@@ -1,0 +1,11 @@
+description: "情感分类器提示词"
+classify_prompt: |
+  分析以下消息的情感，考虑近几轮对话上下文：
+  
+  近3轮对话：
+  {recent_context}
+  
+  当前消息：{message}
+  
+  回复JSON格式：{{"primary": {{"type": "情感类型", "intensity": 0.0-1.0}}, "secondary": [{{"type": "情感类型", "intensity": 0.0-1.0}}]}}
+  情感类型限定：开心/伤心/生气/撒娇/吃醋/傲娇/温柔/调皮/疲惫/平常

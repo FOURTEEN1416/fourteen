@@ -1,0 +1,32 @@
+{
+  "name": "ai-girlfriend-frontend",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.5.0",
+    "zustand": "^5.0.0",
+    "axios": "^1.7.0",
+    "recharts": "^2.15.0",
+    "clsx": "^2.1.0",
+    "lucide-react": "^0.510.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.4.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.1.0",
+    "@tailwindcss/vite": "^4.1.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.12"
+  }
+}
