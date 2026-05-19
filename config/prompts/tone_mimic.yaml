@@ -1,0 +1,12 @@
+description: "语气模仿风格参考提示词"
+style_reference_prompt: |
+  以下是你之前的回复风格参考（{source}）：
+  
+  {style_examples}
+  
+  请参考以上风格的以下维度回复当前消息：
+  - 正式程度：{formality}
+  - Emoji频率：{emoji_freq}
+  - 句子长度：{sentence_length}
+  - 情感表达：{emotional_expression}
+  - 幽默程度：{humor}

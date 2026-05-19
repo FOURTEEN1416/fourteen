@@ -1,0 +1,21 @@
+{
+    "bot_type": "girlfriend",
+    "provider": "opencode_zen",
+    "model": "big-pickle",
+    "opencode_zen_api_base": "https://opencode.ai/zen/v1",
+    "opencode_zen_default_model": "big-pickle",
+    "channel_type": "wx",
+    "single_chat_prefix": [""],
+    "single_chat_reply_prefix": "",
+    "group_chat_prefix": ["@小暖"],
+    "group_name_white_list": [],
+    "nick_name_white_list": [],
+    "clear_memory_commands": ["重置记忆"],
+    "voice_to_text": "openai",
+    "text_to_voice": "google",
+    "temperature": 0.85,
+    "hot_reload": true,
+    "max_history_len": 20,
+    "proxy": "",
+    "concurrency_in_message": 1
+}

@@ -1,0 +1,49 @@
+# 情感状态机配置
+# AI女友"小暖"的情感系统参数
+
+emotion:
+  # 初始状态
+  initial:
+    emotion: "NEUTRAL"
+    energy: 1.0
+    affinity: 0
+    intensity: 0.5
+
+  # 情感衰减参数
+  decay:
+    intensity_per_minute: 0.001   # 每分钟强度衰减
+    energy_recovery_per_hour: 0.05  # 每小时能量恢复
+    energy_drain_per_message: 0.02  # 每条消息消耗能量
+
+  # 好感度阶梯升级条件
+  affinity_levels:
+    0: {name: "陌生人", upgrade_chats: 0, upgrade_affection: 0}
+    1: {name: "认识", upgrade_chats: 5, upgrade_affection: 10}
+    2: {name: "朋友", upgrade_chats: 15, upgrade_affection: 25}
+    3: {name: "好朋友", upgrade_chats: 30, upgrade_affection: 50}
+    4: {name: "知己", upgrade_chats: 60, upgrade_affection: 80}
+    5: {name: "暧昧", upgrade_chats: 100, upgrade_affection: 120}
+    6: {name: "恋人", upgrade_chats: 200, upgrade_affection: 200}
+    7: {name: "热恋", upgrade_chats: 400, upgrade_affection: 350}
+    8: {name: "羁绊", upgrade_chats: 800, upgrade_affection: 500}
+
+  # 情感影响对话风格的权重
+  style_influence:
+    emotion_weight: 0.4      # 情感状态影响权重
+    affinity_weight: 0.3     # 好感度影响权重
+    energy_weight: 0.2       # 能量影响权重
+    personality_weight: 0.1  # 性格影响权重
+
+energy:
+  max: 1.0
+  min: 0.0
+  recovery_rate: 0.05        # 每小时恢复
+  drain_per_reply: 0.02      # 每次回复消耗
+  critical_threshold: 0.2    # 低能量阈值（<此值回复变短）
+
+affection:
+  max: 500
+  per_positive_reply: 1.0    # 积极回复增加好感
+  per_negative_reply: -0.5   # 消极回复减少好感
+  per_day_decay: 0.1         # 每天自然衰减
+  per_miss_day: -1.0         # 每天不联系减少

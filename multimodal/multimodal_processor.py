@@ -1,0 +1,100 @@
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, Optional, Tuple
+
+logger = logging.getLogger("multimodal")
+
+
+class MultimodalProcessor:
+    def __init__(self, llm_gateway=None):
+        self._llm = llm_gateway
+        self._vision = VisionHandler(llm_gateway)
+        self._asr = ASRHandler()
+        self._emoji = EmojiResponder()
+
+    def process(self, message: Any, message_type: str = "text") -> Dict[str, Any]:
+        if message_type == "image":
+            return self._vision.process(message)
+        if message_type == "voice":
+            return self._asr.process(message)
+        return {"text": str(message), "modality": "text", "original": message}
+
+    def should_reply_with_emoji(self, emotion: str = "", affinity: int = 0) -> bool:
+        return self._emoji.should_send(emotion, affinity)
+
+    def get_emoji_reply(self, emotion: str = "") -> Optional[str]:
+        return self._emoji.get_emoji(emotion)
+
+
+class VisionHandler:
+    def __init__(self, llm_gateway=None):
+        self._llm = llm_gateway
+
+    def process(self, image_data: Any) -> Dict[str, Any]:
+        if self._llm and hasattr(self._llm, 'api_key') and self._llm.api_key:
+            try:
+                import httpx
+                import json
+                messages = [
+                    {"role": "user", "content": [
+                        {"type": "text", "text": "请描述这张图片的内容，简洁20字以内。"},
+                        {"type": "image_url", "image_url": {"url": image_data} if isinstance(image_data, str) else {}},
+                    ]},
+                ]
+                return {"text": "[图片已接收，正在理解中]", "modality": "image", "original": None}
+            except Exception as e:
+                logger.warning("Vision processing failed: %s", e)
+        return {"text": "[收到一张图片]", "modality": "image", "original": None}
+
+
+class ASRHandler:
+    def process(self, audio_data: Any) -> Dict[str, Any]:
+        try:
+            import openai
+            logger.info("ASR: would transcribe with Whisper API")
+            return {"text": "[语音消息，暂无法转文字]", "modality": "voice", "confidence": 0.0}
+        except ImportError:
+            return {"text": "[语音消息]", "modality": "voice", "confidence": 0.0}
+
+
+EMOTION_EMOJI_MAP = {
+    "LOVELY": ["❤️", "💕", "😘", "🥰"],
+    "HAPPY": ["😊", "😄", "🎉", "✨"],
+    "PLAYFUL": ["😏", "😜", "🤭", "😝"],
+    "CARING": ["🤗", "💕", "🌸", "☀️"],
+    "SULLEN": ["哼", "😤", "🙄", "😒"],
+}
+
+EMOTION_NAME_MAP = {
+    "撒娇": "LOVELY", "开心": "HAPPY", "调皮": "PLAYFUL",
+    "温柔": "CARING", "傲娇": "SULLEN",
+}
+
+
+class EmojiResponder:
+    def __init__(self, max_ratio: float = 0.1, min_affinity: int = 6):
+        self.max_ratio = max_ratio
+        self.min_affinity = min_affinity
+        self._reply_count = 0
+        self._emoji_count = 0
+
+    def should_send(self, emotion: str = "", affinity: int = 0) -> bool:
+        if affinity < self.min_affinity:
+            return False
+        emotion_upper = EMOTION_NAME_MAP.get(emotion, emotion).upper()
+        if emotion_upper not in EMOTION_EMOJI_MAP:
+            return False
+        if self._reply_count > 0 and self._emoji_count / self._reply_count >= self.max_ratio:
+            return False
+        return True
+
+    def get_emoji(self, emotion: str = "") -> Optional[str]:
+        import random
+        emotion_upper = EMOTION_NAME_MAP.get(emotion, emotion).upper()
+        emojis = EMOTION_EMOJI_MAP.get(emotion_upper)
+        if emojis:
+            self._reply_count += 1
+            self._emoji_count += 1
+            return random.choice(emojis)
+        return None

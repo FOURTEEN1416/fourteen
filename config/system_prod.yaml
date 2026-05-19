@@ -1,0 +1,16 @@
+env: prod
+debug: false
+
+llm:
+  temperature: 0.85
+  stream_enabled: true
+
+safety:
+  encryption_enabled: true
+
+observability:
+  log_level: WARNING
+  log_format: json
+
+api:
+  rate_limit_per_minute: 30

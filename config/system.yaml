@@ -1,0 +1,74 @@
+env: dev
+debug: true
+
+llm:
+  provider: opencode_zen
+  primary_model: big-pickle
+  temperature: 0.85
+  max_tokens: 2048
+  stream_enabled: true
+  first_token_timeout: 3.0
+  retry_count: 2
+  opencode_zen_api_base: "https://opencode.ai/zen/v1"
+  opencode_zen_default_model: "big-pickle"
+  models_priority:
+    - name: big-pickle
+      priority: 1
+    - name: nemotron-3-super-free
+      priority: 2
+    - name: qwen3.6-plus-free
+      priority: 3
+    - name: deepseek-v4-flash-free
+      priority: 4
+    - name: minimax-m2.5-free
+      priority: 5
+
+emotion:
+  use_llm_classifier: true
+  llm_classifier_timeout_ms: 500
+  continuity_blend_ratio: 0.4
+
+memory:
+  working_memory_limit: 20
+  episodic_archive_trigger_rounds: 20
+  retrieval_timeout_seconds: 1.0
+
+proactive:
+  max_daily_messages: 8
+  min_interval_minutes: 30
+  urgency_threshold: 2.0
+  use_llm_generation: true
+
+safety:
+  input_filter_enabled: true
+  output_filter_enabled: true
+  pii_anonymizer_enabled: true
+  encryption_enabled: false
+  prompt_injection_detection: true
+
+tools:
+  enabled: true
+  execution_timeout_seconds: 10.0
+  rate_limit_per_tool_per_minute: 3
+  builtin_tools:
+    - weather
+    - search
+    - calendar
+    - calculator
+    - reminder
+    - calendar_query
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  websocket_port: 8765
+  rate_limit_per_minute: 60
+
+observability:
+  tracing_enabled: true
+  metrics_enabled: true
+  metrics_port: 9090
+  health_check_enabled: true
+  graceful_shutdown_timeout: 30.0
+  log_level: INFO
+  log_format: json

@@ -1,0 +1,78 @@
+﻿python : 2026-05-19 06:54:55 [main_v2] INFO: [1/12] 鍔犺浇V2閰嶇疆...
+所在位置 行:1 字符: 94
++ ...  = "utf-8"; python main_v2.py --no-wechat --no-scheduler 2>&1 | Out-F ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-05-19 06:5...12] 鍔犺浇V2閰嶇疆...:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+2026-05-19 06:54:55 [main_v2] INFO:       鐜: dev, LLM妯″瀷: deepseek-chat
+2026-05-19 06:54:55 [main_v2] INFO: [2/12] 鍒濆鍖栧彲瑙傛祴鎬?..
+
+    鈺斺晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晽
+    鈺?     馃挄 灏忔殩 鈥?AI 浼翠荆濂冲弸      鈺?
+    鈺?       v2.0 路 鍏ㄩ潰鍗囩骇鐗?       鈺?
+    鈺氣晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨暆
+    
+{"event": "Prometheus metrics server started on port 9090", "level": "info", "logger": "metrics", "timestamp": "2026-05-18T22:54:55.558072Z"}
+{"event": "[3/12] \u521d\u59cb\u5316\u5b89\u5168\u5c42...", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:55.559050Z"}
+{"event": "[4/12] \u521d\u59cb\u5316LLM\u7f51\u5173V2...", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:55.574681Z"}
+{"positional_args": ["deepseek-chat"], "event": "LLMGatewayV2 ready, primary model=%s", "level": "info", "logger": "llm_gateway_v2", "timestamp": "2026-05-18T22:54:55.615693Z"}
+{"event": "      \u2705 LLM API\u5df2\u914d\u7f6e (model=deepseek-chat)", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:55.618615Z"}
+{"event": "[5/12] \u521d\u59cb\u5316\u89d2\u8272\u5f15\u64ceV2...", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:55.618615Z"}
+{"event": "ConfigLoader initialized: C:\\Users\\FOUR\\Desktop\\ai-girlfriend\\config", "level": "info", "logger": "character_config", "timestamp": "2026-05-18T22:54:56.181396Z"}
+{"event": "Loaded C:\\Users\\FOUR\\Desktop\\ai-girlfriend\\config\\persona.yaml", "level": "info", "logger": "character_config", "timestamp": "2026-05-18T22:54:56.182373Z"}
+{"event": "Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.", "level": "info", "logger": "chromadb.telemetry.product.posthog", "timestamp": "2026-05-18T22:54:56.285447Z"}
+{"event": "ChromaDB initialized at C:\\Users\\FOUR\\Desktop\\ai-girlfriend\\data\\chroma_db", "level": "info", "logger": "tone_mimic", "timestamp": "2026-05-18T22:54:56.389565Z"}
+{"event": "[6/12] \u521d\u59cb\u5316\u8bb0\u5fc6\u7cfb\u7edfV2...", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:56.389565Z"}
+{"event": "VectorMemory ready: C:\\Users\\FOUR\\Desktop\\ai-girlfriend\\data\\chroma_db", "level": "info", "logger": "vector_memory", "timestamp": "2026-05-18T22:54:56.543998Z"}
+{"event": "StructuredMemory ready: C:\\Users\\FOUR\\Desktop\\ai-girlfriend\\data\\sqlite.db", "level": "info", "logger": "structured_memory", "timestamp": "2026-05-18T22:54:56.546926Z"}
+{"event": "[7/12] \u521d\u59cb\u5316\u5de5\u5177\u7cfb\u7edf...", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:56.546926Z"}
+{"event": "Tool registered: get_weather (permission: public)", "level": "info", "logger": "tool_system", "timestamp": "2026-05-18T22:54:56.563922Z"}
+{"event": "Tool registered: web_search (permission: public)", "level": "info", "logger": "tool_system", "timestamp": "2026-05-18T22:54:56.563922Z"}
+{"event": "Tool registered: get_current_time (permission: public)", "level": "info", "logger": "tool_system", "timestamp": "2026-05-18T22:54:56.563922Z"}
+{"event": "Tool registered: calculator (permission: public)", "level": "info", "logger": "tool_system", "timestamp": "2026-05-18T22:54:56.564914Z"}
+{"event": "Tool registered: set_reminder (permission: friend)", "level": "info", "logger": "tool_system", "timestamp": "2026-05-18T22:54:56.564914Z"}
+{"event": "Tool registered: query_reminders (permission: friend)", "level": "info", "logger": "tool_system", "timestamp": "2026-05-18T22:54:56.564914Z"}
+{"event": "      \u5df2\u6ce8\u518c 6 \u4e2a\u5de5\u5177", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:56.564914Z"}
+{"event": "[8/12] \u521d\u59cb\u5316RAG\u5f15\u64ceV2...", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:56.564914Z"}
+{"event": "[9/12] \u521d\u59cb\u5316\u4e3b\u52a8\u6d88\u606fV2...", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:56.566857Z"}
+{"event": "      \u4e3b\u52a8\u6d88\u606f\u7cfb\u7edf\u5df2\u7981\u7528 (--no-scheduler)", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:56.767662Z"}
+{"event": "[10/12] \u7ec4\u88c5\u5bf9\u8bdd\u7f16\u6392\u5668...", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:56.767662Z"}
+{"event": "[11/12] \u542f\u52a8API\u670d\u52a1...", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:56.768637Z"}
+{"event": "      REST API: http://0.0.0.0:8000", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:57.000205Z"}
+{"event": "      WebSocket: ws://0.0.0.0:8765", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:57.001180Z"}
+{"event": "[12/12] \u542f\u52a8\u804a\u5929\u901a\u9053...", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:57.001180Z"}
+
+[鍋ュ悍妫€鏌
+  鉁?ConfigManager
+  鉁?EmotionEngineV2
+  鉁?PersonaEngineV2
+  鉁?ToneMimic
+  鉁?MemoryPipelineV2
+  鉁?LLMGatewayV2
+  鉁?ToolRegistry
+  鉁?RAGEngineV2
+  鉁?ASEEngineV2
+  鉁?Orchestrator
+  鉁?ContentSafety
+  鉁?PIIAnonymizer
+  鉁?EncryptionManager
+  鉁?PromptInjectionDetector
+
+  鉁?鍏ㄩ儴閫氳繃
+
+
+==================================================
+  V2 鎺у埗鍙拌亰澶╂ā寮?
+  杈撳叆 /quit 閫€鍑? /status 鏌ョ湅鐘舵€? /health 鍋ュ悍妫€鏌?
+==================================================
+
+{"event": "server listening on 0.0.0.0:8765", "level": "info", "logger": "websockets.server", "timestamp": "2026-05-18T22:54:57.003135Z"}
+{"event": "WebSocket server started on 0.0.0.0:8765", "level": "info", "logger": "websocket_server", "timestamp": "2026-05-18T22:54:57.003135Z"}
+浣?> 
+馃憢 涓嬫鍐嶆潵鎵炬垜鍝︼綖
+{"event": "\u63a7\u5236\u53f0\u804a\u5929\u5df2\u9000\u51fa\uff0cAPI\u670d\u52a1\u7ee7\u7eed\u4fdd\u6301\u8fd0\u884c\u4e2d...", "level": "info", "logger": "main_v2", "timestamp": "2026-05-18T22:54:57.012229Z"}
+INFO:     Started server process [13700]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
