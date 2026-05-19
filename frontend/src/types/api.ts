@@ -27,11 +27,15 @@ export interface EvolutionLog {
   }>
 }
 
+export type FactCategory = '偏好' | '习惯' | '个人信息' | '日程' | '关系' | '其他'
+
 export interface MemoryFact {
   type: string
   content: string
   confidence: number
-  category?: string
+  category?: FactCategory
+  source?: string
+  timestamp?: string
 }
 
 export interface ChatMessage {
@@ -48,8 +52,8 @@ export interface ChatResponse {
 }
 
 export interface HealthStatus {
-  status: string
-  checks: Record<string, any>
+  status: 'healthy' | 'degraded' | 'unhealthy' | 'unknown'
+  checks: Record<string, { connected: boolean; detail?: string }>
 }
 
 export interface SystemConfig {
@@ -63,4 +67,126 @@ export interface WSIncomingMessage {
   trace_id?: string
   session_id?: string
   message?: string
+}
+
+export interface DashboardStats {
+  today_chats: number
+  recent_memories: number
+  affinity: number
+  energy: number
+  current_emotion: string
+}
+
+export interface WeChatStatus {
+  connected: boolean
+  uptime_seconds: number
+  reconnect_attempts: number
+  missed_heartbeats: number
+  messages_today: number
+  last_activity: string
+  qr_code?: string
+}
+
+export type TrainingStatusEnum = 'idle' | 'extracting' | 'cleaning' | 'training' | 'done' | 'error' | 'stopped'
+
+export interface TrainingProgress {
+  status: TrainingStatusEnum
+  progress: number
+  loss: number
+  extracted_turns: number
+  cleaned_turns: number
+  current_step: string
+  error?: string
+}
+
+export interface TrainingAvailability {
+  available: boolean
+  missing?: string[]
+}
+
+export interface CloneTestResult {
+  message: string
+  style_output: string
+}
+
+export type ChannelStatus = 'connected' | 'disconnected' | 'connecting' | 'error'
+export type ChannelType = 'wechat' | 'web' | 'feishu' | 'dingtalk' | 'qq'
+
+export interface Channel {
+  id: string
+  name: string
+  status: ChannelStatus
+  desc: string
+  type: ChannelType
+  meta?: Record<string, unknown>
+  session_id?: string
+}
+
+export type UrgencyLevel = '非常想找你' | '有点想你' | '想找人说话' | '还好'
+
+export interface UrgencyBreakdown {
+  total: number
+  base: number
+  miss_bonus: number
+  event_bonus: number
+  scene_bonus: number
+}
+
+export interface ProactiveConfig {
+  threshold: number
+  max_daily: number
+  min_interval_minutes: number
+  cooldown_after_reply_minutes: number
+}
+
+export interface ProactiveEngineState {
+  urgency: number
+  urgency_level: UrgencyLevel
+  daily_count: number
+  last_proactive_at: string | null
+  config: ProactiveConfig
+}
+
+export type LogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
+
+export interface LogEntry {
+  time: string
+  level: LogLevel
+  module: string
+  msg: string
+}
+
+export interface LogQueryParams {
+  limit?: number
+  level?: LogLevel
+  search?: string
+}
+
+export const SENSITIVE_FIELD_KEYS = new Set([
+  'api_key', 'secret', 'token', 'password', 'encryption_key', 'api_base',
+])
+
+export function isSensitiveField(key: string): boolean {
+  if (SENSITIVE_FIELD_KEYS.has(key)) return true
+  const suffixes = ['_key', '_secret', '_token', '_password']
+  return suffixes.some((s) => key.endsWith(s))
+}
+
+export type ConfigItemType = 'toggle' | 'select' | 'range'
+
+export interface ConfigItem {
+  id: string
+  label: string
+  type: ConfigItemType
+  value: unknown
+  options?: Array<{ label: string; value: unknown }>
+  min?: number
+  max?: number
+  step?: number
+}
+
+export interface ConfigSection {
+  id: string
+  label: string
+  items: ConfigItem[]
 }

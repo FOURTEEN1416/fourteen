@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { useHealth } from '../hooks/useAPI'
 import { Activity, Wifi, Database, Bot } from 'lucide-react'
+import ProactiveEnginePanel from '../components/common/ProactiveEnginePanel'
+import type { ProactiveEngineState } from '../types/api'
 
 interface StatData {
   status: string
@@ -16,16 +18,13 @@ export default function AdminPage() {
   const [stats, setStats] = useState<StatData | null>(null)
   const [tools, setTools] = useState<string[]>([])
   const [disabledTools, setDisabledTools] = useState<Set<string>>(new Set())
-  const [proactive, setProactive] = useState<Record<string, any> | null>(null)
-  const [proactiveThreshold, setProactiveThreshold] = useState(4)
+  const [proactiveState, setProactiveState] = useState<ProactiveEngineState | null>(null)
 
   useEffect(() => {
     api.stats().then(({ data }) => setStats(data as StatData)).catch(() => {})
     api.tools().then(({ data }) => setTools((data as { tools: string[] }).tools)).catch(() => {})
     api.proactiveState().then(({ data }) => {
-      const p = data as Record<string, any>
-      setProactive(p)
-      if (p?.config?.threshold != null) setProactiveThreshold(p.config.threshold)
+      setProactiveState(data as ProactiveEngineState)
     }).catch(() => {})
   }, [])
 
@@ -37,13 +36,6 @@ export default function AdminPage() {
         if (enabled) next.delete(name); else next.add(name)
         return next
       })
-    } catch { /* toast handles it */ }
-  }
-
-  const handleUpdateThreshold = async () => {
-    try {
-      await api.updateProactiveConfig({ threshold: proactiveThreshold })
-      setProactive(prev => prev ? { ...prev, config: { ...prev.config, threshold: proactiveThreshold } } : prev)
     } catch { /* toast handles it */ }
   }
 
@@ -136,31 +128,7 @@ export default function AdminPage() {
       </div>
 
       {/* Proactive Config */}
-      <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-4">
-        <h2 className="text-sm font-semibold text-slate-300 mb-3">主动消息配置</h2>
-        <div className="flex items-center gap-3 mb-3">
-          <span className="text-xs text-slate-400">触发阈值</span>
-          <input
-            type="range" min={1} max={10} step={0.5}
-            value={proactiveThreshold}
-            onChange={e => setProactiveThreshold(parseFloat(e.target.value))}
-            className="w-32 h-1 bg-slate-700 rounded-full appearance-none cursor-pointer"
-          />
-          <span className="text-xs text-slate-500 w-6 text-right">{proactiveThreshold}</span>
-          <button
-            onClick={handleUpdateThreshold}
-            className="text-[10px] px-2 py-1 bg-primary-600/30 text-primary-300 rounded-lg hover:bg-primary-600/50 transition-colors"
-          >
-            更新
-          </button>
-        </div>
-        {proactive && (
-          <div className="text-[10px] text-slate-500 bg-slate-800/20 rounded-lg p-2">
-            <div>紧迫度: {proactive.urgency?.total ?? '-'}</div>
-            <div>今日已发: {proactive.daily_count ?? 0}</div>
-          </div>
-        )}
-      </div>
+      <ProactiveEnginePanel state={proactiveState} />
     </div>
   )
 }

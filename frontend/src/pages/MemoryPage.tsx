@@ -5,23 +5,24 @@ import EmptyState from '../components/common/EmptyState'
 
 const categories = ['', '偏好', '习惯', '个人信息', '日程']
 
+const categoryColors: Record<string, string> = {
+  '偏好': 'bg-blue-900/30 text-blue-400 border-blue-700/30',
+  '习惯': 'bg-green-900/30 text-green-400 border-green-700/30',
+  '个人信息': 'bg-purple-900/30 text-purple-400 border-purple-700/30',
+  '日程': 'bg-orange-900/30 text-orange-400 border-orange-700/30',
+}
+
 export default function MemoryPage() {
   const { facts, loading, refetch } = useMemoryFacts()
   const [filter, setFilter] = useState('')
   const [searchText, setSearchText] = useState('')
 
   const filteredFacts = facts.filter((f) => {
-    if (filter && f.type !== filter) return false
+    const cat = f.category || f.type
+    if (filter && cat !== filter) return false
     if (searchText && !f.content.includes(searchText)) return false
     return true
   })
-
-  const typeColors: Record<string, string> = {
-    '偏好': 'bg-slate-700/40 text-slate-300 border-slate-600/30',
-    '习惯': 'bg-slate-700/40 text-slate-300 border-slate-600/30',
-    '个人信息': 'bg-slate-700/40 text-slate-300 border-slate-600/30',
-    '日程': 'bg-slate-700/40 text-slate-300 border-slate-600/30',
-  }
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
@@ -69,8 +70,8 @@ export default function MemoryPage() {
       ) : filteredFacts.length === 0 ? (
         <EmptyState
           icon="💬"
-          title="暂无记忆数据"
-          description="开始和小暖聊天，她会逐渐记住你的偏好和习惯"
+          title={searchText ? '暂无匹配的记忆' : '暂无记忆数据'}
+          description={searchText ? '尝试其他搜索词' : '开始聊天，她会逐渐记住你的偏好和习惯'}
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -80,8 +81,8 @@ export default function MemoryPage() {
               className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-4 hover:border-slate-700/60 transition-colors"
             >
               <div className="flex items-center gap-2 mb-2">
-                <span className={`text-[10px] px-2 py-0.5 rounded-full border ${typeColors[fact.type] || 'bg-slate-700/30 text-slate-400 border-slate-600/30'}`}>
-                  {fact.type}
+                <span className={`text-[10px] px-2 py-0.5 rounded-full border ${categoryColors[fact.category || fact.type] || 'bg-slate-700/30 text-slate-400 border-slate-600/30'}`}>
+                  {fact.category || fact.type}
                 </span>
                 {fact.confidence && (
                   <span className="text-[10px] text-slate-600">
@@ -90,6 +91,12 @@ export default function MemoryPage() {
                 )}
               </div>
               <p className="text-sm text-slate-300">{fact.content}</p>
+              {(fact.source || fact.timestamp) && (
+                <div className="flex gap-3 mt-2 text-[10px] text-slate-600">
+                  {fact.source && <span>来源: {fact.source}</span>}
+                  {fact.timestamp && <span>时间: {fact.timestamp}</span>}
+                </div>
+              )}
             </div>
           ))}
         </div>

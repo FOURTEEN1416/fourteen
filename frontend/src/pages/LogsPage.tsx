@@ -1,57 +1,95 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../api/client'
+import { useSSE } from '../hooks/useSSE'
+import { useLogStore } from '../store/logStore'
+import type { LogEntry, LogLevel } from '../types/api'
 
-interface LogEntry { time: string; level: string; module: string; msg: string }
+const API_BASE = '/api'
 
 export default function LogsPage() {
-  const [filter, setFilter] = useState('all')
-  const [search, setSearch] = useState('')
-  const [logs, setLogs] = useState<LogEntry[]>([])
+  const { entries, filter, search, setFilter, setSearch, appendEntry, setEntries, sseConnected, sseReconnecting } = useLogStore()
+  const [pollingFallback, setPollingFallback] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    const fetchLogs = () => {
-      api.logs({ limit: 200, level: filter, search: search || undefined })
-        .then(({ data }) => setLogs((data as { logs: LogEntry[] }).logs))
-        .catch(() => {})
-    }
-    fetchLogs()
-    const interval = setInterval(fetchLogs, 5000)
-    return () => clearInterval(interval)
-  }, [filter, search])
+  const handleSSEMessage = useCallback((data: string) => {
+    try {
+      const entry = JSON.parse(data) as LogEntry
+      appendEntry(entry)
+    } catch { /* ignore malformed */ }
+  }, [appendEntry])
+
+  const { connected, reconnecting, connect, disconnect } = useSSE(`${API_BASE}/logs/stream`, {
+    onMessage: handleSSEMessage,
+    onError: () => { setPollingFallback(true) },
+  })
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logs])
+    if (pollingFallback) {
+      const fetchLogs = () => {
+        api.logs({ limit: 200, level: filter || undefined, search: search || undefined })
+          .then(({ data }) => setEntries((data as { logs: LogEntry[] }).logs))
+          .catch(() => {})
+      }
+      fetchLogs()
+      const interval = setInterval(fetchLogs, 5000)
+      return () => clearInterval(interval)
+    }
+  }, [pollingFallback, filter, search, setEntries])
+
+  useEffect(() => {
+    if (!pollingFallback && entries.length === 0) {
+      api.logs({ limit: 200 }).then(({ data }) => setEntries((data as { logs: LogEntry[] }).logs)).catch(() => {})
+    }
+  }, [pollingFallback, entries.length, setEntries])
+
+  const filteredEntries = entries.filter((l) => {
+    if (filter && l.level !== filter) return false
+    if (search && !l.msg.toLowerCase().includes(search.toLowerCase()) && !l.module.toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  })
 
   const levelColor = (lvl: string) =>
-    lvl === 'error' ? 'text-red-400' : lvl === 'warn' ? 'text-yellow-400' : lvl === 'debug' ? 'text-slate-500' : 'text-blue-400'
+    lvl === 'ERROR' || lvl === 'CRITICAL' ? 'text-red-400' :
+    lvl === 'WARNING' ? 'text-yellow-400' :
+    lvl === 'DEBUG' ? 'text-slate-500' : 'text-blue-400'
+
+  const sseIndicator = sseConnected ? 'bg-green-400' : sseReconnecting ? 'bg-yellow-400' : 'bg-red-400'
+  const sseLabel = sseConnected ? 'SSE 已连接' : sseReconnecting ? 'SSE 重连中' : 'SSE 断开'
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <h1 className="text-base font-semibold text-slate-200 mb-6">运行日志</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-base font-semibold text-slate-200">运行日志</h1>
+        <div className="flex items-center gap-1.5 text-xs text-slate-500">
+          <span className={`w-2 h-2 rounded-full ${sseIndicator}`} />
+          {sseLabel}
+        </div>
+      </div>
+
       <div className="flex items-center gap-2 mb-4">
-        <input value={search} onChange={e => setSearch(e.target.value)}
+        <input value={search} onChange={(e) => setSearch(e.target.value)}
           placeholder="搜索日志..."
           className="bg-slate-900/40 border border-slate-800/60 text-slate-200 placeholder-slate-500 rounded-lg px-3 py-1.5 text-xs w-48 outline-none" />
-        <select value={filter} onChange={e => setFilter(e.target.value)}
+        <select value={filter} onChange={(e) => setFilter(e.target.value as LogLevel | '')}
           className="bg-slate-900/40 border border-slate-800/60 text-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none">
-          <option value="all">所有</option>
-          <option value="debug">DEBUG</option>
-          <option value="info">INFO</option>
-          <option value="warn">WARN</option>
-          <option value="error">ERROR</option>
+          <option value="">所有</option>
+          <option value="DEBUG">DEBUG</option>
+          <option value="INFO">INFO</option>
+          <option value="WARNING">WARNING</option>
+          <option value="ERROR">ERROR</option>
+          <option value="CRITICAL">CRITICAL</option>
         </select>
       </div>
+
       <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl overflow-hidden">
         <div className="max-h-[60vh] overflow-y-auto font-mono text-xs">
-          {logs.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 text-xs">暂无日志（启动后端后会实时采集）</div>
+          {filteredEntries.length === 0 ? (
+            <div className="p-8 text-center text-slate-500 text-xs">暂无日志</div>
           ) : (
-            logs.map((l, i) => (
+            filteredEntries.map((l, i) => (
               <div key={i} className="flex items-start gap-3 px-4 py-1.5 border-b border-slate-800/30 hover:bg-slate-800/20">
                 <span className="text-slate-600 shrink-0 whitespace-nowrap">{l.time}</span>
-                <span className={`shrink-0 w-10 ${levelColor(l.level)}`}>{l.level.toUpperCase()}</span>
+                <span className={`shrink-0 w-10 ${levelColor(l.level)}`}>{l.level}</span>
                 <span className="text-slate-500 shrink-0">[{l.module}]</span>
                 <span className="text-slate-400 break-all">{l.msg}</span>
               </div>
