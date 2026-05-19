@@ -64,6 +64,7 @@ export const api = {
 
   health: () => client.get('/health'),
   stats: () => client.get('/stats'),
+  dashboardStats: () => client.get('/stats/dashboard'),
   createSession: (userId = 'default', channel = 'web') =>
     client.post('/session', { user_id: userId, channel }),
   listSessions: () => client.get('/sessions'),
@@ -85,5 +86,18 @@ export const api = {
   logs: (params?: { limit?: number; level?: string; search?: string }) =>
     client.get('/logs', { params }),
   channels: () => client.get('/channels'),
+  wechatStatus: () => client.get('/channels/wechat/status'),
+  wechatReconnect: () => client.post('/channels/wechat/reconnect'),
   trainingStatus: () => client.get('/training/status'),
+  trainingProgress: () => client.get('/training/progress'),
+  trainingExtract: (target: string, source: string) =>
+    client.post('/training/extract', null, { params: { target, source } }),
+  trainingClean: (acceptScore: number) =>
+    client.post('/training/clean', null, { params: { accept_score: acceptScore } }),
+  trainingTrain: (epochs: number, loraRank: number) =>
+    client.post('/training/train', null, { params: { epochs, lora_rank: loraRank } }),
+  trainingStop: () => client.post('/training/stop'),
+  trainingTest: (message: string) =>
+    client.post('/training/test', null, { params: { message } }),
+  trainingApply: () => client.post('/training/apply'),
 }

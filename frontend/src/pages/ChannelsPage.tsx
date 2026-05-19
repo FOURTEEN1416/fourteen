@@ -1,42 +1,66 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/client'
+import Button from '../components/common/Button'
+import Card from '../components/common/Card'
+import Badge from '../components/common/Badge'
+import type { Channel, WeChatStatus, ChannelStatus } from '../types/api'
 
-interface Channel {
-  id: string; name: string
-  status: 'connected' | 'disconnected' | 'connecting' | 'error'
-  desc: string; meta?: string
+const statusVariant: Record<ChannelStatus, 'success' | 'error' | 'warning' | 'default'> = {
+  connected: 'success',
+  disconnected: 'error',
+  connecting: 'warning',
+  error: 'error',
+}
+
+const statusLabel: Record<ChannelStatus, string> = {
+  connected: '已连接',
+  disconnected: '未连接',
+  connecting: '连接中',
+  error: '异常',
 }
 
 export default function ChannelsPage() {
   const [channels, setChannels] = useState<Channel[]>([])
-  const [loading, setLoading] = useState<string | null>(null)
+  const [wechatDetail, setWechatDetail] = useState<WeChatStatus | null>(null)
+  const [reconnecting, setReconnecting] = useState(false)
 
-  useEffect(() => {
-    api.channels().then(({ data }) => setChannels((data as { channels: Channel[] }).channels)).catch(() => {})
-    const interval = setInterval(() => {
-      api.channels().then(({ data }) => setChannels((data as { channels: Channel[] }).channels)).catch(() => {})
-    }, 10000)
-    return () => clearInterval(interval)
+  const fetchChannels = useCallback(async () => {
+    try {
+      const { data } = await api.channels()
+      setChannels((data as { channels: Channel[] }).channels)
+    } catch { /* silent */ }
   }, [])
 
-  const toggle = (id: string) => {
-    const ch = channels.find(c => c.id === id)
-    if (!ch) return
-    if (ch.status === 'connected') {
-      setChannels(prev => prev.map(c => c.id === id ? { ...c, status: 'disconnected' } : c))
-    } else {
-      setLoading(id)
-      setChannels(prev => prev.map(c => c.id === id ? { ...c, status: 'connecting' } : c))
-      // Simulate connection attempt — real backend not available yet
-      setTimeout(() => {
-        setChannels(prev => prev.map(c => {
-          if (c.id !== id) return c
-          if (id === 'wechat') return { ...c, status: 'disconnected', meta: '需要后端扫码登录' }
-          return { ...c, status: 'connected', meta: '在线' }
-        }))
-        setLoading(null)
-      }, 1500)
-    }
+  useEffect(() => {
+    fetchChannels()
+    const interval = setInterval(fetchChannels, 10000)
+    return () => clearInterval(interval)
+  }, [fetchChannels])
+
+  const fetchWechatDetail = async () => {
+    try {
+      const { data } = await api.wechatStatus()
+      setWechatDetail(data as WeChatStatus)
+    } catch { /* silent */ }
+  }
+
+  const handleReconnect = async () => {
+    setReconnecting(true)
+    try {
+      await api.wechatReconnect()
+      await fetchWechatDetail()
+      fetchChannels()
+    } catch { /* toast */ }
+    finally { setReconnecting(false) }
+  }
+
+  const hasWechat = channels.some((ch) => ch.type === 'wechat')
+
+  const formatUptime = (seconds: number): string => {
+    const h = Math.floor(seconds / 3600)
+    const m = Math.floor((seconds % 3600) / 60)
+    if (h > 0) return `${h}小时${m}分钟`
+    return `${m}分钟`
   }
 
   return (
@@ -44,40 +68,76 @@ export default function ChannelsPage() {
       <h1 className="text-base font-semibold text-slate-200 mb-6">通道连接</h1>
 
       {channels.length === 0 ? (
-        <div className="text-sm text-slate-500">加载中...</div>
+        <p className="text-sm text-slate-500">暂无通道数据</p>
       ) : (
-        <div className="space-y-2">
-          {channels.map(ch => {
-            const on = ch.status === 'connected'
-            return (
-              <div key={ch.id}
-                className="flex items-center gap-4 bg-slate-900/40 border border-slate-800/60 rounded-xl px-4 py-3">
-                <div className={`w-2 h-2 rounded-full ${on ? 'bg-green-400' : 'bg-slate-600'}`} />
+        <div className="space-y-3">
+          {channels.map((ch) => (
+            <Card key={ch.id} hover onClick={ch.type === 'wechat' ? fetchWechatDetail : undefined}>
+              <div className="flex items-center gap-4">
+                <div className={`w-2 h-2 rounded-full ${
+                  ch.status === 'connected' ? 'bg-green-400' :
+                  ch.status === 'connecting' ? 'bg-yellow-400' :
+                  'bg-red-400'
+                }`} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm text-slate-200">{ch.name}</div>
-                  <div className="text-xs text-slate-500">{ch.desc}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-200">{ch.name}</span>
+                    <Badge variant={statusVariant[ch.status]}>{statusLabel[ch.status]}</Badge>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-0.5">{ch.desc}</div>
+                  {ch.session_id && (
+                    <div className="text-xs text-slate-600 mt-0.5">会话: {ch.session_id.slice(0, 8)}...</div>
+                  )}
                 </div>
-                {ch.meta && <div className="text-xs text-slate-500">{ch.meta}</div>}
-                <button
-                  onClick={() => toggle(ch.id)}
-                  disabled={loading === ch.id || ch.status === 'connecting'}
-                  className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
-                    on
-                      ? 'text-red-400 border-red-700/30'
-                      : 'text-primary-300 border-primary-700/30'
-                  } disabled:opacity-50`}
-                >
-                  {loading === ch.id ? '连接中...' : on ? '断开' : '连接'}
-                </button>
               </div>
-            )
-          })}
+            </Card>
+          ))}
         </div>
       )}
 
+      {!hasWechat && (
+        <div className="mt-4 text-xs text-yellow-400 bg-yellow-900/20 border border-yellow-800/30 rounded-lg px-4 py-3">
+          微信通道未配置
+        </div>
+      )}
+
+      {hasWechat && (
+        <Card className="mt-6">
+          <h2 className="text-sm font-semibold text-slate-200 mb-4">微信连接详情</h2>
+          <div className="space-y-2">
+            {wechatDetail ? (
+              <>
+                <DetailRow label="连接状态" value={wechatDetail.connected ? '已连接' : '未连接'} />
+                <DetailRow label="在线时长" value={formatUptime(wechatDetail.uptime_seconds)} />
+                <DetailRow label="今日消息" value={String(wechatDetail.messages_today)} />
+                <DetailRow label="重连尝试" value={String(wechatDetail.reconnect_attempts)} />
+                <DetailRow label="心跳丢失" value={String(wechatDetail.missed_heartbeats)} />
+                <DetailRow label="最后活动" value={wechatDetail.last_activity} />
+              </>
+            ) : (
+              <p className="text-xs text-slate-500">点击微信通道卡片查看详情</p>
+            )}
+            <div className="pt-3">
+              <Button onClick={handleReconnect} loading={reconnecting} size="sm">
+                重新连接
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
       <div className="mt-6 text-xs text-slate-600 bg-slate-900/20 border border-slate-800/30 rounded-lg px-4 py-3">
-        小暖支持多通道同时运行。微信通道需启动后端后扫码登录。
+        系统支持多通道同时运行。微信通道需启动后端后扫码登录。
       </div>
+    </div>
+  )
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between text-xs">
+      <span className="text-slate-500">{label}</span>
+      <span className="text-slate-300">{value}</span>
     </div>
   )
 }

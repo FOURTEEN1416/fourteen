@@ -1,16 +1,19 @@
-# AI女友"小暖" — 性格系统
-from .emotion_engine import EmotionEngine, Emotion, EmotionalState
-from .emotion_engine_v2 import EmotionEngineV2, CompoundEmotionalState
+from .emotion_engine import EmotionEngine, Emotion, CompoundEmotionalState
 from .tone_mimic import ToneMimic
-from .persona import PersonaEngine
-from .persona_engine_v2 import PersonaEngineV2
+from .persona_engine import PersonaEngine, PersonaProfile
 from .character_config import ConfigLoader
 
+EmotionEngineV2 = EmotionEngine
+EmotionEngineOptimized = EmotionEngine
+EmotionalState = CompoundEmotionalState
+PersonaEngineV2 = PersonaEngine
+PersonaEngineOptimized = PersonaEngine
+
 __all__ = [
-    "EmotionEngine", "Emotion", "EmotionalState",
-    "EmotionEngineV2", "CompoundEmotionalState",
+    "EmotionEngine", "Emotion", "CompoundEmotionalState",
+    "EmotionEngineV2", "EmotionEngineOptimized", "EmotionalState",
     "ToneMimic",
-    "PersonaEngine",
-    "PersonaEngineV2",
+    "PersonaEngine", "PersonaProfile",
+    "PersonaEngineV2", "PersonaEngineOptimized",
     "ConfigLoader",
 ]

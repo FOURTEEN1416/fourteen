@@ -1,6 +1,9 @@
+import { useState } from 'react'
 import { usePersonaProfile } from '../hooks/useAPI'
-import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer } from 'recharts'
+import { useEmotionTrend } from '../hooks/useAPI'
+import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts'
 import Skeleton from '../components/common/Skeleton'
+import Button from '../components/common/Button'
 
 const traitLabels: Record<string, string> = {
   warmth: '温暖', playfulness: '调皮', independence: '独立',
@@ -12,6 +15,8 @@ const traitLabels: Record<string, string> = {
 
 export default function PersonaPage() {
   const { profile, log } = usePersonaProfile()
+  const [trendDays, setTrendDays] = useState(7)
+  const emotionTrend = useEmotionTrend(trendDays)
 
   if (!profile) {
     return (
@@ -116,6 +121,31 @@ export default function PersonaPage() {
                 </div>
               ))}
             </div>
+          )}
+        </div>
+
+        {/* Emotion Trend Chart */}
+        <div className="lg:col-span-2 bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-slate-300">情感趋势</h2>
+            <div className="flex gap-1">
+              <Button size="sm" variant={trendDays === 7 ? 'primary' : 'ghost'} onClick={() => setTrendDays(7)}>7天</Button>
+              <Button size="sm" variant={trendDays === 30 ? 'primary' : 'ghost'} onClick={() => setTrendDays(30)}>30天</Button>
+            </div>
+          </div>
+          {emotionTrend && emotionTrend.trend.length > 0 ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={emotionTrend.trend}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                <XAxis dataKey="timestamp" tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={(v: string) => new Date(v).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })} />
+                <YAxis domain={[0, 1]} tick={{ fill: '#64748b', fontSize: 10 }} />
+                <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, fontSize: 12 }} labelFormatter={(v: string) => new Date(v).toLocaleString('zh-CN')} />
+                <Legend />
+                <Line type="monotone" dataKey="intensity" stroke="#6366f1" strokeWidth={2} dot={false} name="情感强度" />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-xs text-slate-500">暂无情感趋势数据</p>
           )}
         </div>
       </div>

@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api/client'
+import SensitiveInput from '../components/common/SensitiveInput'
+import { isSensitiveField } from '../types/api'
 
 interface Setting {
   id: string; label: string
@@ -32,6 +34,7 @@ const sections: { id: string; label: string; items: Setting[] }[] = [
       options: [{ value: 'qwen2.5-0.5b', label: 'Qwen2.5 0.5B' }, { value: 'qwen2.5-1.5b', label: 'Qwen2.5 1.5B' },
         { value: 'qwen2.5-3b', label: 'Qwen2.5 3B' }, { value: 'qwen2.5-7b', label: 'Qwen2.5 7B' }] },
     { id: 'max_tokens', label: '最大回复长度', type: 'range', value: 512, min: 64, max: 2048, step: 64 },
+    { id: 'api_key', label: 'API Key', type: 'toggle' as any, value: '' },
   ]},
   { id: 'notifications', label: '通知', items: [
     { id: 'sound', label: '消息提示音', type: 'toggle', value: true },
@@ -105,7 +108,15 @@ export default function SettingsPage() {
             {section.items.map(item => (
               <div key={item.id} className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-slate-800/30">
                 <span className="text-sm text-slate-300">{item.label}</span>
-                {item.type === 'toggle' && (
+                {isSensitiveField(item.id) ? (
+                  <div className="w-48">
+                    <SensitiveInput
+                      value={vals[item.id] ?? ''}
+                      onChange={(v) => set(item.id, v)}
+                      placeholder="输入..."
+                    />
+                  </div>
+                ) : item.type === 'toggle' ? (
                   <button onClick={() => set(item.id, !vals[item.id])}
                     className={`w-9 h-5 rounded-full transition-colors ${
                       vals[item.id] ? 'bg-primary-500' : 'bg-slate-700'
@@ -114,21 +125,19 @@ export default function SettingsPage() {
                       vals[item.id] ? 'translate-x-4.5' : 'translate-x-0.5'
                     }`} />
                   </button>
-                )}
-                {item.type === 'select' && (
+                ) : item.type === 'select' ? (
                   <select value={vals[item.id]} onChange={e => set(item.id, e.target.value)}
                     className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2 py-1 text-xs outline-none">
                     {item.options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
-                )}
-                {item.type === 'range' && (
+                ) : item.type === 'range' ? (
                   <div className="flex items-center gap-2">
                     <input type="range" min={item.min} max={item.max} step={item.step}
                       value={vals[item.id]} onChange={e => set(item.id, parseFloat(e.target.value))}
                       className="w-20 h-1 bg-slate-700 rounded-full appearance-none cursor-pointer" />
                     <span className="text-xs text-slate-500 w-8 text-right">{vals[item.id]}</span>
                   </div>
-                )}
+                ) : null}
               </div>
             ))}
           </div>
@@ -155,6 +164,8 @@ function mapConfigToSettings(config: Record<string, any>): Record<string, any> {
     if (config.llm.primary_model) mapped.model_name = config.llm.primary_model
     if (config.llm.temperature != null) mapped.temperature = config.llm.temperature
     if (config.llm.max_tokens != null) mapped.max_tokens = config.llm.max_tokens
+    if (config.llm.top_p != null) mapped.top_p = config.llm.top_p
+    if (config.llm.api_key != null) mapped.api_key = config.llm.api_key
   }
   if (config.memory) {
     if (config.memory.working_memory_limit != null) mapped.max_context = config.memory.working_memory_limit
@@ -166,6 +177,18 @@ function mapConfigToSettings(config: Record<string, any>): Record<string, any> {
   if (config.safety) {
     if (config.safety.input_filter_enabled != null) mapped.store_history = config.safety.input_filter_enabled
   }
+  if (config.voice) {
+    if (config.voice.voice_input != null) mapped.voice_input = config.voice.voice_input
+    if (config.voice.voice_output != null) mapped.voice_output = config.voice.voice_output
+    if (config.voice.speaker != null) mapped.speaker = config.voice.speaker
+  }
+  if (config.personality) {
+    if (config.personality.style != null) mapped.style = config.personality.style
+  }
+  if (config.notifications) {
+    if (config.notifications.sound != null) mapped.sound = config.notifications.sound
+    if (config.notifications.desktop_notify != null) mapped.desktop_notify = config.notifications.desktop_notify
+  }
   return mapped
 }
 
@@ -175,12 +198,23 @@ function buildConfigPayload(vals: Record<string, any>): Record<string, any> {
     llm: {},
     memory: {},
     proactive: {},
+    voice: {},
+    personality: {},
+    notifications: {},
   }
   if (vals.model_name) payload.llm.primary_model = vals.model_name
   if (vals.temperature != null) payload.llm.temperature = vals.temperature
   if (vals.max_tokens != null) payload.llm.max_tokens = vals.max_tokens
+  if (vals.top_p != null) payload.llm.top_p = vals.top_p
+  if (vals.api_key != null) payload.llm.api_key = vals.api_key
   if (vals.max_context != null) payload.memory.working_memory_limit = vals.max_context
   if (vals.auto_reply != null) payload.proactive.max_daily_messages = vals.auto_reply ? 8 : 0
   if (vals.reply_delay != null) payload.proactive.min_interval_minutes = Math.round(vals.reply_delay)
+  if (vals.voice_input != null) payload.voice.voice_input = vals.voice_input
+  if (vals.voice_output != null) payload.voice.voice_output = vals.voice_output
+  if (vals.speaker != null) payload.voice.speaker = vals.speaker
+  if (vals.style != null) payload.personality.style = vals.style
+  if (vals.sound != null) payload.notifications.sound = vals.sound
+  if (vals.desktop_notify != null) payload.notifications.desktop_notify = vals.desktop_notify
   return payload
 }

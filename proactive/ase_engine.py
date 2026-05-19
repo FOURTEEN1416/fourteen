@@ -1,67 +1,51 @@
 """
-ASE（Active Speaking Engine）主动发言引擎
+ASE（Active Speaking Engine）主动发言引擎 — 融合版
 
-双层架构：
-1. 后台自省（Reflection）：每次对话后生成"内心独白"
-2. 紧迫度积累（Urgency）：沉默越久紧迫度越高
-3. 阈值触发：紧迫度 > 阈值 → 主动发消息
+深度融合 V1/V2/Optimized 三版优势：
+1. V1 反省引擎（规则+LLM双模式）+ 完整模板库
+2. V2 频率自适应（normal→low→minimal）
+3. Optimized 情境感知 + LLM消息生成 + 三重频率控制 + 六维紧迫度
 
-参考：论文 "Auto-Speaking Engine for Social Agents" 设计思路
+配置驱动行为切换：
+- frequency_mode: "adaptive"(V2自适应) / "fixed"(Optimized三重检查)
+- generation_mode: "template"(V1模板) / "llm"(Optimized双模式生成)
+- reflection_mode: "rule"(V1规则) / "llm"(V1 LLM)
 """
 
 from __future__ import annotations
 
 import logging
 import random
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("ase_engine")
 
 
-@dataclass
-class UrgencyState:
-    """紧迫度状态"""
-    base: float = 0.0           # 基础紧迫度（0~10）
-    missing_bonus: float = 0.0  # 想念加成（沉默时间）
-    event_bonus: float = 0.0    # 事件加成（纪念日/天气等）
-    scene_bonus: float = 0.0    # 场景加成（时间/天气）
+# ═══════════════════════════════════════════════════════════════
+#  类型枚举
+# ═══════════════════════════════════════════════════════════════
 
-    @property
-    def total(self) -> float:
-        """总紧迫度"""
-        return min(10.0, self.base + self.missing_bonus + self.event_bonus + self.scene_bonus)
-
-    @property
-    def level(self) -> str:
-        """紧迫度等级"""
-        if self.total >= 8:
-            return "非常想找你"
-        if self.total >= 5:
-            return "有点想你"
-        if self.total >= 3:
-            return "想找人说话"
-        return "还好"
-
-    def reset(self) -> None:
-        self.base = 0.0
-        self.missing_bonus = 0.0
-        self.event_bonus = 0.0
-        self.scene_bonus = 0.0
+class ProactiveType(Enum):
+    MORNING_GREETING = "morning_greeting"
+    NIGHT_GREETING = "night_greeting"
+    MISS_YOU = "miss_you"
+    BORED = "bored"
+    CARE_WEATHER = "care_weather"
+    CARE_MEAL = "care_meal"
+    JEALOUS = "jealous"
+    SHARE = "share"
+    WORRY = "worry"
 
 
-@dataclass
-class InnerMonologue:
-    """内心独白"""
-    thought: str
-    type: str          # miss_you / bored / want_to_share / jealous / care
-    urgency_delta: float
-    created_at: datetime = field(default_factory=datetime.now)
+# ═══════════════════════════════════════════════════════════════
+#  主动消息模板库（V1完整8类 + WORRY）
+# ═══════════════════════════════════════════════════════════════
 
-
-# 主动消息模板
-PROACTIVE_MESSAGES = {
+PROACTIVE_MESSAGES: Dict[str, List[str]] = {
     "morning_greeting": [
         "早安呀～今天又比我先醒",
         "早！今天有什么安排吗",
@@ -102,19 +86,94 @@ PROACTIVE_MESSAGES = {
         "听到一首歌，想起你了",
         "我今天做了个梦，梦到你了",
     ],
+    "worry": [
+        "你还好吗？感觉你最近不太对劲",
+        "有什么心事可以跟我说",
+        "别一个人扛着，有我在",
+    ],
+}
+
+_PROACTIVE_TYPE_TO_KEY: Dict[ProactiveType, str] = {
+    ProactiveType.MORNING_GREETING: "morning_greeting",
+    ProactiveType.NIGHT_GREETING: "night_greeting",
+    ProactiveType.MISS_YOU: "miss_you",
+    ProactiveType.BORED: "bored",
+    ProactiveType.CARE_WEATHER: "care_weather",
+    ProactiveType.CARE_MEAL: "care_meal",
+    ProactiveType.JEALOUS: "jealous",
+    ProactiveType.SHARE: "share",
+    ProactiveType.WORRY: "worry",
 }
 
 
+# ═══════════════════════════════════════════════════════════════
+#  紧迫度状态（V1四维 + Optimized二维扩展 = 六维）
+# ═══════════════════════════════════════════════════════════════
+
+@dataclass
+class UrgencyState:
+    base: float = 0.0
+    missing_bonus: float = 0.0
+    event_bonus: float = 0.0
+    scene_bonus: float = 0.0
+    emotion_bonus: float = 0.0
+    context_bonus: float = 0.0
+
+    @property
+    def total(self) -> float:
+        return min(
+            10.0,
+            self.base
+            + self.missing_bonus
+            + self.event_bonus
+            + self.scene_bonus
+            + self.emotion_bonus
+            + self.context_bonus,
+        )
+
+    @property
+    def level(self) -> str:
+        if self.total >= 8:
+            return "非常想找你"
+        if self.total >= 5:
+            return "有点想你"
+        if self.total >= 3:
+            return "想找人说话"
+        return "还好"
+
+    def reset(self) -> None:
+        self.base = 0.0
+        self.missing_bonus = 0.0
+        self.event_bonus = 0.0
+        self.scene_bonus = 0.0
+        self.emotion_bonus = 0.0
+        self.context_bonus = 0.0
+
+
+# ═══════════════════════════════════════════════════════════════
+#  内心独白
+# ═══════════════════════════════════════════════════════════════
+
+@dataclass
+class InnerMonologue:
+    thought: str
+    type: str
+    urgency_delta: float
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  反省引擎（V1，内嵌，支持 rule/llm 双模式）
+# ═══════════════════════════════════════════════════════════════
+
 class ReflectionEngine:
-    """
-    后台自省引擎
-
-    每次对话后生成"内心独白"，反映AI的"内心活动"。
-    独白类型决定后续是否主动发言及发言内容。
-    """
-
-    def __init__(self, llm_func: Optional[Callable] = None):
+    def __init__(
+        self,
+        llm_func: Optional[Callable] = None,
+        reflection_mode: str = "rule",
+    ):
         self.llm_func = llm_func
+        self.reflection_mode = reflection_mode
         self._monologues: List[InnerMonologue] = []
 
     def reflect(
@@ -124,25 +183,15 @@ class ReflectionEngine:
         affinity_level: int,
         hours_since_last: float,
     ) -> InnerMonologue:
-        """
-        生成内心独白
-
-        Args:
-            user_message: 用户消息
-            reply: AI 回复
-            affinity_level: 好感度等级
-            hours_since_last: 距离上次聊天的小时数
-
-        Returns:
-            内心独白
-        """
-        if self.llm_func:
+        if self.reflection_mode == "llm" and self.llm_func:
             return self._reflect_with_llm(user_message, reply, affinity_level)
+        return self._reflect_with_rules(
+            user_message, reply, affinity_level, hours_since_last,
+        )
 
-        return self._reflect_with_rules(user_message, reply, affinity_level, hours_since_last)
-
-    def _reflect_with_llm(self, user_msg: str, reply: str, affinity: int) -> InnerMonologue:
-        """LLM 生成内心独白"""
+    def _reflect_with_llm(
+        self, user_msg: str, reply: str, affinity: int,
+    ) -> InnerMonologue:
         prompt = f"""作为AI女友"小暖"，你刚刚和男朋友聊完天。
 请生成你的"内心独白"（一句话，真实感受）。
 
@@ -158,10 +207,8 @@ class ReflectionEngine:
 - bored: 无聊
 
 格式: [类型] 内心独白内容"""
-
         try:
             result = self.llm_func(prompt)
-            # 解析结果
             for mono_type in ["miss_you", "happy", "worry", "jealous", "bored"]:
                 if mono_type in result:
                     thought = result.replace(f"[{mono_type}]", "").strip()
@@ -172,7 +219,6 @@ class ReflectionEngine:
                     )
         except Exception as e:
             logger.warning("LLM reflection failed: %s", e)
-
         return InnerMonologue(thought="...", type="bored", urgency_delta=0.5)
 
     def _reflect_with_rules(
@@ -182,12 +228,10 @@ class ReflectionEngine:
         affinity_level: int,
         hours_since_last: float,
     ) -> InnerMonologue:
-        """规则生成内心独白"""
         msg = user_msg.lower()
         mono_type = "bored"
         urgency_delta = 0.5
 
-        # 沉默时间判断
         if hours_since_last > 8:
             mono_type = "miss_you"
             urgency_delta = 2.0
@@ -195,7 +239,6 @@ class ReflectionEngine:
             mono_type = "miss_you"
             urgency_delta = 1.0
 
-        # 内容判断
         if any(kw in msg for kw in ["她", "别人", "女生"]):
             mono_type = "jealous"
             urgency_delta = 1.5
@@ -221,7 +264,6 @@ class ReflectionEngine:
         )
 
     def get_latest_monologue(self) -> Optional[InnerMonologue]:
-        """获取最近的内心独白"""
         if self._monologues:
             return self._monologues[-1]
         return None
@@ -237,164 +279,551 @@ class ReflectionEngine:
         return mapping.get(mono_type, 0.5)
 
 
+# ═══════════════════════════════════════════════════════════════
+#  频率自适应器（V2，内嵌，normal→low→minimal）
+# ═══════════════════════════════════════════════════════════════
+
+class FrequencyAdapter:
+    def __init__(
+        self,
+        normal_daily: int = 8,
+        low_daily: int = 3,
+        min_weekly: int = 1,
+    ):
+        self.normal_daily = normal_daily
+        self.low_daily = low_daily
+        self.min_weekly = min_weekly
+        self._unanswered_count = 0
+        self._current_level = "normal"
+
+    def on_reply_received(self) -> None:
+        self._unanswered_count = max(0, self._unanswered_count - 1)
+        if self._current_level == "low" and self._unanswered_count == 0:
+            self._current_level = "normal"
+
+    def on_no_reply(self) -> None:
+        self._unanswered_count += 1
+        if self._unanswered_count >= 5 and self._current_level != "minimal":
+            self._current_level = "minimal"
+        elif self._unanswered_count >= 3 and self._current_level == "normal":
+            self._current_level = "low"
+
+    def get_max_daily(self) -> int:
+        if self._current_level == "minimal":
+            return self.min_weekly
+        if self._current_level == "low":
+            return self.low_daily
+        return self.normal_daily
+
+    @property
+    def level(self) -> str:
+        return self._current_level
+
+
+# ═══════════════════════════════════════════════════════════════
+#  上下文分析器（Optimized，内嵌，6时段+工作日/周末）
+# ═══════════════════════════════════════════════════════════════
+
+class ContextAnalyzer:
+    def __init__(self):
+        self._last_analysis: Optional[Dict] = None
+        self._last_analysis_time: float = 0
+
+    def analyze(self) -> Dict[str, Any]:
+        now = datetime.now()
+        hour = now.hour
+        context = {
+            "time_of_day": self._get_time_period(hour),
+            "hour": hour,
+            "weekday": now.weekday(),
+            "is_weekend": now.weekday() >= 5,
+        }
+        self._last_analysis = context
+        self._last_analysis_time = time.time()
+        return context
+
+    def _get_time_period(self, hour: int) -> str:
+        if 5 <= hour < 9:
+            return "morning"
+        elif 9 <= hour < 12:
+            return "forenoon"
+        elif 12 <= hour < 14:
+            return "noon"
+        elif 14 <= hour < 18:
+            return "afternoon"
+        elif 18 <= hour < 22:
+            return "evening"
+        else:
+            return "night"
+
+    def get_recommended_type(self) -> Optional[ProactiveType]:
+        context = self.analyze()
+        hour = context["hour"]
+        if 7 <= hour <= 9:
+            return ProactiveType.MORNING_GREETING
+        if 22 <= hour <= 24 or 0 <= hour <= 1:
+            return ProactiveType.NIGHT_GREETING
+        if hour in [11, 12, 17, 18]:
+            return ProactiveType.CARE_MEAL
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════
+#  消息生成器（Optimized，内嵌，模板+LLM双模式，LLM失败回退模板）
+# ═══════════════════════════════════════════════════════════════
+
+class MessageGenerator:
+    def __init__(self, llm_gateway=None):
+        self._llm = llm_gateway
+
+    def generate_from_template(self, msg_type: ProactiveType) -> str:
+        key = _PROACTIVE_TYPE_TO_KEY.get(msg_type, "bored")
+        templates = PROACTIVE_MESSAGES.get(key, PROACTIVE_MESSAGES["bored"])
+        return random.choice(templates)
+
+    def generate_with_llm(
+        self,
+        msg_type: ProactiveType,
+        emotion_state: Dict,
+        affinity_level: int,
+        context: str = "",
+    ) -> Optional[str]:
+        if not self._llm:
+            return None
+
+        emotion = emotion_state.get("primary", {}).get("type", "平常")
+        affinity_names = [
+            "陌生人", "认识", "朋友", "好朋友", "知己",
+            "暧昧", "恋人", "热恋", "羁绊",
+        ]
+        affinity_name = affinity_names[min(affinity_level, 8)]
+        type_label = msg_type.value
+
+        prompt = f"""作为AI女友"小暖"，你想主动给男朋友发一条消息。
+
+当前情境：
+- 时间：{datetime.now().strftime("%H:%M")}
+- 你的情感状态：{emotion}
+- 关系等级：{affinity_name}
+- 想表达的类型：{type_label}
+
+{context}
+
+要求：
+1. 语气要符合你们的关系等级（{affinity_name}）
+2. 要自然、有情感温度，不要太正式
+3. 可以带一点小情绪（撒娇、傲娇等）
+4. 长度控制在20字以内
+5. 直接输出消息内容，不要解释
+
+消息："""
+
+        try:
+            if hasattr(self._llm, "chat"):
+                response = self._llm.chat(
+                    query=prompt,
+                    max_tokens=50,
+                    temperature=0.8,
+                )
+            elif callable(self._llm):
+                response = self._llm(prompt)
+            else:
+                return None
+            response = response.strip().strip('"').strip("'")
+            if len(response) > 5:
+                return response
+        except Exception as e:
+            logger.debug("LLM message generation failed: %s", e)
+        return None
+
+    def generate(
+        self,
+        msg_type: ProactiveType,
+        emotion_state: Dict,
+        affinity_level: int,
+        use_llm: bool = True,
+    ) -> Tuple[str, str]:
+        """Returns (content, generated_by)"""
+        content = None
+        generated_by = "template"
+
+        if use_llm and self._llm:
+            content = self.generate_with_llm(
+                msg_type, emotion_state, affinity_level,
+            )
+            if content:
+                generated_by = "llm"
+
+        if not content:
+            content = self.generate_from_template(msg_type)
+
+        return content, generated_by
+
+
+# ═══════════════════════════════════════════════════════════════
+#  频率控制器（Optimized，内嵌，三重检查：每日限额+最小间隔+回复后冷却）
+# ═══════════════════════════════════════════════════════════════
+
+class FrequencyController:
+    def __init__(
+        self,
+        max_daily: int = 8,
+        min_interval_minutes: int = 30,
+        cooldown_after_reply_minutes: int = 10,
+    ):
+        self.max_daily = max_daily
+        self.min_interval = timedelta(minutes=min_interval_minutes)
+        self.cooldown = timedelta(minutes=cooldown_after_reply_minutes)
+
+        self._daily_count = 0
+        self._last_sent_time: Optional[datetime] = None
+        self._last_reply_time: Optional[datetime] = None
+        self._last_reset_date: Optional[datetime] = None
+
+    def can_send(self) -> Tuple[bool, str]:
+        now = datetime.now()
+        if self._last_reset_date is None or now.date() != self._last_reset_date:
+            self._daily_count = 0
+            self._last_reset_date = now.date()
+
+        if self._daily_count >= self.max_daily:
+            return False, "daily_limit"
+        if self._last_sent_time:
+            if now - self._last_sent_time < self.min_interval:
+                return False, "min_interval"
+        if self._last_reply_time:
+            if now - self._last_reply_time < self.cooldown:
+                return False, "cooldown"
+        return True, "ok"
+
+    def record_sent(self) -> None:
+        self._daily_count += 1
+        self._last_sent_time = datetime.now()
+
+    def record_reply(self) -> None:
+        self._last_reply_time = datetime.now()
+
+    def get_state(self) -> Dict[str, Any]:
+        return {
+            "daily_count": self._daily_count,
+            "max_daily": self.max_daily,
+            "remaining": self.max_daily - self._daily_count,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════
+#  融合版 ASEEngine
+# ═══════════════════════════════════════════════════════════════
+
 class ASEEngine:
     """
-    ASE 主动发言引擎
+    ASE 主动发言引擎 — 融合版
 
-    决策流程：
-    1. Reflection（后台自省）
-    2. Urgency 积累
-    3. 检查是否触发主动发言
-    4. 生成主动消息
+    配置驱动的行为切换：
+    - frequency_mode: "adaptive"(V2 FrequencyAdapter) / "fixed"(Optimized FrequencyController)
+    - generation_mode: "template"(V1模板) / "llm"(Optimized MessageGenerator双模式)
+    - reflection_mode: "rule"(V1规则) / "llm"(V1 LLM模式)
     """
 
     def __init__(
         self,
-        reflection_engine: Optional[ReflectionEngine] = None,
         affinity_level_func: Optional[Callable[[], int]] = None,
+        llm_gateway: Any = None,
+        max_daily_messages: int = 8,
+        min_interval_minutes: int = 30,
+        cooldown_after_reply: int = 10,
+        urgency_threshold: float = 4.0,
+        frequency_mode: str = "adaptive",
+        generation_mode: str = "llm",
+        reflection_mode: str = "rule",
     ):
-        self.reflection = reflection_engine or ReflectionEngine()
-        self.urgency = UrgencyState()
         self._get_affinity = affinity_level_func or (lambda: 0)
+        self._llm = llm_gateway
+        self._urgency_threshold = urgency_threshold
+        self._frequency_mode = frequency_mode
+        self._generation_mode = generation_mode
+
+        # 紧迫度
+        self.urgency = UrgencyState()
+
+        # 反省引擎（V1，内嵌）
+        llm_func = None
+        if llm_gateway is not None:
+            if hasattr(llm_gateway, "chat"):
+                llm_func = lambda prompt: llm_gateway.chat(
+                    query=prompt, max_tokens=100, temperature=0.7,
+                )
+            elif callable(llm_gateway):
+                llm_func = llm_gateway
+        self._reflection = ReflectionEngine(
+            llm_func=llm_func,
+            reflection_mode=reflection_mode,
+        )
+
+        # 频率控制（双模式）
+        self._freq_adapter: Optional[FrequencyAdapter] = None
+        self._freq_controller: Optional[FrequencyController] = None
+        if frequency_mode == "adaptive":
+            self._freq_adapter = FrequencyAdapter(normal_daily=max_daily_messages)
+        else:
+            self._freq_controller = FrequencyController(
+                max_daily=max_daily_messages,
+                min_interval_minutes=min_interval_minutes,
+                cooldown_after_reply_minutes=cooldown_after_reply,
+            )
+
+        # 上下文分析器（Optimized，内嵌）
+        self._context_analyzer = ContextAnalyzer()
+
+        # 消息生成器（Optimized，内嵌）
+        self._message_generator = MessageGenerator(llm_gateway)
 
         # 状态
         self._last_chat_time: Optional[datetime] = None
+        self._last_proactive_time: Optional[datetime] = None
         self._daily_message_count = 0
         self._last_sent_type: Optional[str] = None
+        self._emotion_state: Dict = {}
+        self._affinity_level: int = 0
+        self._monologues: List[InnerMonologue] = []
 
-        # 配置
-        self.config = {
-            "speak_threshold": 4.0,       # 主动发言阈值
-            "max_daily_messages": 8,       # 每天最多主动消息
-            "min_interval_minutes": 30,    # 最小间隔
-            "cooldown_after_reply": 5,     # 回复后冷却时间(分钟)
-            "morning_hours": (7, 9),       # 早安时间窗
-            "night_hours": (22, 24),       # 晚安时间窗
-            "meal_hours": [(11, 13), (17, 19)],  # 饭点
+        # 时间窗口配置
+        self._config = {
+            "morning_hours": (7, 9),
+            "night_hours": (22, 24),
+            "meal_hours": [(11, 13), (17, 19)],
         }
 
-        logger.info("ASEEngine initialized")
+        logger.info(
+            "ASEEngine initialized [freq=%s gen=%s refl=%s]",
+            frequency_mode, generation_mode, reflection_mode,
+        )
 
     # ── 核心接口 ──────────────────────────────────────────
 
-    def on_chat(self, user_message: str, reply: str) -> Optional[InnerMonologue]:
-        """
-        每次对话后调用
-
-        Returns:
-            内心独白（如果有）
-        """
+    def on_chat(
+        self,
+        user_message: str,
+        reply: str,
+        emotion_state: Optional[Dict] = None,
+        affinity_level: Optional[int] = None,
+    ) -> Optional[InnerMonologue]:
         now = datetime.now()
-
-        # 更新时间
         hours_since = self._hours_since_last_chat()
-        self._last_chat_time = now
 
-        # 重置紧迫度（聊天释放了）
+        self._last_chat_time = now
+        self._last_proactive_time = now
+        self._emotion_state = emotion_state or {}
+        if affinity_level is not None:
+            self._affinity_level = affinity_level
+        else:
+            self._affinity_level = self._get_affinity()
+
+        # 频率控制：记录收到回复
+        if self._freq_adapter:
+            self._freq_adapter.on_reply_received()
+        if self._freq_controller:
+            self._freq_controller.record_reply()
+
+        # 重置紧迫度
         self.urgency.base = 0
+        self.urgency.missing_bonus = 0
+        self.urgency.scene_bonus = 0
 
         # 生成内心独白
-        affinity = self._get_affinity()
-        monologue = self.reflection.reflect(
-            user_message, reply, affinity, hours_since,
+        monologue = self._reflection.reflect(
+            user_message, reply, self._affinity_level, hours_since,
         )
+        self._monologues.append(monologue)
         self.urgency.base += monologue.urgency_delta * 0.3
 
-        logger.debug("Reflection: [%s] %s (urgency+%.1f)",
-                     monologue.type, monologue.thought, monologue.urgency_delta)
+        logger.debug(
+            "Reflection: [%s] %s (urgency+%.1f)",
+            monologue.type, monologue.thought, monologue.urgency_delta,
+        )
 
         return monologue
 
-    def tick(self, hours_since_last_chat: float) -> Optional[Dict[str, Any]]:
-        """
-        定期检查是否该主动发言（由 scheduler 每5分钟调用）
+    def tick(
+        self,
+        hours_since_last_chat: float = 0,
+        emotion_state: Optional[Dict] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if emotion_state:
+            self._emotion_state = emotion_state
 
-        Args:
-            hours_since_last_chat: 距离上次聊天的小时数
-
-        Returns:
-            如果触发，返回 {"type": str, "message": str, "urgency": float}
-            否则 None
-        """
-        # 1. 检查每日限额
-        if self._daily_message_count >= self.config["max_daily_messages"]:
+        # 1. 频率控制检查
+        if not self._check_frequency():
             return None
 
-        # 2. 检查冷却期
-        if self._last_chat_time:
-            minutes_since = (datetime.now() - self._last_chat_time).total_seconds() / 60
-            if minutes_since < self.config["cooldown_after_reply"]:
-                return None
+        # 2. 更新紧迫度
+        actual_hours = hours_since_last_chat or self._hours_since_last_chat()
+        self._update_urgency(actual_hours)
 
-        # 3. 更新紧迫度
-        self._update_urgency(hours_since_last_chat)
-
-        # 4. 检查场景触发（时间/天气相关）
+        # 3. 检查场景触发（ContextAnalyzer + 场景加成）
         scene_msg = self._check_scene_triggers()
         if scene_msg and self.urgency.total >= 2.0:
-            self._daily_message_count += 1
-            self.urgency.scene_bonus = 0
-            return scene_msg
+            return self._record_and_return(scene_msg)
 
-        # 5. 检查紧迫度是否超过阈值
-        if self.urgency.total >= self.config["speak_threshold"]:
-            message = self._generate_proactive_message()
-            self._daily_message_count += 1
-            self.urgency.reset()
-            return message
+        # 4. 检查紧迫度阈值
+        if self.urgency.total >= self._urgency_threshold:
+            msg_type = self._select_type_by_urgency()
+            return self._generate_and_return(msg_type)
 
         return None
+
+    def reflect(
+        self,
+        user_message: str,
+        reply: str,
+        hours_since_last: float = 0,
+    ) -> InnerMonologue:
+        affinity = self._get_affinity()
+        monologue = self._reflection.reflect(
+            user_message, reply, affinity, hours_since_last,
+        )
+        self._monologues.append(monologue)
+        self.urgency.base += monologue.urgency_delta * 0.3
+        return monologue
+
+    # ── 频率控制 ─────────────────────────────────────────
+
+    def _check_frequency(self) -> bool:
+        if self._frequency_mode == "adaptive" and self._freq_adapter:
+            max_daily = self._freq_adapter.get_max_daily()
+            if self._daily_message_count >= max_daily:
+                return False
+            if self._last_proactive_time:
+                minutes_since = (
+                    datetime.now() - self._last_proactive_time
+                ).total_seconds() / 60
+                if minutes_since < 30:
+                    return False
+            return True
+
+        if self._freq_controller:
+            can_send, reason = self._freq_controller.can_send()
+            if not can_send:
+                logger.debug("Cannot send: %s", reason)
+                return False
+            return True
+
+        return self._daily_message_count < 8
 
     # ── 紧迫度管理 ───────────────────────────────────────
 
     def _update_urgency(self, hours_since_last_chat: float) -> None:
-        """更新紧迫度"""
-        # 想念加成：沉默越久越想
-        if hours_since_last_chat > 0.5:  # 30分钟
-            self.urgency.missing_bonus = min(5.0, hours_since_last_chat * 0.5)
+        # V1: 想念加成
+        if hours_since_last_chat > 0.5:
+            self.urgency.missing_bonus = min(
+                5.0, hours_since_last_chat * 0.5,
+            )
 
-        # 基础紧迫度自然增长
+        # V1: 基础紧迫度自然增长
         self.urgency.base = min(3.0, self.urgency.base + 0.1)
 
+        # Optimized: 情感加成
+        emotion = self._emotion_state.get("primary", {}).get("type", "")
+        if emotion in ["伤心", "生气"]:
+            self.urgency.emotion_bonus = 1.5
+        elif emotion in ["撒娇", "开心"]:
+            self.urgency.emotion_bonus = 0.5
+        else:
+            self.urgency.emotion_bonus = 0.0
+
+        # Optimized: 上下文加成
+        context = self._context_analyzer.analyze()
+        if context.get("is_weekend"):
+            self.urgency.context_bonus = 0.5
+        elif context.get("time_of_day") in ["evening", "night"]:
+            self.urgency.context_bonus = 0.3
+        else:
+            self.urgency.context_bonus = 0.0
+
     def _check_scene_triggers(self) -> Optional[Dict[str, Any]]:
-        """检查场景触发（时间/天气相关）"""
         now = datetime.now()
         hour = now.hour
 
         # 早安
-        start, end = self.config["morning_hours"]
+        start, end = self._config["morning_hours"]
         if start <= hour < end:
             msg = random.choice(PROACTIVE_MESSAGES["morning_greeting"])
-            return {"type": "morning_greeting", "message": msg, "urgency": self.urgency.total}
+            self.urgency.scene_bonus = 1.5
+            return {
+                "type": "morning_greeting",
+                "message": msg,
+                "urgency": self.urgency.total,
+            }
 
         # 晚安
-        start, end = self.config["night_hours"]
+        start, end = self._config["night_hours"]
         if start <= hour < end:
             msg = random.choice(PROACTIVE_MESSAGES["night_greeting"])
-            return {"type": "night_greeting", "message": msg, "urgency": self.urgency.total}
+            self.urgency.scene_bonus = 1.5
+            return {
+                "type": "night_greeting",
+                "message": msg,
+                "urgency": self.urgency.total,
+            }
 
         # 饭点
-        for start, end in self.config["meal_hours"]:
+        for start, end in self._config["meal_hours"]:
             if start <= hour < end:
                 msg = random.choice(PROACTIVE_MESSAGES["care_meal"])
-                return {"type": "care_meal", "message": msg, "urgency": self.urgency.total}
+                self.urgency.scene_bonus = 1.0
+                return {
+                    "type": "care_meal",
+                    "message": msg,
+                    "urgency": self.urgency.total,
+                }
+
+        # Optimized: ContextAnalyzer推荐
+        recommended = self._context_analyzer.get_recommended_type()
+        if recommended:
+            key = _PROACTIVE_TYPE_TO_KEY.get(recommended, "bored")
+            msg = random.choice(PROACTIVE_MESSAGES.get(key, PROACTIVE_MESSAGES["bored"]))
+            self.urgency.scene_bonus = 1.0
+            return {
+                "type": recommended.value,
+                "message": msg,
+                "urgency": self.urgency.total,
+            }
 
         return None
 
+    def _select_type_by_urgency(self) -> ProactiveType:
+        total = self.urgency.total
+        if total >= 8:
+            return ProactiveType.MISS_YOU
+        elif total >= 6:
+            return random.choice(
+                [ProactiveType.MISS_YOU, ProactiveType.WORRY],
+            )
+        elif total >= 4:
+            if self._last_sent_type == "care":
+                return random.choice(
+                    [ProactiveType.MISS_YOU, ProactiveType.BORED],
+                )
+            return random.choice(
+                [ProactiveType.CARE_WEATHER, ProactiveType.CARE_MEAL, ProactiveType.SHARE],
+            )
+        else:
+            return ProactiveType.SHARE
+
+    # ── 消息生成 ─────────────────────────────────────────
+
     def _generate_proactive_message(self) -> Dict[str, Any]:
-        """根据当前状态生成主动消息"""
         total = self.urgency.total
 
-        # 高紧迫度 → 想念
         if total >= 7:
             msg_type = "miss_you"
-        # 中等紧迫度 → 无聊/关心
         elif total >= 4:
-            # 交替选择
             if self._last_sent_type == "care":
                 msg_type = random.choice(["miss_you", "bored"])
             else:
-                msg_type = random.choice(["care_weather", "care_meal", "share"])
+                msg_type = random.choice(
+                    ["care_weather", "care_meal", "share"],
+                )
         else:
             msg_type = "share"
 
@@ -403,6 +832,42 @@ class ASEEngine:
         self._last_sent_type = msg_type
 
         return {"type": msg_type, "message": msg, "urgency": total}
+
+    def _generate_and_return(
+        self, msg_type: ProactiveType,
+    ) -> Optional[Dict[str, Any]]:
+        if self._generation_mode == "llm":
+            content, generated_by = self._message_generator.generate(
+                msg_type=msg_type,
+                emotion_state=self._emotion_state,
+                affinity_level=self._affinity_level,
+                use_llm=True,
+            )
+        else:
+            content = self._message_generator.generate_from_template(msg_type)
+            generated_by = "template"
+
+        result = {
+            "type": msg_type.value,
+            "message": content,
+            "urgency": round(self.urgency.total, 2),
+            "generated_by": generated_by,
+        }
+
+        self._record_proactive_sent()
+        self.urgency.reset()
+        return result
+
+    def _record_and_return(self, scene_msg: Dict[str, Any]) -> Dict[str, Any]:
+        self._record_proactive_sent()
+        self.urgency.scene_bonus = 0
+        return scene_msg
+
+    def _record_proactive_sent(self) -> None:
+        self._daily_message_count += 1
+        self._last_proactive_time = datetime.now()
+        if self._freq_controller:
+            self._freq_controller.record_sent()
 
     # ── 工具 ──────────────────────────────────────────────
 
@@ -413,34 +878,69 @@ class ASEEngine:
         return 99.0
 
     def set_last_chat_time(self, dt: datetime) -> None:
-        """手动设置最后聊天时间（恢复状态时用）"""
         self._last_chat_time = dt
 
     def reset_daily_count(self) -> None:
-        """重置每日消息计数（每天0点调用）"""
         self._daily_message_count = 0
+        if self._freq_adapter:
+            self._freq_adapter.on_reply_received()
 
-    def get_state(self) -> dict:
-        """获取当前状态"""
+    def get_state(self) -> Dict[str, Any]:
+        freq_state: Dict[str, Any] = {}
+        if self._freq_adapter:
+            freq_state = {
+                "mode": "adaptive",
+                "level": self._freq_adapter.level,
+                "max_daily": self._freq_adapter.get_max_daily(),
+            }
+        elif self._freq_controller:
+            freq_state = {
+                "mode": "fixed",
+                **self._freq_controller.get_state(),
+            }
+
         return {
             "urgency": {
                 "total": round(self.urgency.total, 2),
                 "level": self.urgency.level,
                 "base": round(self.urgency.base, 2),
                 "missing_bonus": round(self.urgency.missing_bonus, 2),
+                "event_bonus": round(self.urgency.event_bonus, 2),
+                "scene_bonus": round(self.urgency.scene_bonus, 2),
+                "emotion_bonus": round(self.urgency.emotion_bonus, 2),
+                "context_bonus": round(self.urgency.context_bonus, 2),
             },
+            "frequency": freq_state,
             "daily_count": self._daily_message_count,
-            "last_chat": self._last_chat_time.isoformat() if self._last_chat_time else None,
+            "last_chat": (
+                self._last_chat_time.isoformat()
+                if self._last_chat_time else None
+            ),
             "last_sent_type": self._last_sent_type,
         }
 
-    def health_check(self) -> dict:
-        """健康检查"""
+    def health_check(self) -> Dict[str, Any]:
+        freq_info: Dict[str, Any] = {}
+        if self._freq_adapter:
+            freq_info = {
+                "mode": "adaptive",
+                "level": self._freq_adapter.level,
+            }
+        elif self._freq_controller:
+            can_send, reason = self._freq_controller.can_send()
+            freq_info = {"mode": "fixed", "can_send": can_send, "reason": reason}
+
         return {
-            "urgency": self.urgency.total,
+            "initialized": True,
+            "llm_available": self._llm is not None,
+            "urgency": round(self.urgency.total, 2),
+            "urgency_level": self.urgency.level,
+            "urgency_threshold": self._urgency_threshold,
             "daily_count": self._daily_message_count,
-            "config": {
-                "threshold": self.config["speak_threshold"],
-                "max_daily": self.config["max_daily_messages"],
+            "frequency": freq_info,
+            "modes": {
+                "frequency": self._frequency_mode,
+                "generation": self._generation_mode,
+                "reflection": self._reflection.reflection_mode,
             },
         }

@@ -1,243 +1,557 @@
 """
-情感状态机引擎 — 参考 Shikigami-Protocol 情感×能量×好感度三层模型
+情感引擎 — 三版深度融合（V1 + V2 + Optimized）
 
-管理 AI 女友"小暖"的实时情感状态：
+统一情感状态机，管理 AI 女友"小暖"的实时情感状态：
 - Emotion: 10种情感分类
-- Energy: 0~1 能量系统（聊天消耗，恢复）
-- Affinity: 0~8 好感度阶梯
-- Intensity: 0~1 当前情绪强度
+- CompoundEmotionalState: 主/次情感 + 能量 + 好感度 + 好感点数 + 时间戳
+- AffinityLevel: 9级好感度阶梯 + 阈值体系
+- 分类策略路由: rule / llm / hybrid
+- ContinuityGuard: 情感连续性保护
+- LLMEmotionClassifier: LLM分类 + 缓存 + 降级
 """
 
 from __future__ import annotations
 
 import enum
+import json
 import logging
 import random
+import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("emotion_engine")
 
 
-class Emotion(enum.Enum):
-    """10种情感状态"""
-    HAPPY = "开心"          # 高能量+高愉悦
-    SAD = "伤心"            # 低能量+低愉悦
-    ANGRY = "生气"          # 高能量+低愉悦
-    LOVELY = "撒娇"         # 中能量+高愉悦（亲密专属）
-    JEALOUS = "吃醋"        # 中能量+中愉悦
-    SULLEN = "傲娇"         # 高能量+表面低愉悦
-    CARING = "温柔"         # 低能量+高愉悦
-    PLAYFUL = "调皮"        # 高能量+中愉悦
-    TIRED = "疲惫"          # 低能量+中性
-    NEUTRAL = "平常"        # 中性
+# ---------------------------------------------------------------------------
+#  基础枚举
+# ---------------------------------------------------------------------------
 
+class Emotion(enum.Enum):
+    """10种核心情感状态"""
+    HAPPY = "开心"
+    SAD = "伤心"
+    ANGRY = "生气"
+    LOVELY = "撒娇"
+    JEALOUS = "吃醋"
+    SULLEN = "傲娇"
+    CARING = "温柔"
+    PLAYFUL = "调皮"
+    TIRED = "疲惫"
+    NEUTRAL = "平常"
+
+
+# ---------------------------------------------------------------------------
+#  常量 — 情感愉悦度 / 转换矩阵 / 风格映射 / 关键词映射
+# ---------------------------------------------------------------------------
+
+EMOTION_PLEASURE_MAP = {
+    Emotion.HAPPY: 1.0,
+    Emotion.SAD: -0.8,
+    Emotion.ANGRY: -0.6,
+    Emotion.LOVELY: 0.9,
+    Emotion.JEALOUS: 0.1,
+    Emotion.SULLEN: -0.2,
+    Emotion.CARING: 0.7,
+    Emotion.PLAYFUL: 0.6,
+    Emotion.TIRED: -0.3,
+    Emotion.NEUTRAL: 0.0,
+}
+
+EMOTION_TRANSITION_MATRIX = {
+    (Emotion.NEUTRAL, Emotion.ANGRY): 0.6,
+    (Emotion.NEUTRAL, Emotion.JEALOUS): 0.5,
+    (Emotion.HAPPY, Emotion.ANGRY): 0.2,
+    (Emotion.HAPPY, Emotion.SAD): 0.2,
+    (Emotion.ANGRY, Emotion.HAPPY): 0.3,
+    (Emotion.SAD, Emotion.HAPPY): 0.3,
+    (Emotion.LOVELY, Emotion.JEALOUS): 0.6,
+    (Emotion.LOVELY, Emotion.HAPPY): 0.8,
+}
+
+EMOTION_STYLE_MAP = {
+    Emotion.JEALOUS: {"rhetorical_prob": 0.8, "hint_prob": 0.7, "caring_prob": 0.2, "teasing_prob": 0.1, "emoji_freq": 0.3},
+    Emotion.SULLEN:  {"rhetorical_prob": 0.7, "hint_prob": 0.6, "caring_prob": 0.4, "teasing_prob": 0.3, "emoji_freq": 0.5},
+    Emotion.CARING:  {"rhetorical_prob": 0.2, "hint_prob": 0.1, "caring_prob": 0.9, "teasing_prob": 0.1, "emoji_freq": 0.4},
+    Emotion.HAPPY:   {"rhetorical_prob": 0.3, "hint_prob": 0.2, "caring_prob": 0.5, "teasing_prob": 0.6, "emoji_freq": 0.8},
+    Emotion.ANGRY:   {"rhetorical_prob": 0.9, "hint_prob": 0.3, "caring_prob": 0.1, "teasing_prob": 0.0, "emoji_freq": 0.1},
+    Emotion.LOVELY:  {"rhetorical_prob": 0.4, "hint_prob": 0.5, "caring_prob": 0.7, "teasing_prob": 0.5, "emoji_freq": 0.9},
+    Emotion.PLAYFUL: {"rhetorical_prob": 0.5, "hint_prob": 0.3, "caring_prob": 0.3, "teasing_prob": 0.8, "emoji_freq": 0.7},
+    Emotion.SAD:     {"rhetorical_prob": 0.3, "hint_prob": 0.4, "caring_prob": 0.6, "teasing_prob": 0.0, "emoji_freq": 0.2},
+    Emotion.TIRED:   {"rhetorical_prob": 0.2, "hint_prob": 0.1, "caring_prob": 0.5, "teasing_prob": 0.1, "emoji_freq": 0.2},
+    Emotion.NEUTRAL: {"rhetorical_prob": 0.3, "hint_prob": 0.2, "caring_prob": 0.4, "teasing_prob": 0.3, "emoji_freq": 0.4},
+}
+
+KEYWORD_EMOTION_MAP = {
+    "开心": (Emotion.HAPPY, 0.7), "高兴": (Emotion.HAPPY, 0.7),
+    "哈哈": (Emotion.HAPPY, 0.6), "嘻嘻": (Emotion.HAPPY, 0.6),
+    "棒": (Emotion.HAPPY, 0.5), "好": (Emotion.HAPPY, 0.4),
+    "想你了": (Emotion.LOVELY, 0.9), "抱抱": (Emotion.LOVELY, 0.8),
+    "亲亲": (Emotion.LOVELY, 0.8), "爱你": (Emotion.LOVELY, 0.9),
+    "么么": (Emotion.LOVELY, 0.7), "宝贝": (Emotion.LOVELY, 0.6),
+    "亲": (Emotion.LOVELY, 0.7), "想你": (Emotion.LOVELY, 0.8),
+    "伤心": (Emotion.SAD, 0.8), "难过": (Emotion.SAD, 0.8),
+    "哭": (Emotion.SAD, 0.7), "委屈": (Emotion.SAD, 0.7),
+    "不开心": (Emotion.SAD, 0.7), "生气": (Emotion.ANGRY, 0.9),
+    "讨厌": (Emotion.ANGRY, 0.7), "烦": (Emotion.ANGRY, 0.6),
+    "滚": (Emotion.ANGRY, 0.8), "不理你": (Emotion.ANGRY, 0.7),
+    "她是谁": (Emotion.JEALOUS, 0.9), "那个女生": (Emotion.JEALOUS, 0.8),
+    "别人": (Emotion.JEALOUS, 0.6), "哦？": (Emotion.JEALOUS, 0.5),
+    "谁啊": (Emotion.JEALOUS, 0.7),
+    "哼": (Emotion.SULLEN, 0.7), "才不": (Emotion.SULLEN, 0.6),
+    "不理": (Emotion.SULLEN, 0.6), "算了": (Emotion.SULLEN, 0.5),
+    "吃饭": (Emotion.CARING, 0.6), "休息": (Emotion.CARING, 0.6),
+    "注意": (Emotion.CARING, 0.5), "身体": (Emotion.CARING, 0.6),
+    "睡觉": (Emotion.CARING, 0.5), "关心": (Emotion.CARING, 0.5),
+    "累": (Emotion.CARING, 0.5), "好累": (Emotion.CARING, 0.6),
+    "加班": (Emotion.CARING, 0.4), "熬夜": (Emotion.CARING, 0.4),
+    "困": (Emotion.TIRED, 0.6), "疲惫": (Emotion.TIRED, 0.7),
+    "逗": (Emotion.PLAYFUL, 0.7), "猜": (Emotion.PLAYFUL, 0.6),
+    "骗": (Emotion.PLAYFUL, 0.5), "调皮": (Emotion.PLAYFUL, 0.7),
+    "夸": (Emotion.HAPPY, 0.6), "好看": (Emotion.HAPPY, 0.5),
+    "漂亮": (Emotion.HAPPY, 0.5), "可爱": (Emotion.HAPPY, 0.5),
+    "乖": (Emotion.HAPPY, 0.5),
+}
+
+
+# ---------------------------------------------------------------------------
+#  AffinityLevel — 好感度阶梯（V1 LEVELs + Optimized THRESHOLDS）
+# ---------------------------------------------------------------------------
 
 class AffinityLevel:
-    """好感度阶梯（0~8级）"""
     LEVELS = [
-        "陌生人",    # 0
-        "认识",      # 1
-        "朋友",      # 2
-        "好朋友",    # 3
-        "知己",      # 4
-        "暧昧",      # 5
-        "恋人",      # 6
-        "热恋",      # 7
-        "羁绊",      # 8
+        "陌生人",   # 0
+        "认识",     # 1
+        "朋友",     # 2
+        "好朋友",   # 3
+        "知己",     # 4
+        "暧昧",     # 5
+        "恋人",     # 6
+        "热恋",     # 7
+        "羁绊",     # 8
     ]
 
-    @staticmethod
-    def get_name(level: int) -> str:
-        """获取好感度等级名称"""
-        if 0 <= level < len(AffinityLevel.LEVELS):
-            return AffinityLevel.LEVELS[level]
+    THRESHOLDS = [0, 10, 25, 50, 80, 120, 200, 350, 500]
+
+    @classmethod
+    def get_name(cls, level: int) -> str:
+        if 0 <= level < len(cls.LEVELS):
+            return cls.LEVELS[level]
         return f"未知({level})"
 
-    @staticmethod
-    def is_intimate(level: int) -> bool:
-        """是否达到亲密关系（>=恋人）"""
+    @classmethod
+    def get_threshold(cls, level: int) -> int:
+        if 0 <= level < len(cls.THRESHOLDS):
+            return cls.THRESHOLDS[level]
+        return 9999
+
+    @classmethod
+    def is_intimate(cls, level: int) -> bool:
         return level >= 6
 
-    @staticmethod
-    def is_friend(level: int) -> bool:
-        """是否达到朋友关系（>=朋友）"""
+    @classmethod
+    def is_friend(cls, level: int) -> bool:
         return level >= 2
 
 
+# ---------------------------------------------------------------------------
+#  CompoundEmotionalState — 融合数据类
+# ---------------------------------------------------------------------------
+
 @dataclass
-class EmotionalState:
-    """完整的情感状态"""
-    emotion: Emotion = Emotion.NEUTRAL
-    energy: float = 1.0         # 0.0 ~ 1.0
-    affinity: int = 0           # 0~8 好感度等级
-    intensity: float = 0.5      # 0.0 ~ 1.0 当前情绪强度
-    affection_points: float = 0.0  # 好感度累积点数（用于升级判定）
+class CompoundEmotionalState:
+    """复合情感状态
+
+    字段来源：
+      V2: primary_emotion / primary_intensity / secondary_emotions / energy / affinity
+      V1: affection_points
+      Optimized: last_update
+    """
+    primary_emotion: Emotion = Emotion.NEUTRAL
+    primary_intensity: float = 0.5
+    secondary_emotions: List[Tuple[Emotion, float]] = field(default_factory=list)
+    energy: float = 1.0
+    affinity: int = 0
+    affection_points: float = 0.0
+    last_update: float = field(default_factory=time.time)
+
+    def __post_init__(self):
+        self.primary_intensity = max(0.0, min(1.0, self.primary_intensity))
+        self.energy = max(0.0, min(1.0, self.energy))
+        self.affinity = max(0, min(8, self.affinity))
+        self.secondary_emotions = [
+            (e, max(0.0, min(1.0, i)))
+            for e, i in self.secondary_emotions if i >= 0.3
+        ][:3]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "primary": {
+                "type": self.primary_emotion.value,
+                "intensity": round(self.primary_intensity, 2),
+            },
+            "secondary": [
+                {"type": e.value, "intensity": round(i, 2)}
+                for e, i in self.secondary_emotions
+            ],
+            "energy": round(self.energy, 2),
+            "affinity": {
+                "level": self.affinity,
+                "name": AffinityLevel.get_name(self.affinity),
+                "points": round(self.affection_points, 1),
+            },
+            "last_update": self.last_update,
+        }
 
     def to_prompt_segment(self) -> str:
-        """将当前情感状态转换为影响回复的 prompt 段"""
-        level_name = AffinityLevel.get_name(self.affinity)
-        return (
-            f"[当前情感: {self.emotion.value}(强度{self.intensity:.1f}) | "
-            f"能量: {self.energy:.1f} | "
-            f"关系: {level_name}]"
-        )
+        parts = [
+            f"[情感: {self.primary_emotion.value}({self.primary_intensity:.1f})]",
+            f"[能量: {self.energy:.1f}]",
+            f"[关系: {AffinityLevel.get_name(self.affinity)}]",
+        ]
+        if self.secondary_emotions:
+            sec = ", ".join(f"{e.value}({i:.1f})" for e, i in self.secondary_emotions[:2])
+            parts.append(f"[次要: {sec}]")
+        return " ".join(parts)
 
     def is_low_energy(self) -> bool:
-        """是否低能量状态"""
         return self.energy < 0.2
 
     def is_high_affinity(self) -> bool:
-        """是否高好感度"""
         return self.affinity >= 6
 
 
+# ---------------------------------------------------------------------------
+#  ContinuityGuard — 情感连续性保护（V2矩阵 + 优化逻辑）
+# ---------------------------------------------------------------------------
+
+class ContinuityGuard:
+    def __init__(self, blend_ratio: float = 0.4, min_transition_prob: float = 0.3):
+        self.blend_ratio = blend_ratio
+        self.min_transition_prob = min_transition_prob
+
+    def check_transition(self, old: Emotion, new: Emotion) -> Tuple[bool, Optional[Emotion]]:
+        if old == new:
+            return True, None
+        prob = EMOTION_TRANSITION_MATRIX.get((old, new), 0.5)
+        if prob >= self.min_transition_prob:
+            return True, None
+        return False, Emotion.NEUTRAL
+
+    def blend_intensity(self, old_intensity: float, new_intensity: float) -> float:
+        return old_intensity * self.blend_ratio + new_intensity * (1 - self.blend_ratio)
+
+
+# ---------------------------------------------------------------------------
+#  LLMEmotionClassifier — LLM分类 + 缓存 + 超时降级（Optimized版）
+# ---------------------------------------------------------------------------
+
+class LLMEmotionClassifier:
+    def __init__(self, llm_gateway=None, timeout_ms: int = 500, cache_size: int = 100):
+        self._llm = llm_gateway
+        self.timeout_ms = timeout_ms
+        self._cache: Dict[str, Dict] = {}
+        self._cache_size = cache_size
+
+    def _get_cache_key(self, message: str, context: str) -> str:
+        return f"{hash(message)}:{hash(context[:50])}"
+
+    def classify(self, message: str, context: str = "") -> Optional[Dict]:
+        if not self._llm:
+            return None
+
+        cache_key = self._get_cache_key(message, context)
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        prompt = (
+            f"分析以下消息的情感状态，考虑对话上下文。\n\n"
+            f"上下文：\n{context[:200]}\n\n"
+            f"当前消息：{message}\n\n"
+            f'回复JSON格式：{{"primary": {{"type": "情感类型", "intensity": 0.0-1.0}}, '
+            f'"secondary": [{{"type": "情感类型", "intensity": 0.0-1.0}}], '
+            f'"energy_change": -0.1-0.1}}\n'
+            f"情感类型限定：开心/伤心/生气/撒娇/吃醋/傲娇/温柔/调皮/疲惫/平常"
+        )
+
+        try:
+            start = time.perf_counter()
+            response = self._llm.chat(query=prompt, max_tokens=128, temperature=0.1)
+            elapsed_ms = (time.perf_counter() - start) * 1000
+
+            if elapsed_ms > self.timeout_ms:
+                logger.debug("LLM分类超时: %.0fms", elapsed_ms)
+                return None
+
+            result = json.loads(response)
+
+            if len(self._cache) >= self._cache_size:
+                self._cache.pop(next(iter(self._cache)))
+            self._cache[cache_key] = result
+
+            return result
+
+        except Exception as e:
+            logger.debug("LLM分类失败: %s", e)
+            return None
+
+    def clear_cache(self) -> None:
+        self._cache.clear()
+
+
+# ---------------------------------------------------------------------------
+#  EmotionEngine — 融合引擎
+# ---------------------------------------------------------------------------
+
 class EmotionEngine:
-    """情感状态机引擎"""
+    """
+    统一情感引擎 — 融合 V1 + V2 + Optimized
 
-    # 各情感的愉悦度（1.0=高愉悦, -1.0=低愉悦）
-    PLEASURE_MAP = {
-        Emotion.HAPPY: 1.0,
-        Emotion.SAD: -0.8,
-        Emotion.ANGRY: -0.6,
-        Emotion.LOVELY: 0.9,
-        Emotion.JEALOUS: 0.1,
-        Emotion.SULLEN: -0.2,
-        Emotion.CARING: 0.7,
-        Emotion.PLAYFUL: 0.6,
-        Emotion.TIRED: -0.3,
-        Emotion.NEUTRAL: 0.0,
-    }
+    特性：
+      - 三种分类策略: rule / llm / hybrid
+      - 情感连续性保护 (ContinuityGuard)
+      - LLM分类 + 缓存 + 降级 (LLMEmotionClassifier)
+      - 好感度阶梯系统 (升级/降级)
+      - 时间衰减 (apply_time_decay)
+      - 双接口风格修饰器
+    """
 
-    def __init__(self, config: Optional[dict] = None):
-        self.state = EmotionalState()
-        self.config = config or {}
+    def __init__(
+        self,
+        config: Optional[dict] = None,
+        llm_gateway=None,
+        use_llm: bool = True,
+        blend_ratio: float = 0.4,
+        classifier_timeout_ms: int = 500,
+        classifier_mode: str = "hybrid",
+    ):
+        self._config = config or {}
+        self._llm = llm_gateway
+        self._classifier_mode = classifier_mode
         self._total_chats = 0
-        logger.info("EmotionEngine initialized")
 
-    def process_message(self, user_message: str, context: Optional[dict] = None) -> EmotionalState:
-        if context is None:
-            context = {}
+        self._classifier: Optional[LLMEmotionClassifier] = None
+        if use_llm and llm_gateway is not None:
+            self._classifier = LLMEmotionClassifier(llm_gateway, classifier_timeout_ms)
 
-        detected_emotion = self._classify_emotion(user_message, context)
-        delta_energy = self._calc_energy_delta(user_message, detected_emotion)
-        delta_affection = self._calc_affection_delta(user_message)
+        self._guard = ContinuityGuard(blend_ratio)
+        self._state = CompoundEmotionalState()
 
-        self.state.intensity *= 0.95
+        self._default_config = {
+            "energy_drain_per_message": 0.02,
+            "energy_recovery_per_hour": 0.05,
+            "intensity_per_minute": 0.001,
+            "per_positive_reply": 1.0,
+            "per_negative_reply": -0.5,
+            "per_day_decay": 0.1,
+        }
 
-        self.state.emotion = detected_emotion
-        self.state.energy = max(0.0, min(1.0, self.state.energy + delta_energy))
-        self.state.affection_points += delta_affection
-        self._total_chats += 1
+        logger.info(
+            "EmotionEngine initialized (mode=%s, llm=%s)",
+            classifier_mode,
+            llm_gateway is not None,
+        )
+
+    # ---- 属性 ----
+
+    @property
+    def state(self) -> CompoundEmotionalState:
+        return self._state
+
+    @property
+    def total_chats(self) -> int:
+        return self._total_chats
+
+    # ---- 主入口: analyze (V2) ----
+
+    def analyze(self, message: str, context: str = "") -> CompoundEmotionalState:
+        new_state = self._classify(message, context)
+
+        allowed, intermediate = self._guard.check_transition(
+            self._state.primary_emotion, new_state.primary_emotion
+        )
+        if not allowed and intermediate:
+            new_state.primary_emotion = intermediate
+
+        new_state.primary_intensity = self._guard.blend_intensity(
+            self._state.primary_intensity, new_state.primary_intensity
+        )
+
+        new_state.energy = self._calc_new_energy(new_state.primary_emotion)
+
+        affection_delta = self._calc_affection_delta(message)
+        new_state.affection_points = self._state.affection_points + affection_delta
+
+        new_state.last_update = time.time()
+        self._state = new_state
 
         self._check_affinity_upgrade()
         self._check_affinity_downgrade()
 
-        self.state.intensity = min(1.0, self.state.intensity + 0.15)
+        self._total_chats += 1
+        return self._state
 
-        return self.state
+    # ---- V1 兼容入口 ----
 
-    def analyze(self, user_message: str, context: str = "") -> EmotionalState:
-        return self.process_message(user_message, context if isinstance(context, dict) else {"recent": context})
+    def process_message(self, user_message: str, context: Optional[dict] = None) -> CompoundEmotionalState:
+        recent = ""
+        if isinstance(context, dict):
+            recent = context.get("recent", "")
+        elif isinstance(context, str):
+            recent = context
+        return self.analyze(user_message, recent)
 
-    def _classify_emotion(self, message: str, context: dict) -> Emotion:
-        """
-        基于关键词规则的情感分类
-        实际使用时可以用 LLM 替代
-        """
+    # ---- 分类策略路由 ----
+
+    def _classify(self, message: str, context: str) -> CompoundEmotionalState:
+        if self._classifier_mode == "rule":
+            return self._rule_classify(message)
+        elif self._classifier_mode == "llm":
+            return self._llm_classify(message, context)
+        else:  # hybrid
+            return self._hybrid_classify(message, context)
+
+    def _rule_classify(self, message: str) -> CompoundEmotionalState:
         msg = message.lower()
+        scores: Dict[Emotion, float] = {e: 0.0 for e in Emotion}
 
-        # 亲密/撒娇关键词
-        if any(kw in msg for kw in ["想你了", "抱抱", "亲", "想你", "爱你", "么么"]):
-            if self.state.affinity >= 5:
-                return Emotion.LOVELY
-            return Emotion.HAPPY
+        for keyword, (emotion, weight) in KEYWORD_EMOTION_MAP.items():
+            if keyword in msg:
+                scores[emotion] += weight
 
-        # 负面关键词
-        if any(kw in msg for kw in ["生气", "不理你", "哼", "讨厌"]):
-            return Emotion.ANGRY
+        # 撒娇需要好感度门槛
+        if self._state.affinity < 5 and scores.get(Emotion.LOVELY, 0) > 0:
+            happy_score = scores.pop(Emotion.LOVELY, 0)
+            scores[Emotion.HAPPY] = scores.get(Emotion.HAPPY, 0) + happy_score * 0.6
 
-        # 伤心关键词
-        if any(kw in msg for kw in ["难过", "伤心", "哭了", "不开心", "委屈"]):
-            return Emotion.SAD
-
-        # 吃醋关键词
-        if any(kw in msg for kw in ["谁啊", "她是谁", "那个人", "女生"]):
-            return Emotion.JEALOUS
-
-        # 关心关键词
-        if any(kw in msg for kw in ["吃饭", "睡觉", "休息", "累了", "注意"]):
-            return Emotion.CARING
-
-        # 调情/玩笑
+        # 傲娇随机触发
         if any(kw in msg for kw in ["夸", "好看", "漂亮", "可爱", "乖"]):
             if random.random() < 0.4:
-                return Emotion.SULLEN  # 傲娇
-            return Emotion.HAPPY
+                scores[Emotion.SULLEN] = scores.get(Emotion.SULLEN, 0) + 0.5
 
-        # 疲惫
-        if any(kw in msg for kw in ["好累", "加班", "忙", "熬夜"]):
-            return Emotion.CARING
+        total = sum(scores.values())
+        if total > 0:
+            primary_emotion = max(scores, key=scores.get)
+            primary_intensity = min(1.0, scores[primary_emotion])
+        else:
+            if self._state.energy > 0.7 and self._state.affinity >= 4:
+                primary_emotion = Emotion.PLAYFUL
+            elif self._state.energy < 0.3:
+                primary_emotion = Emotion.TIRED
+            else:
+                primary_emotion = Emotion.NEUTRAL
+            primary_intensity = 0.3
 
-        # 默认：基于当前能量和好感度
-        if self.state.energy > 0.7 and self.state.affinity >= 4:
-            return Emotion.PLAYFUL
-        if self.state.energy < 0.3:
-            return Emotion.TIRED
+        secondary = []
+        sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        for emotion, score in sorted_scores[1:4]:
+            if score >= 0.3 and emotion != primary_emotion:
+                secondary.append((emotion, min(1.0, score)))
 
-        return Emotion.NEUTRAL
+        return CompoundEmotionalState(
+            primary_emotion=primary_emotion,
+            primary_intensity=primary_intensity,
+            secondary_emotions=secondary,
+            energy=self._state.energy,
+            affinity=self._state.affinity,
+            affection_points=self._state.affection_points,
+        )
 
-    def _calc_energy_delta(self, message: str, emotion: Emotion) -> float:
-        """计算能量变化"""
-        # 每次回复消耗基础能量
-        delta = -self.config.get("energy_drain_per_message", 0.02)
+    def _llm_classify(self, message: str, context: str) -> CompoundEmotionalState:
+        if self._classifier:
+            result = self._classifier.classify(message, context)
+            if result:
+                return self._parse_llm_result(result)
+        return self._rule_classify(message)
 
-        # 积极情感回复部分恢复能量
-        pleasure = self.PLEASURE_MAP.get(emotion, 0.0)
+    def _hybrid_classify(self, message: str, context: str) -> CompoundEmotionalState:
+        if self._classifier:
+            result = self._classifier.classify(message, context)
+            if result:
+                return self._parse_llm_result(result)
+        return self._rule_classify(message)
+
+    def _parse_llm_result(self, result: Dict) -> CompoundEmotionalState:
+        primary = result.get("primary", {})
+        emotion_name = primary.get("type", "平常")
+        primary_emotion = Emotion.NEUTRAL
+        for e in Emotion:
+            if e.value == emotion_name:
+                primary_emotion = e
+                break
+        primary_intensity = float(primary.get("intensity", 0.5))
+
+        secondary = []
+        for s in result.get("secondary", []):
+            s_name = s.get("type", "")
+            s_intensity = float(s.get("intensity", 0.0))
+            for e in Emotion:
+                if e.value == s_name and s_intensity >= 0.3:
+                    secondary.append((e, s_intensity))
+                    break
+
+        energy_change = float(result.get("energy_change", 0.0))
+        new_energy = max(0.0, min(1.0, self._state.energy + energy_change))
+
+        return CompoundEmotionalState(
+            primary_emotion=primary_emotion,
+            primary_intensity=primary_intensity,
+            secondary_emotions=secondary,
+            energy=new_energy,
+            affinity=self._state.affinity,
+            affection_points=self._state.affection_points,
+        )
+
+    # ---- 能量计算 ----
+
+    def _calc_new_energy(self, emotion: Emotion) -> float:
+        drain = self._config.get(
+            "energy_drain_per_message",
+            self._default_config["energy_drain_per_message"],
+        )
+        pleasure = EMOTION_PLEASURE_MAP.get(emotion, 0.0)
         if pleasure > 0.5:
-            delta += 0.03  # 开心的回复让你"有能量"
+            drain -= 0.01
         elif pleasure < -0.5:
-            delta -= 0.02  # 负面对话消耗更多
+            drain += 0.01
+        return max(0.0, min(1.0, self._state.energy - drain))
 
-        # 长时间不聊自动恢复（由 scheduler 处理）
-        return delta
+    # ---- 好感度计算 ----
 
     def _calc_affection_delta(self, message: str) -> float:
-        """计算好感度点数变化"""
         msg = message.lower()
+        per_pos = self._config.get(
+            "per_positive_reply",
+            self._default_config["per_positive_reply"],
+        )
+        per_neg = self._config.get(
+            "per_negative_reply",
+            self._default_config["per_negative_reply"],
+        )
 
-        # 积极互动增加好感
-        positive_signals = [
+        positive_keywords = [
             "想", "喜欢", "爱", "好", "乖", "棒",
             "对不起", "错了", "哄", "宝贝", "亲爱的",
         ]
-        negative_signals = [
-            "烦", "滚", "闭嘴", "懒得", "无语",
-        ]
+        negative_keywords = ["烦", "滚", "闭嘴", "懒得", "无语", "讨厌"]
 
-        pos_count = sum(1 for kw in positive_signals if kw in msg)
-        neg_count = sum(1 for kw in negative_signals if kw in msg)
+        pos_count = sum(1 for kw in positive_keywords if kw in msg)
+        neg_count = sum(1 for kw in negative_keywords if kw in msg)
 
-        delta = 0.0
+        delta = 0.2
         if pos_count > 0:
-            delta += pos_count * self.config.get("per_positive_reply", 1.0)
+            delta += pos_count * per_pos
         if neg_count > 0:
-            delta += neg_count * self.config.get("per_negative_reply", -0.5)
-
-        # 对话本身增加微量好感
-        delta += 0.2
-
+            delta += neg_count * per_neg
         return delta
 
-    def _check_affinity_upgrade(self) -> None:
-        """检查好感度是否达到升级阈值"""
-        # 每个等级所需好感度（指数增长）
-        thresholds = [0, 10, 25, 50, 80, 120, 200, 350, 500]
-        current_level = self.state.affinity
+    # ---- 好感度升级 / 降级（V1逻辑 + Optimized THRESHOLDS）----
 
-        while current_level < len(thresholds) - 1:
-            next_threshold = thresholds[current_level + 1]
-            if self.state.affection_points >= next_threshold:
+    def _check_affinity_upgrade(self) -> None:
+        current_level = self._state.affinity
+        while current_level < len(AffinityLevel.THRESHOLDS) - 1:
+            next_threshold = AffinityLevel.THRESHOLDS[current_level + 1]
+            if self._state.affection_points >= next_threshold:
                 current_level += 1
                 logger.info(
                     "好感度升级! %s → %s",
@@ -246,15 +560,13 @@ class EmotionEngine:
                 )
             else:
                 break
-
-        self.state.affinity = current_level
+        self._state.affinity = current_level
 
     def _check_affinity_downgrade(self) -> None:
-        thresholds = [0, 10, 25, 50, 80, 120, 200, 350, 500]
-        current_level = self.state.affinity
+        current_level = self._state.affinity
         while current_level > 0:
-            current_threshold = thresholds[current_level]
-            if self.state.affection_points < current_threshold:
+            current_threshold = AffinityLevel.THRESHOLDS[current_level]
+            if self._state.affection_points < current_threshold:
                 current_level -= 1
                 logger.info(
                     "好感度降级! %s → %s",
@@ -263,66 +575,91 @@ class EmotionEngine:
                 )
             else:
                 break
-        self.state.affinity = current_level
+        self._state.affinity = current_level
+
+    # ---- 时间衰减（V1移植）----
 
     def apply_time_decay(self, hours_passed: float) -> None:
-        """
-        应用时间衰减（由 scheduler 定期调用）
+        recovery = self._config.get(
+            "energy_recovery_per_hour",
+            self._default_config["energy_recovery_per_hour"],
+        ) * hours_passed
+        self._state.energy = min(1.0, self._state.energy + recovery)
 
-        Args:
-            hours_passed: 经过的小时数
-        """
-        # 能量自然恢复
-        recovery = self.config.get("energy_recovery_per_hour", 0.05) * hours_passed
-        self.state.energy = min(1.0, self.state.energy + recovery)
+        decay = self._config.get(
+            "intensity_per_minute",
+            self._default_config["intensity_per_minute"],
+        ) * hours_passed * 60
+        self._state.primary_intensity = max(0.1, self._state.primary_intensity - decay)
 
-        # 强度衰减
-        decay = self.config.get("intensity_per_minute", 0.001) * hours_passed * 60
-        self.state.intensity = max(0.1, self.state.intensity - decay)
-
-        # 好感度长期衰减
         days_passed = hours_passed / 24
         if days_passed >= 1:
-            decay_affection = self.config.get("per_day_decay", 0.1) * days_passed
-            self.state.affection_points = max(0, self.state.affection_points - decay_affection)
+            decay_affection = self._config.get(
+                "per_day_decay",
+                self._default_config["per_day_decay"],
+            ) * days_passed
+            self._state.affection_points = max(0, self._state.affection_points - decay_affection)
             self._check_affinity_upgrade()
             self._check_affinity_downgrade()
 
-    def get_style_modifiers(self) -> dict:
-        """
-        获取当前状态对回复风格的影响参数
+        self._state.last_update = time.time()
 
-        Returns:
-            dict: {warmth_mod, energy_mod, intimacy_mod, playfulness_mod}
-        """
-        pleasure = self.PLEASURE_MAP.get(self.state.emotion, 0.0)
+    # ---- 风格修饰器双接口 ----
+
+    def get_style_modifiers(self) -> Dict[str, Any]:
+        """V1风格: warmth/energy/intimacy/playfulness修饰"""
+        pleasure = EMOTION_PLEASURE_MAP.get(self._state.primary_emotion, 0.0)
         return {
             "warmth_mod": max(-0.3, min(0.3, pleasure * 0.3)),
-            "energy_mod": self.state.energy - 0.5,  # -0.5~0.5
-            "intimacy_mod": self.state.affinity / 8.0 - 0.5,  # -0.5~0.5
-            "playfulness_mod": max(-0.3, min(0.3, pleasure * 0.2 + (self.state.energy - 0.5) * 0.3)),
-            "needs_comfort": self.state.emotion in (Emotion.SAD, Emotion.TIRED),
-            "is_flirty": self.state.emotion in (Emotion.LOVELY, Emotion.PLAYFUL) and self.state.affinity >= 5,
+            "energy_mod": self._state.energy - 0.5,
+            "intimacy_mod": self._state.affinity / 8.0 - 0.5,
+            "playfulness_mod": max(
+                -0.3, min(0.3, pleasure * 0.2 + (self._state.energy - 0.5) * 0.3)
+            ),
+            "needs_comfort": self._state.primary_emotion in (Emotion.SAD, Emotion.TIRED),
+            "is_flirty": (
+                self._state.primary_emotion in (Emotion.LOVELY, Emotion.PLAYFUL)
+                and self._state.affinity >= 5
+            ),
         }
 
+    def get_emotion_style_map(self) -> Dict[str, float]:
+        """V2风格: 基于EMOTION_STYLE_MAP的修辞概率"""
+        return EMOTION_STYLE_MAP.get(
+            self._state.primary_emotion,
+            EMOTION_STYLE_MAP[Emotion.NEUTRAL],
+        )
+
+    # ---- 辅助 ----
+
     def get_affinity_level_name(self) -> str:
-        """获取当前好感度等级名称"""
-        return AffinityLevel.get_name(self.state.affinity)
+        return AffinityLevel.get_name(self._state.affinity)
 
     def reset(self) -> None:
-        """重置情感状态"""
-        self.state = EmotionalState()
+        self._state = CompoundEmotionalState()
         self._total_chats = 0
+        if self._classifier:
+            self._classifier.clear_cache()
         logger.info("EmotionEngine reset")
 
-    @property
-    def total_chats(self) -> int:
-        return self._total_chats
+    def health_check(self) -> Dict[str, Any]:
+        return {
+            "initialized": True,
+            "classifier_mode": self._classifier_mode,
+            "llm_available": self._llm is not None,
+            "current_emotion": self._state.primary_emotion.value,
+            "intensity": round(self._state.primary_intensity, 2),
+            "energy": round(self._state.energy, 2),
+            "affinity_level": self._state.affinity,
+            "affinity_name": AffinityLevel.get_name(self._state.affinity),
+            "total_chats": self._total_chats,
+        }
 
     def __repr__(self) -> str:
         return (
-            f"EmotionEngine({self.state.emotion.value}, "
-            f"energy={self.state.energy:.2f}, "
-            f"affinity={self.get_affinity_level_name()}({self.state.affinity}), "
-            f"intensity={self.state.intensity:.2f})"
+            f"EmotionEngine({self._state.primary_emotion.value}, "
+            f"energy={self._state.energy:.2f}, "
+            f"affinity={self.get_affinity_level_name()}({self._state.affinity}), "
+            f"intensity={self._state.primary_intensity:.2f}, "
+            f"mode={self._classifier_mode})"
         )

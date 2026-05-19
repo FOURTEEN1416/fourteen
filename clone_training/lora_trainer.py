@@ -203,7 +203,7 @@ class LoRATrainer:
             warmup_ratio=warmup_ratio,
             logging_steps=logging_steps,
             save_steps=save_steps,
-            evaluation_strategy="steps" if "validation" in dataset else "no",
+            eval_strategy="steps" if "validation" in dataset else "no",
             eval_steps=save_steps,
             save_total_limit=3,
             load_best_model_at_end=True if "validation" in dataset else False,
