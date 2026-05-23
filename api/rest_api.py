@@ -295,7 +295,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         try:
             updated = _config.save(req.config)
             return _sanitize_config(updated.model_dump())
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError) as e:
             logger.error("Config save failed: %s", e)
             raise HTTPException(400, f"Invalid config: {e}")
 
@@ -492,7 +492,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             mimic = ToneMimic(chroma_path=chroma_path)
             style_prompt = mimic.get_style_prompt()
             return {"message": message, "style_output": style_prompt, "status": "ok"}
-        except Exception as e:
+        except (ImportError, OSError, ValueError) as e:
             return {"message": message, "style_output": "", "status": "error", "detail": str(e)}
 
     @app.post("/api/training/apply")
@@ -501,7 +501,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         try:
             result_path = str(Path(__file__).parent.parent / "data" / "training")
             return {"status": "applied", "path": result_path}
-        except Exception as e:
+        except (ValueError, OSError) as e:
             raise HTTPException(status_code=500, detail=str(e))
 
     # ═══════════════════════════════════════════
@@ -634,7 +634,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
 
                 health = bot.health_check()
                 status["components_ok"] = all(health.values()) if isinstance(health, dict) else False
-        except Exception as e:
+        except (AttributeError, KeyError, TypeError, OSError) as e:
             logger.debug("Could not get wechat status: %s", e)
 
         return status
@@ -651,7 +651,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                     hb._try_reconnect(None)
                     return {"status": "reconnecting"}
             return {"status": "no_heartbeat", "message": "Heartbeat not available"}
-        except Exception as e:
+        except (AttributeError, ConnectionError, OSError) as e:
             raise HTTPException(status_code=500, detail=str(e))
 
     # ═══════════════════════════════════════════

@@ -200,7 +200,7 @@ class LLMGatewayV2:
         model: Optional[str] = None,
     ) -> str:
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(asyncio.run, self.chat(
