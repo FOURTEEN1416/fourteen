@@ -75,7 +75,7 @@ class ToolToggleRequest(BaseModel):
 
 def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                    session_manager=None) -> FastAPI:
-    app = FastAPI(title="AI女友系统API", version="2.0")
+    app = FastAPI(title="十四 AI虚拟伴侣系统API", version="2.0")
 
     cors_origins_env = os.environ.get("API_CORS_ORIGINS", "http://localhost:5173")
     cors_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]

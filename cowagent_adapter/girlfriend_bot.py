@@ -97,7 +97,7 @@ class GirlfriendBot:
             )
 
             # ── 5. LLM 生成回复 ──
-            reply_text = self.llm.chat(
+            reply_text = self.llm.chat_sync(
                 query=query,
                 system_prompt=system_prompt,
                 temperature=self._get_temperature(),

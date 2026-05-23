@@ -7,7 +7,7 @@ from pathlib import Path
 def print_banner(version: str = "v1.1") -> None:
     print(f"""
     ╔══════════════════════════════════╗
-    ║      💕 小暖 — AI 伴侣女友      ║
+    ║      💕 十四 — AI 虚拟伴侣      ║
     ║        {version} · CowAgent 集成     ║
     ╚══════════════════════════════════╝
     """)

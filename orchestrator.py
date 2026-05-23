@@ -124,7 +124,7 @@ class Orchestrator:
                         tools_schema = self._tools.registry.get_tools_by_permission(affinity)
 
                     if tools_schema and self._llm and hasattr(self._llm, 'chat_with_tools'):
-                        llm_result = self._llm.chat_with_tools(
+                        llm_result = await self._llm.chat_with_tools(
                             query=user_msg,
                             system_prompt=system_prompt,
                             temperature=0.85,
@@ -147,13 +147,13 @@ class Orchestrator:
                                     result = self._tools.dispatch(tool_name, arguments, affinity, trace_id)
                                     if result.success:
                                         tool_msg = f"[工具{tool_name}结果] {result.to_fc_result()}"
-                                        reply = self._llm.chat(
+                                        reply = await self._llm.chat(
                                             query=f"基于工具结果回复用户：{tool_msg}\n原始问题：{user_msg}",
                                             system_prompt=system_prompt,
                                             max_tokens=1024,
                                         )
                     elif self._llm:
-                        reply = self._llm.chat(
+                        reply = await self._llm.chat(
                             query=user_msg,
                             system_prompt=system_prompt,
                             temperature=0.85,

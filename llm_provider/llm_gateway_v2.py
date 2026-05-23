@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -87,11 +88,6 @@ class LLMGatewayV2:
             "Content-Type": "application/json",
         }
         pool_limits = httpx.Limits(max_keepalive_connections=20, max_connections=100)
-        self._sync_client = httpx.Client(
-            timeout=httpx.Timeout(60.0),
-            limits=pool_limits,
-            headers=self._headers,
-        )
         self._async_client = httpx.AsyncClient(
             timeout=httpx.Timeout(60.0),
             limits=pool_limits,
@@ -103,7 +99,7 @@ class LLMGatewayV2:
         else:
             logger.warning("LLMGatewayV2: no API key, using mock replies")
 
-    def chat(
+    async def chat(
         self,
         query: str = "",
         system_prompt: str = "",
@@ -131,7 +127,7 @@ class LLMGatewayV2:
 
         start = time.perf_counter()
         try:
-            resp = self._sync_client.post(self._chat_url, json=payload)
+            resp = await self._async_client.post(self._chat_url, json=payload)
             resp.raise_for_status()
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
@@ -149,12 +145,12 @@ class LLMGatewayV2:
             entry = self.registry.get_by_name(model_name)
             if entry:
                 entry.mark_failed()
-            fallback_content = self._try_fallback(built_messages, temperature, max_tokens, tools)
+            fallback_content = await self._try_fallback_async(built_messages, temperature, max_tokens, tools)
             if fallback_content:
                 return fallback_content
             return self._handle_error(e)
 
-    def chat_with_tools(
+    async def chat_with_tools(
         self,
         query: str = "",
         system_prompt: str = "",
@@ -180,7 +176,7 @@ class LLMGatewayV2:
             payload["tool_choice"] = "auto"
 
         try:
-            resp = self._sync_client.post(self._chat_url, json=payload)
+            resp = await self._async_client.post(self._chat_url, json=payload)
             resp.raise_for_status()
             data = resp.json()
             message = data["choices"][0]["message"]
@@ -191,6 +187,34 @@ class LLMGatewayV2:
         except Exception as e:
             record_error("llm", type(e).__name__)
             return {"content": self._handle_error(e), "tool_calls": None}
+
+    def chat_sync(
+        self,
+        query: str = "",
+        system_prompt: str = "",
+        history: Optional[list] = None,
+        messages: Optional[list] = None,
+        temperature: float = 0.85,
+        max_tokens: int = 1024,
+        tools: Optional[list] = None,
+        model: Optional[str] = None,
+    ) -> str:
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(asyncio.run, self.chat(
+                    query=query, system_prompt=system_prompt, history=history,
+                    messages=messages, temperature=temperature, max_tokens=max_tokens,
+                    tools=tools, model=model,
+                ))
+                return future.result()
+        except RuntimeError:
+            return asyncio.run(self.chat(
+                query=query, system_prompt=system_prompt, history=history,
+                messages=messages, temperature=temperature, max_tokens=max_tokens,
+                tools=tools, model=model,
+            ))
 
     async def chat_stream(
         self,
@@ -264,7 +288,7 @@ class LLMGatewayV2:
             result.append({"role": "user", "content": query})
         return result
 
-    def _try_fallback(self, messages: list, temperature: float,
+    async def _try_fallback_async(self, messages: list, temperature: float,
                       max_tokens: int, tools: Optional[list]) -> Optional[str]:
         for entry in self.registry.all_models:
             if entry.name == self.model or not entry.is_available():
@@ -279,7 +303,7 @@ class LLMGatewayV2:
             if tools:
                 payload["tools"] = tools
             try:
-                resp = self._sync_client.post(self._chat_url, json=payload)
+                resp = await self._async_client.post(self._chat_url, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
                 content = data["choices"][0]["message"]["content"]
@@ -292,7 +316,6 @@ class LLMGatewayV2:
 
     async def close(self):
         await self._async_client.aclose()
-        self._sync_client.close()
         logger.info("LLMGatewayV2 connection pool closed")
 
     def _handle_error(self, e: Exception) -> str:

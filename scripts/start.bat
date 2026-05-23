@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 >nul
-title 小暖 - AI伴侣女友
+title 十四 - AI虚拟伴侣
 
 echo ============================================
-echo   💕 小暖 — AI 伴侣女友 启动脚本
+echo   💕 十四 — AI 虚拟伴侣 启动脚本
 echo   Windows 11 / Python 版
 echo ============================================
 echo.

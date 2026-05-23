@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AI女友"小暖" — 全量验证脚本
+"十四" AI虚拟伴侣 — 全量验证脚本
 
 验证所有模块是否能正常导入，组件健康检查是否通过。
 """
@@ -38,7 +38,7 @@ def warn(name: str, detail: str = ""):
 def main():
     global PASS, FAIL, WARN
     print("=" * 55)
-    print("   AI女友'小暖' — 全量验证")
+    print("   '十四' AI虚拟伴侣 — 全量验证")
     print("=" * 55)
 
     # ── 1. 目录结构 ──
@@ -232,7 +232,7 @@ def main():
     try:
         pe2 = PersonaEngine(emotion_engine=ee3)
         prompt = pe2.build_system_prompt(user_input="在干嘛")
-        assert "小暖" in prompt or "小暖" in prompt
+        assert "十四" in prompt or "AI" in prompt
         check("人格引擎: 构建System Prompt", True)
     except Exception as e:
         check("人格引擎: 构建System Prompt", False, str(e)[:60])

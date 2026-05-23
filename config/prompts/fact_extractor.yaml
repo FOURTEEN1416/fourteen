@@ -5,7 +5,7 @@ extraction_prompt: |
   
   对话：
   用户：{user_message}
-  小暖：{assistant_message}
+  十四：{assistant_message}
   
   回复JSON格式：{{"facts": [{{"type": "偏好/习惯/个人信息/日程", "content": "事实描述", "confidence": 0.0-1.0}}]}}
   如果没有可提取的事实，返回{{"facts": []}}

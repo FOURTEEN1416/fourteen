@@ -242,7 +242,7 @@ class PADODetector:
         self._last_detect_time = now
 
         # Chameleon效应隔离：如果消息很短(<5字)，降低置信度
-        # 因为短消息容易被AI女友的情感"传染"，不代表用户真实人格
+        # 因为短消息容易被AI虚拟伴侣的情感"传染"，不代表用户真实人格
         msg_len = len(message.strip())
         chameleon_penalty = 1.0
         if self.chameleon_guard and msg_len < 10:
@@ -418,7 +418,7 @@ Low视角（偏向各维度低端）: {low_data}
                 import asyncio
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(
-                    None, lambda: self._llm.chat(  # type: ignore
+                    None, lambda: self._llm.chat_sync(  # type: ignore
                         query=prompt, max_tokens=512, temperature=0.1
                     )
                 )

@@ -1,7 +1,7 @@
 """
-角色卡集成适配器 - 对接小暖现有PersonaEngine
+角色卡集成适配器 - 对接十四现有PersonaEngine
 
-将SillyTavern角色卡无缝接入小暖的人格系统:
+将SillyTavern角色卡无缝接入十四的人格系统:
   1. 角色卡 → PersonaEngine配置转换
   2. 角色卡加载器 (支持加载目录、单文件)
   3. 角色卡缓存
@@ -26,7 +26,7 @@ logger = logging.getLogger("character_card.integration")
 
 class CharacterCardAdapter:
     """
-    角色卡适配器 - 将角色卡系统挂接到小暖
+    角色卡适配器 - 将角色卡系统挂接到十四
 
     特性:
       - 懒加载：首次使用时才解析角色卡文件
@@ -249,7 +249,7 @@ class CharacterCardAdapter:
             return builder.build_system_prompt(card)
 
     def health_check(self) -> Dict[str, Any]:
-        """健康检查 - 符合小暖可观测性规范"""
+        """健康检查 - 符合十四可观测性规范"""
         card = self.get_card()
         return {
             "enabled": self._enabled,

@@ -52,7 +52,7 @@ export default function Sidebar() {
     <aside className={`hidden lg:flex flex-col bg-white border-r border-gray-200 shrink-0 transition-all duration-200 ${collapsed ? 'w-14' : 'w-52'}`}>
       {/* Brand + toggle */}
       <div className={`flex items-center h-14 border-b border-gray-200/50 ${collapsed ? 'justify-center px-0' : 'px-4 justify-between'}`}>
-        {!collapsed && <span className="text-sm font-semibold text-gray-800">小暖</span>}
+        {!collapsed && <span className="text-sm font-semibold text-gray-800">十四</span>}
         <button
           onClick={() => setCollapsed(!collapsed)}
           className="text-gray-400 hover:text-gray-600 transition-colors"

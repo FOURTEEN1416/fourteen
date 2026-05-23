@@ -102,7 +102,7 @@ class CharacterCard:
         """
         转换为PersonaEngine兼容配置
 
-        这是核心集成点 - 对接小暖的my_character/模块
+        这是核心集成点 - 对接十四的my_character/模块
         """
         return {
             "name": self.data.name,
@@ -209,7 +209,7 @@ class EmotionStyleMap:
     """
     情感-风格映射表
 
-    用于将SillyTavern角色卡的情感倾向映射到小暖的情感系统
+    用于将SillyTavern角色卡的情感倾向映射到十四的情感系统
     """
     warmth: float = 0.5
     playfulness: float = 0.5

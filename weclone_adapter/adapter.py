@@ -164,7 +164,7 @@ class WeCloneAdapter:
             logger.info("━━━ Step 5/5: 跳过训练 (do_train=False 或 数据集为空) ━━━")
             result["training"] = None
 
-        # ── 注入到小暖的语气模仿器 ──
+        # ── 注入到十四的语气模仿器 ──
         logger.info("━━━ 注入风格到 ToneMimic ━━━")
         injected = self._inject_to_tone_mimic(conversations[:max_samples])
         result["injected_to_tone_mimic"] = injected
@@ -211,7 +211,7 @@ class WeCloneAdapter:
     def _inject_to_tone_mimic(
         self, conversations: List[Dict[str, Any]],
     ) -> int:
-        """将对话注入到小暖的语气模仿器（ToneMimic）"""
+        """将对话注入到十四的语气模仿器（ToneMimic）"""
         try:
             import sys
             sys.path.insert(0, str(Path(__file__).parent.parent))

@@ -1,7 +1,7 @@
 """
 情感引擎 — 三版深度融合（V1 + V2 + Optimized）
 
-统一情感状态机，管理 AI 女友"小暖"的实时情感状态：
+统一情感状态机，管理 AI 虚拟伴侣"十四"的实时情感状态：
 - Emotion: 10种情感分类
 - CompoundEmotionalState: 主/次情感 + 能量 + 好感度 + 好感点数 + 时间戳
 - AffinityLevel: 9级好感度阶梯 + 阈值体系
@@ -278,7 +278,7 @@ class LLMEmotionClassifier:
 
         try:
             start = time.perf_counter()
-            response = self._llm.chat(query=prompt, max_tokens=128, temperature=0.1)
+            response = self._llm.chat_sync(query=prompt, max_tokens=128, temperature=0.1)
             elapsed_ms = (time.perf_counter() - start) * 1000
 
             if elapsed_ms > self.timeout_ms:

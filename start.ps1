@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    小暖 AI 伴侣 — 一键启动脚本（后端API + 前端管理UI）
+    十四 AI 虚拟伴侣 — 一键启动脚本（后端API + 前端管理UI）
 .DESCRIPTION
     启动后端 API 服务 (python main.py) + 前端开发服务器 (Vite)。
     所有操作通过管理 UI 完成，无需额外配置。
@@ -21,7 +21,7 @@ function Write-Error { Write-Host "[ERROR] $args" -ForegroundColor Red }
 
 Write-Host ""
 Write-Host "================================================" -ForegroundColor DarkCyan
-Write-Host "  小暖 - AI 伴侣女友 管理控制台一键启动"           -ForegroundColor Cyan
+Write-Host "  十四 - AI 虚拟伴侣 管理控制台一键启动"           -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor DarkCyan
 Write-Host ""
 

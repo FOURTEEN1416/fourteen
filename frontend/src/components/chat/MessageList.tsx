@@ -47,7 +47,7 @@ export default function MessageList() {
       <EmptyState
         icon="💬"
         title="开始聊天"
-        description="和小暖说点什么吧，她会记住你的喜好"
+        description="和十四说点什么吧，她会记住你的喜好"
         className="flex-1"
       />
     )

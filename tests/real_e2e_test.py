@@ -227,7 +227,7 @@ test_cases = [
     ("生理指标", "vital_signs"),
     ("发表情", "send_sticker"),
     ("收藏", "favorite"),
-    ("转发给：小暖", "forward"),
+    ("转发给：十四", "forward"),
     ("普通聊天", None),
 ]
 

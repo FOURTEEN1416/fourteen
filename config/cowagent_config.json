@@ -5,7 +5,7 @@
     "channel_type": "wx",
     "single_chat_prefix": [""],
     "single_chat_reply_prefix": "",
-    "group_chat_prefix": ["@小暖"],
+    "group_chat_prefix": ["@十四"],
     "group_name_white_list": [],
     "nick_name_white_list": [],
     "clear_memory_commands": ["重置记忆"],

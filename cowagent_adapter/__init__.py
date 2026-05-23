@@ -2,7 +2,7 @@
 CowAgent 适配器模块
 
 在运行时将我们的 AI 女友引擎注册为 CowAgent 的自定义 Bot，
-使得 CowAgent 的微信通道收到消息后自动路由到 小暖 的完整处理管线。
+使得 CowAgent 的微信通道收到消息后自动路由到 十四 的完整处理管线。
 
 用法 A — 完整启动微信通道（方案 C）:
     from cowagent_adapter import initialize_wechat_channel

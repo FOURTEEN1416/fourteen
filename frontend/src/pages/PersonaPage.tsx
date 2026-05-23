@@ -37,7 +37,7 @@ export default function PersonaPage() {
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <h1 className="text-base font-semibold text-gray-800 mb-6">小暖的人设档案</h1>
+      <h1 className="text-base font-semibold text-gray-800 mb-6">十四的人设档案</h1>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Radar Chart */}
