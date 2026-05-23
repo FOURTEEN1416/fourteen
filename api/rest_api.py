@@ -4,14 +4,16 @@ import asyncio
 import json
 import logging
 import os
+import re
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request, Security
+from fastapi import FastAPI, HTTPException, Query, Request, Security, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response, FileResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
@@ -215,6 +217,73 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             return {"log": _orch._persona.get_evolution_log(limit)}
         return {"log": []}
 
+    # ═══ 用户心理画像（OCEAN+PAD人格分析） ═══
+
+    @app.get("/api/psych/profile")
+    async def psych_profile():
+        """获取用户心理画像（OCEAN五大人格 + PAD情感 + 风格向量）"""
+        pe = None
+        if _orch:
+            pe = _orch.components.get("persona_extractor") if hasattr(_orch, 'components') else None
+        if pe is None:
+            return {"user_id": "default", "status": "unavailable", "snapshots": 0}
+        return pe.get_user_profile_summary()
+
+    @app.get("/api/psych/snapshots")
+    async def psych_snapshots(limit: int = Query(default=20, ge=1, le=200)):
+        """获取最近的人格检测快照历史"""
+        pe = None
+        if _orch:
+            pe = _orch.components.get("persona_extractor") if hasattr(_orch, 'components') else None
+        if pe is None:
+            return {"snapshots": []}
+        snaps = pe.bank.get_recent_snapshots(user_id=pe.user_id, limit=limit)
+        return {"snapshots": [s.to_dict() for s in snaps]}
+
+    @app.delete("/api/psych/profile")
+    async def reset_psych_profile(_auth: bool = Security(_verify_api_key)):
+        """重置用户心理画像数据"""
+        pe = None
+        if _orch:
+            pe = _orch.components.get("persona_extractor") if hasattr(_orch, 'components') else None
+        if pe is None:
+            raise HTTPException(503, "PersonaExtractor未初始化")
+        ok = pe.bank.clear_user(pe.user_id)
+        return {"status": "reset" if ok else "failed"}
+
+    @app.get("/api/psych/mental-health")
+    async def psych_mental_health():
+        """获取心理健康筛查结果（抑郁/焦虑/自伤风险/认知扭曲）"""
+        pe = None
+        if _orch:
+            pe = _orch.components.get("persona_extractor") if hasattr(_orch, 'components') else None
+        if pe is None:
+            return {"available": False}
+        persona = pe.bank.get_persona(pe.user_id)
+        if persona is None:
+            return {"available": True, "data": None}
+        return {
+            "available": True,
+            "mental_health": persona.mental_health,
+            "cognitive": persona.cognitive,
+            "liwc": persona.liwc,
+            "dark_triad": persona.dark_triad,
+            "hexaco": persona.hexaco,
+        }
+
+    @app.get("/api/psych/liwc")
+    async def psych_liwc():
+        """获取 LIWC 心理语言学分析"""
+        pe = None
+        if _orch:
+            pe = _orch.components.get("persona_extractor") if hasattr(_orch, 'components') else None
+        if pe is None or not pe.liwc:
+            return {"available": False}
+        persona = pe.bank.get_persona(pe.user_id)
+        if persona is None or not persona.liwc:
+            return {"available": True, "data": None}
+        return {"available": True, "data": persona.liwc}
+
     @app.get("/api/memory/facts")
     async def memory_facts(category: Optional[str] = None, limit: int = Query(default=50)):
         if _orch and _orch._memory:
@@ -286,11 +355,14 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         # Add connected sessions as channels
         if _sessions:
             active = _sessions.get_active_sessions()
-            for ses in active:
-                ch_type = ses.get("channel", ses.get("channel_type", "unknown"))
+            for ses_id in active:
+                ses_data = _sessions.get_session(ses_id)
+                if not ses_data:
+                    continue
+                ch_type = ses_data.get("channel", ses_data.get("channel_type", "unknown"))
                 if ch_type not in [c["id"] for c in channels]:
                     channels.append({"id": ch_type, "name": ch_type.capitalize(),
-                                     "status": "connected", "desc": f"活跃会话 {ses.get('session_id','')[:8]}...", "meta": "在线"})
+                                     "status": "connected", "desc": f"活跃会话 {ses_id[:8]}...", "meta": "在线"})
         return {"channels": channels}
 
     @app.get("/api/config")
@@ -317,16 +389,18 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             raise HTTPException(503, "Proactive engine not initialized")
         ase = _orch._ase
         if req.threshold is not None:
-            ase.config["speak_threshold"] = req.threshold
+            ase._config["speak_threshold"] = req.threshold
         if req.max_daily is not None:
-            ase.config["max_daily_messages"] = req.max_daily
+            ase._config["max_daily_messages"] = req.max_daily
         if req.min_interval_minutes is not None:
-            ase.config["min_interval_minutes"] = req.min_interval_minutes
+            ase._config["min_interval_minutes"] = req.min_interval_minutes
         if req.cooldown_after_reply_minutes is not None:
-            ase.config["cooldown_after_reply"] = req.cooldown_after_reply_minutes
+            ase._config["cooldown_after_reply"] = req.cooldown_after_reply_minutes
         logger.info("Proactive config updated: threshold=%s, max_daily=%s",
-                     ase.config["speak_threshold"], ase.config["max_daily_messages"])
-        return {"status": "ok", "config": ase.config}
+                     ase._config["speak_threshold"], ase._config["max_daily_messages"])
+        return {"status": "ok", "config": ase._config}
+
+    _tool_history: list = []
 
     @app.post("/api/tools/{name}/toggle")
     async def toggle_tool(name: str, req: ToolToggleRequest,
@@ -338,11 +412,19 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         if not tool:
             raise HTTPException(404, f"Tool not found: {name}")
         if req.enabled:
-            registry.register(tool)  # re-register (no-op if already registered)
+            registry.register(tool)
         else:
             registry.unregister(name)
+        _tool_history.append({
+            "timestamp": datetime.now().isoformat(),
+            "tool": name, "action": "enable" if req.enabled else "disable",
+        })
         logger.info("Tool '%s' toggled: enabled=%s", name, req.enabled)
         return {"status": "ok", "tool": name, "enabled": req.enabled}
+
+    @app.get("/api/tools/history")
+    async def tool_history(limit: int = Query(default=50, le=200)):
+        return {"history": _tool_history[-limit:]}
 
     # ═══════════════════════════════════════════
     # Training / Clone Pipeline API
@@ -803,6 +885,187 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             "training": training_info,
         }
 
+    # ═══════════════════════════════════════════
+    # Safety Dashboard API
+    # ═══════════════════════════════════════════
+
+    _safety_log: list = []
+
+    def _get_safety():
+        if _orch:
+            return _orch.components.get("safety") if hasattr(_orch, 'components') else getattr(_orch, '_safety', None)
+        return None
+
+    @app.get("/api/safety/stats")
+    async def safety_stats():
+        sf = _get_safety()
+        logs = _safety_log[-200:]
+        categories = {}
+        for entry in logs:
+            cat = entry.get("category", "unknown")
+            categories[cat] = categories.get(cat, 0) + 1
+        return {
+            "enabled": sf.enabled if sf else False,
+            "total_flagged": len(_safety_log),
+            "recent_flagged": len(logs),
+            "by_category": categories,
+            "recent": logs[-20:],
+        }
+
+    @app.get("/api/safety/log")
+    async def safety_log(limit: int = Query(default=50, le=200)):
+        return {"log": _safety_log[-limit:]}
+
+    @app.post("/api/safety/config")
+    async def safety_config(enabled: bool = True, _auth: bool = Security(_verify_api_key)):
+        sf = _get_safety()
+        if sf:
+            sf.enabled = enabled
+            return {"status": "ok", "enabled": enabled}
+        return {"status": "not_available"}
+
+    # ═══════════════════════════════════════════
+    # RAG Knowledge Base API
+    # ═══════════════════════════════════════════
+
+    def _get_rag():
+        if _orch:
+            return _orch.components.get("rag") if hasattr(_orch, 'components') else getattr(_orch, '_rag', None)
+        return None
+
+    @app.get("/api/rag/stats")
+    async def rag_stats():
+        rag = _get_rag()
+        if rag:
+            return rag.health_check()
+        return {"available": False}
+
+    @app.post("/api/rag/search")
+    async def rag_search(query: str = "", top_k: int = Query(default=5, le=20)):
+        rag = _get_rag()
+        if not rag:
+            raise HTTPException(503, "RAG引擎未初始化")
+        results = rag.retrieve(query, top_k=top_k)
+        return {"query": query, "results": results.get("results", []),
+                "total_vector": results.get("total_vector", 0),
+                "total_keyword": results.get("total_keyword", 0)}
+
+    @app.post("/api/rag/documents")
+    async def rag_upload_document(file: UploadFile = File(...), _auth: bool = Security(_verify_api_key)):
+        rag = _get_rag()
+        if not rag:
+            raise HTTPException(503, "RAG引擎未初始化")
+        content = await file.read()
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            text = content.decode("gbk", errors="replace")
+        rag._sm.add_fact({"fact": text[:2000], "category": "upload",
+                           "source": file.filename, "confidence": 1.0})
+        return {"status": "indexed", "filename": file.filename, "size": len(content)}
+
+    # ═══════════════════════════════════════════
+    # Voice / TTS API
+    # ═══════════════════════════════════════════
+
+    def _get_tts():
+        if _orch:
+            return _orch.components.get("voice") if hasattr(_orch, 'components') else None
+        return None
+
+    @app.get("/api/voice/status")
+    async def voice_status():
+        tts = _get_tts()
+        if tts:
+            return tts.health_check()
+        return {"enabled": False, "available_engines": []}
+
+    @app.post("/api/voice/synthesize")
+    async def voice_synthesize(text: str = Form(...), engine: str = Form("")):
+        tts = _get_tts()
+        if not tts or not tts.enabled:
+            raise HTTPException(503, "TTS未启用")
+        if engine and engine in tts.available_engines:
+            await tts.switch_engine(engine)
+        audio = await tts.synthesize(text)
+        if audio is None:
+            raise HTTPException(500, "语音合成失败")
+        return Response(content=audio, media_type="audio/wav",
+                        headers={"Content-Disposition": "inline; filename=tts.wav"})
+
+    # ═══════════════════════════════════════════
+    # Plugin Management API
+    # ═══════════════════════════════════════════
+
+    @app.get("/api/plugins")
+    async def list_plugins():
+        try:
+            plugin_path = Path(__file__).parent.parent / "plugins" / "plugins.json"
+            if plugin_path.exists():
+                with open(plugin_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return {"plugins": data.get("plugins", {})}
+        except Exception:
+            pass
+        return {"plugins": {}}
+
+    @app.post("/api/plugins/{name}/toggle")
+    async def toggle_plugin(name: str, enabled: bool = True, _auth: bool = Security(_verify_api_key)):
+        plugin_path = Path(__file__).parent.parent / "plugins" / "plugins.json"
+        data = {}
+        if plugin_path.exists():
+            with open(plugin_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        plugins = data.get("plugins", {})
+        if name not in plugins:
+            plugins[name] = {}
+        plugins[name]["enabled"] = enabled
+        plugins[name]["toggled_at"] = datetime.now().isoformat()
+        data["plugins"] = plugins
+        with open(plugin_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return {"status": "ok", "name": name, "enabled": enabled}
+
+    # ═══════════════════════════════════════════
+    # Multimodal File Upload
+    # ═══════════════════════════════════════════
+
+    UPLOAD_DIR = Path(__file__).parent.parent / "data" / "uploads"
+
+    @app.post("/api/files/upload")
+    async def upload_file(file: UploadFile = File(...)):
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        safe_name = re.sub(r'[^\w.\-]', '_', file.filename)
+        dest = UPLOAD_DIR / f"{int(time.time())}_{safe_name}"
+        content = await file.read()
+        with open(dest, "wb") as f:
+            f.write(content)
+        mime = file.content_type or "application/octet-stream"
+        msg_type = "image" if mime.startswith("image/") else "voice" if mime.startswith("audio/") else "file"
+        return {"status": "ok", "filename": safe_name, "size": len(content),
+                "mime_type": mime, "message_type": msg_type,
+                "url": f"/api/files/{dest.name}"}
+
+    @app.get("/api/files/{filename}")
+    async def serve_file(filename: str):
+        file_path = UPLOAD_DIR / filename
+        if not file_path.exists():
+            raise HTTPException(404, "文件不存在")
+        return FileResponse(file_path)
+
+    # ═══════════════════════════════════════════
+    # Proactive History API
+    # ═══════════════════════════════════════════
+
+    @app.get("/api/proactive/history")
+    async def proactive_history(limit: int = Query(default=50, le=200)):
+        if _orch and _orch._ase:
+            ase = _orch._ase
+            messages = getattr(ase, '_sent_messages', []) if hasattr(ase, '_sent_messages') else []
+            return {"history": messages[-limit:], "total": len(messages)}
+        return {"history": [], "total": 0}
+
+    # ── 十四挂载 ──
     try:
         from shisi.api.registry import setup_shisi
         shisi_reg = setup_shisi(app, run_migrate=True)

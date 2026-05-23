@@ -275,6 +275,8 @@ class PersonaEngine:
         user_input: str = "",
         memory_context: Optional[Dict] = None,
         rag_context: str = "",
+        chat_summary: str = "",
+        character_overrides: Optional[Dict] = None,
     ) -> str:
         cache_key_parts = []
         if emotion_state is not None:
@@ -285,6 +287,7 @@ class PersonaEngine:
         cache_key_parts.append(f"sp:{len(style_prompt)}")
         cache_key_parts.append(f"ch:{len(chat_history)}")
         cache_key_parts.append(f"rag:{len(rag_context)}")
+        cache_key_parts.append(f"cs:{len(chat_summary)}")
         cache_key = "|".join(cache_key_parts)
 
         if cache_key in self._prompt_cache:
@@ -297,7 +300,7 @@ class PersonaEngine:
         else:
             result = self._build_layered_prompt(
                 emotion_state, style_prompt, few_shot_examples, chat_history,
-                user_input, memory_context, rag_context,
+                user_input, memory_context, rag_context, chat_summary,
             )
 
         if len(self._prompt_cache) >= self._prompt_cache_max:
@@ -384,6 +387,7 @@ class PersonaEngine:
         user_input: str,
         memory_context: Optional[Dict],
         rag_context: str,
+        chat_summary: str = "",
     ) -> str:
         """Optimized 5层架构模式"""
         parts = []
@@ -393,7 +397,7 @@ class PersonaEngine:
         parts.append(self._build_emotion_layer(emotion_state))
 
         if memory_context:
-            parts.append(self._build_memory_layer(memory_context))
+            parts.append(self._build_memory_layer(memory_context, chat_summary))
         elif chat_history:
             parts.append(self._build_memory_layer_from_history(chat_history))
 
@@ -493,18 +497,12 @@ class PersonaEngine:
 
         return "\n".join(parts)
 
-    def _build_memory_layer(self, memory_context: Dict) -> str:
+    def _build_memory_layer(self, memory_context: Dict, chat_summary: str = "") -> str:
         parts = ["# 记忆上下文"]
 
-        working = memory_context.get("working", [])
-        if working:
-            parts.append("\n## 最近对话")
-            for msg in working[-5:]:
-                role = "你" if msg.get("role") == "user" else "我"
-                content = msg.get("content", "")
-                if len(content) > 50:
-                    content = content[:50] + "..."
-                parts.append(f"{role}: {content}")
+        if chat_summary:
+            parts.append("\n## 早期对话摘要")
+            parts.append(chat_summary)
 
         facts = memory_context.get("facts", [])
         if facts:

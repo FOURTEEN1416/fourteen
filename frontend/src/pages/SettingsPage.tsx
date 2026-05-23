@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react'
+﻿import { useState, useEffect, useMemo } from 'react'
 import { api } from '../api/client'
 import SensitiveInput from '../components/common/SensitiveInput'
 import { isSensitiveField } from '../types/api'
@@ -10,6 +10,25 @@ interface Setting {
   options?: { value: string; label: string }[]
   min?: number; max?: number; step?: number
 }
+
+const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  deepseek: [
+    { value: 'deepseek-chat', label: 'DeepSeek Chat' },
+    { value: 'deepseek-reasoner', label: 'DeepSeek Reasoner' },
+  ],
+  opencode_zen: [
+    { value: 'big-pickle', label: 'Big Pickle' },
+    { value: 'nemotron-3-super-free', label: 'Nemotron 3 Super Free' },
+    { value: 'qwen3.6-plus-free', label: 'Qwen 3.6 Plus Free' },
+    { value: 'deepseek-v4-flash-free', label: 'DeepSeek V4 Flash Free' },
+    { value: 'minimax-m2.5-free', label: 'MiniMax M2.5 Free' },
+  ],
+}
+
+const PROVIDER_OPTIONS = [
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'opencode_zen', label: 'OpenCode Zen（免费）' },
+]
 
 const sections: { id: string; label: string; items: Setting[] }[] = [
   { id: 'chat', label: '聊天', items: [
@@ -24,17 +43,23 @@ const sections: { id: string; label: string; items: Setting[] }[] = [
       options: [{ value: 'friendly', label: '亲切女声' }, { value: 'gentle', label: '温柔女声' }, { value: 'cute', label: '甜美少女' }] },
   ]},
   { id: 'personality', label: '人设', items: [
-    { id: 'temperature', label: '创意温度', type: 'range', value: 0.8, min: 0.1, max: 1.5, step: 0.1 },
     { id: 'top_p', label: '采样阈值', type: 'range', value: 0.9, min: 0.1, max: 1.0, step: 0.05 },
     { id: 'style', label: '回复风格', type: 'select', value: 'warm',
       options: [{ value: 'warm', label: '温暖贴心' }, { value: 'playful', label: '活泼调皮' }, { value: 'intellectual', label: '知性优雅' }] },
   ]},
   { id: 'model', label: '模型', items: [
-    { id: 'model_name', label: '模型选择', type: 'select', value: 'qwen2.5-7b',
-      options: [{ value: 'qwen2.5-0.5b', label: 'Qwen2.5 0.5B' }, { value: 'qwen2.5-1.5b', label: 'Qwen2.5 1.5B' },
-        { value: 'qwen2.5-3b', label: 'Qwen2.5 3B' }, { value: 'qwen2.5-7b', label: 'Qwen2.5 7B' }] },
-    { id: 'max_tokens', label: '最大回复长度', type: 'range', value: 512, min: 64, max: 2048, step: 64 },
-    { id: 'api_key', label: 'API Key', type: 'toggle' as any, value: '' },
+    { id: 'provider', label: 'LLM 提供商', type: 'select', value: 'deepseek',
+      options: PROVIDER_OPTIONS },
+    { id: 'model_name', label: '主模型', type: 'select', value: 'deepseek-chat', options: MODEL_OPTIONS.deepseek },
+    { id: 'fallback_model', label: '备用模型', type: 'select', value: 'deepseek-reasoner', options: MODEL_OPTIONS.deepseek },
+    { id: 'temperature', label: '温度', type: 'range', value: 0.85, min: 0.0, max: 2.0, step: 0.05 },
+    { id: 'max_tokens', label: '最大回复长度', type: 'range', value: 2048, min: 64, max: 4096, step: 64 },
+    { id: 'api_base', label: 'API 地址', type: 'select', value: 'https://api.deepseek.com/v1',
+      options: [
+        { value: 'https://api.deepseek.com/v1', label: 'DeepSeek 官方' },
+        { value: 'https://api.opencode.ai/zen/v1', label: 'OpenCode Zen' },
+      ] },
+    { id: 'api_key', label: 'API Key', type: 'select' as any, value: '' },
   ]},
   { id: 'notifications', label: '通知', items: [
     { id: 'sound', label: '消息提示音', type: 'toggle', value: true },
@@ -54,6 +79,34 @@ export default function SettingsPage() {
   })
   const [saved, setSaved] = useState(false)
 
+  const section = sections.find(s => s.id === tab)!
+
+  // Compute model options based on current provider
+  const currentProvider = vals.provider || 'deepseek'
+  const modelOptions = useMemo(() => MODEL_OPTIONS[currentProvider] || MODEL_OPTIONS.deepseek, [currentProvider])
+
+  // Build the items for the current section with dynamic options
+  const sectionItems = useMemo(() => {
+    if (section.id !== 'model') return section.items
+    return section.items.map(item => {
+      if (item.id === 'model_name' || item.id === 'fallback_model') {
+        return { ...item, options: modelOptions }
+      }
+      if (item.id === 'api_base') {
+        return {
+          ...item,
+          options: currentProvider === 'opencode_zen'
+            ? [{ value: 'https://api.opencode.ai/zen/v1', label: 'OpenCode Zen' }]
+            : [
+                { value: 'https://api.deepseek.com/v1', label: 'DeepSeek 官方' },
+                { value: 'https://api.opencode.ai/zen/v1', label: 'OpenCode Zen' },
+              ],
+        }
+      }
+      return item
+    })
+  }, [section, modelOptions, currentProvider])
+
   // Load config from backend on mount
   useEffect(() => {
     api.config().then(({ data }) => {
@@ -68,8 +121,6 @@ export default function SettingsPage() {
     setVals(p => ({ ...p, [id]: v }))
     setSaved(false)
   }
-
-  const section = sections.find(s => s.id === tab)!
 
   const handleSave = async () => {
     try {
@@ -105,7 +156,7 @@ export default function SettingsPage() {
           </select>
 
           <div className="space-y-1">
-            {section.items.map(item => (
+            {sectionItems.map(item => (
               <div key={item.id} className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-gray-50">
                 <span className="text-sm text-gray-700">{item.label}</span>
                 {isSensitiveField(item.id) ? (
@@ -127,7 +178,7 @@ export default function SettingsPage() {
                   </button>
                 ) : item.type === 'select' ? (
                   <select value={vals[item.id]} onChange={e => set(item.id, e.target.value)}
-                    className="bg-gray-200 border border-gray-300 text-gray-800 rounded-lg px-2 py-1 text-xs outline-none">
+                    className="bg-gray-200 border border-gray-300 text-gray-800 rounded-lg px-2 py-1 text-xs outline-none max-w-48">
                     {item.options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 ) : item.type === 'range' ? (
@@ -161,10 +212,13 @@ export default function SettingsPage() {
 function mapConfigToSettings(config: Record<string, any>): Record<string, any> {
   const mapped: Record<string, any> = {}
   if (config.llm) {
+    if (config.llm.provider) mapped.provider = config.llm.provider
     if (config.llm.primary_model) mapped.model_name = config.llm.primary_model
+    if (config.llm.fallback_model) mapped.fallback_model = config.llm.fallback_model
     if (config.llm.temperature != null) mapped.temperature = config.llm.temperature
     if (config.llm.max_tokens != null) mapped.max_tokens = config.llm.max_tokens
     if (config.llm.top_p != null) mapped.top_p = config.llm.top_p
+    if (config.llm.api_base != null) mapped.api_base = config.llm.api_base
     if (config.llm.api_key != null) mapped.api_key = config.llm.api_key
   }
   if (config.memory) {
@@ -202,10 +256,13 @@ function buildConfigPayload(vals: Record<string, any>): Record<string, any> {
     personality: {},
     notifications: {},
   }
+  if (vals.provider) payload.llm.provider = vals.provider
   if (vals.model_name) payload.llm.primary_model = vals.model_name
+  if (vals.fallback_model) payload.llm.fallback_model = vals.fallback_model
   if (vals.temperature != null) payload.llm.temperature = vals.temperature
   if (vals.max_tokens != null) payload.llm.max_tokens = vals.max_tokens
   if (vals.top_p != null) payload.llm.top_p = vals.top_p
+  if (vals.api_base != null) payload.llm.api_base = vals.api_base
   if (vals.api_key != null) payload.llm.api_key = vals.api_key
   if (vals.max_context != null) payload.memory.working_memory_limit = vals.max_context
   if (vals.auto_reply != null) payload.proactive.max_daily_messages = vals.auto_reply ? 8 : 0

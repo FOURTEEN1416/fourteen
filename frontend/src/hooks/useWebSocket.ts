@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { useChatStore } from '../store/chatStore'
 import type { WSIncomingMessage } from '../types/api'
 
-const WS_URL = `ws://${window.location.hostname}:8765`
+const WS_URL = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:8765`
 const RECONNECT_BASE_MS = 1000
 const RECONNECT_MAX_MS = 30000
 const RECONNECT_MULTIPLIER = 2

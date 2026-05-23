@@ -31,7 +31,7 @@ export default function StickersPage() {
     try {
       setLoading(true)
       const data = await shisiClient.stickers.list() as StickerItem[]
-      setStickers(data)
+      setStickers(Array.isArray(data) ? data : [])
     } catch (e: any) {
       toast({ type: 'error', message: e?.message || '加载表情包失败' })
     } finally { setLoading(false) }
@@ -77,8 +77,8 @@ export default function StickersPage() {
   async function handleRecommend() {
     if (!emotion.trim()) return
     try {
-      const data = await shisiClient.stickers.recommend(emotion) as StickerItem[]
-      setRecommended(data)
+      const data = await shisiClient.stickers.recommend([emotion]) as StickerItem[]
+      setRecommended(Array.isArray(data) ? data : [])
     } catch (e: any) {
       toast({ type: 'error', message: e?.message || '推荐失败' })
     }

@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../api/client'
-import { useTrainingProgress } from '../hooks/useTrainingProgress'
+import { useTrainingProgress } from '../hooks/useQueries'
 import Button from '../components/common/Button'
 import Card from '../components/common/Card'
 import type { TrainingAvailability, CloneTestResult, TrainingStatusEnum, CloneContact, CloneDataset } from '../types/api'
@@ -18,7 +18,7 @@ const activeStatuses: TrainingStatusEnum[] = ['extracting', 'cleaning', 'trainin
 export default function TrainingPage() {
   const [step, setStep] = useState(0)
   const [availability, setAvailability] = useState<TrainingAvailability | null>(null)
-  const { progress, isLoading, refetch } = useTrainingProgress()
+  const { data: progress, isLoading, refetch } = useTrainingProgress()
 
   const [target, setTarget] = useState('')
   const [source, setSource] = useState('wcf')
@@ -419,7 +419,7 @@ export default function TrainingPage() {
 
       {isError && (
         <div className="mt-6 flex gap-2">
-          <Button variant="secondary" onClick={refetch}>刷新状态</Button>
+          <Button variant="secondary" onClick={() => refetch()}>刷新状态</Button>
         </div>
       )}
     </div>

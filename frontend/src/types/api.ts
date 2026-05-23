@@ -244,6 +244,208 @@ export interface CloneStats {
   persons: CloneDataset[]
 }
 
+// ── 用户心理画像（OCEAN+PAD） ──
+
+export interface OceanTraits {
+  openness: number
+  conscientiousness: number
+  extraversion: number
+  agreeableness: number
+  neuroticism: number
+}
+
+export interface PadState {
+  pleasure: number
+  arousal: number
+  dominance: number
+}
+
+export interface StyleVector {
+  formality: number
+  expressiveness: number
+  humor: number
+  directness: number
+  sentiment: number
+}
+
+export interface PsychProfile {
+  user_id: string
+  status: 'stable' | 'learning' | 'insufficient_data' | 'unavailable'
+  stability: number
+  snapshots: number
+  ocean: OceanTraits
+  pad: PadState
+  style: StyleVector
+  first_seen: string
+  last_updated: string
+  hexaco?: HexacoTraits
+  dark_triad?: DarkTriadTraits
+  mental_health?: MentalHealthSnapshot
+  liwc?: LiwcProfile
+  cognitive?: CognitiveDistortionResult
+}
+
+export interface HexacoTraits {
+  honesty_humility: number
+  emotionality: number
+  extraversion: number
+  agreeableness: number
+  conscientiousness: number
+  openness: number
+}
+
+export interface DarkTriadTraits {
+  narcissism: number
+  machiavellianism: number
+  psychopathy: number
+  overall_level: 'normal' | 'elevated' | 'significant'
+  matched?: string[]
+}
+
+export interface DepressionIndicators {
+  sleep: number; interest: number; guilt: number; energy: number
+  concentration: number; appetite: number; psychomotor: number; suicidal: number
+  total_score: number; level: string; matched?: string[]
+}
+
+export interface AnxietyIndicators {
+  nervousness: number; uncontrollable_worry: number; worry_too_much: number
+  trouble_relaxing: number; restlessness: number; irritability: number; fear_awful: number
+  total_score: number; level: string; matched?: string[]
+}
+
+export interface MentalHealthSnapshot {
+  timestamp: string
+  depression: DepressionIndicators
+  anxiety: AnxietyIndicators
+  trauma_signals: number
+  self_harm_risk: number
+  overall_risk: 'low' | 'moderate' | 'high' | 'critical'
+}
+
+export interface CognitiveDistortionResult {
+  total_count: number
+  dominant_pattern: string
+  severity: 'none' | 'mild' | 'moderate' | 'frequent'
+  by_type: Record<string, number>
+  recent?: Array<{ type: string; subtype: string; matched: string }>
+}
+
+export interface LiwcProfile {
+  emotional_tone?: number
+  analytical_thinking?: number
+  clout?: number
+  authentic?: number
+  total_words?: number
+  i_ratio?: number; we_ratio?: number; you_ratio?: number
+  positive_emotion_ratio?: number; negative_emotion_ratio?: number
+  anxiety_ratio?: number; anger_ratio?: number; sadness_ratio?: number
+  cognitive_ratio?: number; insight_ratio?: number; tentative_ratio?: number
+  certainty_ratio?: number; past_ratio?: number; present_ratio?: number; future_ratio?: number
+  health_ratio?: number; affiliation_ratio?: number; achievement_ratio?: number
+  swear_ratio?: number; filler_ratio?: number
+}
+
+export interface MentalHealthSummary {
+  available: boolean
+  mental_health?: MentalHealthSnapshot | null
+  cognitive?: CognitiveDistortionResult | null
+  liwc?: LiwcProfile | null
+  dark_triad?: DarkTriadTraits | null
+  hexaco?: HexacoTraits | null
+}
+
+export interface PsychSnapshot {
+  timestamp: string
+  ocean: OceanTraits
+  pad: PadState
+  style: StyleVector
+  confidence: number
+  source: string
+  trigger_message: string
+}
+
+// ── 安全面板 ──
+
+export interface SafetyStats {
+  enabled: boolean
+  total_flagged: number
+  recent_flagged: number
+  by_category: Record<string, number>
+  recent: SafetyLogEntry[]
+}
+
+export interface SafetyLogEntry {
+  timestamp: string
+  category: string
+  message: string
+  confidence: number
+}
+
+// ── RAG ──
+
+export interface RAGStats {
+  available: boolean
+  bm25_available?: boolean
+}
+
+export interface RAGSearchResult {
+  query: string
+  results: Array<{ content: string; score?: number }>
+  total_vector: number
+  total_keyword: number
+}
+
+// ── Voice TTS ──
+
+export interface VoiceStatus {
+  enabled: boolean
+  current_engine: string | null
+  available_engines: string[]
+  providers?: Record<string, { connected: boolean }>
+  synthesize_count: number
+  last_error: string | null
+}
+
+// ── 插件 ──
+
+export interface PluginEntry {
+  enabled?: boolean
+  toggled_at?: string
+}
+
+export interface PluginsList {
+  plugins: Record<string, PluginEntry>
+}
+
+// ── 文件上传 ──
+
+export interface FileUploadResult {
+  status: string
+  filename: string
+  size: number
+  mime_type: string
+  message_type: 'image' | 'voice' | 'file'
+  url: string
+}
+
+// ── 工具历史 ──
+
+export interface ToolHistoryEntry {
+  timestamp: string
+  tool: string
+  action: string
+}
+
+// ── 主动消息历史 ──
+
+export interface ProactiveHistoryEntry {
+  timestamp?: string
+  message?: string
+  urgency?: number
+  sent?: boolean
+}
+
 // ── 微信手动连接（需求1） ──
 
 export interface WeChatConnectionStatus {

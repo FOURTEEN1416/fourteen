@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class LLMConfig(BaseModel):
+    provider: str = "deepseek"
     primary_model: str = "deepseek-chat"
     fallback_model: str = "deepseek-reasoner"
     api_base: str = "https://api.deepseek.com/v1"

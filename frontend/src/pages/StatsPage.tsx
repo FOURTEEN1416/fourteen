@@ -41,8 +41,8 @@ export default function StatsPage() {
     </div>
   )
 
-  const charData = Object.entries(stats.character_distribution).map(([name, value]) => ({ name, value }))
-  const emotionData = Object.entries(stats.emotion_distribution).map(([name, value]) => ({ name, value }))
+  const charData = Object.entries(stats.character_distribution ?? {}).map(([name, value]) => ({ name, value }))
+  const emotionData = Object.entries(stats.emotion_distribution ?? {}).map(([name, value]) => ({ name, value }))
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6">

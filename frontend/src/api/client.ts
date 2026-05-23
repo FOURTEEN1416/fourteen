@@ -128,4 +128,51 @@ export const api = {
   cloneBatchDeleteConversations: (personId: string, indices: number[]) =>
     client.post(`/clone/datasets/${personId}/conversations/batch-delete`, null, { params: { indices: indices.join(',') } }),
   cloneStats: () => client.get('/clone/stats'),
+
+  // ── 用户心理画像 ──
+  psychProfile: () => client.get('/psych/profile'),
+  psychSnapshots: (limit = 20) => client.get('/psych/snapshots', { params: { limit } }),
+  psychReset: () => client.delete('/psych/profile'),
+  psychMentalHealth: () => client.get('/psych/mental-health'),
+  psychLiwc: () => client.get('/psych/liwc'),
+
+  // ── 安全面板 ──
+  safetyStats: () => client.get('/safety/stats'),
+  safetyLog: (limit = 50) => client.get('/safety/log', { params: { limit } }),
+  safetyConfig: (enabled: boolean) => client.post('/safety/config', null, { params: { enabled } }),
+
+  // ── RAG 知识库 ──
+  ragStats: () => client.get('/rag/stats'),
+  ragSearch: (query: string, topK = 5) => client.post('/rag/search', null, { params: { query, top_k: topK } }),
+  ragUpload: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return client.post('/rag/documents', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+
+  // ── Voice TTS ──
+  voiceStatus: () => client.get('/voice/status'),
+  voiceSynthesize: (text: string, engine = '') => {
+    const form = new FormData()
+    form.append('text', text)
+    if (engine) form.append('engine', engine)
+    return client.post('/voice/synthesize', form, { headers: { 'Content-Type': 'multipart/form-data' }, responseType: 'blob' })
+  },
+
+  // ── 插件管理 ──
+  plugins: () => client.get('/plugins'),
+  togglePlugin: (name: string, enabled: boolean) => client.post(`/plugins/${name}/toggle`, null, { params: { enabled } }),
+
+  // ── 文件上传 ──
+  uploadFile: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return client.post('/files/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+
+  // ── 工具历史 ──
+  toolHistory: (limit = 50) => client.get('/tools/history', { params: { limit } }),
+
+  // ── 主动消息历史 ──
+  proactiveHistory: (limit = 50) => client.get('/proactive/history', { params: { limit } }),
 }

@@ -1,6 +1,5 @@
 ﻿import { useState } from 'react'
-import { usePersonaProfile } from '../hooks/useAPI'
-import { useEmotionTrend } from '../hooks/useAPI'
+import { usePersonaProfile, usePersonaEvolutionLog, useEmotionTrend } from '../hooks/useQueries'
 import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts'
 import Skeleton from '../components/common/Skeleton'
 import Button from '../components/common/Button'
@@ -14,9 +13,11 @@ const traitLabels: Record<string, string> = {
 }
 
 export default function PersonaPage() {
-  const { profile, log } = usePersonaProfile()
+  const { data: profile } = usePersonaProfile()
+  const { data: logData } = usePersonaEvolutionLog()
+  const log = logData ?? []
   const [trendDays, setTrendDays] = useState(7)
-  const emotionTrend = useEmotionTrend(trendDays)
+  const { data: emotionTrend } = useEmotionTrend(trendDays)
 
   if (!profile) {
     return (

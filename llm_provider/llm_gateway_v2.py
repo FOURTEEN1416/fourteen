@@ -87,17 +87,27 @@ class LLMGatewayV2:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        pool_limits = httpx.Limits(max_keepalive_connections=20, max_connections=100)
-        self._async_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(60.0),
-            limits=pool_limits,
-            headers=self._headers,
-        )
+        self._pool_limits = httpx.Limits(max_keepalive_connections=20, max_connections=100)
+        self._client = None
+        self._client_loop_id = None
 
         if self.api_key:
             logger.info("LLMGatewayV2 ready, primary model=%s", self.model)
         else:
             logger.warning("LLMGatewayV2: no API key, using mock replies")
+
+    @property
+    def _async_client(self):
+        loop = asyncio.get_running_loop()
+        loop_id = id(loop)
+        if self._client is None or self._client_loop_id != loop_id:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(60.0),
+                limits=self._pool_limits,
+                headers=self._headers,
+            )
+            self._client_loop_id = loop_id
+        return self._client
 
     async def chat(
         self,
@@ -315,8 +325,11 @@ class LLMGatewayV2:
         return None
 
     async def close(self):
-        await self._async_client.aclose()
-        logger.info("LLMGatewayV2 connection pool closed")
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+            self._client_loop_id = None
+            logger.info("LLMGatewayV2 connection pool closed")
 
     def _handle_error(self, e: Exception) -> str:
         if isinstance(e, httpx.HTTPStatusError):

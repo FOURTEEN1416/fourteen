@@ -1,6 +1,7 @@
 ﻿import { useEffect, useState, useCallback } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useChatStore } from '../store/chatStore'
+import { useActiveCharacter } from '../hooks/useQueries'
 import { api } from '../api/client'
 import MessageList from '../components/chat/MessageList'
 import ChatInput from '../components/chat/ChatInput'
@@ -13,6 +14,7 @@ export default function ChatPage() {
   const setSessionId = useChatStore((s) => s.setSessionId)
   const [sessionError, setSessionError] = useState(false)
   const [sessionLoading, setSessionLoading] = useState(true)
+  const { activeCharacter } = useActiveCharacter()
 
   const createSession = useCallback(async () => {
     setSessionError(false)
@@ -36,7 +38,7 @@ export default function ChatPage() {
     }
   }, [sessionId, createSession])
 
-  const handleSend = (message: string) => {
+  const handleSend = (message: string, _messageType?: string, _fileUrl?: string) => {
     sendMessage(message, true)
   }
 
@@ -47,7 +49,7 @@ export default function ChatPage() {
       <div className="flex-1 flex">
         <div className="flex-1 flex flex-col min-w-0">
           <div className="border-b border-gray-200 px-4 py-3 bg-gray-50">
-            <h1 className="text-sm font-semibold text-gray-800">十四</h1>
+            <h1 className="text-sm font-semibold text-gray-800">{activeCharacter?.name ?? '十四'}</h1>
           </div>
 
           {sessionError ? (
@@ -75,7 +77,7 @@ export default function ChatPage() {
         </div>
 
         <aside className="hidden xl:flex flex-col w-64 border-l border-gray-200 p-3 gap-3 overflow-y-auto">
-          <EmotionPanel />
+          <EmotionPanel characterId={activeCharacter?.character_id} maxAffinity={8} />
         </aside>
       </div>
     </div>

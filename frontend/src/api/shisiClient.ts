@@ -4,49 +4,69 @@ import type { EmotionStageProgress, AffinityProgress, VitalSignsData } from '../
 
 const BASE = '/shisi'
 
+const unwrap = <T>(r: { data: unknown }): T => (r.data as ApiResponse<T>).data as T
+
 export const shisiClient = {
   characters: {
-    list: () => client.get<CharacterState[]>(`${BASE}/characters`).then(r => r.data),
-    get: (id: string) => client.get(`${BASE}/characters/${id}`).then(r => r.data),
-    switch: (id: string) => client.post(`${BASE}/characters/switch`, { character_id: id }).then(r => r.data),
-    delete: (id: string) => client.delete(`${BASE}/characters/${id}`).then(r => r.data),
-    export_: (id: string) => client.get(`${BASE}/characters/${id}/export`).then(r => r.data),
-    import_: (data: unknown) => client.post(`${BASE}/characters/import`, data).then(r => r.data),
+    list: () => client.get<CharacterState[]>(`${BASE}/characters`).then(unwrap<CharacterState[]>),
+    get: (id: string) => client.get(`${BASE}/characters/${id}`).then(unwrap),
+    switch: (id: string) => client.post(`${BASE}/characters/switch`, { character_id: id }).then(unwrap),
+    delete: (id: string) => client.delete(`${BASE}/characters/${id}`).then(unwrap),
+    // Backend: POST /api/shisi/characters/export/{character_id}
+    export_: (id: string) => client.post(`${BASE}/characters/export/${id}`).then(unwrap),
+    // Backend: POST /api/shisi/characters/import (multipart UploadFile)
+    import_: (file: File) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      return client.post(`${BASE}/characters/import`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(unwrap)
+    },
+    // Backend: PUT /api/shisi/characters/{character_id} (body: {card: {...}})
+    update: (id: string, card: Record<string, unknown>) => client.put(`${BASE}/characters/${id}`, { card }).then(unwrap),
   },
   emotionStage: {
-    get: (cid: string) => client.get<EmotionStageProgress>(`${BASE}/emotion-stage/${cid}`).then(r => r.data),
-    listStages: () => client.get(`${BASE}/emotion-stage/stages`).then(r => r.data),
-    triggerTransition: (cid: string, targetStage: string) => client.post(`${BASE}/emotion-stage/${cid}/transition`, { target_stage: targetStage }).then(r => r.data),
+    get: (cid: string) => client.get<EmotionStageProgress>(`${BASE}/emotion-stage/${cid}`).then(unwrap<EmotionStageProgress>),
+    listStages: () => client.get(`${BASE}/emotion-stage/stages`).then(unwrap),
+    // Backend: POST /api/shisi/emotion-stage/{character_id}/evaluate?affinity=...
+    evaluate: (cid: string, affinity: number) => client.post(`${BASE}/emotion-stage/${cid}/evaluate`, null, { params: { affinity } }).then(unwrap),
   },
   affinity: {
-    get: (cid: string) => client.get<AffinityProgress>(`${BASE}/affinity/${cid}`).then(r => r.data),
-    update: (cid: string, delta: number, reason: string) => client.post(`${BASE}/affinity/${cid}/update`, { delta, reason, source: 'web' }).then(r => r.data),
-    history: (cid: string) => client.get(`${BASE}/affinity/${cid}/history`).then(r => r.data),
+    get: (cid: string) => client.get<AffinityProgress>(`${BASE}/affinity/${cid}`).then(unwrap<AffinityProgress>),
+    update: (cid: string, delta: number, reason: string) => client.post(`${BASE}/affinity/${cid}/update`, { delta, reason, source: 'web' }).then(unwrap),
+    // Backend: GET /api/shisi/affinity/{character_id}/unlocks
+    unlocks: (cid: string) => client.get(`${BASE}/affinity/${cid}/unlocks`).then(unwrap),
+    // Backend: POST /api/shisi/affinity/{character_id}/decay
+    decay: (cid: string) => client.post(`${BASE}/affinity/${cid}/decay`).then(unwrap),
   },
   vitalSigns: {
-    get: (cid: string) => client.get<VitalSignsData>(`${BASE}/vital-signs/${cid}`).then(r => r.data),
+    get: (cid: string) => client.get<VitalSignsData>(`${BASE}/vital-signs/${cid}`).then(unwrap<VitalSignsData>),
   },
   stats: {
-    get: () => client.get(`${BASE}/stats`).then(r => r.data),
+    get: () => client.get(`${BASE}/stats`).then(unwrap),
   },
   stickers: {
-    list: () => client.get(`${BASE}/stickers`).then(r => r.data),
-    get: (id: string) => client.get(`${BASE}/stickers/${id}`).then(r => r.data),
-    upload: (formData: FormData) => client.post(`${BASE}/stickers/upload`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data),
-    delete: (id: string) => client.delete(`${BASE}/stickers/${id}`).then(r => r.data),
-    recommend: (emotion: string) => client.get(`${BASE}/stickers/recommend`, { params: { emotion } }).then(r => r.data),
-    importZip: (formData: FormData) => client.post(`${BASE}/stickers/import`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data),
+    list: (category?: string) => client.get(`${BASE}/stickers`, { params: { category } }).then(unwrap),
+    delete: (id: string) => client.delete(`${BASE}/stickers/${id}`).then(unwrap),
+    // Backend: GET /api/shisi/stickers/recommend (expects body data)
+    recommend: (emotionTags: string[], limit = 5) => client.request({ method: 'GET', url: `${BASE}/stickers/recommend`, data: { emotion_tags: emotionTags, limit } }).then(unwrap),
+    // Backend: POST /api/shisi/stickers/import (multipart)
+    importZip: (formData: FormData) => client.post(`${BASE}/stickers/import`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(unwrap),
+    upload: (formData: FormData) => client.post(`${BASE}/stickers/import`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(unwrap),
   },
   memory: {
-    favorites: (cid: string) => client.get(`${BASE}/memory/${cid}/favorites`).then(r => r.data),
-    addFavorite: (cid: string, memoryId: string) => client.post(`${BASE}/memory/${cid}/favorites`, { memory_id: memoryId }).then(r => r.data),
-    removeFavorite: (cid: string, memoryId: string) => client.delete(`${BASE}/memory/${cid}/favorites/${memoryId}`).then(r => r.data),
-    forwards: (cid: string) => client.get(`${BASE}/memory/${cid}/forwards`).then(r => r.data),
-    forward: (fromCid: string, toCid: string, memoryId: string) => client.post(`${BASE}/memory/${fromCid}/forward`, { to_character_id: toCid, memory_id: memoryId }).then(r => r.data),
+    // Backend: GET /api/shisi/memory/favorites?character_id=...
+    favorites: (cid: string) => client.get(`${BASE}/memory/favorites`, { params: { character_id: cid } }).then(unwrap),
+    // Backend: POST /api/shisi/memory/favorite (body: {character_id, memory_id})
+    addFavorite: (cid: string, memoryId: string) => client.post(`${BASE}/memory/favorite`, { character_id: cid, memory_id: memoryId }).then(unwrap),
+    // Backend: DELETE /api/shisi/memory/favorite/{fav_id}?character_id=...
+    removeFavorite: (favId: string, cid?: string) => client.delete(`${BASE}/memory/favorite/${favId}`, { params: { character_id: cid } }).then(unwrap),
+    // Backend: POST /api/shisi/memory/forward (body: {from_character, to_character, memory_id, content?})
+    forward: (fromCid: string, toCid: string, memoryId: string, content?: string) => client.post(`${BASE}/memory/forward`, { from_character: fromCid, to_character: toCid, memory_id: memoryId, content }).then(unwrap),
+    // Backend: DELETE /api/shisi/memory/{memory_id}?character_id=...&confirm=true
+    delete: (memoryId: string, cid?: string) => client.delete(`${BASE}/memory/${memoryId}`, { params: { character_id: cid, confirm: true } }).then(unwrap),
   },
   persona: {
-    get: (cid: string) => client.get(`${BASE}/persona/${cid}`).then(r => r.data),
-    update: (cid: string, fields: Record<string, unknown>) => client.put(`${BASE}/persona/${cid}`, fields).then(r => r.data),
-    preview: (cid: string) => client.get(`${BASE}/persona/${cid}/preview`).then(r => r.data),
+    get: (cid: string) => client.get(`${BASE}/persona/characters/${cid}`).then(unwrap),
+    update: (cid: string, fields: Record<string, unknown>) => client.put(`${BASE}/persona/characters/${cid}`, { card: fields }).then(unwrap),
+    preview: (cid: string) => client.get(`${BASE}/persona/characters/${cid}/preview`).then(unwrap),
   },
 }

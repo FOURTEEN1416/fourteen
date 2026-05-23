@@ -111,7 +111,7 @@ class RAGEngineV2:
         self._hallucination_guard = HallucinationGuard(semantic_memory) if semantic_memory else None
 
     def retrieve(self, query: str, top_k: int = 5) -> Dict[str, Any]:
-        vector_results = self._vm.search_chats(query, top_k)
+        vector_results = self._vm.search_chats_sync(query, top_k)
         keyword_results = self._keyword_retriever.search(query, top_k)
         merged = self._reranker.rerank(vector_results, keyword_results)
         final = self._budget_mgr.truncate(merged)
