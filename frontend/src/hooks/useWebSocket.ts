@@ -3,10 +3,14 @@ import { useChatStore } from '../store/chatStore'
 import type { WSIncomingMessage } from '../types/api'
 
 const WS_URL = `ws://${window.location.hostname}:8765`
+const RECONNECT_BASE_MS = 1000
+const RECONNECT_MAX_MS = 30000
+const RECONNECT_MULTIPLIER = 2
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const reconnectDelay = useRef(RECONNECT_BASE_MS)
   const {
     sessionId, isConnected, setConnected, setStreaming,
     addMessage, setEmotion, setProactiveMessage,
@@ -21,6 +25,7 @@ export function useWebSocket() {
 
     ws.onopen = () => {
       setConnected(true)
+      reconnectDelay.current = RECONNECT_BASE_MS
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current)
         reconnectTimer.current = undefined
@@ -31,7 +36,9 @@ export function useWebSocket() {
       setConnected(false)
       setStreaming(false)
       finalizeStreamMessage()
-      reconnectTimer.current = setTimeout(connect, 3000)
+      const delay = reconnectDelay.current
+      reconnectDelay.current = Math.min(delay * RECONNECT_MULTIPLIER, RECONNECT_MAX_MS)
+      reconnectTimer.current = setTimeout(connect, delay)
     }
 
     ws.onerror = () => {
