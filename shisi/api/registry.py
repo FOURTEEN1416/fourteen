@@ -26,6 +26,7 @@ from . import (
     persona_routes,
     stats_routes,
     sticker_routes,
+    training_routes,
     vital_routes,
 )
 
@@ -64,6 +65,9 @@ def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True) -> AiyuReg
     reg.voice_enhancer = VoiceEnhancer()
     reg.analytics_service = AnalyticsService()
 
+    from voice.voice_training import VoiceTrainingManager
+    _training_mgr = VoiceTrainingManager()
+
     reg.wechat_handler = WeChatCommandHandler(
         character_manager=reg.character_manager,
         affinity_enhancer=reg.affinity_enhancer,
@@ -94,6 +98,7 @@ def _mount_routes(app: FastAPI, reg: AiyuRegistry) -> None:
     vital_routes.set_engine(reg.vital_engine)  # type: ignore
     persona_routes.set_manager(reg.character_manager)  # type: ignore
     stats_routes.set_service(reg.analytics_service)  # type: ignore
+    training_routes.set_manager(_training_mgr)  # type: ignore
 
     app.include_router(character_routes.router)
     app.include_router(sticker_routes.router)
@@ -103,5 +108,6 @@ def _mount_routes(app: FastAPI, reg: AiyuRegistry) -> None:
     app.include_router(vital_routes.router)
     app.include_router(persona_routes.router)
     app.include_router(stats_routes.router)
+    app.include_router(training_routes.router)
 
     logger.info("十四API路由挂载完成")
