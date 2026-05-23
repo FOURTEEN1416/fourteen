@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import signal
 import threading
@@ -35,7 +34,8 @@ class GracefulShutdown:
             return
         logger.info("Received signal %d, initiating graceful shutdown", signum)
         self._shutting_down = True
-        threading.Thread(target=self._do_shutdown, daemon=True).start()
+        # 注意: 信号处理器应尽量轻量；使用Timer延迟执行关闭以避免在信号上下文中直接操作
+        threading.Timer(0.1, self._do_shutdown).start()
 
     def _do_shutdown(self):
         logger.info("Rejecting new messages, completing current processing...")
@@ -51,7 +51,7 @@ class GracefulShutdown:
     def allow_current_processing(self):
         self._event.set()
 
-    def wait_for_completion(self, timeout: Optional[float] = None):
+    def wait_for_completion(self, timeout: float | None = None):
         self._event.wait(timeout=timeout or self.timeout)
 
 

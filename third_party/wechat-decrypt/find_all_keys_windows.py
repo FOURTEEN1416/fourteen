@@ -6,7 +6,7 @@ salt嵌在hex字符串中，可以直接匹配DB文件的salt
 """
 import ctypes
 import ctypes.wintypes as wt
-import os, sys, time, re
+import sys, time, re
 
 import functools
 print = functools.partial(print, flush=True)

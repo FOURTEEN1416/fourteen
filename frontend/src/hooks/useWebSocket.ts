@@ -10,6 +10,7 @@ export function useWebSocket() {
   const {
     sessionId, isConnected, setConnected, setStreaming,
     addMessage, setEmotion, setProactiveMessage,
+    appendStreamToken, finalizeStreamMessage,
   } = useChatStore()
 
   const connect = useCallback(() => {
@@ -29,6 +30,7 @@ export function useWebSocket() {
     ws.onclose = () => {
       setConnected(false)
       setStreaming(false)
+      finalizeStreamMessage()
       reconnectTimer.current = setTimeout(connect, 3000)
     }
 
@@ -51,10 +53,11 @@ export function useWebSocket() {
             break
 
           case 'stream_token':
-            addMessage({ role: 'assistant', content: data.content || '', timestamp: Date.now() })
+            appendStreamToken(data.content || '')
             break
 
           case 'stream_end':
+            finalizeStreamMessage()
             setStreaming(false)
             break
 
@@ -70,7 +73,7 @@ export function useWebSocket() {
         console.error('WS parse error:', e)
       }
     }
-  }, [setConnected, setStreaming, addMessage, setEmotion, setProactiveMessage])
+  }, [setConnected, setStreaming, addMessage, setEmotion, setProactiveMessage, appendStreamToken, finalizeStreamMessage])
 
   useEffect(() => {
     connect()

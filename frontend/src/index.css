@@ -1,69 +1,275 @@
 @import "tailwindcss";
 
+/* ════════════════════════════════════════
+   Design System — Clean Light (简洁浅色系)
+   ════════════════════════════════════════ */
 @theme {
-  /* Neutral gray scale (primary) */
-  --color-primary-50: #fafafa;
-  --color-primary-100: #f5f5f5;
-  --color-primary-200: #e5e5e5;
-  --color-primary-300: #d4d4d4;
-  --color-primary-400: #a3a3a3;
-  --color-primary-500: #737373;
-  --color-primary-600: #525252;
-  --color-primary-700: #404040;
-  --color-primary-800: #262626;
-  --color-primary-900: #171717;
+  /* Background palette — clean light */
+  --color-bg-deep: #f5f7fa;
+  --color-bg-surface: #ffffff;
+  --color-bg-card: #ffffff;
+  --color-bg-elevated: #f0f2f5;
+  --color-bg-hover: #e8ecf1;
 
-  /* Accent - neutral blue-gray (replaces purple) */
-  --color-accent-50: #f8fafc;
-  --color-accent-100: #f1f5f9;
-  --color-accent-200: #e2e8f0;
-  --color-accent-300: #cbd5e1;
-  --color-accent-400: #94a3b8;
-  --color-accent-500: #64748b;
-  --color-accent-600: #475569;
-  --color-accent-700: #334155;
-  --color-accent-800: #1e293b;
-  --color-accent-900: #0f172a;
+  /* Borders */
+  --color-border-subtle: rgba(0, 0, 0, 0.06);
+  --color-border-default: rgba(0, 0, 0, 0.10);
+  --color-border-hover: rgba(0, 0, 0, 0.16);
 
-  /* Emotion colors - ONLY for emotional state indicators */
-  --color-emotion-rose: #f43f5e;
-  --color-emotion-amber: #f59e0b;
-  --color-emotion-blue: #3b82f6;
-  --color-emotion-red: #ef4444;
-  --color-emotion-purple: #a855f7;
-  --color-emotion-green: #22c55e;
+  /* Accent — Cyan (brand primary, keep original) */
+  --color-cyan-50: #e6fbfe;
+  --color-cyan-100: #b3f2fa;
+  --color-cyan-200: #80e9f6;
+  --color-cyan-300: #4de0f2;
+  --color-cyan-400: #22d0df;
+  --color-cyan-500: #1ab8c7;
+  --color-cyan-600: #1499a8;
+  --color-cyan-700: #0e7a87;
+  --color-cyan-800: #085b66;
+  --color-cyan-900: #023c45;
 
-  /* Status colors */
-  --color-success: #22c55e;
-  --color-warning: #eab308;
-  --color-error: #ef4444;
-  --color-info: #3b82f6;
+  /* Accent — Purple (brand secondary, keep original) */
+  --color-magenta-50: #fde6ff;
+  --color-magenta-100: #f7b3ff;
+  --color-magenta-200: #f180ff;
+  --color-magenta-300: #eb4dff;
+  --color-magenta-400: #e628ff;
+  --color-magenta-500: #c91ae0;
+  --color-magenta-600: #ab14bf;
+  --color-magenta-700: #8d0e9e;
+  --color-magenta-800: #6f087d;
+  --color-magenta-900: #51025c;
+
+  /* Primary / accent aliases */
+  --color-primary-50: #e6fbfe;
+  --color-primary-100: #b3f2fa;
+  --color-primary-200: #80e9f6;
+  --color-primary-300: #4de0f2;
+  --color-primary-400: #22d0df;
+  --color-primary-500: #1ab8c7;
+  --color-primary-600: #1499a8;
+  --color-primary-700: #0e7a87;
+  --color-primary-800: #085b66;
+  --color-primary-900: #023c45;
+
+  /* Accent alias */
+  --color-accent-50: #fde6ff;
+  --color-accent-100: #f7b3ff;
+  --color-accent-200: #f180ff;
+  --color-accent-300: #eb4dff;
+  --color-accent-400: #e628ff;
+  --color-accent-500: #c91ae0;
+  --color-accent-600: #ab14bf;
+  --color-accent-700: #8d0e9e;
+  --color-accent-800: #6f087d;
+  --color-accent-900: #51025c;
+
+  /* Neutral text (light bg -> dark text) */
+  --color-text-primary: #1e293b;
+  --color-text-secondary: #475569;
+  --color-text-muted: #64748b;
+  --color-text-dim: #94a3b8;
+
+  /* Emotion indicators (keep functional) */
+  --color-emotion-rose: #e11d48;
+  --color-emotion-amber: #d97706;
+  --color-emotion-blue: #2563eb;
+  --color-emotion-red: #dc2626;
+  --color-emotion-purple: #9333ea;
+  --color-emotion-green: #16a34a;
+
+  /* Status */
+  --color-success: #06b6d4;
+  --color-warning: #c084fc;
+  --color-error: #e11d48;
+  --color-info: #2563eb;
 }
 
+/* ═══ Base Styles ═══ */
 body {
   margin: 0;
-  font-family: "Inter", "Noto Sans SC", system-ui, sans-serif;
+  font-family: "Inter", "Noto Sans SC", system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: #f5f7fa;
+  color: #1e293b;
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
+/* ═══ Scrollbar (thin style) ═══ */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.12); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.2); }
+
+/* ═══ MazeCard — the primary card component ═══ */
+.maze-card {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 16px;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.maze-card:hover {
+  border-color: rgba(0, 0, 0, 0.14);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+/* ═══ MazeButton variants ═══ */
+.maze-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 10px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  cursor: pointer;
+  border: none;
+}
+.maze-btn-primary {
+  background: linear-gradient(135deg, #22d0df, #1ab8c7);
+  color: #ffffff;
+}
+.maze-btn-primary:hover {
+  box-shadow: 0 0 16px rgba(34, 208, 223, 0.3);
+  transform: translateY(-1px);
+}
+.maze-btn-ghost {
+  background: rgba(34, 208, 223, 0.06);
+  color: #22d0df;
+  border: 1px solid rgba(34, 208, 223, 0.15);
+}
+.maze-btn-ghost:hover {
+  background: rgba(34, 208, 223, 0.12);
+  border-color: rgba(34, 208, 223, 0.25);
+}
+.maze-btn-danger {
+  background: rgba(225, 29, 72, 0.06);
+  color: #e11d48;
+  border: 1px solid rgba(225, 29, 72, 0.12);
+}
+.maze-btn-danger:hover {
+  background: rgba(225, 29, 72, 0.12);
+}
+
+/* ═══ MazeStat — stat display card ═══ */
+.maze-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.maze-stat-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+.maze-stat-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+/* ═══ Status dot ═══ */
+.maze-dot {
   width: 6px;
   height: 6px;
+  border-radius: 50%;
+  display: inline-block;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
+.maze-dot-online { background: #22d0df; box-shadow: 0 0 6px rgba(34, 208, 223, 0.4); }
+.maze-dot-offline { background: #94a3b8; }
+.maze-dot-error { background: #e11d48; box-shadow: 0 0 6px rgba(225, 29, 72, 0.4); }
+.maze-dot-active { background: #16a34a; box-shadow: 0 0 6px rgba(22, 163, 74, 0.4); }
+
+/* ═══ Progress bar ═══ */
+.maze-progress {
+  height: 4px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
 }
-::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.25);
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.4);
+.maze-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #22d0df, #e628ff);
+  border-radius: 2px;
+  transition: width 0.5s ease;
 }
 
-/* Toast animations */
+/* ═══ Dotted separator ═══ */
+.maze-divider {
+  border: none;
+  border-top: 1px dashed rgba(0, 0, 0, 0.10);
+  margin: 1rem 0;
+}
+
+/* ═══ Gradient text ═══ */
+.maze-gradient-text {
+  background: linear-gradient(135deg, #22d0df, #e628ff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ═══ Badge ═══ */
+.maze-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+}
+.maze-badge-cyan {
+  background: rgba(34, 208, 223, 0.1);
+  color: #1ab8c7;
+  border: 1px solid rgba(34, 208, 223, 0.15);
+}
+.maze-badge-magenta {
+  background: rgba(230, 40, 255, 0.08);
+  color: #c91ae0;
+  border: 1px solid rgba(230, 40, 255, 0.15);
+}
+.maze-badge-green {
+  background: rgba(22, 163, 74, 0.08);
+  color: #16a34a;
+  border: 1px solid rgba(22, 163, 74, 0.15);
+}
+
+/* ═══ Animations ═══ */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 4px rgba(34, 208, 223, 0.15); }
+  50% { box-shadow: 0 0 12px rgba(34, 208, 223, 0.3); }
+}
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up {
+  animation: slide-up 0.4s ease-out;
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
+.animate-skeleton { animation: skeleton-pulse 1.5s ease-in-out infinite; }
+
 @keyframes toast-in {
   from { transform: translateX(100%); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
@@ -74,10 +280,3 @@ body {
 }
 .animate-toast-in { animation: toast-in 0.3s ease-out; }
 .animate-toast-out { animation: toast-out 0.3s ease-in forwards; }
-
-/* Skeleton pulse */
-@keyframes skeleton-pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.8; }
-}
-.animate-skeleton { animation: skeleton-pulse 1.5s ease-in-out infinite; }

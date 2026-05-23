@@ -10,10 +10,9 @@ clone_training 模块全量验证脚本
 5. WeCloneAdapter — 完整克隆管线
 """
 
-import sys
-import os
 import json
-import random
+import os
+import sys
 
 # 确保项目根目录在路径中
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -103,7 +102,7 @@ def test_data_extractor():
 
 def test_style_analyzer():
     print("\n=== StyleAnalyzer ===")
-    from clone_training import StyleAnalyzer, StyleProfile
+    from clone_training import StyleAnalyzer
 
     # Test 1: 模块可导入
     try:
@@ -248,7 +247,7 @@ def test_dataset_builder():
         chatml_path = db.build_chatml(MOCK_CONVERSATIONS, name="测试目标", window_size=3)
         if os.path.exists(chatml_path):
             with open(chatml_path, "r", encoding="utf-8") as f:
-                lines = [json.loads(l) for l in f if l.strip()]
+                lines = [json.loads(line) for line in f if line.strip()]
                 ok(f"ChatML 格式: {len(lines)} 段对话")
         else:
             fail("ChatML 格式", "文件不存在")
@@ -380,7 +379,7 @@ def test_style_profile_serialization():
 
 def test_edge_cases():
     print("\n=== 边界情况 ===")
-    from clone_training import StyleAnalyzer, DatasetBuilder
+    from clone_training import DatasetBuilder, StyleAnalyzer
 
     sa = StyleAnalyzer()
     db = DatasetBuilder("./data/test_edge")

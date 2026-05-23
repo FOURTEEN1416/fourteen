@@ -19,9 +19,10 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from .emotion_engine import EmotionEngine, CompoundEmotionalState as EmotionalState
-from .tone_mimic import ToneMimic
 from .character_config import ConfigLoader
+from .emotion_engine import CompoundEmotionalState as EmotionalState
+from .emotion_engine import EmotionEngine
+from .tone_mimic import ToneMimic
 
 logger = logging.getLogger("persona_engine")
 
@@ -422,7 +423,12 @@ class PersonaEngine:
         if emotion_state is None:
             emotion_state = self.emotion.state
 
-        if hasattr(emotion_state, "to_dict"):
+        if isinstance(emotion_state, dict):
+            emotion_type = emotion_state.get("primary", {}).get("type", "平常")
+            intensity = emotion_state.get("primary", {}).get("intensity", 0.5)
+            energy = emotion_state.get("energy", 1.0)
+            affinity_level = emotion_state.get("affinity", {}).get("level", 0)
+        elif hasattr(emotion_state, "to_dict"):
             state_dict = emotion_state.to_dict()
             emotion_type = state_dict.get("primary", {}).get("type", "平常")
             intensity = state_dict.get("primary", {}).get("intensity", 0.5)
@@ -439,7 +445,7 @@ class PersonaEngine:
             energy = 1.0
             affinity_level = 0
 
-        style = self.EMOTION_STYLE_MAP.get(emotion_type, self.EMOTION_STYLE_MAP["平常"])
+        self.EMOTION_STYLE_MAP.get(emotion_type, self.EMOTION_STYLE_MAP["平常"])
 
         parts = ["# 当前状态"]
         parts.append(f"- 情感: {emotion_type}(强度{intensity:.1f})")

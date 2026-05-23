@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 logger = logging.getLogger("pii_anonymizer")
 
@@ -11,7 +11,7 @@ PII_PATTERNS: List[Tuple[str, re.Pattern]] = [
     ("id_card", re.compile(r"(?<!\d)\d{6}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx](?!\d)")),
     ("bank_card", re.compile(r"(?<!\d)\d{16,19}(?!\d)")),
     ("email", re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")),
-    ("address", re.compile(r"(省|市|区|县|镇|乡|街道|路|号|栋|单元|室)")),
+    ("address", re.compile(r"(?:[\u4e00-\u9fa5]{2,}(?:省|自治区|特别行政区))[\u4e00-\u9fa5]{2,}(?:市|地区|州|盟)(?:[\u4e00-\u9fa5]{2,}(?:区|县|市|旗))?")),
 ]
 
 HOTLINE_WHITELIST = re.compile(r"400[-]?\d{3}[-]?\d{4}")
@@ -32,11 +32,19 @@ class PIIAnonymizer:
                     continue
                 all_matches.append((match.start(), match.end(), pii_type, original))
 
-        all_matches.sort(key=lambda x: x[0], reverse=True)
+        all_matches.sort(key=lambda x: x[0])
+        merged = []
+        for m in all_matches:
+            if merged and m[0] < merged[-1][1]:
+                prev = merged[-1]
+                merged[-1] = (prev[0], max(prev[1], m[1]), prev[2], prev[3])
+            else:
+                merged.append(m)
+        merged.sort(key=lambda x: x[0], reverse=True)
 
         anonymized = text
         detected = []
-        for start, end, pii_type, original in all_matches:
+        for start, end, pii_type, original in merged:
             replacement = self._mask(pii_type, original)
             anonymized = anonymized[:start] + replacement + anonymized[end:]
             detected.append({

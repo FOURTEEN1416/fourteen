@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
-import time
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 logger = logging.getLogger("importance_scorer")
 
@@ -81,7 +80,7 @@ class CrossSessionReasoner:
 
     def store_pending_event(self, event_desc: str, expected_time: Optional[str] = None,
                             session_id: str = ""):
-        with self._sm._conn() as conn:
+        with self._sm.get_connection() as conn:
             conn.execute(
                 "INSERT INTO pending_events (event_desc, expected_time, source_session_id) "
                 "VALUES (?, ?, ?)",
@@ -90,7 +89,7 @@ class CrossSessionReasoner:
             conn.commit()
 
     def get_pending_events(self):
-        with self._sm._conn() as conn:
+        with self._sm.get_connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM pending_events WHERE is_resolved = 0 "
                 "ORDER BY created_at ASC"
@@ -98,7 +97,7 @@ class CrossSessionReasoner:
             return [dict(r) for r in rows]
 
     def resolve_event(self, event_id: int):
-        with self._sm._conn() as conn:
+        with self._sm.get_connection() as conn:
             conn.execute(
                 "UPDATE pending_events SET is_resolved = 1 WHERE id = ?",
                 (event_id,),

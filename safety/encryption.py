@@ -20,6 +20,12 @@ class DecryptionError(Exception):
         self.ciphertext_preview = ciphertext_preview
 
 
+class EncryptionError(Exception):
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
 class EncryptionManager:
     def __init__(self, key_env: str = "AI_GF_ENCRYPTION_KEY", enabled: bool = False):
         self.enabled = enabled and HAS_CRYPTO
@@ -33,25 +39,28 @@ class EncryptionManager:
                 self.enabled = False
 
     def encrypt(self, plaintext: str, associated_data: Optional[bytes] = None) -> Optional[str]:
-        if not self.enabled or not self._key:
+        if not self.enabled:
             return None
+        if not self._key:
+            raise EncryptionError("Encryption enabled but key not available")
         try:
-            aesgcm = AESGCM(self._key)
+            aesgcm = AESGCM(self._key)  # type: ignore
             nonce = os.urandom(12)
             ct = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), associated_data)
             return (nonce + ct).hex()
         except Exception as e:
-            logger.error("Encryption failed: %s", e)
-            return None
+            raise EncryptionError(f"Encryption failed: {e}")
 
     def decrypt(self, ciphertext_hex: str, associated_data: Optional[bytes] = None) -> Optional[str]:
-        if not self.enabled or not self._key:
+        if not self.enabled:
             return None
+        if not self._key:
+            raise DecryptionError("Encryption enabled but key not available")
         try:
             data = bytes.fromhex(ciphertext_hex)
             nonce = data[:12]
             ct = data[12:]
-            aesgcm = AESGCM(self._key)
+            aesgcm = AESGCM(self._key)  # type: ignore
             plaintext = aesgcm.decrypt(nonce, ct, associated_data)
             return plaintext.decode("utf-8")
         except Exception as e:

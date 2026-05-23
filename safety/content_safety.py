@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger("content_safety")
 
@@ -100,7 +100,7 @@ class ContentSafetyFilter:
                 f"文本：{text[:500]}\n"
                 f'回复JSON格式：{{"category": "xxx", "confidence": 0.0-1.0}}'
             )
-            response = self.llm_gateway.chat(
+            response = self.llm_gateway.chat(  # type: ignore
                 query=prompt,
                 system_prompt="你是一个内容安全分类器，仅输出JSON。",
                 max_tokens=64,

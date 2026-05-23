@@ -18,20 +18,18 @@ WeChat Decrypt 数据源适配器 — 集成 ylytdeng/wechat-decrypt
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import re
+import sqlite3
 import subprocess
 import sys
-import sqlite3
-import hashlib
-import re
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import closing
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("clone.decrypt_source")
 
@@ -49,11 +47,11 @@ if _WD_PATH not in sys.path:
 
 # wechat-decrypt 的消息解析模块（可选，有降级）
 try:
-    import mcp_server as _wd_mcp
+    import mcp_server as _wd_mcp  # type: ignore
 except ImportError:
     _wd_mcp = None
 try:
-    from chat_export_helpers import _resolve_sender as _wd_resolve_sender
+    from chat_export_helpers import _resolve_sender as _wd_resolve_sender  # type: ignore
 except ImportError:
     _wd_resolve_sender = None
 
@@ -262,7 +260,7 @@ class DecryptSource:
         """运行 wechat-decrypt 的数据库解密（增量模式）"""
         decrypt_script = self.decrypt_path / "decrypt_db.py"
         if not decrypt_script.exists():
-            raise DecryptSourceError(f"找不到 decrypt_db.py")
+            raise DecryptSourceError("找不到 decrypt_db.py")
 
         logger.info("运行: python decrypt_db.py -i（增量模式，仅解密变更的数据库）")
         result = subprocess.run(
@@ -480,15 +478,15 @@ class DecryptSource:
         conn = sqlite3.connect(db_path)
         start_ts = self._date_to_ts(date_from) if date_from else None
         end_ts = self._date_to_ts(date_to, end_of_day=True) if date_to else None
-        rows = _wd_mcp._query_messages(
+        rows = _wd_mcp._query_messages(  # type: ignore
             conn, table_name,
             start_ts=start_ts, end_ts=end_ts,
             limit=limit, oldest_first=True,
             type_filter=[1],
         )
-        names = _wd_mcp.get_contact_names()
+        names = _wd_mcp.get_contact_names()  # type: ignore
         try:
-            id_to_username = _wd_mcp._load_name2id_maps(conn)
+            id_to_username = _wd_mcp._load_name2id_maps(conn)  # type: ignore
         except Exception:
             id_to_username = {}
 
@@ -511,7 +509,7 @@ class DecryptSource:
                     pass
 
             # 解码消息内容（WeChat 4.x 二进制格式）
-            decoded = _wd_mcp._decompress_content(raw_content, ct)
+            decoded = _wd_mcp._decompress_content(raw_content, ct)  # type: ignore
             if not decoded:
                 if isinstance(raw_content, bytes):
                     decoded = raw_content
@@ -523,7 +521,7 @@ class DecryptSource:
             text_content = ""
             if decoded:
                 try:
-                    result = _wd_mcp._format_message_text(
+                    result = _wd_mcp._format_message_text(  # type: ignore
                         local_id, local_type, decoded,
                         "@chatroom" in target_wxid,
                         target_wxid,

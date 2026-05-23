@@ -10,9 +10,10 @@ DeepSeek API LLM 网关
     DEEPSEEK_MODEL — 模型名 (默认 deepseek-chat)
 """
 
-import json
 import logging
 import os
+import time
+from enum import Enum
 from typing import Optional
 
 import httpx
@@ -21,6 +22,43 @@ logger = logging.getLogger("llm.deepseek")
 
 DEFAULT_API_BASE = "https://api.deepseek.com/v1"
 DEFAULT_MODEL = "deepseek-chat"
+MAX_RETRIES = int(os.environ.get("DEEPSEEK_MAX_RETRIES", "3"))
+
+
+class ErrorCategory(Enum):
+    RETRYABLE_TIMEOUT = "retryable_timeout"
+    RETRYABLE_RATE_LIMIT = "retryable_rate_limit"
+    RETRYABLE_SERVER_ERROR = "retryable_server_error"
+    NON_RETRYABLE_AUTH = "non_retryable_auth"
+    NON_RETRYABLE_INVALID = "non_retryable_invalid"
+    NON_RETRYABLE_PERMANENT = "non_retryable_permanent"
+
+
+def _classify_error(exc: Exception) -> ErrorCategory:
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code == 429:
+            return ErrorCategory.RETRYABLE_RATE_LIMIT
+        if code in (401, 403):
+            return ErrorCategory.NON_RETRYABLE_AUTH
+        if code in (400, 422):
+            return ErrorCategory.NON_RETRYABLE_INVALID
+        if code >= 500:
+            return ErrorCategory.RETRYABLE_SERVER_ERROR
+    if isinstance(exc, httpx.TimeoutException):
+        return ErrorCategory.RETRYABLE_TIMEOUT
+    if isinstance(exc, httpx.RequestError):
+        return ErrorCategory.RETRYABLE_TIMEOUT
+    return ErrorCategory.NON_RETRYABLE_PERMANENT
+
+
+def _should_retry(category: ErrorCategory) -> bool:
+    return category.name.startswith("RETRYABLE")
+
+
+def _get_retry_delay(category: ErrorCategory, attempt: int) -> float:
+    base = 1.0 if category == ErrorCategory.RETRYABLE_RATE_LIMIT else 0.5
+    return base * (2 ** attempt)
 
 
 class DeepSeekGateway:
@@ -42,15 +80,29 @@ class DeepSeekGateway:
             "Content-Type": "application/json",
         }
 
+        self._client = httpx.Client(
+            timeout=httpx.Timeout(60.0, connect=10.0),
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10, keepalive_expiry=30.0),
+        )
+
         if self.api_key:
             logger.info("DeepSeekGateway: model=%s, base=%s", self.model, self.api_base)
         else:
             logger.warning("DeepSeekGateway: 未配置 API Key，将返回模拟回复")
 
+    def close(self):
+        if hasattr(self, '_client') and self._client:
+            self._client.close()
+
+    def __del__(self):
+        self.close()
+
     @staticmethod
     def _sanitize_log(text: str) -> str:
         import re
-        return re.sub(r'(Bearer\s+)sk-\S+', r'\1sk-****', text)
+        text = re.sub(r'(Bearer\s+)sk-\S+', r'\1sk-****', text)
+        text = re.sub(r'(?i)(Authorization["\s:]+)\S+', r'\1****', text)
+        return text
 
     def chat(
         self,
@@ -93,11 +145,10 @@ class DeepSeekGateway:
         }
 
         try:
-            resp = httpx.post(
+            resp = self._client.post(
                 self._chat_url,
                 headers=self._headers,
                 json=payload,
-                timeout=60,
             )
             resp.raise_for_status()
             data = resp.json()
@@ -111,16 +162,33 @@ class DeepSeekGateway:
             )
             return content.strip()
 
-        except httpx.HTTPStatusError as e:
-            logger.error("DeepSeek API HTTP %d: %s", e.response.status_code, e.response.text[:200])
-            return f"（API 请求失败，错误代码 {e.response.status_code}）"
-        except httpx.RequestError as e:
-            sanitized_msg = self._sanitize_log(str(e))
-            logger.error("DeepSeek API 请求失败: %s", sanitized_msg)
-            return "（网络请求失败，请检查网络连接和 API 地址）"
-        except (KeyError, IndexError, json.JSONDecodeError) as e:
-            logger.error("DeepSeek API 响应解析失败: %s", e)
-            return "（API 响应格式异常）"
+        except Exception as e:
+            category = _classify_error(e)
+            if _should_retry(category) and MAX_RETRIES > 0:
+                for attempt in range(MAX_RETRIES):
+                    delay = _get_retry_delay(category, attempt)
+                    logger.warning("LLM retry %d/%d after %.1fs (category=%s)", attempt + 1, MAX_RETRIES, delay, category.value)
+                    time.sleep(delay)
+                    try:
+                        resp = self._client.post(self._chat_url, headers=self._headers, json=payload)
+                        resp.raise_for_status()
+                        data = resp.json()
+                        return data["choices"][0]["message"]["content"].strip()
+                    except Exception as retry_e:
+                        category = _classify_error(retry_e)
+                        if not _should_retry(category):
+                            break
+                        continue
+
+            if isinstance(e, httpx.HTTPStatusError):
+                logger.error("DeepSeek API HTTP %d: %s", e.response.status_code, self._sanitize_log(e.response.text[:200]))
+                return f"（API 请求失败，错误代码 {e.response.status_code}）"
+            if isinstance(e, httpx.RequestError):
+                sanitized_msg = self._sanitize_log(str(e))
+                logger.error("DeepSeek API 请求失败: %s", sanitized_msg)
+                return "（网络请求失败，请检查网络连接和 API 地址）"
+            logger.error("DeepSeek API 异常: %s", e)
+            return "（生成回复时出现异常）"
 
     def _mock_reply(self, query: str) -> str:
         """无 API Key 时的模拟回复（仅供测试）"""

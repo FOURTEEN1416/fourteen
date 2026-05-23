@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from observability.logging_setup import get_logger, get_trace_id, set_trace_id, new_trace_id
+from observability.logging_setup import get_logger, get_trace_id, set_trace_id
 
 logger = get_logger("tracing")
 
@@ -50,16 +51,19 @@ class TraceSpan:
 class Tracer:
     def __init__(self):
         self._active_traces: Dict[str, List[TraceSpan]] = {}
+        self._traces_lock = threading.Lock()
 
     def start_trace(self, trace_id: Optional[str] = None) -> str:
         tid = trace_id or str(uuid.uuid4())
-        self._active_traces[tid] = []
+        with self._traces_lock:
+            self._active_traces[tid] = []
         set_trace_id(tid)
         return tid
 
     def end_trace(self, trace_id: Optional[str] = None) -> Dict[str, Any]:
         tid = trace_id or get_trace_id()
-        spans = self._active_traces.pop(tid, [])
+        with self._traces_lock:
+            spans = self._active_traces.pop(tid, [])
         total_ms = sum(s.duration_ms for s in spans)
         result = {
             "trace_id": tid,
@@ -73,7 +77,7 @@ class Tracer:
                 for s in spans
             ],
         }
-        logger.info("trace_completed", trace_id=tid, total_ms=round(total_ms, 2))
+        logger.info("trace_completed", trace_id=tid, total_ms=round(total_ms, 2))  # type: ignore
         return result
 
     @contextmanager
@@ -88,8 +92,9 @@ class Tracer:
             yield span
         finally:
             span.end()
-            if trace_id in self._active_traces:
-                self._active_traces[trace_id].append(span)
+            with self._traces_lock:
+                if trace_id in self._active_traces:
+                    self._active_traces[trace_id].append(span)
 
     def get_active_trace_id(self) -> str:
         return get_trace_id()

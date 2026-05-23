@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field
 
@@ -101,6 +101,37 @@ class ObservabilityConfig(BaseModel):
     log_format: str = "json"
 
 
+class VoiceConfig(BaseModel):
+    """语音TTS配置 - 与voice/模块对接"""
+    enabled: bool = False
+    engine: str = "edge-tts"
+    edge_tts: Dict[str, Any] = Field(default_factory=lambda: {
+        "speaker_name": "zh-CN-XiaoxiaoNeural",
+    })
+    gpt_sovits: Dict[str, Any] = Field(default_factory=lambda: {
+        "url": "http://localhost:9880",
+        "timeout": 60.0,
+    })
+    bert_vits2: Dict[str, Any] = Field(default_factory=lambda: {
+        "url": "http://localhost:5000",
+        "speaker_name": "珊瑚宫心海[中]",
+        "timeout": 60.0,
+    })
+
+
+class CharacterCardConfig(BaseModel):
+    """角色卡配置 - 与character_card/模块对接"""
+    enabled: bool = True
+    default_card: str = ""
+    card_dir: str = "config/characters"
+
+
+class MemoryExtConfig(BaseModel):
+    """长期记忆增强配置 - 与memory_ext/模块对接"""
+    enabled: bool = False
+    collection_name: str = "long_term_memories"
+
+
 class SystemConfig(BaseModel):
     env: str = Field(default="dev", pattern=r"^(dev|prod|test)$")
     debug: bool = False
@@ -111,4 +142,7 @@ class SystemConfig(BaseModel):
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     api: APIConfig = Field(default_factory=APIConfig)
+    voice: VoiceConfig = Field(default_factory=VoiceConfig)
+    character_card: CharacterCardConfig = Field(default_factory=CharacterCardConfig)
+    memory_ext: MemoryExtConfig = Field(default_factory=MemoryExtConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)

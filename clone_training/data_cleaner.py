@@ -25,7 +25,7 @@ logger = logging.getLogger("clone.cleaner")
 
 # 启发式低质量检测
 _HEURISTIC_SHORT_MSG_THRESHOLD = 3  # 少于这个字符数视为无效
-_PUNCTUATION_ONLY_RE = re.compile(r"^[，。！？、；：""''．…—·,\.!\?;:'\"`~\-—\s]+$")
+_PUNCTUATION_ONLY_RE = re.compile(r"^[，。！？、；：""''．…—·,\\.!\\?;:'\"`~\\-—\\s]+$")
 _EMOJI_ONLY_RE = re.compile(r"^[\U0001F300-\U0001F9FF\u2600-\u27BF\uFE00-\uFE0F\U0001F600-\U0001F64F\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF\u200d\U0000200B-\U0000200D\U0000FE0F]+$")
 _AUTO_REPLY_PATTERNS = [
     r"^收到$",
@@ -227,7 +227,7 @@ Return ONLY a single number (1-5):"""
             reply_msg=reply_msg[:500],
         )
         try:
-            result = self._llm.chat(query=prompt, system_prompt="")
+            result = self._llm.chat(query=prompt, system_prompt="")  # type: ignore
             result = result.strip()
             # 提取数字
             nums = re.findall(r"[1-5]", result)

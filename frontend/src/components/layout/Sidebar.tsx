@@ -1,8 +1,9 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Heart, Brain, GraduationCap, Smartphone,
-  Settings, FileText, Shield, PanelLeftClose, PanelLeft,
+  Settings, FileText, Shield, PanelLeftClose, PanelLeft, Database,
+  Users, Activity, BarChart3, Sticker, PenTool,
 } from 'lucide-react'
 import { useChatStore } from '../../store/chatStore'
 
@@ -12,7 +13,18 @@ const navGroups = [
     items: [
       { to: '/', icon: LayoutDashboard, label: '仪表盘', end: true },
       { to: '/training', icon: GraduationCap, label: '克隆工作台' },
+      { to: '/clone-data', icon: Database, label: '数据管理' },
       { to: '/channels', icon: Smartphone, label: '通道管理' },
+    ],
+  },
+  {
+    label: '爱语',
+    items: [
+      { to: '/characters', icon: Users, label: '角色管理' },
+      { to: '/monitor', icon: Activity, label: '情感监控' },
+      { to: '/stats', icon: BarChart3, label: '对话统计' },
+      { to: '/stickers', icon: Sticker, label: '表情包' },
+      { to: '/persona-editor', icon: PenTool, label: '人设编辑' },
     ],
   },
   {
@@ -37,13 +49,13 @@ export default function Sidebar() {
   const isConnected = useChatStore((s) => s.isConnected)
 
   return (
-    <aside className={`hidden lg:flex flex-col bg-slate-900/50 border-r border-slate-800 shrink-0 transition-all duration-200 ${collapsed ? 'w-14' : 'w-52'}`}>
+    <aside className={`hidden lg:flex flex-col bg-white border-r border-gray-200 shrink-0 transition-all duration-200 ${collapsed ? 'w-14' : 'w-52'}`}>
       {/* Brand + toggle */}
-      <div className={`flex items-center h-14 border-b border-slate-800/50 ${collapsed ? 'justify-center px-0' : 'px-4 justify-between'}`}>
-        {!collapsed && <span className="text-sm font-semibold text-slate-100">小暖</span>}
+      <div className={`flex items-center h-14 border-b border-gray-200/50 ${collapsed ? 'justify-center px-0' : 'px-4 justify-between'}`}>
+        {!collapsed && <span className="text-sm font-semibold text-gray-800">小暖</span>}
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="text-slate-500 hover:text-slate-300 transition-colors"
+          className="text-gray-400 hover:text-gray-600 transition-colors"
           title={collapsed ? '展开侧边栏' : '收起侧边栏'}
         >
           {collapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
@@ -55,7 +67,7 @@ export default function Sidebar() {
         {navGroups.map((group) => (
           <div key={group.label}>
             {!collapsed && (
-              <div className="px-4 py-1 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              <div className="px-4 py-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
                 {group.label}
               </div>
             )}
@@ -72,8 +84,8 @@ export default function Sidebar() {
                         ? 'justify-center w-10 h-10 mx-auto'
                         : 'px-3 py-2',
                       isActive
-                        ? 'bg-primary-600/15 text-primary-300 font-medium'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30',
+                        ? 'bg-primary-100 text-primary-700 font-medium'
+                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100',
                     ].join(' ')
                   }
                   title={collapsed ? label : undefined}
@@ -89,8 +101,8 @@ export default function Sidebar() {
 
       {/* Connection status */}
       {!collapsed && (
-        <div className="px-4 py-3 border-t border-slate-800/50">
-          <div className="flex items-center gap-2 text-xs text-slate-500">
+        <div className="px-4 py-3 border-t border-gray-200/50">
+          <div className="flex items-center gap-2 text-xs text-gray-400">
             <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`} />
             {isConnected ? '已连接' : '未连接'}
           </div>

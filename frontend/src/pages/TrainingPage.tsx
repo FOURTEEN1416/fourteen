@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../api/client'
 import { useTrainingProgress } from '../hooks/useTrainingProgress'
 import Button from '../components/common/Button'
 import Card from '../components/common/Card'
-import type { TrainingAvailability, CloneTestResult, TrainingStatusEnum } from '../types/api'
+import type { TrainingAvailability, CloneTestResult, TrainingStatusEnum, CloneContact, CloneDataset } from '../types/api'
 
 const steps = [
   { id: 'extract', label: '数据提取' },
@@ -37,19 +37,65 @@ export default function TrainingPage() {
 
   const [targetError, setTargetError] = useState('')
 
+  // ── 联系人选择器（需求4） ──
+  const [contacts, setContacts] = useState<CloneContact[]>([])
+  const [datasets, setDatasets] = useState<CloneDataset[]>([])
+  const [showContactPicker, setShowContactPicker] = useState(false)
+  const [contactSearch, setContactSearch] = useState('')
+  const [loadingContacts, setLoadingContacts] = useState(false)
+  const [inputMode, setInputMode] = useState<'pick' | 'manual'>('pick') // pick=选人, manual=手输
+  const pickerRef = useRef<HTMLDivElement>(null)
+
+  // 点击外部关闭选择器
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setShowContactPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
   useEffect(() => {
     api.trainingStatus().then(({ data }) => {
       setAvailability(data as TrainingAvailability)
     }).catch(() => {})
   }, [])
 
+  // 加载联系人和已有数据集
+  const loadContacts = useCallback(async () => {
+    setLoadingContacts(true)
+    try {
+      const [cRes, dRes] = await Promise.all([
+        api.cloneContacts(),
+        api.cloneDatasets(),
+      ])
+      setContacts((cRes.data as { contacts: CloneContact[] }).contacts)
+      setDatasets((dRes.data as { datasets: CloneDataset[] }).datasets)
+    } catch { /* silent */ }
+    finally { setLoadingContacts(false) }
+  }, [])
+
+  useEffect(() => {
+    loadContacts()
+  }, [loadContacts])
+
   const isAvailable = availability?.available ?? false
   const isTraining = activeStatuses.includes(progress?.status as TrainingStatusEnum)
   const isDone = progress?.status === 'done'
   const isError = progress?.status === 'error'
 
+  // 选人
+  const selectContact = (username: string, displayName: string) => {
+    setTarget(username)
+    setContactSearch(displayName)
+    setShowContactPicker(false)
+    setTargetError('')
+  }
+
   const handleExtract = async () => {
-    if (!target.trim()) { setTargetError('请输入目标联系人'); return }
+    if (!target.trim()) { setTargetError('请选择或输入目标联系人'); return }
     setTargetError('')
     setExtracting(true)
     try {
@@ -104,12 +150,18 @@ export default function TrainingPage() {
 
   const stepDisabled = !isAvailable
 
+  // 筛选联系人
+  const filteredContacts = contacts.filter(c =>
+    !contactSearch || c.display_name.toLowerCase().includes(contactSearch.toLowerCase()) ||
+    c.username.toLowerCase().includes(contactSearch.toLowerCase())
+  )
+
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <h1 className="text-base font-semibold text-slate-200 mb-6">风格克隆训练</h1>
+      <h1 className="text-base font-semibold text-gray-800 mb-6">风格克隆训练</h1>
 
       {!isAvailable && (
-        <div className="mb-4 bg-red-900/20 border border-red-800/30 rounded-lg px-4 py-3 text-xs text-red-300">
+        <div className="mb-4 bg-red-50 border border-red-800/30 rounded-lg px-4 py-3 text-xs text-red-300">
           训练管线不可用
           {availability?.missing && availability.missing.length > 0 && (
             <span className="ml-2 text-red-400">— 缺失依赖: {availability.missing.join(', ')}</span>
@@ -129,34 +181,34 @@ export default function TrainingPage() {
               onClick={() => setStep(i)}
               className={`px-3 py-1.5 rounded-lg transition-colors ${
                 i === step ? 'bg-primary-600/30 text-primary-200' :
-                i < step ? 'text-green-400' : 'text-slate-600'
+                i < step ? 'text-green-400' : 'text-gray-300'
               }`}
             >
               {st.label}
             </button>
-            {i < steps.length - 1 && <div className={`w-4 h-px ${i < step ? 'bg-green-700' : 'bg-slate-700'}`} />}
+            {i < steps.length - 1 && <div className={`w-4 h-px ${i < step ? 'bg-green-700' : 'bg-gray-200'}`} />}
           </div>
         ))}
       </div>
 
       {progress && (
         <Card className="mb-6">
-          <h3 className="text-sm font-semibold text-slate-200 mb-3">训练进度</h3>
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">训练进度</h3>
           <div className="space-y-2">
-            <div className="flex justify-between text-xs text-slate-400">
+            <div className="flex justify-between text-xs text-gray-500">
               <span>状态: {{ idle: '空闲', extracting: '提取中', cleaning: '清洗中', training: '训练中', done: '已完成', error: '失败', stopped: '已停止' }[progress.status] ?? progress.status}</span>
               <span>{Math.round(progress.progress)}%</span>
             </div>
-            <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+            <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
               <div className="h-full bg-accent-500 rounded-full transition-all duration-500" style={{ width: `${progress.progress}%` }} />
             </div>
-            <div className="grid grid-cols-3 gap-2 text-xs text-slate-500">
+            <div className="grid grid-cols-3 gap-2 text-xs text-gray-400">
               <span>步骤: {progress.current_step}</span>
               <span>Loss: {progress.loss > 0 ? progress.loss.toFixed(4) : '-'}</span>
               <span>提取{progress.extracted_turns} / 清洗{progress.cleaned_turns}</span>
             </div>
             {progress.error && (
-              <div className="text-xs text-red-400 bg-red-900/20 rounded px-2 py-1 mt-2">
+              <div className="text-xs text-red-400 bg-red-50 rounded px-2 py-1 mt-2">
                 错误: {progress.error}
               </div>
             )}
@@ -165,22 +217,116 @@ export default function TrainingPage() {
       )}
 
       <div className="space-y-6">
+        {/* ── 数据提取（改造：支持选人） ── */}
         <Card>
-          <h3 className="text-sm font-semibold text-slate-200 mb-3">数据提取</h3>
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">数据提取</h3>
           <div className="space-y-3">
-            <div>
-              <label className="text-xs text-slate-400 block mb-1">目标联系人</label>
-              <input
-                value={target} onChange={(e) => { setTarget(e.target.value); setTargetError('') }}
-                placeholder="输入联系人名称"
-                className={`w-full bg-slate-800/60 border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-primary-500/50 ${targetError ? 'border-red-500/50' : 'border-slate-700/50'}`}
-              />
-              {targetError && <p className="text-xs text-red-400 mt-1">{targetError}</p>}
+            {/* 切换模式 */}
+            <div className="flex gap-2 text-xs mb-1">
+              <button
+                onClick={() => { setInputMode('pick'); setContactSearch(''); setShowContactPicker(false) }}
+                className={`px-2 py-1 rounded ${inputMode === 'pick' ? 'bg-primary-600/30 text-primary-200' : 'text-gray-400'}`}
+              >
+                从列表选人
+              </button>
+              <button
+                onClick={() => { setInputMode('manual'); setShowContactPicker(false) }}
+                className={`px-2 py-1 rounded ${inputMode === 'manual' ? 'bg-primary-600/30 text-primary-200' : 'text-gray-400'}`}
+              >
+                手动输入
+              </button>
             </div>
+
+            {/* 选人模式 */}
+            {inputMode === 'pick' && (
+              <div className="relative" ref={pickerRef}>
+                <div
+                  onClick={() => setShowContactPicker(!showContactPicker)}
+                  className="w-full bg-gray-200/60 border border-gray-300/50 rounded px-3 py-2 text-sm text-gray-800 cursor-pointer flex items-center justify-between"
+                >
+                  <span className={target ? 'text-gray-800' : 'text-gray-400'}>
+                    {target ? contactSearch || target : '点击选择联系人...'}
+                  </span>
+                  <span className="text-[10px] text-gray-400">{showContactPicker ? '▲' : '▼'}</span>
+                </div>
+
+                {showContactPicker && (
+                  <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-hidden flex flex-col">
+                    {/* 搜索框 */}
+                    <div className="p-2 border-b border-gray-100">
+                      <input
+                        value={contactSearch}
+                        onChange={(e) => setContactSearch(e.target.value)}
+                        placeholder="搜索联系人..."
+                        className="w-full bg-gray-100/80 border border-gray-200 rounded px-2 py-1.5 text-xs text-gray-800 outline-none"
+                        autoFocus
+                      />
+                    </div>
+                    {/* 联系人列表 */}
+                    <div className="flex-1 overflow-y-auto">
+                      {loadingContacts ? (
+                        <div className="p-3 text-xs text-gray-400 text-center">加载中...</div>
+                      ) : filteredContacts.length === 0 ? (
+                        <div className="p-3 text-xs text-gray-400 text-center">
+                          {contactSearch ? '未找到匹配的联系人' : '暂无联系人数据'}
+                          <div className="mt-1 text-[10px] text-gray-500">需要先解密微信数据库</div>
+                        </div>
+                      ) : (
+                        filteredContacts.map((c) => (
+                          <div
+                            key={c.username}
+                            onClick={() => selectContact(c.username, c.display_name)}
+                            className="px-3 py-2 text-xs text-gray-700 hover:bg-primary-50 cursor-pointer border-b border-gray-50 last:border-0 flex items-center justify-between"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate">{c.display_name || c.username}</div>
+                              <div className="text-[10px] text-gray-400 truncate">{c.username}</div>
+                            </div>
+                            {c.msg_count !== undefined && (
+                              <span className="text-[10px] text-gray-400 shrink-0 ml-2">{c.msg_count}条</span>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    {/* 已有数据集快捷选项 */}
+                    {datasets.length > 0 && (
+                      <div className="border-t border-gray-100">
+                        <div className="px-3 py-1.5 text-[10px] text-gray-400 font-medium">已有数据集</div>
+                        {datasets.slice(0, 5).map((ds) => (
+                          <div
+                            key={ds.person_id}
+                            onClick={() => selectContact(ds.person_id, ds.person_name)}
+                            className="px-3 py-1.5 text-xs text-gray-600 hover:bg-primary-50 cursor-pointer flex items-center justify-between"
+                          >
+                            <span>{ds.person_name}</span>
+                            <span className="text-[10px] text-gray-400">{ds.message_count}条</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 手动输入模式 */}
+            {inputMode === 'manual' && (
+              <div>
+                <input
+                  value={target} onChange={(e) => { setTarget(e.target.value); setTargetError('') }}
+                  placeholder="输入联系人 wxid 或文件路径"
+                  className={`w-full bg-gray-200/60 border rounded px-3 py-2 text-sm text-gray-800 placeholder-slate-500 outline-none focus:border-primary-500/50 ${targetError ? 'border-red-500/50' : 'border-gray-300/50'}`}
+                />
+                {targetError && <p className="text-xs text-red-400 mt-1">{targetError}</p>}
+              </div>
+            )}
+
+            {/* 数据源选择 */}
             <div>
-              <label className="text-xs text-slate-400 block mb-1">数据源</label>
+              <label className="text-xs text-gray-500 block mb-1">数据源</label>
               <select value={source} onChange={(e) => setSource(e.target.value)}
-                className="w-full bg-slate-800/60 border border-slate-700/50 text-slate-200 rounded px-3 py-2 text-sm outline-none">
+                className="w-full bg-gray-200/60 border border-gray-300/50 text-gray-800 rounded px-3 py-2 text-sm outline-none">
                 <option value="wcf">微信 (WeChatFerry RPC)</option>
                 <option value="sqlite">微信 (SQLite导出)</option>
                 <option value="decrypt">微信 (解密数据库)</option>
@@ -189,15 +335,19 @@ export default function TrainingPage() {
                 <option value="json">JSON 文件</option>
               </select>
             </div>
-            <Button onClick={handleExtract} loading={extracting} disabled={stepDisabled}>开始提取</Button>
+
+            <Button onClick={handleExtract} loading={extracting} disabled={stepDisabled || !target.trim()}>
+              开始提取
+            </Button>
           </div>
         </Card>
 
+        {/* 后续步骤保持不变 */}
         <Card>
-          <h3 className="text-sm font-semibold text-slate-200 mb-3">数据清洗</h3>
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">数据清洗</h3>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-slate-400 block mb-1">LLM Judge 评分阈值: {acceptScore}</label>
+              <label className="text-xs text-gray-500 block mb-1">LLM Judge 评分阈值: {acceptScore}</label>
               <input type="range" min={1} max={5} step={1} value={acceptScore}
                 onChange={(e) => setAcceptScore(Number(e.target.value))}
                 className="w-full accent-primary-500" />
@@ -207,20 +357,20 @@ export default function TrainingPage() {
         </Card>
 
         <Card>
-          <h3 className="text-sm font-semibold text-slate-200 mb-3">LoRA 训练</h3>
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">LoRA 训练</h3>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-slate-400 block mb-1">Epochs</label>
+                <label className="text-xs text-gray-500 block mb-1">Epochs</label>
                 <input type="number" min={1} max={50} value={epochs}
                   onChange={(e) => setEpochs(Number(e.target.value))}
-                  className="w-full bg-slate-800/60 border border-slate-700/50 rounded px-3 py-2 text-sm text-slate-200 outline-none" />
+                  className="w-full bg-gray-200/60 border border-gray-300/50 rounded px-3 py-2 text-sm text-gray-800 outline-none" />
               </div>
               <div>
-                <label className="text-xs text-slate-400 block mb-1">LoRA Rank</label>
+                <label className="text-xs text-gray-500 block mb-1">LoRA Rank</label>
                 <input type="number" min={1} max={256} value={loraRank}
                   onChange={(e) => setLoraRank(Number(e.target.value))}
-                  className="w-full bg-slate-800/60 border border-slate-700/50 rounded px-3 py-2 text-sm text-slate-200 outline-none" />
+                  className="w-full bg-gray-200/60 border border-gray-300/50 rounded px-3 py-2 text-sm text-gray-800 outline-none" />
               </div>
             </div>
             <div className="flex gap-2">
@@ -237,29 +387,29 @@ export default function TrainingPage() {
         </Card>
 
         <Card>
-          <h3 className="text-sm font-semibold text-slate-200 mb-3">克隆测试</h3>
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">克隆测试</h3>
           <div className="space-y-3">
             <input
               value={testMessage} onChange={(e) => setTestMessage(e.target.value)}
               placeholder="输入测试消息"
-              className="w-full bg-slate-800/60 border border-slate-700/50 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-primary-500/50"
+              className="w-full bg-gray-200/60 border border-gray-300/50 rounded px-3 py-2 text-sm text-gray-800 placeholder-slate-500 outline-none focus:border-primary-500/50"
             />
             <Button onClick={handleTest} loading={testing} disabled={!testMessage.trim() || !isDone}>
               测试
             </Button>
             {testResult && (
-              <div className="bg-slate-800/30 rounded-lg p-3 space-y-2">
-                <div className="text-xs text-slate-400">输入: {testResult.message}</div>
-                <div className="text-xs text-slate-200 whitespace-pre-wrap">{testResult.style_output}</div>
+              <div className="bg-gray-200/30 rounded-lg p-3 space-y-2">
+                <div className="text-xs text-gray-500">输入: {testResult.message}</div>
+                <div className="text-xs text-gray-800 whitespace-pre-wrap">{testResult.style_output}</div>
               </div>
             )}
           </div>
         </Card>
 
         <Card>
-          <h3 className="text-sm font-semibold text-slate-200 mb-3">应用克隆</h3>
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">应用克隆</h3>
           <div className="space-y-3">
-            <p className="text-xs text-slate-400">将训练好的 LoRA 模型应用到当前对话系统。</p>
+            <p className="text-xs text-gray-500">将训练好的 LoRA 模型应用到当前对话系统。</p>
             <Button onClick={handleApply} loading={applying} disabled={!isDone} variant="secondary">
               应用克隆模型
             </Button>

@@ -15,7 +15,6 @@ import glob
 import json
 import os
 import shutil
-import sys
 
 
 def format_size(size_bytes):

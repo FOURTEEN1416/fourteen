@@ -4,8 +4,7 @@
 原理: 定期解密 session.db (2MB, <1秒), 检测新消息
 session.db 包含每个聊天的最新消息摘要、发送者、时间戳
 """
-import hashlib, struct, os, sys, json, time, sqlite3, io
-import hmac as hmac_mod
+import hashlib, os, sys, json, time, sqlite3, io
 from datetime import datetime
 from Crypto.Cipher import AES
 import zstandard as zstd

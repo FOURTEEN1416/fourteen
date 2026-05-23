@@ -208,7 +208,7 @@ class ReflectionEngine:
 
 格式: [类型] 内心独白内容"""
         try:
-            result = self.llm_func(prompt)
+            result = self.llm_func(prompt)  # type: ignore
             for mono_type in ["miss_you", "happy", "worry", "jealous", "bored"]:
                 if mono_type in result:
                     thought = result.replace(f"[{mono_type}]", "").strip()
@@ -429,7 +429,7 @@ class MessageGenerator:
                 response = self._llm(prompt)
             else:
                 return None
-            response = response.strip().strip('"').strip("'")
+            response = response.strip().strip('"').strip("'")  # type: ignore
             if len(response) > 5:
                 return response
         except Exception as e:
@@ -484,7 +484,7 @@ class FrequencyController:
         now = datetime.now()
         if self._last_reset_date is None or now.date() != self._last_reset_date:
             self._daily_count = 0
-            self._last_reset_date = now.date()
+            self._last_reset_date = now.date()  # type: ignore
 
         if self._daily_count >= self.max_daily:
             return False, "daily_limit"
@@ -547,12 +547,13 @@ class ASEEngine:
         self.urgency = UrgencyState()
 
         # 反省引擎（V1，内嵌）
-        llm_func = None
+        llm_func = None  # type: ignore[assignment]
         if llm_gateway is not None:
             if hasattr(llm_gateway, "chat"):
-                llm_func = lambda prompt: llm_gateway.chat(
-                    query=prompt, max_tokens=100, temperature=0.7,
-                )
+                def llm_func(prompt):
+                    return llm_gateway.chat(
+                                    query=prompt, max_tokens=100, temperature=0.7,
+                                )
             elif callable(llm_gateway):
                 llm_func = llm_gateway
         self._reflection = ReflectionEngine(

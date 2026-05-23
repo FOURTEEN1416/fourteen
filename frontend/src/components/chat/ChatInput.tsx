@@ -1,4 +1,4 @@
-import { useState, useRef, KeyboardEvent } from 'react'
+﻿import { useState, useRef, KeyboardEvent } from 'react'
 import { Send } from 'lucide-react'
 import { useChatStore } from '../../store/chatStore'
 
@@ -26,7 +26,7 @@ export default function ChatInput({ onSend }: Props) {
   }
 
   return (
-    <div className="border-t border-slate-800 px-4 py-3 bg-slate-900/50">
+    <div className="border-t border-gray-200 px-4 py-3 bg-gray-50">
       <div className="flex items-center gap-2">
         <input
           ref={inputRef}
@@ -34,14 +34,14 @@ export default function ChatInput({ onSend }: Props) {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="说点什么..."
-          className="flex-1 bg-slate-800/50 text-slate-200 placeholder-slate-500 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary-400/30 border border-slate-700/50"
+          className="flex-1 bg-gray-200/50 text-gray-800 placeholder-slate-500 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary-400/30 border border-gray-300/50"
           disabled={isStreaming}
         />
 
         <button
           onClick={handleSend}
           disabled={!text.trim() || isStreaming}
-          className="bg-primary-600 hover:bg-primary-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-xl px-3 py-2.5 transition-colors shrink-0"
+          className="bg-primary-600 hover:bg-primary-500 disabled:bg-gray-200 disabled:text-gray-300 text-white rounded-xl px-3 py-2.5 transition-colors shrink-0"
         >
           <Send className="w-4 h-4" />
         </button>

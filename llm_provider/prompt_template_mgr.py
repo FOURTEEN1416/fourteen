@@ -4,7 +4,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 logger = logging.getLogger("prompt_template")
 
@@ -55,7 +55,7 @@ class PromptTemplateMgr:
         for filepath in self.template_dir.glob("*.yaml"):
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f) or {}
+                    data = yaml.safe_load(f) or {}  # type: ignore
                 name = data.get("name", filepath.stem)
                 self._templates[name] = PromptTemplate(
                     name=name,

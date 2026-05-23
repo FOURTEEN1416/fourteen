@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger("rag_engine_v2")
 
 try:
-    from rank_bm25 import BM25Okapi
+    from rank_bm25 import BM25Okapi  # noqa: F401
     HAS_BM25 = True
 except ImportError:
     HAS_BM25 = False

@@ -15,15 +15,14 @@ WeClone 适配器 — 完整的风格克隆管线总控
 
 import json
 import logging
-import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from clone_training import (
     DataExtractor,
-    StyleAnalyzer,
     DatasetBuilder,
     LoRATrainer,
+    StyleAnalyzer,
 )
 from safety.pii_anonymizer import PIIAnonymizer
 
@@ -240,6 +239,64 @@ class WeCloneAdapter:
         except ImportError as e:
             logger.warning("ToneMimic 注入跳过（模块不可用）: %s", e)
             return 0
+
+    def extract(self, target: str, source: str = "wcf", **kwargs) -> List[Dict[str, Any]]:
+        """Public wrapper around _extract for API use"""
+        return self._extract(target, source, **kwargs)
+
+    def train(
+        self,
+        config_path: str = "",
+        progress_callback=None,
+        epochs: int = 3,
+        lora_rank: int = 16,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """Run LoRA training on the most recently prepared dataset.
+
+        Args:
+            config_path: Ignored (kept for API compatibility).
+            progress_callback: Optional callable(step, total, loss).
+            epochs: Number of training epochs.
+            lora_rank: LoRA rank dimension.
+            **kwargs: Additional kwargs forwarded to LoRATrainer.train().
+
+        Returns:
+            Dict with status/output_dir/train_loss on success,
+            or status "error" on failure.
+        """
+        # Find most recent dataset files
+        dataset_dir = self.data_dir / "dataset"
+        if not dataset_dir.exists():
+            return {"status": "error", "error": "No dataset directory found"}
+
+        train_path = None
+        val_path = None
+        jsonl_files = sorted(dataset_dir.glob("*_train.jsonl"))
+        if jsonl_files:
+            train_path = str(jsonl_files[-1])
+            val_name = jsonl_files[-1].name.replace("_train.jsonl", "_val.jsonl")
+            val_candidate = dataset_dir / val_name
+            if val_candidate.exists():
+                val_path = str(val_candidate)
+
+        if not train_path:
+            json_files = sorted(dataset_dir.glob("*.json"))
+            if json_files:
+                train_path = str(json_files[-1])
+
+        if not train_path:
+            return {"status": "error", "error": "No training dataset found"}
+
+        logger.info("Training dataset: %s (val: %s)", train_path, val_path)
+        return self.trainer.train(
+            train_path=train_path,
+            val_path=val_path,
+            lora_r=lora_rank,
+            num_epochs=epochs,
+            progress_callback=progress_callback,
+            **kwargs,
+        )
 
     def health_check(self) -> dict:
         """健康检查"""

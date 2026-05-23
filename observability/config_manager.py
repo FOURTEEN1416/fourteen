@@ -41,12 +41,12 @@ class ConfigManager:
         system_yaml = self.config_dir / "system.yaml"
         if HAS_YAML and system_yaml.exists():
             with open(system_yaml, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
+                data = yaml.safe_load(f) or {}  # type: ignore
         env = os.environ.get("AI_GF_ENV", data.get("env", "dev"))
         env_yaml = self.config_dir / f"system_{env}.yaml"
         if HAS_YAML and env_yaml.exists():
             with open(env_yaml, "r", encoding="utf-8") as f:
-                env_overrides = yaml.safe_load(f) or {}
+                env_overrides = yaml.safe_load(f) or {}  # type: ignore
             data = self._deep_merge(data, env_overrides)
         for key in SystemConfig.model_fields:
             env_val = os.environ.get(f"AI_GF_{key.upper()}")
@@ -66,7 +66,7 @@ class ConfigManager:
         system_yaml = self.config_dir / "system.yaml"
         if HAS_YAML:
             with open(system_yaml, "w", encoding="utf-8") as f:
-                yaml.dump(self._config.model_dump(), f, default_flow_style=False, allow_unicode=True)
+                yaml.dump(self._config.model_dump(), f, default_flow_style=False, allow_unicode=True)  # type: ignore
             logger.info("Config saved to %s", system_yaml)
         return self._config
 
@@ -92,7 +92,7 @@ class ConfigManager:
         import asyncio
 
         async def _watch():
-            async for changes in watch(self.config_dir):
+            async for changes in watch(self.config_dir):  # type: ignore[misc]
                 logger.info("Config files changed: %s, reloading", changes)
                 self.reload()
 

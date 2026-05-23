@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("diary_summarizer")
@@ -183,7 +182,7 @@ class DiarySummarizer:
 每日摘要（100字以内）："""
 
         try:
-            return self.llm_func(prompt)
+            return self.llm_func(prompt)  # type: ignore
         except Exception as e:
             logger.warning("LLM summary failed: %s", e)
             return self._summarize_with_template(chats)

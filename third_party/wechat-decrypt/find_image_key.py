@@ -12,7 +12,6 @@ Usage:
   2. 立即运行: python find_image_key.py
 """
 import os
-import sys
 import re
 import struct
 import glob

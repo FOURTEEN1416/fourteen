@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 logger = logging.getLogger("character_config")
 
@@ -30,6 +31,7 @@ class ConfigLoader:
         self.config_dir = Path(os.path.abspath(config_dir))
         self._cache: Dict[str, Any] = {}
         self._merged: Dict[str, Any] = {}
+        self._reload_lock = threading.Lock()
 
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
@@ -54,11 +56,14 @@ class ConfigLoader:
         return data
 
     def reload(self) -> None:
-        self._cache.clear()
-        self._merged.clear()
-        self.load_persona()
-        self.load_emotion()
-        logger.info("All configs reloaded")
+        with self._reload_lock:
+            new_cache = {}
+            new_merged = {}
+            _old_cache, _old_merged = self._cache, self._merged
+            self._cache, self._merged = new_cache, new_merged
+            self.load_persona()
+            self.load_emotion()
+        logger.info("All configs reloaded atomically")
 
     # ── 内部方法 ──────────────────────────────────────────────
 

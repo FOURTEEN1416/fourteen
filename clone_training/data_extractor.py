@@ -17,7 +17,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("clone.extractor")
 
@@ -55,7 +55,7 @@ class DataExtractor:
             清洗后的对话列表
         """
         try:
-            import wcf
+            import wcf  # type: ignore
         except ImportError:
             logger.error("WeChatFerry 未安装: pip install wcf")
             return self._empty_result("wcf_not_installed")
@@ -281,7 +281,8 @@ class DataExtractor:
 
     def _extract_from_csv(self, content: str) -> List[Dict[str, Any]]:
         """从 CSV 提取"""
-        import csv, io
+        import csv
+        import io
         reader = csv.DictReader(io.StringIO(content))
         msgs = [dict(row) for row in reader]
         return self._process_raw_messages(msgs)
@@ -294,7 +295,7 @@ class DataExtractor:
         格式B: "2026-05-16 21:30 名字\n消息内容" （双行）
         格式C: "名字 2026-05-16 21:30\n消息内容" （变体）
         """
-        lines = [l.strip() for l in content.split("\n") if l.strip()]
+        lines = [line.strip() for line in content.split("\n") if line.strip()]
         conversations = []
 
         # 模式: 日期 时间 说话人: 消息

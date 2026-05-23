@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { api } from '../api/client'
 import SensitiveInput from '../components/common/SensitiveInput'
 import { isSensitiveField } from '../types/api'
@@ -84,14 +84,14 @@ export default function SettingsPage() {
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <h1 className="text-base font-semibold text-slate-200 mb-6">设置</h1>
+      <h1 className="text-base font-semibold text-gray-800 mb-6">设置</h1>
 
       <div className="flex gap-6">
         <nav className="hidden lg:flex flex-col gap-0.5 w-28 shrink-0">
           {sections.map(s => (
             <button key={s.id} onClick={() => setTab(s.id)}
               className={`text-xs px-3 py-1.5 rounded-lg text-left transition-colors ${
-                tab === s.id ? 'bg-primary-600/15 text-primary-200' : 'text-slate-500 hover:text-slate-300'
+                tab === s.id ? 'bg-primary-600/15 text-primary-200' : 'text-gray-400 hover:text-gray-700'
               }`}>
               {s.label}
             </button>
@@ -100,14 +100,14 @@ export default function SettingsPage() {
 
         <div className="flex-1 max-w-lg">
           <select value={tab} onChange={e => setTab(e.target.value)}
-            className="lg:hidden w-full mb-4 bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-2 text-sm outline-none">
+            className="lg:hidden w-full mb-4 bg-gray-200 border border-gray-300 text-gray-800 rounded-lg px-3 py-2 text-sm outline-none">
             {sections.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select>
 
           <div className="space-y-1">
             {section.items.map(item => (
-              <div key={item.id} className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-slate-800/30">
-                <span className="text-sm text-slate-300">{item.label}</span>
+              <div key={item.id} className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-gray-50">
+                <span className="text-sm text-gray-700">{item.label}</span>
                 {isSensitiveField(item.id) ? (
                   <div className="w-48">
                     <SensitiveInput
@@ -119,7 +119,7 @@ export default function SettingsPage() {
                 ) : item.type === 'toggle' ? (
                   <button onClick={() => set(item.id, !vals[item.id])}
                     className={`w-9 h-5 rounded-full transition-colors ${
-                      vals[item.id] ? 'bg-primary-500' : 'bg-slate-700'
+                      vals[item.id] ? 'bg-primary-500' : 'bg-gray-200'
                     }`}>
                     <div className={`w-4 h-4 bg-white rounded-full transition-transform ${
                       vals[item.id] ? 'translate-x-4.5' : 'translate-x-0.5'
@@ -127,15 +127,15 @@ export default function SettingsPage() {
                   </button>
                 ) : item.type === 'select' ? (
                   <select value={vals[item.id]} onChange={e => set(item.id, e.target.value)}
-                    className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2 py-1 text-xs outline-none">
+                    className="bg-gray-200 border border-gray-300 text-gray-800 rounded-lg px-2 py-1 text-xs outline-none">
                     {item.options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 ) : item.type === 'range' ? (
                   <div className="flex items-center gap-2">
                     <input type="range" min={item.min} max={item.max} step={item.step}
                       value={vals[item.id]} onChange={e => set(item.id, parseFloat(e.target.value))}
-                      className="w-20 h-1 bg-slate-700 rounded-full appearance-none cursor-pointer" />
-                    <span className="text-xs text-slate-500 w-8 text-right">{vals[item.id]}</span>
+                      className="w-20 h-1 bg-gray-200 rounded-full appearance-none cursor-pointer" />
+                    <span className="text-xs text-gray-400 w-8 text-right">{vals[item.id]}</span>
                   </div>
                 ) : null}
               </div>

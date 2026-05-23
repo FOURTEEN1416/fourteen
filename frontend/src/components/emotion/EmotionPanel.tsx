@@ -1,4 +1,4 @@
-import { useEmotionState } from '../../hooks/useAPI'
+﻿import { useEmotionState } from '../../hooks/useAPI'
 import Badge from '../common/Badge'
 
 const emotionColors: Record<string, string> = {
@@ -34,39 +34,39 @@ export default function EmotionPanel() {
     state.affinity <= 6 ? '恋人' : '热恋'
 
   return (
-    <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-4">
-      <h3 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-3">情感状态</h3>
+    <div className="bg-white/80 border border-gray-200 rounded-xl p-4">
+      <h3 className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">情感状态</h3>
 
       <div className="flex items-center gap-3 mb-3">
-        <div className="w-9 h-9 rounded-lg bg-slate-800 flex items-center justify-center text-base">
+        <div className="w-9 h-9 rounded-lg bg-gray-200 flex items-center justify-center text-base">
           {emotionEmojis[state.current_emotion] || '💬'}
         </div>
         <div>
-          <div className="text-sm font-medium text-slate-200">{state.current_emotion}</div>
-          <div className="text-[10px] text-slate-500">强度 {Math.round(state.intensity * 100)}%</div>
+          <div className="text-sm font-medium text-gray-800">{state.current_emotion}</div>
+          <div className="text-[10px] text-gray-400">强度 {Math.round(state.intensity * 100)}%</div>
         </div>
       </div>
 
       <div className="space-y-2.5">
         <div>
-          <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+          <div className="flex justify-between text-[10px] text-gray-400 mb-1">
             <span>能量</span>
             <span>{Math.round(state.energy * 100)}%</span>
           </div>
-          <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+          <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
             <div
-              className="h-full bg-slate-500 rounded-full transition-all duration-500"
+              className="h-full bg-gray-400 rounded-full transition-all duration-500"
               style={{ width: `${state.energy * 100}%` }}
             />
           </div>
         </div>
 
         <div>
-          <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+          <div className="flex justify-between text-[10px] text-gray-400 mb-1">
             <span>好感度</span>
             <Badge variant={state.affinity > 4 ? 'success' : 'default'}>{affinityLabel}</Badge>
           </div>
-          <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+          <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
             <div
               className="h-full bg-emotion-rose rounded-full transition-all duration-700"
               style={{ width: `${(state.affinity / 8) * 100}%` }}

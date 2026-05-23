@@ -100,4 +100,29 @@ export const api = {
   trainingTest: (message: string) =>
     client.post('/training/test', null, { params: { message } }),
   trainingApply: () => client.post('/training/apply'),
+
+  // ── 手动微信连接（需求1） ──
+  wechatConnect: () => client.post('/channels/wechat/connect'),
+  wechatDisconnect: () => client.post('/channels/wechat/disconnect'),
+  wechatConnectionStatus: () => client.get('/channels/wechat/connection-status'),
+
+  // ── 克隆数据管理（需求3+4） ──
+  cloneContacts: (keyword = '') =>
+    client.get('/clone/contacts', { params: { keyword } }),
+  cloneDatasets: () => client.get('/clone/datasets'),
+  cloneDatasetDetail: (personId: string, params?: {
+    page?: number; pageSize?: number; keyword?: string;
+    dateFrom?: string; dateTo?: string; onlyUser?: boolean
+  }) => client.get(`/clone/datasets/${personId}`, { params: {
+    page: params?.page, page_size: params?.pageSize,
+    keyword: params?.keyword, date_from: params?.dateFrom,
+    date_to: params?.dateTo, only_user: params?.onlyUser,
+  }}),
+  cloneDeleteDataset: (personId: string) =>
+    client.delete(`/clone/datasets/${personId}`),
+  cloneDeleteConversation: (personId: string, index: number) =>
+    client.delete(`/clone/datasets/${personId}/conversation`, { params: { index } }),
+  cloneBatchDeleteConversations: (personId: string, indices: number[]) =>
+    client.post(`/clone/datasets/${personId}/conversations/batch-delete`, null, { params: { indices: indices.join(',') } }),
+  cloneStats: () => client.get('/clone/stats'),
 }

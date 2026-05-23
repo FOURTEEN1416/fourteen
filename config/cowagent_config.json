@@ -1,9 +1,7 @@
 {
     "bot_type": "girlfriend",
-    "provider": "opencode_zen",
-    "model": "big-pickle",
-    "opencode_zen_api_base": "https://opencode.ai/zen/v1",
-    "opencode_zen_default_model": "big-pickle",
+    "provider": "deepseek",
+    "model": "deepseek-chat",
     "channel_type": "wx",
     "single_chat_prefix": [""],
     "single_chat_reply_prefix": "",
