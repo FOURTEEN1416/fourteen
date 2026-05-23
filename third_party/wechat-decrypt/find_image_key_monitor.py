@@ -6,7 +6,6 @@
 按 Ctrl+C 退出。
 """
 import os
-import sys
 import re
 import struct
 import glob

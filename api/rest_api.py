@@ -7,15 +7,15 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import AsyncGenerator, Optional
-
-from observability.logging_setup import ring_buffer
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
+
+from observability.logging_setup import ring_buffer
 
 logger = logging.getLogger("rest_api")
 
@@ -42,9 +42,9 @@ except ImportError:
 
 
 class ChatRequest(BaseModel):
-    message: str
-    session_id: str = ""
-    message_type: str = "text"
+    message: str = Field(..., max_length=10000)
+    session_id: str = Field(default="", max_length=128)
+    message_type: str = Field(default="text", pattern=r"^(text|image|voice|file)$")
 
 
 class ChatResponse(BaseModel):
@@ -77,9 +77,13 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                    session_manager=None) -> FastAPI:
     app = FastAPI(title="AI女友系统API", version="2.0")
 
-    cors_origins = os.environ.get("API_CORS_ORIGINS", "http://localhost:*").split(",")
+    cors_origins_env = os.environ.get("API_CORS_ORIGINS", "http://localhost:5173")
+    cors_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
     if cors_origins == ["*"]:
         logger.warning("CORS allows all origins - not recommended for production")
+    _is_prod = os.environ.get("ENV", os.environ.get("APP_ENV", "")).lower() in ("prod", "production")
+    if _is_prod and (cors_origins == ["*"] or not cors_origins):
+        logger.warning("Production environment detected with permissive CORS - consider restricting origins")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
@@ -88,6 +92,12 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         allow_headers=["*"],
     )
 
+    @app.exception_handler(Exception)
+    async def _global_exception_handler(request: Request, exc: Exception):
+        logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
     _api_key_enabled = os.environ.get("API_KEY_ENABLED", "false").lower() == "true"
     _api_key = os.environ.get("API_KEY", "")
     _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -95,12 +105,13 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     async def _verify_api_key(api_key: Optional[str] = Security(_api_key_header)):
         if not _api_key_enabled:
             return True
-        if api_key == _api_key:
+        import hmac
+        if hmac.compare_digest(api_key or "", _api_key):
             return True
         raise HTTPException(401, "Invalid or missing API key")
 
     if HAS_SLOWAPI:
-        limiter = Limiter(key_func=get_remote_address)
+        limiter = Limiter(key_func=get_remote_address)  # type: ignore
         app.state.limiter = limiter
 
     _orch = orchestrator
@@ -112,7 +123,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     async def chat(req: ChatRequest, _auth: bool = Security(_verify_api_key)):
         if not _orch:
             raise HTTPException(503, "Orchestrator not initialized")
-        result = _orch.process_message(req.message, req.session_id, req.message_type)
+        result = await _orch.process_message(req.message, req.session_id, req.message_type)
         return ChatResponse(
             reply=result.get("reply", ""),
             trace_id=result.get("trace_id", ""),
@@ -125,7 +136,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             raise HTTPException(503, "Stream not available")
 
         async def event_generator():
-            async for token in _orch.process_message_stream(req.message, req.session_id, req.message_type):
+            async for token in _orch.process_message_stream(req.message, req.session_id, req.message_type):  # type: ignore
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
 
@@ -141,11 +152,11 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     async def stats():
         stats_data = {"status": "ok"}
         if _orch:
-            stats_data["has_orchestrator"] = True
+            stats_data["has_orchestrator"] = True  # type: ignore
             if _orch._emotion:
                 stats_data["emotion"] = _orch._emotion.health_check()
             if _orch._memory:
-                stats_data["working_count"] = _orch._memory.working.count("")
+                stats_data["working_count"] = _orch._memory.working.count()
             if _sessions:
                 stats_data["active_sessions"] = _sessions.active_count
         return stats_data
@@ -220,7 +231,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     async def training_status():
         """Check if training pipeline is available."""
         try:
-            import clone_training
+            import clone_training  # noqa: F401
             available = True
             desc = "训练管线已就绪"
         except ImportError:
@@ -244,14 +255,21 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     @app.get("/api/channels")
     async def list_channels():
         channels = [
-            {"id": "web", "name": "Web 控制台", "status": "connected", "desc": "当前浏览器 WebSocket", "meta": "在线"},
-            {"id": "api", "name": "REST API", "status": "connected", "desc": "HTTP API 接口", "meta": "端口 8000"},
+            {"id": "web", "name": "Web 控制台", "type": "web", "status": "connected", "desc": "当前浏览器 WebSocket", "meta": "在线"},
+            {"id": "api", "name": "REST API", "type": "api", "status": "connected", "desc": "HTTP API 接口", "meta": "端口 8000"},
         ]
-        # Add WeChat channel if session manager knows about it
+        # Add WeChat channel — 通过 adapter 报告真实连接状态
         try:
             from wechatmsg_src.adapter import WeChatAdapter
-            channels.append({"id": "wechat", "name": "个人微信", "status": "disconnected",
-                             "desc": "CowAgent 扫码连接微信", "meta": ""})
+            status = WeChatAdapter.get_status()
+            channels.append({
+                "id": "wechat",
+                "name": "个人微信",
+                "type": "wechat",
+                "status": "connected" if status["connected"] else "disconnected",
+                "desc": "CowAgent 扫码连接微信",
+                "meta": f"在线 {status['uptime_seconds']}s" if status["connected"] else "",
+            })
         except ImportError:
             pass
         # Add connected sessions as channels
@@ -335,7 +353,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     _training_lock = threading.Lock()
 
     @app.post("/api/training/extract")
-    async def start_extraction(target: str = "", source: str = "wcf"):
+    async def start_extraction(target: str = "", source: str = "wcf", _auth: bool = Security(_verify_api_key)):
         """Start data extraction from WeChat records"""
         def _do_extract():
             try:
@@ -347,7 +365,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                 result = adapter.extract(target=target, source=source)
                 with _training_lock:
                     _training_state["status"] = "extracted"
-                    _training_state["extracted_turns"] = result.get("turns", 0)
+                    _training_state["extracted_turns"] = len(result) if isinstance(result, list) else result.get("turns", 0)
                     _training_state["progress"] = 0.3
             except Exception as e:
                 with _training_lock:
@@ -368,13 +386,13 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"status": "started", "task": "extract", "target": target}
 
     @app.get("/api/training/progress")
-    async def get_training_progress():
+    async def get_training_progress(_auth: bool = Security(_verify_api_key)):
         """Get real-time training progress"""
         with _training_lock:
             return dict(_training_state)
 
     @app.post("/api/training/clean")
-    async def start_cleaning(accept_score: int = 2):
+    async def start_cleaning(accept_score: int = 2, _auth: bool = Security(_verify_api_key)):
         """Start LLM Judge data cleaning"""
         def _do_clean():
             try:
@@ -383,14 +401,22 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                 llm = get_llm()
                 cleaner = DataCleaner(llm=llm, accept_score=accept_score)
                 data_dir = Path(__file__).parent.parent / "data" / "training"
-                json_files = sorted(data_dir.glob("*.json"))
+                json_files = sorted(data_dir.glob("*.jsonl"))
                 if not json_files:
                     raise FileNotFoundError("No dataset found")
                 latest = str(json_files[-1])
                 result_path = cleaner.score_from_dataset(latest)
+                cleaned_count = 0
+                if result_path:
+                    try:
+                        with open(result_path, "r", encoding="utf-8") as f:
+                            cleaned_data = json.load(f)
+                        cleaned_count = len(cleaned_data) if isinstance(cleaned_data, list) else 0
+                    except Exception:
+                        pass
                 with _training_lock:
                     _training_state["status"] = "cleaned"
-                    _training_state["cleaned_turns"] = len(cleaner.clean(cleaner.score_batch([])))
+                    _training_state["cleaned_turns"] = cleaned_count
                     _training_state["progress"] = 0.6
             except Exception as e:
                 with _training_lock:
@@ -407,7 +433,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"status": "started", "task": "clean", "accept_score": accept_score}
 
     @app.post("/api/training/train")
-    async def start_training(epochs: int = 3, lora_rank: int = 16):
+    async def start_training(epochs: int = 3, lora_rank: int = 16, _auth: bool = Security(_verify_api_key)):
         """Start LoRA training"""
         def _do_train():
             try:
@@ -431,7 +457,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                     lora_rank=lora_rank,
                 )
                 with _training_lock:
-                    _training_state["status"] = "done" if result.get("success") else "error"
+                    _training_state["status"] = "done" if result.get("status") == "success" else "error"
                     _training_state["progress"] = 1.0
                     if "lora_path" in result:
                         _training_state["lora_path"] = result["lora_path"]
@@ -451,26 +477,26 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"status": "started", "task": "train", "epochs": epochs}
 
     @app.post("/api/training/stop")
-    async def stop_training():
+    async def stop_training(_auth: bool = Security(_verify_api_key)):
         """Stop running training"""
         with _training_lock:
             _training_state["status"] = "stopped"
         return {"status": "stopped"}
 
     @app.post("/api/training/test")
-    async def test_clone(message: str):
+    async def test_clone(message: str, _auth: bool = Security(_verify_api_key)):
         """Test clone output"""
         try:
             from my_character.tone_mimic import ToneMimic
             chroma_path = str(Path(__file__).parent.parent / "data" / "chroma_db")
             mimic = ToneMimic(chroma_path=chroma_path)
             style_prompt = mimic.get_style_prompt()
-            return {"message": message, "style_prompt": style_prompt, "status": "ok"}
+            return {"message": message, "style_output": style_prompt, "status": "ok"}
         except Exception as e:
-            return {"message": message, "style_prompt": "", "status": "error", "detail": str(e)}
+            return {"message": message, "style_output": "", "status": "error", "detail": str(e)}
 
     @app.post("/api/training/apply")
-    async def apply_clone():
+    async def apply_clone(_auth: bool = Security(_verify_api_key)):
         """Apply trained clone as active persona"""
         try:
             result_path = str(Path(__file__).parent.parent / "data" / "training")
@@ -479,8 +505,108 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             raise HTTPException(status_code=500, detail=str(e))
 
     # ═══════════════════════════════════════════
-    # WeChat Channel API
+    # WeChat Channel API — 手动连接控制
     # ═══════════════════════════════════════════
+
+    # 微信连接状态（API 手动控制）
+    # 内部引用存在 <_wechat_connection> 字典中，无需 module-level global
+    _wechat_connection: dict = {
+        "status": "idle",  # idle, connecting, connected, disconnected, error
+        "message": "",
+        "qr_code": None,
+        "pid": None,
+        "started_at": None,
+        "_process_mgr": None,   # _CowAgentProcess 实例（内部使用，不输出）
+        "_heartbeat_mgr": None,  # _HeartbeatManager 实例
+    }
+    _wechat_lock = threading.Lock()
+
+    @app.post("/api/channels/wechat/connect")
+    async def manual_connect_wechat(_auth: bool = Security(_verify_api_key)):
+        """手动启动微信连接（扫码登录）"""
+        with _wechat_lock:
+            if _wechat_connection["status"] == "connecting":
+                return {"status": "connecting", "message": "正在连接中，请稍候..."}
+
+            if _wechat_connection["status"] == "connected":
+                return {"status": "connected", "message": "微信已连接"}
+
+            _wechat_connection["status"] = "connecting"
+            _wechat_connection["message"] = "正在启动 CowAgent 子进程..."
+
+        def _do_connect():
+            try:
+                from cowagent_adapter.init import initialize_wechat_channel
+
+                cowagent_cfg = str(Path(__file__).parent.parent / "cowagent_src" / "config.json")
+
+                result = initialize_wechat_channel(
+                    orchestrator=_orch,
+                    enable_heartbeat=True,
+                    heartbeat_interval=30,
+                    heartbeat_max_missed=3,
+                    cowagent_config=cowagent_cfg,
+                    auto_restart=True,
+                )
+
+                with _wechat_lock:
+                    if result.get("ok"):
+                        _wechat_connection["status"] = "connected"
+                        _wechat_connection["pid"] = result.get("pid")
+                        _wechat_connection["started_at"] = time.time()
+                        _wechat_connection["message"] = f"微信通道已启动 (PID={result.get('pid')})"
+                        _wechat_connection["_process_mgr"] = result.get("process")
+                        _wechat_connection["_heartbeat_mgr"] = result.get("heartbeat")
+                    else:
+                        _wechat_connection["status"] = "error"
+                        _wechat_connection["message"] = result.get("message", "连接失败")
+
+            except Exception as e:
+                with _wechat_lock:
+                    _wechat_connection["status"] = "error"
+                    _wechat_connection["message"] = str(e)
+                logger.exception("手动微信连接失败")
+
+        thread = threading.Thread(target=_do_connect, daemon=True)
+        thread.start()
+
+        return {"status": "connecting", "message": "微信连接已触发，请查看终端二维码扫码登录"}
+
+    @app.post("/api/channels/wechat/disconnect")
+    async def manual_disconnect_wechat(_auth: bool = Security(_verify_api_key)):
+        """手动断开微信连接"""
+        with _wechat_lock:
+            proc_mgr = _wechat_connection.get("_process_mgr")
+            hb_mgr = _wechat_connection.get("_heartbeat_mgr")
+            if hb_mgr:
+                try:
+                    hb_mgr.stop()
+                except Exception:
+                    pass
+            if proc_mgr:
+                try:
+                    proc_mgr.stop()
+                except Exception:
+                    pass
+            _wechat_connection["status"] = "disconnected"
+            _wechat_connection["message"] = "微信连接已断开"
+            _wechat_connection["pid"] = None
+            _wechat_connection["started_at"] = None
+            _wechat_connection["_process_mgr"] = None
+            _wechat_connection["_heartbeat_mgr"] = None
+        return {"status": "disconnected", "message": "微信已断开"}
+
+    @app.get("/api/channels/wechat/connection-status")
+    async def get_wechat_connection_status():
+        """获取手动连接状态（过滤内部字段）"""
+        with _wechat_lock:
+            return {
+                "status": _wechat_connection["status"],
+                "message": _wechat_connection["message"],
+                "qr_code": _wechat_connection.get("qr_code"),
+                "pid": _wechat_connection.get("pid"),
+                "started_at": _wechat_connection.get("started_at"),
+            }
 
     @app.get("/api/channels/wechat/status")
     async def get_wechat_status():
@@ -527,6 +653,95 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             return {"status": "no_heartbeat", "message": "Heartbeat not available"}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
+    # ═══════════════════════════════════════════
+    # Clone Data Management API（需求3+4）
+    # ═══════════════════════════════════════════
+
+    _clone_mgr = None  # lazy init
+
+    def _get_clone_mgr():
+        nonlocal _clone_mgr
+        if _clone_mgr is None:
+            from api.clone_manager import CloneDataManager
+            _clone_mgr = CloneDataManager()
+        return _clone_mgr
+
+    @app.get("/api/clone/contacts")
+    async def list_clone_contacts(keyword: str = "", _auth: bool = Security(_verify_api_key)):
+        """获取可克隆的联系人列表（需求4）"""
+        mgr = _get_clone_mgr()
+        contacts = mgr.get_contacts(keyword=keyword)
+        return {"contacts": contacts, "total": len(contacts)}
+
+    @app.get("/api/clone/datasets")
+    async def list_clone_datasets(_auth: bool = Security(_verify_api_key)):
+        """列出所有已提取的克隆数据集（需求3）"""
+        mgr = _get_clone_mgr()
+        datasets = mgr.list_datasets()
+        return {"datasets": datasets, "total": len(datasets)}
+
+    @app.get("/api/clone/datasets/{person_id}")
+    async def get_clone_dataset_detail(
+        person_id: str,
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=50, ge=1, le=200),
+        keyword: str = Query(default=""),
+        date_from: str = Query(default=""),
+        date_to: str = Query(default=""),
+        only_user: bool = Query(default=False),
+        _auth: bool = Security(_verify_api_key),
+    ):
+        """查看某人物的聊天记录详情"""
+        mgr = _get_clone_mgr()
+        return mgr.get_dataset_detail(
+            person_id=person_id,
+            page=page,
+            page_size=page_size,
+            keyword=keyword,
+            date_from=date_from,
+            date_to=date_to,
+            only_user=only_user,
+        )
+
+    @app.delete("/api/clone/datasets/{person_id}")
+    async def delete_clone_dataset(person_id: str, _auth: bool = Security(_verify_api_key)):
+        """删除某人物的整个数据集"""
+        mgr = _get_clone_mgr()
+        ok = mgr.delete_dataset(person_id)
+        if not ok:
+            raise HTTPException(404, f"数据集 {person_id} 未找到")
+        return {"status": "deleted", "person_id": person_id}
+
+    @app.delete("/api/clone/datasets/{person_id}/conversation")
+    async def delete_clone_conversation(
+        person_id: str,
+        index: int = Query(..., description="对话索引（从0开始）"),
+        _auth: bool = Security(_verify_api_key),
+    ):
+        """删除单条对话"""
+        mgr = _get_clone_mgr()
+        ok = mgr.delete_conversation(person_id, index)
+        if not ok:
+            raise HTTPException(404, "对话未找到或删除失败")
+        return {"status": "deleted", "person_id": person_id, "index": index}
+
+    @app.post("/api/clone/datasets/{person_id}/conversations/batch-delete")
+    async def batch_delete_clone_conversations(
+        person_id: str,
+        indices: list[int] = Query(..., description="要删除的索引列表"),
+        _auth: bool = Security(_verify_api_key),
+    ):
+        """批量删除多条对话"""
+        mgr = _get_clone_mgr()
+        deleted = mgr.batch_delete_conversations(person_id, indices)
+        return {"status": "deleted", "person_id": person_id, "deleted_count": deleted}
+
+    @app.get("/api/clone/stats")
+    async def get_clone_stats(_auth: bool = Security(_verify_api_key)):
+        """克隆数据全局统计"""
+        mgr = _get_clone_mgr()
+        return mgr.get_stats()
 
     # ═══════════════════════════════════════════
     # Real-time Log Stream (SSE)
@@ -582,48 +797,49 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
 
     @app.get("/api/stats/dashboard")
     async def get_dashboard_stats():
-        """Enhanced dashboard stats"""
-        stats = {
-            "system": {"status": "unknown", "uptime": 0},
-            "wechat": {"connected": False},
-            "training": {"status": "idle", "progress": 0},
-            "emotion": {"current": "-", "affinity": 0, "energy": 0},
-            "memory": {"facts_count": 0, "chats_today": 0},
-        }
+        """Enhanced dashboard stats — flat shape matching frontend DashboardStats type"""
+        emotion_current = "-"
+        affinity = 0
+        energy = 0
+        chats_today = 0
+        facts_count = 0
+        sys_status = "unknown"
+        uptime = 0
 
         # Get training state
         with _training_lock:
-            stats["training"] = {
+            training_info = {
                 "status": _training_state["status"],
                 "progress": _training_state["progress"],
                 "loss": _training_state["loss"],
                 "extracted_turns": _training_state["extracted_turns"],
+                "cleaned_turns": _training_state.get("cleaned_turns", 0),
             }
 
         # Get wechat status
+        wechat_info = {"connected": False}
         try:
-            wc = await get_wechat_status()
-            stats["wechat"] = wc
+            wechat_info = await get_wechat_status()
         except Exception:
             pass
 
-        # Try to get emotion/memory stats from running components
+        # Get emotion/memory stats from running components
         try:
             from cowagent_adapter._globals import bot_registry
             bot = bot_registry.get()
             if bot:
                 if hasattr(bot, 'emotion') and bot.emotion:
                     es = bot.emotion.state
-                    stats["emotion"] = {
-                        "current": es.emotion.value if hasattr(es.emotion, 'value') else str(es.emotion),
-                        "affinity": getattr(es, 'affinity', 0),
-                        "energy": getattr(es, 'energy', 0),
-                    }
+                    emotion_current = es.emotion.value if hasattr(es.emotion, 'value') else str(es.emotion)
+                    affinity = getattr(es, 'affinity', 0)
+                    energy = getattr(es, 'energy', 0)
                 if hasattr(bot, 'memory') and bot.memory:
                     try:
                         structured = bot.memory.structured_memory
                         if structured:
-                            stats["memory"]["chats_today"] = structured.count_chats_today()
+                            chats_today = structured.count_chats_today()
+                            if hasattr(structured, 'count_facts'):
+                                facts_count = structured.count_facts()
                     except Exception:
                         pass
         except Exception:
@@ -633,13 +849,31 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         if _health:
             try:
                 health_data = _health.check()
-                stats["system"] = {
-                    "status": health_data.get("status", "unknown"),
-                    "uptime": health_data.get("uptime_seconds", 0),
-                }
+                sys_status = health_data.get("status", "unknown")
+                uptime = health_data.get("uptime_seconds", 0)
             except Exception:
                 pass
 
-        return stats
+        return {
+            "today_chats": chats_today,
+            "recent_memories": facts_count,
+            "affinity": affinity,
+            "energy": energy,
+            "current_emotion": emotion_current,
+            "system_status": sys_status,
+            "uptime_seconds": uptime,
+            "wechat_connected": wechat_info.get("connected", False),
+            "wechat": wechat_info,
+            "training": training_info,
+        }
+
+    try:
+        from aiyu.api.registry import setup_aiyu
+        aiyu_reg = setup_aiyu(app, run_migrate=True)
+        if orchestrator and hasattr(orchestrator, '_character_manager'):
+            orchestrator._character_manager = aiyu_reg.character_manager
+        logger.info("爱语模块已挂载到REST API")
+    except Exception as e:
+        logger.warning("爱语模块挂载失败: %s", e)
 
     return app

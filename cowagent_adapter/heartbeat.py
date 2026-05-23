@@ -16,7 +16,7 @@ logger = logging.getLogger("wechat.heartbeat")
 class WeChatHeartbeat:
     """
     WeChat connection heartbeat monitor.
-    
+
     Periodically checks if CowAgent's WeChat channel is alive,
     notifies listeners on state changes, and auto-reconnects.
     """

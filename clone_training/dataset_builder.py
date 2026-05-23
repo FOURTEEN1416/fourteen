@@ -22,10 +22,9 @@
 
 import json
 import logging
-import os
 import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 from .style_analyzer import StyleAnalyzer, StyleProfile
 
@@ -206,9 +205,9 @@ class DatasetBuilder:
         tags = []
 
         # 句长
-        dominant = max(
+        dominant = max(  # type: ignore
             profile.sentence_length_dist,
-            key=profile.sentence_length_dist.get,
+            key=profile.sentence_length_dist.get,  # type: ignore
             default="中句",
         )
         if "短句" in dominant:
@@ -224,7 +223,7 @@ class DatasetBuilder:
 
         # 情绪
         if profile.emotion_dist:
-            top_emo = max(profile.emotion_dist, key=profile.emotion_dist.get)
+            top_emo = max(profile.emotion_dist, key=profile.emotion_dist.get)  # type: ignore
             if top_emo == "正面":
                 tags.append("语气活泼")
             elif top_emo == "负面":
@@ -261,7 +260,7 @@ class DatasetBuilder:
             "min_length": min(lengths),
             "max_length": max(lengths),
             "length_std": (
-                sum((l - sum(lengths)/len(lengths))**2 for l in lengths) / len(lengths)
+                sum((ln - sum(lengths)/len(lengths))**2 for ln in lengths) / len(lengths)
             ) ** 0.5,
             "estimated_tokens": sum(lengths) * 1.5,
             "diversity": len(set(c["reply"][:10] for c in conversations if c.get("reply"))) / len(conversations),

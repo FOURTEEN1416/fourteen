@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
@@ -127,7 +126,7 @@ class WeatherPlugin:
         )
 
         try:
-            with httpx.Client(timeout=10) as client:
+            with httpx.Client(timeout=10) as client:  # type: ignore
                 resp = client.get(url)
                 resp.raise_for_status()
                 data = resp.json()

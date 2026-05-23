@@ -9,8 +9,8 @@
 
 from __future__ import annotations
 
-import logging
 import hashlib
+import logging
 import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -19,7 +19,9 @@ logger = logging.getLogger("vector_memory")
 
 try:
     import chromadb
-    from chromadb.api.models.Collection import Collection
+
+    # 使用最稳定的导入路径; chromadb v0.4+ 兼容
+    from chromadb.api.models.Collection import Collection  # type: ignore
     from chromadb.utils import embedding_functions
     HAS_CHROMADB = True
 except ImportError:
@@ -41,7 +43,7 @@ class VectorMemory:
 
     def __init__(self, chroma_path: str = "./data/chroma_db"):
         self.chroma_path = os.path.abspath(chroma_path)
-        self._collections: Dict[str, Optional[Collection]] = {
+        self._collections: dict[str, Any] = {
             name: None for name in self.COLLECTIONS
         }
 
@@ -54,14 +56,14 @@ class VectorMemory:
         """初始化 ChromaDB 连接和 collections"""
         try:
             os.makedirs(self.chroma_path, exist_ok=True)
-            client = chromadb.PersistentClient(path=self.chroma_path)
-            ef = embedding_functions.DefaultEmbeddingFunction()
+            client = chromadb.PersistentClient(path=self.chroma_path)  # type: ignore
+            ef = embedding_functions.DefaultEmbeddingFunction()  # type: ignore
 
             for name in self.COLLECTIONS:
                 try:
                     self._collections[name] = client.get_or_create_collection(
                         name=name,
-                        embedding_function=ef,
+                        embedding_function=ef,  # type: ignore
                     )
                 except Exception as e:
                     logger.warning("Failed to init collection '%s': %s", name, e)
@@ -124,6 +126,22 @@ class VectorMemory:
             logger.warning("store_fact failed: %s", e)
             return None
 
+    def add_batch(self, documents: List[str], metadatas: List[Dict[str, Any]],
+                  ids: List[str], collection: str = "user_facts") -> bool:
+        """批量添加文档"""
+        if len(documents) != len(metadatas) or len(documents) != len(ids):
+            logger.error("add_batch: documents/metadatas/ids length mismatch")
+            return False
+        coll = self._collections.get(collection)
+        if coll is None:
+            return False
+        try:
+            coll.add(documents=documents, metadatas=metadatas, ids=ids)
+            return True
+        except Exception as e:
+            logger.warning("add_batch failed: %s", e)
+            return False
+
     def search_facts(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """语义搜索用户事实"""
         return self._search("user_facts", query, top_k)
@@ -157,8 +175,7 @@ class VectorMemory:
         }
 
         try:
-            from datetime import datetime as dt
-            doc_id = f"emotion_{dt.now().strftime('%Y%m%d%H%M%S%f')}"
+            doc_id = f"emotion_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
             coll.add(documents=[doc], metadatas=[meta], ids=[doc_id])
             return doc_id
         except Exception as e:
@@ -208,6 +225,56 @@ class VectorMemory:
         except Exception as e:
             logger.warning("Search failed on %s: %s", collection_name, e)
             return []
+
+    def search(self, query: str, top_k: int = 5, filter_dict: Optional[dict] = None) -> List[Dict[str, Any]]:
+        """通用语义搜索 (memory_pipeline 调用入口)
+
+        Args:
+            query: 搜索文本
+            top_k: 返回条数
+            filter_dict: 过滤器，type -> collection_name 映射:
+                "episode" → "episodic_memory"
+                "fact"    → "user_facts"
+        """
+        collection_map = {
+            "episode": "episodic_memory",
+            "fact": "user_facts",
+        }
+        if filter_dict and isinstance(filter_dict, dict):
+            coll_name = collection_map.get(filter_dict.get("type", ""))
+            if coll_name:
+                return self._search(coll_name, query, top_k)
+        # 默认: 搜所有 collection, 合并结果
+        all_results = []
+        for coll in self._collections.values():
+            if coll is not None:
+                try:
+                    res = coll.query(query_texts=[query], n_results=top_k)
+                    if res and res.get("documents"):
+                        for i, doc in enumerate(res["documents"][0]):
+                            meta = res["metadatas"][0][i] if res.get("metadatas") else {}
+                            all_results.append({
+                                "content": doc,
+                                "metadata": meta,
+                                "distance": res["distances"][0][i] if res.get("distances") else 0,
+                            })
+                except Exception:
+                    pass
+        return all_results
+
+    def store_text(self, text: str, metadata: Optional[dict] = None,
+                   collection: str = "episodic_memory") -> Optional[str]:
+        """存储任意文本到指定 collection (memory_pipeline EpisodicMemory 调用)"""
+        coll = self._collections.get(collection)
+        if coll is None:
+            return None
+        doc_id = f"text_{hashlib.md5(text.encode()).hexdigest()[:12]}"
+        try:
+            coll.add(documents=[text], metadatas=[metadata or {}], ids=[doc_id])
+            return doc_id
+        except Exception as e:
+            logger.warning("store_text failed: %s", e)
+            return None
 
     def health_check(self) -> dict:
         """健康检查"""

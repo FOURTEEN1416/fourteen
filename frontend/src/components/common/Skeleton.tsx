@@ -1,4 +1,4 @@
-interface SkeletonProps {
+﻿interface SkeletonProps {
   className?: string
   lines?: number
 }
@@ -10,7 +10,7 @@ export default function Skeleton({ className = '', lines = 1 }: SkeletonProps) {
         {Array.from({ length: lines }).map((_, i) => (
           <div
             key={i}
-            className={`h-3 bg-slate-800/60 rounded animate-skeleton ${
+            className={`h-3 bg-gray-200/60 rounded animate-skeleton ${
               i === lines - 1 ? 'w-3/4' : 'w-full'
             } ${className}`}
           />
@@ -20,6 +20,6 @@ export default function Skeleton({ className = '', lines = 1 }: SkeletonProps) {
   }
 
   return (
-    <div className={`bg-slate-800/60 rounded animate-skeleton ${className}`} />
+    <div className={`bg-gray-200/60 rounded animate-skeleton ${className}`} />
   )
 }

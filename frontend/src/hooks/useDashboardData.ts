@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useCallback } from 'react'
 import { api } from '../api/client'
 import type { DashboardStats, WeChatStatus, ProactiveEngineState, HealthStatus } from '../types/api'
+import { useSmartPoll } from './useSmartPoll'
 
 const POLL_INTERVAL = 15000
 
@@ -10,7 +11,6 @@ export function useDashboardData() {
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [proactive, setProactive] = useState<ProactiveEngineState | null>(null)
   const [loading, setLoading] = useState(true)
-  const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
 
   const refetch = useCallback(async () => {
     try {
@@ -32,13 +32,7 @@ export function useDashboardData() {
     }
   }, [])
 
-  useEffect(() => {
-    refetch()
-    timerRef.current = setInterval(refetch, POLL_INTERVAL)
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
-  }, [refetch])
+  useSmartPoll(refetch, POLL_INTERVAL)
 
   return { stats, wechat, health, proactive, loading, refetch }
 }

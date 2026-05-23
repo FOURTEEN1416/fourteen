@@ -7,9 +7,7 @@ import hashlib
 import hmac as hmac_mod
 import json
 import os
-import re
 import struct
-import time
 
 PAGE_SZ = 4096
 KEY_SZ = 32

@@ -23,8 +23,7 @@ import logging
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger("clone.analyzer")
 
@@ -96,7 +95,7 @@ class StyleProfile:
 
         # 句式
         if self.sentence_length_dist:
-            dominant = max(self.sentence_length_dist, key=self.sentence_length_dist.get)
+            dominant = max(self.sentence_length_dist, key=self.sentence_length_dist.get)  # type: ignore
             lines.append(f"- 偏好句式: {dominant} (占 {self.sentence_length_dist.get(dominant, 0):.0%})")
 
         # 标点
@@ -122,7 +121,7 @@ class StyleProfile:
 
         # 情绪
         if self.emotion_dist:
-            dominant_emo = max(self.emotion_dist, key=self.emotion_dist.get)
+            dominant_emo = max(self.emotion_dist, key=self.emotion_dist.get)  # type: ignore
             lines.append(f"- 主要情绪: {dominant_emo} ({self.emotion_dist[dominant_emo]:.0%})")
 
         # 人称
@@ -134,7 +133,7 @@ class StyleProfile:
 
         # 句类
         if self.sentence_type_dist:
-            top_s = max(self.sentence_type_dist, key=self.sentence_type_dist.get)
+            top_s = max(self.sentence_type_dist, key=self.sentence_type_dist.get)  # type: ignore
             lines.append(f"- 主要句类: {top_s} ({self.sentence_type_dist[top_s]:.0%})")
 
         # 网络用语
@@ -212,10 +211,10 @@ class StyleAnalyzer:
         lengths = [len(r) for r in replies]
         profile.avg_sentence_length = sum(lengths) / len(lengths)
         profile.sentence_length_dist = {
-            "短句(<=10字)": sum(1 for l in lengths if l <= 10) / len(lengths),
-            "中句(11-30字)": sum(1 for l in lengths if 11 <= l <= 30) / len(lengths),
-            "长句(31-80字)": sum(1 for l in lengths if 31 <= l <= 80) / len(lengths),
-            "超长句(>80字)": sum(1 for l in lengths if l > 80) / len(lengths),
+            "短句(<=10字)": sum(1 for ln in lengths if ln <= 10) / len(lengths),
+            "中句(11-30字)": sum(1 for ln in lengths if 11 <= ln <= 30) / len(lengths),
+            "长句(31-80字)": sum(1 for ln in lengths if 31 <= ln <= 80) / len(lengths),
+            "超长句(>80字)": sum(1 for ln in lengths if ln > 80) / len(lengths),
         }
 
         # 2. 标点

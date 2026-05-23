@@ -1,4 +1,4 @@
-import type { ReactNode, ButtonHTMLAttributes } from 'react'
+﻿import type { ReactNode, ButtonHTMLAttributes } from 'react'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
@@ -8,9 +8,9 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantStyles = {
-  primary: 'bg-primary-600 text-white hover:bg-primary-500 disabled:bg-slate-800 disabled:text-slate-600',
-  secondary: 'border border-slate-700 text-slate-300 hover:bg-slate-800/60 hover:text-slate-200',
-  ghost: 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30',
+  primary: 'bg-primary-600 text-white hover:bg-primary-500 disabled:bg-gray-200 disabled:text-gray-300',
+  secondary: 'border border-gray-300 text-gray-700 hover:bg-gray-200/60 hover:text-gray-800',
+  ghost: 'text-gray-400 hover:text-gray-700 hover:bg-gray-200/30',
   danger: 'bg-red-900/30 text-red-400 border border-red-800/30 hover:bg-red-900/50',
 }
 

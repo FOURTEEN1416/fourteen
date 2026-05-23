@@ -54,6 +54,14 @@ class ProactiveScheduler:
 
         logger.info("ProactiveScheduler initialized (APScheduler=%s)", HAS_APSCHEDULER)
 
+    def _safe_job_wrapper(self, job_fn: Callable, job_name: str) -> Callable:
+        def wrapper(*args, **kwargs):
+            try:
+                return job_fn(*args, **kwargs)
+            except Exception as e:
+                logger.error("Scheduled job '%s' failed: %s", job_name, e, exc_info=True)
+        return wrapper
+
     def start(self) -> bool:
         """
         启动所有定时任务
@@ -70,48 +78,56 @@ class ProactiveScheduler:
             return True
 
         try:
-            self._scheduler = BackgroundScheduler(daemon=True)
+            self._scheduler = BackgroundScheduler(daemon=True)  # type: ignore
 
             # 1. ASE 检查（每5分钟）
             self._scheduler.add_job(
-                self._check_ase,
-                IntervalTrigger(minutes=5),
+                self._safe_job_wrapper(self._check_ase, "ase_check"),
+                IntervalTrigger(minutes=5),  # type: ignore
                 id="ase_check",
                 name="ASE主动消息检查",
                 replace_existing=True,
+                misfire_grace_time=60,
+                coalesce=True,
             )
 
             # 2. 早安任务（08:00）
             self._scheduler.add_job(
-                self._morning_greeting,
-                CronTrigger(hour=8, minute=0),
+                self._safe_job_wrapper(self._morning_greeting, "morning_greeting"),
+                CronTrigger(hour=8, minute=0),  # type: ignore
                 id="morning_greeting",
                 name="早安问候",
                 replace_existing=True,
+                misfire_grace_time=60,
+                coalesce=True,
             )
 
             # 3. 晚安任务（23:30）
             self._scheduler.add_job(
-                self._night_greeting,
-                CronTrigger(hour=23, minute=30),
+                self._safe_job_wrapper(self._night_greeting, "night_greeting"),
+                CronTrigger(hour=23, minute=30),  # type: ignore
                 id="night_greeting",
                 name="晚安问候",
                 replace_existing=True,
+                misfire_grace_time=60,
+                coalesce=True,
             )
 
             # 4. 每日维护（00:05）
             self._scheduler.add_job(
-                self._run_daily_maintenance,
-                CronTrigger(hour=0, minute=5),
+                self._safe_job_wrapper(self._run_daily_maintenance, "daily_maintenance"),
+                CronTrigger(hour=0, minute=5),  # type: ignore
                 id="daily_maintenance",
                 name="每日维护",
                 replace_existing=True,
+                misfire_grace_time=60,
+                coalesce=True,
             )
 
             # 5. 每日 ASE 重置（00:00）
             self._scheduler.add_job(
-                self._reset_daily,
-                CronTrigger(hour=0, minute=0),
+                self._safe_job_wrapper(self._reset_daily, "daily_reset"),
+                CronTrigger(hour=0, minute=0),  # type: ignore
                 id="daily_reset",
                 name="每日重置",
                 replace_existing=True,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Optional, Tuple
 
 logger = logging.getLogger("prompt_injection")
 
@@ -84,7 +84,7 @@ class PromptInjectionDetector:
                 f"{text[:500]}\n"
                 f'回复JSON：{{"is_injection": true/false, "confidence": 0.0-1.0}}'
             )
-            response = self.llm_gateway.chat(
+            response = self.llm_gateway.chat(  # type: ignore
                 query=prompt,
                 system_prompt="你是一个Prompt注入检测器，仅输出JSON。",
                 max_tokens=64,

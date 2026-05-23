@@ -1,12 +1,17 @@
-from .vector_memory import VectorMemory
-from .structured_memory import StructuredMemory
-from .fact_extractor import FactExtractor
 from .diary_summarizer import DiarySummarizer
-from .memory_pipeline import MemoryPipeline
-from .working_memory import WorkingMemory
 from .episodic_memory import EpisodicMemory
+from .fact_extractor import FactExtractor
+from .importance_scorer import (
+    ConflictDetector,
+    CrossSessionReasoner,
+    ForgettingManager,
+    ImportanceScorer,
+)
+from .memory_pipeline import MemoryPipeline
 from .semantic_memory import SemanticMemory
-from .importance_scorer import ImportanceScorer, ForgettingManager, ConflictDetector, CrossSessionReasoner
+from .structured_memory import StructuredMemory
+from .vector_memory import VectorMemory
+from .working_memory import WorkingMemory
 
 MemoryPipelineV2 = MemoryPipeline
 MemoryPipelineOptimized = MemoryPipeline

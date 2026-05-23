@@ -75,6 +75,11 @@ export interface DashboardStats {
   affinity: number
   energy: number
   current_emotion: string
+  system_status: string
+  uptime_seconds: number
+  wechat_connected: boolean
+  wechat: WeChatStatus | null
+  training: TrainingProgress | null
 }
 
 export interface WeChatStatus {
@@ -189,4 +194,61 @@ export interface ConfigSection {
   id: string
   label: string
   items: ConfigItem[]
+}
+
+// ── 克隆数据管理（需求3+4） ──
+
+export interface CloneContact {
+  username: string
+  display_name: string
+  source: string
+  msg_count?: number
+}
+
+export interface CloneDataset {
+  person_id: string
+  person_name: string
+  source: string
+  message_count: number
+  extracted_at: string
+  has_style: boolean
+  has_lora: boolean
+}
+
+export interface CloneConversation {
+  user: string
+  reply: string
+  timestamp?: number
+  is_self?: boolean
+  source?: string
+}
+
+export interface CloneDatasetDetail {
+  person_id: string
+  person_name: string
+  total: number
+  page: number
+  page_size: number
+  conversations: CloneConversation[]
+  stats: {
+    total: number
+    date_range: string
+  }
+  error?: string
+}
+
+export interface CloneStats {
+  total_persons: number
+  total_messages: number
+  cloned_persons: number
+  persons: CloneDataset[]
+}
+
+// ── 微信手动连接（需求1） ──
+
+export interface WeChatConnectionStatus {
+  status: 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error'
+  message: string
+  pid?: number
+  started_at?: number
 }

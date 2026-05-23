@@ -31,6 +31,8 @@ export const useErrorStore = create<ErrorState>((set) => ({
     }))
 
     if (duration > 0) {
+      // Note: zustand set() is safe to call after unmount — no cleanup needed.
+      // The store persists independently of React component lifecycle.
       setTimeout(() => {
         set((state) => ({
           toasts: state.toasts.filter((t) => t.id !== id),

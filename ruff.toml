@@ -1,0 +1,8 @@
+line-length = 120
+
+[lint]
+ignore = ["E501", "C901"]
+
+[lint.per-file-ignores]
+"tests/real_e2e_test.py" = ["E402"]
+"tests/real_test.py" = ["E402"]

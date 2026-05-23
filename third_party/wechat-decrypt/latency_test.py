@@ -1,5 +1,5 @@
 """测量消息延迟 - 用mtime检测WAL变化（WAL文件是预分配固定大小的）"""
-import time, os, sys, io, hashlib, struct, sqlite3, json
+import time, os, sys, io, struct, sqlite3, json
 from datetime import datetime
 from Crypto.Cipher import AES
 

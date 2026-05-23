@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+﻿import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../api/client'
 import { useSSE } from '../hooks/useSSE'
 import { useLogStore } from '../store/logStore'
@@ -51,7 +51,7 @@ export default function LogsPage() {
   const levelColor = (lvl: string) =>
     lvl === 'ERROR' || lvl === 'CRITICAL' ? 'text-red-400' :
     lvl === 'WARNING' ? 'text-yellow-400' :
-    lvl === 'DEBUG' ? 'text-slate-500' : 'text-blue-400'
+    lvl === 'DEBUG' ? 'text-gray-400' : 'text-blue-400'
 
   const sseIndicator = sseConnected ? 'bg-green-400' : sseReconnecting ? 'bg-yellow-400' : 'bg-red-400'
   const sseLabel = sseConnected ? 'SSE 已连接' : sseReconnecting ? 'SSE 重连中' : 'SSE 断开'
@@ -59,8 +59,8 @@ export default function LogsPage() {
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-base font-semibold text-slate-200">运行日志</h1>
-        <div className="flex items-center gap-1.5 text-xs text-slate-500">
+        <h1 className="text-base font-semibold text-gray-800">运行日志</h1>
+        <div className="flex items-center gap-1.5 text-xs text-gray-400">
           <span className={`w-2 h-2 rounded-full ${sseIndicator}`} />
           {sseLabel}
         </div>
@@ -69,9 +69,9 @@ export default function LogsPage() {
       <div className="flex items-center gap-2 mb-4">
         <input value={search} onChange={(e) => setSearch(e.target.value)}
           placeholder="搜索日志..."
-          className="bg-slate-900/40 border border-slate-800/60 text-slate-200 placeholder-slate-500 rounded-lg px-3 py-1.5 text-xs w-48 outline-none" />
+          className="bg-white/80 border border-gray-200 text-gray-800 placeholder-slate-500 rounded-lg px-3 py-1.5 text-xs w-48 outline-none" />
         <select value={filter} onChange={(e) => setFilter(e.target.value as LogLevel | '')}
-          className="bg-slate-900/40 border border-slate-800/60 text-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none">
+          className="bg-white/80 border border-gray-200 text-gray-800 rounded-lg px-2 py-1.5 text-xs outline-none">
           <option value="">所有</option>
           <option value="DEBUG">DEBUG</option>
           <option value="INFO">INFO</option>
@@ -81,17 +81,17 @@ export default function LogsPage() {
         </select>
       </div>
 
-      <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl overflow-hidden">
+      <div className="bg-white/80 border border-gray-200 rounded-xl overflow-hidden">
         <div className="max-h-[60vh] overflow-y-auto font-mono text-xs">
           {filteredEntries.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 text-xs">暂无日志</div>
+            <div className="p-8 text-center text-gray-400 text-xs">暂无日志</div>
           ) : (
             filteredEntries.map((l, i) => (
-              <div key={i} className="flex items-start gap-3 px-4 py-1.5 border-b border-slate-800/30 hover:bg-slate-800/20">
-                <span className="text-slate-600 shrink-0 whitespace-nowrap">{l.time}</span>
+              <div key={i} className="flex items-start gap-3 px-4 py-1.5 border-b border-gray-200/30 hover:bg-gray-200/20">
+                <span className="text-gray-300 shrink-0 whitespace-nowrap">{l.time}</span>
                 <span className={`shrink-0 w-10 ${levelColor(l.level)}`}>{l.level}</span>
-                <span className="text-slate-500 shrink-0">[{l.module}]</span>
-                <span className="text-slate-400 break-all">{l.msg}</span>
+                <span className="text-gray-400 shrink-0">[{l.module}]</span>
+                <span className="text-gray-500 break-all">{l.msg}</span>
               </div>
             ))
           )}

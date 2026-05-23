@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+﻿import type { ReactNode } from 'react'
 
 interface CardProps {
   children: ReactNode
@@ -19,9 +19,9 @@ export default function Card({ children, className = '', padding = 'md', hover, 
     <div
       onClick={onClick}
       className={[
-        'bg-slate-900/40 border border-slate-800/60 rounded-xl',
+        'bg-white/80 border border-gray-200 rounded-xl',
         paddings[padding],
-        hover && 'hover:bg-slate-800/30 cursor-pointer transition-colors',
+        hover && 'hover:bg-gray-200/30 cursor-pointer transition-colors',
         onClick && 'cursor-pointer',
         className,
       ].filter(Boolean).join(' ')}

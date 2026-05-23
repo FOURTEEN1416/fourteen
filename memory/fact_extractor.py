@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("fact_extractor")
@@ -219,7 +218,6 @@ JSON:"""
             pass
 
         # 尝试提取 ```json ... ``` 块
-        import re
         match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
         if match:
             try:

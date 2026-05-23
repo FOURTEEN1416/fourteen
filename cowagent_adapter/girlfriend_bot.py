@@ -18,8 +18,8 @@ import logging
 import time
 from typing import Any, Optional
 
-from bridge.context import Context, ContextType
-from bridge.reply import Reply, ReplyType
+from bridge.context import Context  # type: ignore
+from bridge.reply import Reply, ReplyType  # type: ignore
 
 logger = logging.getLogger("girlfriend.bot")
 
@@ -178,8 +178,8 @@ class GirlfriendBot:
                 for ch_name in ["weixin", "wechat"]:
                     ch = app.get_channel(ch_name)
                     if ch is not None:
-                        from bridge.context import Context, ContextType
-                        from bridge.reply import Reply, ReplyType
+                        from bridge.context import Context, ContextType  # type: ignore
+                        from bridge.reply import Reply, ReplyType  # type: ignore
 
                         context = Context(ContextType.TEXT, message)
                         context["receiver"] = to_user
@@ -209,7 +209,7 @@ class _GirlfriendSessionManager:
     def __init__(self, bot: GirlfriendBot):
         self.bot = bot
 
-    def build_session(self, session_id: str, system_prompt: str = None):
+    def build_session(self, session_id: str, system_prompt: str = None):  # type: ignore
         """兼容 CowAgent SessionManager.build_session"""
         return _CompatSession(session_id)
 

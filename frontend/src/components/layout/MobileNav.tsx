@@ -1,9 +1,13 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Heart, Brain, GraduationCap, Smartphone, Settings, FileText, Shield } from 'lucide-react'
+import { LayoutDashboard, Heart, Brain, GraduationCap, Smartphone, Settings, FileText, Shield, Database, Users, Activity, BarChart3 } from 'lucide-react'
 
 const mobileItems = [
   { to: '/', icon: LayoutDashboard, label: '仪表盘', end: true },
+  { to: '/characters', icon: Users, label: '角色' },
+  { to: '/monitor', icon: Activity, label: '监控' },
+  { to: '/stats', icon: BarChart3, label: '统计' },
   { to: '/training', icon: GraduationCap, label: '克隆' },
+  { to: '/clone-data', icon: Database, label: '数据' },
   { to: '/channels', icon: Smartphone, label: '通道' },
   { to: '/persona', icon: Heart, label: '人设' },
   { to: '/memory', icon: Brain, label: '记忆' },
@@ -14,7 +18,7 @@ const mobileItems = [
 
 export default function MobileNav() {
   return (
-    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-slate-900/95 border-t border-slate-800 backdrop-blur-sm safe-area-bottom">
+    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/95 border-t border-gray-200 backdrop-blur-sm safe-area-bottom">
       <div className="flex overflow-x-auto">
         {mobileItems.map(({ to, icon: Icon, label, end }) => (
           <NavLink
@@ -25,7 +29,7 @@ export default function MobileNav() {
               `flex flex-col items-center gap-0.5 py-2 px-3 min-w-[60px] text-[10px] transition-colors ${
                 isActive
                   ? 'text-primary-300'
-                  : 'text-slate-500 hover:text-slate-300'
+                  : 'text-gray-400 hover:text-gray-600'
               }`
             }
           >

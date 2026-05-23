@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 import json
-import logging
 import os
 import time
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 import httpx
 
-from observability.metrics import record_chat_duration, record_token_usage, record_error
 from observability.logging_setup import get_logger
+from observability.metrics import record_chat_duration, record_error, record_token_usage
 
 logger = get_logger("llm_gateway_v2")
 
@@ -88,6 +86,18 @@ class LLMGatewayV2:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+        pool_limits = httpx.Limits(max_keepalive_connections=20, max_connections=100)
+        self._sync_client = httpx.Client(
+            timeout=httpx.Timeout(60.0),
+            limits=pool_limits,
+            headers=self._headers,
+        )
+        self._async_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0),
+            limits=pool_limits,
+            headers=self._headers,
+        )
+
         if self.api_key:
             logger.info("LLMGatewayV2 ready, primary model=%s", self.model)
         else:
@@ -121,7 +131,7 @@ class LLMGatewayV2:
 
         start = time.perf_counter()
         try:
-            resp = httpx.post(self._chat_url, headers=self._headers, json=payload, timeout=60)
+            resp = self._sync_client.post(self._chat_url, json=payload)
             resp.raise_for_status()
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
@@ -170,7 +180,7 @@ class LLMGatewayV2:
             payload["tool_choice"] = "auto"
 
         try:
-            resp = httpx.post(self._chat_url, headers=self._headers, json=payload, timeout=60)
+            resp = self._sync_client.post(self._chat_url, json=payload)
             resp.raise_for_status()
             data = resp.json()
             message = data["choices"][0]["message"]
@@ -210,26 +220,25 @@ class LLMGatewayV2:
         first_token_time = None
         start = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
-                async with client.stream("POST", self._chat_url, headers=self._headers, json=payload) as resp:
-                    resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
-                        data_str = line[6:]
-                        if data_str.strip() == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data_str)
-                            delta = chunk["choices"][0]["delta"]
-                            if "content" in delta and delta["content"]:
-                                if first_token_time is None:
-                                    first_token_time = time.perf_counter()
-                                    if first_token_time - start > 3.0:
-                                        logger.warning("First token timeout (>3s)")
-                                yield delta["content"]
-                        except (json.JSONDecodeError, KeyError, IndexError):
-                            continue
+            async with self._async_client.stream("POST", self._chat_url, json=payload) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]
+                    if data_str.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = chunk["choices"][0]["delta"]
+                        if "content" in delta and delta["content"]:
+                            if first_token_time is None:
+                                first_token_time = time.perf_counter()
+                                if first_token_time - start > 3.0:
+                                    logger.warning("First token timeout (>3s)")
+                            yield delta["content"]
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
         except Exception as e:
             record_error("llm_stream", type(e).__name__)
             yield self._handle_error(e)
@@ -270,7 +279,7 @@ class LLMGatewayV2:
             if tools:
                 payload["tools"] = tools
             try:
-                resp = httpx.post(self._chat_url, headers=self._headers, json=payload, timeout=60)
+                resp = self._sync_client.post(self._chat_url, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
                 content = data["choices"][0]["message"]["content"]
@@ -281,15 +290,28 @@ class LLMGatewayV2:
                 entry.mark_failed()
         return None
 
+    async def close(self):
+        await self._async_client.aclose()
+        self._sync_client.close()
+        logger.info("LLMGatewayV2 connection pool closed")
+
     def _handle_error(self, e: Exception) -> str:
         if isinstance(e, httpx.HTTPStatusError):
-            logger.error("LLM API HTTP %d: %s", e.response.status_code, e.response.text[:200])
+            sanitized = self._sanitize_log(e.response.text[:200])
+            logger.error("LLM API HTTP %d: %s", e.response.status_code, sanitized)
             return f"（API 请求失败，错误代码 {e.response.status_code}）"
         if isinstance(e, httpx.RequestError):
             logger.error("LLM API 请求失败: %s", e)
             return "（网络请求失败，请检查网络连接）"
         logger.error("LLM API 异常: %s", e)
         return "（生成回复时出现异常）"
+
+    @staticmethod
+    def _sanitize_log(text: str) -> str:
+        import re
+        text = re.sub(r'(Bearer\s+)sk-\S+', r'\1sk-****', text)
+        text = re.sub(r'(?i)(Authorization["\s:]+)\S+', r'\1****', text)
+        return text
 
     def _mock_reply(self, query: str) -> str:
         q = query.lower()

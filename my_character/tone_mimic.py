@@ -12,10 +12,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
-from dataclasses import dataclass, field
+import re
+from collections import Counter
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -248,11 +249,9 @@ class ToneMimic:
             self.style_profile.punctuation_style = "question"
 
         # 提取常用词作为口头禅（简单版）
-        import re
         all_text = " ".join(replies)
         words = re.findall(r'[\u4e00-\u9fff]{2,4}', all_text)
         if words:
-            from collections import Counter
             word_freq = Counter(words)
             common = [w for w, c in word_freq.most_common(5) if c >= 2]
             self.style_profile.catch_phrases = common[:3]
@@ -268,8 +267,7 @@ class ToneMimic:
 
     def to_dict(self) -> dict:
         """导出风格画像为字典"""
-        import dataclasses
-        return dataclasses.asdict(self.style_profile)
+        return asdict(self.style_profile)
 
     def from_dict(self, data: dict) -> None:
         """从字典加载风格画像"""

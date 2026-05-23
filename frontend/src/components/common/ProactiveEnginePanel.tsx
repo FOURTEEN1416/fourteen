@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import Card from './Card'
 import Button from './Button'
 import UrgencyBadge from './UrgencyBadge'
@@ -12,10 +12,11 @@ interface ProactiveEnginePanelProps {
 }
 
 export default function ProactiveEnginePanel({ state, onConfigUpdated }: ProactiveEnginePanelProps) {
-  const [threshold, setThreshold] = useState(state?.config.threshold ?? 5)
-  const [maxDaily, setMaxDaily] = useState(state?.config.max_daily ?? 5)
-  const [minInterval, setMinInterval] = useState(state?.config.min_interval_minutes ?? 30)
-  const [cooldown, setCooldown] = useState(state?.config.cooldown_after_reply_minutes ?? 10)
+  const config = state?.config
+  const [threshold, setThreshold] = useState(config?.threshold ?? 5)
+  const [maxDaily, setMaxDaily] = useState(config?.max_daily ?? 5)
+  const [minInterval, setMinInterval] = useState(config?.min_interval_minutes ?? 30)
+  const [cooldown, setCooldown] = useState(config?.cooldown_after_reply_minutes ?? 10)
   const [saving, setSaving] = useState(false)
   const addToast = useErrorStore((s) => s.addToast)
 
@@ -45,26 +46,26 @@ export default function ProactiveEnginePanel({ state, onConfigUpdated }: Proacti
 
   return (
     <Card className="space-y-4">
-      <h3 className="text-sm font-semibold text-slate-200">主动发言引擎</h3>
+      <h3 className="text-sm font-semibold text-gray-800">主动发言引擎</h3>
 
       {state ? (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">紧迫度:</span>
+            <span className="text-xs text-gray-400">紧迫度:</span>
             <UrgencyBadge urgency={state.urgency} />
           </div>
-          <div className="flex gap-4 text-xs text-slate-500">
+          <div className="flex gap-4 text-xs text-gray-400">
             <span>今日已发: {state.daily_count}</span>
             <span>上次发言: {state.last_proactive_at ?? '—'}</span>
           </div>
         </div>
       ) : (
-        <p className="text-xs text-slate-500">引擎状态未知</p>
+        <p className="text-xs text-gray-400">引擎状态未知</p>
       )}
 
-      <div className="space-y-3 pt-2 border-t border-slate-800/60">
+      <div className="space-y-3 pt-2 border-t border-gray-200">
         <div>
-          <label className="text-xs text-slate-400 block mb-1">
+          <label className="text-xs text-gray-500 block mb-1">
             触发阈值: {threshold}
           </label>
           <input
@@ -77,30 +78,30 @@ export default function ProactiveEnginePanel({ state, onConfigUpdated }: Proacti
 
         <div className="grid grid-cols-3 gap-2">
           <div>
-            <label className="text-xs text-slate-400 block mb-1">每日上限</label>
+            <label className="text-xs text-gray-500 block mb-1">每日上限</label>
             <input
               type="number" min={1} max={100}
               value={maxDaily}
               onChange={(e) => setMaxDaily(Number(e.target.value))}
-              className="w-full bg-slate-800/60 border border-slate-700/50 rounded px-2 py-1 text-xs text-slate-200"
+              className="w-full bg-gray-200/60 border border-gray-300/50 rounded px-2 py-1 text-xs text-gray-800"
             />
           </div>
           <div>
-            <label className="text-xs text-slate-400 block mb-1">最小间隔(分)</label>
+            <label className="text-xs text-gray-500 block mb-1">最小间隔(分)</label>
             <input
               type="number" min={1} max={1440}
               value={minInterval}
               onChange={(e) => setMinInterval(Number(e.target.value))}
-              className="w-full bg-slate-800/60 border border-slate-700/50 rounded px-2 py-1 text-xs text-slate-200"
+              className="w-full bg-gray-200/60 border border-gray-300/50 rounded px-2 py-1 text-xs text-gray-800"
             />
           </div>
           <div>
-            <label className="text-xs text-slate-400 block mb-1">回复冷却(分)</label>
+            <label className="text-xs text-gray-500 block mb-1">回复冷却(分)</label>
             <input
               type="number" min={1} max={1440}
               value={cooldown}
               onChange={(e) => setCooldown(Number(e.target.value))}
-              className="w-full bg-slate-800/60 border border-slate-700/50 rounded px-2 py-1 text-xs text-slate-200"
+              className="w-full bg-gray-200/60 border border-gray-300/50 rounded px-2 py-1 text-xs text-gray-800"
             />
           </div>
         </div>

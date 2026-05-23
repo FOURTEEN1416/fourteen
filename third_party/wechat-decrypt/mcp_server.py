@@ -6,10 +6,9 @@ Runs on Windows Python (needs access to D:\ WeChat databases).
 """
 
 import io
-import os, sys, json, time, sqlite3, tempfile, struct, hashlib, atexit, re, threading, subprocess
+import os, sys, json, sqlite3, tempfile, struct, hashlib, atexit, re, threading, subprocess
 import glob
 import wave
-import hmac as hmac_mod
 from contextlib import closing
 from datetime import datetime, timedelta
 import xml.etree.ElementTree as ET
@@ -2729,7 +2728,6 @@ def decode_record_item(chat_name: str, local_id: int, item_index: int, create_ti
 
     candidates = []
     if os.path.isdir(attach_dir):
-        import glob as glob_mod
         sub = subdir_map.get(datatype, '*')
         idx_str = str(item_index)
 

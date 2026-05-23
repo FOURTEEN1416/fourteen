@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-import hashlib
+import asyncio
 import json
 import logging
 import math
@@ -20,9 +20,9 @@ import re
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger("memory_pipeline")
 
@@ -63,7 +63,7 @@ class WorkingMemory:
             self._session_id = f"session_{int(time.time())}"
         return self._session_id
 
-    def start_session(self, session_id: str = "") -> None:
+    def start_session(self, session_id: str = "", channel: str = "wechat", user_id: str = "default") -> None:
         with self._lock:
             self._messages.clear()
             self._session_id = session_id or f"session_{int(time.time())}"
@@ -226,6 +226,26 @@ class SemanticMemory:
                 })
         return facts
 
+    def get_facts(self, category: Optional[str] = None,
+                  limit: int = 50) -> List[Dict]:
+        """获取事实列表，按分类过滤"""
+        try:
+            raw = self._sm.get_facts(category, limit=limit)
+            return [
+                {
+                    "id": r.get("id", 0),
+                    "fact": r.get("fact", r.get("content", "")),
+                    "category": r.get("category", category or "general"),
+                    "confidence": r.get("confidence", 0.5),
+                    "source": r.get("source", ""),
+                    "created_at": str(r.get("created_at", "")),
+                }
+                for r in (raw or [])
+            ]
+        except Exception as e:
+            logger.warning("get_facts failed: %s", e)
+            return []
+
 
 # ═══════════════════════════════════════════════════════════════
 #  重要性评分器（Optimized 版）
@@ -247,7 +267,7 @@ class ImportanceScorer:
     }
 
     def score(self, content: str, emotion: str = "",
-              context: Dict = None) -> float:
+              context: Dict = None) -> float:  # type: ignore
         s = 0.3
         for keyword, weight in self.KEYWORD_WEIGHTS.items():
             if keyword in content:
@@ -344,7 +364,7 @@ class CrossSessionReasoner:
                             expected_time: Optional[str] = None,
                             session_id: str = ""):
         try:
-            with self._sm._conn() as conn:
+            with self._sm.get_connection() as conn:
                 conn.execute(
                     "INSERT INTO pending_events "
                     "(event_desc, expected_time, source_session_id) "
@@ -357,7 +377,7 @@ class CrossSessionReasoner:
 
     def get_pending_events(self) -> List[Dict]:
         try:
-            with self._sm._conn() as conn:
+            with self._sm.get_connection() as conn:
                 rows = conn.execute(
                     "SELECT * FROM pending_events WHERE is_resolved = 0 "
                     "ORDER BY created_at ASC"
@@ -369,7 +389,7 @@ class CrossSessionReasoner:
 
     def resolve_event(self, event_id: int):
         try:
-            with self._sm._conn() as conn:
+            with self._sm.get_connection() as conn:
                 conn.execute(
                     "UPDATE pending_events SET is_resolved = 1 WHERE id = ?",
                     (event_id,),
@@ -449,7 +469,7 @@ class FactExtractor:
 
 JSON:"""
         try:
-            result = self.llm_func(prompt)
+            result = self.llm_func(prompt)  # type: ignore
             facts = self._parse_json_result(result)
             if facts:
                 for f in facts:
@@ -638,7 +658,7 @@ class DiarySummarizer:
 
 每日摘要（100字以内）："""
         try:
-            return self.llm_func(prompt)
+            return self.llm_func(prompt)  # type: ignore
         except Exception as e:
             logger.warning("LLM summary failed: %s", e)
             return self._summarize_with_template(chats)
@@ -928,6 +948,94 @@ class MemoryPipeline:
 
         return context
 
+    async def retrieve_context_async(
+        self,
+        query: str,
+        session_id: str = "",
+        top_k: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        异步检索记忆上下文 — 并行检索三层记忆，向量检索超时降级
+
+        Returns:
+            {"working": [], "episodic": [], "semantic": [], "facts": []}
+        """
+        cache_key = f"{session_id}:{hash(query)}"
+        with self._cache_lock:
+            if cache_key in self._context_cache:
+                cached = self._context_cache[cache_key]
+                if time.time() - cached.get("_ts", 0) < 30:
+                    logger.debug("retrieve_context_async cache hit")
+                    return {k: v for k, v in cached.items() if k != "_ts"}
+
+        context = {
+            "working": [],
+            "episodic": [],
+            "semantic": [],
+            "facts": [],
+        }
+
+        start = time.perf_counter()
+
+        async def _get_working():
+            try:
+                return self.working.get_recent(n=10)
+            except Exception:
+                return []
+
+        async def _search_episodic():
+            try:
+                return self.episodic.search(query, top_k=top_k)
+            except Exception as e:
+                logger.warning("Episodic retrieval failed, degraded: %s", e)
+                return []
+
+        async def _search_semantic():
+            try:
+                return self.semantic.search(query, top_k=top_k)
+            except Exception as e:
+                logger.warning("Semantic retrieval failed, degraded: %s", e)
+                return {}
+
+        results = await asyncio.gather(
+            _get_working(),
+            _search_episodic(),
+            _search_semantic(),
+            return_exceptions=True,
+        )
+
+        context["working"] = results[0] if not isinstance(results[0], Exception) else []  # type: ignore
+        context["episodic"] = results[1] if not isinstance(results[1], Exception) else []  # type: ignore
+
+        semantic_result = results[2] if not isinstance(results[2], Exception) else {}
+        if isinstance(semantic_result, dict):
+            context["semantic"] = semantic_result.get("structured", [])
+            context["facts"] = [
+                s.get("fact", "") for s in context["semantic"]
+                if isinstance(s, dict)
+            ]
+
+        elapsed = time.perf_counter() - start
+        logger.debug("Async retrieve_context completed in %.3fs", elapsed)
+
+        if not context["facts"]:
+            try:
+                facts = self.sm.get_facts(min_confidence=0.3)
+                context["facts"] = [f["fact"] for f in facts[:top_k]]
+            except Exception as e:
+                logger.debug("Structured fact fallback failed: %s", e)
+
+        try:
+            context["pending_events"] = self.cross_session.get_pending_events()
+        except Exception:
+            context["pending_events"] = []
+
+        context["_ts"] = time.time()  # type: ignore
+        with self._cache_lock:
+            self._context_cache[cache_key] = context
+
+        return {k: v for k, v in context.items() if k != "_ts"}
+
     def get_recent_context(self, n: int = 3) -> str:
         """获取最近对话上下文文本"""
         recent = self.working.get_recent(n=n)
@@ -1152,14 +1260,18 @@ class MemoryPipeline:
             sum(m.get("importance", 0.5) for m in messages) / len(messages)
         )
 
-        self.episodic.store_episode(
-            messages,
-            summary=summary,
-            importance=avg_importance,
-            session_id=self.working.session_id,
-        )
-        self.working.clear()
-        logger.info("Working memory archived: %d messages", len(messages))
+        try:
+            self.episodic.store_episode(
+                messages,
+                summary=summary,
+                importance=avg_importance,
+                session_id=self.working.session_id,
+            )
+            # 仅在归档成功后清空工作记忆（防止数据丢失）
+            self.working.clear()
+            logger.info("Working memory archived: %d messages", len(messages))
+        except Exception as e:
+            logger.error("归档工作记忆失败，保留数据: %s", e)
 
     def _cleanup_low_confidence_facts(self) -> None:
         """清理低置信度事实"""

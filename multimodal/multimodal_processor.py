@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger("multimodal")
 
@@ -34,9 +34,7 @@ class VisionHandler:
     def process(self, image_data: Any) -> Dict[str, Any]:
         if self._llm and hasattr(self._llm, 'api_key') and self._llm.api_key:
             try:
-                import httpx
-                import json
-                messages = [
+                [
                     {"role": "user", "content": [
                         {"type": "text", "text": "请描述这张图片的内容，简洁20字以内。"},
                         {"type": "image_url", "image_url": {"url": image_data} if isinstance(image_data, str) else {}},
@@ -51,7 +49,7 @@ class VisionHandler:
 class ASRHandler:
     def process(self, audio_data: Any) -> Dict[str, Any]:
         try:
-            import openai
+            import openai  # noqa: F401
             logger.info("ASR: would transcribe with Whisper API")
             return {"text": "[语音消息，暂无法转文字]", "modality": "voice", "confidence": 0.0}
         except ImportError:

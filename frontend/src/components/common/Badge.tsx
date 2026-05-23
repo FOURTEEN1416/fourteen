@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+﻿import type { ReactNode } from 'react'
 
 interface BadgeProps {
   children: ReactNode
@@ -7,7 +7,7 @@ interface BadgeProps {
 }
 
 const variantStyles = {
-  default: 'bg-slate-800/60 text-slate-400',
+  default: 'bg-gray-200/60 text-gray-500',
   success: 'bg-green-900/30 text-green-400',
   warning: 'bg-yellow-900/30 text-yellow-400',
   error: 'bg-red-900/30 text-red-400',

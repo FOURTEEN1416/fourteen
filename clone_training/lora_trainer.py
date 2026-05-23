@@ -13,7 +13,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger("clone.trainer")
 
@@ -85,20 +85,20 @@ class LoRATrainer:
             return self._training_unavailable_result()
 
         import torch
+        from datasets import load_dataset
+        from peft import (
+            LoraConfig,
+            TaskType,
+            get_peft_model,
+            prepare_model_for_kbit_training,
+        )
         from transformers import (
             AutoModelForCausalLM,
             AutoTokenizer,
-            TrainingArguments,
-            Trainer,
             DataCollatorForLanguageModeling,
+            Trainer,
+            TrainingArguments,
         )
-        from peft import (
-            LoraConfig,
-            get_peft_model,
-            TaskType,
-            prepare_model_for_kbit_training,
-        )
-        from datasets import load_dataset
 
         logger.info("=" * 60)
         logger.info("LoRA 微调训练开始")
@@ -266,9 +266,9 @@ class LoRATrainer:
     ) -> str:
         if not self._peft_available:
             return ""
+        import torch
         from peft import PeftModel
         from transformers import AutoModelForCausalLM, AutoTokenizer
-        import torch
 
         merge_path = self.output_dir / "merged_model"
         merge_path.mkdir(parents=True, exist_ok=True)
@@ -281,7 +281,7 @@ class LoRATrainer:
         )
 
         model = PeftModel.from_pretrained(base_model, lora_path)
-        merged = model.merge_and_unload()
+        merged = model.merge_and_unload()  # type: ignore
 
         merged.save_pretrained(str(merge_path))
         tokenizer.save_pretrained(str(merge_path))

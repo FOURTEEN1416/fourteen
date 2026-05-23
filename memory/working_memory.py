@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import logging
-import math
-import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("working_memory")
 
@@ -16,7 +14,7 @@ class WorkingMemory:
 
     def start_session(self, session_id: str, channel: str = "wechat", user_id: str = "default"):
         self.session_id = session_id
-        with self._sm._conn() as conn:
+        with self._sm.get_connection() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO sessions (id, channel, user_id, started_at, is_active) "
                 "VALUES (?, ?, ?, CURRENT_TIMESTAMP, 1)",
@@ -27,7 +25,7 @@ class WorkingMemory:
     def end_session(self):
         if not self.session_id:
             return
-        with self._sm._conn() as conn:
+        with self._sm.get_connection() as conn:
             conn.execute(
                 "UPDATE sessions SET ended_at = CURRENT_TIMESTAMP, is_active = 0 WHERE id = ?",
                 (self.session_id,),
@@ -37,7 +35,7 @@ class WorkingMemory:
     def add(self, role: str, content: str, emotion_tag: str = "", importance: float = 0.5):
         if not self.session_id:
             return
-        with self._sm._conn() as conn:
+        with self._sm.get_connection() as conn:
             conn.execute(
                 "INSERT INTO working_memory (session_id, role, content, emotion_tag, importance) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -49,7 +47,7 @@ class WorkingMemory:
         n = n or self.limit
         if not self.session_id:
             return []
-        with self._sm._conn() as conn:
+        with self._sm.get_connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM working_memory WHERE session_id = ? "
                 "ORDER BY created_at DESC LIMIT ?",
@@ -60,7 +58,7 @@ class WorkingMemory:
     def count(self) -> int:
         if not self.session_id:
             return 0
-        with self._sm._conn() as conn:
+        with self._sm.get_connection() as conn:
             row = conn.execute(
                 "SELECT COUNT(*) as cnt FROM working_memory WHERE session_id = ?",
                 (self.session_id,),
@@ -76,7 +74,7 @@ class WorkingMemory:
     def clear(self):
         if not self.session_id:
             return
-        with self._sm._conn() as conn:
+        with self._sm.get_connection() as conn:
             conn.execute(
                 "DELETE FROM working_memory WHERE session_id = ?",
                 (self.session_id,),

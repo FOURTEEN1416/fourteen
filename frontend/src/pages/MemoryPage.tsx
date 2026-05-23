@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { useMemoryFacts } from '../hooks/useAPI'
 import { Search } from 'lucide-react'
 import EmptyState from '../components/common/EmptyState'
@@ -26,17 +26,17 @@ export default function MemoryPage() {
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <h1 className="text-base font-semibold text-slate-200 mb-6">记忆浏览器</h1>
+      <h1 className="text-base font-semibold text-gray-800 mb-6">记忆浏览器</h1>
 
       {/* Search & Filter */}
       <div className="flex items-center gap-3 mb-6">
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
             placeholder="搜索记忆..."
-            className="w-full bg-slate-800/50 text-slate-200 placeholder-slate-500 rounded-xl pl-9 pr-4 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500/30 border border-slate-700/50"
+            className="w-full bg-gray-200/50 text-gray-800 placeholder-slate-500 rounded-xl pl-9 pr-4 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500/30 border border-gray-300/50"
           />
         </div>
 
@@ -48,7 +48,7 @@ export default function MemoryPage() {
               className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${
                 filter === cat
                   ? 'bg-primary-600/30 text-primary-300 border border-primary-500/30'
-                  : 'text-slate-500 hover:text-slate-300 border border-transparent'
+                  : 'text-gray-400 hover:text-gray-700 border border-transparent'
               }`}
             >
               {cat || '全部'}
@@ -58,7 +58,7 @@ export default function MemoryPage() {
 
         <button
           onClick={() => refetch()}
-          className="text-xs text-slate-500 hover:text-slate-300 px-2"
+          className="text-xs text-gray-400 hover:text-gray-700 px-2"
         >
           刷新
         </button>
@@ -66,7 +66,7 @@ export default function MemoryPage() {
 
       {/* Facts Grid */}
       {loading ? (
-        <div className="text-sm text-slate-500">加载中...</div>
+        <div className="text-sm text-gray-400">加载中...</div>
       ) : filteredFacts.length === 0 ? (
         <EmptyState
           icon="💬"
@@ -78,21 +78,21 @@ export default function MemoryPage() {
           {filteredFacts.map((fact, i) => (
             <div
               key={i}
-              className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-4 hover:border-slate-700/60 transition-colors"
+              className="bg-white/80 border border-gray-200 rounded-xl p-4 hover:border-gray-300/60 transition-colors"
             >
               <div className="flex items-center gap-2 mb-2">
-                <span className={`text-[10px] px-2 py-0.5 rounded-full border ${categoryColors[fact.category || fact.type] || 'bg-slate-700/30 text-slate-400 border-slate-600/30'}`}>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full border ${categoryColors[fact.category || fact.type] || 'bg-gray-200/30 text-gray-500 border-gray-300'}`}>
                   {fact.category || fact.type}
                 </span>
                 {fact.confidence && (
-                  <span className="text-[10px] text-slate-600">
+                  <span className="text-[10px] text-gray-300">
                     置信度 {Math.round(fact.confidence * 100)}%
                   </span>
                 )}
               </div>
-              <p className="text-sm text-slate-300">{fact.content}</p>
+              <p className="text-sm text-gray-700">{fact.content}</p>
               {(fact.source || fact.timestamp) && (
-                <div className="flex gap-3 mt-2 text-[10px] text-slate-600">
+                <div className="flex gap-3 mt-2 text-[10px] text-gray-300">
                   {fact.source && <span>来源: {fact.source}</span>}
                   {fact.timestamp && <span>时间: {fact.timestamp}</span>}
                 </div>

@@ -8,20 +8,22 @@ API 端点: https://opencode.ai/zen/v1
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
 import time
-from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 import httpx
 
-from .llm_gateway_v2 import ModelEntry, ModelRegistry
+from .llm_gateway_v2 import ModelRegistry
 
 try:
-    from observability.metrics import record_chat_duration, record_token_usage, record_error
+    from observability.metrics import (
+        record_chat_duration,
+        record_error,
+        record_token_usage,
+    )
     HAS_METRICS = True
 except ImportError:
     HAS_METRICS = False
@@ -137,10 +139,10 @@ class OpenCodeZenProvider:
             usage = data.get("usage", {})
 
             if HAS_METRICS:
-                record_chat_duration(model_name, time.perf_counter() - start)
+                record_chat_duration(model_name, time.perf_counter() - start)  # type: ignore
                 if usage:
-                    record_token_usage(model_name, "prompt", usage.get("prompt_tokens", 0))
-                    record_token_usage(model_name, "completion", usage.get("completion_tokens", 0))
+                    record_token_usage(model_name, "prompt", usage.get("prompt_tokens", 0))  # type: ignore
+                    record_token_usage(model_name, "completion", usage.get("completion_tokens", 0))  # type: ignore
 
             entry = self.registry.get_by_name(model_name)
             if entry:
@@ -149,7 +151,7 @@ class OpenCodeZenProvider:
 
         except Exception as e:
             if HAS_METRICS:
-                record_error("llm", type(e).__name__)
+                record_error("llm", type(e).__name__)  # type: ignore
             entry = self.registry.get_by_name(model_name)
             if entry:
                 entry.mark_failed()
@@ -204,7 +206,7 @@ class OpenCodeZenProvider:
                             continue
         except Exception as e:
             if HAS_METRICS:
-                record_error("llm_stream", type(e).__name__)
+                record_error("llm_stream", type(e).__name__)  # type: ignore
             yield self._handle_error(e)
 
     def chat_with_tools(
@@ -240,7 +242,7 @@ class OpenCodeZenProvider:
             }
         except Exception as e:
             if HAS_METRICS:
-                record_error("llm", type(e).__name__)
+                record_error("llm", type(e).__name__)  # type: ignore
             if tools:
                 logger.warning("Tool call failed, retrying without tools")
                 try:

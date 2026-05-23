@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Set
 
 try:
     import websockets
@@ -14,6 +14,8 @@ except ImportError:
 
 logger = logging.getLogger("websocket_server")
 
+MAX_CLIENTS = 1000
+
 
 class WebSocketServer:
     def __init__(self, orchestrator=None, host: str = "0.0.0.0", port: int = 8765):
@@ -21,6 +23,7 @@ class WebSocketServer:
         self.host = host
         self.port = port
         self._clients: Set = set()
+        self._client_lock = asyncio.Lock()
         self._running = False
 
     async def start(self):
@@ -28,7 +31,7 @@ class WebSocketServer:
             logger.warning("websockets not installed, WebSocket server disabled")
             return
         self._running = True
-        async with serve(self._handler, self.host, self.port, ping_interval=30, ping_timeout=10):
+        async with serve(self._handler, self.host, self.port, ping_interval=30, ping_timeout=10):  # type: ignore
             logger.info("WebSocket server started on %s:%d", self.host, self.port)
             await asyncio.Future()
 
@@ -39,7 +42,11 @@ class WebSocketServer:
         self._clients.clear()
 
     async def _handler(self, websocket):
-        self._clients.add(websocket)
+        async with self._client_lock:
+            if len(self._clients) >= MAX_CLIENTS:
+                await websocket.close(code=1013, reason="连接已满")
+                return
+            self._clients.add(websocket)
         try:
             async for message in websocket:
                 try:
@@ -65,7 +72,7 @@ class WebSocketServer:
                                 "session_id": session_id,
                             }))
                         elif self._orch:
-                            result = self._orch.process_message(user_msg, session_id)
+                            result = await self._orch.process_message(user_msg, session_id)
                             await websocket.send(json.dumps({
                                 "type": "reply",
                                 "content": result.get("reply", ""),
@@ -79,18 +86,50 @@ class WebSocketServer:
                 except Exception as e:
                     logger.error("WebSocket handler error: %s", e)
                     await websocket.send(json.dumps({"type": "error", "message": str(e)}))
-        except websockets.exceptions.ConnectionClosed:
+        except websockets.exceptions.ConnectionClosed:  # type: ignore
             pass
         finally:
-            self._clients.discard(websocket)
+            async with self._client_lock:
+                self._clients.discard(websocket)
 
     async def broadcast_proactive(self, content: str):
         msg = json.dumps({"type": "proactive", "content": content}, ensure_ascii=False)
-        for ws in self._clients:
+        await self._parallel_broadcast(msg)
+
+    async def broadcast_aiyu_event(self, event_type: str, data: Dict[str, Any]):
+        msg = json.dumps({"type": event_type, "data": data}, ensure_ascii=False)
+        await self._parallel_broadcast(msg)
+
+    async def _parallel_broadcast(self, message: str):
+        disconnected = set()
+
+        async def send_to_client(ws):
             try:
-                await ws.send(msg)
+                await ws.send(message)
             except Exception:
-                self._clients.discard(ws)
+                disconnected.add(ws)
+
+        async with self._client_lock:
+            clients = list(self._clients)
+
+        if clients:
+            await asyncio.gather(*[send_to_client(ws) for ws in clients], return_exceptions=True)
+
+        if disconnected:
+            async with self._client_lock:
+                self._clients -= disconnected
+
+    async def broadcast_character_switched(self, character_id: str, character_name: str):
+        await self.broadcast_aiyu_event("character_switched", {"character_id": character_id, "name": character_name})
+
+    async def broadcast_emotion_stage_changed(self, character_id: str, old_stage: str, new_stage: str, affinity: float):
+        await self.broadcast_aiyu_event("emotion_stage_changed", {"character_id": character_id, "old_stage": old_stage, "new_stage": new_stage, "affinity": affinity})
+
+    async def broadcast_affinity_changed(self, character_id: str, old_value: float, new_value: float):
+        await self.broadcast_aiyu_event("affinity_changed", {"character_id": character_id, "old_value": old_value, "new_value": new_value})
+
+    async def broadcast_sticker_send(self, character_id: str, sticker_id: str, category: str):
+        await self.broadcast_aiyu_event("sticker_send", {"character_id": character_id, "sticker_id": sticker_id, "category": category})
 
     @property
     def client_count(self) -> int:

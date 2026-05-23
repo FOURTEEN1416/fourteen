@@ -250,7 +250,8 @@ class LLMEmotionClassifier:
     def __init__(self, llm_gateway=None, timeout_ms: int = 500, cache_size: int = 100):
         self._llm = llm_gateway
         self.timeout_ms = timeout_ms
-        self._cache: Dict[str, Dict] = {}
+        from collections import OrderedDict
+        self._cache: OrderedDict[str, Dict] = OrderedDict()
         self._cache_size = cache_size
 
     def _get_cache_key(self, message: str, context: str) -> str:
@@ -262,6 +263,7 @@ class LLMEmotionClassifier:
 
         cache_key = self._get_cache_key(message, context)
         if cache_key in self._cache:
+            self._cache.move_to_end(cache_key)
             return self._cache[cache_key]
 
         prompt = (
@@ -285,8 +287,10 @@ class LLMEmotionClassifier:
 
             result = json.loads(response)
 
-            if len(self._cache) >= self._cache_size:
-                self._cache.pop(next(iter(self._cache)))
+            if cache_key in self._cache:
+                self._cache.move_to_end(cache_key)
+            elif len(self._cache) >= self._cache_size:
+                self._cache.popitem(last=False)
             self._cache[cache_key] = result
 
             return result

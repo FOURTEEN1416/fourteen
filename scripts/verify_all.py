@@ -6,7 +6,6 @@ AI女友"小暖" — 全量验证脚本
 """
 
 import importlib
-import os
 import sys
 from pathlib import Path
 
@@ -277,7 +276,7 @@ def main():
     # ── 13. Clone Training 模块 ──
     print("\n[13] Clone Training 模块")
     try:
-        from clone_training import DataExtractor, StyleAnalyzer, DatasetBuilder, LoRATrainer
+        from clone_training import DatasetBuilder, StyleAnalyzer
         check("DataExtractor", True)
         check("StyleAnalyzer", True)
         check("DatasetBuilder", True)
@@ -294,7 +293,7 @@ def main():
 
         # 数据集构建
         full_test = [
-            {"user": f"msg{i}", "reply": f"回复内容{i} 哈哈！"} 
+            {"user": f"msg{i}", "reply": f"回复内容{i} 哈哈！"}
             for i in range(20)
         ]
         db = DatasetBuilder(str(project_root / "data" / "test_clone"))

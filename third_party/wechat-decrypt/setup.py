@@ -10,12 +10,10 @@ WeChat Decrypt — 交互式配置向导
 """
 
 import argparse
-import glob
 import json
 import os
 import platform
 import shutil
-import subprocess
 import sys
 
 

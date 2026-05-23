@@ -6,9 +6,8 @@ http://localhost:5678
 - 检测到变化后：全量解密DB + 全量WAL patch
 - SSE 服务器推送
 """
-import hashlib, struct, os, sys, json, time, sqlite3, io, threading, queue, traceback, subprocess
+import hashlib, struct, os, sys, json, time, sqlite3, threading, queue, subprocess
 import uuid
-import hmac as hmac_mod
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime

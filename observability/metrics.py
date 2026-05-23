@@ -7,7 +7,7 @@ from typing import Dict
 logger = logging.getLogger("metrics")
 
 try:
-    from prometheus_client import Counter, Histogram, Gauge, start_http_server
+    from prometheus_client import Counter, Gauge, Histogram, start_http_server
     HAS_PROMETHEUS = True
 except ImportError:
     HAS_PROMETHEUS = False
@@ -19,52 +19,52 @@ _lock = threading.Lock()
 def _init_metrics():
     if not HAS_PROMETHEUS:
         return
-    _metrics["chat_request_duration"] = Histogram(
+    _metrics["chat_request_duration"] = Histogram(  # type: ignore
         "chat_request_duration_seconds",
         "Chat request total duration",
         ["model"],
     )
-    _metrics["chat_token_usage"] = Counter(
+    _metrics["chat_token_usage"] = Counter(  # type: ignore
         "chat_token_usage_total",
         "Total tokens used",
         ["model", "type"],
     )
-    _metrics["emotion_analysis_duration"] = Histogram(
+    _metrics["emotion_analysis_duration"] = Histogram(  # type: ignore
         "emotion_analysis_duration_seconds",
         "Emotion analysis duration",
     )
-    _metrics["memory_retrieval_duration"] = Histogram(
+    _metrics["memory_retrieval_duration"] = Histogram(  # type: ignore
         "memory_retrieval_duration_seconds",
         "Memory retrieval duration",
         ["memory_type"],
     )
-    _metrics["tool_call_duration"] = Histogram(
+    _metrics["tool_call_duration"] = Histogram(  # type: ignore
         "tool_call_duration_seconds",
         "Tool call duration",
         ["tool_name"],
     )
-    _metrics["tool_call_total"] = Counter(
+    _metrics["tool_call_total"] = Counter(  # type: ignore
         "tool_call_total",
         "Tool call count",
         ["tool_name", "status"],
     )
-    _metrics["proactive_message_sent"] = Counter(
+    _metrics["proactive_message_sent"] = Counter(  # type: ignore
         "proactive_message_sent_total",
         "Proactive messages sent",
         ["trigger_type"],
     )
-    _metrics["error_total"] = Counter(
+    _metrics["error_total"] = Counter(  # type: ignore
         "error_total",
         "Total errors",
         ["module", "error_type"],
     )
-    _metrics["active_sessions"] = Gauge(
+    _metrics["active_sessions"] = Gauge(  # type: ignore
         "active_sessions",
         "Currently active sessions",
     )
 
 
-def setup_metrics(port: int = 8000):
+def setup_metrics(port: int = 9090):
     if not HAS_PROMETHEUS:
         logger.warning("prometheus_client not installed, metrics disabled")
         return
@@ -72,7 +72,7 @@ def setup_metrics(port: int = 8000):
         if not _metrics:
             _init_metrics()
     try:
-        start_http_server(port)
+        start_http_server(port)  # type: ignore
         logger.info("Prometheus metrics server started on port %d", port)
     except OSError:
         logger.warning("Metrics port %d already in use", port)

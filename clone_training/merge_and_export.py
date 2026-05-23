@@ -13,10 +13,9 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List
 
 logger = logging.getLogger("clone.merge_export")
 
@@ -46,7 +45,7 @@ class ModelExporter:
         # 使用 LoRATrainer.merge_lora_weights 静态方法
         from .lora_trainer import LoRATrainer
         try:
-            result = LoRATrainer.merge_lora_weights(base_model, lora_weights, str(output_path))
+            result = LoRATrainer.merge_lora_weights(base_model, lora_weights, str(output_path))  # type: ignore
             return result
         except Exception as e:
             logger.error("合并失败: %s", e)
@@ -66,7 +65,7 @@ class ModelExporter:
                 f.write(f"LoRA Adapter for {base_model}\n")
                 f.write(f"Original weights: {lora_weights}\n")
                 f.write("\n使用方法:\n")
-                f.write(f"  from peft import PeftModel\n")
+                f.write("  from peft import PeftModel\n")
                 f.write(f"  model = PeftModel.from_pretrained(base_model, '{output_path}')\n")
 
             return str(output_path)
@@ -107,8 +106,8 @@ class ModelExporter:
 
         logger.info("ONNX 导出需要安装 optimum 和 onnxruntime")
         logger.info("请手动执行以下命令:")
-        logger.info(f"  pip install optimum onnx onnxruntime")
-        logger.info(f"  optimum-cli export onnx \\")
+        logger.info("  pip install optimum onnx onnxruntime")
+        logger.info("  optimum-cli export onnx \\")
         logger.info(f"    --model {merged_path} \\")
         logger.info(f"    --opset {opset} \\")
         logger.info(f"    {output_path}")
@@ -129,8 +128,8 @@ class ModelExporter:
 
         logger.info("GGUF 导出需要 llama.cpp 工具")
         logger.info("请手动执行以下命令:")
-        logger.info(f"  git clone https://github.com/ggerganov/llama.cpp")
-        logger.info(f"  cd llama.cpp && make")
+        logger.info("  git clone https://github.com/ggerganov/llama.cpp")
+        logger.info("  cd llama.cpp && make")
         logger.info(f"  python convert_hf_to_gguf.py {merged_path} \\")
         logger.info(f"    --outfile {output_file}")
         logger.info(f"  ./llama-quantize {output_file} {quantize}")
@@ -221,7 +220,7 @@ SYSTEM \"\"\"
         base_model: str,
         lora_weights: str,
         output_name: str = "girlfriend-clone",
-        formats: List[str] = None,
+        formats: List[str] = None,  # type: ignore
         ollama_system_prompt: str = "",
     ) -> Dict[str, str]:
         """

@@ -23,16 +23,40 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import atexit
 import logging
-import multiprocessing
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 project_root = Path(__file__).parent.absolute()
 sys.path.insert(0, str(project_root))
+
+
+# ── 加载 .env（手动解析，无需 python-dotenv 依赖） ──
+_env_loaded = False
+def _load_env() -> None:
+    global _env_loaded
+    if _env_loaded:
+        return
+    env_path = project_root / ".env"
+    if env_path.exists():
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key, val = key.strip(), val.strip().strip("\"'")
+                # 只在环境变量未设置时写入，不覆盖系统已设值
+                if key not in os.environ:
+                    os.environ[key] = val
+    _env_loaded = True
+
+_load_env()
 
 
 def setup_logging(log_level: str = "INFO") -> logging.Logger:
@@ -96,16 +120,18 @@ def parse_args() -> argparse.Namespace:
 
 def print_banner() -> None:
     banner = """
-    ╔══════════════════════════════════════════════════╗
-    ║                                                  ║
-    ║           💕 小暖 — AI 伴侣女友 💕               ║
-    ║                                                  ║
-    ║     情感 · 记忆 · 主动交互 · 风格克隆            ║
-    ║            融合统一版 v3.0                        ║
-    ║                                                  ║
-    ╚══════════════════════════════════════════════════╝
+    ==================================================
+             小暖 -- AI 伴侣女友
+    ==================================================
+        情感 . 记忆 . 主动交互 . 风格克隆
+               融合统一版 v3.0
+    ==================================================
     """
-    print(banner)
+    try:
+        print(banner)
+    except UnicodeEncodeError:
+        safe = banner.replace('\u2500', '-').replace('\u2502', '|').replace('\u250c', '+').replace('\u2510', '+').replace('\u2514', '+').replace('\u2518', '+')
+        print(safe)
 
 
 def load_fusion_config(config_dir: str) -> Dict[str, Any]:
@@ -129,7 +155,27 @@ class OptimizedOrchestrator:
     def __init__(self):
         self.components: Dict[str, Any] = {}
         self._initialized = False
-        self._lock = False
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _run_async(coro) -> Any:
+        """
+        安全运行协程，支持有/无事件循环两种情况
+
+        设计:
+          - 无运行中事件循环 → asyncio.run()
+          - 有运行中事件循环 → 在新线程中新建事件循环运行
+        """
+        try:
+            asyncio.get_running_loop()
+            # 有运行中事件循环，不能直接asyncio.run
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(asyncio.run, coro)
+                return future.result()
+        except RuntimeError:
+            # 无运行中事件循环
+            return asyncio.run(coro)
 
     def initialize(self, config_dir: str = "config",
                    fusion_cfg: Optional[Dict] = None) -> bool:
@@ -145,8 +191,8 @@ class OptimizedOrchestrator:
             self.components["config"] = ConfigManager(config_dir=config_dir)
             cfg = self.components["config"].config
 
-            from observability.tracing import tracer
             from observability.health import health_checker
+            from observability.tracing import tracer
             self.components["tracer"] = tracer
             self.components["health"] = health_checker
 
@@ -164,8 +210,8 @@ class OptimizedOrchestrator:
                 enabled=cfg.safety.prompt_injection_detection
             )
 
-            from llm_provider.llm_gateway_v2 import LLMGatewayV2
-            self.components["llm"] = LLMGatewayV2(
+            from llm_provider import get_llm
+            self.components["llm"] = get_llm(
                 models_config=cfg.llm.models_priority
             )
 
@@ -173,26 +219,28 @@ class OptimizedOrchestrator:
             self.components["injection"].llm_gateway = self.components["llm"]
 
             emotion_fusion = fusion_cfg.get("emotion", {})
-            blend_ratio = emotion_fusion.get("blend_ratio", cfg.emotion.continuity_blend_ratio)
-            classifier_timeout = emotion_fusion.get("classifier_timeout_ms",
+            emotion_fusion.get("blend_ratio", cfg.emotion.continuity_blend_ratio)
+            emotion_fusion.get("classifier_timeout_ms",
                                                      cfg.emotion.llm_classifier_timeout_ms)
 
-            try:
-                from my_character.emotion_engine import EmotionEngine as EmotionEngineOptimized
-                from my_character.persona_engine import PersonaEngine as PersonaEngineOptimized
-            except ImportError:
-                from my_character.emotion_engine import EmotionEngine as EmotionEngineOptimized
-                from my_character.persona_engine import PersonaEngine as PersonaEngineOptimized
-
+            from my_character.character_config import ConfigLoader
+            from my_character.emotion_engine import (
+                EmotionEngine as EmotionEngineOptimized,
+            )
+            from my_character.persona_engine import (
+                PersonaEngine as PersonaEngineOptimized,
+            )
             from my_character.tone_mimic import ToneMimic
 
             self.components["emotion"] = EmotionEngineOptimized(
                 llm_gateway=self.components["llm"],
                 use_llm=cfg.emotion.use_llm_classifier,
             )
+            config_loader = ConfigLoader(config_dir=config_dir)
             self.components["persona"] = PersonaEngineOptimized(
-                config_dir=config_dir,
+                config_loader=config_loader,
                 llm_gateway=self.components["llm"],
+                emotion_engine=self.components["emotion"],
             )
             self.components["tone"] = ToneMimic(
                 chroma_path=str(project_root / "data" / "chroma_db")
@@ -207,11 +255,11 @@ class OptimizedOrchestrator:
                     working_limit=cfg.memory.working_memory_limit,
                 )
             except ImportError:
-                from memory import VectorMemory, StructuredMemory
+                from memory import StructuredMemory, VectorMemory
                 from memory.memory_pipeline import MemoryPipeline
                 vector_memory = VectorMemory(chroma_path=str(project_root / "data" / "chroma_db"))
                 structured_memory = StructuredMemory(db_path=str(project_root / "data" / "sqlite.db"))
-                self.components["memory"] = MemoryPipelineV2(
+                self.components["memory"] = MemoryPipeline(
                     structured_memory=structured_memory,
                     vector_memory=vector_memory,
                     llm_gateway=self.components["llm"],
@@ -221,7 +269,7 @@ class OptimizedOrchestrator:
                 self.components["vector_memory"] = vector_memory
                 self.components["structured_memory"] = structured_memory
 
-            ase_fusion = fusion_cfg.get("ase", {})
+            fusion_cfg.get("ase", {})
             try:
                 from proactive.ase_engine import ASEEngine as ASEEngineOptimized
                 self.components["ase"] = ASEEngineOptimized(
@@ -239,11 +287,14 @@ class OptimizedOrchestrator:
                     urgency_threshold=cfg.proactive.urgency_threshold,
                 )
 
-            from tool_system.base import ToolRegistry, ToolDispatcher
-            from tool_system.builtin.weather_tool import WeatherTool
+            from tool_system.base import ToolDispatcher, ToolRegistry
+            from tool_system.builtin.calendar_tool import CalculatorTool, CalendarTool
+            from tool_system.builtin.reminder_tool import (
+                CalendarQueryTool,
+                ReminderTool,
+            )
             from tool_system.builtin.search_tool import SearchTool
-            from tool_system.builtin.calendar_tool import CalendarTool, CalculatorTool
-            from tool_system.builtin.reminder_tool import ReminderTool, CalendarQueryTool
+            from tool_system.builtin.weather_tool import WeatherTool
 
             registry = ToolRegistry()
             for tool_cls in [WeatherTool, SearchTool, CalendarTool, CalculatorTool]:
@@ -276,6 +327,120 @@ class OptimizedOrchestrator:
                 tone_mimic=self.components["tone"],
             )
 
+            # ── 角色卡系统 (v3.0 新增) ──
+            card_fusion = fusion_cfg.get("character_card", {})
+            card_enabled = card_fusion.get("enabled", cfg.character_card.enabled)
+            card_mode = card_fusion.get("mode", "merge")
+
+            if card_enabled:
+                try:
+                    from character_card.integration import CharacterCardAdapter
+                    char_dir = card_fusion.get("card_dir", cfg.character_card.card_dir) or "config/characters"
+                    default_card = card_fusion.get("default_card", cfg.character_card.default_card) or ""
+
+                    self.components["character_card"] = CharacterCardAdapter(
+                        card_dir=str(project_root / char_dir),
+                        default_card_path=str(project_root / default_card) if default_card else None,
+                        enabled=True,
+                    )
+                    self.components["card_mode"] = card_mode
+                    # 自动加载默认卡
+                    if default_card and self.components["character_card"].load_default():
+                        logger.info("默认角色卡已加载: %s", default_card)
+                    else:
+                        logger.info("未配置默认角色卡，跳过")
+                except Exception as e:
+                    logger.warning("角色卡系统初始化失败 (不影响运行): %s", e)
+                    self.components["character_card"] = None
+            else:
+                logger.info("角色卡系统已禁用")
+
+            # ── 语音TTS系统 (v3.0 新增) ──
+            voice_fusion = fusion_cfg.get("voice", {})
+            voice_enabled = voice_fusion.get("enabled", cfg.voice.enabled)
+
+            if voice_enabled:
+                try:
+                    from voice import TTSManager
+                    # 将VoiceConfig对象转换为dict以兼容TTSManager.initialize()
+                    voice_config = voice_fusion if voice_fusion else cfg.voice.model_dump()
+                    self.components["voice"] = TTSManager()
+                    self._run_async(self.components["voice"].initialize(
+                        voice_config if isinstance(voice_config, dict) else voice_config
+                    ))
+                    if self.components["voice"].enabled:
+                        logger.info("语音系统初始化完成: engine=%s",
+                                     self.components["voice"].current_engine)
+                    else:
+                        self.components["voice"] = None
+                        logger.warning("语音系统初始化失败")
+                except Exception as e:
+                    logger.warning("语音系统初始化失败 (不影响运行): %s", e)
+                    self.components["voice"] = None
+            else:
+                self.components["voice"] = None
+                logger.info("语音系统已禁用")
+
+            # ── 长期记忆增强 (v3.0 新增) ──
+            mem_ext_fusion = fusion_cfg.get("memory_ext", {})
+            mem_ext_enabled = mem_ext_fusion.get("enabled", cfg.memory_ext.enabled)
+
+            if mem_ext_enabled:
+                try:
+                    from memory_ext import MemoryEnhancer
+                    coll_name = mem_ext_fusion.get("collection_name", cfg.memory_ext.collection_name) or "long_term_memories"
+                    self.components["memory_ext"] = MemoryEnhancer(
+                        chroma_path=str(project_root / "data" / "chroma_db"),
+                        collection_name=coll_name,
+                        llm_gateway=self.components["llm"],
+                        enabled=True,
+                    )
+                    self._run_async(self.components["memory_ext"].initialize())
+                    logger.info("长期记忆增强已初始化: collection=%s", coll_name)
+                except Exception as e:
+                    logger.warning("长期记忆增强初始化失败 (不影响运行): %s", e)
+                    self.components["memory_ext"] = None
+            else:
+                self.components["memory_ext"] = None
+                logger.info("长期记忆增强已禁用")
+
+            # ── PersonaExtractor人格克隆 (v3.1 新增) ──
+            persona_fusion = fusion_cfg.get("persona_extractor", {})
+            persona_ext_enabled = persona_fusion.get("enabled", False)
+
+            if persona_ext_enabled:
+                try:
+                    from persona_extractor import PersonaExtractor
+
+                    pe_mode = persona_fusion.get("mode", "lite")
+                    pe_freq = persona_fusion.get("detect_frequency", 3)
+                    pe_inject = persona_fusion.get("inject_persona", True)
+
+                    self.components["persona_extractor"] = PersonaExtractor(
+                        llm_gateway=self.components["llm"],
+                        db_path=str(project_root / "data" / "sqlite.db"),
+                        pado_mode=pe_mode,
+                        detect_frequency=pe_freq,
+                        inject_persona=pe_inject,
+                    )
+                    # 注入 ToneMimic 引用
+                    if "tone" in self.components:
+                        self.components["persona_extractor"].set_tone_mimic(
+                            self.components["tone"]
+                        )
+                    # 异步初始化
+                    self._run_async(
+                        self.components["persona_extractor"].initialize()
+                    )
+                    logger.info("PersonaExtractor已初始化: mode=%s, freq=%d",
+                                pe_mode, pe_freq)
+                except Exception as e:
+                    logger.warning("PersonaExtractor初始化失败 (不影响运行): %s", e)
+                    self.components["persona_extractor"] = None
+            else:
+                self.components["persona_extractor"] = None
+                logger.info("PersonaExtractor已禁用")
+
             self._initialized = True
             init_time = time.perf_counter() - start_time
             logger.info("[初始化] 完成, 耗时 %.2fs", init_time)
@@ -285,20 +450,20 @@ class OptimizedOrchestrator:
             logger.error("[初始化] 失败: %s", e)
             return False
 
-    def process_message(self, user_msg: str, session_id: str = "") -> Dict[str, Any]:
+    def process_message(self, user_msg: str, session_id: str = "", message_type: str = "text") -> Dict[str, Any]:
         if not self._initialized:
             return {"reply": "系统初始化中, 请稍候...", "error": "not_initialized"}
 
-        if self._lock:
+        if self._lock.locked():
             return {"reply": "处理中, 请稍候...", "error": "busy"}
 
-        self._lock = True
+        self._lock.acquire()
         start_time = time.perf_counter()
 
         try:
             safety_result = self.components["safety"].check_input(user_msg)
             if not safety_result.is_safe:
-                self._lock = False
+                self._lock.release()
                 return {
                     "reply": self.components["safety"].safe_alternative(safety_result.category),
                     "safety_triggered": True,
@@ -309,6 +474,20 @@ class OptimizedOrchestrator:
             is_injection, _, _ = self.components["injection"].detect(user_msg_clean)
             if is_injection:
                 user_msg_clean = self.components["injection"].sanitize(user_msg_clean)
+
+            # ── PersonaExtractor: 从用户消息检测人格特征 ──
+            persona_enhancement = ""
+            pe = self.components.get("persona_extractor")
+            if pe is not None:
+                try:
+                    persona_enhancement = self._run_async(
+                        pe.process_message(
+                            message=user_msg_clean,
+                            context=self.components["memory"].get_recent_context(3),
+                        )
+                    )
+                except Exception as e:
+                    logger.debug("PersonaExtractor process error: %s", e)
 
             emotion_state = self.components["emotion"].analyze(
                 user_msg_clean,
@@ -328,6 +507,10 @@ class OptimizedOrchestrator:
                 memory_context=memory_context,
                 rag_context=rag_context,
             )
+
+            # 注入人格增强段
+            if persona_enhancement:
+                system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
 
             reply = self.components["llm"].chat(
                 query=user_msg_clean,
@@ -351,7 +534,7 @@ class OptimizedOrchestrator:
 
             process_time = time.perf_counter() - start_time
 
-            self._lock = False
+            self._lock.release()
             return {
                 "reply": reply,
                 "emotion": emotion_state.to_dict() if emotion_state else None,
@@ -360,7 +543,7 @@ class OptimizedOrchestrator:
 
         except Exception as e:
             logger.exception("消息处理异常")
-            self._lock = False
+            self._lock.release()
             return {"reply": "（处理消息时出现异常, 请稍后重试）", "error": str(e)}
 
     def health_check(self) -> Dict[str, Any]:
@@ -386,7 +569,7 @@ class OptimizedOrchestrator:
 
 def run_clone_pipeline(args: argparse.Namespace) -> None:
     print("\n" + "=" * 50)
-    print("  🧬 风格克隆管线")
+    print("  [CLONE] 风格克隆管线")
     print("=" * 50)
     print(f"  目标: {args.clone}")
     print(f"  来源: {args.clone_source}")
@@ -414,11 +597,11 @@ def run_clone_pipeline(args: argparse.Namespace) -> None:
     )
 
     if result.get("error"):
-        print(f"  ❌ 克隆失败: {result['error']}")
+        print(f"  [FAIL] 克隆失败: {result['error']}")
         return
 
     print(f"\n{'=' * 50}")
-    print(f"  ✅ 克隆完成")
+    print("  [OK] 克隆完成")
     print(f"{'=' * 50}")
     print(f"  提取对话: {result.get('extracted_turns', 0)} 轮")
     print(f"  风格独特性: {result.get('uniqueness', 0):.0%}")
@@ -428,6 +611,33 @@ def run_clone_pipeline(args: argparse.Namespace) -> None:
     print()
 
 
+# 健康检查中不视为"失败"的字段名
+_HEALTH_OK_KEYS = {"base_prompt_cached", "evolution_count", "original_anchors",
+                   "anchor_integrity", "chromadb", "prompt_mode"}
+
+
+def _is_healthy(result) -> bool:
+    if isinstance(result, bool):
+        return result
+    if isinstance(result, dict):
+        if "healthy" in result:
+            return bool(result["healthy"])
+        if "status" in result:
+            return result["status"] in ("healthy", "ok", True)
+        # 忽略非关键字段，只看核心运行状态字段
+        non_ok = any(v is False for k, v in result.items()
+                     if isinstance(v, bool) and k not in _HEALTH_OK_KEYS)
+        if non_ok:
+            logger.warning("Health check dict has False values: %s",
+                           {k: v for k, v in result.items() if v is False})
+            return False
+        # 检查是否有 error 字段
+        if result.get("error"):
+            return False
+        return True
+    return True
+
+
 def health_check_all(components: dict) -> bool:
     all_ok = True
     print("\n[健康检查]")
@@ -435,29 +645,27 @@ def health_check_all(components: dict) -> bool:
         if hasattr(component, "health_check"):
             try:
                 status = component.health_check()
-                ok = True
-                if isinstance(status, dict):
-                    ok = not any(v is False for v in status.values())
-                print(f"  {'✅' if ok else '❌'} {name}")
+                ok = _is_healthy(status)
+                print(f"  {'[OK]' if ok else '[FAIL]'} {name}")
                 if not ok:
                     logger.warning("%s health check failed: %s", name, status)
                     all_ok = False
             except Exception as e:
-                print(f"  ❌ {name} (error: {e})")
+                print(f"  [FAIL] {name} (error: {e})")
                 all_ok = False
         else:
-            print(f"  ✅ {name}")
+            print(f"  [OK] {name}")
     if all_ok:
-        print("\n  ✅ 全部通过\n")
+        print("\n  [OK] 全部通过\n")
     else:
-        print("\n  ⚠️ 部分组件异常\n")
+        print("\n  [WARN] 部分组件异常\n")
     return all_ok
 
 
 def run_console_chat(orchestrator_or_obj, orchestrator_mode: str,
                      emotion_engine=None, ase_engine=None) -> None:
     print("\n" + "=" * 50)
-    print(f"  💬 控制台聊天模式 ({orchestrator_mode} 模式)")
+    print(f"  [CHAT] 控制台聊天模式 ({orchestrator_mode} 模式)")
     print("  命令: /quit 退出  /status 查看状态  /health 健康检查  /reset 重置记忆")
     print("=" * 50 + "\n")
 
@@ -474,22 +682,22 @@ def run_console_chat(orchestrator_or_obj, orchestrator_mode: str,
             try:
                 query = input("你 > ").strip()
             except (EOFError, KeyboardInterrupt):
-                print("\n👋 下次再来找我哦～")
+                print("\n[BYE] 下次再来找我哦~")
                 break
 
             if not query:
                 continue
 
             if query == "/quit":
-                print("👋 笨蛋, 记得想我！")
+                print("[BYE] 笨蛋, 记得想我！")
                 break
             elif query == "/reset":
                 if orchestrator_mode == "full" and hasattr(orchestrator_or_obj, "_memory"):
                     try:
                         orchestrator_or_obj._memory.structured_memory.clear_session("console")
-                        print("✅ 记忆已重置")
+                        print("[OK] 记忆已重置")
                     except Exception as e:
-                        print(f"⚠️ 重置失败: {e}")
+                        print(f"[WARN] 重置失败: {e}")
                 continue
             elif query == "/status":
                 if orchestrator_mode == "full" and emotion_engine:
@@ -518,12 +726,12 @@ def run_console_chat(orchestrator_or_obj, orchestrator_mode: str,
                     print(f"  系统状态: {health_checker.check()}")
                 elif orchestrator_mode == "fast":
                     health = orchestrator_or_obj.health_check()
-                    print(f"  系统状态: {'✅ 健康' if health['healthy'] else '⚠️ 异常'}")
+                    print(f"  系统状态: {'[OK] 健康' if health['healthy'] else '[WARN] 异常'}")
                     for name, status in health.get("components", {}).items():
                         print(f"    {name}: {status}")
                 continue
 
-            result = orchestrator_or_obj.process_message(query, session_id)
+            result = asyncio.run(orchestrator_or_obj.process_message(query, session_id)) if asyncio.iscoroutinefunction(orchestrator_or_obj.process_message) else orchestrator_or_obj.process_message(query, session_id)
             reply = result.get("reply", "")
             emotion = result.get("emotion")
 
@@ -533,110 +741,57 @@ def run_console_chat(orchestrator_or_obj, orchestrator_mode: str,
 
             print(f"小暖 > {reply}{emotion_tag}")
 
-    except Exception as e:
+    except Exception:
         logger.exception("控制台聊天异常")
 
 
 def run_wechat_mode(orchestrator_or_obj, orchestrator_mode: str,
                     args: argparse.Namespace) -> None:
-    from cowagent_adapter import patch_cowagent, GirlfriendBot
-    import cowagent_adapter._globals as gl
+    # 使用方案 C 的统一入口
+    from cowagent_adapter.init import initialize_wechat_channel
 
-    class OrchestratorAdapter:
-        def __init__(self, orch):
-            self._orch = orch
-
-        def reply(self, user_msg: str) -> Any:
-            result = self._orch.process_message(user_msg)
-            return type("Reply", (), {"content": result.get("reply", "")})()
-
-    bot = OrchestratorAdapter(orchestrator_or_obj)
-    gl.bot_registry.register(bot)
-    gl._girlfriend_bot_instance = bot
-    patch_cowagent()
-
-    heartbeat = None
-    heartbeat_available = False
-
-    try:
-        from cowagent_adapter.heartbeat import WeChatHeartbeat
-        heartbeat = WeChatHeartbeat(check_interval=30, max_missed=3)
-
-        def on_heartbeat_change(connected: bool):
-            if connected:
-                logger.info("💓 微信连接状态: 已连接")
-            else:
-                logger.warning("💔 微信连接状态: 已断开")
-
-        heartbeat.on_status_change(on_heartbeat_change)
-        if hasattr(bot, '_heartbeat'):
-            bot._heartbeat = heartbeat
-        heartbeat_available = True
-    except (ImportError, Exception) as e:
-        logger.warning("心跳监控未启用: %s", e)
-
-    wechat_process: Optional[multiprocessing.Process] = None
-
-    def start_cowagent_process():
-        nonlocal wechat_process
-
-        config_path = str(project_root / "config" / "cowagent_config.json")
-        os.environ["COWAGENT_CONFIG"] = config_path
-
-        def _run_in_subprocess():
-            import cowagent_src.app as cowapp
-            try:
-                cowapp.run()
-            except KeyboardInterrupt:
-                pass
-            except Exception as e:
-                logger.error("CowAgent 子进程异常: %s", e)
-                raise
-
-        wechat_process = multiprocessing.Process(
-            target=_run_in_subprocess,
-            daemon=True,
-            name="cowagent-wechat",
-        )
-        wechat_process.start()
-        logger.info("CowAgent 子进程已启动 (PID=%d)", wechat_process.pid)
-
-    def check_cowagent_process():
-        nonlocal wechat_process
-        if wechat_process is None:
-            return
-        if not wechat_process.is_alive():
-            logger.warning("CowAgent 子进程已退出 (exitcode=%s), 正在重启...",
-                          wechat_process.exitcode)
-            start_cowagent_process()
+    config_path = str(project_root / "config" / "cowagent_config.json")
 
     print("\n📱 微信模式启动中...")
     print("   请扫描二维码登录微信个人号")
     print("   或按 Ctrl+C 切换回控制台模式\n")
 
-    start_cowagent_process()
+    status = initialize_wechat_channel(
+        orchestrator=orchestrator_or_obj,
+        enable_heartbeat=True,
+        heartbeat_interval=30,
+        heartbeat_max_missed=3,
+        cowagent_config=config_path,
+        auto_restart=True,
+    )
 
-    if heartbeat_available and heartbeat:
-        heartbeat.start(cowagent_instance=None)
+    if not status["ok"]:
+        logger.error("微信通道初始化失败: %s", status.get("message", ""))
+        print(f"\n❌ 微信通道初始化失败: {status.get('message', '')}")
+        print("   请检查 CowAgent 配置后重试")
+        return
 
+    hb_mgr = status.get("heartbeat")
+    proc_mgr = status.get("process")
+
+    # 维持主循环：监控子进程 + 响应 Ctrl+C
     try:
         while True:
             time.sleep(10)
-            check_cowagent_process()
+            if proc_mgr:
+                proc_mgr.check()
     except KeyboardInterrupt:
         print("\n👋 正在停止...")
-        if heartbeat_available and heartbeat:
-            heartbeat.stop()
-        if wechat_process and wechat_process.is_alive():
-            wechat_process.terminate()
-            wechat_process.join(timeout=5)
-            logger.info("CowAgent 子进程已终止")
+        if hb_mgr:
+            hb_mgr.stop()
+        if proc_mgr:
+            proc_mgr.stop()
 
 
 def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None) -> None:
     from api.rest_api import create_api_app
-    from api.websocket_server import WebSocketServer
     from api.session_manager import SessionManager
+    from api.websocket_server import WebSocketServer
     from observability.health import health_checker
 
     session_mgr = SessionManager()
@@ -713,8 +868,6 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
     from observability.logging_setup import setup_logging
     setup_logging(cfg.observability.log_level, cfg.observability.log_format)
 
-    from observability.tracing import tracer
-    from observability.health import health_checker
     from observability.graceful_shutdown import graceful_shutdown
 
     if cfg.observability.metrics_enabled:
@@ -748,6 +901,7 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
 
         if scheduler.start():
             logger.info("主动消息调度器已启动")
+            atexit.register(scheduler.stop)
         else:
             logger.warning("主动消息调度器启动失败")
     else:
@@ -792,9 +946,8 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     from observability.logging_setup import setup_logging
     setup_logging(cfg.observability.log_level, cfg.observability.log_format)
 
-    from observability.tracing import tracer
-    from observability.health import health_checker
     from observability.graceful_shutdown import graceful_shutdown
+    from observability.health import health_checker
 
     if cfg.observability.metrics_enabled:
         from observability.metrics import setup_metrics
@@ -804,8 +957,8 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
 
     logger.info("[3/12] 初始化安全层...")
     from safety.content_safety import ContentSafetyFilter
-    from safety.pii_anonymizer import PIIAnonymizer
     from safety.encryption import EncryptionManager
+    from safety.pii_anonymizer import PIIAnonymizer
     from safety.prompt_injection import PromptInjectionDetector
 
     safety_filter = ContentSafetyFilter(enabled=cfg.safety.input_filter_enabled)
@@ -817,26 +970,27 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     injection_detector = PromptInjectionDetector(enabled=cfg.safety.prompt_injection_detection)
 
     logger.info("[4/12] 初始化LLM网关V2...")
-    from llm_provider.llm_gateway_v2 import LLMGatewayV2
+    from llm_provider import get_llm
     from llm_provider.prompt_template_mgr import PromptTemplateMgr
 
-    llm = LLMGatewayV2(models_config=cfg.llm.models_priority)
-    template_mgr = PromptTemplateMgr()
+    llm = get_llm(models_config=cfg.llm.models_priority)
+    PromptTemplateMgr()
 
     safety_filter.llm_gateway = llm
     injection_detector.llm_gateway = llm
 
-    llm_ok = llm.health_check().get("configured", False)
+    health = llm.health_check()
+    llm_ok = health.get("configured", False) or health.get("reachable", False)
     if llm_ok:
-        logger.info("      ✅ LLM API已配置 (model=%s)", llm.model)
+        logger.info("      ✅ %s 已配置 (model=%s)", type(llm).__name__, llm.model)
     else:
-        logger.info("      ⚠️ 未检测到API Key, 将使用模拟回复")
+        logger.info("      ⚠️ LLM 未配置或不可用，将使用模拟回复")
 
     logger.info("[5/12] 初始化角色引擎 (融合)...")
     from my_character import ConfigLoader
     config_loader = ConfigLoader(config_dir=args.config)
 
-    classifier_mode = emotion_fusion.get("classifier_mode", "hybrid")
+    emotion_fusion.get("classifier_mode", "hybrid")
     blend_ratio = emotion_fusion.get("blend_ratio", cfg.emotion.continuity_blend_ratio)
     classifier_timeout = emotion_fusion.get("classifier_timeout_ms",
                                              cfg.emotion.llm_classifier_timeout_ms)
@@ -849,8 +1003,8 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
         classifier_timeout_ms=classifier_timeout,
     )
 
-    prompt_mode = persona_fusion.get("prompt_mode", "layered")
-    anchor_verification = persona_fusion.get("anchor_verification_enabled", True)
+    persona_fusion.get("prompt_mode", "layered")
+    persona_fusion.get("anchor_verification_enabled", True)
 
     from my_character.persona_engine import PersonaEngine as PersonaEngineV2
     persona_engine = PersonaEngineV2(config_loader=config_loader, llm_gateway=llm)
@@ -863,15 +1017,15 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
         logger.warning("ToneMimic 不可用")
 
     logger.info("[6/12] 初始化记忆系统 (融合)...")
-    forgetting_model = memory_fusion.get("forgetting_model", "exponential")
+    memory_fusion.get("forgetting_model", "exponential")
 
-    from memory import VectorMemory, StructuredMemory
+    from memory import StructuredMemory, VectorMemory
     from memory.memory_pipeline import MemoryPipeline
 
     vector_memory = VectorMemory(chroma_path=str(project_root / "data" / "chroma_db"))
     structured_memory = StructuredMemory(db_path=str(project_root / "data" / "sqlite.db"))
 
-    memory_pipeline = MemoryPipelineV2(
+    memory_pipeline = MemoryPipeline(
         structured_memory=structured_memory,
         vector_memory=vector_memory,
         llm_gateway=llm,
@@ -880,11 +1034,11 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     )
 
     logger.info("[7/12] 初始化工具系统...")
-    from tool_system.base import ToolRegistry, ToolDispatcher
-    from tool_system.builtin.weather_tool import WeatherTool
+    from tool_system.base import ToolDispatcher, ToolRegistry
+    from tool_system.builtin.calendar_tool import CalculatorTool, CalendarTool
+    from tool_system.builtin.reminder_tool import CalendarQueryTool, ReminderTool
     from tool_system.builtin.search_tool import SearchTool
-    from tool_system.builtin.calendar_tool import CalendarTool, CalculatorTool
-    from tool_system.builtin.reminder_tool import ReminderTool, CalendarQueryTool
+    from tool_system.builtin.weather_tool import WeatherTool
 
     tool_registry = ToolRegistry()
     tool_dispatcher = ToolDispatcher(
@@ -910,9 +1064,9 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     )
 
     logger.info("[9/12] 初始化主动消息 (融合)...")
-    frequency_mode = ase_fusion.get("frequency_mode", "adaptive")
-    generation_mode = ase_fusion.get("generation_mode", "llm")
-    reflection_mode = ase_fusion.get("reflection_mode", "rule")
+    ase_fusion.get("frequency_mode", "adaptive")
+    ase_fusion.get("generation_mode", "llm")
+    ase_fusion.get("reflection_mode", "rule")
 
     from proactive.ase_engine import ASEEngine as ASEEngineV2
 
@@ -945,7 +1099,12 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
             send_message_func=_send_proactive,
             daily_maintenance_func=_daily_maintenance,
         )
-        logger.info("      调度器已就绪")
+        if scheduler.start():
+            logger.info("      调度器已启动")
+            atexit.register(scheduler.stop)
+        else:
+            logger.warning("      调度器启动失败，以无调度模式运行")
+            scheduler = None
     else:
         logger.info("      主动消息系统已禁用 (--no-scheduler)")
 
@@ -971,8 +1130,8 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     if not args.no_api:
         logger.info("[11/12] 启动API服务...")
         from api.rest_api import create_api_app
-        from api.websocket_server import WebSocketServer
         from api.session_manager import SessionManager
+        from api.websocket_server import WebSocketServer
 
         session_mgr = SessionManager()
 

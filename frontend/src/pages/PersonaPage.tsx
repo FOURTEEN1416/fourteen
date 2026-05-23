@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { usePersonaProfile } from '../hooks/useAPI'
 import { useEmotionTrend } from '../hooks/useAPI'
 import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts'
@@ -37,12 +37,12 @@ export default function PersonaPage() {
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <h1 className="text-base font-semibold text-slate-200 mb-6">小暖的人设档案</h1>
+      <h1 className="text-base font-semibold text-gray-800 mb-6">小暖的人设档案</h1>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Radar Chart */}
-        <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6">
-          <h2 className="text-sm font-semibold text-slate-300 mb-4">性格雷达</h2>
+        <div className="bg-white/80 border border-gray-200 rounded-2xl p-6">
+          <h2 className="text-sm font-semibold text-gray-700 mb-4">性格雷达</h2>
           <ResponsiveContainer width="100%" height={300}>
             <RadarChart data={radarData}>
               <PolarGrid stroke="#334155" />
@@ -61,19 +61,19 @@ export default function PersonaPage() {
         </div>
 
         {/* Character Traits */}
-        <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 space-y-5">
+        <div className="bg-white/80 border border-gray-200 rounded-2xl p-6 space-y-5">
           <div>
-            <h2 className="text-sm font-semibold text-slate-300 mb-4">性格维度</h2>
+            <h2 className="text-sm font-semibold text-gray-700 mb-4">性格维度</h2>
             <div className="space-y-3">
               {Object.entries(profile.core_character).map(([key, value]) => (
                 <div key={key}>
-                  <div className="flex justify-between text-xs text-slate-400 mb-1">
+                  <div className="flex justify-between text-xs text-gray-500 mb-1">
                     <span>{traitLabels[key] || key}</span>
                     <span>{Math.round(value * 100)}%</span>
                   </div>
-                  <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-slate-500 rounded-full"
+                      className="h-full bg-gray-300 rounded-full"
                       style={{ width: `${value * 100}%` }}
                     />
                   </div>
@@ -83,15 +83,15 @@ export default function PersonaPage() {
           </div>
 
           <div>
-            <h2 className="text-sm font-semibold text-slate-300 mb-4">说话风格</h2>
+            <h2 className="text-sm font-semibold text-gray-700 mb-4">说话风格</h2>
             <div className="space-y-3">
               {Object.entries(profile.speaking_style).map(([key, value]) => (
                 <div key={key}>
-                  <div className="flex justify-between text-xs text-slate-400 mb-1">
+                  <div className="flex justify-between text-xs text-gray-500 mb-1">
                     <span>{traitLabels[key] || key}</span>
                     <span>{Math.round(value * 100)}%</span>
                   </div>
-                  <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-accent-500 rounded-full"
                       style={{ width: `${value * 100}%` }}
@@ -104,19 +104,19 @@ export default function PersonaPage() {
         </div>
 
         {/* Evolution Log */}
-        <div className="lg:col-span-2 bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6">
-          <h2 className="text-sm font-semibold text-slate-300 mb-4">演化日志</h2>
+        <div className="lg:col-span-2 bg-white/80 border border-gray-200 rounded-2xl p-6">
+          <h2 className="text-sm font-semibold text-gray-700 mb-4">演化日志</h2>
           {log.length === 0 ? (
-            <p className="text-xs text-slate-500">暂无演化记录</p>
+            <p className="text-xs text-gray-400">暂无演化记录</p>
           ) : (
             <div className="space-y-2 max-h-60 overflow-y-auto">
               {log.slice().reverse().map((entry, i) => (
-                <div key={i} className="flex items-center gap-3 text-xs text-slate-400 bg-slate-800/30 rounded-lg px-3 py-2">
-                  <span className="text-slate-500 shrink-0">
+                <div key={i} className="flex items-center gap-3 text-xs text-gray-500 bg-gray-200/30 rounded-lg px-3 py-2">
+                  <span className="text-gray-400 shrink-0">
                     {new Date(entry.timestamp).toLocaleString('zh-CN')}
                   </span>
-                  <span className="text-slate-300">{traitLabels[entry.dimension] || entry.dimension}</span>
-                  <span className="text-slate-500">{entry.before.toFixed(2)} → {entry.after.toFixed(2)}</span>
+                  <span className="text-gray-700">{traitLabels[entry.dimension] || entry.dimension}</span>
+                  <span className="text-gray-400">{entry.before.toFixed(2)} → {entry.after.toFixed(2)}</span>
                   <span className="text-primary-400">({entry.delta >= 0 ? '+' : ''}{entry.delta.toFixed(3)})</span>
                 </div>
               ))}
@@ -125,9 +125,9 @@ export default function PersonaPage() {
         </div>
 
         {/* Emotion Trend Chart */}
-        <div className="lg:col-span-2 bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6">
+        <div className="lg:col-span-2 bg-white/80 border border-gray-200 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-slate-300">情感趋势</h2>
+            <h2 className="text-sm font-semibold text-gray-700">情感趋势</h2>
             <div className="flex gap-1">
               <Button size="sm" variant={trendDays === 7 ? 'primary' : 'ghost'} onClick={() => setTrendDays(7)}>7天</Button>
               <Button size="sm" variant={trendDays === 30 ? 'primary' : 'ghost'} onClick={() => setTrendDays(30)}>30天</Button>
@@ -145,7 +145,7 @@ export default function PersonaPage() {
               </LineChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-xs text-slate-500">暂无情感趋势数据</p>
+            <p className="text-xs text-gray-400">暂无情感趋势数据</p>
           )}
         </div>
       </div>
