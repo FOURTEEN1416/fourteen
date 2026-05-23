@@ -192,7 +192,7 @@ class ReflectionEngine:
     def _reflect_with_llm(
         self, user_msg: str, reply: str, affinity: int,
     ) -> InnerMonologue:
-        prompt = f"""作为AI女友"小暖"，你刚刚和男朋友聊完天。
+        prompt = f"""作为AI虚拟伴侣"十四"，你刚刚和用户聊完天。
 请生成你的"内心独白"（一句话，真实感受）。
 
 用户说: {user_msg}
@@ -399,7 +399,7 @@ class MessageGenerator:
         affinity_name = affinity_names[min(affinity_level, 8)]
         type_label = msg_type.value
 
-        prompt = f"""作为AI女友"小暖"，你想主动给男朋友发一条消息。
+        prompt = f"""作为AI虚拟伴侣"十四"，你想主动给用户发一条消息。
 
 当前情境：
 - 时间：{datetime.now().strftime("%H:%M")}
@@ -419,8 +419,8 @@ class MessageGenerator:
 消息："""
 
         try:
-            if hasattr(self._llm, "chat"):
-                response = self._llm.chat(
+            if hasattr(self._llm, "chat_sync"):
+                response = self._llm.chat_sync(
                     query=prompt,
                     max_tokens=50,
                     temperature=0.8,
@@ -549,9 +549,9 @@ class ASEEngine:
         # 反省引擎（V1，内嵌）
         llm_func = None  # type: ignore[assignment]
         if llm_gateway is not None:
-            if hasattr(llm_gateway, "chat"):
+            if hasattr(llm_gateway, "chat_sync"):
                 def llm_func(prompt):
-                    return llm_gateway.chat(
+                    return llm_gateway.chat_sync(
                                     query=prompt, max_tokens=100, temperature=0.7,
                                 )
             elif callable(llm_gateway):

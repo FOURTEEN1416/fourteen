@@ -86,9 +86,9 @@ class TestWeChatCommandParser:
 
     def test_forward(self):
         parser = WeChatCommandParser()
-        cmd = parser.parse("转发给：小暖")
+        cmd = parser.parse("转发给：十四")
         assert cmd.action == "forward"
-        assert cmd.params["target_character"] == "小暖"
+        assert cmd.params["target_character"] == "十四"
 
     def test_normal_message_returns_none(self):
         parser = WeChatCommandParser()
@@ -133,9 +133,9 @@ class TestWeChatCommandHandler:
 
     def test_forward_command(self, handler):
         h = handler[0]
-        ok, msg = h.handle("转发给：小暖")
+        ok, msg = h.handle("转发给：十四")
         assert ok is True
-        assert "小暖" in msg
+        assert "十四" in msg
 
     def test_normal_message_not_handled(self, handler):
         h = handler[0]

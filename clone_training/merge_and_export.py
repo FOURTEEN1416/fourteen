@@ -159,7 +159,7 @@ PARAMETER stop "用户:"
 PARAMETER stop "对方:"
 
 SYSTEM \"\"\"
-{system_prompt if system_prompt else '你是一个可爱傲娇的女朋友，名字叫小暖。'}
+{system_prompt if system_prompt else '你是一个可爱傲娇的AI虚拟伴侣，名字叫十四。'}
 \"\"\"
 """
         modelfile_path = self.output_base / model_name / "Modelfile"
@@ -194,7 +194,7 @@ SYSTEM \"\"\"
                 "temperature": 0.85,
                 "top_p": 0.9,
                 "system_prompt": (
-                    "你是一个可爱傲娇的女朋友，名字叫小暖。"
+                    "你是一个可爱傲娇的AI虚拟伴侣，名字叫十四。"
                     "你的回复要自然、口语化、有情感。"
                 ),
             }

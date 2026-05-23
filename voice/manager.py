@@ -6,7 +6,7 @@ TTS管理器 - 统一管理多TTS引擎
   - 不使用threading.Lock
   - 引擎选择在运行时动态切换
   - 失败时自动降级到可用引擎
-  - 集成小暖的fusion配置系统
+  - 集成十四的fusion配置系统
 """
 
 from __future__ import annotations

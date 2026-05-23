@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AI 伴侣女友"小暖" — 融合统一版主入口
+"十四" — AI 虚拟伴侣融合统一版主入口
 
 融合 V1 + V2 + Optimized 三版优势：
 - V1: CowAgent子进程管理 + 心跳监控 + 自动重启
@@ -80,7 +80,7 @@ logger = setup_logging()
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="AI伴侣女友 - 小暖 (融合统一版)",
+        description="十四 - AI 虚拟伴侣 (融合统一版)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -121,7 +121,7 @@ def parse_args() -> argparse.Namespace:
 def print_banner() -> None:
     banner = """
     ==================================================
-             小暖 -- AI 伴侣女友
+             十四 -- AI 虚拟伴侣
     ==================================================
         情感 . 记忆 . 主动交互 . 风格克隆
                融合统一版 v3.0
@@ -155,7 +155,8 @@ class OptimizedOrchestrator:
     def __init__(self):
         self.components: Dict[str, Any] = {}
         self._initialized = False
-        self._lock = threading.Lock()
+        self._session_locks: Dict[str, asyncio.Lock] = {}
+        self._locks_mutex = threading.Lock()
 
     @staticmethod
     def _run_async(coro) -> Any:
@@ -450,101 +451,101 @@ class OptimizedOrchestrator:
             logger.error("[初始化] 失败: %s", e)
             return False
 
-    def process_message(self, user_msg: str, session_id: str = "", message_type: str = "text") -> Dict[str, Any]:
+    def _get_session_lock(self, session_id: str) -> asyncio.Lock:
+        with self._locks_mutex:
+            if session_id not in self._session_locks:
+                self._session_locks[session_id] = asyncio.Lock()
+            return self._session_locks[session_id]
+
+    async def process_message(self, user_msg: str, session_id: str = "", message_type: str = "text") -> Dict[str, Any]:
         if not self._initialized:
             return {"reply": "系统初始化中, 请稍候...", "error": "not_initialized"}
 
-        if self._lock.locked():
+        lock = self._get_session_lock(session_id)
+        if lock.locked():
             return {"reply": "处理中, 请稍候...", "error": "busy"}
 
-        self._lock.acquire()
-        start_time = time.perf_counter()
+        async with lock:
+            start_time = time.perf_counter()
 
-        try:
-            safety_result = self.components["safety"].check_input(user_msg)
-            if not safety_result.is_safe:
-                self._lock.release()
-                return {
-                    "reply": self.components["safety"].safe_alternative(safety_result.category),
-                    "safety_triggered": True,
-                }
+            try:
+                safety_result = self.components["safety"].check_input(user_msg)
+                if not safety_result.is_safe:
+                    return {
+                        "reply": self.components["safety"].safe_alternative(safety_result.category),
+                        "safety_triggered": True,
+                    }
 
-            user_msg_clean, _ = self.components["pii"].anonymize(user_msg)
+                user_msg_clean, _ = self.components["pii"].anonymize(user_msg)
 
-            is_injection, _, _ = self.components["injection"].detect(user_msg_clean)
-            if is_injection:
-                user_msg_clean = self.components["injection"].sanitize(user_msg_clean)
+                is_injection, _, _ = self.components["injection"].detect(user_msg_clean)
+                if is_injection:
+                    user_msg_clean = self.components["injection"].sanitize(user_msg_clean)
 
-            # ── PersonaExtractor: 从用户消息检测人格特征 ──
-            persona_enhancement = ""
-            pe = self.components.get("persona_extractor")
-            if pe is not None:
-                try:
-                    persona_enhancement = self._run_async(
-                        pe.process_message(
+                persona_enhancement = ""
+                pe = self.components.get("persona_extractor")
+                if pe is not None:
+                    try:
+                        persona_enhancement = await pe.process_message(
                             message=user_msg_clean,
                             context=self.components["memory"].get_recent_context(3),
                         )
-                    )
-                except Exception as e:
-                    logger.debug("PersonaExtractor process error: %s", e)
+                    except Exception as e:
+                        logger.debug("PersonaExtractor process error: %s", e)
 
-            emotion_state = self.components["emotion"].analyze(
-                user_msg_clean,
-                context=self.components["memory"].get_recent_context(3),
-            )
+                emotion_state = self.components["emotion"].analyze(
+                    user_msg_clean,
+                    context=self.components["memory"].get_recent_context(3),
+                )
 
-            memory_context = self.components["memory"].retrieve_context(
-                query=user_msg_clean,
-                session_id=session_id,
-                top_k=5,
-            )
+                memory_context = self.components["memory"].retrieve_context(
+                    query=user_msg_clean,
+                    session_id=session_id,
+                    top_k=5,
+                )
 
-            rag_context = self.components["rag"].retrieve(user_msg_clean)
+                rag_context = self.components["rag"].retrieve(user_msg_clean)
 
-            system_prompt = self.components["persona"].build_system_prompt(
-                emotion_state=emotion_state,
-                memory_context=memory_context,
-                rag_context=rag_context,
-            )
+                system_prompt = self.components["persona"].build_system_prompt(
+                    emotion_state=emotion_state,
+                    memory_context=memory_context,
+                    rag_context=rag_context,
+                )
 
-            # 注入人格增强段
-            if persona_enhancement:
-                system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
+                if persona_enhancement:
+                    system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
 
-            reply = self.components["llm"].chat(
-                query=user_msg_clean,
-                system_prompt=system_prompt,
-                temperature=0.85,
-                max_tokens=2048,
-            )
+                reply = await self.components["llm"].chat(
+                    query=user_msg_clean,
+                    system_prompt=system_prompt,
+                    temperature=0.85,
+                    max_tokens=2048,
+                )
 
-            output_result = self.components["safety"].check_output(reply)
-            if not output_result.is_safe:
-                reply = self.components["safety"].safe_alternative(output_result.category)
+                output_result = self.components["safety"].check_output(reply)
+                if not output_result.is_safe:
+                    reply = self.components["safety"].safe_alternative(output_result.category)
 
-            self.components["memory"].after_chat(
-                user_msg=user_msg_clean,
-                reply=reply,
-                emotion=emotion_state.primary_emotion.value if emotion_state else "",
-                session_id=session_id,
-            )
+                self.components["memory"].after_chat(
+                    user_msg=user_msg_clean,
+                    reply=reply,
+                    emotion=emotion_state.primary_emotion.value if emotion_state else "",
+                    session_id=session_id,
+                )
 
-            self.components["ase"].on_chat(user_msg_clean, reply)
+                self.components["ase"].on_chat(user_msg_clean, reply)
 
-            process_time = time.perf_counter() - start_time
+                process_time = time.perf_counter() - start_time
 
-            self._lock.release()
-            return {
-                "reply": reply,
-                "emotion": emotion_state.to_dict() if emotion_state else None,
-                "process_time": round(process_time, 3),
-            }
+                return {
+                    "reply": reply,
+                    "emotion": emotion_state.to_dict() if emotion_state else None,
+                    "process_time": round(process_time, 3),
+                }
 
-        except Exception as e:
-            logger.exception("消息处理异常")
-            self._lock.release()
-            return {"reply": "（处理消息时出现异常, 请稍后重试）", "error": str(e)}
+            except Exception as e:
+                logger.exception("消息处理异常")
+                return {"reply": "（处理消息时出现异常, 请稍后重试）", "error": str(e)}
 
     def health_check(self) -> Dict[str, Any]:
         results = {}
@@ -739,7 +740,7 @@ def run_console_chat(orchestrator_or_obj, orchestrator_mode: str,
             if emotion:
                 emotion_tag = f" [{emotion.get('primary', {}).get('type', '')}]"
 
-            print(f"小暖 > {reply}{emotion_tag}")
+            print(f"十四 > {reply}{emotion_tag}")
 
     except Exception:
         logger.exception("控制台聊天异常")
@@ -886,7 +887,7 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
 
         def send_proactive(msg: str):
             logger.info("[主动消息] %s", msg)
-            print(f"\n💕 [小暖主动] {msg}")
+            print(f"\n💕 [十四主动] {msg}")
 
         def daily_maintenance():
             mem = orchestrator.components.get("memory")
@@ -1084,7 +1085,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
 
         def _send_proactive(msg: str):
             logger.info("[PROACTIVE] %s", msg)
-            print(f"\n💕 [小暖主动] {msg}")
+            print(f"\n💕 [十四主动] {msg}")
 
         def _daily_maintenance():
             try:

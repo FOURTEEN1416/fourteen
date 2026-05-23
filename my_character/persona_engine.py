@@ -27,7 +27,7 @@ from .tone_mimic import ToneMimic
 logger = logging.getLogger("persona_engine")
 
 DEFAULT_PERSONA_DESC = """
-你叫小暖，是我的女朋友。以下是你的性格设定，请严格遵守：
+你叫十四，是我的AI虚拟伴侣。以下是你的性格设定，请严格遵守：
 
 【核心性格】
 - 表面傲娇，嘴硬心软。嘴上说"哼，我才不管你"，实际上偷偷关注他的一切
@@ -181,6 +181,9 @@ class PersonaEngine:
         if self.anchor_verification_enabled:
             self._freeze_anchors()
 
+        self._prompt_cache: Dict[str, str] = {}
+        self._prompt_cache_max = 32
+
         self._evolution_log: List[dict] = []
         self._base_prompt_cache: Optional[str] = None
 
@@ -208,7 +211,7 @@ class PersonaEngine:
     # ── V1兼容接口 ────────────────────────────────────────────
 
     def get_name(self) -> str:
-        return self._persona.get("name", "小暖")
+        return self._persona.get("name", "十四")
 
     def get_core_anchors(self) -> List[str]:
         return list(self._original_anchors)
@@ -273,14 +276,35 @@ class PersonaEngine:
         memory_context: Optional[Dict] = None,
         rag_context: str = "",
     ) -> str:
+        cache_key_parts = []
+        if emotion_state is not None:
+            if isinstance(emotion_state, dict):
+                cache_key_parts.append(f"e:{emotion_state.get('primary_emotion','')}:{emotion_state.get('affinity','')}")
+            else:
+                cache_key_parts.append(f"e:{getattr(emotion_state,'primary_emotion','')}:{getattr(emotion_state,'affinity','')}")
+        cache_key_parts.append(f"sp:{len(style_prompt)}")
+        cache_key_parts.append(f"ch:{len(chat_history)}")
+        cache_key_parts.append(f"rag:{len(rag_context)}")
+        cache_key = "|".join(cache_key_parts)
+
+        if cache_key in self._prompt_cache:
+            return self._prompt_cache[cache_key]
+
         if self.prompt_mode == "legacy":
-            return self._build_legacy_prompt(
+            result = self._build_legacy_prompt(
                 emotion_state, style_prompt, few_shot_examples, chat_history, user_input,
             )
-        return self._build_layered_prompt(
-            emotion_state, style_prompt, few_shot_examples, chat_history,
-            user_input, memory_context, rag_context,
-        )
+        else:
+            result = self._build_layered_prompt(
+                emotion_state, style_prompt, few_shot_examples, chat_history,
+                user_input, memory_context, rag_context,
+            )
+
+        if len(self._prompt_cache) >= self._prompt_cache_max:
+            oldest_key = next(iter(self._prompt_cache))
+            del self._prompt_cache[oldest_key]
+        self._prompt_cache[cache_key] = result
+        return result
 
     def _build_legacy_prompt(
         self,

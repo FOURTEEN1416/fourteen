@@ -130,7 +130,7 @@ class EpisodicMemory:
             "timestamp": time.time(),
         }
         try:
-            self._vm.store_text(content, metadata)
+            self._vm.store_text_sync(content, metadata)
             self._sm.add_episode(episode_id, summary, importance, metadata)
             logger.debug("Episode stored: %s", episode_id)
             return episode_id
@@ -140,7 +140,7 @@ class EpisodicMemory:
 
     def search(self, query: str, top_k: int = 5) -> List[Dict]:
         try:
-            return self._vm.search(query, top_k=top_k,
+            return self._vm.search_sync(query, top_k=top_k,
                                    filter_dict={"type": "episode"})
         except Exception as e:
             logger.warning("Episode search failed: %s", e)
@@ -182,7 +182,7 @@ class SemanticMemory:
             self._sm.add_fact(fact, category, confidence, source)
             self._fact_cache.add(fact_hash)
             try:
-                self._vm.store_text(fact, {
+                self._vm.store_text_sync(fact, {
                     "type": "fact",
                     "category": category,
                     "confidence": confidence,
@@ -197,7 +197,7 @@ class SemanticMemory:
     def search(self, query: str, top_k: int = 5) -> Dict[str, List]:
         results = {"vector": [], "structured": []}
         try:
-            vector_results = self._vm.search(query, top_k=top_k,
+            vector_results = self._vm.search_sync(query, top_k=top_k,
                                              filter_dict={"type": "fact"})
             results["vector"] = vector_results
             structured_results = self._sm.search_facts(query)
@@ -642,7 +642,7 @@ class DiarySummarizer:
 
     def _summarize_with_llm(self, chats: List[Dict[str, Any]]) -> str:
         chat_text = "\n".join(
-            f"{'用户' if c['role'] == 'user' else '小暖'}: {c['content']}"
+            f"{'用户' if c['role'] == 'user' else '十四'}: {c['content']}"
             for c in chats[-30:]
         )
         prompt = f"""以下是今天的对话记录，请生成简洁的每日摘要。
@@ -679,7 +679,7 @@ class DiarySummarizer:
         emotions = [c.get("emotion_tag", "") for c in assistant_msgs
                     if c.get("emotion_tag")]
         emotion_summary = ", ".join(set(emotions)) if emotions else "未记录"
-        summary = f"今日共 {total} 条消息（用户 {user_count} 条，小暖 {assistant_count} 条）。"
+        summary = f"今日共 {total} 条消息（用户 {user_count} 条，十四 {assistant_count} 条）."
         if mentioned:
             summary += f" 提到话题：{'、'.join(mentioned)}。"
         if emotion_summary != "未记录":
@@ -842,7 +842,7 @@ class MemoryPipeline:
 
         # 4. 存储到向量库
         try:
-            self.vm.store_chat(user_msg, reply, {
+            self.vm.store_chat_sync(user_msg, reply, {
                 "emotion": emotion_tag,
                 "session_id": effective_session,
                 "importance": importance,
@@ -872,7 +872,7 @@ class MemoryPipeline:
         # 7. 情绪记录
         if emotion_tag:
             try:
-                self.vm.store_emotion_log(
+                self.vm.store_emotion_log_sync(
                     emotion_tag, importance, trigger="chat"
                 )
                 result["emotion_updated"] = True

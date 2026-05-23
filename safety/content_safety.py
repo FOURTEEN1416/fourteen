@@ -100,7 +100,7 @@ class ContentSafetyFilter:
                 f"文本：{text[:500]}\n"
                 f'回复JSON格式：{{"category": "xxx", "confidence": 0.0-1.0}}'
             )
-            response = self.llm_gateway.chat(  # type: ignore
+            response = self.llm_gateway.chat_sync(  # type: ignore
                 query=prompt,
                 system_prompt="你是一个内容安全分类器，仅输出JSON。",
                 max_tokens=64,

@@ -164,7 +164,7 @@ class DiarySummarizer:
     def _summarize_with_llm(self, chats: List[Dict[str, Any]]) -> str:
         """LLM 摘要"""
         chat_text = "\n".join(
-            f"{'用户' if c['role'] == 'user' else '小暖'}: {c['content']}"
+            f"{'用户' if c['role'] == 'user' else '十四'}: {c['content']}"
             for c in chats[-30:]  # 最多30条
         )
 
@@ -209,7 +209,7 @@ class DiarySummarizer:
         emotion_summary = ", ".join(set(emotions)) if emotions else "未记录"
 
         summary = (
-            f"今日共 {total} 条消息（用户 {user_count} 条，小暖 {assistant_count} 条）。"
+            f"今日共 {total} 条消息（用户 {user_count} 条，十四 {assistant_count} 条）."
         )
         if mentioned:
             summary += f" 提到话题：{'、'.join(mentioned)}。"

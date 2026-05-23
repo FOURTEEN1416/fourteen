@@ -97,7 +97,7 @@ class ConfigLoader:
     @staticmethod
     def _default_persona() -> dict:
         return {
-            "name": "小暖",
+            "name": "十四",
             "core_anchors": [
                 "表面傲娇，内心温柔",
                 "在你面前才会展现脆弱",

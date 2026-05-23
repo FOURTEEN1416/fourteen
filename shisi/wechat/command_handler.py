@@ -95,5 +95,5 @@ class WeChatCommandHandler:
     def _handle_forward(self, cmd: Command, cid: str) -> str:
         target = cmd.params.get("target_character", "")
         if not target:
-            return "请指定目标角色，如：转发给：小暖"
+            return "请指定目标角色，如：转发给：十四"
         return f"📤 已转发记忆给：{target}"

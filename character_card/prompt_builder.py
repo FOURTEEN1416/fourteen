@@ -1,7 +1,7 @@
 """
 系统提示词构建器 - 将角色卡转换为LLM提示词
 
-复用SillyTavern的提示词构建逻辑，输出格式兼容小暖的PersonaEngine
+复用SillyTavern的提示词构建逻辑，输出格式兼容十四的PersonaEngine
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ class PromptBuilder:
     """
     系统提示词构建器
 
-    将SillyTavern角色卡转换为LLM系统提示词，输出格式与小暖PersonaEngine兼容
+    将SillyTavern角色卡转换为LLM系统提示词，输出格式与十四PersonaEngine兼容
 
     构建顺序:
       1. 主提示词 (写回复的指令)

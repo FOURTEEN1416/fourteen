@@ -16,7 +16,7 @@ const WECHAT_COMMANDS: WechatCommandHelp[] = [
   { command: '生理指标', description: '查看角色生理数据', example: '生理指标' },
   { command: '发表情', description: '触发情感推荐表情', example: '发表情' },
   { command: '收藏', description: '收藏当前对话记忆', example: '收藏' },
-  { command: '转发给：[名]', description: '转发记忆给其他角色', example: '转发给：小暖' },
+  { command: '转发给：[名]', description: '转发记忆给其他角色', example: '转发给：十四' },
 ]
 
 interface StageHistoryEntry {

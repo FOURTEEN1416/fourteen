@@ -47,7 +47,7 @@ export default function ChatPage() {
       <div className="flex-1 flex">
         <div className="flex-1 flex flex-col min-w-0">
           <div className="border-b border-gray-200 px-4 py-3 bg-gray-50">
-            <h1 className="text-sm font-semibold text-gray-800">小暖</h1>
+            <h1 className="text-sm font-semibold text-gray-800">十四</h1>
           </div>
 
           {sessionError ? (

@@ -113,7 +113,7 @@ class PromptTemplateMgr:
                     "当前情感：{emotion_state}\n"
                     "好感度等级：{affinity_level}\n"
                     "距离上次聊天：{hours_since_last}小时\n\n"
-                    "要求：符合小暖的傲娇人设，自然不做作，15字以内。"
+                    "要求：符合十四的傲娇人设，自然不做作，15字以内。"
                 ),
                 version="1.0",
                 description="Proactive message generation prompt",

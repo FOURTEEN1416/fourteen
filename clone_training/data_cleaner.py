@@ -227,7 +227,7 @@ Return ONLY a single number (1-5):"""
             reply_msg=reply_msg[:500],
         )
         try:
-            result = self._llm.chat(query=prompt, system_prompt="")  # type: ignore
+            result = self._llm.chat_sync(query=prompt, system_prompt="")  # type: ignore
             result = result.strip()
             # 提取数字
             nums = re.findall(r"[1-5]", result)
