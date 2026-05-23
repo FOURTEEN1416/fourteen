@@ -2,17 +2,17 @@
 
 import pytest
 
-from aiyu.affinity.enhancer import AffinityEnhancer
-from aiyu.character.manager import CharacterManager
-from aiyu.character.models import CharaCardV2, CharacterData
-from aiyu.character.store import CharacterStore
-from aiyu.config import reset_config
-from aiyu.emotion_stage.stage_engine import EmotionStageEngine
-from aiyu.migrations import run_migrations
-from aiyu.wechat.command_handler import WeChatCommandHandler
-from aiyu.wechat.command_parser import WeChatCommandParser
-from aiyu.wechat.proactive_messenger import WeChatProactiveMessenger
-from aiyu.wechat.sticker_adapter import WeChatStickerAdapter
+from shisi.affinity.enhancer import AffinityEnhancer
+from shisi.character.manager import CharacterManager
+from shisi.character.models import CharaCardV2, CharacterData
+from shisi.character.store import CharacterStore
+from shisi.config import reset_config
+from shisi.emotion_stage.stage_engine import EmotionStageEngine
+from shisi.migrations import run_migrations
+from shisi.wechat.command_handler import WeChatCommandHandler
+from shisi.wechat.command_parser import WeChatCommandParser
+from shisi.wechat.proactive_messenger import WeChatProactiveMessenger
+from shisi.wechat.sticker_adapter import WeChatStickerAdapter
 
 
 @pytest.fixture(autouse=True)

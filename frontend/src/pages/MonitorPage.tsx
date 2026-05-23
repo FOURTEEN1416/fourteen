@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { aiyuClient } from '../api/aiyuClient'
+import { shisiClient } from '../api/shisiClient'
 import { useErrorStore } from '../store/errorStore'
 import Card from '../components/common/Card'
 import Badge from '../components/common/Badge'
@@ -7,7 +7,7 @@ import Skeleton from '../components/common/Skeleton'
 import EmptyState from '../components/common/EmptyState'
 import { Activity, Heart, ChevronDown, History, Unlock, Clock } from 'lucide-react'
 import type { CharacterState } from '../types/character'
-import type { EmotionStageProgress, AffinityProgress, WechatCommandHelp } from '../types/aiyu'
+import type { EmotionStageProgress, AffinityProgress, WechatCommandHelp } from '../types/shisi'
 
 const WECHAT_COMMANDS: WechatCommandHelp[] = [
   { command: '切换角色：[名]', description: '切换当前对话角色', example: '切换角色：椎名真昼' },
@@ -47,7 +47,7 @@ export default function MonitorPage() {
   async function loadCharacters() {
     try {
       setLoading(true)
-      const data = await aiyuClient.characters.list() as CharacterState[]
+      const data = await shisiClient.characters.list() as CharacterState[]
       setCharacters(data)
       if (data.length > 0) {
         const active = data.find(c => c.is_active) || data[0]
@@ -62,8 +62,8 @@ export default function MonitorPage() {
   async function loadDetail(cid: string) {
     try {
       const [aff, st] = await Promise.all([
-        aiyuClient.affinity.get(cid),
-        aiyuClient.emotionStage.get(cid),
+        shisiClient.affinity.get(cid),
+        shisiClient.emotionStage.get(cid),
       ])
       setAffinity(aff as AffinityProgress)
       setStage(st as EmotionStageProgress)
@@ -74,7 +74,7 @@ export default function MonitorPage() {
 
   async function loadStageHistory(cid: string) {
     try {
-      const data = await aiyuClient.emotionStage.listStages() as any[]
+      const data = await shisiClient.emotionStage.listStages() as any[]
       setStageHistory(data.map((s, i) => ({
         from_stage: i > 0 ? data[i - 1].name : '初始',
         to_stage: s.name,
@@ -88,7 +88,7 @@ export default function MonitorPage() {
 
   async function loadUnlockEvents(cid: string) {
     try {
-      const data = await aiyuClient.affinity.get(cid) as any
+      const data = await shisiClient.affinity.get(cid) as any
       setUnlockEvents(data?.unlocks?.map((u: any) => ({
         name: u.name,
         affinity_threshold: u.affinity_threshold ?? 0,

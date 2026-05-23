@@ -96,7 +96,7 @@ class WebSocketServer:
         msg = json.dumps({"type": "proactive", "content": content}, ensure_ascii=False)
         await self._parallel_broadcast(msg)
 
-    async def broadcast_aiyu_event(self, event_type: str, data: Dict[str, Any]):
+    async def broadcast_shisi_event(self, event_type: str, data: Dict[str, Any]):
         msg = json.dumps({"type": event_type, "data": data}, ensure_ascii=False)
         await self._parallel_broadcast(msg)
 
@@ -120,16 +120,16 @@ class WebSocketServer:
                 self._clients -= disconnected
 
     async def broadcast_character_switched(self, character_id: str, character_name: str):
-        await self.broadcast_aiyu_event("character_switched", {"character_id": character_id, "name": character_name})
+        await self.broadcast_shisi_event("character_switched", {"character_id": character_id, "name": character_name})
 
     async def broadcast_emotion_stage_changed(self, character_id: str, old_stage: str, new_stage: str, affinity: float):
-        await self.broadcast_aiyu_event("emotion_stage_changed", {"character_id": character_id, "old_stage": old_stage, "new_stage": new_stage, "affinity": affinity})
+        await self.broadcast_shisi_event("emotion_stage_changed", {"character_id": character_id, "old_stage": old_stage, "new_stage": new_stage, "affinity": affinity})
 
     async def broadcast_affinity_changed(self, character_id: str, old_value: float, new_value: float):
-        await self.broadcast_aiyu_event("affinity_changed", {"character_id": character_id, "old_value": old_value, "new_value": new_value})
+        await self.broadcast_shisi_event("affinity_changed", {"character_id": character_id, "old_value": old_value, "new_value": new_value})
 
     async def broadcast_sticker_send(self, character_id: str, sticker_id: str, category: str):
-        await self.broadcast_aiyu_event("sticker_send", {"character_id": character_id, "sticker_id": sticker_id, "category": category})
+        await self.broadcast_shisi_event("sticker_send", {"character_id": character_id, "sticker_id": sticker_id, "category": category})
 
     @property
     def client_count(self) -> int:

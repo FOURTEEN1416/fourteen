@@ -4,28 +4,28 @@ import json
 
 import pytest
 
-from aiyu.character.chara_card_v2 import (
+from shisi.character.chara_card_v2 import (
     ParserDispatcher,
     to_persona_config,
 )
-from aiyu.character.exporter import PersonaExporter
-from aiyu.character.importer import PersonaImporter
-from aiyu.character.manager import CharacterManager
-from aiyu.character.models import (
+from shisi.character.exporter import PersonaExporter
+from shisi.character.importer import PersonaImporter
+from shisi.character.manager import CharacterManager
+from shisi.character.models import (
     CardFormat,
     CharaCardV2,
     CharacterData,
     CharacterState,
     ImportResult,
 )
-from aiyu.character.store import CharacterStore
-from aiyu.character.validator import (
+from shisi.character.store import CharacterStore
+from shisi.character.validator import (
     ValidationError,
     sanitize_text,
     validate_card,
     validate_card_strict,
 )
-from aiyu.migrations import run_migrations
+from shisi.migrations import run_migrations
 
 
 @pytest.fixture
@@ -90,7 +90,7 @@ class TestParser:
         card, fmt = ParserDispatcher.parse(raw)
         assert fmt == CardFormat.CHARA_CARD_V3
 
-    def test_aiyu_prompts_format(self):
+    def test_shisi_prompts_format(self):
         raw = {"data": {"prompts": {"uuid-1": {"data": {"name": "阿哈", "description": "内向少年", "personality": "温柔", "scenario": "初期", "creator_notes": "病娇 纯爱"}}}}}
         card, fmt = ParserDispatcher.parse(raw)
         assert card.data.name == "阿哈"

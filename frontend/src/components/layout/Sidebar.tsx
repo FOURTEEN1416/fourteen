@@ -18,7 +18,7 @@ const navGroups = [
     ],
   },
   {
-    label: '爱语',
+    label: '十四',
     items: [
       { to: '/characters', icon: Users, label: '角色管理' },
       { to: '/monitor', icon: Activity, label: '情感监控' },

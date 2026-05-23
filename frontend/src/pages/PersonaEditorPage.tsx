@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { aiyuClient } from '../api/aiyuClient'
+import { shisiClient } from '../api/shisiClient'
 import { useErrorStore } from '../store/errorStore'
 import Card from '../components/common/Card'
 import Button from '../components/common/Button'
@@ -35,7 +35,7 @@ export default function PersonaEditorPage() {
   async function loadCharacters() {
     try {
       setLoading(true)
-      const data = await aiyuClient.characters.list() as CharacterState[]
+      const data = await shisiClient.characters.list() as CharacterState[]
       setCharacters(data)
       if (data.length > 0) {
         const active = data.find(c => c.is_active) || data[0]
@@ -49,7 +49,7 @@ export default function PersonaEditorPage() {
 
   async function loadPersona(cid: string) {
     try {
-      const data = await aiyuClient.persona.get(cid) as PersonaData
+      const data = await shisiClient.persona.get(cid) as PersonaData
       setPersona(data)
       setDirty(false)
     } catch (e: any) {
@@ -61,7 +61,7 @@ export default function PersonaEditorPage() {
     if (!selected || !persona) return
     try {
       setSaving(true)
-      await aiyuClient.persona.update(selected, persona as unknown as Record<string, unknown>)
+      await shisiClient.persona.update(selected, persona as unknown as Record<string, unknown>)
       setDirty(false)
       toast({ type: 'success', message: '人设保存成功' })
     } catch (e: any) {
@@ -72,7 +72,7 @@ export default function PersonaEditorPage() {
   async function handlePreview() {
     if (!selected) return
     try {
-      const data = await aiyuClient.persona.preview(selected) as { preview: string }
+      const data = await shisiClient.persona.preview(selected) as { preview: string }
       setPreview(data.preview)
     } catch (e: any) {
       toast({ type: 'error', message: e?.message || '预览失败' })
