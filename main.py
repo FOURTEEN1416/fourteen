@@ -158,6 +158,28 @@ class OptimizedOrchestrator:
         self._session_locks: Dict[str, asyncio.Lock] = {}
         self._locks_mutex = threading.Lock()
 
+    # ── backward-compatible property aliases (for rest_api etc.) ──
+
+    @property
+    def _ase(self):
+        return self.components.get("ase")
+
+    @property
+    def _emotion(self):
+        return self.components.get("emotion")
+
+    @property
+    def _memory(self):
+        return self.components.get("memory")
+
+    @property
+    def _persona(self):
+        return self.components.get("persona")
+
+    @property
+    def _tools(self):
+        return self.components.get("tools")
+
     @staticmethod
     def _run_async(coro) -> Any:
         """
@@ -482,39 +504,68 @@ class OptimizedOrchestrator:
                 if is_injection:
                     user_msg_clean = self.components["injection"].sanitize(user_msg_clean)
 
-                persona_enhancement = ""
+                # ── 并行执行独立任务 ──
+                recent = self.components["memory"].get_recent_context(3)
+                loop = asyncio.get_running_loop()
                 pe = self.components.get("persona_extractor")
+
+                tasks = {}
+
+                # 人格抽取 (async)
                 if pe is not None:
-                    try:
-                        persona_enhancement = await pe.process_message(
-                            message=user_msg_clean,
-                            context=self.components["memory"].get_recent_context(3),
-                        )
-                    except Exception as e:
-                        logger.debug("PersonaExtractor process error: %s", e)
+                    tasks["persona"] = pe.process_message(
+                        message=user_msg_clean, context=recent,
+                    )
 
-                emotion_state = self.components["emotion"].analyze(
-                    user_msg_clean,
-                    context=self.components["memory"].get_recent_context(3),
+                # 情感分析 (sync, 走线程)
+                tasks["emotion"] = loop.run_in_executor(
+                    None, self.components["emotion"].analyze,
+                    user_msg_clean, recent,
                 )
 
-                memory_context = self.components["memory"].retrieve_context(
-                    query=user_msg_clean,
-                    session_id=session_id,
-                    top_k=5,
+                # 记忆检索 (sync)
+                tasks["memory"] = loop.run_in_executor(
+                    None,
+                    lambda: self.components["memory"].retrieve_context(
+                        query=user_msg_clean, session_id=session_id, top_k=5,
+                    ),
                 )
 
-                rag_context = self.components["rag"].retrieve(user_msg_clean)
+                # RAG (sync)
+                tasks["rag"] = loop.run_in_executor(
+                    None, self.components["rag"].retrieve, user_msg_clean,
+                )
 
+                results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+
+                persona_enhancement = ""
+                emotion_state = None
+                memory_context = ""
+                rag_context = ""
+
+                for name, result in zip(tasks.keys(), results):
+                    if isinstance(result, Exception):
+                        logger.debug("并行任务 %s 异常: %s", name, result)
+                        continue
+                    if name == "persona":
+                        persona_enhancement = result or ""
+                    elif name == "emotion":
+                        emotion_state = result
+                    elif name == "memory":
+                        memory_context = result or ""
+                    elif name == "rag":
+                        rag_context = result or ""
+
+                # ── 组装 system prompt ──
                 system_prompt = self.components["persona"].build_system_prompt(
                     emotion_state=emotion_state,
                     memory_context=memory_context,
                     rag_context=rag_context,
                 )
-
                 if persona_enhancement:
                     system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
 
+                # ── 主 LLM 对话 ──
                 reply = await self.components["llm"].chat(
                     query=user_msg_clean,
                     system_prompt=system_prompt,
@@ -526,13 +577,21 @@ class OptimizedOrchestrator:
                 if not output_result.is_safe:
                     reply = self.components["safety"].safe_alternative(output_result.category)
 
-                self.components["memory"].after_chat(
+                # ── 聊后处理 ──
+                emotion_tag = emotion_state.primary_emotion.value if emotion_state else ""
+                mem_kwargs = dict(
                     user_msg=user_msg_clean,
                     reply=reply,
-                    emotion=emotion_state.primary_emotion.value if emotion_state else "",
                     session_id=session_id,
                 )
-
+                if hasattr(self.components["memory"], "after_chat"):
+                    import inspect
+                    sig = inspect.signature(self.components["memory"].after_chat)
+                    if "emotion" in sig.parameters:
+                        mem_kwargs["emotion"] = emotion_tag
+                    elif "emotion_tag" in sig.parameters:
+                        mem_kwargs["emotion_tag"] = emotion_tag
+                self.components["memory"].after_chat(**mem_kwargs)
                 self.components["ase"].on_chat(user_msg_clean, reply)
 
                 process_time = time.perf_counter() - start_time
@@ -748,45 +807,19 @@ def run_console_chat(orchestrator_or_obj, orchestrator_mode: str,
 
 def run_wechat_mode(orchestrator_or_obj, orchestrator_mode: str,
                     args: argparse.Namespace) -> None:
-    # 使用方案 C 的统一入口
-    from cowagent_adapter.init import initialize_wechat_channel
-
-    config_path = str(project_root / "config" / "cowagent_config.json")
+    from wechat_direct import WeChatConnector
 
     print("\n📱 微信模式启动中...")
-    print("   请扫描二维码登录微信个人号")
-    print("   或按 Ctrl+C 切换回控制台模式\n")
+    print("   请用微信扫码登录")
+    print("   或按 Ctrl+C 退出\n")
 
-    status = initialize_wechat_channel(
-        orchestrator=orchestrator_or_obj,
-        enable_heartbeat=True,
-        heartbeat_interval=30,
-        heartbeat_max_missed=3,
-        cowagent_config=config_path,
-        auto_restart=True,
-    )
+    connector = WeChatConnector(orchestrator_or_obj)
 
-    if not status["ok"]:
-        logger.error("微信通道初始化失败: %s", status.get("message", ""))
-        print(f"\n❌ 微信通道初始化失败: {status.get('message', '')}")
-        print("   请检查 CowAgent 配置后重试")
-        return
-
-    hb_mgr = status.get("heartbeat")
-    proc_mgr = status.get("process")
-
-    # 维持主循环：监控子进程 + 响应 Ctrl+C
     try:
-        while True:
-            time.sleep(10)
-            if proc_mgr:
-                proc_mgr.check()
+        connector.run()
     except KeyboardInterrupt:
         print("\n👋 正在停止...")
-        if hb_mgr:
-            hb_mgr.stop()
-        if proc_mgr:
-            proc_mgr.stop()
+        connector.stop()
 
 
 def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None) -> None:

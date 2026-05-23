@@ -28,7 +28,13 @@ export default function ChannelsPage() {
   const [connStatus, setConnStatus] = useState<WeChatConnectionStatus | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
+  const [qrData, setQrData] = useState<{ qr_image?: string; status: string; message?: string } | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const hasWechat = channels.some((ch) => ch.type === 'wechat')
+  const wechatChannel = channels.find((ch) => ch.type === 'wechat')
+  const isWechatConnected = wechatChannel?.status === 'connected'
 
   const fetchChannels = useCallback(async () => {
     try {
@@ -63,11 +69,28 @@ export default function ChannelsPage() {
     }, 2000)
   }, [fetchChannels])
 
+  // 轮询二维码（始终轮询，组件控制显示时机）
+  const startQrPolling = useCallback(() => {
+    if (qrPollRef.current) return
+    qrPollRef.current = setInterval(async () => {
+      try {
+        const { data } = await api.wechatQrCode()
+        const d = data as { qr_image?: string; status: string; message?: string; qrcode_url?: string }
+        setQrData(d)
+      } catch { /* silent */ }
+    }, 3000)
+  }, [])
+
+  // Auto-start QR polling when wechat channel exists
   useEffect(() => {
+    if (hasWechat) {
+      startQrPolling()
+    }
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
+      if (qrPollRef.current) clearInterval(qrPollRef.current)
     }
-  }, [])
+  }, [hasWechat, startQrPolling])
 
   const fetchWechatDetail = async () => {
     try {
@@ -78,10 +101,12 @@ export default function ChannelsPage() {
 
   const handleConnect = async () => {
     setConnecting(true)
+    setQrData(null)
     try {
       const { data } = await api.wechatConnect()
       setConnStatus(data as WeChatConnectionStatus)
       startPollingConnStatus()
+      startQrPolling()
     } catch {
       setConnecting(false)
     }
@@ -106,10 +131,6 @@ export default function ChannelsPage() {
     } catch { /* toast */ }
     finally { setReconnecting(false) }
   }
-
-  const hasWechat = channels.some((ch) => ch.type === 'wechat')
-  const wechatChannel = channels.find((ch) => ch.type === 'wechat')
-  const isWechatConnected = wechatChannel?.status === 'connected'
 
   const formatUptime = (seconds: number): string => {
     const h = Math.floor(seconds / 3600)
@@ -216,10 +237,28 @@ export default function ChannelsPage() {
               </Button>
             </div>
 
+            {/* 二维码展示 — 只在等待扫码时显示 */}
+            {qrData?.status === 'waiting' && (
+              <div className="mt-4 flex flex-col items-center">
+                {qrData?.qr_image ? (
+                  <>
+                    <img src={qrData.qr_image} alt="微信二维码" className="w-48 h-48 rounded-lg border border-gray-200" />
+                    <p className="mt-2 text-xs text-gray-400">{qrData.message || '请使用微信扫描二维码登录'}</p>
+                    <p className="mt-1 text-[10px] text-gray-300">二维码约 2 分钟过期，过期后自动刷新</p>
+                  </>
+                ) : (
+                  <div className="flex flex-col items-center py-4">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-2" />
+                    <p className="text-xs text-gray-400">正在获取二维码...</p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* 使用说明 */}
             <div className="mt-4 text-[10px] text-gray-400 space-y-1">
               <p>1. 点击「连接微信」启动 CowAgent 连接</p>
-              <p>2. 查看终端窗口的二维码，用手机微信扫码登录</p>
+              <p>2. 扫描上方二维码，用手机微信扫码登录</p>
               <p>3. 连接成功后状态自动变为「已连接」</p>
             </div>
           </Card>

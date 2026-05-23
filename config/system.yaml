@@ -8,7 +8,7 @@ llm:
   max_tokens: 2048
   stream_enabled: true
   first_token_timeout: 5.0
-  retry_count: 2
+  retry_count: 0
   models_priority:
     - name: deepseek-chat
       priority: 1
@@ -114,7 +114,7 @@ fusion:
     frequency_mode: adaptive
     generation_mode: llm
     reflection_mode: rule
-  orchestrator_mode: full               # full=12步流程, fast=精简流程
+  orchestrator_mode: fast               # full=12步流程, fast=精简流程
   # ── 新模块控制在fusion层 ──
   character_card:
     enabled: true
@@ -124,7 +124,7 @@ fusion:
   memory_ext:
     enabled: true
   persona_extractor:
-    enabled: true                      # 人格克隆模块 (v3.1 新增, 已启用)
-    mode: lite                         # lite=快速单次检测, full=多智能体辩论检测, rule=仅规则
-    detect_frequency: 3                # 每N条消息检测一次
-    inject_persona: true               # 是否注入人格信息到response
+    enabled: true
+    mode: lite
+    detect_frequency: 3
+    inject_persona: true

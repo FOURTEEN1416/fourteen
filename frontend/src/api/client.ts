@@ -106,6 +106,9 @@ export const api = {
   wechatDisconnect: () => client.post('/channels/wechat/disconnect'),
   wechatConnectionStatus: () => client.get('/channels/wechat/connection-status'),
 
+  // ── 微信二维码 ──
+  wechatQrCode: () => client.get('/wechat/qrcode'),
+
   // ── 克隆数据管理（需求3+4） ──
   cloneContacts: (keyword = '') =>
     client.get('/clone/contacts', { params: { keyword } }),
