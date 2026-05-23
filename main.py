@@ -318,6 +318,8 @@ class OptimizedOrchestrator:
             )
             from tool_system.builtin.search_tool import SearchTool
             from tool_system.builtin.weather_tool import WeatherTool
+            from tool_system.builtin.time_awareness_tool import TimeAwarenessTool
+            from tool_system.builtin.character_crawler_tool import CharacterCrawlerTool
 
             registry = ToolRegistry()
             for tool_cls in [WeatherTool, SearchTool, CalendarTool, CalculatorTool]:
@@ -328,6 +330,9 @@ class OptimizedOrchestrator:
             if sm:
                 registry.register(ReminderTool(sm))
                 registry.register(CalendarQueryTool(sm))
+
+            registry.register(TimeAwarenessTool())
+            registry.register(CharacterCrawlerTool())
 
             self.components["tool_registry"] = registry
             self.components["tools"] = ToolDispatcher(
@@ -438,6 +443,7 @@ class OptimizedOrchestrator:
                     pe_mode = persona_fusion.get("mode", "lite")
                     pe_freq = persona_fusion.get("detect_frequency", 3)
                     pe_inject = persona_fusion.get("inject_persona", True)
+                    pe_mh = persona_fusion.get("enable_mental_health", True)
 
                     self.components["persona_extractor"] = PersonaExtractor(
                         llm_gateway=self.components["llm"],
@@ -445,6 +451,7 @@ class OptimizedOrchestrator:
                         pado_mode=pe_mode,
                         detect_frequency=pe_freq,
                         inject_persona=pe_inject,
+                        enable_mental_health=pe_mh,
                     )
                     # 注入 ToneMimic 引用
                     if "tone" in self.components:
@@ -556,11 +563,21 @@ class OptimizedOrchestrator:
                     elif name == "rag":
                         rag_context = result or ""
 
+                # 获取对话历史 + 摘要
+                chat_history: list = []
+                chat_summary: str = ""
+                mem = self.components.get("memory")
+                if mem and hasattr(mem, 'get_chat_context'):
+                    chat_history, chat_summary = mem.get_chat_context(
+                        session_id=session_id,
+                    )
+
                 # ── 组装 system prompt ──
                 system_prompt = self.components["persona"].build_system_prompt(
                     emotion_state=emotion_state,
                     memory_context=memory_context,
                     rag_context=rag_context,
+                    chat_summary=chat_summary,
                 )
                 if persona_enhancement:
                     system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
@@ -569,6 +586,7 @@ class OptimizedOrchestrator:
                 reply = await self.components["llm"].chat(
                     query=user_msg_clean,
                     system_prompt=system_prompt,
+                    history=chat_history,
                     temperature=0.85,
                     max_tokens=2048,
                 )
@@ -1073,6 +1091,8 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     from tool_system.builtin.reminder_tool import CalendarQueryTool, ReminderTool
     from tool_system.builtin.search_tool import SearchTool
     from tool_system.builtin.weather_tool import WeatherTool
+    from tool_system.builtin.time_awareness_tool import TimeAwarenessTool
+    from tool_system.builtin.character_crawler_tool import CharacterCrawlerTool
 
     tool_registry = ToolRegistry()
     tool_dispatcher = ToolDispatcher(
@@ -1085,6 +1105,8 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
         tool_registry.register(tool_cls())
     tool_registry.register(ReminderTool(structured_memory))
     tool_registry.register(CalendarQueryTool(structured_memory))
+    tool_registry.register(TimeAwarenessTool())
+    tool_registry.register(CharacterCrawlerTool())
     logger.info("      已注册 %d 个工具", len(tool_registry.tool_names))
 
     logger.info("[8/12] 初始化RAG引擎V2...")

@@ -49,6 +49,8 @@ tools:
     - calculator
     - reminder
     - calendar_query
+    - time_awareness
+    - character_crawler
 
 api:
   host: "0.0.0.0"
@@ -69,6 +71,7 @@ observability:
 voice:
   enabled: false                        # 是否启用语音合成
   engine: "edge-tts"                    # 默认引擎: edge-tts / gpt-sovits / bert-vits2
+  emotion_enabled: true                 # 启用情感语音参数注入
   edge-tts:
     speaker_name: "zh-CN-XiaoxiaoNeural" # 中文女声
     rate: "+0%"
@@ -86,6 +89,21 @@ voice:
     noisew: 0.9
     speed: 1.0
     timeout: 60.0
+
+# ── 表情包配置 ──
+sticker:
+  enabled: true
+  auto_recommend: true
+  send_mode: "image_channel"
+  emotion_mapping:
+    "开心": ["开心", "可爱", "撒娇"]
+    "伤心": ["伤心", "委屈"]
+    "生气": ["生气", "傲娇"]
+    "撒娇": ["撒娇", "可爱", "开心"]
+    "害怕": ["害怕", "紧张"]
+    "害羞": ["害羞", "可爱"]
+    "默认": ["可爱"]
+  send_delay_ms: 300
 
 # ── 角色卡配置 ──
 character_card:
