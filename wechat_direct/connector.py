@@ -231,6 +231,26 @@ class WeChatConnector:
         self._get_updates_buf = ""
         self._received_msgs = set()
         self._context_tokens = {}
+        self._last_user_id: str = ""
+
+    def send_text(self, text: str, to_user: str = "") -> bool:
+        """主动发送文本消息（供外部调用）"""
+        target = to_user or self._last_user_id
+        if not target or not self.token:
+            logger.warning("微信主动发送失败: 无目标用户或未登录")
+            return False
+        try:
+            context_token = self._context_tokens.get(target, "")
+            _send_text(
+                to=target, text=text,
+                context_token=context_token,
+                token=self.token, base_url=self.base_url,
+            )
+            logger.info("微信主动发送成功: %s", text[:30])
+            return True
+        except Exception as e:
+            logger.warning("微信主动发送失败: %s", e)
+            return False
 
     # ── 登录 ──
 
@@ -463,6 +483,8 @@ class WeChatConnector:
         context_token = raw_msg.get("context_token", "")
         if context_token and from_user:
             self._context_tokens[from_user] = context_token
+        if from_user:
+            self._last_user_id = from_user
 
         items = raw_msg.get("item_list", [])
         text = ""

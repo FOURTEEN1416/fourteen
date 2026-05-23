@@ -2,17 +2,16 @@
 定时调度器 — 基于 APScheduler
 
 管理所有定时任务：
-1. 早安任务（08:00）
-2. 晚安任务（23:30）
-3. ASE 检查（每5分钟）
-4. 每日维护（00:05）
-5. 纪念日检查（每天）
+1. ASE 检查（每5分钟）
+2. 每日维护（00:05）
+3. 每日重置（00:00）
+
+早安/晚安由 ASE 场景触发处理，不再独立注册定时任务。
 """
 
 from __future__ import annotations
 
 import logging
-import random
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -33,7 +32,7 @@ class ProactiveScheduler:
     主动消息调度器
 
     定时检查 ASE 引擎，判断是否该主动发消息。
-    同时管理早安/晚安等定时问候。
+    早安/晚安由 ASEEngine._check_scene_triggers() 统一处理。
     """
 
     def __init__(
@@ -41,18 +40,32 @@ class ProactiveScheduler:
         ase_engine: Optional[Any] = None,
         send_message_func: Optional[Callable[[str], None]] = None,
         daily_maintenance_func: Optional[Callable[[], None]] = None,
+        get_last_chat_time: Optional[Callable[[], Optional[datetime]]] = None,
+        is_online_check: Optional[Callable[[], bool]] = None,
     ):
         self.ase = ase_engine
         self._send = send_message_func
         self._daily_maintenance = daily_maintenance_func
+        self._get_last_chat_time = get_last_chat_time
+        self._is_online_check = is_online_check
 
         self._scheduler: Any = None
         self._active_tasks: Dict[str, bool] = {}
 
-        # 上次 ASE 检查的时间（用于计算小时差）
         self._last_check_time: Optional[datetime] = None
 
+        self._ws_server = None
+        self._wechat_connector = None
+
         logger.info("ProactiveScheduler initialized (APScheduler=%s)", HAS_APSCHEDULER)
+
+    def set_ws_server(self, ws_server) -> None:
+        """注入WebSocket服务器实例"""
+        self._ws_server = ws_server
+
+    def set_wechat_connector(self, wechat_connector) -> None:
+        """注入微信连接器实例"""
+        self._wechat_connector = wechat_connector
 
     def _safe_job_wrapper(self, job_fn: Callable, job_name: str) -> Callable:
         def wrapper(*args, **kwargs):
@@ -78,12 +91,12 @@ class ProactiveScheduler:
             return True
 
         try:
-            self._scheduler = BackgroundScheduler(daemon=True)  # type: ignore
+            self._scheduler = BackgroundScheduler(daemon=True)
 
             # 1. ASE 检查（每5分钟）
             self._scheduler.add_job(
                 self._safe_job_wrapper(self._check_ase, "ase_check"),
-                IntervalTrigger(minutes=5),  # type: ignore
+                IntervalTrigger(minutes=5),
                 id="ase_check",
                 name="ASE主动消息检查",
                 replace_existing=True,
@@ -91,32 +104,10 @@ class ProactiveScheduler:
                 coalesce=True,
             )
 
-            # 2. 早安任务（08:00）
-            self._scheduler.add_job(
-                self._safe_job_wrapper(self._morning_greeting, "morning_greeting"),
-                CronTrigger(hour=8, minute=0),  # type: ignore
-                id="morning_greeting",
-                name="早安问候",
-                replace_existing=True,
-                misfire_grace_time=60,
-                coalesce=True,
-            )
-
-            # 3. 晚安任务（23:30）
-            self._scheduler.add_job(
-                self._safe_job_wrapper(self._night_greeting, "night_greeting"),
-                CronTrigger(hour=23, minute=30),  # type: ignore
-                id="night_greeting",
-                name="晚安问候",
-                replace_existing=True,
-                misfire_grace_time=60,
-                coalesce=True,
-            )
-
-            # 4. 每日维护（00:05）
+            # 2. 每日维护（00:05）
             self._scheduler.add_job(
                 self._safe_job_wrapper(self._run_daily_maintenance, "daily_maintenance"),
-                CronTrigger(hour=0, minute=5),  # type: ignore
+                CronTrigger(hour=0, minute=5),
                 id="daily_maintenance",
                 name="每日维护",
                 replace_existing=True,
@@ -124,13 +115,24 @@ class ProactiveScheduler:
                 coalesce=True,
             )
 
-            # 5. 每日 ASE 重置（00:00）
+            # 3. 每日 ASE 重置（00:00）
             self._scheduler.add_job(
                 self._safe_job_wrapper(self._reset_daily, "daily_reset"),
-                CronTrigger(hour=0, minute=0),  # type: ignore
+                CronTrigger(hour=0, minute=0),
                 id="daily_reset",
                 name="每日重置",
                 replace_existing=True,
+            )
+
+            # 4. 状态持久化（每10分钟）
+            self._scheduler.add_job(
+                self._safe_job_wrapper(self._save_state, "save_state"),
+                IntervalTrigger(minutes=10),
+                id="save_state",
+                name="状态持久化",
+                replace_existing=True,
+                misfire_grace_time=120,
+                coalesce=True,
             )
 
             self._scheduler.start()
@@ -145,6 +147,7 @@ class ProactiveScheduler:
     def stop(self) -> None:
         """停止调度器"""
         if self._scheduler and self._scheduler.running:
+            self._save_state()
             self._scheduler.shutdown(wait=False)
             logger.info("Scheduler stopped")
 
@@ -156,8 +159,24 @@ class ProactiveScheduler:
             return
 
         try:
-            # 计算距离上次聊天的小时数
-            hours = self._hours_since_last_check()
+            if self._get_last_chat_time:
+                last_chat = self._get_last_chat_time()
+                if last_chat:
+                    hours = (datetime.now() - last_chat).total_seconds() / 3600
+                else:
+                    hours = 99.0
+            else:
+                hours = self._hours_since_last_check()
+
+            is_online = True
+            if self._is_online_check:
+                is_online = self._is_online_check()
+
+            if not is_online:
+                logger.debug("用户离线，仅更新紧迫度不发送")
+                if hasattr(self.ase, 'tick'):
+                    self.ase.tick(hours, dry_run=True)
+                return
 
             result = self.ase.tick(hours)
             if result:
@@ -165,37 +184,11 @@ class ProactiveScheduler:
                 msg_type = result.get("type", "unknown")
                 logger.info("ASE triggered: [%s] %s", msg_type, message)
                 if self._send:
-                    self._send(f"[{msg_type}] {message}")
+                    self._send(message)
         except Exception as e:
             logger.error("ASE check failed: %s", e)
         finally:
             self._last_check_time = datetime.now()
-
-    def _morning_greeting(self) -> None:
-        """早安问候"""
-        if not self._send:
-            return
-        greetings = [
-            "早安呀～今天又比我先醒",
-            "早！新的一天开始了",
-            "早上好，昨晚睡得好吗",
-        ]
-        msg = random.choice(greetings)
-        logger.info("Morning greeting sent")
-        self._send(msg)
-
-    def _night_greeting(self) -> None:
-        """晚安问候"""
-        if not self._send:
-            return
-        greetings = [
-            "还不睡？要我陪你会儿吗",
-            "晚安啦，别熬夜太晚",
-            "到点睡觉了，别让我担心",
-        ]
-        msg = random.choice(greetings)
-        logger.info("Night greeting sent")
-        self._send(msg)
 
     def _run_daily_maintenance(self) -> None:
         """每日维护"""
@@ -211,6 +204,15 @@ class ProactiveScheduler:
         if self.ase and hasattr(self.ase, "reset_daily_count"):
             self.ase.reset_daily_count()
             logger.info("Daily ASE count reset")
+        self._save_state()
+
+    def _save_state(self) -> None:
+        """持久化ASE引擎状态"""
+        if self.ase and hasattr(self.ase, "save_state"):
+            try:
+                self.ase.save_state()
+            except Exception as e:
+                logger.warning("State save failed: %s", e)
 
     # ── 工具方法 ─────────────────────────────────────────
 
