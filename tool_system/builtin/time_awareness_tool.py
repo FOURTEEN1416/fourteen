@@ -57,7 +57,8 @@ class TimeAwarenessTool(BaseTool):
     }
 
     def execute(self, action: str, date: str = "", **kwargs) -> ToolResult:
-        target = self._parse_date(date) if date else date.today()
+        from datetime import date as date_type
+        target = self._parse_date(date) if date else date_type.today()
         handlers = {
             "current": self._get_current,
             "holiday": lambda: self._check_holiday(target),
