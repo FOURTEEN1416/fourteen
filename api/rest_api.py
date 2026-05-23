@@ -868,12 +868,12 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         }
 
     try:
-        from aiyu.api.registry import setup_aiyu
-        aiyu_reg = setup_aiyu(app, run_migrate=True)
+        from shisi.api.registry import setup_shisi
+        shisi_reg = setup_shisi(app, run_migrate=True)
         if orchestrator and hasattr(orchestrator, '_character_manager'):
-            orchestrator._character_manager = aiyu_reg.character_manager
-        logger.info("爱语模块已挂载到REST API")
+            orchestrator._character_manager = shisi_reg.character_manager
+        logger.info("十四模块已挂载到REST API")
     except Exception as e:
-        logger.warning("爱语模块挂载失败: %s", e)
+        logger.warning("十四模块挂载失败: %s", e)
 
     return app

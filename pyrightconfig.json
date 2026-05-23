@@ -1,6 +1,6 @@
 {
   "include": [
-    "aiyu",
+    "shisi",
     "api",
     "orchestrator.py",
     "config",

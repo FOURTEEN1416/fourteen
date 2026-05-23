@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { aiyuClient } from '../api/aiyuClient'
+import { shisiClient } from '../api/shisiClient'
 import { useErrorStore } from '../store/errorStore'
 import Card from '../components/common/Card'
 import Button from '../components/common/Button'
@@ -23,7 +23,7 @@ export default function CharactersPage() {
   async function loadCharacters() {
     try {
       setLoading(true)
-      const data = await aiyuClient.characters.list()
+      const data = await shisiClient.characters.list()
       setCharacters(data as CharacterState[])
     } catch (e: any) {
       toast({ type: 'error', message: e?.message || '加载角色失败' })
@@ -32,7 +32,7 @@ export default function CharactersPage() {
 
   async function handleSwitch(id: string) {
     try {
-      await aiyuClient.characters.switch(id)
+      await shisiClient.characters.switch(id)
       toast({ type: 'success', message: '角色切换成功' })
       await loadCharacters()
     } catch (e: any) {
@@ -43,7 +43,7 @@ export default function CharactersPage() {
   async function handleDelete(id: string) {
     if (!confirm('确定删除此角色？')) return
     try {
-      await aiyuClient.characters.delete(id)
+      await shisiClient.characters.delete(id)
       toast({ type: 'success', message: '角色已删除' })
       await loadCharacters()
     } catch (e: any) {
@@ -56,7 +56,7 @@ export default function CharactersPage() {
     try {
       const formData = new FormData()
       Array.from(files).forEach(f => formData.append('file', f))
-      await aiyuClient.characters.import_(formData as any)
+      await shisiClient.characters.import_(formData as any)
       toast({ type: 'success', message: '角色导入成功' })
       await loadCharacters()
     } catch (e: any) {
@@ -66,7 +66,7 @@ export default function CharactersPage() {
 
   async function handleExport(id: string) {
     try {
-      const result = await aiyuClient.characters.export_(id)
+      const result = await shisiClient.characters.export_(id)
       const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -90,7 +90,7 @@ export default function CharactersPage() {
     if (!editingId) return
     try {
       const tags = editTags.split(',').map(s => s.trim()).filter(Boolean)
-      await aiyuClient.characters.get(editingId)
+      await shisiClient.characters.get(editingId)
       toast({ type: 'success', message: '角色信息已更新' })
       setEditingId(null)
       await loadCharacters()

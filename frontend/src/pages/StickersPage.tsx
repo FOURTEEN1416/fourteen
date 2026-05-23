@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { aiyuClient } from '../api/aiyuClient'
+import { shisiClient } from '../api/shisiClient'
 import { useErrorStore } from '../store/errorStore'
 import Card from '../components/common/Card'
 import Button from '../components/common/Button'
@@ -30,7 +30,7 @@ export default function StickersPage() {
   async function loadStickers() {
     try {
       setLoading(true)
-      const data = await aiyuClient.stickers.list() as StickerItem[]
+      const data = await shisiClient.stickers.list() as StickerItem[]
       setStickers(data)
     } catch (e: any) {
       toast({ type: 'error', message: e?.message || '加载表情包失败' })
@@ -40,7 +40,7 @@ export default function StickersPage() {
   async function handleDelete(id: string) {
     if (!confirm('确定删除此表情包？')) return
     try {
-      await aiyuClient.stickers.delete(id)
+      await shisiClient.stickers.delete(id)
       toast({ type: 'success', message: '表情包已删除' })
       await loadStickers()
     } catch (e: any) {
@@ -53,7 +53,7 @@ export default function StickersPage() {
     try {
       const formData = new FormData()
       Array.from(files).forEach(f => formData.append('files', f))
-      await aiyuClient.stickers.upload(formData)
+      await shisiClient.stickers.upload(formData)
       toast({ type: 'success', message: '表情包上传成功' })
       await loadStickers()
     } catch (e: any) {
@@ -66,7 +66,7 @@ export default function StickersPage() {
     try {
       const formData = new FormData()
       formData.append('zip', files[0])
-      await aiyuClient.stickers.importZip(formData)
+      await shisiClient.stickers.importZip(formData)
       toast({ type: 'success', message: 'ZIP导入成功' })
       await loadStickers()
     } catch (e: any) {
@@ -77,7 +77,7 @@ export default function StickersPage() {
   async function handleRecommend() {
     if (!emotion.trim()) return
     try {
-      const data = await aiyuClient.stickers.recommend(emotion) as StickerItem[]
+      const data = await shisiClient.stickers.recommend(emotion) as StickerItem[]
       setRecommended(data)
     } catch (e: any) {
       toast({ type: 'error', message: e?.message || '推荐失败' })

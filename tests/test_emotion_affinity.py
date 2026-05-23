@@ -4,12 +4,12 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from aiyu.affinity.decay_engine import DecayEngine
-from aiyu.affinity.enhancer import AffinityEnhancer
-from aiyu.affinity.unlock_manager import UnlockManager
-from aiyu.config import reset_config
-from aiyu.emotion_stage.stage_config import EmotionStageConfig
-from aiyu.emotion_stage.stage_engine import EmotionStageEngine
+from shisi.affinity.decay_engine import DecayEngine
+from shisi.affinity.enhancer import AffinityEnhancer
+from shisi.affinity.unlock_manager import UnlockManager
+from shisi.config import reset_config
+from shisi.emotion_stage.stage_config import EmotionStageConfig
+from shisi.emotion_stage.stage_engine import EmotionStageEngine
 
 
 @pytest.fixture(autouse=True)

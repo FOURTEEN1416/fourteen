@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { aiyuClient } from '../api/aiyuClient'
+import { shisiClient } from '../api/shisiClient'
 import { useErrorStore } from '../store/errorStore'
 import Card from '../components/common/Card'
 import Skeleton from '../components/common/Skeleton'
@@ -25,7 +25,7 @@ export default function StatsPage() {
 
   async function loadStats() {
     try {
-      const data = await aiyuClient.stats.get() as StatsData
+      const data = await shisiClient.stats.get() as StatsData
       setStats(data)
     } catch (e: any) {
       toast({ type: 'error', message: e?.message || '加载统计数据失败' })
