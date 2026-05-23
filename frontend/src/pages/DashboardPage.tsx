@@ -1,18 +1,16 @@
 ﻿import React, { useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import { useDashboardData } from '../hooks/useDashboardData'
-import { useTrainingProgress } from '../hooks/useTrainingProgress'
+import { useDashboard, useHealth, useWechatStatus, useTrainingProgress, useProactiveState, useActiveCharacter, useAffinity } from '../hooks/useQueries'
 import ProactiveEnginePanel from '../components/common/ProactiveEnginePanel'
 import {
   Activity, Smartphone, MessageCircle, GraduationCap,
   Heart, Brain, Settings, FileText, Wifi, RefreshCw,
   PlugZap, Play, ChevronRight, Users, BarChart3,
+  Database, PenTool, Sticker, Shield,
 } from 'lucide-react'
-import type { TrainingStatusEnum, WeChatStatus } from '../types/api'
 
-const TRAINING_ACTIVE: TrainingStatusEnum[] = ['extracting', 'cleaning', 'training']
-const MAX_AFFINITY = 8
+const TRAINING_ACTIVE = ['extracting', 'cleaning', 'training']
 
 const TRAINING_STATUS_MAP: Record<string, string> = {
   idle: '空闲', extracting: '提取中', cleaning: '清洗中',
@@ -29,15 +27,24 @@ function formatUptime(seconds: number): string {
 
 export default function DashboardPage() {
   const navigate = useNavigate()
-  const { stats, wechat: wechatStatus, health, proactive: proactiveState, loading, refetch } = useDashboardData()
-  const { progress: trainingProgress } = useTrainingProgress()
+  const { data: stats, isLoading: statsLoading } = useDashboard()
+  const { data: health } = useHealth()
+  const { data: wechatStatus } = useWechatStatus()
+  const { data: trainingProgress } = useTrainingProgress()
+  const { data: proactiveState } = useProactiveState()
+  const { activeCharacter } = useActiveCharacter()
+  const { data: affinity } = useAffinity(activeCharacter?.character_id)
+  const loading = statsLoading
 
   const systemStatus = health?.status ?? 'unknown'
   const systemOk = systemStatus === 'healthy'
   const systemDegraded = systemStatus === 'degraded'
   const wechatConnected = wechatStatus?.connected ?? false
   const trainingStatus = trainingProgress?.status ?? 'idle'
-  const isTraining = TRAINING_ACTIVE.includes(trainingStatus as TrainingStatusEnum)
+  const isTraining = TRAINING_ACTIVE.includes(trainingStatus)
+
+  const maxAffinity = affinity?.max ?? 8
+  const currentAffinity = stats?.affinity ?? 0
 
   const statusColor = systemOk ? 'text-green-400' : systemDegraded ? 'text-yellow-400' : 'text-red-400'
   const statusLabel = systemOk ? '健康' : systemDegraded ? '降级' : '异常'
@@ -47,9 +54,8 @@ export default function DashboardPage() {
   const handleReconnect = useCallback(async () => {
     try {
       await api.wechatReconnect()
-      refetch()
     } catch { /* toast handles it */ }
-  }, [refetch])
+  }, [])
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -58,6 +64,7 @@ export default function DashboardPage() {
         {loading && <span className="text-xs text-gray-400">刷新中...</span>}
       </div>
 
+      {/* ── 状态概览卡片 ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatusCard icon={Activity} label="系统状态" value={statusLabel} color={statusColor} />
         <StatusCard icon={Smartphone} label="微信连接" value={wechatLabel} color={wechatColor} />
@@ -65,6 +72,7 @@ export default function DashboardPage() {
         <StatusCard icon={GraduationCap} label="训练状态" value={TRAINING_STATUS_MAP[trainingStatus] ?? '-'} color={isTraining ? 'text-accent-400' : 'text-gray-500'} />
       </div>
 
+      {/* ── 微信 & 克隆 双面板 ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white/80 border border-gray-200 rounded-2xl p-5">
           <h2 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
@@ -164,6 +172,10 @@ export default function DashboardPage() {
                   <Play className="w-3.5 h-3.5" />
                   打开克隆工作台
                 </button>
+                <button onClick={() => navigate('/clone-data')} className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-200/60 transition-colors">
+                  <Database className="w-3.5 h-3.5" />
+                  数据管理
+                </button>
               </div>
             </div>
           ) : (
@@ -172,6 +184,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* ── 情感 & 记忆概览 ── */}
       <div className="bg-white/80 border border-gray-200 rounded-2xl p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
           <Heart className="w-4 h-4 text-gray-500" />
@@ -185,10 +198,10 @@ export default function DashboardPage() {
           <div className="bg-gray-200/30 rounded-xl p-3">
             <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">好感度</div>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-800">{stats?.affinity != null ? `${stats.affinity}/${MAX_AFFINITY}` : '-'}</span>
-              {stats?.affinity != null && (
+              <span className="text-sm font-medium text-gray-800">{currentAffinity != null ? `${currentAffinity}/${maxAffinity}` : '-'}</span>
+              {currentAffinity != null && (
                 <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden max-w-24">
-                  <div className="h-full rounded-full bg-accent-500" style={{ width: `${(stats.affinity / MAX_AFFINITY) * 100}%` }} />
+                  <div className="h-full rounded-full bg-accent-500" style={{ width: `${(currentAffinity / maxAffinity) * 100}%` }} />
                 </div>
               )}
             </div>
@@ -204,16 +217,43 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <ProactiveEnginePanel state={proactiveState} onConfigUpdated={refetch} />
+      {/* ── 功能导航快速入口 ── */}
+      <Section title="角色与人设">
+        <QuickLink icon={Users} label="角色管理" to="/characters" onClick={navigate} desc="管理多个角色、导入导出" />
+        <QuickLink icon={Heart} label="人设档案" to="/persona" onClick={navigate} desc="查看性格雷达与演化日志" />
+        <QuickLink icon={PenTool} label="人设编辑" to="/persona-editor" onClick={navigate} desc="编辑角色人设与对话风格" />
+      </Section>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <QuickLink icon={Users} label="角色管理" to="/characters" onClick={navigate} />
-        <QuickLink icon={Activity} label="情感监控" to="/monitor" onClick={navigate} />
-        <QuickLink icon={BarChart3} label="对话统计" to="/stats" onClick={navigate} />
-        <QuickLink icon={Heart} label="人设管理" to="/persona" onClick={navigate} />
-        <QuickLink icon={Brain} label="记忆浏览" to="/memory" onClick={navigate} />
-        <QuickLink icon={Settings} label="系统设置" to="/settings" onClick={navigate} />
-        <QuickLink icon={FileText} label="运行日志" to="/logs" onClick={navigate} />
+      <Section title="克隆训练">
+        <QuickLink icon={GraduationCap} label="克隆工作台" to="/training" onClick={navigate} desc="提取数据、清洗、训练 LoRA" />
+        <QuickLink icon={Database} label="数据管理" to="/clone-data" onClick={navigate} desc="管理已提取的聊天数据" />
+        <QuickLink icon={Smartphone} label="通道管理" to="/channels" onClick={navigate} desc="微信连接与多通道控制" />
+      </Section>
+
+      <Section title="监控与分析">
+        <QuickLink icon={Activity} label="情感监控" to="/monitor" onClick={navigate} desc="好感度、情感阶段与解锁事件" />
+        <QuickLink icon={BarChart3} label="对话统计" to="/stats" onClick={navigate} desc="消息量、角色使用、情感分布" />
+        <QuickLink icon={Brain} label="记忆浏览" to="/memory" onClick={navigate} desc="搜索与筛选长期记忆" />
+        <QuickLink icon={Sticker} label="表情包" to="/stickers" onClick={navigate} desc="表情包管理与情感推荐" />
+      </Section>
+
+      <Section title="系统管理">
+        <QuickLink icon={Settings} label="系统设置" to="/settings" onClick={navigate} desc="LLM、语音、通知等配置" />
+        <QuickLink icon={Shield} label="管理面板" to="/admin" onClick={navigate} desc="组件健康、工具开关、模型配置" />
+        <QuickLink icon={FileText} label="运行日志" to="/logs" onClick={navigate} desc="查看系统运行日志" />
+      </Section>
+
+      <ProactiveEnginePanel state={proactiveState ?? null} onConfigUpdated={() => {}} />
+    </div>
+  )
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">{title}</h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        {children}
       </div>
     </div>
   )
@@ -235,12 +275,17 @@ const StatusCard = React.memo(function StatusCard({ icon: Icon, label, value, co
   )
 })
 
-const QuickLink = React.memo(function QuickLink({ icon: Icon, label, to, onClick }: { icon: React.FC<{ className?: string }>; label: string; to: string; onClick: (path: string) => void }) {
+const QuickLink = React.memo(function QuickLink({ icon: Icon, label, to, onClick, desc }: { icon: React.FC<{ className?: string }>; label: string; desc: string; to: string; onClick: (path: string) => void }) {
   return (
-    <button onClick={() => onClick(to)} className="flex items-center gap-3 bg-white/80 border border-gray-200 rounded-xl px-4 py-3 hover:bg-gray-50 transition-colors text-left">
-      <Icon className="w-4 h-4 text-gray-500 shrink-0" />
-      <span className="text-sm text-gray-700">{label}</span>
-      <ChevronRight className="w-3.5 h-3.5 text-gray-300 ml-auto" />
+    <button onClick={() => onClick(to)} className="flex items-start gap-3 bg-white/80 border border-gray-200 rounded-xl px-4 py-3 hover:bg-gray-50 hover:border-gray-300 transition-colors text-left group">
+      <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 group-hover:bg-primary-50 transition-colors">
+        <Icon className="w-4 h-4 text-gray-500 group-hover:text-primary-500 transition-colors" />
+      </div>
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-gray-700">{label}</div>
+        <div className="text-[11px] text-gray-400 mt-0.5">{desc}</div>
+      </div>
+      <ChevronRight className="w-3.5 h-3.5 text-gray-300 ml-auto shrink-0 self-center" />
     </button>
   )
 })

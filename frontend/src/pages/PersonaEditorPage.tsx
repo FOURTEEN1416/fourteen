@@ -140,7 +140,7 @@ export default function PersonaEditorPage() {
                 <label className="block text-xs font-medium text-gray-500 mb-1.5">{label}</label>
                 {rows ? (
                   <textarea
-                    value={persona[key] as string}
+                    value={(persona[key] ?? '') as string}
                     onChange={e => updateField(key, e.target.value)}
                     rows={rows}
                     className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-700 resize-y focus:outline-none focus:ring-2 focus:ring-primary-400/30"
@@ -148,7 +148,7 @@ export default function PersonaEditorPage() {
                 ) : (
                   <input
                     type="text"
-                    value={persona[key] as string}
+                    value={(persona[key] ?? '') as string}
                     onChange={e => updateField(key, e.target.value)}
                     className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-400/30"
                   />
@@ -159,7 +159,7 @@ export default function PersonaEditorPage() {
               <label className="block text-xs font-medium text-gray-500 mb-1.5">标签</label>
               <input
                 type="text"
-                value={persona.tags.join(', ')}
+                value={(persona.tags ?? []).join(', ')}
                 onChange={e => updateField('tags', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
                 className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-400/30"
                 placeholder="标签1, 标签2, ..."

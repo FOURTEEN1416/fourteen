@@ -1,5 +1,7 @@
 import { Routes, Route } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { queryClient } from './api/queryClient'
 import Sidebar from './components/layout/Sidebar'
 import MobileNav from './components/layout/MobileNav'
 import ToastContainer from './components/common/Toast'
@@ -20,6 +22,11 @@ const MonitorPage = lazy(() => import('./pages/MonitorPage'))
 const StatsPage = lazy(() => import('./pages/StatsPage'))
 const PersonaEditorPage = lazy(() => import('./pages/PersonaEditorPage'))
 const StickersPage = lazy(() => import('./pages/StickersPage'))
+const PsychProfilePage = lazy(() => import('./pages/PsychProfilePage'))
+const SafetyPage = lazy(() => import('./pages/SafetyPage'))
+const KnowledgeBasePage = lazy(() => import('./pages/KnowledgeBasePage'))
+const ExtensionsPage = lazy(() => import('./pages/ExtensionsPage'))
+const FavoritesPage = lazy(() => import('./pages/FavoritesPage'))
 
 function PageLoadingSpinner() {
   return (
@@ -31,6 +38,7 @@ function PageLoadingSpinner() {
 
 export default function App() {
   return (
+    <QueryClientProvider client={queryClient}>
     <ErrorBoundary>
       <div className="flex h-screen bg-gray-50 overflow-hidden">
         <Sidebar />
@@ -52,6 +60,11 @@ export default function App() {
               <Route path="/stats" element={<StatsPage />} />
               <Route path="/persona-editor" element={<PersonaEditorPage />} />
               <Route path="/stickers" element={<StickersPage />} />
+              <Route path="/psych" element={<PsychProfilePage />} />
+              <Route path="/safety" element={<SafetyPage />} />
+              <Route path="/knowledge" element={<KnowledgeBasePage />} />
+              <Route path="/extensions" element={<ExtensionsPage />} />
+              <Route path="/favorites" element={<FavoritesPage />} />
             </Routes>
           </Suspense>
         </main>
@@ -59,5 +72,6 @@ export default function App() {
         <ToastContainer />
       </div>
     </ErrorBoundary>
+    </QueryClientProvider>
   )
 }

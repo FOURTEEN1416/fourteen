@@ -1,5 +1,5 @@
 ﻿import { useState } from 'react'
-import { useMemoryFacts } from '../hooks/useAPI'
+import { useMemoryFacts } from '../hooks/useQueries'
 import { Search } from 'lucide-react'
 import EmptyState from '../components/common/EmptyState'
 
@@ -13,7 +13,7 @@ const categoryColors: Record<string, string> = {
 }
 
 export default function MemoryPage() {
-  const { facts, loading, refetch } = useMemoryFacts()
+  const { data: facts = [], isLoading: loading, refetch } = useMemoryFacts()
   const [filter, setFilter] = useState('')
   const [searchText, setSearchText] = useState('')
 

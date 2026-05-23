@@ -1,19 +1,22 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Heart, Brain, GraduationCap, Smartphone, Settings, FileText, Shield, Database, Users, Activity, BarChart3 } from 'lucide-react'
+import { LayoutDashboard, MessageCircle, Users, Heart, PenTool, GraduationCap, Database, Smartphone, Activity, BarChart3, Brain, Sticker, Settings, Shield, FileText } from 'lucide-react'
 
 const mobileItems = [
+  { to: '/chat', icon: MessageCircle, label: '聊天' },
   { to: '/', icon: LayoutDashboard, label: '仪表盘', end: true },
   { to: '/characters', icon: Users, label: '角色' },
-  { to: '/monitor', icon: Activity, label: '监控' },
-  { to: '/stats', icon: BarChart3, label: '统计' },
+  { to: '/persona', icon: Heart, label: '人设' },
+  { to: '/persona-editor', icon: PenTool, label: '编辑' },
   { to: '/training', icon: GraduationCap, label: '克隆' },
   { to: '/clone-data', icon: Database, label: '数据' },
   { to: '/channels', icon: Smartphone, label: '通道' },
-  { to: '/persona', icon: Heart, label: '人设' },
+  { to: '/monitor', icon: Activity, label: '监控' },
+  { to: '/stats', icon: BarChart3, label: '统计' },
   { to: '/memory', icon: Brain, label: '记忆' },
+  { to: '/stickers', icon: Sticker, label: '表情' },
   { to: '/settings', icon: Settings, label: '设置' },
-  { to: '/logs', icon: FileText, label: '日志' },
   { to: '/admin', icon: Shield, label: '管理' },
+  { to: '/logs', icon: FileText, label: '日志' },
 ]
 
 export default function MobileNav() {

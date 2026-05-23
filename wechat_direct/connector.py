@@ -236,6 +236,20 @@ class WeChatConnector:
 
     def login(self):
         """登微信 — 先放二维码，再试保存的凭证"""
+        # 0. 快速重连：如果当前已有 token（从 _poll_loop 调用的重连），先试一次
+        if self.token:
+            logger.info("尝试用现有 token 快速重连...")
+            try:
+                test = _get_updates("", self.token, self.base_url, timeout=5)
+                if test.get("ret") != -14 and test.get("errcode") != -14:
+                    logger.info("现有 token 仍有效，重连成功")
+                    _save_qr_to_file("", "connected")
+                    return True
+            except Exception as e:
+                logger.debug(f"快速重连测试失败: {e}")
+            logger.warning("现有 token 已失效，需要重新扫码")
+            self.token = ""
+
         # 1. 先生成二维码（确保前端随时能读到）
         qrcode = None
         qrcode_url = ""
@@ -363,6 +377,7 @@ class WeChatConnector:
         """消息轮询循环"""
         logger.info("进入消息轮询")
         consecutive_failures = 0
+        session_errors = 0
 
         while not self._stop:
             try:
@@ -377,13 +392,22 @@ class WeChatConnector:
 
                 if ret != 0 or errcode != 0:
                     if errcode == -14 or ret == -14:
-                        logger.error("会话过期，重新登录...")
+                        session_errors += 1
+                        if session_errors < 3:
+                            logger.warning(
+                                "会话错误 -14（%d/3），%d秒后重试...",
+                                session_errors, RETRY_DELAY * session_errors
+                            )
+                            time.sleep(RETRY_DELAY * session_errors)
+                            continue
+                        logger.error("会话过期（连续%d次-14），重新登录...", session_errors)
                         _save_qr_to_file("", "idle")
                         if os.path.exists(CREDENTIALS_PATH):
                             os.remove(CREDENTIALS_PATH)
                         if self.login():
                             self._get_updates_buf = ""
                             consecutive_failures = 0
+                            session_errors = 0
                             continue
                         else:
                             logger.error("重新登录失败，5分钟后重试")
@@ -399,6 +423,7 @@ class WeChatConnector:
                     continue
 
                 consecutive_failures = 0
+                session_errors = 0
 
                 new_buf = resp.get("get_updates_buf", "")
                 if new_buf:

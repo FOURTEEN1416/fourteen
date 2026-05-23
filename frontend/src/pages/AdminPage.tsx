@@ -1,8 +1,9 @@
 ﻿import { useEffect, useState } from 'react'
 import { api } from '../api/client'
-import { useHealth } from '../hooks/useAPI'
-import { Activity, Wifi, Database, Bot } from 'lucide-react'
+import { useHealth } from '../hooks/useQueries'
+import { Activity, Wifi, Database, Bot, Cpu } from 'lucide-react'
 import ProactiveEnginePanel from '../components/common/ProactiveEnginePanel'
+import SensitiveInput from '../components/common/SensitiveInput'
 import type { ProactiveEngineState } from '../types/api'
 
 interface StatData {
@@ -13,18 +14,53 @@ interface StatData {
   has_orchestrator?: boolean
 }
 
+const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  deepseek: [
+    { value: 'deepseek-chat', label: 'DeepSeek Chat' },
+    { value: 'deepseek-reasoner', label: 'DeepSeek Reasoner' },
+  ],
+  opencode_zen: [
+    { value: 'big-pickle', label: 'Big Pickle' },
+    { value: 'nemotron-3-super-free', label: 'Nemotron 3 Super Free' },
+    { value: 'qwen3.6-plus-free', label: 'Qwen 3.6 Plus Free' },
+    { value: 'deepseek-v4-flash-free', label: 'DeepSeek V4 Flash Free' },
+    { value: 'minimax-m2.5-free', label: 'MiniMax M2.5 Free' },
+  ],
+}
+
 export default function AdminPage() {
-  const health = useHealth()
+  const { data: health } = useHealth()
   const [stats, setStats] = useState<StatData | null>(null)
   const [tools, setTools] = useState<string[]>([])
   const [disabledTools, setDisabledTools] = useState<Set<string>>(new Set())
   const [proactiveState, setProactiveState] = useState<ProactiveEngineState | null>(null)
+
+  // Model config state
+  const [provider, setProvider] = useState('deepseek')
+  const [modelName, setModelName] = useState('deepseek-chat')
+  const [fallbackModel, setFallbackModel] = useState('deepseek-reasoner')
+  const [temperature, setTemperature] = useState(0.85)
+  const [maxTokens, setMaxTokens] = useState(2048)
+  const [apiBase, setApiBase] = useState('https://api.deepseek.com/v1')
+  const [apiKey, setApiKey] = useState('')
+  const [modelSaved, setModelSaved] = useState(false)
 
   useEffect(() => {
     api.stats().then(({ data }) => setStats(data as StatData)).catch(() => {})
     api.tools().then(({ data }) => setTools((data as { tools: string[] }).tools)).catch(() => {})
     api.proactiveState().then(({ data }) => {
       setProactiveState(data as ProactiveEngineState)
+    }).catch(() => {})
+    api.config().then(({ data }) => {
+      const cfg = data as Record<string, any>
+      if (cfg?.llm) {
+        if (cfg.llm.provider) setProvider(cfg.llm.provider)
+        if (cfg.llm.primary_model) setModelName(cfg.llm.primary_model)
+        if (cfg.llm.fallback_model) setFallbackModel(cfg.llm.fallback_model)
+        if (cfg.llm.temperature != null) setTemperature(cfg.llm.temperature)
+        if (cfg.llm.max_tokens != null) setMaxTokens(cfg.llm.max_tokens)
+        if (cfg.llm.api_base) setApiBase(cfg.llm.api_base)
+      }
     }).catch(() => {})
   }, [])
 
@@ -39,8 +75,28 @@ export default function AdminPage() {
     } catch { /* toast handles it */ }
   }
 
+  const handleSaveModel = async () => {
+    try {
+      await api.saveConfig({
+        llm: {
+          provider,
+          primary_model: modelName,
+          fallback_model: fallbackModel,
+          temperature,
+          max_tokens: maxTokens,
+          api_base: apiBase,
+          ...(apiKey ? { api_key: apiKey } : {}),
+        },
+      })
+      setModelSaved(true)
+      setTimeout(() => setModelSaved(false), 2000)
+    } catch { /* toast handles it */ }
+  }
+
   const statusColor = health?.status === 'healthy' ? 'text-green-400' : health?.status === 'degraded' ? 'text-yellow-400' : 'text-red-400'
   const activeTools = tools.filter(t => !disabledTools.has(t))
+
+  const currentModelOptions = MODEL_OPTIONS[provider] || MODEL_OPTIONS.deepseek
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
@@ -125,6 +181,72 @@ export default function AdminPage() {
             })}
           </div>
         )}
+      </div>
+
+      {/* Model Configuration */}
+      <div className="bg-white/80 border border-gray-200 rounded-2xl p-4 mb-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Cpu className="w-4 h-4 text-gray-500" />
+          <h2 className="text-sm font-semibold text-gray-700">大模型配置</h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">LLM 提供商</label>
+            <select value={provider} onChange={e => { setProvider(e.target.value); setModelName(MODEL_OPTIONS[e.target.value]?.[0]?.value || ''); setFallbackModel(MODEL_OPTIONS[e.target.value]?.[1]?.value || '') }}
+              className="w-full bg-gray-200 border border-gray-300 text-gray-800 rounded-lg px-3 py-2 text-xs outline-none">
+              <option value="deepseek">DeepSeek</option>
+              <option value="opencode_zen">OpenCode Zen（免费）</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">主模型</label>
+            <select value={modelName} onChange={e => setModelName(e.target.value)}
+              className="w-full bg-gray-200 border border-gray-300 text-gray-800 rounded-lg px-3 py-2 text-xs outline-none">
+              {currentModelOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">备用模型</label>
+            <select value={fallbackModel} onChange={e => setFallbackModel(e.target.value)}
+              className="w-full bg-gray-200 border border-gray-300 text-gray-800 rounded-lg px-3 py-2 text-xs outline-none">
+              {currentModelOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">最大回复长度</label>
+            <div className="flex items-center gap-2">
+              <input type="range" min={64} max={4096} step={64}
+                value={maxTokens} onChange={e => setMaxTokens(parseInt(e.target.value))}
+                className="flex-1 h-1 bg-gray-200 rounded-full appearance-none cursor-pointer" />
+              <span className="text-xs text-gray-400 w-10 text-right">{maxTokens}</span>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">温度 ({temperature})</label>
+            <input type="range" min={0} max={200} step={5}
+              value={Math.round(temperature * 100)}
+              onChange={e => setTemperature(parseInt(e.target.value) / 100)}
+              className="w-full h-1 bg-gray-200 rounded-full appearance-none cursor-pointer" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">API 地址</label>
+            <input type="text" value={apiBase} onChange={e => setApiBase(e.target.value)}
+              className="w-full bg-gray-200 border border-gray-300 text-gray-800 rounded-lg px-3 py-2 text-xs outline-none font-mono" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">API Key</label>
+            <SensitiveInput value={apiKey} onChange={setApiKey} placeholder="留空则使用系统配置" />
+          </div>
+        </div>
+        <div className="flex items-center gap-3 mt-4">
+          <button onClick={handleSaveModel}
+            className="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg text-sm transition-colors">
+            保存模型配置
+          </button>
+          {modelSaved && (
+            <span className="text-xs text-green-400">已保存</span>
+          )}
+        </div>
       </div>
 
       {/* Proactive Config */}

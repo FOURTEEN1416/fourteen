@@ -51,7 +51,7 @@ class MemoryConfig:
 class WorkingMemory:
     """工作记忆 — 短期对话上下文（deque O(1) + 自动归档触发）"""
 
-    def __init__(self, limit: int = 20):
+    def __init__(self, limit: int = 500):
         self._messages: deque = deque(maxlen=limit)
         self._session_id: str = ""
         self._lock = threading.Lock()
@@ -775,6 +775,10 @@ class MemoryPipeline:
         )
         self.cross_session = CrossSessionReasoner(self.sm)
 
+        # 对话摘要器（方案二：摘要+滑动窗口）
+        from .conversation_summarizer import ConversationSummarizer
+        self.summarizer = ConversationSummarizer(llm_gateway)
+
         # 遗忘模型路由
         self._forgetting_model = forgetting_model
         if forgetting_model not in ("exponential", "threshold"):
@@ -1080,6 +1084,22 @@ class MemoryPipeline:
         except Exception as e:
             logger.error("Daily maintenance failed: %s", e)
             return None
+
+    def get_chat_context(
+        self,
+        session_id: str = "",
+        keep_recent: int = 50,
+        summary_trigger: int = 80,
+    ):
+        working_messages = self.working.get_recent(n=200)
+        if not working_messages:
+            return [], ""
+        return self.summarizer.get_chat_context(
+            working_messages,
+            session_id=session_id or self.working.session_id,
+            keep_recent=keep_recent,
+            summary_trigger=summary_trigger,
+        )
 
     # ── V1 兼容接口 ──────────────────────────────────────
 

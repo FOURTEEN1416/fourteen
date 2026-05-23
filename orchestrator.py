@@ -94,6 +94,13 @@ class Orchestrator:
                     else:
                         ctx = {}
 
+                    chat_history: list = []
+                    chat_summary: str = ""
+                    if self._memory and hasattr(self._memory, 'get_chat_context'):
+                        chat_history, chat_summary = self._memory.get_chat_context(
+                            session_id=session_id,
+                        )
+
                 with tracer.span("rag_retrieve"):
                     rag_context = ""
                     if self._rag:
@@ -114,6 +121,7 @@ class Orchestrator:
                             emotion_state=emotion_dict,
                             memory_context=ctx,
                             rag_context=rag_context,
+                            chat_summary=chat_summary,
                             character_overrides=persona_overrides,
                         )
 
@@ -127,6 +135,7 @@ class Orchestrator:
                         llm_result = await self._llm.chat_with_tools(
                             query=user_msg,
                             system_prompt=system_prompt,
+                            history=chat_history,
                             temperature=0.85,
                             max_tokens=2048,
                             tools=tools_schema,
@@ -150,12 +159,14 @@ class Orchestrator:
                                         reply = await self._llm.chat(
                                             query=f"基于工具结果回复用户：{tool_msg}\n原始问题：{user_msg}",
                                             system_prompt=system_prompt,
+                                            history=chat_history,
                                             max_tokens=1024,
                                         )
                     elif self._llm:
                         reply = await self._llm.chat(
                             query=user_msg,
                             system_prompt=system_prompt,
+                            history=chat_history,
                             temperature=0.85,
                             max_tokens=2048,
                         )

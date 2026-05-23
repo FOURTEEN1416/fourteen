@@ -24,7 +24,7 @@ export default function CharactersPage() {
     try {
       setLoading(true)
       const data = await shisiClient.characters.list()
-      setCharacters(data as CharacterState[])
+      setCharacters(Array.isArray(data) ? data as CharacterState[] : [])
     } catch (e: any) {
       toast({ type: 'error', message: e?.message || '加载角色失败' })
     } finally { setLoading(false) }
@@ -54,9 +54,9 @@ export default function CharactersPage() {
   async function handleImport(files: FileList | null) {
     if (!files || files.length === 0) return
     try {
-      const formData = new FormData()
-      Array.from(files).forEach(f => formData.append('file', f))
-      await shisiClient.characters.import_(formData as any)
+      for (const file of Array.from(files)) {
+        await shisiClient.characters.import_(file)
+      }
       toast({ type: 'success', message: '角色导入成功' })
       await loadCharacters()
     } catch (e: any) {
@@ -90,7 +90,7 @@ export default function CharactersPage() {
     if (!editingId) return
     try {
       const tags = editTags.split(',').map(s => s.trim()).filter(Boolean)
-      await shisiClient.characters.get(editingId)
+      await shisiClient.characters.update(editingId, { name: editName, tags })
       toast({ type: 'success', message: '角色信息已更新' })
       setEditingId(null)
       await loadCharacters()

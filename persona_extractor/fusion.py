@@ -46,6 +46,7 @@ class PersonaExtractor:
         user_id: str = "default",
         detect_frequency: int = 3,  # 每 N 条消息检测一次
         inject_persona: bool = True,  # 是否注入人格信息到prompt
+        enable_mental_health: bool = True,  # 是否启用心健筛查
     ):
         self._llm = llm_gateway
         self.user_id = user_id
@@ -62,9 +63,27 @@ class PersonaExtractor:
         self.vectorizer = StyleVectorizer()
         self.coupler = EmotionCoupler()
 
+        # 新增心理分析模块
+        self.enable_mental_health = enable_mental_health
+        if enable_mental_health:
+            from .mental_health import MentalHealthScreener
+            from .dark_triad import DarkTriadDetector
+            from .liwc_analyzer import LiwcAnalyzer
+            from .cognitive_distortions import CognitiveDistortionDetector
+            from .hexaco import HexacoTraits
+            self.mental_health = MentalHealthScreener(llm_gateway=llm_gateway)
+            self.dark_triad = DarkTriadDetector(llm_gateway=llm_gateway)
+            self.liwc = LiwcAnalyzer()
+            self.cognitive = CognitiveDistortionDetector(llm_gateway=llm_gateway)
+        else:
+            self.mental_health = None
+            self.dark_triad = None
+            self.liwc = None
+            self.cognitive = None
+
         self._initialized = False
-        logger.info("PersonaExtractor created (mode=%s, freq=%d, inject=%s)",
-                     pado_mode, detect_frequency, inject_persona)
+        logger.info("PersonaExtractor created (mode=%s, freq=%d, inject=%s, mh=%s)",
+                      pado_mode, detect_frequency, inject_persona, enable_mental_health)
 
     async def initialize(self) -> bool:
         """异步初始化（检测+预加载）"""
@@ -134,7 +153,11 @@ class PersonaExtractor:
         # 5. 存储+演化
         self.bank.update_persona_with_snapshot(snapshot, self.user_id)
 
-        # 6. 更新 ToneMimic 风格配置（如果可用）
+        # 6. 心理健康筛查 (v4.0 新增)
+        if self.enable_mental_health and self.mental_health:
+            self._run_mental_health_pipeline(message, context)
+
+        # 7. 更新 ToneMimic 风格配置（如果可用）
         try:
             from my_character.tone_mimic import ToneMimic  # noqa: F401
             # global tone_mimic 在运行时由main注入
@@ -162,6 +185,43 @@ class PersonaExtractor:
             return ""
 
         return persona.to_prompt_enhancement()
+
+    def _run_mental_health_pipeline(self, message: str, context: str) -> None:
+        """运行心理健康筛查管线 (零延时, 仅规则匹配)
+
+        LLM 深度分析仅在检测到高风险时异步触发（不阻塞主流程）。
+        """
+        persona = self.bank.get_persona(self.user_id)
+        if persona is None:
+            return
+
+        try:
+            # 1. HEXACO 推断 (零成本)
+            from .hexaco import HexacoTraits
+            hex_traits = HexacoTraits.from_ocean(persona.ocean)
+            persona.hexaco = hex_traits.to_dict()
+
+            # 2. 暗黑三人格检测 (正则, 零成本)
+            dt = self.dark_triad.detect(message)
+            persona.dark_triad = dt.to_dict()
+
+            # 3. LIWC 心理语言学分析 (零成本)
+            liwc_profile = self.liwc.analyze(message)
+            persona.liwc = liwc_profile.to_dict()
+
+            # 4. 认知扭曲检测 (零成本)
+            cog_result = self.cognitive.detect(message)
+            persona.cognitive = cog_result.to_dict()
+
+            # 5. 心理健康筛查 (零成本)
+            mh_snapshot = self.mental_health.quick_screen(message)
+            persona.mental_health = mh_snapshot.to_dict()
+
+            # 6. 保存更新后的画像
+            self.bank.save_persona(persona)
+
+        except Exception as e:
+            logger.debug("Mental health pipeline skipped: %s", e)
 
     # ── 适配器接口 ──
 
@@ -197,7 +257,7 @@ class PersonaExtractor:
         if persona is None:
             return {"user_id": self.user_id, "status": "insufficient_data", "snapshots": 0}
 
-        return {
+        summary = {
             "user_id": self.user_id,
             "status": "stable" if self.bank.is_stable(self.user_id) else "learning",
             "stability": round(self.bank.get_stability_score(self.user_id), 3),
@@ -208,6 +268,17 @@ class PersonaExtractor:
             "first_seen": persona.first_seen,
             "last_updated": persona.last_updated,
         }
+        if persona.hexaco:
+            summary["hexaco"] = persona.hexaco
+        if persona.dark_triad:
+            summary["dark_triad"] = persona.dark_triad
+        if persona.mental_health:
+            summary["mental_health"] = persona.mental_health
+        if persona.liwc:
+            summary["liwc"] = persona.liwc
+        if persona.cognitive:
+            summary["cognitive"] = persona.cognitive
+        return summary
 
     # ── 健康检查 ──
 

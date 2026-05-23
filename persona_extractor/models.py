@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 #  OCEAN 五大人格特质
@@ -430,6 +430,12 @@ class UserPersona:
     first_seen: str = ""
     last_updated: str = ""
     _history: List[UserPersonaSnapshot] = field(default_factory=list)
+    # 新增心理维度
+    hexaco: Optional[dict] = None     # HEXACO 六因素
+    dark_triad: Optional[dict] = None # 暗黑三人格
+    mental_health: Optional[dict] = None  # 心理健康摘要
+    liwc: Optional[dict] = None       # LIWC 心理语言学
+    cognitive: Optional[dict] = None  # 认知扭曲摘要
 
     def apply_snapshot(self, snapshot: UserPersonaSnapshot) -> None:
         """融合新快照（Bayesian加权更新）"""
@@ -479,7 +485,7 @@ class UserPersona:
         return self.pad.to_dict()
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             'user_id': self.user_id,
             'ocean': self.ocean.to_dict(),
             'pad': self.pad.to_dict(),
@@ -489,13 +495,20 @@ class UserPersona:
             'last_updated': self.last_updated,
             'recent_history': [s.to_dict() for s in self._history[-5:]],
         }
+        if self.hexaco:
+            d['hexaco'] = self.hexaco
+        if self.dark_triad:
+            d['dark_triad'] = self.dark_triad
+        if self.mental_health:
+            d['mental_health'] = self.mental_health
+        if self.liwc:
+            d['liwc'] = self.liwc
+        if self.cognitive:
+            d['cognitive'] = self.cognitive
+        return d
 
     def to_prompt_enhancement(self) -> str:
-        """生成增强 system prompt 的人格段
-
-        用于注入 LLM 对话的 system_prompt 中，
-        让 AI 女友知道用户的性格特点，从而调整回应方式。
-        """
+        """生成增强 system prompt 的人格段"""
         parts = []
         ocean_text = self.get_stable_ocean().to_prompt_segment()
         if ocean_text:
@@ -503,4 +516,55 @@ class UserPersona:
         style_text = self.style.to_prompt_segment()
         if style_text:
             parts.append(style_text)
+
+        # HEXACO 人格
+        if self.hexaco:
+            try:
+                from .hexaco import HexacoTraits
+                h = HexacoTraits(**self.hexaco) if isinstance(self.hexaco, dict) else self.hexaco
+                parts.append(h.to_prompt_segment())
+            except Exception:
+                pass
+
+        # 暗黑人格提示
+        if self.dark_triad and isinstance(self.dark_triad, dict):
+            parts.append(self._dark_triad_prompt(self.dark_triad))
+
+        # 心理健康提示
+        if self.mental_health and isinstance(self.mental_health, dict):
+            risk = self.mental_health.get("overall_risk", "low")
+            if risk in ("high", "critical"):
+                parts.append("[心理健康提示] 用户当前心理状态需要特别关注，回应时保持温和、支持、非评判的态度。避免刺激性和负面话题。")
+            elif risk == "moderate":
+                parts.append("[心理健康提示] 用户可能有轻微情绪困扰，回应时保持支持和理解。")
+
+        # 认知扭曲提示
+        if self.cognitive and isinstance(self.cognitive, dict):
+            severity = self.cognitive.get("severity", "none")
+            dominant = self.cognitive.get("dominant_pattern", "")
+            if severity in ("moderate", "frequent") and dominant:
+                dist_labels = {
+                    "all_or_nothing": "全或无思维", "overgeneralization": "过度概括",
+                    "mental_filter": "心理过滤", "disqualifying_positive": "否定正面",
+                    "jumping_to_conclusions": "妄下结论", "magnification": "灾难化",
+                    "emotional_reasoning": "情绪推理", "should_statements": "应该陈述",
+                    "labeling": "贴标签", "personalization": "个人化",
+                }
+                label = dist_labels.get(dominant, dominant)
+                parts.append(f"[认知扭曲提示] 用户表现出'{label}'的思维模式，回应时避免强化，提供温和的替代视角。")
+
         return "\n\n".join(parts)
+
+    @staticmethod
+    def _dark_triad_prompt(dt: dict) -> str:
+        avg = (dt.get("narcissism", 0) + dt.get("machiavellianism", 0) + dt.get("psychopathy", 0)) / 3
+        if avg <= 0.25:
+            return ""
+        lines = ["[暗黑人格提示]"]
+        if dt.get("narcissism", 0) > 0.3:
+            lines.append("- 用户可能较自我中心，适当给予肯定但避免过度迎合")
+        if dt.get("machiavellianism", 0) > 0.3:
+            lines.append("- 用户可能有功利倾向，注意保持真诚")
+        if dt.get("psychopathy", 0) > 0.3:
+            lines.append("- 用户可能缺乏共情，需要温和引导")
+        return "\n".join(lines) if len(lines) > 1 else ""
