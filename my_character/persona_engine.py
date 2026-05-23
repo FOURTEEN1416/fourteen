@@ -17,12 +17,16 @@ import copy
 import hashlib
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .character_config import ConfigLoader
 from .emotion_engine import CompoundEmotionalState as EmotionalState
 from .emotion_engine import EmotionEngine
 from .tone_mimic import ToneMimic
+from .emotion_style_coupler import EmotionStyleCoupler
+from .constraint_validator import ConstraintValidator
+from .anchor_protection import EnhancedAnchorProtection
 
 logger = logging.getLogger("persona_engine")
 
@@ -187,6 +191,15 @@ class PersonaEngine:
         self._evolution_log: List[dict] = []
         self._base_prompt_cache: Optional[str] = None
 
+        self._emotion_style_coupler = EmotionStyleCoupler(
+            config_path=str(Path(__file__).parent.parent / "config" / "emotion_style_matrix.yaml"),
+        )
+        self._constraint_validator = ConstraintValidator()
+        self._anchor_protection = EnhancedAnchorProtection(
+            anchors=self._original_anchors,
+            llm_gateway=llm_gateway,
+        )
+
         logger.info(
             "PersonaEngine initialized: %s, mode=%s, anchor_verify=%s",
             self.get_name(), self.prompt_mode, self.anchor_verification_enabled,
@@ -303,11 +316,67 @@ class PersonaEngine:
                 user_input, memory_context, rag_context, chat_summary,
             )
 
+        emotion_style_segment = self._build_emotion_style_segment(emotion_state)
+        if emotion_style_segment:
+            result = result + "\n\n" + emotion_style_segment
+
         if len(self._prompt_cache) >= self._prompt_cache_max:
             oldest_key = next(iter(self._prompt_cache))
             del self._prompt_cache[oldest_key]
         self._prompt_cache[cache_key] = result
         return result
+
+    def _build_emotion_style_segment(self, emotion_state: Optional[EmotionalState]) -> str:
+        """构建情感-风格耦合指导段"""
+        if not emotion_state or not self._emotion_style_coupler:
+            return ""
+        try:
+            emotion_dict = {}
+            if isinstance(emotion_state, dict):
+                emotion_dict = {
+                    "primary": {"type": emotion_state.get("primary_emotion", "平常")},
+                    "affinity": emotion_state.get("affinity", 0),
+                }
+            else:
+                emotion_dict = {
+                    "primary": {"type": getattr(emotion_state, "primary_emotion", "平常")},
+                    "affinity": getattr(emotion_state, "affinity", 0),
+                }
+            coupled_style = self._emotion_style_coupler.couple(emotion_dict)
+            segment = self._emotion_style_coupler.get_style_prompt_segment(coupled_style)
+            if segment:
+                return f"[当前风格指导] {segment}"
+        except Exception as e:
+            logger.debug("Emotion-style segment generation failed: %s", e)
+        return ""
+
+    def validate_response(self, response: str) -> Dict[str, Any]:
+        """运行时约束验证（供外部调用）"""
+        result = self._constraint_validator.validate(response)
+        return {
+            "passed": result.passed,
+            "violations": result.violations,
+            "severity": result.severity,
+        }
+
+    def auto_correct_response(self, response: str) -> str:
+        """自动修正违规回复"""
+        result = self._constraint_validator.validate(response)
+        if result.passed:
+            return response
+        return self._constraint_validator.auto_correct(response, result.violations)
+
+    def check_anchor_consistency(self, response: str) -> Dict[str, Any]:
+        """检查回复与锚点的一致性"""
+        is_consistent, score, details = self._anchor_protection.check_response_consistency(response)
+        return {
+            "is_consistent": is_consistent,
+            "score": score,
+            "details": [
+                {"anchor": d.anchor, "consistent": d.is_consistent, "score": d.semantic_score}
+                for d in details
+            ],
+        }
 
     def _build_legacy_prompt(
         self,

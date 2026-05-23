@@ -840,7 +840,7 @@ def run_wechat_mode(orchestrator_or_obj, orchestrator_mode: str,
         connector.stop()
 
 
-def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None) -> None:
+def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None):
     from api.rest_api import create_api_app
     from api.session_manager import SessionManager
     from api.websocket_server import WebSocketServer
@@ -879,6 +879,37 @@ def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None) -> None:
     ws_thread = threading.Thread(target=_run_ws, daemon=True)
     ws_thread.start()
     logger.info("WebSocket: ws://%s:%d", cfg.api.host, cfg.api.websocket_port)
+
+    return ws_server
+
+
+def _create_proactive_sender(ws_server=None, wechat_connector=None):
+    """创建主动消息发送器 — 多通道统一出口"""
+    def send_proactive(msg: str):
+        logger.info("[主动消息] %s", msg)
+        print(f"\n💕 [十四主动] {msg}")
+
+        if ws_server:
+            try:
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.ensure_future(ws_server.broadcast_proactive(msg))
+                    else:
+                        loop.run_until_complete(ws_server.broadcast_proactive(msg))
+                except RuntimeError:
+                    asyncio.run(ws_server.broadcast_proactive(msg))
+            except Exception as e:
+                logger.warning("[主动消息] WebSocket推送失败: %s", e)
+
+        if wechat_connector:
+            try:
+                wechat_connector.send_text(msg)
+            except Exception as e:
+                logger.warning("[主动消息] 微信发送失败: %s", e)
+
+    return send_proactive
 
 
 def main() -> None:
@@ -932,13 +963,21 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
     if not health["healthy"]:
         logger.warning("部分组件健康检查未通过, 继续启动...")
 
+    ws_server_fast = None
+    if not args.no_api:
+        logger.info("启动API服务...")
+        ws_server_fast = _start_api_service(orchestrator, cfg, config_mgr=orchestrator.components.get("config"))
+    else:
+        logger.info("API服务已禁用 (--no-api)")
+
     scheduler = None
     if not args.no_scheduler:
         from proactive.scheduler import ProactiveScheduler
 
-        def send_proactive(msg: str):
-            logger.info("[主动消息] %s", msg)
-            print(f"\n💕 [十四主动] {msg}")
+        send_proactive = _create_proactive_sender(
+            ws_server=ws_server_fast,
+            wechat_connector=None,
+        )
 
         def daily_maintenance():
             mem = orchestrator.components.get("memory")
@@ -958,12 +997,6 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
             logger.warning("主动消息调度器启动失败")
     else:
         logger.info("主动消息系统已禁用 (--no-scheduler)")
-
-    if not args.no_api:
-        logger.info("启动API服务...")
-        _start_api_service(orchestrator, cfg, config_mgr=orchestrator.components.get("config"))
-    else:
-        logger.info("API服务已禁用 (--no-api)")
 
     if args.init_only:
         logger.info("--init-only 模式, 初始化完成")
@@ -1138,9 +1171,10 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     if not args.no_scheduler:
         from proactive.scheduler import ProactiveScheduler
 
-        def _send_proactive(msg: str):
-            logger.info("[PROACTIVE] %s", msg)
-            print(f"\n💕 [十四主动] {msg}")
+        _send_proactive = _create_proactive_sender(
+            ws_server=None,
+            wechat_connector=None,
+        )
 
         def _daily_maintenance():
             try:
