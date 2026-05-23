@@ -118,7 +118,7 @@ class TTSManager:
     def available_engines(self) -> List[str]:
         return list(self._providers.keys())
 
-    async def synthesize(self, text: str, **kwargs) -> Optional[bytes]:
+    async def synthesize(self, text: str, emotion: str = "", **kwargs) -> Optional[bytes]:
         """
         合成语音 - 使用当前引擎
 
@@ -126,6 +126,7 @@ class TTSManager:
 
         Args:
             text: 要合成的文本
+            emotion: 情感状态(如"开心"、"伤心")，仅Edge-TTS生效
             **kwargs: 传递给引擎的参数
 
         Returns:
@@ -133,6 +134,16 @@ class TTSManager:
         """
         if not self._enabled or not text:
             return None
+
+        if emotion and self._current_engine == "edge-tts":
+            try:
+                from shisi.voice_ext.emotion_tts import EmotionVoiceMapper
+                mapper = EmotionVoiceMapper()
+                emotion_params = mapper.apply_to_edge_tts(emotion)
+                kwargs.update(emotion_params)
+                logger.debug("[TTS] 情感参数注入: %s → %s", emotion, emotion_params)
+            except Exception:
+                pass
 
         # 注意: 无全局锁，支持并发合成
         # _current_engine/_last_error 的竞态只影响统计日志，不影响正确性
