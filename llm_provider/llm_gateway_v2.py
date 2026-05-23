@@ -23,8 +23,8 @@ class ModelEntry:
     priority: int
     retry_count: int = 0
     cooldown_until: float = 0.0
-    max_retries: int = 3
-    cooldown_seconds: float = 30.0
+    max_retries: int = 1
+    cooldown_seconds: float = 10.0
 
     def is_available(self) -> bool:
         return time.time() >= self.cooldown_until

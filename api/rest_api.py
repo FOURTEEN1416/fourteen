@@ -258,18 +258,29 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             {"id": "web", "name": "Web 控制台", "type": "web", "status": "connected", "desc": "当前浏览器 WebSocket", "meta": "在线"},
             {"id": "api", "name": "REST API", "type": "api", "status": "connected", "desc": "HTTP API 接口", "meta": "端口 8000"},
         ]
-        # Add WeChat channel — 通过 adapter 报告真实连接状态
+        # Add WeChat channel — 通过新连接器报告真实状态
         try:
-            from wechatmsg_src.adapter import WeChatAdapter
-            status = WeChatAdapter.get_status()
-            channels.append({
-                "id": "wechat",
-                "name": "个人微信",
-                "type": "wechat",
-                "status": "connected" if status["connected"] else "disconnected",
-                "desc": "CowAgent 扫码连接微信",
-                "meta": f"在线 {status['uptime_seconds']}s" if status["connected"] else "",
-            })
+            from wechat_direct import get_connector
+            conn = get_connector()
+            if conn and conn.token:
+                uptime = time.time() - conn.started_at if conn.started_at else 0
+                channels.append({
+                    "id": "wechat",
+                    "name": "个人微信",
+                    "type": "wechat",
+                    "status": "connected",
+                    "desc": "直接微信连接",
+                    "meta": f"在线 {uptime:.0f}s",
+                })
+            else:
+                channels.append({
+                    "id": "wechat",
+                    "name": "个人微信",
+                    "type": "wechat",
+                    "status": "disconnected",
+                    "desc": "直接微信连接",
+                    "meta": "",
+                })
         except ImportError:
             pass
         # Add connected sessions as channels
@@ -508,151 +519,76 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     # WeChat Channel API — 手动连接控制
     # ═══════════════════════════════════════════
 
-    # 微信连接状态（API 手动控制）
-    # 内部引用存在 <_wechat_connection> 字典中，无需 module-level global
-    _wechat_connection: dict = {
-        "status": "idle",  # idle, connecting, connected, disconnected, error
-        "message": "",
-        "qr_code": None,
-        "pid": None,
-        "started_at": None,
-        "_process_mgr": None,   # _CowAgentProcess 实例（内部使用，不输出）
-        "_heartbeat_mgr": None,  # _HeartbeatManager 实例
-    }
+    def _get_wechat_connector():
+        from wechat_direct import get_connector
+        return get_connector()
+
     _wechat_lock = threading.Lock()
 
     @app.post("/api/channels/wechat/connect")
     async def manual_connect_wechat(_auth: bool = Security(_verify_api_key)):
         """手动启动微信连接（扫码登录）"""
-        with _wechat_lock:
-            if _wechat_connection["status"] == "connecting":
-                return {"status": "connecting", "message": "正在连接中，请稍候..."}
-
-            if _wechat_connection["status"] == "connected":
-                return {"status": "connected", "message": "微信已连接"}
-
-            _wechat_connection["status"] = "connecting"
-            _wechat_connection["message"] = "正在启动 CowAgent 子进程..."
+        conn = _get_wechat_connector()
+        if conn and conn.token:
+            return {"status": "connected", "message": "微信已连接"}
 
         def _do_connect():
             try:
-                from cowagent_adapter.init import initialize_wechat_channel
-
-                cowagent_cfg = str(Path(__file__).parent.parent / "cowagent_src" / "config.json")
-
-                result = initialize_wechat_channel(
-                    orchestrator=_orch,
-                    enable_heartbeat=True,
-                    heartbeat_interval=30,
-                    heartbeat_max_missed=3,
-                    cowagent_config=cowagent_cfg,
-                    auto_restart=True,
-                )
-
-                with _wechat_lock:
-                    if result.get("ok"):
-                        _wechat_connection["status"] = "connected"
-                        _wechat_connection["pid"] = result.get("pid")
-                        _wechat_connection["started_at"] = time.time()
-                        _wechat_connection["message"] = f"微信通道已启动 (PID={result.get('pid')})"
-                        _wechat_connection["_process_mgr"] = result.get("process")
-                        _wechat_connection["_heartbeat_mgr"] = result.get("heartbeat")
-                    else:
-                        _wechat_connection["status"] = "error"
-                        _wechat_connection["message"] = result.get("message", "连接失败")
-
+                from wechat_direct import WeChatConnector
+                connector = WeChatConnector(_orch)
+                connector.run()
             except Exception as e:
-                with _wechat_lock:
-                    _wechat_connection["status"] = "error"
-                    _wechat_connection["message"] = str(e)
-                logger.exception("手动微信连接失败")
+                logger.exception("微信连接失败: %s", e)
 
         thread = threading.Thread(target=_do_connect, daemon=True)
         thread.start()
 
-        return {"status": "connecting", "message": "微信连接已触发，请查看终端二维码扫码登录"}
+        return {"status": "connecting", "message": "微信连接已触发，请看终端/页面二维码扫码登录"}
 
     @app.post("/api/channels/wechat/disconnect")
     async def manual_disconnect_wechat(_auth: bool = Security(_verify_api_key)):
         """手动断开微信连接"""
-        with _wechat_lock:
-            proc_mgr = _wechat_connection.get("_process_mgr")
-            hb_mgr = _wechat_connection.get("_heartbeat_mgr")
-            if hb_mgr:
-                try:
-                    hb_mgr.stop()
-                except Exception:
-                    pass
-            if proc_mgr:
-                try:
-                    proc_mgr.stop()
-                except Exception:
-                    pass
-            _wechat_connection["status"] = "disconnected"
-            _wechat_connection["message"] = "微信连接已断开"
-            _wechat_connection["pid"] = None
-            _wechat_connection["started_at"] = None
-            _wechat_connection["_process_mgr"] = None
-            _wechat_connection["_heartbeat_mgr"] = None
+        conn = _get_wechat_connector()
+        if conn:
+            conn.stop()
         return {"status": "disconnected", "message": "微信已断开"}
 
     @app.get("/api/channels/wechat/connection-status")
     async def get_wechat_connection_status():
-        """获取手动连接状态（过滤内部字段）"""
-        with _wechat_lock:
-            return {
-                "status": _wechat_connection["status"],
-                "message": _wechat_connection["message"],
-                "qr_code": _wechat_connection.get("qr_code"),
-                "pid": _wechat_connection.get("pid"),
-                "started_at": _wechat_connection.get("started_at"),
-            }
+        """获取手动连接状态"""
+        conn = _get_wechat_connector()
+        if conn and conn.token:
+            return {"status": "connected", "message": "已连接", "started_at": conn.started_at}
+        return {"status": "idle", "message": "未连接"}
 
     @app.get("/api/channels/wechat/status")
     async def get_wechat_status():
-        """Get detailed WeChat connection status"""
-        status = {
-            "connected": False,
-            "uptime_seconds": 0,
-            "reconnect_attempts": 0,
-            "missed_heartbeats": 0,
-            "messages_today": 0,
-            "last_activity": "",
-        }
-
-        try:
-            from cowagent_adapter._globals import bot_registry
-            bot = bot_registry.get()
-            if bot:
-                hb = getattr(bot, '_heartbeat', None)
-                if hb:
-                    hb_status = hb.get_status()
-                    status["connected"] = hb_status["connected"]
-                    status["uptime_seconds"] = hb_status["uptime_seconds"]
-                    status["reconnect_attempts"] = hb_status["reconnect_attempts"]
-                    status["missed_heartbeats"] = hb_status["missed_heartbeats"]
-
-                health = bot.health_check()
-                status["components_ok"] = all(health.values()) if isinstance(health, dict) else False
-        except (AttributeError, KeyError, TypeError, OSError) as e:
-            logger.debug("Could not get wechat status: %s", e)
-
-        return status
+        """获取微信连接详细信息"""
+        conn = _get_wechat_connector()
+        if conn and conn.token:
+            return {
+                "connected": True,
+                "uptime_seconds": time.time() - conn.started_at if conn.started_at else 0,
+                "bot_id": conn.bot_id,
+            }
+        return {"connected": False, "uptime_seconds": 0}
 
     @app.post("/api/channels/wechat/reconnect")
     async def reconnect_wechat():
-        """Trigger WeChat reconnection"""
-        try:
-            from cowagent_adapter._globals import bot_registry
-            bot = bot_registry.get()
-            if bot:
-                hb = getattr(bot, '_heartbeat', None)
-                if hb and hasattr(hb, '_try_reconnect'):
-                    hb._try_reconnect(None)
-                    return {"status": "reconnecting"}
-            return {"status": "no_heartbeat", "message": "Heartbeat not available"}
-        except (AttributeError, ConnectionError, OSError) as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        """触发微信重连"""
+        conn = _get_wechat_connector()
+        if conn and conn.token:
+            conn.stop()
+        def _do_reconnect():
+            import wechat_direct.connector as wc
+            from wechat_direct import WeChatConnector
+            time.sleep(1)
+            wc._clear_credentials()
+            new_conn = WeChatConnector(_orch)
+            new_conn.run()
+        thread = threading.Thread(target=_do_reconnect, daemon=True)
+        thread.start()
+        return {"status": "reconnecting"}
 
     # ═══════════════════════════════════════════
     # Clone Data Management API（需求3+4）
@@ -825,17 +761,17 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
 
         # Get emotion/memory stats from running components
         try:
-            from cowagent_adapter._globals import bot_registry
-            bot = bot_registry.get()
-            if bot:
-                if hasattr(bot, 'emotion') and bot.emotion:
-                    es = bot.emotion.state
-                    emotion_current = es.emotion.value if hasattr(es.emotion, 'value') else str(es.emotion)
+            if _orch:
+                emotion = _orch.components.get("emotion") if hasattr(_orch, 'components') else getattr(_orch, '_emotion', None)
+                memory = _orch.components.get("memory") if hasattr(_orch, 'components') else getattr(_orch, '_memory', None)
+                if emotion:
+                    es = emotion.state
+                    emotion_current = es.primary_emotion.value if hasattr(es.primary_emotion, 'value') else str(es.primary_emotion)
                     affinity = getattr(es, 'affinity', 0)
                     energy = getattr(es, 'energy', 0)
-                if hasattr(bot, 'memory') and bot.memory:
+                if memory:
                     try:
-                        structured = bot.memory.structured_memory
+                        structured = getattr(memory, 'structured_memory', None)
                         if structured:
                             chats_today = structured.count_chats_today()
                             if hasattr(structured, 'count_facts'):
@@ -875,5 +811,12 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         logger.info("十四模块已挂载到REST API")
     except Exception as e:
         logger.warning("十四模块挂载失败: %s", e)
+
+    # ── 微信二维码 API ──
+    try:
+        from api.qrcode_store import router as qrcode_router
+        app.include_router(qrcode_router)
+    except Exception as e:
+        logger.warning("二维码API挂载失败: %s", e)
 
     return app

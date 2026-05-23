@@ -233,7 +233,7 @@ def _run_subprocess_target():
         _root_norm = str(Path(_project_root).resolve())
         sys.path = [p for p in sys.path if str(Path(p).resolve()) != _root_norm]
 
-        import cowagent_src.app as cowapp
+        import app as cowapp
         cowapp.run()
     except KeyboardInterrupt:
         pass
