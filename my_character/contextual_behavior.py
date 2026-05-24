@@ -95,6 +95,14 @@ class ContextualBehavior:
         self._rules.sort(key=lambda r: r.priority, reverse=True)
 
     def generate_behavior_prompt(self, context: Any) -> str:
+        """根据当前情境生成行为修饰指令
+
+        Args:
+            context: PromptContext实例或dict，提供emotion_state/time_context等
+
+        Returns:
+            情境化行为修饰文本，无匹配规则时返回空串
+        """
         context_vars = self._extract_context_vars(context)
         active_modifiers = []
 
@@ -113,28 +121,49 @@ class ContextualBehavior:
     def _extract_context_vars(self, context: Any) -> Dict[str, Any]:
         from my_character.enhanced_prompt_engine import PromptContext, TimeContext
 
-        vars_ = {
+        try:
+            from my_character.persona_utils import extract_context_vars as _extract
+        except ImportError:
+            _extract = None
+
+        if isinstance(context, PromptContext):
+            time_ctx = context.time_context
+            if _extract is not None:
+                return _extract(emotion_state=context.emotion_state, time_context=time_ctx)
+            vars_ = {
+                "time_period": "afternoon",
+                "energy": 1.0,
+                "affinity": 0,
+                "is_weekend": False,
+                "is_holiday": False,
+            }
+            if time_ctx:
+                vars_["time_period"] = time_ctx.period
+                vars_["is_weekend"] = time_ctx.is_weekend
+                vars_["is_holiday"] = time_ctx.is_holiday
+            if context.emotion_state:
+                if hasattr(context.emotion_state, "energy"):
+                    vars_["energy"] = context.emotion_state.energy
+                if hasattr(context.emotion_state, "affinity"):
+                    vars_["affinity"] = context.emotion_state.affinity
+            return vars_
+        elif isinstance(context, dict):
+            if _extract is not None:
+                return _extract(emotion_state=None, time_context=None)
+            return {
+                "time_period": "afternoon",
+                "energy": 1.0,
+                "affinity": 0,
+                "is_weekend": False,
+                "is_holiday": False,
+            }
+        return {
             "time_period": "afternoon",
             "energy": 1.0,
             "affinity": 0,
             "is_weekend": False,
             "is_holiday": False,
         }
-
-        if isinstance(context, PromptContext):
-            if context.time_context:
-                vars_["time_period"] = context.time_context.period
-                vars_["is_weekend"] = context.time_context.is_weekend
-                vars_["is_holiday"] = context.time_context.is_holiday
-            if context.emotion_state:
-                if hasattr(context.emotion_state, "energy"):
-                    vars_["energy"] = context.emotion_state.energy
-                if hasattr(context.emotion_state, "affinity"):
-                    vars_["affinity"] = context.emotion_state.affinity
-        elif isinstance(context, dict):
-            vars_.update(context)
-
-        return vars_
 
     def add_rule(self, rule: BehaviorRule) -> None:
         self._rules.append(rule)

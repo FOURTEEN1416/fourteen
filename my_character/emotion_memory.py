@@ -11,7 +11,10 @@ import logging
 import time as time_mod
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from memory.memory_pipeline import MemoryPipeline
 
 logger = logging.getLogger("emotion_memory")
 
@@ -50,7 +53,7 @@ class EmotionMemorySystem:
 
     MAX_EVENTS = 500
 
-    def __init__(self, memory_pipeline: Optional[Any] = None):
+    def __init__(self, memory_pipeline: Optional[MemoryPipeline] = None):
         self._memory = memory_pipeline
         self._emotion_events: deque = deque(maxlen=self.MAX_EVENTS)
         self._emotion_patterns: Dict[str, EmotionPattern] = {}
@@ -63,6 +66,15 @@ class EmotionMemorySystem:
         user_message: str = "",
         affinity: int = 0,
     ) -> None:
+        """记录一次情感事件
+
+        Args:
+            emotion: 情感类型（如"开心""生气""撒娇"等）
+            intensity: 情感强度 [0.0, 1.0]，超出范围自动钳制
+            trigger: 触发原因描述
+            user_message: 用户消息原文（截断至100字符）
+            affinity: 触发时的好感度等级
+        """
         event = EmotionEvent(
             emotion=emotion,
             intensity=max(0.0, min(1.0, intensity)),

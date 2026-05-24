@@ -79,6 +79,18 @@ class StyleEnhancerV2:
         chat_history: Optional[List[Dict]] = None,
         persona_style: Optional[Dict[str, Any]] = None,
     ) -> EnhancedStyleV2:
+        """基于20维度增强风格输出
+
+        Args:
+            base_style: 基础风格字典（含各维度分值）
+            emotion_state: 当前情感状态字典（可选）
+            context: 上下文对象（可选）
+            chat_history: 对话历史列表（可选）
+            persona_style: 人设风格覆盖（可选，优先于base_style）
+
+        Returns:
+            EnhancedStyleV2 含最终dimensions/particles/sentence_length等
+        """
         base_result = None
         if self._base and hasattr(self._base, "enhance_style"):
             try:
