@@ -30,6 +30,7 @@ export const queryKeys = {
   plugins: { all: ['plugins'] as const },
   toolHistory: ['tools', 'history'] as const,
   proactiveHistory: ['proactive', 'history'] as const,
+  proactive: { state: ['proactive', 'state'] as const },
 }
 
 export function useCharacters() {
@@ -147,7 +148,7 @@ export function useTrainingProgress() {
 
 export function useProactiveState() {
   return useQuery({
-    queryKey: ['proactive', 'state'],
+    queryKey: queryKeys.proactive.state,
     queryFn: () => api.proactiveState().then(r => r.data as ProactiveEngineState),
     refetchInterval: 30 * 1000,
   })
@@ -202,7 +203,7 @@ export function usePsychProfile() {
 
 export function usePsychSnapshots(limit = 20) {
   return useQuery({
-    queryKey: queryKeys.psych.snapshots,
+    queryKey: [...queryKeys.psych.snapshots, limit],
     queryFn: () => api.psychSnapshots(limit).then(r => (r.data as { snapshots: PsychSnapshot[] }).snapshots),
     staleTime: 30 * 1000,
   })

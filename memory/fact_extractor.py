@@ -13,7 +13,8 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger("fact_extractor")
 
@@ -68,7 +69,7 @@ class FactExtractor:
     2. 规则模式：基于正则表达式提取
     """
 
-    def __init__(self, llm_func: Optional[Callable] = None):
+    def __init__(self, llm_func: Callable | None = None):
         """
         Args:
             llm_func: LLM 调用函数，接受 prompt 返回文本
@@ -76,7 +77,7 @@ class FactExtractor:
         """
         self.llm_func = llm_func
 
-    def extract_facts(self, user_messages: List[str]) -> List[Dict[str, Any]]:
+    def extract_facts(self, user_messages: list[str]) -> list[dict[str, Any]]:
         """
         从用户消息中提取事实
 
@@ -90,7 +91,7 @@ class FactExtractor:
             return self._extract_with_llm(user_messages)
         return self._extract_with_rules(user_messages)
 
-    def extract_from_chat(self, chat_history: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    def extract_from_chat(self, chat_history: list[dict[str, str]]) -> list[dict[str, Any]]:
         """
         从聊天历史中提取事实
 
@@ -108,7 +109,7 @@ class FactExtractor:
 
     # ── LLM 模式 ─────────────────────────────────────────
 
-    def _extract_with_llm(self, messages: List[str]) -> List[Dict[str, Any]]:
+    def _extract_with_llm(self, messages: list[str]) -> list[dict[str, Any]]:
         """使用 LLM 提取事实"""
         if not self.llm_func or not messages:
             return []
@@ -148,7 +149,7 @@ JSON:"""
 
     # ── 规则模式 ─────────────────────────────────────────
 
-    def _extract_with_rules(self, messages: List[str]) -> List[Dict[str, Any]]:
+    def _extract_with_rules(self, messages: list[str]) -> list[dict[str, Any]]:
         """使用正则规则提取事实"""
         facts = []
 
@@ -174,7 +175,7 @@ JSON:"""
     # ── 工具方法 ─────────────────────────────────────────
 
     @staticmethod
-    def deduplicate(facts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def deduplicate(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         去重并合并相似事实
 
@@ -186,7 +187,7 @@ JSON:"""
             return []
 
         # 按类别分组
-        by_category: Dict[str, list] = {}
+        by_category: dict[str, list] = {}
         for f in facts:
             cat = f.get("category", "general")
             if cat not in by_category:
@@ -209,7 +210,7 @@ JSON:"""
         return result
 
     @staticmethod
-    def _parse_json_result(text: str) -> Optional[List[Dict[str, Any]]]:
+    def _parse_json_result(text: str) -> list[dict[str, Any]] | None:
         """尝试从 LLM 输出中解析 JSON"""
         # 直接解析
         try:

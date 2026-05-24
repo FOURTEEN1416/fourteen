@@ -1,7 +1,8 @@
 """单元测试: 角色专属音色管理"""
-import sys
 import os
+import sys
 import tempfile
+
 sys.path.insert(0, ".")
 
 from shisi.voice_ext.character_voice import CharacterVoiceManager

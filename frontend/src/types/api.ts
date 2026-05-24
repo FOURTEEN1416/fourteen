@@ -43,6 +43,7 @@ export interface ChatMessage {
   content: string
   emotion?: string
   timestamp: number
+  interrupted?: boolean
 }
 
 export interface ChatResponse {
@@ -112,6 +113,8 @@ export interface TrainingProgress {
   extracted_turns: number
   cleaned_turns: number
   current_step: string
+  step_name?: string
+  eta_seconds?: number
   error?: string
 }
 
@@ -179,7 +182,7 @@ export interface LogQueryParams {
 }
 
 export const SENSITIVE_FIELD_KEYS = new Set([
-  'api_key', 'secret', 'token', 'password', 'encryption_key', 'api_base',
+  'api_key', 'secret', 'token', 'password', 'encryption_key',
 ])
 
 export function isSensitiveField(key: string): boolean {

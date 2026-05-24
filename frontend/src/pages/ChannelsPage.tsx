@@ -1,9 +1,11 @@
-﻿import { useState, useEffect, useCallback, useRef } from 'react'
+﻿import { useState, useRef, useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { useChannels, useWechatStatus, queryKeys } from '../hooks/useQueries'
 import Button from '../components/common/Button'
 import Card from '../components/common/Card'
 import Badge from '../components/common/Badge'
-import type { Channel, WeChatStatus, ChannelStatus, WeChatConnectionStatus } from '../types/api'
+import type { Channel, ChannelStatus, WeChatConnectionStatus } from '../types/api'
 
 const statusVariant: Record<ChannelStatus, 'success' | 'error' | 'warning' | 'default'> = {
   connected: 'success',
@@ -20,8 +22,10 @@ const statusLabel: Record<ChannelStatus, string> = {
 }
 
 export default function ChannelsPage() {
-  const [channels, setChannels] = useState<Channel[]>([])
-  const [wechatDetail, setWechatDetail] = useState<WeChatStatus | null>(null)
+  const queryClient = useQueryClient()
+  const { data: channelsData, isLoading: channelsLoading } = useChannels()
+  const { data: wechatDetail } = useWechatStatus()
+  const channels = (channelsData as { channels: Channel[] } | undefined)?.channels ?? []
   const [reconnecting, setReconnecting] = useState(false)
 
   // 手动连接状态（需求1）
@@ -33,30 +37,15 @@ export default function ChannelsPage() {
   const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const mountedRef = useRef(true)
 
-  const hasWechat = channels.some((ch) => ch.type === 'wechat')
-  const wechatChannel = channels.find((ch) => ch.type === 'wechat')
+  const hasWechat = channels.some((ch: Channel) => ch.type === 'wechat')
+  const wechatChannel = channels.find((ch: Channel) => ch.type === 'wechat')
   const isWechatConnected = wechatChannel?.status === 'connected'
 
-  const fetchChannels = useCallback(async () => {
-    if (!mountedRef.current) return
-    try {
-      const { data } = await api.channels()
-      if (mountedRef.current) setChannels((data as { channels: Channel[] }).channels)
-    } catch { /* silent */ }
-  }, [])
-
-  useEffect(() => {
-    mountedRef.current = true
-    fetchChannels()
-    const interval = setInterval(fetchChannels, 10000)
-    return () => {
-      mountedRef.current = false
-      clearInterval(interval)
-    }
-  }, [fetchChannels])
+  const invalidateChannels = () =>
+    queryClient.invalidateQueries({ queryKey: queryKeys.channels })
 
   // 轮询手动连接状态
-  const startPollingConnStatus = useCallback(() => {
+  const startPollingConnStatus = () => {
     if (pollRef.current || !mountedRef.current) return
     pollRef.current = setInterval(async () => {
       if (!mountedRef.current) {
@@ -71,14 +60,14 @@ export default function ChannelsPage() {
         if (s.status === 'connected' || s.status === 'error' || s.status === 'disconnected') {
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
           setConnecting(false)
-          fetchChannels()
+          invalidateChannels()
         }
       } catch { /* silent */ }
     }, 2000)
-  }, [fetchChannels])
+  }
 
   // 轮询二维码（始终轮询，组件控制显示时机）
-  const startQrPolling = useCallback(() => {
+  const startQrPolling = () => {
     if (qrPollRef.current || !mountedRef.current) return
     qrPollRef.current = setInterval(async () => {
       if (!mountedRef.current) {
@@ -92,25 +81,23 @@ export default function ChannelsPage() {
         setQrData(d)
       } catch { /* silent */ }
     }, 3000)
-  }, [])
+  }
 
   // Auto-start QR polling when wechat channel exists
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+      if (qrPollRef.current) { clearInterval(qrPollRef.current); qrPollRef.current = null }
+    }
+  }, [])
+
   useEffect(() => {
     if (hasWechat) {
       startQrPolling()
     }
-    return () => {
-      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
-      if (qrPollRef.current) { clearInterval(qrPollRef.current); qrPollRef.current = null }
-    }
-  }, [hasWechat, startQrPolling])
-
-  const fetchWechatDetail = async () => {
-    try {
-      const { data } = await api.wechatStatus()
-      setWechatDetail(data as WeChatStatus)
-    } catch { /* silent */ }
-  }
+  }, [hasWechat])
 
   const handleConnect = async () => {
     setConnecting(true)
@@ -130,7 +117,7 @@ export default function ChannelsPage() {
     try {
       await api.wechatDisconnect()
       setConnStatus({ status: 'disconnected', message: '微信已断开' })
-      fetchChannels()
+      invalidateChannels()
     } catch { /* toast */ }
     finally { setDisconnecting(false) }
   }
@@ -139,8 +126,7 @@ export default function ChannelsPage() {
     setReconnecting(true)
     try {
       await api.wechatReconnect()
-      await fetchWechatDetail()
-      fetchChannels()
+      invalidateChannels()
     } catch { /* toast */ }
     finally { setReconnecting(false) }
   }
@@ -156,12 +142,14 @@ export default function ChannelsPage() {
     <div className="flex-1 overflow-y-auto p-6">
       <h1 className="text-base font-semibold text-gray-800 mb-6">通道连接</h1>
 
-      {channels.length === 0 ? (
+      {channelsLoading ? (
+        <p className="text-sm text-gray-400">加载中...</p>
+      ) : channels.length === 0 ? (
         <p className="text-sm text-gray-400">暂无通道数据</p>
       ) : (
         <div className="space-y-3">
-          {channels.map((ch) => (
-            <Card key={ch.id} hover onClick={ch.type === 'wechat' ? fetchWechatDetail : undefined}>
+          {channels.map((ch: Channel) => (
+            <Card key={ch.id} hover>
               <div className="flex items-center gap-4">
                 <div className={`w-2 h-2 rounded-full ${
                   ch.status === 'connected' ? 'bg-green-400' :
@@ -206,7 +194,7 @@ export default function ChannelsPage() {
                   <DetailRow label="最后活动" value={wechatDetail.last_activity} />
                 </>
               ) : (
-                <p className="text-xs text-gray-400">点击微信通道卡片查看详情</p>
+                <p className="text-xs text-gray-400">微信状态加载中...</p>
               )}
             </div>
           </Card>

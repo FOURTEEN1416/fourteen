@@ -16,11 +16,12 @@ import logging
 import random
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger("ase_engine")
 
@@ -45,7 +46,7 @@ class ProactiveType(Enum):
 #  主动消息模板库 — 扩展版（每类8-10条，按好感度分组）
 # ═══════════════════════════════════════════════════════════════
 
-PROACTIVE_MESSAGES: Dict[str, Dict[str, List[str]]] = {
+PROACTIVE_MESSAGES: dict[str, dict[str, list[str]]] = {
     "morning_greeting": {
         "low": [
             "早啊，新的一天",
@@ -201,7 +202,7 @@ PROACTIVE_MESSAGES: Dict[str, Dict[str, List[str]]] = {
 }
 
 
-def _get_messages(key: str, affinity_level: int = 0) -> List[str]:
+def _get_messages(key: str, affinity_level: int = 0) -> list[str]:
     """根据好感度获取消息列表"""
     msgs = PROACTIVE_MESSAGES.get(key, PROACTIVE_MESSAGES["bored"])
     if isinstance(msgs, dict):
@@ -211,7 +212,7 @@ def _get_messages(key: str, affinity_level: int = 0) -> List[str]:
     return msgs if isinstance(msgs, list) else []
 
 
-_PROACTIVE_TYPE_TO_KEY: Dict[ProactiveType, str] = {
+_PROACTIVE_TYPE_TO_KEY: dict[ProactiveType, str] = {
     ProactiveType.MORNING_GREETING: "morning_greeting",
     ProactiveType.NIGHT_GREETING: "night_greeting",
     ProactiveType.MISS_YOU: "miss_you",
@@ -287,12 +288,12 @@ class InnerMonologue:
 class ReflectionEngine:
     def __init__(
         self,
-        llm_func: Optional[Callable] = None,
+        llm_func: Callable | None = None,
         reflection_mode: str = "rule",
     ):
         self.llm_func = llm_func
         self.reflection_mode = reflection_mode
-        self._monologues: List[InnerMonologue] = []
+        self._monologues: list[InnerMonologue] = []
 
     def reflect(
         self,
@@ -381,7 +382,7 @@ class ReflectionEngine:
             urgency_delta=urgency_delta,
         )
 
-    def get_latest_monologue(self) -> Optional[InnerMonologue]:
+    def get_latest_monologue(self) -> InnerMonologue | None:
         if self._monologues:
             return self._monologues[-1]
         return None
@@ -437,7 +438,7 @@ class FrequencyAdapter:
     def level(self) -> str:
         return self._current_level
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "current_level": self._current_level,
             "unanswered_count": self._unanswered_count,
@@ -446,7 +447,7 @@ class FrequencyAdapter:
             "min_weekly": self.min_weekly,
         }
 
-    def from_dict(self, data: Dict[str, Any]) -> None:
+    def from_dict(self, data: dict[str, Any]) -> None:
         self._current_level = data.get("current_level", self._current_level)
         self._unanswered_count = data.get("unanswered_count", self._unanswered_count)
         self.normal_daily = data.get("normal_daily", self.normal_daily)
@@ -460,10 +461,10 @@ class FrequencyAdapter:
 
 class ContextAnalyzer:
     def __init__(self):
-        self._last_analysis: Optional[Dict] = None
+        self._last_analysis: dict | None = None
         self._last_analysis_time: float = 0
 
-    def analyze(self) -> Dict[str, Any]:
+    def analyze(self) -> dict[str, Any]:
         now = datetime.now()
         hour = now.hour
         context = {
@@ -490,7 +491,7 @@ class ContextAnalyzer:
         else:
             return "night"
 
-    def get_recommended_type(self) -> Optional[ProactiveType]:
+    def get_recommended_type(self) -> ProactiveType | None:
         context = self.analyze()
         hour = context["hour"]
         if 7 <= hour <= 9:
@@ -516,7 +517,7 @@ class MessageGenerator:
             prompt_path = Path(__file__).parent.parent / "config" / "prompts" / "proactive.yaml"
             if prompt_path.exists():
                 import yaml
-                with open(prompt_path, "r", encoding="utf-8") as f:
+                with open(prompt_path, encoding="utf-8") as f:
                     data = yaml.safe_load(f)
                     if isinstance(data, dict):
                         return data.get("generation_prompt", "")
@@ -536,10 +537,10 @@ class MessageGenerator:
     def generate_with_llm(
         self,
         msg_type: ProactiveType,
-        emotion_state: Dict,
+        emotion_state: dict,
         affinity_level: int,
         context: str = "",
-    ) -> Optional[str]:
+    ) -> str | None:
         if not self._llm:
             return None
 
@@ -600,10 +601,10 @@ class MessageGenerator:
     def generate(
         self,
         msg_type: ProactiveType,
-        emotion_state: Dict,
+        emotion_state: dict,
         affinity_level: int,
         use_llm: bool = True,
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         content = None
         generated_by = "template"
 
@@ -636,11 +637,11 @@ class FrequencyController:
         self.cooldown = timedelta(minutes=cooldown_after_reply_minutes)
 
         self._daily_count = 0
-        self._last_sent_time: Optional[datetime] = None
-        self._last_reply_time: Optional[datetime] = None
-        self._last_reset_date: Optional[datetime] = None
+        self._last_sent_time: datetime | None = None
+        self._last_reply_time: datetime | None = None
+        self._last_reset_date: datetime | None = None
 
-    def can_send(self) -> Tuple[bool, str]:
+    def can_send(self) -> tuple[bool, str]:
         now = datetime.now()
         if self._last_reset_date is None or now.date() != self._last_reset_date:
             self._daily_count = 0
@@ -648,12 +649,10 @@ class FrequencyController:
 
         if self._daily_count >= self.max_daily:
             return False, "daily_limit"
-        if self._last_sent_time:
-            if now - self._last_sent_time < self.min_interval:
-                return False, "min_interval"
-        if self._last_reply_time:
-            if now - self._last_reply_time < self.cooldown:
-                return False, "cooldown"
+        if self._last_sent_time and now - self._last_sent_time < self.min_interval:
+            return False, "min_interval"
+        if self._last_reply_time and now - self._last_reply_time < self.cooldown:
+            return False, "cooldown"
         return True, "ok"
 
     def record_sent(self) -> None:
@@ -663,14 +662,14 @@ class FrequencyController:
     def record_reply(self) -> None:
         self._last_reply_time = datetime.now()
 
-    def get_state(self) -> Dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         return {
             "daily_count": self._daily_count,
             "max_daily": self.max_daily,
             "remaining": self.max_daily - self._daily_count,
         }
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "daily_count": self._daily_count,
             "max_daily": self.max_daily,
@@ -680,7 +679,7 @@ class FrequencyController:
             "last_reply_time": self._last_reply_time.isoformat() if self._last_reply_time else None,
         }
 
-    def from_dict(self, data: Dict[str, Any]) -> None:
+    def from_dict(self, data: dict[str, Any]) -> None:
         self._daily_count = data.get("daily_count", self._daily_count)
         self.max_daily = data.get("max_daily", self.max_daily)
         if "min_interval_minutes" in data:
@@ -697,7 +696,7 @@ class FrequencyController:
 #  融合版 ASEEngine v2
 # ═══════════════════════════════════════════════════════════════
 
-_STATE_PATH = Path("data/proactive_state.json")
+_STATE_PATH = Path(__file__).resolve().parent.parent / "data" / "proactive_state.json"
 
 
 class ASEEngine:
@@ -714,7 +713,7 @@ class ASEEngine:
 
     def __init__(
         self,
-        affinity_level_func: Optional[Callable[[], int]] = None,
+        affinity_level_func: Callable[[], int] | None = None,
         llm_gateway: Any = None,
         max_daily_messages: int = 8,
         min_interval_minutes: int = 30,
@@ -748,8 +747,8 @@ class ASEEngine:
             reflection_mode=reflection_mode,
         )
 
-        self._freq_adapter: Optional[FrequencyAdapter] = None
-        self._freq_controller: Optional[FrequencyController] = None
+        self._freq_adapter: FrequencyAdapter | None = None
+        self._freq_controller: FrequencyController | None = None
         if frequency_mode == "adaptive":
             self._freq_adapter = FrequencyAdapter(normal_daily=max_daily_messages)
         else:
@@ -762,13 +761,13 @@ class ASEEngine:
         self._context_analyzer = ContextAnalyzer()
         self._message_generator = MessageGenerator(llm_gateway)
 
-        self._last_chat_time: Optional[datetime] = None
-        self._last_proactive_time: Optional[datetime] = None
+        self._last_chat_time: datetime | None = None
+        self._last_proactive_time: datetime | None = None
         self._daily_message_count = 0
-        self._last_sent_type: Optional[str] = None
-        self._emotion_state: Dict = {}
+        self._last_sent_type: str | None = None
+        self._emotion_state: dict = {}
         self._affinity_level: int = 0
-        self._monologues: List[InnerMonologue] = []
+        self._monologues: list[InnerMonologue] = []
 
         self._config = {
             "morning_hours": (7, 9),
@@ -776,9 +775,9 @@ class ASEEngine:
             "meal_hours": [(11, 13), (17, 19)],
         }
 
-        self._last_morning_date: Optional[Any] = None
-        self._last_night_date: Optional[Any] = None
-        self._last_meal_date: Optional[Any] = None
+        self._last_morning_date: Any | None = None
+        self._last_night_date: Any | None = None
+        self._last_meal_date: Any | None = None
 
         self._recent_messages: deque = deque(maxlen=50)
 
@@ -795,9 +794,9 @@ class ASEEngine:
         self,
         user_message: str,
         reply: str,
-        emotion_state: Optional[Dict] = None,
-        affinity_level: Optional[int] = None,
-    ) -> Optional[InnerMonologue]:
+        emotion_state: dict | None = None,
+        affinity_level: int | None = None,
+    ) -> InnerMonologue | None:
         now = datetime.now()
         hours_since = self._hours_since_last_chat()
 
@@ -834,9 +833,9 @@ class ASEEngine:
     def tick(
         self,
         hours_since_last_chat: float = 0,
-        emotion_state: Optional[Dict] = None,
+        emotion_state: dict | None = None,
         dry_run: bool = False,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """定时检查。dry_run=True时只更新紧迫度，不发送消息。"""
         if emotion_state:
             self._emotion_state = emotion_state
@@ -851,9 +850,8 @@ class ASEEngine:
             return None
 
         scene_msg = self._check_scene_triggers()
-        if scene_msg and self.urgency.total >= 2.0:
-            if not self._is_duplicate(scene_msg.get("message", "")):
-                return self._record_and_return(scene_msg)
+        if scene_msg and self.urgency.total >= 2.0 and not self._is_duplicate(scene_msg.get("message", "")):
+            return self._record_and_return(scene_msg)
 
         if self.urgency.total >= self._urgency_threshold:
             msg_type = self._select_type_by_urgency()
@@ -925,24 +923,23 @@ class ASEEngine:
         else:
             self.urgency.context_bonus = 0.0
 
-    def _check_scene_triggers(self) -> Optional[Dict[str, Any]]:
+    def _check_scene_triggers(self) -> dict[str, Any] | None:
         now = datetime.now()
         hour = now.hour
         today = now.date()
         affinity = self._affinity_level
 
         start, end = self._config["morning_hours"]
-        if start <= hour < end:
-            if self._last_morning_date != today:
-                self._last_morning_date = today
-                templates = _get_messages("morning_greeting", affinity)
-                msg = random.choice(templates) if templates else "早安"
-                self.urgency.scene_bonus = 1.5
-                return {
-                    "type": "morning_greeting",
-                    "message": msg,
-                    "urgency": self.urgency.total,
-                }
+        if start <= hour < end and self._last_morning_date != today:
+            self._last_morning_date = today
+            templates = _get_messages("morning_greeting", affinity)
+            msg = random.choice(templates) if templates else "早安"
+            self.urgency.scene_bonus = 1.5
+            return {
+                "type": "morning_greeting",
+                "message": msg,
+                "urgency": self.urgency.total,
+            }
 
         start, end = self._config["night_hours"]
         if hour >= start or hour < 1:
@@ -959,17 +956,16 @@ class ASEEngine:
                 }
 
         for meal_start, meal_end in self._config["meal_hours"]:
-            if meal_start <= hour < meal_end:
-                if self._last_meal_date != today:
-                    self._last_meal_date = today
-                    templates = _get_messages("care_meal", affinity)
-                    msg = random.choice(templates) if templates else "记得吃饭"
-                    self.urgency.scene_bonus = 1.0
-                    return {
-                        "type": "care_meal",
-                        "message": msg,
-                        "urgency": self.urgency.total,
-                    }
+            if meal_start <= hour < meal_end and self._last_meal_date != today:
+                self._last_meal_date = today
+                templates = _get_messages("care_meal", affinity)
+                msg = random.choice(templates) if templates else "记得吃饭"
+                self.urgency.scene_bonus = 1.0
+                return {
+                    "type": "care_meal",
+                    "message": msg,
+                    "urgency": self.urgency.total,
+                }
 
         return None
 
@@ -994,7 +990,7 @@ class ASEEngine:
 
     # ── 消息生成 ─────────────────────────────────────────
 
-    def _generate_proactive_message(self) -> Dict[str, Any]:
+    def _generate_proactive_message(self) -> dict[str, Any]:
         total = self.urgency.total
 
         if total >= 7:
@@ -1017,7 +1013,7 @@ class ASEEngine:
 
     def _generate_and_return(
         self, msg_type: ProactiveType,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         if self._generation_mode == "llm":
             content, generated_by = self._message_generator.generate(
                 msg_type=msg_type,
@@ -1052,7 +1048,7 @@ class ASEEngine:
         self.urgency.reset()
         return result
 
-    def _record_and_return(self, scene_msg: Dict[str, Any]) -> Dict[str, Any]:
+    def _record_and_return(self, scene_msg: dict[str, Any]) -> dict[str, Any]:
         self._record_proactive_sent()
         self._recent_messages.append(scene_msg.get("message", ""))
         self.urgency.scene_bonus = 0
@@ -1098,7 +1094,7 @@ class ASEEngine:
         if not self._state_path.exists():
             return
         try:
-            with open(self._state_path, "r", encoding="utf-8") as f:
+            with open(self._state_path, encoding="utf-8") as f:
                 state = json.load(f)
 
             self._daily_message_count = state.get("daily_count", 0)
@@ -1161,8 +1157,8 @@ class ASEEngine:
         if self._freq_adapter:
             self._freq_adapter.on_reply_received()
 
-    def get_state(self) -> Dict[str, Any]:
-        freq_state: Dict[str, Any] = {}
+    def get_state(self) -> dict[str, Any]:
+        freq_state: dict[str, Any] = {}
         if self._freq_adapter:
             freq_state = {
                 "mode": "adaptive",
@@ -1195,8 +1191,8 @@ class ASEEngine:
             "last_sent_type": self._last_sent_type,
         }
 
-    def health_check(self) -> Dict[str, Any]:
-        freq_info: Dict[str, Any] = {}
+    def health_check(self) -> dict[str, Any]:
+        freq_info: dict[str, Any] = {}
         if self._freq_adapter:
             freq_info = {
                 "mode": "adaptive",

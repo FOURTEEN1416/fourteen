@@ -17,8 +17,11 @@ import json
 import logging
 import random
 import time
+import weakref
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger("emotion_engine")
 
@@ -169,7 +172,7 @@ class CompoundEmotionalState:
     """
     primary_emotion: Emotion = Emotion.NEUTRAL
     primary_intensity: float = 0.5
-    secondary_emotions: List[Tuple[Emotion, float]] = field(default_factory=list)
+    secondary_emotions: list[tuple[Emotion, float]] = field(default_factory=list)
     energy: float = 1.0
     affinity: int = 0
     affection_points: float = 0.0
@@ -184,7 +187,7 @@ class CompoundEmotionalState:
             for e, i in self.secondary_emotions if i >= 0.3
         ][:3]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "primary": {
                 "type": self.primary_emotion.value,
@@ -230,7 +233,7 @@ class ContinuityGuard:
         self.blend_ratio = blend_ratio
         self.min_transition_prob = min_transition_prob
 
-    def check_transition(self, old: Emotion, new: Emotion) -> Tuple[bool, Optional[Emotion]]:
+    def check_transition(self, old: Emotion, new: Emotion) -> tuple[bool, Emotion | None]:
         if old == new:
             return True, None
         prob = EMOTION_TRANSITION_MATRIX.get((old, new), 0.5)
@@ -247,18 +250,44 @@ class ContinuityGuard:
 # ---------------------------------------------------------------------------
 
 class LLMEmotionClassifier:
+    """LLM情感分类器 — 使用弱引用避免循环引用风险
+
+    设计考虑：
+    - 使用 weakref.ref 替代对 llm_gateway 的直接引用，防止循环引用导致内存泄漏
+    - 如果 llm_gateway 被垃圾回收，_get_llm() 将返回 None，分类器自动降级到规则模式
+    - 缓存使用 LRU 策略，避免内存无限增长
+    """
+
     def __init__(self, llm_gateway=None, timeout_ms: int = 500, cache_size: int = 100):
-        self._llm = llm_gateway
+        # 使用弱引用存储 llm_gateway，避免循环引用
+        # 如果 llm_gateway 被回收，弱引用将自动变为 None
+        self._llm_ref: weakref.ref | None = weakref.ref(llm_gateway) if llm_gateway else None
         self.timeout_ms = timeout_ms
         from collections import OrderedDict
-        self._cache: OrderedDict[str, Dict] = OrderedDict()
+        self._cache: OrderedDict[str, dict] = OrderedDict()
         self._cache_size = cache_size
+        # 类级别共享线程池，避免每次 classify 调用都创建新线程池
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="emotion_llm")
+
+    def _get_llm(self) -> Any | None:
+        """获取 LLM 网关实例（通过弱引用）
+
+        Returns:
+            llm_gateway 实例，如果已被垃圾回收则返回 None
+        """
+        if self._llm_ref is None:
+            return None
+        llm = self._llm_ref()
+        if llm is None:
+            logger.debug("LLM gateway 已被回收，情感分类器降级到规则模式")
+        return llm
 
     def _get_cache_key(self, message: str, context: str) -> str:
         return f"{hash(message)}:{hash(context[:50])}"
 
-    def classify(self, message: str, context: str = "") -> Optional[Dict]:
-        if not self._llm:
+    def classify(self, message: str, context: str = "") -> dict | None:
+        llm = self._get_llm()
+        if not llm:
             return None
 
         cache_key = self._get_cache_key(message, context)
@@ -277,13 +306,11 @@ class LLMEmotionClassifier:
         )
 
         try:
-            start = time.perf_counter()
-            response = self._llm.chat_sync(query=prompt, max_tokens=128, temperature=0.1)
-            elapsed_ms = (time.perf_counter() - start) * 1000
-
-            if elapsed_ms > self.timeout_ms:
-                logger.debug("LLM分类超时: %.0fms", elapsed_ms)
-                return None
+            timeout_sec = self.timeout_ms / 1000.0
+            future = self._executor.submit(
+                llm.chat_sync, query=prompt, max_tokens=128, temperature=0.1
+            )
+            response = future.result(timeout=timeout_sec)
 
             result = json.loads(response)
 
@@ -295,12 +322,22 @@ class LLMEmotionClassifier:
 
             return result
 
+        except FuturesTimeoutError:
+            logger.debug("LLM分类超时: %.0fms", self.timeout_ms)
+            return None
         except Exception as e:
             logger.debug("LLM分类失败: %s", e)
             return None
 
     def clear_cache(self) -> None:
         self._cache.clear()
+
+    def close(self) -> None:
+        """关闭共享线程池，释放资源。"""
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
+            logger.debug("LLMEmotionClassifier 线程池已关闭")
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +359,7 @@ class EmotionEngine:
 
     def __init__(
         self,
-        config: Optional[dict] = None,
+        config: dict | None = None,
         llm_gateway=None,
         use_llm: bool = True,
         blend_ratio: float = 0.4,
@@ -334,7 +371,7 @@ class EmotionEngine:
         self._classifier_mode = classifier_mode
         self._total_chats = 0
 
-        self._classifier: Optional[LLMEmotionClassifier] = None
+        self._classifier: LLMEmotionClassifier | None = None
         if use_llm and llm_gateway is not None:
             self._classifier = LLMEmotionClassifier(llm_gateway, classifier_timeout_ms)
 
@@ -397,7 +434,7 @@ class EmotionEngine:
 
     # ---- V1 兼容入口 ----
 
-    def process_message(self, user_message: str, context: Optional[dict] = None) -> CompoundEmotionalState:
+    def process_message(self, user_message: str, context: dict | None = None) -> CompoundEmotionalState:
         recent = ""
         if isinstance(context, dict):
             recent = context.get("recent", "")
@@ -417,7 +454,7 @@ class EmotionEngine:
 
     def _rule_classify(self, message: str) -> CompoundEmotionalState:
         msg = message.lower()
-        scores: Dict[Emotion, float] = {e: 0.0 for e in Emotion}
+        scores: dict[Emotion, float] = {e: 0.0 for e in Emotion}
 
         for keyword, (emotion, weight) in KEYWORD_EMOTION_MAP.items():
             if keyword in msg:
@@ -429,9 +466,8 @@ class EmotionEngine:
             scores[Emotion.HAPPY] = scores.get(Emotion.HAPPY, 0) + happy_score * 0.6
 
         # 傲娇随机触发
-        if any(kw in msg for kw in ["夸", "好看", "漂亮", "可爱", "乖"]):
-            if random.random() < 0.4:
-                scores[Emotion.SULLEN] = scores.get(Emotion.SULLEN, 0) + 0.5
+        if any(kw in msg for kw in ["夸", "好看", "漂亮", "可爱", "乖"]) and random.random() < 0.4:
+            scores[Emotion.SULLEN] = scores.get(Emotion.SULLEN, 0) + 0.5
 
         total = sum(scores.values())
         if total > 0:
@@ -475,7 +511,7 @@ class EmotionEngine:
                 return self._parse_llm_result(result)
         return self._rule_classify(message)
 
-    def _parse_llm_result(self, result: Dict) -> CompoundEmotionalState:
+    def _parse_llm_result(self, result: dict) -> CompoundEmotionalState:
         primary = result.get("primary", {})
         emotion_name = primary.get("type", "平常")
         primary_emotion = Emotion.NEUTRAL
@@ -610,7 +646,7 @@ class EmotionEngine:
 
     # ---- 风格修饰器双接口 ----
 
-    def get_style_modifiers(self) -> Dict[str, Any]:
+    def get_style_modifiers(self) -> dict[str, Any]:
         """V1风格: warmth/energy/intimacy/playfulness修饰"""
         pleasure = EMOTION_PLEASURE_MAP.get(self._state.primary_emotion, 0.0)
         return {
@@ -627,7 +663,7 @@ class EmotionEngine:
             ),
         }
 
-    def get_emotion_style_map(self) -> Dict[str, float]:
+    def get_emotion_style_map(self) -> dict[str, float]:
         """V2风格: 基于EMOTION_STYLE_MAP的修辞概率"""
         return EMOTION_STYLE_MAP.get(
             self._state.primary_emotion,
@@ -646,7 +682,13 @@ class EmotionEngine:
             self._classifier.clear_cache()
         logger.info("EmotionEngine reset")
 
-    def health_check(self) -> Dict[str, Any]:
+    def close(self) -> None:
+        """关闭底层资源（如 LLM 分类器的线程池）。"""
+        if self._classifier:
+            self._classifier.close()
+        logger.info("EmotionEngine closed")
+
+    def health_check(self) -> dict[str, Any]:
         return {
             "initialized": True,
             "classifier_mode": self._classifier_mode,

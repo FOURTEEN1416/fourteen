@@ -6,8 +6,10 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from shisi.infrastructure.migration.migration_runner import MigrationResult, run as run_migration
-from shisi.infrastructure.migration.rollback_runner import RollbackResult, run as run_rollback
+from shisi.infrastructure.migration.migration_runner import MigrationResult
+from shisi.infrastructure.migration.migration_runner import run as run_migration
+from shisi.infrastructure.migration.rollback_runner import RollbackResult
+from shisi.infrastructure.migration.rollback_runner import run as run_rollback
 
 
 @dataclass

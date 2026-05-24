@@ -137,7 +137,7 @@ def check_environment():
     if dirs:
         print(f"[微信目录] 找到 {len(dirs)} 个:")
         for d in dirs:
-            age_days = (os.path.getmtime(__file__ if '__file__' in dir() else 0) - os.path.getmtime(d)) / 86400 if os.path.exists(d) else 0
+            (os.path.getmtime(__file__ if '__file__' in dir() else 0) - os.path.getmtime(d)) / 86400 if os.path.exists(d) else 0
             print(f"            {d}")
     else:
         print("[微信目录] 未找到自动检测路径")
@@ -162,14 +162,14 @@ def interactive_setup():
     if detected:
         if len(detected) == 1:
             chosen = detected[0]
-            print(f"[1/3] 微信数据目录: 自动检测到")
+            print("[1/3] 微信数据目录: 自动检测到")
             print(f"      {chosen}")
         else:
             print(f"[1/3] 检测到 {len(detected)} 个微信数据目录:")
             for i, d in enumerate(detected, 1):
                 print(f"      [{i}] {d}")
             try:
-                sel = int(input("\n请选择 (1-{}): ".format(len(detected))) or "1")
+                sel = int(input(f"\n请选择 (1-{len(detected)}): ") or "1")
                 chosen = detected[sel - 1]
             except (ValueError, IndexError):
                 chosen = detected[0]
@@ -182,8 +182,8 @@ def interactive_setup():
 
     # 转录 backend
     backends = detect_transcription_backends()
-    print(f"\n[2/3] 语音转录 backend:")
-    print(f"      [1] local — 本地 CPU 转录（默认，隐私最佳，速度较慢）")
+    print("\n[2/3] 语音转录 backend:")
+    print("      [1] local — 本地 CPU 转录（默认，隐私最佳，速度较慢）")
     status_w = "✓" if backends.get("whisper_cpp") else "✗ (brew install whisper-cpp)"
     print(f"      [2] whisper_cpp — GPU 加速 ({status_w})")
     status_o = "✓" if backends.get("openai") else "✗ (pip install openai)"
@@ -206,7 +206,7 @@ def interactive_setup():
         config["transcription_backend"] = "local"
 
     # 确认
-    print(f"\n[3/3] 即将写入 config.json:")
+    print("\n[3/3] 即将写入 config.json:")
     print(json.dumps(config, indent=4))
     ans = input("\n      确认？(Y/n): ").strip().lower()
     if ans in ("", "y", "yes"):

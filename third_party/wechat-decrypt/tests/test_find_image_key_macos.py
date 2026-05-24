@@ -11,9 +11,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from Crypto.Cipher import AES
-
 import find_image_key_macos as fkm
+from Crypto.Cipher import AES
 
 
 class NormalizeWxidTests(unittest.TestCase):
@@ -113,9 +112,8 @@ class FindExistingKvcommDirTests(unittest.TestCase):
     def test_returns_none_when_no_candidate_exists(self):
         # 即使 HOME fallback 候选也不存在时，应返回 None。
         # 隔离测试不能依赖宿主机有/无微信安装；patch expanduser 指向 tmp。
-        with tempfile.TemporaryDirectory() as fake_home:
-            with patch("os.path.expanduser", return_value=fake_home):
-                self.assertIsNone(fkm.find_existing_kvcomm_dir("/nonexistent/x/y/z"))
+        with tempfile.TemporaryDirectory() as fake_home, patch("os.path.expanduser", return_value=fake_home):
+            self.assertIsNone(fkm.find_existing_kvcomm_dir("/nonexistent/x/y/z"))
 
 
 class CollectKvcommCodesTests(unittest.TestCase):
@@ -371,9 +369,8 @@ class FindImageKeyMacosIntegrationTests(unittest.TestCase):
         # 防御：空字符串、不合理路径不应抛异常。
         # patch expanduser 让 HOME fallback 也指向不存在的路径，避免
         # 测试在装了真实微信的开发机上意外深入到 wxid 缺失分支。
-        with tempfile.TemporaryDirectory() as fake_home:
-            with patch("os.path.expanduser", return_value=fake_home):
-                self.assertIsNone(fkm.find_image_key_macos(""))
+        with tempfile.TemporaryDirectory() as fake_home, patch("os.path.expanduser", return_value=fake_home):
+            self.assertIsNone(fkm.find_image_key_macos(""))
 
 
 class MainShortCircuitTests(unittest.TestCase):
@@ -750,7 +747,7 @@ class SaveConfigAtomicTests(unittest.TestCase):
                 self.assertEqual(json.load(f), cfg)
             # ensure_ascii=False：中文应直接落盘，不被转义
             with open(cfg_path, "rb") as f:
-                self.assertIn("中文测试key".encode("utf-8"), f.read())
+                self.assertIn("中文测试key".encode(), f.read())
 
     def test_failed_replace_leaves_original_intact(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -758,9 +755,8 @@ class SaveConfigAtomicTests(unittest.TestCase):
             with open(cfg_path, "w", encoding="utf-8") as f:
                 json.dump({"original": True}, f)
             with patch.object(os, "replace",
-                              side_effect=OSError("disk full during rename")):
-                with self.assertRaises(OSError):
-                    fkm._save_config_atomic(cfg_path, {"new": True})
+                              side_effect=OSError("disk full during rename")), self.assertRaises(OSError):
+                fkm._save_config_atomic(cfg_path, {"new": True})
             # 原文件应保持不变
             with open(cfg_path, encoding="utf-8") as f:
                 self.assertEqual(json.load(f), {"original": True})

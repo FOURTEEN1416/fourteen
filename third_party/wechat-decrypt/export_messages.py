@@ -3,13 +3,13 @@
 图片导出: <output_base_dir>/<display_name>/image/<md5>.<ext>
 """
 import base64
-import sqlite3
+import csv
 import glob
 import hashlib
-import os
 import json
-import csv
+import os
 import re
+import sqlite3
 import struct
 import sys
 import xml.etree.ElementTree as ET
@@ -215,7 +215,7 @@ def _decrypt_dat_to_bytes(dat_path):
             return None, None
 
     # 旧 XOR 格式
-    for fmt_name, magic in _IMAGE_MAGICS.items():
+    for _fmt_name, magic in _IMAGE_MAGICS.items():
         key = data[0] ^ magic[0]
         match = all(i < len(data) and (data[i] ^ key) == magic[i] for i in range(len(magic)))
         if match:
@@ -272,19 +272,13 @@ def decode_chat_images(chat_username, _messages_unused, out_dir):
     for src_type, base_path in source_dirs:
         # xwechat: <hash>/<YYYY-MM>/Img/  — 直接列 base_path 得到月份
         # wechat:  <hash>/Image/<YYYY-MM>/ — 需要列 base_path/Image 得到月份
-        if src_type == "xwechat":
-            scan_base = base_path
-        else:
-            scan_base = os.path.join(base_path, "Image")
+        scan_base = base_path if src_type == "xwechat" else os.path.join(base_path, "Image")
         try:
             months = sorted(os.listdir(scan_base))
         except OSError:
             continue
         for month in months:
-            if src_type == "xwechat":
-                img_dir = os.path.join(base_path, month, "Img")
-            else:
-                img_dir = os.path.join(scan_base, month)
+            img_dir = os.path.join(base_path, month, "Img") if src_type == "xwechat" else os.path.join(scan_base, month)
             if not os.path.isdir(img_dir):
                 continue
             try:

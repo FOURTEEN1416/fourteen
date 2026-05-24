@@ -17,7 +17,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("character_card.models")
 
@@ -36,24 +36,24 @@ class CardVersion(Enum):
 class WorldInfoEntry:
     """角色书条目 - SillyTavern WorldInfo完全兼容"""
     id: int = 0
-    keys: List[str] = field(default_factory=list)
+    keys: list[str] = field(default_factory=list)
     content: str = ""
-    secondary_keys: List[str] = field(default_factory=list)
+    secondary_keys: list[str] = field(default_factory=list)
     comment: str = ""
     constant: bool = False
     selective: bool = True
     insertion_order: int = 100
     enabled: bool = True
     position: str = "0"
-    extensions: Dict[str, Any] = field(default_factory=dict)
+    extensions: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class WorldInfoBook:
     """角色书 - 场景/知识库"""
     name: str = ""
-    entries: List[WorldInfoEntry] = field(default_factory=list)
-    extensions: Dict[str, Any] = field(default_factory=dict)
+    entries: list[WorldInfoEntry] = field(default_factory=list)
+    extensions: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -62,8 +62,8 @@ class CharacterExtensions:
     talkativeness: float = 0.5
     fav: bool = False
     world: str = ""
-    depth_prompt: Optional[Dict] = None
-    regex_scripts: List[Dict] = field(default_factory=list)
+    depth_prompt: dict | None = None
+    regex_scripts: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -76,13 +76,13 @@ class CharacterData:
     scenario: str = ""
     first_mes: str = ""
     mes_example: str = ""
-    alternate_greetings: List[str] = field(default_factory=list)
+    alternate_greetings: list[str] = field(default_factory=list)
     system_prompt: str = ""
     post_history_instructions: str = ""
     creator_notes: str = ""
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
     creator: str = "unknown"
-    character_book: Optional[WorldInfoBook] = None
+    character_book: WorldInfoBook | None = None
     extensions: CharacterExtensions = field(default_factory=lambda: CharacterExtensions())
 
 
@@ -101,7 +101,7 @@ class CharacterCard:
             return CardVersion.V3
         return CardVersion.V1
 
-    def to_persona_config(self) -> Dict[str, Any]:
+    def to_persona_config(self) -> dict[str, Any]:
         """
         转换为PersonaEngine兼容配置
 
@@ -150,7 +150,7 @@ class CharacterCard:
                 score -= 0.1
         return max(0.0, min(1.0, score))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """序列化为字典（兼容SillyTavern格式）"""
         result = {
             "spec": self.spec,
@@ -221,7 +221,7 @@ class EmotionStyleMap:
     stubbornness: float = 0.4
 
     @classmethod
-    def from_character_card(cls, card: CharacterCard) -> "EmotionStyleMap":
+    def from_character_card(cls, card: CharacterCard) -> EmotionStyleMap:
         config = card.to_persona_config()
         text = (card.data.description + card.data.personality + card.data.creator_notes).lower()
         # 推断独立性

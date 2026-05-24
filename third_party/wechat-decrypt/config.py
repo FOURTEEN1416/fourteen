@@ -78,7 +78,7 @@ def _choose_candidate(candidates):
         print("    0. 跳过，稍后手动配置")
         try:
             while True:
-                choice = input("请选择 [0-{}]: ".format(len(candidates))).strip()
+                choice = input(f"请选择 [0-{len(candidates)}]: ").strip()
                 if choice == "0":
                     return None
                 if choice.isdigit() and 1 <= int(choice) <= len(candidates):
@@ -109,7 +109,7 @@ def _auto_detect_db_dir_windows():
             content = None
             for enc in ("utf-8", "gbk"):
                 try:
-                    with open(ini_file, "r", encoding=enc) as f:
+                    with open(ini_file, encoding=enc) as f:
                         content = f.read(1024).strip()
                     break
                 except UnicodeDecodeError:
@@ -258,14 +258,14 @@ def load_config():
             if not os.path.exists(config_file):
                 with open(config_file, "w", encoding="utf-8") as f:
                     json.dump(_DEFAULT, f, indent=4, ensure_ascii=False)
-            print(f"[!] 未能自动检测微信数据目录")
+            print("[!] 未能自动检测微信数据目录")
             print(f"    请手动编辑 {config_file} 中的 db_dir 字段")
             if _SYSTEM == "linux":
                 print("    Linux 默认路径类似: ~/Documents/xwechat_files/<wxid>/db_storage")
             elif _SYSTEM == "darwin":
                 print("    macOS 默认路径类似: ~/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/<wxid>/db_storage")
             else:
-                print(f"    路径可在 微信设置 → 文件管理 中找到")
+                print("    路径可在 微信设置 → 文件管理 中找到")
             sys.exit(1)
     else:
         cfg = {**_DEFAULT, **cfg}
@@ -316,7 +316,7 @@ def load_config():
             # xwechat_files 的 wxid 可能带后缀如 _1d4c，需要模糊匹配
             wxid_prefix = wxid.rsplit("_", 1)[0] if "_" in wxid else wxid
             for d in os.listdir(wechat_files_base):
-                if d == wxid or d == wxid_prefix or wxid.startswith(d):
+                if d in (wxid, wxid_prefix) or wxid.startswith(d):
                     candidate = os.path.join(wechat_files_base, d)
                     if os.path.isdir(os.path.join(candidate, "FileStorage")):
                         cfg["wechat_files_dir"] = candidate

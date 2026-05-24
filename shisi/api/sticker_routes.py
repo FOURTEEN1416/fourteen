@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -15,7 +14,7 @@ logger = logging.getLogger("shisi.api.sticker_routes")
 
 router = APIRouter(prefix="/api/shisi/stickers", tags=["stickers"])
 
-_manager: Optional[StickerManager] = None
+_manager: StickerManager | None = None
 
 
 def set_manager(mgr: StickerManager) -> None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Dict, Optional
 
 logger = logging.getLogger("importance_scorer")
 
@@ -18,7 +17,7 @@ FACT_TYPE_WEIGHTS = {
 
 
 class ImportanceScorer:
-    def __init__(self, type_weights: Optional[Dict[str, float]] = None):
+    def __init__(self, type_weights: dict[str, float] | None = None):
         self.type_weights = type_weights or FACT_TYPE_WEIGHTS
 
     def score(self, emotion_intensity: float, fact_type: str,
@@ -50,7 +49,7 @@ class ConflictDetector:
     def __init__(self, semantic_memory):
         self._sm = semantic_memory
 
-    def check_conflict(self, new_fact: str, category: str) -> Optional[Dict]:
+    def check_conflict(self, new_fact: str, category: str) -> dict | None:
         search_results = self._sm.search(new_fact, top_k=3)
         vector_results = search_results.get("vector", [])
         for result in vector_results:
@@ -71,14 +70,14 @@ class CrossSessionReasoner:
     def __init__(self, structured_memory):
         self._sm = structured_memory
 
-    def extract_pending_events(self, fact: str) -> Optional[Dict]:
+    def extract_pending_events(self, fact: str) -> dict | None:
         future_keywords = ["明天", "下周", "周末", "之后", "以后", "即将", "将要"]
         for kw in future_keywords:
             if kw in fact:
                 return {"event_desc": fact, "keyword": kw}
         return None
 
-    def store_pending_event(self, event_desc: str, expected_time: Optional[str] = None,
+    def store_pending_event(self, event_desc: str, expected_time: str | None = None,
                             session_id: str = ""):
         with self._sm.get_connection() as conn:
             conn.execute(

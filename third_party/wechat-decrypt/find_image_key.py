@@ -11,14 +11,15 @@ Usage:
   1. 打开微信, 进入聊天/朋友圈, 点击查看 2-3 张图片
   2. 立即运行: python find_image_key.py
 """
+import ctypes
+import glob
+import json
 import os
 import re
 import struct
-import glob
-import json
 import time
-import ctypes
 from ctypes import wintypes
+
 from Crypto.Cipher import AES
 from Crypto.Util import Padding
 
@@ -326,7 +327,7 @@ def verify_and_decrypt(attach_dir, aes_key_str, xor_key):
                     fp.write(result)
                 print(f"  saved: {out_path}", flush=True)
                 return True
-        except Exception as e:
+        except Exception:
             continue
     return False
 
@@ -390,7 +391,7 @@ def main():
             break
 
     if aes_key:
-        print(f"\n=== Result ===", flush=True)
+        print("\n=== Result ===", flush=True)
         print(f"AES key: {aes_key}", flush=True)
         print(f"XOR key: 0x{xor_key:02x}" if xor_key is not None else "XOR key: unknown", flush=True)
 

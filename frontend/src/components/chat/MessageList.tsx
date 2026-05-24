@@ -4,15 +4,36 @@ import MessageBubble from './MessageBubble'
 import TypingIndicator from './TypingIndicator'
 import EmptyState from '../common/EmptyState'
 
-declare const require: any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare const require: (id: string) => unknown
 
-let FixedSizeList: any = null
-let AutoSizer: any = null
+interface FixedSizeListProps {
+  height: number
+  itemCount: number
+  itemSize: number
+  width: number
+  overscanCount?: number
+  children: React.ComponentType<{ index: number; style: React.CSSProperties }>
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let FixedSizeList: React.ComponentType<FixedSizeListProps> | undefined = undefined
+
+interface AutoSizerProps {
+  children: (props: { height: number; width: number }) => React.ReactNode
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let AutoSizer: React.ComponentType<AutoSizerProps> | undefined = undefined
+
 ;(() => {
   try {
-    const rw = require('react-window') as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rw = require('react-window') as { FixedSizeList: React.ComponentType<FixedSizeListProps> }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const autoSizer = require('react-virtualized-auto-sizer') as { default: React.ComponentType<AutoSizerProps> }
     FixedSizeList = rw.FixedSizeList
-    AutoSizer = (require('react-virtualized-auto-sizer') as any).default
+    AutoSizer = autoSizer.default
   } catch {
     // fallback: no virtualization
   }
@@ -21,7 +42,11 @@ let AutoSizer: any = null
 const ITEM_SIZE = 80
 const OVERSCAN_COUNT = 5
 
-export default function MessageList() {
+interface MessageListProps {
+  onRetryStream?: () => void
+}
+
+export default function MessageList({ onRetryStream }: MessageListProps) {
   const messages = useChatStore((s) => s.messages)
   const streamingMessage = useChatStore((s) => s.streamingMessage)
   const isStreaming = useChatStore((s) => s.isStreaming)
@@ -36,10 +61,10 @@ export default function MessageList() {
   const Row = useCallback(
     ({ index, style }: { index: number; style: React.CSSProperties }) => (
       <div style={style}>
-        <MessageBubble {...displayMessages[index]} />
+        <MessageBubble {...displayMessages[index]} onRetryStream={onRetryStream} />
       </div>
     ),
-    [displayMessages]
+    [displayMessages, onRetryStream]
   )
 
   if (displayMessages.length === 0) {
@@ -54,11 +79,13 @@ export default function MessageList() {
   }
 
   if (FixedSizeList && AutoSizer) {
+    const ListComponent = FixedSizeList
+    const SizerComponent = AutoSizer
     return (
       <div className="flex-1 overflow-hidden px-4 py-4">
-        <AutoSizer>
+        <SizerComponent>
           {({ height, width }: { height: number; width: number }) => (
-            <FixedSizeList
+            <ListComponent
               height={height}
               itemCount={displayMessages.length}
               itemSize={ITEM_SIZE}
@@ -66,9 +93,9 @@ export default function MessageList() {
               overscanCount={OVERSCAN_COUNT}
             >
               {Row}
-            </FixedSizeList>
+            </ListComponent>
           )}
-        </AutoSizer>
+        </SizerComponent>
         {isStreaming && !streamingMessage && <TypingIndicator />}
         <div ref={bottomRef} />
       </div>
@@ -78,7 +105,7 @@ export default function MessageList() {
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
       {displayMessages.map((msg, i) => (
-        <MessageBubble key={i} {...msg} />
+        <MessageBubble key={i} {...msg} onRetryStream={onRetryStream} />
       ))}
       {isStreaming && !streamingMessage && <TypingIndicator />}
       <div ref={bottomRef} />

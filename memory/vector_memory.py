@@ -19,13 +19,12 @@ import hashlib
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("vector_memory")
 
 try:
     import chromadb
-
     from chromadb.api.models.Collection import Collection  # type: ignore
     from chromadb.utils import embedding_functions
     HAS_CHROMADB = True
@@ -88,7 +87,7 @@ class VectorMemory:
 
     # ── 聊天历史 ──────────────────────────────────────────
 
-    async def store_chat(self, user_msg: str, reply: str, metadata: Optional[dict] = None) -> Optional[str]:
+    async def store_chat(self, user_msg: str, reply: str, metadata: dict | None = None) -> str | None:
         coll = self._collections.get("chat_history")
         if coll is None:
             return None
@@ -109,18 +108,18 @@ class VectorMemory:
             logger.warning("store_chat failed: %s", e)
             return None
 
-    def store_chat_sync(self, user_msg: str, reply: str, metadata: Optional[dict] = None) -> Optional[str]:
+    def store_chat_sync(self, user_msg: str, reply: str, metadata: dict | None = None) -> str | None:
         return _run_async(self.store_chat(user_msg, reply, metadata))
 
-    async def search_chats(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    async def search_chats(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         return await self._search("chat_history", query, top_k)
 
-    def search_chats_sync(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def search_chats_sync(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         return _run_async(self.search_chats(query, top_k))
 
     # ── 用户事实 ──────────────────────────────────────────
 
-    async def store_fact(self, fact: str, category: str = "general", confidence: float = 0.5) -> Optional[str]:
+    async def store_fact(self, fact: str, category: str = "general", confidence: float = 0.5) -> str | None:
         coll = self._collections.get("user_facts")
         if coll is None:
             return None
@@ -137,11 +136,11 @@ class VectorMemory:
             logger.warning("store_fact failed: %s", e)
             return None
 
-    def store_fact_sync(self, fact: str, category: str = "general", confidence: float = 0.5) -> Optional[str]:
+    def store_fact_sync(self, fact: str, category: str = "general", confidence: float = 0.5) -> str | None:
         return _run_async(self.store_fact(fact, category, confidence))
 
-    async def add_batch(self, documents: List[str], metadatas: List[Dict[str, Any]],
-                  ids: List[str], collection: str = "user_facts") -> bool:
+    async def add_batch(self, documents: list[str], metadatas: list[dict[str, Any]],
+                  ids: list[str], collection: str = "user_facts") -> bool:
         if len(documents) != len(metadatas) or len(documents) != len(ids):
             logger.error("add_batch: documents/metadatas/ids length mismatch")
             return False
@@ -155,17 +154,17 @@ class VectorMemory:
             logger.warning("add_batch failed: %s", e)
             return False
 
-    def add_batch_sync(self, documents: List[str], metadatas: List[Dict[str, Any]],
-                  ids: List[str], collection: str = "user_facts") -> bool:
+    def add_batch_sync(self, documents: list[str], metadatas: list[dict[str, Any]],
+                  ids: list[str], collection: str = "user_facts") -> bool:
         return _run_async(self.add_batch(documents, metadatas, ids, collection))
 
-    async def search_facts(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    async def search_facts(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         return await self._search("user_facts", query, top_k)
 
-    def search_facts_sync(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def search_facts_sync(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         return _run_async(self.search_facts(query, top_k))
 
-    async def get_all_facts(self) -> List[str]:
+    async def get_all_facts(self) -> list[str]:
         coll = self._collections.get("user_facts")
         if coll is None:
             return []
@@ -176,12 +175,12 @@ class VectorMemory:
             logger.warning("get_all_facts failed: %s", e)
             return []
 
-    def get_all_facts_sync(self) -> List[str]:
+    def get_all_facts_sync(self) -> list[str]:
         return _run_async(self.get_all_facts())
 
     # ── 情绪日志 ──────────────────────────────────────────
 
-    async def store_emotion_log(self, emotion: str, intensity: float, trigger: str = "") -> Optional[str]:
+    async def store_emotion_log(self, emotion: str, intensity: float, trigger: str = "") -> str | None:
         coll = self._collections.get("emotion_logs")
         if coll is None:
             return None
@@ -200,10 +199,10 @@ class VectorMemory:
             logger.warning("store_emotion_log failed: %s", e)
             return None
 
-    def store_emotion_log_sync(self, emotion: str, intensity: float, trigger: str = "") -> Optional[str]:
+    def store_emotion_log_sync(self, emotion: str, intensity: float, trigger: str = "") -> str | None:
         return _run_async(self.store_emotion_log(emotion, intensity, trigger))
 
-    async def get_recent_emotions(self, n: int = 10) -> List[Dict[str, Any]]:
+    async def get_recent_emotions(self, n: int = 10) -> list[dict[str, Any]]:
         coll = self._collections.get("emotion_logs")
         if coll is None:
             return []
@@ -212,19 +211,19 @@ class VectorMemory:
             if not results or not results.get("metadatas"):
                 return []
             items = []
-            for meta, doc in zip(results["metadatas"], results["documents"]):
+            for meta, doc in zip(results["metadatas"], results["documents"], strict=False):
                 items.append({"metadata": meta, "content": doc})
             return items
         except Exception as e:
             logger.warning("get_recent_emotions failed: %s", e)
             return []
 
-    def get_recent_emotions_sync(self, n: int = 10) -> List[Dict[str, Any]]:
+    def get_recent_emotions_sync(self, n: int = 10) -> list[dict[str, Any]]:
         return _run_async(self.get_recent_emotions(n))
 
     # ── 通用 ──────────────────────────────────────────────
 
-    async def _search(self, collection_name: str, query: str, top_k: int) -> List[Dict[str, Any]]:
+    async def _search(self, collection_name: str, query: str, top_k: int) -> list[dict[str, Any]]:
         coll = self._collections.get(collection_name)
         if coll is None:
             return []
@@ -245,7 +244,7 @@ class VectorMemory:
             logger.warning("Search failed on %s: %s", collection_name, e)
             return []
 
-    async def search(self, query: str, top_k: int = 5, filter_dict: Optional[dict] = None) -> List[Dict[str, Any]]:
+    async def search(self, query: str, top_k: int = 5, filter_dict: dict | None = None) -> list[dict[str, Any]]:
         collection_map = {
             "episode": "episodic_memory",
             "fact": "user_facts",
@@ -254,7 +253,7 @@ class VectorMemory:
             coll_name = collection_map.get(filter_dict.get("type", ""))
             if coll_name:
                 return await self._search(coll_name, query, top_k)
-        all_results: List[Dict[str, Any]] = []
+        all_results: list[dict[str, Any]] = []
         for coll in self._collections.values():
             if coll is not None:
                 try:
@@ -271,11 +270,11 @@ class VectorMemory:
                     pass
         return all_results
 
-    def search_sync(self, query: str, top_k: int = 5, filter_dict: Optional[dict] = None) -> List[Dict[str, Any]]:
+    def search_sync(self, query: str, top_k: int = 5, filter_dict: dict | None = None) -> list[dict[str, Any]]:
         return _run_async(self.search(query, top_k, filter_dict))
 
-    async def store_text(self, text: str, metadata: Optional[dict] = None,
-                   collection: str = "episodic_memory") -> Optional[str]:
+    async def store_text(self, text: str, metadata: dict | None = None,
+                   collection: str = "episodic_memory") -> str | None:
         coll = self._collections.get(collection)
         if coll is None:
             return None
@@ -287,8 +286,8 @@ class VectorMemory:
             logger.warning("store_text failed: %s", e)
             return None
 
-    def store_text_sync(self, text: str, metadata: Optional[dict] = None,
-                   collection: str = "episodic_memory") -> Optional[str]:
+    def store_text_sync(self, text: str, metadata: dict | None = None,
+                   collection: str = "episodic_memory") -> str | None:
         return _run_async(self.store_text(text, metadata, collection))
 
     def health_check(self) -> dict:

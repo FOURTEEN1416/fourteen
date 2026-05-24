@@ -1,5 +1,6 @@
 """单元测试: 表情包推荐器"""
 import sys
+
 sys.path.insert(0, ".")
 
 from shisi.sticker.emotion_recommender import EmotionRecommender

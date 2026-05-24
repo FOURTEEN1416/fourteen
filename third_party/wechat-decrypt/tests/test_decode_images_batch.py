@@ -11,12 +11,12 @@
 decrypt_dat_file 用 mock 隔离(避免依赖真实加密图片);is_v2_format
 单独覆盖真实 magic 检测路径。
 """
+import io
 import os
 import struct
 import tempfile
 import unittest
 from contextlib import redirect_stderr
-import io
 from unittest.mock import patch
 
 import decode_image

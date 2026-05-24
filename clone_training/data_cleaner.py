@@ -19,7 +19,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("clone.cleaner")
 
@@ -57,7 +57,7 @@ A: {reply_msg}
 
 Return ONLY a single number (1-5):"""
 
-    def __init__(self, llm: Optional[Any] = None, accept_score: int = 2):
+    def __init__(self, llm: Any | None = None, accept_score: int = 2):
         """
         Args:
             llm: 一个具有 .chat(query, system_prompt) 方法的 LLM 实例。
@@ -100,7 +100,7 @@ Return ONLY a single number (1-5):"""
         # 无 LLM：基于简单规则评分
         return self._rule_based_score(user_msg, reply_msg)
 
-    def score_batch(self, conversations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def score_batch(self, conversations: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """批量评分，为每条对话添加 'score' 键
 
         Args:
@@ -122,7 +122,7 @@ Return ONLY a single number (1-5):"""
             scored.append(conv)
         return scored
 
-    def clean(self, conversations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def clean(self, conversations: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """过滤掉低于 accept_score 阈值的对话
 
         Args:
@@ -161,7 +161,7 @@ Return ONLY a single number (1-5):"""
             logger.error("数据集文件不存在: %s", dataset_path)
             return ""
 
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
         if isinstance(data, list):
@@ -187,7 +187,7 @@ Return ONLY a single number (1-5):"""
 
     # ── 内部方法 ──
 
-    def _heuristic_check(self, user_msg: str, reply_msg: str) -> Optional[int]:
+    def _heuristic_check(self, user_msg: str, reply_msg: str) -> int | None:
         """启发式快速判定低质量，返回分数或 None（需要进一步判断）"""
         user_msg = user_msg.strip() if user_msg else ""
         reply_msg = reply_msg.strip() if reply_msg else ""

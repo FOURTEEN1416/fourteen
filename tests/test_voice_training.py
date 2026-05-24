@@ -1,6 +1,7 @@
 """单元测试: VoiceTrainingManager音色训练"""
-import sys
 import asyncio
+import sys
+
 sys.path.insert(0, ".")
 
 from voice.voice_training import VoiceTrainingManager
@@ -56,12 +57,15 @@ def test_save_uploads():
 
 
 def test_save_uploads_path_traversal():
+    """测试路径遍历防护 - 恶意路径应被阻止"""
     import tempfile
     with tempfile.TemporaryDirectory() as tmpdir:
         mgr = VoiceTrainingManager(models_dir=tmpdir)
         files = [("../../etc/passwd", b"malicious")]
         result = asyncio.run(mgr.save_uploads(files, "test_model"))
-        assert result["saved"] == 1
+        # 路径遍历攻击应被阻止，不应保存任何文件
+        assert result["saved"] == 0, f"路径遍历攻击应被阻止，但保存了 {result['saved']} 个文件"
+        assert result["blocked"] == 1, f"应阻止 1 个恶意文件，但阻止了 {result.get('blocked', 0)} 个"
 
 
 def test_safe_name_regex():

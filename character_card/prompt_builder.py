@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, List
 
 from .models import CharacterCard
 
@@ -86,7 +85,7 @@ class PromptBuilder:
 
         return "\n\n".join(parts)
 
-    def build_example_messages(self, card: CharacterCard) -> List[Dict[str, str]]:
+    def build_example_messages(self, card: CharacterCard) -> list[dict[str, str]]:
         """
         构建示例对话（few-shot示例）
 

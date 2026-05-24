@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger("diary_summarizer")
 
@@ -22,16 +23,16 @@ class DiarySummarizer:
     每次"午夜自省"时调用，分析当天对话并生成摘要。
     """
 
-    def __init__(self, llm_func: Optional[Callable] = None):
+    def __init__(self, llm_func: Callable | None = None):
         """
         Args:
             llm_func: LLM 调用函数（可选），为 None 时使用模板摘要
         """
         self.llm_func = llm_func
-        self._daily_summaries: Dict[str, str] = {}
+        self._daily_summaries: dict[str, str] = {}
         logger.info("DiarySummarizer initialized")
 
-    def summarize_day(self, chats: List[Dict[str, Any]]) -> str:
+    def summarize_day(self, chats: list[dict[str, Any]]) -> str:
         """
         生成每日对话摘要
 
@@ -50,7 +51,7 @@ class DiarySummarizer:
 
         return self._summarize_with_template(chats)
 
-    def summarize_week(self, daily_summaries: List[str]) -> str:
+    def summarize_week(self, daily_summaries: list[str]) -> str:
         """生成每周综合摘要"""
         if not daily_summaries:
             return "本周没有记录。"
@@ -79,7 +80,7 @@ class DiarySummarizer:
 
         return "\n".join(daily_summaries)
 
-    def detect_mood_trend(self, daily_summaries: Dict[str, str]) -> Dict[str, Any]:
+    def detect_mood_trend(self, daily_summaries: dict[str, str]) -> dict[str, Any]:
         """
         分析情绪趋势
 
@@ -151,17 +152,17 @@ class DiarySummarizer:
         self._daily_summaries[date_str] = summary
         logger.info("Diary summary saved for %s", date_str)
 
-    def get_summary(self, date_str: str) -> Optional[str]:
+    def get_summary(self, date_str: str) -> str | None:
         """获取指定日期的摘要"""
         return self._daily_summaries.get(date_str)
 
-    def get_all_summaries(self) -> Dict[str, str]:
+    def get_all_summaries(self) -> dict[str, str]:
         """获取所有摘要"""
         return dict(self._daily_summaries)
 
     # ── 内部方法 ─────────────────────────────────────────
 
-    def _summarize_with_llm(self, chats: List[Dict[str, Any]]) -> str:
+    def _summarize_with_llm(self, chats: list[dict[str, Any]]) -> str:
         """LLM 摘要"""
         chat_text = "\n".join(
             f"{'用户' if c['role'] == 'user' else '十四'}: {c['content']}"
@@ -187,7 +188,7 @@ class DiarySummarizer:
             logger.warning("LLM summary failed: %s", e)
             return self._summarize_with_template(chats)
 
-    def _summarize_with_template(self, chats: List[Dict[str, Any]]) -> str:
+    def _summarize_with_template(self, chats: list[dict[str, Any]]) -> str:
         """模板摘要"""
         user_msgs = [c for c in chats if c.get("role") == "user"]
         assistant_msgs = [c for c in chats if c.get("role") == "assistant"]

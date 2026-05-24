@@ -5,9 +5,10 @@
 AES-128-CBC 页面加密：16 字节 raw key，每页按 page index 派生 AES key
 和 IV；页面没有 SQLCipher HMAC/reserve 区。
 """
+import bisect
+import contextlib
 import ctypes
 import ctypes.wintypes as wt
-import bisect
 import functools
 import hashlib
 import hmac as hmac_mod
@@ -149,14 +150,10 @@ def _wxwork_data_dir_mtime(data_dir):
             if not name.endswith((".db", ".db-wal", ".db-shm")):
                 continue
             path = os.path.join(root, name)
-            try:
+            with contextlib.suppress(OSError):
                 latest = max(latest, os.path.getmtime(path))
-            except OSError:
-                pass
-    try:
+    with contextlib.suppress(OSError):
         latest = max(latest, os.path.getmtime(data_dir))
-    except OSError:
-        pass
     return latest
 
 
@@ -293,7 +290,7 @@ def scan_memory_for_wxwork_keys(data, hex_re, db_files, salt_to_dbs, key_map,
 
             if salt_hex and salt_hex in remaining_salts:
                 # salt 匹配已知数据库
-                for rel, path, sz, s, page1 in db_files:
+                for _rel, _path, _sz, s, page1 in db_files:
                     if s == salt_hex:
                         ok, desc = verify_enc_key_wxwork(enc_key, page1)
                         if ok:
@@ -308,7 +305,7 @@ def scan_memory_for_wxwork_keys(data, hex_re, db_files, salt_to_dbs, key_map,
                             break
             elif not salt_hex and remaining_salts:
                 # 没有 salt，暴力尝试所有未匹配的数据库
-                for rel, path, sz, salt_hex_db, page1 in db_files:
+                for _rel, _path, _sz, salt_hex_db, page1 in db_files:
                     if salt_hex_db in remaining_salts:
                         ok, desc = verify_enc_key_wxwork(enc_key, page1)
                         if ok:
@@ -351,7 +348,7 @@ def _valid_ptr(memory_regions, starts, addr, length=4):
 
 
 def _wxwork_page_size_chain(memory_regions, starts, cipher_addr):
-    """Validate the AES cipher object by following the page-size pointer chain.
+    r"""Validate the AES cipher object by following the page-size pointer chain.
 
     In WXWork 5.x's inlined wxSQLite3 AES-128 code, the decrypt path uses:
       raw_key = cipher + 0x08
@@ -376,7 +373,7 @@ def _record_candidate_key(enc_key, db_files, salt_to_dbs, key_map,
                           remaining_salts, pid, addr, desc, print_fn):
     matched = []
     params_desc = desc
-    for rel, path, sz, salt_hex, page1 in db_files:
+    for _rel, _path, _sz, salt_hex, page1 in db_files:
         if salt_hex not in remaining_salts:
             continue
         ok, verified_desc = verify_enc_key_wxwork(enc_key, page1)
@@ -421,7 +418,7 @@ def scan_memory_for_wxwork_cipher_structs(h, regions, db_files, salt_to_dbs,
     key_tests = 0
     page_sizes = {512, 1024, 2048, 4096, 8192, 16384, 32768, 65536}
 
-    for base, end, data in memory_regions:
+    for base, _end, data in memory_regions:
         max_off = len(data) - 0x40
         off = 0
         while off >= 0 and off < max_off:
@@ -450,9 +447,8 @@ def scan_memory_for_wxwork_cipher_structs(h, regions, db_files, salt_to_dbs,
                                 remaining_salts, pid, cipher_addr,
                                 f"wxSQLite3 AES-128-CBC, page_size={page_size}",
                                 print_fn,
-                            ):
-                                if not remaining_salts:
-                                    return key_tests
+                            ) and not remaining_salts:
+                                return key_tests
 
             checked += 1
             off += 4
@@ -471,7 +467,7 @@ def cross_verify_wxwork_keys(db_files, salt_to_dbs, key_map, print_fn):
         return
     print_fn(f"\n还有 {len(missing_salts)} 个 salt 未匹配，尝试交叉验证...")
     for salt_hex in list(missing_salts):
-        for rel, path, sz, s, page1 in db_files:
+        for _rel, _path, _sz, s, page1 in db_files:
             if s == salt_hex:
                 for known_salt, known_key_hex in key_map.items():
                     enc_key = bytes.fromhex(known_key_hex)
@@ -489,7 +485,7 @@ def save_wxwork_results(db_files, salt_to_dbs, key_map, db_dir, out_file, print_
     print_fn(f"结果: {len(key_map)}/{len(salt_to_dbs)} salts 找到密钥")
 
     result = {}
-    for rel, path, sz, salt_hex, page1 in db_files:
+    for rel, _path, sz, salt_hex, _page1 in db_files:
         if salt_hex in key_map:
             result[rel] = {
                 "enc_key": key_map[salt_hex],
@@ -520,7 +516,7 @@ def save_wxwork_results(db_files, salt_to_dbs, key_map, db_dir, out_file, print_
 
     missing = [rel for rel, path, sz, salt_hex, page1 in db_files if salt_hex not in key_map]
     if missing:
-        print_fn(f"\n未找到密钥的数据库:")
+        print_fn("\n未找到密钥的数据库:")
         for rel in missing:
             print_fn(f"  {rel}")
 
@@ -529,7 +525,7 @@ def save_wxwork_results(db_files, salt_to_dbs, key_map, db_dir, out_file, print_
 
 def _load_wxwork_config():
     """从 config.json 加载企业微信配置，必要时自动检测"""
-    from config import _config_file_path, _app_base_dir
+    from config import _app_base_dir, _config_file_path
 
     config_file = _config_file_path()
     cfg = {}
@@ -599,7 +595,7 @@ def main():
     all_bare_hex_matches = 0
     t0 = time.time()
 
-    for pid, mem_kb in pids:
+    for pid, _mem_kb in pids:
         h = kernel32.OpenProcess(0x0010 | 0x0400, False, pid)
         if not h:
             print(f"[WARN] 无法打开进程 PID={pid}，跳过")
@@ -647,7 +643,7 @@ def main():
             kernel32.CloseHandle(h)
 
         if not remaining_salts:
-            print(f"\n[+] 所有密钥已找到，跳过剩余进程")
+            print("\n[+] 所有密钥已找到，跳过剩余进程")
             break
 
     elapsed = time.time() - t0

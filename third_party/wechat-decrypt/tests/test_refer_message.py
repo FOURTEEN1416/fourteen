@@ -14,7 +14,6 @@ import xml.etree.ElementTree as ET
 
 import mcp_server
 
-
 # ---------- 合成 fixture ----------
 
 def _appmsg(refermsg_xml='', title='我的回复'):

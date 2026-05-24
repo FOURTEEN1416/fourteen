@@ -5,7 +5,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from observability.logging_setup import get_logger, get_trace_id, set_trace_id
 
@@ -39,7 +39,7 @@ class TraceSpan:
     node: str
     start_time: float = 0.0
     duration_ms: float = 0.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def start(self):
         self.start_time = time.perf_counter()
@@ -50,17 +50,17 @@ class TraceSpan:
 
 class Tracer:
     def __init__(self):
-        self._active_traces: Dict[str, List[TraceSpan]] = {}
+        self._active_traces: dict[str, list[TraceSpan]] = {}
         self._traces_lock = threading.Lock()
 
-    def start_trace(self, trace_id: Optional[str] = None) -> str:
+    def start_trace(self, trace_id: str | None = None) -> str:
         tid = trace_id or str(uuid.uuid4())
         with self._traces_lock:
             self._active_traces[tid] = []
         set_trace_id(tid)
         return tid
 
-    def end_trace(self, trace_id: Optional[str] = None) -> Dict[str, Any]:
+    def end_trace(self, trace_id: str | None = None) -> dict[str, Any]:
         tid = trace_id or get_trace_id()
         with self._traces_lock:
             spans = self._active_traces.pop(tid, [])
@@ -81,7 +81,7 @@ class Tracer:
         return result
 
     @contextmanager
-    def span(self, node: str, metadata: Optional[Dict] = None):
+    def span(self, node: str, metadata: dict | None = None):
         trace_id = get_trace_id()
         if not trace_id:
             yield

@@ -1,6 +1,7 @@
 """CharacterId 单元测试"""
 
 import pytest
+
 from shisi.core.models.character_id import CharacterId
 
 

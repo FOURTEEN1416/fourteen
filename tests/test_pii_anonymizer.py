@@ -1,5 +1,6 @@
 """单元测试: PII匿名化"""
 import sys
+
 sys.path.insert(0, ".")
 
 from safety.pii_anonymizer import PIIAnonymizer

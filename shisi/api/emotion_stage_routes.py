@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
@@ -14,7 +13,7 @@ logger = logging.getLogger("shisi.api.emotion_stage_routes")
 
 router = APIRouter(prefix="/api/shisi/emotion-stage", tags=["emotion-stage"])
 
-_engine: Optional[EmotionStageEngine] = None
+_engine: EmotionStageEngine | None = None
 
 
 def set_engine(e: EmotionStageEngine) -> None:

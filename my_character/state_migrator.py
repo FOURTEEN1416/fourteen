@@ -11,21 +11,21 @@ import logging
 import time as time_mod
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("state_migrator")
 
 
 @dataclass
 class StateSnapshot:
-    emotion_state: Dict[str, Any] = field(default_factory=dict)
+    emotion_state: dict[str, Any] = field(default_factory=dict)
     affinity_level: int = 0
     affection_points: float = 0.0
     energy: float = 1.0
     total_chats: int = 0
     timestamp: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "emotion_state": self.emotion_state,
             "affinity_level": self.affinity_level,
@@ -51,8 +51,8 @@ class MigrationRecord:
 @dataclass
 class MigrationResult:
     success: bool
-    record: Optional[MigrationRecord] = None
-    error: Optional[str] = None
+    record: MigrationRecord | None = None
+    error: str | None = None
 
 
 class StateMigrator:
@@ -64,15 +64,15 @@ class StateMigrator:
 
     def __init__(
         self,
-        emotion_engine: Optional[Any] = None,
-        memory_pipeline: Optional[Any] = None,
-        emotion_memory: Optional[Any] = None,
+        emotion_engine: Any | None = None,
+        memory_pipeline: Any | None = None,
+        emotion_memory: Any | None = None,
     ):
         self._emotion = emotion_engine
         self._memory = memory_pipeline
         self._emotion_memory = emotion_memory
-        self._migration_log: List[MigrationRecord] = []
-        self._snapshots: Dict[str, StateSnapshot] = {}
+        self._migration_log: list[MigrationRecord] = []
+        self._snapshots: dict[str, StateSnapshot] = {}
 
     def set_engines(
         self,
@@ -82,7 +82,7 @@ class StateMigrator:
         self._emotion = emotion_engine
         self._memory = memory_pipeline
 
-    def snapshot(self, persona_id: str) -> Optional[StateSnapshot]:
+    def snapshot(self, persona_id: str) -> StateSnapshot | None:
         if self._emotion is None:
             logger.warning("EmotionEngine not set, cannot create snapshot")
             return None
@@ -159,8 +159,8 @@ class StateMigrator:
             return MigrationResult(success=True, record=record)
 
         except Exception as e:
-            logger.error("Migration failed: %s", e)
-            return MigrationResult(success=False, error=str(e))
+            logger.exception("Migration failed: %s", e)
+            return MigrationResult(success=False, error="migration_failed")
 
     def _apply_soft(self, snapshot: StateSnapshot) -> None:
         state = self._emotion._state if hasattr(self._emotion, "_state") else None
@@ -197,7 +197,7 @@ class StateMigrator:
                     return True
         return False
 
-    def get_migration_history(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_migration_history(self, limit: int = 10) -> list[dict[str, Any]]:
         return [
             {
                 "id": r.id,

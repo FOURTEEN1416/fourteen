@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any
 from urllib.parse import quote
 
 from tool_system.base import BaseTool, ToolResult
@@ -75,8 +75,8 @@ class CharacterCrawlerTool(BaseTool):
                 self._save(result.data, kwargs["output_file"])
             return result
         except Exception as e:
-            logger.error("爬虫错误: %s", e)
-            return ToolResult(False, error=str(e))
+            logger.exception("人物爬取失败: %s", e)
+            return ToolResult(False, error="character_crawl_failed")
 
     def _fetch_wikipedia(self, name: str) -> ToolResult:
         if not name:
@@ -94,8 +94,8 @@ class CharacterCrawlerTool(BaseTool):
         profile["crawled_at"] = datetime.now().isoformat()
         return ToolResult(True, data=profile)
 
-    def _parse_wikipedia(self, soup) -> Dict[str, Any]:
-        profile: Dict[str, Any] = {
+    def _parse_wikipedia(self, soup) -> dict[str, Any]:
+        profile: dict[str, Any] = {
             "source": "维基百科",
             "name": "",
             "basic_info": {},
@@ -129,9 +129,7 @@ class CharacterCrawlerTool(BaseTool):
         hostname = parsed.hostname or ""
         if hostname in _BLOCKED_HOSTS:
             return False
-        if any(hostname.startswith(p) for p in _BLOCKED_PREFIXES):
-            return False
-        return True
+        return not any(hostname.startswith(p) for p in _BLOCKED_PREFIXES)
 
     def _fetch_generic(self, url: str) -> ToolResult:
         if not url:
@@ -146,7 +144,7 @@ class CharacterCrawlerTool(BaseTool):
             return ToolResult(False, error="重定向被阻止（安全策略）")
         if resp.status_code != 200:
             return ToolResult(False, error=f"请求失败: HTTP {resp.status_code}")
-        result: Dict[str, Any] = {"url": url, "title": ""}
+        result: dict[str, Any] = {"url": url, "title": ""}
         soup = BeautifulSoup(resp.text, "html.parser")
         title_tag = soup.find("title")
         result["title"] = title_tag.text.strip() if title_tag else ""
@@ -161,7 +159,7 @@ class CharacterCrawlerTool(BaseTool):
             result["content"] = soup.get_text(strip=True)[:_MAX_CONTENT_LEN]
         return ToolResult(True, data=result)
 
-    def _batch_crawl(self, urls: List[str]) -> ToolResult:
+    def _batch_crawl(self, urls: list[str]) -> ToolResult:
         results = []
         for url in urls:
             try:
@@ -184,7 +182,7 @@ class CharacterKnowledgeImporter:
     def __init__(self, structured_memory=None):
         self.memory = structured_memory
 
-    def import_profile(self, profile: Dict[str, Any]) -> bool:
+    def import_profile(self, profile: dict[str, Any]) -> bool:
         name = profile.get("name", "未知")
         if self.memory:
             self.memory.store_semantic(
@@ -202,7 +200,7 @@ class CharacterKnowledgeImporter:
         logger.info("人物 '%s' 已导入知识库", name)
         return True
 
-    def generate_character_prompt(self, profile: Dict[str, Any]) -> str:
+    def generate_character_prompt(self, profile: dict[str, Any]) -> str:
         name = profile.get("name", "角色")
         basic = profile.get("basic_info", {})
         summary = profile.get("summary", "")

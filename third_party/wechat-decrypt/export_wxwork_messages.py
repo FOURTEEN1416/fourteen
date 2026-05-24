@@ -16,7 +16,6 @@ from collections import defaultdict
 from datetime import datetime
 from html import escape
 
-
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 

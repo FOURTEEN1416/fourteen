@@ -1,5 +1,4 @@
 """T-18: 表情包推荐+角色过滤 单元测试"""
-import pytest
 from unittest.mock import MagicMock, patch
 
 

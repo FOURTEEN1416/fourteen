@@ -34,7 +34,7 @@ class CharaCardV2Parser:
     @staticmethod
     def parse_file(path: Path | str) -> CharaCardV2:
         p = Path(path)
-        with open(p, "r", encoding="utf-8") as f:
+        with open(p, encoding="utf-8") as f:
             data = json.load(f)
         return CharaCardV2Parser.parse(data)
 
@@ -224,7 +224,7 @@ class ParserDispatcher:
     @classmethod
     def parse_file(cls, path: Path | str) -> tuple[CharaCardV2, CardFormat]:
         p = Path(path)
-        with open(p, "r", encoding="utf-8") as f:
+        with open(p, encoding="utf-8") as f:
             data = json.load(f)
         return cls.parse(data)
 

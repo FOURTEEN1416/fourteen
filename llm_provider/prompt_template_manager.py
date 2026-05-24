@@ -4,7 +4,6 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Dict, Optional
 
 logger = logging.getLogger("prompt_template")
 
@@ -44,7 +43,7 @@ class PromptTemplateMgr:
     def __init__(self, template_dir: str = "config/prompts"):
         self.template_dir = Path(os.path.abspath(template_dir))
         self.template_dir.mkdir(parents=True, exist_ok=True)
-        self._templates: Dict[str, PromptTemplate] = {}
+        self._templates: dict[str, PromptTemplate] = {}
         self._load_all()
 
     def _load_all(self):
@@ -54,7 +53,7 @@ class PromptTemplateMgr:
             return
         for filepath in self.template_dir.glob("*.yaml"):
             try:
-                with open(filepath, "r", encoding="utf-8") as f:
+                with open(filepath, encoding="utf-8") as f:
                     data = yaml.safe_load(f) or {}  # type: ignore
                 name = data.get("name", filepath.stem)
                 self._templates[name] = PromptTemplate(
@@ -123,7 +122,7 @@ class PromptTemplateMgr:
             if name not in self._templates:
                 self._templates[name] = tmpl
 
-    def get(self, name: str) -> Optional[PromptTemplate]:
+    def get(self, name: str) -> PromptTemplate | None:
         return self._templates.get(name)
 
     def render(self, name: str, **kwargs) -> str:

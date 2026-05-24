@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -17,7 +17,7 @@ logger = logging.getLogger("shisi.api.persona_routes")
 
 router = APIRouter(prefix="/api/shisi/persona", tags=["persona"])
 
-_manager: Optional[CharacterManager] = None
+_manager: CharacterManager | None = None
 
 
 def set_manager(mgr: CharacterManager) -> None:
@@ -45,8 +45,9 @@ async def update_persona(character_id: str, req: PersonaUpdateRequest):
         raise HTTPException(status_code=503, detail="CharacterManager未初始化")
     try:
         card = CharaCardV2.model_validate(req.card)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"角色卡数据无效: {e}")
+    except Exception:
+        logger.exception("角色卡数据校验失败: %s", character_id)
+        raise HTTPException(status_code=400, detail="角色卡数据无效")
     ok = _manager.update_character(character_id, card)
     if not ok:
         raise HTTPException(status_code=404, detail="角色不存在")

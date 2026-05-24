@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -18,7 +18,7 @@ logger = logging.getLogger("shisi.api.character_routes")
 
 router = APIRouter(prefix="/api/shisi/characters", tags=["characters"])
 
-_manager: Optional[CharacterManager] = None
+_manager: CharacterManager | None = None
 
 
 def set_manager(mgr: CharacterManager) -> None:
@@ -97,12 +97,14 @@ async def update_character(character_id: str, req: UpdateRequest):
     mgr = _get_manager()
     try:
         card = CharaCardV2.model_validate(req.card)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"角色卡数据无效: {e}")
+    except Exception:
+        logger.exception("角色卡数据校验失败: %s", character_id)
+        raise HTTPException(status_code=400, detail="角色卡数据无效")
     try:
         ok = mgr.update_character(character_id, card)
-    except ValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except ValidationError:
+        logger.exception("角色更新校验失败: %s", character_id)
+        raise HTTPException(status_code=400, detail="角色数据更新失败")
     if not ok:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
     return ApiResponse(data={"character_id": character_id, "message": "更新成功"})

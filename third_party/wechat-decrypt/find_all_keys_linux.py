@@ -15,7 +15,10 @@ import sys
 import time
 
 from key_scan_common import (
-    collect_db_files, scan_memory_for_keys, cross_verify_keys, save_results,
+    collect_db_files,
+    cross_verify_keys,
+    save_results,
+    scan_memory_for_keys,
 )
 
 print = functools.partial(print, flush=True)
@@ -173,7 +176,7 @@ def main():
     all_hex_matches = 0
     t0 = time.time()
 
-    for pid, rss_kb in pids:
+    for pid, _rss_kb in pids:
         try:
             regions = _get_readable_regions(pid)
         except PermissionError:
@@ -228,7 +231,7 @@ def main():
             mem.close()
 
         if not remaining_salts:
-            print(f"\n[+] 所有密钥已找到，跳过剩余进程")
+            print("\n[+] 所有密钥已找到，跳过剩余进程")
             break
 
     elapsed = time.time() - t0

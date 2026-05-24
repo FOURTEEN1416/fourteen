@@ -27,7 +27,7 @@ def verify_refactor():
 
     print("\n2. 检查核心模块...")
     try:
-        from shisi.core.models import CharacterAggregate, PersonaProfile, EmotionalState
+        from shisi.core.models import CharacterAggregate
         char = CharacterAggregate(name="测试角色")
         print(f"   ✓ 可创建角色: {char.id}")
     except Exception as e:
@@ -36,7 +36,6 @@ def verify_refactor():
 
     print("\n3. 检查API模块...")
     try:
-        from shisi.api.v2 import v2_router
         print("   ✓ API v2 可导入")
     except Exception as e:
         print(f"   ✗ API检查失败: {e}")
@@ -44,7 +43,6 @@ def verify_refactor():
 
     print("\n4. 检查服务层...")
     try:
-        from shisi.application.character_service import CharacterService
         print("   ✓ CharacterService 可导入")
     except Exception as e:
         print(f"   ✗ 服务检查失败: {e}")

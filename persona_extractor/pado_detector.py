@@ -20,7 +20,6 @@ import logging
 import re
 import time
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
 
 from .models import OceanTraits, PadState, StyleVector, UserPersonaSnapshot
 
@@ -102,7 +101,7 @@ PADO_JUDGE_PROMPT = """## 任务：综合判断用户人格特征
 # ---------------------------------------------------------------------------
 
 # OCEAN 关键词映射 (keyword → trait, direction, weight)
-OCEAN_KEYWORDS: Dict[str, List[Tuple[str, float, float]]] = {
+OCEAN_KEYWORDS: dict[str, list[tuple[str, float, float]]] = {
     # (trait, direction 1=high, -1=low, weight)
     "好无聊": [("openness", -0.3, 0.6), ("extraversion", -0.2, 0.4)],
     "没意思": [("openness", -0.3, 0.5)],
@@ -140,7 +139,7 @@ OCEAN_KEYWORDS: Dict[str, List[Tuple[str, float, float]]] = {
 }
 
 
-def _rule_detect(message: str) -> Tuple[OceanTraits, float]:
+def _rule_detect(message: str) -> tuple[OceanTraits, float]:
     """基于关键词规则的人格检测（零成本备选）"""
     msg = message.lower()
     scores = {
@@ -204,7 +203,7 @@ class PADODetector:
         self._llm = llm_gateway
         self.mode = mode
         self.chameleon_guard = chameleon_guard
-        self._cache: Dict[str, UserPersonaSnapshot] = {}
+        self._cache: dict[str, UserPersonaSnapshot] = {}
         self._cache_size = cache_size
         self._last_detect_time = 0.0
 
@@ -432,7 +431,7 @@ Low视角（偏向各维度低端）: {low_data}
 
     # ── 解析 ──────────────────────────────────────────────────
 
-    def _parse_lite_response(self, response: str) -> Optional[Tuple[dict, Optional[dict], float]]:
+    def _parse_lite_response(self, response: str) -> tuple[dict, dict | None, float] | None:
         """解析Lite PADO的JSON响应"""
         data = self._extract_json(response)
         if not data:
@@ -462,7 +461,7 @@ Low视角（偏向各维度低端）: {low_data}
             logger.warning("PADO parse error: %s", e)
             return None
 
-    def _parse_full_response(self, response: str) -> Optional[dict]:
+    def _parse_full_response(self, response: str) -> dict | None:
         """解析Full PADO的单视角响应"""
         data = self._extract_json(response)
         if not data:
@@ -476,12 +475,12 @@ Low视角（偏向各维度低端）: {low_data}
         except (ValueError, TypeError):
             return None
 
-    def _parse_judge_response(self, response: str) -> Optional[Tuple[dict, Optional[dict], float]]:
+    def _parse_judge_response(self, response: str) -> tuple[dict, dict | None, float] | None:
         """解析Judge的JSON响应"""
         return self._parse_lite_response(response)
 
     @staticmethod
-    def _extract_json(text: str) -> Optional[dict]:
+    def _extract_json(text: str) -> dict | None:
         """从LLM回复中提取JSON对象"""
         if not text or text == "{}":
             return None
@@ -528,7 +527,7 @@ Low视角（偏向各维度低端）: {low_data}
             trigger_message=message[:200],
         )
 
-    def _get_cached(self, user_id: str) -> Optional[UserPersonaSnapshot]:
+    def _get_cached(self, user_id: str) -> UserPersonaSnapshot | None:
         return self._cache.get(f"user_{user_id}")
 
     def health_check(self) -> dict:

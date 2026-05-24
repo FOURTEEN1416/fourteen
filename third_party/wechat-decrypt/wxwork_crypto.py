@@ -5,7 +5,6 @@ import struct
 
 from Crypto.Cipher import AES
 
-
 PAGE_SZ = 4096
 SQLITE_HDR = b"SQLite format 3\x00"
 WXSQLITE3_SALT = b"sAlT"

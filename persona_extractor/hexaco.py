@@ -18,7 +18,6 @@ HEXACO 在 OCEAN(Big Five) 基础上增加第六维度:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
 
 
 @dataclass
@@ -37,7 +36,7 @@ class HexacoTraits:
             setattr(self, trait, max(0.0, min(1.0, getattr(self, trait))))
 
     @classmethod
-    def from_ocean(cls, ocean) -> 'HexacoTraits':
+    def from_ocean(cls, ocean) -> HexacoTraits:
         """从 OCEAN 推断 HEXACO
 
         H = (A + C) / 2 (宜人性和尽责性的组合反映诚实-谦逊)
@@ -56,7 +55,7 @@ class HexacoTraits:
             openness=ocean.openness,
         )
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, float]:
         return {
             'honesty_humility': round(self.honesty_humility, 3),
             'emotionality': round(self.emotionality, 3),

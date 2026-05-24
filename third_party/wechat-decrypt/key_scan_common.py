@@ -35,7 +35,7 @@ def collect_db_files(db_dir):
     """
     db_files = []
     salt_to_dbs = {}
-    for root, dirs, files in os.walk(db_dir):
+    for root, _dirs, files in os.walk(db_dir):
         for name in files:
             if not name.endswith(".db") or name.endswith("-wal") or name.endswith("-shm"):
                 continue
@@ -70,7 +70,7 @@ def scan_memory_for_keys(data, hex_re, db_files, salt_to_dbs, key_map,
             salt_hex = hex_str[64:]
             if salt_hex in remaining_salts:
                 enc_key = bytes.fromhex(enc_key_hex)
-                for rel, path, sz, s, page1 in db_files:
+                for _rel, _path, _sz, s, page1 in db_files:
                     if s == salt_hex and verify_enc_key(enc_key, page1):
                         key_map[salt_hex] = enc_key_hex
                         remaining_salts.discard(salt_hex)
@@ -86,7 +86,7 @@ def scan_memory_for_keys(data, hex_re, db_files, salt_to_dbs, key_map,
                 continue
             enc_key_hex = hex_str
             enc_key = bytes.fromhex(enc_key_hex)
-            for rel, path, sz, salt_hex_db, page1 in db_files:
+            for _rel, _path, _sz, salt_hex_db, page1 in db_files:
                 if salt_hex_db in remaining_salts and verify_enc_key(enc_key, page1):
                     key_map[salt_hex_db] = enc_key_hex
                     remaining_salts.discard(salt_hex_db)
@@ -102,7 +102,7 @@ def scan_memory_for_keys(data, hex_re, db_files, salt_to_dbs, key_map,
             salt_hex = hex_str[-32:]
             if salt_hex in remaining_salts:
                 enc_key = bytes.fromhex(enc_key_hex)
-                for rel, path, sz, s, page1 in db_files:
+                for _rel, _path, _sz, s, page1 in db_files:
                     if s == salt_hex and verify_enc_key(enc_key, page1):
                         key_map[salt_hex] = enc_key_hex
                         remaining_salts.discard(salt_hex)
@@ -123,7 +123,7 @@ def cross_verify_keys(db_files, salt_to_dbs, key_map, print_fn):
         return
     print_fn(f"\n还有 {len(missing_salts)} 个 salt 未匹配，尝试交叉验证...")
     for salt_hex in list(missing_salts):
-        for rel, path, sz, s, page1 in db_files:
+        for _rel, _path, _sz, s, page1 in db_files:
             if s == salt_hex:
                 for known_salt, known_key_hex in key_map.items():
                     enc_key = bytes.fromhex(known_key_hex)
@@ -140,7 +140,7 @@ def save_results(db_files, salt_to_dbs, key_map, db_dir, out_file, print_fn):
     print_fn(f"结果: {len(key_map)}/{len(salt_to_dbs)} salts 找到密钥")
 
     result = {}
-    for rel, path, sz, salt_hex, page1 in db_files:
+    for rel, _path, sz, salt_hex, _page1 in db_files:
         if salt_hex in key_map:
             result[rel] = {
                 "enc_key": key_map[salt_hex],
@@ -162,6 +162,6 @@ def save_results(db_files, salt_to_dbs, key_map, db_dir, out_file, print_fn):
 
     missing = [rel for rel, path, sz, salt_hex, page1 in db_files if salt_hex not in key_map]
     if missing:
-        print_fn(f"\n未找到密钥的数据库:")
+        print_fn("\n未找到密钥的数据库:")
         for rel in missing:
             print_fn(f"  {rel}")

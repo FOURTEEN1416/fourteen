@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any
 
 from .models import StyleVector
 
@@ -78,9 +78,9 @@ class StyleVectorizer:
     """
 
     def __init__(self):
-        self._history: List[Dict[str, Any]] = []
+        self._history: list[dict[str, Any]] = []
 
-    def analyze(self, messages: List[str]) -> StyleVector:
+    def analyze(self, messages: list[str]) -> StyleVector:
         """从一组消息中分析风格向量
 
         Args:
@@ -164,7 +164,7 @@ class StyleVectorizer:
             sentiment=current.sentiment * (1 - weight) + new_vec.sentiment * weight,
         )
 
-    def to_tone_mimic_profile(self, style: StyleVector) -> Dict[str, Any]:
+    def to_tone_mimic_profile(self, style: StyleVector) -> dict[str, Any]:
         """将 StyleVector 转为 ToneMimic 可用的配置
 
         适配 my_character/tone_mimic.py 的 StyleProfile 格式
@@ -179,7 +179,7 @@ class StyleVectorizer:
         }
 
     @staticmethod
-    def batch_analyze(messages: List[str], window: int = 20) -> List[float]:
+    def batch_analyze(messages: list[str], window: int = 20) -> list[float]:
         """批量分析一段时间内的风格趋势
 
         Returns:

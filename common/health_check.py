@@ -22,9 +22,7 @@ def _is_healthy(result) -> bool:
             logger.warning("Health check dict has False values: %s",
                            {k: v for k, v in result.items() if v is False})
             return False
-        if result.get("error"):
-            return False
-        return True
+        return not result.get("error")
     return True
 
 

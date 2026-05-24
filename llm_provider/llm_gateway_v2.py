@@ -4,8 +4,9 @@ import asyncio
 import json
 import os
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -41,42 +42,42 @@ class ModelEntry:
 
 
 class ModelRegistry:
-    def __init__(self, models: Optional[List[Dict[str, Any]]] = None):
+    def __init__(self, models: list[dict[str, Any]] | None = None):
         default_models = [
             {"name": "deepseek-chat", "priority": 1},
             {"name": "deepseek-reasoner", "priority": 2},
         ]
         model_list = models or default_models
-        self._models: List[ModelEntry] = [
+        self._models: list[ModelEntry] = [
             ModelEntry(name=m["name"], priority=m["priority"])
             for m in model_list
         ]
         self._models.sort(key=lambda m: m.priority)
 
-    def get_available(self) -> Optional[ModelEntry]:
+    def get_available(self) -> ModelEntry | None:
         for m in self._models:
             if m.is_available():
                 return m
         return None
 
-    def get_by_name(self, name: str) -> Optional[ModelEntry]:
+    def get_by_name(self, name: str) -> ModelEntry | None:
         for m in self._models:
             if m.name == name:
                 return m
         return None
 
     @property
-    def all_models(self) -> List[ModelEntry]:
+    def all_models(self) -> list[ModelEntry]:
         return self._models
 
 
 class LLMGatewayV2:
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        api_base: Optional[str] = None,
-        model: Optional[str] = None,
-        models_config: Optional[List[Dict]] = None,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        model: str | None = None,
+        models_config: list[dict] | None = None,
     ):
         self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "")
         self.api_base = (api_base or os.environ.get("DEEPSEEK_API_BASE") or DEFAULT_API_BASE).rstrip("/")
@@ -113,12 +114,12 @@ class LLMGatewayV2:
         self,
         query: str = "",
         system_prompt: str = "",
-        history: Optional[list] = None,
-        messages: Optional[list] = None,
+        history: list | None = None,
+        messages: list | None = None,
         temperature: float = 0.85,
         max_tokens: int = 1024,
-        tools: Optional[list] = None,
-        model: Optional[str] = None,
+        tools: list | None = None,
+        model: str | None = None,
     ) -> str:
         if not self.api_key:
             return self._mock_reply(query)
@@ -164,12 +165,12 @@ class LLMGatewayV2:
         self,
         query: str = "",
         system_prompt: str = "",
-        history: Optional[list] = None,
-        messages: Optional[list] = None,
+        history: list | None = None,
+        messages: list | None = None,
         temperature: float = 0.85,
         max_tokens: int = 2048,
-        tools: Optional[list] = None,
-    ) -> Dict[str, Any]:
+        tools: list | None = None,
+    ) -> dict[str, Any]:
         if not self.api_key:
             return {"content": self._mock_reply(query), "tool_calls": None}
 
@@ -202,12 +203,12 @@ class LLMGatewayV2:
         self,
         query: str = "",
         system_prompt: str = "",
-        history: Optional[list] = None,
-        messages: Optional[list] = None,
+        history: list | None = None,
+        messages: list | None = None,
         temperature: float = 0.85,
         max_tokens: int = 1024,
-        tools: Optional[list] = None,
-        model: Optional[str] = None,
+        tools: list | None = None,
+        model: str | None = None,
     ) -> str:
         try:
             asyncio.get_running_loop()
@@ -230,11 +231,11 @@ class LLMGatewayV2:
         self,
         query: str = "",
         system_prompt: str = "",
-        history: Optional[list] = None,
-        messages: Optional[list] = None,
+        history: list | None = None,
+        messages: list | None = None,
         temperature: float = 0.85,
         max_tokens: int = 2048,
-        tools: Optional[list] = None,
+        tools: list | None = None,
     ) -> AsyncIterator[str]:
         if not self.api_key:
             yield self._mock_reply(query)
@@ -256,23 +257,27 @@ class LLMGatewayV2:
         try:
             async with self._async_client.stream("POST", self._chat_url, json=payload) as resp:
                 resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data_str = line[6:]
-                    if data_str.strip() == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data_str)
-                        delta = chunk["choices"][0]["delta"]
-                        if "content" in delta and delta["content"]:
-                            if first_token_time is None:
-                                first_token_time = time.perf_counter()
-                                if first_token_time - start > 3.0:
-                                    logger.warning("First token timeout (>3s)")
-                            yield delta["content"]
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        continue
+                async with asyncio.timeout(60):
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                            delta = chunk["choices"][0]["delta"]
+                            if "content" in delta and delta["content"]:
+                                if first_token_time is None:
+                                    first_token_time = time.perf_counter()
+                                    if first_token_time - start > 3.0:
+                                        logger.warning("First token timeout (>3s)")
+                                yield delta["content"]
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue
+        except asyncio.TimeoutError:
+            logger.warning("LLM 流式生成超时 (60s)")
+            yield "（生成已超时，请重试）"
         except Exception as e:
             record_error("llm_stream", type(e).__name__)
             yield self._handle_error(e)
@@ -286,7 +291,7 @@ class LLMGatewayV2:
         return False
 
     def _build_messages(self, query: str, system_prompt: str,
-                        history: Optional[list], messages: Optional[list]) -> list:
+                        history: list | None, messages: list | None) -> list:
         if messages:
             return messages
         result = []
@@ -299,7 +304,7 @@ class LLMGatewayV2:
         return result
 
     async def _try_fallback_async(self, messages: list, temperature: float,
-                      max_tokens: int, tools: Optional[list]) -> Optional[str]:
+                      max_tokens: int, tools: list | None) -> str | None:
         for entry in self.registry.all_models:
             if entry.name == self.model or not entry.is_available():
                 continue

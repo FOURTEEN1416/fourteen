@@ -21,7 +21,7 @@ class EmotionStageConfig:
     allow_backward: bool = False
 
     @classmethod
-    def from_yaml(cls) -> "EmotionStageConfig":
+    def from_yaml(cls) -> EmotionStageConfig:
         raw = get_config("emotion_stage")
         if not raw:
             return cls.default()
@@ -41,7 +41,7 @@ class EmotionStageConfig:
         )
 
     @classmethod
-    def default(cls) -> "EmotionStageConfig":
+    def default(cls) -> EmotionStageConfig:
         return cls(stages=[
             StageDefinition("陌生", 0, 25, ["基础对话"]),
             StageDefinition("熟悉", 25, 50, ["基础对话", "个人话题"]),

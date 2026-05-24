@@ -23,7 +23,7 @@ import logging
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 logger = logging.getLogger("clone.analyzer")
 
@@ -37,36 +37,36 @@ class StyleProfile:
     avg_sentence_length: float = 0.0
 
     # 句式分布
-    sentence_length_dist: Dict[str, float] = field(default_factory=dict)
+    sentence_length_dist: dict[str, float] = field(default_factory=dict)
     # 标点习惯
-    punctuation_freq: Dict[str, float] = field(default_factory=dict)
-    top_punctuation: List[str] = field(default_factory=list)
+    punctuation_freq: dict[str, float] = field(default_factory=dict)
+    top_punctuation: list[str] = field(default_factory=list)
 
     # 语气词
-    particle_freq: Dict[str, float] = field(default_factory=dict)
+    particle_freq: dict[str, float] = field(default_factory=dict)
     # 表情/颜文字
     emoji_freq: float = 0.0
-    emoji_types: List[str] = field(default_factory=list)
+    emoji_types: list[str] = field(default_factory=list)
     kaomoji_freq: float = 0.0
 
     # 口头禅
-    catchphrases: List[Tuple[str, int]] = field(default_factory=list)
+    catchphrases: list[tuple[str, int]] = field(default_factory=list)
 
     # 情绪分布
-    emotion_dist: Dict[str, float] = field(default_factory=dict)
+    emotion_dist: dict[str, float] = field(default_factory=dict)
     # 人称
-    pronoun_dist: Dict[str, float] = field(default_factory=dict)
+    pronoun_dist: dict[str, float] = field(default_factory=dict)
 
     # 句类分布
-    sentence_type_dist: Dict[str, float] = field(default_factory=dict)
+    sentence_type_dist: dict[str, float] = field(default_factory=dict)
     # 网络用语
     slang_freq: float = 0.0
-    slang_examples: List[str] = field(default_factory=list)
+    slang_examples: list[str] = field(default_factory=list)
 
     # 独特性
     uniqueness_score: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """导出为字典（用于 JSON）"""
         return {
             "total_messages": self.total_messages,
@@ -185,7 +185,7 @@ class StyleAnalyzer:
         pass
 
     def analyze(
-        self, conversations: List[Dict[str, Any]],
+        self, conversations: list[dict[str, Any]],
     ) -> StyleProfile:
         """
         完整分析一组对话的说话风格

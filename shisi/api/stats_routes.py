@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
@@ -14,7 +13,7 @@ logger = logging.getLogger("shisi.api.stats_routes")
 
 router = APIRouter(prefix="/api/shisi/stats", tags=["stats"])
 
-_service: Optional[AnalyticsService] = None
+_service: AnalyticsService | None = None
 
 
 def set_service(s: AnalyticsService) -> None:

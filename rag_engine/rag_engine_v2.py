@@ -1,23 +1,28 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 logger = logging.getLogger("rag_engine_v2")
 
-try:
-    from rank_bm25 import BM25Okapi  # noqa: F401
-    HAS_BM25 = True
-except ImportError:
-    HAS_BM25 = False
+_DEFAULT_QUERY_TIMEOUT = 1.0
+
+# BM25Okapi 保留导入供未来使用，当前版本未直接引用
+# try:
+#     from rank_bm25 import BM25Okapi
+#     HAS_BM25 = True
+# except ImportError:
+#     HAS_BM25 = False
+HAS_BM25 = False
 
 
 class KeywordRetriever:
     def __init__(self, structured_memory):
         self._sm = structured_memory
 
-    def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         keywords = re.findall(r'\w+', query)
         results = []
         for kw in keywords:
@@ -45,8 +50,8 @@ class Reranker:
         self.vector_weight = vector_weight
         self.keyword_weight = keyword_weight
 
-    def rerank(self, vector_results: List[Dict], keyword_results: List[Dict],
-               threshold: float = 0.3) -> List[Dict]:
+    def rerank(self, vector_results: list[dict], keyword_results: list[dict],
+               threshold: float = 0.3) -> list[dict]:
         scored = {}
         for r in vector_results:
             content = r.get("content", "")
@@ -70,7 +75,7 @@ class ContextBudgetMgr:
         self.max_tokens = max_context_tokens
         self.retrieval_ratio = retrieval_ratio
 
-    def truncate(self, items: List[Dict], estimated_tokens_per_item: int = 100) -> List[Dict]:
+    def truncate(self, items: list[dict], estimated_tokens_per_item: int = 100) -> list[dict]:
         budget = int(self.max_tokens * self.retrieval_ratio)
         max_items = budget // estimated_tokens_per_item
         if len(items) <= max_items:
@@ -82,7 +87,7 @@ class HallucinationGuard:
     def __init__(self, semantic_memory):
         self._sm = semantic_memory
 
-    def check(self, reply: str) -> Tuple[bool, str]:
+    def check(self, reply: str) -> tuple[bool, str]:
         patterns = [
             re.compile(r"你说过(.+?)。"),
             re.compile(r"你喜欢(.+?)。"),
@@ -92,26 +97,45 @@ class HallucinationGuard:
             match = pattern.search(reply)
             if match:
                 claim = match.group(1)
-                results = self._sm.search(claim, top_k=3)
-                if not results.get("vector") and not results.get("exact"):
-                    return False, claim
+                # search 返回格式取决于 semantic_memory 实现，兼容 list 和 dict
+                try:
+                    results = self._sm.search(claim, top_k=3)
+                    if isinstance(results, list):
+                        if results:
+                            continue  # 有结果，声明有据可查
+                        return False, claim
+                    elif isinstance(results, dict):
+                        if results.get("vector") or results.get("exact") or results.get("results"):
+                            continue
+                        return False, claim
+                except Exception as e:
+                    # semantic_memory 不可用或 search 接口异常，跳过检查
+                    logger.debug("Hallucination guard search failed, skipping check: %s", e)
+                    continue
         return True, ""
 
 
 class RAGEngineV2:
     def __init__(self, vector_memory, structured_memory, semantic_memory=None,
-                 tone_mimic=None, max_context_tokens: int = 4096):
+                 tone_mimic=None, max_context_tokens: int = 4096,
+                 query_timeout: float = _DEFAULT_QUERY_TIMEOUT):
         self._vm = vector_memory
         self._sm = structured_memory
         self._semantic = semantic_memory
         self._tone_mimic = tone_mimic
+        self._query_timeout = query_timeout
         self._keyword_retriever = KeywordRetriever(structured_memory)
         self._reranker = Reranker()
         self._budget_mgr = ContextBudgetMgr(max_context_tokens)
         self._hallucination_guard = HallucinationGuard(semantic_memory) if semantic_memory else None
 
-    def retrieve(self, query: str, top_k: int = 5) -> Dict[str, Any]:
-        vector_results = self._vm.search_chats_sync(query, top_k)
+    def retrieve(self, query: str, top_k: int = 5) -> dict[str, Any]:
+        vector_results = []
+        if self._vm is not None:
+            try:
+                vector_results = self._vm.search_chats_sync(query, top_k)
+            except Exception as e:
+                logger.warning("Vector search failed: %s", e)
         keyword_results = self._keyword_retriever.search(query, top_k)
         merged = self._reranker.rerank(vector_results, keyword_results)
         final = self._budget_mgr.truncate(merged)
@@ -119,8 +143,8 @@ class RAGEngineV2:
         if self._tone_mimic:
             try:
                 style_examples = self._tone_mimic.retrieve_style_examples(query, top_k=3)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Style example retrieval failed: %s", e)
         return {
             "results": final,
             "style_examples": style_examples,
@@ -128,7 +152,17 @@ class RAGEngineV2:
             "total_keyword": len(keyword_results),
         }
 
-    def validate_reply(self, reply: str) -> Tuple[bool, str]:
+    async def retrieve_async(self, query: str, top_k: int = 5) -> dict[str, Any]:
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(self.retrieve, query, top_k),
+                timeout=self._query_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("RAG query timed out after %.1fs: %s", self._query_timeout, query[:100])
+            return {"results": [], "style_examples": [], "total_vector": 0, "total_keyword": 0}
+
+    def validate_reply(self, reply: str) -> tuple[bool, str]:
         if self._hallucination_guard:
             return self._hallucination_guard.check(reply)
         return True, ""

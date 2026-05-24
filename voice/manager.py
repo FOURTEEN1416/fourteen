@@ -12,7 +12,7 @@ TTS管理器 - 统一管理多TTS引擎
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .base import TTSProviderBase
 
@@ -32,13 +32,13 @@ class TTSManager:
     """
 
     def __init__(self):
-        self._providers: Dict[str, TTSProviderBase] = {}
-        self._current_engine: Optional[str] = None
+        self._providers: dict[str, TTSProviderBase] = {}
+        self._current_engine: str | None = None
         self._enabled: bool = False
-        self._last_error: Optional[str] = None
+        self._last_error: str | None = None
         self._synthesize_count: int = 0
 
-    async def initialize(self, config: Optional[Dict[str, Any]] = None) -> bool:
+    async def initialize(self, config: dict[str, Any] | None = None) -> bool:
         """
         从fusion配置初始化TTS引擎
 
@@ -111,14 +111,14 @@ class TTSManager:
         return self._enabled
 
     @property
-    def current_engine(self) -> Optional[str]:
+    def current_engine(self) -> str | None:
         return self._current_engine
 
     @property
-    def available_engines(self) -> List[str]:
+    def available_engines(self) -> list[str]:
         return list(self._providers.keys())
 
-    async def synthesize(self, text: str, emotion: str = "", **kwargs) -> Optional[bytes]:
+    async def synthesize(self, text: str, emotion: str = "", **kwargs) -> bytes | None:
         """
         合成语音 - 使用当前引擎
 
@@ -182,11 +182,11 @@ class TTSManager:
         logger.info("TTS引擎切换到: %s", engine_name)
         return True
 
-    def get_engine(self, name: str) -> Optional[TTSProviderBase]:
+    def get_engine(self, name: str) -> TTSProviderBase | None:
         """获取指定的引擎实例"""
         return self._providers.get(name)
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         providers_health = {}
         for name, provider in self._providers.items():
             providers_health[name] = provider.health_check()

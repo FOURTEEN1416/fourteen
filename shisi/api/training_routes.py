@@ -2,19 +2,19 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from voice.voice_training import VoiceTrainingManager
+
 from .common import ApiResponse
 
 logger = logging.getLogger("shisi.api.training_routes")
 
 router = APIRouter(prefix="/api/shisi/voice/training", tags=["voice-training"])
 
-_manager: Optional[VoiceTrainingManager] = None
+_manager: VoiceTrainingManager | None = None
 
 
 def set_manager(mgr: VoiceTrainingManager) -> None:

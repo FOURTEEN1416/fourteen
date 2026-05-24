@@ -7,10 +7,15 @@ import Skeleton from '../components/common/Skeleton'
 import Badge from '../components/common/Badge'
 import { Search, Upload, Database } from 'lucide-react'
 
+interface RAGSearchResult {
+  content: string
+  score?: number
+}
+
 export default function KnowledgeBasePage() {
   const { data: stats, isLoading } = useRAGStats()
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<any[]>([])
+  const [results, setResults] = useState<RAGSearchResult[]>([])
   const [searching, setSearching] = useState(false)
   const [uploadMsg, setUploadMsg] = useState('')
 
@@ -88,7 +93,7 @@ export default function KnowledgeBasePage() {
         </div>
         {results.length > 0 && (
           <div className="space-y-2">
-            {results.map((r, i) => (
+            {results.map((r: RAGSearchResult, i: number) => (
               <div key={i} className="p-2 bg-gray-50 rounded-lg text-xs">
                 <div className="text-gray-700">{r.content}</div>
                 {r.score !== undefined && (

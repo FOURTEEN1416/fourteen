@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-import sqlite3
 import shutil
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
 class RollbackResult:
     success: bool
     message: str
-    backup_used: Optional[str] = None
+    backup_used: str | None = None
 
 
 def run(db_path: Path = Path("data/sqlite.db")) -> RollbackResult:

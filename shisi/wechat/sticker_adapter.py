@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from ..sticker.sticker_manager import StickerManager
 
@@ -15,7 +15,7 @@ class WeChatStickerAdapter:
         self._sticker_mgr = sticker_manager
         self._connector = wechat_connector
 
-    def get_sticker_for_reply(self, emotion: str, character_id: str = "") -> Optional[dict[str, Any]]:
+    def get_sticker_for_reply(self, emotion: str, character_id: str = "") -> dict[str, Any] | None:
         if not self._sticker_mgr:
             return None
         emotion_map = {

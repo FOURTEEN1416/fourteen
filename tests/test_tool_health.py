@@ -1,11 +1,10 @@
 """T-19: 工具健康检测+指令处理器 单元测试"""
-import pytest
 from unittest.mock import MagicMock
 
 
 class TestToolRegistryHealthCheck:
     def test_health_check_all_available(self):
-        from tool_system.base import ToolRegistry, BaseTool
+        from tool_system.base import BaseTool, ToolRegistry
         registry = ToolRegistry()
         tool = MagicMock(spec=BaseTool)
         tool.name = "test_tool"
@@ -16,7 +15,7 @@ class TestToolRegistryHealthCheck:
         assert result["test_tool"]["available"] is True
 
     def test_health_check_plugin_not_loaded(self):
-        from tool_system.base import ToolRegistry, BaseTool
+        from tool_system.base import BaseTool, ToolRegistry
         registry = ToolRegistry()
         tool = MagicMock(spec=BaseTool)
         tool.name = "broken_tool"

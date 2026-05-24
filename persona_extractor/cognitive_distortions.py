@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List
 
 
 @dataclass
@@ -40,13 +39,13 @@ class CognitiveDistortionHit:
 @dataclass
 class CognitiveDistortionResult:
     """认知扭曲检测结果"""
-    hits: List[CognitiveDistortionHit] = field(default_factory=list)
+    hits: list[CognitiveDistortionHit] = field(default_factory=list)
     total_count: int = 0
     dominant_pattern: str = "none"
     severity: str = "none"  # none / mild / moderate / frequent
 
     def to_dict(self) -> dict:
-        by_type: Dict[str, int] = {}
+        by_type: dict[str, int] = {}
         for h in self.hits:
             by_type[h.type] = by_type.get(h.type, 0) + 1
         return {
@@ -60,7 +59,7 @@ class CognitiveDistortionResult:
 
 
 # 10种认知扭曲的匹配模式
-_DISTORTION_PATTERNS: Dict[str, List[tuple]] = {
+_DISTORTION_PATTERNS: dict[str, list[tuple]] = {
     "all_or_nothing": [
         (re.compile(r"(从来.{0,3}(不|没|都|总是|一直))"), 0.7, "全或无"),
         (re.compile(r"(永远.{0,3}(不|都|就|会))"), 0.6, "全或无"),
@@ -147,7 +146,7 @@ class CognitiveDistortionDetector:
 
         # 找主导模式
         if result.hits:
-            type_counts: Dict[str, int] = {}
+            type_counts: dict[str, int] = {}
             for h in result.hits:
                 type_counts[h.type] = type_counts.get(h.type, 0) + 1
             result.dominant_pattern = max(type_counts, key=lambda k: type_counts[k])

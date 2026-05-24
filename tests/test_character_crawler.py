@@ -1,5 +1,6 @@
 """单元测试: 人物爬虫工具"""
 import sys
+
 sys.path.insert(0, ".")
 
 from tool_system.builtin.character_crawler_tool import CharacterCrawlerTool

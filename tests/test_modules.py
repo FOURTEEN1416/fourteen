@@ -1,6 +1,7 @@
 """表情包 + 生理指标 + 语音 + 统计 单元测试。"""
 
 import sys
+
 sys.path.insert(0, ".")
 
 import json

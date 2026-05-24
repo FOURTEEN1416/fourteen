@@ -1,13 +1,13 @@
 """WeChat Decrypt GUI — 一键解密 / 导出消息 / 转换音频"""
-import os
-import sys
-import subprocess
-import threading
-import sqlite3
-import hashlib
 import glob as globmod
+import hashlib
+import os
+import sqlite3
+import subprocess
+import sys
+import threading
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import scrolledtext, ttk
 
 # 确保工作目录为脚本所在目录（打包后也适用）
 if getattr(sys, "frozen", False):
@@ -23,15 +23,23 @@ os.environ["WECHAT_DECRYPT_APP_DIR"] = BASE_DIR
 # 显式导入：让 PyInstaller 收集子脚本需要的所有依赖
 # （这些脚本通过 exec 动态加载，PyInstaller 无法自动检测）
 import importlib.util  # noqa: F401 - used for dynamic loading
+
 if False:  # noqa: never executed, only for PyInstaller dependency detection
-    import sqlite3, hashlib, csv, json, re, glob, tempfile  # noqa: F401
+    import ctypes
+    import ctypes.wintypes  # noqa: F401
+    import hashlib
+    import sqlite3
+    import tempfile  # noqa: F401
     import xml.etree.ElementTree  # noqa: F401
-    import functools, platform, ctypes, ctypes.wintypes  # noqa: F401
-    import zstandard  # noqa: F401
-    import pilk  # noqa: F401
-    import Crypto, Crypto.Cipher, Crypto.Cipher.AES, Crypto.Util.Padding  # noqa: F401
-    import wxwork_crypto  # noqa: F401
+
+    import Crypto
+    import Crypto.Cipher
+    import Crypto.Cipher.AES
+    import Crypto.Util.Padding  # noqa: F401
     import export_wxwork_messages  # noqa: F401
+    import pilk  # noqa: F401
+    import wxwork_crypto  # noqa: F401
+    import zstandard  # noqa: F401
 
 
 def _run_subtask(task: str):
@@ -127,7 +135,7 @@ def _load_contact_map(decrypted_dir):
         return contact_map
     try:
         conn = sqlite3.connect(db_path)
-        for uname, alias, remark, nick_name in conn.execute(
+        for uname, _alias, remark, nick_name in conn.execute(
             "SELECT username, alias, remark, nick_name FROM contact"
         ):
             contact_map[uname] = {

@@ -10,15 +10,50 @@
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import sqlite3
 import threading
 import time
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("structured_memory")
+
+# 全局注册表，用于跟踪所有 StructuredMemory 实例，确保程序退出时关闭连接
+_structured_memory_instances: list[StructuredMemory] = []
+_instances_lock = threading.Lock()
+
+
+def _register_structured_memory(instance: StructuredMemory) -> None:
+    """注册 StructuredMemory 实例到全局注册表"""
+    with _instances_lock:
+        if instance not in _structured_memory_instances:
+            _structured_memory_instances.append(instance)
+
+
+def _unregister_structured_memory(instance: StructuredMemory) -> None:
+    """从全局注册表移除 StructuredMemory 实例"""
+    with _instances_lock:
+        if instance in _structured_memory_instances:
+            _structured_memory_instances.remove(instance)
+
+
+def _close_all_structured_memory() -> None:
+    """关闭所有注册的 StructuredMemory 实例（atexit 处理器）"""
+    with _instances_lock:
+        instances = _structured_memory_instances.copy()
+    for instance in instances:
+        try:
+            instance.close()
+            logger.debug("StructuredMemory 连接已关闭: %s", instance.db_path)
+        except Exception as e:
+            logger.warning("关闭 StructuredMemory 连接时出错: %s", e)
+
+
+# 注册 atexit 处理器，确保程序退出时关闭所有数据库连接
+atexit.register(_close_all_structured_memory)
 
 
 class StructuredMemory:
@@ -38,14 +73,36 @@ class StructuredMemory:
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._write_lock = threading.Lock()
         self._degraded = False
+        self._closed = False
+
+        # 注册实例到全局注册表，确保程序退出时关闭连接
+        _register_structured_memory(self)
 
         self._init_db()
         logger.info("StructuredMemory ready: %s", self.db_path)
 
     def close(self):
-        if self._connection:
-            self._connection.close()
-            self._connection = None
+        """关闭数据库连接
+
+        线程安全的数据库连接关闭方法，确保连接被正确释放。
+        可通过 atexit 处理器自动调用，也可手动调用。
+        """
+        if self._closed:
+            return
+
+        with self._write_lock:
+            if self._connection:
+                try:
+                    self._connection.close()
+                    logger.debug("SQLite 连接已关闭: %s", self.db_path)
+                except Exception as e:
+                    logger.warning("关闭 SQLite 连接时出错: %s", e)
+                finally:
+                    self._connection = None
+                    self._closed = True
+
+        # 从全局注册表移除
+        _unregister_structured_memory(self)
 
     def _execute_write(self, fn, *args, **kwargs):
         max_retries = 3
@@ -61,6 +118,11 @@ class StructuredMemory:
         return None
 
     def __del__(self):
+        """析构函数 — 确保连接被关闭
+
+        注意：__del__ 不保证一定被调用，因此主要依赖 atexit 处理器。
+        这里作为双重保险，在对象被垃圾回收时尝试关闭连接。
+        """
         self.close()
 
     def _init_db(self) -> None:
@@ -214,20 +276,37 @@ class StructuredMemory:
             conn.commit()  # type: ignore
 
     @contextmanager
-    def _conn(self):  # type: ignore
-        yield self._connection
+    def _conn(self, write: bool = False):  # type: ignore
+        """获取数据库连接
+
+        Args:
+            write: 是否为写操作，写操作会获取写锁
+        """
+        if write:
+            with self._write_lock:
+                yield self._connection
+        else:
+            yield self._connection
 
     @contextmanager
-    def get_connection(self):
-        """公开的连接获取接口（用于CrossSessionReasoner等外部组件）"""
-        yield self._connection
+    def get_connection(self, write: bool = False):
+        """公开的连接获取接口（用于CrossSessionReasoner等外部组件）
+
+        Args:
+            write: 是否为写操作，写操作会获取写锁
+        """
+        if write:
+            with self._write_lock:
+                yield self._connection
+        else:
+            yield self._connection
 
     # ── 用户事实 ──────────────────────────────────────────
 
     def add_fact(self, fact: str, category: str = "general",
                  confidence: float = 0.5, source: str = "") -> int:
         """添加用户事实"""
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             cursor = conn.execute(  # type: ignore
                 "INSERT INTO user_facts (fact, category, confidence, source) VALUES (?, ?, ?, ?)",
                 (fact, category, confidence, source),
@@ -235,9 +314,9 @@ class StructuredMemory:
             conn.commit()  # type: ignore
             return cursor.lastrowid  # type: ignore
 
-    def get_facts(self, category: Optional[str] = None,
+    def get_facts(self, category: str | None = None,
                   min_confidence: float = 0.0,
-                  limit: int = 50) -> List[Dict[str, Any]]:
+                  limit: int = 50) -> list[dict[str, Any]]:
         """获取用户事实"""
         with self._conn() as conn:
             if category:
@@ -252,7 +331,7 @@ class StructuredMemory:
                 ).fetchall()
             return [dict(r) for r in rows]
 
-    def search_facts(self, keyword: str) -> List[Dict[str, Any]]:
+    def search_facts(self, keyword: str) -> list[dict[str, Any]]:
         """关键词搜索事实 — 优先FTS5，降级LIKE"""
         with self._conn() as conn:
             try:
@@ -276,7 +355,7 @@ class StructuredMemory:
 
     def update_fact_confidence(self, fact_id: int, confidence: float) -> None:
         """更新事实置信度"""
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute(  # type: ignore
                 "UPDATE user_facts SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (confidence, fact_id),
@@ -285,15 +364,15 @@ class StructuredMemory:
 
     def delete_fact(self, fact_id: int) -> None:
         """删除事实"""
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute("DELETE FROM user_facts WHERE id = ?", (fact_id,))  # type: ignore
             conn.commit()  # type: ignore
 
-    def add_facts_batch(self, facts: List[Dict[str, Any]]) -> List[int]:
+    def add_facts_batch(self, facts: list[dict[str, Any]]) -> list[int]:
         """批量添加事实"""
         if not facts:
             return []
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             rows = self._execute_write(
                 lambda: (
                     conn.executemany(  # type: ignore
@@ -313,7 +392,7 @@ class StructuredMemory:
     def add_affinity_log(self, level: int, level_name: str,
                          affection_points: float, reason: str = "") -> int:
         """记录好感度变化"""
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             cursor = conn.execute(  # type: ignore
                 "INSERT INTO affinity_log (level, level_name, affection_points, reason) VALUES (?, ?, ?, ?)",
                 (level, level_name, affection_points, reason),
@@ -321,7 +400,7 @@ class StructuredMemory:
             conn.commit()  # type: ignore
             return cursor.lastrowid  # type: ignore
 
-    def get_affinity_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_affinity_history(self, limit: int = 50) -> list[dict[str, Any]]:
         """获取好感度历史"""
         with self._conn() as conn:
             rows = conn.execute(  # type: ignore
@@ -330,7 +409,7 @@ class StructuredMemory:
             ).fetchall()
             return [dict(r) for r in rows]
 
-    def get_latest_affinity(self) -> Optional[Dict[str, Any]]:
+    def get_latest_affinity(self) -> dict[str, Any] | None:
         """获取最新好感度记录"""
         with self._conn() as conn:
             row = conn.execute(  # type: ignore
@@ -343,7 +422,7 @@ class StructuredMemory:
     def add_chat(self, role: str, content: str,
                  emotion_tag: str = "", session_id: str = "") -> int:
         """添加聊天记录"""
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             cursor = conn.execute(  # type: ignore
                 "INSERT INTO chat_history (role, content, emotion_tag, session_id) VALUES (?, ?, ?, ?)",
                 (role, content, emotion_tag, session_id),
@@ -351,7 +430,7 @@ class StructuredMemory:
             conn.commit()  # type: ignore
             return cursor.lastrowid  # type: ignore
 
-    def get_recent_chats(self, n: int = 20) -> List[Dict[str, Any]]:
+    def get_recent_chats(self, n: int = 20) -> list[dict[str, Any]]:
         """获取最近 N 条聊天"""
         with self._conn() as conn:
             rows = conn.execute(  # type: ignore
@@ -360,7 +439,7 @@ class StructuredMemory:
             ).fetchall()
             return [dict(r) for r in rows][::-1]  # 反转成时间正序
 
-    def get_chats_by_session(self, session_id: str) -> List[Dict[str, Any]]:
+    def get_chats_by_session(self, session_id: str) -> list[dict[str, Any]]:
         """获取某次会话的聊天"""
         with self._conn() as conn:
             rows = conn.execute(  # type: ignore
@@ -369,7 +448,7 @@ class StructuredMemory:
             ).fetchall()
             return [dict(r) for r in rows]
 
-    def get_chats_today(self) -> List[Dict[str, Any]]:
+    def get_chats_today(self) -> list[dict[str, Any]]:
         """获取今天的聊天"""
         with self._conn() as conn:
             rows = conn.execute(  # type: ignore
@@ -387,9 +466,9 @@ class StructuredMemory:
 
     # ── 提醒 ──────────────────────────────────────────────
 
-    def add_reminder(self, content: str, trigger_time: Optional[str] = None) -> int:
+    def add_reminder(self, content: str, trigger_time: str | None = None) -> int:
         """添加提醒"""
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             cursor = conn.execute(  # type: ignore
                 "INSERT INTO reminders (content, trigger_time) VALUES (?, ?)",
                 (content, trigger_time),
@@ -397,7 +476,7 @@ class StructuredMemory:
             conn.commit()  # type: ignore
             return cursor.lastrowid  # type: ignore
 
-    def get_pending_reminders(self) -> List[Dict[str, Any]]:
+    def get_pending_reminders(self) -> list[dict[str, Any]]:
         """获取待触发的提醒"""
         with self._conn() as conn:
             rows = conn.execute(  # type: ignore
@@ -409,7 +488,7 @@ class StructuredMemory:
 
     def mark_reminder_triggered(self, reminder_id: int) -> None:
         """标记提醒已触发"""
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute(  # type: ignore
                 "UPDATE reminders SET triggered = 1 WHERE id = ?",
                 (reminder_id,),
@@ -418,7 +497,7 @@ class StructuredMemory:
 
     # ── 统计 ──────────────────────────────────────────────
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """获取记忆统计"""
         with self._conn() as conn:
             fact_count = conn.execute("SELECT COUNT(*) FROM user_facts").fetchone()[0]  # type: ignore
@@ -442,5 +521,6 @@ class StructuredMemory:
             with self._conn() as conn:
                 conn.execute("SELECT 1")  # type: ignore
                 return {"connected": True, "path": self.db_path}
-        except Exception as e:
-            return {"connected": False, "error": str(e)}
+        except Exception:
+            logger.exception("StructuredMemory健康检查异常")
+            return {"connected": False, "error": "db_check_failed"}

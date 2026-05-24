@@ -3,6 +3,7 @@ import { api } from '../api/client'
 import { useTrainingProgress } from '../hooks/useQueries'
 import Button from '../components/common/Button'
 import Card from '../components/common/Card'
+import EmptyState from '../components/common/EmptyState'
 import type { TrainingAvailability, CloneTestResult, TrainingStatusEnum, CloneContact, CloneDataset } from '../types/api'
 
 const steps = [
@@ -150,6 +151,13 @@ export default function TrainingPage() {
 
   const stepDisabled = !isAvailable
 
+  const formatEta = (seconds: number): string => {
+    if (seconds < 60) return `${Math.round(seconds)}秒`
+    const m = Math.floor(seconds / 60)
+    const s = Math.round(seconds % 60)
+    return s > 0 ? `${m}分${s}秒` : `${m}分钟`
+  }
+
   // 筛选联系人
   const filteredContacts = contacts.filter(c =>
     !contactSearch || c.display_name.toLowerCase().includes(contactSearch.toLowerCase()) ||
@@ -191,13 +199,17 @@ export default function TrainingPage() {
         ))}
       </div>
 
-      {progress && (
+      {progress ? (
         <Card className="mb-6">
           <h3 className="text-sm font-semibold text-gray-800 mb-3">训练进度</h3>
           <div className="space-y-2">
             <div className="flex justify-between text-xs text-gray-500">
               <span>状态: {{ idle: '空闲', extracting: '提取中', cleaning: '清洗中', training: '训练中', done: '已完成', error: '失败', stopped: '已停止' }[progress.status] ?? progress.status}</span>
-              <span>{Math.round(progress.progress)}%</span>
+              <span>
+                {progress.step_name && `${progress.step_name}中... `}
+                {Math.round(progress.progress * 100)}%
+                {progress.eta_seconds != null && progress.eta_seconds > 0 && ` · 预计${formatEta(progress.eta_seconds)}`}
+              </span>
             </div>
             <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
               <div className="h-full bg-accent-500 rounded-full transition-all duration-500" style={{ width: `${progress.progress}%` }} />
@@ -214,6 +226,12 @@ export default function TrainingPage() {
             )}
           </div>
         </Card>
+      ) : !isLoading && (
+        <EmptyState
+          icon="🧠"
+          title="尚未开始训练"
+          description="选择联系人并提取数据后即可开始风格克隆训练"
+        />
       )}
 
       <div className="space-y-6">

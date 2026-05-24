@@ -24,7 +24,7 @@ import json
 import logging
 import random
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from .style_analyzer import StyleAnalyzer, StyleProfile
 
@@ -48,11 +48,11 @@ class DatasetBuilder:
 
     def build(
         self,
-        conversations: List[Dict[str, Any]],
+        conversations: list[dict[str, Any]],
         name: str = "目标人物",
         split_ratio: float = 0.15,
         max_samples: int = 2000,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         构建完整训练数据集
 
@@ -134,7 +134,7 @@ class DatasetBuilder:
 
     def build_chatml(
         self,
-        conversations: List[Dict[str, Any]],
+        conversations: list[dict[str, Any]],
         name: str = "目标人物",
         window_size: int = 4,
     ) -> str:
@@ -169,14 +169,14 @@ class DatasetBuilder:
         logger.info("ChatML 数据集: %d 段对话 → %s", len(all_chunks), path)
         return path
 
-    def _save_jsonl(self, data: List[dict], path: str) -> None:
+    def _save_jsonl(self, data: list[dict], path: str) -> None:
         """保存为 JSONL 格式"""
         with open(path, "w", encoding="utf-8") as f:
             for item in data:
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
     def _save_alpaca(
-        self, samples: List[dict], path: str, system_prompt: str,
+        self, samples: list[dict], path: str, system_prompt: str,
     ) -> None:
         """保存为 Alpaca 格式"""
         alpaca_data = []
@@ -200,7 +200,7 @@ class DatasetBuilder:
 
         logger.info("Alpaca 格式: %d 条 → %s", len(alpaca_data), path)
 
-    def _extract_style_tags(self, profile: StyleProfile) -> List[str]:
+    def _extract_style_tags(self, profile: StyleProfile) -> list[str]:
         """从风格档案中提取简短标签"""
         tags = []
 
@@ -245,7 +245,7 @@ class DatasetBuilder:
             return "负面"
         return "中性"
 
-    def get_dataset_stats(self, conversations: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def get_dataset_stats(self, conversations: list[dict[str, Any]]) -> dict[str, Any]:
         """获取数据集统计信息（预训练前检查）"""
         if not conversations:
             return {"error": "无数据"}

@@ -8,7 +8,7 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 logger = logging.getLogger("character_config")
 
@@ -29,8 +29,8 @@ class ConfigLoader:
 
     def __init__(self, config_dir: str = "config"):
         self.config_dir = Path(os.path.abspath(config_dir))
-        self._cache: Dict[str, Any] = {}
-        self._merged: Dict[str, Any] = {}
+        self._cache: dict[str, Any] = {}
+        self._merged: dict[str, Any] = {}
         self._reload_lock = threading.Lock()
 
         self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -78,7 +78,7 @@ class ConfigLoader:
 
         try:
             if filepath.exists():
-                with open(filepath, "r", encoding="utf-8") as f:
+                with open(filepath, encoding="utf-8") as f:
                     data = yaml.safe_load(f) or {}
                     self._cache[filename] = data
                     self._merged.update(data)

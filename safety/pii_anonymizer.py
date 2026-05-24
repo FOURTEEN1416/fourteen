@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, List, Tuple
 
 logger = logging.getLogger("pii_anonymizer")
 
-PII_PATTERNS: List[Tuple[str, re.Pattern]] = [
+PII_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("phone", re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")),
     ("id_card", re.compile(r"(?<!\d)\d{6}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx](?!\d)")),
     ("bank_card", re.compile(r"(?<!\d)\d{16,19}(?!\d)")),
@@ -21,7 +20,7 @@ class PIIAnonymizer:
     def __init__(self, enabled: bool = True):
         self.enabled = enabled
 
-    def anonymize(self, text: str) -> Tuple[str, List[Dict]]:
+    def anonymize(self, text: str) -> tuple[str, list[dict]]:
         if not self.enabled:
             return text, []
         all_matches = []
@@ -49,15 +48,14 @@ class PIIAnonymizer:
             anonymized = anonymized[:start] + replacement + anonymized[end:]
             detected.append({
                 "type": pii_type,
-                "original": original[:2] + "****",
-                "replacement": replacement,
-                "position": start,
+                "placeholder": replacement,
+                "original": original,
             })
         if detected:
             logger.info("PII detected and anonymized: %d items", len(detected))
         return anonymized, detected
 
-    def deanonymize(self, text: str, pii_map: Dict[str, str]) -> str:
+    def deanonymize(self, text: str, pii_map: dict[str, str]) -> str:
         result = text
         for placeholder, original in pii_map.items():
             result = result.replace(placeholder, original)

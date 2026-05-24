@@ -10,16 +10,16 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger("style_enhancer")
 
 
 @dataclass
 class EnhancedStyle:
-    config: Dict[str, Any] = field(default_factory=dict)
-    examples: List[Dict[str, str]] = field(default_factory=list)
-    dimensions: Dict[str, float] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
+    examples: list[dict[str, str]] = field(default_factory=list)
+    dimensions: dict[str, float] = field(default_factory=dict)
 
 
 STYLE_DIMENSIONS = [
@@ -45,14 +45,14 @@ STYLE_DIMENSIONS = [
 class StyleEnhancer:
     """风格增强器 — 16维度风格分析"""
 
-    def __init__(self, chat_history: Optional[List[Dict]] = None):
+    def __init__(self, chat_history: list[dict] | None = None):
         self._chat_history = chat_history or []
 
     def enhance_style(
         self,
-        base_style: Dict[str, Any],
-        chat_history: Optional[List[Dict]] = None,
-        persona_style: Optional[Dict[str, Any]] = None,
+        base_style: dict[str, Any],
+        chat_history: list[dict] | None = None,
+        persona_style: dict[str, Any] | None = None,
     ) -> EnhancedStyle:
         """风格增强流程：提取历史风格 → 融合人设风格 → 生成增强配置"""
         history = chat_history or self._chat_history
@@ -72,7 +72,7 @@ class StyleEnhancer:
             dimensions=dimensions,
         )
 
-    def _extract_style_from_history(self, history: List[Dict]) -> Dict[str, Any]:
+    def _extract_style_from_history(self, history: list[dict]) -> dict[str, Any]:
         if not history:
             return {}
         ai_messages = [m.get("response", "") for m in history if m.get("response")]
@@ -93,11 +93,11 @@ class StyleEnhancer:
 
     def _fuse_styles(
         self,
-        base: Dict[str, Any],
-        historical: Dict[str, Any],
-        persona: Dict[str, Any],
-        weights: Tuple[float, float, float] = (0.3, 0.3, 0.4),
-    ) -> Dict[str, Any]:
+        base: dict[str, Any],
+        historical: dict[str, Any],
+        persona: dict[str, Any],
+        weights: tuple[float, float, float] = (0.3, 0.3, 0.4),
+    ) -> dict[str, Any]:
         fused = {}
         all_keys = set(list(base.keys()) + list(historical.keys()) + list(persona.keys()))
 
@@ -117,8 +117,8 @@ class StyleEnhancer:
         return fused
 
     def _extract_style_examples(
-        self, history: List[Dict], top_k: int = 5,
-    ) -> List[Dict[str, str]]:
+        self, history: list[dict], top_k: int = 5,
+    ) -> list[dict[str, str]]:
         examples = []
         for msg in history[-top_k:]:
             user = msg.get("user", "")
@@ -127,7 +127,7 @@ class StyleEnhancer:
                 examples.append({"user": user, "response": response})
         return examples
 
-    def _calculate_all_dimensions(self, style: Dict[str, Any]) -> Dict[str, float]:
+    def _calculate_all_dimensions(self, style: dict[str, Any]) -> dict[str, float]:
         dims = {}
 
         avg_len = style.get("avg_length", 30)
@@ -150,9 +150,9 @@ class StyleEnhancer:
 
         return dims
 
-    def _count_particles(self, messages: List[str]) -> Dict[str, int]:
+    def _count_particles(self, messages: list[str]) -> dict[str, int]:
         particle_pattern = re.compile(r'[哼嘛呢呀哦吧哇唉嗯呵呜]')
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for msg in messages:
             for char in msg:
                 if particle_pattern.match(char):

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
 
 logger = logging.getLogger("encryption")
 
@@ -29,7 +28,7 @@ class EncryptionError(Exception):
 class EncryptionManager:
     def __init__(self, key_env: str = "AI_GF_ENCRYPTION_KEY", enabled: bool = False):
         self.enabled = enabled and HAS_CRYPTO
-        self._key: Optional[bytes] = None
+        self._key: bytes | None = None
         if self.enabled:
             key_hex = os.environ.get(key_env)
             if key_hex and len(key_hex) == 64:
@@ -38,7 +37,7 @@ class EncryptionManager:
                 logger.warning("Encryption key not found or invalid, encryption disabled")
                 self.enabled = False
 
-    def encrypt(self, plaintext: str, associated_data: Optional[bytes] = None) -> Optional[str]:
+    def encrypt(self, plaintext: str, associated_data: bytes | None = None) -> str | None:
         if not self.enabled:
             return None
         if not self._key:
@@ -51,7 +50,7 @@ class EncryptionManager:
         except Exception as e:
             raise EncryptionError(f"Encryption failed: {e}")
 
-    def decrypt(self, ciphertext_hex: str, associated_data: Optional[bytes] = None) -> Optional[str]:
+    def decrypt(self, ciphertext_hex: str, associated_data: bytes | None = None) -> str | None:
         if not self.enabled:
             raise DecryptionError("Encryption is disabled, cannot decrypt")
         if not self._key:

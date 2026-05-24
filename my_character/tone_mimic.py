@@ -18,7 +18,7 @@ import re
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("tone_mimic")
 
@@ -42,9 +42,9 @@ class StyleProfile:
     sentence_len: str = "short"     # short/medium/long
     pet_name: str = ""              # 对用户的昵称
     self_name: str = ""             # 自称
-    catch_phrases: List[str] = field(default_factory=list)
-    topics_like: List[str] = field(default_factory=list)
-    topics_dislike: List[str] = field(default_factory=list)
+    catch_phrases: list[str] = field(default_factory=list)
+    topics_like: list[str] = field(default_factory=list)
+    topics_dislike: list[str] = field(default_factory=list)
     punctuation_style: str = "normal"  # normal/exclamation/dot/ellipsis
     first_person: str = "我"        # 第一人称
 
@@ -67,7 +67,7 @@ class ToneMimic:
     ):
         self.chroma_path = os.path.abspath(chroma_path)
         self.collection_name = collection_name
-        self._collection: Optional[Collection] = None
+        self._collection: Collection | None = None
         self._client: Any = None
 
         # 风格画像
@@ -94,7 +94,7 @@ class ToneMimic:
 
     # ── 核心接口 ──────────────────────────────────────────────
 
-    def add_conversation(self, user_msg: str, reply: str, metadata: Optional[dict] = None) -> None:
+    def add_conversation(self, user_msg: str, reply: str, metadata: dict | None = None) -> None:
         """
         添加一轮对话到风格库
 
@@ -127,7 +127,7 @@ class ToneMimic:
         except Exception as e:
             logger.warning("Failed to add conversation: %s", e)
 
-    def retrieve_style_examples(self, query: str, top_k: int = 3) -> List[str]:
+    def retrieve_style_examples(self, query: str, top_k: int = 3) -> list[str]:
         """
         检索与当前消息最相似的历史回复
 
@@ -204,7 +204,7 @@ class ToneMimic:
 
         return "\n".join(parts)
 
-    def analyze_style(self, chat_history: List[Dict[str, str]]) -> StyleProfile:
+    def analyze_style(self, chat_history: list[dict[str, str]]) -> StyleProfile:
         """
         用规则分析聊天记录的语气特征
         实际使用时可替换为 LLM 分析

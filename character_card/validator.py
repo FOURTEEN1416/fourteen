@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-from typing import List, Tuple
-
 from .models import CharacterCard
 
 
@@ -28,7 +26,7 @@ class CharacterValidator:
     MAX_EXAMPLE_LENGTH = 100000
 
     @classmethod
-    def validate(cls, card: CharacterCard) -> Tuple[bool, List[str]]:
+    def validate(cls, card: CharacterCard) -> tuple[bool, list[str]]:
         """
         验证角色卡完整性
 
@@ -57,7 +55,7 @@ class CharacterValidator:
         return valid
 
     @classmethod
-    def _check_required_fields(cls, card: CharacterCard) -> List[str]:
+    def _check_required_fields(cls, card: CharacterCard) -> list[str]:
         errors = []
         for field in cls.REQUIRED_FIELDS:
             value = getattr(card.data, field, "")
@@ -66,7 +64,7 @@ class CharacterValidator:
         return errors
 
     @classmethod
-    def _check_lengths(cls, card: CharacterCard) -> List[str]:
+    def _check_lengths(cls, card: CharacterCard) -> list[str]:
         errors = []
         if len(card.data.name) > cls.MAX_NAME_LENGTH:
             errors.append(f"角色名过长 ({len(card.data.name)} > {cls.MAX_NAME_LENGTH})")
@@ -77,7 +75,7 @@ class CharacterValidator:
         return errors
 
     @classmethod
-    def _check_ranges(cls, card: CharacterCard) -> List[str]:
+    def _check_ranges(cls, card: CharacterCard) -> list[str]:
         errors = []
         t = card.data.extensions.talkativeness
         if not 0 <= t <= 1:
@@ -85,7 +83,7 @@ class CharacterValidator:
         return errors
 
     @classmethod
-    def _check_world_info(cls, card: CharacterCard) -> List[str]:
+    def _check_world_info(cls, card: CharacterCard) -> list[str]:
         errors = []
         if card.data.character_book:
             for entry in card.data.character_book.entries:
@@ -96,7 +94,7 @@ class CharacterValidator:
         return errors
 
     @classmethod
-    def _check_examples(cls, card: CharacterCard) -> List[str]:
+    def _check_examples(cls, card: CharacterCard) -> list[str]:
         errors = []
         if card.data.mes_example:
             if "{{char}}" not in card.data.mes_example and "{{user}}" not in card.data.mes_example:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from tool_system.base import BaseTool, ToolResult
 
@@ -30,7 +29,7 @@ class ReminderTool(BaseTool):
     def __init__(self, structured_memory=None):
         self._sm = structured_memory
 
-    def execute(self, content: str = "", trigger_time: Optional[str] = None, **kwargs) -> ToolResult:
+    def execute(self, content: str = "", trigger_time: str | None = None, **kwargs) -> ToolResult:
         if not content:
             return ToolResult(False, error="content is required")
         if not self._sm:
@@ -43,8 +42,9 @@ class ReminderTool(BaseTool):
                 "trigger_time": trigger_time,
                 "message": f"已设置提醒：{content}",
             })
-        except Exception as e:
-            return ToolResult(False, error=str(e))
+        except Exception:
+            logger.exception("设置提醒失败")
+            return ToolResult(False, error="reminder_set_failed")
 
 
 class CalendarQueryTool(BaseTool):
@@ -66,5 +66,6 @@ class CalendarQueryTool(BaseTool):
         try:
             reminders = self._sm.get_pending_reminders()
             return ToolResult(True, data=reminders)
-        except Exception as e:
-            return ToolResult(False, error=str(e))
+        except Exception:
+            logger.exception("查询提醒失败")
+            return ToolResult(False, error="reminder_query_failed")

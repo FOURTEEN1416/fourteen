@@ -14,23 +14,33 @@ if (apiKey) {
   client.defaults.headers.common['X-API-Key'] = apiKey
 }
 
+const ERROR_CODE_MAP: Record<string, string> = {
+  LLM_TIMEOUT: 'AI思考时间较长，请稍后重试',
+  NETWORK_ERROR: '无法连接服务器，请检查网络',
+  AUTH_ERROR: '认证已过期，请重新登录',
+  RATE_LIMIT: '操作过于频繁，请30秒后重试',
+  FEATURE_UNAVAILABLE: '该功能暂不可用',
+}
+
 // Global error interceptor — catches all 4xx/5xx and shows toast
 client.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status
     const data = error.response?.data
+    const errorCode = data?.error_code
     const rawDetail = data?.detail
     let detailStr = ''
     if (typeof rawDetail === 'string') {
       detailStr = rawDetail
     } else if (Array.isArray(rawDetail)) {
       detailStr = rawDetail
-        .map((e: any) => {
+        .map((e: unknown) => {
           if (typeof e === 'string') return e
-          if (e?.msg) {
-            const loc = Array.isArray(e.loc) ? e.loc.join('.') : ''
-            return loc ? `${loc}: ${e.msg}` : e.msg
+          if (e && typeof e === 'object' && 'msg' in e) {
+            const errObj = e as { msg?: string; loc?: unknown[] }
+            const loc = Array.isArray(errObj.loc) ? errObj.loc.join('.') : ''
+            return loc ? `${loc}: ${errObj.msg}` : (errObj.msg ?? '')
           }
           return String(e)
         })
@@ -38,30 +48,37 @@ client.interceptors.response.use(
     } else if (rawDetail && typeof rawDetail === 'object') {
       detailStr = JSON.stringify(rawDetail)
     }
+
+    if (errorCode && ERROR_CODE_MAP[errorCode]) {
+      const type = errorCode === 'AUTH_ERROR' ? 'error' : errorCode === 'RATE_LIMIT' ? 'warning' : 'warning'
+      useErrorStore.getState().addToast({ type, message: ERROR_CODE_MAP[errorCode] })
+      return Promise.reject(error)
+    }
+
     const msg = detailStr || data?.message || error.message || '请求失败'
 
-    // Skip 401 for now (no auth yet)
     if (status === 401) return Promise.reject(error)
 
-    // Rate limit hint
+    if (status === 404) {
+      useErrorStore.getState().addToast({ type: 'warning', message: '该功能暂不可用' })
+      return Promise.reject(error)
+    }
+
     if (status === 429) {
-      useErrorStore.getState().addToast({ type: 'warning', message: '请求太频繁，请稍后再试' })
+      useErrorStore.getState().addToast({ type: 'warning', message: '操作过于频繁，请30秒后重试' })
       return Promise.reject(error)
     }
 
-    // Network / timeout
     if (error.code === 'ERR_NETWORK' || error.code === 'ECONNABORTED') {
-      useErrorStore.getState().addToast({ type: 'error', message: '无法连接到后端服务' })
+      useErrorStore.getState().addToast({ type: 'error', message: '无法连接服务器，请检查网络' })
       return Promise.reject(error)
     }
 
-    // Server errors
     if (status && status >= 500) {
       useErrorStore.getState().addToast({ type: 'error', message: `服务器错误 (${status})` })
       return Promise.reject(error)
     }
 
-    // General error toast for 4xx
     useErrorStore.getState().addToast({ type: 'warning', message: msg })
     return Promise.reject(error)
   }
@@ -73,12 +90,18 @@ export const api = {
   chat: (message: string, sessionId = '', messageType = 'text') =>
     client.post('/chat', { message, session_id: sessionId, message_type: messageType }),
 
-  chatStream: (message: string, sessionId = '', messageType = 'text') =>
-    fetch(`${API_BASE}/chat/stream`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(apiKey ? { 'X-API-Key': apiKey } : {}) },
-      body: JSON.stringify({ message, session_id: sessionId, message_type: messageType }),
-    }),
+  chatStream: (message: string, sessionId = '', messageType = 'text') => {
+    const controller = new AbortController()
+    const promise = client.post('/chat/stream',
+      { message, session_id: sessionId, message_type: messageType },
+      {
+        responseType: 'stream',
+        adapter: 'fetch',
+        signal: controller.signal,
+      },
+    )
+    return { promise, cancel: () => controller.abort() }
+  },
 
   health: () => client.get('/health'),
   stats: () => client.get('/stats'),

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { shisiClient } from '../api/shisiClient'
 import { useErrorStore } from '../store/errorStore'
 import Card from '../components/common/Card'
@@ -15,22 +15,32 @@ interface StatsData {
   active_days: number
 }
 
+interface ChartDataItem {
+  name: string
+  value: number
+}
+
 const PIE_COLORS = ['#06b6d4', '#d946ef', '#f59e0b', '#10b981', '#6366f1', '#ef4444', '#8b5cf6', '#f97316', '#14b8a6', '#e11d48']
+
+function getErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message
+  return String(e)
+}
 
 export default function StatsPage() {
   const [stats, setStats] = useState<StatsData | null>(null)
   const toast = useErrorStore.getState().addToast
 
-  useEffect(() => { loadStats() }, [])
-
-  async function loadStats() {
+  const loadStats = useCallback(async () => {
     try {
       const data = await shisiClient.stats.get() as StatsData
       setStats(data)
-    } catch (e: any) {
-      toast({ type: 'error', message: e?.message || '加载统计数据失败' })
+    } catch (e: unknown) {
+      toast({ type: 'error', message: getErrorMessage(e) || '加载统计数据失败' })
     }
-  }
+  }, [toast])
+
+  useEffect(() => { loadStats() }, [loadStats])
 
   if (!stats) return (
     <div className="flex-1 overflow-y-auto p-6 space-y-4">
@@ -41,8 +51,8 @@ export default function StatsPage() {
     </div>
   )
 
-  const charData = Object.entries(stats.character_distribution ?? {}).map(([name, value]) => ({ name, value }))
-  const emotionData = Object.entries(stats.emotion_distribution ?? {}).map(([name, value]) => ({ name, value }))
+  const charData: ChartDataItem[] = Object.entries(stats.character_distribution ?? {}).map(([name, value]) => ({ name, value }))
+  const emotionData: ChartDataItem[] = Object.entries(stats.emotion_distribution ?? {}).map(([name, value]) => ({ name, value }))
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6">

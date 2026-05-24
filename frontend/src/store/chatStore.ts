@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import client from '../api/client'
 import type { ChatMessage, EmotionState } from '../types/api'
 
 const MAX_MESSAGES = 500
@@ -18,7 +19,7 @@ interface ChatState {
   lastSticker: { sticker_id: string; category: string } | null
   addMessage: (msg: ChatMessage) => void
   appendStreamToken: (token: string) => void
-  finalizeStreamMessage: () => void
+  finalizeStreamMessage: (interrupted?: boolean) => void
   setSessionId: (id: string) => void
   setConnected: (v: boolean) => void
   setStreaming: (v: boolean) => void
@@ -62,10 +63,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         : { role: 'assistant' as const, content: token, timestamp: Date.now() },
     })),
 
-  finalizeStreamMessage: () => {
+  finalizeStreamMessage: (interrupted = false) => {
     const { streamingMessage, messages } = get()
     if (!streamingMessage) return
-    const newMessages = [...messages, streamingMessage]
+    const finalMsg = interrupted ? { ...streamingMessage, interrupted: true } : streamingMessage
+    const newMessages = [...messages, finalMsg]
     set({
       messages: newMessages.length > MAX_MESSAGES ? newMessages.slice(-MAX_MESSAGES) : newMessages,
       streamingMessage: null,
@@ -85,14 +87,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   loadMoreMessages: async (before: number) => {
     try {
-      const resp = await fetch(`/api/chat/history?before=${before}&limit=50`)
-      if (!resp.ok) return
-      const olderMessages: ChatMessage[] = await resp.json()
-      if (olderMessages.length > 0) {
+      const { data } = await client.get('/chat/history', { params: { before, limit: 50 } })
+      const olderMessages: ChatMessage[] = data as ChatMessage[]
+      if (Array.isArray(olderMessages) && olderMessages.length > 0) {
         set((state) => ({ messages: [...olderMessages, ...state.messages] }))
       }
     } catch {
-      // silently ignore
+      // error handled by interceptor
     }
   },
 }))

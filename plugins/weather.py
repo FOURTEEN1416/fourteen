@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger("weather_plugin")
 
@@ -40,11 +40,11 @@ class WeatherPlugin:
     def __init__(self, api_key: str = "", city: str = "Shanghai"):
         self.api_key = api_key or os.environ.get("OPENWEATHERMAP_API_KEY", "")
         self.city = city
-        self._cache: Optional[Dict[str, Any]] = None
-        self._cache_time: Optional[datetime] = None
+        self._cache: dict[str, Any] | None = None
+        self._cache_time: datetime | None = None
         self._cache_ttl = timedelta(minutes=30)  # 缓存30分钟
 
-    def get_weather(self) -> Optional[Dict[str, Any]]:
+    def get_weather(self) -> dict[str, Any] | None:
         """
         获取当前天气
 
@@ -53,9 +53,8 @@ class WeatherPlugin:
              "wind": float, "description": str, "icon": str}
         """
         # 检查缓存
-        if self._cache and self._cache_time:
-            if datetime.now() - self._cache_time < self._cache_ttl:
-                return self._cache
+        if self._cache and self._cache_time and datetime.now() - self._cache_time < self._cache_ttl:
+            return self._cache
 
         # 使用 API
         if self.api_key and HAS_HTTPX:
@@ -64,7 +63,7 @@ class WeatherPlugin:
         # 无 API 时模拟数据
         return self._simulate()
 
-    def check_trigger(self) -> Optional[Dict[str, Any]]:
+    def check_trigger(self) -> dict[str, Any] | None:
         """
         检查天气是否触发关心场景
 
@@ -116,7 +115,7 @@ class WeatherPlugin:
 
     # ── API 模式 ─────────────────────────────────────────
 
-    def _fetch_from_api(self) -> Optional[Dict[str, Any]]:
+    def _fetch_from_api(self) -> dict[str, Any] | None:
         """从 OpenWeatherMap API 获取"""
         if not HAS_HTTPX:
             return self._simulate()
@@ -153,7 +152,7 @@ class WeatherPlugin:
 
     # ── 模拟模式（无 API Key 时用） ─────────────────────
 
-    def _simulate(self) -> Dict[str, Any]:
+    def _simulate(self) -> dict[str, Any]:
         """模拟天气数据（开发/测试用）"""
         import random
 

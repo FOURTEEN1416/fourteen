@@ -1,7 +1,6 @@
 """单元测试: 记忆管线 — 深度版"""
 import sys
-import time
-import threading
+
 sys.path.insert(0, ".")
 
 

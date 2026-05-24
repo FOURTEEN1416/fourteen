@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import wechat_decrypt_launcher
+
 import config
 
 

@@ -28,7 +28,7 @@ import re
 import sqlite3
 import sys
 import time
-from contextlib import closing
+from contextlib import closing, suppress
 from datetime import datetime
 
 import mcp_server
@@ -40,7 +40,6 @@ except ImportError:
     _tqdm = None
 
 from chat_export_helpers import _extract_content, _msg_type_str, _resolve_sender
-
 
 PLAN_CSV_FIELDS = [
     "export",
@@ -88,7 +87,7 @@ def _get_last_message_ts(json_path):
         msgs = data.get("messages", [])
         if msgs:
             return msgs[-1].get("timestamp", 0)
-    except (json.JSONDecodeError, IOError, KeyError):
+    except (OSError, json.JSONDecodeError, KeyError):
         pass
     return 0
 
@@ -99,7 +98,7 @@ def _get_existing_messages(json_path):
         with open(json_path, encoding="utf-8") as f:
             data = json.load(f)
         return data.get("messages", [])
-    except (json.JSONDecodeError, IOError, KeyError):
+    except (OSError, json.JSONDecodeError, KeyError):
         return []
 
 
@@ -557,10 +556,8 @@ def _scan_dir_bytes(path):
     for root, _, files in os.walk(path):
         for name in files:
             full = os.path.join(root, name)
-            try:
+            with suppress(OSError):
                 total += os.path.getsize(full)
-            except OSError:
-                pass
     return total
 
 
@@ -993,10 +990,7 @@ def _load_selected_usernames_from_plan_csv(
             seen[username] = line_no
 
             flag = (row.get("export") or "").strip()
-            if plan_mode == PLAN_MODE_WHITELIST:
-                should_export = flag == "1"
-            else:
-                should_export = flag != "0"
+            should_export = flag == "1" if plan_mode == PLAN_MODE_WHITELIST else flag != "0"
             if not should_export:
                 continue
             if username not in valid_usernames:
@@ -1079,7 +1073,7 @@ def export_one(username, output_dir, names, transcribe=False,
     local_ids_existing = {m.get("local_id") for m in existing_msgs}
 
     # 构建已有消息的 local_id → message 映射（用于合并时保留 transcription）
-    existing_by_lid = {m.get("local_id"): m for m in existing_msgs}
+    {m.get("local_id"): m for m in existing_msgs}
 
     new_messages = []
     for row, id_to_username in new_rows:
@@ -1145,7 +1139,7 @@ def export_one(username, output_dir, names, transcribe=False,
             except Exception:
                 failed += 1
         if transcribed or failed:
-            display = names.get(username, username)
+            names.get(username, username)
             voice_total = len(voices_to_transcribe)
             print(
                 f"   转录: {transcribed}/{voice_total} 条语音"

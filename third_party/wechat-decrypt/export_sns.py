@@ -6,22 +6,23 @@
 时间线:   <output_base_dir>/<display_name>/SNS/timeline.html
 """
 import bisect
-import os
-import sys
 import json
+import os
+import re
 import sqlite3
 import struct
-import re
+import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from urllib.request import urlopen, Request
 from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from config import load_config
 from decode_image import aligned_aes_block_size
+
+from config import load_config
 
 # 朋友圈 XML 来源是不可信输入 (他人朋友圈的 content), 必须挡 XXE。
 # 跟 mcp_server._XML_UNSAFE_RE 保持同一过滤模式; max_len 比 mcp_server 宽松
@@ -157,11 +158,10 @@ def _image_size_from_bytes(data):
         return 0, 0
 
     # WEBP VP8
-    if data[:4] == b'RIFF' and len(data) >= 30 and data[8:12] == b'WEBP':
-        if data[12:16] == b'VP8 ':
-            w = struct.unpack('<H', data[26:28])[0] & 0x3FFF
-            h = struct.unpack('<H', data[28:30])[0] & 0x3FFF
-            return w, h
+    if data[:4] == b'RIFF' and len(data) >= 30 and data[8:12] == b'WEBP' and data[12:16] == b'VP8 ':
+        w = struct.unpack('<H', data[26:28])[0] & 0x3FFF
+        h = struct.unpack('<H', data[28:30])[0] & 0x3FFF
+        return w, h
 
     return 0, 0
 
@@ -309,14 +309,12 @@ def _match_cache_images(create_time, media_list, index, index_mtimes):
                 continue
 
             # 尺寸匹配
-            if want_w > 0 and want_h > 0 and w_i > 0 and h_i > 0:
-                if w_i != want_w or h_i != want_h:
-                    continue
+            if want_w > 0 and want_h > 0 and w_i > 0 and h_i > 0 and (w_i != want_w or h_i != want_h):
+                continue
 
             # 大小匹配
-            if want_size > 0:
-                if dec_size_i > want_size * 3 or dec_size_i < want_size * 0.3:
-                    continue
+            if want_size > 0 and (dec_size_i > want_size * 3 or dec_size_i < want_size * 0.3):
+                continue
 
             size_diff = abs(dec_size_i - want_size) if want_size > 0 else 0
             time_diff = abs(mtime_i - create_time)
@@ -756,7 +754,7 @@ def export_sns_timeline():
                     post.get("create_time", 0), media_list,
                     cache_index, index_mtimes,
                 )
-                for i, (matched_path, fmt) in enumerate(matches):
+                for i, (matched_path, _fmt) in enumerate(matches):
                     if matched_path is not None:
                         dec_bytes = _decrypt_sns_dat(matched_path)
                         if dec_bytes:

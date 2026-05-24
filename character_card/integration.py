@@ -14,7 +14,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from .models import CharacterCard
 from .parser import CharacterCardParser
@@ -38,8 +38,8 @@ class CharacterCardAdapter:
 
     def __init__(
         self,
-        card_dir: Optional[str] = None,
-        default_card_path: Optional[str] = None,
+        card_dir: str | None = None,
+        default_card_path: str | None = None,
         enabled: bool = True,
         user_name: str = "用户",
     ):
@@ -48,14 +48,14 @@ class CharacterCardAdapter:
         self._enabled = enabled
         self._user_name = user_name
 
-        self._card_cache: Optional[CharacterCard] = None
-        self._card_name: Optional[str] = None
+        self._card_cache: CharacterCard | None = None
+        self._card_name: str | None = None
         self._lock = threading.Lock()
-        self._load_time: Optional[float] = None
-        self._last_error: Optional[str] = None
+        self._load_time: float | None = None
+        self._last_error: str | None = None
 
         # 目录列表缓存: {文件名: (mtime, 解析结果)}
-        self._dir_cache: Dict[str, tuple] = {}
+        self._dir_cache: dict[str, tuple] = {}
         self._dir_cache_mtime: float = 0.0
 
     @property
@@ -68,7 +68,7 @@ class CharacterCardAdapter:
         if not value:
             self._clear_cache()
 
-    def load_card(self, path: str) -> Tuple[bool, Optional[str]]:
+    def load_card(self, path: str) -> tuple[bool, str | None]:
         """
         从文件或路径加载角色卡
 
@@ -115,7 +115,7 @@ class CharacterCardAdapter:
             return self.load_card(str(self._default_card_path))[0]
         return False
 
-    def get_card(self) -> Optional[CharacterCard]:
+    def get_card(self) -> CharacterCard | None:
         """获取当前缓存的角色卡"""
         with self._lock:
             return self._card_cache
@@ -142,7 +142,7 @@ class CharacterCardAdapter:
             self._dir_cache = {}
             self._dir_cache_mtime = current_mtime
 
-    def list_available_cards(self) -> List[Dict[str, Any]]:
+    def list_available_cards(self) -> list[dict[str, Any]]:
         """
         列出角色卡目录中的可用角色卡
 
@@ -196,12 +196,13 @@ class CharacterCardAdapter:
                     "valid": valid,
                     "warnings": errors,
                 }
-            except Exception as e:
+            except Exception:
+                logger.exception("角色卡加载失败: %s", f.name)
                 entry = {
                     "file": f.name,
                     "path": str(f),
                     "name": f.stem,
-                    "error": str(e),
+                    "error": "character_card_load_failed",
                 }
 
             self._dir_cache[cache_key] = (file_mtime, entry)
@@ -211,7 +212,7 @@ class CharacterCardAdapter:
             key=lambda x: x[0],
         )]
 
-    def to_persona_config(self) -> Dict[str, Any]:
+    def to_persona_config(self) -> dict[str, Any]:
         """
         转换为PersonaEngine兼容配置
 
@@ -248,7 +249,7 @@ class CharacterCardAdapter:
         else:
             return builder.build_system_prompt(card)
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         """健康检查 - 符合十四可观测性规范"""
         card = self.get_card()
         return {

@@ -1,12 +1,12 @@
 """单元测试: TTSManager语音管理器 — 深度版"""
-import sys
 import asyncio
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
+
 sys.path.insert(0, ".")
 
-from voice.manager import TTSManager
 from voice.base import TTSProviderBase
-
+from voice.manager import TTSManager
 
 # ═══════════════════════════════════════════════════════════════
 #  基础默认值验证
@@ -343,8 +343,8 @@ def test_available_engines_multiple():
 # ═══════════════════════════════════════════════════════════════
 
 def test_tts_provider_base_is_abstract():
+
     from voice.base import TTSProviderBase
-    import abc
     assert hasattr(TTSProviderBase, "__abstractmethods__")
 
 

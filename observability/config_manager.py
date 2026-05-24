@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Optional
 
 from observability.config_models import SystemConfig
 
@@ -26,7 +25,7 @@ class ConfigManager:
     def __init__(self, config_dir: str = "config"):
         self.config_dir = Path(os.path.abspath(config_dir))
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        self._config: Optional[SystemConfig] = None
+        self._config: SystemConfig | None = None
         self._watcher = None
         self._callbacks = []
 
@@ -40,12 +39,12 @@ class ConfigManager:
         data = {}
         system_yaml = self.config_dir / "system.yaml"
         if HAS_YAML and system_yaml.exists():
-            with open(system_yaml, "r", encoding="utf-8") as f:
+            with open(system_yaml, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}  # type: ignore
         env = os.environ.get("AI_GF_ENV", data.get("env", "dev"))
         env_yaml = self.config_dir / f"system_{env}.yaml"
         if HAS_YAML and env_yaml.exists():
-            with open(env_yaml, "r", encoding="utf-8") as f:
+            with open(env_yaml, encoding="utf-8") as f:
                 env_overrides = yaml.safe_load(f) or {}  # type: ignore
             data = self._deep_merge(data, env_overrides)
         for key in SystemConfig.model_fields:

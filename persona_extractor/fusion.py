@@ -15,7 +15,7 @@ PersonaExtractor 融合适配器 — 集成到原系统的核心桥梁
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from .emotion_coupler import EmotionCoupler
 from .pado_detector import PADODetector
@@ -66,11 +66,10 @@ class PersonaExtractor:
         # 新增心理分析模块
         self.enable_mental_health = enable_mental_health
         if enable_mental_health:
-            from .mental_health import MentalHealthScreener
+            from .cognitive_distortions import CognitiveDistortionDetector
             from .dark_triad import DarkTriadDetector
             from .liwc_analyzer import LiwcAnalyzer
-            from .cognitive_distortions import CognitiveDistortionDetector
-            from .hexaco import HexacoTraits
+            from .mental_health import MentalHealthScreener
             self.mental_health = MentalHealthScreener(llm_gateway=llm_gateway)
             self.dark_triad = DarkTriadDetector(llm_gateway=llm_gateway)
             self.liwc = LiwcAnalyzer()
@@ -225,7 +224,7 @@ class PersonaExtractor:
 
     # ── 适配器接口 ──
 
-    def adapt_to_emotion_engine(self) -> Dict[str, Any]:
+    def adapt_to_emotion_engine(self) -> dict[str, Any]:
         """生成给 EmotionEngine 的 PAD 适配参数
 
         在 main.py 中调用 emotion_engine.analyze() 时，
@@ -240,7 +239,7 @@ class PersonaExtractor:
             persona.pad.closest_emotion(),
         )
 
-    def get_ocean_adjusted_pad(self) -> Dict[str, float]:
+    def get_ocean_adjusted_pad(self) -> dict[str, float]:
         """获取 OCEAN 调整后的 PAD（给 EmotionEngine 参考）"""
         persona = self.bank.get_persona(self.user_id)
         if persona is None:

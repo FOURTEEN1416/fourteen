@@ -1,6 +1,6 @@
 """T-16: AudioFormatConverter 单元测试"""
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from voice.audio_converter import AudioFormatConverter
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -11,21 +11,21 @@ from pydantic import BaseModel, Field
 class CreateCharacterRequest(BaseModel):
     name: str
     description: str = ""
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
 
 
 class UpdatePersonaRequest(BaseModel):
-    warmth: Optional[float] = None
-    playfulness: Optional[float] = None
-    independence: Optional[float] = None
-    jealousy: Optional[float] = None
-    stubbornness: Optional[float] = None
-    formality: Optional[float] = None
-    emoji_frequency: Optional[float] = None
-    sentence_length: Optional[float] = None
-    emotional_expression: Optional[float] = None
-    humor: Optional[float] = None
-    core_anchors: Optional[List[str]] = None
+    warmth: float | None = None
+    playfulness: float | None = None
+    independence: float | None = None
+    jealousy: float | None = None
+    stubbornness: float | None = None
+    formality: float | None = None
+    emoji_frequency: float | None = None
+    sentence_length: float | None = None
+    emotional_expression: float | None = None
+    humor: float | None = None
+    core_anchors: list[str] | None = None
 
 
 class ProcessMessageRequest(BaseModel):
@@ -37,10 +37,10 @@ class CharacterDetail(BaseModel):
     id: str
     name: str
     description: str
-    avatar_url: Optional[str]
-    tags: List[str]
-    persona: Dict[str, Any]
-    emotional_state: Dict[str, Any]
+    avatar_url: str | None
+    tags: list[str]
+    persona: dict[str, Any]
+    emotional_state: dict[str, Any]
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -53,8 +53,8 @@ class CharacterSummary(BaseModel):
     is_active: bool
     affinity_level: int
     affinity_name: str
-    avatar_url: Optional[str]
-    tags: List[str]
+    avatar_url: str | None
+    tags: list[str]
     updated_at: datetime
 
 
@@ -66,8 +66,8 @@ class ProcessMessageResponse(BaseModel):
 class MigrationResponse(BaseModel):
     total_migrated: int
     total_failed: int
-    errors: List[tuple]
-    active_character: Optional[str]
+    errors: list[tuple]
+    active_character: str | None
 
 
 class RollbackResponse(BaseModel):

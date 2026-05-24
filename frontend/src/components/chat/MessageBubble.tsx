@@ -5,9 +5,11 @@ interface Props {
   content: string
   emotion?: string
   timestamp?: number
+  interrupted?: boolean
+  onRetryStream?: () => void
 }
 
-function MessageBubbleInner({ role, content, emotion }: Props) {
+function MessageBubbleInner({ role, content, emotion, interrupted, onRetryStream }: Props) {
   const isUser = role === 'user'
 
   return (
@@ -26,6 +28,11 @@ function MessageBubbleInner({ role, content, emotion }: Props) {
           }`}
         >
           {content}
+          {interrupted && (
+            <span className="inline-flex items-center gap-1 ml-1 text-amber-600 text-xs cursor-pointer hover:underline" onClick={onRetryStream}>
+              ⚠️ 回复中断，点击重试
+            </span>
+          )}
         </div>
         {!isUser && emotion && (
           <div className="text-[10px] text-gray-400 mt-0.5 px-1">{emotion}</div>
@@ -38,7 +45,8 @@ function MessageBubbleInner({ role, content, emotion }: Props) {
 const MessageBubble = memo(MessageBubbleInner, (prev, next) => {
   return prev.content === next.content &&
          prev.role === next.role &&
-         prev.emotion === next.emotion
+         prev.emotion === next.emotion &&
+         prev.interrupted === next.interrupted
 })
 
 export default MessageBubble

@@ -1,7 +1,6 @@
 import os
 
 from Crypto.Cipher import AES
-
 from wxwork_crypto import (
     PAGE_SZ,
     SQLITE_HDR,

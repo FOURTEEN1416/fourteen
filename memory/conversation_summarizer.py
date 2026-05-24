@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import logging
-import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger("conversation_summarizer")
 
@@ -21,16 +20,16 @@ SUMMARY_PROMPT = """将以下对话内容压缩成一段简洁的摘要（不超
 class ConversationSummarizer:
     def __init__(self, llm_gateway):
         self._llm = llm_gateway
-        self._cache: Dict[str, str] = {}
-        self._cache_boundary: Dict[str, int] = {}
+        self._cache: dict[str, str] = {}
+        self._cache_boundary: dict[str, int] = {}
 
     def get_chat_context(
         self,
-        working_messages: List[Dict[str, Any]],
+        working_messages: list[dict[str, Any]],
         session_id: str = "",
         keep_recent: int = 50,
         summary_trigger: int = 80,
-    ) -> Tuple[List[Dict[str, str]], str]:
+    ) -> tuple[list[dict[str, str]], str]:
         total = len(working_messages)
 
         if total == 0:
@@ -68,7 +67,7 @@ class ConversationSummarizer:
 
         return self._format_history(recent), summary
 
-    def _format_history(self, messages: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    def _format_history(self, messages: list[dict[str, Any]]) -> list[dict[str, str]]:
         result = []
         for msg in messages:
             role = msg.get("role", "user")
@@ -79,7 +78,7 @@ class ConversationSummarizer:
                 result.append({"role": "assistant", "content": content})
         return result
 
-    def _summarize(self, messages: List[Dict[str, Any]]) -> str:
+    def _summarize(self, messages: list[dict[str, Any]]) -> str:
         if not self._llm:
             return ""
 
@@ -101,7 +100,7 @@ class ConversationSummarizer:
             elif hasattr(self._llm, "chat"):
                 import asyncio
                 try:
-                    loop = asyncio.get_running_loop()
+                    asyncio.get_running_loop()
                     import concurrent.futures
                     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                         future = pool.submit(asyncio.run, self._llm.chat(query=prompt, max_tokens=256, temperature=0.3))

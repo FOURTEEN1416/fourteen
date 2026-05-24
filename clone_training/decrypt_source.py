@@ -29,7 +29,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("clone.decrypt_source")
 
@@ -40,19 +40,37 @@ DECRYPT_CONFIG = DECRYPT_DIR / "config.json"
 DECRYPT_KEYS = DECRYPT_DIR / "all_keys.json"
 DECRYPT_OUTPUT = DECRYPT_DIR / "decrypted"
 
-# ── wechat-decrypt 路径（必须在 import mcp_server 之前加入） ──
-_WD_PATH = str(DECRYPT_DIR)
-if _WD_PATH not in sys.path:
-    sys.path.insert(0, _WD_PATH)
+# ── wechat-decrypt 路径处理（使用 importlib 避免修改全局 sys.path） ──
+_WD_PATH = DECRYPT_DIR
 
 # wechat-decrypt 的消息解析模块（可选，有降级）
+# 使用 importlib.util 动态加载，避免修改 sys.path 导致命名冲突
+import importlib.util as _importlib_util
+
+_wd_mcp = None
+_wd_resolve_sender = None
+
+# 尝试动态加载 mcp_server 模块
 try:
-    import mcp_server as _wd_mcp  # type: ignore
-except ImportError:
+    _mcp_spec = _importlib_util.spec_from_file_location(
+        "wd_mcp_server", _WD_PATH / "mcp_server.py"
+    )
+    if _mcp_spec and _mcp_spec.loader:
+        _wd_mcp = _importlib_util.module_from_spec(_mcp_spec)
+        _mcp_spec.loader.exec_module(_wd_mcp)
+except Exception:
     _wd_mcp = None
+
+# 尝试动态加载 chat_export_helpers 模块
 try:
-    from chat_export_helpers import _resolve_sender as _wd_resolve_sender  # type: ignore
-except ImportError:
+    _helpers_spec = _importlib_util.spec_from_file_location(
+        "wd_chat_export_helpers", _WD_PATH / "chat_export_helpers.py"
+    )
+    if _helpers_spec and _helpers_spec.loader:
+        _wd_helpers = _importlib_util.module_from_spec(_helpers_spec)
+        _helpers_spec.loader.exec_module(_wd_helpers)
+        _wd_resolve_sender = getattr(_wd_helpers, "_resolve_sender", None)
+except Exception:
     _wd_resolve_sender = None
 
 
@@ -69,7 +87,7 @@ class DecryptSource:
         self._contacts: dict = {}
         self._self_wxid: str = ""
         self._ready = False
-        self._table_cache: Dict[str, List[Dict]] = {}  # wxid → 消息表列表缓存
+        self._table_cache: dict[str, list[dict]] = {}  # wxid → 消息表列表缓存
 
     # ── 公开接口 ──────────────────────────────────
 
@@ -127,7 +145,7 @@ class DecryptSource:
         self._ready = True
         logger.info("✅ wechat-decrypt 就绪")
 
-    def get_contacts(self, keyword: str = "") -> List[Dict[str, Any]]:
+    def get_contacts(self, keyword: str = "") -> list[dict[str, Any]]:
         """获取所有联系人列表"""
         self._ensure_contacts_loaded()
         if not keyword:
@@ -146,9 +164,9 @@ class DecryptSource:
         self,
         target: str,
         max_messages: int = 5000,
-        date_from: Optional[str] = None,
-        date_to: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list[dict[str, Any]]:
         """提取指定联系人的聊天对话
 
         Args:
@@ -343,7 +361,7 @@ class DecryptSource:
                 pass
         return ""
 
-    def _resolve_target(self, target: str) -> Optional[str]:
+    def _resolve_target(self, target: str) -> str | None:
         """将目标（wxid/备注名/昵称）解析为 wxid"""
         if not target:
             return None
@@ -365,7 +383,7 @@ class DecryptSource:
 
         return None
 
-    def _find_decrypted_db(self, *parts: str) -> Optional[Path]:
+    def _find_decrypted_db(self, *parts: str) -> Path | None:
         """在解密目录中查找指定数据库"""
         # 1. 优先 DECRYPTED_DIR 下的持久解密文件
         path = DECRYPT_OUTPUT.joinpath(*parts)
@@ -382,7 +400,7 @@ class DecryptSource:
 
         return None
 
-    def _find_message_tables(self, target_wxid: str) -> List[Dict[str, Any]]:
+    def _find_message_tables(self, target_wxid: str) -> list[dict[str, Any]]:
         """查找目标联系人的消息表
         优先从 decrypted/message_*.db 查找（稳定可靠），
         回退到 mcp_server 的临时缓存路径。"""
@@ -411,7 +429,7 @@ class DecryptSource:
 
         return []
 
-    def _find_message_tables_fallback(self, target_wxid: str) -> List[Dict[str, Any]]:
+    def _find_message_tables_fallback(self, target_wxid: str) -> list[dict[str, Any]]:
         """手动查找消息表（降级方案）"""
         table_hash = hashlib.md5(target_wxid.encode()).hexdigest()
         table_name = f"Msg_{table_hash}"
@@ -425,7 +443,7 @@ class DecryptSource:
             return []
 
         tables = []
-        def _check_table(db_path: Path) -> Dict | None:
+        def _check_table(db_path: Path) -> dict | None:
             try:
                 conn = sqlite3.connect(str(db_path))
                 result = conn.execute(
@@ -451,10 +469,10 @@ class DecryptSource:
 
     def _query_messages(
         self, db_path: str, table_name: str, target_wxid: str,
-        date_from: Optional[str] = None,
-        date_to: Optional[str] = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
         limit: int = 5000,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """从消息表查询并解码文本消息
         WeChat 4.x 的 message_content 是二进制格式，
         优先用 mcp_server._format_message_text 解码"""
@@ -559,10 +577,10 @@ class DecryptSource:
 
     def _query_messages_fallback(
         self, db_path: str, table_name: str, target_wxid: str,
-        date_from: Optional[str] = None,
-        date_to: Optional[str] = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
         limit: int = 5000,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """手动读取消息（降级方案，用 Name2Id 判断 is_self）"""
         messages = []
         try:
@@ -636,7 +654,7 @@ class DecryptSource:
 
         return messages
 
-    def _build_conversations(self, messages: List[Dict]) -> List[Dict]:
+    def _build_conversations(self, messages: list[dict]) -> list[dict]:
         """将消息列表转为对话轮次"""
         conversations = []
         pending = None

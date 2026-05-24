@@ -8,7 +8,7 @@
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from clone_training import StyleAnalyzer, StyleProfile
 
@@ -22,8 +22,8 @@ class StyleProfiler:
         self.analyzer = StyleAnalyzer()
 
     def profile(
-        self, conversations: List[Dict[str, Any]], name: str = ""
-    ) -> Dict[str, Any]:
+        self, conversations: list[dict[str, Any]], name: str = ""
+    ) -> dict[str, Any]:
         """
         从对话构建完整风格画像
 
@@ -46,10 +46,10 @@ class StyleProfiler:
 
     def _build_few_shot(
         self,
-        conversations: List[Dict[str, Any]],
+        conversations: list[dict[str, Any]],
         profile: StyleProfile,
         n: int = 5,
-    ) -> List[Dict[str, str]]:
+    ) -> list[dict[str, str]]:
         """构建 few-shot 示例（选取最有代表性的对话对）"""
         scored = []
         for conv in conversations:
@@ -72,7 +72,7 @@ class StyleProfiler:
             for _, c in scored[:n]
         ]
 
-    def _build_quick_tags(self, profile: StyleProfile) -> List[str]:
+    def _build_quick_tags(self, profile: StyleProfile) -> list[str]:
         """构建快速标签"""
         tags = []
         d = profile.sentence_length_dist

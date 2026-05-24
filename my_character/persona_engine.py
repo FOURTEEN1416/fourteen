@@ -18,15 +18,15 @@ import hashlib
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
+from .anchor_protection import EnhancedAnchorProtection
 from .character_config import ConfigLoader
+from .constraint_validator import ConstraintValidator
 from .emotion_engine import CompoundEmotionalState as EmotionalState
 from .emotion_engine import EmotionEngine
-from .tone_mimic import ToneMimic
 from .emotion_style_coupler import EmotionStyleCoupler
-from .constraint_validator import ConstraintValidator
-from .anchor_protection import EnhancedAnchorProtection
+from .tone_mimic import ToneMimic
 
 if TYPE_CHECKING:
     from llm_provider.llm_gateway_v2 import LLMGatewayV2
@@ -70,19 +70,19 @@ class PersonaProfile:
     """V2 五维人格画像"""
 
     def __init__(self):
-        self.core_character: Dict[str, float] = {
+        self.core_character: dict[str, float] = {
             "warmth": 0.8, "playfulness": 0.6, "independence": 0.7,
             "jealousy": 0.5, "stubbornness": 0.6,
         }
-        self.speaking_style: Dict[str, float] = {
+        self.speaking_style: dict[str, float] = {
             "formality": 0.3, "emoji_freq": 0.6, "sentence_length": 0.5,
             "emotional_expression": 0.7, "humor": 0.5,
         }
-        self.emotional_preference: Dict[str, float] = {
+        self.emotional_preference: dict[str, float] = {
             "expressiveness": 0.7, "empathy": 0.8, "jealousy_tendency": 0.5,
         }
-        self.interest_hobbies: List[str] = []
-        self.value_tendency: Dict[str, float] = {
+        self.interest_hobbies: list[str] = []
+        self.value_tendency: dict[str, float] = {
             "relationship": 0.9, "freedom": 0.6, "stability": 0.7,
         }
 
@@ -95,7 +95,7 @@ class PersonaProfile:
             lines.append("【兴趣爱好】" + ", ".join(self.interest_hobbies))
         return "\n".join(lines)
 
-    def all_dimensions(self) -> Dict[str, float]:
+    def all_dimensions(self) -> dict[str, float]:
         dims = {}
         dims.update(self.core_character)
         dims.update(self.speaking_style)
@@ -160,10 +160,10 @@ class PersonaEngine:
 
     def __init__(
         self,
-        config_loader: Optional[ConfigLoader] = None,
-        emotion_engine: Optional[EmotionEngine] = None,
-        tone_mimic: Optional[ToneMimic] = None,
-        llm_gateway: Optional[LLMGatewayV2] = None,
+        config_loader: ConfigLoader | None = None,
+        emotion_engine: EmotionEngine | None = None,
+        tone_mimic: ToneMimic | None = None,
+        llm_gateway: LLMGatewayV2 | None = None,
         prompt_mode: str = "layered",
         anchor_verification_enabled: bool = True,
     ):
@@ -177,22 +177,22 @@ class PersonaEngine:
         self.anchor_verification_enabled = anchor_verification_enabled
 
         self._persona = self.config.load_persona()
-        self._original_anchors: List[str] = list(
+        self._original_anchors: list[str] = list(
             self._persona.get("core_anchors", self.CORE_ANCHORS)
         )
 
         self.profile = PersonaProfile()
         self._sync_profile_from_config()
 
-        self._anchor_hashes: Dict[str, str] = {}
+        self._anchor_hashes: dict[str, str] = {}
         if self.anchor_verification_enabled:
             self._freeze_anchors()
 
-        self._prompt_cache: Dict[str, str] = {}
+        self._prompt_cache: dict[str, str] = {}
         self._prompt_cache_max = 32
 
-        self._evolution_log: List[dict] = []
-        self._base_prompt_cache: Optional[str] = None
+        self._evolution_log: list[dict] = []
+        self._base_prompt_cache: str | None = None
 
         self._emotion_style_coupler = EmotionStyleCoupler(
             config_path=str(Path(__file__).parent.parent / "config" / "emotion_style_matrix.yaml"),
@@ -217,12 +217,12 @@ class PersonaEngine:
         self._style_enhancer_v2 = None
 
         try:
-            from my_character.persona_schema import PersonaSchema
-            from my_character.dynamic_anchor import DynamicAnchorSystem
             from my_character.consistency_checker import PersonaConsistencyChecker
-            from my_character.enhanced_prompt_engine import EnhancedPromptEngine
             from my_character.contextual_behavior import ContextualBehavior
+            from my_character.dynamic_anchor import DynamicAnchorSystem
+            from my_character.enhanced_prompt_engine import EnhancedPromptEngine
             from my_character.evolution_engine import PersonaEvolutionEngine
+            from my_character.persona_schema import PersonaSchema
             from my_character.style_enhancer_v2 import StyleEnhancerV2
 
             self.schema = PersonaSchema.from_persona_config(self._persona)
@@ -306,7 +306,7 @@ class PersonaEngine:
     def get_name(self) -> str:
         return self._persona.get("name", "十四")
 
-    def get_core_anchors(self) -> List[str]:
+    def get_core_anchors(self) -> list[str]:
         return list(self._original_anchors)
 
     def get_trait(self, name: str) -> float:
@@ -324,10 +324,7 @@ class PersonaEngine:
                     "Trait %s change %.1f->%.1f exceeds 0.3 limit, clamping",
                     name, old_val, value,
                 )
-                if value > old_val:
-                    value = min(1.0, old_val + 0.3)
-                else:
-                    value = max(0.0, old_val - 0.3)
+                value = min(1.0, old_val + 0.3) if value > old_val else max(0.0, old_val - 0.3)
             self._persona["personality_traits"][name] = max(0.0, min(1.0, value))
         self.profile.set_dimension(name, max(0.0, min(1.0, value)))
 
@@ -361,26 +358,29 @@ class PersonaEngine:
 
     def build_system_prompt(
         self,
-        emotion_state: Optional[EmotionalState] = None,
+        emotion_state: EmotionalState | None = None,
         style_prompt: str = "",
-        few_shot_examples: Optional[List[str]] = None,
+        few_shot_examples: list[str] | None = None,
         chat_history: str = "",
         user_input: str = "",
-        memory_context: Optional[Dict] = None,
+        memory_context: dict | None = None,
         rag_context: str = "",
         chat_summary: str = "",
-        character_overrides: Optional[Dict] = None,
+        character_overrides: dict | None = None,
     ) -> str:
+        # 使用内容的 hash 作为缓存键，而非仅长度，避免不同内容但相同长度导致的缓存错误
+        import hashlib
         cache_key_parts = []
         if emotion_state is not None:
             if isinstance(emotion_state, dict):
                 cache_key_parts.append(f"e:{emotion_state.get('primary_emotion','')}:{emotion_state.get('affinity','')}")
             else:
                 cache_key_parts.append(f"e:{getattr(emotion_state,'primary_emotion','')}:{getattr(emotion_state,'affinity','')}")
-        cache_key_parts.append(f"sp:{len(style_prompt)}")
-        cache_key_parts.append(f"ch:{len(chat_history)}")
-        cache_key_parts.append(f"rag:{len(rag_context)}")
-        cache_key_parts.append(f"cs:{len(chat_summary)}")
+        # 使用内容 hash 而非长度，确保不同内容产生不同缓存键
+        cache_key_parts.append(f"sp:{hashlib.md5(style_prompt.encode()).hexdigest()[:8]}")
+        cache_key_parts.append(f"ch:{hashlib.md5(chat_history.encode()).hexdigest()[:8]}")
+        cache_key_parts.append(f"rag:{hashlib.md5(rag_context.encode()).hexdigest()[:8]}")
+        cache_key_parts.append(f"cs:{hashlib.md5(chat_summary.encode()).hexdigest()[:8]}")
         cache_key = "|".join(cache_key_parts)
 
         if cache_key in self._prompt_cache:
@@ -406,7 +406,7 @@ class PersonaEngine:
         self._prompt_cache[cache_key] = result
         return result
 
-    def _build_emotion_style_segment(self, emotion_state: Optional[EmotionalState]) -> str:
+    def _build_emotion_style_segment(self, emotion_state: EmotionalState | None) -> str:
         """构建情感-风格耦合指导段"""
         if not emotion_state or not self._emotion_style_coupler:
             return ""
@@ -430,7 +430,7 @@ class PersonaEngine:
             logger.debug("Emotion-style segment generation failed: %s", e)
         return ""
 
-    def validate_response(self, response: str) -> Dict[str, Any]:
+    def validate_response(self, response: str) -> dict[str, Any]:
         """运行时约束验证（供外部调用）"""
         result = self._constraint_validator.validate(response)
         return {
@@ -446,7 +446,7 @@ class PersonaEngine:
             return response
         return self._constraint_validator.auto_correct(response, result.violations)
 
-    def check_anchor_consistency(self, response: str) -> Dict[str, Any]:
+    def check_anchor_consistency(self, response: str) -> dict[str, Any]:
         """检查回复与锚点的一致性"""
         is_consistent, score, details = self._anchor_protection.check_response_consistency(response)
         return {
@@ -460,9 +460,9 @@ class PersonaEngine:
 
     def _build_legacy_prompt(
         self,
-        emotion_state: Optional[EmotionalState],
+        emotion_state: EmotionalState | None,
         style_prompt: str,
-        few_shot_examples: Optional[List[str]],
+        few_shot_examples: list[str] | None,
         chat_history: str,
         user_input: str,
     ) -> str:
@@ -529,12 +529,12 @@ class PersonaEngine:
 
     def _build_layered_prompt(
         self,
-        emotion_state: Optional[EmotionalState],
+        emotion_state: EmotionalState | None,
         style_prompt: str,
-        few_shot_examples: Optional[List[str]],
+        few_shot_examples: list[str] | None,
         chat_history: str,
         user_input: str,
-        memory_context: Optional[Dict],
+        memory_context: dict | None,
         rag_context: str,
         chat_summary: str = "",
     ) -> str:
@@ -596,7 +596,7 @@ class PersonaEngine:
         self._base_prompt_cache = prompt
         return prompt
 
-    def _build_emotion_layer(self, emotion_state: Optional[EmotionalState]) -> str:
+    def _build_emotion_layer(self, emotion_state: EmotionalState | None) -> str:
         if emotion_state is None:
             emotion_state = self.emotion.state
 
@@ -646,7 +646,7 @@ class PersonaEngine:
 
         return "\n".join(parts)
 
-    def _build_memory_layer(self, memory_context: Dict, chat_summary: str = "") -> str:
+    def _build_memory_layer(self, memory_context: dict, chat_summary: str = "") -> str:
         parts = ["# 记忆上下文"]
 
         if chat_summary:
@@ -674,9 +674,9 @@ class PersonaEngine:
 
     def _build_style_layer(
         self,
-        emotion_state: Optional[EmotionalState],
+        emotion_state: EmotionalState | None,
         style_prompt: str,
-        few_shot_examples: Optional[List[str]],
+        few_shot_examples: list[str] | None,
     ) -> str:
         parts = ["# 表达方式"]
 
@@ -784,7 +784,7 @@ class PersonaEngine:
 
     # ── 人格演化双接口 ────────────────────────────────────────
 
-    def evolve(self, interaction_summary: Dict[str, Any]) -> Dict[str, Any]:
+    def evolve(self, interaction_summary: dict[str, Any]) -> dict[str, Any]:
         """V1批量演化接口"""
         before = copy.deepcopy(self._persona.get("personality_traits", {}))
 
@@ -848,7 +848,7 @@ class PersonaEngine:
         logger.info("Persona evolved: %s %.3f -> %.3f (delta=%.4f)", dimension, before, after, delta)
         return True
 
-    def get_evolution_log(self, limit: int = 50) -> List[dict]:
+    def get_evolution_log(self, limit: int = 50) -> list[dict]:
         return self._evolution_log[-limit:]
 
     # ── 回滚 ──────────────────────────────────────────────────

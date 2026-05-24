@@ -8,8 +8,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger("contextual_behavior")
 
@@ -33,7 +33,7 @@ _AST_OPS = {
 }
 
 
-def _safe_eval_ast(node: ast.AST, ctx: Dict[str, Any]) -> Any:
+def _safe_eval_ast(node: ast.AST, ctx: dict[str, Any]) -> Any:
     """使用 AST 节点遍历安全求值，替代 eval()"""
     if isinstance(node, ast.Constant):
         return node.value
@@ -49,7 +49,7 @@ def _safe_eval_ast(node: ast.AST, ctx: Dict[str, Any]) -> Any:
         )
     if isinstance(node, ast.Compare):
         left = _safe_eval_ast(node.left, ctx)
-        for op, comp in zip(node.ops, node.comparators):
+        for op, comp in zip(node.ops, node.comparators, strict=False):
             if type(op) in _AST_OPS:
                 left = _AST_OPS[type(op)](left, _safe_eval_ast(comp, ctx))
             else:
@@ -79,7 +79,7 @@ def _safe_eval_ast(node: ast.AST, ctx: Dict[str, Any]) -> Any:
 @dataclass
 class BehaviorRule:
     condition: str
-    modifiers: List[str]
+    modifiers: list[str]
     priority: int = 5
 
     _ALLOWED_NAMES = frozenset({
@@ -87,9 +87,8 @@ class BehaviorRule:
         "True", "False", "None",
     })
 
-    def evaluate(self, context_vars: Dict[str, Any]) -> bool:
+    def evaluate(self, context_vars: dict[str, Any]) -> bool:
         import ast
-        import operator
 
         try:
             tree = ast.parse(self.condition, mode="eval")
@@ -159,8 +158,8 @@ DEFAULT_BEHAVIOR_RULES = [
 class ContextualBehavior:
     """情境化行为 — 根据情境因素生成行为修饰"""
 
-    def __init__(self, rules: Optional[List[BehaviorRule]] = None):
-        self._rules: List[BehaviorRule] = rules or list(DEFAULT_BEHAVIOR_RULES)
+    def __init__(self, rules: list[BehaviorRule] | None = None):
+        self._rules: list[BehaviorRule] = rules or list(DEFAULT_BEHAVIOR_RULES)
         self._rules.sort(key=lambda r: r.priority, reverse=True)
 
     def generate_behavior_prompt(self, context: Any) -> str:
@@ -187,8 +186,8 @@ class ContextualBehavior:
             f"- {m}" for m in unique_modifiers[:8]
         )
 
-    def _extract_context_vars(self, context: Any) -> Dict[str, Any]:
-        from my_character.enhanced_prompt_engine import PromptContext, TimeContext
+    def _extract_context_vars(self, context: Any) -> dict[str, Any]:
+        from my_character.enhanced_prompt_engine import PromptContext
 
         try:
             from my_character.persona_utils import extract_context_vars as _extract

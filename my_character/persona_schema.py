@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger("persona_schema")
 
@@ -19,7 +19,7 @@ class EvolutionConfig:
     enabled: bool = True
     max_delta: float = 0.05
     cooldown_rounds: int = 10
-    protected_dimensions: Tuple[str, ...] = ("warmth",)
+    protected_dimensions: tuple[str, ...] = ("warmth",)
 
 
 @dataclass
@@ -34,9 +34,9 @@ class AnchorConfig:
 @dataclass
 class ValidationResult:
     is_valid: bool
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
-    anchor_conflicts: List[Tuple[str, str]] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    anchor_conflicts: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -44,16 +44,16 @@ class PersonaSchema:
     """统一人设模式 — 单一真值源"""
     name: str
     version: str = "2.0"
-    core_anchors: Tuple[str, ...] = ()
-    personality_traits: Dict[str, float] = field(default_factory=dict)
-    speaking_style: Dict[str, float] = field(default_factory=dict)
-    emotional_preference: Dict[str, float] = field(default_factory=dict)
-    value_tendency: Dict[str, float] = field(default_factory=dict)
-    interest_hobbies: Tuple[str, ...] = ()
-    communication_templates: Dict[str, str] = field(default_factory=dict)
+    core_anchors: tuple[str, ...] = ()
+    personality_traits: dict[str, float] = field(default_factory=dict)
+    speaking_style: dict[str, float] = field(default_factory=dict)
+    emotional_preference: dict[str, float] = field(default_factory=dict)
+    value_tendency: dict[str, float] = field(default_factory=dict)
+    interest_hobbies: tuple[str, ...] = ()
+    communication_templates: dict[str, str] = field(default_factory=dict)
     evolution_config: EvolutionConfig = field(default_factory=EvolutionConfig)
     anchor_config: AnchorConfig = field(default_factory=AnchorConfig)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> ValidationResult:
         errors = []
@@ -85,7 +85,7 @@ class PersonaSchema:
             anchor_conflicts=anchor_conflicts,
         )
 
-    def merge(self, other: PersonaSchema, weights: Dict[str, float] = None) -> PersonaSchema:
+    def merge(self, other: PersonaSchema, weights: dict[str, float] = None) -> PersonaSchema:
         w = weights or {"self": 0.6, "other": 0.4}
         ws = w.get("self", 0.6)
         wo = w.get("other", 0.4)
@@ -161,7 +161,7 @@ class PersonaSchema:
         )
 
     @classmethod
-    def from_persona_profile(cls, profile: Any, anchors: List[str], name: str) -> PersonaSchema:
+    def from_persona_profile(cls, profile: Any, anchors: list[str], name: str) -> PersonaSchema:
         traits = {}
         if hasattr(profile, "core_character"):
             traits = dict(profile.core_character)

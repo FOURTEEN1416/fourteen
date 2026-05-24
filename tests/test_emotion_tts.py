@@ -1,5 +1,6 @@
 """单元测试: 情感语音映射器"""
 import sys
+
 sys.path.insert(0, ".")
 
 from shisi.voice_ext.emotion_tts import EmotionVoiceMapper, VoiceEnhancer

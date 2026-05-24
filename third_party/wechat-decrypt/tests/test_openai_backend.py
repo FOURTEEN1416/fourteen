@@ -64,9 +64,8 @@ class OpenAIBackendPrivacyTests(unittest.TestCase):
         fake_openai.RateLimitError = type("RateLimitError", (Exception,), {})
         fake_openai.APIError = type("APIError", (Exception,), {})
 
-        with patch.dict(sys.modules, {"openai": fake_openai}):
-            with self.assertRaises(RuntimeError) as ctx:
-                mcp_server._transcribe_openai(big_path)
+        with patch.dict(sys.modules, {"openai": fake_openai}), self.assertRaises(RuntimeError) as ctx:
+            mcp_server._transcribe_openai(big_path)
 
         self.assertIn("25MB", str(ctx.exception))
         fake_openai.OpenAI.assert_not_called()

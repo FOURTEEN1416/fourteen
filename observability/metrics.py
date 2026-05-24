@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Dict
 
 logger = logging.getLogger("metrics")
 
@@ -12,7 +11,7 @@ try:
 except ImportError:
     HAS_PROMETHEUS = False
 
-_metrics: Dict = {}
+_metrics: dict = {}
 _lock = threading.Lock()
 
 

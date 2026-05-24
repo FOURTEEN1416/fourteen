@@ -21,7 +21,6 @@ import json
 import logging
 import sqlite3
 import threading
-from typing import Dict, List, Optional
 
 from .models import (
     OceanTraits,
@@ -77,8 +76,8 @@ class UserPersonaBank:
         self.db_path = db_path
         self.history_limit = history_limit
         self._lock = threading.Lock()
-        self._cache: Dict[str, UserPersona] = {}
-        self._conn: Optional[sqlite3.Connection] = None
+        self._cache: dict[str, UserPersona] = {}
+        self._conn: sqlite3.Connection | None = None
 
         self._init_db()
         self._load_all()
@@ -103,13 +102,13 @@ class UserPersonaBank:
         except Exception as e:
             logger.error("PersonaBank DB init error: %s", e)
 
-    def get_connection(self) -> Optional[sqlite3.Connection]:
+    def get_connection(self) -> sqlite3.Connection | None:
         """获取数据库连接（给外部复用）"""
         return self._conn
 
     # ── CRUD ──
 
-    def get_persona(self, user_id: str = "default") -> Optional[UserPersona]:
+    def get_persona(self, user_id: str = "default") -> UserPersona | None:
         """获取用户人格画像（优先缓存）"""
         if user_id in self._cache:
             return self._cache[user_id]
@@ -227,7 +226,7 @@ class UserPersonaBank:
 
     # ── 内部方法 ──
 
-    def _load_from_db(self, user_id: str) -> Optional[UserPersona]:
+    def _load_from_db(self, user_id: str) -> UserPersona | None:
         if not self._conn:
             return None
         try:
@@ -267,7 +266,7 @@ class UserPersonaBank:
 
     def get_recent_snapshots(
         self, user_id: str = "default", limit: int = 10
-    ) -> List[UserPersonaSnapshot]:
+    ) -> list[UserPersonaSnapshot]:
         """获取最近的检测快照（用于趋势分析）"""
         if not self._conn:
             return []

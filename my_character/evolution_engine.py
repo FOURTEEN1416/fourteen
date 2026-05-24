@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import time as time_mod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from my_character.emotion_engine import CompoundEmotionalState, EmotionEngine
@@ -23,8 +23,8 @@ logger = logging.getLogger("evolution_engine")
 
 @dataclass
 class EvolutionContext:
-    emotion_state: Optional[CompoundEmotionalState] = None
-    recent_emotion_events: List[Any] = field(default_factory=list)
+    emotion_state: CompoundEmotionalState | None = None
+    recent_emotion_events: list[Any] = field(default_factory=list)
     chat_round: int = 0
     affinity_change: int = 0
 
@@ -40,7 +40,7 @@ class EvolutionTrigger:
 @dataclass
 class EvolutionResult:
     triggered: bool
-    trigger: Optional[EvolutionTrigger] = None
+    trigger: EvolutionTrigger | None = None
     dimension: str = ""
     before: float = 0.0
     after: float = 0.0
@@ -63,10 +63,10 @@ class PersonaEvolutionEngine:
 
     def __init__(
         self,
-        persona_engine: Optional[PersonaEngine] = None,
-        emotion_engine: Optional[EmotionEngine] = None,
-        emotion_memory: Optional[EmotionMemorySystem] = None,
-        evolution_config: Optional[Dict] = None,
+        persona_engine: PersonaEngine | None = None,
+        emotion_engine: EmotionEngine | None = None,
+        emotion_memory: EmotionMemorySystem | None = None,
+        evolution_config: dict | None = None,
     ):
         self._persona = persona_engine
         self._emotion = emotion_engine
@@ -74,13 +74,13 @@ class PersonaEvolutionEngine:
         self._config = evolution_config
         self._cooldown_remaining: int = 0
         self._last_evolution_time: float = 0.0
-        self._evolution_history: List[EvolutionResult] = []
+        self._evolution_history: list[EvolutionResult] = []
 
     def set_engines(self, persona_engine: PersonaEngine, emotion_engine: EmotionEngine) -> None:
         self._persona = persona_engine
         self._emotion = emotion_engine
 
-    def check_and_evolve(self, context: EvolutionContext) -> Optional[EvolutionResult]:
+    def check_and_evolve(self, context: EvolutionContext) -> EvolutionResult | None:
         """检查是否满足自动演化条件，满足则执行单维度演化
 
         Args:
@@ -113,7 +113,7 @@ class PersonaEvolutionEngine:
             return False
         return True
 
-    def _detect_evolution_trigger(self, context: EvolutionContext) -> Optional[EvolutionTrigger]:
+    def _detect_evolution_trigger(self, context: EvolutionContext) -> EvolutionTrigger | None:
         trigger = self._detect_emotion_pattern_trigger(context)
         if trigger:
             return trigger
@@ -128,7 +128,7 @@ class PersonaEvolutionEngine:
 
         return None
 
-    def _detect_emotion_pattern_trigger(self, context: EvolutionContext) -> Optional[EvolutionTrigger]:
+    def _detect_emotion_pattern_trigger(self, context: EvolutionContext) -> EvolutionTrigger | None:
         if not context.recent_emotion_events:
             if self._emotion_memory and hasattr(self._emotion_memory, "detect_patterns"):
                 patterns = self._emotion_memory.detect_patterns(window=50)
@@ -145,7 +145,7 @@ class PersonaEvolutionEngine:
                             )
             return None
 
-        emotion_counts: Dict[str, int] = {}
+        emotion_counts: dict[str, int] = {}
         for event in context.recent_emotion_events:
             emotion = event.emotion if hasattr(event, "emotion") else str(event)
             emotion_counts[emotion] = emotion_counts.get(emotion, 0) + 1
@@ -164,7 +164,7 @@ class PersonaEvolutionEngine:
                     )
         return None
 
-    def _detect_affinity_change_trigger(self, context: EvolutionContext) -> Optional[EvolutionTrigger]:
+    def _detect_affinity_change_trigger(self, context: EvolutionContext) -> EvolutionTrigger | None:
         if context.affinity_change > 0:
             return EvolutionTrigger(
                 type="affinity_change",
@@ -174,7 +174,7 @@ class PersonaEvolutionEngine:
             )
         return None
 
-    def _detect_time_period_trigger(self, context: EvolutionContext) -> Optional[EvolutionTrigger]:
+    def _detect_time_period_trigger(self, context: EvolutionContext) -> EvolutionTrigger | None:
         if context.chat_round > 0 and context.chat_round % 50 == 0:
             return EvolutionTrigger(
                 type="time_period",
@@ -221,8 +221,8 @@ class PersonaEvolutionEngine:
                 try:
                     self._persona.evolve_dimension(trigger.dimension, after, reason=trigger.reason)
                 except Exception as e:
-                    logger.error("Evolve dimension failed: %s", e)
-                    return EvolutionResult(triggered=False, reason=str(e))
+                    logger.exception("Evolve dimension failed: %s", e)
+                    return EvolutionResult(triggered=False, reason="evolution_failed")
         elif hasattr(self._persona, "set_trait"):
             self._persona.set_trait(trigger.dimension, after)
 
@@ -245,7 +245,7 @@ class PersonaEvolutionEngine:
         )
         return result
 
-    def get_evolution_history(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def get_evolution_history(self, limit: int = 20) -> list[dict[str, Any]]:
         return [
             {
                 "dimension": r.dimension,

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import logging
-import subprocess
 import shutil
-from typing import Optional
+import subprocess
 
 logger = logging.getLogger("voice.audio_converter")
 
@@ -14,10 +13,10 @@ class AudioFormatConverter:
     def __init__(self, ffmpeg_path: str = "ffmpeg", silk_sample_rate: int = 24000):
         self._ffmpeg_path = ffmpeg_path
         self._silk_sample_rate = silk_sample_rate
-        self._has_ffmpeg: Optional[bool] = None
-        self._has_silk: Optional[bool] = None
+        self._has_ffmpeg: bool | None = None
+        self._has_silk: bool | None = None
 
-    def to_silk(self, audio_bytes: bytes, source_format: str = "mp3") -> Optional[bytes]:
+    def to_silk(self, audio_bytes: bytes, source_format: str = "mp3") -> bytes | None:
         wav_bytes = self._ffmpeg_convert(
             audio_bytes, source_format, "wav",
             sample_rate=self._silk_sample_rate, channels=1,
@@ -26,13 +25,13 @@ class AudioFormatConverter:
             return None
         return self._wav_to_silk(wav_bytes)
 
-    def to_amr(self, audio_bytes: bytes, source_format: str = "mp3") -> Optional[bytes]:
+    def to_amr(self, audio_bytes: bytes, source_format: str = "mp3") -> bytes | None:
         return self._ffmpeg_convert(
             audio_bytes, source_format, "amr",
             sample_rate=8000, channels=1,
         )
 
-    def _wav_to_silk(self, wav_bytes: bytes) -> Optional[bytes]:
+    def _wav_to_silk(self, wav_bytes: bytes) -> bytes | None:
         try:
             from pysilk import encode
             return encode(wav_bytes, sample_rate=self._silk_sample_rate)
@@ -43,7 +42,7 @@ class AudioFormatConverter:
             logger.warning("SILK编码失败: %s", e)
             return None
 
-    def _silk_cli_encode(self, wav_bytes: bytes) -> Optional[bytes]:
+    def _silk_cli_encode(self, wav_bytes: bytes) -> bytes | None:
         import tempfile
         try:
             silk_bin = shutil.which("silk_encoder")
@@ -78,7 +77,7 @@ class AudioFormatConverter:
         target_format: str,
         sample_rate: int = 16000,
         channels: int = 1,
-    ) -> Optional[bytes]:
+    ) -> bytes | None:
         if not audio_bytes:
             return None
         try:
