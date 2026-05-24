@@ -209,7 +209,10 @@ class PersonaConsistencyChecker:
         return "\n".join(parts) if parts else ""
 
     def _build_anchor_context(self, context: ConsistencyContext) -> Any:
-        from my_character.dynamic_anchor import AnchorContext
+        try:
+            from my_character.dynamic_anchor import AnchorContext
+        except ImportError:
+            return None
 
         affinity = context.affinity
         emotion_type = "平常"

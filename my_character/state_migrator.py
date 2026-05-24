@@ -60,6 +60,7 @@ class StateMigrator:
 
     SOFT_AFFINITY_FACTOR = 0.7
     MAX_LOG_SIZE = 50
+    MAX_SNAPSHOTS = 20
 
     def __init__(
         self,
@@ -108,6 +109,9 @@ class StateMigrator:
                 timestamp=time_mod.time(),
             )
             self._snapshots[persona_id] = snap
+            if len(self._snapshots) > self.MAX_SNAPSHOTS:
+                oldest_key = next(iter(self._snapshots))
+                del self._snapshots[oldest_key]
             logger.info("Snapshot created: %s, affinity=%d", persona_id, affinity)
             return snap
         except Exception as e:

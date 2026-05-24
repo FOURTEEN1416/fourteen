@@ -205,51 +205,74 @@ class PersonaEngine:
             self.get_name(), self.prompt_mode, self.anchor_verification_enabled,
         )
 
-        from my_character.persona_schema import PersonaSchema
-        from my_character.dynamic_anchor import DynamicAnchorSystem
-        from my_character.consistency_checker import PersonaConsistencyChecker
-        from my_character.enhanced_prompt_engine import EnhancedPromptEngine
-        from my_character.contextual_behavior import ContextualBehavior
-        from my_character.evolution_engine import PersonaEvolutionEngine
-        from my_character.style_enhancer_v2 import StyleEnhancerV2
+        self.schema = None
+        self._dynamic_anchors = None
+        self._consistency_checker = None
+        self._contextual_behavior = None
+        self._enhanced_prompt_engine = None
+        self._evolution_engine = None
+        self._style_enhancer_v2 = None
 
-        self.schema = PersonaSchema.from_persona_config(self._persona)
-        self._dynamic_anchors = DynamicAnchorSystem(base_anchors=self._original_anchors)
-        self._consistency_checker = PersonaConsistencyChecker(
-            schema=self.schema,
-            dynamic_anchors=self._dynamic_anchors,
-            style_coupler=self._emotion_style_coupler,
-        )
-        self._contextual_behavior = ContextualBehavior()
-        self._enhanced_prompt_engine = EnhancedPromptEngine(
-            persona_engine=self,
-            style_coupler=self._emotion_style_coupler,
-            contextual_behavior=self._contextual_behavior,
-            dynamic_anchors=self._dynamic_anchors,
-            constraint_validator=self._constraint_validator,
-        )
-        self._evolution_engine = PersonaEvolutionEngine(persona_engine=self, emotion_engine=self.emotion)
-        self._style_enhancer_v2 = StyleEnhancerV2(base_enhancer=None)
+        try:
+            from my_character.persona_schema import PersonaSchema
+            from my_character.dynamic_anchor import DynamicAnchorSystem
+            from my_character.consistency_checker import PersonaConsistencyChecker
+            from my_character.enhanced_prompt_engine import EnhancedPromptEngine
+            from my_character.contextual_behavior import ContextualBehavior
+            from my_character.evolution_engine import PersonaEvolutionEngine
+            from my_character.style_enhancer_v2 import StyleEnhancerV2
+
+            self.schema = PersonaSchema.from_persona_config(self._persona)
+            self._dynamic_anchors = DynamicAnchorSystem(base_anchors=self._original_anchors)
+            self._consistency_checker = PersonaConsistencyChecker(
+                schema=self.schema,
+                dynamic_anchors=self._dynamic_anchors,
+                style_coupler=self._emotion_style_coupler,
+            )
+            self._contextual_behavior = ContextualBehavior()
+            self._enhanced_prompt_engine = EnhancedPromptEngine(
+                persona_engine=self,
+                style_coupler=self._emotion_style_coupler,
+                contextual_behavior=self._contextual_behavior,
+                dynamic_anchors=self._dynamic_anchors,
+                constraint_validator=self._constraint_validator,
+            )
+            self._evolution_engine = PersonaEvolutionEngine(persona_engine=self, emotion_engine=self.emotion)
+            self._style_enhancer_v2 = StyleEnhancerV2(base_enhancer=None)
+        except ImportError as e:
+            logger.warning("Persona enhancement modules not available, running without: %s", e)
 
     def check_consistency(self, response: str, emotion_state=None, chat_round: int = 0) -> Any:
-        from my_character.consistency_checker import ConsistencyContext
-        ctx = ConsistencyContext(
-            emotion_state=emotion_state or (self.emotion._state if self.emotion else None),
-            chat_round=chat_round,
-            affinity=self.emotion._state.affinity if self.emotion and hasattr(self.emotion, "_state") else 0,
-        )
-        return self._consistency_checker.check(response, ctx)
+        if self._consistency_checker is None:
+            return None
+        try:
+            from my_character.consistency_checker import ConsistencyContext
+            ctx = ConsistencyContext(
+                emotion_state=emotion_state or (self.emotion._state if self.emotion else None),
+                chat_round=chat_round,
+                affinity=self.emotion._state.affinity if self.emotion and hasattr(self.emotion, "_state") else 0,
+            )
+            return self._consistency_checker.check(response, ctx)
+        except Exception as e:
+            logger.debug("check_consistency failed: %s", e)
+            return None
 
     def auto_evolve(self, context: Any = None) -> Any:
-        from my_character.evolution_engine import EvolutionContext
-        if context is None:
-            ctx = EvolutionContext(
-                emotion_state=self.emotion._state if self.emotion else None,
-                chat_round=getattr(self.emotion, "_total_chats", 0),
-            )
-        else:
-            ctx = context
-        return self._evolution_engine.check_and_evolve(ctx)
+        if self._evolution_engine is None:
+            return None
+        try:
+            from my_character.evolution_engine import EvolutionContext
+            if context is None:
+                ctx = EvolutionContext(
+                    emotion_state=self.emotion._state if self.emotion else None,
+                    chat_round=getattr(self.emotion, "_total_chats", 0),
+                )
+            else:
+                ctx = context
+            return self._evolution_engine.check_and_evolve(ctx)
+        except Exception as e:
+            logger.debug("auto_evolve failed: %s", e)
+            return None
 
     # ── 配置同步 ──────────────────────────────────────────────
 

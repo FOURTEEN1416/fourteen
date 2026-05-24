@@ -203,10 +203,13 @@ class PersonaEvolutionEngine:
 
         if hasattr(self._persona, "evolve_dimension"):
             try:
-                self._persona.evolve_dimension(trigger.dimension, after, reason=trigger.reason)
-            except Exception as e:
-                logger.error("Evolve dimension failed: %s", e)
-                return EvolutionResult(triggered=False, reason=str(e))
+                self._persona.evolve_dimension(trigger.dimension, after, trigger.reason)
+            except TypeError:
+                try:
+                    self._persona.evolve_dimension(trigger.dimension, after, reason=trigger.reason)
+                except Exception as e:
+                    logger.error("Evolve dimension failed: %s", e)
+                    return EvolutionResult(triggered=False, reason=str(e))
         elif hasattr(self._persona, "set_trait"):
             self._persona.set_trait(trigger.dimension, after)
 

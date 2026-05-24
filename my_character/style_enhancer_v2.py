@@ -82,7 +82,7 @@ class StyleEnhancerV2:
         base_result = None
         if self._base and hasattr(self._base, "enhance_style"):
             try:
-                base_result = self._base.enhance_style(base_style, chat_history, persona_style)
+                base_result = self._base.enhance_style(base_style, chat_history=chat_history, persona_style=persona_style)
             except Exception as e:
                 logger.debug("Base enhancer failed: %s", e)
 
