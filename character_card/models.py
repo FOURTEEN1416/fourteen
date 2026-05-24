@@ -1,6 +1,9 @@
 """
 角色卡数据模型 - 直接复用SillyTavern V1/V2/V3格式
 
+@deprecated 此模块已弃用，请使用 shisi.core.models.character_aggregate.CharacterAggregate
+EmotionStyleMap → shisi.core.models.persona_profile.PersonaProfile.from_emotion_style_map()
+
 设计原则:
   - 数据结构与SillyTavern完全兼容
   - 使用dataclass而非pydantic（避免额外依赖，与项目现有风格一致）

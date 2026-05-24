@@ -31,6 +31,7 @@ class Orchestrator:
         pii_anonymizer: Optional[PIIAnonymizer] = None,
         injection_detector: Optional[PromptInjectionDetector] = None,
         character_manager=None,
+        character_service=None,
     ):
         self._llm = llm_gateway
         self._emotion = emotion_engine
@@ -44,6 +45,7 @@ class Orchestrator:
         self._pii = pii_anonymizer or PIIAnonymizer(enabled=False)
         self._injection = injection_detector or PromptInjectionDetector(enabled=False)
         self._character_manager = character_manager
+        self._character_service = character_service
         self._state_lock = threading.RLock()
         self._async_lock = asyncio.Lock()
         self._last_chat_time = datetime.now()
