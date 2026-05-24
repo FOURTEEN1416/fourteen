@@ -54,7 +54,7 @@ class CharacterStore:
             ).fetchone()
             if not row:
                 return None
-            from .chara_card_v2 import ParserDispatcher
+            from .character_card_v2 import ParserDispatcher
             data = json.loads(row["chara_card_json"])
             data.pop("_format", None)
             card, _ = ParserDispatcher.parse(data)

@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from ..vital_signs.vital_engine import VitalSignsEngine
 from .common import ApiResponse
 
-logger = logging.getLogger("shisi.api.vital_routes")
+logger = logging.getLogger("shisi.api.vital_signs_routes")
 
 router = APIRouter(prefix="/api/shisi/vital-signs", tags=["vital-signs"])
 

@@ -8,7 +8,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..character.chara_card_v2 import to_persona_config
+from ..character.character_card_v2 import to_persona_config
 from ..character.manager import CharacterManager
 from ..character.models import CharaCardV2
 from .common import ApiResponse

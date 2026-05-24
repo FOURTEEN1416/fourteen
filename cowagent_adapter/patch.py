@@ -129,7 +129,7 @@ def _register_bot_type():
 
     def patched_create_bot(bot_type):
         if bot_type == BOT_TYPE:
-            from cowagent_adapter._globals import bot_registry
+            from cowagent_adapter.shared_state import bot_registry
             instance = bot_registry.get()
             if instance is not None:
                 return instance

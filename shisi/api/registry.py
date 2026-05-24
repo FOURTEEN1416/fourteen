@@ -28,7 +28,7 @@ from . import (
     stats_routes,
     sticker_routes,
     training_routes,
-    vital_routes,
+    vital_signs_routes,
 )
 
 logger = logging.getLogger("shisi.api.registry")
@@ -97,7 +97,7 @@ def _mount_routes(app: FastAPI, reg: AiyuRegistry) -> None:
     memory_routes.set_managers(reg.favorite_manager, reg.forward_manager)  # type: ignore
     emotion_stage_routes.set_engine(reg.stage_engine)  # type: ignore
     affinity_routes.set_enhancer(reg.affinity_enhancer)  # type: ignore
-    vital_routes.set_engine(reg.vital_engine)  # type: ignore
+    vital_signs_routes.set_engine(reg.vital_engine)  # type: ignore
     persona_routes.set_manager(reg.character_manager)  # type: ignore
     stats_routes.set_service(reg.analytics_service)  # type: ignore
     training_routes.set_manager(reg.training_manager)  # type: ignore
@@ -107,7 +107,7 @@ def _mount_routes(app: FastAPI, reg: AiyuRegistry) -> None:
     app.include_router(memory_routes.router)
     app.include_router(emotion_stage_routes.router)
     app.include_router(affinity_routes.router)
-    app.include_router(vital_routes.router)
+    app.include_router(vital_signs_routes.router)
     app.include_router(persona_routes.router)
     app.include_router(stats_routes.router)
     app.include_router(training_routes.router)
