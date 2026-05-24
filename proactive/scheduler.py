@@ -59,14 +59,6 @@ class ProactiveScheduler:
 
         logger.info("ProactiveScheduler initialized (APScheduler=%s)", HAS_APSCHEDULER)
 
-    def set_ws_server(self, ws_server) -> None:
-        """注入WebSocket服务器实例"""
-        self._ws_server = ws_server
-
-    def set_wechat_connector(self, wechat_connector) -> None:
-        """注入微信连接器实例"""
-        self._wechat_connector = wechat_connector
-
     def _safe_job_wrapper(self, job_fn: Callable, job_name: str) -> Callable:
         def wrapper(*args, **kwargs):
             try:

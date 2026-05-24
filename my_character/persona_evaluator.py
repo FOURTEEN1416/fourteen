@@ -92,9 +92,16 @@ class PersonaEvaluator:
     def _eval_anchor_fidelity(self, anchors: List[str], response: str) -> float:
         if self._anchor_checker and anchors:
             try:
-                is_consistent, score, _ = self._anchor_checker.check_response_consistency(
+                is_consistent, score, results = self._anchor_checker.check_response_consistency(
                     response, anchors,
                 )
+                if not is_consistent:
+                    score = min(score, 0.4)
+                    keyword_violations = any(
+                        getattr(r, "keyword_violation", False) for r in results
+                    )
+                    if keyword_violations:
+                        score *= 0.5
                 return score
             except Exception:
                 pass

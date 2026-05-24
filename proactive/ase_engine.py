@@ -446,6 +446,13 @@ class FrequencyAdapter:
             "min_weekly": self.min_weekly,
         }
 
+    def from_dict(self, data: Dict[str, Any]) -> None:
+        self._current_level = data.get("current_level", self._current_level)
+        self._unanswered_count = data.get("unanswered_count", self._unanswered_count)
+        self.normal_daily = data.get("normal_daily", self.normal_daily)
+        self.low_daily = data.get("low_daily", self.low_daily)
+        self.min_weekly = data.get("min_weekly", self.min_weekly)
+
 
 # ═══════════════════════════════════════════════════════════════
 #  上下文分析器（6时段+工作日/周末）
@@ -672,6 +679,18 @@ class FrequencyController:
             "last_sent_time": self._last_sent_time.isoformat() if self._last_sent_time else None,
             "last_reply_time": self._last_reply_time.isoformat() if self._last_reply_time else None,
         }
+
+    def from_dict(self, data: Dict[str, Any]) -> None:
+        self._daily_count = data.get("daily_count", self._daily_count)
+        self.max_daily = data.get("max_daily", self.max_daily)
+        if "min_interval_minutes" in data:
+            self.min_interval = timedelta(minutes=data["min_interval_minutes"])
+        if "cooldown_minutes" in data:
+            self.cooldown = timedelta(minutes=data["cooldown_minutes"])
+        if data.get("last_sent_time"):
+            self._last_sent_time = datetime.fromisoformat(data["last_sent_time"])
+        if data.get("last_reply_time"):
+            self._last_reply_time = datetime.fromisoformat(data["last_reply_time"])
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -927,8 +946,9 @@ class ASEEngine:
 
         start, end = self._config["night_hours"]
         if hour >= start or hour < 1:
-            if self._last_night_date != today:
-                self._last_night_date = today
+            check_date = today if hour >= start else (today - timedelta(days=1))
+            if self._last_night_date != check_date:
+                self._last_night_date = check_date
                 templates = _get_messages("night_greeting", affinity)
                 msg = random.choice(templates) if templates else "晚安"
                 self.urgency.scene_bonus = 1.5
@@ -1012,9 +1032,12 @@ class ASEEngine:
             generated_by = "template"
 
         if self._is_duplicate(content):
-            content = self._message_generator.generate_from_template(
-                msg_type, self._affinity_level,
-            )
+            for _ in range(3):
+                content = self._message_generator.generate_from_template(
+                    msg_type, self._affinity_level,
+                )
+                if not self._is_duplicate(content):
+                    break
             generated_by = "template_fallback"
 
         result = {
@@ -1095,17 +1118,25 @@ class ASEEngine:
                 self.urgency.context_bonus = urgency_data.get("context_bonus", 0.0)
 
             if state.get("last_morning_date"):
-                from datetime import date
-                self._last_morning_date = date.fromisoformat(state["last_morning_date"])
+                self._last_morning_date = datetime.strptime(state["last_morning_date"], "%Y-%m-%d").date()
             if state.get("last_night_date"):
-                from datetime import date
-                self._last_night_date = date.fromisoformat(state["last_night_date"])
+                self._last_night_date = datetime.strptime(state["last_night_date"], "%Y-%m-%d").date()
             if state.get("last_meal_date"):
-                from datetime import date
-                self._last_meal_date = date.fromisoformat(state["last_meal_date"])
+                self._last_meal_date = datetime.strptime(state["last_meal_date"], "%Y-%m-%d").date()
 
             recent = state.get("recent_messages", [])
             self._recent_messages = deque(recent[-50:], maxlen=50)
+
+            if self._freq_controller and state.get("freq_controller"):
+                try:
+                    self._freq_controller.from_dict(state["freq_controller"])
+                except Exception as e:
+                    logger.warning("Failed to restore freq_controller: %s", e)
+            if self._freq_adapter and state.get("freq_adapter"):
+                try:
+                    self._freq_adapter.from_dict(state["freq_adapter"])
+                except Exception as e:
+                    logger.warning("Failed to restore freq_adapter: %s", e)
 
             logger.info("State loaded from %s (daily_count=%d)", self._state_path, self._daily_message_count)
         except Exception as e:

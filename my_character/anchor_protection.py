@@ -195,10 +195,12 @@ AI回复：{response}
             logger.debug("LLM semantic check failed: %s", e)
             return None
 
-    def generate_reinforcement_prompt(self, anchors: Optional[List[str]] = None) -> str:
+    def generate_reinforcement_prompt(self, anchors: Optional[List[str]] = None, max_length: int = 200) -> str:
         """生成锚点强化提示词（用于长对话中周期性注入）"""
         check_anchors = anchors or self._anchors
         if not check_anchors:
             return ""
         anchor_text = "；".join(check_anchors)
+        if len(anchor_text) > max_length:
+            anchor_text = anchor_text[:max_length] + "..."
         return f"【角色锚点提醒】记住你的核心性格：{anchor_text}。无论对话如何发展，都必须保持这些核心特征。"
