@@ -10,7 +10,6 @@ import os
 import runpy
 import sys
 
-
 MAIN_COMMANDS = {"decrypt", "export", "all", "status", "-s", "decode-images"}
 HELP_COMMANDS = {"help", "-h", "--help"}
 SCRIPT_ENTRYPOINTS = {

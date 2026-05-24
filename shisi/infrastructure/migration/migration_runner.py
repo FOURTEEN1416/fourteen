@@ -8,7 +8,6 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
 
 from shisi.core.models.character_aggregate import CharacterAggregate
 from shisi.infrastructure.persistence.sqlite_repository import SQLiteCharacterRepository
@@ -18,9 +17,9 @@ from shisi.infrastructure.persistence.sqlite_repository import SQLiteCharacterRe
 class MigrationResult:
     total_migrated: int = 0
     total_failed: int = 0
-    errors: List[tuple] = field(default_factory=list)
-    active_character: Optional[str] = None
-    backup_path: Optional[str] = None
+    errors: list[tuple] = field(default_factory=list)
+    active_character: str | None = None
+    backup_path: str | None = None
 
 
 def run(db_path: Path = Path("data/sqlite.db"), char_dir: Path = Path("data/characters")) -> MigrationResult:
@@ -77,7 +76,7 @@ def run(db_path: Path = Path("data/sqlite.db"), char_dir: Path = Path("data/char
 
     for file_path in char_files:
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 file_data = json.load(f)
             char_id = file_path.stem
             if char_id in migrated_ids:

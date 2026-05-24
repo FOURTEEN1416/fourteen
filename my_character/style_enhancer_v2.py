@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("style_enhancer_v2")
 
@@ -17,15 +17,15 @@ logger = logging.getLogger("style_enhancer_v2")
 @dataclass
 class DimensionDependency:
     dimension: str
-    depends_on: List[str]
+    depends_on: list[str]
     formula: str = ""
 
 
 @dataclass
 class EnhancedStyleV2:
     base: Any
-    cross_dimensions: Dict[str, float] = field(default_factory=dict)
-    dimensions: Dict[str, float] = field(default_factory=dict)
+    cross_dimensions: dict[str, float] = field(default_factory=dict)
+    dimensions: dict[str, float] = field(default_factory=dict)
 
     def to_prompt_segment(self) -> str:
         parts = []
@@ -67,17 +67,17 @@ class StyleEnhancerV2:
         "time_style_cross",
     ]
 
-    def __init__(self, base_enhancer: Optional[Any] = None):
+    def __init__(self, base_enhancer: Any | None = None):
         self._base = base_enhancer
-        self._dimension_dependencies: List[DimensionDependency] = list(DEFAULT_DEPENDENCIES)
+        self._dimension_dependencies: list[DimensionDependency] = list(DEFAULT_DEPENDENCIES)
 
     def enhance_style(
         self,
-        base_style: Dict[str, Any],
-        emotion_state: Optional[Dict] = None,
-        context: Optional[Any] = None,
-        chat_history: Optional[List[Dict]] = None,
-        persona_style: Optional[Dict[str, Any]] = None,
+        base_style: dict[str, Any],
+        emotion_state: dict | None = None,
+        context: Any | None = None,
+        chat_history: list[dict] | None = None,
+        persona_style: dict[str, Any] | None = None,
     ) -> EnhancedStyleV2:
         """基于20维度增强风格输出
 
@@ -115,10 +115,10 @@ class StyleEnhancerV2:
 
     def _calculate_cross_dimensions(
         self,
-        base_dims: Dict[str, float],
-        emotion_state: Optional[Dict],
-        context: Optional[Any],
-    ) -> Dict[str, float]:
+        base_dims: dict[str, float],
+        emotion_state: dict | None,
+        context: Any | None,
+    ) -> dict[str, float]:
         cross = {}
 
         if emotion_state:
@@ -149,7 +149,7 @@ class StyleEnhancerV2:
 
         return cross
 
-    def _emotion_style_interaction(self, emotion_type: str, base_dims: Dict[str, float]) -> float:
+    def _emotion_style_interaction(self, emotion_type: str, base_dims: dict[str, float]) -> float:
         EMOTION_EFFECT = {
             "开心": 0.15, "撒娇": 0.2, "傲娇": -0.1,
             "生气": -0.2, "伤心": -0.15, "温柔": 0.1,
@@ -157,7 +157,7 @@ class StyleEnhancerV2:
         }
         return EMOTION_EFFECT.get(emotion_type, 0.0)
 
-    def _context_style_interaction(self, time_ctx: Any, base_dims: Dict[str, float]) -> float:
+    def _context_style_interaction(self, time_ctx: Any, base_dims: dict[str, float]) -> float:
         period = getattr(time_ctx, "period", "afternoon")
         CONTEXT_EFFECT = {
             "late_night": -0.15, "night": -0.1,
@@ -166,7 +166,7 @@ class StyleEnhancerV2:
         }
         return CONTEXT_EFFECT.get(period, 0.0)
 
-    def _relationship_style_interaction(self, affinity: int, base_dims: Dict[str, float]) -> float:
+    def _relationship_style_interaction(self, affinity: int, base_dims: dict[str, float]) -> float:
         if affinity >= 7:
             return 0.2
         elif affinity >= 5:
@@ -175,7 +175,7 @@ class StyleEnhancerV2:
             return 0.0
         return -0.1
 
-    def _time_style_interaction(self, time_ctx: Any, base_dims: Dict[str, float]) -> float:
+    def _time_style_interaction(self, time_ctx: Any, base_dims: dict[str, float]) -> float:
         period = getattr(time_ctx, "period", "afternoon")
         is_weekend = getattr(time_ctx, "is_weekend", False)
         base = {"late_night": -0.2, "night": -0.1, "morning": 0.05}.get(period, 0.0)
@@ -185,9 +185,9 @@ class StyleEnhancerV2:
 
     def _resolve_dependencies(
         self,
-        base_dims: Dict[str, float],
-        cross_dims: Dict[str, float],
-    ) -> Dict[str, float]:
+        base_dims: dict[str, float],
+        cross_dims: dict[str, float],
+    ) -> dict[str, float]:
         resolved = dict(base_dims)
 
         for dep in self._dimension_dependencies:

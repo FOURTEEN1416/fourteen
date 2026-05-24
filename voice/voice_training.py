@@ -60,21 +60,40 @@ class VoiceTrainingManager:
         return self._is_training
 
     async def save_uploads(self, files: list[tuple[str, bytes]], model_name: str) -> dict[str, Any]:
-        """保存上传的音频文件"""
-        safe_name = _SAFE_NAME_RE.sub("_", model_name)
+        """保存上传的音频文件（带路径遍历防护）"""
+        safe_name = _validate_model_name(model_name)
         audio_dir = self._models / safe_name / "raw"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
         saved = []
+        blocked = []
         for filename, data in files:
+            # 路径遍历防护：提取纯文件名，拒绝包含路径分隔符的文件名
             safe_filename = Path(filename).name
+            if safe_filename != filename:
+                # 文件名包含路径分隔符，可能是路径遍历攻击
+                logger.warning("阻止潜在的路径遍历攻击: %s", filename)
+                blocked.append(filename)
+                continue
+            # 进一步验证文件名安全性
+            safe_filename = _SAFE_NAME_RE.sub("_", safe_filename)
+            if not safe_filename:
+                blocked.append(filename)
+                continue
             path = audio_dir / safe_filename
+            # 确保最终路径在目标目录内（防止 .. 绕过）
+            try:
+                path.relative_to(audio_dir)
+            except ValueError:
+                logger.warning("阻止越界路径: %s", path)
+                blocked.append(filename)
+                continue
             path.write_bytes(data)
             saved.append(str(path))
 
         self._state.update({"status": "uploaded", "step": "文件已保存", "progress": 0.1})
-        logger.info("保存 %d 个音频文件到 %s", len(saved), audio_dir)
-        return {"saved": len(saved), "directory": str(audio_dir)}
+        logger.info("保存 %d 个音频文件到 %s, 阻止 %d 个", len(saved), audio_dir, len(blocked))
+        return {"saved": len(saved), "blocked": len(blocked), "directory": str(audio_dir)}
 
     async def preprocess(self, model_name: str) -> dict[str, Any]:
         """
@@ -119,7 +138,7 @@ class VoiceTrainingManager:
             return {"error": "ffmpeg未安装，请先安装ffmpeg"}
         except Exception as e:
             logger.exception("预处理失败: %s", e)
-            return {"error": str(e)}
+            return {"error": "音频预处理失败，请检查音频文件和ffmpeg"}
 
     async def generate_dataset(self, model_name: str) -> dict[str, Any]:
         """
@@ -234,9 +253,9 @@ class VoiceTrainingManager:
 
         except Exception as e:
             logger.exception("[VoiceTraining] 训练失败: %s", e)
-            self._state.update({"status": "error", "error": str(e)})
+            self._state.update({"status": "error", "error": "training_failed"})
             self._is_training = False
-            return {"status": "error", "error": str(e)}
+            return {"status": "error", "error": "voice_training_failed"}
 
     def _generate_s1_config(self, model_name: str, epochs: int) -> dict:
         return {

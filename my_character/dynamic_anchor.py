@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("dynamic_anchor")
 
@@ -19,7 +19,7 @@ class ActivationCondition:
     operator: str
     value: Any
 
-    def evaluate(self, context: Dict[str, Any]) -> bool:
+    def evaluate(self, context: dict[str, Any]) -> bool:
         actual = context.get(self.field)
         if actual is None:
             return True
@@ -45,8 +45,8 @@ class ActivationCondition:
 class DynamicAnchor:
     text: str
     priority: int = 5
-    activation_conditions: List[ActivationCondition] = field(default_factory=list)
-    emotion_weights: Dict[str, float] = field(default_factory=dict)
+    activation_conditions: list[ActivationCondition] = field(default_factory=list)
+    emotion_weights: dict[str, float] = field(default_factory=dict)
     active: bool = True
 
 
@@ -64,7 +64,7 @@ class AnchorContext:
     chat_round: int = 0
     time_of_day: str = "daytime"
 
-    def to_condition_context(self) -> Dict[str, Any]:
+    def to_condition_context(self) -> dict[str, Any]:
         return {
             "affinity": self.affinity,
             "energy": self.energy,
@@ -85,7 +85,7 @@ class AnchorViolation:
 class AnchorCheckResult:
     is_consistent: bool
     overall_score: float
-    violations: List[AnchorViolation] = field(default_factory=list)
+    violations: list[AnchorViolation] = field(default_factory=list)
     reinforcement_needed: bool = False
 
 
@@ -120,13 +120,13 @@ class DynamicAnchorSystem:
 
     def __init__(
         self,
-        base_anchors: Optional[List[str]] = None,
-        anchor_config: Optional[Dict] = None,
-        dynamic_anchors: Optional[List[DynamicAnchor]] = None,
+        base_anchors: list[str] | None = None,
+        anchor_config: dict | None = None,
+        dynamic_anchors: list[DynamicAnchor] | None = None,
     ):
         self._base_anchors = base_anchors or []
         self._config = anchor_config
-        self._dynamic_anchors: List[DynamicAnchor] = dynamic_anchors or list(DEFAULT_DYNAMIC_ANCHORS)
+        self._dynamic_anchors: list[DynamicAnchor] = dynamic_anchors or list(DEFAULT_DYNAMIC_ANCHORS)
         self._reinforcement_counter: int = 0
         self._reinforcement_interval: int = 5
         if anchor_config and hasattr(anchor_config, "reinforcement_interval"):
@@ -144,7 +144,7 @@ class DynamicAnchorSystem:
             self._dynamic_anchors.sort(key=lambda a: a.priority, reverse=True)
             logger.info("Registered dynamic anchor: %s (priority=%d)", anchor.text, anchor.priority)
 
-    def get_active_anchors(self, context: AnchorContext) -> List[WeightedAnchor]:
+    def get_active_anchors(self, context: AnchorContext) -> list[WeightedAnchor]:
         ctx_dict = context.to_condition_context()
         result = []
 
@@ -232,7 +232,7 @@ class DynamicAnchorSystem:
             reinforcement_needed=not is_consistent,
         )
 
-    def get_all_anchors(self) -> List[str]:
+    def get_all_anchors(self) -> list[str]:
         return [da.text for da in self._dynamic_anchors if da.active]
 
     def health_check(self) -> dict:

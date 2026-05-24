@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import ast
+import logging
 import operator
 from datetime import datetime
 from typing import Any
 
 from tool_system.base import BaseTool, ToolResult
+
+logger = logging.getLogger("calendar_tool")
 
 # 安全的数学运算符映射
 _SAFE_OPS = {
@@ -89,5 +92,6 @@ class CalculatorTool(BaseTool):
                 return ToolResult(False, error="Expression contains disallowed characters")
             result = _safe_eval_expr(expression)
             return ToolResult(True, data={"expression": expression, "result": result})
-        except Exception as e:
-            return ToolResult(False, error=f"Calculation error: {e}")
+        except Exception:
+            logger.exception("日历计算失败")
+            return ToolResult(False, error="calculation_error")

@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Generator
 
 from .models import CardFormat, CharaCardV2, CharacterState
 
@@ -52,7 +52,7 @@ class CharacterStore:
             conn.commit()
             return char_id
 
-    def get_character(self, character_id: str) -> Optional[CharaCardV2]:
+    def get_character(self, character_id: str) -> CharaCardV2 | None:
         with self._connection() as conn:
             row = conn.execute(
                 "SELECT chara_card_json FROM characters WHERE character_id=?",
@@ -86,7 +86,7 @@ class CharacterStore:
                 ))
             return result
 
-    def set_active(self, character_id: str) -> Optional[str]:
+    def set_active(self, character_id: str) -> str | None:
         with self._connection() as conn:
             row = conn.execute(
                 "SELECT character_id FROM characters WHERE character_id=?", (character_id,)
@@ -98,7 +98,7 @@ class CharacterStore:
                 conn.execute("UPDATE characters SET is_active=1, updated_at=datetime('now') WHERE character_id=?", (character_id,))
             return character_id
 
-    def get_active_id(self) -> Optional[str]:
+    def get_active_id(self) -> str | None:
         with self._connection() as conn:
             row = conn.execute("SELECT character_id FROM characters WHERE is_active=1").fetchone()
             return row["character_id"] if row else None

@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
+
+if TYPE_CHECKING:
+    from voice.voice_training import VoiceTrainingManager
+
+    from ..application.character_service import CharacterService
 
 from ..affinity.enhancer import AffinityEnhancer
 from ..character.manager import CharacterManager
@@ -46,8 +51,8 @@ class AiyuRegistry:
     analytics_service: AnalyticsService | None = None
     wechat_handler: WeChatCommandHandler | None = None
     proactive_messenger: WeChatProactiveMessenger | None = None
-    training_manager: Any | None = None
-    character_service: Any | None = None
+    training_manager: VoiceTrainingManager | None = None
+    character_service: CharacterService | None = None
 
 
 def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True) -> AiyuRegistry:
@@ -68,8 +73,12 @@ def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True) -> AiyuReg
     reg.voice_enhancer = VoiceEnhancer()
     reg.analytics_service = AnalyticsService()
 
-    from voice.voice_training import VoiceTrainingManager
-    reg.training_manager = VoiceTrainingManager()
+    try:
+        from voice.voice_training import VoiceTrainingManager
+        reg.training_manager = VoiceTrainingManager()
+    except (ImportError, Exception) as e:
+        reg.training_manager = None
+        logger.warning("语音训练模块初始化失败: %s", e)
 
     reg.wechat_handler = WeChatCommandHandler(
         character_manager=reg.character_manager,

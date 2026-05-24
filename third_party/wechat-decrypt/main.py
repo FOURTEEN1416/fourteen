@@ -40,6 +40,7 @@ def _run_decode_images(cfg, argv):
     (只读已存在的 .dat 文件;V2 文件用 config.json 里的 image_aes_key)。
     """
     import argparse
+
     from decode_image import decode_all_dats
 
     parser = argparse.ArgumentParser(
@@ -79,10 +80,7 @@ def _run_decode_images(cfg, argv):
     out_dir = args.decoded_dir or default_out
     aes_key = args.aes_key if args.aes_key is not None else cfg.get("image_aes_key")
     xor_key_raw = args.xor_key if args.xor_key is not None else cfg.get("image_xor_key", 0x88)
-    if isinstance(xor_key_raw, str):
-        xor_key = int(xor_key_raw, 0)
-    else:
-        xor_key = xor_key_raw
+    xor_key = int(xor_key_raw, 0) if isinstance(xor_key_raw, str) else xor_key_raw
 
     if not os.path.isdir(attach_dir):
         print(f"[ERROR] attach 目录不存在: {attach_dir}", file=sys.stderr)
@@ -134,7 +132,7 @@ def ensure_keys(keys_file, db_dir):
             keys = {}
         saved_dir = keys.pop("_db_dir", None)
         if saved_dir and os.path.normcase(os.path.normpath(saved_dir)) != os.path.normcase(os.path.normpath(db_dir)):
-            print(f"[!] 密钥文件对应的目录已变更，需要重新提取")
+            print("[!] 密钥文件对应的目录已变更，需要重新提取")
             print(f"    旧: {saved_dir}")
             print(f"    新: {db_dir}")
             keys = {}
@@ -207,7 +205,7 @@ def show_status():
     if os.path.exists(exported_dir):
         jsons = [f for f in glob.glob(os.path.join(exported_dir, "*.json"))
                  if not f.endswith("_transcribed.json")]
-        tx_jsons = glob.glob(os.path.join(exported_dir, "*_transcribed.json"))
+        glob.glob(os.path.join(exported_dir, "*_transcribed.json"))
         total_sz = sum(os.path.getsize(f) for f in jsons) / 1024 / 1024
         print(f"[export]  {len(jsons)} 个 JSON ({total_sz:.0f} MB)")
     else:
@@ -336,7 +334,7 @@ def main():
             print()
             print("[*] 检查语音转录配置...")
             from config import load_config
-            cfg2 = load_config()
+            load_config()
             from mcp_server import _resolve_active_backend
             backend = _resolve_active_backend()
             if backend and backend != "local":

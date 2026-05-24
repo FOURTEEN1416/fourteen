@@ -4,14 +4,13 @@ import logging
 import threading
 import time
 import uuid
-from typing import Dict, List, Optional
 
 logger = logging.getLogger("session_manager")
 
 
 class SessionManager:
     def __init__(self):
-        self._sessions: Dict[str, Dict] = {}
+        self._sessions: dict[str, dict] = {}
         self._lock = threading.Lock()
 
     def create_session(self, user_id: str = "default", channel: str = "web") -> str:
@@ -25,7 +24,7 @@ class SessionManager:
             }
         return session_id
 
-    def get_session(self, session_id: str) -> Optional[Dict]:
+    def get_session(self, session_id: str) -> dict | None:
         with self._lock:
             return self._sessions.get(session_id)
 
@@ -34,13 +33,12 @@ class SessionManager:
             if session_id in self._sessions:
                 self._sessions[session_id]["is_active"] = False
 
-    def get_active_sessions(self, user_id: str = "") -> List[str]:
+    def get_active_sessions(self, user_id: str = "") -> list[str]:
         result = []
         with self._lock:
             for sid, info in self._sessions.items():
-                if info.get("is_active"):
-                    if not user_id or info.get("user_id") == user_id:
-                        result.append(sid)
+                if info.get("is_active") and (not user_id or info.get("user_id") == user_id):
+                    result.append(sid)
         return result
 
     @property

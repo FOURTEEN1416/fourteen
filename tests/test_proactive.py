@@ -1,7 +1,7 @@
 """单元测试: 主动消息ASE引擎 — 深度版"""
 import sys
-import time
 from datetime import datetime, timedelta
+
 sys.path.insert(0, ".")
 
 
@@ -169,7 +169,7 @@ def test_urgency_state_reset():
 # ═══════════════════════════════════════════════════════════════
 
 def test_reflection_engine_rule_mode():
-    from proactive.ase_engine import ReflectionEngine, InnerMonologue
+    from proactive.ase_engine import InnerMonologue, ReflectionEngine
     re = ReflectionEngine(reflection_mode="rule")
     result = re.reflect("你好", "你好呀", affinity_level=3, hours_since_last=1)
     assert isinstance(result, InnerMonologue)
@@ -465,7 +465,7 @@ def test_scheduler_with_ase_engine():
 
 
 def test_scheduler_start_without_apscheduler():
-    from proactive.scheduler import ProactiveScheduler, HAS_APSCHEDULER
+    from proactive.scheduler import HAS_APSCHEDULER, ProactiveScheduler
     ps = ProactiveScheduler()
     if not HAS_APSCHEDULER:
         result = ps.start()

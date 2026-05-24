@@ -22,15 +22,13 @@ LIWC 核心类别:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Set
-
+from dataclasses import dataclass
 
 # ═══════════════════════════════════════════════════════════
 # LIWC 中文字典 (精选核心词)
 # ═══════════════════════════════════════════════════════════
 
-_LIWC_ZH_DICT: Dict[str, Set[str]] = {
+_LIWC_ZH_DICT: dict[str, set[str]] = {
     # ── 代词 (Pronouns) ──
     "i_words": {"我", "俺", "本人", "自己", "咱"},
     "we_words": {"我们", "咱们", "大家", "咱俩", "我俩"},
@@ -275,7 +273,7 @@ class LiwcAnalyzer:
         profile = LiwcProfile(total_words=total)
 
         # 统计各类别命中数
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for category, lexicon in _LIWC_ZH_DICT.items():
             cnt = sum(1 for w in words if w in lexicon)
             counts[category] = cnt

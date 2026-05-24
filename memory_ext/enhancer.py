@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("memory_ext.enhancer")
 
@@ -42,7 +42,7 @@ class MemoryEnhancer:
 
     def __init__(
         self,
-        chroma_path: Optional[str] = None,
+        chroma_path: str | None = None,
         collection_name: str = "long_term_memories",
         llm_gateway=None,
         enabled: bool = True,
@@ -85,7 +85,7 @@ class MemoryEnhancer:
             return False
 
     def add(self, message: str, user_id: str = "default",
-            metadata: Optional[Dict] = None) -> Dict[str, Any]:
+            metadata: dict | None = None) -> dict[str, Any]:
         """
         添加记忆 - 自动提取关键信息并存储
 
@@ -129,11 +129,11 @@ class MemoryEnhancer:
             }
 
         except Exception as e:
-            logger.error("添加记忆失败: %s", e)
-            return {"error": str(e)}
+            logger.exception("添加记忆失败: %s", e)
+            return {"error": "memory_add_failed"}
 
-    def add_batch(self, messages: List[str], user_id: str = "default",
-                   metadatas: Optional[List[Dict]] = None) -> List[Dict]:
+    def add_batch(self, messages: list[str], user_id: str = "default",
+                   metadatas: list[dict] | None = None) -> list[dict]:
         """
         批量添加记忆 - 使用ChromaDB批量API，非逐条插入
 
@@ -182,7 +182,7 @@ class MemoryEnhancer:
                     metadatas=metadatas_batch,
                     ids=doc_ids,
                 )
-                for idx, (msg, doc_id) in enumerate(zip(batch_msgs, doc_ids)):
+                for idx, (msg, doc_id) in enumerate(zip(batch_msgs, doc_ids, strict=False)):
                     results.append({
                         "id": doc_id,
                         "message": msg,
@@ -190,15 +190,15 @@ class MemoryEnhancer:
                     })
                     self._stats["total_added"] += 1
             except Exception as e:
-                logger.error("批量添加记忆失败 (batch %d): %s", batch_start, e)
+                logger.exception("批量添加记忆失败 (batch %d): %s", batch_start, e)
                 for msg in batch_msgs:
-                    results.append({"error": str(e), "message": msg})
+                    results.append({"error": "memory_add_failed", "message": msg})
 
         self._stats["last_add_time"] = timestamp
         return results
 
     def search(self, query: str, user_id: str = "default",
-               top_k: int = 5, threshold: float = 0.0) -> List[Dict[str, Any]]:
+               top_k: int = 5, threshold: float = 0.0) -> list[dict[str, Any]]:
         """
         检索相关记忆
 
@@ -248,7 +248,7 @@ class MemoryEnhancer:
             return []
 
     def get_all(self, user_id: str = "default",
-                limit: int = 100) -> List[Dict[str, Any]]:
+                limit: int = 100) -> list[dict[str, Any]]:
         """
         获取用户所有记忆
 
@@ -333,7 +333,7 @@ class MemoryEnhancer:
             logger.error("统计记忆数量失败: %s", e)
             return 0
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         return {
             "enabled": self._enabled,
             "initialized": self._initialized,

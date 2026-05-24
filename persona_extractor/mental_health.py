@@ -14,16 +14,14 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
 
 # ═══════════════════════════════════════════════════════════
 # DSM-5 抑郁发作 (Major Depressive Episode) 标志性词汇
 # ═══════════════════════════════════════════════════════════
 
 # SIGECAPS 助记词对应词汇库
-_DEPRESSION_LEXICON: Dict[str, List[str]] = {
+_DEPRESSION_LEXICON: dict[str, list[str]] = {
     "sleep": [
         "失眠", "睡不着", "早醒", "睡太多", "嗜睡", "熬夜", "通宵",
         "insomnia", "can't sleep", "wake up early", "oversleep",
@@ -63,7 +61,7 @@ _DEPRESSION_LEXICON: Dict[str, List[str]] = {
 }
 
 # GAD-7 焦虑对应词汇
-_ANXIETY_LEXICON: Dict[str, List[str]] = {
+_ANXIETY_LEXICON: dict[str, list[str]] = {
     "nervousness": [
         "紧张", "焦虑", "不安", "心慌", "忐忑", "害怕", "恐惧",
         "anxious", "nervous", "scared", "fearful", "worried",
@@ -95,7 +93,7 @@ _ANXIETY_LEXICON: Dict[str, List[str]] = {
 }
 
 # PTSD/创伤相关词汇
-_TRAUMA_LEXICON: Dict[str, List[str]] = {
+_TRAUMA_LEXICON: dict[str, list[str]] = {
     "intrusion": [
         "闪回", "噩梦", "总是想起", "画面挥之不去",
         "flashback", "nightmare", "can't stop thinking about it",
@@ -128,7 +126,7 @@ class DepressionIndicators:
     suicidal: float = 0.0
     total_score: float = 0.0
     level: str = "none"  # none / mild / moderate / severe / critical
-    matched_keywords: List[str] = field(default_factory=list)
+    matched_keywords: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -158,7 +156,7 @@ class AnxietyIndicators:
     fear_awful: float = 0.0
     total_score: float = 0.0
     level: str = "none"
-    matched_keywords: List[str] = field(default_factory=list)
+    matched_keywords: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -214,7 +212,7 @@ class MentalHealthScreener:
         self._llm = llm_gateway
         self.screening_count = 0
         self.crisis_alerts = 0
-        self.history: List[MentalHealthSnapshot] = []
+        self.history: list[MentalHealthSnapshot] = []
 
     def quick_screen(self, text: str) -> MentalHealthSnapshot:
         """快速词典筛查 (零成本)

@@ -27,7 +27,7 @@ def preflight_check():
         for f in json_files[:5]:
             try:
                 import json
-                with open(f, "r", encoding="utf-8") as fp:
+                with open(f, encoding="utf-8") as fp:
                     json.load(fp)
             except Exception as e:
                 issues.append(f"角色文件损坏 {f}: {e}")

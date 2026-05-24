@@ -15,7 +15,6 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Dict, List
 
 logger = logging.getLogger("clone.merge_export")
 
@@ -42,10 +41,11 @@ class ModelExporter:
         output_path = self.output_base / output_name / "merged"
         logger.info("合并 LoRA 权重: %s + %s → %s", base_model, lora_weights, output_path)
 
-        # 使用 LoRATrainer.merge_lora_weights 静态方法
+        # 使用 LoRATrainer 合并 LoRA 权重
         from .lora_trainer import LoRATrainer
         try:
-            result = LoRATrainer.merge_lora_weights(base_model, lora_weights, str(output_path))  # type: ignore
+            trainer = LoRATrainer(base_model=base_model, output_dir=str(output_path))
+            result = trainer.merge_and_export(lora_weights, export_format="hf")
             return result
         except Exception as e:
             logger.error("合并失败: %s", e)
@@ -220,9 +220,9 @@ SYSTEM \"\"\"
         base_model: str,
         lora_weights: str,
         output_name: str = "girlfriend-clone",
-        formats: List[str] = None,  # type: ignore
+        formats: list[str] = None,  # type: ignore
         ollama_system_prompt: str = "",
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """
         一键全格式导出
 
@@ -266,7 +266,7 @@ def merge_and_export(
     lora_weights: str,
     output_name: str = "girlfriend-clone",
     output_base: str = "./data/models",
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """快捷合并导出入口"""
     exporter = ModelExporter(output_base=output_base)
     return exporter.export_full(base_model, lora_weights, output_name)

@@ -7,10 +7,10 @@ TimeContext 提取等公共函数。
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 
-def extract_emotion_attrs(emotion_state: Any) -> Tuple[int, str, float]:
+def extract_emotion_attrs(emotion_state: Any) -> tuple[int, str, float]:
     """从 emotion_state 提取 affinity, emotion_type, energy
 
     Returns:
@@ -38,7 +38,7 @@ def extract_emotion_attrs(emotion_state: Any) -> Tuple[int, str, float]:
 def build_anchor_context(
     emotion_state: Any = None,
     chat_round: int = 0,
-    affinity_override: Optional[int] = None,
+    affinity_override: int | None = None,
 ) -> Any:
     """从 emotion_state 构建 AnchorContext
 
@@ -80,7 +80,7 @@ def build_time_context() -> Any:
         return None
 
 
-def extract_context_vars(emotion_state: Any = None, time_context: Any = None) -> Dict[str, Any]:
+def extract_context_vars(emotion_state: Any = None, time_context: Any = None) -> dict[str, Any]:
     """从 emotion_state + time_context 提取行为规则所需的上下文变量
 
     Returns:

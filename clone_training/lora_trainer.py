@@ -13,7 +13,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger("clone.trainer")
 
@@ -67,7 +67,7 @@ class LoRATrainer:
     def train(
         self,
         train_path: str,
-        val_path: Optional[str] = None,
+        val_path: str | None = None,
         lora_r: int = 16,
         lora_alpha: int = 32,
         learning_rate: float = 1e-4,
@@ -80,7 +80,7 @@ class LoRATrainer:
         warmup_ratio: float = 0.03,
         save_steps: int = 200,
         logging_steps: int = 10,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not self._peft_available:
             return self._training_unavailable_result()
 
@@ -115,8 +115,13 @@ class LoRATrainer:
             )["val"]
 
         logger.info("[2/6] 加载 Tokenizer...")
+        # 安全提示：trust_remote_code=True 允许执行模型仓库中的代码
+        # 仅在确信模型来源可信时使用。如需禁用，设置环境变量 DISABLE_TRUST_REMOTE_CODE=1
+        _trust_remote = os.environ.get("DISABLE_TRUST_REMOTE_CODE", "").lower() not in ("1", "true", "yes")
+        if _trust_remote:
+            logger.warning("trust_remote_code=True 已启用，确保模型来源可信")
         tokenizer = AutoTokenizer.from_pretrained(
-            self.base_model, trust_remote_code=True,
+            self.base_model, trust_remote_code=_trust_remote,
         )
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
@@ -206,7 +211,7 @@ class LoRATrainer:
             eval_strategy="steps" if "validation" in dataset else "no",
             eval_steps=save_steps,
             save_total_limit=3,
-            load_best_model_at_end=True if "validation" in dataset else False,
+            load_best_model_at_end="validation" in dataset,
             fp16=torch.cuda.is_available(),
             report_to="none",
             remove_unused_columns=False,
@@ -221,8 +226,7 @@ class LoRATrainer:
             args=training_args,
             train_dataset=tokenized_dataset["train"],
             eval_dataset=(
-                tokenized_dataset["validation"]
-                if "validation" in tokenized_dataset else None
+                tokenized_dataset.get("validation", None)
             ),
             data_collator=data_collator,
         )
@@ -231,7 +235,7 @@ class LoRATrainer:
             train_result = trainer.train()
         except Exception as e:
             logger.exception("训练过程出错: %s", e)
-            return {"error": str(e), "output_dir": str(output_path)}
+            return {"error": "training_failed", "output_dir": str(output_path)}
 
         final_path = output_path / "final"
         model.save_pretrained(str(final_path))
@@ -289,7 +293,7 @@ class LoRATrainer:
         logger.info("合并完成 → %s", merge_path)
         return str(merge_path)
 
-    def _training_unavailable_result(self) -> Dict[str, Any]:
+    def _training_unavailable_result(self) -> dict[str, Any]:
         return {
             "status": "unavailable",
             "error": (

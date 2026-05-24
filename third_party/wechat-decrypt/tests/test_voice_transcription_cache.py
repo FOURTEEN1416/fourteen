@@ -71,7 +71,7 @@ class VoiceTranscriptionCachePersistenceTests(_CacheIsolationMixin, unittest.Tes
 
         with open(mcp_server.VOICE_TRANSCRIPTION_CACHE_FILE, "rb") as f:
             raw = f.read()
-        self.assertIn("中文测试".encode("utf-8"), raw)
+        self.assertIn("中文测试".encode(), raw)
 
     def test_save_without_prior_load_persists_empty_dict(self):
         # 从未 load 过就直接 save：应落盘一个空 dict，而不是静默丢弃。

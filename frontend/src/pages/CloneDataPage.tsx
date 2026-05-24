@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/client'
 import Button from '../components/common/Button'
 import Card from '../components/common/Card'
+import EmptyState from '../components/common/EmptyState'
 import type { CloneDataset, CloneDatasetDetail, CloneConversation, CloneContact } from '../types/api'
 
 export default function CloneDataPage() {
@@ -335,12 +336,11 @@ export default function CloneDataPage() {
               {loadingDatasets ? (
                 <p className="text-xs text-gray-400 py-4">加载中...</p>
               ) : datasets.length === 0 ? (
-                <div className="text-xs text-gray-400 bg-gray-100/50 border border-gray-200/30 rounded-lg px-4 py-6 text-center">
-                  暂无已提取的聊天数据
-                  <div className="mt-2 text-[10px] text-gray-500">
-                    先去「风格克隆训练」页面提取数据，再回来管理
-                  </div>
-                </div>
+                <EmptyState
+                  icon="💬"
+                  title="暂无已提取的聊天数据"
+                  description="先去「风格克隆训练」页面提取数据，再回来管理"
+                />
               ) : (
                 <div className="space-y-2">
                   {datasets.map((ds) => (
@@ -399,12 +399,11 @@ export default function CloneDataPage() {
           {loadingContacts ? (
             <p className="text-xs text-gray-400 py-4">加载中...</p>
           ) : contacts.length === 0 ? (
-            <div className="text-xs text-gray-400 bg-gray-100/50 border border-gray-200/30 rounded-lg px-4 py-6 text-center">
-              未找到联系人
-              <div className="mt-2 text-[10px] text-gray-500">
-                需要先启动微信并解密数据库才能获取联系人列表
-              </div>
-            </div>
+            <EmptyState
+              icon="📇"
+              title="未找到联系人"
+              description="需要先启动微信并解密数据库才能获取联系人列表"
+            />
           ) : (
             <div className="space-y-1">
               {contacts.map((c) => (

@@ -63,7 +63,7 @@ def test_build_filters_without_type_filter():
 
 def test_build_filters_with_single_type():
     clauses, params = mcp_server._build_message_filters(type_filter=[1])
-    assert any('local_type IN (?)' == c for c in clauses)
+    assert any(c == 'local_type IN (?)' for c in clauses)
     assert 1 in params
 
 

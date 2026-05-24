@@ -16,7 +16,7 @@ WeClone 适配器 — 完整的风格克隆管线总控
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from clone_training import (
     DataExtractor,
@@ -58,7 +58,7 @@ class WeCloneAdapter:
         do_train: bool = True,
         lora_r: int = 16,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         执行完整克隆流程
 
@@ -173,13 +173,13 @@ class WeCloneAdapter:
 
     def quick_clone(
         self, target: str, name: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """快速克隆（仅提取 + 分析，不训练）"""
         return self.clone(target, name=name, do_train=False)
 
     def clone_from_file(
         self, file_path: str, name: str = "", do_train: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """从文件克隆（支持 txt/csv/json 导出格式）"""
         ext = Path(file_path).suffix.lower().lstrip(".")
         source = ext if ext in ("txt", "csv", "json") else "auto"
@@ -194,7 +194,7 @@ class WeCloneAdapter:
 
     def _extract(
         self, target: str, source: str, **kwargs,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """根据来源类型调用对应提取器"""
         if source == "wcf":
             return self.extractor.extract_from_wcf(target, **kwargs)
@@ -209,7 +209,7 @@ class WeCloneAdapter:
             return []
 
     def _inject_to_tone_mimic(
-        self, conversations: List[Dict[str, Any]],
+        self, conversations: list[dict[str, Any]],
     ) -> int:
         """将对话注入到十四的语气模仿器（ToneMimic）"""
         try:
@@ -240,7 +240,7 @@ class WeCloneAdapter:
             logger.warning("ToneMimic 注入跳过（模块不可用）: %s", e)
             return 0
 
-    def extract(self, target: str, source: str = "wcf", **kwargs) -> List[Dict[str, Any]]:
+    def extract(self, target: str, source: str = "wcf", **kwargs) -> list[dict[str, Any]]:
         """Public wrapper around _extract for API use"""
         return self._extract(target, source, **kwargs)
 
@@ -251,7 +251,7 @@ class WeCloneAdapter:
         epochs: int = 3,
         lora_rank: int = 16,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run LoRA training on the most recently prepared dataset.
 
         Args:

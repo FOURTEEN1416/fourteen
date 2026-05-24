@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar, List
+from typing import ClassVar
 
 
 @dataclass
@@ -20,7 +20,7 @@ class PersonaProfile:
     emotional_expression: float = 0.7
     humor: float = 0.5
 
-    core_anchors: List[str] = field(default_factory=list)
+    core_anchors: list[str] = field(default_factory=list)
 
     _DIMENSIONS: ClassVar[tuple[str, ...]] = (
         "warmth", "playfulness", "independence", "jealousy", "stubbornness",
@@ -62,13 +62,13 @@ class PersonaProfile:
         return result
 
     @classmethod
-    def from_dict(cls, data: dict) -> "PersonaProfile":
+    def from_dict(cls, data: dict) -> PersonaProfile:
         return cls(
             **{k: v for k, v in data.items() if k in cls._DIMENSIONS or k == "core_anchors"}
         )
 
     @classmethod
-    def from_emotion_style_map(cls, style_map) -> "PersonaProfile":
+    def from_emotion_style_map(cls, style_map) -> PersonaProfile:
         return cls(
             warmth=getattr(style_map, "warmth", 0.5),
             playfulness=getattr(style_map, "playfulness", 0.5),

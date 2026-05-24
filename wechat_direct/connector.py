@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import atexit
 import base64
 import concurrent.futures
 import json
@@ -12,11 +13,25 @@ import logging
 import os
 import time
 import uuid
+from collections import OrderedDict
 from pathlib import Path
 
 import requests
 
 logger = logging.getLogger("wechat_direct")
+
+# ── 共享线程池（供 _call_girlfriend_manager 复用，避免反复创建/销毁） ──
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="wx_async")
+
+# ── 进程退出时自动关闭线程池，防止资源泄漏 ──
+def _shutdown_executor():
+    try:
+        _executor.shutdown(wait=False)
+        logger.info("全局线程池已关闭 (atexit)")
+    except Exception:
+        pass
+
+atexit.register(_shutdown_executor)
 
 # ── 微信 API 地址 ──
 DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
@@ -31,6 +46,10 @@ LONG_POLL_TIMEOUT = 35
 MAX_CONSECUTIVE_FAILURES = 5
 RETRY_DELAY = 5
 BACKOFF_DELAY = 60
+
+# ── 内存泄漏防护 ──
+_RECEIVED_MSGS_MAX = 10000       # _received_msgs 最大条目数
+_CONTEXT_TOKENS_TTL = 86400      # _context_tokens 条目 TTL（秒），默认24小时
 
 # ── 全局单例（供 REST API 读取状态） ──
 _connector: "WeChatConnector | None" = None
@@ -58,7 +77,7 @@ def _load_credentials(path=None):
     path = path or CREDENTIALS_PATH
     if os.path.exists(path):
         try:
-            with open(path, "r") as f:
+            with open(path) as f:
                 return json.load(f)
         except Exception as e:
             logger.warning(f"读取凭证失败: {e}")
@@ -264,15 +283,14 @@ def _send_emoji_message(to, emoji_md5, context_token,
 def _call_girlfriend_manager(mgr, user_id, text):
     """
     调用女友管理器处理消息（多用户路由）。
-    process_message 是 async 的，但我们的轮询循环是同步的，
-    所以用线程池跑 asyncio.run。
+    process_message 是 async 的，但轮询循环是同步的，
+    用全局共享线程池跑 asyncio.run（避免每次创建/销毁线程池的开销）。
     """
     coro = mgr.process_message(user_id, text)
     try:
         asyncio.get_running_loop()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, coro)
-            return future.result()
+        future = _executor.submit(asyncio.run, coro)
+        return future.result()
     except RuntimeError:
         return asyncio.run(coro)
 
@@ -299,8 +317,8 @@ class WeChatConnector:
         self.started_at = 0
         self._stop = False
         self._get_updates_buf = ""
-        self._received_msgs = set()
-        self._context_tokens = {}
+        self._received_msgs: OrderedDict = OrderedDict()  # 有序字典，支持按插入顺序淘汰
+        self._context_tokens: dict = {}  # {user_id: {"token": str, "ts": float}}
         self._last_user_id: str = ""
 
     def send_text(self, text: str, to_user: str = "") -> bool:
@@ -310,7 +328,7 @@ class WeChatConnector:
             logger.warning("微信主动发送失败: 无目标用户或未登录")
             return False
         try:
-            context_token = self._context_tokens.get(target, "")
+            context_token = self._get_context_token(target)
             _send_text(
                 to=target, text=text,
                 context_token=context_token,
@@ -331,7 +349,7 @@ class WeChatConnector:
             return False
         try:
             audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-            context_token = self._context_tokens.get(target, "")
+            context_token = self._get_context_token(target)
             _send_voice_message(
                 to=target, audio_data_b64=audio_b64,
                 duration_ms=duration_ms, context_token=context_token,
@@ -352,7 +370,7 @@ class WeChatConnector:
             return False
         try:
             image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-            context_token = self._context_tokens.get(target, "")
+            context_token = self._get_context_token(target)
             _send_image_message(
                 to=target, image_data_b64=image_b64,
                 context_token=context_token,
@@ -372,7 +390,7 @@ class WeChatConnector:
             logger.warning("发表情失败: 无目标用户或未登录或无表情数据")
             return False
         try:
-            context_token = self._context_tokens.get(target, "")
+            context_token = self._get_context_token(target)
             _send_emoji_message(
                 to=target, emoji_md5=emoji_md5,
                 context_token=context_token,
@@ -600,6 +618,28 @@ class WeChatConnector:
 
         logger.info("消息轮询结束")
 
+    def _get_context_token(self, user_id: str) -> str:
+        """获取用户的 context_token，并清理过期条目"""
+        entry = self._context_tokens.get(user_id)
+        if entry is None:
+            return ""
+        if isinstance(entry, dict):
+            return entry.get("token", "")
+        # 兼容旧格式（直接存储的字符串）
+        return str(entry)
+
+    def _cleanup_context_tokens(self):
+        """清理过期的 context_token 条目，防止内存泄漏"""
+        now = time.time()
+        expired = [
+            uid for uid, entry in self._context_tokens.items()
+            if isinstance(entry, dict) and (now - entry.get("ts", 0)) > _CONTEXT_TOKENS_TTL
+        ]
+        for uid in expired:
+            del self._context_tokens[uid]
+        if expired:
+            logger.debug("Cleaned up %d expired context_tokens entries", len(expired))
+
     def _handle_message(self, raw_msg):
         """处理一条消息"""
         msg_type = raw_msg.get("message_type", 0)
@@ -609,19 +649,23 @@ class WeChatConnector:
         msg_id = str(raw_msg.get("message_id", raw_msg.get("seq", "")))
         if msg_id in self._received_msgs:
             return
-        self._received_msgs.add(msg_id)
+        self._received_msgs[msg_id] = True
+        # 超过最大条目时清理最早的记录，防止内存无限增长
+        while len(self._received_msgs) > _RECEIVED_MSGS_MAX:
+            self._received_msgs.popitem(last=False)
+        # 定期清理过期的 context_tokens
+        self._cleanup_context_tokens()
 
         from_user = raw_msg.get("from_user_id", "")
         context_token = raw_msg.get("context_token", "")
         if context_token and from_user:
-            self._context_tokens[from_user] = context_token
+            self._context_tokens[from_user] = {"token": context_token, "ts": time.time()}
         if from_user:
             self._last_user_id = from_user
 
         items = raw_msg.get("item_list", [])
         text = ""
         voice_data = ""
-        image_data = ""
         for item in items:
             item_type = item.get("type", 0)
             if item_type == 1:
@@ -632,7 +676,7 @@ class WeChatConnector:
                 voice_data = voice_item.get("voice_data", "")
             elif item_type == 3:
                 image_item = item.get("image_item", {})
-                image_data = image_item.get("image_data", "")
+                image_item.get("image_data", "")
 
         if not text and not voice_data:
             return
@@ -643,7 +687,7 @@ class WeChatConnector:
             result = _call_girlfriend_manager(self.girlfriend_manager, from_user, text)
             reply = result.get("reply", "")
             if reply:
-                token = self._context_tokens.get(from_user, context_token)
+                token = self._get_context_token(from_user) or context_token
                 _send_text(
                     to=from_user, text=reply,
                     context_token=token,
@@ -692,5 +736,12 @@ class WeChatConnector:
         }
 
     def stop(self):
+        """停止微信连接器并清理资源。
+
+        注意: 必须调用此方法以确保 ThreadPoolExecutor 正确关闭，
+        避免程序退出时线程池资源泄漏。
+        """
         self._stop = True
-        logger.info("微信连接器已停止")
+        # 关闭全局线程池，等待所有任务完成
+        _executor.shutdown(wait=True)
+        logger.info("微信连接器已停止，线程池已关闭")

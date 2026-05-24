@@ -5,7 +5,6 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter
 
@@ -18,7 +17,7 @@ router = APIRouter(prefix="/api/wechat", tags=["wechat"])
 def _read_qrcode_data() -> dict:
     if QRCODE_FILE.exists():
         try:
-            with open(QRCODE_FILE, "r") as f:
+            with open(QRCODE_FILE) as f:
                 return json.load(f)
         except Exception as e:
             logger.warning("Failed to read qrcode file: %s", e)
@@ -35,7 +34,15 @@ def save_qrcode(qrcode_url: str, status: str = "waiting"):
         logger.warning("Failed to save qrcode: %s", e)
 
 
-def _generate_qr_image(url: str) -> Optional[str]:
+QRCODE_EXPIRY_SECONDS = 600
+
+
+def is_expired() -> bool:
+    data = _read_qrcode_data()
+    return (time.time() - data.get("timestamp", 0)) >= QRCODE_EXPIRY_SECONDS
+
+
+def _generate_qr_image(url: str) -> str | None:
     try:
         import qrcode as qr_lib
         qr = qr_lib.QRCode(error_correction=qr_lib.constants.ERROR_CORRECT_M, box_size=10, border=4)
@@ -51,11 +58,30 @@ def _generate_qr_image(url: str) -> Optional[str]:
         return None
 
 
+from fastapi import HTTPException, Security
+from fastapi.security import APIKeyHeader
+
+# API Key 认证配置（与 rest_api.py 保持一致）
+_api_key_enabled = os.environ.get("API_KEY_ENABLED", "false").lower() == "true"
+_api_key = os.environ.get("API_KEY", "")
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def _verify_api_key(api_key: str = Security(_api_key_header)):
+    """验证 API Key"""
+    if not _api_key_enabled:
+        return True
+    import hmac
+    if hmac.compare_digest(api_key or "", _api_key):
+        return True
+    raise HTTPException(401, "Invalid or missing API key")
+
+
 @router.get("/qrcode")
-def get_qrcode():
+def get_qrcode(_auth: bool = Security(_verify_api_key)):
     data = _read_qrcode_data()
     url = data.get("qrcode_url", "")
-    has_new_qr = url and (time.time() - data.get("timestamp", 0)) < 600
+    has_new_qr = url and (time.time() - data.get("timestamp", 0)) < QRCODE_EXPIRY_SECONDS
 
     qr_image = None
     if has_new_qr:
@@ -66,5 +92,6 @@ def get_qrcode():
         "qrcode_url": url if has_new_qr else "",
         "qr_image": qr_image or "",
         "timestamp": data.get("timestamp", 0),
+        "is_expired": is_expired(),
         "message": "请使用微信扫描二维码登录" if has_new_qr else "等待二维码生成...",
     }

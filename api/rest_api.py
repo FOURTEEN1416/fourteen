@@ -5,18 +5,16 @@ import json
 import logging
 import os
 import re
-import threading
-import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request, Security, File, UploadFile, Form
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Security, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, Response, FileResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
+from api.state import SafetyLogManager, ToolHistoryManager, TrainingStateManager
 from observability.logging_setup import ring_buffer
 
 logger = logging.getLogger("rest_api")
@@ -52,7 +50,14 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     trace_id: str = ""
-    emotion: Optional[dict] = None
+    emotion: dict | None = None
+
+
+class EmotionStateResponse(BaseModel):
+    current_emotion: str = ""
+    intensity: float = 0.0
+    energy: float = 0.0
+    affinity: float = 0.0
 
 
 class CreateSessionRequest(BaseModel):
@@ -108,13 +113,21 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
+    @app.exception_handler(HTTPException)
+    async def _http_exception_handler(request: Request, exc: HTTPException):
+        from fastapi.responses import JSONResponse
+        status_code_map = {401: "AUTH_ERROR", 429: "RATE_LIMIT", 503: "FEATURE_UNAVAILABLE", 404: "FEATURE_UNAVAILABLE", 504: "LLM_TIMEOUT", 502: "NETWORK_ERROR"}
+        error_code = (exc.headers or {}).get("X-Error-Code") or status_code_map.get(exc.status_code, "UNKNOWN")
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        return JSONResponse(status_code=exc.status_code, content={"detail": detail, "error_code": error_code})
+
     @app.exception_handler(Exception)
     async def _global_exception_handler(request: Request, exc: Exception):
         logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
         from fastapi.responses import JSONResponse
         if isinstance(exc, ValueError):
-            return JSONResponse(status_code=400, content={"detail": str(exc)})
-        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+            return JSONResponse(status_code=400, content={"detail": str(exc), "error_code": "VALIDATION_ERROR"})
+        return JSONResponse(status_code=500, content={"detail": "Internal server error", "error_code": "INTERNAL_ERROR"})
 
     # P0: 生产环境强制启用 API 认证
     _api_key_enabled = os.environ.get("API_KEY_ENABLED", "true" if _is_prod else "false").lower() == "true"
@@ -123,13 +136,32 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     _api_key = os.environ.get("API_KEY", "")
     _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-    async def _verify_api_key(api_key: Optional[str] = Security(_api_key_header)):
+    async def _verify_api_key(api_key: str | None = Security(_api_key_header)):
         if not _api_key_enabled:
             return True
         import hmac
         if hmac.compare_digest(api_key or "", _api_key):
             return True
-        raise HTTPException(401, "Invalid or missing API key")
+        raise HTTPException(status_code=401, detail="Invalid or missing API key", headers={"X-Error-Code": "AUTH_ERROR"})
+
+    # P2: 请求体大小限制 - 防止内存耗尽攻击
+    MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10MB
+
+    @app.middleware("http")
+    async def request_size_limiter(request: Request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                size = int(content_length)
+                if size > MAX_REQUEST_SIZE:
+                    from fastapi.responses import JSONResponse
+                    return JSONResponse(
+                        status_code=413,
+                        content={"detail": f"Request body too large (max {MAX_REQUEST_SIZE // 1024 // 1024}MB)", "error_code": "REQUEST_TOO_LARGE"}
+                    )
+            except ValueError:
+                pass
+        return await call_next(request)
 
     # P2: 强制请求限流 - 使用内存限流器作为 SlowAPI 不可用时的回退
     if HAS_SLOWAPI:
@@ -137,8 +169,8 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         app.state.limiter = limiter
     else:
         # 简易内存限流器回退方案 - 线程安全 + 自动清理
-        import time
         import threading
+        import time
         from collections import defaultdict
         _rate_limit_store: dict[str, list[float]] = defaultdict(list)
         _rate_limit_lock = threading.Lock()
@@ -198,8 +230,13 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     @app.post("/api/chat", response_model=ChatResponse)
     async def chat(req: ChatRequest, _auth: bool = Security(_verify_api_key)):
         if not _orch:
-            raise HTTPException(503, "Orchestrator not initialized")
-        result = await _orch.process_message(req.message, req.session_id, req.message_type)
+            raise HTTPException(status_code=503, detail="Orchestrator not initialized", headers={"X-Error-Code": "FEATURE_UNAVAILABLE"})
+        try:
+            result = await _orch.process_message(req.message, req.session_id, req.message_type)
+        except TimeoutError:
+            raise HTTPException(status_code=504, detail="LLM response timeout", headers={"X-Error-Code": "LLM_TIMEOUT"})
+        except ConnectionError:
+            raise HTTPException(status_code=502, detail="Upstream connection error", headers={"X-Error-Code": "NETWORK_ERROR"})
         return ChatResponse(
             reply=result.get("reply", ""),
             trace_id=result.get("trace_id", ""),
@@ -209,7 +246,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     @app.post("/api/chat/stream")
     async def chat_stream(req: ChatRequest, _auth: bool = Security(_verify_api_key)):
         if not _orch or not hasattr(_orch, 'process_message_stream'):
-            raise HTTPException(503, "Stream not available")
+            raise HTTPException(status_code=503, detail="Stream not available", headers={"X-Error-Code": "FEATURE_UNAVAILABLE"})
 
         async def event_generator():
             async for token in _orch.process_message_stream(req.message, req.session_id, req.message_type):  # type: ignore
@@ -225,7 +262,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"status": "unknown"}
 
     @app.get("/api/stats")
-    async def stats():
+    async def stats(_auth: bool = Security(_verify_api_key)):
         stats_data = {"status": "ok"}
         if _orch:
             stats_data["has_orchestrator"] = True  # type: ignore
@@ -247,7 +284,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"session_id": ""}
 
     @app.get("/api/sessions")
-    async def list_sessions():
+    async def list_sessions(_auth: bool = Security(_verify_api_key)):
         if _sessions:
             return {
                 "sessions": _sessions.get_active_sessions(),
@@ -256,27 +293,65 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"sessions": [], "active_count": 0}
 
     @app.get("/api/chat/history")
-    async def chat_history(session_id: str = "", limit: int = Query(default=20, ge=1, le=100)):
+    async def chat_history(
+        session_id: str = "",
+        limit: int = Query(default=20, ge=1, le=100),
+        before: int = Query(default=0, ge=0, description="Timestamp to load messages before"),
+        _auth: bool = Security(_verify_api_key)
+    ):
         if not _orch or not _orch._memory:
             return {"messages": []}
+        # P0: 使用 session_id 过滤聊天记录
+        if session_id:
+            # 从结构化记忆中按 session_id 查询
+            sm = getattr(_orch._memory, "structured_memory", None) or getattr(_orch._memory, "_sm", None)
+            if sm and hasattr(sm, "get_connection"):
+                try:
+                    with sm.get_connection() as conn:
+                        # 构建查询条件
+                        conditions = ["session_id = ?"]
+                        params = [session_id]
+                        if before > 0:
+                            conditions.append("created_at < ?")
+                            params.append(before)
+                        where_clause = " AND ".join(conditions)
+                        params.append(limit)
+
+                        rows = conn.execute(
+                            f"SELECT role, content, emotion_tag, created_at FROM chat_history "
+                            f"WHERE {where_clause} ORDER BY created_at DESC LIMIT ?",
+                            tuple(params),
+                        ).fetchall()
+                        messages = [dict(r) for r in rows][::-1]
+                        return {"messages": messages, "session_id": session_id}
+                except Exception as e:
+                    logger.warning("Failed to query chat history by session_id: %s", e)
+        # 如果没有 session_id 或查询失败，返回最近的记录
         messages = _orch._memory.working.get_recent(limit)
         return {"messages": messages, "session_id": session_id}
 
-    @app.get("/api/emotion/state")
-    async def emotion_state():
+    @app.get("/api/emotion/state", response_model=EmotionStateResponse)
+    async def emotion_state(_auth: bool = Security(_verify_api_key)):
         if _orch and _orch._emotion:
-            return _orch._emotion.health_check()
-        return {}
+            health = _orch._emotion.health_check()
+            # 统一响应格式
+            return EmotionStateResponse(
+                current_emotion=health.get("current_emotion", ""),
+                intensity=health.get("intensity", 0.0),
+                energy=health.get("energy", 0.0),
+                affinity=health.get("affinity", 0.0)
+            )
+        return EmotionStateResponse()
 
     @app.get("/api/emotion/trend")
-    async def emotion_trend(days: int = Query(default=7, ge=1, le=30)):
+    async def emotion_trend(days: int = Query(default=7, ge=1, le=30), _auth: bool = Security(_verify_api_key)):
         if not _orch or not _orch._emotion:
             return {"trend": [], "days": days}
         trend = getattr(_orch._emotion, '_emotion_history', [])
         return {"trend": trend[-days * 20:], "days": days}
 
     @app.get("/api/persona/profile")
-    async def persona_profile():
+    async def persona_profile(_auth: bool = Security(_verify_api_key)):
         if _orch and _orch._persona:
             return {
                 "core_character": _orch._persona.profile.core_character,
@@ -286,7 +361,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {}
 
     @app.get("/api/persona/evolution-log")
-    async def persona_evolution_log(limit: int = Query(default=50, ge=1, le=500)):
+    async def persona_evolution_log(limit: int = Query(default=50, ge=1, le=500), _auth: bool = Security(_verify_api_key)):
         if _orch and _orch._persona:
             return {"log": _orch._persona.get_evolution_log(limit)}
         return {"log": []}
@@ -294,7 +369,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     # ═══ 用户心理画像（OCEAN+PAD人格分析） ═══
 
     @app.get("/api/psych/profile")
-    async def psych_profile():
+    async def psych_profile(_auth: bool = Security(_verify_api_key)):
         """获取用户心理画像（OCEAN五大人格 + PAD情感 + 风格向量）"""
         pe = None
         if _orch:
@@ -304,7 +379,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return pe.get_user_profile_summary()
 
     @app.get("/api/psych/snapshots")
-    async def psych_snapshots(limit: int = Query(default=20, ge=1, le=200)):
+    async def psych_snapshots(limit: int = Query(default=20, ge=1, le=200), _auth: bool = Security(_verify_api_key)):
         """获取最近的人格检测快照历史"""
         pe = None
         if _orch:
@@ -326,7 +401,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"status": "reset" if ok else "failed"}
 
     @app.get("/api/psych/mental-health")
-    async def psych_mental_health():
+    async def psych_mental_health(_auth: bool = Security(_verify_api_key)):
         """获取心理健康筛查结果（抑郁/焦虑/自伤风险/认知扭曲）"""
         pe = None
         if _orch:
@@ -346,7 +421,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         }
 
     @app.get("/api/psych/liwc")
-    async def psych_liwc():
+    async def psych_liwc(_auth: bool = Security(_verify_api_key)):
         """获取 LIWC 心理语言学分析"""
         pe = None
         if _orch:
@@ -359,19 +434,19 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"available": True, "data": persona.liwc}
 
     @app.get("/api/memory/facts")
-    async def memory_facts(category: Optional[str] = None, limit: int = Query(default=50)):
+    async def memory_facts(category: str | None = None, limit: int = Query(default=50), _auth: bool = Security(_verify_api_key)):
         if _orch and _orch._memory:
             return {"facts": _orch._memory.semantic.get_facts(category, limit=limit)}
         return {"facts": []}
 
     @app.get("/api/tools")
-    async def tools_list():
+    async def tools_list(_auth: bool = Security(_verify_api_key)):
         if _orch and _orch._tools:
             return {"tools": _orch._tools.registry.tool_names}
         return {"tools": []}
 
     @app.get("/api/training/status")
-    async def training_status():
+    async def training_status(_auth: bool = Security(_verify_api_key)):
         """Check if training pipeline is available."""
         try:
             import clone_training  # noqa: F401
@@ -385,7 +460,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         ]}
 
     @app.get("/api/proactive/state")
-    async def proactive_state():
+    async def proactive_state(_auth: bool = Security(_verify_api_key)):
         if _orch and _orch._ase:
             return _orch._ase.health_check()
         return {}
@@ -396,7 +471,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"logs": ring_buffer.get_recent(limit=limit, level=level, search=search)}
 
     @app.get("/api/channels")
-    async def list_channels():
+    async def list_channels(_auth: bool = Security(_verify_api_key)):
         channels = [
             {"id": "web", "name": "Web 控制台", "type": "web", "status": "connected", "desc": "当前浏览器 WebSocket", "meta": "在线"},
             {"id": "api", "name": "REST API", "type": "api", "status": "connected", "desc": "HTTP API 接口", "meta": "端口 8000"},
@@ -424,8 +499,8 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                     "desc": "直接微信连接",
                     "meta": "",
                 })
-        except ImportError:
-            pass
+        except ImportError as e:
+            logger.debug("wechat_direct module not available, skipping WeChat channel: %s", e)
         # Add connected sessions as channels
         if _sessions:
             active = _sessions.get_active_sessions()
@@ -452,9 +527,9 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         try:
             updated = _config.save(req.config)
             return _sanitize_config(updated.model_dump())
-        except (ValueError, TypeError, KeyError, AttributeError) as e:
-            logger.error("Config save failed: %s", e)
-            raise HTTPException(400, f"Invalid config: {e}")
+        except (ValueError, TypeError, KeyError, AttributeError):
+            logger.exception("Config save failed")
+            raise HTTPException(400, "Invalid config")
 
     @app.post("/api/proactive/config")
     async def update_proactive_config(req: ProactiveConfigRequest,
@@ -474,7 +549,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                      ase._config["speak_threshold"], ase._config["max_daily_messages"])
         return {"status": "ok", "config": ase._config}
 
-    _tool_history: list = []
+    _tool_history_mgr = ToolHistoryManager(maxlen=1000)
 
     @app.post("/api/tools/{name}/toggle")
     async def toggle_tool(name: str, req: ToolToggleRequest,
@@ -489,7 +564,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             registry.register(tool)
         else:
             registry.unregister(name)
-        _tool_history.append({
+        _tool_history_mgr.append({
             "timestamp": datetime.now().isoformat(),
             "tool": name, "action": "enable" if req.enabled else "disable",
         })
@@ -497,27 +572,17 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"status": "ok", "tool": name, "enabled": req.enabled}
 
     @app.get("/api/tools/history")
-    async def tool_history(limit: int = Query(default=50, le=200)):
-        return {"history": _tool_history[-limit:]}
+    async def tool_history(limit: int = Query(default=50, le=200), _auth: bool = Security(_verify_api_key)):
+        return {"history": _tool_history_mgr.get_recent(limit)}
 
     # ═══════════════════════════════════════════
     # Training / Clone Pipeline API
     # ═══════════════════════════════════════════
 
-    # Global training state tracker
-    _training_state: dict = {
-        "status": "idle",  # idle, extracting, cleaning, training, testing, done, error
-        "progress": 0.0,
-        "current_step": 0,
-        "total_steps": 0,
-        "loss": None,
-        "extracted_turns": 0,
-        "cleaned_turns": 0,
-        "error": None,
-        "start_time": None,
-        "eta_seconds": None,
-    }
-    _training_lock = threading.Lock()
+    _training_mgr = TrainingStateManager()
+
+    _wechat_status_cache: dict = {"data": None, "ts": 0.0}
+    _WECHAT_STATUS_TTL = 5.0
 
     @app.post("/api/training/extract")
     async def start_extraction(target: str = "", source: str = "wcf", _auth: bool = Security(_verify_api_key)):
@@ -530,33 +595,28 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                     output_dir=str(Path(__file__).parent.parent / "data" / "training"),
                 )
                 result = adapter.extract(target=target, source=source)
-                with _training_lock:
-                    _training_state["status"] = "extracted"
-                    _training_state["extracted_turns"] = len(result) if isinstance(result, list) else result.get("turns", 0)
-                    _training_state["progress"] = 0.3
-            except Exception as e:
-                with _training_lock:
-                    _training_state["status"] = "error"
-                    _training_state["error"] = str(e)
-                logger.error("Extraction failed: %s", e)
+                _training_mgr.update(
+                    status="extracted",
+                    extracted_turns=len(result) if isinstance(result, list) else result.get("turns", 0),
+                    progress=0.3,
+                    step_name="数据提取",
+                )
+            except Exception:
+                logger.exception("Extraction failed")
+                _training_mgr.update(status="error", error="internal_error")
 
         if not target.strip():
             raise HTTPException(status_code=400, detail="target is required")
 
-        thread = threading.Thread(target=_do_extract, daemon=True)
-        thread.start()
-
-        with _training_lock:
-            _training_state["status"] = "extracting"
-            _training_state["start_time"] = time.time()
+        _training_mgr.update(status="extracting", start_time=time.time(), step_name="数据提取")
+        _training_mgr.submit(_do_extract)
 
         return {"status": "started", "task": "extract", "target": target}
 
     @app.get("/api/training/progress")
     async def get_training_progress(_auth: bool = Security(_verify_api_key)):
         """Get real-time training progress"""
-        with _training_lock:
-            return dict(_training_state)
+        return _training_mgr.get_state()
 
     @app.post("/api/training/clean")
     async def start_cleaning(accept_score: int = 2, _auth: bool = Security(_verify_api_key)):
@@ -576,26 +636,23 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                 cleaned_count = 0
                 if result_path:
                     try:
-                        with open(result_path, "r", encoding="utf-8") as f:
+                        with open(result_path, encoding="utf-8") as f:
                             cleaned_data = json.load(f)
                         cleaned_count = len(cleaned_data) if isinstance(cleaned_data, list) else 0
-                    except Exception:
-                        pass
-                with _training_lock:
-                    _training_state["status"] = "cleaned"
-                    _training_state["cleaned_turns"] = cleaned_count
-                    _training_state["progress"] = 0.6
-            except Exception as e:
-                with _training_lock:
-                    _training_state["status"] = "error"
-                    _training_state["error"] = str(e)
+                    except Exception as e:
+                        logger.debug("Failed to read cleaned data result: %s", e)
+                _training_mgr.update(
+                    status="cleaned",
+                    cleaned_turns=cleaned_count,
+                    progress=0.6,
+                    step_name="数据清洗",
+                )
+            except Exception:
+                logger.exception("Cleaning failed")
+                _training_mgr.update(status="error", error="internal_error")
 
-        thread = threading.Thread(target=_do_clean, daemon=True)
-        thread.start()
-
-        with _training_lock:
-            _training_state["status"] = "cleaning"
-            _training_state["start_time"] = time.time()
+        _training_mgr.update(status="cleaning", start_time=time.time(), step_name="数据清洗")
+        _training_mgr.submit(_do_clean)
 
         return {"status": "started", "task": "clean", "accept_score": accept_score}
 
@@ -611,11 +668,14 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                 )
 
                 def progress_callback(step, total, loss):
-                    with _training_lock:
-                        _training_state["current_step"] = step
-                        _training_state["total_steps"] = total
-                        _training_state["progress"] = step / total if total > 0 else 0
-                        _training_state["loss"] = loss
+                    _training_mgr.update(
+                        current_step=step,
+                        total_steps=total,
+                        progress=step / total if total > 0 else 0,
+                        loss=loss,
+                    )
+                    if _training_mgr.is_stopping:
+                        raise InterruptedError("Training stopped by user")
 
                 result = adapter.train(
                     config_path="",
@@ -623,31 +683,28 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                     epochs=epochs,
                     lora_rank=lora_rank,
                 )
-                with _training_lock:
-                    _training_state["status"] = "done" if result.get("status") == "success" else "error"
-                    _training_state["progress"] = 1.0
-                    if "lora_path" in result:
-                        _training_state["lora_path"] = result["lora_path"]
-            except Exception as e:
-                with _training_lock:
-                    _training_state["status"] = "error"
-                    _training_state["error"] = str(e)
-                logger.error("Training failed: %s", e)
+                _training_mgr.update(
+                    status="done" if result.get("status") == "success" else "error",
+                    progress=1.0,
+                    step_name="模型训练",
+                )
+                if "lora_path" in result:
+                    _training_mgr.update(lora_path=result["lora_path"])
+            except InterruptedError:
+                _training_mgr.update(status="stopped")
+            except Exception:
+                logger.exception("Training failed")
+                _training_mgr.update(status="error", error="internal_error")
 
-        thread = threading.Thread(target=_do_train, daemon=True)
-        thread.start()
-
-        with _training_lock:
-            _training_state["status"] = "training"
-            _training_state["start_time"] = time.time()
+        _training_mgr.update(status="training", start_time=time.time(), step_name="模型训练")
+        _training_mgr.submit(_do_train)
 
         return {"status": "started", "task": "train", "epochs": epochs}
 
     @app.post("/api/training/stop")
     async def stop_training(_auth: bool = Security(_verify_api_key)):
-        """Stop running training"""
-        with _training_lock:
-            _training_state["status"] = "stopped"
+        """Stop running training — truly terminates background thread"""
+        _training_mgr.stop()
         return {"status": "stopped"}
 
     @app.post("/api/training/test")
@@ -659,8 +716,9 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             mimic = ToneMimic(chroma_path=chroma_path)
             style_prompt = mimic.get_style_prompt()
             return {"message": message, "style_output": style_prompt, "status": "ok"}
-        except (ImportError, OSError, ValueError) as e:
-            return {"message": message, "style_output": "", "status": "error", "detail": str(e)}
+        except (ImportError, OSError, ValueError):
+            logger.exception("Test clone failed")
+            return {"message": message, "style_output": "", "status": "error", "detail": "internal_error"}
 
     @app.post("/api/training/apply")
     async def apply_clone(_auth: bool = Security(_verify_api_key)):
@@ -668,8 +726,9 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         try:
             result_path = str(Path(__file__).parent.parent / "data" / "training")
             return {"status": "applied", "path": result_path}
-        except (ValueError, OSError) as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except (ValueError, OSError):
+            logger.exception("Apply clone failed")
+            raise HTTPException(status_code=500, detail="internal_error")
 
     # ═══════════════════════════════════════════
     # WeChat Channel API — 手动连接控制
@@ -710,7 +769,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"status": "disconnected", "message": "微信已断开"}
 
     @app.get("/api/channels/wechat/connection-status")
-    async def get_wechat_connection_status():
+    async def get_wechat_connection_status(_auth: bool = Security(_verify_api_key)):
         """获取手动连接状态"""
         conn = _get_wechat_connector()
         if conn and conn.token:
@@ -718,7 +777,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"status": "idle", "message": "未连接"}
 
     @app.get("/api/channels/wechat/status")
-    async def get_wechat_status():
+    async def get_wechat_status(_auth: bool = Security(_verify_api_key)):
         """获取微信连接详细信息"""
         conn = _get_wechat_connector()
         if conn and conn.token:
@@ -730,7 +789,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"connected": False, "uptime_seconds": 0}
 
     @app.post("/api/channels/wechat/reconnect")
-    async def reconnect_wechat():
+    async def reconnect_wechat(_auth: bool = Security(_verify_api_key)):
         """触发微信重连"""
         conn = _get_wechat_connector()
         if conn and conn.token:
@@ -751,14 +810,14 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     # ═══════════════════════════════════════════
 
     @app.get("/api/users")
-    async def list_users():
+    async def list_users(_auth: bool = Security(_verify_api_key)):
         """获取所有活跃用户列表"""
         if not _gf:
             return {"users": [], "total": 0}
         return {"users": _gf.get_all_users(), "total": _gf.active_user_count}
 
     @app.get("/api/users/{user_id}")
-    async def get_user_detail(user_id: str):
+    async def get_user_detail(user_id: str, _auth: bool = Security(_verify_api_key)):
         """获取某个用户详情"""
         if not _gf:
             raise HTTPException(503, "女友管理器未初始化")
@@ -768,7 +827,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return info
 
     @app.get("/api/users/{user_id}/chat")
-    async def get_user_chat_history(user_id: str, limit: int = Query(default=50, le=200)):
+    async def get_user_chat_history(user_id: str, limit: int = Query(default=50, le=200), _auth: bool = Security(_verify_api_key)):
         """获取某个用户的聊天记录（按 user_id 即 session_id 过滤）"""
         if not _orch or not _orch._memory:
             return {"messages": [], "user_id": user_id}
@@ -787,7 +846,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"messages": messages, "user_id": user_id}
 
     @app.get("/api/users/{user_id}/emotion")
-    async def get_user_emotion(user_id: str):
+    async def get_user_emotion(user_id: str, _auth: bool = Security(_verify_api_key)):
         """获取某个用户的情感状态"""
         if not _gf:
             raise HTTPException(503, "女友管理器未初始化")
@@ -797,7 +856,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"user_id": user_id, "emotion": info.get("emotion", {})}
 
     @app.post("/api/users/{user_id}/role")
-    async def set_user_role(user_id: str, card_id: str = Query(..., description="角色卡ID")):
+    async def set_user_role(user_id: str, card_id: str = Query(..., description="角色卡ID"), _auth: bool = Security(_verify_api_key)):
         """给用户分配角色卡"""
         if not _gf:
             raise HTTPException(503, "女友管理器未初始化")
@@ -807,7 +866,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"status": "ok", "user_id": user_id, "character_card_id": card_id}
 
     @app.post("/api/users/{user_id}/reset")
-    async def reset_user(user_id: str):
+    async def reset_user(user_id: str, _auth: bool = Security(_verify_api_key)):
         """重置用户（记忆+情感归零）"""
         if not _gf:
             raise HTTPException(503, "女友管理器未初始化")
@@ -817,7 +876,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"status": "reset", "user_id": user_id}
 
     @app.delete("/api/users/{user_id}")
-    async def remove_user(user_id: str):
+    async def remove_user(user_id: str, _auth: bool = Security(_verify_api_key)):
         """移除用户"""
         if not _gf:
             raise HTTPException(503, "女友管理器未初始化")
@@ -920,7 +979,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     # ═══════════════════════════════════════════
 
     @app.get("/api/logs/stream")
-    async def stream_logs():
+    async def stream_logs(_auth: bool = Security(_verify_api_key)):
         """SSE endpoint for real-time log streaming"""
         async def event_generator():
             queue = asyncio.Queue(maxsize=100)
@@ -935,8 +994,8 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                     asyncio.run_coroutine_threadsafe(
                         queue.put(msg), loop
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to emit log to SSE queue: %s", e)
 
             log_queue_handler.emit = emit
 
@@ -968,7 +1027,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     # ═══════════════════════════════════════════
 
     @app.get("/api/stats/dashboard")
-    async def get_dashboard_stats():
+    async def get_dashboard_stats(_auth: bool = Security(_verify_api_key)):
         """Enhanced dashboard stats — flat shape matching frontend DashboardStats type"""
         emotion_current = "-"
         affinity = 0
@@ -978,22 +1037,27 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         sys_status = "unknown"
         uptime = 0
 
-        # Get training state
-        with _training_lock:
-            training_info = {
-                "status": _training_state["status"],
-                "progress": _training_state["progress"],
-                "loss": _training_state["loss"],
-                "extracted_turns": _training_state["extracted_turns"],
-                "cleaned_turns": _training_state.get("cleaned_turns", 0),
-            }
+        training_state = _training_mgr.get_state()
+        training_info = {
+            "status": training_state["status"],
+            "progress": training_state["progress"],
+            "loss": training_state["loss"],
+            "extracted_turns": training_state["extracted_turns"],
+            "cleaned_turns": training_state.get("cleaned_turns", 0),
+        }
 
-        # Get wechat status
-        wechat_info = {"connected": False}
-        try:
-            wechat_info = await get_wechat_status()
-        except Exception:
-            pass
+        # Get wechat status (with TTL cache)
+        now = time.time()
+        if _wechat_status_cache["data"] is not None and (now - _wechat_status_cache["ts"]) < _WECHAT_STATUS_TTL:
+            wechat_info = _wechat_status_cache["data"]
+        else:
+            wechat_info = {"connected": False}
+            try:
+                wechat_info = await get_wechat_status()
+            except Exception as e:
+                logger.debug("Failed to get wechat status for dashboard: %s", e)
+            _wechat_status_cache["data"] = wechat_info
+            _wechat_status_cache["ts"] = now
 
         # Get emotion/memory stats from running components
         try:
@@ -1012,10 +1076,10 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                             chats_today = structured.count_chats_today()
                             if hasattr(structured, 'count_facts'):
                                 facts_count = structured.count_facts()
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as e:
+                        logger.debug("Failed to get memory stats for dashboard: %s", e)
+        except Exception as e:
+            logger.debug("Failed to get emotion/memory stats for dashboard: %s", e)
 
         # Get system stats
         if _health:
@@ -1023,8 +1087,8 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                 health_data = _health.check()
                 sys_status = health_data.get("status", "unknown")
                 uptime = health_data.get("uptime_seconds", 0)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to get health check for dashboard: %s", e)
 
         return {
             "today_chats": chats_today,
@@ -1043,7 +1107,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     # Safety Dashboard API
     # ═══════════════════════════════════════════
 
-    _safety_log: list = []
+    _safety_log_mgr = SafetyLogManager(maxlen=2000)
 
     def _get_safety():
         if _orch:
@@ -1051,24 +1115,13 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return None
 
     @app.get("/api/safety/stats")
-    async def safety_stats():
+    async def safety_stats(_auth: bool = Security(_verify_api_key)):
         sf = _get_safety()
-        logs = _safety_log[-200:]
-        categories = {}
-        for entry in logs:
-            cat = entry.get("category", "unknown")
-            categories[cat] = categories.get(cat, 0) + 1
-        return {
-            "enabled": sf.enabled if sf else False,
-            "total_flagged": len(_safety_log),
-            "recent_flagged": len(logs),
-            "by_category": categories,
-            "recent": logs[-20:],
-        }
+        return _safety_log_mgr.get_stats(enabled=sf.enabled if sf else False)
 
     @app.get("/api/safety/log")
-    async def safety_log(limit: int = Query(default=50, le=200)):
-        return {"log": _safety_log[-limit:]}
+    async def safety_log(limit: int = Query(default=50, le=200), _auth: bool = Security(_verify_api_key)):
+        return {"log": _safety_log_mgr.get_recent(limit)}
 
     @app.post("/api/safety/config")
     async def safety_config(enabled: bool = True, _auth: bool = Security(_verify_api_key)):
@@ -1088,14 +1141,14 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return None
 
     @app.get("/api/rag/stats")
-    async def rag_stats():
+    async def rag_stats(_auth: bool = Security(_verify_api_key)):
         rag = _get_rag()
         if rag:
             return rag.health_check()
         return {"available": False}
 
     @app.post("/api/rag/search")
-    async def rag_search(query: str = "", top_k: int = Query(default=5, le=20)):
+    async def rag_search(query: str = "", top_k: int = Query(default=5, le=20), _auth: bool = Security(_verify_api_key)):
         rag = _get_rag()
         if not rag:
             raise HTTPException(503, "RAG引擎未初始化")
@@ -1110,13 +1163,19 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         if not rag:
             raise HTTPException(503, "RAG引擎未初始化")
         content = await file.read()
+        if len(content) > MAX_RAG_UPLOAD_SIZE:
+            raise HTTPException(413, f"文档大小超过限制 ({MAX_RAG_UPLOAD_SIZE // 1024 // 1024}MB)")
         try:
             text = content.decode("utf-8")
         except UnicodeDecodeError:
             text = content.decode("gbk", errors="replace")
-        rag._sm.add_fact({"fact": text[:2000], "category": "upload",
-                           "source": file.filename, "confidence": 1.0})
-        return {"status": "indexed", "filename": file.filename, "size": len(content)}
+        chunk_size = 2000
+        chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)] if len(text) > chunk_size else [text]
+        for idx, chunk in enumerate(chunks):
+            rag._sm.add_fact({"fact": chunk, "category": "upload",
+                               "source": file.filename, "confidence": 1.0,
+                               "chunk_index": idx, "total_chunks": len(chunks)})
+        return {"status": "indexed", "filename": file.filename, "size": len(content), "chunks": len(chunks)}
 
     # ═══════════════════════════════════════════
     # Voice / TTS API
@@ -1128,14 +1187,14 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return None
 
     @app.get("/api/voice/status")
-    async def voice_status():
+    async def voice_status(_auth: bool = Security(_verify_api_key)):
         tts = _get_tts()
         if tts:
             return tts.health_check()
         return {"enabled": False, "available_engines": []}
 
     @app.post("/api/voice/synthesize")
-    async def voice_synthesize(text: str = Form(...), engine: str = Form("")):
+    async def voice_synthesize(text: str = Form(...), engine: str = Form(""), _auth: bool = Security(_verify_api_key)):
         tts = _get_tts()
         if not tts or not tts.enabled:
             raise HTTPException(503, "TTS未启用")
@@ -1152,15 +1211,15 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     # ═══════════════════════════════════════════
 
     @app.get("/api/plugins")
-    async def list_plugins():
+    async def list_plugins(_auth: bool = Security(_verify_api_key)):
         try:
             plugin_path = Path(__file__).parent.parent / "plugins" / "plugins.json"
             if plugin_path.exists():
-                with open(plugin_path, "r", encoding="utf-8") as f:
+                with open(plugin_path, encoding="utf-8") as f:
                     data = json.load(f)
                 return {"plugins": data.get("plugins", {})}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load plugins config: %s", e)
         return {"plugins": {}}
 
     @app.post("/api/plugins/{name}/toggle")
@@ -1168,7 +1227,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         plugin_path = Path(__file__).parent.parent / "plugins" / "plugins.json"
         data = {}
         if plugin_path.exists():
-            with open(plugin_path, "r", encoding="utf-8") as f:
+            with open(plugin_path, encoding="utf-8") as f:
                 data = json.load(f)
         plugins = data.get("plugins", {})
         if name not in plugins:
@@ -1185,13 +1244,24 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     # ═══════════════════════════════════════════
 
     UPLOAD_DIR = Path(__file__).parent.parent / "data" / "uploads"
+    # 文件上传大小限制：默认50MB，硬编码上限100MB
+    MAX_UPLOAD_SIZE = min(
+        int(os.environ.get("MAX_UPLOAD_SIZE", str(50 * 1024 * 1024))),
+        100 * 1024 * 1024  # 硬编码上限 100MB
+    )
+    MAX_RAG_UPLOAD_SIZE = min(
+        int(os.environ.get("MAX_RAG_UPLOAD_SIZE", str(10 * 1024 * 1024))),
+        50 * 1024 * 1024  # 硬编码上限 50MB
+    )
 
     @app.post("/api/files/upload")
-    async def upload_file(file: UploadFile = File(...)):
+    async def upload_file(file: UploadFile = File(...), _auth: bool = Security(_verify_api_key)):
+        content = await file.read()
+        if len(content) > MAX_UPLOAD_SIZE:
+            raise HTTPException(413, f"文件大小超过限制 ({MAX_UPLOAD_SIZE // 1024 // 1024}MB)")
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         safe_name = re.sub(r'[^\w.\-]', '_', file.filename)
         dest = UPLOAD_DIR / f"{int(time.time())}_{safe_name}"
-        content = await file.read()
         with open(dest, "wb") as f:
             f.write(content)
         mime = file.content_type or "application/octet-stream"
@@ -1201,7 +1271,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                 "url": f"/api/files/{dest.name}"}
 
     @app.get("/api/files/{filename}")
-    async def serve_file(filename: str):
+    async def serve_file(filename: str, _auth: bool = Security(_verify_api_key)):
         # P0: 路径遍历防护 - 规范化路径并验证在允许目录内
         safe_name = os.path.basename(filename)  # 去除所有路径分隔符
         file_path = (UPLOAD_DIR / safe_name).resolve()
@@ -1219,7 +1289,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     # ═══════════════════════════════════════════
 
     @app.get("/api/proactive/history")
-    async def proactive_history(limit: int = Query(default=50, le=200)):
+    async def proactive_history(limit: int = Query(default=50, le=200), _auth: bool = Security(_verify_api_key)):
         if _orch and _orch._ase:
             ase = _orch._ase
             messages = getattr(ase, '_sent_messages', []) if hasattr(ase, '_sent_messages') else []
@@ -1227,26 +1297,33 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"history": [], "total": 0}
 
     # ── 十四挂载 ──
-    shisi_available = False
-    shisi_error = None
     try:
         from shisi.api.registry import setup_shisi
         shisi_reg = setup_shisi(app, run_migrate=True)
         if orchestrator and hasattr(orchestrator, '_character_manager'):
             orchestrator._character_manager = shisi_reg.character_manager
-        shisi_available = True
         logger.info("十四模块已挂载到REST API")
-    except Exception as e:
-        shisi_error = str(e)
-        logger.error("十四模块挂载失败: %s", e)
-        # Add health check endpoint to report shisi status
+
         @app.get("/api/shisi/status")
         async def shisi_status():
-            return {"available": False, "error": shisi_error}
+            """返回所有模块可用状态"""
+            modules = {}
+            for attr in ("character_manager", "affinity_enhancer", "stage_engine",
+                         "sticker_manager", "favorite_manager", "forward_manager",
+                         "vital_engine", "voice_enhancer", "analytics_service",
+                         "wechat_handler", "proactive_messenger", "training_manager",
+                         "character_service"):
+                modules[attr] = getattr(shisi_reg, attr, None) is not None
+            return {"available": True, "modules": modules}
+    except Exception:
+        logger.exception("十四模块挂载失败")
+        @app.get("/api/shisi/status")
+        async def shisi_status():
+            return {"available": False, "error": "module_load_failed"}
 
     # ═══ LLM缓存统计API ═══
     @app.get("/api/cache/stats")
-    async def cache_stats():
+    async def cache_stats(_auth: bool = Security(_verify_api_key)):
         """获取LLM缓存统计信息"""
         try:
             from cache.llm_cache import LLMCache
@@ -1256,8 +1333,9 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                 "stats": cache.get_stats(),
                 "health": cache.health_check(),
             }
-        except Exception as e:
-            return {"available": False, "error": str(e)}
+        except Exception:
+            logger.exception("Cache stats query failed")
+            return {"available": False, "error": "internal_error"}
 
     @app.post("/api/cache/invalidate")
     async def cache_invalidate(pattern: str = "*", _auth: bool = Security(_verify_api_key)):
@@ -1271,8 +1349,9 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             return {"status": "ok", "deleted_keys": deleted}
         except HTTPException:
             raise
-        except Exception as e:
-            raise HTTPException(500, f"Cache invalidation failed: {e}")
+        except Exception:
+            logger.exception("Cache invalidation failed")
+            raise HTTPException(500, "Cache invalidation failed")
 
     # ── 微信二维码 API ──
     try:
@@ -1280,5 +1359,14 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         app.include_router(qrcode_router)
     except Exception as e:
         logger.warning("二维码API挂载失败: %s", e)
+
+    @app.get("/api/routes")
+    async def list_routes():
+        """返回所有已注册路由的路径和方法列表"""
+        routes = []
+        for route in app.routes:
+            if hasattr(route, 'path') and hasattr(route, 'methods'):
+                routes.append({"path": route.path, "methods": list(route.methods)})
+        return {"routes": routes, "total": len(routes)}
 
     return app

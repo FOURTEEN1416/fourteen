@@ -20,8 +20,6 @@ def main():
     char_dir = Path(args.char_dir)
 
     if args.dry_run:
-        import json
-        from pathlib import Path
         print("=== 预检模式 ===")
         char_files = list(char_dir.glob("*.json")) if char_dir.exists() else []
         print(f"角色文件数: {len(char_files)}")

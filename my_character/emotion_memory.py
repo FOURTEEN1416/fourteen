@@ -10,8 +10,8 @@ from __future__ import annotations
 import logging
 import time as time_mod
 from collections import deque
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from memory.memory_pipeline import MemoryPipeline
@@ -28,7 +28,7 @@ class EmotionEvent:
     timestamp: float = 0.0
     affinity_at_trigger: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "emotion": self.emotion,
             "intensity": self.intensity,
@@ -43,7 +43,7 @@ class EmotionEvent:
 class EmotionPattern:
     emotion: str
     frequency: float
-    common_triggers: List[str]
+    common_triggers: list[str]
     avg_intensity: float
     trend: str = "stable"
 
@@ -53,10 +53,10 @@ class EmotionMemorySystem:
 
     MAX_EVENTS = 500
 
-    def __init__(self, memory_pipeline: Optional[MemoryPipeline] = None):
+    def __init__(self, memory_pipeline: MemoryPipeline | None = None):
         self._memory = memory_pipeline
         self._emotion_events: deque = deque(maxlen=self.MAX_EVENTS)
-        self._emotion_patterns: Dict[str, EmotionPattern] = {}
+        self._emotion_patterns: dict[str, EmotionPattern] = {}
 
     def record_event(
         self,
@@ -86,12 +86,12 @@ class EmotionMemorySystem:
         self._emotion_events.append(event)
         logger.debug("Emotion event recorded: %s (%.2f)", emotion, intensity)
 
-    def detect_patterns(self, window: int = 50) -> List[EmotionPattern]:
+    def detect_patterns(self, window: int = 50) -> list[EmotionPattern]:
         recent = list(self._emotion_events)[-window:]
         if not recent:
             return []
 
-        emotion_data: Dict[str, List[EmotionEvent]] = {}
+        emotion_data: dict[str, list[EmotionEvent]] = {}
         for event in recent:
             emotion_data.setdefault(event.emotion, []).append(event)
 
@@ -100,7 +100,7 @@ class EmotionMemorySystem:
         for emotion, events in emotion_data.items():
             freq = len(events) / total
             triggers = [e.trigger for e in events if e.trigger]
-            trigger_counts: Dict[str, int] = {}
+            trigger_counts: dict[str, int] = {}
             for t in triggers:
                 trigger_counts[t] = trigger_counts.get(t, 0) + 1
             common_triggers = sorted(trigger_counts, key=trigger_counts.get, reverse=True)[:5]
@@ -129,7 +129,7 @@ class EmotionMemorySystem:
         patterns.sort(key=lambda p: p.frequency, reverse=True)
         return patterns
 
-    def predict_trigger(self, user_message: str) -> Optional[str]:
+    def predict_trigger(self, user_message: str) -> str | None:
         if not self._emotion_patterns:
             self.detect_patterns()
 
@@ -139,15 +139,15 @@ class EmotionMemorySystem:
                     return emotion
         return None
 
-    def get_emotion_history(self, limit: int = 20) -> List[EmotionEvent]:
+    def get_emotion_history(self, limit: int = 20) -> list[EmotionEvent]:
         return list(self._emotion_events)[-limit:]
 
-    def get_dominant_emotion(self, window: int = 50) -> Tuple[str, float]:
+    def get_dominant_emotion(self, window: int = 50) -> tuple[str, float]:
         recent = list(self._emotion_events)[-window:]
         if not recent:
             return ("平常", 0.0)
 
-        emotion_counts: Dict[str, int] = {}
+        emotion_counts: dict[str, int] = {}
         for event in recent:
             emotion_counts[event.emotion] = emotion_counts.get(event.emotion, 0) + 1
 
@@ -158,7 +158,7 @@ class EmotionMemorySystem:
         freq = emotion_counts[dominant] / len(recent)
         return (dominant, round(freq, 4))
 
-    def get_emotion_summary(self) -> Dict[str, Any]:
+    def get_emotion_summary(self) -> dict[str, Any]:
         dominant, freq = self.get_dominant_emotion()
         patterns = self.detect_patterns()
         return {

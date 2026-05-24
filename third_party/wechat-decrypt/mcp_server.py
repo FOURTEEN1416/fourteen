@@ -5,19 +5,34 @@ Based on FastMCP (stdio transport), reuses existing decryption.
 Runs on Windows Python (needs access to D:\ WeChat databases).
 """
 
+import atexit
+import hashlib
 import io
-import os, sys, json, sqlite3, tempfile, struct, hashlib, atexit, re, threading, subprocess
+import json
+import logging
+import os
+import re
+import sqlite3
+import struct
+import subprocess
+import sys
+import tempfile
+import threading
+
+logger = logging.getLogger("mcp_server")
 import glob
 import wave
+import xml.etree.ElementTree as ET
 from contextlib import closing
 from datetime import datetime, timedelta
-import xml.etree.ElementTree as ET
-from Crypto.Cipher import AES
-from mcp.server.fastmcp import FastMCP
+
 import zstandard as zstd
-from config import _config_file_path, _DEFAULT
+from Crypto.Cipher import AES
 from decode_image import ImageResolver
 from key_utils import get_key_info, key_path_variants, strip_key_metadata
+from mcp.server.fastmcp import FastMCP
+
+from config import _DEFAULT, _config_file_path
 
 # ============ 加密常量 ============
 PAGE_SZ = 4096
@@ -47,10 +62,7 @@ DECRYPTED_DIR = _cfg["decrypted_dir"]
 
 # 图片相关路径
 _db_dir = _cfg["db_dir"]
-if os.path.basename(_db_dir) == "db_storage":
-    WECHAT_BASE_DIR = os.path.dirname(_db_dir)
-else:
-    WECHAT_BASE_DIR = _db_dir
+WECHAT_BASE_DIR = os.path.dirname(_db_dir) if os.path.basename(_db_dir) == "db_storage" else _db_dir
 
 DECODED_IMAGE_DIR = _cfg.get("decoded_image_dir")
 if not DECODED_IMAGE_DIR:
@@ -273,7 +285,7 @@ def _load_contacts_from(db_path):
             + " FROM contact"
         ).fetchall()
         for r in rows:
-            data = dict(zip(select_columns, r))
+            data = dict(zip(select_columns, r, strict=False))
             uname = data.get("username")
             nick = data.get("nick_name")
             remark = data.get("remark")
@@ -738,9 +750,8 @@ def _parse_app_message_outer(content):
     decode_record_item）共用此 helper，避免同一条大消息在不同 caller 上行为不一致。
     Substring 短路保证非 type=19 的大 appmsg 不付出 500K parse 代价。"""
     root = _parse_xml_root(content)
-    if root is None and content and len(content) <= _RECORD_XML_PARSE_MAX_LEN:
-        if '<type>19</type>' in content:
-            root = _parse_xml_root(content, max_len=_RECORD_XML_PARSE_MAX_LEN)
+    if root is None and content and len(content) <= _RECORD_XML_PARSE_MAX_LEN and '<type>19</type>' in content:
+        root = _parse_xml_root(content, max_len=_RECORD_XML_PARSE_MAX_LEN)
     return root
 
 
@@ -2545,7 +2556,7 @@ def decode_file_message(chat_name: str, local_id: int, create_time: int = 0) -> 
             f"在本地缓存找到 {len(candidates)} 个匹配的副本，无法唯一定位"
             f"（同名同 size 多份，且消息 XML 没含 md5 用于强校验）:\n  "
             + '\n  '.join(details)
-            + f"\n请人工 inspect mtime / 上下文区分"
+            + "\n请人工 inspect mtime / 上下文区分"
         )
 
     chosen = candidates[0]
@@ -2555,8 +2566,8 @@ def decode_file_message(chat_name: str, local_id: int, create_time: int = 0) -> 
     binding_note = (
         "✅ md5 校验通过，路径与消息唯一绑定"
         if md5_verified else
-        f"⚠️  消息 XML 没含 md5，路径基于 (filename+size) 启发式匹配——"
-        f"如果同 chat 缓存里另有同名同 size 的不相关文件，可能返回错副本，请人工验证。"
+        "⚠️  消息 XML 没含 md5，路径基于 (filename+size) 启发式匹配——"
+        "如果同 chat 缓存里另有同名同 size 的不相关文件，可能返回错副本，请人工验证。"
     )
     return (
         f"找到本地文件:\n"
@@ -2691,7 +2702,7 @@ def decode_record_item(chat_name: str, local_id: int, item_index: int, create_ti
     if raw_datatitle and not datatitle:
         return f"该 dataitem 的 datatitle {raw_datatitle!r} 不安全（含绝对路径/分隔符/..），拒绝处理"
     datasize = _parse_int(_collapse_text(item.findtext('datasize') or ''), 0)
-    datafmt = _collapse_text(item.findtext('datafmt') or '')
+    _collapse_text(item.findtext('datafmt') or '')
     sourcename = _collapse_text(item.findtext('sourcename') or '')
     # fullmd5 是文件内容唯一标识，用于把候选绑定到这条 record，避免误命中
     # 同 chat 内别条 record 的同名同 size 文件。
@@ -2830,7 +2841,7 @@ def decode_record_item(chat_name: str, local_id: int, item_index: int, create_ti
             f"找到 {len(candidates)} 个匹配的本地副本，无法唯一定位"
             f"（同位置同名同 size 多份，且 dataitem XML 没含 fullmd5 用于强校验）:\n  "
             + '\n  '.join(details)
-            + f"\n请人工 inspect mtime / 上下文区分"
+            + "\n请人工 inspect mtime / 上下文区分"
         )
 
     chosen = candidates[0]
@@ -2840,8 +2851,8 @@ def decode_record_item(chat_name: str, local_id: int, item_index: int, create_ti
     binding_note = (
         "✅ md5 校验通过，路径与 dataitem 唯一绑定"
         if md5_verified else
-        f"⚠️  此 dataitem XML 没含 fullmd5，路径基于 (item_index+filename+size) 启发式匹配——"
-        f"如果同 chat 内多条合并卡片碰巧含同位置同名同 size 的文件，可能返回别条 record 的副本，请人工验证。"
+        "⚠️  此 dataitem XML 没含 fullmd5，路径基于 (item_index+filename+size) 启发式匹配——"
+        "如果同 chat 内多条合并卡片碰巧含同位置同名同 size 的文件，可能返回别条 record 的副本，请人工验证。"
     )
     return (
         f"找到本地文件:\n"
@@ -3520,10 +3531,9 @@ def _resolve_whisper_cpp_binary():
     global _whisper_cpp_binary_resolved
     if _whisper_cpp_binary_resolved is not None:
         return _whisper_cpp_binary_resolved
-    if WHISPER_CPP_BINARY:
-        if os.path.isfile(WHISPER_CPP_BINARY) and os.access(WHISPER_CPP_BINARY, os.X_OK):
-            _whisper_cpp_binary_resolved = WHISPER_CPP_BINARY
-            return _whisper_cpp_binary_resolved
+    if WHISPER_CPP_BINARY and os.path.isfile(WHISPER_CPP_BINARY) and os.access(WHISPER_CPP_BINARY, os.X_OK):
+        _whisper_cpp_binary_resolved = WHISPER_CPP_BINARY
+        return _whisper_cpp_binary_resolved
     for p in _WHISPER_CPP_BINARY_SEARCH_PATHS:
         if os.path.isfile(p) and os.access(p, os.X_OK):
             _whisper_cpp_binary_resolved = p
@@ -3536,10 +3546,9 @@ def _resolve_whisper_cpp_model():
     global _whisper_cpp_model_resolved
     if _whisper_cpp_model_resolved is not None:
         return _whisper_cpp_model_resolved
-    if WHISPER_CPP_MODEL:
-        if os.path.isfile(WHISPER_CPP_MODEL):
-            _whisper_cpp_model_resolved = WHISPER_CPP_MODEL
-            return _whisper_cpp_model_resolved
+    if WHISPER_CPP_MODEL and os.path.isfile(WHISPER_CPP_MODEL):
+        _whisper_cpp_model_resolved = WHISPER_CPP_MODEL
+        return _whisper_cpp_model_resolved
     for search_dir in _WHISPER_CPP_MODEL_SEARCH_PATHS:
         if not os.path.isdir(search_dir):
             continue
@@ -3625,8 +3634,7 @@ def _transcribe_openai(wav_path):
         )
 
     try:
-        from openai import OpenAI
-        from openai import AuthenticationError, RateLimitError, APIError
+        from openai import APIError, AuthenticationError, OpenAI, RateLimitError
     except ImportError:
         raise RuntimeError("缺少依赖: pip install openai")
 
@@ -3756,10 +3764,7 @@ def transcribe_voice(chat_name: str, local_id: int) -> str:
         # 条目里存了 create_time，即使源 DB 中消息已被清理仍能返回历史转录。
         lang = entry.get("language", "unknown")
         cached_ts = entry.get("create_time")
-        if isinstance(cached_ts, int):
-            time_label = datetime.fromtimestamp(cached_ts).strftime('%Y-%m-%d %H:%M')
-        else:
-            time_label = "-"
+        time_label = datetime.fromtimestamp(cached_ts).strftime('%Y-%m-%d %H:%M') if isinstance(cached_ts, int) else "-"
         return f"[{time_label}] ({lang})\n{entry['text']}"
 
     # 未命中：本地后端才需要 whisper 包，云后端在 _transcribe_openai 内单独检查
@@ -3783,8 +3788,9 @@ def transcribe_voice(chat_name: str, local_id: int) -> str:
 
     try:
         result = _transcribe(wav_path, sig["backend"])
-    except RuntimeError as e:
-        return str(e)
+    except RuntimeError:
+        logger.exception("语音转写失败")
+        return "语音转写失败，请稍后重试"
     text = result["text"]
     lang = result["language"]
 

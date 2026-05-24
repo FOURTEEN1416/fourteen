@@ -1,5 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useChatStore } from '../store/chatStore'
+import { queryKeys } from './useQueries'
 import type { WSIncomingMessage } from '../types/api'
 
 // P1: 生产环境自动使用 wss://
@@ -14,12 +16,22 @@ export function useWebSocket() {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const reconnectDelay = useRef(RECONNECT_BASE_MS)
   const mountedRef = useRef(true)
-  const {
-    sessionId, isConnected, setConnected, setStreaming,
-    addMessage, setEmotion, setProactiveMessage,
-    appendStreamToken, finalizeStreamMessage,
-    setCurrentCharacter, setEmotionStage, setAffinity, setLastSticker,
-  } = useChatStore()
+  const queryClient = useQueryClient()
+
+  // 使用独立选择器避免不必要的重渲染
+  const sessionId = useChatStore((state) => state.sessionId)
+  const isConnected = useChatStore((state) => state.isConnected)
+  const setConnected = useChatStore((state) => state.setConnected)
+  const setStreaming = useChatStore((state) => state.setStreaming)
+  const addMessage = useChatStore((state) => state.addMessage)
+  const setEmotion = useChatStore((state) => state.setEmotion)
+  const setProactiveMessage = useChatStore((state) => state.setProactiveMessage)
+  const appendStreamToken = useChatStore((state) => state.appendStreamToken)
+  const finalizeStreamMessage = useChatStore((state) => state.finalizeStreamMessage)
+  const setCurrentCharacter = useChatStore((state) => state.setCurrentCharacter)
+  const setEmotionStage = useChatStore((state) => state.setEmotionStage)
+  const setAffinity = useChatStore((state) => state.setAffinity)
+  const setLastSticker = useChatStore((state) => state.setLastSticker)
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
@@ -83,6 +95,11 @@ export function useWebSocket() {
           case 'character_switched':
             if (data.data?.character_id && data.data?.name) {
               setCurrentCharacter(data.data.character_id, data.data.name)
+              const cid = data.data.character_id
+              queryClient.invalidateQueries({ queryKey: queryKeys.affinity.detail(cid) })
+              queryClient.invalidateQueries({ queryKey: queryKeys.emotionStage.detail(cid) })
+              queryClient.invalidateQueries({ queryKey: queryKeys.vitalSigns.detail(cid) })
+              queryClient.invalidateQueries({ queryKey: queryKeys.characters.all })
             }
             break
 
@@ -115,7 +132,7 @@ export function useWebSocket() {
         console.error('WS parse error:', e)
       }
     }
-  }, [setConnected, setStreaming, addMessage, setEmotion, setProactiveMessage, appendStreamToken, finalizeStreamMessage, setCurrentCharacter, setEmotionStage, setAffinity, setLastSticker])
+  }, [setConnected, setStreaming, addMessage, setEmotion, setProactiveMessage, appendStreamToken, finalizeStreamMessage, setCurrentCharacter, setEmotionStage, setAffinity, setLastSticker, queryClient])
 
   // P2: React Strict Mode 兼容 - 使用 cleanup 标志防止竞态
   useEffect(() => {
@@ -143,7 +160,7 @@ export function useWebSocket() {
     }
   }, [connect])
 
-  const sendMessage = useCallback((message: string, stream = false) => {
+  const sendMessage = useCallback((message: string, stream = false, messageType = 'text', fileUrl = '') => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return false
 
@@ -154,6 +171,8 @@ export function useWebSocket() {
       message,
       session_id: sessionId,
       stream,
+      message_type: messageType,
+      file_url: fileUrl,
     }))
     return true
   }, [sessionId, addMessage])

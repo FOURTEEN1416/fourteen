@@ -1,7 +1,6 @@
 """T-17: WeChatConnector 非文本消息发送单元测试"""
-import pytest
-from unittest.mock import patch, MagicMock, PropertyMock
 import base64
+from unittest.mock import MagicMock, patch
 
 
 class TestWeChatConnectorSendMethods:

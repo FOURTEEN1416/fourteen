@@ -6,18 +6,29 @@ http://localhost:5678
 - 检测到变化后：全量解密DB + 全量WAL patch
 - SSE 服务器推送
 """
-import hashlib, struct, os, sys, json, time, sqlite3, threading, queue, subprocess
+import glob as glob_mod
+import hashlib
+import json
+import logging
+import os
+import queue
+import sqlite3
+import struct
+import subprocess
+import sys
+import threading
+import time
+import urllib.parse
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
+from contextlib import closing, suppress
 from datetime import datetime
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
-from Crypto.Cipher import AES
-import urllib.parse
-import glob as glob_mod
+
 import zstandard as zstd
-from decode_image import extract_md5_from_packed_info, decrypt_dat_file, is_v2_format
+from Crypto.Cipher import AES
+from decode_image import decrypt_dat_file, extract_md5_from_packed_info, is_v2_format
 from key_utils import get_key_info, strip_key_metadata
 
 _zstd_dctx = zstd.ZstdDecompressor()
@@ -31,6 +42,7 @@ WAL_HEADER_SZ = 32
 WAL_FRAME_HEADER_SZ = 24
 
 from config import load_config
+
 _cfg = load_config()
 DB_DIR = _cfg["db_dir"]
 KEYS_FILE = _cfg["keys_file"]
@@ -136,10 +148,8 @@ def _build_emoji_lookup(keys_dict):
     except Exception as e:
         print(f"[emoji] 构建映射失败: {e}", flush=True)
     finally:
-        try:
+        with suppress(OSError):
             os.unlink(dst)
-        except OSError:
-            pass
 
 def _download_emoji(md5):
     """从 CDN 下载表情并缓存到 decoded_images/，返回文件名或 None"""
@@ -148,7 +158,7 @@ def _download_emoji(md5):
     if not info:
         # Lookup miss: 刷新 emoticon.db（最多每60秒一次）
         if _emoji_keys_dict and time.time() - _emoji_last_refresh > 60:
-            print(f"  [emoji] lookup miss, 刷新 emoticon.db...", flush=True)
+            print("  [emoji] lookup miss, 刷新 emoticon.db...", flush=True)
             _build_emoji_lookup(_emoji_keys_dict)
             with _emoji_lookup_lock:
                 info = _emoji_lookup.get(md5)
@@ -213,10 +223,8 @@ def _download_emoji(md5):
         with open(tmp_path, 'wb') as f:
             f.write(data)
         jpg_path = _convert_hevc_to_jpeg(tmp_path, os.path.join(DECODED_IMAGE_DIR, f"emoji_{md5}.jpg"))
-        try:
+        with suppress(OSError):
             os.unlink(tmp_path)
-        except OSError:
-            pass
         if jpg_path:
             return f"emoji_{md5}.jpg"
         return None
@@ -582,10 +590,7 @@ def msg_type_icon(t):
 def broadcast_sse(msg_data):
     event_type = msg_data.get('event', '')
     data_line = f"data: {json.dumps(msg_data, ensure_ascii=False)}\n"
-    if event_type:
-        payload = f"event: {event_type}\n{data_line}\n"
-    else:
-        payload = f"{data_line}\n"
+    payload = f"event: {event_type}\n{data_line}\n" if event_type else f"{data_line}\n"
     with sse_lock:
         dead = []
         for q in sse_clients:
@@ -617,7 +622,7 @@ def _convert_hevc_to_jpeg(hevc_path, jpeg_path):
             # fallback: 找 SPS (00 00 00 01 42 01)
             hevc_start = data.find(b'\x00\x00\x00\x01\x42\x01')
         if hevc_start < 0:
-            print(f"  [img] wxgf 中未找到 HEVC VPS/SPS", flush=True)
+            print("  [img] wxgf 中未找到 HEVC VPS/SPS", flush=True)
             return None
 
         # 提取 HEVC Annex B 流并用 PyAV 解码
@@ -638,7 +643,7 @@ def _convert_hevc_to_jpeg(hevc_path, jpeg_path):
                 os.unlink(h265_path)
 
     except ImportError:
-        print(f"  [img] 需要 PyAV: pip install av", flush=True)
+        print("  [img] 需要 PyAV: pip install av", flush=True)
     except Exception as e:
         print(f"  [img] HEVC→JPEG 失败: {e}", flush=True)
     return None
@@ -781,7 +786,7 @@ class SessionMonitor:
                 break
             except Exception as e:
                 if 'malformed' in str(e) and _try == 0:
-                    print(f"  [img] resource DB malformed, 强制刷新...", flush=True)
+                    print("  [img] resource DB malformed, 强制刷新...", flush=True)
                     self.db_cache.invalidate(os.path.join("message", "message_resource.db"))
                     continue
                 print(f"  [img] 查询 message_resource 失败: {e}", flush=True)
@@ -850,12 +855,12 @@ class SessionMonitor:
             print(f"  [img] 尝试 {sel_type}({sz/1024:.0f}KB): {os.path.basename(selected)}", flush=True)
 
             if is_v2_format(selected) and not IMAGE_AES_KEY:
-                print(f"  [img] V2 格式缺少 AES key, 跳过", flush=True)
+                print("  [img] V2 格式缺少 AES key, 跳过", flush=True)
                 continue
 
             result_path, fmt = decrypt_dat_file(selected, f"{out_base}.tmp", IMAGE_AES_KEY, IMAGE_XOR_KEY)
             if not result_path:
-                print(f"  [img] 解密失败, 跳过", flush=True)
+                print("  [img] 解密失败, 跳过", flush=True)
                 continue
 
             # HEVC/wxgf → 用 pillow-heif 转 JPEG
@@ -866,7 +871,7 @@ class SessionMonitor:
                     size_kb = os.path.getsize(jpg_path) / 1024
                     print(f"  [img] HEVC→JPEG 成功: {os.path.basename(jpg_path)} ({size_kb:.0f}KB)", flush=True)
                     return os.path.basename(jpg_path)
-                print(f"  [img] HEVC→JPEG 转换失败, 尝试下一个", flush=True)
+                print("  [img] HEVC→JPEG 转换失败, 尝试下一个", flush=True)
                 continue
 
             final = f"{out_base}.{fmt}"
@@ -877,7 +882,7 @@ class SessionMonitor:
             print(f"  [img] 解密成功: {os.path.basename(final)} ({size_kb:.0f}KB)", flush=True)
             return os.path.basename(final)
 
-        print(f"  [img] 所有 .dat 均无法解密", flush=True)
+        print("  [img] 所有 .dat 均无法解密", flush=True)
         return '__v2_unsupported__'
 
     def _async_resolve_image(self, username, timestamp, msg_data):
@@ -949,10 +954,8 @@ class SessionMonitor:
             print(f"  [hidden] {db_key} 独立解密失败: {e}", flush=True)
             return []
         finally:
-            try:
+            with suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
 
     def _lookup_latest_message(self, username, timestamp):
         """从 message_N.db 查指定 username 在 timestamp 的最新一条消息，返回
@@ -1059,7 +1062,7 @@ class SessionMonitor:
 
         # 仅在缓存查询出错时才用昂贵的独立解密
         if cache_failed:
-            print(f"  [hidden] 缓存异常，启动独立解密...", flush=True)
+            print("  [hidden] 缓存异常，启动独立解密...", flush=True)
             all_rows = []
             for db_key in db_keys:
                 rows = self._fresh_decrypt_query(db_key, table_name, prev_ts, curr_ts)
@@ -1303,7 +1306,7 @@ class SessionMonitor:
                     # 链接/文章 — 清理 tracking 参数
                     clean_url = url
                     if 'mp.weixin.qq.com' in url:
-                        from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+                        from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
                         pu = urlparse(url)
                         params = parse_qs(pu.query, keep_blank_values=False)
                         # 只保留文章必要参数
@@ -1590,7 +1593,7 @@ class SessionMonitor:
                 msg_age = now - msg['timestamp']
                 tag = f"{self.patched_pages}pg/{self.decrypt_ms:.0f}ms"
                 sender = msg['sender']
-                now_str = datetime.fromtimestamp(now).strftime('%H:%M:%S')
+                datetime.fromtimestamp(now).strftime('%H:%M:%S')
                 if sender:
                     print(f"[{msg['time']} 延迟={msg_age:.1f}s] [{msg['chat']}] {sender}: {msg['content']}  ({tag})", flush=True)
                 else:
@@ -2741,7 +2744,7 @@ def _run_tool_task(job_id, task_name, args=None):
             if _tool_running.get("cancelled"):
                 cancelled = True
                 _broadcast_tool_event("tool_log", job_id=job_id,
-                                      line=f"\n[CANCELLED] 任务被用户终止\n")
+                                      line="\n[CANCELLED] 任务被用户终止\n")
                 break
         if proc.returncode != 0:
             _broadcast_tool_event("tool_log", job_id=job_id,
@@ -2781,15 +2784,11 @@ class Handler(BaseHTTPRequestHandler):
             params = urllib.parse.parse_qs(parsed.query)
             filter_chat = params.get('chat', [''])[0].strip().lower()
             since_ts = 0
-            try:
+            with suppress(ValueError, TypeError):
                 since_ts = int(params.get('since', ['0'])[0])
-            except (ValueError, TypeError):
-                pass
             limit_val = 500
-            try:
+            with suppress(ValueError, TypeError):
                 limit_val = min(int(params.get('limit', ['500'])[0]), 2000)
-            except (ValueError, TypeError):
-                pass
 
             with messages_lock:
                 data = sorted(messages_log, key=lambda m: m.get('timestamp', 0))
@@ -2882,11 +2881,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
                 self.wfile.write(json.dumps(sessions, ensure_ascii=False).encode())
-            except Exception as e:
+            except Exception:
+                logging.exception("API处理异常")
                 self.send_response(500)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode())
+                self.wfile.write(json.dumps({"error": "internal_error"}).encode())
 
         else:
             self.send_error(404)
@@ -2957,7 +2957,7 @@ class Handler(BaseHTTPRequestHandler):
                     proc.wait(timeout=1.5)
                 except subprocess.TimeoutExpired:
                     proc.kill()
-            except Exception as e:
+            except Exception:
                 pass  # 进程可能正好自己退了
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

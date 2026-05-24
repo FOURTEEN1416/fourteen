@@ -18,8 +18,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Dict, List
-
 
 # 自恋标志性语言模式
 _NARCISSISM_PATTERNS = [
@@ -71,7 +69,7 @@ class DarkTriadTraits:
     machiavellianism: float = 0.0
     psychopathy: float = 0.0
     overall_level: str = "normal"  # normal / elevated / significant
-    matched_patterns: List[str] = None
+    matched_patterns: list[str] = None
 
     def __post_init__(self):
         if self.matched_patterns is None:

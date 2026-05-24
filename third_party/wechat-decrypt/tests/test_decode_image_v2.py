@@ -16,7 +16,6 @@ import unittest
 
 from Crypto.Cipher import AES
 from Crypto.Util import Padding
-
 from decode_image import (
     V1_MAGIC_FULL,
     V2_MAGIC_FULL,
@@ -24,7 +23,6 @@ from decode_image import (
     decrypt_dat_file,
     v2_decrypt_file,
 )
-
 
 # 测试用 16 字节 AES key (任意值,仅用于合成测试数据)
 TEST_AES_KEY = b'1234567890abcdef'

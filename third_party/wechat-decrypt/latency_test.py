@@ -1,6 +1,13 @@
 """测量消息延迟 - 用mtime检测WAL变化（WAL文件是预分配固定大小的）"""
-import time, os, sys, io, struct, sqlite3, json
+import io
+import json
+import os
+import sqlite3
+import struct
+import sys
+import time
 from datetime import datetime
+
 from Crypto.Cipher import AES
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -10,6 +17,7 @@ SQLITE_HDR = b'SQLite format 3\x00'
 WAL_HEADER_SZ = 32; WAL_FRAME_HEADER_SZ = 24
 
 from config import load_config
+
 _cfg = load_config()
 DB_DIR = _cfg["db_dir"]
 KEYS_FILE = _cfg["keys_file"]
@@ -100,7 +108,7 @@ wal_sz = os.path.getsize(wal_path) if os.path.exists(wal_path) else 0
 
 print(f"\nWAL大小: {wal_sz} bytes (固定预分配)", flush=True)
 print(f"跟踪 {len(prev_sessions)} 个会话", flush=True)
-print(f"\n等待微信新消息... (60秒超时, 30ms轮询)\n", flush=True)
+print("\n等待微信新消息... (60秒超时, 30ms轮询)\n", flush=True)
 
 start = time.time()
 
@@ -166,7 +174,7 @@ while time.time() - start < 60:
         print(f"  >>> 消息时间={msg_time} | 微信→DB延迟={delay:.1f}s | {sender}: {summary}", flush=True)
 
     if not new_msgs:
-        print(f"  (无新消息变化)", flush=True)
+        print("  (无新消息变化)", flush=True)
 
     prev_wal_mtime = wal_mtime
     prev_db_mtime = db_mtime

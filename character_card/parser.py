@@ -14,7 +14,7 @@ import base64
 import json
 import logging
 import struct
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .models import (
     CharacterCard,
@@ -53,7 +53,7 @@ class CharacterCardParser:
         path = pathlib.Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"角色卡文件不存在: {file_path}")
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             return CharacterCardParser.parse_json(f.read())
 
     @staticmethod
@@ -170,7 +170,7 @@ class CharacterCardParser:
     # ── 内部方法 ──────────────────────────────────────────
 
     @classmethod
-    def _from_dict(cls, data: Dict[str, Any]) -> CharacterCard:
+    def _from_dict(cls, data: dict[str, Any]) -> CharacterCard:
         """从字典构建CharacterCard"""
         # V1格式（无spec字段，顶层直接是data）
         if "spec" not in data:
@@ -203,7 +203,7 @@ class CharacterCardParser:
         )
 
     @classmethod
-    def _from_v1(cls, v1_data: Dict[str, Any]) -> CharacterCard:
+    def _from_v1(cls, v1_data: dict[str, Any]) -> CharacterCard:
         """V1格式 → V2格式转换"""
         return CharacterCard(
             spec="chara_card_v2",
@@ -226,7 +226,7 @@ class CharacterCardParser:
         )
 
     @staticmethod
-    def _parse_world_info(wb: Any) -> Optional[WorldInfoBook]:
+    def _parse_world_info(wb: Any) -> WorldInfoBook | None:
         """解析WorldInfo角色书"""
         if not wb or not isinstance(wb, dict):
             return None
@@ -255,7 +255,7 @@ class CharacterCardParser:
         )
 
     @staticmethod
-    def _parse_extensions(ext: Dict[str, Any]) -> CharacterExtensions:
+    def _parse_extensions(ext: dict[str, Any]) -> CharacterExtensions:
         """解析扩展字段"""
         return CharacterExtensions(
             talkativeness=ext.get("talkativeness", 0.5),

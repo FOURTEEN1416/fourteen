@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from my_character.emotion_engine import AffinityLevel, EmotionEngine
 
@@ -31,7 +33,7 @@ class UserInstance:
     session_id: str = ""
 
     # 用户专属的情感引擎
-    emotion_engine: Optional[EmotionEngine] = None
+    emotion_engine: EmotionEngine | None = None
 
     # 统计
     total_chats: int = 0
@@ -67,8 +69,9 @@ class GirlfriendManager:
 
     def __init__(self, orchestrator):
         self._orch = orchestrator
-        self._users: Dict[str, UserInstance] = {}
-        self._lock = asyncio.Lock()
+        self._users: dict[str, UserInstance] = {}
+        # 使用线程锁保护 _users 字典，防止并发竞态条件
+        self._users_lock = threading.Lock()
 
         # 从 orchestrator 的共享情感引擎提取配置
         self._engine_template = None
@@ -89,35 +92,20 @@ class GirlfriendManager:
 
     async def process_message(
         self, user_id: str, text: str, message_type: str = "text"
-    ) -> Dict[str, Any]:
-        """处理某个用户的消息"""
-        instance = await self._get_or_create(user_id)
-        instance.last_active = time.time()
+    ) -> dict[str, Any]:
+        """处理某个用户的消息
 
-        # 换入用户专属情感引擎
-        saved_engine = None
-        if hasattr(self._orch, "components") and "emotion" in self._orch.components:
-            saved_engine = self._orch.components["emotion"]
-            self._orch.components["emotion"] = instance.emotion_engine
-
-        try:
-            result = await self._orch.process_message(
-                text, session_id=user_id, message_type=message_type
-            )
-            instance.total_chats += 1
-            return result
-        except Exception as e:
-            logger.exception("处理用户 %s 消息失败", user_id)
-            return {"reply": "（处理消息时出现异常）", "error": str(e)}
-        finally:
-            # 换回共享引擎
-            if saved_engine and hasattr(self._orch, "components"):
-                self._orch.components["emotion"] = saved_engine
+        注意: 不再使用全局锁，依赖 Orchestrator 的 per-session 锁保证并发安全。
+        Orchestrator._get_session_lock(session_id) 为每个 session 提供独立的锁，
+        不同用户可并行处理，同一用户消息串行处理，避免情感引擎状态串扰。
+        """
+        return await self._process_message_inner(user_id, text, message_type)
 
     # ── 用户管理 ─────────────────────────────────────────
 
     async def _get_or_create(self, user_id: str) -> UserInstance:
-        async with self._lock:
+        """获取或创建用户实例（线程安全）"""
+        with self._users_lock:
             if user_id not in self._users:
                 engine = self._create_user_engine()
                 instance = UserInstance(
@@ -130,23 +118,31 @@ class GirlfriendManager:
             return self._users[user_id]
 
     def remove_user(self, user_id: str) -> bool:
-        """移除用户"""
-        if user_id in self._users:
-            del self._users[user_id]
-            logger.info("用户移除: %s", user_id)
-            return True
-        return False
+        """移除用户（线程安全）"""
+        with self._users_lock:
+            if user_id in self._users:
+                instance = self._users.pop(user_id)
+                # 关闭用户的情感引擎，释放线程池资源
+                if instance.emotion_engine:
+                    try:
+                        instance.emotion_engine.close()
+                    except Exception as e:
+                        logger.warning("关闭用户 %s 情感引擎时出错: %s", user_id, e)
+                logger.info("用户移除: %s", user_id)
+                return True
+            return False
 
     def reset_user(self, user_id: str) -> bool:
-        """重置用户（情感归零）"""
-        if user_id not in self._users:
-            return False
-        instance = self._users[user_id]
-        if instance.emotion_engine:
-            instance.emotion_engine.reset()
-        instance.total_chats = 0
-        logger.info("用户重置: %s", user_id)
-        return True
+        """重置用户（情感归零）（线程安全）"""
+        with self._users_lock:
+            if user_id not in self._users:
+                return False
+            instance = self._users[user_id]
+            if instance.emotion_engine:
+                instance.emotion_engine.reset()
+            instance.total_chats = 0
+            logger.info("用户重置: %s", user_id)
+            return True
 
     # ── 角色卡分配 ───────────────────────────────────────
 
@@ -163,7 +159,7 @@ class GirlfriendManager:
 
     # ── 查询接口 ─────────────────────────────────────────
 
-    def get_all_users(self) -> List[Dict[str, Any]]:
+    def get_all_users(self) -> list[dict[str, Any]]:
         return [
             {
                 "user_id": u.user_id,
@@ -180,7 +176,7 @@ class GirlfriendManager:
             for u in self._users.values()
         ]
 
-    def get_user_info(self, user_id: str) -> Optional[Dict[str, Any]]:
+    def get_user_info(self, user_id: str) -> dict[str, Any] | None:
         instance = self._users.get(user_id)
         if not instance:
             return None
@@ -200,7 +196,7 @@ class GirlfriendManager:
     def active_user_count(self) -> int:
         return len(self._users)
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         return {
             "active_users": self.active_user_count,
             "users": list(self._users.keys()),

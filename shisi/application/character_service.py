@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
-
 from shisi.core.models.character_aggregate import CharacterAggregate
 from shisi.core.ports.character_repository import CharacterRepository
 from shisi.core.services.prompt_builder import build as build_prompt
@@ -18,13 +16,13 @@ class CharacterService:
         self._repo.save(character)
         return character
 
-    def get_character(self, character_id: str) -> Optional[CharacterAggregate]:
+    def get_character(self, character_id: str) -> CharacterAggregate | None:
         return self._repo.get_by_id(character_id)
 
-    def get_active_character(self) -> Optional[CharacterAggregate]:
+    def get_active_character(self) -> CharacterAggregate | None:
         return self._repo.get_active()
 
-    def list_characters(self) -> List[CharacterAggregate]:
+    def list_characters(self) -> list[CharacterAggregate]:
         return self._repo.list_all()
 
     def switch_character(self, character_id: str) -> bool:
@@ -35,7 +33,7 @@ class CharacterService:
         character_id: str,
         user_message: str,
         chat_history: str = "",
-    ) -> Tuple[CharacterAggregate, str]:
+    ) -> tuple[CharacterAggregate, str]:
         character = self._repo.get_by_id(character_id)
         if not character:
             raise ValueError(f"角色不存在: {character_id}")

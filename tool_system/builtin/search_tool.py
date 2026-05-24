@@ -46,5 +46,5 @@ class SearchTool(BaseTool):
                 ]
                 return ToolResult(True, data=simplified)
         except Exception as e:
-            logger.error("Search failed: %s", e)
-            return ToolResult(False, error=str(e))
+            logger.exception("Search failed: %s", e)
+            return ToolResult(False, error="search_failed")

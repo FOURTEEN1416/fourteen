@@ -6,7 +6,7 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..config import get_config
 
@@ -83,7 +83,7 @@ class StickerManager:
         finally:
             conn.close()
 
-    def get_sticker(self, sticker_id: str) -> Optional[dict[str, Any]]:
+    def get_sticker(self, sticker_id: str) -> dict[str, Any] | None:
         conn = sqlite3.connect(str(self._db_path))
         conn.row_factory = sqlite3.Row
         try:

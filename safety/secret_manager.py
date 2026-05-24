@@ -5,7 +5,6 @@ import os
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger("secret_manager")
 
@@ -19,7 +18,7 @@ class SecretManager:
         self._ttl = ttl
         self._max_cache_size = max_cache_size
 
-    def get(self, key: str, default: Optional[str] = None) -> Optional[str]:
+    def get(self, key: str, default: str | None = None) -> str | None:
         if key in self._secrets:
             value, timestamp = self._secrets[key]
             if time.time() - timestamp < self._ttl:
@@ -41,7 +40,7 @@ class SecretManager:
             self._secrets.popitem(last=False)
         self._secrets[key] = (value, time.time())
 
-    def _load_from_file(self, key: str) -> Optional[str]:
+    def _load_from_file(self, key: str) -> str | None:
         secret_file = Path(f"./secrets/{key}")
         if secret_file.exists():
             try:
@@ -53,10 +52,7 @@ class SecretManager:
     @staticmethod
     def check_no_hardcoded_secrets(text: str) -> bool:
         lower = text.lower()
-        for pattern in HARDCODED_PATTERNS:
-            if pattern in lower:
-                return False
-        return True
+        return all(pattern not in lower for pattern in HARDCODED_PATTERNS)
 
     def health_check(self) -> dict:
         return {"cached_count": len(self._secrets), "ttl": self._ttl, "max_size": self._max_cache_size}

@@ -1,6 +1,7 @@
 ﻿import { useState, useRef, KeyboardEvent } from 'react'
 import { Send, Paperclip, X } from 'lucide-react'
 import { useChatStore } from '../../store/chatStore'
+import { useErrorStore } from '../../store/errorStore'
 import { api } from '../../api/client'
 
 interface Props {
@@ -14,6 +15,7 @@ export default function ChatInput({ onSend }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const isStreaming = useChatStore((s) => s.isStreaming)
+  const addToast = useErrorStore((s) => s.addToast)
 
   const handleSend = () => {
     const msg = text.trim()
@@ -41,7 +43,9 @@ export default function ChatInput({ onSend }: Props) {
     try {
       const r = await api.uploadFile(file)
       setAttachedFile({ name: r.data.filename, url: r.data.url, type: r.data.message_type })
-    } catch { /* ignore */ }
+    } catch (err) {
+      addToast({ type: 'error', message: '文件上传失败，请重试' })
+    }
     setUploading(false)
     if (fileRef.current) fileRef.current.value = ''
   }

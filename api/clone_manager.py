@@ -15,7 +15,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 _PATH_TRAVERSAL_RE = re.compile(r'[/\\]|\.\.')
 
@@ -36,12 +36,12 @@ class CloneDataManager:
     """克隆数据管理器"""
 
     def __init__(self):
-        self._contacts_cache: Optional[List[Dict[str, Any]]] = None
+        self._contacts_cache: list[dict[str, Any]] | None = None
         self._contacts_cache_time = 0
 
     # ── 联系人列表（需求4） ──
 
-    def get_contacts(self, keyword: str = "", force_refresh: bool = False) -> List[Dict[str, Any]]:
+    def get_contacts(self, keyword: str = "", force_refresh: bool = False) -> list[dict[str, Any]]:
         """获取微信联系人列表（优先从解密数据库，降级到已有克隆数据）
 
         Args:
@@ -70,7 +70,7 @@ class CloneDataManager:
 
         return contacts
 
-    def _get_contacts_from_decrypt(self) -> List[Dict[str, Any]]:
+    def _get_contacts_from_decrypt(self) -> list[dict[str, Any]]:
         """从 wechat-decrypt 获取联系人"""
         try:
             from clone_training.decrypt_source import DecryptSource
@@ -85,14 +85,14 @@ class CloneDataManager:
             logger.debug("解密数据库获取联系人失败（降级到克隆数据）: %s", e)
             return []
 
-    def _get_contacts_from_clone_data(self) -> List[Dict[str, Any]]:
+    def _get_contacts_from_clone_data(self) -> list[dict[str, Any]]:
         """从已有克隆数据提取联系人"""
         contacts = []
         if CLONE_DATA_DIR.exists():
             for f in sorted(CLONE_DATA_DIR.glob("*_raw.json")):
                 name = f.name.replace("_raw.json", "")
                 try:
-                    with open(f, "r", encoding="utf-8") as fh:
+                    with open(f, encoding="utf-8") as fh:
                         data = json.load(fh)
                     msg_count = len(data) if isinstance(data, list) else 0
                     contacts.append({
@@ -112,7 +112,7 @@ class CloneDataManager:
 
     # ── 克隆数据集管理（需求3） ──
 
-    def list_datasets(self) -> List[Dict[str, Any]]:
+    def list_datasets(self) -> list[dict[str, Any]]:
         """列出所有已提取的克隆数据集（按人物分组）
 
         Returns:
@@ -133,7 +133,7 @@ class CloneDataManager:
         for f in sorted(CLONE_DATA_DIR.glob("*_raw.json"), key=os.path.getmtime, reverse=True):
             name = f.name.replace("_raw.json", "")
             try:
-                with open(f, "r", encoding="utf-8") as fh:
+                with open(f, encoding="utf-8") as fh:
                     data = json.load(fh)
                 msg_count = len(data) if isinstance(data, list) else 0
             except Exception:
@@ -157,7 +157,7 @@ class CloneDataManager:
 
     def get_dataset_detail(self, person_id: str, page: int = 1, page_size: int = 50,
                            keyword: str = "", date_from: str = "", date_to: str = "",
-                           only_user: bool = False) -> Dict[str, Any]:
+                           only_user: bool = False) -> dict[str, Any]:
         _safe_person_id(person_id)
         """查看某个人物的聊天记录详情（支持分页/筛选）
 
@@ -186,10 +186,11 @@ class CloneDataManager:
             return {"person_id": person_id, "error": "数据集不存在", "conversations": []}
 
         try:
-            with open(raw_path, "r", encoding="utf-8") as f:
+            with open(raw_path, encoding="utf-8") as f:
                 all_convs = json.load(f)
-        except Exception as e:
-            return {"person_id": person_id, "error": str(e), "conversations": []}
+        except Exception:
+            logger.exception("Failed to load dataset %s", person_id)
+            return {"person_id": person_id, "error": "读取数据集失败", "conversations": []}
 
         if not isinstance(all_convs, list):
             return {"person_id": person_id, "error": "数据格式错误", "conversations": []}
@@ -282,7 +283,7 @@ class CloneDataManager:
             return False
 
         try:
-            with open(raw_path, "r", encoding="utf-8") as f:
+            with open(raw_path, encoding="utf-8") as f:
                 convs = json.load(f)
         except Exception:
             return False
@@ -297,7 +298,7 @@ class CloneDataManager:
 
         return True
 
-    def batch_delete_conversations(self, person_id: str, indices: List[int]) -> int:
+    def batch_delete_conversations(self, person_id: str, indices: list[int]) -> int:
         _safe_person_id(person_id)
         """批量删除多条对话
 
@@ -313,7 +314,7 @@ class CloneDataManager:
             return 0
 
         try:
-            with open(raw_path, "r", encoding="utf-8") as f:
+            with open(raw_path, encoding="utf-8") as f:
                 convs = json.load(f)
         except Exception:
             return 0
@@ -336,7 +337,7 @@ class CloneDataManager:
 
     # ── 统计 ──
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """获取克隆数据全局统计"""
         datasets = self.list_datasets()
         total_persons = len(datasets)
@@ -358,7 +359,7 @@ class CloneDataManager:
         if not raw_path.exists():
             return "unknown"
         try:
-            with open(raw_path, "r", encoding="utf-8") as f:
+            with open(raw_path, encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, list) and data:
                 return data[0].get("source", "unknown")

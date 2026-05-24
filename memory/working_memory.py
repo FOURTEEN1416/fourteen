@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("working_memory")
 
@@ -43,7 +43,7 @@ class WorkingMemory:
             )
             conn.commit()
 
-    def get_recent(self, n: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_recent(self, n: int | None = None) -> list[dict[str, Any]]:
         n = n or self.limit
         if not self.session_id:
             return []
@@ -68,7 +68,7 @@ class WorkingMemory:
     def should_archive(self) -> bool:
         return self.count() >= self.limit
 
-    def get_for_archive(self) -> List[Dict[str, Any]]:
+    def get_for_archive(self) -> list[dict[str, Any]]:
         return self.get_recent()
 
     def clear(self):

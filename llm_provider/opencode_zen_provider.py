@@ -8,11 +8,13 @@ API 端点: https://opencode.ai/zen/v1
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import time
-from typing import Any, AsyncIterator, Dict, List, Optional
+from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
 
@@ -53,9 +55,9 @@ class OpenCodeZenProvider:
 
     def __init__(
         self,
-        api_base: Optional[str] = None,
-        model: Optional[str] = None,
-        models_config: Optional[List[Dict]] = None,
+        api_base: str | None = None,
+        model: str | None = None,
+        models_config: list[dict] | None = None,
     ):
         self.api_base = (api_base or os.environ.get("OPENCODE_ZEN_API_BASE") or DEFAULT_API_BASE).rstrip("/")
         self.model = model or os.environ.get("OPENCODE_ZEN_DEFAULT_MODEL") or DEFAULT_MODEL
@@ -63,7 +65,7 @@ class OpenCodeZenProvider:
         self._chat_url = f"{self.api_base}/chat/completions"
         self._models_url = f"{self.api_base}/models"
         self._headers = {"Content-Type": "application/json"}
-        self.available_models: List[str] = []
+        self.available_models: list[str] = []
 
         logger.info("OpenCodeZenProvider ready: api_base=%s, default_model=%s", self.api_base, self.model)
 
@@ -72,7 +74,7 @@ class OpenCodeZenProvider:
         except Exception as e:
             logger.warning("Failed to fetch models on init (will use config): %s", e)
 
-    def fetch_available_models(self) -> List[str]:
+    def fetch_available_models(self) -> list[str]:
         try:
             resp = httpx.get(self._models_url, headers=self._headers, timeout=10)
             resp.raise_for_status()
@@ -108,12 +110,12 @@ class OpenCodeZenProvider:
         self,
         query: str = "",
         system_prompt: str = "",
-        history: Optional[list] = None,
-        messages: Optional[list] = None,
+        history: list | None = None,
+        messages: list | None = None,
         temperature: float = 0.85,
         max_tokens: int = 1024,
-        tools: Optional[list] = None,
-        model: Optional[str] = None,
+        tools: list | None = None,
+        model: str | None = None,
     ) -> str:
         built_messages = self._build_messages(query, system_prompt, history, messages)
         model_name = model or self.model
@@ -164,11 +166,11 @@ class OpenCodeZenProvider:
         self,
         query: str = "",
         system_prompt: str = "",
-        history: Optional[list] = None,
-        messages: Optional[list] = None,
+        history: list | None = None,
+        messages: list | None = None,
         temperature: float = 0.85,
         max_tokens: int = 2048,
-        tools: Optional[list] = None,
+        tools: list | None = None,
     ) -> AsyncIterator[str]:
         built_messages = self._build_messages(query, system_prompt, history, messages)
         payload = {
@@ -187,23 +189,27 @@ class OpenCodeZenProvider:
             async with httpx.AsyncClient(timeout=60) as client:
                 async with client.stream("POST", self._chat_url, headers=self._headers, json=payload) as resp:
                     resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
-                        data_str = line[6:]
-                        if data_str.strip() == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data_str)
-                            delta = chunk["choices"][0]["delta"]
-                            if "content" in delta and delta["content"]:
-                                if first_token_time is None:
-                                    first_token_time = time.perf_counter()
-                                    if first_token_time - start > 3.0:
-                                        logger.warning("Stream first token timeout (>3s)")
-                                yield delta["content"]
-                        except (json.JSONDecodeError, KeyError, IndexError):
-                            continue
+                    async with asyncio.timeout(60):
+                        async for line in resp.aiter_lines():
+                            if not line.startswith("data: "):
+                                continue
+                            data_str = line[6:]
+                            if data_str.strip() == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data_str)
+                                delta = chunk["choices"][0]["delta"]
+                                if "content" in delta and delta["content"]:
+                                    if first_token_time is None:
+                                        first_token_time = time.perf_counter()
+                                        if first_token_time - start > 3.0:
+                                            logger.warning("Stream first token timeout (>3s)")
+                                    yield delta["content"]
+                            except (json.JSONDecodeError, KeyError, IndexError):
+                                continue
+        except asyncio.TimeoutError:
+            logger.warning("OpenCodeZen 流式生成超时 (60s)")
+            yield "（生成已超时，请重试）"
         except Exception as e:
             if HAS_METRICS:
                 record_error("llm_stream", type(e).__name__)  # type: ignore
@@ -213,12 +219,12 @@ class OpenCodeZenProvider:
         self,
         query: str = "",
         system_prompt: str = "",
-        history: Optional[list] = None,
-        messages: Optional[list] = None,
+        history: list | None = None,
+        messages: list | None = None,
         temperature: float = 0.85,
         max_tokens: int = 2048,
-        tools: Optional[list] = None,
-    ) -> Dict[str, Any]:
+        tools: list | None = None,
+    ) -> dict[str, Any]:
         built_messages = self._build_messages(query, system_prompt, history, messages)
         payload = {
             "model": self.model,
@@ -269,7 +275,7 @@ class OpenCodeZenProvider:
 
     def health_check(self) -> dict:
         reachable = False
-        remote_models: List[str] = []
+        remote_models: list[str] = []
         try:
             resp = httpx.get(self._models_url, headers=self._headers, timeout=5)
             resp.raise_for_status()
@@ -291,7 +297,7 @@ class OpenCodeZenProvider:
         }
 
     def _build_messages(self, query: str, system_prompt: str,
-                        history: Optional[list], messages: Optional[list]) -> list:
+                        history: list | None, messages: list | None) -> list:
         if messages:
             return messages
         result = []
@@ -304,7 +310,7 @@ class OpenCodeZenProvider:
         return result
 
     def _try_fallback(self, messages: list, temperature: float,
-                      max_tokens: int, tools: Optional[list]) -> Optional[str]:
+                      max_tokens: int, tools: list | None) -> str | None:
         fallback_count = 0
         for entry in self.registry.all_models:
             if entry.name == self.model or not entry.is_available():
@@ -334,7 +340,7 @@ class OpenCodeZenProvider:
         return None
 
     def _handle_429_and_fallback(self, messages: list, temperature: float,
-                                  max_tokens: int, tools: Optional[list],
+                                  max_tokens: int, tools: list | None,
                                   model_name: str) -> str:
         entry = self.registry.get_by_name(model_name)
         if entry:

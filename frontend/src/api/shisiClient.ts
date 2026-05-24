@@ -2,7 +2,7 @@ import client from './client'
 import type { CharacterState, ApiResponse } from '../types/character'
 import type { EmotionStageProgress, AffinityProgress, VitalSignsData } from '../types/shisi'
 
-const BASE = '/shisi'
+const BASE = '/api/shisi'
 
 const unwrap = <T>(r: { data: unknown }): T => (r.data as ApiResponse<T>).data as T
 

@@ -1,8 +1,8 @@
 """十四模块数据库迁移 — 建表SQL与迁移执行器。"""
 
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 _DB_DEFAULT = Path(__file__).resolve().parent.parent / "data" / "sqlite.db"
 

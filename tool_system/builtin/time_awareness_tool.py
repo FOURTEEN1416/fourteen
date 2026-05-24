@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
-from typing import Dict
 
 from tool_system.base import BaseTool, ToolResult
 
@@ -71,13 +70,13 @@ class TimeAwarenessTool(BaseTool):
         try:
             return handler()
         except Exception as e:
-            logger.error("时间感知错误: %s", e)
-            return ToolResult(False, error=str(e))
+            logger.exception("时间感知错误: %s", e)
+            return ToolResult(False, error="time_awareness_failed")
 
     def _get_current(self) -> ToolResult:
         now = datetime.now()
         today = now.date()
-        result: Dict = {
+        result: dict = {
             "date": now.strftime("%Y-%m-%d"),
             "time": now.strftime("%H:%M:%S"),
             "weekday": WEEKDAY_CN[now.weekday()],

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("tool_system")
 
@@ -14,7 +14,7 @@ class ToolResult:
         self.data = data
         self.error = error
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = {"success": self.success}
         if self.data is not None:
             result["data"] = self.data
@@ -32,12 +32,12 @@ class BaseTool:
     name: str = ""
     description: str = ""
     permission_level: str = "public"
-    parameters_schema: Dict[str, Any] = {}
+    parameters_schema: dict[str, Any] = {}
 
     def execute(self, **kwargs) -> ToolResult:
         raise NotImplementedError
 
-    def to_openai_fc_schema(self) -> Dict[str, Any]:
+    def to_openai_fc_schema(self) -> dict[str, Any]:
         return {
             "type": "function",
             "function": {
@@ -50,7 +50,7 @@ class BaseTool:
 
 class ToolRegistry:
     def __init__(self):
-        self._tools: Dict[str, BaseTool] = {}
+        self._tools: dict[str, BaseTool] = {}
 
     def register(self, tool: BaseTool):
         self._tools[tool.name] = tool
@@ -59,13 +59,13 @@ class ToolRegistry:
     def unregister(self, name: str):
         self._tools.pop(name, None)
 
-    def get(self, name: str) -> Optional[BaseTool]:
+    def get(self, name: str) -> BaseTool | None:
         return self._tools.get(name)
 
-    def get_all_schemas(self) -> List[Dict]:
+    def get_all_schemas(self) -> list[dict]:
         return [tool.to_openai_fc_schema() for tool in self._tools.values()]
 
-    def get_tools_by_permission(self, min_affinity: int = 0) -> List[Dict]:
+    def get_tools_by_permission(self, min_affinity: int = 0) -> list[dict]:
         permission_affinity = {"public": 0, "friend": 2, "intimate": 6, "admin": 99}
         schemas = []
         for tool in self._tools.values():
@@ -75,10 +75,10 @@ class ToolRegistry:
         return schemas
 
     @property
-    def tool_names(self) -> List[str]:
+    def tool_names(self) -> list[str]:
         return list(self._tools.keys())
 
-    def health_check_all(self) -> Dict[str, Dict[str, Any]]:
+    def health_check_all(self) -> dict[str, dict[str, Any]]:
         results = {}
         for name, tool in self._tools.items():
             status = {"available": True, "error": ""}
@@ -97,11 +97,11 @@ class ToolDispatcher:
         self.registry = registry
         self.timeout = timeout
         self.rate_limit = rate_limit_per_minute
-        self._call_times: Dict[str, List[float]] = {}
+        self._call_times: dict[str, list[float]] = {}
         self.retry_count = retry_count
         self.retry_tools = retry_tools or {"web_search", "get_weather"}
 
-    def dispatch(self, tool_name: str, arguments: Dict[str, Any],
+    def dispatch(self, tool_name: str, arguments: dict[str, Any],
                  affinity_level: int = 0, trace_id: str = "") -> ToolResult:
         tool = self.registry.get(tool_name)
         if not tool:
@@ -120,13 +120,14 @@ class ToolDispatcher:
             from observability.metrics import record_tool_call
             record_tool_call(tool_name, duration_ms / 1000, result.success)
             return result
-        except Exception as e:
+        except Exception:
             duration_ms = (time.perf_counter() - start) * 1000
             from observability.metrics import record_tool_call
             record_tool_call(tool_name, duration_ms / 1000, False)
             if tool_name in self.retry_tools and self.retry_count > 0:
                 return self._execute_with_retry(tool, arguments, tool_name)
-            return ToolResult(False, error=str(e))
+            logger.exception("工具执行失败: %s", tool_name)
+            return ToolResult(False, error="tool_execution_failed")
 
     def _check_permission(self, tool: BaseTool, affinity: int) -> bool:
         permission_affinity = {"public": 0, "friend": 2, "intimate": 6, "admin": 99}
@@ -143,7 +144,7 @@ class ToolDispatcher:
         times.append(now)
         return True
 
-    def _execute_with_retry(self, tool: BaseTool, arguments: Dict[str, Any],
+    def _execute_with_retry(self, tool: BaseTool, arguments: dict[str, Any],
                             tool_name: str) -> ToolResult:
         for attempt in range(self.retry_count):
             time.sleep(0.5 * (attempt + 1))

@@ -1,14 +1,16 @@
 import functools
+import glob
+import hashlib
+import json
+import multiprocessing
+import os
 import platform
 import sys
-import os
-import glob
-import json
-import hashlib
-import multiprocessing
 import time
-from config import load_config
+
 from Crypto.Cipher import AES
+
+from config import load_config
 
 
 def find_v2_ciphertext(attach_dir):
@@ -75,11 +77,11 @@ def _brute_worker(start_i, end_i, xor_key, bin_suffix, base_wxid_bytes, cipherte
     for i in range(start_i, end_i):
         uin = (i << 8) | xor_key
         uin_bytes = str(uin).encode('ascii')
-        
+
         if hashlib.md5(uin_bytes).digest()[:2] == bin_suffix:
             h_aes = hashlib.md5(uin_bytes + base_wxid_bytes).hexdigest()
             aes_key_16 = h_aes[:16].encode('ascii')
-            
+
             if try_key(aes_key_16, ciphertext_16):
                 result_queue.put((uin, aes_key_16.decode('ascii')))
                 return
@@ -94,23 +96,23 @@ def find_image_key_offline(cfg):
     if not db_dir:
         print("未配置 db_dir")
         return
-        
+
     base_dir = os.path.dirname(db_dir)
     attach_dir = os.path.join(base_dir, 'msg', 'attach')
-    
+
     folder = os.path.basename(base_dir)
     base_wxid, suffix = "", ""
     if '_' in folder:
         parts = folder.rsplit('_', 1)
         if len(parts) == 2 and len(parts[1]) == 4:
             base_wxid, suffix = parts
-            
+
     if not base_wxid or not suffix:
         print(f"[!] 目录名不符合 wxid_..._suffix 格式: {folder}，跳过爆破")
         return
-        
+
     print(f"[*] 解析到 wxid={base_wxid}, suffix={suffix}")
-    
+
     xor_key = find_xor_key(attach_dir)
     if xor_key is None:
         print("[!] 找不到足够的 _t.dat 文件推导 XOR key，跳过爆破")
@@ -123,20 +125,20 @@ def find_image_key_offline(cfg):
         print("[!] 找不到 V2 加密的图片文件，跳过爆破")
         print("    请先在微信中查看 2-3 张图片，让缩略图缓存到本地后再重试。")
         return
-        
-    print(f"[*] 启动多进程 UIN 空间爆破...")
+
+    print("[*] 启动多进程 UIN 空间爆破...")
     t0 = time.time()
-    
+
     bin_suffix = bytes.fromhex(suffix)
     base_wxid_bytes = base_wxid.encode('ascii')
-    
+
     cpu_count = multiprocessing.cpu_count()
     total = 1 << 24
     chunk = total // cpu_count
-    
+
     result_queue = multiprocessing.Queue()
     processes = []
-    
+
     for i in range(cpu_count):
         start, end = i * chunk, (i + 1) * chunk if i != cpu_count - 1 else total
         p = multiprocessing.Process(
@@ -145,7 +147,7 @@ def find_image_key_offline(cfg):
         )
         p.start()
         processes.append(p)
-    
+
     found = None
     try:
         while any(p.is_alive() for p in processes):
@@ -164,13 +166,13 @@ def find_image_key_offline(cfg):
         print(f"[+] 爆破成功! UIN={found[0]}, 耗时={elapsed:.1f}s")
         aes_key = found[1]
         print(f"    image_aes_key = {aes_key}")
-        
+
         cfg['image_aes_key'] = aes_key
         cfg['image_xor_key'] = xor_key
         config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
         with open(config_file, 'w', encoding='utf-8') as f:
             json.dump(cfg, f, indent=4, ensure_ascii=False)
-        print(f"[+] 已保存到 config.json")
+        print("[+] 已保存到 config.json")
     else:
         print(f"[-] 未能在 UIN 空间找到有效密钥 (耗时={elapsed:.1f}s)")
         print("    可能原因: 目录名被重命名过，或者不是标准账号目录。")

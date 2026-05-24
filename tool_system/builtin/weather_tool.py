@@ -41,5 +41,6 @@ class WeatherTool(BaseTool):
             if weather:
                 return ToolResult(True, data=weather)
             return ToolResult(False, error="Failed to get weather data")
-        except Exception as e:
-            return ToolResult(False, error=str(e))
+        except Exception:
+            logger.exception("获取天气失败")
+            return ToolResult(False, error="weather_fetch_failed")

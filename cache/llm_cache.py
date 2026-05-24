@@ -14,8 +14,9 @@ import hashlib
 import json
 import logging
 import time
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, Optional, Protocol, TypeVar
+from typing import Any, TypeVar
 
 from .redis_client import RedisClient, get_redis_client
 
@@ -70,7 +71,7 @@ class LLMCache:
 
     def __init__(
         self,
-        redis_client: Optional[RedisClient] = None,
+        redis_client: RedisClient | None = None,
         ttl: int = DEFAULT_TTL,
         enabled: bool = True,
     ):
@@ -90,7 +91,7 @@ class LLMCache:
         messages: list[dict],
         model: str,
         temperature: float,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
         **kwargs,
     ) -> str:
         """
@@ -122,9 +123,9 @@ class LLMCache:
         messages: list[dict],
         model: str,
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
         **kwargs,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """
         获取缓存的响应
 
@@ -167,8 +168,8 @@ class LLMCache:
         response: dict,
         model: str,
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
-        ttl: Optional[int] = None,
+        max_tokens: int | None = None,
+        ttl: int | None = None,
         **kwargs,
     ) -> bool:
         """
@@ -262,9 +263,9 @@ class LLMCache:
 
 
 def cached_chat(
-    cache: Optional[LLMCache] = None,
-    ttl: Optional[int] = None,
-    key_func: Optional[Callable[..., str]] = None,
+    cache: LLMCache | None = None,
+    ttl: int | None = None,
+    key_func: Callable[..., str] | None = None,
 ):
     """
     装饰器 — 为LLM聊天函数添加缓存

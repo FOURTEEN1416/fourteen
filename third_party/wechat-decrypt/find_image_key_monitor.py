@@ -5,14 +5,15 @@
 
 按 Ctrl+C 退出。
 """
+import ctypes
+import glob
+import json
 import os
 import re
 import struct
-import glob
-import json
 import time
-import ctypes
 from ctypes import wintypes
+
 from Crypto.Cipher import AES
 from Crypto.Util import Padding
 

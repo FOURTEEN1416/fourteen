@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -16,7 +16,7 @@ class LLMConfig(BaseModel):
     first_token_timeout: float = 3.0
     retry_count: int = 2
     retry_cooldown: float = 30.0
-    models_priority: List[Dict[str, Any]] = Field(default_factory=lambda: [
+    models_priority: list[dict[str, Any]] = Field(default_factory=lambda: [
         {"name": "deepseek-chat", "priority": 1},
         {"name": "deepseek-reasoner", "priority": 2},
     ])
@@ -42,7 +42,7 @@ class MemoryConfig(BaseModel):
     importance_lambda_low: float = 0.1
     importance_lambda_high: float = 0.01
     retrieval_timeout_seconds: float = 1.0
-    fact_type_weights: Dict[str, float] = Field(default_factory=lambda: {
+    fact_type_weights: dict[str, float] = Field(default_factory=lambda: {
         "health": 1.0, "relationship": 0.9, "preference": 0.8,
         "event": 0.7, "work": 0.6, "hobby": 0.5, "general": 0.3,
     })
@@ -73,12 +73,12 @@ class ToolsConfig(BaseModel):
     enabled: bool = True
     execution_timeout_seconds: float = 10.0
     rate_limit_per_tool_per_minute: int = 3
-    sandbox_network_whitelist: List[str] = Field(default_factory=lambda: [
+    sandbox_network_whitelist: list[str] = Field(default_factory=lambda: [
         "api.openweathermap.org",
         "duckduckgo.com",
         "api.deepseek.com",
     ])
-    builtin_tools: List[str] = Field(default_factory=lambda: [
+    builtin_tools: list[str] = Field(default_factory=lambda: [
         "weather", "search", "calendar", "calculator", "reminder", "calendar_query",
     ])
 
@@ -87,9 +87,9 @@ class APIConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
     websocket_port: int = 8765
-    cors_origins: List[str] = Field(default_factory=lambda: ["*"])
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://localhost:8000"])
     rate_limit_per_minute: int = 60
-    api_key_enabled: bool = False
+    api_key_enabled: bool = True
 
 
 class ObservabilityConfig(BaseModel):
@@ -106,14 +106,14 @@ class VoiceConfig(BaseModel):
     """语音TTS配置 - 与voice/模块对接"""
     enabled: bool = False
     engine: str = "edge-tts"
-    edge_tts: Dict[str, Any] = Field(default_factory=lambda: {
+    edge_tts: dict[str, Any] = Field(default_factory=lambda: {
         "speaker_name": "zh-CN-XiaoxiaoNeural",
     })
-    gpt_sovits: Dict[str, Any] = Field(default_factory=lambda: {
+    gpt_sovits: dict[str, Any] = Field(default_factory=lambda: {
         "url": "http://localhost:9880",
         "timeout": 60.0,
     })
-    bert_vits2: Dict[str, Any] = Field(default_factory=lambda: {
+    bert_vits2: dict[str, Any] = Field(default_factory=lambda: {
         "url": "http://localhost:5000",
         "speaker_name": "珊瑚宫心海[中]",
         "timeout": 60.0,

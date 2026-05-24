@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
 from .affinity_level import AffinityLevel
-from .emotional_state import EmotionalState
 from .emotion_type import EmotionType
+from .emotional_state import EmotionalState
 from .persona_profile import PersonaProfile
 
 
@@ -18,8 +18,8 @@ class CharacterAggregate(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
     name: str
     description: str = ""
-    avatar_url: Optional[str] = None
-    tags: List[str] = Field(default_factory=list)
+    avatar_url: str | None = None
+    tags: list[str] = Field(default_factory=list)
 
     persona: PersonaProfile = Field(default_factory=PersonaProfile)
     emotional_state: EmotionalState = Field(default_factory=EmotionalState)
@@ -29,7 +29,7 @@ class CharacterAggregate(BaseModel):
     version: int = 1
 
     source_format: str = "chara_card_v2"
-    source_data: Dict[str, Any] = Field(default_factory=dict)
+    source_data: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -125,7 +125,7 @@ class CharacterAggregate(BaseModel):
         }
 
     @classmethod
-    def from_legacy_card(cls, card_data: dict) -> "CharacterAggregate":
+    def from_legacy_card(cls, card_data: dict) -> CharacterAggregate:
         data = card_data.get("data", card_data)
 
         char_id = card_data.get("character_id") or str(uuid.uuid4())[:8]

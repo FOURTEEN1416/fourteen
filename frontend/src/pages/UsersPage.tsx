@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import client from '../api/client'
+import { useErrorStore } from '../store/errorStore'
+import Modal from '../components/ui/Modal'
 import { Users, Trash2, RotateCcw, MessageCircle, Heart } from 'lucide-react'
 
 interface UserData {
@@ -15,6 +17,29 @@ interface UserData {
   is_active: boolean
 }
 
+interface ChatHistoryItem {
+  role: 'user' | 'assistant'
+  content?: string
+}
+
+interface EmotionDetailData {
+  primary?: { intensity?: number }
+  energy?: number
+  affinity?: { points?: number }
+}
+
+interface UsersResponse {
+  users?: UserData[]
+}
+
+interface ChatHistoryResponse {
+  messages?: ChatHistoryItem[]
+}
+
+interface EmotionResponse {
+  emotion?: EmotionDetailData
+}
+
 function timeAgo(ts: number): string {
   const secs = Math.floor((Date.now() / 1000 - ts))
   if (secs < 60) return '刚刚'
@@ -27,57 +52,84 @@ export default function UsersPage() {
   const [users, setUsers] = useState<UserData[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedUser, setSelectedUser] = useState<UserData | null>(null)
-  const [chatHistory, setChatHistory] = useState<any[]>([])
-  const [emotionDetail, setEmotionDetail] = useState<any>(null)
+  const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([])
+  const [emotionDetail, setEmotionDetail] = useState<EmotionDetailData | null>(null)
+  const [modal, setModal] = useState<{ type: 'reset' | 'remove'; userId: string } | null>(null)
+  const addToast = useErrorStore((s) => s.addToast)
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
       const { data } = await client.get('/users')
-      setUsers((data as any).users || [])
-    } catch { /* ignore */ }
+      setUsers((data as UsersResponse).users || [])
+    } catch {
+      addToast({ type: 'error', message: '获取用户列表失败' })
+    }
     setLoading(false)
-  }
+  }, [addToast])
 
-  useEffect(() => { fetchUsers() }, [])
+  useEffect(() => { fetchUsers() }, [fetchUsers])
 
   const handleViewDetail = async (user: UserData) => {
     setSelectedUser(user)
-    // Fetch chat history
     try {
       const { data } = await client.get(`/users/${user.user_id}/chat`, { params: { limit: 20 } })
-      setChatHistory((data as any).messages || [])
-    } catch { setChatHistory([]) }
-    // Fetch emotion
+      setChatHistory((data as ChatHistoryResponse).messages || [])
+    } catch {
+      setChatHistory([])
+      addToast({ type: 'error', message: '获取聊天记录失败' })
+    }
     try {
       const { data } = await client.get(`/users/${user.user_id}/emotion`)
-      setEmotionDetail((data as any).emotion || null)
-    } catch { setEmotionDetail(null) }
+      setEmotionDetail((data as EmotionResponse).emotion || null)
+    } catch {
+      setEmotionDetail(null)
+      addToast({ type: 'error', message: '获取情感数据失败' })
+    }
   }
 
   const handleReset = async (userId: string) => {
-    if (!confirm('确定重置该用户的情感+记忆？')) return
+    setModal({ type: 'reset', userId })
+  }
+
+  const confirmReset = async () => {
+    if (!modal) return
     try {
-      await client.post(`/users/${userId}/reset`)
+      await client.post(`/users/${modal.userId}/reset`)
+      addToast({ type: 'success', message: '重置成功' })
       fetchUsers()
-    } catch { /* ignore */ }
+    } catch {
+      addToast({ type: 'error', message: '重置失败' })
+    }
+    setModal(null)
   }
 
   const handleRemove = async (userId: string) => {
-    if (!confirm('确定移除该用户？')) return
+    setModal({ type: 'remove', userId })
+  }
+
+  const confirmRemove = async () => {
+    if (!modal) return
     try {
-      await client.delete(`/users/${userId}`)
-      if (selectedUser?.user_id === userId) setSelectedUser(null)
+      await client.delete(`/users/${modal.userId}`)
+      if (selectedUser?.user_id === modal.userId) setSelectedUser(null)
+      addToast({ type: 'success', message: '用户已移除' })
       fetchUsers()
-    } catch { /* ignore */ }
+    } catch {
+      addToast({ type: 'error', message: '移除失败' })
+    }
+    setModal(null)
   }
 
   const handleSetRole = async (userId: string) => {
-    const cardId = prompt('输入角色卡ID (如: "default", "tsundere", "gentle"):')
+    const cardId = prompt('输入角色卡ID (如 "default", "tsundere", "gentle"):')
     if (!cardId) return
     try {
       await client.post(`/users/${userId}/role`, null, { params: { card_id: cardId } })
+      addToast({ type: 'success', message: '角色切换成功' })
       fetchUsers()
-    } catch { /* ignore */ }
+    } catch {
+      addToast({ type: 'error', message: '角色切换失败' })
+    }
   }
 
   if (loading) {
@@ -129,7 +181,7 @@ export default function UsersPage() {
                   </div>
                   <div className="flex items-center gap-3 text-xs text-gray-400">
                     <span>❤️ {user.affinity_name}</span>
-                    <span>💬 {user.total_chats}条</span>
+                    <span>💬 {user.total_chats}</span>
                     <span>{timeAgo(user.last_active)}</span>
                   </div>
                 </div>
@@ -196,7 +248,7 @@ export default function UsersPage() {
                       <div className="grid grid-cols-3 gap-2 text-xs text-gray-500">
                         <div>强度: {emotionDetail.primary?.intensity ?? '-'}</div>
                         <div>能量: {emotionDetail.energy ?? '-'}</div>
-                        <div>好感分: {emotionDetail.affinity?.points ?? '-'}</div>
+                        <div>好感度: {emotionDetail.affinity?.points ?? '-'}</div>
                       </div>
                     </div>
                   )}
@@ -212,7 +264,7 @@ export default function UsersPage() {
                     <p className="text-xs text-gray-400 py-4 text-center">暂无聊天记录</p>
                   ) : (
                     <div className="space-y-2 max-h-60 overflow-y-auto">
-                      {chatHistory.slice(-20).map((msg: any, i: number) => (
+                      {chatHistory.slice(-20).map((msg: ChatHistoryItem, i: number) => (
                         <div key={i} className={`text-xs p-2 rounded-lg ${
                           msg.role === 'user' ? 'bg-blue-50 text-blue-700 ml-8' : 'bg-gray-50 text-gray-600 mr-8'
                         }`}>
@@ -233,6 +285,15 @@ export default function UsersPage() {
           </div>
         </div>
       )}
+
+      <Modal
+        open={!!modal}
+        title={modal?.type === 'reset' ? '重置确认' : '移除确认'}
+        message={modal?.type === 'reset' ? '确定重置该用户的情感+记忆？此操作不可恢复。' : '确定移除该用户？此操作不可恢复。'}
+        variant="danger"
+        onConfirm={modal?.type === 'reset' ? confirmReset : confirmRemove}
+        onCancel={() => setModal(null)}
+      />
     </div>
   )
 }

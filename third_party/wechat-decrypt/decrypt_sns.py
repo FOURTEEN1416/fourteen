@@ -4,16 +4,17 @@
 输出目录: <output_base_dir>/朋友圈图片/<YYYY-MM>/
 _t 后缀为缩略图（跳过）
 """
-import os
-import sys
 import glob
+import os
 import struct
+import sys
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from config import load_config
 from decode_image import aligned_aes_block_size
+
+from config import load_config
 
 _cfg = load_config()
 SNS_CACHE_DIR = _cfg.get("sns_cache_dir", "")
@@ -99,7 +100,7 @@ def decrypt_dat(dat_path):
             return None, None
 
     # 旧 XOR 格式
-    for fmt_name, magic in _IMAGE_MAGICS.items():
+    for _fmt_name, magic in _IMAGE_MAGICS.items():
         key = data[0] ^ magic[0]
         match = all(i < len(data) and (data[i] ^ key) == magic[i] for i in range(len(magic)))
         if match:
@@ -151,7 +152,7 @@ def main():
     has_xwechat = XWECHAT_CACHE_DIR and os.path.isdir(XWECHAT_CACHE_DIR)
 
     if not has_wechat and not has_xwechat:
-        print(f"朋友圈缓存目录不存在:")
+        print("朋友圈缓存目录不存在:")
         print(f"  WeChat Files: {SNS_CACHE_DIR}")
         print(f"  xwechat:      {XWECHAT_CACHE_DIR}")
         print("请确认 config.json 中的路径配置正确")

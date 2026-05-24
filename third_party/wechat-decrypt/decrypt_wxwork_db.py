@@ -112,7 +112,7 @@ def main(argv=None):
     elif global_key:
         print("Using global key from argument/config")
     else:
-        print(f"No key available. Run find_wxwork_keys.py or pass --key.")
+        print("No key available. Run find_wxwork_keys.py or pass --key.")
         return 1
 
     os.makedirs(out_dir, exist_ok=True)

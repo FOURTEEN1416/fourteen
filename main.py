@@ -30,13 +30,14 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 project_root = Path(__file__).parent.absolute()
 sys.path.insert(0, str(project_root))
 
-from common.health_check import health_check_all
+import contextlib
 
+from common.health_check import health_check_all
 
 # ── 加载 .env（手动解析，无需 python-dotenv 依赖） ──
 _env_loaded = False
@@ -46,7 +47,7 @@ def _load_env() -> None:
         return
     env_path = project_root / ".env"
     if env_path.exists():
-        with open(env_path, "r", encoding="utf-8") as f:
+        with open(env_path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:
@@ -62,6 +63,7 @@ _load_env()
 
 
 def setup_logging(log_level: str = "INFO") -> logging.Logger:
+    (project_root / "data").mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=getattr(logging, log_level.upper(), logging.INFO),
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
@@ -136,11 +138,11 @@ def print_banner() -> None:
         print(safe)
 
 
-def load_fusion_config(config_dir: str) -> Dict[str, Any]:
+def load_fusion_config(config_dir: str) -> dict[str, Any]:
     import yaml
     system_yaml = project_root / config_dir / "system.yaml"
     if system_yaml.exists():
-        with open(system_yaml, "r", encoding="utf-8") as f:
+        with open(system_yaml, encoding="utf-8") as f:
             full_cfg = yaml.safe_load(f) or {}
         return full_cfg.get("fusion", {})
     logger.warning("未找到 %s, 使用默认 fusion 配置", system_yaml)
@@ -154,11 +156,37 @@ class OptimizedOrchestrator:
     简洁流程: 安全→PII脱敏→注入检测→情感→记忆→RAG→LLM→输出安全→存储→ASE
     """
 
+    # Session锁缓存配置：最大缓存数、锁过期时间（秒）
+    _MAX_SESSION_LOCKS = 1000
+    _SESSION_LOCK_TTL_SECONDS = 3600  # 1小时无使用后清理
+
     def __init__(self):
-        self.components: Dict[str, Any] = {}
+        self.components: dict[str, Any] = {}
         self._initialized = False
-        self._session_locks: Dict[str, asyncio.Lock] = {}
+        # per-session 异步锁，使用带TTL的缓存防止内存无限增长
+        self._session_locks: dict[str, tuple[asyncio.Lock, float]] = {}
+        self._session_lock_access_time: dict[str, float] = {}
         self._locks_mutex = threading.Lock()
+        self._executor = None  # 延迟初始化的共享线程池
+
+    def _get_executor(self):
+        if self._executor is None:
+            import concurrent.futures
+            self._executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=4, thread_name_prefix="opt_init"
+            )
+        return self._executor
+
+    def shutdown(self):
+        """关闭 OptimizedOrchestrator 并释放资源。
+
+        注意: 必须调用此方法以确保 ThreadPoolExecutor 正确关闭，
+        避免程序退出时线程池资源泄漏。
+        """
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
+            logger.info("OptimizedOrchestrator 线程池已关闭")
 
     # ── backward-compatible property aliases (for rest_api etc.) ──
 
@@ -184,26 +212,15 @@ class OptimizedOrchestrator:
 
     @staticmethod
     def _run_async(coro) -> Any:
-        """
-        安全运行协程，支持有/无事件循环两种情况
+        """安全运行协程，支持有/无事件循环两种情况。
 
-        设计:
-          - 无运行中事件循环 → asyncio.run()
-          - 有运行中事件循环 → 在新线程中新建事件循环运行
+        代理到 common.async_utils.run_async，保持向后兼容。
         """
-        try:
-            asyncio.get_running_loop()
-            # 有运行中事件循环，不能直接asyncio.run
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, coro)
-                return future.result()
-        except RuntimeError:
-            # 无运行中事件循环
-            return asyncio.run(coro)
+        from common.async_utils import run_async
+        return run_async(coro)
 
     def initialize(self, config_dir: str = "config",
-                   fusion_cfg: Optional[Dict] = None) -> bool:
+                   fusion_cfg: dict | None = None) -> bool:
         if self._initialized:
             return True
 
@@ -244,9 +261,9 @@ class OptimizedOrchestrator:
             self.components["injection"].llm_gateway = self.components["llm"]
 
             emotion_fusion = fusion_cfg.get("emotion", {})
-            emotion_fusion.get("blend_ratio", cfg.emotion.continuity_blend_ratio)
-            emotion_fusion.get("classifier_timeout_ms",
-                                                     cfg.emotion.llm_classifier_timeout_ms)
+            blend_ratio = emotion_fusion.get("blend_ratio", cfg.emotion.continuity_blend_ratio)
+            classifier_timeout_ms = emotion_fusion.get("classifier_timeout_ms",
+                                                       cfg.emotion.llm_classifier_timeout_ms)
 
             from my_character.character_config import ConfigLoader
             from my_character.emotion_engine import (
@@ -260,6 +277,8 @@ class OptimizedOrchestrator:
             self.components["emotion"] = EmotionEngineOptimized(
                 llm_gateway=self.components["llm"],
                 use_llm=cfg.emotion.use_llm_classifier,
+                blend_ratio=blend_ratio,
+                classifier_timeout_ms=classifier_timeout_ms,
             )
             config_loader = ConfigLoader(config_dir=config_dir)
             self.components["persona"] = PersonaEngineOptimized(
@@ -294,7 +313,7 @@ class OptimizedOrchestrator:
                 self.components["vector_memory"] = vector_memory
                 self.components["structured_memory"] = structured_memory
 
-            fusion_cfg.get("ase", {})
+            _ = fusion_cfg.get("ase", {})
             try:
                 from proactive.ase_engine import ASEEngine as ASEEngineOptimized
                 self.components["ase"] = ASEEngineOptimized(
@@ -314,14 +333,14 @@ class OptimizedOrchestrator:
 
             from tool_system.base import ToolDispatcher, ToolRegistry
             from tool_system.builtin.calendar_tool import CalculatorTool, CalendarTool
+            from tool_system.builtin.character_crawler_tool import CharacterCrawlerTool
             from tool_system.builtin.reminder_tool import (
                 CalendarQueryTool,
                 ReminderTool,
             )
             from tool_system.builtin.search_tool import SearchTool
-            from tool_system.builtin.weather_tool import WeatherTool
             from tool_system.builtin.time_awareness_tool import TimeAwarenessTool
-            from tool_system.builtin.character_crawler_tool import CharacterCrawlerTool
+            from tool_system.builtin.weather_tool import WeatherTool
 
             registry = ToolRegistry()
             for tool_cls in [WeatherTool, SearchTool, CalendarTool, CalculatorTool]:
@@ -483,12 +502,76 @@ class OptimizedOrchestrator:
             return False
 
     def _get_session_lock(self, session_id: str) -> asyncio.Lock:
-        with self._locks_mutex:
-            if session_id not in self._session_locks:
-                self._session_locks[session_id] = asyncio.Lock()
-            return self._session_locks[session_id]
+        """获取 per-session 异步锁，确保不同 session 可并行处理。
 
-    async def process_message(self, user_msg: str, session_id: str = "", message_type: str = "text") -> Dict[str, Any]:
+        注意: asyncio.Lock 必须在 async 上下文中创建以绑定正确的事件循环。
+        采用延迟创建策略，首次在 async 上下文中调用时才实例化 Lock。
+
+        内存优化：
+        - 使用带TTL的锁缓存，防止session过多导致内存无限增长
+        - 定期清理过期的session锁（超过1小时未访问）
+        - 最大缓存数限制为1000个session
+        """
+        current_time = time.time()
+
+        with self._locks_mutex:
+            # 清理过期锁（每100次访问触发一次清理，避免频繁清理）
+            if len(self._session_locks) >= self._MAX_SESSION_LOCKS or \
+               (len(self._session_locks) > 0 and hash(session_id) % 100 == 0):
+                self._cleanup_expired_session_locks(current_time)
+
+            # 检查是否已存在该session的锁
+            if session_id in self._session_locks:
+                lock, _ = self._session_locks[session_id]
+                self._session_lock_access_time[session_id] = current_time
+                return lock
+
+            # 延迟创建：确保 Lock 绑定到当前运行的事件循环
+            try:
+                asyncio.get_running_loop()
+                new_lock = asyncio.Lock()
+            except RuntimeError:
+                # 没有运行中的事件循环时，创建一个未绑定循环的 Lock
+                new_lock = asyncio.Lock()
+
+            self._session_locks[session_id] = (new_lock, current_time)
+            self._session_lock_access_time[session_id] = current_time
+            return new_lock
+
+    def _cleanup_expired_session_locks(self, current_time: float) -> None:
+        """清理过期的session锁，防止内存无限增长。
+
+        清理策略：
+        1. 优先清理超过TTL（1小时）未访问的锁
+        2. 如果仍然超过最大限制，清理最久未访问的锁
+        """
+        expired_sessions = []
+        for sid, (_, created_time) in self._session_locks.items():
+            last_access = self._session_lock_access_time.get(sid, created_time)
+            if current_time - last_access > self._SESSION_LOCK_TTL_SECONDS:
+                expired_sessions.append(sid)
+
+        for sid in expired_sessions:
+            del self._session_locks[sid]
+            if sid in self._session_lock_access_time:
+                del self._session_lock_access_time[sid]
+
+        # 如果仍然超过最大限制，清理最久未访问的
+        if len(self._session_locks) >= self._MAX_SESSION_LOCKS:
+            sorted_sessions = sorted(
+                self._session_lock_access_time.items(),
+                key=lambda x: x[1]
+            )
+            sessions_to_remove = len(self._session_locks) - self._MAX_SESSION_LOCKS + 100
+            for sid, _ in sorted_sessions[:sessions_to_remove]:
+                if sid in self._session_locks:
+                    del self._session_locks[sid]
+                del self._session_lock_access_time[sid]
+
+        if expired_sessions:
+            logger.debug("清理 %d 个过期session锁，当前总数: %d", len(expired_sessions), len(self._session_locks))
+
+    async def process_message(self, user_msg: str, session_id: str = "", message_type: str = "text") -> dict[str, Any]:
         if not self._initialized:
             return {"reply": "系统初始化中, 请稍候...", "error": "not_initialized"}
 
@@ -552,7 +635,7 @@ class OptimizedOrchestrator:
                 memory_context = ""
                 rag_context = ""
 
-                for name, result in zip(tasks.keys(), results):
+                for name, result in zip(tasks.keys(), results, strict=False):
                     if isinstance(result, Exception):
                         logger.debug("并行任务 %s 异常: %s", name, result)
                         continue
@@ -584,14 +667,21 @@ class OptimizedOrchestrator:
                 if persona_enhancement:
                     system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
 
-                # ── 主 LLM 对话 ──
-                reply = await self.components["llm"].chat(
-                    query=user_msg_clean,
-                    system_prompt=system_prompt,
-                    history=chat_history,
-                    temperature=0.85,
-                    max_tokens=2048,
-                )
+                # ── 主 LLM 对话（带 30s 超时保护） ──
+                try:
+                    reply = await asyncio.wait_for(
+                        self.components["llm"].chat(
+                            query=user_msg_clean,
+                            system_prompt=system_prompt,
+                            history=chat_history,
+                            temperature=0.85,
+                            max_tokens=2048,
+                        ),
+                        timeout=30.0,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("LLM 调用超时 (30s), session=%s", session_id)
+                    return {"reply": "抱歉，处理超时，请稍后重试", "error": "timeout"}
 
                 output_result = self.components["safety"].check_output(reply)
                 if not output_result.is_safe:
@@ -622,11 +712,11 @@ class OptimizedOrchestrator:
                     "process_time": round(process_time, 3),
                 }
 
-            except Exception as e:
+            except Exception:
                 logger.exception("消息处理异常")
-                return {"reply": "（处理消息时出现异常, 请稍后重试）", "error": str(e)}
+                return {"reply": "（处理消息时出现异常, 请稍后重试）", "error": "internal_error"}
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         results = {}
         all_ok = True
 
@@ -638,8 +728,9 @@ class OptimizedOrchestrator:
                     if isinstance(status, dict):
                         if not all(v for v in status.values() if isinstance(v, bool)):
                             all_ok = False
-                except Exception as e:
-                    results[name] = {"error": str(e)}
+                except Exception:
+                    logger.exception("组件健康检查异常: %s", name)
+                    results[name] = {"error": "component_check_failed"}
                     all_ok = False
             else:
                 results[name] = "no check"
@@ -701,10 +792,8 @@ def run_console_chat(orchestrator_or_obj, orchestrator_mode: str,
     session_id = f"console_{int(time.time())}"
 
     if orchestrator_mode == "full" and hasattr(orchestrator_or_obj, "_memory"):
-        try:
+        with contextlib.suppress(Exception):
             orchestrator_or_obj._memory.working.start_session(session_id, "console")
-        except Exception:
-            pass
 
     try:
         while True:
@@ -847,7 +936,7 @@ def _create_proactive_sender(ws_server_holder: dict, wechat_connector_holder: di
             try:
                 import asyncio
                 try:
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     if loop.is_running():
                         asyncio.ensure_future(ws_server.broadcast_proactive(msg))
                     else:
@@ -892,7 +981,7 @@ def main() -> None:
 
 
 def _run_fast_mode(args: argparse.Namespace, use_console: bool,
-                   fusion_cfg: Dict[str, Any]) -> None:
+                   fusion_cfg: dict[str, Any]) -> None:
     logger.info("=== fast 模式启动（多用户版） ===")
 
     orchestrator = OptimizedOrchestrator()
@@ -900,6 +989,9 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
     if not orchestrator.initialize(config_dir=args.config, fusion_cfg=fusion_cfg):
         logger.error("系统初始化失败, 退出")
         sys.exit(1)
+
+    # 注册 orchestrator 关闭函数，确保线程池被正确释放
+    atexit.register(orchestrator.shutdown)
 
     cfg = orchestrator.components["config"].config
 
@@ -966,17 +1058,25 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
         return
 
     if use_console:
-        run_console_chat(orchestrator, "fast")
+        try:
+            run_console_chat(orchestrator, "fast")
+        finally:
+            # 确保在控制台模式退出时关闭资源
+            orchestrator.shutdown()
         if not args.no_api:
             logger.info("控制台聊天已退出, API服务继续保持运行中...")
             while True:
                 time.sleep(3600)
     else:
-        run_wechat_mode(girlfriend_mgr, "fast", args)
+        try:
+            run_wechat_mode(girlfriend_mgr, "fast", args)
+        finally:
+            # 确保在微信模式退出时关闭资源
+            orchestrator.shutdown()
 
 
 def _run_full_mode(args: argparse.Namespace, use_console: bool,
-                   fusion_cfg: Dict[str, Any]) -> None:
+                   fusion_cfg: dict[str, Any]) -> None:
     logger.info("=== full 模式启动（多用户版） ===")
 
     emotion_fusion = fusion_cfg.get("emotion", {})
@@ -1051,8 +1151,8 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
         classifier_timeout_ms=classifier_timeout,
     )
 
-    persona_fusion.get("prompt_mode", "layered")
-    persona_fusion.get("anchor_verification_enabled", True)
+    _ = persona_fusion.get("prompt_mode", "layered")
+    _ = persona_fusion.get("anchor_verification_enabled", True)
 
     from my_character.persona_engine import PersonaEngine as PersonaEngineV2
     persona_engine = PersonaEngineV2(config_loader=config_loader, llm_gateway=llm)
@@ -1065,7 +1165,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
         logger.warning("ToneMimic 不可用")
 
     logger.info("[6/12] 初始化记忆系统 (融合)...")
-    memory_fusion.get("forgetting_model", "exponential")
+    _ = memory_fusion.get("forgetting_model", "exponential")
 
     from memory import StructuredMemory, VectorMemory
     from memory.memory_pipeline import MemoryPipeline
@@ -1084,11 +1184,11 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     logger.info("[7/12] 初始化工具系统...")
     from tool_system.base import ToolDispatcher, ToolRegistry
     from tool_system.builtin.calendar_tool import CalculatorTool, CalendarTool
+    from tool_system.builtin.character_crawler_tool import CharacterCrawlerTool
     from tool_system.builtin.reminder_tool import CalendarQueryTool, ReminderTool
     from tool_system.builtin.search_tool import SearchTool
-    from tool_system.builtin.weather_tool import WeatherTool
     from tool_system.builtin.time_awareness_tool import TimeAwarenessTool
-    from tool_system.builtin.character_crawler_tool import CharacterCrawlerTool
+    from tool_system.builtin.weather_tool import WeatherTool
 
     tool_registry = ToolRegistry()
     tool_dispatcher = ToolDispatcher(
@@ -1116,9 +1216,9 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     )
 
     logger.info("[9/12] 初始化主动消息 (融合)...")
-    ase_fusion.get("frequency_mode", "adaptive")
-    ase_fusion.get("generation_mode", "llm")
-    ase_fusion.get("reflection_mode", "rule")
+    _ = ase_fusion.get("frequency_mode", "adaptive")
+    _ = ase_fusion.get("generation_mode", "llm")
+    _ = ase_fusion.get("reflection_mode", "rule")
 
     from proactive.ase_engine import ASEEngine as ASEEngineV2
 

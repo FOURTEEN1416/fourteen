@@ -1,5 +1,6 @@
 """单元测试: 内容安全模块"""
 import sys
+
 sys.path.insert(0, ".")
 
 from safety.content_safety import ContentSafetyFilter, SafetyCategory

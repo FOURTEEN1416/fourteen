@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional, Any
+from typing import Any
 
 try:
     import redis
@@ -21,15 +21,15 @@ logger = logging.getLogger("cache.redis")
 class RedisClient:
     """Redis客户端封装"""
 
-    _instance: Optional[RedisClient] = None
-    _pool: Optional[Any] = None
+    _instance: RedisClient | None = None
+    _pool: Any | None = None
 
     def __init__(
         self,
         host: str = "localhost",
         port: int = 6379,
         db: int = 0,
-        password: Optional[str] = None,
+        password: str | None = None,
         max_connections: int = 50,
         socket_timeout: float = 5.0,
         socket_connect_timeout: float = 5.0,
@@ -43,7 +43,7 @@ class RedisClient:
         self._max_connections = max_connections
         self._socket_timeout = socket_timeout
         self._socket_connect_timeout = socket_connect_timeout
-        self._client: Optional[Any] = None
+        self._client: Any | None = None
 
         if not REDIS_AVAILABLE:
             logger.warning("Redis未安装，缓存功能将禁用。请执行: pip install redis")
@@ -78,7 +78,7 @@ class RedisClient:
         )
         self._client = redis.Redis(connection_pool=self._pool)
 
-    def get(self, key: str) -> Optional[str]:
+    def get(self, key: str) -> str | None:
         """获取缓存值"""
         if not self.enabled or not self._client:
             return None
@@ -93,7 +93,7 @@ class RedisClient:
         self,
         key: str,
         value: str,
-        expire: Optional[int] = None,
+        expire: int | None = None,
     ) -> bool:
         """设置缓存值"""
         if not self.enabled or not self._client:
@@ -165,8 +165,8 @@ class RedisClient:
             return {}
         try:
             info = self._client.info()
-            return {k.decode('utf-8') if isinstance(k, bytes) else k: 
-                    v.decode('utf-8') if isinstance(v, bytes) else v 
+            return {k.decode('utf-8') if isinstance(k, bytes) else k:
+                    v.decode('utf-8') if isinstance(v, bytes) else v
                     for k, v in info.items()}
         except Exception as e:
             logger.debug("Redis info失败: %s", e)
@@ -191,8 +191,9 @@ class RedisClient:
                 "port": self._port,
                 "db": self._db,
             }
-        except Exception as e:
-            return {"available": False, "reason": str(e)}
+        except Exception:
+            logger.exception("Redis健康检查异常")
+            return {"available": False, "reason": "redis_check_failed"}
 
     def close(self) -> None:
         """关闭连接"""
@@ -211,11 +212,11 @@ class RedisClient:
 
 
 def get_redis_client(
-    host: Optional[str] = None,
-    port: Optional[int] = None,
-    db: Optional[int] = None,
-    password: Optional[str] = None,
-    enabled: Optional[bool] = None,
+    host: str | None = None,
+    port: int | None = None,
+    db: int | None = None,
+    password: str | None = None,
+    enabled: bool | None = None,
 ) -> RedisClient:
     """
     获取Redis客户端实例（支持环境变量配置）

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { shisiClient } from '../api/shisiClient'
 import { useErrorStore } from '../store/errorStore'
 import Card from '../components/common/Card'
@@ -16,6 +16,11 @@ interface StickerItem {
   character_id?: string
 }
 
+function getErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message
+  return String(e)
+}
+
 export default function StickersPage() {
   const [stickers, setStickers] = useState<StickerItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -25,17 +30,17 @@ export default function StickersPage() {
   const zipInputRef = useRef<HTMLInputElement>(null)
   const toast = useErrorStore.getState().addToast
 
-  useEffect(() => { loadStickers() }, [])
-
-  async function loadStickers() {
+  const loadStickers = useCallback(async () => {
     try {
       setLoading(true)
       const data = await shisiClient.stickers.list() as StickerItem[]
       setStickers(Array.isArray(data) ? data : [])
-    } catch (e: any) {
-      toast({ type: 'error', message: e?.message || '加载表情包失败' })
+    } catch (e: unknown) {
+      toast({ type: 'error', message: getErrorMessage(e) || '加载表情包失败' })
     } finally { setLoading(false) }
-  }
+  }, [toast])
+
+  useEffect(() => { loadStickers() }, [loadStickers])
 
   async function handleDelete(id: string) {
     if (!confirm('确定删除此表情包？')) return
@@ -43,8 +48,8 @@ export default function StickersPage() {
       await shisiClient.stickers.delete(id)
       toast({ type: 'success', message: '表情包已删除' })
       await loadStickers()
-    } catch (e: any) {
-      toast({ type: 'error', message: e?.message || '删除失败' })
+    } catch (e: unknown) {
+      toast({ type: 'error', message: getErrorMessage(e) || '删除失败' })
     }
   }
 
@@ -56,8 +61,8 @@ export default function StickersPage() {
       await shisiClient.stickers.upload(formData)
       toast({ type: 'success', message: '表情包上传成功' })
       await loadStickers()
-    } catch (e: any) {
-      toast({ type: 'error', message: e?.message || '上传失败' })
+    } catch (e: unknown) {
+      toast({ type: 'error', message: getErrorMessage(e) || '上传失败' })
     }
   }
 
@@ -69,8 +74,8 @@ export default function StickersPage() {
       await shisiClient.stickers.importZip(formData)
       toast({ type: 'success', message: 'ZIP导入成功' })
       await loadStickers()
-    } catch (e: any) {
-      toast({ type: 'error', message: e?.message || 'ZIP导入失败' })
+    } catch (e: unknown) {
+      toast({ type: 'error', message: getErrorMessage(e) || 'ZIP导入失败' })
     }
   }
 
@@ -79,8 +84,8 @@ export default function StickersPage() {
     try {
       const data = await shisiClient.stickers.recommend([emotion]) as StickerItem[]
       setRecommended(Array.isArray(data) ? data : [])
-    } catch (e: any) {
-      toast({ type: 'error', message: e?.message || '推荐失败' })
+    } catch (e: unknown) {
+      toast({ type: 'error', message: getErrorMessage(e) || '推荐失败' })
     }
   }
 

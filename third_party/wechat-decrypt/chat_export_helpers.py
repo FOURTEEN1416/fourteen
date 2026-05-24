@@ -8,7 +8,6 @@ import base64
 
 import mcp_server
 
-
 MSG_TYPE_MAP = {
     1: "text",
     3: "image",

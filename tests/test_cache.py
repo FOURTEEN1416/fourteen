@@ -9,15 +9,16 @@ LLM缓存层测试
 - 装饰器功能
 """
 
-import pytest
 import json
 import time
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
+
+import pytest
 
 # 标记是否可测试缓存
 try:
+    from cache.llm_cache import CacheStats, LLMCache, cached_chat
     from cache.redis_client import RedisClient, get_redis_client
-    from cache.llm_cache import LLMCache, CacheStats, cached_chat
     CACHE_AVAILABLE = True
 except ImportError:
     CACHE_AVAILABLE = False

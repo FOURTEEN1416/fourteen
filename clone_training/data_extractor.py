@@ -17,7 +17,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("clone.extractor")
 
@@ -42,7 +42,7 @@ class DataExtractor:
         target_wxid: str,
         limit: int = 1000,
         offset: int = 0,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         通过 WeChatFerry RPC 查询微信进程内数据库
 
@@ -77,8 +77,8 @@ class DataExtractor:
             return self._empty_result(str(e))
 
     def _process_wcf_messages(
-        self, raw_msgs: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+        self, raw_msgs: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         """处理 WCF 原始消息 → 轮次对话"""
         text_msgs = [
             m for m in raw_msgs
@@ -107,10 +107,10 @@ class DataExtractor:
     def extract_from_wechatmsg(
         self,
         db_path: str,
-        target_name: Optional[str] = None,
-        date_from: Optional[str] = None,
-        date_to: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        target_name: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         从 WeChatMsg 导出/解密的 SQLite 数据库提取聊天记录
 
@@ -170,17 +170,17 @@ class DataExtractor:
             return self._empty_result(str(e))
 
     def _build_conversations_from_rows(
-        self, rows: List[Any]
-    ) -> List[Dict[str, Any]]:
+        self, rows: list[Any]
+    ) -> list[dict[str, Any]]:
         """从 SQLite 查询结果构建对话列表"""
         conversations = []
         pending_msg = None
 
         for row in rows:
             msg_data = {
-                "content": row["StrContent"] if "StrContent" in row.keys() else "",
-                "timestamp": row["CreateTime"] if "CreateTime" in row.keys() else 0,
-                "is_self": bool(row["IsSender"]) if "IsSender" in row.keys() else False,
+                "content": row.get("StrContent", ""),
+                "timestamp": row.get("CreateTime", 0),
+                "is_self": bool(row["IsSender"]) if "IsSender" in row else False,
                 "talker": row.get("StrTalker", ""),
             }
 
@@ -237,7 +237,7 @@ class DataExtractor:
 
     def extract_from_export(
         self, file_path: str, format: str = "auto",
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         从手动导出的聊天记录文件提取
 
@@ -265,7 +265,7 @@ class DataExtractor:
         else:
             return self._extract_from_txt(content)
 
-    def _extract_from_json(self, content: str) -> List[Dict[str, Any]]:
+    def _extract_from_json(self, content: str) -> list[dict[str, Any]]:
         """从 JSON 文件提取（ChatGPT/微信导出格式）"""
         try:
             data = json.loads(content)
@@ -279,7 +279,7 @@ class DataExtractor:
             pass
         return []
 
-    def _extract_from_csv(self, content: str) -> List[Dict[str, Any]]:
+    def _extract_from_csv(self, content: str) -> list[dict[str, Any]]:
         """从 CSV 提取"""
         import csv
         import io
@@ -287,7 +287,7 @@ class DataExtractor:
         msgs = [dict(row) for row in reader]
         return self._process_raw_messages(msgs)
 
-    def _extract_from_txt(self, content: str) -> List[Dict[str, Any]]:
+    def _extract_from_txt(self, content: str) -> list[dict[str, Any]]:
         """从 TXT 文件提取（微信聊天记录导出格式）
 
         支持格式：
@@ -406,9 +406,9 @@ class DataExtractor:
         self,
         target: str,
         max_messages: int = 5000,
-        date_from: Optional[str] = None,
-        date_to: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         通过 wechat-decrypt（微信 4.x 数据库解密）提取聊天记录
 
@@ -448,8 +448,8 @@ class DataExtractor:
     # ── 工具方法 ────────────────────────────────────────
 
     def _process_raw_messages(
-        self, msgs: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+        self, msgs: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         """将原始消息列表转为轮次对话"""
         text_msgs = [
             m for m in msgs
@@ -494,12 +494,12 @@ class DataExtractor:
             dt = dt.replace(hour=23, minute=59, second=59)
         return int(dt.timestamp())
 
-    def _empty_result(self, reason: str) -> List[Dict[str, Any]]:
+    def _empty_result(self, reason: str) -> list[dict[str, Any]]:
         logger.warning("提取失败或无数据: %s", reason)
         return []
 
     def save_to_json(
-        self, conversations: List[Dict[str, Any]], filename: str
+        self, conversations: list[dict[str, Any]], filename: str
     ) -> str:
         """保存为 JSON 文件"""
         path = self.data_dir / f"{filename}.json"

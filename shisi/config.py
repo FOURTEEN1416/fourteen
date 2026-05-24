@@ -48,7 +48,7 @@ def load_config(config_path: Path | str | None = None, force_reload: bool = Fals
     if not path.exists():
         raise FileNotFoundError(f"shisi config not found: {path}")
 
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
 
     config = _apply_env_overrides(config)

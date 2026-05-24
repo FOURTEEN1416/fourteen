@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
@@ -17,6 +18,8 @@ from .schemas import (
     ProcessMessageRequest,
     ProcessMessageResponse,
 )
+
+logger = logging.getLogger("shisi.api.v2.character_routes")
 
 router = APIRouter(prefix="/v2/characters", tags=["v2-characters"])
 
@@ -114,8 +117,9 @@ async def process_message(
             chat_history=request.chat_history,
         )
         return ProcessMessageResponse(character=_to_detail(character, is_active=True), system_prompt=prompt)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError:
+        logger.exception("处理消息失败: character_id=%s", character_id)
+        raise HTTPException(status_code=404, detail="角色不存在或消息处理失败")
 
 
 @router.post("/import")
@@ -137,8 +141,9 @@ async def import_character(file: UploadFile = File(...), service: CharacterServi
 async def export_character(character_id: str, service: CharacterService = Depends(get_character_service)):
     try:
         return service.export_to_legacy(character_id)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError:
+        logger.exception("导出角色失败: character_id=%s", character_id)
+        raise HTTPException(status_code=404, detail="角色不存在或导出失败")
 
 
 @router.delete("/{character_id}")

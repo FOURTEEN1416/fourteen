@@ -16,7 +16,6 @@ import asyncio
 import logging
 import os
 import tempfile
-from typing import Optional
 
 from .base import TTSProviderBase
 
@@ -36,7 +35,7 @@ class EdgeTTSProvider(TTSProviderBase):
         rate: str = "+0%",
         volume: str = "+0%",
         timeout: float = 30.0,
-        output_dir: Optional[str] = None,
+        output_dir: str | None = None,
     ):
         self._speaker_name = speaker_name
         self._rate = rate
@@ -49,7 +48,7 @@ class EdgeTTSProvider(TTSProviderBase):
     def name(self) -> str:
         return "edge-tts"
 
-    async def synthesize(self, text: str, **kwargs) -> Optional[bytes]:
+    async def synthesize(self, text: str, **kwargs) -> bytes | None:
         """
         合成语音
 

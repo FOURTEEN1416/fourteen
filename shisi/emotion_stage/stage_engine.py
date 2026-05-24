@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from .event_dispatcher import EventDispatcher, StageChangeEvent
 from .stage_config import EmotionStageConfig, StageDefinition
@@ -57,7 +58,7 @@ class EmotionStageEngine:
 
         return stage
 
-    def get_current_stage(self, character_id: str) -> Optional[StageDefinition]:
+    def get_current_stage(self, character_id: str) -> StageDefinition | None:
         state = self._states.get(character_id)
         if not state:
             return None

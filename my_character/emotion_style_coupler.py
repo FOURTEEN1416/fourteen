@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("emotion_style_coupler")
 
@@ -29,8 +29,8 @@ class StyleAdjustment:
     intimacy_delta: float = 0.0
     emoji_multiplier: float = 1.0
     sentence_length: str = "medium"
-    rhetorical_devices: List[str] = field(default_factory=list)
-    particles: List[str] = field(default_factory=list)
+    rhetorical_devices: list[str] = field(default_factory=list)
+    particles: list[str] = field(default_factory=list)
     indirect_expression: bool = False
 
 
@@ -42,14 +42,14 @@ class CoupledStyle:
     intimacy: float = 0.3
     emoji_freq: float = 0.5
     sentence_length: str = "medium"
-    rhetorical_devices: List[str] = field(default_factory=list)
-    particles: List[str] = field(default_factory=list)
+    rhetorical_devices: list[str] = field(default_factory=list)
+    particles: list[str] = field(default_factory=list)
     formality: float = 0.3
     use_nickname: bool = True
     indirect_expression: bool = False
 
 
-EMOTION_STYLE_MATRIX: Dict[str, Dict[str, Any]] = {
+EMOTION_STYLE_MATRIX: dict[str, dict[str, Any]] = {
     "开心": {
         "warmth_delta": 0.1,
         "playfulness_delta": 0.2,
@@ -124,7 +124,7 @@ EMOTION_STYLE_MATRIX: Dict[str, Dict[str, Any]] = {
     },
 }
 
-AFFINITY_STYLE_MATRIX: Dict[int, Dict[str, Any]] = {
+AFFINITY_STYLE_MATRIX: dict[int, dict[str, Any]] = {
     0: {"formality": 0.8, "intimacy": 0.0, "use_nickname": False, "emoji_freq": 0.2, "proactivity": 0.1},
     1: {"formality": 0.6, "intimacy": 0.2, "use_nickname": False, "emoji_freq": 0.3, "proactivity": 0.2},
     2: {"formality": 0.4, "intimacy": 0.4, "use_nickname": True, "emoji_freq": 0.5, "proactivity": 0.3},
@@ -140,7 +140,7 @@ AFFINITY_STYLE_MATRIX: Dict[int, Dict[str, Any]] = {
 class EmotionStyleCoupler:
     """情感-风格耦合器"""
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: str | None = None):
         self._emotion_matrix = EMOTION_STYLE_MATRIX
         self._affinity_matrix = AFFINITY_STYLE_MATRIX
         if config_path and HAS_YAML:
@@ -150,7 +150,7 @@ class EmotionStyleCoupler:
         try:
             p = Path(path)
             if p.exists():
-                with open(p, "r", encoding="utf-8") as f:
+                with open(p, encoding="utf-8") as f:
                     data = yaml.safe_load(f)
                 if data and "emotion_style_map" in data:
                     self._emotion_matrix.update(data["emotion_style_map"])
@@ -163,8 +163,8 @@ class EmotionStyleCoupler:
 
     def couple(
         self,
-        emotion_state: Dict[str, Any],
-        base_style: Optional[Dict[str, Any]] = None,
+        emotion_state: dict[str, Any],
+        base_style: dict[str, Any] | None = None,
     ) -> CoupledStyle:
         """情感-风格耦合，输出融合了情感状态和好感度的动态风格配置"""
         base = base_style or {}
@@ -194,7 +194,7 @@ class EmotionStyleCoupler:
         return style
 
     def _apply_emotion_adjustment(
-        self, style: CoupledStyle, adj: Dict[str, Any],
+        self, style: CoupledStyle, adj: dict[str, Any],
     ) -> CoupledStyle:
         style.warmth = max(0.0, min(1.0, style.warmth + adj.get("warmth_delta", 0.0)))
         style.playfulness = max(0.0, min(1.0, style.playfulness + adj.get("playfulness_delta", 0.0)))
@@ -212,7 +212,7 @@ class EmotionStyleCoupler:
         return style
 
     def _apply_affinity_adjustment(
-        self, style: CoupledStyle, adj: Dict[str, Any],
+        self, style: CoupledStyle, adj: dict[str, Any],
     ) -> CoupledStyle:
         style.formality = adj.get("formality", style.formality)
         style.intimacy = max(style.intimacy, adj.get("intimacy", style.intimacy))
@@ -221,7 +221,7 @@ class EmotionStyleCoupler:
         return style
 
     def _blend_secondary(
-        self, style: CoupledStyle, secondary: Dict[str, Any],
+        self, style: CoupledStyle, secondary: dict[str, Any],
     ) -> CoupledStyle:
         secondary_type = secondary.get("type", "")
         weight = secondary.get("weight", 0.3)
@@ -229,7 +229,8 @@ class EmotionStyleCoupler:
         if not sec_adj:
             return style
 
-        blend = lambda a, b, w: a * (1 - w) + b * w
+        def blend(a, b, w):
+            return a * (1 - w) + b * w
         style.warmth = max(0, min(1, blend(style.warmth, style.warmth + sec_adj.get("warmth_delta", 0), weight)))
         style.sarcasm = max(0, min(1, blend(style.sarcasm, style.sarcasm + sec_adj.get("sarcasm_delta", 0), weight)))
         return style

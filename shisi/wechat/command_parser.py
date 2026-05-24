@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
 
 from ..config import get_config
 
@@ -32,7 +31,7 @@ class WeChatCommandParser:
             "forward": ["转发给", "转发"],
         }
 
-    def parse(self, message: str) -> Optional[Command]:
+    def parse(self, message: str) -> Command | None:
         text = message.strip()
         if self._prefix and text.startswith(self._prefix):
             text = text[len(self._prefix):].strip()

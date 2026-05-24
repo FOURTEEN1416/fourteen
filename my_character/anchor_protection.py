@@ -11,7 +11,7 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger("anchor_protection")
 
@@ -22,14 +22,14 @@ class AnchorCheckResult:
     is_consistent: bool
     semantic_score: float = 0.0
     keyword_violation: bool = False
-    violation_keywords: List[str] = None
+    violation_keywords: list[str] = None
 
     def __post_init__(self):
         if self.violation_keywords is None:
             self.violation_keywords = []
 
 
-ANCHOR_VIOLATION_KEYWORDS: Dict[str, List[str]] = {
+ANCHOR_VIOLATION_KEYWORDS: dict[str, list[str]] = {
     "傲娇": ["坦率", "直说", "明说", "老实说", "说真的", "我承认", "我真心"],
     "温柔": ["冷漠", "不在乎", "无所谓", "关我什么事"],
     "嘴硬心软": ["我不在乎", "我无所谓", "随便你", "你爱怎样怎样"],
@@ -42,7 +42,7 @@ class EnhancedAnchorProtection:
 
     def __init__(
         self,
-        anchors: Optional[List[str]] = None,
+        anchors: list[str] | None = None,
         semantic_threshold: float = 0.3,
         use_llm_check: bool = False,
         llm_gateway: Any = None,
@@ -56,14 +56,14 @@ class EnhancedAnchorProtection:
         self._llm = llm_gateway
         self._violation_keywords = ANCHOR_VIOLATION_KEYWORDS
 
-    def set_anchors(self, anchors: List[str]) -> None:
+    def set_anchors(self, anchors: list[str]) -> None:
         """设置锚点"""
         self._anchors = anchors
         self._anchor_hashes = {
             a: hashlib.sha256(a.encode("utf-8")).hexdigest() for a in anchors
         }
 
-    def verify_anchors_integrity(self, current_anchors: List[str]) -> bool:
+    def verify_anchors_integrity(self, current_anchors: list[str]) -> bool:
         """验证锚点文本完整性（SHA256校验）"""
         for anchor in current_anchors:
             expected_hash = self._anchor_hashes.get(anchor)
@@ -79,8 +79,8 @@ class EnhancedAnchorProtection:
     def check_response_consistency(
         self,
         response: str,
-        anchors: Optional[List[str]] = None,
-    ) -> Tuple[bool, float, List[AnchorCheckResult]]:
+        anchors: list[str] | None = None,
+    ) -> tuple[bool, float, list[AnchorCheckResult]]:
         """检测回复是否违背锚点 — 语义相似度 + 关键词匹配双重检测"""
         check_anchors = anchors or self._anchors
         results = []
@@ -160,7 +160,7 @@ class EnhancedAnchorProtection:
 
     def _check_keyword_violation(
         self, anchor: str, response: str,
-    ) -> Tuple[bool, List[str]]:
+    ) -> tuple[bool, list[str]]:
         """关键词违背检测"""
         violations = []
         for anchor_key, keywords in self._violation_keywords.items():
@@ -171,7 +171,7 @@ class EnhancedAnchorProtection:
 
         return len(violations) > 0, violations
 
-    def _llm_semantic_check(self, anchor: str, response: str) -> Optional[float]:
+    def _llm_semantic_check(self, anchor: str, response: str) -> float | None:
         """LLM语义检测"""
         if not self._llm:
             return None
@@ -195,7 +195,7 @@ AI回复：{response}
             logger.debug("LLM semantic check failed: %s", e)
             return None
 
-    def generate_reinforcement_prompt(self, anchors: Optional[List[str]] = None, max_length: int = 200) -> str:
+    def generate_reinforcement_prompt(self, anchors: list[str] | None = None, max_length: int = 200) -> str:
         """生成锚点强化提示词（用于长对话中周期性注入）"""
         check_anchors = anchors or self._anchors
         if not check_anchors:

@@ -5,10 +5,10 @@
 递归扫描指定文件夹下的所有 .dat 文件并解密。
 输出目录默认为 <文件夹路径>_decoded/，保持原有子目录结构。
 """
-import os
-import sys
 import glob
+import os
 import struct
+import sys
 
 # Windows 控制台 UTF-8
 if sys.platform == "win32":
@@ -97,7 +97,7 @@ def decrypt_dat(dat_path):
             return None, None
 
     # 旧 XOR 格式
-    for fmt_name, magic in _IMAGE_MAGICS.items():
+    for _fmt_name, magic in _IMAGE_MAGICS.items():
         key = data[0] ^ magic[0]
         match = all(i < len(data) and (data[i] ^ key) == magic[i] for i in range(len(magic)))
         if match:
@@ -119,10 +119,7 @@ def main():
         print(f"目录不存在: {source_dir}")
         sys.exit(1)
 
-    if len(sys.argv) >= 3:
-        output_dir = os.path.abspath(sys.argv[2])
-    else:
-        output_dir = source_dir.rstrip(os.sep) + "_decoded"
+    output_dir = os.path.abspath(sys.argv[2]) if len(sys.argv) >= 3 else source_dir.rstrip(os.sep) + "_decoded"
 
     # 递归收集所有 .dat 文件
     dat_files = []

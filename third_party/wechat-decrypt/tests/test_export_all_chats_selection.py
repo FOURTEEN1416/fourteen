@@ -397,9 +397,8 @@ class ExportAllChatsCliPlanCsvTests(unittest.TestCase):
              patch.object(export_all_chats, "_write_plan_csv",
                           side_effect=PermissionError("locked")):
             err = io.StringIO()
-            with redirect_stderr(err):
-                with self.assertRaises(SystemExit) as cm:
-                    export_all_chats.main(["--write-plan-csv", "plan.csv"])
+            with redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+                export_all_chats.main(["--write-plan-csv", "plan.csv"])
 
         self.assertEqual(cm.exception.code, 1)
         self.assertIn("写入导出计划 CSV 失败", err.getvalue())

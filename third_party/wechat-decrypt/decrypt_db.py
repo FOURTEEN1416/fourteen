@@ -5,12 +5,17 @@ WeChat 4.0 数据库解密器
 参数: SQLCipher 4, AES-256-CBC, HMAC-SHA512, reserve=80, page_size=4096
 密钥来源: all_keys.json (由find_all_keys.py从内存提取)
 """
-import hashlib, struct, os, sys, json
-import hmac as hmac_mod
-from Crypto.Cipher import AES
-
 import argparse
 import functools
+import hashlib
+import hmac as hmac_mod
+import json
+import os
+import struct
+import sys
+
+from Crypto.Cipher import AES
+
 print = functools.partial(print, flush=True)
 
 PAGE_SZ = 4096
@@ -21,8 +26,12 @@ HMAC_SZ = 64
 RESERVE_SZ = 80  # IV(16) + HMAC(64)
 SQLITE_HDR = b'SQLite format 3\x00'
 
-from config import load_config
+import contextlib
+
 from key_utils import get_key_info, strip_key_metadata
+
+from config import load_config
+
 _cfg = load_config()
 DB_DIR = _cfg["db_dir"]
 OUT_DIR = _cfg["decrypted_dir"]
@@ -66,7 +75,7 @@ def decrypt_database(db_path, out_path, enc_key):
         page1 = fin.read(PAGE_SZ)
 
     if len(page1) < PAGE_SZ:
-        print(f"  [ERROR] 文件太小")
+        print("  [ERROR] 文件太小")
         return False
 
     # 提取salt并派生mac_key, 验证page 1
@@ -96,9 +105,8 @@ def decrypt_database(db_path, out_path, enc_key):
             decrypted = decrypt_page(enc_key, page, pgno)
             fout.write(decrypted)
 
-            if pgno == 1:
-                if decrypted[:16] != SQLITE_HDR:
-                    print(f"  [WARN] 解密后header不匹配!")
+            if pgno == 1 and decrypted[:16] != SQLITE_HDR:
+                print("  [WARN] 解密后header不匹配!")
 
             if pgno % 10000 == 0:
                 print(f"  进度: {pgno}/{total_pages} ({100*pgno/total_pages:.1f}%)")
@@ -140,12 +148,12 @@ def main(argv=None):
     print(f"\n加载 {len(keys)} 个数据库密钥")
     print(f"输出目录: {OUT_DIR}")
     if args.incremental:
-        print(f"模式: 增量 (跳过未变更的数据库)")
+        print("模式: 增量 (跳过未变更的数据库)")
     os.makedirs(OUT_DIR, exist_ok=True)
 
     # 收集所有DB文件
     db_files = []
-    for root, dirs, files in os.walk(DB_DIR):
+    for root, _dirs, files in os.walk(DB_DIR):
         for f in files:
             if f.endswith('.db') and not f.endswith('-wal') and not f.endswith('-shm'):
                 path = os.path.join(root, f)
@@ -221,10 +229,8 @@ def main(argv=None):
         for suffix in ("-shm", "-wal"):
             residual = out_path + suffix
             if os.path.exists(residual):
-                try:
+                with contextlib.suppress(OSError):
                     os.remove(residual)
-                except OSError:
-                    pass
 
     if args.dry_run:
         print(f"\n{'='*60}")

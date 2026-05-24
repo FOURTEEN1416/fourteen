@@ -21,7 +21,7 @@ _instances: dict = {}
 _instance_lock = threading.Lock()
 
 
-def _resolve_provider(provider: Optional[str] = None) -> str:
+def _resolve_provider(provider: str | None = None) -> str:
     if provider:
         return provider
     env_provider = os.environ.get("LLM_PROVIDER", "").strip()
@@ -33,14 +33,14 @@ def _resolve_provider(provider: Optional[str] = None) -> str:
     return "opencode_zen"  # 默认用 OpenCode Zen 免费模型（无需 API Key）
 
 
-def _load_provider_from_config() -> Optional[str]:
+def _load_provider_from_config() -> str | None:
     try:
         from pathlib import Path
 
         import yaml
         system_path = Path("config/system.yaml")
         if system_path.exists():
-            with open(system_path, "r", encoding="utf-8") as f:
+            with open(system_path, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
             return cfg.get("llm", {}).get("provider")
     except Exception:
@@ -48,7 +48,7 @@ def _load_provider_from_config() -> Optional[str]:
     return None
 
 
-def get_llm(provider: Optional[str] = None, models_config: Optional[List[Dict]] = None):
+def get_llm(provider: str | None = None, models_config: list[dict] | None = None):
     """
     获取 LLM 实例（线程安全，按 provider 缓存不同实例）
 
@@ -80,7 +80,7 @@ def get_llm(provider: Optional[str] = None, models_config: Optional[List[Dict]] 
         return _instances[resolved]
 
 
-def get_llm_names(provider: Optional[str] = None) -> list:
+def get_llm_names(provider: str | None = None) -> list:
     resolved = _resolve_provider(provider)
     if resolved == "opencode_zen":
         return [m["name"] for m in DEFAULT_MODELS_PRIORITY]

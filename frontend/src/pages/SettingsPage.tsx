@@ -1,12 +1,13 @@
-﻿import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { api } from '../api/client'
 import SensitiveInput from '../components/common/SensitiveInput'
+import Button from '../components/common/Button'
 import { isSensitiveField } from '../types/api'
 
 interface Setting {
   id: string; label: string
   type: 'toggle' | 'select' | 'range'
-  value: any
+  value: unknown
   options?: { value: string; label: string }[]
   min?: number; max?: number; step?: number
 }
@@ -59,7 +60,7 @@ const sections: { id: string; label: string; items: Setting[] }[] = [
         { value: 'https://api.deepseek.com/v1', label: 'DeepSeek 官方' },
         { value: 'https://api.opencode.ai/zen/v1', label: 'OpenCode Zen' },
       ] },
-    { id: 'api_key', label: 'API Key', type: 'select' as any, value: '' },
+    { id: 'api_key', label: 'API Key', type: 'select', value: '' },
   ]},
   { id: 'notifications', label: '通知', items: [
     { id: 'sound', label: '消息提示音', type: 'toggle', value: true },
@@ -72,17 +73,20 @@ const sections: { id: string; label: string; items: Setting[] }[] = [
 
 export default function SettingsPage() {
   const [tab, setTab] = useState(sections[0].id)
-  const [vals, setVals] = useState<Record<string, any>>(() => {
-    const r: Record<string, any> = {}
+  const [vals, setVals] = useState<Record<string, unknown>>(() => {
+    const r: Record<string, unknown> = {}
     sections.forEach(s => s.items.forEach(i => { r[i.id] = i.value }))
     return r
   })
   const [saved, setSaved] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [configDiff, setConfigDiff] = useState<string[]>([])
+  const configBackupRef = useRef<Record<string, unknown> | null>(null)
 
   const section = sections.find(s => s.id === tab)!
 
   // Compute model options based on current provider
-  const currentProvider = vals.provider || 'deepseek'
+  const currentProvider = (vals.provider as string) || 'deepseek'
   const modelOptions = useMemo(() => MODEL_OPTIONS[currentProvider] || MODEL_OPTIONS.deepseek, [currentProvider])
 
   // Build the items for the current section with dynamic options
@@ -110,27 +114,51 @@ export default function SettingsPage() {
   // Load config from backend on mount
   useEffect(() => {
     api.config().then(({ data }) => {
-      const config = data as Record<string, any>
+      const config = data as Record<string, unknown>
       if (config && Object.keys(config).length > 0) {
         setVals(prev => ({ ...prev, ...mapConfigToSettings(config) }))
       }
     }).catch(() => {})
   }, [])
 
-  const set = (id: string, v: any) => {
+  const set = (id: string, v: unknown) => {
     setVals(p => ({ ...p, [id]: v }))
     setSaved(false)
   }
 
   const handleSave = async () => {
+    const configPayload = buildConfigPayload(vals)
+    configBackupRef.current = structuredClone(vals)
+    const diff: string[] = []
+    sections.forEach(s => s.items.forEach(item => {
+      const oldVal = (configBackupRef.current as Record<string, unknown> | undefined)?.[item.id]
+      if (oldVal !== vals[item.id]) {
+        diff.push(`${item.label}: ${String(oldVal)} → ${String(vals[item.id])}`)
+      }
+    }))
+    setConfigDiff(diff)
+    setShowConfirm(true)
+  }
+
+  const handleConfirmSave = async () => {
+    setShowConfirm(false)
     try {
       const configPayload = buildConfigPayload(vals)
       await api.saveConfig(configPayload)
       setSaved(true)
+      configBackupRef.current = null
       setTimeout(() => setSaved(false), 2000)
     } catch {
-      // error toast handled by interceptor
+      if (configBackupRef.current) {
+        setVals(configBackupRef.current)
+        configBackupRef.current = null
+      }
     }
+  }
+
+  const handleCancelSave = () => {
+    setShowConfirm(false)
+    configBackupRef.current = null
   }
 
   return (
@@ -162,7 +190,7 @@ export default function SettingsPage() {
                 {isSensitiveField(item.id) ? (
                   <div className="w-48">
                     <SensitiveInput
-                      value={vals[item.id] ?? ''}
+                      value={(vals[item.id] as string) ?? ''}
                       onChange={(v) => set(item.id, v)}
                       placeholder="输入..."
                     />
@@ -177,16 +205,16 @@ export default function SettingsPage() {
                     }`} />
                   </button>
                 ) : item.type === 'select' ? (
-                  <select value={vals[item.id]} onChange={e => set(item.id, e.target.value)}
+                  <select value={vals[item.id] as string} onChange={e => set(item.id, e.target.value)}
                     className="bg-gray-200 border border-gray-300 text-gray-800 rounded-lg px-2 py-1 text-xs outline-none max-w-48">
                     {item.options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 ) : item.type === 'range' ? (
                   <div className="flex items-center gap-2">
                     <input type="range" min={item.min} max={item.max} step={item.step}
-                      value={vals[item.id]} onChange={e => set(item.id, parseFloat(e.target.value))}
+                      value={vals[item.id] as number} onChange={e => set(item.id, parseFloat(e.target.value))}
                       className="w-20 h-1 bg-gray-200 rounded-full appearance-none cursor-pointer" />
-                    <span className="text-xs text-gray-400 w-8 text-right">{vals[item.id]}</span>
+                    <span className="text-xs text-gray-400 w-8 text-right">{vals[item.id] as number}</span>
                   </div>
                 ) : null}
               </div>
@@ -202,6 +230,25 @@ export default function SettingsPage() {
               <span className="text-xs text-green-400">已保存</span>
             )}
           </div>
+
+          {showConfirm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={handleCancelSave}>
+              <div className="bg-white rounded-xl shadow-xl p-5 max-w-md w-full mx-4" onClick={e => e.stopPropagation()}>
+                <h3 className="text-sm font-semibold text-gray-800 mb-3">确认保存配置</h3>
+                {configDiff.length > 0 && (
+                  <div className="mb-4 max-h-48 overflow-y-auto space-y-1">
+                    {configDiff.map((d, i) => (
+                      <div key={i} className="text-xs text-gray-600 bg-gray-50 rounded px-2 py-1">{d}</div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2 justify-end">
+                  <Button variant="secondary" size="sm" onClick={handleCancelSave}>取消</Button>
+                  <Button size="sm" onClick={handleConfirmSave}>确认保存</Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -209,46 +256,49 @@ export default function SettingsPage() {
 }
 
 // Map nested backend SystemConfig to flat setting IDs
-function mapConfigToSettings(config: Record<string, any>): Record<string, any> {
-  const mapped: Record<string, any> = {}
+function mapConfigToSettings(config: Record<string, unknown>): Record<string, unknown> {
+  const mapped: Record<string, unknown> = {}
   if (config.llm) {
-    if (config.llm.provider) mapped.provider = config.llm.provider
-    if (config.llm.primary_model) mapped.model_name = config.llm.primary_model
-    if (config.llm.fallback_model) mapped.fallback_model = config.llm.fallback_model
-    if (config.llm.temperature != null) mapped.temperature = config.llm.temperature
-    if (config.llm.max_tokens != null) mapped.max_tokens = config.llm.max_tokens
-    if (config.llm.top_p != null) mapped.top_p = config.llm.top_p
-    if (config.llm.api_base != null) mapped.api_base = config.llm.api_base
-    if (config.llm.api_key != null) mapped.api_key = config.llm.api_key
+    const llm = config.llm as Record<string, unknown>
+    if (llm.provider) mapped.provider = llm.provider
+    if (llm.primary_model) mapped.model_name = llm.primary_model
+    if (llm.fallback_model) mapped.fallback_model = llm.fallback_model
+    if (llm.temperature != null) mapped.temperature = llm.temperature
+    if (llm.max_tokens != null) mapped.max_tokens = llm.max_tokens
+    if (llm.top_p != null) mapped.top_p = llm.top_p
+    if (llm.api_base != null) mapped.api_base = llm.api_base
+    if (llm.api_key != null) mapped.api_key = llm.api_key
   }
   if (config.memory) {
-    if (config.memory.working_memory_limit != null) mapped.max_context = config.memory.working_memory_limit
+    const memory = config.memory as Record<string, unknown>
+    if (memory.working_memory_limit != null) mapped.max_context = memory.working_memory_limit
   }
   if (config.proactive) {
-    if (config.proactive.max_daily_messages != null) mapped.auto_reply = config.proactive.max_daily_messages > 0
-    if (config.proactive.min_interval_minutes != null) mapped.reply_delay = config.proactive.min_interval_minutes
-  }
-  if (config.safety) {
-    if (config.safety.input_filter_enabled != null) mapped.store_history = config.safety.input_filter_enabled
+    const proactive = config.proactive as Record<string, unknown>
+    if (proactive.max_daily_messages != null) mapped.auto_reply = (proactive.max_daily_messages as number) > 0
+    if (proactive.min_interval_minutes != null) mapped.reply_delay = proactive.min_interval_minutes
   }
   if (config.voice) {
-    if (config.voice.voice_input != null) mapped.voice_input = config.voice.voice_input
-    if (config.voice.voice_output != null) mapped.voice_output = config.voice.voice_output
-    if (config.voice.speaker != null) mapped.speaker = config.voice.speaker
+    const voice = config.voice as Record<string, unknown>
+    if (voice.voice_input != null) mapped.voice_input = voice.voice_input
+    if (voice.voice_output != null) mapped.voice_output = voice.voice_output
+    if (voice.speaker != null) mapped.speaker = voice.speaker
   }
   if (config.personality) {
-    if (config.personality.style != null) mapped.style = config.personality.style
+    const personality = config.personality as Record<string, unknown>
+    if (personality.style != null) mapped.style = personality.style
   }
   if (config.notifications) {
-    if (config.notifications.sound != null) mapped.sound = config.notifications.sound
-    if (config.notifications.desktop_notify != null) mapped.desktop_notify = config.notifications.desktop_notify
+    const notifications = config.notifications as Record<string, unknown>
+    if (notifications.sound != null) mapped.sound = notifications.sound
+    if (notifications.desktop_notify != null) mapped.desktop_notify = notifications.desktop_notify
   }
   return mapped
 }
 
 // Convert flat setting IDs to nested backend config payload
-function buildConfigPayload(vals: Record<string, any>): Record<string, any> {
-  const payload: Record<string, any> = {
+function buildConfigPayload(vals: Record<string, unknown>): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
     llm: {},
     memory: {},
     proactive: {},
@@ -256,22 +306,22 @@ function buildConfigPayload(vals: Record<string, any>): Record<string, any> {
     personality: {},
     notifications: {},
   }
-  if (vals.provider) payload.llm.provider = vals.provider
-  if (vals.model_name) payload.llm.primary_model = vals.model_name
-  if (vals.fallback_model) payload.llm.fallback_model = vals.fallback_model
-  if (vals.temperature != null) payload.llm.temperature = vals.temperature
-  if (vals.max_tokens != null) payload.llm.max_tokens = vals.max_tokens
-  if (vals.top_p != null) payload.llm.top_p = vals.top_p
-  if (vals.api_base != null) payload.llm.api_base = vals.api_base
-  if (vals.api_key != null) payload.llm.api_key = vals.api_key
-  if (vals.max_context != null) payload.memory.working_memory_limit = vals.max_context
-  if (vals.auto_reply != null) payload.proactive.max_daily_messages = vals.auto_reply ? 8 : 0
-  if (vals.reply_delay != null) payload.proactive.min_interval_minutes = Math.round(vals.reply_delay)
-  if (vals.voice_input != null) payload.voice.voice_input = vals.voice_input
-  if (vals.voice_output != null) payload.voice.voice_output = vals.voice_output
-  if (vals.speaker != null) payload.voice.speaker = vals.speaker
-  if (vals.style != null) payload.personality.style = vals.style
-  if (vals.sound != null) payload.notifications.sound = vals.sound
-  if (vals.desktop_notify != null) payload.notifications.desktop_notify = vals.desktop_notify
+  if (vals.provider) (payload.llm as Record<string, unknown>).provider = vals.provider
+  if (vals.model_name) (payload.llm as Record<string, unknown>).primary_model = vals.model_name
+  if (vals.fallback_model) (payload.llm as Record<string, unknown>).fallback_model = vals.fallback_model
+  if (vals.temperature != null) (payload.llm as Record<string, unknown>).temperature = vals.temperature
+  if (vals.max_tokens != null) (payload.llm as Record<string, unknown>).max_tokens = vals.max_tokens
+  if (vals.top_p != null) (payload.llm as Record<string, unknown>).top_p = vals.top_p
+  if (vals.api_base != null) (payload.llm as Record<string, unknown>).api_base = vals.api_base
+  if (vals.api_key != null) (payload.llm as Record<string, unknown>).api_key = vals.api_key
+  if (vals.max_context != null) (payload.memory as Record<string, unknown>).working_memory_limit = vals.max_context
+  if (vals.auto_reply != null) (payload.proactive as Record<string, unknown>).max_daily_messages = vals.auto_reply ? 8 : 0
+  if (vals.reply_delay != null) (payload.proactive as Record<string, unknown>).min_interval_minutes = Math.round(vals.reply_delay as number)
+  if (vals.voice_input != null) (payload.voice as Record<string, unknown>).voice_input = vals.voice_input
+  if (vals.voice_output != null) (payload.voice as Record<string, unknown>).voice_output = vals.voice_output
+  if (vals.speaker != null) (payload.voice as Record<string, unknown>).speaker = vals.speaker
+  if (vals.style != null) (payload.personality as Record<string, unknown>).style = vals.style
+  if (vals.sound != null) (payload.notifications as Record<string, unknown>).sound = vals.sound
+  if (vals.desktop_notify != null) (payload.notifications as Record<string, unknown>).desktop_notify = vals.desktop_notify
   return payload
 }

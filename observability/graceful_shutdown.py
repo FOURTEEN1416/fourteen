@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import signal
 import threading
-from typing import Callable, List
+from collections.abc import Callable
 
 logger = logging.getLogger("graceful_shutdown")
 
@@ -12,7 +13,7 @@ class GracefulShutdown:
     def __init__(self, timeout: float = 30.0):
         self.timeout = timeout
         self._shutting_down = False
-        self._cleanup_fns: List[Callable] = []
+        self._cleanup_fns: list[Callable] = []
         self._event = threading.Event()
 
     @property
@@ -24,10 +25,8 @@ class GracefulShutdown:
 
     def setup_signal_handlers(self):
         for sig in (signal.SIGTERM, signal.SIGINT):
-            try:
+            with contextlib.suppress(OSError):
                 signal.signal(sig, self._handle_signal)
-            except OSError:
-                pass
 
     def _handle_signal(self, signum, frame):
         if self._shutting_down:

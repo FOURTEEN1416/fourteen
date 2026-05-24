@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from my_character.dynamic_anchor import DynamicAnchorSystem
     from my_character.emotion_engine import CompoundEmotionalState
     from my_character.emotion_style_coupler import CoupledStyle, EmotionStyleCoupler
-    from my_character.dynamic_anchor import DynamicAnchorSystem
     from my_character.persona_schema import PersonaSchema
 
 logger = logging.getLogger("consistency_checker")
@@ -22,8 +22,8 @@ logger = logging.getLogger("consistency_checker")
 
 @dataclass
 class ConsistencyContext:
-    emotion_state: Optional[CompoundEmotionalState] = None
-    coupled_style: Optional[CoupledStyle] = None
+    emotion_state: CompoundEmotionalState | None = None
+    coupled_style: CoupledStyle | None = None
     chat_round: int = 0
     affinity: int = 0
 
@@ -33,15 +33,15 @@ class DimensionResult:
     dimension: str
     passed: bool
     score: float
-    violations: List[str] = field(default_factory=list)
-    suggestions: List[str] = field(default_factory=list)
+    violations: list[str] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)
 
 
 @dataclass
 class ConsistencyResult:
     overall_passed: bool
     overall_score: float
-    dimensions: Dict[str, DimensionResult] = field(default_factory=dict)
+    dimensions: dict[str, DimensionResult] = field(default_factory=dict)
     correction_prompt: str = ""
 
 
@@ -57,9 +57,9 @@ class PersonaConsistencyChecker:
 
     def __init__(
         self,
-        schema: Optional[PersonaSchema] = None,
-        dynamic_anchors: Optional[DynamicAnchorSystem] = None,
-        style_coupler: Optional[EmotionStyleCoupler] = None,
+        schema: PersonaSchema | None = None,
+        dynamic_anchors: DynamicAnchorSystem | None = None,
+        style_coupler: EmotionStyleCoupler | None = None,
     ):
         self._schema = schema
         self._anchors = dynamic_anchors
@@ -145,10 +145,7 @@ class PersonaConsistencyChecker:
         match_count = sum(1 for word in expected_vocab if word in response)
         match_ratio = match_count / len(expected_vocab) if expected_vocab else 0
 
-        if intensity > 0.6:
-            score = 0.5 + 0.5 * match_ratio
-        else:
-            score = 0.7 + 0.3 * match_ratio
+        score = 0.5 + 0.5 * match_ratio if intensity > 0.6 else 0.7 + 0.3 * match_ratio
 
         passed = score >= 0.6
         violations = []
@@ -215,7 +212,7 @@ class PersonaConsistencyChecker:
             suggestions=suggestions,
         )
 
-    def suggest_correction(self, dimensions: Dict[str, DimensionResult]) -> str:
+    def suggest_correction(self, dimensions: dict[str, DimensionResult]) -> str:
         """根据失败维度生成修正提示词
 
         Args:

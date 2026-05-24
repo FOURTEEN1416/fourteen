@@ -6,12 +6,11 @@ import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
 
 from shisi.core.models.affinity_level import AffinityLevel
 from shisi.core.models.character_aggregate import CharacterAggregate
-from shisi.core.models.emotional_state import EmotionalState
 from shisi.core.models.emotion_type import EmotionType
+from shisi.core.models.emotional_state import EmotionalState
 from shisi.core.models.persona_profile import PersonaProfile
 
 from .schema import CHARACTERS_V2_DDL, CHARACTERS_V2_INDEXES
@@ -32,7 +31,7 @@ class SQLiteCharacterRepository:
         finally:
             conn.close()
 
-    def get_by_id(self, character_id: str) -> Optional[CharacterAggregate]:
+    def get_by_id(self, character_id: str) -> CharacterAggregate | None:
         conn = self._connect()
         try:
             conn.row_factory = sqlite3.Row
@@ -45,7 +44,7 @@ class SQLiteCharacterRepository:
         finally:
             conn.close()
 
-    def get_active(self) -> Optional[CharacterAggregate]:
+    def get_active(self) -> CharacterAggregate | None:
         conn = self._connect()
         try:
             conn.row_factory = sqlite3.Row
@@ -58,7 +57,7 @@ class SQLiteCharacterRepository:
         finally:
             conn.close()
 
-    def list_all(self) -> List[CharacterAggregate]:
+    def list_all(self) -> list[CharacterAggregate]:
         conn = self._connect()
         try:
             conn.row_factory = sqlite3.Row
@@ -139,7 +138,7 @@ class SQLiteCharacterRepository:
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(str(self.db_path))
 
-    def _get_active_id(self, conn: sqlite3.Connection) -> Optional[str]:
+    def _get_active_id(self, conn: sqlite3.Connection) -> str | None:
         row = conn.execute(
             "SELECT id FROM characters_v2 WHERE is_active = 1"
         ).fetchone()

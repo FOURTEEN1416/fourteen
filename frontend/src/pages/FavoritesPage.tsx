@@ -7,17 +7,25 @@ import Button from '../components/common/Button'
 import Skeleton from '../components/common/Skeleton'
 import EmptyState from '../components/common/EmptyState'
 import { Star, Trash2, Send } from 'lucide-react'
+import type { CharacterState } from '../types/character'
+
+interface FavoriteItem {
+  id: string
+  content?: string
+  message?: string
+  timestamp?: string
+}
 
 export default function FavoritesPage() {
   const { data: characters } = useCharacters()
-  const [favs, setFavs] = useState<any[]>([])
+  const [favs, setFavs] = useState<FavoriteItem[]>([])
   const [loading, setLoading] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [selectedChar, setSelectedChar] = useState('')
   const [forwardTarget, setForwardTarget] = useState('')
 
-  const charList = (characters ?? []) as any[]
-  const activeChar = charList.find((c: any) => c.is_active)
+  const charList = (characters ?? []) as CharacterState[]
+  const activeChar = charList.find((c: CharacterState) => c.is_active)
 
   const loadFavorites = async () => {
     setLoading(true)
@@ -25,7 +33,7 @@ export default function FavoritesPage() {
       const cid = selectedChar || activeChar?.character_id
       if (!cid) { setLoading(false); return }
       const r = await shisiClient.memory.favorites(cid)
-      setFavs(r as any[])
+      setFavs(r as FavoriteItem[])
       setLoaded(true)
     } catch { setFavs([]) }
     setLoading(false)
@@ -35,7 +43,7 @@ export default function FavoritesPage() {
     try {
       const cid = selectedChar || activeChar?.character_id
       await shisiClient.memory.removeFavorite(id, cid)
-      setFavs(favs.filter((f: any) => f.id !== id))
+      setFavs(favs.filter((f: FavoriteItem) => f.id !== id))
     } catch { /* ignore */ }
   }
 
@@ -64,7 +72,7 @@ export default function FavoritesPage() {
             className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400/30"
           >
             <option value="">选择角色</option>
-            {charList.map((c: any) => (
+            {charList.map((c: CharacterState) => (
               <option key={c.character_id} value={c.character_id}>{c.name}{c.is_active ? ' (当前)' : ''}</option>
             ))}
           </select>
@@ -82,7 +90,7 @@ export default function FavoritesPage() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {favs.map((fav: any, i: number) => (
+          {favs.map((fav: FavoriteItem, i: number) => (
             <Card key={i}>
               <div className="flex items-start justify-between">
                 <div className="flex-1 min-w-0">
@@ -104,7 +112,7 @@ export default function FavoritesPage() {
                       className="text-[10px] border border-gray-200 rounded px-1 py-0.5"
                     >
                       <option value="">转发到...</option>
-                      {charList.filter((c: any) => c.character_id !== (selectedChar || activeChar?.character_id)).map((c: any) => (
+                      {charList.filter((c: CharacterState) => c.character_id !== (selectedChar || activeChar?.character_id)).map((c: CharacterState) => (
                         <option key={c.character_id} value={c.character_id}>{c.name}</option>
                       ))}
                     </select>

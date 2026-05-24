@@ -12,8 +12,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("scheduler")
 
@@ -37,11 +38,11 @@ class ProactiveScheduler:
 
     def __init__(
         self,
-        ase_engine: Optional[Any] = None,
-        send_message_func: Optional[Callable[[str], None]] = None,
-        daily_maintenance_func: Optional[Callable[[], None]] = None,
-        get_last_chat_time: Optional[Callable[[], Optional[datetime]]] = None,
-        is_online_check: Optional[Callable[[], bool]] = None,
+        ase_engine: Any | None = None,
+        send_message_func: Callable[[str], None] | None = None,
+        daily_maintenance_func: Callable[[], None] | None = None,
+        get_last_chat_time: Callable[[], datetime | None] | None = None,
+        is_online_check: Callable[[], bool] | None = None,
     ):
         self.ase = ase_engine
         self._send = send_message_func
@@ -50,9 +51,9 @@ class ProactiveScheduler:
         self._is_online_check = is_online_check
 
         self._scheduler: Any = None
-        self._active_tasks: Dict[str, bool] = {}
+        self._active_tasks: dict[str, bool] = {}
 
-        self._last_check_time: Optional[datetime] = None
+        self._last_check_time: datetime | None = None
 
         self._ws_server = None
         self._wechat_connector = None
@@ -153,10 +154,7 @@ class ProactiveScheduler:
         try:
             if self._get_last_chat_time:
                 last_chat = self._get_last_chat_time()
-                if last_chat:
-                    hours = (datetime.now() - last_chat).total_seconds() / 3600
-                else:
-                    hours = 99.0
+                hours = (datetime.now() - last_chat).total_seconds() / 3600 if last_chat else 99.0
             else:
                 hours = self._hours_since_last_check()
 
@@ -214,7 +212,7 @@ class ProactiveScheduler:
             return delta.total_seconds() / 3600
         return 0.0
 
-    def get_jobs(self) -> List[Dict[str, Any]]:
+    def get_jobs(self) -> list[dict[str, Any]]:
         """获取所有任务状态"""
         if not self._scheduler:
             return []

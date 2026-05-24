@@ -14,7 +14,6 @@ Bert-VITS2 提供者 - 本地/远程语音合成
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from .base import TTSProviderBase
 
@@ -83,7 +82,7 @@ class BertVITS2Provider(TTSProviderBase):
             )
         return self._client
 
-    async def synthesize(self, text: str, **kwargs) -> Optional[bytes]:
+    async def synthesize(self, text: str, **kwargs) -> bytes | None:
         if not text or not text.strip():
             return None
 

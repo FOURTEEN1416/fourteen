@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger("multimodal")
 
@@ -13,7 +13,7 @@ class MultimodalProcessor:
         self._asr = ASRHandler()
         self._emoji = EmojiResponder()
 
-    def process(self, message: Any, message_type: str = "text") -> Dict[str, Any]:
+    def process(self, message: Any, message_type: str = "text") -> dict[str, Any]:
         if message_type == "image":
             return self._vision.process(message)
         if message_type == "voice":
@@ -23,7 +23,7 @@ class MultimodalProcessor:
     def should_reply_with_emoji(self, emotion: str = "", affinity: int = 0) -> bool:
         return self._emoji.should_send(emotion, affinity)
 
-    def get_emoji_reply(self, emotion: str = "") -> Optional[str]:
+    def get_emoji_reply(self, emotion: str = "") -> str | None:
         return self._emoji.get_emoji(emotion)
 
 
@@ -31,7 +31,7 @@ class VisionHandler:
     def __init__(self, llm_gateway=None):
         self._llm = llm_gateway
 
-    def process(self, image_data: Any) -> Dict[str, Any]:
+    def process(self, image_data: Any) -> dict[str, Any]:
         if self._llm and hasattr(self._llm, 'api_key') and self._llm.api_key:
             try:
                 [
@@ -47,7 +47,7 @@ class VisionHandler:
 
 
 class ASRHandler:
-    def process(self, audio_data: Any) -> Dict[str, Any]:
+    def process(self, audio_data: Any) -> dict[str, Any]:
         try:
             import openai  # noqa: F401
             logger.info("ASR: would transcribe with Whisper API")
@@ -83,11 +83,9 @@ class EmojiResponder:
         emotion_upper = EMOTION_NAME_MAP.get(emotion, emotion).upper()
         if emotion_upper not in EMOTION_EMOJI_MAP:
             return False
-        if self._reply_count > 0 and self._emoji_count / self._reply_count >= self.max_ratio:
-            return False
-        return True
+        return not (self._reply_count > 0 and self._emoji_count / self._reply_count >= self.max_ratio)
 
-    def get_emoji(self, emotion: str = "") -> Optional[str]:
+    def get_emoji(self, emotion: str = "") -> str | None:
         import random
         emotion_upper = EMOTION_NAME_MAP.get(emotion, emotion).upper()
         emojis = EMOTION_EMOJI_MAP.get(emotion_upper)

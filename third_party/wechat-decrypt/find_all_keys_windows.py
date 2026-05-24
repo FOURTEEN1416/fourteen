@@ -6,13 +6,18 @@ salt嵌在hex字符串中，可以直接匹配DB文件的salt
 """
 import ctypes
 import ctypes.wintypes as wt
-import sys, time, re
-
 import functools
+import re
+import sys
+import time
+
 print = functools.partial(print, flush=True)
 
 from key_scan_common import (
-    collect_db_files, scan_memory_for_keys, cross_verify_keys, save_results,
+    collect_db_files,
+    cross_verify_keys,
+    save_results,
+    scan_memory_for_keys,
 )
 
 kernel32 = ctypes.windll.kernel32
@@ -101,7 +106,7 @@ def main():
     all_hex_matches = 0
     t0 = time.time()
 
-    for pid, mem_kb in pids:
+    for pid, _mem_kb in pids:
         h = kernel32.OpenProcess(0x0010 | 0x0400, False, pid)
         if not h:
             print(f"[WARN] 无法打开进程 PID={pid}，跳过")
@@ -136,7 +141,7 @@ def main():
             kernel32.CloseHandle(h)
 
         if not remaining_salts:
-            print(f"\n[+] 所有密钥已找到，跳过剩余进程")
+            print("\n[+] 所有密钥已找到，跳过剩余进程")
             break
 
     elapsed = time.time() - t0

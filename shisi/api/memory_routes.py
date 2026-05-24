@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -16,8 +15,8 @@ logger = logging.getLogger("shisi.api.memory_routes")
 
 router = APIRouter(prefix="/api/shisi/memory", tags=["memory"])
 
-_fav_mgr: Optional[FavoriteManager] = None
-_fwd_mgr: Optional[ForwardManager] = None
+_fav_mgr: FavoriteManager | None = None
+_fwd_mgr: ForwardManager | None = None
 
 
 def set_managers(fav: FavoriteManager, fwd: ForwardManager) -> None:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("persona_evaluator")
 
@@ -24,10 +24,10 @@ EVALUATION_WEIGHTS = {
 @dataclass
 class EvaluationReport:
     overall_score: float = 0.0
-    dimension_scores: Dict[str, float] = field(default_factory=dict)
+    dimension_scores: dict[str, float] = field(default_factory=dict)
     passed: bool = False
-    issues: List[str] = field(default_factory=list)
-    suggestions: List[str] = field(default_factory=list)
+    issues: list[str] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)
 
 
 class PersonaEvaluator:
@@ -35,7 +35,7 @@ class PersonaEvaluator:
 
     def __init__(
         self,
-        weights: Optional[Dict[str, float]] = None,
+        weights: dict[str, float] | None = None,
         passing_threshold: float = 0.75,
         anchor_checker: Any = None,
         constraint_validator: Any = None,
@@ -44,16 +44,16 @@ class PersonaEvaluator:
         self._threshold = passing_threshold
         self._anchor_checker = anchor_checker
         self._constraint_validator = constraint_validator
-        self._history: List[EvaluationReport] = []
+        self._history: list[EvaluationReport] = []
 
     def evaluate_response(
         self,
-        persona_config: Dict[str, Any],
-        context: Dict[str, Any],
+        persona_config: dict[str, Any],
+        context: dict[str, Any],
         response: str,
     ) -> EvaluationReport:
         """多维度评估回复的人设贴合度"""
-        scores: Dict[str, float] = {}
+        scores: dict[str, float] = {}
 
         scores["anchor_fidelity"] = self._eval_anchor_fidelity(
             persona_config.get("anchors", []), response,
@@ -89,7 +89,7 @@ class PersonaEvaluator:
         self._history.append(report)
         return report
 
-    def _eval_anchor_fidelity(self, anchors: List[str], response: str) -> float:
+    def _eval_anchor_fidelity(self, anchors: list[str], response: str) -> float:
         if self._anchor_checker and anchors:
             try:
                 is_consistent, score, results = self._anchor_checker.check_response_consistency(
@@ -110,25 +110,19 @@ class PersonaEvaluator:
         matched = sum(1 for a in anchors if any(c in response for c in a if len(c) > 1))
         return min(1.0, matched / len(anchors) * 2) if anchors else 0.8
 
-    def _eval_style_consistency(self, style: Dict, response: str) -> float:
+    def _eval_style_consistency(self, style: dict, response: str) -> float:
         score = 0.7
         length = len(response)
         pref = style.get("sentence_length_preference", "medium")
-        if pref == "short" and length <= 30:
-            score += 0.15
-        elif pref == "medium" and 10 <= length <= 60:
-            score += 0.15
-        elif pref == "long" and length > 30:
+        if pref == "short" and length <= 30 or pref == "medium" and 10 <= length <= 60 or pref == "long" and length > 30:
             score += 0.15
         emoji_count = sum(1 for c in response if ord(c) > 0x1F000)
         emoji_freq = style.get("emoji_frequency", 0.5)
-        if emoji_freq > 0.5 and emoji_count > 0:
-            score += 0.1
-        elif emoji_freq < 0.3 and emoji_count == 0:
+        if emoji_freq > 0.5 and emoji_count > 0 or emoji_freq < 0.3 and emoji_count == 0:
             score += 0.1
         return min(1.0, score)
 
-    def _eval_emotion_appropriateness(self, emotion_state: Dict, response: str) -> float:
+    def _eval_emotion_appropriateness(self, emotion_state: dict, response: str) -> float:
         score = 0.75
         emotion = emotion_state.get("primary", {}).get("type", "")
         if not emotion or emotion == "平常":
@@ -146,7 +140,7 @@ class PersonaEvaluator:
             score += 0.2
         return min(1.0, score)
 
-    def _eval_behavior_compliance(self, constraints: Dict, response: str) -> float:
+    def _eval_behavior_compliance(self, constraints: dict, response: str) -> float:
         if self._constraint_validator:
             try:
                 result = self._constraint_validator.validate(response)
@@ -159,18 +153,18 @@ class PersonaEvaluator:
                 return 0.3
         return 0.9
 
-    def _eval_memory_coherence(self, recent_messages: List, response: str) -> float:
+    def _eval_memory_coherence(self, recent_messages: list, response: str) -> float:
         if not recent_messages:
             return 0.8
         return 0.8
 
-    def _calculate_weighted_score(self, scores: Dict[str, float]) -> float:
+    def _calculate_weighted_score(self, scores: dict[str, float]) -> float:
         total = 0.0
         for dim, weight in self._weights.items():
             total += scores.get(dim, 0.5) * weight
         return min(1.0, total)
 
-    def _identify_issues(self, scores: Dict[str, float]) -> List[str]:
+    def _identify_issues(self, scores: dict[str, float]) -> list[str]:
         issues = []
         for dim, score in scores.items():
             if score < 0.5:
@@ -180,8 +174,8 @@ class PersonaEvaluator:
         return issues
 
     def _generate_suggestions(
-        self, issues: List[str], persona_config: Dict,
-    ) -> List[str]:
+        self, issues: list[str], persona_config: dict,
+    ) -> list[str]:
         suggestions = []
         for issue in issues:
             if "anchor" in issue:

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { shisiClient } from '../api/shisiClient'
 import { useErrorStore } from '../store/errorStore'
 import Card from '../components/common/Card'
@@ -20,6 +20,15 @@ interface PersonaData {
   tags: string[]
 }
 
+interface PreviewResponse {
+  preview: string
+}
+
+function getErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message
+  return String(e)
+}
+
 export default function PersonaEditorPage() {
   const [characters, setCharacters] = useState<CharacterState[]>([])
   const [selected, setSelected] = useState('')
@@ -30,9 +39,17 @@ export default function PersonaEditorPage() {
   const [dirty, setDirty] = useState(false)
   const toast = useErrorStore.getState().addToast
 
-  useEffect(() => { loadCharacters() }, [])
+  const loadPersona = useCallback(async (cid: string) => {
+    try {
+      const data = await shisiClient.persona.get(cid) as PersonaData
+      setPersona(data)
+      setDirty(false)
+    } catch (e: unknown) {
+      toast({ type: 'error', message: getErrorMessage(e) || '加载人设失败' })
+    }
+  }, [toast])
 
-  async function loadCharacters() {
+  const loadCharacters = useCallback(async () => {
     try {
       setLoading(true)
       const data = await shisiClient.characters.list() as CharacterState[]
@@ -40,22 +57,14 @@ export default function PersonaEditorPage() {
       if (data.length > 0) {
         const active = data.find(c => c.is_active) || data[0]
         setSelected(active.character_id)
-        loadPersona(active.character_id)
+        await loadPersona(active.character_id)
       }
-    } catch (e: any) {
-      toast({ type: 'error', message: e?.message || '加载角色列表失败' })
+    } catch (e: unknown) {
+      toast({ type: 'error', message: getErrorMessage(e) || '加载角色列表失败' })
     } finally { setLoading(false) }
-  }
+  }, [toast, loadPersona])
 
-  async function loadPersona(cid: string) {
-    try {
-      const data = await shisiClient.persona.get(cid) as PersonaData
-      setPersona(data)
-      setDirty(false)
-    } catch (e: any) {
-      toast({ type: 'error', message: e?.message || '加载人设失败' })
-    }
-  }
+  useEffect(() => { loadCharacters() }, [loadCharacters])
 
   async function handleSave() {
     if (!selected || !persona) return
@@ -64,18 +73,18 @@ export default function PersonaEditorPage() {
       await shisiClient.persona.update(selected, persona as unknown as Record<string, unknown>)
       setDirty(false)
       toast({ type: 'success', message: '人设保存成功' })
-    } catch (e: any) {
-      toast({ type: 'error', message: e?.message || '保存失败' })
+    } catch (e: unknown) {
+      toast({ type: 'error', message: getErrorMessage(e) || '保存失败' })
     } finally { setSaving(false) }
   }
 
   async function handlePreview() {
     if (!selected) return
     try {
-      const data = await shisiClient.persona.preview(selected) as { preview: string }
+      const data = await shisiClient.persona.preview(selected) as PreviewResponse
       setPreview(data.preview)
-    } catch (e: any) {
-      toast({ type: 'error', message: e?.message || '预览失败' })
+    } catch (e: unknown) {
+      toast({ type: 'error', message: getErrorMessage(e) || '预览失败' })
     }
   }
 

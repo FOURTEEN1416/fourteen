@@ -1,5 +1,6 @@
 """单元测试: Prompt注入检测"""
 import sys
+
 sys.path.insert(0, ".")
 
 from safety.prompt_injection import PromptInjectionDetector

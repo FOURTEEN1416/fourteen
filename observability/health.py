@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger("health")
 
 
 class HealthChecker:
     def __init__(self):
-        self._checks: Dict[str, Callable] = {}
+        self._checks: dict[str, Callable] = {}
 
     def register(self, name: str, check_fn: Callable[[], dict]):
         self._checks[name] = check_fn
 
-    def check(self) -> Dict[str, Any]:
+    def check(self) -> dict[str, Any]:
         results = {}
         overall = "healthy"
         for name, fn in self._checks.items():
@@ -22,8 +23,9 @@ class HealthChecker:
                 results[name] = result
                 if not result.get("connected", result.get("available", True)):
                     overall = "degraded" if overall == "healthy" else overall
-            except Exception as e:
-                results[name] = {"connected": False, "error": str(e)}
+            except Exception:
+                logger.exception("健康检查异常: %s", name)
+                results[name] = {"connected": False, "error": "health_check_failed"}
                 overall = "unhealthy"
         return {
             "status": overall,

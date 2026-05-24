@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from .models import OceanTraits, PadState
 
@@ -62,15 +62,15 @@ class EmotionCoupler:
         return pad
 
     def batch_emotions_to_pad(
-        self, emotions: List[Tuple[str, float]]
-    ) -> List[PadState]:
+        self, emotions: list[tuple[str, float]]
+    ) -> list[PadState]:
         """批量转换情感列表为PAD"""
         return [self.emotion_to_pad(name, intensity)
                 for name, intensity in emotions]
 
     # ── 反向转换: PAD → Emotion ──
 
-    def pad_to_emotion(self, pad: PadState) -> Tuple[str, float]:
+    def pad_to_emotion(self, pad: PadState) -> tuple[str, float]:
         """将PAD反向映射到最近的情感名称+匹配度
 
         Returns:
@@ -152,7 +152,7 @@ class EmotionCoupler:
         self,
         pad: PadState,
         engine_emotion_name: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """将PAD适配到EmotionEngine的输入格式
 
         返回提供给 EmotionEngine.analyze() 的附加上下文

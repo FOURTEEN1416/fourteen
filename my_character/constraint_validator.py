@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("constraint_validator")
 
@@ -18,12 +17,12 @@ logger = logging.getLogger("constraint_validator")
 @dataclass
 class ValidationResult:
     passed: bool = True
-    violations: List[str] = field(default_factory=list)
+    violations: list[str] = field(default_factory=list)
     severity: str = "none"
-    corrected_response: Optional[str] = None
+    corrected_response: str | None = None
 
 
-FORBIDDEN_PATTERNS: List[Tuple[str, str]] = [
+FORBIDDEN_PATTERNS: list[tuple[str, str]] = [
     (r"作为AI", "ai_self_disclosure"),
     (r"作为.*语言模型", "ai_self_disclosure"),
     (r"作为.*人工智能", "ai_self_disclosure"),
@@ -39,12 +38,12 @@ FORBIDDEN_PATTERNS: List[Tuple[str, str]] = [
     (r"按照.*人设", "meta_reference"),
 ]
 
-MECHANICAL_PATTERNS: List[Tuple[str, str]] = [
+MECHANICAL_PATTERNS: list[tuple[str, str]] = [
     (r"^(好的|明白了|了解|收到)[，。！]?\s*$", "mechanical_ack"),
     (r"^.{0,5}[。！]?\s*$", "too_short"),
 ]
 
-EXCESSIVE_PATTERNS: List[Tuple[str, str]] = [
+EXCESSIVE_PATTERNS: list[tuple[str, str]] = [
     (r"[！!]{3,}", "excessive_exclamation"),
     (r"[？?]{3,}", "excessive_question"),
     (r"哈{5,}", "excessive_laughter"),
@@ -56,7 +55,7 @@ class ConstraintValidator:
 
     def __init__(
         self,
-        custom_patterns: Optional[List[Tuple[str, str]]] = None,
+        custom_patterns: list[tuple[str, str]] | None = None,
         min_length: int = 2,
         max_length: int = 200,
     ):
@@ -105,7 +104,7 @@ class ConstraintValidator:
 
         return result
 
-    def auto_correct(self, response: str, violations: List[str]) -> str:
+    def auto_correct(self, response: str, violations: list[str]) -> str:
         """自动修正违规内容"""
         corrected = response
 

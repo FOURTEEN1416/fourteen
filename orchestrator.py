@@ -4,8 +4,10 @@ import asyncio
 import json
 import logging
 import threading
+import time
+from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any
 
 from observability.logging_setup import new_trace_id
 from observability.tracing import tracer
@@ -14,6 +16,10 @@ from safety.pii_anonymizer import PIIAnonymizer
 from safety.prompt_injection import PromptInjectionDetector
 
 logger = logging.getLogger("orchestrator")
+
+# Session锁缓存配置：最大缓存数、锁过期时间（秒）
+_MAX_SESSION_LOCKS = 1000
+_SESSION_LOCK_TTL_SECONDS = 3600  # 1小时无使用后清理
 
 
 class Orchestrator:
@@ -27,9 +33,9 @@ class Orchestrator:
         tool_dispatcher=None,
         multimodal_processor=None,
         ase_engine=None,
-        safety_filter: Optional[ContentSafetyFilter] = None,
-        pii_anonymizer: Optional[PIIAnonymizer] = None,
-        injection_detector: Optional[PromptInjectionDetector] = None,
+        safety_filter: ContentSafetyFilter | None = None,
+        pii_anonymizer: PIIAnonymizer | None = None,
+        injection_detector: PromptInjectionDetector | None = None,
         character_manager=None,
         character_service=None,
     ):
@@ -46,17 +52,102 @@ class Orchestrator:
         self._injection = injection_detector or PromptInjectionDetector(enabled=False)
         self._character_manager = character_manager
         self._character_service = character_service
-        self._state_lock = threading.RLock()
-        self._async_lock = asyncio.Lock()
+        self._last_chat_time_lock = threading.Lock()  # 轻量锁，仅保护 _last_chat_time 的读写
+        # per-session 异步锁，避免全局锁导致所有用户串行处理
+        # 使用带TTL的锁缓存，防止内存无限增长
+        self._session_locks: dict[str, tuple[asyncio.Lock, float]] = {}
+        self._session_locks_mutex = threading.Lock()
         self._last_chat_time = datetime.now()
+        self._session_lock_access_time: dict[str, float] = {}
+
+    def _get_session_lock(self, session_id: str) -> asyncio.Lock:
+        """获取 per-session 异步锁，确保不同 session 可并行处理。
+
+        注意: asyncio.Lock 必须在 async 上下文中创建以绑定正确的事件循环。
+        采用延迟创建策略，首次在 async 上下文中调用时才实例化 Lock。
+
+        内存优化：
+        - 使用带TTL的锁缓存，防止session过多导致内存无限增长
+        - 定期清理过期的session锁（超过1小时未访问）
+        - 最大缓存数限制为1000个session
+        """
+        current_time = time.time()
+
+        with self._session_locks_mutex:
+            # 清理过期锁（每100次访问触发一次清理，避免频繁清理）
+            if len(self._session_locks) >= _MAX_SESSION_LOCKS or \
+               (len(self._session_locks) > 0 and hash(session_id) % 100 == 0):
+                self._cleanup_expired_session_locks(current_time)
+
+            # 检查是否已存在该session的锁
+            if session_id in self._session_locks:
+                lock, _ = self._session_locks[session_id]
+                self._session_lock_access_time[session_id] = current_time
+                return lock
+
+            # 延迟创建：确保 Lock 绑定到当前运行的事件循环
+            try:
+                asyncio.get_running_loop()
+                new_lock = asyncio.Lock()
+            except RuntimeError:
+                # 没有运行中的事件循环时，创建一个未绑定循环的 Lock
+                # 后续在 async 上下文中使用时仍需注意事件循环一致性
+                new_lock = asyncio.Lock()
+
+            self._session_locks[session_id] = (new_lock, current_time)
+            self._session_lock_access_time[session_id] = current_time
+            return new_lock
+
+    def _cleanup_expired_session_locks(self, current_time: float) -> None:
+        """清理过期的session锁，防止内存无限增长。
+
+        清理策略：
+        1. 优先清理超过TTL（1小时）未访问的锁
+        2. 如果仍然超过最大限制，清理最久未访问的锁
+        """
+        expired_sessions = []
+        for sid, (_, created_time) in self._session_locks.items():
+            last_access = self._session_lock_access_time.get(sid, created_time)
+            if current_time - last_access > _SESSION_LOCK_TTL_SECONDS:
+                expired_sessions.append(sid)
+
+        for sid in expired_sessions:
+            del self._session_locks[sid]
+            if sid in self._session_lock_access_time:
+                del self._session_lock_access_time[sid]
+
+        # 如果仍然超过最大限制，清理最久未访问的
+        if len(self._session_locks) >= _MAX_SESSION_LOCKS:
+            sorted_sessions = sorted(
+                self._session_lock_access_time.items(),
+                key=lambda x: x[1]
+            )
+            sessions_to_remove = len(self._session_locks) - _MAX_SESSION_LOCKS + 100  # 预留100个空间
+            for sid, _ in sorted_sessions[:sessions_to_remove]:
+                if sid in self._session_locks:
+                    del self._session_locks[sid]
+                del self._session_lock_access_time[sid]
+
+        if expired_sessions:
+            logger.debug("清理 %d 个过期session锁，当前总数: %d", len(expired_sessions), len(self._session_locks))
 
     async def process_message(self, user_msg: str, session_id: str = "",
-                        message_type: str = "text") -> Dict[str, Any]:
+                        message_type: str = "text",
+                        emotion_engine: Any | None = None) -> dict[str, Any]:
+        """处理用户消息
+
+        Args:
+            user_msg: 用户消息内容
+            session_id: 会话ID
+            message_type: 消息类型
+            emotion_engine: 可选的情感引擎，用于多用户隔离场景
+        """
         trace_id = new_trace_id()
         tracer.start_trace(trace_id)
 
         try:
-            async with self._async_lock:
+            lock = self._get_session_lock(session_id or "default")
+            async with lock:
                 with tracer.span("multimodal_preprocess"):
                     if self._multimodal and message_type != "text":
                         processed = self._multimodal.process(user_msg, message_type)
@@ -81,12 +172,18 @@ class Orchestrator:
 
                 with tracer.span("emotion_analyze"):
                     emotion_state = None
-                    if self._emotion:
+                    # 优先使用传入的情感引擎（多用户隔离）
+                    effective_emotion_engine = emotion_engine or self._emotion
+                    if effective_emotion_engine:
                         recent = []
                         if self._memory:
                             recent_msgs = self._memory.working.get_recent(3)
                             recent = [m.get("content", "") for m in recent_msgs]
-                        emotion_state = self._emotion.analyze(user_msg, "\n".join(recent))
+                        # 使用 run_in_executor 避免同步阻塞事件循环
+                        loop = asyncio.get_running_loop()
+                        emotion_state = await loop.run_in_executor(
+                            None, effective_emotion_engine.analyze, user_msg, "\n".join(recent)
+                        )
 
                 with tracer.span("memory_retrieve"):
                     if self._memory and hasattr(self._memory, 'retrieve_context_async'):
@@ -105,12 +202,15 @@ class Orchestrator:
 
                 with tracer.span("rag_retrieve"):
                     rag_context = ""
-                    if self._rag:
+                    rag_results = {}
+                    if self._rag and hasattr(self._rag, 'retrieve_async'):
+                        rag_results = await self._rag.retrieve_async(user_msg)
+                    elif self._rag:
                         rag_results = self._rag.retrieve(user_msg)
-                        if rag_results.get("results"):
-                            rag_context = "\n".join(
-                                r.get("content", "") for r in rag_results["results"][:3]
-                            )
+                    if rag_results.get("results"):
+                        rag_context = "\n".join(
+                            r.get("content", "") for r in rag_results["results"][:3]
+                        )
 
                 with tracer.span("prompt_assemble"):
                     system_prompt = ""
@@ -192,7 +292,8 @@ class Orchestrator:
                     if self._ase:
                         self._ase.on_chat(user_msg, reply)
 
-                self._last_chat_time = datetime.now()
+                with self._last_chat_time_lock:
+                    self._last_chat_time = datetime.now()
 
             trace_result = tracer.end_trace()
             return {
@@ -220,96 +321,157 @@ class Orchestrator:
         tracer.start_trace(trace_id)
 
         try:
-            async with self._async_lock:
-                with self._state_lock:
-                    with tracer.span("multimodal_preprocess"):
-                        if self._multimodal and message_type != "text":
-                            processed = self._multimodal.process(user_msg, message_type)
-                            user_msg = processed.get("text", user_msg)
+            lock = self._get_session_lock(session_id or "default")
+            async with lock:
+                with tracer.span("multimodal_preprocess"):
+                    if self._multimodal and message_type != "text":
+                        processed = self._multimodal.process(user_msg, message_type)
+                        user_msg = processed.get("text", user_msg)
 
-                    with tracer.span("input_safety_check"):
-                        safety_result = self._safety.check_input(user_msg)
-                        if not safety_result.is_safe:
-                            yield self._safety.safe_alternative(safety_result.category)
-                            return
+                with tracer.span("input_safety_check"):
+                    safety_result = self._safety.check_input(user_msg)
+                    if not safety_result.is_safe:
+                        yield self._safety.safe_alternative(safety_result.category)
+                        return
 
-                    with tracer.span("pii_anonymize"):
-                        user_msg, pii_detected = self._pii.anonymize(user_msg)
+                with tracer.span("pii_anonymize"):
+                    user_msg, pii_detected = self._pii.anonymize(user_msg)
 
-                    with tracer.span("prompt_injection_check"):
-                        is_injection, _, _ = self._injection.detect(user_msg)
-                        if is_injection:
-                            user_msg = self._injection.sanitize(user_msg)
+                with tracer.span("prompt_injection_check"):
+                    is_injection, _, _ = self._injection.detect(user_msg)
+                    if is_injection:
+                        user_msg = self._injection.sanitize(user_msg)
 
-                    with tracer.span("emotion_analyze"):
-                        emotion_state = None
-                        if self._emotion:
-                            recent = []
-                            if self._memory:
-                                recent_msgs = self._memory.working.get_recent(3)
-                                recent = [m.get("content", "") for m in recent_msgs]
-                            emotion_state = self._emotion.analyze(user_msg, "\n".join(recent))
-
-                    with tracer.span("memory_retrieve"):
-                        ctx = self._memory.retrieve_context(user_msg, session_id) if self._memory else {}
-
-                    with tracer.span("rag_retrieve"):
-                        rag_context = ""
-                        if self._rag:
-                            rag_results = self._rag.retrieve(user_msg)
-                            if rag_results.get("results"):
-                                rag_context = "\n".join(
-                                    r.get("content", "") for r in rag_results["results"][:3]
-                                )
-
-                    with tracer.span("prompt_assemble"):
-                        system_prompt = ""
-                        if self._persona:
-                            emotion_dict = emotion_state.to_dict() if emotion_state else None
-                            persona_overrides = None
-                            if self._character_manager:
-                                persona_overrides = self._character_manager.get_active_persona_config()
-                            system_prompt = self._persona.build_system_prompt(
-                                emotion_state=emotion_dict,
-                                memory_context=ctx,
-                                rag_context=rag_context,
-                                character_overrides=persona_overrides,
-                            )
-
-                    collected_tokens = []
-                    with tracer.span("llm_inference"):
-                        async for token in self._llm.chat_stream(query=user_msg, system_prompt=system_prompt):
-                            collected_tokens.append(token)
-                            yield token
-
-                    with tracer.span("output_safety_check"):
-                        full_output = "".join(collected_tokens)
-                        output_result = self._safety.check_output(full_output)
-                        if not output_result.is_safe:
-                            logger.warning("Stream output safety issue: %s", output_result.category.value)
-                            full_output = self._safety.safe_alternative(output_result.category)
-
-                    with tracer.span("memory_store"):
+                with tracer.span("emotion_analyze"):
+                    emotion_state = None
+                    if self._emotion:
+                        recent = []
                         if self._memory:
-                            emotion_tag = emotion_state.primary_emotion.value if emotion_state else ""
-                            self._memory.after_chat(user_msg, full_output, emotion_tag, session_id=session_id)
+                            recent_msgs = self._memory.working.get_recent(3)
+                            recent = [m.get("content", "") for m in recent_msgs]
+                        # 使用 run_in_executor 避免同步阻塞事件循环
+                        loop = asyncio.get_running_loop()
+                        emotion_state = await loop.run_in_executor(
+                            None, self._emotion.analyze, user_msg, "\n".join(recent)
+                        )
 
-                    with tracer.span("reflection"):
-                        if self._ase:
-                            self._ase.on_chat(user_msg, full_output)
+                with tracer.span("memory_retrieve"):
+                    if self._memory and hasattr(self._memory, 'retrieve_context_async'):
+                        ctx = await self._memory.retrieve_context_async(user_msg, session_id)
+                    elif self._memory:
+                        ctx = self._memory.retrieve_context(user_msg, session_id)
+                    else:
+                        ctx = {}
 
+                with tracer.span("rag_retrieve"):
+                    rag_context = ""
+                    rag_results = {}
+                    if self._rag and hasattr(self._rag, 'retrieve_async'):
+                        rag_results = await self._rag.retrieve_async(user_msg)
+                    elif self._rag:
+                        rag_results = self._rag.retrieve(user_msg)
+                    if rag_results.get("results"):
+                        rag_context = "\n".join(
+                            r.get("content", "") for r in rag_results["results"][:3]
+                        )
+
+                with tracer.span("prompt_assemble"):
+                    system_prompt = ""
+                    if self._persona:
+                        emotion_dict = emotion_state.to_dict() if emotion_state else None
+                        persona_overrides = None
+                        if self._character_manager:
+                            persona_overrides = self._character_manager.get_active_persona_config()
+                        system_prompt = self._persona.build_system_prompt(
+                            emotion_state=emotion_dict,
+                            memory_context=ctx,
+                            rag_context=rag_context,
+                            character_overrides=persona_overrides,
+                        )
+
+                collected_tokens = []
+                # 缓冲区安全检�?先攒够缓冲区再检查，安全后才 yield，杜绝不安全内容外泄
+                BUFFER_CHECK_INTERVAL = 20
+                buffer = []
+                stream_unsafe = False
+                partial_result = None  # 初始化 partial_result，避免后续引用时 NameError
+                with tracer.span("llm_inference"):
+                    async for token in self._llm.chat_stream(query=user_msg, system_prompt=system_prompt):
+                        collected_tokens.append(token)
+                        buffer.append(token)
+                        if len(buffer) >= BUFFER_CHECK_INTERVAL:
+                            partial_text = "".join(buffer)
+                            partial_result = self._safety.check_output(partial_text)
+                            if not partial_result.is_safe:
+                                logger.warning(
+                                    "Stream mid-buffer safety issue: %s",
+                                    partial_result.category.value,
+                                )
+                                stream_unsafe = True
+                                break
+                            # 缓冲区安全，逐 token 输出
+                            for t in buffer:
+                                yield t
+                            buffer = []
+
+                    # 处理剩余的不足 BUFFER_CHECK_INTERVAL 的 token
+                    if not stream_unsafe and buffer:
+                        partial_text = "".join(buffer)
+                        partial_result = self._safety.check_output(partial_text)
+                        if not partial_result.is_safe:
+                            logger.warning(
+                                "Stream final buffer safety issue: %s",
+                                partial_result.category.value,
+                            )
+                            stream_unsafe = True
+                        else:
+                            for t in buffer:
+                                yield t
+                            buffer = []
+
+                if stream_unsafe:
+                    # 检测到不安全内容，中断流并发送安全替代内容（此时未输出任何不安全token）
+                    # partial_result 在 stream_unsafe=True 时必然已被赋值
+                    if partial_result is not None:
+                        yield self._safety.safe_alternative(partial_result.category)
+                    else:
+                        # 防御性编程：理论上不会到达这里
+                        logger.error("stream_unsafe=True but partial_result is None")
+                        yield "[内容安全过滤]"
+                    # 不再执行后续的 memory_store 和 reflection
+                    with self._last_chat_time_lock:
+                        self._last_chat_time = datetime.now()
+                    return
+
+                with tracer.span("output_safety_check"):
+                    full_output = "".join(collected_tokens)
+                    output_result = self._safety.check_output(full_output)
+                    if not output_result.is_safe:
+                        logger.warning("Stream output safety issue: %s", output_result.category.value)
+                        full_output = self._safety.safe_alternative(output_result.category)
+
+                with tracer.span("memory_store"):
+                    if self._memory:
+                        emotion_tag = emotion_state.primary_emotion.value if emotion_state else ""
+                        self._memory.after_chat(user_msg, full_output, emotion_tag, session_id=session_id)
+
+                with tracer.span("reflection"):
+                    if self._ase:
+                        self._ase.on_chat(user_msg, full_output)
+
+                with self._last_chat_time_lock:
                     self._last_chat_time = datetime.now()
 
         except Exception as e:
-            logger.error("Stream orchestrator error: %s", e)
-            yield json.dumps({"type": "stream_error", "error": str(e)[:200]})
+            logger.exception("Stream orchestrator error")
+            yield json.dumps({"type": "stream_error", "error": "stream_error"})
         finally:
             if trace_id in getattr(tracer, '_active_traces', {}):
                 tracer.end_trace()
 
-    def check_proactive(self) -> Optional[Dict[str, Any]]:
+    def check_proactive(self) -> dict[str, Any] | None:
         if self._ase:
-            with self._state_lock:
+            with self._last_chat_time_lock:
                 hours_since_last = (datetime.now() - self._last_chat_time).total_seconds() / 3600.0
             return self._ase.tick(hours_since_last_chat=hours_since_last)
         return None

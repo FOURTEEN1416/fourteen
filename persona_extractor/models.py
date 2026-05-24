@@ -13,7 +13,6 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 #  OCEAN 五大人格特质
@@ -41,7 +40,7 @@ class OceanTraits:
             setattr(self, trait, max(0.0, min(1.0, val)))
 
     @classmethod
-    def random(cls) -> 'OceanTraits':
+    def random(cls) -> OceanTraits:
         """生成随机人格（用于初始化）"""
         return cls(
             openness=random.uniform(0.3, 0.8),
@@ -52,7 +51,7 @@ class OceanTraits:
         )
 
     @classmethod
-    def from_dict(cls, data: Dict[str, float]) -> 'OceanTraits':
+    def from_dict(cls, data: dict[str, float]) -> OceanTraits:
         return cls(
             openness=data.get('openness', 0.5),
             conscientiousness=data.get('conscientiousness', 0.5),
@@ -61,7 +60,7 @@ class OceanTraits:
             neuroticism=data.get('neuroticism', 0.5),
         )
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, float]:
         return {
             'openness': round(self.openness, 3),
             'conscientiousness': round(self.conscientiousness, 3),
@@ -106,7 +105,7 @@ class OceanTraits:
                 lines.append(f"- {desc}")
         return "\n".join(lines)
 
-    def similarity(self, other: 'OceanTraits') -> float:
+    def similarity(self, other: OceanTraits) -> float:
         """余弦相似度 (0~1)"""
         dot = sum(getattr(self, t) * getattr(other, t)
                   for t in ['openness', 'conscientiousness', 'extraversion',
@@ -121,7 +120,7 @@ class OceanTraits:
             return 0.0
         return dot / (norm1 * norm2)
 
-    def blend(self, other: 'OceanTraits', weight: float = 0.3) -> 'OceanTraits':
+    def blend(self, other: OceanTraits, weight: float = 0.3) -> OceanTraits:
         """加权融合: self * (1-w) + other * w"""
         return OceanTraits(
             openness=self.openness * (1 - weight) + other.openness * weight,
@@ -142,7 +141,7 @@ class OceanTraits:
 # ---------------------------------------------------------------------------
 
 # 12种基本情绪在PAD空间中的映射 (来源: Agethos EmotionalState + PAD理论)
-PAD_EMOTION_MAP: Dict[str, Tuple[float, float, float]] = {
+PAD_EMOTION_MAP: dict[str, tuple[float, float, float]] = {
     "开心":     (0.8,  0.6,  0.5),   # Joy
     "伤心":     (-0.7, 0.1, -0.4),   # Sadness
     "生气":     (-0.5, 0.7,  0.6),   # Anger
@@ -177,7 +176,7 @@ class PadState:
         self.dominance = max(-1.0, min(1.0, self.dominance))
 
     @classmethod
-    def from_ocean(cls, ocean: OceanTraits) -> 'PadState':
+    def from_ocean(cls, ocean: OceanTraits) -> PadState:
         """从OCEAN计算基线PAD (Agethos算法)
 
         基线映射:
@@ -195,7 +194,7 @@ class PadState:
         )
 
     @classmethod
-    def from_emotion(cls, emotion_name: str) -> 'PadState':
+    def from_emotion(cls, emotion_name: str) -> PadState:
         """从情感名称获取PAD值"""
         if emotion_name in PAD_EMOTION_MAP:
             p, a, d = PAD_EMOTION_MAP[emotion_name]
@@ -203,14 +202,14 @@ class PadState:
         return cls()
 
     @classmethod
-    def from_dict(cls, data: Dict[str, float]) -> 'PadState':
+    def from_dict(cls, data: dict[str, float]) -> PadState:
         return cls(
             pleasure=data.get('pleasure', 0.0),
             arousal=data.get('arousal', 0.0),
             dominance=data.get('dominance', 0.0),
         )
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, float]:
         return {
             'pleasure': round(self.pleasure, 3),
             'arousal': round(self.arousal, 3),
@@ -258,7 +257,7 @@ class PadState:
                 closest = name
         return closest
 
-    def blend(self, other: 'PadState', weight: float = 0.3) -> 'PadState':
+    def blend(self, other: PadState, weight: float = 0.3) -> PadState:
         """加权融合: self * (1-w) + other * w"""
         return PadState(
             pleasure=self.pleasure * (1 - weight) + other.pleasure * weight,
@@ -321,7 +320,7 @@ class StyleVector:
             setattr(self, dim, max(0.0, min(1.0, val)))
 
     @classmethod
-    def from_ocean(cls, ocean: OceanTraits) -> 'StyleVector':
+    def from_ocean(cls, ocean: OceanTraits) -> StyleVector:
         """从OCEAN推断风格向量"""
         return cls(
             formality=ocean.conscientiousness * 0.6 + (1 - ocean.openness) * 0.4,
@@ -332,7 +331,7 @@ class StyleVector:
         )
 
     @classmethod
-    def from_dict(cls, data: Dict[str, float]) -> 'StyleVector':
+    def from_dict(cls, data: dict[str, float]) -> StyleVector:
         return cls(
             formality=data.get('formality', 0.3),
             expressiveness=data.get('expressiveness', 0.7),
@@ -341,7 +340,7 @@ class StyleVector:
             sentiment=data.get('sentiment', 0.6),
         )
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, float]:
         return {
             'formality': round(self.formality, 3),
             'expressiveness': round(self.expressiveness, 3),
@@ -429,13 +428,13 @@ class UserPersona:
     snapshot_count: int = 0
     first_seen: str = ""
     last_updated: str = ""
-    _history: List[UserPersonaSnapshot] = field(default_factory=list)
+    _history: list[UserPersonaSnapshot] = field(default_factory=list)
     # 新增心理维度
-    hexaco: Optional[dict] = None     # HEXACO 六因素
-    dark_triad: Optional[dict] = None # 暗黑三人格
-    mental_health: Optional[dict] = None  # 心理健康摘要
-    liwc: Optional[dict] = None       # LIWC 心理语言学
-    cognitive: Optional[dict] = None  # 认知扭曲摘要
+    hexaco: dict | None = None     # HEXACO 六因素
+    dark_triad: dict | None = None # 暗黑三人格
+    mental_health: dict | None = None  # 心理健康摘要
+    liwc: dict | None = None       # LIWC 心理语言学
+    cognitive: dict | None = None  # 认知扭曲摘要
 
     def apply_snapshot(self, snapshot: UserPersonaSnapshot) -> None:
         """融合新快照（Bayesian加权更新）"""
@@ -476,11 +475,11 @@ class UserPersona:
             return self.ocean
         return OceanTraits()  # 默认中间值
 
-    def get_style_adapter(self) -> Dict[str, float]:
+    def get_style_adapter(self) -> dict[str, float]:
         """生成给 tone_mimic 的风格适配参数"""
         return self.style.to_dict()
 
-    def get_pad_adapter(self) -> Dict[str, float]:
+    def get_pad_adapter(self) -> dict[str, float]:
         """生成给 emotion_engine 的PAD适配参数"""
         return self.pad.to_dict()
 

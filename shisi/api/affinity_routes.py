@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -15,7 +14,7 @@ logger = logging.getLogger("shisi.api.affinity_routes")
 
 router = APIRouter(prefix="/api/shisi/affinity", tags=["affinity"])
 
-_enhancer: Optional[AffinityEnhancer] = None
+_enhancer: AffinityEnhancer | None = None
 
 
 def set_enhancer(e: AffinityEnhancer) -> None:

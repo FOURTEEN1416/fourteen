@@ -7,7 +7,6 @@ TTS引擎抽象基类
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
 
 
 class TTSProviderBase(ABC):
@@ -23,7 +22,7 @@ class TTSProviderBase(ABC):
     """
 
     @abstractmethod
-    async def synthesize(self, text: str, **kwargs) -> Optional[bytes]:
+    async def synthesize(self, text: str, **kwargs) -> bytes | None:
         """
         将文本合成为音频
 

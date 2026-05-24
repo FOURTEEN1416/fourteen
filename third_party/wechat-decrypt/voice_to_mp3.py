@@ -1,9 +1,9 @@
 """从 media_0.db 提取所有语音数据，按用户名分目录，SILK_V3 转 MP3"""
+import os
 import sqlite3
 import subprocess
-import tempfile
-import os
 import sys
+import tempfile
 from datetime import datetime
 
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -18,6 +18,7 @@ except ImportError:
     sys.exit(1)
 
 import shutil as _shutil
+
 if not _shutil.which("ffmpeg"):
     print("[ERROR] ffmpeg 不在 PATH 中 (MP3 编码必需)", file=sys.stderr)
     print("        Windows: https://ffmpeg.org/download.html 下载后加入 PATH", file=sys.stderr)
@@ -41,13 +42,10 @@ if _filter_raw:
 def silk_to_mp3(voice_data, output_path):
     """将微信 SILK 语音数据转换为 MP3"""
     # 去掉微信格式的 0x02 前缀
-    if voice_data[0:1] == b'\x02':
-        silk_data = voice_data[1:]
-    else:
-        silk_data = voice_data
+    silk_data = voice_data[1:] if voice_data[0:1] == b'\x02' else voice_data
 
     if not silk_data.startswith(b'#!SILK_V3'):
-        print(f"  警告：数据不以 #!SILK_V3 开头，跳过")
+        print("  警告：数据不以 #!SILK_V3 开头，跳过")
         return False
 
     # 补上结尾标记

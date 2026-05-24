@@ -1,6 +1,7 @@
 """集成测试：FastAPI端点 + E2E流程 + Orchestrator。"""
 
 import sys
+
 sys.path.insert(0, ".")
 
 
@@ -8,12 +9,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from orchestrator import Orchestrator
 from shisi.api.registry import setup_shisi
 from shisi.character.manager import CharacterManager
 from shisi.character.models import CharaCardV2, CharacterData
 from shisi.config import reset_config
 from shisi.migrations import run_migrations
-from orchestrator import Orchestrator
 
 
 @pytest.fixture(autouse=True)
@@ -162,7 +163,7 @@ class TestE2EFlow:
         resp = client.post("/api/shisi/characters/switch", json={"character_id": cid})
         assert resp.status_code == 200
 
-        for i in range(6):
+        for _i in range(6):
             resp = client.post(f"/api/shisi/affinity/{cid}/update", json={"delta": 10, "reason": "chat", "source": "test"})
             assert resp.status_code == 200
 

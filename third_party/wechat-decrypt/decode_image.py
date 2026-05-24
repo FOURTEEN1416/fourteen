@@ -16,12 +16,13 @@ V2 文件结构:
   message_*.db (local_id) → message_resource.db (packed_info 含 MD5) → .dat 文件 → 解密
 """
 
-import os
-import sys
+import contextlib
 import glob
 import hashlib
+import os
 import sqlite3
 import struct
+import sys
 
 # V2 格式完整 magic (6 bytes)
 V2_MAGIC = b'\x07\x08\x56\x32'       # 前 4 字节用于快速检测
@@ -60,7 +61,7 @@ def is_v2_format(dat_path):
         with open(dat_path, 'rb') as f:
             magic = f.read(4)
         return magic == V2_MAGIC
-    except (OSError, IOError):
+    except OSError:
         return False
 
 
@@ -80,7 +81,7 @@ def detect_xor_key(dat_path):
         return None
 
     # 先尝试 3+ 字节 magic 的格式（可靠匹配）
-    for fmt, magic in IMAGE_MAGIC.items():
+    for _fmt, magic in IMAGE_MAGIC.items():
         key = header[0] ^ magic[0]
         match = True
         for i in range(1, len(magic)):
@@ -388,8 +389,7 @@ def decode_all_dats(attach_dir, out_dir, aes_key=None, xor_key=0x88,
             if result_path is None or fmt is None:
                 failed += 1
                 if os.path.exists(tmp_path):
-                    try: os.remove(tmp_path)
-                    except OSError: pass
+                    with contextlib.suppress(OSError): os.remove(tmp_path)
             else:
                 final_path = os.path.join(target_dir, f"{basename}.{fmt}")
                 os.replace(result_path, final_path)
@@ -398,8 +398,7 @@ def decode_all_dats(attach_dir, out_dir, aes_key=None, xor_key=0x88,
         except Exception as e:
             failed += 1
             if os.path.exists(tmp_path):
-                try: os.remove(tmp_path)
-                except OSError: pass
+                with contextlib.suppress(OSError): os.remove(tmp_path)
             print(f"[WARN] {rel}: {e}", file=sys.stderr)
 
         if on_file:
@@ -620,7 +619,7 @@ class ImageResolver:
                 ORDER BY create_time DESC
                 LIMIT ?
             """, params).fetchall()
-        except Exception as e:
+        except Exception:
             conn.close()
             return []
         conn.close()
@@ -637,10 +636,8 @@ class ImageResolver:
                 dat_files = self.find_dat_files(username, file_md5)
                 if dat_files:
                     info['dat_file'] = dat_files[0]
-                    try:
+                    with contextlib.suppress(OSError):
                         info['size'] = os.path.getsize(dat_files[0])
-                    except OSError:
-                        pass
             results.append(info)
 
         return results

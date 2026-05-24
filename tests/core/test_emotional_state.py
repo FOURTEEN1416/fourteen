@@ -1,8 +1,6 @@
 """EmotionalState 单元测试"""
 
 from shisi.core.models.emotional_state import EmotionalState
-from shisi.core.models.emotion_type import EmotionType
-from shisi.core.models.affinity_level import AffinityLevel
 
 
 def test_intensity_clamping():

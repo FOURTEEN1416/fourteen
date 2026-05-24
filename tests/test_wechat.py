@@ -1,6 +1,7 @@
 """微信指令系统 单元测试。"""
 
 import sys
+
 sys.path.insert(0, ".")
 
 import pytest

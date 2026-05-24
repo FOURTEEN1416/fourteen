@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, useNavigate } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './api/queryClient'
@@ -28,46 +28,62 @@ const KnowledgeBasePage = lazy(() => import('./pages/KnowledgeBasePage'))
 const ExtensionsPage = lazy(() => import('./pages/ExtensionsPage'))
 const FavoritesPage = lazy(() => import('./pages/FavoritesPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 
-function PageLoadingSpinner() {
+function PageLoadingSkeleton() {
   return (
-    <div className="flex-1 flex items-center justify-center">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+    <div className="flex-1 p-6 space-y-6 animate-pulse">
+      <div className="h-8 w-48 bg-gray-200 rounded" />
+      <div className="grid grid-cols-3 gap-4">
+        <div className="h-24 bg-gray-200 rounded-lg" />
+        <div className="h-24 bg-gray-200 rounded-lg" />
+        <div className="h-24 bg-gray-200 rounded-lg" />
+      </div>
+      <div className="h-64 bg-gray-200 rounded-lg" />
+      <div className="flex gap-4">
+        <div className="h-40 flex-1 bg-gray-200 rounded-lg" />
+        <div className="h-40 flex-1 bg-gray-200 rounded-lg" />
+      </div>
     </div>
   )
 }
 
 export default function App() {
+  const navigate = useNavigate()
+
   return (
     <QueryClientProvider client={queryClient}>
     <ErrorBoundary>
       <div className="flex h-screen bg-gray-50 overflow-hidden">
         <Sidebar />
         <main className="flex-1 flex flex-col min-w-0 pb-16 lg:pb-0">
-          <Suspense fallback={<PageLoadingSpinner />}>
-            <Routes>
-              <Route path="/" element={<DashboardPage />} />
-              <Route path="/chat" element={<ChatPage />} />
-              <Route path="/persona" element={<PersonaPage />} />
-              <Route path="/memory" element={<MemoryPage />} />
-              <Route path="/training" element={<TrainingPage />} />
-              <Route path="/clone-data" element={<CloneDataPage />} />
-              <Route path="/channels" element={<ChannelsPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/logs" element={<LogsPage />} />
-              <Route path="/admin" element={<AdminPage />} />
-              <Route path="/characters" element={<CharactersPage />} />
-              <Route path="/monitor" element={<MonitorPage />} />
-              <Route path="/stats" element={<StatsPage />} />
-              <Route path="/persona-editor" element={<PersonaEditorPage />} />
-              <Route path="/stickers" element={<StickersPage />} />
-              <Route path="/psych" element={<PsychProfilePage />} />
-              <Route path="/safety" element={<SafetyPage />} />
-              <Route path="/knowledge" element={<KnowledgeBasePage />} />
-              <Route path="/extensions" element={<ExtensionsPage />} />
-              <Route path="/favorites" element={<FavoritesPage />} />
-              <Route path="/users" element={<UsersPage />} />
-            </Routes>
+          <Suspense fallback={<PageLoadingSkeleton />}>
+            <div className="animate-fade-in">
+              <Routes>
+                <Route path="/" element={<DashboardPage />} />
+                <Route path="/chat" element={<ChatPage />} />
+                <Route path="/persona" element={<PersonaPage />} />
+                <Route path="/memory" element={<MemoryPage />} />
+                <Route path="/training" element={<TrainingPage />} />
+                <Route path="/clone-data" element={<CloneDataPage />} />
+                <Route path="/channels" element={<ChannelsPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/logs" element={<LogsPage />} />
+                <Route path="/admin" element={<AdminPage />} />
+                <Route path="/characters" element={<CharactersPage />} />
+                <Route path="/monitor" element={<MonitorPage />} />
+                <Route path="/stats" element={<StatsPage />} />
+                <Route path="/persona-editor" element={<PersonaEditorPage />} />
+                <Route path="/stickers" element={<StickersPage />} />
+                <Route path="/psych" element={<PsychProfilePage />} />
+                <Route path="/safety" element={<SafetyPage />} />
+                <Route path="/knowledge" element={<KnowledgeBasePage />} />
+                <Route path="/extensions" element={<ExtensionsPage />} />
+                <Route path="/favorites" element={<FavoritesPage />} />
+                <Route path="/users" element={<UsersPage />} />
+                <Route path="*" element={<NotFoundPage />} />
+              </Routes>
+            </div>
           </Suspense>
         </main>
         <MobileNav />

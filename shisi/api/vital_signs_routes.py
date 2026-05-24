@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
@@ -14,7 +13,7 @@ logger = logging.getLogger("shisi.api.vital_signs_routes")
 
 router = APIRouter(prefix="/api/shisi/vital-signs", tags=["vital-signs"])
 
-_engine: Optional[VitalSignsEngine] = None
+_engine: VitalSignsEngine | None = None
 
 
 def set_engine(e: VitalSignsEngine) -> None:

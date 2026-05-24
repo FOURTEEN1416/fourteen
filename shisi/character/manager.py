@@ -6,7 +6,6 @@ import logging
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Optional
 
 from ..config import get_config
 from .character_card_v2 import ParserDispatcher, to_persona_config
@@ -60,7 +59,7 @@ class CharacterManager:
         self._initialized = True
         logger.info("CharacterManager初始化完成, active=%s", self._active_id)
 
-    def load_character(self, character_id: str) -> Optional[CharaCardV2]:
+    def load_character(self, character_id: str) -> CharaCardV2 | None:
         if character_id in self._cache:
             self._cache.move_to_end(character_id)
             return self._cache[character_id]
@@ -101,10 +100,7 @@ class CharacterManager:
         if old_id and self._state_migrator:
             try:
                 result = self._state_migrator.migrate(old_id, character_id, migrate_strategy)
-                if result.success:
-                    migration_msg = "（已迁移状态）"
-                else:
-                    migration_msg = f"（迁移失败: {result.error}）"
+                migration_msg = "（已迁移状态）" if result.success else f"（迁移失败: {result.error}）"
             except Exception as e:
                 migration_msg = f"（迁移异常: {e}）"
 
@@ -120,10 +116,10 @@ class CharacterManager:
 
         return True, f"已切换到: {card.data.name}{migration_msg}"
 
-    def get_active(self) -> Optional[CharaCardV2]:
+    def get_active(self) -> CharaCardV2 | None:
         return self._active_card
 
-    def get_active_id(self) -> Optional[str]:
+    def get_active_id(self) -> str | None:
         return self._active_id
 
     def get_active_persona_config(self) -> dict | None:
@@ -134,7 +130,7 @@ class CharacterManager:
     def list_characters(self) -> list[CharacterState]:
         return self.store.list_characters()
 
-    def import_character(self, path: Path | str) -> tuple[Optional[CharaCardV2], str | None]:
+    def import_character(self, path: Path | str) -> tuple[CharaCardV2 | None, str | None]:
         importer = PersonaImporter()
         card, error = importer.import_file(path)
         if error:
@@ -153,7 +149,7 @@ class CharacterManager:
                 logger.debug("存入DB: %s → %s", char_id, db_id)
         return result
 
-    def load_character_from_file(self, char_id: str) -> Optional[CharaCardV2]:
+    def load_character_from_file(self, char_id: str) -> CharaCardV2 | None:
         data_dir = Path(get_config("character", "data_dir", "data/characters"))
         path = data_dir / f"{char_id}.json"
         if not path.exists():
@@ -165,7 +161,7 @@ class CharacterManager:
             logger.warning("加载角色卡失败 %s: %s", path, e)
             return None
 
-    def export_character(self, character_id: str, output_dir: Path | str = "data/characters") -> Optional[Path]:
+    def export_character(self, character_id: str, output_dir: Path | str = "data/characters") -> Path | None:
         card = self.load_character(character_id)
         if card is None:
             return None

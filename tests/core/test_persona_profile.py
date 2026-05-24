@@ -1,6 +1,5 @@
 """PersonaProfile 单元测试"""
 
-import pytest
 from shisi.core.models.persona_profile import PersonaProfile
 
 

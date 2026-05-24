@@ -15,7 +15,6 @@ import os
 import re
 import time
 from enum import Enum
-from typing import Optional
 
 import httpx
 
@@ -73,9 +72,9 @@ class DeepSeekGateway:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        api_base: Optional[str] = None,
-        model: Optional[str] = None,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        model: str | None = None,
         enable_cache: bool = True,
         cache_ttl: int = 3600 * 24 * 7,  # 7天
     ):
@@ -95,7 +94,7 @@ class DeepSeekGateway:
         )
 
         # 初始化缓存
-        self._cache: Optional[LLMCache] = None
+        self._cache: LLMCache | None = None
         if enable_cache and CACHE_AVAILABLE:
             try:
                 self._cache = LLMCache(ttl=cache_ttl)
@@ -125,7 +124,7 @@ class DeepSeekGateway:
         self,
         query: str,
         system_prompt: str = "",
-        history: Optional[list] = None,
+        history: list | None = None,
         temperature: float = 0.85,
         max_tokens: int = 1024,
         use_cache: bool = True,
@@ -236,7 +235,7 @@ class DeepSeekGateway:
         self,
         query: str,
         system_prompt: str = "",
-        history: Optional[list] = None,
+        history: list | None = None,
         temperature: float = 0.85,
         max_tokens: int = 1024,
     ) -> str:
@@ -246,11 +245,19 @@ class DeepSeekGateway:
         self,
         query: str,
         system_prompt: str = "",
-        history: Optional[list] = None,
+        history: list | None = None,
         temperature: float = 0.85,
         max_tokens: int = 1024,
     ) -> str:
-        return self.chat(query, system_prompt, history, temperature, max_tokens)
+        """异步版本的 chat 方法
+
+        使用 asyncio.to_thread 在后台线程中执行同步的 chat 方法，
+        避免阻塞事件循环。
+        """
+        import asyncio
+        return await asyncio.to_thread(
+            self.chat, query, system_prompt, history, temperature, max_tokens
+        )
 
     def _mock_reply(self, query: str) -> str:
         """无 API Key 时的模拟回复（仅供测试）"""

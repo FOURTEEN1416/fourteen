@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("episodic_memory")
 
@@ -13,8 +13,8 @@ class EpisodicMemory:
         self._vm = vector_memory
         self._sm = structured_memory
 
-    def store_episode(self, messages: List[Dict], summary: str = "",
-                      importance: float = 0.5, session_id: str = "") -> Optional[str]:
+    def store_episode(self, messages: list[dict], summary: str = "",
+                      importance: float = 0.5, session_id: str = "") -> str | None:
         if not messages:
             return None
         content_parts = []
@@ -42,10 +42,10 @@ class EpisodicMemory:
             logger.warning("store_episode failed: %s", e)
             return None
 
-    def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         return self._vm._search("episodic_memory", query, top_k)
 
-    def get_recent_episodes(self, n: int = 10) -> List[Dict[str, Any]]:
+    def get_recent_episodes(self, n: int = 10) -> list[dict[str, Any]]:
         coll = self._vm._collections.get("episodic_memory")
         if coll is None:
             return []
@@ -54,7 +54,7 @@ class EpisodicMemory:
             if not results or not results.get("documents"):
                 return []
             items = []
-            for doc, meta in zip(results["documents"], results.get("metadatas", [{}] * len(results["documents"]))):
+            for doc, meta in zip(results["documents"], results.get("metadatas", [{}] * len(results["documents"])), strict=False):
                 items.append({"content": doc, "metadata": meta})
             return items
         except Exception as e:

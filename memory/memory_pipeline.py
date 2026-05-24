@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import math
@@ -20,9 +21,10 @@ import re
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any
 
 logger = logging.getLogger("memory_pipeline")
 
@@ -81,11 +83,11 @@ class WorkingMemory:
             })
             self._total_count += 1
 
-    def get_recent(self, n: int = 10) -> List[Dict]:
+    def get_recent(self, n: int = 10) -> list[dict]:
         with self._lock:
             return list(self._messages)[-n:]
 
-    def get_for_archive(self) -> List[Dict]:
+    def get_for_archive(self) -> list[dict]:
         with self._lock:
             return list(self._messages)
 
@@ -107,10 +109,10 @@ class EpisodicMemory:
     def __init__(self, vector_memory, structured_memory):
         self._vm = vector_memory
         self._sm = structured_memory
-        self._cache: Dict[str, Any] = {}
+        self._cache: dict[str, Any] = {}
         self._cache_lock = threading.Lock()
 
-    def store_episode(self, messages: List[Dict], summary: str = "",
+    def store_episode(self, messages: list[dict], summary: str = "",
                       importance: float = 0.5, session_id: str = "") -> str:
         if not messages:
             return ""
@@ -138,7 +140,7 @@ class EpisodicMemory:
             logger.warning("Failed to store episode: %s", e)
             return ""
 
-    def search(self, query: str, top_k: int = 5) -> List[Dict]:
+    def search(self, query: str, top_k: int = 5) -> list[dict]:
         try:
             return self._vm.search_sync(query, top_k=top_k,
                                    filter_dict={"type": "episode"})
@@ -146,7 +148,7 @@ class EpisodicMemory:
             logger.warning("Episode search failed: %s", e)
             return []
 
-    def _generate_summary(self, messages: List[Dict]) -> str:
+    def _generate_summary(self, messages: list[dict]) -> str:
         user_msgs = [m["content"] for m in messages if m.get("role") == "user"]
         if not user_msgs:
             return ""
@@ -162,11 +164,12 @@ class SemanticMemory:
     def __init__(self, vector_memory, structured_memory):
         self._vm = vector_memory
         self._sm = structured_memory
-        self._fact_cache: Set[int] = set()
+        self._fact_cache: set[int] = set()
 
     def add_fact(self, fact: str, category: str = "general",
                  confidence: float = 0.5, source: str = "") -> bool:
-        fact_hash = hash(fact) % 10000000
+        # 使用 hashlib.md5 替代 hash()，确保进程间一致性
+        fact_hash = hashlib.md5(fact.encode()).hexdigest()
         if fact_hash in self._fact_cache:
             return False
         try:
@@ -176,25 +179,24 @@ class SemanticMemory:
                 if isinstance(first, dict) and first.get("similarity", 0) > 0.9:
                     logger.debug("Similar fact exists, skipping: %s...", fact[:30])
                     return False
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Similar fact search failed, skipping dedup: %s", e)
         try:
             self._sm.add_fact(fact, category, confidence, source)
-            self._fact_cache.add(fact_hash)
             try:
                 self._vm.store_text_sync(fact, {
                     "type": "fact",
                     "category": category,
                     "confidence": confidence,
                 })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to store fact vector: %s", e)
             return True
         except Exception as e:
             logger.warning("Failed to add fact: %s", e)
             return False
 
-    def search(self, query: str, top_k: int = 5) -> Dict[str, List]:
+    def search(self, query: str, top_k: int = 5) -> dict[str, list]:
         results = {"vector": [], "structured": []}
         try:
             vector_results = self._vm.search_sync(query, top_k=top_k,
@@ -206,7 +208,7 @@ class SemanticMemory:
             logger.warning("Fact search failed: %s", e)
         return results
 
-    def extract_facts_from_message(self, message: str) -> List[Dict]:
+    def extract_facts_from_message(self, message: str) -> list[dict]:
         facts = []
         patterns = [
             (r"我喜欢(.+)", "preference"),
@@ -226,8 +228,8 @@ class SemanticMemory:
                 })
         return facts
 
-    def get_facts(self, category: Optional[str] = None,
-                  limit: int = 50) -> List[Dict]:
+    def get_facts(self, category: str | None = None,
+                  limit: int = 50) -> list[dict]:
         """获取事实列表，按分类过滤"""
         try:
             raw = self._sm.get_facts(category, limit=limit)
@@ -267,7 +269,7 @@ class ImportanceScorer:
     }
 
     def score(self, content: str, emotion: str = "",
-              context: Dict = None) -> float:  # type: ignore
+              context: dict = None) -> float:  # type: ignore
         s = 0.3
         for keyword, weight in self.KEYWORD_WEIGHTS.items():
             if keyword in content:
@@ -322,7 +324,7 @@ class ConflictDetector:
         self._sem = semantic_memory
         self._threshold = similarity_threshold
 
-    def check_conflict(self, new_fact: str, category: str) -> Optional[Dict]:
+    def check_conflict(self, new_fact: str, category: str) -> dict | None:
         try:
             search_results = self._sem.search(new_fact, top_k=3)
             vector_results = search_results.get("vector", [])
@@ -354,14 +356,14 @@ class CrossSessionReasoner:
     def __init__(self, structured_memory):
         self._sm = structured_memory
 
-    def extract_pending_event(self, fact: str) -> Optional[Dict]:
+    def extract_pending_event(self, fact: str) -> dict | None:
         for kw in self.FUTURE_KEYWORDS:
             if kw in fact:
                 return {"event_desc": fact, "keyword": kw}
         return None
 
     def store_pending_event(self, event_desc: str,
-                            expected_time: Optional[str] = None,
+                            expected_time: str | None = None,
                             session_id: str = ""):
         try:
             with self._sm.get_connection() as conn:
@@ -375,7 +377,7 @@ class CrossSessionReasoner:
         except Exception as e:
             logger.warning("store_pending_event failed: %s", e)
 
-    def get_pending_events(self) -> List[Dict]:
+    def get_pending_events(self) -> list[dict]:
         try:
             with self._sm.get_connection() as conn:
                 rows = conn.execute(
@@ -440,17 +442,17 @@ PATTERNS = {
 class FactExtractor:
     """事实提取器 — LLM模式 / 规则模式"""
 
-    def __init__(self, llm_func: Optional[Callable] = None):
+    def __init__(self, llm_func: Callable | None = None):
         self.llm_func = llm_func
 
-    def extract_facts(self, user_messages: List[str]) -> List[Dict[str, Any]]:
+    def extract_facts(self, user_messages: list[str]) -> list[dict[str, Any]]:
         if not user_messages:
             return []
         if self.llm_func:
             return self._extract_with_llm(user_messages)
         return self._extract_with_rules(user_messages)
 
-    def _extract_with_llm(self, messages: List[str]) -> List[Dict[str, Any]]:
+    def _extract_with_llm(self, messages: list[str]) -> list[dict[str, Any]]:
         text = "\n".join(messages[-20:])
         prompt = f"""从以下对话中提取关于用户的事实信息。
 只提取明确提到的、有具体内容的事实。
@@ -479,7 +481,7 @@ JSON:"""
             logger.warning("LLM fact extraction failed: %s", e)
         return []
 
-    def _extract_with_rules(self, messages: List[str]) -> List[Dict[str, Any]]:
+    def _extract_with_rules(self, messages: list[str]) -> list[dict[str, Any]]:
         facts = []
         for msg in messages:
             for category, patterns in PATTERNS.items():
@@ -499,10 +501,10 @@ JSON:"""
         return facts
 
     @staticmethod
-    def deduplicate(facts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def deduplicate(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not facts:
             return []
-        by_category: Dict[str, list] = {}
+        by_category: dict[str, list] = {}
         for f in facts:
             cat = f.get("category", "general")
             if cat not in by_category:
@@ -520,23 +522,23 @@ JSON:"""
         return result
 
     @staticmethod
-    def _parse_json_result(text: str) -> Optional[List[Dict[str, Any]]]:
+    def _parse_json_result(text: str) -> list[dict[str, Any]] | None:
         try:
             return json.loads(text)
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as e:
+            logger.debug("Direct JSON parse failed: %s", e)
         match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
         if match:
             try:
                 return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as e:
+                logger.debug("Code block JSON parse failed: %s", e)
         match = re.search(r'\[.*?\]', text, re.DOTALL)
         if match:
             try:
                 return json.loads(match.group(0))
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as e:
+                logger.debug("Bracket extraction JSON parse failed: %s", e)
         return None
 
     def health_check(self) -> dict:
@@ -553,18 +555,20 @@ JSON:"""
 class DiarySummarizer:
     """日记摘要器 — 每日对话总结 + 情绪趋势分析"""
 
-    def __init__(self, llm_func: Optional[Callable] = None):
+    def __init__(self, llm_func: Callable | None = None,
+                 structured_memory=None):
         self.llm_func = llm_func
-        self._daily_summaries: Dict[str, str] = {}
+        self._daily_summaries: dict[str, str] = {}
+        self._structured_memory = structured_memory  # 用于持久化摘要到 SQLite
 
-    def summarize_day(self, chats: List[Dict[str, Any]]) -> str:
+    def summarize_day(self, chats: list[dict[str, Any]]) -> str:
         if not chats:
             return "今天没有聊天记录。"
         if self.llm_func:
             return self._summarize_with_llm(chats)
         return self._summarize_with_template(chats)
 
-    def summarize_week(self, daily_summaries: List[str]) -> str:
+    def summarize_week(self, daily_summaries: list[str]) -> str:
         if not daily_summaries:
             return "本周没有记录。"
         if self.llm_func:
@@ -590,7 +594,7 @@ class DiarySummarizer:
                 logger.warning("Weekly LLM summary failed: %s", e)
         return "\n".join(daily_summaries)
 
-    def detect_mood_trend(self, daily_summaries: Dict[str, str]) -> Dict[str, Any]:
+    def detect_mood_trend(self, daily_summaries: dict[str, str]) -> dict[str, Any]:
         if not daily_summaries:
             return {"trend": "无数据", "avg_mood": "未知", "notable_days": []}
         mood_keywords = {
@@ -632,15 +636,52 @@ class DiarySummarizer:
 
     def save_summary(self, date_str: str, summary: str) -> None:
         self._daily_summaries[date_str] = summary
+        # 持久化到 SQLite 数据库
+        if self._structured_memory:
+            try:
+                with self._structured_memory.get_connection() as conn:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO daily_summaries (date, summary) VALUES (?, ?)",
+                        (date_str, summary),
+                    )
+                    conn.commit()
+            except Exception as e:
+                logger.warning("Failed to persist diary summary to DB: %s", e)
         logger.info("Diary summary saved for %s", date_str)
 
-    def get_summary(self, date_str: str) -> Optional[str]:
+    def load_summaries_from_db(self) -> None:
+        """从 SQLite 数据库加载已持久化的日记摘要"""
+        if not self._structured_memory:
+            return
+        try:
+            with self._structured_memory.get_connection() as conn:
+                # 尝试创建表（如果不存在）
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS daily_summaries (
+                        date TEXT PRIMARY KEY,
+                        summary TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.commit()
+                # 加载已有摘要
+                rows = conn.execute(
+                    "SELECT date, summary FROM daily_summaries ORDER BY date"
+                ).fetchall()
+                for row in rows:
+                    self._daily_summaries[row[0]] = row[1]
+                if rows:
+                    logger.info("Loaded %d diary summaries from DB", len(rows))
+        except Exception as e:
+            logger.warning("Failed to load diary summaries from DB: %s", e)
+
+    def get_summary(self, date_str: str) -> str | None:
         return self._daily_summaries.get(date_str)
 
-    def get_all_summaries(self) -> Dict[str, str]:
+    def get_all_summaries(self) -> dict[str, str]:
         return dict(self._daily_summaries)
 
-    def _summarize_with_llm(self, chats: List[Dict[str, Any]]) -> str:
+    def _summarize_with_llm(self, chats: list[dict[str, Any]]) -> str:
         chat_text = "\n".join(
             f"{'用户' if c['role'] == 'user' else '十四'}: {c['content']}"
             for c in chats[-30:]
@@ -663,7 +704,7 @@ class DiarySummarizer:
             logger.warning("LLM summary failed: %s", e)
             return self._summarize_with_template(chats)
 
-    def _summarize_with_template(self, chats: List[Dict[str, Any]]) -> str:
+    def _summarize_with_template(self, chats: list[dict[str, Any]]) -> str:
         user_msgs = [c for c in chats if c.get("role") == "user"]
         assistant_msgs = [c for c in chats if c.get("role") == "assistant"]
         user_count = len(user_msgs)
@@ -722,10 +763,10 @@ class MemoryPipeline:
         self,
         vector_memory=None,
         structured_memory=None,
-        fact_extractor: Optional[FactExtractor] = None,
-        diary_summarizer: Optional[DiarySummarizer] = None,
-        emotion_engine: Optional[Any] = None,
-        llm_gateway: Optional[Any] = None,
+        fact_extractor: FactExtractor | None = None,
+        diary_summarizer: DiarySummarizer | None = None,
+        emotion_engine: Any | None = None,
+        llm_gateway: Any | None = None,
         working_limit: int = 20,
         retrieval_timeout: float = 1.0,
         forgetting_model: str = "exponential",
@@ -763,7 +804,8 @@ class MemoryPipeline:
             llm_func=self._llm if callable(self._llm) else None
         )
         self.ds = diary_summarizer or DiarySummarizer(
-            llm_func=self._llm if callable(self._llm) else None
+            llm_func=self._llm if callable(self._llm) else None,
+            structured_memory=self.sm,
         )
         self.emotion = emotion_engine
 
@@ -790,17 +832,21 @@ class MemoryPipeline:
 
         # 会话跟踪
         self._session_id: str = ""
-        self._last_daily_summary: Optional[str] = None
+        self._last_daily_summary: str | None = ""
         self._chat_count_since_extract: int = 0
+        self._chat_count_lock = threading.Lock()  # 保护 _chat_count_since_extract 并发读写
 
         # 缓存
-        self._context_cache: Dict[str, Any] = {}
+        self._context_cache: dict[str, Any] = {}
         self._cache_lock = threading.Lock()
 
         logger.info(
             "MemoryPipeline initialized (forgetting=%s, working_limit=%d)",
             self._forgetting_model, working_limit,
         )
+
+        # 从数据库恢复已持久化的日记摘要
+        self.ds.load_summaries_from_db()
 
     @property
     def session_id(self) -> str:
@@ -816,7 +862,7 @@ class MemoryPipeline:
         reply: str,
         emotion_tag: str = "",
         session_id: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         effective_session = session_id or self.session_id
         result = {
             "stored_chat": False,
@@ -856,9 +902,20 @@ class MemoryPipeline:
             logger.debug("Vector store failed: %s", e)
 
         # 5. 事实提取（每 N 条对话触发）
-        self._chat_count_since_extract += 1
-        if self._chat_count_since_extract >= self._config.fact_extract_interval:
-            self._chat_count_since_extract = 0
+        # 注意：所有对 _chat_count_since_extract 的操作必须在锁保护下完成
+        # 包括读取、递增、重置，防止竞态条件导致计数不准确
+        with self._chat_count_lock:
+            self._chat_count_since_extract += 1
+            should_extract = self._chat_count_since_extract >= self._config.fact_extract_interval
+            if should_extract:
+                self._chat_count_since_extract = 0
+                # 事实提取操作也在锁保护下决定是否执行
+                # 释放锁后再执行实际提取，避免长时间持有锁
+                needs_extraction = True
+            else:
+                needs_extraction = False
+
+        if needs_extraction:
             result["facts_extracted"] = self._do_fact_extraction(
                 effective_session
             )
@@ -895,7 +952,7 @@ class MemoryPipeline:
         query: str,
         session_id: str = "",
         top_k: int = 5,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         检索记忆上下文 — 并行检索三层记忆，向量检索超时降级
 
@@ -947,7 +1004,8 @@ class MemoryPipeline:
         # 4. 待处理事件
         try:
             context["pending_events"] = self.cross_session.get_pending_events()
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to get pending events: %s", e)
             context["pending_events"] = []
 
         return context
@@ -957,14 +1015,18 @@ class MemoryPipeline:
         query: str,
         session_id: str = "",
         top_k: int = 5,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         异步检索记忆上下文 — 并行检索三层记忆，向量检索超时降级
 
         Returns:
             {"working": [], "episodic": [], "semantic": [], "facts": []}
         """
-        cache_key = f"{session_id}:{hash(query)}"
+        # 使用稳定的 hash 函数（hashlib.md5）替代 Python 内置 hash()，
+        # 避免 Python 3.3+ 的 hash randomization 导致缓存命中率低下
+        import hashlib
+        query_hash = hashlib.md5(query.encode()).hexdigest()[:16]
+        cache_key = f"{session_id}:{query_hash}"
         with self._cache_lock:
             if cache_key in self._context_cache:
                 cached = self._context_cache[cache_key]
@@ -984,7 +1046,8 @@ class MemoryPipeline:
         async def _get_working():
             try:
                 return self.working.get_recent(n=10)
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to get working memory: %s", e)
                 return []
 
         async def _search_episodic():
@@ -1031,7 +1094,8 @@ class MemoryPipeline:
 
         try:
             context["pending_events"] = self.cross_session.get_pending_events()
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to get pending events (async): %s", e)
             context["pending_events"] = []
 
         context["_ts"] = time.time()  # type: ignore
@@ -1047,7 +1111,7 @@ class MemoryPipeline:
             f"{m.get('role', '?')}: {m.get('content', '')}" for m in recent
         )
 
-    def daily_maintenance(self) -> Optional[str]:
+    def daily_maintenance(self) -> str | None:
         """
         每日维护
 
@@ -1103,7 +1167,7 @@ class MemoryPipeline:
 
     # ── V1 兼容接口 ──────────────────────────────────────
 
-    def get_memory_context(self, n_chats: int = 10) -> Dict[str, Any]:
+    def get_memory_context(self, n_chats: int = 10) -> dict[str, Any]:
         """V1兼容：获取当前对话需要的记忆上下文"""
         context = {
             "recent_chats": [],
@@ -1164,7 +1228,8 @@ class MemoryPipeline:
         forgotten = 0
         try:
             facts = self.sm.get_facts(min_confidence=0.0, limit=1000)
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to load facts for forgetting: %s", e)
             return 0
 
         for fact in facts:
@@ -1177,7 +1242,8 @@ class MemoryPipeline:
                     days_old = (datetime.now() - updated_dt).total_seconds() / 86400
                 else:
                     days_old = 30.0
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to parse fact updated_at, using default: %s", e)
                 days_old = 30.0
 
             importance = fact.get("confidence", 0.5)
@@ -1197,8 +1263,8 @@ class MemoryPipeline:
                 try:
                     self.sm.delete_fact(fact["id"])
                     forgotten += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Failed to delete fact (id=%s): %s", fact.get("id"), e)
 
         if forgotten:
             logger.info("Forgotten %d facts (model=%s)", forgotten,

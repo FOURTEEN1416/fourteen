@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -42,7 +42,7 @@ class CharacterExtensions(BaseModel):
     talkativeness: float = 0.5
     fav: bool = False
     world: str = ""
-    depth_prompt: Optional[dict[str, Any]] = None
+    depth_prompt: dict[str, Any] | None = None
     regex_scripts: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -60,7 +60,7 @@ class CharacterData(BaseModel):
     creator_notes: str = ""
     tags: list[str] = Field(default_factory=list)
     creator: str = "unknown"
-    character_book: Optional[WorldInfoBook] = None
+    character_book: WorldInfoBook | None = None
     extensions: CharacterExtensions = Field(default_factory=lambda: CharacterExtensions())
 
     @field_validator("name")
@@ -92,7 +92,7 @@ class CharacterState(BaseModel):
     is_active: bool = False
     affinity: float = 0.0
     emotion_stage: str = "陌生"
-    avatar_url: Optional[str] = None
+    avatar_url: str | None = None
     tags: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

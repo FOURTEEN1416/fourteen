@@ -10,15 +10,15 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from my_character.emotion_engine import CompoundEmotionalState
-    from my_character.emotion_style_coupler import EmotionStyleCoupler
-    from my_character.style_enhancer_v2 import StyleEnhancerV2
     from my_character.contextual_behavior import ContextualBehavior
     from my_character.dynamic_anchor import DynamicAnchorSystem
+    from my_character.emotion_engine import CompoundEmotionalState
+    from my_character.emotion_style_coupler import EmotionStyleCoupler
     from my_character.persona_engine import PersonaEngine
+    from my_character.style_enhancer_v2 import StyleEnhancerV2
 
 logger = logging.getLogger("enhanced_prompt_engine")
 
@@ -39,9 +39,7 @@ class TimeContext:
             period = "morning"
         elif 9 <= hour < 12:
             period = "forenoon"
-        elif 12 <= hour < 14:
-            period = "afternoon"
-        elif 14 <= hour < 18:
+        elif 12 <= hour < 14 or 14 <= hour < 18:
             period = "afternoon"
         elif 18 <= hour < 22:
             period = "evening"
@@ -55,20 +53,20 @@ class TimeContext:
 
 @dataclass
 class PromptContext:
-    emotion_state: Optional[CompoundEmotionalState] = None
-    memory_context: Optional[Dict] = None
+    emotion_state: CompoundEmotionalState | None = None
+    memory_context: dict | None = None
     chat_history: str = ""
     chat_summary: str = ""
     rag_context: str = ""
     user_input: str = ""
-    few_shot_examples: Optional[List[str]] = None
+    few_shot_examples: list[str] | None = None
     style_prompt: str = ""
     chat_round: int = 0
-    time_context: Optional[TimeContext] = None
-    character_overrides: Optional[Dict] = None
+    time_context: TimeContext | None = None
+    character_overrides: dict | None = None
 
     @property
-    def emotion_dict(self) -> Dict[str, Any]:
+    def emotion_dict(self) -> dict[str, Any]:
         if self.emotion_state is None:
             return {}
         if hasattr(self.emotion_state, "to_dict"):
@@ -96,7 +94,7 @@ class PromptContext:
 @dataclass
 class CouplerFeedback:
     suggested_intensity_adjustment: float = 0.0
-    suggested_evolution_direction: Dict[str, float] = field(default_factory=dict)
+    suggested_evolution_direction: dict[str, float] = field(default_factory=dict)
 
 
 class EnhancedPromptEngine:
@@ -111,12 +109,12 @@ class EnhancedPromptEngine:
 
     def __init__(
         self,
-        persona_engine: Optional[PersonaEngine] = None,
-        style_coupler: Optional[EmotionStyleCoupler] = None,
-        style_enhancer: Optional[StyleEnhancerV2] = None,
-        contextual_behavior: Optional[ContextualBehavior] = None,
-        dynamic_anchors: Optional[DynamicAnchorSystem] = None,
-        constraint_validator: Optional[Any] = None,
+        persona_engine: PersonaEngine | None = None,
+        style_coupler: EmotionStyleCoupler | None = None,
+        style_enhancer: StyleEnhancerV2 | None = None,
+        contextual_behavior: ContextualBehavior | None = None,
+        dynamic_anchors: DynamicAnchorSystem | None = None,
+        constraint_validator: Any | None = None,
     ):
         self._persona = persona_engine
         self._coupler = style_coupler

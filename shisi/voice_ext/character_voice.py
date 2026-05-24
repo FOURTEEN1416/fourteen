@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger("shisi.voice_ext.character_voice")
 
@@ -30,7 +30,7 @@ class CharacterVoiceManager:
     def _load(self) -> None:
         if self._config_path.exists():
             try:
-                with open(self._config_path, "r", encoding="utf-8") as f:
+                with open(self._config_path, encoding="utf-8") as f:
                     self._bindings = json.load(f)
                 logger.info("角色音色配置已加载: %d 个角色", len(self._bindings))
             except Exception as e:
@@ -61,7 +61,7 @@ class CharacterVoiceManager:
             return True
         return False
 
-    def get_voice_config(self, character_id: str) -> Optional[dict[str, Any]]:
+    def get_voice_config(self, character_id: str) -> dict[str, Any] | None:
         """获取角色音色配置"""
         return self._bindings.get(character_id)
 

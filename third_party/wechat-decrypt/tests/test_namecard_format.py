@@ -12,7 +12,6 @@ import unittest
 
 import mcp_server
 
-
 # Realistic-shape sample with the noisy / sensitive attrs that used to leak.
 _REAL_NAMECARD = (
     '<msg username="wxid_friend_demo" nickname="李雷" '

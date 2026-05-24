@@ -43,6 +43,7 @@ uin 来源（两条路径，dispatcher 自动 fallback）
 ----
   python find_image_key_macos.py
 """
+import contextlib
 import hashlib
 import json
 import multiprocessing
@@ -97,7 +98,7 @@ def derive_image_keys(code, wxid):
     AES-128 密钥。本函数不做 wxid 归一化（由调用方枚举原值与归一化值）。
     """
     xor_key = int(code) & 0xFF
-    aes_key = hashlib.md5(f"{code}{wxid}".encode("utf-8")).hexdigest()[:16]
+    aes_key = hashlib.md5(f"{code}{wxid}".encode()).hexdigest()[:16]
     return xor_key, aes_key
 
 
@@ -418,10 +419,8 @@ def _bruteforce_with_aes_parallel(xor_key, suffix_hex, wxid_norm, templates,
                 continue
         # 所有 worker 死亡后 queue 仍可能有最后入队的数据
         if not found:
-            try:
+            with contextlib.suppress(_queue.Empty):
                 found = queue.get_nowait()
-            except _queue.Empty:
-                pass
     finally:
         for p in procs:
             if p.is_alive():
@@ -581,10 +580,8 @@ def _save_config_atomic(config_path, config):
     finally:
         # 失败路径上 .tmp 可能残留；成功路径上 os.replace 已经把 tmp 移走了
         if os.path.exists(tmp_path):
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
 
 
 def main(config_path=None):

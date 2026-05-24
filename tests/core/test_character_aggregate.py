@@ -1,9 +1,10 @@
 """CharacterAggregate 单元测试"""
 
 import pytest
+
+from shisi.core.models.affinity_level import AffinityLevel
 from shisi.core.models.character_aggregate import CharacterAggregate
 from shisi.core.models.emotion_type import EmotionType
-from shisi.core.models.affinity_level import AffinityLevel
 
 
 def test_create_default():
