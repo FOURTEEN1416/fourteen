@@ -76,7 +76,7 @@ class ToolToggleRequest(BaseModel):
 
 
 def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
-                   session_manager=None) -> FastAPI:
+                   session_manager=None, girlfriend_manager=None) -> FastAPI:
     app = FastAPI(title="十四 AI虚拟伴侣系统API", version="2.0")
 
     cors_origins_env = os.environ.get("API_CORS_ORIGINS", "http://localhost:5173")
@@ -120,6 +120,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     _health = health_checker
     _config = config_manager
     _sessions = session_manager
+    _gf = girlfriend_manager  # 女友管理器（多用户核心）
 
     @app.post("/api/chat", response_model=ChatResponse)
     async def chat(req: ChatRequest, _auth: bool = Security(_verify_api_key)):
@@ -666,11 +667,91 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             from wechat_direct import WeChatConnector
             time.sleep(1)
             wc._clear_credentials()
-            new_conn = WeChatConnector(_orch)
+            new_conn = WeChatConnector(_gf)
             new_conn.run()
         thread = threading.Thread(target=_do_reconnect, daemon=True)
         thread.start()
         return {"status": "reconnecting"}
+
+    # ═══════════════════════════════════════════
+    # 多用户管理 API（女友管理器）
+    # ═══════════════════════════════════════════
+
+    @app.get("/api/users")
+    async def list_users():
+        """获取所有活跃用户列表"""
+        if not _gf:
+            return {"users": [], "total": 0}
+        return {"users": _gf.get_all_users(), "total": _gf.active_user_count}
+
+    @app.get("/api/users/{user_id}")
+    async def get_user_detail(user_id: str):
+        """获取某个用户详情"""
+        if not _gf:
+            raise HTTPException(503, "女友管理器未初始化")
+        info = _gf.get_user_info(user_id)
+        if not info:
+            raise HTTPException(404, f"用户 {user_id} 未找到")
+        return info
+
+    @app.get("/api/users/{user_id}/chat")
+    async def get_user_chat_history(user_id: str, limit: int = Query(default=50, le=200)):
+        """获取某个用户的聊天记录（按 user_id 即 session_id 过滤）"""
+        if not _orch or not _orch._memory:
+            return {"messages": [], "user_id": user_id}
+        # 结构化记忆存了正确的 session_id，直接查 chat_history 表
+        sm = getattr(_orch._memory, "structured_memory", None) or getattr(_orch._memory, "_sm", None)
+        if sm and hasattr(sm, "get_connection"):
+            with sm.get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT role, content, emotion_tag, created_at FROM chat_history "
+                    "WHERE session_id = ? ORDER BY created_at DESC LIMIT ?",
+                    (user_id, limit),
+                ).fetchall()
+                messages = [dict(r) for r in rows][::-1]
+        else:
+            messages = []
+        return {"messages": messages, "user_id": user_id}
+
+    @app.get("/api/users/{user_id}/emotion")
+    async def get_user_emotion(user_id: str):
+        """获取某个用户的情感状态"""
+        if not _gf:
+            raise HTTPException(503, "女友管理器未初始化")
+        info = _gf.get_user_info(user_id)
+        if not info:
+            raise HTTPException(404, f"用户 {user_id} 未找到")
+        return {"user_id": user_id, "emotion": info.get("emotion", {})}
+
+    @app.post("/api/users/{user_id}/role")
+    async def set_user_role(user_id: str, card_id: str = Query(..., description="角色卡ID")):
+        """给用户分配角色卡"""
+        if not _gf:
+            raise HTTPException(503, "女友管理器未初始化")
+        ok = _gf.set_user_character(user_id, card_id)
+        if not ok:
+            raise HTTPException(404, f"用户 {user_id} 未找到")
+        return {"status": "ok", "user_id": user_id, "character_card_id": card_id}
+
+    @app.post("/api/users/{user_id}/reset")
+    async def reset_user(user_id: str):
+        """重置用户（记忆+情感归零）"""
+        if not _gf:
+            raise HTTPException(503, "女友管理器未初始化")
+        ok = _gf.reset_user(user_id)
+        if not ok:
+            raise HTTPException(404, f"用户 {user_id} 未找到")
+        return {"status": "reset", "user_id": user_id}
+
+    @app.delete("/api/users/{user_id}")
+    async def remove_user(user_id: str):
+        """移除用户"""
+        if not _gf:
+            raise HTTPException(503, "女友管理器未初始化")
+        ok = _gf.remove_user(user_id)
+        if not ok:
+            raise HTTPException(404, f"用户 {user_id} 未找到")
+        return {"status": "removed", "user_id": user_id}
 
     # ═══════════════════════════════════════════
     # Clone Data Management API（需求3+4）
@@ -1066,14 +1147,22 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         return {"history": [], "total": 0}
 
     # ── 十四挂载 ──
+    shisi_available = False
+    shisi_error = None
     try:
         from shisi.api.registry import setup_shisi
         shisi_reg = setup_shisi(app, run_migrate=True)
         if orchestrator and hasattr(orchestrator, '_character_manager'):
             orchestrator._character_manager = shisi_reg.character_manager
+        shisi_available = True
         logger.info("十四模块已挂载到REST API")
     except Exception as e:
-        logger.warning("十四模块挂载失败: %s", e)
+        shisi_error = str(e)
+        logger.error("十四模块挂载失败: %s", e)
+        # Add health check endpoint to report shisi status
+        @app.get("/api/shisi/status")
+        async def shisi_status():
+            return {"available": False, "error": shisi_error}
 
     # ── 微信二维码 API ──
     try:
