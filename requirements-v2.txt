@@ -26,6 +26,9 @@ duckduckgo-search>=6.0.0
 chinese-calendar>=1.9.0
 lunarcalendar>=0.2.0
 
+# Voice synthesis
+edge-tts>=6.1.0
+
 # Character crawler tool
 requests>=2.31.0
 beautifulsoup4>=4.12.0
