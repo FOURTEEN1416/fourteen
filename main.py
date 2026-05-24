@@ -883,12 +883,13 @@ def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None):
     return ws_server
 
 
-def _create_proactive_sender(ws_server=None, wechat_connector=None):
-    """创建主动消息发送器 — 多通道统一出口"""
+def _create_proactive_sender(ws_server_holder: dict, wechat_connector_holder: dict):
+    """创建主动消息发送器 — 多通道统一出口（通过holder dict实现延迟注入）"""
     def send_proactive(msg: str):
         logger.info("[主动消息] %s", msg)
         print(f"\n💕 [十四主动] {msg}")
 
+        ws_server = ws_server_holder.get("ws")
         if ws_server:
             try:
                 import asyncio
@@ -903,6 +904,7 @@ def _create_proactive_sender(ws_server=None, wechat_connector=None):
             except Exception as e:
                 logger.warning("[主动消息] WebSocket推送失败: %s", e)
 
+        wechat_connector = wechat_connector_holder.get("connector")
         if wechat_connector:
             try:
                 wechat_connector.send_text(msg)
@@ -964,9 +966,12 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
         logger.warning("部分组件健康检查未通过, 继续启动...")
 
     ws_server_fast = None
+    _ws_holder = {}
+    _wechat_holder = {}
     if not args.no_api:
         logger.info("启动API服务...")
         ws_server_fast = _start_api_service(orchestrator, cfg, config_mgr=orchestrator.components.get("config"))
+        _ws_holder["ws"] = ws_server_fast
     else:
         logger.info("API服务已禁用 (--no-api)")
 
@@ -975,8 +980,8 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
         from proactive.scheduler import ProactiveScheduler
 
         send_proactive = _create_proactive_sender(
-            ws_server=ws_server_fast,
-            wechat_connector=None,
+            ws_server_holder=_ws_holder,
+            wechat_connector_holder=_wechat_holder,
         )
 
         def daily_maintenance():
@@ -1168,12 +1173,14 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     )
 
     scheduler = None
+    _ws_holder_full = {}
+    _wechat_holder_full = {}
     if not args.no_scheduler:
         from proactive.scheduler import ProactiveScheduler
 
         _send_proactive = _create_proactive_sender(
-            ws_server=None,
-            wechat_connector=None,
+            ws_server_holder=_ws_holder_full,
+            wechat_connector_holder=_wechat_holder_full,
         )
 
         def _daily_maintenance():
@@ -1262,6 +1269,11 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
         ws_thread = threading.Thread(target=_run_ws, daemon=True)
         ws_thread.start()
         logger.info("      WebSocket: ws://%s:%d", cfg.api.host, cfg.api.websocket_port)
+
+        if scheduler:
+            _ws_holder_full["ws"] = ws_server
+            scheduler.set_ws_server(ws_server)
+            logger.info("      WebSocket已注入调度器")
     else:
         logger.info("[11/12] API服务已禁用 (--no-api)")
 
@@ -1284,13 +1296,6 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
         "PromptInjectionDetector": injection_detector,
     }
     health_check_all(components)
-
-    if scheduler:
-        try:
-            scheduler.start()
-            logger.info("调度器已启动")
-        except Exception as e:
-            logger.warning("调度器启动失败: %s", e)
 
     if args.init_only:
         logger.info("--init-only 模式, 初始化完成")

@@ -926,7 +926,7 @@ class ASEEngine:
                 }
 
         start, end = self._config["night_hours"]
-        if start <= hour < end or (start == 22 and hour >= 22):
+        if hour >= start or hour < 1:
             if self._last_night_date != today:
                 self._last_night_date = today
                 templates = _get_messages("night_greeting", affinity)

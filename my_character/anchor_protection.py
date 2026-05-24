@@ -127,14 +127,29 @@ class EnhancedAnchorProtection:
         overlap = len(anchor_chars & response_chars)
         jaccard = overlap / len(anchor_chars | response_chars) if (anchor_chars | response_chars) else 0
 
-        anchor_words = set(re.findall(r'[\u4e00-\u9fff]+', anchor_lower))
-        response_words = set(re.findall(r'[\u4e00-\u9fff]+', response_lower))
-        word_overlap = 0.0
-        if anchor_words:
-            common = anchor_words & response_words
-            word_overlap = len(common) / len(anchor_words)
+        anchor_bigrams = set()
+        for i in range(len(anchor_lower) - 1):
+            anchor_bigrams.add(anchor_lower[i:i+2])
+        response_bigrams = set()
+        for i in range(len(response_lower) - 1):
+            response_bigrams.add(response_lower[i:i+2])
+        bigram_overlap = 0.0
+        if anchor_bigrams:
+            common = anchor_bigrams & response_bigrams
+            bigram_overlap = len(common) / len(anchor_bigrams)
 
-        score = 0.4 * jaccard + 0.6 * word_overlap
+        anchor_substrings = set()
+        cn_chars = re.findall(r'[\u4e00-\u9fff]', anchor_lower)
+        for w in cn_chars:
+            anchor_substrings.add(w)
+        for i in range(len(cn_chars) - 1):
+            anchor_substrings.add(cn_chars[i] + cn_chars[i+1])
+        substring_match = 0.0
+        if anchor_substrings:
+            matched = sum(1 for s in anchor_substrings if s in response_lower)
+            substring_match = matched / len(anchor_substrings)
+
+        score = 0.2 * jaccard + 0.3 * bigram_overlap + 0.5 * substring_match
 
         if self._use_llm:
             llm_score = self._llm_semantic_check(anchor, response)
