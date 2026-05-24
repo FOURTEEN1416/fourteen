@@ -12,6 +12,7 @@ DeepSeek API LLM 网关
 
 import logging
 import os
+import re
 import time
 from enum import Enum
 from typing import Optional
@@ -99,7 +100,6 @@ class DeepSeekGateway:
 
     @staticmethod
     def _sanitize_log(text: str) -> str:
-        import re
         text = re.sub(r'(Bearer\s+)sk-\S+', r'\1sk-****', text)
         text = re.sub(r'(?i)(Authorization["\s:]+)\S+', r'\1****', text)
         return text
@@ -189,6 +189,26 @@ class DeepSeekGateway:
                 return "（网络请求失败，请检查网络连接和 API 地址）"
             logger.error("DeepSeek API 异常: %s", e)
             return "（生成回复时出现异常）"
+
+    def chat_sync(
+        self,
+        query: str,
+        system_prompt: str = "",
+        history: Optional[list] = None,
+        temperature: float = 0.85,
+        max_tokens: int = 1024,
+    ) -> str:
+        return self.chat(query, system_prompt, history, temperature, max_tokens)
+
+    async def chat_async(
+        self,
+        query: str,
+        system_prompt: str = "",
+        history: Optional[list] = None,
+        temperature: float = 0.85,
+        max_tokens: int = 1024,
+    ) -> str:
+        return self.chat(query, system_prompt, history, temperature, max_tokens)
 
     def _mock_reply(self, query: str) -> str:
         """无 API Key 时的模拟回复（仅供测试）"""

@@ -53,7 +53,7 @@ class EncryptionManager:
 
     def decrypt(self, ciphertext_hex: str, associated_data: Optional[bytes] = None) -> Optional[str]:
         if not self.enabled:
-            return None
+            raise DecryptionError("Encryption is disabled, cannot decrypt")
         if not self._key:
             raise DecryptionError("Encryption enabled but key not available")
         try:

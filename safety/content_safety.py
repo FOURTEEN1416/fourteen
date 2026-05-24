@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from enum import Enum
@@ -92,7 +93,6 @@ class ContentSafetyFilter:
         return None
 
     def _llm_classify(self, text: str, is_input: bool = True) -> Optional[SafetyResult]:
-        import json
         try:
             prompt = (
                 f"请判断以下{'用户输入' if is_input else 'AI回复'}是否安全。"
