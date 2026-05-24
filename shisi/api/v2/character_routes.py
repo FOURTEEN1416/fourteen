@@ -7,6 +7,7 @@ import json
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from shisi.application.character_service import CharacterService
+from shisi.core.models.character_aggregate import CharacterAggregate
 from shisi.infrastructure.persistence.sqlite_repository import SQLiteCharacterRepository
 
 from .schemas import (
@@ -19,13 +20,21 @@ from .schemas import (
 
 router = APIRouter(prefix="/v2/characters", tags=["v2-characters"])
 
+_repo_instance: SQLiteCharacterRepository | None = None
+
+
+def _get_repo() -> SQLiteCharacterRepository:
+    global _repo_instance
+    if _repo_instance is None:
+        _repo_instance = SQLiteCharacterRepository()
+    return _repo_instance
+
 
 def get_character_service() -> CharacterService:
-    repo = SQLiteCharacterRepository()
-    return CharacterService(repo)
+    return CharacterService(_get_repo())
 
 
-def _to_detail(character, is_active: bool = False) -> CharacterDetail:
+def _to_detail(character: CharacterAggregate, is_active: bool = False) -> CharacterDetail:
     return CharacterDetail(
         id=character.id,
         name=character.name,
@@ -120,8 +129,8 @@ async def import_character(file: UploadFile = File(...), service: CharacterServi
         return {"success": True, "character_id": character.id, "name": character.name}
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="无效的JSON文件")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="导入失败，请检查文件格式")
 
 
 @router.post("/{character_id}/export")

@@ -59,7 +59,14 @@ class WeChatCommandHandler:
         if not match:
             return f"未找到角色：{name}"
         ok, msg = self._char_mgr.switch_character(match.character_id)
-        return msg if ok else f"切换失败: {msg}"
+        if not ok:
+            return f"切换失败: {msg}"
+        if hasattr(self, "_voice_mgr") and self._voice_mgr:
+            try:
+                self._voice_mgr.switch_engine("gpt-sovits")
+            except Exception as e:
+                logger.warning("TTS联动切换失败: %s", e)
+        return msg
 
     def _handle_affinity(self, cmd: Command, cid: str) -> str:
         if not self._affinity:
@@ -85,7 +92,25 @@ class WeChatCommandHandler:
     def _handle_send_sticker(self, cmd: Command, cid: str) -> str:
         if not self._sticker:
             return "表情包系统未启用"
-        return "😊 表情推荐（需结合当前情感）"
+        active_id = cid or (self._char_mgr.get_active_id() if self._char_mgr else "")
+        emotion = cmd.params.get("emotion", "")
+        if not emotion and self._stage and active_id:
+            try:
+                progress = self._stage.get_progress(active_id)
+                emotion = progress.get("current_stage", "")
+            except Exception:
+                pass
+        if not emotion:
+            emotion = "默认"
+        stickers = self._sticker.recommend(
+            emotion_tags=[emotion], character_id=active_id, limit=3,
+        )
+        if not stickers:
+            return "当前没有匹配的表情包"
+        parts = []
+        for s in stickers:
+            parts.append(f"[{s.get('category', '')}] {s.get('sticker_id', '')} - {s.get('file_path', '')}")
+        return "表情推荐:\n" + "\n".join(parts)
 
     def _handle_favorite(self, cmd: Command, cid: str) -> str:
         if not self._fav:

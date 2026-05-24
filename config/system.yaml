@@ -1,4 +1,5 @@
 env: dev
+# WARNING: debug:true 仅用于开发环境，生产环境必须设为 false
 debug: true
 
 llm:
@@ -16,6 +17,15 @@ llm:
       priority: 1
     - name: deepseek-reasoner
       priority: 2
+  # 缓存配置
+  cache:
+    enabled: true
+    ttl: 604800  # 7天 (秒)
+    redis:
+      host: ${REDIS_HOST:-localhost}
+      port: ${REDIS_PORT:-6379}
+      db: ${REDIS_DB:-0}
+      password: ${REDIS_PASSWORD}
 
 emotion:
   use_llm_classifier: true
@@ -71,7 +81,11 @@ observability:
 
 # ── 语音合成配置 ──
 voice:
-  enabled: false                        # 是否启用语音合成
+  enabled: true                         # 是否启用语音合成
+  audio_converter:
+    ffmpeg_path: "ffmpeg"
+    preferred_format: "silk"
+    silk_sample_rate: 24000
   engine: "edge-tts"                    # 默认引擎: edge-tts / gpt-sovits / bert-vits2
   emotion_enabled: true                 # 启用情感语音参数注入
   edge-tts:

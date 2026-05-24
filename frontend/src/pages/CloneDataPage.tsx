@@ -271,7 +271,7 @@ export default function CloneDataPage() {
                 <p className="text-xs text-gray-400 py-4">加载中...</p>
               ) : detail.error ? (
                 <div className="text-xs text-red-400 bg-red-900/20 border border-red-800/30 rounded-lg px-3 py-2">
-                  {detail.error}
+                  {typeof detail.error === 'string' ? detail.error : JSON.stringify(detail.error)}
                 </div>
               ) : detail.conversations.length === 0 ? (
                 <p className="text-xs text-gray-400 py-4">无匹配记录</p>

@@ -66,4 +66,10 @@ class CharacterService:
         }
 
     def delete_character(self, character_id: str) -> bool:
+        character = self._repo.get_by_id(character_id)
+        if not character:
+            return False
+        active = self._repo.get_active()
+        if active and active.id == character_id:
+            self._repo.set_active("")
         return self._repo.delete(character_id)

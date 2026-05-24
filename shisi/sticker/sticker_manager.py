@@ -33,10 +33,32 @@ class StickerManager:
         finally:
             conn.close()
 
-    def recommend(self, emotion_tags: list[str], limit: int = 5) -> list[dict[str, Any]]:
+    def recommend(self, emotion_tags: list[str], limit: int = 5, character_id: str = "") -> list[dict[str, Any]]:
         from .emotion_recommender import EmotionRecommender
         rec = EmotionRecommender()
-        return rec.recommend(emotion_tags, self.list_by_category(), limit)
+        all_stickers = self.list_by_category()
+        if character_id:
+            char_ids = self._get_character_sticker_ids(character_id)
+            if char_ids:
+                char_stickers = [s for s in all_stickers if s.get("sticker_id") in char_ids]
+                result = rec.recommend(emotion_tags, char_stickers, limit)
+                if len(result) < limit:
+                    general = [s for s in all_stickers if s.get("sticker_id") not in char_ids]
+                    extra = rec.recommend(emotion_tags, general, limit - len(result))
+                    result.extend(extra)
+                return result
+        return rec.recommend(emotion_tags, all_stickers, limit)
+
+    def _get_character_sticker_ids(self, character_id: str) -> set[str]:
+        conn = sqlite3.connect(str(self._db_path))
+        try:
+            rows = conn.execute(
+                "SELECT sticker_id FROM character_stickers WHERE character_id=?",
+                (character_id,),
+            ).fetchall()
+            return {r[0] for r in rows}
+        finally:
+            conn.close()
 
     def import_zip(self, zip_path: Path | str, category: str = "default") -> tuple[int, int]:
         from .importer import StickerImporter

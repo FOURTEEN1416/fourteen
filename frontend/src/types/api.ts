@@ -61,12 +61,23 @@ export interface SystemConfig {
 }
 
 export interface WSIncomingMessage {
-  type: 'reply' | 'stream_start' | 'stream_token' | 'stream_end' | 'proactive' | 'pong' | 'error'
+  type: 'reply' | 'stream_start' | 'stream_token' | 'stream_end' | 'proactive' | 'pong' | 'error' | 'character_switched' | 'emotion_stage_changed' | 'affinity_changed' | 'sticker_send'
   content?: string
   emotion?: EmotionState
   trace_id?: string
   session_id?: string
   message?: string
+  data?: {
+    character_id?: string
+    name?: string
+    old_stage?: string
+    new_stage?: string
+    affinity?: number
+    old_value?: number
+    new_value?: number
+    sticker_id?: string
+    category?: string
+  }
 }
 
 export interface DashboardStats {

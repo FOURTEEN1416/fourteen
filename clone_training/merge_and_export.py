@@ -198,7 +198,7 @@ SYSTEM \"\"\"
                     "你的回复要自然、口语化、有情感。"
                 ),
             }
-        elif deploy_type == "cowagent":
+        elif deploy_type == "local":
             config = {
                 "bot_type": "girlfriend",
                 "model": model_path,

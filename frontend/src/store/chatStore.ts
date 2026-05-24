@@ -11,6 +11,11 @@ interface ChatState {
   isStreaming: boolean
   emotion: EmotionState | null
   proactiveMessage: string | null
+  currentCharacterId: string | null
+  currentCharacterName: string | null
+  emotionStage: string | null
+  affinity: number | null
+  lastSticker: { sticker_id: string; category: string } | null
   addMessage: (msg: ChatMessage) => void
   appendStreamToken: (token: string) => void
   finalizeStreamMessage: () => void
@@ -19,6 +24,10 @@ interface ChatState {
   setStreaming: (v: boolean) => void
   setEmotion: (e: EmotionState | null) => void
   setProactiveMessage: (msg: string | null) => void
+  setCurrentCharacter: (id: string, name: string) => void
+  setEmotionStage: (stage: string) => void
+  setAffinity: (value: number) => void
+  setLastSticker: (sticker: { sticker_id: string; category: string }) => void
   clearMessages: () => void
   loadMoreMessages: (before: number) => Promise<void>
 }
@@ -31,6 +40,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isStreaming: false,
   emotion: null,
   proactiveMessage: null,
+  currentCharacterId: null,
+  currentCharacterName: null,
+  emotionStage: null,
+  affinity: null,
+  lastSticker: null,
 
   addMessage: (msg) =>
     set((state) => {
@@ -63,6 +77,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setStreaming: (v) => set({ isStreaming: v }),
   setEmotion: (e) => set({ emotion: e }),
   setProactiveMessage: (msg) => set({ proactiveMessage: msg }),
+  setCurrentCharacter: (id, name) => set({ currentCharacterId: id, currentCharacterName: name }),
+  setEmotionStage: (stage) => set({ emotionStage: stage }),
+  setAffinity: (value) => set({ affinity: value }),
+  setLastSticker: (sticker) => set({ lastSticker: sticker }),
   clearMessages: () => set({ messages: [], streamingMessage: null }),
 
   loadMoreMessages: async (before: number) => {

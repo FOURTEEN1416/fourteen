@@ -19,6 +19,12 @@ from typing import Optional
 
 import httpx
 
+try:
+    from cache.llm_cache import LLMCache
+    CACHE_AVAILABLE = True
+except ImportError:
+    CACHE_AVAILABLE = False
+
 logger = logging.getLogger("llm.deepseek")
 
 DEFAULT_API_BASE = "https://api.deepseek.com/v1"
@@ -70,6 +76,8 @@ class DeepSeekGateway:
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
         model: Optional[str] = None,
+        enable_cache: bool = True,
+        cache_ttl: int = 3600 * 24 * 7,  # 7天
     ):
         self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "")
         self.api_base = (api_base or os.environ.get("DEEPSEEK_API_BASE") or DEFAULT_API_BASE).rstrip("/")
@@ -85,6 +93,15 @@ class DeepSeekGateway:
             timeout=httpx.Timeout(60.0, connect=10.0),
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10, keepalive_expiry=30.0),
         )
+
+        # 初始化缓存
+        self._cache: Optional[LLMCache] = None
+        if enable_cache and CACHE_AVAILABLE:
+            try:
+                self._cache = LLMCache(ttl=cache_ttl)
+                logger.info("DeepSeekGateway: 缓存已启用 (TTL=%s秒)", cache_ttl)
+            except Exception as e:
+                logger.warning("DeepSeekGateway: 缓存初始化失败: %s", e)
 
         if self.api_key:
             logger.info("DeepSeekGateway: model=%s, base=%s", self.model, self.api_base)
@@ -111,6 +128,7 @@ class DeepSeekGateway:
         history: Optional[list] = None,
         temperature: float = 0.85,
         max_tokens: int = 1024,
+        use_cache: bool = True,
     ) -> str:
         """
         发送聊天请求
@@ -121,6 +139,7 @@ class DeepSeekGateway:
             history: 历史消息 [{"role": "user"/"assistant", "content": ...}]
             temperature: 生成温度
             max_tokens: 最大生成 token 数
+            use_cache: 是否使用缓存
 
         Returns:
             回复文本
@@ -135,6 +154,18 @@ class DeepSeekGateway:
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": query})
+
+        # 尝试从缓存获取
+        if use_cache and self._cache and self._cache.enabled:
+            cached = self._cache.get(
+                messages=messages,
+                model=self.model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            if cached:
+                logger.debug("DeepSeekGateway: 缓存命中")
+                return cached["response"]["content"]
 
         payload = {
             "model": self.model,
@@ -160,6 +191,17 @@ class DeepSeekGateway:
                 usage.get("completion_tokens", 0),
                 usage.get("total_tokens", 0) * 0.000001,
             )
+
+            # 缓存响应
+            if use_cache and self._cache and self._cache.enabled:
+                self._cache.set(
+                    messages=messages,
+                    response={"content": content.strip(), "usage": usage},
+                    model=self.model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+
             return content.strip()
 
         except Exception as e:

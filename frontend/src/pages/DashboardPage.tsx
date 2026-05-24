@@ -164,7 +164,7 @@ export default function DashboardPage() {
               </div>
               {trainingProgress.error && (
                 <div className="text-xs text-red-400 bg-red-50 rounded px-2 py-1">
-                  错误: {trainingProgress.error}
+                  错误: {typeof trainingProgress.error === 'string' ? trainingProgress.error : JSON.stringify(trainingProgress.error)}
                 </div>
               )}
               <div className="flex gap-2 pt-1">
