@@ -1,5 +1,8 @@
 """集成测试：FastAPI端点 + E2E流程 + Orchestrator。"""
 
+import sys
+sys.path.insert(0, ".")
+
 
 import pytest
 from fastapi import FastAPI

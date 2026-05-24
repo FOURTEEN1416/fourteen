@@ -1,5 +1,8 @@
 """情感阶段 + 好感度 + 衰减 单元测试。"""
 
+import sys
+sys.path.insert(0, ".")
+
 from datetime import datetime, timedelta
 
 import pytest

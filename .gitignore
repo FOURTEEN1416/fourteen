@@ -25,5 +25,7 @@ frontend/node_modules/
 frontend/5173
 frontend/--port
 
+*.db
+validation_reports/
 .codeartsdoer/
 .uploads/
