@@ -49,6 +49,12 @@ const navGroups = [
     ],
   },
   {
+    label: '用户',
+    items: [
+      { to: '/users', icon: Users, label: '用户管理', end: false },
+    ],
+  },
+  {
     label: '通道',
     items: [
       { to: '/channels', icon: Smartphone, label: '通道管理', end: false },

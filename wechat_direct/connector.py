@@ -1,8 +1,7 @@
 """
 直接微信连接器
 
-不做 CowAgent 子进程、不做补丁、不做适配器。
-扫码登录微信 → 收消息 → 传给小十 → 发回复，完事。
+直连微信 API，扫码登录 → 收消息 → 传给小十 → 发回复。
 """
 
 import asyncio
@@ -192,13 +191,13 @@ def _send_text(to, text, context_token, token="", base_url=DEFAULT_BASE_URL):
 # 异步编排器调用（process_message 是 async 的）
 # ═══════════════════════════════════════════════
 
-def _call_orchestrator(orchestrator, text, session_id):
+def _call_girlfriend_manager(mgr, user_id, text):
     """
-    调用小十处理消息。
+    调用女友管理器处理消息（多用户路由）。
     process_message 是 async 的，但我们的轮询循环是同步的，
     所以用线程池跑 asyncio.run。
     """
-    coro = orchestrator.process_message(text, session_id=session_id)
+    coro = mgr.process_message(user_id, text)
     try:
         asyncio.get_running_loop()
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
@@ -214,15 +213,16 @@ def _call_orchestrator(orchestrator, text, session_id):
 
 class WeChatConnector:
     """
-    微信连接器 — 直接连微信，不用 CowAgent。
+    微信连接器 — 直连微信 API（多用户版）
 
     用法:
-        connector = WeChatConnector(orchestrator)
+        connector = WeChatConnector(girlfriend_manager)
         connector.run()  # 登录 + 消息轮询
     """
 
-    def __init__(self, orchestrator, base_url=DEFAULT_BASE_URL):
-        self.orchestrator = orchestrator
+    def __init__(self, girlfriend_manager, base_url=DEFAULT_BASE_URL):
+        self.girlfriend_manager = girlfriend_manager
+        self.orchestrator = getattr(girlfriend_manager, "_orch", None)
         self.base_url = base_url
         self.token = ""
         self.bot_id = ""
@@ -500,7 +500,8 @@ class WeChatConnector:
         logger.info(f"微信消息: from={from_user} text={text[:50]}")
 
         try:
-            result = _call_orchestrator(self.orchestrator, text, session_id=from_user)
+            # 走女友管理器（多用户路由）
+            result = _call_girlfriend_manager(self.girlfriend_manager, from_user, text)
             reply = result.get("reply", "")
             if reply:
                 token = self._context_tokens.get(from_user, context_token)
@@ -509,7 +510,7 @@ class WeChatConnector:
                     context_token=token,
                     token=self.token, base_url=self.base_url,
                 )
-                logger.info(f"小十回复已发送: {reply[:50]}")
+                logger.info(f"回复已发送给 {from_user}: {reply[:50]}")
         except Exception as e:
             logger.error(f"处理消息/发回复失败: {e}")
 

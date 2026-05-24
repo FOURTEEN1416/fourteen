@@ -27,6 +27,7 @@ const SafetyPage = lazy(() => import('./pages/SafetyPage'))
 const KnowledgeBasePage = lazy(() => import('./pages/KnowledgeBasePage'))
 const ExtensionsPage = lazy(() => import('./pages/ExtensionsPage'))
 const FavoritesPage = lazy(() => import('./pages/FavoritesPage'))
+const UsersPage = lazy(() => import('./pages/UsersPage'))
 
 function PageLoadingSpinner() {
   return (
@@ -65,6 +66,7 @@ export default function App() {
               <Route path="/knowledge" element={<KnowledgeBasePage />} />
               <Route path="/extensions" element={<ExtensionsPage />} />
               <Route path="/favorites" element={<FavoritesPage />} />
+              <Route path="/users" element={<UsersPage />} />
             </Routes>
           </Suspense>
         </main>
