@@ -11,9 +11,14 @@ from .schemas import UpdatePersonaRequest
 
 router = APIRouter(prefix="/v2/characters", tags=["v2-persona"])
 
+_repo_instance: SQLiteCharacterRepository | None = None
+
 
 def get_character_service() -> CharacterService:
-    return CharacterService(SQLiteCharacterRepository())
+    global _repo_instance
+    if _repo_instance is None:
+        _repo_instance = SQLiteCharacterRepository()
+    return CharacterService(_repo_instance)
 
 
 @router.get("/{character_id}/persona")

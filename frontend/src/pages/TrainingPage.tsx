@@ -209,7 +209,7 @@ export default function TrainingPage() {
             </div>
             {progress.error && (
               <div className="text-xs text-red-400 bg-red-50 rounded px-2 py-1 mt-2">
-                错误: {progress.error}
+                错误: {typeof progress.error === 'string' ? progress.error : JSON.stringify(progress.error)}
               </div>
             )}
           </div>

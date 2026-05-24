@@ -11,8 +11,9 @@ logger = logging.getLogger("shisi.wechat.sticker_adapter")
 
 
 class WeChatStickerAdapter:
-    def __init__(self, sticker_manager: StickerManager | None = None):
+    def __init__(self, sticker_manager: StickerManager | None = None, wechat_connector=None):
         self._sticker_mgr = sticker_manager
+        self._connector = wechat_connector
 
     def get_sticker_for_reply(self, emotion: str, character_id: str = "") -> Optional[dict[str, Any]]:
         if not self._sticker_mgr:
@@ -27,7 +28,7 @@ class WeChatStickerAdapter:
             "默认": ["可爱"],
         }
         tags = emotion_map.get(emotion, emotion_map["默认"])
-        stickers = self._sticker_mgr.recommend(tags, limit=1)
+        stickers = self._sticker_mgr.recommend(tags, limit=1, character_id=character_id)
         return stickers[0] if stickers else None
 
     def format_sticker_message(self, text: str, sticker: dict[str, Any] | None) -> dict[str, Any]:
@@ -39,3 +40,29 @@ class WeChatStickerAdapter:
                 "category": sticker.get("category", ""),
             }
         return msg
+
+    def send_sticker_via_wechat(self, emotion: str, to_user: str, character_id: str = "") -> bool:
+        if not self._sticker_mgr or not self._connector:
+            return False
+        sticker = self.get_sticker_for_reply(emotion, character_id)
+        if not sticker:
+            return False
+        try:
+            from shisi.sticker.safety_check import SafetyChecker
+            checker = SafetyChecker()
+            if not checker.check(sticker):
+                logger.warning("表情包安全检测未通过: %s", sticker.get("sticker_id"))
+                return False
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning("安全检测异常: %s", e)
+        file_path = sticker.get("file_path", "")
+        if not file_path:
+            return False
+        from pathlib import Path
+        p = Path(file_path)
+        if not p.exists():
+            logger.warning("表情包文件不存在: %s", file_path)
+            return False
+        return self._connector.send_image(p.read_bytes(), to_user=to_user)

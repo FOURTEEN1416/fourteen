@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 音色训练管理器 — 用户手动上传音频 → GPT-SoVITS训练
 
@@ -13,7 +15,6 @@
 
 GPT-SoVITS使用配置文件而非命令行参数
 """
-from __future__ import annotations
 
 import asyncio
 import json
@@ -24,7 +25,16 @@ from typing import Any
 
 logger = logging.getLogger("voice.voice_training")
 
+# P1: 安全名称验证 - 防止命令注入
 _SAFE_NAME_RE = re.compile(r"[^\w\-]")
+
+
+def _validate_model_name(name: str) -> str:
+    """验证并清理模型名称，防止命令注入"""
+    safe = _SAFE_NAME_RE.sub("_", name)
+    if not safe:
+        raise ValueError(f"Invalid model name: {name!r}")
+    return safe
 
 
 class VoiceTrainingManager:

@@ -2,7 +2,9 @@ import { useEffect, useRef, useCallback } from 'react'
 import { useChatStore } from '../store/chatStore'
 import type { WSIncomingMessage } from '../types/api'
 
-const WS_URL = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:8765`
+// P1: 生产环境自动使用 wss://
+const _isSecure = window.location.protocol === 'https:'
+const WS_URL = import.meta.env.VITE_WS_URL || `${_isSecure ? 'wss' : 'ws'}://${window.location.hostname}:8765`
 const RECONNECT_BASE_MS = 1000
 const RECONNECT_MAX_MS = 30000
 const RECONNECT_MULTIPLIER = 2
@@ -11,19 +13,23 @@ export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const reconnectDelay = useRef(RECONNECT_BASE_MS)
+  const mountedRef = useRef(true)
   const {
     sessionId, isConnected, setConnected, setStreaming,
     addMessage, setEmotion, setProactiveMessage,
     appendStreamToken, finalizeStreamMessage,
+    setCurrentCharacter, setEmotionStage, setAffinity, setLastSticker,
   } = useChatStore()
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
+    if (!mountedRef.current) return
 
     const ws = new WebSocket(WS_URL)
     wsRef.current = ws
 
     ws.onopen = () => {
+      if (!mountedRef.current) { ws.close(); return }
       setConnected(true)
       reconnectDelay.current = RECONNECT_BASE_MS
       if (reconnectTimer.current) {
@@ -33,6 +39,7 @@ export function useWebSocket() {
     }
 
     ws.onclose = () => {
+      if (!mountedRef.current) return
       setConnected(false)
       setStreaming(false)
       finalizeStreamMessage()
@@ -46,6 +53,7 @@ export function useWebSocket() {
     }
 
     ws.onmessage = (event) => {
+      if (!mountedRef.current) return
       try {
         const data: WSIncomingMessage = JSON.parse(event.data)
 
@@ -72,6 +80,33 @@ export function useWebSocket() {
             setProactiveMessage(data.content || null)
             break
 
+          case 'character_switched':
+            if (data.data?.character_id && data.data?.name) {
+              setCurrentCharacter(data.data.character_id, data.data.name)
+            }
+            break
+
+          case 'emotion_stage_changed':
+            if (data.data?.new_stage) {
+              setEmotionStage(data.data.new_stage)
+            }
+            break
+
+          case 'affinity_changed':
+            if (data.data?.new_value !== undefined) {
+              setAffinity(data.data.new_value)
+            }
+            break
+
+          case 'sticker_send':
+            if (data.data?.sticker_id && data.data?.category) {
+              setLastSticker({ sticker_id: data.data.sticker_id, category: data.data.category })
+            }
+            break
+
+          case 'pong':
+            break
+
           case 'error':
             console.error('WS error:', data.message)
             break
@@ -80,13 +115,31 @@ export function useWebSocket() {
         console.error('WS parse error:', e)
       }
     }
-  }, [setConnected, setStreaming, addMessage, setEmotion, setProactiveMessage, appendStreamToken, finalizeStreamMessage])
+  }, [setConnected, setStreaming, addMessage, setEmotion, setProactiveMessage, appendStreamToken, finalizeStreamMessage, setCurrentCharacter, setEmotionStage, setAffinity, setLastSticker])
 
+  // P2: React Strict Mode 兼容 - 使用 cleanup 标志防止竞态
   useEffect(() => {
-    connect()
+    let isCleanedUp = false
+    mountedRef.current = true
+
+    // 延迟连接以避免 Strict Mode 双重挂载导致的重复连接
+    const connectTimer = setTimeout(() => {
+      if (!isCleanedUp && mountedRef.current) {
+        connect()
+      }
+    }, 0)
+
     return () => {
+      isCleanedUp = true
+      mountedRef.current = false
+      clearTimeout(connectTimer)
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
-      wsRef.current?.close()
+      reconnectTimer.current = undefined
+      if (wsRef.current) {
+        wsRef.current.onclose = null  // 防止 onclose 触发重连
+        wsRef.current.close()
+        wsRef.current = null
+      }
     }
   }, [connect])
 

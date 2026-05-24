@@ -46,7 +46,7 @@ async def list_stickers(category: str | None = None):
     return ApiResponse(data=stickers)
 
 
-@router.get("/recommend", response_model=ApiResponse)
+@router.post("/recommend", response_model=ApiResponse)
 async def recommend_stickers(req: RecommendRequest):
     mgr = _get_manager()
     results = mgr.recommend(req.emotion_tags, req.limit)

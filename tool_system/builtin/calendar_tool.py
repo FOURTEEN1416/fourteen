@@ -1,8 +1,47 @@
 from __future__ import annotations
 
+import ast
+import operator
 from datetime import datetime
+from typing import Any
 
 from tool_system.base import BaseTool, ToolResult
+
+# 安全的数学运算符映射
+_SAFE_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+}
+
+
+def _safe_eval_expr(expr: str) -> Any:
+    """安全地计算数学表达式，不使用 eval()"""
+    tree = ast.parse(expr, mode="eval")
+    return _eval_node(tree.body)
+
+
+def _eval_node(node: ast.AST) -> Any:
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Num):  # Python 3.7 compat
+        return node.n
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_OPS:
+        return _SAFE_OPS[type(node.op)](_eval_node(node.operand))
+    if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_OPS:
+        left = _eval_node(node.left)
+        right = _eval_node(node.right)
+        # 零除检查：Div, FloorDiv, Mod 都需要检查
+        if isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)) and right == 0:
+            raise ZeroDivisionError("division by zero")
+        return _SAFE_OPS[type(node.op)](left, right)
+    raise ValueError(f"Unsupported expression: {ast.dump(node)}")
 
 
 class CalendarTool(BaseTool):
@@ -41,11 +80,6 @@ class CalculatorTool(BaseTool):
         "required": ["expression"],
     }
 
-    SAFE_BUILTINS = {
-        "abs": abs, "round": round, "min": min, "max": max,
-        "pow": pow, "int": int, "float": float,
-    }
-
     def execute(self, expression: str = "", **kwargs) -> ToolResult:
         if not expression:
             return ToolResult(False, error="expression is required")
@@ -53,7 +87,7 @@ class CalculatorTool(BaseTool):
             allowed_chars = set("0123456789+-*/.() ")
             if not all(c in allowed_chars for c in expression.replace(" ", "")):
                 return ToolResult(False, error="Expression contains disallowed characters")
-            result = eval(expression, {"__builtins__": {}}, self.SAFE_BUILTINS)
+            result = _safe_eval_expr(expression)
             return ToolResult(True, data={"expression": expression, "result": result})
         except Exception as e:
             return ToolResult(False, error=f"Calculation error: {e}")

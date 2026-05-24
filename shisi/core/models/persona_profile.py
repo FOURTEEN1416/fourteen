@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import ClassVar, List
 
 
 @dataclass
@@ -22,7 +22,7 @@ class PersonaProfile:
 
     core_anchors: List[str] = field(default_factory=list)
 
-    _DIMENSIONS = (
+    _DIMENSIONS: ClassVar[tuple[str, ...]] = (
         "warmth", "playfulness", "independence", "jealousy", "stubbornness",
         "formality", "emoji_frequency", "sentence_length", "emotional_expression", "humor",
     )

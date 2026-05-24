@@ -77,30 +77,49 @@ class ToolToggleRequest(BaseModel):
 
 def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                    session_manager=None, girlfriend_manager=None) -> FastAPI:
-    app = FastAPI(title="十四 AI虚拟伴侣系统API", version="2.0")
+    _is_prod = os.environ.get("ENV", os.environ.get("APP_ENV", "")).lower() in ("prod", "production")
 
+    # P0: 生产环境强制关闭 debug
+    app = FastAPI(title="十四 AI虚拟伴侣系统API", version="2.0", debug=not _is_prod)
+
+    # P2: CORS 策略 - 生产环境强制限制来源
     cors_origins_env = os.environ.get("API_CORS_ORIGINS", "http://localhost:5173")
     cors_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
-    if cors_origins == ["*"]:
-        logger.warning("CORS allows all origins - not recommended for production")
-    _is_prod = os.environ.get("ENV", os.environ.get("APP_ENV", "")).lower() in ("prod", "production")
-    if _is_prod and (cors_origins == ["*"] or not cors_origins):
-        logger.warning("Production environment detected with permissive CORS - consider restricting origins")
+    if _is_prod and (cors_origins == ["*"] or cors_origins == ["http://localhost:5173"]):
+        logger.warning("Production environment detected with default CORS - set API_CORS_ORIGINS to restrict origins")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "X-API-Key"],
     )
+
+    # P3: 安全响应头
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = "default-src 'self'"
+        if _is_prod:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
 
     @app.exception_handler(Exception)
     async def _global_exception_handler(request: Request, exc: Exception):
         logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
         from fastapi.responses import JSONResponse
+        if isinstance(exc, ValueError):
+            return JSONResponse(status_code=400, content={"detail": str(exc)})
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
-    _api_key_enabled = os.environ.get("API_KEY_ENABLED", "false").lower() == "true"
+    # P0: 生产环境强制启用 API 认证
+    _api_key_enabled = os.environ.get("API_KEY_ENABLED", "true" if _is_prod else "false").lower() == "true"
+    if _is_prod and not os.environ.get("API_KEY"):
+        logger.warning("Production environment detected without API_KEY set - authentication is enabled but no key configured")
     _api_key = os.environ.get("API_KEY", "")
     _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -112,9 +131,63 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             return True
         raise HTTPException(401, "Invalid or missing API key")
 
+    # P2: 强制请求限流 - 使用内存限流器作为 SlowAPI 不可用时的回退
     if HAS_SLOWAPI:
         limiter = Limiter(key_func=get_remote_address)  # type: ignore
         app.state.limiter = limiter
+    else:
+        # 简易内存限流器回退方案 - 线程安全 + 自动清理
+        import time
+        import threading
+        from collections import defaultdict
+        _rate_limit_store: dict[str, list[float]] = defaultdict(list)
+        _rate_limit_lock = threading.Lock()
+        _rate_limit_last_cleanup = time.time()
+
+        def _simple_rate_limit(request: Request, max_requests: int = 60, window_seconds: int = 60) -> bool:
+            client_ip = request.client.host if request.client else "unknown"
+            key = f"{client_ip}:{request.url.path}"
+            now = time.time()
+
+            with _rate_limit_lock:
+                # 定期全局清理（每5分钟）防止内存无限增长
+                global _rate_limit_last_cleanup
+                if now - _rate_limit_last_cleanup > 300:  # 5 minutes
+                    _cleanup_expired_records(now, window_seconds)
+                    _rate_limit_last_cleanup = now
+
+                # 清理该 key 的过期记录
+                _rate_limit_store[key] = [t for t in _rate_limit_store[key] if now - t < window_seconds]
+
+                # 如果记录为空，删除该 key 以释放内存
+                if not _rate_limit_store[key]:
+                    if key in _rate_limit_store:
+                        del _rate_limit_store[key]
+                    return True
+
+                if len(_rate_limit_store[key]) >= max_requests:
+                    return False
+                _rate_limit_store[key].append(now)
+                return True
+
+        def _cleanup_expired_records(now: float, window_seconds: int):
+            """清理所有过期的限流记录，防止内存泄漏"""
+            expired_keys = []
+            for key, timestamps in _rate_limit_store.items():
+                valid_timestamps = [t for t in timestamps if now - t < window_seconds]
+                if valid_timestamps:
+                    _rate_limit_store[key] = valid_timestamps
+                else:
+                    expired_keys.append(key)
+            for key in expired_keys:
+                del _rate_limit_store[key]
+
+        @app.middleware("http")
+        async def fallback_rate_limiter(request: Request, call_next):
+            if not _simple_rate_limit(request):
+                from fastapi.responses import JSONResponse
+                return JSONResponse(status_code=429, content={"detail": "Too many requests"})
+            return await call_next(request)
 
     _orch = orchestrator
     _health = health_checker
@@ -1129,9 +1202,16 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
 
     @app.get("/api/files/{filename}")
     async def serve_file(filename: str):
-        file_path = UPLOAD_DIR / filename
+        # P0: 路径遍历防护 - 规范化路径并验证在允许目录内
+        safe_name = os.path.basename(filename)  # 去除所有路径分隔符
+        file_path = (UPLOAD_DIR / safe_name).resolve()
+        upload_dir_resolved = UPLOAD_DIR.resolve()
+        if not str(file_path).startswith(str(upload_dir_resolved)):
+            raise HTTPException(403, "Access denied")
         if not file_path.exists():
             raise HTTPException(404, "文件不存在")
+        if not file_path.is_file():
+            raise HTTPException(400, "Not a file")
         return FileResponse(file_path)
 
     # ═══════════════════════════════════════════
@@ -1163,6 +1243,36 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         @app.get("/api/shisi/status")
         async def shisi_status():
             return {"available": False, "error": shisi_error}
+
+    # ═══ LLM缓存统计API ═══
+    @app.get("/api/cache/stats")
+    async def cache_stats():
+        """获取LLM缓存统计信息"""
+        try:
+            from cache.llm_cache import LLMCache
+            cache = LLMCache()
+            return {
+                "available": cache.enabled,
+                "stats": cache.get_stats(),
+                "health": cache.health_check(),
+            }
+        except Exception as e:
+            return {"available": False, "error": str(e)}
+
+    @app.post("/api/cache/invalidate")
+    async def cache_invalidate(pattern: str = "*", _auth: bool = Security(_verify_api_key)):
+        """使LLM缓存失效"""
+        try:
+            from cache.llm_cache import LLMCache
+            cache = LLMCache()
+            if not cache.enabled:
+                raise HTTPException(503, "Cache not enabled")
+            deleted = cache.invalidate(pattern)
+            return {"status": "ok", "deleted_keys": deleted}
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, f"Cache invalidation failed: {e}")
 
     # ── 微信二维码 API ──
     try:

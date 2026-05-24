@@ -133,23 +133,31 @@ class CharacterAggregate(BaseModel):
         persona = PersonaProfile()
         if "personality_traits" in card_data:
             traits = card_data["personality_traits"]
-            persona.warmth = traits.get("warmth", 0.7)
-            persona.playfulness = traits.get("playfulness", 0.5)
-            persona.independence = traits.get("independence", 0.6)
-            persona.jealousy = traits.get("jealousy", 0.4)
-            persona.stubbornness = traits.get("stubbornness", 0.5)
+            persona = PersonaProfile(
+                warmth=traits.get("warmth", 0.7),
+                playfulness=traits.get("playfulness", 0.5),
+                independence=traits.get("independence", 0.6),
+                jealousy=traits.get("jealousy", 0.4),
+                stubbornness=traits.get("stubbornness", 0.5),
+            )
 
         if "core_anchors" in card_data:
             persona.core_anchors = card_data["core_anchors"]
         elif "personality" in data:
             persona.core_anchors = [data["personality"][:100]]
 
-        emotional_state = EmotionalState()
+        affinity_level = AffinityLevel.STRANGER
+        affection_points = 0.0
         if "affinity" in card_data:
             affinity_val = int(card_data["affinity"])
-            emotional_state.affinity_level = AffinityLevel(min(8, max(0, affinity_val)))
+            affinity_level = AffinityLevel(min(8, max(0, affinity_val)))
         if "affection_points" in card_data:
-            emotional_state.affection_points = float(card_data["affection_points"])
+            affection_points = max(0.0, float(card_data["affection_points"]))
+
+        emotional_state = EmotionalState(
+            affinity_level=affinity_level,
+            affection_points=affection_points,
+        )
 
         return cls(
             id=char_id,

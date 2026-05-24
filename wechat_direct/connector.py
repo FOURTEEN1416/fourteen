@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import base64
 import concurrent.futures
 import json
 import logging
@@ -187,6 +188,75 @@ def _send_text(to, text, context_token, token="", base_url=DEFAULT_BASE_URL):
     }, token=token, base_url=base_url)
 
 
+def _send_voice_message(to, audio_data_b64, duration_ms, context_token,
+                        token="", base_url=DEFAULT_BASE_URL, fmt="silk"):
+    """发语音消息 (message_type=34)"""
+    item = {
+        "type": 34,
+        "voice_item": {
+            "voice_data": audio_data_b64,
+            "duration": duration_ms,
+            "voice_format": fmt,
+        },
+    }
+    return _post_api("ilink/bot/sendmessage", {
+        "msg": {
+            "from_user_id": "",
+            "to_user_id": to,
+            "client_id": uuid.uuid4().hex[:16],
+            "message_type": 34,
+            "message_state": 2,
+            "item_list": [item],
+            "context_token": context_token,
+        }
+    }, token=token, base_url=base_url)
+
+
+def _send_image_message(to, image_data_b64, context_token,
+                        token="", base_url=DEFAULT_BASE_URL, image_type="png"):
+    """发图片消息 (message_type=3)"""
+    item = {
+        "type": 3,
+        "image_item": {
+            "image_data": image_data_b64,
+            "image_format": image_type,
+        },
+    }
+    return _post_api("ilink/bot/sendmessage", {
+        "msg": {
+            "from_user_id": "",
+            "to_user_id": to,
+            "client_id": uuid.uuid4().hex[:16],
+            "message_type": 3,
+            "message_state": 2,
+            "item_list": [item],
+            "context_token": context_token,
+        }
+    }, token=token, base_url=base_url)
+
+
+def _send_emoji_message(to, emoji_md5, context_token,
+                        token="", base_url=DEFAULT_BASE_URL):
+    """发表情消息 (message_type=47)"""
+    item = {
+        "type": 47,
+        "emoji_item": {
+            "md5": emoji_md5,
+        },
+    }
+    return _post_api("ilink/bot/sendmessage", {
+        "msg": {
+            "from_user_id": "",
+            "to_user_id": to,
+            "client_id": uuid.uuid4().hex[:16],
+            "message_type": 47,
+            "message_state": 2,
+            "item_list": [item],
+            "context_token": context_token,
+        }
+    }, token=token, base_url=base_url)
+
+
 # ═══════════════════════════════════════════════
 # 异步编排器调用（process_message 是 async 的）
 # ═══════════════════════════════════════════════
@@ -250,6 +320,68 @@ class WeChatConnector:
             return True
         except Exception as e:
             logger.warning("微信主动发送失败: %s", e)
+            return False
+
+    def send_voice(self, audio_bytes: bytes, to_user: str = "",
+                   duration_ms: int = 0, fmt: str = "silk") -> bool:
+        """发送语音消息"""
+        target = to_user or self._last_user_id
+        if not target or not self.token or not audio_bytes:
+            logger.warning("发送语音失败: 无目标用户或未登录或无音频数据")
+            return False
+        try:
+            audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+            context_token = self._context_tokens.get(target, "")
+            _send_voice_message(
+                to=target, audio_data_b64=audio_b64,
+                duration_ms=duration_ms, context_token=context_token,
+                token=self.token, base_url=self.base_url, fmt=fmt,
+            )
+            logger.info("语音发送成功: %d bytes, fmt=%s", len(audio_bytes), fmt)
+            return True
+        except Exception as e:
+            logger.warning("语音发送失败: %s", e)
+            return False
+
+    def send_image(self, image_bytes: bytes, to_user: str = "",
+                   image_type: str = "png") -> bool:
+        """发送图片消息"""
+        target = to_user or self._last_user_id
+        if not target or not self.token or not image_bytes:
+            logger.warning("发送图片失败: 无目标用户或未登录或无图片数据")
+            return False
+        try:
+            image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+            context_token = self._context_tokens.get(target, "")
+            _send_image_message(
+                to=target, image_data_b64=image_b64,
+                context_token=context_token,
+                token=self.token, base_url=self.base_url,
+                image_type=image_type,
+            )
+            logger.info("图片发送成功: %d bytes", len(image_bytes))
+            return True
+        except Exception as e:
+            logger.warning("图片发送失败: %s", e)
+            return False
+
+    def send_emoji(self, emoji_md5: str, to_user: str = "") -> bool:
+        """发送表情消息"""
+        target = to_user or self._last_user_id
+        if not target or not self.token or not emoji_md5:
+            logger.warning("发表情失败: 无目标用户或未登录或无表情数据")
+            return False
+        try:
+            context_token = self._context_tokens.get(target, "")
+            _send_emoji_message(
+                to=target, emoji_md5=emoji_md5,
+                context_token=context_token,
+                token=self.token, base_url=self.base_url,
+            )
+            logger.info("表情发送成功: md5=%s", emoji_md5)
+            return True
+        except Exception as e:
+            logger.warning("表情发送失败: %s", e)
             return False
 
     # ── 登录 ──
@@ -488,19 +620,26 @@ class WeChatConnector:
 
         items = raw_msg.get("item_list", [])
         text = ""
+        voice_data = ""
+        image_data = ""
         for item in items:
-            if item.get("type") == 1:
+            item_type = item.get("type", 0)
+            if item_type == 1:
                 text_item = item.get("text_item", {})
                 text = text_item.get("text", "")
-                break
+            elif item_type == 34:
+                voice_item = item.get("voice_item", {})
+                voice_data = voice_item.get("voice_data", "")
+            elif item_type == 3:
+                image_item = item.get("image_item", {})
+                image_data = image_item.get("image_data", "")
 
-        if not text:
+        if not text and not voice_data:
             return
 
         logger.info(f"微信消息: from={from_user} text={text[:50]}")
 
         try:
-            # 走女友管理器（多用户路由）
             result = _call_girlfriend_manager(self.girlfriend_manager, from_user, text)
             reply = result.get("reply", "")
             if reply:
@@ -511,6 +650,35 @@ class WeChatConnector:
                     token=self.token, base_url=self.base_url,
                 )
                 logger.info(f"回复已发送给 {from_user}: {reply[:50]}")
+
+            voice_result = result.get("voice")
+            if voice_result:
+                try:
+                    from voice.audio_converter import AudioFormatConverter
+                    converter = AudioFormatConverter()
+                    fmt = "silk"
+                    silk_audio = converter.to_silk(voice_result, "mp3")
+                    if silk_audio is None:
+                        fmt = "amr"
+                        silk_audio = converter.to_amr(voice_result, "mp3")
+                    if silk_audio:
+                        duration_ms = result.get("voice_duration_ms", 3000)
+                        self.send_voice(silk_audio, to_user=from_user,
+                                        duration_ms=duration_ms, fmt=fmt)
+                except Exception as e:
+                    logger.warning("语音发送降级失败: %s", e)
+
+            sticker_result = result.get("sticker")
+            if sticker_result:
+                try:
+                    sticker_path = sticker_result.get("path", "")
+                    if sticker_path:
+                        from pathlib import Path as _Path
+                        img_bytes = _Path(sticker_path).read_bytes()
+                        if img_bytes:
+                            self.send_image(img_bytes, to_user=from_user)
+                except Exception as e:
+                    logger.warning("表情包发送失败: %s", e)
         except Exception as e:
             logger.error(f"处理消息/发回复失败: {e}")
 

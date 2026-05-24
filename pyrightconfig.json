@@ -15,11 +15,9 @@
     "observability",
     "common",
     "clone_training",
-    "cowagent_adapter"
   ],
   "exclude": [
     "**/__pycache__",
-    "cowagent_src",
     "wechatmsg_src",
     "third_party",
     "data",

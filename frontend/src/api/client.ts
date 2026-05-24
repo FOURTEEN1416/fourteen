@@ -20,7 +20,25 @@ client.interceptors.response.use(
   (error) => {
     const status = error.response?.status
     const data = error.response?.data
-    const msg = data?.detail || data?.message || error.message || '请求失败'
+    const rawDetail = data?.detail
+    let detailStr = ''
+    if (typeof rawDetail === 'string') {
+      detailStr = rawDetail
+    } else if (Array.isArray(rawDetail)) {
+      detailStr = rawDetail
+        .map((e: any) => {
+          if (typeof e === 'string') return e
+          if (e?.msg) {
+            const loc = Array.isArray(e.loc) ? e.loc.join('.') : ''
+            return loc ? `${loc}: ${e.msg}` : e.msg
+          }
+          return String(e)
+        })
+        .join('; ')
+    } else if (rawDetail && typeof rawDetail === 'object') {
+      detailStr = JSON.stringify(rawDetail)
+    }
+    const msg = detailStr || data?.message || error.message || '请求失败'
 
     // Skip 401 for now (no auth yet)
     if (status === 401) return Promise.reject(error)

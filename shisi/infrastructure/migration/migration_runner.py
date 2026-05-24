@@ -80,8 +80,7 @@ def run(db_path: Path = Path("data/sqlite.db"), char_dir: Path = Path("data/char
             with open(file_path, "r", encoding="utf-8") as f:
                 file_data = json.load(f)
             char_id = file_path.stem
-            existing = new_repo.get_by_id(char_id)
-            if existing:
+            if char_id in migrated_ids:
                 continue
             file_data["character_id"] = char_id
             new_char = CharacterAggregate.from_legacy_card(file_data)

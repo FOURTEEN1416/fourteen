@@ -32,9 +32,13 @@ class CharacterManager:
         self._active_card: CharaCardV2 | None = None
         self._initialized = False
         self._state_migrator = None
+        self._on_switch_callback = None
 
     def set_state_migrator(self, migrator) -> None:
         self._state_migrator = migrator
+
+    def set_on_switch_callback(self, callback) -> None:
+        self._on_switch_callback = callback
 
     def get_active_schema(self):
         if self._active_card is None:
@@ -82,8 +86,9 @@ class CharacterManager:
         if old_id and self._state_migrator and migrate_strategy != "hard":
             try:
                 self._state_migrator.snapshot(old_id)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger("character_manager").warning("状态迁移快照失败: %s", e)
 
         active_id = self.store.set_active(character_id)
         if active_id is None:
@@ -106,6 +111,13 @@ class CharacterManager:
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         logger.info("角色切换: %s → %s (%.1fms) %s", old_id, character_id, elapsed_ms, migration_msg)
+
+        if self._on_switch_callback:
+            try:
+                self._on_switch_callback(self._active_card)
+            except Exception as e:
+                logger.warning("角色切换回调异常: %s", e)
+
         return True, f"已切换到: {card.data.name}{migration_msg}"
 
     def get_active(self) -> Optional[CharaCardV2]:

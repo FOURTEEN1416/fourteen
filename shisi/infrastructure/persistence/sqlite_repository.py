@@ -106,12 +106,16 @@ class SQLiteCharacterRepository:
     def set_active(self, character_id: str) -> bool:
         conn = self._connect()
         try:
+            conn.execute("UPDATE characters_v2 SET is_active = 0")
+            if not character_id:
+                conn.commit()
+                return True
             row = conn.execute(
                 "SELECT 1 FROM characters_v2 WHERE id = ?", (character_id,)
             ).fetchone()
             if not row:
+                conn.commit()
                 return False
-            conn.execute("UPDATE characters_v2 SET is_active = 0")
             conn.execute(
                 "UPDATE characters_v2 SET is_active = 1 WHERE id = ?",
                 (character_id,),

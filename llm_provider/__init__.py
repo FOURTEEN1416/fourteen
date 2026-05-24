@@ -35,16 +35,6 @@ def _resolve_provider(provider: Optional[str] = None) -> str:
 
 def _load_provider_from_config() -> Optional[str]:
     try:
-        import json
-        from pathlib import Path
-        cowagent_path = Path("config/cowagent_config.json")
-        if cowagent_path.exists():
-            with open(cowagent_path, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            return cfg.get("provider")
-    except Exception:
-        pass
-    try:
         from pathlib import Path
 
         import yaml

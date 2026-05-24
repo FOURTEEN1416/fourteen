@@ -46,11 +46,13 @@ export const shisiClient = {
   stickers: {
     list: (category?: string) => client.get(`${BASE}/stickers`, { params: { category } }).then(unwrap),
     delete: (id: string) => client.delete(`${BASE}/stickers/${id}`).then(unwrap),
-    // Backend: GET /api/shisi/stickers/recommend (expects body data)
-    recommend: (emotionTags: string[], limit = 5) => client.request({ method: 'GET', url: `${BASE}/stickers/recommend`, data: { emotion_tags: emotionTags, limit } }).then(unwrap),
+    // Backend: POST /api/shisi/stickers/recommend
+    recommend: (emotionTags: string[], limit = 5) => client.post(`${BASE}/stickers/recommend`, { emotion_tags: emotionTags, limit }).then(unwrap),
     // Backend: POST /api/shisi/stickers/import (multipart)
     importZip: (formData: FormData) => client.post(`${BASE}/stickers/import`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(unwrap),
     upload: (formData: FormData) => client.post(`${BASE}/stickers/import`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(unwrap),
+    // Backend: PUT /api/shisi/stickers/characters/{character_id}/stickers
+    bindToCharacter: (characterId: string, stickerIds: string[], unlockThreshold = 0) => client.put(`${BASE}/stickers/characters/${characterId}/stickers`, { sticker_ids: stickerIds, unlock_threshold: unlockThreshold }).then(unwrap),
   },
   memory: {
     // Backend: GET /api/shisi/memory/favorites?character_id=...
@@ -68,5 +70,20 @@ export const shisiClient = {
     get: (cid: string) => client.get(`${BASE}/persona/characters/${cid}`).then(unwrap),
     update: (cid: string, fields: Record<string, unknown>) => client.put(`${BASE}/persona/characters/${cid}`, { card: fields }).then(unwrap),
     preview: (cid: string) => client.get(`${BASE}/persona/characters/${cid}/preview`).then(unwrap),
+  },
+  voiceTraining: {
+    // Backend: POST /api/shisi/voice/training/upload (multipart)
+    upload: (files: File[], modelName = 'default') => {
+      const fd = new FormData()
+      files.forEach(f => fd.append('files', f))
+      fd.append('model_name', modelName)
+      return client.post(`${BASE}/voice/training/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(unwrap)
+    },
+    // Backend: POST /api/shisi/voice/training/preprocess
+    preprocess: (modelName: string) => client.post(`${BASE}/voice/training/preprocess`, { model_name: modelName }).then(unwrap),
+    // Backend: POST /api/shisi/voice/training/train
+    train: (modelName: string, epochs = 8, batchSize = 4) => client.post(`${BASE}/voice/training/train`, { model_name: modelName, epochs, batch_size: batchSize }).then(unwrap),
+    // Backend: GET /api/shisi/voice/training/status
+    status: () => client.get(`${BASE}/voice/training/status`).then(unwrap),
   },
 }

@@ -78,14 +78,28 @@ class ToolRegistry:
     def tool_names(self) -> List[str]:
         return list(self._tools.keys())
 
+    def health_check_all(self) -> Dict[str, Dict[str, Any]]:
+        results = {}
+        for name, tool in self._tools.items():
+            status = {"available": True, "error": ""}
+            if hasattr(tool, "_plugin") and getattr(tool, "_plugin", None) is None:
+                status = {"available": False, "error": "plugin not loaded"}
+            elif hasattr(tool, "_sm") and getattr(tool, "_sm", None) is None:
+                status = {"available": False, "error": "memory system not initialized"}
+            results[name] = status
+        return results
+
 
 class ToolDispatcher:
     def __init__(self, registry: ToolRegistry, timeout: float = 10.0,
-                 rate_limit_per_minute: int = 3):
+                 rate_limit_per_minute: int = 3,
+                 retry_count: int = 1, retry_tools: set | None = None):
         self.registry = registry
         self.timeout = timeout
         self.rate_limit = rate_limit_per_minute
         self._call_times: Dict[str, List[float]] = {}
+        self.retry_count = retry_count
+        self.retry_tools = retry_tools or {"web_search", "get_weather"}
 
     def dispatch(self, tool_name: str, arguments: Dict[str, Any],
                  affinity_level: int = 0, trace_id: str = "") -> ToolResult:
@@ -110,6 +124,8 @@ class ToolDispatcher:
             duration_ms = (time.perf_counter() - start) * 1000
             from observability.metrics import record_tool_call
             record_tool_call(tool_name, duration_ms / 1000, False)
+            if tool_name in self.retry_tools and self.retry_count > 0:
+                return self._execute_with_retry(tool, arguments, tool_name)
             return ToolResult(False, error=str(e))
 
     def _check_permission(self, tool: BaseTool, affinity: int) -> bool:
@@ -126,3 +142,15 @@ class ToolDispatcher:
             return False
         times.append(now)
         return True
+
+    def _execute_with_retry(self, tool: BaseTool, arguments: Dict[str, Any],
+                            tool_name: str) -> ToolResult:
+        for attempt in range(self.retry_count):
+            time.sleep(0.5 * (attempt + 1))
+            try:
+                result = tool.execute(**arguments)
+                if result.success:
+                    return result
+            except Exception as e:
+                logger.warning("工具重试 %s (%d/%d) 失败: %s", tool_name, attempt + 1, self.retry_count, e)
+        return ToolResult(False, error=f"Tool {tool_name} failed after {self.retry_count} retries")

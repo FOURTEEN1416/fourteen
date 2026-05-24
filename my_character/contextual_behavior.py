@@ -13,6 +13,68 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("contextual_behavior")
 
+# AST 安全求值支持
+_AST_OPS = {
+    ast.Add: lambda a, b: a + b,
+    ast.Sub: lambda a, b: a - b,
+    ast.Mult: lambda a, b: a * b,
+    ast.Div: lambda a, b: a / b,
+    ast.Eq: lambda a, b: a == b,
+    ast.NotEq: lambda a, b: a != b,
+    ast.Lt: lambda a, b: a < b,
+    ast.LtE: lambda a, b: a <= b,
+    ast.Gt: lambda a, b: a > b,
+    ast.GtE: lambda a, b: a >= b,
+    ast.And: lambda a, b: a and b,
+    ast.Or: lambda a, b: a or b,
+    ast.Not: lambda a: not a,
+    ast.USub: lambda a: -a,
+    ast.UAdd: lambda a: +a,
+}
+
+
+def _safe_eval_ast(node: ast.AST, ctx: Dict[str, Any]) -> Any:
+    """使用 AST 节点遍历安全求值，替代 eval()"""
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id in ctx:
+            return ctx[node.id]
+        raise NameError(f"Undefined variable: {node.id}")
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _AST_OPS:
+        return _AST_OPS[type(node.op)](_safe_eval_ast(node.operand, ctx))
+    if isinstance(node, ast.BinOp) and type(node.op) in _AST_OPS:
+        return _AST_OPS[type(node.op)](
+            _safe_eval_ast(node.left, ctx), _safe_eval_ast(node.right, ctx)
+        )
+    if isinstance(node, ast.Compare):
+        left = _safe_eval_ast(node.left, ctx)
+        for op, comp in zip(node.ops, node.comparators):
+            if type(op) in _AST_OPS:
+                left = _AST_OPS[type(op)](left, _safe_eval_ast(comp, ctx))
+            else:
+                raise ValueError(f"Unsupported comparison: {ast.dump(op)}")
+        return left
+    if isinstance(node, ast.BoolOp):
+        # 短路求值：and/or 应该逐个求值，遇到确定结果立即停止
+        if isinstance(node.op, ast.And):
+            result = _safe_eval_ast(node.values[0], ctx)
+            for val_node in node.values[1:]:
+                if not result:  # 短路：遇到 False 立即停止
+                    return result
+                result = result and _safe_eval_ast(val_node, ctx)
+            return result
+        elif isinstance(node.op, ast.Or):
+            result = _safe_eval_ast(node.values[0], ctx)
+            for val_node in node.values[1:]:
+                if result:  # 短路：遇到 True 立即停止
+                    return result
+                result = result or _safe_eval_ast(val_node, ctx)
+            return result
+        else:
+            raise ValueError(f"Unsupported boolean operator: {ast.dump(node.op)}")
+    raise ValueError(f"Unsupported AST node: {ast.dump(node)}")
+
 
 @dataclass
 class BehaviorRule:
@@ -27,13 +89,20 @@ class BehaviorRule:
 
     def evaluate(self, context_vars: Dict[str, Any]) -> bool:
         import ast
+        import operator
+
         try:
             tree = ast.parse(self.condition, mode="eval")
             for node in ast.walk(tree):
                 if isinstance(node, ast.Name) and node.id not in self._ALLOWED_NAMES:
                     logger.warning("BehaviorRule condition blocked unsafe name: %s", node.id)
                     return False
-            return bool(eval(self.condition, {"__builtins__": {}}, context_vars))
+                # 阻止所有函数调用和属性访问
+                if isinstance(node, (ast.Call, ast.Attribute)):
+                    logger.warning("BehaviorRule condition blocked unsafe operation: %s", ast.dump(node))
+                    return False
+            # 使用 AST 安全求值替代 eval
+            return _safe_eval_ast(tree.body, context_vars)
         except Exception:
             return False
 

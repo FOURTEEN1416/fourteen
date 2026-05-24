@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
@@ -37,7 +38,7 @@ class WeatherPlugin:
     """
 
     def __init__(self, api_key: str = "", city: str = "Shanghai"):
-        self.api_key = api_key
+        self.api_key = api_key or os.environ.get("OPENWEATHERMAP_API_KEY", "")
         self.city = city
         self._cache: Optional[Dict[str, Any]] = None
         self._cache_time: Optional[datetime] = None
