@@ -31,6 +31,19 @@ class CharacterManager:
         self._active_id: str | None = None
         self._active_card: CharaCardV2 | None = None
         self._initialized = False
+        self._state_migrator = None
+
+    def set_state_migrator(self, migrator) -> None:
+        self._state_migrator = migrator
+
+    def get_active_schema(self):
+        if self._active_card is None:
+            return None
+        try:
+            from my_character.persona_schema import PersonaSchema
+            return PersonaSchema.from_chara_card(self._active_card)
+        except Exception:
+            return None
 
     def initialize(self) -> None:
         if self._initialized:
@@ -58,23 +71,42 @@ class CharacterManager:
 
         return card
 
-    def switch_character(self, character_id: str) -> tuple[bool, str]:
+    def switch_character(self, character_id: str, migrate_strategy: str = "soft") -> tuple[bool, str]:
         start = time.perf_counter()
         card = self.load_character(character_id)
         if card is None:
             return False, f"角色不存在: {character_id}"
 
         old_id = self._active_id
+
+        if old_id and self._state_migrator and migrate_strategy != "hard":
+            try:
+                self._state_migrator.snapshot(old_id)
+            except Exception:
+                pass
+
         active_id = self.store.set_active(character_id)
         if active_id is None:
             return False, f"设置活跃角色失败: {character_id}"
 
         self._active_id = character_id
         self._active_card = card
+
+        migration_msg = ""
+        if old_id and self._state_migrator:
+            try:
+                result = self._state_migrator.migrate(old_id, character_id, migrate_strategy)
+                if result.success:
+                    migration_msg = "（已迁移状态）"
+                else:
+                    migration_msg = f"（迁移失败: {result.error}）"
+            except Exception as e:
+                migration_msg = f"（迁移异常: {e}）"
+
         elapsed_ms = (time.perf_counter() - start) * 1000
 
-        logger.info("角色切换: %s → %s (%.1fms)", old_id, character_id, elapsed_ms)
-        return True, f"已切换到: {card.data.name}"
+        logger.info("角色切换: %s → %s (%.1fms) %s", old_id, character_id, elapsed_ms, migration_msg)
+        return True, f"已切换到: {card.data.name}{migration_msg}"
 
     def get_active(self) -> Optional[CharaCardV2]:
         return self._active_card
