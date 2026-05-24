@@ -105,6 +105,24 @@ _MIGRATIONS: list[str] = [
     """CREATE INDEX IF NOT EXISTS idx_stickers_category ON stickers(category)""",
     """CREATE INDEX IF NOT EXISTS idx_memory_fav_cid ON memory_favorites(character_id)""",
     """CREATE INDEX IF NOT EXISTS idx_memory_recycle_cid ON memory_recycle_bin(character_id)""",
+    """CREATE TABLE IF NOT EXISTS characters_v2 (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        avatar_url TEXT,
+        tags TEXT DEFAULT '[]',
+        persona_json TEXT NOT NULL,
+        emotional_state_json TEXT NOT NULL,
+        is_active INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        version INTEGER DEFAULT 1,
+        source_format TEXT DEFAULT 'chara_card_v2',
+        source_data_json TEXT
+    )""",
+    """CREATE INDEX IF NOT EXISTS idx_chars_v2_active ON characters_v2(is_active)""",
+    """CREATE INDEX IF NOT EXISTS idx_chars_v2_updated ON characters_v2(updated_at DESC)""",
+    """CREATE INDEX IF NOT EXISTS idx_chars_v2_name ON characters_v2(name)""",
 ]
 
 
@@ -113,7 +131,7 @@ def get_table_names() -> list[str]:
         "characters", "affinity_records", "affinity_unlocks", "affinity_audit",
         "emotion_stage_state", "stickers", "character_stickers",
         "vital_signs_state", "memory_favorites", "memory_recycle_bin",
-        "shisi_schema_version",
+        "shisi_schema_version", "characters_v2",
     ]
 
 

@@ -1,4 +1,7 @@
-"""角色数据模型 — Pydantic V2模型，兼容chara_card_v2/V3与十四APP prompts格式。"""
+"""角色数据模型 — Pydantic V2模型，兼容chara_card_v2/V3与十四APP prompts格式。
+
+@deprecated 此模块已弃用，请使用 shisi.core.models.character_aggregate.CharacterAggregate
+"""
 
 from __future__ import annotations
 

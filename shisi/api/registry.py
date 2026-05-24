@@ -47,6 +47,7 @@ class AiyuRegistry:
     wechat_handler: WeChatCommandHandler | None = None
     proactive_messenger: WeChatProactiveMessenger | None = None
     training_manager: Any | None = None
+    character_service: Any | None = None
 
 
 def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True) -> AiyuRegistry:
@@ -86,6 +87,7 @@ def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True) -> AiyuReg
 
     if app is not None:
         _mount_routes(app, reg)
+        _mount_v2_routes(app, reg)
 
     logger.info("十四模块初始化完成")
     return reg
@@ -113,3 +115,14 @@ def _mount_routes(app: FastAPI, reg: AiyuRegistry) -> None:
     app.include_router(training_routes.router)
 
     logger.info("十四API路由挂载完成")
+
+
+def _mount_v2_routes(app: FastAPI, reg: AiyuRegistry) -> None:
+    from ..application.character_service import CharacterService
+    from ..infrastructure.persistence.sqlite_repository import SQLiteCharacterRepository
+    from .v2 import v2_router
+
+    repo = SQLiteCharacterRepository()
+    reg.character_service = CharacterService(repo)
+    app.include_router(v2_router)
+    logger.info("十四API v2路由挂载完成")
