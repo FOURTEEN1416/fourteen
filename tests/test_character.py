@@ -1,5 +1,8 @@
 """角色管理 + 导入导出 + 校验 单元测试。"""
 
+import sys
+sys.path.insert(0, ".")
+
 import json
 
 import pytest
