@@ -4,6 +4,9 @@ import logging
 
 logger = logging.getLogger("health_check")
 
+_HEALTH_OK_KEYS = {"base_prompt_cached", "evolution_count", "original_anchors",
+                   "anchor_integrity", "chromadb", "prompt_mode"}
+
 
 def _is_healthy(result) -> bool:
     if isinstance(result, bool):
@@ -13,8 +16,13 @@ def _is_healthy(result) -> bool:
             return bool(result["healthy"])
         if "status" in result:
             return result["status"] in ("healthy", "ok", True)
-        if any(v is False for v in result.values() if isinstance(v, bool)):
-            logger.warning("Health check dict has False values but no explicit healthy/status key")
+        non_ok = any(v is False for k, v in result.items()
+                     if isinstance(v, bool) and k not in _HEALTH_OK_KEYS)
+        if non_ok:
+            logger.warning("Health check dict has False values: %s",
+                           {k: v for k, v in result.items() if v is False})
+            return False
+        if result.get("error"):
             return False
         return True
     return True

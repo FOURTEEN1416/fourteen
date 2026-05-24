@@ -35,6 +35,8 @@ from typing import Any, Dict, Optional
 project_root = Path(__file__).parent.absolute()
 sys.path.insert(0, str(project_root))
 
+from common.health_check import health_check_all
+
 
 # ── 加载 .env（手动解析，无需 python-dotenv 依赖） ──
 _env_loaded = False
@@ -687,57 +689,6 @@ def run_clone_pipeline(args: argparse.Namespace) -> None:
         print(f"  LoRA 模型: {result['lora_path']}")
     print(f"  ToneMimic 注入: {result.get('injected_to_tone_mimic', 0)} 条")
     print()
-
-
-# 健康检查中不视为"失败"的字段名
-_HEALTH_OK_KEYS = {"base_prompt_cached", "evolution_count", "original_anchors",
-                   "anchor_integrity", "chromadb", "prompt_mode"}
-
-
-def _is_healthy(result) -> bool:
-    if isinstance(result, bool):
-        return result
-    if isinstance(result, dict):
-        if "healthy" in result:
-            return bool(result["healthy"])
-        if "status" in result:
-            return result["status"] in ("healthy", "ok", True)
-        # 忽略非关键字段，只看核心运行状态字段
-        non_ok = any(v is False for k, v in result.items()
-                     if isinstance(v, bool) and k not in _HEALTH_OK_KEYS)
-        if non_ok:
-            logger.warning("Health check dict has False values: %s",
-                           {k: v for k, v in result.items() if v is False})
-            return False
-        # 检查是否有 error 字段
-        if result.get("error"):
-            return False
-        return True
-    return True
-
-
-def health_check_all(components: dict) -> bool:
-    all_ok = True
-    print("\n[健康检查]")
-    for name, component in components.items():
-        if hasattr(component, "health_check"):
-            try:
-                status = component.health_check()
-                ok = _is_healthy(status)
-                print(f"  {'[OK]' if ok else '[FAIL]'} {name}")
-                if not ok:
-                    logger.warning("%s health check failed: %s", name, status)
-                    all_ok = False
-            except Exception as e:
-                print(f"  [FAIL] {name} (error: {e})")
-                all_ok = False
-        else:
-            print(f"  [OK] {name}")
-    if all_ok:
-        print("\n  [OK] 全部通过\n")
-    else:
-        print("\n  [WARN] 部分组件异常\n")
-    return all_ok
 
 
 def run_console_chat(orchestrator_or_obj, orchestrator_mode: str,

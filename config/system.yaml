@@ -9,6 +9,8 @@ llm:
   stream_enabled: true
   first_token_timeout: 5.0
   retry_count: 0
+  opencode_zen_api_base: "https://opencode.ai/zen/v1"
+  opencode_zen_default_model: "big-pickle"
   models_priority:
     - name: deepseek-chat
       priority: 1

@@ -129,11 +129,11 @@ def _register_bot_type():
 
     def patched_create_bot(bot_type):
         if bot_type == BOT_TYPE:
-            from cowagent_adapter._globals import _girlfriend_bot_instance
-            if _girlfriend_bot_instance is not None:
-                return _girlfriend_bot_instance
-            logger.warning("GirlfriendBot 全局引用未设置，返回占位实例")
-            # 创建占位实例（main.py 会在初始化后设置全局引用）
+            from cowagent_adapter._globals import bot_registry
+            instance = bot_registry.get()
+            if instance is not None:
+                return instance
+            logger.warning("BotRegistry 中无注册实例，返回占位实例")
             from cowagent_adapter.girlfriend_bot import GirlfriendBot
             return GirlfriendBot(None, None, None, None, None)
         return original_create(bot_type)

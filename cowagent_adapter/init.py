@@ -299,9 +299,6 @@ def initialize_wechat_channel(
 
         # ── Step 2: 注册到 bot_registry ──
         bot_registry.register(adapter)
-        # 兼容 GirlfriendBot 全局引用（patch.py 会检查这个）
-        from cowagent_adapter._globals import _girlfriend_bot_instance
-        _girlfriend_bot_instance = adapter  # noqa: F811
 
         logger.info("编排器已注册到 bot_registry")
 
@@ -392,8 +389,6 @@ def register_standalone(
         result["adapter"] = adapter
 
         bot_registry.register(adapter)
-        from cowagent_adapter._globals import _girlfriend_bot_instance
-        _girlfriend_bot_instance = adapter  # noqa: F811
 
         if enable_heartbeat:
             hb_mgr = _HeartbeatManager()
