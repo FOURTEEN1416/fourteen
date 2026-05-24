@@ -7,7 +7,7 @@ import logging
 import re
 from pathlib import Path
 
-from .chara_card_v2 import ParserDispatcher
+from .character_card_v2 import ParserDispatcher
 from .models import CardFormat, CharaCardV2, ImportResult
 from .validator import validate_card
 

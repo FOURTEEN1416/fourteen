@@ -17,7 +17,7 @@ from .models import (
     WorldInfoEntry,
 )
 
-logger = logging.getLogger("shisi.character.chara_card_v2")
+logger = logging.getLogger("shisi.character.character_card_v2")
 
 
 class CharaCardV2Parser:

@@ -28,7 +28,7 @@ if str(_cowagent_src) not in sys.path:
     sys.path.insert(0, str(_cowagent_src))
 
 from .girlfriend_bot import GirlfriendBot  # noqa: E402
-from .init import initialize_wechat_channel, register_standalone  # noqa: E402
+from .wechat_launcher import initialize_wechat_channel, register_standalone  # noqa: E402
 from .patch import patch_cowagent, start_cowagent  # noqa: E402
 
 __all__ = [

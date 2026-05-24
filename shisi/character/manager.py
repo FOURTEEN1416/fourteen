@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..config import get_config
-from .chara_card_v2 import ParserDispatcher, to_persona_config
+from .character_card_v2 import ParserDispatcher, to_persona_config
 from .exporter import PersonaExporter
 from .importer import PersonaImporter
 from .models import CardFormat, CharaCardV2, CharacterState, ImportResult

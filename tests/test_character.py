@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from shisi.character.chara_card_v2 import (
+from shisi.character.character_card_v2 import (
     ParserDispatcher,
     to_persona_config,
 )

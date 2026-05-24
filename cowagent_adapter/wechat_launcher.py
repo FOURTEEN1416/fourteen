@@ -5,7 +5,7 @@ cowagent_adapter 统一初始化入口
 提供清晰的「启动微信通道」API，同时不破坏已有的直接调用方式。
 
 用法:
-    from cowagent_adapter.init import initialize_wechat_channel
+    from cowagent_adapter.wechat_launcher import initialize_wechat_channel
 
     # 在 main.py 中:
     status = initialize_wechat_channel(
@@ -23,7 +23,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from cowagent_adapter._globals import bot_registry
+from cowagent_adapter.shared_state import bot_registry
 
 logger = logging.getLogger("cowagent.init")
 

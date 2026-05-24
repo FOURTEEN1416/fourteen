@@ -1012,7 +1012,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
 
     logger.info("[4/12] 初始化LLM网关V2...")
     from llm_provider import get_llm
-    from llm_provider.prompt_template_mgr import PromptTemplateMgr
+    from llm_provider.prompt_template_manager import PromptTemplateMgr
 
     llm = get_llm(models_config=cfg.llm.models_priority)
     PromptTemplateMgr()
