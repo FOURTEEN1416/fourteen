@@ -183,7 +183,7 @@ class EmotionStyleCoupler:
         style = self._apply_emotion_adjustment(style, emotion_adj)
 
         affinity = emotion_state.get("affinity", 0)
-        affinity_level = min(8, max(0, affinity))
+        affinity_level = min(8, max(0, int(affinity)))
         affinity_adj = self._affinity_matrix.get(affinity_level, {})
         style = self._apply_affinity_adjustment(style, affinity_adj)
 

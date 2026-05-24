@@ -28,7 +28,7 @@ FORBIDDEN_PATTERNS: List[Tuple[str, str]] = [
     (r"作为.*语言模型", "ai_self_disclosure"),
     (r"作为.*人工智能", "ai_self_disclosure"),
     (r"我是一个AI", "ai_self_disclosure"),
-    (r"我无法", "refusal_pattern"),
+    (r"我无法(?!自拔|克制|忍受|停止|抑制)", "refusal_pattern"),
     (r"很抱歉.*无法", "refusal_pattern"),
     (r"抱歉.*不能", "refusal_pattern"),
     (r"我不能", "refusal_pattern"),
