@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import FastAPI
 
@@ -45,6 +46,7 @@ class AiyuRegistry:
     analytics_service: AnalyticsService | None = None
     wechat_handler: WeChatCommandHandler | None = None
     proactive_messenger: WeChatProactiveMessenger | None = None
+    training_manager: Any | None = None
 
 
 def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True) -> AiyuRegistry:
@@ -66,7 +68,7 @@ def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True) -> AiyuReg
     reg.analytics_service = AnalyticsService()
 
     from voice.voice_training import VoiceTrainingManager
-    _training_mgr = VoiceTrainingManager()
+    reg.training_manager = VoiceTrainingManager()
 
     reg.wechat_handler = WeChatCommandHandler(
         character_manager=reg.character_manager,
@@ -98,7 +100,7 @@ def _mount_routes(app: FastAPI, reg: AiyuRegistry) -> None:
     vital_routes.set_engine(reg.vital_engine)  # type: ignore
     persona_routes.set_manager(reg.character_manager)  # type: ignore
     stats_routes.set_service(reg.analytics_service)  # type: ignore
-    training_routes.set_manager(_training_mgr)  # type: ignore
+    training_routes.set_manager(reg.training_manager)  # type: ignore
 
     app.include_router(character_routes.router)
     app.include_router(sticker_routes.router)
