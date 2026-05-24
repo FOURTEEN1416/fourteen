@@ -65,7 +65,7 @@ class EmotionMemorySystem:
     ) -> None:
         event = EmotionEvent(
             emotion=emotion,
-            intensity=intensity,
+            intensity=max(0.0, min(1.0, intensity)),
             trigger=trigger,
             user_message=user_message[:100],
             timestamp=time_mod.time(),

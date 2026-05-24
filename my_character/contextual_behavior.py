@@ -20,8 +20,19 @@ class BehaviorRule:
     modifiers: List[str]
     priority: int = 5
 
+    _ALLOWED_NAMES = frozenset({
+        "time_period", "energy", "affinity", "is_weekend", "is_holiday",
+        "True", "False", "None",
+    })
+
     def evaluate(self, context_vars: Dict[str, Any]) -> bool:
+        import ast
         try:
+            tree = ast.parse(self.condition, mode="eval")
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Name) and node.id not in self._ALLOWED_NAMES:
+                    logger.warning("BehaviorRule condition blocked unsafe name: %s", node.id)
+                    return False
             return bool(eval(self.condition, {"__builtins__": {}}, context_vars))
         except Exception:
             return False

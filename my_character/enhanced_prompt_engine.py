@@ -119,7 +119,6 @@ class EnhancedPromptEngine:
         self._contextual = contextual_behavior
         self._anchors = dynamic_anchors
         self._validator = constraint_validator
-        self._layer_cache: Dict[str, str] = {}
 
     def build_prompt(self, context: PromptContext) -> str:
         layers = [
