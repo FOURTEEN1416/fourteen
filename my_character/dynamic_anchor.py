@@ -121,7 +121,7 @@ class DynamicAnchorSystem:
     def __init__(
         self,
         base_anchors: Optional[List[str]] = None,
-        anchor_config: Optional[Any] = None,
+        anchor_config: Optional[Dict] = None,
         dynamic_anchors: Optional[List[DynamicAnchor]] = None,
     ):
         self._base_anchors = base_anchors or []

@@ -11,14 +11,19 @@ from __future__ import annotations
 import logging
 import time as time_mod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from my_character.emotion_engine import CompoundEmotionalState, EmotionEngine
+    from my_character.emotion_memory import EmotionMemorySystem
+    from my_character.persona_engine import PersonaEngine
 
 logger = logging.getLogger("evolution_engine")
 
 
 @dataclass
 class EvolutionContext:
-    emotion_state: Optional[Any] = None
+    emotion_state: Optional[CompoundEmotionalState] = None
     recent_emotion_events: List[Any] = field(default_factory=list)
     chat_round: int = 0
     affinity_change: int = 0
@@ -58,10 +63,10 @@ class PersonaEvolutionEngine:
 
     def __init__(
         self,
-        persona_engine: Optional[Any] = None,
-        emotion_engine: Optional[Any] = None,
-        emotion_memory: Optional[Any] = None,
-        evolution_config: Optional[Any] = None,
+        persona_engine: Optional[PersonaEngine] = None,
+        emotion_engine: Optional[EmotionEngine] = None,
+        emotion_memory: Optional[EmotionMemorySystem] = None,
+        evolution_config: Optional[Dict] = None,
     ):
         self._persona = persona_engine
         self._emotion = emotion_engine
@@ -71,11 +76,19 @@ class PersonaEvolutionEngine:
         self._last_evolution_time: float = 0.0
         self._evolution_history: List[EvolutionResult] = []
 
-    def set_engines(self, persona_engine: Any, emotion_engine: Any) -> None:
+    def set_engines(self, persona_engine: PersonaEngine, emotion_engine: EmotionEngine) -> None:
         self._persona = persona_engine
         self._emotion = emotion_engine
 
     def check_and_evolve(self, context: EvolutionContext) -> Optional[EvolutionResult]:
+        """检查是否满足自动演化条件，满足则执行单维度演化
+
+        Args:
+            context: 演化上下文（含emotion_state/chat_round/affinity_change等）
+
+        Returns:
+            EvolutionResult（触发时）或 None（冷却中/无条件满足时）
+        """
         if not self._can_evolve():
             return None
 

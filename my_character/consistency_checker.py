@@ -9,15 +9,21 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from my_character.emotion_engine import CompoundEmotionalState
+    from my_character.emotion_style_coupler import CoupledStyle, EmotionStyleCoupler
+    from my_character.dynamic_anchor import DynamicAnchorSystem
+    from my_character.persona_schema import PersonaSchema
 
 logger = logging.getLogger("consistency_checker")
 
 
 @dataclass
 class ConsistencyContext:
-    emotion_state: Optional[Any] = None
-    coupled_style: Optional[Any] = None
+    emotion_state: Optional[CompoundEmotionalState] = None
+    coupled_style: Optional[CoupledStyle] = None
     chat_round: int = 0
     affinity: int = 0
 
@@ -51,15 +57,24 @@ class PersonaConsistencyChecker:
 
     def __init__(
         self,
-        schema: Optional[Any] = None,
-        dynamic_anchors: Optional[Any] = None,
-        style_coupler: Optional[Any] = None,
+        schema: Optional[PersonaSchema] = None,
+        dynamic_anchors: Optional[DynamicAnchorSystem] = None,
+        style_coupler: Optional[EmotionStyleCoupler] = None,
     ):
         self._schema = schema
         self._anchors = dynamic_anchors
         self._style_coupler = style_coupler
 
     def check(self, response: str, context: ConsistencyContext) -> ConsistencyResult:
+        """对AI回复执行4维度一致性校验
+
+        Args:
+            response: AI生成的回复文本
+            context: 一致性校验上下文（含emotion_state/coupled_style等）
+
+        Returns:
+            ConsistencyResult 含 overall_passed/overall_score/dimensions/correction_prompt
+        """
         results = {}
         results["anchor"] = self._check_anchor_consistency(response, context)
         results["emotion"] = self._check_emotion_consistency(response, context)
@@ -201,6 +216,14 @@ class PersonaConsistencyChecker:
         )
 
     def suggest_correction(self, dimensions: Dict[str, DimensionResult]) -> str:
+        """根据失败维度生成修正提示词
+
+        Args:
+            dimensions: 各维度检测结果映射
+
+        Returns:
+            多行修正建议文本，各维度以[dim_name]前缀标识
+        """
         parts = []
         for dim_name, result in dimensions.items():
             if not result.passed:
@@ -210,27 +233,14 @@ class PersonaConsistencyChecker:
 
     def _build_anchor_context(self, context: ConsistencyContext) -> Any:
         try:
-            from my_character.dynamic_anchor import AnchorContext
+            from my_character.persona_utils import build_anchor_context
         except ImportError:
             return None
 
-        affinity = context.affinity
-        emotion_type = "平常"
-        energy = 1.0
-
-        if context.emotion_state:
-            if hasattr(context.emotion_state, "affinity"):
-                affinity = context.emotion_state.affinity
-            if hasattr(context.emotion_state, "primary_emotion"):
-                emotion_type = context.emotion_state.primary_emotion.value
-            if hasattr(context.emotion_state, "energy"):
-                energy = context.emotion_state.energy
-
-        return AnchorContext(
-            affinity=affinity,
-            energy=energy,
-            emotion_type=emotion_type,
+        return build_anchor_context(
+            emotion_state=context.emotion_state,
             chat_round=context.chat_round,
+            affinity_override=context.affinity if context.affinity != 0 else None,
         )
 
     def health_check(self) -> dict:

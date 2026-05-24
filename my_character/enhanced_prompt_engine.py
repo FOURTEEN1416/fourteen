@@ -10,7 +10,15 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from my_character.emotion_engine import CompoundEmotionalState
+    from my_character.emotion_style_coupler import EmotionStyleCoupler
+    from my_character.style_enhancer_v2 import StyleEnhancerV2
+    from my_character.contextual_behavior import ContextualBehavior
+    from my_character.dynamic_anchor import DynamicAnchorSystem
+    from my_character.persona_engine import PersonaEngine
 
 logger = logging.getLogger("enhanced_prompt_engine")
 
@@ -47,7 +55,7 @@ class TimeContext:
 
 @dataclass
 class PromptContext:
-    emotion_state: Optional[Any] = None
+    emotion_state: Optional[CompoundEmotionalState] = None
     memory_context: Optional[Dict] = None
     chat_history: str = ""
     chat_summary: str = ""
@@ -69,22 +77,19 @@ class PromptContext:
 
     @property
     def anchor_context(self) -> Any:
+        try:
+            from my_character.persona_utils import build_anchor_context
+            result = build_anchor_context(
+                emotion_state=self.emotion_state,
+                chat_round=self.chat_round,
+            )
+            if result is not None:
+                return result
+        except ImportError:
+            pass
         from my_character.dynamic_anchor import AnchorContext
-        affinity = 0
-        emotion_type = "平常"
-        energy = 1.0
-        if self.emotion_state:
-            if hasattr(self.emotion_state, "affinity"):
-                affinity = self.emotion_state.affinity
-            if hasattr(self.emotion_state, "primary_emotion"):
-                emotion_type = self.emotion_state.primary_emotion.value
-            if hasattr(self.emotion_state, "energy"):
-                energy = self.emotion_state.energy
         return AnchorContext(
-            affinity=affinity,
-            energy=energy,
-            emotion_type=emotion_type,
-            chat_round=self.chat_round,
+            affinity=0, energy=1.0, emotion_type="平常", chat_round=self.chat_round,
         )
 
 
@@ -106,11 +111,11 @@ class EnhancedPromptEngine:
 
     def __init__(
         self,
-        persona_engine: Optional[Any] = None,
-        style_coupler: Optional[Any] = None,
-        style_enhancer: Optional[Any] = None,
-        contextual_behavior: Optional[Any] = None,
-        dynamic_anchors: Optional[Any] = None,
+        persona_engine: Optional[PersonaEngine] = None,
+        style_coupler: Optional[EmotionStyleCoupler] = None,
+        style_enhancer: Optional[StyleEnhancerV2] = None,
+        contextual_behavior: Optional[ContextualBehavior] = None,
+        dynamic_anchors: Optional[DynamicAnchorSystem] = None,
         constraint_validator: Optional[Any] = None,
     ):
         self._persona = persona_engine
@@ -121,6 +126,14 @@ class EnhancedPromptEngine:
         self._validator = constraint_validator
 
     def build_prompt(self, context: PromptContext) -> str:
+        """构建6层架构的完整提示词
+
+        Args:
+            context: 提示词构建上下文
+
+        Returns:
+            6层提示词拼接结果（层间以双换行分隔），空层自动跳过
+        """
         layers = [
             self._build_base_layer(context),
             self._build_emotion_layer(context),

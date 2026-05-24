@@ -18,7 +18,7 @@ import hashlib
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from .character_config import ConfigLoader
 from .emotion_engine import CompoundEmotionalState as EmotionalState
@@ -27,6 +27,9 @@ from .tone_mimic import ToneMimic
 from .emotion_style_coupler import EmotionStyleCoupler
 from .constraint_validator import ConstraintValidator
 from .anchor_protection import EnhancedAnchorProtection
+
+if TYPE_CHECKING:
+    from llm_provider.llm_gateway_v2 import LLMGatewayV2
 
 logger = logging.getLogger("persona_engine")
 
@@ -160,7 +163,7 @@ class PersonaEngine:
         config_loader: Optional[ConfigLoader] = None,
         emotion_engine: Optional[EmotionEngine] = None,
         tone_mimic: Optional[ToneMimic] = None,
-        llm_gateway: Optional[Any] = None,
+        llm_gateway: Optional[LLMGatewayV2] = None,
         prompt_mode: str = "layered",
         anchor_verification_enabled: bool = True,
     ):
@@ -258,6 +261,14 @@ class PersonaEngine:
             return None
 
     def auto_evolve(self, context: Any = None) -> Any:
+        """触发人格自动演化检查
+
+        Args:
+            context: EvolutionContext实例，为None时自动从emotion构造
+
+        Returns:
+            EvolutionResult（触发演化时）或 None
+        """
         if self._evolution_engine is None:
             return None
         try:
