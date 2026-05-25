@@ -108,9 +108,9 @@ class BertVITS2Provider(TTSProviderBase):
             response.raise_for_status()
 
             self._available = True
-            return response.content
+            return response.content  # type: ignore[no-any-return]
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Bert-VITS2 合成失败: %s", e)
             self._available = False
             return None

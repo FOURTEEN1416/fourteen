@@ -103,9 +103,9 @@ class GPTSoVITSProvider(TTSProviderBase):
             response.raise_for_status()
 
             self._available = True
-            return response.content
+            return response.content  # type: ignore[no-any-return]
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("GPT-SoVITS 合成失败: %s", e)
             self._available = False
             return None
@@ -125,7 +125,7 @@ class GPTSoVITSProvider(TTSProviderBase):
             response.raise_for_status()
             logger.info("GPT-SoVITS 参考音频设置成功")
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("GPT-SoVITS 参考音频设置失败: %s", e)
             return False
 

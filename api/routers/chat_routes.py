@@ -51,7 +51,7 @@ async def chat_stream(req: ChatRequest, _auth: bool = Security(_verify_api_key))
         raise HTTPException(503, "Stream not available")
 
     async def event_generator():
-        async for token in _orch.process_message_stream(req.message, req.session_id, req.message_type):  # type: ignore
+        async for token in _orch.process_message_stream(req.message, req.session_id, req.message_type):
             yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 

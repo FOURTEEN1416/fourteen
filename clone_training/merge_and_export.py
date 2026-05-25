@@ -47,7 +47,7 @@ class ModelExporter:
             trainer = LoRATrainer(base_model=base_model, output_dir=str(output_path))
             result = trainer.merge_and_export(lora_weights, export_format="hf")
             return result
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("合并失败: %s", e)
 
             # 降级：直接复制 LoRA 权重
@@ -61,12 +61,12 @@ class ModelExporter:
                     shutil.copy2(str(f), str(output_path / f.name))
 
             # 创建说明文件
-            with open(output_path / "README.txt", "w") as f:
-                f.write(f"LoRA Adapter for {base_model}\n")
-                f.write(f"Original weights: {lora_weights}\n")
-                f.write("\n使用方法:\n")
-                f.write("  from peft import PeftModel\n")
-                f.write(f"  model = PeftModel.from_pretrained(base_model, '{output_path}')\n")
+            with open(output_path / "README.txt", "w") as f:  # type: ignore[assignment]
+                f.write(f"LoRA Adapter for {base_model}\n")  # type: ignore[attr-defined]
+                f.write(f"Original weights: {lora_weights}\n")  # type: ignore[attr-defined]
+                f.write("\n使用方法:\n")  # type: ignore[attr-defined]
+                f.write("  from peft import PeftModel\n")  # type: ignore[attr-defined]
+                f.write(f"  model = PeftModel.from_pretrained(base_model, '{output_path}')\n")  # type: ignore[attr-defined]
 
             return str(output_path)
 

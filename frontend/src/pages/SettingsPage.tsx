@@ -127,7 +127,6 @@ export default function SettingsPage() {
   }
 
   const handleSave = async () => {
-    const configPayload = buildConfigPayload(vals)
     configBackupRef.current = structuredClone(vals)
     const diff: string[] = []
     sections.forEach(s => s.items.forEach(item => {

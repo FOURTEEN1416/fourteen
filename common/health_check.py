@@ -38,7 +38,7 @@ def health_check_all(components: dict) -> bool:
                 if not ok:
                     logger.warning("%s health check failed: %s", name, status)
                     all_ok = False
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"  [FAIL] {name} (error: {e})")
                 all_ok = False
         else:

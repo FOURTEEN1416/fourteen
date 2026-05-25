@@ -71,7 +71,7 @@ class OpenCodeZenProvider:
 
         try:
             self.fetch_available_models()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to fetch models on init (will use config): %s", e)
 
     def fetch_available_models(self) -> list[str]:
@@ -101,7 +101,7 @@ class OpenCodeZenProvider:
                 logger.warning("No overlap with remote models, using all configured models")
 
             return self.available_models
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("fetch_available_models failed: %s", e)
             self.available_models = [m.name for m in self.registry.all_models]
             return self.available_models
@@ -141,19 +141,18 @@ class OpenCodeZenProvider:
             usage = data.get("usage", {})
 
             if HAS_METRICS:
-                record_chat_duration(model_name, time.perf_counter() - start)  # type: ignore
+                record_chat_duration(model_name, time.perf_counter() - start)
                 if usage:
-                    record_token_usage(model_name, "prompt", usage.get("prompt_tokens", 0))  # type: ignore
-                    record_token_usage(model_name, "completion", usage.get("completion_tokens", 0))  # type: ignore
-
+                    record_token_usage(model_name, "prompt", usage.get("prompt_tokens", 0))
+                    record_token_usage(model_name, "completion", usage.get("completion_tokens", 0))
             entry = self.registry.get_by_name(model_name)
             if entry:
                 entry.mark_success()
-            return content.strip()
+            return content.strip()  # type: ignore[no-any-return]
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             if HAS_METRICS:
-                record_error("llm", type(e).__name__)  # type: ignore
+                record_error("llm", type(e).__name__)
             entry = self.registry.get_by_name(model_name)
             if entry:
                 entry.mark_failed()
@@ -186,10 +185,10 @@ class OpenCodeZenProvider:
         first_token_time = None
         start = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
+            async with httpx.AsyncClient(timeout=60) as client:  # noqa: SIM117
                 async with client.stream("POST", self._chat_url, headers=self._headers, json=payload) as resp:
                     resp.raise_for_status()
-                    async with asyncio.timeout(60):
+                    async with asyncio.timeout(60):  # type: ignore[attr-defined]
                         async for line in resp.aiter_lines():
                             if not line.startswith("data: "):
                                 continue
@@ -210,9 +209,9 @@ class OpenCodeZenProvider:
         except asyncio.TimeoutError:
             logger.warning("OpenCodeZen 流式生成超时 (60s)")
             yield "（生成已超时，请重试）"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             if HAS_METRICS:
-                record_error("llm_stream", type(e).__name__)  # type: ignore
+                record_error("llm_stream", type(e).__name__)
             yield self._handle_error(e)
 
     def chat_with_tools(
@@ -246,9 +245,9 @@ class OpenCodeZenProvider:
                 "content": message.get("content", ""),
                 "tool_calls": message.get("tool_calls"),
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             if HAS_METRICS:
-                record_error("llm", type(e).__name__)  # type: ignore
+                record_error("llm", type(e).__name__)
             if tools:
                 logger.warning("Tool call failed, retrying without tools")
                 try:
@@ -259,9 +258,9 @@ class OpenCodeZenProvider:
                     data = resp.json()
                     content = data["choices"][0]["message"]["content"]
                     return {"content": content, "tool_calls": None}
-                except Exception:
+                except Exception as e:  # noqa: BLE001
                     pass
-            return {"content": self._handle_error(e), "tool_calls": None}
+            return {"content": self._handle_error(e), "tool_calls": None}  # type: ignore[misc]
 
     def switch_model(self, model_name: str) -> bool:
         entry = self.registry.get_by_name(model_name)
@@ -285,7 +284,7 @@ class OpenCodeZenProvider:
                 remote_models = [m.get("id", "") for m in data["data"] if isinstance(m, dict)]
             elif isinstance(data, list):
                 remote_models = [m.get("id", "") for m in data if isinstance(m, dict)]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Health check: opencode/zen not reachable: %s", e)
 
         return {
@@ -334,8 +333,8 @@ class OpenCodeZenProvider:
                 content = data["choices"][0]["message"]["content"]
                 entry.mark_success()
                 logger.info("Fallback: %s → %s succeeded", self.model, entry.name)
-                return content.strip()
-            except Exception:
+                return content.strip()  # type: ignore[no-any-return]
+            except Exception:  # noqa: BLE001
                 entry.mark_failed()
         return None
 

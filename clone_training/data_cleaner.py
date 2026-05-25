@@ -72,7 +72,7 @@ Return ONLY a single number (1-5):"""
                 from llm_provider import get_llm
                 self._llm = get_llm()
                 logger.info("DataCleaner: 使用 llm_provider 的 LLM 实例")
-            except (ImportError, Exception) as e:
+            except (ImportError, Exception) as e:  # noqa: BLE001
                 self._llm = None
                 logger.warning("DataCleaner: 无法获取 LLM，回退到启发式评分: %s", e)
 
@@ -115,7 +115,7 @@ Return ONLY a single number (1-5):"""
             reply_msg = conv.get("reply_msg") or conv.get("reply", "")
             try:
                 score = self.score_pair(user_msg, reply_msg)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("评分异常 (第 %d 条): %s, 默认 1 分", i, e)
                 score = 1
             conv["score"] = score
@@ -167,7 +167,7 @@ Return ONLY a single number (1-5):"""
         if isinstance(data, list):
             conversations = data
         elif isinstance(data, dict):
-            conversations = data.get("conversations", data.get("data", [data]))
+            conversations = data.get("conversations", data.get("data", [data]))  # type: ignore[assignment]
         else:
             logger.error("不支持的 JSON 格式: %s", type(data))
             return ""
@@ -235,7 +235,7 @@ Return ONLY a single number (1-5):"""
                 return int(nums[0])
             logger.warning("LLM 返回无法解析: %s, 默认 3 分", result[:50])
             return 3
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("LLM 评分失败: %s, 回退到规则评分", e)
             return self._rule_based_score(user_msg, reply_msg)
 

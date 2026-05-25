@@ -76,7 +76,7 @@ class StickerManager:
                         (character_id, sid, unlock_threshold),
                     )
                     count += 1
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.debug("单条表情包插入跳过: %s", e)
             conn.commit()
             return count

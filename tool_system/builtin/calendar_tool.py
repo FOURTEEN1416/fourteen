@@ -36,14 +36,14 @@ def _eval_node(node: ast.AST) -> Any:
     if isinstance(node, ast.Num):  # Python 3.7 compat
         return node.n
     if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_OPS:
-        return _SAFE_OPS[type(node.op)](_eval_node(node.operand))
+        return _SAFE_OPS[type(node.op)](_eval_node(node.operand))  # type: ignore[operator]
     if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_OPS:
         left = _eval_node(node.left)
         right = _eval_node(node.right)
         # 零除检查：Div, FloorDiv, Mod 都需要检查
         if isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)) and right == 0:
             raise ZeroDivisionError("division by zero")
-        return _SAFE_OPS[type(node.op)](left, right)
+        return _SAFE_OPS[type(node.op)](left, right)  # type: ignore[operator]
     raise ValueError(f"Unsupported expression: {ast.dump(node)}")
 
 
@@ -58,7 +58,7 @@ class CalendarTool(BaseTool):
     }
 
     def execute(self, **kwargs) -> ToolResult:
-        now = datetime.now()
+        now = datetime.now()  # noqa: DTZ005
         weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
         return ToolResult(True, data={
             "date": now.strftime("%Y-%m-%d"),

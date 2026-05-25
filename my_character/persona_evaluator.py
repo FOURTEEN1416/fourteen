@@ -102,8 +102,8 @@ class PersonaEvaluator:
                     )
                     if keyword_violations:
                         score *= 0.5
-                return score
-            except Exception:
+                return float(score)
+            except Exception:  # noqa: BLE001
                 pass
         if not anchors:
             return 0.8
@@ -145,7 +145,7 @@ class PersonaEvaluator:
             try:
                 result = self._constraint_validator.validate(response)
                 return 1.0 if result.passed else 0.3
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
         forbidden = constraints.get("forbidden", [])
         for pattern in forbidden:

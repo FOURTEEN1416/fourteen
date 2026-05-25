@@ -105,7 +105,7 @@ class CharaCardV2Parser:
                     position=str(entry.get("position", "0")),
                     extensions=entry.get("extensions", {}),
                 ))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("WorldInfo条目解析跳过: %s", e)
         return WorldInfoBook(
             name=wb.get("name", ""),

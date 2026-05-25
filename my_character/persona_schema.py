@@ -58,7 +58,7 @@ class PersonaSchema:
     def validate(self) -> ValidationResult:
         errors = []
         warnings = []
-        anchor_conflicts = []
+        anchor_conflicts = []  # type: ignore[var-annotated]
 
         if not self.name:
             errors.append("name is required")
@@ -85,7 +85,7 @@ class PersonaSchema:
             anchor_conflicts=anchor_conflicts,
         )
 
-    def merge(self, other: PersonaSchema, weights: dict[str, float] = None) -> PersonaSchema:
+    def merge(self, other: PersonaSchema, weights: dict[str, float] | None = None) -> PersonaSchema:
         w = weights or {"self": 0.6, "other": 0.4}
         ws = w.get("self", 0.6)
         wo = w.get("other", 0.4)

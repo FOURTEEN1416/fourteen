@@ -64,7 +64,7 @@ def _should_retry(category: ErrorCategory) -> bool:
 
 def _get_retry_delay(category: ErrorCategory, attempt: int) -> float:
     base = 1.0 if category == ErrorCategory.RETRYABLE_RATE_LIMIT else 0.5
-    return base * (2 ** attempt)
+    return base * (2 ** attempt)  # type: ignore[no-any-return]
 
 
 class DeepSeekGateway:
@@ -99,7 +99,7 @@ class DeepSeekGateway:
             try:
                 self._cache = LLMCache(ttl=cache_ttl)
                 logger.info("DeepSeekGateway: 缓存已启用 (TTL=%s秒)", cache_ttl)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("DeepSeekGateway: 缓存初始化失败: %s", e)
 
         if self.api_key:
@@ -164,7 +164,7 @@ class DeepSeekGateway:
             )
             if cached:
                 logger.debug("DeepSeekGateway: 缓存命中")
-                return cached["response"]["content"]
+                return cached["response"]["content"]  # type: ignore[no-any-return]
 
         payload = {
             "model": self.model,
@@ -201,9 +201,9 @@ class DeepSeekGateway:
                     max_tokens=max_tokens,
                 )
 
-            return content.strip()
+            return content.strip()  # type: ignore[no-any-return]
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             category = _classify_error(e)
             if _should_retry(category) and MAX_RETRIES > 0:
                 for attempt in range(MAX_RETRIES):
@@ -214,8 +214,8 @@ class DeepSeekGateway:
                         resp = self._client.post(self._chat_url, headers=self._headers, json=payload)
                         resp.raise_for_status()
                         data = resp.json()
-                        return data["choices"][0]["message"]["content"].strip()
-                    except Exception as retry_e:
+                        return data["choices"][0]["message"]["content"].strip()  # type: ignore[no-any-return]
+                    except Exception as retry_e:  # noqa: BLE001
                         category = _classify_error(retry_e)
                         if not _should_retry(category):
                             break

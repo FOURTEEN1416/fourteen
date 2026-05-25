@@ -10,11 +10,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
 import time
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -99,7 +97,7 @@ class GirlfriendManager:
         Orchestrator._get_session_lock(session_id) 为每个 session 提供独立的锁，
         不同用户可并行处理，同一用户消息串行处理，避免情感引擎状态串扰。
         """
-        return await self._process_message_inner(user_id, text, message_type)
+        return await self._process_message_inner(user_id, text, message_type)  # type: ignore[attr-defined, no-any-return]
 
     # ── 用户管理 ─────────────────────────────────────────
 
@@ -124,9 +122,9 @@ class GirlfriendManager:
                 instance = self._users.pop(user_id)
                 # 关闭用户的情感引擎，释放线程池资源
                 if instance.emotion_engine:
-                    try:
+                    try:  # noqa: BLE001
                         instance.emotion_engine.close()
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         logger.warning("关闭用户 %s 情感引擎时出错: %s", user_id, e)
                 logger.info("用户移除: %s", user_id)
                 return True

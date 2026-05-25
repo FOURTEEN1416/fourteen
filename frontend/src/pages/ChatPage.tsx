@@ -19,7 +19,7 @@ export default function ChatPage() {
   const setSessionId = useChatStore((s) => s.setSessionId)
   const [sessionError, setSessionError] = useState(false)
   const [sessionLoading, setSessionLoading] = useState(true)
-  const [loading, setLoading] = useState(false)
+  const [_loading, setLoading] = useState(false)
   const addMessage = useChatStore((s) => s.addMessage)
   const setEmotion = useChatStore((s) => s.setEmotion)
   const setStreaming = useChatStore((s) => s.setStreaming)

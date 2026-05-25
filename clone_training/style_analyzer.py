@@ -95,7 +95,7 @@ class StyleProfile:
 
         # 句式
         if self.sentence_length_dist:
-            dominant = max(self.sentence_length_dist, key=self.sentence_length_dist.get)  # type: ignore
+            dominant: str = max(self.sentence_length_dist, key=self.sentence_length_dist.get)  # type: ignore[arg-type]
             lines.append(f"- 偏好句式: {dominant} (占 {self.sentence_length_dist.get(dominant, 0):.0%})")
 
         # 标点
@@ -121,7 +121,7 @@ class StyleProfile:
 
         # 情绪
         if self.emotion_dist:
-            dominant_emo = max(self.emotion_dist, key=self.emotion_dist.get)  # type: ignore
+            dominant_emo: str = max(self.emotion_dist, key=self.emotion_dist.get)  # type: ignore[arg-type]
             lines.append(f"- 主要情绪: {dominant_emo} ({self.emotion_dist[dominant_emo]:.0%})")
 
         # 人称
@@ -133,7 +133,7 @@ class StyleProfile:
 
         # 句类
         if self.sentence_type_dist:
-            top_s = max(self.sentence_type_dist, key=self.sentence_type_dist.get)  # type: ignore
+            top_s: str = max(self.sentence_type_dist, key=self.sentence_type_dist.get)  # type: ignore[arg-type]
             lines.append(f"- 主要句类: {top_s} ({self.sentence_type_dist[top_s]:.0%})")
 
         # 网络用语
@@ -232,7 +232,7 @@ class StyleAnalyzer:
         ]
 
         # 3. 语气词
-        particle_counter = Counter()
+        particle_counter = Counter()  # type: ignore[var-annotated]
         for reply in replies:
             for p in self.PARTICLES:
                 particle_counter[p] += reply.count(p)
@@ -260,7 +260,7 @@ class StyleAnalyzer:
         profile.kaomoji_freq = kaomoji_count / len(replies) if replies else 0
 
         # 5. 口头禅（2-4字高频短语）
-        catchphrase_counter = Counter()
+        catchphrase_counter = Counter()  # type: ignore[var-annotated]
         for reply in replies:
             for n in range(2, 5):
                 for i in range(len(reply) - n + 1):
@@ -274,7 +274,7 @@ class StyleAnalyzer:
         ][:10]
 
         # 6. 情绪分布
-        emo_counter = Counter()
+        emo_counter = Counter()  # type: ignore[var-annotated]
         for reply in replies:
             for kw in self.POSITIVE_EMO:
                 if kw in reply:
@@ -296,7 +296,7 @@ class StyleAnalyzer:
         }
 
         # 7. 人称代词
-        pronoun_counter = Counter()
+        pronoun_counter = Counter()  # type: ignore[var-annotated]
         for reply in replies:
             for pro in ["你", "我", "他", "她", "人家", "咱", "俺"]:
                 pronoun_counter[pro] += reply.count(pro)
@@ -307,7 +307,7 @@ class StyleAnalyzer:
         }
 
         # 8. 句类分布
-        st_counter = Counter()
+        st_counter = Counter()  # type: ignore[var-annotated]
         for reply in replies:
             classified = False
             for st_name, patterns in self.SENTENCE_TYPES.items():

@@ -134,8 +134,8 @@ def _check_permissions():
             for line in f:
                 if line.startswith("CapEff:"):
                     cap_eff = int(line.split(":")[1].strip(), 16)
-                    CAP_SYS_PTRACE = 1 << 19
-                    if cap_eff & CAP_SYS_PTRACE:
+                    cap_sys_ptrace = 1 << 19
+                    if cap_eff & cap_sys_ptrace:
                         return
                     break
     except (OSError, ValueError):
@@ -192,43 +192,38 @@ def main():
 
         scanned_bytes = 0
         try:
-            mem = open(f"/proc/{pid}/mem", "rb")
+            with open(f"/proc/{pid}/mem", "rb") as mem:
+                # 防御 TOCTOU: 打开 mem 后再次确认仍为微信进程
+                if not _is_wechat_process(pid):
+                    print(f"[WARN] PID {pid} 已不是微信进程，跳过")
+                    continue
+
+                for reg_idx, (base, size) in enumerate(regions):
+                    try:
+                        mem.seek(base)
+                        data = mem.read(size)
+                    except (OSError, ValueError):
+                        continue
+                    scanned_bytes += len(data)
+
+                    all_hex_matches += scan_memory_for_keys(
+                        data, hex_re, db_files, salt_to_dbs,
+                        key_map, remaining_salts, base, pid, print,
+                    )
+
+                    if (reg_idx + 1) % 200 == 0:
+                        elapsed = time.time() - t0
+                        progress = scanned_bytes / total_bytes * 100 if total_bytes else 100
+                        print(
+                            f"  [{progress:.1f}%] {len(key_map)}/{len(salt_to_dbs)} salts matched, "
+                            f"{all_hex_matches} hex patterns, {elapsed:.1f}s"
+                        )
         except PermissionError:
             print(f"[WARN] 无法打开 /proc/{pid}/mem，权限不足，跳过")
             continue
         except (FileNotFoundError, ProcessLookupError):
             print(f"[WARN] PID {pid} 已退出，跳过")
             continue
-
-        # 防御 TOCTOU: 打开 mem 后再次确认仍为微信进程
-        if not _is_wechat_process(pid):
-            print(f"[WARN] PID {pid} 已不是微信进程，跳过")
-            mem.close()
-            continue
-
-        try:
-            for reg_idx, (base, size) in enumerate(regions):
-                try:
-                    mem.seek(base)
-                    data = mem.read(size)
-                except (OSError, ValueError):
-                    continue
-                scanned_bytes += len(data)
-
-                all_hex_matches += scan_memory_for_keys(
-                    data, hex_re, db_files, salt_to_dbs,
-                    key_map, remaining_salts, base, pid, print,
-                )
-
-                if (reg_idx + 1) % 200 == 0:
-                    elapsed = time.time() - t0
-                    progress = scanned_bytes / total_bytes * 100 if total_bytes else 100
-                    print(
-                        f"  [{progress:.1f}%] {len(key_map)}/{len(salt_to_dbs)} salts matched, "
-                        f"{all_hex_matches} hex patterns, {elapsed:.1f}s"
-                    )
-        finally:
-            mem.close()
 
         if not remaining_salts:
             print("\n[+] 所有密钥已找到，跳过剩余进程")

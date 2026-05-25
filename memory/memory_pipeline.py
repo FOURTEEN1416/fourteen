@@ -23,7 +23,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger("memory_pipeline")
@@ -136,15 +136,15 @@ class EpisodicMemory:
             self._sm.add_episode(episode_id, summary, importance, metadata)
             logger.debug("Episode stored: %s", episode_id)
             return episode_id
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to store episode: %s", e)
             return ""
 
     def search(self, query: str, top_k: int = 5) -> list[dict]:
         try:
-            return self._vm.search_sync(query, top_k=top_k,
+            return self._vm.search_sync(query, top_k=top_k,  # type: ignore[no-any-return]
                                    filter_dict={"type": "episode"})
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Episode search failed: %s", e)
             return []
 
@@ -153,7 +153,7 @@ class EpisodicMemory:
         if not user_msgs:
             return ""
         if len(user_msgs[-1]) > 10:
-            return user_msgs[-1][:100]
+            return user_msgs[-1][:100]  # type: ignore[no-any-return]
         longest = max(user_msgs, key=len, default="")
         return longest[:100] if longest else ""
 
@@ -179,7 +179,7 @@ class SemanticMemory:
                 if isinstance(first, dict) and first.get("similarity", 0) > 0.9:
                     logger.debug("Similar fact exists, skipping: %s...", fact[:30])
                     return False
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Similar fact search failed, skipping dedup: %s", e)
         try:
             self._sm.add_fact(fact, category, confidence, source)
@@ -189,22 +189,22 @@ class SemanticMemory:
                     "category": category,
                     "confidence": confidence,
                 })
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to store fact vector: %s", e)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to add fact: %s", e)
             return False
 
     def search(self, query: str, top_k: int = 5) -> dict[str, list]:
-        results = {"vector": [], "structured": []}
+        results = {"vector": [], "structured": []}  # type: ignore[var-annotated]
         try:
             vector_results = self._vm.search_sync(query, top_k=top_k,
                                              filter_dict={"type": "fact"})
             results["vector"] = vector_results
             structured_results = self._sm.search_facts(query)
             results["structured"] = structured_results
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Fact search failed: %s", e)
         return results
 
@@ -244,7 +244,7 @@ class SemanticMemory:
                 }
                 for r in (raw or [])
             ]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("get_facts failed: %s", e)
             return []
 
@@ -339,7 +339,7 @@ class ConflictDetector:
                         "category": category,
                         "status": "pending",
                     }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Conflict detection failed: %s", e)
         return None
 
@@ -374,7 +374,7 @@ class CrossSessionReasoner:
                     (event_desc, expected_time, session_id),
                 )
                 conn.commit()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("store_pending_event failed: %s", e)
 
     def get_pending_events(self) -> list[dict]:
@@ -385,7 +385,7 @@ class CrossSessionReasoner:
                     "ORDER BY created_at ASC"
                 ).fetchall()
                 return [dict(r) for r in rows]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("get_pending_events failed: %s", e)
             return []
 
@@ -397,7 +397,7 @@ class CrossSessionReasoner:
                     (event_id,),
                 )
                 conn.commit()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("resolve_event failed: %s", e)
 
 
@@ -477,12 +477,12 @@ JSON:"""
                 for f in facts:
                     f["source"] = "llm"
                 return facts
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("LLM fact extraction failed: %s", e)
         return []
 
     def _extract_with_rules(self, messages: list[str]) -> list[dict[str, Any]]:
-        facts = []
+        facts = []  # type: ignore[var-annotated]
         for msg in messages:
             for category, patterns in PATTERNS.items():
                 for pattern in patterns:
@@ -511,7 +511,7 @@ JSON:"""
                 by_category[cat] = []
             by_category[cat].append(f)
         result = []
-        for cat, items in by_category.items():
+        for cat, items in by_category.items():  # noqa: B007
             items.sort(key=lambda x: x.get("confidence", 0), reverse=True)
             seen_texts = set()
             for item in items:
@@ -524,19 +524,19 @@ JSON:"""
     @staticmethod
     def _parse_json_result(text: str) -> list[dict[str, Any]] | None:
         try:
-            return json.loads(text)
+            return json.loads(text)  # type: ignore[no-any-return]
         except json.JSONDecodeError as e:
             logger.debug("Direct JSON parse failed: %s", e)
         match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
         if match:
             try:
-                return json.loads(match.group(1))
+                return json.loads(match.group(1))  # type: ignore[no-any-return]
             except json.JSONDecodeError as e:
                 logger.debug("Code block JSON parse failed: %s", e)
         match = re.search(r'\[.*?\]', text, re.DOTALL)
         if match:
             try:
-                return json.loads(match.group(0))
+                return json.loads(match.group(0))  # type: ignore[no-any-return]
             except json.JSONDecodeError as e:
                 logger.debug("Bracket extraction JSON parse failed: %s", e)
         return None
@@ -589,8 +589,8 @@ class DiarySummarizer:
 ## 情绪趋势
 - ..."""
             try:
-                return self.llm_func(prompt)
-            except Exception as e:
+                return self.llm_func(prompt)  # type: ignore[no-any-return]
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Weekly LLM summary failed: %s", e)
         return "\n".join(daily_summaries)
 
@@ -645,7 +645,7 @@ class DiarySummarizer:
                         (date_str, summary),
                     )
                     conn.commit()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to persist diary summary to DB: %s", e)
         logger.info("Diary summary saved for %s", date_str)
 
@@ -672,7 +672,7 @@ class DiarySummarizer:
                     self._daily_summaries[row[0]] = row[1]
                 if rows:
                     logger.info("Loaded %d diary summaries from DB", len(rows))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to load diary summaries from DB: %s", e)
 
     def get_summary(self, date_str: str) -> str | None:
@@ -700,7 +700,7 @@ class DiarySummarizer:
 每日摘要（100字以内）："""
         try:
             return self.llm_func(prompt)  # type: ignore
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("LLM summary failed: %s", e)
             return self._summarize_with_template(chats)
 
@@ -851,7 +851,7 @@ class MemoryPipeline:
     @property
     def session_id(self) -> str:
         if not self._session_id:
-            self._session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self._session_id = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
         return self._session_id
 
     # ── 核心接口 ──────────────────────────────────────────
@@ -883,7 +883,7 @@ class MemoryPipeline:
             self.sm.add_chat("assistant", reply, emotion_tag=emotion_tag,
                              session_id=effective_session)
             result["stored_chat"] = True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to store chat: %s", e)
 
         # 3. 存储到工作记忆
@@ -898,7 +898,7 @@ class MemoryPipeline:
                 "importance": importance,
             })
             result["stored_vector"] = True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Vector store failed: %s", e)
 
         # 5. 事实提取（每 N 条对话触发）
@@ -927,7 +927,7 @@ class MemoryPipeline:
                 self.cross_session.store_pending_event(
                     pending["event_desc"], session_id=effective_session
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Cross-session reasoning failed: %s", e)
 
         # 7. 情绪记录
@@ -937,7 +937,7 @@ class MemoryPipeline:
                     emotion_tag, importance, trigger="chat"
                 )
                 result["emotion_updated"] = True
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("Emotion log failed: %s", e)
 
         # 8. 归档检查
@@ -959,7 +959,7 @@ class MemoryPipeline:
         Returns:
             {"working": [], "episodic": [], "semantic": [], "facts": []}
         """
-        context = {
+        context = {  # type: ignore[var-annotated]
             "working": [],
             "episodic": [],
             "semantic": [],
@@ -974,7 +974,7 @@ class MemoryPipeline:
         try:
             episodic_results = self.episodic.search(query, top_k=top_k)
             context["episodic"] = episodic_results
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Episodic retrieval failed, degraded: %s", e)
 
         elapsed = time.perf_counter() - start
@@ -990,7 +990,7 @@ class MemoryPipeline:
                     s.get("fact", "") for s in context["semantic"]
                     if isinstance(s, dict)
                 ]
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Semantic retrieval failed, degraded: %s", e)
 
         # 3. 结构化事实补充（降级回退）
@@ -998,13 +998,13 @@ class MemoryPipeline:
             try:
                 facts = self.sm.get_facts(min_confidence=0.3)
                 context["facts"] = [f["fact"] for f in facts[:top_k]]
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("Structured fact fallback failed: %s", e)
 
         # 4. 待处理事件
         try:
             context["pending_events"] = self.cross_session.get_pending_events()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Failed to get pending events: %s", e)
             context["pending_events"] = []
 
@@ -1034,7 +1034,7 @@ class MemoryPipeline:
                     logger.debug("retrieve_context_async cache hit")
                     return {k: v for k, v in cached.items() if k != "_ts"}
 
-        context = {
+        context = {  # type: ignore[var-annotated]
             "working": [],
             "episodic": [],
             "semantic": [],
@@ -1046,21 +1046,21 @@ class MemoryPipeline:
         async def _get_working():
             try:
                 return self.working.get_recent(n=10)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("Failed to get working memory: %s", e)
                 return []
 
         async def _search_episodic():
             try:
                 return self.episodic.search(query, top_k=top_k)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Episodic retrieval failed, degraded: %s", e)
                 return []
 
         async def _search_semantic():
             try:
                 return self.semantic.search(query, top_k=top_k)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Semantic retrieval failed, degraded: %s", e)
                 return {}
 
@@ -1089,12 +1089,12 @@ class MemoryPipeline:
             try:
                 facts = self.sm.get_facts(min_confidence=0.3)
                 context["facts"] = [f["fact"] for f in facts[:top_k]]
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("Structured fact fallback failed: %s", e)
 
         try:
             context["pending_events"] = self.cross_session.get_pending_events()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Failed to get pending events (async): %s", e)
             context["pending_events"] = []
 
@@ -1131,7 +1131,7 @@ class MemoryPipeline:
                 logger.info("No chats today, skipping daily maintenance")
                 return None
             summary = self.ds.summarize_day(today_chats)
-            date_str = datetime.now().strftime("%Y-%m-%d")
+            date_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
             self.ds.save_summary(date_str, summary)
             self._last_daily_summary = summary
 
@@ -1145,7 +1145,7 @@ class MemoryPipeline:
             logger.info("Daily maintenance complete: %s", date_str)
             return summary
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Daily maintenance failed: %s", e)
             return None
 
@@ -1178,24 +1178,24 @@ class MemoryPipeline:
 
         try:
             context["recent_chats"] = self.sm.get_recent_chats(n_chats)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to get recent chats: %s", e)
 
         try:
             facts = self.sm.get_facts(min_confidence=0.3)
             context["user_facts"] = [f["fact"] for f in facts]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to get facts: %s", e)
 
         try:
             summaries = self.ds.get_all_summaries()
             if summaries:
                 context["today_summary"] = summaries.get(
-                    datetime.now().strftime("%Y-%m-%d"), ""
+                    datetime.now(tz=timezone.utc).strftime("%Y-%m-%d"), ""
                 )
                 trend = self.ds.detect_mood_trend(summaries)
                 context["emotion_trend"] = trend
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to detect trend: %s", e)
 
         return context
@@ -1228,7 +1228,7 @@ class MemoryPipeline:
         forgotten = 0
         try:
             facts = self.sm.get_facts(min_confidence=0.0, limit=1000)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to load facts for forgetting: %s", e)
             return 0
 
@@ -1238,11 +1238,11 @@ class MemoryPipeline:
                 if updated_at_str:
                     updated_dt = datetime.fromisoformat(
                         updated_at_str.replace("Z", "+00:00")
-                    ) if isinstance(updated_at_str, str) else datetime.now()
-                    days_old = (datetime.now() - updated_dt).total_seconds() / 86400
+                    ) if isinstance(updated_at_str, str) else datetime.now(tz=timezone.utc)
+                    days_old = (datetime.now(tz=timezone.utc) - updated_dt).total_seconds() / 86400
                 else:
                     days_old = 30.0
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("Failed to parse fact updated_at, using default: %s", e)
                 days_old = 30.0
 
@@ -1263,7 +1263,7 @@ class MemoryPipeline:
                 try:
                     self.sm.delete_fact(fact["id"])
                     forgotten += 1
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("Failed to delete fact (id=%s): %s", fact.get("id"), e)
 
         if forgotten:
@@ -1320,7 +1320,7 @@ class MemoryPipeline:
                             pending["event_desc"], session_id=session_id
                         )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Fact extraction failed: %s", e)
 
         return count
@@ -1339,7 +1339,7 @@ class MemoryPipeline:
                      "content": m.get("content", "")}
                     for m in messages
                 ]) or ""
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("Summary generation failed: %s", e)
 
         avg_importance = (
@@ -1356,7 +1356,7 @@ class MemoryPipeline:
             # 仅在归档成功后清空工作记忆（防止数据丢失）
             self.working.clear()
             logger.info("Working memory archived: %d messages", len(messages))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("归档工作记忆失败，保留数据: %s", e)
 
     def _cleanup_low_confidence_facts(self) -> None:
@@ -1367,7 +1367,7 @@ class MemoryPipeline:
                 if f.get("confidence", 0) < self._config.fact_min_confidence:
                     self.sm.delete_fact(f["id"])
             logger.debug("Cleaned up low confidence facts")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Cleanup failed: %s", e)
 
     # ── 健康检查 ──────────────────────────────────────────

@@ -28,7 +28,7 @@ def _shutdown_executor():
     try:
         _executor.shutdown(wait=False)
         logger.info("全局线程池已关闭 (atexit)")
-    except Exception:
+    except Exception:  # noqa: BLE001
         pass
 
 atexit.register(_shutdown_executor)
@@ -79,7 +79,7 @@ def _load_credentials(path=None):
         try:
             with open(path) as f:
                 return json.load(f)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"读取凭证失败: {e}")
     return {}
 
@@ -91,7 +91,7 @@ def _save_credentials(data, path=None):
         with open(path, "w") as f:
             json.dump(data, f)
         logger.info(f"凭证已保存到 {path}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning(f"保存凭证失败: {e}")
 
 
@@ -107,7 +107,7 @@ def _save_qr_to_file(qrcode_url="", status="waiting"):
                 "status": status,
                 "timestamp": time.time(),
             }, f)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning(f"保存二维码到文件失败: {e}")
 
 
@@ -336,7 +336,7 @@ class WeChatConnector:
             )
             logger.info("微信主动发送成功: %s", text[:30])
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("微信主动发送失败: %s", e)
             return False
 
@@ -357,7 +357,7 @@ class WeChatConnector:
             )
             logger.info("语音发送成功: %d bytes, fmt=%s", len(audio_bytes), fmt)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("语音发送失败: %s", e)
             return False
 
@@ -379,7 +379,7 @@ class WeChatConnector:
             )
             logger.info("图片发送成功: %d bytes", len(image_bytes))
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("图片发送失败: %s", e)
             return False
 
@@ -398,7 +398,7 @@ class WeChatConnector:
             )
             logger.info("表情发送成功: md5=%s", emoji_md5)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("表情发送失败: %s", e)
             return False
 
@@ -415,7 +415,7 @@ class WeChatConnector:
                     logger.info("现有 token 仍有效，重连成功")
                     _save_qr_to_file("", "connected")
                     return True
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug(f"快速重连测试失败: {e}")
             logger.warning("现有 token 已失效，需要重新扫码")
             self.token = ""
@@ -427,7 +427,7 @@ class WeChatConnector:
             qr_resp = _fetch_qr_code(self.base_url)
             qrcode = qr_resp.get("qrcode", "")
             qrcode_url = qr_resp.get("qrcode_img_content", "")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"生成二维码失败（不影响后续）: {e}")
 
         # 2. 有二维码就先写到文件
@@ -450,7 +450,7 @@ class WeChatConnector:
                     logger.info("保存的凭证有效，跳过扫码")
                     _save_qr_to_file(qrcode_url or "", "connected")
                     return True
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug(f"凭证快速测试失败: {e}")
             logger.warning("保存的凭证已过期，等待扫码登录")
             self.token = ""
@@ -471,7 +471,7 @@ class WeChatConnector:
 
             try:
                 status_resp = _poll_qr_status(qrcode, self.base_url)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error(f"轮询二维码失败: {e}")
                 time.sleep(3)
                 continue
@@ -494,7 +494,7 @@ class WeChatConnector:
                     qrcode_url = qr_resp.get("qrcode_img_content", "")
                     _save_qr_to_file(qrcode_url, "waiting")
                     print(f"新二维码: {qrcode_url}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.error(f"刷新二维码失败: {e}")
                     return False
             elif status == "confirmed":
@@ -603,10 +603,10 @@ class WeChatConnector:
                 for raw_msg in msgs:
                     try:
                         self._handle_message(raw_msg)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         logger.error(f"处理消息异常: {e}")
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 if self._stop:
                     break
                 consecutive_failures += 1
@@ -624,7 +624,7 @@ class WeChatConnector:
         if entry is None:
             return ""
         if isinstance(entry, dict):
-            return entry.get("token", "")
+            return entry.get("token", "")  # type: ignore[no-any-return]
         # 兼容旧格式（直接存储的字符串）
         return str(entry)
 
@@ -709,7 +709,7 @@ class WeChatConnector:
                         duration_ms = result.get("voice_duration_ms", 3000)
                         self.send_voice(silk_audio, to_user=from_user,
                                         duration_ms=duration_ms, fmt=fmt)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("语音发送降级失败: %s", e)
 
             sticker_result = result.get("sticker")
@@ -721,9 +721,9 @@ class WeChatConnector:
                         img_bytes = _Path(sticker_path).read_bytes()
                         if img_bytes:
                             self.send_image(img_bytes, to_user=from_user)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("表情包发送失败: %s", e)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"处理消息/发回复失败: {e}")
 
     # ── 状态 ──

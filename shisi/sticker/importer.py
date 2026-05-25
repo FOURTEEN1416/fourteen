@@ -51,7 +51,7 @@ class StickerImporter:
                         with zf.open(info) as src, open(out_path, 'wb') as dst:
                             dst.write(src.read())
                         success += 1
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         failed += 1
                         logger.warning("解压失败: %s: %s", info.filename, e)
         except zipfile.BadZipFile:

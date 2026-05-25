@@ -110,8 +110,8 @@ class ConversationSummarizer:
             else:
                 return ""
             logger.info("Conversation summary generated (%d messages → %d chars)", len(messages), len(result))
-            return result.strip()
-        except Exception as e:
+            return result.strip()  # type: ignore[no-any-return]
+        except Exception as e:  # noqa: BLE001
             logger.warning("Summary generation failed: %s", e)
             return ""
 

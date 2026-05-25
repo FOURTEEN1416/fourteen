@@ -78,7 +78,7 @@ class EdgeTTSProvider(TTSProviderBase):
 
             # 收集所有chunk
             audio_chunks = []
-            async with asyncio.timeout(self._timeout):
+            async with asyncio.timeout(self._timeout):  # type: ignore[attr-defined]
                 async for chunk in communicate.stream():
                     if chunk["type"] == "audio":
                         audio_chunks.append(chunk["data"])
@@ -113,7 +113,7 @@ class EdgeTTSProvider(TTSProviderBase):
             with open(output_path, "wb") as f:
                 f.write(audio)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("保存音频文件失败: %s", e)
             return False
 
@@ -128,7 +128,7 @@ class EdgeTTSProvider(TTSProviderBase):
 
             communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate, volume=volume)
 
-            async with asyncio.timeout(self._timeout):
+            async with asyncio.timeout(self._timeout):  # type: ignore[attr-defined]
                 async for chunk in communicate.stream():
                     if chunk["type"] == "audio":
                         yield chunk["data"]

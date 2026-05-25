@@ -1,4 +1,4 @@
-import { Routes, Route, useNavigate } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './api/queryClient'
@@ -49,8 +49,6 @@ function PageLoadingSkeleton() {
 }
 
 export default function App() {
-  const navigate = useNavigate()
-
   return (
     <QueryClientProvider client={queryClient}>
     <ErrorBoundary>

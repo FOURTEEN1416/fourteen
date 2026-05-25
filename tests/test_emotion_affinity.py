@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, ".")
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -86,18 +86,18 @@ class TestEmotionStageEngine:
 class TestDecayEngine:
     def test_no_decay_within_grace(self):
         decay = DecayEngine()
-        last = datetime.now() - timedelta(days=2)
+        last = datetime.now(tz=timezone.utc) - timedelta(days=2)
         assert decay.calculate_decay(50, last) == 0.0
 
     def test_decay_after_grace(self):
         decay = DecayEngine(decay_rate=0.5, grace_period_days=3)
-        last = datetime.now() - timedelta(days=5)
+        last = datetime.now(tz=timezone.utc) - timedelta(days=5)
         d = decay.calculate_decay(50, last)
         assert abs(d - 1.0) < 0.01
 
     def test_decay_capped_at_current(self):
         decay = DecayEngine(decay_rate=10, grace_period_days=0)
-        last = datetime.now() - timedelta(days=10)
+        last = datetime.now(tz=timezone.utc) - timedelta(days=10)
         d = decay.calculate_decay(5, last)
         assert d <= 5.0
 
@@ -156,7 +156,7 @@ class TestAffinityEnhancer:
     def test_apply_decay(self):
         enhancer = AffinityEnhancer()
         enhancer.update("c", 50)
-        enhancer._last_interaction["c"] = datetime.now() - timedelta(days=5)
+        enhancer._last_interaction["c"] = datetime.now(tz=timezone.utc) - timedelta(days=5)
         decay = enhancer.apply_decay("c")
         assert decay > 0
         assert enhancer.get_value("c") < 50.0

@@ -38,7 +38,7 @@ class CacheStats:
 
     @property
     def total_requests(self) -> int:
-        return self.hits + self.misses
+        return self.hits + self.misses  # type: ignore[no-any-return]
 
     @property
     def hit_rate(self) -> float:
@@ -47,7 +47,7 @@ class CacheStats:
 
     @property
     def uptime_seconds(self) -> float:
-        return time.time() - self._start_time
+        return time.time() - self._start_time  # type: ignore[no-any-return]
 
     def to_dict(self) -> dict:
         return {
@@ -151,13 +151,13 @@ class LLMCache:
                 self.stats.saved_cost += tokens * 0.000002  # 估算成本
 
                 logger.debug("缓存命中: %s", key[:16])
-                return data
+                return data  # type: ignore[no-any-return]
 
             self.stats.misses += 1
             logger.debug("缓存未命中: %s", key[:16])
             return None
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             self.stats.errors += 1
             logger.warning("缓存读取失败: %s", e)
             return None
@@ -202,7 +202,7 @@ class LLMCache:
 
             return success
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             self.stats.errors += 1
             logger.warning("缓存写入失败: %s", e)
             return False
@@ -231,7 +231,7 @@ class LLMCache:
             logger.info("缓存已清理: %s 个键", len(keys))
             return len(keys)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("缓存清理失败: %s", e)
             return 0
 
@@ -243,7 +243,7 @@ class LLMCache:
             try:
                 keys = self.redis.keys(f"{self.KEY_PREFIX}:*")
                 stats["cached_keys"] = len(keys)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 stats["cached_keys"] = 0
         else:
             stats["cached_keys"] = 0

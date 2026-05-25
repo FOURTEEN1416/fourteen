@@ -1,6 +1,6 @@
 """单元测试: 主动消息ASE引擎 — 深度版"""
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, ".")
 
@@ -311,7 +311,7 @@ def test_frequency_controller_can_send_initial():
 def test_frequency_controller_daily_limit():
     from proactive.ase_engine import FrequencyController
     fc = FrequencyController(max_daily=3, min_interval_minutes=0, cooldown_after_reply_minutes=0)
-    fc._last_reset_date = datetime.now().date()
+    fc._last_reset_date = datetime.now(tz=timezone.utc).date()
     for _ in range(3):
         fc.record_sent()
     can, reason = fc.can_send()
@@ -322,7 +322,7 @@ def test_frequency_controller_daily_limit():
 def test_frequency_controller_daily_limit_boundary():
     from proactive.ase_engine import FrequencyController
     fc = FrequencyController(max_daily=3, min_interval_minutes=0, cooldown_after_reply_minutes=0)
-    fc._last_reset_date = datetime.now().date()
+    fc._last_reset_date = datetime.now(tz=timezone.utc).date()
     fc.record_sent()
     fc.record_sent()
     can, _ = fc.can_send()
@@ -381,13 +381,13 @@ def test_frequency_controller_from_dict():
 def test_frequency_controller_daily_reset():
     from proactive.ase_engine import FrequencyController
     fc = FrequencyController(max_daily=2, min_interval_minutes=0, cooldown_after_reply_minutes=0)
-    fc._last_reset_date = datetime.now().date()
+    fc._last_reset_date = datetime.now(tz=timezone.utc).date()
     fc.record_sent()
     fc.record_sent()
     can, _ = fc.can_send()
     assert can is False
-    fc._last_reset_date = (datetime.now() - timedelta(days=1)).date()
-    fc._last_sent_time = datetime.now() - timedelta(minutes=60)
+    fc._last_reset_date = (datetime.now(tz=timezone.utc) - timedelta(days=1)).date()
+    fc._last_sent_time = datetime.now(tz=timezone.utc) - timedelta(minutes=60)
     can, _ = fc.can_send()
     assert can is True
 

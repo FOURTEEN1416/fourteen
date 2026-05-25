@@ -38,20 +38,20 @@ class DefaultStickerProvider:
 
         count = 0
         for meta in self.DEFAULT_STICKERS:
-            file_path = self._data_dir / meta["file"]
+            file_path = self._data_dir / meta["file"]  # type: ignore[operator]
             if not file_path.exists():
                 logger.warning("预置表情文件不存在: %s，跳过", file_path)
                 continue
             try:
                 self._mgr.add_sticker(
-                    sticker_id=meta["id"],
-                    category=meta["category"],
-                    emotion_tags=meta["emotion_tags"],
+                    sticker_id=str(meta["id"]),
+                    category=str(meta["category"]),
+                    emotion_tags=list(meta["emotion_tags"]),
                     file_path=str(file_path),
                     fmt="png",
                 )
                 count += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("添加预置表情失败 %s: %s", meta["id"], e)
 
         logger.info("预置表情包初始化完成: %d/%d", count, len(self.DEFAULT_STICKERS))

@@ -6,6 +6,7 @@ Runs on Windows Python (needs access to D:\ WeChat databases).
 """
 
 import atexit
+import glob
 import hashlib
 import io
 import json
@@ -18,9 +19,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-
-logger = logging.getLogger("mcp_server")
-import glob
 import wave
 import xml.etree.ElementTree as ET
 from contextlib import closing
@@ -33,6 +31,8 @@ from key_utils import get_key_info, key_path_variants, strip_key_metadata
 from mcp.server.fastmcp import FastMCP
 
 from config import _DEFAULT, _config_file_path
+
+logger = logging.getLogger("mcp_server")
 
 # ============ 加密常量 ============
 PAGE_SZ = 4096
@@ -385,7 +385,8 @@ def _extract_pb_field_30(data):
         tag = 0
         shift = 0
         while pos < n:
-            b = data[pos]; pos += 1
+            b = data[pos]
+            pos += 1
             tag |= (b & 0x7f) << shift
             if not (b & 0x80):
                 break
@@ -397,9 +398,11 @@ def _extract_pb_field_30(data):
                 pos += 1
             pos += 1
         elif wire_type == 2:  # length-delimited
-            length = 0; shift = 0
+            length = 0
+            shift = 0
             while pos < n:
-                b = data[pos]; pos += 1
+                b = data[pos]
+                pos += 1
                 length |= (b & 0x7f) << shift
                 if not (b & 0x80):
                     break
@@ -3635,8 +3638,8 @@ def _transcribe_openai(wav_path):
 
     try:
         from openai import APIError, AuthenticationError, OpenAI, RateLimitError
-    except ImportError:
-        raise RuntimeError("缺少依赖: pip install openai")
+    except ImportError as err:
+        raise RuntimeError("缺少依赖: pip install openai") from err
 
     if not _openai_warning_emitted:
         print(
@@ -3656,12 +3659,12 @@ def _transcribe_openai(wav_path):
                 file=f,
                 response_format="verbose_json",
             )
-    except AuthenticationError:
-        raise RuntimeError("OpenAI 鉴权失败 (401)：检查 openai_api_key")
-    except RateLimitError:
-        raise RuntimeError("OpenAI 限流 (429)：稍后重试")
-    except APIError as e:
-        raise RuntimeError(f"OpenAI API 错误: {e}")
+    except AuthenticationError as err:
+        raise RuntimeError("OpenAI 鉴权失败 (401)：检查 openai_api_key") from err
+    except RateLimitError as err:
+        raise RuntimeError("OpenAI 限流 (429)：稍后重试") from err
+    except APIError as err:
+        raise RuntimeError(f"OpenAI API 错误: {err}") from err
 
     return {
         "language": getattr(result, "language", "unknown"),
@@ -3707,10 +3710,10 @@ def _transcribe_whisper_cpp(wav_path):
             os.unlink(txt_path)
             return {"language": WHISPER_CPP_LANGUAGE, "text": text or ""}
         return {"language": WHISPER_CPP_LANGUAGE, "text": ""}
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("whisper-cpp 超时 (120s)")
-    except Exception as e:
-        raise RuntimeError(f"whisper-cpp 转录失败: {e}")
+    except subprocess.TimeoutExpired as err:
+        raise RuntimeError("whisper-cpp 超时 (120s)") from err
+    except Exception as err:
+        raise RuntimeError(f"whisper-cpp 转录失败: {err}") from err
 
 
 def _transcribe(wav_path, backend):

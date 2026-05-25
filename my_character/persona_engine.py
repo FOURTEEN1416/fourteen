@@ -16,7 +16,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -256,7 +256,7 @@ class PersonaEngine:
                 affinity=self.emotion._state.affinity if self.emotion and hasattr(self.emotion, "_state") else 0,
             )
             return self._consistency_checker.check(response, ctx)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("check_consistency failed: %s", e)
             return None
 
@@ -281,7 +281,7 @@ class PersonaEngine:
             else:
                 ctx = context
             return self._evolution_engine.check_and_evolve(ctx)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("auto_evolve failed: %s", e)
             return None
 
@@ -304,7 +304,7 @@ class PersonaEngine:
     # ── V1兼容接口 ────────────────────────────────────────────
 
     def get_name(self) -> str:
-        return self._persona.get("name", "十四")
+        return self._persona.get("name", "十四")  # type: ignore[no-any-return]
 
     def get_core_anchors(self) -> list[str]:
         return list(self._original_anchors)
@@ -312,7 +312,7 @@ class PersonaEngine:
     def get_trait(self, name: str) -> float:
         traits = self._persona.get("personality_traits", {})
         if name in traits:
-            return traits[name]
+            return traits[name]  # type: ignore[no-any-return]
         return self.profile.all_dimensions().get(name, 0.5)
 
     def set_trait(self, name: str, value: float) -> None:
@@ -336,7 +336,7 @@ class PersonaEngine:
             return True
         for anchor, expected_hash in self._anchor_hashes.items():
             current_hash = hashlib.sha256(anchor.encode()).hexdigest()
-            if current_hash != expected_hash:
+            if current_hash != expected_hash:  # noqa: BLE001
                 logger.error("Anchor integrity violation detected for: %s", anchor[:20])
                 return False
         return True
@@ -361,7 +361,7 @@ class PersonaEngine:
         emotion_state: EmotionalState | None = None,
         style_prompt: str = "",
         few_shot_examples: list[str] | None = None,
-        chat_history: str = "",
+        chat_history: str = "",  # noqa: BLE001
         user_input: str = "",
         memory_context: dict | None = None,
         rag_context: str = "",
@@ -426,7 +426,7 @@ class PersonaEngine:
             segment = self._emotion_style_coupler.get_style_prompt_segment(coupled_style)
             if segment:
                 return f"[当前风格指导] {segment}"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Emotion-style segment generation failed: %s", e)
         return ""
 
@@ -507,7 +507,7 @@ class PersonaEngine:
         if not style_prompt:
             style_prompt = self.tone.get_style_prompt()
         if style_prompt:
-            prompt_parts.append(style_prompt)
+            prompt_parts.append(style_prompt)  # noqa: BLE001
             prompt_parts.append("")
 
         if few_shot_examples:
@@ -800,7 +800,7 @@ class PersonaEngine:
         after = copy.deepcopy(self._persona.get("personality_traits", {}))
 
         evolution_record = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "before": before,
             "after": after,
             "trigger": interaction_summary.get("reason", "unknown"),
@@ -836,7 +836,7 @@ class PersonaEngine:
                 self._persona["personality_traits"][dimension] = after
 
         log_entry = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "dimension": dimension,
             "before": before,
             "after": after,

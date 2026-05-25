@@ -13,7 +13,7 @@ import logging
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -81,7 +81,7 @@ class CloneDataManager:
                 {"username": c["username"], "display_name": c["display_name"], "source": "decrypt"}
                 for c in raw
             ]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("解密数据库获取联系人失败（降级到克隆数据）: %s", e)
             return []
 
@@ -101,7 +101,7 @@ class CloneDataManager:
                         "source": "clone_data",
                         "msg_count": msg_count,
                     })
-                except Exception:
+                except Exception:  # noqa: BLE001
                     contacts.append({
                         "username": name,
                         "display_name": name,
@@ -126,7 +126,7 @@ class CloneDataManager:
                 "has_lora": bool,       # 是否有训练模型
             }, ...]
         """
-        datasets = []
+        datasets = []  # type: ignore[var-annotated]
         if not CLONE_DATA_DIR.exists():
             return datasets
 
@@ -136,7 +136,7 @@ class CloneDataManager:
                 with open(f, encoding="utf-8") as fh:
                     data = json.load(fh)
                 msg_count = len(data) if isinstance(data, list) else 0
-            except Exception:
+            except Exception:  # noqa: BLE001
                 msg_count = 0
 
             mtime = os.path.getmtime(f)
@@ -148,7 +148,7 @@ class CloneDataManager:
                 "person_name": name,
                 "source": self._detect_source(name),
                 "message_count": msg_count,
-                "extracted_at": datetime.fromtimestamp(mtime).isoformat(),
+                "extracted_at": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
                 "has_style": style_path.exists(),
                 "has_lora": lora_dir.exists() and any(lora_dir.iterdir()),
             })
@@ -221,10 +221,10 @@ class CloneDataManager:
         }
         if timestamps:
             try:
-                min_dt = datetime.fromtimestamp(min(timestamps))
-                max_dt = datetime.fromtimestamp(max(timestamps))
+                min_dt = datetime.fromtimestamp(min(timestamps), tz=timezone.utc)
+                max_dt = datetime.fromtimestamp(max(timestamps), tz=timezone.utc)
                 stats["date_range"] = f"{min_dt.strftime('%Y-%m-%d')} ~ {max_dt.strftime('%Y-%m-%d')}"
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
         # 分页
@@ -285,7 +285,7 @@ class CloneDataManager:
         try:
             with open(raw_path, encoding="utf-8") as f:
                 convs = json.load(f)
-        except Exception:
+        except Exception:  # noqa: BLE001
             return False
 
         if not isinstance(convs, list) or index < 0 or index >= len(convs):
@@ -316,7 +316,7 @@ class CloneDataManager:
         try:
             with open(raw_path, encoding="utf-8") as f:
                 convs = json.load(f)
-        except Exception:
+        except Exception:  # noqa: BLE001
             return 0
 
         if not isinstance(convs, list):
@@ -362,15 +362,15 @@ class CloneDataManager:
             with open(raw_path, encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, list) and data:
-                return data[0].get("source", "unknown")
-        except Exception:
+                return data[0].get("source", "unknown")  # type: ignore[no-any-return]
+        except Exception:  # noqa: BLE001
             pass
         return "unknown"
 
     def _date_to_ts(self, date_str: str, end_of_day: bool = False) -> int:
         """日期字符串 → 时间戳"""
         try:
-            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            dt = datetime.strptime(date_str, "%Y-%m-%d")  # noqa: DTZ007
             if end_of_day:
                 dt = dt.replace(hour=23, minute=59, second=59)
             return int(dt.timestamp())

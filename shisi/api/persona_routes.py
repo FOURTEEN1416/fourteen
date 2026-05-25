@@ -47,7 +47,7 @@ async def update_persona(character_id: str, req: PersonaUpdateRequest):
         card = CharaCardV2.model_validate(req.card)
     except Exception:
         logger.exception("角色卡数据校验失败: %s", character_id)
-        raise HTTPException(status_code=400, detail="角色卡数据无效")
+        raise HTTPException(status_code=400, detail="角色卡数据无效") from None
     ok = _manager.update_character(character_id, card)
     if not ok:
         raise HTTPException(status_code=404, detail="角色不存在")

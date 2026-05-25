@@ -74,8 +74,8 @@ class DiarySummarizer:
 ## 情绪趋势
 - ..."""
             try:
-                return self.llm_func(prompt)
-            except Exception as e:
+                return self.llm_func(prompt)  # type: ignore[no-any-return]
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Weekly LLM summary failed: %s", e)
 
         return "\n".join(daily_summaries)
@@ -183,8 +183,9 @@ class DiarySummarizer:
 每日摘要（100字以内）："""
 
         try:
-            return self.llm_func(prompt)  # type: ignore
-        except Exception as e:
+            result = self.llm_func(prompt)  # type: ignore
+            return str(result) if result else self._summarize_with_template(chats)
+        except Exception as e:  # noqa: BLE001
             logger.warning("LLM summary failed: %s", e)
             return self._summarize_with_template(chats)
 

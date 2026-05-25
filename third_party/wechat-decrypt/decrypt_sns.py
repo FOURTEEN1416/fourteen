@@ -179,8 +179,11 @@ def main():
                 month_src = os.path.join(SNS_CACHE_DIR, month)
                 month_out = os.path.join(OUTPUT_DIR, month)
                 stats = _process_dir_stats(month_src, month_out, month)
-                total += stats[0]; success += stats[1]; skipped_thumb += stats[2]
-                skipped_exist += stats[3]; failed += stats[4]
+                total += stats[0]
+                success += stats[1]
+                skipped_thumb += stats[2]
+                skipped_exist += stats[3]
+                failed += stats[4]
         else:
             stats = _process_dir_stats(SNS_CACHE_DIR, OUTPUT_DIR, "")
             total, success, skipped_thumb, skipped_exist, failed = stats
@@ -196,8 +199,11 @@ def main():
             for month, file_list in sorted(xw_files.items()):
                 month_out = os.path.join(OUTPUT_DIR, month)
                 stats = _process_file_list(file_list, month_out, month)
-                total += stats[0]; success += stats[1]; skipped_thumb += stats[2]
-                skipped_exist += stats[3]; failed += stats[4]
+                total += stats[0]
+                success += stats[1]
+                skipped_thumb += stats[2]
+                skipped_exist += stats[3]
+                failed += stats[4]
 
     print(f"\n完成: 共 {total} 个文件")
     print(f"  成功解密: {success}")

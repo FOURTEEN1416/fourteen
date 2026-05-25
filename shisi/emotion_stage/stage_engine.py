@@ -31,7 +31,7 @@ class EmotionStageEngine:
 
         if character_id in self._states:
             old = self._states[character_id]
-            old_index = old.get("stage_index", 0)
+            old_index: int = old.get("stage_index", 0)
             new_index = self._config.stages.index(stage) if stage in self._config.stages else 0
 
             if new_index != old_index:
@@ -41,7 +41,7 @@ class EmotionStageEngine:
 
                 event = StageChangeEvent(
                     character_id=character_id,
-                    old_stage=old["current_stage"],
+                    old_stage=str(old["current_stage"]),
                     new_stage=stage.name,
                     old_index=old_index,
                     new_index=new_index,
@@ -62,7 +62,7 @@ class EmotionStageEngine:
         state = self._states.get(character_id)
         if not state:
             return None
-        idx = state.get("stage_index", 0)
+        idx: int = state.get("stage_index", 0)
         if 0 <= idx < len(self._config.stages):
             return self._config.stages[idx]
         return None

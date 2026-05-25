@@ -55,9 +55,11 @@ class TimeAwarenessTool(BaseTool):
         "required": ["action"],
     }
 
-    def execute(self, action: str, date: str = "", **kwargs) -> ToolResult:
+    def execute(self, **kwargs) -> ToolResult:
+        action = kwargs.get("action", "")
+        date_str = kwargs.get("date", "")
         from datetime import date as date_type
-        target = self._parse_date(date) if date else date_type.today()
+        target = self._parse_date(date_str) if date_str else date_type.today()  # noqa: DTZ011
         handlers = {
             "current": self._get_current,
             "holiday": lambda: self._check_holiday(target),
@@ -74,7 +76,7 @@ class TimeAwarenessTool(BaseTool):
             return ToolResult(False, error="time_awareness_failed")
 
     def _get_current(self) -> ToolResult:
-        now = datetime.now()
+        now = datetime.now()  # noqa: DTZ005
         today = now.date()
         result: dict = {
             "date": now.strftime("%Y-%m-%d"),

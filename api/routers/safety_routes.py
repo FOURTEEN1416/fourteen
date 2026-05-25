@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Query, Security
+from fastapi import APIRouter, HTTPException, Query, Security
 
 from api.state import SafetyLogManager
 

@@ -158,7 +158,7 @@ class EmotionStyleCoupler:
                     for k, v in data["affinity_levels"].items():
                         self._affinity_matrix[int(k)] = v
                 logger.info("Loaded emotion-style config from %s", path)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to load config: %s", e)
 
     def couple(

@@ -54,7 +54,7 @@ class PromptTemplateMgr:
         for filepath in self.template_dir.glob("*.yaml"):
             try:
                 with open(filepath, encoding="utf-8") as f:
-                    data = yaml.safe_load(f) or {}  # type: ignore
+                    data = yaml.safe_load(f) or {}
                 name = data.get("name", filepath.stem)
                 self._templates[name] = PromptTemplate(
                     name=name,
@@ -62,7 +62,7 @@ class PromptTemplateMgr:
                     version=data.get("version", "1.0"),
                     description=data.get("description", ""),
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to load template %s: %s", filepath, e)
         self._load_defaults()
 

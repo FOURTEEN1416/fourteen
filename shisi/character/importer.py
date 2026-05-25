@@ -26,7 +26,7 @@ class PersonaImporter:
 
         try:
             card, fmt = ParserDispatcher.parse_file(p)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return None, f"解析失败: {e}"
 
         errors = validate_card(card)

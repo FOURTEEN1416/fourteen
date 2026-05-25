@@ -55,7 +55,7 @@ class DataExtractor:
             清洗后的对话列表
         """
         try:
-            import wcf  # type: ignore
+            import wcf
         except ImportError:
             logger.error("WeChatFerry 未安装: pip install wcf")
             return self._empty_result("wcf_not_installed")
@@ -144,11 +144,11 @@ class DataExtractor:
 
             if date_from:
                 query += " AND CreateTime >= ?"
-                params.append(self._date_to_timestamp(date_from))
+                params.append(self._date_to_timestamp(date_from))  # type: ignore[arg-type]
 
             if date_to:
                 query += " AND CreateTime <= ?"
-                params.append(self._date_to_timestamp(date_to, end_of_day=True))
+                params.append(self._date_to_timestamp(date_to, end_of_day=True))  # type: ignore[arg-type]
 
             query += " ORDER BY CreateTime ASC LIMIT 5000"
 
@@ -380,7 +380,7 @@ class DataExtractor:
 
             try:
                 ts_str = f"{user_entry['date']} {user_entry['time']}"
-                ts = int(datetime.strptime(
+                ts = int(datetime.strptime(  # noqa: DTZ007
                     ts_str.replace("/", "-"),
                     "%Y-%m-%d %H:%M:%S" if ":" in user_entry["time"].split(":")[-1] and len(user_entry["time"].split(":")) > 2
                     else "%Y-%m-%d %H:%M"
@@ -489,7 +489,7 @@ class DataExtractor:
 
     def _date_to_timestamp(self, date_str: str, end_of_day: bool = False) -> int:
         """日期字符串 → 时间戳"""
-        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        dt = datetime.strptime(date_str, "%Y-%m-%d")  # noqa: DTZ007
         if end_of_day:
             dt = dt.replace(hour=23, minute=59, second=59)
         return int(dt.timestamp())

@@ -95,7 +95,7 @@ class StyleEnhancerV2:
         if self._base and hasattr(self._base, "enhance_style"):
             try:
                 base_result = self._base.enhance_style(base_style, chat_history=chat_history, persona_style=persona_style)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("Base enhancer failed: %s", e)
 
         base_dims = {}
@@ -150,7 +150,7 @@ class StyleEnhancerV2:
         return cross
 
     def _emotion_style_interaction(self, emotion_type: str, base_dims: dict[str, float]) -> float:
-        EMOTION_EFFECT = {
+        EMOTION_EFFECT = {  # noqa: N806
             "开心": 0.15, "撒娇": 0.2, "傲娇": -0.1,
             "生气": -0.2, "伤心": -0.15, "温柔": 0.1,
             "吃醋": 0.05, "害怕": -0.1, "害羞": 0.05,
@@ -159,7 +159,7 @@ class StyleEnhancerV2:
 
     def _context_style_interaction(self, time_ctx: Any, base_dims: dict[str, float]) -> float:
         period = getattr(time_ctx, "period", "afternoon")
-        CONTEXT_EFFECT = {
+        CONTEXT_EFFECT = {  # noqa: N806
             "late_night": -0.15, "night": -0.1,
             "morning": 0.05, "forenoon": 0.0,
             "afternoon": 0.0, "evening": 0.05,

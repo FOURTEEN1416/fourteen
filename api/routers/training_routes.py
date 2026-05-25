@@ -5,7 +5,7 @@ import logging
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Security
+from fastapi import APIRouter, HTTPException, Query, Security
 
 from api.state import TrainingStateManager
 
@@ -93,7 +93,7 @@ async def start_cleaning(accept_score: int = 2, _auth: bool = Security(_verify_a
                     with open(result_path, encoding="utf-8") as f:
                         cleaned_data = json.load(f)
                     cleaned_count = len(cleaned_data) if isinstance(cleaned_data, list) else 0
-                except Exception:
+                except Exception:  # noqa: BLE001
                     pass
             _training_mgr.update(
                 status="cleaned",
@@ -182,7 +182,7 @@ async def apply_clone(_auth: bool = Security(_verify_api_key)):
         return {"status": "applied", "path": result_path}
     except (ValueError, OSError):
         logger.exception("Apply clone failed")
-        raise HTTPException(status_code=500, detail="internal_error")
+        raise HTTPException(status_code=500, detail="internal_error") from None
 
 
 # ═══ Clone Data Management API ═══
@@ -260,7 +260,7 @@ async def delete_clone_conversation(
 @router.post("/clone/datasets/{person_id}/conversations/batch-delete")
 async def batch_delete_clone_conversations(
     person_id: str,
-    indices: list[int] = Query(..., description="要删除的索引列表"),
+    indices: list[int] = Query(..., description="要删除的索引列表"),  # noqa: B008
     _auth: bool = Security(_verify_api_key),
 ):
     mgr = _get_clone_mgr()

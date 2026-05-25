@@ -103,7 +103,7 @@ class EmotionMemorySystem:
             trigger_counts: dict[str, int] = {}
             for t in triggers:
                 trigger_counts[t] = trigger_counts.get(t, 0) + 1
-            common_triggers = sorted(trigger_counts, key=trigger_counts.get, reverse=True)[:5]
+            common_triggers = sorted(trigger_counts, key=trigger_counts.get, reverse=True)[:5]  # type: ignore[arg-type]
             avg_intensity = sum(e.intensity for e in events) / len(events)
 
             trend = "stable"
@@ -154,7 +154,7 @@ class EmotionMemorySystem:
         if not emotion_counts:
             return ("平常", 0.0)
 
-        dominant = max(emotion_counts, key=emotion_counts.get)
+        dominant = max(emotion_counts, key=emotion_counts.get)  # type: ignore[arg-type]
         freq = emotion_counts[dominant] / len(recent)
         return (dominant, round(freq, 4))
 

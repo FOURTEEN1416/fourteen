@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger("episodic_memory")
@@ -24,7 +24,7 @@ class EpisodicMemory:
             content_parts.append(f"{role}: {text}")
         doc = "\n".join(content_parts)
         meta = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "type": "episode",
             "session_id": session_id,
             "importance": importance,
@@ -38,12 +38,13 @@ class EpisodicMemory:
         try:
             coll.add(documents=[doc], metadatas=[meta], ids=[doc_id])
             return doc_id
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("store_episode failed: %s", e)
             return None
 
     def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
-        return self._vm._search("episodic_memory", query, top_k)
+        result = self._vm._search("episodic_memory", query, top_k)
+        return result if isinstance(result, list) else []
 
     def get_recent_episodes(self, n: int = 10) -> list[dict[str, Any]]:
         coll = self._vm._collections.get("episodic_memory")
@@ -57,6 +58,6 @@ class EpisodicMemory:
             for doc, meta in zip(results["documents"], results.get("metadatas", [{}] * len(results["documents"])), strict=False):
                 items.append({"content": doc, "metadata": meta})
             return items
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("get_recent_episodes failed: %s", e)
             return []

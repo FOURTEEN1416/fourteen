@@ -15,16 +15,16 @@ class MultimodalProcessor:
 
     def process(self, message: Any, message_type: str = "text") -> dict[str, Any]:
         if message_type == "image":
-            return self._vision.process(message)
+            return self._vision.process(message)  # type: ignore[no-any-return]
         if message_type == "voice":
-            return self._asr.process(message)
+            return self._asr.process(message)  # type: ignore[no-any-return]
         return {"text": str(message), "modality": "text", "original": message}
 
     def should_reply_with_emoji(self, emotion: str = "", affinity: int = 0) -> bool:
-        return self._emoji.should_send(emotion, affinity)
+        return self._emoji.should_send(emotion, affinity)  # type: ignore[no-any-return]
 
     def get_emoji_reply(self, emotion: str = "") -> str | None:
-        return self._emoji.get_emoji(emotion)
+        return self._emoji.get_emoji(emotion)  # type: ignore[no-any-return]
 
 
 class VisionHandler:
@@ -41,7 +41,7 @@ class VisionHandler:
                     ]},
                 ]
                 return {"text": "[图片已接收，正在理解中]", "modality": "image", "original": None}
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Vision processing failed: %s", e)
         return {"text": "[收到一张图片]", "modality": "image", "original": None}
 

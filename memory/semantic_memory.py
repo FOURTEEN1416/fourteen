@@ -26,19 +26,21 @@ class SemanticMemory:
                     "importance": importance,
                 }
                 coll.add(documents=[fact], metadatas=[meta], ids=[doc_id])
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("semantic_knowledge store failed: %s", e)
-        return fact_id
+        return fact_id  # type: ignore[no-any-return]
 
     def search(self, query: str, top_k: int = 5) -> dict[str, list[dict]]:
-        results = {"vector": [], "exact": []}
-        results["vector"] = self._vm._search("semantic_knowledge", query, top_k)
+        results: dict[str, list[dict]] = {"vector": [], "exact": []}
+        vector_result = self._vm._search("semantic_knowledge", query, top_k)
+        results["vector"] = vector_result if isinstance(vector_result, list) else []
         results["exact"] = self._sm.search_facts(query)
         return results
 
     def get_facts(self, category: str | None = None,
                   min_confidence: float = 0.0, limit: int = 50) -> list[dict]:
-        return self._sm.get_facts(category, min_confidence, limit)
+        result = self._sm.get_facts(category, min_confidence, limit)
+        return result if isinstance(result, list) else []
 
     def update_confidence(self, fact_id: int, confidence: float):
         self._sm.update_fact_confidence(fact_id, confidence)

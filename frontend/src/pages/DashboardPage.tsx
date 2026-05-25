@@ -5,7 +5,7 @@ import { useDashboard, useHealth, useWechatStatus, useTrainingProgress, useProac
 import ProactiveEnginePanel from '../components/common/ProactiveEnginePanel'
 import {
   Activity, Smartphone, MessageCircle, GraduationCap,
-  Heart, Brain, Settings, FileText, Wifi, RefreshCw,
+  Heart, Brain, Settings, FileText, RefreshCw,
   PlugZap, Play, ChevronRight, Users, BarChart3,
   Database, PenTool, Sticker, Shield,
 } from 'lucide-react'

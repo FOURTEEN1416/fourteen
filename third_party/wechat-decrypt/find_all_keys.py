@@ -63,11 +63,16 @@ def try_key(key_bytes, ciphertext):
     try:
         cipher = AES.new(key_bytes, AES.MODE_ECB)
         dec = cipher.decrypt(ciphertext)
-        if dec[:3] == b'\xFF\xD8\xFF': return 'JPEG'
-        if dec[:4] == b'\x89PNG': return 'PNG'
-        if dec[:4] == b'RIFF': return 'WEBP'
-        if dec[:4] == b'wxgf': return 'WXGF'
-        if dec[:3] == b'GIF': return 'GIF'
+        if dec[:3] == b'\xFF\xD8\xFF':
+            return 'JPEG'
+        if dec[:4] == b'\x89PNG':
+            return 'PNG'
+        if dec[:4] == b'RIFF':
+            return 'WEBP'
+        if dec[:4] == b'wxgf':
+            return 'WXGF'
+        if dec[:3] == b'GIF':
+            return 'GIF'
     except Exception:
         pass
     return None

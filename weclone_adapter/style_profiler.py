@@ -77,7 +77,7 @@ class StyleProfiler:
         tags = []
         d = profile.sentence_length_dist
         if d:
-            dominant = max(d, key=d.get)
+            dominant = max(d, key=d.get)  # type: ignore[arg-type]
             if "短句" in dominant:
                 tags.append("短句型")
             elif "长句" in dominant:
@@ -91,7 +91,7 @@ class StyleProfiler:
             tags.append("网络冲浪")
 
         if profile.emotion_dist:
-            top = max(profile.emotion_dist, key=profile.emotion_dist.get)
+            top = max(profile.emotion_dist, key=profile.emotion_dist.get)  # type: ignore[arg-type]
             if top == "正面":
                 tags.append("阳光型")
             elif top == "负面":

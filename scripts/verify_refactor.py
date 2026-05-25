@@ -30,21 +30,21 @@ def verify_refactor():
         from shisi.core.models import CharacterAggregate
         char = CharacterAggregate(name="测试角色")
         print(f"   ✓ 可创建角色: {char.id}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"   ✗ 模块检查失败: {e}")
         all_passed = False
 
     print("\n3. 检查API模块...")
     try:
         print("   ✓ API v2 可导入")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"   ✗ API检查失败: {e}")
         all_passed = False
 
     print("\n4. 检查服务层...")
     try:
         print("   ✓ CharacterService 可导入")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"   ✗ 服务检查失败: {e}")
         all_passed = False
 

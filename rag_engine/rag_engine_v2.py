@@ -52,7 +52,7 @@ class Reranker:
 
     def rerank(self, vector_results: list[dict], keyword_results: list[dict],
                threshold: float = 0.3) -> list[dict]:
-        scored = {}
+        scored = {}  # type: ignore[var-annotated]
         for r in vector_results:
             content = r.get("content", "")
             distance = r.get("distance", 1.0)
@@ -108,7 +108,7 @@ class HallucinationGuard:
                         if results.get("vector") or results.get("exact") or results.get("results"):
                             continue
                         return False, claim
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     # semantic_memory 不可用或 search 接口异常，跳过检查
                     logger.debug("Hallucination guard search failed, skipping check: %s", e)
                     continue
@@ -134,7 +134,7 @@ class RAGEngineV2:
         if self._vm is not None:
             try:
                 vector_results = self._vm.search_chats_sync(query, top_k)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Vector search failed: %s", e)
         keyword_results = self._keyword_retriever.search(query, top_k)
         merged = self._reranker.rerank(vector_results, keyword_results)
@@ -143,7 +143,7 @@ class RAGEngineV2:
         if self._tone_mimic:
             try:
                 style_examples = self._tone_mimic.retrieve_style_examples(query, top_k=3)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("Style example retrieval failed: %s", e)
         return {
             "results": final,

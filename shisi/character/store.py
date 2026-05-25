@@ -7,7 +7,7 @@ import re
 import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .models import CardFormat, CharaCardV2, CharacterState
@@ -37,7 +37,7 @@ class CharacterStore:
     def save_character(self, card: CharaCardV2, fmt: CardFormat = CardFormat.CHARA_CARD_V2) -> str:
         char_id = re.sub(r'[^\w\u4e00-\u9fff]', '_', card.data.name).strip('_')[:50]
         if not char_id:
-            char_id = f"char_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            char_id = f"char_{datetime.now(tz=timezone.utc).strftime('%Y%m%d%H%M%S')}"
 
         card_json = card.model_dump_json()
         tags_json = json.dumps(card.data.tags, ensure_ascii=False)
@@ -81,8 +81,8 @@ class CharacterStore:
                     format=CardFormat(r["format"]) if r["format"] in CardFormat._value2member_map_ else CardFormat.CHARA_CARD_V2,
                     is_active=bool(r["is_active"]),
                     tags=tags,
-                    created_at=datetime.fromisoformat(r["created_at"]) if r["created_at"] else datetime.now(),
-                    updated_at=datetime.fromisoformat(r["updated_at"]) if r["updated_at"] else datetime.now(),
+                    created_at=datetime.fromisoformat(r["created_at"]) if r["created_at"] else datetime.now(tz=timezone.utc),
+                    updated_at=datetime.fromisoformat(r["updated_at"]) if r["updated_at"] else datetime.now(tz=timezone.utc),
                 ))
             return result
 

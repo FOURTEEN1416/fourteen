@@ -114,7 +114,7 @@ class StateMigrator:
                 del self._snapshots[oldest_key]
             logger.info("Snapshot created: %s, affinity=%d", persona_id, affinity)
             return snap
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Snapshot failed: %s", e)
             return None
 
@@ -163,6 +163,8 @@ class StateMigrator:
             return MigrationResult(success=False, error="migration_failed")
 
     def _apply_soft(self, snapshot: StateSnapshot) -> None:
+        if self._emotion is None:
+            return
         state = self._emotion._state if hasattr(self._emotion, "_state") else None
         if state is None:
             return
@@ -170,10 +172,11 @@ class StateMigrator:
         new_affinity = int(snapshot.affinity_level * self.SOFT_AFFINITY_FACTOR)
         state.affinity = max(0, min(8, new_affinity))
         state.energy = snapshot.energy
-        if hasattr(self._emotion, "_total_chats"):
-            self._emotion._total_chats = snapshot.total_chats
+        self._emotion._total_chats = snapshot.total_chats
 
     def _apply_inherit(self, snapshot: StateSnapshot) -> None:
+        if self._emotion is None:
+            return
         state = self._emotion._state if hasattr(self._emotion, "_state") else None
         if state is None:
             return
@@ -181,10 +184,11 @@ class StateMigrator:
         state.affinity = snapshot.affinity_level
         state.affection_points = snapshot.affection_points
         state.energy = snapshot.energy
-        if hasattr(self._emotion, "_total_chats"):
-            self._emotion._total_chats = snapshot.total_chats
+        self._emotion._total_chats = snapshot.total_chats
 
     def rollback(self, migration_id: str) -> bool:
+        if self._emotion is None:
+            return False
         for record in reversed(self._migration_log):
             if record.id == migration_id and record.success:
                 before = record.snapshot_before
@@ -210,7 +214,7 @@ class StateMigrator:
             for r in self._migration_log[-limit:]
         ]
 
-    def health_check(self) -> dict:
+    def health_check(self) -> dict[str, Any]:
         return {
             "emotion_set": self._emotion is not None,
             "memory_set": self._memory is not None,

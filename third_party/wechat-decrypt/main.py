@@ -16,9 +16,9 @@ import platform
 import subprocess
 import sys
 
-print = functools.partial(print, flush=True)
-
 from key_utils import strip_key_metadata
+
+print = functools.partial(print, flush=True)
 
 
 def check_wechat_running():

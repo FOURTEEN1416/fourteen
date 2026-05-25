@@ -1,6 +1,7 @@
 """WeChat Decrypt GUI — 一键解密 / 导出消息 / 转换音频"""
 import glob as globmod
 import hashlib
+import importlib.util  # noqa: F401 - used for dynamic loading
 import os
 import sqlite3
 import subprocess
@@ -22,7 +23,6 @@ os.environ["WECHAT_DECRYPT_APP_DIR"] = BASE_DIR
 
 # 显式导入：让 PyInstaller 收集子脚本需要的所有依赖
 # （这些脚本通过 exec 动态加载，PyInstaller 无法自动检测）
-import importlib.util  # noqa: F401 - used for dynamic loading
 
 if False:  # noqa: never executed, only for PyInstaller dependency detection
     import ctypes

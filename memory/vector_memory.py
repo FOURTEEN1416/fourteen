@@ -18,14 +18,14 @@ import asyncio
 import hashlib
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger("vector_memory")
 
 try:
     import chromadb
-    from chromadb.api.models.Collection import Collection  # type: ignore
+    from chromadb.api.models.Collection import Collection
     from chromadb.utils import embedding_functions
     HAS_CHROMADB = True
 except ImportError:
@@ -69,20 +69,19 @@ class VectorMemory:
     def _init(self) -> None:
         try:
             os.makedirs(self.chroma_path, exist_ok=True)
-            client = chromadb.PersistentClient(path=self.chroma_path)  # type: ignore
-            ef = embedding_functions.DefaultEmbeddingFunction()  # type: ignore
-
+            client = chromadb.PersistentClient(path=self.chroma_path)
+            ef = embedding_functions.DefaultEmbeddingFunction()
             for name in self.COLLECTIONS:
                 try:
                     self._collections[name] = client.get_or_create_collection(
                         name=name,
                         embedding_function=ef,  # type: ignore
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("Failed to init collection '%s': %s", name, e)
 
             logger.info("VectorMemory ready: %s", self.chroma_path)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("ChromaDB init failed: %s", e)
 
     # ── 聊天历史 ──────────────────────────────────────────
@@ -93,7 +92,7 @@ class VectorMemory:
             return None
         doc = f"User: {user_msg}\nAssistant: {reply}"
         meta = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "type": "chat",
             "user_msg_len": len(user_msg),
             "reply_len": len(reply),
@@ -104,18 +103,18 @@ class VectorMemory:
         try:
             await asyncio.to_thread(coll.add, documents=[doc], metadatas=[meta], ids=[doc_id])
             return doc_id
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("store_chat failed: %s", e)
             return None
 
     def store_chat_sync(self, user_msg: str, reply: str, metadata: dict | None = None) -> str | None:
-        return _run_async(self.store_chat(user_msg, reply, metadata))
+        return _run_async(self.store_chat(user_msg, reply, metadata))  # type: ignore[no-any-return]
 
     async def search_chats(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         return await self._search("chat_history", query, top_k)
 
     def search_chats_sync(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
-        return _run_async(self.search_chats(query, top_k))
+        return _run_async(self.search_chats(query, top_k))  # type: ignore[no-any-return]
 
     # ── 用户事实 ──────────────────────────────────────────
 
@@ -125,19 +124,19 @@ class VectorMemory:
             return None
         doc_id = f"fact_{hashlib.md5(fact.encode()).hexdigest()[:12]}"
         meta = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "category": category,
             "confidence": confidence,
         }
         try:
             await asyncio.to_thread(coll.add, documents=[fact], metadatas=[meta], ids=[doc_id])
             return doc_id
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("store_fact failed: %s", e)
             return None
 
     def store_fact_sync(self, fact: str, category: str = "general", confidence: float = 0.5) -> str | None:
-        return _run_async(self.store_fact(fact, category, confidence))
+        return _run_async(self.store_fact(fact, category, confidence))  # type: ignore[no-any-return]
 
     async def add_batch(self, documents: list[str], metadatas: list[dict[str, Any]],
                   ids: list[str], collection: str = "user_facts") -> bool:
@@ -150,19 +149,19 @@ class VectorMemory:
         try:
             await asyncio.to_thread(coll.add, documents=documents, metadatas=metadatas, ids=ids)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("add_batch failed: %s", e)
             return False
 
     def add_batch_sync(self, documents: list[str], metadatas: list[dict[str, Any]],
                   ids: list[str], collection: str = "user_facts") -> bool:
-        return _run_async(self.add_batch(documents, metadatas, ids, collection))
+        return _run_async(self.add_batch(documents, metadatas, ids, collection))  # type: ignore[no-any-return]
 
     async def search_facts(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         return await self._search("user_facts", query, top_k)
 
     def search_facts_sync(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
-        return _run_async(self.search_facts(query, top_k))
+        return _run_async(self.search_facts(query, top_k))  # type: ignore[no-any-return]
 
     async def get_all_facts(self) -> list[str]:
         coll = self._collections.get("user_facts")
@@ -170,13 +169,13 @@ class VectorMemory:
             return []
         try:
             results = await asyncio.to_thread(coll.get)
-            return results.get("documents", [])
-        except Exception as e:
+            return results.get("documents", [])  # type: ignore[no-any-return]
+        except Exception as e:  # noqa: BLE001
             logger.warning("get_all_facts failed: %s", e)
             return []
 
     def get_all_facts_sync(self) -> list[str]:
-        return _run_async(self.get_all_facts())
+        return _run_async(self.get_all_facts())  # type: ignore[no-any-return]
 
     # ── 情绪日志 ──────────────────────────────────────────
 
@@ -186,21 +185,21 @@ class VectorMemory:
             return None
         doc = f"情感: {emotion}, 强度: {intensity:.2f}, 触发: {trigger}"
         meta = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "emotion": emotion,
             "intensity": intensity,
             "trigger": trigger,
         }
         try:
-            doc_id = f"emotion_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+            doc_id = f"emotion_{datetime.now(tz=timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
             await asyncio.to_thread(coll.add, documents=[doc], metadatas=[meta], ids=[doc_id])
             return doc_id
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("store_emotion_log failed: %s", e)
             return None
 
     def store_emotion_log_sync(self, emotion: str, intensity: float, trigger: str = "") -> str | None:
-        return _run_async(self.store_emotion_log(emotion, intensity, trigger))
+        return _run_async(self.store_emotion_log(emotion, intensity, trigger))  # type: ignore[no-any-return]
 
     async def get_recent_emotions(self, n: int = 10) -> list[dict[str, Any]]:
         coll = self._collections.get("emotion_logs")
@@ -214,12 +213,12 @@ class VectorMemory:
             for meta, doc in zip(results["metadatas"], results["documents"], strict=False):
                 items.append({"metadata": meta, "content": doc})
             return items
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("get_recent_emotions failed: %s", e)
             return []
 
     def get_recent_emotions_sync(self, n: int = 10) -> list[dict[str, Any]]:
-        return _run_async(self.get_recent_emotions(n))
+        return _run_async(self.get_recent_emotions(n))  # type: ignore[no-any-return]
 
     # ── 通用 ──────────────────────────────────────────────
 
@@ -240,7 +239,7 @@ class VectorMemory:
                     "distance": results["distances"][0][i] if results.get("distances") else 0,
                 })
             return items
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Search failed on %s: %s", collection_name, e)
             return []
 
@@ -266,12 +265,12 @@ class VectorMemory:
                                 "metadata": meta,
                                 "distance": res["distances"][0][i] if res.get("distances") else 0,
                             })
-                except Exception:
+                except Exception:  # noqa: BLE001
                     pass
         return all_results
 
     def search_sync(self, query: str, top_k: int = 5, filter_dict: dict | None = None) -> list[dict[str, Any]]:
-        return _run_async(self.search(query, top_k, filter_dict))
+        return _run_async(self.search(query, top_k, filter_dict))  # type: ignore[no-any-return]
 
     async def store_text(self, text: str, metadata: dict | None = None,
                    collection: str = "episodic_memory") -> str | None:
@@ -282,13 +281,13 @@ class VectorMemory:
         try:
             await asyncio.to_thread(coll.add, documents=[text], metadatas=[metadata or {}], ids=[doc_id])
             return doc_id
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("store_text failed: %s", e)
             return None
 
     def store_text_sync(self, text: str, metadata: dict | None = None,
                    collection: str = "episodic_memory") -> str | None:
-        return _run_async(self.store_text(text, metadata, collection))
+        return _run_async(self.store_text(text, metadata, collection))  # type: ignore[no-any-return]
 
     def health_check(self) -> dict:
         return {

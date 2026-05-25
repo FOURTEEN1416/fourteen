@@ -57,8 +57,8 @@ class ConfigLoader:
 
     def reload(self) -> None:
         with self._reload_lock:
-            new_cache = {}
-            new_merged = {}
+            new_cache = {}  # type: ignore[var-annotated]
+            new_merged = {}  # type: ignore[var-annotated]
             _old_cache, _old_merged = self._cache, self._merged
             self._cache, self._merged = new_cache, new_merged
             self.load_persona()
@@ -86,7 +86,7 @@ class ConfigLoader:
                     return data
             else:
                 logger.warning("Config file not found: %s, using defaults", filepath)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Failed to load %s: %s", filepath, e)
 
         self._cache[filename] = default

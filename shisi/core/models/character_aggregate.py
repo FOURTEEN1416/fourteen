@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -72,7 +72,7 @@ class CharacterAggregate(BaseModel):
         )
 
         self.emotional_state = new_state
-        self.updated_at = datetime.now()
+        self.updated_at = datetime.now(tz=timezone.utc)
         return new_state
 
     def _detect_emotion(self, message: str) -> EmotionType:

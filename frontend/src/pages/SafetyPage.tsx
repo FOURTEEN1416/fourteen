@@ -1,8 +1,6 @@
-import { useState } from 'react'
 import { useSafetyStats, useSafetyLog, useSafetyConfig } from '../hooks/useQueries'
 import Card from '../components/common/Card'
 import Badge from '../components/common/Badge'
-import Button from '../components/common/Button'
 import Skeleton from '../components/common/Skeleton'
 import { Shield, AlertTriangle, Ban, ToggleLeft, ToggleRight } from 'lucide-react'
 

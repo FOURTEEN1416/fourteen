@@ -142,7 +142,7 @@ JSON:"""
                 for f in facts:
                     f["source"] = "llm"
                 return facts
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("LLM fact extraction failed: %s", e)
 
         return []
@@ -151,7 +151,7 @@ JSON:"""
 
     def _extract_with_rules(self, messages: list[str]) -> list[dict[str, Any]]:
         """使用正则规则提取事实"""
-        facts = []
+        facts = []  # type: ignore[var-annotated]
 
         for msg in messages:
             for category, patterns in PATTERNS.items():
@@ -195,7 +195,7 @@ JSON:"""
             by_category[cat].append(f)
 
         result = []
-        for cat, items in by_category.items():
+        for cat, items in by_category.items():  # noqa: B007
             # 按置信度排序
             items.sort(key=lambda x: x.get("confidence", 0), reverse=True)
 
@@ -214,7 +214,7 @@ JSON:"""
         """尝试从 LLM 输出中解析 JSON"""
         # 直接解析
         try:
-            return json.loads(text)
+            return json.loads(text)  # type: ignore[no-any-return]
         except json.JSONDecodeError:
             pass
 
@@ -222,7 +222,7 @@ JSON:"""
         match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
         if match:
             try:
-                return json.loads(match.group(1))
+                return json.loads(match.group(1))  # type: ignore[no-any-return]
             except json.JSONDecodeError:
                 pass
 
@@ -230,13 +230,13 @@ JSON:"""
         match = re.search(r'\[.*?\]', text, re.DOTALL)
         if match:
             try:
-                return json.loads(match.group(0))
+                return json.loads(match.group(0))  # type: ignore[no-any-return]
             except json.JSONDecodeError:
                 pass
 
         return None
 
-    def health_check(self) -> dict:
+    def health_check(self) -> dict[str, Any]:
         """健康检查"""
         return {
             "llm_available": self.llm_func is not None,

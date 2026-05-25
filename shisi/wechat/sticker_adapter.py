@@ -48,21 +48,21 @@ class WeChatStickerAdapter:
         if not sticker:
             return False
         try:
-            from shisi.sticker.safety_check import SafetyChecker
+            from shisi.sticker.safety_check import SafetyChecker  # type: ignore[attr-defined]
             checker = SafetyChecker()
             if not checker.check(sticker):
                 logger.warning("表情包安全检测未通过: %s", sticker.get("sticker_id"))
                 return False
         except ImportError:
             pass
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("安全检测异常: %s", e)
         file_path = sticker.get("file_path", "")
-        if not file_path:
+        if not file_path or not isinstance(file_path, str):
             return False
         from pathlib import Path
         p = Path(file_path)
         if not p.exists():
             logger.warning("表情包文件不存在: %s", file_path)
             return False
-        return self._connector.send_image(p.read_bytes(), to_user=to_user)
+        return bool(self._connector.send_image(p.read_bytes(), to_user=to_user))

@@ -33,7 +33,7 @@ class CharacterVoiceManager:
                 with open(self._config_path, encoding="utf-8") as f:
                     self._bindings = json.load(f)
                 logger.info("角色音色配置已加载: %d 个角色", len(self._bindings))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error("加载角色音色配置失败: %s", e)
                 self._bindings = {}
 
@@ -93,4 +93,4 @@ class CharacterVoiceManager:
         success = await tts_manager.switch_engine(engine)
         if success:
             logger.info("角色 %s 音色已切换到 %s", character_id, engine)
-        return success
+        return bool(success)

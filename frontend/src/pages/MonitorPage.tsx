@@ -41,7 +41,7 @@ export default function MonitorPage() {
 
   const { data: affinity, isLoading: affLoading } = useAffinity(activeId)
   const { data: stage, isLoading: stageLoading } = useEmotionStage(activeId)
-  const { data: stageList } = useEmotionStageList()
+  useEmotionStageList()
   const { data: unlocksData, isLoading: unlocksLoading } = useAffinityUnlocks(activeId)
 
   const loading = charsLoading || affLoading || stageLoading || unlocksLoading

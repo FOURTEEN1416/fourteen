@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from shisi.core.models.affinity_level import AffinityLevel
@@ -90,7 +90,7 @@ class SQLiteCharacterRepository:
                     json.dumps(character.emotional_state.to_dict(), ensure_ascii=False),
                     1 if character.id == active_id else 0,
                     character.created_at.isoformat(),
-                    datetime.now().isoformat(),
+                    datetime.now(tz=timezone.utc).isoformat(),
                     character.version + 1,
                     character.source_format,
                     json.dumps(character.source_data, ensure_ascii=False)

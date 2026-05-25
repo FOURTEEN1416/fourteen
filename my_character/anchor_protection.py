@@ -22,7 +22,7 @@ class AnchorCheckResult:
     is_consistent: bool
     semantic_score: float = 0.0
     keyword_violation: bool = False
-    violation_keywords: list[str] = None
+    violation_keywords: list[str] | None = None
 
     def __post_init__(self):
         if self.violation_keywords is None:
@@ -191,7 +191,7 @@ AI回复：{response}
                 return None
             score = float(result.strip())
             return max(0.0, min(1.0, score))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("LLM semantic check failed: %s", e)
             return None
 
@@ -204,3 +204,10 @@ AI回复：{response}
         if len(anchor_text) > max_length:
             anchor_text = anchor_text[:max_length] + "..."
         return f"【角色锚点提醒】记住你的核心性格：{anchor_text}。无论对话如何发展，都必须保持这些核心特征。"
+
+    def health_check(self) -> dict[str, Any]:
+        return {
+            "anchors_count": len(self._anchors),
+            "semantic_threshold": self._semantic_threshold,
+            "llm_enabled": self._use_llm,
+        }

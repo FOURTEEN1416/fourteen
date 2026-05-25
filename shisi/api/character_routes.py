@@ -66,7 +66,7 @@ async def switch_character(req: SwitchRequest):
 
 
 @router.post("/import", response_model=ApiResponse)
-async def import_characters(file: UploadFile = File(...)):
+async def import_characters(file: UploadFile = File(...)):  # noqa: B008
     mgr = _get_manager()
     import tempfile
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False, encoding="utf-8") as tmp:
@@ -99,12 +99,12 @@ async def update_character(character_id: str, req: UpdateRequest):
         card = CharaCardV2.model_validate(req.card)
     except Exception:
         logger.exception("角色卡数据校验失败: %s", character_id)
-        raise HTTPException(status_code=400, detail="角色卡数据无效")
+        raise HTTPException(status_code=400, detail="角色卡数据无效") from None
     try:
         ok = mgr.update_character(character_id, card)
     except ValidationError:
         logger.exception("角色更新校验失败: %s", character_id)
-        raise HTTPException(status_code=400, detail="角色数据更新失败")
+        raise HTTPException(status_code=400, detail="角色数据更新失败") from None
     if not ok:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
     return ApiResponse(data={"character_id": character_id, "message": "更新成功"})

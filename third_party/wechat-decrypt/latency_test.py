@@ -10,13 +10,17 @@ from datetime import datetime
 
 from Crypto.Cipher import AES
 
+from config import load_config
+
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-PAGE_SZ = 4096; KEY_SZ = 32; SALT_SZ = 16; RESERVE_SZ = 80
+PAGE_SZ = 4096
+KEY_SZ = 32
+SALT_SZ = 16
+RESERVE_SZ = 80
 SQLITE_HDR = b'SQLite format 3\x00'
-WAL_HEADER_SZ = 32; WAL_FRAME_HEADER_SZ = 24
-
-from config import load_config
+WAL_HEADER_SZ = 32
+WAL_FRAME_HEADER_SZ = 24
 
 _cfg = load_config()
 DB_DIR = _cfg["db_dir"]
@@ -51,7 +55,8 @@ def full_decrypt(src, dst):
     with open(src, 'rb') as fin, open(dst, 'wb') as fout:
         for pgno in range(1, total + 1):
             page = fin.read(PAGE_SZ)
-            if len(page) < PAGE_SZ: break
+            if len(page) < PAGE_SZ:
+                break
             fout.write(decrypt_page(enc_key, page, pgno))
     return total, (time.perf_counter() - t0) * 1000
 
@@ -70,14 +75,18 @@ def decrypt_wal_full(wal_path, dst):
 
         while wf.tell() + frame_size <= wal_sz:
             fh = wf.read(WAL_FRAME_HEADER_SZ)
-            if len(fh) < WAL_FRAME_HEADER_SZ: break
+            if len(fh) < WAL_FRAME_HEADER_SZ:
+                break
             pgno = struct.unpack('>I', fh[0:4])[0]
             frame_salt1 = struct.unpack('>I', fh[8:12])[0]
             frame_salt2 = struct.unpack('>I', fh[12:16])[0]
             ep = wf.read(PAGE_SZ)
-            if len(ep) < PAGE_SZ: break
-            if pgno == 0 or pgno > 1000000: continue
-            if frame_salt1 != wal_salt1 or frame_salt2 != wal_salt2: continue
+            if len(ep) < PAGE_SZ:
+                break
+            if pgno == 0 or pgno > 1000000:
+                continue
+            if frame_salt1 != wal_salt1 or frame_salt2 != wal_salt2:
+                continue
             dec = decrypt_page(enc_key, ep, pgno)
             df.seek((pgno - 1) * PAGE_SZ)
             df.write(dec)
@@ -119,7 +128,7 @@ while time.time() - start < 60:
     try:
         wal_mtime = os.path.getmtime(wal_path) if os.path.exists(wal_path) else 0
         db_mtime = os.path.getmtime(session_db)
-    except:
+    except Exception:
         continue
 
     if wal_mtime == prev_wal_mtime and db_mtime == prev_db_mtime:
@@ -167,7 +176,7 @@ while time.time() - start < 60:
 
     print(f"  处理总耗时: {total_ms:.1f}ms (解密{decrypt_ms:.1f}ms + 查询{query_ms:.1f}ms)", flush=True)
 
-    for uname, ts, summary, sender, delay in sorted(new_msgs, key=lambda x: x[1]):
+    for _uname, ts, summary, sender, delay in sorted(new_msgs, key=lambda x: x[1]):
         if ':\n' in summary:
             summary = summary.split(':\n', 1)[1]
         msg_time = datetime.fromtimestamp(ts).strftime('%H:%M:%S')

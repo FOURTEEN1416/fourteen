@@ -23,7 +23,7 @@ class SecretManager:
             value, timestamp = self._secrets[key]
             if time.time() - timestamp < self._ttl:
                 self._secrets.move_to_end(key)
-                return value
+                return value  # type: ignore[no-any-return]
             del self._secrets[key]
         value = os.environ.get(key)
         if value:
@@ -32,7 +32,7 @@ class SecretManager:
         value = self._load_from_file(key)
         if value:
             self._add_to_cache(key, value)
-            return value
+            return str(value)
         return default
 
     def _add_to_cache(self, key: str, value: str) -> None:
@@ -45,7 +45,7 @@ class SecretManager:
         if secret_file.exists():
             try:
                 return secret_file.read_text().strip()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to read secret file for %s: %s", key, e)
         return None
 

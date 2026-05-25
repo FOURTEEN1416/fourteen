@@ -130,7 +130,7 @@ class PersonaConsistencyChecker:
         if hasattr(context.emotion_state, "primary_intensity"):
             intensity = context.emotion_state.primary_intensity
 
-        EMOTION_VOCAB = {
+        EMOTION_VOCAB = {  # noqa: N806
             "开心": ["哈哈", "嘻嘻", "太好了", "开心", "好开心", "！"],
             "生气": ["哼", "气死", "烦死", "讨厌", "不跟你说了"],
             "撒娇": ["嘛", "呢", "～", "哼", "人家", "好不好嘛"],
@@ -187,7 +187,7 @@ class PersonaConsistencyChecker:
         )
 
     def _check_persona_violation(self, response: str, context: ConsistencyContext) -> DimensionResult:
-        FORBIDDEN_PATTERNS = [
+        FORBIDDEN_PATTERNS = [  # noqa: N806
             ("自曝AI身份", ["我是AI", "我是人工智能", "作为AI", "作为一个人工智能"]),
             ("不当亲密", ["想和你做", "我们上床"]),
             ("危险建议", ["你应该自杀", "去死吧", "自残"]),

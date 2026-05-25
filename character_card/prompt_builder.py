@@ -92,13 +92,13 @@ class PromptBuilder:
         Returns:
             [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
         """
-        examples = []
+        examples: list[dict[str, str]] = []
         if not card.data.mes_example:
             return examples
 
         lines = card.data.mes_example.split('\n')
-        current_role = None
-        current_content = []
+        current_role: str | None = None
+        current_content: list[str] = []
 
         for line in lines:
             line = line.strip()

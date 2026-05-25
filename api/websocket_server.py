@@ -8,7 +8,7 @@ from typing import Any
 
 try:
     import websockets
-    from websockets.server import serve
+    from websockets.server import serve  # type: ignore[attr-defined]
     HAS_WEBSOCKETS = True
 except ImportError:
     HAS_WEBSOCKETS = False
@@ -35,7 +35,7 @@ class WebSocketServer:
             logger.warning("websockets not installed, WebSocket server disabled")
             return
         self._running = True
-        async with serve(self._handler, self.host, self.port, ping_interval=30, ping_timeout=10):  # type: ignore
+        async with serve(self._handler, self.host, self.port, ping_interval=30, ping_timeout=10):
             logger.info("WebSocket server started on %s:%d", self.host, self.port)
             await asyncio.Future()
 
@@ -62,7 +62,7 @@ class WebSocketServer:
                 query = path.split('?', 1)[1]
                 params = dict(p.split('=', 1) for p in query.split('&') if '=' in p)
                 token = params.get('token', '')
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
 
         # 如果 URL 中没有 token，等待首条消息进行认证
@@ -139,7 +139,7 @@ class WebSocketServer:
                 except Exception:
                     logger.exception("WebSocket handler error")
                     await websocket.send(json.dumps({"type": "error", "message": "internal_error"}))
-        except websockets.exceptions.ConnectionClosed:  # type: ignore
+        except websockets.exceptions.ConnectionClosed:
             pass
         finally:
             async with self._client_lock:
@@ -159,7 +159,7 @@ class WebSocketServer:
         async def send_to_client(ws):
             try:
                 await ws.send(message)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 disconnected.add(ws)
 
         async with self._client_lock:

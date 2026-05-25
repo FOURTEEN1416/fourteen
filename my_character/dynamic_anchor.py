@@ -25,17 +25,17 @@ class ActivationCondition:
             return True
         try:
             if self.operator == ">=":
-                return actual >= self.value
+                return actual >= self.value  # type: ignore[no-any-return]
             elif self.operator == "<=":
-                return actual <= self.value
+                return actual <= self.value  # type: ignore[no-any-return]
             elif self.operator == "==":
-                return actual == self.value
+                return actual == self.value  # type: ignore[no-any-return]
             elif self.operator == "in":
                 return actual in self.value
             elif self.operator == ">":
-                return actual > self.value
+                return actual > self.value  # type: ignore[no-any-return]
             elif self.operator == "<":
-                return actual < self.value
+                return actual < self.value  # type: ignore[no-any-return]
         except (TypeError, ValueError):
             return True
         return True
@@ -201,7 +201,7 @@ class DynamicAnchorSystem:
         total_weight = sum(wa.weight for wa in active)
         violation_weight = 0.0
 
-        CONTRADICT_PATTERNS = {
+        CONTRADICT_PATTERNS = {  # noqa: N806
             "傲娇": ["坦率", "直说", "明说", "老实说", "我承认"],
             "温柔": ["冷漠", "不在乎", "无所谓"],
             "嘴硬心软": ["我不在乎", "我无所谓", "随便你"],
@@ -235,7 +235,7 @@ class DynamicAnchorSystem:
     def get_all_anchors(self) -> list[str]:
         return [da.text for da in self._dynamic_anchors if da.active]
 
-    def health_check(self) -> dict:
+    def health_check(self) -> dict[str, Any]:
         return {
             "base_anchors_count": len(self._base_anchors),
             "dynamic_anchors_count": len(self._dynamic_anchors),

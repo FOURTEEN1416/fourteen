@@ -102,7 +102,7 @@ class CharacterCardAdapter:
             logger.info("角色卡加载成功: %s (v%s)", self._card_name, card.spec_version)
             return True, None
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             error_msg = f"角色卡加载失败: {e}"
             logger.error(error_msg)
             with self._lock:
@@ -156,10 +156,11 @@ class CharacterCardAdapter:
 
         # 如果缓存已满且未失效，直接返回缓存
         if self._dir_cache:
-            return [v for _, v in sorted(
-                [(k, v) for k, v in self._dir_cache.items()],
-                key=lambda x: x[0],
-            )]
+            result: list[dict[str, Any]] = []
+            for _key, value in sorted(self._dir_cache.items()):
+                if isinstance(value, tuple) and len(value) == 2:
+                    result.append(value[1])
+            return result
 
         # 无缓存或已失效，重新扫描
         for f in sorted(self._card_dir.iterdir()):
@@ -207,10 +208,11 @@ class CharacterCardAdapter:
 
             self._dir_cache[cache_key] = (file_mtime, entry)
 
-        return [v for _, v in sorted(
-            [(k, v) for k, v in self._dir_cache.items()],
-            key=lambda x: x[0],
-        )]
+        result2: list[dict[str, Any]] = []
+        for _key, value in sorted(self._dir_cache.items()):
+            if isinstance(value, tuple) and len(value) == 2:
+                result2.append(value[1])
+        return result2
 
     def to_persona_config(self) -> dict[str, Any]:
         """

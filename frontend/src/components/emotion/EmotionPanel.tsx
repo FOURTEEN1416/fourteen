@@ -13,7 +13,7 @@ interface Props {
   maxAffinity?: number
 }
 
-export default function EmotionPanel({ characterId, maxAffinity }: Props) {
+export default function EmotionPanel({ maxAffinity }: Props) {
   const { data: state, isLoading } = useQuery({
     queryKey: ['emotion', 'state'],
     queryFn: () => api.emotionState().then(r => r.data as { current_emotion: string; intensity: number; energy: number; affinity: number }),

@@ -18,7 +18,7 @@ export default function LogsPage() {
     } catch { /* ignore malformed */ }
   }, [appendEntry])
 
-  const { connected, reconnecting, connect, disconnect } = useSSE(`${API_BASE}/logs/stream`, {
+  useSSE(`${API_BASE}/logs/stream`, {
     onMessage: handleSSEMessage,
     onError: () => { setPollingFallback(true) },
   })

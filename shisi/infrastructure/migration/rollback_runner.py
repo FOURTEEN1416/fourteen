@@ -26,7 +26,7 @@ def run(db_path: Path = Path("data/sqlite.db")) -> RollbackResult:
         conn = sqlite3.connect(str(latest_backup))
         conn.execute("SELECT 1")
         conn.close()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return RollbackResult(success=False, message=f"备份文件损坏: {e}")
 
     shutil.copy(latest_backup, db_path)

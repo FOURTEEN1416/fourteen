@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
@@ -58,12 +58,12 @@ class CharacterCrawlerTool(BaseTool):
         "required": ["action"],
     }
 
-    def execute(self, action: str, **kwargs) -> ToolResult:
+    def execute(self, action: str, **kwargs) -> ToolResult:  # type: ignore[override]
         if not HAS_REQUESTS:
             return ToolResult(False, error="请安装: pip install requests beautifulsoup4")
         handlers = {
-            "fetch_wiki": lambda: self._fetch_wikipedia(kwargs.get("name")),
-            "fetch_url": lambda: self._fetch_generic(kwargs.get("url")),
+            "fetch_wiki": lambda: self._fetch_wikipedia(kwargs.get("name")),  # type: ignore[arg-type]
+            "fetch_url": lambda: self._fetch_generic(kwargs.get("url")),  # type: ignore[arg-type]
             "batch_crawl": lambda: self._batch_crawl(kwargs.get("urls", [])),
         }
         handler = handlers.get(action)
@@ -91,7 +91,7 @@ class CharacterCrawlerTool(BaseTool):
         soup = BeautifulSoup(resp.text, "html.parser")
         profile = self._parse_wikipedia(soup)
         profile["source_url"] = url
-        profile["crawled_at"] = datetime.now().isoformat()
+        profile["crawled_at"] = datetime.now(tz=timezone.utc).isoformat()
         return ToolResult(True, data=profile)
 
     def _parse_wikipedia(self, soup) -> dict[str, Any]:
@@ -166,7 +166,7 @@ class CharacterCrawlerTool(BaseTool):
                 r = self._fetch_generic(url)
                 if r.success:
                     results.append(r.data)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error("抓取失败 %s: %s", url, e)
         return ToolResult(True, data={"total": len(urls), "success": len(results), "profiles": results})
 

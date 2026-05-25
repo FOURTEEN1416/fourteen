@@ -48,7 +48,7 @@ def _close_all_structured_memory() -> None:
         try:
             instance.close()
             logger.debug("StructuredMemory 连接已关闭: %s", instance.db_path)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("关闭 StructuredMemory 连接时出错: %s", e)
 
 
@@ -95,7 +95,7 @@ class StructuredMemory:
                 try:
                     self._connection.close()
                     logger.debug("SQLite 连接已关闭: %s", self.db_path)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("关闭 SQLite 连接时出错: %s", e)
                 finally:
                     self._connection = None
@@ -273,10 +273,10 @@ class StructuredMemory:
                     VALUES ('delete', old.id, old.fact);
                 END;
             """)
-            conn.commit()  # type: ignore
+            conn.commit()
 
     @contextmanager
-    def _conn(self, write: bool = False):  # type: ignore
+    def _conn(self, write: bool = False):
         """获取数据库连接
 
         Args:
@@ -307,12 +307,11 @@ class StructuredMemory:
                  confidence: float = 0.5, source: str = "") -> int:
         """添加用户事实"""
         with self._conn(write=True) as conn:
-            cursor = conn.execute(  # type: ignore
-                "INSERT INTO user_facts (fact, category, confidence, source) VALUES (?, ?, ?, ?)",
+            cursor = conn.execute(                "INSERT INTO user_facts (fact, category, confidence, source) VALUES (?, ?, ?, ?)",
                 (fact, category, confidence, source),
             )
-            conn.commit()  # type: ignore
-            return cursor.lastrowid  # type: ignore
+            conn.commit()
+            return cursor.lastrowid  # type: ignore[no-any-return]
 
     def get_facts(self, category: str | None = None,
                   min_confidence: float = 0.0,
@@ -320,13 +319,11 @@ class StructuredMemory:
         """获取用户事实"""
         with self._conn() as conn:
             if category:
-                rows = conn.execute(  # type: ignore
-                    "SELECT * FROM user_facts WHERE category = ? AND confidence >= ? ORDER BY updated_at DESC LIMIT ?",
+                rows = conn.execute(                    "SELECT * FROM user_facts WHERE category = ? AND confidence >= ? ORDER BY updated_at DESC LIMIT ?",
                     (category, min_confidence, limit),
                 ).fetchall()
             else:
-                rows = conn.execute(  # type: ignore
-                    "SELECT * FROM user_facts WHERE confidence >= ? ORDER BY updated_at DESC LIMIT ?",
+                rows = conn.execute(                    "SELECT * FROM user_facts WHERE confidence >= ? ORDER BY updated_at DESC LIMIT ?",
                     (min_confidence, limit),
                 ).fetchall()
             return [dict(r) for r in rows]
@@ -335,8 +332,7 @@ class StructuredMemory:
         """关键词搜索事实 — 优先FTS5，降级LIKE"""
         with self._conn() as conn:
             try:
-                rows = conn.execute(  # type: ignore
-                    """SELECT f.* FROM user_facts f
+                rows = conn.execute(                    """SELECT f.* FROM user_facts f
                        JOIN user_facts_fts fts ON f.id = fts.rowid
                        WHERE user_facts_fts MATCH ?
                        ORDER BY rank
@@ -345,10 +341,9 @@ class StructuredMemory:
                 ).fetchall()
                 if rows:
                     return [dict(r) for r in rows]
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("FTS5 search failed, falling back to LIKE: %s", e)
-            rows = conn.execute(  # type: ignore
-                "SELECT * FROM user_facts WHERE fact LIKE ? ORDER BY confidence DESC LIMIT 20",
+            rows = conn.execute(                "SELECT * FROM user_facts WHERE fact LIKE ? ORDER BY confidence DESC LIMIT 20",
                 (f"%{keyword}%",),
             ).fetchall()
             return [dict(r) for r in rows]
@@ -356,18 +351,15 @@ class StructuredMemory:
     def update_fact_confidence(self, fact_id: int, confidence: float) -> None:
         """更新事实置信度"""
         with self._conn(write=True) as conn:
-            conn.execute(  # type: ignore
-                "UPDATE user_facts SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            conn.execute(                "UPDATE user_facts SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (confidence, fact_id),
             )
-            conn.commit()  # type: ignore
-
+            conn.commit()
     def delete_fact(self, fact_id: int) -> None:
         """删除事实"""
         with self._conn(write=True) as conn:
-            conn.execute("DELETE FROM user_facts WHERE id = ?", (fact_id,))  # type: ignore
-            conn.commit()  # type: ignore
-
+            conn.execute("DELETE FROM user_facts WHERE id = ?", (fact_id,))
+            conn.commit()
     def add_facts_batch(self, facts: list[dict[str, Any]]) -> list[int]:
         """批量添加事实"""
         if not facts:
@@ -375,16 +367,13 @@ class StructuredMemory:
         with self._conn(write=True) as conn:
             rows = self._execute_write(
                 lambda: (
-                    conn.executemany(  # type: ignore
-                        "INSERT INTO user_facts (fact, category, confidence, source) VALUES (?, ?, ?, ?)",
+                    conn.executemany(                        "INSERT INTO user_facts (fact, category, confidence, source) VALUES (?, ?, ?, ?)",
                         [(f.get("fact", ""), f.get("category", "general"),
                           f.get("confidence", 0.5), f.get("source", "")) for f in facts],
                     ),
-                    conn.commit(),  # type: ignore
-                    conn.execute("SELECT last_insert_rowid()").fetchone()[0],  # type: ignore
-                )[2]
+                    conn.commit(),                    conn.execute("SELECT last_insert_rowid()").fetchone()[0],                )[2]
             )
-            start_id = rows - len(facts) + 1  # type: ignore
+            start_id = rows - len(facts) + 1
             return list(range(start_id, start_id + len(facts)))
 
     # ── 好感度日志 ────────────────────────────────────────
@@ -393,18 +382,16 @@ class StructuredMemory:
                          affection_points: float, reason: str = "") -> int:
         """记录好感度变化"""
         with self._conn(write=True) as conn:
-            cursor = conn.execute(  # type: ignore
-                "INSERT INTO affinity_log (level, level_name, affection_points, reason) VALUES (?, ?, ?, ?)",
+            cursor = conn.execute(                "INSERT INTO affinity_log (level, level_name, affection_points, reason) VALUES (?, ?, ?, ?)",
                 (level, level_name, affection_points, reason),
             )
-            conn.commit()  # type: ignore
-            return cursor.lastrowid  # type: ignore
+            conn.commit()
+            return cursor.lastrowid  # type: ignore[no-any-return]
 
     def get_affinity_history(self, limit: int = 50) -> list[dict[str, Any]]:
         """获取好感度历史"""
         with self._conn() as conn:
-            rows = conn.execute(  # type: ignore
-                "SELECT * FROM affinity_log ORDER BY created_at DESC LIMIT ?",
+            rows = conn.execute(                "SELECT * FROM affinity_log ORDER BY created_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
             return [dict(r) for r in rows]
@@ -412,8 +399,7 @@ class StructuredMemory:
     def get_latest_affinity(self) -> dict[str, Any] | None:
         """获取最新好感度记录"""
         with self._conn() as conn:
-            row = conn.execute(  # type: ignore
-                "SELECT * FROM affinity_log ORDER BY created_at DESC LIMIT 1"
+            row = conn.execute(                "SELECT * FROM affinity_log ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
             return dict(row) if row else None
 
@@ -423,18 +409,16 @@ class StructuredMemory:
                  emotion_tag: str = "", session_id: str = "") -> int:
         """添加聊天记录"""
         with self._conn(write=True) as conn:
-            cursor = conn.execute(  # type: ignore
-                "INSERT INTO chat_history (role, content, emotion_tag, session_id) VALUES (?, ?, ?, ?)",
+            cursor = conn.execute(                "INSERT INTO chat_history (role, content, emotion_tag, session_id) VALUES (?, ?, ?, ?)",
                 (role, content, emotion_tag, session_id),
             )
-            conn.commit()  # type: ignore
-            return cursor.lastrowid  # type: ignore
+            conn.commit()
+            return cursor.lastrowid  # type: ignore[no-any-return]
 
     def get_recent_chats(self, n: int = 20) -> list[dict[str, Any]]:
         """获取最近 N 条聊天"""
         with self._conn() as conn:
-            rows = conn.execute(  # type: ignore
-                "SELECT * FROM chat_history ORDER BY created_at DESC LIMIT ?",
+            rows = conn.execute(                "SELECT * FROM chat_history ORDER BY created_at DESC LIMIT ?",
                 (n,),
             ).fetchall()
             return [dict(r) for r in rows][::-1]  # 反转成时间正序
@@ -442,8 +426,7 @@ class StructuredMemory:
     def get_chats_by_session(self, session_id: str) -> list[dict[str, Any]]:
         """获取某次会话的聊天"""
         with self._conn() as conn:
-            rows = conn.execute(  # type: ignore
-                "SELECT * FROM chat_history WHERE session_id = ? ORDER BY created_at ASC",
+            rows = conn.execute(                "SELECT * FROM chat_history WHERE session_id = ? ORDER BY created_at ASC",
                 (session_id,),
             ).fetchall()
             return [dict(r) for r in rows]
@@ -451,16 +434,14 @@ class StructuredMemory:
     def get_chats_today(self) -> list[dict[str, Any]]:
         """获取今天的聊天"""
         with self._conn() as conn:
-            rows = conn.execute(  # type: ignore
-                "SELECT * FROM chat_history WHERE date(created_at) = date('now') ORDER BY created_at ASC"
+            rows = conn.execute(                "SELECT * FROM chat_history WHERE date(created_at) = date('now') ORDER BY created_at ASC"
             ).fetchall()
             return [dict(r) for r in rows]
 
     def count_chats_today(self) -> int:
         """今天聊了多少条"""
         with self._conn() as conn:
-            row = conn.execute(  # type: ignore
-                "SELECT COUNT(*) as cnt FROM chat_history WHERE date(created_at) = date('now')"
+            row = conn.execute(                "SELECT COUNT(*) as cnt FROM chat_history WHERE date(created_at) = date('now')"
             ).fetchone()
             return row["cnt"] if row else 0
 
@@ -469,18 +450,16 @@ class StructuredMemory:
     def add_reminder(self, content: str, trigger_time: str | None = None) -> int:
         """添加提醒"""
         with self._conn(write=True) as conn:
-            cursor = conn.execute(  # type: ignore
-                "INSERT INTO reminders (content, trigger_time) VALUES (?, ?)",
+            cursor = conn.execute(                "INSERT INTO reminders (content, trigger_time) VALUES (?, ?)",
                 (content, trigger_time),
             )
-            conn.commit()  # type: ignore
-            return cursor.lastrowid  # type: ignore
+            conn.commit()
+            return cursor.lastrowid  # type: ignore[no-any-return]
 
     def get_pending_reminders(self) -> list[dict[str, Any]]:
         """获取待触发的提醒"""
         with self._conn() as conn:
-            rows = conn.execute(  # type: ignore
-                "SELECT * FROM reminders WHERE active = 1 AND triggered = 0 "
+            rows = conn.execute(                "SELECT * FROM reminders WHERE active = 1 AND triggered = 0 "
                 "AND (trigger_time IS NULL OR trigger_time <= datetime('now')) "
                 "ORDER BY created_at ASC"
             ).fetchall()
@@ -489,22 +468,19 @@ class StructuredMemory:
     def mark_reminder_triggered(self, reminder_id: int) -> None:
         """标记提醒已触发"""
         with self._conn(write=True) as conn:
-            conn.execute(  # type: ignore
-                "UPDATE reminders SET triggered = 1 WHERE id = ?",
+            conn.execute(                "UPDATE reminders SET triggered = 1 WHERE id = ?",
                 (reminder_id,),
             )
-            conn.commit()  # type: ignore
-
+            conn.commit()
     # ── 统计 ──────────────────────────────────────────────
 
     def get_stats(self) -> dict[str, Any]:
         """获取记忆统计"""
         with self._conn() as conn:
-            fact_count = conn.execute("SELECT COUNT(*) FROM user_facts").fetchone()[0]  # type: ignore
-            chat_count = conn.execute("SELECT COUNT(*) FROM chat_history").fetchone()[0]  # type: ignore
+            fact_count = conn.execute("SELECT COUNT(*) FROM user_facts").fetchone()[0]
+            chat_count = conn.execute("SELECT COUNT(*) FROM chat_history").fetchone()[0]
             today_chats = self.count_chats_today()
-            affinity_count = conn.execute("SELECT COUNT(*) FROM affinity_log").fetchone()[0]  # type: ignore
-
+            affinity_count = conn.execute("SELECT COUNT(*) FROM affinity_log").fetchone()[0]
             latest_affinity = self.get_latest_affinity()
 
             return {
@@ -519,7 +495,7 @@ class StructuredMemory:
         """健康检查"""
         try:
             with self._conn() as conn:
-                conn.execute("SELECT 1")  # type: ignore
+                conn.execute("SELECT 1")
                 return {"connected": True, "path": self.db_path}
         except Exception:
             logger.exception("StructuredMemory健康检查异常")

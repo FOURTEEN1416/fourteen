@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 音色训练管理器 — 用户手动上传音频 → GPT-SoVITS训练
 
@@ -15,6 +13,8 @@ from __future__ import annotations
 
 GPT-SoVITS使用配置文件而非命令行参数
 """
+
+from __future__ import annotations
 
 import asyncio
 import json

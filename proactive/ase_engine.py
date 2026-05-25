@@ -18,7 +18,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -327,7 +327,7 @@ class ReflectionEngine:
 
 格式: [类型] 内心独白内容"""
         try:
-            result = self.llm_func(prompt)
+            result = self.llm_func(prompt) if self.llm_func is not None else ""
             for mono_type in ["miss_you", "happy", "worry", "jealous", "bored"]:
                 if mono_type in result:
                     thought = result.replace(f"[{mono_type}]", "").strip()
@@ -336,7 +336,7 @@ class ReflectionEngine:
                         type=mono_type,
                         urgency_delta=self._type_to_urgency(mono_type),
                     )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("LLM reflection failed: %s", e)
         return InnerMonologue(thought="...", type="bored", urgency_delta=0.5)
 
@@ -465,7 +465,7 @@ class ContextAnalyzer:
         self._last_analysis_time: float = 0
 
     def analyze(self) -> dict[str, Any]:
-        now = datetime.now()
+        now = datetime.now(tz=timezone.utc)
         hour = now.hour
         context = {
             "time_of_day": self._get_time_period(hour),
@@ -520,8 +520,8 @@ class MessageGenerator:
                 with open(prompt_path, encoding="utf-8") as f:
                     data = yaml.safe_load(f)
                     if isinstance(data, dict):
-                        return data.get("generation_prompt", "")
-        except Exception as e:
+                        return data.get("generation_prompt", "")  # type: ignore[no-any-return]
+        except Exception as e:  # noqa: BLE001
             logger.debug("Failed to load proactive.yaml: %s", e)
         return ""
 
@@ -554,17 +554,18 @@ class MessageGenerator:
 
         if self._proactive_prompt:
             prompt = self._proactive_prompt.format(
-                time=datetime.now().strftime("%H:%M"),
+                time=datetime.now().strftime("%H:%M"),  # noqa: DTZ005
                 emotion=emotion,
                 affinity_name=affinity_name,
                 type_label=type_label,
                 context=context,
             )
         else:
+            now_time = datetime.now().strftime("%H:%M")  # noqa: DTZ005
             prompt = f"""作为AI虚拟伴侣"十四"，你想主动给用户发一条消息。
 
 当前情境：
-- 时间：{datetime.now().strftime("%H:%M")}
+- 时间：{now_time}
 - 你的情感状态：{emotion}
 - 关系等级：{affinity_name}
 - 想表达的类型：{type_label}
@@ -593,8 +594,8 @@ class MessageGenerator:
                 return None
             response = response.strip().strip('"').strip("'")
             if len(response) > 5:
-                return response
-        except Exception as e:
+                return response  # type: ignore[no-any-return]
+        except Exception as e:  # noqa: BLE001
             logger.debug("LLM message generation failed: %s", e)
         return None
 
@@ -642,10 +643,10 @@ class FrequencyController:
         self._last_reset_date: datetime | None = None
 
     def can_send(self) -> tuple[bool, str]:
-        now = datetime.now()
+        now = datetime.now(tz=timezone.utc)
         if self._last_reset_date is None or now.date() != self._last_reset_date:
             self._daily_count = 0
-            self._last_reset_date = now.date()
+            self._last_reset_date = now.date()  # type: ignore[assignment]
 
         if self._daily_count >= self.max_daily:
             return False, "daily_limit"
@@ -657,10 +658,10 @@ class FrequencyController:
 
     def record_sent(self) -> None:
         self._daily_count += 1
-        self._last_sent_time = datetime.now()
+        self._last_sent_time = datetime.now(tz=timezone.utc)
 
     def record_reply(self) -> None:
-        self._last_reply_time = datetime.now()
+        self._last_reply_time = datetime.now(tz=timezone.utc)
 
     def get_state(self) -> dict[str, Any]:
         return {
@@ -733,15 +734,18 @@ class ASEEngine:
 
         self.urgency = UrgencyState()
 
-        llm_func = None
+        llm_func: Callable[[str], str] | None = None
         if llm_gateway is not None:
             if hasattr(llm_gateway, "chat_sync"):
-                def llm_func(prompt):
-                    return llm_gateway.chat_sync(
+                def llm_func(prompt: str) -> str:
+                    result = llm_gateway.chat_sync(
                         query=prompt, max_tokens=100, temperature=0.7,
                     )
+                    return str(result) if result else ""
             elif callable(llm_gateway):
-                llm_func = llm_gateway
+                def llm_func(prompt: str) -> str:
+                    result = llm_gateway(prompt)
+                    return str(result) if result else ""
         self._reflection = ReflectionEngine(
             llm_func=llm_func,
             reflection_mode=reflection_mode,
@@ -775,9 +779,9 @@ class ASEEngine:
             "meal_hours": [(11, 13), (17, 19)],
         }
 
-        self._last_morning_date: Any | None = None
-        self._last_night_date: Any | None = None
-        self._last_meal_date: Any | None = None
+        self._last_morning_date: datetime | None = None
+        self._last_night_date: datetime | None = None
+        self._last_meal_date: datetime | None = None
 
         self._recent_messages: deque = deque(maxlen=50)
 
@@ -797,7 +801,7 @@ class ASEEngine:
         emotion_state: dict | None = None,
         affinity_level: int | None = None,
     ) -> InnerMonologue | None:
-        now = datetime.now()
+        now = datetime.now(tz=timezone.utc)
         hours_since = self._hours_since_last_chat()
 
         self._last_chat_time = now
@@ -882,7 +886,7 @@ class ASEEngine:
                 return False
             if self._last_proactive_time:
                 minutes_since = (
-                    datetime.now() - self._last_proactive_time
+                    datetime.now(tz=timezone.utc) - self._last_proactive_time
                 ).total_seconds() / 60
                 if minutes_since < 30:
                     return False
@@ -924,14 +928,14 @@ class ASEEngine:
             self.urgency.context_bonus = 0.0
 
     def _check_scene_triggers(self) -> dict[str, Any] | None:
-        now = datetime.now()
+        now = datetime.now(tz=timezone.utc)
         hour = now.hour
         today = now.date()
         affinity = self._affinity_level
 
         start, end = self._config["morning_hours"]
-        if start <= hour < end and self._last_morning_date != today:
-            self._last_morning_date = today
+        if start <= hour < end and self._last_morning_date != today:  # type: ignore[operator]
+            self._last_morning_date = today  # type: ignore[assignment]
             templates = _get_messages("morning_greeting", affinity)
             msg = random.choice(templates) if templates else "早安"
             self.urgency.scene_bonus = 1.5
@@ -942,10 +946,10 @@ class ASEEngine:
             }
 
         start, end = self._config["night_hours"]
-        if hour >= start or hour < 1:
-            check_date = today if hour >= start else (today - timedelta(days=1))
+        if hour >= start or hour < 1:  # type: ignore[operator]
+            check_date = today if hour >= start else (today - timedelta(days=1))  # type: ignore[operator]
             if self._last_night_date != check_date:
-                self._last_night_date = check_date
+                self._last_night_date = check_date  # type: ignore[assignment]
                 templates = _get_messages("night_greeting", affinity)
                 msg = random.choice(templates) if templates else "晚安"
                 self.urgency.scene_bonus = 1.5
@@ -955,9 +959,9 @@ class ASEEngine:
                     "urgency": self.urgency.total,
                 }
 
-        for meal_start, meal_end in self._config["meal_hours"]:
-            if meal_start <= hour < meal_end and self._last_meal_date != today:
-                self._last_meal_date = today
+        for meal_start, meal_end in self._config["meal_hours"]:  # type: ignore[misc]
+            if meal_start <= hour < meal_end and self._last_meal_date != today:  # type: ignore[has-type]
+                self._last_meal_date = today  # type: ignore[assignment]
                 templates = _get_messages("care_meal", affinity)
                 msg = random.choice(templates) if templates else "记得吃饭"
                 self.urgency.scene_bonus = 1.0
@@ -1056,7 +1060,7 @@ class ASEEngine:
 
     def _record_proactive_sent(self) -> None:
         self._daily_message_count += 1
-        self._last_proactive_time = datetime.now()
+        self._last_proactive_time = datetime.now(tz=timezone.utc)
         if self._freq_controller:
             self._freq_controller.record_sent()
 
@@ -1081,13 +1085,13 @@ class ASEEngine:
                 "recent_messages": list(self._recent_messages),
                 "freq_adapter": self._freq_adapter.to_dict() if self._freq_adapter else None,
                 "freq_controller": self._freq_controller.to_dict() if self._freq_controller else None,
-                "saved_at": datetime.now().isoformat(),
+                "saved_at": datetime.now(tz=timezone.utc).isoformat(),
             }
             state_path.parent.mkdir(parents=True, exist_ok=True)
             with open(state_path, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
             logger.debug("State saved to %s", state_path)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("State save failed: %s", e)
 
     def _load_state(self) -> None:
@@ -1114,11 +1118,11 @@ class ASEEngine:
                 self.urgency.context_bonus = urgency_data.get("context_bonus", 0.0)
 
             if state.get("last_morning_date"):
-                self._last_morning_date = datetime.strptime(state["last_morning_date"], "%Y-%m-%d").date()
+                self._last_morning_date = datetime.strptime(state["last_morning_date"], "%Y-%m-%d").date()  # type: ignore[assignment]  # noqa: DTZ007
             if state.get("last_night_date"):
-                self._last_night_date = datetime.strptime(state["last_night_date"], "%Y-%m-%d").date()
+                self._last_night_date = datetime.strptime(state["last_night_date"], "%Y-%m-%d").date()  # type: ignore[assignment]  # noqa: DTZ007
             if state.get("last_meal_date"):
-                self._last_meal_date = datetime.strptime(state["last_meal_date"], "%Y-%m-%d").date()
+                self._last_meal_date = datetime.strptime(state["last_meal_date"], "%Y-%m-%d").date()  # type: ignore[assignment]  # noqa: DTZ007
 
             recent = state.get("recent_messages", [])
             self._recent_messages = deque(recent[-50:], maxlen=50)
@@ -1126,23 +1130,23 @@ class ASEEngine:
             if self._freq_controller and state.get("freq_controller"):
                 try:
                     self._freq_controller.from_dict(state["freq_controller"])
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("Failed to restore freq_controller: %s", e)
             if self._freq_adapter and state.get("freq_adapter"):
                 try:
                     self._freq_adapter.from_dict(state["freq_adapter"])
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("Failed to restore freq_adapter: %s", e)
 
             logger.info("State loaded from %s (daily_count=%d)", self._state_path, self._daily_message_count)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("State load failed, using defaults: %s", e)
 
     # ── 工具 ──────────────────────────────────────────────
 
     def _hours_since_last_chat(self) -> float:
         if self._last_chat_time:
-            delta = datetime.now() - self._last_chat_time
+            delta = datetime.now(tz=timezone.utc) - self._last_chat_time
             return delta.total_seconds() / 3600
         return 99.0
 

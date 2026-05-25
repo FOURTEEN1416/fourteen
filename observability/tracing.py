@@ -77,7 +77,7 @@ class Tracer:
                 for s in spans
             ],
         }
-        logger.info("trace_completed", trace_id=tid, total_ms=round(total_ms, 2))  # type: ignore
+        logger.info("trace_completed", trace_id=tid, total_ms=round(total_ms, 2))
         return result
 
     @contextmanager
