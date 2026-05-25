@@ -34,11 +34,12 @@ class AudioFormatConverter:
     def _wav_to_silk(self, wav_bytes: bytes) -> bytes | None:
         try:
             from pysilk import encode
-            return encode(wav_bytes, sample_rate=self._silk_sample_rate)
+            result = encode(wav_bytes, sample_rate=self._silk_sample_rate)
+            return result if isinstance(result, bytes) else None
         except ImportError:
             logger.debug("pysilk not installed, trying silk-v3-decoder CLI")
             return self._silk_cli_encode(wav_bytes)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("SILK编码失败: %s", e)
             return None
 
@@ -59,7 +60,7 @@ class AudioFormatConverter:
             )
             with open(out_path, "rb") as f:
                 return f.read()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("SILK CLI编码失败: %s", e)
             return None
         finally:
@@ -67,7 +68,7 @@ class AudioFormatConverter:
                 import os
                 os.unlink(wav_path)
                 os.unlink(out_path)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
     def _ffmpeg_convert(
@@ -102,7 +103,7 @@ class AudioFormatConverter:
         except subprocess.TimeoutExpired:
             logger.warning("ffmpeg转换超时")
             return None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("ffmpeg异常: %s", e)
             return None
 
@@ -111,7 +112,7 @@ class AudioFormatConverter:
             self._has_ffmpeg = shutil.which(self._ffmpeg_path) is not None
         if self._has_silk is None:
             try:
-                from pysilk import encode
+                from pysilk import encode  # noqa: F401
                 self._has_silk = True
             except ImportError:
                 self._has_silk = shutil.which("silk_encoder") is not None

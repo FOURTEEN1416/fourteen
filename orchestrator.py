@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from observability.logging_setup import new_trace_id
@@ -57,7 +57,7 @@ class Orchestrator:
         # 使用带TTL的锁缓存，防止内存无限增长
         self._session_locks: dict[str, tuple[asyncio.Lock, float]] = {}
         self._session_locks_mutex = threading.Lock()
-        self._last_chat_time = datetime.now()
+        self._last_chat_time = datetime.now(tz=timezone.utc)
         self._session_lock_access_time: dict[str, float] = {}
 
     def _get_session_lock(self, session_id: str) -> asyncio.Lock:
@@ -293,7 +293,7 @@ class Orchestrator:
                         self._ase.on_chat(user_msg, reply)
 
                 with self._last_chat_time_lock:
-                    self._last_chat_time = datetime.now()
+                    self._last_chat_time = datetime.now(tz=timezone.utc)
 
             trace_result = tracer.end_trace()
             return {
@@ -303,7 +303,7 @@ class Orchestrator:
                 "trace": trace_result,
             }
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Orchestrator error: %s", e)
             return {"reply": "（处理消息时出现异常，请稍后重试）", "trace_id": trace_id, "error": "internal_error"}
         finally:
@@ -391,7 +391,7 @@ class Orchestrator:
 
                 collected_tokens = []
                 # 缓冲区安全检�?先攒够缓冲区再检查，安全后才 yield，杜绝不安全内容外泄
-                BUFFER_CHECK_INTERVAL = 20
+                BUFFER_CHECK_INTERVAL = 20  # noqa: N806
                 buffer = []
                 stream_unsafe = False
                 partial_result = None  # 初始化 partial_result，避免后续引用时 NameError
@@ -440,7 +440,7 @@ class Orchestrator:
                         yield "[内容安全过滤]"
                     # 不再执行后续的 memory_store 和 reflection
                     with self._last_chat_time_lock:
-                        self._last_chat_time = datetime.now()
+                        self._last_chat_time = datetime.now(tz=timezone.utc)
                     return
 
                 with tracer.span("output_safety_check"):
@@ -460,9 +460,9 @@ class Orchestrator:
                         self._ase.on_chat(user_msg, full_output)
 
                 with self._last_chat_time_lock:
-                    self._last_chat_time = datetime.now()
+                    self._last_chat_time = datetime.now(tz=timezone.utc)
 
-        except Exception as e:
+        except Exception:
             logger.exception("Stream orchestrator error")
             yield json.dumps({"type": "stream_error", "error": "stream_error"})
         finally:
@@ -472,8 +472,8 @@ class Orchestrator:
     def check_proactive(self) -> dict[str, Any] | None:
         if self._ase:
             with self._last_chat_time_lock:
-                hours_since_last = (datetime.now() - self._last_chat_time).total_seconds() / 3600.0
-            return self._ase.tick(hours_since_last_chat=hours_since_last)
+                hours_since_last = (datetime.now(tz=timezone.utc) - self._last_chat_time).total_seconds() / 3600.0
+            return self._ase.tick(hours_since_last_chat=hours_since_last)  # type: ignore[no-any-return]
         return None
 
     def shutdown(self) -> None:
@@ -497,11 +497,11 @@ class Orchestrator:
                     else:
                         comp.close()
                     logger.info("Shutdown component: %s", name)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("Failed to shutdown %s: %s", name, e)
             elif comp and hasattr(comp, 'shutdown'):
                 try:
                     comp.shutdown()
                     logger.info("Shutdown component: %s", name)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("Failed to shutdown %s: %s", name, e)

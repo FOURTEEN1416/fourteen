@@ -96,9 +96,8 @@ def detect_xor_key(dat_path):
     # 最后尝试 BMP (2 字节 magic，需要额外验证)
     bmp_magic = [0x42, 0x4D]
     key = header[0] ^ bmp_magic[0]
-    if len(header) >= 2 and (header[1] ^ key) == bmp_magic[1]:
+    if len(header) >= 2 and (header[1] ^ key) == bmp_magic[1] and len(header) >= 14:
         # 额外验证: XOR 解密后检查 BMP file size 和 offset 字段
-        if len(header) >= 14:
             dec = bytes(b ^ key for b in header[:14])
             bmp_size = struct.unpack_from('<I', dec, 2)[0]
             bmp_offset = struct.unpack_from('<I', dec, 10)[0]
@@ -389,7 +388,8 @@ def decode_all_dats(attach_dir, out_dir, aes_key=None, xor_key=0x88,
             if result_path is None or fmt is None:
                 failed += 1
                 if os.path.exists(tmp_path):
-                    with contextlib.suppress(OSError): os.remove(tmp_path)
+                    with contextlib.suppress(OSError):
+                        os.remove(tmp_path)
             else:
                 final_path = os.path.join(target_dir, f"{basename}.{fmt}")
                 os.replace(result_path, final_path)
@@ -398,7 +398,8 @@ def decode_all_dats(attach_dir, out_dir, aes_key=None, xor_key=0x88,
         except Exception as e:
             failed += 1
             if os.path.exists(tmp_path):
-                with contextlib.suppress(OSError): os.remove(tmp_path)
+                with contextlib.suppress(OSError):
+                    os.remove(tmp_path)
             print(f"[WARN] {rel}: {e}", file=sys.stderr)
 
         if on_file:

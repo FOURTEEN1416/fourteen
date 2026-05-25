@@ -35,9 +35,9 @@ from typing import Any
 project_root = Path(__file__).parent.absolute()
 sys.path.insert(0, str(project_root))
 
-import contextlib
+import contextlib  # noqa: E402
 
-from common.health_check import health_check_all
+from common.health_check import health_check_all  # noqa: E402
 
 # ── 加载 .env（手动解析，无需 python-dotenv 依赖） ──
 _env_loaded = False
@@ -144,7 +144,7 @@ def load_fusion_config(config_dir: str) -> dict[str, Any]:
     if system_yaml.exists():
         with open(system_yaml, encoding="utf-8") as f:
             full_cfg = yaml.safe_load(f) or {}
-        return full_cfg.get("fusion", {})
+        return full_cfg.get("fusion", {})  # type: ignore[no-any-return]
     logger.warning("未找到 %s, 使用默认 fusion 配置", system_yaml)
     return {}
 
@@ -398,7 +398,7 @@ class OptimizedOrchestrator:
                         logger.info("默认角色卡已加载: %s", default_card)
                     else:
                         logger.info("未配置默认角色卡，跳过")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("角色卡系统初始化失败 (不影响运行): %s", e)
                     self.components["character_card"] = None
             else:
@@ -423,7 +423,7 @@ class OptimizedOrchestrator:
                     else:
                         self.components["voice"] = None
                         logger.warning("语音系统初始化失败")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("语音系统初始化失败 (不影响运行): %s", e)
                     self.components["voice"] = None
             else:
@@ -446,7 +446,7 @@ class OptimizedOrchestrator:
                     )
                     self._run_async(self.components["memory_ext"].initialize())
                     logger.info("长期记忆增强已初始化: collection=%s", coll_name)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("长期记忆增强初始化失败 (不影响运行): %s", e)
                     self.components["memory_ext"] = None
             else:
@@ -485,7 +485,7 @@ class OptimizedOrchestrator:
                     )
                     logger.info("PersonaExtractor已初始化: mode=%s, freq=%d",
                                 pe_mode, pe_freq)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("PersonaExtractor初始化失败 (不影响运行): %s", e)
                     self.components["persona_extractor"] = None
             else:
@@ -497,7 +497,7 @@ class OptimizedOrchestrator:
             logger.info("[初始化] 完成, 耗时 %.2fs", init_time)
             return True
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("[初始化] 失败: %s", e)
             return False
 
@@ -640,13 +640,13 @@ class OptimizedOrchestrator:
                         logger.debug("并行任务 %s 异常: %s", name, result)
                         continue
                     if name == "persona":
-                        persona_enhancement = result or ""
+                        persona_enhancement = result or ""  # type: ignore[assignment]
                     elif name == "emotion":
                         emotion_state = result
                     elif name == "memory":
-                        memory_context = result or ""
+                        memory_context = result or ""  # type: ignore[assignment]
                     elif name == "rag":
-                        rag_context = result or ""
+                        rag_context = result or ""  # type: ignore[assignment]
 
                 # 获取对话历史 + 摘要
                 chat_history: list = []
@@ -688,7 +688,7 @@ class OptimizedOrchestrator:
                     reply = self.components["safety"].safe_alternative(output_result.category)
 
                 # ── 聊后处理 ──
-                emotion_tag = emotion_state.primary_emotion.value if emotion_state else ""
+                emotion_tag = emotion_state.primary_emotion.value if emotion_state else ""  # type: ignore[union-attr]
                 mem_kwargs = dict(
                     user_msg=user_msg_clean,
                     reply=reply,
@@ -708,7 +708,7 @@ class OptimizedOrchestrator:
 
                 return {
                     "reply": reply,
-                    "emotion": emotion_state.to_dict() if emotion_state else None,
+                    "emotion": emotion_state.to_dict() if emotion_state else None,  # type: ignore[union-attr]
                     "process_time": round(process_time, 3),
                 }
 
@@ -725,9 +725,8 @@ class OptimizedOrchestrator:
                 try:
                     status = component.health_check()
                     results[name] = status
-                    if isinstance(status, dict):
-                        if not all(v for v in status.values() if isinstance(v, bool)):
-                            all_ok = False
+                    if isinstance(status, dict) and not all(v for v in status.values() if isinstance(v, bool)):
+                        all_ok = False
                 except Exception:
                     logger.exception("组件健康检查异常: %s", name)
                     results[name] = {"error": "component_check_failed"}
@@ -763,7 +762,7 @@ def run_clone_pipeline(args: argparse.Namespace) -> None:
     result = adapter.clone(
         target=args.clone,
         source=args.clone_source,
-        name=args.clone_name or None,
+        name=args.clone_name or None,  # type: ignore[arg-type]
         do_train=health["trainer_available"],
     )
 
@@ -814,7 +813,7 @@ def run_console_chat(orchestrator_or_obj, orchestrator_mode: str,
                     try:
                         orchestrator_or_obj._memory.structured_memory.clear_session("console")
                         print("[OK] 记忆已重置")
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         print(f"[WARN] 重置失败: {e}")
                 continue
             elif query == "/status":
@@ -943,14 +942,14 @@ def _create_proactive_sender(ws_server_holder: dict, wechat_connector_holder: di
                         loop.run_until_complete(ws_server.broadcast_proactive(msg))
                 except RuntimeError:
                     asyncio.run(ws_server.broadcast_proactive(msg))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("[主动消息] WebSocket推送失败: %s", e)
 
         wechat_connector = wechat_connector_holder.get("connector")
         if wechat_connector:
             try:
                 wechat_connector.send_text(msg)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("[主动消息] 微信发送失败: %s", e)
 
     return send_proactive
@@ -1017,7 +1016,7 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
 
     ws_server_fast = None
     _ws_holder = {}
-    _wechat_holder = {}
+    _wechat_holder = {}  # type: ignore[var-annotated]
     if not args.no_api:
         logger.info("启动API服务...")
         ws_server_fast = _start_api_service(orchestrator, cfg, config_mgr=orchestrator.components.get("config"), girlfriend_manager=girlfriend_mgr)
@@ -1231,8 +1230,8 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     )
 
     scheduler = None
-    _ws_holder_full = {}
-    _wechat_holder_full = {}
+    _ws_holder_full = {}  # type: ignore[var-annotated]
+    _wechat_holder_full = {}  # type: ignore[var-annotated]
     if not args.no_scheduler:
         from proactive.scheduler import ProactiveScheduler
 
@@ -1246,7 +1245,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
                 summary = memory_pipeline.daily_maintenance()
                 if summary:
                     logger.info("每日摘要: %s", summary)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("每日维护异常: %s", e)
 
         scheduler = ProactiveScheduler(
@@ -1336,7 +1335,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
 
         if scheduler:
             _ws_holder_full["ws"] = ws_server
-            scheduler.set_ws_server(ws_server)
+            scheduler.set_ws_server(ws_server)  # type: ignore[attr-defined]
             logger.info("      WebSocket已注入调度器")
     else:
         logger.info("[11/12] API服务已禁用 (--no-api)")

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Security, UploadFile
@@ -51,7 +51,7 @@ async def rag_search(query: str = "", top_k: int = Query(default=5, le=20), _aut
 
 
 @router.post("/rag/documents")
-async def rag_upload_document(file: UploadFile = File(...), _auth: bool = Security(_verify_api_key)):
+async def rag_upload_document(file: UploadFile = File(...), _auth: bool = Security(_verify_api_key)):  # noqa: B008
     rag = _get_rag()
     if not rag:
         raise HTTPException(503, "RAG引擎未初始化")
@@ -111,7 +111,7 @@ async def list_plugins(_auth: bool = Security(_verify_api_key)):
             with open(plugin_path, encoding="utf-8") as f:
                 data = json.load(f)
             return {"plugins": data.get("plugins", {})}
-    except Exception:
+    except Exception:  # noqa: BLE001
         pass
     return {"plugins": {}}
 
@@ -127,7 +127,7 @@ async def toggle_plugin(name: str, enabled: bool = True, _auth: bool = Security(
     if name not in plugins:
         plugins[name] = {}
     plugins[name]["enabled"] = enabled
-    plugins[name]["toggled_at"] = datetime.now().isoformat()
+    plugins[name]["toggled_at"] = datetime.now(tz=timezone.utc).isoformat()
     data["plugins"] = plugins
     with open(plugin_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)

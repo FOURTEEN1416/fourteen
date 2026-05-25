@@ -305,7 +305,7 @@ def decode_chat_images(chat_username, _messages_unused, out_dir):
         return image_map
 
     decoded_count = 0
-    for base_md5, (pri, dat_path, month) in file_candidates.items():
+    for base_md5, (_, dat_path, month) in file_candidates.items():
         month_dir = os.path.join(out_dir, "image", month)
         # 检查是否已解密
         existing = glob.glob(os.path.join(month_dir, f"{base_md5}.*"))

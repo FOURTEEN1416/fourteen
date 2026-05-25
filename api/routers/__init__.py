@@ -1,9 +1,9 @@
-from api.routers.chat_routes import router as chat_router
-from api.routers.config_routes import router as config_router
-from api.routers.file_routes import router as file_router
-from api.routers.memory_routes import router as memory_router
-from api.routers.rag_routes import router as rag_router
-from api.routers.safety_routes import router as safety_router
-from api.routers.training_routes import router as training_router
-from api.routers.user_routes import router as user_router
-from api.routers.wechat_routes import router as wechat_router
+from api.routers.chat_routes import router as chat_router  # noqa: F401
+from api.routers.config_routes import router as config_router  # noqa: F401
+from api.routers.file_routes import router as file_router  # noqa: F401
+from api.routers.memory_routes import router as memory_router  # noqa: F401
+from api.routers.rag_routes import router as rag_router  # noqa: F401
+from api.routers.safety_routes import router as safety_router  # noqa: F401
+from api.routers.training_routes import router as training_router  # noqa: F401
+from api.routers.user_routes import router as user_router  # noqa: F401
+from api.routers.wechat_routes import router as wechat_router  # noqa: F401

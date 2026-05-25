@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Security, UploadFile
@@ -28,7 +28,7 @@ def _sanitize_config(config_dict: dict) -> dict:
         if isinstance(v, dict):
             sanitized[k] = _sanitize_config(v)
         elif k.lower() in SENSITIVE_FIELDS or any(s in k.lower() for s in SENSITIVE_FIELDS):
-            sanitized[k] = "****"
+            sanitized[k] = "****"  # type: ignore[assignment]
         else:
             sanitized[k] = v
     return sanitized
@@ -145,7 +145,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         raise HTTPException(status_code=401, detail="Invalid or missing API key", headers={"X-Error-Code": "AUTH_ERROR"})
 
     # P2: 请求体大小限制 - 防止内存耗尽攻击
-    MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10MB
+    MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10MB  # noqa: N806
 
     @app.middleware("http")
     async def request_size_limiter(request: Request, call_next):
@@ -165,7 +165,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
 
     # P2: 强制请求限流 - 使用内存限流器作为 SlowAPI 不可用时的回退
     if HAS_SLOWAPI:
-        limiter = Limiter(key_func=get_remote_address)  # type: ignore
+        limiter = Limiter(key_func=get_remote_address)
         app.state.limiter = limiter
     else:
         # 简易内存限流器回退方案 - 线程安全 + 自动清理
@@ -174,7 +174,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         from collections import defaultdict
         _rate_limit_store: dict[str, list[float]] = defaultdict(list)
         _rate_limit_lock = threading.Lock()
-        _rate_limit_last_cleanup = time.time()
+        _rate_limit_last_cleanup: list[float] = [time.time()]
 
         def _simple_rate_limit(request: Request, max_requests: int = 60, window_seconds: int = 60) -> bool:
             client_ip = request.client.host if request.client else "unknown"
@@ -183,10 +183,9 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
 
             with _rate_limit_lock:
                 # 定期全局清理（每5分钟）防止内存无限增长
-                global _rate_limit_last_cleanup
-                if now - _rate_limit_last_cleanup > 300:  # 5 minutes
+                if now - _rate_limit_last_cleanup[0] > 300:  # 5 minutes
                     _cleanup_expired_records(now, window_seconds)
-                    _rate_limit_last_cleanup = now
+                    _rate_limit_last_cleanup[0] = now
 
                 # 清理该 key 的过期记录
                 _rate_limit_store[key] = [t for t in _rate_limit_store[key] if now - t < window_seconds]
@@ -234,9 +233,9 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         try:
             result = await _orch.process_message(req.message, req.session_id, req.message_type)
         except TimeoutError:
-            raise HTTPException(status_code=504, detail="LLM response timeout", headers={"X-Error-Code": "LLM_TIMEOUT"})
+            raise HTTPException(status_code=504, detail="LLM response timeout", headers={"X-Error-Code": "LLM_TIMEOUT"}) from None
         except ConnectionError:
-            raise HTTPException(status_code=502, detail="Upstream connection error", headers={"X-Error-Code": "NETWORK_ERROR"})
+            raise HTTPException(status_code=502, detail="Upstream connection error", headers={"X-Error-Code": "NETWORK_ERROR"}) from None
         return ChatResponse(
             reply=result.get("reply", ""),
             trace_id=result.get("trace_id", ""),
@@ -249,7 +248,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             raise HTTPException(status_code=503, detail="Stream not available", headers={"X-Error-Code": "FEATURE_UNAVAILABLE"})
 
         async def event_generator():
-            async for token in _orch.process_message_stream(req.message, req.session_id, req.message_type):  # type: ignore
+            async for token in _orch.process_message_stream(req.message, req.session_id, req.message_type):
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
 
@@ -313,9 +312,9 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                         params = [session_id]
                         if before > 0:
                             conditions.append("created_at < ?")
-                            params.append(before)
+                            params.append(before)  # type: ignore[arg-type]
                         where_clause = " AND ".join(conditions)
-                        params.append(limit)
+                        params.append(limit)  # type: ignore[arg-type]
 
                         rows = conn.execute(
                             f"SELECT role, content, emotion_tag, created_at FROM chat_history "
@@ -324,10 +323,10 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                         ).fetchall()
                         messages = [dict(r) for r in rows][::-1]
                         return {"messages": messages, "session_id": session_id}
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("Failed to query chat history by session_id: %s", e)
         # 如果没有 session_id 或查询失败，返回最近的记录
-        messages = _orch._memory.working.get_recent(limit)
+        messages = _orch._memory.working.get_recent(limit)  # noqa: BLE001
         return {"messages": messages, "session_id": session_id}
 
     @app.get("/api/emotion/state", response_model=EmotionStateResponse)
@@ -529,7 +528,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             return _sanitize_config(updated.model_dump())
         except (ValueError, TypeError, KeyError, AttributeError):
             logger.exception("Config save failed")
-            raise HTTPException(400, "Invalid config")
+            raise HTTPException(400, "Invalid config") from None
 
     @app.post("/api/proactive/config")
     async def update_proactive_config(req: ProactiveConfigRequest,
@@ -565,7 +564,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         else:
             registry.unregister(name)
         _tool_history_mgr.append({
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "tool": name, "action": "enable" if req.enabled else "disable",
         })
         logger.info("Tool '%s' toggled: enabled=%s", name, req.enabled)
@@ -582,7 +581,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     _training_mgr = TrainingStateManager()
 
     _wechat_status_cache: dict = {"data": None, "ts": 0.0}
-    _WECHAT_STATUS_TTL = 5.0
+    _WECHAT_STATUS_TTL = 5.0  # noqa: N806
 
     @app.post("/api/training/extract")
     async def start_extraction(target: str = "", source: str = "wcf", _auth: bool = Security(_verify_api_key)):
@@ -639,10 +638,10 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                         with open(result_path, encoding="utf-8") as f:
                             cleaned_data = json.load(f)
                         cleaned_count = len(cleaned_data) if isinstance(cleaned_data, list) else 0
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         logger.debug("Failed to read cleaned data result: %s", e)
                 _training_mgr.update(
-                    status="cleaned",
+                    status="cleaned",  # noqa: BLE001
                     cleaned_turns=cleaned_count,
                     progress=0.6,
                     step_name="数据清洗",
@@ -728,7 +727,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             return {"status": "applied", "path": result_path}
         except (ValueError, OSError):
             logger.exception("Apply clone failed")
-            raise HTTPException(status_code=500, detail="internal_error")
+            raise HTTPException(status_code=500, detail="internal_error") from None
 
     # ═══════════════════════════════════════════
     # WeChat Channel API — 手动连接控制
@@ -960,7 +959,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     @app.post("/api/clone/datasets/{person_id}/conversations/batch-delete")
     async def batch_delete_clone_conversations(
         person_id: str,
-        indices: list[int] = Query(..., description="要删除的索引列表"),
+        indices: list[int] = Query(..., description="要删除的索引列表"),  # noqa: B008
         _auth: bool = Security(_verify_api_key),
     ):
         """批量删除多条对话"""
@@ -994,10 +993,10 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                     asyncio.run_coroutine_threadsafe(
                         queue.put(msg), loop
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.debug("Failed to emit log to SSE queue: %s", e)
 
-            log_queue_handler.emit = emit
+            log_queue_handler.emit = emit  # noqa: BLE001
 
             root_logger = logging.getLogger()
             root_logger.addHandler(log_queue_handler)
@@ -1054,10 +1053,10 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             wechat_info = {"connected": False}
             try:
                 wechat_info = await get_wechat_status()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("Failed to get wechat status for dashboard: %s", e)
             _wechat_status_cache["data"] = wechat_info
-            _wechat_status_cache["ts"] = now
+            _wechat_status_cache["ts"] = now  # noqa: BLE001
 
         # Get emotion/memory stats from running components
         try:
@@ -1076,21 +1075,21 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                             chats_today = structured.count_chats_today()
                             if hasattr(structured, 'count_facts'):
                                 facts_count = structured.count_facts()
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         logger.debug("Failed to get memory stats for dashboard: %s", e)
-        except Exception as e:
-            logger.debug("Failed to get emotion/memory stats for dashboard: %s", e)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Failed to get emotion/memory stats for dashboard: %s", e)  # noqa: BLE001
 
-        # Get system stats
+        # Get system stats  # noqa: BLE001
         if _health:
             try:
                 health_data = _health.check()
                 sys_status = health_data.get("status", "unknown")
                 uptime = health_data.get("uptime_seconds", 0)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("Failed to get health check for dashboard: %s", e)
 
-        return {
+        return {  # noqa: BLE001
             "today_chats": chats_today,
             "recent_memories": facts_count,
             "affinity": affinity,
@@ -1158,7 +1157,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                 "total_keyword": results.get("total_keyword", 0)}
 
     @app.post("/api/rag/documents")
-    async def rag_upload_document(file: UploadFile = File(...), _auth: bool = Security(_verify_api_key)):
+    async def rag_upload_document(file: UploadFile = File(...), _auth: bool = Security(_verify_api_key)):  # noqa: B008
         rag = _get_rag()
         if not rag:
             raise HTTPException(503, "RAG引擎未初始化")
@@ -1218,10 +1217,10 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
                 with open(plugin_path, encoding="utf-8") as f:
                     data = json.load(f)
                 return {"plugins": data.get("plugins", {})}
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Failed to load plugins config: %s", e)
         return {"plugins": {}}
-
+  # noqa: BLE001
     @app.post("/api/plugins/{name}/toggle")
     async def toggle_plugin(name: str, enabled: bool = True, _auth: bool = Security(_verify_api_key)):
         plugin_path = Path(__file__).parent.parent / "plugins" / "plugins.json"
@@ -1233,7 +1232,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         if name not in plugins:
             plugins[name] = {}
         plugins[name]["enabled"] = enabled
-        plugins[name]["toggled_at"] = datetime.now().isoformat()
+        plugins[name]["toggled_at"] = datetime.now(tz=timezone.utc).isoformat()
         data["plugins"] = plugins
         with open(plugin_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1243,24 +1242,24 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
     # Multimodal File Upload
     # ═══════════════════════════════════════════
 
-    UPLOAD_DIR = Path(__file__).parent.parent / "data" / "uploads"
+    UPLOAD_DIR = Path(__file__).parent.parent / "data" / "uploads"  # noqa: N806
     # 文件上传大小限制：默认50MB，硬编码上限100MB
-    MAX_UPLOAD_SIZE = min(
+    MAX_UPLOAD_SIZE = min(  # noqa: N806
         int(os.environ.get("MAX_UPLOAD_SIZE", str(50 * 1024 * 1024))),
         100 * 1024 * 1024  # 硬编码上限 100MB
     )
-    MAX_RAG_UPLOAD_SIZE = min(
+    MAX_RAG_UPLOAD_SIZE = min(  # noqa: N806
         int(os.environ.get("MAX_RAG_UPLOAD_SIZE", str(10 * 1024 * 1024))),
         50 * 1024 * 1024  # 硬编码上限 50MB
     )
 
     @app.post("/api/files/upload")
-    async def upload_file(file: UploadFile = File(...), _auth: bool = Security(_verify_api_key)):
+    async def upload_file(file: UploadFile = File(...), _auth: bool = Security(_verify_api_key)):  # noqa: B008
         content = await file.read()
         if len(content) > MAX_UPLOAD_SIZE:
             raise HTTPException(413, f"文件大小超过限制 ({MAX_UPLOAD_SIZE // 1024 // 1024}MB)")
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        safe_name = re.sub(r'[^\w.\-]', '_', file.filename)
+        safe_name = re.sub(r'[^\w.\-]', '_', file.filename)  # type: ignore[arg-type]
         dest = UPLOAD_DIR / f"{int(time.time())}_{safe_name}"
         with open(dest, "wb") as f:
             f.write(content)
@@ -1351,16 +1350,16 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
             raise
         except Exception:
             logger.exception("Cache invalidation failed")
-            raise HTTPException(500, "Cache invalidation failed")
+            raise HTTPException(500, "Cache invalidation failed") from None
 
     # ── 微信二维码 API ──
     try:
         from api.qrcode_store import router as qrcode_router
         app.include_router(qrcode_router)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("二维码API挂载失败: %s", e)
 
-    @app.get("/api/routes")
+    @app.get("/api/routes")  # noqa: BLE001
     async def list_routes():
         """返回所有已注册路由的路径和方法列表"""
         routes = []

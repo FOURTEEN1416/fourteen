@@ -49,7 +49,7 @@ class ModelRegistry:
         ]
         model_list = models or default_models
         self._models: list[ModelEntry] = [
-            ModelEntry(name=m["name"], priority=m["priority"])
+            ModelEntry(name=m["name"], priority=m["priority"])  # type: ignore[arg-type]
             for m in model_list
         ]
         self._models.sort(key=lambda m: m.priority)
@@ -150,8 +150,8 @@ class LLMGatewayV2:
             entry = self.registry.get_by_name(model_name)
             if entry:
                 entry.mark_success()
-            return content.strip()
-        except Exception as e:
+            return content.strip()  # type: ignore[no-any-return]
+        except Exception as e:  # noqa: BLE001
             record_error("llm", type(e).__name__)
             entry = self.registry.get_by_name(model_name)
             if entry:
@@ -195,7 +195,7 @@ class LLMGatewayV2:
                 "content": message.get("content", ""),
                 "tool_calls": message.get("tool_calls"),
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             record_error("llm", type(e).__name__)
             return {"content": self._handle_error(e), "tool_calls": None}
 
@@ -257,7 +257,7 @@ class LLMGatewayV2:
         try:
             async with self._async_client.stream("POST", self._chat_url, json=payload) as resp:
                 resp.raise_for_status()
-                async with asyncio.timeout(60):
+                async with asyncio.timeout(60):  # type: ignore[attr-defined]
                     async for line in resp.aiter_lines():
                         if not line.startswith("data: "):
                             continue
@@ -278,7 +278,7 @@ class LLMGatewayV2:
         except asyncio.TimeoutError:
             logger.warning("LLM 流式生成超时 (60s)")
             yield "（生成已超时，请重试）"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             record_error("llm_stream", type(e).__name__)
             yield self._handle_error(e)
 
@@ -324,8 +324,8 @@ class LLMGatewayV2:
                 content = data["choices"][0]["message"]["content"]
                 entry.mark_success()
                 logger.info("Fallback to %s succeeded", entry.name)
-                return content.strip()
-            except Exception:
+                return content.strip()  # type: ignore[no-any-return]
+            except Exception:  # noqa: BLE001
                 entry.mark_failed()
         return None
 

@@ -43,7 +43,7 @@ class GracefulShutdown:
         for fn in self._cleanup_fns:
             try:
                 fn()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Cleanup error: %s", e)
         logger.info("Graceful shutdown complete")
 

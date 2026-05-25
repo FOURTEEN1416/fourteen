@@ -96,7 +96,6 @@ class CharacterValidator:
     @classmethod
     def _check_examples(cls, card: CharacterCard) -> list[str]:
         errors = []
-        if card.data.mes_example:
-            if "{{char}}" not in card.data.mes_example and "{{user}}" not in card.data.mes_example:
-                errors.append("示例消息中未使用 {{char}}/{{user}} 占位符")
+        if card.data.mes_example and "{{char}}" not in card.data.mes_example and "{{user}}" not in card.data.mes_example:
+            errors.append("示例消息中未使用 {{char}}/{{user}} 占位符")
         return errors

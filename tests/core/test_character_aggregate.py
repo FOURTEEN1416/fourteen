@@ -15,12 +15,12 @@ def test_create_default():
 
 
 def test_validate_name_empty():
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         CharacterAggregate(name="")
 
 
 def test_validate_name_whitespace():
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         CharacterAggregate(name="   ")
 
 

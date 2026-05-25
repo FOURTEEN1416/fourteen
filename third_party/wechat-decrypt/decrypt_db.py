@@ -6,6 +6,7 @@ WeChat 4.0 数据库解密器
 密钥来源: all_keys.json (由find_all_keys.py从内存提取)
 """
 import argparse
+import contextlib
 import functools
 import hashlib
 import hmac as hmac_mod
@@ -15,6 +16,8 @@ import struct
 import sys
 
 from Crypto.Cipher import AES
+from config import load_config
+from key_utils import get_key_info, strip_key_metadata
 
 print = functools.partial(print, flush=True)
 
@@ -25,12 +28,6 @@ IV_SZ = 16
 HMAC_SZ = 64
 RESERVE_SZ = 80  # IV(16) + HMAC(64)
 SQLITE_HDR = b'SQLite format 3\x00'
-
-import contextlib
-
-from key_utils import get_key_info, strip_key_metadata
-
-from config import load_config
 
 _cfg = load_config()
 DB_DIR = _cfg["db_dir"]

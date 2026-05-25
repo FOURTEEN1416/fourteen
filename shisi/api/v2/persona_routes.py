@@ -22,7 +22,7 @@ def get_character_service() -> CharacterService:
 
 
 @router.get("/{character_id}/persona")
-async def get_persona(character_id: str, service: CharacterService = Depends(get_character_service)):
+async def get_persona(character_id: str, service: CharacterService = Depends(get_character_service)):  # noqa: B008
     character = service.get_character(character_id)
     if not character:
         raise HTTPException(status_code=404, detail="角色不存在")
@@ -33,7 +33,7 @@ async def get_persona(character_id: str, service: CharacterService = Depends(get
 async def update_persona(
     character_id: str,
     request: UpdatePersonaRequest,
-    service: CharacterService = Depends(get_character_service),
+    service: CharacterService = Depends(get_character_service),  # noqa: B008
 ):
     character = service.get_character(character_id)
     if not character:

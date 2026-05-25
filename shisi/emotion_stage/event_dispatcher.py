@@ -36,12 +36,12 @@ class EventDispatcher:
                 result = listener(event)
                 if hasattr(result, '__await__'):
                     await result
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error("事件监听器异常: %s", e)
 
     def dispatch_sync(self, event: StageChangeEvent) -> None:
         for listener in self._listeners:
             try:
                 listener(event)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error("事件监听器异常: %s", e)

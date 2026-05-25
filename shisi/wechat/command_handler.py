@@ -44,7 +44,7 @@ class WeChatCommandHandler:
                 result = handler(cmd, character_id)
                 return True, result
             return True, f"未知指令: {cmd.action}"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("指令处理异常: %s", e)
             return True, f"指令执行失败: {e}"
 
@@ -64,7 +64,7 @@ class WeChatCommandHandler:
         if hasattr(self, "_voice_mgr") and self._voice_mgr:
             try:
                 self._voice_mgr.switch_engine("gpt-sovits")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("TTS联动切换失败: %s", e)
         return msg
 
@@ -98,12 +98,12 @@ class WeChatCommandHandler:
             try:
                 progress = self._stage.get_progress(active_id)
                 emotion = progress.get("current_stage", "")
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
         if not emotion:
             emotion = "默认"
         stickers = self._sticker.recommend(
-            emotion_tags=[emotion], character_id=active_id, limit=3,
+            emotion_tags=[emotion], character_id=active_id, limit=3,  # type: ignore[arg-type]
         )
         if not stickers:
             return "当前没有匹配的表情包"

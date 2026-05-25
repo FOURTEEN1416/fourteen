@@ -101,10 +101,7 @@ class StyleVectorizer:
         informal_count = sum(1 for m in messages
                              for marker in INFORMAL_MARKERS if marker in m)
         total_markers = formal_count + informal_count
-        if total_markers > 0:
-            formality = formal_count / total_markers
-        else:
-            formality = 0.3  # 默认偏低（日常对话偏随意）
+        formality = formal_count / total_markers if total_markers > 0 else 0.3
 
         # ── 情感表达度 expressiveness ──
         emoji_count = len(EMOJI_PATTERN.findall(all_text))
@@ -130,10 +127,7 @@ class StyleVectorizer:
         pos_count = sum(1 for w in POSITIVE_WORDS if w in all_text)
         neg_count = sum(1 for w in NEGATIVE_WORDS if w in all_text)
         total_pn = pos_count + neg_count
-        if total_pn > 0:
-            sentiment = pos_count / total_pn
-        else:
-            sentiment = 0.6  # 默认偏正面
+        sentiment = pos_count / total_pn if total_pn > 0 else 0.6
 
         return StyleVector(
             formality=formality,

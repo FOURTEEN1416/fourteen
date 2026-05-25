@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import sqlite3
@@ -91,15 +92,13 @@ class UserPersonaBank:
             self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
             self._conn.execute(CREATE_USER_PERSONA_TABLE)
             self._conn.execute(CREATE_USER_SNAPSHOT_TABLE)
-            try:
+            with contextlib.suppress(Exception):  # noqa: BLE001
                 self._conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_snapshots_user_time "
                     "ON user_persona_snapshots (user_id, timestamp DESC)"
                 )
-            except Exception:
-                pass  # 索引创建失败不影响使用
             self._conn.commit()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("PersonaBank DB init error: %s", e)
 
     def get_connection(self) -> sqlite3.Connection | None:
@@ -139,7 +138,7 @@ class UserPersonaBank:
                 self._conn.commit()
                 self._cache[persona.user_id] = persona
                 return True
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error("Failed to save persona: %s", e)
                 return False
 
@@ -181,7 +180,7 @@ class UserPersonaBank:
                 )
                 self._conn.commit()
                 return True
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error("Failed to add snapshot: %s", e)
                 return False
 
@@ -222,7 +221,7 @@ class UserPersonaBank:
             return 0.0
         # 基于样本数的S曲线
         count = persona.snapshot_count
-        return 1.0 / (1.0 + 10.0 * (2.718 ** (-0.5 * count)))
+        return 1.0 / (1.0 + 10.0 * (2.718 ** (-0.5 * count)))  # type: ignore[no-any-return]
 
     # ── 内部方法 ──
 
@@ -247,7 +246,7 @@ class UserPersonaBank:
             )
             self._cache[user_id] = persona
             return persona
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Failed to load persona from DB: %s", e)
             return None
 
@@ -261,7 +260,7 @@ class UserPersonaBank:
             ).fetchall()
             for (user_id,) in rows:
                 self._load_from_db(user_id)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("No existing personas to load: %s", e)
 
     def get_recent_snapshots(
@@ -292,7 +291,7 @@ class UserPersonaBank:
                     trigger_message=row[6] or "",
                 ))
             return snapshots
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Failed to load snapshots: %s", e)
             return []
 
@@ -310,7 +309,7 @@ class UserPersonaBank:
             self._conn.commit()
             self._cache.pop(user_id, None)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Failed to clear user: %s", e)
             return False
 

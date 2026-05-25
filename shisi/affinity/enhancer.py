@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +42,7 @@ class AffinityEnhancer:
         old = self._values.get(character_id, 0.0)
         new = max(self._min, min(self._max, old + delta))
         self._values[character_id] = new
-        self._last_interaction[character_id] = datetime.now()
+        self._last_interaction[character_id] = datetime.now(tz=timezone.utc)
 
         unlocks = self._unlock.check_unlocks(character_id, old, new)
 
@@ -55,7 +55,7 @@ class AffinityEnhancer:
     def apply_decay(self, character_id: str, now: datetime | None = None) -> float:
         if character_id not in self._values:
             return 0.0
-        last = self._last_interaction.get(character_id, datetime.now())
+        last = self._last_interaction.get(character_id, datetime.now(tz=timezone.utc))
         decay = self._decay.calculate_decay(self._values[character_id], last, now)
         if decay > 0:
             old = self._values[character_id]
@@ -85,7 +85,7 @@ class AffinityEnhancer:
                     "INSERT INTO affinity_records (character_id, old_value, new_value, delta, reason, source) VALUES (?,?,?,?,?,?)",
                     (cid, old, new, delta, reason, source),
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("记录好感度变更失败: %s", e)
 
     def _audit(self, cid: str, action: str, detail: str) -> None:
@@ -95,5 +95,5 @@ class AffinityEnhancer:
                     "INSERT INTO affinity_audit (character_id, action, detail) VALUES (?,?,?)",
                     (cid, action, detail),
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("审计记录失败: %s", e)

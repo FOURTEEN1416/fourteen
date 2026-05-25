@@ -53,7 +53,7 @@ def _to_detail(character: CharacterAggregate, is_active: bool = False) -> Charac
 
 
 @router.get("", response_model=list[CharacterSummary])
-async def list_characters(service: CharacterService = Depends(get_character_service)):
+async def list_characters(service: CharacterService = Depends(get_character_service)):  # noqa: B008
     characters = service.list_characters()
     active = service.get_active_character()
     active_id = active.id if active else None
@@ -74,7 +74,7 @@ async def list_characters(service: CharacterService = Depends(get_character_serv
 
 
 @router.get("/active", response_model=CharacterDetail | None)
-async def get_active_character(service: CharacterService = Depends(get_character_service)):
+async def get_active_character(service: CharacterService = Depends(get_character_service)):  # noqa: B008
     character = service.get_active_character()
     if not character:
         return None
@@ -82,7 +82,7 @@ async def get_active_character(service: CharacterService = Depends(get_character
 
 
 @router.get("/{character_id}", response_model=CharacterDetail)
-async def get_character(character_id: str, service: CharacterService = Depends(get_character_service)):
+async def get_character(character_id: str, service: CharacterService = Depends(get_character_service)):  # noqa: B008
     character = service.get_character(character_id)
     if not character:
         raise HTTPException(status_code=404, detail="角色不存在")
@@ -91,13 +91,13 @@ async def get_character(character_id: str, service: CharacterService = Depends(g
 
 
 @router.post("", response_model=CharacterDetail, status_code=201)
-async def create_character(request: CreateCharacterRequest, service: CharacterService = Depends(get_character_service)):
+async def create_character(request: CreateCharacterRequest, service: CharacterService = Depends(get_character_service)):  # noqa: B008
     character = service.create_character(name=request.name, description=request.description, tags=request.tags)
     return _to_detail(character)
 
 
 @router.put("/{character_id}/activate")
-async def activate_character(character_id: str, service: CharacterService = Depends(get_character_service)):
+async def activate_character(character_id: str, service: CharacterService = Depends(get_character_service)):  # noqa: B008
     success = service.switch_character(character_id)
     if not success:
         raise HTTPException(status_code=404, detail="角色不存在")
@@ -108,7 +108,7 @@ async def activate_character(character_id: str, service: CharacterService = Depe
 async def process_message(
     character_id: str,
     request: ProcessMessageRequest,
-    service: CharacterService = Depends(get_character_service),
+    service: CharacterService = Depends(get_character_service),  # noqa: B008
 ):
     try:
         character, prompt = service.process_message(
@@ -119,11 +119,11 @@ async def process_message(
         return ProcessMessageResponse(character=_to_detail(character, is_active=True), system_prompt=prompt)
     except ValueError:
         logger.exception("处理消息失败: character_id=%s", character_id)
-        raise HTTPException(status_code=404, detail="角色不存在或消息处理失败")
+        raise HTTPException(status_code=404, detail="角色不存在或消息处理失败") from None
 
 
 @router.post("/import")
-async def import_character(file: UploadFile = File(...), service: CharacterService = Depends(get_character_service)):
+async def import_character(file: UploadFile = File(...), service: CharacterService = Depends(get_character_service)):  # noqa: B008
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="文件大小超过限制")
@@ -132,22 +132,22 @@ async def import_character(file: UploadFile = File(...), service: CharacterServi
         character = service.import_from_legacy(data)
         return {"success": True, "character_id": character.id, "name": character.name}
     except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="无效的JSON文件")
-    except Exception:
-        raise HTTPException(status_code=500, detail="导入失败，请检查文件格式")
+        raise HTTPException(status_code=400, detail="无效的JSON文件") from None
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail="导入失败，请检查文件格式") from None
 
 
 @router.post("/{character_id}/export")
-async def export_character(character_id: str, service: CharacterService = Depends(get_character_service)):
+async def export_character(character_id: str, service: CharacterService = Depends(get_character_service)):  # noqa: B008
     try:
         return service.export_to_legacy(character_id)
     except ValueError:
         logger.exception("导出角色失败: character_id=%s", character_id)
-        raise HTTPException(status_code=404, detail="角色不存在或导出失败")
+        raise HTTPException(status_code=404, detail="角色不存在或导出失败") from None
 
 
 @router.delete("/{character_id}")
-async def delete_character(character_id: str, service: CharacterService = Depends(get_character_service)):
+async def delete_character(character_id: str, service: CharacterService = Depends(get_character_service)):  # noqa: B008
     success = service.delete_character(character_id)
     if not success:
         raise HTTPException(status_code=404, detail="角色不存在")

@@ -69,7 +69,7 @@ class DarkTriadTraits:
     machiavellianism: float = 0.0
     psychopathy: float = 0.0
     overall_level: str = "normal"  # normal / elevated / significant
-    matched_patterns: list[str] = None
+    matched_patterns: list[str] | None = None
 
     def __post_init__(self):
         if self.matched_patterns is None:
@@ -81,7 +81,7 @@ class DarkTriadTraits:
             "machiavellianism": round(self.machiavellianism, 3),
             "psychopathy": round(self.psychopathy, 3),
             "overall_level": self.overall_level,
-            "matched": self.matched_patterns[:10],
+            "matched": self.matched_patterns[:10],  # type: ignore[index]
         }
 
 

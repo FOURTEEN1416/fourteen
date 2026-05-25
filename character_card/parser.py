@@ -107,7 +107,7 @@ class CharacterCardParser:
                             chara_data = decoded.decode('utf-8')
                         elif keyword == 'ccv3':
                             ccv3_data = decoded.decode('utf-8')
-                    except (base64.binascii.Error, UnicodeDecodeError):
+                    except Exception:  # base64解码错误或Unicode解码错误
                         # 可能是未编码的文本，直接尝试
                         try:
                             if keyword == 'chara':
@@ -123,7 +123,7 @@ class CharacterCardParser:
         if ccv3_data:
             try:
                 return CharacterCardParser.parse_json(ccv3_data)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("V3角色卡解析失败，尝试V2: %s", e)
 
         if chara_data:
@@ -246,7 +246,7 @@ class CharacterCardParser:
                     position=str(entry.get("position", "0")),
                     extensions=entry.get("extensions", {}),
                 ))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("WorldInfo条目解析跳过: %s", e)
         return WorldInfoBook(
             name=wb.get("name", ""),

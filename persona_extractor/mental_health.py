@@ -219,10 +219,10 @@ class MentalHealthScreener:
 
         基于 DSM-5 标志性词汇和 GAD-7 对应词汇进行模式匹配。
         """
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         text_lower = text.lower()
-        snapshot = MentalHealthSnapshot(timestamp=datetime.now().isoformat())
+        snapshot = MentalHealthSnapshot(timestamp=datetime.now(tz=timezone.utc).isoformat())
         all_matched = []
 
         # ── 抑郁筛查 ──
@@ -353,7 +353,7 @@ class MentalHealthScreener:
                 else "low"
             )
             return snapshot
-        except Exception:
+        except Exception:  # noqa: BLE001
             return self.quick_screen(text)
 
     def get_risk_summary(self) -> dict:

@@ -118,7 +118,8 @@ class OceanTraits:
             'agreeableness', 'neuroticism']))
         if norm1 * norm2 == 0:
             return 0.0
-        return dot / (norm1 * norm2)
+        result = dot / (norm1 * norm2)
+        return float(result)
 
     def blend(self, other: OceanTraits, weight: float = 0.3) -> OceanTraits:
         """加权融合: self * (1-w) + other * w"""
@@ -522,7 +523,7 @@ class UserPersona:
                 from .hexaco import HexacoTraits
                 h = HexacoTraits(**self.hexaco) if isinstance(self.hexaco, dict) else self.hexaco
                 parts.append(h.to_prompt_segment())
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
         # 暗黑人格提示

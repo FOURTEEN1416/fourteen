@@ -43,7 +43,7 @@ class UnlockManager:
                 for listener in self._listeners:
                     try:
                         listener(character_id, u)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         logger.error("解锁事件监听器异常: %s", e)
         return newly_unlocked
 

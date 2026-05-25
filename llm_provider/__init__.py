@@ -10,7 +10,6 @@ LLM 提供商 — 对外统一接口
 import logging
 import os
 import threading
-from typing import Dict, List, Optional
 
 from .llm_gateway_v2 import LLMGatewayV2
 from .opencode_zen_provider import DEFAULT_MODELS_PRIORITY, OpenCodeZenProvider
@@ -42,8 +41,8 @@ def _load_provider_from_config() -> str | None:
         if system_path.exists():
             with open(system_path, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
-            return cfg.get("llm", {}).get("provider")
-    except Exception:
+            return cfg.get("llm", {}).get("provider")  # type: ignore[no-any-return]  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         pass
     return None
 

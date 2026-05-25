@@ -29,7 +29,7 @@ def main():
             try:
                 row = conn.execute("SELECT COUNT(*) FROM characters").fetchone()
                 print(f"旧数据库角色数: {row[0]}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"旧表读取失败: {e}")
             finally:
                 conn.close()

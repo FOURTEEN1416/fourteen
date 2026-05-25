@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger("memory_ext.enhancer")
@@ -68,18 +68,18 @@ class MemoryEnhancer:
 
         try:
             import chromadb
-            client = chromadb.PersistentClient(path=self._chroma_path)
+            client = chromadb.PersistentClient(path=self._chroma_path)  # type: ignore[arg-type]
             # 尝试获取已存在的集合，不存在则创建
             try:
-                self._collection = client.get_collection(self._collection_name)
+                self._collection = client.get_collection(self._collection_name)  # type: ignore[assignment]
                 logger.info("使用已有记忆集合: %s", self._collection_name)
-            except Exception:
-                self._collection = client.create_collection(self._collection_name)
+            except Exception:  # noqa: BLE001
+                self._collection = client.create_collection(self._collection_name)  # type: ignore[assignment]
                 logger.info("创建新记忆集合: %s", self._collection_name)
 
             self._initialized = True
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("初始化MemoryEnhancer失败: %s", e)
             self._enabled = False
             return False
@@ -107,7 +107,7 @@ class MemoryEnhancer:
             meta = {
                 "user_id": user_id,
                 "timestamp": timestamp,
-                "date": datetime.fromtimestamp(timestamp).isoformat(),
+                "date": datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat(),
                 "type": "long_term",
             }
             if metadata:
@@ -168,7 +168,7 @@ class MemoryEnhancer:
                 meta = {
                     "user_id": user_id,
                     "timestamp": timestamp + idx,
-                    "date": datetime.fromtimestamp(timestamp + idx).isoformat(),
+                    "date": datetime.fromtimestamp(timestamp + idx, tz=timezone.utc).isoformat(),
                     "type": "long_term",
                 }
                 if batch_meta:
@@ -243,7 +243,7 @@ class MemoryEnhancer:
             memories.sort(key=lambda x: x["score"], reverse=True)
             return memories
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("搜索记忆失败: %s", e)
             return []
 
@@ -278,7 +278,7 @@ class MemoryEnhancer:
                     })
             return memories
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("获取记忆列表失败: %s", e)
             return []
 
@@ -289,7 +289,7 @@ class MemoryEnhancer:
         try:
             self._collection.delete(ids=[memory_id])
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("删除记忆失败: %s", e)
             return False
 
@@ -311,7 +311,7 @@ class MemoryEnhancer:
                 self._collection.delete(where={"type": "long_term"})
             logger.info("已清除用户 '%s' 的所有记忆", user_id)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("清除记忆失败: %s", e)
             return False
 
@@ -329,7 +329,7 @@ class MemoryEnhancer:
                 result = self._collection.get(where={"user_id": user_id})
                 return len(result.get("ids", [])) if result else 0
             return self._collection.count()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("统计记忆数量失败: %s", e)
             return 0
 

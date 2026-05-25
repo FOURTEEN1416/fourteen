@@ -142,7 +142,7 @@ class TTSManager:
                 emotion_params = mapper.apply_to_edge_tts(emotion)
                 kwargs.update(emotion_params)
                 logger.debug("[TTS] 情感参数注入: %s → %s", emotion, emotion_params)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
         # 注意: 无全局锁，支持并发合成

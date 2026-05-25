@@ -6,7 +6,8 @@ import os
 import time
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Security
+from fastapi.security import APIKeyHeader
 
 logger = logging.getLogger("qrcode_store")
 
@@ -18,8 +19,8 @@ def _read_qrcode_data() -> dict:
     if QRCODE_FILE.exists():
         try:
             with open(QRCODE_FILE) as f:
-                return json.load(f)
-        except Exception as e:
+                return json.load(f)  # type: ignore[no-any-return]
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to read qrcode file: %s", e)
     return {"qrcode_url": "", "status": "idle", "timestamp": 0}
 
@@ -30,7 +31,7 @@ def save_qrcode(qrcode_url: str, status: str = "waiting"):
     try:
         with open(QRCODE_FILE, "w") as f:
             json.dump(data, f)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("Failed to save qrcode: %s", e)
 
 
@@ -39,7 +40,7 @@ QRCODE_EXPIRY_SECONDS = 600
 
 def is_expired() -> bool:
     data = _read_qrcode_data()
-    return (time.time() - data.get("timestamp", 0)) >= QRCODE_EXPIRY_SECONDS
+    return (time.time() - data.get("timestamp", 0)) >= QRCODE_EXPIRY_SECONDS  # type: ignore[no-any-return]
 
 
 def _generate_qr_image(url: str) -> str | None:
@@ -57,9 +58,6 @@ def _generate_qr_image(url: str) -> str | None:
         logger.warning("qrcode package not installed, cannot generate image")
         return None
 
-
-from fastapi import HTTPException, Security
-from fastapi.security import APIKeyHeader
 
 # API Key 认证配置（与 rest_api.py 保持一致）
 _api_key_enabled = os.environ.get("API_KEY_ENABLED", "false").lower() == "true"

@@ -19,7 +19,7 @@ import json
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .models import OceanTraits, PadState, StyleVector, UserPersonaSnapshot
 
@@ -233,7 +233,7 @@ class PADODetector:
         if not force and now - self._last_detect_time < 1.0:
             logger.debug("PADO detect rate limited, returning cached")
             return self._get_cached(user_id) or UserPersonaSnapshot(
-                timestamp=datetime.now().isoformat(),
+                timestamp=datetime.now(tz=timezone.utc).isoformat(),
                 ocean=OceanTraits(),
                 confidence=0.0,
                 source="cached",
@@ -299,7 +299,7 @@ class PADODetector:
             style = StyleVector.from_ocean(ocean)
 
             return UserPersonaSnapshot(
-                timestamp=datetime.now().isoformat(),
+                timestamp=datetime.now(tz=timezone.utc).isoformat(),
                 ocean=ocean,
                 pad=pad,
                 style=style,
@@ -308,7 +308,7 @@ class PADODetector:
                 trigger_message=message[:200],
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("PADO lite detection error: %s", e)
             ocean, confidence = _rule_detect(message)
             return self._build_snapshot(message, ocean, confidence, "rule_error")
@@ -385,7 +385,7 @@ Low视角（偏向各维度低端）: {low_data}
                 style = StyleVector.from_ocean(ocean)
 
                 return UserPersonaSnapshot(
-                    timestamp=datetime.now().isoformat(),
+                    timestamp=datetime.now(tz=timezone.utc).isoformat(),
                     ocean=ocean,
                     pad=pad,
                     style=style,
@@ -394,7 +394,7 @@ Low视角（偏向各维度低端）: {low_data}
                     trigger_message=message[:200],
                 )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("PADO full detection error: %s", e)
 
         return await self._lite_detect(message, context, chameleon_penalty)
@@ -417,13 +417,12 @@ Low视角（偏向各维度低端）: {low_data}
                 import asyncio
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(
-                    None, lambda: self._llm.chat_sync(  # type: ignore
-                        query=prompt, max_tokens=512, temperature=0.1
+                    None, lambda: self._llm.chat_sync(                        query=prompt, max_tokens=512, temperature=0.1
                     )
                 )
             else:
                 response = ""
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("PADO LLM call failed: %s", e)
             response = ""
 
@@ -498,7 +497,7 @@ Low视角（偏向各维度低端）: {low_data}
             text = text[start:end + 1]
 
         try:
-            return json.loads(text)
+            return json.loads(text)  # type: ignore[no-any-return]
         except json.JSONDecodeError:
             pass
 
@@ -507,7 +506,7 @@ Low视角（偏向各维度低端）: {low_data}
             # 修复 trailing comma
             text = re.sub(r',\s*}', '}', text)
             text = re.sub(r',\s*\]', ']', text)
-            return json.loads(text)
+            return json.loads(text)  # type: ignore[no-any-return]
         except json.JSONDecodeError:
             logger.debug("Failed to extract JSON from: %s...", text[:100])
             return None
@@ -518,7 +517,7 @@ Low视角（偏向各维度低端）: {low_data}
         pad = PadState.from_ocean(ocean)
         style = StyleVector.from_ocean(ocean)
         return UserPersonaSnapshot(
-            timestamp=datetime.now().isoformat(),
+            timestamp=datetime.now(tz=timezone.utc).isoformat(),
             ocean=ocean,
             pad=pad,
             style=style,

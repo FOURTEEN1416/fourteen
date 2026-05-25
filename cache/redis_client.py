@@ -9,8 +9,8 @@ import os
 from typing import Any
 
 try:
-    import redis
-    from redis.connection import ConnectionPool
+    import redis  # noqa: F401
+    from redis.connection import ConnectionPool  # noqa: F401
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
@@ -57,7 +57,7 @@ class RedisClient:
         try:
             self._connect()
             logger.info("Redis连接成功: %s:%s/%s", host, port, db)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Redis连接失败: %s", e)
             self.enabled = False
 
@@ -85,7 +85,7 @@ class RedisClient:
         try:
             value = self._client.get(key)
             return value.decode('utf-8') if isinstance(value, bytes) else value
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Redis get失败: %s", e)
             return None
 
@@ -101,7 +101,7 @@ class RedisClient:
         try:
             self._client.set(key, value, ex=expire)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Redis set失败: %s", e)
             return False
 
@@ -112,7 +112,7 @@ class RedisClient:
         try:
             self._client.delete(key)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Redis delete失败: %s", e)
             return False
 
@@ -122,7 +122,7 @@ class RedisClient:
             return False
         try:
             return bool(self._client.exists(key))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Redis exists失败: %s", e)
             return False
 
@@ -131,8 +131,8 @@ class RedisClient:
         if not self.enabled or not self._client:
             return -2
         try:
-            return self._client.ttl(key)
-        except Exception as e:
+            return self._client.ttl(key)  # type: ignore[no-any-return]
+        except Exception as e:  # noqa: BLE001
             logger.debug("Redis ttl失败: %s", e)
             return -2
 
@@ -143,7 +143,7 @@ class RedisClient:
         try:
             keys = self._client.keys(pattern)
             return [k.decode('utf-8') if isinstance(k, bytes) else k for k in keys]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Redis keys失败: %s", e)
             return []
 
@@ -155,7 +155,7 @@ class RedisClient:
             self._client.flushdb()
             logger.info("Redis数据库已清空")
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Redis flushdb失败: %s", e)
             return False
 
@@ -168,7 +168,7 @@ class RedisClient:
             return {k.decode('utf-8') if isinstance(k, bytes) else k:
                     v.decode('utf-8') if isinstance(v, bytes) else v
                     for k, v in info.items()}
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Redis info失败: %s", e)
             return {}
 
@@ -201,7 +201,7 @@ class RedisClient:
             try:
                 self._pool.disconnect()
                 logger.info("Redis连接已关闭")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("Redis关闭失败: %s", e)
 
     def __enter__(self):

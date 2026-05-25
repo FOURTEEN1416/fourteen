@@ -4,6 +4,7 @@
 原理: 定期解密 session.db (2MB, <1秒), 检测新消息
 session.db 包含每个聊天的最新消息摘要、发送者、时间戳
 """
+import functools
 import hashlib
 import io
 import json
@@ -15,13 +16,12 @@ from datetime import datetime
 
 import zstandard as zstd
 from Crypto.Cipher import AES
+from config import load_config
 from key_utils import get_key_info, strip_key_metadata
 
 _zstd_dctx = zstd.ZstdDecompressor()
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-
-import functools
 
 print = functools.partial(print, flush=True)
 
@@ -32,8 +32,6 @@ IV_SZ = 16
 HMAC_SZ = 64
 RESERVE_SZ = 80
 SQLITE_HDR = b'SQLite format 3\x00'
-
-from config import load_config
 
 _cfg = load_config()
 DB_DIR = _cfg["db_dir"]

@@ -19,6 +19,7 @@ WeChat Decrypt 数据源适配器 — 集成 ylytdeng/wechat-decrypt
 from __future__ import annotations
 
 import hashlib
+import importlib.util as _importlib_util
 import json
 import logging
 import os
@@ -45,7 +46,6 @@ _WD_PATH = DECRYPT_DIR
 
 # wechat-decrypt 的消息解析模块（可选，有降级）
 # 使用 importlib.util 动态加载，避免修改 sys.path 导致命名冲突
-import importlib.util as _importlib_util
 
 _wd_mcp = None
 _wd_resolve_sender = None
@@ -58,7 +58,7 @@ try:
     if _mcp_spec and _mcp_spec.loader:
         _wd_mcp = _importlib_util.module_from_spec(_mcp_spec)
         _mcp_spec.loader.exec_module(_wd_mcp)
-except Exception:
+except Exception:  # noqa: BLE001
     _wd_mcp = None
 
 # 尝试动态加载 chat_export_helpers 模块
@@ -70,7 +70,7 @@ try:
         _wd_helpers = _importlib_util.module_from_spec(_helpers_spec)
         _helpers_spec.loader.exec_module(_wd_helpers)
         _wd_resolve_sender = getattr(_wd_helpers, "_resolve_sender", None)
-except Exception:
+except Exception:  # noqa: BLE001
     _wd_resolve_sender = None
 
 
@@ -239,7 +239,7 @@ class DecryptSource:
                     capture_output=True, text=True, timeout=5,
                 )
                 return "Weixin.exe" in result.stdout
-            except Exception:
+            except Exception:  # noqa: BLE001
                 return True  # 无法检测时乐观返回
 
     def _run_find_keys(self) -> None:
@@ -357,7 +357,7 @@ class DecryptSource:
                         base = wxid.rsplit("_", 1)[0]
                         if base in self._contacts:
                             return base
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
         return ""
 
@@ -376,10 +376,10 @@ class DecryptSource:
         target_lower = target.lower()
         for wxid, display in self._contacts.items():
             if target_lower == display.lower():
-                return wxid
+                return wxid  # type: ignore[no-any-return]
         for wxid, display in self._contacts.items():
             if target_lower in display.lower():
-                return wxid
+                return wxid  # type: ignore[no-any-return]
 
         return None
 
@@ -424,7 +424,7 @@ class DecryptSource:
                     ]
                     self._table_cache[target_wxid] = tables
                     return tables
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("mcp_server 查询失败: %s", e)
 
         return []
@@ -478,10 +478,10 @@ class DecryptSource:
         优先用 mcp_server._format_message_text 解码"""
         if _wd_mcp is not None:
             try:
-                return self._query_via_mcp(
+                return self._query_via_mcp(  # type: ignore[no-any-return]
                     db_path, table_name, target_wxid, date_from, date_to, limit
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("mcp_server 解码失败: %s，降级手动读取", e)
 
         return self._query_messages_fallback(
@@ -496,16 +496,15 @@ class DecryptSource:
         conn = sqlite3.connect(db_path)
         start_ts = self._date_to_ts(date_from) if date_from else None
         end_ts = self._date_to_ts(date_to, end_of_day=True) if date_to else None
-        rows = _wd_mcp._query_messages(  # type: ignore
-            conn, table_name,
+        rows = _wd_mcp._query_messages(            conn, table_name,
             start_ts=start_ts, end_ts=end_ts,
             limit=limit, oldest_first=True,
             type_filter=[1],
         )
-        names = _wd_mcp.get_contact_names()  # type: ignore
+        names = _wd_mcp.get_contact_names()
         try:
-            id_to_username = _wd_mcp._load_name2id_maps(conn)  # type: ignore
-        except Exception:
+            id_to_username = _wd_mcp._load_name2id_maps(conn)
+        except Exception:  # noqa: BLE001
             id_to_username = {}
 
         messages = []
@@ -523,11 +522,11 @@ class DecryptSource:
                     }
                     label = _wd_resolve_sender(row, ctx, names, id_to_username)
                     is_self = (label == "me")
-                except Exception:
+                except Exception:  # noqa: BLE001
                     pass
 
             # 解码消息内容（WeChat 4.x 二进制格式）
-            decoded = _wd_mcp._decompress_content(raw_content, ct)  # type: ignore
+            decoded = _wd_mcp._decompress_content(raw_content, ct)
             if not decoded:
                 if isinstance(raw_content, bytes):
                     decoded = raw_content
@@ -539,8 +538,7 @@ class DecryptSource:
             text_content = ""
             if decoded:
                 try:
-                    result = _wd_mcp._format_message_text(  # type: ignore
-                        local_id, local_type, decoded,
+                    result = _wd_mcp._format_message_text(                        local_id, local_type, decoded,
                         "@chatroom" in target_wxid,
                         target_wxid,
                         self._contacts.get(target_wxid, target_wxid),
@@ -552,10 +550,10 @@ class DecryptSource:
                         text_content = result[1] or ""
                     elif isinstance(result, str):
                         text_content = result
-                except Exception:
+                except Exception:  # noqa: BLE001
                     try:
                         text_content = decoded.decode("utf-8", errors="replace")
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         text_content = ""
 
             if isinstance(text_content, bytes):
@@ -594,7 +592,7 @@ class DecryptSource:
                     if uname == self._self_wxid:
                         self_rowid = rid
                         break
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
             query = (
@@ -627,13 +625,13 @@ class DecryptSource:
                     try:
                         import zstandard as zstd
                         text = zstd.ZstdDecompressor().decompress(raw).decode("utf-8", errors="replace")
-                    except Exception:
-                        pass
+                    except Exception:  # noqa: BLE001
+                        pass  # noqa: BLE001
                 if not text and raw:
                     try:
                         text = raw.decode("utf-8", errors="replace")
-                    except Exception:
-                        text = ""
+                    except Exception:  # noqa: BLE001
+                        text = ""  # noqa: BLE001
                 # 跳过二进制乱码(含不可见字符比例过高)
                 if isinstance(text, str):
                     visible = sum(1 for c in text if c.isprintable() or c in '\n\r\t')
@@ -706,7 +704,7 @@ class DecryptSource:
 
     def _date_to_ts(self, date_str: str, end_of_day: bool = False) -> int:
         """日期字符串 → 时间戳"""
-        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        dt = datetime.strptime(date_str, "%Y-%m-%d")  # noqa: DTZ007
         if end_of_day:
             dt = dt.replace(hour=23, minute=59, second=59)
         return int(dt.timestamp())

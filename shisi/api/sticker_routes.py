@@ -53,7 +53,7 @@ async def recommend_stickers(req: RecommendRequest):
 
 
 @router.post("/import", response_model=ApiResponse)
-async def import_stickers(file: UploadFile = File(...), category: str = "default"):
+async def import_stickers(file: UploadFile = File(...), category: str = "default"):  # noqa: B008
     mgr = _get_manager()
     import tempfile
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:

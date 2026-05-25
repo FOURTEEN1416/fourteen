@@ -28,7 +28,7 @@ PAGE_WRITECOPY = 0x08
 PAGE_EXECUTE_READWRITE = 0x40
 PAGE_EXECUTE_WRITECOPY = 0x80
 
-class MEMORY_BASIC_INFORMATION(ctypes.Structure):
+class MemoryBasicInformation(ctypes.Structure):
     _fields_ = [
         ("BaseAddress", ctypes.c_void_p),
         ("AllocationBase", ctypes.c_void_p),
@@ -71,7 +71,7 @@ def find_v2_ciphertext(attach_dir):
                 header = fp.read(31)
             if header[:6] == v2_magic and len(header) >= 31:
                 return header[15:31], os.path.basename(f)
-        except:
+        except Exception:
             continue
     return None, None
 
@@ -91,7 +91,7 @@ def find_xor_key(attach_dir):
             if head == v2_magic and len(tail) == 2:
                 key = (tail[0], tail[1])
                 tail_counts[key] = tail_counts.get(key, 0) + 1
-        except:
+        except Exception:
             continue
     if not tail_counts:
         return None
@@ -103,12 +103,17 @@ def try_key(key_bytes, ciphertext):
     try:
         cipher = AES.new(key_bytes, AES.MODE_ECB)
         dec = cipher.decrypt(ciphertext)
-        if dec[:3] == b'\xFF\xD8\xFF': return 'JPEG'
-        if dec[:4] == bytes([0x89, 0x50, 0x4E, 0x47]): return 'PNG'
-        if dec[:4] == b'RIFF': return 'WEBP'
-        if dec[:4] == b'wxgf': return 'WXGF'
-        if dec[:3] == b'GIF': return 'GIF'
-    except:
+        if dec[:3] == b'\xFF\xD8\xFF':
+            return 'JPEG'
+        if dec[:4] == bytes([0x89, 0x50, 0x4E, 0x47]):
+            return 'PNG'
+        if dec[:4] == b'RIFF':
+            return 'WEBP'
+        if dec[:4] == b'wxgf':
+            return 'WXGF'
+        if dec[:3] == b'GIF':
+            return 'GIF'
+    except Exception:
         pass
     return None
 
@@ -122,7 +127,7 @@ def is_rw_protect(protect):
 def get_rw_regions(h_process):
     """Get RW committed memory regions"""
     address = 0
-    mbi = MEMORY_BASIC_INFORMATION()
+    mbi = MemoryBasicInformation()
     regions = []
     while address < 0x7FFFFFFFFFFF:
         result = kernel32.VirtualQueryEx(
@@ -206,10 +211,14 @@ def verify_and_decrypt(attach_dir, aes_key_str, xor_key):
             result = dec_aes + raw_data + dec_xor
 
             fmt, ext = "unknown", ".bin"
-            if result[:3] == b'\xFF\xD8\xFF': fmt, ext = "JPEG", ".jpg"
-            elif result[:4] == bytes([0x89, 0x50, 0x4E, 0x47]): fmt, ext = "PNG", ".png"
-            elif result[:4] == b'RIFF': fmt, ext = "WEBP", ".webp"
-            elif result[:4] == b'wxgf': fmt, ext = "WXGF", ".hevc"
+            if result[:3] == b'\xFF\xD8\xFF':
+                fmt, ext = "JPEG", ".jpg"
+            elif result[:4] == bytes([0x89, 0x50, 0x4E, 0x47]):
+                fmt, ext = "PNG", ".png"
+            elif result[:4] == b'RIFF':
+                fmt, ext = "WEBP", ".webp"
+            elif result[:4] == b'wxgf':
+                fmt, ext = "WXGF", ".hevc"
 
             if fmt != "unknown":
                 out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "decoded_images")
@@ -220,7 +229,7 @@ def verify_and_decrypt(attach_dir, aes_key_str, xor_key):
                 print(f"  Verified: {os.path.basename(f)} -> {fmt} ({len(result):,}B)", flush=True)
                 print(f"  Saved: {out_path}", flush=True)
                 return True
-        except:
+        except Exception:
             continue
     return False
 

@@ -25,7 +25,7 @@ class FavoriteManager:
             )
             conn.commit()
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("收藏失败: %s", e)
             return False
         finally:

@@ -18,47 +18,38 @@ _lock = threading.Lock()
 def _init_metrics():
     if not HAS_PROMETHEUS:
         return
-    _metrics["chat_request_duration"] = Histogram(  # type: ignore
-        "chat_request_duration_seconds",
+    _metrics["chat_request_duration"] = Histogram(        "chat_request_duration_seconds",
         "Chat request total duration",
         ["model"],
     )
-    _metrics["chat_token_usage"] = Counter(  # type: ignore
-        "chat_token_usage_total",
+    _metrics["chat_token_usage"] = Counter(        "chat_token_usage_total",
         "Total tokens used",
         ["model", "type"],
     )
-    _metrics["emotion_analysis_duration"] = Histogram(  # type: ignore
-        "emotion_analysis_duration_seconds",
+    _metrics["emotion_analysis_duration"] = Histogram(        "emotion_analysis_duration_seconds",
         "Emotion analysis duration",
     )
-    _metrics["memory_retrieval_duration"] = Histogram(  # type: ignore
-        "memory_retrieval_duration_seconds",
+    _metrics["memory_retrieval_duration"] = Histogram(        "memory_retrieval_duration_seconds",
         "Memory retrieval duration",
         ["memory_type"],
     )
-    _metrics["tool_call_duration"] = Histogram(  # type: ignore
-        "tool_call_duration_seconds",
+    _metrics["tool_call_duration"] = Histogram(        "tool_call_duration_seconds",
         "Tool call duration",
         ["tool_name"],
     )
-    _metrics["tool_call_total"] = Counter(  # type: ignore
-        "tool_call_total",
+    _metrics["tool_call_total"] = Counter(        "tool_call_total",
         "Tool call count",
         ["tool_name", "status"],
     )
-    _metrics["proactive_message_sent"] = Counter(  # type: ignore
-        "proactive_message_sent_total",
+    _metrics["proactive_message_sent"] = Counter(        "proactive_message_sent_total",
         "Proactive messages sent",
         ["trigger_type"],
     )
-    _metrics["error_total"] = Counter(  # type: ignore
-        "error_total",
+    _metrics["error_total"] = Counter(        "error_total",
         "Total errors",
         ["module", "error_type"],
     )
-    _metrics["active_sessions"] = Gauge(  # type: ignore
-        "active_sessions",
+    _metrics["active_sessions"] = Gauge(        "active_sessions",
         "Currently active sessions",
     )
 
@@ -71,7 +62,7 @@ def setup_metrics(port: int = 9090):
         if not _metrics:
             _init_metrics()
     try:
-        start_http_server(port)  # type: ignore
+        start_http_server(port)
         logger.info("Prometheus metrics server started on port %d", port)
     except OSError:
         logger.warning("Metrics port %d already in use", port)

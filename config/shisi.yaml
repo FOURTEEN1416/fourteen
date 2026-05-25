@@ -67,21 +67,6 @@ emotion:
     - "惊讶"
     - "平静"
 
-# 亲密度系统配置
-affinity:
-  # 初始亲密度
-  initial_value: 50
-  # 最大亲密度
-  max_value: 100
-  # 最小亲密度
-  min_value: 0
-  # 亲密度增长系数
-  growth_rate: 1.0
-  # 亲密度衰减系数
-  decay_rate: 0.1
-  # 每日互动上限
-  daily_interaction_limit: 50
-
 # 记忆系统配置
 memory:
   # 工作记忆容量
@@ -156,6 +141,81 @@ logging:
     enabled: true
     max_size_mb: 100
     backup_count: 5
+
+# 语音扩展配置
+voice_ext:
+  # 默认TTS引擎
+  default_tts: "edge-tts"
+  # 情感参数配置 - 影响语速和音调
+  emotion_params:
+    开心:
+      speed: 1.1
+      pitch: 1.1
+      volume: 1.1
+    撒娇:
+      speed: 0.95
+      pitch: 1.05
+      volume: 1.05
+    温柔:
+      speed: 0.9
+      pitch: 0.95
+      volume: 0.95
+    伤心:
+      speed: 0.85
+      pitch: 0.9
+      volume: 0.9
+    生气:
+      speed: 1.15
+      pitch: 1.15
+      volume: 1.15
+    害怕:
+      speed: 1.1
+      pitch: 0.95
+      volume: 0.95
+    害羞:
+      speed: 0.92
+      pitch: 0.9
+      volume: 0.9
+    傲娇:
+      speed: 1.0
+      pitch: 1.0
+      volume: 1.0
+    平常:
+      speed: 1.0
+      pitch: 1.0
+      volume: 1.0
+
+# 亲密度系统配置
+affinity:
+  # 初始亲密度
+  initial_value: 50
+  # 最大亲密度
+  max_value: 100
+  # 最小亲密度
+  min_value: 0
+  # 亲密度增长系数
+  growth_rate: 1.0
+  # 亲密度衰减系数
+  decay_rate: 0.1
+  # 每日互动上限
+  daily_interaction_limit: 50
+  # 解锁配置 - 好感度阈值对应的解锁内容
+  unlocks:
+    - threshold: 25
+      type: "topic"
+      name: "个人话题"
+    - threshold: 50
+      type: "topic"
+      name: "亲密话题"
+    - threshold: 50
+      type: "sticker"
+      name: "专属表情包"
+    - threshold: 75
+      type: "voice"
+      name: "专属语音"
+    - threshold: 90
+      type: "special"
+      name: "特殊互动"
 
 # 功能开关
 features:

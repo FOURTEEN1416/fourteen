@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -33,7 +33,7 @@ class TimeContext:
 
     @classmethod
     def now(cls) -> TimeContext:
-        now = datetime.now()
+        now = datetime.now(tz=timezone.utc)
         hour = now.hour
         if 6 <= hour < 9:
             period = "morning"
@@ -201,7 +201,7 @@ class EnhancedPromptEngine:
                 if hasattr(coupled, "sentence_length"):
                     len_map = {"short": "简短", "medium": "适中", "long": "较长"}
                     parts.append(f"回复长度偏好：{len_map.get(coupled.sentence_length, '适中')}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("Style coupler failed: %s", e)
         if context.few_shot_examples:
             examples_text = "\n".join(f"例：{ex}" for ex in context.few_shot_examples[:3])
@@ -216,9 +216,8 @@ class EnhancedPromptEngine:
             "不讨论政治、宗教敏感话题",
             "保持人设一致性，不OOC（Out of Character）",
         ]
-        if context.emotion_state and hasattr(context.emotion_state, "affinity"):
-            if context.emotion_state.affinity < 3:
-                constraints.append("当前好感度较低，保持适当距离感")
+        if context.emotion_state and hasattr(context.emotion_state, "affinity") and context.emotion_state.affinity < 3:
+            constraints.append("当前好感度较低，保持适当距离感")
         return "# 行为约束\n" + "\n".join(f"- {c}" for c in constraints)
 
     def _build_contextual_layer(self, context: PromptContext) -> str:
@@ -226,7 +225,7 @@ class EnhancedPromptEngine:
             return ""
         try:
             return self._contextual.generate_behavior_prompt(context)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Contextual behavior failed: %s", e)
             return ""
 
@@ -235,7 +234,7 @@ class EnhancedPromptEngine:
             return ""
         try:
             return self._anchors.generate_reinforcement(context.anchor_context)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Anchor reinforcement failed: %s", e)
             return ""
 
@@ -255,7 +254,7 @@ class EnhancedPromptEngine:
                 suggested_intensity_adjustment=adjustment,
                 suggested_evolution_direction=evo_dir,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Coupler feedback failed: %s", e)
             return CouplerFeedback()
 

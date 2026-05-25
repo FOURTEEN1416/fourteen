@@ -32,7 +32,7 @@ class PIIAnonymizer:
                 all_matches.append((match.start(), match.end(), pii_type, original))
 
         all_matches.sort(key=lambda x: x[0])
-        merged = []
+        merged: list[tuple[int, int, str, str]] = []
         for m in all_matches:
             if merged and m[0] < merged[-1][1]:
                 prev = merged[-1]

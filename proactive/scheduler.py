@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger("scheduler")
@@ -129,11 +129,11 @@ class ProactiveScheduler:
             )
 
             self._scheduler.start()
-            self._last_check_time = datetime.now()
+            self._last_check_time = datetime.now(tz=timezone.utc)
             logger.info("Scheduler started with %d jobs", len(self._scheduler.get_jobs()))
             return True
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Failed to start scheduler: %s", e)
             return False
 
@@ -154,7 +154,7 @@ class ProactiveScheduler:
         try:
             if self._get_last_chat_time:
                 last_chat = self._get_last_chat_time()
-                hours = (datetime.now() - last_chat).total_seconds() / 3600 if last_chat else 99.0
+                hours = (datetime.now(tz=timezone.utc) - last_chat).total_seconds() / 3600 if last_chat else 99.0
             else:
                 hours = self._hours_since_last_check()
 
@@ -175,10 +175,10 @@ class ProactiveScheduler:
                 logger.info("ASE triggered: [%s] %s", msg_type, message)
                 if self._send:
                     self._send(message)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("ASE check failed: %s", e)
         finally:
-            self._last_check_time = datetime.now()
+            self._last_check_time = datetime.now(tz=timezone.utc)
 
     def _run_daily_maintenance(self) -> None:
         """每日维护"""
@@ -186,7 +186,7 @@ class ProactiveScheduler:
             try:
                 self._daily_maintenance()
                 logger.info("Daily maintenance completed")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error("Daily maintenance failed: %s", e)
 
     def _reset_daily(self) -> None:
@@ -201,14 +201,14 @@ class ProactiveScheduler:
         if self.ase and hasattr(self.ase, "save_state"):
             try:
                 self.ase.save_state()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("State save failed: %s", e)
 
     # ── 工具方法 ─────────────────────────────────────────
 
     def _hours_since_last_check(self) -> float:
         if self._last_check_time:
-            delta = datetime.now() - self._last_check_time
+            delta = datetime.now(tz=timezone.utc) - self._last_check_time
             return delta.total_seconds() / 3600
         return 0.0
 

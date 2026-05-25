@@ -219,7 +219,7 @@ class PersonaEvolutionEngine:
                 self._persona.evolve_dimension(trigger.dimension, after, trigger.reason)
             except TypeError:
                 try:
-                    self._persona.evolve_dimension(trigger.dimension, after, reason=trigger.reason)
+                    self._persona.evolve_dimension(trigger.dimension, after, reason=trigger.reason)  # type: ignore[call-arg]
                 except Exception as e:
                     logger.exception("Evolve dimension failed: %s", e)
                     return EvolutionResult(triggered=False, reason="evolution_failed")

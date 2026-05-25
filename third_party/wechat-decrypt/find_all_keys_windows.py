@@ -11,14 +11,14 @@ import re
 import sys
 import time
 
-print = functools.partial(print, flush=True)
-
 from key_scan_common import (
     collect_db_files,
     cross_verify_keys,
     save_results,
     scan_memory_for_keys,
 )
+
+print = functools.partial(print, flush=True)
 
 kernel32 = ctypes.windll.kernel32
 MEM_COMMIT = 0x1000

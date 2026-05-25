@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger("weather_plugin")
@@ -53,7 +53,7 @@ class WeatherPlugin:
              "wind": float, "description": str, "icon": str}
         """
         # 检查缓存
-        if self._cache and self._cache_time and datetime.now() - self._cache_time < self._cache_ttl:
+        if self._cache and self._cache_time and datetime.now(tz=timezone.utc) - self._cache_time < self._cache_ttl:
             return self._cache
 
         # 使用 API
@@ -126,7 +126,7 @@ class WeatherPlugin:
         )
 
         try:
-            with httpx.Client(timeout=10) as client:  # type: ignore
+            with httpx.Client(timeout=10) as client:
                 resp = client.get(url)
                 resp.raise_for_status()
                 data = resp.json()
@@ -142,11 +142,11 @@ class WeatherPlugin:
 
                 # 更新缓存
                 self._cache = result
-                self._cache_time = datetime.now()
+                self._cache_time = datetime.now(tz=timezone.utc)
 
                 return result
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Weather API failed: %s", e)
             return self._simulate()
 
@@ -171,7 +171,7 @@ class WeatherPlugin:
         }
 
         self._cache = result
-        self._cache_time = datetime.now()
+        self._cache_time = datetime.now(tz=timezone.utc)
         return result
 
     def health_check(self) -> dict:

@@ -507,10 +507,8 @@ def save_wxwork_results(db_files, salt_to_dbs, key_map, db_dir, out_file, print_
     tmp_file = out_file + ".tmp"
     with open(tmp_file, 'w', encoding='utf-8') as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
-    try:
-        os.chmod(tmp_file, 0o600)
-    except OSError:
-        pass  # Windows 上某些场景 chmod 可能失败,不阻塞主流程
+    with contextlib.suppress(OSError):
+        os.chmod(tmp_file, 0o600)  # Windows 上某些场景 chmod 可能失败,不阻塞主流程
     os.replace(tmp_file, out_file)
     print_fn(f"\n密钥保存到: {out_file} (权限已收紧为 0600)")
 

@@ -43,12 +43,12 @@ class EncryptionManager:
         if not self._key:
             raise EncryptionError("Encryption enabled but key not available")
         try:
-            aesgcm = AESGCM(self._key)  # type: ignore
+            aesgcm = AESGCM(self._key)
             nonce = os.urandom(12)
             ct = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), associated_data)
             return (nonce + ct).hex()
-        except Exception as e:
-            raise EncryptionError(f"Encryption failed: {e}")
+        except Exception as e:  # noqa: BLE001
+            raise EncryptionError(f"Encryption failed: {e}") from None
 
     def decrypt(self, ciphertext_hex: str, associated_data: bytes | None = None) -> str | None:
         if not self.enabled:
@@ -59,12 +59,12 @@ class EncryptionManager:
             data = bytes.fromhex(ciphertext_hex)
             nonce = data[:12]
             ct = data[12:]
-            aesgcm = AESGCM(self._key)  # type: ignore
+            aesgcm = AESGCM(self._key)
             plaintext = aesgcm.decrypt(nonce, ct, associated_data)
             return plaintext.decode("utf-8")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             preview = ciphertext_hex[:16] + "..." if len(ciphertext_hex) > 16 else ciphertext_hex
-            raise DecryptionError(f"Decryption failed: {e}", ciphertext_preview=preview)
+            raise DecryptionError(f"Decryption failed: {e}", ciphertext_preview=preview) from None
 
     def is_available(self) -> bool:
         return self.enabled

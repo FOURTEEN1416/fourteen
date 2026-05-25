@@ -16,7 +16,7 @@ def get_migration_service() -> MigrationService:
 
 
 @router.post("/execute", response_model=MigrationResponse)
-async def execute_migration(service: MigrationService = Depends(get_migration_service)):
+async def execute_migration(service: MigrationService = Depends(get_migration_service)):  # noqa: B008
     result = service.execute()
     return MigrationResponse(
         total_migrated=result.total_migrated,
@@ -27,13 +27,13 @@ async def execute_migration(service: MigrationService = Depends(get_migration_se
 
 
 @router.post("/rollback", response_model=RollbackResponse)
-async def execute_rollback(service: MigrationService = Depends(get_migration_service)):
+async def execute_rollback(service: MigrationService = Depends(get_migration_service)):  # noqa: B008
     result = service.rollback()
     return RollbackResponse(success=result.success, message=result.message)
 
 
 @router.get("/status", response_model=MigrationStatusResponse)
-async def get_migration_status(service: MigrationService = Depends(get_migration_service)):
+async def get_migration_status(service: MigrationService = Depends(get_migration_service)):  # noqa: B008
     status = service.status()
     return MigrationStatusResponse(
         v2_table_exists=status.v2_table_exists,

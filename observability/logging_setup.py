@@ -81,37 +81,24 @@ def setup_logging(log_level: str = "INFO", log_format: str = "json") -> None:
         return
 
     shared_processors = [
-        structlog.contextvars.merge_contextvars,  # type: ignore
-        structlog.stdlib.add_log_level,  # type: ignore
-        structlog.stdlib.add_logger_name,  # type: ignore
-        _add_trace_info,
-        structlog.processors.TimeStamper(fmt="iso"),  # type: ignore
-        structlog.processors.StackInfoRenderer(),  # type: ignore
-        structlog.processors.format_exc_info,  # type: ignore
-    ]
+        structlog.contextvars.merge_contextvars,        structlog.stdlib.add_log_level,        structlog.stdlib.add_logger_name,        _add_trace_info,
+        structlog.processors.TimeStamper(fmt="iso"),        structlog.processors.StackInfoRenderer(),        structlog.processors.format_exc_info,    ]
 
-    if log_format == "json":
-        renderer = structlog.processors.JSONRenderer()  # type: ignore
-    else:
-        renderer = structlog.dev.ConsoleRenderer()  # type: ignore
+    renderer = (  # noqa: SIM108
+        structlog.processors.JSONRenderer()        if log_format == "json"
+        else structlog.dev.ConsoleRenderer()    )
 
-    structlog.configure(  # type: ignore
-        processors=[
-            *shared_processors,
-            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,  # type: ignore
-        ],
+    structlog.configure(        processors=[
+            *shared_processors,  # type: ignore[list-item]
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,        ],
         context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),  # type: ignore
-        wrapper_class=structlog.stdlib.BoundLogger,  # type: ignore
-        cache_logger_on_first_use=True,
+        logger_factory=structlog.stdlib.LoggerFactory(),        wrapper_class=structlog.stdlib.BoundLogger,        cache_logger_on_first_use=True,
     )
 
-    formatter = structlog.stdlib.ProcessorFormatter(  # type: ignore
-        processors=[
-            structlog.stdlib.ProcessorFormatter.remove_processors_meta,  # type: ignore
-            renderer,
+    formatter = structlog.stdlib.ProcessorFormatter(        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,            renderer,
         ],
-        foreign_pre_chain=shared_processors,
+        foreign_pre_chain=shared_processors,  # type: ignore[arg-type]
     )
 
     handler = logging.StreamHandler(sys.stdout)
@@ -135,5 +122,5 @@ def _add_trace_info(logger, method, event_dict):
 
 def get_logger(name: str):
     if HAS_STRUCTLOG:
-        return structlog.get_logger(name)  # type: ignore
+        return structlog.get_logger(name)
     return logging.getLogger(name)

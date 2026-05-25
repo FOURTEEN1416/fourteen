@@ -17,7 +17,7 @@ import os
 import re
 from collections import Counter
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger("tone_mimic")
@@ -88,7 +88,7 @@ class ToneMimic:
                 embedding_function=embedding_functions.DefaultEmbeddingFunction(),
             )
             logger.info("ChromaDB initialized at %s", self.chroma_path)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("ChromaDB init failed: %s, fallback mode", e)
             self._collection = None
 
@@ -108,7 +108,7 @@ class ToneMimic:
 
         doc = f"User: {user_msg}\nYou: {reply}"
         meta = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "type": "chat",
             "user_msg_len": len(user_msg),
             "reply_len": len(reply),
@@ -121,10 +121,10 @@ class ToneMimic:
         try:
             self._collection.add(
                 documents=[doc],
-                metadatas=[meta],
+                metadatas=[meta],  # type: ignore[list-item]
                 ids=[doc_id],
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to add conversation: %s", e)
 
     def retrieve_style_examples(self, query: str, top_k: int = 3) -> list[str]:
@@ -147,8 +147,8 @@ class ToneMimic:
                 n_results=top_k,
             )
             if results and results.get("documents"):
-                return results["documents"][0]
-        except Exception as e:
+                return results["documents"][0]  # type: ignore[index]
+        except Exception as e:  # noqa: BLE001
             logger.warning("Style retrieval failed: %s", e)
 
         return []

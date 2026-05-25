@@ -17,7 +17,7 @@ def preflight_check():
         conn.execute("SELECT 1")
         conn.close()
         print("✓ 数据库连接正常")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         issues.append(f"数据库连接失败: {e}")
 
     char_dir = Path("data/characters")
@@ -29,7 +29,7 @@ def preflight_check():
                 import json
                 with open(f, encoding="utf-8") as fp:
                     json.load(fp)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 issues.append(f"角色文件损坏 {f}: {e}")
     else:
         print("! data/characters/ 目录不存在（跳过检查）")

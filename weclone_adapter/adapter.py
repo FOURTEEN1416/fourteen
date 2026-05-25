@@ -118,9 +118,9 @@ class WeCloneAdapter:
         # ── Step 3: 风格分析 ──
         logger.info("━━━ Step 3/5: 分析说话风格 ━━━")
         profile = self.analyzer.analyze(conversations[:max_samples])
-        result["style_profile"] = profile.to_dict()
-        result["style_prompt"] = profile.to_style_prompt()
-        result["uniqueness"] = profile.uniqueness_score
+        result["style_profile"] = profile.to_dict()  # type: ignore[assignment]
+        result["style_prompt"] = profile.to_style_prompt()  # type: ignore[assignment]
+        result["uniqueness"] = profile.uniqueness_score  # type: ignore[assignment]
 
         # 保存风格报告
         report_path = self.data_dir / f"{name}_style_report.json"
@@ -132,7 +132,7 @@ class WeCloneAdapter:
             conversations[:max_samples],
             name=name,
         )
-        result["dataset"] = dataset_result
+        result["dataset"] = dataset_result  # type: ignore[assignment]
 
         # ChatML 多轮对话格式输出
         try:
@@ -141,28 +141,28 @@ class WeCloneAdapter:
                 name=name,
                 window_size=4,
             )
-            result["dataset"]["chatml"] = chatml_path
+            result["dataset"]["chatml"] = chatml_path  # type: ignore[index]
             logger.info("  ChatML 多轮对话: %s", chatml_path)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("ChatML 构建失败（不影响主流程）: %s", e)
-            result["dataset"]["chatml"] = None
+            result["dataset"]["chatml"] = None  # type: ignore[index]
 
         # ── Step 5: LoRA 微调 ──
         if do_train and result["dataset"]:
             logger.info("━━━ Step 5/5: LoRA 微调训练 ━━━")
             train_result = self.trainer.train(
-                train_path=result["dataset"]["train"],
-                val_path=result["dataset"].get("val"),
+                train_path=result["dataset"]["train"],  # type: ignore[index]
+                val_path=result["dataset"].get("val"),  # type: ignore[attr-defined]
                 lora_r=lora_r,
                 **kwargs,
             )
-            result["training"] = train_result
+            result["training"] = train_result  # type: ignore[assignment]
 
             if train_result.get("status") == "success":
-                result["lora_path"] = train_result.get("output_dir")
+                result["lora_path"] = train_result.get("output_dir")  # type: ignore[assignment]
         else:
             logger.info("━━━ Step 5/5: 跳过训练 (do_train=False 或 数据集为空) ━━━")
-            result["training"] = None
+            result["training"] = None  # type: ignore[assignment]
 
         # ── 注入到十四的语气模仿器 ──
         logger.info("━━━ 注入风格到 ToneMimic ━━━")
@@ -230,7 +230,7 @@ class WeCloneAdapter:
                         metadata={"source": "clone", "timestamp": str(conv.get("timestamp", ""))},
                     )
                     injected += 1
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.debug("ToneMimic 注入失败: %s", e)
 
             logger.info("ToneMimic 注入: %d/%d 条成功", injected, len(conversations))
@@ -289,7 +289,7 @@ class WeCloneAdapter:
             return {"status": "error", "error": "No training dataset found"}
 
         logger.info("Training dataset: %s (val: %s)", train_path, val_path)
-        return self.trainer.train(
+        return self.trainer.train(  # type: ignore[call-arg]
             train_path=train_path,
             val_path=val_path,
             lora_r=lora_rank,

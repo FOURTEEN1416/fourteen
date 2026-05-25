@@ -144,8 +144,7 @@ class ContentSafetyFilter:
             )
             timeout_sec = 3.0  # LLM 安全分类超时 3 秒
             future = _safety_executor.submit(
-                self.llm_gateway.chat_sync,  # type: ignore
-                query=prompt,
+                self.llm_gateway.chat_sync,                query=prompt,
                 system_prompt="你是一个内容安全分类器，仅输出JSON。",
                 max_tokens=64,
                 temperature=0.1,
@@ -162,7 +161,7 @@ class ContentSafetyFilter:
             logger.warning("LLM safety classify timed out (%.1fs), falling back to rule-based", timeout_sec)
         except TypeError as e:
             logger.warning("LLM safety classify interface mismatch, falling back to rule-based: %s", e)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("LLM safety classify failed: %s", e)
         return None
 

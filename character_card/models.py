@@ -178,14 +178,14 @@ class CharacterCard:
         }
         # 可选字段
         if self.data.character_book:
-            result["data"]["character_book"] = {
+            book_data: dict[str, Any] = {
                 "name": self.data.character_book.name,
                 "entries": [
                     {
                         "id": e.id,
-                        "keys": e.keys,
+                        "keys": list(e.keys),
                         "content": e.content,
-                        "secondary_keys": e.secondary_keys,
+                        "secondary_keys": list(e.secondary_keys),
                         "comment": e.comment,
                         "constant": e.constant,
                         "selective": e.selective,
@@ -198,8 +198,9 @@ class CharacterCard:
                 ],
                 "extensions": self.data.character_book.extensions,
             }
+            result["data"]["character_book"] = book_data  # type: ignore[index]
         if self.data.extensions.depth_prompt:
-            result["data"]["extensions"]["depth_prompt"] = self.data.extensions.depth_prompt
+            result["data"]["extensions"]["depth_prompt"] = self.data.extensions.depth_prompt  # type: ignore[index]
         return result
 
     def to_json(self, indent: int = 2) -> str:

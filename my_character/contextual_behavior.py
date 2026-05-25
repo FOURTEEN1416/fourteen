@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import ast
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -42,16 +43,16 @@ def _safe_eval_ast(node: ast.AST, ctx: dict[str, Any]) -> Any:
             return ctx[node.id]
         raise NameError(f"Undefined variable: {node.id}")
     if isinstance(node, ast.UnaryOp) and type(node.op) in _AST_OPS:
-        return _AST_OPS[type(node.op)](_safe_eval_ast(node.operand, ctx))
+        return _AST_OPS[type(node.op)](_safe_eval_ast(node.operand, ctx))  # type: ignore[operator]
     if isinstance(node, ast.BinOp) and type(node.op) in _AST_OPS:
-        return _AST_OPS[type(node.op)](
+        return _AST_OPS[type(node.op)](  # type: ignore[operator]
             _safe_eval_ast(node.left, ctx), _safe_eval_ast(node.right, ctx)
         )
     if isinstance(node, ast.Compare):
         left = _safe_eval_ast(node.left, ctx)
         for op, comp in zip(node.ops, node.comparators, strict=False):
             if type(op) in _AST_OPS:
-                left = _AST_OPS[type(op)](left, _safe_eval_ast(comp, ctx))
+                left = _AST_OPS[type(op)](left, _safe_eval_ast(comp, ctx))  # type: ignore[operator]
             else:
                 raise ValueError(f"Unsupported comparison: {ast.dump(op)}")
         return left
@@ -101,8 +102,8 @@ class BehaviorRule:
                     logger.warning("BehaviorRule condition blocked unsafe operation: %s", ast.dump(node))
                     return False
             # 使用 AST 安全求值替代 eval
-            return _safe_eval_ast(tree.body, context_vars)
-        except Exception:
+            return _safe_eval_ast(tree.body, context_vars)  # type: ignore[no-any-return]  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             return False
 
 
@@ -192,7 +193,7 @@ class ContextualBehavior:
         try:
             from my_character.persona_utils import extract_context_vars as _extract
         except ImportError:
-            _extract = None
+            _extract = None  # type: ignore[assignment]
 
         if isinstance(context, PromptContext):
             time_ctx = context.time_context

@@ -146,7 +146,7 @@ class LoRATrainer:
 
         def tokenize_fn(examples: dict) -> dict:
             texts = [format_chat({"messages": msgs}) for msgs in examples["messages"]]
-            return tokenizer(
+            return tokenizer(  # type: ignore[no-any-return]
                 texts, truncation=True, max_length=max_seq_length,
                 padding="max_length", return_tensors="pt",
             )
@@ -191,8 +191,8 @@ class LoRATrainer:
             bias="none",
         )
 
-        model = get_peft_model(model, lora_config)
-        model.print_trainable_parameters()
+        model = get_peft_model(model, lora_config)  # type: ignore[assignment]
+        model.print_trainable_parameters()  # type: ignore[operator]
 
         logger.info("[6/6] 开始训练...")
         output_path = self.output_dir / f"lora_r{lora_r}_ep{num_epochs}"
@@ -285,8 +285,7 @@ class LoRATrainer:
         )
 
         model = PeftModel.from_pretrained(base_model, lora_path)
-        merged = model.merge_and_unload()  # type: ignore
-
+        merged = model.merge_and_unload()
         merged.save_pretrained(str(merge_path))
         tokenizer.save_pretrained(str(merge_path))
 

@@ -6,7 +6,7 @@ import json
 import shutil
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from shisi.core.models.character_aggregate import CharacterAggregate
@@ -25,7 +25,7 @@ class MigrationResult:
 def run(db_path: Path = Path("data/sqlite.db"), char_dir: Path = Path("data/characters")) -> MigrationResult:
     result = MigrationResult()
 
-    backup_path = db_path.parent / f"sqlite.db.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    backup_path = db_path.parent / f"sqlite.db.backup.{datetime.now(tz=timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     if db_path.exists():
         shutil.copy(db_path, backup_path)
         result.backup_path = str(backup_path)
@@ -69,7 +69,7 @@ def run(db_path: Path = Path("data/sqlite.db"), char_dir: Path = Path("data/char
                 result.active_character = new_char.name
             result.total_migrated += 1
             print(f"5. ✓ 迁移: {new_char.name}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             result.total_failed += 1
             result.errors.append((old_char.get("name", "unknown"), str(e)))
             print(f"5. ✗ 失败: {old_char.get('name', 'unknown')} - {e}")
@@ -86,7 +86,7 @@ def run(db_path: Path = Path("data/sqlite.db"), char_dir: Path = Path("data/char
             new_repo.save(new_char)
             result.total_migrated += 1
             print(f"6. ✓ 从文件迁移: {new_char.name}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             result.total_failed += 1
             result.errors.append((file_path.name, str(e)))
             print(f"6. ✗ 文件迁移失败: {file_path.name} - {e}")
@@ -101,7 +101,7 @@ def run(db_path: Path = Path("data/sqlite.db"), char_dir: Path = Path("data/char
             conn.execute("ALTER TABLE characters RENAME TO characters_legacy")
             conn.commit()
             print("7. ✓ 旧表已重命名为 characters_legacy")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"7. ! 跳过重命名: {e}")
         finally:
             conn.close()

@@ -205,9 +205,9 @@ class DatasetBuilder:
         tags = []
 
         # 句长
-        dominant = max(  # type: ignore
+        dominant = max(
             profile.sentence_length_dist,
-            key=profile.sentence_length_dist.get,  # type: ignore
+            key=profile.sentence_length_dist.get,  # type: ignore[arg-type]
             default="中句",
         )
         if "短句" in dominant:
@@ -223,7 +223,7 @@ class DatasetBuilder:
 
         # 情绪
         if profile.emotion_dist:
-            top_emo = max(profile.emotion_dist, key=profile.emotion_dist.get)  # type: ignore
+            top_emo = max(profile.emotion_dist, key=profile.emotion_dist.get)  # type: ignore[arg-type]
             if top_emo == "正面":
                 tags.append("语气活泼")
             elif top_emo == "负面":

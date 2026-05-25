@@ -3,7 +3,7 @@ import { api } from '../api/client'
 import Button from '../components/common/Button'
 import Card from '../components/common/Card'
 import EmptyState from '../components/common/EmptyState'
-import type { CloneDataset, CloneDatasetDetail, CloneConversation, CloneContact } from '../types/api'
+import type { CloneDataset, CloneDatasetDetail, CloneContact } from '../types/api'
 
 export default function CloneDataPage() {
   // ── Tab 切换 ──

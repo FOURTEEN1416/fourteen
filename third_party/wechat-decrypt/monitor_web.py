@@ -31,6 +31,8 @@ from Crypto.Cipher import AES
 from decode_image import decrypt_dat_file, extract_md5_from_packed_info, is_v2_format
 from key_utils import get_key_info, strip_key_metadata
 
+from config import load_config
+
 _zstd_dctx = zstd.ZstdDecompressor()
 
 PAGE_SZ = 4096
@@ -40,8 +42,6 @@ RESERVE_SZ = 80
 SQLITE_HDR = b'SQLite format 3\x00'
 WAL_HEADER_SZ = 32
 WAL_FRAME_HEADER_SZ = 24
-
-from config import load_config
 
 _cfg = load_config()
 DB_DIR = _cfg["db_dir"]
@@ -476,7 +476,7 @@ def load_contact_names(db_path=None):
         for r in conn.execute("SELECT username, nick_name, remark FROM contact").fetchall():
             names[r[0]] = r[2] if r[2] else r[1] if r[1] else r[0]
         conn.close()
-    except:
+    except Exception:
         pass
     return names
 
@@ -491,7 +491,8 @@ def _extract_pb_field_30(data):
         tag = 0
         shift = 0
         while pos < n:
-            b = data[pos]; pos += 1
+            b = data[pos]
+            pos += 1
             tag |= (b & 0x7f) << shift
             if not (b & 0x80):
                 break
@@ -503,9 +504,11 @@ def _extract_pb_field_30(data):
                 pos += 1
             pos += 1
         elif wire_type == 2:
-            length = 0; shift = 0
+            length = 0
+            shift = 0
             while pos < n:
-                b = data[pos]; pos += 1
+                b = data[pos]
+                pos += 1
                 length |= (b & 0x7f) << shift
                 if not (b & 0x80):
                     break
@@ -596,7 +599,7 @@ def broadcast_sse(msg_data):
         for q in sse_clients:
             try:
                 q.put_nowait(payload)
-            except:
+            except Exception:
                 dead.append(q)
         for q in dead:
             sse_clients.remove(q)
@@ -2767,10 +2770,8 @@ def _run_tool_task(job_id, task_name, args=None):
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def handle(self):
-        try:
-            super().handle()
-        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError):
-            pass  # 浏览器关闭连接，正常
+        with suppress(ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError):
+            super().handle()  # 浏览器关闭连接，正常
 
     def do_GET(self):
         if self.path in ('/', '/index.html'):
@@ -2864,7 +2865,7 @@ class Handler(BaseHTTPRequestHandler):
                     except queue.Empty:
                         self.wfile.write(b': hb\n\n')
                         self.wfile.flush()
-            except:
+            except Exception:
                 pass
             finally:
                 with sse_lock:

@@ -75,10 +75,10 @@ class PersonaExtractor:
             self.liwc = LiwcAnalyzer()
             self.cognitive = CognitiveDistortionDetector(llm_gateway=llm_gateway)
         else:
-            self.mental_health = None
-            self.dark_triad = None
-            self.liwc = None
-            self.cognitive = None
+            self.mental_health = None  # type: ignore[assignment]
+            self.dark_triad = None  # type: ignore[assignment]
+            self.liwc = None  # type: ignore[assignment]
+            self.cognitive = None  # type: ignore[assignment]
 
         self._initialized = False
         logger.info("PersonaExtractor created (mode=%s, freq=%d, inject=%s, mh=%s)",
@@ -219,7 +219,7 @@ class PersonaExtractor:
             # 6. 保存更新后的画像
             self.bank.save_persona(persona)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Mental health pipeline skipped: %s", e)
 
     # ── 适配器接口 ──

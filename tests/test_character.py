@@ -63,11 +63,11 @@ class TestCharaCardV2Models:
         assert card.spec == "chara_card_v2"
 
     def test_empty_name_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: B017
             CharaCardV2(data=CharacterData(name="", description="x"))
 
     def test_invalid_spec_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: B017
             CharaCardV2(spec="invalid_spec", data=CharacterData(name="x"))
 
     def test_character_state(self):

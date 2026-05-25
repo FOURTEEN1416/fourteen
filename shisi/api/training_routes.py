@@ -40,7 +40,7 @@ class PreprocessRequest(BaseModel):
 
 @router.post("/upload", response_model=ApiResponse)
 async def upload_training_audio(
-    files: list[UploadFile] = File(...),
+    files: list[UploadFile] = File(...),  # noqa: B008
     model_name: str = "default",
 ):
     mgr = _get_manager()

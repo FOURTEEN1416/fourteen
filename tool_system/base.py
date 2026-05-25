@@ -19,12 +19,14 @@ class ToolResult:
         if self.data is not None:
             result["data"] = self.data
         if self.error:
-            result["error"] = self.error
+            result["error"] = self.error  # type: ignore[assignment]
         return result
 
     def to_fc_result(self) -> str:
         if self.success:
-            return json.dumps(self.data, ensure_ascii=False) if not isinstance(self.data, str) else self.data
+            if isinstance(self.data, str):
+                return self.data
+            return json.dumps(self.data, ensure_ascii=False)
         return json.dumps({"error": self.error}, ensure_ascii=False)
 
 
@@ -152,6 +154,6 @@ class ToolDispatcher:
                 result = tool.execute(**arguments)
                 if result.success:
                     return result
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("工具重试 %s (%d/%d) 失败: %s", tool_name, attempt + 1, self.retry_count, e)
         return ToolResult(False, error=f"Tool {tool_name} failed after {self.retry_count} retries")

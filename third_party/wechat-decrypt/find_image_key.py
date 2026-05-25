@@ -35,7 +35,7 @@ PAGE_WRITECOPY = 0x08
 PAGE_EXECUTE_READWRITE = 0x40
 PAGE_EXECUTE_WRITECOPY = 0x80
 
-class MEMORY_BASIC_INFORMATION(ctypes.Structure):
+class MemoryBasicInformation(ctypes.Structure):
     _fields_ = [
         ("BaseAddress", ctypes.c_void_p),
         ("AllocationBase", ctypes.c_void_p),
@@ -83,7 +83,7 @@ def find_v2_ciphertext(attach_dir):
                 header = fp.read(31)
             if header[:6] == v2_magic and len(header) >= 31:
                 return header[15:31], os.path.basename(f)
-        except:
+        except Exception:
             continue
     return None, None
 
@@ -105,7 +105,7 @@ def find_xor_key(attach_dir):
             if head == v2_magic and len(tail) == 2:
                 key = (tail[0], tail[1])
                 tail_counts[key] = tail_counts.get(key, 0) + 1
-        except:
+        except Exception:
             continue
 
     if not tail_counts:
@@ -136,7 +136,7 @@ def try_key(key_bytes, ciphertext):
             return 'WXGF'
         if dec[:3] == b'GIF':
             return 'GIF'
-    except:
+    except Exception:
         pass
     return None
 
@@ -159,7 +159,7 @@ def scan_memory_for_aes_key(pid, ciphertext):
     try:
         # Enumerate memory regions
         address = 0
-        mbi = MEMORY_BASIC_INFORMATION()
+        mbi = MemoryBasicInformation()
         rw_regions = []
         all_regions = []
 

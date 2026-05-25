@@ -320,12 +320,12 @@ class LLMEmotionClassifier:
                 self._cache.popitem(last=False)
             self._cache[cache_key] = result
 
-            return result
+            return result  # type: ignore[no-any-return]
 
         except FuturesTimeoutError:
             logger.debug("LLM分类超时: %.0fms", self.timeout_ms)
             return None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("LLM分类失败: %s", e)
             return None
 
@@ -336,7 +336,7 @@ class LLMEmotionClassifier:
         """关闭共享线程池，释放资源。"""
         if self._executor is not None:
             self._executor.shutdown(wait=True)
-            self._executor = None
+            self._executor = None  # type: ignore[assignment]
             logger.debug("LLMEmotionClassifier 线程池已关闭")
 
 
@@ -471,7 +471,7 @@ class EmotionEngine:
 
         total = sum(scores.values())
         if total > 0:
-            primary_emotion = max(scores, key=scores.get)
+            primary_emotion = max(scores, key=scores.get)  # type: ignore[arg-type]
             primary_intensity = min(1.0, scores[primary_emotion])
         else:
             if self._state.energy > 0.7 and self._state.affinity >= 4:
@@ -554,7 +554,7 @@ class EmotionEngine:
             drain -= 0.01
         elif pleasure < -0.5:
             drain += 0.01
-        return max(0.0, min(1.0, self._state.energy - drain))
+        return max(0.0, min(1.0, self._state.energy - drain))  # type: ignore[no-any-return]
 
     # ---- 好感度计算 ----
 

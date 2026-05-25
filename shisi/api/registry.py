@@ -76,7 +76,7 @@ def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True) -> AiyuReg
     try:
         from voice.voice_training import VoiceTrainingManager
         reg.training_manager = VoiceTrainingManager()
-    except (ImportError, Exception) as e:
+    except (ImportError, Exception) as e:  # noqa: BLE001
         reg.training_manager = None
         logger.warning("语音训练模块初始化失败: %s", e)
 

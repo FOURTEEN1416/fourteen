@@ -320,7 +320,7 @@ def test_get_engine_existing():
     assert mgr.get_engine("edge-tts") is p
 
 
-def test_get_engine_nonexistent():
+def test_get_engine_unknown():
     mgr = TTSManager()
     assert mgr.get_engine("unknown") is None
 

@@ -1,5 +1,5 @@
 """T-19: 工具健康检测+指令处理器 单元测试"""
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock
 
 
 class TestToolRegistryHealthCheck:
@@ -50,5 +50,3 @@ class TestCommandHandlerSendSticker:
         result = handler._handle_send_sticker(cmd, "")
         assert "没有匹配" in result
 
-
-from unittest.mock import PropertyMock

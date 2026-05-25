@@ -45,7 +45,7 @@ class CharacterManager:
         try:
             from my_character.persona_schema import PersonaSchema
             return PersonaSchema.from_chara_card(self._active_card)
-        except Exception:
+        except Exception:  # noqa: BLE001
             return None
 
     def initialize(self) -> None:
@@ -85,7 +85,7 @@ class CharacterManager:
         if old_id and self._state_migrator and migrate_strategy != "hard":
             try:
                 self._state_migrator.snapshot(old_id)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 import logging
                 logging.getLogger("character_manager").warning("状态迁移快照失败: %s", e)
 
@@ -101,7 +101,7 @@ class CharacterManager:
             try:
                 result = self._state_migrator.migrate(old_id, character_id, migrate_strategy)
                 migration_msg = "（已迁移状态）" if result.success else f"（迁移失败: {result.error}）"
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 migration_msg = f"（迁移异常: {e}）"
 
         elapsed_ms = (time.perf_counter() - start) * 1000
@@ -111,7 +111,7 @@ class CharacterManager:
         if self._on_switch_callback:
             try:
                 self._on_switch_callback(self._active_card)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("角色切换回调异常: %s", e)
 
         return True, f"已切换到: {card.data.name}{migration_msg}"
@@ -157,7 +157,7 @@ class CharacterManager:
         try:
             card, _ = ParserDispatcher.parse_file(path)
             return card
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("加载角色卡失败 %s: %s", path, e)
             return None
 
