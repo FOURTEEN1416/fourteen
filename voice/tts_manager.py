@@ -82,10 +82,9 @@ class TTSManager:
         if cosy_cfg:
             from .cosyvoice_provider import CosyVoiceProvider
             self._providers["cosyvoice"] = CosyVoiceProvider(
-                url=cosy_cfg.get("url", "http://localhost:8088"),
-                voice=cosy_cfg.get("voice", "中文男"),
-                timeout=cosy_cfg.get("timeout", 60.0),
-                response_format=cosy_cfg.get("response_format", "wav"),
+                voice=cosy_cfg.get("voice", "中文女"),
+                instruct_prompt=cosy_cfg.get("instruct_prompt", "用温柔的语气说话"),
+                timeout=cosy_cfg.get("timeout", 120.0),
             )
 
         bert_cfg = config.get("bert-vits2", {})

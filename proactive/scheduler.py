@@ -72,6 +72,8 @@ class ProactiveScheduler:
             name: 通道名称 (如 "wechat", "websocket", "console")
             sender_factory: 返回 async send(message) 可调用对象的工厂函数
         """
+        if name in self._channels:
+            logger.warning("通道 '%s' 重复注册，将覆盖旧通道", name)
         self._channels[name] = sender_factory
         try:
             instance = sender_factory()

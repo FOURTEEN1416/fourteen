@@ -26,6 +26,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from .conversation_summarizer import ConversationSummarizer
+from .structured_memory import StructuredMemory
+from .vector_memory import VectorMemory
+
 logger = logging.getLogger("memory_pipeline")
 
 
@@ -44,6 +48,7 @@ class MemoryConfig:
     fact_extract_interval: int = 5
     fact_min_confidence: float = 0.2
     conflict_similarity_threshold: float = 0.3
+    cache_ttl: int = 30  # 上下文缓存 TTL（秒），代替硬编码值
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -116,7 +121,7 @@ class EpisodicMemory:
                       importance: float = 0.5, session_id: str = "") -> str:
         if not messages:
             return ""
-        episode_id = f"ep_{int(time.time())}_{hash(str(messages)) % 10000}"
+        episode_id = f"ep_{int(time.time())}_{hashlib.md5(str(messages).encode()).hexdigest()[:8]}"
         if not summary:
             summary = self._generate_summary(messages)
         content = "\n".join(
@@ -324,7 +329,7 @@ class ConflictDetector:
         self._sem = semantic_memory
         self._threshold = similarity_threshold
 
-    def check_conflict(self, new_fact: str, category: str) -> dict | None:
+    def check_conflict(self, new_fact: str, category: str) -> dict[str, Any] | None:
         try:
             search_results = self._sem.search(new_fact, top_k=3)
             vector_results = search_results.get("vector", [])
@@ -783,10 +788,8 @@ class MemoryPipeline:
 
         # 存储后端
         if vector_memory is None:
-            from .vector_memory import VectorMemory
             vector_memory = VectorMemory()
         if structured_memory is None:
-            from .structured_memory import StructuredMemory
             structured_memory = StructuredMemory()
         self.vm = vector_memory
         self.sm = structured_memory
@@ -818,7 +821,6 @@ class MemoryPipeline:
         self.cross_session = CrossSessionReasoner(self.sm)
 
         # 对话摘要器（方案二：摘要+滑动窗口）
-        from .conversation_summarizer import ConversationSummarizer
         self.summarizer = ConversationSummarizer(llm_gateway)
 
         # 遗忘模型路由
@@ -890,16 +892,17 @@ class MemoryPipeline:
         self.working.add("user", user_msg, emotion_tag, importance)
         self.working.add("assistant", reply, emotion_tag, importance)
 
-        # 4. 存储到向量库
-        try:
-            self.vm.store_chat_sync(user_msg, reply, {
+        # 4. 存储到向量库（后台线程异步执行，不阻塞主流程）
+        threading.Thread(
+            target=self.vm.store_chat_sync,
+            args=(user_msg, reply, {
                 "emotion": emotion_tag,
                 "session_id": effective_session,
                 "importance": importance,
-            })
-            result["stored_vector"] = True
-        except Exception as e:  # noqa: BLE001
-            logger.debug("Vector store failed: %s", e)
+            }),
+            daemon=True,
+        ).start()
+        result["stored_vector"] = True  # 乐观标记，错误在内部日志
 
         # 5. 事实提取（每 N 条对话触发）
         # 注意：所有对 _chat_count_since_extract 的操作必须在锁保护下完成
@@ -916,9 +919,12 @@ class MemoryPipeline:
                 needs_extraction = False
 
         if needs_extraction:
-            result["facts_extracted"] = self._do_fact_extraction(
-                effective_session
-            )
+            threading.Thread(
+                target=self._do_fact_extraction,
+                args=(effective_session,),
+                daemon=True,
+            ).start()
+            result["facts_extracted"] = 0  # 后台异步提取中，具体数量由线程日志记录
 
         # 6. 跨会话推理：检测未来事件
         try:
@@ -938,7 +944,7 @@ class MemoryPipeline:
                 )
                 result["emotion_updated"] = True
             except Exception as e:  # noqa: BLE001
-                logger.debug("Emotion log failed: %s", e)
+                logger.warning("Emotion log failed: %s", e)
 
         # 8. 归档检查
         if self.working.should_archive(self._config.episodic_archive_trigger):
@@ -969,29 +975,39 @@ class MemoryPipeline:
         # 1. 工作记忆（最快，无超时风险）
         context["working"] = self.working.get_recent(n=10)
 
-        # 2. 向量检索（带超时降级）
-        start = time.perf_counter()
+        # 2. 向量检索 — 情景记忆（独立超时检测）
+        start_episodic = time.perf_counter()
         try:
             episodic_results = self.episodic.search(query, top_k=top_k)
             context["episodic"] = episodic_results
         except Exception as e:  # noqa: BLE001
             logger.warning("Episodic retrieval failed, degraded: %s", e)
+        elapsed_episodic = time.perf_counter() - start_episodic
 
-        elapsed = time.perf_counter() - start
-        if elapsed > self._config.retrieval_timeout:
+        # 3. 语义检索（独立超时检测，不依赖 episodic 耗时）
+        start_semantic = time.perf_counter()
+        try:
+            semantic_results = self.semantic.search(query, top_k=top_k)
+            context["semantic"] = semantic_results.get("structured", [])
+            context["facts"] = [
+                s.get("fact", "") for s in context["semantic"]
+                if isinstance(s, dict)
+            ]
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Semantic retrieval failed, degraded: %s", e)
+        elapsed_semantic = time.perf_counter() - start_semantic
+
+        # 超时日志（各自独立检测）
+        if elapsed_episodic > self._config.retrieval_timeout:
             logger.warning(
-                "Episodic retrieval slow (%.2fs), skipping semantic", elapsed
+                "Episodic retrieval slow (%.2fs > %.1fs)",
+                elapsed_episodic, self._config.retrieval_timeout,
             )
-        else:
-            try:
-                semantic_results = self.semantic.search(query, top_k=top_k)
-                context["semantic"] = semantic_results.get("structured", [])
-                context["facts"] = [
-                    s.get("fact", "") for s in context["semantic"]
-                    if isinstance(s, dict)
-                ]
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Semantic retrieval failed, degraded: %s", e)
+        if elapsed_semantic > self._config.retrieval_timeout:
+            logger.warning(
+                "Semantic retrieval slow (%.2fs > %.1fs), facts may be degraded",
+                elapsed_semantic, self._config.retrieval_timeout,
+            )
 
         # 3. 结构化事实补充（降级回退）
         if not context["facts"]:
@@ -1030,7 +1046,7 @@ class MemoryPipeline:
         with self._cache_lock:
             if cache_key in self._context_cache:
                 cached = self._context_cache[cache_key]
-                if time.time() - cached.get("_ts", 0) < 30:
+                if time.time() - cached.get("_ts", 0) < self._config.cache_ttl:
                     logger.debug("retrieve_context_async cache hit")
                     return {k: v for k, v in cached.items() if k != "_ts"}
 
@@ -1291,9 +1307,10 @@ class MemoryPipeline:
                     fact["fact"], fact.get("category", "general")
                 )
                 if conflict:
+                    existing_fact = conflict.get("existing_fact", "")
                     logger.debug(
                         "Fact conflict detected: new=%s vs existing=%s",
-                        fact["fact"][:30], conflict["existing_fact"][:30],
+                        fact["fact"][:30], existing_fact[:30],
                     )
                     continue
 
@@ -1334,11 +1351,28 @@ class MemoryPipeline:
         summary = ""
         if self._llm and callable(self._llm):
             try:
-                summary = self.ds._summarize_with_llm([
+                messages_for_summary = [
                     {"role": m.get("role", "user"),
                      "content": m.get("content", "")}
                     for m in messages
-                ]) or ""
+                ]
+                try:
+                    # 检测是否在异步事件循环上下文中
+                    loop = asyncio.get_running_loop()
+                    # 异步上下文：使用 run_in_executor 避免阻塞事件循环
+                    future = asyncio.run_coroutine_threadsafe(
+                        asyncio.to_thread(
+                            self.ds._summarize_with_llm,
+                            messages_for_summary,
+                        ),
+                        loop,
+                    )
+                    summary = future.result(timeout=30) or ""
+                except RuntimeError:
+                    # 不在异步上下文中，直接同步调用
+                    summary = self.ds._summarize_with_llm(
+                        messages_for_summary
+                    ) or ""
             except Exception as e:  # noqa: BLE001
                 logger.debug("Summary generation failed: %s", e)
 
@@ -1360,13 +1394,28 @@ class MemoryPipeline:
             logger.error("归档工作记忆失败，保留数据: %s", e)
 
     def _cleanup_low_confidence_facts(self) -> None:
-        """清理低置信度事实"""
+        """分批清理低置信度事实（防止大量删除阻塞）"""
         try:
-            facts = self.sm.get_facts(min_confidence=0.0)
-            for f in facts:
-                if f.get("confidence", 0) < self._config.fact_min_confidence:
-                    self.sm.delete_fact(f["id"])
-            logger.debug("Cleaned up low confidence facts")
+            batch_size = 50
+            max_batches = 20  # 安全上限，防止无限循环
+            total_deleted = 0
+            for _ in range(max_batches):
+                facts = self.sm.get_facts(min_confidence=0.0, limit=batch_size)
+                if not facts:
+                    break
+                ids_to_delete = [
+                    f["id"] for f in facts
+                    if f.get("confidence", 0) < self._config.fact_min_confidence
+                ]
+                if not ids_to_delete:
+                    break
+                for fid in ids_to_delete:
+                    self.sm.delete_fact(fid)
+                total_deleted += len(ids_to_delete)
+                if len(facts) < batch_size:
+                    break
+            if total_deleted:
+                logger.info("Cleaned up %d low confidence facts", total_deleted)
         except Exception as e:  # noqa: BLE001
             logger.warning("Cleanup failed: %s", e)
 

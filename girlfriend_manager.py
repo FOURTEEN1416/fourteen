@@ -68,7 +68,17 @@ class GirlfriendManager:
     def __init__(self, orchestrator):
         self._orch = orchestrator
         self._users: dict[str, UserInstance] = {}
-        # 使用线程锁保护 _users 字典，防止并发竞态条件
+        # ── 锁策略说明 ──────────────────────────────────────────────
+        # 使用 threading.Lock 保护 _users 字典的并发访问。
+        # 选择 threading.Lock 而非 asyncio.Lock 的原因：
+        #   1. 所有加锁操作（_get_or_create / remove_user / reset_user）
+        #      都是同步短操作（仅 dict get/set/pop，无 await），
+        #      不会阻塞事件循环。
+        #   2. 每个用户有独立的 EmotionEngine 实例，情感引擎之间
+        #      不存在共享状态的竞态条件。
+        #   3. 消息处理流程（process_message）的并发安全由
+        #      Orchestrator 的 per-session 锁保证，与 _users_lock 无关。
+        # ────────────────────────────────────────────────────────────
         self._users_lock = threading.Lock()
 
         # 从 orchestrator 的共享情感引擎提取配置
@@ -101,8 +111,19 @@ class GirlfriendManager:
 
     # ── 用户管理 ─────────────────────────────────────────
 
-    async def _get_or_create(self, user_id: str) -> UserInstance:
-        """获取或创建用户实例（线程安全）"""
+    def _get_or_create(self, user_id: str) -> UserInstance:
+        """获取或创建用户实例（线程安全）
+
+        注意：此方法为同步方法，内部不包含任何 await 操作。
+        threading.Lock 足以保护简短的字典操作。
+
+        竞态条件分析：
+        - 每个用户有独立的 EmotionEngine 实例，情感状态完全隔离
+        - _users 字典操作在锁保护下是原子的（dict __contains__ / __setitem__ / __getitem__）
+        - EmotionEngine 内部状态变更仅在 process_message 中发生，
+          而 process_message 由 Orchestrator 的 per-session 锁串行化
+        - 因此 _users_lock + per-session 锁两层保护足以防止所有竞态条件
+        """
         with self._users_lock:
             if user_id not in self._users:
                 engine = self._create_user_engine()

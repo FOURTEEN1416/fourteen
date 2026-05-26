@@ -103,10 +103,9 @@ voice:
     volume: "+0%"
     timeout: 30.0
   cosyvoice:
-    url: "http://localhost:8088"
-    voice: "中文男"
-    response_format: "wav"
-    timeout: 60.0
+    voice: "中文女"
+    instruct_prompt: "用温柔自然的语气说话"
+    timeout: 120.0
   gpt-sovits:
     url: "http://localhost:9880"
     text_language: "auto"

@@ -1,51 +1,129 @@
 """
-CosyVoice 提供者 - 本地/远程语音合成
+CosyVoice 提供者 - 本地语音合成
 
-通过 OpenAI 兼容 API 调用 CosyVoice TTS 服务。
-需要运行 cosyvoice-server 命令启动服务：
+直接加载 CosyVoice-300M-Instruct 模型进行文本到语音合成。
+支持预训练音色（SFT）和自然语言控制（Instruct）模式。
 
-    cosyvoice-server --ip 127.0.0.1 --port 8088 --type instruct
-
-服务启动后会自动下载模型（首次约 3-4GB）。
+注意：首次使用需要等待模型加载（约 10-30 秒，CPU 推理约 7x 实时）。
+所有同步操作通过 run_in_executor 避免阻塞事件循环。
 """
 
 from __future__ import annotations
 
+import asyncio
+import functools
+import io
 import logging
+import os
+import struct
+import sys
+import threading
+from typing import Any, AsyncGenerator
+
+import numpy as np
 
 from .tts_provider_base import TTSProviderBase
 
 logger = logging.getLogger("voice.cosyvoice")
 
+MODEL_DIR = os.path.join(
+    os.path.expanduser("~"),
+    "cosyvoice_models", "cosyvoice", "CosyVoice-300M-Instruct",
+)
+COSYVOICE_REPO = os.path.join(os.environ.get("TEMP", ""), "cosyvoice_repo")
+MATCHA_TTS = os.path.join(COSYVOICE_REPO, "third_party", "Matcha-TTS")
+
 MAX_TEXT_LENGTH = 5000
+SYNTHESIS_TIMEOUT = 300  # CPU 推理的超时秒数
+
+# 全局单例，避免重复加载模型
+_cosyvoice_instance = None
+_cosyvoice_lock = threading.Lock()
+
+
+def _get_cosyvoice():
+    """懒加载 CosyVoice 模型（线程安全）"""
+    global _cosyvoice_instance
+    if _cosyvoice_instance is not None:
+        return _cosyvoice_instance
+
+    with _cosyvoice_lock:
+        if _cosyvoice_instance is not None:
+            return _cosyvoice_instance
+
+        if COSYVOICE_REPO not in sys.path:
+            sys.path.insert(0, COSYVOICE_REPO)
+        if MATCHA_TTS not in sys.path:
+            sys.path.insert(0, MATCHA_TTS)
+
+        from cosyvoice.cli.cosyvoice import CosyVoice  # type: ignore[import-untyped]
+
+        logger.info("正在加载 CosyVoice 模型（%s）...", MODEL_DIR)
+        _cosyvoice_instance = CosyVoice(MODEL_DIR, load_jit=False, device="cpu")
+        logger.info(
+            "CosyVoice 加载完成！可用音色: %s",
+            _cosyvoice_instance.list_avaliable_spks(),
+        )
+        return _cosyvoice_instance
+
+
+def _ensure_model_loaded():
+    """在后台线程中确保模型已加载，返回是否首次加载耗时"""
+    global _cosyvoice_instance
+    if _cosyvoice_instance is not None:
+        return False
+    _get_cosyvoice()
+    return True
+
+
+def _sync_synthesize(text: str, voice: str, instruct: str | None) -> dict[str, Any]:
+    """同步执行推理（在 executor 线程中运行）"""
+    cosyvoice = _get_cosyvoice()
+    if instruct:
+        return next(cosyvoice.inference_instruct(text, voice, instruct, stream=False))
+    return next(cosyvoice.inference_sft(text, voice, stream=False))
+
+
+def _tensor_to_wav_bytes(tensor, sample_rate: int = 22050) -> bytes:
+    """将 PyTorch tensor 转为 WAV 字节"""
+    arr = tensor.cpu().numpy().flatten()
+    arr = np.clip(arr, -1.0, 1.0)
+    buf = io.BytesIO()
+    data = (arr * 32767).astype(np.int16).tobytes()
+    data_size = len(data)
+    buf.write(b"RIFF")
+    buf.write(struct.pack("<I", data_size + 36))
+    buf.write(b"WAVE")
+    buf.write(struct.pack("<I", 16))
+    buf.write(struct.pack("<H", 1))
+    buf.write(struct.pack("<H", 1))
+    buf.write(struct.pack("<I", sample_rate))
+    buf.write(struct.pack("<I", sample_rate * 2))
+    buf.write(struct.pack("<H", 2))
+    buf.write(struct.pack("<H", 16))
+    buf.write(b"data")
+    buf.write(struct.pack("<I", data_size))
+    buf.write(data)
+    return buf.getvalue()
 
 
 class CosyVoiceProvider(TTSProviderBase):
     """
-    CosyVoice 语音合成
+    CosyVoice 语音合成（本地模型）
 
-    需要运行 CosyVoice 服务:
-      https://github.com/lucasjinreal/CosyVoice
-
-    用法:
-        provider = CosyVoiceProvider()
-        async with provider:
-            audio = await provider.synthesize("你好")
+    所有 CPU 密集推理在后台线程执行，不阻塞事件循环。
     """
 
     def __init__(
         self,
-        url: str = "http://localhost:8088",
-        timeout: float = 60.0,
-        voice: str = "中文男",
-        response_format: str = "wav",
+        voice: str = "中文女",
+        instruct_prompt: str = "用温柔的语气说话",
+        timeout: float = SYNTHESIS_TIMEOUT,
     ):
-        self._url = url.rstrip("/")
-        self._timeout = timeout
         self._voice = voice
-        self._response_format = response_format
+        self._instruct_prompt = instruct_prompt
+        self._timeout = timeout
         self._available = False
-        self._client = None
 
     async def __aenter__(self):
         return self
@@ -54,55 +132,42 @@ class CosyVoiceProvider(TTSProviderBase):
         await self.close()
 
     async def close(self):
-        """显式关闭HTTP客户端，释放连接池"""
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
-            logger.debug("CosyVoice HTTP客户端已关闭")
+        self._available = False
 
     @property
     def name(self) -> str:
         return "cosyvoice"
-
-    async def _get_client(self):
-        if self._client is None:
-            import httpx
-            self._client = httpx.AsyncClient(
-                base_url=self._url,
-                timeout=self._timeout,
-            )
-        return self._client
 
     async def synthesize(self, text: str, **kwargs) -> bytes | None:
         if not text or not text.strip():
             return None
 
         if len(text) > MAX_TEXT_LENGTH:
-            logger.warning("CosyVoice 输入文本超长 (%d > %d 字符)", len(text), MAX_TEXT_LENGTH)
+            logger.warning(
+                "CosyVoice 输入文本超长 (%d > %d 字符)", len(text), MAX_TEXT_LENGTH
+            )
             text = text[:MAX_TEXT_LENGTH]
 
         voice = kwargs.get("voice", self._voice)
-        response_format = kwargs.get("response_format", self._response_format)
+        instruct = kwargs.get("instruct", self._instruct_prompt)
 
         try:
-            client = await self._get_client()
-            payload = {
-                "input": text,
-                "model": "tts-1",
-                "voice": voice,
-                "response_format": response_format,
-                "speed": kwargs.get("speed", 1.0),
-                "stream": False,
-            }
+            loop = asyncio.get_running_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, _sync_synthesize, text, voice, instruct),
+                timeout=self._timeout,
+            )
 
-            response = await client.post("/v1/audio/speech", json=payload)
-            response.raise_for_status()
-
+            wav_bytes = _tensor_to_wav_bytes(result["tts_speech"])
             self._available = True
-            return response.content  # type: ignore[no-any-return]
+            return wav_bytes
 
+        except asyncio.TimeoutError:
+            logger.error("CosyVoice 合成超时（%s 秒）", self._timeout)
+            self._available = False
+            return None
         except Exception as e:  # noqa: BLE001
-            logger.error("CosyVoice 合成失败: %s", e)
+            logger.error("CosyVoice 合成失败: %s", e, exc_info=True)
             self._available = False
             return None
 
@@ -110,38 +175,16 @@ class CosyVoiceProvider(TTSProviderBase):
         return {
             "engine": "cosyvoice",
             "available": self._available,
-            "url": self._url,
+            "model": MODEL_DIR,
             "voice": self._voice,
-            "timeout": self._timeout,
+            "instruct": self._instruct_prompt,
         }
 
     @property
     def supports_streaming(self) -> bool:
-        return True
+        return False
 
-    async def synthesize_stream(self, text: str, **kwargs):
-        """流式合成 - 通过SSE流式返回音频块"""
-        if not text or not text.strip():
-            return
-
-        voice = kwargs.get("voice", self._voice)
-
-        try:
-            client = await self._get_client()
-            payload = {
-                "input": text,
-                "model": "tts-1",
-                "voice": voice,
-                "response_format": "wav",
-                "speed": kwargs.get("speed", 1.0),
-                "stream": True,
-            }
-
-            async with client.stream("POST", "/v1/audio/speech", json=payload) as response:
-                response.raise_for_status()
-                async for chunk in response.aiter_bytes():
-                    if chunk:
-                        yield chunk
-
-        except Exception as e:  # noqa: BLE001
-            logger.error("CosyVoice 流式合成失败: %s", e)
+    async def synthesize_stream(self, text: str, **kwargs) -> AsyncGenerator[bytes, None]:
+        audio = await self.synthesize(text, **kwargs)
+        if audio:
+            yield audio

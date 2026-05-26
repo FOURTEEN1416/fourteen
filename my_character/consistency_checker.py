@@ -246,3 +246,71 @@ class PersonaConsistencyChecker:
             "anchors_loaded": self._anchors is not None,
             "coupler_loaded": self._style_coupler is not None,
         }
+
+
+# ── 共享编排器工具函数 ─────────────────────────────────────
+
+async def check_and_correct_reply(
+    reply: str,
+    persona_engine: Any,
+    llm_gateway: Any,
+    emotion_state: Any = None,
+    session_id: str = "",
+    memory: Any = None,
+) -> str:
+    """统一的一致性检查 + 自动修正（供 main.py 和 orchestrator.py 复用）
+
+    Args:
+        reply: LLM 原始回复文本
+        persona_engine: PersonaEngine 实例（含 check_consistency 方法）
+        llm_gateway: LLM 网关实例（含 chat_sync 方法）
+        emotion_state: 可选的情感状态
+        session_id: 可选会话 ID（用于计算 chat_round）
+        memory: 可选记忆管线（用于获取对话历史）
+
+    Returns:
+        修正后（或原样放行）的回复文本
+    """
+    try:
+        if not persona_engine or not hasattr(persona_engine, "check_consistency"):
+            return reply
+
+        # 计算 chat_round
+        chat_round = 0
+        if memory and hasattr(memory, "get_chat_context"):
+            try:
+                history, _ = memory.get_chat_context(session_id=session_id)
+                chat_round = len(history) if history else 0
+            except Exception:
+                pass
+
+        result = persona_engine.check_consistency(reply, emotion_state, chat_round)
+
+        if result is None:
+            return reply
+
+        if not result.overall_passed and result.overall_score < 0.4 and result.correction_prompt:
+            # 严重违规：用修正 prompt 重新生成
+            if llm_gateway and hasattr(llm_gateway, "chat_sync"):
+                corrected = await llm_gateway.chat_sync(
+                    query=(
+                        f"{result.correction_prompt}\n\n"
+                        f"原始回复：{reply}\n\n"
+                        f"请根据以上修正建议重新生成一条符合角色设定的回复。"
+                        f"只输出修正后的回复。"
+                    ),
+                    max_tokens=512,
+                )
+                if corrected and len(corrected.strip()) > 0:
+                    logger.info("一致性严重违规已修正: score=%.2f", result.overall_score)
+                    return corrected.strip()
+            else:
+                logger.warning("LLM 网关不可用，跳过一致性修正")
+        elif not result.overall_passed:
+            # 轻度违规：放行原回复
+            logger.info("一致性轻度违规(score=%.2f)，放行原回复", result.overall_score)
+
+    except Exception as exc:
+        logger.warning("一致性检查异常（已放行原回复）: %s", exc)
+
+    return reply
