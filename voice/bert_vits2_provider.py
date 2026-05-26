@@ -13,6 +13,7 @@ Bert-VITS2 提供者 - 本地/远程语音合成
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from .tts_provider_base import TTSProviderBase
@@ -55,6 +56,7 @@ class BertVITS2Provider(TTSProviderBase):
         self._speed = speed
         self._available = False
         self._client = None
+        self._client_lock = asyncio.Lock()
 
     async def __aenter__(self):
         return self
@@ -75,11 +77,13 @@ class BertVITS2Provider(TTSProviderBase):
 
     async def _get_client(self):
         if self._client is None:
-            import httpx
-            self._client = httpx.AsyncClient(
-                base_url=self._url,
-                timeout=self._timeout,
-            )
+            async with self._client_lock:
+                if self._client is None:
+                    import httpx
+                    self._client = httpx.AsyncClient(
+                        base_url=self._url,
+                        timeout=self._timeout,
+                    )
         return self._client
 
     async def synthesize(self, text: str, **kwargs) -> bytes | None:

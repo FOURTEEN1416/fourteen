@@ -196,6 +196,7 @@ class OptimizedOrchestrator:
         self._session_locks: dict[str, tuple[asyncio.Lock, float]] = {}
         self._session_lock_access_time: dict[str, float] = {}
         self._locks_mutex = threading.Lock()
+        self._lock_cleanup_counter: int = 0  # 替代 hash() 的概率触发
         self._executor = None  # 延迟初始化的共享线程池
 
     def _get_executor(self):
@@ -316,13 +317,18 @@ class OptimizedOrchestrator:
             self.components["vector_memory"] = vector_memory
             self.components["structured_memory"] = structured_memory
 
-            _ = fusion_cfg.get("ase", {})
+            ase_fusion = fusion_cfg.get("ase", {})
             try:
                 from proactive.ase_engine import ASEEngine as ASEEngineOptimized
                 self.components["ase"] = ASEEngineOptimized(
                     llm_gateway=self.components["llm"],
                     max_daily_messages=cfg.proactive.max_daily_messages,
                     min_interval_minutes=cfg.proactive.min_interval_minutes,
+                    cooldown_after_reply=cfg.proactive.cooldown_after_reply_minutes,
+                    urgency_threshold=cfg.proactive.urgency_threshold,
+                    frequency_mode=ase_fusion.get("frequency_mode", "adaptive"),
+                    generation_mode=ase_fusion.get("generation_mode", "llm"),
+                    reflection_mode=ase_fusion.get("reflection_mode", "rule"),
                 )
             except ImportError:
                 from proactive.ase_engine import ASEEngine as ASEEngineV2
@@ -507,8 +513,9 @@ class OptimizedOrchestrator:
 
         with self._locks_mutex:
             # 清理过期锁（每100次访问触发一次清理，避免频繁清理）
+            self._lock_cleanup_counter = (self._lock_cleanup_counter + 1) % 100
             if len(self._session_locks) >= self._MAX_SESSION_LOCKS or \
-               (len(self._session_locks) > 0 and hash(session_id) % 100 == 0):
+               (len(self._session_locks) > 0 and self._lock_cleanup_counter == 0):
                 self._cleanup_expired_session_locks(current_time)
 
             # 检查是否已存在该session的锁
@@ -674,22 +681,16 @@ class OptimizedOrchestrator:
                     logger.warning("LLM 调用超时 (30s), session=%s", session_id)
                     return {"reply": "抱歉，处理超时，请稍后重试", "error": "timeout"}
 
-                # === 新增：一致性检查（复用 PersonaEngine.check_consistency） ===
-                try:
-                    persona = self.components.get("persona")
-                    if persona and hasattr(persona, 'check_consistency'):
-                        result = persona.check_consistency(reply, emotion_state, 0)
-                        if not result.overall_passed and result.overall_score < 0.4 and result.correction_prompt:
-                            corrected = await self.components["llm"].chat_sync(
-                                query=f"{result.correction_prompt}\n\n"
-                                      f"原始回复：{reply}\n\n"
-                                      f"请重新生成：",
-                                max_tokens=512,
-                            )
-                            if corrected and len(corrected.strip()) > 0:
-                                reply = corrected.strip()
-                except Exception as e:
-                    logger.warning("一致性检查异常（已放行）: %s", e)
+                # === 一致性检查（复用 my_character/consistency_checker.py） ===
+                from my_character.consistency_checker import check_and_correct_reply
+                reply = await check_and_correct_reply(
+                    reply=reply,
+                    persona_engine=self.components.get("persona"),
+                    llm_gateway=self.components.get("llm"),
+                    emotion_state=emotion_state,
+                    session_id=session_id,
+                    memory=self.components.get("memory"),
+                )
                 # === 检查结束 ===
 
                 output_result = self.components["safety"].check_output(reply)
@@ -1138,7 +1139,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     from my_character import ConfigLoader
     config_loader = ConfigLoader(config_dir=args.config)
 
-    emotion_fusion.get("classifier_mode", "hybrid")
+    classifier_mode = emotion_fusion.get("classifier_mode", "hybrid")
     blend_ratio = emotion_fusion.get("blend_ratio", cfg.emotion.continuity_blend_ratio)
     classifier_timeout = emotion_fusion.get("classifier_timeout_ms",
                                              cfg.emotion.llm_classifier_timeout_ms)
@@ -1148,12 +1149,18 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
         use_llm=cfg.emotion.use_llm_classifier,
         blend_ratio=blend_ratio,
         classifier_timeout_ms=classifier_timeout,
+        classifier_mode=classifier_mode,
     )
 
-    _ = persona_fusion.get("prompt_mode", "layered")
-    _ = persona_fusion.get("anchor_verification_enabled", True)
+    prompt_mode = persona_fusion.get("prompt_mode", "layered")
+    anchor_verification = persona_fusion.get("anchor_verification_enabled", True)
 
-    persona_engine = PersonaEngine(config_loader=config_loader, llm_gateway=llm)
+    persona_engine = PersonaEngine(
+        config_loader=config_loader,
+        llm_gateway=llm,
+        prompt_mode=prompt_mode,
+        anchor_verification_enabled=anchor_verification,
+    )
 
     tone_mimic = None
     try:
@@ -1163,7 +1170,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
         logger.warning("ToneMimic 不可用")
 
     logger.info("[6/12] 初始化记忆系统 (融合)...")
-    _ = memory_fusion.get("forgetting_model", "exponential")
+    forgetting_model = memory_fusion.get("forgetting_model", "exponential")
 
     vector_memory = VectorMemory(chroma_path=str(project_root / "data" / "chroma_db"))
     structured_memory = StructuredMemory(db_path=str(project_root / "data" / "sqlite.db"))
@@ -1174,6 +1181,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
         llm_gateway=llm,
         working_limit=cfg.memory.working_memory_limit,
         retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
+        forgetting_model=forgetting_model,
     )
 
     logger.info("[7/12] 初始化工具系统...")
@@ -1201,9 +1209,9 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     )
 
     logger.info("[9/12] 初始化主动消息 (融合)...")
-    _ = ase_fusion.get("frequency_mode", "adaptive")
-    _ = ase_fusion.get("generation_mode", "llm")
-    _ = ase_fusion.get("reflection_mode", "rule")
+    ase_frequency_mode = ase_fusion.get("frequency_mode", "adaptive")
+    ase_generation_mode = ase_fusion.get("generation_mode", "llm")
+    ase_reflection_mode = ase_fusion.get("reflection_mode", "rule")
 
     ase_engine = ASEEngine(
         llm_gateway=llm,
@@ -1211,6 +1219,9 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
         min_interval_minutes=cfg.proactive.min_interval_minutes,
         cooldown_after_reply=cfg.proactive.cooldown_after_reply_minutes,
         urgency_threshold=cfg.proactive.urgency_threshold,
+        frequency_mode=ase_frequency_mode,
+        generation_mode=ase_generation_mode,
+        reflection_mode=ase_reflection_mode,
     )
 
     scheduler = None

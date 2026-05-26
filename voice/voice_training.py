@@ -251,7 +251,7 @@ class VoiceTrainingManager:
             gpt_path = Path(gpt_sovits_dir)
 
             s1_config = self._generate_s1_config(safe_name, epochs)
-            s1_config_path = self._models / f"{safe_name}_s1.yaml"
+            s1_config_path = self._models / f"{safe_name}_s1.json"
             s1_config_path.write_text(
                 json.dumps(s1_config, ensure_ascii=False, indent=2), encoding="utf-8"
             )

@@ -56,11 +56,11 @@ class PromptInjectionDetector:
 
     def sanitize(self, text: str) -> str:
         # 先做规则检查和替换，避免不必要的LLM调用
-        rule_hit, rule_conf, _ = self._rule_check(text)
+        rule_hit, rule_conf, rule_pattern = self._rule_check(text)
         if not rule_hit and self.llm_gateway:
-            # 规则未命中时才调用detect（含LLM检查）
-            is_injection, confidence, pattern = self.detect(text)
-            if not is_injection:
+            # 规则未命中时直接走 LLM 检查，避免 detect() 中重复 _rule_check()
+            llm_hit, llm_conf = self._llm_check(text)
+            if not llm_hit:
                 return text
         sanitized = text
         for p in INJECTION_PATTERNS:

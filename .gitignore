@@ -57,3 +57,5 @@ validation_reports/
 .uploads/
 .coverage
 htmlcov/
+
+.env

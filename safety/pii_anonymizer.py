@@ -55,11 +55,33 @@ class PIIAnonymizer:
             logger.info("PII detected and anonymized: %d items", len(detected))
         return anonymized, detected
 
-    def deanonymize(self, text: str, pii_map: dict[str, str]) -> str:
+    def deanonymize(self, text: str, pii_map: dict[str, str] | list[dict]) -> str:
+        """反脱敏 — 支持 dict[str, str] 和 list[dict] 两种格式
+
+        Args:
+            text: 脱敏后的文本
+            pii_map: dict[str, str] 格式 {placeholder: original}
+                     或 list[dict] 格式 [{"type":..., "placeholder":..., "original":...}]
+        """
+        if isinstance(pii_map, list):
+            # 从 list[dict] 转换为 dict[str, str]
+            pii_dict: dict[str, str] = {}
+            for item in pii_map:
+                if isinstance(item, dict) and "placeholder" in item and "original" in item:
+                    pii_dict[str(item["placeholder"])] = str(item["original"])
+            pii_map = pii_dict
+
         result = text
         for placeholder, original in pii_map.items():
             result = result.replace(placeholder, original)
         return result
+
+    @staticmethod
+    def pii_list_to_map(pii_list: list[dict]) -> dict[str, str]:
+        """将 anonymize() 返回的 list[dict] 转换为 dict[str,str] 格式"""
+        return {str(item["placeholder"]): str(item["original"])
+                for item in pii_list
+                if isinstance(item, dict) and "placeholder" in item and "original" in item}
 
     @staticmethod
     def _mask(pii_type: str, original: str) -> str:

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import enum
+import hashlib
 import json
 import logging
 import random
@@ -283,7 +284,10 @@ class LLMEmotionClassifier:
         return llm
 
     def _get_cache_key(self, message: str, context: str) -> str:
-        return f"{hash(message)}:{hash(context[:50])}"
+        # 使用 hashlib.md5 替代 hash()，避免 PYTHONHASHSEED 随机化导致进程间缓存不命中
+        msg_hash = hashlib.md5(message.encode()).hexdigest()[:12]
+        ctx_hash = hashlib.md5(context[:50].encode()).hexdigest()[:12]
+        return f"{msg_hash}:{ctx_hash}"
 
     def classify(self, message: str, context: str = "") -> dict | None:
         llm = self._get_llm()
