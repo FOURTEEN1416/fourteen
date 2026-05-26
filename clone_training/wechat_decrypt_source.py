@@ -11,7 +11,7 @@ WeChat Decrypt 数据源适配器 — 集成 ylytdeng/wechat-decrypt
   4. 输出 [{"user": .., "reply": .., ...}] 格式
 
 用法:
-    from clone_training.decrypt_source import DecryptSource
+    from clone_training.wechat_decrypt_source import DecryptSource
     ds = DecryptSource()
     conversations = ds.extract("目标联系人wxid或备注名")
 """

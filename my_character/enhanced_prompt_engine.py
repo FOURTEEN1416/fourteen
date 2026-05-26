@@ -105,6 +105,7 @@ class EnhancedPromptEngine:
     LAYER_MEMORY = "memory"
     LAYER_STYLE = "style"
     LAYER_CONSTRAINT = "constraint"
+    LAYER_COGNITIVE_FOCUS = "cognitive_focus"  # 新增第6层
     LAYER_CONTEXTUAL = "contextual"
 
     def __init__(
@@ -138,6 +139,7 @@ class EnhancedPromptEngine:
             self._build_memory_layer(context),
             self._build_style_layer(context),
             self._build_constraint_layer(context),
+            self._build_cognitive_focus_layer(context),  # 新增第6层
             self._build_contextual_layer(context),
         ]
 
@@ -219,6 +221,49 @@ class EnhancedPromptEngine:
         if context.emotion_state and hasattr(context.emotion_state, "affinity") and context.emotion_state.affinity < 3:
             constraints.append("当前好感度较低，保持适当距离感")
         return "# 行为约束\n" + "\n".join(f"- {c}" for c in constraints)
+
+    def _build_cognitive_focus_layer(self, context: PromptContext) -> str:
+        """
+        认知聚焦层（第6层）
+        引导模型在回复前完成内心思考，提升回复的"走心"程度
+        
+        插入位置: constraint层之后，contextual层之前
+        """
+        try:
+            emotion_name = "平常"
+            intensity = 0.5
+            affinity = 0
+            if context.emotion_state:
+                emotion_dict = context.emotion_dict
+                emotion_name = emotion_dict.get("primary_emotion", "平常")
+                intensity = emotion_dict.get("primary_intensity", 0.5)
+                affinity = emotion_dict.get("affinity", 0)
+            
+            # 好感度影响关系提示
+            if affinity <= 1:
+                relationship_hint = "还不太熟，保持礼貌但有距离感"
+            elif affinity <= 3:
+                relationship_hint = "算是认识的人，可以稍微放松一些"
+            elif affinity <= 5:
+                relationship_hint = "已经比较熟悉了，可以更自然地表达"
+            elif affinity <= 7:
+                relationship_hint = "关系很亲密，可以展现更多真实的一面"
+            else:
+                relationship_hint = "非常亲密的关系，几乎无话不谈"
+            
+            return (
+                f"## 回复前的内心深处（不要输出给用户）\n"
+                f"在回复TA之前，先在内心过一遍：\n"
+                f"1. 我现在的心情 → {emotion_name}（强度{intensity:.0%}）\n"
+                f"2. 我和TA现在的关系 → {relationship_hint}\n"
+                f"3. TA想聊什么 → 专注当前话题，别跑偏\n"
+                f"4. 以前有过类似的事吗 → 想想相关的回忆\n"
+                f"5. 我该用什么语气 → 配合{emotion_name}状态的表达方式\n\n"
+                f"想完这些之后，用真实的自己回复TA。思考过程不要说出来。"
+            )
+        except Exception as e:
+            logger.debug("认知聚焦层构建失败（已跳过）: %s", e)
+            return ""
 
     def _build_contextual_layer(self, context: PromptContext) -> str:
         if self._contextual is None:

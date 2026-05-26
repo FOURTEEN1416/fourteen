@@ -26,7 +26,7 @@ from typing import Any
 logger = logging.getLogger("voice.voice_training")
 
 # P1: 安全名称验证 - 防止命令注入
-_SAFE_NAME_RE = re.compile(r"[^\w\-]")
+_SAFE_NAME_RE = re.compile(r"[^\w\-.]")
 
 
 def _validate_model_name(name: str) -> str:
@@ -159,13 +159,71 @@ class VoiceTrainingManager:
         if not wav_files:
             return {"error": "processed目录中没有WAV文件"}
 
+        # 异步尝试加载 ASR 引擎（不阻塞主线程）
+        asr_method = "filename"
+        whisper_model = None
+        funasr_model = None
+
+        def _load_whisper():
+            import whisper as _w
+
+            return _w.load_model("tiny")
+
+        def _load_funasr():
+            from funasr import AutoModel as _am
+
+            return _am(model="paraformer-zh")
+
+        try:
+            whisper_model = await asyncio.to_thread(_load_whisper)
+            asr_method = "whisper"
+            logger.info("ASR 引擎: Whisper (tiny)")
+        except ImportError:
+            try:
+                funasr_model = await asyncio.to_thread(_load_funasr)
+                asr_method = "funasr"
+                logger.info("ASR 引擎: FunASR (paraformer-zh)")
+            except ImportError:
+                logger.info("ASR 引擎不可用，回退到文件名标注")
+
+        def _transcribe_whisper(path: str) -> str:
+            result = whisper_model.transcribe(path, language="zh")
+            return result.get("text", "").strip()
+
+        def _transcribe_funasr(path: str) -> str:
+            result = funasr_model.generate(input=path)
+            if result and isinstance(result, list):
+                return result[0].get("text", "").strip()
+            return ""
+
         lines = []
         for wav in wav_files:
-            lines.append(f"{wav}|{safe_name}|zh|请在此处填入标注文本")
+            text = ""
+            if asr_method == "whisper":
+                try:
+                    text = await asyncio.to_thread(_transcribe_whisper, str(wav))
+                except Exception as e:
+                    logger.warning("Whisper 转写失败: %s, 回退到文件名", e)
+            elif asr_method == "funasr":
+                try:
+                    text = await asyncio.to_thread(_transcribe_funasr, str(wav))
+                except Exception as e:
+                    logger.warning("FunASR 转写失败: %s, 回退到文件名", e)
+
+            if not text:
+                text = wav.stem  # 回退：文件名作为标注文本
+
+            lines.append(f"{wav}|{safe_name}|zh|{text}")
 
         list_file.write_text("\n".join(lines), encoding="utf-8")
-        self._state.update({"status": "dataset_ready", "step": "数据集已生成(需手动标注)", "progress": 0.5})
-        return {"list_file": str(list_file), "entries": len(lines), "note": "标注文本需要手动补充"}
+        step_text = f"数据集已生成(ASR: {asr_method})"
+        self._state.update({"status": "dataset_ready", "step": step_text, "progress": 0.5})
+        return {
+            "list_file": str(list_file),
+            "entries": len(lines),
+            "asr_method": asr_method,
+            "note": f"标注方式: {asr_method}",
+        }
 
     async def train(
         self,

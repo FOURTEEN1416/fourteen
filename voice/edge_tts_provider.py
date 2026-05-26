@@ -17,7 +17,7 @@ import logging
 import os
 import tempfile
 
-from .base import TTSProviderBase
+from .tts_provider_base import TTSProviderBase
 
 logger = logging.getLogger("voice.edge_tts")
 

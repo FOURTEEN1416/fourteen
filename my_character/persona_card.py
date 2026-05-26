@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger("persona_card_v3")
+logger = logging.getLogger("persona_card")
 
 try:
     import yaml

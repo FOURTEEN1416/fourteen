@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import client from '../api/client'
 import { useErrorStore } from '../store/errorStore'
 import Modal from '../components/ui/Modal'
@@ -49,25 +50,19 @@ function timeAgo(ts: number): string {
 }
 
 export default function UsersPage() {
-  const [users, setUsers] = useState<UserData[]>([])
-  const [loading, setLoading] = useState(true)
   const [selectedUser, setSelectedUser] = useState<UserData | null>(null)
   const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([])
   const [emotionDetail, setEmotionDetail] = useState<EmotionDetailData | null>(null)
   const [modal, setModal] = useState<{ type: 'reset' | 'remove'; userId: string } | null>(null)
   const addToast = useErrorStore((s) => s.addToast)
 
-  const fetchUsers = useCallback(async () => {
-    try {
+  const { data: users = [], isLoading: loading, refetch: fetchUsers } = useQuery({
+    queryKey: ['users'],
+    queryFn: async () => {
       const { data } = await client.get('/users')
-      setUsers((data as UsersResponse).users || [])
-    } catch {
-      addToast({ type: 'error', message: '获取用户列表失败' })
-    }
-    setLoading(false)
-  }, [addToast])
-
-  useEffect(() => { fetchUsers() }, [fetchUsers])
+      return (data as UsersResponse).users || []
+    },
+  })
 
   const handleViewDetail = async (user: UserData) => {
     setSelectedUser(user)

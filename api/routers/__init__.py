@@ -1,9 +1,13 @@
-from api.routers.chat_routes import router as chat_router  # noqa: F401
-from api.routers.config_routes import router as config_router  # noqa: F401
-from api.routers.file_routes import router as file_router  # noqa: F401
-from api.routers.memory_routes import router as memory_router  # noqa: F401
-from api.routers.rag_routes import router as rag_router  # noqa: F401
-from api.routers.safety_routes import router as safety_router  # noqa: F401
+from api.routers.character_routes import router as character_router  # noqa: F401
+from api.routers.voice_routes import router as voice_router  # noqa: F401
 from api.routers.training_routes import router as training_router  # noqa: F401
-from api.routers.user_routes import router as user_router  # noqa: F401
-from api.routers.wechat_routes import router as wechat_router  # noqa: F401
+from api.routers.memory_routes import router as memory_router  # noqa: F401
+from api.routers.persona_card_routes import router as persona_card_router  # noqa: F401
+
+__all__ = [
+    "character_router",
+    "training_router",
+    "voice_router",
+    "memory_router",
+    "persona_card_router",
+]

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { shisiClient } from '../api/shisiClient'
 import { useErrorStore } from '../store/errorStore'
 import Card from '../components/common/Card'
@@ -22,25 +23,23 @@ function getErrorMessage(e: unknown): string {
 }
 
 export default function StickersPage() {
-  const [stickers, setStickers] = useState<StickerItem[]>([])
-  const [loading, setLoading] = useState(true)
   const [emotion, setEmotion] = useState('')
   const [recommended, setRecommended] = useState<StickerItem[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const zipInputRef = useRef<HTMLInputElement>(null)
   const toast = useErrorStore.getState().addToast
 
-  const loadStickers = useCallback(async () => {
-    try {
-      setLoading(true)
+  const { data: stickers = [], isLoading: loading, error, refetch: loadStickers } = useQuery({
+    queryKey: ['stickers'],
+    queryFn: async () => {
       const data = await shisiClient.stickers.list() as StickerItem[]
-      setStickers(Array.isArray(data) ? data : [])
-    } catch (e: unknown) {
-      toast({ type: 'error', message: getErrorMessage(e) || '加载表情包失败' })
-    } finally { setLoading(false) }
-  }, [toast])
+      return Array.isArray(data) ? data : []
+    },
+  })
 
-  useEffect(() => { loadStickers() }, [loadStickers])
+  useEffect(() => {
+    if (error) toast({ type: 'error', message: getErrorMessage(error) || '加载表情包失败' })
+  }, [error, toast])
 
   async function handleDelete(id: string) {
     if (!confirm('确定删除此表情包？')) return
@@ -105,7 +104,7 @@ export default function StickersPage() {
           <Button variant="secondary" size="sm" onClick={() => zipInputRef.current?.click()}>
             <Upload className="w-3.5 h-3.5 mr-1" /> 导入ZIP
           </Button>
-          <Button variant="ghost" size="sm" onClick={loadStickers}>
+          <Button variant="ghost" size="sm" onClick={() => loadStickers()}>
             <RefreshCw className="w-3.5 h-3.5" />
           </Button>
         </div>

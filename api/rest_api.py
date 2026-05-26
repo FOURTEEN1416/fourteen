@@ -5,6 +5,8 @@ import json
 import logging
 import os
 import re
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -168,9 +170,6 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         limiter = Limiter(key_func=get_remote_address)
         app.state.limiter = limiter
     else:
-        # 简易内存限流器回退方案 - 线程安全 + 自动清理
-        import threading
-        import time
         from collections import defaultdict
         _rate_limit_store: dict[str, list[float]] = defaultdict(list)
         _rate_limit_lock = threading.Lock()
@@ -794,7 +793,7 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         if conn and conn.token:
             conn.stop()
         def _do_reconnect():
-            import wechat_direct.connector as wc
+            import wechat_direct.wechat_connector as wc
             from wechat_direct import WeChatConnector
             time.sleep(1)
             wc._clear_credentials()
@@ -1358,6 +1357,49 @@ def create_api_app(orchestrator=None, health_checker=None, config_manager=None,
         app.include_router(qrcode_router)
     except Exception as e:  # noqa: BLE001
         logger.warning("二维码API挂载失败: %s", e)
+
+    # ── 统一角色管理 API ──
+    try:
+        from api.routers.character_routes import router as character_router
+        from api.routers.character_routes import set_dependencies as set_character_deps
+        set_character_deps(_orch, _gf, _verify_api_key)
+        app.include_router(character_router)
+        logger.info("统一角色管理API已挂载")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("统一角色管理API挂载失败: %s", e)
+
+    # ── 角色音色绑定 API ──
+    try:
+        from api.routers.voice_routes import router as voice_router
+        from api.routers.voice_routes import set_dependencies as set_voice_deps
+        set_voice_deps(_orch, _verify_api_key)
+        app.include_router(voice_router)
+        logger.info("角色音色绑定API已挂载")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("角色音色绑定API挂载失败: %s", e)
+
+    # ── 统一记忆 API (桥接 shisi FavoriteManager/ForwardManager) ──
+    try:
+        from api.routers.memory_routes import router as memory_bridge_router
+        from api.routers.memory_routes import set_dependencies as set_memory_deps
+        _fav_mgr_local = shisi_reg.favorite_manager
+        _fwd_mgr_local = shisi_reg.forward_manager
+        set_memory_deps(_verify_api_key, fav_mgr=_fav_mgr_local, fwd_mgr=_fwd_mgr_local)
+        app.include_router(memory_bridge_router)
+        logger.info("统一记忆API已挂载")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("统一记忆API挂载失败: %s", e)
+
+    # ── 统一角色卡 API (桥接 shisi CharacterManager) ──
+    try:
+        from api.routers.persona_card_routes import router as persona_card_router
+        from api.routers.persona_card_routes import set_dependencies as set_pcard_deps
+        _char_mgr_local = shisi_reg.character_manager
+        set_pcard_deps(_verify_api_key, character_mgr=_char_mgr_local)
+        app.include_router(persona_card_router)
+        logger.info("统一角色卡API已挂载")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("统一角色卡API挂载失败: %s", e)
 
     @app.get("/api/routes")  # noqa: BLE001
     async def list_routes():

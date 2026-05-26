@@ -1,72 +1,38 @@
 ﻿import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
-  LayoutDashboard, MessageCircle, Users, Heart, PenTool, GraduationCap,
-  Database, Smartphone, Activity, BarChart3, Brain, Sticker,
-  Settings, Shield, FileText, PanelLeftClose, PanelLeft,
-  ShieldAlert, BookOpen, Puzzle, Star,
+  LayoutDashboard, MessageCircle, Users, PenTool, Activity,
+  GraduationCap, Database, Settings, FileText, PanelLeftClose, PanelLeft,
 } from 'lucide-react'
 import { useChatStore } from '../../store/chatStore'
 
 const navGroups = [
   {
-    label: '对话',
+    label: '总览',
     items: [
+      { to: '/', icon: LayoutDashboard, label: '仪表盘', end: true },
       { to: '/chat', icon: MessageCircle, label: '聊天', end: false },
     ],
   },
   {
-    label: '总览',
-    items: [
-      { to: '/', icon: LayoutDashboard, label: '仪表盘', end: true },
-    ],
-  },
-  {
-    label: '角色与人设',
+    label: '角色',
     items: [
       { to: '/characters', icon: Users, label: '角色管理', end: false },
-      { to: '/persona', icon: Heart, label: '人设档案', end: false },
       { to: '/persona-editor', icon: PenTool, label: '人设编辑', end: false },
+      { to: '/monitor', icon: Activity, label: '状态中心', end: false },
     ],
   },
   {
-    label: '克隆训练',
+    label: '训练',
     items: [
-      { to: '/training', icon: GraduationCap, label: '克隆工作台', end: false },
+      { to: '/training', icon: GraduationCap, label: '克隆训练', end: false },
       { to: '/clone-data', icon: Database, label: '数据管理', end: false },
-    ],
-  },
-  {
-    label: '监控分析',
-    items: [
-      { to: '/monitor', icon: Activity, label: '情感监控', end: false },
-      { to: '/stats', icon: BarChart3, label: '对话统计', end: false },
-      { to: '/memory', icon: Brain, label: '记忆浏览', end: false },
-      { to: '/stickers', icon: Sticker, label: '表情包', end: false },
-      { to: '/psych', icon: Brain, label: '心理画像', end: false },
-      { to: '/favorites', icon: Star, label: '收藏记忆', end: false },
-      { to: '/knowledge', icon: BookOpen, label: '知识库', end: false },
-    ],
-  },
-  {
-    label: '用户',
-    items: [
-      { to: '/users', icon: Users, label: '用户管理', end: false },
-    ],
-  },
-  {
-    label: '通道',
-    items: [
-      { to: '/channels', icon: Smartphone, label: '通道管理', end: false },
     ],
   },
   {
     label: '系统',
     items: [
-      { to: '/settings', icon: Settings, label: '设置', end: false },
-      { to: '/admin', icon: Shield, label: '管理面板', end: false },
-      { to: '/safety', icon: ShieldAlert, label: '安全面板', end: false },
-      { to: '/extensions', icon: Puzzle, label: '扩展管理', end: false },
+      { to: '/settings', icon: Settings, label: '系统设置', end: false },
       { to: '/logs', icon: FileText, label: '日志', end: false },
     ],
   },

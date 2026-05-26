@@ -16,10 +16,13 @@ export function useSSE(url: string, options: SSEOptions) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const onMessageRef = useRef(options.onMessage)
   const onErrorRef = useRef(options.onError)
+  const connectRef = useRef<() => void>(() => {})
   const maxDelay = options.maxReconnectDelay ?? DEFAULT_MAX_DELAY
 
-  onMessageRef.current = options.onMessage
-  onErrorRef.current = options.onError
+  useEffect(() => {
+    onMessageRef.current = options.onMessage
+    onErrorRef.current = options.onError
+  })
 
   const connect = useCallback(() => {
     if (esRef.current) { esRef.current.close(); esRef.current = null }
@@ -46,9 +49,11 @@ export function useSSE(url: string, options: SSEOptions) {
 
       const delay = Math.min(1000 * 2 ** attemptRef.current, maxDelay)
       attemptRef.current += 1
-      timerRef.current = setTimeout(connect, delay)
+      timerRef.current = setTimeout(() => connectRef.current(), delay)
     }
   }, [url, maxDelay])
+
+  useEffect(() => { connectRef.current = connect })
 
   const disconnect = useCallback(() => {
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = undefined }

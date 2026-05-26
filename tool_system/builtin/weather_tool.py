@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from tool_system.base import BaseTool, ToolResult
+from tool_system.base_tool import BaseTool, ToolResult
 
 logger = logging.getLogger("weather_tool")
 

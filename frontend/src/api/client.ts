@@ -120,7 +120,7 @@ export const api = {
   tools: () => client.get('/tools'),
   proactiveState: () => client.get('/proactive/state'),
   config: () => client.get('/config'),
-  saveConfig: (config: Record<string, any>) => client.post('/config', { config }),
+  saveConfig: (config: Record<string, unknown>) => client.post('/config', { config }),
   toggleTool: (name: string, enabled: boolean) => client.post(`/tools/${name}/toggle`, { enabled }),
   updateProactiveConfig: (cfg: { threshold?: number; max_daily?: number; min_interval_minutes?: number; cooldown_after_reply_minutes?: number }) =>
     client.post('/proactive/config', cfg),
@@ -135,12 +135,13 @@ export const api = {
     client.post('/training/extract', null, { params: { target, source } }),
   trainingClean: (acceptScore: number) =>
     client.post('/training/clean', null, { params: { accept_score: acceptScore } }),
-  trainingTrain: (epochs: number, loraRank: number) =>
-    client.post('/training/train', null, { params: { epochs, lora_rank: loraRank } }),
+  trainingTrain: (epochs: number, loraRank: number, characterId?: string) =>
+    client.post('/training/train', null, { params: { epochs, lora_rank: loraRank, ...(characterId ? { character_id: characterId } : {}) } }),
   trainingStop: () => client.post('/training/stop'),
   trainingTest: (message: string) =>
     client.post('/training/test', null, { params: { message } }),
-  trainingApply: () => client.post('/training/apply'),
+  trainingApply: (characterId?: string) =>
+    client.post('/training/apply', null, { params: { ...(characterId ? { character_id: characterId } : {}) } }),
 
   // ── 手动微信连接（需求1） ──
   wechatConnect: () => client.post('/channels/wechat/connect'),

@@ -11,6 +11,7 @@
 
 支持的引擎:
   - edge-tts: 免费，无需GPU，需要网络
+  - cosyvoice: CosyVoice 本地/远程服务 (OpenAI兼容API)
   - gpt-sovits: 本地/远程GPT-SoVITS API
   - bert-vits2: 本地/远程Bert-VITS2 API
 
@@ -28,14 +29,17 @@
 """
 
 from .bert_vits2_provider import BertVITS2Provider
+from .cosyvoice_provider import CosyVoiceProvider
 from .edge_tts_provider import EdgeTTSProvider
-from .manager import TTSManager, TTSProviderBase
 from .sovits_provider import GPTSoVITSProvider
+from .tts_manager import TTSManager
+from .tts_provider_base import TTSProviderBase
 
 __all__ = [
     "TTSManager",
     "TTSProviderBase",
     "EdgeTTSProvider",
+    "CosyVoiceProvider",
     "GPTSoVITSProvider",
     "BertVITS2Provider",
 ]

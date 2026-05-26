@@ -29,7 +29,7 @@ from .emotion_style_coupler import EmotionStyleCoupler
 from .tone_mimic import ToneMimic
 
 if TYPE_CHECKING:
-    from llm_provider.llm_gateway_v2 import LLMGatewayV2
+    from llm_provider.llm_gateway import LLMGatewayV2
 
 logger = logging.getLogger("persona_engine")
 

@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, ".")
 
-from voice.base import TTSProviderBase
-from voice.manager import TTSManager
+from voice.tts_manager import TTSManager
+from voice.tts_provider_base import TTSProviderBase
 
 # ═══════════════════════════════════════════════════════════════
 #  基础默认值验证
@@ -344,27 +344,27 @@ def test_available_engines_multiple():
 
 def test_tts_provider_base_is_abstract():
 
-    from voice.base import TTSProviderBase
+    from voice.tts_provider_base import TTSProviderBase
     assert hasattr(TTSProviderBase, "__abstractmethods__")
 
 
 def test_tts_provider_base_has_synthesize():
-    from voice.base import TTSProviderBase
+    from voice.tts_provider_base import TTSProviderBase
     assert hasattr(TTSProviderBase, "synthesize")
 
 
 def test_tts_provider_base_has_health_check():
-    from voice.base import TTSProviderBase
+    from voice.tts_provider_base import TTSProviderBase
     assert hasattr(TTSProviderBase, "health_check")
 
 
 def test_tts_provider_base_has_name():
-    from voice.base import TTSProviderBase
+    from voice.tts_provider_base import TTSProviderBase
     assert hasattr(TTSProviderBase, "name")
 
 
 def test_tts_provider_base_supports_streaming_default():
-    from voice.base import TTSProviderBase
+    from voice.tts_provider_base import TTSProviderBase
     class ConcreteProvider(TTSProviderBase):
         async def synthesize(self, text, **kwargs):
             return b""

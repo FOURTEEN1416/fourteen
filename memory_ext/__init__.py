@@ -27,6 +27,6 @@
     all_memories = enhancer.get_all(user_id="user_123")
 """
 
-from .enhancer import MemoryEnhancer
+from .mem0_backend import MemoryEnhancer
 
 __all__ = ["MemoryEnhancer"]

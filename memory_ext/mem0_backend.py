@@ -26,7 +26,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-logger = logging.getLogger("memory_ext.enhancer")
+logger = logging.getLogger("memory_ext.mem0_backend")
 
 # 每次批量操作的最大条数
 _BATCH_SIZE = 100

@@ -52,7 +52,7 @@ export default function AdminPage() {
       setProactiveState(data as ProactiveEngineState)
     }).catch(() => {})
     api.config().then(({ data }) => {
-      const cfg = data as Record<string, any>
+      const cfg = data as { llm?: { provider?: string; primary_model?: string; fallback_model?: string; temperature?: number; max_tokens?: number; api_base?: string } }
       if (cfg?.llm) {
         if (cfg.llm.provider) setProvider(cfg.llm.provider)
         if (cfg.llm.primary_model) setModelName(cfg.llm.primary_model)
@@ -255,7 +255,7 @@ export default function AdminPage() {
   )
 }
 
-function StatCard({ icon: Icon, label, value, color }: { icon: any; label: string; value: string; color: string }) {
+function StatCard({ icon: Icon, label, value, color }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; color: string }) {
   return (
     <div className="bg-white/80 border border-gray-200 rounded-2xl p-4">
       <div className="flex items-center gap-3">

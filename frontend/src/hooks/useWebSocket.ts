@@ -32,6 +32,7 @@ export function useWebSocket() {
   const setEmotionStage = useChatStore((state) => state.setEmotionStage)
   const setAffinity = useChatStore((state) => state.setAffinity)
   const setLastSticker = useChatStore((state) => state.setLastSticker)
+  const connectRef = useRef<() => void>(() => {})
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
@@ -57,7 +58,7 @@ export function useWebSocket() {
       finalizeStreamMessage()
       const delay = reconnectDelay.current
       reconnectDelay.current = Math.min(delay * RECONNECT_MULTIPLIER, RECONNECT_MAX_MS)
-      reconnectTimer.current = setTimeout(connect, delay)
+      reconnectTimer.current = setTimeout(() => connectRef.current(), delay)
     }
 
     ws.onerror = () => {
@@ -133,6 +134,9 @@ export function useWebSocket() {
       }
     }
   }, [setConnected, setStreaming, addMessage, setEmotion, setProactiveMessage, appendStreamToken, finalizeStreamMessage, setCurrentCharacter, setEmotionStage, setAffinity, setLastSticker, queryClient])
+
+  // 保持 connectRef 指向最新的 connect 函数
+  useEffect(() => { connectRef.current = connect })
 
   // P2: React Strict Mode 兼容 - 使用 cleanup 标志防止竞态
   useEffect(() => {

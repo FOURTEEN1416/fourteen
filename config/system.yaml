@@ -3,21 +3,30 @@ env: dev
 debug: true
 
 llm:
-  provider: deepseek
-  primary_model: deepseek-chat
+  # ── 供应商模式 ──
+  #   "auto"            → MultiProviderGateway（自动fallback链）
+  #   "zhipu"           → 仅智谱AI
+  #   "xunfei"          → 仅讯飞星火
+  #   "baidu"           → 仅百度千帆
+  #   "deepseek"        → 仅DeepSeek
+  #   "opencode_zen"    → 仅OpenCode Zen免费模型
+  provider: auto
+
+  # ── Fallback 链（provider=auto 时生效）──
+  # 按优先级依次尝试，前一个不可用自动切到下一个
+  fallback_chain:
+    - zhipu         # 智谱AI GLM-4.7-Flash（永久免费）
+    - xunfei        # 讯飞星火 Spark Lite（永久免费）
+    - baidu         # 百度千帆 ERNIE-Speed（每月50万免费Token）
+    - opencode_zen  # OpenCode Zen 免费模型（无需API Key，兜底）
+
   temperature: 0.85
   max_tokens: 2048
   stream_enabled: true
   first_token_timeout: 5.0
-  retry_count: 0
-  opencode_zen_api_base: "https://opencode.ai/zen/v1"
-  opencode_zen_default_model: "big-pickle"
-  models_priority:
-    - name: deepseek-chat
-      priority: 1
-    - name: deepseek-reasoner
-      priority: 2
-  # 缓存配置
+  retry_count: 3
+
+  # ── 缓存配置 ──
   cache:
     enabled: true
     ttl: 604800  # 7天 (秒)
@@ -86,13 +95,18 @@ voice:
     ffmpeg_path: "ffmpeg"
     preferred_format: "silk"
     silk_sample_rate: 24000
-  engine: "edge-tts"                    # 默认引擎: edge-tts / gpt-sovits / bert-vits2
+  engine: "edge-tts"                    # 默认引擎: edge-tts / cosyvoice / gpt-sovits / bert-vits2
   emotion_enabled: true                 # 启用情感语音参数注入
   edge-tts:
     speaker_name: "zh-CN-XiaoxiaoNeural" # 中文女声
     rate: "+0%"
     volume: "+0%"
     timeout: 30.0
+  cosyvoice:
+    url: "http://localhost:8088"
+    voice: "中文男"
+    response_format: "wav"
+    timeout: 60.0
   gpt-sovits:
     url: "http://localhost:9880"
     text_language: "auto"

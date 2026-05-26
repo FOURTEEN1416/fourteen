@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useChatStore } from '../store/chatStore'
 import { useErrorStore } from '../store/errorStore'
@@ -17,8 +18,6 @@ export default function ChatPage() {
   const sessionId = useChatStore((s) => s.sessionId)
   const isConnected = useChatStore((s) => s.isConnected)
   const setSessionId = useChatStore((s) => s.setSessionId)
-  const [sessionError, setSessionError] = useState(false)
-  const [sessionLoading, setSessionLoading] = useState(true)
   const [_loading, setLoading] = useState(false)
   const addMessage = useChatStore((s) => s.addMessage)
   const setEmotion = useChatStore((s) => s.setEmotion)
@@ -33,27 +32,18 @@ export default function ChatPage() {
   const streamRetryCountRef = useRef(0)
   const lastUserMsgRef = useRef<{ text: string; msgType: string } | null>(null)
 
-  const createSession = useCallback(async () => {
-    setSessionError(false)
-    setSessionLoading(true)
-    try {
+  const { isPending: sessionLoading, isError: sessionError, refetch: createSession } = useQuery({
+    queryKey: ['session'],
+    queryFn: async () => {
       const { data } = await api.createSession()
       const sid = (data as { session_id: string }).session_id
       setSessionId(sid)
-    } catch {
-      setSessionError(true)
-    } finally {
-      setSessionLoading(false)
-    }
-  }, [setSessionId])
-
-  useEffect(() => {
-    if (!sessionId) {
-      createSession()
-    } else {
-      setSessionLoading(false)
-    }
-  }, [sessionId, createSession])
+      return sid
+    },
+    enabled: !sessionId,
+    staleTime: Infinity,
+    retry: 2,
+  })
 
   const runChatStream = useCallback(async (text: string, msgType: string) => {
     const controller = new AbortController()
@@ -94,8 +84,9 @@ export default function ChatPage() {
       }
       finalizeStreamMessage(false)
       streamRetryCountRef.current = 0
-    } catch (err: any) {
-      if (err?.name === 'AbortError' || err?.name === 'CanceledError') return
+    } catch (err: unknown) {
+      const error = err as { name?: string }
+      if (error?.name === 'AbortError' || error?.name === 'CanceledError') return
       const hasPartialContent = useChatStore.getState().streamingMessage?.content
       if (hasPartialContent) {
         finalizeStreamMessage(true)
@@ -162,7 +153,7 @@ export default function ChatPage() {
       <div className="flex-1 flex">
         <div className="flex-1 flex flex-col min-w-0">
           <div className="border-b border-gray-200 px-4 py-3 bg-gray-50">
-            <h1 className="text-sm font-semibold text-gray-800">{activeCharacter?.name ?? '十四'}</h1>
+            <h1 className="text-sm font-semibold text-gray-800">{(activeCharacter as { name?: string } | null)?.name ?? '十四'}</h1>
           </div>
 
           {!isConnected && !sessionLoading && (
@@ -177,7 +168,7 @@ export default function ChatPage() {
               <div className="text-center">
                 <p className="text-sm text-red-400 mb-3">会话连接失败，请检查后端服务是否正常运行</p>
                 <button
-                  onClick={createSession}
+                  onClick={() => createSession()}
                   className="px-4 py-2 bg-primary-500 text-white rounded-md text-sm hover:bg-primary-600 transition-colors"
                 >
                   重试连接

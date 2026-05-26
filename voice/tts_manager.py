@@ -14,9 +14,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .base import TTSProviderBase
+from .tts_provider_base import TTSProviderBase
 
-logger = logging.getLogger("voice.manager")
+logger = logging.getLogger("voice.tts_manager")
 
 
 class TTSManager:
@@ -76,6 +76,16 @@ class TTSManager:
                 url=sovits_cfg.get("url", "http://localhost:9880"),
                 timeout=sovits_cfg.get("timeout", 60.0),
                 text_language=sovits_cfg.get("text_language", "auto"),
+            )
+
+        cosy_cfg = config.get("cosyvoice", {})
+        if cosy_cfg:
+            from .cosyvoice_provider import CosyVoiceProvider
+            self._providers["cosyvoice"] = CosyVoiceProvider(
+                url=cosy_cfg.get("url", "http://localhost:8088"),
+                voice=cosy_cfg.get("voice", "中文男"),
+                timeout=cosy_cfg.get("timeout", 60.0),
+                response_format=cosy_cfg.get("response_format", "wav"),
             )
 
         bert_cfg = config.get("bert-vits2", {})

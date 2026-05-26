@@ -48,6 +48,7 @@ frontend/node_modules/
 # ── 数据库 ──
 *.db
 *.sqlite3
+dump.rdb
 *.sqlite3-wal
 *.sqlite3-shm
 

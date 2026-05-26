@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import Button from '../components/common/Button'
 import Card from '../components/common/Card'
@@ -8,10 +9,6 @@ import type { CloneDataset, CloneDatasetDetail, CloneContact } from '../types/ap
 export default function CloneDataPage() {
   // ── Tab 切换 ──
   const [tab, setTab] = useState<'datasets' | 'contacts'>('datasets')
-
-  // ── 数据集列表 ──
-  const [datasets, setDatasets] = useState<CloneDataset[]>([])
-  const [loadingDatasets, setLoadingDatasets] = useState(false)
 
   // ── 数据集详情 ──
   const [detail, setDetail] = useState<CloneDatasetDetail | null>(null)
@@ -31,42 +28,33 @@ export default function CloneDataPage() {
   const [contactKeyword, setContactKeyword] = useState('')
   const [loadingContacts, setLoadingContacts] = useState(false)
 
-  // ── 统计 ──
-  const [stats, setStats] = useState<{ total_persons: number; total_messages: number; cloned_persons: number } | null>(null)
-
   // 加载数据集列表
-  const fetchDatasets = useCallback(async () => {
-    setLoadingDatasets(true)
-    try {
+  const { data: datasets = [], isLoading: loadingDatasets, refetch: fetchDatasets } = useQuery({
+    queryKey: ['clone', 'datasets'],
+    queryFn: async () => {
       const { data } = await api.cloneDatasets()
-      const d = data as { datasets: CloneDataset[] }
-      setDatasets(d.datasets)
-    } catch { /* toast */ }
-    finally { setLoadingDatasets(false) }
-  }, [])
+      return (data as { datasets: CloneDataset[] }).datasets
+    },
+  })
 
   // 加载统计
-  const fetchStats = useCallback(async () => {
-    try {
+  const { data: stats, refetch: fetchStats } = useQuery({
+    queryKey: ['clone', 'stats'],
+    queryFn: async () => {
       const { data } = await api.cloneStats()
-      setStats(data as typeof stats)
-    } catch { /* silent */ }
-  }, [])
+      return data as { total_persons: number; total_messages: number; cloned_persons: number }
+    },
+  })
 
   // 加载联系人
-  const fetchContacts = useCallback(async (kw = '') => {
+  const fetchContacts = async (kw = '') => {
     setLoadingContacts(true)
     try {
       const { data } = await api.cloneContacts(kw)
       setContacts((data as { contacts: CloneContact[] }).contacts)
     } catch { /* toast */ }
     finally { setLoadingContacts(false) }
-  }, [])
-
-  useEffect(() => {
-    fetchDatasets()
-    fetchStats()
-  }, [fetchDatasets, fetchStats])
+  }
 
   // 查看详情
   const openDetail = async (personId: string, page = 1) => {

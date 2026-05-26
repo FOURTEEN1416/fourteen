@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
-from tool_system.base import BaseTool, ToolResult
+from tool_system.base_tool import BaseTool, ToolResult
 
 logger = logging.getLogger("character_crawler_tool")
 

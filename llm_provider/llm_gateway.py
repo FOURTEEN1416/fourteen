@@ -13,7 +13,7 @@ import httpx
 from observability.logging_setup import get_logger
 from observability.metrics import record_chat_duration, record_error, record_token_usage
 
-logger = get_logger("llm_gateway_v2")
+logger = get_logger("llm_gateway")
 
 DEFAULT_API_BASE = "https://api.deepseek.com/v1"
 

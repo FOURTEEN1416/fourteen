@@ -16,8 +16,9 @@ import struct
 import sys
 
 from Crypto.Cipher import AES
-from config import load_config
 from key_utils import get_key_info, strip_key_metadata
+
+from config import load_config
 
 print = functools.partial(print, flush=True)
 

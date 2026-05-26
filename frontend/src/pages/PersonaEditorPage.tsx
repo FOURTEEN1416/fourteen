@@ -1,5 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
-import { shisiClient } from '../api/shisiClient'
+import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useUnifiedCharacters } from '../hooks/useQueries'
+import { personaCardApi } from '../api/personaCardApi'
+import type { PersonaCardData } from '../api/personaCardApi'
 import { useErrorStore } from '../store/errorStore'
 import Card from '../components/common/Card'
 import Button from '../components/common/Button'
@@ -7,22 +10,7 @@ import Badge from '../components/common/Badge'
 import Skeleton from '../components/common/Skeleton'
 import EmptyState from '../components/common/EmptyState'
 import { PenTool, Save, RefreshCw, Eye, ChevronDown } from 'lucide-react'
-import type { CharacterState } from '../types/character'
-
-interface PersonaData {
-  name: string
-  description: string
-  personality: string
-  scenario: string
-  first_mes: string
-  mes_example: string
-  creator_notes: string
-  tags: string[]
-}
-
-interface PreviewResponse {
-  preview: string
-}
+import type { UnifiedCharacter } from '../types/api'
 
 function getErrorMessage(e: unknown): string {
   if (e instanceof Error) return e.message
@@ -30,48 +18,49 @@ function getErrorMessage(e: unknown): string {
 }
 
 export default function PersonaEditorPage() {
-  const [characters, setCharacters] = useState<CharacterState[]>([])
-  const [selected, setSelected] = useState('')
-  const [persona, setPersona] = useState<PersonaData | null>(null)
+  const [selectedOverride, setSelectedOverride] = useState('')
+  const [fieldOverrides, setFieldOverrides] = useState<Partial<PersonaCardData>>({})
+  const [isDirty, setIsDirty] = useState(false)
   const [preview, setPreview] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [dirty, setDirty] = useState(false)
   const toast = useErrorStore.getState().addToast
 
-  const loadPersona = useCallback(async (cid: string) => {
-    try {
-      const data = await shisiClient.persona.get(cid) as PersonaData
-      setPersona(data)
-      setDirty(false)
-    } catch (e: unknown) {
-      toast({ type: 'error', message: getErrorMessage(e) || '加载人设失败' })
-    }
-  }, [toast])
+  const { data: charData, isLoading: loading, error: charsError } = useUnifiedCharacters()
+  const characters = (charData?.characters ?? []) as UnifiedCharacter[]
 
-  const loadCharacters = useCallback(async () => {
-    try {
-      setLoading(true)
-      const data = await shisiClient.characters.list() as CharacterState[]
-      setCharacters(data)
-      if (data.length > 0) {
-        const active = data.find(c => c.is_active) || data[0]
-        setSelected(active.character_id)
-        await loadPersona(active.character_id)
-      }
-    } catch (e: unknown) {
-      toast({ type: 'error', message: getErrorMessage(e) || '加载角色列表失败' })
-    } finally { setLoading(false) }
-  }, [toast, loadPersona])
+  useEffect(() => {
+    if (charsError) toast({ type: 'error', message: getErrorMessage(charsError) || '加载角色列表失败' })
+  }, [charsError, toast])
 
-  useEffect(() => { loadCharacters() }, [loadCharacters])
+  // 派生当前选中角色：优先用户选择，否则取第一个活跃角色
+  const defaultCharId = characters.find((c: UnifiedCharacter) => c.is_active)?.id || characters[0]?.id || ''
+  const selected = selectedOverride || defaultCharId
+
+  const { data: personaData, error: personaError, refetch: refetchPersona, isLoading: personaLoading } = useQuery({
+    queryKey: ['persona-card', selected],
+    queryFn: () => personaCardApi.get(selected),
+    enabled: !!selected,
+  })
+
+  useEffect(() => {
+    if (personaError) toast({ type: 'error', message: getErrorMessage(personaError) || '加载人设失败' })
+  }, [personaError, toast])
+
+  // 合并后端数据与用户编辑覆盖
+  const persona: PersonaCardData | null = personaData ? { ...personaData, ...fieldOverrides } : null
+
+  const updateField = (key: keyof PersonaCardData, value: string | string[]) => {
+    if (!personaData) return
+    setFieldOverrides(prev => ({ ...prev, [key]: value }))
+    setIsDirty(true)
+  }
 
   async function handleSave() {
     if (!selected || !persona) return
     try {
       setSaving(true)
-      await shisiClient.persona.update(selected, persona as unknown as Record<string, unknown>)
-      setDirty(false)
+      await personaCardApi.update(selected, persona)
+      setIsDirty(false)
       toast({ type: 'success', message: '人设保存成功' })
     } catch (e: unknown) {
       toast({ type: 'error', message: getErrorMessage(e) || '保存失败' })
@@ -81,20 +70,14 @@ export default function PersonaEditorPage() {
   async function handlePreview() {
     if (!selected) return
     try {
-      const data = await shisiClient.persona.preview(selected) as PreviewResponse
+      const data = await personaCardApi.preview(selected)
       setPreview(data.preview)
     } catch (e: unknown) {
       toast({ type: 'error', message: getErrorMessage(e) || '预览失败' })
     }
   }
 
-  function updateField(key: keyof PersonaData, value: string | string[]) {
-    if (!persona) return
-    setPersona({ ...persona, [key]: value })
-    setDirty(true)
-  }
-
-  const textFields: { key: keyof PersonaData; label: string; rows?: number }[] = [
+  const textFields: { key: keyof PersonaCardData; label: string; rows?: number }[] = [
     { key: 'name', label: '名称' },
     { key: 'description', label: '描述', rows: 2 },
     { key: 'personality', label: '性格', rows: 3 },
@@ -116,28 +99,28 @@ export default function PersonaEditorPage() {
             <div className="relative">
               <select
                 value={selected}
-                onChange={e => { setSelected(e.target.value); loadPersona(e.target.value) }}
+                onChange={e => { setSelectedOverride(e.target.value); setFieldOverrides({}); setIsDirty(false) }}
                 className="appearance-none bg-white/80 border border-gray-200 rounded-lg pl-3 pr-8 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-400/30"
               >
-                {characters.map(c => <option key={c.character_id} value={c.character_id}>{c.name}</option>)}
+                {characters.map((c: UnifiedCharacter) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-gray-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           )}
-          {dirty && <Badge variant="warning">未保存</Badge>}
-          <Button variant="ghost" size="sm" onClick={() => loadPersona(selected)}>
+          {isDirty && <Badge variant="warning">未保存</Badge>}
+          <Button variant="ghost" size="sm" onClick={() => refetchPersona()}>
             <RefreshCw className="w-3.5 h-3.5" />
           </Button>
           <Button variant="secondary" size="sm" onClick={handlePreview}>
             <Eye className="w-3.5 h-3.5 mr-1" /> 预览
           </Button>
-          <Button variant="primary" size="sm" onClick={handleSave} loading={saving} disabled={!dirty}>
+          <Button variant="primary" size="sm" onClick={handleSave} loading={saving} disabled={!isDirty}>
             <Save className="w-3.5 h-3.5 mr-1" /> 保存
           </Button>
         </div>
       </div>
 
-      {loading ? (
+      {loading || personaLoading ? (
         <Card><Skeleton lines={8} /></Card>
       ) : !persona ? (
         <EmptyState icon="📝" title="请选择角色" description="从上方下拉选择一个角色以编辑人设" />
