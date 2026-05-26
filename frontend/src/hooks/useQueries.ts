@@ -295,3 +295,145 @@ export function useMentalHealth() {
     refetchInterval: 30 * 1000,
   })
 }
+
+// ═══ 统一角色管理 hooks ═══
+
+export function useUnifiedCharacters(userId?: string, search?: string) {
+  return useQuery({
+    queryKey: [...queryKeys.characters.all, userId, search],
+    queryFn: async () => {
+      const mod = await import('../api/characterApi')
+      return mod.characterApi.list({ user_id: userId, search })
+    },
+    staleTime: 30 * 1000,
+  })
+}
+
+export function useUnifiedCharacter(id: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.characters.detail(id!),
+    queryFn: async () => {
+      const mod = await import('../api/characterApi')
+      return mod.characterApi.get(id!)
+    },
+    enabled: !!id,
+  })
+}
+
+export function useCreateCharacter() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (data: import('../types/api').UnifiedCharacterCreate) => {
+      const mod = await import('../api/characterApi')
+      return mod.characterApi.create(data)
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.characters.all }),
+  })
+}
+
+export function useUpdateCharacter() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: import('../types/api').UnifiedCharacterUpdate }) => {
+      const mod = await import('../api/characterApi')
+      return mod.characterApi.update(id, data)
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.characters.all }),
+  })
+}
+
+export function useDeleteCharacter() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const mod = await import('../api/characterApi')
+      return mod.characterApi.delete(id)
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.characters.all }),
+  })
+}
+
+export function useActivateCharacter() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const mod = await import('../api/characterApi')
+      return mod.characterApi.activate(id)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.characters.all })
+    },
+  })
+}
+
+// ═══ 角色音色绑定 hooks ═══
+
+export function useCharacterVoice(characterId: string | undefined) {
+  return useQuery({
+    queryKey: ['character', characterId, 'voice'],
+    queryFn: async () => {
+      const mod = await import('../api/voiceApi')
+      return mod.voiceApi.getConfig(characterId!)
+    },
+    enabled: !!characterId,
+  })
+}
+
+export function useBindCharacterVoice() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ characterId, data }: { characterId: string; data: import('../types/api').VoiceBindRequest }) => {
+      const mod = await import('../api/voiceApi')
+      return mod.voiceApi.bind(characterId, data)
+    },
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['character', variables.characterId, 'voice'] })
+    },
+  })
+}
+
+export function useUpdateCharacterVoice() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ characterId, data }: { characterId: string; data: import('../types/api').VoiceUpdateRequest }) => {
+      const mod = await import('../api/voiceApi')
+      return mod.voiceApi.update(characterId, data)
+    },
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['character', variables.characterId, 'voice'] })
+    },
+  })
+}
+
+export function useUnbindCharacterVoice() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (characterId: string) => {
+      const mod = await import('../api/voiceApi')
+      return mod.voiceApi.unbind(characterId)
+    },
+    onSuccess: (_data, characterId) => {
+      qc.invalidateQueries({ queryKey: ['character', characterId, 'voice'] })
+    },
+  })
+}
+
+export function useTestCharacterVoice() {
+  return useMutation({
+    mutationFn: async ({ characterId, text }: { characterId: string; text?: string }) => {
+      const mod = await import('../api/voiceApi')
+      return mod.voiceApi.test(characterId, text)
+    },
+  })
+}
+
+export function useVoiceSpeakers(engine: string = 'edge-tts') {
+  return useQuery({
+    queryKey: ['voice', 'speakers', engine],
+    queryFn: async () => {
+      const mod = await import('../api/voiceApi')
+      return mod.voiceApi.speakers(engine)
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+}

@@ -39,6 +39,35 @@ import contextlib  # noqa: E402
 
 from common.health_check import health_check_all  # noqa: E402
 
+# ── 集中管理重复出现的函数级导入（合并重复 import） ──
+from api.rest_api import create_api_app  # noqa: E402
+from api.session_manager import SessionManager  # noqa: E402
+from api.websocket_server import WebSocketServer  # noqa: E402
+from girlfriend_manager import GirlfriendManager  # noqa: E402
+from llm_provider import get_llm  # noqa: E402
+from observability.config_manager import ConfigManager  # noqa: E402
+from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
+from observability.health import health_checker  # noqa: E402
+from observability.logging_setup import setup_logging  # noqa: E402
+from rag_engine.rag_engine import RAGEngineV2  # noqa: E402
+from safety.content_safety import ContentSafetyFilter  # noqa: E402
+from safety.encryption import EncryptionManager  # noqa: E402
+from safety.pii_anonymizer import PIIAnonymizer  # noqa: E402
+from safety.prompt_injection import PromptInjectionDetector  # noqa: E402
+from tool_system.base_tool import ToolDispatcher, ToolRegistry  # noqa: E402
+from tool_system.builtin.calendar_tool import CalculatorTool, CalendarTool  # noqa: E402
+from tool_system.builtin.character_crawler_tool import CharacterCrawlerTool  # noqa: E402
+from tool_system.builtin.reminder_tool import CalendarQueryTool, ReminderTool  # noqa: E402
+from tool_system.builtin.search_tool import SearchTool  # noqa: E402
+from tool_system.builtin.time_awareness_tool import TimeAwarenessTool  # noqa: E402
+from tool_system.builtin.weather_tool import WeatherTool  # noqa: E402
+from memory import StructuredMemory, VectorMemory  # noqa: E402
+from memory.memory_pipeline import MemoryPipeline  # noqa: E402
+from my_character.emotion_engine import EmotionEngine  # noqa: E402
+from my_character.persona_engine import PersonaEngine  # noqa: E402
+from my_character.tone_mimic import ToneMimic  # noqa: E402
+from proactive.ase_engine import ASEEngine  # noqa: E402
+
 # ── 加载 .env（手动解析，无需 python-dotenv 依赖） ──
 _env_loaded = False
 def _load_env() -> None:
@@ -62,7 +91,7 @@ def _load_env() -> None:
 _load_env()
 
 
-def setup_logging(log_level: str = "INFO") -> logging.Logger:
+def _setup_basic_logging(log_level: str = "INFO") -> logging.Logger:
     (project_root / "data").mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=getattr(logging, log_level.upper(), logging.INFO),
@@ -79,7 +108,7 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
     return logging.getLogger("main")
 
 
-logger = setup_logging()
+logger = _setup_basic_logging()
 
 
 def parse_args() -> argparse.Namespace:
@@ -229,18 +258,12 @@ class OptimizedOrchestrator:
         start_time = time.perf_counter()
 
         try:
-            from observability.config_manager import ConfigManager
             self.components["config"] = ConfigManager(config_dir=config_dir)
             cfg = self.components["config"].config
 
-            from observability.health import health_checker
             from observability.tracing import tracer
             self.components["tracer"] = tracer
             self.components["health"] = health_checker
-
-            from safety.content_safety import ContentSafetyFilter
-            from safety.pii_anonymizer import PIIAnonymizer
-            from safety.prompt_injection import PromptInjectionDetector
 
             self.components["safety"] = ContentSafetyFilter(
                 enabled=cfg.safety.input_filter_enabled
@@ -252,7 +275,6 @@ class OptimizedOrchestrator:
                 enabled=cfg.safety.prompt_injection_detection
             )
 
-            from llm_provider import get_llm
             self.components["llm"] = get_llm(
                 models_config=cfg.llm.models_priority
             )
@@ -265,23 +287,15 @@ class OptimizedOrchestrator:
             classifier_timeout_ms = emotion_fusion.get("classifier_timeout_ms",
                                                        cfg.emotion.llm_classifier_timeout_ms)
 
-            from my_character.character_config import ConfigLoader
-            from my_character.emotion_engine import (
-                EmotionEngine as EmotionEngineOptimized,
-            )
-            from my_character.persona_engine import (
-                PersonaEngine as PersonaEngineOptimized,
-            )
-            from my_character.tone_mimic import ToneMimic
-
-            self.components["emotion"] = EmotionEngineOptimized(
+            self.components["emotion"] = EmotionEngine(
                 llm_gateway=self.components["llm"],
                 use_llm=cfg.emotion.use_llm_classifier,
                 blend_ratio=blend_ratio,
                 classifier_timeout_ms=classifier_timeout_ms,
             )
+            from my_character.character_config import ConfigLoader
             config_loader = ConfigLoader(config_dir=config_dir)
-            self.components["persona"] = PersonaEngineOptimized(
+            self.components["persona"] = PersonaEngine(
                 config_loader=config_loader,
                 llm_gateway=self.components["llm"],
                 emotion_engine=self.components["emotion"],
@@ -290,28 +304,17 @@ class OptimizedOrchestrator:
                 chroma_path=str(project_root / "data" / "chroma_db")
             )
 
-            try:
-                from memory.memory_pipeline_optimized import MemoryPipelineOptimized
-                self.components["memory"] = MemoryPipelineOptimized(
-                    chroma_path=str(project_root / "data" / "chroma_db"),
-                    db_path=str(project_root / "data" / "sqlite.db"),
-                    llm_gateway=self.components["llm"],
-                    working_limit=cfg.memory.working_memory_limit,
-                )
-            except ImportError:
-                from memory import StructuredMemory, VectorMemory
-                from memory.memory_pipeline import MemoryPipeline
-                vector_memory = VectorMemory(chroma_path=str(project_root / "data" / "chroma_db"))
-                structured_memory = StructuredMemory(db_path=str(project_root / "data" / "sqlite.db"))
-                self.components["memory"] = MemoryPipeline(
-                    structured_memory=structured_memory,
-                    vector_memory=vector_memory,
-                    llm_gateway=self.components["llm"],
-                    working_limit=cfg.memory.working_memory_limit,
-                    retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
-                )
-                self.components["vector_memory"] = vector_memory
-                self.components["structured_memory"] = structured_memory
+            vector_memory = VectorMemory(chroma_path=str(project_root / "data" / "chroma_db"))
+            structured_memory = StructuredMemory(db_path=str(project_root / "data" / "sqlite.db"))
+            self.components["memory"] = MemoryPipeline(
+                structured_memory=structured_memory,
+                vector_memory=vector_memory,
+                llm_gateway=self.components["llm"],
+                working_limit=cfg.memory.working_memory_limit,
+                retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
+            )
+            self.components["vector_memory"] = vector_memory
+            self.components["structured_memory"] = structured_memory
 
             _ = fusion_cfg.get("ase", {})
             try:
@@ -330,17 +333,6 @@ class OptimizedOrchestrator:
                     cooldown_after_reply=cfg.proactive.cooldown_after_reply_minutes,
                     urgency_threshold=cfg.proactive.urgency_threshold,
                 )
-
-            from tool_system.base import ToolDispatcher, ToolRegistry
-            from tool_system.builtin.calendar_tool import CalculatorTool, CalendarTool
-            from tool_system.builtin.character_crawler_tool import CharacterCrawlerTool
-            from tool_system.builtin.reminder_tool import (
-                CalendarQueryTool,
-                ReminderTool,
-            )
-            from tool_system.builtin.search_tool import SearchTool
-            from tool_system.builtin.time_awareness_tool import TimeAwarenessTool
-            from tool_system.builtin.weather_tool import WeatherTool
 
             registry = ToolRegistry()
             for tool_cls in [WeatherTool, SearchTool, CalendarTool, CalculatorTool]:
@@ -362,7 +354,6 @@ class OptimizedOrchestrator:
                 rate_limit_per_minute=cfg.tools.rate_limit_per_tool_per_minute,
             )
 
-            from rag_engine.rag_engine_v2 import RAGEngineV2
             rag_vm = self.components.get("vector_memory") or getattr(
                 self.components["memory"], "vector_memory", None)
             rag_sm = self.components.get("structured_memory") or getattr(
@@ -683,6 +674,24 @@ class OptimizedOrchestrator:
                     logger.warning("LLM 调用超时 (30s), session=%s", session_id)
                     return {"reply": "抱歉，处理超时，请稍后重试", "error": "timeout"}
 
+                # === 新增：一致性检查（复用 PersonaEngine.check_consistency） ===
+                try:
+                    persona = self.components.get("persona")
+                    if persona and hasattr(persona, 'check_consistency'):
+                        result = persona.check_consistency(reply, emotion_state, 0)
+                        if not result.overall_passed and result.overall_score < 0.4 and result.correction_prompt:
+                            corrected = await self.components["llm"].chat_sync(
+                                query=f"{result.correction_prompt}\n\n"
+                                      f"原始回复：{reply}\n\n"
+                                      f"请重新生成：",
+                                max_tokens=512,
+                            )
+                            if corrected and len(corrected.strip()) > 0:
+                                reply = corrected.strip()
+                except Exception as e:
+                    logger.warning("一致性检查异常（已放行）: %s", e)
+                # === 检查结束 ===
+
                 output_result = self.components["safety"].check_output(reply)
                 if not output_result.is_safe:
                     reply = self.components["safety"].safe_alternative(output_result.category)
@@ -881,11 +890,6 @@ def run_wechat_mode(girlfriend_manager, orchestrator_mode: str,
 
 
 def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None, girlfriend_manager=None):
-    from api.rest_api import create_api_app
-    from api.session_manager import SessionManager
-    from api.websocket_server import WebSocketServer
-    from observability.health import health_checker
-
     session_mgr = SessionManager()
 
     app_kwargs = dict(
@@ -903,8 +907,6 @@ def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None, girlfriend_man
         orchestrator=orchestrator_or_obj,
         port=cfg.api.websocket_port,
     )
-
-    import threading
 
     def _run_api():
         import uvicorn
@@ -958,6 +960,15 @@ def _create_proactive_sender(ws_server_holder: dict, wechat_connector_holder: di
 def main() -> None:
     args = parse_args()
 
+    # P0: 检查 API_KEY 是否为出厂默认值
+    _default_api_key = "CHANGE_ME_TO_STRONG_RANDOM_KEY_32_CHARS_MIN"
+    _api_key_env = os.environ.get("API_KEY", _default_api_key)
+    if _api_key_env == _default_api_key:
+        logger.warning("⚠️ API_KEY 使用出厂默认值！生产环境必须修改！")
+        if os.environ.get("APP_ENV", "").lower() in ("prod", "production"):
+            logger.critical("生产环境禁止使用默认 API_KEY！请设置环境变量 API_KEY 后再启动。")
+            sys.exit(1)
+
     if args.log_level:
         logging.getLogger().setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
 
@@ -994,10 +1005,7 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
 
     cfg = orchestrator.components["config"].config
 
-    from observability.logging_setup import setup_logging
     setup_logging(cfg.observability.log_level, cfg.observability.log_format)
-
-    from observability.graceful_shutdown import graceful_shutdown
 
     if cfg.observability.metrics_enabled:
         from observability.metrics import setup_metrics
@@ -1010,7 +1018,6 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
         logger.warning("部分组件健康检查未通过, 继续启动...")
 
     # ── 创建女友管理器（多用户核心） ──
-    from girlfriend_manager import GirlfriendManager
     girlfriend_mgr = GirlfriendManager(orchestrator)
     logger.info("女友管理器已创建")
 
@@ -1040,9 +1047,14 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
 
         scheduler = ProactiveScheduler(
             ase_engine=orchestrator.components["ase"],
-            send_message_func=send_proactive,
+            send_message_func=send_proactive,  # 兜底
             daily_maintenance_func=daily_maintenance,
         )
+
+        # 注册通道
+        if ws_server_fast:
+            scheduler.register_channel("websocket", lambda: ws_server_fast.broadcast_proactive)
+        scheduler.register_channel("console", lambda: lambda msg: logger.info("[主动消息] %s", msg))
 
         if scheduler.start():
             logger.info("主动消息调度器已启动")
@@ -1084,17 +1096,12 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     ase_fusion = fusion_cfg.get("ase", {})
 
     logger.info("[1/12] 加载V2配置...")
-    from observability.config_manager import ConfigManager
     config_mgr = ConfigManager(config_dir=args.config)
     cfg = config_mgr.config
     logger.info("      环境: %s, LLM模型: %s", cfg.env, cfg.llm.primary_model)
 
     logger.info("[2/12] 初始化可观测性...")
-    from observability.logging_setup import setup_logging
     setup_logging(cfg.observability.log_level, cfg.observability.log_format)
-
-    from observability.graceful_shutdown import graceful_shutdown
-    from observability.health import health_checker
 
     if cfg.observability.metrics_enabled:
         from observability.metrics import setup_metrics
@@ -1103,11 +1110,6 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     graceful_shutdown.setup_signal_handlers()
 
     logger.info("[3/12] 初始化安全层...")
-    from safety.content_safety import ContentSafetyFilter
-    from safety.encryption import EncryptionManager
-    from safety.pii_anonymizer import PIIAnonymizer
-    from safety.prompt_injection import PromptInjectionDetector
-
     safety_filter = ContentSafetyFilter(enabled=cfg.safety.input_filter_enabled)
     pii_anonymizer = PIIAnonymizer(enabled=cfg.safety.pii_anonymizer_enabled)
     encryption_mgr = EncryptionManager(
@@ -1117,7 +1119,6 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     injection_detector = PromptInjectionDetector(enabled=cfg.safety.prompt_injection_detection)
 
     logger.info("[4/12] 初始化LLM网关V2...")
-    from llm_provider import get_llm
     from llm_provider.prompt_template_manager import PromptTemplateMgr
 
     llm = get_llm(models_config=cfg.llm.models_priority)
@@ -1142,8 +1143,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     classifier_timeout = emotion_fusion.get("classifier_timeout_ms",
                                              cfg.emotion.llm_classifier_timeout_ms)
 
-    from my_character.emotion_engine import EmotionEngine as EmotionEngineV2
-    emotion_engine = EmotionEngineV2(
+    emotion_engine = EmotionEngine(
         llm_gateway=llm,
         use_llm=cfg.emotion.use_llm_classifier,
         blend_ratio=blend_ratio,
@@ -1153,8 +1153,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     _ = persona_fusion.get("prompt_mode", "layered")
     _ = persona_fusion.get("anchor_verification_enabled", True)
 
-    from my_character.persona_engine import PersonaEngine as PersonaEngineV2
-    persona_engine = PersonaEngineV2(config_loader=config_loader, llm_gateway=llm)
+    persona_engine = PersonaEngine(config_loader=config_loader, llm_gateway=llm)
 
     tone_mimic = None
     try:
@@ -1165,9 +1164,6 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
 
     logger.info("[6/12] 初始化记忆系统 (融合)...")
     _ = memory_fusion.get("forgetting_model", "exponential")
-
-    from memory import StructuredMemory, VectorMemory
-    from memory.memory_pipeline import MemoryPipeline
 
     vector_memory = VectorMemory(chroma_path=str(project_root / "data" / "chroma_db"))
     structured_memory = StructuredMemory(db_path=str(project_root / "data" / "sqlite.db"))
@@ -1181,14 +1177,6 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     )
 
     logger.info("[7/12] 初始化工具系统...")
-    from tool_system.base import ToolDispatcher, ToolRegistry
-    from tool_system.builtin.calendar_tool import CalculatorTool, CalendarTool
-    from tool_system.builtin.character_crawler_tool import CharacterCrawlerTool
-    from tool_system.builtin.reminder_tool import CalendarQueryTool, ReminderTool
-    from tool_system.builtin.search_tool import SearchTool
-    from tool_system.builtin.time_awareness_tool import TimeAwarenessTool
-    from tool_system.builtin.weather_tool import WeatherTool
-
     tool_registry = ToolRegistry()
     tool_dispatcher = ToolDispatcher(
         tool_registry,
@@ -1205,8 +1193,6 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     logger.info("      已注册 %d 个工具", len(tool_registry.tool_names))
 
     logger.info("[8/12] 初始化RAG引擎V2...")
-    from rag_engine.rag_engine_v2 import RAGEngineV2
-
     rag_engine = RAGEngineV2(
         vector_memory=vector_memory,
         structured_memory=structured_memory,
@@ -1219,9 +1205,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     _ = ase_fusion.get("generation_mode", "llm")
     _ = ase_fusion.get("reflection_mode", "rule")
 
-    from proactive.ase_engine import ASEEngine as ASEEngineV2
-
-    ase_engine = ASEEngineV2(
+    ase_engine = ASEEngine(
         llm_gateway=llm,
         max_daily_messages=cfg.proactive.max_daily_messages,
         min_interval_minutes=cfg.proactive.min_interval_minutes,
@@ -1250,9 +1234,13 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
 
         scheduler = ProactiveScheduler(
             ase_engine=ase_engine,
-            send_message_func=_send_proactive,
+            send_message_func=_send_proactive,  # 兜底
             daily_maintenance_func=_daily_maintenance,
         )
+
+        # 注册通道（ws_server在后续API启动后注入）
+        scheduler.register_channel("console", lambda: lambda msg: logger.info("[主动消息] %s", msg))
+
         if scheduler.start():
             logger.info("      调度器已启动")
             atexit.register(scheduler.stop)
@@ -1282,16 +1270,11 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     )
 
     # ── 创建女友管理器（多用户核心） ──
-    from girlfriend_manager import GirlfriendManager
     girlfriend_mgr = GirlfriendManager(orchestrator)
     logger.info("女友管理器已创建")
 
     if not args.no_api:
         logger.info("[11/12] 启动API服务...")
-        from api.rest_api import create_api_app
-        from api.session_manager import SessionManager
-        from api.websocket_server import WebSocketServer
-
         session_mgr = SessionManager()
 
         app = create_api_app(
@@ -1316,8 +1299,6 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
             scheduler=scheduler,
         )
 
-        import threading
-
         def _run_api():
             import uvicorn
             uvicorn.run(app, host=cfg.api.host, port=cfg.api.port, log_level="info")
@@ -1335,7 +1316,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
 
         if scheduler:
             _ws_holder_full["ws"] = ws_server
-            scheduler.set_ws_server(ws_server)  # type: ignore[attr-defined]
+            scheduler.register_channel("websocket", lambda: ws_server.broadcast_proactive)
             logger.info("      WebSocket已注入调度器")
     else:
         logger.info("[11/12] API服务已禁用 (--no-api)")

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 
-from .base import TTSProviderBase
+from .tts_provider_base import TTSProviderBase
 
 logger = logging.getLogger("voice.gpt_sovits")
 

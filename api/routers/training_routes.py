@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Security
+from fastapi.security import APIKeyHeader
 
 from api.state import TrainingStateManager
 
@@ -14,15 +15,22 @@ logger = logging.getLogger("rest_api.training")
 router = APIRouter(prefix="/api", tags=["training"])
 
 _orch = None
-_verify_api_key = None
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+_verify_api_key_func = None
+
+
+async def _verify_api_key(api_key: str | None = Security(_api_key_header)):
+    if _verify_api_key_func is not None:
+        return await _verify_api_key_func(api_key)
+    return True
 
 _training_mgr = TrainingStateManager()
 
 
 def set_dependencies(orch, verify_api_key):
-    global _orch, _verify_api_key
+    global _orch, _verify_api_key_func
     _orch = orch
-    _verify_api_key = verify_api_key
+    _verify_api_key_func = verify_api_key
 
 
 @router.get("/training/status")
@@ -112,7 +120,12 @@ async def start_cleaning(accept_score: int = 2, _auth: bool = Security(_verify_a
 
 
 @router.post("/training/train")
-async def start_training(epochs: int = 3, lora_rank: int = 16, _auth: bool = Security(_verify_api_key)):
+async def start_training(
+    epochs: int = 3,
+    lora_rank: int = 16,
+    character_id: str = Query(default="", description="训练完成后自动绑定到的角色ID"),
+    _auth: bool = Security(_verify_api_key),
+):
     def _do_train():
         try:
             from weclone_adapter import WeCloneAdapter
@@ -137,13 +150,47 @@ async def start_training(epochs: int = 3, lora_rank: int = 16, _auth: bool = Sec
                 epochs=epochs,
                 lora_rank=lora_rank,
             )
-            _training_mgr.update(
-                status="done" if result.get("status") == "success" else "error",
-                progress=1.0,
-                step_name="模型训练",
-            )
+            status = "done" if result.get("status") == "success" else "error"
+            update_kwargs = {
+                "status": status,
+                "progress": 1.0,
+                "step_name": "模型训练",
+            }
             if "lora_path" in result:
-                _training_mgr.update(lora_path=result["lora_path"])
+                update_kwargs["lora_path"] = result["lora_path"]
+
+            _training_mgr.update(**update_kwargs)
+
+            # 自动绑定到角色
+            if status == "done" and character_id:
+                lora_path = result.get("lora_path", "")
+                if not lora_path:
+                    output_dir = Path(__file__).parent.parent.parent / "data" / "clone" / "lora_output"
+                    if output_dir.exists():
+                        pth_files = sorted(
+                            output_dir.glob("**/*.pth"),
+                            key=lambda p: p.stat().st_mtime,
+                            reverse=True,
+                        )
+                        if pth_files:
+                            lora_path = str(pth_files[0])
+
+                if lora_path:
+                    try:
+                        from shisi.voice_ext.character_voice import CharacterVoiceManager
+
+                        voice_mgr = CharacterVoiceManager()
+                        voice_mgr.bind_voice(
+                            character_id=character_id,
+                            engine="gpt-sovits",
+                            speaker_name=lora_path,
+                        )
+                        logger.info(
+                            "训练完成自动绑定角色 %s → %s", character_id, lora_path
+                        )
+                    except Exception as e:
+                        logger.warning("自动绑定角色失败: %s", e)
+
         except InterruptedError:
             _training_mgr.update(status="stopped")
         except Exception:
@@ -153,7 +200,7 @@ async def start_training(epochs: int = 3, lora_rank: int = 16, _auth: bool = Sec
     _training_mgr.update(status="training", start_time=time.time(), step_name="模型训练")
     _training_mgr.submit(_do_train)
 
-    return {"status": "started", "task": "train", "epochs": epochs}
+    return {"status": "started", "task": "train", "epochs": epochs, "character_id": character_id}
 
 
 @router.post("/training/stop")
@@ -176,13 +223,47 @@ async def test_clone(message: str, _auth: bool = Security(_verify_api_key)):
 
 
 @router.post("/training/apply")
-async def apply_clone(_auth: bool = Security(_verify_api_key)):
+async def apply_clone(character_id: str = Query(...), _auth: bool = Security(_verify_api_key)):
     try:
-        result_path = str(Path(__file__).parent.parent.parent / "data" / "training")
-        return {"status": "applied", "path": result_path}
-    except (ValueError, OSError):
+        # 1. 从训练状态获取 lora_path
+        state = _training_mgr.get_state()
+        lora_path = state.get("lora_path")
+
+        # 2. 如果状态中没有，从 data/clone/lora_output/ 查找最新的 .pth
+        if not lora_path or not Path(lora_path).exists():
+            lora_output_dir = Path(__file__).parent.parent.parent / "data" / "clone" / "lora_output"
+            if lora_output_dir.exists():
+                pth_files = sorted(
+                    lora_output_dir.glob("**/*.pth"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                if pth_files:
+                    lora_path = str(pth_files[0])
+
+        if not lora_path or not Path(lora_path).exists():
+            raise HTTPException(
+                status_code=400,
+                detail="没有可用的训练模型，请先完成训练",
+            )
+
+        # 3. 绑定到角色
+        from shisi.voice_ext.character_voice import CharacterVoiceManager
+
+        voice_mgr = CharacterVoiceManager()
+        voice_mgr.bind_voice(
+            character_id=character_id,
+            engine="gpt-sovits",
+            speaker_name=lora_path,
+        )
+
+        logger.info("角色 %s 绑定音色模型: %s", character_id, lora_path)
+        return {"status": "applied", "character_id": character_id, "model_path": lora_path}
+    except HTTPException:
+        raise
+    except (ValueError, OSError) as e:
         logger.exception("Apply clone failed")
-        raise HTTPException(status_code=500, detail="internal_error") from None
+        raise HTTPException(status_code=500, detail=f"internal_error: {e}") from None
 
 
 # ═══ Clone Data Management API ═══

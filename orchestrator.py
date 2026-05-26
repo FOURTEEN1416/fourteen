@@ -275,6 +275,37 @@ class Orchestrator:
                     else:
                         reply = "（系统暂不可用）"
 
+                # === 新增：一致性检查（复用 PersonaEngine.check_consistency） ===
+                with tracer.span("consistency_check"):
+                    try:
+                        if self._persona and hasattr(self._persona, 'check_consistency'):
+                            chat_round = 0
+                            if self._memory and hasattr(self._memory, 'get_chat_context'):
+                                history, _ = self._memory.get_chat_context(session_id=session_id)
+                                chat_round = len(history) if history else 0
+                            result = self._persona.check_consistency(
+                                reply, emotion_state, chat_round
+                            )
+                            if not result.overall_passed:
+                                if result.overall_score < 0.4 and result.correction_prompt:
+                                    # 严重违规：用修正prompt重新生成
+                                    corrected = await self._llm.chat_sync(
+                                        query=f"{result.correction_prompt}\n\n"
+                                              f"原始回复：{reply}\n\n"
+                                              f"请根据以上修正建议重新生成一条符合角色设定的回复。"
+                                              f"只输出修正后的回复。",
+                                        max_tokens=512,
+                                    )
+                                    if corrected and len(corrected.strip()) > 0:
+                                        reply = corrected.strip()
+                                        logger.info("一致性严重违规已修正: score=%.2f", result.overall_score)
+                                else:
+                                    # 轻度违规：轻量修正
+                                    logger.info("一致性轻度违规(score=%.2f)，放行原回复", result.overall_score)
+                    except Exception as e:
+                        logger.warning("一致性检查异常（已放行原回复）: %s", e)
+                # === 检查结束 ===
+
                 with tracer.span("output_safety_check"):
                     output_result = self._safety.check_output(reply)
                     if not output_result.is_safe:
@@ -390,7 +421,7 @@ class Orchestrator:
                         )
 
                 collected_tokens = []
-                # 缓冲区安全检�?先攒够缓冲区再检查，安全后才 yield，杜绝不安全内容外泄
+                # 缓冲区安全检查：先攒够缓冲区再检查，安全后才 yield，杜绝不安全内容外泄
                 BUFFER_CHECK_INTERVAL = 20  # noqa: N806
                 buffer = []
                 stream_unsafe = False
@@ -443,8 +474,29 @@ class Orchestrator:
                         self._last_chat_time = datetime.now(tz=timezone.utc)
                     return
 
+                # === 新增：一致性检查（复用 PersonaEngine.check_consistency） ===
+                with tracer.span("consistency_check"):
+                    try:
+                        full_output = "".join(collected_tokens)
+                        if self._persona and hasattr(self._persona, 'check_consistency'):
+                            result = self._persona.check_consistency(
+                                full_output, emotion_state, 0
+                            )
+                            if not result.overall_passed and result.overall_score < 0.4 and result.correction_prompt:
+                                # 严重违规时尝试修正
+                                corrected = await self._llm.chat_sync(
+                                    query=f"{result.correction_prompt}\n\n"
+                                          f"原始回复：{full_output}\n\n"
+                                          f"请重新生成：",
+                                    max_tokens=512,
+                                )
+                                if corrected and len(corrected.strip()) > 0:
+                                    full_output = corrected.strip()
+                    except Exception as e:
+                        logger.warning("Stream一致性检查异常（已放行）: %s", e)
+                # === 检查结束 ===
+
                 with tracer.span("output_safety_check"):
-                    full_output = "".join(collected_tokens)
                     output_result = self._safety.check_output(full_output)
                     if not output_result.is_safe:
                         logger.warning("Stream output safety issue: %s", output_result.category.value)

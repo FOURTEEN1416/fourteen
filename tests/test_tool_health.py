@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, PropertyMock
 
 class TestToolRegistryHealthCheck:
     def test_health_check_all_available(self):
-        from tool_system.base import BaseTool, ToolRegistry
+        from tool_system.base_tool import BaseTool, ToolRegistry
         registry = ToolRegistry()
         tool = MagicMock(spec=BaseTool)
         tool.name = "test_tool"
@@ -15,7 +15,7 @@ class TestToolRegistryHealthCheck:
         assert result["test_tool"]["available"] is True
 
     def test_health_check_plugin_not_loaded(self):
-        from tool_system.base import BaseTool, ToolRegistry
+        from tool_system.base_tool import BaseTool, ToolRegistry
         registry = ToolRegistry()
         tool = MagicMock(spec=BaseTool)
         tool.name = "broken_tool"

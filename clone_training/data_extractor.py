@@ -424,7 +424,7 @@ class DataExtractor:
             清洗后的对话列表
         """
         try:
-            from clone_training.decrypt_source import DecryptSource
+            from clone_training.wechat_decrypt_source import DecryptSource
         except ImportError:
             logger.error("decrypt_source 模块不可用，请确保 third_party/wechat-decrypt 已安装")
             return self._empty_result("decrypt_source_not_found")

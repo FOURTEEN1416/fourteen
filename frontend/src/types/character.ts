@@ -1,3 +1,7 @@
+/**
+ * @deprecated 请使用 types/api.ts 中的 UnifiedCharacter 替代
+ * 旧 shisi API 仍在过渡期使用此类型
+ */
 export interface CharacterState {
   character_id: string
   name: string

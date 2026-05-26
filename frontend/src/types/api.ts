@@ -58,7 +58,7 @@ export interface HealthStatus {
 }
 
 export interface SystemConfig {
-  [key: string]: any
+  [key: string]: unknown
 }
 
 export interface WSIncomingMessage {
@@ -467,4 +467,115 @@ export interface WeChatConnectionStatus {
   message: string
   pid?: number
   started_at?: number
+}
+
+/** @deprecated 使用 UnifiedCharacter */
+export type DeprecatedCharacterState = import('./character').CharacterState
+
+// ── 统一角色管理 ──
+
+export interface UnifiedCharacter {
+  id: string
+  name: string
+  description: string
+  personality: Record<string, number>
+  speaking_style: Record<string, number>
+  core_anchors: string[]
+  user_id: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  version: number
+  voice_config?: VoiceConfig | null
+}
+
+export interface UnifiedCharacterCreate {
+  name: string
+  description?: string
+  personality?: Record<string, number>
+  speaking_style?: Record<string, number>
+  core_anchors?: string[]
+  user_id?: string
+}
+
+export interface UnifiedCharacterUpdate {
+  name?: string
+  description?: string
+  personality?: Record<string, number>
+  speaking_style?: Record<string, number>
+  core_anchors?: string[]
+}
+
+export interface PersonaUpdate {
+  personality?: Record<string, number>
+  speaking_style?: Record<string, number>
+  core_anchors?: string[]
+}
+
+export interface CharacterListResponse {
+  characters: UnifiedCharacter[]
+  total: number
+}
+
+export interface CharacterCreateResponse {
+  id: string
+  name: string
+  status: string
+}
+
+export interface CharacterVoiceResponse {
+  configured: boolean
+  voice: VoiceConfig | null
+}
+
+// ── 角色音色绑定 ──
+
+export interface VoiceConfig {
+  engine: string
+  speaker_name: string
+  rate?: string
+  pitch?: string
+  volume?: string
+  extra_params?: Record<string, unknown>
+}
+
+export interface VoiceBindRequest {
+  engine?: string
+  speaker_name?: string
+  rate?: string
+  pitch?: string
+  volume?: string
+  extra_params?: Record<string, unknown>
+}
+
+export interface VoiceUpdateRequest {
+  engine?: string
+  speaker_name?: string
+  rate?: string
+  pitch?: string
+  volume?: string
+  extra_params?: Record<string, unknown>
+}
+
+export interface VoiceTestRequest {
+  text?: string
+}
+
+export interface SpeakerInfo {
+  name: string
+  gender?: string
+  description?: string
+}
+
+export interface SpeakerListResponse {
+  engine: string
+  speakers: SpeakerInfo[]
+  total: number
+}
+
+export interface VoiceBindStatusResponse {
+  status: string
+  character_id: string
+  engine?: string
+  model_path?: string
 }

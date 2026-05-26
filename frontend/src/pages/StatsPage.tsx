@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { shisiClient } from '../api/shisiClient'
 import { useErrorStore } from '../store/errorStore'
 import Card from '../components/common/Card'
@@ -28,19 +29,16 @@ function getErrorMessage(e: unknown): string {
 }
 
 export default function StatsPage() {
-  const [stats, setStats] = useState<StatsData | null>(null)
   const toast = useErrorStore.getState().addToast
+  const { data: stats, error } = useQuery({
+    queryKey: ['shisi', 'stats'],
+    queryFn: () => shisiClient.stats.get() as Promise<StatsData>,
+    staleTime: 30 * 1000,
+  })
 
-  const loadStats = useCallback(async () => {
-    try {
-      const data = await shisiClient.stats.get() as StatsData
-      setStats(data)
-    } catch (e: unknown) {
-      toast({ type: 'error', message: getErrorMessage(e) || '加载统计数据失败' })
-    }
-  }, [toast])
-
-  useEffect(() => { loadStats() }, [loadStats])
+  useEffect(() => {
+    if (error) toast({ type: 'error', message: getErrorMessage(error) || '加载统计数据失败' })
+  }, [error, toast])
 
   if (!stats) return (
     <div className="flex-1 overflow-y-auto p-6 space-y-4">

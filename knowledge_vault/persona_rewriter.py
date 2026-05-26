@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from my_character.persona_card_v3 import PersonaCardV3
+from my_character.persona_card import PersonaCardV3
 
 logger = logging.getLogger("persona_rewriter")
 

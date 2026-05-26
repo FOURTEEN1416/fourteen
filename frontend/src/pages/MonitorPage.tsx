@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { useCharacters, useAffinity, useEmotionStage, useEmotionStageList, useAffinityUnlocks } from '../hooks/useQueries'
+import { useUnifiedCharacters, useAffinity, useEmotionStage, useEmotionStageList, useAffinityUnlocks } from '../hooks/useQueries'
 import Card from '../components/common/Card'
 import Badge from '../components/common/Badge'
 import Skeleton from '../components/common/Skeleton'
 import EmptyState from '../components/common/EmptyState'
 import { Activity, Heart, ChevronDown, History, Unlock, Clock } from 'lucide-react'
-import type { CharacterState } from '../types/character'
+import type { UnifiedCharacter } from '../types/api'
 
 interface UnlockItem {
   name: string
@@ -33,11 +33,11 @@ interface AffinityUnlocksData {
 }
 
 export default function MonitorPage() {
-  const { data: characters, isLoading: charsLoading } = useCharacters()
-  const characterList = (characters ?? []) as CharacterState[]
+  const { data: charData, isLoading: charsLoading } = useUnifiedCharacters()
+  const characterList = (charData?.characters ?? []) as UnifiedCharacter[]
   const [selected, setSelected] = useState('')
 
-  const activeId = selected || (characterList.find((c: CharacterState) => c.is_active)?.character_id ?? characterList[0]?.character_id ?? '')
+  const activeId = selected || (characterList.find((c: UnifiedCharacter) => c.is_active)?.id ?? characterList[0]?.id ?? '')
 
   const { data: affinity, isLoading: affLoading } = useAffinity(activeId)
   const { data: stage, isLoading: stageLoading } = useEmotionStage(activeId)
@@ -60,7 +60,7 @@ export default function MonitorPage() {
               onChange={e => setSelected(e.target.value)}
               className="appearance-none bg-white/80 border border-gray-200 rounded-lg pl-3 pr-8 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-400/30"
             >
-              {characterList.map((c: CharacterState) => <option key={c.character_id} value={c.character_id}>{c.name}</option>)}
+              {characterList.map((c: UnifiedCharacter) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <ChevronDown className="w-3.5 h-3.5 text-gray-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>

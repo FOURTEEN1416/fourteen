@@ -5,7 +5,7 @@ import logging
 import re
 from typing import Any
 
-logger = logging.getLogger("rag_engine_v2")
+logger = logging.getLogger("rag_engine")
 
 _DEFAULT_QUERY_TIMEOUT = 1.0
 

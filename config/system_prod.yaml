@@ -3,24 +3,20 @@ env: prod
 debug: false
 
 llm:
-  provider: deepseek
-  primary_model: deepseek-chat
+  provider: auto
+  fallback_chain:
+    - zhipu
+    - xunfei
+    - baidu
+    - opencode_zen
   temperature: 0.7
   max_tokens: 2048
   stream_enabled: true
   first_token_timeout: 10.0
   retry_count: 3
-  opencode_zen_api_base: "https://opencode.ai/zen/v1"
-  opencode_zen_default_model: "big-pickle"
-  models_priority:
-    - name: deepseek-chat
-      priority: 1
-    - name: deepseek-reasoner
-      priority: 2
-  # 生产环境缓存配置
   cache:
     enabled: true
-    ttl: 604800  # 7天 (秒)
+    ttl: 604800
     redis:
       host: ${REDIS_HOST:-localhost}
       port: ${REDIS_PORT:-6379}
@@ -87,6 +83,11 @@ voice:
     preferred_format: "silk"
     silk_sample_rate: 24000
   engine: "edge-tts"
+  cosyvoice:
+    url: "http://localhost:8088"
+    voice: "中文男"
+    response_format: "wav"
+    timeout: 60.0
   emotion_enabled: true
   edge-tts:
     speaker_name: "zh-CN-XiaoxiaoNeural"

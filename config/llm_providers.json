@@ -1,0 +1,73 @@
+{
+  "default_provider": "auto",
+  "providers": {
+    "xunfei": {
+      "name": "讯飞星火",
+      "model": "spark-lite",
+      "api_base": "https://spark-api-open.xf-yun.com/v1",
+      "api_key": "",
+      "auth_mode": "bearer",
+      "max_tokens": 2048,
+      "temperature": 0.85,
+      "stream_enabled": true,
+      "description": "Spark Lite 永久免费，Token无限，并发5，有效期至2036年"
+    },
+    "zhipu": {
+      "name": "智谱AI",
+      "model": "glm-4-flash",
+      "api_base": "https://open.bigmodel.cn/api/paas/v4",
+      "api_key": "",
+      "auth_mode": "bearer",
+      "max_tokens": 2048,
+      "temperature": 0.85,
+      "stream_enabled": true,
+      "description": "GLM-4.7-Flash 永久免费，无Token上限，200K上下文"
+    },
+    "baidu": {
+      "name": "百度千帆",
+      "model": "ernie-speed-128k",
+      "api_base": "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat",
+      "api_key": "",
+      "auth_mode": "oauth",
+      "max_tokens": 2048,
+      "temperature": 0.85,
+      "stream_enabled": true,
+      "description": "ERNIE-Speed 每月50万Token免费，128K上下文"
+    },
+    "deepseek": {
+      "name": "DeepSeek",
+      "model": "deepseek-chat",
+      "api_base": "https://api.deepseek.com/v1",
+      "api_key": "",
+      "auth_mode": "bearer",
+      "max_tokens": 4096,
+      "temperature": 0.85,
+      "stream_enabled": true,
+      "description": "DeepSeek-V2/V3 高质量模型，需自行申请API Key"
+    }
+  },
+  "fallback_chain": [
+    "zhipu",
+    "xunfei",
+    "baidu",
+    "opencode_zen"
+  ],
+  "deepseek_guide": {
+    "enabled": false,
+    "description": "DeepSeek 是高质量模型推荐选项，需手动配置 API Key",
+    "apply_steps": [
+      "1. 打开 https://platform.deepseek.com 注册账号",
+      "2. 进入控制台 → API Keys → 创建新的 API Key",
+      "3. 复制 API Key，填入上方配置",
+      "4. 保存后系统自动使用 DeepSeek（优先于免费模型）"
+    ],
+    "why_deepseek": "DeepSeek-V3 在中文理解、角色扮演、长上下文方面表现优异，适合 AI Girlfriend 场景"
+  },
+  "notes": {
+    "xunfei": "讯飞星火 Spark Lite - 永久免费，Token无限，并发限制5，有效期至2036年",
+    "zhipu": "智谱AI GLM-4.7-Flash - 永久免费，无Token上限，200K上下文",
+    "baidu": "百度千帆 ERNIE-Speed - 每月50万Token免费，QPS=5，需百度云账号",
+    "deepseek": "DeepSeek - 高质量模型，API Key 从 platform.deepseek.com 获取，按量计费但价格极低",
+    "opencode_zen": "OpenCode Zen - 完全免费，无需API Key，作为兜底方案"
+  }
+}

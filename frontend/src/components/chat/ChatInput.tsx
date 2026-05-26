@@ -43,7 +43,7 @@ export default function ChatInput({ onSend }: Props) {
     try {
       const r = await api.uploadFile(file)
       setAttachedFile({ name: r.data.filename, url: r.data.url, type: r.data.message_type })
-    } catch (err) {
+    } catch {
       addToast({ type: 'error', message: '文件上传失败，请重试' })
     }
     setUploading(false)

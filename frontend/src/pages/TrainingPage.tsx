@@ -1,6 +1,7 @@
-﻿import { useState, useEffect, useCallback, useRef } from 'react'
+﻿import { useState, useEffect, useRef } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
-import { useTrainingProgress } from '../hooks/useQueries'
+import { useTrainingProgress, useUnifiedCharacters } from '../hooks/useQueries'
 import Button from '../components/common/Button'
 import Card from '../components/common/Card'
 import EmptyState from '../components/common/EmptyState'
@@ -26,6 +27,10 @@ export default function TrainingPage() {
   const [acceptScore, setAcceptScore] = useState(2)
   const [epochs, setEpochs] = useState(3)
   const [loraRank, setLoraRank] = useState(16)
+  const [targetCharacterId, setTargetCharacterId] = useState('')
+  const { data: charList } = useUnifiedCharacters()
+  const characters = charList?.characters ?? []
+
   const [testMessage, setTestMessage] = useState('')
   const [testResult, setTestResult] = useState<CloneTestResult | null>(null)
 
@@ -43,7 +48,6 @@ export default function TrainingPage() {
   const [datasets, setDatasets] = useState<CloneDataset[]>([])
   const [showContactPicker, setShowContactPicker] = useState(false)
   const [contactSearch, setContactSearch] = useState('')
-  const [loadingContacts, setLoadingContacts] = useState(false)
   const [inputMode, setInputMode] = useState<'pick' | 'manual'>('pick') // pick=选人, manual=手输
   const pickerRef = useRef<HTMLDivElement>(null)
 
@@ -65,22 +69,19 @@ export default function TrainingPage() {
   }, [])
 
   // 加载联系人和已有数据集
-  const loadContacts = useCallback(async () => {
-    setLoadingContacts(true)
-    try {
+  const { isFetching: loadingContacts } = useQuery({
+    queryKey: ['training', 'contacts'],
+    queryFn: async () => {
       const [cRes, dRes] = await Promise.all([
         api.cloneContacts(),
         api.cloneDatasets(),
       ])
       setContacts((cRes.data as { contacts: CloneContact[] }).contacts)
       setDatasets((dRes.data as { datasets: CloneDataset[] }).datasets)
-    } catch { /* silent */ }
-    finally { setLoadingContacts(false) }
-  }, [])
-
-  useEffect(() => {
-    loadContacts()
-  }, [loadContacts])
+      return true
+    },
+    staleTime: 30 * 1000,
+  })
 
   const isAvailable = availability?.available ?? false
   const isTraining = activeStatuses.includes(progress?.status as TrainingStatusEnum)
@@ -118,7 +119,7 @@ export default function TrainingPage() {
   const handleTrain = async () => {
     setTraining(true)
     try {
-      await api.trainingTrain(epochs, loraRank)
+      await api.trainingTrain(epochs, loraRank, targetCharacterId || undefined)
       refetch()
     } catch { /* toast */ }
     finally { setTraining(false) }
@@ -143,7 +144,7 @@ export default function TrainingPage() {
   const handleApply = async () => {
     setApplying(true)
     try {
-      await api.trainingApply()
+      await api.trainingApply(targetCharacterId || undefined)
       refetch()
     } catch { /* toast */ }
     finally { setApplying(false) }
@@ -391,6 +392,19 @@ export default function TrainingPage() {
                   className="w-full bg-gray-200/60 border border-gray-300/50 rounded px-3 py-2 text-sm text-gray-800 outline-none" />
               </div>
             </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">绑定角色（可选）</label>
+              <select
+                value={targetCharacterId}
+                onChange={(e) => setTargetCharacterId(e.target.value)}
+                className="w-full bg-gray-200/60 border border-gray-300/50 text-gray-800 rounded px-3 py-2 text-sm outline-none"
+              >
+                <option value="">不绑定</option>
+                {characters.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
             <div className="flex gap-2">
               <Button onClick={handleTrain} loading={training} disabled={stepDisabled || isTraining}>
                 开始训练
@@ -428,6 +442,11 @@ export default function TrainingPage() {
           <h3 className="text-sm font-semibold text-gray-800 mb-3">应用克隆</h3>
           <div className="space-y-3">
             <p className="text-xs text-gray-500">将训练好的 LoRA 模型应用到当前对话系统。</p>
+            {targetCharacterId && (
+              <p className="text-xs text-primary-600">
+                将绑定至：{characters.find(c => c.id === targetCharacterId)?.name ?? targetCharacterId}
+              </p>
+            )}
             <Button onClick={handleApply} loading={applying} disabled={!isDone} variant="secondary">
               应用克隆模型
             </Button>

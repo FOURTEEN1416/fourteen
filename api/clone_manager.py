@@ -73,7 +73,7 @@ class CloneDataManager:
     def _get_contacts_from_decrypt(self) -> list[dict[str, Any]]:
         """从 wechat-decrypt 获取联系人"""
         try:
-            from clone_training.decrypt_source import DecryptSource
+            from clone_training.wechat_decrypt_source import DecryptSource
             ds = DecryptSource()
             ds.ensure_ready()
             raw = ds.get_contacts()

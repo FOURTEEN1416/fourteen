@@ -1,37 +1,30 @@
 import { useState } from 'react'
-import { useCharacters } from '../hooks/useQueries'
-import { shisiClient } from '../api/shisiClient'
+import { useUnifiedCharacters } from '../hooks/useQueries'
+import { memoryApi } from '../api/memoryApi'
+import type { FavoriteItem } from '../api/memoryApi'
 import Card from '../components/common/Card'
 import Button from '../components/common/Button'
 import EmptyState from '../components/common/EmptyState'
 import { Star, Trash2, Send } from 'lucide-react'
-import type { CharacterState } from '../types/character'
-
-interface FavoriteItem {
-  id: string
-  content?: string
-  message?: string
-  timestamp?: string
-}
+import type { UnifiedCharacter } from '../types/api'
 
 export default function FavoritesPage() {
-  const { data: characters } = useCharacters()
+  const { data: charData } = useUnifiedCharacters()
+  const charList = charData?.characters ?? []
+  const activeChar = charList.find((c: UnifiedCharacter) => c.is_active)
   const [favs, setFavs] = useState<FavoriteItem[]>([])
   const [loading, setLoading] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [selectedChar, setSelectedChar] = useState('')
   const [forwardTarget, setForwardTarget] = useState('')
 
-  const charList = (characters ?? []) as CharacterState[]
-  const activeChar = charList.find((c: CharacterState) => c.is_active)
-
   const loadFavorites = async () => {
     setLoading(true)
     try {
-      const cid = selectedChar || activeChar?.character_id
+      const cid = selectedChar || activeChar?.id
       if (!cid) { setLoading(false); return }
-      const r = await shisiClient.memory.favorites(cid)
-      setFavs(r as FavoriteItem[])
+      const r = await memoryApi.listFavorites(cid)
+      setFavs(r)
       setLoaded(true)
     } catch { setFavs([]) }
     setLoading(false)
@@ -39,8 +32,9 @@ export default function FavoritesPage() {
 
   const removeFavorite = async (id: string) => {
     try {
-      const cid = selectedChar || activeChar?.character_id
-      await shisiClient.memory.removeFavorite(id, cid)
+      const cid = selectedChar || activeChar?.id
+      if (!cid) return
+      await memoryApi.removeFavorite(cid, id)
       setFavs(favs.filter((f: FavoriteItem) => f.id !== id))
     } catch { /* ignore */ }
   }
@@ -48,9 +42,9 @@ export default function FavoritesPage() {
   const forwardMemory = async (memoryId: string) => {
     if (!forwardTarget) return
     try {
-      const cid = selectedChar || activeChar?.character_id
+      const cid = selectedChar || activeChar?.id
       if (!cid) return
-      await shisiClient.memory.forward(cid, forwardTarget, memoryId)
+      await memoryApi.forward(cid, forwardTarget, memoryId)
       setForwardTarget('')
     } catch { /* ignore */ }
   }
@@ -70,8 +64,8 @@ export default function FavoritesPage() {
             className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400/30"
           >
             <option value="">选择角色</option>
-            {charList.map((c: CharacterState) => (
-              <option key={c.character_id} value={c.character_id}>{c.name}{c.is_active ? ' (当前)' : ''}</option>
+            {charList.map((c: UnifiedCharacter) => (
+              <option key={c.id} value={c.id}>{c.name}{c.is_active ? ' (当前)' : ''}</option>
             ))}
           </select>
           <Button size="sm" onClick={loadFavorites} loading={loading}>加载收藏</Button>
@@ -110,8 +104,8 @@ export default function FavoritesPage() {
                       className="text-[10px] border border-gray-200 rounded px-1 py-0.5"
                     >
                       <option value="">转发到...</option>
-                      {charList.filter((c: CharacterState) => c.character_id !== (selectedChar || activeChar?.character_id)).map((c: CharacterState) => (
-                        <option key={c.character_id} value={c.character_id}>{c.name}</option>
+                      {charList.filter((c: UnifiedCharacter) => c.id !== (selectedChar || activeChar?.id)).map((c: UnifiedCharacter) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
                     <button

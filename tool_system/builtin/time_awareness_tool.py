@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime
 
-from tool_system.base import BaseTool, ToolResult
+from tool_system.base_tool import BaseTool, ToolResult
 
 logger = logging.getLogger("time_awareness_tool")
 

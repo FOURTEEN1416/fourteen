@@ -11,10 +11,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger("scheduler")
 
@@ -55,10 +56,30 @@ class ProactiveScheduler:
 
         self._last_check_time: datetime | None = None
 
-        self._ws_server = None
-        self._wechat_connector = None
+        # 通道注册表（支持多通道投递）
+        self._channels: dict[str, Callable[[], Any]] = {}        # name → sender_factory
+        self._channel_instances: dict[str, Optional[Callable]] = {}  # name → instantiated sender
+        self._health_check_interval = 60  # 秒
+        self._quiet_hours = (23, 7)       # 23:00-07:00 免打扰
 
         logger.info("ProactiveScheduler initialized (APScheduler=%s)", HAS_APSCHEDULER)
+
+    def register_channel(self, name: str, sender_factory: Callable[[], Any]) -> None:
+        """
+        注册并初始化消息通道
+        
+        参数:
+            name: 通道名称 (如 "wechat", "websocket", "console")
+            sender_factory: 返回 async send(message) 可调用对象的工厂函数
+        """
+        self._channels[name] = sender_factory
+        try:
+            instance = sender_factory()
+            self._channel_instances[name] = instance
+            logger.info("消息通道已注册并初始化: %s", name)
+        except Exception as e:
+            logger.warning("消息通道初始化失败: %s - %s（稍后重试）", name, e)
+            self._channel_instances[name] = None
 
     def _safe_job_wrapper(self, job_fn: Callable, job_name: str) -> Callable:
         def wrapper(*args, **kwargs):
@@ -128,6 +149,17 @@ class ProactiveScheduler:
                 coalesce=True,
             )
 
+            # 5. 通道健康检查（每60秒）
+            self._scheduler.add_job(
+                self._safe_job_wrapper(self._health_check_channels, "health_check_channels"),
+                IntervalTrigger(seconds=self._health_check_interval),
+                id="health_check_channels",
+                name="通道健康检查",
+                replace_existing=True,
+                misfire_grace_time=30,
+                coalesce=True,
+            )
+
             self._scheduler.start()
             self._last_check_time = datetime.now(tz=timezone.utc)
             logger.info("Scheduler started with %d jobs", len(self._scheduler.get_jobs()))
@@ -146,8 +178,56 @@ class ProactiveScheduler:
 
     # ── 定时任务 ─────────────────────────────────────────
 
+    def _is_quiet_hours(self) -> bool:
+        """检查是否在免打扰时段"""
+        now = datetime.now(tz=timezone.utc).hour + 8  # UTC+8
+        now = now % 24
+        start, end = self._quiet_hours
+        if start < end:
+            return start <= now < end
+        return now >= start or now < end
+
+    async def _send_to_all(self, message: str) -> bool:
+        """
+        向所有已注册通道发送消息
+        优先级: wechat > websocket > console
+        
+        Returns: 是否至少一个通道发送成功
+        """
+        if self._is_quiet_hours():
+            logger.info("免打扰时段(%s-%s)，跳过非紧急消息", self._quiet_hours[0], self._quiet_hours[1])
+            return False
+
+        priority = ["wechat", "websocket", "console"]
+        sent = False
+        for name in priority:
+            sender = self._channel_instances.get(name)
+            if sender is None:
+                continue
+            try:
+                if asyncio.iscoroutinefunction(sender):
+                    await sender(message)
+                else:
+                    sender(message)
+                logger.info("主动消息已投递: %s", name)
+                sent = True
+                break  # 高优先级成功就不再尝试低优先级
+            except Exception as e:
+                logger.warning("通道投递失败: %s - %s", name, e)
+                self._channel_instances[name] = None  # 标记失效
+
+        # 兜底：使用旧的 send_message_func
+        if not sent and self._send:
+            try:
+                self._send(message)
+                sent = True
+            except Exception as e:
+                logger.error("兜底发送失败: %s", e)
+
+        return sent
+
     def _check_ase(self) -> None:
-        """ASE 主动消息检查"""
+        """ASE 主动消息检查（APScheduler同步任务）"""
         if not self.ase:
             return
 
@@ -173,8 +253,17 @@ class ProactiveScheduler:
                 message = result.get("message", "")
                 msg_type = result.get("type", "unknown")
                 logger.info("ASE triggered: [%s] %s", msg_type, message)
-                if self._send:
-                    self._send(message)
+                # 通过事件循环发送（APScheduler在非async上下文运行）
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.ensure_future(self._send_to_all(message))
+                    else:
+                        loop.run_until_complete(self._send_to_all(message))
+                except RuntimeError:
+                    # 无事件循环，兜底
+                    if self._send:
+                        self._send(message)
         except Exception as e:  # noqa: BLE001
             logger.error("ASE check failed: %s", e)
         finally:
@@ -225,6 +314,19 @@ class ProactiveScheduler:
                 "next_run": str(job.next_run_time) if job.next_run_time else None,
             })
         return jobs
+
+    def _health_check_channels(self) -> None:
+        """检查并重连失效通道"""
+        for name in list(self._channel_instances.keys()):
+            if self._channel_instances.get(name) is None:
+                factory = self._channels.get(name)
+                if factory:
+                    try:
+                        instance = factory()
+                        self._channel_instances[name] = instance
+                        logger.info("通道已重连: %s", name)
+                    except Exception as e:
+                        logger.debug("通道重连失败: %s - %s", name, e)
 
     def health_check(self) -> dict:
         """健康检查"""

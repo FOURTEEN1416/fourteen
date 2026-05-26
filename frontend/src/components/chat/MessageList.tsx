@@ -1,10 +1,9 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { useChatStore } from '../../store/chatStore'
 import MessageBubble from './MessageBubble'
 import TypingIndicator from './TypingIndicator'
 import EmptyState from '../common/EmptyState'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const require: (id: string) => unknown
 
 interface FixedSizeListProps {
@@ -16,21 +15,17 @@ interface FixedSizeListProps {
   children: React.ComponentType<{ index: number; style: React.CSSProperties }>
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let FixedSizeList: React.ComponentType<FixedSizeListProps> | undefined = undefined
 
 interface AutoSizerProps {
   children: (props: { height: number; width: number }) => React.ReactNode
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let AutoSizer: React.ComponentType<AutoSizerProps> | undefined = undefined
 
 ;(() => {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rw = require('react-window') as { FixedSizeList: React.ComponentType<FixedSizeListProps> }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const autoSizer = require('react-virtualized-auto-sizer') as { default: React.ComponentType<AutoSizerProps> }
     FixedSizeList = rw.FixedSizeList
     AutoSizer = autoSizer.default
@@ -52,7 +47,10 @@ export default function MessageList({ onRetryStream }: MessageListProps) {
   const isStreaming = useChatStore((s) => s.isStreaming)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  const displayMessages = streamingMessage ? [...messages, streamingMessage] : messages
+  const displayMessages = useMemo(
+    () => streamingMessage ? [...messages, streamingMessage] : messages,
+    [messages, streamingMessage]
+  )
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })

@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 
-from .llm_gateway_v2 import ModelRegistry
+from .llm_gateway import ModelRegistry
 
 try:
     from observability.metrics import (

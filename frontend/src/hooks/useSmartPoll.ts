@@ -8,15 +8,17 @@ export function useSmartPoll(
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const fetchRef = useRef(fetchFn)
   const isFetchingRef = useRef(false)
-  fetchRef.current = fetchFn
+  const pollRef = useRef<() => Promise<void>>(async () => {})
+
+  useEffect(() => { fetchRef.current = fetchFn })
 
   const poll = useCallback(async () => {
     if (document.hidden) {
-      timerRef.current = setTimeout(poll, intervalMs)
+      timerRef.current = setTimeout(() => pollRef.current(), intervalMs)
       return
     }
     if (isFetchingRef.current) {
-      timerRef.current = setTimeout(poll, intervalMs)
+      timerRef.current = setTimeout(() => pollRef.current(), intervalMs)
       return
     }
     isFetchingRef.current = true
@@ -25,8 +27,10 @@ export function useSmartPoll(
     } finally {
       isFetchingRef.current = false
     }
-    timerRef.current = setTimeout(poll, intervalMs)
+    timerRef.current = setTimeout(() => pollRef.current(), intervalMs)
   }, [intervalMs])
+
+  useEffect(() => { pollRef.current = poll })
 
   useEffect(() => {
     if (!enabled) return
@@ -38,12 +42,12 @@ export function useSmartPoll(
           timerRef.current = undefined
         }
       } else {
-        poll()
+        pollRef.current()
       }
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
-    poll()
+    pollRef.current()
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
@@ -52,5 +56,5 @@ export function useSmartPoll(
         timerRef.current = undefined
       }
     }
-  }, [enabled, poll])
+  }, [enabled])
 }
