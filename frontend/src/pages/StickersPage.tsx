@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { shisiClient } from '../api/shisiClient'
+import { api } from '../api/client'
 import { useErrorStore } from '../store/errorStore'
 import Card from '../components/common/Card'
 import Button from '../components/common/Button'
@@ -32,7 +32,8 @@ export default function StickersPage() {
   const { data: stickers = [], isLoading: loading, error, refetch: loadStickers } = useQuery({
     queryKey: ['stickers'],
     queryFn: async () => {
-      const data = await shisiClient.stickers.list() as StickerItem[]
+      const r = await api.stickerList()
+      const data = (r.data as any)?.data as StickerItem[]
       return Array.isArray(data) ? data : []
     },
   })
@@ -44,7 +45,7 @@ export default function StickersPage() {
   async function handleDelete(id: string) {
     if (!confirm('确定删除此表情包？')) return
     try {
-      await shisiClient.stickers.delete(id)
+      await api.stickerDelete(id)
       toast({ type: 'success', message: '表情包已删除' })
       await loadStickers()
     } catch (e: unknown) {
@@ -57,7 +58,7 @@ export default function StickersPage() {
     try {
       const formData = new FormData()
       Array.from(files).forEach(f => formData.append('files', f))
-      await shisiClient.stickers.upload(formData)
+      await api.stickerUpload(formData)
       toast({ type: 'success', message: '表情包上传成功' })
       await loadStickers()
     } catch (e: unknown) {
@@ -70,7 +71,7 @@ export default function StickersPage() {
     try {
       const formData = new FormData()
       formData.append('zip', files[0])
-      await shisiClient.stickers.importZip(formData)
+      await api.stickerImportZip(formData)
       toast({ type: 'success', message: 'ZIP导入成功' })
       await loadStickers()
     } catch (e: unknown) {
@@ -81,7 +82,8 @@ export default function StickersPage() {
   async function handleRecommend() {
     if (!emotion.trim()) return
     try {
-      const data = await shisiClient.stickers.recommend([emotion]) as StickerItem[]
+      const r2 = await api.stickerRecommend([emotion])
+      const data = (r2.data as any)?.data as StickerItem[]
       setRecommended(Array.isArray(data) ? data : [])
     } catch (e: unknown) {
       toast({ type: 'error', message: getErrorMessage(e) || '推荐失败' })

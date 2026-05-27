@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { shisiClient } from '../api/shisiClient'
+import { api } from '../api/client'
 import { useErrorStore } from '../store/errorStore'
 import Card from '../components/common/Card'
 import Skeleton from '../components/common/Skeleton'
@@ -32,7 +32,7 @@ export default function StatsPage() {
   const toast = useErrorStore.getState().addToast
   const { data: stats, error } = useQuery({
     queryKey: ['shisi', 'stats'],
-    queryFn: () => shisiClient.stats.get() as Promise<StatsData>,
+    queryFn: () => api.shisiStats().then(r => (r.data as any)?.data as Promise<StatsData>),
     staleTime: 30 * 1000,
   })
 

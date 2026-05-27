@@ -1,12 +1,13 @@
 import { useState, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { characterApi } from '../api/characterApi'
+import { api } from '../api/client'
 import {
   useUnifiedCharacters,
   useCreateCharacter,
   useDeleteCharacter,
   useActivateCharacter,
   useUpdateCharacter,
+  useUpdateStorylineConfig,
   queryKeys,
 } from '../hooks/useQueries'
 import { useErrorStore } from '../store/errorStore'
@@ -15,6 +16,9 @@ import Button from '../components/common/Button'
 import Badge from '../components/common/Badge'
 import Skeleton from '../components/common/Skeleton'
 import EmptyState from '../components/common/EmptyState'
+import StorylineEditor from '../components/storyline/StorylineEditor'
+import StorylineIndicator from '../components/storyline/StorylineIndicator'
+import KnowledgePreview from '../components/storyline/KnowledgePreview'
 import { Users, RefreshCw, Trash2, ArrowRightLeft, Upload, Download, Pencil, X, Save, Plus } from 'lucide-react'
 import type { UnifiedCharacter } from '../types/api'
 
@@ -55,6 +59,7 @@ export default function CharactersPage() {
   const [createPersonality, setCreatePersonality] = useState('')
   const [createSpeakingStyle, setCreateSpeakingStyle] = useState('')
   const [createCoreAnchors, setCreateCoreAnchors] = useState('')
+  const [createStoryline, setCreateStoryline] = useState(false)
 
   const importRef = useRef<HTMLInputElement>(null)
   const toast = useErrorStore.getState().addToast
@@ -67,6 +72,7 @@ export default function CharactersPage() {
   const deleteMutation = useDeleteCharacter()
   const createMutation = useCreateCharacter()
   const updateMutation = useUpdateCharacter()
+  const updateStorylineMutation = useUpdateStorylineConfig()
 
   const invalidateCharacters = () =>
     queryClient.invalidateQueries({ queryKey: queryKeys.characters.all })
@@ -98,13 +104,33 @@ export default function CharactersPage() {
       return
     }
     try {
-      await createMutation.mutateAsync({
+      const result = await createMutation.mutateAsync({
         name: createName.trim(),
         description: createDescription.trim() || undefined,
         personality: parseRecord(createPersonality),
         speaking_style: parseRecord(createSpeakingStyle),
         core_anchors: createCoreAnchors.split(',').map(s => s.trim()).filter(Boolean),
       })
+      // 如果勾选了启用剧情线，自动设置默认 7 天模板
+      if (createStoryline && result.id) {
+        const DEFAULT_STAGES = [
+          { name: '初识期', timing: { start_minutes: 0, end_minutes: 2160 }, style_rules: [{ style: '短句克制', inject_prompt: true }], behavior_rules: [{ rule: '保持距离', enforce: true }], dialogue_notes: '礼貌疏离、保持距离', transition_message: '我们就这样相遇了……' },
+          { name: '熟悉期', timing: { start_minutes: 2160, end_minutes: 5760 }, style_rules: [{ style: '软萌语气', inject_prompt: true }], behavior_rules: [{ rule: '接受接触', enforce: false }], dialogue_notes: '语气柔和、主动分享', transition_message: '不知不觉间，我好像开始依赖你了……' },
+          { name: '倾心期', timing: { start_minutes: 5760, end_minutes: 11760 }, style_rules: [{ style: '撒娇黏人', inject_prompt: true }], behavior_rules: [{ rule: '允许亲密', enforce: false }], dialogue_notes: '撒娇依赖、主动靠近', transition_message: '和你在一起的每一天，都那么幸福……' },
+          { name: '离别克制期', timing: { start_minutes: 11760, end_minutes: 12480 }, style_rules: [{ style: '温柔克制', inject_prompt: true }], behavior_rules: [{ rule: '拒绝亲密', enforce: true }], dialogue_notes: '温柔克制、整理回忆', transition_message: '时间过得真快……有些话，不说可能来不及了。' },
+          { name: '告别期', timing: { start_minutes: 12480, end_minutes: 12600 }, style_rules: [{ style: '简短珍重', inject_prompt: true }], behavior_rules: [{ rule: '严禁亲密', enforce: true }], dialogue_notes: '坚定离别、约好再见', transition_message: '该说再见了。谢谢你，给了我这么美好的回忆。' },
+        ]
+        updateStorylineMutation.mutate({
+          characterId: result.id,
+          config: {
+            enabled: true,
+            time_per_turn: 30,
+            max_duration_minutes: 10080,
+            stages: DEFAULT_STAGES,
+            ending: { type: 'separation', final_dialogue: '再见……我们一定还会再见的吧？', narrative: '列车缓缓远去，站台上只留下空荡荡的风声。', memorial_items: ['合照', '手写信'], blank_after_end: true },
+          },
+        })
+      }
       toast({ type: 'success', message: '角色创建成功' })
       setShowCreate(false)
       setCreateName('')
@@ -112,6 +138,7 @@ export default function CharactersPage() {
       setCreatePersonality('')
       setCreateSpeakingStyle('')
       setCreateCoreAnchors('')
+      setCreateStoryline(false)
     } catch (e: unknown) {
       toast({ type: 'error', message: getErrorMessage(e) || '创建失败' })
     }
@@ -146,7 +173,7 @@ export default function CharactersPage() {
 
   async function handleExport(id: string) {
     try {
-      const blob = await characterApi.export(id)
+      const blob = await api.exportCharacter(id)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -161,7 +188,7 @@ export default function CharactersPage() {
 
   async function handleImport(files: FileList) {
     try {
-      const promises = Array.from(files).map(f => characterApi.import(f))
+      const promises = Array.from(files).map(f => api.importCharacter(f))
       await Promise.all(promises)
       toast({ type: 'success', message: '角色导入成功' })
       invalidateCharacters()
@@ -234,6 +261,10 @@ export default function CharactersPage() {
                 className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-black focus:outline-none focus:ring-2 focus:ring-gray-400/30"
               />
             </div>
+            <label className="flex items-center gap-2 cursor-pointer pt-1">
+              <input type="checkbox" checked={createStoryline} onChange={e => setCreateStoryline(e.target.checked)} className="w-3.5 h-3.5 accent-gray-800" />
+              <span className="text-xs text-black">启用剧情线（默认 7 天模板）</span>
+            </label>
           </div>
           <div className="flex gap-2 pt-2">
             <Button variant="primary" size="sm" onClick={handleCreate} disabled={createMutation.isPending}>
@@ -325,7 +356,8 @@ export default function CharactersPage() {
                       />
                     </div>
                   </div>
-                  <div className="flex gap-2">
+                  <StorylineEditor characterId={c.id} />
+                  <div className="flex gap-2 pt-2">
                     <Button variant="primary" size="sm" onClick={handleSaveEdit} disabled={updateMutation.isPending}>
                       <Save className="w-3 h-3 mr-1" /> 保存
                     </Button>
@@ -343,6 +375,8 @@ export default function CharactersPage() {
                   {c.description && (
                     <p className="text-xs text-gray-500 mb-2 line-clamp-2">{c.description}</p>
                   )}
+                  <StorylineIndicator characterId={c.id} />
+                  <KnowledgePreview characterId={c.id} />
                   <div className="space-y-1 mb-3">
                     {c.personality && Object.keys(c.personality).length > 0 && (
                       <div className="flex flex-wrap gap-1">
