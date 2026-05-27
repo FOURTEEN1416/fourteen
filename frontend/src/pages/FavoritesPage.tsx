@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useUnifiedCharacters } from '../hooks/useQueries'
-import { memoryApi } from '../api/memoryApi'
-import type { FavoriteItem } from '../api/memoryApi'
+import { api } from '../api/client'
+import type { FavoriteItem } from '../api/characters'
 import Card from '../components/common/Card'
 import Button from '../components/common/Button'
 import EmptyState from '../components/common/EmptyState'
@@ -23,7 +23,7 @@ export default function FavoritesPage() {
     try {
       const cid = selectedChar || activeChar?.id
       if (!cid) { setLoading(false); return }
-      const r = await memoryApi.listFavorites(cid)
+      const r = await api.listFavorites(cid)
       setFavs(r)
       setLoaded(true)
     } catch { setFavs([]) }
@@ -34,7 +34,7 @@ export default function FavoritesPage() {
     try {
       const cid = selectedChar || activeChar?.id
       if (!cid) return
-      await memoryApi.removeFavorite(cid, id)
+      await api.removeFavorite(cid, id)
       setFavs(favs.filter((f: FavoriteItem) => f.id !== id))
     } catch { /* ignore */ }
   }
@@ -44,7 +44,7 @@ export default function FavoritesPage() {
     try {
       const cid = selectedChar || activeChar?.id
       if (!cid) return
-      await memoryApi.forward(cid, forwardTarget, memoryId)
+      await api.forwardFavorite(cid, forwardTarget, memoryId)
       setForwardTarget('')
     } catch { /* ignore */ }
   }

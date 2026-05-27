@@ -469,9 +469,6 @@ export interface WeChatConnectionStatus {
   started_at?: number
 }
 
-/** @deprecated 使用 UnifiedCharacter */
-export type DeprecatedCharacterState = import('./character').CharacterState
-
 // ── 统一角色管理 ──
 
 export interface UnifiedCharacter {
@@ -578,4 +575,117 @@ export interface VoiceBindStatusResponse {
   character_id: string
   engine?: string
   model_path?: string
+}
+
+// ── 剧情线 ──
+
+export interface StorylineStageTiming {
+  start_minutes: number
+  end_minutes: number
+}
+
+export interface StorylineStyleRule {
+  style: string
+  inject_prompt: boolean
+}
+
+export interface StorylineBehaviorRule {
+  rule: string
+  enforce: boolean
+}
+
+export interface StorylineStage {
+  name: string
+  display_name: string
+  timing: StorylineStageTiming
+  style_rules: StorylineStyleRule[]
+  behavior_rules: StorylineBehaviorRule[]
+  dialogue_notes: string
+  transition_message: string
+}
+
+export interface StorylineEnding {
+  type: string
+  final_dialogue: string
+  narrative: string
+  memorial_items: string[]
+  blank_after_end: boolean
+}
+
+export interface StorylineConfig {
+  enabled: boolean
+  time_per_turn: number
+  time_unit_label: string
+  max_duration_minutes: number
+  start_day: number
+  start_hour: number
+  start_minute: number
+  stages: StorylineStage[]
+  ending: StorylineEnding
+  auto_detected: boolean
+  detection_confidence: number
+}
+
+export interface StorylineConfigResponse {
+  enabled: boolean
+  configured: boolean
+  config?: StorylineConfig
+}
+
+export interface StorylineState {
+  character_id: string
+  story_time_minutes: number
+  story_day: number
+  story_hour: number
+  story_minute: number
+  display_time: string
+  current_stage_index: number
+  is_ended: boolean
+  turn_count: number
+}
+
+export interface StorylineCurrentStage {
+  name: string
+  display_name: string
+  style_rules: string[]
+  behavior_rules: string[]
+  dialogue_notes: string
+  transition_message: string
+}
+
+export interface StorylineProgress {
+  enabled: boolean
+  state: StorylineState | null
+  current_stage: StorylineCurrentStage | null
+  progress_percent: number
+  total_stages: number
+}
+
+export interface StorylineDetectResult {
+  has_storyline: boolean
+  confidence: number
+  matched_patterns: string[]
+  suggested: StorylineConfig | null
+}
+
+export interface StorylineConfigRequest {
+  enabled: boolean
+  time_per_turn: number
+  max_duration_minutes: number
+  stages: Array<{
+    name: string
+    display_name?: string
+    timing: StorylineStageTiming
+    style_rules: StorylineStyleRule[]
+    behavior_rules: StorylineBehaviorRule[]
+    dialogue_notes?: string
+    transition_message?: string
+  }>
+  ending: {
+    type: string
+    final_dialogue?: string
+    narrative?: string
+    memorial_items?: string[]
+    blank_after_end?: boolean
+  }
 }

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useUnifiedCharacters } from '../hooks/useQueries'
-import { personaCardApi } from '../api/personaCardApi'
-import type { PersonaCardData } from '../api/personaCardApi'
+import { api } from '../api/client'
+import type { PersonaCardData } from '../api/characters'
 import { useErrorStore } from '../store/errorStore'
 import Card from '../components/common/Card'
 import Button from '../components/common/Button'
@@ -38,7 +38,7 @@ export default function PersonaEditorPage() {
 
   const { data: personaData, error: personaError, refetch: refetchPersona, isLoading: personaLoading } = useQuery({
     queryKey: ['persona-card', selected],
-    queryFn: () => personaCardApi.get(selected),
+    queryFn: () => api.getPersonaCard(selected),
     enabled: !!selected,
   })
 
@@ -59,7 +59,7 @@ export default function PersonaEditorPage() {
     if (!selected || !persona) return
     try {
       setSaving(true)
-      await personaCardApi.update(selected, persona)
+      await api.updatePersonaCard(selected, persona)
       setIsDirty(false)
       toast({ type: 'success', message: '人设保存成功' })
     } catch (e: unknown) {
@@ -70,7 +70,7 @@ export default function PersonaEditorPage() {
   async function handlePreview() {
     if (!selected) return
     try {
-      const data = await personaCardApi.preview(selected)
+      const data = await api.previewPersonaCard(selected)
       setPreview(data.preview)
     } catch (e: unknown) {
       toast({ type: 'error', message: getErrorMessage(e) || '预览失败' })

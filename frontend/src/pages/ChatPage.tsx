@@ -4,12 +4,13 @@ import { useWebSocket } from '../hooks/useWebSocket'
 import { useChatStore } from '../store/chatStore'
 import { useErrorStore } from '../store/errorStore'
 import { useSettingsStore } from '../store/settingsStore'
-import { useActiveCharacter } from '../hooks/useQueries'
+import { useActiveCharacter, useStorylineProgress } from '../hooks/useQueries'
 import { api } from '../api/client'
 import MessageList from '../components/chat/MessageList'
 import ChatInput from '../components/chat/ChatInput'
 import EmotionPanel from '../components/emotion/EmotionPanel'
 import ProactiveToast from '../components/chat/ProactiveToast'
+import Badge from '../components/common/Badge'
 
 const MAX_STREAM_RETRIES = 3
 
@@ -27,6 +28,8 @@ export default function ChatPage() {
   const addToast = useErrorStore((s) => s.addToast)
   const { activeCharacter } = useActiveCharacter()
   const useStreaming = useSettingsStore((s) => s.useStreaming)
+
+  const { data: storylineProgress } = useStorylineProgress(activeCharacter?.character_id)
 
   const streamAbortRef = useRef<AbortController | null>(null)
   const streamRetryCountRef = useRef(0)
@@ -153,7 +156,25 @@ export default function ChatPage() {
       <div className="flex-1 flex">
         <div className="flex-1 flex flex-col min-w-0">
           <div className="border-b border-gray-200 px-4 py-3 bg-gray-50">
-            <h1 className="text-sm font-semibold text-gray-800">{(activeCharacter as { name?: string } | null)?.name ?? '十四'}</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-sm font-semibold text-gray-800">{(activeCharacter as { name?: string } | null)?.name ?? '十四'}</h1>
+              {storylineProgress?.enabled && storylineProgress.current_stage && (
+                <div className="flex items-center gap-1.5">
+                  <Badge variant="info">{storylineProgress.current_stage.display_name}</Badge>
+                  {storylineProgress.state && (
+                    <span className="text-[10px] text-gray-400">
+                      第{storylineProgress.state.story_day + 1}天 {String(storylineProgress.state.story_hour).padStart(2, '0')}:{String(storylineProgress.state.story_minute).padStart(2, '0')}
+                    </span>
+                  )}
+                  {storylineProgress.progress_percent > 0 && storylineProgress.progress_percent < 100 && (
+                    <div className="w-12 h-1 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-gray-400 rounded-full" style={{ width: `${storylineProgress.progress_percent}%` }} />
+                    </div>
+                  )}
+                  {storylineProgress.state?.is_ended && <Badge variant="info">已结局</Badge>}
+                </div>
+              )}
+            </div>
           </div>
 
           {!isConnected && !sessionLoading && (
