@@ -30,9 +30,10 @@ function AIChatTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaSt
     const text = input.trim(); if (!text || loading) return
     setMessages(prev => [...prev, { role: 'user', content: text }]); setInput(''); setLoading(true)
     try {
-      const res = await chat(text, { mode: 'character_build' })
-      setMessages(prev => [...prev, { role: 'assistant', content: res?.reply || '嗯，我知道了～' }])
-      if (res?.persona_update) onPersonaUpdate(res.persona_update)
+      const res = await chat(text, '', 'character_build')
+      const data = res.data as { reply?: string; persona_update?: Partial<PersonaState> }
+      setMessages(prev => [...prev, { role: 'assistant', content: data?.reply || '嗯，我知道了～' }])
+      if (data?.persona_update) onPersonaUpdate(data.persona_update)
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: '抱歉，我暂时无法回应。' }])
     } finally { setLoading(false) }
@@ -178,7 +179,7 @@ function CreateButton() {
     try {
       const result = await createMutation.mutateAsync({ name: persona.name || '未命名角色', description: persona.description || '', core_anchors: persona.anchors, personality: persona.personality, speaking_style: persona.speakingStyle })
       toast({ type: 'success', message: '角色创建成功！' })
-      navigate(`/users/${userId || 'default'}/roles/${result.character_id}/settings`)
+      navigate(`/users/${userId || 'default'}/roles/${result.id}/settings`)
     } catch { toast({ type: 'error', message: '创建失败，请重试' }) }
   }
   return (

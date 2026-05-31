@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { AnimatedPage } from '../components/shared'
 import { useWechatStatus } from '../hooks/useQueries'
-import { Plus, Search, Wifi, WifiOff, Trash2, RefreshCw, X, QrCode, Clock, MessageSquare, AlertTriangle, CheckCircle2, Smartphone } from 'lucide-react'
+import { Search, Wifi, WifiOff, Trash2, RefreshCw, X, QrCode, Clock, MessageSquare, AlertTriangle, CheckCircle2, Smartphone } from 'lucide-react'
 import type { SavedConnection } from '../types/framework'
 import {
   wechatCreateConnection,
