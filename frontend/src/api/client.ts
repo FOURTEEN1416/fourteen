@@ -54,6 +54,10 @@ import {
   getVoiceConfig, bindVoice, updateVoice, unbindVoice, testVoice,
   exportCharacter, importCharacter,
 } from './characters'
+import {
+  listUsers, getUserDetail, getUserChatHistory, getUserEmotion,
+  setUserRole, resetUser, deleteUser,
+} from './users'
 
 const API_BASE = '/api'
 
@@ -154,6 +158,7 @@ export {
   getVoiceConfig, bindVoice, updateVoice, unbindVoice, testVoice,
   exportCharacter, importCharacter,
 }
+export { listUsers, getUserDetail, getUserChatHistory, getUserEmotion, setUserRole, resetUser, deleteUser }
 export {
   health, stats, dashboardStats, config, saveConfig,
   personaProfile, personaEvolutionLog, memoryFacts,
@@ -202,6 +207,8 @@ export const api = {
   getStorylineProgress, detectStoryline, resetStoryline,
   getVoiceConfig, bindVoice, updateVoice, unbindVoice, testVoice,
   exportCharacter, importCharacter,
+  // users domain
+  listUsers, getUserDetail, getUserChatHistory, getUserEmotion, setUserRole, resetUser, deleteUser,
   // shisi legacy — flattened into api object
   affinityGet, affinityUpdate, affinityUnlocks, affinityDecay,
   emotionStageGet, emotionStageList, emotionStageEvaluate,

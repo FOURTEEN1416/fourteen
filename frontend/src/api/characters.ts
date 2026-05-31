@@ -16,6 +16,10 @@ import type {
   CharacterVoiceResponse,
   VoiceBindRequest,
   VoiceUpdateRequest,
+  MiMoStatus,
+  MiMoCloneResponse,
+  MiMoDesignResponse,
+  MiMoSetEngineResponse,
 } from '../types/api'
 
 // ── 类型 ──
@@ -226,20 +230,67 @@ export function testVoice(characterId: string, text: string = '你好，我是�
   return client.post(`/characters/${characterId}/voice/test`, { text }, { responseType: 'blob' }).then(r => r.data as Blob)
 }
 
-// ════════════════════════════════════════════════════
-//  角色卡导入/导出 (Shisi 桥接，尚未有统一等效)
-// ════════════════════════════════════════════════════
+// ── MiMo TTS API ──
 
-/** POST /api/shisi/characters/export/{id} — 导出角色卡 */
-export function exportCharacter(id: string): Promise<Blob> {
-  return client.post(`/shisi/characters/export/${id}`, null, { responseType: 'blob' }).then(r => r.data as Blob)
+/** GET /mimo/status — MiMo TTS 状态 */
+export function getMiMoStatus(): Promise<MiMoStatus> {
+  return client.get('/mimo/status').then(r => r.data as MiMoStatus)
 }
 
-/** POST /api/shisi/characters/import — 导入角色卡 */
-export function importCharacter(file: File): Promise<any> {
+/** POST /mimo/clone — 语音克隆 */
+export function cloneMiMoVoice(voiceName: string, description: string, audio: File): Promise<MiMoCloneResponse> {
+  const formData = new FormData()
+  formData.append('voice_name', voiceName)
+  formData.append('description', description)
+  formData.append('audio', audio)
+  return client.post('/mimo/clone', formData).then(r => r.data as MiMoCloneResponse)
+}
+
+/** POST /mimo/design — 音色设计 */
+export function designMiMoVoice(voiceName: string, description: string, gender?: string, ageGroup?: string): Promise<MiMoDesignResponse> {
+  const formData = new FormData()
+  formData.append('voice_name', voiceName)
+  formData.append('description', description)
+  if (gender) formData.append('gender', gender)
+  if (ageGroup) formData.append('age_group', ageGroup)
+  return client.post('/mimo/design', formData).then(r => r.data as MiMoDesignResponse)
+}
+
+/** POST /mimo/set-engine — 切换模型 */
+export function setMiMoEngine(model: string): Promise<MiMoSetEngineResponse> {
+  const formData = new FormData()
+  formData.append('model', model)
+  return client.post('/mimo/set-engine', formData).then(r => r.data as MiMoSetEngineResponse)
+}
+
+/** POST /mimo/switch-voice — 切换音色 */
+export function switchMiMoVoice(voiceId: string): Promise<{ status: string; voice_id: string; message?: string }> {
+  const formData = new FormData()
+  formData.append('voice_id', voiceId)
+  return client.post('/mimo/switch-voice', formData).then(r => r.data as { status: string; voice_id: string; message?: string })
+}
+
+/** POST /mimo/synthesize — MiMo 直接合成 */
+export function synthesizeMiMo(text: string): Promise<Blob> {
+  const formData = new FormData()
+  formData.append('text', text)
+  return client.post('/mimo/synthesize', formData, { responseType: 'blob' }).then(r => r.data as Blob)
+}
+
+// ════════════════════════════════════════════════════
+//  角色卡导入/导出 (统一 API)
+// ════════════════════════════════════════════════════
+
+/** GET /api/characters/{id}/export — 导出角色卡 JSON */
+export function exportCharacter(id: string): Promise<Blob> {
+  return client.get(`/characters/${id}/export`, { responseType: 'blob' }).then(r => r.data as Blob)
+}
+
+/** POST /api/characters/import — 导入角色卡 JSON 文件 */
+export function importCharacter(file: File): Promise<{ id: string; name: string; status: string }> {
   const fd = new FormData()
   fd.append('file', file)
-  return client.post('/shisi/characters/import', fd, {
+  return client.post('/characters/import', fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
-  }).then(r => r.data)
+  }).then(r => r.data as { id: string; name: string; status: string })
 }

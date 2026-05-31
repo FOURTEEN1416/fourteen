@@ -95,7 +95,7 @@ voice:
     ffmpeg_path: "ffmpeg"
     preferred_format: "silk"
     silk_sample_rate: 24000
-  engine: "edge-tts"                    # 默认引擎: edge-tts / cosyvoice / gpt-sovits / bert-vits2
+  engine: "mimo-tts"                   # 默认引擎: mimo-tts / edge-tts / cosyvoice / gpt-sovits / bert-vits2
   emotion_enabled: true                 # 启用情感语音参数注入
   edge-tts:
     speaker_name: "zh-CN-XiaoxiaoNeural" # 中文女声
@@ -118,6 +118,19 @@ voice:
     noisew: 0.9
     speed: 1.0
     timeout: 60.0
+  # MiMo TTS配置（优先API，本地引擎作为降级）
+  # 文档: https://platform.xiaomimimo.com/docs
+  mimo-tts:
+    enabled: true                       # 是否启用MiMo TTS
+    api_key: "sk-c3xwgfb34tyvbs3h14iji0gbruvwim1fi4siglxel6fdl3y8"  # MiMo API密钥
+    model: "mimo-v2.5-tts"              # 默认模型:
+                                        #   - mimo-v2.5-tts: 基础语音合成
+                                        #   - mimo-v2.5-tts-voiceclone: 语音克隆
+                                        #   - mimo-v2.5-tts-voicedesign: 音色设计
+                                        #   - mimo-v2-tts: 降级备选
+    voice_id: ""                        # 克隆音色ID（使用voiceclone时填写）
+    timeout: 30.0                       # API调用超时（秒）
+    fallback_local: true                # API失败时是否降级到本地引擎
 
 # ── 表情包配置 ──
 sticker:

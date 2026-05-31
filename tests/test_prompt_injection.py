@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, ".")
 
-from safety.prompt_injection import PromptInjectionDetector
+from security.prompt_injection import PromptInjectionDetector
 
 
 def test_safe_input():

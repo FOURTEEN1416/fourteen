@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, ".")
 
-from safety.pii_anonymizer import PIIAnonymizer
+from security.pii_anonymizer import PIIAnonymizer
 
 
 def test_no_pii():

@@ -457,7 +457,7 @@ OpenAI 的 ChatGPT Pulse 功能提供了主动消息的参考范式：每天晚�
 | GirlfriendBot.send_message() | cowagent_adapter/girlfriend_bot.py:160-198 | 通过 send_message_func 调用 |
 | WeChatConnector._send_text() | wechat_direct/connector.py:176-188 | 通过 send_message_func 调用 |
 | WeChatProactiveMessenger | shisi/wechat/proactive_messenger.py | 注入到 scheduler |
-| REST API /api/proactive/* | api/rest_api.py | 已有，无需改动 |
+| REST API /api/proactive/* | api/app_factory.py | 已有，无需改动 |
 | 前端 ProactiveToast | frontend/src/components/chat/ProactiveToast.tsx | 已有，无需改动 |
 | 前端 ProactiveEnginePanel | frontend/src/components/common/ProactiveEnginePanel.tsx | 已有，无需改动 |
 

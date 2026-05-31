@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, ".")
 
-from tool_system.builtin.character_crawler_tool import CharacterCrawlerTool
+from tools.builtin.character_crawler_tool import CharacterCrawlerTool
 
 
 def test_validate_url_blocks_localhost():
@@ -49,7 +49,7 @@ def test_unknown_action():
 
 
 def test_generate_character_prompt():
-    from tool_system.builtin.character_crawler_tool import CharacterKnowledgeImporter
+    from tools.builtin.character_crawler_tool import CharacterKnowledgeImporter
     importer = CharacterKnowledgeImporter()
     prompt = importer.generate_character_prompt({
         "name": "测试角色",

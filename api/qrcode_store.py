@@ -6,8 +6,9 @@ import os
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Security
-from fastapi.security import APIKeyHeader
+from fastapi import APIRouter, Security
+
+from api.auth import verify_api_key_dep
 
 logger = logging.getLogger("qrcode_store")
 
@@ -59,24 +60,8 @@ def _generate_qr_image(url: str) -> str | None:
         return None
 
 
-# API Key 认证配置（与 rest_api.py 保持一致）
-_api_key_enabled = os.environ.get("API_KEY_ENABLED", "false").lower() == "true"
-_api_key = os.environ.get("API_KEY", "")
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-
-async def _verify_api_key(api_key: str = Security(_api_key_header)):
-    """验证 API Key"""
-    if not _api_key_enabled:
-        return True
-    import hmac
-    if hmac.compare_digest(api_key or "", _api_key):
-        return True
-    raise HTTPException(401, "Invalid or missing API key")
-
-
 @router.get("/qrcode")
-def get_qrcode(_auth: bool = Security(_verify_api_key)):
+def get_qrcode(_auth: bool = Security(verify_api_key_dep)):
     data = _read_qrcode_data()
     url = data.get("qrcode_url", "")
     has_new_qr = url and (time.time() - data.get("timestamp", 0)) < QRCODE_EXPIRY_SECONDS

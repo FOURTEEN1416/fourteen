@@ -56,6 +56,8 @@ class RedisClient:
 
         try:
             self._connect()
+            # redis-py 构造是惰性的，必须 ping 一次才能确认连接真的可用
+            self._client.ping()
             logger.info("Redis连接成功: %s:%s/%s", host, port, db)
         except Exception as e:  # noqa: BLE001
             logger.error("Redis连接失败: %s", e)

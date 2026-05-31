@@ -1,282 +1,140 @@
-# 十四 AI虚拟伴侣系统
+# 十四
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/FastAPI-0.110%2B-green" alt="FastAPI">
-  <img src="https://img.shields.io/badge/License-MIT-yellow" alt="License">
+  <img src="https://img.shields.io/badge/Python-3.10+-blue">
+  <img src="https://img.shields.io/badge/TypeScript-React%2018-3178c6">
+  <img src="https://img.shields.io/badge/CI-passing-brightgreen">
+  <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
-## 项目简介
+AI 虚拟伴侣。微信扫码就能聊，控制台调角色和语音。
 
-**十四 AI虚拟伴侣系统**是一个基于大语言模型(LLM)的智能情感陪伴与记忆增强系统。系统通过多模块协同架构，实现自然对话、情感识别、长期记忆、主动交互等核心功能，为用户提供沉浸式的AI陪伴体验。
+---
 
-### 核心功能
-
-- **智能对话引擎**: 基于DeepSeek等LLM，支持流式响应与多模型优先级调度
-- **情感识别与响应**: 混合模式情感分类器，支持情感语音参数注入
-- **长期记忆系统**: 工作记忆+情景记忆+长期记忆三层架构，支持记忆自动归档与检索
-- **主动交互**: 基于 urgency 算法的主动消息触发，支持LLM生成主动内容
-- **语音合成**: 支持 Edge-TTS、GPT-SoVITS、Bert-VITS2 多引擎
-- **表情包推荐**: 基于情感映射的自动表情包推荐
-- **角色卡系统**: 支持角色卡导入与个性化配置
-- **工具系统**: 内置天气、搜索、日历、提醒等多种工具
-- **微信集成**: 支持微信消息收发与历史记录导入
-
-## 环境要求
-
-- **Python**: 3.10 或更高版本
-- **操作系统**: Windows / Linux / macOS
-- **内存**: 建议 4GB+
-- **可选依赖**:
-  - Redis (用于缓存与消息队列)
-  - FFmpeg (用于语音格式转换)
-
-## 安装依赖
-
-### 1. 克隆项目
+## 快速开始
 
 ```bash
 git clone https://github.com/fourteen-ai/ai-girlfriend.git
 cd ai-girlfriend
-```
 
-### 2. 创建虚拟环境
-
-```bash
-# 使用 venv
-python -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-# 或
-.venv\Scripts\activate  # Windows
-
-# 或使用 conda
-conda create -n ai-girlfriend python=3.11
-conda activate ai-girlfriend
-```
-
-### 3. 安装依赖
-
-```bash
-# 基础依赖
-pip install -e .
-
-# 开发依赖（包含测试工具）
+python -m venv .venv && .venv\Scripts\activate
 pip install -e ".[dev]"
 
-# 或使用 requirements.txt
-pip install -r requirements.txt
-```
-
-## 配置指南
-
-### 环境变量 (.env)
-
-创建 `.env` 文件，配置以下环境变量：
-
-```env
-# LLM API 配置
-DEEPSEEK_API_KEY=your_deepseek_api_key
-DEEPSEEK_API_BASE=https://api.deepseek.com/v1
-
-# OpenCode Zen (可选)
-OPENCODE_ZEN_API_KEY=your_opencode_api_key
-
-# Redis 配置 (可选)
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_DB=0
-REDIS_PASSWORD=your_redis_password
-
-# 安全配置
-ENCRYPTION_KEY=your_encryption_key_32_chars_long
-
-# 微信配置 (可选)
-WECHAT_DB_PATH=/path/to/wechat/db
-WECHAT_KEY=your_wechat_key
-```
-
-### 配置文件
-
-项目使用 YAML 配置文件，位于 `config/` 目录：
-
-- `system.yaml` - 开发环境配置
-- `system_prod.yaml` - 生产环境配置
-- `system_test.yaml` - 测试环境配置
-
-通过环境变量 `ENV` 切换配置：
-
-```bash
-ENV=prod python main.py
-```
-
-## 启动方式
-
-### 标准模式
-
-```bash
-# 开发模式
+cp .env.example .env   # 填 LLM 的 key
 python main.py
-
-# 生产模式
-ENV=prod python main.py
 ```
 
-### API 服务模式
+终端会打印二维码，微信扫一下就开始聊。
 
-```bash
-# 启动 FastAPI 服务
-python -c "from main import start_api; start_api()"
-
-# 或使用 uvicorn 直接启动
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
-
-### 微信直连模式
-
-```bash
-python wechat_direct/connector.py
-```
-
-### 测试运行
-
-```bash
-# 运行所有测试
-pytest
-
-# 运行单元测试（跳过慢测试）
-pytest -m "not slow"
-
-# 运行特定测试文件
-pytest tests/test_memory.py
-
-# 带覆盖率报告
-pytest --cov=. --cov-report=html
-```
-
-## 架构说明
-
-```
-ai-girlfriend/
-├── config/                 # 配置文件
-│   ├── system.yaml        # 开发配置
-│   ├── system_prod.yaml   # 生产配置
-│   └── system_test.yaml   # 测试配置
-├── core/                   # 核心模块
-│   ├── emotion/           # 情感引擎
-│   ├── memory/            # 记忆系统
-│   ├── persona/           # 人格系统
-│   └── safety/            # 安全模块
-├── tool_system/            # 工具系统
-│   └── builtin/           # 内置工具
-├── voice/                  # 语音合成
-├── wechat_direct/          # 微信直连
-├── weclone_adapter/        # WeClone 适配器
-├── tests/                  # 测试用例
-├── main.py                 # 主入口
-└── orchestrator.py         # 编排器
-```
-
-### 核心模块
-
-| 模块 | 说明 | 关键文件 |
-|------|------|----------|
-| 编排器 (Orchestrator) | 12步消息处理流水线 | `orchestrator.py` |
-| 情感引擎 | 情感识别与亲和度计算 | `core/emotion/` |
-| 记忆系统 | 三层记忆架构 | `core/memory/` |
-| 工具系统 | 可扩展工具框架 | `tool_system/` |
-| 语音合成 | 多引擎TTS支持 | `voice/` |
-
-## API 文档
-
-启动服务后访问：
-
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-- **健康检查**: http://localhost:8000/health
-- **指标监控**: http://localhost:9090/metrics
-
-### WebSocket 接口
-
-```
-ws://localhost:8765/chat
-```
-
-消息格式：
-
-```json
-{
-  "type": "message",
-  "content": "你好",
-  "session_id": "user_123"
-}
-```
-
-## 安全注意事项
-
-1. **API 密钥保护**
-   - 不要将 `.env` 文件提交到版本控制
-   - 生产环境使用密钥管理服务
-
-2. **数据加密**
-   - 敏感对话内容建议启用加密存储
-   - 配置 `ENCRYPTION_KEY` 环境变量
-
-3. **输入过滤**
-   - 系统内置输入/输出过滤器
-   - 支持 PII 匿名化与提示词注入检测
-
-4. **速率限制**
-   - API 默认启用速率限制
-   - 生产环境建议配置更严格的限制
-
-5. **微信集成安全**
-   - 微信数据库解密需要管理员权限
-   - 妥善保管解密密钥
-
-## 开发指南
-
-### 代码规范
-
-```bash
-# 代码格式化
-ruff format .
-
-# 代码检查
-ruff check .
-
-# 类型检查
-mypy .
-```
-
-### 添加新工具
-
-1. 在 `tool_system/builtin/` 创建新工具类
-2. 继承 `BaseTool` 并实现 `execute` 方法
-3. 在配置文件中启用工具
-
-### 添加新测试
-
-```python
-# tests/test_new_feature.py
-import pytest
-
-@pytest.mark.unit
-def test_new_feature():
-    assert True
-```
-
-## 许可证
-
-MIT License - 详见 [LICENSE](LICENSE) 文件
-
-## 支持与反馈
-
-- **Issues**: https://github.com/fourteen-ai/ai-girlfriend/issues
-- **文档**: https://docs.fourteen.ai
-- **邮箱**: team@fourteen.ai
+**前提：** Python 3.10+。FFmpeg 和 Redis 是可选的（语音转换 / 缓存用，没有也能跑）。
 
 ---
 
-<p align="center">
-  Made with ❤️ by 十四团队
-</p>
+## 它能做什么
+
+| 能力 | 说明 |
+|------|------|
+| **微信聊天** | 扫码登录，文字/语音消息都支持。多用户可以同时聊，各自独立 |
+| **角色系统** | 每个微信用户绑一个角色卡，性格、说话风格、口头禅都能调 |
+| **情感引擎** | 聊得越久越了解你，有亲密度和情感阶段变化 |
+| **主动搭话** | 不全是等你发消息，系统也会主动找话题 |
+| **语音合成** | 文字回复能自动转语音发到微信。支持 MiMo 云 / Edge-TTS / 本地模型 |
+| **记忆系统** | 会记住你说过的事（三层记忆：短期+情景+长期） |
+| **工具** | 天气、日历、提醒、搜索……需要什么可以加 |
+| **剧情线** | 和角色的关系可以按"剧情"推进，有支线和进度追踪 |
+| **控制台** | 浏览器打开 `localhost:8000`，调角色设语音查记忆 |
+
+---
+
+## 配置
+
+一个文件搞定：`config/system.yaml`。主要改这几块：
+
+```yaml
+llm:
+  provider: auto          # auto = 自动 fallback 链（智谱→讯飞→百度→免费模型）
+  temperature: 0.85
+
+voice:
+  engine: "mimo-tts"      # 默认语音引擎
+  mimo-tts:
+    enabled: true
+    api_key: "sk-xxx"     # MiMo API key
+    model: "mimo-v2.5-tts"
+
+wechat: {}                # 微信直连，扫码自动配
+```
+
+`.env` 里放 LLM 的 key。不填也能跑——fallback 链最底层有个免费模型兜底。
+
+---
+
+## 怎么跑
+
+```bash
+python main.py                  # 开发模式（终端+微信）
+ENV=prod python main.py        # 生产模式
+python main.py --no-wechat      # 只要控制台，不连微信
+```
+
+启动后：
+- 控制台：`http://localhost:8000`
+- API 文档：`http://localhost:8000/docs`
+- WebSocket：`ws://localhost:8765/chat`
+
+---
+
+## 怎么测
+
+```bash
+pytest                          # 全量（525+ 用例）
+pytest -m "not slow"           # 跳过慢的
+pytest --cov=. --cov-report=html  # 覆盖率报告
+```
+
+---
+
+## 项目结构
+
+```
+├── api/             FastAPI（统一路由，前端只调这一层）
+│   └── routers/     角色 / 语音 / 剧情线 / 记忆 / 知识库
+├── voice/           语音引擎：MiMo Cloud / Edge-TTS / SoVITS / Bert-VITS2
+├── wechat_direct/   微信直连（扫码登录 + 收发消息）
+├── girlfriend_manager.py  多用户调度（每个微信用户独立情感状态）
+├── my_character/    情感引擎 + 角色卡
+├── shisi/           旧架构（逐步废弃，前端已不调）
+├── frontend/        React 管理台
+│   └── src/
+│       ├── api/      按域拆的 API Client
+│       ├── pages/    22 个页面
+│       ├── store/    Zustand（UI 状态）
+│       └── hooks/    React Query（服务端数据）
+├── docs/
+│   ├── adr/         架构决策记录（6 个）
+│   └── architecture/ 8层地图 / 设计原则 / Fitness Functions / Bus Factor
+├── tests/           525+ 后端单元测试
+├── config/          配置文件
+└── main.py          入口
+```
+
+深入看 `docs/architecture/8-layer-code-map.md`。
+
+---
+
+## 开发约定
+
+```bash
+ruff format .   # 格式化
+ruff check .    # lint
+mypy .          # 类型检查
+bun run build   # 前端构建（cd frontend/）
+```
+
+CI 会自动跑，不合规不合并。具体规则见 `docs/architecture/fitness-functions.md`。
+
+---
+
+## 许可证
+
+MIT

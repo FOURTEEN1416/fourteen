@@ -10,7 +10,7 @@ from fastapi.responses import Response
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
-from shisi.voice_ext.character_voice import CharacterVoiceManager
+from shisi.voice.character_voice import CharacterVoiceManager
 
 logger = logging.getLogger("api.voice_routes")
 

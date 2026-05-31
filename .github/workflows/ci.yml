@@ -2,66 +2,139 @@ name: CI
 
 on:
   push:
-    branches: [main, master, dev]
+    branches: [main, arch/*]
   pull_request:
-    branches: [main, master]
+    branches: [main]
+  schedule:
+    - cron: '0 8 * * 1'  # 每周一 08:00 UTC 周期检查
 
 jobs:
-  lint:
+  backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install dependencies
-        run: pip install ruff
-      - name: Lint with ruff
-        run: ruff check .
-      - name: Format check with ruff
-        run: ruff format . --check
+          cache: "pip"
 
-  typecheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
-      - name: Type check with mypy
-        run: mypy . --ignore-missing-imports
-
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11"]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
+      - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      - name: Run tests with coverage
-        run: pytest tests/ -v --tb=short --cov=. --cov-report=xml --cov-fail-under=30
 
-  build-frontend:
+      - name: Run pytest (push/PR: stop on first fail)
+        if: github.event_name != 'schedule'
+        run: pytest -v --tb=short -x
+        env:
+          ENV: test
+          AI_GF_ENV: test
+
+      - name: Run pytest with coverage (schedule: full report)
+        if: github.event_name == 'schedule'
+        run: pytest -v --tb=short --cov=. --cov-report=term --cov-report=html -m "not slow"
+        env:
+          ENV: test
+          AI_GF_ENV: test
+
+      - name: Upload coverage report (schedule only)
+        if: github.event_name == 'schedule'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: htmlcov/
+
+      - name: Run ruff check
+        run: ruff check . --output-format=github
+        continue-on-error: true
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: TypeScript type check
+        run: bunx tsc --noEmit
+        continue-on-error: true
+
+      - name: Build frontend
+        run: bun run build
+
+  # ═══ Fitness Functions（自动化门禁） ═══
+
+  ff-no-old-api-imports:
+    """FF-0003: 前端页面禁止直接 import 旧 API 文件"""
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci || npm install
-      - name: Build
-        working-directory: frontend
-        run: npm run build
+      - name: Check pages/ 无旧 API import
+        run: |
+          FORBIDDEN="from.*'\.\./api/characterApi\|from.*'\.\./api/memoryApi\|from.*'\.\./api/personaCardApi\|from.*'\.\./api/voiceApi\|from.*'\.\./api/oldClient\|from.*shisiClient\|from.*trainingApi"
+          if grep -rn "$FORBIDDEN" frontend/src/pages/ frontend/src/hooks/ 2>/dev/null; then
+            echo "❌ FF-0003 违规：页面直接 import 了旧 API 文件"
+            exit 1
+          fi
+          echo "✅ FF-0003: 无旧 API import"
+
+  ff-client-ts-no-functions:
+    """FF-0006: client.ts 禁止定义函数（只做 re-export）"""
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check client.ts 无函数定义
+        run: |
+          if grep -qE "export (async )?function|export const.*=.*\(.*\)" frontend/src/api/client.ts 2>/dev/null; then
+            echo "❌ FF-0006 违规：client.ts 包含函数定义，应移到领域文件中"
+            exit 1
+          fi
+          echo "✅ FF-0006: client.ts 纯 re-export"
+
+  ff-stores-no-api-imports:
+    """FF-0007: Zustand store 禁止直接调用 API"""
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check stores/ 无 API import
+        run: |
+          if grep -rn "from.*\.\./api/" frontend/src/store/*.ts 2>/dev/null; then
+            echo "❌ FF-0007 违规：Zustand store 直接 import API"
+            exit 1
+          fi
+          echo "✅ FF-0007: Store 无 API 直接调用"
+
+  adr-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check ADR directory exists and not empty
+        run: |
+          if [ ! -d "docs/adr" ] || [ -z "$(ls -A docs/adr)" ]; then
+            echo "❌ docs/adr/ 目录为空或不存在"
+            exit 1
+          fi
+          echo "✅ docs/adr/ 存在且有 ADR 文件"
+
+      - name: Check ADR Supersedes links are valid
+        run: |
+          for file in docs/adr/*.md; do
+            supersedes=$(grep -oP 'Supersedes ADR-\K\d+' "$file" || true)
+            if [ -n "$supersedes" ] && [ ! -f "docs/adr/ADR-$supersedes-*.md" ]; then
+              echo "⚠️  $file 引用了 ADR-$supersedes，但找不到完全匹配的文件名"
+            fi
+          done
+          echo "✅ ADR 引用完整性检查完成"

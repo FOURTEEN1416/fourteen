@@ -6,9 +6,9 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from ..memory.favorite_manager import FavoriteManager
 
-from ..memory_ext.favorite_manager import FavoriteManager
-from ..memory_ext.forward_manager import ForwardManager
+from ..memory.forward_manager import ForwardManager
 from .common import ApiResponse
 
 logger = logging.getLogger("shisi.api.memory_routes")

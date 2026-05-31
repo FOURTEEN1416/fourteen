@@ -9,8 +9,8 @@ import json
 import pytest
 
 from shisi.config import reset_config
-from shisi.memory_ext.favorite_manager import FavoriteManager
-from shisi.memory_ext.forward_manager import ForwardManager
+from shisi.memory.favorite_manager import FavoriteManager
+from shisi.memory.forward_manager import ForwardManager
 from shisi.migrations import run_migrations
 from shisi.stats.analytics import AnalyticsService
 from shisi.sticker.emotion_recommender import EmotionRecommender
@@ -18,7 +18,7 @@ from shisi.sticker.safety_check import check_sticker_safety
 from shisi.sticker.sticker_manager import StickerManager
 from shisi.vital_signs.emotion_mapping import EMOTION_VITAL_MAP
 from shisi.vital_signs.vital_engine import VitalSignsEngine
-from shisi.voice_ext.emotion_tts import VoiceEnhancer
+from shisi.voice.emotion_tts import VoiceEnhancer
 
 
 @pytest.fixture(autouse=True)
