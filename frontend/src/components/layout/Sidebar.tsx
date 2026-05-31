@@ -2,7 +2,7 @@
 import { NavLink, useLocation, Link } from 'react-router-dom'
 import {
   MessageCircle, Users, PanelLeftClose, PanelLeft,
-  Sliders, Sparkles, Mic, Shield, FileText,
+  Sparkles, Mic, Shield, FileText,
   Bot, Settings, Activity, Plus, ChevronDown, ChevronRight,
   User, Power,
 } from 'lucide-react'
@@ -162,7 +162,8 @@ export default function Sidebar() {
   const { level, userId, roleId, isCreatePage } = useRouteLevel()
 
   const atRoleLevel = level === 'role' && userId
-  const showRoleBar = atRoleLevel || (level === 'user' && !roleId)
+  // showRoleBar is derived from route level — used implicitly by layout
+  void (atRoleLevel || (level === 'user' && !roleId))
 
   return (
     <aside

@@ -9,7 +9,7 @@ import StorylineEditor from '../components/storyline/StorylineEditor'
 import type { RoleSettingsTab } from '../types/framework'
 import {
   User, Mic, MessageSquare, Database, Smile, Clock,
-  Save, Trash2, Copy, Play, Pause, Check, AlertTriangle,
+  Save, Trash2, Copy, Play, Check,
 } from 'lucide-react'
 
 // ═══ Constants ═══
@@ -136,7 +136,7 @@ function BasicTab() {
                   <span className="text-xs text-gray-600">{info.emoji} {info.zh}</span>
                 </div>
                 <div className="flex-1">
-                  <Slider value={val} min={0} max={1} step={0.01} onChange={v => setPersonality(prev => ({ ...prev, [key]: v }))} />
+                  <Slider value={val} min={0} max={1} step={0.01} label={labels[key]?.zh || key} onChange={v => setPersonality(prev => ({ ...prev, [key]: v }))} />
                 </div>
                 <span className="w-10 text-right text-xs font-mono text-gray-400">{(val * 100).toFixed(0)}</span>
               </div>
@@ -158,7 +158,7 @@ function BasicTab() {
               <div key={key} className="flex items-center gap-4">
                 <div className="w-20 shrink-0"><span className="text-xs text-gray-600">{labels[key] || key}</span></div>
                 <div className="flex-1">
-                  <Slider value={val} min={0} max={1} step={0.01} onChange={v => setSpeaking(prev => ({ ...prev, [key]: v }))} />
+                  <Slider value={val} min={0} max={1} step={0.01} label={labels[key] || key} onChange={v => setSpeaking(prev => ({ ...prev, [key]: v }))} />
                 </div>
                 <span className="w-10 text-right text-xs font-mono text-gray-400">{(val * 100).toFixed(0)}</span>
               </div>
@@ -238,12 +238,12 @@ function VoiceTab() {
             </div>
             <div className="flex items-center gap-4">
               <div className="w-20 shrink-0"><span className="text-xs text-gray-600">语速</span></div>
-              <div className="flex-1"><Slider value={edgeRate} min={0.5} max={2.0} step={0.1} onChange={setEdgeRate} /></div>
+              <div className="flex-1"><Slider value={edgeRate} min={0.5} max={2.0} step={0.1} label="语速" onChange={setEdgeRate} /></div>
               <span className="w-10 text-right text-xs font-mono text-gray-400">{edgeRate.toFixed(1)}x</span>
             </div>
             <div className="flex items-center gap-4">
               <div className="w-20 shrink-0"><span className="text-xs text-gray-600">音调</span></div>
-              <div className="flex-1"><Slider value={edgePitch} min={0} max={1} step={0.01} onChange={setEdgePitch} /></div>
+              <div className="flex-1"><Slider value={edgePitch} min={0} max={1} step={0.01} label="音调" onChange={setEdgePitch} /></div>
               <span className="w-10 text-right text-xs font-mono text-gray-400">{(edgePitch * 100).toFixed(0)}</span>
             </div>
             <div className="flex justify-end gap-2">
@@ -394,13 +394,13 @@ function MessageTab() {
           ].map(s => (
             <div key={s.label} className="flex items-center gap-4">
               <div className="w-24 shrink-0"><span className="text-xs text-gray-600">{s.label}</span></div>
-              <div className="flex-1"><Slider value={s.value} min={s.min} max={s.max} step={1} onChange={s.onChange} /></div>
+              <div className="flex-1"><Slider value={s.value} min={s.min} max={s.max} step={1} label={s.label} onChange={s.onChange} /></div>
               <span className="w-16 text-right text-xs font-mono text-gray-400">{s.value} {s.unit}</span>
             </div>
           ))}
           <div className="flex items-center gap-4">
             <div className="w-24 shrink-0"><span className="text-xs text-gray-600">紧迫阈值</span></div>
-            <div className="flex-1"><Slider value={urgency} min={0} max={1} step={0.01} onChange={setUrgency} /></div>
+            <div className="flex-1"><Slider value={urgency} min={0} max={1} step={0.01} label="紧迫阈值" onChange={setUrgency} /></div>
             <span className="w-16 text-right text-xs font-mono text-gray-400">{(urgency * 100).toFixed(0)}%</span>
           </div>
         </div>

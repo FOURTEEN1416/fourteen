@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Wifi, Power, PowerOff } from 'lucide-react'
+import { Wifi } from 'lucide-react'
 import { tools as fetchTools, toggleTool } from '../api/system'
 
 const TOOL_DESCRIPTIONS: Record<string, string> = {

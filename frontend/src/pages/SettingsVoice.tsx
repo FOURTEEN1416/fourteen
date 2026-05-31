@@ -10,7 +10,7 @@ import {
   mimoSwitchVoice,
   mimoStatus,
 } from '../api/mimo'
-import { getSpeakers, voiceStatus } from '../api/system'
+import { getSpeakers } from '../api/system'
 
 // ── Constants ──
 
