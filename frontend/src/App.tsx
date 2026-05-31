@@ -1,50 +1,56 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './api/queryClient'
 import Sidebar from './components/layout/Sidebar'
+import Breadcrumb from './components/layout/Breadcrumb'
 import MobileNav from './components/layout/MobileNav'
 import ToastContainer from './components/common/Toast'
 import ErrorBoundary from './components/common/ErrorBoundary'
+import AnimatedPage from './components/shared/AnimatedPage'
+import ScrollProgress from './components/shared/ScrollProgress'
+import UserWorkspace from './pages/UserWorkspace'
+import SystemSettingsLayout from './pages/SystemSettingsLayout'
+import CreateRole from './pages/CreateRole'
+import RoleSettings from './pages/RoleSettings'
+import StatusCenter from './pages/StatusCenter'
+import StorylineEditor from './components/storyline/StorylineEditor'
 
-const DashboardPage = lazy(() => import('./pages/DashboardPage'))
-const ChatPage = lazy(() => import('./pages/ChatPage'))
-const PersonaPage = lazy(() => import('./pages/PersonaPage'))
-const MemoryPage = lazy(() => import('./pages/MemoryPage'))
-const AdminPage = lazy(() => import('./pages/AdminPage'))
-const TrainingPage = lazy(() => import('./pages/TrainingPage'))
-const CloneDataPage = lazy(() => import('./pages/CloneDataPage'))
-const ChannelsPage = lazy(() => import('./pages/ChannelsPage'))
-const SettingsPage = lazy(() => import('./pages/SettingsPage'))
-const LogsPage = lazy(() => import('./pages/LogsPage'))
-const CharactersPage = lazy(() => import('./pages/CharactersPage'))
-const MonitorPage = lazy(() => import('./pages/MonitorPage'))
-const StatsPage = lazy(() => import('./pages/StatsPage'))
-const PersonaEditorPage = lazy(() => import('./pages/PersonaEditorPage'))
-const StickersPage = lazy(() => import('./pages/StickersPage'))
-const PsychProfilePage = lazy(() => import('./pages/PsychProfilePage'))
-const SafetyPage = lazy(() => import('./pages/SafetyPage'))
-const KnowledgeBasePage = lazy(() => import('./pages/KnowledgeBasePage'))
-const ExtensionsPage = lazy(() => import('./pages/ExtensionsPage'))
-const FavoritesPage = lazy(() => import('./pages/FavoritesPage'))
+const WeChatPage = lazy(() => import('./pages/WeChatPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
-const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
+
+const SettingsLLM = lazy(() => import('./pages/SettingsLLM'))
+const SettingsVoice = lazy(() => import('./pages/SettingsVoice'))
+const SettingsSecurity = lazy(() => import('./pages/SettingsSecurity'))
+const ToolsDashboard = lazy(() => import('./pages/ToolsDashboard'))
+const SettingsLogs = lazy(() => import('./pages/SettingsLogs'))
 
 function PageLoadingSkeleton() {
   return (
     <div className="flex-1 p-6 space-y-6 animate-pulse">
-      <div className="h-8 w-48 bg-gray-200 rounded" />
+      <div className="h-8 w-48 bg-gray-200/60 rounded-lg" />
       <div className="grid grid-cols-3 gap-4">
-        <div className="h-24 bg-gray-200 rounded-lg" />
-        <div className="h-24 bg-gray-200 rounded-lg" />
-        <div className="h-24 bg-gray-200 rounded-lg" />
+        <div className="h-24 bg-gray-200/60 rounded-xl" />
+        <div className="h-24 bg-gray-200/60 rounded-xl" />
+        <div className="h-24 bg-gray-200/60 rounded-xl" />
       </div>
-      <div className="h-64 bg-gray-200 rounded-lg" />
-      <div className="flex gap-4">
-        <div className="h-40 flex-1 bg-gray-200 rounded-lg" />
-        <div className="h-40 flex-1 bg-gray-200 rounded-lg" />
-      </div>
+      <div className="h-64 bg-gray-200/60 rounded-xl" />
     </div>
+  )
+}
+
+function StorylinePage() {
+  const { roleId } = useParams<{ roleId: string }>()
+  return <StorylineEditor characterId={roleId!} />
+}
+
+function AnimatedSuspense({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={<PageLoadingSkeleton />}>
+      <AnimatedPage>
+        {children}
+      </AnimatedPage>
+    </Suspense>
   )
 }
 
@@ -52,37 +58,39 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
     <ErrorBoundary>
-      <div className="flex h-screen bg-gray-50 overflow-hidden">
+      <div className="flex h-screen overflow-hidden bg-dynamic bg-orbs">
+        <ScrollProgress />
         <Sidebar />
-        <main className="flex-1 flex flex-col min-w-0 pb-16 lg:pb-0">
-          <Suspense fallback={<PageLoadingSkeleton />}>
-            <div className="animate-fade-in">
-              <Routes>
-                <Route path="/" element={<DashboardPage />} />
-                <Route path="/chat" element={<ChatPage />} />
-                <Route path="/persona" element={<PersonaPage />} />
-                <Route path="/memory" element={<MemoryPage />} />
-                <Route path="/training" element={<TrainingPage />} />
-                <Route path="/clone-data" element={<CloneDataPage />} />
-                <Route path="/channels" element={<ChannelsPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/logs" element={<LogsPage />} />
-                <Route path="/admin" element={<AdminPage />} />
-                <Route path="/characters" element={<CharactersPage />} />
-                <Route path="/monitor" element={<MonitorPage />} />
-                <Route path="/stats" element={<StatsPage />} />
-                <Route path="/persona-editor" element={<PersonaEditorPage />} />
-                <Route path="/stickers" element={<StickersPage />} />
-                <Route path="/psych" element={<PsychProfilePage />} />
-                <Route path="/safety" element={<SafetyPage />} />
-                <Route path="/knowledge" element={<KnowledgeBasePage />} />
-                <Route path="/extensions" element={<ExtensionsPage />} />
-                <Route path="/favorites" element={<FavoritesPage />} />
-                <Route path="/users" element={<UsersPage />} />
-                <Route path="*" element={<NotFoundPage />} />
-              </Routes>
-            </div>
-          </Suspense>
+        <main className="flex-1 flex flex-col min-w-0 pb-16 lg:pb-0 overflow-y-auto">
+          <Breadcrumb />
+          <Routes>
+            <Route path="/" element={<Navigate to="/wechat" replace />} />
+
+            {/* ═══ Global Level ═══ */}
+            <Route path="/wechat" element={<AnimatedSuspense><WeChatPage /></AnimatedSuspense>} />
+            <Route path="/users" element={<AnimatedSuspense><UsersPage /></AnimatedSuspense>} />
+
+            {/* ═══ User Level ═══ */}
+            <Route path="/users/:userId" element={<UserWorkspace />}>
+              <Route path="roles/create" element={<AnimatedPage><CreateRole /></AnimatedPage>} />
+              <Route path="roles/:roleId/settings" element={<AnimatedPage><RoleSettings /></AnimatedPage>} />
+              <Route path="roles/:roleId/settings/:tab" element={<AnimatedPage><RoleSettings /></AnimatedPage>} />
+              <Route path="roles/:roleId/status" element={<AnimatedPage><StatusCenter /></AnimatedPage>} />
+              <Route path="roles/:roleId/storyline" element={<AnimatedPage><StorylinePage /></AnimatedPage>} />
+            </Route>
+
+            {/* ═══ System Settings ═══ */}
+            <Route path="/settings" element={<Navigate to="/settings/llm" replace />} />
+            <Route path="/settings" element={<SystemSettingsLayout />}>
+              <Route path="llm" element={<AnimatedSuspense><SettingsLLM /></AnimatedSuspense>} />
+              <Route path="voice" element={<AnimatedSuspense><SettingsVoice /></AnimatedSuspense>} />
+          <Route path="tools" element={<AnimatedSuspense><ToolsDashboard /></AnimatedSuspense>} />
+          <Route path="security" element={<AnimatedSuspense><SettingsSecurity /></AnimatedSuspense>} />
+              <Route path="logs" element={<AnimatedSuspense><SettingsLogs /></AnimatedSuspense>} />
+            </Route>
+
+            <Route path="*" element={<Navigate to="/wechat" replace />} />
+          </Routes>
         </main>
         <MobileNav />
         <ToastContainer />

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import threading
 import uuid
 from contextvars import ContextVar
+from logging.handlers import RotatingFileHandler
 
 try:
     import structlog
@@ -73,11 +75,34 @@ class RingBufferHandler(logging.Handler):
 ring_buffer = RingBufferHandler()
 
 
+def _add_rotating_file_handler(root_logger: logging.Logger, log_level: int) -> None:
+    """添加 10MB 轮转文件日志到 ./data/app.log"""
+    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
+    os.makedirs(log_dir, exist_ok=True)
+    file_handler = RotatingFileHandler(
+        os.path.join(log_dir, "app.log"),
+        maxBytes=10 * 1024 * 1024,  # 10MB
+        backupCount=5,
+        encoding="utf-8",
+    )
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    root_logger.addHandler(file_handler)
+
+
 def setup_logging(log_level: str = "INFO", log_format: str = "json") -> None:
+    level = getattr(logging, log_level, logging.INFO)
+
     if not HAS_STRUCTLOG:
-        logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
+        logging.basicConfig(level=level)
         root_logger = logging.getLogger()
         root_logger.addHandler(ring_buffer)
+        _add_rotating_file_handler(root_logger, level)
         return
 
     shared_processors = [
@@ -107,6 +132,7 @@ def setup_logging(log_level: str = "INFO", log_format: str = "json") -> None:
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
     root_logger.addHandler(ring_buffer)  # capture recent logs for API
+    _add_rotating_file_handler(root_logger, level)
     root_logger.setLevel(getattr(logging, log_level, logging.INFO))
 
 

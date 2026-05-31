@@ -148,3 +148,94 @@ body {
   to { opacity: 1; transform: scale(1); }
 }
 .animate-scale-in { animation: scale-in 0.15s ease-out; }
+
+/* ═══ Glass & Immersive ═══ */
+.glass-card {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+.glass-card-hover {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+@keyframes gradient-shift {
+  0%   { background-position: 0% 50%; }
+  25%  { background-position: 100% 0%; }
+  50%  { background-position: 100% 100%; }
+  75%  { background-position: 0% 100%; }
+  100% { background-position: 0% 50%; }
+}
+.bg-dynamic {
+  background: linear-gradient(
+    135deg,
+    #e0f0f8,
+    #ede0ff,
+    #def5e8,
+    #f0f2f8,
+    #fce4f0,
+    #e0f4f8
+  );
+  background-size: 600% 600%;
+  animation: gradient-shift 25s ease infinite;
+}
+
+/* Floating gradient orbs — layered behind glass cards */
+.bg-orbs {
+  position: relative;
+  overflow: hidden;
+}
+.bg-orbs::before,
+.bg-orbs::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.15;
+  pointer-events: none;
+  z-index: 0;
+}
+.bg-orbs::before {
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(34, 208, 223, 0.6), transparent 70%);
+  top: -10%;
+  left: -10%;
+  animation: orb-drift 30s ease-in-out infinite alternate;
+}
+.bg-orbs::after {
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(230, 40, 255, 0.5), transparent 70%);
+  bottom: -10%;
+  right: -10%;
+  animation: orb-drift 25s ease-in-out infinite alternate-reverse;
+}
+
+.bg-orbs > * {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes orb-drift {
+  0%   { transform: translate(0, 0) scale(1); }
+  33%  { transform: translate(60px, -40px) scale(1.1); }
+  66%  { transform: translate(-30px, 50px) scale(0.95); }
+  100% { transform: translate(40px, -20px) scale(1.05); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}

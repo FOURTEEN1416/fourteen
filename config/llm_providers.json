@@ -1,4 +1,4 @@
-{
+﻿{
   "default_provider": "auto",
   "providers": {
     "xunfei": {
@@ -71,3 +71,4 @@
     "opencode_zen": "OpenCode Zen - 完全免费，无需API Key，作为兜底方案"
   }
 }
+

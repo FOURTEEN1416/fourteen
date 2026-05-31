@@ -2,11 +2,52 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 
 from observability.config_models import SystemConfig
 
 logger = logging.getLogger("config_manager")
+
+_ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
+
+
+def _resolve_env_vars(value: object) -> object:
+    """递归解析字符串中的 ${VAR:-default} 和 ${VAR} 环境变量"""
+    if isinstance(value, str):
+        def _replace(match: re.Match) -> str:
+            expr = match.group(1)
+            if ":-" in expr:
+                var, default = expr.split(":-", 1)
+                return os.environ.get(var, default)
+            return os.environ.get(expr, "")
+        return _ENV_VAR_PATTERN.sub(_replace, value)
+    if isinstance(value, dict):
+        return {k: _resolve_env_vars(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_resolve_env_vars(item) for item in value]
+    return value
+
+
+def _apply_dot_env_overrides(data: dict) -> None:
+    """应用点号路径环境变量覆盖
+
+    例如: AI_GF_LLM_CACHE_REDIS_HOST → data["llm"]["cache"]["redis"]["host"]
+    """
+    prefix = "AI_GF_"
+    for env_key, env_val in os.environ.items():
+        if not env_key.startswith(prefix):
+            continue
+        # 去掉前缀，分割路径
+        path = env_key[len(prefix):].lower().split("_")
+        target = data
+        for i, part in enumerate(path):
+            if i == len(path) - 1:
+                target[part] = env_val
+            else:
+                if part not in target or not isinstance(target[part], dict):
+                    target[part] = {}
+                target = target[part]
 
 try:
     import yaml
@@ -47,10 +88,16 @@ class ConfigManager:
             with open(env_yaml, encoding="utf-8") as f:
                 env_overrides = yaml.safe_load(f) or {}
                 data = self._deep_merge(data, env_overrides)
+        # 解析 ${VAR:-default} 环境变量占位符
+        data = _resolve_env_vars(data)
+
+        # 深层 AI_GF_* 环境变量覆盖（支持点号路径: AI_GF_LLM_CACHE_REDIS_HOST）
         for key in SystemConfig.model_fields:
             env_val = os.environ.get(f"AI_GF_{key.upper()}")
             if env_val is not None:
                 data[key] = env_val
+        # 追加 dot-notation 环境变量覆盖: AI_GF_LLM_CACHE_REDIS_HOST → data["llm"]["cache"]["redis"]["host"]
+        _apply_dot_env_overrides(data)
         try:
             return SystemConfig(**data)
         except Exception as e:  # noqa: BLE001

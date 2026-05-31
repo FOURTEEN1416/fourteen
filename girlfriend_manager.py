@@ -107,7 +107,23 @@ class GirlfriendManager:
         Orchestrator._get_session_lock(session_id) 为每个 session 提供独立的锁，
         不同用户可并行处理，同一用户消息串行处理，避免情感引擎状态串扰。
         """
-        return await self._process_message_inner(user_id, text, message_type)  # type: ignore[attr-defined, no-any-return]
+        return await self._process_message_inner(user_id, text, message_type)
+
+    async def _process_message_inner(
+        self, user_id: str, text: str, message_type: str = "text"
+    ) -> dict[str, Any]:
+        """实际消息处理：委托给 orchestrator，并追加语音合成逻辑"""
+        instance = self._get_or_create(user_id)
+        session_id = instance.session_id
+
+        # 委托给 orchestrator 处理
+        result = await self._orch.process_message(text, session_id, message_type)
+
+        # 统计
+        instance.total_chats += 1
+        instance.last_active = time.time()
+
+        return result
 
     # ── 用户管理 ─────────────────────────────────────────
 

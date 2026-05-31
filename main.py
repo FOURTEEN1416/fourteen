@@ -29,18 +29,112 @@ import os
 import sys
 import threading
 import time
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
+
+# ── 语音触发检测 ───────────────────────────────────────
+
+# 直接命令词（高置信度）
+_VOICE_COMMANDS = [
+    "发语音", "语音回复", "发段语音", "发个语音",
+    "语音消息", "语音说", "用语音", "用说的",
+    "声音回复", "语音告诉我",
+]
+
+# 欲望/请求模式
+_VOICE_DESIRE_PATTERNS = [
+    r"想听你说[句话]?",
+    r"用(你的?)?声音",
+    r"听(到|见)你的声音",
+    r"能不能?发(个|段)?语音",
+    r"可以发语音",
+    r"说话.*听听?",
+    r"(给|帮)我(说|讲|读)",
+]
+
+# 情感修饰 + 说
+_VOICE_EMOTION_SPEAK = [
+    r"(温柔|轻声|小声|大声|悄悄|慢慢|好好)地说",
+    r"(温柔|轻声|小声|大声|悄悄|慢慢|好好)说",
+]
+
+# 能力询问
+_VOICE_CAPABILITY = [
+    r"(能|会|可以)说话[吗么]?",
+    r"(能|会)发声[吗么]?",
+    r"有语音功能",
+]
+
+# 上下文触发
+_VOICE_CONTEXT = [
+    r"说句话",
+    r"出[个声]?声",
+    r"发声",
+    r"说话",
+    r"语音",
+]
+
+
+def _detect_voice_request(text: str) -> bool:
+    """检测用户消息是否要求语音回复"""
+    if not text:
+        return False
+    text = text.strip()
+
+    # 排除否定
+    if re.search(r"(不要|别|不想|不用|懒得|算了).{0,5}(语音|说话|声音|发声)", text):
+        return False
+    if re.search(r"文字(就|才|更)好|打字", text):
+        return False
+
+    # Tier 1: 直接命令词
+    for cmd in _VOICE_COMMANDS:
+        if cmd in text:
+            return True
+
+    # Tier 2: 欲望/请求模式
+    for pat in _VOICE_DESIRE_PATTERNS:
+        if re.search(pat, text):
+            return True
+
+    # Tier 3: 情感修饰 + 说
+    for pat in _VOICE_EMOTION_SPEAK:
+        if re.search(pat, text):
+            return True
+
+    # Tier 4: 能力询问
+    for pat in _VOICE_CAPABILITY:
+        if re.search(pat, text):
+            return True
+
+    # Tier 5: 上下文触发（排除误触发）
+    for pat in _VOICE_CONTEXT:
+        m = re.search(pat, text)
+        if m:
+            surrounding = text[max(0, m.start() - 2):m.end() + 2]
+            if any(x in surrounding for x in ["识别", "输入", "转文字", "普通", "导航", "搜索"]):
+                continue
+            if "说句话" in text and ("听听" in text or "吗" in text or "吧" in text):
+                return True
+            if pat == "说话" and len(text) < 8:
+                return True
+            if pat == "语音" and len(text) < 10 and "吗" in text:
+                return True
+            return True
+
+    return False
+
 
 project_root = Path(__file__).parent.absolute()
 sys.path.insert(0, str(project_root))
 
 import contextlib  # noqa: E402
 
-from common.health_check import health_check_all  # noqa: E402
+from utils.health_check import health_check_all  # noqa: E402
 
 # ── 集中管理重复出现的函数级导入（合并重复 import） ──
-from api.rest_api import create_api_app  # noqa: E402
+from api.app_factory import create_api_app  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
 from api.websocket_server import WebSocketServer  # noqa: E402
 from girlfriend_manager import GirlfriendManager  # noqa: E402
@@ -50,17 +144,17 @@ from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
 from observability.health import health_checker  # noqa: E402
 from observability.logging_setup import setup_logging  # noqa: E402
 from rag_engine.rag_engine import RAGEngineV2  # noqa: E402
-from safety.content_safety import ContentSafetyFilter  # noqa: E402
-from safety.encryption import EncryptionManager  # noqa: E402
-from safety.pii_anonymizer import PIIAnonymizer  # noqa: E402
-from safety.prompt_injection import PromptInjectionDetector  # noqa: E402
-from tool_system.base_tool import ToolDispatcher, ToolRegistry  # noqa: E402
-from tool_system.builtin.calendar_tool import CalculatorTool, CalendarTool  # noqa: E402
-from tool_system.builtin.character_crawler_tool import CharacterCrawlerTool  # noqa: E402
-from tool_system.builtin.reminder_tool import CalendarQueryTool, ReminderTool  # noqa: E402
-from tool_system.builtin.search_tool import SearchTool  # noqa: E402
-from tool_system.builtin.time_awareness_tool import TimeAwarenessTool  # noqa: E402
-from tool_system.builtin.weather_tool import WeatherTool  # noqa: E402
+from security.content_safety import ContentSafetyFilter  # noqa: E402
+from security.encryption import EncryptionManager  # noqa: E402
+from security.pii_anonymizer import PIIAnonymizer  # noqa: E402
+from security.prompt_injection import PromptInjectionDetector  # noqa: E402
+from tools.base_tool import ToolDispatcher, ToolRegistry  # noqa: E402
+from tools.builtin.calendar_tool import CalculatorTool, CalendarTool  # noqa: E402
+from tools.builtin.character_crawler_tool import CharacterCrawlerTool  # noqa: E402
+from tools.builtin.reminder_tool import CalendarQueryTool, ReminderTool  # noqa: E402
+from tools.builtin.search_tool import SearchTool  # noqa: E402
+from tools.builtin.time_awareness_tool import TimeAwarenessTool  # noqa: E402
+from tools.builtin.weather_tool import WeatherTool  # noqa: E402
 from memory import StructuredMemory, VectorMemory  # noqa: E402
 from memory.memory_pipeline import MemoryPipeline  # noqa: E402
 from my_character.emotion_engine import EmotionEngine  # noqa: E402
@@ -99,8 +193,10 @@ def _setup_basic_logging(log_level: str = "INFO") -> logging.Logger:
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(
+            RotatingFileHandler(
                 str(project_root / "data" / "app.log"),
+                maxBytes=10 * 1024 * 1024,
+                backupCount=5,
                 encoding="utf-8",
             ),
         ],
@@ -108,7 +204,7 @@ def _setup_basic_logging(log_level: str = "INFO") -> logging.Logger:
     return logging.getLogger("main")
 
 
-logger = _setup_basic_logging()
+logger = logging.getLogger("main")
 
 
 def parse_args() -> argparse.Namespace:
@@ -246,7 +342,7 @@ class OptimizedOrchestrator:
 
         代理到 common.async_utils.run_async，保持向后兼容。
         """
-        from common.async_utils import run_async
+        from utils.async_utils import run_async
         return run_async(coro)
 
     def initialize(self, config_dir: str = "config",
@@ -714,13 +810,40 @@ class OptimizedOrchestrator:
                 self.components["memory"].after_chat(**mem_kwargs)
                 self.components["ase"].on_chat(user_msg_clean, reply)
 
+                # ── 语音合成（用户明确要求时触发）──
+                voice_audio: bytes | None = None
+                want_voice = _detect_voice_request(user_msg)
+                if want_voice and len(reply) >= 8:
+                    voice_mgr = self.components.get("voice")
+                    if voice_mgr and hasattr(voice_mgr, 'synthesize') and voice_mgr.enabled:
+                        try:
+                            # 截取合适长度（微信语音建议 ≤60 字）
+                            voice_text = reply[:200]
+                            # 注入情感参数
+                            emotion_tag = emotion_state.primary_emotion.value if emotion_state else ""
+                            voice_audio = await voice_mgr.synthesize(
+                                voice_text, emotion=emotion_tag,
+                            )
+                            if voice_audio:
+                                logger.info("语音合成成功: %d bytes, engine=%s, emotion=%s",
+                                            len(voice_audio), voice_mgr.current_engine, emotion_tag)
+                            else:
+                                logger.warning("语音合成返回空, engine=%s", voice_mgr.current_engine)
+                        except Exception as e:
+                            logger.warning("语音合成失败: %s", e)
+
                 process_time = time.perf_counter() - start_time
 
-                return {
+                result: dict[str, Any] = {
                     "reply": reply,
-                    "emotion": emotion_state.to_dict() if emotion_state else None,  # type: ignore[union-attr]
+                    "emotion": emotion_state.to_dict() if emotion_state else None,
                     "process_time": round(process_time, 3),
                 }
+                if voice_audio:
+                    result["voice"] = voice_audio
+                    # 微信 silk: ~2.4KB/s, 按字数估算时长
+                    result["voice_duration_ms"] = min(60000, max(1500, len(reply) * 180))
+                return result
 
             except Exception:
                 logger.exception("消息处理异常")
@@ -745,6 +868,39 @@ class OptimizedOrchestrator:
                 results[name] = "no check"
 
         return {"healthy": all_ok, "components": results}
+
+    async def test_voice_pipeline(self, text: str = "你好呀，今天天气真不错") -> dict[str, Any]:
+        """端到端语音管线测试（供调试用）"""
+        voice_mgr = self.components.get("voice")
+        if not voice_mgr:
+            return {"ok": False, "error": "voice_mgr not found"}
+        if not voice_mgr.enabled:
+            return {"ok": False, "error": "voice disabled"}
+
+        result = {"ok": False, "timing": {}}
+        import time as _time
+
+        # 1. 测试触发检测
+        t0 = _time.perf_counter()
+        detected = _detect_voice_request(text)
+        result["detection"] = {"triggered": detected, "text": text, "latency_ms": round((_time.perf_counter() - t0) * 1000)}
+
+        # 2. 测试合成
+        t0 = _time.perf_counter()
+        try:
+            audio = await voice_mgr.synthesize(text[:50])
+            result["synthesis"] = {
+                "success": audio is not None,
+                "bytes": len(audio) if audio else 0,
+                "engine": voice_mgr.current_engine,
+                "latency_ms": round((_time.perf_counter() - t0) * 1000),
+            }
+            if audio:
+                result["ok"] = True
+        except Exception as e:
+            result["synthesis"] = {"success": False, "error": str(e)}
+
+        return result
 
 
 def run_clone_pipeline(args: argparse.Namespace) -> None:
@@ -961,6 +1117,9 @@ def _create_proactive_sender(ws_server_holder: dict, wechat_connector_holder: di
 def main() -> None:
     args = parse_args()
 
+    # P0: 从 --log-level 开始配置日志（不等到 setup_logging 才生效）
+    _setup_basic_logging(args.log_level)
+
     # P0: 检查 API_KEY 是否为出厂默认值
     _default_api_key = "CHANGE_ME_TO_STRONG_RANDOM_KEY_32_CHARS_MIN"
     _api_key_env = os.environ.get("API_KEY", _default_api_key)
@@ -969,9 +1128,6 @@ def main() -> None:
         if os.environ.get("APP_ENV", "").lower() in ("prod", "production"):
             logger.critical("生产环境禁止使用默认 API_KEY！请设置环境变量 API_KEY 后再启动。")
             sys.exit(1)
-
-    if args.log_level:
-        logging.getLogger().setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
 
     use_console = args.console or args.no_wechat
 

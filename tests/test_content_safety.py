@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, ".")
 
-from safety.content_safety import ContentSafetyFilter, SafetyCategory
+from security.content_safety import ContentSafetyFilter, SafetyCategory
 
 
 def test_safe_text():

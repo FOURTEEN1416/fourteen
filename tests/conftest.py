@@ -21,11 +21,27 @@ def reset_config_each():
 
 @pytest.fixture
 def tmp_db(tmp_path):
-    """提供临时数据库路径"""
+    """提供临时数据库路径（Windows 兼容：清理 WAL/SHM + 重试）"""
+    import gc
+    import time
+
     db_path = str(tmp_path / "test.db")
     yield db_path
-    if os.path.exists(db_path):
-        os.unlink(db_path)
+
+    gc.collect()  # 确保所有连接被先 GC
+    time.sleep(0.02)
+
+    # 清理 WAL / SHM 文件
+    for suffix in ("", "-wal", "-shm"):
+        p = db_path + suffix
+        if os.path.exists(p):
+            for _ in range(3):
+                try:
+                    os.unlink(p)
+                    break
+                except PermissionError:
+                    time.sleep(0.05)
+                    gc.collect()
 
 
 @pytest.fixture

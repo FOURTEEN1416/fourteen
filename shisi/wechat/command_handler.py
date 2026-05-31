@@ -7,8 +7,8 @@ import logging
 from ..affinity.enhancer import AffinityEnhancer
 from ..character.manager import CharacterManager
 from ..emotion_stage.stage_engine import EmotionStageEngine
-from ..memory_ext.favorite_manager import FavoriteManager
-from ..memory_ext.forward_manager import ForwardManager
+from ..memory.favorite_manager import FavoriteManager
+from ..memory.forward_manager import ForwardManager
 from ..sticker.sticker_manager import StickerManager
 from .command_parser import Command, WeChatCommandParser
 

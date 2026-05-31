@@ -46,7 +46,7 @@ class WebSocketServer:
         self._clients.clear()
 
     def _verify_api_key(self, token: str) -> bool:
-        """验证 API Key，参考 rest_api.py 的 _verify_api_key 实现"""
+        """验证 API Key，参考 app_factory.py 的 _verify_api_key 实现"""
         if not self._api_key_enabled:
             return True
         import hmac

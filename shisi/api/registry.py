@@ -15,13 +15,13 @@ if TYPE_CHECKING:
 from ..affinity.enhancer import AffinityEnhancer
 from ..character.manager import CharacterManager
 from ..emotion_stage.stage_engine import EmotionStageEngine
-from ..memory_ext.favorite_manager import FavoriteManager
-from ..memory_ext.forward_manager import ForwardManager
+from ..memory.favorite_manager import FavoriteManager
+from ..memory.forward_manager import ForwardManager
 from ..migrations import run_migrations
 from ..stats.analytics import AnalyticsService
 from ..sticker.sticker_manager import StickerManager
 from ..vital_signs.vital_engine import VitalSignsEngine
-from ..voice_ext.emotion_tts import VoiceEnhancer
+from ..voice.emotion_tts import VoiceEnhancer
 from ..wechat.command_handler import WeChatCommandHandler
 from ..wechat.proactive_messenger import WeChatProactiveMessenger
 from . import (

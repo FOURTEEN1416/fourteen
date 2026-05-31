@@ -5,7 +5,7 @@ import tempfile
 
 sys.path.insert(0, ".")
 
-from shisi.voice_ext.character_voice import CharacterVoiceManager
+from shisi.voice.character_voice import CharacterVoiceManager
 
 
 def test_bind_and_get():

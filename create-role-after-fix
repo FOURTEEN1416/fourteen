@@ -1,0 +1,109 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: 十四
+      - button "收起侧边栏" [ref=e7]:
+        - img [ref=e8]
+    - navigation [ref=e11]:
+      - generic [ref=e12]:
+        - generic [ref=e13]: 微信接入
+        - link "微信控制台" [ref=e15] [cursor=pointer]:
+          - /url: /wechat
+          - img [ref=e16]
+          - generic [ref=e18]: 微信控制台
+      - generic [ref=e19]:
+        - generic [ref=e20]: 用户管理
+        - link "用户列表" [ref=e22] [cursor=pointer]:
+          - /url: /users
+          - img [ref=e23]
+          - generic [ref=e28]: 用户列表
+      - generic [ref=e29]:
+        - generic [ref=e30]: 系统设置
+        - generic [ref=e31]:
+          - link "通用设置" [ref=e32] [cursor=pointer]:
+            - /url: /settings/general
+            - img [ref=e33]
+            - generic [ref=e34]: 通用设置
+          - link "LLM 配置" [ref=e35] [cursor=pointer]:
+            - /url: /settings/llm
+            - img [ref=e36]
+            - generic [ref=e38]: LLM 配置
+          - link "语音引擎" [ref=e39] [cursor=pointer]:
+            - /url: /settings/voice
+            - img [ref=e40]
+            - generic [ref=e43]: 语音引擎
+          - link "安全" [ref=e44] [cursor=pointer]:
+            - /url: /settings/security
+            - img [ref=e45]
+            - generic [ref=e47]: 安全
+          - link "扩展管理" [ref=e48] [cursor=pointer]:
+            - /url: /settings/extensions
+            - img [ref=e49]
+            - generic [ref=e51]: 扩展管理
+          - link "日志" [ref=e52] [cursor=pointer]:
+            - /url: /settings/logs
+            - img [ref=e53]
+            - generic [ref=e56]: 日志
+    - generic [ref=e58]: 未连接
+  - main [ref=e60]:
+    - generic [ref=e61]:
+      - generic [ref=e62]:
+        - generic [ref=e63]:
+          - button "返回用户列表" [ref=e64]:
+            - img [ref=e65]
+          - generic [ref=e67]:
+            - heading "工作区" [level=2] [ref=e68]
+            - paragraph [ref=e69]: "用户 #u-001"
+        - navigation [ref=e70]:
+          - button "角色创造" [ref=e71]:
+            - img [ref=e72]
+            - generic [ref=e75]: 角色创造
+          - button "角色设置" [ref=e76]:
+            - img [ref=e77]
+            - generic [ref=e83]: 角色设置
+          - button "语音克隆" [ref=e84]:
+            - img [ref=e85]
+            - generic [ref=e88]: 语音克隆
+          - button "状态中心" [ref=e89]:
+            - img [ref=e90]
+            - generic [ref=e92]: 状态中心
+      - generic [ref=e95]:
+        - button "+ 创造新角色" [ref=e97]
+        - generic [ref=e99]:
+          - generic [ref=e100]:
+            - heading "创建角色" [level=1] [ref=e101]
+            - paragraph [ref=e102]: 选择一种方式创建你的 AI 角色
+          - generic [ref=e103]:
+            - button "AI 对话 通过聊天记录生成角色" [ref=e104]:
+              - paragraph [ref=e105]: AI 对话
+              - paragraph [ref=e106]: 通过聊天记录生成角色
+            - button "克隆微信好友 导入微信联系人数据" [ref=e107]:
+              - paragraph [ref=e108]: 克隆微信好友
+              - paragraph [ref=e109]: 导入微信联系人数据
+            - button "文件导入 导入角色定义 JSON" [ref=e110]:
+              - paragraph [ref=e111]: 文件导入
+              - paragraph [ref=e112]: 导入角色定义 JSON
+          - generic [ref=e114]:
+            - generic [ref=e115]:
+              - generic [ref=e116]:
+                - generic [ref=e119]: 你好呀~ 今天心情怎么样？
+                - generic [ref=e120]:
+                  - generic [ref=e121]: 🤖
+                  - generic [ref=e123]: 哈喽！今天阳光特别好，心情很不错呢 ☀️ 感觉你也是个温暖的人~
+                - generic [ref=e126]: 哈哈被你说中了，我确实挺喜欢照顾别人的
+                - generic [ref=e127]:
+                  - generic [ref=e128]: 🤖
+                  - generic [ref=e130]: 真的吗？那我猜你一定很善解人意！我最喜欢和温柔的人聊天了，让人觉得特别安心 😊
+                - generic [ref=e133]: 嗯嗯，身边的朋友也都这么说。你喜欢做什么呀？
+              - generic [ref=e134]:
+                - textbox "输入消息，与AI对话构建角色..." [ref=e135]
+                - button [disabled] [ref=e136]:
+                  - img [ref=e137]
+            - generic [ref=e141]:
+              - generic [ref=e142]:
+                - heading "实时人设卡" [level=3] [ref=e143]
+                - generic [ref=e144]: 待生成
+              - generic [ref=e145]:
+                - generic [ref=e146]: ✨
+                - paragraph [ref=e147]: 开始对话或导入数据
+                - paragraph [ref=e148]: 角色人设将实时更新

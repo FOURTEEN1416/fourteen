@@ -533,7 +533,38 @@ export interface VoiceConfig {
   rate?: string
   pitch?: string
   volume?: string
+  model?: string
   extra_params?: Record<string, unknown>
+}
+
+export interface MiMoStatus {
+  enabled: boolean
+  message?: string
+  health?: {
+    status: string
+    model: string
+    latency_ms: number
+  }
+  current_engine?: string | null
+  available_engines?: string[]
+}
+
+export interface MiMoCloneResponse {
+  status: string
+  voice_id: string
+  message?: string
+}
+
+export interface MiMoDesignResponse {
+  status: string
+  voice_id: string
+  message?: string
+}
+
+export interface MiMoSetEngineResponse {
+  status: string
+  model: string
+  message?: string
 }
 
 export interface VoiceBindRequest {
