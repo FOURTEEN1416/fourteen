@@ -15,7 +15,7 @@ import CreateRole from './pages/CreateRole'
 import RoleSettings from './pages/RoleSettings'
 import StatusCenter from './pages/StatusCenter'
 import StorylineEditor from './components/storyline/StorylineEditor'
-import AuthGuard from './components/auth/AuthGuard'
+import { AuthGuard, RoleGuard } from './components/auth'
 import { useAuth } from './hooks/useAuth'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
@@ -116,6 +116,14 @@ export default function App() {
             <Route path="tools" element={<AnimatedSuspense><ToolsDashboard /></AnimatedSuspense>} />
             <Route path="security" element={<AnimatedSuspense><SettingsSecurity /></AnimatedSuspense>} />
             <Route path="logs" element={<AnimatedSuspense><SettingsLogs /></AnimatedSuspense>} />
+          </Route>
+
+          {/* ═══ 管理后台（仅 admin 角色） ═══ */}
+          <Route element={<RoleGuard roles={['admin']} />}>
+            <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
+            <Route path="/admin/users" element={<AnimatedSuspense><UsersPage /></AnimatedSuspense>} />
+            <Route path="/admin/logs" element={<AnimatedSuspense><SettingsLogs /></AnimatedSuspense>} />
+            <Route path="/admin/config" element={<AnimatedSuspense><SettingsSecurity /></AnimatedSuspense>} />
           </Route>
         </Route>
 

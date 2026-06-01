@@ -7,6 +7,7 @@ import {
   User, Power,
 } from 'lucide-react'
 import { useChatStore } from '../../store/chatStore'
+import { useAuthStore } from '../../store/authStore'
 import { useCharacterBuilderStore } from '../../store/characterBuilderStore'
 
 // ── Global nav items ──
@@ -23,30 +24,41 @@ interface NavGroup {
   items: NavItem[]
 }
 
-const globalNavGroups: NavGroup[] = [
-  {
-    label: '微信接入',
-    items: [
-      { to: '/wechat', icon: MessageCircle, label: '微信控制台' },
-    ],
-  },
-  {
-    label: '用户管理',
-    items: [
-      { to: '/users', icon: Users, label: '用户列表' },
-    ],
-  },
-  {
-    label: '系统设置',
-    items: [
-      { to: '/settings/llm', icon: Sparkles, label: 'LLM 配置' },
-      { to: '/settings/voice', icon: Mic, label: '语音引擎' },
-      { to: '/settings/tools', icon: Power, label: '工具仪表盘' },
-      { to: '/settings/security', icon: Shield, label: '安全' },
-      { to: '/settings/logs', icon: FileText, label: '日志' },
-    ],
-  },
-]
+function buildGlobalNavGroups(isAdmin: boolean): NavGroup[] {
+  return [
+    {
+      label: '微信接入',
+      items: [
+        { to: '/wechat', icon: MessageCircle, label: '微信控制台' },
+      ],
+    },
+    {
+      label: '用户管理',
+      items: [
+        { to: '/users', icon: Users, label: '用户列表' },
+      ],
+    },
+    // 管理后台 — 仅 admin 可见
+    ...(isAdmin ? [{
+      label: '管理后台',
+      items: [
+        { to: '/admin/users', icon: Shield, label: '用户管理' },
+        { to: '/admin/logs', icon: FileText, label: '日志审计' },
+        { to: '/admin/config', icon: Settings, label: '系统配置' },
+      ],
+    }] : []),
+    {
+      label: '系统设置',
+      items: [
+        { to: '/settings/llm', icon: Sparkles, label: 'LLM 配置' },
+        { to: '/settings/voice', icon: Mic, label: '语音引擎' },
+        { to: '/settings/tools', icon: Power, label: '工具仪表盘' },
+        { to: '/settings/security', icon: Shield, label: '安全' },
+        { to: '/settings/logs', icon: FileText, label: '日志' },
+      ],
+    },
+  ]
+}
 
 // ── Role-level nav items ──
 
@@ -159,6 +171,9 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
   const [rolesExpanded, setRolesExpanded] = useState(true)
   const isConnected = useChatStore((s) => s.isConnected)
+  const { user } = useAuthStore()
+  const isAdmin = user?.role === 'admin'
+  const globalNavGroups = buildGlobalNavGroups(isAdmin)
   const { level, userId, roleId, isCreatePage } = useRouteLevel()
 
   const atRoleLevel = level === 'role' && userId

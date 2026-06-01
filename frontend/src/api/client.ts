@@ -11,6 +11,8 @@
  */
 import axios from 'axios'
 import { useErrorStore } from '../store/errorStore'
+import { useAuthStore } from '../store/authStore'
+import { refreshToken as refreshTokenApi } from './auth'
 
 // ── Domain API imports (for re-export and api namespace) ──
 import {
@@ -64,6 +66,34 @@ if (apiKey) {
   client.defaults.headers.common['X-API-Key'] = apiKey
 }
 
+// ── JWT Bearer token interceptor ──
+// Attach access token to every authenticated request
+client.interceptors.request.use((config) => {
+  const token = useAuthStore.getState().accessToken
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+// ── 401 auto-refresh state ──
+let _isRefreshing = false
+let _pendingQueue: Array<{
+  resolve: (token: string) => void
+  reject: (error: unknown) => void
+}> = []
+
+function processQueue(error: unknown, token: string | null = null) {
+  _pendingQueue.forEach(({ resolve, reject }) => {
+    if (error) {
+      reject(error)
+    } else {
+      resolve(token!)
+    }
+  })
+  _pendingQueue = []
+}
+
 const ERROR_CODE_MAP: Record<string, string> = {
   LLM_TIMEOUT: 'AI思考时间较长，请稍后重试',
   NETWORK_ERROR: '无法连接服务器，请检查网络',
@@ -75,9 +105,61 @@ const ERROR_CODE_MAP: Record<string, string> = {
 // Global error interceptor — catches all 4xx/5xx and shows toast
 client.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     const status = error.response?.status
     const data = error.response?.data
+    const originalRequest = error.config as (typeof error.config) & { _isRetry?: boolean }
+
+    // ── 401 auto-refresh ──
+    // Skips the refresh endpoint itself to avoid infinite loop
+    if (
+      status === 401 &&
+      originalRequest &&
+      !originalRequest._isRetry &&
+      !originalRequest.url?.includes('/auth/refresh')
+    ) {
+      const { refreshToken: storedRefreshToken } = useAuthStore.getState()
+
+      if (storedRefreshToken) {
+        if (_isRefreshing) {
+          // Queue concurrent 401s — they'll all retry with the new token
+          return new Promise((resolve, reject) => {
+            _pendingQueue.push({
+              resolve: (token: string) => {
+                originalRequest.headers.Authorization = `Bearer ${token}`
+                originalRequest._isRetry = true
+                resolve(client(originalRequest))
+              },
+              reject,
+            })
+          })
+        }
+
+        _isRefreshing = true
+        originalRequest._isRetry = true
+
+        try {
+          const res = await refreshTokenApi(storedRefreshToken)
+          useAuthStore.getState().setTokens(res.access_token, res.refresh_token, res.user)
+
+          // Unblock queued requests with the new token
+          processQueue(null, res.access_token)
+
+          // Retry the original request
+          originalRequest.headers.Authorization = `Bearer ${res.access_token}`
+          return client(originalRequest)
+        } catch (refreshError) {
+          processQueue(refreshError, null)
+          useAuthStore.getState().clearAuth()
+          window.location.href = '/login'
+          return Promise.reject(refreshError)
+        } finally {
+          _isRefreshing = false
+        }
+      }
+    }
+
+    // ── Existing error handling (falls through for non-401 / no refresh token) ──
     const errorCode = data?.error_code
     const rawDetail = data?.detail
     let detailStr = ''
@@ -107,6 +189,7 @@ client.interceptors.response.use(
 
     const msg = detailStr || data?.message || error.message || '请求失败'
 
+    // 401 without a refresh token → not authenticated, just reject
     if (status === 401) return Promise.reject(error)
 
     if (status === 404) {

@@ -16,11 +16,13 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Security, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Security, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.auth import verify_api_key_dep
+from api.auth_jwt import require_role
+from api.database import User
 from api.deps import deps
 from observability.logging_setup import ring_buffer
 
@@ -299,7 +301,10 @@ async def psych_snapshots(limit: int = Query(default=20, ge=1, le=200), _auth: b
 
 
 @router.delete("/api/psych/profile")
-async def reset_psych_profile(_auth: bool = Security(verify_api_key_dep)):
+async def reset_psych_profile(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     pe = _get_pe()
     if pe is None:
         raise HTTPException(503, "PersonaExtractor未初始化")
@@ -381,7 +386,9 @@ async def proactive_state(_auth: bool = Security(verify_api_key_dep)):
 
 @router.get("/api/logs")
 async def get_logs(limit: int = Query(default=100, le=200), level: str = Query(default="all"),
-                   search: str = Query(default=""), _auth: bool = Security(verify_api_key_dep)):
+                   search: str = Query(default=""),
+                   _auth: bool = Security(verify_api_key_dep),
+                   _admin: tuple[int, User] = Depends(require_role("admin"))):
     return {"logs": ring_buffer.get_recent(limit=limit, level=level, search=search)}
 
 
@@ -422,7 +429,10 @@ async def list_channels(_auth: bool = Security(verify_api_key_dep)):
 
 
 @router.get("/api/config")
-async def get_config(_auth: bool = Security(verify_api_key_dep)):
+async def get_config(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     cfg = deps.config
     if cfg:
         return _sanitize_config(cfg.config.model_dump())
@@ -430,7 +440,11 @@ async def get_config(_auth: bool = Security(verify_api_key_dep)):
 
 
 @router.post("/api/config")
-async def save_config(req: ConfigUpdateRequest, _auth: bool = Security(verify_api_key_dep)):
+async def save_config(
+    req: ConfigUpdateRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     cfg = deps.config
     if not cfg:
         raise HTTPException(503, "Config manager not initialized")
@@ -443,7 +457,11 @@ async def save_config(req: ConfigUpdateRequest, _auth: bool = Security(verify_ap
 
 
 @router.post("/api/proactive/config")
-async def update_proactive_config(req: ProactiveConfigRequest, _auth: bool = Security(verify_api_key_dep)):
+async def update_proactive_config(
+    req: ProactiveConfigRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     orch = deps.orch
     if not orch or not orch._ase:
         raise HTTPException(503, "Proactive engine not initialized")
@@ -462,7 +480,11 @@ async def update_proactive_config(req: ProactiveConfigRequest, _auth: bool = Sec
 
 
 @router.post("/api/tools/{name}/toggle")
-async def toggle_tool(name: str, req: ToolToggleRequest, _auth: bool = Security(verify_api_key_dep)):
+async def toggle_tool(
+    name: str, req: ToolToggleRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     orch = deps.orch
     if not orch or not orch._tools or not orch._tools.registry:
         raise HTTPException(503, "Tool system not initialized")
@@ -488,7 +510,11 @@ async def tool_history(limit: int = Query(default=50, le=200), _auth: bool = Sec
 
 
 @router.post("/api/training/extract")
-async def start_extraction(target: str = "", source: str = "wcf", _auth: bool = Security(verify_api_key_dep)):
+async def start_extraction(
+    target: str = "", source: str = "wcf",
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     def _do_extract():
         try:
             from weclone_adapter import WeCloneAdapter
@@ -521,7 +547,11 @@ async def get_training_progress(_auth: bool = Security(verify_api_key_dep)):
 
 
 @router.post("/api/training/clean")
-async def start_cleaning(accept_score: int = 2, _auth: bool = Security(verify_api_key_dep)):
+async def start_cleaning(
+    accept_score: int = 2,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     def _do_clean():
         try:
             from clone_training.data_cleaner import DataCleaner
@@ -558,7 +588,11 @@ async def start_cleaning(accept_score: int = 2, _auth: bool = Security(verify_ap
 
 
 @router.post("/api/training/train")
-async def start_training(epochs: int = 3, lora_rank: int = 16, _auth: bool = Security(verify_api_key_dep)):
+async def start_training(
+    epochs: int = 3, lora_rank: int = 16,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     def _do_train():
         try:
             from weclone_adapter import WeCloneAdapter
@@ -602,13 +636,20 @@ async def start_training(epochs: int = 3, lora_rank: int = 16, _auth: bool = Sec
 
 
 @router.post("/api/training/stop")
-async def stop_training(_auth: bool = Security(verify_api_key_dep)):
+async def stop_training(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     deps.training_mgr.stop()
     return {"status": "stopped"}
 
 
 @router.post("/api/training/test")
-async def test_clone(message: str, _auth: bool = Security(verify_api_key_dep)):
+async def test_clone(
+    message: str,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     try:
         from my_character.tone_mimic import ToneMimic
         chroma_path = str(Path(__file__).parent.parent / "data" / "chroma_db")
@@ -621,7 +662,10 @@ async def test_clone(message: str, _auth: bool = Security(verify_api_key_dep)):
 
 
 @router.post("/api/training/apply")
-async def apply_clone(_auth: bool = Security(verify_api_key_dep)):
+async def apply_clone(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     try:
         result_path = str(Path(__file__).parent.parent / "data" / "training")
         return {"status": "applied", "path": result_path}
@@ -767,7 +811,11 @@ async def set_user_role(user_id: str, card_id: str = Query(..., description="角
 
 
 @router.post("/api/users/{user_id}/reset")
-async def reset_user(user_id: str, _auth: bool = Security(verify_api_key_dep)):
+async def reset_user(
+    user_id: str,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     gf = deps.gf
     if not gf:
         raise HTTPException(503, "女友管理器未初始化")
@@ -778,7 +826,11 @@ async def reset_user(user_id: str, _auth: bool = Security(verify_api_key_dep)):
 
 
 @router.delete("/api/users/{user_id}")
-async def remove_user(user_id: str, _auth: bool = Security(verify_api_key_dep)):
+async def remove_user(
+    user_id: str,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     gf = deps.gf
     if not gf:
         raise HTTPException(503, "女友管理器未初始化")
@@ -831,7 +883,11 @@ async def get_clone_dataset_detail(
 
 
 @router.delete("/api/clone/datasets/{person_id}")
-async def delete_clone_dataset(person_id: str, _auth: bool = Security(verify_api_key_dep)):
+async def delete_clone_dataset(
+    person_id: str,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     mgr = deps.get_clone_mgr()
     ok = mgr.delete_dataset(person_id)
     if not ok:
@@ -844,6 +900,7 @@ async def delete_clone_conversation(
     person_id: str,
     index: int = Query(..., description="对话索引（从0开始）"),
     _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     mgr = deps.get_clone_mgr()
     ok = mgr.delete_conversation(person_id, index)
@@ -857,6 +914,7 @@ async def batch_delete_clone_conversations(
     person_id: str,
     indices: list[int] = Query(..., description="要删除的索引列表"),  # noqa: B008
     _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     mgr = deps.get_clone_mgr()
     deleted = mgr.batch_delete_conversations(person_id, indices)
@@ -875,7 +933,10 @@ async def get_clone_stats(_auth: bool = Security(verify_api_key_dep)):
 
 
 @router.get("/api/logs/stream")
-async def stream_logs(_auth: bool = Security(verify_api_key_dep)):
+async def stream_logs(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     async def event_generator():
         queue = asyncio.Queue(maxsize=100)
         loop = asyncio.get_event_loop()
@@ -1005,18 +1066,29 @@ async def get_dashboard_stats(_auth: bool = Security(verify_api_key_dep)):
 
 
 @router.get("/api/safety/stats")
-async def safety_stats(_auth: bool = Security(verify_api_key_dep)):
+async def safety_stats(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     sf = deps.get_safety()
     return deps.safety_log_mgr.get_stats(enabled=sf.enabled if sf else False)
 
 
 @router.get("/api/safety/log")
-async def safety_log(limit: int = Query(default=50, le=200), _auth: bool = Security(verify_api_key_dep)):
+async def safety_log(
+    limit: int = Query(default=50, le=200),
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     return {"log": deps.safety_log_mgr.get_recent(limit)}
 
 
 @router.post("/api/safety/config")
-async def safety_config(enabled: bool = True, _auth: bool = Security(verify_api_key_dep)):
+async def safety_config(
+    enabled: bool = True,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     sf = deps.get_safety()
     if sf:
         sf.enabled = enabled
@@ -1115,7 +1187,11 @@ async def list_plugins(_auth: bool = Security(verify_api_key_dep)):
 
 
 @router.post("/api/plugins/{name}/toggle")
-async def toggle_plugin(name: str, enabled: bool = True, _auth: bool = Security(verify_api_key_dep)):
+async def toggle_plugin(
+    name: str, enabled: bool = True,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     plugin_path = Path(__file__).parent.parent / "plugins" / "plugins.json"
     data = {}
     if plugin_path.exists():
@@ -1204,7 +1280,11 @@ async def cache_stats(_auth: bool = Security(verify_api_key_dep)):
 
 
 @router.post("/api/cache/invalidate")
-async def cache_invalidate(pattern: str = "*", _auth: bool = Security(verify_api_key_dep)):
+async def cache_invalidate(
+    pattern: str = "*",
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     try:
         from cache.llm_cache import LLMCache
         cache = LLMCache()

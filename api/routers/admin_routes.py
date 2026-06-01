@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Security
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.auth_jwt import get_current_user_id, hash_password
+from api.auth_jwt import hash_password, require_role
 from api.database import User, get_db
 
 logger = logging.getLogger("admin_routes")
@@ -52,25 +52,6 @@ class UserListResponse(BaseModel):
 
 
 # ═══════════════════════════════════════════════════════
-# 依赖 - 管理员权限校验
-# ═══════════════════════════════════════════════════════
-
-
-async def _require_admin(
-    user_id: int = Security(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
-) -> tuple[int, User]:
-    """检查当前用户是否为 admin"""
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return user_id, user
-
-
-# ═══════════════════════════════════════════════════════
 # 端点
 # ═══════════════════════════════════════════════════════
 
@@ -81,7 +62,7 @@ async def list_users(
     page_size: int = Query(20, ge=1, le=100),
     search: str | None = Query(None, max_length=100),
     role: str | None = Query(None, pattern=r"^(admin|editor|viewer)$"),
-    _admin: tuple[int, User] = Depends(_require_admin),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
     """获取用户列表（分页、搜索、筛选）"""
@@ -128,7 +109,7 @@ async def list_users(
 @router.get("/users/{user_id}")
 async def get_user(
     user_id: int,
-    _admin: tuple[int, User] = Depends(_require_admin),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
     """获取单个用户详情"""
@@ -142,7 +123,7 @@ async def get_user(
 @router.post("/users")
 async def create_user(
     req: AdminCreateUserRequest,
-    _admin: tuple[int, User] = Depends(_require_admin),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
     """管理员创建用户"""
@@ -177,7 +158,7 @@ async def create_user(
 async def update_user(
     user_id: int,
     req: AdminUpdateUserRequest,
-    _admin: tuple[int, User] = Depends(_require_admin),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
     """管理员编辑用户"""
@@ -219,7 +200,7 @@ async def update_user(
 @router.delete("/users/{user_id}")
 async def delete_user(
     user_id: int,
-    _admin: tuple[int, User] = Depends(_require_admin),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
     """管理员删除用户（禁止删除自己）"""

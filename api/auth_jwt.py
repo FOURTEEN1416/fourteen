@@ -16,10 +16,14 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import HTTPException, Security
+from fastapi import Depends, HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import ExpiredSignatureError, JWTError, jwt
 from passlib.context import CryptContext
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from api.database import User, get_db
 
 logger = logging.getLogger("auth_jwt")
 
@@ -116,3 +120,31 @@ async def get_current_user_id(
     if user_id is None:
         raise HTTPException(status_code=401, detail="Token missing 'sub' claim")
     return int(user_id)
+
+
+def require_role(required_role: str):
+    """Factory: 返回一个 FastAPI 依赖，校验当前用户是否拥有指定角色。
+
+    用法:
+        @router.get("/admin/users")
+        async def list_users(
+            _admin: tuple[int, User] = Depends(require_role("admin")),
+            db: AsyncSession = Depends(get_db),
+        ):
+            ...
+    """
+    async def _role_checker(
+        user_id: int = Security(get_current_user_id),
+        db: AsyncSession = Depends(get_db),
+    ) -> tuple[int, User]:
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        if user.role != required_role:
+            raise HTTPException(
+                status_code=403,
+                detail=f"{required_role} access required",
+            )
+        return user_id, user
+    return _role_checker
