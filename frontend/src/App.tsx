@@ -147,12 +147,11 @@ export default function App() {
             <Route path="logs" element={<AnimatedSuspense><SettingsLogs /></AnimatedSuspense>} />
           </Route>
 
-          {/* ═══ 管理后台（仅 admin 角色） ═══ */}
+          {/* ═══ 管理后台（仅 admin 角色） ═══
+              日志审计/系统配置/安全面板已从 /settings/* 统一入口访问,不在此处重复 */}
           <Route element={<RoleGuard roles={['admin']} />}>
             <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
             <Route path="/admin/users" element={<AnimatedSuspense><AdminUsersPage /></AnimatedSuspense>} />
-            <Route path="/admin/logs" element={<AnimatedSuspense><SettingsLogs /></AnimatedSuspense>} />
-            <Route path="/admin/config" element={<AnimatedSuspense><SettingsSecurity /></AnimatedSuspense>} />
           </Route>
         </Route>
 

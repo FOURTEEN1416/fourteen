@@ -36,17 +36,14 @@ function buildGlobalNavGroups(isAdmin: boolean): NavGroup[] {
       label: '用户管理',
       items: [
         { to: '/users', icon: Users, label: '用户列表' },
+        // admin 增强版用户管理 — 与 /users 共存不冲突
+        ...(isAdmin ? [{ to: '/admin/users', icon: Shield, label: '用户管理' }] : []),
       ],
     },
-    // 管理后台 — 仅 admin 可见
-    ...(isAdmin ? [{
-      label: '管理后台',
-      items: [
-        { to: '/admin/users', icon: Shield, label: '用户管理' },
-        { to: '/admin/logs', icon: FileText, label: '日志审计' },
-        { to: '/admin/config', icon: Settings, label: '系统配置' },
-      ],
-    }] : []),
+    // 原"管理后台"组下的"日志审计"和"系统配置"已删除:
+    // - 日志审计 = /settings/logs(同一组件,两个入口让用户误以为重复)
+    // - 系统配置 = /settings/llm(系统配置实际指 LLM/YAML 配置)
+    // admin 仍可通过 /settings/* 访问所有功能
     {
       label: '系统设置',
       items: [

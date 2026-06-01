@@ -7,7 +7,7 @@ import { safetyStats, safetyLog, safetyConfig } from '../api/system'
 interface SafetyStatsData {
   total_detections: number
   today_blocked: number
-  block_rate: number
+  block_rate: number | null  // null 表示后端未提供
 }
 
 interface SafetyLogEntry {
@@ -24,26 +24,31 @@ function SafetyPanelSection() {
   const [logs, setLogs] = useState<SafetyLogEntry[]>([])
   const [enabled, setEnabled] = useState(true)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [toggling, setToggling] = useState(false)
 
   const doFetch = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       const [statsRes, logRes] = await Promise.all([
         safetyStats(),
         safetyLog(10),
       ])
       const d = statsRes.data ?? {}
+      // 字段缺失时显示 0 / —,绝不编造数字
       setStats({
-        total_detections: d.total_detections ?? 1283,
-        today_blocked: d.today_blocked ?? 47,
-        block_rate: d.block_rate ?? 3.7,
+        total_detections: d.total_detections ?? 0,
+        today_blocked: d.today_blocked ?? 0,
+        block_rate: d.block_rate ?? null,
       })
       setLogs(logRes.data?.logs ?? [])
       setEnabled(d.enabled !== undefined ? d.enabled : true)
     } catch {
-      setStats({ total_detections: 1283, today_blocked: 47, block_rate: 3.7 })
+      // API 失败:不显示假数字,明确告知用户加载失败
+      setStats(null)
       setLogs([])
+      setError('无法加载安全数据')
     } finally {
       setLoading(false)
     }
@@ -70,6 +75,26 @@ function SafetyPanelSection() {
         </h3>
         <div className="flex items-center justify-center py-8">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+        </div>
+      </section>
+    )
+  }
+
+  if (error) {
+    return (
+      <section>
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700">
+          <ShieldAlert className="h-4 w-4 text-red-400" />
+          内容安全面板
+        </h3>
+        <div className="rounded-xl border border-red-200/40 bg-red-50/40 p-6 text-center space-y-3">
+          <p className="text-sm text-red-600">{error}</p>
+          <button
+            onClick={doFetch}
+            className="rounded-lg border border-red-200 bg-white/80 px-4 py-1.5 text-xs text-red-600 hover:bg-white transition-colors"
+          >
+            重试
+          </button>
         </div>
       </section>
     )
