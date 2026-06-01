@@ -585,6 +585,21 @@ class OptimizedOrchestrator:
                 self.components["persona_extractor"] = None
                 logger.info("PersonaExtractor已禁用")
 
+            # ── 知识宝库系统 (v4.0 新增) ──
+            vault_fusion = fusion_cfg.get("vault", {})
+            vault_enabled = vault_fusion.get("enabled", True)
+            if vault_enabled:
+                try:
+                    from shisi.vault import VaultCollector
+                    self.components["vault_collector"] = VaultCollector()
+                    logger.info("知识宝库已初始化")
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("知识宝库初始化失败 (不影响运行): %s", e)
+                    self.components["vault_collector"] = None
+            else:
+                self.components["vault_collector"] = None
+                logger.info("知识宝库已禁用")
+
             self._initialized = True
             init_time = time.perf_counter() - start_time
             logger.info("[初始化] 完成, 耗时 %.2fs", init_time)
