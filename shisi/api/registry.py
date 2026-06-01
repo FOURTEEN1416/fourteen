@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
 
 from ..affinity.enhancer import AffinityEnhancer
 from ..character.manager import CharacterManager
+from ..character.store import CharacterStore
 from ..emotion_stage.stage_engine import EmotionStageEngine
 from ..memory.favorite_manager import FavoriteManager
 from ..memory.forward_manager import ForwardManager
@@ -55,13 +57,14 @@ class AiyuRegistry:
     character_service: CharacterService | None = None
 
 
-def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True) -> AiyuRegistry:
+def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True, db_path: str | Path | None = None) -> AiyuRegistry:
     reg = AiyuRegistry()
 
     if run_migrate:
-        run_migrations()
+        run_migrations(db_path)
 
-    reg.character_manager = CharacterManager()
+    store = CharacterStore(db_path) if db_path else CharacterStore()
+    reg.character_manager = CharacterManager(store=store)
     reg.character_manager.initialize()
 
     reg.affinity_enhancer = AffinityEnhancer()

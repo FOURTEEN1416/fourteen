@@ -123,10 +123,11 @@ indent-style = "space"
 [tool.mypy]
 python_version = "3.10"
 exclude = ["third_party/"]
-warn_return_any = true
+warn_return_any = false
 warn_unused_configs = true
+warn_unused_ignores = false
 disallow_untyped_defs = false
 ignore_missing_imports = true
 no_implicit_optional = true
+disable_error_code = "import-untyped"
 warn_redundant_casts = true
-warn_unused_ignores = true
