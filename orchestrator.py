@@ -11,9 +11,9 @@ from typing import Any
 
 from observability.logging_setup import new_trace_id
 from observability.tracing import tracer
-from safety.content_safety import ContentSafetyFilter
-from safety.pii_anonymizer import PIIAnonymizer
-from safety.prompt_injection import PromptInjectionDetector
+from security.content_safety import ContentSafetyFilter
+from security.pii_anonymizer import PIIAnonymizer
+from security.prompt_injection import PromptInjectionDetector
 
 logger = logging.getLogger("orchestrator")
 

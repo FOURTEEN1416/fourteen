@@ -20,6 +20,7 @@ class CharacterStore:
         self.db_path = Path(db_path) if db_path else _DB_DEFAULT
 
     def _connect(self) -> sqlite3.Connection:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path))
         conn.execute("PRAGMA foreign_keys=ON")
         conn.row_factory = sqlite3.Row

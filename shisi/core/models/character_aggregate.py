@@ -24,6 +24,9 @@ class CharacterAggregate(BaseModel):
     persona: PersonaProfile = Field(default_factory=PersonaProfile)
     emotional_state: EmotionalState = Field(default_factory=EmotionalState)
 
+    # 剧情线配置（可选，存储序列化 dict）
+    storyline_config: dict[str, Any] | None = Field(default=None, description="剧情线配置序列化数据")
+
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     version: int = 1
@@ -88,7 +91,28 @@ class CharacterAggregate(BaseModel):
             return EmotionType.TIRED
         return EmotionType.NEUTRAL
 
-    def build_system_prompt(self, user_message: str = "", chat_history: str = "") -> str:
+    def get_storyline_config(self):
+        """获取解析后的 StorylineConfig（延迟导入避免循环）。"""
+        if not self.storyline_config:
+            return None
+        from shisi.storyline.config import StorylineConfig
+        return StorylineConfig.from_dict(self.storyline_config)
+
+    def set_storyline_config(self, config) -> None:
+        """设置剧情线配置。"""
+        from shisi.storyline.config import StorylineConfig
+        if isinstance(config, StorylineConfig):
+            self.storyline_config = config.to_dict()
+        else:
+            self.storyline_config = config
+
+    def build_system_prompt(
+        self,
+        user_message: str = "",
+        chat_history: str = "",
+        knowledge_context: str = "",
+        storyline_context: str = "",
+    ) -> str:
         parts = [
             f"# 角色设定\n\n你是{self.name}。",
             self.description,
@@ -100,6 +124,12 @@ class CharacterAggregate(BaseModel):
             f"- 能量: {self.emotional_state.energy:.1f}",
             f"- 关系: {self.emotional_state.affinity_level.display_name}",
         ]
+
+        if knowledge_context:
+            parts.extend(["", "# 角色知识库", knowledge_context])
+
+        if storyline_context:
+            parts.extend(["", "# 剧情线", storyline_context])
 
         if chat_history:
             parts.extend(["", "# 对话历史", chat_history])
@@ -118,6 +148,7 @@ class CharacterAggregate(BaseModel):
             "tags": self.tags,
             "persona": self.persona.to_dict(),
             "emotional_state": self.emotional_state.to_dict(),
+            "storyline_config": self.storyline_config,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "version": self.version,

@@ -1,9 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import { shisiClient } from '../api/shisiClient'
 import type { EmotionState, DashboardStats, HealthStatus, WeChatStatus, TrainingProgress, ProactiveEngineState, MemoryFact, PsychProfile, PsychSnapshot, SafetyStats, SafetyLogEntry, RAGStats, VoiceStatus, PluginsList, ToolHistoryEntry, ProactiveHistoryEntry, MentalHealthSummary } from '../types/api'
-import type { AffinityProgress, EmotionStageProgress, VitalSignsData } from '../types/shisi'
-import type { CharacterState } from '../types/character'
 
 export const queryKeys = {
   characters: { all: ['characters'] as const, detail: (id: string) => ['characters', id] as const },
@@ -36,7 +33,7 @@ export const queryKeys = {
 export function useCharacters() {
   return useQuery({
     queryKey: queryKeys.characters.all,
-    queryFn: () => shisiClient.characters.list() as Promise<CharacterState[]>,
+    queryFn: () => api.listCharacters({}).then(r => r.characters as any[]),
     staleTime: 60 * 1000,
   })
 }
@@ -50,7 +47,7 @@ export function useActiveCharacter() {
 export function useAffinity(characterId: string | undefined) {
   return useQuery({
     queryKey: queryKeys.affinity.detail(characterId!),
-    queryFn: () => shisiClient.affinity.get(characterId!) as Promise<AffinityProgress>,
+    queryFn: () => api.affinityGet(characterId!).then(r => (r.data as any)?.data),
     enabled: !!characterId,
   })
 }
@@ -58,7 +55,7 @@ export function useAffinity(characterId: string | undefined) {
 export function useAffinityUnlocks(characterId: string | undefined) {
   return useQuery({
     queryKey: queryKeys.affinity.unlocks(characterId!),
-    queryFn: () => shisiClient.affinity.unlocks(characterId!) as Promise<{ affinity: number; unlocks: Array<{ name: string; affinity_threshold: number; unlocked_at?: string }> }>,
+    queryFn: () => api.affinityUnlocks(characterId!).then(r => (r.data as any)?.data),
     enabled: !!characterId,
   })
 }
@@ -66,7 +63,7 @@ export function useAffinityUnlocks(characterId: string | undefined) {
 export function useEmotionStage(characterId: string | undefined) {
   return useQuery({
     queryKey: queryKeys.emotionStage.detail(characterId!),
-    queryFn: () => shisiClient.emotionStage.get(characterId!) as Promise<EmotionStageProgress>,
+    queryFn: () => api.emotionStageGet(characterId!).then(r => (r.data as any)?.data),
     enabled: !!characterId,
   })
 }
@@ -74,7 +71,7 @@ export function useEmotionStage(characterId: string | undefined) {
 export function useEmotionStageList() {
   return useQuery({
     queryKey: queryKeys.emotionStage.stages,
-    queryFn: () => shisiClient.emotionStage.listStages() as Promise<Array<{ name: string; min: number; features: string[] }>>,
+    queryFn: () => api.emotionStageList().then(r => (r.data as any)?.data),
     staleTime: 5 * 60 * 1000,
   })
 }
@@ -188,7 +185,7 @@ export function useChannels() {
 export function useVitalSigns(characterId: string | undefined) {
   return useQuery({
     queryKey: queryKeys.vitalSigns.detail(characterId!),
-    queryFn: () => shisiClient.vitalSigns.get(characterId!) as Promise<VitalSignsData>,
+    queryFn: () => api.vitalSignsGet(characterId!).then(r => (r.data as any)?.data),
     enabled: !!characterId,
   })
 }
@@ -301,10 +298,7 @@ export function useMentalHealth() {
 export function useUnifiedCharacters(userId?: string, search?: string) {
   return useQuery({
     queryKey: [...queryKeys.characters.all, userId, search],
-    queryFn: async () => {
-      const mod = await import('../api/characterApi')
-      return mod.characterApi.list({ user_id: userId, search })
-    },
+    queryFn: () => api.listCharacters({ user_id: userId, search }),
     staleTime: 30 * 1000,
   })
 }
@@ -312,10 +306,7 @@ export function useUnifiedCharacters(userId?: string, search?: string) {
 export function useUnifiedCharacter(id: string | undefined) {
   return useQuery({
     queryKey: queryKeys.characters.detail(id!),
-    queryFn: async () => {
-      const mod = await import('../api/characterApi')
-      return mod.characterApi.get(id!)
-    },
+    queryFn: () => api.getCharacter(id!),
     enabled: !!id,
   })
 }
@@ -323,10 +314,7 @@ export function useUnifiedCharacter(id: string | undefined) {
 export function useCreateCharacter() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (data: import('../types/api').UnifiedCharacterCreate) => {
-      const mod = await import('../api/characterApi')
-      return mod.characterApi.create(data)
-    },
+    mutationFn: (data: import('../types/api').UnifiedCharacterCreate) => api.createCharacter(data),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.characters.all }),
   })
 }
@@ -334,10 +322,7 @@ export function useCreateCharacter() {
 export function useUpdateCharacter() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: import('../types/api').UnifiedCharacterUpdate }) => {
-      const mod = await import('../api/characterApi')
-      return mod.characterApi.update(id, data)
-    },
+    mutationFn: ({ id, data }: { id: string; data: import('../types/api').UnifiedCharacterUpdate }) => api.updateCharacter(id, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.characters.all }),
   })
 }
@@ -345,10 +330,7 @@ export function useUpdateCharacter() {
 export function useDeleteCharacter() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (id: string) => {
-      const mod = await import('../api/characterApi')
-      return mod.characterApi.delete(id)
-    },
+    mutationFn: (id: string) => api.deleteCharacter(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.characters.all }),
   })
 }
@@ -356,10 +338,7 @@ export function useDeleteCharacter() {
 export function useActivateCharacter() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (id: string) => {
-      const mod = await import('../api/characterApi')
-      return mod.characterApi.activate(id)
-    },
+    mutationFn: (id: string) => api.activateCharacter(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.characters.all })
     },
@@ -371,10 +350,7 @@ export function useActivateCharacter() {
 export function useCharacterVoice(characterId: string | undefined) {
   return useQuery({
     queryKey: ['character', characterId, 'voice'],
-    queryFn: async () => {
-      const mod = await import('../api/voiceApi')
-      return mod.voiceApi.getConfig(characterId!)
-    },
+    queryFn: () => api.getVoiceConfig(characterId!),
     enabled: !!characterId,
   })
 }
@@ -382,10 +358,7 @@ export function useCharacterVoice(characterId: string | undefined) {
 export function useBindCharacterVoice() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async ({ characterId, data }: { characterId: string; data: import('../types/api').VoiceBindRequest }) => {
-      const mod = await import('../api/voiceApi')
-      return mod.voiceApi.bind(characterId, data)
-    },
+    mutationFn: ({ characterId, data }: { characterId: string; data: import('../types/api').VoiceBindRequest }) => api.bindVoice(characterId, data),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ['character', variables.characterId, 'voice'] })
     },
@@ -395,10 +368,7 @@ export function useBindCharacterVoice() {
 export function useUpdateCharacterVoice() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async ({ characterId, data }: { characterId: string; data: import('../types/api').VoiceUpdateRequest }) => {
-      const mod = await import('../api/voiceApi')
-      return mod.voiceApi.update(characterId, data)
-    },
+    mutationFn: ({ characterId, data }: { characterId: string; data: import('../types/api').VoiceUpdateRequest }) => api.updateVoice(characterId, data),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ['character', variables.characterId, 'voice'] })
     },
@@ -408,10 +378,7 @@ export function useUpdateCharacterVoice() {
 export function useUnbindCharacterVoice() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (characterId: string) => {
-      const mod = await import('../api/voiceApi')
-      return mod.voiceApi.unbind(characterId)
-    },
+    mutationFn: (characterId: string) => api.unbindVoice(characterId),
     onSuccess: (_data, characterId) => {
       qc.invalidateQueries({ queryKey: ['character', characterId, 'voice'] })
     },
@@ -420,20 +387,74 @@ export function useUnbindCharacterVoice() {
 
 export function useTestCharacterVoice() {
   return useMutation({
-    mutationFn: async ({ characterId, text }: { characterId: string; text?: string }) => {
-      const mod = await import('../api/voiceApi')
-      return mod.voiceApi.test(characterId, text)
-    },
+    mutationFn: ({ characterId, text }: { characterId: string; text?: string }) => api.testVoice(characterId, text),
   })
 }
 
 export function useVoiceSpeakers(engine: string = 'edge-tts') {
   return useQuery({
     queryKey: ['voice', 'speakers', engine],
-    queryFn: async () => {
-      const mod = await import('../api/voiceApi')
-      return mod.voiceApi.speakers(engine)
-    },
+    queryFn: () => api.getSpeakers(engine),
     staleTime: 5 * 60 * 1000,
+  })
+}
+
+// ═══ 剧情线 hooks ═══
+
+export function useStorylineConfig(characterId: string | undefined) {
+  return useQuery({
+    queryKey: ['storyline', characterId, 'config'],
+    queryFn: () => api.getStorylineConfig(characterId!),
+    enabled: !!characterId,
+    staleTime: 30 * 1000,
+  })
+}
+
+export function useStorylineProgress(characterId: string | undefined) {
+  return useQuery({
+    queryKey: ['storyline', characterId, 'progress'],
+    queryFn: () => api.getStorylineProgress(characterId!),
+    enabled: !!characterId,
+    refetchInterval: 60 * 1000,
+  })
+}
+
+export function useUpdateStorylineConfig() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ characterId, config }: { characterId: string; config: import('../types/api').StorylineConfigRequest }) => api.updateStorylineConfig(characterId, config),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['storyline', variables.characterId, 'config'] })
+      qc.invalidateQueries({ queryKey: ['storyline', variables.characterId, 'progress'] })
+      qc.invalidateQueries({ queryKey: queryKeys.characters.all })
+    },
+  })
+}
+
+export function useDeleteStorylineConfig() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (characterId: string) => api.deleteStorylineConfig(characterId),
+    onSuccess: (_data, characterId) => {
+      qc.invalidateQueries({ queryKey: ['storyline', characterId, 'config'] })
+      qc.invalidateQueries({ queryKey: ['storyline', characterId, 'progress'] })
+      qc.invalidateQueries({ queryKey: queryKeys.characters.all })
+    },
+  })
+}
+
+export function useDetectStoryline() {
+  return useMutation({
+    mutationFn: (characterId: string) => api.detectStoryline(characterId),
+  })
+}
+
+export function useResetStoryline() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (characterId: string) => api.resetStoryline(characterId),
+    onSuccess: (_data, characterId) => {
+      qc.invalidateQueries({ queryKey: ['storyline', characterId, 'progress'] })
+    },
   })
 }

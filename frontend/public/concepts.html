@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>前端改造概念方案 · 研讨</title>
+<style>
+  /* ---- Reset & Base ---- */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: #f5f5f7;
+    color: #1d1d1f;
+    padding: 24px;
+    line-height: 1.6;
+  }
+
+  /* ---- Master header ---- */
+  .master-header {
+    max-width: 1000px;
+    margin: 0 auto 32px;
+    text-align: center;
+  }
+  .master-header h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
+  .master-header p { color: #6e6e73; font-size: 14px; margin-top: 8px; }
+  .master-header .badge {
+    display: inline-block;
+    background: #007aff;
+    color: #fff;
+    padding: 2px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+
+  /* ---- Concept card ---- */
+  .concept {
+    max-width: 1000px;
+    margin: 0 auto 40px;
+    background: #fff;
+    border-radius: 20px;
+    box-shadow: 0 2px 20px rgba(0,0,0,0.06);
+    overflow: hidden;
+  }
+  .concept-header {
+    padding: 24px 28px 16px;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .concept-header .num {
+    display: inline-block;
+    width: 28px; height: 28px;
+    background: #007aff;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    border-radius: 8px;
+    text-align: center;
+    line-height: 28px;
+    margin-right: 10px;
+  }
+  .concept-header h2 {
+    display: inline-block;
+    font-size: 18px;
+    font-weight: 600;
+    vertical-align: middle;
+  }
+  .concept-header .tag {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 10px;
+    border-radius: 10px;
+    margin-left: 10px;
+    font-weight: 500;
+    vertical-align: middle;
+  }
+  .tag-clear { background: #e8f5e9; color: #2e7d32; }
+  .tag-vague { background: #fff3e0; color: #e65100; }
+  .tag-debate { background: #e3f2fd; color: #1565c0; }
+
+  .concept-body { padding: 20px 28px 28px; }
+  .concept-desc { font-size: 14px; color: #6e6e73; margin-bottom: 20px; }
+
+  /* ---- Design variants ---- */
+  .variants {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .variant {
+    border: 2px solid #e8e8ed;
+    border-radius: 14px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .variant:hover { border-color: #007aff; box-shadow: 0 4px 16px rgba(0,122,255,0.1); }
+  .variant.selected { border-color: #007aff; background: #f5f9ff; }
+  .variant .label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #007aff;
+    margin-bottom: 8px;
+  }
+  .variant .preview {
+    background: #f5f5f7;
+    border-radius: 10px;
+    padding: 12px;
+    min-height: 120px;
+    position: relative;
+    overflow: hidden;
+  }
+  .variant .desc { font-size: 12px; color: #6e6e73; margin-top: 8px; }
+  .variant .radio {
+    display: inline-block;
+    width: 16px; height: 16px;
+    border: 2px solid #c7c7cc;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+    position: relative;
+    top: -1px;
+  }
+  .variant.selected .radio { border-color: #007aff; }
+  .variant.selected .radio::after {
+    content: '';
+    display: block;
+    width: 8px; height: 8px;
+    background: #007aff;
+    border-radius: 50%;
+    margin: 2px auto;
+  }
+
+  /* ---- Before/After split ---- */
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .split-box { border-radius: 12px; padding: 16px; }
+  .split-box.before { background: #fff5f5; border: 1px solid #ffcdd2; }
+  .split-box.after { background: #f1f8e9; border: 1px solid #c8e6c9; }
+  .split-box .title { font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+  .split-box.before .title { color: #c62828; }
+  .split-box.after .title { color: #2e7d32; }
+  .split-box .content { font-size: 13px; color: #444; line-height: 1.8; }
+
+  /* ---- Mocks inside previews ---- */
+  .mock-sidebar {
+    background: #fff;
+    border-radius: 8px;
+    padding: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    font-size: 10px;
+  }
+  .mock-sidebar .item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    margin-bottom: 2px;
+  }
+  .mock-sidebar .item.active { background: #e8f0fe; color: #007aff; font-weight: 600; }
+  .mock-sidebar .item .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .mock-sidebar .item .dot.online { background: #34c759; }
+  .mock-sidebar .item .dot.offline { background: #c7c7cc; }
+  .mock-tabbar {
+    display: flex; gap: 4px; font-size: 11px;
+  }
+  .mock-tabbar .tab {
+    padding: 4px 10px; border-radius: 6px;
+    background: #f5f5f7; color: #8e8e93;
+    white-space: nowrap;
+  }
+  .mock-tabbar .tab.active { background: #007aff; color: #fff; }
+
+  .mock-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    font-size: 10px;
+  }
+  .mock-card .avatar {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: #fff;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .mock-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  /* ---- Footer ---- */
+  .footer {
+    max-width: 1000px;
+    margin: 0 auto;
+    text-align: center;
+    padding: 20px;
+    color: #8e8e93;
+    font-size: 13px;
+  }
+  .footer strong { color: #1d1d1f; }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 640px) {
+    body { padding: 12px; }
+    .split { grid-template-columns: 1fr; }
+    .variants { grid-template-columns: 1fr; }
+    .concept-header { padding: 16px; }
+    .concept-body { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="master-header">
+  <div class="badge">研讨中 · 勿修改代码</div>
+  <h1>🎨 前端改造 · 概念方案</h1>
+  <p>每个需求点我标注了理解清晰度。不明确的地方做了多种方案，点击选择你倾向的</p>
+</div>
+
+<!-- ============================================================ -->
+<!-- POINT 1: 多微信账号 -->
+<!-- ============================================================ -->
+<div class="concept">
+  <div class="concept-header">
+    <span class="num">1</span>
+    <h2>多微信账号连接管理</h2>
+    <span class="tag tag-vague">模糊 · 2 种方案</span>
+  </div>
+  <div class="concept-body">
+    <div class="concept-desc">
+      <strong>你的想法：</strong>当前只支持连接一个微信账号，需要支持添加多个。<br>
+      <strong>我的理解：</strong>同时连接多个微信账号，每个独立管理连接/断开/状态。
+      不确定的是——多个账号之间的切换/管理方式，以下两种方案你看看哪个对：
+    </div>
+    <div class="variants">
+      <div class="variant" onclick="this.classList.toggle('selected')">
+        <div class="label"><span class="radio"></span>方案 A：账号卡片网格</div>
+        <div class="preview">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;">
+            <div style="flex:1;min-width:100px;background:#fff;border-radius:8px;padding:10px;box-shadow:0 1px 4px rgba(0,0,0,0.06);font-size:10px;">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                <div style="width:22px;height:22px;border-radius:50%;background:#34c759;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;">微</div>
+                <div style="font-weight:600;">工作号</div>
+                <div style="font-size:9px;color:#34c759;">● 在线</div>
+              </div>
+              <div style="font-size:9px;color:#8e8e93;">wxid_a1b2c3...</div>
+            </div>
+            <div style="flex:1;min-width:100px;background:#fff;border-radius:8px;padding:10px;box-shadow:0 1px 4px rgba(0,0,0,0.06);font-size:10px;">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                <div style="width:22px;height:22px;border-radius:50%;background:#ff9500;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;">小</div>
+                <div style="font-weight:600;">小号</div>
+                <div style="font-size:9px;color:#c7c7cc;">● 离线</div>
+              </div>
+              <div style="font-size:9px;color:#8e8e93;">最后在线 2h前</div>
+            </div>
+            <div style="flex:1;min-width:100px;background:#f5f5f7;border-radius:8px;padding:10px;border:1px dashed #c7c7cc;display:flex;align-items:center;justify-content:center;font-size:10px;color:#8e8e93;cursor:pointer;">
+              + 添加账号
+            </div>
+          </div>
+        </div>
+        <div class="desc">每个账号一张卡片，独立显示状态。点击卡片进入详情（扫码连接/断开/查看信息）。适合 2-5 个账号。</div>
+      </div>
+
+      <div class="variant" onclick="this.classList.toggle('selected')">
+        <div class="label"><span class="radio"></span>方案 B：账号列表 + 选中详情</div>
+        <div class="preview">
+          <div style="display:flex;gap:8px;height:120px;">
+            <div style="width:80px;background:#fff;border-radius:8px;padding:6px;box-shadow:0 1px 4px rgba(0,0,0,0.06);font-size:9px;overflow-y:auto;">
+              <div style="padding:5px 6px;border-radius:6px;background:#e8f0fe;color:#007aff;font-weight:600;margin-bottom:2px;">工作号</div>
+              <div style="padding:5px 6px;border-radius:6px;margin-bottom:2px;">小号</div>
+              <div style="padding:5px 6px;border-radius:6px;color:#c7c7cc;border:1px dashed #c7c7cc;text-align:center;margin-top:4px;">+</div>
+            </div>
+            <div style="flex:1;background:#fff;border-radius:8px;padding:10px;box-shadow:0 1px 4px rgba(0,0,0,0.06);font-size:10px;">
+              <div style="font-weight:600;margin-bottom:6px;">工作号 <span style="color:#34c759;font-weight:400;">● 在线</span></div>
+              <div style="color:#8e8e93;margin-bottom:4px;">wxid_work_001</div>
+              <div style="display:flex;gap:6px;">
+                <div style="padding:4px 8px;background:#f5f5f7;border-radius:4px;font-size:9px;">断开</div>
+                <div style="padding:4px 8px;background:#f5f5f7;border-radius:4px;font-size:9px;">重新连接</div>
+                <div style="padding:4px 8px;background:#fff5f5;color:#ff3b30;border-radius:4px;font-size:9px;">删除</div>
+              </div>
+              <div style="margin-top:8px;border-top:1px solid #f0f0f0;padding-top:6px;font-size:9px;color:#8e8e93;">
+                在线时长：03:12:45 · 消息数：128
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="desc">左侧账号列表，右侧显示选中账号的详情/操作。适合 5 个以上账号。</div>
+      </div>
+    </div>
+    <div style="font-size:12px;color:#6e6e73;background:#f5f5f7;border-radius:8px;padding:12px;">
+      💡 另外想问：多个微信账号是否共用同一个二维码扫码流程？还是每个账号独立扫码连接？这会影响连接交互设计。
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- POINT 2: 实时人设卡 -->
+<!-- ============================================================ -->
+<div class="concept">
+  <div class="concept-header">
+    <span class="num">2</span>
+    <h2>实时人设卡 — 在所有子 Tab 始终存在</h2>
+    <span class="tag tag-vague">模糊 · 3 种方案</span>
+  </div>
+  <div class="concept-body">
+    <div class="concept-desc">
+      <strong>你的想法：</strong>人设卡目前只在"AI 对话"tab 存在，需要在所有子 tab（AI对话/聊天记录生成角色/克隆微信好友/导入微信联系人/文件导入/导入角色定义JSON）都始终显示，且能预览和编辑。<br>
+      <strong>我的理解：</strong>人设卡是角色的"身份证"，不管在哪个功能页面都要能看到并修改。不确定的是——人设卡应该放在什么位置、什么尺寸。
+    </div>
+    <div class="variants">
+      <div class="variant" onclick="this.classList.toggle('selected')">
+        <div class="label"><span class="radio"></span>方案 A：右侧固定面板</div>
+        <div class="preview">
+          <div style="display:flex;gap:6px;height:130px;">
+            <div style="flex:1;background:#f5f5f7;border-radius:6px;padding:8px;font-size:9px;">
+              <div class="mock-tabbar" style="margin-bottom:6px;">
+                <span class="tab active">AI 对话</span>
+                <span class="tab">克隆好友</span>
+                <span class="tab">文件导入</span>
+              </div>
+              <div style="background:#fff;border-radius:6px;padding:8px;height:70px;font-size:9px;color:#8e8e93;display:flex;align-items:center;justify-content:center;">
+                内容区域
+              </div>
+            </div>
+            <div class="mock-card" style="width:110px;display:flex;flex-direction:column;">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                <div class="avatar" style="background:linear-gradient(135deg,#ff6b9d,#c44dff);">薇</div>
+                <div>
+                  <div style="font-weight:600;font-size:10px;">小薇</div>
+                  <div style="font-size:8px;color:#8e8e93;">温柔邻家姐姐</div>
+                </div>
+              </div>
+              <div style="font-size:8px;color:#8e8e93;margin-bottom:4px;">温暖 85% · 幽默 60%</div>
+              <div style="display:flex;gap:2px;flex-wrap:wrap;">
+                <span style="padding:1px 6px;background:#f0f0f0;border-radius:4px;font-size:8px;">温柔</span>
+                <span style="padding:1px 6px;background:#f0f0f0;border-radius:4px;font-size:8px;">体贴</span>
+              </div>
+              <div style="margin-top:auto;font-size:8px;color:#007aff;">编辑 →</div>
+            </div>
+          </div>
+        </div>
+        <div class="desc">人设卡固定在右侧，始终可见。内容区域随 tab 切换。人设卡可折叠收起。</div>
+      </div>
+
+      <div class="variant" onclick="this.classList.toggle('selected')">
+        <div class="label"><span class="radio"></span>方案 B：顶部横条</div>
+        <div class="preview">
+          <div style="background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,0.06);font-size:10px;">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;">
+              <div class="avatar" style="width:32px;height:32px;background:linear-gradient(135deg,#ff6b9d,#c44dff);">薇</div>
+              <div style="flex:1;">
+                <div style="font-weight:600;">小薇</div>
+                <div style="font-size:9px;color:#8e8e93;">温柔体贴的邻家姐姐</div>
+              </div>
+              <div style="display:flex;gap:4px;font-size:9px;color:#8e8e93;">
+                <span>❤️ 温暖 85</span>
+                <span>😄 幽默 60</span>
+              </div>
+              <div style="font-size:9px;color:#007aff;cursor:pointer;">编辑</div>
+            </div>
+            <div style="padding:0 12px 6px;">
+              <div class="mock-tabbar">
+                <span class="tab active">AI 对话</span>
+                <span class="tab">克隆好友</span>
+                <span class="tab">文件导入</span>
+              </div>
+            </div>
+          </div>
+          <div style="background:#f5f5f7;border-radius:6px;padding:8px;margin-top:6px;font-size:9px;color:#8e8e93;display:flex;align-items:center;justify-content:center;height:60px;">
+            内容区域
+          </div>
+        </div>
+        <div class="desc">人设卡作为顶部横幅，tabs 在下方。内容区完全展开。适合宽屏。</div>
+      </div>
+
+      <div class="variant" onclick="this.classList.toggle('selected')">
+        <div class="label"><span class="radio"></span>方案 C：可折叠侧边栏（左/右可配置）</div>
+        <div class="preview">
+          <div style="display:flex;gap:6px;height:130px;">
+            <div style="width:30px;background:#f0f0f0;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#8e8e93;writing-mode:vertical-rl;cursor:pointer;">
+              ≫ 人设卡
+            </div>
+            <div style="flex:1;background:#f5f5f7;border-radius:6px;padding:8px;font-size:9px;">
+              <div class="mock-tabbar" style="margin-bottom:6px;">
+                <span class="tab active">AI 对话</span>
+                <span class="tab">克隆好友</span>
+                <span class="tab">文件导入</span>
+              </div>
+              <div style="background:#fff;border-radius:6px;padding:8px;height:70px;font-size:9px;color:#8e8e93;display:flex;align-items:center;justify-content:center;">
+                内容区域（完全展开）
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="desc">人设卡默认收起为细条，点击展开为侧边栏。内容区任何时候都最大。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- POINT 3: 角色三标签页置顶 -->
+<!-- ============================================================ -->
+<div class="concept">
+  <div class="concept-header">
+    <span class="num">3</span>
+    <h2>角色三标签置顶 + 加大字号</h2>
+    <span class="tag tag-clear">清晰</span>
+  </div>
+  <div class="concept-body">
+    <div class="concept-desc">
+      <strong>你的想法：</strong>进入 <code>/users/u-001/create</code> 页面后，"角色创造 / 角色设置 / 状态中心" 放在页面顶部，调大字号便于切换。<br>
+      <strong>我的理解：</strong>把当前的工作区子 tab 从中间挪到顶部，字体加大。以下是我做的 before/after 效果：
+    </div>
+    <div class="split">
+      <div class="split-box before">
+        <div class="title">← 当前</div>
+        <div class="content">
+          <div style="background:#f5f5f7;border-radius:6px;padding:10px;font-size:12px;">
+            <div style="color:#8e8e93;margin-bottom:6px;">工作区 · 林小希</div>
+            <div style="display:flex;gap:4px;padding:4px;background:#e8e8ed;border-radius:8px;">
+              <span style="flex:1;text-align:center;padding:4px 8px;background:#fff;border-radius:6px;font-size:11px;font-weight:500;">创造角色</span>
+              <span style="flex:1;text-align:center;padding:4px 8px;border-radius:6px;font-size:11px;color:#8e8e93;">角色设置</span>
+              <span style="flex:1;text-align:center;padding:4px 8px;border-radius:6px;font-size:11px;color:#8e8e93;">状态中心</span>
+            </div>
+            <div style="margin-top:8px;padding:12px;background:#fff;border-radius:6px;text-align:center;color:#8e8e93;font-size:11px;">
+              tab 内容区<br>（字号小，位置居中偏下）
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="split-box after">
+        <div class="title">→ 改造后</div>
+        <div class="content">
+          <div style="background:#f1f8e9;border-radius:6px;padding:10px;font-size:12px;">
+            <div style="display:flex;gap:6px;margin-bottom:8px;">
+              <span style="padding:8px 18px;background:#007aff;color:#fff;border-radius:10px;font-size:15px;font-weight:600;">创造角色</span>
+              <span style="padding:8px 18px;background:#f0f0f0;color:#444;border-radius:10px;font-size:15px;font-weight:500;">角色设置</span>
+              <span style="padding:8px 18px;background:#f0f0f0;color:#444;border-radius:10px;font-size:15px;font-weight:500;">状态中心</span>
+            </div>
+            <div style="margin-top:8px;padding:16px;background:#fff;border-radius:8px;text-align:center;color:#444;font-size:12px;">
+              tab 内容区<br>（三标签固定在页面最顶部）
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- POINT 4: 角色侧边栏 + 克隆微信好友补全 -->
+<!-- ============================================================ -->
+<div class="concept">
+  <div class="concept-header">
+    <span class="num">4</span>
+    <h2>角色列表侧边栏 + 克隆微信好友功能补全</h2>
+    <span class="tag tag-debate">需讨论 · 2 层不确定</span>
+  </div>
+  <div class="concept-body">
+    <div class="concept-desc">
+      <strong>你的想法：</strong>(1) "+ 创造新角色"按钮下方新增侧边栏显示已有角色列表；(2) "克隆微信好友"页面功能不完整，未展示后端所有功能。<br>
+      <strong>不确定点：</strong>A) 角色侧边栏的层级位置——是在用户选择后的工作区里？还是在用户列表页直接显示？B) 微信克隆页面缺了哪些后端功能？
+    </div>
+
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;">▎第一部分：角色侧边栏布局方案</div>
+    <div class="variants">
+      <div class="variant" onclick="this.classList.toggle('selected')">
+        <div class="label"><span class="radio"></span>方案 A：用户工作区内的角色侧边栏</div>
+        <div class="preview">
+          <div style="display:flex;gap:6px;height:120px;">
+            <div style="width:90px;background:#fff;border-radius:8px;padding:6px;box-shadow:0 1px 4px rgba(0,0,0,0.06);font-size:9px;">
+              <div style="font-weight:600;padding:4px 2px;font-size:8px;color:#8e8e93;border-bottom:1px solid #f0f0f0;margin-bottom:4px;">我的角色</div>
+              <div style="padding:4px 6px;border-radius:4px;background:#e8f0fe;color:#007aff;font-weight:600;margin-bottom:2px;">小薇</div>
+              <div style="padding:4px 6px;border-radius:4px;margin-bottom:2px;">小冰</div>
+              <div style="padding:4px 6px;border-radius:4px;margin-bottom:2px;">助手A</div>
+              <div style="padding:4px 6px;border-radius:4px;font-size:8px;color:#007aff;border:1px dashed #007aff;text-align:center;margin-top:4px;">+ 新角色</div>
+            </div>
+            <div style="flex:1;background:#f5f5f7;border-radius:6px;padding:6px;font-size:9px;">
+              <div class="mock-tabbar" style="margin-bottom:4px;">
+                <span class="tab active">创造角色</span>
+                <span class="tab">角色设置</span>
+                <span class="tab">状态中心</span>
+              </div>
+              <div style="background:#fff;border-radius:4px;padding:6px;font-size:8px;color:#8e8e93;height:60px;">
+                当前角色（小薇）的工作区内容
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="desc">进入用户工作区后，左侧显示角色列表，右侧显示当前角色的操作选项卡</div>
+      </div>
+
+      <div class="variant" onclick="this.classList.toggle('selected')">
+        <div class="label"><span class="radio"></span>方案 B：用户列表页直接嵌入角色侧边栏</div>
+        <div class="preview">
+          <div style="display:flex;gap:6px;height:120px;">
+            <div style="width:100px;background:#fff;border-radius:8px;padding:6px;box-shadow:0 1px 4px rgba(0,0,0,0.06);font-size:9px;">
+              <div style="font-weight:600;font-size:8px;padding:4px;color:#8e8e93;">👤 林小希</div>
+              <div style="padding:4px 6px;border-radius:4px;background:#e8f0fe;color:#007aff;font-weight:600;margin-bottom:2px;">小薇</div>
+              <div style="padding:4px 6px;border-radius:4px;margin-bottom:2px;">小冰</div>
+            </div>
+            <div style="flex:1;background:#f5f5f7;border-radius:6px;padding:6px;font-size:9px;">
+              <div style="display:flex;gap:4px;margin-bottom:4px;">
+                <span style="padding:6px 14px;background:#007aff;color:#fff;border-radius:6px;font-size:11px;font-weight:600;">创造</span>
+                <span style="padding:6px 14px;background:#f0f0f0;color:#444;border-radius:6px;font-size:11px;">设置</span>
+                <span style="padding:6px 14px;background:#f0f0f0;color:#444;border-radius:6px;font-size:11px;">状态</span>
+              </div>
+              <div style="background:#fff;border-radius:4px;padding:6px;font-size:8px;color:#8e8e93;height:55px;">
+                内容区
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="desc">用户列表页点击某个用户后，直接进入角色管理视图（不额外跳转路由）</div>
+      </div>
+    </div>
+
+    <div style="font-size:13px;font-weight:600;margin:16px 0 10px;">▎第二部分：克隆微信好友 — 需要你确认缺失的功能</div>
+    <div style="background:#f5f5f7;border-radius:10px;padding:14px;font-size:13px;line-height:1.8;">
+      <p style="margin-bottom:8px;">目前前端"克隆微信好友"tab 只展示了：</p>
+      <ul style="margin-left:18px;color:#444;">
+        <li>✅ 好友列表选择</li>
+        <li>✅ 克隆进度条（提取→分析→生成→完成）</li>
+        <li>✅ 生成的角色性格参数预览</li>
+      </ul>
+      <p style="margin:8px 0;">后端的微信模块完整功能可能还包括以下，<strong>你帮我勾一下哪些需要展示到前端：</strong></p>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:4px 8px;background:#fff;border-radius:6px;">
+          <input type="checkbox"> 微信聊天记录批量导出（按联系人/日期筛选）
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:4px 8px;background:#fff;border-radius:6px;">
+          <input type="checkbox"> 微信联系人列表管理（分组/标签/搜索）
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:4px 8px;background:#fff;border-radius:6px;">
+          <input type="checkbox"> 自动回复/消息转发规则配置
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:4px 8px;background:#fff;border-radius:6px;">
+          <input type="checkbox"> 微信消息历史记录查看/搜索
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:4px 8px;background:#fff;border-radius:6px;">
+          <input type="checkbox"> 微信多账号消息聚合/分离查看
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:4px 8px;background:#fff;border-radius:6px;">
+          <input type="checkbox"> 群聊管理（群列表/群成员/群消息）
+        </label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- POINT 5: 系统设置侧边栏 -->
+<!-- ============================================================ -->
+<div class="concept">
+  <div class="concept-header">
+    <span class="num">5</span>
+    <h2>系统设置：顶部 Tab → 侧边栏导航</h2>
+    <span class="tag tag-clear">清晰</span>
+  </div>
+  <div class="concept-body">
+    <div class="concept-desc">
+      <strong>你的想法：</strong>删除顶部 tab 切换组件（通用/LLM/语音/安全/扩展/日志），改用侧边栏切换。<br>
+      <strong>我的理解：</strong>把 SystemSettingsLayout 的水平 tab bar 替换为垂直侧边栏，与全局侧边栏风格统一。
+    </div>
+    <div class="split">
+      <div class="split-box before">
+        <div class="title">← 当前</div>
+        <div class="content">
+          <div style="background:#f5f5f7;border-radius:8px;padding:10px;font-size:12px;">
+            <div style="font-weight:600;margin-bottom:8px;">系统设置</div>
+            <div style="display:flex;gap:4px;padding:4px;background:#e8e8ed;border-radius:8px;">
+              <span style="padding:4px 8px;background:#fff;border-radius:4px;font-size:10px;">通用</span>
+              <span style="padding:4px 8px;border-radius:4px;font-size:10px;color:#8e8e93;">LLM</span>
+              <span style="padding:4px 8px;border-radius:4px;font-size:10px;color:#8e8e93;">语音</span>
+              <span style="padding:4px 8px;border-radius:4px;font-size:10px;color:#8e8e93;">安全</span>
+              <span style="padding:4px 8px;border-radius:4px;font-size:10px;color:#8e8e93;">扩展</span>
+              <span style="padding:4px 8px;border-radius:4px;font-size:10px;color:#8e8e93;">日志</span>
+            </div>
+            <div style="margin-top:8px;padding:12px;background:#fff;border-radius:6px;height:60px;display:flex;align-items:center;justify-content:center;color:#8e8e93;font-size:11px;">
+              设置内容区域
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="split-box after">
+        <div class="title">→ 改造后</div>
+        <div class="content">
+          <div style="display:flex;gap:10px;background:#f1f8e9;border-radius:8px;padding:10px;font-size:12px;">
+            <div style="width:80px;">
+              <div style="font-weight:600;margin-bottom:6px;">系统设置</div>
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <div style="padding:6px 10px;background:#007aff;color:#fff;border-radius:6px;font-size:11px;">⚙ 通用</div>
+                <div style="padding:6px 10px;border-radius:6px;font-size:11px;color:#444;">✨ LLM</div>
+                <div style="padding:6px 10px;border-radius:6px;font-size:11px;color:#444;">🎤 语音</div>
+                <div style="padding:6px 10px;border-radius:6px;font-size:11px;color:#444;">🛡 安全</div>
+                <div style="padding:6px 10px;border-radius:6px;font-size:11px;color:#444;">🧩 工具</div>
+                <div style="padding:6px 10px;border-radius:6px;font-size:11px;color:#444;">📋 日志</div>
+              </div>
+            </div>
+            <div style="flex:1;background:#fff;border-radius:6px;padding:10px;height:100px;display:flex;align-items:center;justify-content:center;color:#8e8e93;font-size:11px;">
+              设置内容区域（完全展开）
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- POINT 6: 删除环境选择 -->
+<!-- ============================================================ -->
+<div class="concept">
+  <div class="concept-header">
+    <span class="num">6</span>
+    <h2>通用设置：删除"环境选择"</h2>
+    <span class="tag tag-clear">清晰</span>
+  </div>
+  <div class="concept-body">
+    <div class="concept-desc">
+      <strong>你的想法：</strong>删除"通用设置 → 环境选择 → 选择运行环境 → 开发环境"这一整块。<br>
+      <strong>我的理解：</strong>把 SettingsGeneral 里的环境选择 section 整块删掉，只保留 LLM 缓存相关设置。
+    </div>
+    <div class="split">
+      <div class="split-box before">
+        <div class="title">← 当前</div>
+        <div class="content">
+          <div style="background:#f5f5f7;border-radius:6px;padding:8px;">
+            <div style="padding:8px;background:#fff5f5;border-radius:4px;border:1px solid #ffcdd2;margin-bottom:6px;">
+              <div style="font-size:11px;font-weight:600;">❌ 环境选择</div>
+              <div style="font-size:10px;color:#8e8e93;">选择运行环境</div>
+              <div style="font-size:10px;color:#c62828;">[开发环境 ↓]</div>
+            </div>
+            <div style="padding:8px;background:#fff;border-radius:4px;">
+              <div style="font-size:11px;font-weight:600;">LLM 缓存</div>
+              <div style="font-size:10px;color:#8e8e93;">启用缓存 · 缓存时间</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="split-box after">
+        <div class="title">→ 改造后</div>
+        <div class="content">
+          <div style="background:#f1f8e9;border-radius:6px;padding:8px;">
+            <div style="padding:8px;background:#fff;border-radius:4px;">
+              <div style="font-size:11px;font-weight:600;">LLM 缓存</div>
+              <div style="font-size:10px;color:#8e8e93;">启用缓存 · 缓存时间</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- POINT 7: MiMo 选项 -->
+<!-- ============================================================ -->
+<div class="concept">
+  <div class="concept-header">
+    <span class="num">7</span>
+    <h2>语音合成引擎：添加 MiMo</h2>
+    <span class="tag tag-clear">清晰</span>
+  </div>
+  <div class="concept-body">
+    <div class="concept-desc">
+      <strong>你的想法：</strong>语音合成引擎选择里没有 MiMo 选项。<br>
+      <strong>我的理解：</strong>在 SettingsVoice.tsx 的 engineOptions 里加上 MiMo。但有个问题——<strong>系统设置的语音引擎和角色设置的语音引擎是什么关系？</strong>
+    </div>
+    <div class="split">
+      <div class="split-box before">
+        <div class="title">← 当前（SettingsVoice.tsx）</div>
+        <div class="content">
+          <div style="background:#f5f5f7;border-radius:6px;padding:10px;">
+            <div style="font-size:11px;">引擎选项：</div>
+            <div style="font-size:11px;color:#8e8e93;">• Edge TTS</div>
+            <div style="font-size:11px;color:#8e8e93;">• GPT-SoVITS</div>
+            <div style="font-size:11px;color:#8e8e93;">• Bert-VITS2</div>
+            <div style="font-size:11px;color:#ff3b30;text-decoration:line-through;">MiMo Cloud（缺失）</div>
+          </div>
+        </div>
+      </div>
+      <div class="split-box after">
+        <div class="title">→ 改造后</div>
+        <div class="content">
+          <div style="background:#f1f8e9;border-radius:6px;padding:10px;">
+            <div style="font-size:11px;">引擎选项：</div>
+            <div style="font-size:11px;">• Edge TTS</div>
+            <div style="font-size:11px;">• GPT-SoVITS</div>
+            <div style="font-size:11px;">• Bert-VITS2</div>
+            <div style="font-size:11px;font-weight:600;color:#2e7d32;">• MiMo Cloud ✅ 新增</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="font-size:12px;color:#6e6e73;background:#e3f2fd;border-radius:8px;padding:12px;margin-top:12px;">
+      💡 需要确认的问题：<strong>系统设置里的"默认语音引擎"和角色设置里每个角色的语音引擎</strong>——是系统级默认值、角色级可以覆盖？还是说系统设置选了 MiMo，所有角色都强制用 MiMo？
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- POINT 8: 安全页清理 + 扩展→工具 -->
+<!-- ============================================================ -->
+<div class="concept">
+  <div class="concept-header">
+    <span class="num">8</span>
+    <h2>安全页精简 + 扩展重命名为"工具"</h2>
+    <span class="tag tag-debate">需讨论 · 范围确认</span>
+  </div>
+  <div class="concept-body">
+    <div class="concept-desc">
+      <strong>你的想法：</strong>(A) 删除"登录密码/会话管理/IP 白名单"；(B) 扩展设置改名为"工具"；(C) 把所有工具（工具箱 + WebDAV + Web 搜索）归到同一个页面管理开关。<br>
+      <strong>我的理解：</strong>安全页面只保留"安全选项"（管理员后台/敏感词过滤/日志脱敏）；原"扩展"页面重构成"工具"页面，负责所有功能模块的开关管理。
+    </div>
+
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;">▎8A：安全页改造</div>
+    <div class="split">
+      <div class="split-box before">
+        <div class="title">← 当前</div>
+        <div class="content">
+          <div style="background:#f5f5f7;border-radius:6px;padding:8px;font-size:10px;">
+            <div style="padding:6px;background:#fff5f5;border-radius:4px;border:1px solid #ffcdd2;margin-bottom:4px;">
+              ❌ 登录密码（设置/修改密码）
+            </div>
+            <div style="padding:6px;background:#fff5f5;border-radius:4px;border:1px solid #ffcdd2;margin-bottom:4px;">
+              ❌ 会话管理（有效期选择）
+            </div>
+            <div style="padding:6px;background:#fff5f5;border-radius:4px;border:1px solid #ffcdd2;margin-bottom:4px;">
+              ❌ IP 白名单
+            </div>
+            <div style="padding:6px;background:#fff;border-radius:4px;">
+              ✅ 安全选项（管理员后台/敏感词/日志脱敏）
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="split-box after">
+        <div class="title">→ 改造后</div>
+        <div class="content">
+          <div style="background:#f1f8e9;border-radius:6px;padding:8px;">
+            <div style="padding:6px;background:#fff;border-radius:4px;">
+              <div style="font-size:11px;font-weight:600;">安全选项</div>
+              <div style="font-size:10px;color:#8e8e93;">
+                ✅ 管理员后台开关<br>
+                ✅ 敏感词过滤开关<br>
+                ✅ 日志脱敏开关
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size:13px;font-weight:600;margin:16px 0 10px;">▎8B：扩展 → 工具（功能开关总控）</div>
+    <div style="background:#f5f5f7;border-radius:10px;padding:14px;font-size:13px;">
+      <p style="margin-bottom:8px;"><strong>我的理解是做成"工具仪表盘"：</strong></p>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#fff;border-radius:8px;">
+          <div>
+            <div style="font-size:12px;font-weight:500;">🌐 Web 搜索</div>
+            <div style="font-size:10px;color:#8e8e93;">联网搜索增强 AI 回答实时准确性</div>
+          </div>
+          <div style="width:36px;height:20px;background:#34c759;border-radius:10px;position:relative;">
+            <div style="width:16px;height:16px;background:#fff;border-radius:50%;position:absolute;right:2px;top:2px;"></div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#fff;border-radius:8px;">
+          <div>
+            <div style="font-size:12px;font-weight:500;">☁️ WebDAV 同步</div>
+            <div style="font-size:10px;color:#8e8e93;">通过 WebDAV 协议同步角色配置数据</div>
+          </div>
+          <div style="width:36px;height:20px;background:#34c759;border-radius:10px;position:relative;">
+            <div style="width:16px;height:16px;background:#fff;border-radius:50%;position:absolute;right:2px;top:2px;"></div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#fff;border-radius:8px;">
+          <div>
+            <div style="font-size:12px;font-weight:500;">🎙️ 语音合成</div>
+            <div style="font-size:10px;color:#8e8e93;">TTS 语音合成引擎总开关</div>
+          </div>
+          <div style="width:36px;height:20px;background:#e8e8ed;border-radius:10px;position:relative;">
+            <div style="width:16px;height:16px;background:#fff;border-radius:50%;position:absolute;left:2px;top:2px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="font-size:12px;color:#6e6e73;background:#e3f2fd;border-radius:8px;padding:12px;margin-top:12px;">
+      💡 不确定：这个"工具"页面需要覆盖哪些工具的开关？我上面列了 3 个（Web搜索/WebDAV/语音合成），还有别的要加吗？比如是否包括"微信连接管理"？
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 底部 -->
+<!-- ============================================================ -->
+<div class="footer">
+  <p>以上是我对你 8 个需求点的理解和设计方案。</p>
+  <p style="margin-top:4px;">
+    标注 <strong style="color:#e65100;">模糊</strong> 和 <strong style="color:#1565c0;">需讨论</strong> 的地方，<br>
+    你直接回复：<strong>"方案A"、"选2"、"要加XX功能"</strong> 之类的，我就能确认方向。
+  </p>
+  <p style="margin-top:8px;color:#c7c7cc;">全部确认后，我再按顺序逐一修改前端代码。</p>
+</div>
+
+</body>
+</html>

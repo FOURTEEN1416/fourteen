@@ -57,5 +57,26 @@ validation_reports/
 .uploads/
 .coverage
 htmlcov/
+.superpowers/
+.arts/
+.playwright-mcp/
+
+# ── 运行时产物 ──
+*.rdb
+audit_output.json
+ACA(3)*/
+
+# ── 设计稿/截图 ──
+*.docx
+createrole-*.png
+rolesettings-*.png
+rolesettings-check
+navigation-design-v10.html
+concepts-overview.html
+
+# ── 临时测试文件 ──
+run_api_only.py
+/0
+create-role-after-fix/
 
 .env

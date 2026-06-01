@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
@@ -14,14 +15,15 @@ if TYPE_CHECKING:
 
 from ..affinity.enhancer import AffinityEnhancer
 from ..character.manager import CharacterManager
+from ..character.store import CharacterStore
 from ..emotion_stage.stage_engine import EmotionStageEngine
-from ..memory_ext.favorite_manager import FavoriteManager
-from ..memory_ext.forward_manager import ForwardManager
+from ..memory.favorite_manager import FavoriteManager
+from ..memory.forward_manager import ForwardManager
 from ..migrations import run_migrations
 from ..stats.analytics import AnalyticsService
 from ..sticker.sticker_manager import StickerManager
 from ..vital_signs.vital_engine import VitalSignsEngine
-from ..voice_ext.emotion_tts import VoiceEnhancer
+from ..voice.emotion_tts import VoiceEnhancer
 from ..wechat.command_handler import WeChatCommandHandler
 from ..wechat.proactive_messenger import WeChatProactiveMessenger
 from . import (
@@ -55,13 +57,14 @@ class AiyuRegistry:
     character_service: CharacterService | None = None
 
 
-def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True) -> AiyuRegistry:
+def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True, db_path: str | Path | None = None) -> AiyuRegistry:
     reg = AiyuRegistry()
 
     if run_migrate:
-        run_migrations()
+        run_migrations(db_path)
 
-    reg.character_manager = CharacterManager()
+    store = CharacterStore(db_path) if db_path else CharacterStore()
+    reg.character_manager = CharacterManager(store=store)
     reg.character_manager.initialize()
 
     reg.affinity_enhancer = AffinityEnhancer()
@@ -96,7 +99,8 @@ def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True) -> AiyuReg
 
     if app is not None:
         _mount_routes(app, reg)
-        _mount_v2_routes(app, reg)
+        # v2 路由已废弃（2026-05-31）：前端无调用，功能已被 /api/characters/* 替代
+        # _mount_v2_routes(app, reg)
 
     logger.info("十四模块初始化完成")
     return reg

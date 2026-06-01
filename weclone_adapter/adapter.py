@@ -24,7 +24,7 @@ from clone_training import (
     LoRATrainer,
     StyleAnalyzer,
 )
-from safety.pii_anonymizer import PIIAnonymizer
+from security.pii_anonymizer import PIIAnonymizer
 
 logger = logging.getLogger("weclone.adapter")
 

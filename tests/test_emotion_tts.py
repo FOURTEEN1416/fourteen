@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, ".")
 
-from shisi.voice_ext.emotion_tts import EmotionVoiceMapper, VoiceEnhancer
+from shisi.voice.emotion_tts import EmotionVoiceMapper, VoiceEnhancer
 
 
 def test_emotion_params_mapping():

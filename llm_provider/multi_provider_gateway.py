@@ -19,14 +19,14 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 from .llm_gateway import LLMGatewayV2
-from .opencode_zen_provider import OpenCodeZenProvider
 from .openai_compatible_provider import OpenAICompatibleProvider
+from .opencode_zen_provider import OpenCodeZenProvider
 
 logger = logging.getLogger("llm_provider.multi_gateway")
 
@@ -321,9 +321,7 @@ class MultiProviderGateway:
         }
 
     async def close(self) -> None:
-        for key, provider in self._providers.items():
+        for provider in self._providers.values():
             if hasattr(provider, "close"):
-                try:
+                with suppress(Exception):
                     await provider.close()
-                except Exception:  # noqa: BLE001
-                    pass

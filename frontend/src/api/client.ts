@@ -1,5 +1,60 @@
+/**
+ * API 客户端 & 领域函数总线
+ *
+ * ═══ Decision 5: 数据架构约定 ═══
+ * • 服务端数据（角色列表、训练状态、日志等）→ React Query (useQueries.ts)
+ *     从本文件 import { api } 调用，queryKey 见 useQueries.ts
+ * • UI 交互状态（弹窗、表单输入、选中项、切片 UI 状态）→ Zustand store
+ *     见 ../store/ 目录
+ * • 例外：少量页面仍用 useState 直接管理服务端数据（UsersPage），
+ *     逐步迁移到 React Query + api.* 模式
+ */
 import axios from 'axios'
 import { useErrorStore } from '../store/errorStore'
+
+// ── Domain API imports (for re-export and api namespace) ──
+import {
+  chat, chatStream, createSession, listSessions, chatHistory, emotionState, emotionTrend,
+} from './chat'
+import {
+  trainingStatus, trainingProgress, trainingExtract, trainingClean,
+  trainingTrain, trainingStop, trainingTest, trainingApply,
+} from './training'
+import {
+  cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset,
+  cloneDeleteConversation, cloneBatchDeleteConversations, cloneStats,
+} from './clone'
+import {
+  health, stats, dashboardStats, config, saveConfig,
+  personaProfile, personaEvolutionLog, memoryFacts,
+  tools, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,
+  logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
+  wechatConnectionStatus, wechatQrCode,
+  psychProfile, psychSnapshots, psychReset, psychMentalHealth, psychLiwc,
+  safetyStats, safetyLog, safetyConfig,
+  ragStats, ragSearch, ragUpload,
+  voiceStatus, voiceSynthesize, getSpeakers,
+  plugins, togglePlugin, uploadFile,
+  affinityGet, affinityUpdate, affinityUnlocks, affinityDecay,
+  emotionStageGet, emotionStageList, emotionStageEvaluate,
+  vitalSignsGet,
+  stickerList, stickerDelete, stickerRecommend, stickerImportZip, stickerUpload, stickerBindToCharacter,
+  voiceTrainingUpload, voiceTrainingPreprocess, voiceTrainingTrain, voiceTrainingStatus,
+} from './system'
+import {
+  listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
+  getPersona, updatePersona,
+  getPersonaCard, updatePersonaCard, previewPersonaCard,
+  listFavorites, addFavorite, removeFavorite, forwardFavorite,
+  getStorylineConfig, updateStorylineConfig, deleteStorylineConfig,
+  getStorylineProgress, detectStoryline, resetStoryline,
+  getVoiceConfig, bindVoice, updateVoice, unbindVoice, testVoice,
+  exportCharacter, importCharacter,
+} from './characters'
+import {
+  listUsers, getUserDetail, getUserChatHistory, getUserEmotion,
+  setUserRole, resetUser, deleteUser,
+} from './users'
 
 const API_BASE = '/api'
 
@@ -86,135 +141,72 @@ client.interceptors.response.use(
 
 export default client
 
+// ── Named re-exports for backward compat (import { chat } from '../api/client') ──
+export { chat, chatStream, createSession, listSessions, chatHistory, emotionState, emotionTrend }
+export { trainingStatus, trainingProgress, trainingExtract, trainingClean, trainingTrain, trainingStop, trainingTest, trainingApply }
+export { cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset, cloneDeleteConversation, cloneBatchDeleteConversations, cloneStats }
+export {
+  listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
+  getPersona, updatePersona,
+  getPersonaCard, updatePersonaCard, previewPersonaCard,
+  listFavorites, addFavorite, removeFavorite, forwardFavorite,
+  getStorylineConfig, updateStorylineConfig, deleteStorylineConfig,
+  getStorylineProgress, detectStoryline, resetStoryline,
+  getVoiceConfig, bindVoice, updateVoice, unbindVoice, testVoice,
+  exportCharacter, importCharacter,
+}
+export { listUsers, getUserDetail, getUserChatHistory, getUserEmotion, setUserRole, resetUser, deleteUser }
+export {
+  health, stats, dashboardStats, config, saveConfig,
+  personaProfile, personaEvolutionLog, memoryFacts,
+  tools, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,
+  logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
+  wechatConnectionStatus, wechatQrCode,
+  psychProfile, psychSnapshots, psychReset, psychMentalHealth, psychLiwc,
+  safetyStats, safetyLog, safetyConfig,
+  ragStats, ragSearch, ragUpload,
+  voiceStatus, voiceSynthesize, getSpeakers,
+  plugins, togglePlugin, uploadFile,
+  affinityGet, affinityUpdate, affinityUnlocks, affinityDecay,
+  emotionStageGet, emotionStageList, emotionStageEvaluate,
+  vitalSignsGet,
+  stickerList, stickerDelete, stickerRecommend, stickerImportZip, stickerUpload, stickerBindToCharacter,
+  voiceTrainingUpload, voiceTrainingPreprocess, voiceTrainingTrain, voiceTrainingStatus,
+}
+
+// Legacy `api` namespace object — keeps `import { api } from '../api/client'` working
 export const api = {
-  chat: (message: string, sessionId = '', messageType = 'text') =>
-    client.post('/chat', { message, session_id: sessionId, message_type: messageType }),
-
-  chatStream: (message: string, sessionId = '', messageType = 'text') => {
-    const controller = new AbortController()
-    const promise = client.post('/chat/stream',
-      { message, session_id: sessionId, message_type: messageType },
-      {
-        responseType: 'stream',
-        adapter: 'fetch',
-        signal: controller.signal,
-      },
-    )
-    return { promise, cancel: () => controller.abort() }
-  },
-
-  health: () => client.get('/health'),
-  stats: () => client.get('/stats'),
-  dashboardStats: () => client.get('/stats/dashboard'),
-  createSession: (userId = 'default', channel = 'web') =>
-    client.post('/session', { user_id: userId, channel }),
-  listSessions: () => client.get('/sessions'),
-  chatHistory: (sessionId = '', limit = 20) =>
-    client.get('/chat/history', { params: { session_id: sessionId, limit } }),
-  emotionState: () => client.get('/emotion/state'),
-  emotionTrend: (days = 7) => client.get('/emotion/trend', { params: { days } }),
-  personaProfile: () => client.get('/persona/profile'),
-  personaEvolutionLog: (limit = 50) => client.get('/persona/evolution-log', { params: { limit } }),
-  memoryFacts: (category = '', limit = 50) =>
-    client.get('/memory/facts', { params: { category, limit } }),
-  tools: () => client.get('/tools'),
-  proactiveState: () => client.get('/proactive/state'),
-  config: () => client.get('/config'),
-  saveConfig: (config: Record<string, unknown>) => client.post('/config', { config }),
-  toggleTool: (name: string, enabled: boolean) => client.post(`/tools/${name}/toggle`, { enabled }),
-  updateProactiveConfig: (cfg: { threshold?: number; max_daily?: number; min_interval_minutes?: number; cooldown_after_reply_minutes?: number }) =>
-    client.post('/proactive/config', cfg),
-  logs: (params?: { limit?: number; level?: string; search?: string }) =>
-    client.get('/logs', { params }),
-  channels: () => client.get('/channels'),
-  wechatStatus: () => client.get('/channels/wechat/status'),
-  wechatReconnect: () => client.post('/channels/wechat/reconnect'),
-  trainingStatus: () => client.get('/training/status'),
-  trainingProgress: () => client.get('/training/progress'),
-  trainingExtract: (target: string, source: string) =>
-    client.post('/training/extract', null, { params: { target, source } }),
-  trainingClean: (acceptScore: number) =>
-    client.post('/training/clean', null, { params: { accept_score: acceptScore } }),
-  trainingTrain: (epochs: number, loraRank: number, characterId?: string) =>
-    client.post('/training/train', null, { params: { epochs, lora_rank: loraRank, ...(characterId ? { character_id: characterId } : {}) } }),
-  trainingStop: () => client.post('/training/stop'),
-  trainingTest: (message: string) =>
-    client.post('/training/test', null, { params: { message } }),
-  trainingApply: (characterId?: string) =>
-    client.post('/training/apply', null, { params: { ...(characterId ? { character_id: characterId } : {}) } }),
-
-  // ── 手动微信连接（需求1） ──
-  wechatConnect: () => client.post('/channels/wechat/connect'),
-  wechatDisconnect: () => client.post('/channels/wechat/disconnect'),
-  wechatConnectionStatus: () => client.get('/channels/wechat/connection-status'),
-
-  // ── 微信二维码 ──
-  wechatQrCode: () => client.get('/wechat/qrcode'),
-
-  // ── 克隆数据管理（需求3+4） ──
-  cloneContacts: (keyword = '') =>
-    client.get('/clone/contacts', { params: { keyword } }),
-  cloneDatasets: () => client.get('/clone/datasets'),
-  cloneDatasetDetail: (personId: string, params?: {
-    page?: number; pageSize?: number; keyword?: string;
-    dateFrom?: string; dateTo?: string; onlyUser?: boolean
-  }) => client.get(`/clone/datasets/${personId}`, { params: {
-    page: params?.page, page_size: params?.pageSize,
-    keyword: params?.keyword, date_from: params?.dateFrom,
-    date_to: params?.dateTo, only_user: params?.onlyUser,
-  }}),
-  cloneDeleteDataset: (personId: string) =>
-    client.delete(`/clone/datasets/${personId}`),
-  cloneDeleteConversation: (personId: string, index: number) =>
-    client.delete(`/clone/datasets/${personId}/conversation`, { params: { index } }),
-  cloneBatchDeleteConversations: (personId: string, indices: number[]) =>
-    client.post(`/clone/datasets/${personId}/conversations/batch-delete`, null, { params: { indices: indices.join(',') } }),
-  cloneStats: () => client.get('/clone/stats'),
-
-  // ── 用户心理画像 ──
-  psychProfile: () => client.get('/psych/profile'),
-  psychSnapshots: (limit = 20) => client.get('/psych/snapshots', { params: { limit } }),
-  psychReset: () => client.delete('/psych/profile'),
-  psychMentalHealth: () => client.get('/psych/mental-health'),
-  psychLiwc: () => client.get('/psych/liwc'),
-
-  // ── 安全面板 ──
-  safetyStats: () => client.get('/safety/stats'),
-  safetyLog: (limit = 50) => client.get('/safety/log', { params: { limit } }),
-  safetyConfig: (enabled: boolean) => client.post('/safety/config', null, { params: { enabled } }),
-
-  // ── RAG 知识库 ──
-  ragStats: () => client.get('/rag/stats'),
-  ragSearch: (query: string, topK = 5) => client.post('/rag/search', null, { params: { query, top_k: topK } }),
-  ragUpload: (file: File) => {
-    const form = new FormData()
-    form.append('file', file)
-    return client.post('/rag/documents', form, { headers: { 'Content-Type': 'multipart/form-data' } })
-  },
-
-  // ── Voice TTS ──
-  voiceStatus: () => client.get('/voice/status'),
-  voiceSynthesize: (text: string, engine = '') => {
-    const form = new FormData()
-    form.append('text', text)
-    if (engine) form.append('engine', engine)
-    return client.post('/voice/synthesize', form, { headers: { 'Content-Type': 'multipart/form-data' }, responseType: 'blob' })
-  },
-
-  // ── 插件管理 ──
-  plugins: () => client.get('/plugins'),
-  togglePlugin: (name: string, enabled: boolean) => client.post(`/plugins/${name}/toggle`, null, { params: { enabled } }),
-
-  // ── 文件上传 ──
-  uploadFile: (file: File) => {
-    const form = new FormData()
-    form.append('file', file)
-    return client.post('/files/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } })
-  },
-
-  // ── 工具历史 ──
-  toolHistory: (limit = 50) => client.get('/tools/history', { params: { limit } }),
-
-  // ── 主动消息历史 ──
-  proactiveHistory: (limit = 50) => client.get('/proactive/history', { params: { limit } }),
+  chat, chatStream, createSession, listSessions, chatHistory, emotionState, emotionTrend,
+  health, stats, dashboardStats, config, saveConfig,
+  personaProfile, personaEvolutionLog, memoryFacts,
+  tools, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,
+  logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
+  wechatConnectionStatus, wechatQrCode,
+  trainingStatus, trainingProgress, trainingExtract, trainingClean,
+  trainingTrain, trainingStop, trainingTest, trainingApply,
+  cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset,
+  cloneDeleteConversation, cloneBatchDeleteConversations, cloneStats,
+  psychProfile, psychSnapshots, psychReset, psychMentalHealth, psychLiwc,
+  safetyStats, safetyLog, safetyConfig,
+  ragStats, ragSearch, ragUpload,
+  voiceStatus, voiceSynthesize, getSpeakers,
+  plugins, togglePlugin,
+  uploadFile,
+  // characters domain
+  listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
+  getPersona, updatePersona,
+  getPersonaCard, updatePersonaCard, previewPersonaCard,
+  listFavorites, addFavorite, removeFavorite, forwardFavorite,
+  getStorylineConfig, updateStorylineConfig, deleteStorylineConfig,
+  getStorylineProgress, detectStoryline, resetStoryline,
+  getVoiceConfig, bindVoice, updateVoice, unbindVoice, testVoice,
+  exportCharacter, importCharacter,
+  // users domain
+  listUsers, getUserDetail, getUserChatHistory, getUserEmotion, setUserRole, resetUser, deleteUser,
+  // shisi legacy — flattened into api object
+  affinityGet, affinityUpdate, affinityUnlocks, affinityDecay,
+  emotionStageGet, emotionStageList, emotionStageEvaluate,
+  vitalSignsGet,
+  stickerList, stickerDelete, stickerRecommend, stickerImportZip, stickerUpload, stickerBindToCharacter,
+  voiceTrainingUpload, voiceTrainingPreprocess, voiceTrainingTrain, voiceTrainingStatus,
 }

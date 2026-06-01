@@ -100,6 +100,19 @@ class TTSManager:
                 speed=bert_cfg.get("speed", 1.0),
             )
 
+        # MiMo TTS配置（优先API，本地作为降级）
+        mimo_cfg = config.get("mimo-tts", {})
+        if mimo_cfg and mimo_cfg.get("api_key"):
+            from .mimo_tts_provider import MiMoTTSProvider
+            self._providers["mimo-tts"] = MiMoTTSProvider(
+                api_key=mimo_cfg.get("api_key", ""),
+                model=mimo_cfg.get("model", "mimo-v2.5-tts"),
+                voice_id=mimo_cfg.get("voice_id", ""),
+                timeout=mimo_cfg.get("timeout", 30.0),
+                fallback_local=mimo_cfg.get("fallback_local", True),
+            )
+            logger.info("MiMo TTS已配置: model=%s", mimo_cfg.get("model", "mimo-v2.5-tts"))
+
         # 设置当前引擎
         engine = config.get("engine", "edge-tts")
         if engine in self._providers:
@@ -146,7 +159,7 @@ class TTSManager:
 
         if emotion and self._current_engine == "edge-tts":
             try:
-                from shisi.voice_ext.emotion_tts import EmotionVoiceMapper
+                from shisi.voice.emotion_tts import EmotionVoiceMapper
                 mapper = EmotionVoiceMapper()
                 emotion_params = mapper.apply_to_edge_tts(emotion)
                 kwargs.update(emotion_params)

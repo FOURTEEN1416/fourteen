@@ -5,7 +5,7 @@ sys.path.insert(0, ".")
 
 from datetime import date
 
-from tool_system.builtin.time_awareness_tool import TimeAwarenessTool
+from tools.builtin.time_awareness_tool import TimeAwarenessTool
 
 
 def test_get_current():

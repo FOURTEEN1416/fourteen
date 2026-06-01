@@ -27,7 +27,7 @@ def app_and_reg(tmp_path):
     db = tmp_path / "test.db"
     run_migrations(db)
     app = FastAPI()
-    reg = setup_shisi(app, run_migrate=False)
+    reg = setup_shisi(app, run_migrate=False, db_path=db)
     client = TestClient(app)
     return app, reg, client
 
