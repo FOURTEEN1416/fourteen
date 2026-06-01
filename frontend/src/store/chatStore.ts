@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import client from '../api/client'
 import type { ChatMessage, EmotionState } from '../types/api'
 
 const MAX_MESSAGES = 500
@@ -30,7 +29,6 @@ interface ChatState {
   setAffinity: (value: number) => void
   setLastSticker: (sticker: { sticker_id: string; category: string }) => void
   clearMessages: () => void
-  loadMoreMessages: (before: number) => Promise<void>
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -84,16 +82,4 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setAffinity: (value) => set({ affinity: value }),
   setLastSticker: (sticker) => set({ lastSticker: sticker }),
   clearMessages: () => set({ messages: [], streamingMessage: null }),
-
-  loadMoreMessages: async (before: number) => {
-    try {
-      const { data } = await client.get('/chat/history', { params: { before, limit: 50 } })
-      const olderMessages: ChatMessage[] = data as ChatMessage[]
-      if (Array.isArray(olderMessages) && olderMessages.length > 0) {
-        set((state) => ({ messages: [...olderMessages, ...state.messages] }))
-      }
-    } catch {
-      // error handled by interceptor
-    }
-  },
 }))
