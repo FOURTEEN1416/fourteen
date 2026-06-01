@@ -16,7 +16,8 @@ import RoleSettings from './pages/RoleSettings'
 import StatusCenter from './pages/StatusCenter'
 import StorylineEditor from './components/storyline/StorylineEditor'
 import { AuthGuard, RoleGuard } from './components/auth'
-import { useAuth } from './hooks/useAuth'
+import { useAuthStore } from './store/authStore'
+import * as authApi from './api/auth'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const WeChatPage = lazy(() => import('./pages/WeChatPage'))
@@ -60,8 +61,35 @@ function AnimatedSuspense({ children }: { children: React.ReactNode }) {
 
 /** 认证初始化：App 启动时 init() 一次 */
 function AuthInit({ children }: { children: React.ReactNode }) {
-  const { init } = useAuth()
-  useEffect(() => { init() }, [init])
+  useEffect(() => {
+    const { accessToken } = useAuthStore.getState()
+    if (!accessToken) {
+      useAuthStore.setState({ isInitialized: true })
+      return
+    }
+    // 有 token 时尝试 refresh
+    const doInit = async () => {
+      const { refreshToken } = useAuthStore.getState()
+      if (!refreshToken) {
+        useAuthStore.setState({ isInitialized: true })
+        return
+      }
+      try {
+        const res = await authApi.refreshToken(refreshToken)
+        useAuthStore.setState({
+          accessToken: res.access_token,
+          refreshToken: res.refresh_token,
+          user: res.user,
+          isAuthenticated: true,
+          isInitialized: true,
+        })
+      } catch {
+        useAuthStore.getState().clearAuth()
+        useAuthStore.setState({ isInitialized: true })
+      }
+    }
+    doInit()
+  }, [])
   return <>{children}</>
 }
 

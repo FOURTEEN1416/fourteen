@@ -19,7 +19,7 @@ from typing import Any
 from fastapi import Depends, HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import ExpiredSignatureError, JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,20 +40,20 @@ REFRESH_TOKEN_EXPIRE_DAYS = int(os.environ.get("JWT_REFRESH_EXPIRE_DAYS", "7"))
 # 密码工具
 # ═══════════════════════════════════════════════════════
 
-_pwd_ctx = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto",
-)
-
-
 def hash_password(password: str) -> str:
-    """将明文密码哈希为安全字符串"""
-    return _pwd_ctx.hash(password)
+    """将明文密码哈希为安全字符串
+
+    绕过 passlib（1.7.4 与 bcrypt 5.0.0 不兼容），直接调 bcrypt。
+    """
+    return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """验证明文密码 vs 哈希值"""
-    return _pwd_ctx.verify(plain_password, hashed_password)
+    """验证明文密码 vs 哈希值
+
+    绕过 passlib，直接调 bcrypt.checkpw。
+    """
+    return _bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
 # ═══════════════════════════════════════════════════════
