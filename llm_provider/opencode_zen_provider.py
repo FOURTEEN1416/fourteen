@@ -41,12 +41,11 @@ DEFAULT_MODEL = "big-pickle"
 
 DEFAULT_MODELS_PRIORITY = [
     # ── OpenCode Zen 免费模型（无需 API Key） ──
-    # 只有这 5 个是确定免费的，其余都要钱
+    # 已在 opencode.ai/zen 实测可用（fetch_available_models 验证），其余一律从列表剔除
     {"name": "big-pickle",             "priority": 1},   # 综合最强，推荐首选
     {"name": "nemotron-3-super-free",  "priority": 2},   # 稳定性最好（实测立刻响应）
     {"name": "qwen3.6-plus-free",      "priority": 3},   # 通义千问，中文优秀
     {"name": "deepseek-v4-flash-free", "priority": 4},   # DeepSeek 快速版
-    {"name": "minimax-m2.5-free",      "priority": 5},   # MiniMax 备用
 ]
 
 

@@ -9,13 +9,12 @@ logger = logging.getLogger("rag_engine")
 
 _DEFAULT_QUERY_TIMEOUT = 1.0
 
-# BM25Okapi 保留导入供未来使用，当前版本未直接引用
-# try:
-#     from rank_bm25 import BM25Okapi
-#     HAS_BM25 = True
-# except ImportError:
-#     HAS_BM25 = False
-HAS_BM25 = False
+# BM25Okapi 自动检测（rank_bm25 已安装则启用关键词打分）
+try:
+    from rank_bm25 import BM25Okapi  # noqa: F401
+    HAS_BM25 = True
+except ImportError:
+    HAS_BM25 = False
 
 
 class KeywordRetriever:

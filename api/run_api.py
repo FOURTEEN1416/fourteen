@@ -44,8 +44,14 @@ graceful_shutdown.setup_signal_handlers()
 # ── 检查组件健康 ──
 health = orchestrator.health_check()
 if not health.get("healthy", False):
-    logger.warning("部分组件健康检查未通过（不影响启动）: %s",
-                   {k: v for k, v in health.items() if not v})
+    # 找出真正失败的字段（嵌套 components 也要展开）
+    failing = {}
+    for k, v in health.get("components", {}).items():
+        if isinstance(v, dict):
+            false_keys = [kk for kk, vv in v.items() if isinstance(vv, bool) and not vv]
+            if false_keys:
+                failing[k] = {kk: False for kk in false_keys}
+    logger.warning("部分组件健康检查未通过（不影响启动）: %s", failing or health)
 
 # ── 创建女友管理器 ──
 girlfriend_mgr = GirlfriendManager(orchestrator)

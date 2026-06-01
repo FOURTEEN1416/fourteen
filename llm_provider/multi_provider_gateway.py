@@ -81,7 +81,8 @@ def _load_providers_config() -> dict[str, Any]:
         return {}
 
     try:
-        with open(config_path, encoding="utf-8") as f:
+        # 用 utf-8-sig 兼容 BOM 头（utf-8 会在首个 BOM 字节处抛 UnicodeDecodeError）
+        with open(config_path, encoding="utf-8-sig") as f:
             data = json.load(f)
         return data
     except Exception as e:  # noqa: BLE001

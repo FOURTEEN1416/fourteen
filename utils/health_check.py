@@ -4,8 +4,12 @@ import logging
 
 logger = logging.getLogger("health_check")
 
+# 懒加载字段：首次调用前为 False 是正常的，不应算 health check 失败
+# - base_prompt_cached: persona.build_system_prompt() 调用后才 True
+# - card_loaded: 用户选过角色后才 True
 _HEALTH_OK_KEYS = {"base_prompt_cached", "evolution_count", "original_anchors",
-                   "anchor_integrity", "chromadb", "prompt_mode"}
+                   "anchor_integrity", "chromadb", "prompt_mode",
+                   "card_loaded", "card_name", "load_time", "last_error"}
 
 
 def _is_healthy(result) -> bool:

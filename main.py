@@ -160,7 +160,7 @@ from tools.builtin.reminder_tool import CalendarQueryTool, ReminderTool  # noqa:
 from tools.builtin.search_tool import SearchTool  # noqa: E402
 from tools.builtin.time_awareness_tool import TimeAwarenessTool  # noqa: E402
 from tools.builtin.weather_tool import WeatherTool  # noqa: E402
-from utils.health_check import health_check_all  # noqa: E402
+from utils.health_check import health_check_all, _is_healthy  # noqa: E402
 
 # ── 加载 .env（手动解析，无需 python-dotenv 依赖） ──
 _env_loaded = False
@@ -864,7 +864,8 @@ class OptimizedOrchestrator:
                 try:
                     status = component.health_check()
                     results[name] = status
-                    if isinstance(status, dict) and not all(v for v in status.values() if isinstance(v, bool)):
+                    # 用 _is_healthy 过滤掉懒加载字段（base_prompt_cached, card_loaded 等）
+                    if not _is_healthy(status):
                         all_ok = False
                 except Exception:
                     logger.exception("组件健康检查异常: %s", name)
