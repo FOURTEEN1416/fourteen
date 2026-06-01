@@ -379,7 +379,13 @@ class PersonaEngine:
         # 使用内容 hash 而非长度，确保不同内容产生不同缓存键
         cache_key_parts.append(f"sp:{hashlib.md5(style_prompt.encode()).hexdigest()[:8]}")
         cache_key_parts.append(f"ch:{hashlib.md5(chat_history.encode()).hexdigest()[:8]}")
-        cache_key_parts.append(f"rag:{hashlib.md5(rag_context.encode()).hexdigest()[:8]}")
+        # rag_context 可能是 dict（旧调用方）—— 防御性降级到 JSON 序列化
+        if isinstance(rag_context, dict):
+            import json
+            rag_str = json.dumps(rag_context, sort_keys=True, ensure_ascii=False)
+        else:
+            rag_str = str(rag_context)
+        cache_key_parts.append(f"rag:{hashlib.md5(rag_str.encode()).hexdigest()[:8]}")
         cache_key_parts.append(f"cs:{hashlib.md5(chat_summary.encode()).hexdigest()[:8]}")
         cache_key = "|".join(cache_key_parts)
 

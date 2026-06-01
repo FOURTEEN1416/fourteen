@@ -740,7 +740,13 @@ class OptimizedOrchestrator:
                     elif name == "memory":
                         memory_context = task_result or ""  # type: ignore[assignment]
                     elif name == "rag":
-                        rag_context = task_result or ""  # type: ignore[assignment]
+                        if task_result:
+                            # RAG 返回 dict (results/style_examples/total_*)
+                            # 序列化为 JSON 字符串供下游缓存键使用
+                            import json
+                            rag_context = json.dumps(task_result, sort_keys=True, ensure_ascii=False)
+                        else:
+                            rag_context = ""
 
                 # 获取对话历史 + 摘要
                 chat_history: list = []
