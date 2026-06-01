@@ -219,7 +219,7 @@ async def logout(req: LogoutRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/me")
-async def get_me(
+async def me(
     user_id: int = Security(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
