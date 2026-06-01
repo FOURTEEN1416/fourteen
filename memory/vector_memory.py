@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
 import os
@@ -31,6 +32,60 @@ try:
 except ImportError:
     HAS_CHROMADB = False
     Collection = Any  # type: ignore
+
+
+@contextlib.contextmanager
+def _silence_stdout():
+    """屏蔽 onnxruntime C++ 扩展 import 时的 EP Error 噪声（缺 TensorRT 库）。
+    onnxruntime C++ 通过 std::cerr (fd 2) 打印 EP Error，所以必须同时重定向 fd 1+2。
+    """
+    if os.name == "nt":
+        devnull_path = "nul"
+    else:
+        devnull_path = os.devnull
+    saved_stdout_file = None
+    saved_stderr_file = None
+    devnull_out = None
+    devnull_err = None
+    saved_fd1 = None
+    saved_fd2 = None
+    devnull_fd1 = None
+    devnull_fd2 = None
+    try:
+        import sys
+        sys.stdout.flush()
+        sys.stderr.flush()
+        # 重定向 fd 1 (stdout) 和 fd 2 (stderr) — onnxruntime C++ 用 std::cerr
+        saved_fd1 = os.dup(1)
+        saved_fd2 = os.dup(2)
+        devnull_fd1 = os.open(devnull_path, os.O_WRONLY)
+        devnull_fd2 = os.open(devnull_path, os.O_WRONLY)
+        os.dup2(devnull_fd1, 1)
+        os.dup2(devnull_fd2, 2)
+        os.close(devnull_fd1)
+        os.close(devnull_fd2)
+        # 也重定向 Python 层
+        saved_stdout_file = sys.stdout
+        saved_stderr_file = sys.stderr
+        devnull_out = open(devnull_path, "w")
+        devnull_err = open(devnull_path, "w")
+        sys.stdout = devnull_out
+        sys.stderr = devnull_err
+        yield
+    finally:
+        import sys
+        if devnull_out:
+            sys.stdout = saved_stdout_file
+            devnull_out.close()
+        if devnull_err:
+            sys.stderr = saved_stderr_file
+            devnull_err.close()
+        if saved_fd1 is not None:
+            os.dup2(saved_fd1, 1)
+            os.close(saved_fd1)
+        if saved_fd2 is not None:
+            os.dup2(saved_fd2, 2)
+            os.close(saved_fd2)
 
 
 def _run_async(coro):
@@ -70,7 +125,10 @@ class VectorMemory:
         try:
             os.makedirs(self.chroma_path, exist_ok=True)
             client = chromadb.PersistentClient(path=self.chroma_path)
-            ef = embedding_functions.DefaultEmbeddingFunction()
+            # onnxruntime 首次加载会 printf "EP Error nvinfer_10.dll missing" 到 stdout
+            # 屏蔽此 C++ 噪声（不影响功能，CPU EP 正常工作）
+            with _silence_stdout():
+                ef = embedding_functions.DefaultEmbeddingFunction()
             for name in self.COLLECTIONS:
                 try:
                     self._collections[name] = client.get_or_create_collection(

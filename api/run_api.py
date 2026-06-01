@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -18,6 +19,11 @@ from pathlib import Path
 _project_root = Path(__file__).parent.parent.absolute()
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
+
+# 必须在任何 onnxruntime/chromadb import 之前设置 ORT 日志级别
+# 0=VERBOSE 1=INFO 2=WARNING 3=ERROR 4=FATAL
+# 设 3 屏蔽 "EP Error nvinfer_10.dll missing" 噪声（系统缺 TensorRT 库）
+os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
 
 from api.app_factory import create_api_app  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402

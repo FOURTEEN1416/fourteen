@@ -44,7 +44,7 @@ emotion:
 memory:
   working_memory_limit: 20
   episodic_archive_trigger_rounds: 20
-  retrieval_timeout_seconds: 1.0
+  retrieval_timeout_seconds: 3.0  # 覆盖 onnxruntime 模型冷启动 (~2-4s 首次加载)
 
 proactive:
   max_daily_messages: 8

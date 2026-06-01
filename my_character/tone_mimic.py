@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
@@ -21,6 +22,56 @@ from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger("tone_mimic")
+
+
+@contextlib.contextmanager
+def _silence_stdout():
+    """屏蔽 onnxruntime C++ 扩展 import 时的 EP Error 噪声（缺 TensorRT 库）。
+    onnxruntime C++ 通过 std::cerr (fd 2) 打印 EP Error，必须同时重定向 fd 1+2。
+    """
+    if os.name == "nt":
+        devnull_path = "nul"
+    else:
+        devnull_path = os.devnull
+    saved_stdout_file = None
+    saved_stderr_file = None
+    devnull_out = None
+    devnull_err = None
+    saved_fd1 = None
+    saved_fd2 = None
+    try:
+        import sys
+        sys.stdout.flush()
+        sys.stderr.flush()
+        saved_fd1 = os.dup(1)
+        saved_fd2 = os.dup(2)
+        d1 = os.open(devnull_path, os.O_WRONLY)
+        d2 = os.open(devnull_path, os.O_WRONLY)
+        os.dup2(d1, 1)
+        os.dup2(d2, 2)
+        os.close(d1)
+        os.close(d2)
+        saved_stdout_file = sys.stdout
+        saved_stderr_file = sys.stderr
+        devnull_out = open(devnull_path, "w")
+        devnull_err = open(devnull_path, "w")
+        sys.stdout = devnull_out
+        sys.stderr = devnull_err
+        yield
+    finally:
+        import sys
+        if devnull_out:
+            sys.stdout = saved_stdout_file
+            devnull_out.close()
+        if devnull_err:
+            sys.stderr = saved_stderr_file
+            devnull_err.close()
+        if saved_fd1 is not None:
+            os.dup2(saved_fd1, 1)
+            os.close(saved_fd1)
+        if saved_fd2 is not None:
+            os.dup2(saved_fd2, 2)
+            os.close(saved_fd2)
 
 # ChromaDB 延迟导入，避免无环境时崩溃
 try:
@@ -83,9 +134,12 @@ class ToneMimic:
         try:
             os.makedirs(self.chroma_path, exist_ok=True)
             self._client = chromadb.PersistentClient(path=self.chroma_path)
+            # onnxruntime 首次加载会 printf "EP Error nvinfer_10.dll missing" 到 stdout
+            with _silence_stdout():
+                ef = embedding_functions.DefaultEmbeddingFunction()
             self._collection = self._client.get_or_create_collection(
                 name=self.collection_name,
-                embedding_function=embedding_functions.DefaultEmbeddingFunction(),
+                embedding_function=ef,
             )
             logger.info("ChromaDB initialized at %s", self.chroma_path)
         except Exception as e:  # noqa: BLE001

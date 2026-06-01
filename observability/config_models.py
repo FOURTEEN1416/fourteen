@@ -41,7 +41,8 @@ class MemoryConfig(BaseModel):
     episodic_archive_trigger_minutes: int = 30
     importance_lambda_low: float = 0.1
     importance_lambda_high: float = 0.01
-    retrieval_timeout_seconds: float = 1.0
+    # 阈值覆盖 onnxruntime 模型冷启动 (~2-4s 首次加载) + 正常检索余量
+    retrieval_timeout_seconds: float = 3.0
     fact_type_weights: dict[str, float] = Field(default_factory=lambda: {
         "health": 1.0, "relationship": 0.9, "preference": 0.8,
         "event": 0.7, "work": 0.6, "hobby": 0.5, "general": 0.3,
