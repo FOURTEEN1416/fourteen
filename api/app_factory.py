@@ -291,6 +291,14 @@ def create_api_app(
     except Exception as e:
         logger.warning("情绪参数编辑API挂载失败: %s", e)
 
+    # ── 管理员用户管理 API ──
+    try:
+        from api.routers.admin_routes import router as admin_router
+        app.include_router(admin_router)
+        logger.info("管理员用户管理API已挂载")
+    except Exception as e:
+        logger.warning("管理员用户管理API挂载失败: %s", e)
+
     return app
 
 

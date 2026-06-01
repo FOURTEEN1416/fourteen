@@ -21,6 +21,7 @@ import { useAuth } from './hooks/useAuth'
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const WeChatPage = lazy(() => import('./pages/WeChatPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
+const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
 
 const SettingsLLM = lazy(() => import('./pages/SettingsLLM'))
 const SettingsVoice = lazy(() => import('./pages/SettingsVoice'))
@@ -121,7 +122,7 @@ export default function App() {
           {/* ═══ 管理后台（仅 admin 角色） ═══ */}
           <Route element={<RoleGuard roles={['admin']} />}>
             <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
-            <Route path="/admin/users" element={<AnimatedSuspense><UsersPage /></AnimatedSuspense>} />
+            <Route path="/admin/users" element={<AnimatedSuspense><AdminUsersPage /></AnimatedSuspense>} />
             <Route path="/admin/logs" element={<AnimatedSuspense><SettingsLogs /></AnimatedSuspense>} />
             <Route path="/admin/config" element={<AnimatedSuspense><SettingsSecurity /></AnimatedSuspense>} />
           </Route>

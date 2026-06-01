@@ -52,6 +52,9 @@ import {
   listUsers, getUserDetail, getUserChatHistory, getUserEmotion,
   setUserRole, resetUser, deleteUser,
 } from './users'
+import {
+  adminListUsers, adminUpdateUser, adminDeleteUser, adminCreateUser,
+} from './admin'
 
 const API_BASE = '/api'
 
@@ -234,6 +237,7 @@ export {
   exportCharacter, importCharacter,
 }
 export { listUsers, getUserDetail, getUserChatHistory, getUserEmotion, setUserRole, resetUser, deleteUser }
+export { adminListUsers, adminUpdateUser, adminDeleteUser, adminCreateUser }
 export {
   health, stats, dashboardStats, config, saveConfig,
   personaProfile, personaEvolutionLog, memoryFacts,
@@ -276,4 +280,6 @@ export const api = {
   exportCharacter, importCharacter,
   // users domain
   listUsers, getUserDetail, getUserChatHistory, getUserEmotion, setUserRole, resetUser, deleteUser,
+  // admin domain
+  adminListUsers, adminUpdateUser, adminDeleteUser, adminCreateUser,
 }
