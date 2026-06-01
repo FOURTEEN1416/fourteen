@@ -63,6 +63,23 @@ class CharaCardV2Parser:
             ),
         )
 
+    @staticmethod
+    def _safe_personality(personality: Any) -> str:
+        """将 personality 统一转为字符串（支持 dict/None/str）。"""
+        if isinstance(personality, dict):
+            parts = []
+            for k, v in personality.items():
+                label = k.replace("_", " ")
+                if isinstance(v, (int, float)):
+                    if v >= 0.8: parts.append(f"极度{label}")
+                    elif v >= 0.6: parts.append(f"非常{label}")
+                    elif v >= 0.4: parts.append(f"偏向{label}")
+                    elif v >= 0.2: parts.append(f"略有{label}")
+            return "，".join(parts) if parts else ""
+        if personality is None:
+            return ""
+        return str(personality)
+
     @classmethod
     def _from_v1(cls, data: dict[str, Any]) -> CharaCardV2:
         return CharaCardV2(
@@ -71,7 +88,7 @@ class CharaCardV2Parser:
             data=CharacterData(
                 name=data.get("name", ""),
                 description=data.get("description", ""),
-                personality=data.get("personality", ""),
+                personality=cls._safe_personality(data.get("personality")),
                 scenario=data.get("scenario", ""),
                 first_mes=data.get("first_mes", ""),
                 mes_example=data.get("mes_example", ""),

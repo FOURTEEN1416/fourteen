@@ -7,7 +7,7 @@ import {
   wechatCreateConnection,
   wechatDeleteConnection,
 } from '../api/wechat'
-import { wechatQrCode, wechatConnectionStatus } from '../api/system'
+import { wechatQrCode, wechatConnectionStatus, wechatConnect } from '../api/system'
 
 // ── Types ──
 
@@ -131,34 +131,48 @@ function QrCodeConnectionModal({ onClose }: { onClose: () => void }) {
   const [qrImage, setQrImage] = useState<string>('')
   const [errorMsg, setErrorMsg] = useState<string>('')
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const startupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollingStartRef = useRef<number>(0) // 轮询开始时间（用于过期宽限期）
 
-  // 获取二维码
-  const fetchQrCode = useCallback(async () => {
-    setStatus('loading')
-    setErrorMsg('')
+  // 触发后端连接（启动 WeChatConnector 生成二维码）
+  const triggerConnection = useCallback(async () => {
     try {
-      const res = await wechatQrCode()
-      const data = res.data as { qr_image?: string; status?: string; is_expired?: boolean; message?: string }
-      if (data.qr_image) {
-        setQrImage(data.qr_image)
-        setStatus('waiting')
-        // 开始轮询连接状态
-        startPolling()
-      } else if (data.is_expired) {
-        setStatus('expired')
-      } else {
-        setStatus('waiting')
-        setErrorMsg(data.message || '等待二维码生成...')
-      }
-    } catch (err) {
-      setStatus('error')
-      setErrorMsg('获取二维码失败，请检查后端是否运行')
+      await wechatConnect()
+    } catch {
+      // 可能已连接中，忽略
     }
   }, [])
 
-  const startPolling = useCallback(() => {
+  // 轮询二维码（后端连接器需要时间生成二维码）
+  const startQrPolling = useCallback(() => {
     if (pollingRef.current) clearInterval(pollingRef.current)
-    // 每 2 秒轮询连接状态
+    pollingStartRef.current = Date.now()
+
+    pollingRef.current = setInterval(async () => {
+      try {
+        const res = await wechatQrCode()
+        const data = res.data as { qr_image?: string; status?: string; is_expired?: boolean; message?: string }
+
+        if (data.qr_image) {
+          setQrImage(data.qr_image)
+          setStatus('waiting')
+          // 有二维码了，切到轮询连接状态
+          if (pollingRef.current) clearInterval(pollingRef.current)
+          startConnectionPolling()
+        } else if (data.is_expired && (Date.now() - pollingStartRef.current) > 12000) {
+          // 后端连接器刚启动时可能尚无二维码，给 12s 宽限期后再认为过期
+          setStatus('expired')
+          if (pollingRef.current) clearInterval(pollingRef.current)
+        }
+        // 否则继续等待二维码生成
+      } catch {
+        // 忽略轮询错误
+      }
+    }, 2000)
+  }, [])
+
+  // 轮询连接状态（用户扫码确认后变为已连接）
+  const startConnectionPolling = useCallback(() => {
     pollingRef.current = setInterval(async () => {
       try {
         const res = await wechatConnectionStatus()
@@ -179,17 +193,30 @@ function QrCodeConnectionModal({ onClose }: { onClose: () => void }) {
     }, 2000)
   }, [])
 
+  // 启动完整流程
+  const startFlow = useCallback(() => {
+    // 清理旧的 timer 和 polling
+    if (startupTimerRef.current) clearTimeout(startupTimerRef.current)
+    if (pollingRef.current) clearInterval(pollingRef.current)
+
+    triggerConnection()
+    // 延迟启动 QR 轮询，给后端连接器一点初始化时间
+    startupTimerRef.current = setTimeout(() => startQrPolling(), 1500)
+  }, [triggerConnection, startQrPolling])
+
   useEffect(() => {
-    fetchQrCode()
+    startFlow()
     return () => {
+      if (startupTimerRef.current) clearTimeout(startupTimerRef.current)
       if (pollingRef.current) clearInterval(pollingRef.current)
     }
-  }, [fetchQrCode])
+  }, [startFlow])
 
   // 二维码过期或错误时重新获取
   const handleRefresh = () => {
-    if (pollingRef.current) clearInterval(pollingRef.current)
-    fetchQrCode()
+    setStatus('loading')
+    setErrorMsg('')
+    startFlow()
   }
 
   // 关闭前清理

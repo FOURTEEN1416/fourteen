@@ -17,7 +17,7 @@
 
 ## L2 — 结构架构
 
-### 后端（Python 3.12 + FastAPI · ~155 路由 + main_routes 84 端点）
+### 后端（Python 3.12 + FastAPI · 172 路由）
 
 | 目录 | 用途 | 状态 |
 |-----|------|------|
@@ -121,6 +121,9 @@ role:   返回用户列表 · 用户#ID · 创建角色 · 角色功能 · 人�
 |---|------|------|------|
 | 1 | **前端零测试** — vitest/playwright 未配置 | P2 | 📋 待办 |
 | 2 | **Bus Factor = 1**（仅默默） | P2 | ⚠️ 有缓解文档 |
+| 3 | **服务器进程在 shell 超时后被终止** — PowerShell NonInteractive 模式不保持 `Start-Process` | P3 | 📋 需用 `start_all.cmd` 或独立终端 |
+| 4 | **PostgreSQL 15 服务未启动** — localhost:5432 连接拒绝，auth 使用 SQLite 回退 | P3 | 📋 需手动 `net start postgresql-15` |
+| 5 | **shisi 域旧 API 路径** — 前端 system.ts 仍有 `shisi/*` 旧引用 | P2 | 📋 待清 |
 
 **已消除的风险（上期审计后）：**
 - ~~前端 Mock 数据（全页面已接 API）~~ ✅
@@ -131,6 +134,12 @@ role:   返回用户列表 · 用户#ID · 创建角色 · 角色功能 · 人�
 - ~~shisi 旧路由 17 处引用~~ ✅ system.ts/client.ts/useQueries.ts/useWebSocket.ts 全部清理
 - ~~ADR-0014 FFs 未进 CI~~ ✅ FF-014/015 已实现 (ff-auth-endpoints + ff-route-guard)
 - ~~Mock 状态待验证~~ ✅ 4页 (RoleSettings/StatusCenter/SettingsVoice/StorylinePage) 全部真实 API
+
+**本期消除（Phase 12）：**
+- ~~auth 3 个运行时 bug（is_expired naive/aware、register 缺 commit、jti 碰撞）~~ ✅ 已修复并提交 39a5a71
+- ~~API 模块健康状态未知~~ ✅ 20+ 端点全面验证通过（stats/chat/characters/emotion/persona/psych/memory/tools/voice/mimo/wechat/shisi/knowledge/storyline）
+- ~~TypeScript 编译状态未知~~ ✅ `tsc --noEmit` 零错误 + `vite build` 生产构建成功
+- ~~一次性测试文件残留~~ ✅ 已清理（test_auth_jti.py + 10 个 test 脚本 + _check 脚本 + characters_backup/ + server.pid）
 
 ## L6 — 演化历史
 
@@ -144,6 +153,7 @@ role:   返回用户列表 · 用户#ID · 创建角色 · 角色功能 · 人�
 | Phase 9 | 全面审计 — 三体文件更新 + 风险重评 | 2026-05-31 |
 | **Phase 10** | **用户认证模块 — JWT登录/注册/管理员CRUD + ADR-0014** | **2026-06-01** |
 | **Phase 11** | **三体导航全面审计 — 发现 LoginPage 孤立+ADR-0014脱节** | **2026-06-01** |
+| **Phase 12** | **Auth 全流程验证 + API 模块全面健康检查** | **2026-06-01** |
 
 ## L7 — 归属
 

@@ -126,12 +126,13 @@ async def search_knowledge(
             raise HTTPException(status_code=500, detail="知识索引失败") from e
 
     result = service.search(character_id, req.query, top_k=req.top_k)
+    top_results = result.get_top(req.top_k)
     return {
         "query": req.query,
-        "total": result.total,
+        "total": result.total_chunks,
         "results": [
             {"content": r.content, "source": r.source, "score": r.score}
-            for r in result.top_k
+            for r in top_results
         ],
     }
 
@@ -226,7 +227,7 @@ def _get_all_chunks(service, character_id: str) -> list:
     if not service.has_index(character_id):
         return []
     result = service.search(character_id, "", top_k=200)
-    return result.top_k
+    return result.chunks
 
 
 def _aggregate_sources(chunks: list) -> list[dict]:

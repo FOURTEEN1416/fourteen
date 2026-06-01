@@ -505,7 +505,7 @@ class OptimizedOrchestrator:
                 try:
                     from voice import TTSManager
                     # 将VoiceConfig对象转换为dict以兼容TTSManager.initialize()
-                    voice_config = voice_fusion if voice_fusion else cfg.voice.model_dump()
+                    voice_config = voice_fusion if voice_fusion else cfg.voice.model_dump(by_alias=True)
                     self.components["voice"] = TTSManager()
                     self._run_async(self.components["voice"].initialize(
                         voice_config if isinstance(voice_config, dict) else voice_config

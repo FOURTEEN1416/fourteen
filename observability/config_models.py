@@ -106,18 +106,20 @@ class VoiceConfig(BaseModel):
     """语音TTS配置 - 与voice/模块对接"""
     enabled: bool = False
     engine: str = "edge-tts"
-    edge_tts: dict[str, Any] = Field(default_factory=lambda: {
-        "speaker_name": "zh-CN-XiaoxiaoNeural",
-    })
-    gpt_sovits: dict[str, Any] = Field(default_factory=lambda: {
-        "url": "http://localhost:9880",
-        "timeout": 60.0,
-    })
-    bert_vits2: dict[str, Any] = Field(default_factory=lambda: {
-        "url": "http://localhost:5000",
-        "speaker_name": "珊瑚宫心海[中]",
-        "timeout": 60.0,
-    })
+    edge_tts: dict[str, Any] = Field(
+        default_factory=lambda: {"speaker_name": "zh-CN-XiaoxiaoNeural"},
+        alias="edge-tts",
+    )
+    gpt_sovits: dict[str, Any] = Field(
+        default_factory=lambda: {"url": "http://localhost:9880", "timeout": 60.0},
+        alias="gpt-sovits",
+    )
+    bert_vits2: dict[str, Any] = Field(
+        default_factory=lambda: {"url": "http://localhost:5000", "speaker_name": "珊瑚宫心海[中]", "timeout": 60.0},
+        alias="bert-vits2",
+    )
+    cosyvoice: dict[str, Any] = Field(default_factory=dict, alias="cosyvoice")
+    mimo_tts: dict[str, Any] = Field(default_factory=dict, alias="mimo-tts")
 
 
 class CharacterCardConfig(BaseModel):
