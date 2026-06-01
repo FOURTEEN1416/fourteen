@@ -33,7 +33,7 @@ duckduckgo-search>=6.0.0
 
 # ========== 日历工具 ==========
 chinese-calendar>=1.9.0
-lunarcalendar>=0.2.0
+lunarcalendar>=0.0.7
 
 # ========== 语音合成 ==========
 edge-tts>=6.1.0
