@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from shisi.migrations import (
     get_table_names,
     run_migrations,

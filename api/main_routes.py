@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Security, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Security, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -387,7 +387,6 @@ async def get_logs(limit: int = Query(default=100, le=200), level: str = Query(d
 
 @router.get("/api/channels")
 async def list_channels(_auth: bool = Security(verify_api_key_dep)):
-    orch = deps.orch
     sessions = deps.sessions
     channels = [
         {"id": "web", "name": "Web 控制台", "type": "web", "status": "connected", "desc": "当前浏览器 WebSocket", "meta": "在线"},
@@ -925,7 +924,6 @@ async def stream_logs(_auth: bool = Security(verify_api_key_dep)):
 @router.get("/api/stats/dashboard")
 async def get_dashboard_stats(_auth: bool = Security(verify_api_key_dep)):
     orch = deps.orch
-    sessions = deps.sessions
     emotion_current = "-"
     affinity = 0
     energy = 0

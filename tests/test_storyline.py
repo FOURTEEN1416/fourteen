@@ -1,9 +1,9 @@
 """剧情线引擎测试"""
-from shisi.storyline.config import StorylineConfig
-from shisi.storyline.engine import get_storyline_engine
-from shisi.storyline.detector import StorylineDetector
 from shisi.core.models.character_aggregate import CharacterAggregate
 from shisi.core.services.prompt_builder import build
+from shisi.storyline.config import StorylineConfig
+from shisi.storyline.detector import StorylineDetector
+from shisi.storyline.engine import get_storyline_engine
 
 
 def test_detector():

@@ -5,10 +5,9 @@ from pathlib import Path
 import pytest
 
 from shisi.character.manager import CharacterManager
-from shisi.character.models import CardFormat, CharacterData, CharaCardV2
+from shisi.character.models import CharaCardV2, CharacterData
 from shisi.character.store import CharacterStore
 from shisi.migrations import run_migrations
-
 
 # ═══════════════════════════════════════════════════════
 # CharacterStore 测试

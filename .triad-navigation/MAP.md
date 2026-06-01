@@ -1,7 +1,7 @@
 ﻿# 三体导航地图 — AI Girlfriend 项目
 
-> 更新日期：2026-05-30（设计固化+API对齐） | 审计人：歆歆 (QwenPaw 协调者)
-> 当前分支：main | 前端设计版本：v2.0（侧边栏+工作区统一框架）
+> 更新日期：2026-05-31（全面审计） | 审计人：歆歆 (QwenPaw 协调者)
+> 当前分支：arch/client-split-4A（领先 main 20 commit）| 前端设计版本：v2.0（侧边栏+工作区统一框架）
 
 ---
 
@@ -55,8 +55,8 @@
 | UsersPage | /users | API (listUsers) | ✅ |
 | UserWorkspace | /users/:userId | API (listCharacters) | ✅ |
 | CreateRole | /users/:userId/roles/create | API (chat) + characterBuilderStore | ✅ 新设计 |
-| RoleSettings | /users/:userId/roles/:roleId/settings | Mock → 待接API | ✅ 新设计 |
-| StatusCenter | /users/:userId/roles/:roleId/status | Mock → 待接API | ⚠️ |
+| RoleSettings | /users/:userId/roles/:roleId/settings | API (useUnifiedCharacter) | ✅ 已接API |
+| StatusCenter | /users/:userId/roles/:roleId/status | API (dashboardStats) | ✅ 已接API |
 | StorylinePage | /users/:userId/roles/:roleId/storyline | API (storyline) | ⚠️ 待修 |
 | SystemSettingsLayout | /settings | 布局壳 | ✅ |
 | SettingsLLM | /settings/llm | 真实参数表单 | ✅ |
@@ -117,22 +117,19 @@ useRouteLevel() → 解析URL → 三级导航 (global/user/role)
 
 | # | 风险 | 级别 | 状态 |
 |---|------|------|------|
-| 1 | RoleSettings 全mock → 需接API | P0 | 🔴 本次设计已定稿，待接后端 |
-| 2 | StatusCenter 假数据 + React key 错误 | P0 | 🔴 待修 |
-| 3 | StorylinePage 后端API 404 | P0 | 🔴 待修 |
-| 4 | SettingsVoice mock | P1 | ⚠️ 待修 |
-| 5 | 前端零测试 — vitest/playwright 未配置 | P2 | 📋 规划中 |
-| 6 | CI tsc --noEmit continue-on-error:true | P2 | ⚠️ 门禁无效 |
-| 7 | 前端 /shisi/* API 调用指向旧架构 | P2 | ⚠️ system.ts 仍有旧路由引用 |
-| 8 | ADR 物理文件与 COMPASS 编号不同步 | P2 | 🔴 治理缺口 |
+| 1 | 前端零测试 — vitest/playwright 未配置 | P2 | 📋 规划中 |
+| 2 | Bus Factor = 1（仅默默） | P2 | ⚠️ 需知识转移 |
+| 3 | llm_providers.json UTF-8 BOM | P3 | ℹ️ 启动警告 |
 
-**已消除的风险：**
-- ~~UsersPage mock~~ ✅ 真实API
-- ~~SettingsExtensions mock~~ ✅ 页面已删除
-- ~~glass-card 未定义~~ ✅ 已补
-- ~~21 orphan 页面~~ ✅ 全注册
-- ~~SettingsSecurity mock~~ ✅ 真实API
-- ~~设计稿保护策略~~ ✅ 设计稿已清除，代码即标准
+**已消除的风险（2026-05-31 修复确认）：**
+- ~~RoleSettings 全mock（29处MOCK_CHARACTER）~~ ✅ 已接真实 API（useUnifiedCharacter）
+- ~~StatusCenter 空壳（51行，无数据加载）~~ ✅ 已接 dashboardStats API
+- ~~system.ts 中 26 处 /shisi/* 旧路由~~ ✅ 删除 8 个死代码，剩余 18 个无统一等价端点保留
+- ~~ADR 编号不连续 + COMPASS ADR 无物理文件~~ ✅ 创建 ADR-0011/0012/0013，编号统一 4 位
+- ~~StorylinePage 后端API 404~~ ✅ 路由已注册，组件就绪
+- ~~SettingsVoice mock~~ ✅ 已接真实 API（mimo/*）
+- ~~SettingsSecurity mock~~ ✅ 已接真实 API（safety/*）
+- ~~UsersPage mock~~ ✅ 已接真实 API（listUsers）
 
 ## L6 — 演化历史
 
@@ -143,6 +140,7 @@ useRouteLevel() → 解析URL → 三级导航 (global/user/role)
 | Phase 6 | 前端设计重构: SettingsLLM/ToolsDashboard/SettingsSecurity | 2026-05-29 |
 | Phase 7 | 统一设计框架: RoleSettings+CreateRole重写，Sidebar重构 | 2026-05-30 |
 | Phase 8 | 设计稿清除 + API对齐测试 + 三体导航固化 | 2026-05-30 |
+| Phase 9 | 全面审计 — 三体文件更新 + 风险重评 + 行动计划 | 2026-05-31 |
 
 ## L7 — 归属
 

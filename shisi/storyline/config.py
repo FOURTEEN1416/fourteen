@@ -39,7 +39,7 @@ class StageDefinition:
     """剧情阶段定义"""
     name: str  # 如 "初识期", "熟悉期", "倾心期"
     display_name: str = ""  # 展示用名
-    timing: StageTimning = field(default_factory=StageTiming)
+    timing: StageTiming = field(default_factory=StageTiming)
     style_rules: list[StageStyleRule] = field(default_factory=list)
     behavior_rules: list[StageBehaviorRule] = field(default_factory=list)
     dialogue_notes: str = ""  # 对话风格说明

@@ -26,7 +26,7 @@ logger = logging.getLogger("voice.mimo_tts")
 class MiMoTTSProvider(TTSProviderBase):
     """
     MiMo TTS API 提供者
-    
+
     特性:
     - 支持多种MiMo TTS模型
     - 情感参数原生支持
@@ -146,23 +146,22 @@ class MiMoTTSProvider(TTSProviderBase):
             payload["voice_id"] = self._voice_id
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.API_BASE}{self.ENDPOINTS['tts']}",
-                    headers=self._get_headers(),
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=self._timeout),
-                ) as response:
-                    if response.status == 200:
-                        audio_data = await response.read()
-                        self._available = True
-                        self._last_error = None
-                        logger.debug("MiMo TTS合成成功: %d bytes", len(audio_data))
-                        return audio_data
-                    else:
-                        error_text = await response.text()
-                        self._last_error = f"API错误 {response.status}: {error_text}"
-                        logger.warning("MiMo TTS API失败: %s", self._last_error)
+            async with aiohttp.ClientSession() as session, session.post(
+                f"{self.API_BASE}{self.ENDPOINTS['tts']}",
+                headers=self._get_headers(),
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=self._timeout),
+            ) as response:
+                if response.status == 200:
+                    audio_data = await response.read()
+                    self._available = True
+                    self._last_error = None
+                    logger.debug("MiMo TTS合成成功: %d bytes", len(audio_data))
+                    return audio_data
+                else:
+                    error_text = await response.text()
+                    self._last_error = f"API错误 {response.status}: {error_text}"
+                    logger.warning("MiMo TTS API失败: %s", self._last_error)
 
         except asyncio.TimeoutError:
             self._last_error = "API调用超时"
@@ -199,20 +198,19 @@ class MiMoTTSProvider(TTSProviderBase):
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.API_BASE}{self.ENDPOINTS['tts']}",
-                    headers=self._get_headers(),
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=self._timeout),
-                ) as response:
-                    if response.status == 200:
-                        async for chunk in response.content.iter_chunked(chunk_size):
-                            if chunk:
-                                yield chunk
-                    else:
-                        error_text = await response.text()
-                        logger.warning("MiMo TTS流式合成失败: %s", error_text)
+            async with aiohttp.ClientSession() as session, session.post(
+                f"{self.API_BASE}{self.ENDPOINTS['tts']}",
+                headers=self._get_headers(),
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=self._timeout),
+            ) as response:
+                if response.status == 200:
+                    async for chunk in response.content.iter_chunked(chunk_size):
+                        if chunk:
+                            yield chunk
+                else:
+                    error_text = await response.text()
+                    logger.warning("MiMo TTS流式合成失败: %s", error_text)
 
         except Exception as e:
             logger.warning("MiMo TTS流式合成异常: %s", e)
@@ -325,31 +323,30 @@ class MiMoTTSProvider(TTSProviderBase):
                 content_type="audio/mpeg",
             )
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.API_BASE}{self.ENDPOINTS['voiceclone']}",
-                    headers={"Authorization": f"Bearer {self._api_key}"},
-                    data=data,
-                    timeout=aiohttp.ClientTimeout(total=60.0),  # 克隆需要更长时间
-                ) as response:
-                    result = await response.json()
-                    if response.status == 200:
-                        voice_id = result.get("voice_id", "")
-                        self._voice_id = voice_id  # 保存克隆的voice_id
-                        logger.info("语音克隆成功: %s -> %s", voice_name, voice_id)
-                        return {
-                            "voice_id": voice_id,
-                            "status": "success",
-                            "message": "语音克隆成功",
-                        }
-                    else:
-                        error_msg = result.get("error", "未知错误")
-                        logger.warning("语音克隆失败: %s", error_msg)
-                        return {
-                            "voice_id": "",
-                            "status": "error",
-                            "message": error_msg,
-                        }
+            async with aiohttp.ClientSession() as session, session.post(
+                f"{self.API_BASE}{self.ENDPOINTS['voiceclone']}",
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                data=data,
+                timeout=aiohttp.ClientTimeout(total=60.0),  # 克隆需要更长时间
+            ) as response:
+                result = await response.json()
+                if response.status == 200:
+                    voice_id = result.get("voice_id", "")
+                    self._voice_id = voice_id  # 保存克隆的voice_id
+                    logger.info("语音克隆成功: %s -> %s", voice_name, voice_id)
+                    return {
+                        "voice_id": voice_id,
+                        "status": "success",
+                        "message": "语音克隆成功",
+                    }
+                else:
+                    error_msg = result.get("error", "未知错误")
+                    logger.warning("语音克隆失败: %s", error_msg)
+                    return {
+                        "voice_id": "",
+                        "status": "error",
+                        "message": error_msg,
+                    }
 
         except Exception as e:
             logger.warning("语音克隆异常: %s", e)
@@ -395,31 +392,30 @@ class MiMoTTSProvider(TTSProviderBase):
             payload["age_group"] = kwargs["age_group"]
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.API_BASE}{self.ENDPOINTS['voicedesign']}",
-                    headers=self._get_headers(),
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30.0),
-                ) as response:
-                    result = await response.json()
-                    if response.status == 200:
-                        voice_id = result.get("voice_id", "")
-                        self._voice_id = voice_id
-                        logger.info("音色设计成功: %s -> %s", voice_name, voice_id)
-                        return {
-                            "voice_id": voice_id,
-                            "status": "success",
-                            "message": "音色设计成功",
-                        }
-                    else:
-                        error_msg = result.get("error", "未知错误")
-                        logger.warning("音色设计失败: %s", error_msg)
-                        return {
-                            "voice_id": "",
-                            "status": "error",
-                            "message": error_msg,
-                        }
+            async with aiohttp.ClientSession() as session, session.post(
+                f"{self.API_BASE}{self.ENDPOINTS['voicedesign']}",
+                headers=self._get_headers(),
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=30.0),
+            ) as response:
+                result = await response.json()
+                if response.status == 200:
+                    voice_id = result.get("voice_id", "")
+                    self._voice_id = voice_id
+                    logger.info("音色设计成功: %s -> %s", voice_name, voice_id)
+                    return {
+                        "voice_id": voice_id,
+                        "status": "success",
+                        "message": "音色设计成功",
+                    }
+                else:
+                    error_msg = result.get("error", "未知错误")
+                    logger.warning("音色设计失败: %s", error_msg)
+                    return {
+                        "voice_id": "",
+                        "status": "error",
+                        "message": error_msg,
+                    }
 
         except Exception as e:
             logger.warning("音色设计异常: %s", e)

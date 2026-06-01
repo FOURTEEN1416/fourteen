@@ -33,7 +33,7 @@ export const queryKeys = {
 export function useCharacters() {
   return useQuery({
     queryKey: queryKeys.characters.all,
-    queryFn: () => api.shisiCharactersList().then(r => (r.data as any)?.data as any[]),
+    queryFn: () => api.listCharacters({}).then(r => r.characters as any[]),
     staleTime: 60 * 1000,
   })
 }

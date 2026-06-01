@@ -96,7 +96,8 @@ def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True) -> AiyuReg
 
     if app is not None:
         _mount_routes(app, reg)
-        _mount_v2_routes(app, reg)
+        # v2 路由已废弃（2026-05-31）：前端无调用，功能已被 /api/characters/* 替代
+        # _mount_v2_routes(app, reg)
 
     logger.info("十四模块初始化完成")
     return reg

@@ -6,9 +6,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-from shisi.storyline.config import StorylineConfig
 from shisi.storyline.engine import StorylineEngine
 
 logger = logging.getLogger("shisi.ase.scene_narrator")
@@ -129,6 +127,6 @@ class SceneNarrator:
             "熟悉期": f"💫 {character_name}看你的眼神里多了几分信任…",
             "倾心期": f"❤️ {character_name}的心扉完全向你敞开了…",
             "离别克制期": f"🌙 时间不多了，{character_name}开始收拾行囊…",
-            "告别期": f"🚉 离别的时刻越来越近了…",
+            "告别期": "🚉 离别的时刻越来越近了…",
         }
         return msgs.get(transition.new_stage_name, f"📌 剧情进入「{transition.new_stage_name}」")

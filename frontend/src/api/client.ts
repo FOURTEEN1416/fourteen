@@ -37,12 +37,9 @@ import {
   plugins, togglePlugin, uploadFile,
   affinityGet, affinityUpdate, affinityUnlocks, affinityDecay,
   emotionStageGet, emotionStageList, emotionStageEvaluate,
-  vitalSignsGet, shisiStats,
+  vitalSignsGet,
   stickerList, stickerDelete, stickerRecommend, stickerImportZip, stickerUpload, stickerBindToCharacter,
-  shisiMemoryFavorites, shisiMemoryAddFavorite, shisiMemoryRemoveFavorite,
-  shisiMemoryForward, shisiMemoryDelete,
   voiceTrainingUpload, voiceTrainingPreprocess, voiceTrainingTrain, voiceTrainingStatus,
-  shisiCharactersList, shisiPersonaGet, shisiPersonaUpdate, shisiPersonaPreview,
 } from './system'
 import {
   listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
@@ -172,12 +169,9 @@ export {
   plugins, togglePlugin, uploadFile,
   affinityGet, affinityUpdate, affinityUnlocks, affinityDecay,
   emotionStageGet, emotionStageList, emotionStageEvaluate,
-  vitalSignsGet, shisiStats,
+  vitalSignsGet,
   stickerList, stickerDelete, stickerRecommend, stickerImportZip, stickerUpload, stickerBindToCharacter,
-  shisiMemoryFavorites, shisiMemoryAddFavorite, shisiMemoryRemoveFavorite,
-  shisiMemoryForward, shisiMemoryDelete,
   voiceTrainingUpload, voiceTrainingPreprocess, voiceTrainingTrain, voiceTrainingStatus,
-  shisiCharactersList, shisiPersonaGet, shisiPersonaUpdate, shisiPersonaPreview,
 }
 
 // Legacy `api` namespace object — keeps `import { api } from '../api/client'` working
@@ -212,10 +206,7 @@ export const api = {
   // shisi legacy — flattened into api object
   affinityGet, affinityUpdate, affinityUnlocks, affinityDecay,
   emotionStageGet, emotionStageList, emotionStageEvaluate,
-  vitalSignsGet, shisiStats,
+  vitalSignsGet,
   stickerList, stickerDelete, stickerRecommend, stickerImportZip, stickerUpload, stickerBindToCharacter,
-  shisiMemoryFavorites, shisiMemoryAddFavorite, shisiMemoryRemoveFavorite,
-  shisiMemoryForward, shisiMemoryDelete,
   voiceTrainingUpload, voiceTrainingPreprocess, voiceTrainingTrain, voiceTrainingStatus,
-  shisiCharactersList, shisiPersonaGet, shisiPersonaUpdate, shisiPersonaPreview,
 }

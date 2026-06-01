@@ -11,7 +11,6 @@ from shisi.migrations import run_migrations
 from shisi.sticker.sticker_manager import StickerManager
 from shisi.vital_signs.vital_engine import VitalSignsEngine
 
-
 # ═══════════════════════════════════════════════════════
 # StickerManager 测试
 # ═══════════════════════════════════════════════════════
