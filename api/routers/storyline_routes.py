@@ -136,7 +136,6 @@ async def update_storyline_config(
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 
     # 构建配置
-    from shisi.storyline.config import StageDefinition, StageTiming, StageStyleRule, StageBehaviorRule, EndingConfig
 
     stages = []
     for s in req.stages:
@@ -246,7 +245,6 @@ async def detect_storyline(
         str(data.get("core_anchors", "")),
     ])
 
-    from shisi.storyline.detector import StorylineDetector
     result = StorylineDetector.detect_from_text(search_text)
 
     return {

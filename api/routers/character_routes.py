@@ -16,10 +16,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
+from api.deps import deps
 from my_character.persona_card import PersonaCardV3
 from shisi.voice.character_voice import CharacterVoiceManager
-
-from api.deps import deps
 
 logger = logging.getLogger("api.character_routes")
 
@@ -423,7 +422,7 @@ async def update_character_persona(
 
 @router.post("/characters/import", status_code=201)
 async def import_character(
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
     _auth: bool = Security(_verify_api_key),
 ):
     """导入角色卡（JSON 文件）"""

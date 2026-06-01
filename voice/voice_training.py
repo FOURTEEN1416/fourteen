@@ -170,7 +170,7 @@ class VoiceTrainingManager:
             return _w.load_model("tiny")
 
         def _load_funasr():
-            from funasr import AutoModel as _am
+            from funasr import AutoModel as _am  # noqa: N813
 
             return _am(model="paraformer-zh")
 

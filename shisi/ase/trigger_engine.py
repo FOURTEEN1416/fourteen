@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
 from shisi.storyline.engine import StageTransition, StorylineEngine
 
@@ -227,7 +226,7 @@ class TriggerEngine:
         if not config or not config.enabled:
             return
 
-        for i, stage in enumerate(config.stages):
+        for stage in config.stages:
             if stage.transition_message:
                 self.add_stage_trigger(character_id, StageTrigger(
                     name=f"enter_{stage.name}",

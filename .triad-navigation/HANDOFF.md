@@ -1,6 +1,6 @@
 ﻿# HANDOFF — 工作交接
 
-> 源会话：2026-05-28 → 2026-05-29 三体导航审计修正
+> 源会话：2026-05-31 全面审计
 > 执行流水线：startup-calibrator → triad-navigation → loop-executor → evolution-auditor
 > 协调者：歆歆
 
@@ -17,26 +17,23 @@
 
 ## 当前分支
 
-`arch/client-split-4A`（比 main 领先约 8 个 commit）
+`arch/client-split-4A`（比 main 领先约 20 个 commit，265 文件变更）
 
 ---
 
-## 本次修复（2026-05-29）
+## 本次审计（2026-05-31）
 
-| 问题 | 文件 | 操作 |
-|------|------|------|
-| ADR-004 标签冲突 | `frontend/src/pages/SystemSettingsLayout.tsx` | `label: '状态'` → `label: '安全'` |
-| SettingsVoice 全 mock | `frontend/src/pages/SettingsVoice.tsx` | 替换为真实 API：`mimoClone/mimoDesign/mimoSynthesize/mimoSetEngine/mimoSwitchVoice/getSpeakers/mimoStatus` |
-| SettingsExtensions mock MCP | `frontend/src/pages/SettingsExtensions.tsx` | 删除 `MOCK_MCP_SERVERS`，默认空列表 |
-| SettingsLogs build error | `frontend/src/pages/SettingsLogs.tsx` | `useRef<ReturnType<typeof setInterval>>()` → 加 `| null` |
-
-### ADR-004 更新
-COMPASS.md 已同步更新：原则体系第 7 条已验证 — sidebar 与 tab 标签保持一致。
-
-### 跳过项（默默决策）
-- v2 路由 X-API-Key 鉴权 → **跳过**，「没必要，反正本地跑」
-- UsersPage 全 mock → **未修**，默默未要求
-- CreateRole/CloneTrain mock → **未修**，默默未要求
+| 检查项 | 结果 |
+|--------|------|
+| tsc --noEmit | ✅ 零错误 |
+| 后端测试 | ✅ 524 passed, 1 skipped (527 items) |
+| 后端路由 | ✅ 162 条 |
+| 前端页面 | ✅ 13 页面全注册路由 |
+| StorylinePage | ✅ 路由已注册，组件就绪 |
+| shisi 旧路由 | ⚠️ system.ts 中 26 处残留 |
+| RoleSettings mock | 🔴 29 处 MOCK_CHARACTER |
+| StatusCenter | 🔴 空壳（51行） |
+| ADR 体系 | ⚠️ 编号不连续，COMPASS ADR 无物理文件 |
 
 ---
 
@@ -44,29 +41,30 @@ COMPASS.md 已同步更新：原则体系第 7 条已验证 — sidebar 与 tab 
 
 | 维度 | 评分 | 说明 |
 |------|------|------|
-| 后端完整性 | 90% | 146端点齐备，525测试通过（524 passed / 1 skipped） |
-| 前端路由 | 40% | 14路由注册 + 1新(storyline待加)，21 orphan待决策 |
-| Mock治理 | 40% | Voice/Extensions/Logs已修，UsersPage/CreateRole/CloneTrain仍mock |
+| 后端完整性 | 92% | 162路由齐备，524/527测试通过 |
+| 前端路由 | 85% | 13页面全注册，StorylinePage就绪 |
+| Mock治理 | 60% | RoleSettings仍全mock，其余已修 |
 | 测试覆盖 | 5% | 后端有测试，前端零测试 |
-| 设计稿一致性 | 90% | glass-card已定义，标签冲突已修复 |
-| Build 健康度 | 100% | Vite 0 error 0 warning，876ms |
+| 架构治理 | 70% | 三体文件齐全，ADR→FF映射67% |
+| Build 健康度 | 100% | tsc 零错误 |
 
 ## 剩余待办
 
-### P0 — 可能需修复
-- [ ] UsersPage: 替换 MOCK_USERS 为真实 API（3 个假用户）
-- [ ] SettingsSecurity: 全 mock（需对接用户/系统配置 API）
+### P0 — 立即修复
+- [ ] RoleSettings: 替换 MOCK_CHARACTER 为真实 API（29处引用，564行）
+- [ ] StatusCenter: 接入 stats/dashboard API（当前空壳51行）
 
-### P1 — 可做
-- [ ] Storyline: 添加路由 + sidebar入口（组件就绪，22700B）
-- [ ] CreateRole/CloneTrain: 对接 API
-- [ ] 21 orphan 页面: 决策取舍
-- [ ] SettingsVoice: `voiceStatus` 和 `voiceSynthesize` 导入但未使用，可清理
+### P1 — 本周
+- [ ] system.ts: 清理 26 处 /shisi/* 旧路由 → 迁移到新 /api/* 端点
+- [ ] COMPASS.md ADR-011/012/013 补物理文件到 docs/adr/
+- [ ] 统一 ADR 编号（0001-0006 vs 011-013）
+- [ ] 修复 llm_providers.json UTF-8 BOM
 
 ### P2 — 加固
-- [ ] 全局 axios 错误拦截器（各页面各处理，有重复）
 - [ ] Vitest + RTL 前端测试
-- [ ] Bus Factor 改善：交接文档已完成，需要至少 1 人熟悉
+- [ ] FF-011/012 自动化脚本
+- [ ] CONTRIBUTING.md 贡献指南
+- [ ] Bus Factor 改善（文档 + 知识转移）
 
 ---
 
@@ -113,11 +111,7 @@ python main.py
 | GitHub | https://github.com/FOURTEEN1416/knowledge-base |
 | 本地前端 | http://localhost:5173 |
 | 后端 API 文档 | http://localhost:8000/docs |
-| 设计概念 | file:///C:/Users/FOUR/Desktop/ai-girlfriend/concepts-overview.html |
 | .triad-navigation | C:\Users\FOUR\Desktop\ai-girlfriend\.triad-navigation\ |
 
 ## 设计稿保护
-以下文件体现设计原则，禁止删除/修改：
-- `v2/` (frontend + root 两层)
-- `concepts-overview.html`
-- `.superpowers/brainstorm/`
+已清除（ADR-012）。前端设计以代码为准。

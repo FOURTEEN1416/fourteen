@@ -1,9 +1,9 @@
 # 十四
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10+-blue">
+  <img src="https://img.shields.io/badge/Python-3.12-blue">
   <img src="https://img.shields.io/badge/TypeScript-React%2018-3178c6">
-  <img src="https://img.shields.io/badge/CI-passing-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-524+-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
@@ -26,7 +26,7 @@ python main.py
 
 终端会打印二维码，微信扫一下就开始聊。
 
-**前提：** Python 3.10+。FFmpeg 和 Redis 是可选的（语音转换 / 缓存用，没有也能跑）。
+**前提：** Python 3.12+。FFmpeg 和 Redis 是可选的（语音转换 / 缓存用，没有也能跑）。
 
 ---
 
@@ -42,7 +42,7 @@ python main.py
 | **记忆系统** | 会记住你说过的事（三层记忆：短期+情景+长期） |
 | **工具** | 天气、日历、提醒、搜索……需要什么可以加 |
 | **剧情线** | 和角色的关系可以按"剧情"推进，有支线和进度追踪 |
-| **控制台** | 浏览器打开 `localhost:8000`，调角色设语音查记忆 |
+| **管理控制台** | React 前端，14 个页面，角色管理/语音设置/系统配置一站式 |
 
 ---
 
@@ -72,22 +72,26 @@ wechat: {}                # 微信直连，扫码自动配
 ## 怎么跑
 
 ```bash
-python main.py                  # 开发模式（终端+微信）
-ENV=prod python main.py        # 生产模式
-python main.py --no-wechat      # 只要控制台，不连微信
+# 一键启动（前后端）
+.\start_all.cmd
+
+# 单独启动后端（:8000）
+python -m uvicorn api.run_api:app --reload --host 0.0.0.0 --port 8000
+
+# 单独启动前端（:5173）
+cd frontend && npx vite --port 5173
 ```
 
 启动后：
-- 控制台：`http://localhost:8000`
+- 管理控制台：`http://localhost:5173`
 - API 文档：`http://localhost:8000/docs`
-- WebSocket：`ws://localhost:8765/chat`
 
 ---
 
 ## 怎么测
 
 ```bash
-pytest                          # 全量（525+ 用例）
+pytest                          # 全量（524+ 用例）
 pytest -m "not slow"           # 跳过慢的
 pytest --cov=. --cov-report=html  # 覆盖率报告
 ```
@@ -97,28 +101,42 @@ pytest --cov=. --cov-report=html  # 覆盖率报告
 ## 项目结构
 
 ```
-├── api/             FastAPI（统一路由，前端只调这一层）
-│   └── routers/     角色 / 语音 / 剧情线 / 记忆 / 知识库
-├── voice/           语音引擎：MiMo Cloud / Edge-TTS / SoVITS / Bert-VITS2
-├── wechat_direct/   微信直连（扫码登录 + 收发消息）
-├── girlfriend_manager.py  多用户调度（每个微信用户独立情感状态）
-├── my_character/    情感引擎 + 角色卡
-├── shisi/           旧架构（逐步废弃，前端已不调）
-├── frontend/        React 管理台
+├── api/                  FastAPI 后端（162 路由）
+│   ├── main_routes.py    主路由（chat/users/config/stats/persona/psych/safety/rag）
+│   └── routers/          域路由（character/voice/mimo/storyline/wechat/emotion/memory/knowledge）
+├── voice/                语音引擎：MiMo Cloud / Edge-TTS / SoVITS / Bert-VITS2
+├── wechat_direct/        微信直连（扫码登录 + 收发消息）
+├── girlfriend_manager.py 多用户调度（每个微信用户独立情感状态）
+├── my_character/         情感引擎 + 角色卡
+├── security/             4 安全模块（内容过滤/加密/脱敏/注入检测）
+├── rag_engine/           RAG 检索引擎
+├── llm_provider/         LLM 接入层（自动 fallback）
+├── frontend/             React 管理控制台
 │   └── src/
-│       ├── api/      按域拆的 API Client
-│       ├── pages/    22 个页面
-│       ├── store/    Zustand（UI 状态）
-│       └── hooks/    React Query（服务端数据）
+│       ├── api/          10 个 API 模块（按域拆分）
+│       ├── pages/        14 个页面（全部注册路由）
+│       ├── store/        Zustand（chatStore/errorStore/characterBuilderStore）
+│       ├── hooks/        React Query hooks
+│       └── components/   layout + shared + storyline
 ├── docs/
-│   ├── adr/         架构决策记录（6 个）
-│   └── architecture/ 8层地图 / 设计原则 / Fitness Functions / Bus Factor
-├── tests/           525+ 后端单元测试
-├── config/          配置文件
-└── main.py          入口
+│   ├── adr/              架构决策记录（9 个：ADR-0001~0006 + ADR-0011~0013）
+│   └── architecture/     8 层地图 / 设计原则 / Fitness Functions / Bus Factor
+├── tests/                524+ 后端单元测试
+├── config/               YAML 配置
+└── main.py               入口
 ```
 
-深入看 `docs/architecture/8-layer-code-map.md`。
+---
+
+## 架构
+
+项目采用三体导航（Triad Navigation）方法论管理：
+
+- **地图**（`.triad-navigation/MAP.md`）：8 层代码地图，描述现状
+- **指南针**（`.triad-navigation/COMPASS.md`）：7 条设计原则 + 9 个 ADR
+- **闭环控制**（`.triad-navigation/CONTROL.md`）：Fitness Functions + 审计节奏
+
+深入看 `docs/architecture/8-layer-code-map.md` 和 `.triad-navigation/` 目录。
 
 ---
 

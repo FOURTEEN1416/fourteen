@@ -5,17 +5,16 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, Query, Security, UploadFile
+from fastapi import APIRouter, File, HTTPException, Security, UploadFile
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from shisi.character.models import CharaCardV2
 from shisi.knowledge.character_knowledge_service import get_knowledge_service
-
-from api.deps import deps
 
 logger = logging.getLogger("api.knowledge_routes")
 
@@ -47,7 +46,7 @@ def _load_character_data(character_id: str) -> dict[str, Any] | None:
     if not filepath.exists():
         return None
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         logger.exception("加载角色数据失败: %s", character_id)
@@ -122,8 +121,8 @@ async def search_knowledge(
     if not service.has_index(character_id):
         try:
             service.index_from_card(character_id, card)
-        except Exception:
-            raise HTTPException(status_code=500, detail="知识索引失败")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail="知识索引失败") from e
 
     result = service.search(character_id, req.query, top_k=req.top_k)
     return {
@@ -142,7 +141,7 @@ async def search_knowledge(
 @router.post("/{character_id}/knowledge/documents", status_code=201)
 async def upload_knowledge_document(
     character_id: str,
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
     _auth: bool = Security(_verify_api_key),
 ):
     """上传文档到角色知识库（文本文件，自动分块索引）"""

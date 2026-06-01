@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import hmac
-import os
 import threading
 from typing import Any
 

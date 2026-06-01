@@ -12,10 +12,10 @@ from __future__ import annotations
 import logging
 import time as time_module
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from .config import EndingConfig, StageDefinition, StorylineConfig
+from .config import StageDefinition, StorylineConfig
 
 logger = logging.getLogger("shisi.storyline.engine")
 
@@ -348,9 +348,7 @@ class StorylineEngine:
         """检查是否到达结局条件。"""
         if state.is_ended:
             return False
-        if state.story_time_minutes >= config.max_duration_minutes:
-            return True
-        return False
+        return state.story_time_minutes >= config.max_duration_minutes
 
     def _trigger_persist(self, character_id: str) -> None:
         """触发持久化回调。"""

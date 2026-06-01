@@ -6,7 +6,7 @@ import pytest
 
 from shisi.affinity.decay_engine import DecayEngine
 from shisi.affinity.enhancer import AffinityEnhancer
-from shisi.affinity.unlock_manager import UnlockManager, UnlockEvent
+from shisi.affinity.unlock_manager import UnlockManager
 from shisi.migrations import run_migrations
 
 

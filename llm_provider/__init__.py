@@ -8,7 +8,7 @@ LLM 提供商 — 对外统一接口
 使用方式:
   llm = get_llm()
   result = await llm.chat("你好")
-  
+
   或手动指定 provider:
   llm = get_llm(provider="deepseek")
 """

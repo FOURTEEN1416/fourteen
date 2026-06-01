@@ -100,7 +100,7 @@ export function uploadFile(file: File) {
   return client.post('/files/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } })
 }
 
-// ── Shisi Legacy — still-used old routes (no unified equivalent yet) ──
+// ── Shisi Legacy — 18 old routes (no unified /api/* equivalent yet) ──
 
 // Affinity
 export function affinityGet(cid: string) { return client.get(`/shisi/affinity/${cid}`) }
@@ -120,12 +120,6 @@ export function emotionStageEvaluate(cid: string, affinity: number) {
 // Vital Signs
 export function vitalSignsGet(cid: string) { return client.get(`/shisi/vital-signs/${cid}`) }
 
-// Characters (shisi legacy — still needed for old CharacterState type)
-export function shisiCharactersList() { return client.get('/shisi/characters') }
-
-// Stats (shisi legacy)
-export function shisiStats() { return client.get('/shisi/stats') }
-
 // Stickers
 export function stickerList(category?: string) { return client.get('/shisi/stickers', { params: { category } }) }
 export function stickerDelete(id: string) { return client.delete(`/shisi/stickers/${id}`) }
@@ -140,21 +134,6 @@ export function stickerUpload(formData: FormData) {
 }
 export function stickerBindToCharacter(characterId: string, stickerIds: string[], unlockThreshold = 0) {
   return client.put(`/shisi/stickers/characters/${characterId}/stickers`, { sticker_ids: stickerIds, unlock_threshold: unlockThreshold })
-}
-
-// Memory (shisi legacy)
-export function shisiMemoryFavorites(cid: string) { return client.get('/shisi/memory/favorites', { params: { character_id: cid } }) }
-export function shisiMemoryAddFavorite(cid: string, memoryId: string) {
-  return client.post('/shisi/memory/favorite', { character_id: cid, memory_id: memoryId })
-}
-export function shisiMemoryRemoveFavorite(favId: string, cid?: string) {
-  return client.delete(`/shisi/memory/favorite/${favId}`, { params: { character_id: cid } })
-}
-export function shisiMemoryForward(fromCid: string, toCid: string, memoryId: string, content?: string) {
-  return client.post('/shisi/memory/forward', { from_character: fromCid, to_character: toCid, memory_id: memoryId, content })
-}
-export function shisiMemoryDelete(memoryId: string, cid?: string) {
-  return client.delete(`/shisi/memory/${memoryId}`, { params: { character_id: cid, confirm: true } })
 }
 
 // Voice Training (shisi legacy)
@@ -174,9 +153,3 @@ export function voiceTrainingStatus() {
   return client.get('/shisi/voice/training/status')
 }
 
-// Persona (shisi legacy)
-export function shisiPersonaGet(cid: string) { return client.get(`/shisi/persona/characters/${cid}`) }
-export function shisiPersonaUpdate(cid: string, fields: Record<string, unknown>) {
-  return client.put(`/shisi/persona/characters/${cid}`, { card: fields })
-}
-export function shisiPersonaPreview(cid: string) { return client.get(`/shisi/persona/characters/${cid}/preview`) }

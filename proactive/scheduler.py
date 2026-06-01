@@ -15,7 +15,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger("scheduler")
 
@@ -58,7 +58,7 @@ class ProactiveScheduler:
 
         # 通道注册表（支持多通道投递）
         self._channels: dict[str, Callable[[], Any]] = {}        # name → sender_factory
-        self._channel_instances: dict[str, Optional[Callable]] = {}  # name → instantiated sender
+        self._channel_instances: dict[str, Callable | None] = {}  # name → instantiated sender
         self._health_check_interval = 60  # 秒
         self._quiet_hours = (23, 7)       # 23:00-07:00 免打扰
 
@@ -67,7 +67,7 @@ class ProactiveScheduler:
     def register_channel(self, name: str, sender_factory: Callable[[], Any]) -> None:
         """
         注册并初始化消息通道
-        
+
         参数:
             name: 通道名称 (如 "wechat", "websocket", "console")
             sender_factory: 返回 async send(message) 可调用对象的工厂函数
@@ -193,7 +193,7 @@ class ProactiveScheduler:
         """
         向所有已注册通道发送消息
         优先级: wechat > websocket > console
-        
+
         Returns: 是否至少一个通道发送成功
         """
         if self._is_quiet_hours():

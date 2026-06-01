@@ -226,7 +226,8 @@ class EnhancedPromptEngine:
         """
         认知聚焦层（第6层）
         引导模型在回复前完成内心思考，提升回复的"走心"程度
-        
+
+
         插入位置: constraint层之后，contextual层之前
         """
         try:
@@ -238,7 +239,7 @@ class EnhancedPromptEngine:
                 emotion_name = emotion_dict.get("primary_emotion", "平常")
                 intensity = emotion_dict.get("primary_intensity", 0.5)
                 affinity = emotion_dict.get("affinity", 0)
-            
+
             # 好感度影响关系提示
             if affinity <= 1:
                 relationship_hint = "还不太熟，保持礼貌但有距离感"
@@ -250,7 +251,7 @@ class EnhancedPromptEngine:
                 relationship_hint = "关系很亲密，可以展现更多真实的一面"
             else:
                 relationship_hint = "非常亲密的关系，几乎无话不谈"
-            
+
             return (
                 f"## 回复前的内心深处（不要输出给用户）\n"
                 f"在回复TA之前，先在内心过一遍：\n"

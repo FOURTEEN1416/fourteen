@@ -11,14 +11,14 @@ CosyVoice 提供者 - 本地语音合成
 from __future__ import annotations
 
 import asyncio
-import functools
 import io
 import logging
 import os
 import struct
 import sys
 import threading
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 import numpy as np
 

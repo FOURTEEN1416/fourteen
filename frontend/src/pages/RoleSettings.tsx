@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
+import { useUnifiedCharacter } from '../hooks/useQueries'
 import Slider from '../components/shared/Slider'
 import TagInput from '../components/shared/TagInput'
 import Toggle from '../components/shared/Toggle'
@@ -45,26 +46,6 @@ const EDGE_SPEAKERS = [
   { value: 'zh-CN-XiaochenNeural', label: '晓辰（女·自然）' },
 ]
 
-// ═══ Mock Character Data (replace with API call later) ═══
-
-const MOCK_CHARACTER = {
-  id: 'mock-001',
-  name: '林晚星',
-  description: '22岁美术系毕业生，温柔细腻、略带敏感，喜欢用画笔记录生活的点滴',
-  avatar_gradient: 'from-amber-400 to-rose-500',
-  personality: { warmth: 0.85, playfulness: 0.4, independence: 0.55, jealousy: 0.35, stubbornness: 0.25 },
-  anchors: ['温柔', '细腻', '慢热', '共情力强', '外柔内刚'],
-  speaking: { formality: 0.4, humor: 0.45, liveliness: 0.5, gentleness: 0.9 },
-  catchphrases: ['嗯...让我想想', '你说的对呢', '今天画了新的画'],
-  voice: { engine: 'mimo-tts', mimoModel: 'mimo-v2.5-tts' },
-  message: { proactive: true, dailyLimit: 20, minInterval: 15, cooldown: 30, urgency: 0.7 },
-  stats: { messages: 1247, memories: 156, lastActive: '2026-05-28 21:30', avgResponse: '1.2s' },
-  rag: { vectorDocs: 1247, keywordIndex: 3892, hitRate: 98.2 },
-  knowledgeDocs: ['关于我的基础信息.md', '性格设定指南.pdf', '对话风格参考.txt', '用户偏好记录.md'],
-  createdAt: '2026-03-15 14:20',
-  updatedAt: '2026-05-28 21:45',
-}
-
 // ═══ Section Wrapper ═══
 
 function Section({ title, children, className = '' }: { title: string; children: React.ReactNode; className?: string }) {
@@ -81,13 +62,22 @@ function Section({ title, children, className = '' }: { title: string; children:
 
 // ═══ Tab: Basic ═══
 
-function BasicTab() {
-  const [name, setName] = useState(MOCK_CHARACTER.name)
-  const [description, setDescription] = useState(MOCK_CHARACTER.description)
-  const [personality, setPersonality] = useState(MOCK_CHARACTER.personality)
-  const [anchors, setAnchors] = useState(MOCK_CHARACTER.anchors)
-  const [speaking, setSpeaking] = useState(MOCK_CHARACTER.speaking)
-  const [catchphrases, setCatchphrases] = useState(MOCK_CHARACTER.catchphrases)
+function BasicTab({ character }: { character: any }) {
+  const [name, setName] = useState(character.name)
+  const [description, setDescription] = useState(character.description)
+  const [personality, setPersonality] = useState(character.personality || {})
+  const [anchors, setAnchors] = useState(character.core_anchors || [])
+  const [speaking, setSpeaking] = useState(character.speaking_style || {})
+  const [catchphrases, setCatchphrases] = useState(character.catchphrases || [])
+
+  useEffect(() => {
+    setName(character.name)
+    setDescription(character.description)
+    setPersonality(character.personality || {})
+    setAnchors(character.core_anchors || [])
+    setSpeaking(character.speaking_style || {})
+    setCatchphrases(character.catchphrases || [])
+  }, [character])
 
   const personaJson = { name, description, personality, core_anchors: anchors, speaking_style: { ...speaking, catchphrases } }
 
@@ -121,7 +111,7 @@ function BasicTab() {
       {/* Personality */}
       <Section title="性格特质">
         <div className="space-y-4">
-          {Object.entries(personality).map(([key, val]) => {
+          {(Object.entries(personality) as [string, number][]).map(([key, val]) => {
             const labels: Record<string, { zh: string; emoji: string }> = {
               warmth: { zh: '温暖', emoji: '☀️' },
               playfulness: { zh: '俏皮', emoji: '🎭' },
@@ -136,7 +126,7 @@ function BasicTab() {
                   <span className="text-xs text-gray-600">{info.emoji} {info.zh}</span>
                 </div>
                 <div className="flex-1">
-                  <Slider value={val} min={0} max={1} step={0.01} label={labels[key]?.zh || key} onChange={v => setPersonality(prev => ({ ...prev, [key]: v }))} />
+                  <Slider value={val} min={0} max={1} step={0.01} label={labels[key]?.zh || key} onChange={v => setPersonality((prev: Record<string, number>) => ({ ...prev, [key]: v }))} />
                 </div>
                 <span className="w-10 text-right text-xs font-mono text-gray-400">{(val * 100).toFixed(0)}</span>
               </div>
@@ -152,13 +142,13 @@ function BasicTab() {
       {/* Speaking Style */}
       <Section title="说话风格">
         <div className="space-y-4">
-          {Object.entries(speaking).map(([key, val]) => {
+          {(Object.entries(speaking) as [string, number][]).map(([key, val]) => {
             const labels: Record<string, string> = { formality: '正式度', humor: '幽默感', liveliness: '活泼度', gentleness: '温柔度' }
             return (
               <div key={key} className="flex items-center gap-4">
                 <div className="w-20 shrink-0"><span className="text-xs text-gray-600">{labels[key] || key}</span></div>
                 <div className="flex-1">
-                  <Slider value={val} min={0} max={1} step={0.01} label={labels[key] || key} onChange={v => setSpeaking(prev => ({ ...prev, [key]: v }))} />
+                  <Slider value={val} min={0} max={1} step={0.01} label={labels[key] || key} onChange={v => setSpeaking((prev: Record<string, number>) => ({ ...prev, [key]: v }))} />
                 </div>
                 <span className="w-10 text-right text-xs font-mono text-gray-400">{(val * 100).toFixed(0)}</span>
               </div>
@@ -193,9 +183,9 @@ function BasicTab() {
 
 // ═══ Tab: Voice ═══
 
-function VoiceTab() {
-  const [engine, setEngine] = useState(MOCK_CHARACTER.voice.engine)
-  const [mimoModel, setMimoModel] = useState(MOCK_CHARACTER.voice.mimoModel)
+function VoiceTab({ character }: { character: any }) {
+  const [engine, setEngine] = useState(character.voice_config?.engine || 'mimo-tts')
+  const [mimoModel, setMimoModel] = useState(character.voice_config?.mimo_model || 'mimo-v2.5-tts')
   const [edgeSpeaker, setEdgeSpeaker] = useState('zh-CN-XiaoxiaoNeural')
   const [edgeRate, setEdgeRate] = useState(1.0)
   const [edgePitch, setEdgePitch] = useState(0.6)
@@ -348,12 +338,12 @@ function VoiceTab() {
 
 // ═══ Tab: Message ═══
 
-function MessageTab() {
-  const [proactive, setProactive] = useState(MOCK_CHARACTER.message.proactive)
-  const [dailyLimit, setDailyLimit] = useState(MOCK_CHARACTER.message.dailyLimit)
-  const [minInterval, setMinInterval] = useState(MOCK_CHARACTER.message.minInterval)
-  const [cooldown, setCooldown] = useState(MOCK_CHARACTER.message.cooldown)
-  const [urgency, setUrgency] = useState(MOCK_CHARACTER.message.urgency)
+function MessageTab({ character }: { character: any }) {
+  const [proactive, setProactive] = useState(character.message?.proactive ?? true)
+  const [dailyLimit, setDailyLimit] = useState(character.message?.dailyLimit ?? 20)
+  const [minInterval, setMinInterval] = useState(character.message?.minInterval ?? 15)
+  const [cooldown, setCooldown] = useState(character.message?.cooldown ?? 30)
+  const [urgency, setUrgency] = useState(character.message?.urgency ?? 0.7)
 
   return (
     <div className="space-y-4">
@@ -415,7 +405,7 @@ function MessageTab() {
 
 // ═══ Tab: Data ═══
 
-function DataTab() {
+function DataTab({ character }: { character: any }) {
   const [showDelete, setShowDelete] = useState(false)
 
   return (
@@ -424,9 +414,9 @@ function DataTab() {
       <Section title="数据概览">
         <div className="grid grid-cols-3 gap-4">
           {[
-            { label: '消息总数', value: MOCK_CHARACTER.stats.messages.toLocaleString(), icon: '💬' },
-            { label: '记忆条数', value: MOCK_CHARACTER.stats.memories.toLocaleString(), icon: '🧠' },
-            { label: '平均响应', value: MOCK_CHARACTER.stats.avgResponse, icon: '⚡' },
+            { label: '消息总数', value: (character.stats?.messages ?? 0).toLocaleString(), icon: '💬' },
+            { label: '记忆条数', value: (character.stats?.memories ?? 0).toLocaleString(), icon: '🧠' },
+            { label: '平均响应', value: character.stats?.avgResponse ?? '—', icon: '⚡' },
           ].map(s => (
             <div key={s.label} className="text-center p-3 rounded-xl bg-gray-50">
               <p className="text-lg mb-0.5">{s.icon}</p>
@@ -450,9 +440,9 @@ function DataTab() {
         </div>
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: '向量文档', value: MOCK_CHARACTER.rag.vectorDocs.toLocaleString() },
-            { label: '关键词索引', value: MOCK_CHARACTER.rag.keywordIndex.toLocaleString() },
-            { label: '检索命中率', value: `${MOCK_CHARACTER.rag.hitRate}%` },
+            { label: '向量文档', value: (character.rag?.vectorDocs ?? 0).toLocaleString() },
+            { label: '关键词索引', value: (character.rag?.keywordIndex ?? 0).toLocaleString() },
+            { label: '检索命中率', value: `${character.rag?.hitRate ?? 0}%` },
           ].map(s => (
             <div key={s.label} className="text-center p-2.5 rounded-xl bg-purple-50/50 border border-purple-100/50">
               <p className="text-lg font-bold text-purple-600">{s.value}</p>
@@ -465,7 +455,7 @@ function DataTab() {
           <button className="px-4 py-2 rounded-xl bg-primary-500 text-white text-xs font-medium hover:bg-primary-600 transition-colors">搜索</button>
         </div>
         <div className="mt-3 flex flex-wrap gap-1.5">
-          {MOCK_CHARACTER.knowledgeDocs.map(doc => (
+          {(character.knowledgeDocs || []).map((doc: string) => (
             <span key={doc} className="inline-flex items-center gap-1 rounded-lg bg-gray-100 px-2.5 py-1 text-[11px] text-gray-600">
               📄 {doc}
               <button className="ml-1 text-gray-400 hover:text-red-400">×</button>
@@ -480,8 +470,8 @@ function DataTab() {
       {/* Timestamps */}
       <Section title="时间信息">
         <div className="flex justify-between text-sm">
-          <div><span className="text-gray-400 text-xs">创建时间</span><p className="text-gray-700 font-medium">{MOCK_CHARACTER.createdAt}</p></div>
-          <div><span className="text-gray-400 text-xs">最后更新</span><p className="text-gray-700 font-medium">{MOCK_CHARACTER.updatedAt}</p></div>
+          <div><span className="text-gray-400 text-xs">创建时间</span><p className="text-gray-700 font-medium">{character.created_at ? new Date(character.created_at).toLocaleDateString() : '—'}</p></div>
+          <div><span className="text-gray-400 text-xs">最后更新</span><p className="text-gray-700 font-medium">{character.updated_at ? new Date(character.updated_at).toLocaleDateString() : '—'}</p></div>
         </div>
       </Section>
 
@@ -498,7 +488,7 @@ function DataTab() {
         </div>
       </Section>
 
-      <ConfirmDialog open={showDelete} title="确认删除角色" message={`确定要删除「${MOCK_CHARACTER.name}」吗？此操作不可恢复。`} confirmText="确认删除" cancelText="取消" variant="danger" onConfirm={() => setShowDelete(false)} onCancel={() => setShowDelete(false)} />
+      <ConfirmDialog open={showDelete} title="确认删除角色" message={`确定要删除「${character.name}」吗？此操作不可恢复。`} confirmText="确认删除" cancelText="取消" variant="danger" onConfirm={() => setShowDelete(false)} onCancel={() => setShowDelete(false)} />
     </div>
   )
 }
@@ -535,10 +525,10 @@ function StickersTab() {
 
 // ═══ Tab: Timeline ═══
 
-function TimelineTab() {
+function TimelineTab({ character }: { character: any }) {
   return (
     <div className="space-y-4">
-      <StorylineEditor characterId="mock-001" />
+      <StorylineEditor characterId={character.id} />
       <button className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
         <Save className="w-4 h-4" /> 保存时间线
       </button>
@@ -548,14 +538,14 @@ function TimelineTab() {
 
 // ═══ Main Component ═══
 
-function ActiveTab({ tab }: { tab: RoleSettingsTab }) {
+function ActiveTab({ tab, character }: { tab: RoleSettingsTab; character: any }) {
   switch (tab) {
-    case 'basic': return <BasicTab />
-    case 'voice': return <VoiceTab />
-    case 'message': return <MessageTab />
-    case 'data': return <DataTab />
+    case 'basic': return <BasicTab character={character} />
+    case 'voice': return <VoiceTab character={character} />
+    case 'message': return <MessageTab character={character} />
+    case 'data': return <DataTab character={character} />
     case 'stickers': return <StickersTab />
-    case 'timeline': return <TimelineTab />
+    case 'timeline': return <TimelineTab character={character} />
   }
 }
 
@@ -563,8 +553,24 @@ export default function RoleSettings() {
   const { userId, roleId } = useParams<{ userId: string; roleId: string }>()
   const [activeTab, setActiveTab] = useState<RoleSettingsTab>('basic')
 
-  // Decode roleId for display
-  const displayId = roleId ? decodeURIComponent(roleId) : ''
+  const characterId = roleId ? decodeURIComponent(roleId) : ''
+  const { data: character, isLoading, error } = useUnifiedCharacter(characterId)
+
+  if (isLoading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-sm text-gray-400">加载角色中...</div>
+      </div>
+    )
+  }
+
+  if (error || !character) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-sm text-gray-400">角色不存在或加载失败</div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -573,14 +579,14 @@ export default function RoleSettings() {
         <div className="bg-white/70 backdrop-blur-sm border border-gray-200/60 rounded-2xl p-5 mb-5">
           <div className="flex items-center gap-4">
             {/* Avatar */}
-            <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${MOCK_CHARACTER.avatar_gradient} flex items-center justify-center text-white text-xl font-bold shadow-sm shrink-0`}>
-              {MOCK_CHARACTER.name[0]}
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-400 to-purple-500 flex items-center justify-center text-white text-xl font-bold shadow-sm shrink-0">
+              {character.name[0]}
             </div>
             <div className="min-w-0 flex-1">
-              <h1 className="text-lg font-bold text-gray-800">{MOCK_CHARACTER.name}</h1>
-              <p className="text-sm text-gray-500 truncate">{MOCK_CHARACTER.description}</p>
+              <h1 className="text-lg font-bold text-gray-800">{character.name}</h1>
+              <p className="text-sm text-gray-500 truncate">{character.description}</p>
               <div className="flex items-center gap-3 mt-1.5">
-                <span className="text-[11px] text-gray-400">ID: {displayId || roleId || 'mock-001'}</span>
+                <span className="text-[11px] text-gray-400">ID: {characterId}</span>
                 <span className="text-[11px] text-gray-400">用户: {userId || 'default'}</span>
                 <span className="flex items-center gap-1 text-[11px] text-green-600">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-400" /> 活跃
@@ -588,8 +594,8 @@ export default function RoleSettings() {
               </div>
             </div>
             <div className="text-right shrink-0">
-              <p className="text-xs text-gray-400">最后活跃</p>
-              <p className="text-sm font-medium text-gray-700">{MOCK_CHARACTER.stats.lastActive.split(' ')[0]}</p>
+              <p className="text-xs text-gray-400">最后更新</p>
+              <p className="text-sm font-medium text-gray-700">{character.updated_at ? new Date(character.updated_at).toLocaleDateString() : '—'}</p>
             </div>
           </div>
         </div>
@@ -613,7 +619,7 @@ export default function RoleSettings() {
         </div>
 
         {/* ── Tab Content ── */}
-        <ActiveTab tab={activeTab} />
+        <ActiveTab tab={activeTab} character={character} />
       </div>
     </div>
   )

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from shisi.character.models import CharaCardV2, WorldInfoBook
+from shisi.character.models import CharaCardV2
 from shisi.core.models.character_aggregate import CharacterAggregate
 
 from .retriever import (

@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from shisi.core.models.affinity_level import AffinityLevel
 from shisi.core.models.character_aggregate import CharacterAggregate
 from shisi.core.models.emotion_type import EmotionType
 from shisi.infrastructure.persistence.sqlite_repository import (

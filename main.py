@@ -26,6 +26,7 @@ import asyncio
 import atexit
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -131,18 +132,22 @@ sys.path.insert(0, str(project_root))
 
 import contextlib  # noqa: E402
 
-from utils.health_check import health_check_all  # noqa: E402
-
 # ── 集中管理重复出现的函数级导入（合并重复 import） ──
 from api.app_factory import create_api_app  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
 from api.websocket_server import WebSocketServer  # noqa: E402
 from girlfriend_manager import GirlfriendManager  # noqa: E402
 from llm_provider import get_llm  # noqa: E402
+from memory import StructuredMemory, VectorMemory  # noqa: E402
+from memory.memory_pipeline import MemoryPipeline  # noqa: E402
+from my_character.emotion_engine import EmotionEngine  # noqa: E402
+from my_character.persona_engine import PersonaEngine  # noqa: E402
+from my_character.tone_mimic import ToneMimic  # noqa: E402
 from observability.config_manager import ConfigManager  # noqa: E402
 from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
 from observability.health import health_checker  # noqa: E402
 from observability.logging_setup import setup_logging  # noqa: E402
+from proactive.ase_engine import ASEEngine  # noqa: E402
 from rag_engine.rag_engine import RAGEngineV2  # noqa: E402
 from security.content_safety import ContentSafetyFilter  # noqa: E402
 from security.encryption import EncryptionManager  # noqa: E402
@@ -155,12 +160,7 @@ from tools.builtin.reminder_tool import CalendarQueryTool, ReminderTool  # noqa:
 from tools.builtin.search_tool import SearchTool  # noqa: E402
 from tools.builtin.time_awareness_tool import TimeAwarenessTool  # noqa: E402
 from tools.builtin.weather_tool import WeatherTool  # noqa: E402
-from memory import StructuredMemory, VectorMemory  # noqa: E402
-from memory.memory_pipeline import MemoryPipeline  # noqa: E402
-from my_character.emotion_engine import EmotionEngine  # noqa: E402
-from my_character.persona_engine import PersonaEngine  # noqa: E402
-from my_character.tone_mimic import ToneMimic  # noqa: E402
-from proactive.ase_engine import ASEEngine  # noqa: E402
+from utils.health_check import health_check_all  # noqa: E402
 
 # ── 加载 .env（手动解析，无需 python-dotenv 依赖） ──
 _env_loaded = False
