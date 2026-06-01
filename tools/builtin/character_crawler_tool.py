@@ -300,17 +300,11 @@ class CharacterCrawlerTool(BaseTool):
         if title_tag:
             profile["title"] = title_tag.text.strip()
 
-        # 基本信息：查找包含 basicInfoItem 的 dt/dd 对
-        # 百度百科 CSS modules 生成带 hash 的类名，用属性选择器匹配
-        for dt in soup.select('[class*="basicInfoItem"]'):
+        # 基本信息：查找 basicInfoItem 类名的 dt 标签
+        # 百度百科 CSS modules 生成带 hash 的类名（如 basicInfoItem_WtJzh）
+        for dt in soup.select('dt[class*="basicInfoItem"]'):
             key = dt.get_text(strip=True).rstrip("：:")
-            # 取下一个兄弟 dd 作为值
             dd = dt.find_next_sibling('dd')
-            if not dd:
-                # 或者找父级内的下一个 dd
-                parent = dt.parent
-                if parent:
-                    dd = parent.find('dd')
             if dd:
                 val = dd.get_text(strip=True)[:200]
                 if key and val:
