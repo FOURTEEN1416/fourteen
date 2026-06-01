@@ -729,18 +729,18 @@ class OptimizedOrchestrator:
                 memory_context = ""
                 rag_context = ""
 
-                for name, result in zip(tasks.keys(), results, strict=False):
-                    if isinstance(result, Exception):
-                        logger.debug("并行任务 %s 异常: %s", name, result)
+                for name, task_result in zip(tasks.keys(), results, strict=False):
+                    if isinstance(task_result, Exception):
+                        logger.debug("并行任务 %s 异常: %s", name, task_result)
                         continue
                     if name == "persona":
-                        persona_enhancement = result or ""  # type: ignore[assignment]
+                        persona_enhancement = task_result or ""  # type: ignore[assignment]
                     elif name == "emotion":
-                        emotion_state = result
+                        emotion_state = task_result
                     elif name == "memory":
-                        memory_context = result or ""  # type: ignore[assignment]
+                        memory_context = task_result or ""  # type: ignore[assignment]
                     elif name == "rag":
-                        rag_context = result or ""  # type: ignore[assignment]
+                        rag_context = task_result or ""  # type: ignore[assignment]
 
                 # 获取对话历史 + 摘要
                 chat_history: list = []
