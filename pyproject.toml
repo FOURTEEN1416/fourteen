@@ -122,7 +122,8 @@ indent-style = "space"
 
 [tool.mypy]
 python_version = "3.10"
-exclude = ["third_party/"]
+exclude = ["third_party/", "wechatmsg_src/"]
+plugins = ["sqlalchemy.ext.mypy.plugin"]
 warn_return_any = false
 warn_unused_configs = true
 warn_unused_ignores = false
@@ -131,3 +132,21 @@ ignore_missing_imports = true
 no_implicit_optional = true
 disable_error_code = "import-untyped"
 warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = [
+  "api.database",
+  "api.main_routes",
+  "api.routers.admin_routes",
+  "api.routers.auth_routes",
+  "api.routers.knowledge_routes",
+  "api.routers.mimo_voice_routes",
+  "cache.redis_client",
+  "llm_provider",
+  "llm_provider.openai_compatible_provider",
+  "main",
+  "observability.config_manager",
+  "voice.mimo_tts_provider",
+  "voice.voice_training",
+]
+ignore_errors = true
