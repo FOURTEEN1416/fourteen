@@ -63,18 +63,39 @@ class CharaCardV2Parser:
             ),
         )
 
+    # 中英性格特质映射表 — 确保 personality dict 的 key 都能正确翻译为中文
+    _TRAIT_MAP: dict[str, str] = {
+        # 中文 → 中文（保留原样）
+        "身份": "身份", "性格": "性格", "背景": "背景", "特点": "特点",
+        "习惯": "习惯", "喜好": "喜好", "口头禅": "口头禅",
+        # 英文 → 中文
+        "identity": "身份", "personality": "性格", "background": "背景",
+        "traits": "特点", "habit": "习惯", "hobby": "喜好",
+        "catchphrase": "口头禅", "likes": "喜好", "dislikes": "厌恶",
+        "strengths": "优点", "weaknesses": "缺点", "values": "价值观",
+        "speaking_style": "说话风格", "tone": "语气",
+        "emotional_tendency": "情感倾向",
+        "loyalty": "忠诚", "kindness": "善良", "honesty": "诚实",
+        "bravery": "勇敢", "intelligence": "智慧", "wisdom": "智慧",
+        "patience": "耐心", "confidence": "自信", "humor": "幽默",
+        "empathy": "同理心", "ambition": "野心", "curiosity": "好奇心",
+        "independence": "独立", "temper": "脾气",
+    }
+
     @staticmethod
     def _safe_personality(personality: Any) -> str:
         """将 personality 统一转为字符串（支持 dict/None/str）。"""
         if isinstance(personality, dict):
             parts = []
             for k, v in personality.items():
-                label = k.replace("_", " ")
+                label = CharaCardV2Parser._TRAIT_MAP.get(k, k.replace("_", " "))
                 if isinstance(v, (int, float)):
                     if v >= 0.8: parts.append(f"极度{label}")
                     elif v >= 0.6: parts.append(f"非常{label}")
                     elif v >= 0.4: parts.append(f"偏向{label}")
                     elif v >= 0.2: parts.append(f"略有{label}")
+                elif isinstance(v, str) and v.strip():
+                    parts.append(f"{label}: {v.strip()}")
             return "，".join(parts) if parts else ""
         if personality is None:
             return ""
@@ -92,7 +113,7 @@ class CharaCardV2Parser:
                 scenario=data.get("scenario", ""),
                 first_mes=data.get("first_mes", ""),
                 mes_example=data.get("mes_example", ""),
-                creator_notes=data.get("creatorcomment", ""),
+                creator_notes=data.get("creator_notes") or data.get("creatorcomment") or data.get("notes") or "",
                 tags=data.get("tags", []),
                 creator=data.get("creator", "unknown"),
                 extensions=CharacterExtensions(
@@ -146,12 +167,30 @@ class AiyuPromptsParser:
 
     @staticmethod
     def parse(data: dict[str, Any]) -> CharaCardV2:
+        cards = AiyuPromptsParser.parse_all(data)
+        return cards[0]
+
+    @staticmethod
+    def parse_all(data: dict[str, Any]) -> list[CharaCardV2]:
+        """解析所有角色，返回列表（支持多角色 prompts）。"""
         prompts = data.get("data", {}).get("prompts", {})
         if not prompts:
             raise ValueError("十四prompts格式中无prompts数据")
 
-        pid = next(iter(prompts))
-        prompt_data = prompts[pid].get("data", {})
+        cards: list[CharaCardV2] = []
+        for pid in prompts:
+            prompt_data = prompts[pid].get("data", {})
+            if not prompt_data.get("name"):
+                continue
+            cards.append(AiyuPromptsParser._parse_one(prompt_data))
+        if not cards:
+            # fallback: 取第一个
+            pid = next(iter(prompts))
+            cards.append(AiyuPromptsParser._parse_one(prompts[pid].get("data", {})))
+        return cards
+
+    @staticmethod
+    def _parse_one(prompt_data: dict[str, Any]) -> CharaCardV2:
 
         name = prompt_data.get("name", "")
         description = prompt_data.get("description", "")
