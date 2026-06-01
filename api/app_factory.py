@@ -2,7 +2,7 @@
 REST API 应用工厂
 
 精简版：仅负责创建 FastAPI 实例、配置中间件、挂载子路由。
-所有业务路由定义在 api.main_routes 及其它子路由模块中。
+业务路由按域拆分为 8 个子路由文件（共 71 端点），模型/常量/Helper 仍保留在 api.main_routes。
 """
 
 from __future__ import annotations
@@ -16,9 +16,16 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from api._chat_routes import router as chat_router
+from api._clone_routes import router as clone_router
+from api._misc_routes import router as misc_router
+from api._personality_routes import router as personality_router
+from api._safety_routes import router as safety_router
+from api._tools_routes import router as tools_router
+from api._training_routes import router as training_router
+from api._users_routes import router as users_router
 from api.auth import configure_auth, verify_api_key_dep
 from api.deps import deps
-from api.main_routes import router as main_router
 
 logger = logging.getLogger("app_factory")
 
@@ -147,10 +154,18 @@ def create_api_app(
     )
 
     # ═══════════════════════════════════════════════════
-    # 挂载主路由
+    # 挂载主路由（已拆分为 8 个子路由，共 71 端点）
     # ═══════════════════════════════════════════════════
 
-    app.include_router(main_router)
+    app.include_router(misc_router)         # 10 端点: health/stats/memory/logs/config/channels/routes
+    app.include_router(chat_router)         # 10 端点: chat/session + wechat channels
+    app.include_router(personality_router)  #  9 端点: emotion/persona/psych
+    app.include_router(users_router)        #  7 端点: users/*
+    app.include_router(training_router)     # 11 端点: training/* + proactive/*
+    app.include_router(tools_router)        #  5 端点: tools/* + plugins/*
+    app.include_router(safety_router)       # 12 端点: safety/rag/voice/files/cache
+    app.include_router(clone_router)        #  7 端点: clone/*
+    logger.info("主路由已拆分为 8 个子路由 (71 端点)")
 
     # ── 用户认证 API ──
     try:

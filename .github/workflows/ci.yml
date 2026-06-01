@@ -166,6 +166,30 @@ jobs:
           fi
           echo "✅ FF-015: 路由守卫覆盖完整（ProtectedLayout + AuthGuard + /login）"
 
+  ff-sub-router-mount:
+    # FF-016/017: 8 子路由 mount 完整性 + main_routes.py 端点零残留
+    # 跑 tests/test_api_routes.py 的 14 个用例：8 子路由 parametrize + 3 单测 + 2 live HTTP 烟测
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: "FF-016/017: 8 子路由 mount + main_routes 零端点"
+        run: pytest tests/test_api_routes.py -v --tb=short
+        env:
+          ENV: test
+          AI_GF_ENV: test
+
   adr-integrity:
     runs-on: ubuntu-latest
     steps:

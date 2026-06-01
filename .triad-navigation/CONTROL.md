@@ -25,12 +25,14 @@
 | FF-012 | Mock 数据零容忍 | 人工 review 每个 page | P1 |
 | FF-013 | 侧边栏路由一致性 | 人工验证 user/role/create 三级 | P2 |
 
-### ✅ 本会话已实现（2个）
+### ✅ 本会话已实现（4个）
 
 | FF | 检测项 | CI job | 状态 |
 |----|--------|--------|------|
 | FF-014 | auth_routes.py 端点完整性 | `ff-auth-endpoints` 检查 5 端点存在 | ✅ |
 | FF-015 | 前端路由守卫覆盖 | `ff-route-guard` 检查 ProtectedLayout + AuthGuard | ✅ |
+| FF-016 | 8 子路由 mount 完整性 | `pytest tests/test_api_routes.py` 核对 71 端点 100% 挂载 | ✅ |
+| FF-017 | main_routes.py 端点零残留 | `pytest::test_main_routes_residual_is_zero` 阻止再膨胀 | ✅ |
 
 ---
 
@@ -100,6 +102,15 @@
 
 ### ✅ 本轮已修复
 - [x] auth_routes.py 注册到 app_factory.py ✅（POST /api/auth/login|register|refresh|logout + GET /api/auth/me）
+- [x] **main_routes.py 拆分** ✅（1313 行/71 端点 → 8 个子路由 + main_routes 缩至 95 行仅留 6 模型/4 常量/1 Helper/空 router 占位）
+- [x] **verify_refactor.py 6/6 PASS** ✅（import 8 子路由 OK / main_routes 导出 OK / 残余=0 / 端点分布=71 / 无重复 / create_api_app() 启动 168 路由）
+- [x] **tests/test_api_routes.py 14/14 PASS** ✅（2.15s · parametrize × 8 子路由 mount + 3 单测 + 2 live HTTP 烟测）
+- [x] **P0 main_routes.py 拆分重构**（1313 行 → 95 行）✅
+  - 8 子路由：`_misc_routes(10)` / `_chat_routes(10)` / `_personality_routes(9)` / `_users_routes(7)` / `_training_routes(11)` / `_tools_routes(5)` / `_safety_routes(12)` / `_clone_routes(7)` = 71 端点
+  - `app_factory.py` 改为 8 个 `include_router`，`main_routes.py` 保留 6 模型 + 4 常量 + `_sanitize_config` + 空 router 占位
+  - 验证脚本 `verify_refactor.py` 6/6 PASS
+  - 测试套件 `tests/test_api_routes.py` 14/14 PASS（2.15s，零外部依赖）
+  - **FF-016/017 加入 CI 防止回归**
 
 ### P2 — 加固
 - [ ] Vitest + RTL 前端测试
@@ -110,3 +121,5 @@
 ---
 
 > 更新记录：2026-06-01 — P0 LoginPage 接入 / P1 shisi 死代码清理 / Mock 4页复检 / FF-014/015 CI 实现
+> 2026-06-01（重构）— main_routes.py 拆分为 8 个子路由（71 端点）/ FF-016/017 落库 / test_api_routes.py 14/14 PASS / 2.15s
+> 更新记录：2026-06-01（+1d）— **P0 main_routes.py 拆分**（1313→95 行，8 子路由 71 端点）/ verify_refactor.py 6/6 / test_api_routes.py 14/14 / **FF-016/017 上线**

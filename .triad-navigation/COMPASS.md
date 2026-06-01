@@ -58,6 +58,17 @@ JSX 中使用的每个 CSS 类必须在 Tailwind 或自定义 CSS 中有对应�
 
 **ADR→FF 绑定率：8/14 个活跃 ADR 有对应 FF = 57%**（达标 > 50% 🔶 边缘）
 
+### Fitness Functions 清单（独立于 ADR 的工程门禁）
+
+> 这些 FF 是审计过程中发现的具体 gate，与 ADR 的"原则"维度互补 —— ADR 讲"为什么"，FF 讲"如何自动验证"。
+
+| FF | 检测项 | 自动化方式 | 关联 ADR | 状态 |
+|----|--------|----------|---------|------|
+| FF-014 | auth_routes.py 端点完整性 | CI: ff-auth-endpoints | ADR-0014 | ✅ |
+| FF-015 | 前端路由守卫覆盖 | CI: ff-route-guard | ADR-0014 | ✅ |
+| **FF-016** | **8 子路由 mount 完整性**（71 端点 100% 挂载） | **CI: ff-sub-router-mount + pytest tests/test_api_routes.py 14/14** | **ADR-0014 audit cycle** | **✅** |
+| **FF-017** | **main_routes.py 端点零残留**（阻止再膨胀） | **CI: ff-sub-router-mount + pytest::test_main_routes_residual_is_zero** | **ADR-0014 audit cycle** | **✅** |
+
 ### ADR-0014: 用户认证与权限体系（2026-06-01 新增）
 
 **状态**：已采纳 ✅
@@ -110,3 +121,4 @@ JSX 中使用的每个 CSS 类必须在 Tailwind 或自定义 CSS 中有对应�
 ---
 
 > 更新记录：2026-06-01 — 新增 ADR-0014，更新原则状态，更新 API 对齐矩阵，补充 shisi 路由清单
+> 2026-06-01（重构）— **FF-016/017 落库**（独立 FF 清单段 + ADR-0014 audit cycle 关联）/ CI 新增 `ff-sub-router-mount` job / 7→8 个 CI job

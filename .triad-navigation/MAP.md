@@ -1,6 +1,6 @@
 ﻿# 三体导航地图 — AI Girlfriend 项目
 
-> 更新日期：2026-06-01（全面审计） | 审计人：歆歆 (QwenPaw 协调者)
+> 更新日期：2026-06-01（全面审计 + main_routes 拆分重构） | 审计人：歆歆 (QwenPaw 协调者)
 > 当前分支：main（arch/client-split-4A 已合并）| 项目规模：324 Python + 92 TS/TSX 文件
 
 ---
@@ -17,13 +17,14 @@
 
 ## L2 — 结构架构
 
-### 后端（Python 3.12 + FastAPI · 172 路由）
+### 后端（Python 3.12 + FastAPI · 168 路由 · 拆分后 71 端点归 8 子路由）
 
 | 目录 | 用途 | 状态 |
 |-----|------|------|
 | api/ | REST API 路由层 | ✅ |
+| api/_*_routes.py (×8) | 8 子路由（拆分自 main_routes）：misc 10 / chat 10 / personality 9 / users 7 / training 11 / tools 5 / safety 12 / clone 7 = 71 端点 | ✅ 新拆分 |
 | api/routers/ | 11 个域路由（character/auth/admin/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card） | ✅ 新增 auth/admin/persona_card |
-| api/main_routes.py | 主路由（chat/users/config/stats/persona/psych/safety/rag/proactive/tools）84 端点 | ✅ |
+| api/main_routes.py | 6 Pydantic 模型 + 4 常量 + `_sanitize_config` + 空 router 占位（1313 → 95 行，0 端点） | ✅ 重构 |
 | api/auth_jwt.py | JWT 认证工具 + bcrypt | ✅ 新增 |
 | api/database.py | SQLAlchemy 引擎 + User/UserSession 模型 | ✅ 新增 |
 | shisi/ | 旧业务域（逐步废弃中） | ⚠️ 前端仍有 17 引用 |
@@ -77,8 +78,16 @@
 
 ```
 用户请求 → Vite Dev (:5173) → /api/* proxy → FastAPI (:8000)
-                                               ├─ main_routes.py (84端点)
-                                               ├─ character_routes.py (53)
+                                                ├─ _misc_routes.py (10)
+                                                ├─ _chat_routes.py (10)
+                                                ├─ _personality_routes.py (9)
+                                                ├─ _users_routes.py (7)
+                                                ├─ _training_routes.py (11)
+                                                ├─ _tools_routes.py (5)
+                                                ├─ _safety_routes.py (12)
+                                                ├─ _clone_routes.py (7)
+                                                ├─ main_routes.py (0端点 · 仅模型+常量+Helper)
+                                                ├─ character_routes.py (53)
                                                ├─ auth_routes.py (9) + admin_routes.py (6)
                                                ├─ voice_routes.py (16) + mimo_voice_routes.py (10)
                                                ├─ storyline_routes.py (27)
@@ -141,6 +150,11 @@ role:   返回用户列表 · 用户#ID · 创建角色 · 角色功能 · 人�
 - ~~TypeScript 编译状态未知~~ ✅ `tsc --noEmit` 零错误 + `vite build` 生产构建成功
 - ~~一次性测试文件残留~~ ✅ 已清理（test_auth_jti.py + 10 个 test 脚本 + _check 脚本 + characters_backup/ + server.pid）
 
+**本期消除（Phase 13）：**
+- ~~main_routes.py 1313 行单体怪兽~~ ✅ 拆分为 8 个 ≤300 行子路由 + 95 行模型/常量模块
+- ~~拆分无回归保障~~ ✅ `verify_refactor.py` 6/6 + `tests/test_api_routes.py` 14/14（2.15s） + FF-016/017 落库
+- ~~_tools_routes.py 缺 Depends import~~ ✅ 修复 + 8 子路由 grep 全 OK
+
 ## L6 — 演化历史
 
 | 阶段 | 变更 | 日期 |
@@ -154,6 +168,7 @@ role:   返回用户列表 · 用户#ID · 创建角色 · 角色功能 · 人�
 | **Phase 10** | **用户认证模块 — JWT登录/注册/管理员CRUD + ADR-0014** | **2026-06-01** |
 | **Phase 11** | **三体导航全面审计 — 发现 LoginPage 孤立+ADR-0014脱节** | **2026-06-01** |
 | **Phase 12** | **Auth 全流程验证 + API 模块全面健康检查** | **2026-06-01** |
+| **Phase 13** | **main_routes.py 拆分重构**（1313→95 行 / 71 端点归 8 子路由）+ verify_refactor 6/6 + test_api_routes 14/14 + FF-016/017 落库 | **2026-06-01** |
 
 ## L7 — 归属
 
