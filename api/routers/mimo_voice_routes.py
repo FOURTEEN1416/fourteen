@@ -25,7 +25,7 @@ async def clone_voice(
     voice_name: str = Form(..., description="音色名称"),
     description: str = Form("", description="音色描述"),
     audio: UploadFile = File(..., description="参考音频文件(10-30秒)"),  # noqa: B008
-    tts_manager: TTSManager = Depends(get_tts_manager),  # noqa: B008
+    tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
 ) -> dict[str, Any]:
     """
     克隆音色
@@ -41,6 +41,8 @@ async def clone_voice(
         {"voice_id": str, "status": str, "message": str}
     """
     # 获取MiMo TTS提供者
+    if tts_manager is None:
+        raise HTTPException(status_code=400, detail="TTS管理器未初始化")
     provider = tts_manager.get_engine("mimo-tts")
     if not provider:
         raise HTTPException(status_code=400, detail="MiMo TTS未配置")
@@ -83,7 +85,7 @@ async def design_voice(
     description: str = Form(..., description="音色描述（如：温柔的女声，带有一点磁性）"),
     gender: str | None = Form(None, description="性别（male/female）"),
     age_group: str | None = Form(None, description="年龄段（young/adult/elder）"),
-    tts_manager: TTSManager = Depends(get_tts_manager),  # noqa: B008
+    tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
 ) -> dict[str, Any]:
     """
     设计音色
@@ -100,6 +102,8 @@ async def design_voice(
         {"voice_id": str, "status": str, "message": str}
     """
     # 获取MiMo TTS提供者
+    if tts_manager is None:
+        raise HTTPException(status_code=400, detail="TTS管理器未初始化")
     provider = tts_manager.get_engine("mimo-tts")
     if not provider:
         raise HTTPException(status_code=400, detail="MiMo TTS未配置")
@@ -142,7 +146,7 @@ async def design_voice(
 @router.post("/switch-voice")
 async def switch_voice(
     voice_id: str = Form(..., description="音色ID"),
-    tts_manager: TTSManager = Depends(get_tts_manager),  # noqa: B008
+    tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
 ) -> dict[str, Any]:
     """
     切换当前使用的音色
@@ -153,6 +157,8 @@ async def switch_voice(
     Returns:
         {"status": str, "voice_id": str}
     """
+    if tts_manager is None:
+        raise HTTPException(status_code=400, detail="TTS管理器未初始化")
     provider = tts_manager.get_engine("mimo-tts")
     if not provider:
         raise HTTPException(status_code=400, detail="MiMo TTS未配置")
@@ -171,7 +177,7 @@ async def switch_voice(
 
 @router.get("/status")
 async def mimo_status(
-    tts_manager: TTSManager = Depends(get_tts_manager),  # noqa: B008
+    tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
 ) -> dict[str, Any]:
     """
     获取MiMo TTS状态
@@ -179,6 +185,11 @@ async def mimo_status(
     Returns:
         MiMo TTS配置和健康状况
     """
+    if tts_manager is None:
+        return {
+            "enabled": False,
+            "message": "TTS管理器未初始化",
+        }
     provider = tts_manager.get_engine("mimo-tts")
     if not provider:
         return {
@@ -198,7 +209,7 @@ async def mimo_status(
 @router.post("/set-engine")
 async def set_mimo_engine(
     model: str = Form(..., description="模型名称"),
-    tts_manager: TTSManager = Depends(get_tts_manager),  # noqa: B008
+    tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
 ) -> dict[str, Any]:
     """
     切换MiMo TTS引擎模型
@@ -209,6 +220,8 @@ async def set_mimo_engine(
     Returns:
         {"status": str, "model": str}
     """
+    if tts_manager is None:
+        raise HTTPException(status_code=400, detail="TTS管理器未初始化")
     from voice.mimo_tts_provider import MiMoTTSProvider
 
     provider = tts_manager.get_engine("mimo-tts")
@@ -252,9 +265,11 @@ async def set_mimo_engine(
 @router.post("/synthesize")
 async def synthesize(
     text: str = Form(..., description="合成文本"),
-    tts_manager: TTSManager = Depends(get_tts_manager),  # noqa: B008
+    tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
 ):
     """MiMo TTS 直接合成（无需角色绑定）"""
+    if tts_manager is None:
+        raise HTTPException(status_code=400, detail="TTS管理器未初始化")
     provider = tts_manager.get_engine("mimo-tts")
     if not provider:
         raise HTTPException(status_code=400, detail="MiMo TTS未配置")

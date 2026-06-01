@@ -101,6 +101,7 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
     # 存储 refresh token 哈希
     _save_refresh_token(db, user.id, refresh_token)
+    await db.commit()
 
     logger.info("新用户注册: %s (%s)", user.email, user.username)
     return TokenResponse(

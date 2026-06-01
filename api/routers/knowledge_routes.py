@@ -13,6 +13,7 @@ from fastapi import APIRouter, File, HTTPException, Security, UploadFile
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
+from shisi.character.character_card_v2 import CharaCardV2Parser
 from shisi.character.models import CharaCardV2
 from shisi.knowledge.character_knowledge_service import get_knowledge_service
 
@@ -59,7 +60,7 @@ def _load_character_card(character_id: str) -> CharaCardV2 | None:
     if not data:
         return None
     try:
-        return CharaCardV2.from_dict(data)
+        return CharaCardV2Parser.parse(data)
     except Exception:
         logger.exception("解析角色卡失败: %s", character_id)
         return None

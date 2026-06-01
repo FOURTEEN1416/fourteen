@@ -116,7 +116,11 @@ class UserSession(Base):
     user = relationship("User", back_populates="sessions")
 
     def is_expired(self) -> bool:
-        return datetime.now(timezone.utc) > self.expires_at
+        now = datetime.now(timezone.utc)
+        # SQLite/aiosqlite 不保存时区信息，读回的是 naive datetime
+        if self.expires_at.tzinfo is None:
+            return now > self.expires_at.replace(tzinfo=timezone.utc)
+        return now > self.expires_at
 
     def __repr__(self) -> str:
         return f"<UserSession(id={self.id}, user_id={self.user_id})>"
