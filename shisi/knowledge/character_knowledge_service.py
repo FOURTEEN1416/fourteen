@@ -3,12 +3,14 @@
 职责：
 1. 从 CharaCardV2 / CharacterAggregate 提取所有可索引的知识
 2. 建索引并支持检索
-3. 注入 LLM 上下文
+3. 索引持久化（缓存到磁盘，避免重复建索引）
+4. 注入 LLM 上下文
 """
 
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from shisi.character.models import CharaCardV2
@@ -23,14 +25,74 @@ from .retriever import (
 
 logger = logging.getLogger("shisi.knowledge.character_knowledge_service")
 
+# 默认 BM25 索引缓存目录
+_DEFAULT_INDEX_DIR = Path("data") / "knowledge"
+
 
 class CharacterKnowledgeService:
     """角色知识服务 — 知识提取 + 检索 + 上下文注入。"""
 
-    def __init__(self, use_bm25: bool = True):
+    def __init__(self, use_bm25: bool = True, index_dir: str | Path | None = None):
         self._use_bm25 = use_bm25
         self._retrievers: dict[str, KeywordRetriever | BM25Retriever] = {}
         self._chunk_counts: dict[str, int] = {}
+        self._index_dir = Path(index_dir) if index_dir else _DEFAULT_INDEX_DIR
+
+    # ── 索引持久化 ──
+
+    def _index_path(self, character_id: str) -> Path:
+        return self._index_dir / f"{character_id}.json"
+
+    def save_index(self, character_id: str) -> None:
+        """将角色 BM25 索引保存到磁盘。"""
+        retriever = self._retrievers.get(character_id)
+        if not retriever or not isinstance(retriever, BM25Retriever):
+            return
+        path = self._index_path(character_id)
+        retriever.save(path)
+        logger.info("BM25 索引已保存: %s (%d 块)", path, self._chunk_counts.get(character_id, 0))
+
+    def load_index(self, character_id: str) -> bool:
+        """从磁盘加载角色 BM25 索引。成功返回 True。"""
+        path = self._index_path(character_id)
+        if not path.exists():
+            return False
+        try:
+            retriever = BM25Retriever.from_file(path)
+            self._retrievers[character_id] = retriever
+            self._chunk_counts[character_id] = len(retriever._chunks)  # type: ignore[attr-defined]
+            logger.info("BM25 索引已加载: %s (%d 块)", path, self._chunk_counts[character_id])
+            return True
+        except Exception as e:
+            logger.warning("BM25 索引加载失败，将重新构建: %s — %s", path, e)
+            return False
+
+    def ensure_index(self, character_id: str, card: CharaCardV2 | None = None,
+                     character: CharacterAggregate | None = None) -> bool:
+        """确保角色索引就绪。
+        - 先尝试磁盘加载
+        - 失败则从 card/character 建索引
+        - 建索引后自动保存到磁盘
+        返回是否索引可用。
+        """
+        if character_id in self._retrievers:
+            return True
+        # 尝试从磁盘加载
+        if self.load_index(character_id):
+            return True
+        # 从 card 建索引
+        if card is not None:
+            self.index_from_card(character_id, card)
+            self.save_index(character_id)
+            return True
+        # 从 character 建索引
+        if character is not None:
+            self.index_character(character_id, character)
+            self.save_index(character_id)
+            return True
+        return False
+
+    # ── 索引构建 ──
 
     def index_character(self, character_id: str, character: CharacterAggregate) -> None:
         """为角色建知识索引。"""

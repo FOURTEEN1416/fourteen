@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
@@ -165,6 +167,44 @@ class BM25Retriever(KeywordRetriever):
         self._avg_doc_len: float = 0.0
         self._idf_cache: dict[str, float] = {}
 
+    def save(self, path: str | Path) -> None:
+        """将 BM25 索引序列化为 JSON 文件。"""
+        data = {
+            "k1": self._k1,
+            "b": self._b,
+            "avg_doc_len": self._avg_doc_len,
+            "idf_cache": self._idf_cache,
+            "chunks": [
+                {"content": c.content, "source": c.source, "source_id": c.source_id, "score": c.score}
+                for c in self._chunks
+            ],
+            "token_counts": [dict(ct) for ct in self._chunk_token_counts],
+            "total_chunks": self._total_chunks,
+        }
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    @classmethod
+    def from_file(cls, path: str | Path) -> BM25Retriever:
+        """从 JSON 文件加载 BM25 索引。"""
+        p = Path(path)
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+        retriever = cls(k1=data.get("k1", 1.5), b=data.get("b", 0.75))
+        retriever._avg_doc_len = data.get("avg_doc_len", 0.0)
+        retriever._idf_cache = data.get("idf_cache", {})
+        retriever._total_chunks = data.get("total_chunks", 0)
+        retriever._chunks = [
+            KnowledgeChunk(content=c["content"], source=c.get("source", ""),
+                           source_id=c.get("source_id", ""), score=c.get("score", 0.0))
+            for c in data.get("chunks", [])
+        ]
+        from collections import Counter
+        retriever._chunk_token_counts = [Counter(ct) for ct in data.get("token_counts", [])]
+        return retriever
+
     def index(self, chunks: list[KnowledgeChunk]) -> None:
         super().index(chunks)
         if not self._chunks:
@@ -182,6 +222,10 @@ class BM25Retriever(KeywordRetriever):
                     docs_with_token = sum(1 for ct in self._chunk_token_counts if token in ct)
                     idf = math.log((total_docs - docs_with_token + 0.5) / (docs_with_token + 0.5) + 1.0)
                     self._idf_cache[token] = idf
+
+    def add_chunks(self, chunks: list[KnowledgeChunk]) -> None:
+        """追加知识块到已有索引（合并后重建 BM25 参数）。"""
+        self.index(self._chunks + chunks)
 
     def _compute_score(self, query_tokens: Counter, chunk_tokens: Counter, content: str) -> float:
         if not chunk_tokens or not self._avg_doc_len:

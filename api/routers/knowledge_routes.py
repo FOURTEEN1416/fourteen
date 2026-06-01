@@ -84,6 +84,7 @@ async def get_knowledge_stats(
     if not service.has_index(character_id):
         try:
             service.index_from_card(character_id, card)
+            service.save_index(character_id)
         except Exception:
             logger.exception("索引知识失败: %s", character_id)
             return {
@@ -122,6 +123,7 @@ async def search_knowledge(
     if not service.has_index(character_id):
         try:
             service.index_from_card(character_id, card)
+            service.save_index(character_id)
         except Exception as e:
             raise HTTPException(status_code=500, detail="知识索引失败") from e
 
@@ -190,6 +192,8 @@ async def upload_knowledge_document(
     else:
         service._chunk_counts[character_id] = len(knowledge_chunks)
 
+    service.save_index(character_id)
+
     logger.info("文档已上传到角色知识库: %s → %s (%d 块)", file.filename, character_id, len(knowledge_chunks))
     return {
         "status": "indexed",
@@ -217,6 +221,74 @@ async def delete_knowledge_document(
         del service._chunk_counts[character_id]
     logger.info("文档已从角色知识库删除: %s", doc_id)
     return {"status": "deleted", "document_id": doc_id}
+
+
+# ── 知识宝库 vault 端点 ──
+
+
+class VaultCollectRequest(BaseModel):
+    collect_persona: bool = Field(default=True, description="是否从角色卡提取 PersonaFeatures")
+    collect_documents: bool = Field(default=False, description="是否收集已上传文档")
+
+
+@router.post("/{character_id}/knowledge/vault")
+async def collect_knowledge_vault(
+    character_id: str,
+    req: VaultCollectRequest = VaultCollectRequest(),  # noqa: B008
+    _auth: bool = Security(_verify_api_key),
+):
+    """触发知识宝库收集：从角色卡提取 PersonaFeatures → 知识块 → BM25 索引。"""
+    card = _load_character_card(character_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
+
+    try:
+        from shisi.vault import VaultCollector
+        collector = VaultCollector()
+        chunk_count = collector.collect_card(character_id, card)
+
+        stats = get_knowledge_service().get_stats(character_id)
+        return {
+            "status": "collected",
+            "character_id": character_id,
+            "chunks_added": chunk_count,
+            "total_chunks": stats.get("total_chunks", 0),
+            "features": {
+                "persona": req.collect_persona,
+                "documents": req.collect_documents,
+            },
+        }
+    except Exception as e:
+        logger.exception("知识宝库收集失败: %s", character_id)
+        raise HTTPException(status_code=500, detail=f"知识宝库收集失败: {e}") from e
+
+
+@router.get("/{character_id}/knowledge/vault/features")
+async def get_vault_features(
+    character_id: str,
+    _auth: bool = Security(_verify_api_key),
+):
+    """查看角色 PersonaFeatures 提取结果（调试用）。"""
+    card = _load_character_card(character_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
+
+    try:
+        from shisi.vault._persona_adapter import PersonaAdapter
+        features = PersonaAdapter.extract(card)
+        return {
+            "character_id": character_id,
+            "features": features.to_dict(),
+            "chunk_count": (
+                len(features.core_anchors)
+                + len(features.speaking_style)
+                + len(features.background)
+                + len(features.relationship)
+                + len(features.behavior_rules)
+            ),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Persona 提取失败: {e}") from e
 
 
 # ── 辅助 ──
