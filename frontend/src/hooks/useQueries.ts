@@ -4,17 +4,14 @@ import type { EmotionState, DashboardStats, HealthStatus, WeChatStatus, Training
 
 export const queryKeys = {
   characters: { all: ['characters'] as const, detail: (id: string) => ['characters', id] as const },
-  affinity: { detail: (id: string) => ['affinity', id] as const, unlocks: (id: string) => ['affinity', id, 'unlocks'] as const },
-  emotionStage: { detail: (id: string) => ['emotionStage', id] as const, stages: ['emotionStage', 'stages'] as const },
-  vitalSigns: { detail: (id: string) => ['vitalSigns', id] as const },
+
   dashboard: ['dashboard'] as const,
   health: ['health'] as const,
   emotion: { state: ['emotion', 'state'] as const, trend: (days: number) => ['emotion', 'trend', days] as const },
   persona: { profile: ['persona', 'profile'] as const, evolution: ['persona', 'evolution'] as const },
   memory: { facts: (category?: string) => ['memory', 'facts', category] as const },
   config: ['config'] as const,
-  stickers: { all: ['stickers'] as const, recommend: (emotion: string) => ['stickers', 'recommend', emotion] as const },
-  stats: { shisi: ['stats', 'shisi'] as const },
+
   training: { status: ['training', 'status'] as const, progress: ['training', 'progress'] as const },
   wechat: { status: ['wechat', 'status'] as const, connection: ['wechat', 'connection'] as const, qrcode: ['wechat', 'qrcode'] as const },
   channels: ['channels'] as const,
@@ -42,38 +39,6 @@ export function useActiveCharacter() {
   const { data: characters } = useCharacters()
   const active = characters?.find(c => c.is_active)
   return { activeCharacter: active ?? characters?.[0] ?? null, characters: characters ?? [] }
-}
-
-export function useAffinity(characterId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.affinity.detail(characterId!),
-    queryFn: () => api.affinityGet(characterId!).then(r => (r.data as any)?.data),
-    enabled: !!characterId,
-  })
-}
-
-export function useAffinityUnlocks(characterId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.affinity.unlocks(characterId!),
-    queryFn: () => api.affinityUnlocks(characterId!).then(r => (r.data as any)?.data),
-    enabled: !!characterId,
-  })
-}
-
-export function useEmotionStage(characterId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.emotionStage.detail(characterId!),
-    queryFn: () => api.emotionStageGet(characterId!).then(r => (r.data as any)?.data),
-    enabled: !!characterId,
-  })
-}
-
-export function useEmotionStageList() {
-  return useQuery({
-    queryKey: queryKeys.emotionStage.stages,
-    queryFn: () => api.emotionStageList().then(r => (r.data as any)?.data),
-    staleTime: 5 * 60 * 1000,
-  })
 }
 
 export function useDashboard() {
@@ -179,14 +144,6 @@ export function useChannels() {
     queryKey: queryKeys.channels,
     queryFn: () => api.channels().then(r => r.data as { channels: import('../types/api').Channel[] }),
     refetchInterval: 30 * 1000,
-  })
-}
-
-export function useVitalSigns(characterId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.vitalSigns.detail(characterId!),
-    queryFn: () => api.vitalSignsGet(characterId!).then(r => (r.data as any)?.data),
-    enabled: !!characterId,
   })
 }
 

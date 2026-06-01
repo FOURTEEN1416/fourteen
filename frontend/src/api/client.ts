@@ -35,11 +35,6 @@ import {
   ragStats, ragSearch, ragUpload,
   voiceStatus, voiceSynthesize, getSpeakers,
   plugins, togglePlugin, uploadFile,
-  affinityGet, affinityUpdate, affinityUnlocks, affinityDecay,
-  emotionStageGet, emotionStageList, emotionStageEvaluate,
-  vitalSignsGet,
-  stickerList, stickerDelete, stickerRecommend, stickerImportZip, stickerUpload, stickerBindToCharacter,
-  voiceTrainingUpload, voiceTrainingPreprocess, voiceTrainingTrain, voiceTrainingStatus,
 } from './system'
 import {
   listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
@@ -167,11 +162,6 @@ export {
   ragStats, ragSearch, ragUpload,
   voiceStatus, voiceSynthesize, getSpeakers,
   plugins, togglePlugin, uploadFile,
-  affinityGet, affinityUpdate, affinityUnlocks, affinityDecay,
-  emotionStageGet, emotionStageList, emotionStageEvaluate,
-  vitalSignsGet,
-  stickerList, stickerDelete, stickerRecommend, stickerImportZip, stickerUpload, stickerBindToCharacter,
-  voiceTrainingUpload, voiceTrainingPreprocess, voiceTrainingTrain, voiceTrainingStatus,
 }
 
 // Legacy `api` namespace object — keeps `import { api } from '../api/client'` working
@@ -203,10 +193,4 @@ export const api = {
   exportCharacter, importCharacter,
   // users domain
   listUsers, getUserDetail, getUserChatHistory, getUserEmotion, setUserRole, resetUser, deleteUser,
-  // shisi legacy — flattened into api object
-  affinityGet, affinityUpdate, affinityUnlocks, affinityDecay,
-  emotionStageGet, emotionStageList, emotionStageEvaluate,
-  vitalSignsGet,
-  stickerList, stickerDelete, stickerRecommend, stickerImportZip, stickerUpload, stickerBindToCharacter,
-  voiceTrainingUpload, voiceTrainingPreprocess, voiceTrainingTrain, voiceTrainingStatus,
 }

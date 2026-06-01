@@ -116,6 +116,56 @@ jobs:
           fi
           echo "✅ FF-0007: Store 无 API 直接调用"
 
+  ff-auth-endpoints:
+    # FF-014: 认证模块端点完整性检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check auth_routes.py exports router with 5 endpoints
+        run: |
+          FILE="api/routers/auth_routes.py"
+          if [ ! -f "$FILE" ]; then
+            echo "❌ FF-014 违规：auth_routes.py 不存在"
+            exit 1
+          fi
+          if ! grep -q "router = APIRouter" "$FILE"; then
+            echo "❌ FF-014 违规：auth_routes.py 未导出 router"
+            exit 1
+          fi
+          for ENDPOINT in register login refresh logout me; do
+            if ! grep -q "async def $ENDPOINT" "$FILE"; then
+              echo "❌ FF-014 违规：缺少端点 $ENDPOINT"
+              exit 1
+            fi
+          done
+          echo "✅ FF-014: auth_routes.py 完整（5端点: register/login/refresh/logout/me）"
+
+  ff-route-guard:
+    # FF-015: 前端路由守卫覆盖检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check App.tsx has ProtectedLayout with AuthGuard
+        run: |
+          FILE="frontend/src/App.tsx"
+          if [ ! -f "$FILE" ]; then
+            echo "❌ FF-015 违规：App.tsx 不存在"
+            exit 1
+          fi
+          if ! grep -q "function ProtectedLayout" "$FILE"; then
+            echo "❌ FF-015 违规：缺少 ProtectedLayout 组件"
+            exit 1
+          fi
+          if ! grep -q "<AuthGuard>" "$FILE"; then
+            echo "❌ FF-015 违规：ProtectedLayout 未使用 AuthGuard"
+            exit 1
+          fi
+          if ! grep -q 'path="/login"' "$FILE"; then
+            echo "❌ FF-015 违规：缺少 /login 路由"
+            exit 1
+          fi
+          echo "✅ FF-015: 路由守卫覆盖完整（ProtectedLayout + AuthGuard + /login）"
+
   adr-integrity:
     runs-on: ubuntu-latest
     steps:

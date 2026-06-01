@@ -152,6 +152,14 @@ def create_api_app(
 
     app.include_router(main_router)
 
+    # ── 用户认证 API ──
+    try:
+        from api.routers.auth_routes import router as auth_router
+        app.include_router(auth_router)
+        logger.info("用户认证API已挂载 (/api/auth)")
+    except Exception as e:
+        logger.warning("用户认证API挂载失败: %s", e)
+
     # ═══════════════════════════════════════════════════
     # shisi（十四）模块挂载
     # ═══════════════════════════════════════════════════

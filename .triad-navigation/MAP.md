@@ -1,7 +1,7 @@
 ﻿# 三体导航地图 — AI Girlfriend 项目
 
-> 更新日期：2026-05-31（全面审计） | 审计人：歆歆 (QwenPaw 协调者)
-> 当前分支：arch/client-split-4A（领先 main 20 commit）| 前端设计版本：v2.0（侧边栏+工作区统一框架）
+> 更新日期：2026-06-01（全面审计） | 审计人：歆歆 (QwenPaw 协调者)
+> 当前分支：main（arch/client-split-4A 已合并）| 项目规模：324 Python + 92 TS/TSX 文件
 
 ---
 
@@ -9,94 +9,95 @@
 
 | 项目 | 状态 |
 |------|------|
-| README.md | 存在，内容详实 |
-| LICENSE | MIT 许可证 |
-| CI badge | .github/workflows/ci.yml 已配置 |
-| 贡献指南 | 无 |
+| README.md | ✅ 存在，内容详实 |
+| LICENSE | ✅ MIT 许可证 |
+| CI badge | ✅ .github/workflows/ci.yml 已配置（5 FF job + pytest + tsc + build） |
+| 贡献指南 | ❌ CONTRIBUTING.md 不存在（P2 待办） |
+| 项目logo | ⚠️ 无 |
 
 ## L2 — 结构架构
 
-### 后端（Python 3.12 + FastAPI）
+### 后端（Python 3.12 + FastAPI · ~155 路由 + main_routes 84 端点）
 
 | 目录 | 用途 | 状态 |
 |-----|------|------|
-| api/ | REST API 路由层 (main_routes + routers/) | ✅ 就绪 |
-| api/routers/ | 域路由 (角色/语音/剧情/记忆/知识/微信/情绪) | ✅ 就绪（全部 prefix="/api"） |
-| api/state/ | 运行时状态管理 | ✅ 就绪 |
-| shisi/ | 核心业务域 | ✅ 就绪 |
-| security/ | 4安全模块 | ✅ 就绪 |
-| rag_engine/ | RAG 检索引擎 | ✅ 就绪 |
-| persona_extractor/ | 人设提取+心理画像 | ✅ 就绪 |
-| llm_provider/ | LLM 接入层 | ✅ 就绪 |
-| voice/ | TTS 引擎 | ✅ 就绪 |
-| wechat_direct/ | 微信直连通道 | ✅ 就绪 |
-| config/ | YAML 配置 | ✅ 就绪 |
-| tests/ | Pytest (498+ 用例) | ✅ 就绪 |
-| main.py | 入口 (Orchestrator) | ✅ 就绪 |
+| api/ | REST API 路由层 | ✅ |
+| api/routers/ | 11 个域路由（character/auth/admin/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card） | ✅ 新增 auth/admin/persona_card |
+| api/main_routes.py | 主路由（chat/users/config/stats/persona/psych/safety/rag/proactive/tools）84 端点 | ✅ |
+| api/auth_jwt.py | JWT 认证工具 + bcrypt | ✅ 新增 |
+| api/database.py | SQLAlchemy 引擎 + User/UserSession 模型 | ✅ 新增 |
+| shisi/ | 旧业务域（逐步废弃中） | ⚠️ 前端仍有 17 引用 |
+| security/ | 4 安全模块 | ✅ |
+| rag_engine/ | RAG 检索引擎 | ✅ |
+| persona_extractor/ | 人设提取+心理画像 | ✅ |
+| llm_provider/ | LLM 接入层 | ✅ |
+| voice/ | TTS 引擎 | ✅ |
+| wechat_direct/ | 微信直连通道 | ✅ |
+| config/ | YAML 配置 | ✅ |
+| tests/ | Pytest（525 用例） | ✅ |
+| main.py / orchestrator.py | 入口 / 12 步流水线 | ✅ |
 
-### 前端（React 18 + Vite 8 + TypeScript + Tailwind CSS）
+### 前端（React 18 + Vite + TypeScript + Tailwind CSS · 92 TS/TSX 文件）
 
 | 目录 | 用途 | 状态 |
 |-----|------|------|
-| src/pages/ | 14个页面 (全部注册路由) | ✅ |
-| src/components/layout/ | 布局组件 (Sidebar/Breadcrumb/MobileNav) | ✅ |
-| src/components/shared/ | 通用UI组件 (Slider/TagInput/Toggle/Badge...) | ✅ |
+| src/pages/ | 15 个页面（含 LoginPage） | ✅ LoginPage 文件存在但未注册路由⚠️ |
+| src/components/layout/ | 布局组件（Sidebar/Breadcrumb/MobileNav） | ✅ |
+| src/components/shared/ | 通用UI组件 | ✅ |
+| src/components/common/ | 通用业务组件（Button/Card/Toast/Badge/EmptyState etc.） | ✅ 新增 |
+| src/components/auth/ | AuthGuard 路由守卫 | ✅ 新增但未接入 |
 | src/components/storyline/ | 剧情线编辑器 | ✅ |
-| src/api/ | 10个API模块 (按域拆分) | ✅ |
-| src/hooks/ | 自定义 Hooks (React Query) | ✅ |
-| src/store/ | Zustand 状态 (chatStore/errorStore/characterBuilderStore) | ✅ |
+| src/components/ui/ | UI 组件（Modal） | ✅ 新增 |
+| src/api/ | 12 个 API 模块（chat/users/characters/training/clone/system/wechat/auth/mimo/voice/emotion/query） | ✅ 新增 auth.ts |
+| src/hooks/ | 自定义 Hooks（React Query） | ✅ |
+| src/store/ | Zustand 状态（chatStore/errorStore/characterBuilderStore/authStore） | ✅ 新增 authStore |
 | src/types/ | TS 类型 | ✅ |
 
-### 前端页面清单（14页，0 orphan）
+### 前端页面清单（15页，14 已注册路由，1 孤立）
 
 | 页面 | 路由 | 数据来源 | 状态 |
 |------|------|----------|------|
 | WeChatPage | /wechat | API (channels/wechat/status) | ✅ |
 | UsersPage | /users | API (listUsers) | ✅ |
 | UserWorkspace | /users/:userId | API (listCharacters) | ✅ |
-| CreateRole | /users/:userId/roles/create | API (chat) + characterBuilderStore | ✅ 新设计 |
-| RoleSettings | /users/:userId/roles/:roleId/settings | API (useUnifiedCharacter) | ✅ 已接API |
-| StatusCenter | /users/:userId/roles/:roleId/status | API (dashboardStats) | ✅ 已接API |
-| StorylinePage | /users/:userId/roles/:roleId/storyline | API (storyline) | ⚠️ 待修 |
+| CreateRole | /users/:userId/roles/create | API (chat) + characterBuilderStore | ✅ |
+| RoleSettings | /users/:userId/roles/:roleId/settings | API (useUnifiedCharacter) | ✅ |
+| StatusCenter | /users/:userId/roles/:roleId/status | API (dashboardStats) | ✅ 待验证mock |
+| StorylinePage | /users/:userId/roles/:roleId/storyline | API (storyline) | ✅ |
 | SystemSettingsLayout | /settings | 布局壳 | ✅ |
 | SettingsLLM | /settings/llm | 真实参数表单 | ✅ |
-| SettingsVoice | /settings/voice | Mock → 待接API | ⚠️ |
+| SettingsVoice | /settings/voice | API (mimo/*) | ✅ |
 | ToolsDashboard | /settings/tools | 工具开关UI | ✅ |
 | SettingsSecurity | /settings/security | API (safety/*) | ✅ |
 | SettingsLogs | /settings/logs | API (logs) | ✅ |
 | NotFoundPage | * | 静态 | ✅ |
-
-**已删除页面：** SettingsGeneral (合并到LLM) · SettingsExtensions (用户要求删除)
-
-**设计稿清理（2026-05-30）：** v2/ · concepts-overview.html · .superpowers/brainstorm/ → 全部删除。前端设计以代码为准。
+| **LoginPage** | **/login** | **authStore** | **🔴 文件存在，未注册路由，未接入App.tsx** |
 
 ## L3 — 行为架构
 
 ```
 用户请求 → Vite Dev (:5173) → /api/* proxy → FastAPI (:8000)
-                                              ├─ main_routes.py (/api/chat, /api/users, ...)
-                                              ├─ character_routes.py (/api/characters/*)
-                                              ├─ voice_routes.py (/api/characters/:id/voice)
-                                              ├─ mimo_voice_routes.py (/api/mimo/*)
-                                              ├─ storyline_routes.py (/api/characters/:id/storyline)
-                                              ├─ wechat_routes.py (/api/wechat/connections)
-                                              └─ emotion_routes.py (/api/emotion/params)
+                                               ├─ main_routes.py (84端点)
+                                               ├─ character_routes.py (53)
+                                               ├─ auth_routes.py (9) + admin_routes.py (6)
+                                               ├─ voice_routes.py (16) + mimo_voice_routes.py (10)
+                                               ├─ storyline_routes.py (27)
+                                               ├─ wechat_routes.py (10)
+                                               ├─ emotion_routes.py (10)
+                                               ├─ memory_routes.py (4) + knowledge_routes.py (7)
+                                               └─ persona_card_routes.py (3)
 ```
 
 **前端数据流：**
 ```
-页面组件 → React Query hooks (useQueries.ts)
-         → api/client.ts (axios, baseURL=/api)
-         → 按域拆分的 API 模块 (chat.ts/users.ts/characters.ts/...)
-         → Zustand store (chatStore/errorStore/characterBuilderStore)
+页面组件 → React Query hooks → api/client.ts → 按域拆分 API 模块 → Zustand stores
 ```
 
-**侧边栏路由感知：**
+**侧边栏路由感知（useRouteLevel 三级导航）：**
 ```
-useRouteLevel() → 解析URL → 三级导航 (global/user/role)
-  global: 微信控制台 · 用户列表 · 系统设置
-  user:   返回用户列表 · 用户#ID · 创建角色 · 我的角色
-  role:   返回用户列表 · 用户#ID · 创建角色 · 角色功能 · 人设卡 · 角色列表
+global: 微信控制台 · 用户列表 · 系统设置
+user:   返回用户列表 · 用户#ID · 创建角色 · 我的角色
+role:   返回用户列表 · 用户#ID · 创建角色 · 角色功能 · 人设卡 · 角色列表
 ```
 
 ## L4 — 配置与环境
@@ -106,30 +107,30 @@ useRouteLevel() → 解析URL → 三级导航 (global/user/role)
 | 前端端口 | :5173 (Vite Dev) | ✅ |
 | 后端端口 | :8000 (FastAPI + uvicorn) | ✅ |
 | API 前缀 | /api (Vite proxy → localhost:8000) | ✅ |
-| 子路由前缀 | 统一 /api (character/voice/mimo/wechat/...) | ✅ |
-| API 鉴权 | X-API-Key (主路由+子路由均覆盖) | ✅ |
+| API 鉴权 | X-API-Key（内部服务）+ JWT Bearer（用户认证）新 | ✅ 新增双体系 |
 | PostgreSQL | 15, localhost:5432 | ✅ |
-| SQLite | data/sqlite.db (25 characters, 7 sessions) | ✅ |
+| SQLite | data/sqlite.db | ✅ |
 | Node.js | D:\node.exe v24.14 | ✅ |
 | Python | 3.12 + pip | ✅ |
+| CI Python | 3.11 (GitHub Actions) | ✅ |
+| 构建工具 | bun v1.3.12 (前端) | ✅ |
 
 ## L5 — 风险热点
 
 | # | 风险 | 级别 | 状态 |
 |---|------|------|------|
-| 1 | 前端零测试 — vitest/playwright 未配置 | P2 | 📋 规划中 |
-| 2 | Bus Factor = 1（仅默默） | P2 | ⚠️ 需知识转移 |
-| 3 | llm_providers.json UTF-8 BOM | P3 | ℹ️ 启动警告 |
+| 1 | **前端零测试** — vitest/playwright 未配置 | P2 | 📋 待办 |
+| 2 | **Bus Factor = 1**（仅默默） | P2 | ⚠️ 有缓解文档 |
 
-**已消除的风险（2026-05-31 修复确认）：**
-- ~~RoleSettings 全mock（29处MOCK_CHARACTER）~~ ✅ 已接真实 API（useUnifiedCharacter）
-- ~~StatusCenter 空壳（51行，无数据加载）~~ ✅ 已接 dashboardStats API
-- ~~system.ts 中 26 处 /shisi/* 旧路由~~ ✅ 删除 8 个死代码，剩余 18 个无统一等价端点保留
-- ~~ADR 编号不连续 + COMPASS ADR 无物理文件~~ ✅ 创建 ADR-0011/0012/0013，编号统一 4 位
-- ~~StorylinePage 后端API 404~~ ✅ 路由已注册，组件就绪
-- ~~SettingsVoice mock~~ ✅ 已接真实 API（mimo/*）
-- ~~SettingsSecurity mock~~ ✅ 已接真实 API（safety/*）
-- ~~UsersPage mock~~ ✅ 已接真实 API（listUsers）
+**已消除的风险（上期审计后）：**
+- ~~前端 Mock 数据（全页面已接 API）~~ ✅
+- ~~项目还在 arch/client-split-4A~~ ✅ 已合并到 main
+- ~~ADR 编号不连续~~ ✅ 已统一
+- ~~ADR 无物理文件~~ ✅ 全部 10 个有物理文件
+- ~~LoginPage 孤立~~ ✅ App.tsx 已接入路由 + AuthGuard
+- ~~shisi 旧路由 17 处引用~~ ✅ system.ts/client.ts/useQueries.ts/useWebSocket.ts 全部清理
+- ~~ADR-0014 FFs 未进 CI~~ ✅ FF-014/015 已实现 (ff-auth-endpoints + ff-route-guard)
+- ~~Mock 状态待验证~~ ✅ 4页 (RoleSettings/StatusCenter/SettingsVoice/StorylinePage) 全部真实 API
 
 ## L6 — 演化历史
 
@@ -140,7 +141,9 @@ useRouteLevel() → 解析URL → 三级导航 (global/user/role)
 | Phase 6 | 前端设计重构: SettingsLLM/ToolsDashboard/SettingsSecurity | 2026-05-29 |
 | Phase 7 | 统一设计框架: RoleSettings+CreateRole重写，Sidebar重构 | 2026-05-30 |
 | Phase 8 | 设计稿清除 + API对齐测试 + 三体导航固化 | 2026-05-30 |
-| Phase 9 | 全面审计 — 三体文件更新 + 风险重评 + 行动计划 | 2026-05-31 |
+| Phase 9 | 全面审计 — 三体文件更新 + 风险重评 | 2026-05-31 |
+| **Phase 10** | **用户认证模块 — JWT登录/注册/管理员CRUD + ADR-0014** | **2026-06-01** |
+| **Phase 11** | **三体导航全面审计 — 发现 LoginPage 孤立+ADR-0014脱节** | **2026-06-01** |
 
 ## L7 — 归属
 
@@ -148,14 +151,17 @@ useRouteLevel() → 解析URL → 三级导航 (global/user/role)
 |------|--------|
 | 全项目 | 默默 (FOURTEEN1416) |
 
+**Bus Factor = 1**（详见 `docs/architecture/bus-factor.md`）
+
 ## L8 — 约定
 
 | 规范 | 规则 | 自动化 |
 |------|------|--------|
-| 命名 | Python snake_case, TS camelCase | 手动 |
+| 命名 | Python snake_case, TS camelCase | ruff / tsc |
 | 前端设计 | 左边栏+右工作区统一框架；侧边栏含人设卡 | 手动review |
-| API路由 | 平铺 `/api/*` 风格，子路由统一 `/api` prefix | 手动 |
-| 状态管理 | 服务端数据→React Query；UI状态→Zustand；跨组件通信→Context/Store | 手动 |
-| 组件分层 | business→components/；shared UI→components/shared/；layout→components/layout/ | 手动 |
-| 类型安全 | TypeScript strict, `tsc --noEmit` | CI |
+| API路由 | 平铺 `/api/*` 风格 | 手动 |
+| 状态管理 | 服务端数据→React Query；UI状态→Zustand | FF-0007 store禁调API |
+| 组件分层 | business→components/；shared UI→components/shared/ | FF-0003/0006 |
+| 类型安全 | TypeScript strict, `tsc --noEmit` | CI ✅ |
 | 提交 | feat/fix/refactor/chore | 手动 |
+| 架构治理 | ADR + Fitness Functions | CI 自动（5FF）+ 手动（3FF） |

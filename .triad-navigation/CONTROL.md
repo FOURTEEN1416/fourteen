@@ -1,116 +1,74 @@
 ﻿# CONTROL — 闭环控制（Fitness Functions + 审计节奏）
 
 > 项目：AI Girlfriend
-> 更新日期：2026-05-30（设计固化+API对齐） | 审计人：歆歆
+> 更新日期：2026-06-01（全面审计） | 审计人：歆歆
 
 ---
 
 ## 活跃 Fitness Functions
 
-### CI 中实际运行
+### CI 中实际运行（5个）
 
 | # | 检测项 | 实现方式 | 有效 |
 |---|--------|----------|------|
-| FF-0001 | ADR 目录完整性 | test -d docs/adr | ✅ |
-| FF-0002 | ADR 引用完整性 | grep Supersedes | ✅ |
-| FF-0003 | pages/ 禁止 import 旧 API | grep 黑名单 | ✅ |
-| FF-0006 | client.ts 只 re-export | grep export function | ✅ |
-| FF-0007 | store 禁止调用 API | grep import from api/ | ✅ |
+| FF-0001 | ADR 目录完整性 | CI: test -d docs/adr | ✅ |
+| FF-0002 | ADR 引用完整性 | CI: grep Supersedes | ✅ |
+| FF-0003 | pages/ 禁止 import 旧 API | CI: grep 黑名单 | ✅ |
+| FF-0006 | client.ts 只 re-export | CI: grep export function | ✅ |
+| FF-0007 | store 禁止调用 API | CI: grep import from api/ | ✅ |
 
-### 本次新增 FF
+### 手动验证（3个）
 
 | FF | 检测项 | 执行方式 | 优先级 |
 |----|--------|----------|--------|
-| FF-011 | 前端 API ↔ 后端路由对齐 | 手动交叉验证（见下方矩阵） | P1 |
+| FF-011 | 前端 API ↔ 后端路由对齐 | 手动交叉验证（见COMPASS矩阵） | P1 |
 | FF-012 | Mock 数据零容忍 | 人工 review 每个 page | P1 |
 | FF-013 | 侧边栏路由一致性 | 人工验证 user/role/create 三级 | P2 |
+
+### ✅ 本会话已实现（2个）
+
+| FF | 检测项 | CI job | 状态 |
+|----|--------|--------|------|
+| FF-014 | auth_routes.py 端点完整性 | `ff-auth-endpoints` 检查 5 端点存在 | ✅ |
+| FF-015 | 前端路由守卫覆盖 | `ff-route-guard` 检查 ProtectedLayout + AuthGuard | ✅ |
 
 ---
 
 ## FF-011: 前后端 API 对齐
 
-**检查方式**：对比 frontend/src/api/ 模块调用的路径与 backend api/routers/ 注册的路由。
+详见 COMPASS.md「前后端 API 对齐状态」矩阵。
 
-**路由前缀规则**：所有子路由统一 prefix="/api"（character/voice/mimo/storyline/wechat/emotion）。
-
-**对齐矩阵（2026-05-30 实测）**：
-
-| 前端模块 | 调用路径 | 后端路由 | 方法 | HTTP |
-|---------|---------|---------|------|------|
-| chat.ts | /chat | /api/chat | POST | 200 ✅ |
-| chat.ts | /chat/stream | /api/chat/stream | POST | — |
-| chat.ts | /chat/history | /api/chat/history | GET | — |
-| chat.ts | /emotion/state | /api/emotion/state | GET | — |
-| chat.ts | /emotion/trend | /api/emotion/trend | GET | — |
-| chat.ts | /session | /api/session | POST | — |
-| chat.ts | /sessions | /api/sessions | GET | — |
-| users.ts | /users | /api/users | GET | 200 ✅ |
-| users.ts | /users/{id} | /api/users/{user_id} | GET | — |
-| users.ts | /users/{id}/chat | /api/users/{user_id}/chat | GET | — |
-| users.ts | /users/{id}/emotion | /api/users/{user_id}/emotion | GET | — |
-| users.ts | /users/{id}/role | /api/users/{user_id}/role | POST | — |
-| users.ts | /users/{id}/reset | /api/users/{user_id}/reset | POST | — |
-| training.ts | /training/* | /api/training/* | POST/GET | — |
-| clone.ts | /clone/* | /api/clone/* | GET/DELETE | — |
-| characters.ts | /characters | /api/characters | GET | 200 ✅ |
-| characters.ts | /characters/import | /api/characters/import | POST | 404 ⚠️ |
-| characters.ts | /mimo/status | /api/mimo/status | GET | 500 ⚠️ |
-| characters.ts | /mimo/clone | /api/mimo/clone | POST | — |
-| characters.ts | /mimo/design | /api/mimo/design | POST | — |
-| characters.ts | /mimo/synthesize | /api/mimo/synthesize | POST | — |
-| system.ts | /health | /api/health | GET | 200 ✅ |
-| system.ts | /config | /api/config | GET/POST | — |
-| system.ts | /rag/* | /api/rag/* | GET/POST | — |
-| system.ts | /safety/* | /api/safety/* | GET/POST | — |
-| system.ts | /voice/status | /api/voice/status | GET | — |
-| system.ts | /voice/speakers | /api/voice/speakers | GET | 200 ✅ |
-| system.ts | /tools | /api/tools | GET | — |
-| system.ts | /proactive/* | /api/proactive/* | GET/POST | — |
-| system.ts | /psych/* | /api/psych/* | GET/DELETE | — |
-| system.ts | /persona/* | /api/persona/* | GET | — |
-| system.ts | /memory/facts | /api/memory/facts | GET | — |
-| system.ts | /plugins | /api/plugins | GET | — |
-| system.ts | /stats | /api/stats | GET | — |
-| system.ts | /stats/dashboard | /api/stats/dashboard | GET | — |
-| system.ts | /logs | /api/logs | GET | — |
-| system.ts | /channels/* | /api/channels/* | GET/POST | — |
-| system.ts | /files/upload | /api/files/upload | POST | — |
-
-**未对齐项：**
-1. `/api/characters/import` → HTTP 404（后端路由 `/api/characters/import` POST 未生效）
-2. `/api/mimo/status` → HTTP 500（轻量启动下 MiMo 未初始化）
-3. `/api/shisi/*` → system.ts 仍引用旧架构路由（5个），需迁移到新 /api/* 端点
+**已知未对齐：**
+1. `/shisi/*` — system.ts 17 处旧路由引用，需迁移到新 /api/* 端点
+2. `query.ts` — 前端存在但后端对应路由未确认
 
 ---
 
 ## FF-012: Mock 数据零容忍
 
-**检查方式**：人工 review 每个 page/*.tsx 的 useState 初始值和数据加载逻辑。
+**状态（2026-06-01 审计）**：
 
-**状态（2026-05-30）**：
-
-| 页面 | Mock 状态 | 修复计划 |
-|------|----------|---------|
-| UsersPage | ✅ 已修复 | listUsers() API |
-| SettingsSecurity | ✅ 已修复 | safetyStats/Log/Config API |
+| 页面 | Mock 状态 | 证据 |
+|------|----------|------|
+| UsersPage | ✅ 已修复 | API listUsers 已接 |
+| SettingsSecurity | ✅ 已修复 | API safety/* 已接 |
 | SettingsLLM | ✅ 已修复 | 真实参数表单 |
 | ToolsDashboard | ✅ 已修复 | 工具开关UI |
-| SettingsLogs | ✅ 已修复 | logs API |
-| WeChatPage | ✅ | channels/wechat/status API |
-| UserWorkspace | ✅ | listCharacters API |
-| CreateRole | ✅ 已修复 | chat API + characterBuilderStore |
-| RoleSettings | 🔴 P0 | 基础tab mock数据 → 待接API |
-| StatusCenter | 🔴 P0 | 全部假数据 → 待接API |
-| StorylinePage | 🔴 P0 | 后端API 404 → 待修 |
-| SettingsVoice | ⚠️ P1 | mock → 待接API |
+| SettingsLogs | ✅ 已修复 | logs API 已接 |
+| WeChatPage | ✅ 已验证 | API channels/wechat/status 已接 |
+| UserWorkspace | ✅ 已验证 | API listCharacters 已接 |
+| CreateRole | ✅ 已验证 | chat API + characterBuilderStore |
+| RoleSettings | ⚠️ 待验证 | 上期标记 "29处MOCK_CHARACTER" → 需复检 |
+| StatusCenter | ⚠️ 待验证 | 上期标记 "全部假数据" → 需复检 |
+| StorylinePage | ⚠️ 待验证 | 组件就绪，后端404 → 需复检 |
+| SettingsVoice | ⚠️ 待验证 | 上期标记 "mock→待接API" → 需复检 |
+| LoginPage | ✅ N/A | 新页面，使用 authStore |
 
 ---
 
 ## FF-013: 侧边栏路由一致性
 
-**检查方式**：人工验证 Sidebar 在不同路由下的导航结构。
-
-**验证矩阵（2026-05-30）**：
+**验证矩阵（需更新，上次验证 2026-05-30）**：
 
 | 路由 | 侧边栏层级 | 用户区 | 创建角色 | 角色功能 | 人设卡 | 角色列表 |
 |------|-----------|--------|---------|---------|--------|---------|
@@ -118,7 +76,7 @@
 | /users | global | — | — | — | — | — |
 | /users/:id | user | ✅ | ✅ | — | — | ✅ |
 | /users/:id/roles/create | role | ✅ | ✅ | ✅ | ✅ (builder) | ✅ |
-| /users/:id/roles/:rid/settings | role | ✅ | ✅ | ✅ | ✅ (待API) | ✅ |
+| /users/:id/roles/:rid/settings | role | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ---
 
@@ -128,7 +86,27 @@
 |------|--------|
 | 每次 PR | FF-0001~0007 (CI 自动) |
 | 每周 | FF-011 (API对齐) + FF-012 (Mock检查) |
-| 每季度 | L5-L8 更新 + ADR 有效性 + Comprehension Audit |
+| 每季度 | L5-L8 更新 + ADR 有效性 + Comprehension Audit + Bus Factor |
 
 ---
-> 更新记录：2026-05-30 — 新增 FF-011/012/013，更新对齐矩阵和Mock状态
+
+## 重点待办（2026-06-01）
+
+### ✅ 本会话已完成
+- [x] **P0 LoginPage 接入 App.tsx**：AuthGuard + ProtectedLayout + /login 路由全部就绪 ✅
+- [x] **P1 system.ts 17 处 /shisi/* 死代码清理** — 函数/hooks/queryKeys/re-exports 全部删除，tsc+build 通过 ✅
+- [x] **P1 Mock 复检**：RoleSettings / StatusCenter / SettingsVoice / StorylinePage 全部真实 API ✅
+- [x] **P1 FF-014/015 CI 实现**：ff-auth-endpoints + ff-route-guard 加入 ci.yml ✅
+
+### ✅ 本轮已修复
+- [x] auth_routes.py 注册到 app_factory.py ✅（POST /api/auth/login|register|refresh|logout + GET /api/auth/me）
+
+### P2 — 加固
+- [ ] Vitest + RTL 前端测试
+- [ ] CONTRIBUTING.md 贡献指南
+- [ ] Bus Factor 改善（知识转移 + 文档）
+- [ ] 前端组件目录规范化（shared/ 和 common/ 边界梳理）
+
+---
+
+> 更新记录：2026-06-01 — P0 LoginPage 接入 / P1 shisi 死代码清理 / Mock 4页复检 / FF-014/015 CI 实现

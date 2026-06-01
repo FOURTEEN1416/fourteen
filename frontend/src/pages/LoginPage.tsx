@@ -1,12 +1,12 @@
 /**
  * 登录 / 注册页面
  *
- * 使用 authStore 处理认证，支持登录和注册两种模式切换。
+ * 使用 useAuth hook 处理认证，支持登录和注册两种模式切换。
  * 认证成功后自动跳转到 /wechat。
  */
 import { useState, type FormEvent } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { useAuthStore } from '../store/authStore'
+import { useAuth } from '../hooks/useAuth'
 import Button from '../components/common/Button'
 
 type Mode = 'login' | 'register'
@@ -14,7 +14,7 @@ type Mode = 'login' | 'register'
 export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { login, register, isAuthenticated } = useAuthStore()
+  const { login, register, isAuthenticated } = useAuth()
 
   const [mode, setMode] = useState<Mode>('login')
   const [loginValue, setLoginValue] = useState('')

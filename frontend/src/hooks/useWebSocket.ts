@@ -96,10 +96,6 @@ export function useWebSocket() {
           case 'character_switched':
             if (data.data?.character_id && data.data?.name) {
               setCurrentCharacter(data.data.character_id, data.data.name)
-              const cid = data.data.character_id
-              queryClient.invalidateQueries({ queryKey: queryKeys.affinity.detail(cid) })
-              queryClient.invalidateQueries({ queryKey: queryKeys.emotionStage.detail(cid) })
-              queryClient.invalidateQueries({ queryKey: queryKeys.vitalSigns.detail(cid) })
               queryClient.invalidateQueries({ queryKey: queryKeys.characters.all })
             }
             break
