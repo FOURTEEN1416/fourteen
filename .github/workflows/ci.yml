@@ -25,14 +25,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Run pytest (push/PR: stop on first fail)
+      - name: "Run pytest (push/PR: stop on first fail)"
         if: github.event_name != 'schedule'
         run: pytest -v --tb=short -x
         env:
           ENV: test
           AI_GF_ENV: test
 
-      - name: Run pytest with coverage (schedule: full report)
+      - name: "Run pytest with coverage (schedule: full report)"
         if: github.event_name == 'schedule'
         run: pytest -v --tb=short --cov=. --cov-report=term --cov-report=html -m "not slow"
         env:
@@ -77,7 +77,7 @@ jobs:
   # ═══ Fitness Functions（自动化门禁） ═══
 
   ff-no-old-api-imports:
-    """FF-0003: 前端页面禁止直接 import 旧 API 文件"""
+    # FF-0003: 前端页面禁止直接 import 旧 API 文件
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -91,7 +91,7 @@ jobs:
           echo "✅ FF-0003: 无旧 API import"
 
   ff-client-ts-no-functions:
-    """FF-0006: client.ts 禁止定义函数（只做 re-export）"""
+    # FF-0006: client.ts 禁止定义函数（只做 re-export）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -104,7 +104,7 @@ jobs:
           echo "✅ FF-0006: client.ts 纯 re-export"
 
   ff-stores-no-api-imports:
-    """FF-0007: Zustand store 禁止直接调用 API"""
+    # FF-0007: Zustand store 禁止直接调用 API
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
