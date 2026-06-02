@@ -314,6 +314,14 @@ def create_api_app(
     except Exception as e:
         logger.warning("管理员用户管理API挂载失败: %s", e)
 
+    # ── 邀请码 API（注册 + 管理） ──
+    try:
+        from api.routers.invite_routes import router as invite_router
+        app.include_router(invite_router)
+        logger.info("邀请码API已挂载 (/api/auth/register-invite + /api/admin/invites)")
+    except Exception as e:
+        logger.warning("邀请码API挂载失败: %s", e)
+
     return app
 
 

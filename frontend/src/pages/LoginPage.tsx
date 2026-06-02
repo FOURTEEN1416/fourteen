@@ -14,7 +14,7 @@ type Mode = 'login' | 'register'
 export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { login, register, isAuthenticated } = useAuth()
+  const { login, register, registerWithInvite, isAuthenticated } = useAuth()
 
   const [mode, setMode] = useState<Mode>('login')
   const [loginValue, setLoginValue] = useState('')
@@ -22,6 +22,8 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
+  const [useInvite, setUseInvite] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -40,6 +42,12 @@ export default function LoginPage() {
     try {
       if (mode === 'login') {
         await login(loginValue, password)
+      } else if (useInvite && inviteCode.trim()) {
+        await registerWithInvite({
+          invite_code: inviteCode.trim(),
+          email, username, password,
+          display_name: displayName || undefined,
+        })
       } else {
         await register({ email, username, password, display_name: displayName || undefined })
       }
@@ -135,6 +143,36 @@ export default function LoginPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/30 focus:border-indigo-400"
                 />
               </div>
+
+              {/* 邀请码切换 */}
+              <div className="flex items-center gap-2">
+                <input
+                  id="useInvite"
+                  type="checkbox"
+                  checked={useInvite}
+                  onChange={(e) => setUseInvite(e.target.checked)}
+                  className="rounded border-gray-300 text-indigo-500 focus:ring-indigo-400/30"
+                />
+                <label htmlFor="useInvite" className="text-sm text-gray-500 cursor-pointer select-none">
+                  我有邀请码
+                </label>
+              </div>
+
+              {/* 邀请码输入 */}
+              {useInvite && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">邀请码</label>
+                  <input
+                    type="text"
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value)}
+                    placeholder="请输入8位邀请码"
+                    required={useInvite}
+                    maxLength={16}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/30 focus:border-indigo-400"
+                  />
+                </div>
+              )}
             </>
           )}
 

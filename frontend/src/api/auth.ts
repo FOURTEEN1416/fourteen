@@ -41,9 +41,22 @@ export interface RegisterRequest {
 
 // ── API 函数 ──────────────────────────────────────
 
+export interface RegisterInviteRequest {
+  invite_code: string
+  email: string
+  username: string
+  password: string
+  display_name?: string
+}
+
 /** POST /api/auth/register — 注册新用户 */
 export function register(data: RegisterRequest): Promise<TokenResponse> {
   return client.post('/auth/register', data).then(r => r.data as TokenResponse)
+}
+
+/** POST /api/auth/register-invite — 使用邀请码注册 */
+export function registerWithInvite(data: RegisterInviteRequest): Promise<TokenResponse> {
+  return client.post('/auth/register-invite', data).then(r => r.data as TokenResponse)
 }
 
 /** POST /api/auth/login — 登录 */

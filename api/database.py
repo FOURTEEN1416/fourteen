@@ -96,6 +96,51 @@ class User(Base):
         return f"<User(id={self.id}, email='{self.email}', role='{self.role}')>"
 
 
+class InviteCode(Base):
+    """邀请码 — 内测注册控制"""
+
+    __tablename__ = "invite_codes"
+
+    code = Column(String(16), primary_key=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    used_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    used_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=False)
+    is_revoked = Column(Boolean, default=False, nullable=False)
+    note = Column(String(255), default="", nullable=False)
+
+    def is_valid(self) -> bool:
+        """检查邀请码是否仍可使用"""
+        now = datetime.now(timezone.utc)
+        if self.is_revoked:
+            return False
+        if self.used_by is not None:
+            return False
+        # SQLite 存的是 naive datetime
+        exp = self.expires_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if now > exp:
+            return False
+        return True
+
+    def to_dict(self) -> dict:
+        return {
+            "code": self.code,
+            "created_by": self.created_by,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "used_by": self.used_by,
+            "used_at": self.used_at.isoformat() if self.used_at else None,
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "is_revoked": self.is_revoked,
+            "note": self.note,
+        }
+
+    def __repr__(self) -> str:
+        return f"<InviteCode(code='{self.code}', revoked={self.is_revoked})>"
+
+
 class UserSession(Base):
     """用户登录会话 — 记录 refresh token 和设备信息"""
 

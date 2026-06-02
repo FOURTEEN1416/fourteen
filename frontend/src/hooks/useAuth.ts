@@ -51,6 +51,22 @@ export function useAuth() {
     })
   }
 
+  const registerWithInvite = async (data: {
+    invite_code: string
+    email: string
+    username: string
+    password: string
+    display_name?: string
+  }) => {
+    const res = await authApi.registerWithInvite(data)
+    useAuthStore.setState({
+      accessToken: res.access_token,
+      refreshToken: res.refresh_token,
+      user: res.user,
+      isAuthenticated: true,
+    })
+  }
+
   const logout = async () => {
     const { refreshToken } = useAuthStore.getState()
     try {
@@ -82,7 +98,7 @@ export function useAuth() {
   }
 
   return {
-    init, login, register, logout, refresh,
+    init, login, register, registerWithInvite, logout, refresh,
     user, isAuthenticated, isInitialized,
   }
 }

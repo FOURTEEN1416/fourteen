@@ -18,6 +18,8 @@ export default defineConfig(({ mode }) => {
       environment: 'jsdom',
       setupFiles: ['./src/tests/setup.ts'],
       css: true,
+      include: ['src/**/*.{test,spec}.{ts,tsx}'],
+      exclude: ['node_modules', 'e2e', 'dist'],
     },
     server: {
       port: Number(env.VITE_DEV_PORT) || 5173,
