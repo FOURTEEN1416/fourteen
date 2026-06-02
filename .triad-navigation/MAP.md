@@ -35,7 +35,7 @@
 | voice/ | TTS 引擎 | ✅ |
 | wechat_direct/ | 微信直连通道 | ✅ |
 | config/ | YAML 配置 | ✅ |
-| tests/ | Pytest（525 用例） | ✅ |
+| tests/ | Pytest（625 用例 + 1 skip） | ✅ |
 | main.py / orchestrator.py | 入口 / 12 步流水线 | ✅ |
 
 ### 前端（React 18 + Vite + TypeScript + Tailwind CSS · 92 TS/TSX 文件）
@@ -54,7 +54,7 @@
 | src/store/ | Zustand 状态（chatStore/errorStore/characterBuilderStore/authStore） | ✅ 新增 authStore |
 | src/types/ | TS 类型 | ✅ |
 
-### 前端页面清单（15页，14 已注册路由，1 孤立）
+### 前端页面清单（15页，15 已注册路由，0 孤立）
 
 | 页面 | 路由 | 数据来源 | 状态 |
 |------|------|----------|------|
@@ -63,7 +63,7 @@
 | UserWorkspace | /users/:userId | API (listCharacters) | ✅ |
 | CreateRole | /users/:userId/roles/create | API (chat) + characterBuilderStore | ✅ |
 | RoleSettings | /users/:userId/roles/:roleId/settings | API (useUnifiedCharacter) | ✅ |
-| StatusCenter | /users/:userId/roles/:roleId/status | API (dashboardStats) | ✅ 待验证mock |
+| StatusCenter | /users/:userId/roles/:roleId/status | API (dashboardStats) | ✅ |
 | StorylinePage | /users/:userId/roles/:roleId/storyline | API (storyline) | ✅ |
 | SystemSettingsLayout | /settings | 布局壳 | ✅ |
 | SettingsLLM | /settings/llm | 真实参数表单 | ✅ |
@@ -71,8 +71,9 @@
 | ToolsDashboard | /settings/tools | 工具开关UI | ✅ |
 | SettingsSecurity | /settings/security | API (safety/*) | ✅ |
 | SettingsLogs | /settings/logs | API (logs) | ✅ |
+| AdminInvitesPage | /admin/invites | API (invites) | ✅ 新增（commit `881f2d4`） |
+| LoginPage | /login | authStore + invites | ✅ |
 | NotFoundPage | * | 静态 | ✅ |
-| **LoginPage** | **/login** | **authStore** | **🔴 文件存在，未注册路由，未接入App.tsx** |
 
 ## L3 — 行为架构
 
@@ -84,17 +85,17 @@
                                                 ├─ _users_routes.py (7)
                                                 ├─ _training_routes.py (11)
                                                 ├─ _tools_routes.py (5)
-                                                ├─ _safety_routes.py (12)
-                                                ├─ _clone_routes.py (7)
-                                                ├─ main_routes.py (0端点 · 仅模型+常量+Helper)
-                                                ├─ character_routes.py (53)
-                                               ├─ auth_routes.py (9) + admin_routes.py (6)
-                                               ├─ voice_routes.py (16) + mimo_voice_routes.py (10)
-                                               ├─ storyline_routes.py (27)
-                                               ├─ wechat_routes.py (10)
-                                               ├─ emotion_routes.py (10)
-                                               ├─ memory_routes.py (4) + knowledge_routes.py (7)
-                                               └─ persona_card_routes.py (3)
+├─ _safety_routes.py (12)
+├─ _clone_routes.py (7)
+├─ main_routes.py (0端点 · 仅模型+常量+Helper)
+├─ character_routes.py (53)
+├─ auth_routes.py (9) + admin_routes.py (6) + **invite_routes.py (4)** 新增
+├─ voice_routes.py (16) + mimo_voice_routes.py (10)
+├─ storyline_routes.py (27)
+├─ wechat_routes.py (10)
+├─ emotion_routes.py (10)
+├─ memory_routes.py (4) + knowledge_routes.py (7)
+└─ persona_card_routes.py (3)
 ```
 
 **前端数据流：**
@@ -128,11 +129,9 @@ role:   返回用户列表 · 用户#ID · 创建角色 · 角色功能 · 人�
 
 | # | 风险 | 级别 | 状态 |
 |---|------|------|------|
-| 1 | **前端零测试** — vitest/playwright 未配置 | P2 | 📋 待办 |
-| 2 | **Bus Factor = 1**（仅默默） | P2 | ⚠️ 有缓解文档 |
-| 3 | **服务器进程在 shell 超时后被终止** — PowerShell NonInteractive 模式不保持 `Start-Process` | P3 | 📋 需用 `start_all.cmd` 或独立终端 |
-| 4 | **PostgreSQL 15 服务未启动** — localhost:5432 连接拒绝，auth 使用 SQLite 回退 | P3 | 📋 需手动 `net start postgresql-15` |
-| 5 | **shisi 域旧 API 路径** — 前端 system.ts 仍有 `shisi/*` 旧引用 | P2 | 📋 待清 |
+| 1 | **Bus Factor = 1**（仅默默） | P2 | ⚠️ 有缓解文档 |
+| 2 | **服务器进程在 shell 超时后被终止** — PowerShell NonInteractive 模式不保持 `Start-Process` | P3 | 📋 需用 `start_all.cmd` 或独立终端 |
+| 3 | **PostgreSQL 15 服务未启动** — localhost:5432 连接拒绝，auth 使用 SQLite 回退 | P3 | 📋 需手动 `net start postgresql-15` |
 
 **已消除的风险（上期审计后）：**
 - ~~前端 Mock 数据（全页面已接 API）~~ ✅
@@ -155,6 +154,11 @@ role:   返回用户列表 · 用户#ID · 创建角色 · 角色功能 · 人�
 - ~~拆分无回归保障~~ ✅ `verify_refactor.py` 6/6 + `tests/test_api_routes.py` 14/14（2.15s） + FF-016/017 落库
 - ~~_tools_routes.py 缺 Depends import~~ ✅ 修复 + 8 子路由 grep 全 OK
 
+**本期消除（Phase 14）：**
+- ~~前端零测试~~ ✅ Vitest 4/4 + Playwright 3/3 全部实跑通过 + FF-022/023 落库
+- ~~P0 投产阻塞：内测注册无门~~ ✅ 邀请码系统完整（后端 4 端点 + 前端 admin UI + 15 测试 + FF-021）
+- ~~21 orphan 页面（陈旧记忆）~~ ✅ 实测 0 orphan（15/15 全部已挂路由）
+
 ## L6 — 演化历史
 
 | 阶段 | 变更 | 日期 |
@@ -169,6 +173,7 @@ role:   返回用户列表 · 用户#ID · 创建角色 · 角色功能 · 人�
 | **Phase 11** | **三体导航全面审计 — 发现 LoginPage 孤立+ADR-0014脱节** | **2026-06-01** |
 | **Phase 12** | **Auth 全流程验证 + API 模块全面健康检查** | **2026-06-01** |
 | **Phase 13** | **main_routes.py 拆分重构**（1313→95 行 / 71 端点归 8 子路由）+ verify_refactor 6/6 + test_api_routes 14/14 + FF-016/017 落库 | **2026-06-01** |
+| **Phase 14** | **P0 投产阻塞清零** — 邀请码内测系统（后端 4 端点 + 前端 admin UI + 15/15 测试）/ **Vitest+Playwright 框架**（4+3 实跑通过）/ 0 orphan 页面实测 / pytest 625 passed | **2026-06-02** |
 
 ## L7 — 归属
 
