@@ -1,4 +1,4 @@
-# 十四
+# 唯一的你
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12-blue">
@@ -14,8 +14,8 @@ AI 虚拟伴侣。微信扫码就能聊，控制台调角色和语音。
 ## 快速开始
 
 ```bash
-git clone https://github.com/fourteen-ai/ai-girlfriend.git
-cd ai-girlfriend
+git clone https://github.com/fourteen-ai/unique-you.git
+cd unique-you
 
 python -m venv .venv && .venv\Scripts\activate
 pip install -e ".[dev]"

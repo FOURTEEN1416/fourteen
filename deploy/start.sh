@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════
-# AI Girlfriend — Production Start Script
+# 唯一的你 — Production Start Script
 # ═══════════════════════════════════════════════════════════
 # Usage: sudo bash deploy/start.sh
-# Run from: /opt/ai-girlfriend
+# Run from: /opt/unique-you
 # ═══════════════════════════════════════════════════════════
 
 set -euo pipefail
 
-APP_DIR="/opt/ai-girlfriend"
+APP_DIR="/opt/unique-you"
 VENV="${APP_DIR}/.venv"
-NGINX_SERVE="/var/www/ai-girlfriend"
+NGINX_SERVE="/var/www/unique-you"
 ENV_FILE="${APP_DIR}/.env"
 
 log() {
@@ -40,7 +40,7 @@ set -a
 source "${ENV_FILE}"
 set +a
 
-log "=== Starting AI Girlfriend (Production) ==="
+log "=== Starting 唯一的你 (Production) ==="
 
 # ── Step 1: Verify database connection ──
 log "[1/5] Checking database connection..."
@@ -114,7 +114,7 @@ done
 
 if [ "${HEALTHY}" = true ]; then
     log "=========================================="
-    log "AI Girlfriend is running!"
+    log "唯一的你 is running!"
     log "  API:  http://127.0.0.1:8000"
     log "  Docs: http://127.0.0.1:8000/docs"
     log "  PID:  ${UVICORN_PID}"

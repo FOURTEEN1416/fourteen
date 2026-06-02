@@ -1,4 +1,6 @@
-# "十四" AI虚拟伴侣系统 — 审计追踪报告 2026-05-26
+# "唯一的你" AI虚拟伴侣系统 — 审计追踪报告 2026-05-26
+
+> ⚠️ **历史快照**（2026-06-01 标注）：本报告为时点审计，已过期。当前项目状态见 `.triad-navigation/MAP.md` / `HANDOFF.md` 和本目录最新报告（`E2E_REPORT.md`）。
 
 **审计范围**：全栈（Python 后端 + React 前端）
 **基线报告**：AUDIT_REPORT_20260524.docx（v3.0 fusion unified）

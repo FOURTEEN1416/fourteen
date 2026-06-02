@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════
-# AI Girlfriend — Deployment Script
+# 唯一的你 — Deployment Script
 # ═══════════════════════════════════════════════════════════
 # Usage: sudo bash deploy/deploy.sh
-# Run from: /opt/ai-girlfriend
+# Run from: /opt/unique-you
 # ═══════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -13,12 +13,12 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
 
-log "=== AI Girlfriend Deployment Started ==="
+log "=== 唯一的你 Deployment Started ==="
 
-APP_DIR="/opt/ai-girlfriend"
+APP_DIR="/opt/unique-you"
 FRONTEND_SRC="${APP_DIR}/frontend"
 FRONTEND_DIST="${FRONTEND_SRC}/dist"
-NGINX_SERVE="/var/www/ai-girlfriend"
+NGINX_SERVE="/var/www/unique-you"
 VENV="${APP_DIR}/.venv"
 
 # ── Step 1: Pull latest code ──
@@ -76,7 +76,7 @@ fi
 # ── Step 6: Restart services ──
 log "[6/6] Restarting services..."
 systemctl daemon-reload
-systemctl restart ai-girlfriend-backend
+systemctl restart unique-you-backend
 log "[6/6] Backend service restarted."
 
 # Reload Nginx (test config first)
@@ -87,6 +87,6 @@ else
     log "[6/6] WARNING: Nginx config test failed, skipping reload."
 fi
 
-log "=== AI Girlfriend Deployment Completed Successfully ==="
-log "Check status: systemctl status ai-girlfriend-backend"
-log "Check logs:   journalctl -u ai-girlfriend-backend -f"
+log "=== 唯一的你 Deployment Completed Successfully ==="
+log "Check status: systemctl status unique-you-backend"
+log "Check logs:   journalctl -u unique-you-backend -f"

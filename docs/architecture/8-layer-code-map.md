@@ -17,7 +17,7 @@
 ## L2：结构架构
 
 ```
-ai-girlfriend/                          ← 根（Python 后端 + React 管理台）
+unique-you/                          ← 根（Python 后端 + React 管理台）
 ├── api/                                ← FastAPI 路由层
 │   ├── routers/                        ← 子路由（领域拆分）
 │   ├── auth.py                         ← 认证

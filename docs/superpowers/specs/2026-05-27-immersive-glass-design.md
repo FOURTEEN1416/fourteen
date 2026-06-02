@@ -1,4 +1,4 @@
-# AI Girlfriend 沉浸式玻璃态视觉设计 v1.0
+# 唯一的你 沉浸式玻璃态视觉设计 v1.0
 
 > 状态: **设计定稿**  
 > 基于 `frontend-design-framework-v1.md` 架构框架 + 用户确认的全量沉浸方向  

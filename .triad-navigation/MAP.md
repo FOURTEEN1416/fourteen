@@ -1,4 +1,4 @@
-﻿# 三体导航地图 — AI Girlfriend 项目
+﻿# 三体导航地图 — 唯一的你 项目
 
 > 更新日期：2026-06-01（全面审计 + main_routes 拆分重构） | 审计人：歆歆 (QwenPaw 协调者)
 > 当前分支：main（arch/client-split-4A 已合并）| 项目规模：324 Python + 92 TS/TSX 文件

@@ -1,6 +1,6 @@
 ﻿# CONTROL — 闭环控制（Fitness Functions + 审计节奏）
 
-> 项目：AI Girlfriend
+> 项目：唯一的你
 > 更新日期：2026-06-01（全面审计） | 审计人：歆歆
 
 ---

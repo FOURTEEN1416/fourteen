@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════
-# AI Girlfriend — Ubuntu Server Initial Setup
+# 唯一的你 — Ubuntu Server Initial Setup
 # ═══════════════════════════════════════════════════════════
 # Usage: sudo bash deploy/setup.sh
 # Run on: Fresh Ubuntu 22.04+ server
@@ -28,12 +28,12 @@ fi
 # Configuration (edit these for your environment)
 # ═══════════════════════════════════════════════════════════════
 
-APP_DIR="/opt/ai-girlfriend"
+APP_DIR="/opt/unique-you"
 APP_USER="www-data"  # matches Nginx user; change if needed
-DB_NAME="ai_girlfriend"
-DB_USER="ai_girlfriend"
+DB_NAME="unique_you"
+DB_USER="unique_you"
 DB_PASS="$(openssl rand -base64 24)"  # auto-generated, save this
-DOMAIN="ai-girlfriend.example.com"     # CHANGE THIS
+DOMAIN="unique-you.example.com"     # CHANGE THIS
 
 # ═══════════════════════════════════════════════════════════════
 # Step 1: System Packages
@@ -88,7 +88,7 @@ mkdir -p "${APP_DIR}/data" "${APP_DIR}/cache" "${APP_DIR}/logs"
 # Clone repo if empty
 if [ -z "$(ls -A "${APP_DIR}" 2>/dev/null)" ]; then
     info "Cloning repository..."
-    git clone https://github.com/FOURTEEN1416/ai-girlfriend.git "${APP_DIR}"
+    git clone https://github.com/FOURTEEN1416/unique-you.git "${APP_DIR}"
 else
     info "App directory not empty, assuming repository already cloned."
 fi
@@ -163,20 +163,20 @@ info "Step 4/7 complete."
 info "=== Step 5/7: Configuring Nginx ==="
 
 # Create frontend serve directory
-mkdir -p /var/www/ai-girlfriend
+mkdir -p /var/www/unique-you
 
 # Copy nginx config if present
 if [ -f "${APP_DIR}/deploy/nginx.conf" ]; then
-    cp "${APP_DIR}/deploy/nginx.conf" /etc/nginx/sites-available/ai-girlfriend
+    cp "${APP_DIR}/deploy/nginx.conf" /etc/nginx/sites-available/unique-you
     # Replace example domain placeholder
-    sed -i "s/ai-girlfriend\.example\.com/${DOMAIN}/g" /etc/nginx/sites-available/ai-girlfriend
+    sed -i "s/unique-you\.example\.com/${DOMAIN}/g" /etc/nginx/sites-available/unique-you
 else
     warn "deploy/nginx.conf not found, skipping."
 fi
 
 # Enable site
-if [ ! -L /etc/nginx/sites-enabled/ai-girlfriend ]; then
-    ln -sf /etc/nginx/sites-available/ai-girlfriend /etc/nginx/sites-enabled/ai-girlfriend
+if [ ! -L /etc/nginx/sites-enabled/unique-you ]; then
+    ln -sf /etc/nginx/sites-available/unique-you /etc/nginx/sites-enabled/unique-you
     # Remove default if it conflicts
     rm -f /etc/nginx/sites-enabled/default
 fi
@@ -196,14 +196,14 @@ info "Step 5/7 complete."
 
 info "=== Step 6/7: Installing systemd service ==="
 
-if [ -f "${APP_DIR}/deploy/ai-girlfriend-backend.service" ]; then
-    cp "${APP_DIR}/deploy/ai-girlfriend-backend.service" /etc/systemd/system/ai-girlfriend-backend.service
+if [ -f "${APP_DIR}/deploy/unique-you-backend.service" ]; then
+    cp "${APP_DIR}/deploy/unique-you-backend.service" /etc/systemd/system/unique-you-backend.service
     systemctl daemon-reload
-    systemctl enable ai-girlfriend-backend
-    systemctl start ai-girlfriend-backend
+    systemctl enable unique-you-backend
+    systemctl start unique-you-backend
     info "systemd service installed and started."
 else
-    warn "deploy/ai-girlfriend-backend.service not found, skipping."
+    warn "deploy/unique-you-backend.service not found, skipping."
 fi
 info "Step 6/7 complete."
 

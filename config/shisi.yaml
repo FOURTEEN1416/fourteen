@@ -1,11 +1,11 @@
-# 十四 AI虚拟伴侣系统 - 核心配置文件
-# Shisi AI Virtual Companion System - Core Configuration
+# 唯一的你 AI虚拟伴侣系统 - 核心配置文件
+# Unique You AI Virtual Companion System - Core Configuration
 
 # 应用基础配置
 app:
-  name: "十四"
-  version: "2.0.0"
-  description: "AI虚拟伴侣系统"
+  name: "唯一的你"
+  version: "3.0.0"
+  description: "AI 虚拟伴侣系统"
   # 运行模式: development, production, testing
   mode: "development"
   # 时区设置

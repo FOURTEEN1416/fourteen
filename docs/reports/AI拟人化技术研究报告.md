@@ -367,4 +367,4 @@ class EmotionAnalyzer:
 
 ---
 
-*报告完成 - 祝你的 AI-Girlfriend 项目成功！*
+*报告完成 - 祝你的"唯一的你"项目成功！*

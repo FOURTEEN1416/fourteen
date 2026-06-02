@@ -1,4 +1,4 @@
-# AI Girlfriend — 生产部署指南
+# 唯一的你 — 生产部署指南
 
 > 预计阅读时间：10 分钟 · 部署时间：15-30 分钟
 
@@ -27,10 +27,10 @@ sudo apt-get update && sudo apt-get upgrade -y
 sudo timedatectl set-timezone Asia/Shanghai
 
 # 克隆项目
-sudo mkdir -p /opt/ai-girlfriend
-sudo chown $USER:$USER /opt/ai-girlfriend
-git clone https://github.com/FOURTEEN1416/ai-girlfriend.git /opt/ai-girlfriend
-cd /opt/ai-girlfriend
+sudo mkdir -p /opt/unique-you
+sudo chown $USER:$USER /opt/unique-you
+git clone https://github.com/FOURTEEN1416/unique-you.git /opt/unique-you
+cd /opt/unique-you
 ```
 
 ### 第二步：运行初始化脚本
@@ -53,8 +53,8 @@ sudo bash deploy/setup.sh
 ### 第三步：配置环境变量
 
 ```bash
-cp deploy/.env.production /opt/ai-girlfriend/.env
-nano /opt/ai-girlfriend/.env
+cp deploy/.env.production /opt/unique-you/.env
+nano /opt/unique-you/.env
 ```
 
 **必须修改的项：**
@@ -72,7 +72,7 @@ nano /opt/ai-girlfriend/.env
 
 ```bash
 # 先确保 DNS 已指向服务器 IP
-sudo certbot --nginx -d ai-girlfriend.yourdomain.com
+sudo certbot --nginx -d unique-you.yourdomain.com
 ```
 
 certbot 会自动修改 Nginx 配置并启用 HTTPS。
@@ -81,7 +81,7 @@ certbot 会自动修改 Nginx 配置并启用 HTTPS。
 ### 第五步：部署应用
 
 ```bash
-cd /opt/ai-girlfriend
+cd /opt/unique-you
 sudo bash deploy/deploy.sh
 ```
 
@@ -100,16 +100,16 @@ sudo bash deploy/deploy.sh
 
 ```bash
 # 检查后端服务状态
-systemctl status ai-girlfriend-backend
+systemctl status unique-you-backend
 
 # 检查 API 是否响应
 curl http://127.0.0.1:8000/health
 
 # 通过域名访问前端
-curl -I https://ai-girlfriend.yourdomain.com
+curl -I https://unique-you.yourdomain.com
 
 # 测试 API 鉴权
-curl -H "X-API-Key: your-api-key" https://ai-girlfriend.yourdomain.com/api/v1/status
+curl -H "X-API-Key: your-api-key" https://unique-you.yourdomain.com/api/v1/status
 ```
 
 ---
@@ -120,33 +120,33 @@ curl -H "X-API-Key: your-api-key" https://ai-girlfriend.yourdomain.com/api/v1/st
 
 ```bash
 # 后端日志（实时）
-journalctl -u ai-girlfriend-backend -f
+journalctl -u unique-you-backend -f
 
 # Nginx 访问日志
-tail -f /var/log/nginx/ai-girlfriend-access.log
+tail -f /var/log/nginx/unique-you-access.log
 
 # Nginx 错误日志
-tail -f /var/log/nginx/ai-girlfriend-error.log
+tail -f /var/log/nginx/unique-you-error.log
 
 # 应用自定义日志
-tail -f /opt/ai-girlfriend/logs/uvicorn.log
+tail -f /opt/unique-you/logs/uvicorn.log
 ```
 
 ### 常用操作
 
 ```bash
 # 重启后端
-sudo systemctl restart ai-girlfriend-backend
+sudo systemctl restart unique-you-backend
 
 # 重启 Nginx
 sudo systemctl reload nginx
 
 # 查看后端资源占用
-systemctl status ai-girlfriend-backend
+systemctl status unique-you-backend
 top -p $(pgrep -f uvicorn)
 
 # 数据库备份
-pg_dump ai_girlfriend > backup_$(date +%Y%m%d).sql
+pg_dump unique_you > backup_$(date +%Y%m%d).sql
 ```
 
 ### 健康检查端点
@@ -162,7 +162,7 @@ pg_dump ai_girlfriend > backup_$(date +%Y%m%d).sql
 ## 更新应用
 
 ```bash
-cd /opt/ai-girlfriend
+cd /opt/unique-you
 sudo bash deploy/deploy.sh
 ```
 
@@ -171,10 +171,10 @@ sudo bash deploy/deploy.sh
 如果你要回滚：
 
 ```bash
-cd /opt/ai-girlfriend
+cd /opt/unique-you
 git log --oneline -10        # 找到要回滚的 commit
 git reset --hard <commit-hash>
-sudo systemctl restart ai-girlfriend-backend
+sudo systemctl restart unique-you-backend
 ```
 
 ---
@@ -214,7 +214,7 @@ sudo systemctl restart ai-girlfriend-backend
 
 ```bash
 # 看 journalctl 的具体错误
-journalctl -u ai-girlfriend-backend --no-pager -n 50
+journalctl -u unique-you-backend --no-pager -n 50
 
 # 常见原因：
 # 1. .env 文件缺失或格式错误
@@ -223,7 +223,7 @@ journalctl -u ai-girlfriend-backend --no-pager -n 50
 # 4. Python 依赖未安装
 
 # 手动启动看错误
-cd /opt/ai-girlfriend && sudo -u www-data bash -c '
+cd /opt/unique-you && sudo -u www-data bash -c '
 source .venv/bin/activate
 PYTHONPATH=. uvicorn api.run_api:app --host 127.0.0.1 --port 8000
 '
@@ -236,7 +236,7 @@ PYTHONPATH=. uvicorn api.run_api:app --host 127.0.0.1 --port 8000
 systemctl status postgresql
 
 # 测试连接
-sudo -u ai_girlfriend psql -h localhost -d ai_girlfriend
+sudo -u unique_you psql -h localhost -d unique_you
 
 # 检查 pg_hba.conf
 sudo cat /etc/postgresql/15/main/pg_hba.conf | grep local
@@ -246,13 +246,13 @@ sudo cat /etc/postgresql/15/main/pg_hba.conf | grep local
 
 ```bash
 # 确认前端文件已部署
-ls -la /var/www/ai-girlfriend/
+ls -la /var/www/unique-you/
 
 # 确认 Nginx 配置正确
 nginx -t
 
 # 检查 Nginx error log
-tail -f /var/log/nginx/ai-girlfriend-error.log
+tail -f /var/log/nginx/unique-you-error.log
 
 # 刷新浏览器缓存（硬刷新：Ctrl+Shift+R）
 ```
@@ -274,10 +274,10 @@ sudo certbot --nginx -d yourdomain.com --force-renewal
 
 ```bash
 # 导出
-pg_dump -U ai_girlfriend -h localhost ai_girlfriend > dump.sql
+pg_dump -U unique_you -h localhost unique_you > dump.sql
 
 # 导入到新服务器
-psql -U ai_girlfriend -h localhost ai_girlfriend < dump.sql
+psql -U unique_you -h localhost unique_you < dump.sql
 ```
 
 ---
@@ -286,10 +286,10 @@ psql -U ai_girlfriend -h localhost ai_girlfriend < dump.sql
 
 | 日志 | 位置 |
 |------|------|
-| 后端 (journald) | `journalctl -u ai-girlfriend-backend` |
-| 后端 (uvicorn) | `/opt/ai-girlfriend/logs/uvicorn.log` |
-| Nginx 访问日志 | `/var/log/nginx/ai-girlfriend-access.log` |
-| Nginx 错误日志 | `/var/log/nginx/ai-girlfriend-error.log` |
+| 后端 (journald) | `journalctl -u unique-you-backend` |
+| 后端 (uvicorn) | `/opt/unique-you/logs/uvicorn.log` |
+| Nginx 访问日志 | `/var/log/nginx/unique-you-access.log` |
+| Nginx 错误日志 | `/var/log/nginx/unique-you-error.log` |
 | PostgreSQL 日志 | `/var/log/postgresql/postgresql-15-main.log` |
 
 ---
@@ -299,7 +299,7 @@ psql -U ai_girlfriend -h localhost ai_girlfriend < dump.sql
 ```
 deploy/
 ├── nginx.conf                        # Nginx 反向代理配置
-├── ai-girlfriend-backend.service     # systemd 服务单元
+├── unique-you-backend.service     # systemd 服务单元
 ├── deploy.sh                         # 部署脚本（拉取→构建→重启）
 ├── setup.sh                          # 初始化脚本（一次性的）
 ├── start.sh                          # 生产启动脚本（手动模式）

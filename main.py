@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-"十四" — AI 虚拟伴侣融合统一版主入口
+"唯一的你" — AI 虚拟伴侣融合统一版主入口
 
 融合 V1 + V2 + Optimized 三版优势：
 - V1: 微信直连通道 + 自动重连
@@ -209,7 +209,7 @@ logger = logging.getLogger("main")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="十四 - AI 虚拟伴侣 (融合统一版)",
+        description="唯一的你 - AI 虚拟伴侣 (融合统一版)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -250,7 +250,7 @@ def parse_args() -> argparse.Namespace:
 def print_banner() -> None:
     banner = """
     ==================================================
-             十四 -- AI 虚拟伴侣
+             唯一的你 -- AI 虚拟伴侣
     ==================================================
         情感 . 记忆 . 主动交互 . 风格克隆
                融合统一版 v3.0

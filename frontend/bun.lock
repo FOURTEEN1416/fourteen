@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "ai-girlfriend-frontend",
+      "name": "unique-you-frontend",
       "dependencies": {
         "@tanstack/react-query": "^5.100.13",
         "axios": "^1.7.0",

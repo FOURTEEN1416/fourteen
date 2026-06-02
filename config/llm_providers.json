@@ -61,7 +61,7 @@
       "3. 复制 API Key，填入上方配置",
       "4. 保存后系统自动使用 DeepSeek（优先于免费模型）"
     ],
-    "why_deepseek": "DeepSeek-V3 在中文理解、角色扮演、长上下文方面表现优异，适合 AI Girlfriend 场景"
+    "why_deepseek": "DeepSeek-V3 在中文理解、角色扮演、长上下文方面表现优异，适合 AI 虚拟伴侣 场景"
   },
   "notes": {
     "xunfei": "讯飞星火 Spark Lite - 永久免费，Token无限，并发限制5，有效期至2036年",

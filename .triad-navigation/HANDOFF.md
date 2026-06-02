@@ -1,8 +1,44 @@
 ﻿# HANDOFF — 工作交接
 
-> 源会话：2026-06-01 全面审计 + 修复执行
+> 源会话：2026-06-01 全面审计 + 修复执行 + 2026-06-01 全面更名（"AI Girlfriend" → "唯一的你"）
 > 执行流水线：startup-calibrator → triad-navigation → domain-explorer → evolution-auditor → loop-executor → constitution-guardian
 > 协调者：歆歆
+
+---
+
+## 2026-06-01 全面更名（已落地 ✅）
+
+| 类别 | 旧名 | 新名 | 状态 |
+|------|------|------|------|
+| 项目品牌 | AI Girlfriend / ai-girlfriend / ai_girlfriend | 唯一的你 / unique-you / unique_you | ✅ |
+| 定位词 | AI 虚拟伴侣 | 保留（产品类型描述） | ✅ |
+| 角色名 | 十四 | 保留（真人，作为默认角色） | ✅ |
+| 物理目录 | C:\Users\FOUR\Desktop\ai-girlfriend | 不改（决策保留） | ⏸️ |
+| GitHub 仓库 | FOURTEEN1416/ai-girlfriend | 等用户在网页端改名（代码 URL 已全部更新） | ⏸️ |
+| shisi 旧域 | shisi | 不动（单独任务） | ⏸️ |
+
+**改动覆盖：**
+- 配置层（pyproject.toml, package.json, lock 文件, requirements.txt）
+- 启动脚本（start_all/frontend/backend.cmd）
+- 部署层（deploy/*.sh, nginx.conf, systemd service, README.deploy.md）— 6 文件
+- README.md（标题 + 克隆命令）
+- 前端（index.html, LoginPage.tsx, WeChatPage.tsx localStorage 兼容层）
+- 后端品牌文案（main.py, app_factory.py, utils/bootstrap.py）
+- 配置文件（config/shisi.yaml, config/llm_providers.json, config/prompts/system.yaml）
+- 文档（audit_reports/* × 3, docs/superpowers/specs/* × 2, docs/MiMo_TTS, docs/architecture/8-layer-code-map, docs/AI拟人化技术研究报告, proactive/PROACTIVE_IMPROVEMENT_PLAN）
+- 三体导航（.triad-navigation.md, MAP.md, COMPASS.md, CONTROL.md, HANDOFF.md）
+
+**验证结果：**
+- ✅ TypeScript tsc --noEmit 零错误
+- ✅ pytest 538 passed, 1 skipped（40.88s）
+- ✅ vite build 1.16s 成功
+- ✅ 后端工厂加载正常，title="唯一的你 AI虚拟伴侣系统API"
+- ✅ 174 路由全部注册
+
+**保留的旧名引用（6 处，预期保留）：**
+- verify_split.py / verify_refactor.py：物理目录路径常量
+- shisi/__init__.py：shisi 旧域模块文档
+- WeChatPage.tsx × 3：localStorage 兼容层（用于老用户数据自动迁移）
 
 ---
 
