@@ -20,6 +20,7 @@ import { useAuthStore } from './store/authStore'
 import * as authApi from './api/auth'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const WeChatPage = lazy(() => import('./pages/WeChatPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
@@ -149,14 +150,14 @@ export default function App() {
 
           {/* ═══ 管理后台（仅 admin 角色） ═══
               日志审计/系统配置/安全面板已从 /settings/* 统一入口访问,不在此处重复 */}
-          <Route element={<RoleGuard roles={['admin']} />}>
+          <Route element={<RoleGuard roles={['admin'] as const} />}>
             <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
             <Route path="/admin/users" element={<AnimatedSuspense><AdminUsersPage /></AnimatedSuspense>} />
           </Route>
         </Route>
 
-        {/* 兜底 */}
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        {/* 兜底：未匹配的路径 */}
+        <Route path="*" element={<Suspense fallback={<PageLoadingSkeleton />}><NotFoundPage /></Suspense>} />
       </Routes>
     </AuthInit>
     </ErrorBoundary>

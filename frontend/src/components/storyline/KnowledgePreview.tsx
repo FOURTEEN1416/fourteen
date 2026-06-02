@@ -113,7 +113,7 @@ export default function KnowledgePreview({ characterId }: KnowledgePreviewProps)
               {searchResults.length > 0 && (
                 <div className="space-y-1.5">
                   {searchResults.map((r, i) => (
-                    <div key={i} className="bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-2">
+                    <div key={`kresult-${i}-${r.content.slice(0, 24)}`} className="bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-2">
                       <div className="flex items-center gap-1.5 mb-0.5">
                         <Badge variant="default">{sourceLabel[r.source] || r.source}</Badge>
                         <span className="text-[10px] text-gray-400">{(r.score * 100).toFixed(0)}%</span>

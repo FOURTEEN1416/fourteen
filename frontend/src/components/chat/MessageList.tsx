@@ -103,7 +103,7 @@ export default function MessageList({ onRetryStream }: MessageListProps) {
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
       {displayMessages.map((msg, i) => (
-        <MessageBubble key={i} {...msg} onRetryStream={onRetryStream} />
+        <MessageBubble key={`msg-${msg.timestamp ?? i}-${i}-${msg.content.slice(0, 16)}`} {...msg} onRetryStream={onRetryStream} />
       ))}
       {isStreaming && !streamingMessage && <TypingIndicator />}
       <div ref={bottomRef} />

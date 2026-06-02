@@ -174,7 +174,10 @@ export default function StorylineEditor({ characterId }: StorylineEditorProps) {
       setStages(DEFAULT_STAGES)
       setEnding(DEFAULT_ENDING)
       setDetectResult(null)
-    } catch { /* ignore */ }
+    } catch (err: unknown) {
+      // 错误已由 useDeleteStorylineConfig 的 onError 统一处理；这里只兜底
+      console.error('删除剧情线失败:', err)
+    }
   }
 
   // ── 阶段操作 ──
@@ -321,7 +324,7 @@ export default function StorylineEditor({ characterId }: StorylineEditorProps) {
                 </label>
                 <div className="space-y-2">
                   {stages.map((stage, idx) => (
-                    <div key={idx} className="border border-gray-200 rounded-lg p-2.5 space-y-2">
+                    <div key={stage.name ?? `stage-${idx}`} className="border border-gray-200 rounded-lg p-2.5 space-y-2">
                       <div className="flex items-center justify-between">
                         {editingStageIdx === idx ? (
                           <input
@@ -381,7 +384,7 @@ export default function StorylineEditor({ characterId }: StorylineEditorProps) {
                             <label className="block text-[10px] text-gray-400">风格规则</label>
                             <div className="flex flex-wrap gap-1">
                               {stage.style_rules.map((sr, si) => (
-                                <Badge key={si} variant="default">
+                                <Badge key={sr.style ?? `sr-${si}`} variant="default">
                                   {sr.style}
                                   <button type="button" className="ml-1 text-red-400"
                                     onClick={() => updateStage(idx, { style_rules: stage.style_rules.filter((_, i) => i !== si) })}>
@@ -395,7 +398,7 @@ export default function StorylineEditor({ characterId }: StorylineEditorProps) {
                             <label className="block text-[10px] text-gray-400">行为规则</label>
                             <div className="flex flex-wrap gap-1">
                               {stage.behavior_rules.map((br, bi) => (
-                                <Badge key={bi} variant={br.enforce ? 'info' : 'default'}>
+                                <Badge key={br.rule ?? `br-${bi}`} variant={br.enforce ? 'info' : 'default'}>
                                   {br.rule}
                                   <button type="button" className="ml-1 text-red-400"
                                     onClick={() => updateStage(idx, { behavior_rules: stage.behavior_rules.filter((_, i) => i !== bi) })}>
@@ -413,7 +416,7 @@ export default function StorylineEditor({ characterId }: StorylineEditorProps) {
                             {fmtMin(stage.timing.start_minutes)} ~ {fmtMin(stage.timing.end_minutes)}
                           </span>
                           {stage.style_rules.map((sr, si) => (
-                            <Badge key={si} variant="default">{sr.style}</Badge>
+                            <Badge key={sr.style ?? `sr-${si}`} variant="default">{sr.style}</Badge>
                           ))}
                         </div>
                       )}
@@ -464,7 +467,7 @@ export default function StorylineEditor({ characterId }: StorylineEditorProps) {
                     <label className="block text-[10px] text-gray-400">回忆物品</label>
                     <div className="flex flex-wrap gap-1 mb-1">
                       {ending.memorial_items.map((item, i) => (
-                        <Badge key={i} variant="default">
+                        <Badge key={item ?? `mem-${i}`} variant="default">
                           {item}
                           <button type="button" className="ml-1 text-red-400" onClick={() => removeMemorialItem(i)}>×</button>
                         </Badge>

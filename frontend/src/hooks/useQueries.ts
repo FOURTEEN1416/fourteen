@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { useErrorStore } from '../store/errorStore'
 import type { EmotionState, DashboardStats, HealthStatus, WeChatStatus, TrainingProgress, ProactiveEngineState, MemoryFact, PsychProfile, PsychSnapshot, SafetyStats, SafetyLogEntry, RAGStats, VoiceStatus, PluginsList, ToolHistoryEntry, ProactiveHistoryEntry, MentalHealthSummary, UnifiedCharacter } from '../types/api'
 
 export const queryKeys = {
@@ -396,6 +397,10 @@ export function useDeleteStorylineConfig() {
       qc.invalidateQueries({ queryKey: ['storyline', characterId, 'config'] })
       qc.invalidateQueries({ queryKey: ['storyline', characterId, 'progress'] })
       qc.invalidateQueries({ queryKey: queryKeys.characters.all })
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : '剧情线删除失败'
+      useErrorStore.getState().addToast({ type: 'error', message })
     },
   })
 }

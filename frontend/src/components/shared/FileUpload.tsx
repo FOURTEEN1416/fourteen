@@ -58,7 +58,7 @@ export default function FileUpload({ accept, maxSize = 30, multiple, onUpload }:
       {files.length > 0 && (
         <div className="mt-2 space-y-1">
           {files.map((f, i) => (
-            <div key={i} className="flex items-center gap-2 glass-card rounded-lg px-3 py-1.5 text-xs">
+            <div key={`${f.name}-${f.size}-${f.lastModified}-${i}`} className="flex items-center gap-2 glass-card rounded-lg px-3 py-1.5 text-xs">
               <File className="w-3.5 h-3.5 text-primary-400 shrink-0" />
               <span className="flex-1 text-gray-600 truncate">{f.name}</span>
               <span className="text-gray-300 shrink-0">{(f.size / 1024).toFixed(0)}KB</span>

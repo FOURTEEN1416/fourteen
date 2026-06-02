@@ -1,6 +1,7 @@
 ﻿import { useState, useEffect, useCallback } from 'react'
 import { Shield, ShieldAlert } from 'lucide-react'
 import { safetyStats, safetyLog, safetyConfig } from '../api/system'
+import { useErrorStore } from '../store/errorStore'
 
 // ── Safety Types ──
 
@@ -64,7 +65,10 @@ function SafetyPanelSection() {
     try {
       await safetyConfig(!enabled)
       setEnabled(!enabled)
-    } catch { /* ignore */ } finally {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '安全开关切换失败，请重试'
+      useErrorStore.getState().addToast({ type: 'error', message })
+    } finally {
       setToggling(false)
     }
   }
@@ -165,7 +169,7 @@ function SafetyPanelSection() {
             <div className="space-y-1">
               {displayLogs.map((log, i) => (
                 <div
-                  key={i}
+                  key={`seclog-${log.timestamp}-${i}-${log.content_snippet.slice(0, 16)}`}
                   className="flex items-center gap-2 rounded-lg bg-white/40 px-3 py-1.5 text-[11px]"
                 >
                   <span

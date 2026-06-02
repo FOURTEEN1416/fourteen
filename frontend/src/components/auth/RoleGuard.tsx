@@ -9,12 +9,13 @@
  */
 import { Navigate, Outlet } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import type { UserRole } from '../../api/admin'
 import type { ReactNode } from 'react'
 
 interface RoleGuardProps {
   children?: ReactNode
   /** 允许访问的角色列表，如 ['admin'] 或 ['admin', 'editor'] */
-  roles: string[]
+  roles: readonly UserRole[]
   /** 角色不符时的跳转路径（默认 '/'） */
   fallback?: string
 }

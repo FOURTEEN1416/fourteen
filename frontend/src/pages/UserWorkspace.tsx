@@ -102,9 +102,9 @@ function CharacterCard({
       {/* Core anchors */}
       {character.core_anchors && character.core_anchors.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
-          {character.core_anchors.slice(0, 3).map((anchor, i) => (
+          {character.core_anchors.slice(0, 3).map((anchor) => (
             <span
-              key={i}
+              key={anchor}
               className="rounded bg-primary-50/60 px-1.5 py-0.5 text-[10px] text-primary-600"
             >
               {anchor}

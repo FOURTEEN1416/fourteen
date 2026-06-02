@@ -12,6 +12,7 @@ import { persist } from 'zustand/middleware'
 
 // 注意：不 import API 类型（遵循 FF-0007），自行维护镜像类型
 // 必须与 api/auth.ts 的 UserInfo 保持一致
+import type { UserRole } from '../api/admin'
 
 export interface UserInfo {
   id: number
@@ -19,7 +20,7 @@ export interface UserInfo {
   username: string
   display_name: string
   avatar_url: string
-  role: 'admin' | 'editor' | 'viewer'
+  role: UserRole
   is_active: boolean
   is_verified: boolean
   created_at: string
