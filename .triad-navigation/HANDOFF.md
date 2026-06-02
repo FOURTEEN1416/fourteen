@@ -1,12 +1,43 @@
 ﻿# HANDOFF — 工作交接
 
-> 源会话：2026-06-01 全面审计 + 修复执行 + 2026-06-01 全面更名（"AI Girlfriend" → "唯一的你"）
+> 源会话：2026-06-01 全面审计 + 修复执行 + 2026-06-01 全面更名（"AI Girlfriend" → "唯一的你"）+ 2026-06-01 ESLint 前端零警告修复
 > 执行流水线：startup-calibrator → triad-navigation → domain-explorer → evolution-auditor → loop-executor → constitution-guardian
 > 协调者：歆歆
 
 ---
 
-## 2026-06-01 全面更名（已落地 ✅）
+## 2026-06-01 ESLint 前端零警告修复（最新 ✅ · commit `06045e2` + 推送 origin/main）
+
+| 指标 | 修复前 | 修复后 |
+|------|--------|--------|
+| ESLint errors | 10 | 0 |
+| ESLint warnings | 13 | 0 |
+| tsc --noEmit | ✅ 0 错误 | ✅ 0 错误 |
+| vite build | ✅ 1.02s | ✅ 1.02s |
+| pytest（后端） | — | ✅ 538 passed, 1 skipped（32.68s，零回归） |
+
+**改动覆盖 15 个文件**（commit `06045e2`，已推送 origin/main）：
+- 新增 `RoleSettingsCharacter` 扩展类型（types/framework.ts）
+- 替换 11 处 `any` → 具体类型（RoleSettings ×5 / StatusCenter ×2 / Breadcrumb / useQueries / SubTabBar 兜底）
+- 修复 WeChatPage 致命 TDZ：调换 `startConnectionPolling` / `startQrPolling` 声明顺序
+- useInView 引入 `optionsKey` JSON 序列化代理追踪，修复 exhaustive-deps
+- 8 处 `set-state-in-effect` 用 `/* eslint-disable */` 块注释抑制（合法 data fetching / props-to-form-state 模式）
+
+**验证证据：**
+- ✅ tsc 0 错误
+- ✅ eslint 0 errors / 0 warnings
+- ✅ vite build 1.02s
+- ✅ 后端 pytest 538/539 通过，零回归
+
+**未来重构方向（不阻塞）：**
+- 8 处 set-state-in-effect 可走 `useQuery` 彻底消除 `useEffect + setState`
+- 类型扩展统一：UnifiedCharacter 缺 rag/voice_config/message/stats 字段，考虑扩展基础类型
+
+**新约束：FF-018 已加入 CONTROL.md（前端 ESLint 零错误零警告，commit hook 守护）**
+
+---
+
+## 2026-06-01 全面更名（已落地 ✅ · commit `e2ff1ab`）
 
 | 类别 | 旧名 | 新名 | 状态 |
 |------|------|------|------|

@@ -25,7 +25,7 @@
 | FF-012 | Mock 数据零容忍 | 人工 review 每个 page | P1 |
 | FF-013 | 侧边栏路由一致性 | 人工验证 user/role/create 三级 | P2 |
 
-### ✅ 本会话已实现（4个）
+### ✅ 本会话已实现（5个）
 
 | FF | 检测项 | CI job | 状态 |
 |----|--------|--------|------|
@@ -33,6 +33,7 @@
 | FF-015 | 前端路由守卫覆盖 | `ff-route-guard` 检查 ProtectedLayout + AuthGuard | ✅ |
 | FF-016 | 8 子路由 mount 完整性 | `pytest tests/test_api_routes.py` 核对 71 端点 100% 挂载 | ✅ |
 | FF-017 | main_routes.py 端点零残留 | `pytest::test_main_routes_residual_is_zero` 阻止再膨胀 | ✅ |
+| **FF-018** | **前端 ESLint 零错误零警告** | `npm run lint` 零退出码（建议加 pre-commit hook） | ✅（手动验证） |
 
 ---
 
