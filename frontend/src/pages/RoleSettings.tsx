@@ -7,7 +7,7 @@ import Toggle from '../components/shared/Toggle'
 import FileUpload from '../components/shared/FileUpload'
 import ConfirmDialog from '../components/shared/ConfirmDialog'
 import StorylineEditor from '../components/storyline/StorylineEditor'
-import type { RoleSettingsTab } from '../types/framework'
+import type { RoleSettingsTab, RoleSettingsCharacter } from '../types/framework'
 import {
   User, Mic, MessageSquare, Database, Smile, Clock,
   Save, Trash2, Copy, Play, Check,
@@ -62,22 +62,27 @@ function Section({ title, children, className = '' }: { title: string; children:
 
 // ═══ Tab: Basic ═══
 
-function BasicTab({ character }: { character: any }) {
+function BasicTab({ character }: { character: RoleSettingsCharacter }) {
   const [name, setName] = useState(character.name)
-  const [description, setDescription] = useState(character.description)
-  const [personality, setPersonality] = useState(character.personality || {})
-  const [anchors, setAnchors] = useState(character.core_anchors || [])
-  const [speaking, setSpeaking] = useState(character.speaking_style || {})
-  const [catchphrases, setCatchphrases] = useState(character.catchphrases || [])
+  const [description, setDescription] = useState(character.description ?? '')
+  const [personality, setPersonality] = useState<Record<string, number>>(character.personality || {})
+  const [anchors, setAnchors] = useState<string[]>(character.core_anchors || [])
+  const [speaking, setSpeaking] = useState<Record<string, number>>(character.speaking_style || {})
+  const [catchphrases, setCatchphrases] = useState<string[]>(character.catchphrases || [])
 
+  // 当 character 变化时（角色切换），同步重置本地表单 state
+  // 触发条件：character.id 变化而非整个对象引用变化
+  const characterId = character.id
+  /* eslint-disable react-hooks/set-state-in-effect -- props-to-form-state sync（标准模式）*/
   useEffect(() => {
     setName(character.name)
-    setDescription(character.description)
+    setDescription(character.description ?? '')
     setPersonality(character.personality || {})
     setAnchors(character.core_anchors || [])
     setSpeaking(character.speaking_style || {})
     setCatchphrases(character.catchphrases || [])
-  }, [character])
+  }, [characterId]) // eslint-disable-line react-hooks/exhaustive-deps
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const personaJson = { name, description, personality, core_anchors: anchors, speaking_style: { ...speaking, catchphrases } }
 
@@ -183,9 +188,11 @@ function BasicTab({ character }: { character: any }) {
 
 // ═══ Tab: Voice ═══
 
-function VoiceTab({ character }: { character: any }) {
+function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
   const [engine, setEngine] = useState(character.voice_config?.engine || 'mimo-tts')
-  const [mimoModel, setMimoModel] = useState(character.voice_config?.mimo_model || 'mimo-v2.5-tts')
+  // voice_config 是 VoiceConfig | 自定义对象 联合类型；mimo_model 是自定义字段，需要运行时安全访问
+  const mimoModelInitial = (character.voice_config as { mimo_model?: string } | null | undefined)?.mimo_model
+  const [mimoModel, setMimoModel] = useState(mimoModelInitial || 'mimo-v2.5-tts')
   const [edgeSpeaker, setEdgeSpeaker] = useState('zh-CN-XiaoxiaoNeural')
   const [edgeRate, setEdgeRate] = useState(1.0)
   const [edgePitch, setEdgePitch] = useState(0.6)
@@ -338,7 +345,7 @@ function VoiceTab({ character }: { character: any }) {
 
 // ═══ Tab: Message ═══
 
-function MessageTab({ character }: { character: any }) {
+function MessageTab({ character }: { character: RoleSettingsCharacter }) {
   const [proactive, setProactive] = useState(character.message?.proactive ?? true)
   const [dailyLimit, setDailyLimit] = useState(character.message?.dailyLimit ?? 20)
   const [minInterval, setMinInterval] = useState(character.message?.minInterval ?? 15)
@@ -405,7 +412,7 @@ function MessageTab({ character }: { character: any }) {
 
 // ═══ Tab: Data ═══
 
-function DataTab({ character }: { character: any }) {
+function DataTab({ character }: { character: RoleSettingsCharacter }) {
   const [showDelete, setShowDelete] = useState(false)
 
   return (
@@ -525,7 +532,7 @@ function StickersTab() {
 
 // ═══ Tab: Timeline ═══
 
-function TimelineTab({ character }: { character: any }) {
+function TimelineTab({ character }: { character: RoleSettingsCharacter }) {
   return (
     <div className="space-y-4">
       <StorylineEditor characterId={character.id} />
@@ -538,7 +545,7 @@ function TimelineTab({ character }: { character: any }) {
 
 // ═══ Main Component ═══
 
-function ActiveTab({ tab, character }: { tab: RoleSettingsTab; character: any }) {
+function ActiveTab({ tab, character }: { tab: RoleSettingsTab; character: RoleSettingsCharacter }) {
   switch (tab) {
     case 'basic': return <BasicTab character={character} />
     case 'voice': return <VoiceTab character={character} />
@@ -619,7 +626,7 @@ export default function RoleSettings() {
         </div>
 
         {/* ── Tab Content ── */}
-        <ActiveTab tab={activeTab} character={character} />
+        <ActiveTab tab={activeTab} character={character as unknown as RoleSettingsCharacter} />
       </div>
     </div>
   )

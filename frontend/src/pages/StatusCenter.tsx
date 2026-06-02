@@ -4,6 +4,7 @@ import SubTabBar from '../components/shared/SubTabBar';
 import Badge from '../components/shared/Badge';
 import { useUnifiedCharacters } from '../hooks/useQueries';
 import { dashboardStats } from '../api/system';
+import type { UnifiedCharacter } from '../types/api';
 
 interface DashboardData {
   today_chats: number;
@@ -28,8 +29,8 @@ export default function StatusCenter() {
     refetchInterval: 30_000,
   });
 
-  const char = characters.find((c: any) => c.id === activeKey) || (characters[0] as any);
-  const tabs = characters.map((c: any) => ({ key: c.id, label: c.name }));
+  const char = characters.find((c: UnifiedCharacter) => c.id === activeKey) || (characters[0] as UnifiedCharacter | undefined);
+  const tabs = characters.map((c: UnifiedCharacter) => ({ key: c.id, label: c.name }));
 
   if (characters.length === 0) {
     return (
@@ -47,7 +48,7 @@ export default function StatusCenter() {
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       {tabs.length > 1 && (
-        <SubTabBar tabs={tabs} activeKey={activeKey || char?.id} onChange={setActiveKey} />
+        <SubTabBar tabs={tabs} activeKey={activeKey || char?.id || ''} onChange={setActiveKey} />
       )}
 
       {/* Character Info */}

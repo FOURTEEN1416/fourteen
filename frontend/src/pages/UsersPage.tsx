@@ -47,6 +47,8 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // 挂载时拉取用户列表（cancelled flag 防竞态）
+  /* eslint-disable react-hooks/set-state-in-effect -- data fetching on mount */
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -66,6 +68,7 @@ export default function UsersPage() {
       })
     return () => { cancelled = true }
   }, [])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const filteredUsers = useMemo(() => {
     if (!search.trim()) return users

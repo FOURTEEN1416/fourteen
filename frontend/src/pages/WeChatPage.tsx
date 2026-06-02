@@ -143,6 +143,28 @@ function QrCodeConnectionModal({ onClose }: { onClose: () => void }) {
     }
   }, [])
 
+  // 轮询连接状态（用户扫码确认后变为已连接）— 必须先于 startQrPolling 声明（被其内部引用）
+  const startConnectionPolling = useCallback(() => {
+    pollingRef.current = setInterval(async () => {
+      try {
+        const res = await wechatConnectionStatus()
+        const connData = res.data as { connected?: boolean; wxid?: string; status?: string }
+        if (connData.connected || connData.status === 'connected') {
+          setStatus('connected')
+          if (pollingRef.current) clearInterval(pollingRef.current)
+          // 自动保存连接
+          if (connData.wxid) {
+            wechatCreateConnection({ wxid: connData.wxid }).catch(() => {})
+          }
+        } else if (connData.status === 'scanned') {
+          setStatus('scanned')
+        }
+      } catch {
+        // 忽略轮询错误
+      }
+    }, 2000)
+  }, [])
+
   // 轮询二维码（后端连接器需要时间生成二维码）
   const startQrPolling = useCallback(() => {
     if (pollingRef.current) clearInterval(pollingRef.current)
@@ -169,29 +191,7 @@ function QrCodeConnectionModal({ onClose }: { onClose: () => void }) {
         // 忽略轮询错误
       }
     }, 2000)
-  }, [])
-
-  // 轮询连接状态（用户扫码确认后变为已连接）
-  const startConnectionPolling = useCallback(() => {
-    pollingRef.current = setInterval(async () => {
-      try {
-        const res = await wechatConnectionStatus()
-        const connData = res.data as { connected?: boolean; wxid?: string; status?: string }
-        if (connData.connected || connData.status === 'connected') {
-          setStatus('connected')
-          if (pollingRef.current) clearInterval(pollingRef.current)
-          // 自动保存连接
-          if (connData.wxid) {
-            wechatCreateConnection({ wxid: connData.wxid }).catch(() => {})
-          }
-        } else if (connData.status === 'scanned') {
-          setStatus('scanned')
-        }
-      } catch {
-        // 忽略轮询错误
-      }
-    }, 2000)
-  }, [])
+  }, [startConnectionPolling])
 
   // 启动完整流程
   const startFlow = useCallback(() => {
@@ -345,8 +345,22 @@ function QrCodeConnectionModal({ onClose }: { onClose: () => void }) {
 export default function WeChatPage() {
   const [connections, setConnections] = useState<SavedConnection[]>(() => {
     try {
-      const raw = localStorage.getItem('ai-girlfriend-wechat-connections')
-      return raw ? (JSON.parse(raw) as SavedConnection[]) : []
+      // 兼容层：先读新键，回退到旧键（老的"ai-girlfriend-wechat-connections"自动迁移）
+      const raw =
+        localStorage.getItem('unique-you-wechat-connections') ??
+        localStorage.getItem('ai-girlfriend-wechat-connections')
+      if (!raw) return []
+      const list = JSON.parse(raw) as SavedConnection[]
+      // 一次性迁移：读到旧键则立即写新键，后续用新键
+      if (!localStorage.getItem('unique-you-wechat-connections')) {
+        try {
+          localStorage.setItem('unique-you-wechat-connections', raw)
+          localStorage.removeItem('ai-girlfriend-wechat-connections')
+        } catch {
+          /* 忽略写失败 */
+        }
+      }
+      return list
     } catch {
       return []
     }
@@ -358,7 +372,7 @@ export default function WeChatPage() {
   // ── Persist ──
 
   const persist = useCallback((list: SavedConnection[]) => {
-    localStorage.setItem('ai-girlfriend-wechat-connections', JSON.stringify(list))
+    localStorage.setItem('unique-you-wechat-connections', JSON.stringify(list))
   }, [])
 
   // ── Filter ──

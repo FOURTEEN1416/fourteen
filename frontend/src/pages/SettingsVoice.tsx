@@ -445,9 +445,12 @@ export default function SettingsVoice() {
     }
   }, [engine, activeVoice])
 
+  // 挂载时拉数据
+  /* eslint-disable react-hooks/set-state-in-effect -- data fetching on mount */
   useEffect(() => {
     doFetchVoices()
   }, [doFetchVoices])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleEngineChange = useCallback(
     async (v: string) => {

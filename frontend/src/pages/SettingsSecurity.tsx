@@ -54,7 +54,10 @@ function SafetyPanelSection() {
     }
   }, [])
 
+  // 挂载时拉数据（cancelled flag 已防竞态）
+  /* eslint-disable react-hooks/set-state-in-effect -- data fetching on mount */
   useEffect(() => { doFetch() }, [doFetch])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleToggle = async () => {
     setToggling(true)

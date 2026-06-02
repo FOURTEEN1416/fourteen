@@ -130,3 +130,44 @@ export interface CharacterListItem {
   avatar?: string
   isActive: boolean
 }
+
+// RoleSettings 页面使用的扩展角色类型：UnifiedCharacter 之外的运行时字段
+export interface RoleSettingsCharacter {
+  id: string
+  name: string
+  description?: string
+  personality?: Record<string, number>
+  speaking_style?: Record<string, number>
+  core_anchors?: string[]
+  catchphrases?: string[]
+  created_at?: string
+  updated_at?: string
+  voice_config?: import('./api').VoiceConfig | {
+    engine?: string
+    mimo_model?: string
+    edge_speaker?: string
+    sovits_model?: string
+    [key: string]: unknown
+  } | null
+  message?: {
+    proactive?: boolean
+    dailyLimit?: number
+    minInterval?: number
+    cooldown?: number
+    urgency?: number
+  }
+  stats?: {
+    messages?: number
+    memories?: number
+    avgResponse?: string
+    [key: string]: unknown
+  }
+  rag?: {
+    vectorDocs?: number
+    keywordIndex?: number
+    hitRate?: number
+    [key: string]: unknown
+  }
+  knowledgeDocs?: string[]
+  [key: string]: unknown
+}

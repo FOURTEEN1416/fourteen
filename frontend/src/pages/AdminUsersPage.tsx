@@ -179,7 +179,10 @@ export default function AdminUsersPage() {
     }
   }, [page, pageSize, search, roleFilter])
 
+  // 挂载时拉数据（搜索/分页/筛选变化时重拉）
+  /* eslint-disable react-hooks/set-state-in-effect -- data fetching on mount + filter change */
   useEffect(() => { fetchUsers() }, [fetchUsers])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // ── 搜索防抖 ──
   useEffect(() => {

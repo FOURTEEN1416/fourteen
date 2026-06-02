@@ -94,7 +94,8 @@ export default function StorylineEditor({ characterId }: StorylineEditorProps) {
   const [editingStageIdx, setEditingStageIdx] = useState<number | null>(null)
   const [editMemorialInput, setEditMemorialInput] = useState('')
 
-  // 加载远程配置
+  // 加载远程配置 — 同步 props/config 到 form state（标准模式）
+  /* eslint-disable react-hooks/set-state-in-effect -- props-to-form-state sync */
   useEffect(() => {
     if (configData?.configured && configData?.config) {
       const c = configData.config
@@ -105,6 +106,7 @@ export default function StorylineEditor({ characterId }: StorylineEditorProps) {
       setEnding(c.ending)
     }
   }, [configData])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // ── 自动检测 ──
 

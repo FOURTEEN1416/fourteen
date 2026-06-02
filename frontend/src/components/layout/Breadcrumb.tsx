@@ -1,6 +1,7 @@
 import { useLocation, Link } from 'react-router-dom'
 import { ChevronRight } from 'lucide-react'
 import { useUnifiedCharacters } from '../../hooks/useQueries'
+import type { UnifiedCharacter } from '../../types/api'
 
 interface Crumb {
   label: string
@@ -52,7 +53,7 @@ function useBreadcrumbs(): Crumb[] {
   if (!roleMatch) return userCrumbs
 
   const roleId = roleMatch[1]
-  const char = characters.find((c: any) => c.id === roleId || c.name === roleId)
+  const char = characters.find((c: UnifiedCharacter) => c.id === roleId || c.name === roleId)
 
   if (pathname.includes('/roles/create')) {
     return [...userCrumbs, { label: '创建角色' }]

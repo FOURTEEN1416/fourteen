@@ -41,6 +41,7 @@ function SettingsLLM() {
   const [cacheDuration, setCacheDuration] = useState(30)
 
   // 加载配置
+  /* eslint-disable react-hooks/set-state-in-effect -- data fetching on mount, cancelled flag 防竞态 */
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -71,6 +72,7 @@ function SettingsLLM() {
 
     return () => { cancelled = true }
   }, [])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleSave = async () => {
     setSaving(true)
