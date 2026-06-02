@@ -265,7 +265,7 @@ class Orchestrator:
                 with tracer.span("prompt_assemble"):
                     system_prompt = ""
                     if self._persona:
-                        emotion_dict = emotion_state.to_dict() if emotion_state else None
+                        emotion_dict = emotion_state
                         persona_overrides = None
                         if self._character_manager:
                             persona_overrides = self._character_manager.get_active_persona_config()
@@ -444,7 +444,7 @@ class Orchestrator:
                 with tracer.span("prompt_assemble"):
                     system_prompt = ""
                     if self._persona:
-                        emotion_dict = emotion_state.to_dict() if emotion_state else None
+                        emotion_dict = emotion_state
                         persona_overrides = None
                         if self._character_manager:
                             persona_overrides = self._character_manager.get_active_persona_config()
