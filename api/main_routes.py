@@ -52,6 +52,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., max_length=10000)
     session_id: str = Field(default="", max_length=128)
     message_type: str = Field(default="text", pattern=r"^(text|image|voice|file)$")
+    character_id: str = Field(default="default", max_length=128)
 
 
 class ChatResponse(BaseModel):

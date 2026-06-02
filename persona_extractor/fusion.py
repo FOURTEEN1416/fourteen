@@ -172,6 +172,17 @@ class PersonaExtractor:
         """注入 ToneMimic 引用（由main在初始化后设置）"""
         self._tone_mimic = tone_mimic
 
+    def set_user_id(self, user_id: str) -> None:
+        """切换当前 user_id（修复多用户/多角色串味 bug）
+
+        调用方应在 process_message 之前根据 (character_id, session_id) 调用此方法。
+        同时重置消息计数（避免新用户继承旧用户的频率控制状态）。
+        """
+        if self.user_id != user_id:
+            logger.debug("PersonaExtractor user_id 切换: %s → %s", self.user_id, user_id)
+            self.user_id = user_id
+            self._msg_count = 0  # 重置频率控制
+
     # ── 增强段生成 ──
 
     def _get_enhancement(self) -> str:

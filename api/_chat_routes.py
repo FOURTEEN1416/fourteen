@@ -42,7 +42,9 @@ async def chat(req: ChatRequest, _auth: bool = Security(verify_api_key_dep)):
             headers={"X-Error-Code": "FEATURE_UNAVAILABLE"},
         )
     try:
-        result = await orch.process_message(req.message, req.session_id, req.message_type)
+        result = await orch.process_message(
+            req.message, req.session_id, req.message_type, req.character_id,
+        )
     except TimeoutError:
         raise HTTPException(
             status_code=504,
@@ -73,7 +75,9 @@ async def chat_stream(req: ChatRequest, _auth: bool = Security(verify_api_key_de
         )
 
     async def event_generator():
-        async for token in orch.process_message_stream(req.message, req.session_id, req.message_type):
+        async for token in orch.process_message_stream(
+            req.message, req.session_id, req.message_type, req.character_id,
+        ):
             yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 

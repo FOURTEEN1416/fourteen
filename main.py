@@ -679,7 +679,13 @@ class OptimizedOrchestrator:
         if expired_sessions:
             logger.debug("清理 %d 个过期session锁，当前总数: %d", len(expired_sessions), len(self._session_locks))
 
-    async def process_message(self, user_msg: str, session_id: str = "", message_type: str = "text") -> dict[str, Any]:
+    async def process_message(
+        self,
+        user_msg: str,
+        session_id: str = "",
+        message_type: str = "text",
+        character_id: str = "default",
+    ) -> dict[str, Any]:
         if not self._initialized:
             return {"reply": "系统初始化中, 请稍候...", "error": "not_initialized"}
 
@@ -704,10 +710,19 @@ class OptimizedOrchestrator:
                 if is_injection:
                     user_msg_clean = self.components["injection"].sanitize(user_msg_clean)
 
+                # ── 动态设置 PersonaExtractor 的 user_id（修复 P0-B：避免多用户串味） ──
+                pe = self.components.get("persona_extractor")
+                if pe is not None:
+                    # 用 (character_id, session_id) 拼接作为 user_id，session_id 为空时退化为 character_id
+                    effective_user_id = (
+                        f"{character_id}:{session_id}" if session_id else f"{character_id}"
+                    )
+                    if pe.user_id != effective_user_id:
+                        pe.set_user_id(effective_user_id)
+
                 # ── 并行执行独立任务 ──
                 recent = self.components["memory"].get_recent_context(3)
                 loop = asyncio.get_running_loop()
-                pe = self.components.get("persona_extractor")
 
                 tasks = {}
 
@@ -829,6 +844,35 @@ class OptimizedOrchestrator:
                         mem_kwargs["emotion_tag"] = emotion_tag
                 self.components["memory"].after_chat(**mem_kwargs)
                 self.components["ase"].on_chat(user_msg_clean, reply)
+
+                # ── 同步 AffinityEnhancer + EmotionStageEngine（修复 P0-C） ──
+                # 把 EmotionEngine 的 affection_points 增量同步到 shisi 体系，
+                # 让"好感度"在三个系统（EmotionEngine/AffinityEnhancer/StageEngine）一致
+                if character_id and character_id != "default" and emotion_state is not None:
+                    try:
+                        from api.deps import deps as _deps
+                        shisi_reg = getattr(_deps, "shisi_reg", None)
+                        if shisi_reg is not None:
+                            ae = getattr(shisi_reg, "affinity_enhancer", None)
+                            se = getattr(shisi_reg, "stage_engine", None)
+                            if ae is not None and se is not None:
+                                # 计算增量：当前 affection_points 与上一次的差
+                                # 简化：取 emotion_state.affection_points 作为绝对值，差值 ≈ state.affinity*0.5
+                                affection_pts = getattr(emotion_state, "affection_points", 0.0)
+                                # 把 0-100 范围的 affection_points 映射到 affinity 增量（每点 0.5 单位）
+                                delta = float(affection_pts) * 0.05
+                                delta = max(-3.0, min(3.0, delta))  # 限幅 [-3, +3]
+                                if abs(delta) > 0.01:
+                                    new_affinity, _unlocks = ae.update(
+                                        character_id=character_id,
+                                        delta=delta,
+                                        reason=f"emotion:{emotion_tag}",
+                                        source="chat",
+                                    )
+                                    # 同步 StageEngine
+                                    se.evaluate(character_id, new_affinity)
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("Affinity/Stage 同步跳过: %s", e)
 
                 # ── 语音合成（用户明确要求时触发）──
                 voice_audio: bytes | None = None
