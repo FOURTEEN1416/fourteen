@@ -1,12 +1,44 @@
 ﻿# HANDOFF — 工作交接
 
-> 源会话：2026-06-01 全面审计 + 修复执行 + 2026-06-01 全面更名（"AI Girlfriend" → "唯一的你"）+ 2026-06-01 ESLint 前端零警告修复
+> 源会话：2026-06-01 全面审计 + 修复执行 + 2026-06-01 全面更名（"AI Girlfriend" → "唯一的你"）+ 2026-06-01 ESLint 前端零警告修复 + 2026-06-01 shisi 历史债清理
 > 执行流水线：startup-calibrator → triad-navigation → domain-explorer → evolution-auditor → loop-executor → constitution-guardian
 > 协调者：歆歆
 
 ---
 
-## 2026-06-01 ESLint 前端零警告修复（最新 ✅ · commit `06045e2` + 推送 origin/main）
+## 2026-06-01 shisi 历史债清理（最新 ✅ · commit `23beb15` + 推送 origin/main）
+
+**重要校正**：前期报告"23 ruff 全部在 shisi"为**误判**。真实分布：api 14 + my_character 3 + shisi 6 = 23。本批次**仅处理 shisi 6 ruff + 2 mypy = 8 errors**。
+
+| 指标 | 修复前 | 修复后 |
+|------|--------|--------|
+| shisi ruff errors | 6 | 0 |
+| shisi mypy errors | 2 | 0 |
+| pytest 回归 | — | ✅ 538 passed, 1 skipped, 2 warnings (31.99s) |
+
+**4 文件修复明细：**
+- `shisi/character/character_card_v2.py`：4 个 E701（if/elif 单行 → 多行拆分）
+- `shisi/vault/_persona_adapter.py`：1 个 F841（删除未使用变量 `mes_example`）
+- `shisi/vault/collect_loop.py`：1 个 SIM105（try/except/pass → contextlib.suppress）+ 加 `import contextlib`
+- `shisi/knowledge/retriever.py`：基类 `KeywordRetriever` 补 `add_chunks` 方法 → 消除 union-attr/attr-defined
+
+**mypy 根治方案：**
+在 `KeywordRetriever` 基类补 `add_chunks`（`self.index(self._chunks + chunks)`），`BM25Retriever` 继承后自动获得一致接口，**无需 isinstance 收窄**。这样：
+- ✅ union-attr 错误自然消解
+- ✅ KeywordRetriever 也支持增量追加（功能补齐）
+- ✅ 改动最小、契约统一
+
+**未处理项（按默默指示）：**
+- api/ 14 个 ruff errors（其中 12 个 B008 是 FastAPI 假阳性，2 个 F401+I001 是真错误但 trivial）
+- my_character/ 3 个 ruff errors（SIM108 + SIM115×2，trivial）
+- api/ 3 个 mypy errors（_chat_routes.py:125,127 arg-type + _misc_routes.py:86 no-redef）
+- PAT 安全（remote URL 含明文 token）
+
+**新约束：FF-019 已加入 CONTROL.md（shisi ruff+mypy 零错误，commit 23beb15 留底）**
+
+---
+
+## 2026-06-01 ESLint 前端零警告修复（✅ · commit `06045e2`）
 
 | 指标 | 修复前 | 修复后 |
 |------|--------|--------|
