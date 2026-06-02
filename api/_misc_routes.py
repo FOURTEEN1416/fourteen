@@ -80,13 +80,15 @@ async def get_dashboard_stats(_auth: bool = Security(verify_api_key_dep)):
 
     now = time.time()
     cache = deps.wechat_status_cache
+    wechat_info: dict[str, Any] = {"connected": False}
     if cache["data"] is not None and (now - cache["ts"]) < deps.WECHAT_STATUS_TTL:
         wechat_info = cache["data"]
     else:
-        wechat_info: dict[str, Any] = {"connected": False}
         try:
             from api._chat_routes import get_wechat_status
-            wechat_info = await get_wechat_status()  # type: ignore[func-returns-value]
+            result = await get_wechat_status()  # type: ignore[func-returns-value]
+            if isinstance(result, dict):
+                wechat_info = result
         except Exception as e:
             logger.debug("Failed to get wechat status for dashboard: %s", e)
         cache["data"] = wechat_info

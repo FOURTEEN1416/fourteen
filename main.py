@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import atexit
+import contextlib
 import logging
 import os
 import re
@@ -130,8 +131,6 @@ def _detect_voice_request(text: str) -> bool:
 project_root = Path(__file__).parent.absolute()
 sys.path.insert(0, str(project_root))
 
-import contextlib  # noqa: E402
-
 # ── 集中管理重复出现的函数级导入（合并重复 import） ──
 from api.app_factory import create_api_app  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
@@ -160,7 +159,7 @@ from tools.builtin.reminder_tool import CalendarQueryTool, ReminderTool  # noqa:
 from tools.builtin.search_tool import SearchTool  # noqa: E402
 from tools.builtin.time_awareness_tool import TimeAwarenessTool  # noqa: E402
 from tools.builtin.weather_tool import WeatherTool  # noqa: E402
-from utils.health_check import health_check_all, _is_healthy  # noqa: E402
+from utils.health_check import _is_healthy, health_check_all  # noqa: E402
 
 # ── 加载 .env（手动解析，无需 python-dotenv 依赖） ──
 _env_loaded = False

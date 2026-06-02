@@ -115,6 +115,11 @@ ignore = ["E501", "C901"]
 "tests/real_e2e_test.py" = ["E402"]
 "tests/real_test.py" = ["E402"]
 "tests/*" = ["S101", "S106", "ARG001", "PLR2004", "T201"]
+# FastAPI 依赖注入在参数默认值中是框架的官方推荐写法，B008 是 false positive
+"api/**/*.py" = ["B008"]
+# scripts/ 是管理/迁移/验证工具，非生产代码路径
+"scripts/**/*.py" = ["E402", "E401", "F401", "F541", "I001", "SIM115", "SIM117", "UP015", "W293"]
+"tools/builtin/character_crawler_tool.py" = ["F401"]
 
 [tool.ruff.format]
 quote-style = "double"

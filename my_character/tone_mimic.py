@@ -29,43 +29,30 @@ def _silence_stdout():
     """屏蔽 onnxruntime C++ 扩展 import 时的 EP Error 噪声（缺 TensorRT 库）。
     onnxruntime C++ 通过 std::cerr (fd 2) 打印 EP Error，必须同时重定向 fd 1+2。
     """
-    if os.name == "nt":
-        devnull_path = "nul"
-    else:
-        devnull_path = os.devnull
-    saved_stdout_file = None
-    saved_stderr_file = None
-    devnull_out = None
-    devnull_err = None
-    saved_fd1 = None
-    saved_fd2 = None
+    devnull_path = "nul" if os.name == "nt" else os.devnull
+    import sys
+    sys.stdout.flush()
+    sys.stderr.flush()
+    saved_fd1 = os.dup(1)
+    saved_fd2 = os.dup(2)
+    d1 = os.open(devnull_path, os.O_WRONLY)
+    d2 = os.open(devnull_path, os.O_WRONLY)
+    os.dup2(d1, 1)
+    os.dup2(d2, 2)
+    os.close(d1)
+    os.close(d2)
+    saved_stdout_file = sys.stdout
+    saved_stderr_file = sys.stderr
     try:
-        import sys
-        sys.stdout.flush()
-        sys.stderr.flush()
-        saved_fd1 = os.dup(1)
-        saved_fd2 = os.dup(2)
-        d1 = os.open(devnull_path, os.O_WRONLY)
-        d2 = os.open(devnull_path, os.O_WRONLY)
-        os.dup2(d1, 1)
-        os.dup2(d2, 2)
-        os.close(d1)
-        os.close(d2)
-        saved_stdout_file = sys.stdout
-        saved_stderr_file = sys.stderr
-        devnull_out = open(devnull_path, "w")
-        devnull_err = open(devnull_path, "w")
-        sys.stdout = devnull_out
-        sys.stderr = devnull_err
-        yield
+        with contextlib.ExitStack() as stack:
+            devnull_out = stack.enter_context(open(devnull_path, "w"))
+            devnull_err = stack.enter_context(open(devnull_path, "w"))
+            sys.stdout = devnull_out
+            sys.stderr = devnull_err
+            yield
     finally:
-        import sys
-        if devnull_out:
-            sys.stdout = saved_stdout_file
-            devnull_out.close()
-        if devnull_err:
-            sys.stderr = saved_stderr_file
-            devnull_err.close()
+        sys.stdout = saved_stdout_file
+        sys.stderr = saved_stderr_file
         if saved_fd1 is not None:
             os.dup2(saved_fd1, 1)
             os.close(saved_fd1)

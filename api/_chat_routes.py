@@ -122,9 +122,9 @@ async def chat_history(
                     params = [session_id]
                     if before > 0:
                         conditions.append("created_at < ?")
-                        params.append(before)
+                        params.append(str(before))
                     where_clause = " AND ".join(conditions)
-                    params.append(limit)
+                    params.append(str(limit))
                     rows = conn.execute(
                         f"SELECT role, content, emotion_tag, created_at FROM chat_history "
                         f"WHERE {where_clause} ORDER BY created_at DESC LIMIT ?",
