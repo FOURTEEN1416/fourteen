@@ -69,6 +69,15 @@ class KeywordRetriever:
             self._chunk_token_counts.append(Counter(tokens))
         self._total_chunks = len(chunks)
 
+    def add_chunks(self, chunks: list[KnowledgeChunk]) -> None:
+        """追加知识块到已有索引（合并后重建 TF/IDF 参数）。
+
+        基类默认实现：合并后重建索引。子类可覆盖以优化增量更新。
+        """
+        if not chunks:
+            return
+        self.index(self._chunks + chunks)
+
     def search(self, query: str, top_k: int = 5) -> RetrievalResult:
         """检索：基于查询词在各块中的 TF 评分。"""
         if not self._chunks or not query.strip():

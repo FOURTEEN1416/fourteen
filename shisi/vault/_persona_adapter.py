@@ -92,7 +92,6 @@ class PersonaAdapter:
         description = data.description or ""
         creator_notes = data.creator_notes or ""
         scenario = data.scenario or ""
-        mes_example = data.mes_example or ""
 
         # 合并所有文本用于规则提取
         all_text = f"{personality}\n{description}\n{creator_notes}\n{scenario}"

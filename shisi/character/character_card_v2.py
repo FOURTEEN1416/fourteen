@@ -90,10 +90,14 @@ class CharaCardV2Parser:
             for k, v in personality.items():
                 label = CharaCardV2Parser._TRAIT_MAP.get(k, k.replace("_", " "))
                 if isinstance(v, (int, float)):
-                    if v >= 0.8: parts.append(f"极度{label}")
-                    elif v >= 0.6: parts.append(f"非常{label}")
-                    elif v >= 0.4: parts.append(f"偏向{label}")
-                    elif v >= 0.2: parts.append(f"略有{label}")
+                    if v >= 0.8:
+                        parts.append(f"极度{label}")
+                    elif v >= 0.6:
+                        parts.append(f"非常{label}")
+                    elif v >= 0.4:
+                        parts.append(f"偏向{label}")
+                    elif v >= 0.2:
+                        parts.append(f"略有{label}")
                 elif isinstance(v, str) and v.strip():
                     parts.append(f"{label}: {v.strip()}")
             return "，".join(parts) if parts else ""
