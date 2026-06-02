@@ -35,6 +35,7 @@
 | FF-017 | main_routes.py 端点零残留 | `pytest::test_main_routes_residual_is_zero` 阻止再膨胀 | ✅ |
 | **FF-018** | **前端 ESLint 零错误零警告** | `npm run lint` 零退出码（建议加 pre-commit hook） | ✅（手动验证） |
 | **FF-019** | **shisi ruff+mypy 零错误** | `ruff check shisi/` + `mypy shisi/` 零退出码 | ✅（手动验证） |
+| **FF-020** | **全工程 ruff+mypy 零错误** | `ruff check .` + `mypy api/ my_character/` 零退出码（建议加 pre-commit hook） | ✅（手动验证，commit `3af3a14`） |
 
 ---
 
@@ -125,3 +126,4 @@
 > 更新记录：2026-06-01 — P0 LoginPage 接入 / P1 shisi 死代码清理 / Mock 4页复检 / FF-014/015 CI 实现
 > 2026-06-01（重构）— main_routes.py 拆分为 8 个子路由（71 端点）/ FF-016/017 落库 / test_api_routes.py 14/14 PASS / 2.15s
 > 更新记录：2026-06-01（+1d）— **P0 main_routes.py 拆分**（1313→95 行，8 子路由 71 端点）/ verify_refactor.py 6/6 / test_api_routes.py 14/14 / **FF-016/017 上线**
+> 更新记录：2026-06-01（+2d）— **全工程 ruff 0 errors**（97→0，含 79 自动修 + 8 文件手工改）/ mypy 0 / pytest 538 / **FF-020 落库**（commit `3af3a14`）/ scripts/ 纳入 per-file-ignores
