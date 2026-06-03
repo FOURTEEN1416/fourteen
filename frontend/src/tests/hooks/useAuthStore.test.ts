@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+﻿import { describe, it, expect, beforeEach } from 'vitest'
 import { useAuthStore, type UserInfo } from '../../store/authStore'
 
 // 构造一个合法的 UserInfo（UserRole 来自 api/admin）
@@ -21,7 +21,6 @@ describe('useAuthStore', () => {
     useAuthStore.setState({
       user: null,
       accessToken: null,
-      refreshToken: null,
       isAuthenticated: false,
       isInitialized: false,
     })
@@ -36,20 +35,19 @@ describe('useAuthStore', () => {
     expect(state.accessToken).toBeNull()
   })
 
-  it('setTokens transitions to authenticated state', () => {
+  it('setAuth transitions to authenticated state', () => {
     const store = useAuthStore.getState()
-    store.setTokens('access-123', 'refresh-456', mockUser)
+    store.setAuth(mockUser, 'access-123')
 
     const state = useAuthStore.getState()
     expect(state.isAuthenticated).toBe(true)
     expect(state.accessToken).toBe('access-123')
-    expect(state.refreshToken).toBe('refresh-456')
     expect(state.user).toEqual(mockUser)
   })
 
   it('clearAuth resets back to unauthenticated', () => {
     // 先登录
-    useAuthStore.getState().setTokens('access-123', 'refresh-456', mockUser)
+    useAuthStore.getState().setAuth(mockUser, 'access-123')
     expect(useAuthStore.getState().isAuthenticated).toBe(true)
 
     // 再登出
@@ -59,6 +57,5 @@ describe('useAuthStore', () => {
     expect(state.isAuthenticated).toBe(false)
     expect(state.user).toBeNull()
     expect(state.accessToken).toBeNull()
-    expect(state.refreshToken).toBeNull()
   })
 })

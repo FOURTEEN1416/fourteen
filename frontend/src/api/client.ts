@@ -1,4 +1,4 @@
-/**
+﻿/**
  * API 客户端 & 领域函数总线
  *
  * ═══ Decision 5: 数据架构约定 ═══
@@ -8,10 +8,12 @@
  *     见 ../store/ 目录
  * • 例外：少量页面仍用 useState 直接管理服务端数据（UsersPage），
  *     逐步迁移到 React Query + api.* 模式
+ *
+ * Option A: accessToken 存内存（getAccessToken），refreshToken 由 httpOnly cookie 管理。
  */
 import axios from 'axios'
 import { useErrorStore } from '../store/errorStore'
-import { useAuthStore } from '../store/authStore'
+import { getAccessToken, setAccessToken, useAuthStore } from '../store/authStore'
 import { refreshToken as refreshTokenApi } from './auth'
 
 // ── Domain API imports (for re-export and api namespace) ──
@@ -70,9 +72,9 @@ if (apiKey) {
 }
 
 // ── JWT Bearer token interceptor ──
-// Attach access token to every authenticated request
+// Attach access token from memory (not localStorage) to every request
 client.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().accessToken
+  const token = getAccessToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -114,51 +116,49 @@ client.interceptors.response.use(
     const originalRequest = error.config as (typeof error.config) & { _isRetry?: boolean }
 
     // ── 401 auto-refresh ──
-    // Skips the refresh endpoint itself to avoid infinite loop
+    // Uses httpOnly cookie (browser auto-sends) instead of stored refresh_token
     if (
       status === 401 &&
       originalRequest &&
       !originalRequest._isRetry &&
       !originalRequest.url?.includes('/auth/refresh')
     ) {
-      const { refreshToken: storedRefreshToken } = useAuthStore.getState()
-
-      if (storedRefreshToken) {
-        if (_isRefreshing) {
-          // Queue concurrent 401s — they'll all retry with the new token
-          return new Promise((resolve, reject) => {
-            _pendingQueue.push({
-              resolve: (token: string) => {
-                originalRequest.headers.Authorization = `Bearer ${token}`
-                originalRequest._isRetry = true
-                resolve(client(originalRequest))
-              },
-              reject,
-            })
+      if (_isRefreshing) {
+        // Queue concurrent 401s — they'll all retry with the new token
+        return new Promise((resolve, reject) => {
+          _pendingQueue.push({
+            resolve: (token: string) => {
+              originalRequest.headers.Authorization = `Bearer ${token}`
+              originalRequest._isRetry = true
+              resolve(client(originalRequest))
+            },
+            reject,
           })
-        }
+        })
+      }
 
-        _isRefreshing = true
-        originalRequest._isRetry = true
+      _isRefreshing = true
+      originalRequest._isRetry = true
 
-        try {
-          const res = await refreshTokenApi(storedRefreshToken)
-          useAuthStore.getState().setTokens(res.access_token, res.refresh_token, res.user)
+      try {
+        // httpOnly cookie auto-sent by browser — no need to pass refresh_token
+        const res = await refreshTokenApi()
+        setAccessToken(res.access_token)
+        useAuthStore.getState().setAuth(res.user, res.access_token)
 
-          // Unblock queued requests with the new token
-          processQueue(null, res.access_token)
+        // Unblock queued requests with the new token
+        processQueue(null, res.access_token)
 
-          // Retry the original request
-          originalRequest.headers.Authorization = `Bearer ${res.access_token}`
-          return client(originalRequest)
-        } catch (refreshError) {
-          processQueue(refreshError, null)
-          useAuthStore.getState().clearAuth()
-          window.location.href = '/login'
-          return Promise.reject(refreshError)
-        } finally {
-          _isRefreshing = false
-        }
+        // Retry the original request
+        originalRequest.headers.Authorization = `Bearer ${res.access_token}`
+        return client(originalRequest)
+      } catch (refreshError) {
+        processQueue(refreshError, null)
+        useAuthStore.getState().clearAuth()
+        window.location.href = '/login'
+        return Promise.reject(refreshError)
+      } finally {
+        _isRefreshing = false
       }
     }
 

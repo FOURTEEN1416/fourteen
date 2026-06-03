@@ -1,17 +1,16 @@
-/**
+﻿/**
  * 用户认证状态管理
  *
- * 纯状态 Store — 遵循 FF-0007（Zustand store 禁止直接 import API）。
- * API 调用逻辑在 useAuth hook 中处理。
+ * Option A: accessToken 存内存闭包（不可持久化），refreshToken 存 httpOnly cookie（后端控制）。
+ * 遵循 FF-0007：Zustand store 禁止直接 import API。
  *
- * 只存：user / accessToken / refreshToken / isAuthenticated / isInitialized
- * 只提供：setTokens / clearAuth
+ * 只存：user / isAuthenticated / isInitialized（可持久化 user 用于恢复会话）
+ * 内存：accessToken（页面刷新后通过 refresh cookie 重新获取）
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 // 注意：不 import API 类型（遵循 FF-0007），自行维护镜像类型
-// 必须与 api/auth.ts 的 UserInfo 保持一致
 import type { UserRole } from '../api/admin'
 
 export interface UserInfo {
@@ -27,16 +26,29 @@ export interface UserInfo {
   last_login_at: string | null
 }
 
+// ── 内存级 accessToken（不持久化，XSS 不可窃取） ──
+
+let _accessToken: string | null = null
+
+export function getAccessToken(): string | null {
+  return _accessToken
+}
+
+export function setAccessToken(token: string | null): void {
+  _accessToken = token
+}
+
+// ── Store 类型 ──
+
 export interface AuthState {
-  // 状态
   user: UserInfo | null
+  /** @deprecated 请用 getAccessToken() 读取内存值 */
   accessToken: string | null
-  refreshToken: string | null
   isAuthenticated: boolean
   isInitialized: boolean
 
   // 纯动作（无 API 调用）
-  setTokens: (access: string, refresh: string, user: UserInfo) => void
+  setAuth: (user: UserInfo, accessToken: string) => void
   clearAuth: () => void
 }
 
@@ -48,28 +60,19 @@ export const useAuthStore = create<AuthState>()(
       // 初始状态
       user: null,
       accessToken: null,
-      refreshToken: null,
       isAuthenticated: false,
       isInitialized: false,
 
-      /** 直接设置 tokens（从 persist 恢复时使用） */
-      setTokens: (access: string, refresh: string, user: UserInfo) => {
-        set({
-          accessToken: access,
-          refreshToken: refresh,
-          user,
-          isAuthenticated: true,
-        })
+      /** 登录/注册成功后设置认证信息 */
+      setAuth: (user: UserInfo, accessToken: string) => {
+        setAccessToken(accessToken)
+        set({ user, accessToken, isAuthenticated: true })
       },
 
       /** 清除所有认证状态 */
       clearAuth: () => {
-        set({
-          user: null,
-          accessToken: null,
-          refreshToken: null,
-          isAuthenticated: false,
-        })
+        setAccessToken(null)
+        set({ user: null, accessToken: null, isAuthenticated: false })
         // 清除 persist 存储
         if (typeof window !== 'undefined') {
           try {
@@ -80,9 +83,8 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'auth-storage',
+      // 只持久化 user 信息（accessToken 不持久化——内存安全）
       partialize: (state) => ({
-        accessToken: state.accessToken,
-        refreshToken: state.refreshToken,
         user: state.user,
         isAuthenticated: state.isAuthenticated,
       }),

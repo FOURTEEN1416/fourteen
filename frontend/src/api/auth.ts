@@ -1,7 +1,10 @@
-/**
+﻿/**
  * 认证 API — /api/auth/* 端点
  *
  * 用户注册 / 登录 / 刷新令牌 / 登出 / 个人信息
+ *
+ * Option A: refreshToken 由 httpOnly cookie 自动传送，前端不手动传参。
+ * 保留 refresh_token 参数做向后兼容（方便 curl / 脚本调用）。
  */
 import client from './client'
 
@@ -39,8 +42,6 @@ export interface RegisterRequest {
   display_name?: string
 }
 
-// ── API 函数 ──────────────────────────────────────
-
 export interface RegisterInviteRequest {
   invite_code: string
   email: string
@@ -48,6 +49,8 @@ export interface RegisterInviteRequest {
   password: string
   display_name?: string
 }
+
+// ── API 函数 ──────────────────────────────────────
 
 /** POST /api/auth/register — 注册新用户 */
 export function register(data: RegisterRequest): Promise<TokenResponse> {
@@ -64,14 +67,24 @@ export function login(data: LoginRequest): Promise<TokenResponse> {
   return client.post('/auth/login', data).then(r => r.data as TokenResponse)
 }
 
-/** POST /api/auth/refresh — 刷新 access token */
-export function refreshToken(refresh_token: string): Promise<TokenResponse> {
-  return client.post('/auth/refresh', { refresh_token }).then(r => r.data as TokenResponse)
+/** POST /api/auth/refresh — 刷新 access token
+ *
+ * 优先使用 httpOnly cookie（浏览器自动发送），
+ * 也接受 refresh_token 参数做向后兼容。
+ */
+export function refreshToken(refresh_token?: string): Promise<TokenResponse> {
+  const body = refresh_token ? { refresh_token } : {}
+  return client.post('/auth/refresh', body).then(r => r.data as TokenResponse)
 }
 
-/** POST /api/auth/logout — 登出 */
-export function logout(refresh_token: string): Promise<void> {
-  return client.post('/auth/logout', { refresh_token }).then(() => undefined)
+/** POST /api/auth/logout — 登出
+ *
+ * 优先使用 httpOnly cookie（浏览器自动发送），
+ * 也接受 refresh_token 参数做向后兼容。
+ */
+export function logout(refresh_token?: string): Promise<void> {
+  const body = refresh_token ? { refresh_token } : {}
+  return client.post('/auth/logout', body).then(() => undefined)
 }
 
 /** GET /api/auth/me — 获取当前用户信息 */
