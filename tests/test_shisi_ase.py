@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import fields
 
-import pytest
-
 from shisi.ase.trigger_engine import (
     AffinityTrigger,
     EventTrigger,

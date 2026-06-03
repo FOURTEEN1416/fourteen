@@ -81,6 +81,9 @@ jobs:
       - name: Run vitest (New)
         run: bun run test
 
+      - name: Install Playwright browsers
+        run: bunx playwright install chromium
+
       - name: Run Playwright E2E (New)
         # Uses the webServer defined in playwright.config.ts
         run: bunx playwright test

@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-import json
-import math
 from pathlib import Path
 
 import pytest
 
+from shisi.knowledge.character_knowledge_service import CharacterKnowledgeService
 from shisi.knowledge.retriever import (
     BM25Retriever,
     KeywordRetriever,
     KnowledgeChunk,
     RetrievalResult,
 )
-from shisi.knowledge.character_knowledge_service import CharacterKnowledgeService
 
 
 def _make_chunks() -> list[KnowledgeChunk]:

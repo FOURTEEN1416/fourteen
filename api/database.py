@@ -121,9 +121,7 @@ class InviteCode(Base):
         exp = self.expires_at
         if exp.tzinfo is None:
             exp = exp.replace(tzinfo=timezone.utc)
-        if now > exp:
-            return False
-        return True
+        return not (now > exp)
 
     def to_dict(self) -> dict:
         return {

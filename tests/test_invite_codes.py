@@ -16,15 +16,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 # 项目根路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from api.auth_jwt import create_access_token, hash_password
 from api.database import Base, InviteCode, User, get_db
-
 
 # ═══════════════════════════════════════════════════════
 # 模块级 fixture（共享引擎，减少开销）

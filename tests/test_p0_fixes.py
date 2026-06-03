@@ -35,9 +35,9 @@ class TestAffinityEnhancer:
 
     def _make_enhancer(self):
         from shisi.affinity.enhancer import AffinityEnhancer
-        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-        tmp.close()
-        return AffinityEnhancer(db_path=tmp.name), tmp.name
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+            tmp_path = tmp.name
+        return AffinityEnhancer(db_path=tmp_path), tmp_path
 
     def test_update_increments_affinity(self):
         enhancer, db = self._make_enhancer()

@@ -14,10 +14,8 @@ LLM Provider 单元测试 — 覆盖 0 测试 P0 风险
 
 from __future__ import annotations
 
-import sys
 import os
-
-import pytest
+import sys
 
 # Ensure project root is on path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -271,6 +269,7 @@ class TestLLMGatewayV2MockMode:
 
     def test_chat_with_no_key_uses_mock(self, monkeypatch):
         import asyncio
+
         from llm_provider.llm_gateway import LLMGatewayV2
 
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
@@ -295,8 +294,9 @@ class TestLLMGatewayV2MockMode:
 
 def _make_httpx_response(data: dict, status_code: int = 200):
     """构造一个 httpx.Response mock"""
-    import httpx
     import json
+
+    import httpx
 
     return httpx.Response(
         status_code=status_code,

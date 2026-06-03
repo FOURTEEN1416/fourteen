@@ -15,7 +15,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Security
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +23,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.auth_jwt import (
     create_access_token,
     create_refresh_token,
-    get_current_user_id,
     hash_password,
     hash_refresh_token,
     require_role,
@@ -202,7 +201,7 @@ async def create_invites(
 
     for _ in range(req.count):
         # 避免重复
-        for attempt in range(10):
+        for _attempt in range(10):
             candidate = _generate_code()
             result = await db.execute(
                 select(InviteCode).where(InviteCode.code == candidate)
@@ -247,12 +246,12 @@ async def list_invites(
 
     if status == "valid":
         query = query.where(
-            InviteCode.is_revoked == False,
+            ~InviteCode.is_revoked,
             InviteCode.used_by.is_(None),
             InviteCode.expires_at > now,
         )
         count_query = count_query.where(
-            InviteCode.is_revoked == False,
+            ~InviteCode.is_revoked,
             InviteCode.used_by.is_(None),
             InviteCode.expires_at > now,
         )
@@ -260,16 +259,16 @@ async def list_invites(
         query = query.where(InviteCode.used_by.isnot(None))
         count_query = count_query.where(InviteCode.used_by.isnot(None))
     elif status == "revoked":
-        query = query.where(InviteCode.is_revoked == True)
-        count_query = count_query.where(InviteCode.is_revoked == True)
+        query = query.where(InviteCode.is_revoked)
+        count_query = count_query.where(InviteCode.is_revoked)
     elif status == "expired":
         query = query.where(
-            InviteCode.is_revoked == False,
+            ~InviteCode.is_revoked,
             InviteCode.used_by.is_(None),
             InviteCode.expires_at <= now,
         )
         count_query = count_query.where(
-            InviteCode.is_revoked == False,
+            ~InviteCode.is_revoked,
             InviteCode.used_by.is_(None),
             InviteCode.expires_at <= now,
         )

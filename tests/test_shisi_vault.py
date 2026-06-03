@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import fields
 
-import pytest
-
 from shisi.character.models import CharaCardV2, CharacterData
 from shisi.knowledge.retriever import KnowledgeChunk
 from shisi.vault import PersonaAdapter, PersonaFeatures, VaultCollector

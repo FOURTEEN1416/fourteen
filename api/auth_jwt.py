@@ -44,8 +44,8 @@ _IS_PROD = os.environ.get("ENV", os.environ.get("APP_ENV", "")).lower() in ("pro
 
 if _IS_PROD and (not JWT_SECRET or len(JWT_SECRET) < _MIN_SECRET_LEN):
     raise RuntimeError(
-        "JWT_SECRET must be set and >=%d chars in production. "
-        "Generate with: openssl rand -base64 48" % _MIN_SECRET_LEN
+        f"JWT_SECRET must be set and >={_MIN_SECRET_LEN} chars in production. "
+        f"Generate with: openssl rand -base64 48"
     )
 
 if not JWT_SECRET:
