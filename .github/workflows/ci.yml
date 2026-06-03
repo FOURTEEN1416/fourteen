@@ -46,9 +46,13 @@ jobs:
           name: coverage-report
           path: htmlcov/
 
-      - name: Run ruff check
+      - name: Run ruff check (Hardened)
         run: ruff check . --output-format=github
-        continue-on-error: true
+        # continue-on-error: true  <-- Removed: FF-020 now requires strict pass
+
+      - name: Run mypy check (Hardened)
+        run: mypy . --ignore-missing-imports --no-error-summary
+        # continue-on-error: true  <-- Removed: FF-020 now requires strict pass
 
   frontend:
     runs-on: ubuntu-latest
@@ -67,12 +71,28 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
-      - name: TypeScript type check
+      - name: TypeScript type check (Hardened)
         run: bunx tsc --noEmit
-        continue-on-error: true
+        # continue-on-error: true  <-- Removed: FF-022 now requires strict pass
 
       - name: Build frontend
         run: bun run build
+
+      - name: Run vitest (New)
+        run: bun run test:unit
+
+      - name: Run Playwright E2E (New)
+        # Uses the webServer defined in playwright.config.ts
+        run: bunx playwright test
+
+  weekly-hygiene:
+    # 新增 job：专门跑 Lint / Type / E2E（独立于 push 触发的快速反馈）
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    needs: [backend, frontend]
+    steps:
+      - name: Summary
+        run: echo "✅ Weekly hygiene passed (Lint/Type/E2E integrated in main jobs)"
 
   # ═══ Fitness Functions（自动化门禁） ═══
 

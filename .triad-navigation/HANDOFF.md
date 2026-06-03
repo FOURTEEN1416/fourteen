@@ -287,7 +287,7 @@ python -m uvicorn api.run_api:app --reload --host 0.0.0.0 --port 8000
 
 | 资源 | 地址 |
 |------|------|
-| GitHub | https://github.com/FOURTEEN1416/knowledge-base |
+| GitHub | https://github.com/FOURTEEN1416/fourteen.git |
 | 本地前端 | http://localhost:5173 |
 | 后端 API 文档 | http://localhost:8000/docs |
 | .triad-navigation | C:\Users\FOUR\Desktop\ai-girlfriend\.triad-navigation\ |
@@ -329,4 +329,31 @@ python -m uvicorn api.run_api:app --reload --host 0.0.0.0 --port 8000
 **审计报告**：`docs/audits/2026-06-02-full-audit.md`（4 维度合稿，~300 行）
 
 **remote 注意**：当前 remote 是 `github.com/FOURTEEN1416/fourteen.git`（不是 ai-girlfriend），是历史遗留配置；push 已成功到该仓库。
+
+---
+
+## 2026-06-03 CI 加固 + P1 清理（✅ 已推送 origin/main）
+
+**目标**：修复 CI cron 只跑 pytest 不跑 lint/type/E2E 的缺陷（FF-020/022/023 守护）+ 整理 P1 债务。
+
+### CI cron 加固（`.github/workflows/ci.yml`）
+
+| 改动 | 详情 |
+|------|------|
+| **ruff check** | 移除 `continue-on-error: true`，改硬性通过（FF-020 守护） |
+| **mypy check** | 新增 step，`--ignore-missing-imports`，硬性通过 |
+| **vitest** | frontend job 新增 `bun run test:unit`（FF-022 守护） |
+| **Playwright E2E** | frontend job 新增 `bunx playwright test`（FF-023 守护） |
+| **weekly-hygiene** | 新增汇总 job，`needs: [backend, frontend]`，仅 schedule 触发时跑 |
+
+### P1 债务文档化
+
+- **`docs/P1_BACKLOG.md`** — 18 个 P1 条目，按 Frontend/Backend/Security 分类
+- 内测时按需清，不挡上线
+
+### `AGENTS.md` 记忆更新
+
+- 修正 GitHub 仓库名：`knowledge-base` → `fourteen.git`
+- 新增 Git Proxy 间歇性断线警告
+- 资源链接同步修正
 
