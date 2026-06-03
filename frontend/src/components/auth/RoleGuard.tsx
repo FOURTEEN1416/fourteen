@@ -40,8 +40,9 @@ export default function RoleGuard({ children, roles, fallback = '/' }: RoleGuard
     return null
   }
 
-  // 角色不在允许列表中 → 跳转到 fallback
-  if (!user || !roles.includes(user.role)) {
+  // 角色不在允许列表中或账号被禁用 → 跳转到 fallback
+  // 修复 P0-5：必须同时校验 is_active，被禁用管理员不应能访问
+  if (!user || !user.is_active || !roles.includes(user.role)) {
     return <Navigate to={fallback} replace />
   }
 
