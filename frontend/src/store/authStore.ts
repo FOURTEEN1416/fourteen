@@ -10,8 +10,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-// 注意：不 import API 类型（遵循 FF-0007），自行维护镜像类型
-import type { UserRole } from '../api/admin'
+// 遵循 FF-0007：不 import API 类型，自行维护镜像类型
+type UserRole = 'admin' | 'editor' | 'viewer'
 
 export interface UserInfo {
   id: number
