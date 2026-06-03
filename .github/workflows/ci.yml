@@ -79,7 +79,7 @@ jobs:
         run: bun run build
 
       - name: Run vitest (New)
-        run: bun run test:unit
+        run: bun run test
 
       - name: Run Playwright E2E (New)
         # Uses the webServer defined in playwright.config.ts
