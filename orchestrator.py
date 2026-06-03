@@ -183,7 +183,8 @@ class Orchestrator:
 
     async def process_message(self, user_msg: str, session_id: str = "",
                         message_type: str = "text",
-                        emotion_engine: Any | None = None) -> dict[str, Any]:
+                        emotion_engine: Any | None = None,
+                        character_id: str = "default") -> dict[str, Any]:
         """处理用户消息
 
         Args:
@@ -191,6 +192,8 @@ class Orchestrator:
             session_id: 会话ID
             message_type: 消息类型
             emotion_engine: 可选的情感引擎，用于多用户隔离场景
+            character_id: 修复 P0-7，兼容新调用约定（OptimizedOrchestrator 用此参），
+                旧 Orchestrator 不做多角色隔离，参数被记录但不改变行为。
         """
         trace_id = new_trace_id()
         tracer.start_trace(trace_id)
@@ -374,7 +377,13 @@ class Orchestrator:
                 tracer.end_trace()
 
     async def process_message_stream(self, user_msg: str, session_id: str = "",
-                                      message_type: str = "text") -> AsyncIterator[str]:
+                                      message_type: str = "text",
+                                      character_id: str = "default") -> AsyncIterator[str]:
+        """流式聊天接口 — 修复 P0-7
+
+        兼容新调用约定（OptimizedOrchestrator 用 character_id='xxx'）。
+        旧 Orchestrator 不做多角色隔离，character_id 被记录但不改变行为。
+        """
         if not self._llm or not hasattr(self._llm, 'chat_stream'):
             result = await self.process_message(user_msg, session_id, message_type)
             yield result.get("reply", "")
