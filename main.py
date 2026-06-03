@@ -33,7 +33,7 @@ import threading
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 # ── 语音触发检测 ───────────────────────────────────────
 
@@ -912,6 +912,54 @@ class OptimizedOrchestrator:
             except Exception:
                 logger.exception("消息处理异常")
                 return {"reply": "（处理消息时出现异常, 请稍后重试）", "error": "internal_error"}
+
+    async def process_message_stream(
+        self,
+        user_msg: str,
+        session_id: str = "",
+        message_type: str = "text",
+        character_id: str = "default",
+    ) -> AsyncIterator[str]:
+        """SSE 流式聊天接口 — 修复 P0-8
+
+        旧问题：OptimizedOrchestrator 缺 process_message_stream 方法，
+        `api/_chat_routes.py:78` 的 hasattr 防御让流式端点永远 503。
+
+        实现策略（MVP）：
+        1. 委托 process_message 跑完整预处理（安全/PII/情感/记忆/RAG/LLM）
+        2. 把 reply 按 chunk 切分 yield（chunk_size=8 字符模拟打字机）
+        3. 真"边生成边 yield"流式（基于 LLM.chat_stream）留作 P2 优化
+
+        Args:
+            user_msg: 用户消息
+            session_id: 会话 ID
+            message_type: 消息类型（text/voice/image）
+            character_id: 角色 ID（用于多角色隔离）
+
+        Yields:
+            每次返回一个 token（当前为 8 字符的块）
+        """
+        if not self._initialized:
+            yield "系统初始化中, 请稍候..."
+            return
+
+        try:
+            result = await self.process_message(
+                user_msg, session_id, message_type, character_id,
+            )
+            reply = result.get("reply", "")
+        except Exception:
+            logger.exception("流式处理异常")
+            yield "（处理消息时出现异常, 请稍后重试）"
+            return
+
+        if not reply:
+            return
+
+        # 按块 yield 模拟流式输出（8 字符/块，平衡延迟与流畅度）
+        chunk_size = 8
+        for i in range(0, len(reply), chunk_size):
+            yield reply[i:i + chunk_size]
 
     def health_check(self) -> dict[str, Any]:
         results = {}
