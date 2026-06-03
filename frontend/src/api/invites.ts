@@ -55,15 +55,15 @@ export interface InviteListResponse {
 }
 
 // ── API 调用 ──────────────────────────────────────────
-
-const BASE = '/api';
+// 修复 P0-1：axios client.ts baseURL='/api'，此处不能再加 BASE 前缀
+// 否则实际路径变为 /api/api/... 后端 404
 
 export function registerWithInvite(data: RegisterInviteRequest) {
-  return client.post<TokenResponse>(`${BASE}/auth/register-invite`, data);
+  return client.post<TokenResponse>('/auth/register-invite', data)
 }
 
 export function adminCreateInvites(data: CreateInvitesRequest) {
-  return client.post<CreateInvitesResponse>(`${BASE}/admin/invites`, data);
+  return client.post<CreateInvitesResponse>('/admin/invites', data)
 }
 
 export function adminListInvites(params?: {
@@ -71,11 +71,11 @@ export function adminListInvites(params?: {
   page_size?: number;
   status?: 'valid' | 'used' | 'revoked' | 'expired';
 }) {
-  return client.get<InviteListResponse>(`${BASE}/admin/invites`, { params });
+  return client.get<InviteListResponse>('/admin/invites', { params })
 }
 
 export function adminRevokeInvite(code: string) {
   return client.delete<{ detail: string; code: string }>(
-    `${BASE}/admin/invites/${encodeURIComponent(code)}`,
-  );
+    `/admin/invites/${encodeURIComponent(code)}`,
+  )
 }
