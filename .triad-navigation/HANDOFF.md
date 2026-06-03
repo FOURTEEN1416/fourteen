@@ -291,3 +291,42 @@ python -m uvicorn api.run_api:app --reload --host 0.0.0.0 --port 8000
 | 本地前端 | http://localhost:5173 |
 | 后端 API 文档 | http://localhost:8000/docs |
 | .triad-navigation | C:\Users\FOUR\Desktop\ai-girlfriend\.triad-navigation\ |
+
+---
+
+## 2026-06-03 P0 全面修复（✅ 已推送 origin/main `0b25faf`）
+
+**目标**：4 维度审计发现 8 个 P0，按用户"全面修复除 P0-4"决策修完 6 个 + 跳过 2 个。
+
+**6 个 P0 修复 commit：**
+
+| Commit | 修复 | 影响 |
+|--------|------|------|
+| `986117b` | **P0-6** Option A：accessToken 内存闭包 + refreshToken httpOnly cookie | XSS 不可窃 accessToken |
+| `5b4e90a` | **P0-1** invites.ts 双重 baseURL → `/api/api/...` 404 | 注册卡住修复 |
+| `27b77cd` | **P0-5** RoleGuard 加 `is_active` 校验 | 被禁管理员无法进 |
+| `1a6efe6` | **P0-2** JWT_SECRET 弱默认改 fail-fast | 防任意伪造 admin token |
+| `feb259e` | **P0-8** OptimizedOrchestrator 加 process_message_stream | `/api/chat/stream` 503 修复 |
+| `0b25faf` | **P0-7** Orchestrator 兼容 character_id 签名 | 双编排器签名冲突修复 |
+
+**2 个 P0 跳过（用户决策）：**
+- **P0-3** 跳过：智谱/讯飞/百度是免费档 Key，泄漏无损失；.env 已被 .gitignore 保护
+- **P0-4** 跳过：用户明确不修（authStore import admin 违 FF-0007 精神）
+
+**修复后测试基线：**
+- pytest **625 passed, 1 skipped, 0 failed** (67.25s)
+- vitest **4/4 passed** (3.31s)
+- playwright **3/3 passed** (5.6s)
+- tsc **0 errors**
+- ruff/mypy：未重跑（基线 0 错未触发）
+
+**未做但已评估可接受：**
+- P0-3 真实 API Key 轮换（用户说不需要）
+- Phase 2 CI cron 修复（30 分钟，可选）
+- 18 个 P1 债务（用户决策：内测时清，不挡内测）
+- 真 LLM 流式（当前 P0-8 修法：调 process_message 拿完整 reply，按 8 字符/块 yield；真"边生成边 yield"留 P2）
+
+**审计报告**：`docs/audits/2026-06-02-full-audit.md`（4 维度合稿，~300 行）
+
+**remote 注意**：当前 remote 是 `github.com/FOURTEEN1416/fourteen.git`（不是 ai-girlfriend），是历史遗留配置；push 已成功到该仓库。
+
