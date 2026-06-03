@@ -76,8 +76,10 @@ async function mockWechatStatus(page: Page) {
 test.describe('Login Smoke Tests', () => {
 
   test('login page renders', async ({ page }) => {
-    await page.goto('/login')
-    await page.waitForLoadState('networkidle')
+    await page.goto('/login', { waitUntil: 'networkidle' })
+
+    // 等待 React 挂载完成
+    await page.waitForSelector('h1', { timeout: 15000 })
 
     // 1) 页面标题
     await expect(page.locator('h1')).toContainText('唯一的你')

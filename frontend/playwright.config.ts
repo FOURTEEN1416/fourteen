@@ -24,14 +24,14 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: 'bun run dev',
+      command: process.env.CI ? 'bun run preview --port 5199' : 'bun run dev',
       url: 'http://127.0.0.1:5199',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
       cwd: '.',
       env: {
-        VITE_DEV_PORT: '5199',
         VITE_API_BASE: 'http://localhost:8000',
+        ...(process.env.CI ? {} : { VITE_DEV_PORT: '5199' }),
       },
     },
   ],

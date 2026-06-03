@@ -7,7 +7,7 @@ dst_dir = "data/characters"
 os.makedirs(dst_dir, exist_ok=True)
 
 ok = 0
-errors = []
+errors: list[str] = []
 
 for fname in sorted(os.listdir(src_dir)):
     if not fname.endswith(".json"):
@@ -50,7 +50,7 @@ HEADERS = {"X-API-Key": API_KEY}
 test_ids = ["sys_001", "阿哈(1)", "孙颖莎"]  # try different patterns
 for cid in test_ids:
     try:
-        url = f"{API_BASE}/api/characters/{urllib.request.quote(cid, safe='')}/knowledge/stats"
+        url = f"{API_BASE}/api/characters/{urllib.parse.quote(cid, safe='')}/knowledge/stats"
         req = urllib.request.Request(url, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=10) as resp:
             result = json.loads(resp.read().decode())

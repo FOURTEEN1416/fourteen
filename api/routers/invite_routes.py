@@ -156,7 +156,7 @@ async def register_with_invite(
 
     # ── 标记邀请码已使用 ──
     invite.used_by = user.id
-    invite.used_at = datetime.now(timezone.utc)
+    invite.used_at = datetime.now(timezone.utc)  # type: ignore[assignment]
     await db.flush()
 
     # ── 生成令牌 ──
@@ -292,7 +292,7 @@ async def list_invites(
     expired_count = sum(1 for c in all_list if not c.is_valid() and c.used_by is None and not c.is_revoked)
 
     return InviteListResponse(
-        items=[InviteCodeItem(**c.to_dict()) for c in invites],
+        items=[InviteCodeItem(**c.to_dict()) for c in invites],  # type: ignore[attr-defined]
         total=total,
         page=page,
         page_size=page_size,
