@@ -12,7 +12,7 @@ export default defineConfig({
   },
   reporter: [
     ['list'],
-    ['html', { outputFolder: 'test-results/html-report' }],
+    ['html', { outputFolder: '../playwright-report' }],
   ],
   use: {
     baseURL: process.env.BASE_URL || 'http://127.0.0.1:5199',
@@ -24,10 +24,10 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: process.env.CI ? 'bun run preview --port 5199' : 'bun run dev',
+      command: process.env.CI ? 'bun run preview --port 5199 --host 127.0.0.1' : 'bun run dev',
       url: 'http://127.0.0.1:5199',
       reuseExistingServer: !process.env.CI,
-      timeout: 120_000,
+      timeout: 60_000,
       cwd: '.',
       env: {
         VITE_API_BASE: 'http://localhost:8000',
