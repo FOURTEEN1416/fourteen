@@ -32,7 +32,34 @@ logger = logging.getLogger("auth_jwt")
 # 配置（可被环境变量覆写）
 # ═══════════════════════════════════════════════════════
 
-JWT_SECRET = os.environ.get("JWT_SECRET", "dev-jwt-secret-change-in-production-32chars!")
+# 修复 P0-2：旧代码用 dev-jwt-secret-change-in-production-32chars! 弱默认
+# 生产忘配 JWT_SECRET → 任何人都能用此 secret 伪造 admin token
+
+# 仅用于 dev/test 兜底——生产环境必须显式提供，且 >=32 字符
+_DEV_ONLY_JWT_SECRET = "dev-only-DO-NOT-USE-IN-PRODUCTION-32chars-ok-ok!"
+_MIN_SECRET_LEN = 32
+
+JWT_SECRET = os.environ.get("JWT_SECRET", "")
+_IS_PROD = os.environ.get("ENV", os.environ.get("APP_ENV", "")).lower() in ("prod", "production")
+
+if _IS_PROD and (not JWT_SECRET or len(JWT_SECRET) < _MIN_SECRET_LEN):
+    raise RuntimeError(
+        "JWT_SECRET must be set and >=%d chars in production. "
+        "Generate with: openssl rand -base64 48" % _MIN_SECRET_LEN
+    )
+
+if not JWT_SECRET:
+    # dev/test 兜底：保留可启动能力，但日志高强度警告
+    JWT_SECRET = _DEV_ONLY_JWT_SECRET
+    logger.warning(
+        "🔓 JWT_SECRET 未设置，使用 DEV-ONLY 默认值（不安全）。"
+        "生产环境必须显式设置 JWT_SECRET>=32 字符，否则任何用户可伪造 token。"
+    )
+elif len(JWT_SECRET) < _MIN_SECRET_LEN:
+    raise ValueError(
+        f"JWT_SECRET too short ({len(JWT_SECRET)} chars); minimum {_MIN_SECRET_LEN} chars required"
+    )
+
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("JWT_ACCESS_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.environ.get("JWT_REFRESH_EXPIRE_DAYS", "7"))
