@@ -241,7 +241,7 @@ class PADODetector:
         self._last_detect_time = now
 
         # Chameleon效应隔离：如果消息很短(<5字)，降低置信度
-        # 因为短消息容易被AI虚拟伴侣的情感"传染"，不代表用户真实人格
+        # 因为短消息容易被AI的情感"传染"，不代表用户真实人格
         msg_len = len(message.strip())
         chameleon_penalty = 1.0
         if self.chameleon_guard and msg_len < 10:

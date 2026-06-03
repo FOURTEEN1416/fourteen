@@ -55,7 +55,7 @@ def create_api_app(
     _is_prod = os.environ.get("ENV", os.environ.get("APP_ENV", "")).lower() in ("prod", "production")
 
     # ── FastAPI 实例 ──
-    app = FastAPI(title="唯一的你 AI虚拟伴侣系统API", version="2.0", debug=not _is_prod)
+    app = FastAPI(    title="唯一的你 API", version="2.0", debug=not _is_prod)
 
     # ═══════════════════════════════════════════════════
     # 中间件

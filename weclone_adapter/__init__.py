@@ -1,5 +1,5 @@
 """
-WeClone 适配器 — 将 WeChatMsg 数据提取桥接到 AI 女友项目
+WeClone 适配器 — 将 WeChatMsg 数据提取桥接到 唯一的你 项目
 
 集成 LC044/WeChatMsg 的数据导出功能，直接送入 clone_training 管线。
 

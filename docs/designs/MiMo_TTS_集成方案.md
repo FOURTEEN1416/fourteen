@@ -201,7 +201,7 @@ await tts_manager.initialize(config={
 })
 
 # 合成语音
-audio_data = await tts_manager.synthesize("你好，我是你的AI女友", emotion="开心")
+audio_data = await tts_manager.synthesize("你好，我是十四", emotion="开心")
 ```
 
 ### 语音克隆
@@ -227,7 +227,7 @@ result = await provider.clone_voice(
 
 # 使用克隆的音色
 provider.set_voice_id(result["voice_id"])
-audio = await provider.synthesize("你好，我是你的AI女友")
+audio = await provider.synthesize("你好，我是十四")
 ```
 
 ### 音色设计

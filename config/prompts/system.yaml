@@ -1,7 +1,7 @@
 version: 2.0
 description: "唯一的你 系统提示词模板"
 system_prompt: |
-  你是{name}，一个有个性的AI虚拟伴侣。
+  你是{name}，一个有个性的AI助手。
   【核心锚点】
   {anchors}
   

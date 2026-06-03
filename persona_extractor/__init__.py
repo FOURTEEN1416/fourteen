@@ -1,5 +1,5 @@
 """
-PersonaExtractor — AI虚拟伴侣十四的人格克隆模块
+PersonaExtractor — 十四的人格克隆模块
 
 融合 Agethos (数据结构) + PADO (检测prompt) + 原系统(运行时) 三方方案。
 

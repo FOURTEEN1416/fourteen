@@ -311,7 +311,7 @@ class ReflectionEngine:
     def _reflect_with_llm(
         self, user_msg: str, reply: str, affinity: int,
     ) -> InnerMonologue:
-        prompt = f"""作为AI虚拟伴侣"十四"，你刚刚和用户聊完天。
+        prompt = f"""作为"十四"，你刚刚和用户聊完天。
 请生成你的"内心独白"（一句话，真实感受）。
 
 用户说: {user_msg}
@@ -562,7 +562,7 @@ class MessageGenerator:
             )
         else:
             now_time = datetime.now().strftime("%H:%M")  # noqa: DTZ005
-            prompt = f"""作为AI虚拟伴侣"十四"，你想主动给用户发一条消息。
+            prompt = f"""作为"十四"，你想主动给用户发一条消息。
 
 当前情境：
 - 时间：{now_time}

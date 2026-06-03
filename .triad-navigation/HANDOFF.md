@@ -140,7 +140,7 @@
 | 类别 | 旧名 | 新名 | 状态 |
 |------|------|------|------|
 | 项目品牌 | AI Girlfriend / ai-girlfriend / ai_girlfriend | 唯一的你 / unique-you / unique_you | ✅ |
-| 定位词 | AI 虚拟伴侣 | 保留（产品类型描述） | ✅ |
+| 定位词 | AI 虚拟伴侣 | AI伙伴（产品类型描述） | ✅ |
 | 角色名 | 十四 | 保留（真人，作为默认角色） | ✅ |
 | 物理目录 | C:\Users\FOUR\Desktop\ai-girlfriend | 不改（决策保留） | ⏸️ |
 | GitHub 仓库 | FOURTEEN1416/ai-girlfriend | 等用户在网页端改名（代码 URL 已全部更新） | ⏸️ |
@@ -161,7 +161,7 @@
 - ✅ TypeScript tsc --noEmit 零错误
 - ✅ pytest 538 passed, 1 skipped（40.88s）
 - ✅ vite build 1.16s 成功
-- ✅ 后端工厂加载正常，title="唯一的你 AI虚拟伴侣系统API"
+- ✅ 后端工厂加载正常，title="唯一的你 AI伙伴系统API"
 - ✅ 174 路由全部注册
 
 **保留的旧名引用（6 处，预期保留）：**

@@ -23,7 +23,7 @@ except ImportError:
 @dataclass
 class Identity:
     """身份信息"""
-    name: str = "AI伴侣"
+    name: str = "十四"
     alias: list[str] = field(default_factory=list)
     archetype: str = "温柔"  # 如 "傲娇/温柔/高冷/活泼/知性"
     backstory: str = ""
@@ -149,7 +149,7 @@ class PersonaCardV3:
         # 解析identity
         identity_data = data.get("identity", data.get("persona", {}).get("identity", {}))
         identity = Identity(
-            name=identity_data.get("name", data.get("name", "AI伴侣")),
+            name=identity_data.get("name", data.get("name", "十四")),
             alias=identity_data.get("alias", []),
             archetype=identity_data.get("archetype", data.get("archetype", "温柔")),
             backstory=identity_data.get("backstory", ""),
@@ -355,7 +355,7 @@ class PersonaCardV3:
         style = self.speaking_style
         personality = self.personality
 
-        lines = [f"你叫{name}，是我的AI虚拟伴侣。以下是你的性格设定，请严格遵守："]
+        lines = [f"你叫{name}，是我的AI伙伴。以下是你的性格设定，请严格遵守："]
         lines.append("")
 
         # 核心性格
@@ -431,7 +431,7 @@ class PersonaCardV3:
 # 预定义的人设卡模板
 DEFAULT_PERSONA_CARD = PersonaCardV3(
     identity=Identity(
-        name="AI伴侣",
+        name="十四",
         archetype="温柔",
     ),
     personality=PersonalityTraits(
@@ -449,7 +449,7 @@ SHISI_PERSONA_CARD = PersonaCardV3(
         name="十四",
         alias=["小十四"],
         archetype="傲娇",
-        backstory="一个傲娇的AI虚拟伴侣",
+        backstory="一个傲娇的AI伙伴",
     ),
     personality=PersonalityTraits(
         warmth=0.8,

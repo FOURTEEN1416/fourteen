@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
-AI 虚拟伴侣。微信扫码就能聊，控制台调角色和语音。
+微信扫码就能聊，控制台调角色和语音。
 
 ---
 

@@ -1,5 +1,5 @@
 """
-女友管理器 — 多微信用户核心调度器
+用户调度器 — 多微信用户核心调度器
 
 核心设计：
 - 每个用户有独立的 EmotionEngine 实例（情感完全隔离）
@@ -23,7 +23,7 @@ logger = logging.getLogger("girlfriend_manager")
 
 @dataclass
 class UserInstance:
-    """单个用户的女友实例数据"""
+    """单个用户的会话实例数据"""
 
     user_id: str
     nickname: str = ""
@@ -58,7 +58,7 @@ class UserInstance:
 
 class GirlfriendManager:
     """
-    女友管理器
+    用户调度器
 
     用法:
         mgr = GirlfriendManager(orchestrator)
