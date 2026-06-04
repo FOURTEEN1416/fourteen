@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 import time
@@ -68,18 +69,28 @@ class GirlfriendManager:
     def __init__(self, orchestrator):
         self._orch = orchestrator
         self._users: dict[str, UserInstance] = {}
+        # ── 微信绑定缓存（wxid → binding dict） ──
+        # 在 API 操作绑定或启动时预加载，让 _get_or_create 能查询角色信息
+        self._bindings: dict[str, dict] = {}
         # ── 锁策略说明 ──────────────────────────────────────────────
-        # 使用 threading.Lock 保护 _users 字典的并发访问。
-        # 选择 threading.Lock 而非 asyncio.Lock 的原因：
-        #   1. 所有加锁操作（_get_or_create / remove_user / reset_user）
-        #      都是同步短操作（仅 dict get/set/pop，无 await），
-        #      不会阻塞事件循环。
-        #   2. 每个用户有独立的 EmotionEngine 实例，情感引擎之间
-        #      不存在共享状态的竞态条件。
-        #   3. 消息处理流程（process_message）的并发安全由
-        #      Orchestrator 的 per-session 锁保证，与 _users_lock 无关。
+        # 两个独立锁，分别保护 _users 和 _bindings：
+        #
+        # _users_lock (threading.Lock)：
+        #   保护 _get_or_create / remove_user / reset_user
+        #   这些方法可能从同步或异步上下文调用，且操作 O(1) dict，
+        #   用 threading.Lock 足以（锁持有时间 < 1μs，不阻塞事件循环）。
+        #
+        # _bindings_lock (asyncio.Lock)：
+        #   保护 load_bindings / upsert_binding / remove_binding
+        #   这些方法只从异步 API handler 调用，用 asyncio.Lock
+        #   避免在长时间无响应场景下阻塞事件循环。
+        #
+        # _get_or_create 读 _bindings 时持有 _users_lock 但不持有
+        # _bindings_lock。CPython GIL 保证 dict.get() 是原子的，
+        # 最坏情况读到旧值，下一条消息即更新。
         # ────────────────────────────────────────────────────────────
         self._users_lock = threading.Lock()
+        self._bindings_lock = asyncio.Lock()
 
         # 从 orchestrator 的共享情感引擎提取配置
         self._engine_template = None
@@ -143,13 +154,19 @@ class GirlfriendManager:
         with self._users_lock:
             if user_id not in self._users:
                 engine = self._create_user_engine()
+                # 查绑定缓存，用绑定的角色和昵称
+                binding = self._bindings.get(user_id)
+                character_card_id = binding["character_card_id"] if binding else "default"
+                nickname = binding["nickname"] if binding else ""
                 instance = UserInstance(
                     user_id=user_id,
+                    nickname=nickname,
+                    character_card_id=character_card_id,
                     session_id=user_id,
                     emotion_engine=engine,
                 )
                 self._users[user_id] = instance
-                logger.info("✨ 新用户接入: %s (总用户数: %d)", user_id, len(self._users))
+                logger.info("✨ 新用户接入: %s → 角色 %s (总用户数: %d)", user_id, character_card_id, len(self._users))
             return self._users[user_id]
 
     def remove_user(self, user_id: str) -> bool:
@@ -230,6 +247,49 @@ class GirlfriendManager:
     @property
     def active_user_count(self) -> int:
         return len(self._users)
+
+    # ── 绑定缓存管理 ───────────────────────────────────
+    #
+    # 绑定缓存是 SQLite wechat_bindings 表的内存镜像，
+    # 使 _get_or_create 能在不查 DB（异步）的情况下获取角色信息。
+    #
+    # 三种更新路径：
+    #   1. 启动预加载: load_bindings()
+    #   2. API 创建绑定: upsert_binding()
+    #   3. API 切换角色: upsert_binding()
+    # ──────────────────────────────────────────────────
+
+    async def load_bindings(self, bindings: list[dict]) -> None:
+        """启动时预加载所有绑定到缓存"""
+        async with self._bindings_lock:
+            self._bindings.clear()
+            for b in bindings:
+                wxid = b.get("wxid", "")
+                if wxid:
+                    self._bindings[wxid] = b
+            logger.info("已加载 %d 条绑定到缓存", len(self._bindings))
+
+    async def upsert_binding(self, wxid: str, data: dict) -> None:
+        """API 操作绑定后同步更新缓存和实时用户实例"""
+        async with self._bindings_lock:
+            # 更新缓存
+            if wxid in self._bindings:
+                self._bindings[wxid].update(data)
+            else:
+                self._bindings[wxid] = data
+        # 同步更新已在内存中的用户实例（用 threading.Lock，不阻塞事件循环）
+        with self._users_lock:
+            if wxid in self._users:
+                if "character_card_id" in data:
+                    self._users[wxid].character_card_id = data["character_card_id"]
+                    logger.info("用户 %s 实时角色切换 → %s", wxid, data["character_card_id"])
+                if "nickname" in data:
+                    self._users[wxid].nickname = data["nickname"]
+
+    async def remove_binding(self, wxid: str) -> None:
+        """解除绑定时清理缓存"""
+        async with self._bindings_lock:
+            self._bindings.pop(wxid, None)
 
     def health_check(self) -> dict[str, Any]:
         return {

@@ -6,6 +6,7 @@ import csv
 import io
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,8 @@ from pydantic import BaseModel
 from api.deps import deps
 from my_character.persona_card import PersonaCardV3
 from shisi.voice.character_voice import CharacterVoiceManager
+
+PRESETS_DIR = Path("data/presets")
 
 logger = logging.getLogger("api.character_routes")
 
@@ -483,6 +486,109 @@ async def export_character(
     })
 
 
+# ── 内置角色预设 ────────────────────────────────────────
+
+
+@router.get("/presets")
+async def list_presets(
+    _auth: bool = Security(_verify_api_key),
+):
+    """获取所有内置角色预设"""
+    PRESETS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 优先读取缓存的索引文件
+    index_path = PRESETS_DIR / "_index.json"
+    if index_path.exists():
+        try:
+            with open(index_path, encoding="utf-8") as f:
+                index_data = json.load(f)
+            return {"presets": index_data, "total": len(index_data)}
+        except Exception:
+            pass
+
+    # 降级：扫描目录
+    presets = []
+    for f in sorted(PRESETS_DIR.glob("*.json")):
+        if f.name.startswith("_"):
+            continue
+        try:
+            with open(f, encoding="utf-8") as fh:
+                data = json.load(fh)
+            d = data.get("data", {})
+            presets.append({
+                "id": f.stem,
+                "name": d.get("name", ""),
+                "description": (d.get("description", "") or "")[:500],
+                "tags": d.get("tags", []),
+                "has_first_mes": bool(d.get("first_mes")),
+            })
+        except Exception as e:
+            logger.debug("读取预设失败 %s: %s", f.name, e)
+
+    return {"presets": presets, "total": len(presets)}
+
+
+@router.get("/presets/{preset_id}")
+async def get_preset(
+    preset_id: str,
+    _auth: bool = Security(_verify_api_key),
+):
+    """获取单个内置角色预设的完整数据，映射为前端 PersonaState 友好格式"""
+    # 先检查安全文件名
+    safe_id = re.sub(r'[^\w\u4e00-\u9fff\-]', '', preset_id)
+    preset_path = PRESETS_DIR / f"{safe_id}.json"
+
+    if not preset_path.exists():
+        raise HTTPException(status_code=404, detail=f"预设不存在: {preset_id}")
+
+    try:
+        with open(preset_path, encoding="utf-8") as f:
+            card = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取预设失败: {e}") from e
+
+    d = card.get("data", {})
+    tags = d.get("tags", [])
+
+    # 从 personality 文本中尝试提取性格关键词作为 anchors 补充
+    personality_text = d.get("personality", "") or ""
+    extracted_anchors = []
+    if personality_text and not tags:
+        # 尝试用常见分隔符拆分
+        for sep in ["、", "，", ",", "；", ";", " "]:
+            if sep in personality_text:
+                parts = [p.strip() for p in personality_text.split(sep) if len(p.strip()) > 1]
+                if len(parts) >= 2:
+                    extracted_anchors = parts[:8]
+                    break
+
+    preset_response = {
+        "preset_id": safe_id,
+        "name": d.get("name", ""),
+        "description": d.get("description", "") or "",
+        "personality_text": personality_text,
+        "scenario": d.get("scenario", "") or "",
+        "first_mes": d.get("first_mes", "") or "",
+        "alternate_greetings": d.get("alternate_greetings", []),
+        "tags": tags,
+        "anchors": tags[:8] if tags else (extracted_anchors if extracted_anchors else []),
+        "personality": {
+            "warmth": 0.6,
+            "playfulness": 0.5,
+            "independence": 0.5,
+            "jealousy": 0.3,
+            "stubbornness": 0.4,
+        },
+        "speakingStyle": {
+            "formality": 0.5,
+            "expressiveness": 0.5,
+            "humor": 0.5,
+            "directness": 0.5,
+        },
+    }
+    return preset_response
+
+
 # ── 记忆事实管理 ────────────────────────────────────────
 
 MEMORY_FACTS_DIR = Path("data") / "character_memory"
@@ -613,7 +719,6 @@ async def generate_character_from_description(
 
     try:
         response = llm.chat_sync(query=prompt, max_tokens=1024, temperature=0.7)
-        import re
         json_match = re.search(r'\{.*\}', response, re.DOTALL)
         if not json_match:
             raise HTTPException(status_code=500, detail="LLM 返回格式异常，无法解析")

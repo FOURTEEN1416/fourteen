@@ -42,3 +42,40 @@ export function wechatUpdateConnection(
 export function wechatDeleteConnection(wxid: string) {
   return client.delete(`/wechat/connections/${wxid}`)
 }
+
+// ── 微信绑定管理（JWT 鉴权） ─────────────────────────
+
+export interface WechatBindingDTO {
+  id: number
+  user_id: number
+  wxid: string
+  nickname: string
+  avatar: string
+  character_card_id: string
+  bound_at: string
+}
+
+/** POST /api/wechat/bind — 将微信绑定到当前登录账号 */
+export function bindWechat(data: { wxid: string; nickname?: string; avatar?: string }) {
+  return client.post<{ status: string; wxid: string; binding: WechatBindingDTO }>('/wechat/bind', data)
+}
+
+/** GET /api/wechat/bindings — 获取当前用户的微信绑定列表 */
+export function listMyBindings() {
+  return client.get<{ bindings: WechatBindingDTO[]; total: number }>('/wechat/bindings')
+}
+
+/** PUT /api/wechat/bindings/:wxid — 更新绑定（昵称 / 角色卡） */
+export function updateBinding(
+  wxid: string,
+  data: { nickname?: string; character_card_id?: string }
+) {
+  return client.put<{ status: string; wxid: string; binding: WechatBindingDTO }>(
+    `/wechat/bindings/${wxid}`, data
+  )
+}
+
+/** DELETE /api/wechat/bindings/:wxid — 解除微信绑定 */
+export function unbindWechat(wxid: string) {
+  return client.delete<{ status: string; wxid: string }>(`/wechat/bindings/${wxid}`)
+}

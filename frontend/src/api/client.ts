@@ -34,12 +34,16 @@ import {
   tools, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,
   logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
   wechatConnectionStatus, wechatQrCode,
-  psychProfile, psychSnapshots, psychReset, psychMentalHealth, psychLiwc,
   safetyStats, safetyLog, safetyConfig,
   ragStats, ragSearch, ragUpload,
   voiceStatus, voiceSynthesize, getSpeakers,
   plugins, togglePlugin, uploadFile,
+  psychProfile, psychSnapshots, psychReset, psychMentalHealth, psychLiwc,
 } from './system'
+import {
+  wechatCreateConnection, wechatListConnections, wechatUpdateConnection, wechatDeleteConnection,
+  bindWechat, listMyBindings, updateBinding, unbindWechat,
+} from './wechat'
 import {
   listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
   getPersona, updatePersona,
@@ -49,6 +53,7 @@ import {
   getStorylineProgress, detectStoryline, resetStoryline,
   getVoiceConfig, bindVoice, updateVoice, unbindVoice, testVoice,
   exportCharacter, importCharacter,
+  listPresets, getPreset,
 } from './characters'
 import {
   listUsers, getUserDetail, getUserChatHistory, getUserEmotion,
@@ -235,9 +240,14 @@ export {
   getStorylineProgress, detectStoryline, resetStoryline,
   getVoiceConfig, bindVoice, updateVoice, unbindVoice, testVoice,
   exportCharacter, importCharacter,
+  listPresets, getPreset,
 }
 export { listUsers, getUserDetail, getUserChatHistory, getUserEmotion, setUserRole, resetUser, deleteUser }
 export { adminListUsers, adminUpdateUser, adminDeleteUser, adminCreateUser }
+export {
+  wechatCreateConnection, wechatListConnections, wechatUpdateConnection, wechatDeleteConnection,
+  bindWechat, listMyBindings, updateBinding, unbindWechat,
+}
 export {
   health, stats, dashboardStats, config, saveConfig,
   personaProfile, personaEvolutionLog, memoryFacts,
@@ -278,8 +288,12 @@ export const api = {
   getStorylineProgress, detectStoryline, resetStoryline,
   getVoiceConfig, bindVoice, updateVoice, unbindVoice, testVoice,
   exportCharacter, importCharacter,
+  listPresets, getPreset,
   // users domain
   listUsers, getUserDetail, getUserChatHistory, getUserEmotion, setUserRole, resetUser, deleteUser,
   // admin domain
   adminListUsers, adminUpdateUser, adminDeleteUser, adminCreateUser,
+  // wechat bindings
+  wechatCreateConnection, wechatListConnections, wechatUpdateConnection, wechatDeleteConnection,
+  bindWechat, listMyBindings, updateBinding, unbindWechat,
 }

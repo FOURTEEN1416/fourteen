@@ -78,5 +78,8 @@ concepts-overview.html
 run_api_only.py
 /0
 create-role-after-fix/
+# ── UI 快照（二进制 diff，不提交） ──
+create-role-snapshot.md
+create-role-presets.png
 
 .env

@@ -1,7 +1,7 @@
 ﻿# COMPASS — 指南针（ADR + 原则体系）
 
 > 项目：唯一的你
-> 更新日期：2026-06-01（全面审计） | 审计人：歆歆
+> 更新日期：2026-06-03（P0 修复 + CI 加固 + 品牌清洗） | 审计人：默默 (doc-updater)
 
 ---
 
@@ -86,39 +86,36 @@ JSX 中使用的每个 CSS 类必须在 Tailwind 或自定义 CSS 中有对应�
 **影响**：
 - 后端新增：api/auth_jwt.py, api/database.py, api/routers/auth_routes.py, api/routers/admin_routes.py
 - 前端新增：src/api/auth.ts, src/store/authStore.ts, src/pages/LoginPage.tsx, src/components/auth/AuthGuard.tsx
-- ⚠️ **当前状态：后端文件就绪，前端文件已创建但未接入 App.tsx（LoginPage 未注册路由，AuthGuard 未包裹）**
+- ✅ **状态**：LoginPage 已注册路由，AuthGuard 已包裹 ProtectedLayout
 
 ---
 
 ## 前后端 API 对齐状态
 
-### 对齐矩阵（2026-06-01 审计）
+### 对齐矩阵（2026-06-03 审计）
 
 | 前端 API 模块 | 后端路由模块 | 状态 |
 |-------------|-------------|------|
-| chat.ts | main_routes.py (+ emotion_routes.py) | ✅ |
-| users.ts | main_routes.py | ✅ |
+| chat.ts | _chat_routes.py + emotion_routes.py | ✅ |
+| users.ts | _users_routes.py | ✅ |
 | characters.ts | character_routes.py (53端点) | ✅ |
-| training.ts | main_routes.py | ✅ |
-| clone.ts | main_routes.py | ✅ |
+| training.ts | _training_routes.py | ✅ |
+| clone.ts | _clone_routes.py | ✅ |
 | wechat.ts | wechat_routes.py | ✅ |
-| system.ts | main_routes.py | ⚠️ 17处 /shisi/* 旧路由 |
-| auth.ts | auth_routes.py (9) + admin_routes.py (6) | ✅ 新 |
+| system.ts | _misc_routes.py | ✅ shisi 旧路由已清理 |
+| auth.ts | auth_routes.py (9) + admin_routes.py (6) | ✅ |
 | voice.ts | voice_routes.py | ✅ |
 | mimo.ts | mimo_voice_routes.py | ✅ |
 | emotion.ts | emotion_routes.py | ✅ |
 | query.ts | — | ⚠️ 需确认后端对应路由 |
+| invites.ts | invite_routes.py (4) | ✅ 新增 |
 
-### shisi 旧路由引用（system.ts 中，需清理）
+### shisi 旧路由引用（✅ 已清理）
 
-17 处 `/shisi/*` 引用：
-- `/shisi/affinity/*` (4)
-- `/shisi/emotion-stage/*` (3)
-- `/shisi/vital-signs/*` (1)
-- `/shisi/stickers/*` (6)
-- `/shisi/voice/training/*` (3)
+17 处 `/shisi/*` 引用（system.ts / client.ts / useQueries.ts / useWebSocket.ts）已于 2026-06-01 清理完毕。
 
 ---
 
 > 更新记录：2026-06-01 — 新增 ADR-0014，更新原则状态，更新 API 对齐矩阵，补充 shisi 路由清单
 > 2026-06-01（重构）— **FF-016/017 落库**（独立 FF 清单段 + ADR-0014 audit cycle 关联）/ CI 新增 `ff-sub-router-mount` job / 7→8 个 CI job
+> 2026-06-03 — **API 对齐矩阵更新**：system.ts shisi 清理完成，新增 invites.ts；**ADR-0014 状态更新**：前端完整接入；**FF-018~023 加入 FF 清单**

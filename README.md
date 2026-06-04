@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12-blue">
   <img src="https://img.shields.io/badge/TypeScript-React%2018-3178c6">
-  <img src="https://img.shields.io/badge/Tests-524+-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-626+-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
@@ -42,7 +42,8 @@ python main.py
 | **记忆系统** | 会记住你说过的事（三层记忆：短期+情景+长期） |
 | **工具** | 天气、日历、提醒、搜索……需要什么可以加 |
 | **剧情线** | 和角色的关系可以按"剧情"推进，有支线和进度追踪 |
-| **管理控制台** | React 前端，14 个页面，角色管理/语音设置/系统配置一站式 |
+| **邀请码注册** | 内测期间通过邀请码注册，管理员在控制台生成 |
+| **管理控制台** | React 前端，15 个页面，角色管理/语音设置/系统配置一站式 |
 
 ---
 
@@ -91,8 +92,9 @@ cd frontend && npx vite --port 5173
 ## 怎么测
 
 ```bash
-pytest                          # 全量（524+ 用例）
+pytest                          # 全量（626+ 用例）
 pytest -m "not slow"           # 跳过慢的
+pytest -x tests/test_invite_codes.py  # 邀请码专项测试（15 个）
 pytest --cov=. --cov-report=html  # 覆盖率报告
 ```
 
@@ -101,9 +103,10 @@ pytest --cov=. --cov-report=html  # 覆盖率报告
 ## 项目结构
 
 ```
-├── api/                  FastAPI 后端（162 路由）
-│   ├── main_routes.py    主路由（chat/users/config/stats/persona/psych/safety/rag）
-│   └── routers/          域路由（character/voice/mimo/storyline/wechat/emotion/memory/knowledge）
+├── api/                  FastAPI 后端（168+ 路由）
+│   ├── _*_routes.py      8 子路由（misc/chat/personality/users/training/tools/safety/clone = 71 端点）
+│   ├── main_routes.py    仅 Pydantic 模型 + 常量 + 空 router 占位（95 行，0 端点）
+│   └── routers/          13 个域路由（character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card）
 ├── voice/                语音引擎：MiMo Cloud / Edge-TTS / SoVITS / Bert-VITS2
 ├── wechat_direct/        微信直连（扫码登录 + 收发消息）
 ├── girlfriend_manager.py 多用户调度（每个微信用户独立情感状态）
@@ -113,15 +116,17 @@ pytest --cov=. --cov-report=html  # 覆盖率报告
 ├── llm_provider/         LLM 接入层（自动 fallback）
 ├── frontend/             React 管理控制台
 │   └── src/
-│       ├── api/          10 个 API 模块（按域拆分）
-│       ├── pages/        14 个页面（全部注册路由）
-│       ├── store/        Zustand（chatStore/errorStore/characterBuilderStore）
+│       ├── api/          12 个 API 模块（按域拆分，含 auth/invites）
+│       ├── pages/        15 个页面（全部注册路由）
+│       ├── store/        Zustand（chatStore/errorStore/characterBuilderStore/authStore）
 │       ├── hooks/        React Query hooks
-│       └── components/   layout + shared + storyline
+│       ├── components/   layout + auth + shared + common + storyline + ui
+│       └── types/        TypeScript 类型定义
 ├── docs/
-│   ├── adr/              架构决策记录（9 个：ADR-0001~0006 + ADR-0011~0013）
-│   └── architecture/     8 层地图 / 设计原则 / Fitness Functions / Bus Factor
-├── tests/                524+ 后端单元测试
+│   ├── adr/              架构决策记录（10 个：ADR-0001~0006 + ADR-0011~0014）
+│   ├── architecture/     8 层地图 / 设计原则 / Fitness Functions / Bus Factor
+│   └── audits/           审计报告
+├── tests/                626+ 后端单元测试
 ├── config/               YAML 配置
 └── main.py               入口
 ```
@@ -143,13 +148,15 @@ pytest --cov=. --cov-report=html  # 覆盖率报告
 ## 开发约定
 
 ```bash
-ruff format .   # 格式化
-ruff check .    # lint
-mypy .          # 类型检查
-bun run build   # 前端构建（cd frontend/）
+ruff format .           # 格式化
+ruff check .            # lint（CI 强制零错误）
+mypy .                  # 类型检查（CI 强制零错误）
+bun run build           # 前端构建（cd frontend/）
+bun run test            # Vitest 前端单元测试
+bunx playwright test    # Playwright E2E 端到端测试
 ```
 
-CI 会自动跑，不合规不合并。具体规则见 `docs/architecture/fitness-functions.md`。
+CI 会自动跑全部检查（lint/type/test/build），不合规不合并。具体规则见 `docs/architecture/fitness-functions.md`。
 
 ---
 

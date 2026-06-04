@@ -1,7 +1,9 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AnimatedPage, Skeleton, EmptyState } from '../components/shared'
-import { listUsers, toUserDisplay, type UserDisplay } from '../api/users'
+import { listMyBindings, unbindWechat, type WechatBindingDTO } from '../api/wechat'
+import { getAccessToken } from '../store/authStore'
+import { Smartphone, Trash2, User, ExternalLink } from 'lucide-react'
 
 const GRADIENTS = [
   'from-primary-400 to-accent-500',
@@ -14,27 +16,12 @@ const GRADIENTS = [
   'from-indigo-400 to-blue-500',
 ]
 
-function getInitials(name: string): string {
-  return name.slice(0, 2)
-}
-
-function gradientForUser(id: string): string {
+function gradientForWxid(wxid: string): string {
   let hash = 0
-  for (let i = 0; i < id.length; i++) {
-    hash = id.charCodeAt(i) + ((hash << 5) - hash)
+  for (let i = 0; i < wxid.length; i++) {
+    hash = wxid.charCodeAt(i) + ((hash << 5) - hash)
   }
   return GRADIENTS[Math.abs(hash) % GRADIENTS.length]
-}
-
-function formatLastActive(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60_000)
-  if (mins < 1) return '刚刚'
-  if (mins < 60) return `${mins} 分钟前`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours} 小时前`
-  const days = Math.floor(hours / 24)
-  return `${days} 天前`
 }
 
 // ---- Component ----
@@ -42,57 +29,89 @@ function formatLastActive(iso: string): string {
 export default function UsersPage() {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
-  const [users, setUsers] = useState<UserDisplay[]>([])
-  const [total, setTotal] = useState(0)
+  const [bindings, setBindings] = useState<WechatBindingDTO[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // 挂载时拉取用户列表（cancelled flag 防竞态）
-  /* eslint-disable react-hooks/set-state-in-effect -- data fetching on mount */
-  useEffect(() => {
-    let cancelled = false
+  // 检查是否已登录
+  const isLoggedIn = !!getAccessToken()
+
+  // 加载绑定列表
+  const loadBindings = useCallback(() => {
+    if (!isLoggedIn) {
+      setLoading(false)
+      setError('请先登录')
+      return
+    }
     setLoading(true)
     setError(null)
-    listUsers()
+    listMyBindings()
       .then((res) => {
-        if (cancelled) return
-        setUsers(res.users.map(toUserDisplay))
-        setTotal(res.total)
+        setBindings(res.data.bindings)
       })
       .catch((err) => {
-        if (cancelled) return
-        setError(err?.response?.data?.detail || err?.message || '加载用户失败')
+        setError(err?.response?.data?.detail || err?.message || '加载绑定失败')
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [])
-  /* eslint-enable react-hooks/set-state-in-effect */
+      .finally(() => setLoading(false))
+  }, [isLoggedIn])
 
-  const filteredUsers = useMemo(() => {
-    if (!search.trim()) return users
+  useEffect(() => {
+    loadBindings()
+  }, [loadBindings])
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return bindings
     const q = search.trim().toLowerCase()
-    return users.filter(
-      (u) =>
-        u.name.toLowerCase().includes(q) ||
-        u.id.toLowerCase().includes(q),
+    return bindings.filter(
+      (b) =>
+        b.wxid.toLowerCase().includes(q) ||
+        b.nickname.toLowerCase().includes(q) ||
+        b.character_card_id.toLowerCase().includes(q),
     )
-  }, [search, users])
+  }, [search, bindings])
+
+  // 解绑
+  const handleUnbind = async (wxid: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!window.confirm('确定解除绑定此微信？')) return
+    try {
+      await unbindWechat(wxid)
+      setBindings((prev) => prev.filter((b) => b.wxid !== wxid))
+    } catch {
+      // toast 已由 client interceptor 处理
+    }
+  }
+
+  // 未登录状态
+  if (!isLoggedIn) {
+    return (
+      <AnimatedPage>
+        <div className="px-4 py-6 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-6xl">
+            <EmptyState
+              icon="🔒"
+              title="请先登录"
+              description="登录后即可查看绑定的微信账号"
+            />
+          </div>
+        </div>
+      </AnimatedPage>
+    )
+  }
 
   return (
     <AnimatedPage>
-      <div className="min-h-screen bg-dynamic px-4 py-6 sm:px-6 lg:px-8">
+      <div className="px-4 py-6 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-6xl">
           {/* Header */}
           <div className="mb-5">
-            <h1 className="text-xl font-bold text-gray-800">用户管理</h1>
+            <h1 className="text-xl font-bold text-gray-800">我的微信</h1>
             <p className="mt-0.5 text-sm text-gray-400">
               共{' '}
               <span className="font-semibold text-gray-600">
-                {loading ? '-' : total}
+                {loading ? '-' : bindings.length}
               </span>{' '}
-              位用户
+              个绑定账号
             </p>
           </div>
 
@@ -112,7 +131,7 @@ export default function UsersPage() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="搜索用户名称或 ID..."
+                placeholder="搜索微信昵称或 wxid..."
                 className="w-full border-0 bg-transparent pl-6 text-sm text-gray-700 placeholder:text-gray-300 focus:outline-none"
               />
               {search && (
@@ -137,7 +156,7 @@ export default function UsersPage() {
             />
           )}
 
-          {/* User grid */}
+          {/* Bindings grid */}
           {loading ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 6 }).map((_, i) => (
@@ -156,23 +175,24 @@ export default function UsersPage() {
                 </div>
               ))}
             </div>
-          ) : filteredUsers.length === 0 && !error ? (
+          ) : filtered.length === 0 && !error ? (
             <EmptyState
-              icon="👤"
-              title={search ? '未找到匹配用户' : '暂无用户'}
-              description={search ? '尝试修改搜索关键词' : '新用户注册后将显示在这里'}
+              icon="📱"
+              title={search ? '未找到匹配' : '暂无绑定'}
+              description={search ? '尝试修改搜索关键词' : '扫码连接微信后，将自动显示在这里'}
             />
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {filteredUsers.map((user) => {
-                const gradient = gradientForUser(user.id)
-                const initials = getInitials(user.name)
-                const lastActive = formatLastActive(user.lastActive)
+              {filtered.map((binding) => {
+                const gradient = gradientForWxid(binding.wxid)
+                const displayName = binding.nickname || binding.wxid
+                const initials = displayName.slice(0, 2)
+                const hasCharacter = binding.character_card_id && binding.character_card_id !== 'default'
 
                 return (
                   <button
-                    key={user.id}
-                    onClick={() => navigate(`/users/${user.id}`)}
+                    key={binding.wxid}
+                    onClick={() => navigate(`/bindings/${binding.wxid}`)}
                     className="glass-card-hover group rounded-xl p-4 text-left transition-all active:scale-[0.98]"
                   >
                     {/* Top row: avatar + name */}
@@ -181,27 +201,49 @@ export default function UsersPage() {
                         className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-sm font-bold text-white shadow-sm ${gradient}`}
                       >
                         {initials}
-                        <span
-                          className={`absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-white ${
-                            user.online ? 'bg-green-400' : 'bg-gray-300'
-                          }`}
-                        />
                       </div>
 
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-gray-800 group-hover:text-primary-600 transition-colors">
-                          {user.name}
+                          {binding.nickname || '微信用户'}
                         </p>
-                        <p className="text-xs text-gray-400">{user.affinityLevel} 级 · {user.affinityName}</p>
+                        <p className="text-xs text-gray-400">
+                          <code className="rounded bg-gray-100 px-1 px-0.5 text-[10px]">{binding.wxid}</code>
+                        </p>
                       </div>
                     </div>
 
-                    {/* Stats row */}
+                    {/* Status row */}
                     <div className="mt-3 flex items-center justify-between border-t border-gray-100 pt-3">
-                      <span className="text-xs text-gray-500">
-                        {user.totalChats} 条对话
+                      <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+                        {hasCharacter ? (
+                          <>
+                            <User className="h-3 w-3" />
+                            {binding.character_card_id}
+                          </>
+                        ) : (
+                          <>
+                            <Smartphone className="h-3 w-3" />
+                            未选角色
+                          </>
+                        )}
                       </span>
-                      <span className="text-xs text-gray-400">{lastActive}</span>
+                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => navigate(`/bindings/${binding.wxid}`)}
+                          className="rounded-lg p-1.5 text-gray-300 transition hover:bg-primary-50 hover:text-primary-500"
+                          title="设置角色"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => handleUnbind(binding.wxid, e)}
+                          className="rounded-lg p-1.5 text-gray-300 transition hover:bg-red-50 hover:text-red-500"
+                          title="解除绑定"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </button>
                 )

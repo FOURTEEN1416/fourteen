@@ -19,6 +19,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -167,6 +168,34 @@ class UserSession(Base):
 
     def __repr__(self) -> str:
         return f"<UserSession(id={self.id}, user_id={self.user_id})>"
+
+
+class WechatBinding(Base):
+    """微信绑定 — 将微信账号关联到注册用户，并记录绑定的角色卡"""
+
+    __tablename__ = "wechat_bindings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    wxid = Column(String(255), unique=True, nullable=False, index=True)
+    nickname = Column(String(255), default="")
+    avatar = Column(Text, default="")
+    character_card_id = Column(String(255), default="default")
+    bound_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "wxid": self.wxid,
+            "nickname": self.nickname,
+            "avatar": self.avatar,
+            "character_card_id": self.character_card_id,
+            "bound_at": self.bound_at.isoformat() if self.bound_at else None,
+        }
+
+    def __repr__(self) -> str:
+        return f"<WechatBinding(id={self.id}, wxid='{self.wxid}', user_id={self.user_id}, char='{self.character_card_id}')>"
 
 
 # ═══════════════════════════════════════════════════════

@@ -24,6 +24,7 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const WeChatPage = lazy(() => import('./pages/WeChatPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
+const BindingDetailPage = lazy(() => import('./pages/BindingDetailPage'))
 
 const SettingsLLM = lazy(() => import('./pages/SettingsLLM'))
 const SettingsVoice = lazy(() => import('./pages/SettingsVoice'))
@@ -92,7 +93,7 @@ function ProtectedLayout() {
       <div className="flex h-screen overflow-hidden bg-dynamic bg-orbs">
         <ScrollProgress />
         <Sidebar />
-        <main className="flex-1 flex flex-col min-w-0 pb-16 lg:pb-0 overflow-y-auto">
+        <main className="flex-1 flex flex-col min-w-0 pt-5 pb-24 lg:pb-6 overflow-y-auto">
           <Breadcrumb />
           <Outlet />
         </main>
@@ -119,6 +120,7 @@ export default function App() {
           {/* Global Level */}
           <Route path="/wechat" element={<AnimatedSuspense><WeChatPage /></AnimatedSuspense>} />
           <Route path="/users" element={<AnimatedSuspense><UsersPage /></AnimatedSuspense>} />
+          <Route path="/bindings/:wxid" element={<AnimatedSuspense><BindingDetailPage /></AnimatedSuspense>} />
 
           {/* User Level */}
           <Route path="/users/:userId" element={<UserWorkspace />}>

@@ -286,6 +286,44 @@ export function exportCharacter(id: string): Promise<Blob> {
   return client.get(`/characters/${id}/export`, { responseType: 'blob' }).then(r => r.data as Blob)
 }
 
+// ════════════════════════════════════════════════════
+//  内置角色预设 (Presets)
+// ════════════════════════════════════════════════════
+
+export interface PresetItem {
+  id: string
+  name: string
+  description: string
+  tags: string[]
+  has_first_mes: boolean
+  has_scenario: boolean
+  char_count: number
+}
+
+export interface PresetDetail {
+  preset_id: string
+  name: string
+  description: string
+  personality_text: string
+  scenario: string
+  first_mes: string
+  alternate_greetings: string[]
+  tags: string[]
+  anchors: string[]
+  personality: Record<string, number>
+  speakingStyle: Record<string, number>
+}
+
+/** GET /api/presets — 获取所有内置角色预设 */
+export function listPresets(): Promise<{ presets: PresetItem[]; total: number }> {
+  return client.get('/presets').then(r => r.data as { presets: PresetItem[]; total: number })
+}
+
+/** GET /api/presets/{id} — 获取单个预设详情（映射为前端 PersonaState 友好格式） */
+export function getPreset(id: string): Promise<PresetDetail> {
+  return client.get(`/presets/${id}`).then(r => r.data as PresetDetail)
+}
+
 /** POST /api/characters/import — 导入角色卡 JSON 文件 */
 export function importCharacter(file: File): Promise<{ id: string; name: string; status: string }> {
   const fd = new FormData()

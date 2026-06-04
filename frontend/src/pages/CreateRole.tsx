@@ -3,10 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useCreateCharacter } from '../hooks/useQueries'
 import { useErrorStore } from '../store/errorStore'
 import { useCharacterBuilderStore, type PersonaState } from '../store/characterBuilderStore'
-import { chat } from '../api/client'
+import { chat, listPresets, getPreset } from '../api/client'
+import type { PresetItem } from '../api/characters'
 import {
   MessageCircle, Users, FileUp, Send, Loader2,
-  Sparkles, Bot, Check,
+  Sparkles, Bot, Check, BookOpen, ChevronDown, ChevronUp,
 } from 'lucide-react'
 
 type CreateMethod = 'ai-chat' | 'wechat-clone' | 'file-import'
@@ -189,6 +190,112 @@ function CreateButton() {
   )
 }
 
+// ═══ Built-in Preset Grid ═══
+function PresetGrid({ onSelect }: { onSelect: (p: Partial<PersonaState>) => void }) {
+  const [presets, setPresets] = useState<PresetItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(true)
+  const cancelledRef = useRef(false)
+
+  useEffect(() => {
+    listPresets()
+      .then(res => { if (!cancelledRef.current) setPresets(res.presets || []) })
+      .catch((err: unknown) => console.warn('加载预设角色失败:', err))
+      .finally(() => { if (!cancelledRef.current) setLoading(false) })
+    return () => { cancelledRef.current = true }
+  }, [])
+
+  async function handleSelect(item: PresetItem) {
+    setSelectedId(item.id)
+    try {
+      const detail = await getPreset(item.id)
+      onSelect({
+        name: detail.name,
+        description: detail.description,
+        anchors: detail.anchors?.length ? detail.anchors : detail.tags?.slice(0, 8) || [],
+        personality: detail.personality || {
+          warmth: 0.6, playfulness: 0.5, independence: 0.5,
+          jealousy: 0.3, stubbornness: 0.4,
+        },
+        speakingStyle: detail.speakingStyle || {
+          formality: 0.5, expressiveness: 0.5, humor: 0.5, directness: 0.5,
+        },
+      })
+    } catch (err) {
+      console.warn('获取预设详情失败，使用概要数据:', err)
+      // fallback: fill basic info
+      onSelect({
+        name: item.name,
+        description: item.description,
+        anchors: item.tags?.slice(0, 8) || [],
+      })
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-4">
+        <Loader2 className="w-4 h-4 text-gray-400 animate-spin" />
+        <span className="text-xs text-gray-400 ml-2">加载预设角色...</span>
+      </div>
+    )
+  }
+
+  if (!presets.length) return null
+
+  return (
+    <div className="bg-white/40 backdrop-blur-sm border border-gray-200/50 rounded-2xl overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-5 py-3 text-sm font-semibold text-gray-600 hover:bg-white/40 transition-colors"
+      >
+        <span className="flex items-center gap-2">
+          <BookOpen className="w-4 h-4 text-accent-400" />
+          内置角色预设
+          <span className="text-[10px] font-normal text-gray-400 ml-1">({presets.length} 个)</span>
+        </span>
+        {expanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+      </button>
+      {expanded && (
+        <div className="px-5 pb-4">
+          <p className="text-[11px] text-gray-400 mb-3">选择一个内置角色预设，人设将自动填充到侧边栏预览卡</p>
+          <div className="grid grid-cols-2 gap-2">
+            {presets.map(item => (
+              <button
+                key={item.id}
+                onClick={() => handleSelect(item)}
+                className={`text-left p-3 rounded-xl border transition-all ${
+                  selectedId === item.id
+                    ? 'border-accent-400 bg-accent-50/60 ring-1 ring-accent-400/30'
+                    : 'border-gray-200/60 bg-white/60 hover:border-gray-300 hover:bg-white/80'
+                }`}
+              >
+                <p className={`text-xs font-semibold truncate ${selectedId === item.id ? 'text-accent-700' : 'text-gray-700'}`}>
+                  {item.name}
+                </p>
+                <p className="text-[10px] text-gray-400 mt-0.5 line-clamp-2 leading-relaxed">
+                  {item.description || '暂无描述'}
+                </p>
+                {item.tags && item.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {item.tags.slice(0, 4).map(t => (
+                      <span key={t} className="px-1 py-0.5 rounded bg-gray-100/60 text-[9px] text-gray-500 leading-none">{t}</span>
+                    ))}
+                    {item.tags.length > 4 && (
+                      <span className="text-[9px] text-gray-400 leading-none">+{item.tags.length - 4}</span>
+                    )}
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ═══ Main ═══
 export default function CreateRole() {
   const [method, setMethod] = useState<CreateMethod>('ai-chat')
@@ -211,6 +318,7 @@ export default function CreateRole() {
           <h1 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Sparkles className="w-5 h-5 text-amber-400" />创建角色</h1>
           <p className="text-sm text-gray-400 mt-0.5">选择一种方式来构建你的 AI 角色</p>
         </div>
+        <PresetGrid onSelect={setPersona} />
         <div className="grid grid-cols-3 gap-2">
           {METHODS.map(m => (
             <button key={m.key} onClick={() => setMethod(m.key)} className={`flex flex-col items-center gap-1.5 p-4 rounded-2xl border transition-all ${method === m.key ? 'border-primary-400 bg-primary-50/50 ring-1 ring-primary-400/30' : 'border-gray-200 bg-white hover:border-gray-300'}`}>

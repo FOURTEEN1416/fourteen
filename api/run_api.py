@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import atexit
 import logging
 import os
@@ -26,11 +27,13 @@ if str(_project_root) not in sys.path:
 os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
 
 from api.app_factory import create_api_app  # noqa: E402
+from api.database import WechatBinding, _async_session, init_db  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
 from main import GirlfriendManager, OptimizedOrchestrator  # noqa: E402
 from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
 from observability.health import health_checker  # noqa: E402
 from observability.logging_setup import setup_logging  # noqa: E402
+from sqlalchemy import select  # noqa: E402
 
 logger = logging.getLogger("run_api")
 
@@ -71,6 +74,29 @@ app = create_api_app(
     session_manager=session_mgr,
     girlfriend_manager=girlfriend_mgr,
 )
+
+# ── 数据库初始化 + 预加载微信绑定 ─────────────────────
+
+async def _init_and_preload():
+    """确保数据库表存在，并将微信绑定加载到 GirlfriendManager 缓存"""
+    await init_db()
+    async with _async_session() as session:
+        result = await session.execute(select(WechatBinding))
+        bindings = result.scalars().all()
+        binding_dicts = [
+            {
+                "wxid": b.wxid,
+                "user_id": b.user_id,
+                "nickname": b.nickname,
+                "character_card_id": b.character_card_id,
+            }
+            for b in bindings
+        ]
+        await girlfriend_mgr.load_bindings(binding_dicts)
+    logger.info("✅ 数据库就绪，已加载 %d 条微信绑定", len(binding_dicts))
+
+
+asyncio.run(_init_and_preload())
 
 logger.info("✅ API 应用就绪 — %d 条路由", len(app.routes))
 

@@ -6,8 +6,10 @@ import type { SavedConnection } from '../types/framework'
 import {
   wechatCreateConnection,
   wechatDeleteConnection,
+  bindWechat,
 } from '../api/wechat'
 import { wechatQrCode, wechatConnectionStatus, wechatConnect } from '../api/system'
+import { getAccessToken } from '../store/authStore'
 
 // ── Types ──
 
@@ -154,7 +156,12 @@ function QrCodeConnectionModal({ onClose }: { onClose: () => void }) {
           if (pollingRef.current) clearInterval(pollingRef.current)
           // 自动保存连接
           if (connData.wxid) {
-            wechatCreateConnection({ wxid: connData.wxid }).catch(() => {})
+            const wxid = connData.wxid
+            wechatCreateConnection({ wxid }).catch(() => {})
+            // 如果已登录，自动绑定到当前账号
+            if (getAccessToken()) {
+              bindWechat({ wxid }).catch(() => {})
+            }
           }
         } else if (connData.status === 'scanned') {
           setStatus('scanned')
@@ -403,7 +410,7 @@ export default function WeChatPage() {
 
   return (
     <AnimatedPage>
-      <div className="min-h-screen bg-dynamic px-4 py-6 sm:px-6 lg:px-8">
+      <div className="bg-dynamic px-4 py-6 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-6xl">
           {/* Header */}
           <div className="mb-6 flex items-center justify-between">
