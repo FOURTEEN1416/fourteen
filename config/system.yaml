@@ -14,6 +14,7 @@ llm:
 
   # ── Fallback 链（provider=auto 时生效）──
   # 按优先级依次尝试，前一个不可用自动切到下一个
+  # 用户可在 .env 中配置 DEEPSEEK_API_KEY 后，将 deepseek 插入链首
   fallback_chain:
     - zhipu         # 智谱AI GLM-4.7-Flash（永久免费）
     - xunfei        # 讯飞星火 Spark Lite（永久免费）

@@ -1,6 +1,8 @@
 ﻿# HANDOFF — 工作交接
 
 > 源会话：2026-06-01 全面审计 + 修复执行 + 2026-06-01 全面更名（"AI Girlfriend" → "唯一的你"）+ 2026-06-01 ESLint 前端零警告修复 + 2026-06-01 shisi 历史债清理 + 2026-06-01 全工程 lint/type 零债清理
+
+> **2026-06-04 补充**：全库命名清洗完成（`ai-girlfriend` / `ai_girlfriend` / `AI Girlfriend` → `unique-you` / `unique_you` / `唯一的你`）
 > 执行流水线：startup-calibrator → triad-navigation → domain-explorer → evolution-auditor → loop-executor → constitution-guardian
 > 协调者：歆歆
 

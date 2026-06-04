@@ -33,7 +33,7 @@
 ### 项目目录结构
 
 ```
-ai-girlfriend/
+unique-you/
 ├── api/                    # FastAPI 路由层 (36 文件)
 ├── shisi/                  # 核心业务逻辑 (96 文件)
 ├── frontend/               # React 前端 SPA

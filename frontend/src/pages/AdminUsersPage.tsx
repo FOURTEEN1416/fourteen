@@ -180,8 +180,9 @@ export default function AdminUsersPage() {
   }, [page, pageSize, search, roleFilter])
 
   // 挂载时拉数据（搜索/分页/筛选变化时重拉）
+  // 非 admin 用户不调用 API，避免不必要的 403/404
   /* eslint-disable react-hooks/set-state-in-effect -- data fetching on mount + filter change */
-  useEffect(() => { fetchUsers() }, [fetchUsers])
+  useEffect(() => { if (isAdmin) fetchUsers() }, [fetchUsers, isAdmin])
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // ── 搜索防抖 ──

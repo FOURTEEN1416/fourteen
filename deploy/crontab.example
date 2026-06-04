@@ -1,0 +1,49 @@
+# =============================================================================
+# 唯一的你 PostgreSQL 自动备份 — Crontab 配置
+# =============================================================================
+#
+# 使用方法:
+#   1. 编辑 crontab: crontab -e
+#   2. 粘贴下面一行（去掉注释说明）
+#   3. 保存退出
+#
+# 说明:
+#   - 每天凌晨 3:00 执行数据库备份
+#   - 日志会自动写入 BACKUP_DIR/backup.log
+#   - 备份文件保留 30 天，自动清理旧文件
+#   - 可通过环境变量自定义:
+#       DB_BACKUP_DIR: 备份目录（默认 /opt/unique-you/backups）
+#       DB_RETENTION_DAYS: 保留天数（默认 30）
+#
+# 前置条件:
+#   - pg_dump 已安装（postgresql-client）
+#   - DATABASE_URL 已设置（环境变量或项目 .env 文件）
+#   - 备份目录有写入权限
+#
+# 测试命令:
+#   /opt/unique-you/deploy/backup.sh --test
+#
+# 手动执行一次备份:
+#   /opt/unique-you/deploy/backup.sh
+#
+# =============================================================================
+
+# ┌───────────── 分钟 (0 - 59)
+# │ ┌────────────── 小时 (0 - 23)
+# │ │ ┌─────────────── 日期 (1 - 31)
+# │ │ │ ┌──────────────── 月份 (1 - 12, 或 jan-dec)
+# │ │ │ │ ┌───────────────── 星期 (0 - 7, 0或7=周日)
+# │ │ │ │ │
+# * * * * * 要执行的命令
+
+# 每日凌晨 3:00 执行备份
+# 如果使用自定义备份目录，在 crontab 开头设置:
+# DB_BACKUP_DIR=/custom/path
+# 然后:
+# 0 3 * * * /opt/unique-you/deploy/backup.sh >> /opt/unique-you/backups/backup.log 2>&1
+
+# 如需同时设置环境变量和自定义路径，写成一行:
+# 0 3 * * * DB_BACKUP_DIR=/opt/unique-you/backups /opt/unique-you/deploy/backup.sh >> /opt/unique-you/backups/cron.log 2>&1
+
+# 如果想在备份后发通知，可以:
+# 0 3 * * * /opt/unique-you/deploy/backup.sh && echo "Backup OK" | mail -s "DB Backup Report" admin@example.com

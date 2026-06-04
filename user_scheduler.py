@@ -19,7 +19,7 @@ from typing import Any
 
 from my_character.emotion_engine import AffinityLevel, EmotionEngine
 
-logger = logging.getLogger("girlfriend_manager")
+logger = logging.getLogger("user_scheduler")
 
 
 @dataclass
@@ -57,12 +57,12 @@ class UserInstance:
         return "平常"
 
 
-class GirlfriendManager:
+class UserManager:
     """
     用户调度器
 
     用法:
-        mgr = GirlfriendManager(orchestrator)
+        mgr = UserManager(orchestrator)
         result = await mgr.process_message("wx_小明", "你好呀")
     """
 

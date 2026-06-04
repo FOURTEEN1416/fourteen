@@ -1,6 +1,6 @@
 # 全维度架构审计报告 — 2026-06-02
 
-> **审计范围**：AI Girlfriend 整个代码库（前端 15 routed pages / 后端 145 端点 / 数据库 / 部署 / 流程 / CI）
+> **审计范围**：唯一的你 整个代码库（前端 15 routed pages / 后端 145 端点 / 数据库 / 部署 / 流程 / CI）
 > **审计时间**：2026-06-02 22:30 ~ 23:45
 > **审计者**：4 维度并行 subagent（后端架构 / 前端架构 / 安全配置 / ADR-FF-CI 体系）
 > **代码版本**：`38a3d71`（== origin/main，已推送）
@@ -172,7 +172,7 @@ JWT_ALGORITHM = "HS256"
 - **影响**：误同步到云盘/截图泄漏 = 盗刷 LLM 配额（zhipu/baidu 按 token 计费可破产）
 - **修复**：
   1. 立即轮换 3 个 Key（旧 Key 立即作废）
-  2. 移到用户级 `%USERPROFILE%\.config\ai-girlfriend\.env`（不入仓）
+   2. 移到用户级 `%USERPROFILE%\.config\unique-you\.env`（不入仓）
   3. `.env.example` 只保留字段名
   4. 加 pre-commit hook 检测 `grep -E 'sk-[a-zA-Z0-9]{20,}'`
 

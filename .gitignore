@@ -26,7 +26,8 @@ Thumbs.db
 .env.*.local
 
 # ── IDE/工具 ──
-.omo/
+.opencode/
+omo/
 .vite/
 .codeartsdoer/
 .idea/
@@ -44,6 +45,9 @@ data/
 frontend/dist/
 frontend/.vite/
 frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
+*.tsbuildinfo
 
 # ── 数据库 ──
 *.db
@@ -81,5 +85,9 @@ create-role-after-fix/
 # ── UI 快照（二进制 diff，不提交） ──
 create-role-snapshot.md
 create-role-presets.png
+
+# ── Playwright ──
+playwright-report/
+test-results/
 
 .env

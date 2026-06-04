@@ -50,12 +50,21 @@ def create_api_app(
     health_checker=None,
     config_manager=None,
     session_manager=None,
-    girlfriend_manager=None,
+    user_manager=None,
+    lifespan=None,
 ) -> FastAPI:
     _is_prod = os.environ.get("ENV", os.environ.get("APP_ENV", "")).lower() in ("prod", "production")
 
+    # ── Sentry 错误监控（生产环境自动启用） ──
+    if _is_prod:
+        try:
+            from observability.sentry import init_sentry
+            init_sentry()
+        except Exception:
+            pass  # Sentry 不可用不影响启动
+
     # ── FastAPI 实例 ──
-    app = FastAPI(    title="唯一的你 API", version="2.0", debug=not _is_prod)
+    app = FastAPI(title="唯一的你 API", version="2.0", debug=not _is_prod, lifespan=lifespan)
 
     # ═══════════════════════════════════════════════════
     # 中间件
@@ -150,7 +159,7 @@ def create_api_app(
         health=health_checker,
         config=config_manager,
         sessions=session_manager,
-        gf=girlfriend_manager,
+        gf=user_manager,
     )
 
     # ═══════════════════════════════════════════════════
@@ -222,7 +231,7 @@ def create_api_app(
     try:
         from api.routers.character_routes import router as character_router
         from api.routers.character_routes import set_dependencies as set_character_deps
-        set_character_deps(orchestrator, girlfriend_manager, verify_api_key_dep)
+        set_character_deps(orchestrator, user_manager, verify_api_key_dep)
         app.include_router(character_router)
         logger.info("统一角色管理API已挂载")
     except Exception as e:

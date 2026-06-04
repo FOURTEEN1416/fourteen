@@ -1,4 +1,4 @@
-﻿# Task Plan — AI Girlfriend 多智能体协同执行
+﻿# Task Plan — 唯一的你 多智能体协同执行
 
 ## 目标
 基于默默已做的决策，多智能体并行执行：

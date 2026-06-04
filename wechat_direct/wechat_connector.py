@@ -20,7 +20,7 @@ import requests
 
 logger = logging.getLogger("wechat_direct")
 
-# ── 共享线程池（供 _call_girlfriend_manager 复用，避免反复创建/销毁） ──
+# ── 共享线程池（供 _call_user_manager 复用，避免反复创建/销毁） ──
 _executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="wx_async")
 
 # ── 进程退出时自动关闭线程池，防止资源泄漏 ──
@@ -280,7 +280,7 @@ def _send_emoji_message(to, emoji_md5, context_token,
 # 异步编排器调用（process_message 是 async 的）
 # ═══════════════════════════════════════════════
 
-def _call_girlfriend_manager(mgr, user_id, text):
+def _call_user_manager(mgr, user_id, text):
     """
     调用女友管理器处理消息（多用户路由）。
     process_message 是 async 的，但轮询循环是同步的，
@@ -308,9 +308,9 @@ class WeChatConnector:
         connector.run()  # 登录 + 消息轮询
     """
 
-    def __init__(self, girlfriend_manager, base_url=DEFAULT_BASE_URL):
-        self.girlfriend_manager = girlfriend_manager
-        self.orchestrator = getattr(girlfriend_manager, "_orch", None)
+    def __init__(self, user_manager, base_url=DEFAULT_BASE_URL):
+        self.user_manager = user_manager
+        self.orchestrator = getattr(user_manager, "_orch", None)
         self.base_url = base_url
         self.token = ""
         self.bot_id = ""
@@ -684,7 +684,7 @@ class WeChatConnector:
         logger.info(f"微信消息: from={from_user} text={text[:50]}")
 
         try:
-            result = _call_girlfriend_manager(self.girlfriend_manager, from_user, text)
+            result = _call_user_manager(self.user_manager, from_user, text)
             reply = result.get("reply", "")
             if reply:
                 token = self._get_context_token(from_user) or context_token

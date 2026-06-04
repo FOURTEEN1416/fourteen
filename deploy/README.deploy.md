@@ -94,6 +94,8 @@ sudo bash deploy/deploy.sh
 5. 重启后端服务
 6. 重载 Nginx
 
+> 💡 **首次部署**：部署完成后，运行 python deploy/seed.py 一键生成所有角色的知识库索引（后续新增角色只需重新运行此命令即可增量添加）。
+
 ---
 
 ## 验证部署
@@ -145,8 +147,11 @@ sudo systemctl reload nginx
 systemctl status unique-you-backend
 top -p $(pgrep -f uvicorn)
 
-# 数据库备份
-pg_dump unique_you > backup_$(date +%Y%m%d).sql
+# 数据库备份（推荐使用自动备份脚本）
+bash deploy/backup.sh
+
+# 查看备份列表
+ls -la /opt/unique-you/backups/
 ```
 
 ### 健康检查端点
@@ -156,6 +161,7 @@ pg_dump unique_you > backup_$(date +%Y%m%d).sql
 | `/health` | 基础健康检查 |
 | `/api/health` | API 健康（含数据库连接） |
 | `/metrics` | Prometheus 指标（如果启用） |
+| Sentry | 错误监控（配置 SENTRY_DSN 后自动启用） |
 
 ---
 
@@ -273,7 +279,10 @@ sudo certbot --nginx -d yourdomain.com --force-renewal
 ### Q: 如何迁移数据库？
 
 ```bash
-# 导出
+# 使用备份脚本导出
+bash deploy/backup.sh
+
+# 或手动导出
 pg_dump -U unique_you -h localhost unique_you > dump.sql
 
 # 导入到新服务器

@@ -1,4 +1,4 @@
-# P1 Backlog - AI Girlfriend (唯一的你)
+# P1 Backlog - 唯一的你
 
 **Created**: 2026-06-03
 **Last Updated**: 2026-06-03 (P0 修复 + CI 加固 + 品牌清洗)

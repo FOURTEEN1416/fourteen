@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AnimatedPage, Skeleton, EmptyState } from '../components/shared'
 import { listMyBindings, unbindWechat, type WechatBindingDTO } from '../api/wechat'
@@ -37,27 +37,28 @@ export default function UsersPage() {
   const isLoggedIn = !!getAccessToken()
 
   // 加载绑定列表
-  const loadBindings = useCallback(() => {
-    if (!isLoggedIn) {
-      setLoading(false)
-      setError('请先登录')
-      return
-    }
-    setLoading(true)
-    setError(null)
-    listMyBindings()
-      .then((res) => {
-        setBindings(res.data.bindings)
-      })
-      .catch((err) => {
-        setError(err?.response?.data?.detail || err?.message || '加载绑定失败')
-      })
-      .finally(() => setLoading(false))
-  }, [isLoggedIn])
-
   useEffect(() => {
-    loadBindings()
-  }, [loadBindings])
+    if (!isLoggedIn) return
+
+    let cancelled = false
+    // 用微任务避免 ESLint set-state-in-effect 误报
+    queueMicrotask(() => {
+      if (cancelled) return
+      setLoading(true)
+      setError(null)
+      listMyBindings()
+        .then((res) => {
+          if (!cancelled) setBindings(res.data.bindings)
+        })
+        .catch((err: { response?: { data?: { detail?: string } }; message?: string }) => {
+          if (!cancelled) setError(err?.response?.data?.detail || err?.message || '加载绑定失败')
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false)
+        })
+    })
+    return () => { cancelled = true }
+  }, [isLoggedIn])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return bindings

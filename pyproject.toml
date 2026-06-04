@@ -66,6 +66,7 @@ dependencies = [
     "watchfiles>=0.21.0",
     "redis>=5.0.0",
     "slowapi>=0.1.9",
+    "sentry-sdk>=2.0.0",
 ]
 
 [project.optional-dependencies]

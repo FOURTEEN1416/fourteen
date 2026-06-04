@@ -183,6 +183,7 @@ role:   返回用户列表 · 用户#ID · 创建角色 · 角色功能 · 人�
 | **Phase 14** | **P0 投产阻塞清零** — 邀请码内测系统（后端 4 端点 + 前端 admin UI + 15/15 测试）/ **Vitest+Playwright 框架**（4+3 实跑通过）/ 0 orphan 页面实测 / pytest 625 passed | **2026-06-02** |
 | **Phase 15** | **P0 全面修复** — 6 个 P0 修复（accessToken 内存闭包 / JWT_SECRET fail-fast / RoleGuard / double baseURL / orchestrator 兼容 + 流式）/ pytest 626 passed / vitest 4/4 / playwright 3/3 | **2026-06-03** |
 | **Phase 16** | **CI 加固 + 品牌清洗** — ruff/mypy/vitest/playwright CI 全部 blocking / `'AI伴侣'`→`'十四'` / 全库品牌标签清洗 / P1_BACKLOG.md 建立 | **2026-06-03** |
+| **Phase 17** | **全库命名清洗** — `ai-girlfriend` / `ai_girlfriend` / `AI Girlfriend` → `unique-you` / `unique_you` / `唯一的你` | **2026-06-04** |
 
 ## L7 — 归属
 

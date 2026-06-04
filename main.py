@@ -136,7 +136,7 @@ sys.path.insert(0, str(project_root))
 from api.app_factory import create_api_app  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
 from api.websocket_server import WebSocketServer  # noqa: E402
-from girlfriend_manager import GirlfriendManager  # noqa: E402
+from user_scheduler import UserManager  # noqa: E402
 from llm_provider import get_llm  # noqa: E402
 from memory import StructuredMemory, VectorMemory  # noqa: E402
 from memory.memory_pipeline import MemoryPipeline  # noqa: E402
@@ -1142,7 +1142,7 @@ def run_console_chat(orchestrator_or_obj, orchestrator_mode: str,
         logger.exception("控制台聊天异常")
 
 
-def run_wechat_mode(girlfriend_manager, orchestrator_mode: str,
+def run_wechat_mode(user_manager, orchestrator_mode: str,
                     args: argparse.Namespace) -> None:
     from wechat_direct import WeChatConnector
 
@@ -1151,7 +1151,7 @@ def run_wechat_mode(girlfriend_manager, orchestrator_mode: str,
     print("   每个用户有独立情感/记忆/角色")
     print("   或按 Ctrl+C 退出\n")
 
-    connector = WeChatConnector(girlfriend_manager)
+    connector = WeChatConnector(user_manager)
 
     try:
         connector.run()
@@ -1160,14 +1160,14 @@ def run_wechat_mode(girlfriend_manager, orchestrator_mode: str,
         connector.stop()
 
 
-def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None, girlfriend_manager=None):
+def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None, user_manager=None):
     session_mgr = SessionManager()
 
     app_kwargs = dict(
         orchestrator=orchestrator_or_obj,
         health_checker=health_checker,
         session_manager=session_mgr,
-        girlfriend_manager=girlfriend_manager,
+        user_manager=user_manager,
     )
     if config_mgr is not None:
         app_kwargs["config_manager"] = config_mgr
@@ -1288,16 +1288,16 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
     if not health["healthy"]:
         logger.warning("部分组件健康检查未通过, 继续启动...")
 
-    # ── 创建女友管理器（多用户核心） ──
-    girlfriend_mgr = GirlfriendManager(orchestrator)
-    logger.info("女友管理器已创建")
+    # ── 创建用户调度器（多用户核心） ──
+    user_mgr = UserManager(orchestrator)
+    logger.info("用户调度器已创建")
 
     ws_server_fast = None
     _ws_holder = {}
     _wechat_holder = {}  # type: ignore[var-annotated]
     if not args.no_api:
         logger.info("启动API服务...")
-        ws_server_fast = _start_api_service(orchestrator, cfg, config_mgr=orchestrator.components.get("config"), girlfriend_manager=girlfriend_mgr)
+        ws_server_fast = _start_api_service(orchestrator, cfg, config_mgr=orchestrator.components.get("config"), user_manager=user_mgr)
         _ws_holder["ws"] = ws_server_fast
     else:
         logger.info("API服务已禁用 (--no-api)")
@@ -1351,7 +1351,7 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
                 time.sleep(3600)
     else:
         try:
-            run_wechat_mode(girlfriend_mgr, "fast", args)
+            run_wechat_mode(user_mgr, "fast", args)
         finally:
             # 确保在微信模式退出时关闭资源
             orchestrator.shutdown()
@@ -1550,9 +1550,9 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
         injection_detector=injection_detector,
     )
 
-    # ── 创建女友管理器（多用户核心） ──
-    girlfriend_mgr = GirlfriendManager(orchestrator)
-    logger.info("女友管理器已创建")
+    # ── 创建用户调度器（多用户核心） ──
+    user_mgr = UserManager(orchestrator)
+    logger.info("用户调度器已创建")
 
     if not args.no_api:
         logger.info("[11/12] 启动API服务...")
@@ -1563,7 +1563,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
             health_checker=health_checker,
             config_manager=config_mgr,
             session_manager=session_mgr,
-            girlfriend_manager=girlfriend_mgr,
+            user_manager=user_mgr,
         )
         ws_server = WebSocketServer(
             orchestrator=orchestrator,
@@ -1635,7 +1635,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
             while True:
                 time.sleep(3600)
     else:
-        run_wechat_mode(girlfriend_mgr, "full", args)
+        run_wechat_mode(user_mgr, "full", args)
 
 
 if __name__ == "__main__":

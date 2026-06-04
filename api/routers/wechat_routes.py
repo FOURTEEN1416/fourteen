@@ -196,7 +196,7 @@ async def bind_wechat(
     await db.commit()
     await db.refresh(binding)
 
-    # ── DB 确认后，同步到 GirlfriendManager ──
+        # ── DB 确认后，同步到 UserManager ──
     gf = deps.gf
     if gf:
         await gf.upsert_binding(req.wxid, {
@@ -256,7 +256,7 @@ async def update_binding(
         await db.commit()
         await db.refresh(binding)
 
-        # ── DB 确认后，同步到 GirlfriendManager ──
+    # ── DB 确认后，同步到 UserManager ──
         gf = deps.gf
         if gf:
             await gf.upsert_binding(wxid, changed)
@@ -284,7 +284,7 @@ async def unbind_wechat(
     await db.delete(binding)
     await db.commit()
 
-    # 清理 GirlfriendManager 缓存
+    # 清理 UserManager 缓存
     gf = deps.gf
     if gf:
         await gf.remove_binding(wxid)

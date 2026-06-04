@@ -1,4 +1,4 @@
-﻿# Findings — AI Girlfriend 多智能体协同
+﻿# Findings — 唯一的你 多智能体协同
 
 ## 项目状态（2026-06-03）
 - 分支：main（领先 origin/main 1 commit）

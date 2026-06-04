@@ -20,6 +20,7 @@ from api.auth_jwt import (
     get_current_user_id,
     hash_password,
     hash_refresh_token,
+    require_role,
     verify_password,
     verify_token,
 )
@@ -60,6 +61,15 @@ class RefreshRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     refresh_token: str = ""  # 可选：优先从 body 读，无则退到 cookie
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=128, examples=["oldPass123"])
+    new_password: str = Field(..., min_length=6, max_length=128, examples=["newPass456"])
+
+
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str = Field(..., min_length=6, max_length=128, examples=["resetPass789"])
 
 
 # ═══════════════════════════════════════════════════════
@@ -300,6 +310,65 @@ async def me(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user.to_dict()
+
+
+
+@router.post("/change-password")
+async def change_password(
+    req: ChangePasswordRequest,
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """当前用户修改自己的密码"""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # 验证当前密码
+    if not verify_password(req.current_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    # 新旧密码不能一样
+    if req.current_password == req.new_password:
+        raise HTTPException(status_code=400, detail="New password must differ from current password")
+
+    # 更新密码
+    user.hashed_password = hash_password(req.new_password)
+    await db.commit()
+
+    logger.info("用户 %s 修改了密码", user.email)
+    return {"detail": "Password changed successfully"}
+
+
+@router.post("/admin/reset-password/{target_user_id}")
+async def admin_reset_password(
+    target_user_id: int,
+    req: AdminResetPasswordRequest,
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """管理员强制重置指定用户的密码"""
+    result = await db.execute(select(User).where(User.id == target_user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # 更新密码为管理员指定的新密码
+    user.hashed_password = hash_password(req.new_password)
+
+    # 吊销该用户所有 refresh token（强制重新登录）
+    result = await db.execute(
+        select(UserSession).where(UserSession.user_id == target_user_id)
+    )
+    sessions = result.scalars().all()
+    for session in sessions:
+        await db.delete(session)
+
+    await db.commit()
+
+    logger.info("管理员重置了用户 %s 的密码并吊销了其会话", user.email)
+    return {"detail": f"Password reset for user {target_user_id} successful. All sessions revoked."}
 
 
 # ═══════════════════════════════════════════════════════

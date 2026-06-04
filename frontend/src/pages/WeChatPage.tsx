@@ -352,25 +352,15 @@ function QrCodeConnectionModal({ onClose }: { onClose: () => void }) {
 export default function WeChatPage() {
   const [connections, setConnections] = useState<SavedConnection[]>(() => {
     try {
-      // 兼容层：先读新键，回退到旧键（老的"ai-girlfriend-wechat-connections"自动迁移）
-      const raw =
-        localStorage.getItem('unique-you-wechat-connections') ??
-        localStorage.getItem('ai-girlfriend-wechat-connections')
-      if (!raw) return []
-      const list = JSON.parse(raw) as SavedConnection[]
-      // 一次性迁移：读到旧键则立即写新键，后续用新键
-      if (!localStorage.getItem('unique-you-wechat-connections')) {
-        try {
-          localStorage.setItem('unique-you-wechat-connections', raw)
-          localStorage.removeItem('ai-girlfriend-wechat-connections')
-        } catch {
-          /* 忽略写失败 */
-        }
+      const saved = localStorage.getItem('unique-you-wechat-connections')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed)) return parsed
       }
-      return list
     } catch {
-      return []
+      // ignore corrupt data
     }
+    return []
   })
 
   const [searchQuery, setSearchQuery] = useState('')

@@ -1,4 +1,4 @@
-﻿# Progress — AI Girlfriend 多智能体协同
+﻿# Progress — 唯一的你 多智能体协同
 
 ## 2026-06-03
 
