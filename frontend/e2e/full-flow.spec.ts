@@ -222,8 +222,9 @@ test.describe('Full User Flow', () => {
     await expect(page.locator('h1')).toContainText('我的微信')
 
     // 验证 2 个绑定卡片可见（昵称显示在卡片中）
-    await expect(page.locator('text=小花')).toBeVisible()
-    await expect(page.locator('text=小明')).toBeVisible()
+    // 使用 getByRole 匹配卡片按钮本身，避免 text= 匹配到多个子元素
+    await expect(page.getByRole('button', { name: /小花/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /小明/ })).toBeVisible()
 
     // ── 点击第一个绑定卡片 ──
     // 卡片是 <button> 元素，包含昵称文本
@@ -270,18 +271,19 @@ test.describe('Full User Flow', () => {
     await page.waitForSelector('h1', { timeout: 15000 })
 
     // 确认 3 个绑定都可见
-    await expect(page.locator('text=Alice')).toBeVisible()
-    await expect(page.locator('text=Bob')).toBeVisible()
-    await expect(page.locator('text=Charlie')).toBeVisible()
+    // 使用 getByRole 匹配卡片按钮本身，避免 text= 匹配多个子元素（text=Alice 同时命中 <p>Alice</p> 和 <code>wx_alice_001</code>）
+    await expect(page.getByRole('button', { name: /Alice/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Bob/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Charlie/ })).toBeVisible()
 
     // ── 搜索 "ali" ──
     const searchInput = page.locator('input[placeholder="搜索微信昵称或 wxid..."]')
     await searchInput.fill('ali')
 
-    // 只有 Alice 可见
-    await expect(page.locator('text=Alice')).toBeVisible()
-    await expect(page.locator('text=Bob')).not.toBeVisible()
-    await expect(page.locator('text=Charlie')).not.toBeVisible()
+    // 只有 Alice 可见（Bob/Charlie 的卡片从 DOM 中移除）
+    await expect(page.getByRole('button', { name: /Alice/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Bob/ })).not.toBeVisible()
+    await expect(page.getByRole('button', { name: /Charlie/ })).not.toBeVisible()
   })
 
   test('admin page requires admin role', async ({ page }) => {
