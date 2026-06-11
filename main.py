@@ -21,10 +21,7 @@
 
 
 from __future__ import annotations
-from collections.abc import AsyncIterator
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
-from typing import Any
+
 import argparse
 import asyncio
 import atexit
@@ -35,6 +32,10 @@ import re
 import sys
 import threading
 import time
+from collections.abc import AsyncIterator
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Any
 
 # ── 语音触发检测 ───────────────────────────────────────
 
