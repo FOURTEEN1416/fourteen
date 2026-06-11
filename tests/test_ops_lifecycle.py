@@ -316,7 +316,7 @@ class TestApplicationFactory:
         app = create_api_app()
 
         # Check that CORSMiddleware is in the user middleware list
-        middleware_classes = [type(m.cls).__name__ for m in app.user_middleware]
+        middleware_classes = [m.cls.__name__ for m in app.user_middleware]  # type: ignore[attr-defined]
         assert "CORSMiddleware" in middleware_classes, (
             f"CORSMiddleware not found in {middleware_classes}"
         )
