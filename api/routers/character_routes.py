@@ -500,8 +500,8 @@ async def list_presets(
     index_path = PRESETS_DIR / "_index.json"
     if index_path.exists():
         try:
-            with open(index_path, encoding="utf-8") as f:
-                index_data = json.load(f)
+            with open(index_path, encoding="utf-8") as fh:
+                index_data = json.load(fh)
             return {"presets": index_data, "total": len(index_data)}
         except Exception:
             pass
