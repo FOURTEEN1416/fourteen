@@ -17,7 +17,6 @@
 import argparse
 import json
 import logging
-import os
 import sys
 import time
 from pathlib import Path
@@ -174,7 +173,7 @@ def verify_search(results):
     ok = 0
     fail = 0
     print("\n🔍 搜索验证（前 10 个角色）...")
-    for name, cid, chunks, status in results[:10]:
+    for name, cid, _chunks, status in results[:10]:
         if status.startswith("ERR"):
             continue
         try:
