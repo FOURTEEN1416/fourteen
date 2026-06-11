@@ -38,15 +38,15 @@ if _env_file.exists():
 # 设 3 屏蔽 "EP Error nvinfer_10.dll missing" 噪声（系统缺 TensorRT 库）
 os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
 
-from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
-from observability.health import health_checker  # noqa: E402
-from observability.logging_setup import setup_logging  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
 from api.app_factory import create_api_app  # noqa: E402
 from api.database import WechatBinding, _async_session, init_db  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
 from main import OptimizedOrchestrator, UserManager  # noqa: E402
+from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
+from observability.health import health_checker  # noqa: E402
+from observability.logging_setup import setup_logging  # noqa: E402
 
 logger = logging.getLogger("run_api")
 
