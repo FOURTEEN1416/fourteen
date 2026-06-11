@@ -23,8 +23,8 @@ from pathlib import Path
 
 from shisi.character.character_card_v2 import CharaCardV2Parser
 from shisi.knowledge.character_knowledge_service import (
-    get_knowledge_service,
     _DEFAULT_INDEX_DIR,
+    get_knowledge_service,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
