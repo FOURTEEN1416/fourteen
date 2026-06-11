@@ -7,7 +7,7 @@ import gc
 import os
 import sys
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from typing import Any
 from unittest.mock import patch
 
