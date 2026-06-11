@@ -157,12 +157,12 @@ from tools.builtin.reminder_tool import CalendarQueryTool, ReminderTool  # noqa:
 from tools.builtin.search_tool import SearchTool  # noqa: E402
 from tools.builtin.time_awareness_tool import TimeAwarenessTool  # noqa: E402
 from tools.builtin.weather_tool import WeatherTool  # noqa: E402
-from user_scheduler import UserManager  # noqa: E402
-from utils.health_check import _is_healthy, health_check_all  # noqa: E402
 
 from api.app_factory import create_api_app  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
 from api.websocket_server import WebSocketServer  # noqa: E402
+from user_scheduler import UserManager  # noqa: E402
+from utils.health_check import _is_healthy, health_check_all  # noqa: E402
 
 # ── 加载 .env（手动解析，无需 python-dotenv 依赖） ──
 _env_loaded = False
