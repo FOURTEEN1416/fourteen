@@ -42,7 +42,7 @@ def _cleanup_db_file(db_path: str, retries: int = 5, delay: float = 0.1) -> None
 
 
 @pytest.fixture
-def db_module(tmp_path: Any) -> AsyncGenerator[Any, None]:
+def db_module(tmp_path: Any) -> Generator[Any, None, None]:
     """Provide isolated api.database module with a temp SQLite file.
 
     This fixture creates a fresh engine backed by a temp file so that
@@ -204,6 +204,7 @@ class TestDatabaseLifecycle:
                 row = result.one()
                 assert row._mapping["val"] == 1
                 return idx
+            return -1
 
         results = await asyncio.gather(*[_use_db(i) for i in range(10)])
         assert results == list(range(10))
@@ -315,7 +316,7 @@ class TestApplicationFactory:
         app = create_api_app()
 
         # Check that CORSMiddleware is in the user middleware list
-        middleware_classes = [m.cls.__name__ for m in app.user_middleware]
+        middleware_classes = [type(m.cls).__name__ for m in app.user_middleware]
         assert "CORSMiddleware" in middleware_classes, (
             f"CORSMiddleware not found in {middleware_classes}"
         )
