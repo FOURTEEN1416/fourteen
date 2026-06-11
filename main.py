@@ -162,7 +162,6 @@ from tools.builtin.weather_tool import WeatherTool  # noqa: E402
 from user_scheduler import UserManager  # noqa: E402
 from utils.health_check import _is_healthy, health_check_all  # noqa: E402
 
-
 # ── 加载 .env（手动解析，无需 python-dotenv 依赖） ──
 _env_loaded = False
 def _load_env() -> None:
