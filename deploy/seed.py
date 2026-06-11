@@ -21,10 +21,11 @@ import sys
 import time
 from pathlib import Path
 
-# 确保项目根在 sys.path
-_project_root = Path(__file__).parent.parent.absolute()
-if str(_project_root) not in sys.path:
-    sys.path.insert(0, str(_project_root))
+from shisi.character.character_card_v2 import CharaCardV2Parser
+from shisi.knowledge.character_knowledge_service import (
+    get_knowledge_service,
+    _DEFAULT_INDEX_DIR,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("seed")
@@ -32,11 +33,12 @@ logger = logging.getLogger("seed")
 # 抑制第三方库日志
 logging.getLogger("shisi").setLevel(logging.WARNING)
 
-from shisi.character.character_card_v2 import CharaCardV2Parser
-from shisi.knowledge.character_knowledge_service import (
-    get_knowledge_service,
-    _DEFAULT_INDEX_DIR,
-)
+
+# 确保项目根在 sys.path
+_project_root = Path(__file__).parent.parent.absolute()
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
 
 CHARS_DIR = Path("config/characters")
 PRESETS_DIR = Path("data/presets")
