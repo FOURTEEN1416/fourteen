@@ -1,7 +1,5 @@
 """API层 — FastAPI RESTful + WebSocket 接口"""
 
-from voice.clone_data_manager import CloneDataManager
-
 from api.app_factory import create_api_app
 from api.main_routes import (
     ChatRequest,
@@ -15,6 +13,7 @@ from api.main_routes import (
 from api.qrcode_store import is_expired, save_qrcode
 from api.session_manager import SessionManager
 from api.websocket_server import WebSocketServer
+from voice.clone_data_manager import CloneDataManager
 
 __all__ = [
     "create_api_app",
