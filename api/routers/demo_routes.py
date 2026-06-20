@@ -10,6 +10,8 @@ Demo 体验路由 — 无需认证，面向大赛评审与用户试用
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 from collections import Counter
@@ -65,13 +67,14 @@ async def demo_chat_stream(req: DemoChatRequest):
         )
 
     async def event_generator():
+        stream_gen = orch.process_message_stream(
+            req.message,
+            req.session_id,
+            req.message_type,
+            character_id="demo",
+        )
         try:
-            async for event in orch.process_message_stream(
-                req.message,
-                req.session_id,
-                req.message_type,
-                character_id="demo",
-            ):
+            async for event in stream_gen:
                 # 兼容旧版返回字符串的生成器（full 模式 Orchestrator）
                 if isinstance(event, str):
                     event = {"type": "token", "content": event}
@@ -82,11 +85,17 @@ async def demo_chat_stream(req: DemoChatRequest):
                 else:
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
+        except asyncio.CancelledError:
+            logger.debug("Demo SSE client disconnected, cancelling stream for session %s", req.session_id)
+            raise
         except TimeoutError:
             yield f"data: {json.dumps({'type': 'error', 'error': 'LLM timeout'}, ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.warning("Demo stream error: %s", e)
             yield f"data: {json.dumps({'type': 'error', 'error': 'stream failed'}, ensure_ascii=False)}\n\n"
+        finally:
+            with contextlib.suppress(Exception):
+                await stream_gen.aclose()
 
     return StreamingResponse(
         event_generator(),

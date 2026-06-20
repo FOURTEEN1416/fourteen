@@ -99,4 +99,7 @@ create-role-presets.png
 playwright-report/
 test-results/
 
+# ── 大赛提交材料（保留本地，不进入版本控制） ──
+docs/trae_submission/
+
 .env

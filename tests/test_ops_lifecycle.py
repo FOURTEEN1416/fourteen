@@ -7,11 +7,12 @@ import gc
 import os
 import sys
 import time
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,8 +42,8 @@ def _cleanup_db_file(db_path: str, retries: int = 5, delay: float = 0.1) -> None
                     gc.collect()
 
 
-@pytest.fixture
-def db_module(tmp_path: Any) -> Generator[Any, None, None]:
+@pytest_asyncio.fixture(loop_scope="function")
+async def db_module(tmp_path: Any) -> AsyncGenerator[Any, None]:
     """Provide isolated api.database module with a temp SQLite file.
 
     This fixture creates a fresh engine backed by a temp file so that
@@ -68,15 +69,8 @@ def db_module(tmp_path: Any) -> Generator[Any, None, None]:
 
     yield db_mod
 
-    # Cleanup — dispose the test engine first
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(db_mod._engine.dispose())
-        else:
-            loop.run_until_complete(db_mod._engine.dispose())
-    except Exception:
-        pass
+    # Cleanup — close all pooled connections and dispose the test engine
+    await db_mod._engine.dispose()
 
     # Restore originals
     db_mod.DATABASE_URL = orig_url
@@ -184,10 +178,8 @@ class TestDatabaseLifecycle:
             assert isinstance(session, AsyncSession)
             assert session.is_active
 
-            # Exiting the generator triggers the finally block → close()
-            from contextlib import suppress
-            with suppress(StopAsyncIteration):
-                await gen.__anext__()
+            # Explicitly close the async generator so its finally block runs
+            await gen.aclose()
 
         assert close_called, "session.close() must be called on generator exit"
 

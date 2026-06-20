@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 import threading
@@ -75,10 +77,11 @@ async def chat_stream(req: ChatRequest, _auth: bool = Security(verify_api_key_de
         )
 
     async def event_generator():
+        stream_gen = orch.process_message_stream(
+            req.message, req.session_id, req.message_type, req.character_id,
+        )
         try:
-            async for event in orch.process_message_stream(
-                req.message, req.session_id, req.message_type, req.character_id,
-            ):
+            async for event in stream_gen:
                 # 兼容旧版返回字符串的生成器（full 模式 Orchestrator）
                 if isinstance(event, str):
                     event = {"type": "token", "content": event}
@@ -89,11 +92,17 @@ async def chat_stream(req: ChatRequest, _auth: bool = Security(verify_api_key_de
                 else:
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
+        except asyncio.CancelledError:
+            logger.debug("SSE client disconnected, cancelling stream for session %s", req.session_id)
+            raise
         except TimeoutError:
             yield f"data: {json.dumps({'type': 'error', 'error': 'LLM timeout'}, ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.warning("Stream error: %s", e)
             yield f"data: {json.dumps({'type': 'error', 'error': 'stream failed'}, ensure_ascii=False)}\n\n"
+        finally:
+            with contextlib.suppress(Exception):
+                await stream_gen.aclose()
 
     return StreamingResponse(
         event_generator(),

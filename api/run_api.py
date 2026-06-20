@@ -89,7 +89,20 @@ if HAS_WEBSOCKETS:
     def _run_ws_server(holder: dict[str, WebSocketServer | None] = _ws_holder, port: int = _ws_port) -> None:
         ws_server = WebSocketServer(orchestrator=orchestrator, port=port)
         holder["ws"] = ws_server
-        asyncio.run(ws_server.start())
+        loop = asyncio.new_event_loop()
+        holder["loop"] = loop
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(ws_server.start())
+        finally:
+            try:
+                loop.run_until_complete(ws_server.stop())
+            except Exception as e:  # noqa: BLE001
+                logger.debug("WebSocket 服务器关闭时异常: %s", e)
+            try:
+                loop.close()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("WebSocket 事件循环关闭时异常: %s", e)
 
     _ws_thread = threading.Thread(target=_run_ws_server, daemon=True)
     _ws_thread.start()
@@ -98,10 +111,14 @@ if HAS_WEBSOCKETS:
     @atexit.register
     def _stop_ws_server() -> None:
         ws_server = _ws_holder.get("ws")
+        loop = _ws_holder.get("loop")
         if ws_server is None:
             return
+        if loop is None or loop.is_closed():
+            return
         try:
-            asyncio.run(ws_server.stop())
+            future = asyncio.run_coroutine_threadsafe(ws_server.stop(), loop)
+            future.result(timeout=5)
         except Exception as e:  # noqa: BLE001
             logger.debug("WebSocket 服务器关闭时异常: %s", e)
 

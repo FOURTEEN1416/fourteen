@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -26,6 +27,8 @@ class WebSocketServer:
         self._clients: set = set()
         self._client_lock = asyncio.Lock()
         self._running = False
+        self._server_done: asyncio.Future | None = None
+        self._client_tasks: dict[Any, asyncio.Task] = {}
         # P0: API Key 认证配置
         self._api_key_enabled = os.environ.get("API_KEY_ENABLED", "false").lower() == "true"
         self._api_key = os.environ.get("API_KEY", "")
@@ -35,15 +38,45 @@ class WebSocketServer:
             logger.warning("websockets not installed, WebSocket server disabled")
             return
         self._running = True
-        async with serve(self._handler, self.host, self.port, ping_interval=30, ping_timeout=10):
-            logger.info("WebSocket server started on %s:%d", self.host, self.port)
-            await asyncio.Future()
+        self._server_done = asyncio.get_running_loop().create_future()
+        try:
+            async with serve(self._handler, self.host, self.port, ping_interval=30, ping_timeout=10):
+                logger.info("WebSocket server started on %s:%d", self.host, self.port)
+                try:
+                    await self._server_done
+                except asyncio.CancelledError:
+                    logger.info("WebSocket server shutting down")
+                    raise
+        finally:
+            self._running = False
+            self._server_done = None
 
     async def stop(self):
         self._running = False
-        for ws in self._clients:
-            await ws.close()
-        self._clients.clear()
+
+        # 触发 server 退出阻塞
+        if self._server_done is not None and not self._server_done.done():
+            self._server_done.set_result(None)
+
+        # 取消所有客户端处理任务，避免任务泄漏
+        tasks: list[asyncio.Task] = []
+        async with self._client_lock:
+            for task in list(self._client_tasks.values()):
+                if not task.done():
+                    task.cancel()
+                    tasks.append(task)
+            self._client_tasks.clear()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 关闭所有客户端连接
+        close_tasks: list[asyncio.Task] = []
+        async with self._client_lock:
+            for ws in list(self._clients):
+                close_tasks.append(asyncio.ensure_future(ws.close()))
+            self._clients.clear()
+        if close_tasks:
+            await asyncio.gather(*close_tasks, return_exceptions=True)
 
     def _verify_api_key(self, token: str) -> bool:
         """验证 API Key，参考 app_factory.py 的 _verify_api_key 实现"""
@@ -92,6 +125,8 @@ class WebSocketServer:
                 await websocket.close(code=1013, reason="连接已满")
                 return
             self._clients.add(websocket)
+            self._client_tasks[websocket] = asyncio.current_task()
+
         try:
             async for message in websocket:
                 try:
@@ -111,24 +146,29 @@ class WebSocketServer:
                                 "session_id": session_id,
                                 "message_type": message_type,
                             }))
-                            async for event in self._orch.process_message_stream(user_msg, session_id):
-                                # 兼容旧版返回字符串的生成器
-                                if isinstance(event, str):
-                                    event = {"type": "token", "content": event}
-                                if event.get("type") == "token":
-                                    await websocket.send(json.dumps({
-                                        "type": "stream_token",
-                                        "content": event.get("content", ""),
-                                        "message_type": message_type,
-                                    }, ensure_ascii=False))
-                                elif event.get("type") == "done":
-                                    await websocket.send(json.dumps({
-                                        "type": "stream_end",
-                                        "session_id": session_id,
-                                        "message_type": message_type,
-                                        "reply": event.get("reply", ""),
-                                        "emotion": event.get("emotion"),
-                                    }, ensure_ascii=False))
+                            stream_gen = self._orch.process_message_stream(user_msg, session_id)
+                            try:
+                                async for event in stream_gen:
+                                    # 兼容旧版返回字符串的生成器
+                                    if isinstance(event, str):
+                                        event = {"type": "token", "content": event}
+                                    if event.get("type") == "token":
+                                        await websocket.send(json.dumps({
+                                            "type": "stream_token",
+                                            "content": event.get("content", ""),
+                                            "message_type": message_type,
+                                        }, ensure_ascii=False))
+                                    elif event.get("type") == "done":
+                                        await websocket.send(json.dumps({
+                                            "type": "stream_end",
+                                            "session_id": session_id,
+                                            "message_type": message_type,
+                                            "reply": event.get("reply", ""),
+                                            "emotion": event.get("emotion"),
+                                        }, ensure_ascii=False))
+                            finally:
+                                with contextlib.suppress(Exception):
+                                    await stream_gen.aclose()
                             await websocket.send(json.dumps({
                                 "type": "stream_end",
                                 "session_id": session_id,
@@ -148,14 +188,27 @@ class WebSocketServer:
                         await websocket.send(json.dumps({"type": "pong"}))
                 except json.JSONDecodeError:
                     await websocket.send(json.dumps({"type": "error", "message": "Invalid JSON"}))
+                except websockets.exceptions.ConnectionClosed:
+                    break
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
                     logger.exception("WebSocket handler error")
-                    await websocket.send(json.dumps({"type": "error", "message": "internal_error"}))
+                    try:
+                        await websocket.send(json.dumps({"type": "error", "message": "internal_error"}))
+                    except websockets.exceptions.ConnectionClosed:
+                        break
         except websockets.exceptions.ConnectionClosed:
             pass
+        except asyncio.CancelledError:
+            logger.debug("WebSocket handler cancelled for %s", getattr(websocket, "id", ""))
+            raise
         finally:
             async with self._client_lock:
                 self._clients.discard(websocket)
+                self._client_tasks.pop(websocket, None)
+            with contextlib.suppress(Exception):
+                await websocket.close()
 
     async def broadcast_proactive(self, content: str):
         msg = json.dumps({"type": "proactive", "content": content}, ensure_ascii=False)
@@ -171,6 +224,8 @@ class WebSocketServer:
         async def send_to_client(ws):
             try:
                 await ws.send(message)
+            except websockets.exceptions.ConnectionClosed:
+                disconnected.add(ws)
             except Exception:  # noqa: BLE001
                 disconnected.add(ws)
 
