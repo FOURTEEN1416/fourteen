@@ -321,6 +321,14 @@ class OptimizedOrchestrator:
             except Exception as e:  # noqa: BLE001
                 logger.warning("调度器停止异常: %s", e)
 
+        memory = self.components.get("memory")
+        if memory is not None and hasattr(memory, "close"):
+            try:
+                memory.close()
+                logger.info("MemoryPipeline 已关闭")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("MemoryPipeline 关闭异常: %s", e)
+
         if self._executor is not None:
             self._executor.shutdown(wait=True)
             self._executor = None

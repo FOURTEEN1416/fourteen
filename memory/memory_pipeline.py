@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -867,6 +868,11 @@ class MemoryPipeline:
         self._chat_count_since_extract: int = 0
         self._chat_count_lock = threading.Lock()  # 保护 _chat_count_since_extract 并发读写
 
+        # 后台任务线程池：避免每条消息都创建/销毁线程
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="memory_pipeline"
+        )
+
         # 缓存
         self._context_cache: dict[str, Any] = {}
         self._cache_lock = threading.Lock()
@@ -990,16 +996,17 @@ class MemoryPipeline:
         self.working.add("user", user_msg, emotion_tag, importance)
         self.working.add("assistant", reply, emotion_tag, importance)
 
-        # 4. 存储到向量库（后台线程异步执行，不阻塞主流程）
-        threading.Thread(
-            target=self.vm.store_chat_sync,
-            args=(user_msg, reply, {
+        # 4. 存储到向量库（线程池异步执行，不阻塞主流程）
+        self._executor.submit(
+            self.vm.store_chat_sync,
+            user_msg,
+            reply,
+            {
                 "emotion": emotion_tag,
                 "session_id": effective_session,
                 "importance": importance,
-            }),
-            daemon=True,
-        ).start()
+            },
+        )
         result["stored_vector"] = True  # 乐观标记，错误在内部日志
 
         # 5. 事实提取（每 N 条对话触发）
@@ -1017,11 +1024,7 @@ class MemoryPipeline:
                 needs_extraction = False
 
         if needs_extraction:
-            threading.Thread(
-                target=self._do_fact_extraction,
-                args=(effective_session,),
-                daemon=True,
-            ).start()
+            self._executor.submit(self._do_fact_extraction, effective_session)
             result["facts_extracted"] = 0  # 后台异步提取中，具体数量由线程日志记录
 
         # 6. 跨会话推理：检测未来事件
@@ -1497,23 +1500,11 @@ class MemoryPipeline:
                      "content": m.get("content", "")}
                     for m in messages
                 ]
-                try:
-                    # 检测是否在异步事件循环上下文中
-                    loop = asyncio.get_running_loop()
-                    # 异步上下文：使用 run_in_executor 避免阻塞事件循环
-                    future = asyncio.run_coroutine_threadsafe(
-                        asyncio.to_thread(
-                            self.ds._summarize_with_llm,
-                            messages_for_summary,
-                        ),
-                        loop,
-                    )
-                    summary = future.result(timeout=30) or ""
-                except RuntimeError:
-                    # 不在异步上下文中，直接同步调用
-                    summary = self.ds._summarize_with_llm(
-                        messages_for_summary
-                    ) or ""
+                # 复用后台线程池执行 LLM 摘要，避免阻塞主线程
+                future = self._executor.submit(
+                    self.ds._summarize_with_llm, messages_for_summary
+                )
+                summary = future.result(timeout=30) or ""
             except Exception as e:  # noqa: BLE001
                 logger.debug("Summary generation failed: %s", e)
 
@@ -1576,3 +1567,12 @@ class MemoryPipeline:
     def reset_session(self) -> None:
         self.working.start_session()
         logger.info("Memory session reset")
+
+    def close(self) -> None:
+        """关闭后台线程池，释放资源。"""
+        if hasattr(self, "_executor") and self._executor is not None:
+            try:
+                self._executor.shutdown(wait=True)
+                logger.info("MemoryPipeline 后台线程池已关闭")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("MemoryPipeline 关闭线程池异常: %s", e)
