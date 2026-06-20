@@ -144,6 +144,8 @@ fusion:
     anchor_verification_enabled: true
   memory:
     forgetting_model: exponential
+  rag:
+    use_shisi_rag: false
   ase:
     frequency_mode: adaptive
     generation_mode: llm

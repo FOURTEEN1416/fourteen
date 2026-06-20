@@ -175,6 +175,11 @@ fusion:
     # true  → 使用 shisi.application.memory_service.ShisiMemoryService
     # false → 使用 memory.memory_pipeline.MemoryPipeline（默认，保持兼容）
     use_shisi_memory: false
+  rag:
+    # 是否使用 shisi knowledge 适配层（双轨架构开关）
+    # true  → 使用 shisi.application.knowledge_service.ShisiKnowledgeAdapter
+    # false → 使用 rag_engine.rag_engine.RAGEngineV2（默认，保持兼容）
+    use_shisi_rag: false
   ase:
     frequency_mode: adaptive
     generation_mode: llm

@@ -87,3 +87,5 @@ memory_ext:
 
 fusion:
   orchestrator_mode: fast
+  rag:
+    use_shisi_rag: false

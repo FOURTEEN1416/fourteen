@@ -256,10 +256,13 @@ class Orchestrator:
                 with tracer.span("rag_retrieve"):
                     rag_context = ""
                     rag_results = {}
-                    if self._rag and hasattr(self._rag, 'retrieve_async'):
-                        rag_results = await self._rag.retrieve_async(user_msg)
-                    elif self._rag:
-                        rag_results = self._rag.retrieve(user_msg)
+                    if self._rag:
+                        if hasattr(self._rag, "set_character_id"):
+                            self._rag.set_character_id(character_id)
+                        if hasattr(self._rag, 'retrieve_async'):
+                            rag_results = await self._rag.retrieve_async(user_msg)
+                        else:
+                            rag_results = self._rag.retrieve(user_msg)
                     if rag_results.get("results"):
                         rag_context = "\n".join(
                             r.get("content", "") for r in rag_results["results"][:3]
@@ -441,10 +444,13 @@ class Orchestrator:
                 with tracer.span("rag_retrieve"):
                     rag_context = ""
                     rag_results = {}
-                    if self._rag and hasattr(self._rag, 'retrieve_async'):
-                        rag_results = await self._rag.retrieve_async(processed_msg)
-                    elif self._rag:
-                        rag_results = self._rag.retrieve(processed_msg)
+                    if self._rag:
+                        if hasattr(self._rag, "set_character_id"):
+                            self._rag.set_character_id(character_id)
+                        if hasattr(self._rag, 'retrieve_async'):
+                            rag_results = await self._rag.retrieve_async(processed_msg)
+                        else:
+                            rag_results = self._rag.retrieve(processed_msg)
                     if rag_results.get("results"):
                         rag_context = "\n".join(
                             r.get("content", "") for r in rag_results["results"][:3]

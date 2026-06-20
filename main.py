@@ -152,6 +152,7 @@ from security.content_safety import ContentSafetyFilter  # noqa: E402
 from security.encryption import EncryptionManager  # noqa: E402
 from security.pii_anonymizer import PIIAnonymizer  # noqa: E402
 from security.prompt_injection import PromptInjectionDetector  # noqa: E402
+from shisi.application.knowledge_service import ShisiKnowledgeAdapter  # noqa: E402
 from shisi.application.memory_service import ShisiMemoryService  # noqa: E402
 from shisi.application.persona_service import PersonaService  # noqa: E402
 from tools.base_tool import ToolDispatcher, ToolRegistry  # noqa: E402
@@ -285,6 +286,17 @@ def _should_use_shisi_memory(fusion_cfg: dict[str, Any]) -> bool:
     if env_val is not None:
         return env_val.lower() in ("true", "1", "yes", "on")
     return fusion_cfg.get("memory", {}).get("use_shisi_memory", False)
+
+
+def _should_use_shisi_rag(fusion_cfg: dict[str, Any]) -> bool:
+    """判断是否使用 shisi knowledge 适配层。
+
+    优先级：环境变量 USE_SHISI_RAG > fusion.rag.use_shisi_rag
+    """
+    env_val = os.environ.get("USE_SHISI_RAG")
+    if env_val is not None:
+        return env_val.lower() in ("true", "1", "yes", "on")
+    return fusion_cfg.get("rag", {}).get("use_shisi_rag", False)
 
 
 class OptimizedOrchestrator:
@@ -532,12 +544,22 @@ class OptimizedOrchestrator:
                 self.components["memory"], "structured_memory", None)
             rag_sem = getattr(self.components["memory"], "semantic", None)
 
-            self.components["rag"] = RAGEngineV2(
-                vector_memory=rag_vm,
-                structured_memory=rag_sm,
-                semantic_memory=rag_sem,
-                tone_mimic=self.components["tone"],
-            )
+            if _should_use_shisi_rag(fusion_cfg):
+                self.components["rag"] = ShisiKnowledgeAdapter(
+                    vector_memory=rag_vm,
+                    structured_memory=rag_sm,
+                    semantic_memory=rag_sem,
+                    tone_mimic=self.components["tone"],
+                )
+                logger.info("使用 shisi knowledge 适配层 (ShisiKnowledgeAdapter)")
+            else:
+                self.components["rag"] = RAGEngineV2(
+                    vector_memory=rag_vm,
+                    structured_memory=rag_sm,
+                    semantic_memory=rag_sem,
+                    tone_mimic=self.components["tone"],
+                )
+                logger.info("使用原有 RAG 引擎 (RAGEngineV2)")
 
             # ── 世界信息动态注入 ──
             self.components["world_info"] = WorldInfoProvider(
@@ -825,8 +847,11 @@ class OptimizedOrchestrator:
                 )
 
                 # RAG (sync)
+                rag = self.components["rag"]
+                if hasattr(rag, "set_character_id"):
+                    rag.set_character_id(character_id)
                 tasks["rag"] = loop.run_in_executor(
-                    None, self.components["rag"].retrieve, user_msg_clean,
+                    None, rag.retrieve, user_msg_clean,
                 )
 
                 results = await asyncio.gather(*tasks.values(), return_exceptions=True)
@@ -1133,8 +1158,11 @@ class OptimizedOrchestrator:
                         query=user_msg_clean, session_id=session_id, top_k=5,
                     ),
                 )
+                rag = self.components["rag"]
+                if hasattr(rag, "set_character_id"):
+                    rag.set_character_id(character_id)
                 tasks["rag"] = loop.run_in_executor(
-                    None, self.components["rag"].retrieve, user_msg_clean,
+                    None, rag.retrieve, user_msg_clean,
                 )
 
                 results = await asyncio.gather(*tasks.values(), return_exceptions=True)
@@ -1829,12 +1857,22 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     logger.info("      已注册 %d 个工具", len(tool_registry.tool_names))
 
     logger.info("[8/12] 初始化RAG引擎V2...")
-    rag_engine = RAGEngineV2(
-        vector_memory=vector_memory,
-        structured_memory=structured_memory,
-        semantic_memory=memory_pipeline.semantic,
-        tone_mimic=tone_mimic,
-    )
+    if _should_use_shisi_rag(fusion_cfg):
+        rag_engine = ShisiKnowledgeAdapter(
+            vector_memory=vector_memory,
+            structured_memory=structured_memory,
+            semantic_memory=memory_pipeline.semantic,
+            tone_mimic=tone_mimic,
+        )
+        logger.info("      使用 shisi knowledge 适配层 (ShisiKnowledgeAdapter)")
+    else:
+        rag_engine = RAGEngineV2(
+            vector_memory=vector_memory,
+            structured_memory=structured_memory,
+            semantic_memory=memory_pipeline.semantic,
+            tone_mimic=tone_mimic,
+        )
+        logger.info("      使用原有 RAG 引擎 (RAGEngineV2)")
 
     logger.info("[9/12] 初始化主动消息 (融合)...")
     ase_frequency_mode = ase_fusion.get("frequency_mode", "adaptive")
