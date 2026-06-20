@@ -96,14 +96,13 @@ def _do_silence_stdout():
 
 
 def _run_async(coro):
+    """在同步上下文中运行 coroutine；若已处于事件循环中则复用该循环。"""
     try:
-        asyncio.get_running_loop()
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, coro)
-            return future.result()
+        loop = asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
+    # 已处于事件循环中：提交到同一线程的事件循环，避免创建额外线程/事件循环
+    return asyncio.run_coroutine_threadsafe(coro, loop).result()
 
 
 def _get_default_embedding_function() -> Any:
