@@ -171,6 +171,10 @@ fusion:
     anchor_verification_enabled: true
   memory:
     forgetting_model: exponential
+    # 是否使用 shisi 记忆服务适配层（双轨架构开关）
+    # true  → 使用 shisi.application.memory_service.ShisiMemoryService
+    # false → 使用 memory.memory_pipeline.MemoryPipeline（默认，保持兼容）
+    use_shisi_memory: false
   ase:
     frequency_mode: adaptive
     generation_mode: llm

@@ -152,6 +152,7 @@ from security.content_safety import ContentSafetyFilter  # noqa: E402
 from security.encryption import EncryptionManager  # noqa: E402
 from security.pii_anonymizer import PIIAnonymizer  # noqa: E402
 from security.prompt_injection import PromptInjectionDetector  # noqa: E402
+from shisi.application.memory_service import ShisiMemoryService  # noqa: E402
 from shisi.application.persona_service import PersonaService  # noqa: E402
 from tools.base_tool import ToolDispatcher, ToolRegistry  # noqa: E402
 from tools.builtin.calendar_tool import CalculatorTool, CalendarTool  # noqa: E402
@@ -273,6 +274,17 @@ def load_fusion_config(config_dir: str) -> dict[str, Any]:
         return full_cfg.get("fusion", {})  # type: ignore[no-any-return]
     logger.warning("未找到 %s, 使用默认 fusion 配置", system_yaml)
     return {}
+
+
+def _should_use_shisi_memory(fusion_cfg: dict[str, Any]) -> bool:
+    """判断是否使用 shisi 记忆服务适配层。
+
+    优先级：环境变量 USE_SHISI_MEMORY > fusion.memory.use_shisi_memory
+    """
+    env_val = os.environ.get("USE_SHISI_MEMORY")
+    if env_val is not None:
+        return env_val.lower() in ("true", "1", "yes", "on")
+    return fusion_cfg.get("memory", {}).get("use_shisi_memory", False)
 
 
 class OptimizedOrchestrator:
@@ -423,13 +435,28 @@ class OptimizedOrchestrator:
 
             vector_memory = VectorMemory(chroma_path=str(project_root / "data" / "chroma_db"))
             structured_memory = StructuredMemory(db_path=str(project_root / "data" / "sqlite.db"))
-            self.components["memory"] = MemoryPipeline(
-                structured_memory=structured_memory,
-                vector_memory=vector_memory,
-                llm_gateway=self.components["llm"],
-                working_limit=cfg.memory.working_memory_limit,
-                retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
-            )
+            memory_fusion = fusion_cfg.get("memory", {})
+            if _should_use_shisi_memory(fusion_cfg):
+                self.components["memory"] = ShisiMemoryService(
+                    structured_memory=structured_memory,
+                    vector_memory=vector_memory,
+                    llm_gateway=self.components["llm"],
+                    db_path=str(project_root / "data" / "sqlite.db"),
+                    working_limit=cfg.memory.working_memory_limit,
+                    retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
+                    forgetting_model=memory_fusion.get("forgetting_model", "exponential"),
+                )
+                logger.info("使用 shisi 记忆服务适配层 (ShisiMemoryService)")
+            else:
+                self.components["memory"] = MemoryPipeline(
+                    structured_memory=structured_memory,
+                    vector_memory=vector_memory,
+                    llm_gateway=self.components["llm"],
+                    working_limit=cfg.memory.working_memory_limit,
+                    retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
+                    forgetting_model=memory_fusion.get("forgetting_model", "exponential"),
+                )
+                logger.info("使用原有记忆管线 (MemoryPipeline)")
             self.components["vector_memory"] = vector_memory
             self.components["structured_memory"] = structured_memory
 
@@ -1763,14 +1790,27 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     vector_memory = VectorMemory(chroma_path=str(project_root / "data" / "chroma_db"))
     structured_memory = StructuredMemory(db_path=str(project_root / "data" / "sqlite.db"))
 
-    memory_pipeline = MemoryPipeline(
-        structured_memory=structured_memory,
-        vector_memory=vector_memory,
-        llm_gateway=llm,
-        working_limit=cfg.memory.working_memory_limit,
-        retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
-        forgetting_model=forgetting_model,
-    )
+    if _should_use_shisi_memory(fusion_cfg):
+        memory_pipeline = ShisiMemoryService(
+            structured_memory=structured_memory,
+            vector_memory=vector_memory,
+            llm_gateway=llm,
+            db_path=str(project_root / "data" / "sqlite.db"),
+            working_limit=cfg.memory.working_memory_limit,
+            retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
+            forgetting_model=forgetting_model,
+        )
+        logger.info("      使用 shisi 记忆服务适配层 (ShisiMemoryService)")
+    else:
+        memory_pipeline = MemoryPipeline(
+            structured_memory=structured_memory,
+            vector_memory=vector_memory,
+            llm_gateway=llm,
+            working_limit=cfg.memory.working_memory_limit,
+            retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
+            forgetting_model=forgetting_model,
+        )
+        logger.info("      使用原有记忆管线 (MemoryPipeline)")
 
     logger.info("[7/12] 初始化工具系统...")
     tool_registry = ToolRegistry()
