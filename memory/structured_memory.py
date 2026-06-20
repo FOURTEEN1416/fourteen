@@ -230,6 +230,14 @@ class StructuredMemory:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS reflections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content TEXT NOT NULL,
+                    session_id TEXT DEFAULT '',
+                    source_fact_ids TEXT DEFAULT '[]',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS trace_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     trace_id TEXT NOT NULL,
@@ -254,6 +262,9 @@ class StructuredMemory:
                     ON chat_history(session_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_emotion_traj_affinity_time
                     ON emotion_trajectory(affinity_level, created_at);
+
+                CREATE INDEX IF NOT EXISTS idx_reflections_created
+                    ON reflections(created_at DESC);
 
                 CREATE VIRTUAL TABLE IF NOT EXISTS user_facts_fts USING fts5(
                     fact,
@@ -375,6 +386,39 @@ class StructuredMemory:
             )
             start_id = rows - len(facts) + 1
             return list(range(start_id, start_id + len(facts)))
+
+    # ── 记忆反思 ──────────────────────────────────────────
+
+    def add_reflection(self, content: str, session_id: str = "",
+                       source_fact_ids: list[int] | None = None) -> int:
+        """添加反思洞察"""
+        import json
+        source_ids = json.dumps(source_fact_ids or [])
+        with self._conn(write=True) as conn:
+            cursor = conn.execute(
+                "INSERT INTO reflections (content, session_id, source_fact_ids) VALUES (?, ?, ?)",
+                (content, session_id, source_ids),
+            )
+            conn.commit()
+            return cursor.lastrowid  # type: ignore[no-any-return]
+
+    def get_reflections(self, limit: int = 10) -> list[dict[str, Any]]:
+        """获取最近反思洞察"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM reflections ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def search_reflections(self, keyword: str, limit: int = 5) -> list[dict[str, Any]]:
+        """关键词搜索反思洞察"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM reflections WHERE content LIKE ? ORDER BY created_at DESC LIMIT ?",
+                (f"%{keyword}%", limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     # ── 好感度日志 ────────────────────────────────────────
 

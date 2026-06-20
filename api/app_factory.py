@@ -26,6 +26,7 @@ from api._training_routes import router as training_router
 from api._users_routes import router as users_router
 from api.auth import configure_auth, verify_api_key_dep
 from api.deps import deps
+from api.routers.demo_routes import router as demo_router
 
 logger = logging.getLogger("app_factory")
 
@@ -168,13 +169,14 @@ def create_api_app(
 
     app.include_router(misc_router)         # 10 端点: health/stats/memory/logs/config/channels/routes
     app.include_router(chat_router)         # 10 端点: chat/session + wechat channels
+    app.include_router(demo_router)         #  4 端点: demo 体验入口（无认证）
     app.include_router(personality_router)  #  9 端点: emotion/persona/psych
     app.include_router(users_router)        #  7 端点: users/*
     app.include_router(training_router)     # 11 端点: training/* + proactive/*
     app.include_router(tools_router)        #  5 端点: tools/* + plugins/*
     app.include_router(safety_router)       # 12 端点: safety/rag/voice/files/cache
     app.include_router(clone_router)        #  7 端点: clone/*
-    logger.info("主路由已拆分为 8 个子路由 (71 端点)")
+    logger.info("主路由已拆分为 9 个子路由 (75 端点)")
 
     # ── 用户认证 API ──
     try:
@@ -367,11 +369,8 @@ def _setup_fallback_rate_limiter(app: FastAPI) -> None:
 
             _rate_limit_store[key] = [t for t in _rate_limit_store[key] if now - t < window_seconds]
 
-            if not _rate_limit_store[key]:
-                if key in _rate_limit_store:
-                    del _rate_limit_store[key]
-                return True
-
+            # 修复：先检查数量，未超限则 append 再 return True
+            # 原逻辑当列表为空时直接 return True 但不记录本次请求，导致限流永不生效
             if len(_rate_limit_store[key]) >= max_requests:
                 return False
             _rate_limit_store[key].append(now)

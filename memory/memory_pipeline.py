@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .conversation_summarizer import ConversationSummarizer
+from .reflection_engine import ReflectionEngine
 from .structured_memory import StructuredMemory
 from .vector_memory import VectorMemory
 
@@ -36,6 +37,25 @@ logger = logging.getLogger("memory_pipeline")
 # ═══════════════════════════════════════════════════════════════
 #  配置
 # ═══════════════════════════════════════════════════════════════
+
+# ── 选择性记忆规则常量 ──────────────────────────────────────
+# 敷衍词：用户用来回避真实情绪的表达
+PERFUNCTORY_WORDS = ("没事", "我没事", "我很好", "还行", "还好", "无所谓", "算了")
+
+# 情感关键词：表明用户在表达真实情感
+EMOTION_KEYWORDS = (
+    "难过", "伤心", "开心", "生气", "孤独", "寂寞", "怕", "害怕",
+    "想", "想念", "爱", "讨厌", "焦虑", "烦躁", "崩溃", "绝望",
+    "委屈", "心疼", "感动", "幸福",
+)
+
+# 深夜情感关键词：深夜时段需要特别关注的情感信号
+LATE_NIGHT_EMOTION_WORDS = ("怕", "想", "孤独", "难过", "寂寞", "睡不着", "失眠", "崩溃")
+
+# 深夜时段范围（24小时制，含两端）
+LATE_NIGHT_START_HOUR = 23
+LATE_NIGHT_END_HOUR = 5
+
 
 @dataclass
 class MemoryConfig:
@@ -188,6 +208,7 @@ class SemanticMemory:
             logger.debug("Similar fact search failed, skipping dedup: %s", e)
         try:
             self._sm.add_fact(fact, category, confidence, source)
+            self._fact_cache.add(fact_hash)
             try:
                 self._vm.store_text_sync(fact, {
                     "type": "fact",
@@ -820,6 +841,14 @@ class MemoryPipeline:
         )
         self.cross_session = CrossSessionReasoner(self.sm)
 
+        # 记忆反思引擎：将零散事实沉淀为洞察
+        self.reflection = ReflectionEngine(
+            llm_func=self._llm if callable(self._llm) else None,
+            vector_memory=self.vm,
+            structured_memory=self.sm,
+            reflection_interval=max(1, fact_extract_interval * 2),
+        )
+
         # 对话摘要器（方案二：摘要+滑动窗口）
         self.summarizer = ConversationSummarizer(llm_gateway)
 
@@ -858,6 +887,60 @@ class MemoryPipeline:
 
     # ── 核心接口 ──────────────────────────────────────────
 
+    @staticmethod
+    def _is_late_night(timestamp: datetime) -> bool:
+        """判断给定时间是否处于深夜时段（23:00-05:00，含两端）。
+
+        Args:
+            timestamp: 待判断的时间戳（建议带时区）
+
+        Returns:
+            True 表示处于深夜时段
+        """
+        hour = timestamp.hour
+        # 23:00-23:59 或 00:00-05:00
+        return hour >= LATE_NIGHT_START_HOUR or hour <= LATE_NIGHT_END_HOUR
+
+    def should_store_as_fact(self, message: str, timestamp: datetime) -> bool:
+        """选择性记忆判定：是否应将消息提取为语义记忆（事实）。
+
+        规则：
+        1. 包含敷衍词且不含情感关键词 → 不存为事实（降低重要性）
+        2. 深夜（23:00-05:00）含情感关键词 → 提升重要性，存为事实
+        3. 其他情况默认存为事实
+
+        Args:
+            message: 用户消息文本
+            timestamp: 消息时间戳
+
+        Returns:
+            True 表示应存为事实，False 表示应跳过事实提取
+        """
+        if not message:
+            return False
+
+        has_perfunctory = any(w in message for w in PERFUNCTORY_WORDS)
+        has_emotion = any(w in message for w in EMOTION_KEYWORDS)
+
+        # 规则1：敷衍且无情感 → 不存为事实
+        if has_perfunctory and not has_emotion:
+            logger.debug("Skipping fact storage (perfunctory): %s", message[:30])
+            return False
+
+        # 规则2：深夜 + 情感词 → 强制存为事实（重要性在 after_chat 中提升）
+        if self._is_late_night(timestamp):
+            has_late_night_emotion = any(
+                w in message for w in LATE_NIGHT_EMOTION_WORDS
+            )
+            if has_late_night_emotion:
+                logger.debug(
+                    "Late-night emotion detected, force store: %s", message[:30]
+                )
+                return True
+
+        # 规则3：默认存为事实
+        return True
+
     def after_chat(
         self,
         user_msg: str,
@@ -877,6 +960,21 @@ class MemoryPipeline:
 
         # 1. 重要性评分
         importance = self.scorer.score(user_msg, emotion_tag)
+
+        # 1.1 选择性记忆：深夜情感词提升重要性
+        now = datetime.now(tz=timezone.utc)
+        try:
+            if self._is_late_night(now):
+                has_late_night_emotion = any(
+                    w in user_msg for w in LATE_NIGHT_EMOTION_WORDS
+                )
+                if has_late_night_emotion:
+                    importance = min(1.0, importance + 0.3)
+                    logger.debug(
+                        "Late-night emotion importance boost: %s", user_msg[:30]
+                    )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Late-night importance boost failed: %s", e)
 
         # 2. 存储到结构化记忆
         try:
@@ -970,6 +1068,7 @@ class MemoryPipeline:
             "episodic": [],
             "semantic": [],
             "facts": [],
+            "reflections": [],
         }
 
         # 1. 工作记忆（最快，无超时风险）
@@ -1024,6 +1123,13 @@ class MemoryPipeline:
             logger.debug("Failed to get pending events: %s", e)
             context["pending_events"] = []
 
+        # 5. 记忆反思洞察
+        try:
+            context["reflections"] = self.reflection.get_insights(query=query, top_k=3)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Failed to get reflections: %s", e)
+            context["reflections"] = []
+
         return context
 
     async def retrieve_context_async(
@@ -1055,6 +1161,7 @@ class MemoryPipeline:
             "episodic": [],
             "semantic": [],
             "facts": [],
+            "reflections": [],
         }
 
         start = time.perf_counter()
@@ -1113,6 +1220,13 @@ class MemoryPipeline:
         except Exception as e:  # noqa: BLE001
             logger.debug("Failed to get pending events (async): %s", e)
             context["pending_events"] = []
+
+        # 记忆反思洞察
+        try:
+            context["reflections"] = self.reflection.get_insights(query=query, top_k=3)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Failed to get reflections (async): %s", e)
+            context["reflections"] = []
 
         context["_ts"] = time.time()  # type: ignore
         with self._cache_lock:
@@ -1290,11 +1404,21 @@ class MemoryPipeline:
     # ── 内部方法 ──────────────────────────────────────────
 
     def _do_fact_extraction(self, session_id: str) -> int:
-        """执行事实提取（V1 FactExtractor + V2 ConflictDetector）"""
+        """执行事实提取（V1 FactExtractor + V2 ConflictDetector）
+
+        集成选择性记忆：通过 should_store_as_fact 过滤敷衍消息，
+        避免把"没事/还行"等无信息量内容提取为事实。
+        """
         count = 0
         try:
             recent = self.sm.get_recent_chats(10)
-            user_msgs = [c["content"] for c in recent if c["role"] == "user"]
+            # 选择性记忆：过滤掉敷衍且无情感的消息
+            now = datetime.now(tz=timezone.utc)
+            user_msgs = [
+                c["content"] for c in recent
+                if c["role"] == "user"
+                and self.should_store_as_fact(c.get("content", ""), now)
+            ]
             if not user_msgs:
                 return 0
 
@@ -1302,6 +1426,10 @@ class MemoryPipeline:
             deduped = FactExtractor.deduplicate(facts)
 
             for fact in deduped:
+                # 选择性记忆：对提取出的事实文本再次校验（防止规则模式误提取敷衍词）
+                if not self.should_store_as_fact(fact.get("fact", ""), now):
+                    continue
+
                 # 冲突检测
                 conflict = self.conflict_detector.check_conflict(
                     fact["fact"], fact.get("category", "general")
@@ -1339,6 +1467,19 @@ class MemoryPipeline:
 
         except Exception as e:  # noqa: BLE001
             logger.warning("Fact extraction failed: %s", e)
+
+        # 记忆反思：事实足够时生成更高层洞察
+        if count > 0:
+            try:
+                facts = self.semantic.get_facts(limit=20)
+                episodes = self.episodic.search("", top_k=3)
+                self.reflection.maybe_reflect(
+                    facts=[{"fact": f.get("fact", ""), "category": f.get("category", "general")} for f in facts],
+                    episodes=episodes,
+                    session_id=session_id,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Reflection trigger failed: %s", e)
 
         return count
 

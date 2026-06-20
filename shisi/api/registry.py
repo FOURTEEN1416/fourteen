@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from ..application.character_service import CharacterService
 
 from ..affinity.enhancer import AffinityEnhancer
+from ..affinity.mapper import AffinityMapper
 from ..character.manager import CharacterManager
 from ..character.store import CharacterStore
 from ..emotion_stage.stage_engine import EmotionStageEngine
@@ -44,6 +45,7 @@ logger = logging.getLogger("shisi.api.registry")
 class AiyuRegistry:
     character_manager: CharacterManager | None = None
     affinity_enhancer: AffinityEnhancer | None = None
+    affinity_mapper: AffinityMapper | None = None
     stage_engine: EmotionStageEngine | None = None
     sticker_manager: StickerManager | None = None
     favorite_manager: FavoriteManager | None = None
@@ -69,6 +71,10 @@ def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True, db_path: s
 
     reg.affinity_enhancer = AffinityEnhancer()
     reg.stage_engine = EmotionStageEngine()
+    reg.affinity_mapper = AffinityMapper(
+        enhancer=reg.affinity_enhancer,
+        stage_engine=reg.stage_engine,
+    )
     reg.sticker_manager = StickerManager()
     reg.favorite_manager = FavoriteManager()
     reg.forward_manager = ForwardManager()

@@ -1,29 +1,35 @@
-﻿import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { Select } from '../components/shared'
 import { logs } from '../api/system'
-import type { LogEntry } from '../types/framework'
+// 修复：LogEntry 改为从 types/api 导入，统一类型定义（字段：time/level/module/msg）
+import type { LogEntry } from '../types/api'
 
 const levelOptions = [
   { value: 'ALL', label: 'ALL' },
   { value: 'DEBUG', label: 'DEBUG' },
   { value: 'INFO', label: 'INFO' },
-  { value: 'WARN', label: 'WARN' },
+  { value: 'WARNING', label: 'WARNING' },
   { value: 'ERROR', label: 'ERROR' },
+  { value: 'CRITICAL', label: 'CRITICAL' },
 ]
 
 const POLL_INTERVAL = 5000 // 5s
 
-/** 后端日志记录 → 前端 LogEntry */
+/** 后端日志记录 → 前端 LogEntry（字段对齐 api.ts：time/level/module/msg） */
 function toLogEntry(raw: Record<string, unknown>): LogEntry {
+  // 后端可能发送 'WARN'，统一为 api.ts LogEntry 定义的 'WARNING'
+  const rawLevel = (raw.level as string)?.toUpperCase() || 'INFO'
+  const level = (rawLevel === 'WARN' ? 'WARNING' : rawLevel) as LogEntry['level']
   return {
-    timestamp: (raw.time as string) || '',
-    level: ((raw.level as string)?.toUpperCase() as LogEntry['level']) || 'INFO',
-    message: (raw.msg as string) || '',
+    time: (raw.time as string) || '',
+    level,
+    module: (raw.module as string) || '',
+    msg: (raw.msg as string) || '',
   }
 }
 
 function sortLogs(entries: LogEntry[]): LogEntry[] {
-  return [...entries].sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''))
+  return [...entries].sort((a, b) => (b.time || '').localeCompare(a.time || ''))
 }
 
 function SettingsLogs() {
@@ -68,7 +74,7 @@ function SettingsLogs() {
   const filteredLogs = useMemo(() => {
     return allLogs.filter(entry => {
       if (activeLevel !== 'ALL' && entry.level !== activeLevel) return false
-      if (searchQuery && !entry.message.toLowerCase().includes(searchQuery.toLowerCase())) return false
+      if (searchQuery && !entry.msg.toLowerCase().includes(searchQuery.toLowerCase())) return false
       return true
     })
   }, [allLogs, activeLevel, searchQuery])
@@ -79,7 +85,7 @@ function SettingsLogs() {
 
   function handleExport() {
     const blob = new Blob(
-      [allLogs.map(e => `[${e.timestamp}] [${e.level}] ${e.message}`).join('\n')],
+      [allLogs.map(e => `[${e.time}] [${e.level}] ${e.msg}`).join('\n')],
       { type: 'text/plain' },
     )
     const url = URL.createObjectURL(blob)
@@ -94,8 +100,9 @@ function SettingsLogs() {
     switch (level) {
       case 'DEBUG': return 'text-gray-400'
       case 'INFO': return 'text-primary-600'
-      case 'WARN': return 'text-amber-600'
+      case 'WARNING': return 'text-amber-600'
       case 'ERROR': return 'text-red-600'
+      case 'CRITICAL': return 'text-red-700'
     }
   }
 
@@ -171,12 +178,12 @@ function SettingsLogs() {
         ) : (
           filteredLogs.map((entry, idx) => (
             <div
-              key={`${entry.timestamp}-${idx}`}
+              key={`${entry.time}-${idx}`}
               className="glass-card rounded-lg px-3 py-2 flex items-start gap-2 animate-slide-up"
               style={{ animationDelay: `${Math.min(idx * 20, 400)}ms` }}
             >
               <span className="text-xs font-mono text-gray-400 shrink-0 whitespace-nowrap">
-                [{entry.timestamp}]
+                [{entry.time}]
               </span>
               <span className={[
                 'text-xs font-mono font-medium shrink-0 whitespace-nowrap',
@@ -185,7 +192,7 @@ function SettingsLogs() {
                 [{entry.level}]
               </span>
               <span className="text-xs font-mono text-gray-700 break-all leading-relaxed">
-                {entry.message}
+                {entry.msg}
               </span>
             </div>
           ))

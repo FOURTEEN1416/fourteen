@@ -71,16 +71,11 @@ export interface User {
   online?: boolean
   characterCount?: number
   last_active?: string
-  is_online: boolean
+  // 修复：移除冗余的 is_online 字段，统一使用 online? 避免字段重复语义冲突
 }
 
-export interface EmotionState {
-  current_emotion: string
-  intensity: number
-  baseline: number
-  volatility: number
-  resilience: number
-}
+// 修复：EmotionState 已在 types/api.ts 中统一定义（current_emotion/intensity/energy/affinity），
+// 此处删除避免类型冲突。如需框架扩展字段，请使用 FrameworkEmotionState 等独立命名。
 
 export interface EmotionTrendPoint {
   date: string
@@ -103,11 +98,8 @@ export interface PluginItem {
   built_in: boolean
 }
 
-export interface LogEntry {
-  timestamp: string
-  level: "DEBUG" | "INFO" | "WARN" | "ERROR"
-  message: string
-}
+// 修复：LogEntry 已在 types/api.ts 中统一定义（time/level/module/msg，含 WARNING/CRITICAL），
+// 此处删除避免类型冲突。SettingsLogs.tsx 已改为从 types/api 导入。
 
 export type WorkspaceTab = "create" | "settings" | "status"
 

@@ -1,4 +1,4 @@
-﻿import { Routes, Route, Navigate, useParams, Outlet } from 'react-router-dom'
+import { Routes, Route, Navigate, useParams, Outlet } from 'react-router-dom'
 import { lazy, Suspense, useEffect } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './api/queryClient'
@@ -25,6 +25,7 @@ const WeChatPage = lazy(() => import('./pages/WeChatPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
 const BindingDetailPage = lazy(() => import('./pages/BindingDetailPage'))
+const DemoPage = lazy(() => import('./pages/DemoPage'))
 
 const SettingsLLM = lazy(() => import('./pages/SettingsLLM'))
 const SettingsVoice = lazy(() => import('./pages/SettingsVoice'))
@@ -110,8 +111,9 @@ export default function App() {
     <ErrorBoundary>
     <AuthInit>
       <Routes>
-        {/* 鈺愨晲鈺?鍏紑璺敱锛氱櫥褰曢〉锛堟棤渚ц竟鏍忥級 鈺愨晲鈺?*/}
+        {/* 鈺愨晲鈺?鍏紑璺敱锛氱櫥褰曢〉 + Demo 浣撻獙 鈺愨晲鈺?*/}
         <Route path="/login" element={<Suspense fallback={<PageLoadingSkeleton />}><LoginPage /></Suspense>} />
+        <Route path="/demo" element={<AnimatedSuspense><DemoPage /></AnimatedSuspense>} />
 
         {/* 鈺愨晲鈺?鍙椾繚鎶よ矾鐢憋細绠＄悊鎺у埗鍙?鈺愨晲鈺?*/}
         <Route element={<ProtectedLayout />}>

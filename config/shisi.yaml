@@ -187,8 +187,8 @@ voice:
 
 # 亲密度系统配置
 affinity:
-  # 初始亲密度
-  initial_value: 50
+  # 初始亲密度（统一为 0，从陌生人开始，与 emotion.yaml initial.affinity 保持一致）
+  initial_value: 0
   # 最大亲密度
   max_value: 100
   # 最小亲密度

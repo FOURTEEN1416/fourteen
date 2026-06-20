@@ -452,7 +452,12 @@ class TestProductionSecurity:
         (2) the CORS origins are the default localhost ones (still
         permissive, but with a warning).
         """
-        with patch.dict(os.environ, {"ENV": "prod", "API_KEY": "test-prod-key"}), \
+        with patch.dict(os.environ, {
+                    "ENV": "prod",
+                    "API_KEY": "test-prod-key",
+                    "JWT_SECRET": "test-prod-secret-must-be-at-least-32-characters-long",
+                    "API_CORS_ORIGINS": "http://localhost:5173",
+                }), \
              patch("api.app_factory.logger") as mock_logger:
                 from api.app_factory import create_api_app
                 app = create_api_app()
@@ -475,7 +480,7 @@ class TestProductionSecurity:
     @pytest.mark.asyncio
     async def test_prod_env_adds_hsts_header(self) -> None:
         """Set ENV=prod, verify Strict-Transport-Security header."""
-        with patch.dict(os.environ, {"ENV": "prod", "API_KEY": "test-prod-key"}):
+        with patch.dict(os.environ, {"ENV": "prod", "API_KEY": "test-prod-key", "JWT_SECRET": "test-prod-secret-must-be-at-least-32-characters-long"}):
             from api.app_factory import create_api_app
             app = create_api_app()
 

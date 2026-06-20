@@ -111,12 +111,24 @@ class WebSocketServer:
                                 "session_id": session_id,
                                 "message_type": message_type,
                             }))
-                            async for token in self._orch.process_message_stream(user_msg, session_id):
-                                await websocket.send(json.dumps({
-                                    "type": "stream_token",
-                                    "content": token,
-                                    "message_type": message_type,
-                                }, ensure_ascii=False))
+                            async for event in self._orch.process_message_stream(user_msg, session_id):
+                                # 兼容旧版返回字符串的生成器
+                                if isinstance(event, str):
+                                    event = {"type": "token", "content": event}
+                                if event.get("type") == "token":
+                                    await websocket.send(json.dumps({
+                                        "type": "stream_token",
+                                        "content": event.get("content", ""),
+                                        "message_type": message_type,
+                                    }, ensure_ascii=False))
+                                elif event.get("type") == "done":
+                                    await websocket.send(json.dumps({
+                                        "type": "stream_end",
+                                        "session_id": session_id,
+                                        "message_type": message_type,
+                                        "reply": event.get("reply", ""),
+                                        "emotion": event.get("emotion"),
+                                    }, ensure_ascii=False))
                             await websocket.send(json.dumps({
                                 "type": "stream_end",
                                 "session_id": session_id,

@@ -19,6 +19,7 @@ import contextlib
 import hashlib
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -33,9 +34,31 @@ except ImportError:
     HAS_CHROMADB = False
     Collection = Any  # type: ignore
 
+# 进程级缓存：避免重复初始化 embedding function 和 ChromaDB collection
+_silence_once: bool = False
+_silence_lock = threading.Lock()
+_embedding_function: Any | None = None
+_embedding_lock = threading.Lock()
+
 
 @contextlib.contextmanager
 def _silence_stdout():
+    """屏蔽 onnxruntime C++ 扩展 import 时的 EP Error 噪声；首次调用执行 fd 重定向，后续直接放行。"""
+    global _silence_once
+    if _silence_once:
+        yield
+        return
+    with _silence_lock:
+        if _silence_once:
+            yield
+            return
+        _silence_once = True
+    with _do_silence_stdout():
+        yield
+
+
+@contextlib.contextmanager
+def _do_silence_stdout():
     """屏蔽 onnxruntime C++ 扩展 import 时的 EP Error 噪声（缺 TensorRT 库）。
     onnxruntime C++ 通过 std::cerr (fd 2) 打印 EP Error，所以必须同时重定向 fd 1+2。
     """
@@ -83,6 +106,19 @@ def _run_async(coro):
         return asyncio.run(coro)
 
 
+def _get_default_embedding_function() -> Any:
+    """进程级单例：避免每次初始化 VectorMemory 都重新加载 onnxruntime 模型。"""
+    global _embedding_function
+    if _embedding_function is not None:
+        return _embedding_function
+    with _embedding_lock:
+        if _embedding_function is not None:
+            return _embedding_function
+        with _silence_stdout():
+            _embedding_function = embedding_functions.DefaultEmbeddingFunction()
+        return _embedding_function
+
+
 class VectorMemory:
     """
     ChromaDB 向量记忆封装 (async + sync)
@@ -90,11 +126,30 @@ class VectorMemory:
     所有公开方法同时提供 async 和 sync 版本：
     - async: store_chat(), search() 等 — 供 async 上下文
     - sync: store_chat_sync(), search_sync() 等 — 供同步上下文
+
+    同一路径的 VectorMemory 实例会被进程级缓存复用，避免重复初始化 collection。
     """
 
     COLLECTIONS = ["chat_history", "user_facts", "emotion_logs", "episodic_memory", "semantic_knowledge", "emotion_trajectory"]
 
+    _instances: dict[str, VectorMemory] = {}
+    _instance_lock = threading.Lock()
+
+    def __new__(cls, chroma_path: str = "./data/chroma_db") -> VectorMemory:
+        abs_path = os.path.abspath(chroma_path)
+        if abs_path in cls._instances:
+            return cls._instances[abs_path]
+        with cls._instance_lock:
+            if abs_path in cls._instances:
+                return cls._instances[abs_path]
+            instance = super().__new__(cls)
+            cls._instances[abs_path] = instance
+            return instance
+
     def __init__(self, chroma_path: str = "./data/chroma_db"):
+        # 单例复用时跳过重复初始化
+        if getattr(self, "_initialized", False):
+            return
         self.chroma_path = os.path.abspath(chroma_path)
         self._collections: dict[str, Any] = {
             name: None for name in self.COLLECTIONS
@@ -104,15 +159,13 @@ class VectorMemory:
             self._init()
         else:
             logger.warning("chromadb not installed, VectorMemory runs in fallback mode")
+        self._initialized = True
 
     def _init(self) -> None:
         try:
             os.makedirs(self.chroma_path, exist_ok=True)
             client = chromadb.PersistentClient(path=self.chroma_path)
-            # onnxruntime 首次加载会 printf "EP Error nvinfer_10.dll missing" 到 stdout
-            # 屏蔽此 C++ 噪声（不影响功能，CPU EP 正常工作）
-            with _silence_stdout():
-                ef = embedding_functions.DefaultEmbeddingFunction()
+            ef = _get_default_embedding_function()
             for name in self.COLLECTIONS:
                 try:
                     self._collections[name] = client.get_or_create_collection(
@@ -123,7 +176,9 @@ class VectorMemory:
                     logger.warning("Failed to init collection '%s': %s", name, e)
 
             logger.info("VectorMemory ready: %s", self.chroma_path)
-        except Exception as e:  # noqa: BLE001
+        except BaseException as e:  # noqa: BLE001
+            if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                raise
             logger.error("ChromaDB init failed: %s", e)
 
     # ── 聊天历史 ──────────────────────────────────────────

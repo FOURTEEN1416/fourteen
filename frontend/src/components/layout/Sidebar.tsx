@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { NavLink, useLocation, Link } from 'react-router-dom'
 import {
   MessageCircle, Users, PanelLeftClose, PanelLeft,
@@ -187,7 +187,7 @@ export default function Sidebar() {
         ${collapsed ? 'justify-center px-0' : 'px-4 justify-between'}`}>
         {!collapsed && (
           <Link to="/wechat" className="text-sm font-semibold bg-gradient-to-r from-primary-500 to-accent-500 bg-clip-text text-transparent hover:opacity-80 transition-opacity">
-            十四
+            唯一的我
           </Link>
         )}
         <button

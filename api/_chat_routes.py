@@ -75,13 +75,31 @@ async def chat_stream(req: ChatRequest, _auth: bool = Security(verify_api_key_de
         )
 
     async def event_generator():
-        async for token in orch.process_message_stream(
-            req.message, req.session_id, req.message_type, req.character_id,
-        ):
-            yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
+        try:
+            async for event in orch.process_message_stream(
+                req.message, req.session_id, req.message_type, req.character_id,
+            ):
+                # 兼容旧版返回字符串的生成器（full 模式 Orchestrator）
+                if isinstance(event, str):
+                    event = {"type": "token", "content": event}
+                if event.get("type") == "token":
+                    yield f"data: {json.dumps({'token': event.get('content', '')}, ensure_ascii=False)}\n\n"
+                elif event.get("type") == "done":
+                    yield f"data: {json.dumps({'done': True, 'reply': event.get('reply', ''), 'emotion': event.get('emotion'), 'process_time': event.get('process_time')}, ensure_ascii=False)}\n\n"
+                else:
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+        except TimeoutError:
+            yield f"data: {json.dumps({'type': 'error', 'error': 'LLM timeout'}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.warning("Stream error: %s", e)
+            yield f"data: {json.dumps({'type': 'error', 'error': 'stream failed'}, ensure_ascii=False)}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/api/session")

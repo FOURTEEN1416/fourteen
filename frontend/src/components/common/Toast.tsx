@@ -1,10 +1,11 @@
 import { useErrorStore } from '../../store/errorStore'
 
+// 修复：改为浅色配色，与 index.css 的 @theme 浅色系一致（参考 shared/Badge.tsx 风格）
 const typeStyles = {
-  error: 'bg-red-900/80 border-red-800/50 text-red-200',
-  warning: 'bg-yellow-900/80 border-yellow-800/50 text-yellow-200',
-  info: 'bg-blue-900/80 border-blue-800/50 text-blue-200',
-  success: 'bg-green-900/80 border-green-800/50 text-green-200',
+  error: 'bg-red-50 border-red-200 text-red-700',
+  warning: 'bg-amber-50 border-amber-200 text-amber-700',
+  info: 'bg-blue-50 border-blue-200 text-blue-700',
+  success: 'bg-green-50 border-green-200 text-green-700',
 }
 
 const typeIcons = {

@@ -1,4 +1,4 @@
-﻿import type { ReactNode } from 'react'
+import type { ReactNode } from 'react'
 
 interface BadgeProps {
   children: ReactNode
@@ -6,12 +6,13 @@ interface BadgeProps {
   className?: string
 }
 
+// 修复：改为浅色配色，与 index.css 的 @theme 浅色系一致（参考 shared/Badge.tsx 风格）
 const variantStyles = {
-  default: 'bg-gray-200/60 text-gray-500',
-  success: 'bg-green-900/30 text-green-400',
-  warning: 'bg-yellow-900/30 text-yellow-400',
-  error: 'bg-red-900/30 text-red-400',
-  info: 'bg-blue-900/30 text-blue-400',
+  default: 'bg-gray-100/60 text-gray-500',
+  success: 'bg-green-50 text-green-600',
+  warning: 'bg-amber-50 text-amber-600',
+  error: 'bg-red-50 text-red-600',
+  info: 'bg-primary-50 text-primary-600',
 }
 
 export default function Badge({ children, variant = 'default', className = '' }: BadgeProps) {

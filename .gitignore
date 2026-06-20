@@ -72,6 +72,7 @@ htmlcov/
 .superpowers/
 .arts/
 .playwright-mcp/
+.browser_profile/
 
 # ── 运行时产物 ──
 *.rdb

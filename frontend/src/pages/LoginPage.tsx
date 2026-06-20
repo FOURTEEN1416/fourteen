@@ -75,7 +75,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm mx-4">
         {/* Logo / 标题 */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-800">唯一的你</h1>
+          <h1 className="text-3xl font-bold text-gray-800">唯一的我</h1>
           <p className="text-sm text-gray-400 mt-1">
             {mode === 'login' ? '登录管理控制台' : '创建新账户'}
           </p>
@@ -218,6 +218,15 @@ export default function LoginPage() {
         {/* Footer */}
         <p className="text-center text-xs text-gray-300 mt-6">
           唯一的你 — 管理控制台
+        </p>
+        <p className="text-center text-xs text-gray-400 mt-2">
+          <button
+            type="button"
+            onClick={() => navigate('/demo')}
+            className="hover:text-indigo-500 transition-colors"
+          >
+            先试试 Demo 体验 →
+          </button>
         </p>
       </div>
     </div>

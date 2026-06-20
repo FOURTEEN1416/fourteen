@@ -69,15 +69,18 @@ class OpenCodeZenProvider:
         logger.info("OpenCodeZenProvider ready: api_base=%s, default_model=%s", self.api_base, self.model)
 
         try:
-            self.fetch_available_models()
+            # 初始化时不阻塞事件循环，异步获取可用模型由首次 chat 触发
+            pass
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to fetch models on init (will use config): %s", e)
 
-    def fetch_available_models(self) -> list[str]:
+    async def _fetch_available_models_async(self) -> list[str]:
+        """异步获取远程可用模型列表。"""
         try:
-            resp = httpx.get(self._models_url, headers=self._headers, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(self._models_url, headers=self._headers)
+                resp.raise_for_status()
+                data = resp.json()
             remote_ids = set()
             if isinstance(data, dict) and "data" in data:
                 for m in data["data"]:
@@ -105,7 +108,18 @@ class OpenCodeZenProvider:
             self.available_models = [m.name for m in self.registry.all_models]
             return self.available_models
 
-    def chat(
+    def fetch_available_models(self) -> list[str]:
+        """同步兼容入口：未在事件循环中时直接返回已配置模型。"""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            self.available_models = [m.name for m in self.registry.all_models]
+            return self.available_models
+        # 已在事件循环中则委托给异步版本；为避免 __init__ 时阻塞，这里也直接返回配置模型
+        self.available_models = [m.name for m in self.registry.all_models]
+        return self.available_models
+
+    async def chat(
         self,
         query: str = "",
         system_prompt: str = "",
@@ -128,11 +142,15 @@ class OpenCodeZenProvider:
         if tools:
             payload["tools"] = tools
 
+        if not self.available_models:
+            await self._fetch_available_models_async()
+
         start = time.perf_counter()
         try:
-            resp = httpx.post(self._chat_url, headers=self._headers, json=payload, timeout=60)
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(self._chat_url, headers=self._headers, json=payload)
             if resp.status_code == 429:
-                return self._handle_429_and_fallback(built_messages, temperature, max_tokens, tools, model_name)
+                return await self._handle_429_and_fallback(built_messages, temperature, max_tokens, tools, model_name)
 
             resp.raise_for_status()
             data = resp.json()
@@ -155,7 +173,7 @@ class OpenCodeZenProvider:
             entry = self.registry.get_by_name(model_name)
             if entry:
                 entry.mark_failed()
-            fallback = self._try_fallback(built_messages, temperature, max_tokens, tools)
+            fallback = await self._try_fallback_async(built_messages, temperature, max_tokens, tools)
             if fallback:
                 return fallback
             return self._handle_error(e)
@@ -213,7 +231,7 @@ class OpenCodeZenProvider:
                 record_error("llm_stream", type(e).__name__)
             yield self._handle_error(e)
 
-    def chat_with_tools(
+    async def chat_with_tools(
         self,
         query: str = "",
         system_prompt: str = "",
@@ -235,8 +253,12 @@ class OpenCodeZenProvider:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
+        if not self.available_models:
+            await self._fetch_available_models_async()
+
         try:
-            resp = httpx.post(self._chat_url, headers=self._headers, json=payload, timeout=60)
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(self._chat_url, headers=self._headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
             message = data["choices"][0]["message"]
@@ -252,12 +274,13 @@ class OpenCodeZenProvider:
                 try:
                     payload.pop("tools", None)
                     payload.pop("tool_choice", None)
-                    resp = httpx.post(self._chat_url, headers=self._headers, json=payload, timeout=60)
+                    async with httpx.AsyncClient(timeout=60) as client:
+                        resp = await client.post(self._chat_url, headers=self._headers, json=payload)
                     resp.raise_for_status()
                     data = resp.json()
                     content = data["choices"][0]["message"]["content"]
                     return {"content": content, "tool_calls": None}
-                except Exception as e:  # noqa: BLE001
+                except Exception:  # noqa: BLE001
                     pass
             return {"content": self._handle_error(e), "tool_calls": None}  # type: ignore[misc]
 
@@ -307,15 +330,30 @@ class OpenCodeZenProvider:
             result.append({"role": "user", "content": query})
         return result
 
-    def _try_fallback(self, messages: list, temperature: float,
-                      max_tokens: int, tools: list | None) -> str | None:
-        fallback_count = 0
-        for entry in self.registry.all_models:
-            if entry.name == self.model or not entry.is_available():
-                continue
-            fallback_count += 1
-            if fallback_count > len(self.registry.all_models):
-                break
+    async def _post_one(self, client: httpx.AsyncClient, model_name: str,
+                        payload: dict[str, Any]) -> str | None:
+        """单个模型异步请求，成功返回文本，失败返回 None。"""
+        try:
+            resp = await client.post(self._chat_url, headers=self._headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"]
+            return content.strip()
+        except Exception:  # noqa: BLE001
+            return None
+
+    async def _try_fallback_async(self, messages: list, temperature: float,
+                                  max_tokens: int, tools: list | None) -> str | None:
+        """并发 fallback：向所有可用候选模型同时请求，取最快成功结果。"""
+        candidates = [
+            entry for entry in self.registry.all_models
+            if entry.name != self.model and entry.is_available()
+        ]
+        if not candidates:
+            return None
+
+        payloads: list[tuple[str, dict[str, Any]]] = []
+        for entry in candidates:
             payload = {
                 "model": entry.name,
                 "messages": messages,
@@ -325,21 +363,50 @@ class OpenCodeZenProvider:
             }
             if tools:
                 payload["tools"] = tools
+            payloads.append((entry.name, payload))
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            tasks: dict[asyncio.Task, str] = {}
+            for model_name, payload in payloads:
+                task = asyncio.create_task(self._post_one(client, model_name, payload))
+                tasks[task] = model_name
+
+            pending = set(tasks.keys())
+            winner_model: str | None = None
+            winner_text: str | None = None
             try:
-                resp = httpx.post(self._chat_url, headers=self._headers, json=payload, timeout=60)
-                resp.raise_for_status()
-                data = resp.json()
-                content = data["choices"][0]["message"]["content"]
-                entry.mark_success()
-                logger.info("Fallback: %s → %s succeeded", self.model, entry.name)
-                return content.strip()  # type: ignore[no-any-return]
-            except Exception:  # noqa: BLE001
-                entry.mark_failed()
+                while pending:
+                    done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                    for task in done:
+                        model_name = tasks[task]
+                        text = task.result()
+                        model_entry = self.registry.get_by_name(model_name)
+                        if text is not None:
+                            winner_model = model_name
+                            winner_text = text
+                            if model_entry:
+                                model_entry.mark_success()
+                            for t in pending:
+                                t.cancel()
+                            break
+                        if model_entry:
+                            model_entry.mark_failed()
+                    if winner_model:
+                        break
+            finally:
+                if pending:
+                    for t in pending:
+                        t.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
+
+            if winner_model:
+                logger.info("Fallback: %s → %s succeeded (concurrent)", self.model, winner_model)
+                return winner_text
         return None
 
-    def _handle_429_and_fallback(self, messages: list, temperature: float,
-                                  max_tokens: int, tools: list | None,
-                                  model_name: str) -> str:
+    async def _handle_429_and_fallback(self, messages: list, temperature: float,
+                                        max_tokens: int, tools: list | None,
+                                        model_name: str) -> str:
         entry = self.registry.get_by_name(model_name)
         if entry:
             retry_after = 30.0
@@ -347,7 +414,7 @@ class OpenCodeZenProvider:
             entry.retry_count = 0
             logger.warning("Model %s rate-limited (429), cooling for %.0fs", model_name, retry_after)
 
-        fallback = self._try_fallback(messages, temperature, max_tokens, tools)
+        fallback = await self._try_fallback_async(messages, temperature, max_tokens, tools)
         if fallback:
             return fallback
         return "（当前服务暂时不可用，请稍后重试）"

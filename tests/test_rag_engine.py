@@ -1,6 +1,8 @@
 """单元测试: RAG引擎 — 深度版"""
 import sys
 
+import pytest
+
 sys.path.insert(0, ".")
 
 
@@ -292,6 +294,300 @@ def test_hallucination_guard_verifiable_claim():
 def test_has_bm25_flag():
     from rag_engine.rag_engine import HAS_BM25
     assert isinstance(HAS_BM25, bool)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  BM25Index 缓存与 dirty 标记验证
+# ═══════════════════════════════════════════════════════════════
+
+def test_bm25_index_caches_facts_and_respects_dirty():
+    from rag_engine.rag_engine import BM25Index
+
+    class FakeSM:
+        def __init__(self):
+            self.facts = [
+                {"fact": "I love cats", "category": "preference", "confidence": 0.9},
+                {"fact": "I love dogs", "category": "preference", "confidence": 0.8},
+                {"fact": "I love birds", "category": "preference", "confidence": 0.7},
+            ]
+            self.call_count = 0
+
+        def get_facts(self, min_confidence, limit):
+            self.call_count += 1
+            return self.facts
+
+    sm = FakeSM()
+    idx = BM25Index(sm, ttl_seconds=60.0)
+
+    # 首次 search 触发加载
+    results1 = idx.search("cats")
+    assert sm.call_count == 1
+    assert len(results1) > 0
+
+    # 60s 内再次 search 应使用缓存，不重新加载
+    results2 = idx.search("cats")
+    assert sm.call_count == 1  # 未增加
+    assert len(results2) == len(results1)
+
+    # 标记 dirty 后再次 search 应重新加载
+    idx.mark_dirty()
+    sm.facts.append({"fact": "I also love rabbits", "category": "preference", "confidence": 0.8})
+    results3 = idx.search("rabbits")
+    assert sm.call_count == 2
+    assert any("rabbits" in r["content"] for r in results3)
+
+
+def test_bm25_index_ttl_rebuilds_index():
+    from rag_engine.rag_engine import BM25Index
+
+    class FakeSM:
+        def __init__(self):
+            self.call_count = 0
+
+        def get_facts(self, min_confidence, limit):
+            self.call_count += 1
+            return [
+                {"fact": "time test fact one", "category": "general", "confidence": 0.5},
+                {"fact": "time test fact two", "category": "general", "confidence": 0.5},
+                {"fact": "time test fact three", "category": "general", "confidence": 0.5},
+            ]
+
+    sm = FakeSM()
+    idx = BM25Index(sm, ttl_seconds=-1.0)
+    idx.search("time")
+    assert sm.call_count == 1
+    idx.search("time")
+    assert sm.call_count == 2  # TTL<0 视为立即过期
+
+
+def test_rag_engine_mark_dirty_propagates():
+    from rag_engine.rag_engine import RAGEngineV2
+
+    class MockVM:
+        def search_chats_sync(self, q, k):
+            return []
+
+    class MockSM:
+        def get_facts(self, min_confidence, limit):
+            return [{"fact": "测试", "category": "general", "confidence": 0.5}]
+
+    engine = RAGEngineV2(MockVM(), MockSM())
+    assert hasattr(engine, "mark_dirty")
+    engine.mark_dirty()
+    assert engine._keyword_retriever._bm25._dirty is True
+
+
+# ═══════════════════════════════════════════════════════════════
+#  边界与异常路径
+# ═══════════════════════════════════════════════════════════════
+
+
+def test_bm25_index_load_facts_returns_empty_when_no_sm():
+    from rag_engine.rag_engine import BM25Index
+    idx = BM25Index(None)
+    assert idx._load_facts() == []
+
+
+def test_bm25_index_build_skips_empty_facts():
+    from rag_engine.rag_engine import BM25Index
+
+    class FakeSM:
+        def get_facts(self, min_confidence, limit):
+            return [
+                {"fact": "", "category": "general", "confidence": 0.5},
+                {"fact": "valid fact", "category": "general", "confidence": 0.6},
+            ]
+
+    idx = BM25Index(FakeSM())
+    idx._build()
+    assert "valid fact" in idx._corpus
+    assert "" not in idx._corpus
+
+
+def test_bm25_index_search_empty_query_returns_empty():
+    from rag_engine.rag_engine import BM25Index
+
+    class FakeSM:
+        def get_facts(self, min_confidence, limit):
+            return [{"fact": "valid fact", "category": "general", "confidence": 0.6}]
+
+    idx = BM25Index(FakeSM())
+    assert idx.search("") == []
+    assert idx.search("?!@#") == []
+
+
+def test_bm25_index_search_exception_returns_empty():
+    import time
+
+    from rag_engine.rag_engine import BM25Index
+
+    class FakeIndex:
+        def get_scores(self, query):
+            raise RuntimeError("boom")
+
+    class FakeSM:
+        def get_facts(self, min_confidence, limit):
+            return [{"fact": "valid fact", "category": "general", "confidence": 0.6}]
+
+    idx = BM25Index(FakeSM())
+    idx._corpus = ["valid fact"]
+    idx._docs = [{"fact": "valid fact", "category": "general", "confidence": 0.6}]
+    idx._index = FakeIndex()
+    idx._dirty = False
+    idx._last_build_time = time.monotonic()
+    assert idx.search("valid") == []
+
+
+def test_keyword_retriever_bm25_results_sliced_to_top_k():
+    from rag_engine.rag_engine import KeywordRetriever
+
+    class FakeSM:
+        def get_facts(self, min_confidence, limit):
+            return [
+                {"fact": f"I love {animal}", "category": "g", "confidence": 0.5}
+                for animal in ("cats", "dogs", "birds", "rabbits", "fish")
+            ]
+
+        def search_facts(self, kw):
+            return []
+
+    kr = KeywordRetriever(FakeSM())
+    # "love" 出现在多个文档中且分数为正，验证 top_k 切片
+    results = kr.search("love", top_k=2)
+    assert 0 < len(results) <= 2
+
+
+def test_keyword_retriever_fallback_without_bm25(monkeypatch):
+    from rag_engine import rag_engine as rag_mod
+    from rag_engine.rag_engine import KeywordRetriever
+
+    monkeypatch.setattr(rag_mod, "HAS_BM25", False)
+
+    class FakeSM:
+        def search_facts(self, kw):
+            return [{"fact": f"match_{kw}", "category": "g", "confidence": 0.6}]
+
+    kr = KeywordRetriever(FakeSM())
+    results = kr.search("hello world", top_k=5)
+    contents = {r["content"] for r in results}
+    assert "match_hello" in contents or "match_world" in contents
+
+
+def test_reranker_skips_empty_content():
+    from rag_engine.rag_engine import Reranker
+    rr = Reranker()
+    vec = [{"content": ""}, {"content": "real"}]
+    kw = [{"content": ""}, {"content": "real"}]
+    results = rr.rerank(vec, kw)
+    assert all(r["content"] for r in results)
+
+
+def test_hallucination_guard_list_results_verified():
+    from rag_engine.rag_engine import HallucinationGuard
+    class MockSM:
+        def search(self, q, top_k=5):
+            return [{"content": "喜欢猫"}]
+    hg = HallucinationGuard(MockSM())
+    ok, claim = hg.check("你喜欢猫。")
+    assert ok is True
+    assert claim == ""
+
+
+def test_hallucination_guard_list_results_unverifiable():
+    from rag_engine.rag_engine import HallucinationGuard
+    class MockSM:
+        def search(self, q, top_k=5):
+            return []
+    hg = HallucinationGuard(MockSM())
+    ok, claim = hg.check("你喜欢猫。")
+    assert ok is False
+    assert claim == "猫"
+
+
+def test_hallucination_guard_search_exception_returns_safe():
+    from rag_engine.rag_engine import HallucinationGuard
+    class MockSM:
+        def search(self, q, top_k=5):
+            raise RuntimeError("semantic memory down")
+    hg = HallucinationGuard(MockSM())
+    ok, claim = hg.check("你喜欢猫。")
+    assert ok is True
+    assert claim == ""
+
+
+def test_rag_engine_retrieve_vector_search_exception_logged():
+    from rag_engine.rag_engine import RAGEngineV2
+
+    class BadVM:
+        def search_chats_sync(self, q, k):
+            raise RuntimeError("vector down")
+
+    class MockSM:
+        def search_facts(self, q): return []
+
+    engine = RAGEngineV2(BadVM(), MockSM())
+    result = engine.retrieve("query")
+    assert result["total_vector"] == 0
+    assert result["total_keyword"] == 0
+    assert isinstance(result["results"], list)
+
+
+def test_rag_engine_retrieve_tone_mimic_exception_ignored():
+    from rag_engine.rag_engine import RAGEngineV2
+
+    class MockVM:
+        def search_chats_sync(self, q, k): return []
+
+    class MockSM:
+        def search_facts(self, q): return []
+
+    class BadTone:
+        def retrieve_style_examples(self, query, top_k=3):
+            raise RuntimeError("tone down")
+
+    engine = RAGEngineV2(MockVM(), MockSM(), tone_mimic=BadTone())
+    result = engine.retrieve("query")
+    assert result["style_examples"] == []
+
+
+@pytest.mark.asyncio
+async def test_rag_engine_retrieve_async_timeout():
+    from rag_engine.rag_engine import RAGEngineV2
+
+    class MockVM:
+        def search_chats_sync(self, q, k): return []
+
+    class MockSM:
+        def search_facts(self, q): return []
+
+    engine = RAGEngineV2(MockVM(), MockSM(), query_timeout=0.001)
+
+    def slow_retrieve(query, top_k):
+        import time
+        time.sleep(0.1)
+        return {"results": []}
+
+    engine.retrieve = slow_retrieve  # type: ignore[method-assign]
+    result = await engine.retrieve_async("query")
+    assert result["results"] == []
+    assert result["total_vector"] == 0
+    assert result["total_keyword"] == 0
+
+
+def test_rag_engine_validate_reply_delegates_to_guard():
+    from rag_engine.rag_engine import RAGEngineV2
+
+    class MockVM:
+        def search_chats_sync(self, q, k): return []
+
+    class MockSM:
+        def search(self, q, top_k=5):
+            return {"vector": [], "exact": []}
+
+    engine = RAGEngineV2(MockVM(), MockSM(), semantic_memory=MockSM())
+    ok, claim = engine.validate_reply("你喜欢猫。")
+    assert ok is False
+    assert claim == "猫"
 
 
 if __name__ == "__main__":

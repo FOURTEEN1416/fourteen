@@ -64,6 +64,7 @@ class PromptContext:
     chat_round: int = 0
     time_context: TimeContext | None = None
     character_overrides: dict | None = None
+    world_info: str = ""
 
     @property
     def emotion_dict(self) -> dict[str, Any]:
@@ -135,6 +136,7 @@ class EnhancedPromptEngine:
         """
         layers = [
             self._build_base_layer(context),
+            self._build_world_layer(context),
             self._build_emotion_layer(context),
             self._build_memory_layer(context),
             self._build_style_layer(context),
@@ -157,6 +159,11 @@ class EnhancedPromptEngine:
             if anchor_text:
                 return f"# 角色设定\n你是{name}。\n\n## 核心性格\n{anchor_text}"
         return ""
+
+    def _build_world_layer(self, context: PromptContext) -> str:
+        if not context.world_info:
+            return ""
+        return f"# 世界与时间\n{context.world_info}"
 
     def _build_emotion_layer(self, context: PromptContext) -> str:
         if context.emotion_state is None:

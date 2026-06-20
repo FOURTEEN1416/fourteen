@@ -203,7 +203,7 @@ class Orchestrator:
             async with lock:
                 with tracer.span("multimodal_preprocess"):
                     if self._multimodal and message_type != "text":
-                        processed = self._multimodal.process(user_msg, message_type)
+                        processed = await self._multimodal.process(user_msg, message_type)
                         user_msg = processed.get("text", user_msg)
 
                 with tracer.span("input_safety_check"):
@@ -402,7 +402,7 @@ class Orchestrator:
                 with tracer.span("multimodal_preprocess"):
                     processed_msg = user_msg
                     if self._multimodal and message_type != "text":
-                        processed = self._multimodal.process(user_msg, message_type)
+                        processed = await self._multimodal.process(user_msg, message_type)
                         processed_msg = processed.get("text", user_msg)
 
                 with tracer.span("input_safety_check"):

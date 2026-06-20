@@ -127,8 +127,12 @@ class UserManager:
         instance = self._get_or_create(user_id)
         session_id = instance.session_id
 
-        # 委托给 orchestrator 处理
-        result = await self._orch.process_message(text, session_id, message_type)
+        # 修复：传入 character_id，否则多用户角色隔离失效
+        # 使用关键字参数以兼容 Orchestrator（character_id 为第 5 参）和
+        # OptimizedOrchestrator（character_id 为第 4 参）两种签名
+        result = await self._orch.process_message(
+            text, session_id, message_type, character_id=instance.character_card_id
+        )
 
         # 统计
         instance.total_chats += 1

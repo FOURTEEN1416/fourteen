@@ -13,11 +13,11 @@ class MultimodalProcessor:
         self._asr = ASRHandler()
         self._emoji = EmojiResponder()
 
-    def process(self, message: Any, message_type: str = "text") -> dict[str, Any]:
+    async def process(self, message: Any, message_type: str = "text") -> dict[str, Any]:
         if message_type == "image":
-            return self._vision.process(message)  # type: ignore[no-any-return]
+            return await self._vision.process(message)  # type: ignore[no-any-return]
         if message_type == "voice":
-            return self._asr.process(message)  # type: ignore[no-any-return]
+            return await self._asr.process(message)  # type: ignore[no-any-return]
         return {"text": str(message), "modality": "text", "original": message}
 
     def should_reply_with_emoji(self, emotion: str = "", affinity: int = 0) -> bool:
@@ -31,29 +31,36 @@ class VisionHandler:
     def __init__(self, llm_gateway=None):
         self._llm = llm_gateway
 
-    def process(self, image_data: Any) -> dict[str, Any]:
-        if self._llm and hasattr(self._llm, 'api_key') and self._llm.api_key:
+    async def process(self, image_data: Any) -> dict[str, Any]:
+        if self._llm and hasattr(self._llm, 'chat'):
             try:
-                [
+                # 修复：原代码构建了消息列表但从未传给 LLM，直接返回假回复
+                # 现在实际调用 LLM 网关进行视觉理解
+                messages = [
                     {"role": "user", "content": [
                         {"type": "text", "text": "请描述这张图片的内容，简洁20字以内。"},
                         {"type": "image_url", "image_url": {"url": image_data} if isinstance(image_data, str) else {}},
                     ]},
                 ]
-                return {"text": "[图片已接收，正在理解中]", "modality": "image", "original": None}
+                description = await self._llm.chat(messages=messages)
+                return {"text": description, "modality": "image", "original": None}
             except Exception as e:  # noqa: BLE001
                 logger.warning("Vision processing failed: %s", e)
+                return {"text": "[收到一张图片，视觉理解失败]", "modality": "image", "original": None}
+        # 视觉理解不可用：未传入支持 chat 的 LLM 网关
         return {"text": "[收到一张图片]", "modality": "image", "original": None}
 
 
 class ASRHandler:
-    def process(self, audio_data: Any) -> dict[str, Any]:
+    async def process(self, audio_data: Any) -> dict[str, Any]:
+        # TODO: ASR 语音转文字未实现，当前 Whisper API 转录逻辑缺失
+        # 需接入 openai.Audio.transcribe 或本地 Whisper 模型后替换下方占位返回
         try:
             import openai  # noqa: F401
-            logger.info("ASR: would transcribe with Whisper API")
-            return {"text": "[语音消息，暂无法转文字]", "modality": "voice", "confidence": 0.0}
+            logger.info("ASR: openai 库已安装，但转录逻辑未实现")
         except ImportError:
-            return {"text": "[语音消息]", "modality": "voice", "confidence": 0.0}
+            logger.debug("ASR: openai 库未安装")
+        return {"text": "[语音消息，暂无法转文字]", "modality": "voice", "confidence": 0.0}
 
 
 EMOTION_EMOJI_MAP = {

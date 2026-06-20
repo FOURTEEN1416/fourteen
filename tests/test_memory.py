@@ -89,7 +89,7 @@ def test_memory_pipeline_retrieve_context_keys():
     from memory.memory_pipeline import MemoryPipeline
     mp = MemoryPipeline()
     ctx = mp.retrieve_context("你好")
-    expected_keys = {"working", "episodic", "semantic", "facts", "pending_events"}
+    expected_keys = {"working", "episodic", "semantic", "facts", "pending_events", "reflections"}
     assert set(ctx.keys()) == expected_keys
 
 

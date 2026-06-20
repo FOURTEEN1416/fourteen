@@ -9,10 +9,12 @@
 """
 from __future__ import annotations
 
+import asyncio
 import atexit
 import logging
 import os
 import sys
+import threading
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -43,6 +45,7 @@ from sqlalchemy import select  # noqa: E402
 from api.app_factory import create_api_app  # noqa: E402
 from api.database import WechatBinding, _async_session, init_db  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
+from api.websocket_server import HAS_WEBSOCKETS, WebSocketServer  # noqa: E402
 from main import OptimizedOrchestrator, UserManager  # noqa: E402
 from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
 from observability.health import health_checker  # noqa: E402
@@ -77,6 +80,58 @@ if not health.get("healthy", False):
 
 # ── 创建女友管理器 ──
 user_mgr = UserManager(orchestrator)
+
+# ── 启动 WebSocket 服务器（主动消息 websocket 通道） ──
+_ws_holder: dict[str, WebSocketServer | None] = {}
+if HAS_WEBSOCKETS:
+    _ws_port = getattr(cfg.api, "websocket_port", 8765)
+
+    def _run_ws_server(holder: dict[str, WebSocketServer | None] = _ws_holder, port: int = _ws_port) -> None:
+        ws_server = WebSocketServer(orchestrator=orchestrator, port=port)
+        holder["ws"] = ws_server
+        asyncio.run(ws_server.start())
+
+    _ws_thread = threading.Thread(target=_run_ws_server, daemon=True)
+    _ws_thread.start()
+    logger.info("WebSocket 服务器线程已启动，端口 %d", _ws_port)
+
+    @atexit.register
+    def _stop_ws_server() -> None:
+        ws_server = _ws_holder.get("ws")
+        if ws_server is None:
+            return
+        try:
+            asyncio.run(ws_server.stop())
+        except Exception as e:  # noqa: BLE001
+            logger.debug("WebSocket 服务器关闭时异常: %s", e)
+
+# ── 向主动消息调度器注册 websocket / wechat 通道 ──
+_scheduler = orchestrator.components.get("scheduler")
+if _scheduler is not None:
+    def _websocket_sender_factory(holder: dict[str, WebSocketServer | None] = _ws_holder):
+        ws_server = holder.get("ws")
+        if ws_server is None:
+            return None
+        return ws_server.broadcast_proactive
+
+    _scheduler.register_channel("websocket", _websocket_sender_factory)
+
+    def _wechat_sender_factory():
+        try:
+            from wechat_direct import get_connector
+            connector = get_connector()
+        except Exception:  # noqa: BLE001
+            return None
+        if connector is None or not getattr(connector, "token", ""):
+            return None
+
+        async def _send(msg: str) -> None:
+            connector.send_text(msg)
+
+        return _send
+
+    _scheduler.register_channel("wechat", _wechat_sender_factory)
+    logger.info("已向主动消息调度器注册 websocket/wechat 通道")
 
 # ── 数据库初始化 + 预加载微信绑定（FastAPI lifespan） ──
 

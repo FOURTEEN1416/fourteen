@@ -44,12 +44,14 @@ class ProactiveScheduler:
         daily_maintenance_func: Callable[[], None] | None = None,
         get_last_chat_time: Callable[[], datetime | None] | None = None,
         is_online_check: Callable[[], bool] | None = None,
+        emotion_engine: Any | None = None,
     ):
         self.ase = ase_engine
         self._send = send_message_func
         self._daily_maintenance = daily_maintenance_func
         self._get_last_chat_time = get_last_chat_time
         self._is_online_check = is_online_check
+        self._emotion_engine = emotion_engine
 
         self._scheduler: Any = None
         self._active_tasks: dict[str, bool] = {}
@@ -279,6 +281,40 @@ class ProactiveScheduler:
                 logger.info("Daily maintenance completed")
             except Exception as e:  # noqa: BLE001
                 logger.error("Daily maintenance failed: %s", e)
+
+        # 情感时间衰减 — 应用自上次检查以来的能量恢复与强度衰减
+        try:
+            hours = self._hours_since_last_check()
+            if hours > 0 and self._emotion_engine is not None and hasattr(self._emotion_engine, 'apply_time_decay'):
+                self._emotion_engine.apply_time_decay(hours)
+                logger.info("情感时间衰减已应用: %.2f 小时", hours)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("情感时间衰减任务失败: %s", e)
+
+        # 好感度衰减 — 对所有已记录角色应用每日衰减
+        # DecayEngine 逻辑正确但此前未被调度调用，此处补全
+        try:
+            from api.deps import deps as _deps
+            shisi_reg = getattr(_deps, "shisi_reg", None)
+            if shisi_reg is not None:
+                enhancer = getattr(shisi_reg, "affinity_enhancer", None)
+                if enhancer is not None:
+                    # 遍历所有已记录好感度的角色，逐一应用衰减
+                    character_ids = list(getattr(enhancer, "_values", {}).keys())
+                    total_decay = 0.0
+                    decayed_count = 0
+                    for cid in character_ids:
+                        decay = enhancer.apply_decay(cid)
+                        if decay > 0:
+                            total_decay += decay
+                            decayed_count += 1
+                    if decayed_count > 0:
+                        logger.info(
+                            "好感度衰减完成: %d/%d 个角色衰减, 总衰减 %.2f",
+                            decayed_count, len(character_ids), total_decay,
+                        )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("好感度衰减任务失败: %s", e)
 
     def _reset_daily(self) -> None:
         """每日重置"""

@@ -1,33 +1,26 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, MessageCircle, Users, Heart, PenTool, GraduationCap, Database, Smartphone, Activity, BarChart3, Brain, Sticker, Settings, Shield, FileText } from 'lucide-react'
+import { MessageCircle, Users, Sparkles, Mic, Power, Shield, FileText } from 'lucide-react'
 
+// 修复：导航项对齐 App.tsx 实际路由，移除不存在的 /chat /characters /persona /training 等死路由
+// 路由清单参考 Sidebar.tsx 的 globalNavGroups：/wechat /users /settings/* /admin/users
 const mobileItems = [
-  { to: '/chat', icon: MessageCircle, label: '聊天' },
-  { to: '/', icon: LayoutDashboard, label: '仪表盘', end: true },
-  { to: '/characters', icon: Users, label: '角色' },
-  { to: '/persona', icon: Heart, label: '人设' },
-  { to: '/persona-editor', icon: PenTool, label: '编辑' },
-  { to: '/training', icon: GraduationCap, label: '克隆' },
-  { to: '/clone-data', icon: Database, label: '数据' },
-  { to: '/channels', icon: Smartphone, label: '通道' },
-  { to: '/monitor', icon: Activity, label: '监控' },
-  { to: '/stats', icon: BarChart3, label: '统计' },
-  { to: '/memory', icon: Brain, label: '记忆' },
-  { to: '/stickers', icon: Sticker, label: '表情' },
-  { to: '/settings', icon: Settings, label: '设置' },
-  { to: '/admin', icon: Shield, label: '管理' },
-  { to: '/logs', icon: FileText, label: '日志' },
+  { to: '/wechat', icon: MessageCircle, label: '微信' },
+  { to: '/users', icon: Users, label: '用户' },
+  { to: '/settings/llm', icon: Sparkles, label: 'LLM' },
+  { to: '/settings/voice', icon: Mic, label: '语音' },
+  { to: '/settings/tools', icon: Power, label: '工具' },
+  { to: '/settings/security', icon: Shield, label: '安全' },
+  { to: '/settings/logs', icon: FileText, label: '日志' },
 ]
 
 export default function MobileNav() {
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/95 border-t border-gray-200 backdrop-blur-sm safe-area-bottom">
       <div className="flex overflow-x-auto">
-        {mobileItems.map(({ to, icon: Icon, label, end }) => (
+        {mobileItems.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}
-            end={end}
             className={({ isActive }) =>
               `flex flex-col items-center gap-0.5 py-2 px-3 min-w-[60px] text-[10px] transition-colors ${
                 isActive

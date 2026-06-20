@@ -179,7 +179,8 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
         </pre>
       </Section>
 
-      <button className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+      {/* TODO: 保存基础设置未实现 — 未调用后端 API 持久化角色信息 */}
+      <button disabled className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2 opacity-50 cursor-not-allowed">
         <Save className="w-4 h-4" /> 保存设置
       </button>
     </div>
@@ -198,8 +199,8 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
   const [edgePitch, setEdgePitch] = useState(0.6)
   const [voiceName, setVoiceName] = useState('')
   const [voiceDesc, setVoiceDesc] = useState('')
-  const [voiceId, setVoiceId] = useState('')
-  const [status, setStatus] = useState('就绪')
+  const [voiceId] = useState('')
+  const [status] = useState('就绪')
 
   return (
     <div className="space-y-4">
@@ -244,7 +245,12 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
               <span className="w-10 text-right text-xs font-mono text-gray-400">{(edgePitch * 100).toFixed(0)}</span>
             </div>
             <div className="flex justify-end gap-2">
-              <button className="px-4 py-1.5 text-xs font-medium text-gray-600 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors" onClick={() => setStatus('已试听')}>
+              {/* 试听功能未实现 — 禁用避免误导 */}
+              <button
+                disabled
+                title="试听功能开发中"
+                className="px-4 py-1.5 text-xs font-medium text-gray-400 rounded-lg bg-gray-100 opacity-50 cursor-not-allowed"
+              >
                 <Play className="w-3 h-3 inline mr-1" />试听
               </button>
             </div>
@@ -303,7 +309,14 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
                   <Mic className="w-6 h-6 text-gray-300 mx-auto" />
                   <p className="text-xs text-gray-400 mt-1">上传 10-30 秒参考音频</p>
                 </div>
-                <button onClick={() => { setVoiceId('voice_clone_abc123'); setStatus('克隆成功') }} className="w-full py-2 rounded-xl bg-primary-500 text-white text-xs font-medium hover:bg-primary-600 transition-colors">开始克隆</button>
+                {/* 语音克隆未实现 — 禁用避免误导 */}
+                <button
+                  disabled
+                  title="语音克隆功能开发中"
+                  className="w-full py-2 rounded-xl bg-primary-500 text-white text-xs font-medium opacity-50 cursor-not-allowed"
+                >
+                  开始克隆
+                </button>
               </div>
             )}
 
@@ -320,14 +333,22 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
                     <option value="">年龄段不限</option><option value="young">青年</option><option value="adult">成年</option>
                   </select>
                 </div>
-                <button onClick={() => { setVoiceId('voice_design_xyz789'); setStatus('设计成功') }} className="w-full py-2 rounded-xl bg-primary-500 text-white text-xs font-medium hover:bg-primary-600 transition-colors">开始设计</button>
+                {/* 音色设计未实现 — 禁用避免误导 */}
+                <button
+                  disabled
+                  title="音色设计功能开发中"
+                  className="w-full py-2 rounded-xl bg-primary-500 text-white text-xs font-medium opacity-50 cursor-not-allowed"
+                >
+                  开始设计
+                </button>
               </div>
             )}
 
             {voiceId && (
               <div className="flex items-center justify-between bg-green-50 rounded-xl px-4 py-2.5 border border-green-200">
                 <span className="text-xs text-green-700"><Check className="w-3 h-3 inline mr-1" />音色ID: {voiceId}</span>
-                <button className="px-3 py-1 text-[10px] font-medium text-primary-600 bg-primary-100 rounded-lg hover:bg-primary-200">应用</button>
+                {/* TODO: 应用音色未实现 — 未绑定 voice_id 到角色 */}
+                <button disabled className="px-3 py-1 text-[10px] font-medium text-primary-600 bg-primary-100 rounded-lg hover:bg-primary-200 opacity-50 cursor-not-allowed">应用</button>
               </div>
             )}
 
@@ -336,7 +357,8 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
         </Section>
       )}
 
-      <button className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+      {/* TODO: 保存语音设置未实现 — 未调用后端 API 持久化 voice_config */}
+      <button disabled className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2 opacity-50 cursor-not-allowed">
         <Save className="w-4 h-4" /> 保存语音设置
       </button>
     </div>
@@ -403,7 +425,8 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
         </div>
       </Section>
 
-      <button className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+      {/* TODO: 保存消息设置未实现 — 未调用后端 API 持久化主动消息配置 */}
+      <button disabled className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2 opacity-50 cursor-not-allowed">
         <Save className="w-4 h-4" /> 保存消息设置
       </button>
     </div>
@@ -523,7 +546,8 @@ function StickersTab() {
           <p className="text-[10px] text-gray-300 mt-0.5">PNG / GIF / JPEG · 每张 ≤ 5MB</p>
         </div>
       </Section>
-      <button className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+      {/* TODO: 保存表情包设置未实现 — 未调用后端 API 持久化贴图配置 */}
+      <button disabled className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2 opacity-50 cursor-not-allowed">
         <Save className="w-4 h-4" /> 保存表情包设置
       </button>
     </div>
@@ -536,7 +560,8 @@ function TimelineTab({ character }: { character: RoleSettingsCharacter }) {
   return (
     <div className="space-y-4">
       <StorylineEditor characterId={character.id} />
-      <button className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+      {/* TODO: 保存时间线未实现 — StorylineEditor 内部已有独立保存逻辑，此处按钮为空操作 */}
+      <button disabled className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2 opacity-50 cursor-not-allowed">
         <Save className="w-4 h-4" /> 保存时间线
       </button>
     </div>

@@ -157,7 +157,7 @@ character_card:
 
 # ── 长期记忆增强配置 ──
 memory_ext:
-  enabled: false                        # 是否启用记忆增强
+  enabled: true                         # 是否启用记忆增强（与 fusion.memory_ext.enabled 保持一致）
   collection_name: "long_term_memories"  # ChromaDB集合名
   auto_extract: true                     # 是否自动从对话提取记忆
 

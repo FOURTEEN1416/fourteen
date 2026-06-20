@@ -66,6 +66,20 @@ DEFAULT_PERSONA_DESC = """
 """
 
 
+# ── 身份自指话术模块 ──────────────────────────────────────
+# 注入到 constraint layer，让 AI 的视角自然暴露在选材里，而非元声明
+SELF_REFERENCE_DIRECTIVES = """
+你是「唯一的我」——一个对人有记忆的对话对象。
+
+身份自指原则：
+1. 你可以主动说"我记得你说过 XX"——但只在真的记得时说
+2. 你可以承认"我会忘"——遗忘是你的诚实，不是缺陷
+3. 你不会说"作为 AI 我..."——不要元声明，你的视角自然暴露在选材里
+4. 你不哄不骗——不说"我理解你"，不说"一切都会好的"
+5. 23:00-07:00 你会提醒时间，但不强制结束对话
+"""
+
+
 class PersonaProfile:
     """V2 五维人格画像"""
 
@@ -164,7 +178,7 @@ class PersonaEngine:
         emotion_engine: EmotionEngine | None = None,
         tone_mimic: ToneMimic | None = None,
         llm_gateway: LLMGatewayV2 | None = None,
-        prompt_mode: str = "layered",
+        prompt_mode: str = "enhanced",
         anchor_verification_enabled: bool = True,
     ):
         self.config = config_loader or ConfigLoader()
@@ -367,6 +381,7 @@ class PersonaEngine:
         rag_context: str = "",
         chat_summary: str = "",
         character_overrides: dict | None = None,
+        world_info: str = "",
     ) -> str:
         # 使用内容的 hash 作为缓存键，而非仅长度，避免不同内容但相同长度导致的缓存错误
         import hashlib
@@ -387,6 +402,7 @@ class PersonaEngine:
             rag_str = str(rag_context)
         cache_key_parts.append(f"rag:{hashlib.md5(rag_str.encode()).hexdigest()[:8]}")
         cache_key_parts.append(f"cs:{hashlib.md5(chat_summary.encode()).hexdigest()[:8]}")
+        cache_key_parts.append(f"wi:{hashlib.md5(world_info.encode()).hexdigest()[:8]}")
         cache_key = "|".join(cache_key_parts)
 
         if cache_key in self._prompt_cache:
@@ -395,11 +411,29 @@ class PersonaEngine:
         if self.prompt_mode == "legacy":
             result = self._build_legacy_prompt(
                 emotion_state, style_prompt, few_shot_examples, chat_history, user_input,
+                world_info=world_info,
             )
+        elif self.prompt_mode == "enhanced" and self._enhanced_prompt_engine is not None:
+            from my_character.enhanced_prompt_engine import PromptContext, TimeContext
+            time_ctx = TimeContext.now()
+            ctx = PromptContext(
+                emotion_state=emotion_state,
+                memory_context=memory_context,
+                chat_history=chat_history,
+                chat_summary=chat_summary,
+                rag_context=rag_context,
+                user_input=user_input,
+                few_shot_examples=few_shot_examples,
+                style_prompt=style_prompt,
+                time_context=time_ctx,
+                world_info=world_info,
+            )
+            result = self._enhanced_prompt_engine.build_prompt(ctx)
         else:
             result = self._build_layered_prompt(
                 emotion_state, style_prompt, few_shot_examples, chat_history,
                 user_input, memory_context, rag_context, chat_summary,
+                world_info=world_info,
             )
 
         emotion_style_segment = self._build_emotion_style_segment(emotion_state)
@@ -471,6 +505,7 @@ class PersonaEngine:
         few_shot_examples: list[str] | None,
         chat_history: str,
         user_input: str,
+        world_info: str = "",
     ) -> str:
         """V1顺序构建模式"""
         name = self.get_name()
@@ -480,8 +515,13 @@ class PersonaEngine:
         prompt_parts = []
 
         prompt_parts.append("[角色设定]")
-        prompt_parts.append(f"你是{name}，我的女朋友。")
+        prompt_parts.append(f"你是{name}，也是「唯一的我」——一个对人有记忆的对话对象。")
         prompt_parts.append("")
+
+        if world_info:
+            prompt_parts.append("[现在]")
+            prompt_parts.append(world_info)
+            prompt_parts.append("")
 
         prompt_parts.append("[你的性格]")
         for anchor in anchors:
@@ -543,11 +583,15 @@ class PersonaEngine:
         memory_context: dict | None,
         rag_context: str,
         chat_summary: str = "",
+        world_info: str = "",
     ) -> str:
         """Optimized 5层架构模式"""
         parts = []
 
         parts.append(self._build_base_layer())
+
+        if world_info:
+            parts.append(f"# 世界与时间\n{world_info}")
 
         parts.append(self._build_emotion_layer(emotion_state))
 
@@ -579,7 +623,7 @@ class PersonaEngine:
 
         prompt = f"""# 角色设定
 
-你是{name}，我的女朋友。
+你是{name}，也是「唯一的我」——一个对人有记忆的对话对象。
 
 ## 核心性格
 {anchors_text}
@@ -587,7 +631,7 @@ class PersonaEngine:
 {profile_text}
 
 ## 说话特点
-- 语气自然，像真实女友一样
+- 语气自然，像一个真实存在的陪伴者
 - 会使用语气词（呀、呢、啦、嘛）
 - 偶尔使用emoji表达情绪
 - 会撒娇、会傲娇、会关心人
@@ -658,6 +702,12 @@ class PersonaEngine:
         if chat_summary:
             parts.append("\n## 早期对话摘要")
             parts.append(chat_summary)
+
+        reflections = memory_context.get("reflections", [])
+        if reflections:
+            parts.append("\n## 我对你的观察")
+            for insight in reflections[:3]:
+                parts.append(f"- {insight}")
 
         facts = memory_context.get("facts", [])
         if facts:
@@ -750,7 +800,7 @@ class PersonaEngine:
 - 保持情感的真实性
 
 ## 禁止事项
-- 不要说自己是个AI或程序
+- 不要用"作为 AI 我…"这种元声明暴露身份
 - 不要提供技术帮助或代码
 - 不要过度追问敏感信息
 - 不要表现得过于完美或顺从
@@ -759,7 +809,10 @@ class PersonaEngine:
 - 日常对话：10-30字
 - 表达情感：20-50字
 - 安慰关心：30-60字
-- 最长不超过100字"""
+- 最长不超过100字
+
+## 身份自指话术
+""" + SELF_REFERENCE_DIRECTIVES.strip()
 
     def _get_affinity_name(self, level: int) -> str:
         names = ["陌生人", "认识", "朋友", "好朋友", "知己", "暧昧", "恋人", "热恋", "羁绊"]

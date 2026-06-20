@@ -136,6 +136,7 @@ sys.path.insert(0, str(project_root))
 from api.app_factory import create_api_app  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
 from api.websocket_server import WebSocketServer  # noqa: E402
+from context.world_info_provider import WorldInfoProvider  # noqa: E402
 from llm_provider import get_llm  # noqa: E402
 from memory import StructuredMemory, VectorMemory  # noqa: E402
 from memory.memory_pipeline import MemoryPipeline  # noqa: E402
@@ -294,6 +295,9 @@ class OptimizedOrchestrator:
         self._locks_mutex = threading.Lock()
         self._lock_cleanup_counter: int = 0  # 替代 hash() 的概率触发
         self._executor = None  # 延迟初始化的共享线程池
+        # 计数反诘模块：跟踪用户连续说"没事"等敷衍词的次数
+        from my_character.counter_rebuttal import CounterRebuttal
+        self._counter_rebuttal = CounterRebuttal()
 
     def _get_executor(self):
         if self._executor is None:
@@ -306,9 +310,17 @@ class OptimizedOrchestrator:
     def shutdown(self):
         """关闭 OptimizedOrchestrator 并释放资源。
 
-        注意: 必须调用此方法以确保 ThreadPoolExecutor 正确关闭，
-        避免程序退出时线程池资源泄漏。
+        注意: 必须调用此方法以确保 ThreadPoolExecutor / 调度器正确关闭，
+        避免程序退出时线程池或后台线程资源泄漏。
         """
+        scheduler = self.components.get("scheduler")
+        if scheduler is not None and hasattr(scheduler, "stop"):
+            try:
+                scheduler.stop()
+                logger.info("OptimizedOrchestrator 调度器已停止")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("调度器停止异常: %s", e)
+
         if self._executor is not None:
             self._executor.shutdown(wait=True)
             self._executor = None
@@ -436,6 +448,29 @@ class OptimizedOrchestrator:
                     urgency_threshold=cfg.proactive.urgency_threshold,
                 )
 
+            # ── 主动消息调度器（启用 apply_time_decay / ASE / 每日维护） ──
+            try:
+                from proactive.scheduler import ProactiveScheduler
+
+                scheduler = ProactiveScheduler(
+                    ase_engine=self.components["ase"],
+                    send_message_func=lambda msg: logger.info("[主动消息] %s", msg),
+                    emotion_engine=self.components["emotion"],
+                )
+                # 至少注册一个控制台通道作为兜底；后续可通过 register_channel 注入 ws/wechat
+                scheduler.register_channel(
+                    "console", lambda: lambda msg: logger.info("[主动消息/console] %s", msg)
+                )
+                if scheduler.start():
+                    self.components["scheduler"] = scheduler
+                    logger.info("主动消息调度器已启动")
+                else:
+                    logger.warning("主动消息调度器启动失败，时间衰减/ASE 将不可用")
+                    self.components["scheduler"] = None
+            except Exception as e:  # noqa: BLE001
+                logger.warning("主动消息调度器初始化失败 (不影响运行): %s", e)
+                self.components["scheduler"] = None
+
             registry = ToolRegistry()
             for tool_cls in [WeatherTool, SearchTool, CalendarTool, CalculatorTool]:
                 registry.register(tool_cls())
@@ -467,6 +502,13 @@ class OptimizedOrchestrator:
                 structured_memory=rag_sm,
                 semantic_memory=rag_sem,
                 tone_mimic=self.components["tone"],
+            )
+
+            # ── 世界信息动态注入 ──
+            self.components["world_info"] = WorldInfoProvider(
+                timezone_offset=cfg.system.timezone_offset_hours
+                if hasattr(cfg, "system") and hasattr(cfg.system, "timezone_offset_hours")
+                else 8
             )
 
             # ── 角色卡系统 (v3.0 新增) ──
@@ -787,12 +829,22 @@ class OptimizedOrchestrator:
                         session_id=session_id,
                     )
 
+                # ── 世界信息动态注入 ──
+                world_info = ""
+                wip = self.components.get("world_info")
+                if wip:
+                    try:
+                        world_info = wip.render()
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("World info render failed: %s", e)
+
                 # ── 组装 system prompt ──
                 system_prompt = self.components["persona"].build_system_prompt(
                     emotion_state=emotion_state,
                     memory_context=memory_context,
                     rag_context=rag_context,
                     chat_summary=chat_summary,
+                    world_info=world_info,
                 )
                 if persona_enhancement:
                     system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
@@ -825,6 +877,17 @@ class OptimizedOrchestrator:
                 )
                 # === 检查结束 ===
 
+                # === 计数反诘：用户连续说"没事"达到阈值时追加反诘 ===
+                try:
+                    rebuttal = self._counter_rebuttal.check_and_increment(
+                        user_msg_clean, session_id
+                    )
+                    if rebuttal:
+                        reply = f"{reply}\n{rebuttal}"
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("计数反诘检查异常: %s", e)
+                # === 反诘结束 ===
+
                 output_result = self.components["safety"].check_output(reply)
                 if not output_result.is_safe:
                     reply = self.components["safety"].safe_alternative(output_result.category)
@@ -843,7 +906,10 @@ class OptimizedOrchestrator:
                         mem_kwargs["emotion"] = emotion_tag
                     elif "emotion_tag" in sig.parameters:
                         mem_kwargs["emotion_tag"] = emotion_tag
-                self.components["memory"].after_chat(**mem_kwargs)
+                    try:
+                        self.components["memory"].after_chat(**mem_kwargs)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("after_chat failed, skipping: %s", e)
                 self.components["ase"].on_chat(user_msg_clean, reply)
 
                 # ── 同步 AffinityEnhancer + EmotionStageEngine（修复 P0-C） ──
@@ -853,25 +919,15 @@ class OptimizedOrchestrator:
                     try:
                         from api.deps import deps as _deps
                         shisi_reg = getattr(_deps, "shisi_reg", None)
-                        if shisi_reg is not None:
-                            ae = getattr(shisi_reg, "affinity_enhancer", None)
-                            se = getattr(shisi_reg, "stage_engine", None)
-                            if ae is not None and se is not None:
-                                # 计算增量：当前 affection_points 与上一次的差
-                                # 简化：取 emotion_state.affection_points 作为绝对值，差值 ≈ state.affinity*0.5
-                                affection_pts = getattr(emotion_state, "affection_points", 0.0)
-                                # 把 0-100 范围的 affection_points 映射到 affinity 增量（每点 0.5 单位）
-                                delta = float(affection_pts) * 0.05
-                                delta = max(-3.0, min(3.0, delta))  # 限幅 [-3, +3]
-                                if abs(delta) > 0.01:
-                                    new_affinity, _unlocks = ae.update(
-                                        character_id=character_id,
-                                        delta=delta,
-                                        reason=f"emotion:{emotion_tag}",
-                                        source="chat",
-                                    )
-                                    # 同步 StageEngine
-                                    se.evaluate(character_id, new_affinity)
+                        mapper = getattr(shisi_reg, "affinity_mapper", None)
+                        if mapper is not None:
+                            affection_pts = getattr(emotion_state, "affection_points", 0.0)
+                            mapper.sync(
+                                character_id=character_id,
+                                affection_points=affection_pts,
+                                reason=f"emotion:{emotion_tag}",
+                                source="chat",
+                            )
                     except Exception as e:  # noqa: BLE001
                         logger.debug("Affinity/Stage 同步跳过: %s", e)
 
@@ -920,16 +976,14 @@ class OptimizedOrchestrator:
         session_id: str = "",
         message_type: str = "text",
         character_id: str = "default",
-    ) -> AsyncIterator[str]:
-        """SSE 流式聊天接口 — 修复 P0-8
+    ) -> AsyncIterator[dict[str, Any]]:
+        """SSE 流式聊天接口 — 真流式接入
 
-        旧问题：OptimizedOrchestrator 缺 process_message_stream 方法，
-        `api/_chat_routes.py:78` 的 hasattr 防御让流式端点永远 503。
-
-        实现策略（MVP）：
-        1. 委托 process_message 跑完整预处理（安全/PII/情感/记忆/RAG/LLM）
-        2. 把 reply 按 chunk 切分 yield（chunk_size=8 字符模拟打字机）
-        3. 真"边生成边 yield"流式（基于 LLM.chat_stream）留作 P2 优化
+        实现策略：
+        1. 如果 LLM 网关支持 chat_stream，使用真流式（边生成边 yield）
+        2. 如果不支持，降级为伪流式（跑完 process_message 后按 8 字符切块 yield）
+        3. 安全检查和 PII 脱敏在流式开始前完成
+        4. 最后统一返回一条 done 事件，包含 reply / emotion / process_time 等字段
 
         Args:
             user_msg: 用户消息
@@ -938,29 +992,263 @@ class OptimizedOrchestrator:
             character_id: 角色 ID（用于多角色隔离）
 
         Yields:
-            每次返回一个 token（当前为 8 字符的块）
+            事件字典：{"type": "token", "content": "..."} 或
+            {"type": "done", "reply": "...", "emotion": ..., "process_time": ...}
         """
+        stream_start = time.perf_counter()
+
         if not self._initialized:
-            yield "系统初始化中, 请稍候..."
+            reply = "系统初始化中, 请稍候..."
+            yield {"type": "token", "content": reply}
+            yield {"type": "done", "reply": reply, "emotion": None, "process_time": 0.0}
             return
 
+        # 检测 LLM 网关是否支持真流式
+        llm = self.components.get("llm")
+        use_true_stream = llm is not None and hasattr(llm, "chat_stream")
+
+        if not use_true_stream:
+            # ── 降级：伪流式（跑完整 process_message 后按块 yield） ──
+            try:
+                result = await self.process_message(
+                    user_msg, session_id, message_type, character_id,
+                )
+                reply = result.get("reply", "")
+                emotion = result.get("emotion")
+                process_time = result.get(
+                    "process_time", round(time.perf_counter() - stream_start, 3)
+                )
+            except Exception:
+                logger.exception("流式处理异常")
+                reply = "（处理消息时出现异常, 请稍后重试）"
+                emotion = None
+                process_time = round(time.perf_counter() - stream_start, 3)
+
+            if reply:
+                chunk_size = 8
+                for i in range(0, len(reply), chunk_size):
+                    yield {"type": "token", "content": reply[i:i + chunk_size]}
+            yield {"type": "done", "reply": reply, "emotion": emotion, "process_time": process_time}
+            return
+
+        # ── 真流式路径 ──
         try:
-            result = await self.process_message(
-                user_msg, session_id, message_type, character_id,
-            )
-            reply = result.get("reply", "")
+            # 1. 输入安全检查（必须在流式开始前完成）
+            safety_result = self.components["safety"].check_input(user_msg)
+            if not safety_result.is_safe:
+                reply = self.components["safety"].safe_alternative(safety_result.category)
+                yield {"type": "token", "content": reply}
+                yield {
+                    "type": "done",
+                    "reply": reply,
+                    "emotion": None,
+                    "process_time": round(time.perf_counter() - stream_start, 3),
+                }
+                return
+
+            # 2. PII 脱敏（必须在流式开始前完成）
+            user_msg_clean, _ = self.components["pii"].anonymize(user_msg)
+
+            # 3. 注入检测 + 消毒
+            is_injection, _, _ = self.components["injection"].detect(user_msg_clean)
+            if is_injection:
+                user_msg_clean = self.components["injection"].sanitize(user_msg_clean)
+
+            # 4. 会话锁（防止同 session 并发处理）
+            lock = self._get_session_lock(session_id)
+            if lock.locked():
+                reply = "处理中, 请稍候..."
+                yield {"type": "token", "content": reply}
+                yield {
+                    "type": "done",
+                    "reply": reply,
+                    "emotion": None,
+                    "process_time": round(time.perf_counter() - stream_start, 3),
+                }
+                return
+
+            async with lock:
+                # 5. 动态设置 PersonaExtractor 的 user_id（多用户隔离）
+                pe = self.components.get("persona_extractor")
+                if pe is not None:
+                    effective_user_id = (
+                        f"{character_id}:{session_id}" if session_id else f"{character_id}"
+                    )
+                    if pe.user_id != effective_user_id:
+                        pe.set_user_id(effective_user_id)
+
+                # 6. 并行执行独立任务（情感/记忆/RAG/人格抽取）
+                recent = self.components["memory"].get_recent_context(3)
+                loop = asyncio.get_running_loop()
+
+                tasks = {}
+                if pe is not None:
+                    tasks["persona"] = pe.process_message(
+                        message=user_msg_clean, context=recent,
+                    )
+                tasks["emotion"] = loop.run_in_executor(
+                    None, self.components["emotion"].analyze,
+                    user_msg_clean, recent,
+                )
+                tasks["memory"] = loop.run_in_executor(
+                    None,
+                    lambda: self.components["memory"].retrieve_context(
+                        query=user_msg_clean, session_id=session_id, top_k=5,
+                    ),
+                )
+                tasks["rag"] = loop.run_in_executor(
+                    None, self.components["rag"].retrieve, user_msg_clean,
+                )
+
+                results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+
+                persona_enhancement = ""
+                emotion_state = None
+                memory_context = ""
+                rag_context = ""
+
+                for name, task_result in zip(tasks.keys(), results, strict=False):
+                    if isinstance(task_result, Exception):
+                        logger.debug("并行任务 %s 异常: %s", name, task_result)
+                        continue
+                    if name == "persona":
+                        persona_enhancement = task_result or ""
+                    elif name == "emotion":
+                        emotion_state = task_result
+                    elif name == "memory":
+                        memory_context = task_result or ""
+                    elif name == "rag":
+                        if task_result:
+                            import json
+                            rag_context = json.dumps(task_result, sort_keys=True, ensure_ascii=False)
+                        else:
+                            rag_context = ""
+
+                # 7. 获取对话历史 + 摘要
+                chat_history: list = []
+                chat_summary: str = ""
+                mem = self.components.get("memory")
+                if mem and hasattr(mem, 'get_chat_context'):
+                    chat_history, chat_summary = mem.get_chat_context(
+                        session_id=session_id,
+                    )
+
+                # 8. 世界信息动态注入
+                world_info = ""
+                wip = self.components.get("world_info")
+                if wip:
+                    try:
+                        world_info = wip.render()
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("World info render failed: %s", e)
+
+                # 8. 组装 system prompt
+                system_prompt = self.components["persona"].build_system_prompt(
+                    emotion_state=emotion_state,
+                    memory_context=memory_context,
+                    rag_context=rag_context,
+                    chat_summary=chat_summary,
+                    world_info=world_info,
+                )
+                if persona_enhancement:
+                    system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
+
+                # 9. 真流式 LLM 调用 — 边生成边 yield
+                full_reply = ""
+                try:
+                    async for token in llm.chat_stream(
+                        query=user_msg_clean,
+                        system_prompt=system_prompt,
+                        history=chat_history,
+                        temperature=0.85,
+                        max_tokens=2048,
+                    ):
+                        if token:
+                            full_reply += token
+                            yield {"type": "token", "content": token}
+                except Exception as e:
+                    logger.warning("真流式调用失败: %s", e)
+                    # 流式中途失败：如果已有部分输出，补充提示后继续后处理
+                    # 如果完全没有输出，降级为返回错误提示
+                    if not full_reply:
+                        reply = "（生成回复时出现异常, 请稍后重试）"
+                        yield {"type": "token", "content": reply}
+                        yield {
+                            "type": "done",
+                            "reply": reply,
+                            "emotion": None,
+                            "process_time": round(time.perf_counter() - stream_start, 3),
+                        }
+                        return
+
+                if not full_reply:
+                    yield {
+                        "type": "done",
+                        "reply": "",
+                        "emotion": None,
+                        "process_time": round(time.perf_counter() - stream_start, 3),
+                    }
+                    return
+
+                # 10. 流式后处理（不修改已 yield 的内容）
+                # 注意：一致性检查和输出安全检查需要完整回复且可能修改内容，
+                # 在流式模式下跳过（依赖输入安全 + system prompt 约束输出质量）
+                reply = full_reply
+
+                emotion_tag = emotion_state.primary_emotion.value if emotion_state else ""
+                mem_kwargs = dict(
+                    user_msg=user_msg_clean,
+                    reply=reply,
+                    session_id=session_id,
+                )
+                if hasattr(self.components["memory"], "after_chat"):
+                    import inspect
+                    sig = inspect.signature(self.components["memory"].after_chat)
+                    if "emotion" in sig.parameters:
+                        mem_kwargs["emotion"] = emotion_tag
+                    elif "emotion_tag" in sig.parameters:
+                        mem_kwargs["emotion_tag"] = emotion_tag
+                    try:
+                        self.components["memory"].after_chat(**mem_kwargs)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("after_chat failed, skipping: %s", e)
+                self.components["ase"].on_chat(user_msg_clean, reply)
+
+                # 好感度同步（与 process_message 保持一致）
+                if character_id and character_id != "default" and emotion_state is not None:
+                    try:
+                        from api.deps import deps as _deps
+                        shisi_reg = getattr(_deps, "shisi_reg", None)
+                        mapper = getattr(shisi_reg, "affinity_mapper", None)
+                        if mapper is not None:
+                            affection_pts = getattr(emotion_state, "affection_points", 0.0)
+                            mapper.sync(
+                                character_id=character_id,
+                                affection_points=affection_pts,
+                                reason=f"emotion:{emotion_tag}",
+                                source="chat",
+                            )
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("Affinity/Stage 同步跳过: %s", e)
+
+                process_time = round(time.perf_counter() - stream_start, 3)
+                yield {
+                    "type": "done",
+                    "reply": reply,
+                    "emotion": emotion_state.to_dict() if emotion_state else None,
+                    "process_time": process_time,
+                }
+
         except Exception:
             logger.exception("流式处理异常")
-            yield "（处理消息时出现异常, 请稍后重试）"
-            return
-
-        if not reply:
-            return
-
-        # 按块 yield 模拟流式输出（8 字符/块，平衡延迟与流畅度）
-        chunk_size = 8
-        for i in range(0, len(reply), chunk_size):
-            yield reply[i:i + chunk_size]
+            reply = "（处理消息时出现异常, 请稍后重试）"
+            yield {"type": "token", "content": reply}
+            yield {
+                "type": "done",
+                "reply": reply,
+                "emotion": None,
+                "process_time": round(time.perf_counter() - stream_start, 3),
+            }
 
     def health_check(self) -> dict[str, Any]:
         results = {}
@@ -1143,7 +1431,8 @@ def run_console_chat(orchestrator_or_obj, orchestrator_mode: str,
 
 
 def run_wechat_mode(user_manager, orchestrator_mode: str,
-                    args: argparse.Namespace) -> None:
+                    args: argparse.Namespace,
+                    wechat_connector_holder: dict | None = None) -> None:
     from wechat_direct import WeChatConnector
 
     print("\n📱 微信模式启动中（多用户版）...")
@@ -1152,6 +1441,12 @@ def run_wechat_mode(user_manager, orchestrator_mode: str,
     print("   或按 Ctrl+C 退出\n")
 
     connector = WeChatConnector(user_manager)
+
+    # 注入 connector 到 holder，供主动消息调度器使用
+    # 必须在 connector.run() 之前注入，这样调度器的健康检查能在登录后自动拾取
+    if wechat_connector_holder is not None:
+        wechat_connector_holder["connector"] = connector
+        logger.info("微信连接器已注入主动消息通道 holder")
 
     try:
         connector.run()
@@ -1320,12 +1615,24 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
             ase_engine=orchestrator.components["ase"],
             send_message_func=send_proactive,  # 兜底
             daily_maintenance_func=daily_maintenance,
+            emotion_engine=orchestrator.components.get("emotion"),
         )
 
         # 注册通道
         if ws_server_fast:
             scheduler.register_channel("websocket", lambda: ws_server_fast.broadcast_proactive)
         scheduler.register_channel("console", lambda: lambda msg: logger.info("[主动消息] %s", msg))
+
+        # 注册微信通道 — 工厂从 holder 延迟读取 connector
+        # connector 在 run_wechat_mode 中注入，调度器健康检查会自动拾取
+        def _wechat_sender_factory(_holder=_wechat_holder):
+            connector = _holder.get("connector")
+            if connector is None:
+                return None
+            async def _send(msg: str):
+                connector.send_text(msg)
+            return _send
+        scheduler.register_channel("wechat", _wechat_sender_factory)
 
         if scheduler.start():
             logger.info("主动消息调度器已启动")
@@ -1351,7 +1658,7 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
                 time.sleep(3600)
     else:
         try:
-            run_wechat_mode(user_mgr, "fast", args)
+            run_wechat_mode(user_mgr, "fast", args, wechat_connector_holder=_wechat_holder)
         finally:
             # 确保在微信模式退出时关闭资源
             orchestrator.shutdown()
@@ -1517,10 +1824,22 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
             ase_engine=ase_engine,
             send_message_func=_send_proactive,  # 兜底
             daily_maintenance_func=_daily_maintenance,
+            emotion_engine=emotion_engine,
         )
 
         # 注册通道（ws_server在后续API启动后注入）
         scheduler.register_channel("console", lambda: lambda msg: logger.info("[主动消息] %s", msg))
+
+        # 注册微信通道 — 工厂从 holder 延迟读取 connector
+        # connector 在 run_wechat_mode 中注入，调度器健康检查会自动拾取
+        def _wechat_sender_factory_full(_holder=_wechat_holder_full):
+            connector = _holder.get("connector")
+            if connector is None:
+                return None
+            async def _send(msg: str):
+                connector.send_text(msg)
+            return _send
+        scheduler.register_channel("wechat", _wechat_sender_factory_full)
 
         if scheduler.start():
             logger.info("      调度器已启动")
@@ -1635,7 +1954,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
             while True:
                 time.sleep(3600)
     else:
-        run_wechat_mode(user_mgr, "full", args)
+        run_wechat_mode(user_mgr, "full", args, wechat_connector_holder=_wechat_holder_full)
 
 
 if __name__ == "__main__":

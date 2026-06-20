@@ -14,6 +14,7 @@ LLM Provider 单元测试 — 覆盖 0 测试 P0 风险
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 
@@ -202,23 +203,33 @@ class TestOpenCodeZenProviderFallback:
         p.available_models = ["m1", "m2"]
         p._chat_url = "http://test/chat/completions"
 
-        # mock httpx.post 第一次失败，第二次成功
+        # mock httpx.AsyncClient 第一次失败，第二次成功
         responses = [
             Exception("first model fails"),
             _make_httpx_response({"choices": [{"message": {"content": "fallback reply"}}]}, 200),
         ]
         call_count = {"n": 0}
 
-        def mock_post(*args, **kwargs):
-            call_count["n"] += 1
-            r = responses[call_count["n"] - 1]
-            if isinstance(r, Exception):
-                raise r
-            return r
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
 
-        monkeypatch.setattr("httpx.post", mock_post)
+            async def post(self, *args, **kwargs):
+                call_count["n"] += 1
+                r = responses[call_count["n"] - 1]
+                if isinstance(r, Exception):
+                    raise r
+                return r
 
-        result = p.chat("hello", "sys")
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        monkeypatch.setattr("httpx.AsyncClient", FakeClient)
+
+        result = asyncio.run(p.chat("hello", "sys"))
         assert result == "fallback reply"
         assert call_count["n"] == 2
 
@@ -233,11 +244,21 @@ class TestOpenCodeZenProviderFallback:
         p.available_models = ["m1", "m2"]
         p._chat_url = "http://test/chat/completions"
 
-        def always_fail(*args, **kwargs):
-            raise Exception("boom")
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
 
-        monkeypatch.setattr("httpx.post", always_fail)
-        result = p.chat("hello", "sys")
+            async def post(self, *args, **kwargs):
+                raise Exception("boom")
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        monkeypatch.setattr("httpx.AsyncClient", FakeClient)
+        result = asyncio.run(p.chat("hello", "sys"))
         # 全部失败时返回错误消息字符串
         assert "失败" in result or "不可用" in result or "error" in result.lower()
 

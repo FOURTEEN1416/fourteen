@@ -1,105 +1,83 @@
 @import "tailwindcss";
 
 /* ════════════════════════════════════════
-   Design System — Clean Light (简洁浅色系)
+   Design System — 宣纸墨韵 (Xuan Paper Ink)
    ════════════════════════════════════════ */
 @theme {
-  /* Background palette — clean light */
-  --color-bg-deep: #f5f7fa;
+  /* Background palette — rice paper */
+  --color-bg-deep: #faf8f4;
   --color-bg-surface: #ffffff;
-  --color-bg-card: #ffffff;
-  --color-bg-elevated: #f0f2f5;
-  --color-bg-hover: #e8ecf1;
+  --color-bg-card: #fdfcf8;
+  --color-bg-elevated: #f5f1ea;
+  --color-bg-hover: #efe9de;
 
-  /* Borders */
-  --color-border-subtle: rgba(0, 0, 0, 0.06);
-  --color-border-default: rgba(0, 0, 0, 0.10);
-  --color-border-hover: rgba(0, 0, 0, 0.16);
+  /* Borders — ink wash subtle */
+  --color-border-subtle: rgba(26, 26, 26, 0.06);
+  --color-border-default: rgba(26, 26, 26, 0.12);
+  --color-border-hover: rgba(26, 26, 26, 0.20);
 
-  /* Accent — Cyan (brand primary, keep original) */
-  --color-cyan-50: #e6fbfe;
-  --color-cyan-100: #b3f2fa;
-  --color-cyan-200: #80e9f6;
-  --color-cyan-300: #4de0f2;
-  --color-cyan-400: #22d0df;
-  --color-cyan-500: #1ab8c7;
-  --color-cyan-600: #1499a8;
-  --color-cyan-700: #0e7a87;
-  --color-cyan-800: #085b66;
-  --color-cyan-900: #023c45;
+  /* Primary — Cinnabar red */
+  --color-primary-50: #fdf2f2;
+  --color-primary-100: #f8d9d9;
+  --color-primary-200: #efb5b5;
+  --color-primary-300: #e38a8a;
+  --color-primary-400: #c94e4e;
+  --color-primary-500: #8b1e1e;
+  --color-primary-600: #771a1a;
+  --color-primary-700: #611616;
+  --color-primary-800: #4a1111;
+  --color-primary-900: #330b0b;
 
-  /* Accent — Purple (brand secondary, keep original) */
-  --color-magenta-50: #fde6ff;
-  --color-magenta-100: #f7b3ff;
-  --color-magenta-200: #f180ff;
-  --color-magenta-300: #eb4dff;
-  --color-magenta-400: #e628ff;
-  --color-magenta-500: #c91ae0;
-  --color-magenta-600: #ab14bf;
-  --color-magenta-700: #8d0e9e;
-  --color-magenta-800: #6f087d;
-  --color-magenta-900: #51025c;
+  /* Accent — Antique gold */
+  --color-accent-50: #faf7ed;
+  --color-accent-100: #f2ead0;
+  --color-accent-200: #e8d8ab;
+  --color-accent-300: #dbc27f;
+  --color-accent-400: #c9a554;
+  --color-accent-500: #b08a3e;
+  --color-accent-600: #967534;
+  --color-accent-700: #7a5f2a;
+  --color-accent-800: #5e4920;
+  --color-accent-900: #423216;
 
-  /* Primary / accent aliases */
-  --color-primary-50: #e6fbfe;
-  --color-primary-100: #b3f2fa;
-  --color-primary-200: #80e9f6;
-  --color-primary-300: #4de0f2;
-  --color-primary-400: #22d0df;
-  --color-primary-500: #1ab8c7;
-  --color-primary-600: #1499a8;
-  --color-primary-700: #0e7a87;
-  --color-primary-800: #085b66;
-  --color-primary-900: #023c45;
+  /* Neutral text */
+  --color-text-primary: #1a1a1a;
+  --color-text-secondary: #4a4a4a;
+  --color-text-muted: #7a7a7a;
+  --color-text-dim: #a0a0a0;
 
-  /* Accent alias */
-  --color-accent-50: #fde6ff;
-  --color-accent-100: #f7b3ff;
-  --color-accent-200: #f180ff;
-  --color-accent-300: #eb4dff;
-  --color-accent-400: #e628ff;
-  --color-accent-500: #c91ae0;
-  --color-accent-600: #ab14bf;
-  --color-accent-700: #8d0e9e;
-  --color-accent-800: #6f087d;
-  --color-accent-900: #51025c;
-
-  /* Neutral text (light bg -> dark text) */
-  --color-text-primary: #1e293b;
-  --color-text-secondary: #475569;
-  --color-text-muted: #64748b;
-  --color-text-dim: #94a3b8;
-
-  /* Emotion indicators (keep functional) */
-  --color-emotion-rose: #e11d48;
-  --color-emotion-amber: #d97706;
-  --color-emotion-blue: #2563eb;
-  --color-emotion-red: #dc2626;
-  --color-emotion-purple: #9333ea;
-  --color-emotion-green: #16a34a;
+  /* Emotion indicators */
+  --color-emotion-rose: #8b1e1e;
+  --color-emotion-amber: #b08a3e;
+  --color-emotion-blue: #4a6fa5;
+  --color-emotion-red: #9c2c2c;
+  --color-emotion-purple: #7a4a8a;
+  --color-emotion-green: #4a7c59;
 
   /* Status */
-  --color-success: #06b6d4;
-  --color-warning: #c084fc;
-  --color-error: #e11d48;
-  --color-info: #2563eb;
+  --color-success: #4a7c59;
+  --color-warning: #b08a3e;
+  --color-error: #8b1e1e;
+  --color-info: #4a6fa5;
 }
 
 /* ═══ Base Styles ═══ */
 body {
   margin: 0;
-  font-family: "Inter", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+  font-family: "Noto Serif SC", "Songti SC", "SimSun", serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f5f7fa;
-  color: #1e293b;
+  background-color: #faf8f4;
+  background-image: radial-gradient(circle at 20% 20%, rgba(176, 138, 62, 0.03) 0%, transparent 40%),
+                    radial-gradient(circle at 80% 80%, rgba(139, 30, 30, 0.03) 0%, transparent 40%);
+  color: #1a1a1a;
 }
 
 /* ═══ Scrollbar (thin style) ═══ */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.12); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.2); }
+::-webkit-scrollbar-thumb { background: rgba(26, 26, 26, 0.15); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(26, 26, 26, 0.25); }
 
 /* ═══ Animations ═══ */
 @keyframes fade-in {
@@ -111,8 +89,8 @@ body {
 }
 
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 4px rgba(34, 208, 223, 0.15); }
-  50% { box-shadow: 0 0 12px rgba(34, 208, 223, 0.3); }
+  0%, 100% { box-shadow: 0 0 4px rgba(139, 30, 30, 0.10); }
+  50% { box-shadow: 0 0 10px rgba(139, 30, 30, 0.18); }
 }
 .animate-pulse-glow {
   animation: pulse-glow 2s ease-in-out infinite;
@@ -149,93 +127,25 @@ body {
 }
 .animate-scale-in { animation: scale-in 0.15s ease-out; }
 
-/* ═══ Glass & Immersive ═══ */
-.glass-card {
-  background: rgba(255, 255, 255, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+/* ═══ Paper Surfaces ═══ */
+.paper-card {
+  background: #fdfcf8;
+  border: 1px solid rgba(26, 26, 26, 0.08);
+  box-shadow: 0 1px 2px rgba(26, 26, 26, 0.04);
 }
-.glass-card-hover {
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+.paper-card-hover {
+  background: #ffffff;
+  border: 1px solid rgba(26, 26, 26, 0.12);
+  box-shadow: 0 2px 6px rgba(26, 26, 26, 0.06);
 }
 
-@keyframes gradient-shift {
-  0%   { background-position: 0% 50%; }
-  25%  { background-position: 100% 0%; }
-  50%  { background-position: 100% 100%; }
-  75%  { background-position: 0% 100%; }
-  100% { background-position: 0% 50%; }
-}
-.bg-dynamic {
-  background: linear-gradient(
-    135deg,
-    #e0f0f8,
-    #ede0ff,
-    #def5e8,
-    #f0f2f8,
-    #fce4f0,
-    #e0f4f8
-  );
-  background-size: 600% 600%;
-  animation: gradient-shift 25s ease infinite;
-}
-
-/* Floating gradient orbs — layered behind glass cards */
-.bg-orbs {
-  position: relative;
-  overflow: hidden;
-}
-.bg-orbs::before,
-.bg-orbs::after {
-  content: '';
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.15;
-  pointer-events: none;
-  z-index: 0;
-}
-.bg-orbs::before {
-  width: 500px;
-  height: 500px;
-  background: radial-gradient(circle, rgba(34, 208, 223, 0.6), transparent 70%);
-  top: -10%;
-  left: -10%;
-  animation: orb-drift 30s ease-in-out infinite alternate;
-}
-.bg-orbs::after {
-  width: 400px;
-  height: 400px;
-  background: radial-gradient(circle, rgba(230, 40, 255, 0.5), transparent 70%);
-  bottom: -10%;
-  right: -10%;
-  animation: orb-drift 25s ease-in-out infinite alternate-reverse;
-}
-
-.bg-orbs > * {
-  position: relative;
-  z-index: 1;
-}
-
-@keyframes orb-drift {
-  0%   { transform: translate(0, 0) scale(1); }
-  33%  { transform: translate(60px, -40px) scale(1.1); }
-  66%  { transform: translate(-30px, 50px) scale(0.95); }
-  100% { transform: translate(40px, -20px) scale(1.05); }
-}
-
+/* ═══ Shimmer loader ═══ */
 @keyframes shimmer {
   0%   { background-position: -200% center; }
   100% { background-position: 200% center; }
 }
 .animate-shimmer {
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  background: linear-gradient(90deg, transparent, rgba(176, 138, 62, 0.12), transparent);
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
 }

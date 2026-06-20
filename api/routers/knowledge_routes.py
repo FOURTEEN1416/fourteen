@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from shisi.character.character_card_v2 import CharaCardV2Parser
 from shisi.character.models import CharaCardV2
 from shisi.knowledge.character_knowledge_service import get_knowledge_service
+from shisi.knowledge.crawler_adapter import get_crawler_adapter
 
 logger = logging.getLogger("api.knowledge_routes")
 
@@ -215,12 +216,24 @@ async def delete_knowledge_document(
     if not service.has_index(character_id):
         raise HTTPException(status_code=404, detail=f"角色知识库不存在: {character_id}")
     retriever = service._retrievers.get(character_id)
-    if retriever and hasattr(retriever, 'clear'):
-        retriever.clear()
-    if character_id in service._chunk_counts:
-        del service._chunk_counts[character_id]
-    logger.info("文档已从角色知识库删除: %s", doc_id)
-    return {"status": "deleted", "document_id": doc_id}
+    if retriever is None:
+        raise HTTPException(status_code=404, detail="检索器未初始化")
+
+    # 修复：按 doc_id 删除单个文档，而非 clear() 清空整个角色知识库
+    # 上传时 source_id 格式为 f"{doc_id}_{idx}"，按前缀过滤保留其余文档
+    existing_chunks = list(retriever._chunks)  # type: ignore[attr-defined]
+    remaining_chunks = [
+        c for c in existing_chunks
+        if not c.source_id.startswith(f"{doc_id}_")
+    ]
+    removed_count = len(existing_chunks) - len(remaining_chunks)
+    if removed_count == 0:
+        raise HTTPException(status_code=404, detail=f"文档不存在: {doc_id}")
+    retriever.index(remaining_chunks)
+    service._chunk_counts[character_id] = len(remaining_chunks)
+    service.save_index(character_id)
+    logger.info("文档已从角色知识库删除: %s (移除 %d 块)", doc_id, removed_count)
+    return {"status": "deleted", "document_id": doc_id, "removed_chunks": removed_count}
 
 
 # ── 知识宝库 vault 端点 ──
@@ -289,6 +302,45 @@ async def get_vault_features(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Persona 提取失败: {e}") from e
+
+
+# ── 从网络抓取人物资料 ──
+
+
+class CrawlPersonaRequest(BaseModel):
+    name: str = Field(..., min_length=1, description="要抓取的人物名称")
+
+
+@router.post("/{character_id}/knowledge/crawl")
+async def crawl_persona_knowledge(
+    character_id: str,
+    req: CrawlPersonaRequest,
+    _auth: bool = Security(_verify_api_key),
+):
+    """从网络抓取人物资料并写入角色知识索引。"""
+    card = _load_character_card(character_id)
+    # 允许角色卡不存在，此时仅建立爬虫来源的索引
+    adapter = get_crawler_adapter()
+    result = adapter.crawl_and_index(
+        character_id=character_id,
+        name=req.name,
+        card=card,
+    )
+    if not result.get("success"):
+        logger.warning("抓取人物资料失败: %s — %s", character_id, result.get("error"))
+        raise HTTPException(status_code=502, detail=result.get("error", "抓取失败"))
+
+    stats = get_knowledge_service().get_stats(character_id)
+    return {
+        "status": "crawled",
+        "character_id": character_id,
+        "name": req.name,
+        "chunks_added": result.get("chunks_added", 0),
+        "source": result.get("source", "unknown"),
+        "source_url": result.get("source_url", ""),
+        "fallback_chain": result.get("fallback_chain", []),
+        "total_chunks": stats.get("total_chunks", 0),
+    }
 
 
 # ── 辅助 ──

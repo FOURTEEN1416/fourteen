@@ -62,16 +62,130 @@ EMOTION_PLEASURE_MAP = {
     Emotion.NEUTRAL: 0.0,
 }
 
-EMOTION_TRANSITION_MATRIX = {
-    (Emotion.NEUTRAL, Emotion.ANGRY): 0.6,
-    (Emotion.NEUTRAL, Emotion.JEALOUS): 0.5,
-    (Emotion.HAPPY, Emotion.ANGRY): 0.2,
-    (Emotion.HAPPY, Emotion.SAD): 0.2,
-    (Emotion.ANGRY, Emotion.HAPPY): 0.3,
-    (Emotion.SAD, Emotion.HAPPY): 0.3,
-    (Emotion.LOVELY, Emotion.JEALOUS): 0.6,
-    (Emotion.LOVELY, Emotion.HAPPY): 0.8,
-}
+def _build_emotion_transition_matrix() -> dict[tuple[Emotion, Emotion], float]:
+    """规则驱动生成情感转移矩阵
+
+    设计原则（基于心理学常识）：
+    1. 每种情绪至少有 2 条出向转移（到不同情绪）
+    2. 正向情绪倾向于转向其他正向/中性情绪（保持愉悦）
+    3. 负向情绪可被温柔安抚（→CARING）或自然平复（→NEUTRAL）
+    4. 跨极性转移概率低（如 sadness→joy=0.1, joy→sadness=0.05）
+    5. 转移概率之和不需要严格等于 1（系统有默认 0.5 fallback）
+    """
+    # 显式规则（原有 8 条，优先级最高，可被下方规则补充但不会覆盖）
+    explicit_rules: dict[tuple[Emotion, Emotion], float] = {
+        (Emotion.NEUTRAL, Emotion.ANGRY): 0.6,
+        (Emotion.NEUTRAL, Emotion.JEALOUS): 0.5,
+        (Emotion.HAPPY, Emotion.ANGRY): 0.2,
+        (Emotion.HAPPY, Emotion.SAD): 0.2,
+        (Emotion.ANGRY, Emotion.HAPPY): 0.3,
+        (Emotion.SAD, Emotion.HAPPY): 0.3,
+        (Emotion.LOVELY, Emotion.JEALOUS): 0.6,
+        (Emotion.LOVELY, Emotion.HAPPY): 0.8,
+    }
+
+    # 每种情绪的自然转移规则：{源情绪: [(目标情绪, 概率), ...]}
+    # 基于心理学常识：负向情绪可被安抚、正向情绪易延续、疲惫需休息
+    natural_transitions: dict[Emotion, list[tuple[Emotion, float]]] = {
+        Emotion.HAPPY: [
+            (Emotion.PLAYFUL, 0.5),   # 开心→调皮：愉悦感延续
+            (Emotion.LOVELY, 0.4),    # 开心→撒娇：亲密感升温
+            (Emotion.NEUTRAL, 0.3),   # 开心→平常：情绪自然平复
+            (Emotion.SAD, 0.05),      # 开心→伤心：极低概率的情绪反转
+        ],
+        Emotion.SAD: [
+            (Emotion.CARING, 0.4),    # 伤心→温柔：寻求/接受安慰
+            (Emotion.NEUTRAL, 0.3),   # 伤心→平常：情绪逐渐平复
+            (Emotion.HAPPY, 0.1),     # 伤心→开心：低概率的情绪恢复
+            (Emotion.TIRED, 0.2),     # 伤心→疲惫：情绪消耗精力
+        ],
+        Emotion.ANGRY: [
+            (Emotion.CARING, 0.3),    # 生气→温柔：被安抚后软化
+            (Emotion.NEUTRAL, 0.4),   # 生气→平常：怒气消退
+            (Emotion.SULLEN, 0.2),    # 生气→傲娇：余怒转为别扭
+            (Emotion.SAD, 0.15),      # 生气→伤心：愤怒转为委屈
+        ],
+        Emotion.LOVELY: [
+            (Emotion.SULLEN, 0.3),    # 撒娇→傲娇：没得到回应时闹别扭
+            (Emotion.CARING, 0.4),    # 撒娇→温柔：亲密感深化
+            (Emotion.PLAYFUL, 0.3),   # 撒娇→调皮：活泼互动
+        ],
+        Emotion.JEALOUS: [
+            (Emotion.SULLEN, 0.5),    # 吃醋→傲娇：醋意转为别扭
+            (Emotion.ANGRY, 0.3),     # 吃醋→生气：醋意升级
+            (Emotion.NEUTRAL, 0.2),   # 吃醋→平常：解释后释然
+            (Emotion.CARING, 0.2),    # 吃醋→温柔：被哄好后软化
+        ],
+        Emotion.SULLEN: [
+            (Emotion.CARING, 0.4),    # 傲娇→温柔：被哄后展现真心
+            (Emotion.HAPPY, 0.3),     # 傲娇→开心：被逗笑后破功
+            (Emotion.NEUTRAL, 0.2),   # 傲娇→平常：别扭消退
+            (Emotion.PLAYFUL, 0.2),   # 傲娇→调皮：转为打闹
+        ],
+        Emotion.CARING: [
+            (Emotion.HAPPY, 0.4),     # 温柔→开心：关怀得到回应
+            (Emotion.LOVELY, 0.3),    # 温柔→撒娇：关怀转为亲昵
+            (Emotion.TIRED, 0.2),     # 温柔→疲惫：关怀消耗精力
+            (Emotion.NEUTRAL, 0.2),   # 温柔→平常：自然平复
+        ],
+        Emotion.PLAYFUL: [
+            (Emotion.HAPPY, 0.5),     # 调皮→开心：玩闹中愉悦
+            (Emotion.SULLEN, 0.3),    # 调皮→傲娇：玩闹过头的别扭
+            (Emotion.JEALOUS, 0.2),   # 调皮→吃醋：玩笑引发醋意
+            (Emotion.NEUTRAL, 0.2),   # 调皮→平常：玩闹结束
+        ],
+        Emotion.TIRED: [
+            (Emotion.NEUTRAL, 0.5),   # 疲惫→平常：休息后恢复
+            (Emotion.CARING, 0.3),    # 疲惫→温柔：被关心后感动
+            (Emotion.SAD, 0.2),       # 疲惫→伤心：疲惫时的脆弱
+            (Emotion.SULLEN, 0.15),   # 疲惫→傲娇：没精力理人的别扭
+        ],
+        Emotion.NEUTRAL: [
+            (Emotion.HAPPY, 0.3),     # 平常→开心：被逗乐
+            (Emotion.PLAYFUL, 0.2),   # 平常→调皮：活跃起来
+            (Emotion.CARING, 0.2),    # 平常→温柔：关心对方
+            (Emotion.TIRED, 0.15),    # 平常→疲惫：精力下降
+        ],
+    }
+
+    # 合并：自然规则（心理学值）优先，显式规则仅补充自然规则未覆盖的转移
+    # 这样 sadness→joy=0.1、joy→sadness=0.05 等心理学值能正确生效
+    matrix: dict[tuple[Emotion, Emotion], float] = {}
+    for source, targets in natural_transitions.items():
+        for target, prob in targets:
+            matrix[(source, target)] = prob
+
+    # 显式规则补充自然规则未覆盖的转移（不覆盖已有的自然规则）
+    for key, prob in explicit_rules.items():
+        if key not in matrix:
+            matrix[key] = prob
+
+    # 完整性补全：为所有未覆盖的 (source, target) 对赋予基于愉悦度差异的低概率，
+    # 使 10×10 矩阵达到 100% 覆盖，避免情感跳转时出现未定义行为。
+    for source in Emotion:
+        for target in Emotion:
+            if source == target or (source, target) in matrix:
+                continue
+            # 回归中性的概率稍高；跨极性跳转概率最低
+            if target is Emotion.NEUTRAL:
+                matrix[(source, target)] = 0.25
+            elif source is Emotion.NEUTRAL:
+                matrix[(source, target)] = 0.20
+            else:
+                pleasure_diff = abs(
+                    EMOTION_PLEASURE_MAP[source] - EMOTION_PLEASURE_MAP[target]
+                )
+                if pleasure_diff <= 0.3:
+                    matrix[(source, target)] = 0.15
+                elif pleasure_diff <= 0.8:
+                    matrix[(source, target)] = 0.08
+                else:
+                    matrix[(source, target)] = 0.03
+
+    return matrix
+
+
+EMOTION_TRANSITION_MATRIX = _build_emotion_transition_matrix()
 
 EMOTION_STYLE_MAP = {
     Emotion.JEALOUS: {"rhetorical_prob": 0.8, "hint_prob": 0.7, "caring_prob": 0.2, "teasing_prob": 0.1, "emoji_freq": 0.3},

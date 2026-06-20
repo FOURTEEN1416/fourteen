@@ -1,8 +1,16 @@
 export interface EmotionState {
-  current_emotion: string
-  intensity: number
+  primary: {
+    type: string
+    intensity: number
+  }
+  secondary: Array<{ type: string; intensity: number }>
   energy: number
-  affinity: number
+  affinity: {
+    level: number
+    name: string
+    points: number
+  }
+  last_update?: number
 }
 
 export interface EmotionTrend {
