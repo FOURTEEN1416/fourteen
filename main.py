@@ -141,7 +141,6 @@ from llm_provider import get_llm  # noqa: E402
 from memory import StructuredMemory, VectorMemory  # noqa: E402
 from memory.memory_pipeline import MemoryPipeline  # noqa: E402
 from my_character.emotion_engine import EmotionEngine  # noqa: E402
-from my_character.persona_engine import PersonaEngine  # noqa: E402
 from my_character.tone_mimic import ToneMimic  # noqa: E402
 from observability.config_manager import ConfigManager  # noqa: E402
 from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
@@ -153,6 +152,7 @@ from security.content_safety import ContentSafetyFilter  # noqa: E402
 from security.encryption import EncryptionManager  # noqa: E402
 from security.pii_anonymizer import PIIAnonymizer  # noqa: E402
 from security.prompt_injection import PromptInjectionDetector  # noqa: E402
+from shisi.application.persona_service import PersonaService  # noqa: E402
 from tools.base_tool import ToolDispatcher, ToolRegistry  # noqa: E402
 from tools.builtin.calendar_tool import CalculatorTool, CalendarTool  # noqa: E402
 from tools.builtin.character_crawler_tool import CharacterCrawlerTool  # noqa: E402
@@ -412,7 +412,7 @@ class OptimizedOrchestrator:
             )
             from my_character.character_config import ConfigLoader
             config_loader = ConfigLoader(config_dir=config_dir)
-            self.components["persona"] = PersonaEngine(
+            self.components["persona"] = PersonaService(
                 config_loader=config_loader,
                 llm_gateway=self.components["llm"],
                 emotion_engine=self.components["emotion"],
@@ -877,8 +877,10 @@ class OptimizedOrchestrator:
                 from my_character.consistency_checker import check_and_correct_reply
                 reply = await check_and_correct_reply(
                     reply=reply,
-                    persona_engine=self.components.get("persona"),
-                    llm_gateway=self.components.get("llm"),
+                persona_engine=getattr(
+                    self.components.get("persona"), "engine", None
+                ),
+                llm_gateway=self.components.get("llm"),
                     emotion_state=emotion_state,
                     session_id=session_id,
                     memory=self.components.get("memory"),
@@ -1740,12 +1742,13 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     prompt_mode = persona_fusion.get("prompt_mode", "layered")
     anchor_verification = persona_fusion.get("anchor_verification_enabled", True)
 
-    persona_engine = PersonaEngine(
+    persona_service = PersonaService(
         config_loader=config_loader,
         llm_gateway=llm,
         prompt_mode=prompt_mode,
         anchor_verification_enabled=anchor_verification,
     )
+    persona_engine = persona_service.engine
 
     tone_mimic = None
     try:
