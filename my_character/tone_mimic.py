@@ -128,10 +128,15 @@ class ToneMimic:
                 name=self.collection_name,
                 embedding_function=ef,
             )
-            logger.info("ChromaDB initialized at %s", self.chroma_path)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("ChromaDB init failed: %s, fallback mode", e)
+        except BaseException as e:  # noqa: BLE001
+            # ChromaDB Rust 绑定偶发 panic（如 nvinfer 缺失 / sqlite 越界），
+            # pyo3 PanicException 继承自 BaseException 而非 Exception，必须兜底。
+            # 降级为无库模式：功能受限但 PersonaEngine 仍可构建。
+            logger.warning("ChromaDB init failed, ToneMimic running in fallback mode: %s", e)
+            self._client = None
             self._collection = None
+            return
+        logger.info("ChromaDB initialized at %s", self.chroma_path)
 
     # ── 核心接口 ──────────────────────────────────────────────
 

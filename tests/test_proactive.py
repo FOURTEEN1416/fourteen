@@ -58,10 +58,16 @@ def test_ase_engine_has_check_scene_triggers():
 
 
 def test_ase_engine_init_default():
+    import tempfile
+    from pathlib import Path
+
     from proactive.ase_engine import ASEEngine
-    engine = ASEEngine()
-    assert engine is not None
-    assert engine._daily_message_count == 0
+
+    with tempfile.TemporaryDirectory() as td:
+        # 显式指向临时 state_path，避免 cwd 已有 state.json 干扰
+        engine = ASEEngine(state_path=str(Path(td) / "ase_state.json"))
+        assert engine is not None
+        assert engine._daily_message_count == 0
 
 
 def test_ase_engine_init_params():
