@@ -1,3 +1,19 @@
+# TODO: shisi 后等效迁移
+#
+# 符号迁移表（shisi 暂无与原根 memory/ 模块 API 兼容的等价实现，保留原 import）：
+#   - memory.memory_pipeline.MemoryPipeline    → shisi.application.memory_service.ShisiMemoryService（仅包装，内部仍依赖根 memory/，且未透传 _config/_forgetting_model/_chat_count_since_extract 等内部属性）
+#   - memory.memory_pipeline.EpisodicMemory     → shisi 无等价类
+#   - memory.memory_pipeline.SemanticMemory    → shisi 无等价类
+#   - memory.memory_pipeline.ConflictDetector  → shisi 无等价类
+#   - memory.memory_pipeline.CrossSessionReasoner → shisi 无等价类
+#   - memory.memory_pipeline.FactExtractor     → shisi 无等价类
+#   - memory.memory_pipeline.DiarySummarizer   → shisi 无等价类
+#   - memory.memory_pipeline.WorkingMemory     → shisi 无等价类
+#   - memory.memory_pipeline.ImportanceScorer  → shisi 无等价类
+#   - memory.memory_pipeline.ForgettingManager → shisi 无等价类
+# 原因：shisi/memory/ 当前仅含 FavoriteManager / ForwardManager（收藏/转发），
+#       核心记忆管线（工作/情景/语义/遗忘/评分/事实抽取/日记摘要）尚未在 shisi 中实现等价类。
+#       等待后续迁移提供兼容 API 后再切换 import。
 """记忆管线核心路径测试 — 使用 mock 后端隔离向量/结构化存储。"""
 
 from __future__ import annotations
@@ -7,6 +23,9 @@ import time
 from datetime import datetime, timezone
 
 import pytest
+
+# 根目录 memory/ 已迁移到 shisi.memory.legacy/；根目录物理删除后本文件可继续运行。
+pytest.importorskip("shisi.memory.legacy", reason="根目录 memory/ 已迁移到 shisi/")
 
 sys.path.insert(0, ".")
 
@@ -184,7 +203,7 @@ class FakeStructuredMemory:
 
 
 def _make_pipeline(forgetting_model: str = "exponential", fact_extract_interval: int = 2):
-    from memory.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     vm = FakeVectorMemory()
     sm = FakeStructuredMemory()
     mp = MemoryPipeline(
@@ -238,7 +257,7 @@ def test_mp_should_store_as_fact_rules():
 
 
 def test_mp_is_late_night():
-    from memory.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     assert MemoryPipeline._is_late_night(datetime(2026, 1, 1, 23, 30, tzinfo=timezone.utc)) is True
     assert MemoryPipeline._is_late_night(datetime(2026, 1, 1, 2, 0, tzinfo=timezone.utc)) is True
     assert MemoryPipeline._is_late_night(datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)) is False
@@ -333,7 +352,7 @@ def test_mp_health_check():
 
 
 def test_episodic_memory_store_and_search():
-    from memory.memory_pipeline import EpisodicMemory
+    from shisi.memory.legacy.memory_pipeline import EpisodicMemory
     vm = FakeVectorMemory()
     sm = FakeStructuredMemory()
     em = EpisodicMemory(vm, sm)
@@ -347,7 +366,7 @@ def test_episodic_memory_store_and_search():
 
 
 def test_semantic_memory_add_fact_dedup():
-    from memory.memory_pipeline import SemanticMemory
+    from shisi.memory.legacy.memory_pipeline import SemanticMemory
     vm = FakeVectorMemory()
     sm = FakeStructuredMemory()
     sem = SemanticMemory(vm, sm)
@@ -357,7 +376,7 @@ def test_semantic_memory_add_fact_dedup():
 
 
 def test_conflict_detector_detects_near_duplicate():
-    from memory.memory_pipeline import ConflictDetector, SemanticMemory
+    from shisi.memory.legacy.memory_pipeline import ConflictDetector, SemanticMemory
     vm = FakeVectorMemory()
     sm = FakeStructuredMemory()
     sem = SemanticMemory(vm, sm)
@@ -370,7 +389,7 @@ def test_conflict_detector_detects_near_duplicate():
 
 
 def test_cross_session_reasoner_crud():
-    from memory.memory_pipeline import CrossSessionReasoner
+    from shisi.memory.legacy.memory_pipeline import CrossSessionReasoner
     sm = FakeStructuredMemory()
     csr = CrossSessionReasoner(sm)
     assert csr.extract_pending_event("我明天去上海") is not None
@@ -383,7 +402,7 @@ def test_cross_session_reasoner_crud():
 
 
 def test_fact_extractor_llm_mode():
-    from memory.memory_pipeline import FactExtractor
+    from shisi.memory.legacy.memory_pipeline import FactExtractor
     def llm(prompt: str) -> str:
         return '[{"fact": "用户喜欢蓝色", "category": "preference", "confidence": 0.8}]'
     fe = FactExtractor(llm_func=llm)
@@ -393,7 +412,7 @@ def test_fact_extractor_llm_mode():
 
 
 def test_fact_extractor_deduplicate():
-    from memory.memory_pipeline import FactExtractor
+    from shisi.memory.legacy.memory_pipeline import FactExtractor
     facts = [
         {"fact": "喜欢猫", "category": "preference", "confidence": 0.9},
         {"fact": "喜欢猫", "category": "preference", "confidence": 0.5},
@@ -404,7 +423,7 @@ def test_fact_extractor_deduplicate():
 
 
 def test_diary_summarizer_template_summary():
-    from memory.memory_pipeline import DiarySummarizer
+    from shisi.memory.legacy.memory_pipeline import DiarySummarizer
     ds = DiarySummarizer(llm_func=None)
     chats = [
         {"role": "user", "content": "今天工作"},
@@ -421,7 +440,7 @@ def test_diary_summarizer_template_summary():
 
 
 def test_working_memory_session_and_clear():
-    from memory.memory_pipeline import WorkingMemory
+    from shisi.memory.legacy.memory_pipeline import WorkingMemory
     wm = WorkingMemory(limit=5)
     wm.start_session(session_id="s1", channel="wechat", user_id="u1")
     assert wm.session_id == "s1"
@@ -432,13 +451,13 @@ def test_working_memory_session_and_clear():
 
 
 def test_episodic_memory_store_empty_messages():
-    from memory.memory_pipeline import EpisodicMemory
+    from shisi.memory.legacy.memory_pipeline import EpisodicMemory
     em = EpisodicMemory(FakeVectorMemory(), FakeStructuredMemory())
     assert em.store_episode([]) == ""
 
 
 def test_episodic_memory_search_exception_returns_empty():
-    from memory.memory_pipeline import EpisodicMemory
+    from shisi.memory.legacy.memory_pipeline import EpisodicMemory
     vm = FakeVectorMemory()
     vm.search_sync = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("vm fail"))  # type: ignore[method-assign]
     em = EpisodicMemory(vm, FakeStructuredMemory())
@@ -446,7 +465,7 @@ def test_episodic_memory_search_exception_returns_empty():
 
 
 def test_semantic_memory_add_fact_similar_fact_dedup():
-    from memory.memory_pipeline import SemanticMemory
+    from shisi.memory.legacy.memory_pipeline import SemanticMemory
     vm = FakeVectorMemory()
     sm = FakeStructuredMemory()
     sem = SemanticMemory(vm, sm)
@@ -460,7 +479,7 @@ def test_semantic_memory_add_fact_similar_fact_dedup():
 
 
 def test_semantic_memory_search_exception_returns_empty():
-    from memory.memory_pipeline import SemanticMemory
+    from shisi.memory.legacy.memory_pipeline import SemanticMemory
     vm = FakeVectorMemory()
     vm.search_sync = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("vm fail"))  # type: ignore[method-assign]
     sem = SemanticMemory(vm, FakeStructuredMemory())
@@ -469,7 +488,7 @@ def test_semantic_memory_search_exception_returns_empty():
 
 
 def test_semantic_memory_extract_facts_from_message():
-    from memory.memory_pipeline import SemanticMemory
+    from shisi.memory.legacy.memory_pipeline import SemanticMemory
     sem = SemanticMemory(FakeVectorMemory(), FakeStructuredMemory())
     facts = sem.extract_facts_from_message("我喜欢吃火锅，我是程序员")
     categories = {f["category"] for f in facts}
@@ -478,7 +497,7 @@ def test_semantic_memory_extract_facts_from_message():
 
 
 def test_importance_scorer_should_retain():
-    from memory.memory_pipeline import ImportanceScorer
+    from shisi.memory.legacy.memory_pipeline import ImportanceScorer
     scorer = ImportanceScorer()
     assert scorer.should_retain(0.9, 100) is True
     assert scorer.should_retain(0.3, 0, access_count=0) is True
@@ -486,7 +505,7 @@ def test_importance_scorer_should_retain():
 
 
 def test_forgetting_manager_retrieval_weight_bounds():
-    from memory.memory_pipeline import ForgettingManager
+    from shisi.memory.legacy.memory_pipeline import ForgettingManager
     fm = ForgettingManager()
     assert 0.0 <= fm.retrieval_weight(0.8, 0) <= 1.0
     assert fm.retrieval_weight(0.1, 1000) < 1e-10
@@ -494,13 +513,13 @@ def test_forgetting_manager_retrieval_weight_bounds():
 
 
 def test_fact_extractor_empty_input():
-    from memory.memory_pipeline import FactExtractor
+    from shisi.memory.legacy.memory_pipeline import FactExtractor
     fe = FactExtractor(llm_func=None)
     assert fe.extract_facts([]) == []
 
 
 def test_fact_extractor_rule_mode():
-    from memory.memory_pipeline import FactExtractor
+    from shisi.memory.legacy.memory_pipeline import FactExtractor
     fe = FactExtractor(llm_func=None)
     facts = fe.extract_facts(["我喜欢吃火锅", "我明天去北京出差"])
     categories = {f["category"] for f in facts}
@@ -509,7 +528,7 @@ def test_fact_extractor_rule_mode():
 
 
 def test_fact_extractor_parse_json_variants():
-    from memory.memory_pipeline import FactExtractor
+    from shisi.memory.legacy.memory_pipeline import FactExtractor
     parse = FactExtractor._parse_json_result
     assert parse('[{"fact": "x"}]') == [{"fact": "x"}]
     assert parse('```json\n[{"fact": "x"}]\n```') == [{"fact": "x"}]
@@ -518,19 +537,19 @@ def test_fact_extractor_parse_json_variants():
 
 
 def test_diary_summarizer_empty_chats():
-    from memory.memory_pipeline import DiarySummarizer
+    from shisi.memory.legacy.memory_pipeline import DiarySummarizer
     ds = DiarySummarizer(llm_func=None)
     assert ds.summarize_day([]) == "今天没有聊天记录。"
 
 
 def test_diary_summarizer_weekly_no_summaries():
-    from memory.memory_pipeline import DiarySummarizer
+    from shisi.memory.legacy.memory_pipeline import DiarySummarizer
     ds = DiarySummarizer(llm_func=None)
     assert ds.summarize_week([]) == "本周没有记录。"
 
 
 def test_diary_summarizer_mood_trend():
-    from memory.memory_pipeline import DiarySummarizer
+    from shisi.memory.legacy.memory_pipeline import DiarySummarizer
     ds = DiarySummarizer(llm_func=None)
     trend = ds.detect_mood_trend({
         "2026-06-18": "今天很开心",
@@ -541,7 +560,7 @@ def test_diary_summarizer_mood_trend():
 
 
 def test_memory_pipeline_unknown_forgetting_model_defaults():
-    from memory.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     mp = MemoryPipeline(
         vector_memory=FakeVectorMemory(),
         structured_memory=FakeStructuredMemory(),
@@ -603,7 +622,7 @@ def test_memory_pipeline_reset_session():
 
 
 def test_semantic_memory_add_fact_structured_exception_returns_false():
-    from memory.memory_pipeline import SemanticMemory
+    from shisi.memory.legacy.memory_pipeline import SemanticMemory
     vm = FakeVectorMemory()
     sm = FakeStructuredMemory()
     sm.add_fact = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("db fail"))  # type: ignore[method-assign]
@@ -612,7 +631,7 @@ def test_semantic_memory_add_fact_structured_exception_returns_false():
 
 
 def test_semantic_memory_add_fact_vector_exception_still_returns_true():
-    from memory.memory_pipeline import SemanticMemory
+    from shisi.memory.legacy.memory_pipeline import SemanticMemory
     vm = FakeVectorMemory()
     vm.store_text_sync = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("vector fail"))  # type: ignore[method-assign]
     sm = FakeStructuredMemory()
@@ -622,7 +641,7 @@ def test_semantic_memory_add_fact_vector_exception_still_returns_true():
 
 
 def test_episodic_memory_store_episode_vector_exception_returns_empty():
-    from memory.memory_pipeline import EpisodicMemory
+    from shisi.memory.legacy.memory_pipeline import EpisodicMemory
     vm = FakeVectorMemory()
     vm.store_text_sync = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("vector fail"))  # type: ignore[method-assign]
     em = EpisodicMemory(vm, FakeStructuredMemory())
@@ -635,7 +654,7 @@ def test_episodic_memory_store_episode_vector_exception_returns_empty():
 def test_mp_after_chat_late_night_emotion_boost():
     from unittest.mock import patch
     mp, vm, sm = _make_pipeline()
-    with patch("memory.memory_pipeline.datetime") as mock_dt:
+    with patch("shisi.memory.legacy.memory_pipeline.datetime") as mock_dt:
         mock_dt.now.return_value = datetime(2026, 1, 1, 2, 0, tzinfo=timezone.utc)
         mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
         result = mp.after_chat("我睡不着，有点难过", "抱抱你", emotion_tag="难过")

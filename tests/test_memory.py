@@ -1,5 +1,23 @@
+# TODO: shisi 后等效迁移
+#
+# 符号迁移表（shisi 暂无与原根 memory/ 模块 API 兼容的等价实现，保留原 import）：
+#   - memory.memory_pipeline.MemoryPipeline       → shisi.application.memory_service.ShisiMemoryService（仅包装，内部仍依赖根 memory/，且未透传内部属性如 _config/_forgetting_model/_chat_count_since_extract 等）
+#   - memory.memory_pipeline.WorkingMemory        → shisi 无等价类
+#   - memory.memory_pipeline.MemoryConfig         → shisi 无等价类
+#   - memory.memory_pipeline.ImportanceScorer     → shisi 无等价类
+#   - memory.memory_pipeline.ForgettingManager    → shisi 无等价类
+#   - memory.memory_pipeline.SemanticMemory       → shisi 无等价类
+#   - memory.conversation_summarizer.ConversationSummarizer → shisi 无等价类
+# 原因：shisi/memory/ 当前仅含 FavoriteManager / ForwardManager（收藏/转发），
+#       核心记忆管线（工作/情景/语义/遗忘/评分/摘要/事实抽取）尚未在 shisi 中实现等价类。
+#       等待后续迁移提供兼容 API 后再切换 import。
 """单元测试: 记忆管线 — 深度版"""
 import sys
+
+import pytest
+
+# 根目录 memory/ 已迁移到 shisi.memory.legacy/；根目录物理删除后本文件可继续运行。
+pytest.importorskip("shisi.memory.legacy", reason="根目录 memory/ 已迁移到 shisi/")
 
 sys.path.insert(0, ".")
 
@@ -9,41 +27,41 @@ sys.path.insert(0, ".")
 # ═══════════════════════════════════════════════════════════════
 
 def test_memory_pipeline_import():
-    from memory.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     assert MemoryPipeline is not None
 
 
 def test_memory_pipeline_has_after_chat():
-    from memory.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     assert hasattr(MemoryPipeline, "after_chat")
     assert callable(MemoryPipeline.after_chat)
 
 
 def test_memory_pipeline_has_retrieve_context():
-    from memory.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     assert hasattr(MemoryPipeline, "retrieve_context")
     assert callable(MemoryPipeline.retrieve_context)
 
 
 def test_memory_pipeline_has_start_session_on_working():
-    from memory.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     mp = MemoryPipeline()
     assert hasattr(mp.working, "start_session")
 
 
 def test_memory_pipeline_has_health_check():
-    from memory.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     assert hasattr(MemoryPipeline, "health_check")
     assert callable(MemoryPipeline.health_check)
 
 
 def test_memory_pipeline_has_session_id_property():
-    from memory.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     assert isinstance(getattr(MemoryPipeline, "session_id", None), property)
 
 
 def test_memory_pipeline_init_default():
-    from memory.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     mp = MemoryPipeline()
     assert mp is not None
     assert hasattr(mp, "working")
@@ -57,7 +75,7 @@ def test_memory_pipeline_init_default():
 
 
 def test_memory_pipeline_init_custom_params():
-    from memory.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     mp = MemoryPipeline(
         working_limit=50,
         retrieval_timeout=2.0,
@@ -71,13 +89,13 @@ def test_memory_pipeline_init_custom_params():
 
 
 def test_memory_pipeline_forgetting_model_invalid_fallback():
-    from memory.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     mp = MemoryPipeline(forgetting_model="invalid_model")
     assert mp._forgetting_model == "exponential"
 
 
 def test_memory_pipeline_after_chat_result_keys():
-    from memory.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     mp = MemoryPipeline()
     result = mp.after_chat("你好", "你好呀", emotion_tag="开心")
     expected_keys = {"stored_chat", "stored_vector", "facts_extracted",
@@ -86,7 +104,7 @@ def test_memory_pipeline_after_chat_result_keys():
 
 
 def test_memory_pipeline_retrieve_context_keys():
-    from memory.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     mp = MemoryPipeline()
     ctx = mp.retrieve_context("你好")
     expected_keys = {"working", "episodic", "semantic", "facts", "pending_events", "reflections"}
@@ -98,7 +116,7 @@ def test_memory_pipeline_retrieve_context_keys():
 # ═══════════════════════════════════════════════════════════════
 
 def test_working_memory_add_and_get_recent():
-    from memory.memory_pipeline import WorkingMemory
+    from shisi.memory.legacy.memory_pipeline import WorkingMemory
     wm = WorkingMemory(limit=100)
     wm.add("user", "hello", "happy", 0.5)
     wm.add("assistant", "hi", "happy", 0.5)
@@ -109,7 +127,7 @@ def test_working_memory_add_and_get_recent():
 
 
 def test_working_memory_get_recent_limit():
-    from memory.memory_pipeline import WorkingMemory
+    from shisi.memory.legacy.memory_pipeline import WorkingMemory
     wm = WorkingMemory(limit=100)
     for i in range(10):
         wm.add("user", f"msg_{i}")
@@ -119,7 +137,7 @@ def test_working_memory_get_recent_limit():
 
 
 def test_working_memory_should_archive():
-    from memory.memory_pipeline import WorkingMemory
+    from shisi.memory.legacy.memory_pipeline import WorkingMemory
     wm = WorkingMemory(limit=100)
     for i in range(20):
         wm.add("user", f"msg_{i}")
@@ -128,7 +146,7 @@ def test_working_memory_should_archive():
 
 
 def test_working_memory_clear():
-    from memory.memory_pipeline import WorkingMemory
+    from shisi.memory.legacy.memory_pipeline import WorkingMemory
     wm = WorkingMemory(limit=100)
     wm.add("user", "hello")
     wm.clear()
@@ -136,7 +154,7 @@ def test_working_memory_clear():
 
 
 def test_working_memory_start_session():
-    from memory.memory_pipeline import WorkingMemory
+    from shisi.memory.legacy.memory_pipeline import WorkingMemory
     wm = WorkingMemory(limit=100)
     wm.add("user", "hello")
     wm.start_session(session_id="test_session")
@@ -145,7 +163,7 @@ def test_working_memory_start_session():
 
 
 def test_working_memory_count():
-    from memory.memory_pipeline import WorkingMemory
+    from shisi.memory.legacy.memory_pipeline import WorkingMemory
     wm = WorkingMemory(limit=100)
     assert wm.count() == 0
     wm.add("user", "a")
@@ -154,7 +172,7 @@ def test_working_memory_count():
 
 
 def test_working_memory_deque_maxlen():
-    from memory.memory_pipeline import WorkingMemory
+    from shisi.memory.legacy.memory_pipeline import WorkingMemory
     wm = WorkingMemory(limit=5)
     for i in range(10):
         wm.add("user", f"msg_{i}")
@@ -162,14 +180,14 @@ def test_working_memory_deque_maxlen():
 
 
 def test_working_memory_session_id_auto():
-    from memory.memory_pipeline import WorkingMemory
+    from shisi.memory.legacy.memory_pipeline import WorkingMemory
     wm = WorkingMemory()
     sid = wm.session_id
     assert sid.startswith("session_")
 
 
 def test_working_memory_message_structure():
-    from memory.memory_pipeline import WorkingMemory
+    from shisi.memory.legacy.memory_pipeline import WorkingMemory
     wm = WorkingMemory(limit=100)
     wm.add("user", "hello", "happy", 0.8)
     msg = wm.get_recent(1)[0]
@@ -185,7 +203,7 @@ def test_working_memory_message_structure():
 
 
 def test_working_memory_get_for_archive():
-    from memory.memory_pipeline import WorkingMemory
+    from shisi.memory.legacy.memory_pipeline import WorkingMemory
     wm = WorkingMemory(limit=100)
     wm.add("user", "a")
     wm.add("assistant", "b")
@@ -198,7 +216,7 @@ def test_working_memory_get_for_archive():
 # ═══════════════════════════════════════════════════════════════
 
 def test_memory_config_defaults():
-    from memory.memory_pipeline import MemoryConfig
+    from shisi.memory.legacy.memory_pipeline import MemoryConfig
     cfg = MemoryConfig()
     assert cfg.working_limit == 20
     assert cfg.episodic_archive_trigger == 20
@@ -216,7 +234,7 @@ def test_memory_config_defaults():
 # ═══════════════════════════════════════════════════════════════
 
 def test_importance_scorer_basic():
-    from memory.memory_pipeline import ImportanceScorer
+    from shisi.memory.legacy.memory_pipeline import ImportanceScorer
     scorer = ImportanceScorer()
     score = scorer.score("我喜欢你", "")
     assert score > 0.3
@@ -224,7 +242,7 @@ def test_importance_scorer_basic():
 
 
 def test_importance_scorer_keyword_boost():
-    from memory.memory_pipeline import ImportanceScorer
+    from shisi.memory.legacy.memory_pipeline import ImportanceScorer
     scorer = ImportanceScorer()
     s1 = scorer.score("普通消息", "")
     s2 = scorer.score("记住这个生日", "")
@@ -232,7 +250,7 @@ def test_importance_scorer_keyword_boost():
 
 
 def test_importance_scorer_emotion_weight():
-    from memory.memory_pipeline import ImportanceScorer
+    from shisi.memory.legacy.memory_pipeline import ImportanceScorer
     scorer = ImportanceScorer()
     s1 = scorer.score("消息", "开心")
     s2 = scorer.score("消息", "生气")
@@ -240,19 +258,19 @@ def test_importance_scorer_emotion_weight():
 
 
 def test_importance_scorer_should_retain_high_importance():
-    from memory.memory_pipeline import ImportanceScorer
+    from shisi.memory.legacy.memory_pipeline import ImportanceScorer
     scorer = ImportanceScorer()
     assert scorer.should_retain(0.9, 100) is True
 
 
 def test_importance_scorer_should_retain_old_low():
-    from memory.memory_pipeline import ImportanceScorer
+    from shisi.memory.legacy.memory_pipeline import ImportanceScorer
     scorer = ImportanceScorer()
     assert scorer.should_retain(0.2, 60) is False
 
 
 def test_importance_scorer_should_retain_fresh():
-    from memory.memory_pipeline import ImportanceScorer
+    from shisi.memory.legacy.memory_pipeline import ImportanceScorer
     scorer = ImportanceScorer()
     assert scorer.should_retain(0.5, 0) is True
 
@@ -262,14 +280,14 @@ def test_importance_scorer_should_retain_fresh():
 # ═══════════════════════════════════════════════════════════════
 
 def test_forgetting_manager_retrieval_weight_fresh():
-    from memory.memory_pipeline import ForgettingManager
+    from shisi.memory.legacy.memory_pipeline import ForgettingManager
     fm = ForgettingManager()
     w = fm.retrieval_weight(0.5, 0)
     assert abs(w - 0.5) < 1e-6
 
 
 def test_forgetting_manager_retrieval_weight_decay():
-    from memory.memory_pipeline import ForgettingManager
+    from shisi.memory.legacy.memory_pipeline import ForgettingManager
     fm = ForgettingManager()
     w1 = fm.retrieval_weight(0.5, 1)
     w2 = fm.retrieval_weight(0.5, 10)
@@ -277,21 +295,21 @@ def test_forgetting_manager_retrieval_weight_decay():
 
 
 def test_forgetting_manager_high_importance_slow_decay():
-    from memory.memory_pipeline import ForgettingManager
+    from shisi.memory.legacy.memory_pipeline import ForgettingManager
     fm = ForgettingManager()
     w = fm.retrieval_weight(0.8, 30)
     assert w > 0.01
 
 
 def test_forgetting_manager_should_delete():
-    from memory.memory_pipeline import ForgettingManager
+    from shisi.memory.legacy.memory_pipeline import ForgettingManager
     fm = ForgettingManager()
     assert fm.should_delete(0.1, 100) is True
     assert fm.should_delete(0.9, 0) is False
 
 
 def test_forgetting_manager_weight_bounded():
-    from memory.memory_pipeline import ForgettingManager
+    from shisi.memory.legacy.memory_pipeline import ForgettingManager
     fm = ForgettingManager()
     for imp in [0.0, 0.5, 1.0]:
         for days in [0, 10, 100, 1000]:
@@ -304,22 +322,22 @@ def test_forgetting_manager_weight_bounded():
 # ═══════════════════════════════════════════════════════════════
 
 def test_conversation_summarizer_import():
-    from memory.conversation_summarizer import ConversationSummarizer
+    from shisi.memory.legacy.conversation_summarizer import ConversationSummarizer
     assert ConversationSummarizer is not None
 
 
 def test_conversation_summarizer_has_get_chat_context():
-    from memory.conversation_summarizer import ConversationSummarizer
+    from shisi.memory.legacy.conversation_summarizer import ConversationSummarizer
     assert hasattr(ConversationSummarizer, "get_chat_context")
 
 
 def test_conversation_summarizer_has_clear_cache():
-    from memory.conversation_summarizer import ConversationSummarizer
+    from shisi.memory.legacy.conversation_summarizer import ConversationSummarizer
     assert hasattr(ConversationSummarizer, "clear_cache")
 
 
 def test_conversation_summarizer_empty_messages():
-    from memory.conversation_summarizer import ConversationSummarizer
+    from shisi.memory.legacy.conversation_summarizer import ConversationSummarizer
     cs = ConversationSummarizer(llm_gateway=None)
     history, summary = cs.get_chat_context([])
     assert history == []
@@ -327,7 +345,7 @@ def test_conversation_summarizer_empty_messages():
 
 
 def test_conversation_summarizer_few_messages():
-    from memory.conversation_summarizer import ConversationSummarizer
+    from shisi.memory.legacy.conversation_summarizer import ConversationSummarizer
     cs = ConversationSummarizer(llm_gateway=None)
     msgs = [
         {"role": "user", "content": "你好"},
@@ -339,7 +357,7 @@ def test_conversation_summarizer_few_messages():
 
 
 def test_conversation_summarizer_init_attributes():
-    from memory.conversation_summarizer import ConversationSummarizer
+    from shisi.memory.legacy.conversation_summarizer import ConversationSummarizer
     cs = ConversationSummarizer(llm_gateway=None)
     assert hasattr(cs, "_cache")
     assert hasattr(cs, "_cache_boundary")
@@ -348,7 +366,7 @@ def test_conversation_summarizer_init_attributes():
 
 
 def test_conversation_summarizer_clear_cache_all():
-    from memory.conversation_summarizer import ConversationSummarizer
+    from shisi.memory.legacy.conversation_summarizer import ConversationSummarizer
     cs = ConversationSummarizer(llm_gateway=None)
     cs._cache["test:1"] = "summary"
     cs.clear_cache()
@@ -356,7 +374,7 @@ def test_conversation_summarizer_clear_cache_all():
 
 
 def test_conversation_summarizer_clear_cache_by_session():
-    from memory.conversation_summarizer import ConversationSummarizer
+    from shisi.memory.legacy.conversation_summarizer import ConversationSummarizer
     cs = ConversationSummarizer(llm_gateway=None)
     cs._cache["sess1:1"] = "a"
     cs._cache["sess2:1"] = "b"
@@ -370,7 +388,7 @@ def test_conversation_summarizer_clear_cache_by_session():
 # ═══════════════════════════════════════════════════════════════
 
 def test_semantic_memory_extract_facts():
-    from memory.memory_pipeline import SemanticMemory
+    from shisi.memory.legacy.memory_pipeline import SemanticMemory
     sm = SemanticMemory(None, None)
     facts = sm.extract_facts_from_message("我喜欢猫")
     assert len(facts) >= 1
@@ -378,7 +396,7 @@ def test_semantic_memory_extract_facts():
 
 
 def test_semantic_memory_extract_facts_identity():
-    from memory.memory_pipeline import SemanticMemory
+    from shisi.memory.legacy.memory_pipeline import SemanticMemory
     sm = SemanticMemory(None, None)
     facts = sm.extract_facts_from_message("我是学生")
     assert len(facts) >= 1
@@ -386,14 +404,14 @@ def test_semantic_memory_extract_facts_identity():
 
 
 def test_semantic_memory_extract_facts_no_match():
-    from memory.memory_pipeline import SemanticMemory
+    from shisi.memory.legacy.memory_pipeline import SemanticMemory
     sm = SemanticMemory(None, None)
     facts = sm.extract_facts_from_message("今天天气不错")
     assert facts == []
 
 
 def test_semantic_memory_extract_facts_attribute():
-    from memory.memory_pipeline import SemanticMemory
+    from shisi.memory.legacy.memory_pipeline import SemanticMemory
     sm = SemanticMemory(None, None)
     facts = sm.extract_facts_from_message("我的名字是小明")
     assert any(f["category"] == "attribute" for f in facts)

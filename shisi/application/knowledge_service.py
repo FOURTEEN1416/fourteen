@@ -41,7 +41,10 @@ class ShisiKnowledgeAdapter:
         tone_mimic=None,
         default_character_id: str = "default",
         query_timeout: float = _DEFAULT_QUERY_TIMEOUT,
+        use_legacy_rag: bool = False,
     ):
+        # 延迟 import：见模块顶部 TODO
+        # TODO: shisi/knowledge/rag.py 后续实现后，移除对根目录 rag_engine/ 的直接 import。
         self._service = knowledge_service or CharacterKnowledgeService(use_bm25=True)
         self._vm = vector_memory
         self._sm = structured_memory
@@ -50,6 +53,19 @@ class ShisiKnowledgeAdapter:
         self._default_character_id = default_character_id
         self._current_character_id = default_character_id
         self._query_timeout = query_timeout
+        # 可选：兼容 _should_use_shisi_rag=False 时的旧 RAGEngineV2 行为，
+        # 让 main.py 不必直接 import 根目录 rag_engine.rag_engine。
+        self._legacy_rag = None
+        self._use_legacy_rag = use_legacy_rag
+        if use_legacy_rag:
+            # 根目录 rag_engine/ 已物理删除，引用 shisi 自有 legacy 位置
+            from shisi.knowledge.legacy.rag_engine import RAGEngineV2
+            self._legacy_rag = RAGEngineV2(
+                vector_memory=vector_memory,
+                structured_memory=structured_memory,
+                semantic_memory=semantic_memory,
+                tone_mimic=tone_mimic,
+            )
 
     # ── 属性代理（保持与 RAGEngineV2 兼容）────────────────
 
@@ -93,6 +109,8 @@ class ShisiKnowledgeAdapter:
 
     def retrieve(self, query: str, top_k: int = 5) -> dict[str, Any]:
         """检索当前角色的知识，返回与 RAGEngineV2 兼容的字典。"""
+        if self._use_legacy_rag and self._legacy_rag is not None:
+            return self._legacy_rag.retrieve(query, top_k=top_k)
         result = self._service.search(self._current_character_id, query, top_k=top_k)
 
         results: list[dict[str, Any]] = []
@@ -144,17 +162,23 @@ class ShisiKnowledgeAdapter:
 
     def mark_dirty(self) -> None:
         """结构化记忆变更时调用；shisi 索引基于角色卡，此方法目前为空操作。"""
-        pass
+        if self._use_legacy_rag and self._legacy_rag is not None:
+            self._legacy_rag.mark_dirty()
 
     def validate_reply(self, reply: str) -> tuple[bool, str]:
         """回复校验；shisi 适配层暂不做幻觉检查，始终通过。"""
+        if self._use_legacy_rag and self._legacy_rag is not None:
+            return self._legacy_rag.validate_reply(reply)
         return True, ""
 
     def health_check(self) -> dict[str, Any]:
+        if self._use_legacy_rag and self._legacy_rag is not None:
+            return {**self._legacy_rag.health_check(), "use_shisi_rag": False, "use_legacy_rag": True}
         stats = self._service.get_stats(self._current_character_id)
         return {
             "available": True,
             "use_shisi_rag": True,
+            "use_legacy_rag": False,
             "character_id": self._current_character_id,
             "indexed": self._service.has_index(self._current_character_id),
             "bm25_available": True,

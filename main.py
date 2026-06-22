@@ -138,8 +138,6 @@ from api.session_manager import SessionManager  # noqa: E402
 from api.websocket_server import WebSocketServer  # noqa: E402
 from context.world_info_provider import WorldInfoProvider  # noqa: E402
 from llm_provider import get_llm  # noqa: E402
-from memory import StructuredMemory, VectorMemory  # noqa: E402
-from memory.memory_pipeline import MemoryPipeline  # noqa: E402
 from my_character.emotion_engine import EmotionEngine  # noqa: E402
 from my_character.tone_mimic import ToneMimic  # noqa: E402
 from observability.config_manager import ConfigManager  # noqa: E402
@@ -147,7 +145,6 @@ from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
 from observability.health import health_checker  # noqa: E402
 from observability.logging_setup import setup_logging  # noqa: E402
 from proactive.ase_engine import ASEEngine  # noqa: E402
-from rag_engine.rag_engine import RAGEngineV2  # noqa: E402
 from security.content_safety import ContentSafetyFilter  # noqa: E402
 from security.encryption import EncryptionManager  # noqa: E402
 from security.pii_anonymizer import PIIAnonymizer  # noqa: E402
@@ -445,32 +442,22 @@ class OptimizedOrchestrator:
                 chroma_path=str(project_root / "data" / "chroma_db")
             )
 
-            vector_memory = VectorMemory(chroma_path=str(project_root / "data" / "chroma_db"))
-            structured_memory = StructuredMemory(db_path=str(project_root / "data" / "sqlite.db"))
             memory_fusion = fusion_cfg.get("memory", {})
+            # Shisi 适配层是唯一对外接口；其内部按需懒加载 VectorMemory / StructuredMemory。
+            self.components["memory"] = ShisiMemoryService(
+                chroma_path=str(project_root / "data" / "chroma_db"),
+                db_path=str(project_root / "data" / "sqlite.db"),
+                llm_gateway=self.components["llm"],
+                working_limit=cfg.memory.working_memory_limit,
+                retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
+                forgetting_model=memory_fusion.get("forgetting_model", "exponential"),
+            )
             if _should_use_shisi_memory(fusion_cfg):
-                self.components["memory"] = ShisiMemoryService(
-                    structured_memory=structured_memory,
-                    vector_memory=vector_memory,
-                    llm_gateway=self.components["llm"],
-                    db_path=str(project_root / "data" / "sqlite.db"),
-                    working_limit=cfg.memory.working_memory_limit,
-                    retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
-                    forgetting_model=memory_fusion.get("forgetting_model", "exponential"),
-                )
                 logger.info("使用 shisi 记忆服务适配层 (ShisiMemoryService)")
             else:
-                self.components["memory"] = MemoryPipeline(
-                    structured_memory=structured_memory,
-                    vector_memory=vector_memory,
-                    llm_gateway=self.components["llm"],
-                    working_limit=cfg.memory.working_memory_limit,
-                    retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
-                    forgetting_model=memory_fusion.get("forgetting_model", "exponential"),
-                )
-                logger.info("使用原有记忆管线 (MemoryPipeline)")
-            self.components["vector_memory"] = vector_memory
-            self.components["structured_memory"] = structured_memory
+                logger.info("使用原有记忆管线 (经 ShisiMemoryService 包装的 MemoryPipeline)")
+            self.components["vector_memory"] = self.components["memory"].vector_memory
+            self.components["structured_memory"] = self.components["memory"].structured_memory
 
             ase_fusion = fusion_cfg.get("ase", {})
             try:
@@ -544,22 +531,18 @@ class OptimizedOrchestrator:
                 self.components["memory"], "structured_memory", None)
             rag_sem = getattr(self.components["memory"], "semantic", None)
 
+            # Shisi 适配层是唯一对外接口；use_legacy_rag=True 时内部委托给 RAGEngineV2。
+            self.components["rag"] = ShisiKnowledgeAdapter(
+                vector_memory=rag_vm,
+                structured_memory=rag_sm,
+                semantic_memory=rag_sem,
+                tone_mimic=self.components["tone"],
+                use_legacy_rag=not _should_use_shisi_rag(fusion_cfg),
+            )
             if _should_use_shisi_rag(fusion_cfg):
-                self.components["rag"] = ShisiKnowledgeAdapter(
-                    vector_memory=rag_vm,
-                    structured_memory=rag_sm,
-                    semantic_memory=rag_sem,
-                    tone_mimic=self.components["tone"],
-                )
                 logger.info("使用 shisi knowledge 适配层 (ShisiKnowledgeAdapter)")
             else:
-                self.components["rag"] = RAGEngineV2(
-                    vector_memory=rag_vm,
-                    structured_memory=rag_sm,
-                    semantic_memory=rag_sem,
-                    tone_mimic=self.components["tone"],
-                )
-                logger.info("使用原有 RAG 引擎 (RAGEngineV2)")
+                logger.info("使用原有 RAG 引擎 (经 ShisiKnowledgeAdapter 包装的 RAGEngineV2)")
 
             # ── 世界信息动态注入 ──
             self.components["world_info"] = WorldInfoProvider(
@@ -1815,30 +1798,21 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     logger.info("[6/12] 初始化记忆系统 (融合)...")
     forgetting_model = memory_fusion.get("forgetting_model", "exponential")
 
-    vector_memory = VectorMemory(chroma_path=str(project_root / "data" / "chroma_db"))
-    structured_memory = StructuredMemory(db_path=str(project_root / "data" / "sqlite.db"))
-
+    # Shisi 适配层是唯一对外接口；其内部按需懒加载 VectorMemory / StructuredMemory。
+    memory_pipeline = ShisiMemoryService(
+        chroma_path=str(project_root / "data" / "chroma_db"),
+        db_path=str(project_root / "data" / "sqlite.db"),
+        llm_gateway=llm,
+        working_limit=cfg.memory.working_memory_limit,
+        retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
+        forgetting_model=forgetting_model,
+    )
+    vector_memory = memory_pipeline.vector_memory
+    structured_memory = memory_pipeline.structured_memory
     if _should_use_shisi_memory(fusion_cfg):
-        memory_pipeline = ShisiMemoryService(
-            structured_memory=structured_memory,
-            vector_memory=vector_memory,
-            llm_gateway=llm,
-            db_path=str(project_root / "data" / "sqlite.db"),
-            working_limit=cfg.memory.working_memory_limit,
-            retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
-            forgetting_model=forgetting_model,
-        )
         logger.info("      使用 shisi 记忆服务适配层 (ShisiMemoryService)")
     else:
-        memory_pipeline = MemoryPipeline(
-            structured_memory=structured_memory,
-            vector_memory=vector_memory,
-            llm_gateway=llm,
-            working_limit=cfg.memory.working_memory_limit,
-            retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
-            forgetting_model=forgetting_model,
-        )
-        logger.info("      使用原有记忆管线 (MemoryPipeline)")
+        logger.info("      使用原有记忆管线 (经 ShisiMemoryService 包装的 MemoryPipeline)")
 
     logger.info("[7/12] 初始化工具系统...")
     tool_registry = ToolRegistry()
@@ -1857,22 +1831,18 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     logger.info("      已注册 %d 个工具", len(tool_registry.tool_names))
 
     logger.info("[8/12] 初始化RAG引擎V2...")
+    # Shisi 适配层是唯一对外接口；use_legacy_rag=True 时内部委托给 RAGEngineV2。
+    rag_engine = ShisiKnowledgeAdapter(
+        vector_memory=vector_memory,
+        structured_memory=structured_memory,
+        semantic_memory=memory_pipeline.semantic,
+        tone_mimic=tone_mimic,
+        use_legacy_rag=not _should_use_shisi_rag(fusion_cfg),
+    )
     if _should_use_shisi_rag(fusion_cfg):
-        rag_engine = ShisiKnowledgeAdapter(
-            vector_memory=vector_memory,
-            structured_memory=structured_memory,
-            semantic_memory=memory_pipeline.semantic,
-            tone_mimic=tone_mimic,
-        )
         logger.info("      使用 shisi knowledge 适配层 (ShisiKnowledgeAdapter)")
     else:
-        rag_engine = RAGEngineV2(
-            vector_memory=vector_memory,
-            structured_memory=structured_memory,
-            semantic_memory=memory_pipeline.semantic,
-            tone_mimic=tone_mimic,
-        )
-        logger.info("      使用原有 RAG 引擎 (RAGEngineV2)")
+        logger.info("      使用原有 RAG 引擎 (经 ShisiKnowledgeAdapter 包装的 RAGEngineV2)")
 
     logger.info("[9/12] 初始化主动消息 (融合)...")
     ase_frequency_mode = ase_fusion.get("frequency_mode", "adaptive")

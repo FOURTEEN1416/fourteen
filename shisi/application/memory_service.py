@@ -1,9 +1,9 @@
 """Shisi 记忆服务适配层 — 兼容 MemoryPipeline 接口。
 
-当前 shisi/memory 提供收藏/转发增强能力，核心记忆存储/检索仍复用
-memory/ 中的 VectorMemory、StructuredMemory 与 MemoryPipeline。
+shisi/memory 提供收藏/转发增强能力（FavoriteManager/ForwardManager），
+核心记忆存储/检索复用 shisi/memory/legacy/（迁移自原根 memory/）。
 适配层统一暴露 OptimizedOrchestrator 所需的方法，使 main.py 可以通过
-配置开关在 root MemoryPipeline 与 shisi 记忆服务之间切换。
+配置开关在 shisi 适配层与 _legacy 兼容行为之间切换。
 """
 
 from __future__ import annotations
@@ -12,11 +12,26 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from memory.memory_pipeline import MemoryPipeline
+# shisi 自有 pipeline（迁移自原根 memory.memory_pipeline）。
+# 根目录 memory/ 已物理删除，所有引用统一指向 shisi 自有位置。
+# StructuredMemory / VectorMemory 改为在 _build_default_memory_backends 内 lazy import，
+# 避免顶级导入未使用触发 ruff F401。
 from shisi.memory.favorite_manager import FavoriteManager
 from shisi.memory.forward_manager import ForwardManager
+from shisi.memory.legacy.memory_pipeline import MemoryPipeline  # noqa: E402
 
 logger = logging.getLogger("shisi.application.memory_service")
+
+
+def _build_default_memory_backends(chroma_path, db_path, structured_memory, vector_memory):
+    """Build defaults."""
+    if vector_memory is None and chroma_path is not None:
+        from memory.vector_memory import VectorMemory  # TODO: shisi/memory/pipeline.py
+        vector_memory = VectorMemory(chroma_path=str(chroma_path))
+    if structured_memory is None and db_path is not None:
+        from memory.structured_memory import StructuredMemory  # TODO: shisi/memory/pipeline.py
+        structured_memory = StructuredMemory(db_path=str(db_path))
+    return structured_memory, vector_memory
 
 
 class ShisiMemoryService:
@@ -36,6 +51,7 @@ class ShisiMemoryService:
         emotion_engine=None,
         llm_gateway=None,
         db_path: str | Path | None = None,
+        chroma_path: str | Path | None = None,
         working_limit: int = 20,
         retrieval_timeout: float = 1.0,
         forgetting_model: str = "exponential",
@@ -44,6 +60,12 @@ class ShisiMemoryService:
         conflict_similarity_threshold: float = 0.3,
         fact_extract_interval: int = 5,
     ):
+        structured_memory, vector_memory = _build_default_memory_backends(
+            chroma_path=chroma_path,
+            db_path=db_path,
+            structured_memory=structured_memory,
+            vector_memory=vector_memory,
+        )
         self._pipeline = MemoryPipeline(
             vector_memory=vector_memory,
             structured_memory=structured_memory,
