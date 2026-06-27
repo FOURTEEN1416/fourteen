@@ -9,6 +9,8 @@ import ToastContainer from './components/common/Toast'
 import ErrorBoundary from './components/common/ErrorBoundary'
 import AnimatedPage from './components/shared/AnimatedPage'
 import ScrollProgress from './components/shared/ScrollProgress'
+import { ParticleCanvas } from './components/common/ParticleCanvas'
+import { CustomCursor } from './components/common/CustomCursor'
 import UserWorkspace from './pages/UserWorkspace'
 import SystemSettingsLayout from './pages/SystemSettingsLayout'
 import CreateRole from './pages/CreateRole'
@@ -32,6 +34,7 @@ const SettingsVoice = lazy(() => import('./pages/SettingsVoice'))
 const SettingsSecurity = lazy(() => import('./pages/SettingsSecurity'))
 const ToolsDashboard = lazy(() => import('./pages/ToolsDashboard'))
 const SettingsLogs = lazy(() => import('./pages/SettingsLogs'))
+const RolesPage = lazy(() => import('./pages/RolesPage'))
 
 function PageLoadingSkeleton() {
   return (
@@ -93,6 +96,7 @@ function ProtectedLayout() {
     <AuthGuard>
       <div className="flex h-screen overflow-hidden bg-dynamic bg-orbs">
         <ScrollProgress />
+        <ParticleCanvas />
         <Sidebar />
         <main className="flex-1 flex flex-col min-w-0 pt-5 pb-24 lg:pb-6 overflow-y-auto">
           <Breadcrumb />
@@ -100,6 +104,7 @@ function ProtectedLayout() {
         </main>
         <MobileNav />
         <ToastContainer />
+        <CustomCursor />
       </div>
     </AuthGuard>
   )
@@ -121,6 +126,7 @@ export default function App() {
 
           {/* Global Level */}
           <Route path="/wechat" element={<AnimatedSuspense><WeChatPage /></AnimatedSuspense>} />
+          <Route path="/roles" element={<AnimatedSuspense><RolesPage /></AnimatedSuspense>} />
           <Route path="/users" element={<AnimatedSuspense><UsersPage /></AnimatedSuspense>} />
           <Route path="/bindings/:wxid" element={<AnimatedSuspense><BindingDetailPage /></AnimatedSuspense>} />
 

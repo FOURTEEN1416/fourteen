@@ -1,0 +1,1744 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>唯一的你——十四 — 完整前端改造蓝图（17 页全覆盖）</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ═══════════════ 改造点2：三色混合马卡龙配色系统（替换原宣纸墨韵）═══════════════ */
+  :root {
+    /* 马卡龙三色（浅粉/蓝/绿） */
+    --macaron-pink: #F8B4D9;
+    --macaron-pink-light: #FCE7F3;
+    --macaron-pink-deep: #EC4899;
+    --macaron-blue: #B4D9F8;
+    --macaron-blue-light: #DBEAFE;
+    --macaron-blue-deep: #3B82F6;
+    --macaron-green: #B4F8D9;
+    --macaron-green-light: #D1FAE5;
+    --macaron-green-deep: #10B981;
+
+    /* 语义色映射（保持原类名兼容，便于改造时 1:1 替换） */
+    --color-primary-50: #FCE7F3;
+    --color-primary-100: #FBCFE8;
+    --color-primary-200: #F9A8D4;
+    --color-primary-300: #F472B6;
+    --color-primary-400: #F8B4D9;
+    --color-primary-500: #EC4899;
+    --color-primary-600: #DB2777;
+    --color-primary-700: #BE185D;
+    --color-accent-50: #DBEAFE;
+    --color-accent-100: #BFDBFE;
+    --color-accent-200: #93C5FD;
+    --color-accent-300: #60A5FA;
+    --color-accent-400: #B4D9F8;
+    --color-accent-500: #3B82F6;
+    --color-accent-600: #2563EB;
+    --color-accent-700: #1D4ED8;
+    --color-bg-deep: #FDF2F8;
+    --color-bg-surface: rgba(255,255,255,0.7);
+    --color-bg-card: rgba(255,255,255,0.55);
+    --color-bg-elevated: rgba(255,255,255,0.4);
+    --color-bg-hover: rgba(255,255,255,0.3);
+    --color-text-primary: #1F2937;
+    --color-text-secondary: #4B5563;
+    --color-text-muted: #6B7280;
+    --color-text-dim: #9CA3AF;
+    --cursor-color: #7DD3FC;
+  }
+
+  * { cursor: none !important; }
+
+  body {
+    font-family: 'Noto Sans SC', system-ui, sans-serif;
+    background: linear-gradient(135deg, #FDF2F8 0%, #EFF6FF 33%, #ECFDF5 66%, #FDF2F8 100%);
+    background-size: 400% 400%;
+    animation: gradientShift 15s ease infinite;
+    min-height: 100vh;
+    overflow-x: hidden;
+    color: var(--color-text-primary);
+  }
+  @keyframes gradientShift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  /* 粒子背景 */
+  #particleCanvas {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 0; pointer-events: none;
+  }
+
+  /* 毛玻璃（替换原 glass-card / paper-card） */
+  .glass-card, .paper-card {
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
+  }
+  .glass-card-hover, .paper-card-hover {
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .glass-card-hover:hover, .paper-card-hover:hover {
+    transform: translateY(-4px) scale(1.02);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.1);
+  }
+  .glass-pink {
+    background: rgba(252, 231, 243, 0.4);
+    backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(248, 180, 217, 0.3);
+  }
+  .glass-blue {
+    background: rgba(219, 234, 254, 0.4);
+    backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(180, 217, 248, 0.3);
+  }
+  .glass-green {
+    background: rgba(209, 250, 229, 0.4);
+    backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(180, 248, 217, 0.3);
+  }
+  .bg-dynamic {
+    background: linear-gradient(135deg, #FDF2F8 0%, #EFF6FF 50%, #ECFDF5 100%);
+  }
+
+  /* 鼠标动效（mimo.xiaomi.com 风格） */
+  .cursor-ring {
+    position: fixed; width: 32px; height: 32px;
+    border: 2px solid var(--cursor-color); border-radius: 50%;
+    pointer-events: none; z-index: 9999;
+    transition: width 0.25s cubic-bezier(0.34,1.56,0.64,1), height 0.25s cubic-bezier(0.34,1.56,0.64,1), border-color 0.3s, background 0.3s;
+    transform: translate(-50%, -50%);
+  }
+  .cursor-ring.hovering { width: 56px; height: 56px; background: var(--cursor-hover-bg, rgba(125,211,252,0.12)); }
+  .cursor-ring.hovering-pink { --cursor-hover-bg: rgba(248,180,217,0.15); border-color: var(--macaron-pink); }
+  .cursor-ring.hovering-blue { --cursor-hover-bg: rgba(180,217,248,0.15); border-color: var(--macaron-blue-deep); }
+  .cursor-ring.hovering-green { --cursor-hover-bg: rgba(180,248,217,0.15); border-color: var(--macaron-green-deep); }
+  .cursor-dot {
+    position: fixed; width: 8px; height: 8px;
+    background: var(--cursor-color); border-radius: 50%;
+    pointer-events: none; z-index: 10000;
+    transform: translate(-50%, -50%);
+    transition: background 0.3s;
+  }
+
+  /* 组件动效（增强） */
+  .interactive { transition: all 0.3s cubic-bezier(0.34,1.56,0.64,1); }
+  .interactive:hover { transform: translateY(-2px) scale(1.02); }
+  .card-hover { transition: all 0.4s cubic-bezier(0.34,1.56,0.64,1); }
+  .card-hover:hover { transform: translateY(-6px) scale(1.03); box-shadow: 0 20px 40px rgba(0,0,0,0.1); }
+
+  .btn-macaron {
+    background: linear-gradient(135deg, var(--macaron-pink), var(--macaron-blue), var(--macaron-green));
+    background-size: 200% 200%; color: white;
+    transition: all 0.4s ease; animation: btnGradient 3s ease infinite;
+  }
+  @keyframes btnGradient { 0%,100%{background-position:0% 50%} 50%{background-position:100% 50%} }
+  .btn-macaron:hover { transform: translateY(-2px) scale(1.05); box-shadow: 0 12px 24px rgba(236,72,153,0.25); }
+  .btn-macaron:active { transform: scale(0.98); }
+
+  /* 导航项 */
+  .nav-item { transition: all 0.3s; position: relative; overflow: hidden; }
+  .nav-item::before {
+    content: ''; position: absolute; left: 0; top: 0; width: 3px; height: 100%;
+    background: linear-gradient(180deg, var(--macaron-pink), var(--macaron-blue));
+    transform: scaleY(0); transition: transform 0.3s;
+  }
+  .nav-item:hover::before { transform: scaleY(1); }
+  .nav-item.active { background: linear-gradient(135deg, rgba(248,180,217,0.15), rgba(180,217,248,0.15)); }
+  .nav-item.active::before { transform: scaleY(1); }
+
+  /* 标签 */
+  .tag-pink { background: rgba(248,180,217,0.2); color: var(--macaron-pink-deep); }
+  .tag-blue { background: rgba(180,217,248,0.2); color: var(--macaron-blue-deep); }
+  .tag-green { background: rgba(180,248,217,0.2); color: var(--macaron-green-deep); }
+
+  /* 动画 */
+  @keyframes pulse-ring {
+    0% { box-shadow: 0 0 0 0 rgba(248,180,217,0.4); }
+    70% { box-shadow: 0 0 0 12px rgba(248,180,217,0); }
+    100% { box-shadow: 0 0 0 0 rgba(248,180,217,0); }
+  }
+  .pulse-ring { animation: pulse-ring 2s infinite; }
+  @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+  .float { animation: float 4s ease-in-out infinite; }
+
+  /* 页面切换（堆叠式：所有 .page 绝对定位，active 的显示在顶层） */
+  .page { display: none; }
+  .page.active { display: block; animation: pageIn 0.4s cubic-bezier(0.34,1.56,0.64,1); }
+  @keyframes pageIn { from{opacity:0;transform:translateY(12px) scale(0.99)} to{opacity:1;transform:translateY(0) scale(1)} }
+
+  /* 方式选择卡片选中态 */
+  .method-card { transition: all 0.4s cubic-bezier(0.34,1.56,0.64,1); border: 2px solid transparent; }
+  .method-card:hover { transform: translateY(-4px) scale(1.03); }
+  .method-card.selected { border-color: var(--macaron-pink-deep); box-shadow: 0 8px 24px rgba(236,72,153,0.2); }
+  .method-card.selected .method-icon { transform: scale(1.15) rotate(-5deg); }
+  .method-icon { transition: transform 0.4s cubic-bezier(0.34,1.56,0.64,1); }
+
+  /* 抽屉式折叠（用户/角色组） */
+  .drawer {
+    max-height: 500px;
+    overflow: hidden;
+    transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease;
+    opacity: 1;
+  }
+  .drawer.collapsed {
+    max-height: 0;
+    opacity: 0;
+  }
+  .drawer-arrow.rotated {
+    transform: rotate(-90deg);
+  }
+
+  /* 滚动条 */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 2px; }
+
+  /* Toggle 开关（替换原 primary-400） */
+  .toggle { transition: all 0.3s; }
+  .toggle.on { background: linear-gradient(135deg, var(--macaron-pink), var(--macaron-blue)); }
+
+  /* 角色卡 */
+  .role-card { transition: all 0.4s cubic-bezier(0.34,1.56,0.64,1); }
+  .role-card:hover { transform: translateY(-8px) scale(1.04); box-shadow: 0 24px 48px rgba(0,0,0,0.12); }
+
+  /* Section 标题竖线（替换原 primary-400） */
+  .section-bar { width: 4px; height: 16px; border-radius: 2px; background: linear-gradient(180deg, var(--macaron-pink), var(--macaron-blue)); }
+
+  /* Tab 栏选中态（替换原 primary-700） */
+  .tab-active { background: white; color: var(--macaron-pink-deep); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+
+  /* 输入框 focus 态（替换原 primary-400） */
+  .input-macaron:focus { border-color: var(--macaron-pink); box-shadow: 0 0 0 3px rgba(248,180,217,0.2); outline: none; }
+
+  /* 顶部导航切换器（公开页 vs 受保护页） */
+  .layout-switcher { position: fixed; top: 12px; right: 12px; z-index: 10001; }
+</style>
+</head>
+<body>
+
+<canvas id="particleCanvas"></canvas>
+<div class="cursor-ring" id="cursorRing"></div>
+<div class="cursor-dot" id="cursorDot"></div>
+
+<!-- 顶部页面切换器（仅用于蓝图预览，实际改造时移除） -->
+<div class="layout-switcher glass-card rounded-full px-3 py-2 flex items-center gap-2 text-xs">
+  <span class="text-gray-400">页面：</span>
+  <select id="pageSwitcher" class="bg-transparent text-gray-700 text-xs focus:outline-none" onchange="switchPage(this.value)">
+    <optgroup label="公开页面">
+      <option value="login">登录 / 注册</option>
+      <option value="demo">Demo 对话页</option>
+      <option value="notfound">404 页面</option>
+    </optgroup>
+    <optgroup label="微信接入">
+      <option value="wechat">微信控制台</option>
+      <option value="roles">角色配置页面（新增）</option>
+    </optgroup>
+    <optgroup label="用户/角色">
+      <option value="users">用户列表（我的微信）</option>
+      <option value="binding">绑定详情</option>
+      <option value="workspace">用户工作区</option>
+      <option value="create-role">创建角色</option>
+      <option value="role-settings">角色设置（6 Tab）</option>
+      <option value="status">状态中心</option>
+    </optgroup>
+    <optgroup label="系统设置">
+      <option value="llm">LLM 配置</option>
+      <option value="voice">语音引擎</option>
+      <option value="tools">工具仪表盘</option>
+      <option value="admin-users">用户管理（admin）</option>
+      <option value="security">安全</option>
+      <option value="logs">日志（admin）</option>
+    </optgroup>
+  </select>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════════
+     公开页面（无侧边栏）：登录、Demo、404
+════════════════════════════════════════════════════════════════════════════ -->
+
+<!-- ─── 页面：登录 / 注册（保持原布局，只换配色） ─── -->
+<div class="page" id="page-login">
+  <div class="min-h-screen flex items-center justify-center">
+    <div class="w-full max-w-sm mx-4">
+      <div class="text-center mb-8">
+        <h1 class="text-3xl font-bold bg-gradient-to-r from-pink-500 via-blue-500 to-green-500 bg-clip-text text-transparent">唯一的你——十四</h1>
+        <p class="text-sm text-gray-400 mt-1">登录管理控制台</p>
+      </div>
+      <form class="glass-card rounded-2xl p-6 space-y-4">
+        <div class="flex gap-2 p-1 glass-card rounded-xl">
+          <button type="button" class="flex-1 tab-active rounded-lg py-2 text-sm font-medium" data-hover="pink">登录</button>
+          <button type="button" class="flex-1 text-gray-500 rounded-lg py-2 text-sm" data-hover="blue">注册</button>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">邮箱或用户名</label>
+          <input type="text" class="input-macaron w-full glass-card rounded-lg px-3 py-2.5 text-sm" placeholder="admin" data-hover="pink" />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">密码</label>
+          <input type="password" class="input-macaron w-full glass-card rounded-lg px-3 py-2.5 text-sm" placeholder="••••••••" data-hover="pink" />
+        </div>
+        <button type="button" class="btn-macaron w-full rounded-lg py-2.5 text-sm font-medium" data-hover="pink">登录</button>
+        <div class="text-center text-xs text-gray-400">
+          <a class="hover:text-pink-500" data-hover="pink">忘记密码？</a>
+          <span class="mx-2">·</span>
+          <a class="hover:text-blue-500" data-hover="blue">注册新账户</a>
+        </div>
+        <div class="border-t border-white/30 pt-3 text-center">
+          <a class="text-xs text-gray-500 hover:text-green-500" data-hover="green">→ Demo 体验入口</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ─── 页面：Demo 对话页（保持原布局，只换配色） ─── -->
+<div class="page" id="page-demo">
+  <div class="h-screen flex flex-col">
+    <!-- Header -->
+    <div class="shrink-0 px-6 py-4 border-b border-white/30 glass-card flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white text-sm font-bold">我</div>
+        <div>
+          <div class="text-sm font-semibold text-gray-800">唯一的你——十四</div>
+          <div class="text-[10px] text-gray-400">有记忆的对话对象</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 text-xs text-gray-500">
+          <span class="w-2 h-2 rounded-full bg-pink-400"></span>
+          <span>情绪：温柔</span>
+          <span class="text-gray-300">·</span>
+          <span>亲密度：初识</span>
+        </div>
+        <button class="glass-card interactive rounded-lg px-3 py-1.5 text-xs text-gray-600" data-hover="blue">🧠 我记得</button>
+        <button class="glass-card interactive rounded-lg px-3 py-1.5 text-xs text-gray-600" data-hover="pink">退出</button>
+      </div>
+    </div>
+    <!-- Messages -->
+    <div class="flex-1 overflow-y-auto px-4 py-6">
+      <div class="max-w-3xl mx-auto space-y-4">
+        <!-- AI 消息 -->
+        <div class="flex gap-3">
+          <div class="w-8 h-8 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white text-xs font-bold shrink-0">我</div>
+          <div class="glass-card rounded-2xl rounded-tl-sm px-4 py-3 max-w-[80%]">
+            <p class="text-sm text-gray-700">你好，今天过得怎么样？我刚刚整理了一下我们之前的对话，发现你最近常提到工作上的事。</p>
+            <div class="text-[10px] text-gray-400 mt-1">12:34</div>
+          </div>
+        </div>
+        <!-- 用户消息 -->
+        <div class="flex gap-3 justify-end">
+          <div class="bg-gradient-to-br from-pink-500 to-rose-500 text-white rounded-2xl rounded-tr-sm px-4 py-3 max-w-[80%]">
+            <p class="text-sm">是有点累，但能和你聊聊就好了</p>
+            <div class="text-[10px] text-pink-100 mt-1">12:35</div>
+          </div>
+          <div class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-cyan-400 flex items-center justify-center text-white text-xs font-bold shrink-0">你</div>
+        </div>
+        <!-- Typing -->
+        <div class="flex gap-3">
+          <div class="w-8 h-8 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white text-xs font-bold shrink-0">我</div>
+          <div class="glass-card rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce" style="animation-delay:0.15s"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce" style="animation-delay:0.3s"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Input -->
+    <div class="shrink-0 px-4 py-4 border-t border-white/30 glass-card">
+      <div class="max-w-3xl mx-auto flex items-end gap-3">
+        <textarea placeholder="想说什么…" rows="1" class="input-macaron flex-1 glass-card rounded-2xl px-4 py-3 text-sm resize-none" data-hover="pink"></textarea>
+        <button class="w-12 h-12 rounded-2xl btn-macaron flex items-center justify-center" data-hover="pink">
+          <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+      <p class="text-center text-[10px] text-gray-400 mt-2">Demo 体验 · 对话仅用于展示记忆与情感能力 · Enter 发送 / Shift+Enter 换行</p>
+    </div>
+  </div>
+</div>
+
+<!-- ─── 页面：404（保持原布局，只换配色） ─── -->
+<div class="page" id="page-notfound">
+  <div class="min-h-screen flex items-center justify-center p-6">
+    <div class="text-center">
+      <div class="w-16 h-16 mx-auto mb-4 rounded-2xl glass-card flex items-center justify-center">
+        <span class="text-3xl">🔍</span>
+      </div>
+      <h1 class="text-lg font-semibold text-gray-600 mb-1">页面未找到</h1>
+      <p class="text-sm text-gray-400 mb-6">你访问的页面不存在或已被移除</p>
+      <button class="btn-macaron rounded-lg px-6 py-2 text-sm font-medium" data-hover="pink">返回仪表盘</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════════════════
+     受保护页面（带侧边栏）
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="protectedLayout" style="display:none;">
+<div class="relative z-10 flex h-screen overflow-hidden">
+
+  <!-- ═══════════════ 改造点7：侧边栏新结构 ═══════════════ -->
+  <aside class="hidden lg:flex flex-col shrink-0 w-52 glass-card border-r border-white/30">
+    <!-- Header -->
+    <div class="flex items-center h-14 border-b border-white/30 px-4 justify-between">
+      <span class="text-sm font-semibold bg-gradient-to-r from-pink-500 via-blue-500 to-green-500 bg-clip-text text-transparent">唯一的你——十四</span>
+      <button class="text-gray-400 hover:text-gray-600" data-hover="blue">◀</button>
+    </div>
+    <!-- Nav -->
+    <nav class="flex-1 overflow-y-auto py-3 space-y-3">
+      <!-- 微信接入组（含新增"角色配置页面"） -->
+      <div>
+        <div class="px-4 py-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">微信接入</div>
+        <div class="space-y-0.5 px-1.5">
+          <a class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer" data-page="wechat" data-hover="blue">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>微信控制台</span>
+          </a>
+          <a class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer" data-page="roles" data-hover="blue">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a4 4 0 0 0-3-3.87M9 20H4v-2a4 4 0 0 1 3-3.87m6-2a4 4 0 1 0-4-4 4 4 0 0 0 4 4z"/></svg>
+            <span>角色配置页面</span>
+            <span class="ml-auto text-[9px] tag-pink rounded px-1">新</span>
+          </a>
+        </div>
+      </div>
+      <!-- 用户/角色组（抽屉式可折叠，位于微信接入和系统设置之间） -->
+      <div>
+        <button type="button" class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 w-full cursor-pointer" data-hover="blue" onclick="toggleDrawer('userRoleDrawer', this)">
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM12 14a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7z"/></svg>
+          <span>用户/角色</span>
+          <svg class="w-3 h-3 ml-auto transition-transform drawer-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div class="drawer space-y-0.5 px-1.5 mt-0.5" id="userRoleDrawer">
+          <a class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer" data-page="users" data-hover="blue">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 4h14v16H5zM12 18h.01"/></svg>
+            <span>我的微信</span>
+          </a>
+          <a class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer" data-page="binding" data-hover="blue">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            <span>绑定详情</span>
+          </a>
+          <a class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer" data-page="workspace" data-hover="blue">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12l9-9 9 9M5 10v10h14V10"/></svg>
+            <span>用户工作区</span>
+          </a>
+          <a class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer" data-page="create-role" data-hover="blue">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>
+            <span>创建角色</span>
+          </a>
+          <a class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer" data-page="role-settings" data-hover="blue">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>角色设置</span>
+          </a>
+          <a class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer" data-page="status" data-hover="blue">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3v18h18M9 17V9M15 17V5M21 17v-3"/></svg>
+            <span>状态中心</span>
+          </a>
+        </div>
+      </div>
+      <!-- 系统设置组（用户管理和日志仅 admin，放到工具仪表盘和安全之间） -->
+      <div>
+        <div class="px-4 py-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">系统设置</div>
+        <div class="space-y-0.5 px-1.5">
+          <a class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer" data-page="llm" data-hover="green">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4h16v16H4zM9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg>
+            <span>LLM 配置</span>
+          </a>
+          <a class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer" data-page="voice" data-hover="green">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3zM19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
+            <span>语音引擎</span>
+          </a>
+          <a class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer" data-page="tools" data-hover="green">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            <span>工具仪表盘</span>
+          </a>
+          <a class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer" data-page="admin-users" data-hover="pink">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a4 4 0 0 0-3-3.87M9 20H4v-2a4 4 0 0 1 3-3.87m6-2a4 4 0 1 0-4-4 4 4 0 0 0 4 4z"/></svg>
+            <span>用户管理</span>
+            <span class="ml-auto text-[9px] tag-pink rounded px-1">admin</span>
+          </a>
+          <a class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer" data-page="security" data-hover="pink">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM12 8v4M12 16h.01"/></svg>
+            <span>安全</span>
+          </a>
+          <a class="nav-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer" data-page="logs" data-hover="pink">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8"/></svg>
+            <span>日志</span>
+            <span class="ml-auto text-[9px] tag-pink rounded px-1">admin</span>
+          </a>
+        </div>
+      </div>
+    </nav>
+    <!-- 连接状态 -->
+    <div class="px-4 py-3 border-t border-white/30">
+      <div class="flex items-center gap-2 text-xs text-gray-400">
+        <div class="w-1.5 h-1.5 rounded-full bg-green-400 pulse-ring"></div>
+        已连接
+      </div>
+    </div>
+  </aside>
+
+  <!-- ═══════════════ 主内容区 ═══════════════ -->
+  <main class="flex-1 flex flex-col min-w-0 overflow-y-auto">
+
+    <!-- 顶部面包屑 -->
+    <div class="glass-card border-b border-white/30 px-6 py-3 flex items-center gap-2 text-sm">
+      <span class="text-gray-400" id="breadcrumb-group">微信接入</span>
+      <span class="text-gray-300">/</span>
+      <span class="text-gray-700 font-medium" id="breadcrumb">微信控制台</span>
+    </div>
+
+
+    <!-- ═══════════════ 页面：微信控制台（保持原布局，只换配色） ═══════════════ -->
+    <div class="page" id="page-wechat">
+      <div class="px-4 py-6 sm:px-6 lg:px-8">
+        <div class="mx-auto max-w-6xl">
+          <div class="mb-6 flex items-center justify-between">
+            <div>
+              <h1 class="text-xl font-bold text-gray-800">微信接入</h1>
+              <p class="mt-0.5 text-sm text-gray-400">扫码连接微信账号，管理实时状态</p>
+            </div>
+            <button class="btn-macaron rounded-lg px-4 py-2 text-sm font-medium" data-hover="pink">📱 扫码连接</button>
+          </div>
+          <!-- 状态横幅 -->
+          <div class="glass-card mb-5 rounded-xl p-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2">
+                  <span class="inline-flex h-2.5 w-2.5 rounded-full bg-green-400"></span>
+                  <span class="text-sm font-semibold text-gray-700">微信桥接 已连接</span>
+                </div>
+                <div class="flex items-center gap-3 text-xs text-gray-400">
+                  <span>⏱️ 运行 120 分 30 秒</span>
+                  <span>💬 今日 42 条消息</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="glass-card interactive rounded-lg px-3 py-1.5 text-xs text-gray-600" data-hover="blue">📱 二维码</button>
+              </div>
+            </div>
+          </div>
+          <!-- 统计 -->
+          <div class="flex gap-4 mb-5">
+            <div class="glass-blue rounded-xl px-4 py-2.5 flex items-center gap-2" data-hover="blue">
+              <span class="text-2xl font-bold text-blue-600">1</span>
+              <span class="text-xs font-medium text-gray-600">总连接</span>
+            </div>
+            <div class="glass-green rounded-xl px-4 py-2.5 flex items-center gap-2" data-hover="green">
+              <span class="text-2xl font-bold text-green-600">1</span>
+              <span class="text-xs font-medium text-gray-600">在线</span>
+            </div>
+            <div class="glass-card rounded-xl px-4 py-2.5 flex items-center gap-2" data-hover="pink">
+              <span class="text-2xl font-bold text-gray-400">0</span>
+              <span class="text-xs font-medium text-gray-600">离线</span>
+            </div>
+          </div>
+          <!-- 搜索 -->
+          <div class="glass-card mb-5 rounded-lg px-4 py-3">
+            <input type="text" placeholder="搜索 wxid 或别名..." class="w-full bg-transparent text-sm focus:outline-none" data-hover="pink" />
+          </div>
+          <!-- 连接列表 -->
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div class="glass-card-hover rounded-xl p-4" data-hover="blue">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white text-sm font-bold">张三</div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm font-semibold text-gray-800">张三</div>
+                  <div class="text-xs text-gray-400"><code class="rounded bg-gray-100 px-1 text-[10px]">wxid_zhangsan</code></div>
+                </div>
+              </div>
+              <div class="mt-3 flex items-center justify-between border-t border-white/30 pt-3">
+                <span class="text-xs text-gray-500">📱 未选角色</span>
+                <div class="flex gap-1">
+                  <button class="rounded-lg p-1.5 text-gray-300 hover:bg-pink-50 hover:text-pink-500" data-hover="pink">↗</button>
+                  <button class="rounded-lg p-1.5 text-gray-300 hover:bg-red-50 hover:text-red-500" data-hover="pink">🗑️</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════════════ 改造点6：角色配置页面（新增 — 方案B 非线性流程） ═══════════════ -->
+    <div class="page" id="page-roles">
+      <div class="px-4 py-6 sm:px-6 lg:px-8">
+        <div class="mx-auto max-w-7xl">
+          <div class="mb-6">
+            <h1 class="text-xl font-bold text-gray-800">角色配置</h1>
+            <p class="mt-0.5 text-sm text-gray-400">选择内置角色体验，或创建自定义角色。无需绑定微信即可使用。</p>
+          </div>
+
+          <!-- 内置角色卡（未绑定时也可体验） -->
+          <div class="mb-6">
+            <h2 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+              <span class="section-bar"></span>内置角色
+            </h2>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <div class="role-card glass-pink rounded-xl p-4" data-hover="pink">
+                <div class="flex items-center gap-3 mb-3">
+                  <div class="w-12 h-12 rounded-full bg-gradient-to-br from-pink-400 to-rose-400 flex items-center justify-center text-white font-bold">真昼</div>
+                  <div>
+                    <div class="text-sm font-semibold text-gray-800">椎名真昼</div>
+                    <div class="text-[10px] text-gray-400">温柔 · 细腻 · 居家</div>
+                  </div>
+                </div>
+                <p class="text-xs text-gray-500 mb-3">完美温柔的少女，擅长照顾人，对话风格细腻温暖。</p>
+                <div class="flex gap-1 mb-3">
+                  <span class="tag-pink text-[9px] rounded px-1.5 py-0.5">内置</span>
+                  <span class="tag-blue text-[9px] rounded px-1.5 py-0.5">可体验</span>
+                </div>
+                <button class="btn-macaron w-full rounded-lg py-2 text-xs font-medium" data-hover="pink">开始对话</button>
+              </div>
+              <div class="role-card glass-blue rounded-xl p-4" data-hover="blue">
+                <div class="flex items-center gap-3 mb-3">
+                  <div class="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-cyan-400 flex items-center justify-center text-white font-bold">绫波</div>
+                  <div>
+                    <div class="text-sm font-semibold text-gray-800">绫波丽</div>
+                    <div class="text-[10px] text-gray-400">冷淡 · 内敛 · 神秘</div>
+                  </div>
+                </div>
+                <p class="text-xs text-gray-500 mb-3">寡言少语的少女，对话简短克制，需要耐心接近。</p>
+                <div class="flex gap-1 mb-3">
+                  <span class="tag-pink text-[9px] rounded px-1.5 py-0.5">内置</span>
+                  <span class="tag-blue text-[9px] rounded px-1.5 py-0.5">可体验</span>
+                </div>
+                <button class="btn-macaron w-full rounded-lg py-2 text-xs font-medium" data-hover="blue">开始对话</button>
+              </div>
+              <div class="role-card glass-green rounded-xl p-4" data-hover="green">
+                <div class="flex items-center gap-3 mb-3">
+                  <div class="w-12 h-12 rounded-full bg-gradient-to-br from-green-400 to-emerald-400 flex items-center justify-center text-white font-bold">初音</div>
+                  <div>
+                    <div class="text-sm font-semibold text-gray-800">初音未来</div>
+                    <div class="text-[10px] text-gray-400">活泼 · 开朗 · 音乐</div>
+                  </div>
+                </div>
+                <p class="text-xs text-gray-500 mb-3">充满活力的虚拟歌手，对话风格轻快活泼。</p>
+                <div class="flex gap-1 mb-3">
+                  <span class="tag-pink text-[9px] rounded px-1.5 py-0.5">内置</span>
+                  <span class="tag-blue text-[9px] rounded px-1.5 py-0.5">可体验</span>
+                </div>
+                <button class="btn-macaron w-full rounded-lg py-2 text-xs font-medium" data-hover="green">开始对话</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 创建角色入口（整个卡片可点击跳转） -->
+          <div class="mb-6">
+            <h2 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+              <span class="section-bar"></span>自定义角色
+            </h2>
+            <div role="button" tabindex="0" onclick="switchPage('create-role'); document.getElementById('pageSwitcher').value='create-role';" class="role-card glass-card rounded-xl p-4 border-2 border-dashed border-pink-200 flex items-center gap-4 w-full text-left cursor-pointer" data-hover="pink">
+              <div class="w-12 h-12 rounded-full bg-gradient-to-br from-pink-200 to-blue-200 flex items-center justify-center text-white text-2xl">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12h14"/></svg>
+              </div>
+              <div class="flex-1">
+                <div class="text-sm font-semibold text-gray-800">创建新角色</div>
+                <div class="text-xs text-gray-400">通过 AI 对话 / 微信克隆 / 文件导入构建人设</div>
+              </div>
+              <span class="btn-macaron rounded-lg px-4 py-2 text-xs font-medium" data-hover="pink">创建</span>
+            </div>
+          </div>
+
+          <!-- 已绑定微信提示（非线性：绑定是可选的） -->
+          <div class="glass-blue rounded-xl p-4 flex items-center gap-3" data-hover="blue">
+            <svg class="w-6 h-6 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 4h14v16H5zM12 18h.01"/></svg>
+            <div class="flex-1">
+              <div class="text-sm font-medium text-gray-700">扫码绑定微信后，角色对话可同步到微信</div>
+              <div class="text-xs text-gray-400">绑定是可选的，你可以先体验角色再决定是否绑定</div>
+            </div>
+            <button class="btn-macaron rounded-lg px-4 py-2 text-xs font-medium cursor-pointer" data-hover="blue" onclick="goTo('wechat')">去绑定</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════════════ 页面：用户列表（保持原布局，只换配色） ═══════════════ -->
+    <div class="page" id="page-users">
+      <div class="px-4 py-6 sm:px-6 lg:px-8">
+        <div class="mx-auto max-w-7xl">
+          <div class="mb-5">
+            <h1 class="text-xl font-bold text-gray-800">我的微信</h1>
+            <p class="mt-0.5 text-sm text-gray-400">共 <span class="font-semibold text-gray-600">1</span> 个绑定账号</p>
+          </div>
+          <div class="glass-card mb-5 rounded-lg px-4 py-3">
+            <input type="text" placeholder="搜索微信昵称或 wxid..." class="w-full bg-transparent text-sm focus:outline-none" data-hover="pink" />
+          </div>
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div role="button" tabindex="0" class="glass-card-hover group rounded-xl p-4 text-left cursor-pointer interactive" data-hover="blue" onclick="goTo('binding')">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white text-sm font-bold">张三</div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm font-semibold text-gray-800 group-hover:text-pink-600">张三</div>
+                  <div class="text-xs text-gray-400"><code class="rounded bg-gray-100 px-1 text-[10px]">wxid_zhangsan</code></div>
+                </div>
+              </div>
+              <div class="mt-3 flex items-center justify-between border-t border-white/30 pt-3">
+                <span class="text-xs text-gray-500">📱 未选角色</span>
+                <div class="flex gap-1">
+                  <span class="rounded-lg p-1.5 text-gray-300 hover:bg-pink-50 hover:text-pink-500 cursor-pointer" data-hover="pink">↗</span>
+                  <span class="rounded-lg p-1.5 text-gray-300 hover:bg-red-50 hover:text-red-500 cursor-pointer" data-hover="pink">🗑️</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════════════ 页面：绑定详情（保持原布局，只换配色） ═══════════════ -->
+    <div class="page" id="page-binding">
+      <div class="px-4 py-6 sm:px-6 lg:px-8">
+        <div class="mx-auto max-w-7xl">
+          <button class="text-sm text-gray-400 hover:text-gray-600 mb-4 cursor-pointer" data-hover="blue" onclick="goTo('users')">← 返回我的微信</button>
+          <div class="flex items-center gap-3 mb-5">
+            <div class="h-12 w-12 rounded-xl glass-pink flex items-center justify-center text-pink-500">📱</div>
+            <div>
+              <h1 class="text-xl font-bold text-gray-800">张三</h1>
+              <p class="text-xs text-gray-400"><code class="rounded bg-gray-100 px-1">wxid_zhangsan</code></p>
+            </div>
+          </div>
+          <!-- 当前角色 -->
+          <div class="glass-card rounded-xl p-4 mb-5">
+            <div class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1">当前角色</div>
+            <div class="text-sm text-gray-700">未选择角色（默认）</div>
+            <div class="text-xs text-gray-400 mt-1">微信聊天时将使用所选角色回复</div>
+          </div>
+          <!-- 预设角色网格 -->
+          <h2 class="text-sm font-semibold text-gray-700 mb-3">选择一个角色</h2>
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            <div class="glass-card-hover rounded-xl p-3 ring-2 ring-pink-400 bg-pink-50/30 relative cursor-pointer interactive" data-hover="pink" onclick="goTo('role-settings')">
+              <div class="absolute top-2 right-2 w-5 h-5 rounded-full bg-pink-500 text-white text-xs flex items-center justify-center">✓</div>
+              <div class="h-16 rounded-lg bg-gradient-to-br from-pink-100 to-rose-100 flex items-center justify-center text-2xl mb-2">🌸</div>
+              <div class="text-sm font-medium text-gray-800">椎名真昼</div>
+              <div class="text-[10px] text-gray-400 line-clamp-2">温柔细腻的少女</div>
+            </div>
+            <div class="glass-card-hover rounded-xl p-3 cursor-pointer interactive" data-hover="blue" onclick="goTo('role-settings')">
+              <div class="h-16 rounded-lg bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center text-2xl mb-2">❄️</div>
+              <div class="text-sm font-medium text-gray-800">绫波丽</div>
+              <div class="text-[10px] text-gray-400 line-clamp-2">冷淡内敛的少女</div>
+            </div>
+            <div class="glass-card-hover rounded-xl p-3 cursor-pointer interactive" data-hover="green" onclick="goTo('role-settings')">
+              <div class="h-16 rounded-lg bg-gradient-to-br from-green-100 to-emerald-100 flex items-center justify-center text-2xl mb-2">🎵</div>
+              <div class="text-sm font-medium text-gray-800">初音未来</div>
+              <div class="text-[10px] text-gray-400 line-clamp-2">活泼开朗的虚拟歌手</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════════════ 页面：用户工作区（保持原布局，只换配色） ═══════════════ -->
+    <div class="page" id="page-workspace">
+      <div class="p-6">
+        <div class="max-w-7xl mx-auto">
+          <div class="flex items-center justify-between mb-6">
+            <div class="flex items-center gap-3">
+              <button class="text-gray-300 hover:bg-white/40 rounded-lg p-1.5" data-hover="blue">←</button>
+              <div>
+                <h1 class="text-xl font-bold text-gray-800">用户工作区</h1>
+                <p class="text-xs text-gray-400">用户 ID: 1</p>
+              </div>
+            </div>
+            <button class="btn-macaron rounded-lg px-4 py-2 text-sm font-medium flex items-center gap-1 cursor-pointer" data-hover="pink" onclick="goTo('create-role')">
+              <span>+</span><span>创建角色</span>
+            </button>
+          </div>
+          <!-- Stats -->
+          <div class="grid grid-cols-3 gap-4 mb-6">
+            <div class="glass-card rounded-xl p-4" data-hover="pink">
+              <div class="flex items-center gap-2 text-xs text-gray-400 mb-1">🤖 角色总数</div>
+              <div class="text-2xl font-bold text-gray-800">3</div>
+            </div>
+            <div class="glass-card rounded-xl p-4" data-hover="green">
+              <div class="flex items-center gap-2 text-xs text-gray-400 mb-1">⚡ 活跃角色</div>
+              <div class="text-2xl font-bold text-green-600">1</div>
+            </div>
+            <div class="glass-card rounded-xl p-4" data-hover="blue">
+              <div class="flex items-center gap-2 text-xs text-gray-400 mb-1">⚙️ 创建时间</div>
+              <div class="text-sm font-medium text-gray-700">2026-06-15</div>
+            </div>
+          </div>
+          <!-- 角色网格 -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div class="glass-card-hover rounded-xl p-4" data-hover="pink">
+              <div class="flex items-center justify-between mb-3">
+                <span class="inline-flex items-center gap-1 text-[10px] bg-green-50 text-green-600 rounded-full px-2 py-0.5">🟢 活跃</span>
+              </div>
+              <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white font-bold">真</div>
+                <div>
+                  <div class="text-sm font-semibold text-gray-800">椎名真昼</div>
+                  <div class="text-[10px] text-gray-400">温柔细腻的少女</div>
+                </div>
+              </div>
+              <div class="flex gap-1 mb-3">
+                <span class="text-[9px] bg-pink-50 text-pink-600 rounded px-1.5 py-0.5">温柔</span>
+                <span class="text-[9px] bg-blue-50 text-blue-600 rounded px-1.5 py-0.5">细腻</span>
+                <span class="text-[9px] bg-green-50 text-green-600 rounded px-1.5 py-0.5">居家</span>
+              </div>
+              <div class="flex items-center justify-between border-t border-white/30 pt-3">
+                <button class="text-xs text-gray-500 hover:text-pink-500 flex items-center gap-1" data-hover="pink">⚙️ 设置</button>
+                <button class="text-xs text-gray-500 hover:text-blue-500 flex items-center gap-1" data-hover="blue">📊 状态</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════════════ 页面：创建角色（保持原布局，只换配色） ═══════════════ -->
+    <div class="page" id="page-create-role">
+      <div class="p-6">
+        <div class="max-w-5xl mx-auto space-y-5">
+          <div class="flex items-center gap-3">
+            <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-pink-400 via-blue-400 to-green-400 flex items-center justify-center text-white text-xl float shadow-lg">✨</div>
+            <div>
+              <h1 class="text-xl font-bold bg-gradient-to-r from-pink-600 via-blue-600 to-green-600 bg-clip-text text-transparent">创建角色</h1>
+              <p class="text-xs text-gray-400">选择一种方式来构建你的 AI 角色</p>
+            </div>
+          </div>
+          <!-- 内置预设（可折叠） -->
+          <div class="glass-card rounded-xl p-4">
+            <button class="w-full flex items-center justify-between text-sm font-medium text-gray-700 cursor-pointer" data-hover="pink" onclick="togglePresetList(this)">
+              <span class="flex items-center gap-2"><span>📚</span> 内置角色预设 (3 个)</span>
+              <span class="transition-transform duration-300">▲</span>
+            </button>
+            <div class="drawer collapsed mt-3 space-y-2">
+              <div class="glass-pink rounded-lg p-3 flex items-center gap-3 cursor-pointer interactive" data-hover="pink">
+                <div class="w-9 h-9 rounded-full bg-gradient-to-br from-pink-300 to-rose-400 flex items-center justify-center text-white text-sm">樱</div>
+                <div class="flex-1"><div class="text-sm font-medium text-gray-700">樱花少女</div><div class="text-[10px] text-gray-400">温柔细腻的少女</div></div>
+                <span class="text-[9px] tag-pink rounded px-1">使用</span>
+              </div>
+              <div class="glass-blue rounded-lg p-3 flex items-center gap-3 cursor-pointer interactive" data-hover="blue">
+                <div class="w-9 h-9 rounded-full bg-gradient-to-br from-blue-300 to-cyan-400 flex items-center justify-center text-white text-sm">波</div>
+                <div class="flex-1"><div class="text-sm font-medium text-gray-700">绫波丽</div><div class="text-[10px] text-gray-400">冷淡内敛的少女</div></div>
+                <span class="text-[9px] tag-blue rounded px-1">使用</span>
+              </div>
+              <div class="glass-green rounded-lg p-3 flex items-center gap-3 cursor-pointer interactive" data-hover="green">
+                <div class="w-9 h-9 rounded-full bg-gradient-to-br from-green-300 to-emerald-400 flex items-center justify-center text-white text-sm">音</div>
+                <div class="flex-1"><div class="text-sm font-medium text-gray-700">初音未来</div><div class="text-[10px] text-gray-400">活泼开朗的虚拟歌手</div></div>
+                <span class="text-[9px] tag-green rounded px-1">使用</span>
+              </div>
+            </div>
+          </div>
+          <!-- 方式选择 -->
+          <div class="grid grid-cols-3 gap-3">
+            <div role="button" tabindex="0" class="method-card glass-pink rounded-2xl p-5 text-center ring-2 ring-pink-400 cursor-pointer interactive" data-hover="pink" onclick="selectMethod(this, 'ai')">
+              <div class="method-icon w-12 h-12 mx-auto mb-2 rounded-2xl bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white text-2xl shadow-md">💬</div>
+              <div class="text-sm font-semibold text-pink-700">AI 对话</div>
+              <div class="text-[10px] text-gray-400 mt-0.5">通过聊天描述构建</div>
+            </div>
+            <div role="button" tabindex="0" class="method-card glass-blue rounded-2xl p-5 text-center cursor-pointer interactive" data-hover="blue" onclick="selectMethod(this, 'clone')">
+              <div class="method-icon w-12 h-12 mx-auto mb-2 rounded-2xl bg-gradient-to-br from-blue-400 to-cyan-500 flex items-center justify-center text-white text-2xl shadow-md">👥</div>
+              <div class="text-sm font-semibold text-blue-700">克隆好友</div>
+              <div class="text-[10px] text-gray-400 mt-0.5">从聊天记录还原</div>
+            </div>
+            <div role="button" tabindex="0" class="method-card glass-green rounded-2xl p-5 text-center cursor-pointer interactive" data-hover="green" onclick="selectMethod(this, 'import')">
+              <div class="method-icon w-12 h-12 mx-auto mb-2 rounded-2xl bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center text-white text-2xl shadow-md">📁</div>
+              <div class="text-sm font-semibold text-green-700">文件导入</div>
+              <div class="text-[10px] text-gray-400 mt-0.5">从 JSON/文本导入</div>
+            </div>
+          </div>
+          <!-- 方式内容区 -->
+          <div class="glass-card rounded-2xl p-5 min-h-[400px]">
+            <div class="space-y-4">
+              <!-- 消息列表 -->
+              <div class="space-y-3">
+                <div class="flex gap-3">
+                  <div class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-cyan-400 flex items-center justify-center text-white text-xs font-bold shrink-0">你</div>
+                  <div class="bg-white/60 rounded-2xl rounded-tr-sm px-4 py-2 max-w-[80%]">
+                    <p class="text-sm text-gray-700">帮我创建一个温柔的角色</p>
+                  </div>
+                </div>
+                <div class="flex gap-3">
+                  <div class="w-8 h-8 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white text-xs font-bold shrink-0">AI</div>
+                  <div class="glass-pink rounded-2xl rounded-tl-sm px-4 py-2 max-w-[80%]">
+                    <p class="text-sm text-gray-700">好的，我来帮你构建一个温柔的角色。请告诉我她的名字和性格特点。</p>
+                  </div>
+                </div>
+              </div>
+              <!-- 输入 -->
+              <div class="flex gap-2">
+                <input type="text" placeholder="描述你想要的角色..." class="input-macaron flex-1 glass-card rounded-xl px-4 py-2.5 text-sm" data-hover="pink" />
+                <button class="btn-macaron rounded-xl px-4 py-2.5 text-sm font-medium" data-hover="pink">发送</button>
+              </div>
+            </div>
+          </div>
+          <!-- 创建按钮 -->
+          <button class="btn-macaron w-full rounded-2xl py-3.5 text-sm font-semibold flex items-center justify-center gap-2 shadow-lg cursor-pointer interactive" data-hover="pink" onclick="switchPage('role-settings'); document.getElementById('pageSwitcher').value='role-settings';">
+            <span class="text-base">✨</span><span>创建角色</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════════════ 页面：角色设置（6 Tab，保持原布局，只换配色） ═══════════════ -->
+    <div class="page" id="page-role-settings">
+      <div class="p-6">
+        <div class="max-w-6xl mx-auto space-y-5">
+          <!-- 角色 Header -->
+          <div class="glass-card rounded-2xl p-5 flex items-center gap-4">
+            <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-pink-400 to-purple-500 flex items-center justify-center text-white text-xl font-bold">真</div>
+            <div class="flex-1">
+              <div class="text-base font-semibold text-gray-800">椎名真昼</div>
+              <div class="text-xs text-gray-400">温柔细腻的少女 · ID: 1 · 用户: admin</div>
+            </div>
+            <span class="inline-flex items-center gap-1 text-[10px] bg-green-50 text-green-600 rounded-full px-2 py-0.5">🟢 活跃</span>
+          </div>
+          <!-- Tab 栏 -->
+          <div class="flex gap-1 p-1 glass-card rounded-2xl">
+            <button class="flex-1 tab-active rounded-xl py-2 text-xs font-medium" data-hover="pink">基础</button>
+            <button class="flex-1 text-gray-500 rounded-xl py-2 text-xs" data-hover="blue">语音</button>
+            <button class="flex-1 text-gray-500 rounded-xl py-2 text-xs" data-hover="green">消息</button>
+            <button class="flex-1 text-gray-500 rounded-xl py-2 text-xs" data-hover="pink">数据</button>
+            <button class="flex-1 text-gray-500 rounded-xl py-2 text-xs" data-hover="blue">表情包</button>
+            <button class="flex-1 text-gray-500 rounded-xl py-2 text-xs" data-hover="green">时间线</button>
+          </div>
+          <!-- Tab 内容：基础 -->
+          <div class="space-y-4">
+            <!-- 角色身份 -->
+            <section class="glass-card rounded-xl p-4 space-y-3">
+              <h3 class="text-sm font-medium text-gray-700 flex items-center gap-2"><span class="section-bar"></span>角色身份</h3>
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">名称</label>
+                <input type="text" value="椎名真昼" class="input-macaron w-full glass-card rounded-lg px-3 py-2 text-sm" data-hover="pink" />
+              </div>
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">描述</label>
+                <textarea rows="2" class="input-macaron w-full glass-card rounded-lg px-3 py-2 text-sm" data-hover="pink">温柔细腻的少女</textarea>
+              </div>
+            </section>
+            <!-- 性格特质 -->
+            <section class="glass-card rounded-xl p-4 space-y-3">
+              <h3 class="text-sm font-medium text-gray-700 flex items-center gap-2"><span class="section-bar"></span>性格特质</h3>
+              <div class="space-y-2">
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-gray-600 w-16">温暖</span>
+                  <input type="range" min="0" max="100" value="85" class="flex-1 accent-pink-500" data-hover="pink" />
+                  <span class="text-xs text-gray-400 w-8">85</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-gray-600 w-16">俏皮</span>
+                  <input type="range" min="0" max="100" value="40" class="flex-1 accent-blue-500" data-hover="blue" />
+                  <span class="text-xs text-gray-400 w-8">40</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-gray-600 w-16">独立</span>
+                  <input type="range" min="0" max="100" value="60" class="flex-1 accent-green-500" data-hover="green" />
+                  <span class="text-xs text-gray-400 w-8">60</span>
+                </div>
+              </div>
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">核心锚点</label>
+                <div class="flex flex-wrap gap-1">
+                  <span class="tag-pink text-xs rounded px-2 py-0.5">温柔 ×</span>
+                  <span class="tag-blue text-xs rounded px-2 py-0.5">细腻 ×</span>
+                  <span class="tag-green text-xs rounded px-2 py-0.5">居家 ×</span>
+                </div>
+              </div>
+            </section>
+            <!-- 说话风格 -->
+            <section class="glass-card rounded-xl p-4 space-y-3">
+              <h3 class="text-sm font-medium text-gray-700 flex items-center gap-2"><span class="section-bar"></span>说话风格</h3>
+              <div class="space-y-2">
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-gray-600 w-16">正式度</span>
+                  <input type="range" min="0" max="100" value="30" class="flex-1 accent-pink-500" data-hover="pink" />
+                  <span class="text-xs text-gray-400 w-8">30</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-gray-600 w-16">幽默感</span>
+                  <input type="range" min="0" max="100" value="50" class="flex-1 accent-blue-500" data-hover="blue" />
+                  <span class="text-xs text-gray-400 w-8">50</span>
+                </div>
+              </div>
+            </section>
+            <!-- 配置预览 -->
+            <section class="glass-card rounded-xl p-4 space-y-3">
+              <div class="flex items-center justify-between">
+                <h3 class="text-sm font-medium text-gray-700 flex items-center gap-2"><span class="section-bar"></span>配置预览</h3>
+                <button class="text-xs text-pink-500 hover:text-pink-600" data-hover="pink">复制 JSON</button>
+              </div>
+              <pre class="text-xs text-gray-600 bg-white/40 rounded-lg p-3 font-mono">{
+  "name": "椎名真昼",
+  "personality": { "warmth": 85, "playfulness": 40 }
+}</pre>
+            </section>
+            <div class="flex justify-end">
+              <button class="btn-macaron rounded-lg px-6 py-2 text-sm font-medium opacity-50 cursor-not-allowed" data-hover="pink">保存设置</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════════════ 页面：状态中心（保持原布局，只换配色） ═══════════════ -->
+    <div class="page" id="page-status">
+      <div class="p-6">
+        <div class="max-w-7xl mx-auto space-y-6">
+          <!-- 角色信息 -->
+          <div class="glass-card rounded-xl p-5">
+            <div class="flex items-center gap-3 mb-3">
+              <span class="text-2xl">🌸</span>
+              <div class="flex-1">
+                <div class="text-base font-semibold text-gray-800">椎名真昼</div>
+                <div class="text-xs text-gray-400">温柔细腻的少女</div>
+              </div>
+              <span class="inline-flex items-center gap-1 text-[10px] bg-green-50 text-green-600 rounded-full px-2 py-0.5">🟢 活跃</span>
+            </div>
+            <div class="grid grid-cols-2 gap-3 text-xs">
+              <div><span class="text-gray-400">版本：</span><span class="text-gray-700">v1.0.0</span></div>
+              <div><span class="text-gray-400">创建时间：</span><span class="text-gray-700">2026-06-15</span></div>
+            </div>
+          </div>
+          <!-- 系统状态 -->
+          <div class="glass-card rounded-xl p-5">
+            <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2"><span class="section-bar"></span>系统状态</h3>
+            <div class="grid grid-cols-3 gap-3">
+              <div class="glass-card rounded-lg p-3 text-center" data-hover="pink">
+                <div class="text-xs text-gray-400 mb-1">⚙️ 系统</div>
+                <div class="text-sm font-semibold text-green-600">healthy</div>
+              </div>
+              <div class="glass-card rounded-lg p-3 text-center" data-hover="blue">
+                <div class="text-xs text-gray-400 mb-1">📱 微信</div>
+                <div class="text-sm font-semibold text-green-600">已连接</div>
+              </div>
+              <div class="glass-card rounded-lg p-3 text-center" data-hover="green">
+                <div class="text-xs text-gray-400 mb-1">⏱️ 运行</div>
+                <div class="text-sm font-semibold text-gray-700">2h 30m</div>
+              </div>
+            </div>
+          </div>
+          <!-- 情感 & 互动 -->
+          <div class="glass-card rounded-xl p-5">
+            <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2"><span class="section-bar"></span>情感 & 互动</h3>
+            <div class="grid grid-cols-4 gap-3">
+              <div class="glass-pink rounded-lg p-3 text-center" data-hover="pink">
+                <div class="text-xs text-gray-400 mb-1">😊 情绪</div>
+                <div class="text-sm font-semibold text-pink-600">温柔</div>
+              </div>
+              <div class="glass-blue rounded-lg p-3 text-center" data-hover="blue">
+                <div class="text-xs text-gray-400 mb-1">💬 今日</div>
+                <div class="text-sm font-semibold text-blue-600">42</div>
+              </div>
+              <div class="glass-green rounded-lg p-3 text-center" data-hover="green">
+                <div class="text-xs text-gray-400 mb-1">🧠 记忆</div>
+                <div class="text-sm font-semibold text-green-600">128</div>
+              </div>
+              <div class="glass-pink rounded-lg p-3 text-center" data-hover="pink">
+                <div class="text-xs text-gray-400 mb-1">💕 亲密度</div>
+                <div class="text-sm font-semibold text-pink-600">初识</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════════════ 改造点1/4：工具仪表盘（动态工具列表 + 爬虫增强入口） ═══════════════ -->
+    <div class="page" id="page-tools">
+      <div class="px-4 py-6 sm:px-6 lg:px-8">
+        <div class="mx-auto max-w-2xl space-y-6">
+          <div>
+            <h1 class="text-lg font-semibold text-gray-700">工具仪表盘</h1>
+            <p class="mt-0.5 text-xs text-gray-400">查看内置工具运行状态，可切换启用/禁用</p>
+          </div>
+
+          <!-- 内置工具（从后端动态获取，非硬编码；8 个工具） -->
+          <section class="glass-card rounded-xl p-4 space-y-2">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-sm font-medium text-gray-700 flex items-center gap-2">
+                <span>📶</span><span>内置工具</span>
+              </h3>
+              <span class="rounded-full bg-green-50 px-2 py-0.5 text-[10px] text-green-600">6/8 可用</span>
+            </div>
+
+            <!-- 工具项 1: WeatherTool -->
+            <div class="flex items-center gap-3 rounded-lg border border-white/30 bg-white/40 px-4 py-3 interactive" data-hover="green">
+              <span class="text-xl">🌤️</span>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-gray-700">天气查询</div>
+                <div class="text-[10px] text-gray-400">weather — 查询指定城市天气</div>
+              </div>
+              <span class="h-2 w-2 rounded-full bg-green-400"></span>
+              <div class="toggle on relative inline-flex h-5 w-9 items-center rounded-full" data-hover="green">
+                <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm translate-x-4 transition"></span>
+              </div>
+            </div>
+
+            <!-- 工具项 2: SearchTool -->
+            <div class="flex items-center gap-3 rounded-lg border border-white/30 bg-white/40 px-4 py-3 interactive" data-hover="green">
+              <span class="text-xl">🔍</span>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-gray-700">网络搜索</div>
+                <div class="text-[10px] text-gray-400">search — 联网搜索信息</div>
+              </div>
+              <span class="h-2 w-2 rounded-full bg-green-400"></span>
+              <div class="toggle on relative inline-flex h-5 w-9 items-center rounded-full" data-hover="green">
+                <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm translate-x-4 transition"></span>
+              </div>
+            </div>
+
+            <!-- 工具项 3: CalendarTool -->
+            <div class="flex items-center gap-3 rounded-lg border border-white/30 bg-white/40 px-4 py-3 interactive" data-hover="green">
+              <span class="text-xl">📅</span>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-gray-700">日历查询</div>
+                <div class="text-[10px] text-gray-400">calendar — 查询日期/节假日</div>
+              </div>
+              <span class="h-2 w-2 rounded-full bg-green-400"></span>
+              <div class="toggle on relative inline-flex h-5 w-9 items-center rounded-full" data-hover="green">
+                <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm translate-x-4 transition"></span>
+              </div>
+            </div>
+
+            <!-- 工具项 4: CalculatorTool -->
+            <div class="flex items-center gap-3 rounded-lg border border-white/30 bg-white/40 px-4 py-3 interactive" data-hover="green">
+              <span class="text-xl">🧮</span>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-gray-700">计算器</div>
+                <div class="text-[10px] text-gray-400">calculator — 数学计算</div>
+              </div>
+              <span class="h-2 w-2 rounded-full bg-green-400"></span>
+              <div class="toggle on relative inline-flex h-5 w-9 items-center rounded-full" data-hover="green">
+                <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm translate-x-4 transition"></span>
+              </div>
+            </div>
+
+            <!-- 工具项 5: ReminderTool -->
+            <div class="flex items-center gap-3 rounded-lg border border-white/30 bg-white/40 px-4 py-3 interactive" data-hover="green">
+              <span class="text-xl">⏰</span>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-gray-700">提醒</div>
+                <div class="text-[10px] text-gray-400">reminder — 设置定时提醒</div>
+              </div>
+              <span class="h-2 w-2 rounded-full bg-green-400"></span>
+              <div class="toggle on relative inline-flex h-5 w-9 items-center rounded-full" data-hover="green">
+                <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm translate-x-4 transition"></span>
+              </div>
+            </div>
+
+            <!-- 工具项 6: TimeAwarenessTool -->
+            <div class="flex items-center gap-3 rounded-lg border border-white/30 bg-white/40 px-4 py-3 interactive" data-hover="green">
+              <span class="text-xl">🕐</span>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-gray-700">时间感知</div>
+                <div class="text-[10px] text-gray-400">time_awareness — 感知当前时间</div>
+              </div>
+              <span class="h-2 w-2 rounded-full bg-green-400"></span>
+              <div class="toggle on relative inline-flex h-5 w-9 items-center rounded-full" data-hover="green">
+                <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm translate-x-4 transition"></span>
+              </div>
+            </div>
+
+            <!-- 工具项 7: CharacterCrawlerTool（关闭态） -->
+            <div class="flex items-center gap-3 rounded-lg border border-white/30 bg-white/40 px-4 py-3 opacity-60" data-hover="pink">
+              <span class="text-xl">🕷️</span>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-gray-700">角色爬虫</div>
+                <div class="text-[10px] text-gray-400">character_crawler — 抓取角色资料入库</div>
+              </div>
+              <span class="h-2 w-2 rounded-full bg-gray-200"></span>
+              <div class="toggle relative inline-flex h-5 w-9 items-center rounded-full bg-gray-200" data-hover="pink">
+                <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm translate-x-1 transition"></span>
+              </div>
+            </div>
+
+            <!-- 工具项 8: CalendarQueryTool（关闭态） -->
+            <div class="flex items-center gap-3 rounded-lg border border-white/30 bg-white/40 px-4 py-3 opacity-60" data-hover="pink">
+              <span class="text-xl">📆</span>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-gray-700">日历事件查询</div>
+                <div class="text-[10px] text-gray-400">calendar_query — 查询日历事件</div>
+              </div>
+              <span class="h-2 w-2 rounded-full bg-gray-200"></span>
+              <div class="toggle relative inline-flex h-5 w-9 items-center rounded-full bg-gray-200" data-hover="pink">
+                <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm translate-x-1 transition"></span>
+              </div>
+            </div>
+          </section>
+
+          <!-- 改造点5：爬虫增强入口 -->
+          <section class="glass-green rounded-xl p-4" data-hover="green">
+            <div class="flex items-center gap-3 mb-3">
+              <span class="text-2xl">🕷️</span>
+              <div class="flex-1">
+                <div class="text-sm font-semibold text-gray-700">知识库爬虫（增强版）</div>
+                <div class="text-xs text-gray-400">多源抓取 + LLM 结构化提取 + 知识图谱</div>
+              </div>
+              <span class="text-[10px] tag-green rounded px-2 py-0.5">增强</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 mb-3">
+              <button class="glass-card interactive rounded-lg py-2 text-xs text-gray-600 flex items-center justify-center gap-1" data-hover="green">🌐 一键抓取</button>
+              <button class="glass-card interactive rounded-lg py-2 text-xs text-gray-600 flex items-center justify-center gap-1" data-hover="green">📁 手动导入</button>
+            </div>
+            <div class="text-[10px] text-gray-400">数据源：百度百科 · 豆瓣 · 维基 · 微博 · 知乎</div>
+            <div class="mt-2 text-[10px] text-gray-400">能力：LLM 结构化提取 → 知识图谱节点 → RAG 检索增强 → 对话中真正可用</div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════════════ 页面：LLM 配置（保持原布局，只换配色） ═══════════════ -->
+    <div class="page" id="page-llm">
+      <div class="px-4 py-6 sm:px-6 lg:px-8">
+        <div class="mx-auto max-w-2xl space-y-6">
+          <h1 class="text-lg font-semibold text-gray-700">LLM 配置</h1>
+          <!-- 供应商 -->
+          <section class="glass-card rounded-xl p-4 space-y-3">
+            <h3 class="text-sm font-medium text-gray-700 flex items-center gap-2"><span class="section-bar"></span>LLM 供应商</h3>
+            <div class="space-y-2">
+              <label class="flex items-center gap-3 rounded-lg bg-pink-50 ring-1 ring-pink-200 px-3 py-2" data-hover="pink">
+                <input type="radio" checked class="text-pink-500" />
+                <span class="text-sm text-gray-700">自动回退（推荐）</span>
+              </label>
+              <label class="flex items-center gap-3 rounded-lg bg-white/40 px-3 py-2" data-hover="blue">
+                <input type="radio" class="text-blue-500" />
+                <span class="text-sm text-gray-700">智谱 AI (zhipu)</span>
+              </label>
+              <label class="flex items-center gap-3 rounded-lg bg-white/40 px-3 py-2" data-hover="green">
+                <input type="radio" class="text-green-500" />
+                <span class="text-sm text-gray-700">讯飞星火 (xunfei)</span>
+              </label>
+              <label class="flex items-center gap-3 rounded-lg bg-white/40 px-3 py-2" data-hover="pink">
+                <input type="radio" class="text-pink-500" />
+                <span class="text-sm text-gray-700">百度文心 (baidu)</span>
+              </label>
+              <label class="flex items-center gap-3 rounded-lg bg-white/40 px-3 py-2" data-hover="blue">
+                <input type="radio" class="text-blue-500" />
+                <span class="text-sm text-gray-700">DeepSeek</span>
+              </label>
+              <label class="flex items-center gap-3 rounded-lg bg-white/40 px-3 py-2" data-hover="green">
+                <input type="radio" class="text-green-500" />
+                <span class="text-sm text-gray-700">OpenCode Zen（免 key 兜底）</span>
+              </label>
+            </div>
+          </section>
+          <!-- 连接参数 -->
+          <section class="glass-card rounded-xl p-4 space-y-3">
+            <h3 class="text-sm font-medium text-gray-700 flex items-center gap-2"><span class="section-bar"></span>连接参数</h3>
+            <div class="flex items-center justify-between">
+              <div><div class="text-xs text-gray-600">API 地址</div><div class="text-[10px] text-gray-400">留空使用默认</div></div>
+              <input type="text" placeholder="https://..." class="input-macaron w-56 glass-card rounded-lg px-3 py-2 text-sm" data-hover="pink" />
+            </div>
+            <div class="flex items-center justify-between">
+              <div><div class="text-xs text-gray-600">API Key</div><div class="text-[10px] text-gray-400">sk-...</div></div>
+              <input type="password" placeholder="sk-..." class="input-macaron w-56 glass-card rounded-lg px-3 py-2 text-sm" data-hover="pink" />
+            </div>
+            <div class="flex items-center justify-between">
+              <div><div class="text-xs text-gray-600">模型名称</div><div class="text-[10px] text-gray-400">如 glm-4-flash</div></div>
+              <input type="text" placeholder="glm-4-flash" class="input-macaron w-56 glass-card rounded-lg px-3 py-2 text-sm" data-hover="pink" />
+            </div>
+          </section>
+          <!-- 生成参数 -->
+          <section class="glass-card rounded-xl p-4 space-y-3">
+            <h3 class="text-sm font-medium text-gray-700 flex items-center gap-2"><span class="section-bar"></span>生成参数</h3>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">温度 (0-1)</label>
+              <input type="range" min="0" max="1" step="0.1" value="0.7" class="w-full accent-pink-500" data-hover="pink" />
+              <div class="flex justify-between text-[10px] text-gray-400 mt-1"><span>0</span><span>0.5</span><span>1</span></div>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">最大 Token</label>
+              <input type="number" value="2048" min="256" max="32768" class="input-macaron w-full glass-card rounded-lg px-3 py-2 text-sm" data-hover="pink" />
+            </div>
+          </section>
+          <!-- LLM 缓存 -->
+          <section class="glass-card rounded-xl p-4 space-y-3">
+            <h3 class="text-sm font-medium text-gray-700 flex items-center gap-2"><span class="section-bar"></span>LLM 缓存</h3>
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-gray-600">启用缓存</span>
+              <div class="toggle on relative inline-flex h-5 w-9 items-center rounded-full" data-hover="pink">
+                <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm translate-x-4 transition"></span>
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">缓存时长（秒）</label>
+              <input type="number" value="3600" class="input-macaron w-full glass-card rounded-lg px-3 py-2 text-sm" data-hover="pink" />
+            </div>
+          </section>
+          <div class="flex justify-end">
+            <button class="btn-macaron rounded-lg px-6 py-2 text-sm font-medium" data-hover="pink">保存设置</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════════════ 页面：语音引擎（保持原布局，只换配色） ═══════════════ -->
+    <div class="page" id="page-voice">
+      <div class="px-4 py-6 sm:px-6 lg:px-8">
+        <div class="mx-auto max-w-2xl space-y-6">
+          <div>
+            <h1 class="text-lg font-semibold text-gray-700">语音工作台</h1>
+            <p class="text-xs text-gray-400">管理 TTS 引擎、语音克隆与合成测试</p>
+          </div>
+          <!-- 引擎选择 -->
+          <section class="glass-card rounded-xl p-4 space-y-3">
+            <h3 class="text-sm font-medium text-gray-700 flex items-center gap-2"><span class="section-bar"></span>语音引擎</h3>
+            <select class="input-macaron w-full glass-card rounded-lg px-3 py-2 text-sm" data-hover="green">
+              <option>MiMo Cloud</option>
+              <option>Edge TTS（免费）</option>
+              <option>GPT-SoVITS</option>
+              <option>Bert-VITS2</option>
+            </select>
+          </section>
+          <!-- 可用语音 -->
+          <section class="glass-card rounded-xl p-4 space-y-3">
+            <h3 class="text-sm font-medium text-gray-700 flex items-center gap-2"><span class="section-bar"></span>可用语音</h3>
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div role="button" tabindex="0" class="glass-pink rounded-lg p-3 text-left ring-2 ring-pink-300 cursor-pointer" data-hover="pink">
+                <div class="flex items-center gap-2">
+                  <span class="text-pink-500">🎤</span>
+                  <div class="flex-1">
+                    <div class="text-sm font-medium text-pink-700">晓晓 (女声)</div>
+                    <div class="text-[10px] text-gray-400">温柔亲切 · Edge TTS</div>
+                  </div>
+                  <span class="text-pink-500">✓</span>
+                </div>
+              </div>
+              <div role="button" tabindex="0" class="glass-card rounded-lg p-3 text-left cursor-pointer" data-hover="blue">
+                <div class="flex items-center gap-2">
+                  <span class="text-blue-500">🎤</span>
+                  <div class="flex-1">
+                    <div class="text-sm font-medium text-gray-700">云健 (男声)</div>
+                    <div class="text-[10px] text-gray-400">沉稳低沉 · Edge TTS</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+          <!-- 语音克隆 -->
+          <section class="glass-card rounded-xl p-4 space-y-3">
+            <h3 class="text-sm font-medium text-gray-700 flex items-center gap-2"><span class="section-bar"></span>语音克隆</h3>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">语音名称</label>
+              <input type="text" placeholder="自定义语音名称" class="input-macaron w-full glass-card rounded-lg px-3 py-2 text-sm" data-hover="pink" />
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">参考音频</label>
+              <div class="border-2 border-dashed border-pink-200 rounded-lg p-4 text-center text-xs text-gray-400" data-hover="pink">
+                <span class="text-2xl block mb-1">📤</span>
+                点击或拖拽上传音频文件
+              </div>
+            </div>
+            <button class="btn-macaron rounded-lg px-4 py-2 text-sm font-medium" data-hover="pink">开始克隆</button>
+          </section>
+          <!-- 语音设计 -->
+          <section class="glass-card rounded-xl p-4 space-y-3">
+            <h3 class="text-sm font-medium text-gray-700 flex items-center gap-2"><span class="section-bar"></span>语音设计</h3>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">性别</label>
+                <select class="input-macaron w-full glass-card rounded-lg px-3 py-2 text-sm" data-hover="blue"><option>女声</option><option>男声</option></select>
+              </div>
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">风格</label>
+                <select class="input-macaron w-full glass-card rounded-lg px-3 py-2 text-sm" data-hover="blue"><option>温柔</option><option>活泼</option><option>沉稳</option></select>
+              </div>
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">年龄 (18-80)</label>
+                <input type="range" min="18" max="80" value="22" class="w-full accent-blue-500" data-hover="blue" />
+              </div>
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">音调 (-12~12)</label>
+                <input type="range" min="-12" max="12" value="0" class="w-full accent-blue-500" data-hover="blue" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">语速 (0.5-2.0)</label>
+              <input type="range" min="0.5" max="2" step="0.1" value="1.0" class="w-full accent-pink-500" data-hover="pink" />
+            </div>
+            <button class="btn-macaron rounded-lg px-4 py-2 text-sm font-medium" data-hover="pink">应用设计</button>
+          </section>
+          <!-- 合成测试 -->
+          <section class="glass-card rounded-xl p-4 space-y-3">
+            <h3 class="text-sm font-medium text-gray-700 flex items-center gap-2"><span class="section-bar"></span>语音合成测试</h3>
+            <textarea placeholder="输入测试文本..." rows="3" class="input-macaron w-full glass-card rounded-lg px-3 py-2 text-sm" data-hover="pink"></textarea>
+            <button class="btn-macaron rounded-lg px-4 py-2 text-sm font-medium" data-hover="pink">▶ 试听</button>
+          </section>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════════════ 页面：用户管理 admin（保持原布局，只换配色） ═══════════════ -->
+    <div class="page" id="page-admin-users">
+      <div class="px-4 py-6 sm:px-6 lg:px-8">
+        <div class="mx-auto max-w-7xl">
+          <div class="mb-6 flex items-center justify-between">
+            <div>
+              <h1 class="text-xl font-bold text-gray-800 flex items-center gap-2">🛡️ 系统用户管理</h1>
+              <p class="text-sm text-gray-400">管理所有注册用户角色和权限 · 共 3 个用户</p>
+            </div>
+            <button class="btn-macaron rounded-lg px-4 py-2 text-sm font-medium flex items-center gap-1 cursor-pointer" data-hover="pink">
+              <span>+</span><span>创建用户</span>
+            </button>
+          </div>
+          <!-- 搜索 + 过滤 -->
+          <div class="glass-card rounded-xl px-4 py-3 mb-4 flex items-center gap-3">
+            <div class="flex-1 flex items-center gap-2">
+              <span class="text-gray-400">🔍</span>
+              <input type="text" placeholder="搜索邮箱、用户名或 ID..." class="flex-1 bg-transparent text-sm focus:outline-none" data-hover="pink" />
+            </div>
+            <select class="glass-card rounded-lg px-3 py-1.5 text-xs" data-hover="blue">
+              <option>全部角色</option><option>管理员</option><option>编辑者</option><option>观察者</option>
+            </select>
+          </div>
+          <!-- 桌面表格 -->
+          <div class="hidden md:block overflow-hidden rounded-xl glass-card">
+            <table class="w-full text-sm">
+              <thead><tr class="border-b border-white/20 text-left text-xs text-gray-400">
+                <th class="px-4 py-3">ID</th><th class="px-4 py-3">邮箱</th><th class="px-4 py-3">用户名</th><th class="px-4 py-3">显示名称</th><th class="px-4 py-3">角色</th><th class="px-4 py-3">状态</th><th class="px-4 py-3">创建时间</th><th class="px-4 py-3">最后登录</th><th class="px-4 py-3 text-right">操作</th>
+              </tr></thead>
+              <tbody>
+                <tr class="border-b border-white/10 hover:bg-white/30">
+                  <td class="px-4 py-3 font-mono text-xs">#1</td>
+                  <td class="px-4 py-3 text-gray-700">admin@fourteen.local</td>
+                  <td class="px-4 py-3 text-gray-700">admin</td>
+                  <td class="px-4 py-3 text-gray-700">管理员</td>
+                  <td class="px-4 py-3"><span class="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] text-rose-600">🛡️ 管理员</span></td>
+                  <td class="px-4 py-3"><span class="rounded-full bg-green-50 px-2 py-0.5 text-[10px] text-green-600">活跃</span></td>
+                  <td class="px-4 py-3 text-xs text-gray-500">2026-06-15</td>
+                  <td class="px-4 py-3 text-xs text-gray-500">刚刚</td>
+                  <td class="px-4 py-3 text-right">
+                    <button class="text-gray-300 hover:text-pink-500" data-hover="pink">✏️</button>
+                  </td>
+                </tr>
+                <tr class="border-b border-white/10 hover:bg-white/30">
+                  <td class="px-4 py-3 font-mono text-xs">#2</td>
+                  <td class="px-4 py-3 text-gray-700">editor@fourteen.local</td>
+                  <td class="px-4 py-3 text-gray-700">editor</td>
+                  <td class="px-4 py-3 text-gray-700">编辑者</td>
+                  <td class="px-4 py-3"><span class="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] text-amber-600">📝 编辑者</span></td>
+                  <td class="px-4 py-3"><span class="rounded-full bg-green-50 px-2 py-0.5 text-[10px] text-green-600">活跃</span></td>
+                  <td class="px-4 py-3 text-xs text-gray-500">2026-06-16</td>
+                  <td class="px-4 py-3 text-xs text-gray-500">2 小时前</td>
+                  <td class="px-4 py-3 text-right">
+                    <button class="text-gray-300 hover:text-pink-500" data-hover="pink">✏️</button>
+                    <button class="text-gray-300 hover:text-red-500 ml-2" data-hover="pink">🗑️</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <!-- 分页 -->
+          <div class="mt-4 flex items-center justify-between text-xs text-gray-400">
+            <div class="flex items-center gap-2">
+              <select class="glass-card rounded-lg px-2 py-1 text-xs" data-hover="blue"><option>10/页</option><option>20/页</option><option>50/页</option></select>
+              <span>共 3 条</span>
+            </div>
+            <div class="flex items-center gap-1">
+              <button class="glass-card rounded px-2 py-1" data-hover="blue">‹</button>
+              <button class="btn-macaron rounded px-2 py-1 text-white">1</button>
+              <button class="glass-card rounded px-2 py-1" data-hover="blue">›</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════════════ 页面：安全（保持原布局，只换配色） ═══════════════ -->
+    <div class="page" id="page-security">
+      <div class="px-4 py-6 sm:px-6 lg:px-8">
+        <div class="mx-auto max-w-2xl space-y-6">
+          <h1 class="text-lg font-semibold text-gray-700">内容安全面板</h1>
+          <section class="glass-card rounded-xl p-4 space-y-4">
+            <div class="flex items-center gap-2">
+              <span class="text-xl">🛡️</span>
+              <span class="text-sm font-semibold text-gray-700">安全过滤器</span>
+              <span class="ml-auto inline-flex items-center gap-1 text-xs text-green-600">
+                <span class="w-1.5 h-1.5 rounded-full bg-green-400"></span>运行中
+              </span>
+            </div>
+            <!-- 统计 -->
+            <div class="grid grid-cols-3 gap-3">
+              <div class="glass-pink rounded-lg p-3 text-center" data-hover="pink">
+                <div class="text-2xl font-bold text-pink-600">0</div>
+                <div class="text-[10px] text-gray-400">今日拦截</div>
+              </div>
+              <div class="glass-blue rounded-lg p-3 text-center" data-hover="blue">
+                <div class="text-2xl font-bold text-blue-600">42</div>
+                <div class="text-[10px] text-gray-400">总检测</div>
+              </div>
+              <div class="glass-green rounded-lg p-3 text-center" data-hover="green">
+                <div class="text-2xl font-bold text-green-600">0%</div>
+                <div class="text-[10px] text-gray-400">拦截率</div>
+              </div>
+            </div>
+            <!-- Toggle -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-gray-500">🛡️</span>
+                <span class="text-sm text-gray-600">内容安全过滤器</span>
+              </div>
+              <div class="toggle on relative inline-flex h-5 w-9 items-center rounded-full" data-hover="pink">
+                <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm translate-x-4 transition"></span>
+              </div>
+            </div>
+            <!-- 日志 -->
+            <div>
+              <h4 class="text-xs font-semibold text-gray-600 mb-2">最近安全日志</h4>
+              <div class="space-y-1">
+                <div class="glass-card rounded-lg px-3 py-2 flex items-start gap-2">
+                  <span class="rounded bg-green-50 px-1 text-[10px] text-green-600">放行</span>
+                  <span class="flex-1 text-xs text-gray-700 truncate">用户消息：今天天气怎么样</span>
+                  <span class="text-[10px] text-gray-400">12:34</span>
+                </div>
+                <div class="glass-card rounded-lg px-3 py-2 flex items-start gap-2">
+                  <span class="rounded bg-red-50 px-1 text-[10px] text-red-600">拦截</span>
+                  <span class="flex-1 text-xs text-gray-700 truncate">检测到敏感词，已拦截</span>
+                  <span class="text-[10px] text-gray-400">12:30</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════════════ 页面：日志 admin（保持原布局，只换配色） ═══════════════ -->
+    <div class="page" id="page-logs">
+      <div class="px-4 py-6 sm:px-6 lg:px-8">
+        <div class="mx-auto max-w-4xl space-y-4">
+          <div>
+            <h1 class="text-lg font-semibold text-gray-700">日志</h1>
+            <p class="text-xs text-gray-400">查看系统运行日志、调试信息与错误记录</p>
+          </div>
+          <div class="glass-card rounded-xl p-4 space-y-3">
+            <!-- 工具栏 -->
+            <div class="flex items-center gap-2">
+              <select class="glass-card rounded-lg px-2 py-1.5 text-xs" data-hover="pink">
+                <option>ALL</option><option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option><option>CRITICAL</option>
+              </select>
+              <input type="text" placeholder="搜索日志..." class="flex-1 glass-card rounded-lg px-3 py-1.5 text-xs" data-hover="pink" />
+              <button class="glass-card rounded-lg px-3 py-1.5 text-xs text-gray-600" data-hover="blue">🔄 刷新</button>
+              <button class="glass-card rounded-lg px-3 py-1.5 text-xs text-gray-600" data-hover="blue">🧹 清屏</button>
+              <button class="glass-card rounded-lg px-3 py-1.5 text-xs text-gray-600" data-hover="blue">⏸ 暂停</button>
+              <button class="btn-macaron rounded-lg px-3 py-1.5 text-xs font-medium" data-hover="green">📥 导出</button>
+            </div>
+            <!-- 日志列表 -->
+            <div class="max-h-[520px] overflow-y-auto space-y-1">
+              <div class="glass-card rounded-lg px-3 py-2 flex items-start gap-2">
+                <span class="font-mono text-[10px] text-gray-400">12:34:56</span>
+                <span class="rounded bg-pink-50 px-1 text-[10px] text-pink-600">INFO</span>
+                <span class="font-mono text-xs text-gray-700">API 应用就绪 — 191 条路由</span>
+              </div>
+              <div class="glass-card rounded-lg px-3 py-2 flex items-start gap-2">
+                <span class="font-mono text-[10px] text-gray-400">12:34:55</span>
+                <span class="rounded bg-green-50 px-1 text-[10px] text-green-600">INFO</span>
+                <span class="font-mono text-xs text-gray-700">数据库就绪，已加载 0 条微信绑定</span>
+              </div>
+              <div class="glass-card rounded-lg px-3 py-2 flex items-start gap-2">
+                <span class="font-mono text-[10px] text-gray-400">12:34:50</span>
+                <span class="rounded bg-amber-50 px-1 text-[10px] text-amber-600">WARN</span>
+                <span class="font-mono text-xs text-gray-700">ChromaDB 连接失败，ToneMimic 降级运行</span>
+              </div>
+              <div class="glass-card rounded-lg px-3 py-2 flex items-start gap-2">
+                <span class="font-mono text-[10px] text-gray-400">12:34:45</span>
+                <span class="rounded bg-blue-50 px-1 text-[10px] text-blue-600">DEBUG</span>
+                <span class="font-mono text-xs text-gray-700">USE_SHISI_MEMORY=true, USE_SHISI_RAG=true</span>
+              </div>
+              <div class="glass-card rounded-lg px-3 py-2 flex items-start gap-2">
+                <span class="font-mono text-[10px] text-gray-400">12:34:40</span>
+                <span class="rounded bg-red-50 px-1 text-[10px] text-red-600">ERROR</span>
+                <span class="font-mono text-xs text-gray-700">WebSocket port 8765 occupied, proactive channel degraded</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+</div>
+
+
+<script>
+// ── 粒子背景（三色混合） ──
+const canvas = document.getElementById('particleCanvas');
+const ctx = canvas.getContext('2d');
+let particles = [];
+const colors = ['#F8B4D9', '#B4D9F8', '#B4F8D9'];
+function resize() { canvas.width = innerWidth; canvas.height = innerHeight; }
+resize(); addEventListener('resize', resize);
+class Particle {
+  constructor() {
+    this.x = Math.random() * canvas.width;
+    this.y = Math.random() * canvas.height;
+    this.size = Math.random() * 3 + 1;
+    this.sx = (Math.random() - 0.5) * 0.5;
+    this.sy = (Math.random() - 0.5) * 0.5;
+    this.color = colors[Math.floor(Math.random() * 3)];
+    this.opacity = Math.random() * 0.4 + 0.1;
+  }
+  update() {
+    this.x += this.sx; this.y += this.sy;
+    if (this.x < 0 || this.x > canvas.width) this.sx *= -1;
+    if (this.y < 0 || this.y > canvas.height) this.sy *= -1;
+  }
+  draw() {
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fillStyle = this.color; ctx.globalAlpha = this.opacity; ctx.fill();
+  }
+}
+for (let i = 0; i < 60; i++) particles.push(new Particle());
+function animate() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  particles.forEach(p => { p.update(); p.draw(); });
+  ctx.globalAlpha = 1;
+  for (let i = 0; i < particles.length; i++) {
+    for (let j = i + 1; j < particles.length; j++) {
+      const dx = particles[i].x - particles[j].x, dy = particles[i].y - particles[j].y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d < 120) {
+        ctx.beginPath(); ctx.moveTo(particles[i].x, particles[i].y);
+        ctx.lineTo(particles[j].x, particles[j].y);
+        ctx.strokeStyle = particles[i].color;
+        ctx.globalAlpha = (1 - d/120) * 0.15; ctx.lineWidth = 0.5; ctx.stroke();
+      }
+    }
+  }
+  requestAnimationFrame(animate);
+}
+animate();
+
+// ── 鼠标动效（mimo.xiaomi.com 风格：圈触碰不同组件变色） ──
+const ring = document.getElementById('cursorRing');
+const dot = document.getElementById('cursorDot');
+let mx = 0, my = 0, rx = 0, ry = 0;
+addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; dot.style.left = mx + 'px'; dot.style.top = my + 'px'; });
+function animRing() {
+  rx += (mx - rx) * 0.18; ry += (my - ry) * 0.18;
+  ring.style.left = rx + 'px'; ring.style.top = ry + 'px';
+  requestAnimationFrame(animRing);
+}
+animRing();
+function bindHover() {
+  document.querySelectorAll('[data-hover]').forEach(el => {
+    if (el.dataset.bound) return;
+    el.dataset.bound = '1';
+    const c = el.getAttribute('data-hover');
+    el.addEventListener('mouseenter', () => {
+      ring.classList.add('hovering', 'hovering-' + c);
+      dot.style.background = c === 'pink' ? '#EC4899' : c === 'blue' ? '#3B82F6' : '#10B981';
+    });
+    el.addEventListener('mouseleave', () => {
+      ring.classList.remove('hovering', 'hovering-pink', 'hovering-blue', 'hovering-green');
+      dot.style.background = '#7DD3FC';
+    });
+  });
+}
+bindHover();
+
+// ── 页面切换 ──
+const pageGroups = {
+  'login': null, 'demo': null, 'notfound': null,
+  'wechat': '微信接入', 'roles': '微信接入',
+  'users': '用户/角色', 'binding': '用户/角色', 'workspace': '用户/角色',
+  'create-role': '用户/角色', 'role-settings': '用户/角色', 'status': '用户/角色',
+  'llm': '系统设置', 'voice': '系统设置', 'tools': '系统设置',
+  'admin-users': '系统设置', 'security': '系统设置', 'logs': '系统设置'
+};
+const pageNames = {
+  'login': '登录', 'demo': 'Demo 对话', 'notfound': '404',
+  'wechat': '微信控制台', 'roles': '角色配置页面',
+  'users': '我的微信', 'binding': '绑定详情', 'workspace': '用户工作区',
+  'create-role': '创建角色', 'role-settings': '角色设置', 'status': '状态中心',
+  'llm': 'LLM 配置', 'voice': '语音引擎', 'tools': '工具仪表盘',
+  'admin-users': '用户管理', 'security': '安全', 'logs': '日志'
+};
+const publicPages = ['login', 'demo', 'notfound'];
+
+function switchPage(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const target = document.getElementById('page-' + page);
+  if (target) target.classList.add('active');
+
+  // 公开页面隐藏 protected layout
+  const layout = document.getElementById('protectedLayout');
+  if (publicPages.includes(page)) {
+    layout.style.display = 'none';
+  } else {
+    layout.style.display = 'block';
+    // 更新面包屑
+    const bc = document.getElementById('breadcrumb');
+    const bcg = document.getElementById('breadcrumb-group');
+    if (bc) bc.textContent = pageNames[page] || '';
+    if (bcg) bcg.textContent = pageGroups[page] || '';
+    // 更新侧边栏选中态
+    document.querySelectorAll('[data-page]').forEach(n => n.classList.remove('active'));
+    const navItem = document.querySelector(`[data-page="${page}"]`);
+    if (navItem) navItem.classList.add('active');
+  }
+
+  // 重新绑定 hover（新页面元素）
+  setTimeout(bindHover, 50);
+}
+
+// 侧边栏点击
+document.querySelectorAll('[data-page]').forEach(el => {
+  el.addEventListener('click', (e) => {
+    e.preventDefault();
+    const page = el.getAttribute('data-page');
+    switchPage(page);
+    document.getElementById('pageSwitcher').value = page;
+  });
+});
+
+// ── 抽屉式折叠（用户/角色组） ──
+function toggleDrawer(id, btn) {
+  const drawer = document.getElementById(id);
+  const arrow = btn.querySelector('.drawer-arrow');
+  if (!drawer) return;
+  drawer.classList.toggle('collapsed');
+  if (arrow) arrow.classList.toggle('rotated');
+}
+
+// ── 预设列表展开/折叠 ──
+function togglePresetList(btn) {
+  const drawer = btn.nextElementSibling;
+  const arrow = btn.querySelector('.transition-transform');
+  if (!drawer) return;
+  drawer.classList.toggle('collapsed');
+  if (arrow) arrow.style.transform = drawer.classList.contains('collapsed') ? '' : 'rotate(180deg)';
+}
+
+// ── 方式选择（创建角色页） ──
+function selectMethod(card, method) {
+  document.querySelectorAll('.method-card').forEach(c => c.classList.remove('selected'));
+  card.classList.add('selected');
+}
+
+// ── 通用：带跳转的按钮点击 ──
+function goTo(page) {
+  switchPage(page);
+  document.getElementById('pageSwitcher').value = page;
+}
+
+// 默认显示微信控制台
+switchPage('wechat');
+document.getElementById('pageSwitcher').value = 'wechat';
+</script>
+</body>
+</html>

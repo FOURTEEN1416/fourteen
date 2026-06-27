@@ -133,7 +133,7 @@ export default function UsersPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="搜索微信昵称或 wxid..."
-                className="w-full border-0 bg-transparent pl-6 text-sm text-gray-700 placeholder:text-gray-300 focus:outline-none"
+                className="input-macaron w-full border-0 bg-transparent pl-6 text-sm text-gray-700 placeholder:text-gray-300 focus:outline-none"
               />
               {search && (
                 <button
@@ -194,7 +194,7 @@ export default function UsersPage() {
                   <button
                     key={binding.wxid}
                     onClick={() => navigate(`/bindings/${binding.wxid}`)}
-                    className="glass-card-hover group rounded-xl p-4 text-left transition-all active:scale-[0.98]"
+                    className="glass-card glass-card-hover interactive group rounded-xl p-4 text-left transition-all active:scale-[0.98]"
                   >
                     {/* Top row: avatar + name */}
                     <div className="flex items-center gap-3">

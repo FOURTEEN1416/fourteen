@@ -110,9 +110,9 @@ function StatsBar({ connections }: { connections: SavedConnection[] }) {
   return (
     <div className="flex gap-4 mb-5">
       {[
-        { label: '总连接', value: total, color: 'bg-gray-100 text-gray-600' },
-        { label: '在线', value: online, color: 'bg-green-50 text-green-600' },
-        { label: '离线', value: offline, color: 'bg-gray-50 text-gray-400' },
+        { label: '总连接', value: total, color: 'glass-blue text-gray-700' },
+        { label: '在线', value: online, color: 'glass-green text-green-700' },
+        { label: '离线', value: offline, color: 'glass-card text-gray-400' },
       ].map((s) => (
         <div
           key={s.label}
@@ -412,7 +412,7 @@ export default function WeChatPage() {
             </div>
             <button
               onClick={() => setShowQrModal(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-primary-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-primary-600 active:scale-[0.97]"
+              className="btn-macaron flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium shadow-sm"
             >
               <QrCode className="h-4 w-4" />
               扫码连接
@@ -438,7 +438,7 @@ export default function WeChatPage() {
           </div>
 
           {/* Table */}
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white/80">
+          <div className="glass-card overflow-hidden rounded-xl border border-white/30">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50/50 text-left text-xs font-medium text-gray-400">

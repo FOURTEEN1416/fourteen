@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { Toggle } from '../components/shared'
 import { config as fetchConfig, saveConfig } from '../api/system'
 
@@ -170,7 +170,7 @@ function SettingsLLM() {
                 value={apiBase}
                 onChange={(e) => setApiBase(e.target.value)}
                 placeholder="https://api.deepseek.com/v1"
-                className="w-56 px-3 py-1.5 text-xs glass-card rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
+                className="w-56 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
               />
             </div>
             <div className="flex items-center justify-between">
@@ -183,7 +183,7 @@ function SettingsLLM() {
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="sk-..."
-                className="w-56 px-3 py-1.5 text-xs glass-card rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
+                className="w-56 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
               />
             </div>
             <div className="flex items-center justify-between">
@@ -196,7 +196,7 @@ function SettingsLLM() {
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
                 placeholder="deepseek-chat"
-                className="w-56 px-3 py-1.5 text-xs glass-card rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
+                className="w-56 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
               />
             </div>
           </div>
@@ -259,7 +259,7 @@ function SettingsLLM() {
               min={256}
               max={32768}
               step={256}
-              className="w-24 px-3 py-1.5 text-xs glass-card rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50 text-center"
+              className="w-24 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50 text-center"
             />
           </div>
         </div>
@@ -290,7 +290,7 @@ function SettingsLLM() {
               onChange={(e) => setCacheDuration(parseInt(e.target.value) || 0)}
               min={1}
               max={1440}
-              className="w-24 px-3 py-1.5 text-xs glass-card rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50 text-center"
+              className="w-24 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50 text-center"
             />
           </div>
         </div>

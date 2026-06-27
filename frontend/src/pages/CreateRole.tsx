@@ -13,10 +13,10 @@ import {
 type CreateMethod = 'ai-chat' | 'wechat-clone' | 'file-import'
 interface ChatMessage { role: 'user' | 'assistant'; content: string }
 
-const METHODS: { key: CreateMethod; label: string; desc: string; icon: React.ReactNode }[] = [
-  { key: 'ai-chat', label: 'AI 对话', desc: '聊天中逐步构建角色人设', icon: <MessageCircle className="w-5 h-5" /> },
-  { key: 'wechat-clone', label: '克隆好友', desc: '从微信聊天记录提取特征', icon: <Users className="w-5 h-5" /> },
-  { key: 'file-import', label: '文件导入', desc: '上传角色定义 JSON 文件', icon: <FileUp className="w-5 h-5" /> },
+const METHODS: { key: CreateMethod; label: string; desc: string; icon: React.ReactNode; glassClass: string }[] = [
+  { key: 'ai-chat', label: 'AI 对话', desc: '聊天中逐步构建角色人设', icon: <MessageCircle className="w-5 h-5" />, glassClass: 'glass-pink' },
+  { key: 'wechat-clone', label: '克隆好友', desc: '从微信聊天记录提取特征', icon: <Users className="w-5 h-5" />, glassClass: 'glass-blue' },
+  { key: 'file-import', label: '文件导入', desc: '上传角色定义 JSON 文件', icon: <FileUp className="w-5 h-5" />, glassClass: 'glass-green' },
 ]
 
 // ═══ AI Chat Tab ═══
@@ -184,7 +184,7 @@ function CreateButton() {
     } catch { toast({ type: 'error', message: '创建失败，请重试' }) }
   }
   return (
-    <button onClick={handleCreate} disabled={createMutation.isPending || !hasContent} className="w-full py-3 rounded-xl bg-primary-500 text-white text-sm font-semibold hover:bg-primary-600 disabled:opacity-40 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+    <button onClick={handleCreate} disabled={createMutation.isPending || !hasContent} className="btn-macaron w-full py-3 rounded-xl text-sm font-semibold disabled:opacity-40 flex items-center justify-center gap-2">
       <Sparkles className="w-4 h-4" /> {createMutation.isPending ? '创建中...' : '创建角色'}
     </button>
   )
@@ -321,9 +321,9 @@ export default function CreateRole() {
         <PresetGrid onSelect={setPersona} />
         <div className="grid grid-cols-3 gap-2">
           {METHODS.map(m => (
-            <button key={m.key} onClick={() => setMethod(m.key)} className={`flex flex-col items-center gap-1.5 p-4 rounded-2xl border transition-all ${method === m.key ? 'border-primary-400 bg-primary-50/50 ring-1 ring-primary-400/30' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
-              <span className={method === m.key ? 'text-primary-500' : 'text-gray-400'}>{m.icon}</span>
-              <span className={`text-sm font-medium ${method === m.key ? 'text-primary-700' : 'text-gray-700'}`}>{m.label}</span>
+            <button key={m.key} onClick={() => setMethod(m.key)} className={`method-card flex flex-col items-center gap-1.5 p-4 rounded-2xl ${m.glassClass} ${method === m.key ? 'selected tab-active' : ''}`}>
+              <span className="method-icon">{m.icon}</span>
+              <span className="text-sm font-medium">{m.label}</span>
               <span className="text-[10px] text-gray-400">{m.desc}</span>
             </button>
           ))}

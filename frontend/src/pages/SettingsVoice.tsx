@@ -1,4 +1,4 @@
-﻿import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Mic, Upload, Play, Check, Loader2 } from 'lucide-react'
 import { Select } from '../components/shared'
 import type { MiMoVoice, VoiceDesignRequest } from '../api/mimo'
@@ -46,21 +46,20 @@ function EngineSwitcher({
   return (
     <section>
       <h3 className="mb-3 text-sm font-semibold text-gray-700">语音引擎</h3>
-      <div className="rounded-xl border border-gray-200 bg-white/60 p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm text-gray-700">当前引擎</p>
-            <p className="text-xs text-gray-400">选择语音合成后端</p>
-          </div>
-          <div className="w-44">
-            <Select
-              options={ENGINE_OPTIONS}
-              value={engine}
-              onChange={onChange}
-              placeholder="选择引擎"
-            />
-          </div>
-        </div>
+      <div className="grid grid-cols-2 gap-2">
+        {ENGINE_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => onChange(opt.value)}
+            className={`text-left p-3 rounded-xl transition-all ${
+              engine === opt.value
+                ? `${opt.value === 'mimo-tts' ? 'glass-pink' : opt.value === 'edge-tts' ? 'glass-blue' : opt.value === 'gpt-sovits' ? 'glass-green' : 'glass-card'} ring-1 ring-primary-400/30`
+                : 'glass-card border border-gray-200 hover:border-gray-300'
+            }`}
+          >
+            <p className={`text-sm font-medium ${engine === opt.value ? 'text-primary-700' : 'text-gray-700'}`}>{opt.label}</p>
+          </button>
+        ))}
       </div>
     </section>
   )

@@ -211,10 +211,10 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
             <button
               key={opt.value}
               onClick={() => setEngine(opt.value)}
-              className={`text-left p-3 rounded-xl border transition-all ${
+              className={`text-left p-3 rounded-xl transition-all ${
                 engine === opt.value
-                  ? 'border-primary-400 bg-primary-50/50 ring-1 ring-primary-400/30'
-                  : 'border-gray-200 bg-white hover:border-gray-300'
+                  ? `${opt.value === 'mimo-tts' ? 'glass-pink' : opt.value === 'edge-tts' ? 'glass-blue' : opt.value === 'gpt-sovits' ? 'glass-green' : 'glass-card'} ring-1 ring-primary-400/30`
+                  : 'glass-card border border-gray-200 hover:border-gray-300'
               }`}
             >
               <p className={`text-sm font-medium ${engine === opt.value ? 'text-primary-700' : 'text-gray-700'}`}>{opt.label}</p>
@@ -640,7 +640,7 @@ export default function RoleSettings() {
               onClick={() => setActiveTab(t.key)}
               className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ${
                 activeTab === t.key
-                  ? 'bg-white text-primary-700 shadow-sm'
+                  ? 'tab-active'
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >

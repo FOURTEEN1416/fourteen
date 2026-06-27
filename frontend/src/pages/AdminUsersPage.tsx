@@ -397,7 +397,7 @@ export default function AdminUsersPage() {
                   value={searchInput}
                   onChange={e => setSearchInput(e.target.value)}
                   placeholder="搜索邮箱、用户名或显示名称..."
-                  className="w-full pl-9 pr-8 py-2 text-sm bg-white/60 border border-white/30 rounded-lg text-gray-700 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-300/50 focus:border-primary-300 transition-all"
+                  className="w-full pl-9 pr-8 py-2 text-sm input-macaron rounded-lg text-gray-700 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-300/50 focus:border-primary-300 transition-all"
                 />
                 {searchInput && (
                   <button

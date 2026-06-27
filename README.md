@@ -1,13 +1,13 @@
-# 唯一的我
+# 唯一的你——十四
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12-blue">
-  <img src="https://img.shields.io/badge/TypeScript-React%2018-3178c6">
+  <img src="https://img.shields.io/badge/TypeScript-React%2019-3178c6">
   <img src="https://img.shields.io/badge/Tests-626+-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
-微信扫码就能聊，控制台调角色和语音。
+微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
 ---
 

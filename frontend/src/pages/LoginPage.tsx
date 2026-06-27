@@ -7,7 +7,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import Button from '../components/common/Button'
 
 type Mode = 'login' | 'register'
 
@@ -71,11 +70,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50">
+    <div className="min-h-screen flex items-center justify-center">
       <div className="w-full max-w-sm mx-4">
         {/* Logo / 标题 */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-800">唯一的我</h1>
+          <h1 className="text-3xl font-bold bg-gradient-to-r from-pink-500 via-blue-500 to-green-500 bg-clip-text text-transparent">唯一的你——十四</h1>
           <p className="text-sm text-gray-400 mt-1">
             {mode === 'login' ? '登录管理控制台' : '创建新账户'}
           </p>
@@ -84,7 +83,7 @@ export default function LoginPage() {
         {/* 表单卡片 */}
         <form
           onSubmit={handleSubmit}
-          className="bg-white/90 backdrop-blur-sm border border-gray-200 rounded-2xl p-6 shadow-sm space-y-4"
+          className="glass-card rounded-2xl p-6 space-y-4"
         >
           {/* 错误提示 */}
           {error && (
@@ -104,7 +103,7 @@ export default function LoginPage() {
                 placeholder="请输入邮箱或用户名"
                 required
                 autoFocus
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/30 focus:border-indigo-400"
+                className="input-macaron w-full glass-card rounded-lg px-3 py-2.5 text-sm"
               />
             </div>
           ) : (
@@ -118,7 +117,7 @@ export default function LoginPage() {
                   placeholder="your@email.com"
                   required
                   autoFocus
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/30 focus:border-indigo-400"
+                  className="input-macaron w-full glass-card rounded-lg px-3 py-2.5 text-sm"
                 />
               </div>
               <div>
@@ -130,7 +129,7 @@ export default function LoginPage() {
                   placeholder="至少3个字符"
                   required
                   minLength={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/30 focus:border-indigo-400"
+                  className="input-macaron w-full glass-card rounded-lg px-3 py-2.5 text-sm"
                 />
               </div>
               <div>
@@ -140,7 +139,7 @@ export default function LoginPage() {
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   placeholder="你的昵称"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/30 focus:border-indigo-400"
+                  className="input-macaron w-full glass-card rounded-lg px-3 py-2.5 text-sm"
                 />
               </div>
 
@@ -151,7 +150,7 @@ export default function LoginPage() {
                   type="checkbox"
                   checked={useInvite}
                   onChange={(e) => setUseInvite(e.target.checked)}
-                  className="rounded border-gray-300 text-indigo-500 focus:ring-indigo-400/30"
+                  className="rounded border-gray-300 text-pink-500 focus:ring-pink-400/30"
                 />
                 <label htmlFor="useInvite" className="text-sm text-gray-500 cursor-pointer select-none">
                   我有邀请码
@@ -169,7 +168,7 @@ export default function LoginPage() {
                     placeholder="请输入8位邀请码"
                     required={useInvite}
                     maxLength={16}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/30 focus:border-indigo-400"
+                    className="input-macaron w-full glass-card rounded-lg px-3 py-2.5 text-sm"
                   />
                 </div>
               )}
@@ -186,48 +185,49 @@ export default function LoginPage() {
               placeholder={mode === 'register' ? '至少6个字符' : '输入密码'}
               required
               minLength={6}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/30 focus:border-indigo-400"
+              className="input-macaron w-full glass-card rounded-lg px-3 py-2.5 text-sm"
             />
           </div>
 
           {/* 提交按钮 */}
-          <Button type="submit" loading={loading} className="w-full" size="lg">
-            {mode === 'login' ? '登 录' : '注 册'}
-          </Button>
+          <button
+            type="submit"
+            disabled={loading}
+            className="btn-macaron w-full rounded-lg py-2.5 text-sm font-medium disabled:opacity-50"
+          >
+            {loading ? '处理中...' : mode === 'login' ? '登 录' : '注 册'}
+          </button>
 
           {/* 切换模式 */}
-          <div className="text-center text-sm text-gray-400">
+          <div className="text-center text-xs text-gray-400">
             {mode === 'login' ? (
               <span>
                 没有账户？{' '}
-                <button type="button" onClick={toggleMode} className="text-indigo-500 hover:text-indigo-600 font-medium">
+                <button type="button" onClick={toggleMode} className="text-pink-500 hover:text-pink-600 font-medium">
                   注册
                 </button>
               </span>
             ) : (
               <span>
                 已有账户？{' '}
-                <button type="button" onClick={toggleMode} className="text-indigo-500 hover:text-indigo-600 font-medium">
+                <button type="button" onClick={toggleMode} className="text-pink-500 hover:text-pink-600 font-medium">
                   登录
                 </button>
               </span>
             )}
           </div>
-        </form>
 
-        {/* Footer */}
-        <p className="text-center text-xs text-gray-300 mt-6">
-          唯一的你 — 管理控制台
-        </p>
-        <p className="text-center text-xs text-gray-400 mt-2">
-          <button
-            type="button"
-            onClick={() => navigate('/demo')}
-            className="hover:text-indigo-500 transition-colors"
-          >
-            先试试 Demo 体验 →
-          </button>
-        </p>
+          {/* Demo 入口 */}
+          <div className="border-t border-white/30 pt-3 text-center">
+            <button
+              type="button"
+              onClick={() => navigate('/demo')}
+              className="text-xs text-gray-500 hover:text-green-500 transition-colors"
+            >
+              → Demo 体验入口
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )

@@ -145,11 +145,7 @@ export default function BindingDetailPage() {
                       key={preset.id}
                       onClick={() => handleSelectCharacter(preset.id)}
                       disabled={!!saving}
-                      className={`glass-card-hover group relative rounded-xl p-3 text-left transition-all active:scale-[0.97] ${
-                        isSelected
-                          ? 'ring-2 ring-primary-500 bg-primary-50/30'
-                          : ''
-                      } ${saving ? 'opacity-60 pointer-events-none' : ''}`}
+                      className={`${isSelected ? 'glass-pink' : 'glass-card'} group relative rounded-xl p-3 text-left transition-all active:scale-[0.97] ${saving ? 'opacity-60 pointer-events-none' : ''}`}
                     >
                       {isSelected && (
                         <span className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary-500 text-white">

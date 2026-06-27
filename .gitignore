@@ -27,6 +27,7 @@ Thumbs.db
 .env.*.local
 
 # ── IDE/工具 ──
+.trae/
 .opencode/
 .omo/
 omo/

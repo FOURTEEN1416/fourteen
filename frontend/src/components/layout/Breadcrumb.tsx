@@ -1,5 +1,4 @@
 import { useLocation, Link } from 'react-router-dom'
-import { ChevronRight } from 'lucide-react'
 import { useUnifiedCharacters } from '../../hooks/useQueries'
 import type { UnifiedCharacter } from '../../types/api'
 
@@ -79,21 +78,19 @@ function useBreadcrumbs(): Crumb[] {
 export default function Breadcrumb() {
   const crumbs = useBreadcrumbs()
 
-  if (crumbs.length <= 1) return null
-
   return (
-    <nav className="flex items-center gap-1 px-6 pt-4 pb-0 text-xs text-gray-400" aria-label="面包屑导航">
+    <nav className="glass-card border-b border-white/30 px-6 py-3 flex items-center gap-2 text-sm" aria-label="面包屑导航">
       {crumbs.map((crumb, i) => {
         const isLast = i === crumbs.length - 1
         return (
           <span key={crumb.label} className="flex items-center gap-1">
-            {i > 0 && <ChevronRight className="h-3 w-3 text-gray-300" />}
+            {i > 0 && <span className="text-gray-300">/</span>}
             {crumb.to && !isLast ? (
-              <Link to={crumb.to} className="hover:text-primary-500 transition-colors">
+              <Link to={crumb.to} className="text-gray-400 hover:text-primary-500 transition-colors">
                 {crumb.label}
               </Link>
             ) : (
-              <span className={isLast ? 'text-gray-600 font-medium' : ''}>
+              <span className={isLast ? 'text-gray-700 font-medium' : 'text-gray-400'}>
                 {crumb.label}
               </span>
             )}

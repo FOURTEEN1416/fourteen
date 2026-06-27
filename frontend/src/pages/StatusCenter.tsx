@@ -89,7 +89,7 @@ export default function StatusCenter() {
         <>
           {/* System Status */}
           <div className="glass-card rounded-xl p-5">
-            <h3 className="text-sm font-semibold text-gray-700 mb-4">系统状态</h3>
+            <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2"><span className="section-bar" />系统状态</h3>
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-white/60 rounded-xl p-3 text-center">
                 <p className="text-lg mb-0.5">⚙️</p>
@@ -115,7 +115,7 @@ export default function StatusCenter() {
 
           {/* Emotion & Interaction */}
           <div className="glass-card rounded-xl p-5">
-            <h3 className="text-sm font-semibold text-gray-700 mb-4">情感 & 互动</h3>
+            <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2"><span className="section-bar" />情感 & 互动</h3>
             <div className="grid grid-cols-4 gap-3">
               <div className="bg-white/60 rounded-xl p-3 text-center">
                 <p className="text-lg mb-0.5">{emotionEmoji[stats.current_emotion] || '😐'}</p>
@@ -143,7 +143,7 @@ export default function StatusCenter() {
           {/* Training Status */}
           {stats.training && stats.training.status !== 'idle' && (
             <div className="glass-card rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">训练状态</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2"><span className="section-bar" />训练状态</h3>
               <div className="flex items-center gap-4">
                 <Badge variant={stats.training.status === 'training' ? 'warning' : 'success'}>
                   {stats.training.status}
