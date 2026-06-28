@@ -553,8 +553,15 @@ class MessageGenerator:
         type_label = msg_type.value
 
         if self._proactive_prompt:
+            now_str = datetime.now().strftime("%H:%M")  # noqa: DTZ005
             prompt = self._proactive_prompt.format(
-                time=datetime.now().strftime("%H:%M"),  # noqa: DTZ005
+                # proactive.yaml 模板需要的变量
+                user_name="你",
+                hours_since_chat=0.0,
+                current_time=now_str,
+                affinity_level=affinity_level,
+                # 代码历史传过的变量（向后兼容，避免其他模板断裂）
+                time=now_str,
                 emotion=emotion,
                 affinity_name=affinity_name,
                 type_label=type_label,

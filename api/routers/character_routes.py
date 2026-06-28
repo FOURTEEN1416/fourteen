@@ -118,19 +118,61 @@ def _character_path(character_id: str) -> Path:
 
 
 def _load_character(character_id: str) -> dict[str, Any] | None:
+    """加载角色数据。
+
+    查找顺序：
+    1. 按 {character_id}.json 文件名直接查
+    2. 遍历所有角色文件，匹配 JSON 内部 id 字段
+    3. 都找不到返回 None
+    """
+    # 1. 直接按文件名查
     path = _character_path(character_id)
-    if not path.exists():
-        return None
+    if path.exists():
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error("加载角色 %s 失败: %s", character_id, e)
+            return None
+
+    # 2. 遍历匹配 JSON 内部 id 字段（兼容 id 与文件名不一致的情况）
     try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        logger.error("加载角色 %s 失败: %s", character_id, e)
+        for f in _get_characters_dir().glob("*.json"):
+            try:
+                with open(f, encoding="utf-8") as fh:
+                    data = json.load(fh)
+                if data.get("id") == character_id:
+                    return data
+            except (json.JSONDecodeError, OSError):
+                continue
+    except OSError as e:
+        logger.error("遍历角色目录失败: %s", e)
+    return None
+
+
+def _find_character_file_by_id(character_id: str) -> Path | None:
+    """根据 JSON 内部 id 字段查找对应的文件路径。"""
+    try:
+        for f in _get_characters_dir().glob("*.json"):
+            try:
+                with open(f, encoding="utf-8") as fh:
+                    data = json.load(fh)
+                if data.get("id") == character_id:
+                    return f
+            except (json.JSONDecodeError, OSError):
+                continue
+    except OSError:
         return None
+    return None
 
 
 def _save_character(character_id: str, data: dict[str, Any]) -> bool:
+    # 优先用直接文件名；若不存在但能按 id 找到原文件，则写回原文件路径
     path = _character_path(character_id)
+    if not path.exists():
+        found = _find_character_file_by_id(character_id)
+        if found is not None:
+            path = found
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
@@ -143,6 +185,10 @@ def _save_character(character_id: str, data: dict[str, Any]) -> bool:
 
 def _delete_character_file(character_id: str) -> bool:
     path = _character_path(character_id)
+    if not path.exists():
+        found = _find_character_file_by_id(character_id)
+        if found is not None:
+            path = found
     if path.exists():
         try:
             path.unlink()

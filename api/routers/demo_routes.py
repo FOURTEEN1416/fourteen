@@ -33,6 +33,7 @@ class DemoChatRequest(BaseModel):
     message: str = Field(..., max_length=10000)
     session_id: str = Field(default="", max_length=128)
     message_type: str = Field(default="text", pattern=r"^(text|image|voice|file)$")
+    character_id: str = Field(default="demo", max_length=128, description="角色ID，默认 demo")
 
 
 class DemoExitRequest(BaseModel):
@@ -71,7 +72,7 @@ async def demo_chat_stream(req: DemoChatRequest):
             req.message,
             req.session_id,
             req.message_type,
-            character_id="demo",
+            character_id=req.character_id,
         )
         try:
             async for event in stream_gen:

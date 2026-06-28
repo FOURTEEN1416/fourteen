@@ -386,6 +386,122 @@ class OptimizedOrchestrator:
         from utils.async_utils import run_async
         return run_async(coro)
 
+    # ── 角色卡人设动态加载（v3.1 新增）──
+    # 缓存：character_id -> 人设片段字符串。避免每条消息都读文件。
+    _character_persona_cache: dict[str, str] = {}
+    _character_persona_loaded: bool = False
+
+    @classmethod
+    def _load_character_persona_segment(cls, character_id: str) -> str:
+        """根据 character_id 加载角色卡人设，返回可追加到 system prompt 的片段。
+
+        - character_id 为空 / "default" / "demo" 时返回空串（保持基线人设）
+        - 先按 {character_id}.json 找文件，找不到再遍历 config/characters/ 匹配 JSON 内部 id
+        - 结果缓存，避免重复 IO
+        """
+        if not character_id or character_id in ("default", "demo"):
+            return ""
+
+        # 命中缓存
+        if character_id in cls._character_persona_cache:
+            return cls._character_persona_cache[character_id]
+
+        import json as _json
+        chars_dir = project_root / "config" / "characters"
+        card_data: dict | None = None
+
+        # 1. 直接按文件名查
+        direct_path = chars_dir / f"{character_id}.json"
+        if direct_path.exists():
+            try:
+                with open(direct_path, encoding="utf-8") as f:
+                    card_data = _json.load(f)
+            except (OSError, _json.JSONDecodeError):
+                card_data = None
+
+        # 2. 遍历匹配 JSON 内部 id 字段
+        if card_data is None and chars_dir.exists():
+            try:
+                for f in chars_dir.glob("*.json"):
+                    try:
+                        with open(f, encoding="utf-8") as fh:
+                            data = _json.load(fh)
+                        if data.get("id") == character_id:
+                            card_data = data
+                            break
+                    except (OSError, _json.JSONDecodeError):
+                        continue
+            except OSError:
+                pass
+
+        if not card_data:
+            cls._character_persona_cache[character_id] = ""
+            return ""
+
+        # 构造人设片段
+        lines: list[str] = ["=== 角色卡人设 ==="]
+        name = card_data.get("name", "")
+        if name:
+            lines.append(f"角色名：{name}")
+        desc = card_data.get("description", "")
+        if desc:
+            lines.append(f"简介：{desc[:200]}")
+
+        anchors = card_data.get("core_anchors", [])
+        if anchors:
+            lines.append(f"核心锚点：{'、'.join(anchors)}")
+
+        personality = card_data.get("personality", {})
+        if personality:
+            lines.append("性格维度：")
+            # 常见维度中文映射
+            dim_map = {
+                "warmth": "温暖度", "playfulness": "顽皮度", "independence": "独立性",
+                "jealousy": "嫉妒度", "stubbornness": "固执度", "intelligence": "聪慧度",
+                "sweetness": "甜美度", "elegance": "优雅度", "mystery": "神秘度",
+                "loyalty": "忠诚度", "creativity": "创造力",
+            }
+            for k, v in personality.items():
+                label = dim_map.get(k, k)
+                try:
+                    val = float(v)
+                    lines.append(f"- {label} {val:.2f}")
+                except (TypeError, ValueError):
+                    lines.append(f"- {label}: {v}")
+
+        speaking = card_data.get("speaking_style", {})
+        if speaking and isinstance(speaking, dict):
+            style_parts: list[str] = []
+            for k, v in speaking.items():
+                if k == "catchphrases":
+                    continue
+                try:
+                    val = float(v)
+                    if 0 <= val <= 1:
+                        style_parts.append(f"{k}={val:.2f}")
+                    else:
+                        style_parts.append(f"{k}={v}")
+                except (TypeError, ValueError):
+                    style_parts.append(f"{k}={v}")
+            if style_parts:
+                lines.append(f"说话风格：{', '.join(style_parts)}")
+
+        catchphrases = speaking.get("catchphrases", []) if isinstance(speaking, dict) else []
+        if not catchphrases:
+            catchphrases = card_data.get("catchphrases", [])
+        if catchphrases:
+            lines.append(f"口头禅：{' / '.join(catchphrases[:5])}")
+
+        scenario = card_data.get("scenario", "")
+        if scenario:
+            lines.append(f"场景设定：{str(scenario)[:300]}")
+
+        segment = "\n".join(lines)
+        # 缓存（最多 100 个，防止内存膨胀）
+        if len(cls._character_persona_cache) < 100:
+            cls._character_persona_cache[character_id] = segment
+        return segment
+
     def initialize(self, config_dir: str = "config",
                    fusion_cfg: dict | None = None) -> bool:
         if self._initialized:
@@ -892,6 +1008,12 @@ class OptimizedOrchestrator:
                 if persona_enhancement:
                     system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
 
+                # 角色卡人设动态注入（v3.1）：根据 character_id 追加角色卡人设片段
+                if character_id and character_id not in ("default", "demo"):
+                    char_segment = self._load_character_persona_segment(character_id)
+                    if char_segment:
+                        system_prompt = f"{system_prompt}\n\n{char_segment}"
+
                 # ── 主 LLM 对话（带 30s 超时保护） ──
                 try:
                     reply = await asyncio.wait_for(
@@ -1200,6 +1322,12 @@ class OptimizedOrchestrator:
                 )
                 if persona_enhancement:
                     system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
+
+                # 角色卡人设动态注入（v3.1）：根据 character_id 追加角色卡人设片段
+                if character_id and character_id not in ("default", "demo"):
+                    char_segment = self._load_character_persona_segment(character_id)
+                    if char_segment:
+                        system_prompt = f"{system_prompt}\n\n{char_segment}"
 
                 # 9. 真流式 LLM 调用 — 边生成边 yield
                 full_reply = ""

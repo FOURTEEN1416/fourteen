@@ -41,7 +41,7 @@ interface MemoryData {
   }
 }
 
-const CHAR_NAME = '我'
+const CHAR_NAME = '你'
 const WELCOME = '你好。\n我在这里，不是为了取代谁。\n只是在你一个人的时候，陪你说话。'
 
 function generateSessionId() {
@@ -55,7 +55,7 @@ function formatTime(ts: number) {
 
 function AiAvatar() {
   return (
-    <div className="w-10 h-10 rounded-full bg-primary-500 flex items-center justify-center text-white text-lg font-semibold shadow-sm shrink-0 select-none">
+    <div className="w-10 h-10 rounded-full btn-macaron flex items-center justify-center text-white text-lg font-semibold shadow-md shrink-0 select-none">
       {CHAR_NAME}
     </div>
   )
@@ -63,8 +63,8 @@ function AiAvatar() {
 
 function UserAvatar() {
   return (
-    <div className="w-10 h-10 rounded-full bg-accent-500 flex items-center justify-center text-white text-sm font-medium shadow-sm shrink-0 select-none">
-      你
+    <div className="w-10 h-10 rounded-full glass-blue flex items-center justify-center text-macaron-blue-deep text-sm font-semibold shadow-md shrink-0 select-none">
+      我
     </div>
   )
 }
@@ -186,38 +186,38 @@ export default function DemoPage() {
     : messages
 
   return (
-    <div className="h-screen flex flex-col bg-bg-deep text-text-primary overflow-hidden">
+    <div className="h-screen flex flex-col overflow-hidden text-text-primary">
       {/* Header */}
-      <header className="shrink-0 px-6 py-4 border-b border-border-default bg-bg-surface/80 backdrop-blur-sm">
+      <header className="shrink-0 z-20 glass-card border-b border-white/40 px-6 py-4">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-primary-500 flex items-center justify-center text-white text-base font-bold shadow-sm">
-              我
+            <div className="w-9 h-9 rounded-xl btn-macaron flex items-center justify-center text-white text-base font-bold shadow-md">
+              你
             </div>
             <div>
-              <h1 className="text-base font-semibold tracking-wide">唯一的我</h1>
+              <h1 className="text-base font-semibold tracking-wide text-text-primary">唯一的你——十四</h1>
               <p className="text-[11px] text-text-muted">有记忆的对话对象</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             {emotion && (
-              <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-lg bg-bg-deep text-[11px] text-text-secondary">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary-400" />
+              <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-xl glass-pink text-[11px] text-macaron-pink-deep">
+                <span className="w-1.5 h-1.5 rounded-full bg-macaron-pink-deep" />
                 <span>{emotion.primary.type}</span>
                 <span className="text-text-dim">·</span>
-                <span className="text-primary-600">{emotion.affinity.name}</span>
+                <span className="font-medium">{emotion.affinity.name}</span>
               </div>
             )}
             <button
               onClick={openMemory}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:bg-bg-hover hover:text-primary-600 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-text-secondary hover:bg-white/50 hover:text-macaron-pink-deep transition-colors"
             >
               <Brain className="w-3.5 h-3.5" />
               我记得
             </button>
             <button
               onClick={handleExit}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:bg-bg-hover hover:text-primary-600 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-text-secondary hover:bg-white/50 hover:text-macaron-blue-deep transition-colors"
             >
               <LogOut className="w-3.5 h-3.5" />
               退出
@@ -239,10 +239,10 @@ export default function DemoPage() {
                 {isUser ? <UserAvatar /> : <AiAvatar />}
                 <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-[80%]`}>
                   <div
-                    className={`relative px-4 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+                    className={`relative px-4 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap shadow-sm ${
                       isUser
-                        ? 'bg-primary-500 text-white rounded-tr-sm'
-                        : 'bg-bg-surface border border-border-default text-text-primary rounded-tl-sm shadow-sm'
+                        ? 'btn-macaron text-white rounded-tr-sm'
+                        : 'glass-card text-text-primary rounded-tl-sm'
                     }`}
                   >
                     {msg.content}
@@ -260,11 +260,11 @@ export default function DemoPage() {
           {isTyping && !streamingMessage && (
             <div className="flex gap-3 animate-fade-in">
               <AiAvatar />
-              <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-bg-surface border border-border-default text-text-primary shadow-sm">
+              <div className="px-4 py-3 rounded-2xl rounded-tl-sm glass-card text-text-primary shadow-sm">
                 <div className="flex gap-1.5 items-center h-5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-bounce [animation-delay:-0.3s]" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-bounce [animation-delay:-0.15s]" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-bounce" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-macaron-pink-deep animate-bounce [animation-delay:-0.3s]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-macaron-blue-deep animate-bounce [animation-delay:-0.15s]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-macaron-green-deep animate-bounce" />
                 </div>
               </div>
             </div>
@@ -274,7 +274,7 @@ export default function DemoPage() {
       </main>
 
       {/* Input */}
-      <footer className="shrink-0 px-4 py-4 border-t border-border-default bg-bg-surface/80 backdrop-blur-sm">
+      <footer className="shrink-0 z-20 glass-card border-t border-white/40 px-4 py-4">
         <div className="max-w-3xl mx-auto flex items-end gap-3">
           <div className="flex-1 relative">
             <textarea
@@ -285,7 +285,7 @@ export default function DemoPage() {
               rows={1}
               disabled={isTyping}
               placeholder="想说什么…"
-              className="w-full rounded-2xl border border-border-default bg-bg-surface px-4 py-3 pr-12 text-sm text-text-primary placeholder:text-text-dim outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/15 transition-all resize-none max-h-32"
+              className="input-macaron w-full rounded-2xl border border-white/50 bg-white/40 px-4 py-3 pr-12 text-sm text-text-primary placeholder:text-text-dim outline-none transition-all resize-none max-h-32"
               style={{ minHeight: '48px' }}
             />
             <span className="absolute right-3 bottom-3 text-[10px] text-text-dim hidden sm:inline">
@@ -295,7 +295,7 @@ export default function DemoPage() {
           <button
             onClick={handleSend}
             disabled={!input.trim() || isTyping}
-            className="shrink-0 w-12 h-12 rounded-2xl bg-primary-500 text-white flex items-center justify-center hover:bg-primary-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+            className="shrink-0 w-12 h-12 rounded-2xl btn-macaron text-white flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-md"
           >
             <Send className="w-4 h-4" />
           </button>
@@ -309,18 +309,18 @@ export default function DemoPage() {
       {memoryOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div
-            className="absolute inset-0 bg-black/20 backdrop-blur-[2px]"
+            className="absolute inset-0 bg-black/10 backdrop-blur-[2px]"
             onClick={() => setMemoryOpen(false)}
           />
-          <div className="relative w-full max-w-md h-full bg-bg-surface border-l border-border-default shadow-2xl animate-slide-up overflow-y-auto">
-            <div className="sticky top-0 z-10 bg-bg-surface/95 backdrop-blur-sm border-b border-border-default px-5 py-4 flex items-center justify-between">
+          <div className="relative w-full max-w-md h-full glass-card border-l border-white/40 shadow-2xl animate-slide-up overflow-y-auto">
+            <div className="sticky top-0 z-10 glass-card border-b border-white/40 px-5 py-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Brain className="w-4 h-4 text-primary-500" />
+                <Brain className="w-4 h-4 text-macaron-pink-deep" />
                 <h2 className="text-sm font-semibold">我记得你什么</h2>
               </div>
               <button
                 onClick={() => setMemoryOpen(false)}
-                className="p-1.5 rounded-lg hover:bg-bg-hover text-text-muted transition-colors"
+                className="p-1.5 rounded-lg hover:bg-white/50 text-text-muted transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -328,7 +328,7 @@ export default function DemoPage() {
 
             <div className="p-5 space-y-5">
               {/* Mode tabs */}
-              <div className="flex gap-2 p-1 bg-bg-deep rounded-xl">
+              <div className="flex gap-2 p-1 rounded-xl bg-white/30">
                 <button
                   onClick={() => {
                     setMemoryMode('visualize')
@@ -336,7 +336,7 @@ export default function DemoPage() {
                   }}
                   className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
                     memoryMode === 'visualize'
-                      ? 'bg-bg-surface text-primary-700 shadow-sm'
+                      ? 'tab-active'
                       : 'text-text-muted hover:text-text-secondary'
                   }`}
                 >
@@ -349,7 +349,7 @@ export default function DemoPage() {
                   }}
                   className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
                     memoryMode === 'recall'
-                      ? 'bg-bg-surface text-primary-700 shadow-sm'
+                      ? 'tab-active'
                       : 'text-text-muted hover:text-text-secondary'
                   }`}
                 >
@@ -364,12 +364,12 @@ export default function DemoPage() {
                     onChange={(e) => setMemoryQuery(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && loadMemory('recall')}
                     placeholder="输入关键词…"
-                    className="flex-1 rounded-xl border border-border-default bg-bg-surface px-3 py-2 text-xs outline-none focus:border-primary-400"
+                    className="input-macaron flex-1 rounded-xl bg-white/40 border border-white/50 px-3 py-2 text-xs outline-none"
                   />
                   <button
                     onClick={() => loadMemory('recall')}
                     disabled={memoryLoading}
-                    className="px-3 py-2 rounded-xl bg-primary-500 text-white text-xs hover:bg-primary-600 disabled:opacity-50"
+                    className="px-3 py-2 rounded-xl btn-macaron text-white text-xs disabled:opacity-50"
                   >
                     搜索
                   </button>
@@ -379,7 +379,7 @@ export default function DemoPage() {
               {memoryLoading ? (
                 <div className="space-y-3">
                   {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-16 rounded-xl bg-bg-hover animate-pulse" />
+                    <div key={i} className="h-16 rounded-xl bg-white/30 animate-pulse" />
                   ))}
                 </div>
               ) : (
@@ -387,12 +387,12 @@ export default function DemoPage() {
                   {memoryData.stats && memoryMode === 'visualize' && (
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-3">
-                        <div className="bg-bg-deep rounded-xl p-3 text-center">
-                          <p className="text-xl font-bold text-primary-600">{memoryData.stats.fact_count}</p>
+                        <div className="glass-pink rounded-xl p-3 text-center">
+                          <p className="text-xl font-bold text-macaron-pink-deep">{memoryData.stats.fact_count}</p>
                           <p className="text-[10px] text-text-muted mt-0.5">长期事实</p>
                         </div>
-                        <div className="bg-bg-deep rounded-xl p-3 text-center">
-                          <p className="text-xl font-bold text-accent-600">{memoryData.stats.episode_count}</p>
+                        <div className="glass-blue rounded-xl p-3 text-center">
+                          <p className="text-xl font-bold text-macaron-blue-deep">{memoryData.stats.episode_count}</p>
                           <p className="text-[10px] text-text-muted mt-0.5">场景记忆</p>
                         </div>
                       </div>
@@ -404,9 +404,9 @@ export default function DemoPage() {
                             {memoryData.stats.top_categories.map(([cat, count]) => (
                               <span
                                 key={cat}
-                                className="px-2 py-1 rounded-lg bg-bg-deep text-[10px] text-text-secondary border border-border-subtle"
+                                className="px-2 py-1 rounded-lg tag-pink text-[10px]"
                               >
-                                {cat} <span className="text-primary-500 ml-0.5">{count}</span>
+                                {cat} <span className="ml-0.5">{count}</span>
                               </span>
                             ))}
                           </div>
@@ -420,9 +420,9 @@ export default function DemoPage() {
                             {memoryData.stats.top_emotions.map(([emo, count]) => (
                               <span
                                 key={emo}
-                                className="px-2 py-1 rounded-lg bg-bg-deep text-[10px] text-text-secondary border border-border-subtle"
+                                className="px-2 py-1 rounded-lg tag-blue text-[10px]"
                               >
-                                {emo} <span className="text-accent-500 ml-0.5">{count}</span>
+                                {emo} <span className="ml-0.5">{count}</span>
                               </span>
                             ))}
                           </div>
@@ -434,19 +434,19 @@ export default function DemoPage() {
                   {memoryData.facts.length > 0 && (
                     <section>
                       <h3 className="text-xs font-semibold text-text-secondary mb-2 flex items-center gap-1.5">
-                        <Sparkles className="w-3 h-3 text-accent-500" />
+                        <Sparkles className="w-3 h-3 text-macaron-blue-deep" />
                         我记得的事实
                       </h3>
                       <div className="space-y-2">
                         {memoryData.facts.map((fact, idx) => (
                           <div
                             key={idx}
-                            className="bg-bg-deep rounded-xl p-3 text-xs leading-relaxed border border-border-subtle"
+                            className="glass-green rounded-xl p-3 text-xs leading-relaxed"
                           >
                             <p className="text-text-primary">{fact.content || fact.fact}</p>
                             {(fact.category || fact.confidence) && (
-                              <div className="flex items-center gap-2 mt-2 text-[10px] text-text-dim">
-                                {fact.category && <span className="px-1.5 py-0.5 bg-white rounded-md">{fact.category}</span>}
+                              <div className="flex items-center gap-2 mt-2 text-[10px] text-text-muted">
+                                {fact.category && <span className="px-1.5 py-0.5 bg-white/60 rounded-md">{fact.category}</span>}
                                 {fact.confidence !== undefined && (
                                   <span>置信度 {(fact.confidence * 100).toFixed(0)}%</span>
                                 )}
@@ -461,14 +461,14 @@ export default function DemoPage() {
                   {memoryData.episodes.length > 0 && (
                     <section>
                       <h3 className="text-xs font-semibold text-text-secondary mb-2 flex items-center gap-1.5">
-                        <Clock className="w-3 h-3 text-primary-400" />
+                        <Clock className="w-3 h-3 text-macaron-pink-deep" />
                         最近的场景
                       </h3>
                       <div className="space-y-2">
                         {memoryData.episodes.map((ep, idx) => (
                           <div
                             key={idx}
-                            className="bg-bg-deep rounded-xl p-3 text-xs leading-relaxed border border-border-subtle"
+                            className="glass-blue rounded-xl p-3 text-xs leading-relaxed"
                           >
                             <p className="text-text-primary">{ep.summary || ep.content}</p>
                             {ep.timestamp && (
@@ -499,10 +499,10 @@ export default function DemoPage() {
       {/* Exit Modal */}
       {exitOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/25 backdrop-blur-[2px]" onClick={() => setExitOpen(false)} />
-          <div className="relative w-full max-w-sm bg-bg-surface rounded-2xl border border-border-default shadow-2xl p-6 text-center animate-scale-in">
-            <div className="w-12 h-12 mx-auto rounded-full bg-bg-deep border border-border-default flex items-center justify-center mb-4">
-              <LogOut className="w-5 h-5 text-primary-500" />
+          <div className="absolute inset-0 bg-black/15 backdrop-blur-[2px]" onClick={() => setExitOpen(false)} />
+          <div className="relative w-full max-w-sm glass-card rounded-2xl p-6 text-center animate-scale-in">
+            <div className="w-12 h-12 mx-auto rounded-full glass-pink flex items-center justify-center mb-4">
+              <LogOut className="w-5 h-5 text-macaron-pink-deep" />
             </div>
             <p className="text-sm leading-relaxed whitespace-pre-line text-text-primary mb-6">
               {exitMessage}
@@ -510,13 +510,13 @@ export default function DemoPage() {
             <div className="flex gap-3">
               <button
                 onClick={() => setExitOpen(false)}
-                className="flex-1 py-2 rounded-xl border border-border-default text-xs font-medium text-text-secondary hover:bg-bg-hover transition-colors"
+                className="flex-1 py-2.5 rounded-xl border border-white/50 text-xs font-medium text-text-secondary hover:bg-white/50 transition-colors"
               >
                 留在对话里
               </button>
               <button
                 onClick={confirmExit}
-                className="flex-1 py-2 rounded-xl bg-primary-500 text-white text-xs font-medium hover:bg-primary-600 transition-colors flex items-center justify-center gap-1"
+                className="flex-1 py-2.5 rounded-xl btn-macaron text-white text-xs font-medium transition-colors flex items-center justify-center gap-1"
               >
                 退出 <ChevronRight className="w-3 h-3" />
               </button>
