@@ -26,10 +26,10 @@ logger = logging.getLogger("shisi.application.memory_service")
 def _build_default_memory_backends(chroma_path, db_path, structured_memory, vector_memory):
     """Build defaults."""
     if vector_memory is None and chroma_path is not None:
-        from memory.vector_memory import VectorMemory  # TODO: shisi/memory/pipeline.py
+        from shisi.memory.legacy.vector_memory import VectorMemory
         vector_memory = VectorMemory(chroma_path=str(chroma_path))
     if structured_memory is None and db_path is not None:
-        from memory.structured_memory import StructuredMemory  # TODO: shisi/memory/pipeline.py
+        from shisi.memory.legacy.structured_memory import StructuredMemory
         structured_memory = StructuredMemory(db_path=str(db_path))
     return structured_memory, vector_memory
 

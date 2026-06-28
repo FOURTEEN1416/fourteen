@@ -1,0 +1,17 @@
+[Unit]
+Description=AI Girlfriend Backend (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ai-girlfriend
+EnvironmentFile=/opt/ai-girlfriend/.env
+ExecStart=/opt/ai-girlfriend/.venv/bin/python -m uvicorn api.run_api:app --host 0.0.0.0 --port 8000 --workers 1
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/ai-girlfriend.log
+StandardError=append:/var/log/ai-girlfriend.log
+
+[Install]
+WantedBy=multi-user.target

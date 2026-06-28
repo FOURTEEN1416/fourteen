@@ -114,3 +114,6 @@ third_party/
 .triad-navigation/progress.md
 
 .env
+
+# Node modules at root
+node_modules/
