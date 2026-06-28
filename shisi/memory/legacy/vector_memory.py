@@ -361,8 +361,8 @@ class VectorMemory:
                                 "metadata": meta,
                                 "distance": res["distances"][0][i] if res.get("distances") else 0,
                             })
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("向量搜索结果解析失败，跳过该批次: %s", e)
         return all_results
 
     def search_sync(self, query: str, top_k: int = 5, filter_dict: dict | None = None) -> list[dict[str, Any]]:

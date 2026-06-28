@@ -5,7 +5,7 @@
  * 认证成功后自动跳转到 /wechat。
  */
 import { useState, type FormEvent } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, Navigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
 type Mode = 'login' | 'register'
@@ -26,11 +26,10 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  // 已登录则跳走
+  // 已登录则跳走（用 <Navigate> 组件，避免 render 期间副作用）
   if (isAuthenticated) {
     const from = (location.state as { from?: string })?.from || '/wechat'
-    navigate(from, { replace: true })
-    return null
+    return <Navigate to={from} replace />
   }
 
   const handleSubmit = async (e: FormEvent) => {

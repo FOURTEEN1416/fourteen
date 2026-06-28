@@ -29,7 +29,7 @@ export default function BindingDetailPage() {
         setBinding(found)
         setPresets(presetRes.presets || [])
       })
-      .catch((err: unknown) => console.warn('加载绑定详情失败:', err))
+      .catch((err: unknown) => { if (import.meta.env.DEV) console.warn('加载绑定详情失败:', err) })
       .finally(() => {
         if (!cancelled) setLoading(false)
       })

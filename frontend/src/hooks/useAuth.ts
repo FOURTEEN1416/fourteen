@@ -1,33 +1,23 @@
-﻿/**
+/**
  * 用户认证 Hook
  *
  * 封装认证 API 调用逻辑，更新 authStore 纯状态。
  * Option A: accessToken 存内存闭包，refreshToken 由 httpOnly cookie 管理。
  * 遵循 FF-0007：Zustand store 不直接 import API。
  *
- * 提供：login / register / logout / refresh / init
- * 读取：user / isAuthenticated / isInitialized（透传 store 状态）
+ * 提供：login / register / registerWithInvite / logout
+ * 读取：user / isAuthenticated
+ *
+ * 注：认证初始化逻辑已移至 App.tsx 的 <AuthInit> 组件，
+ * 此处不再暴露 init/refresh，避免双份初始化路径。
  */
 import * as authApi from '../api/auth'
-import { useAuthStore, setAccessToken } from '../store/authStore'
+import { useAuthStore } from '../store/authStore'
 
 // ── Hook ────────────────────────────────────────────
 
 export function useAuth() {
-  const { user, isAuthenticated, isInitialized } = useAuthStore()
-
-  const init = async () => {
-    // 检查是否有持久化的 user（说明之前登录过）
-    const { user: storedUser } = useAuthStore.getState()
-    if (!storedUser) {
-      useAuthStore.setState({ isInitialized: true })
-      return
-    }
-    // 尝试用 httpOnly cookie 自动刷新 accessToken
-    const ok = await refresh()
-    useAuthStore.setState({ isInitialized: true })
-    return ok
-  }
+  const { user, isAuthenticated } = useAuthStore()
 
   const login = async (loginName: string, password: string) => {
     const res = await authApi.login({ login: loginName, password })
@@ -65,21 +55,8 @@ export function useAuth() {
     useAuthStore.getState().clearAuth()
   }
 
-  const refresh = async (): Promise<boolean> => {
-    try {
-      // httpOnly cookie 由浏览器自动发送
-      const res = await authApi.refreshToken()
-      setAccessToken(res.access_token)
-      useAuthStore.setState({ user: res.user, isAuthenticated: true })
-      return true
-    } catch {
-      useAuthStore.getState().clearAuth()
-      return false
-    }
-  }
-
   return {
-    init, login, register, registerWithInvite, logout, refresh,
-    user, isAuthenticated, isInitialized,
+    login, register, registerWithInvite, logout,
+    user, isAuthenticated,
   }
 }

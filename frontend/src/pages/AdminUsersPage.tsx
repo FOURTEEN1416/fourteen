@@ -119,7 +119,7 @@ function validatePassword(v: string, required: boolean): string | null {
 // ════════════════════════════════════════════════════
 
 export default function AdminUsersPage() {
-  const { user } = useAuthStore()
+  const user = useAuthStore(s => s.user)
   const addToast = useErrorStore(s => s.addToast)
 
   // ── 数据状态 ──

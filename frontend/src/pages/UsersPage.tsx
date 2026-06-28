@@ -209,7 +209,7 @@ export default function UsersPage() {
                           {binding.nickname || '微信用户'}
                         </p>
                         <p className="text-xs text-gray-400">
-                          <code className="rounded bg-gray-100 px-1 px-0.5 text-[10px]">{binding.wxid}</code>
+                          <code className="rounded bg-gray-100 px-0.5 text-[10px]">{binding.wxid}</code>
                         </p>
                       </div>
                     </div>

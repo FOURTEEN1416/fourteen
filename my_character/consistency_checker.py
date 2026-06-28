@@ -281,8 +281,8 @@ async def check_and_correct_reply(
             try:
                 history, _ = memory.get_chat_context(session_id=session_id)
                 chat_round = len(history) if history else 0
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("获取 chat_context 失败，chat_round 降级为 0: %s", e)
 
         result = persona_engine.check_consistency(reply, emotion_state, chat_round)
 

@@ -223,7 +223,7 @@ function PresetGrid({ onSelect }: { onSelect: (p: Partial<PersonaState>) => void
         },
       })
     } catch (err) {
-      console.warn('获取预设详情失败，使用概要数据:', err)
+      if (import.meta.env.DEV) console.warn('获取预设详情失败，使用概要数据:', err)
       // fallback: fill basic info
       onSelect({
         name: item.name,

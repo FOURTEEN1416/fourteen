@@ -176,7 +176,7 @@ export default function StorylineEditor({ characterId }: StorylineEditorProps) {
       setDetectResult(null)
     } catch (err: unknown) {
       // 错误已由 useDeleteStorylineConfig 的 onError 统一处理；这里只兜底
-      console.error('删除剧情线失败:', err)
+      if (import.meta.env.DEV) console.error('删除剧情线失败:', err)
     }
   }
 

@@ -19,7 +19,7 @@ import StatusCenter from './pages/StatusCenter'
 import StorylineEditor from './components/storyline/StorylineEditor'
 import { AuthGuard, RoleGuard } from './components/auth'
 import { useAuthStore } from './store/authStore'
-import * as authApi from './api/auth'
+import { refreshToken } from './api/auth'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
@@ -65,7 +65,7 @@ function AnimatedSuspense({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** 璁よ瘉鍒濆鍖栵細App 鍚姩鏃?init() 涓€娆?*/
+/** 认证初始化：App 启动时 init() 一次 */
 function AuthInit({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Option A: user 已持久化，accessToken 需通过 httpOnly cookie 刷新获取
@@ -77,7 +77,7 @@ function AuthInit({ children }: { children: React.ReactNode }) {
     // 有持久化 user → 通过 httpOnly cookie 刷新 accessToken
     const doInit = async () => {
       try {
-        const res = await authApi.refreshToken() // cookie auto-sent
+        const res = await refreshToken() // cookie auto-sent
         useAuthStore.getState().setAuth(res.user, res.access_token)
         useAuthStore.setState({ isInitialized: true })
       } catch {
@@ -90,7 +90,7 @@ function AuthInit({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-/** 鍙椾繚鎶ょ殑绠＄悊鎺у埗鍙板竷灞€锛堝惈渚ц竟鏍?椤舵爮+AuthGuard锛?*/
+/** 受保护的管理控制台布局（含侧边栏+顶栏+AuthGuard） */
 function ProtectedLayout() {
   return (
     <AuthGuard>
@@ -116,11 +116,11 @@ export default function App() {
     <ErrorBoundary>
     <AuthInit>
       <Routes>
-        {/* 鈺愨晲鈺?鍏紑璺敱锛氱櫥褰曢〉 + Demo 浣撻獙 鈺愨晲鈺?*/}
+        {/* ─── 公开路由：登录页 + Demo 体验 ─── */}
         <Route path="/login" element={<Suspense fallback={<PageLoadingSkeleton />}><LoginPage /></Suspense>} />
         <Route path="/demo" element={<AnimatedSuspense><DemoPage /></AnimatedSuspense>} />
 
-        {/* 鈺愨晲鈺?鍙椾繚鎶よ矾鐢憋細绠＄悊鎺у埗鍙?鈺愨晲鈺?*/}
+        {/* ─── 受保护路由：管理控制台 ─── */}
         <Route element={<ProtectedLayout />}>
           <Route path="/" element={<Navigate to="/wechat" replace />} />
 
@@ -149,15 +149,15 @@ export default function App() {
             <Route path="logs" element={<AnimatedSuspense><SettingsLogs /></AnimatedSuspense>} />
           </Route>
 
-          {/* 鈺愨晲鈺?绠＄悊鍚庡彴锛堜粎 admin 瑙掕壊锛?鈺愨晲鈺?
-              鏃ュ織瀹¤/绯荤粺閰嶇疆/瀹夊叏闈㈡澘宸蹭粠 /settings/* 缁熶竴鍏ュ彛璁块棶,涓嶅湪姝ゅ閲嶅 */}
+          {/* ─── 管理后台（仅 admin 角色）───
+              日志审计/系统配置/安全面板已从 /settings/* 统一入口访问,不在此处重复 */}
           <Route element={<RoleGuard roles={['admin'] as const} />}>
             <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
             <Route path="/admin/users" element={<AnimatedSuspense><AdminUsersPage /></AnimatedSuspense>} />
           </Route>
         </Route>
 
-        {/* 鍏滃簳锛氭湭鍖归厤鐨勮矾寰?*/}
+        {/* 兜底：未匹配的路径 */}
         <Route path="*" element={<Suspense fallback={<PageLoadingSkeleton />}><NotFoundPage /></Suspense>} />
       </Routes>
     </AuthInit>
@@ -165,4 +165,3 @@ export default function App() {
     </QueryClientProvider>
   )
 }
-
