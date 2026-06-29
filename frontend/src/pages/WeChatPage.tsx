@@ -1,11 +1,13 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { AnimatedPage } from '../components/shared'
-import { useWechatStatus } from '../hooks/useQueries'
+import { useQueryClient } from '@tanstack/react-query'
+import { useWechatStatus, queryKeys } from '../hooks/useQueries'
 import { Search, Wifi, WifiOff, Trash2, RefreshCw, X, QrCode, Clock, MessageSquare, AlertTriangle, CheckCircle2, Smartphone } from 'lucide-react'
 import type { SavedConnection } from '../types/framework'
 import {
   wechatCreateConnection,
   wechatDeleteConnection,
+  wechatListConnections,
   bindWechat,
 } from '../api/wechat'
 import { wechatQrCode, wechatConnectionStatus, wechatConnect } from '../api/system'
@@ -128,13 +130,15 @@ function StatsBar({ connections }: { connections: SavedConnection[] }) {
 
 // ── QR Code Connection Modal ──
 
-function QrCodeConnectionModal({ onClose }: { onClose: () => void }) {
+function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; onConnected?: (wxid: string) => void }) {
   const [status, setStatus] = useState<QrStatus>('loading')
   const [qrImage, setQrImage] = useState<string>('')
   const [errorMsg, setErrorMsg] = useState<string>('')
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollingStartRef = useRef<number>(0) // 轮询开始时间（用于过期宽限期）
+  const connectedRef = useRef(false)
+  const qc = useQueryClient()
 
   // 触发后端连接（启动 WeChatConnector 生成二维码）
   const triggerConnection = useCallback(async () => {
@@ -154,14 +158,21 @@ function QrCodeConnectionModal({ onClose }: { onClose: () => void }) {
         if (connData.connected || connData.status === 'connected') {
           setStatus('connected')
           if (pollingRef.current) clearInterval(pollingRef.current)
-          // 自动保存连接
-          if (connData.wxid) {
+          // 自动保存连接并通知父组件刷新列表
+          if (connData.wxid && !connectedRef.current) {
+            connectedRef.current = true
             const wxid = connData.wxid
-            wechatCreateConnection({ wxid }).catch(() => {})
+            try {
+              await wechatCreateConnection({ wxid })
+            } catch {
+              // 忽略保存失败
+            }
             // 如果已登录，自动绑定到当前账号
             if (getAccessToken()) {
               bindWechat({ wxid }).catch(() => {})
             }
+            onConnected?.(wxid)
+            qc.invalidateQueries({ queryKey: queryKeys.wechat.status })
           }
         } else if (connData.status === 'scanned') {
           setStatus('scanned')
@@ -170,7 +181,7 @@ function QrCodeConnectionModal({ onClose }: { onClose: () => void }) {
         // 忽略轮询错误
       }
     }, 2000)
-  }, [])
+  }, [onConnected, qc])
 
   // 轮询二维码（后端连接器需要时间生成二维码）
   const startQrPolling = useCallback(() => {
@@ -350,6 +361,9 @@ function QrCodeConnectionModal({ onClose }: { onClose: () => void }) {
 // ── Main Component ──
 
 export default function WeChatPage() {
+  const qc = useQueryClient()
+  const { data: wechatStatus } = useWechatStatus()
+
   const [connections, setConnections] = useState<SavedConnection[]>(() => {
     try {
       const saved = localStorage.getItem('unique-you-wechat-connections')
@@ -372,6 +386,43 @@ export default function WeChatPage() {
     localStorage.setItem('unique-you-wechat-connections', JSON.stringify(list))
   }, [])
 
+  // ── Load connections from backend ──
+
+  const loadConnections = useCallback(async () => {
+    try {
+      const res = await wechatListConnections()
+      const data = res.data as { connections?: Array<{ wxid?: string; nickname?: string; alias?: string }> }
+      const list = (data.connections || []).map((c) => ({
+        wxid: c.wxid || '',
+        alias: c.alias || c.nickname || '',
+        isOnline: wechatStatus?.connected ?? false,
+        isCurrent: false,
+      }))
+      setConnections(list)
+      persist(list)
+    } catch {
+      // 保留本地数据
+    }
+  }, [wechatStatus?.connected, persist])
+
+  useEffect(() => {
+    loadConnections()
+  }, [loadConnections])
+
+  // 全局连接状态变化时，同步更新列表中所有连接的在线状态
+  useEffect(() => {
+    setConnections((prev) => {
+      const online = wechatStatus?.connected ?? false
+      const updated = prev.map((c) => ({ ...c, isOnline: online }))
+      const changed = updated.some((c, i) => c.isOnline !== prev[i].isOnline)
+      if (changed) {
+        persist(updated)
+        return updated
+      }
+      return prev
+    })
+  }, [wechatStatus?.connected, persist])
+
   // ── Filter ──
 
   const filtered = useMemo(() => {
@@ -387,13 +438,27 @@ export default function WeChatPage() {
   // ── Handlers ──
 
   const handleDelete = useCallback(
-    (wxid: string) => {
+    async (wxid: string) => {
+      try {
+        await wechatDeleteConnection(wxid)
+      } catch {
+        // ignore
+      }
       const updated = connections.filter((c) => c.wxid !== wxid)
       setConnections(updated)
       persist(updated)
-      wechatDeleteConnection(wxid).catch(() => {})
     },
     [connections, persist]
+  )
+
+  const handleConnected = useCallback(
+    (_wxid: string) => {
+      loadConnections()
+      qc.invalidateQueries({ queryKey: queryKeys.wechat.status })
+      // 连接成功后可以自动关闭弹窗，也可以让用户点击“完成”关闭
+      // setShowQrModal(false)
+    },
+    [loadConnections, qc]
   )
 
   // ── Render ──
@@ -514,7 +579,7 @@ export default function WeChatPage() {
       </div>
 
       {showQrModal && (
-        <QrCodeConnectionModal onClose={() => setShowQrModal(false)} />
+        <QrCodeConnectionModal onClose={() => setShowQrModal(false)} onConnected={handleConnected} />
       )}
     </AnimatedPage>
   )

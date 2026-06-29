@@ -69,6 +69,7 @@ class MiMoTTSProvider(TTSProviderBase):
         voice_id: str = "",
         timeout: float = 30.0,
         fallback_local: bool = True,
+        base_url: str | None = None,
     ):
         """
         初始化MiMo TTS提供者
@@ -79,12 +80,14 @@ class MiMoTTSProvider(TTSProviderBase):
             voice_id: 克隆音色ID（使用voiceclone时需要）
             timeout: API调用超时时间
             fallback_local: API失败时是否降级到本地引擎
+            base_url: 自定义 API Base URL，为空时使用默认地址
         """
         self._api_key = api_key
         self._model = model if model in self.SUPPORTED_MODELS else "mimo-v2.5-tts"
         self._voice_id = voice_id
         self._timeout = timeout
         self._fallback_local = fallback_local
+        self._api_base = base_url if base_url else self._api_base
         self._local_fallback_provider: TTSProviderBase | None = None
         self._available = True
         self._last_error: str | None = None
@@ -147,7 +150,7 @@ class MiMoTTSProvider(TTSProviderBase):
 
         try:
             async with aiohttp.ClientSession() as session, session.post(
-                f"{self.API_BASE}{self.ENDPOINTS['tts']}",
+                f"{self._api_base}{self.ENDPOINTS['tts']}",
                 headers=self._get_headers(),
                 json=payload,
                 timeout=aiohttp.ClientTimeout(total=self._timeout),
@@ -199,7 +202,7 @@ class MiMoTTSProvider(TTSProviderBase):
 
         try:
             async with aiohttp.ClientSession() as session, session.post(
-                f"{self.API_BASE}{self.ENDPOINTS['tts']}",
+                f"{self._api_base}{self.ENDPOINTS['tts']}",
                 headers=self._get_headers(),
                 json=payload,
                 timeout=aiohttp.ClientTimeout(total=self._timeout),
@@ -324,7 +327,7 @@ class MiMoTTSProvider(TTSProviderBase):
             )
 
             async with aiohttp.ClientSession() as session, session.post(
-                f"{self.API_BASE}{self.ENDPOINTS['voiceclone']}",
+                f"{self._api_base}{self.ENDPOINTS['voiceclone']}",
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 data=data,
                 timeout=aiohttp.ClientTimeout(total=60.0),  # 克隆需要更长时间
@@ -393,7 +396,7 @@ class MiMoTTSProvider(TTSProviderBase):
 
         try:
             async with aiohttp.ClientSession() as session, session.post(
-                f"{self.API_BASE}{self.ENDPOINTS['voicedesign']}",
+                f"{self._api_base}{self.ENDPOINTS['voicedesign']}",
                 headers=self._get_headers(),
                 json=payload,
                 timeout=aiohttp.ClientTimeout(total=30.0),

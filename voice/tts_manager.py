@@ -110,6 +110,7 @@ class TTSManager:
                 voice_id=mimo_cfg.get("voice_id", ""),
                 timeout=mimo_cfg.get("timeout", 30.0),
                 fallback_local=mimo_cfg.get("fallback_local", True),
+                base_url=mimo_cfg.get("base_url"),
             )
             logger.info("MiMo TTS已配置: model=%s", mimo_cfg.get("model", "mimo-v2.5-tts"))
 

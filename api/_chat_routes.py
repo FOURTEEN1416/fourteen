@@ -205,8 +205,14 @@ async def manual_disconnect_wechat(_auth: bool = Security(verify_api_key_dep)):
 async def get_wechat_connection_status(_auth: bool = Security(verify_api_key_dep)):
     conn = deps.get_wechat_connector()
     if conn and conn.token:
-        return {"status": "connected", "message": "已连接", "started_at": conn.started_at}
-    return {"status": "idle", "message": "未连接"}
+        return {
+            "status": "connected",
+            "connected": True,
+            "message": "已连接",
+            "started_at": conn.started_at,
+            "wxid": conn.bot_id,
+        }
+    return {"status": "idle", "connected": False, "message": "未连接"}
 
 
 @router.get("/api/channels/wechat/status")

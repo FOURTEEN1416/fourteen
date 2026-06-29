@@ -245,6 +245,7 @@ async def set_mimo_engine(
             voice_id=voice_id,
             timeout=provider._timeout,
             fallback_local=provider._fallback_local,
+            base_url=getattr(provider, "_api_base", MiMoTTSProvider.API_BASE),
         )
 
         # 更新providers字典

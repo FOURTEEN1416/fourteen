@@ -40,11 +40,11 @@ function buildGlobalNavGroups(isAdmin: boolean): NavGroup[] {
       drawer: true,
       items: [
         { to: '/users', icon: Users, label: '我的微信' },
-        { to: '/users', icon: Activity, label: '绑定详情' },
-        { to: '/users', icon: User, label: '用户工作区' },
-        { to: '/users', icon: Plus, label: '创建角色' },
-        { to: '/users', icon: Settings, label: '角色设置' },
-        { to: '/users', icon: BarChart3, label: '状态中心' },
+        { to: '/bindings/default', icon: Activity, label: '绑定详情' },
+        { to: '/users/default', icon: User, label: '用户工作区' },
+        { to: '/users/default/roles/create', icon: Plus, label: '创建角色' },
+        { to: '/users/default/roles/default/settings', icon: Settings, label: '角色设置' },
+        { to: '/users/default/roles/default/status', icon: BarChart3, label: '状态中心' },
       ],
     },
     {

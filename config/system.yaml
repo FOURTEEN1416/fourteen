@@ -123,7 +123,8 @@ voice:
   # 文档: https://platform.xiaomimimo.com/docs
   mimo-tts:
     enabled: true                       # 是否启用MiMo TTS
-    api_key: "sk-c3xwgfb34tyvbs3h14iji0gbruvwim1fi4siglxel6fdl3y8"  # MiMo API密钥
+    api_key: "sk-c2tmjxs4acn2d5z0fyj0mi9zj516grd8zryt8upf6nnyhks7"  # MiMo API密钥
+    base_url: "https://api.xiaomimimo.com/v1"  # MiMo TTS API Base URL（sk- 按量付费）
     model: "mimo-v2.5-tts"              # 默认模型:
                                         #   - mimo-v2.5-tts: 基础语音合成
                                         #   - mimo-v2.5-tts-voiceclone: 语音克隆
