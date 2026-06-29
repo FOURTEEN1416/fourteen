@@ -27,10 +27,10 @@ sudo apt-get update && sudo apt-get upgrade -y
 sudo timedatectl set-timezone Asia/Shanghai
 
 # 克隆项目
-sudo mkdir -p /opt/unique-you
-sudo chown $USER:$USER /opt/unique-you
-git clone https://github.com/FOURTEEN1416/unique-you.git /opt/unique-you
-cd /opt/unique-you
+sudo mkdir -p /opt/ai-girlfriend
+sudo chown $USER:$USER /opt/ai-girlfriend
+git clone https://github.com/FOURTEEN1416/fourteen.git /opt/ai-girlfriend
+cd /opt/ai-girlfriend
 ```
 
 ### 第二步：运行初始化脚本
@@ -53,8 +53,8 @@ sudo bash deploy/setup.sh
 ### 第三步：配置环境变量
 
 ```bash
-cp deploy/.env.production /opt/unique-you/.env
-nano /opt/unique-you/.env
+cp deploy/.env.production /opt/ai-girlfriend/.env
+nano /opt/ai-girlfriend/.env
 ```
 
 **必须修改的项：**
@@ -81,7 +81,7 @@ certbot 会自动修改 Nginx 配置并启用 HTTPS。
 ### 第五步：部署应用
 
 ```bash
-cd /opt/unique-you
+cd /opt/ai-girlfriend
 sudo bash deploy/deploy.sh
 ```
 
@@ -102,7 +102,7 @@ sudo bash deploy/deploy.sh
 
 ```bash
 # 检查后端服务状态
-systemctl status unique-you-backend
+systemctl status ai-girlfriend
 
 # 检查 API 是否响应
 curl http://127.0.0.1:8000/health
@@ -122,36 +122,36 @@ curl -H "X-API-Key: your-api-key" https://unique-you.yourdomain.com/api/v1/statu
 
 ```bash
 # 后端日志（实时）
-journalctl -u unique-you-backend -f
+journalctl -u ai-girlfriend -f
 
 # Nginx 访问日志
-tail -f /var/log/nginx/unique-you-access.log
+tail -f /var/log/nginx/ai-girlfriend-access.log
 
 # Nginx 错误日志
-tail -f /var/log/nginx/unique-you-error.log
+tail -f /var/log/nginx/ai-girlfriend-error.log
 
 # 应用自定义日志
-tail -f /opt/unique-you/logs/uvicorn.log
+tail -f /opt/ai-girlfriend/logs/uvicorn.log
 ```
 
 ### 常用操作
 
 ```bash
 # 重启后端
-sudo systemctl restart unique-you-backend
+sudo systemctl restart ai-girlfriend
 
 # 重启 Nginx
 sudo systemctl reload nginx
 
 # 查看后端资源占用
-systemctl status unique-you-backend
+systemctl status ai-girlfriend
 top -p $(pgrep -f uvicorn)
 
 # 数据库备份（推荐使用自动备份脚本）
 bash deploy/backup.sh
 
 # 查看备份列表
-ls -la /opt/unique-you/backups/
+ls -la /opt/ai-girlfriend/backups/
 ```
 
 ### 健康检查端点
@@ -168,7 +168,7 @@ ls -la /opt/unique-you/backups/
 ## 更新应用
 
 ```bash
-cd /opt/unique-you
+cd /opt/ai-girlfriend
 sudo bash deploy/deploy.sh
 ```
 
@@ -177,10 +177,10 @@ sudo bash deploy/deploy.sh
 如果你要回滚：
 
 ```bash
-cd /opt/unique-you
+cd /opt/ai-girlfriend
 git log --oneline -10        # 找到要回滚的 commit
 git reset --hard <commit-hash>
-sudo systemctl restart unique-you-backend
+sudo systemctl restart ai-girlfriend
 ```
 
 ---
@@ -220,7 +220,7 @@ sudo systemctl restart unique-you-backend
 
 ```bash
 # 看 journalctl 的具体错误
-journalctl -u unique-you-backend --no-pager -n 50
+journalctl -u ai-girlfriend --no-pager -n 50
 
 # 常见原因：
 # 1. .env 文件缺失或格式错误
@@ -229,7 +229,7 @@ journalctl -u unique-you-backend --no-pager -n 50
 # 4. Python 依赖未安装
 
 # 手动启动看错误
-cd /opt/unique-you && sudo -u www-data bash -c '
+cd /opt/ai-girlfriend && sudo -u www-data bash -c '
 source .venv/bin/activate
 PYTHONPATH=. uvicorn api.run_api:app --host 127.0.0.1 --port 8000
 '
@@ -252,13 +252,13 @@ sudo cat /etc/postgresql/15/main/pg_hba.conf | grep local
 
 ```bash
 # 确认前端文件已部署
-ls -la /var/www/unique-you/
+ls -la /var/www/ai-girlfriend/
 
 # 确认 Nginx 配置正确
 nginx -t
 
 # 检查 Nginx error log
-tail -f /var/log/nginx/unique-you-error.log
+tail -f /var/log/nginx/ai-girlfriend-error.log
 
 # 刷新浏览器缓存（硬刷新：Ctrl+Shift+R）
 ```
@@ -295,10 +295,10 @@ psql -U unique_you -h localhost unique_you < dump.sql
 
 | 日志 | 位置 |
 |------|------|
-| 后端 (journald) | `journalctl -u unique-you-backend` |
-| 后端 (uvicorn) | `/opt/unique-you/logs/uvicorn.log` |
-| Nginx 访问日志 | `/var/log/nginx/unique-you-access.log` |
-| Nginx 错误日志 | `/var/log/nginx/unique-you-error.log` |
+| 后端 (journald) | `journalctl -u ai-girlfriend` |
+| 后端 (uvicorn) | `/opt/ai-girlfriend/logs/uvicorn.log` |
+| Nginx 访问日志 | `/var/log/nginx/ai-girlfriend-access.log` |
+| Nginx 错误日志 | `/var/log/nginx/ai-girlfriend-error.log` |
 | PostgreSQL 日志 | `/var/log/postgresql/postgresql-15-main.log` |
 
 ---
@@ -308,7 +308,7 @@ psql -U unique_you -h localhost unique_you < dump.sql
 ```
 deploy/
 ├── nginx.conf                        # Nginx 反向代理配置
-├── unique-you-backend.service     # systemd 服务单元
+├── ai-girlfriend.service     # systemd 服务单元
 ├── deploy.sh                         # 部署脚本（拉取→构建→重启）
 ├── setup.sh                          # 初始化脚本（一次性的）
 ├── start.sh                          # 生产启动脚本（手动模式）

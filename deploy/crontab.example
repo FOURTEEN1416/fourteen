@@ -12,7 +12,7 @@
 #   - 日志会自动写入 BACKUP_DIR/backup.log
 #   - 备份文件保留 30 天，自动清理旧文件
 #   - 可通过环境变量自定义:
-#       DB_BACKUP_DIR: 备份目录（默认 /opt/unique-you/backups）
+#       DB_BACKUP_DIR: 备份目录（默认 /opt/ai-girlfriend/backups）
 #       DB_RETENTION_DAYS: 保留天数（默认 30）
 #
 # 前置条件:
@@ -21,10 +21,10 @@
 #   - 备份目录有写入权限
 #
 # 测试命令:
-#   /opt/unique-you/deploy/backup.sh --test
+#   /opt/ai-girlfriend/deploy/backup.sh --test
 #
 # 手动执行一次备份:
-#   /opt/unique-you/deploy/backup.sh
+#   /opt/ai-girlfriend/deploy/backup.sh
 #
 # =============================================================================
 
@@ -40,10 +40,10 @@
 # 如果使用自定义备份目录，在 crontab 开头设置:
 # DB_BACKUP_DIR=/custom/path
 # 然后:
-# 0 3 * * * /opt/unique-you/deploy/backup.sh >> /opt/unique-you/backups/backup.log 2>&1
+# 0 3 * * * /opt/ai-girlfriend/deploy/backup.sh >> /opt/ai-girlfriend/backups/backup.log 2>&1
 
 # 如需同时设置环境变量和自定义路径，写成一行:
-# 0 3 * * * DB_BACKUP_DIR=/opt/unique-you/backups /opt/unique-you/deploy/backup.sh >> /opt/unique-you/backups/cron.log 2>&1
+# 0 3 * * * DB_BACKUP_DIR=/opt/ai-girlfriend/backups /opt/ai-girlfriend/deploy/backup.sh >> /opt/ai-girlfriend/backups/cron.log 2>&1
 
 # 如果想在备份后发通知，可以:
-# 0 3 * * * /opt/unique-you/deploy/backup.sh && echo "Backup OK" | mail -s "DB Backup Report" admin@example.com
+# 0 3 * * * /opt/ai-girlfriend/deploy/backup.sh && echo "Backup OK" | mail -s "DB Backup Report" admin@example.com

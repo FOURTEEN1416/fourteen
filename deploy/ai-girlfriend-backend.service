@@ -1,10 +1,10 @@
 # ═══════════════════════════════════════════════════════════
 # 唯一的你 — FastAPI Backend Systemd Service Unit
 # ═══════════════════════════════════════════════════════════
-# Deploy to: /etc/systemd/system/unique-you-backend.service
+# Deploy to: /etc/systemd/system/ai-girlfriend.service
 # Then: systemctl daemon-reload
-#       systemctl enable unique-you-backend
-#       systemctl start unique-you-backend
+#       systemctl enable ai-girlfriend
+#       systemctl start ai-girlfriend
 # ═══════════════════════════════════════════════════════════
 
 [Unit]
@@ -17,12 +17,12 @@ Wants=postgresql.service
 Type=simple
 User=www-data
 Group=www-data
-WorkingDirectory=/opt/unique-you
+WorkingDirectory=/opt/ai-girlfriend
 
 # ── ExecStart ──────────────────────────────────────────────
 # Workers = 4 for a typical 2-4 vCPU production server
 # Adjust --workers to match your CPU core count
-ExecStart=/opt/unique-you/.venv/bin/uvicorn api.run_api:app \
+ExecStart=/opt/ai-girlfriend/.venv/bin/uvicorn api.run_api:app \
     --host 127.0.0.1 \
     --port 8000 \
     --workers 4 \
@@ -31,8 +31,8 @@ ExecStart=/opt/unique-you/.venv/bin/uvicorn api.run_api:app \
     --forwarded-allow-ips="127.0.0.1"
 
 # ── Environment ───────────────────────────────────────────
-Environment=PYTHONPATH=/opt/unique-you
-EnvironmentFile=/opt/unique-you/.env
+Environment=PYTHONPATH=/opt/ai-girlfriend
+EnvironmentFile=/opt/ai-girlfriend/.env
 
 # ── Restart Policy ────────────────────────────────────────
 Restart=always
@@ -53,7 +53,7 @@ CapabilityBoundingSet=
 AmbientCapabilities=
 
 # Writeable paths (needed for logs, cache, data)
-ReadWritePaths=/opt/unique-you/data /opt/unique-you/cache /opt/unique-you/logs
+ReadWritePaths=/opt/ai-girlfriend/data /opt/ai-girlfriend/cache /opt/ai-girlfriend/logs
 
 [Install]
 WantedBy=multi-user.target

@@ -18,8 +18,8 @@ set -euo pipefail
 # -------------------------------------------------------------------------
 # Configuration (overridable via environment variables)
 # -------------------------------------------------------------------------
-# Backup directory, defaults to /opt/unique-you/backups
-BACKUP_DIR="${DB_BACKUP_DIR:-/opt/unique-you/backups}"
+# Backup directory, defaults to /opt/ai-girlfriend/backups
+BACKUP_DIR="${DB_BACKUP_DIR:-/opt/ai-girlfriend/backups}"
 
 # Backup retention in days (default 30)
 RETENTION_DAYS="${DB_RETENTION_DAYS:-30}"

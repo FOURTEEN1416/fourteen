@@ -28,12 +28,12 @@ fi
 # Configuration (edit these for your environment)
 # ═══════════════════════════════════════════════════════════════
 
-APP_DIR="/opt/unique-you"
+APP_DIR="/opt/ai-girlfriend"
 APP_USER="www-data"  # matches Nginx user; change if needed
 DB_NAME="unique_you"
 DB_USER="unique_you"
 DB_PASS="$(openssl rand -base64 24)"  # auto-generated, save this
-DOMAIN="unique-you.example.com"     # CHANGE THIS
+DOMAIN="139.199.199.174"     # CHANGE THIS
 
 # ═══════════════════════════════════════════════════════════════
 # Step 1: System Packages
@@ -88,7 +88,7 @@ mkdir -p "${APP_DIR}/data" "${APP_DIR}/cache" "${APP_DIR}/logs"
 # Clone repo if empty
 if [ -z "$(ls -A "${APP_DIR}" 2>/dev/null)" ]; then
     info "Cloning repository..."
-    git clone https://github.com/FOURTEEN1416/unique-you.git "${APP_DIR}"
+    git clone https://github.com/FOURTEEN1416/fourteen.git "${APP_DIR}"
 else
     info "App directory not empty, assuming repository already cloned."
 fi
@@ -163,7 +163,7 @@ info "Step 4/7 complete."
 info "=== Step 5/7: Configuring Nginx ==="
 
 # Create frontend serve directory
-mkdir -p /var/www/unique-you
+mkdir -p /var/www/ai-girlfriend
 
 # Copy nginx config if present
 if [ -f "${APP_DIR}/deploy/nginx.conf" ]; then
@@ -196,14 +196,14 @@ info "Step 5/7 complete."
 
 info "=== Step 6/7: Installing systemd service ==="
 
-if [ -f "${APP_DIR}/deploy/unique-you-backend.service" ]; then
-    cp "${APP_DIR}/deploy/unique-you-backend.service" /etc/systemd/system/unique-you-backend.service
+if [ -f "${APP_DIR}/deploy/ai-girlfriend.service" ]; then
+    cp "${APP_DIR}/deploy/ai-girlfriend.service" /etc/systemd/system/ai-girlfriend.service
     systemctl daemon-reload
-    systemctl enable unique-you-backend
-    systemctl start unique-you-backend
+    systemctl enable ai-girlfriend
+    systemctl start ai-girlfriend
     info "systemd service installed and started."
 else
-    warn "deploy/unique-you-backend.service not found, skipping."
+    warn "deploy/ai-girlfriend.service not found, skipping."
 fi
 info "Step 6/7 complete."
 

@@ -3,14 +3,14 @@
 # 唯一的你 — Production Start Script
 # ═══════════════════════════════════════════════════════════
 # Usage: sudo bash deploy/start.sh
-# Run from: /opt/unique-you
+# Run from: /opt/ai-girlfriend
 # ═══════════════════════════════════════════════════════════
 
 set -euo pipefail
 
-APP_DIR="/opt/unique-you"
+APP_DIR="/opt/ai-girlfriend"
 VENV="${APP_DIR}/.venv"
-NGINX_SERVE="/var/www/unique-you"
+NGINX_SERVE="/opt/ai-girlfriend/frontend/dist"
 ENV_FILE="${APP_DIR}/.env"
 
 log() {

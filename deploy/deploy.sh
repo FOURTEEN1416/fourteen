@@ -3,7 +3,7 @@
 # 唯一的你 — Deployment Script
 # ═══════════════════════════════════════════════════════════
 # Usage: sudo bash deploy/deploy.sh
-# Run from: /opt/unique-you
+# Run from: /opt/ai-girlfriend
 # ═══════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -15,10 +15,10 @@ log() {
 
 log "=== 唯一的你 Deployment Started ==="
 
-APP_DIR="/opt/unique-you"
+APP_DIR="/opt/ai-girlfriend"
 FRONTEND_SRC="${APP_DIR}/frontend"
 FRONTEND_DIST="${FRONTEND_SRC}/dist"
-NGINX_SERVE="/var/www/unique-you"
+NGINX_SERVE="/opt/ai-girlfriend/frontend/dist"
 VENV="${APP_DIR}/.venv"
 
 # ── Step 1: Pull latest code ──
@@ -76,7 +76,7 @@ fi
 # ── Step 6: Restart services ──
 log "[6/6] Restarting services..."
 systemctl daemon-reload
-systemctl restart unique-you-backend
+systemctl restart ai-girlfriend
 log "[6/6] Backend service restarted."
 
 # Reload Nginx (test config first)
@@ -88,5 +88,5 @@ else
 fi
 
 log "=== 唯一的你 Deployment Completed Successfully ==="
-log "Check status: systemctl status unique-you-backend"
-log "Check logs:   journalctl -u unique-you-backend -f"
+log "Check status: systemctl status ai-girlfriend"
+log "Check logs:   journalctl -u ai-girlfriend -f"
