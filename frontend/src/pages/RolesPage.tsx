@@ -7,15 +7,7 @@ import { activateCharacter } from '../api/characters'
 import { useQueryClient } from '@tanstack/react-query'
 import type { UnifiedCharacter } from '../types/api'
 
-function RoleAvatar({ name }: { name: string }) {
-  // 取前两个字符作为头像，无 emoji
-  const display = name.slice(0, 2)
-  return (
-    <div className="w-12 h-12 rounded-full btn-macaron flex items-center justify-center text-white font-bold text-sm">
-      {display}
-    </div>
-  )
-}
+const tagClasses = ['tag-pink', 'tag-blue', 'tag-green']
 
 function RoleCard({
   character,
@@ -29,40 +21,34 @@ function RoleCard({
   return (
     <div
       className={`glass-card rounded-2xl p-4 transition-all hover:bg-white/40 ${
-        character.is_active ? 'border-2 border-macaron-blue/40' : ''
+        character.is_active ? 'border-2 border-macaron-blue/40 relative' : 'cursor-pointer'
       }`}
     >
-      <div className="flex items-center gap-3 mb-3">
-        <RoleAvatar name={character.name} />
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-gray-800 truncate">{character.name}</div>
-          <div className="text-[10px] text-gray-400 truncate">
-            {character.description || '暂无描述'}
-          </div>
-        </div>
+      <div className="text-sm font-semibold text-gray-800 mb-1">{character.name}</div>
+      <div className="text-xs text-gray-500 mb-3 truncate">
+        {character.description || '暂无描述'}
       </div>
       <div className="flex flex-wrap gap-1 mb-4">
-        {character.core_anchors?.slice(0, 3).map((tag) => (
-          <span key={tag} className="tag-pink px-2 py-0.5 rounded text-[10px]">
+        {character.core_anchors?.slice(0, 3).map((tag, i) => (
+          <span key={tag} className={`${tagClasses[i % 3]} px-2 py-0.5 rounded text-[10px]`}>
             {tag}
           </span>
         )) || <span className="text-[10px] text-gray-300">无标签</span>}
       </div>
-      <div className="flex items-center justify-between gap-2">
-        {character.is_active ? (
-          <span className="text-xs px-2.5 py-1.5 rounded-lg bg-macaron-blue-light/50 text-macaron-blue-deep font-medium">
-            当前活跃
-          </span>
-        ) : (
-          <button
-            onClick={() => onActivate(character.id)}
-            disabled={activating === character.id}
-            className="flex-1 py-1.5 rounded-lg text-xs border border-macaron-blue/40 text-macaron-blue-deep hover:bg-macaron-blue-light/30 transition-colors disabled:opacity-50"
-          >
-            {activating === character.id ? '激活中…' : '设为活跃'}
-          </button>
-        )}
-      </div>
+
+      {character.is_active ? (
+        <div className="absolute top-3 right-3 text-[10px] px-2 py-0.5 rounded-full bg-macaron-blue text-white">
+          当前活跃
+        </div>
+      ) : (
+        <button
+          onClick={() => onActivate(character.id)}
+          disabled={activating === character.id}
+          className="w-full py-1.5 rounded-lg text-xs border border-macaron-blue/40 text-macaron-blue-deep hover:bg-macaron-blue-light/30 transition-colors disabled:opacity-50"
+        >
+          {activating === character.id ? '激活中…' : '设为活跃'}
+        </button>
+      )}
     </div>
   )
 }

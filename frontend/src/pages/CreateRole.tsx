@@ -308,7 +308,6 @@ function PersonaPreviewCard() {
 
 // ═══ Create Button ═══
 function CreateButton() {
-  const { userId } = useParams<{ userId?: string }>()
   const navigate = useNavigate()
   const createMutation = useCreateCharacter()
   const toast = useErrorStore.getState().addToast
@@ -320,7 +319,7 @@ function CreateButton() {
     try {
       const result = await createMutation.mutateAsync({ name: persona.name || '未命名角色', description: persona.description || '', core_anchors: persona.anchors, personality: persona.personality, speaking_style: persona.speakingStyle })
       toast({ type: 'success', message: '角色创建成功！' })
-      navigate(`/users/${userId || 'default'}/roles/${result.id}/settings`)
+      navigate(`/roles/${result.id}/settings`)
     } catch { toast({ type: 'error', message: '创建失败，请重试' }) }
   }
   return (

@@ -1,16 +1,16 @@
 import { NavLink } from 'react-router-dom'
-import { MessageCircle, Users, Sparkles, Mic, Power, Shield, FileText } from 'lucide-react'
+import { MessageCircle, Library, Sparkles, Mic, Wrench, Shield, FileText } from 'lucide-react'
 
-// 修复：导航项对齐 App.tsx 实际路由，移除不存在的 /chat /characters /persona /training 等死路由
-// 路由清单参考 Sidebar.tsx 的 globalNavGroups：/wechat /users /settings/* /admin/users
+// 修复：导航项对齐 ia-plan-A.html 信息架构
+// 路由清单：/wechat /roles /settings/* /admin/logs
 const mobileItems = [
   { to: '/wechat', icon: MessageCircle, label: '微信' },
-  { to: '/users', icon: Users, label: '用户' },
+  { to: '/roles', icon: Library, label: '角色' },
   { to: '/settings/llm', icon: Sparkles, label: 'LLM' },
   { to: '/settings/voice', icon: Mic, label: '语音' },
-  { to: '/settings/tools', icon: Power, label: '工具' },
+  { to: '/settings/tools', icon: Wrench, label: '工具' },
   { to: '/settings/security', icon: Shield, label: '安全' },
-  { to: '/settings/logs', icon: FileText, label: '日志' },
+  { to: '/admin/logs', icon: FileText, label: '日志' },
 ]
 
 export default function MobileNav() {

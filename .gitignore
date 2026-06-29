@@ -50,6 +50,7 @@ frontend/.vite/
 frontend/node_modules/
 frontend/test-results/
 frontend/playwright-report/
+frontend/src-backup-*/
 *.tsbuildinfo
 
 # ── 数据库 ──

@@ -1,9 +1,9 @@
-import { NavLink, useLocation, Link } from 'react-router-dom'
+import { NavLink, Link } from 'react-router-dom'
 import { useState } from 'react'
 import {
   MessageCircle, PanelLeftClose, PanelLeft,
   Sparkles, Mic, Shield, FileText,
-  Settings, Activity, Plus, Library,
+  Settings, Activity, Library,
   User, Wrench, BarChart3,
 } from 'lucide-react'
 import { useChatStore } from '../../store/chatStore'
@@ -49,13 +49,13 @@ function buildGlobalNavGroups(isAdmin: boolean, activeRoleId?: string): NavGroup
         { to: '/settings/voice', icon: Mic, label: '语音引擎' },
         { to: '/settings/tools', icon: Wrench, label: '工具仪表盘' },
         { to: '/settings/security', icon: Shield, label: '安全' },
-        ...(isAdmin ? [{ to: '/settings/logs', icon: FileText, label: '日志', badge: 'admin' }] : []),
       ],
     },
     {
       label: '管理后台',
       items: [
         ...(isAdmin ? [{ to: '/admin/users', icon: User, label: '用户管理', badge: 'admin' }] : []),
+        ...(isAdmin ? [{ to: '/admin/logs', icon: FileText, label: '日志审计', badge: 'admin' }] : []),
       ],
     },
   ]
@@ -69,7 +69,6 @@ export default function Sidebar() {
   const { activeCharacter } = useActiveCharacter()
   const activeRoleId = activeCharacter?.id
   const globalNavGroups = buildGlobalNavGroups(isAdmin, activeRoleId)
-  const { pathname } = useLocation()
 
   return (
     <aside
@@ -135,19 +134,6 @@ export default function Sidebar() {
             </div>
           </div>
         ))}
-
-        {/* 创建角色按钮：始终显示在角色分组下方 */}
-        {!collapsed && (
-          <div className="px-3">
-            <Link
-              to="/roles/create"
-              className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-macaron-pink-deep hover:bg-macaron-pink-light/30 rounded-lg transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              创建角色
-            </Link>
-          </div>
-        )}
       </nav>
 
       {/* Connection status */}

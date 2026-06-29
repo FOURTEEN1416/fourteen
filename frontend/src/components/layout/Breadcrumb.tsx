@@ -24,7 +24,6 @@ function useBreadcrumbs(): Crumb[] {
       voice: '语音引擎',
       security: '安全',
       extensions: '扩展管理',
-      logs: '日志',
       tools: '工具仪表盘',
     }
     return [
@@ -36,9 +35,13 @@ function useBreadcrumbs(): Crumb[] {
   // /admin/*
   const adminMatch = pathname.match(/^\/admin\/(.+)/)
   if (adminMatch) {
+    const adminTabLabels: Record<string, string> = {
+      users: '用户管理',
+      logs: '日志审计',
+    }
     return [
       { label: '管理后台', to: '/admin/users' },
-      { label: adminMatch[1] === 'users' ? '用户管理' : adminMatch[1] },
+      { label: adminTabLabels[adminMatch[1]] || adminMatch[1] },
     ]
   }
 
