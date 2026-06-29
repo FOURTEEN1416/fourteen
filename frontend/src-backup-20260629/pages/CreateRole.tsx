@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useCreateCharacter } from '../hooks/useQueries'
 import { useErrorStore } from '../store/errorStore'
 import { useCharacterBuilderStore, type PersonaState } from '../store/characterBuilderStore'

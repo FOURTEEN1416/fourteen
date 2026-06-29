@@ -13,7 +13,10 @@ function useBreadcrumbs(): Crumb[] {
   const characters = data?.characters ?? []
 
   // /wechat
-  if (pathname === '/wechat') return [{ label: '微信连接' }]
+  if (pathname === '/wechat') return [{ label: '微信控制台' }]
+
+  // /users
+  if (pathname === '/users') return [{ label: '用户管理' }]
 
   // /settings/*
   const settingsMatch = pathname.match(/^\/settings\/(.+)/)
@@ -25,7 +28,6 @@ function useBreadcrumbs(): Crumb[] {
       security: '安全',
       extensions: '扩展管理',
       logs: '日志',
-      tools: '工具仪表盘',
     }
     return [
       { label: '系统设置', to: '/settings/llm' },
@@ -33,42 +35,44 @@ function useBreadcrumbs(): Crumb[] {
     ]
   }
 
-  // /admin/*
-  const adminMatch = pathname.match(/^\/admin\/(.+)/)
-  if (adminMatch) {
-    return [
-      { label: '管理后台', to: '/admin/users' },
-      { label: adminMatch[1] === 'users' ? '用户管理' : adminMatch[1] },
-    ]
+  // /users/:userId/...
+  const userMatch = pathname.match(/^\/users\/([^/]+)/)
+  if (!userMatch) return [{ label: '未知页面' }]
+
+  const userId = userMatch[1]
+
+  // Try to find a character with this userId to get a name
+  // For user-level pages, we'll use a generic label since we don't have user names in context
+  const userCrumbs: Crumb[] = [
+    { label: '用户管理', to: '/users' },
+    { label: userId, to: `/users/${userId}` },
+  ]
+
+  const roleMatch = pathname.match(/\/roles\/([^/]+)/)
+  if (!roleMatch) return userCrumbs
+
+  const roleId = roleMatch[1]
+  const char = characters.find((c: UnifiedCharacter) => c.id === roleId || c.name === roleId)
+
+  if (pathname.includes('/roles/create')) {
+    return [...userCrumbs, { label: '创建角色' }]
   }
 
-  // /roles
-  if (pathname === '/roles') return [{ label: '角色配置' }]
-
-  // /roles/create
-  if (pathname === '/roles/create') return [{ label: '角色配置', to: '/roles' }, { label: '创建角色' }]
-
-  // /roles/:roleId/*
-  const roleMatch = pathname.match(/^\/roles\/([^/]+)/)
-  if (roleMatch) {
-    const roleId = roleMatch[1]
-    const char = characters.find((c: UnifiedCharacter) => c.id === roleId || c.name === roleId)
-    const roleLabel = char ? char.name : roleId
-    const tabInPath = pathname.split('/').pop() || ''
-    const roleTabLabels: Record<string, string> = {
-      settings: '角色设置',
-      status: '状态中心',
-      storyline: '剧情线',
-    }
-    const tabLabel = roleTabLabels[tabInPath]
-    return [
-      { label: '角色配置', to: '/roles' },
-      { label: roleLabel, to: `/roles/${roleId}/settings` },
-      ...(tabLabel ? [{ label: tabLabel }] : []),
-    ]
+  const tabInPath = pathname.split('/').pop() || ''
+  const roleTabLabels: Record<string, string> = {
+    settings: '角色设置',
+    status: '状态中心',
+    storyline: '剧情时间线',
   }
 
-  return [{ label: '未知页面' }]
+  const roleLabel = char ? char.name : roleId
+  const tabLabel = roleTabLabels[tabInPath] || tabInPath
+
+  if (tabLabel) {
+    return [...userCrumbs, { label: `${roleLabel} · ${tabLabel}` }]
+  }
+
+  return [...userCrumbs, { label: roleLabel }]
 }
 
 export default function Breadcrumb() {

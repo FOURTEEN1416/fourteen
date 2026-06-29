@@ -11,6 +11,7 @@ import AnimatedPage from './components/shared/AnimatedPage'
 import ScrollProgress from './components/shared/ScrollProgress'
 import { ParticleCanvas } from './components/common/ParticleCanvas'
 import { CustomCursor } from './components/common/CustomCursor'
+import UserWorkspace from './pages/UserWorkspace'
 import SystemSettingsLayout from './pages/SystemSettingsLayout'
 import CreateRole from './pages/CreateRole'
 import RoleSettings from './pages/RoleSettings'
@@ -23,7 +24,9 @@ import { refreshToken } from './api/auth'
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const WeChatPage = lazy(() => import('./pages/WeChatPage'))
+const UsersPage = lazy(() => import('./pages/UsersPage'))
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
+const BindingDetailPage = lazy(() => import('./pages/BindingDetailPage'))
 const DemoPage = lazy(() => import('./pages/DemoPage'))
 
 const SettingsLLM = lazy(() => import('./pages/SettingsLLM'))
@@ -65,14 +68,16 @@ function AnimatedSuspense({ children }: { children: React.ReactNode }) {
 /** 认证初始化：App 启动时 init() 一次 */
 function AuthInit({ children }: { children: React.ReactNode }) {
   useEffect(() => {
+    // Option A: user 已持久化，accessToken 需通过 httpOnly cookie 刷新获取
     const { user } = useAuthStore.getState()
     if (!user) {
       useAuthStore.setState({ isInitialized: true })
       return
     }
+    // 有持久化 user → 通过 httpOnly cookie 刷新 accessToken
     const doInit = async () => {
       try {
-        const res = await refreshToken()
+        const res = await refreshToken() // cookie auto-sent
         useAuthStore.getState().setAuth(res.user, res.access_token)
         useAuthStore.setState({ isInitialized: true })
       } catch {
@@ -119,18 +124,22 @@ export default function App() {
         <Route element={<ProtectedLayout />}>
           <Route path="/" element={<Navigate to="/wechat" replace />} />
 
-          {/* 连接 */}
+          {/* Global Level */}
           <Route path="/wechat" element={<AnimatedSuspense><WeChatPage /></AnimatedSuspense>} />
-
-          {/* 角色 */}
           <Route path="/roles" element={<AnimatedSuspense><RolesPage /></AnimatedSuspense>} />
-          <Route path="/roles/create" element={<AnimatedSuspense><CreateRole /></AnimatedSuspense>} />
-          <Route path="/roles/:roleId/settings" element={<AnimatedSuspense><RoleSettings /></AnimatedSuspense>} />
-          <Route path="/roles/:roleId/settings/:tab" element={<AnimatedSuspense><RoleSettings /></AnimatedSuspense>} />
-          <Route path="/roles/:roleId/status" element={<AnimatedSuspense><StatusCenter /></AnimatedSuspense>} />
-          <Route path="/roles/:roleId/storyline" element={<AnimatedSuspense><StorylinePage /></AnimatedSuspense>} />
+          <Route path="/users" element={<AnimatedSuspense><UsersPage /></AnimatedSuspense>} />
+          <Route path="/bindings/:wxid" element={<AnimatedSuspense><BindingDetailPage /></AnimatedSuspense>} />
 
-          {/* 系统设置 */}
+          {/* User Level */}
+          <Route path="/users/:userId" element={<UserWorkspace />}>
+            <Route path="roles/create" element={<AnimatedPage><CreateRole /></AnimatedPage>} />
+            <Route path="roles/:roleId/settings" element={<AnimatedPage><RoleSettings /></AnimatedPage>} />
+            <Route path="roles/:roleId/settings/:tab" element={<AnimatedPage><RoleSettings /></AnimatedPage>} />
+            <Route path="roles/:roleId/status" element={<AnimatedPage><StatusCenter /></AnimatedPage>} />
+            <Route path="roles/:roleId/storyline" element={<AnimatedPage><StorylinePage /></AnimatedPage>} />
+          </Route>
+
+          {/* System Settings */}
           <Route path="/settings" element={<Navigate to="/settings/llm" replace />} />
           <Route path="/settings" element={<SystemSettingsLayout />}>
             <Route path="llm" element={<AnimatedSuspense><SettingsLLM /></AnimatedSuspense>} />
@@ -140,7 +149,8 @@ export default function App() {
             <Route path="logs" element={<AnimatedSuspense><SettingsLogs /></AnimatedSuspense>} />
           </Route>
 
-          {/* 管理后台 */}
+          {/* ─── 管理后台（仅 admin 角色）───
+              日志审计/系统配置/安全面板已从 /settings/* 统一入口访问,不在此处重复 */}
           <Route element={<RoleGuard roles={['admin'] as const} />}>
             <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
             <Route path="/admin/users" element={<AnimatedSuspense><AdminUsersPage /></AnimatedSuspense>} />
