@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { render, screen, fireEvent, waitFor } from '../utils/test-utils'
 import WeChatPage from '../../pages/WeChatPage'
 
 // ── Shared mock fns (hoisted so vi.mock factories can reference them) ──
@@ -39,11 +38,7 @@ const defaultStatus = {
 }
 
 function renderPage() {
-  return render(
-    <MemoryRouter>
-      <WeChatPage />
-    </MemoryRouter>
-  )
+  return render(<WeChatPage />)
 }
 
 describe('WeChatPage', () => {

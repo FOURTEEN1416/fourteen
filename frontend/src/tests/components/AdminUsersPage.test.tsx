@@ -96,7 +96,9 @@ vi.mock('../../api/admin', () => ({
 }))
 
 vi.mock('../../store/authStore', () => ({
-  useAuthStore: vi.fn(() => authStoreState),
+  useAuthStore: vi.fn((selector?: (s: unknown) => unknown) =>
+    selector ? selector(authStoreState) : authStoreState,
+  ),
 }))
 
 vi.mock('../../store/errorStore', () => ({

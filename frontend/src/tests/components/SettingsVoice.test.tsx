@@ -62,10 +62,8 @@ describe('SettingsVoice', () => {
 
     // Engine section heading
     expect(screen.getByText('语音引擎')).toBeDefined()
-    // Current engine label
-    expect(screen.getByText('当前引擎')).toBeDefined()
-    // The Select shows the default engine label
-    expect(screen.getByText('MiMo Cloud')).toBeDefined()
+    // The engine switcher shows the default engine button
+    expect(screen.getByRole('button', { name: 'MiMo Cloud' })).toBeDefined()
   })
 
   // ── Test 2: Engine options ──
@@ -73,16 +71,11 @@ describe('SettingsVoice', () => {
   it('renders 4 engine options', async () => {
     render(<SettingsVoice />)
 
-    // Open the engine dropdown
-    fireEvent.click(screen.getByText('MiMo Cloud'))
-
-    // All four engine options should be visible
-    expect(screen.getByText('Edge TTS')).toBeDefined()
-    expect(screen.getByText('GPT-SoVITS')).toBeDefined()
-    expect(screen.getByText('Bert-VITS2')).toBeDefined()
-
-    // MiMo Cloud should now have 2 matches (trigger + option)
-    expect(screen.getAllByText('MiMo Cloud').length).toBe(2)
+    // The engine switcher renders all four options as buttons
+    expect(screen.getByRole('button', { name: 'MiMo Cloud' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Edge TTS' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'GPT-SoVITS' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Bert-VITS2' })).toBeDefined()
   })
 
   // ── Test 3: Clone section shows file upload ──

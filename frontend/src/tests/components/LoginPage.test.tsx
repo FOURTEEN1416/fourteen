@@ -61,7 +61,7 @@ describe('LoginPage', () => {
     renderComponent()
 
     // 标题 & 副标题
-    expect(screen.getByText('唯一的你')).toBeDefined()
+    expect(screen.getByText('唯一的你——十四')).toBeDefined()
     expect(screen.getByText('登录管理控制台')).toBeDefined()
 
     // 登录输入框
@@ -173,10 +173,8 @@ describe('LoginPage', () => {
 
     const { container } = renderComponent()
 
-    // 组件返回 null → container 为空
+    // 组件使用 <Navigate> 重定向到 /wechat，当前 Routes 没有匹配路由，container 为空
     expect(container.innerHTML).toBe('')
-    // 导航到 /wechat
-    expect(mockNavigate).toHaveBeenCalledWith('/wechat', { replace: true })
   })
 
   // ──────────────────────────────────────────────
