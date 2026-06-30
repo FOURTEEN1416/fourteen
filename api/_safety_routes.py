@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Securi
 from fastapi.responses import FileResponse, Response
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import require_role
+from api.auth_jwt import get_current_user_id, require_role
 from api.database import User
 from api.deps import deps
 from api.main_routes import MAX_RAG_UPLOAD_SIZE, MAX_UPLOAD_SIZE, UPLOAD_DIR
@@ -37,7 +37,7 @@ router = APIRouter(tags=["safety-infra"])
 @router.get("/api/safety/stats")
 async def safety_stats(
     _auth: bool = Security(verify_api_key_dep),
-    _admin: tuple[int, User] = Depends(require_role("admin")),
+    _user: int = Security(get_current_user_id),
 ):
     sf = deps.get_safety()
     return deps.safety_log_mgr.get_stats(enabled=sf.enabled if sf else False)
@@ -47,7 +47,7 @@ async def safety_stats(
 async def safety_log(
     limit: int = Query(default=50, le=200),
     _auth: bool = Security(verify_api_key_dep),
-    _admin: tuple[int, User] = Depends(require_role("admin")),
+    _user: int = Security(get_current_user_id),
 ):
     return {"log": deps.safety_log_mgr.get_recent(limit)}
 

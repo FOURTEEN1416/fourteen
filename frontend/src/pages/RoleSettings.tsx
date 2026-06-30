@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
-import { useUnifiedCharacter } from '../hooks/useQueries'
+import { useQueryClient } from '@tanstack/react-query'
+import { useUnifiedCharacter, queryKeys } from '../hooks/useQueries'
+import { updateCharacter } from '../api/characters'
+import { useErrorStore } from '../store/errorStore'
 import Slider from '../components/shared/Slider'
 import TagInput from '../components/shared/TagInput'
 import Toggle from '../components/shared/Toggle'
@@ -8,6 +11,7 @@ import FileUpload from '../components/shared/FileUpload'
 import ConfirmDialog from '../components/shared/ConfirmDialog'
 import StorylineEditor from '../components/storyline/StorylineEditor'
 import type { RoleSettingsTab, RoleSettingsCharacter } from '../types/framework'
+import type { UnifiedCharacterUpdate } from '../types/api'
 import {
   User, Mic, MessageSquare, Database, Smile, Clock,
   Save, Trash2, Copy, Play, Check,
@@ -63,12 +67,14 @@ function Section({ title, children, className = '' }: { title: string; children:
 // ═══ Tab: Basic ═══
 
 function BasicTab({ character }: { character: RoleSettingsCharacter }) {
+  const qc = useQueryClient()
   const [name, setName] = useState(character.name)
   const [description, setDescription] = useState(character.description ?? '')
   const [personality, setPersonality] = useState<Record<string, number>>(character.personality || {})
   const [anchors, setAnchors] = useState<string[]>(character.core_anchors || [])
   const [speaking, setSpeaking] = useState<Record<string, number>>(character.speaking_style || {})
   const [catchphrases, setCatchphrases] = useState<string[]>(character.catchphrases || [])
+  const [saving, setSaving] = useState(false)
 
   // 当 character 变化时（角色切换），同步重置本地表单 state
   // 触发条件：character.id 变化而非整个对象引用变化
@@ -85,6 +91,28 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const personaJson = { name, description, personality, core_anchors: anchors, speaking_style: { ...speaking, catchphrases } }
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const payload: UnifiedCharacterUpdate = {
+        name,
+        description,
+        personality,
+        speaking_style: speaking,
+        core_anchors: anchors,
+        catchphrases,
+      }
+      await updateCharacter(character.id, payload)
+      await qc.invalidateQueries({ queryKey: queryKeys.characters.all })
+      await qc.invalidateQueries({ queryKey: queryKeys.characters.detail(character.id) })
+      useErrorStore.getState().addToast({ type: 'success', message: '角色基础设置已保存' })
+    } catch {
+      useErrorStore.getState().addToast({ type: 'error', message: '保存失败，请重试' })
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -179,9 +207,13 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
         </pre>
       </Section>
 
-      {/* TODO: 保存基础设置未实现 — 未调用后端 API 持久化角色信息 */}
-      <button disabled className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2 opacity-50 cursor-not-allowed">
-        <Save className="w-4 h-4" /> 保存设置
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <Save className="w-4 h-4" />
+        {saving ? '保存中…' : '保存设置'}
       </button>
     </div>
   )
@@ -376,13 +408,13 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
 
   return (
     <div className="space-y-4">
-      {/* Status */}
-      <Section title="今日发信统计">
+      {/* Stats */}
+      <Section title="消息统计">
         <div className="grid grid-cols-3 gap-4">
           {[
-            { label: '已发送', value: '12 条', color: 'text-blue-600' },
-            { label: '触发次数', value: '8 次', color: 'text-green-600' },
-            { label: '最后发送', value: '14:32:18', color: 'text-gray-600' },
+            { label: '消息总数', value: (character.stats?.messages ?? 0).toLocaleString(), color: 'text-blue-600' },
+            { label: '今日触发', value: '—', color: 'text-green-600' },
+            { label: '最后发送', value: '—', color: 'text-gray-600' },
           ].map(s => (
             <div key={s.label} className="text-center p-3 rounded-xl bg-gray-50">
               <p className={`text-lg font-bold ${s.color}`}>{s.value}</p>

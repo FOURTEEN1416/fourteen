@@ -137,14 +137,13 @@ export default function App() {
             <Route path="voice" element={<AnimatedSuspense><SettingsVoice /></AnimatedSuspense>} />
             <Route path="tools" element={<AnimatedSuspense><ToolsDashboard /></AnimatedSuspense>} />
             <Route path="security" element={<AnimatedSuspense><SettingsSecurity /></AnimatedSuspense>} />
-            <Route path="logs" element={<Navigate to="/admin/logs" replace />} />
+            <Route path="logs" element={<AnimatedSuspense><SettingsLogs /></AnimatedSuspense>} />
           </Route>
 
           {/* 管理后台 */}
           <Route element={<RoleGuard roles={['admin'] as const} />}>
             <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
             <Route path="/admin/users" element={<AnimatedSuspense><AdminUsersPage /></AnimatedSuspense>} />
-            <Route path="/admin/logs" element={<AnimatedSuspense><SettingsLogs /></AnimatedSuspense>} />
           </Route>
         </Route>
 

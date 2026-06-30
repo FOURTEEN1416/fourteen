@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { MessageCircle, Library, Sparkles, Mic, Wrench, Shield, FileText } from 'lucide-react'
 
 // 修复：导航项对齐 ia-plan-A.html 信息架构
-// 路由清单：/wechat /roles /settings/* /admin/logs
+// 路由清单：/wechat /roles /settings/*
 const mobileItems = [
   { to: '/wechat', icon: MessageCircle, label: '微信' },
   { to: '/roles', icon: Library, label: '角色' },
@@ -10,7 +10,7 @@ const mobileItems = [
   { to: '/settings/voice', icon: Mic, label: '语音' },
   { to: '/settings/tools', icon: Wrench, label: '工具' },
   { to: '/settings/security', icon: Shield, label: '安全' },
-  { to: '/admin/logs', icon: FileText, label: '日志' },
+  { to: '/settings/logs', icon: FileText, label: '日志' },
 ]
 
 export default function MobileNav() {

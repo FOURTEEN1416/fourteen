@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from api.deps import deps
 from my_character.persona_card import PersonaCardV3
 from shisi.voice.character_voice import CharacterVoiceManager
+from utils.character_helpers import normalize_character_card, sanitize_character_name
 
 PRESETS_DIR = Path("data/presets")
 
@@ -199,14 +200,14 @@ def _delete_character_file(character_id: str) -> bool:
     return False
 
 
-def _list_all_characters() -> list[dict[str, Any]]:
+def _list_all_characters(normalize: bool = True) -> list[dict[str, Any]]:
     chars_dir = _get_characters_dir()
     characters: list[dict[str, Any]] = []
     for f in sorted(chars_dir.glob("*.json")):
         try:
             with open(f, encoding="utf-8") as fh:
                 data = json.load(fh)
-            characters.append(data)
+            characters.append(normalize_character_card(data) if normalize else data)
         except (json.JSONDecodeError, OSError) as e:
             logger.error("读取角色文件 %s 失败: %s", f.name, e)
     return characters
@@ -228,7 +229,7 @@ def _build_character_data(
         style["catchphrases"] = catchphrases
     return {
         "id": character_id,
-        "name": name,
+        "name": sanitize_character_name(name),
         "description": description,
         "schema_version": 1,
         "personality": personality or {},

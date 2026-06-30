@@ -3,18 +3,25 @@ import { render, screen, fireEvent, waitFor } from '../utils/test-utils'
 import WeChatPage from '../../pages/WeChatPage'
 
 // ── Shared mock fns (hoisted so vi.mock factories can reference them) ──
-const { mockUseWechatStatus } = vi.hoisted(() => ({
+const { mockUseWechatStatus, mockUseWechatBindings } = vi.hoisted(() => ({
   mockUseWechatStatus: vi.fn(),
+  mockUseWechatBindings: vi.fn(),
 }))
 
 vi.mock('../../hooks/useQueries', () => ({
   useWechatStatus: mockUseWechatStatus,
+  useWechatBindings: mockUseWechatBindings,
+  queryKeys: {
+    wechat: { status: ['wechat', 'status'] },
+    characters: { all: ['characters'], detail: (id: string) => ['characters', id] },
+  },
 }))
 
 vi.mock('../../api/wechat', () => ({
   wechatCreateConnection: vi.fn(() => Promise.resolve()),
   wechatDeleteConnection: vi.fn(() => Promise.resolve()),
   bindWechat: vi.fn(() => Promise.resolve()),
+  unbindWechat: vi.fn(() => Promise.resolve()),
 }))
 
 vi.mock('../../api/system', () => ({
@@ -50,6 +57,11 @@ describe('WeChatPage', () => {
       isLoading: false,
       isError: false,
     })
+    mockUseWechatBindings.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+    })
   })
 
   // ── 1. Header render ──
@@ -61,10 +73,10 @@ describe('WeChatPage', () => {
   })
 
   // ── 2. Empty state ──
-  it('shows empty state when no connections exist', () => {
+  it('shows empty state when no bindings exist', () => {
     renderPage()
     expect(
-      screen.getByText('暂无连接，点击上方 "扫码连接" 添加'),
+      screen.getByText('暂无绑定，点击上方 "扫码连接" 添加'),
     ).toBeDefined()
   })
 
@@ -103,41 +115,38 @@ describe('WeChatPage', () => {
     expect(screen.getByText('微信桥接 已连接').closest('.glass-card')).toBeDefined()
   })
 
-  // ── 6. Connections from localStorage ──
-  it('displays connections from localStorage', () => {
-    const mockConns = [
-      { wxid: 'wx_test_001', alias: '测试1号', isOnline: true, isCurrent: false },
-      { wxid: 'wx_test_002', alias: '测试2号', isOnline: false, isCurrent: true },
-    ]
-    localStorage.setItem(
-      'unique-you-wechat-connections',
-      JSON.stringify(mockConns),
-    )
+  // ── 6. Displays bindings from API ──
+  it('displays bindings from API', () => {
+    mockUseWechatBindings.mockReturnValue({
+      data: [
+        { id: 1, user_id: 1, wxid: 'wx_test_001', nickname: '测试1号', avatar: '', character_card_id: 'c1', bound_at: '' },
+        { id: 2, user_id: 1, wxid: 'wx_test_002', nickname: '测试2号', avatar: '', character_card_id: 'c2', bound_at: '' },
+      ],
+      isLoading: false,
+      isError: false,
+    })
     renderPage()
 
-    // Each row shows wxid and alias
+    // Each row shows wxid and nickname
     expect(screen.getByText('wx_test_001')).toBeDefined()
     expect(screen.getByText('wx_test_002')).toBeDefined()
     expect(screen.getByText('测试1号')).toBeDefined()
     expect(screen.getByText('测试2号')).toBeDefined()
 
     // StatsBar labels
-    expect(screen.getByText('总连接')).toBeDefined()
-    // "在线"/"离线" appear in both StatsBar labels and status badges
-    expect(screen.getAllByText('在线').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('离线').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('总绑定')).toBeDefined()
   })
 
-  // ── 7. Search filters connections ──
-  it('search filters connections by wxid', () => {
-    const mockConns = [
-      { wxid: 'wx_test_001', alias: '测试1号', isOnline: true, isCurrent: false },
-      { wxid: 'wx_other_002', alias: '其他号', isOnline: false, isCurrent: false },
-    ]
-    localStorage.setItem(
-      'unique-you-wechat-connections',
-      JSON.stringify(mockConns),
-    )
+  // ── 7. Search filters bindings ──
+  it('search filters bindings by wxid', () => {
+    mockUseWechatBindings.mockReturnValue({
+      data: [
+        { id: 1, user_id: 1, wxid: 'wx_test_001', nickname: '测试1号', avatar: '', character_card_id: 'c1', bound_at: '' },
+        { id: 2, user_id: 1, wxid: 'wx_other_002', nickname: '其他号', avatar: '', character_card_id: 'c2', bound_at: '' },
+      ],
+      isLoading: false,
+      isError: false,
+    })
     renderPage()
 
     // Both visible initially
@@ -145,41 +154,37 @@ describe('WeChatPage', () => {
     expect(screen.getByText('wx_other_002')).toBeDefined()
 
     // Search for '001' — matches only wx_test_001
-    const searchInput = screen.getByPlaceholderText('搜索 wxid 或别名...')
+    const searchInput = screen.getByPlaceholderText('搜索 wxid 或昵称...')
     fireEvent.change(searchInput, { target: { value: '001' } })
 
     expect(screen.getByText('wx_test_001')).toBeDefined()
     expect(screen.queryByText('wx_other_002')).toBeNull()
   })
 
-  // ── 8. Delete connection ──
-  it('delete connection removes from list', async () => {
-    const mockConns = [
-      { wxid: 'wx_test_001', alias: '测试1号', isOnline: true, isCurrent: false },
-      { wxid: 'wx_test_002', alias: '测试2号', isOnline: false, isCurrent: false },
-    ]
-    localStorage.setItem(
-      'unique-you-wechat-connections',
-      JSON.stringify(mockConns),
-    )
+  // ── 8. Delete binding calls unbindWechat ──
+  it('delete binding calls unbindWechat', async () => {
+    mockUseWechatBindings.mockReturnValue({
+      data: [
+        { id: 1, user_id: 1, wxid: 'wx_test_001', nickname: '测试1号', avatar: '', character_card_id: 'c1', bound_at: '' },
+        { id: 2, user_id: 1, wxid: 'wx_test_002', nickname: '测试2号', avatar: '', character_card_id: 'c2', bound_at: '' },
+      ],
+      isLoading: false,
+      isError: false,
+    })
+    const { unbindWechat } = await import('../../api/wechat')
     renderPage()
 
     // Both visible
     expect(screen.getByText('wx_test_001')).toBeDefined()
     expect(screen.getByText('wx_test_002')).toBeDefined()
 
-    // Click delete on first row
-    const deleteBtns = screen.getAllByTitle('删除')
+    // Click unbind on first row
+    const deleteBtns = screen.getAllByTitle('解绑')
     expect(deleteBtns.length).toBe(2)
     fireEvent.click(deleteBtns[0])
 
-    // First connection removed
     await waitFor(() => {
-      expect(screen.queryByText('wx_test_001')).toBeNull()
+      expect(unbindWechat).toHaveBeenCalledWith('wx_test_001')
     })
-    expect(screen.getByText('wx_test_002')).toBeDefined()
-
-    // Not empty — one still remains
-    expect(screen.queryByText('暂无连接')).toBeNull()
   })
 })

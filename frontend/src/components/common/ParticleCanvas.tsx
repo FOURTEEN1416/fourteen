@@ -22,7 +22,7 @@ export function ParticleCanvas() {
 
     let animId: number;
     const particles: Particle[] = [];
-    const COUNT = 60;
+    const COUNT = 25;
     const DIST = 120;
 
     const resize = () => {

@@ -96,7 +96,7 @@ describe('StatusCenter', () => {
     expect(screen.getByText('周末常去公园散步')).toBeDefined()
   })
 
-  it('falls back to placeholder memories when no facts', () => {
+  it('shows empty state when no facts', () => {
     mockUseActiveCharacter.mockReturnValue({ activeCharacter: FAKE_CHARACTER })
     mockUseDashboard.mockReturnValue({ data: FAKE_STATS, isLoading: false })
     mockUseEmotionState.mockReturnValue({ data: undefined })
@@ -104,7 +104,6 @@ describe('StatusCenter', () => {
 
     renderWithQuery(<StatusCenter />)
 
-    expect(screen.getByText('用户说最近加班很多，需要安静陪伴。')).toBeDefined()
-    expect(screen.getByText('用户不喜欢被主动追问过去。')).toBeDefined()
+    expect(screen.getByText('还没有沉淀下来的记忆')).toBeDefined()
   })
 })

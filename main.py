@@ -152,9 +152,10 @@ from security.prompt_injection import PromptInjectionDetector  # noqa: E402
 from shisi.application.knowledge_service import ShisiKnowledgeAdapter  # noqa: E402
 from shisi.application.memory_service import ShisiMemoryService  # noqa: E402
 from shisi.application.persona_service import PersonaService  # noqa: E402
-from tools.base_tool import ToolDispatcher, ToolRegistry  # noqa: E402
+from tools.base_tool import ToolDispatcher, ToolRegistry, ToolResult  # noqa: E402
 from tools.builtin.calendar_tool import CalculatorTool, CalendarTool  # noqa: E402
 from tools.builtin.character_crawler_tool import CharacterCrawlerTool  # noqa: E402
+from tools.builtin.extra_tools import ImageGenTool, MemoryTool, SchedulerTool, WebSummaryTool  # noqa: E402
 from tools.builtin.reminder_tool import CalendarQueryTool, ReminderTool  # noqa: E402
 from tools.builtin.search_tool import SearchTool  # noqa: E402
 from tools.builtin.time_awareness_tool import TimeAwarenessTool  # noqa: E402
@@ -502,6 +503,74 @@ class OptimizedOrchestrator:
             cls._character_persona_cache[character_id] = segment
         return segment
 
+    async def _run_tools_if_needed(
+        self,
+        llm: Any,
+        query: str,
+        system_prompt: str,
+        history: list | None,
+    ) -> str:
+        """如果系统启用了工具，先让 LLM 判断是否需要调用工具，并返回工具结果摘要。
+
+        返回空字符串表示无需工具调用或调用失败；否则返回一段可追加到 system prompt
+        的工具结果文本。
+        """
+        tools = self.components.get("tools")
+        if not tools or not tools.registry:
+            return ""
+        schemas = tools.registry.get_all_schemas()
+        if not schemas:
+            return ""
+        try:
+            import asyncio
+            loop = asyncio.get_running_loop()
+            tool_resp = await loop.run_in_executor(
+                None,
+                lambda: llm.chat_with_tools(
+                    query=query,
+                    system_prompt=system_prompt,
+                    history=history or [],
+                    tools=schemas,
+                    temperature=0.85,
+                    max_tokens=2048,
+                ),
+            )
+            tool_calls = tool_resp.get("tool_calls") if tool_resp else None
+            if not tool_calls:
+                return ""
+        except Exception as e:
+            logger.debug("工具意图识别失败: %s", e)
+            return ""
+
+        results: list[dict[str, Any]] = []
+        for tc in tool_calls:
+            fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+            name = fn.get("name", "") if isinstance(fn, dict) else ""
+            args_raw = fn.get("arguments", "{}") if isinstance(fn, dict) else "{}"
+            try:
+                args = json.loads(args_raw) if isinstance(args_raw, str) else dict(args_raw)
+            except Exception:
+                args = {}
+            try:
+                import asyncio
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    lambda _n=name, _a=args: tools.dispatch(_n, _a, affinity_level=0),
+                )
+            except Exception as e:
+                logger.debug("工具 %s 执行异常: %s", name, e)
+                result = ToolResult(False, error="tool_execution_failed")
+            results.append({"name": name, "result": result.to_dict()})
+
+        if not results:
+            return ""
+        summary = "\n".join(
+            f"[{r['name']}] {json.dumps(r['result'], ensure_ascii=False)}"
+            for r in results
+        )
+        return f"\n\n[工具调用结果]\n{summary}\n请根据以上结果自然地回复用户。"
+
     def initialize(self, config_dir: str = "config",
                    fusion_cfg: dict | None = None) -> bool:
         if self._initialized:
@@ -630,9 +699,13 @@ class OptimizedOrchestrator:
             if sm:
                 registry.register(ReminderTool(sm))
                 registry.register(CalendarQueryTool(sm))
+                registry.register(MemoryTool(sm))
+                registry.register(SchedulerTool(sm))
 
             registry.register(TimeAwarenessTool())
             registry.register(CharacterCrawlerTool())
+            registry.register(WebSummaryTool())
+            registry.register(ImageGenTool())
 
             self.components["tool_registry"] = registry
             self.components["tools"] = ToolDispatcher(
@@ -1005,14 +1078,22 @@ class OptimizedOrchestrator:
                     chat_summary=chat_summary,
                     world_info=world_info,
                 )
-                if persona_enhancement:
-                    system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
 
-                # 角色卡人设动态注入（v3.1）：根据 character_id 追加角色卡人设片段
+                # 角色卡人设动态注入（v3.1）：放在核心位置，确保角色身份优先于基线人设
                 if character_id and character_id not in ("default", "demo"):
                     char_segment = self._load_character_persona_segment(character_id)
                     if char_segment:
-                        system_prompt = f"{system_prompt}\n\n{char_segment}"
+                        system_prompt = (
+                            f"{system_prompt}\n\n"
+                            f"# 当前必须扮演的角色（最高优先级）\n"
+                            f"{char_segment}\n\n"
+                            f"你当前正在扮演以上角色。"
+                            f"回复时必须使用该角色的名字、身份、性格、说话风格和口头禅；"
+                            f"不要以‘十四’或通用 AI 身份自居。"
+                        )
+
+                if persona_enhancement:
+                    system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
 
                 # ── 主 LLM 对话（带 30s 超时保护） ──
                 try:
@@ -1320,14 +1401,22 @@ class OptimizedOrchestrator:
                     chat_summary=chat_summary,
                     world_info=world_info,
                 )
-                if persona_enhancement:
-                    system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
 
-                # 角色卡人设动态注入（v3.1）：根据 character_id 追加角色卡人设片段
+                # 角色卡人设动态注入（v3.1）：放在核心位置，确保角色身份优先于基线人设
                 if character_id and character_id not in ("default", "demo"):
                     char_segment = self._load_character_persona_segment(character_id)
                     if char_segment:
-                        system_prompt = f"{system_prompt}\n\n{char_segment}"
+                        system_prompt = (
+                            f"{system_prompt}\n\n"
+                            f"# 当前必须扮演的角色（最高优先级）\n"
+                            f"{char_segment}\n\n"
+                            f"你当前正在扮演以上角色。"
+                            f"回复时必须使用该角色的名字、身份、性格、说话风格和口头禅；"
+                            f"不要以‘十四’或通用 AI 身份自居。"
+                        )
+
+                if persona_enhancement:
+                    system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
 
                 # 9. 真流式 LLM 调用 — 边生成边 yield
                 full_reply = ""
@@ -1954,8 +2043,12 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
         tool_registry.register(tool_cls())
     tool_registry.register(ReminderTool(structured_memory))
     tool_registry.register(CalendarQueryTool(structured_memory))
+    tool_registry.register(MemoryTool(structured_memory))
+    tool_registry.register(SchedulerTool(structured_memory))
     tool_registry.register(TimeAwarenessTool())
     tool_registry.register(CharacterCrawlerTool())
+    tool_registry.register(WebSummaryTool())
+    tool_registry.register(ImageGenTool())
     logger.info("      已注册 %d 个工具", len(tool_registry.tool_names))
 
     logger.info("[8/12] 初始化RAG引擎V2...")

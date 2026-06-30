@@ -259,7 +259,7 @@ function PersonaPreviewCard() {
     )
   }
 
-  const anchors = persona.anchors?.length ? persona.anchors : ['温柔', '倾听']
+  const anchors = persona.anchors?.length ? persona.anchors : []
 
   return (
     <div className="glass-card rounded-2xl p-5 space-y-4">
@@ -276,15 +276,17 @@ function PersonaPreviewCard() {
         <p className="text-xs text-text-secondary leading-relaxed">{persona.description || '暂无描述'}</p>
       </div>
 
-      <div>
-        <div className="text-xs text-text-muted mb-2">核心锚点</div>
-        <div className="flex flex-wrap gap-1.5">
-          {anchors.slice(0, 8).map((a, i) => {
-            const colorClass = i % 3 === 0 ? 'tag-pink' : i % 3 === 1 ? 'tag-blue' : 'tag-green'
-            return <span key={a} className={`${colorClass} px-2 py-1 rounded-md text-[10px] font-medium`}>{a}</span>
-          })}
+      {anchors.length > 0 && (
+        <div>
+          <div className="text-xs text-text-muted mb-2">核心锚点</div>
+          <div className="flex flex-wrap gap-1.5">
+            {anchors.slice(0, 8).map((a, i) => {
+              const colorClass = i % 3 === 0 ? 'tag-pink' : i % 3 === 1 ? 'tag-blue' : 'tag-green'
+              return <span key={a} className={`${colorClass} px-2 py-1 rounded-md text-[10px] font-medium`}>{a}</span>
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       <div>
         <div className="text-xs text-text-muted mb-2">性格维度</div>

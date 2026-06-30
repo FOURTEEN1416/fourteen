@@ -183,7 +183,9 @@ async def manual_connect_wechat(_auth: bool = Security(verify_api_key_dep)):
     def _do_connect():
         try:
             from wechat_direct import WeChatConnector
-            connector = WeChatConnector(deps.orch)
+            # 修复 P0-WX1：必须传入 UserManager（deps.gf），而非 Orchestrator（deps.orch）。
+            # UserManager 负责多用户路由 + 角色隔离；Orchestrator 只处理单条消息。
+            connector = WeChatConnector(deps.gf)
             connector.run()
         except Exception as e:
             logger.exception("微信连接失败: %s", e)
@@ -203,28 +205,31 @@ async def manual_disconnect_wechat(_auth: bool = Security(verify_api_key_dep)):
 
 @router.get("/api/channels/wechat/connection-status")
 async def get_wechat_connection_status(_auth: bool = Security(verify_api_key_dep)):
-    conn = deps.get_wechat_connector()
-    if conn and conn.token:
+    from wechat_direct import get_wechat_state
+    state = get_wechat_state()
+    if state.get("connected"):
         return {
             "status": "connected",
             "connected": True,
             "message": "已连接",
-            "started_at": conn.started_at,
-            "wxid": conn.bot_id,
+            "started_at": state.get("started_at", 0),
+            "wxid": state.get("bot_id", ""),
         }
     return {"status": "idle", "connected": False, "message": "未连接"}
 
 
 @router.get("/api/channels/wechat/status")
 async def get_wechat_status(_auth: bool = Security(verify_api_key_dep)):
-    conn = deps.get_wechat_connector()
-    if conn and conn.token:
-        return {
-            "connected": True,
-            "uptime_seconds": time.time() - conn.started_at if conn.started_at else 0,
-            "bot_id": conn.bot_id,
-        }
-    return {"connected": False, "uptime_seconds": 0}
+    from wechat_direct import get_wechat_state
+    state = get_wechat_state()
+    return {
+        "connected": bool(state.get("connected")),
+        "uptime_seconds": state.get("uptime_seconds", 0),
+        "bot_id": state.get("bot_id", ""),
+        "last_activity": state.get("last_activity"),
+        "messages_today": state.get("messages_today", 0),
+        "reconnect_attempts": state.get("reconnect_attempts", 0),
+    }
 
 
 @router.post("/api/channels/wechat/reconnect")

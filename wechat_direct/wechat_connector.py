@@ -51,12 +51,62 @@ BACKOFF_DELAY = 60
 _RECEIVED_MSGS_MAX = 10000       # _received_msgs 最大条目数
 _CONTEXT_TOKENS_TTL = 86400      # _context_tokens 条目 TTL（秒），默认24小时
 
+# ── 连接状态持久化（解决前端状态时连时断问题） ──
+_STATE_FILE = Path(__file__).parent.parent / "data" / "wechat_state.json"
+
+
+def _load_state() -> dict:
+    """读取持久化的连接状态，供 REST API 在 connector 实例重建时仍返回稳定状态。"""
+    try:
+        if _STATE_FILE.exists():
+            with open(_STATE_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception as e:  # noqa: BLE001
+        logger.debug("读取微信状态文件失败: %s", e)
+    return {
+        "connected": False,
+        "started_at": 0,
+        "bot_id": "",
+        "last_activity": 0,
+        "messages_today": 0,
+        "reconnect_attempts": 0,
+    }
+
+
+def _save_state(data: dict) -> None:
+    """持久化连接状态。"""
+    try:
+        _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("保存微信状态文件失败: %s", e)
+
+
+def _merge_state(updates: dict) -> dict:
+    """合并并保存状态更新。"""
+    state = _load_state()
+    state.update(updates)
+    _save_state(state)
+    return state
+
+
 # ── 全局单例（供 REST API 读取状态） ──
 _connector: "WeChatConnector | None" = None
 
 
 def get_connector():
     return _connector
+
+
+def get_wechat_state() -> dict:
+    """供外部 REST API 调用的稳定状态读取（优先内存实例，回退持久化文件）。"""
+    conn = _connector
+    if conn and conn.token:
+        return conn.get_status()
+    return _load_state()
 
 
 def _clear_credentials(path=None):
@@ -280,6 +330,11 @@ def _send_emoji_message(to, emoji_md5, context_token,
 # 异步编排器调用（process_message 是 async 的）
 # ═══════════════════════════════════════════════
 
+def _run_async_coro(coro):
+    """在新事件循环中运行一个协程，返回结果。"""
+    return asyncio.run(coro)
+
+
 def _call_user_manager(mgr, user_id, text):
     """
     调用女友管理器处理消息（多用户路由）。
@@ -289,10 +344,22 @@ def _call_user_manager(mgr, user_id, text):
     coro = mgr.process_message(user_id, text)
     try:
         asyncio.get_running_loop()
-        future = _executor.submit(asyncio.run, coro)
-        return future.result()
     except RuntimeError:
+        # 当前无线程事件循环，直接运行
         return asyncio.run(coro)
+
+    # 已有事件循环（例如在异步 FastAPI handler 中），用线程池执行
+    try:
+        future = _executor.submit(_run_async_coro, coro)
+        return future.result(timeout=120)
+    except concurrent.futures.TimeoutError:
+        logger.warning("处理消息超时 (user=%s)", user_id)
+        return {"reply": "", "error": "timeout"}
+    except RuntimeError as e:
+        if "shutdown" in str(e).lower():
+            logger.warning("全局线程池已关闭，降级为同步运行: %s", e)
+            return asyncio.run(coro)
+        raise
 
 
 # ═══════════════════════════════════════════════
@@ -320,6 +387,15 @@ class WeChatConnector:
         self._received_msgs: OrderedDict = OrderedDict()  # 有序字典，支持按插入顺序淘汰
         self._context_tokens: dict = {}  # {user_id: {"token": str, "ts": float}}
         self._last_user_id: str = ""
+        # 每条消息在独立线程中处理，避免阻塞轮询循环
+        self._msg_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="wx_msg"
+        )
+        # 统计
+        self._messages_today = 0
+        self._last_day = time.strftime("%Y-%m-%d")
+        self._last_activity = 0
+        self._reconnect_attempts = 0
 
     def send_text(self, text: str, to_user: str = "") -> bool:
         """主动发送文本消息（供外部调用）"""
@@ -520,12 +596,19 @@ class WeChatConnector:
                 self.token = bot_token
                 self.base_url = result_base_url
                 self.bot_id = bot_id
+                self._reconnect_attempts = 0
+                _merge_state({
+                    "connected": True,
+                    "bot_id": bot_id,
+                    "last_activity": time.time(),
+                })
                 return True
 
             time.sleep(QR_POLL_INTERVAL)
 
         print("二维码登录超时")
         _save_qr_to_file("", "expired")
+        _merge_state({"connected": False})
         return False
 
     # ── 主循环 ──
@@ -537,11 +620,24 @@ class WeChatConnector:
 
         if not self.login():
             logger.error("微信登录失败")
+            self._reconnect_attempts += 1
+            _merge_state({
+                "connected": False,
+                "reconnect_attempts": self._reconnect_attempts,
+            })
             return
 
         self.started_at = time.time()
+        _merge_state({
+            "connected": True,
+            "started_at": self.started_at,
+            "bot_id": self.bot_id,
+            "reconnect_attempts": 0,
+        })
         logger.info("微信登录成功，开始收消息...")
         self._poll_loop()
+        # 轮询退出时持久化断开状态（保留 started_at 方便排查）
+        _merge_state({"connected": False})
 
     def _poll_loop(self):
         """消息轮询循环"""
@@ -600,11 +696,13 @@ class WeChatConnector:
                     self._get_updates_buf = new_buf
 
                 msgs = resp.get("msgs", [])
+                if msgs:
+                    self._last_activity = time.time()
+                    _merge_state({"last_activity": self._last_activity})
                 for raw_msg in msgs:
-                    try:
-                        self._handle_message(raw_msg)
-                    except Exception as e:  # noqa: BLE001
-                        logger.error(f"处理消息异常: {e}")
+                    # 修复 P0-WX2：消息处理放到独立线程，避免阻塞轮询循环
+                    # 导致连接状态抖动或心跳超时。
+                    self._msg_executor.submit(self._handle_message, raw_msg)
 
             except Exception as e:  # noqa: BLE001
                 if self._stop:
@@ -681,6 +779,14 @@ class WeChatConnector:
         if not text and not voice_data:
             return
 
+        # 跨天清零今日消息计数
+        today = time.strftime("%Y-%m-%d")
+        if today != self._last_day:
+            self._messages_today = 0
+            self._last_day = today
+        self._messages_today += 1
+        _merge_state({"messages_today": self._messages_today})
+
         logger.info(f"微信消息: from={from_user} text={text[:50]}")
 
         try:
@@ -724,24 +830,37 @@ class WeChatConnector:
                 except Exception as e:  # noqa: BLE001
                     logger.warning("表情包发送失败: %s", e)
         except Exception as e:  # noqa: BLE001
-            logger.error(f"处理消息/发回复失败: {e}")
+            logger.exception(f"处理消息/发回复失败: {e}")
 
     # ── 状态 ──
 
     def get_status(self):
+        today = time.strftime("%Y-%m-%d")
+        if today != self._last_day:
+            self._messages_today = 0
+            self._last_day = today
         return {
             "connected": bool(self.token),
             "uptime_seconds": time.time() - self.started_at if self.started_at else 0,
             "bot_id": self.bot_id,
+            "last_activity": self._last_activity or None,
+            "messages_today": self._messages_today,
+            "reconnect_attempts": self._reconnect_attempts,
         }
 
     def stop(self):
         """停止微信连接器并清理资源。
 
-        注意: 必须调用此方法以确保 ThreadPoolExecutor 正确关闭，
-        避免程序退出时线程池资源泄漏。
+        注意: 不再关闭全局共享线程池（_executor），否则重新连接后
+        消息处理会报错 cannot schedule new futures after shutdown。
+        只关闭本实例的消息处理线程池。
         """
         self._stop = True
-        # 关闭全局线程池，等待所有任务完成
-        _executor.shutdown(wait=True)
-        logger.info("微信连接器已停止，线程池已关闭")
+        # 关闭本实例的消息处理线程池
+        try:
+            self._msg_executor.shutdown(wait=False)
+        except Exception:  # noqa: BLE001
+            pass
+        # 持久化断开状态
+        _merge_state({"connected": False})
+        logger.info("微信连接器已停止")

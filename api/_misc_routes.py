@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import require_role
+from api.auth_jwt import get_current_user_id, require_role
 from api.database import User
 from api.deps import deps
 from api.main_routes import ConfigUpdateRequest, _sanitize_config
@@ -167,15 +167,16 @@ async def get_logs(
     level: str = Query(default="all"),
     search: str = Query(default=""),
     _auth: bool = Security(verify_api_key_dep),
-    _admin: tuple[int, User] = Depends(require_role("admin")),
+    _user: int = Security(get_current_user_id),
 ):
+    # 所有认证用户均可查看日志；当前为单用户部署，日志按系统维度聚合
     return {"logs": ring_buffer.get_recent(limit=limit, level=level, search=search)}
 
 
 @router.get("/api/logs/stream")
 async def stream_logs(
     _auth: bool = Security(verify_api_key_dep),
-    _admin: tuple[int, User] = Depends(require_role("admin")),
+    _user: int = Security(get_current_user_id),
 ):
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue(maxsize=100)
@@ -219,14 +220,14 @@ async def stream_logs(
 
 
 # ═══════════════════════════════════════════════════════
-# Config (admin only)
+# Config (read for all authenticated users; write admin only)
 # ═══════════════════════════════════════════════════════
 
 
 @router.get("/api/config")
 async def get_config(
     _auth: bool = Security(verify_api_key_dep),
-    _admin: tuple[int, User] = Depends(require_role("admin")),
+    _user: int = Security(get_current_user_id),
 ):
     cfg = deps.config
     if cfg:

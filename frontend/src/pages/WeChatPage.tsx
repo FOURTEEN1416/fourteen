@@ -1,17 +1,13 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { AnimatedPage } from '../components/shared'
 import { useQueryClient } from '@tanstack/react-query'
-import { useWechatStatus, queryKeys } from '../hooks/useQueries'
+import { useWechatStatus, useWechatBindings, queryKeys } from '../hooks/useQueries'
 import { Search, Wifi, WifiOff, Trash2, RefreshCw, X, QrCode, Clock, MessageSquare, AlertTriangle, CheckCircle2, Smartphone } from 'lucide-react'
-import type { SavedConnection } from '../types/framework'
 import {
   wechatCreateConnection,
-  wechatDeleteConnection,
-  wechatListConnections,
-  bindWechat,
+  unbindWechat,
 } from '../api/wechat'
 import { wechatQrCode, wechatConnectionStatus, wechatConnect } from '../api/system'
-import { getAccessToken } from '../store/authStore'
 
 // ── Types ──
 
@@ -104,15 +100,11 @@ function LiveStatusBanner() {
 
 // ── Stats row ──
 
-function StatsBar({ connections }: { connections: SavedConnection[] }) {
-  const total = connections.length
-  const online = connections.filter((c) => c.isOnline).length
-  const offline = total - online
-
+function StatsBar({ total, online, offline }: { total: number; online: number; offline: number }) {
   return (
     <div className="flex gap-4 mb-5">
       {[
-        { label: '总连接', value: total, color: 'glass-blue text-gray-700' },
+        { label: '总绑定', value: total, color: 'glass-blue text-gray-700' },
         { label: '在线', value: online, color: 'glass-green text-green-700' },
         { label: '离线', value: offline, color: 'glass-card text-gray-400' },
       ].map((s) => (
@@ -136,11 +128,10 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
   const [errorMsg, setErrorMsg] = useState<string>('')
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pollingStartRef = useRef<number>(0) // 轮询开始时间（用于过期宽限期）
+  const pollingStartRef = useRef<number>(0)
   const connectedRef = useRef(false)
   const qc = useQueryClient()
 
-  // 触发后端连接（启动 WeChatConnector 生成二维码）
   const triggerConnection = useCallback(async () => {
     try {
       await wechatConnect()
@@ -149,7 +140,6 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
     }
   }, [])
 
-  // 轮询连接状态（用户扫码确认后变为已连接）— 必须先于 startQrPolling 声明（被其内部引用）
   const startConnectionPolling = useCallback(() => {
     pollingRef.current = setInterval(async () => {
       try {
@@ -158,7 +148,6 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
         if (connData.connected || connData.status === 'connected') {
           setStatus('connected')
           if (pollingRef.current) clearInterval(pollingRef.current)
-          // 自动保存连接并通知父组件刷新列表
           if (connData.wxid && !connectedRef.current) {
             connectedRef.current = true
             const wxid = connData.wxid
@@ -167,12 +156,9 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
             } catch {
               // 忽略保存失败
             }
-            // 如果已登录，自动绑定到当前账号
-            if (getAccessToken()) {
-              bindWechat({ wxid }).catch(() => {})
-            }
             onConnected?.(wxid)
             qc.invalidateQueries({ queryKey: queryKeys.wechat.status })
+            qc.invalidateQueries({ queryKey: ['wechat', 'bindings'] })
           }
         } else if (connData.status === 'scanned') {
           setStatus('scanned')
@@ -183,7 +169,6 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
     }, 2000)
   }, [onConnected, qc])
 
-  // 轮询二维码（后端连接器需要时间生成二维码）
   const startQrPolling = useCallback(() => {
     if (pollingRef.current) clearInterval(pollingRef.current)
     pollingStartRef.current = Date.now()
@@ -196,29 +181,23 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
         if (data.qr_image) {
           setQrImage(data.qr_image)
           setStatus('waiting')
-          // 有二维码了，切到轮询连接状态
           if (pollingRef.current) clearInterval(pollingRef.current)
           startConnectionPolling()
         } else if (data.is_expired && (Date.now() - pollingStartRef.current) > 12000) {
-          // 后端连接器刚启动时可能尚无二维码，给 12s 宽限期后再认为过期
           setStatus('expired')
           if (pollingRef.current) clearInterval(pollingRef.current)
         }
-        // 否则继续等待二维码生成
       } catch {
         // 忽略轮询错误
       }
     }, 2000)
   }, [startConnectionPolling])
 
-  // 启动完整流程
   const startFlow = useCallback(() => {
-    // 清理旧的 timer 和 polling
     if (startupTimerRef.current) clearTimeout(startupTimerRef.current)
     if (pollingRef.current) clearInterval(pollingRef.current)
 
     triggerConnection()
-    // 延迟启动 QR 轮询，给后端连接器一点初始化时间
     startupTimerRef.current = setTimeout(() => startQrPolling(), 1500)
   }, [triggerConnection, startQrPolling])
 
@@ -230,14 +209,12 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
     }
   }, [startFlow])
 
-  // 二维码过期或错误时重新获取
   const handleRefresh = () => {
     setStatus('loading')
     setErrorMsg('')
     startFlow()
   }
 
-  // 关闭前清理
   const handleClose = () => {
     if (pollingRef.current) clearInterval(pollingRef.current)
     onClose()
@@ -246,7 +223,6 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
-        {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-base font-semibold text-gray-800">扫码连接微信</h3>
           <button onClick={handleClose} className="text-gray-300 hover:text-gray-500">
@@ -254,7 +230,6 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
           </button>
         </div>
 
-        {/* Loading */}
         {status === 'loading' && (
           <div className="py-10 flex flex-col items-center gap-3">
             <div className="h-48 w-48 rounded-xl bg-gray-100 animate-pulse flex items-center justify-center">
@@ -264,7 +239,6 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
           </div>
         )}
 
-        {/* Waiting for scan */}
         {status === 'waiting' && qrImage && (
           <div className="py-4">
             <div className="mx-auto w-56 h-56 rounded-xl border-2 border-dashed border-gray-200 p-3 flex items-center justify-center bg-white">
@@ -296,7 +270,6 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
           </div>
         )}
 
-        {/* Scanned on phone */}
         {status === 'scanned' && (
           <div className="py-10 flex flex-col items-center gap-3">
             <div className="h-16 w-16 rounded-full bg-amber-50 flex items-center justify-center">
@@ -307,7 +280,6 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
           </div>
         )}
 
-        {/* Connected! */}
         {status === 'connected' && (
           <div className="py-10 flex flex-col items-center gap-3">
             <div className="h-16 w-16 rounded-full bg-green-50 flex items-center justify-center">
@@ -324,7 +296,6 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
           </div>
         )}
 
-        {/* Expired */}
         {status === 'expired' && (
           <div className="py-10 flex flex-col items-center gap-3">
             <AlertTriangle className="h-8 w-8 text-amber-400" />
@@ -339,7 +310,6 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
           </div>
         )}
 
-        {/* Error */}
         {status === 'error' && (
           <div className="py-10 flex flex-col items-center gap-3">
             <AlertTriangle className="h-8 w-8 text-red-400" />
@@ -363,105 +333,57 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
 export default function WeChatPage() {
   const qc = useQueryClient()
   const { data: wechatStatus } = useWechatStatus()
-
-  const [connections, setConnections] = useState<SavedConnection[]>(() => {
-    try {
-      const saved = localStorage.getItem('unique-you-wechat-connections')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (Array.isArray(parsed)) return parsed
-      }
-    } catch {
-      // ignore corrupt data
-    }
-    return []
-  })
+  const { data: bindings = [], isLoading: bindingsLoading } = useWechatBindings()
 
   const [searchQuery, setSearchQuery] = useState('')
   const [showQrModal, setShowQrModal] = useState(false)
 
-  // ── Persist ──
+  const isGlobalOnline = wechatStatus?.connected ?? false
 
-  const persist = useCallback((list: SavedConnection[]) => {
-    localStorage.setItem('unique-you-wechat-connections', JSON.stringify(list))
-  }, [])
-
-  // ── Load connections from backend ──
-
-  const loadConnections = useCallback(async () => {
-    try {
-      const res = await wechatListConnections()
-      const data = res.data as { connections?: Array<{ wxid?: string; nickname?: string; alias?: string }> }
-      const list = (data.connections || []).map((c) => ({
-        wxid: c.wxid || '',
-        alias: c.alias || c.nickname || '',
-        isOnline: wechatStatus?.connected ?? false,
-        isCurrent: false,
-      }))
-      setConnections(list)
-      persist(list)
-    } catch {
-      // 保留本地数据
-    }
-  }, [wechatStatus?.connected, persist])
-
-  useEffect(() => {
-    loadConnections()
-  }, [loadConnections])
-
-  // 全局连接状态变化时，同步更新列表中所有连接的在线状态
-  useEffect(() => {
-    setConnections((prev) => {
-      const online = wechatStatus?.connected ?? false
-      const updated = prev.map((c) => ({ ...c, isOnline: online }))
-      const changed = updated.some((c, i) => c.isOnline !== prev[i].isOnline)
-      if (changed) {
-        persist(updated)
-        return updated
-      }
-      return prev
-    })
-  }, [wechatStatus?.connected, persist])
-
-  // ── Filter ──
+  const rows = useMemo(() => {
+    return bindings.map((b) => ({
+      wxid: b.wxid,
+      nickname: b.nickname || '',
+      characterCardId: b.character_card_id || '',
+      isOnline: isGlobalOnline,
+    }))
+  }, [bindings, isGlobalOnline])
 
   const filtered = useMemo(() => {
-    if (!searchQuery.trim()) return connections
+    if (!searchQuery.trim()) return rows
     const q = searchQuery.toLowerCase()
-    return connections.filter(
+    return rows.filter(
       (c) =>
-        c.wxid?.toLowerCase().includes(q) ||
-        c.alias?.toLowerCase().includes(q)
+        c.wxid.toLowerCase().includes(q) ||
+        c.nickname.toLowerCase().includes(q)
     )
-  }, [connections, searchQuery])
+  }, [rows, searchQuery])
 
-  // ── Handlers ──
+  const stats = useMemo(() => {
+    const total = rows.length
+    const online = rows.filter((c) => c.isOnline).length
+    return { total, online, offline: total - online }
+  }, [rows])
 
   const handleDelete = useCallback(
     async (wxid: string) => {
       try {
-        await wechatDeleteConnection(wxid)
+        await unbindWechat(wxid)
+        qc.invalidateQueries({ queryKey: ['wechat', 'bindings'] })
       } catch {
-        // ignore
+        // 全局 interceptor 已提示
       }
-      const updated = connections.filter((c) => c.wxid !== wxid)
-      setConnections(updated)
-      persist(updated)
     },
-    [connections, persist]
+    [qc]
   )
 
   const handleConnected = useCallback(
     (_wxid: string) => {
-      loadConnections()
       qc.invalidateQueries({ queryKey: queryKeys.wechat.status })
-      // 连接成功后可以自动关闭弹窗，也可以让用户点击“完成”关闭
-      // setShowQrModal(false)
+      qc.invalidateQueries({ queryKey: ['wechat', 'bindings'] })
     },
-    [loadConnections, qc]
+    [qc]
   )
-
-  // ── Render ──
 
   return (
     <AnimatedPage>
@@ -487,37 +409,43 @@ export default function WeChatPage() {
           {/* Live Status */}
           <LiveStatusBanner />
 
-          {/* Connections Stats */}
-          <StatsBar connections={connections} />
+          {/* Bindings Stats */}
+          <StatsBar total={stats.total} online={stats.online} offline={stats.offline} />
 
-          {/* Search */}
-          <div className="relative mb-4">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索 wxid 或别名..."
-              className="w-full rounded-xl border border-gray-200 bg-white/60 py-2.5 pl-10 pr-4 text-sm text-gray-700 placeholder:text-gray-300 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-400/20"
-            />
-          </div>
-
-          {/* Table */}
+          {/* Bindings Table */}
           <div className="glass-card overflow-hidden rounded-xl border border-white/30">
+            <div className="relative border-b border-gray-100 px-4 py-3">
+              <Search className="pointer-events-none absolute left-7 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜索 wxid 或昵称..."
+                className="w-full max-w-sm rounded-lg border border-gray-200 bg-white/60 py-2 pl-10 pr-4 text-sm text-gray-700 placeholder:text-gray-300 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-400/20"
+              />
+            </div>
+
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50/50 text-left text-xs font-medium text-gray-400">
                   <th className="px-4 py-3">状态</th>
                   <th className="px-4 py-3">wxid</th>
-                  <th className="px-4 py-3">别名</th>
+                  <th className="px-4 py-3">昵称</th>
+                  <th className="px-4 py-3">绑定角色</th>
                   <th className="px-4 py-3 text-right">操作</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.length === 0 ? (
+                {bindingsLoading ? (
                   <tr>
-                    <td colSpan={4} className="px-4 py-12 text-center text-sm text-gray-300">
-                      {searchQuery ? '未找到匹配的连接' : '暂无连接，点击上方 "扫码连接" 添加'}
+                    <td colSpan={5} className="px-4 py-12 text-center text-sm text-gray-300">
+                      加载绑定中...
+                    </td>
+                  </tr>
+                ) : filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-12 text-center text-sm text-gray-300">
+                      {searchQuery ? '未找到匹配的绑定' : '暂无绑定，点击上方 "扫码连接" 添加'}
                     </td>
                   </tr>
                 ) : (
@@ -527,27 +455,20 @@ export default function WeChatPage() {
                       className="border-b border-gray-50 transition hover:bg-gray-50/50 last:border-0"
                     >
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                              conn.isOnline
-                                ? 'bg-green-50 text-green-600'
-                                : 'bg-gray-100 text-gray-400'
-                            }`}
-                          >
-                            {conn.isOnline ? (
-                              <Wifi className="h-3 w-3" />
-                            ) : (
-                              <WifiOff className="h-3 w-3" />
-                            )}
-                            {conn.isOnline ? '在线' : '离线'}
-                          </span>
-                          {conn.isCurrent && (
-                            <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-500">
-                              当前
-                            </span>
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                            conn.isOnline
+                              ? 'bg-green-50 text-green-600'
+                              : 'bg-gray-100 text-gray-400'
+                          }`}
+                        >
+                          {conn.isOnline ? (
+                            <Wifi className="h-3 w-3" />
+                          ) : (
+                            <WifiOff className="h-3 w-3" />
                           )}
-                        </div>
+                          {conn.isOnline ? '在线' : '离线'}
+                        </span>
                       </td>
 
                       <td className="px-4 py-3">
@@ -556,18 +477,18 @@ export default function WeChatPage() {
                         </code>
                       </td>
 
-                      <td className="px-4 py-3 text-gray-700">{conn.alias}</td>
+                      <td className="px-4 py-3 text-gray-700">{conn.nickname || '—'}</td>
+
+                      <td className="px-4 py-3 text-gray-700">{conn.characterCardId || '默认'}</td>
 
                       <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => handleDelete(conn.wxid)}
-                            className="rounded-lg p-1.5 text-gray-300 transition hover:bg-red-50 hover:text-red-500"
-                            title="删除"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
+                        <button
+                          onClick={() => handleDelete(conn.wxid)}
+                          className="rounded-lg p-1.5 text-gray-300 transition hover:bg-red-50 hover:text-red-500"
+                          title="解绑"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </td>
                     </tr>
                   ))

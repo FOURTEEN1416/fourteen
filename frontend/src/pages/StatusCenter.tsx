@@ -66,17 +66,9 @@ export default function StatusCenter() {
               </div>
             ))
           ) : (
-            <>
-              <div className="bg-white/40 rounded-lg px-3 py-2 text-xs text-gray-600">
-                用户说最近加班很多，需要安静陪伴。
-              </div>
-              <div className="bg-white/40 rounded-lg px-3 py-2 text-xs text-gray-600">
-                用户不喜欢被主动追问过去。
-              </div>
-              <div className="bg-white/40 rounded-lg px-3 py-2 text-xs text-gray-600">
-                用户喜欢在睡前聊轻松的话题。
-              </div>
-            </>
+            <p className="py-4 text-center text-xs text-gray-400">
+              还没有沉淀下来的记忆
+            </p>
           )}
         </div>
       </div>

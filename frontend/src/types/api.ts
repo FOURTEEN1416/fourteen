@@ -509,6 +509,7 @@ export interface UnifiedCharacterUpdate {
   personality?: Record<string, number>
   speaking_style?: Record<string, number>
   core_anchors?: string[]
+  catchphrases?: string[]
 }
 
 export interface PersonaUpdate {

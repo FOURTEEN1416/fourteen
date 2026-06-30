@@ -49,13 +49,13 @@ function buildGlobalNavGroups(isAdmin: boolean, activeRoleId?: string): NavGroup
         { to: '/settings/voice', icon: Mic, label: '语音引擎' },
         { to: '/settings/tools', icon: Wrench, label: '工具仪表盘' },
         { to: '/settings/security', icon: Shield, label: '安全' },
+        { to: '/settings/logs', icon: FileText, label: '日志' },
       ],
     },
     {
       label: '管理后台',
       items: [
         ...(isAdmin ? [{ to: '/admin/users', icon: User, label: '用户管理', badge: 'admin' }] : []),
-        ...(isAdmin ? [{ to: '/admin/logs', icon: FileText, label: '日志审计', badge: 'admin' }] : []),
       ],
     },
   ]

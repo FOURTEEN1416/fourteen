@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import RoleSettings from '../../pages/RoleSettings'
 
 // ════════════════════════════════════════════════════════════════
@@ -61,13 +62,16 @@ vi.mock('../../hooks/useQueries', () => ({
 // ════════════════════════════════════════════════════════════════
 
 function renderComponent(initialEntries = ['/users/u1/roles/c1/settings']) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <MemoryRouter initialEntries={initialEntries}>
-      <Routes>
-        <Route path="/users/:userId/roles/:roleId/settings" element={<RoleSettings />} />
-        <Route path="/users/:userId/roles/:roleId/settings/:tab" element={<RoleSettings />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={initialEntries}>
+        <Routes>
+          <Route path="/users/:userId/roles/:roleId/settings" element={<RoleSettings />} />
+          <Route path="/users/:userId/roles/:roleId/settings/:tab" element={<RoleSettings />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 
