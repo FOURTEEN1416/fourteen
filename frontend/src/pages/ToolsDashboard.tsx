@@ -20,6 +20,9 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   web_summary: 'URL 内容摘要',
   calculator: '数学计算与公式',
   scheduler: '定时提醒与调度',
+  set_reminder: '设置定时提醒',
+  query_reminders: '查询已有提醒',
+  time_awareness: '时间感知与日程认知',
 }
 
 export default function ToolsDashboard() {
