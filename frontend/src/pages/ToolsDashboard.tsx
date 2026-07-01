@@ -22,11 +22,10 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   scheduler: '定时提醒与调度',
 }
 
-const TOOL_NAMES = Object.keys(TOOL_DESCRIPTIONS)
-
 export default function ToolsDashboard() {
   const [tools, setTools] = useState<Record<string, boolean>>({})
   const [health, setHealth] = useState<Record<string, ToolHealth>>({})
+  const [summary, setSummary] = useState({ total: 0, online: 0 })
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
 
@@ -35,18 +34,23 @@ export default function ToolsDashboard() {
     try {
       const [toolsRes, healthRes] = await Promise.all([
         fetchTools(),
-        toolsHealth().catch(() => ({ data: { tools: {} } })),
+        toolsHealth().catch(() => ({ data: { tools: {}, total: 0, online: 0 } })),
       ])
       const enabledNames: string[] = toolsRes.data?.tools ?? []
       const enabledMap: Record<string, boolean> = {}
-      for (const key of TOOL_NAMES) {
-        enabledMap[key] = enabledNames.includes(key)
+      for (const key of enabledNames) {
+        enabledMap[key] = true
       }
       setTools(enabledMap)
       setHealth(healthRes.data?.tools ?? {})
+      setSummary({
+        total: healthRes.data?.total ?? 0,
+        online: healthRes.data?.online ?? 0,
+      })
     } catch {
       setTools({})
       setHealth({})
+      setSummary({ total: 0, online: 0 })
     } finally {
       setLoading(false)
     }
@@ -70,11 +74,11 @@ export default function ToolsDashboard() {
     }
   }
 
-  const onlineCount = TOOL_NAMES.filter(
-    (name) => health[name]?.available ?? true
-  ).length
-  const totalCount = TOOL_NAMES.length
-  const allHealthy = onlineCount === totalCount
+  // 展示 health 返回的所有工具；同时保证 enabled 列表里的工具即使 health 缺失也会显示
+  const toolNames = Array.from(new Set([...Object.keys(health), ...Object.keys(tools)]))
+  const onlineCount = summary.online
+  const totalCount = summary.total
+  const allHealthy = totalCount > 0 && onlineCount === totalCount
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -105,7 +109,7 @@ export default function ToolsDashboard() {
             </span>
           </h3>
           <div className="rounded-xl border border-gray-200 bg-white/60 p-4 space-y-2">
-            {TOOL_NAMES.map((name) => {
+            {toolNames.map((name) => {
               const enabled = tools[name] ?? false
               const toolHealth = health[name]
               const available = toolHealth?.available ?? true
@@ -128,7 +132,7 @@ export default function ToolsDashboard() {
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-gray-700">{name}</p>
                       <p className="text-xs text-gray-400">
-                        {TOOL_DESCRIPTIONS[name]}
+                        {TOOL_DESCRIPTIONS[name] || name}
                       </p>
                     </div>
                     <button
