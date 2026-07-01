@@ -1,13 +1,12 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { AnimatedPage } from '../components/shared'
 import { useQueryClient } from '@tanstack/react-query'
-import { useWechatStatus, useWechatBindings, queryKeys } from '../hooks/useQueries'
+import { useWechatStatus, useWechatBindings, useCharacters, queryKeys } from '../hooks/useQueries'
+import type { WeChatStatus } from '../types/api'
 import { Search, Wifi, WifiOff, Trash2, RefreshCw, X, QrCode, Clock, MessageSquare, AlertTriangle, CheckCircle2, Smartphone } from 'lucide-react'
-import {
-  wechatCreateConnection,
-  unbindWechat,
-} from '../api/wechat'
+import { wechatCreateConnection, unbindWechat } from '../api/wechat'
 import { wechatQrCode, wechatConnectionStatus, wechatConnect } from '../api/system'
+import { sanitizeCharacterName } from '../utils/character'
 
 // ── Types ──
 
@@ -328,26 +327,91 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
   )
 }
 
+/** SSE 实时订阅微信状态，更新 React Query 缓存，避免轮询抖动。 */
+function useWechatStatusStream() {
+  const qc = useQueryClient()
+  const reconnectRef = useRef(0)
+
+  useEffect(() => {
+    // Node.js / 测试环境无 EventSource，优雅跳过
+    if (typeof EventSource === 'undefined') return
+
+    let es: EventSource | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let closed = false
+
+    const connect = () => {
+      if (closed) return
+      const apiKey = import.meta.env.VITE_API_KEY || ''
+      const url = apiKey
+        ? `/api/channels/wechat/status-stream?api_key=${encodeURIComponent(apiKey)}`
+        : '/api/channels/wechat/status-stream'
+      es = new EventSource(url)
+
+      es.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data) as WeChatStatus
+          qc.setQueryData(queryKeys.wechat.status, payload)
+          reconnectRef.current = 0
+        } catch {
+          // 忽略非 JSON 数据
+        }
+      }
+
+      es.onerror = () => {
+        if (closed) return
+        if (es) {
+          es.close()
+          es = null
+        }
+        // 指数退避重连：1s / 2s / 4s / 8s，最大 30s
+        const delay = Math.min(1000 * 2 ** reconnectRef.current, 30000)
+        reconnectRef.current = Math.min(reconnectRef.current + 1, 5)
+        reconnectTimer = setTimeout(connect, delay)
+      }
+    }
+
+    connect()
+    return () => {
+      closed = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      if (es) es.close()
+    }
+  }, [qc])
+}
+
 // ── Main Component ──
 
 export default function WeChatPage() {
   const qc = useQueryClient()
+  // SSE 实时更新缓存，轮询作为兜底（30s 一次）
+  useWechatStatusStream()
   const { data: wechatStatus } = useWechatStatus()
   const { data: bindings = [], isLoading: bindingsLoading } = useWechatBindings()
+  const { data: characters = [] } = useCharacters()
 
   const [searchQuery, setSearchQuery] = useState('')
   const [showQrModal, setShowQrModal] = useState(false)
 
   const isGlobalOnline = wechatStatus?.connected ?? false
 
+  const characterNameMap = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const c of characters) {
+      map.set(c.id, sanitizeCharacterName(c.name))
+    }
+    return map
+  }, [characters])
+
   const rows = useMemo(() => {
     return bindings.map((b) => ({
       wxid: b.wxid,
       nickname: b.nickname || '',
       characterCardId: b.character_card_id || '',
+      characterName: characterNameMap.get(b.character_card_id || '') || '默认',
       isOnline: isGlobalOnline,
     }))
-  }, [bindings, isGlobalOnline])
+  }, [bindings, isGlobalOnline, characterNameMap])
 
   const filtered = useMemo(() => {
     if (!searchQuery.trim()) return rows
@@ -479,7 +543,7 @@ export default function WeChatPage() {
 
                       <td className="px-4 py-3 text-gray-700">{conn.nickname || '—'}</td>
 
-                      <td className="px-4 py-3 text-gray-700">{conn.characterCardId || '默认'}</td>
+                      <td className="px-4 py-3 text-gray-700">{conn.characterName}</td>
 
                       <td className="px-4 py-3 text-right">
                         <button

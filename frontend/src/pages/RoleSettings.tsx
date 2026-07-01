@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useUnifiedCharacter, queryKeys } from '../hooks/useQueries'
 import { updateCharacter } from '../api/characters'
 import { useErrorStore } from '../store/errorStore'
+import { sanitizeCharacterName } from '../utils/character'
 import Slider from '../components/shared/Slider'
 import TagInput from '../components/shared/TagInput'
 import Toggle from '../components/shared/Toggle'
@@ -550,7 +551,7 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
         </div>
       </Section>
 
-      <ConfirmDialog open={showDelete} title="确认删除角色" message={`确定要删除「${character.name}」吗？此操作不可恢复。`} confirmText="确认删除" cancelText="取消" variant="danger" onConfirm={() => setShowDelete(false)} onCancel={() => setShowDelete(false)} />
+      <ConfirmDialog open={showDelete} title="确认删除角色" message={`确定要删除「${sanitizeCharacterName(character.name)}」吗？此操作不可恢复。`} confirmText="确认删除" cancelText="取消" variant="danger" onConfirm={() => setShowDelete(false)} onCancel={() => setShowDelete(false)} />
     </div>
   )
 }
@@ -644,10 +645,10 @@ export default function RoleSettings() {
           <div className="flex items-center gap-4">
             {/* Avatar */}
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-400 to-purple-500 flex items-center justify-center text-white text-xl font-bold shadow-sm shrink-0">
-              {character.name[0]}
+              {sanitizeCharacterName(character.name)[0]}
             </div>
             <div className="min-w-0 flex-1">
-              <h1 className="text-lg font-bold text-gray-800">{character.name}</h1>
+              <h1 className="text-lg font-bold text-gray-800">{sanitizeCharacterName(character.name)}</h1>
               <p className="text-sm text-gray-500 truncate">{character.description}</p>
               <div className="flex items-center gap-3 mt-1.5">
                 <span className="text-[11px] text-gray-400">ID: {characterId}</span>

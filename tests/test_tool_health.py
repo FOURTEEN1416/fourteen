@@ -1,29 +1,38 @@
 """T-19: 工具健康检测+指令处理器 单元测试"""
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import MagicMock
+
+from tools.base_tool import BaseTool, ToolResult
+
+
+class FakeTool(BaseTool):
+    name = "fake_tool"
+
+    def __init__(self, plugin=None, sm=None):
+        self._plugin = plugin
+        self._sm = sm
+
+    def execute(self, **kwargs):
+        return ToolResult(True)
 
 
 class TestToolRegistryHealthCheck:
     def test_health_check_all_available(self):
-        from tools.base_tool import BaseTool, ToolRegistry
+        from tools.base_tool import ToolRegistry
         registry = ToolRegistry()
-        tool = MagicMock(spec=BaseTool)
-        tool.name = "test_tool"
-        tool._plugin = MagicMock()
-        registry.register(tool)
+        registry.register(FakeTool(plugin=object(), sm=object()))
         result = registry.health_check_all()
-        assert "test_tool" in result
-        assert result["test_tool"]["available"] is True
+        assert "fake_tool" in result
+        assert result["fake_tool"]["available"] is True
+        assert result["fake_tool"]["error"] == ""
 
     def test_health_check_plugin_not_loaded(self):
-        from tools.base_tool import BaseTool, ToolRegistry
+        from tools.base_tool import ToolRegistry
         registry = ToolRegistry()
-        tool = MagicMock(spec=BaseTool)
-        tool.name = "broken_tool"
-        type(tool)._plugin = PropertyMock(return_value=None)
-        registry.register(tool)
+        registry.register(FakeTool(plugin=None))
         result = registry.health_check_all()
-        assert result["broken_tool"]["available"] is False
-        assert "plugin not loaded" in result["broken_tool"]["error"]
+        assert "fake_tool" in result
+        assert result["fake_tool"]["available"] is False
+        assert "plugin not loaded" in result["fake_tool"]["error"]
 
 
 class TestCommandHandlerSendSticker:

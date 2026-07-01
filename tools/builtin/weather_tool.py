@@ -31,16 +31,39 @@ class WeatherTool(BaseTool):
     def __init__(self, api_key: str = "", city: str = "Shanghai"):
         self._plugin = WeatherPlugin(api_key=api_key, city=city) if HAS_WEATHER else None
 
-    def execute(self, city: str = "", **kwargs) -> ToolResult:
+    def health_check(self) -> dict[str, Any]:
         if not self._plugin:
-            return ToolResult(False, error="Weather plugin not available")
-        if city:
-            self._plugin.city = city
+            return {"available": True, "error": "", "note": "使用 wttr.in 公开接口降级"}
+        return {"available": True, "error": ""}
+
+    def execute(self, city: str = "", **kwargs) -> ToolResult:
+        target_city = city or "Shanghai"
+        if self._plugin:
+            try:
+                self._plugin.city = target_city
+                weather = self._plugin.get_weather()
+                if weather:
+                    return ToolResult(True, data=weather)
+            except Exception:
+                logger.exception("插件获取天气失败，尝试降级")
+        return self._fetch_wttr(target_city)
+
+    def _fetch_wttr(self, city: str) -> ToolResult:
+        """无插件时的公开天气降级（wttr.in）。"""
         try:
-            weather = self._plugin.get_weather()
-            if weather:
-                return ToolResult(True, data=weather)
-            return ToolResult(False, error="Failed to get weather data")
-        except Exception:
-            logger.exception("获取天气失败")
-            return ToolResult(False, error="weather_fetch_failed")
+            import requests
+            url = f"https://wttr.in/{city}?format=j1"
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            current = data.get("current_condition", [{}])[0]
+            return ToolResult(True, data={
+                "city": city,
+                "temperature": current.get("temp_C"),
+                "condition": current.get("weatherDesc", [{}])[0].get("value", ""),
+                "humidity": current.get("humidity"),
+                "source": "wttr.in",
+            })
+        except Exception as e:
+            logger.exception("wttr.in 降级获取天气失败")
+            return ToolResult(False, error=f"天气服务暂不可用: {e}")

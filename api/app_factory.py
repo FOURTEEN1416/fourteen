@@ -25,8 +25,10 @@ from api._tools_routes import router as tools_router
 from api._training_routes import router as training_router
 from api._users_routes import router as users_router
 from api.auth import configure_auth, verify_api_key_dep
+from api.auth_jwt import verify_token
 from api.deps import deps
 from api.routers.demo_routes import router as demo_router
+from observability.logging_setup import _user_id
 
 logger = logging.getLogger("app_factory")
 
@@ -42,6 +44,37 @@ except ImportError:
 # ── 常量 ──────────────────────────────────────────────
 
 MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10MB
+
+
+class UserContextMiddleware:
+    """从 Authorization header 提取当前用户 ID，写入日志上下文变量。
+
+    让后续 ring_buffer / 安全日志能够按用户维度隔离，非管理员只能查看本账号信息。
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            headers = dict(scope.get("headers", []))
+            auth_header = headers.get(b"authorization", b"").decode("latin-1")
+            user_id = None
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+                try:
+                    payload = verify_token(token)
+                    user_id = int(payload.get("sub")) if payload.get("sub") else None
+                except Exception:
+                    user_id = None
+            token_ctx = _user_id.set(user_id)
+            try:
+                await self.app(scope, receive, send)
+            finally:
+                _user_id.reset(token_ctx)
+        else:
+            await self.app(scope, receive, send)
+
 
 # ── 应用工厂 ──────────────────────────────────────────
 
@@ -83,6 +116,9 @@ def create_api_app(
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization", "X-API-Key"],
     )
+
+    # ── 用户上下文中间件（用于日志/安全日志按用户隔离） ──
+    app.add_middleware(UserContextMiddleware)
 
     # ── 安全响应头 ──
     @app.middleware("http")

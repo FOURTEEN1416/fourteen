@@ -60,6 +60,11 @@ describe('SettingsVoice', () => {
   it('renders 语音引擎 section with engine selector', async () => {
     render(<SettingsVoice />)
 
+    // 等待挂载时的异步数据拉取完成，避免状态更新在 test 结束后触发 act() 警告
+    await waitFor(() => {
+      expect(mockGetSpeakers).toHaveBeenCalled()
+    })
+
     // Engine section heading
     expect(screen.getByText('语音引擎')).toBeDefined()
     // The engine switcher shows the default engine button
@@ -70,6 +75,10 @@ describe('SettingsVoice', () => {
 
   it('renders 4 engine options', async () => {
     render(<SettingsVoice />)
+
+    await waitFor(() => {
+      expect(mockGetSpeakers).toHaveBeenCalled()
+    })
 
     // The engine switcher renders all four options as buttons
     expect(screen.getByRole('button', { name: 'MiMo Cloud' })).toBeDefined()
@@ -82,6 +91,10 @@ describe('SettingsVoice', () => {
 
   it('clone section shows file upload input', async () => {
     render(<SettingsVoice />)
+
+    await waitFor(() => {
+      expect(mockGetSpeakers).toHaveBeenCalled()
+    })
 
     // Voice clone section heading
     expect(screen.getByText('语音克隆')).toBeDefined()
@@ -101,6 +114,10 @@ describe('SettingsVoice', () => {
 
   it('design section shows gender and style form', async () => {
     render(<SettingsVoice />)
+
+    await waitFor(() => {
+      expect(mockGetSpeakers).toHaveBeenCalled()
+    })
 
     // Voice design section heading
     expect(screen.getByText('语音设计')).toBeDefined()

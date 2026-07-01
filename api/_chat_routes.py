@@ -232,6 +232,38 @@ async def get_wechat_status(_auth: bool = Security(verify_api_key_dep)):
     }
 
 
+@router.get("/api/channels/wechat/status-stream")
+async def wechat_status_stream(_auth: bool = Security(verify_api_key_dep)):
+    """SSE 实时推送微信连接状态，解决前端轮询导致的状态抖动问题。"""
+    from wechat_direct import get_wechat_state
+
+    async def _event_generator():
+        while True:
+            try:
+                state = get_wechat_state()
+                payload = {
+                    "connected": bool(state.get("connected")),
+                    "uptime_seconds": state.get("uptime_seconds", 0),
+                    "bot_id": state.get("bot_id", ""),
+                    "last_activity": state.get("last_activity"),
+                    "messages_today": state.get("messages_today", 0),
+                    "reconnect_attempts": state.get("reconnect_attempts", 0),
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            except asyncio.CancelledError:
+                logger.debug("WeChat status stream client disconnected")
+                break
+            except Exception as e:  # noqa: BLE001
+                logger.debug("WeChat status stream error: %s", e)
+            await asyncio.sleep(2.0)
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.post("/api/channels/wechat/reconnect")
 async def reconnect_wechat(_auth: bool = Security(verify_api_key_dep)):
     conn = deps.get_wechat_connector()

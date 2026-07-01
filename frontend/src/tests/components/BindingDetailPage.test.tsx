@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import BindingDetailPage from '../../pages/BindingDetailPage'
 
@@ -107,7 +107,7 @@ describe('BindingDetailPage', () => {
     const btns = screen.getAllByRole('button')
     const teacherBtn = btns.find((b) => b.textContent?.includes('温柔老师'))
     expect(teacherBtn).toBeDefined()
-    teacherBtn!.click()
+    fireEvent.click(teacherBtn!)
 
     await waitFor(() => {
       expect(mockUpdateBinding).toHaveBeenCalledWith('wx_test_001', {

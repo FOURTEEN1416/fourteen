@@ -55,6 +55,18 @@ class TimeAwarenessTool(BaseTool):
         "required": ["action"],
     }
 
+    def health_check(self) -> dict[str, Any]:
+        return {
+            "available": True,
+            "error": "",
+            "features": {
+                "current_time": True,
+                "holiday": HAS_CHINESE_CALENDAR,
+                "lunar": HAS_LUNAR,
+                "workday": HAS_CHINESE_CALENDAR,
+            },
+        }
+
     def execute(self, **kwargs) -> ToolResult:
         action = kwargs.get("action", "")
         date_str = kwargs.get("date", "")

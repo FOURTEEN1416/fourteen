@@ -75,11 +75,11 @@ def test_app_creates_and_has_at_least_71_api_routes(app):
     "module,expected_count,label",
     [
         (_misc_routes, 10, "health/stats/memory/logs/config/channels/routes"),
-        (_chat_routes, 10, "chat/session + wechat channels"),
+        (_chat_routes, 11, "chat/session + wechat channels"),
         (_personality_routes, 9, "emotion/persona/psych"),
         (_users_routes, 7, "users/*"),
         (_training_routes, 11, "training/* + proactive/*"),
-        (_tools_routes, 5, "tools/* + plugins/*"),
+        (_tools_routes, 6, "tools/* + plugins/* + health"),
         (_safety_routes, 12, "safety/rag/voice/files/cache"),
         (_clone_routes, 7, "clone/*"),
     ],
@@ -98,14 +98,14 @@ def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
     )
 
 
-def test_total_contribution_is_71(app):
-    """The 8 new sub-routers together contribute exactly 71 endpoints."""
+def test_total_contribution_is_73(app):
+    """The 8 new sub-routers together contribute exactly 73 endpoints."""
     modules = [
         _misc_routes, _chat_routes, _personality_routes, _users_routes,
         _training_routes, _tools_routes, _safety_routes, _clone_routes,
     ]
     total = sum(len(_sub_router_routes(m)) for m in modules)
-    assert total == 71, f"8 sub-routers contribute {total} routes, expected 71"
+    assert total == 73, f"8 sub-routers contribute {total} routes, expected 73"
 
 
 def test_no_duplicate_endpoints_across_sub_routers():

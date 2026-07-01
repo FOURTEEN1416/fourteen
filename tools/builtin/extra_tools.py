@@ -44,6 +44,9 @@ class MemoryTool(BaseTool):
     def __init__(self, structured_memory=None):
         self._sm = structured_memory
 
+    def health_check(self) -> dict[str, Any]:
+        return {"available": bool(self._sm), "error": "" if self._sm else "Memory system not available"}
+
     def execute(self, query: str = "", limit: int = 5, **kwargs) -> ToolResult:
         if not query:
             return ToolResult(False, error="query is required")
@@ -77,6 +80,11 @@ class WebSummaryTool(BaseTool):
         },
         "required": ["url"],
     }
+
+    def health_check(self) -> dict[str, Any]:
+        if not HAS_REQUESTS:
+            return {"available": False, "error": "缺少依赖: pip install requests beautifulsoup4"}
+        return {"available": True, "error": ""}
 
     def execute(self, url: str = "", **kwargs) -> ToolResult:
         if not url:
@@ -122,6 +130,13 @@ class ImageGenTool(BaseTool):
         "required": ["prompt"],
     }
 
+    def health_check(self) -> dict[str, Any]:
+        return {
+            "available": False,
+            "error": "图片生成服务未配置。请在后台集成图像模型（如 Stability、DALL·E、Agnes-AI）后使用。",
+            "config_hint": "设置 IMAGE_GEN_PROVIDER / IMAGE_GEN_API_KEY 环境变量",
+        }
+
     def execute(self, prompt: str = "", **kwargs) -> ToolResult:
         return ToolResult(
             False,
@@ -151,6 +166,9 @@ class SchedulerTool(BaseTool):
 
     def __init__(self, structured_memory=None):
         self._sm = structured_memory
+
+    def health_check(self) -> dict[str, Any]:
+        return {"available": bool(self._sm), "error": "" if self._sm else "Memory system not available"}
 
     def execute(self, content: str = "", trigger_time: str | None = None, **kwargs) -> ToolResult:
         if not content:

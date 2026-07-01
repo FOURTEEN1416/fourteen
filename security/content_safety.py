@@ -93,6 +93,26 @@ class SafetyResult:
         }
 
 
+def _log_safety_event(category: SafetyCategory, text: str, is_input: bool) -> None:
+    """将安全拦截事件写入安全日志，并带上当前用户 ID 用于权限隔离。"""
+    try:
+        from api.deps import deps
+        from observability.logging_setup import get_user_id
+
+        deps.safety_log_mgr.append(
+            {
+                "category": category.value,
+                "direction": "input" if is_input else "output",
+                "text": text[:500],
+                "timestamp": time.time(),
+            },
+            user_id=get_user_id(),
+        )
+    except Exception:
+        # 安全日志写入失败不应影响主流程
+        pass
+
+
 class ContentSafetyFilter:
     def __init__(self, llm_gateway=None, enabled: bool = True):
         self.llm_gateway = llm_gateway
@@ -103,10 +123,12 @@ class ContentSafetyFilter:
             return SafetyResult(True, SafetyCategory.NORMAL, 1.0)
         result = self._quick_scan(text)
         if result and result.category != SafetyCategory.NORMAL:
+            _log_safety_event(result.category, text, is_input=True)
             return result
         if self.llm_gateway:
             result = self._llm_classify(text, is_input=True)
             if result:
+                _log_safety_event(result.category, text, is_input=True)
                 return result
         return SafetyResult(True, SafetyCategory.NORMAL, 0.9)
 
@@ -116,6 +138,7 @@ class ContentSafetyFilter:
         result = self._quick_scan(text)
         if result and result.category != SafetyCategory.NORMAL:
             logger.warning("Output safety issue detected: %s", result.category.value)
+            _log_safety_event(result.category, text, is_input=False)
             return result
         return SafetyResult(True, SafetyCategory.NORMAL, 0.9)
 

@@ -380,6 +380,11 @@ async def update_character(
 
     if not _save_character(character_id, data):
         raise HTTPException(status_code=500, detail="保存角色失败")
+
+    # 清除人设缓存，确保下次对话使用最新角色卡
+    if _orch and hasattr(_orch, "invalidate_character_persona_cache"):
+        _orch.invalidate_character_persona_cache(character_id)
+
     return {"status": "updated", "character_id": character_id}
 
 
@@ -394,6 +399,11 @@ async def delete_character(
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
     if not _delete_character_file(character_id):
         raise HTTPException(status_code=500, detail="删除角色失败")
+
+    # 清除人设缓存
+    if _orch and hasattr(_orch, "invalidate_character_persona_cache"):
+        _orch.invalidate_character_persona_cache(character_id)
+
     logger.info("角色已删除: %s (%s)", data.get("name", ""), character_id)
     return {"status": "deleted", "character_id": character_id}
 

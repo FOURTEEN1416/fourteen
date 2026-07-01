@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Securi
 from fastapi.responses import FileResponse, Response
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import get_current_user_id, require_role
+from api.auth_jwt import get_current_user, get_current_user_id, require_role
 from api.database import User
 from api.deps import deps
 from api.main_routes import MAX_RAG_UPLOAD_SIZE, MAX_UPLOAD_SIZE, UPLOAD_DIR
@@ -34,22 +34,30 @@ router = APIRouter(tags=["safety-infra"])
 # ═══════════════════════════════════════════════════════
 
 
+def _user_filter_scope(current_user: User) -> int | None:
+    """管理员可查看全部，普通用户只能查看本账号数据。"""
+    return None if current_user.role == "admin" else current_user.id
+
+
 @router.get("/api/safety/stats")
 async def safety_stats(
     _auth: bool = Security(verify_api_key_dep),
-    _user: int = Security(get_current_user_id),
+    current_user: User = Security(get_current_user),
 ):
     sf = deps.get_safety()
-    return deps.safety_log_mgr.get_stats(enabled=sf.enabled if sf else False)
+    return deps.safety_log_mgr.get_stats(
+        enabled=sf.enabled if sf else False,
+        user_id=_user_filter_scope(current_user),
+    )
 
 
 @router.get("/api/safety/log")
 async def safety_log(
     limit: int = Query(default=50, le=200),
     _auth: bool = Security(verify_api_key_dep),
-    _user: int = Security(get_current_user_id),
+    current_user: User = Security(get_current_user),
 ):
-    return {"log": deps.safety_log_mgr.get_recent(limit)}
+    return {"log": deps.safety_log_mgr.get_recent(limit, user_id=_user_filter_scope(current_user))}
 
 
 @router.post("/api/safety/config")

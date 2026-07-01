@@ -10,7 +10,7 @@ import hmac
 import threading
 from typing import Any
 
-from fastapi import HTTPException, Security
+from fastapi import HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -36,9 +36,13 @@ def update_auth_key(api_key: str) -> None:
         _auth_config["api_key"] = api_key
 
 
-async def verify_api_key_dep(api_key: str | None = Security(_api_key_header)) -> bool:
+async def verify_api_key_dep(
+    request: Request,
+    api_key: str | None = Security(_api_key_header),
+) -> bool:
     """统一的 API Key 验证依赖注入函数
 
+    支持 header 或 URL query 参数传递 API Key（EventSource 等场景无法自定义 header）。
     所有 FastAPI 路由应使用此函数作为 Security 依赖。
     """
     with _auth_lock:
@@ -48,7 +52,8 @@ async def verify_api_key_dep(api_key: str | None = Security(_api_key_header)) ->
     if not enabled:
         return True
 
-    if hmac.compare_digest(api_key or "", key):
+    candidate = api_key or request.query_params.get("api_key") or ""
+    if hmac.compare_digest(candidate, key):
         return True
 
     raise HTTPException(

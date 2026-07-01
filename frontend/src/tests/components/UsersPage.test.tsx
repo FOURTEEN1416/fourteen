@@ -88,6 +88,7 @@ describe('UsersPage', () => {
     vi.mocked(listMyBindings).mockResolvedValue(
       mockAxiosResponse({ bindings: sampleBindings, total: sampleBindings.length }),
     )
+    vi.mocked(unbindWechat).mockResolvedValue(mockAxiosResponse({ status: 'ok' }))
   })
 
   // ──────────────────────────────────────────────
@@ -207,6 +208,10 @@ describe('UsersPage', () => {
     fireEvent.click(unbindButtons[0])
 
     expect(window.confirm).toHaveBeenCalledWith('确定解除绑定此微信？')
+    // 等待异步解绑流程（含 setBindings）完成，避免 act() 警告
+    await waitFor(() => {
+      expect(unbindWechat).toHaveBeenCalledWith('wx_test_001')
+    })
   })
 
   // ──────────────────────────────────────────────

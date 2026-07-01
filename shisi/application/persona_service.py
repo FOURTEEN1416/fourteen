@@ -64,6 +64,7 @@ class PersonaService:
         world_info: str = "",
         character_id: str | None = None,
         character_overrides: dict[str, Any] | None = None,
+        user_message: str = "",
     ) -> str:
         """构建系统提示词。
 
@@ -82,7 +83,7 @@ class PersonaService:
 
         base_prompt = prompt_builder.build(
             character,
-            user_message="",
+            user_message=user_message,
             chat_history=chat_history,
             use_knowledge=True,
             use_storyline=False,
@@ -155,35 +156,46 @@ class PersonaService:
         return character
 
     def _load_character_card(self, character_id: str) -> dict[str, Any] | None:
-        """从 config/characters 加载角色卡数据。"""
+        """从 config/characters 加载角色卡数据，并展平为统一格式。"""
         from pathlib import Path
+
+        from utils.character_helpers import normalize_character_card
 
         chars_dir = Path("config/characters")
         if not chars_dir.exists():
             return None
+
+        raw_card: dict[str, Any] | None = None
 
         # 1. 按文件名查
         direct_path = chars_dir / f"{character_id}.json"
         if direct_path.exists():
             try:
                 with open(direct_path, encoding="utf-8") as f:
-                    return json.load(f)
+                    raw_card = json.load(f)
             except (OSError, json.JSONDecodeError):
                 pass
 
         # 2. 遍历匹配内部 id 字段
-        try:
-            for f in chars_dir.glob("*.json"):
-                try:
-                    with open(f, encoding="utf-8") as fh:
-                        data = json.load(fh)
-                    if data.get("id") == character_id:
-                        return data
-                except (OSError, json.JSONDecodeError):
-                    continue
-        except OSError:
-            pass
-        return None
+        if raw_card is None:
+            try:
+                for f in chars_dir.glob("*.json"):
+                    try:
+                        with open(f, encoding="utf-8") as fh:
+                            data = json.load(fh)
+                        if data.get("id") == character_id:
+                            raw_card = data
+                            break
+                    except (OSError, json.JSONDecodeError):
+                        continue
+            except OSError:
+                pass
+
+        if not raw_card:
+            return None
+
+        # 展平 SillyTavern 等嵌套格式，确保 name/description/personality 等字段可用
+        return normalize_character_card(raw_card)
 
     def _build_character_from_card(
         self, character_id: str, emotional_state: EmotionalState

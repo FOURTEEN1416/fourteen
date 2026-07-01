@@ -3,14 +3,16 @@ import { render, screen, fireEvent, waitFor } from '../utils/test-utils'
 import WeChatPage from '../../pages/WeChatPage'
 
 // ── Shared mock fns (hoisted so vi.mock factories can reference them) ──
-const { mockUseWechatStatus, mockUseWechatBindings } = vi.hoisted(() => ({
+const { mockUseWechatStatus, mockUseWechatBindings, mockUseCharacters } = vi.hoisted(() => ({
   mockUseWechatStatus: vi.fn(),
   mockUseWechatBindings: vi.fn(),
+  mockUseCharacters: vi.fn(),
 }))
 
 vi.mock('../../hooks/useQueries', () => ({
   useWechatStatus: mockUseWechatStatus,
   useWechatBindings: mockUseWechatBindings,
+  useCharacters: mockUseCharacters,
   queryKeys: {
     wechat: { status: ['wechat', 'status'] },
     characters: { all: ['characters'], detail: (id: string) => ['characters', id] },
@@ -58,6 +60,11 @@ describe('WeChatPage', () => {
       isError: false,
     })
     mockUseWechatBindings.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+    })
+    mockUseCharacters.mockReturnValue({
       data: [],
       isLoading: false,
       isError: false,
@@ -117,6 +124,14 @@ describe('WeChatPage', () => {
 
   // ── 6. Displays bindings from API ──
   it('displays bindings from API', () => {
+    mockUseCharacters.mockReturnValue({
+      data: [
+        { id: 'c1', name: '角色一', description: '', is_active: false },
+        { id: 'c2', name: '角色二', description: '', is_active: false },
+      ],
+      isLoading: false,
+      isError: false,
+    })
     mockUseWechatBindings.mockReturnValue({
       data: [
         { id: 1, user_id: 1, wxid: 'wx_test_001', nickname: '测试1号', avatar: '', character_card_id: 'c1', bound_at: '' },
@@ -139,6 +154,14 @@ describe('WeChatPage', () => {
 
   // ── 7. Search filters bindings ──
   it('search filters bindings by wxid', () => {
+    mockUseCharacters.mockReturnValue({
+      data: [
+        { id: 'c1', name: '角色一', description: '', is_active: false },
+        { id: 'c2', name: '角色二', description: '', is_active: false },
+      ],
+      isLoading: false,
+      isError: false,
+    })
     mockUseWechatBindings.mockReturnValue({
       data: [
         { id: 1, user_id: 1, wxid: 'wx_test_001', nickname: '测试1号', avatar: '', character_card_id: 'c1', bound_at: '' },
@@ -163,6 +186,14 @@ describe('WeChatPage', () => {
 
   // ── 8. Delete binding calls unbindWechat ──
   it('delete binding calls unbindWechat', async () => {
+    mockUseCharacters.mockReturnValue({
+      data: [
+        { id: 'c1', name: '角色一', description: '', is_active: false },
+        { id: 'c2', name: '角色二', description: '', is_active: false },
+      ],
+      isLoading: false,
+      isError: false,
+    })
     mockUseWechatBindings.mockReturnValue({
       data: [
         { id: 1, user_id: 1, wxid: 'wx_test_001', nickname: '测试1号', avatar: '', character_card_id: 'c1', bound_at: '' },

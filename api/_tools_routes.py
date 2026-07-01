@@ -42,6 +42,23 @@ async def tools_list(_auth: bool = Security(verify_api_key_dep)):
     return {"tools": []}
 
 
+@router.get("/api/tools/health")
+async def tools_health(_auth: bool = Security(verify_api_key_dep)):
+    """返回所有注册工具的真实可用性（含错误原因）。"""
+    orch = deps.orch
+    if not orch or not orch._tools or not orch._tools.registry:
+        return {"available": False, "tools": {}, "total": 0, "online": 0}
+
+    health = orch._tools.registry.health_check_all()
+    online = sum(1 for v in health.values() if v.get("available"))
+    return {
+        "available": True,
+        "tools": health,
+        "total": len(health),
+        "online": online,
+    }
+
+
 @router.post("/api/tools/{name}/toggle")
 async def toggle_tool(
     name: str,

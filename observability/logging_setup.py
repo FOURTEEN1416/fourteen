@@ -16,6 +16,7 @@ except ImportError:
 
 _trace_id: ContextVar[str] = ContextVar("trace_id", default="")
 _session_id: ContextVar[str] = ContextVar("session_id", default="")
+_user_id: ContextVar[int | None] = ContextVar("user_id", default=None)
 
 
 def set_trace_id(trace_id: str) -> None:
@@ -40,6 +41,14 @@ def get_session_id() -> str:
     return _session_id.get()
 
 
+def set_user_id(user_id: int | None) -> None:
+    _user_id.set(user_id)
+
+
+def get_user_id() -> int | None:
+    return _user_id.get()
+
+
 # In-memory log ring buffer for /api/logs endpoint
 class RingBufferHandler(logging.Handler):
     """Keeps recent log records in memory (last 200)."""
@@ -55,20 +64,37 @@ class RingBufferHandler(logging.Handler):
             "level": record.levelname.lower(),
             "module": record.name,
             "msg": record.getMessage(),
+            "user_id": getattr(record, "user_id", None),
         }
         with self._lock:
             self._records.append(entry)
             if len(self._records) > self.capacity:
                 self._records.pop(0)
 
-    def get_recent(self, limit: int = 100, level: str = "all", search: str = "") -> list[dict]:
+    def get_recent(
+        self,
+        limit: int = 100,
+        level: str = "all",
+        search: str = "",
+        user_id: int | None = None,
+    ) -> list[dict]:
         with self._lock:
             results = list(self._records)
         if level != "all":
             results = [r for r in results if r["level"] == level]
         if search:
             results = [r for r in results if search.lower() in r["msg"].lower()]
+        if user_id is not None:
+            results = [r for r in results if r.get("user_id") == user_id]
         return results[-limit:]
+
+
+class UserContextFilter(logging.Filter):
+    """将当前请求上下文中的 user_id 注入到 LogRecord，用于后续按用户隔离日志。"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.user_id = get_user_id()
+        return True
 
 
 # Global log handler to be attached during setup
@@ -101,6 +127,7 @@ def setup_logging(log_level: str = "INFO", log_format: str = "json") -> None:
     if not HAS_STRUCTLOG:
         logging.basicConfig(level=level)
         root_logger = logging.getLogger()
+        root_logger.addFilter(UserContextFilter())
         root_logger.addHandler(ring_buffer)
         _add_rotating_file_handler(root_logger, level)
         return
@@ -130,6 +157,7 @@ def setup_logging(log_level: str = "INFO", log_format: str = "json") -> None:
     handler.setFormatter(formatter)
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
+    root_logger.addFilter(UserContextFilter())
     root_logger.addHandler(handler)
     root_logger.addHandler(ring_buffer)  # capture recent logs for API
     _add_rotating_file_handler(root_logger, level)

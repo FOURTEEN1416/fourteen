@@ -7,9 +7,21 @@ interface Particle {
   vy: number;
   r: number;
   color: string;
+  rgb: [number, number, number];
 }
 
-const COLORS = ['#F8B4D9', '#B4D9F8', '#B4F8D9'];
+const COLORS: Array<[string, [number, number, number]]> = [
+  ['#F8B4D9', [248, 180, 217]],
+  ['#B4D9F8', [180, 217, 248]],
+  ['#B4F8D9', [180, 248, 217]],
+];
+
+/** 根据屏幕面积估算粒子数量，避免大屏过度绘制。 */
+function particleCount(width: number, height: number): number {
+  const area = width * height;
+  // 以 1920×1080 为基准，最多 18 个；小屏最少 8 个
+  return Math.max(8, Math.min(18, Math.floor(area / 115_200)));
+}
 
 export function ParticleCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -17,33 +29,60 @@ export function ParticleCanvas() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
     let animId: number;
-    const particles: Particle[] = [];
-    const COUNT = 25;
+    let lastDraw = 0;
+    const FRAME_INTERVAL = 1000 / 30; // 限制 30fps，降低主线程压力
     const DIST = 120;
+    const DIST_SQ = DIST * DIST;
+    const particles: Particle[] = [];
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     const resize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+      // 重建粒子：数量随屏幕面积变化
+      particles.length = 0;
+      const count = reducedMotion ? 0 : particleCount(canvas.width, canvas.height);
+      for (let i = 0; i < count; i++) {
+        const [color, rgb] = COLORS[i % 3];
+        particles.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          vx: (Math.random() - 0.5) * 0.4,
+          vy: (Math.random() - 0.5) * 0.4,
+          r: Math.random() * 2 + 1,
+          color,
+          rgb,
+        });
+      }
     };
     resize();
-    window.addEventListener('resize', resize);
 
-    for (let i = 0; i < COUNT; i++) {
-      particles.push({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        vx: (Math.random() - 0.5) * 0.5,
-        vy: (Math.random() - 0.5) * 0.5,
-        r: Math.random() * 3 + 1,
-        color: COLORS[i % 3],
-      });
-    }
+    const handleResize = () => {
+      // 防抖动：避免窗口缩放时频繁重建
+      window.cancelAnimationFrame(animId);
+      resize();
+      animId = requestAnimationFrame(draw);
+    };
+    window.addEventListener('resize', handleResize);
 
-    const draw = () => {
+    const draw = (time?: number) => {
+      if (document.hidden) {
+        animId = requestAnimationFrame(draw);
+        return;
+      }
+
+      const now = time ?? performance.now();
+      if (now - lastDraw < FRAME_INTERVAL) {
+        animId = requestAnimationFrame(draw);
+        return;
+      }
+      lastDraw = now;
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       for (const p of particles) {
@@ -62,16 +101,14 @@ export function ParticleCanvas() {
         for (let j = i + 1; j < particles.length; j++) {
           const dx = particles[i].x - particles[j].x;
           const dy = particles[i].y - particles[j].y;
-          const d = Math.sqrt(dx * dx + dy * dy);
-          if (d < DIST) {
+          const dSq = dx * dx + dy * dy;
+          if (dSq < DIST_SQ) {
+            const d = Math.sqrt(dSq);
+            const [r, g, b] = particles[i].rgb;
             ctx.beginPath();
             ctx.moveTo(particles[i].x, particles[i].y);
             ctx.lineTo(particles[j].x, particles[j].y);
-            const c = particles[i].color;
-            const r = parseInt(c.slice(1, 3), 16);
-            const g = parseInt(c.slice(3, 5), 16);
-            const b = parseInt(c.slice(5, 7), 16);
-            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${0.15 * (1 - d / DIST)})`;
+            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${0.12 * (1 - d / DIST)})`;
             ctx.lineWidth = 0.5;
             ctx.stroke();
           }
@@ -84,7 +121,7 @@ export function ParticleCanvas() {
 
     return () => {
       cancelAnimationFrame(animId);
-      window.removeEventListener('resize', resize);
+      window.removeEventListener('resize', handleResize);
     };
   }, []);
 
@@ -99,6 +136,8 @@ export function ParticleCanvas() {
         height: '100%',
         zIndex: 0,
         pointerEvents: 'none',
+        contain: 'strict',
+        willChange: 'transform',
       }}
     />
   );

@@ -22,10 +22,12 @@ from observability.logging_setup import (
     get_logger,
     get_session_id,
     get_trace_id,
+    get_user_id,
     new_trace_id,
     ring_buffer,
     set_session_id,
     set_trace_id,
+    set_user_id,
     setup_logging,
 )
 from observability.metrics import (
@@ -50,6 +52,8 @@ __all__ = [
     "new_trace_id",
     "set_session_id",
     "get_session_id",
+    "set_user_id",
+    "get_user_id",
     "RingBufferHandler",
     "ring_buffer",
     # Config models

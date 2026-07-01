@@ -87,3 +87,52 @@ class TestMessageBodyFormat:
         assert msg["message_type"] == 47
         assert msg["item_list"][0]["type"] == 47
         assert "emoji_item" in msg["item_list"][0]
+
+
+class TestHandleMessage:
+    @patch("wechat_direct.wechat_connector._send_text")
+    @patch("wechat_direct.wechat_connector._call_user_manager")
+    def test_sends_fallback_when_reply_empty(self, mock_call, mock_send):
+        from wechat_direct.wechat_connector import WeChatConnector
+        mock_call.return_value = {"reply": ""}
+        conn = WeChatConnector(MagicMock())
+        conn.token = "test_token"
+        conn._last_user_id = "wx_user_1"
+        conn._context_tokens = {"wx_user_1": {"token": "ctx", "ts": 0}}
+
+        raw_msg = {
+            "message_type": 1,
+            "message_id": "m1",
+            "from_user_id": "wx_user_1",
+            "context_token": "ctx",
+            "item_list": [{"type": 1, "text_item": {"text": "你好"}}],
+        }
+        conn._handle_message(raw_msg)
+
+        assert mock_send.call_count == 1
+        args = mock_send.call_args
+        assert "不知道该怎么回复" in args.kwargs.get("text", "") or "不知道该怎么回复" in args[0][1]
+
+    @patch("wechat_direct.wechat_connector._send_text")
+    @patch("wechat_direct.wechat_connector._call_user_manager")
+    def test_sends_normal_reply(self, mock_call, mock_send):
+        from wechat_direct.wechat_connector import WeChatConnector
+        mock_call.return_value = {"reply": "你好呀"}
+        conn = WeChatConnector(MagicMock())
+        conn.token = "test_token"
+        conn._last_user_id = "wx_user_1"
+        conn._context_tokens = {"wx_user_1": {"token": "ctx", "ts": 0}}
+
+        raw_msg = {
+            "message_type": 1,
+            "message_id": "m2",
+            "from_user_id": "wx_user_1",
+            "context_token": "ctx",
+            "item_list": [{"type": 1, "text_item": {"text": "在吗"}}],
+        }
+        conn._handle_message(raw_msg)
+
+        assert mock_send.call_count == 1
+        args = mock_send.call_args
+        text = args.kwargs.get("text", "") or args[0][1]
+        assert text == "你好呀"

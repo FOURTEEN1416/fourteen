@@ -5,6 +5,7 @@ import AnimatedPage from '../components/shared/AnimatedPage'
 import { useUnifiedCharacters } from '../hooks/useQueries'
 import { activateCharacter } from '../api/characters'
 import { useQueryClient } from '@tanstack/react-query'
+import { sanitizeCharacterName } from '../utils/character'
 import type { UnifiedCharacter } from '../types/api'
 
 const tagClasses = ['tag-pink', 'tag-blue', 'tag-green']
@@ -24,7 +25,7 @@ function RoleCard({
         character.is_active ? 'border-2 border-macaron-blue/40 relative' : 'cursor-pointer'
       }`}
     >
-      <div className="text-sm font-semibold text-gray-800 mb-1">{character.name}</div>
+      <div className="text-sm font-semibold text-gray-800 mb-1">{sanitizeCharacterName(character.name)}</div>
       <div className="text-xs text-gray-500 mb-3 truncate">
         {character.description || '暂无描述'}
       </div>

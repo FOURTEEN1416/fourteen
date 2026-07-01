@@ -160,8 +160,8 @@ class UserManager:
                 engine = self._create_user_engine()
                 # 查绑定缓存，用绑定的角色和昵称
                 binding = self._bindings.get(user_id)
-                character_card_id = binding["character_card_id"] if binding else "default"
-                nickname = binding["nickname"] if binding else ""
+                character_card_id = (binding.get("character_card_id") or "default") if binding else "default"
+                nickname = binding.get("nickname") if binding else ""
                 instance = UserInstance(
                     user_id=user_id,
                     nickname=nickname,

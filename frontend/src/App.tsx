@@ -131,8 +131,8 @@ export default function App() {
           <Route path="/roles/:roleId/storyline" element={<AnimatedSuspense><StorylinePage /></AnimatedSuspense>} />
 
           {/* 系统设置 */}
-          <Route path="/settings" element={<Navigate to="/settings/llm" replace />} />
           <Route path="/settings" element={<SystemSettingsLayout />}>
+            <Route index element={<Navigate to="/settings/llm" replace />} />
             <Route path="llm" element={<AnimatedSuspense><SettingsLLM /></AnimatedSuspense>} />
             <Route path="voice" element={<AnimatedSuspense><SettingsVoice /></AnimatedSuspense>} />
             <Route path="tools" element={<AnimatedSuspense><ToolsDashboard /></AnimatedSuspense>} />

@@ -11,7 +11,7 @@ from typing import Any
 
 
 def sanitize_character_name(name: str) -> str:
-    """清洗角色名称中的文件扩展名、人设后缀、作者署名、时间戳等噪声。"""
+    """清洗角色名称中的文件扩展名、人设后缀、作者署名、时间戳、描述性括号等噪声。"""
     if not isinstance(name, str):
         name = str(name) if name is not None else ""
 
@@ -27,6 +27,15 @@ def sanitize_character_name(name: str) -> str:
     # 再去掉剩余纯元数据的括号块（如 (1)、（正常）、(2)、(学校)）
     cleaned = re.sub(r"[（(]\s*\d+\s*[）)]", "", cleaned)
     cleaned = re.sub(r"[（(]\s*(?:正常|学校|女友|旅游|定制|by|BY|作者|著)\s*[）)]", "", cleaned)
+    # 去掉描述性/签名性括号块（如 （慢热毒舌直球抽象社牛）、(听得见)、(绘梨衣的世界地图心愿)）
+    # 策略：括号内全为中文且长度 >= 2，或包含已知签名/作者关键词
+    cleaned = re.sub(
+        r"[（(][^）)]{2,}?[）)]",
+        "",
+        cleaned,
+    )
+    # 再次清理已知签名词（可能不在括号内或残留）
+    cleaned = re.sub(r"听得见|银子著|银子|BY诗|by诗", "", cleaned, flags=re.IGNORECASE)
 
     # 4. 去掉尾部作者署名，如 -银子著、_听得见、_作者xxx
     cleaned = re.sub(r"[-_–—]\s*(?:作者|著|by|BY|银子|听得见|诗)\S*$", "", cleaned, flags=re.IGNORECASE)
@@ -34,10 +43,41 @@ def sanitize_character_name(name: str) -> str:
     # 5. 去掉尾部时间戳 _1774701604527
     cleaned = re.sub(r"[_-]\d{13,15}$", "", cleaned)
 
-    # 6. 清理多余空格、下划线、连接号
+    # 6. 去掉首尾装饰标点（如 ： 伊蕾娜·艾斯特莱雅 ·）
+    cleaned = re.sub(r"^[\s：:·•\-–—_]+", "", cleaned)
+    cleaned = re.sub(r"[\s：:·•\-–—_]+$", "", cleaned)
+
+    # 7. 清理多余空格、下划线、连接号
     cleaned = re.sub(r"[\s_–—]+", " ", cleaned).strip()
 
     return cleaned or name.strip().removesuffix(".json").strip() or "未命名角色"
+
+
+# 常见作者/署名/定制标记词
+_AUTHOR_KEYWORDS = [
+    "by", "BY", "定制", "作者", "著", "听得见", "银子", "银子著", "BY诗", "by诗",
+]
+
+
+def sanitize_character_text(text: str) -> str:
+    """清洗角色卡文本字段中的作者署名、定制标记等噪声。
+
+    用于 description、creator_notes、scenario、first_mes、personality_text 等字段。
+    """
+    if not isinstance(text, str):
+        text = str(text) if text is not None else ""
+
+    # 1. 移除括号/全角括号内的作者、定制、by 等标记
+    text = re.sub(r"[（(][^）)]*(?:by|BY|定制|作者|著|听得见|银子|BY诗|by诗)[^）)]*[）)]", "", text)
+    # 2. 移除尾部署名，如 （作者：听得见）、-银子著、_听得见、 by诗 等
+    text = re.sub(r"[-_–—\s]*(?:作者|著|by|BY|银子|听得见|诗)\S*$", "", text, flags=re.IGNORECASE)
+    # 3. 清理残留的常见署名关键词
+    pattern = "|".join(re.escape(k) for k in _AUTHOR_KEYWORDS)
+    text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    # 4. 清理因移除产生的多余空格与空括号
+    text = re.sub(r"\(\s*\)|（\s*）", "", text)
+    text = re.sub(r"[ \t]{2,}", " ", text).strip()
+    return text
 
 
 def _extract_nested_data(data: dict[str, Any]) -> dict[str, Any] | None:
@@ -83,34 +123,33 @@ def normalize_character_card(data: dict[str, Any]) -> dict[str, Any]:
     raw_name = src.get("name") or top.get("name") or ""
     name = sanitize_character_name(raw_name)
 
-    description = (
+    description = sanitize_character_text(
         src.get("description")
         or top.get("description")
         or src.get("creator_notes")
         or top.get("creator_notes")
         or ""
     )
-    if not isinstance(description, str):
-        description = str(description)
 
-    scenario = src.get("scenario") or top.get("scenario") or src.get("world_scenario") or ""
-    if not isinstance(scenario, str):
-        scenario = str(scenario)
+    creator_notes = sanitize_character_text(src.get("creator_notes") or top.get("creator_notes") or "")
+    # 如果 creator_notes 已经被用作 description，避免重复输出
+    if creator_notes == description:
+        creator_notes = ""
 
-    first_mes = src.get("first_mes") or top.get("first_mes") or ""
-    if not isinstance(first_mes, str):
-        first_mes = str(first_mes)
+    scenario = sanitize_character_text(src.get("scenario") or top.get("scenario") or src.get("world_scenario") or "")
+
+    first_mes = sanitize_character_text(src.get("first_mes") or top.get("first_mes") or "")
 
     # 性格维度（优先字典，退化成文本）
     personality = src.get("personality") or top.get("personality") or {}
     personality_text = ""
     if isinstance(personality, str):
-        personality_text = personality
+        personality_text = sanitize_character_text(personality)
         personality = {}
     else:
         parsed = _safe_float_dict(personality)
         if parsed is None and personality:
-            personality_text = str(personality)
+            personality_text = sanitize_character_text(str(personality))
             personality = {}
         else:
             personality = parsed or {}
@@ -120,14 +159,14 @@ def normalize_character_card(data: dict[str, Any]) -> dict[str, Any]:
     speaking_style_text = ""
     catchphrases: list[str] = []
     if isinstance(speaking_style, str):
-        speaking_style_text = speaking_style
+        speaking_style_text = sanitize_character_text(speaking_style)
         speaking_style = {}
     elif isinstance(speaking_style, dict):
         catchphrases = speaking_style.get("catchphrases") or []
         # 如果其余值不是可量化数字，保留原文本
         numeric = _safe_float_dict({k: v for k, v in speaking_style.items() if k != "catchphrases"})
         if numeric is None and speaking_style:
-            speaking_style_text = str(speaking_style)
+            speaking_style_text = sanitize_character_text(str(speaking_style))
             speaking_style = {}
         else:
             speaking_style = numeric or {}
@@ -135,7 +174,7 @@ def normalize_character_card(data: dict[str, Any]) -> dict[str, Any]:
         catchphrases = src.get("catchphrases") or top.get("catchphrases") or []
     if isinstance(catchphrases, str):
         catchphrases = [catchphrases]
-    catchphrases = [str(c) for c in catchphrases if c][:8]
+    catchphrases = [sanitize_character_text(str(c)) for c in catchphrases if c][:8]
 
     # 核心锚点：优先 core_anchors，其次 tags，最后从 personality/description 中拆关键词
     core_anchors = src.get("core_anchors") or top.get("core_anchors") or []
@@ -153,12 +192,13 @@ def normalize_character_card(data: dict[str, Any]) -> dict[str, Any]:
                     break
     if isinstance(core_anchors, str):
         core_anchors = [core_anchors]
-    core_anchors = [str(a) for a in core_anchors if a][:8]
+    core_anchors = [sanitize_character_text(str(a)) for a in core_anchors if a][:8]
 
     normalized: dict[str, Any] = {
         **data,
         "name": name,
         "description": description,
+        "creator_notes": creator_notes,
         "personality": personality,
         "personality_text": personality_text,
         "speaking_style": speaking_style,
@@ -170,6 +210,8 @@ def normalize_character_card(data: dict[str, Any]) -> dict[str, Any]:
     }
 
     # 清理临时空字段，保持响应干净
+    if not creator_notes:
+        normalized.pop("creator_notes", None)
     if not personality_text:
         normalized.pop("personality_text", None)
     if not speaking_style_text:

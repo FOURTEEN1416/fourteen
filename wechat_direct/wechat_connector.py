@@ -104,8 +104,11 @@ def get_connector():
 def get_wechat_state() -> dict:
     """供外部 REST API 调用的稳定状态读取（优先内存实例，回退持久化文件）。"""
     conn = _connector
-    if conn and conn.token:
-        return conn.get_status()
+    if conn:
+        if conn.token:
+            return conn.get_status()
+        # 内存实例存在但无 token，说明已断开或尚未登录成功
+        return {**_load_state(), "connected": False}
     return _load_state()
 
 
@@ -791,15 +794,25 @@ class WeChatConnector:
 
         try:
             result = _call_user_manager(self.user_manager, from_user, text)
+            if not isinstance(result, dict):
+                logger.warning("UserManager 返回非字典结果: %s", type(result))
+                result = {}
             reply = result.get("reply", "")
-            if reply:
-                token = self._get_context_token(from_user) or context_token
-                _send_text(
-                    to=from_user, text=reply,
-                    context_token=token,
-                    token=self.token, base_url=self.base_url,
-                )
-                logger.info(f"回复已发送给 {from_user}: {reply[:50]}")
+            error = result.get("error", "")
+            if not reply:
+                if error:
+                    logger.warning("处理消息返回错误 (user=%s): %s", from_user, error)
+                else:
+                    logger.warning("LLM 返回空回复 (user=%s)，发送兜底提示", from_user)
+                reply = "（我暂时不知道该怎么回复，可以再说一次吗？）"
+
+            token = self._get_context_token(from_user) or context_token
+            _send_text(
+                to=from_user, text=reply,
+                context_token=token,
+                token=self.token, base_url=self.base_url,
+            )
+            logger.info(f"回复已发送给 {from_user}: {reply[:50]}")
 
             voice_result = result.get("voice")
             if voice_result:

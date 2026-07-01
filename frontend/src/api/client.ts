@@ -1,4 +1,4 @@
-﻿/**
+/**
  * API 客户端 & 领域函数总线
  *
  * ═══ Decision 5: 数据架构约定 ═══
@@ -31,7 +31,7 @@ import {
 import {
   health, stats, dashboardStats, config, saveConfig,
   personaProfile, personaEvolutionLog, memoryFacts,
-  tools, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,
+  tools, toolsHealth, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,
   logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
   wechatConnectionStatus, wechatQrCode,
   safetyStats, safetyLog, safetyConfig,
@@ -251,14 +251,15 @@ export {
 export {
   health, stats, dashboardStats, config, saveConfig,
   personaProfile, personaEvolutionLog, memoryFacts,
-  tools, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,
+  tools, toolsHealth, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,
   logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
   wechatConnectionStatus, wechatQrCode,
   psychProfile, psychSnapshots, psychReset, psychMentalHealth, psychLiwc,
   safetyStats, safetyLog, safetyConfig,
   ragStats, ragSearch, ragUpload,
   voiceStatus, voiceSynthesize, getSpeakers,
-  plugins, togglePlugin, uploadFile,
+  plugins, togglePlugin,
+  uploadFile,
 }
 
 // Legacy `api` namespace object — keeps `import { api } from '../api/client'` working
@@ -266,7 +267,7 @@ export const api = {
   chat, chatStream, createSession, listSessions, chatHistory, emotionState, emotionTrend,
   health, stats, dashboardStats, config, saveConfig,
   personaProfile, personaEvolutionLog, memoryFacts,
-  tools, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,
+  tools, toolsHealth, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,
   logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
   wechatConnectionStatus, wechatQrCode,
   trainingStatus, trainingProgress, trainingExtract, trainingClean,

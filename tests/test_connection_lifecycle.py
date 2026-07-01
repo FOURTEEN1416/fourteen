@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from unittest.mock import MagicMock
+import os
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -97,7 +98,8 @@ async def test_websocket_handler_closes_stream_generator_on_disconnect():
     orch = MagicMock()
     orch.process_message_stream = MagicMock(return_value=stream_gen)
 
-    server = WebSocketServer(orchestrator=orch)
+    with patch.dict(os.environ, {"API_KEY_ENABLED": "false"}, clear=False):
+        server = WebSocketServer(orchestrator=orch)
 
     # 模拟一个会在第二次 send 时断开的 websocket
     class FakeWebSocket:
@@ -148,7 +150,8 @@ async def test_websocket_stop_cancels_client_tasks_and_closes_connections():
     if not HAS_WEBSOCKETS:
         pytest.skip("websockets not installed")
 
-    server = WebSocketServer()
+    with patch.dict(os.environ, {"API_KEY_ENABLED": "false"}, clear=False):
+        server = WebSocketServer()
 
     class FakeWebSocket:
         def __init__(self):

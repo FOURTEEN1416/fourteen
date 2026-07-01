@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import get_current_user_id, require_role
+from api.auth_jwt import get_current_user, get_current_user_id, require_role
 from api.database import User
 from api.deps import deps
 from api.main_routes import ConfigUpdateRequest, _sanitize_config
@@ -161,23 +161,37 @@ async def memory_facts(
 # ═══════════════════════════════════════════════════════
 
 
+def _logs_user_id(current_user: User) -> int | None:
+    """管理员可查看全量日志，普通用户只能查看本账号相关日志。"""
+    return None if current_user.role == "admin" else current_user.id
+
+
 @router.get("/api/logs")
 async def get_logs(
     limit: int = Query(default=100, le=200),
     level: str = Query(default="all"),
     search: str = Query(default=""),
     _auth: bool = Security(verify_api_key_dep),
-    _user: int = Security(get_current_user_id),
+    current_user: User = Security(get_current_user),
 ):
-    # 所有认证用户均可查看日志；当前为单用户部署，日志按系统维度聚合
-    return {"logs": ring_buffer.get_recent(limit=limit, level=level, search=search)}
+    # 非管理员仅返回本账号相关的日志条目（依赖 UserContextMiddleware 注入 user_id）
+    return {
+        "logs": ring_buffer.get_recent(
+            limit=limit,
+            level=level,
+            search=search,
+            user_id=_logs_user_id(current_user),
+        )
+    }
 
 
 @router.get("/api/logs/stream")
 async def stream_logs(
     _auth: bool = Security(verify_api_key_dep),
-    _user: int = Security(get_current_user_id),
+    current_user: User = Security(get_current_user),
 ):
+    user_id = _logs_user_id(current_user)
+
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue(maxsize=100)
         loop = asyncio.get_event_loop()
@@ -187,6 +201,9 @@ async def stream_logs(
 
         def emit(record):
             try:
+                # 非管理员只推送属于本账号的日志
+                if user_id is not None and getattr(record, "user_id", None) != user_id:
+                    return
                 msg = log_queue_handler.format(record)
                 asyncio.run_coroutine_threadsafe(queue.put(msg), loop)
             except Exception as e:

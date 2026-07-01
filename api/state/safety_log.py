@@ -9,18 +9,26 @@ class SafetyLogManager:
         self._log: deque[dict] = deque(maxlen=maxlen)
         self._lock = threading.Lock()
 
-    def append(self, entry: dict) -> None:
+    def append(self, entry: dict, user_id: int | None = None) -> None:
+        entry = {**entry, "user_id": user_id}
         with self._lock:
             self._log.append(entry)
 
-    def get_recent(self, limit: int = 50) -> list[dict]:
+    def _filter_by_user(self, items: list[dict], user_id: int | None = None) -> list[dict]:
+        if user_id is None:
+            return items
+        return [it for it in items if it.get("user_id") == user_id]
+
+    def get_recent(self, limit: int = 50, user_id: int | None = None) -> list[dict]:
         with self._lock:
             items = list(self._log)
+        items = self._filter_by_user(items, user_id)
         return items[-limit:]
 
-    def get_stats(self, enabled: bool = False) -> dict:
+    def get_stats(self, enabled: bool = False, user_id: int | None = None) -> dict:
         with self._lock:
             items = list(self._log)
+        items = self._filter_by_user(items, user_id)
         recent = items[-200:]
         categories: dict[str, int] = {}
         for entry in recent:

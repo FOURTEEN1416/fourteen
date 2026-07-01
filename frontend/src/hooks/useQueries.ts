@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type { WechatBindingDTO } from '../api/wechat'
 import { useErrorStore } from '../store/errorStore'
-import type { EmotionState, DashboardStats, HealthStatus, WeChatStatus, TrainingProgress, ProactiveEngineState, MemoryFact, PsychProfile, PsychSnapshot, SafetyStats, SafetyLogEntry, RAGStats, VoiceStatus, PluginsList, ToolHistoryEntry, ProactiveHistoryEntry, MentalHealthSummary, UnifiedCharacter } from '../types/api'
+import type { EmotionState, DashboardStats, HealthStatus, WeChatStatus, TrainingProgress, ProactiveEngineState, MemoryFact, PsychProfile, PsychSnapshot, SafetyStats, SafetyLogEntry, RAGStats, VoiceStatus, PluginsList, ToolHistoryEntry, ProactiveHistoryEntry, MentalHealthSummary } from '../types/api'
 
 export const queryKeys = {
   characters: { all: ['characters'] as const, detail: (id: string) => ['characters', id] as const },
@@ -30,11 +30,8 @@ export const queryKeys = {
 }
 
 export function useCharacters() {
-  return useQuery({
-    queryKey: queryKeys.characters.all,
-    queryFn: () => api.listCharacters({}).then(r => r.characters as UnifiedCharacter[]),
-    staleTime: 60 * 1000,
-  })
+  const { data, ...rest } = useUnifiedCharacters()
+  return { ...rest, data: data?.characters ?? [] }
 }
 
 export function useActiveCharacter() {
@@ -94,7 +91,9 @@ export function useWechatStatus() {
   return useQuery({
     queryKey: queryKeys.wechat.status,
     queryFn: () => api.wechatStatus().then(r => r.data as WeChatStatus),
-    refetchInterval: 10 * 1000,
+    // SSE 实时推送为主，轮询仅作为兜底
+    refetchInterval: 30 * 1000,
+    staleTime: 60 * 1000,
   })
 }
 
@@ -263,8 +262,11 @@ export function useMentalHealth() {
 // ═══ 统一角色管理 hooks ═══
 
 export function useUnifiedCharacters(userId?: string, search?: string) {
+  const hasFilter = userId !== undefined || search !== undefined
   return useQuery({
-    queryKey: [...queryKeys.characters.all, userId, search],
+    queryKey: hasFilter
+      ? [...queryKeys.characters.all, 'filter', userId, search]
+      : queryKeys.characters.all,
     queryFn: () => api.listCharacters({ user_id: userId, search }),
     staleTime: 30 * 1000,
   })

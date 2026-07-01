@@ -174,9 +174,10 @@ class CharacterCrawlerAdapter:
         """从 app 角色卡格式提取知识块并建索引。"""
         chunks: list[KnowledgeChunk] = []
 
-        if card.get("name"):
+        name = card.get("name", "")
+        if name:
             chunks.append(KnowledgeChunk(
-                content=f"角色名：{card['name']}",
+                content=f"她的名字是{name}，你可以称呼她{name}。",
                 source="card_name",
             ))
 

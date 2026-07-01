@@ -39,6 +39,15 @@ class BaseTool:
     def execute(self, **kwargs) -> ToolResult:
         raise NotImplementedError
 
+    def health_check(self) -> dict[str, Any]:
+        """返回工具健康状态；子类可覆盖以检查依赖/配置。"""
+        status = {"available": True, "error": ""}
+        if hasattr(self, "_plugin") and getattr(self, "_plugin", None) is None:
+            status = {"available": False, "error": "plugin not loaded"}
+        elif hasattr(self, "_sm") and getattr(self, "_sm", None) is None:
+            status = {"available": False, "error": "memory system not initialized"}
+        return status
+
     def to_openai_fc_schema(self) -> dict[str, Any]:
         return {
             "type": "function",
@@ -83,12 +92,11 @@ class ToolRegistry:
     def health_check_all(self) -> dict[str, dict[str, Any]]:
         results = {}
         for name, tool in self._tools.items():
-            status = {"available": True, "error": ""}
-            if hasattr(tool, "_plugin") and getattr(tool, "_plugin", None) is None:
-                status = {"available": False, "error": "plugin not loaded"}
-            elif hasattr(tool, "_sm") and getattr(tool, "_sm", None) is None:
-                status = {"available": False, "error": "memory system not initialized"}
-            results[name] = status
+            try:
+                results[name] = tool.health_check()
+            except Exception:
+                logger.exception("工具 %s 健康检查失败", name)
+                results[name] = {"available": False, "error": "health_check_failed"}
         return results
 
 

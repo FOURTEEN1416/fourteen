@@ -25,6 +25,7 @@ export function memoryFacts(category = '', limit = 50) {
 // ── Tools & Proactive ──
 
 export function tools() { return client.get('/tools') }
+export function toolsHealth() { return client.get('/tools/health') }
 export function toggleTool(name: string, enabled: boolean) { return client.post(`/tools/${name}/toggle`, { enabled }) }
 export function toolHistory(limit = 50) { return client.get('/tools/history', { params: { limit } }) }
 export function proactiveState() { return client.get('/proactive/state') }

@@ -191,10 +191,18 @@ export default function UsersPage() {
                 const hasCharacter = binding.character_card_id && binding.character_card_id !== 'default'
 
                 return (
-                  <button
+                  <div
                     key={binding.wxid}
                     onClick={() => navigate(`/bindings/${binding.wxid}`)}
-                    className="glass-card glass-card-hover interactive group rounded-xl p-4 text-left transition-all active:scale-[0.98]"
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        navigate(`/bindings/${binding.wxid}`)
+                      }
+                    }}
+                    className="glass-card glass-card-hover interactive group cursor-pointer rounded-xl p-4 text-left transition-all active:scale-[0.98]"
                   >
                     {/* Top row: avatar + name */}
                     <div className="flex items-center gap-3">
@@ -246,7 +254,7 @@ export default function UsersPage() {
                         </button>
                       </div>
                     </div>
-                  </button>
+                  </div>
                 )
               })}
             </div>

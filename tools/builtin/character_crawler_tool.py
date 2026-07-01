@@ -131,6 +131,18 @@ class CharacterCrawlerTool(BaseTool):
         },
     ]
 
+    def health_check(self) -> dict[str, Any]:
+        if not HAS_REQUESTS:
+            return {"available": False, "error": "请安装: pip install requests beautifulsoup4"}
+        return {
+            "available": True,
+            "error": "",
+            "features": {
+                "cloudscraper": HAS_CLOUDSCRAPER,
+                "trafilatura": HAS_TRAFILATURA,
+            },
+        }
+
     def execute(self, action: str, **kwargs) -> ToolResult:  # type: ignore[override]
         if not HAS_REQUESTS:
             return ToolResult(False, error="请安装: pip install requests beautifulsoup4")

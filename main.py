@@ -37,6 +37,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select  # noqa: E402
+
 # ── 语音触发检测 ───────────────────────────────────────
 
 # 直接命令词（高置信度）
@@ -134,6 +136,7 @@ project_root = Path(__file__).parent.absolute()
 sys.path.insert(0, str(project_root))
 
 from api.app_factory import create_api_app  # noqa: E402
+from api.database import WechatBinding, _async_session  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
 from api.websocket_server import WebSocketServer  # noqa: E402
 from context.world_info_provider import WorldInfoProvider  # noqa: E402
@@ -161,6 +164,7 @@ from tools.builtin.search_tool import SearchTool  # noqa: E402
 from tools.builtin.time_awareness_tool import TimeAwarenessTool  # noqa: E402
 from tools.builtin.weather_tool import WeatherTool  # noqa: E402
 from user_scheduler import UserManager  # noqa: E402
+from utils.character_helpers import normalize_character_card  # noqa: E402
 from utils.health_check import _is_healthy, health_check_all  # noqa: E402
 
 # ── 加载 .env（手动解析，无需 python-dotenv 依赖） ──
@@ -203,6 +207,15 @@ def _setup_basic_logging(log_level: str = "INFO") -> logging.Logger:
         ],
     )
     return logging.getLogger("main")
+
+
+async def _init_user_bindings(user_mgr: UserManager) -> list[dict[str, Any]]:
+    """启动时从 DB 加载微信绑定并注入用户调度器缓存。"""
+    async with _async_session() as session:
+        result = await session.execute(select(WechatBinding))
+        bindings = [b.to_dict() for b in result.scalars().all()]
+    await user_mgr.load_bindings(bindings)
+    return bindings
 
 
 logger = logging.getLogger("main")
@@ -393,11 +406,25 @@ class OptimizedOrchestrator:
     _character_persona_loaded: bool = False
 
     @classmethod
+    def invalidate_character_persona_cache(cls, character_id: str | None = None) -> None:
+        """清除角色卡人设缓存。
+
+        - character_id 为 None 时清空全部缓存
+        - 否则只清除指定角色，供角色更新/删除后即时生效
+        """
+        if character_id is None:
+            cls._character_persona_cache.clear()
+        else:
+            cls._character_persona_cache.pop(character_id, None)
+
+    @classmethod
     def _load_character_persona_segment(cls, character_id: str) -> str:
         """根据 character_id 加载角色卡人设，返回可追加到 system prompt 的片段。
 
         - character_id 为空 / "default" / "demo" 时返回空串（保持基线人设）
         - 先按 {character_id}.json 找文件，找不到再遍历 config/characters/ 匹配 JSON 内部 id
+        - 使用 normalize_character_card 展平 SillyTavern 等嵌套格式，确保 name/description/
+          personality/speaking_style/scenario 等字段被正确提取
         - 结果缓存，避免重复 IO
         """
         if not character_id or character_id in ("default", "demo"):
@@ -409,53 +436,65 @@ class OptimizedOrchestrator:
 
         import json as _json
         chars_dir = project_root / "config" / "characters"
-        card_data: dict | None = None
+        raw_card: dict | None = None
 
         # 1. 直接按文件名查
         direct_path = chars_dir / f"{character_id}.json"
         if direct_path.exists():
             try:
                 with open(direct_path, encoding="utf-8") as f:
-                    card_data = _json.load(f)
+                    raw_card = _json.load(f)
             except (OSError, _json.JSONDecodeError):
-                card_data = None
+                raw_card = None
 
         # 2. 遍历匹配 JSON 内部 id 字段
-        if card_data is None and chars_dir.exists():
+        if raw_card is None and chars_dir.exists():
             try:
                 for f in chars_dir.glob("*.json"):
                     try:
                         with open(f, encoding="utf-8") as fh:
                             data = _json.load(fh)
                         if data.get("id") == character_id:
-                            card_data = data
+                            raw_card = data
                             break
                     except (OSError, _json.JSONDecodeError):
                         continue
             except OSError:
                 pass
 
-        if not card_data:
+        if not raw_card:
             cls._character_persona_cache[character_id] = ""
             return ""
 
+        # 展平嵌套角色卡格式，提取真实 name/description/personality 等
+        card = normalize_character_card(raw_card)
+
         # 构造人设片段
         lines: list[str] = ["=== 角色卡人设 ==="]
-        name = card_data.get("name", "")
+        name = card.get("name", "")
         if name:
             lines.append(f"角色名：{name}")
-        desc = card_data.get("description", "")
+
+        desc = card.get("description", "")
         if desc:
-            lines.append(f"简介：{desc[:200]}")
+            lines.append(f"简介：{desc[:500]}")
 
-        anchors = card_data.get("core_anchors", [])
-        if anchors:
-            lines.append(f"核心锚点：{'、'.join(anchors)}")
+        # 创作者备注通常包含更细致的人设，优先作为补充
+        creator_notes = card.get("creator_notes") or raw_card.get("creator_notes") or ""
+        if creator_notes and creator_notes != desc:
+            lines.append(f"细节设定：{str(creator_notes)[:500]}")
 
-        personality = card_data.get("personality", {})
+        anchors = [str(a) for a in card.get("core_anchors", []) if a]
+        # 过长的锚点（>20 字）通常是整句性格描述，归到性格描述中更自然
+        short_anchors = [a for a in anchors if len(a) <= 20]
+        if short_anchors:
+            lines.append(f"核心锚点：{'、'.join(short_anchors)}")
+
+        # 性格维度：优先使用可量化的字典；否则使用文本描述
+        personality = card.get("personality", {})
+        personality_text = card.get("personality_text", "")
         if personality:
             lines.append("性格维度：")
-            # 常见维度中文映射
             dim_map = {
                 "warmth": "温暖度", "playfulness": "顽皮度", "independence": "独立性",
                 "jealousy": "嫉妒度", "stubbornness": "固执度", "intelligence": "聪慧度",
@@ -469,8 +508,11 @@ class OptimizedOrchestrator:
                     lines.append(f"- {label} {val:.2f}")
                 except (TypeError, ValueError):
                     lines.append(f"- {label}: {v}")
+        elif personality_text:
+            lines.append(f"性格描述：{personality_text[:400]}")
 
-        speaking = card_data.get("speaking_style", {})
+        speaking = card.get("speaking_style", {})
+        speaking_text = card.get("speaking_style_text", "")
         if speaking and isinstance(speaking, dict):
             style_parts: list[str] = []
             for k, v in speaking.items():
@@ -486,16 +528,20 @@ class OptimizedOrchestrator:
                     style_parts.append(f"{k}={v}")
             if style_parts:
                 lines.append(f"说话风格：{', '.join(style_parts)}")
+        elif speaking_text:
+            lines.append(f"说话风格：{speaking_text[:400]}")
 
-        catchphrases = speaking.get("catchphrases", []) if isinstance(speaking, dict) else []
-        if not catchphrases:
-            catchphrases = card_data.get("catchphrases", [])
+        catchphrases = card.get("catchphrases", [])
         if catchphrases:
-            lines.append(f"口头禅：{' / '.join(catchphrases[:5])}")
+            lines.append(f"口头禅：{' / '.join(str(c) for c in catchphrases[:8])}")
 
-        scenario = card_data.get("scenario", "")
+        scenario = card.get("scenario", "")
         if scenario:
-            lines.append(f"场景设定：{str(scenario)[:300]}")
+            lines.append(f"场景设定：{str(scenario)[:500]}")
+
+        first_mes = card.get("first_mes", "")
+        if first_mes:
+            lines.append(f"开场白：{str(first_mes)[:300]}")
 
         segment = "\n".join(lines)
         # 缓存（最多 100 个，防止内存膨胀）
@@ -1892,6 +1938,12 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
     user_mgr = UserManager(orchestrator)
     logger.info("用户调度器已创建")
 
+    try:
+        bindings = asyncio.run(_init_user_bindings(user_mgr))
+        logger.info("已从数据库加载 %d 条微信绑定", len(bindings))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("加载微信绑定失败: %s", e)
+
     ws_server_fast = None
     _ws_holder = {}
     _wechat_holder = {}  # type: ignore[var-annotated]
@@ -2192,6 +2244,12 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     # ── 创建用户调度器（多用户核心） ──
     user_mgr = UserManager(orchestrator)
     logger.info("用户调度器已创建")
+
+    try:
+        bindings = asyncio.run(_init_user_bindings(user_mgr))
+        logger.info("已从数据库加载 %d 条微信绑定", len(bindings))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("加载微信绑定失败: %s", e)
 
     if not args.no_api:
         logger.info("[11/12] 启动API服务...")
