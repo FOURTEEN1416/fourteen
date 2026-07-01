@@ -1,11 +1,12 @@
 # 代码图谱 — unique-you (唯一的你) v3.0.0
 
-> 由 codebase-memory 图谱工具 知识图谱自动生成 | 2026-06-30
-> 5983 节点 · 24923 边 · 309 Python 文件 · 79 TypeScript 文件 · 332 API 路由
+> 由 维护者 手动维护 | 上次大规模扫描: 2026-06-30 | 最后更新: 2026-07-01
+> ⚠  codebase-memory 图谱工具 MCP 服务器已不可用，以下指标来自 2026-06-30 最后一次扫描，未自动刷新。
+> 7 个新 commit（9c0b636..b455222）增加约 1380 行/删除 241 行，跨越 49 个文件。
 
 ---
 
-## 1. 全局指标
+## 1. 全局指标（截至 2026-06-30 快照）
 
 | 维度 | 数值 |
 |------|------|
@@ -28,6 +29,8 @@
 **边类型分布（前 8）**：USAGE(6331) > CALLS(6116) > DEFINES(5110) > DEFINES_METHOD(1885) > WRITES(1549) > TESTS(1413) > IMPORTS(755) > DECORATES(621)
 
 **语言分布**：Python 309 · TypeScript 79 · YAML 14 · Bash 5 · TOML 1 · JS 1 · HTML 1 · CSS 1
+
+**新增包**：`tools/`（8 Python 文件），`utils/character_helpers.py`
 
 ---
 
@@ -77,7 +80,7 @@ graph TD
 
 ## 3. 核心数据流 — process_message 热路径
 
-`OptimizedOrchestrator.process_message`（main.py:881-1138）处理每一条用户消息，是全系统最关键调用链：
+`OptimizedOrchestrator.process_message`（main.py:881-1138）处理每一条用户消息，是全系统最关键调用链。**最新更新 (2026-07-01)**: PersonaService.build_system_prompt 已重构为**两阶段构造**，第一阶段由 shisi PromptBuilder 生成角色 + RAG 知识 + 情感 + 对话历史，第二阶段注入 PersonaEngine 的 5 层对齐层（世界/时间信息 → RAG 上下文 → 情感 → 风格 → 约束）。
 
 ```mermaid
 sequenceDiagram
@@ -87,6 +90,7 @@ sequenceDiagram
     participant M as Memory 记忆
     participant P as Persona 人格
     participant L as LLM Gateway
+    participant T as Tools 工具系统
     participant A as After 后处理
 
     U->>O: process_message(text, session_id)
@@ -109,9 +113,17 @@ sequenceDiagram
     rect rgb(230, 230, 255)
         O->>P: PersonaExtractor.process_message()
         O->>P: PersonaService.build_system_prompt()
+        Note over P: Phase 1: shisi PromptBuilder (角色+RAG+情感+历史)
+        Note over P: Phase 2: 5 层对齐注入 (世界/情感/风格/约束)
         O->>P: AffinityMapper.sync()
         O->>P: AffinityEnhancer.update()
         O->>P: EmotionStageEngine.evaluate()
+    end
+
+    rect rgb(240, 240, 200)
+        O->>T: ToolRegistry.get_tools_by_permission()
+        O->>T: LLM 决策 → ToolDispatcher.dispatch()
+        O->>T: 工具结果注入 prompt 上下文
     end
 
     O->>L: PromptTemplateMgr.get() then render()
@@ -135,7 +147,7 @@ sequenceDiagram
     O-->>U: reply (+ optional voice)
 ```
 
-**关键风险**：该路径上所有 hop=1 节点都被标记为 CRITICAL — 任何一个故障都会中断整个对话流程。
+**新增（2026-07-01）**：PersonaService 调用链上方新增 Tools 工具系统中间层：LLM 通过函数调用感知工具 → 按 affinity 权限过滤 → 执行后注入上下文作为 prompt 增强。
 
 ---
 
@@ -145,7 +157,7 @@ sequenceDiagram
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
-| `main.py` | main.py (94KB) | 入口 + OptimizedOrchestrator + 多模式启动 |
+| `main.py` | main.py (~103KB) | 入口 + OptimizedOrchestrator + 多模式启动 |
 | `orchestrator.py` | orchestrator.py (31KB) | 基础 Orchestrator 类 |
 | `user_scheduler.py` | user_scheduler.py (13KB) | 多用户调度，每个微信用户独立情感状态 |
 
@@ -188,7 +200,20 @@ DDD 分层架构，是项目最重要的重构成果：
 | `wechat/` | 微信集成 | CommandHandler, CommandParser, ProactiveMessenger, StickerAdapter |
 | `vault/` | 数据收集 | CollectLoop, PersonaAdapter |
 | `ase/` | 场景叙事 | SceneNarrator, TriggerEngine |
-| `knowledge/` | 知识检索 | Retriever, CharacterKnowledgeService, CrawlerAdapter |
+| `knowledge/` | 知识检索 | Retriever, CharacterKnowledgeService, **CrawlerAdapter** |
+
+**shisi/knowledge/ 关键更新 (2026-07-01)**：
+
+| 新增/变更 | 说明 |
+|-----------|------|
+| `CrawlerAdapter` | 双阶段索引管线：_index_card（角色卡结构化分块）→ crawl_and_index（Web 爬取 + BM25 索引） |
+| `CharacterKnowledgeService.ensure_index()` | 新增：检查记忆 → 尝试磁盘加载 → 从角色卡构建 → 自动保存，一句调用"让它就绪" |
+| `CharacterKnowledgeService.add_knowledge_chunks()` | 新增：增量追加知识块到现有 BM25 索引，爬虫使用 |
+| 名称索引 | 修复：`CharacterKnowledgeService.index_character()` 现在提取 name chunk（解决"她叫什么名字"查询） |
+| BM25 持久化 | `save_index()` / `load_index()` 到 `data/knowledge/{character_id}.json` |
+| `PersonaService.build_system_prompt()` | 重构为两阶段：Phase 1 shisi PromptBuilder 构建角色基础 prompt → Phase 2 注入 PersonaEngine 的 5 层对齐（世界/时间/RAG/情感/风格/约束） |
+| `_build_character()` | 双路径解析：角色卡优先（character_id）→ PersonaEngine 回退 |
+| `normalize_character_card()` | 新增 `utils/character_helpers.py`，统一展平 SillyTavern 角色卡格式 |
 
 ### 4.4 my_character/ — 角色引擎（21 模块）
 
@@ -236,15 +261,27 @@ DDD 分层架构，是项目最重要的重构成果：
 
 安全检查在 process_message 中执行两次：输入检查（3 层）+ 输出检查（4 层）。
 
-### 4.7 llm_provider/ — LLM 网关
+**安全日志更新 (2026-07-01)**：`content_safety.py` 新增 `_log_safety_event()` 函数，在每次规则命中/LLM 分类命中后记录安全事件（category、direction、截断文本、时间戳，按用户隔离）。日志失败从不阻塞安全执行。
+
+### 4.7 llm_provider/ — LLM 网关（5+ 供应商）
 
 | 模块 | 职责 |
 |------|------|
 | `llm_gateway.py` | LLMGatewayV2，自动 fallback 链 |
-| `multi_provider_gateway.py` | 多供应商网关 |
-| `openai_compatible_provider.py` | OpenAI 兼容供应商 |
+| `multi_provider_gateway.py` | 多供应商网关（自动 fallback: 智谱AI → 讯飞星火 → 百度千帆 → OpenCode Zen） |
+| `openai_compatible_provider.py` | OpenAI 兼容供应商（被 zhipu/xunfei/baidu/sensenova 共用） |
 | `opencode_zen_provider.py` | OpenCode Zen 供应商 |
 | `prompt_template_manager.py` | PromptTemplateMgr（**54 fan-in**） |
+
+**新增供应商 (2026-07-01)**：
+
+| 供应商 | 注册方式 | 模型 | 认证方式 |
+|--------|---------|------|---------|
+| **sensenova** | `get_llm(provider="sensenova")` | glm-5.2 / deepseek-v4-flash / sensenova-6.7-flash-lite | Bearer Token |
+| 智谱AI (zhipu) | `get_llm(provider="zhipu")` | glm-4-flash | Bearer Token |
+| 讯飞星火 (xunfei) | `get_llm(provider="xunfei")` | spark-lite | Bearer Token |
+| 百度千帆 (baidu) | `get_llm(provider="baidu")` | ernie-speed-128k | OAuth (API Key + Secret) |
+| DeepSeek | `get_llm(provider="deepseek")` | deepseek-chat / deepseek-reasoner | LLMGatewayV2 |
 
 ### 4.8 voice/ — 语音合成（5 Provider）
 
@@ -261,11 +298,78 @@ DDD 分层架构，是项目最重要的重构成果：
 
 ### 4.9 前端（React 19 管理控制台）
 
-- 15 个页面（LoginPage, RolesPage, CreateRole, RoleSettings, SettingsLLM/Security/Logs, UsersPage, AdminUsersPage, WeChatPage, BindingDetailPage, UserWorkspace, DemoPage, NotFoundPage）
+- **18 个页面**（相比 2026-06-30 增加 3 个）：
+  - 用户/认证：LoginPage, UsersPage, AdminUsersPage, UserWorkspace
+  - 角色管理：RolesPage, CreateRole, RoleSettings
+  - 设置：SettingsLLM, SettingsSecurity, SettingsLogs, **SettingsVoice** (新增)
+  - 工具/状态：**ToolsDashboard** (新增), **StatusCenter** (新增)
+  - 微信集成：WeChatPage, BindingDetailPage
+  - 其他：DemoPage, NotFoundPage, SystemSettingsLayout
 - 12 个 API 模块（auth, characters, chat, admin, clone, demo, mimo, system, training, users, wechat, client）
 - 4 个 Zustand store（authStore, chatStore, errorStore, characterBuilderStore）
 - React Query hooks
 - Playwright E2E 测试
+
+**新增页面说明**：
+
+| 页面 | 文件 | 功能 |
+|------|------|------|
+| **ToolsDashboard** | `ToolsDashboard.tsx` | 内置工具仪表盘：展示所有已注册工具的实时健康状态（绿点/红点）、启停控制（toggle）、描述提示。通过 `/api/system/tools` 和 `/api/system/tools/health` 获取数据。 |
+| **StatusCenter** | `StatusCenter.tsx` | 系统状态中心 |
+| **SettingsVoice** | `SettingsVoice.tsx` | 语音设置页 |
+
+### 4.10 tools/ — 工具系统（新增 2026-07-01）
+
+插件式工具系统，为 AI 伴侣提供可调用的功能，以 OpenAI Function Calling schema 暴露给 LLM：
+
+```
+tools/
+├── __init__.py          # 导出 BaseTool, ToolResult, ToolRegistry, ToolDispatcher
+├── base_tool.py         # 核心框架（4 个类）
+└── builtin/             # 具体工具实现（12 个工具）
+    ├── __init__.py      # 重新导出全部内置工具
+    ├── calendar_tool.py          # CalendarTool + CalculatorTool
+    ├── character_crawler_tool.py # CharacterCrawlerTool (角色资料爬虫)
+    ├── extra_tools.py            # MemoryTool, WebSummaryTool, ImageGenTool (新增), SchedulerTool
+    ├── reminder_tool.py          # ReminderTool + CalendarQueryTool
+    ├── search_tool.py            # SearchTool (DuckDuckGo + Bing 回退)
+    ├── time_awareness_tool.py    # TimeAwarenessTool (农历/节假日)
+    └── weather_tool.py           # WeatherTool (插件 → wttr.in 回退)
+```
+
+**12 个已注册工具**：
+
+| 工具名 | 类 | 权限 | 说明 |
+|--------|-----|------|------|
+| `weather` | WeatherTool | public | 天气查询（插件优先 → wttr.in 回退） |
+| `search` | SearchTool | public | 联网搜索（DDGS → Bing HTML 回退） |
+| `calendar` | CalendarTool | public | 当前日期时间 |
+| `calculator` | CalculatorTool | public | 安全表达式计算（AST 解析） |
+| `set_reminder` | ReminderTool | friend | 设置提醒 |
+| `query_reminders` | CalendarQueryTool | friend | 查询待处理提醒 |
+| `memory` | MemoryTool | public | 长期记忆事实查询 |
+| `scheduler` | SchedulerTool | friend | 一次性日程安排 |
+| `time_awareness` | TimeAwarenessTool | public | 农历/节假日/工作日查询 |
+| `character_card` | CharacterCrawlerTool | friend | Web 爬取角色资料（baike → wiki → baidu 回退） |
+| `web_summary` | WebSummaryTool | public | URL 内容摘要 |
+| `image_gen` | ImageGenTool | public | **AI 图片生成**（Agnes-AI 兼容 API，新增 2026-07-01） |
+
+**核心类架构**：
+
+| 类 | 职责 | 关键功能 |
+|----|------|---------|
+| `BaseTool` | 抽象基类 | name/description/permission_level/parameters_schema → `execute()` → ToolResult；`to_openai_fc_schema()` 生成 OpenAI 函数调用 JSON |
+| `ToolResult` | 返回包装 | success + data/error；`to_dict()` / `to_fc_result()` 序列化 |
+| `ToolRegistry` | 注册中心 | `register()` / `get()` / `get_tools_by_permission(affinity)` / `health_check_all()` |
+| `ToolDispatcher` | 执行网关 | dispatch → 权限检查 → 速率限制（3次/分钟/工具）→ 执行 → 重试 → 埋点 |
+
+**集成方式**：main.py 中 `OptimizedOrchestrator.__init__` 创建 `ToolRegistry` → 注册所有工具 → 包装为 `ToolDispatcher` → 存入 `self.components`。`_execute_tool_calls()` 在 LLM chat 管线中调用，工具结果注入 prompt 上下文。
+
+**安全特性**：
+- SSRF 防护：`CharacterCrawlerTool._validate_url()` 拦截 localhost/私有 IP/未注册协议
+- 安全 eval：`CalculatorTool` 使用 AST 解析替代 eval()
+- 权限门控：public/friend/intimate/admin 四级
+- 优雅降级：每个工具有依赖不满足时的回退路径
 
 ---
 
@@ -316,7 +420,7 @@ DDD 分层架构，是项目最重要的重构成果：
 
 ## 7. 复杂度热点（transitive_loop_depth）
 
-main.py 中的函数占满前 6 名：
+main.py 中的函数占满前 6 名（main.py ~103KB，自 2026-06-30 增加 ~9KB）：
 
 | 函数 | 复杂度 | 传递循环深度 | 风险 |
 |------|--------|-------------|------|
@@ -328,7 +432,7 @@ main.py 中的函数占满前 6 名：
 | `main.run_wechat_mode` | 3 | 9 | — |
 | `main._detect_voice_request` | 17 | 4 | 含 4 次线性扫描 |
 
-**建议**：main.py 的 94KB 体量和 12 层传递循环深度表明它是重构的首要候选。
+**建议**：main.py 的 ~103KB 体量和 12 层传递循环深度表明它是重构的首要候选。此轮新增约 104 行（含工具注册逻辑），进一步加重了入口文件的负担。
 
 ---
 
@@ -345,7 +449,7 @@ main.py 中的函数占满前 6 名：
 | OptimizedOrchestrator to prompt_injection | 5 | 编排 to 安全 |
 | OptimizedOrchestrator to scheduler | 4 | 编排 to 调度 |
 | OptimizedOrchestrator to setup | 4 | 编排 to 初始化 |
-| OptimizedOrchestrator to main | 4 | 编排 to 入口（循环依赖风险） |
+| OptimizedOrchestrator to main | 4 | 编排到入口（循环依赖风险） |
 
 **注意**：`OptimizedOrchestrator to main` 的 4 次调用可能形成循环依赖。
 
@@ -364,6 +468,8 @@ main.py 中的函数占满前 6 名：
 
 `_run_full_mode` 是 main.py 与 shisi/ Clean Architecture 的主要集成点。
 
+**新增热点 (2026-07-01)**：`OptimizedOrchestrator` 中增加的 `_execute_tool_calls()` 将 main.py 与 `tools/` 包联结，`ToolRegistry.get_tools_by_permission()` 和 `ToolDispatcher.dispatch()` 成为热路径上的新节点。
+
 ---
 
 ## 10. 技术栈依赖
@@ -374,6 +480,7 @@ main.py 中的函数占满前 6 名：
 | 数据库 | SQLAlchemy 2.0 + aiosqlite + ChromaDB |
 | 向量 | sentence-transformers + rank-bm25 |
 | LLM | httpx + tenacity（自动 fallback） |
+| LLM 供应商 | 智谱AI (glm-4-flash), 讯飞星火 (spark-lite), 百度千帆 (ernie-speed-128k), DeepSeek, **sensenova (glm-5.2)**, OpenCode Zen |
 | 语音 | edge-tts + FFmpeg（可选） |
 | 缓存 | Redis（可选） |
 | 可观测 | prometheus-client + OpenTelemetry + Sentry SDK |
@@ -381,6 +488,7 @@ main.py 中的函数占满前 6 名：
 | 调度 | APScheduler + schedule |
 | 前端 | React 19 + Vite + Zustand + React Query + Playwright |
 | 测试 | pytest + pytest-asyncio + pytest-cov + ruff + mypy |
+| 工具系统 | httpx, requests, beautifulsoup4, cloudscraper, duckduckgo_search, chinese_calendar, lunarcalendar |
 
 ---
 
@@ -388,27 +496,33 @@ main.py 中的函数占满前 6 名：
 
 | 风险 | 严重度 | 位置 | 建议 |
 |------|--------|------|------|
-| main.py 94KB 巨型文件 | 高 | main.py | 拆分为多个模式模块（console/wechat/api/clone） |
+| main.py ~103KB 巨型文件（+9KB） | 高 | main.py | 拆分为多个模式模块（console/wechat/api/clone） |
 | ConfigLoader.get 423 fan-in | 中 | my_character/character_config.py | 加缓存、加降级，避免单点故障 |
 | OptimizedOrchestrator to main 循环依赖 | 中 | main.py | 检查 4 次回调是否可消除 |
 | process_message 全链 CRITICAL | 中 | main.py:881-1138 | 每个 hop=1 节点都需要降级路径 |
 | _run_full_mode 复杂度 19 | 中 | main.py | 提取子函数降低圈复杂度 |
 | run_console_chat 复杂度 24 | 中 | main.py | 提取交互逻辑到独立类 |
+| **工具系统引入热路径新节点** | 低 | tools/base_tool.py | ToolRegistry/ToolDispatcher 成为 LLM 回复前必经路径，需确保可用性 |
 
 ---
 
 ## 12. 查询指南
 
-代码图谱已索引到 codebase-memory 图谱工具，项目名为 `D-Desktop-ai-girlfriend`：
+> ⚠ codebase-memory 图谱工具 MCP 服务器已不可用。以下工具不再支持：
+> - `get_architecture` / `search_graph` / `trace_path` / `query_graph`
+> - 图谱数据仍存储于 `.codebase-memory/graph.db.zst`（3.3MB）但无法通过 MCP 查询。
+>
+> **替代方案**：
 
-- **架构概览**：`get_architecture(project="D-Desktop-ai-girlfriend")`
-- **搜索函数**：`search_graph(project="D-Desktop-ai-girlfriend", query="emotion engine")`
-- **追踪调用链**：`trace_path(project="D-Desktop-ai-girlfriend", function_name="process_message", mode="calls", depth=3)`
-- **Cypher 查询**：`query_graph(project="D-Desktop-ai-girlfriend", query="MATCH (r:Route) RETURN r.file_path, r.method, r.name")`
-- **找热点路径**：`MATCH (f:Function) WHERE f.transitive_loop_depth >= 3 RETURN f.qualified_name, f.complexity ORDER BY f.transitive_loop_depth DESC`
-
-图谱存储于 `.codebase-memory/graph.db.zst`（3.3MB）。
+| 需求 | 方法 | 命令 |
+|------|------|------|
+| 搜索函数/类 | 全局字符串搜索 | `rg "class PersonaService"` / `rg "def process_message"` |
+| 追踪调用链 | grep 调用点 | `rg "PersonaService\." --type py` |
+| 热点分析 | 统计 fan-in | `rg "def " --type py -c` |
+| 模块概览 | 目录树 | `tree /F` |
+| 路由列表 | 搜索路由装饰器 | `rg "router\." --type py \| rg "\.(get\|post\|put\|delete)\("` |
+| 前端页面 | 列出 pages 目录 | `ls frontend/src/pages/` |
 
 ---
 
-*本代码图谱由 维护者 基于 codebase-memory 图谱工具 知识图谱生成。*
+*本代码图谱由 维护者 基于 git log 分析和手动文件审查维护。代码库指标来自 2026-06-30 最后一次 codebase-memory 图谱工具 扫描。*

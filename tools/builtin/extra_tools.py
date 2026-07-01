@@ -143,7 +143,7 @@ class ImageGenTool(BaseTool):
 
     _DEFAULT_CONFIG: dict[str, dict[str, str]] = {
         "agnes": {
-            "base_url": "https://api.agnes-ai.com/v1",
+            "base_url": "https://apihub.agnes-ai.com/v1",
             "model": "agnes-image-2.1-flash",
             "size": "1024x1024",
         },
@@ -203,7 +203,6 @@ class ImageGenTool(BaseTool):
             "prompt": prompt,
             "n": 1,
             "size": target_size,
-            "response_format": "url",
         }
         try:
             resp = httpx.post(

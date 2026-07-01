@@ -53,6 +53,7 @@ class TestImageGenTool:
         mock_post.assert_called_once()
         _, kwargs = mock_post.call_args
         assert kwargs["json"]["prompt"] == "a cat"
+        assert kwargs["json"].get("response_format") is None
         assert kwargs["headers"]["Authorization"] == "Bearer sk-test"
 
     def test_execute_http_error(self):
