@@ -281,6 +281,7 @@ class Orchestrator:
                             rag_context=rag_context,
                             chat_summary=chat_summary,
                             character_overrides=persona_overrides,
+                            character_id=character_id,
                         )
 
                 with tracer.span("llm_inference"):

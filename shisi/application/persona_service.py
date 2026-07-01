@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -61,27 +62,29 @@ class PersonaService:
         rag_context: str = "",
         chat_summary: str = "",
         world_info: str = "",
+        character_id: str | None = None,
+        character_overrides: dict[str, Any] | None = None,
     ) -> str:
         """构建系统提示词。
 
         流程：
         1. 将 emotion_state 映射为 shisi EmotionalState；
-        2. 用 PersonaEngine 的配置构造 CharacterAggregate；
-        3. 通过 prompt_builder 生成基础 prompt（角色设定 + 人设 + 状态 + 对话历史）；
+        2. 用当前角色卡（如可用）或 PersonaEngine 的配置构造 CharacterAggregate；
+        3. 通过 prompt_builder 生成基础 prompt（角色设定 + 人设 + RAG 知识 + 状态 + 对话历史）；
         4. 注入 PersonaEngine 的人格对齐规则：世界信息、RAG、情感层、风格层、约束层。
         """
         effective_emotion = (
             emotion_state if emotion_state is not None else self._engine.emotion.state
         )
 
-        character = self._build_character(effective_emotion)
+        character = self._build_character(effective_emotion, character_id=character_id)
         chat_history = self._build_chat_history(memory_context, chat_summary)
 
         base_prompt = prompt_builder.build(
             character,
             user_message="",
             chat_history=chat_history,
-            use_knowledge=False,
+            use_knowledge=True,
             use_storyline=False,
         )
 
@@ -129,14 +132,100 @@ class PersonaService:
 
     # ── 内部构建 ──────────────────────────────────────────────
 
-    def _build_character(self, emotion_state: Any) -> CharacterAggregate:
-        """根据 PersonaEngine 的配置构造 shisi CharacterAggregate。"""
+    def _build_character(self, emotion_state: Any, character_id: str | None = None) -> CharacterAggregate:
+        """构造 shisi CharacterAggregate。
+
+        优先级：
+        1. 若提供了 character_id 且对应角色卡存在，用角色卡构建（source_data 保留完整卡数据，供 RAG 索引）；
+        2. 否则回退到 PersonaEngine 的基线人设。
+        """
+        emotional_state = self._map_emotional_state(emotion_state)
+
+        if character_id and character_id not in ("default", "demo"):
+            card_character = self._build_character_from_card(character_id, emotional_state)
+            if card_character is not None:
+                return card_character
+
         name = self._engine.get_name()
         description = self._engine._persona.get("description", "")
         persona = self._build_shisi_persona()
-        emotional_state = self._map_emotional_state(emotion_state)
 
         character = CharacterAggregate(name=name, description=description, persona=persona)
+        character.emotional_state = emotional_state
+        return character
+
+    def _load_character_card(self, character_id: str) -> dict[str, Any] | None:
+        """从 config/characters 加载角色卡数据。"""
+        from pathlib import Path
+
+        chars_dir = Path("config/characters")
+        if not chars_dir.exists():
+            return None
+
+        # 1. 按文件名查
+        direct_path = chars_dir / f"{character_id}.json"
+        if direct_path.exists():
+            try:
+                with open(direct_path, encoding="utf-8") as f:
+                    return json.load(f)
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        # 2. 遍历匹配内部 id 字段
+        try:
+            for f in chars_dir.glob("*.json"):
+                try:
+                    with open(f, encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    if data.get("id") == character_id:
+                        return data
+                except (OSError, json.JSONDecodeError):
+                    continue
+        except OSError:
+            pass
+        return None
+
+    def _build_character_from_card(
+        self, character_id: str, emotional_state: EmotionalState
+    ) -> CharacterAggregate | None:
+        """从 app 角色卡格式构建 CharacterAggregate。"""
+        card = self._load_character_card(character_id)
+        if not card:
+            return None
+
+        name = card.get("name", "未命名角色")
+        description = card.get("description", "")
+        anchors = card.get("core_anchors", []) or []
+
+        # 将 personality dict（如 warmth/playfulness）映射到 shisi PersonaProfile
+        traits = card.get("personality", {}) if isinstance(card.get("personality"), dict) else {}
+        style = card.get("speaking_style", {}) if isinstance(card.get("speaking_style"), dict) else {}
+
+        def _trait(name: str, fallback: float) -> float:
+            return float(traits.get(name, fallback) or fallback)
+
+        persona = ShisiPersonaProfile(
+            warmth=_trait("warmth", 0.7),
+            playfulness=_trait("playfulness", 0.5),
+            independence=_trait("independence", 0.6),
+            jealousy=_trait("jealousy", 0.4),
+            stubbornness=_trait("stubbornness", 0.5),
+            formality=float(style.get("formality", 0.3) or 0.3),
+            emoji_frequency=float(style.get("emoji_freq", style.get("emoji_frequency", 0.6)) or 0.6),
+            sentence_length=float(style.get("sentence_length", 0.5) or 0.5),
+            emotional_expression=float(style.get("expressiveness", 0.7) or 0.7),
+            humor=float(style.get("humor", 0.5) or 0.5),
+            core_anchors=anchors,
+        )
+
+        character = CharacterAggregate(
+            id=character_id,
+            name=name,
+            description=description,
+            persona=persona,
+            source_format="shisi_app_card",
+            source_data=card,
+        )
         character.emotional_state = emotional_state
         return character
 

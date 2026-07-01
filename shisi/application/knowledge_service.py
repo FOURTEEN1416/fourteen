@@ -16,7 +16,7 @@ import asyncio
 import logging
 from typing import Any
 
-from shisi.knowledge.character_knowledge_service import CharacterKnowledgeService
+from shisi.knowledge.character_knowledge_service import CharacterKnowledgeService, get_knowledge_service
 from shisi.knowledge.retriever import KnowledgeChunk
 
 logger = logging.getLogger("shisi.application.knowledge_service")
@@ -45,7 +45,7 @@ class ShisiKnowledgeAdapter:
     ):
         # 延迟 import：见模块顶部 TODO
         # TODO: shisi/knowledge/rag.py 后续实现后，移除对根目录 rag_engine/ 的直接 import。
-        self._service = knowledge_service or CharacterKnowledgeService(use_bm25=True)
+        self._service = knowledge_service or get_knowledge_service()
         self._vm = vector_memory
         self._sm = structured_memory
         self._semantic = semantic_memory

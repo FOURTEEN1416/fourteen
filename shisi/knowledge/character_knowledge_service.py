@@ -143,6 +143,17 @@ class CharacterKnowledgeService:
             self._retrievers.clear()
             self._chunk_counts.clear()
 
+    def add_knowledge_chunks(self, character_id: str, chunks: list[KnowledgeChunk]) -> None:
+        """向指定角色追加知识块；若索引不存在则自动创建。"""
+        if character_id not in self._retrievers:
+            retriever = BM25Retriever() if self._use_bm25 else KeywordRetriever()
+            self._retrievers[character_id] = retriever
+            self._chunk_counts[character_id] = 0
+        retriever = self._retrievers[character_id]
+        retriever.add_chunks(chunks)
+        self._chunk_counts[character_id] = len(retriever._chunks)  # type: ignore[attr-defined]
+        logger.info("角色 %s 追加知识块: +%d → %d 块", character_id, len(chunks), self._chunk_counts[character_id])
+
     # ── 知识提取 ──
 
     def _extract_from_character(self, character: CharacterAggregate) -> list[KnowledgeChunk]:

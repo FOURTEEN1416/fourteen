@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -19,6 +20,7 @@ from pydantic import BaseModel
 
 from api.deps import deps
 from my_character.persona_card import PersonaCardV3
+from shisi.knowledge.crawler_adapter import get_crawler_adapter
 from shisi.voice.character_voice import CharacterVoiceManager
 from utils.character_helpers import normalize_character_card, sanitize_character_name
 
@@ -213,6 +215,23 @@ def _list_all_characters(normalize: bool = True) -> list[dict[str, Any]]:
     return characters
 
 
+def _schedule_character_crawl(character_id: str, name: str, card: dict[str, Any]) -> None:
+    """在后台触发角色卡索引与爬虫补全，不阻塞 API 响应。"""
+    async def _run() -> None:
+        try:
+            await asyncio.to_thread(get_crawler_adapter().crawl_and_index, character_id, name, card)
+        except Exception:  # noqa: BLE001
+            logger.warning("角色 %s 后台爬虫/索引失败（非阻塞）", character_id, exc_info=True)
+
+    try:
+        asyncio.create_task(_run())
+    except RuntimeError:
+        # 无运行事件循环时降级到同步线程
+        import threading
+        threading.Thread(target=get_crawler_adapter().crawl_and_index,
+                         args=(character_id, name, card), daemon=True).start()
+
+
 def _build_character_data(
     name: str,
     description: str = "",
@@ -287,6 +306,7 @@ async def create_character(
     )
     if not _save_character(data["id"], data):
         raise HTTPException(status_code=500, detail="保存角色失败")
+    _schedule_character_crawl(data["id"], data["name"], data)
     logger.info("角色已创建: %s (%s)", data["name"], data["id"])
     return {"id": data["id"], "name": data["name"], "status": "created"}
 
@@ -515,6 +535,7 @@ async def import_character(
     if not _save_character(character_id, char_data):
         raise HTTPException(status_code=500, detail="保存角色失败")
 
+    _schedule_character_crawl(character_id, name, char_data)
     logger.info("角色已导入: %s (%s)", name, character_id)
     return {"id": character_id, "name": name, "status": "imported"}
 
@@ -787,6 +808,7 @@ async def generate_character_from_description(
     if not _save_character(data["id"], data):
         raise HTTPException(status_code=500, detail="保存角色失败")
 
+    _schedule_character_crawl(data["id"], data["name"], data)
     logger.info("AI 角色已生成: %s (%s)", data["name"], data["id"])
     return {
         "id": data["id"],

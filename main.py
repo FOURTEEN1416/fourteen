@@ -503,12 +503,25 @@ class OptimizedOrchestrator:
             cls._character_persona_cache[character_id] = segment
         return segment
 
+    def _get_affinity_level(self, emotion_state: Any) -> int:
+        """从 emotion_state 中提取整数好感度等级（0-8）。"""
+        if emotion_state is None:
+            return 0
+        affinity = getattr(emotion_state, "affinity", 0)
+        if isinstance(affinity, dict):
+            return int(affinity.get("level", 0))
+        try:
+            return int(affinity)
+        except (TypeError, ValueError):
+            return 0
+
     async def _run_tools_if_needed(
         self,
         llm: Any,
         query: str,
         system_prompt: str,
         history: list | None,
+        affinity_level: int = 0,
     ) -> str:
         """如果系统启用了工具，先让 LLM 判断是否需要调用工具，并返回工具结果摘要。
 
@@ -518,7 +531,7 @@ class OptimizedOrchestrator:
         tools = self.components.get("tools")
         if not tools or not tools.registry:
             return ""
-        schemas = tools.registry.get_all_schemas()
+        schemas = tools.registry.get_tools_by_permission(affinity_level)
         if not schemas:
             return ""
         try:
@@ -556,7 +569,7 @@ class OptimizedOrchestrator:
                 loop = asyncio.get_running_loop()
                 result = await loop.run_in_executor(
                     None,
-                    lambda _n=name, _a=args: tools.dispatch(_n, _a, affinity_level=0),
+                    lambda _n=name, _a=args: tools.dispatch(_n, _a, affinity_level=affinity_level),
                 )
             except Exception as e:
                 logger.debug("工具 %s 执行异常: %s", name, e)
@@ -1077,6 +1090,7 @@ class OptimizedOrchestrator:
                     rag_context=rag_context,
                     chat_summary=chat_summary,
                     world_info=world_info,
+                    character_id=character_id,
                 )
 
                 # 角色卡人设动态注入（v3.1）：放在核心位置，确保角色身份优先于基线人设
@@ -1094,6 +1108,18 @@ class OptimizedOrchestrator:
 
                 if persona_enhancement:
                     system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
+
+                # ── 工具调用（fast 模式）──
+                affinity_level = self._get_affinity_level(emotion_state)
+                tool_results = await self._run_tools_if_needed(
+                    self.components["llm"],
+                    user_msg_clean,
+                    system_prompt,
+                    chat_history,
+                    affinity_level=affinity_level,
+                )
+                if tool_results:
+                    system_prompt = f"{system_prompt}\n\n{tool_results}"
 
                 # ── 主 LLM 对话（带 30s 超时保护） ──
                 try:
@@ -1400,6 +1426,7 @@ class OptimizedOrchestrator:
                     rag_context=rag_context,
                     chat_summary=chat_summary,
                     world_info=world_info,
+                    character_id=character_id,
                 )
 
                 # 角色卡人设动态注入（v3.1）：放在核心位置，确保角色身份优先于基线人设
@@ -1417,6 +1444,18 @@ class OptimizedOrchestrator:
 
                 if persona_enhancement:
                     system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
+
+                # 8.5 工具调用（fast 模式流式）
+                affinity_level = self._get_affinity_level(emotion_state)
+                tool_results = await self._run_tools_if_needed(
+                    llm,
+                    user_msg_clean,
+                    system_prompt,
+                    chat_history,
+                    affinity_level=affinity_level,
+                )
+                if tool_results:
+                    system_prompt = f"{system_prompt}\n\n{tool_results}"
 
                 # 9. 真流式 LLM 调用 — 边生成边 yield
                 full_reply = ""

@@ -1,241 +1,252 @@
-"""人物爬虫适配器 — 将 character_crawler_tool 抓取结果写入 shisi 知识索引。"""
+"""角色爬虫与知识库索引适配器。
+
+职责：
+1. 角色创建/导入后自动为角色卡数据建索引；
+2. 调用 character_crawler 工具补全网络公开信息；
+3. 将爬虫结果统一写入 CharacterKnowledgeService 单例，供对话时 RAG 检索。
+"""
 
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from shisi.knowledge.character_knowledge_service import CharacterKnowledgeService
+from shisi.knowledge.character_knowledge_service import get_knowledge_service
 from shisi.knowledge.retriever import KnowledgeChunk
 
 logger = logging.getLogger("shisi.knowledge.crawler_adapter")
 
 
-def _split_text(text: str, max_len: int = 300, overlap: int = 30) -> list[str]:
-    """把长文本切分成固定长度的知识块。"""
-    if not text:
-        return []
-    text = text.strip()
+def _split_text(text: str, max_len: int = 500, overlap: int = 50) -> list[str]:
+    """将长文本切分为固定长度、带重叠的短块。"""
     if len(text) <= max_len:
         return [text]
     chunks: list[str] = []
     start = 0
     while start < len(text):
         end = start + max_len
-        chunk = text[start:end]
-        chunks.append(chunk.strip())
+        chunks.append(text[start:end])
         start = end - overlap
+        if start >= len(text):
+            break
     return chunks
 
 
 def _profile_to_chunks(profile: dict[str, Any]) -> list[KnowledgeChunk]:
-    """将爬虫返回的人物 profile 解析为 KnowledgeChunk 列表。"""
+    """将爬虫返回的人物 profile 转换为知识块。"""
     chunks: list[KnowledgeChunk] = []
-    source = profile.get("source", "crawler")
-    source_url = profile.get("source_url", "")
 
-    # 1) 人物名称
-    name = profile.get("name", "").strip() or profile.get("title", "").strip()
+    name = profile.get("name", "")
     if name:
         chunks.append(KnowledgeChunk(
-            content=f"人物名称：{name}",
-            source=f"{source}.name",
-            source_id="name_0",
+            content=f"角色名：{name}",
+            source="crawler_name",
         ))
 
-    # 2) 基本信息（infobox）
-    basic_info = profile.get("basic_info", {})
-    if isinstance(basic_info, dict):
-        for key, value in basic_info.items():
-            if not value:
-                continue
+    basic = profile.get("basic_info", {})
+    for k, v in basic.items():
+        if str(v).strip():
             chunks.append(KnowledgeChunk(
-                content=f"{key}：{value}",
-                source=f"{source}.basic_info",
-                source_id=f"basic_{key}",
+                content=f"{k}：{str(v).strip()}",
+                source="crawler_basic_info",
             ))
 
-    # 3) 摘要/简介（分段）
     summary = profile.get("summary", "")
     if summary:
-        for idx, paragraph in enumerate(_split_text(summary, max_len=400)):
-            chunks.append(KnowledgeChunk(
-                content=paragraph,
-                source=f"{source}.summary",
-                source_id=f"summary_{idx}",
-            ))
-
-    # 4) 正文 content（若摘要为空，则使用正文）
-    content = profile.get("content", "")
-    if content and not summary:
-        for idx, paragraph in enumerate(_split_text(content, max_len=400)):
-            chunks.append(KnowledgeChunk(
-                content=paragraph,
-                source=f"{source}.content",
-                source_id=f"content_{idx}",
-            ))
-
-    # 5) 章节标题（作为弱知识提示）
-    sections = profile.get("sections", {})
-    if isinstance(sections, dict):
-        for idx, (section_name, _) in enumerate(sections.items()):
-            chunks.append(KnowledgeChunk(
-                content=f"相关章节：{section_name}",
-                source=f"{source}.sections",
-                source_id=f"section_{idx}",
-            ))
-
-    # 6) 搜索片段
-    query_results = profile.get("query_results", [])
-    if isinstance(query_results, list):
-        for idx, qr in enumerate(query_results[:5]):
-            title = qr.get("title", "")
-            snippet = qr.get("snippet", "")
-            text = f"{title}\n{snippet}".strip()
-            if text:
+        for para in str(summary).split("\n"):
+            if para.strip():
                 chunks.append(KnowledgeChunk(
-                    content=text,
-                    source=f"{source}.search",
-                    source_id=f"search_{idx}",
+                    content=para.strip(),
+                    source="crawler_summary",
                 ))
 
-    # 7) 元信息：来源 URL
+    content = profile.get("content", "")
+    if content and str(content) != str(summary):
+        for para in str(content).split("\n"):
+            para = para.strip()
+            if para and len(para) > 10:
+                for piece in _split_text(para, max_len=500, overlap=50):
+                    chunks.append(KnowledgeChunk(
+                        content=piece,
+                        source="crawler_content",
+                    ))
+
+    source_url = profile.get("source_url", "")
     if source_url:
         chunks.append(KnowledgeChunk(
             content=f"信息来源：{source_url}",
-            source=f"{source}.metadata",
-            source_id="source_url",
+            source="crawler_source_url",
         ))
 
     return chunks
 
 
 class CharacterCrawlerAdapter:
-    """把网络爬虫抓取的人物资料导入 shisi 知识索引。"""
+    """协调爬虫与知识索引，供角色路由在后台触发。"""
 
-    def __init__(self, service: CharacterKnowledgeService | None = None):
-        self._service = service
-        self._tool: Any | None = None
+    def __init__(self) -> None:
+        self._tool = None
+        self._tool_error = None
 
-    def _get_tool(self) -> Any:
-        """延迟初始化爬虫工具，处理依赖缺失。"""
-        if self._tool is not None:
-            return self._tool
-        try:
-            from tools.builtin.character_crawler_tool import CharacterCrawlerTool
-            self._tool = CharacterCrawlerTool()
-            return self._tool
-        except Exception as e:  # noqa: BLE001
-            logger.warning("爬虫工具初始化失败: %s", e)
-            return None
-
-    @property
-    def _knowledge_service(self) -> CharacterKnowledgeService:
-        if self._service is None:
-            from shisi.knowledge.character_knowledge_service import get_knowledge_service
-            self._service = get_knowledge_service()
-        return self._service
+    def _get_tool(self):
+        """惰性加载爬虫工具；首次调用时初始化。"""
+        if self._tool is None and self._tool_error is None:
+            try:
+                from tools.builtin.character_crawler_tool import CharacterCrawlerTool
+                self._tool = CharacterCrawlerTool()
+            except Exception as e:  # noqa: BLE001
+                self._tool_error = f"爬虫工具不可用: {e}"
+                logger.warning(self._tool_error)
+        return self._tool
 
     def crawl_and_index(
         self,
         character_id: str,
         name: str,
-        card: Any | None = None,
+        card: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """抓取人物资料并写入角色知识索引。
+        """为角色建立知识索引，并尝试网络爬虫补全。
 
-        Args:
-            character_id: 角色唯一标识
-            name: 要抓取的人物名称
-            card: 可选的 CharaCardV2，用于初始化索引
-
-        Returns:
-            操作结果统计字典
+        返回摘要字典，便于路由端记录日志；所有异常均已捕获，不会阻塞主流程。
         """
         tool = self._get_tool()
         if tool is None:
             return {
-                "success": False,
                 "character_id": character_id,
-                "name": name,
-                "chunks_added": 0,
-                "error": "爬虫工具不可用，请安装 requests / beautifulsoup4 / cloudscraper",
+                "success": False,
+                "error": self._tool_error or "爬虫工具不可用",
+                "indexed": False,
+                "crawled": False,
             }
 
-        logger.info("开始抓取人物资料: %s (character_id=%s)", name, character_id)
-        try:
-            result = tool.execute(action="fetch_person", name=name)
-        except Exception as e:  # noqa: BLE001
-            logger.exception("抓取人物资料失败: %s", name)
-            return {
-                "success": False,
-                "character_id": character_id,
-                "name": name,
-                "chunks_added": 0,
-                "error": f"抓取异常: {e}",
-            }
+        service = get_knowledge_service()
 
-        if not result.success or not result.data:
-            return {
-                "success": False,
-                "character_id": character_id,
-                "name": name,
-                "chunks_added": 0,
-                "error": result.error or "未获取到人物资料",
-            }
+        # 1. 先为已有角色卡数据建索引
+        if card:
+            try:
+                self._index_card(service, character_id, card)
+            except Exception:  # noqa: BLE001
+                logger.warning("角色卡 %s 索引失败（非阻塞）", character_id, exc_info=True)
 
-        profile = result.data if isinstance(result.data, dict) else {}
-        chunks = _profile_to_chunks(profile)
-        if not chunks:
-            return {
-                "success": False,
-                "character_id": character_id,
-                "name": name,
-                "chunks_added": 0,
-                "error": "抓取结果为空或无法解析",
-            }
+        # 2. 尝试爬虫补全
+        crawl_ok = False
+        crawl_error = None
+        source = None
+        if name and name.strip():
+            try:
+                result = tool.execute(action="fetch_person", name=name.strip())
+                if result.success and result.data:
+                    crawl_ok = True
+                    source = result.data.get("source", "unknown")
+                    chunks = _profile_to_chunks(result.data)
+                    if chunks:
+                        service.ensure_index(character_id)
+                        service.add_knowledge_chunks(character_id, chunks)
+                        service.save_index(character_id)
+                        logger.info(
+                            "角色 '%s' (%s) 爬虫知识已入库: %d 块, 来源=%s",
+                            name, character_id, len(chunks), source,
+                        )
+                else:
+                    crawl_error = result.error or "crawler_empty"
+                    logger.warning("角色 '%s' 爬虫补全失败: %s", name, crawl_error)
+            except Exception:  # noqa: BLE001
+                crawl_error = "crawler_exception"
+                logger.warning("角色 '%s' 爬虫补全异常（非阻塞）", name, exc_info=True)
 
-        # 确保索引已初始化
-        service = self._knowledge_service
-        if not service.has_index(character_id):
-            if card is not None:
-                service.index_from_card(character_id, card)
-            else:
-                # 无角色卡时，用空 KeywordRetriever 占位，随后追加爬虫块
-                from shisi.knowledge.retriever import KeywordRetriever
-                service._retrievers[character_id] = KeywordRetriever()
-                service._chunk_counts[character_id] = 0
-
-        retriever = service._retrievers.get(character_id)
-        if retriever is None:
-            return {
-                "success": False,
-                "character_id": character_id,
-                "name": name,
-                "chunks_added": 0,
-                "error": "知识索引初始化失败",
-            }
-
-        retriever.add_chunks(chunks)
-        service._chunk_counts[character_id] = len(retriever._chunks)
-        service.save_index(character_id)
-
-        logger.info(
-            "人物资料已导入知识索引: %s → %d 块 (来源: %s)",
-            character_id, len(chunks), profile.get("source", "unknown"),
-        )
-
+        stats = service.get_stats(character_id)
         return {
-            "success": True,
             "character_id": character_id,
-            "name": name,
-            "chunks_added": len(chunks),
-            "source": profile.get("source", "unknown"),
-            "source_url": profile.get("source_url", ""),
-            "fallback_chain": profile.get("fallback_chain", []),
+            "success": True,
+            "indexed": stats["indexed"],
+            "total_chunks": stats["total_chunks"],
+            "crawled": crawl_ok,
+            "crawl_error": crawl_error,
+            "source": source,
         }
 
+    def _index_card(
+        self,
+        service,
+        character_id: str,
+        card: dict[str, Any],
+    ) -> None:
+        """从 app 角色卡格式提取知识块并建索引。"""
+        chunks: list[KnowledgeChunk] = []
 
-def get_crawler_adapter(service: CharacterKnowledgeService | None = None) -> CharacterCrawlerAdapter:
-    """工厂函数，返回单例适配器。"""
-    return CharacterCrawlerAdapter(service=service)
+        if card.get("name"):
+            chunks.append(KnowledgeChunk(
+                content=f"角色名：{card['name']}",
+                source="card_name",
+            ))
+
+        if card.get("description"):
+            for para in str(card["description"]).split("\n"):
+                if para.strip():
+                    chunks.append(KnowledgeChunk(
+                        content=para.strip(),
+                        source="card_description",
+                    ))
+
+        for anchor in card.get("core_anchors", []):
+            if anchor and str(anchor).strip():
+                chunks.append(KnowledgeChunk(
+                    content=f"核心锚点：{str(anchor).strip()}",
+                    source="card_anchors",
+                ))
+
+        personality = card.get("personality", {})
+        if isinstance(personality, dict):
+            for k, v in personality.items():
+                chunks.append(KnowledgeChunk(
+                    content=f"性格维度 {k}：{v}",
+                    source="card_personality",
+                ))
+        elif isinstance(personality, str) and personality.strip():
+            for para in personality.split("\n"):
+                if para.strip():
+                    chunks.append(KnowledgeChunk(
+                        content=para.strip(),
+                        source="card_personality",
+                    ))
+
+        style = card.get("speaking_style", {})
+        if isinstance(style, dict):
+            for k, v in style.items():
+                if k in ("catchphrases", "口头禅") and isinstance(v, list):
+                    for cp in v:
+                        if str(cp).strip():
+                            chunks.append(KnowledgeChunk(
+                                content=f"口头禅：{str(cp).strip()}",
+                                source="card_catchphrase",
+                            ))
+                else:
+                    chunks.append(KnowledgeChunk(
+                        content=f"说话风格 {k}：{v}",
+                        source="card_speaking_style",
+                    ))
+        elif isinstance(style, str) and style.strip():
+            chunks.append(KnowledgeChunk(content=style.strip(), source="card_speaking_style"))
+
+        if card.get("scenario"):
+            chunks.append(KnowledgeChunk(
+                content=f"场景设定：{card['scenario']}",
+                source="card_scenario",
+            ))
+
+        if chunks:
+            service.ensure_index(character_id)
+            service.add_knowledge_chunks(character_id, chunks)
+            service.save_index(character_id)
+            logger.info("角色卡 %s 已索引: %d 块", character_id, len(chunks))
+
+
+_crawler_adapter: CharacterCrawlerAdapter | None = None
+
+
+def get_crawler_adapter() -> CharacterCrawlerAdapter:
+    """返回全局唯一的 CharacterCrawlerAdapter 实例。"""
+    global _crawler_adapter
+    if _crawler_adapter is None:
+        _crawler_adapter = CharacterCrawlerAdapter()
+    return _crawler_adapter
