@@ -48,7 +48,7 @@ def _eval_node(node: ast.AST) -> Any:
 
 
 class CalendarTool(BaseTool):
-    name = "get_current_time"
+    name = "calendar"
     description = "获取当前日期和时间"
     permission_level = "public"
     parameters_schema = {

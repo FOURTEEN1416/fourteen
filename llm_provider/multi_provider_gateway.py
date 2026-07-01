@@ -31,7 +31,7 @@ from .opencode_zen_provider import OpenCodeZenProvider
 logger = logging.getLogger("llm_provider.multi_gateway")
 
 # ── 默认 fallback 链 ──
-DEFAULT_FALLBACK_CHAIN = ["zhipu", "xunfei", "baidu", "opencode_zen"]
+DEFAULT_FALLBACK_CHAIN = ["sensenova", "zhipu", "xunfei", "baidu", "opencode_zen"]
 
 # ── 默认提供商配置 ──
 DEFAULT_PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
@@ -71,6 +71,16 @@ DEFAULT_PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
         "temperature": 0.85,
         "description": "DeepSeek-V2 高质量模型，需自行申请 API Key",
     },
+    "sensenova": {
+        "name": "商汤日日新 SenseNova",
+        "model": "glm-5.2",
+        "api_base": "https://token.sensenova.cn/v1",
+        "auth_mode": "bearer",
+        "max_tokens": 8192,
+        "temperature": 0.85,
+        "description": "商汤 SenseNova 平台，glm-5.2 1M上下文/13万输出，支持工具调用",
+        "extra_payload": {"reasoning_effort": "none"},
+    },
 }
 
 
@@ -97,6 +107,7 @@ def _resolve_env_override(provider_key: str, config: dict[str, Any]) -> dict[str
         "xunfei": {"key": "XUNFEI_API_KEY", "base": "XUNFEI_API_BASE", "model": "XUNFEI_MODEL"},
         "baidu": {"key": "BAIDU_API_KEY", "base": "BAIDU_API_BASE", "model": "BAIDU_MODEL"},
         "deepseek": {"key": "DEEPSEEK_API_KEY", "base": "DEEPSEEK_API_BASE", "model": "DEEPSEEK_MODEL"},
+        "sensenova": {"key": "SENSENOVA_API_KEY", "base": "SENSENOVA_API_BASE", "model": "SENSENOVA_MODEL"},
     }
 
     mapping = env_map.get(provider_key)
@@ -175,6 +186,7 @@ class MultiProviderGateway:
                 auth_mode=cfg.get("auth_mode", "bearer"),
                 max_tokens=cfg.get("max_tokens", 2048),
                 temperature=cfg.get("temperature", 0.85),
+                extra_payload=cfg.get("extra_payload"),
             )
 
         logger.info(

@@ -5,6 +5,7 @@ debug: true
 llm:
   # ── 供应商模式 ──
   #   "auto"            → MultiProviderGateway（自动fallback链）
+  #   "sensenova"       → 商汤日日新 SenseNova（glm-5.2 / deepseek-v4-flash）
   #   "zhipu"           → 仅智谱AI
   #   "xunfei"          → 仅讯飞星火
   #   "baidu"           → 仅百度千帆
@@ -14,8 +15,9 @@ llm:
 
   # ── Fallback 链（provider=auto 时生效）──
   # 按优先级依次尝试，前一个不可用自动切到下一个
-  # 用户可在 .env 中配置 DEEPSEEK_API_KEY 后，将 deepseek 插入链首
+  # 已配置 SENSENOVA_API_KEY 时，sensenova 作为首选强力模型
   fallback_chain:
+    - sensenova     # 商汤日日新 glm-5.2（1M上下文，支持工具调用）
     - zhipu         # 智谱AI GLM-4.7-Flash（永久免费）
     - xunfei        # 讯飞星火 Spark Lite（永久免费）
     - baidu         # 百度千帆 ERNIE-Speed（每月50万免费Token）
@@ -72,7 +74,7 @@ tools:
     - reminder
     - calendar_query
     - time_awareness
-    - character_crawler
+    - character_card
 
 api:
   host: "0.0.0.0"

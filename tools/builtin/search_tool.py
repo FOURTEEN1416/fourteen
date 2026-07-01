@@ -14,7 +14,7 @@ except ImportError:
 
 
 class SearchTool(BaseTool):
-    name = "web_search"
+    name = "search"
     description = "使用DuckDuckGo搜索引擎搜索网页信息"
     permission_level = "public"
     parameters_schema = {

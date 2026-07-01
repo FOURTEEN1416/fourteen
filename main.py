@@ -612,7 +612,8 @@ class OptimizedOrchestrator:
             )
 
             self.components["llm"] = get_llm(
-                models_config=cfg.llm.models_priority
+                provider=cfg.llm.provider,
+                models_config=cfg.llm.models_priority,
             )
 
             self.components["safety"].llm_gateway = self.components["llm"]
@@ -2003,7 +2004,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     logger.info("[4/12] 初始化LLM网关V2...")
     from llm_provider.prompt_template_manager import PromptTemplateMgr
 
-    llm = get_llm(models_config=cfg.llm.models_priority)
+    llm = get_llm(provider=cfg.llm.provider, models_config=cfg.llm.models_priority)
     PromptTemplateMgr()
 
     safety_filter.llm_gateway = llm

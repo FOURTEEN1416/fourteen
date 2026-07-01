@@ -101,7 +101,7 @@ class ToolDispatcher:
         self.rate_limit = rate_limit_per_minute
         self._call_times: dict[str, list[float]] = {}
         self.retry_count = retry_count
-        self.retry_tools = retry_tools or {"web_search", "get_weather"}
+        self.retry_tools = retry_tools or {"search", "weather"}
 
     def dispatch(self, tool_name: str, arguments: dict[str, Any],
                  affinity_level: int = 0, trace_id: str = "") -> ToolResult:

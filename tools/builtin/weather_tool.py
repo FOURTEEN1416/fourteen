@@ -14,7 +14,7 @@ except ImportError:
 
 
 class WeatherTool(BaseTool):
-    name = "get_weather"
+    name = "weather"
     description = "获取当前天气信息，包括温度、天气状况等"
     permission_level = "public"
     parameters_schema = {

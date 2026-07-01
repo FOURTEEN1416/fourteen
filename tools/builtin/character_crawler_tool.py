@@ -74,7 +74,7 @@ _BLOCKED_PREFIXES = ("10.", "172.16.", "172.17.", "172.18.", "172.19.",
 
 class CharacterCrawlerTool(BaseTool):
     """人物信息爬取工具（中国可访问版）"""
-    name = "character_crawler"
+    name = "character_card"
     description = "爬取人物信息构建知识库。自动降级：百度百科→维基→百度搜索。"
     permission_level = "friend"
     # 共享 Session（cloudscraper 优先，自动过 Cloudflare/bot 检测）

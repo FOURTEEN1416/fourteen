@@ -5,6 +5,7 @@ debug: false
 llm:
   provider: auto
   fallback_chain:
+    - sensenova
     - zhipu
     - xunfei
     - baidu
@@ -58,7 +59,7 @@ tools:
     - reminder
     - calendar_query
     - time_awareness
-    - character_crawler
+    - character_card
 
 api:
   host: "0.0.0.0"

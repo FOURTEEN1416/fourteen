@@ -4,6 +4,7 @@ import { config as fetchConfig, saveConfig } from '../api/system'
 
 const PROVIDER_OPTIONS = [
   { value: 'auto', label: '自动回退（推荐）', desc: '按优先级依次尝试可用供应商' },
+  { value: 'sensenova', label: '商汤日日新', desc: 'glm-5.2 1M上下文，强力模型，需 API Key' },
   { value: 'deepseek', label: 'DeepSeek', desc: 'DeepSeek-V2/V3，需 API Key，性价比高' },
   { value: 'zhipu', label: '智谱AI', desc: 'GLM-4.7-Flash 永久免费，无限 Token' },
   { value: 'xunfei', label: '讯飞星火', desc: 'Spark Lite 永久免费，无限 Token' },
@@ -13,6 +14,7 @@ const PROVIDER_OPTIONS = [
 ]
 
 const PROVIDER_GUIDE: Record<string, { apply_url: string; note: string }> = {
+  sensenova: { apply_url: 'https://platform.sensenova.cn', note: '注册 → 控制台 → API Keys → 创建 sk- 密钥' },
   deepseek: { apply_url: 'https://platform.deepseek.com', note: '注册 → API Keys → 创建 Key' },
   zhipu: { apply_url: 'https://open.bigmodel.cn', note: '注册 → API 密钥 → 添加 API Key' },
   xunfei: { apply_url: 'https://console.xfyun.cn', note: '注册 → 星火大模型 → API Key' },

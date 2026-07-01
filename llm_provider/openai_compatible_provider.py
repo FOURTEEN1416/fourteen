@@ -56,6 +56,7 @@ class OpenAICompatibleProvider:
         max_tokens: int = 2048,
         temperature: float = 0.85,
         stream_enabled: bool = True,
+        extra_payload: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
         self.provider_name = provider_name
@@ -66,6 +67,7 @@ class OpenAICompatibleProvider:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.stream_enabled = stream_enabled
+        self.extra_payload = extra_payload or {}
 
         # 模型降级注册表
         default_models = [{"name": model, "priority": 1}]
@@ -192,6 +194,8 @@ class OpenAICompatibleProvider:
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+        if self.extra_payload:
+            payload.update(self.extra_payload)
 
         await self._refresh_oauth_if_needed()
 
@@ -264,6 +268,8 @@ class OpenAICompatibleProvider:
         }
         if tools:
             payload["tools"] = tools
+        if self.extra_payload:
+            payload.update(self.extra_payload)
 
         await self._refresh_oauth_if_needed()
 
@@ -350,6 +356,8 @@ class OpenAICompatibleProvider:
             }
             if tools:
                 payload["tools"] = tools
+            if self.extra_payload:
+                payload.update(self.extra_payload)
             try:
                 resp = await self._async_client.post(self._chat_url, json=payload)
                 resp.raise_for_status()

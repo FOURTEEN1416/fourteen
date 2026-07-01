@@ -60,6 +60,18 @@ def get_llm(provider: str | None = None, models_config: list[dict] | None = None
             if resolved == "auto":
                 _instances[resolved] = MultiProviderGateway()
                 logger.info("Created MultiProviderGateway (auto-fallback chain)")
+            elif resolved == "sensenova":
+                from .openai_compatible_provider import OpenAICompatibleProvider
+                _instances[resolved] = OpenAICompatibleProvider(
+                    provider_name="sensenova",
+                    api_key=os.environ.get("SENSENOVA_API_KEY", ""),
+                    api_base=os.environ.get("SENSENOVA_API_BASE", "https://token.sensenova.cn/v1"),
+                    model=os.environ.get("SENSENOVA_MODEL", "glm-5.2"),
+                    auth_mode="bearer",
+                    models_config=models_config,
+                    extra_payload={"reasoning_effort": "none"},
+                )
+                logger.info("Created OpenAICompatibleProvider [sensenova]")
             elif resolved == "zhipu":
                 from .openai_compatible_provider import OpenAICompatibleProvider
                 _instances[resolved] = OpenAICompatibleProvider(
@@ -114,7 +126,9 @@ def get_llm_names(provider: str | None = None) -> list[str]:
     resolved = _resolve_provider(provider)
     names: list[str] = []
 
-    if resolved == "zhipu":
+    if resolved == "sensenova":
+        names = ["glm-5.2", "deepseek-v4-flash", "sensenova-6.7-flash-lite"]
+    elif resolved == "zhipu":
         names = ["glm-4-flash"]
     elif resolved == "xunfei":
         names = ["spark-lite"]
