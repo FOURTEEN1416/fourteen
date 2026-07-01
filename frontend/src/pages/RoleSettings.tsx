@@ -8,14 +8,14 @@ import { sanitizeCharacterName } from '../utils/character'
 import Slider from '../components/shared/Slider'
 import TagInput from '../components/shared/TagInput'
 import Toggle from '../components/shared/Toggle'
-import FileUpload from '../components/shared/FileUpload'
+
 import ConfirmDialog from '../components/shared/ConfirmDialog'
 import StorylineEditor from '../components/storyline/StorylineEditor'
 import type { RoleSettingsTab, RoleSettingsCharacter } from '../types/framework'
 import type { UnifiedCharacterUpdate } from '../types/api'
 import {
   User, Mic, MessageSquare, Database, Smile, Clock,
-  Save, Trash2, Copy, Play, Check,
+  Save, Trash2, Copy,
 } from 'lucide-react'
 
 // ═══ Constants ═══
@@ -230,9 +230,6 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
   const [edgeSpeaker, setEdgeSpeaker] = useState('zh-CN-XiaoxiaoNeural')
   const [edgeRate, setEdgeRate] = useState(1.0)
   const [edgePitch, setEdgePitch] = useState(0.6)
-  const [voiceName, setVoiceName] = useState('')
-  const [voiceDesc, setVoiceDesc] = useState('')
-  const [voiceId] = useState('')
   const [status] = useState('就绪')
 
   return (
@@ -278,38 +275,18 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
               <span className="w-10 text-right text-xs font-mono text-gray-400">{(edgePitch * 100).toFixed(0)}</span>
             </div>
             <div className="flex justify-end gap-2">
-              {/* 试听功能未实现 — 禁用避免误导 */}
-              <button
-                disabled
-                title="试听功能开发中"
-                className="px-4 py-1.5 text-xs font-medium text-gray-400 rounded-lg bg-gray-100 opacity-50 cursor-not-allowed"
-              >
-                <Play className="w-3 h-3 inline mr-1" />试听
-              </button>
+              <span className="px-3 py-1.5 text-xs text-gray-400">试听功能开发中</span>
             </div>
           </div>
         </Section>
       )}
 
-      {/* GPT-SoVITS */}
-      {engine === 'gpt-sovits' && (
-        <Section title="GPT-SoVITS 参数">
-          <div className="space-y-3">
-            <input className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20" placeholder="服务地址 (http://localhost:5000)" />
-            <input className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20" placeholder="参考文本" />
-            <input className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20" placeholder="说话人名称" />
-            <FileUpload accept=".wav,.mp3" maxSize={10} onUpload={() => {}} />
-          </div>
-        </Section>
-      )}
-
-      {/* Bert-VITS2 */}
-      {engine === 'bert-vits2' && (
-        <Section title="Bert-VITS2 参数">
-          <div className="space-y-3">
-            <input className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20" placeholder="服务地址 (http://localhost:5000)" />
-            <input className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20" placeholder="说话人名称" />
-            <input type="password" className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20" placeholder="API Token" />
+      {/* GPT-SoVITS / Bert-VITS2 开发中 */}
+      {(engine === 'gpt-sovits' || engine === 'bert-vits2') && (
+        <Section title={`${engine === 'gpt-sovits' ? 'GPT-SoVITS' : 'Bert-VITS2'} 参数`}>
+          <div className="rounded-xl bg-amber-50/50 border border-amber-100 p-4 text-center">
+            <p className="text-sm text-amber-700">该语音引擎接入开发中</p>
+            <p className="text-xs text-amber-500 mt-1">当前请先使用 Edge TTS 或 MiMo Cloud</p>
           </div>
         </Section>
       )}
@@ -333,55 +310,12 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
               ))}
             </div>
 
-            {mimoModel === 'mimo-v2.5-tts-voiceclone' && (
-              <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-                <p className="text-xs font-medium text-gray-600">🎤 语音克隆</p>
-                <input value={voiceName} onChange={e => setVoiceName(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-primary-400" placeholder="音色名称（如：林晚星·温柔版）" />
-                <textarea value={voiceDesc} onChange={e => setVoiceDesc(e.target.value)} rows={2} className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-primary-400 resize-none" placeholder="音色描述（可选）" />
-                <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:border-primary-300 transition-colors cursor-pointer">
-                  <Mic className="w-6 h-6 text-gray-300 mx-auto" />
-                  <p className="text-xs text-gray-400 mt-1">上传 10-30 秒参考音频</p>
-                </div>
-                {/* 语音克隆未实现 — 禁用避免误导 */}
-                <button
-                  disabled
-                  title="语音克隆功能开发中"
-                  className="w-full py-2 rounded-xl bg-primary-500 text-white text-xs font-medium opacity-50 cursor-not-allowed"
-                >
-                  开始克隆
-                </button>
-              </div>
-            )}
-
-            {mimoModel === 'mimo-v2.5-tts-voicedesign' && (
-              <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-                <p className="text-xs font-medium text-gray-600">✨ 音色设计</p>
-                <input value={voiceName} onChange={e => setVoiceName(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-primary-400" placeholder="音色名称" />
-                <textarea value={voiceDesc} onChange={e => setVoiceDesc(e.target.value)} rows={3} className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-primary-400 resize-none" placeholder="描述想要的音色（如：温柔的年轻女声，带一点磁性，适合读诗）" />
-                <div className="flex gap-2">
-                  <select className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm outline-none">
-                    <option value="">性别不限</option><option value="female">女声</option><option value="male">男声</option>
-                  </select>
-                  <select className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm outline-none">
-                    <option value="">年龄段不限</option><option value="young">青年</option><option value="adult">成年</option>
-                  </select>
-                </div>
-                {/* 音色设计未实现 — 禁用避免误导 */}
-                <button
-                  disabled
-                  title="音色设计功能开发中"
-                  className="w-full py-2 rounded-xl bg-primary-500 text-white text-xs font-medium opacity-50 cursor-not-allowed"
-                >
-                  开始设计
-                </button>
-              </div>
-            )}
-
-            {voiceId && (
-              <div className="flex items-center justify-between bg-green-50 rounded-xl px-4 py-2.5 border border-green-200">
-                <span className="text-xs text-green-700"><Check className="w-3 h-3 inline mr-1" />音色ID: {voiceId}</span>
-                {/* TODO: 应用音色未实现 — 未绑定 voice_id 到角色 */}
-                <button disabled className="px-3 py-1 text-[10px] font-medium text-primary-600 bg-primary-100 rounded-lg hover:bg-primary-200 opacity-50 cursor-not-allowed">应用</button>
+            {(mimoModel === 'mimo-v2.5-tts-voiceclone' || mimoModel === 'mimo-v2.5-tts-voicedesign') && (
+              <div className="rounded-xl bg-amber-50/50 border border-amber-100 p-4 text-center">
+                <p className="text-sm text-amber-700">
+                  {mimoModel === 'mimo-v2.5-tts-voiceclone' ? '语音克隆' : '音色设计'}功能开发中
+                </p>
+                <p className="text-xs text-amber-500 mt-1">当前请先使用基础合成</p>
               </div>
             )}
 
@@ -390,10 +324,9 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
         </Section>
       )}
 
-      {/* TODO: 保存语音设置未实现 — 未调用后端 API 持久化 voice_config */}
-      <button disabled className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2 opacity-50 cursor-not-allowed">
-        <Save className="w-4 h-4" /> 保存语音设置
-      </button>
+      <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
+        <p className="text-xs text-gray-400">语音设置保存接口开发中，当前仅支持预览配置</p>
+      </div>
     </div>
   )
 }
@@ -458,10 +391,9 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
         </div>
       </Section>
 
-      {/* TODO: 保存消息设置未实现 — 未调用后端 API 持久化主动消息配置 */}
-      <button disabled className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2 opacity-50 cursor-not-allowed">
-        <Save className="w-4 h-4" /> 保存消息设置
-      </button>
+      <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
+        <p className="text-xs text-gray-400">主动消息配置保存接口开发中，当前仅支持预览配置</p>
+      </div>
     </div>
   )
 }
@@ -488,10 +420,7 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
             </div>
           ))}
         </div>
-        <div className="flex gap-2 mt-4">
-          <button className="flex-1 py-2 rounded-lg bg-gray-100 text-xs font-medium text-gray-600 hover:bg-gray-200 transition-colors">导出 JSON</button>
-          <button className="flex-1 py-2 rounded-lg bg-gray-100 text-xs font-medium text-gray-600 hover:bg-gray-200 transition-colors">导出 CSV</button>
-        </div>
+        <p className="text-xs text-gray-400 mt-3">导出功能开发中</p>
       </Section>
 
       {/* RAG */}
@@ -513,20 +442,8 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
             </div>
           ))}
         </div>
-        <div className="flex gap-2 mt-3">
-          <input className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-primary-400" placeholder="搜索知识库..." />
-          <button className="px-4 py-2 rounded-xl bg-primary-500 text-white text-xs font-medium hover:bg-primary-600 transition-colors">搜索</button>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {(character.knowledgeDocs || []).map((doc: string) => (
-            <span key={doc} className="inline-flex items-center gap-1 rounded-lg bg-gray-100 px-2.5 py-1 text-[11px] text-gray-600">
-              📄 {doc}
-              <button className="ml-1 text-gray-400 hover:text-red-400">×</button>
-            </span>
-          ))}
-        </div>
-        <div className="mt-3 border-2 border-dashed border-gray-200 rounded-xl p-4 text-center hover:border-primary-300 transition-colors cursor-pointer">
-          <p className="text-xs text-gray-400">拖拽文件上传 · .txt .pdf .md ≤ 10MB</p>
+        <div className="mt-3 rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
+          <p className="text-xs text-gray-400">知识库搜索与文档管理接口开发中</p>
         </div>
       </Section>
 
@@ -579,10 +496,9 @@ function StickersTab() {
           <p className="text-[10px] text-gray-300 mt-0.5">PNG / GIF / JPEG · 每张 ≤ 5MB</p>
         </div>
       </Section>
-      {/* TODO: 保存表情包设置未实现 — 未调用后端 API 持久化贴图配置 */}
-      <button disabled className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2 opacity-50 cursor-not-allowed">
-        <Save className="w-4 h-4" /> 保存表情包设置
-      </button>
+      <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
+        <p className="text-xs text-gray-400">自定义贴图保存接口开发中</p>
+      </div>
     </div>
   )
 }
@@ -593,10 +509,9 @@ function TimelineTab({ character }: { character: RoleSettingsCharacter }) {
   return (
     <div className="space-y-4">
       <StorylineEditor characterId={character.id} />
-      {/* TODO: 保存时间线未实现 — StorylineEditor 内部已有独立保存逻辑，此处按钮为空操作 */}
-      <button disabled className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2 opacity-50 cursor-not-allowed">
-        <Save className="w-4 h-4" /> 保存时间线
-      </button>
+      <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
+        <p className="text-xs text-gray-400">时间线由剧情编辑器自动保存</p>
+      </div>
     </div>
   )
 }

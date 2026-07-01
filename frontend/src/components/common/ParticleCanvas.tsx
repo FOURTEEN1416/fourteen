@@ -71,11 +71,6 @@ export function ParticleCanvas() {
     window.addEventListener('resize', handleResize);
 
     const draw = (time?: number) => {
-      if (document.hidden) {
-        animId = requestAnimationFrame(draw);
-        return;
-      }
-
       const now = time ?? performance.now();
       if (now - lastDraw < FRAME_INTERVAL) {
         animId = requestAnimationFrame(draw);
@@ -117,11 +112,23 @@ export function ParticleCanvas() {
 
       animId = requestAnimationFrame(draw);
     };
-    draw();
+
+    const handleVisibility = () => {
+      cancelAnimationFrame(animId);
+      if (!document.hidden) {
+        animId = requestAnimationFrame(draw);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    if (!document.hidden) {
+      animId = requestAnimationFrame(draw);
+    }
 
     return () => {
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', handleResize);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
 

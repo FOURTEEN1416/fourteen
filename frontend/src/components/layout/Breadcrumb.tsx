@@ -25,6 +25,7 @@ function useBreadcrumbs(): Crumb[] {
       security: '安全',
       extensions: '扩展管理',
       tools: '工具仪表盘',
+      logs: '日志',
     }
     return [
       { label: '系统设置', to: '/settings/llm' },

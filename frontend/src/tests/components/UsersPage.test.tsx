@@ -88,7 +88,7 @@ describe('UsersPage', () => {
     vi.mocked(listMyBindings).mockResolvedValue(
       mockAxiosResponse({ bindings: sampleBindings, total: sampleBindings.length }),
     )
-    vi.mocked(unbindWechat).mockResolvedValue(mockAxiosResponse({ status: 'ok' }))
+    vi.mocked(unbindWechat).mockResolvedValue(mockAxiosResponse({ status: 'ok', wxid: 'wxid_001' }))
   })
 
   // ──────────────────────────────────────────────
