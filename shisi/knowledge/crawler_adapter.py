@@ -122,9 +122,10 @@ class CharacterCrawlerAdapter:
         service = get_knowledge_service()
 
         # 1. 先为已有角色卡数据建索引
+        card_chunks_added = 0
         if card:
             try:
-                self._index_card(service, character_id, card)
+                card_chunks_added = self._index_card(service, character_id, card)
             except Exception:  # noqa: BLE001
                 logger.warning("角色卡 %s 索引失败（非阻塞）", character_id, exc_info=True)
 
@@ -132,20 +133,26 @@ class CharacterCrawlerAdapter:
         crawl_ok = False
         crawl_error = None
         source = None
+        source_url = ""
+        fallback_chain: list[str] = []
+        crawl_chunks_added = 0
         if name and name.strip():
             try:
                 result = tool.execute(action="fetch_person", name=name.strip())
                 if result.success and result.data:
                     crawl_ok = True
                     source = result.data.get("source", "unknown")
+                    source_url = result.data.get("source_url", "")
+                    fallback_chain = result.data.get("fallback_chain") or []
                     chunks = _profile_to_chunks(result.data)
                     if chunks:
                         service.ensure_index(character_id)
                         service.add_knowledge_chunks(character_id, chunks)
                         service.save_index(character_id)
+                        crawl_chunks_added = len(chunks)
                         logger.info(
                             "角色 '%s' (%s) 爬虫知识已入库: %d 块, 来源=%s",
-                            name, character_id, len(chunks), source,
+                            name, character_id, crawl_chunks_added, source,
                         )
                 else:
                     crawl_error = result.error or "crawler_empty"
@@ -160,9 +167,14 @@ class CharacterCrawlerAdapter:
             "success": True,
             "indexed": stats["indexed"],
             "total_chunks": stats["total_chunks"],
+            "card_chunks_added": card_chunks_added,
+            "crawl_chunks_added": crawl_chunks_added,
+            "chunks_added": card_chunks_added + crawl_chunks_added,
             "crawled": crawl_ok,
             "crawl_error": crawl_error,
             "source": source,
+            "source_url": source_url,
+            "fallback_chain": fallback_chain,
         }
 
     def _index_card(
@@ -170,8 +182,8 @@ class CharacterCrawlerAdapter:
         service,
         character_id: str,
         card: dict[str, Any],
-    ) -> None:
-        """从 app 角色卡格式提取知识块并建索引。"""
+    ) -> int:
+        """从 app 角色卡格式提取知识块并建索引；返回新增知识块数量。"""
         chunks: list[KnowledgeChunk] = []
 
         name = card.get("name", "")
@@ -240,6 +252,7 @@ class CharacterCrawlerAdapter:
             service.add_knowledge_chunks(character_id, chunks)
             service.save_index(character_id)
             logger.info("角色卡 %s 已索引: %d 块", character_id, len(chunks))
+        return len(chunks)
 
 
 _crawler_adapter: CharacterCrawlerAdapter | None = None

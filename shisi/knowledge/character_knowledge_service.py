@@ -161,6 +161,13 @@ class CharacterKnowledgeService:
         chunks: list[KnowledgeChunk] = []
         source_data = character.source_data or {}
 
+        # 0. 角色名作为可检索知识块，确保"她叫什么名字"类查询能命中
+        if character.name:
+            chunks.append(KnowledgeChunk(
+                content=f"她的名字是{character.name}，你可以称呼她{character.name}。",
+                source="character_name",
+            ))
+
         # 1. personality — 分段提取
         if character.persona.core_anchors:
             for i, anchor in enumerate(character.persona.core_anchors):
@@ -224,6 +231,13 @@ class CharacterKnowledgeService:
         """从 CharaCardV2 提取知识块。"""
         chunks: list[KnowledgeChunk] = []
         data = card.data
+
+        # 0. 角色名作为可检索知识块，确保"她叫什么名字"类查询能命中
+        if data.name:
+            chunks.append(KnowledgeChunk(
+                content=f"她的名字是{data.name}，你可以称呼她{data.name}。",
+                source="card_name",
+            ))
 
         # 1. personality 分段
         if data.personality:
