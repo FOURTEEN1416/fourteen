@@ -1,9 +1,9 @@
 """
-8 sub-router mount verification — 2026-06-01 refactor.
+8 sub-router mount verification — migrated to api.routers/
 
-Each test verifies that endpoints from one of the 8 new sub-routers
-(_misc_routes, _chat_routes, _personality_routes, _users_routes,
- _training_routes, _tools_routes, _safety_routes, _clone_routes)
+Each test verifies that endpoints from one of the 8 sub-routers
+(api.routers.misc_routes, chat_routes, personality_routes, users_routes,
+ training_routes, tools_routes, safety_routes, clone_routes)
 are correctly mounted in the FastAPI app with the right method+path.
 
 Static mount check is the primary proof of refactor correctness:
@@ -18,16 +18,18 @@ from __future__ import annotations
 import pytest
 
 from api import (
-    _chat_routes,
-    _clone_routes,
-    _misc_routes,
-    _personality_routes,
-    _safety_routes,
-    _tools_routes,
-    _training_routes,
-    _users_routes,
     app_factory,
     auth,
+)
+from api.routers import (
+    chat_routes,
+    clone_routes,
+    misc_routes,
+    personality_routes,
+    safety_routes,
+    tools_routes,
+    training_routes,
+    users_routes,
 )
 
 
@@ -74,14 +76,14 @@ def test_app_creates_and_has_at_least_71_api_routes(app):
 @pytest.mark.parametrize(
     "module,expected_count,label",
     [
-        (_misc_routes, 10, "health/stats/memory/logs/config/channels/routes"),
-        (_chat_routes, 11, "chat/session + wechat channels"),
-        (_personality_routes, 9, "emotion/persona/psych"),
-        (_users_routes, 7, "users/*"),
-        (_training_routes, 11, "training/* + proactive/*"),
-        (_tools_routes, 6, "tools/* + plugins/* + health"),
-        (_safety_routes, 12, "safety/rag/voice/files/cache"),
-        (_clone_routes, 7, "clone/*"),
+        (misc_routes, 10, "health/stats/memory/logs/config/channels/routes"),
+        (chat_routes, 11, "chat/session + wechat channels"),
+        (personality_routes, 9, "emotion/persona/psych"),
+        (users_routes, 7, "users/*"),
+        (training_routes, 11, "training/* + proactive/*"),
+        (tools_routes, 6, "tools/* + plugins/* + health"),
+        (safety_routes, 12, "safety/rag/voice/files/cache"),
+        (clone_routes, 7, "clone/*"),
     ],
 )
 def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
@@ -101,8 +103,8 @@ def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
 def test_total_contribution_is_73(app):
     """The 8 new sub-routers together contribute exactly 73 endpoints."""
     modules = [
-        _misc_routes, _chat_routes, _personality_routes, _users_routes,
-        _training_routes, _tools_routes, _safety_routes, _clone_routes,
+        misc_routes, chat_routes, personality_routes, users_routes,
+        training_routes, tools_routes, safety_routes, clone_routes,
     ]
     total = sum(len(_sub_router_routes(m)) for m in modules)
     assert total == 73, f"8 sub-routers contribute {total} routes, expected 73"
@@ -111,8 +113,8 @@ def test_total_contribution_is_73(app):
 def test_no_duplicate_endpoints_across_sub_routers():
     """No (METHOD, path) appears in more than one of the 8 new sub-routers."""
     modules = [
-        _misc_routes, _chat_routes, _personality_routes, _users_routes,
-        _training_routes, _tools_routes, _safety_routes, _clone_routes,
+        misc_routes, chat_routes, personality_routes, users_routes,
+        training_routes, tools_routes, safety_routes, clone_routes,
     ]
     seen: dict[tuple[str, str], str] = {}
     for mod in modules:
@@ -148,7 +150,7 @@ def test_health_endpoint_reachable(app):
 
 
 def test_routes_endpoint_reachable(app):
-    """GET /api/routes should return 200 (proves _misc_routes mounted)."""
+    """GET /api/routes should return 200 (proves misc_routes mounted)."""
     from fastapi.testclient import TestClient
 
     client = TestClient(app)

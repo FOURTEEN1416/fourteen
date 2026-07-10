@@ -24,7 +24,7 @@ from api.database import User
 from api.deps import deps
 from api.main_routes import MAX_RAG_UPLOAD_SIZE, MAX_UPLOAD_SIZE, UPLOAD_DIR
 
-logger = logging.getLogger("api._safety_routes")
+logger = logging.getLogger("api.routers.safety_routes")
 
 router = APIRouter(tags=["safety-infra"])
 

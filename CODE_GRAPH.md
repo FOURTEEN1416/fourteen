@@ -1,26 +1,25 @@
 # 代码图谱 — unique-you (唯一的你) v3.0.0
 
-> 由 维护者 手动维护 | 上次大规模扫描: 2026-06-30 | 最后更新: 2026-07-01
-> ⚠  codebase-memory 图谱工具 MCP 服务器已不可用，以下指标来自 2026-06-30 最后一次扫描，未自动刷新。
-> 7 个新 commit（9c0b636..b455222）增加约 1380 行/删除 241 行，跨越 49 个文件。
+> 由 维护者 手动维护 | 上次大规模扫描: 2026-07-09 | 最后更新: 2026-07-09
+> ✅ codebase-memory 图谱工具 指标已通过实时扫描验证。
 
 ---
 
-## 1. 全局指标（截至 2026-06-30 快照）
+## 1. 全局指标（截至 2026-07-09 快照）
 
 | 维度 | 数值 |
 |------|------|
-| 总节点 | 5983 |
-| 总边 | 24923 |
+| 总节点 | 5995 |
+| 总边 | 24931 |
 | Method | 1885 |
 | Function | 1294 |
 | Class | 471 |
-| File | 424 |
+| File | 436 |
 | Module | 423 |
 | Route | 332 |
 | Interface (TS) | 163 |
 | 测试用例 (TESTS 边) | 1413 |
-| 相似函数对 (SIMILAR_TO) | 118 |
+| 相似函数对 (SIMILAR_TO) | 126 |
 | 语义关联 (SEMANTICALLY_RELATED) | 110 |
 | HTTP 跨服务调用 | 49 |
 | 协同变更文件对 (FILE_CHANGES_WITH) | 31 |
@@ -352,7 +351,7 @@ tools/
 | `time_awareness` | TimeAwarenessTool | public | 农历/节假日/工作日查询 |
 | `character_card` | CharacterCrawlerTool | friend | Web 爬取角色资料（baike → wiki → baidu 回退） |
 | `web_summary` | WebSummaryTool | public | URL 内容摘要 |
-| `image_gen` | ImageGenTool | public | **AI 图片生成**（Agnes-AI 兼容 API，新增 2026-07-01） |
+| `image_gen` | ImageGenTool | public | **AI 图片生成**（Agnes-AI apihub 端点，新增 2026-07-01，已修复 API 端点） |
 
 **核心类架构**：
 
@@ -508,21 +507,37 @@ main.py 中的函数占满前 6 名（main.py ~103KB，自 2026-06-30 增加 ~9K
 
 ## 12. 查询指南
 
-> ⚠ codebase-memory 图谱工具 MCP 服务器已不可用。以下工具不再支持：
-> - `get_architecture` / `search_graph` / `trace_path` / `query_graph`
-> - 图谱数据仍存储于 `.codebase-memory/graph.db.zst`（3.3MB）但无法通过 MCP 查询。
->
-> **替代方案**：
+
+
+代码图谱已重新索引到 codebase-memory 图谱工具（2026-07-03 确认可用），项目名为 D-Desktop-ai-girlfriend：
+
+| 需求 | MCP 工具 | 命令 |
+|------|----------|------|
+| 架构概览 | get_architecture | get_architecture(project="D-Desktop-ai-girlfriend") |
+| 搜索函数/类 | search_graph | search_graph(project="D-Desktop-ai-girlfriend", query="emotion engine") |
+| 追踪调用链 | trace_path | trace_path(project="D-Desktop-ai-girlfriend", function_name="process_message", mode="calls", depth=3) |
+| 自定义查询 | query_graph | query_graph(project="D-Desktop-ai-girlfriend", query="MATCH (f:Function) WHERE f.transitive_loop_depth >= 3 RETURN f.qualified_name, f.complexity") |
+| 找热点路径 | query_graph | MATCH (f:Function) WHERE f.transitive_loop_depth >= 3 RETURN f.qualified_name ... ORDER BY f.transitive_loop_depth DESC |
+
+**备选方案**（MCP 工具不可用时）：
 
 | 需求 | 方法 | 命令 |
 |------|------|------|
-| 搜索函数/类 | 全局字符串搜索 | `rg "class PersonaService"` / `rg "def process_message"` |
-| 追踪调用链 | grep 调用点 | `rg "PersonaService\." --type py` |
-| 热点分析 | 统计 fan-in | `rg "def " --type py -c` |
-| 模块概览 | 目录树 | `tree /F` |
-| 路由列表 | 搜索路由装饰器 | `rg "router\." --type py \| rg "\.(get\|post\|put\|delete)\("` |
-| 前端页面 | 列出 pages 目录 | `ls frontend/src/pages/` |
+| 搜索函数/类 | ripgrep 全局搜索 | rg "class PersonaService" / rg "def process_message" |
+| 追踪调用链 | grep 调用点 | rg "PersonaService\." --type py |
+| 目录概览 | 目录树 | tree /F |
+| 路由列表 | 搜索路由装饰器 | rg "router\." --type py \| rg "\.(get\|post\|put\|delete)\(" |
+| 前端页面 | 列出 pages | ls frontend/src/pages/ |
 
+图谱存储于 .codebase-memory/graph.db.zst（3.3MB）。
 ---
 
-*本代码图谱由 维护者 基于 git log 分析和手动文件审查维护。代码库指标来自 2026-06-30 最后一次 codebase-memory 图谱工具 扫描。*
+## 13. 更新记录
+
+| 日期 | 提交 | 变更摘要 |
+|------|------|---------|
+| 2026-07-01 | 9c0b636..b455222 (7 commits) | 初始创建：新增 tools/ 工具系统、sensenova LLM 供应商、PersonaService 两阶段构造、18 个前端页面、安全日志 |
+| 2026-07-03 | 9a0ca50, 78acdc9 (2 commits) | 修复 ImageGenTool Agnes API 端点 (apihub.agnes-ai.com)，删除 response_format 参数；更新环境模板文档 |
+| 2026-07-09 | — | 知识图谱索引刷新（+12 节点 / +8 边，扫描时间更新至 2026-07-09） |
+
+*此图谱将持续更新以反映项目变化。*

@@ -1,0 +1,482 @@
+import { useState, useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '../../hooks/useQueries'
+import { updateCharacter } from '../../api/characters'
+import { useErrorStore } from '../../store/errorStore'
+import { sanitizeCharacterName } from '../../utils/character'
+import Slider from '../shared/Slider'
+import TagInput from '../shared/TagInput'
+import Toggle from '../shared/Toggle'
+import ConfirmDialog from '../shared/ConfirmDialog'
+import StorylineEditor from '../storyline/StorylineEditor'
+import type { RoleSettingsTab, RoleSettingsCharacter } from '../../types/framework'
+import type { UnifiedCharacterUpdate } from '../../types/api'
+import { Save, Trash2, Copy, Smile } from 'lucide-react'
+import { ENGINE_OPTIONS, MIMO_MODELS, EDGE_SPEAKERS } from './RoleSettingsConstants'
+import Section from './RoleSettingsSection'
+
+// ═══ Tab: Basic ═══
+
+function BasicTab({ character }: { character: RoleSettingsCharacter }) {
+  const qc = useQueryClient()
+  const [name, setName] = useState(character.name)
+  const [description, setDescription] = useState(character.description ?? '')
+  const [personality, setPersonality] = useState<Record<string, number>>(character.personality || {})
+  const [anchors, setAnchors] = useState<string[]>(character.core_anchors || [])
+  const [speaking, setSpeaking] = useState<Record<string, number>>(character.speaking_style || {})
+  const [catchphrases, setCatchphrases] = useState<string[]>(character.catchphrases || [])
+  const [saving, setSaving] = useState(false)
+
+  // 当 character 变化时（角色切换），同步重置本地表单 state
+  // 触发条件：character.id 变化而非整个对象引用变化
+  const characterId = character.id
+  /* eslint-disable react-hooks/set-state-in-effect -- props-to-form-state sync（标准模式）*/
+  useEffect(() => {
+    setName(character.name)
+    setDescription(character.description ?? '')
+    setPersonality(character.personality || {})
+    setAnchors(character.core_anchors || [])
+    setSpeaking(character.speaking_style || {})
+    setCatchphrases(character.catchphrases || [])
+  }, [characterId]) // eslint-disable-line react-hooks/exhaustive-deps
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  const personaJson = { name, description, personality, core_anchors: anchors, speaking_style: { ...speaking, catchphrases } }
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const payload: UnifiedCharacterUpdate = {
+        name,
+        description,
+        personality,
+        speaking_style: speaking,
+        core_anchors: anchors,
+        catchphrases,
+      }
+      await updateCharacter(character.id, payload)
+      await qc.invalidateQueries({ queryKey: queryKeys.characters.all })
+      await qc.invalidateQueries({ queryKey: queryKeys.characters.detail(character.id) })
+      useErrorStore.getState().addToast({ type: 'success', message: '角色基础设置已保存' })
+    } catch {
+      useErrorStore.getState().addToast({ type: 'error', message: '保存失败，请重试' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Identity */}
+      <Section title="角色身份">
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1.5 block">角色名称</label>
+            <input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 placeholder-gray-300 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20 transition-all"
+              placeholder="给你的角色取个名字"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1.5 block">一句话描述</label>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={2}
+              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 placeholder-gray-300 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20 transition-all resize-none"
+              placeholder="描述角色的身份、性格、背景..."
+            />
+          </div>
+        </div>
+      </Section>
+
+      {/* Personality */}
+      <Section title="性格特质">
+        <div className="space-y-4">
+          {(Object.entries(personality) as [string, number][]).map(([key, val]) => {
+            const labels: Record<string, { zh: string; emoji: string }> = {
+              warmth: { zh: '温暖', emoji: '☀️' },
+              playfulness: { zh: '俏皮', emoji: '🎭' },
+              independence: { zh: '独立', emoji: '🦅' },
+              jealousy: { zh: '吃醋', emoji: '💢' },
+              stubbornness: { zh: '固执', emoji: '🧱' },
+            }
+            const info = labels[key] || { zh: key, emoji: '' }
+            return (
+              <div key={key} className="flex items-center gap-4">
+                <div className="w-20 shrink-0">
+                  <span className="text-xs text-gray-600">{info.emoji} {info.zh}</span>
+                </div>
+                <div className="flex-1">
+                  <Slider value={val} min={0} max={1} step={0.01} label={labels[key]?.zh || key} onChange={v => setPersonality((prev: Record<string, number>) => ({ ...prev, [key]: v }))} />
+                </div>
+                <span className="w-10 text-right text-xs font-mono text-gray-400">{(val * 100).toFixed(0)}</span>
+              </div>
+            )
+          })}
+        </div>
+        <div className="mt-4 pt-4 border-t border-gray-100">
+          <label className="text-xs font-medium text-gray-500 mb-1.5 block">核心锚点</label>
+          <TagInput tags={anchors} placeholder="输入后按回车添加..." onChange={setAnchors} />
+        </div>
+      </Section>
+
+      {/* Speaking Style */}
+      <Section title="说话风格">
+        <div className="space-y-4">
+          {(Object.entries(speaking) as [string, number][]).map(([key, val]) => {
+            const labels: Record<string, string> = { formality: '正式度', humor: '幽默感', liveliness: '活泼度', gentleness: '温柔度' }
+            return (
+              <div key={key} className="flex items-center gap-4">
+                <div className="w-20 shrink-0"><span className="text-xs text-gray-600">{labels[key] || key}</span></div>
+                <div className="flex-1">
+                  <Slider value={val} min={0} max={1} step={0.01} label={labels[key] || key} onChange={v => setSpeaking((prev: Record<string, number>) => ({ ...prev, [key]: v }))} />
+                </div>
+                <span className="w-10 text-right text-xs font-mono text-gray-400">{(val * 100).toFixed(0)}</span>
+              </div>
+            )
+          })}
+        </div>
+        <div className="mt-4 pt-4 border-t border-gray-100">
+          <label className="text-xs font-medium text-gray-500 mb-1.5 block">口头禅</label>
+          <TagInput tags={catchphrases} placeholder="输入后按回车添加..." onChange={setCatchphrases} />
+        </div>
+      </Section>
+
+      {/* Preview */}
+      <Section title="配置预览">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-gray-400">JSON 预览 · 可复制导出</span>
+          <button onClick={() => navigator.clipboard.writeText(JSON.stringify(personaJson, null, 2))} className="flex items-center gap-1 text-xs text-primary-500 hover:text-primary-600 transition-colors">
+            <Copy className="w-3 h-3" /> 复制
+          </button>
+        </div>
+        <pre className="bg-gray-50 rounded-xl p-3 text-xs text-gray-600 font-mono overflow-auto max-h-48 border border-gray-100">
+          {JSON.stringify(personaJson, null, 2)}
+        </pre>
+      </Section>
+
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="w-full py-2.5 rounded-xl bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <Save className="w-4 h-4" />
+        {saving ? '保存中…' : '保存设置'}
+      </button>
+    </div>
+  )
+}
+
+// ═══ Tab: Voice ═══
+
+function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
+  const [engine, setEngine] = useState(character.voice_config?.engine || 'mimo-tts')
+  // voice_config 是 VoiceConfig | 自定义对象 联合类型；mimo_model 是自定义字段，需要运行时安全访问
+  const mimoModelInitial = (character.voice_config as { mimo_model?: string } | null | undefined)?.mimo_model
+  const [mimoModel, setMimoModel] = useState(mimoModelInitial || 'mimo-v2.5-tts')
+  const [edgeSpeaker, setEdgeSpeaker] = useState('zh-CN-XiaoxiaoNeural')
+  const [edgeRate, setEdgeRate] = useState(1.0)
+  const [edgePitch, setEdgePitch] = useState(0.6)
+  const [status] = useState('就绪')
+
+  return (
+    <div className="space-y-4">
+      {/* Engine Picker */}
+      <Section title="语音引擎">
+        <div className="grid grid-cols-2 gap-2">
+          {ENGINE_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => setEngine(opt.value)}
+              className={`text-left p-3 rounded-xl transition-all ${
+                engine === opt.value
+                  ? `${opt.value === 'mimo-tts' ? 'glass-pink' : opt.value === 'edge-tts' ? 'glass-blue' : opt.value === 'gpt-sovits' ? 'glass-green' : 'glass-card'} ring-1 ring-primary-400/30`
+                  : 'glass-card border border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <p className={`text-sm font-medium ${engine === opt.value ? 'text-primary-700' : 'text-gray-700'}`}>{opt.label}</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">{opt.desc}</p>
+            </button>
+          ))}
+        </div>
+      </Section>
+
+      {/* Edge TTS config */}
+      {engine === 'edge-tts' && (
+        <Section title="Edge TTS 参数">
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1.5 block">发音人</label>
+              <select value={edgeSpeaker} onChange={e => setEdgeSpeaker(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-700 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20">
+                {EDGE_SPEAKERS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="w-20 shrink-0"><span className="text-xs text-gray-600">语速</span></div>
+              <div className="flex-1"><Slider value={edgeRate} min={0.5} max={2.0} step={0.1} label="语速" onChange={setEdgeRate} /></div>
+              <span className="w-10 text-right text-xs font-mono text-gray-400">{edgeRate.toFixed(1)}x</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="w-20 shrink-0"><span className="text-xs text-gray-600">音调</span></div>
+              <div className="flex-1"><Slider value={edgePitch} min={0} max={1} step={0.01} label="音调" onChange={setEdgePitch} /></div>
+              <span className="w-10 text-right text-xs font-mono text-gray-400">{(edgePitch * 100).toFixed(0)}</span>
+            </div>
+            <div className="flex justify-end gap-2">
+              <span className="px-3 py-1.5 text-xs text-gray-400">试听功能开发中</span>
+            </div>
+          </div>
+        </Section>
+      )}
+
+      {/* GPT-SoVITS / Bert-VITS2 开发中 */}
+      {(engine === 'gpt-sovits' || engine === 'bert-vits2') && (
+        <Section title={`${engine === 'gpt-sovits' ? 'GPT-SoVITS' : 'Bert-VITS2'} 参数`}>
+          <div className="rounded-xl bg-amber-50/50 border border-amber-100 p-4 text-center">
+            <p className="text-sm text-amber-700">该语音引擎接入开发中</p>
+            <p className="text-xs text-amber-500 mt-1">当前请先使用 Edge TTS 或 MiMo Cloud</p>
+          </div>
+        </Section>
+      )}
+
+      {/* MiMo Cloud */}
+      {engine === 'mimo-tts' && (
+        <Section title="MiMo Cloud TTS">
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              {MIMO_MODELS.map(m => (
+                <button
+                  key={m.value}
+                  onClick={() => setMimoModel(m.value)}
+                  className={`text-left p-3 rounded-xl border transition-all ${
+                    mimoModel === m.value ? 'border-primary-400 bg-primary-50/50 ring-1 ring-primary-400/30' : 'border-gray-200 bg-white hover:border-gray-300'
+                  }`}
+                >
+                  <p className="text-xs font-medium text-gray-700">{m.label}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{m.desc}</p>
+                </button>
+              ))}
+            </div>
+
+            {(mimoModel === 'mimo-v2.5-tts-voiceclone' || mimoModel === 'mimo-v2.5-tts-voicedesign') && (
+              <div className="rounded-xl bg-amber-50/50 border border-amber-100 p-4 text-center">
+                <p className="text-sm text-amber-700">
+                  {mimoModel === 'mimo-v2.5-tts-voiceclone' ? '语音克隆' : '音色设计'}功能开发中
+                </p>
+                <p className="text-xs text-amber-500 mt-1">当前请先使用基础合成</p>
+              </div>
+            )}
+
+            <div className="text-xs text-gray-400">状态: {status}</div>
+          </div>
+        </Section>
+      )}
+
+      <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
+        <p className="text-xs text-gray-400">语音设置保存接口开发中，当前仅支持预览配置</p>
+      </div>
+    </div>
+  )
+}
+
+// ═══ Tab: Message ═══
+
+function MessageTab({ character }: { character: RoleSettingsCharacter }) {
+  const [proactive, setProactive] = useState(character.message?.proactive ?? true)
+  const [dailyLimit, setDailyLimit] = useState(character.message?.dailyLimit ?? 20)
+  const [minInterval, setMinInterval] = useState(character.message?.minInterval ?? 15)
+  const [cooldown, setCooldown] = useState(character.message?.cooldown ?? 30)
+  const [urgency, setUrgency] = useState(character.message?.urgency ?? 0.7)
+
+  return (
+    <div className="space-y-4">
+      {/* Stats */}
+      <Section title="消息统计">
+        <div className="grid grid-cols-3 gap-4">
+          {[
+            { label: '消息总数', value: (character.stats?.messages ?? 0).toLocaleString(), color: 'text-blue-600' },
+            { label: '今日触发', value: '—', color: 'text-green-600' },
+            { label: '最后发送', value: '—', color: 'text-gray-600' },
+          ].map(s => (
+            <div key={s.label} className="text-center p-3 rounded-xl bg-gray-50">
+              <p className={`text-lg font-bold ${s.color}`}>{s.value}</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">{s.label}</p>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      {/* Toggle */}
+      <Section title="主动对话">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-700">允许角色主动发起对话</p>
+            <p className="text-xs text-gray-400 mt-0.5">角色会在合适的时机主动搭话，如早安问候、事件提醒</p>
+          </div>
+          <Toggle checked={proactive} onChange={setProactive} />
+        </div>
+      </Section>
+
+      {/* Frequency */}
+      <Section title="频率控制">
+        <div className={`space-y-4 ${!proactive ? 'opacity-40 pointer-events-none' : ''}`}>
+          {[
+            { label: '每日上限', value: dailyLimit, min: 1, max: 50, unit: '条/天', onChange: setDailyLimit },
+            { label: '最小间隔', value: minInterval, min: 5, max: 120, unit: '分钟', onChange: setMinInterval },
+            { label: '冷却时间', value: cooldown, min: 5, max: 240, unit: '分钟', onChange: setCooldown },
+          ].map(s => (
+            <div key={s.label} className="flex items-center gap-4">
+              <div className="w-24 shrink-0"><span className="text-xs text-gray-600">{s.label}</span></div>
+              <div className="flex-1"><Slider value={s.value} min={s.min} max={s.max} step={1} label={s.label} onChange={s.onChange} /></div>
+              <span className="w-16 text-right text-xs font-mono text-gray-400">{s.value} {s.unit}</span>
+            </div>
+          ))}
+          <div className="flex items-center gap-4">
+            <div className="w-24 shrink-0"><span className="text-xs text-gray-600">紧迫阈值</span></div>
+            <div className="flex-1"><Slider value={urgency} min={0} max={1} step={0.01} label="紧迫阈值" onChange={setUrgency} /></div>
+            <span className="w-16 text-right text-xs font-mono text-gray-400">{(urgency * 100).toFixed(0)}%</span>
+          </div>
+        </div>
+      </Section>
+
+      <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
+        <p className="text-xs text-gray-400">主动消息配置保存接口开发中，当前仅支持预览配置</p>
+      </div>
+    </div>
+  )
+}
+
+// ═══ Tab: Data ═══
+
+function DataTab({ character }: { character: RoleSettingsCharacter }) {
+  const [showDelete, setShowDelete] = useState(false)
+
+  return (
+    <div className="space-y-4">
+      {/* Stats */}
+      <Section title="数据概览">
+        <div className="grid grid-cols-3 gap-4">
+          {[
+            { label: '消息总数', value: (character.stats?.messages ?? 0).toLocaleString(), icon: '💬' },
+            { label: '记忆条数', value: (character.stats?.memories ?? 0).toLocaleString(), icon: '🧠' },
+            { label: '平均响应', value: character.stats?.avgResponse ?? '—', icon: '⚡' },
+          ].map(s => (
+            <div key={s.label} className="text-center p-3 rounded-xl bg-gray-50">
+              <p className="text-lg mb-0.5">{s.icon}</p>
+              <p className="text-lg font-bold text-gray-800">{s.value}</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">{s.label}</p>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-gray-400 mt-3">导出功能开发中</p>
+      </Section>
+
+      {/* RAG */}
+      <Section title="知识库引擎 (RAG)">
+        <div className="flex items-center gap-2 mb-4">
+          <span className="flex items-center gap-1 text-[11px] text-green-600 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" /> 运行正常
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: '向量文档', value: (character.rag?.vectorDocs ?? 0).toLocaleString() },
+            { label: '关键词索引', value: (character.rag?.keywordIndex ?? 0).toLocaleString() },
+            { label: '检索命中率', value: `${character.rag?.hitRate ?? 0}%` },
+          ].map(s => (
+            <div key={s.label} className="text-center p-2.5 rounded-xl bg-purple-50/50 border border-purple-100/50">
+              <p className="text-lg font-bold text-purple-600">{s.value}</p>
+              <p className="text-[10px] text-gray-400 mt-0.5">{s.label}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
+          <p className="text-xs text-gray-400">知识库搜索与文档管理接口开发中</p>
+        </div>
+      </Section>
+
+      {/* Timestamps */}
+      <Section title="时间信息">
+        <div className="flex justify-between text-sm">
+          <div><span className="text-gray-400 text-xs">创建时间</span><p className="text-gray-700 font-medium">{character.created_at ? new Date(character.created_at).toLocaleDateString() : '—'}</p></div>
+          <div><span className="text-gray-400 text-xs">最后更新</span><p className="text-gray-700 font-medium">{character.updated_at ? new Date(character.updated_at).toLocaleDateString() : '—'}</p></div>
+        </div>
+      </Section>
+
+      {/* Danger */}
+      <Section title="危险区域" className="border-red-200/40 bg-red-50/20">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-red-600">删除角色</p>
+            <p className="text-xs text-gray-400 mt-0.5">所有对话记录、记忆、知识文档将被永久清除</p>
+          </div>
+          <button onClick={() => setShowDelete(true)} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500 text-white text-xs font-medium hover:bg-red-600 transition-colors">
+            <Trash2 className="w-3.5 h-3.5" /> 删除
+          </button>
+        </div>
+      </Section>
+
+      <ConfirmDialog open={showDelete} title="确认删除角色" message={`确定要删除「${sanitizeCharacterName(character.name)}」吗？此操作不可恢复。`} confirmText="确认删除" cancelText="取消" variant="danger" onConfirm={() => setShowDelete(false)} onCancel={() => setShowDelete(false)} />
+    </div>
+  )
+}
+
+// ═══ Tab: Stickers ═══
+
+function StickersTab() {
+  const EMOJIS = ['😊', '😘', '🥰', '😭', '😤', '🤔', '💕', '✨', '🎉', '😅', '😂', '🥺', '😍', '🙈', '💪', '🔥', '👍', '👋']
+
+  return (
+    <div className="space-y-4">
+      <Section title="常用表情">
+        <div className="grid grid-cols-6 gap-2">
+          {EMOJIS.map(emoji => (
+            <button key={emoji} className="aspect-square rounded-xl bg-white border border-gray-100 text-2xl flex items-center justify-center hover:bg-primary-50 hover:border-primary-200 hover:scale-110 transition-all active:scale-95">
+              {emoji}
+            </button>
+          ))}
+        </div>
+      </Section>
+      <Section title="自定义贴图">
+        <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center hover:border-primary-300 transition-colors cursor-pointer">
+          <Smile className="w-8 h-8 text-gray-300 mx-auto" />
+          <p className="text-xs text-gray-400 mt-2">上传自定义贴图</p>
+          <p className="text-[10px] text-gray-300 mt-0.5">PNG / GIF / JPEG · 每张 ≤ 5MB</p>
+        </div>
+      </Section>
+      <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
+        <p className="text-xs text-gray-400">自定义贴图保存接口开发中</p>
+      </div>
+    </div>
+  )
+}
+
+// ═══ Tab: Timeline ═══
+
+function TimelineTab({ character }: { character: RoleSettingsCharacter }) {
+  return (
+    <div className="space-y-4">
+      <StorylineEditor characterId={character.id} />
+      <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
+        <p className="text-xs text-gray-400">时间线由剧情编辑器自动保存</p>
+      </div>
+    </div>
+  )
+}
+
+// ═══ Tab Router ═══
+
+function ActiveTab({ tab, character }: { tab: RoleSettingsTab; character: RoleSettingsCharacter }) {
+  switch (tab) {
+    case 'basic': return <BasicTab character={character} />
+    case 'voice': return <VoiceTab character={character} />
+    case 'message': return <MessageTab character={character} />
+    case 'data': return <DataTab character={character} />
+    case 'stickers': return <StickersTab />
+    case 'timeline': return <TimelineTab character={character} />
+  }
+}
+
+export default ActiveTab

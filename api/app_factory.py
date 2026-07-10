@@ -16,14 +16,14 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api._chat_routes import router as chat_router
-from api._clone_routes import router as clone_router
-from api._misc_routes import router as misc_router
-from api._personality_routes import router as personality_router
-from api._safety_routes import router as safety_router
-from api._tools_routes import router as tools_router
-from api._training_routes import router as training_router
-from api._users_routes import router as users_router
+from api.routers.chat_routes import router as chat_router
+from api.routers.clone_routes import router as clone_router
+from api.routers.misc_routes import router as misc_router
+from api.routers.personality_routes import router as personality_router
+from api.routers.safety_routes import router as safety_router
+from api.routers.tools_routes import router as tools_router
+from api.routers.training_routes import router as training_router
+from api.routers.users_routes import router as users_router
 from api.auth import configure_auth, verify_api_key_dep
 from api.auth_jwt import verify_token
 from api.deps import deps

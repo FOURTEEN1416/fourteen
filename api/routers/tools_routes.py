@@ -24,7 +24,7 @@ from api.database import User
 from api.deps import deps
 from api.main_routes import ToolToggleRequest
 
-logger = logging.getLogger("api._tools_routes")
+logger = logging.getLogger("api.routers.tools_routes")
 
 router = APIRouter(tags=["tools"])
 

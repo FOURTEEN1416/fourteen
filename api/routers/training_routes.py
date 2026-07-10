@@ -25,7 +25,7 @@ from api.database import User
 from api.deps import deps
 from api.main_routes import ProactiveConfigRequest
 
-logger = logging.getLogger("api._training_routes")
+logger = logging.getLogger("api.routers.training_routes")
 
 router = APIRouter(tags=["training"])
 

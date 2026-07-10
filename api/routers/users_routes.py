@@ -19,7 +19,7 @@ from api.auth_jwt import require_role
 from api.database import User
 from api.deps import deps
 
-logger = logging.getLogger("api._users_routes")
+logger = logging.getLogger("api.routers.users_routes")
 
 router = APIRouter(tags=["users"])
 

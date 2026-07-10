@@ -20,7 +20,7 @@ from api.database import User
 from api.deps import deps
 from api.main_routes import EmotionStateResponse
 
-logger = logging.getLogger("api._personality_routes")
+logger = logging.getLogger("api.routers.personality_routes")
 
 router = APIRouter(tags=["personality"])
 

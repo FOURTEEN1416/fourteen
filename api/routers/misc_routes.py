@@ -24,7 +24,7 @@ from api.deps import deps
 from api.main_routes import ConfigUpdateRequest, _sanitize_config
 from observability.logging_setup import ring_buffer
 
-logger = logging.getLogger("api._misc_routes")
+logger = logging.getLogger("api.routers.misc_routes")
 
 router = APIRouter(tags=["misc"])
 

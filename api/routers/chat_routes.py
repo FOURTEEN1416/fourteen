@@ -24,7 +24,7 @@ from api.auth import verify_api_key_dep
 from api.deps import deps
 from api.main_routes import ChatRequest, ChatResponse, CreateSessionRequest
 
-logger = logging.getLogger("api._chat_routes")
+logger = logging.getLogger("api.routers.chat_routes")
 
 router = APIRouter(tags=["chat"])
 
