@@ -697,7 +697,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
         structured_memory=structured_memory,
         semantic_memory=memory_pipeline.semantic,
         tone_mimic=tone_mimic,
-        use_legacy_rag=False,
+
     )
     logger.info("      使用 shisi knowledge 适配层 (ShisiKnowledgeAdapter)")
 

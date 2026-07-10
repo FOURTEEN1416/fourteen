@@ -20,6 +20,28 @@ project_root = Path(__file__).resolve().parent.parent
 
 from orchestrator.voice_detector import detect_voice_request as _detect_voice_request
 from orchestrator.session_locks import SessionLockManager
+from observability.config_manager import ConfigManager
+from observability.health import health_checker
+from security.content_safety import ContentSafetyFilter
+from security.pii_anonymizer import PIIAnonymizer
+from security.prompt_injection import PromptInjectionDetector
+from llm_provider import get_llm
+from my_character.emotion_engine import EmotionEngine
+from my_character.character_config import ConfigLoader
+from my_character.tone_mimic import ToneMimic
+from shisi.application.persona_service import PersonaService
+from shisi.application.memory_service import ShisiMemoryService
+from shisi.application.knowledge_service import ShisiKnowledgeAdapter
+from context.world_info_provider import WorldInfoProvider
+from utils.character_helpers import normalize_character_card
+from tools.base_tool import ToolDispatcher, ToolRegistry, ToolResult
+from tools.builtin.calendar_tool import CalculatorTool, CalendarTool
+from tools.builtin.character_crawler_tool import CharacterCrawlerTool
+from tools.builtin.extra_tools import ImageGenTool, MemoryTool, SchedulerTool, WebSummaryTool
+from tools.builtin.reminder_tool import CalendarQueryTool, ReminderTool
+from tools.builtin.search_tool import SearchTool
+from tools.builtin.time_awareness_tool import TimeAwarenessTool
+from tools.builtin.weather_tool import WeatherTool
 
 class OptimizedOrchestrator:
     """
@@ -494,7 +516,7 @@ class OptimizedOrchestrator:
                 structured_memory=rag_sm,
                 semantic_memory=rag_sem,
                 tone_mimic=self.components["tone"],
-                use_legacy_rag=False,
+
             )
             logger.info("使用 shisi knowledge 适配层 (ShisiKnowledgeAdapter)")
 
