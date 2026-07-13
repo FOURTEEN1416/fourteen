@@ -1,7 +1,8 @@
 # 代码地图索引
 
-**最近更新:** 2026-06-03
-**项目规模:** 324 Python 文件 + 92 TS/TSX 文件 | 当前分支: `main`
+**最近更新:** 2026-07-13
+**项目版本:** 3.1.0
+**项目规模:** ~309 Python 文件 + ~79 TS/TSX 文件 | 当前分支: `main`
 **架构框架:** FastAPI (后端) + React/Vite (前端) + PostgreSQL/SQLite (数据)
 
 ---
@@ -24,8 +25,8 @@
 
 | 层 | 技术 | 版本/端口 |
 |----|------|-----------|
-| **前端** | React 18 + Vite 5 + TypeScript + Tailwind CSS | `:5173` |
-| **后端** | Python 3.12 + FastAPI + Uvicorn | `:8000` |
+| **前端** | React 19 + Vite 8 + TypeScript 6 + Tailwind CSS 4 | `:5173` |
+| **后端** | Python ≥3.10 + FastAPI + Uvicorn | `:8000` |
 | **数据库** | PostgreSQL 15 (主) + SQLite (缓存/本地) | `:5432` |
 | **Node** | D:\node.exe v24.14 | 前端构建 |
 | **Bun** | v1.3.12 | 前端包管理/测试 |
@@ -39,14 +40,19 @@ unique-you/
 ├── frontend/               # React 前端 SPA
 ├── config/                 # YAML/JSON 配置
 ├── security/               # 安全模块 (5 文件)
-├── rag_engine/             # RAG 引擎 (2 文件)
 ├── llm_provider/           # LLM 供应商接入 (6 文件)
 ├── voice/                  # TTS 语音合成 (11 文件)
-├── memory/                 # 记忆系统 (11 文件)
-├── persona_extractor/      # 人格提取 (12 文件)
-├── tools/                  # 工具系统 (9 文件)
-├── proactive/              # 主动消息 (3 文件)
-├── observability/          # 可观测性 (8 文件)
+├── persona_extractor/      # 人格提取 (~14 文件)
+├── tools/                  # 工具系统 (10 文件, 12 内置工具)
+├── orchestrator/           # 优化编排器包 (3 文件)
+├── orchestrator.py         # 薄包装层 (委托 orchestrator/)
+├── cache/                  # 缓存层 (LLM 缓存 + Redis)
+├── character_card/         # 角色卡 (6 文件)
+├── clone_training/         # 克隆训练 (6 文件)
+├── context/                # 上下文 (世界书)
+├── memory_ext/             # 记忆扩展 (mem0 后端)
+├── proactive/              # 主动消息 (5 文件)
+├── observability/          # 可观测性 (9 文件)
 ├── plugins/                # 插件系统 (2 文件)
 ├── multimodal/             # 多模态 (2 文件)
 ├── wechat_direct/          # 微信直连 (2 文件)
@@ -57,7 +63,7 @@ unique-you/
     ├── CODEMAPS/           # ← 本目录
     ├── adr/                # 架构决策记录
     ├── architecture/       # 架构文档
-    ├── audits/             # 审计报告
+    ├── reports/            # 报告文档
     └── designs/            # 设计文档
 ```
 
@@ -75,14 +81,11 @@ unique-you/
 ### 启动命令
 
 ```powershell
-# 一键启动
-.\start_all.cmd
-
-# 单独后端
+# 后端
 python -m uvicorn api.run_api:app --reload --host 0.0.0.0 --port 8000
 
-# 单独前端
-D:\node.exe .\node_modules\vite\bin\vite.js --port 5173 --host
+# 前端
+npm run dev
 ```
 
 ---
@@ -103,7 +106,6 @@ D:\node.exe .\node_modules\vite\bin\vite.js --port 5173 --host
 
 ## 相关文档
 
-- [三体导航 MAP.md](/.triad-navigation/MAP.md) — 8 层代码地图
-- [三体导航 COMPASS.md](/.triad-navigation/COMPASS.md) — 原则 + ADR 索引
-- [三体导航 CONTROL.md](/.triad-navigation/CONTROL.md) — Fitness Functions + 审计
-- [三体导航 HANDOFF.md](/.triad-navigation/HANDOFF.md) — 工作交接文档
+- [ADR 目录](../adr/) — 架构决策记录 (10 篇)
+- [架构文档](../architecture/) — 设计原则与知识图谱
+- [报告文档](../reports/) — 研究与评审报告

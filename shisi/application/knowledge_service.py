@@ -166,12 +166,4 @@ class ShisiKnowledgeAdapter:
 
     def add_knowledge_chunks(self, character_id: str, chunks: list[KnowledgeChunk]) -> None:
         """直接向指定角色追加知识块。"""
-        from shisi.knowledge.retriever import BM25Retriever, KeywordRetriever
-
-        if character_id not in self._service._retrievers:
-            self._service._retrievers[character_id] = (
-                BM25Retriever() if self._service._use_bm25 else KeywordRetriever()
-            )
-        retriever = self._service._retrievers[character_id]
-        retriever.add_chunks(chunks)
-        self._service._chunk_counts[character_id] = len(retriever._chunks)
+        self._service.add_knowledge_chunks(character_id, chunks)

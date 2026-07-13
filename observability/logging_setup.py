@@ -5,6 +5,7 @@ import os
 import sys
 import threading
 import uuid
+from collections import deque
 from contextvars import ContextVar
 from logging.handlers import RotatingFileHandler
 
@@ -55,7 +56,7 @@ class RingBufferHandler(logging.Handler):
     def __init__(self, capacity: int = 200):
         super().__init__()
         self.capacity = capacity
-        self._records: list[dict] = []
+        self._records: deque[dict] = deque(maxlen=capacity)
         self._lock = threading.Lock()
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -68,8 +69,6 @@ class RingBufferHandler(logging.Handler):
         }
         with self._lock:
             self._records.append(entry)
-            if len(self._records) > self.capacity:
-                self._records.pop(0)
 
     def get_recent(
         self,
@@ -133,22 +132,36 @@ def setup_logging(log_level: str = "INFO", log_format: str = "json") -> None:
         return
 
     shared_processors = [
-        structlog.contextvars.merge_contextvars,        structlog.stdlib.add_log_level,        structlog.stdlib.add_logger_name,        _add_trace_info,
-        structlog.processors.TimeStamper(fmt="iso"),        structlog.processors.StackInfoRenderer(),        structlog.processors.format_exc_info,    ]
+        structlog.contextvars.merge_contextvars,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.add_logger_name,
+        _add_trace_info,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+    ]
 
     renderer = (  # noqa: SIM108
-        structlog.processors.JSONRenderer()        if log_format == "json"
-        else structlog.dev.ConsoleRenderer()    )
-
-    structlog.configure(        processors=[
-            *shared_processors,  # type: ignore[list-item]
-            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,        ],
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),        wrapper_class=structlog.stdlib.BoundLogger,        cache_logger_on_first_use=True,
+        structlog.processors.JSONRenderer()
+        if log_format == "json"
+        else structlog.dev.ConsoleRenderer()
     )
 
-    formatter = structlog.stdlib.ProcessorFormatter(        processors=[
-            structlog.stdlib.ProcessorFormatter.remove_processors_meta,            renderer,
+    structlog.configure(
+        processors=[
+            *shared_processors,  # type: ignore[list-item]
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+        ],
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
+        cache_logger_on_first_use=True,
+    )
+
+    formatter = structlog.stdlib.ProcessorFormatter(
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            renderer,
         ],
         foreign_pre_chain=shared_processors,  # type: ignore[arg-type]
     )

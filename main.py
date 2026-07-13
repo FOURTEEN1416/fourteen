@@ -771,19 +771,20 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     from orchestrator import Orchestrator
 
     multimodal = MultimodalProcessor(llm_gateway=llm)
-    orchestrator = Orchestrator(
-        llm_gateway=llm,
-        emotion_engine=emotion_engine,
-        persona_engine=persona_engine,
-        memory_pipeline=memory_pipeline,
-        rag_engine=rag_engine,
-        tool_dispatcher=tool_dispatcher,
-        multimodal_processor=multimodal,
-        ase_engine=ase_engine,
-        safety_filter=safety_filter,
-        pii_anonymizer=pii_anonymizer,
-        injection_detector=injection_detector,
-    )
+    orchestrator = Orchestrator()
+    # ── 注入 full 模式手动创建的组件（合并后复用 OptimizedOrchestrator 的处理逻辑）──
+    orchestrator.components["llm"] = llm
+    orchestrator.components["emotion"] = emotion_engine
+    orchestrator.components["persona"] = persona_service
+    orchestrator.components["memory"] = memory_pipeline
+    orchestrator.components["rag"] = rag_engine
+    orchestrator.components["tools"] = tool_dispatcher
+    orchestrator.components["multimodal"] = multimodal
+    orchestrator.components["ase"] = ase_engine
+    orchestrator.components["safety"] = safety_filter
+    orchestrator.components["pii"] = pii_anonymizer
+    orchestrator.components["injection"] = injection_detector
+    orchestrator._initialized = True
 
     # ── 创建用户调度器（多用户核心） ──
     user_mgr = UserManager(orchestrator)

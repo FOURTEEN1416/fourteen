@@ -28,6 +28,7 @@ from security.prompt_injection import PromptInjectionDetector
 from llm_provider import get_llm
 from my_character.emotion_engine import EmotionEngine
 from my_character.character_config import ConfigLoader
+from utils.health_check import _is_healthy
 from my_character.tone_mimic import ToneMimic
 from shisi.application.persona_service import PersonaService
 from shisi.application.memory_service import ShisiMemoryService
@@ -54,7 +55,7 @@ class OptimizedOrchestrator:
     _MAX_SESSION_LOCKS = 1000
     _SESSION_LOCK_TTL_SECONDS = 3600  # 1小时无使用后清理
 
-    def __init__(self):
+    def __init__(self, character_manager=None, **_kwargs):
         self.components: dict[str, Any] = {}
         self._initialized = False
         # per-session 异步锁，使用带TTL的缓存防止内存无限增长
@@ -66,6 +67,9 @@ class OptimizedOrchestrator:
         # 计数反诘模块：跟踪用户连续说"没事"等敷衍词的次数
         from my_character.counter_rebuttal import CounterRebuttal
         self._counter_rebuttal = CounterRebuttal()
+        # 角色管理器：可从外部注入，也可在 initialize() 中由 ConfigLoader 创建
+        if character_manager is not None:
+            self.components["character_manager"] = character_manager
 
     def _get_executor(self):
         if self._executor is None:
@@ -123,6 +127,40 @@ class OptimizedOrchestrator:
     @property
     def _tools(self):
         return self.components.get("tools")
+
+    # ── 额外向后兼容属性（合并自根目录 orchestrator.py）──
+
+    @property
+    def _llm(self):
+        return self.components.get("llm")
+
+    @property
+    def _rag(self):
+        return self.components.get("rag")
+
+    @property
+    def _safety(self):
+        return self.components.get("safety")
+
+    @property
+    def _pii(self):
+        return self.components.get("pii")
+
+    @property
+    def _injection(self):
+        return self.components.get("injection")
+
+    @property
+    def _multimodal(self):
+        return self.components.get("multimodal")
+
+    @property
+    def _character_manager(self):
+        return self.components.get("character_manager")
+
+    @property
+    def _character_service(self):
+        return self.components.get("character_service")
 
     @staticmethod
     def _run_async(coro) -> Any:
@@ -562,9 +600,15 @@ class OptimizedOrchestrator:
             if voice_enabled:
                 try:
                     from voice import TTSManager
+                    # 注入 EmotionVoiceMapper（领域层 → 基础层，避免反向依赖）
+                    try:
+                        from shisi.voice.emotion_tts import EmotionVoiceMapper
+                        _emotion_mapper = EmotionVoiceMapper()
+                    except Exception:  # noqa: BLE001
+                        _emotion_mapper = None
                     # 将VoiceConfig对象转换为dict以兼容TTSManager.initialize()
                     voice_config = voice_fusion if voice_fusion else cfg.voice.model_dump(by_alias=True)
-                    self.components["voice"] = TTSManager()
+                    self.components["voice"] = TTSManager(emotion_mapper=_emotion_mapper)
                     self._run_async(self.components["voice"].initialize(
                         voice_config if isinstance(voice_config, dict) else voice_config
                     ))
@@ -738,6 +782,205 @@ class OptimizedOrchestrator:
         if expired_sessions:
             logger.debug("清理 %d 个过期session锁，当前总数: %d", len(expired_sessions), len(self._session_locks))
 
+    # ─────────────────────────────────────────────────────────────
+    # 共享预处理 / 后处理（process_message 与 process_message_stream 复用）
+    # ─────────────────────────────────────────────────────────────
+
+    async def _prepare_context(
+        self,
+        user_msg_clean: str,
+        session_id: str,
+        character_id: str,
+    ) -> dict[str, Any]:
+        """共享预处理逻辑。
+
+        执行：PersonaExtractor 设置 → 并行任务（人格/情感/记忆/RAG）
+        → 对话历史 → 世界信息 → system prompt 组装 → 角色卡注入
+        → 人格增强 → 工具调用。
+
+        调用方需在调用前完成安全检查、PII 脱敏、注入检测，
+        并自行管理会话锁。
+
+        Returns:
+            包含 ``emotion_state``、``system_prompt``、``chat_history``、
+            ``affinity_level``、``user_msg_clean`` 的字典。
+        """
+        # PersonaExtractor user_id（多用户隔离）
+        pe = self.components.get("persona_extractor")
+        if pe is not None:
+            effective_user_id = (
+                f"{character_id}:{session_id}" if session_id else f"{character_id}"
+            )
+            if pe.user_id != effective_user_id:
+                pe.set_user_id(effective_user_id)
+
+        # 并行执行独立任务
+        recent = self.components["memory"].get_recent_context(3)
+        loop = asyncio.get_running_loop()
+
+        tasks: dict[str, Any] = {}
+        if pe is not None:
+            tasks["persona"] = pe.process_message(
+                message=user_msg_clean, context=recent,
+            )
+        tasks["emotion"] = loop.run_in_executor(
+            None, self.components["emotion"].analyze,
+            user_msg_clean, recent,
+        )
+        tasks["memory"] = loop.run_in_executor(
+            None,
+            lambda: self.components["memory"].retrieve_context(
+                query=user_msg_clean, session_id=session_id, top_k=5,
+            ),
+        )
+        rag = self.components["rag"]
+        if hasattr(rag, "set_character_id"):
+            rag.set_character_id(character_id)
+        tasks["rag"] = loop.run_in_executor(
+            None, rag.retrieve, user_msg_clean,
+        )
+
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+
+        persona_enhancement = ""
+        emotion_state = None
+        memory_context = ""
+        rag_context = ""
+
+        for name, task_result in zip(tasks.keys(), results, strict=False):
+            if isinstance(task_result, Exception):
+                logger.debug("并行任务 %s 异常: %s", name, task_result)
+                continue
+            if name == "persona":
+                persona_enhancement = task_result or ""  # type: ignore[assignment]
+            elif name == "emotion":
+                emotion_state = task_result
+            elif name == "memory":
+                memory_context = task_result or ""  # type: ignore[assignment]
+            elif name == "rag":
+                if task_result:
+                    import json
+                    rag_context = json.dumps(task_result, sort_keys=True, ensure_ascii=False)
+                else:
+                    rag_context = ""
+
+        # 对话历史 + 摘要
+        chat_history: list = []
+        chat_summary: str = ""
+        mem = self.components.get("memory")
+        if mem and hasattr(mem, 'get_chat_context'):
+            chat_history, chat_summary = mem.get_chat_context(
+                session_id=session_id,
+            )
+
+        # 世界信息动态注入
+        world_info = ""
+        wip = self.components.get("world_info")
+        if wip:
+            try:
+                world_info = wip.render()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("World info render failed: %s", e)
+
+        # 组装 system prompt
+        system_prompt = self.components["persona"].build_system_prompt(
+            emotion_state=emotion_state,
+            memory_context=memory_context,
+            rag_context=rag_context,
+            chat_summary=chat_summary,
+            world_info=world_info,
+            character_id=character_id,
+        )
+
+        # 角色卡人设动态注入（v3.1）
+        if character_id and character_id not in ("default", "demo"):
+            char_segment = self._load_character_persona_segment(character_id)
+            if char_segment:
+                system_prompt = (
+                    f"{system_prompt}\n\n"
+                    f"# 当前必须扮演的角色（最高优先级）\n"
+                    f"{char_segment}\n\n"
+                    f"你当前正在扮演以上角色。"
+                    f"回复时必须使用该角色的名字、身份、性格、说话风格和口头禅；"
+                    f"不要以'十四'或通用 AI 身份自居。"
+                )
+
+        if persona_enhancement:
+            system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
+
+        # 工具调用
+        affinity_level = self._get_affinity_level(emotion_state)
+        llm = self.components.get("llm")
+        tool_results = await self._run_tools_if_needed(
+            llm,
+            user_msg_clean,
+            system_prompt,
+            chat_history,
+            affinity_level=affinity_level,
+        )
+        if tool_results:
+            system_prompt = f"{system_prompt}\n\n{tool_results}"
+
+        return {
+            "emotion_state": emotion_state,
+            "system_prompt": system_prompt,
+            "chat_history": chat_history,
+            "affinity_level": affinity_level,
+            "user_msg_clean": user_msg_clean,
+        }
+
+    def _after_process(
+        self,
+        user_msg_clean: str,
+        reply: str,
+        emotion_state: Any,
+        session_id: str,
+        character_id: str,
+    ) -> str:
+        """共享后处理：after_chat → ASE on_chat → 好感度同步。
+
+        Returns:
+            emotion_tag 字符串。
+        """
+        emotion_tag = emotion_state.primary_emotion.value if emotion_state else ""
+
+        mem_kwargs: dict[str, Any] = dict(
+            user_msg=user_msg_clean,
+            reply=reply,
+            session_id=session_id,
+        )
+        if hasattr(self.components["memory"], "after_chat"):
+            import inspect
+            sig = inspect.signature(self.components["memory"].after_chat)
+            if "emotion" in sig.parameters:
+                mem_kwargs["emotion"] = emotion_tag
+            elif "emotion_tag" in sig.parameters:
+                mem_kwargs["emotion_tag"] = emotion_tag
+            try:
+                self.components["memory"].after_chat(**mem_kwargs)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("after_chat failed, skipping: %s", e)
+        self.components["ase"].on_chat(user_msg_clean, reply)
+
+        # 好感度同步
+        if character_id and character_id != "default" and emotion_state is not None:
+            try:
+                from api.deps import deps as _deps
+                shisi_reg = getattr(_deps, "shisi_reg", None)
+                mapper = getattr(shisi_reg, "affinity_mapper", None)
+                if mapper is not None:
+                    affection_pts = getattr(emotion_state, "affection_points", 0.0)
+                    mapper.sync(
+                        character_id=character_id,
+                        affection_points=affection_pts,
+                        reason=f"emotion:{emotion_tag}",
+                        source="chat",
+                    )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Affinity/Stage 同步跳过: %s", e)
+
+        return emotion_tag
+
     async def process_message(
         self,
         user_msg: str,
@@ -769,131 +1012,11 @@ class OptimizedOrchestrator:
                 if is_injection:
                     user_msg_clean = self.components["injection"].sanitize(user_msg_clean)
 
-                # ── 动态设置 PersonaExtractor 的 user_id（修复 P0-B：避免多用户串味） ──
-                pe = self.components.get("persona_extractor")
-                if pe is not None:
-                    # 用 (character_id, session_id) 拼接作为 user_id，session_id 为空时退化为 character_id
-                    effective_user_id = (
-                        f"{character_id}:{session_id}" if session_id else f"{character_id}"
-                    )
-                    if pe.user_id != effective_user_id:
-                        pe.set_user_id(effective_user_id)
-
-                # ── 并行执行独立任务 ──
-                recent = self.components["memory"].get_recent_context(3)
-                loop = asyncio.get_running_loop()
-
-                tasks = {}
-
-                # 人格抽取 (async)
-                if pe is not None:
-                    tasks["persona"] = pe.process_message(
-                        message=user_msg_clean, context=recent,
-                    )
-
-                # 情感分析 (sync, 走线程)
-                tasks["emotion"] = loop.run_in_executor(
-                    None, self.components["emotion"].analyze,
-                    user_msg_clean, recent,
-                )
-
-                # 记忆检索 (sync)
-                tasks["memory"] = loop.run_in_executor(
-                    None,
-                    lambda: self.components["memory"].retrieve_context(
-                        query=user_msg_clean, session_id=session_id, top_k=5,
-                    ),
-                )
-
-                # RAG (sync)
-                rag = self.components["rag"]
-                if hasattr(rag, "set_character_id"):
-                    rag.set_character_id(character_id)
-                tasks["rag"] = loop.run_in_executor(
-                    None, rag.retrieve, user_msg_clean,
-                )
-
-                results = await asyncio.gather(*tasks.values(), return_exceptions=True)
-
-                persona_enhancement = ""
-                emotion_state = None
-                memory_context = ""
-                rag_context = ""
-
-                for name, task_result in zip(tasks.keys(), results, strict=False):
-                    if isinstance(task_result, Exception):
-                        logger.debug("并行任务 %s 异常: %s", name, task_result)
-                        continue
-                    if name == "persona":
-                        persona_enhancement = task_result or ""  # type: ignore[assignment]
-                    elif name == "emotion":
-                        emotion_state = task_result
-                    elif name == "memory":
-                        memory_context = task_result or ""  # type: ignore[assignment]
-                    elif name == "rag":
-                        if task_result:
-                            # RAG 返回 dict (results/style_examples/total_*)
-                            # 序列化为 JSON 字符串供下游缓存键使用
-                            import json
-                            rag_context = json.dumps(task_result, sort_keys=True, ensure_ascii=False)
-                        else:
-                            rag_context = ""
-
-                # 获取对话历史 + 摘要
-                chat_history: list = []
-                chat_summary: str = ""
-                mem = self.components.get("memory")
-                if mem and hasattr(mem, 'get_chat_context'):
-                    chat_history, chat_summary = mem.get_chat_context(
-                        session_id=session_id,
-                    )
-
-                # ── 世界信息动态注入 ──
-                world_info = ""
-                wip = self.components.get("world_info")
-                if wip:
-                    try:
-                        world_info = wip.render()
-                    except Exception as e:  # noqa: BLE001
-                        logger.debug("World info render failed: %s", e)
-
-                # ── 组装 system prompt ──
-                system_prompt = self.components["persona"].build_system_prompt(
-                    emotion_state=emotion_state,
-                    memory_context=memory_context,
-                    rag_context=rag_context,
-                    chat_summary=chat_summary,
-                    world_info=world_info,
-                    character_id=character_id,
-                )
-
-                # 角色卡人设动态注入（v3.1）：放在核心位置，确保角色身份优先于基线人设
-                if character_id and character_id not in ("default", "demo"):
-                    char_segment = self._load_character_persona_segment(character_id)
-                    if char_segment:
-                        system_prompt = (
-                            f"{system_prompt}\n\n"
-                            f"# 当前必须扮演的角色（最高优先级）\n"
-                            f"{char_segment}\n\n"
-                            f"你当前正在扮演以上角色。"
-                            f"回复时必须使用该角色的名字、身份、性格、说话风格和口头禅；"
-                            f"不要以‘十四’或通用 AI 身份自居。"
-                        )
-
-                if persona_enhancement:
-                    system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
-
-                # ── 工具调用（fast 模式）──
-                affinity_level = self._get_affinity_level(emotion_state)
-                tool_results = await self._run_tools_if_needed(
-                    self.components["llm"],
-                    user_msg_clean,
-                    system_prompt,
-                    chat_history,
-                    affinity_level=affinity_level,
-                )
-                if tool_results:
-                    system_prompt = f"{system_prompt}\n\n{tool_results}"
+                # ── 共享预处理（并行任务、prompt 组装、工具调用） ──
+                ctx = await self._prepare_context(user_msg_clean, session_id, character_id)
+                emotion_state = ctx["emotion_state"]
+                system_prompt = ctx["system_prompt"]
+                chat_history = ctx["chat_history"]
 
                 # ── 主 LLM 对话（带 30s 超时保护） ──
                 try:
@@ -940,44 +1063,10 @@ class OptimizedOrchestrator:
                 if not output_result.is_safe:
                     reply = self.components["safety"].safe_alternative(output_result.category)
 
-                # ── 聊后处理 ──
-                emotion_tag = emotion_state.primary_emotion.value if emotion_state else ""  # type: ignore[union-attr]
-                mem_kwargs = dict(
-                    user_msg=user_msg_clean,
-                    reply=reply,
-                    session_id=session_id,
+                # ── 共享后处理（after_chat → ASE → 好感度同步）──
+                emotion_tag = self._after_process(
+                    user_msg_clean, reply, emotion_state, session_id, character_id,
                 )
-                if hasattr(self.components["memory"], "after_chat"):
-                    import inspect
-                    sig = inspect.signature(self.components["memory"].after_chat)
-                    if "emotion" in sig.parameters:
-                        mem_kwargs["emotion"] = emotion_tag
-                    elif "emotion_tag" in sig.parameters:
-                        mem_kwargs["emotion_tag"] = emotion_tag
-                    try:
-                        self.components["memory"].after_chat(**mem_kwargs)
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning("after_chat failed, skipping: %s", e)
-                self.components["ase"].on_chat(user_msg_clean, reply)
-
-                # ── 同步 AffinityEnhancer + EmotionStageEngine（修复 P0-C） ──
-                # 把 EmotionEngine 的 affection_points 增量同步到 shisi 体系，
-                # 让"好感度"在三个系统（EmotionEngine/AffinityEnhancer/StageEngine）一致
-                if character_id and character_id != "default" and emotion_state is not None:
-                    try:
-                        from api.deps import deps as _deps
-                        shisi_reg = getattr(_deps, "shisi_reg", None)
-                        mapper = getattr(shisi_reg, "affinity_mapper", None)
-                        if mapper is not None:
-                            affection_pts = getattr(emotion_state, "affection_points", 0.0)
-                            mapper.sync(
-                                character_id=character_id,
-                                affection_points=affection_pts,
-                                reason=f"emotion:{emotion_tag}",
-                                source="chat",
-                            )
-                    except Exception as e:  # noqa: BLE001
-                        logger.debug("Affinity/Stage 同步跳过: %s", e)
 
                 # ── 语音合成（用户明确要求时触发）──
                 voice_audio: bytes | None = None
@@ -988,8 +1077,6 @@ class OptimizedOrchestrator:
                         try:
                             # 截取合适长度（微信语音建议 ≤60 字）
                             voice_text = reply[:200]
-                            # 注入情感参数
-                            emotion_tag = emotion_state.primary_emotion.value if emotion_state else ""
                             voice_audio = await voice_mgr.synthesize(
                                 voice_text, emotion=emotion_tag,
                             )
@@ -1116,120 +1203,11 @@ class OptimizedOrchestrator:
                 return
 
             async with lock:
-                # 5. 动态设置 PersonaExtractor 的 user_id（多用户隔离）
-                pe = self.components.get("persona_extractor")
-                if pe is not None:
-                    effective_user_id = (
-                        f"{character_id}:{session_id}" if session_id else f"{character_id}"
-                    )
-                    if pe.user_id != effective_user_id:
-                        pe.set_user_id(effective_user_id)
-
-                # 6. 并行执行独立任务（情感/记忆/RAG/人格抽取）
-                recent = self.components["memory"].get_recent_context(3)
-                loop = asyncio.get_running_loop()
-
-                tasks = {}
-                if pe is not None:
-                    tasks["persona"] = pe.process_message(
-                        message=user_msg_clean, context=recent,
-                    )
-                tasks["emotion"] = loop.run_in_executor(
-                    None, self.components["emotion"].analyze,
-                    user_msg_clean, recent,
-                )
-                tasks["memory"] = loop.run_in_executor(
-                    None,
-                    lambda: self.components["memory"].retrieve_context(
-                        query=user_msg_clean, session_id=session_id, top_k=5,
-                    ),
-                )
-                rag = self.components["rag"]
-                if hasattr(rag, "set_character_id"):
-                    rag.set_character_id(character_id)
-                tasks["rag"] = loop.run_in_executor(
-                    None, rag.retrieve, user_msg_clean,
-                )
-
-                results = await asyncio.gather(*tasks.values(), return_exceptions=True)
-
-                persona_enhancement = ""
-                emotion_state = None
-                memory_context = ""
-                rag_context = ""
-
-                for name, task_result in zip(tasks.keys(), results, strict=False):
-                    if isinstance(task_result, Exception):
-                        logger.debug("并行任务 %s 异常: %s", name, task_result)
-                        continue
-                    if name == "persona":
-                        persona_enhancement = task_result or ""
-                    elif name == "emotion":
-                        emotion_state = task_result
-                    elif name == "memory":
-                        memory_context = task_result or ""
-                    elif name == "rag":
-                        if task_result:
-                            import json
-                            rag_context = json.dumps(task_result, sort_keys=True, ensure_ascii=False)
-                        else:
-                            rag_context = ""
-
-                # 7. 获取对话历史 + 摘要
-                chat_history: list = []
-                chat_summary: str = ""
-                mem = self.components.get("memory")
-                if mem and hasattr(mem, 'get_chat_context'):
-                    chat_history, chat_summary = mem.get_chat_context(
-                        session_id=session_id,
-                    )
-
-                # 8. 世界信息动态注入
-                world_info = ""
-                wip = self.components.get("world_info")
-                if wip:
-                    try:
-                        world_info = wip.render()
-                    except Exception as e:  # noqa: BLE001
-                        logger.debug("World info render failed: %s", e)
-
-                # 8. 组装 system prompt
-                system_prompt = self.components["persona"].build_system_prompt(
-                    emotion_state=emotion_state,
-                    memory_context=memory_context,
-                    rag_context=rag_context,
-                    chat_summary=chat_summary,
-                    world_info=world_info,
-                    character_id=character_id,
-                )
-
-                # 角色卡人设动态注入（v3.1）：放在核心位置，确保角色身份优先于基线人设
-                if character_id and character_id not in ("default", "demo"):
-                    char_segment = self._load_character_persona_segment(character_id)
-                    if char_segment:
-                        system_prompt = (
-                            f"{system_prompt}\n\n"
-                            f"# 当前必须扮演的角色（最高优先级）\n"
-                            f"{char_segment}\n\n"
-                            f"你当前正在扮演以上角色。"
-                            f"回复时必须使用该角色的名字、身份、性格、说话风格和口头禅；"
-                            f"不要以‘十四’或通用 AI 身份自居。"
-                        )
-
-                if persona_enhancement:
-                    system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
-
-                # 8.5 工具调用（fast 模式流式）
-                affinity_level = self._get_affinity_level(emotion_state)
-                tool_results = await self._run_tools_if_needed(
-                    llm,
-                    user_msg_clean,
-                    system_prompt,
-                    chat_history,
-                    affinity_level=affinity_level,
-                )
-                if tool_results:
-                    system_prompt = f"{system_prompt}\n\n{tool_results}"
+                # ── 共享预处理（并行任务、prompt 组装、工具调用） ──
+                ctx = await self._prepare_context(user_msg_clean, session_id, character_id)
+                emotion_state = ctx["emotion_state"]
+                system_prompt = ctx["system_prompt"]
+                chat_history = ctx["chat_history"]
 
                 # 9. 真流式 LLM 调用 — 边生成边 yield
                 full_reply = ""
@@ -1273,41 +1251,10 @@ class OptimizedOrchestrator:
                 # 在流式模式下跳过（依赖输入安全 + system prompt 约束输出质量）
                 reply = full_reply
 
-                emotion_tag = emotion_state.primary_emotion.value if emotion_state else ""
-                mem_kwargs = dict(
-                    user_msg=user_msg_clean,
-                    reply=reply,
-                    session_id=session_id,
+                # ── 共享后处理（after_chat → ASE → 好感度同步）──
+                self._after_process(
+                    user_msg_clean, reply, emotion_state, session_id, character_id,
                 )
-                if hasattr(self.components["memory"], "after_chat"):
-                    import inspect
-                    sig = inspect.signature(self.components["memory"].after_chat)
-                    if "emotion" in sig.parameters:
-                        mem_kwargs["emotion"] = emotion_tag
-                    elif "emotion_tag" in sig.parameters:
-                        mem_kwargs["emotion_tag"] = emotion_tag
-                    try:
-                        self.components["memory"].after_chat(**mem_kwargs)
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning("after_chat failed, skipping: %s", e)
-                self.components["ase"].on_chat(user_msg_clean, reply)
-
-                # 好感度同步（与 process_message 保持一致）
-                if character_id and character_id != "default" and emotion_state is not None:
-                    try:
-                        from api.deps import deps as _deps
-                        shisi_reg = getattr(_deps, "shisi_reg", None)
-                        mapper = getattr(shisi_reg, "affinity_mapper", None)
-                        if mapper is not None:
-                            affection_pts = getattr(emotion_state, "affection_points", 0.0)
-                            mapper.sync(
-                                character_id=character_id,
-                                affection_points=affection_pts,
-                                reason=f"emotion:{emotion_tag}",
-                                source="chat",
-                            )
-                    except Exception as e:  # noqa: BLE001
-                        logger.debug("Affinity/Stage 同步跳过: %s", e)
 
                 process_time = round(time.perf_counter() - stream_start, 3)
                 yield {

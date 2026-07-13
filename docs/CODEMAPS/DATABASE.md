@@ -1,6 +1,6 @@
 # 数据库地图
 
-**最近更新:** 2026-06-03
+**最近更新:** 2026-07-13
 **数据库:** PostgreSQL 15 (主) + SQLite (缓存/本地) + ChromaDB (向量)
 
 ---
@@ -14,15 +14,15 @@
 │  PostgreSQL 15 (:5432)          SQLite                   │
 │  ┌────────────────────┐   ┌──────────────────────┐      │
 │  │ 用户 & 会话         │   │ 本地缓存              │      │
-│  │ User               │   │ data/sqlite.db       │      │
+│  │ User               │   │ data/users.db        │      │
 │  │ UserSession        │   │ - 会话缓存            │      │
 │  │ 未来扩展: 角色/消息  │   │ - 临时数据            │      │
 │  └────────────────────┘   └──────────────────────┘      │
 │                                                          │
 │  ChromaDB (向量)             文件系统                     │
 │  ┌────────────────────┐   ┌──────────────────────┐      │
-│  │ RAG 嵌入向量存储    │   │ 人设卡 JSON           │      │
-│  │ tests/data/chroma_db│   │ character_card/      │      │
+│  │ RAG 嵌入向量存储    │   │ 知识库数据            │      │
+│  │ data/chroma_db/    │   │ data/knowledge/      │      │
 │  │ - 文档嵌入          │   │ config/characters/   │      │
 │  │ - 知识库索引        │   │ config/prompts/      │      │
 │  └────────────────────┘   └──────────────────────┘      │
@@ -74,13 +74,16 @@
 
 ## 文件型存储
 
-### 人设卡 (character_card/)
+### 人设卡模块 (character_card/)
 
 ```
 character_card/
-├── schema/               ← 人设卡 JSON Schema
-├── templates/            ← 人设卡模板
-└── exports/              ← 导出的 JSON 文件
+├── __init__.py           ← 模块入口
+├── integration.py        ← 集成接口
+├── models.py             ← 数据模型
+├── parser.py             ← 解析器
+├── prompt_builder.py     ← 提示词构建
+└── validator.py          ← 校验器
 ```
 
 ### 角色配置 (config/characters/)
@@ -91,13 +94,13 @@ config/characters/
 └── ...
 ```
 
-### 知识库 (knowledge_vault/)
+### 知识库 (data/knowledge/)
 
 ```
-knowledge_vault/
-├── documents/            ← 文档源文件
-├── chunks/               ← 切分后的文档块
-└── index/                ← 检索索引
+data/knowledge/
+├── {character_id}.json   ← 每个角色的知识库数据
+├── char_vault_*.json     ← 角色知识库
+└── sys_001.json          ← 系统知识库
 ```
 
 ---
@@ -106,10 +109,10 @@ knowledge_vault/
 
 | 用途 | 集合 | 嵌入模型 |
 |------|------|----------|
-| RAG 知识检索 | knowledge_chunks | text-embedding-ada-002 |
-| 记忆检索 | memory_vectors | text-embedding-ada-002 |
+| RAG 知识检索 | knowledge_chunks | sentence-transformers + rank-bm25 (本地) |
+| 记忆检索 | memory_vectors | sentence-transformers + rank-bm25 (本地) |
 
-ChromaDB 以持久化模式运行，数据存储在 `tests/data/chroma_db/`。
+ChromaDB 以持久化模式运行，数据存储在 `data/chroma_db/`。
 
 ---
 
@@ -117,10 +120,10 @@ ChromaDB 以持久化模式运行，数据存储在 `tests/data/chroma_db/`。
 
 | 缓存类型 | 位置 | 用途 |
 |----------|------|------|
-| SQLite | data/sqlite.db | 本地会话缓存 |
+| SQLite | data/users.db | 本地会话缓存 |
 | Python dict | memory/ | 运行时内存缓存 |
 | React Query | frontend/ | 前端 API 响应缓存 |
-| ChromaDB | tests/data/chroma_db/ | 向量嵌入缓存 |
+| ChromaDB | data/chroma_db/ | 向量嵌入缓存 |
 
 ---
 
@@ -140,10 +143,10 @@ LoginPage
 ```
 ChatInput
   → POST /api/chat
-    → _chat_routes.py
+    → routers/chat_routes.py
       → Orchestrator
         → 记忆 (memory/) → ChromaDB
-        → RAG (rag_engine/) → ChromaDB + knowledge_vault/
+        → RAG (rag_engine/) → ChromaDB + data/knowledge/
         → 角色配置 → config/characters/{id}.json
         → LLM 响应
 ```

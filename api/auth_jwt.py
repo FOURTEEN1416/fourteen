@@ -40,7 +40,8 @@ _DEV_ONLY_JWT_SECRET = "dev-only-DO-NOT-USE-IN-PRODUCTION-32chars-ok-ok!"
 _MIN_SECRET_LEN = 32
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
-_IS_PROD = os.environ.get("ENV", os.environ.get("APP_ENV", "")).lower() in ("prod", "production")
+from api.runtime_config import is_production as _is_production  # noqa: E402, I001
+_IS_PROD = _is_production()
 
 if _IS_PROD and (not JWT_SECRET or len(JWT_SECRET) < _MIN_SECRET_LEN):
     raise RuntimeError(

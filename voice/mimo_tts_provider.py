@@ -87,7 +87,7 @@ class MiMoTTSProvider(TTSProviderBase):
         self._voice_id = voice_id
         self._timeout = timeout
         self._fallback_local = fallback_local
-        self._api_base = base_url if base_url else self._api_base
+        self._api_base = base_url or self.API_BASE
         self._local_fallback_provider: TTSProviderBase | None = None
         self._available = True
         self._last_error: str | None = None
@@ -252,8 +252,8 @@ class MiMoTTSProvider(TTSProviderBase):
             if health.get("available"):
                 logger.info("降级引擎选择: CosyVoice")
                 return provider
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Fallback provider creation failed: %s", e)
 
         # 尝试GPT-SoVITS
         try:
@@ -263,8 +263,8 @@ class MiMoTTSProvider(TTSProviderBase):
             if health.get("available"):
                 logger.info("降级引擎选择: GPT-SoVITS")
                 return provider
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Fallback provider creation failed: %s", e)
 
         # 尝试Bert-VITS2
         try:
@@ -274,8 +274,8 @@ class MiMoTTSProvider(TTSProviderBase):
             if health.get("available"):
                 logger.info("降级引擎选择: Bert-VITS2")
                 return provider
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Fallback provider creation failed: %s", e)
 
         # 最后尝试Edge-TTS（最稳定，无需本地服务）
         try:

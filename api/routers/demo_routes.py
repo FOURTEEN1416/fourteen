@@ -18,10 +18,11 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from api.auth import verify_api_key_dep
 from api.deps import deps
 
 logger = logging.getLogger("api.demo_routes")
@@ -110,6 +111,7 @@ async def demo_memory_recall(
     query: str = Query(default="", description="记忆查询关键词"),
     session_id: str = Query(default="", description="会话ID"),
     top_k: int = Query(default=5, ge=1, le=20),
+    _auth: bool = Depends(verify_api_key_dep),  # noqa: B008
 ):
     """返回 AI 记得的用户相关事实与最近场景。"""
     memory = _get_memory()
@@ -158,6 +160,7 @@ async def demo_memory_recall(
 @router.get("/api/demo/memory/visualization")
 async def demo_memory_visualization(
     limit: int = Query(default=50, ge=1, le=200),
+    _auth: bool = Depends(verify_api_key_dep),  # noqa: B008
 ):
     """返回结构化记忆图谱数据，用于"我记得你什么"可视化。"""
     memory = _get_memory()

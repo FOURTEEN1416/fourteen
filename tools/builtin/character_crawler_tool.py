@@ -5,6 +5,7 @@ import json
 import logging
 import random
 import re
+import threading
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -77,20 +78,24 @@ class CharacterCrawlerTool(BaseTool):
     name = "character_card"
     description = "爬取人物信息构建知识库。自动降级：百度百科→维基→百度搜索。"
     permission_level = "friend"
-    # 共享 Session（cloudscraper 优先，自动过 Cloudflare/bot 检测）
-    _session: requests.Session | None = None
+
+    def __init__(self):
+        self._session: requests.Session | None = None
+        self._session_lock = threading.Lock()
 
     @property
     def session(self) -> requests.Session:
         if self._session is None:
-            if HAS_CLOUDSCRAPER:
-                # cloudscraper 绕过 Cloudflare/百度云防护
-                self._session = cloudscraper.create_scraper()
-                self._session.headers.update(_headers())
-            else:
-                s = requests.Session()
-                s.headers.update(_headers())
-                self._session = s
+            with self._session_lock:
+                if self._session is None:
+                    if HAS_CLOUDSCRAPER:
+                        # cloudscraper 绕过 Cloudflare/百度云防护
+                        self._session = cloudscraper.create_scraper()
+                        self._session.headers.update(_headers())
+                    else:
+                        s = requests.Session()
+                        s.headers.update(_headers())
+                        self._session = s
         return self._session
 
     parameters_schema = {

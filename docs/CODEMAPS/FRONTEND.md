@@ -1,7 +1,7 @@
 # 前端地图
 
-**最近更新:** 2026-06-03
-**技术栈:** React 18 + Vite 5 + TypeScript 5 + Tailwind CSS 3
+**最近更新:** 2026-07-13
+**技术栈:** React ^19.0.0 + Vite ^8.0.12 + TypeScript ~6.0.2 + Tailwind CSS ^4.1.0 + Zustand ^5.0.0
 **入口:** `frontend/index.html` → `frontend/src/main.tsx`
 
 ---
@@ -14,7 +14,7 @@ frontend/src/
 ├── App.tsx               ← 路由定义 + 布局
 ├── vite-env.d.ts
 │
-├── api/                  ← API 客户端模块 (12 文件)
+├── api/                  ← API 客户端模块 (13 文件)
 │   ├── client.ts         ← axios 实例 + 拦截器 (11.5KB)
 │   ├── queryClient.ts    ← TanStack Query 客户端配置
 │   ├── auth.ts           ← 认证 API
@@ -22,29 +22,30 @@ frontend/src/
 │   ├── characters.ts     ← 角色 API (13.7KB)
 │   ├── chat.ts           ← 聊天 API
 │   ├── clone.ts          ← 克隆 API
-│   ├── invites.ts        ← 邀请码 API
+│   ├── demo.ts           ← 演示 API
 │   ├── mimo.ts           ← MiMo 语音 API
 │   ├── system.ts         ← 系统 API
 │   ├── training.ts       ← 训练 API
 │   ├── users.ts          ← 用户 API
 │   └── wechat.ts         ← 微信 API
 │
-├── pages/                ← 页面组件 (15 pages)
+├── pages/                ← 页面组件 (18 pages)
 │   ├── LoginPage.tsx          ← 登录页 (8.7KB)
 │   ├── WeChatPage.tsx         ← 微信控制台 (20.5KB)
 │   ├── UsersPage.tsx          ← 用户列表 (8.4KB)
 │   ├── UserWorkspace.tsx      ← 用户工作区 (10.3KB)
+│   ├── RolesPage.tsx          ← 角色列表
 │   ├── CreateRole.tsx         ← 创建角色 (14.5KB)
 │   ├── RoleSettings.tsx       ← 角色设置 (34.6KB)
 │   ├── StatusCenter.tsx       ← 状态中心 (7.9KB)
-│   ├── StorylinePage.tsx      ← 故事线页面
+│   ├── DemoPage.tsx           ← 演示页面
+│   ├── BindingDetailPage.tsx  ← 绑定详情
 │   ├── SystemSettingsLayout.tsx← 系统设置布局
 │   ├── SettingsLLM.tsx        ← LLM 设置 (12.4KB)
 │   ├── SettingsVoice.tsx      ← 语音设置 (16.2KB)
 │   ├── SettingsSecurity.tsx   ← 安全设置 (7.8KB)
 │   ├── SettingsLogs.tsx       ← 日志设置 (7.1KB)
 │   ├── ToolsDashboard.tsx     ← 工具仪表盘 (4.6KB)
-│   ├── AdminInvitesPage.tsx   ← 邀请码管理 (24.4KB)
 │   ├── AdminUsersPage.tsx     ← 用户管理 (41.8KB)
 │   └── NotFoundPage.tsx       ← 404 页面
 │
@@ -59,75 +60,52 @@ frontend/src/
 │   │   ├── Breadcrumb.tsx     ← 面包屑
 │   │   └── MobileNav.tsx      ← 移动端导航
 │   │
-│   ├── chat/
-│   │   ├── ChatInput.tsx      ← 聊天输入框
-│   │   ├── MessageBubble.tsx  ← 消息气泡
-│   │   ├── MessageList.tsx    ← 消息列表
-│   │   ├── ProactiveToast.tsx ← 主动消息提示
-│   │   └── TypingIndicator.tsx← 打字指示器
-│   │
-│   ├── common/               ← 通用业务组件
+│   ├── common/               ← 通用业务组件 (7 文件)
 │   │   ├── Badge.tsx
 │   │   ├── Button.tsx
-│   │   ├── Card.tsx
-│   │   ├── EmptyState.tsx
+│   │   ├── CustomCursor.tsx
 │   │   ├── ErrorBoundary.tsx
-│   │   ├── ProactiveEnginePanel.tsx
-│   │   ├── SensitiveInput.tsx
-│   │   ├── Skeleton.tsx
+│   │   ├── ParticleCanvas.tsx
 │   │   ├── Toast.tsx
-│   │   └── UrgencyBadge.tsx
+│   │   └── index.ts
 │   │
-│   ├── shared/               ← 通用 UI 组件
-│   │   ├── AnimatedNumber.tsx
+│   ├── shared/               ← 通用 UI 组件 (14 文件)
 │   │   ├── AnimatedPage.tsx  ← 页面过渡动画 (opacity 淡入)
 │   │   ├── Badge.tsx
 │   │   ├── ConfirmDialog.tsx
-│   │   ├── DangerButton.tsx
 │   │   ├── EmptyState.tsx
 │   │   ├── FileUpload.tsx
 │   │   ├── Modal.tsx
-│   │   ├── ParallaxTilt.tsx
-│   │   ├── ProgressBar.tsx
 │   │   ├── ScrollProgress.tsx
 │   │   ├── Select.tsx
 │   │   ├── Skeleton.tsx
 │   │   ├── Slider.tsx
-│   │   ├── StaggerContainer.tsx
 │   │   ├── SubTabBar.tsx
-│   │   ├── Tabs.tsx
 │   │   ├── TagInput.tsx
-│   │   ├── Toast.tsx
 │   │   ├── Toggle.tsx
-│   │   └── Tooltip.tsx
+│   │   └── index.ts
 │   │
 │   └── storyline/
 │       ├── StorylineEditor.tsx    ← 故事线编辑器 (22.7KB)
 │       ├── StorylineIndicator.tsx  ← 故事线指示器
 │       └── KnowledgePreview.tsx    ← 知识预览
 │
-├── hooks/                ← 自定义 Hooks (9 文件)
+├── hooks/                ← 自定义 Hooks (5 文件)
+│   ├── index.ts                ← 统一导出
 │   ├── useAuth.ts              ← 认证状态
-│   ├── useDashboardData.ts     ← 仪表盘数据
 │   ├── useInView.ts            ← 可见性检测
 │   ├── useMousePosition.ts     ← 鼠标位置
-│   ├── useQueries.ts           ← React Query 封装 (14.6KB)
-│   ├── useSmartPoll.ts         ← 智能轮询
-│   ├── useSSE.ts               ← SSE 连接
-│   └── useWebSocket.ts         ← WebSocket 连接 (6.4KB)
+│   └── useQueries.ts           ← React Query 封装 (14.6KB)
 │
-├── store/                ← Zustand 状态管理 (6 stores)
+├── store/                ← Zustand 状态管理 (4 stores)
 │   ├── authStore.ts            ← 认证状态 (2.7KB)
 │   ├── characterBuilderStore.ts← 角色构建器 (1.5KB)
 │   ├── chatStore.ts            ← 聊天状态 (3.1KB)
-│   ├── errorStore.ts           ← 错误状态 (1.2KB)
-│   ├── logStore.ts             ← 日志状态 (1.2KB)
-│   └── settingsStore.ts        ← 设置状态 (0.4KB)
+│   └── errorStore.ts           ← 错误状态 (1.2KB)
 │
 ├── types/                ← TypeScript 类型定义
 │   ├── api.ts                  ← API 类型 (16.2KB)
-│   ├── framework.ts            ← 框架类型 (3.8KB)
-│   └── sticker.ts              ← 表情包类型
+│   └── framework.ts            ← 框架类型 (3.8KB)
 │
 └── tests/                ← 前端测试
     ├── components/
@@ -136,19 +114,21 @@ frontend/src/
 
 ---
 
-## 页面路由表 (15 注册路由)
+## 页面路由表 (19 注册路由)
 
 | 页面 | 路径 | 认证 | API 源 | 大小 |
 |------|------|------|--------|------|
-| LoginPage | /login | 无 | authStore + invites | 8.7KB |
+| LoginPage | /login | 无 | authStore | 8.7KB |
 | WeChatPage | /wechat | 需要 | wechat/status | 20.5KB |
 | UsersPage | /users | 需要 | listUsers | 8.4KB |
 | BindingDetailPage | /bindings/:wxid | 需要 | API | — |
 | UserWorkspace | /users/:userId | 需要 | listCharacters | 10.3KB |
-| CreateRole | /users/:userId/roles/create | 需要 | chat + characterBuilderStore | 14.5KB |
-| RoleSettings | /users/:userId/roles/:roleId/settings | 需要 | useUnifiedCharacter | 34.6KB |
-| StatusCenter | /users/:userId/roles/:roleId/status | 需要 | dashboardStats | 7.9KB |
-| StorylinePage | /users/:userId/roles/:roleId/storyline | 需要 | storyline | (含 StorylineEditor) |
+| RolesPage | /roles | 需要 | characters | — |
+| CreateRole | /roles/create | 需要 | chat + characterBuilderStore | 14.5KB |
+| RoleSettings | /roles/:roleId/settings | 需要 | useUnifiedCharacter | 34.6KB |
+| StatusCenter | /roles/:roleId/status | 需要 | dashboardStats | 7.9KB |
+| StorylinePage | /roles/:roleId/storyline | 需要 | storyline | (内联在 App.tsx) |
+| DemoPage | /demo | 需要 | demo | — |
 | SystemSettingsLayout | /settings | 需要 | — | 0.3KB |
 | SettingsLLM | /settings/llm | 需要 | 真实 API | 12.4KB |
 | SettingsVoice | /settings/voice | 需要 | mimo/* | 16.2KB |
@@ -157,8 +137,6 @@ frontend/src/
 | ToolsDashboard | /settings/tools | 需要 | 工具 API | 4.6KB |
 | AdminUsersPage | /admin/users | Admin | admin API | 41.8KB |
 | NotFoundPage | * | 无 | — | 0.7KB |
-
-> 注：AdminInvitesPage 文件存在但尚未注册路由（需在 App.tsx 添加 `/admin/invites` 路由）。
 
 ---
 
@@ -173,9 +151,9 @@ frontend/src/
 │  │ API 数据缓存            │   │ authStore (token/用户)│  │
 │  │ 自动失效/重验证         │   │ chatStore (消息/状态) │  │
 │  │ 乐观更新                │   │ errorStore (错误)     │  │
-│  │ 数据预取                │   │ logStore (日志)       │  │
-│  │                        │   │ settingsStore (偏好)  │  │
-│  │                        │   │ characterBuilderStore │  │
+│  │ 数据预取                │   │ characterBuilderStore │  │
+│  │                        │   │                      │  │
+│  │                        │   │                      │  │
 │  └────────────────────────┘   └──────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -189,9 +167,8 @@ components/
 ├── layout/         ← 布局组件 (Sidebar, Breadcrumb, MobileNav)
 ├── auth/           ← 认证组件 (AuthGuard, RoleGuard)
 ├── storyline/      ← 故事线业务组件
-├── chat/           ← 聊天业务组件
-├── common/         ← 通用业务组件 (卡片/按钮/输入等)
-└── shared/         ← 通用 UI 组件 (Modal/Toast/Tabs 等)
+├── common/         ← 通用业务组件 (Badge/Button/Toast 等)
+└── shared/         ← 通用 UI 组件 (Modal/Select/Slider 等)
 ```
 
 ---
@@ -202,8 +179,6 @@ components/
 |------|------|------|
 | AnimatedPage | 页面过渡 | 纯 opacity 淡入 (0→1, 0.15s) |
 | AnimatedSuspense | 加载骨架 | AnimatedPage + Suspense skeleton |
-| StaggerContainer | 子元素动画 | 存在但未使用 (逐行 stagger 已弃用) |
-| ParallaxTilt | 视差倾斜 | 鼠标跟随倾斜效果 |
 
 ---
 
@@ -213,7 +188,7 @@ components/
 axios.create(baseURL: '/api')
   → 请求拦截器: 添加 X-API-Key + JWT Bearer Token
   → 响应拦截器: 错误统一处理 + token 刷新逻辑
-  → 模块 API: 12 个 API 模块 (auth/admin/characters/chat 等)
+  → 模块 API: 13 个 API 模块 (auth/admin/characters/chat 等)
 ```
 
 **重要约束:**

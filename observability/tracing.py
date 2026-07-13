@@ -11,6 +11,8 @@ from observability.logging_setup import get_logger, get_trace_id, set_trace_id
 
 logger = get_logger("tracing")
 
+_TRACE_TTL = 1800  # 30 minutes
+
 TRACE_NODES = [
     "message_received",
     "multimodal_preprocess",
@@ -51,12 +53,15 @@ class TraceSpan:
 class Tracer:
     def __init__(self):
         self._active_traces: dict[str, list[TraceSpan]] = {}
+        self._trace_start_times: dict[str, float] = {}
         self._traces_lock = threading.Lock()
 
     def start_trace(self, trace_id: str | None = None) -> str:
         tid = trace_id or str(uuid.uuid4())
         with self._traces_lock:
+            self._cleanup_expired_locked()
             self._active_traces[tid] = []
+            self._trace_start_times[tid] = time.time()
         set_trace_id(tid)
         return tid
 
@@ -64,6 +69,7 @@ class Tracer:
         tid = trace_id or get_trace_id()
         with self._traces_lock:
             spans = self._active_traces.pop(tid, [])
+            self._trace_start_times.pop(tid, None)
         total_ms = sum(s.duration_ms for s in spans)
         result = {
             "trace_id": tid,
@@ -98,6 +104,39 @@ class Tracer:
 
     def get_active_trace_id(self) -> str:
         return get_trace_id()
+
+    def get_trace(self, trace_id: str) -> dict[str, Any] | None:
+        """Get active trace info by trace_id, cleaning up expired traces."""
+        with self._traces_lock:
+            self._cleanup_expired_locked()
+            if trace_id not in self._active_traces:
+                return None
+            spans = self._active_traces[trace_id]
+            return {
+                "trace_id": trace_id,
+                "spans": [
+                    {
+                        "node": s.node,
+                        "duration_ms": round(s.duration_ms, 2),
+                        "metadata": s.metadata,
+                    }
+                    for s in spans
+                ],
+            }
+
+    def _cleanup_expired_locked(self) -> int:
+        """Remove traces older than _TRACE_TTL. Must be called with lock held."""
+        now = time.time()
+        expired = [
+            tid for tid, start in self._trace_start_times.items()
+            if now - start > _TRACE_TTL
+        ]
+        for tid in expired:
+            self._active_traces.pop(tid, None)
+            self._trace_start_times.pop(tid, None)
+        if expired:
+            logger.warning("Cleaned up %d expired traces (TTL=%ds)", len(expired), _TRACE_TTL)
+        return len(expired)
 
 
 tracer = Tracer()

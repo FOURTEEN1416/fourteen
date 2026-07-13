@@ -59,6 +59,9 @@ class ShisiMemoryService:
         lambda_high: float = 0.01,
         conflict_similarity_threshold: float = 0.3,
         fact_extract_interval: int = 5,
+        *,
+        favorite_mgr=None,
+        forward_mgr=None,
     ):
         structured_memory, vector_memory = _build_default_memory_backends(
             chroma_path=chroma_path,
@@ -82,9 +85,9 @@ class ShisiMemoryService:
             fact_extract_interval=fact_extract_interval,
         )
 
-        # shisi 增强：收藏/转发
-        self._favorite_manager = FavoriteManager(db_path=db_path)
-        self._forward_manager = ForwardManager()
+        # shisi 增强：收藏/转发（支持外部注入，避免重复实例化）
+        self._favorite_manager = favorite_mgr if favorite_mgr is not None else FavoriteManager(db_path=db_path)
+        self._forward_manager = forward_mgr if forward_mgr is not None else ForwardManager()
 
         logger.info(
             "ShisiMemoryService initialized (forgetting=%s, working_limit=%d)",
@@ -181,8 +184,13 @@ class ShisiMemoryService:
         session_id: str = "",
         top_k: int = 5,
     ) -> dict[str, Any]:
-        return await self._pipeline.retrieve_context_async(
-            query=query, session_id=session_id, top_k=top_k,
+        """异步检索上下文（通过 asyncio.to_thread 包装同步方法）。"""
+        import asyncio
+        return await asyncio.to_thread(
+            self.retrieve_context,
+            query=query,
+            session_id=session_id,
+            top_k=top_k,
         )
 
     def get_recent_context(self, n: int = 3) -> str:

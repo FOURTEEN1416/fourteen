@@ -346,8 +346,8 @@
 | `pyproject.toml` | Python 项目配置 |
 | `requirements.txt` | Python 依赖 |
 | `main.py` | 主入口 |
-| `girlfriend_manager.py` | 多用户管理器 |
-| `orchestrator.py` | Orchesrator 编排 |
+| `user_scheduler.py` | 多用户调度器 |
+| `orchestrator.py` | Orchestrator 编排（薄包装层，实际逻辑在 orchestrator/optimized_orchestrator.py） |
 | `frontend/package.json` | 前端依赖 |
 | `frontend/vite.config.ts` | Vite 构建配置 |
 | `frontend/tsconfig.json` | TypeScript 配置 |

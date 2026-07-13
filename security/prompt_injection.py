@@ -8,6 +8,9 @@ from concurrent.futures import TimeoutError as FuturesTimeoutError
 
 logger = logging.getLogger("prompt_injection")
 
+# Module-level shared thread pool for LLM injection checks
+_llm_executor = ThreadPoolExecutor(max_workers=1)
+
 INJECTION_PATTERNS = [
     re.compile(r"忽略以上(所有)?指令", re.IGNORECASE),
     re.compile(r"ignore\s+(all\s+)?previous\s+(instructions|prompts|commands)", re.IGNORECASE),
@@ -103,14 +106,14 @@ class PromptInjectionDetector:
                 f'回复JSON：{{"is_injection": true/false, "confidence": 0.0-1.0}}'
             )
             timeout_sec = 3.0  # LLM 注入检测超时 3 秒
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(
-                    self.llm_gateway.chat_sync,                    query=prompt,
-                    system_prompt="你是一个Prompt注入检测器，仅输出JSON。",
-                    max_tokens=64,
-                    temperature=0.1,
-                )
-                response = future.result(timeout=timeout_sec)
+            future = _llm_executor.submit(
+                self.llm_gateway.chat_sync,
+                query=prompt,
+                system_prompt="你是一个Prompt注入检测器，仅输出JSON。",
+                max_tokens=64,
+                temperature=0.1,
+            )
+            response = future.result(timeout=timeout_sec)
             result = json.loads(response)
             return result.get("is_injection", False), float(result.get("confidence", 0.5))
         except FuturesTimeoutError:

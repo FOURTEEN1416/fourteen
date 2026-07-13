@@ -374,7 +374,7 @@ class WeChatConnector:
     微信连接器 — 直连微信 API（多用户版）
 
     用法:
-        connector = WeChatConnector(girlfriend_manager)
+        connector = WeChatConnector(user_manager)
         connector.run()  # 登录 + 消息轮询
     """
 

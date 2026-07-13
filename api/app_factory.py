@@ -2,7 +2,7 @@
 REST API 应用工厂
 
 精简版：仅负责创建 FastAPI 实例、配置中间件、挂载子路由。
-业务路由按域拆分为 8 个子路由文件（共 71 端点），模型/常量/Helper 仍保留在 api.main_routes。
+业务路由按域拆分为 9 个子路由文件（共 75 端点），模型/常量/Helper 仍保留在 api.main_routes。
 """
 
 from __future__ import annotations
@@ -16,27 +16,31 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from api.auth import configure_auth, verify_api_key_dep
+from api.auth_jwt import verify_token
+from api.deps import deps
 from api.routers.chat_routes import router as chat_router
 from api.routers.clone_routes import router as clone_router
+from api.routers.demo_routes import router as demo_router
 from api.routers.misc_routes import router as misc_router
 from api.routers.personality_routes import router as personality_router
 from api.routers.safety_routes import router as safety_router
 from api.routers.tools_routes import router as tools_router
 from api.routers.training_routes import router as training_router
 from api.routers.users_routes import router as users_router
-from api.auth import configure_auth, verify_api_key_dep
-from api.auth_jwt import verify_token
-from api.deps import deps
-from api.routers.demo_routes import router as demo_router
+from api.runtime_config import is_production
 from observability.logging_setup import _user_id
 
 logger = logging.getLogger("app_factory")
 
-# ── 速率限制依赖（可选） ─────────────────────────────
+# ── 速率限制（slowapi 可选） ────────────────────────────
 
 try:
     from slowapi import Limiter
+    from slowapi.errors import RateLimitExceeded
+    from slowapi.middleware import SlowAPIMiddleware
     from slowapi.util import get_remote_address
+
     HAS_SLOWAPI = True
 except ImportError:
     HAS_SLOWAPI = False
@@ -87,7 +91,7 @@ def create_api_app(
     user_manager=None,
     lifespan=None,
 ) -> FastAPI:
-    _is_prod = os.environ.get("ENV", os.environ.get("APP_ENV", "")).lower() in ("prod", "production")
+    _is_prod = is_production()
 
     # ── Sentry 错误监控（生产环境自动启用） ──
     if _is_prod:
@@ -98,7 +102,7 @@ def create_api_app(
             pass  # Sentry 不可用不影响启动
 
     # ── FastAPI 实例 ──
-    app = FastAPI(title="唯一的你 API", version="2.0", debug=not _is_prod, lifespan=lifespan)
+    app = FastAPI(title="唯一的你 API", version="3.1.0", debug=not _is_prod, lifespan=lifespan)
 
     # ═══════════════════════════════════════════════════
     # 中间件
@@ -150,9 +154,46 @@ def create_api_app(
         return await call_next(request)
 
     # ── 速率限制 ──
-    if HAS_SLOWAPI:
-        limiter = Limiter(key_func=get_remote_address)
+    _rate_limit_enabled = os.environ.get(
+        "RATE_LIMIT_ENABLED", "true" if _is_prod else "false"
+    ).lower() == "true"
+    _rate_limit_per_minute = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "60"))
+
+    if HAS_SLOWAPI and _rate_limit_enabled:
+        limiter = Limiter(
+            key_func=get_remote_address,
+            default_limits=[f"{_rate_limit_per_minute}/minute"],
+        )
         app.state.limiter = limiter
+        app.add_middleware(SlowAPIMiddleware)
+
+        async def _rate_limit_exceeded_handler(
+            request: Request, exc: RateLimitExceeded
+        ) -> JSONResponse:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "detail": f"Rate limit exceeded: {exc.detail}",
+                    "error_code": "RATE_LIMIT",
+                },
+            )
+
+        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    elif HAS_SLOWAPI:
+        # slowapi installed but rate limiting disabled — still register handler
+        # so 429s from per-route limits render correctly
+        async def _rate_limit_exceeded_handler(
+            request: Request, exc: RateLimitExceeded
+        ) -> JSONResponse:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "detail": f"Rate limit exceeded: {exc.detail}",
+                    "error_code": "RATE_LIMIT",
+                },
+            )
+
+        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     else:
         _setup_fallback_rate_limiter(app)
 
@@ -200,7 +241,7 @@ def create_api_app(
     )
 
     # ═══════════════════════════════════════════════════
-    # 挂载主路由（已拆分为 8 个子路由，共 71 端点）
+    # 挂载主路由（已拆分为 9 个子路由，共 75 端点）
     # ═══════════════════════════════════════════════════
 
     app.include_router(misc_router)         # 10 端点: health/stats/memory/logs/config/channels/routes
@@ -229,7 +270,11 @@ def create_api_app(
     shisi_reg = None
     try:
         from shisi.api.registry import setup_shisi
-        shisi_reg = setup_shisi(app, run_migrate=True)
+        # 从 orchestrator 获取 memory_service，复用其 favorite/forward 管理器
+        _mem_service = None
+        if orchestrator is not None:
+            _mem_service = getattr(orchestrator, "components", {}).get("memory") if hasattr(orchestrator, "components") else getattr(orchestrator, "_memory", None)
+        shisi_reg = setup_shisi(app, run_migrate=True, memory_service=_mem_service)
         if orchestrator and hasattr(orchestrator, '_character_manager'):
             orchestrator._character_manager = shisi_reg.character_manager
         deps.shisi_reg = shisi_reg

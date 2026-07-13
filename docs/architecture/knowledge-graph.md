@@ -173,15 +173,15 @@ graph LR
 
 | Module | Dependencies | Depended By |
 |--------|--------------|-------------|
-| `emotion_engine.py` | `persona_card.py`, `config` | `girlfriend_manager.py`, `shisi/` |
-| `memory_pipeline.py` | `vector_memory.py`, `semantic_memory.py` | `girlfriend_manager.py`, `api/` |
-| `llm_gateway.py` | `multi_provider_gateway.py` | `girlfriend_manager.py`, `tools/` |
+| `emotion_engine.py` | `persona_card.py`, `config` | `user_scheduler.py`, `shisi/` |
+| `memory_pipeline.py` | `vector_memory.py`, `semantic_memory.py` | `user_scheduler.py`, `api/` |
+| `llm_gateway.py` | `multi_provider_gateway.py` | `user_scheduler.py`, `tools/` |
 | `tts_manager.py` | `mimo_tts_provider.py`, `edge_tts_provider.py` | `api/voice_routes.py` |
-| `rag_engine.py` | `knowledge_vault/*`, `llm_gateway.py` | `api/knowledge_routes.py` |
+| `shisi/knowledge/retriever.py` | `data/knowledge/`, `llm_gateway.py` | `api/routers/chat_routes.py` |
 | `content_safety.py` | `prompt_injection.py` | `deps.py` (middleware) |
 | `auth.py` | `deps.py` | All routes |
 | `wechat_connector.py` | `qrcode_store.py` | `wechat_routes.py` |
-| `girlfriend_manager.py` | All core services | `main.py`, `app_factory.py` |
+| `user_scheduler.py` | All core services | `main.py`, `app_factory.py` |
 
 ---
 

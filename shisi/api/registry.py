@@ -59,7 +59,19 @@ class AiyuRegistry:
     character_service: CharacterService | None = None
 
 
-def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True, db_path: str | Path | None = None) -> AiyuRegistry:
+def setup_shisi(
+    app: FastAPI | None = None,
+    run_migrate: bool = True,
+    db_path: str | Path | None = None,
+    memory_service=None,
+) -> AiyuRegistry:
+    """初始化 shisi 注册表。
+
+    Args:
+        memory_service: 可选的 ``ShisiMemoryService`` 实例。如果提供，
+            将复用其 ``favorite_manager`` 和 ``forward_manager``，
+            避免重复实例化。
+    """
     reg = AiyuRegistry()
 
     if run_migrate:
@@ -76,8 +88,13 @@ def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True, db_path: s
         stage_engine=reg.stage_engine,
     )
     reg.sticker_manager = StickerManager()
-    reg.favorite_manager = FavoriteManager()
-    reg.forward_manager = ForwardManager()
+    # 复用 memory_service 中的管理器实例，避免重复创建
+    if memory_service is not None:
+        reg.favorite_manager = memory_service.favorite_manager
+        reg.forward_manager = memory_service.forward_manager
+    else:
+        reg.favorite_manager = FavoriteManager()
+        reg.forward_manager = ForwardManager()
     reg.vital_engine = VitalSignsEngine()
     reg.voice_enhancer = VoiceEnhancer()
     reg.analytics_service = AnalyticsService()
@@ -85,7 +102,10 @@ def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True, db_path: s
     try:
         from voice.voice_training import VoiceTrainingManager
         reg.training_manager = VoiceTrainingManager()
-    except (ImportError, Exception) as e:  # noqa: BLE001
+    except ImportError as e:
+        reg.training_manager = None
+        logger.warning("语音训练模块未安装: %s", e)
+    except Exception as e:  # noqa: BLE001
         reg.training_manager = None
         logger.warning("语音训练模块初始化失败: %s", e)
 
@@ -105,8 +125,6 @@ def setup_shisi(app: FastAPI | None = None, run_migrate: bool = True, db_path: s
 
     if app is not None:
         _mount_routes(app, reg)
-        # v2 路由已废弃（2026-05-31）：前端无调用，功能已被 /api/characters/* 替代
-        # _mount_v2_routes(app, reg)
 
     logger.info("十四模块初始化完成")
     return reg
@@ -134,14 +152,3 @@ def _mount_routes(app: FastAPI, reg: AiyuRegistry) -> None:
     app.include_router(training_routes.router)
 
     logger.info("十四API路由挂载完成")
-
-
-def _mount_v2_routes(app: FastAPI, reg: AiyuRegistry) -> None:
-    from ..application.character_service import CharacterService
-    from ..infrastructure.persistence.sqlite_repository import SQLiteCharacterRepository
-    from .v2 import v2_router
-
-    repo = SQLiteCharacterRepository()
-    reg.character_service = CharacterService(repo)
-    app.include_router(v2_router)
-    logger.info("十四API v2路由挂载完成")

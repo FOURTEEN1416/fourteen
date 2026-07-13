@@ -31,12 +31,14 @@ class TTSManager:
       - 失败自动降级
     """
 
-    def __init__(self):
+    def __init__(self, emotion_mapper=None):
         self._providers: dict[str, TTSProviderBase] = {}
         self._current_engine: str | None = None
         self._enabled: bool = False
         self._last_error: str | None = None
         self._synthesize_count: int = 0
+        # 依赖注入：情感映射器（由领域层注入，避免基础层反向依赖 shisi.voice）
+        self._emotion_mapper = emotion_mapper
 
     async def initialize(self, config: dict[str, Any] | None = None) -> bool:
         """
@@ -159,14 +161,13 @@ class TTSManager:
             return None
 
         if emotion and self._current_engine == "edge-tts":
-            try:
-                from shisi.voice.emotion_tts import EmotionVoiceMapper
-                mapper = EmotionVoiceMapper()
-                emotion_params = mapper.apply_to_edge_tts(emotion)
-                kwargs.update(emotion_params)
-                logger.debug("[TTS] 情感参数注入: %s → %s", emotion, emotion_params)
-            except Exception:  # noqa: BLE001
-                pass
+            if self._emotion_mapper is not None:
+                try:
+                    emotion_params = self._emotion_mapper.apply_to_edge_tts(emotion)
+                    kwargs.update(emotion_params)
+                    logger.debug("[TTS] 情感参数注入: %s → %s", emotion, emotion_params)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[TTS] 情感映射失败: %s", e)
 
         # 注意: 无全局锁，支持并发合成
         # _current_engine/_last_error 的竞态只影响统计日志，不影响正确性

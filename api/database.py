@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 
@@ -27,8 +26,9 @@ from sqlalchemy.orm import DeclarativeBase, relationship
 logger = logging.getLogger("database")
 
 # ── 数据库 URL（默认 SQLite，可覆写为 PostgreSQL） ──
-_DEFAULT_DB_URL = "sqlite+aiosqlite:///data/users.db"
-DATABASE_URL = os.environ.get("APP_DATABASE_URL", _DEFAULT_DB_URL)
+from api.runtime_config import get_database_url  # noqa: E402
+
+DATABASE_URL = get_database_url()
 
 # ── 异步引擎 ──
 _engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)

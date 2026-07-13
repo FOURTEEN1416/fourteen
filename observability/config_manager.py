@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import re
+import threading
 from pathlib import Path
 
 from observability.config_models import SystemConfig
@@ -67,17 +69,20 @@ class ConfigManager:
         self.config_dir = Path(os.path.abspath(config_dir))
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self._config: SystemConfig | None = None
+        self._lock = threading.Lock()
         self._watcher = None
         self._callbacks = []  # type: ignore[var-annotated]
 
     @property
     def config(self) -> SystemConfig:
-        if self._config is None:
-            self._config = self._load()
-        return self._config
+        with self._lock:
+            if self._config is None:
+                self._config = self._load()
+            return self._config
 
     def _load(self) -> SystemConfig:
         data = {}  # type: ignore[var-annotated]
+        env = "prod"
         system_yaml = self.config_dir / "system.yaml"
         if HAS_YAML and system_yaml.exists():
             with open(system_yaml, encoding="utf-8") as f:
@@ -106,19 +111,23 @@ class ConfigManager:
 
     def save(self, updates: dict) -> SystemConfig:
         """Merge updates into current config and persist to YAML."""
-        current = self.config.model_dump()
-        merged = self._deep_merge(current, updates)
-        self._config = SystemConfig(**merged)
-        system_yaml = self.config_dir / "system.yaml"
-        if HAS_YAML:
-            with open(system_yaml, "w", encoding="utf-8") as f:
-                yaml.dump(self._config.model_dump(), f, default_flow_style=False, allow_unicode=True)
-                logger.info("Config saved to %s", system_yaml)
-        return self._config
+        with self._lock:
+            if self._config is None:
+                self._config = self._load()
+            current = self._config.model_dump()
+            merged = self._deep_merge(current, updates)
+            self._config = SystemConfig(**merged)
+            system_yaml = self.config_dir / "system.yaml"
+            if HAS_YAML:
+                with open(system_yaml, "w", encoding="utf-8") as f:
+                    yaml.dump(self._config.model_dump(), f, default_flow_style=False, allow_unicode=True)
+                    logger.info("Config saved to %s", system_yaml)
+            return self._config
 
     def reload(self) -> SystemConfig:
-        old = self._config
-        self._config = self._load()
+        with self._lock:
+            old = self._config
+            self._config = self._load()
         if old != self._config:
             logger.info("Config reloaded (changed)")
             for cb in self._callbacks:
@@ -151,10 +160,10 @@ class ConfigManager:
 
     @staticmethod
     def _deep_merge(base: dict, override: dict) -> dict:
-        result = base.copy()
+        result = copy.deepcopy(base)
         for k, v in override.items():
             if k in result and isinstance(result[k], dict) and isinstance(v, dict):
                 result[k] = ConfigManager._deep_merge(result[k], v)
             else:
-                result[k] = v
+                result[k] = copy.deepcopy(v)
         return result

@@ -5,6 +5,7 @@ import contextlib
 import json
 import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from enum import Enum

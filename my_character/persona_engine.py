@@ -814,6 +814,41 @@ class PersonaEngine:
 ## 身份自指话术
 """ + SELF_REFERENCE_DIRECTIVES.strip()
 
+    # ── 公开接口（供 PersonaService 等外部调用，替代直接私有属性/方法访问）──
+
+    def build_emotion_layer(self, emotion_state: EmotionalState | None) -> str:
+        """构建情感层 prompt（公开接口）。"""
+        return self._build_emotion_layer(emotion_state)
+
+    def build_emotion_style_segment(self, emotion_state: EmotionalState | None) -> str:
+        """构建情感风格片段（公开接口）。"""
+        return self._build_emotion_style_segment(emotion_state)
+
+    def build_style_layer(
+        self,
+        emotion_state: EmotionalState | None,
+        style_prompt: str = "",
+        few_shot_examples: list[str] | None = None,
+    ) -> str:
+        """构建表达方式层 prompt（公开接口）。"""
+        return self._build_style_layer(emotion_state, style_prompt, few_shot_examples)
+
+    def build_constraint_layer(self) -> str:
+        """构建行为约束层 prompt（公开接口）。"""
+        return self._build_constraint_layer()
+
+    def build_memory_layer(self, memory_context: dict, chat_summary: str = "") -> str:
+        """构建记忆层 prompt（公开接口）。"""
+        return self._build_memory_layer(memory_context, chat_summary)
+
+    def get_description(self) -> str:
+        """获取角色描述（公开接口，替代直接访问 _persona 私有属性）。"""
+        return self._persona.get("description", "")
+
+    def get_personality_traits(self) -> dict:
+        """获取性格特征（公开接口，替代直接访问 _persona 私有属性）。"""
+        return self._persona.get("personality_traits", {})
+
     def _get_affinity_name(self, level: int) -> str:
         names = ["陌生人", "认识", "朋友", "好朋友", "知己", "暧昧", "恋人", "热恋", "羁绊"]
         return names[min(level, 8)]

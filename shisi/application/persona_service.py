@@ -98,25 +98,25 @@ class PersonaService:
             injection_parts.append(f"# 角色知识库\n{rag_context}")
 
         emotion_layer = self._safe_engine_layer(
-            "emotion", self._engine._build_emotion_layer, effective_emotion
+            "emotion", self._engine.build_emotion_layer, effective_emotion
         )
         if emotion_layer:
             injection_parts.append(emotion_layer)
 
         emotion_style = self._safe_engine_layer(
-            "emotion_style", self._engine._build_emotion_style_segment, effective_emotion
+            "emotion_style", self._engine.build_emotion_style_segment, effective_emotion
         )
         if emotion_style:
             injection_parts.append(emotion_style)
 
         style_layer = self._safe_engine_layer(
-            "style", self._engine._build_style_layer, effective_emotion, "", None
+            "style", self._engine.build_style_layer, effective_emotion, "", None
         )
         if style_layer:
             injection_parts.append(style_layer)
 
         constraint_layer = self._safe_engine_layer(
-            "constraint", self._engine._build_constraint_layer
+            "constraint", self._engine.build_constraint_layer
         )
         if constraint_layer:
             injection_parts.append(constraint_layer)
@@ -148,7 +148,7 @@ class PersonaService:
                 return card_character
 
         name = self._engine.get_name()
-        description = self._engine._persona.get("description", "")
+        description = self._engine.get_description()
         persona = self._build_shisi_persona()
 
         character = CharacterAggregate(name=name, description=description, persona=persona)
@@ -161,7 +161,8 @@ class PersonaService:
 
         from utils.character_helpers import normalize_character_card
 
-        chars_dir = Path("config/characters")
+        # 基于项目根目录构建绝对路径，避免依赖工作目录
+        chars_dir = Path(__file__).resolve().parent.parent.parent / "config" / "characters"
         if not chars_dir.exists():
             return None
 
@@ -244,7 +245,7 @@ class PersonaService:
     def _build_shisi_persona(self) -> ShisiPersonaProfile:
         """将 PersonaEngine 的人格画像映射为 shisi PersonaProfile。"""
         profile = self._engine.profile
-        traits = self._engine._persona.get("personality_traits", {})
+        traits = self._engine.get_personality_traits()
 
         def _trait(name: str, fallback: float) -> float:
             if name in traits:
@@ -312,7 +313,7 @@ class PersonaService:
     def _build_chat_history(self, memory_context: Any, chat_summary: str) -> str:
         """将记忆上下文与对话摘要格式化为 prompt_builder 可用的 chat_history 字符串。"""
         if isinstance(memory_context, dict):
-            return self._engine._build_memory_layer(memory_context, chat_summary)
+            return self._engine.build_memory_layer(memory_context, chat_summary)
 
         parts: list[str] = []
         if chat_summary:

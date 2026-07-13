@@ -1,6 +1,6 @@
 # 架构地图
 
-**最近更新:** 2026-06-03
+**最近更新:** 2026-07-13
 **演进阶段:** Phase 14 (投产准备) → Phase 15 (品牌清洗) → Phase 16 (P0 全面修复 + CI 加固)
 
 ---
@@ -34,12 +34,15 @@
 │                  核心业务层 (Python 模块)                        │
 │                                                                  │
 │  ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐  │
-│  │ shisi/   │ │ LLM     │ │ 安全     │ │ RAG      │ │ 记忆   │  │
-│  │ (96 文件) │ │ Provider│ │ (5 文件)  │ │ 引擎     │ │ 系统   │  │
+│  │ shisi/   │ │ LLM     │ │ 安全     │ │shisi/    │ │shisi/ │  │
+│  │ (96 文件) │ │ Provider│ │ (5 文件)  │ │knowledge │ │memory │  │
 │  └──────────┘ └─────────┘ └──────────┘ └──────────┘ └───────┘  │
-│  ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌────────────────────┐  │
-│  │ TTS 语音 │ │ 人格提取 │ │ 工具系统  │ │ 主动消息/插件/多模态│  │
-│  └──────────┘ └─────────┘ └──────────┘ └────────────────────┘  │
+│  ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐  │
+│  │ TTS 语音 │ │ 人格提取 │ │ 工具系统  │ │ 编排器    │ │ 缓存  │  │
+│  └──────────┘ └─────────┘ └──────────┘ └──────────┘ └───────┘  │
+│  ┌────────────────────────────────────────────────────────┐    │
+│  │ proactive / plugins / multimodal / character_card ...   │    │
+│  └────────────────────────────────────────────────────────┘    │
 └─────────────────────────┬───────────────────────────────────────┘
                           │
 ┌─────────────────────────▼───────────────────────────────────────┐
@@ -53,6 +56,19 @@
 
 ---
 
+## 编排器架构
+
+> **注:** 根目录 `orchestrator.py` 已合并为薄包装层，实际编排逻辑位于
+> `orchestrator/optimized_orchestrator.py`。`orchestrator/` 包还包含
+> `session_locks.py`（会话锁）和 `voice_detector.py`（语音检测）。
+>
+> `tools/` 模块提供 12 个内置工具（搜索、天气、日历、提醒、时间感知等），
+> 由编排器在流水线第 7 步调度执行。
+>
+> `cache/` 模块（`llm_cache.py` + `redis_client.py`）提供 LLM 响应缓存层。
+
+---
+
 ## 数据流
 
 ### 用户请求流 (聊天)
@@ -61,10 +77,10 @@
 用户消息
   → 前端 ChatInput → chat.ts API → POST /api/chat (Vite proxy)
     → FastAPI _chat_routes.py
-      → Orchestrator (12 级流水线)
-        1. 安全过滤器 (ContentSafetyFilter)
+      → Orchestrator (orchestrator/optimized_orchestrator.py, 12 级流水线)
+        1. 安全过滤器 (ContentSafety)
         2. PII 匿名化 (PIIAnonymizer)
-        3. 提示注入检测 (PromptInjectionDetector)
+        3. 提示注入检测 (PromptInjection)
         4. 情感引擎 (EmotionEngine)
         5. LLM 路由 (MultiProviderGateway)
         6. 记忆提取 (MemoryExtractor)
@@ -107,10 +123,10 @@
 │                                                    │
 │  外部网关: X-API-Key (内部服务间认证)               │
 │  路由层:   JWT Bearer Token (用户认证)              │
-│  应用层:   ContentSafetyFilter                     │
+│  应用层:   ContentSafety                           │
 │            PIIAnonymizer                           │
-│            PromptInjectionDetector                 │
-│            EncryptionManager                       │
+│            PromptInjection                         │
+│            Encryption                              │
 │  数据层:   bcrypt 密码哈希                          │
 │            JWT 签名 (HS256)                        │
 └───────────────────────────────────────────────────┘
@@ -143,17 +159,21 @@
 ## 路由层级
 
 ```
-全局 (global)         用户 (user)             角色 (role)
-┌────────────┐       ┌──────────────┐       ┌───────────────────┐
-│ /wechat    │       │ /users/:id   │       │ /users/:id/       │
-│ /users     │       │ 用户工作区    │       │   roles/create    │
-│ /settings  │       │              │       │ /users/:id/       │
-│ /login     │       │              │       │   roles/:rid/     │
-│ /admin/*   │       │              │       │   settings        │
-└────────────┘       └──────────────┘       │   status          │
-                                            │   storyline       │
-                                            └───────────────────┘
+全局 (global)                     角色 (role)
+┌────────────┐                   ┌───────────────────┐
+│ /wechat    │                   │ /roles            │
+│ /roles     │                   │ /roles/create     │
+│ /settings  │                   │ /roles/:roleId/   │
+│ /login     │                   │   settings        │
+│ /demo      │                   │ /roles/:roleId/   │
+│ /admin/*   │                   │   status          │
+└────────────┘                   │ /roles/:roleId/   │
+                                 │   storyline       │
+                                 └───────────────────┘
 ```
+
+> **注:** 路由已从 `/users/:userId/roles/:roleId/...` 重构为 `/roles/:roleId/...`，
+> 移除了用户层级嵌套，角色直接挂在根路径下。
 
 ---
 
@@ -167,11 +187,12 @@
 | bcrypt | 密码哈希 | ≥4.0 |
 | openai | LLM 客户端 | ≥1.0 |
 | ChromaDB | 向量数据库 | 嵌入版 |
-| React | 前端框架 | 18.x |
+| React | 前端框架 | 19.x |
 | TanStack Query | 服务端状态 | 5.x |
-| Zustand | 客户端状态 | 4.x |
-| Tailwind CSS | 样式 | 3.x |
-| Vite | 构建工具 | 5.x |
+| Zustand | 客户端状态 | 5.x |
+| Tailwind CSS | 样式 | 4.x |
+| Vite | 构建工具 | 8.x |
+| TypeScript | 类型系统 | 6.x |
 
 ---
 

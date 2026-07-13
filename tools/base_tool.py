@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 logger = logging.getLogger("tool_system")
 
@@ -34,7 +35,7 @@ class BaseTool:
     name: str = ""
     description: str = ""
     permission_level: str = "public"
-    parameters_schema: dict[str, Any] = {}
+    parameters_schema: ClassVar[dict[str, Any]] = {}
 
     def execute(self, **kwargs) -> ToolResult:
         raise NotImplementedError
@@ -108,6 +109,7 @@ class ToolDispatcher:
         self.timeout = timeout
         self.rate_limit = rate_limit_per_minute
         self._call_times: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
         self.retry_count = retry_count
         self.retry_tools = retry_tools or {"search", "weather"}
 
@@ -146,13 +148,14 @@ class ToolDispatcher:
 
     def _check_rate_limit(self, tool_name: str) -> bool:
         now = time.time()
-        times = self._call_times.get(tool_name, [])
-        times = [t for t in times if now - t < 60]
-        self._call_times[tool_name] = times
-        if len(times) >= self.rate_limit:
-            return False
-        times.append(now)
-        return True
+        with self._lock:
+            times = self._call_times.get(tool_name, [])
+            times = [t for t in times if now - t < 60]
+            self._call_times[tool_name] = times
+            if len(times) >= self.rate_limit:
+                return False
+            times.append(now)
+            return True
 
     def _execute_with_retry(self, tool: BaseTool, arguments: dict[str, Any],
                             tool_name: str) -> ToolResult:

@@ -1,4 +1,9 @@
 # 唯一的你 - 完整依赖清单
+#
+# 注意：本文件为兼容旧工具链（pip freeze / 容器构建）保留。
+# 依赖管理的权威来源是 pyproject.toml 的 [project.dependencies]。
+# 请勿手动编辑本文件；如需新增/升级依赖，请修改 pyproject.toml 后同步本文件，
+# 或使用 `pip-compile`、`uv export` 等工具从 pyproject.toml 重新生成。
 
 # ========== 核心依赖 ==========
 httpx>=0.27.0

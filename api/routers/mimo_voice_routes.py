@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
+from api.auth import verify_api_key_dep
 from api.deps import get_tts_manager
 from voice.tts_manager import TTSManager
 
@@ -26,6 +27,7 @@ async def clone_voice(
     description: str = Form("", description="音色描述"),
     audio: UploadFile = File(..., description="参考音频文件(10-30秒)"),  # noqa: B008
     tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
+    _auth: bool = Depends(verify_api_key_dep),  # noqa: B008
 ) -> dict[str, Any]:
     """
     克隆音色
@@ -86,6 +88,7 @@ async def design_voice(
     gender: str | None = Form(None, description="性别（male/female）"),
     age_group: str | None = Form(None, description="年龄段（young/adult/elder）"),
     tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
+    _auth: bool = Depends(verify_api_key_dep),  # noqa: B008
 ) -> dict[str, Any]:
     """
     设计音色
@@ -147,6 +150,7 @@ async def design_voice(
 async def switch_voice(
     voice_id: str = Form(..., description="音色ID"),
     tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
+    _auth: bool = Depends(verify_api_key_dep),  # noqa: B008
 ) -> dict[str, Any]:
     """
     切换当前使用的音色
@@ -178,6 +182,7 @@ async def switch_voice(
 @router.get("/status")
 async def mimo_status(
     tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
+    _auth: bool = Depends(verify_api_key_dep),  # noqa: B008
 ) -> dict[str, Any]:
     """
     获取MiMo TTS状态
@@ -210,6 +215,7 @@ async def mimo_status(
 async def set_mimo_engine(
     model: str = Form(..., description="模型名称"),
     tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
+    _auth: bool = Depends(verify_api_key_dep),  # noqa: B008
 ) -> dict[str, Any]:
     """
     切换MiMo TTS引擎模型
@@ -267,6 +273,7 @@ async def set_mimo_engine(
 async def synthesize(
     text: str = Form(..., description="合成文本"),
     tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
+    _auth: bool = Depends(verify_api_key_dep),  # noqa: B008
 ):
     """MiMo TTS 直接合成（无需角色绑定）"""
     if tts_manager is None:

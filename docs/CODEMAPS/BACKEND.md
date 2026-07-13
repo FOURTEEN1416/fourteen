@@ -1,6 +1,7 @@
 # 后端地图
 
-**最近更新:** 2026-06-03
+**最近更新:** 2026-07-13
+**版本:** 3.1.0
 **入口文件:** `api/run_api.py`, `api/app_factory.py`, `main.py`, `orchestrator.py`
 
 ---
@@ -19,16 +20,7 @@ api/                        ← FastAPI 路由层
 ├── qrcode_store.py         ← 二维码存储
 ├── session_manager.py      ← 会话管理
 │
-├── _misc_routes.py         ← [旧] 杂项 (10 endpoints)
-├── _chat_routes.py         ← [旧] 聊天 (10 endpoints)
-├── _personality_routes.py  ← [旧] 人格 (9 endpoints)
-├── _users_routes.py        ← [旧] 用户 (7 endpoints)
-├── _training_routes.py     ← [旧] 训练 (11 endpoints)
-├── _tools_routes.py        ← [旧] 工具 (5 endpoints)
-├── _safety_routes.py       ← [旧] 安全 (12 endpoints)
-├── _clone_routes.py        ← [旧] 克隆 (7 endpoints)
-│
-├── routers/                ← 新路由模块 (12 个)
+├── routers/                ← 路由模块 (13 个)
 │   ├── auth_routes.py      ← 认证注册登录 (9 endpoints)
 │   ├── admin_routes.py     ← 管理员 CRUD (6 endpoints)
 │   ├── invite_routes.py    ← 邀请码 (4 endpoints)
@@ -40,7 +32,18 @@ api/                        ← FastAPI 路由层
 │   ├── emotion_routes.py   ← 情感 (10 endpoints)
 │   ├── memory_routes.py    ← 记忆 (4 endpoints)
 │   ├── knowledge_routes.py ← 知识库 (7 endpoints)
-│   └── persona_card_routes.py ← 人设卡 (3 endpoints)
+│   ├── persona_card_routes.py ← 人设卡 (3 endpoints)
+│   └── demo_routes.py      ← 演示 (demo)
+│
+│   (以下为从 api/ 根目录迁移的旧路由，已去除下划线前缀)
+│   ├── misc_routes.py      ← 杂项 (10 endpoints)
+│   ├── chat_routes.py      ← 聊天 (10 endpoints)
+│   ├── personality_routes.py ← 人格 (9 endpoints)
+│   ├── users_routes.py     ← 用户 (7 endpoints)
+│   ├── training_routes.py  ← 训练 (11 endpoints)
+│   ├── tools_routes.py     ← 工具 (5 endpoints)
+│   ├── safety_routes.py    ← 安全 (12 endpoints)
+│   └── clone_routes.py     ← 克隆 (7 endpoints)
 │
 └── main_routes.py          ← 重构后的主路由 (仅 95 行, 0 endpoints)
                              包含 6 个 Pydantic 模型 + 4 个 Helper + sanitize_config
@@ -130,18 +133,20 @@ api/                        ← FastAPI 路由层
 | knowledge_routes.py | /api/knowledge/* | 7 |
 | persona_card_routes.py | /api/persona-card/* | 3 |
 
-### 旧路由模块 (api/_*_routes.py) — 71 endpoints
+### 迁移路由模块 (api/routers/*_routes.py) — 71 endpoints
+
+> 以下模块原位于 `api/` 根目录（带下划线前缀），现已统一迁移至 `api/routers/`。
 
 | 模块 | 路径前缀 | 数量 | 说明 |
 |------|----------|------|------|
-| _misc_routes | /api | 10 | 杂项 (系统状态等) |
-| _chat_routes | /api | 10 | 聊天 |
-| _personality_routes | /api | 9 | 人格 |
-| _users_routes | /api | 7 | 用户 |
-| _training_routes | /api | 11 | 训练 |
-| _tools_routes | /api | 5 | 工具 |
-| _safety_routes | /api | 12 | 安全 |
-| _clone_routes | /api | 7 | 克隆 |
+| misc_routes | /api | 10 | 杂项 (系统状态等) |
+| chat_routes | /api | 10 | 聊天 |
+| personality_routes | /api | 9 | 人格 |
+| users_routes | /api | 7 | 用户 |
+| training_routes | /api | 11 | 训练 |
+| tools_routes | /api | 5 | 工具 |
+| safety_routes | /api | 12 | 安全 |
+| clone_routes | /api | 7 | 克隆 |
 
 ---
 
@@ -166,6 +171,10 @@ api/                        ← FastAPI 路由层
 ## 核心业务流程
 
 ### Orchestrator 12 级流水线
+
+> **注意:** 根目录 `orchestrator.py` 已合并为薄包装层，仅导出向后兼容别名
+> (`Orchestrator = OptimizedOrchestrator`)。实际编排逻辑统一由
+> `orchestrator/optimized_orchestrator.py` 中的 `OptimizedOrchestrator` 提供。
 
 ```
 main.py/orchestrator.py
@@ -193,8 +202,6 @@ main.py/orchestrator.py
 |------|------|--------|
 | `.env` | API Keys / 密钥 (gitignored) | 最高 |
 | `config/system.yaml` | 系统配置 | 高 |
-| `config/system_prod.yaml` | 生产配置 | 中 |
-| `config/system_test.yaml` | 测试配置 | 低 |
 | `config/shisi.yaml` | 核心业务配置 | 高 |
 | `config/llm_providers.json` | LLM 供应商配置 | 高 |
 | `config/emotion.yaml` | 情感配置 | 中 |

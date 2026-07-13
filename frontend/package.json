@@ -1,7 +1,7 @@
 {
   "name": "unique-you-frontend",
   "private": true,
-  "version": "2.0.0",
+  "version": "3.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -28,6 +28,9 @@
     "zustand": "^5.0.0",
     "@sentry/react": "^9.0.0",
     "@sentry/vite-plugin": "^3.0.0"
+  },
+  "overrides": {
+    "form-data": "4.0.6"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

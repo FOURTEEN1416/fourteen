@@ -1,8 +1,13 @@
 # 唯一的你——十四
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.12-blue">
-  <img src="https://img.shields.io/badge/TypeScript-React%2019-3178c6">
+  <img src="https://img.shields.io/badge/version-3.1.0-blue">
+  <img src="https://img.shields.io/badge/Python-3.10+-blue">
+  <img src="https://img.shields.io/badge/React-19-61dafb">
+  <img src="https://img.shields.io/badge/Vite-8-646cff">
+  <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
+  <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
+  <img src="https://img.shields.io/badge/Zustand-5-orange">
   <img src="https://img.shields.io/badge/Tests-626+-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
@@ -26,7 +31,7 @@ python main.py
 
 终端会打印二维码，微信扫一下就开始聊。
 
-**前提：** Python 3.12+。FFmpeg 和 Redis 是可选的（语音转换 / 缓存用，没有也能跑）。
+**前提：** Python 3.10+。FFmpeg 和 Redis 是可选的（语音转换 / 缓存用，没有也能跑）。
 
 ---
 
@@ -43,7 +48,7 @@ python main.py
 | **工具** | 天气、日历、提醒、搜索……需要什么可以加 |
 | **剧情线** | 和角色的关系可以按"剧情"推进，有支线和进度追踪 |
 | **邀请码注册** | 内测期间通过邀请码注册，管理员在控制台生成 |
-| **管理控制台** | React 前端，15 个页面，角色管理/语音设置/系统配置一站式 |
+| **管理控制台** | React 前端，18 个页面，角色管理/语音设置/系统配置一站式 |
 
 ---
 
@@ -104,20 +109,20 @@ pytest --cov=. --cov-report=html  # 覆盖率报告
 
 ```
 ├── api/                  FastAPI 后端（168+ 路由）
-│   ├── _*_routes.py      8 子路由（misc/chat/personality/users/training/tools/safety/clone = 71 端点）
+│   ├── _*_routes.py      9 子路由（misc/chat/demo/personality/users/training/tools/safety/clone = 75 端点）
 │   ├── main_routes.py    仅 Pydantic 模型 + 常量 + 空 router 占位（95 行，0 端点）
 │   └── routers/          13 个域路由（character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card）
 ├── voice/                语音引擎：MiMo Cloud / Edge-TTS / SoVITS / Bert-VITS2
 ├── wechat_direct/        微信直连（扫码登录 + 收发消息）
-├── girlfriend_manager.py 多用户调度（每个微信用户独立情感状态）
+├── user_scheduler.py     多用户调度（每个微信用户独立情感状态）
 ├── my_character/         情感引擎 + 角色卡
 ├── security/             4 安全模块（内容过滤/加密/脱敏/注入检测）
 ├── rag_engine/           RAG 检索引擎
 ├── llm_provider/         LLM 接入层（自动 fallback）
 ├── frontend/             React 管理控制台
 │   └── src/
-│       ├── api/          12 个 API 模块（按域拆分，含 auth/invites）
-│       ├── pages/        15 个页面（全部注册路由）
+│       ├── api/          13 个 API 模块（按域拆分，含 auth/invites）
+│       ├── pages/        18 个页面（全部注册路由）
 │       ├── store/        Zustand（chatStore/errorStore/characterBuilderStore/authStore）
 │       ├── hooks/        React Query hooks
 │       ├── components/   layout + auth + shared + common + storyline + ui

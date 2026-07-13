@@ -271,7 +271,7 @@ class TestApplicationFactory:
         from api.app_factory import create_api_app
         app = create_api_app()
         assert app.title == "唯一的你 API"
-        assert app.version == "2.0"
+        assert app.version == "3.1.0"
         assert app.debug is True  # non-prod by default
 
     def test_create_api_app_registers_routers(self) -> None:

@@ -307,7 +307,7 @@ psql -U unique_you -h localhost unique_you < dump.sql
 
 ```
 deploy/
-├── nginx.conf                        # Nginx 反向代理配置
+├── nginx-ai-girlfriend.conf          # Nginx 反向代理配置（含 ${DOMAIN} 占位符）
 ├── ai-girlfriend.service     # systemd 服务单元
 ├── deploy.sh                         # 部署脚本（拉取→构建→重启）
 ├── setup.sh                          # 初始化脚本（一次性的）

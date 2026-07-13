@@ -56,7 +56,8 @@ apt-get install -y -qq \
     curl \
     wget \
     rsync \
-    ufw
+    ufw \
+    gettext-base
 
 # Install Node.js 22 LTS
 if ! command -v node &> /dev/null; then
@@ -162,16 +163,19 @@ info "Step 4/7 complete."
 
 info "=== Step 5/7: Configuring Nginx ==="
 
-# Create frontend serve directory
-mkdir -p /var/www/ai-girlfriend
+# Create frontend serve directory (matches nginx root and deploy.sh target)
+mkdir -p /opt/ai-girlfriend/frontend/dist
 
 # Copy nginx config if present
-if [ -f "${APP_DIR}/deploy/nginx.conf" ]; then
-    cp "${APP_DIR}/deploy/nginx.conf" /etc/nginx/sites-available/unique-you
-    # Replace example domain placeholder
-    sed -i "s/unique-you\.example\.com/${DOMAIN}/g" /etc/nginx/sites-available/unique-you
+if [ -f "${APP_DIR}/deploy/nginx-ai-girlfriend.conf" ]; then
+    # 通过 envsubst 注入 ${DOMAIN} 占位符。
+    # 仅替换 ${DOMAIN}，保留 nginx 原生 $uri/$host 等变量不变。
+    DOMAIN="${DOMAIN}" envsubst '${DOMAIN}' \
+        < "${APP_DIR}/deploy/nginx-ai-girlfriend.conf" \
+        > /etc/nginx/sites-available/unique-you
+    info "Nginx config rendered with DOMAIN=${DOMAIN}."
 else
-    warn "deploy/nginx.conf not found, skipping."
+    warn "deploy/nginx-ai-girlfriend.conf not found, skipping."
 fi
 
 # Enable site

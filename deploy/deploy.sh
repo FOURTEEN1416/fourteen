@@ -44,7 +44,7 @@ log "[2/6] Python dependencies installed."
 log "[3/6] Building frontend..."
 if [ -d "${FRONTEND_SRC}" ]; then
     cd "${FRONTEND_SRC}"
-    npm ci --only=production 2>/dev/null || npm install
+    npm ci 2>/dev/null || npm install
     npm run build
     log "[3/6] Frontend build complete."
 else
