@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """重构前预检脚本 — 检查系统健康状态"""
 
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -46,6 +47,35 @@ def preflight_check():
         issues.append("有未提交的更改，请先提交")
     else:
         print("✓ Git工作区干净")
+
+    # ── 安全配置检查 ──
+    print("\n--- 安全配置检查 ---")
+
+    # 检查 JWT_SECRET 是否已设置
+    jwt_secret = os.environ.get("JWT_SECRET", "")
+    if not jwt_secret:
+        issues.append("JWT_SECRET 未设置，JWT 令牌将使用不安全默认值")
+    elif len(jwt_secret) < 16:
+        issues.append("JWT_SECRET 长度过短（至少 16 字符）")
+    else:
+        print("✓ JWT_SECRET 已配置")
+
+    # 检查 API_KEY 是否为默认值
+    api_key = os.environ.get("API_KEY", "")
+    default_api_keys = {"", "changeme", "default", "test"}
+    if api_key in default_api_keys:
+        issues.append("API_KEY 未设置或为默认值，存在安全风险")
+    else:
+        print("✓ API_KEY 已配置")
+
+    # 检查 AI_GF_ENV 是否为 prod
+    ai_gf_env = os.environ.get("AI_GF_ENV", os.environ.get("ENV", ""))
+    if ai_gf_env and ai_gf_env.lower() not in ("prod", "production"):
+        print(f"⚠ AI_GF_ENV={ai_gf_env}（建议生产环境设为 prod）")
+    elif ai_gf_env:
+        print("✓ AI_GF_ENV=prod")
+    else:
+        issues.append("AI_GF_ENV 未设置，无法确认环境类型")
 
     if issues:
         print("\n❌ 检查失败，请解决以下问题:")

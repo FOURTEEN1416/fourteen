@@ -9,9 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Security
-from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
+from api.auth import verify_api_key_dep
+from api.path_security import sanitize_id
 from shisi.storyline.config import StorylineConfig
 from shisi.storyline.detector import StorylineDetector
 from shisi.storyline.engine import get_storyline_engine
@@ -19,24 +20,6 @@ from shisi.storyline.engine import get_storyline_engine
 logger = logging.getLogger("api.storyline_routes")
 
 router = APIRouter(prefix="/api/characters", tags=["storyline"])
-
-_verify_api_key_func = None
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-
-async def _verify_api_key(api_key: str | None = Security(_api_key_header)):
-    if _verify_api_key_func is not None:
-        return await _verify_api_key_func(api_key)
-    return True
-
-
-def set_dependencies(verify_api_key):
-    global _verify_api_key_func
-    _verify_api_key_func = verify_api_key
-
-    # 注册引擎持久化钩子
-    engine = get_storyline_engine()
-    engine.set_persist_hook(_persist_state_to_json)
 
 
 def _persist_state_to_json(character_id: str, state_dict: dict[str, Any]) -> None:
@@ -53,8 +36,11 @@ CHARACTERS_DIR = Path("config/characters")
 
 
 def _character_path(character_id: str) -> Path:
+    safe_id = sanitize_id(character_id)
+    if not safe_id:
+        raise HTTPException(status_code=400, detail="Invalid character ID")
     CHARACTERS_DIR.mkdir(parents=True, exist_ok=True)
-    return CHARACTERS_DIR / f"{character_id}.json"
+    return CHARACTERS_DIR / f"{safe_id}.json"
 
 
 def _load_character(character_id: str) -> dict[str, Any] | None:
@@ -104,7 +90,7 @@ class StorylineDetectResponse(BaseModel):
 @router.get("/{character_id}/storyline")
 async def get_storyline_config(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """获取角色剧情线配置。"""
     data = _load_character(character_id)
@@ -128,7 +114,7 @@ async def get_storyline_config(
 async def update_storyline_config(
     character_id: str,
     req: StorylineConfigRequest,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """更新角色剧情线配置。"""
     data = _load_character(character_id)
@@ -174,7 +160,7 @@ async def update_storyline_config(
     }
 
     data["storyline_config"] = config_data
-    data["updated_at"] = __import__("datetime").datetime.now().isoformat()
+    data["updated_at"] = datetime.now().isoformat()
 
     if not _save_character(character_id, data):
         raise HTTPException(status_code=500, detail="保存剧情线配置失败")
@@ -199,7 +185,7 @@ async def update_storyline_config(
 @router.delete("/{character_id}/storyline")
 async def delete_storyline_config(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """删除角色剧情线配置。"""
     data = _load_character(character_id)
@@ -220,7 +206,7 @@ async def delete_storyline_config(
 @router.get("/{character_id}/storyline/progress")
 async def get_storyline_progress(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """获取角色剧情线进度。"""
     engine = get_storyline_engine()
@@ -231,7 +217,7 @@ async def get_storyline_progress(
 @router.post("/{character_id}/storyline/detect")
 async def detect_storyline(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """自动检测角色人设是否适合开启剧情线。"""
     data = _load_character(character_id)
@@ -258,7 +244,7 @@ async def detect_storyline(
 @router.post("/{character_id}/storyline/reset")
 async def reset_storyline(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """重置角色剧情线进度（从头开始）。"""
     engine = get_storyline_engine()

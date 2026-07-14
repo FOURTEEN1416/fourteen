@@ -20,7 +20,7 @@ MAX_CLIENTS = 1000
 
 
 class WebSocketServer:
-    def __init__(self, orchestrator=None, host: str = "0.0.0.0", port: int = 8765):
+    def __init__(self, orchestrator=None, host: str = "127.0.0.1", port: int = 8765):
         self._orch = orchestrator
         self.host = host
         self.port = port
@@ -95,8 +95,8 @@ class WebSocketServer:
                 query = path.split('?', 1)[1]
                 params = dict(p.split('=', 1) for p in query.split('&') if '=' in p)
                 token = params.get('token', '')
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:
+            logger.debug("token parse failed, falling back: %s", e)
 
         # 如果 URL 中没有 token，等待首条消息进行认证
         if not token and self._api_key_enabled:

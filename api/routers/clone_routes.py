@@ -31,8 +31,9 @@ router = APIRouter(tags=["clone"])
 
 @router.get("/api/clone/contacts")
 async def list_clone_contacts(
-    keyword: str = "",
+    keyword: str = Query(default="", max_length=100),
     _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     mgr = deps.get_clone_mgr()
     contacts = mgr.get_contacts(keyword=keyword)
@@ -40,7 +41,10 @@ async def list_clone_contacts(
 
 
 @router.get("/api/clone/datasets")
-async def list_clone_datasets(_auth: bool = Security(verify_api_key_dep)):
+async def list_clone_datasets(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     mgr = deps.get_clone_mgr()
     datasets = mgr.list_datasets()
     return {"datasets": datasets, "total": len(datasets)}
@@ -56,6 +60,7 @@ async def get_clone_dataset_detail(
     date_to: str = Query(default=""),
     only_user: bool = Query(default=False),
     _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     mgr = deps.get_clone_mgr()
     return mgr.get_dataset_detail(
@@ -109,6 +114,9 @@ async def batch_delete_clone_conversations(
 
 
 @router.get("/api/clone/stats")
-async def get_clone_stats(_auth: bool = Security(verify_api_key_dep)):
+async def get_clone_stats(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     mgr = deps.get_clone_mgr()
     return mgr.get_stats()

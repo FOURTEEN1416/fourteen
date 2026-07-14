@@ -17,10 +17,12 @@ import logging
 import threading
 import time
 
-from fastapi import APIRouter, HTTPException, Query, Security
+from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from fastapi.responses import StreamingResponse
 
 from api.auth import verify_api_key_dep
+from api.auth_jwt import require_role
+from api.database import User
 from api.deps import deps
 from api.main_routes import ChatRequest, ChatResponse, CreateSessionRequest
 
@@ -140,6 +142,7 @@ async def chat_history(
     limit: int = Query(default=20, ge=1, le=100),
     before: int = Query(default=0, ge=0, description="Timestamp to load messages before"),
     _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     orch = deps.orch
     if not orch or not orch._memory:

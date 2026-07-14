@@ -194,7 +194,7 @@
 - `session_locks.py` — 会话锁管理
 - `voice_detector.py` — 语音活动检测
 
-> **注:** 根目录 `orchestrator.py` 已合并为薄包装层，委托给 `orchestrator/optimized_orchestrator.py`。
+> **注:** 根目录 `orchestrator.py` 已删除，编排逻辑统一由 `orchestrator/` 包提供（`orchestrator/optimized_orchestrator.py`）。
 
 **依赖:** shisi, llm_provider, security, tools, cache
 **被依赖:** api (chat_routes)

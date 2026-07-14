@@ -7,9 +7,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Security
 from fastapi.responses import Response
-from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
+from api.auth import verify_api_key_dep
 from shisi.voice.character_voice import CharacterVoiceManager
 
 logger = logging.getLogger("api.voice_routes")
@@ -19,16 +19,6 @@ router = APIRouter(prefix="/api", tags=["voice"])
 _voice_mgr: CharacterVoiceManager | None = None
 _tts_mgr: Any | None = None
 _orch: Any | None = None
-
-# ── API Key 认证 ──
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-_verify_api_key_func = None
-
-
-async def _verify_api_key(api_key: str | None = Security(_api_key_header)):
-    if _verify_api_key_func is not None:
-        return await _verify_api_key_func(api_key)
-    return True
 
 
 # ── 请求/响应模型 ──
@@ -54,20 +44,6 @@ class VoiceUpdateRequest(BaseModel):
 
 class VoiceTestRequest(BaseModel):
     text: str = "你好，我是你的专属语音助手"
-
-
-# ── 依赖注入 ──
-
-
-def set_dependencies(orch, verify_api_key):
-    global _orch, _voice_mgr, _tts_mgr, _verify_api_key_func
-    _orch = orch
-    _voice_mgr = CharacterVoiceManager()
-    _verify_api_key_func = verify_api_key
-    # 从 orchestrator 获取 TTSManager
-    if orch and hasattr(orch, "components"):
-        _tts_mgr = orch.components.get("voice")
-    logger.info("Voice routes dependencies injected, TTS: %s", _tts_mgr is not None)
 
 
 # ── Edge-TTS 预定义发音人 ──
@@ -116,7 +92,7 @@ _ENGINE_SPEAKERS = {
 @router.get("/characters/{character_id}/voice")
 async def get_character_voice(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """获取角色音色配置"""
     if _voice_mgr is None:
@@ -131,7 +107,7 @@ async def get_character_voice(
 async def bind_character_voice(
     character_id: str,
     req: VoiceBindRequest,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """绑定角色音色"""
     if _voice_mgr is None:
@@ -157,7 +133,7 @@ async def bind_character_voice(
 async def update_character_voice(
     character_id: str,
     req: VoiceUpdateRequest,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """更新角色音色配置（部分更新）"""
     if _voice_mgr is None:
@@ -195,7 +171,7 @@ async def update_character_voice(
 @router.delete("/characters/{character_id}/voice")
 async def unbind_character_voice(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """解绑角色音色"""
     if _voice_mgr is None:
@@ -210,7 +186,7 @@ async def unbind_character_voice(
 @router.get("/voice/speakers")
 async def list_speakers(
     engine: str = Query(default="edge-tts"),
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """获取指定引擎的可用发音人列表"""
     speakers = _ENGINE_SPEAKERS.get(engine, [])
@@ -225,7 +201,7 @@ async def list_speakers(
 async def test_character_voice(
     character_id: str,
     req: VoiceTestRequest,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """测试角色音色合成"""
     if _voice_mgr is None or _tts_mgr is None:

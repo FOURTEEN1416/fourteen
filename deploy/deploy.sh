@@ -24,6 +24,8 @@ VENV="${APP_DIR}/.venv"
 # ── Step 1: Pull latest code ──
 log "[1/6] Pulling latest code from git..."
 cd "${APP_DIR}"
+# 安全建议: 配置 Git 提交签名验证（GPG），确保代码来源可信
+# git config commit.gpgsign true
 git fetch origin
 git checkout main
 git pull origin main

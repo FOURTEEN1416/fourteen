@@ -13,6 +13,11 @@ export interface DemoStreamDone {
   process_time: number
 }
 
+/**
+ * Demo 聊天流 — 直接使用 fetch 而非 axios client
+ * 设计原因: demo 端点为公开体验，不需要认证 header
+ * 注意: 后端已对 demo 端点添加了 API Key 认证，此处应通过 axios client 发送
+ */
 export async function* demoChatStream(
   message: string,
   sessionId = '',

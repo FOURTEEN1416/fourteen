@@ -58,8 +58,7 @@
 
 ## 编排器架构
 
-> **注:** 根目录 `orchestrator.py` 已合并为薄包装层，实际编排逻辑位于
-> `orchestrator/optimized_orchestrator.py`。`orchestrator/` 包还包含
+> **注:** 编排逻辑位于 `orchestrator/optimized_orchestrator.py`。`orchestrator/` 包还包含
 > `session_locks.py`（会话锁）和 `voice_detector.py`（语音检测）。
 >
 > `tools/` 模块提供 12 个内置工具（搜索、天气、日历、提醒、时间感知等），

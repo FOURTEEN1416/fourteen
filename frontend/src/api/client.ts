@@ -69,6 +69,7 @@ const client = axios.create({
   baseURL: API_BASE,
   timeout: 30000,
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: true, // 确保跨域时发送 httpOnly cookie
 })
 
 const apiKey = import.meta.env.VITE_API_KEY || ''

@@ -143,7 +143,7 @@ parse_db_url() {
         exit 1
     fi
 
-    log_info "Database: $DB_NAME, Host: $DB_HOST:$DB_PORT, User: $DB_USER"
+    log_info "Database backup started (details hidden for security)"
 }
 
 # -------------------------------------------------------------------------
@@ -194,6 +194,7 @@ do_backup() {
     log_info "Starting backup: $DB_NAME -> $backup_file"
 
     # Export password for pg_dump
+    # 安全风险：PGPASSWORD 在进程环境中短暂可见，建议使用 ~/.pgpass 替代
     export PGPASSWORD="$DB_PASS"
 
     # Run pg_dump piped to gzip, writing to a temp file first
@@ -216,6 +217,8 @@ do_backup() {
 
         # Success: rename temp to final
         mv "$temp_file" "$backup_file"
+        # 限制备份文件权限，仅所有者可读写
+        chmod 600 "$backup_file"
         local file_size
         file_size="$(du -h "$backup_file" | cut -f1)"
         rm -f "${temp_file}.log"

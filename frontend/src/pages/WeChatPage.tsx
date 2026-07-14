@@ -72,7 +72,12 @@ function LiveStatusBanner() {
         <div className="flex items-center gap-2">
           {status.qr_code && (
             <button
-              onClick={() => window.open(status.qr_code!, '_blank')}
+              onClick={() => {
+                const qrUrl = status.qr_code!
+                if (qrUrl.startsWith('http://') || qrUrl.startsWith('https://')) {
+                  window.open(qrUrl, '_blank', 'noopener,noreferrer')
+                }
+              }}
               className="flex items-center gap-1 rounded-lg bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 transition-colors"
               title="查看二维码"
             >

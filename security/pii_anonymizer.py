@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 
@@ -49,7 +50,7 @@ class PIIAnonymizer:
             detected.append({
                 "type": pii_type,
                 "placeholder": replacement,
-                "original": original,
+                "original_hash": hashlib.sha256(original.encode()).hexdigest()[:16],
             })
         if detected:
             logger.info("PII detected and anonymized: %d items", len(detected))
@@ -61,10 +62,14 @@ class PIIAnonymizer:
         Args:
             text: 脱敏后的文本
             pii_map: dict[str, str] 格式 {placeholder: original}
-                     或 list[dict] 格式 [{"type":..., "placeholder":..., "original":...}]
+                     或 list[dict] 格式 [{"type":..., "placeholder":..., "original"...}]
+
+        Note:
+            anonymize() 不再存储原始 PII（使用 original_hash 替代），
+            因此从 list[dict] 反脱敏时仅恢复有 "original" 字段的项。
         """
         if isinstance(pii_map, list):
-            # 从 list[dict] 转换为 dict[str, str]
+            # 从 list[dict] 转换为 dict[str, str]（仅恢复有 original 字段的旧格式项）
             pii_dict: dict[str, str] = {}
             for item in pii_map:
                 if isinstance(item, dict) and "placeholder" in item and "original" in item:
@@ -78,7 +83,12 @@ class PIIAnonymizer:
 
     @staticmethod
     def pii_list_to_map(pii_list: list[dict]) -> dict[str, str]:
-        """将 anonymize() 返回的 list[dict] 转换为 dict[str,str] 格式"""
+        """将 anonymize() 返回的 list[dict] 转换为 dict[str,str] 格式
+
+        Note:
+            anonymize() 不再存储原始 PII（使用 original_hash 替代），
+            因此仅转换包含 "original" 字段的旧格式项。
+        """
         return {str(item["placeholder"]): str(item["original"])
                 for item in pii_list
                 if isinstance(item, dict) and "placeholder" in item and "original" in item}

@@ -1,5 +1,5 @@
 ﻿import { describe, it, expect, beforeEach } from 'vitest'
-import { useAuthStore, type UserInfo } from '../../store/authStore'
+import { useAuthStore, getAccessToken, setAccessToken, type UserInfo } from '../../store/authStore'
 
 // 构造一个合法的 UserInfo（UserRole 来自 api/admin）
 const mockUser: UserInfo = {
@@ -24,6 +24,8 @@ describe('useAuthStore', () => {
       isAuthenticated: false,
       isInitialized: false,
     })
+    // 重置内存级 accessToken，避免跨用例污染
+    setAccessToken(null)
     // 清理 localStorage 遗留的 persist 数据
     localStorage.clear()
   })
@@ -41,7 +43,9 @@ describe('useAuthStore', () => {
 
     const state = useAuthStore.getState()
     expect(state.isAuthenticated).toBe(true)
-    expect(state.accessToken).toBe('access-123')
+    // accessToken 不再写入 Zustand 状态，应通过 getAccessToken() 读取内存值
+    expect(state.accessToken).toBeNull()
+    expect(getAccessToken()).toBe('access-123')
     expect(state.user).toEqual(mockUser)
   })
 
@@ -57,5 +61,6 @@ describe('useAuthStore', () => {
     expect(state.isAuthenticated).toBe(false)
     expect(state.user).toBeNull()
     expect(state.accessToken).toBeNull()
+    expect(getAccessToken()).toBeNull()
   })
 })

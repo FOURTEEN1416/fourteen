@@ -30,16 +30,9 @@ router = APIRouter(tags=["misc"])
 
 
 # ═══════════════════════════════════════════════════════
-# Health / Stats / Dashboard
+# Stats / Dashboard
+# 健康检查路由 (/api/health, /api/ready) 已迁移至 api/health_routes.py
 # ═══════════════════════════════════════════════════════
-
-
-@router.get("/api/health")
-async def health():
-    hc = deps.health
-    if hc:
-        return await hc.async_check()
-    return {"status": "unknown"}
 
 
 @router.get("/api/stats")
@@ -316,9 +309,18 @@ async def list_channels(_auth: bool = Security(verify_api_key_dep)):
 
 
 @router.get("/api/routes")
-async def list_routes(request: Request):
+async def list_routes(
+    request: Request,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     routes = []
     for route in request.app.routes:
         if hasattr(route, "path") and hasattr(route, "methods"):
             routes.append({"path": route.path, "methods": list(route.methods)})
+        elif hasattr(route, "original_router"):
+            # FastAPI 0.139+ wraps included routers in _IncludedRouter
+            for sub in route.original_router.routes:
+                if hasattr(sub, "path") and hasattr(sub, "methods"):
+                    routes.append({"path": sub.path, "methods": list(sub.methods)})
     return {"routes": routes, "total": len(routes)}

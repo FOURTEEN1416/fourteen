@@ -39,14 +39,33 @@ def app():
     a = app_factory.create_api_app()
     # Bypass X-API-Key check so smoke tests don't need a real key
     a.dependency_overrides[auth.verify_api_key_dep] = lambda: True
+    # Bypass JWT-based role checks for admin-only endpoints (e.g. /api/routes)
+    from api.auth_jwt import get_current_user_id, get_current_user, require_role
+    a.dependency_overrides[get_current_user_id] = lambda: 1
+    a.dependency_overrides[get_current_user] = lambda: type("U", (), {"id": 1, "role": "admin"})()
+    a.dependency_overrides[require_role("admin")] = lambda: (1, type("U", (), {"id": 1, "role": "admin"})())
     return a
+
+
+def _flatten_app_routes(app) -> list:
+    """Flatten app.routes — handles FastAPI 0.139+ _IncludedRouter wrappers."""
+    flat = []
+    for r in app.routes:
+        if hasattr(r, "path") and hasattr(r, "methods"):
+            flat.append(r)
+        elif hasattr(r, "original_router"):
+            # FastAPI 0.139+ wraps included routers in _IncludedRouter
+            for sub in r.original_router.routes:
+                if hasattr(sub, "path") and hasattr(sub, "methods"):
+                    flat.append(sub)
+    return flat
 
 
 def _app_routes(app) -> set[tuple[str, str]]:
     """Return set of (METHOD, path) for all /api/* routes in the app."""
     routes: set[tuple[str, str]] = set()
-    for r in app.routes:
-        if hasattr(r, "path") and hasattr(r, "methods") and r.path.startswith("/api/"):
+    for r in _flatten_app_routes(app):
+        if r.path.startswith("/api/"):
             for m in r.methods:
                 if m != "HEAD":  # FastAPI auto-adds HEAD
                     routes.add((m, r.path))
@@ -76,7 +95,7 @@ def test_app_creates_and_has_at_least_71_api_routes(app):
 @pytest.mark.parametrize(
     "module,expected_count,label",
     [
-        (misc_routes, 10, "health/stats/memory/logs/config/channels/routes"),
+        (misc_routes, 9, "stats/memory/logs/config/channels/routes"),
         (chat_routes, 11, "chat/session + wechat channels"),
         (personality_routes, 9, "emotion/persona/psych"),
         (users_routes, 7, "users/*"),
@@ -100,14 +119,14 @@ def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
     )
 
 
-def test_total_contribution_is_73(app):
-    """The 8 new sub-routers together contribute exactly 73 endpoints."""
+def test_total_contribution_is_72(app):
+    """The 8 new sub-routers together contribute exactly 72 endpoints."""
     modules = [
         misc_routes, chat_routes, personality_routes, users_routes,
         training_routes, tools_routes, safety_routes, clone_routes,
     ]
     total = sum(len(_sub_router_routes(m)) for m in modules)
-    assert total == 73, f"8 sub-routers contribute {total} routes, expected 73"
+    assert total == 72, f"8 sub-routers contribute {total} routes, expected 72"
 
 
 def test_no_duplicate_endpoints_across_sub_routers():

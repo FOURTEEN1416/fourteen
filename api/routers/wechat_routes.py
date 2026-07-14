@@ -5,38 +5,23 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Security
-from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from api.auth_jwt import get_current_user_id
-from api.database import WechatBinding, get_db
+from api.auth import verify_api_key_dep
+from api.auth_jwt import get_current_user_id, require_role
+from api.database import User, WechatBinding, get_db
 from api.deps import deps
 
 logger = logging.getLogger("api.wechat_routes")
 
 router = APIRouter(prefix="/api/wechat", tags=["wechat"])
 
-_verify_api_key_func: Callable | None = None
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
 CONNECTIONS_FILE = Path(__file__).parent.parent.parent / "data" / "wechat_connections.json"
-
-
-async def _verify_api_key(api_key: str | None = Security(_api_key_header)):
-    if _verify_api_key_func is not None:
-        return await _verify_api_key_func(api_key)
-    return True
-
-
-def set_dependencies(verify_api_key: Callable) -> None:
-    global _verify_api_key_func
-    _verify_api_key_func = verify_api_key
 
 
 class WechatConnectionCreate(BaseModel):
@@ -72,7 +57,10 @@ def _save_connections(data: dict) -> bool:
 
 
 @router.get("/connections")
-def list_connections(_auth: bool = Security(_verify_api_key)):
+def list_connections(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     data = _load_connections()
     return {
         "connections": data.get("connections", []),
@@ -82,7 +70,11 @@ def list_connections(_auth: bool = Security(_verify_api_key)):
 
 
 @router.post("/connections", status_code=201)
-def save_connection(req: WechatConnectionCreate, _auth: bool = Security(_verify_api_key)):
+def save_connection(
+    req: WechatConnectionCreate,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     if not req.wxid.strip():
         raise HTTPException(status_code=400, detail="wxid 不能为空")
     data = _load_connections()
@@ -108,7 +100,12 @@ def save_connection(req: WechatConnectionCreate, _auth: bool = Security(_verify_
 
 
 @router.put("/connections/{wxid}")
-def update_connection(wxid: str, req: WechatConnectionUpdate, _auth: bool = Security(_verify_api_key)):
+def update_connection(
+    wxid: str,
+    req: WechatConnectionUpdate,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     data = _load_connections()
     conns = data["connections"]
     existing = next((c for c in conns if c.get("wxid") == wxid), None)
@@ -126,7 +123,11 @@ def update_connection(wxid: str, req: WechatConnectionUpdate, _auth: bool = Secu
 
 
 @router.delete("/connections/{wxid}")
-def delete_connection(wxid: str, _auth: bool = Security(_verify_api_key)):
+def delete_connection(
+    wxid: str,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     data = _load_connections()
     conns = data["connections"]
     new_conns = [c for c in conns if c.get("wxid") != wxid]

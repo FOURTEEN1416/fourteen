@@ -7,11 +7,15 @@
 from __future__ import annotations
 
 import hmac
+import logging
+import os
 import threading
 from typing import Any
 
 from fastapi import HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
+
+logger = logging.getLogger("api.auth")
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -50,10 +54,14 @@ async def verify_api_key_dep(
         key = _auth_config["api_key"]
 
     if not enabled:
+        # 认证未启用时放行，但记录警告（生产环境应通过配置启用）
+        if os.getenv("ENVIRONMENT", "development") == "production":
+            logger.warning("API 认证未启用，生产环境存在安全风险，请设置 AUTH_ENABLED=true")
         return True
 
+    # 优先从 header 读取，其次从 query 参数（EventSource 场景）
     candidate = api_key or request.query_params.get("api_key") or ""
-    if hmac.compare_digest(candidate, key):
+    if key and hmac.compare_digest(candidate, key):
         return True
 
     raise HTTPException(
@@ -61,3 +69,5 @@ async def verify_api_key_dep(
         detail="Invalid or missing API key",
         headers={"X-Error-Code": "AUTH_ERROR"},
     )
+
+__all__ = ["configure_auth", "update_auth_key", "verify_api_key_dep"]

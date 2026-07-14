@@ -15,10 +15,11 @@ from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Query, Security, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
+from api.auth import verify_api_key_dep
 from api.deps import deps
+from api.path_security import sanitize_id
 from my_character.persona_card import PersonaCardV3
 from shisi.knowledge.crawler_adapter import get_crawler_adapter
 from shisi.voice.character_voice import CharacterVoiceManager
@@ -34,18 +35,6 @@ _orch = None
 _gf = None
 
 CHARACTERS_DIR = Path("config/characters")
-
-# ── API Key 认证委托 ──────────────────────────────────
-# 模块级 Security 函数：先由 FastAPI 提取 X-API-Key 头，
-# 再委托给注入的 verify 函数（来自 app_factory.py）。
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-_verify_api_key_func = None
-
-
-async def _verify_api_key(api_key: str | None = Security(_api_key_header)):
-    if _verify_api_key_func is not None:
-        return await _verify_api_key_func(api_key)
-    return True
 
 
 # ── 请求/响应模型 ────────────────────────────────────────
@@ -98,16 +87,6 @@ class MemoryFactResponse(BaseModel):
     character_id: str
 
 
-# ── 依赖注入 ────────────────────────────────────────────
-
-
-def set_dependencies(orch, gf, verify_api_key):
-    global _orch, _gf, _verify_api_key_func
-    _orch = orch
-    _gf = gf
-    _verify_api_key_func = verify_api_key
-
-
 # ── 数据持久化工具 ───────────────────────────────────────
 
 
@@ -117,7 +96,10 @@ def _get_characters_dir() -> Path:
 
 
 def _character_path(character_id: str) -> Path:
-    return _get_characters_dir() / f"{character_id}.json"
+    safe_id = sanitize_id(character_id)
+    if not safe_id:
+        raise HTTPException(status_code=400, detail="Invalid character ID")
+    return _get_characters_dir() / f"{safe_id}.json"
 
 
 def _load_character(character_id: str) -> dict[str, Any] | None:
@@ -269,7 +251,7 @@ def _build_character_data(
 async def list_characters(
     user_id: str | None = Query(default=None),
     search: str | None = Query(default=None),
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """列出所有角色，支持 user_id 过滤和 search 搜索"""
     characters = _list_all_characters()
@@ -289,7 +271,7 @@ async def list_characters(
 @router.post("/characters", status_code=201)
 async def create_character(
     req: UnifiedCharacterCreate,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """创建新角色"""
     if not req.name.strip():
@@ -314,7 +296,7 @@ async def create_character(
 @router.get("/characters/{character_id}")
 async def get_character(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """获取角色详情（含音色配置）"""
     data = _load_character(character_id)
@@ -348,7 +330,7 @@ async def get_character(
 async def update_character(
     character_id: str,
     req: UnifiedCharacterUpdate,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """更新角色（合并更新，只传要改的字段）"""
     data = _load_character(character_id)
@@ -391,7 +373,7 @@ async def update_character(
 @router.delete("/characters/{character_id}")
 async def delete_character(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """删除角色"""
     data = _load_character(character_id)
@@ -411,7 +393,7 @@ async def delete_character(
 @router.post("/characters/{character_id}/activate")
 async def activate_character(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """激活角色（设为当前使用的角色）"""
     data = _load_character(character_id)
@@ -441,7 +423,7 @@ async def activate_character(
 @router.get("/characters/{character_id}/persona")
 async def get_character_persona(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """获取角色的人设详情"""
     data = _load_character(character_id)
@@ -472,7 +454,7 @@ async def get_character_persona(
 async def update_character_persona(
     character_id: str,
     req: PersonaUpdate,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """更新角色人设（部分更新 personality / speaking_style / catchphrases / core_anchors）"""
     data = _load_character(character_id)
@@ -503,7 +485,7 @@ async def update_character_persona(
 @router.post("/characters/import", status_code=201)
 async def import_character(
     file: UploadFile = File(...),  # noqa: B008
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """导入角色卡（JSON 文件）"""
     if not file.filename or not file.filename.endswith(".json"):
@@ -553,7 +535,7 @@ async def import_character(
 @router.get("/characters/{character_id}/export")
 async def export_character(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """导出角色卡为 JSON 文件下载"""
     data = _load_character(character_id)
@@ -569,7 +551,7 @@ async def export_character(
 
 @router.get("/presets")
 async def list_presets(
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """获取所有内置角色预设"""
     PRESETS_DIR.mkdir(parents=True, exist_ok=True)
@@ -581,8 +563,8 @@ async def list_presets(
             with open(index_path, encoding="utf-8") as fh:
                 index_data = json.load(fh)
             return {"presets": index_data, "total": len(index_data)}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("index file read failed: %s", e)
 
     # 降级：扫描目录
     presets = []
@@ -609,7 +591,7 @@ async def list_presets(
 @router.get("/presets/{preset_id}")
 async def get_preset(
     preset_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """获取单个内置角色预设的完整数据，映射为前端 PersonaState 友好格式"""
     # 先检查安全文件名
@@ -623,7 +605,7 @@ async def get_preset(
         with open(preset_path, encoding="utf-8") as f:
             card = json.load(f)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"读取预设失败: {e}") from e
+        raise HTTPException(status_code=500, detail="读取预设失败") from e
 
     d = card.get("data", {})
     tags = d.get("tags", [])
@@ -673,8 +655,11 @@ MEMORY_FACTS_DIR = Path("data") / "character_memory"
 
 
 def _facts_path(character_id: str) -> Path:
+    safe_id = sanitize_id(character_id)
+    if not safe_id:
+        raise HTTPException(status_code=400, detail="Invalid character ID")
     MEMORY_FACTS_DIR.mkdir(parents=True, exist_ok=True)
-    return MEMORY_FACTS_DIR / f"{character_id}.json"
+    return MEMORY_FACTS_DIR / f"{safe_id}.json"
 
 
 def _load_facts(character_id: str) -> list[dict]:
@@ -704,7 +689,7 @@ def _save_facts(character_id: str, facts: list[dict]) -> bool:
 async def list_memory_facts(
     character_id: str,
     category: str | None = Query(default=None),
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """获取角色记忆事实，可按分类过滤"""
     facts = _load_facts(character_id)
@@ -717,7 +702,7 @@ async def list_memory_facts(
 async def add_memory_fact(
     character_id: str,
     req: MemoryFactCreate,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """添加角色记忆事实"""
     if not req.content.strip():
@@ -741,7 +726,7 @@ async def add_memory_fact(
 async def delete_memory_fact(
     character_id: str,
     fact_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """删除角色记忆事实"""
     facts = _load_facts(character_id)
@@ -756,7 +741,7 @@ async def delete_memory_fact(
 @router.delete("/characters/{character_id}/memory")
 async def clear_memory(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """清空角色所有记忆事实"""
     path = _facts_path(character_id)
@@ -771,7 +756,7 @@ async def clear_memory(
 @router.post("/characters/generate-from-description", status_code=201)
 async def generate_character_from_description(
     req: CharacterGenerateRequest,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """从文本描述用 AI 生成角色人设卡并自动创建"""
     if not req.description.strip():
@@ -803,7 +788,7 @@ async def generate_character_from_description(
         persona_data = json.loads(json_match.group())
     except Exception as e:
         logger.exception("AI 角色生成失败")
-        raise HTTPException(status_code=500, detail=f"角色生成失败: {e}") from e
+        raise HTTPException(status_code=500, detail="角色生成失败") from e
 
     catchphrases = persona_data.pop("catchphrases", [])
     data = _build_character_data(
@@ -836,7 +821,7 @@ async def export_chat(
     character_id: str,
     format: str = Query(default="json", pattern=r"^(json|csv)$"),
     limit: int = Query(default=200, ge=1, le=1000),
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """导出角色对话记录（JSON 或 CSV）"""
     data = _load_character(character_id)

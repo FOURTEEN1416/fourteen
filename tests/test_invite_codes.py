@@ -156,6 +156,13 @@ async def test_invite_routes_are_mounted(module_app):
             for m in (r.methods or set()):
                 if m != "HEAD":
                     routes.add((m, r.path))
+        elif hasattr(r, "original_router"):
+            # FastAPI 0.139+ wraps included routers in _IncludedRouter
+            for sub in r.original_router.routes:
+                if hasattr(sub, "path") and hasattr(sub, "methods"):
+                    for m in (sub.methods or set()):
+                        if m != "HEAD":
+                            routes.add((m, sub.path))
     expected = [
         ("POST", "/api/auth/register-invite"),
         ("POST", "/api/admin/invites"),

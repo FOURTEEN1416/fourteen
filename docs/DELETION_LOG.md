@@ -1,5 +1,32 @@
 ﻿# Code Deletion Log
 
+## [2026-07-14] Routing Fix — Tombstone & Dead Code Cleanup
+
+### Dead Endpoints Removed
+- `api/routers/misc_routes.py` — Removed shadowed `/api/health` endpoint (3 lines). This was superseded by `api/health_routes.py` which is mounted first in `app_factory.py`. Having two `/api/health` routes caused confusion during debugging.
+
+### Dead Imports Removed
+- `api/app_factory.py` — Removed unused `Limiter`, `SlowAPIMiddleware`, `get_remote_address` imports from slowapi. Only `RateLimitExceeded` is used (for exception handler). The custom fallback rate limiter serves as the actual enforcement mechanism.
+- `api/main_routes.py` — Removed unused `APIRouter` import and dead `router = APIRouter(tags=["main"])` variable (tombstone from when `health_router` was extracted to `health_routes.py`). The `router` variable was never imported by any file.
+
+### Test Artifacts Deleted
+- `tests/_test_invite.db` — Leftover SQLite test database artifact from invite code tests.
+
+### Documentation Updated
+- `docs/CODEMAPS/BACKEND.md` — Added `health_routes.py` and `runtime_config.py` to architecture tree; updated `misc_routes.py` endpoint count (10→9); updated `main_routes.py` description to reflect it no longer contains a router instance.
+
+### Files NOT Removed (Intentionally Retained)
+- `shisi/api/v2/health_routes.py` — Defines a `/health` route in the v2 API namespace. The entire `shisi/api/v2/` module (`v2_router`) is never mounted in `app_factory.py`. However, this is part of the shisi v2 API layer and may be activated in future integration work. Left intact to avoid breaking import chains.
+- `shisi/memory/legacy/` — Despite the "legacy" name, these modules are actively imported by `shisi/application/memory_service.py` and covered by `tests/test_memory.py` + `tests/test_memory_pipeline.py`. Not dead code.
+- `shisi/knowledge/legacy/` — Despite the "legacy" name, `rag_engine.py` is actively imported by `shisi/knowledge/legacy/__init__.py` and tested by `tests/test_rag_engine.py`. Not dead code.
+
+### Impact
+- Lines removed: ~15 (dead code + dead imports)
+- No functional changes — all removed code was either shadowed or never executed
+- Tests: 77/77 passed after cleanup (test_api_routes + test_production_hardening + test_ops_lifecycle + test_invite_codes + test_connection_lifecycle + test_p0_fixes + test_config_permissions)
+
+---
+
 ## [2026-06-03] Dead Code Cleanup Session
 
 ### Unused Dependencies Removed

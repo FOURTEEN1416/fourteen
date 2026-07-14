@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Securi
 from fastapi.responses import FileResponse, Response
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import get_current_user, get_current_user_id, require_role
+from api.auth_jwt import get_current_user, require_role
 from api.database import User
 from api.deps import deps
 from api.main_routes import MAX_RAG_UPLOAD_SIZE, MAX_UPLOAD_SIZE, UPLOAD_DIR
@@ -88,7 +88,7 @@ async def rag_stats(_auth: bool = Security(verify_api_key_dep)):
 
 @router.post("/api/rag/search")
 async def rag_search(
-    query: str = "",
+    query: str = Query(default="", max_length=500),
     top_k: int = Query(default=5, le=20),
     _auth: bool = Security(verify_api_key_dep),
 ):
@@ -180,8 +180,10 @@ async def upload_file(
     content = await file.read()
     if len(content) > MAX_UPLOAD_SIZE:
         raise HTTPException(413, f"文件大小超过限制 ({MAX_UPLOAD_SIZE // 1024 // 1024}MB)")
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    safe_name = re.sub(r'[^\w.\-]', '_', file.filename)  # type: ignore[arg-type]
+    safe_name = re.sub(r'[^\w.\-]', '_', file.filename)
     dest = UPLOAD_DIR / f"{int(time.time())}_{safe_name}"
     with open(dest, "wb") as f:
         f.write(content)

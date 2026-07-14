@@ -3,7 +3,9 @@
 # 唯一的你 — Remote Build & Restart Script
 # ═══════════════════════════════════════════════════════════
 # Usage (after code is synced to server):
-#   ssh root@139.199.199.174 "bash /opt/ai-girlfriend/deploy/remote_deploy.sh"
+#   ssh deploy@139.199.199.174 "bash /opt/ai-girlfriend/deploy/remote_deploy.sh"
+# 安全建议: 使用专用部署用户（如 deploy）而非 root 进行 SSH 登录
+# 配置 SSH 密钥认证，禁用 root SSH 登录
 # ═══════════════════════════════════════════════════════════
 
 set -euo pipefail

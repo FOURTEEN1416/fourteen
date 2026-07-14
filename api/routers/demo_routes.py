@@ -59,7 +59,7 @@ def _get_memory() -> Any:
 
 
 @router.post("/api/demo/chat/stream")
-async def demo_chat_stream(req: DemoChatRequest):
+async def demo_chat_stream(req: DemoChatRequest, _auth: bool = Depends(verify_api_key_dep)):
     orch = _get_orchestrator()
     if not hasattr(orch, "process_message_stream"):
         raise HTTPException(
@@ -204,7 +204,7 @@ async def demo_memory_visualization(
 
 
 @router.post("/api/demo/exit")
-async def demo_exit(req: DemoExitRequest):
+async def demo_exit(req: DemoExitRequest, _auth: bool = Depends(verify_api_key_dep)):
     """用户点击退出按钮：记录退出事件并返回告别语。"""
     memory = _get_memory()
     if memory:
@@ -212,7 +212,7 @@ async def demo_exit(req: DemoExitRequest):
             semantic = getattr(memory, "semantic", None)
             if semantic:
                 semantic.add_fact(
-                    fact="用户主动结束了对话。",
+                    fact="[demo] 用户主动结束了对话。",
                     category="exit_event",
                     confidence=1.0,
                     importance=0.9,

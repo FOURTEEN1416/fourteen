@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import hashlib
 import json
 import logging
 import re
@@ -100,18 +101,21 @@ def _log_safety_event(category: SafetyCategory, text: str, is_input: bool) -> No
         from api.deps import deps
         from observability.logging_setup import get_user_id
 
+        # 不记录原始文本，仅记录长度和哈希（防止敏感内容泄露）
+        text_hash = hashlib.sha256(text.encode()).hexdigest()[:16] if text else ""
         deps.safety_log_mgr.append(
             {
                 "category": category.value,
                 "direction": "input" if is_input else "output",
-                "text": text[:500],
+                "text_length": len(text),
+                "text_hash": text_hash,
                 "timestamp": time.time(),
             },
             user_id=get_user_id(),
         )
-    except Exception:
-        # 安全日志写入失败不应影响主流程
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger("content_safety").debug("safety log write failed: %s", e)
 
 
 class ContentSafetyFilter:

@@ -42,7 +42,7 @@ export function setAccessToken(token: string | null): void {
 
 export interface AuthState {
   user: UserInfo | null
-  /** @deprecated 请用 getAccessToken() 读取内存值 */
+  // @deprecated — use getAccessToken() instead
   accessToken: string | null
   isAuthenticated: boolean
   isInitialized: boolean
@@ -66,13 +66,14 @@ export const useAuthStore = create<AuthState>()(
       /** 登录/注册成功后设置认证信息 */
       setAuth: (user: UserInfo, accessToken: string) => {
         setAccessToken(accessToken)
-        set({ user, accessToken, isAuthenticated: true })
+        // accessToken 仅存内存闭包，不再写入 Zustand 状态（避免持久化泄漏）
+        set({ user, isAuthenticated: true })
       },
 
       /** 清除所有认证状态 */
       clearAuth: () => {
         setAccessToken(null)
-        set({ user: null, accessToken: null, isAuthenticated: false })
+        set({ user: null, isAuthenticated: false })
         // 清除 persist 存储
         if (typeof window !== 'undefined') {
           try {

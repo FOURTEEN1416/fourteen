@@ -347,7 +347,7 @@
 | `requirements.txt` | Python 依赖 |
 | `main.py` | 主入口 |
 | `user_scheduler.py` | 多用户调度器 |
-| `orchestrator.py` | Orchestrator 编排（薄包装层，实际逻辑在 orchestrator/optimized_orchestrator.py） |
+| `orchestrator/` | Orchestrator 编排包（实际逻辑在 orchestrator/optimized_orchestrator.py） |
 | `frontend/package.json` | 前端依赖 |
 | `frontend/vite.config.ts` | Vite 构建配置 |
 | `frontend/tsconfig.json` | TypeScript 配置 |

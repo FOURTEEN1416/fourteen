@@ -1,6 +1,6 @@
 # 代码图谱 — unique-you (唯一的你) v3.0.0
 
-> 由 维护者 手动维护 | 上次大规模扫描: 2026-07-09 | 最后更新: 2026-07-09
+> 由 维护者 手动维护 | 上次大规模扫描: 2026-07-09 | 最后更新: 2026-07-14
 > ✅ codebase-memory 图谱工具 指标已通过实时扫描验证。
 
 ---
@@ -157,7 +157,7 @@ sequenceDiagram
 | 模块 | 文件 | 职责 |
 |------|------|------|
 | `main.py` | main.py (~103KB) | 入口 + OptimizedOrchestrator + 多模式启动 |
-| `orchestrator.py` | orchestrator.py (31KB) | 基础 Orchestrator 类 |
+| `orchestrator/` | orchestrator/ (包) | 基础 Orchestrator 类（`Orchestrator = OptimizedOrchestrator` 别名） |
 | `user_scheduler.py` | user_scheduler.py (13KB) | 多用户调度，每个微信用户独立情感状态 |
 
 **OptimizedOrchestrator 运行模式**：
@@ -173,8 +173,7 @@ sequenceDiagram
 
 | 来源 | 路径 | 路由数 | 说明 |
 |------|------|--------|------|
-| `api/_*_routes.py` | 8 个子路由文件 | ~71 端点 | 旧版路由：chat/users/personality/training/tools/safety/clone/misc |
-| `api/routers/` | 13 个域路由 | ~97 端点 | 新版域路由：character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card/demo |
+| `api/routers/` | 21 个域路由 | ~168 端点 | 域路由：character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card/demo/chat/clone/misc/personality/safety/tools/training/users |
 | `shisi/api/` | v1 + v2 | ~164 端点 | shisi 域：affinity/character/emotion_stage/memory/persona/stats/sticker/training/vital_signs + v2 健康检查/迁移 |
 
 ### 4.3 shisi/ — Clean Architecture 重构（核心域）
@@ -260,7 +259,7 @@ DDD 分层架构，是项目最重要的重构成果：
 
 安全检查在 process_message 中执行两次：输入检查（3 层）+ 输出检查（4 层）。
 
-**安全日志更新 (2026-07-01)**：`content_safety.py` 新增 `_log_safety_event()` 函数，在每次规则命中/LLM 分类命中后记录安全事件（category、direction、截断文本、时间戳，按用户隔离）。日志失败从不阻塞安全执行。
+**安全日志更新 (2026-07-01)**：`content_safety.py` 新增 `_log_safety_event()` 函数，在每次规则命中/LLM 分类命中后记录安全事件（category、direction、text_length、text_hash、时间戳，按用户隔离）。日志失败从不阻塞安全执行。
 
 ### 4.7 llm_provider/ — LLM 网关（5+ 供应商）
 
@@ -539,5 +538,6 @@ main.py 中的函数占满前 6 名（main.py ~103KB，自 2026-06-30 增加 ~9K
 | 2026-07-01 | 9c0b636..b455222 (7 commits) | 初始创建：新增 tools/ 工具系统、sensenova LLM 供应商、PersonaService 两阶段构造、18 个前端页面、安全日志 |
 | 2026-07-03 | 9a0ca50, 78acdc9 (2 commits) | 修复 ImageGenTool Agnes API 端点 (apihub.agnes-ai.com)，删除 response_format 参数；更新环境模板文档 |
 | 2026-07-09 | — | 知识图谱索引刷新（+12 节点 / +8 边，扫描时间更新至 2026-07-09） |
+| 2026-07-14 | — | 投产前安全审计修复：路径遍历防护、认证统一、IDOR 修复、部署加固；清理墓碑代码（8个 set_dependencies 函数、2个死函数）、删除18个一次性脚本和临时文件、恢复 app_factory.py |
 
 *此图谱将持续更新以反映项目变化。*

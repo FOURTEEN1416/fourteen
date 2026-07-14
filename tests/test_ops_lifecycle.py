@@ -84,8 +84,8 @@ async def db_module(tmp_path: Any) -> AsyncGenerator[Any, None]:
 def app_no_deps() -> Any:
     """Create a bare FastAPI app without any orchestrator/deps.
 
-    The health endpoint returns ``{"status": "unknown"}`` because
-    ``deps.health`` is None by default.
+    The health endpoint returns ``{"status": "ok"}`` because the process
+    is alive even without a health checker configured.
     """
     # Ensure auth is disabled for test isolation
     import api.auth as auth_mod
@@ -105,11 +105,20 @@ async def async_client(app_no_deps: Any) -> AsyncGenerator[AsyncClient, None]:
 
 
 def _get_route_paths(app: Any) -> set[str]:
-    """Extract all route paths from a FastAPI app instance."""
+    """Extract all route paths from a FastAPI app instance.
+
+    Handles FastAPI 0.139+ _IncludedRouter wrappers that lazily store
+    included router routes under original_router.
+    """
     paths: set[str] = set()
     for route in app.routes:
         if hasattr(route, "path"):
             paths.add(route.path)
+        elif hasattr(route, "original_router"):
+            # FastAPI 0.139+ wraps included routers in _IncludedRouter
+            for sub in route.original_router.routes:
+                if hasattr(sub, "path"):
+                    paths.add(sub.path)
     return paths
 
 
@@ -221,9 +230,9 @@ class TestHealthEndpoint:
         """Response has expected fields (status at minimum)."""
         response = await async_client.get("/api/health")
         data = response.json()
-        # Without a health checker, the endpoint returns {"status": "unknown"}
+        # Without a health checker, the endpoint still returns {"status": "ok"}
         assert "status" in data
-        assert data["status"] == "unknown"
+        assert data["status"] == "ok"
 
     @pytest.mark.asyncio
     async def test_health_works_after_init(self, db_module: Any) -> None:
@@ -240,7 +249,7 @@ class TestHealthEndpoint:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.get("/api/health")
             assert response.status_code == 200
-            assert response.json()["status"] == "unknown"
+            assert response.json()["status"] == "ok"
 
     @pytest.mark.asyncio
     async def test_health_no_auth_required(self, async_client: AsyncClient) -> None:
@@ -408,7 +417,7 @@ class TestRequestLifecycle:
             )
 
         assert response.status_code == 200
-        assert response.json()["status"] == "unknown"
+        assert response.json()["status"] == "ok"
 
     @pytest.mark.asyncio
     async def test_concurrent_health_checks(self) -> None:

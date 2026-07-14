@@ -98,7 +98,10 @@ def _get_pe():
 
 
 @router.get("/api/psych/profile")
-async def psych_profile(_auth: bool = Security(verify_api_key_dep)):
+async def psych_profile(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     pe = _get_pe()
     if pe is None:
         return {"user_id": "default", "status": "unavailable", "snapshots": 0}
@@ -109,6 +112,7 @@ async def psych_profile(_auth: bool = Security(verify_api_key_dep)):
 async def psych_snapshots(
     limit: int = Query(default=20, ge=1, le=200),
     _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     pe = _get_pe()
     if pe is None:
@@ -130,7 +134,10 @@ async def reset_psych_profile(
 
 
 @router.get("/api/psych/mental-health")
-async def psych_mental_health(_auth: bool = Security(verify_api_key_dep)):
+async def psych_mental_health(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     pe = _get_pe()
     if pe is None:
         return {"available": False}
@@ -148,7 +155,10 @@ async def psych_mental_health(_auth: bool = Security(verify_api_key_dep)):
 
 
 @router.get("/api/psych/liwc")
-async def psych_liwc(_auth: bool = Security(verify_api_key_dep)):
+async def psych_liwc(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     pe = _get_pe()
     if pe is None or not pe.liwc:
         return {"available": False}

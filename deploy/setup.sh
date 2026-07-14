@@ -96,7 +96,10 @@ fi
 
 info "Setting permissions for ${APP_USER}..."
 chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
-chmod -R 755 "${APP_DIR}"
+# 安全加固：目录 750（仅属主可读写执行，属组可读执行），文件 640（仅属主可读写，属组可读）
+find "${APP_DIR}" -type d -exec chmod 750 {} \;
+find "${APP_DIR}" -type f -exec chmod 640 {} \;
+chmod 600 "${APP_DIR}/.env" 2>/dev/null || true
 info "Step 2/7 complete."
 
 # ═══════════════════════════════════════════════════════════════

@@ -1,8 +1,8 @@
 # 后端地图
 
-**最近更新:** 2026-07-13
+**最近更新:** 2026-07-14
 **版本:** 3.1.0
-**入口文件:** `api/run_api.py`, `api/app_factory.py`, `main.py`, `orchestrator.py`
+**入口文件:** `api/run_api.py`, `api/app_factory.py`, `main.py`, `orchestrator/`
 
 ---
 
@@ -16,6 +16,8 @@ api/                        ← FastAPI 路由层
 ├── auth_jwt.py             ← JWT 认证 (bcrypt + python-jose)
 ├── database.py             ← SQLAlchemy 模型 (User, UserSession)
 ├── deps.py                 ← 依赖注入
+├── health_routes.py        ← 健康检查路由 (/api/health, /api/ready) — 无需认证
+├── runtime_config.py       ← 运行时环境检测 (is_production, get_database_url)
 ├── websocket_server.py     ← WebSocket 服务
 ├── qrcode_store.py         ← 二维码存储
 ├── session_manager.py      ← 会话管理
@@ -36,7 +38,7 @@ api/                        ← FastAPI 路由层
 │   └── demo_routes.py      ← 演示 (demo)
 │
 │   (以下为从 api/ 根目录迁移的旧路由，已去除下划线前缀)
-│   ├── misc_routes.py      ← 杂项 (10 endpoints)
+│   ├── misc_routes.py      ← 杂项 (9 endpoints, /api/health 已迁移至 health_routes.py)
 │   ├── chat_routes.py      ← 聊天 (10 endpoints)
 │   ├── personality_routes.py ← 人格 (9 endpoints)
 │   ├── users_routes.py     ← 用户 (7 endpoints)
@@ -45,8 +47,8 @@ api/                        ← FastAPI 路由层
 │   ├── safety_routes.py    ← 安全 (12 endpoints)
 │   └── clone_routes.py     ← 克隆 (7 endpoints)
 │
-└── main_routes.py          ← 重构后的主路由 (仅 95 行, 0 endpoints)
-                             包含 6 个 Pydantic 模型 + 4 个 Helper + sanitize_config
+└── main_routes.py          ← 共享模型与 Helper (仅 Pydantic 模型 + _sanitize_config)
+                             不再包含 router 实例或端点定义
 ```
 
 ---
@@ -172,12 +174,11 @@ api/                        ← FastAPI 路由层
 
 ### Orchestrator 12 级流水线
 
-> **注意:** 根目录 `orchestrator.py` 已合并为薄包装层，仅导出向后兼容别名
-> (`Orchestrator = OptimizedOrchestrator`)。实际编排逻辑统一由
-> `orchestrator/optimized_orchestrator.py` 中的 `OptimizedOrchestrator` 提供。
+> **注意:** 根目录 `orchestrator.py` 已删除，编排逻辑统一由 `orchestrator/` 包提供。
+> `orchestrator/optimized_orchestrator.py` 中的 `OptimizedOrchestrator` 是实际实现。
 
 ```
-main.py/orchestrator.py
+main.py/orchestrator/
 ┌─────────────────────────────────────────────────────────┐
 │  1. ContentSafetyFilter    ← 内容安全过滤                 │
 │  2. PIIAnonymizer          ← PII 匿名化                  │

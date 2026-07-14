@@ -19,7 +19,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import get_current_user_id, require_role
+from api.auth_jwt import require_role
 from api.database import User
 from api.deps import deps
 from api.main_routes import ToolToggleRequest
@@ -64,7 +64,7 @@ async def toggle_tool(
     name: str,
     req: ToolToggleRequest,
     _auth: bool = Security(verify_api_key_dep),
-    _user: int = Security(get_current_user_id),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     orch = deps.orch
     if not orch or not orch._tools or not orch._tools.registry:

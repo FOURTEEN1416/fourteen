@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Security, UploadFile
-from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
+from api.auth import verify_api_key_dep
+from api.path_security import sanitize_id
 from shisi.character.character_card_v2 import CharaCardV2Parser
 from shisi.character.models import CharaCardV2
 from shisi.knowledge.character_knowledge_service import get_knowledge_service
@@ -22,29 +22,18 @@ logger = logging.getLogger("api.knowledge_routes")
 
 router = APIRouter(prefix="/api/characters", tags=["knowledge"])
 
-_verify_api_key_func: Callable | None = None
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-
-async def _verify_api_key(api_key: str | None = Security(_api_key_header)):
-    if _verify_api_key_func is not None:
-        return await _verify_api_key_func(api_key)
-    return True
-
-
-def set_dependencies(verify_api_key: Callable) -> None:
-    global _verify_api_key_func
-    _verify_api_key_func = verify_api_key
-
 
 CHARACTER_DIR = Path("characters")
 
 
 def _load_character_data(character_id: str) -> dict[str, Any] | None:
     """从 JSON 文件加载角色数据。"""
-    filepath = CHARACTER_DIR / f"{character_id}.json"
+    safe_id = sanitize_id(character_id)
+    if not safe_id:
+        return None
+    filepath = CHARACTER_DIR / f"{safe_id}.json"
     if not filepath.exists():
-        filepath = Path("data") / "characters" / f"{character_id}.json"
+        filepath = Path("data") / "characters" / f"{safe_id}.json"
     if not filepath.exists():
         return None
     try:
@@ -73,7 +62,7 @@ def _load_character_card(character_id: str) -> CharaCardV2 | None:
 @router.get("/{character_id}/knowledge/stats")
 async def get_knowledge_stats(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """获取角色知识库统计。"""
     card = _load_character_card(character_id)
@@ -112,7 +101,7 @@ class KnowledgeSearchRequest(BaseModel):
 async def search_knowledge(
     character_id: str,
     req: KnowledgeSearchRequest,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """搜索角色知识库。"""
     card = _load_character_card(character_id)
@@ -147,7 +136,7 @@ async def search_knowledge(
 async def upload_knowledge_document(
     character_id: str,
     file: UploadFile = File(...),  # noqa: B008
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """上传文档到角色知识库（文本文件，自动分块索引）"""
     card = _load_character_card(character_id)
@@ -169,7 +158,7 @@ async def upload_knowledge_document(
         try:
             service.index_from_card(character_id, card)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"索引知识失败: {e}") from e
+            raise HTTPException(status_code=500, detail="索引知识失败") from e
 
     chunk_size = 1000
     chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)] if len(text) > chunk_size else [text]
@@ -209,7 +198,7 @@ async def upload_knowledge_document(
 async def delete_knowledge_document(
     character_id: str,
     doc_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """删除角色知识库中的文档"""
     service = get_knowledge_service()
@@ -248,7 +237,7 @@ class VaultCollectRequest(BaseModel):
 async def collect_knowledge_vault(
     character_id: str,
     req: VaultCollectRequest = VaultCollectRequest(),  # noqa: B008
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """触发知识宝库收集：从角色卡提取 PersonaFeatures → 知识块 → BM25 索引。"""
     card = _load_character_card(character_id)
@@ -273,13 +262,13 @@ async def collect_knowledge_vault(
         }
     except Exception as e:
         logger.exception("知识宝库收集失败: %s", character_id)
-        raise HTTPException(status_code=500, detail=f"知识宝库收集失败: {e}") from e
+        raise HTTPException(status_code=500, detail="知识宝库收集失败") from e
 
 
 @router.get("/{character_id}/knowledge/vault/features")
 async def get_vault_features(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """查看角色 PersonaFeatures 提取结果（调试用）。"""
     card = _load_character_card(character_id)
@@ -301,7 +290,7 @@ async def get_vault_features(
             ),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Persona 提取失败: {e}") from e
+        raise HTTPException(status_code=500, detail="Persona 提取失败") from e
 
 
 # ── 从网络抓取人物资料 ──
@@ -315,7 +304,7 @@ class CrawlPersonaRequest(BaseModel):
 async def crawl_persona_knowledge(
     character_id: str,
     req: CrawlPersonaRequest,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """从网络抓取人物资料并写入角色知识索引。"""
     card = _load_character_card(character_id)

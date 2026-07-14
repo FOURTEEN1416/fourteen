@@ -78,7 +78,7 @@ async def clone_voice(
         raise
     except Exception as e:
         logger.error("语音克隆失败: %s", e)
-        raise HTTPException(status_code=500, detail=f"语音克隆失败: {e}") from e
+        raise HTTPException(status_code=500, detail="语音克隆失败") from e
 
 
 @router.post("/design")
@@ -143,7 +143,7 @@ async def design_voice(
         raise
     except Exception as e:
         logger.error("音色设计失败: %s", e)
-        raise HTTPException(status_code=500, detail=f"音色设计失败: {e}") from e
+        raise HTTPException(status_code=500, detail="音色设计失败") from e
 
 
 @router.post("/switch-voice")
@@ -176,7 +176,7 @@ async def switch_voice(
         }
     except Exception as e:
         logger.error("切换音色失败: %s", e)
-        raise HTTPException(status_code=500, detail=f"切换音色失败: {e}") from e
+        raise HTTPException(status_code=500, detail="切换音色失败") from e
 
 
 @router.get("/status")
@@ -266,7 +266,7 @@ async def set_mimo_engine(
 
     except Exception as e:
         logger.error("切换MiMo引擎失败: %s", e)
-        raise HTTPException(status_code=500, detail=f"切换引擎失败: {e}") from e
+        raise HTTPException(status_code=500, detail="切换引擎失败") from e
 
 
 @router.post("/synthesize")
@@ -291,4 +291,4 @@ async def synthesize(
         raise
     except Exception as e:
         logger.error("MiMo合成失败: %s", e)
-        raise HTTPException(status_code=500, detail=f"语音合成失败: {e}") from e
+        raise HTTPException(status_code=500, detail="语音合成失败") from e

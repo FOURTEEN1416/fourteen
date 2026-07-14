@@ -200,12 +200,6 @@ def load_fusion_config(config_dir: str) -> dict[str, Any]:
     return {}
 
 
-def _should_use_shisi_memory(fusion_cfg: dict[str, Any]) -> bool:
-    """判断是否使用 shisi 记忆服务适配层。双轨架构已迁移完成。"""
-    return True
-def _should_use_shisi_rag(fusion_cfg: dict[str, Any]) -> bool:
-    """判断是否使用 shisi knowledge 适配层。双轨架构已迁移完成。"""
-    return True
 def run_clone_pipeline(args: argparse.Namespace) -> None:
     print("\n" + "=" * 50)
     print("  [CLONE] 风格克隆管线")

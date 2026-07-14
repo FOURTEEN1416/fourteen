@@ -6,8 +6,9 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Security
-from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
+
+from api.auth import verify_api_key_dep
 
 logger = logging.getLogger("api.memory_routes")
 
@@ -16,27 +17,11 @@ router = APIRouter(prefix="/api/characters", tags=["memory"])
 _fav_mgr: Any | None = None
 _fwd_mgr: Any | None = None
 
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-_verify_api_key_func = None
-
-
-async def _verify_api_key(api_key: str | None = Security(_api_key_header)):
-    if _verify_api_key_func is not None:
-        return await _verify_api_key_func(api_key)
-    return True
-
 
 class ForwardRequest(BaseModel):
     to_character: str
     memory_id: str
     content: str = ""
-
-
-def set_dependencies(verify_api_key, fav_mgr=None, fwd_mgr=None):
-    global _fav_mgr, _fwd_mgr, _verify_api_key_func
-    _fav_mgr = fav_mgr
-    _fwd_mgr = fwd_mgr
-    _verify_api_key_func = verify_api_key
 
 
 # ── 端点 ──
@@ -45,7 +30,7 @@ def set_dependencies(verify_api_key, fav_mgr=None, fwd_mgr=None):
 @router.get("/{character_id}/favorites")
 async def list_favorites(
     character_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """获取角色收藏列表"""
     if _fav_mgr is None:
@@ -55,14 +40,14 @@ async def list_favorites(
         return {"favorites": favs, "total": len(favs)}
     except Exception as e:
         logger.exception("获取收藏失败 %s", character_id)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="内部错误") from e
 
 
 @router.post("/{character_id}/favorites")
 async def add_favorite(
     character_id: str,
     memory_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """添加收藏"""
     if _fav_mgr is None:
@@ -77,7 +62,7 @@ async def add_favorite(
 async def remove_favorite(
     character_id: str,
     memory_id: str,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """取消收藏"""
     if _fav_mgr is None:
@@ -92,7 +77,7 @@ async def remove_favorite(
 async def forward_favorite(
     character_id: str,
     req: ForwardRequest,
-    _auth: bool = Security(_verify_api_key),
+    _auth: bool = Security(verify_api_key_dep),
 ):
     """转发收藏到其他角色"""
     if _fwd_mgr is None:

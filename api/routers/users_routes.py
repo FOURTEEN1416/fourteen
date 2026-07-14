@@ -30,7 +30,10 @@ router = APIRouter(tags=["users"])
 
 
 @router.get("/api/users")
-async def list_users(_auth: bool = Security(verify_api_key_dep)):
+async def list_users(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     gf = deps.gf
     if not gf:
         return {"users": [], "total": 0}
@@ -38,7 +41,11 @@ async def list_users(_auth: bool = Security(verify_api_key_dep)):
 
 
 @router.get("/api/users/{user_id}")
-async def get_user_detail(user_id: str, _auth: bool = Security(verify_api_key_dep)):
+async def get_user_detail(
+    user_id: str,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     gf = deps.gf
     if not gf:
         raise HTTPException(503, "女友管理器未初始化")
@@ -53,6 +60,7 @@ async def get_user_chat_history(
     user_id: str,
     limit: int = Query(default=50, le=200),
     _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     orch = deps.orch
     if not orch or not orch._memory:
@@ -72,7 +80,11 @@ async def get_user_chat_history(
 
 
 @router.get("/api/users/{user_id}/emotion")
-async def get_user_emotion(user_id: str, _auth: bool = Security(verify_api_key_dep)):
+async def get_user_emotion(
+    user_id: str,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     gf = deps.gf
     if not gf:
         raise HTTPException(503, "女友管理器未初始化")
@@ -92,6 +104,7 @@ async def set_user_role(
     user_id: str,
     card_id: str = Query(..., description="角色卡ID"),
     _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     gf = deps.gf
     if not gf:

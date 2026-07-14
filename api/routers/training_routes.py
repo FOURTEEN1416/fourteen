@@ -61,8 +61,8 @@ async def get_training_progress(_auth: bool = Security(verify_api_key_dep)):
 
 @router.post("/api/training/extract")
 async def start_extraction(
-    target: str = "",
-    source: str = "wcf",
+    target: str = Query(default="", max_length=500),
+    source: str = Query(default="wcf", pattern=r"^(wcf|wechat|csv)$"),
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
@@ -193,7 +193,7 @@ async def stop_training(
 
 @router.post("/api/training/test")
 async def test_clone(
-    message: str,
+    message: str = Query(..., max_length=1000),
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):

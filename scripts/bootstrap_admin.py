@@ -3,8 +3,8 @@
 引导脚本 — 创建第一个管理员用户
 
 用法:
-    python scripts/bootstrap_admin.py                    # 用默认开发账号
-    python scripts/bootstrap_admin.py --email admin@test.com --password admin123
+    python scripts/bootstrap_admin.py                    # 随机生成密码
+    python scripts/bootstrap_admin.py --password MySecurePass123  # 指定密码
 
 环境变量:
     ADMIN_EMAIL, ADMIN_PASSWORD 可替代命令行参数
@@ -38,9 +38,25 @@ def _hash_password(password: str) -> str:
 logger = logging.getLogger("bootstrap_admin")
 
 DEFAULT_EMAIL = "admin@fourteen.local"
-DEFAULT_PASSWORD = "admin123"
 DEFAULT_USERNAME = "admin"
 DEFAULT_DISPLAY_NAME = "系统管理员"
+
+
+def _get_password(args_password: str | None) -> str:
+    """获取管理员密码：优先命令行参数，其次环境变量，最后生成随机密码"""
+    import secrets
+    import string
+    if args_password:
+        return args_password
+    env_pass = os.environ.get("ADMIN_PASSWORD")
+    if env_pass:
+        return env_pass
+    # 生成随机密码
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+    password = ''.join(secrets.choice(alphabet) for _ in range(20))
+    print(f"[SECURITY] 已生成随机管理员密码: {password}")
+    print("[SECURITY] 请妥善保存，此密码不会再次显示。")
+    return password
 
 
 async def bootstrap_admin(email: str, password: str, username: str, display_name: str) -> bool:
@@ -78,7 +94,8 @@ async def bootstrap_admin(email: str, password: str, username: str, display_name
 def main():
     parser = argparse.ArgumentParser(description="引导创建第一个管理员用户")
     parser.add_argument("--email", default=os.environ.get("ADMIN_EMAIL", DEFAULT_EMAIL))
-    parser.add_argument("--password", default=os.environ.get("ADMIN_PASSWORD", DEFAULT_PASSWORD))
+    parser.add_argument("--password", default=None,
+                        help="管理员密码（不提供则从环境变量 ADMIN_PASSWORD 或随机生成）")
     parser.add_argument("--username", default=DEFAULT_USERNAME)
     parser.add_argument("--display-name", default=DEFAULT_DISPLAY_NAME)
     args = parser.parse_args()
@@ -89,13 +106,16 @@ def main():
         datefmt="%H:%M:%S",
     )
 
+    # 安全获取密码：优先命令行参数，其次环境变量，最后随机生成
+    password = _get_password(args.password)
+
     # 先确保表存在
     asyncio.run(_ensure_tables())
 
     created = asyncio.run(
         bootstrap_admin(
             email=args.email,
-            password=args.password,
+            password=password,
             username=args.username,
             display_name=args.display_name,
         )
@@ -104,7 +124,6 @@ def main():
     if created:
         print(f"\n[OK] 管理员账号已创建！")
         print(f"   邮箱: {args.email}")
-        print(f"   密码: {args.password}")
         print(f"   角色: admin")
         print(f"\n => 访问 http://localhost:5173/login 登录")
     else:

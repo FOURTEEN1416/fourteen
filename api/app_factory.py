@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from api.auth import configure_auth, verify_api_key_dep
 from api.auth_jwt import verify_token
 from api.deps import deps
+from api.health_routes import health_router
 from api.routers.chat_routes import router as chat_router
 from api.routers.clone_routes import router as clone_router
 from api.routers.demo_routes import router as demo_router
@@ -36,10 +37,7 @@ logger = logging.getLogger("app_factory")
 # ── 速率限制（slowapi 可选） ────────────────────────────
 
 try:
-    from slowapi import Limiter
     from slowapi.errors import RateLimitExceeded
-    from slowapi.middleware import SlowAPIMiddleware
-    from slowapi.util import get_remote_address
 
     HAS_SLOWAPI = True
 except ImportError:
@@ -159,14 +157,10 @@ def create_api_app(
     ).lower() == "true"
     _rate_limit_per_minute = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "60"))
 
-    if HAS_SLOWAPI and _rate_limit_enabled:
-        limiter = Limiter(
-            key_func=get_remote_address,
-            default_limits=[f"{_rate_limit_per_minute}/minute"],
-        )
-        app.state.limiter = limiter
-        app.add_middleware(SlowAPIMiddleware)
-
+    # SlowAPI 的 SlowAPIMiddleware 与 FastAPI 0.139+ 的 _IncludedRouter 不兼容，
+    # 因此无论 slowapi 是否安装，都使用自定义回退限流器作为实际执行机制。
+    # slowapi 的异常处理器仍注册，以支持 per-route @limiter.limit() 装饰器。
+    if HAS_SLOWAPI:
         async def _rate_limit_exceeded_handler(
             request: Request, exc: RateLimitExceeded
         ) -> JSONResponse:
@@ -179,23 +173,9 @@ def create_api_app(
             )
 
         app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    elif HAS_SLOWAPI:
-        # slowapi installed but rate limiting disabled — still register handler
-        # so 429s from per-route limits render correctly
-        async def _rate_limit_exceeded_handler(
-            request: Request, exc: RateLimitExceeded
-        ) -> JSONResponse:
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "detail": f"Rate limit exceeded: {exc.detail}",
-                    "error_code": "RATE_LIMIT",
-                },
-            )
 
-        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    else:
-        _setup_fallback_rate_limiter(app)
+    if _rate_limit_enabled:
+        _setup_fallback_rate_limiter(app, max_requests=_rate_limit_per_minute)
 
     # ═══════════════════════════════════════════════════
     # 异常处理器
@@ -239,6 +219,13 @@ def create_api_app(
         sessions=session_manager,
         gf=user_manager,
     )
+
+    # ═══════════════════════════════════════════════════
+    # 挂载健康检查路由（无需认证，优先于其他路由注册）
+    # ═══════════════════════════════════════════════════
+
+    app.include_router(health_router)       # 2 端点: /api/health + /api/ready（无认证）
+    logger.info("健康检查路由已挂载 (/api/health, /api/ready)")
 
     # ═══════════════════════════════════════════════════
     # 挂载主路由（已拆分为 9 个子路由，共 75 端点）
@@ -420,12 +407,13 @@ def create_api_app(
 # ── 回退速率限制器（无 slowapi 时使用） ────────────────
 
 
-def _setup_fallback_rate_limiter(app: FastAPI) -> None:
+def _setup_fallback_rate_limiter(app: FastAPI, max_requests: int = 60) -> None:
     from collections import defaultdict
 
     _rate_limit_store: dict[str, list[float]] = defaultdict(list)
     _rate_limit_lock = threading.Lock()
     _rate_limit_last_cleanup: list[float] = [time.time()]
+    _max_requests = max_requests
 
     def _cleanup_expired_records(now: float, window_seconds: int):
         expired_keys = []
@@ -438,7 +426,7 @@ def _setup_fallback_rate_limiter(app: FastAPI) -> None:
         for key in expired_keys:
             del _rate_limit_store[key]
 
-    def _simple_rate_limit(request: Request, max_requests: int = 60, window_seconds: int = 60) -> bool:
+    def _simple_rate_limit(request: Request, window_seconds: int = 60) -> bool:
         client_ip = request.client.host if request.client else "unknown"
         key = f"{client_ip}:{request.url.path}"
         now = time.time()
@@ -450,9 +438,7 @@ def _setup_fallback_rate_limiter(app: FastAPI) -> None:
 
             _rate_limit_store[key] = [t for t in _rate_limit_store[key] if now - t < window_seconds]
 
-            # 修复：先检查数量，未超限则 append 再 return True
-            # 原逻辑当列表为空时直接 return True 但不记录本次请求，导致限流永不生效
-            if len(_rate_limit_store[key]) >= max_requests:
+            if len(_rate_limit_store[key]) >= _max_requests:
                 return False
             _rate_limit_store[key].append(now)
             return True
@@ -460,5 +446,8 @@ def _setup_fallback_rate_limiter(app: FastAPI) -> None:
     @app.middleware("http")
     async def fallback_rate_limiter(request: Request, call_next):
         if not _simple_rate_limit(request):
-            return JSONResponse(status_code=429, content={"detail": "Too many requests"})
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests", "error_code": "RATE_LIMIT"},
+            )
         return await call_next(request)
