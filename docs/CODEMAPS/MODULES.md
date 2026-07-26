@@ -20,7 +20,7 @@
 | **proactive** | 5 | `proactive/` | 主动消息推送 | ✅ 活跃 |
 | **character_card** | 6 | `character_card/` | 角色卡解析/验证/构建 | ✅ 活跃 |
 | **clone_training** | 6 | `clone_training/` | 克隆训练（数据清洗/数据集构建/LoRA） | ✅ 活跃 |
-| **orchestrator** | 3 | `orchestrator/` | 优化编排器（会话锁/语音检测） | ✅ 活跃 |
+| **orchestrator** | 5 | `orchestrator/` | 优化编排器（初始化阶段/流式/会话锁/语音检测） | ✅ 活跃 |
 | **weclone_adapter** | 3 | `weclone_adapter/` | 微信克隆适配 | ✅ 活跃 |
 | **multimodal** | 2 | `multimodal/` | 多模态处理 | ✅ 活跃 |
 | **wechat_direct** | 2 | `wechat_direct/` | 微信直连 | ✅ 活跃 |
@@ -185,16 +185,20 @@
 
 ---
 
-## orchestrator/ — 优化编排器 (3 文件)
+## orchestrator/ — 优化编排器 (5 文件)
 
-**职责:** 聊天流水线编排，会话锁管理，语音检测
+**职责:** 聊天流水线编排，组件初始化阶段化，SSE 流式输出，会话锁管理，语音检测
 
 **关键文件:**
-- `optimized_orchestrator.py` — 优化编排器主逻辑（12 级流水线）
-- `session_locks.py` — 会话锁管理
+- `optimized_orchestrator.py` — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / 上下文准备 / `process_message` / 健康检查（920 行）
+- `_init_mixin.py` — `_InitPhasesMixin`：`initialize` 拆分为 9 个 `_init_*` 阶段（core/emotion/persona/tone → memory/ASE/scheduler/tools/RAG → world_info → character_card → voice → memory_ext → persona_extractor → vault）
+- `_stream_mixin.py` — `_StreamPipelineMixin`：`process_message_stream` SSE 真流式/伪流式降级
+- `session_locks.py` — 会话锁管理（`SessionLockManager`）
 - `voice_detector.py` — 语音活动检测
 
-> **注:** 根目录 `orchestrator.py` 已删除，编排逻辑统一由 `orchestrator/` 包提供（`orchestrator/optimized_orchestrator.py`）。
+> **架构:** `OptimizedOrchestrator` 继承 `_InitPhasesMixin` + `_StreamPipelineMixin`，通过 `self.components` 共享状态。公共 API 100% 兼容，外部导入路径 `from orchestrator import Orchestrator` 不变。
+>
+> **注:** 根目录 `orchestrator.py` 已删除，编排逻辑统一由 `orchestrator/` 包提供。
 
 **依赖:** shisi, llm_provider, security, tools, cache
 **被依赖:** api (chat_routes)
