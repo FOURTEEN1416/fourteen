@@ -8,6 +8,7 @@ P0 测试套件：修复后关键模块的单元测试
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 import time
@@ -170,3 +171,47 @@ class TestPersonaExtractorUserId:
         pe.set_user_id("alice")
         # 同值切换不应重置 _msg_count（避免无谓清零）
         assert pe._msg_count == 5
+
+
+def test_user_manager_passes_user_emotion_engine():
+    """Regression: UserManager 创建的用户专属情绪引擎必须进入聊天管线。"""
+    from user_scheduler import UserManager
+
+    class FakeOrchestrator:
+        def __init__(self):
+            self.components = {"emotion": MagicMock()}
+            self.kwargs = None
+
+        async def process_message(self, *args, **kwargs):
+            self.kwargs = kwargs
+            return {"reply": "ok"}
+
+    orch = FakeOrchestrator()
+    manager = UserManager(orch)
+    instance = manager._get_or_create("alice")
+    asyncio.run(manager.process_message("alice", "你好"))
+
+    assert orch.kwargs["emotion_engine"] is instance.emotion_engine
+    assert orch.kwargs["character_id"] == instance.character_card_id
+
+
+def test_user_manager_uses_distinct_engine_per_character():
+    """同一微信用户切换角色时不能继承上一角色的情绪实例。"""
+    from user_scheduler import UserManager
+
+    class FakeOrchestrator:
+        def __init__(self):
+            self.components = {"emotion": MagicMock()}
+
+        async def process_message(self, *args, **kwargs):
+            return {"reply": "ok"}
+
+    manager = UserManager(FakeOrchestrator())
+    instance = manager._get_or_create("alice")
+    first = instance.emotion_engine
+    assert manager.set_user_character("alice", "role-b") is True
+    second = instance.emotion_engine
+
+    assert first is not second
+    assert instance.emotion_engines["default"] is first
+    assert instance.emotion_engines["role-b"] is second

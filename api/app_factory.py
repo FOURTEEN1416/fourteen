@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.auth import configure_auth, verify_api_key_dep
+from api.auth import configure_auth
 from api.auth_jwt import verify_token
 from api.deps import deps
 from api.health_routes import health_router
@@ -219,6 +219,8 @@ def create_api_app(
         sessions=session_manager,
         gf=user_manager,
     )
+    deps.shisi_reg = None
+    deps.route_mounts = {}
 
     # ═══════════════════════════════════════════════════
     # 挂载健康检查路由（无需认证，优先于其他路由注册）
@@ -262,8 +264,9 @@ def create_api_app(
         if orchestrator is not None:
             _mem_service = getattr(orchestrator, "components", {}).get("memory") if hasattr(orchestrator, "components") else getattr(orchestrator, "_memory", None)
         shisi_reg = setup_shisi(app, run_migrate=True, memory_service=_mem_service)
-        if orchestrator and hasattr(orchestrator, '_character_manager'):
-            orchestrator._character_manager = shisi_reg.character_manager
+        if orchestrator is not None and hasattr(orchestrator, "components"):
+            orchestrator.components["character_manager"] = shisi_reg.character_manager
+            orchestrator.components["character_service"] = shisi_reg.character_service
         deps.shisi_reg = shisi_reg
         logger.info("十四模块已挂载到REST API")
 
@@ -297,24 +300,26 @@ def create_api_app(
     except Exception as e:
         logger.warning("二维码API挂载失败: %s", e)
 
+    def _mount_required_router(name: str, router) -> None:
+        """挂载控制端关键路由，并记录到 readiness 能力矩阵。"""
+        app.include_router(router)
+        deps.route_mounts[name] = True
+        logger.info("%s API已挂载", name)
+
     # ── 统一角色管理 API ──
     try:
         from api.routers.character_routes import router as character_router
-        from api.routers.character_routes import set_dependencies as set_character_deps
-        set_character_deps(orchestrator, user_manager, verify_api_key_dep)
-        app.include_router(character_router)
-        logger.info("统一角色管理API已挂载")
+        _mount_required_router("characters", character_router)
     except Exception as e:
+        deps.route_mounts["characters"] = False
         logger.warning("统一角色管理API挂载失败: %s", e)
 
     # ── 角色音色绑定 API ──
     try:
         from api.routers.voice_routes import router as voice_router
-        from api.routers.voice_routes import set_dependencies as set_voice_deps
-        set_voice_deps(orchestrator, verify_api_key_dep)
-        app.include_router(voice_router)
-        logger.info("角色音色绑定API已挂载")
+        _mount_required_router("character_voice", voice_router)
     except Exception as e:
+        deps.route_mounts["character_voice"] = False
         logger.warning("角色音色绑定API挂载失败: %s", e)
 
     # ── MiMo TTS API ──
@@ -326,63 +331,47 @@ def create_api_app(
         logger.warning("MiMo TTS API挂载失败: %s", e)
 
     # ── 统一记忆 API（桥接 shisi FavoriteManager/ForwardManager） ──
-    if shisi_reg is not None:
-        try:
-            from api.routers.memory_routes import router as memory_bridge_router
-            from api.routers.memory_routes import set_dependencies as set_memory_deps
-            _fav_mgr_local = shisi_reg.favorite_manager
-            _fwd_mgr_local = shisi_reg.forward_manager
-            set_memory_deps(verify_api_key_dep, fav_mgr=_fav_mgr_local, fwd_mgr=_fwd_mgr_local)
-            app.include_router(memory_bridge_router)
-            logger.info("统一记忆API已挂载")
-        except Exception as e:
-            logger.warning("统一记忆API挂载失败: %s", e)
+    try:
+        from api.routers.memory_routes import router as memory_bridge_router
+        _mount_required_router("character_memory", memory_bridge_router)
+    except Exception as e:
+        deps.route_mounts["character_memory"] = False
+        logger.warning("统一记忆API挂载失败: %s", e)
 
     # ── 统一角色卡 API（桥接 shisi CharacterManager） ──
-    if shisi_reg is not None:
-        try:
-            from api.routers.persona_card_routes import router as persona_card_router
-            from api.routers.persona_card_routes import set_dependencies as set_pcard_deps
-            _char_mgr_local = shisi_reg.character_manager
-            set_pcard_deps(verify_api_key_dep, character_mgr=_char_mgr_local)
-            app.include_router(persona_card_router)
-            logger.info("统一角色卡API已挂载")
-        except Exception as e:
-            logger.warning("统一角色卡API挂载失败: %s", e)
+    try:
+        from api.routers.persona_card_routes import router as persona_card_router
+        _mount_required_router("persona_card", persona_card_router)
+    except Exception as e:
+        deps.route_mounts["persona_card"] = False
+        logger.warning("统一角色卡API挂载失败: %s", e)
 
     # ── 剧情线 API ──
     try:
         from api.routers.storyline_routes import router as storyline_router
-        from api.routers.storyline_routes import set_dependencies as set_storyline_deps
-        set_storyline_deps(verify_api_key_dep)
-        app.include_router(storyline_router)
+        _mount_required_router("storyline", storyline_router)
 
         from api.routers.knowledge_routes import router as knowledge_router
-        from api.routers.knowledge_routes import set_dependencies as set_knowledge_deps
-        set_knowledge_deps(verify_api_key_dep)
-        app.include_router(knowledge_router)
-        logger.info("剧情线API已挂载")
+        _mount_required_router("knowledge", knowledge_router)
     except Exception as e:
+        deps.route_mounts.setdefault("storyline", False)
+        deps.route_mounts.setdefault("knowledge", False)
         logger.warning("剧情线API挂载失败: %s", e)
 
     # ── 微信连接持久化 API ──
     try:
         from api.routers.wechat_routes import router as wechat_router
-        from api.routers.wechat_routes import set_dependencies as set_wechat_deps
-        set_wechat_deps(verify_api_key_dep)
-        app.include_router(wechat_router)
-        logger.info("微信连接持久化API已挂载")
+        _mount_required_router("wechat", wechat_router)
     except Exception as e:
+        deps.route_mounts["wechat"] = False
         logger.warning("微信连接持久化API挂载失败: %s", e)
 
     # ── 情绪参数编辑 API ──
     try:
         from api.routers.emotion_routes import router as emotion_params_router
-        from api.routers.emotion_routes import set_dependencies as set_emotion_params_deps
-        set_emotion_params_deps(verify_api_key_dep)
-        app.include_router(emotion_params_router)
-        logger.info("情绪参数编辑API已挂载")
+        _mount_required_router("emotion_params", emotion_params_router)
     except Exception as e:
+        deps.route_mounts["emotion_params"] = False
         logger.warning("情绪参数编辑API挂载失败: %s", e)
 
     # ── 管理员用户管理 API ──

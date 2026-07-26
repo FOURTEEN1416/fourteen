@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import MagicMock
 
-from tools.base_tool import BaseTool, ToolResult, ToolRegistry, ToolDispatcher
-from tools.builtin.calendar_tool import CalendarTool, CalculatorTool
-from tools.builtin.weather_tool import WeatherTool
+from tools.base_tool import BaseTool, ToolDispatcher, ToolRegistry, ToolResult
+from tools.builtin.calendar_tool import CalculatorTool, CalendarTool
 from tools.builtin.time_awareness_tool import TimeAwarenessTool
-
+from tools.builtin.weather_tool import WeatherTool
 
 # ── Helper: 验证 OpenAI Function Calling Schema ──
 

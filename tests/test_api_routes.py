@@ -40,7 +40,7 @@ def app():
     # Bypass X-API-Key check so smoke tests don't need a real key
     a.dependency_overrides[auth.verify_api_key_dep] = lambda: True
     # Bypass JWT-based role checks for admin-only endpoints (e.g. /api/routes)
-    from api.auth_jwt import get_current_user_id, get_current_user, require_role
+    from api.auth_jwt import get_current_user, get_current_user_id, require_role
     a.dependency_overrides[get_current_user_id] = lambda: 1
     a.dependency_overrides[get_current_user] = lambda: type("U", (), {"id": 1, "role": "admin"})()
     a.dependency_overrides[require_role("admin")] = lambda: (1, type("U", (), {"id": 1, "role": "admin"})())
@@ -90,6 +90,22 @@ def test_app_creates_and_has_at_least_71_api_routes(app):
     assert len(routes) >= 71, f"app has only {len(routes)} /api/* routes, expected >=71"
 
 
+def test_control_plane_critical_routes_are_mounted(app):
+    """Regression: the control plane must not silently lose optional route groups."""
+    actual = _app_routes(app)
+    required = {
+        ("GET", "/api/characters"),
+        ("POST", "/api/characters"),
+        ("GET", "/api/characters/{character_id}/favorites"),
+        ("GET", "/api/characters/{character_id}/storyline"),
+        ("GET", "/api/characters/{character_id}/voice"),
+        ("GET", "/api/emotion/params"),
+        ("GET", "/api/wechat/bindings"),
+        ("POST", "/api/wechat/bind"),
+    }
+    assert not required - actual, f"missing critical routes: {sorted(required - actual)}"
+
+
 # --- 8 sub-router mount checks (parametrized) ---
 
 @pytest.mark.parametrize(
@@ -102,7 +118,7 @@ def test_app_creates_and_has_at_least_71_api_routes(app):
         (training_routes, 11, "training/* + proactive/*"),
         (tools_routes, 6, "tools/* + plugins/* + health"),
         (safety_routes, 12, "safety/rag/voice/files/cache"),
-        (clone_routes, 7, "clone/*"),
+        (clone_routes, 8, "clone/*"),
     ],
 )
 def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
@@ -119,14 +135,14 @@ def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
     )
 
 
-def test_total_contribution_is_72(app):
-    """The 8 new sub-routers together contribute exactly 72 endpoints."""
+def test_total_contribution_is_73(app):
+    """The 8 new sub-routers together contribute exactly 73 endpoints."""
     modules = [
         misc_routes, chat_routes, personality_routes, users_routes,
         training_routes, tools_routes, safety_routes, clone_routes,
     ]
     total = sum(len(_sub_router_routes(m)) for m in modules)
-    assert total == 72, f"8 sub-routers contribute {total} routes, expected 72"
+    assert total == 73, f"8 sub-routers contribute {total} routes, expected 73"
 
 
 def test_no_duplicate_endpoints_across_sub_routers():

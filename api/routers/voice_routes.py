@@ -3,23 +3,17 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Security
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 from api.auth import verify_api_key_dep
-from shisi.voice.character_voice import CharacterVoiceManager
+from api.deps import deps
 
 logger = logging.getLogger("api.voice_routes")
 
 router = APIRouter(prefix="/api", tags=["voice"])
-
-_voice_mgr: CharacterVoiceManager | None = None
-_tts_mgr: Any | None = None
-_orch: Any | None = None
-
 
 # ── 请求/响应模型 ──
 
@@ -95,9 +89,8 @@ async def get_character_voice(
     _auth: bool = Security(verify_api_key_dep),
 ):
     """获取角色音色配置"""
-    if _voice_mgr is None:
-        raise HTTPException(status_code=503, detail="语音服务未初始化")
-    config = _voice_mgr.get_voice_config(character_id)
+    voice_mgr = deps.get_character_voice_manager()
+    config = voice_mgr.get_voice_config(character_id)
     if config is None:
         return {"configured": False, "voice": None}
     return {"configured": True, "voice": config}
@@ -110,11 +103,10 @@ async def bind_character_voice(
     _auth: bool = Security(verify_api_key_dep),
 ):
     """绑定角色音色"""
-    if _voice_mgr is None:
-        raise HTTPException(status_code=503, detail="语音服务未初始化")
+    voice_mgr = deps.get_character_voice_manager()
 
     try:
-        _voice_mgr.bind_voice(
+        voice_mgr.bind_voice(
             character_id=character_id,
             engine=req.engine,
             speaker_name=req.speaker_name,
@@ -136,10 +128,9 @@ async def update_character_voice(
     _auth: bool = Security(verify_api_key_dep),
 ):
     """更新角色音色配置（部分更新）"""
-    if _voice_mgr is None:
-        raise HTTPException(status_code=503, detail="语音服务未初始化")
+    voice_mgr = deps.get_character_voice_manager()
 
-    current = _voice_mgr.get_voice_config(character_id)
+    current = voice_mgr.get_voice_config(character_id)
     if current is None:
         raise HTTPException(status_code=404, detail="角色未配置音色，请先绑定")
 
@@ -159,7 +150,7 @@ async def update_character_voice(
         extra.update(req.extra_params)
         updated["extra_params"] = extra
 
-    _voice_mgr.bind_voice(
+    voice_mgr.bind_voice(
         character_id=character_id,
         engine=updated.get("engine", "edge-tts"),
         speaker_name=updated.get("speaker_name", ""),
@@ -174,10 +165,9 @@ async def unbind_character_voice(
     _auth: bool = Security(verify_api_key_dep),
 ):
     """解绑角色音色"""
-    if _voice_mgr is None:
-        raise HTTPException(status_code=503, detail="语音服务未初始化")
+    voice_mgr = deps.get_character_voice_manager()
 
-    ok = _voice_mgr.unbind_voice(character_id)
+    ok = voice_mgr.unbind_voice(character_id)
     if not ok:
         raise HTTPException(status_code=404, detail="角色未配置音色")
     return {"status": "unbound", "character_id": character_id}
@@ -204,16 +194,18 @@ async def test_character_voice(
     _auth: bool = Security(verify_api_key_dep),
 ):
     """测试角色音色合成"""
-    if _voice_mgr is None or _tts_mgr is None:
+    voice_mgr = deps.get_character_voice_manager()
+    tts_mgr = deps.get_tts()
+    if tts_mgr is None:
         raise HTTPException(status_code=503, detail="语音服务未初始化")
 
-    voice_config = _voice_mgr.get_voice_config(character_id)
+    voice_config = voice_mgr.get_voice_config(character_id)
     if voice_config is None:
         raise HTTPException(status_code=400, detail="角色未配置音色，请先绑定")
 
     # 切换到角色配置的引擎
     engine = voice_config.get("engine", "edge-tts")
-    await _tts_mgr.switch_engine(engine)
+    await tts_mgr.switch_engine(engine)
 
     # 提取合成参数
     tts_kwargs = {
@@ -225,7 +217,7 @@ async def test_character_voice(
     # 过滤掉空值
     tts_kwargs = {k: v for k, v in tts_kwargs.items() if v}
 
-    audio_data = await _tts_mgr.synthesize(req.text, **tts_kwargs)
+    audio_data = await tts_mgr.synthesize(req.text, **tts_kwargs)
     if audio_data is None:
         raise HTTPException(status_code=500, detail="语音合成失败")
 

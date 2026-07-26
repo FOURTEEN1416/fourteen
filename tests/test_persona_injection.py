@@ -14,7 +14,6 @@ import pytest
 from main import OptimizedOrchestrator
 from utils.character_helpers import normalize_character_card, sanitize_character_name, sanitize_character_text
 
-
 CHARACTERS_DIR = Path("config/characters")
 
 

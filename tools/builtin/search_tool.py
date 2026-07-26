@@ -58,8 +58,9 @@ class SearchTool(BaseTool):
     def _fallback_search(self, query: str, max_results: int = 5) -> ToolResult:
         """无 DDGS 时的公开搜索降级：Bing 网页快照（无需 API Key）。"""
         try:
-            import requests
             from urllib.parse import quote
+
+            import requests
             url = f"https://www.bing.com/search?q={quote(query)}"
             resp = requests.get(url, timeout=10, headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"

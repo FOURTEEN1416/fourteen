@@ -29,6 +29,7 @@ def _make_orchestrator(with_chat_stream: bool = True):
 
     safety = SimpleNamespace(
         check_input=lambda text: SimpleNamespace(is_safe=True, category=""),
+        check_output=lambda text: SimpleNamespace(is_safe=True, category=""),
         safe_alternative=safe_alternative,
     )
 
@@ -112,12 +113,42 @@ def test_stream_true_path_yields_tokens_and_done():
     orch = _make_orchestrator(with_chat_stream=True)
     events = asyncio.run(_collect_stream(orch, user_msg="你好", session_id="s1"))
     types = [e["type"] for e in events]
-    assert types.count("token") >= 3
+    assert types.count("token") >= 1
+    assert "".join(e["content"] for e in events if e["type"] == "token") == "你好呀"
     assert types[-1] == "done"
     done = events[-1]
     assert done["reply"] == "你好呀"
     assert done["emotion"] is not None
     assert "process_time" in done
+
+
+def test_stream_buffers_until_character_check_corrects(monkeypatch):
+    from my_character import consistency_checker
+
+    orch = _make_orchestrator(with_chat_stream=True)
+    orch.components["persona"] = SimpleNamespace(
+        build_system_prompt=lambda **kwargs: "system prompt",
+        _load_character_card=lambda character_id: {
+            "id": character_id,
+            "core_anchors": ["温柔"],
+        },
+    )
+
+    async def corrected_reply(**kwargs):
+        return "修正后的回复"
+
+    monkeypatch.setattr(consistency_checker, "check_and_correct_reply", corrected_reply)
+    events = asyncio.run(_collect_stream(
+        orch,
+        user_msg="你好",
+        session_id="s-correct",
+        character_id="role-a",
+    ))
+
+    assert not [event for event in events if event["type"] == "replace"]
+    tokens = [event["content"] for event in events if event["type"] == "token"]
+    assert "".join(tokens) == "修正后的回复"
+    assert events[-1]["reply"] == "修正后的回复"
 
 
 def test_stream_safety_blocks():

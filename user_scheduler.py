@@ -33,6 +33,7 @@ class UserInstance:
 
     # 用户专属的情感引擎
     emotion_engine: EmotionEngine | None = None
+    emotion_engines: dict[str, EmotionEngine] = field(default_factory=dict)
 
     # 统计
     total_chats: int = 0
@@ -107,6 +108,15 @@ class UserManager:
             )
         return EmotionEngine()
 
+    def _get_character_engine(self, instance: UserInstance, character_id: str) -> EmotionEngine:
+        """获取“用户 × 角色”专属情绪引擎，并同步兼容属性 emotion_engine。"""
+        engine = instance.emotion_engines.get(character_id)
+        if engine is None:
+            engine = self._create_user_engine()
+            instance.emotion_engines[character_id] = engine
+        instance.emotion_engine = engine
+        return engine
+
     # ── 核心入口 ──────────────────────────────────────────
 
     async def process_message(
@@ -126,12 +136,17 @@ class UserManager:
         """实际消息处理：委托给 orchestrator，并追加语音合成逻辑"""
         instance = self._get_or_create(user_id)
         session_id = instance.session_id
+        emotion_engine = self._get_character_engine(instance, instance.character_card_id)
 
         # 修复：传入 character_id，否则多用户角色隔离失效
         # 使用关键字参数以兼容 Orchestrator（character_id 为第 5 参）和
         # OptimizedOrchestrator（character_id 为第 4 参）两种签名
         result = await self._orch.process_message(
-            text, session_id, message_type, character_id=instance.character_card_id
+            text,
+            session_id,
+            message_type,
+            character_id=instance.character_card_id,
+            emotion_engine=emotion_engine,
         )
 
         # 统计
@@ -168,6 +183,7 @@ class UserManager:
                     character_card_id=character_card_id,
                     session_id=user_id,
                     emotion_engine=engine,
+                    emotion_engines={character_card_id: engine},
                 )
                 self._users[user_id] = instance
                 logger.info("✨ 新用户接入: %s → 角色 %s (总用户数: %d)", user_id, character_card_id, len(self._users))
@@ -179,9 +195,9 @@ class UserManager:
             if user_id in self._users:
                 instance = self._users.pop(user_id)
                 # 关闭用户的情感引擎，释放线程池资源
-                if instance.emotion_engine:
+                for engine in set(instance.emotion_engines.values()):
                     try:  # noqa: BLE001
-                        instance.emotion_engine.close()
+                        engine.close()
                     except Exception as e:  # noqa: BLE001
                         logger.warning("关闭用户 %s 情感引擎时出错: %s", user_id, e)
                 logger.info("用户移除: %s", user_id)
@@ -194,8 +210,8 @@ class UserManager:
             if user_id not in self._users:
                 return False
             instance = self._users[user_id]
-            if instance.emotion_engine:
-                instance.emotion_engine.reset()
+            for engine in instance.emotion_engines.values():
+                engine.reset()
             instance.total_chats = 0
             logger.info("用户重置: %s", user_id)
             return True
@@ -206,6 +222,7 @@ class UserManager:
         if user_id not in self._users:
             return False
         self._users[user_id].character_card_id = card_id
+        self._get_character_engine(self._users[user_id], card_id)
         logger.info("用户 %s 角色卡 → %s", user_id, card_id)
         return True
 
@@ -286,6 +303,7 @@ class UserManager:
             if wxid in self._users:
                 if "character_card_id" in data:
                     self._users[wxid].character_card_id = data["character_card_id"]
+                    self._get_character_engine(self._users[wxid], data["character_card_id"])
                     logger.info("用户 %s 实时角色切换 → %s", wxid, data["character_card_id"])
                 if "nickname" in data:
                     self._users[wxid].nickname = data["nickname"]

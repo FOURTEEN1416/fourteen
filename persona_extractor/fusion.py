@@ -15,6 +15,7 @@ PersonaExtractor 融合适配器 — 集成到原系统的核心桥梁
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 from .emotion_coupler import EmotionCoupler
@@ -53,6 +54,8 @@ class PersonaExtractor:
         self.detect_frequency = detect_frequency
         self.inject_persona = inject_persona
         self._msg_count = 0
+        self._msg_counts: dict[str, int] = {user_id: 0}
+        self._msg_counts_lock = threading.Lock()
 
         # 子组件
         self.detector = PADODetector(
@@ -99,6 +102,7 @@ class PersonaExtractor:
         message: str,
         context: str = "",
         force_detect: bool = False,
+        user_id: str | None = None,
     ) -> str:
         """处理用户消息，返回可注入 system_prompt 的人格增强段
 
@@ -110,28 +114,33 @@ class PersonaExtractor:
         Returns:
             人格增强文本（可直接拼接到 system_prompt 中），空字符串 = 无增强
         """
-        self._msg_count += 1
+        effective_user_id = user_id or self.user_id
+        with self._msg_counts_lock:
+            message_count = self._msg_counts.get(effective_user_id, 0) + 1
+            self._msg_counts[effective_user_id] = message_count
+            if effective_user_id == self.user_id:
+                self._msg_count = message_count
 
         # 1. 频率控制：不是每条消息都检测
         should_detect = (
             force_detect
-            or self._msg_count == 1  # 首条消息必检
-            or self._msg_count % self.detect_frequency == 0
-            or not self.bank.is_stable(self.user_id)  # 不稳定时多检
+            or message_count == 1  # 首条消息必检
+            or message_count % self.detect_frequency == 0
+            or not self.bank.is_stable(effective_user_id)  # 不稳定时多检
         )
 
         if not should_detect:
-            return self._get_enhancement()
+            return self._get_enhancement(effective_user_id)
 
         # 2. PADO 人格检测（异步）
         snapshot = await self.detector.detect(
             message=message,
             context=context,
-            user_id=self.user_id,
+            user_id=effective_user_id,
         )
 
         # 3. 风格向量提取（规则，零成本）
-        current_persona = self.bank.get_persona(self.user_id)
+        current_persona = self.bank.get_persona(effective_user_id)
         if current_persona:
             new_style = self.vectorizer.update(
                 message, current_persona.style, weight=0.2
@@ -150,23 +159,25 @@ class PersonaExtractor:
         snapshot.pad = filtered_pad
 
         # 5. 存储+演化
-        self.bank.update_persona_with_snapshot(snapshot, self.user_id)
+        self.bank.update_persona_with_snapshot(snapshot, effective_user_id)
 
         # 6. 心理健康筛查 (v4.0 新增)
         if self.enable_mental_health and self.mental_health:
-            self._run_mental_health_pipeline(message, context)
+            self._run_mental_health_pipeline(message, context, effective_user_id)
 
         # 7. 更新 ToneMimic 风格配置（如果可用）
         try:
             from my_character.tone_mimic import ToneMimic  # noqa: F401
             # global tone_mimic 在运行时由main注入
-            if hasattr(self, '_tone_mimic') and self._tone_mimic:
+            # ToneMimic 仍是全局组件。仅旧式默认用户调用允许更新它；
+            # 请求级用户画像不能反向污染其他用户/角色的全局风格。
+            if effective_user_id == self.user_id and hasattr(self, '_tone_mimic') and self._tone_mimic:
                 profile_updates = self.vectorizer.to_tone_mimic_profile(snapshot.style)
                 self._tone_mimic.update_style_profile(profile_updates)
         except ImportError:
             pass
 
-        return self._get_enhancement()
+        return self._get_enhancement(effective_user_id)
 
     def set_tone_mimic(self, tone_mimic) -> None:
         """注入 ToneMimic 引用（由main在初始化后设置）"""
@@ -182,26 +193,30 @@ class PersonaExtractor:
             logger.debug("PersonaExtractor user_id 切换: %s → %s", self.user_id, user_id)
             self.user_id = user_id
             self._msg_count = 0  # 重置频率控制
+            with self._msg_counts_lock:
+                self._msg_counts.setdefault(user_id, 0)
 
     # ── 增强段生成 ──
 
-    def _get_enhancement(self) -> str:
+    def _get_enhancement(self, user_id: str | None = None) -> str:
         """获取人格增强文本"""
         if not self.inject_persona:
             return ""
 
-        persona = self.bank.get_persona(self.user_id)
+        persona = self.bank.get_persona(user_id or self.user_id)
         if persona is None or persona.snapshot_count < 1:
             return ""
 
         return persona.to_prompt_enhancement()
 
-    def _run_mental_health_pipeline(self, message: str, context: str) -> None:
+    def _run_mental_health_pipeline(
+        self, message: str, context: str, user_id: str | None = None,
+    ) -> None:
         """运行心理健康筛查管线 (零延时, 仅规则匹配)
 
         LLM 深度分析仅在检测到高风险时异步触发（不阻塞主流程）。
         """
-        persona = self.bank.get_persona(self.user_id)
+        persona = self.bank.get_persona(user_id or self.user_id)
         if persona is None:
             return
 

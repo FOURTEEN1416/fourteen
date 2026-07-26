@@ -15,32 +15,26 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import hashlib
-import json
 import logging
-import math
-import re
 import threading
 import time
-from collections import deque
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from ._legacy_diary_summarizer import DiarySummarizer
+from ._legacy_episodic_memory import EpisodicMemory
+from ._legacy_importance_scorer import ImportanceScorer
+from ._legacy_semantic_memory import SemanticMemory
+from ._legacy_working_memory import WorkingMemory
+from .conflict_detector import ConflictDetector
 from .conversation_summarizer import ConversationSummarizer
+from .cross_session_reasoner import CrossSessionReasoner
+from .fact_extractor import FactExtractor
+from .forgetting_manager import ForgettingManager
 from .reflection_engine import ReflectionEngine
 from .structured_memory import StructuredMemory
 from .vector_memory import VectorMemory
-
-from ._legacy_working_memory import WorkingMemory
-from ._legacy_episodic_memory import EpisodicMemory
-from ._legacy_semantic_memory import SemanticMemory
-from ._legacy_importance_scorer import ImportanceScorer
-from ._legacy_diary_summarizer import DiarySummarizer
-from .forgetting_manager import ForgettingManager
-from .conflict_detector import ConflictDetector
-from .cross_session_reasoner import CrossSessionReasoner
-from .fact_extractor import FactExtractor, FACT_CATEGORIES, PATTERNS
 
 logger = logging.getLogger("memory_pipeline")
 
@@ -467,7 +461,6 @@ class MemoryPipeline:
         """
         # 使用稳定的 hash 函数（hashlib.md5）替代 Python 内置 hash()，
         # 避免 Python 3.3+ 的 hash randomization 导致缓存命中率低下
-        import hashlib
         query_hash = hashlib.md5(query.encode()).hexdigest()[:16]
         cache_key = f"{session_id}:{query_hash}"
         with self._cache_lock:

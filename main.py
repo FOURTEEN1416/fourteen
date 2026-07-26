@@ -28,20 +28,16 @@ import atexit
 import contextlib
 import logging
 import os
-import re
 import sys
 import threading
 import time
-from collections.abc import AsyncIterator
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select  # noqa: E402
 
-from orchestrator.voice_detector import detect_voice_request as _detect_voice_request
 from orchestrator.optimized_orchestrator import OptimizedOrchestrator
-from orchestrator.session_locks import SessionLockManager
 
 # Import project_root
 project_root = Path(__file__).parent.absolute()
@@ -51,10 +47,8 @@ from api.app_factory import create_api_app  # noqa: E402
 from api.database import WechatBinding, _async_session  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
 from api.websocket_server import WebSocketServer  # noqa: E402
-from context.world_info_provider import WorldInfoProvider  # noqa: E402
 from llm_provider import get_llm  # noqa: E402
 from my_character.emotion_engine import EmotionEngine  # noqa: E402
-from my_character.tone_mimic import ToneMimic  # noqa: E402
 from observability.config_manager import ConfigManager  # noqa: E402
 from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
 from observability.health import health_checker  # noqa: E402
@@ -67,7 +61,7 @@ from security.prompt_injection import PromptInjectionDetector  # noqa: E402
 from shisi.application.knowledge_service import ShisiKnowledgeAdapter  # noqa: E402
 from shisi.application.memory_service import ShisiMemoryService  # noqa: E402
 from shisi.application.persona_service import PersonaService  # noqa: E402
-from tools.base_tool import ToolDispatcher, ToolRegistry, ToolResult  # noqa: E402
+from tools.base_tool import ToolDispatcher, ToolRegistry  # noqa: E402
 from tools.builtin.calendar_tool import CalculatorTool, CalendarTool  # noqa: E402
 from tools.builtin.character_crawler_tool import CharacterCrawlerTool  # noqa: E402
 from tools.builtin.extra_tools import ImageGenTool, MemoryTool, SchedulerTool, WebSummaryTool  # noqa: E402
@@ -76,8 +70,7 @@ from tools.builtin.search_tool import SearchTool  # noqa: E402
 from tools.builtin.time_awareness_tool import TimeAwarenessTool  # noqa: E402
 from tools.builtin.weather_tool import WeatherTool  # noqa: E402
 from user_scheduler import UserManager  # noqa: E402
-from utils.character_helpers import normalize_character_card  # noqa: E402
-from utils.health_check import _is_healthy, health_check_all  # noqa: E402
+from utils.health_check import health_check_all  # noqa: E402
 
 # ── 加载 .env（手动解析，无需 python-dotenv 依赖） ──
 _env_loaded = False
@@ -600,7 +593,7 @@ def _run_full_mode(args: argparse.Namespace, use_console: bool,
     logger.info("[4/12] 初始化LLM网关V2...")
     from llm_provider.prompt_template_manager import PromptTemplateMgr
 
-    llm = get_llm(provider=cfg.llm.provider, models_config=cfg.llm.models_priority)
+    llm = get_llm(provider=cfg.llm.provider, models_config=cfg.llm.models_priority, config=cfg.llm)
     PromptTemplateMgr()
 
     safety_filter.llm_gateway = llm

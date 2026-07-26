@@ -31,9 +31,6 @@ logger = logging.getLogger("api.character_routes")
 
 router = APIRouter(prefix="/api", tags=["character"])
 
-_orch = None
-_gf = None
-
 CHARACTERS_DIR = Path("config/characters")
 
 
@@ -70,6 +67,19 @@ class CharacterGenerateRequest(BaseModel):
     description: str
     archetype: str = "温柔"
     user_id: str = "default"
+
+
+class CharacterPreviewResponse(BaseModel):
+    reply: str
+    persona: dict[str, Any]
+
+
+def get_active_character_id() -> str:
+    """返回控制端当前激活角色；未配置时回退 default。"""
+    for character in _list_all_characters(normalize=False):
+        if character.get("is_active"):
+            return str(character.get("id") or "default")
+    return "default"
 
 
 class MemoryFactCreate(BaseModel):
@@ -364,8 +374,8 @@ async def update_character(
         raise HTTPException(status_code=500, detail="保存角色失败")
 
     # 清除人设缓存，确保下次对话使用最新角色卡
-    if _orch and hasattr(_orch, "invalidate_character_persona_cache"):
-        _orch.invalidate_character_persona_cache(character_id)
+    if deps.orch and hasattr(deps.orch, "invalidate_character_persona_cache"):
+        deps.orch.invalidate_character_persona_cache(character_id)
 
     return {"status": "updated", "character_id": character_id}
 
@@ -383,8 +393,8 @@ async def delete_character(
         raise HTTPException(status_code=500, detail="删除角色失败")
 
     # 清除人设缓存
-    if _orch and hasattr(_orch, "invalidate_character_persona_cache"):
-        _orch.invalidate_character_persona_cache(character_id)
+    if deps.orch and hasattr(deps.orch, "invalidate_character_persona_cache"):
+        deps.orch.invalidate_character_persona_cache(character_id)
 
     logger.info("角色已删除: %s (%s)", data.get("name", ""), character_id)
     return {"status": "deleted", "character_id": character_id}
@@ -412,9 +422,9 @@ async def activate_character(
         raise HTTPException(status_code=500, detail="激活角色失败")
 
     # 同步到女友管理器
-    if _gf and hasattr(_gf, "set_user_character"):
+    if deps.gf and hasattr(deps.gf, "set_user_character"):
         user_id = data.get("user_id", "default")
-        _gf.set_user_character(user_id, character_id)
+        deps.gf.set_user_character(user_id, character_id)
         logger.info("角色激活已同步到女友管理器: %s → %s", user_id, character_id)
 
     return {"status": "activated", "character_id": character_id}
@@ -500,24 +510,29 @@ async def import_character(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="无效的 JSON 文件") from None
 
-    # 校验必要字段
-    name = data.get("name", "").strip()
+    # 标准 CharaCard V2/V3 的核心字段位于 data 内；统一展平后再校验，
+    # 同时保留原始 spec/scenario/first_mes/mes_example 等完整字段。
+    normalized = normalize_character_card(data)
+    name = str(normalized.get("name", "")).strip()
     if not name:
         raise HTTPException(status_code=400, detail="角色名称不能为空")
 
     # 生成新 ID 或保留原 ID
-    character_id = data.get("id", str(uuid.uuid4())[:8])
+    character_id = sanitize_id(str(data.get("id", ""))) or str(uuid.uuid4())[:8]
+    if _load_character(character_id) is not None:
+        character_id = str(uuid.uuid4())[:8]
     now = datetime.now(tz=timezone.utc).isoformat()
 
     char_data = {
+        **normalized,
         "id": character_id,
         "name": name,
-        "description": data.get("description", ""),
-        "schema_version": data.get("schema_version", 1),
-        "personality": data.get("personality", {}),
-        "speaking_style": data.get("speaking_style", {}),
-        "core_anchors": data.get("core_anchors", []),
-        "user_id": data.get("user_id", "default"),
+        "description": normalized.get("description", ""),
+        "schema_version": normalized.get("schema_version", 1),
+        "personality": normalized.get("personality", {}),
+        "speaking_style": normalized.get("speaking_style", {}),
+        "core_anchors": normalized.get("core_anchors", []),
+        "user_id": normalized.get("user_id", "default"),
         "is_active": False,
         "created_at": now,
         "updated_at": now,
@@ -753,42 +768,80 @@ async def clear_memory(
 # ── AI 角色生成 ─────────────────────────────────────────
 
 
+def _character_generation_prompt(description: str, archetype: str) -> str:
+    return (
+        "根据以下角色描述，生成一份完整的人设卡 JSON。\n\n"
+        f"角色描述：{description}\n"
+        f"性格类型：{archetype}\n\n"
+        "请按以下 JSON 格式回复（仅返回 JSON，不要额外文字）：\n"
+        '{"name":"角色名","description":"角色概述","personality":{"warmth":0.0,'
+        '"playfulness":0.0,"independence":0.0,"jealousy":0.0,"stubbornness":0.0,'
+        '"creativity":0.0},"speaking_style":{"formality":0.0,"expressiveness":0.0,'
+        '"humor":0.0,"directness":0.0,"emoji_freq":0.0,"catchphrases":["..."]},'
+        '"core_anchors":["..."],"catchphrases":["..."]}'
+    )
+
+
+async def _generate_persona_preview(req: CharacterGenerateRequest) -> dict[str, Any]:
+    if not req.description.strip():
+        raise HTTPException(status_code=400, detail="描述不能为空")
+
+    try:
+        from llm_provider import get_llm
+
+        llm = get_llm()
+    except Exception:
+        raise HTTPException(status_code=503, detail="LLM 不可用，无法生成人设") from None
+
+    prompt = _character_generation_prompt(req.description, req.archetype)
+    try:
+        if hasattr(llm, "chat"):
+            response = await llm.chat(query=prompt, max_tokens=1024, temperature=0.7)
+        elif hasattr(llm, "chat_sync"):
+            response = await asyncio.to_thread(
+                llm.chat_sync,
+                query=prompt,
+                max_tokens=1024,
+                temperature=0.7,
+            )
+        else:
+            raise RuntimeError("LLM 未提供 chat 接口")
+        json_match = re.search(r"\{.*\}", str(response), re.DOTALL)
+        if not json_match:
+            raise ValueError("LLM 返回中没有 JSON 对象")
+        persona_data = json.loads(json_match.group())
+        if not isinstance(persona_data, dict):
+            raise ValueError("LLM 返回的人设不是对象")
+        return persona_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("AI 人设预览生成失败")
+        raise HTTPException(status_code=502, detail="LLM 返回格式异常，无法解析人设") from e
+
+
+@router.post("/characters/preview-from-description", response_model=CharacterPreviewResponse)
+async def preview_character_from_description(
+    req: CharacterGenerateRequest,
+    _auth: bool = Security(verify_api_key_dep),
+):
+    """根据描述生成人设预览，不写入角色库。"""
+    persona_data = await _generate_persona_preview(req)
+    name = sanitize_character_name(str(persona_data.get("name") or "新角色"))
+    persona_data["name"] = name
+    return {
+        "reply": f"我整理出了「{name}」的人设草案，你可以继续描述来覆盖这份预览。",
+        "persona": persona_data,
+    }
+
+
 @router.post("/characters/generate-from-description", status_code=201)
 async def generate_character_from_description(
     req: CharacterGenerateRequest,
     _auth: bool = Security(verify_api_key_dep),
 ):
     """从文本描述用 AI 生成角色人设卡并自动创建"""
-    if not req.description.strip():
-        raise HTTPException(status_code=400, detail="描述不能为空")
-
-    try:
-        from llm_provider import get_llm
-        llm = get_llm()
-    except Exception:
-        raise HTTPException(status_code=503, detail="LLM 不可用，无法生成角色") from None
-
-    prompt = (
-        f"根据以下角色描述，生成一份完整的人设卡 JSON。\n\n"
-        f"角色描述：{req.description}\n"
-        f"性格类型：{req.archetype}\n\n"
-        f"请按以下 JSON 格式回复（仅返回 JSON，不要额外文字）：\n"
-        f'{{"name":"角色名","description":"角色概述","personality":{{"warmth":0.0-1.0,"playfulness":0.0-1.0,'
-        f'"independence":0.0-1.0,"jealousy":0.0-1.0,"stubbornness":0.0-1.0,"creativity":0.0-1.0}},'
-        f'"speaking_style":{{"formality":0.0-1.0,"expressiveness":0.0-1.0,"humor":0.0-1.0,'
-        f'"directness":0.0-1.0,"emoji_freq":0.0-1.0,"catchphrases":["..."]}},'
-        f'"core_anchors":["..."],"catchphrases":["..."]}}'
-    )
-
-    try:
-        response = llm.chat_sync(query=prompt, max_tokens=1024, temperature=0.7)
-        json_match = re.search(r'\{.*\}', response, re.DOTALL)
-        if not json_match:
-            raise HTTPException(status_code=500, detail="LLM 返回格式异常，无法解析")
-        persona_data = json.loads(json_match.group())
-    except Exception as e:
-        logger.exception("AI 角色生成失败")
-        raise HTTPException(status_code=500, detail="角色生成失败") from e
+    persona_data = await _generate_persona_preview(req)
 
     catchphrases = persona_data.pop("catchphrases", [])
     data = _build_character_data(

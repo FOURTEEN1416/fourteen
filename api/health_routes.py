@@ -65,6 +65,11 @@ async def readiness_check():
     else:
         checks["orchestrator"] = False
 
+    # 控制端核心能力必须全部注册。管理器暂不可用可由端点返回 503，
+    # 但路由本身静默缺失（404）属于未就绪。
+    for route_group, mounted in deps.route_mounts.items():
+        checks[f"routes_{route_group}"] = mounted
+
     # ── 健康检查器（如果有） ──
     if deps.health is not None:
         try:

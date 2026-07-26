@@ -10,9 +10,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
+from pydantic import BaseModel, Field
 
 from api.auth import verify_api_key_dep
 from api.auth_jwt import require_role
@@ -24,9 +27,78 @@ logger = logging.getLogger("api.routers.clone_routes")
 router = APIRouter(tags=["clone"])
 
 
+class ClonePreviewRequest(BaseModel):
+    target: str = Field(..., min_length=1, max_length=128)
+    max_messages: int = Field(default=2000, ge=20, le=5000)
+
+
+def _build_clone_preview(target: str, max_messages: int) -> dict[str, Any]:
+    """显式请求时才读取本机微信数据并生成可编辑人设预览。"""
+    from clone_training.style_analyzer import StyleAnalyzer
+    from clone_training.wechat_decrypt_source import DecryptSource, DecryptSourceError
+
+    try:
+        conversations = DecryptSource().extract(target, max_messages=max_messages)
+    except DecryptSourceError:
+        raise
+    if not conversations:
+        raise ValueError("未找到可用于分析的文本对话")
+
+    profile = StyleAnalyzer().analyze(conversations)
+    catchphrases = [phrase for phrase, _count in profile.catchphrases[:8]]
+    anchors = [*catchphrases[:3], *profile.slang_examples[:3]]
+    dominant_emotion = max(profile.emotion_dist, key=profile.emotion_dist.get) if profile.emotion_dist else "自然"
+    anchors.append(f"{dominant_emotion}表达")
+    anchors = list(dict.fromkeys(anchors))[:8]
+
+    positive = profile.emotion_dist.get("正面", 0.0)
+    negative = profile.emotion_dist.get("负面", 0.0)
+    question_ratio = profile.sentence_type_dist.get("提问", 0.0)
+    speaking_style = {
+        "formality": 0.35,
+        "expressiveness": min(1.0, 0.35 + profile.emoji_freq + profile.kaomoji_freq),
+        "humor": min(1.0, 0.3 + profile.slang_freq),
+        "directness": max(0.1, min(1.0, 0.75 - question_ratio * 0.4)),
+        "emoji_freq": min(1.0, profile.emoji_freq),
+        "catchphrases": catchphrases,
+    }
+    persona = {
+        "name": target,
+        "description": profile.to_style_prompt(),
+        "core_anchors": anchors,
+        "personality": {
+            "warmth": max(0.1, min(1.0, 0.5 + positive * 0.35 - negative * 0.2)),
+            "playfulness": max(0.1, min(1.0, 0.35 + profile.slang_freq + profile.emoji_freq)),
+            "independence": 0.6,
+            "jealousy": 0.3,
+            "stubbornness": 0.4,
+        },
+        "speaking_style": speaking_style,
+    }
+    return {
+        "persona": persona,
+        "sample_count": len(conversations),
+        "style_report": profile.to_dict(),
+    }
+
+
 # ═══════════════════════════════════════════════════════
 # Clone Data Management API
 # ═══════════════════════════════════════════════════════
+
+
+@router.post("/api/clone/preview")
+async def preview_clone_persona(
+    req: ClonePreviewRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """从本机微信 4.x 解密数据生成人设预览；不会自动创建角色。"""
+    try:
+        return await asyncio.to_thread(_build_clone_preview, req.target.strip(), req.max_messages)
+    except Exception as e:
+        logger.warning("微信克隆预览失败: %s", e)
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
 
 @router.get("/api/clone/contacts")

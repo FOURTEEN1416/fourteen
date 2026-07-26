@@ -9,13 +9,11 @@ from fastapi import APIRouter, HTTPException, Security
 from pydantic import BaseModel
 
 from api.auth import verify_api_key_dep
+from api.deps import deps
 
 logger = logging.getLogger("api.persona_card_routes")
 
 router = APIRouter(prefix="/api/characters", tags=["persona-card"])
-
-_char_mgr: Any | None = None
-
 
 class PersonaCardUpdateRequest(BaseModel):
     card: dict[str, Any]
@@ -47,9 +45,10 @@ async def get_persona_card(
     _auth: bool = Security(verify_api_key_dep),
 ):
     """获取角色完整角色卡 (CharaCardV2 格式)"""
-    if _char_mgr is None:
+    char_mgr = getattr(deps.shisi_reg, "character_manager", None)
+    if char_mgr is None:
         raise HTTPException(status_code=503, detail="角色管理器未初始化")
-    card = _char_mgr.load_character(character_id)
+    card = char_mgr.load_character(character_id)
     if card is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
     return _chara_card_to_persona_data(card)
@@ -62,14 +61,15 @@ async def update_persona_card(
     _auth: bool = Security(verify_api_key_dep),
 ):
     """更新角色完整角色卡 (CharaCardV2 格式)"""
-    if _char_mgr is None:
+    char_mgr = getattr(deps.shisi_reg, "character_manager", None)
+    if char_mgr is None:
         raise HTTPException(status_code=503, detail="角色管理器未初始化")
     try:
         from shisi.character.models import CharaCardV2
         card = CharaCardV2.model_validate(req.card)
     except Exception as e:
         raise HTTPException(status_code=400, detail="角色卡数据无效") from e
-    ok = _char_mgr.update_character(character_id, card)
+    ok = char_mgr.update_character(character_id, card)
     if not ok:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
     logger.info("角色卡已更新: %s", character_id)
@@ -82,9 +82,10 @@ async def preview_persona_card(
     _auth: bool = Security(verify_api_key_dep),
 ):
     """预览角色卡 — 转为 PersonaEngine 配置"""
-    if _char_mgr is None:
+    char_mgr = getattr(deps.shisi_reg, "character_manager", None)
+    if char_mgr is None:
         raise HTTPException(status_code=503, detail="角色管理器未初始化")
-    card = _char_mgr.load_character(character_id)
+    card = char_mgr.load_character(character_id)
     if card is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
     from shisi.character.character_card_v2 import to_persona_config

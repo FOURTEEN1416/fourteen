@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import sys
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -29,9 +30,9 @@ from api.database import Base, InviteCode, User, get_db
 # ═══════════════════════════════════════════════════════
 
 @pytest.fixture(scope="module")
-def module_engine():
-    """模块级单例异步引擎（文件 DB 避免内存竞争）"""
-    db_path = os.path.join(os.path.dirname(__file__), "_test_invite.db")
+def module_engine(tmp_path_factory):
+    """模块级单例异步引擎；每次测试进程使用独立文件，避免并发污染。"""
+    db_path = tmp_path_factory.mktemp("invite-db") / f"invites-{uuid.uuid4().hex}.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
     return engine
 

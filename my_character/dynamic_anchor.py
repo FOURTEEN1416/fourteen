@@ -126,7 +126,9 @@ class DynamicAnchorSystem:
     ):
         self._base_anchors = base_anchors or []
         self._config = anchor_config
-        self._dynamic_anchors: list[DynamicAnchor] = dynamic_anchors or list(DEFAULT_DYNAMIC_ANCHORS)
+        self._dynamic_anchors: list[DynamicAnchor] = (
+            list(DEFAULT_DYNAMIC_ANCHORS) if dynamic_anchors is None else list(dynamic_anchors)
+        )
         self._reinforcement_counter: int = 0
         self._reinforcement_interval: int = 5
         if anchor_config and hasattr(anchor_config, "reinforcement_interval"):

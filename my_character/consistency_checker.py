@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -257,6 +259,7 @@ async def check_and_correct_reply(
     emotion_state: Any = None,
     session_id: str = "",
     memory: Any = None,
+    character_card: dict[str, Any] | None = None,
 ) -> str:
     """统一的一致性检查 + 自动修正（供 main.py 和 orchestrator.py 复用）
 
@@ -272,9 +275,6 @@ async def check_and_correct_reply(
         修正后（或原样放行）的回复文本
     """
     try:
-        if not persona_engine or not hasattr(persona_engine, "check_consistency"):
-            return reply
-
         # 计算 chat_round
         chat_round = 0
         if memory and hasattr(memory, "get_chat_context"):
@@ -284,23 +284,53 @@ async def check_and_correct_reply(
             except Exception as e:
                 logger.warning("获取 chat_context 失败，chat_round 降级为 0: %s", e)
 
-        result = persona_engine.check_consistency(reply, emotion_state, chat_round)
+        if character_card:
+            from my_character.dynamic_anchor import DynamicAnchorSystem
+
+            anchors = character_card.get("core_anchors") or []
+            checker = PersonaConsistencyChecker(
+                dynamic_anchors=DynamicAnchorSystem(
+                    base_anchors=[str(anchor) for anchor in anchors],
+                    dynamic_anchors=[],
+                )
+            )
+            affinity = getattr(emotion_state, "affinity", 0) if emotion_state else 0
+            result = checker.check(
+                reply,
+                ConsistencyContext(
+                    emotion_state=emotion_state,
+                    chat_round=chat_round,
+                    affinity=int(affinity or 0),
+                ),
+            )
+        elif persona_engine and hasattr(persona_engine, "check_consistency"):
+            result = persona_engine.check_consistency(reply, emotion_state, chat_round)
+        else:
+            return reply
 
         if result is None:
             return reply
 
         if not result.overall_passed and result.overall_score < 0.4 and result.correction_prompt:
             # 严重违规：用修正 prompt 重新生成
-            if llm_gateway and hasattr(llm_gateway, "chat_sync"):
-                corrected = await llm_gateway.chat_sync(
-                    query=(
-                        f"{result.correction_prompt}\n\n"
-                        f"原始回复：{reply}\n\n"
-                        f"请根据以上修正建议重新生成一条符合角色设定的回复。"
-                        f"只输出修正后的回复。"
-                    ),
-                    max_tokens=512,
+            if llm_gateway and (hasattr(llm_gateway, "chat") or hasattr(llm_gateway, "chat_sync")):
+                correction_query = (
+                    f"{result.correction_prompt}\n\n"
+                    f"当前角色卡：{character_card or {}}\n\n"
+                    f"原始回复：{reply}\n\n"
+                    "请根据以上修正建议重新生成一条符合角色设定的回复。"
+                    "只输出修正后的回复。"
                 )
+                if hasattr(llm_gateway, "chat"):
+                    corrected = llm_gateway.chat(query=correction_query, max_tokens=512)
+                    if inspect.isawaitable(corrected):
+                        corrected = await corrected
+                else:
+                    corrected = await asyncio.to_thread(
+                        llm_gateway.chat_sync,
+                        query=correction_query,
+                        max_tokens=512,
+                    )
                 if corrected and len(corrected.strip()) > 0:
                     logger.info("一致性严重违规已修正: score=%.2f", result.overall_score)
                     return corrected.strip()

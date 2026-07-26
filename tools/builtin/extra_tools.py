@@ -1,9 +1,9 @@
 """补充工具 — 补齐前端仪表盘展示的工具名称"""
 from __future__ import annotations
 
-import json
 import logging
 import os
+from contextlib import suppress
 from typing import Any
 
 from tools.base_tool import BaseTool, ToolResult
@@ -225,10 +225,8 @@ class ImageGenTool(BaseTool):
         except httpx.HTTPStatusError as e:
             logger.exception("图片生成接口返回错误")
             detail = ""
-            try:
+            with suppress(Exception):
                 detail = e.response.text[:500]
-            except Exception:
-                pass
             return ToolResult(False, error=f"image_gen_http_error: {e.response.status_code} {detail}")
         except Exception as e:
             logger.exception("图片生成失败")

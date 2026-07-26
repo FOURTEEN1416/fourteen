@@ -14,6 +14,7 @@ import os
 import time
 import uuid
 from collections import OrderedDict
+from contextlib import suppress
 from pathlib import Path
 
 import requests
@@ -870,10 +871,8 @@ class WeChatConnector:
         """
         self._stop = True
         # 关闭本实例的消息处理线程池
-        try:
+        with suppress(Exception):
             self._msg_executor.shutdown(wait=False)
-        except Exception:  # noqa: BLE001
-            pass
         # 持久化断开状态
         _merge_state({"connected": False})
         logger.info("微信连接器已停止")

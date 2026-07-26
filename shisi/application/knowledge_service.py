@@ -1,7 +1,7 @@
 """Shisi 知识服务适配层 — 角色知识检索。
 
 基于角色卡/角色聚合的知识索引进行 BM25 检索，返回兼容的字典。
-通过 set_character_id 切换当前角色。
+角色 ID 由每次检索显式传入；set_character_id 仅为旧调用保留。
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ class ShisiKnowledgeAdapter:
     """十四知识检索适配层。
 
     基于角色卡/角色聚合的知识索引进行 BM25 检索，返回与 RAGEngineV2 兼容的字典。
-    由于 shisi knowledge 是角色维度的，调用方需要在处理每条消息前通过
-    set_character_id 设置当前角色，否则使用 default_character_id。
+    由于 shisi knowledge 是角色维度的，新调用方应给 retrieve/retrieve_async
+    显式传入 character_id。模块仍保留旧游标以兼容管理/诊断调用。
     """
 
     def __init__(
@@ -85,9 +85,15 @@ class ShisiKnowledgeAdapter:
 
     # ── RAGEngineV2 兼容接口 ────────────────────────
 
-    def retrieve(self, query: str, top_k: int = 5) -> dict[str, Any]:
-        """基于当前角色检索知识，返回兼容字典。"""
-        result = self._service.search(self._current_character_id, query, top_k=top_k)
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 5,
+        character_id: str | None = None,
+    ) -> dict[str, Any]:
+        """基于请求指定角色检索知识，返回兼容字典。"""
+        cid = character_id or self._current_character_id or self._default_character_id
+        result = self._service.search(cid, query, top_k=top_k)
 
         results: list[dict[str, Any]] = []
         for chunk in result.get_top(top_k):
@@ -116,10 +122,20 @@ class ShisiKnowledgeAdapter:
             "total_chats": 0,
         }
 
-    async def retrieve_async(self, query: str, top_k: int = 5) -> dict[str, Any]:
+    async def retrieve_async(
+        self,
+        query: str,
+        top_k: int = 5,
+        character_id: str | None = None,
+    ) -> dict[str, Any]:
         try:
             return await asyncio.wait_for(
-                asyncio.to_thread(self.retrieve, query, top_k),
+                asyncio.to_thread(
+                    self.retrieve,
+                    query,
+                    top_k,
+                    character_id=character_id,
+                ),
                 timeout=self._query_timeout,
             )
         except asyncio.TimeoutError:

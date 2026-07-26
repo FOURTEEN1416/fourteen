@@ -4,6 +4,8 @@ import hashlib
 import logging
 import re
 
+from cryptography.fernet import Fernet, InvalidToken
+
 logger = logging.getLogger("pii_anonymizer")
 
 PII_PATTERNS: list[tuple[str, re.Pattern]] = [
@@ -20,11 +22,14 @@ HOTLINE_WHITELIST = re.compile(r"400[-]?\d{3}[-]?\d{4}")
 class PIIAnonymizer:
     def __init__(self, enabled: bool = True):
         self.enabled = enabled
+        # 恢复密钥仅存在于当前进程/实例内；实体列表不携带明文 PII。
+        self._recovery_cipher = Fernet(Fernet.generate_key())
 
     def anonymize(self, text: str) -> tuple[str, list[dict]]:
         if not self.enabled:
             return text, []
-        all_matches = []
+
+        all_matches: list[tuple[int, int, str, str]] = []
         for pii_type, pattern in PII_PATTERNS:
             for match in pattern.finditer(text):
                 original = match.group()
@@ -32,66 +37,79 @@ class PIIAnonymizer:
                     continue
                 all_matches.append((match.start(), match.end(), pii_type, original))
 
-        all_matches.sort(key=lambda x: x[0])
+        all_matches.sort(key=lambda item: item[0])
         merged: list[tuple[int, int, str, str]] = []
-        for m in all_matches:
-            if merged and m[0] < merged[-1][1]:
-                prev = merged[-1]
-                merged[-1] = (prev[0], max(prev[1], m[1]), prev[2], prev[3])
+        for match in all_matches:
+            if merged and match[0] < merged[-1][1]:
+                previous = merged[-1]
+                merged[-1] = (
+                    previous[0],
+                    max(previous[1], match[1]),
+                    previous[2],
+                    previous[3],
+                )
             else:
-                merged.append(m)
-        merged.sort(key=lambda x: x[0], reverse=True)
+                merged.append(match)
 
-        anonymized = text
-        detected = []
+        parts: list[str] = []
+        detected: list[dict] = []
+        cursor = 0
         for start, end, pii_type, original in merged:
             replacement = self._mask(pii_type, original)
-            anonymized = anonymized[:start] + replacement + anonymized[end:]
+            parts.extend((text[cursor:start], replacement))
+            cursor = end
             detected.append({
                 "type": pii_type,
                 "placeholder": replacement,
                 "original_hash": hashlib.sha256(original.encode()).hexdigest()[:16],
+                "recovery_token": self._recovery_cipher.encrypt(original.encode()).decode(),
             })
+        parts.append(text[cursor:])
+
         if detected:
             logger.info("PII detected and anonymized: %d items", len(detected))
-        return anonymized, detected
+        return "".join(parts), detected
+
+    def _recover_entity(self, item: dict) -> str | None:
+        """仅在创建令牌的同一个实例中恢复 PII。"""
+        if "original" in item:  # 向后兼容旧实体；新实体绝不写入此字段
+            return str(item["original"])
+        token = item.get("recovery_token")
+        if not isinstance(token, str):
+            return None
+        try:
+            return self._recovery_cipher.decrypt(token.encode()).decode()
+        except (InvalidToken, UnicodeDecodeError):
+            return None
 
     def deanonymize(self, text: str, pii_map: dict[str, str] | list[dict]) -> str:
-        """反脱敏 — 支持 dict[str, str] 和 list[dict] 两种格式
-
-        Args:
-            text: 脱敏后的文本
-            pii_map: dict[str, str] 格式 {placeholder: original}
-                     或 list[dict] 格式 [{"type":..., "placeholder":..., "original"...}]
-
-        Note:
-            anonymize() 不再存储原始 PII（使用 original_hash 替代），
-            因此从 list[dict] 反脱敏时仅恢复有 "original" 字段的项。
-        """
+        """在当前实例内反脱敏；也兼容显式 ``{placeholder: original}`` 映射。"""
         if isinstance(pii_map, list):
-            # 从 list[dict] 转换为 dict[str, str]（仅恢复有 original 字段的旧格式项）
-            pii_dict: dict[str, str] = {}
+            result = text
+            # anonymize() 按文本顺序返回实体；逐个替换可正确处理相同掩码碰撞。
             for item in pii_map:
-                if isinstance(item, dict) and "placeholder" in item and "original" in item:
-                    pii_dict[str(item["placeholder"])] = str(item["original"])
-            pii_map = pii_dict
+                if not isinstance(item, dict) or "placeholder" not in item:
+                    continue
+                original = self._recover_entity(item)
+                if original is not None:
+                    result = result.replace(str(item["placeholder"]), original, 1)
+            return result
 
         result = text
         for placeholder, original in pii_map.items():
             result = result.replace(placeholder, original)
         return result
 
-    @staticmethod
-    def pii_list_to_map(pii_list: list[dict]) -> dict[str, str]:
-        """将 anonymize() 返回的 list[dict] 转换为 dict[str,str] 格式
-
-        Note:
-            anonymize() 不再存储原始 PII（使用 original_hash 替代），
-            因此仅转换包含 "original" 字段的旧格式项。
-        """
-        return {str(item["placeholder"]): str(item["original"])
-                for item in pii_list
-                if isinstance(item, dict) and "placeholder" in item and "original" in item}
+    def pii_list_to_map(self, pii_list: list[dict]) -> dict[str, str]:
+        """将当前实例产生的实体列表转换为兼容映射，不暴露实体中的明文。"""
+        result: dict[str, str] = {}
+        for item in pii_list:
+            if not isinstance(item, dict) or "placeholder" not in item:
+                continue
+            original = self._recover_entity(item)
+            if original is not None:
+                result[str(item["placeholder"])] = original
+        return result
 
     @staticmethod
     def _mask(pii_type: str, original: str) -> str:

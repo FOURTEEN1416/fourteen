@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import contextlib
 import copy
 import logging
 import os
 import re
+import tempfile
 import threading
 from pathlib import Path
+from typing import Any
 
 from observability.config_models import SystemConfig
 
 logger = logging.getLogger("config_manager")
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
+_MASKED_VALUE = "****"
+_SENSITIVE_KEY_PARTS = ("api_key", "secret", "token", "password", "encryption_key")
 
 
 def _resolve_env_vars(value: object) -> object:
@@ -69,6 +74,7 @@ class ConfigManager:
         self.config_dir = Path(os.path.abspath(config_dir))
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self._config: SystemConfig | None = None
+        self._raw_config: dict[str, Any] | None = None
         self._lock = threading.Lock()
         self._watcher = None
         self._callbacks = []  # type: ignore[var-annotated]
@@ -80,49 +86,137 @@ class ConfigManager:
                 self._config = self._load()
             return self._config
 
-    def _load(self) -> SystemConfig:
-        data = {}  # type: ignore[var-annotated]
-        env = "prod"
-        system_yaml = self.config_dir / "system.yaml"
-        if HAS_YAML and system_yaml.exists():
-            with open(system_yaml, encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-                env = os.environ.get("AI_GF_ENV", data.get("env", "dev"))
-        env_yaml = self.config_dir / f"system_{env}.yaml"
-        if HAS_YAML and env_yaml.exists():
-            with open(env_yaml, encoding="utf-8") as f:
-                env_overrides = yaml.safe_load(f) or {}
-                data = self._deep_merge(data, env_overrides)
-        # 解析 ${VAR:-default} 环境变量占位符
-        data = _resolve_env_vars(data)
+    def get_config_dict(self, *, resolve_env: bool = True) -> dict[str, Any]:
+        """Return the complete effective config, including schema extensions.
 
-        # 深层 AI_GF_* 环境变量覆盖（支持点号路径: AI_GF_LLM_CACHE_REDIS_HOST）
-        for key in SystemConfig.model_fields:
-            env_val = os.environ.get(f"AI_GF_{key.upper()}")
-            if env_val is not None:
-                data[key] = env_val
-        # 追加 dot-notation 环境变量覆盖: AI_GF_LLM_CACHE_REDIS_HOST → data["llm"]["cache"]["redis"]["host"]
-        _apply_dot_env_overrides(data)
+        The YAML document remains the persistence source of truth.  This avoids
+        silently dropping sections that are not represented by SystemConfig.
+        """
+        with self._lock:
+            if self._config is None or self._raw_config is None:
+                self._config = self._load()
+            assert self._raw_config is not None
+            data = self._effective_data(self._raw_config, resolve_env=resolve_env)
+            return copy.deepcopy(data)
+
+    def _read_yaml(self, path: Path) -> dict[str, Any]:
+        if not HAS_YAML or not path.exists():
+            return {}
+        with open(path, encoding="utf-8") as f:
+            loaded = yaml.safe_load(f) or {}
+        if not isinstance(loaded, dict):
+            raise ValueError(f"Config file must contain a mapping: {path}")
+        return loaded
+
+    def _effective_data(
+        self,
+        raw_base: dict[str, Any],
+        *,
+        resolve_env: bool = True,
+    ) -> dict[str, Any]:
+        data = copy.deepcopy(raw_base)
+        env = os.environ.get("AI_GF_ENV", str(data.get("env", "dev")))
+        env_yaml = self.config_dir / f"system_{env}.yaml"
+        data = self._deep_merge(data, self._read_yaml(env_yaml))
+        if resolve_env:
+            data = _resolve_env_vars(data)  # type: ignore[assignment]
+            for key in SystemConfig.model_fields:
+                env_val = os.environ.get(f"AI_GF_{key.upper()}")
+                if env_val is not None:
+                    data[key] = env_val
+            _apply_dot_env_overrides(data)
+        return data
+
+    def _load(self) -> SystemConfig:
+        system_yaml = self.config_dir / "system.yaml"
         try:
-            return SystemConfig(**data)
+            raw = self._read_yaml(system_yaml)
         except Exception as e:  # noqa: BLE001
-            logger.error("Config validation failed, using defaults: %s", e)
+            logger.error("Config file could not be read, using defaults: %s", e)
+            self._raw_config = {}
             return SystemConfig()
 
-    def save(self, updates: dict) -> SystemConfig:
-        """Merge updates into current config and persist to YAML."""
+        self._raw_config = raw
+        try:
+            return SystemConfig(**self._effective_data(raw))
+        except Exception as e:  # noqa: BLE001
+            # Keep the raw document in memory.  A later partial update may repair
+            # the invalid field; discarding it here would erase unrelated config.
+            logger.error("Config validation failed, using runtime defaults: %s", e)
+            return SystemConfig()
+
+    @staticmethod
+    def _without_masked_secrets(updates: dict[str, Any]) -> dict[str, Any]:
+        """Drop redaction placeholders so they can never replace real secrets."""
+        cleaned: dict[str, Any] = {}
+        for key, value in updates.items():
+            lower_key = key.lower()
+            is_sensitive = any(part in lower_key for part in _SENSITIVE_KEY_PARTS)
+            if is_sensitive and value == _MASKED_VALUE:
+                continue
+            if isinstance(value, dict):
+                cleaned[key] = ConfigManager._without_masked_secrets(value)
+            else:
+                cleaned[key] = copy.deepcopy(value)
+        return cleaned
+
+    @staticmethod
+    def _atomic_dump_yaml(path: Path, data: dict[str, Any]) -> None:
+        if not HAS_YAML:
+            raise RuntimeError("PyYAML is required to persist configuration")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+                yaml.safe_dump(
+                    data,
+                    f,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    sort_keys=False,
+                )
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_name, path)
+        except Exception:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(temp_name)
+            raise
+
+    def save(self, updates: dict[str, Any]) -> SystemConfig:
+        """Merge into the original YAML and persist without losing extensions."""
+        if not isinstance(updates, dict):
+            raise TypeError("Config updates must be a mapping")
         with self._lock:
-            if self._config is None:
+            if self._config is None or self._raw_config is None:
                 self._config = self._load()
-            current = self._config.model_dump()
-            merged = self._deep_merge(current, updates)
-            self._config = SystemConfig(**merged)
+            assert self._raw_config is not None
+            old = self._config
+            cleaned = self._without_masked_secrets(updates)
+            merged_raw = self._deep_merge(self._raw_config, cleaned)
+            # Validate the exact effective result before replacing the file.
+            validated = SystemConfig(**self._effective_data(merged_raw))
             system_yaml = self.config_dir / "system.yaml"
-            if HAS_YAML:
-                with open(system_yaml, "w", encoding="utf-8") as f:
-                    yaml.dump(self._config.model_dump(), f, default_flow_style=False, allow_unicode=True)
-                    logger.info("Config saved to %s", system_yaml)
-            return self._config
+            self._atomic_dump_yaml(system_yaml, merged_raw)
+            self._raw_config = merged_raw
+            self._config = validated
+        logger.info("Config saved to %s", system_yaml)
+        if old != validated:
+            self._notify_callbacks(old, validated)
+        return validated
+
+    def _notify_callbacks(
+        self,
+        old: SystemConfig | None,
+        new: SystemConfig,
+    ) -> None:
+        for callback in tuple(self._callbacks):
+            try:
+                callback(old, new)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Config change callback error: %s", e)
 
     def reload(self) -> SystemConfig:
         with self._lock:
@@ -130,11 +224,7 @@ class ConfigManager:
             self._config = self._load()
         if old != self._config:
             logger.info("Config reloaded (changed)")
-            for cb in self._callbacks:
-                try:
-                    cb(old, self._config)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("Config change callback error: %s", e)
+            self._notify_callbacks(old, self._config)
         return self._config
 
     def on_change(self, callback):

@@ -8,8 +8,8 @@
 from __future__ import annotations
 
 from orchestrator.optimized_orchestrator import OptimizedOrchestrator
-from orchestrator.voice_detector import detect_voice_request
 from orchestrator.session_locks import SessionLockManager
+from orchestrator.voice_detector import detect_voice_request
 
 # 向后兼容别名：旧代码通过 ``from orchestrator import Orchestrator`` 引用编排器。
 # 根目录 ``orchestrator.py`` 已删除，``orchestrator/`` 包是唯一的编排入口。

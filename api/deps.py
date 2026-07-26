@@ -39,6 +39,13 @@ class _APIDeps:
         # shisi 注册表（由子路由挂载时使用）
         self.shisi_reg: Any = None
 
+        # 路由挂载状态（readiness 使用，防止关键 API 静默 404）
+        self.route_mounts: dict[str, bool] = {}
+
+        # 延迟创建的角色音色管理器
+        self._character_voice_mgr: Any = None
+        self._character_voice_mgr_lock = threading.Lock()
+
     def set_deps(self, orch=None, health=None, config=None, sessions=None, gf=None):
         self.orch = orch
         self.health = health
@@ -69,6 +76,14 @@ class _APIDeps:
         if tts and hasattr(tts, 'health_check'):
             return tts
         return None
+
+    def get_character_voice_manager(self):
+        if self._character_voice_mgr is None:
+            with self._character_voice_mgr_lock:
+                if self._character_voice_mgr is None:
+                    from shisi.voice.character_voice import CharacterVoiceManager
+                    self._character_voice_mgr = CharacterVoiceManager()
+        return self._character_voice_mgr
 
     def get_safety(self):
         if self.orch:

@@ -22,6 +22,7 @@ from api.auth_jwt import get_current_user, get_current_user_id, require_role
 from api.database import User
 from api.deps import deps
 from api.main_routes import ConfigUpdateRequest, _sanitize_config
+from llm_provider import reconfigure_llm
 from observability.logging_setup import ring_buffer
 
 logger = logging.getLogger("api.routers.misc_routes")
@@ -241,6 +242,8 @@ async def get_config(
 ):
     cfg = deps.config
     if cfg:
+        if hasattr(cfg, "get_config_dict"):
+            return _sanitize_config(cfg.get_config_dict())
         return _sanitize_config(cfg.config.model_dump())
     return {}
 
@@ -256,6 +259,10 @@ async def save_config(
         raise HTTPException(503, "Config manager not initialized")
     try:
         updated = cfg.save(req.config)
+        if "llm" in req.config and hasattr(updated, "llm"):
+            await reconfigure_llm(updated.llm)
+        if hasattr(cfg, "get_config_dict"):
+            return _sanitize_config(cfg.get_config_dict())
         return _sanitize_config(updated.model_dump())
     except (ValueError, TypeError, KeyError, AttributeError):
         logger.exception("Config save failed")

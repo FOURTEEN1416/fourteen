@@ -3,38 +3,28 @@
 from __future__ import annotations
 
 import asyncio
-import atexit
-import contextlib
+import inspect
 import json
 import logging
-import os
-import re
 import threading
 import time
 from collections.abc import AsyncIterator
-from typing import Any
 from pathlib import Path
+from typing import Any
 
-logger = logging.getLogger("orchestrator.optimized")
-project_root = Path(__file__).resolve().parent.parent
-
-from orchestrator.voice_detector import detect_voice_request as _detect_voice_request
-from orchestrator.session_locks import SessionLockManager
+from context.world_info_provider import WorldInfoProvider
+from llm_provider import get_llm
+from my_character.emotion_engine import EmotionEngine
+from my_character.tone_mimic import ToneMimic
 from observability.config_manager import ConfigManager
 from observability.health import health_checker
+from orchestrator.voice_detector import detect_voice_request as _detect_voice_request
 from security.content_safety import ContentSafetyFilter
 from security.pii_anonymizer import PIIAnonymizer
 from security.prompt_injection import PromptInjectionDetector
-from llm_provider import get_llm
-from my_character.emotion_engine import EmotionEngine
-from my_character.character_config import ConfigLoader
-from utils.health_check import _is_healthy
-from my_character.tone_mimic import ToneMimic
-from shisi.application.persona_service import PersonaService
-from shisi.application.memory_service import ShisiMemoryService
 from shisi.application.knowledge_service import ShisiKnowledgeAdapter
-from context.world_info_provider import WorldInfoProvider
-from utils.character_helpers import normalize_character_card
+from shisi.application.memory_service import ShisiMemoryService
+from shisi.application.persona_service import PersonaService
 from tools.base_tool import ToolDispatcher, ToolRegistry, ToolResult
 from tools.builtin.calendar_tool import CalculatorTool, CalendarTool
 from tools.builtin.character_crawler_tool import CharacterCrawlerTool
@@ -43,6 +33,11 @@ from tools.builtin.reminder_tool import CalendarQueryTool, ReminderTool
 from tools.builtin.search_tool import SearchTool
 from tools.builtin.time_awareness_tool import TimeAwarenessTool
 from tools.builtin.weather_tool import WeatherTool
+from utils.character_helpers import normalize_character_card
+from utils.health_check import _is_healthy
+
+logger = logging.getLogger("orchestrator.optimized")
+project_root = Path(__file__).resolve().parent.parent
 
 class OptimizedOrchestrator:
     """
@@ -64,6 +59,10 @@ class OptimizedOrchestrator:
         self._locks_mutex = threading.Lock()
         self._lock_cleanup_counter: int = 0  # 替代 hash() 的概率触发
         self._executor = None  # 延迟初始化的共享线程池
+        # Web/API 调用未经过 UserManager 时，也必须按“会话 × 角色”隔离情绪状态。
+        # 外部显式传入 emotion_engine（如微信 UserManager）时仍优先使用外部实例。
+        self._request_emotion_engines: dict[str, EmotionEngine] = {}
+        self._request_emotion_engines_lock = threading.Lock()
         # 计数反诘模块：跟踪用户连续说"没事"等敷衍词的次数
         from my_character.counter_rebuttal import CounterRebuttal
         self._counter_rebuttal = CounterRebuttal()
@@ -100,6 +99,15 @@ class OptimizedOrchestrator:
                 logger.info("MemoryPipeline 已关闭")
             except Exception as e:  # noqa: BLE001
                 logger.warning("MemoryPipeline 关闭异常: %s", e)
+
+        with self._request_emotion_engines_lock:
+            request_engines = list(self._request_emotion_engines.values())
+            self._request_emotion_engines.clear()
+        for engine in request_engines:
+            try:
+                engine.close()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("请求级情绪引擎关闭异常: %s", e)
 
         if self._executor is not None:
             self._executor.shutdown(wait=True)
@@ -332,6 +340,31 @@ class OptimizedOrchestrator:
         except (TypeError, ValueError):
             return 0
 
+    @staticmethod
+    def _tool_intent_names(query: str) -> set[str]:
+        """用零成本规则筛选明显工具意图，普通聊天不额外调用一次模型。"""
+        text = query.strip().lower()
+        if not text:
+            return set()
+        groups = {
+            "weather": ("天气", "气温", "温度", "下雨", "降雨", "weather"),
+            "search": ("搜索", "查一下", "查询资料", "网上找", "最新消息", "新闻", "search"),
+            "calendar": ("今天几号", "星期几", "当前日期", "现在几点", "日期", "calendar"),
+            "calculator": ("计算", "算一下", "等于多少", "calculator"),
+            "set_reminder": ("提醒我", "设个提醒", "到点叫我", "remind"),
+            "query_reminders": ("有哪些提醒", "查看提醒", "我的提醒"),
+            "time_awareness": ("节假日", "农历", "工作日", "放假吗"),
+            "memory": ("你还记得", "记得我", "我的偏好", "关于我的记忆"),
+            "character_card": ("创建角色", "角色卡", "人物资料", "构建角色"),
+            "web_summary": ("总结网页", "概括网页", "这个链接", "网页摘要", "http://", "https://"),
+            "image_gen": ("生成图片", "画一张", "画个", "生成一张图", "image"),
+            "scheduler": ("安排日程", "创建日程", "定时任务"),
+        }
+        return {
+            name for name, keywords in groups.items()
+            if any(keyword in text for keyword in keywords)
+        }
+
     async def _run_tools_if_needed(
         self,
         llm: Any,
@@ -340,61 +373,57 @@ class OptimizedOrchestrator:
         history: list | None,
         affinity_level: int = 0,
     ) -> str:
-        """如果系统启用了工具，先让 LLM 判断是否需要调用工具，并返回工具结果摘要。
-
-        返回空字符串表示无需工具调用或调用失败；否则返回一段可追加到 system prompt
-        的工具结果文本。
-        """
+        """只对明显工具意图调用模型，并并行执行互不依赖的工具。"""
         tools = self.components.get("tools")
-        if not tools or not tools.registry:
+        if not tools or not tools.registry or llm is None:
             return ""
-        schemas = tools.registry.get_tools_by_permission(affinity_level)
+
+        intent_names = self._tool_intent_names(query)
+        if not intent_names:
+            return ""
+        schemas = [
+            schema for schema in tools.registry.get_tools_by_permission(affinity_level)
+            if schema.get("function", {}).get("name") in intent_names
+        ]
         if not schemas:
             return ""
+
         try:
-            import asyncio
-            loop = asyncio.get_running_loop()
-            tool_resp = await loop.run_in_executor(
-                None,
-                lambda: llm.chat_with_tools(
-                    query=query,
-                    system_prompt=system_prompt,
-                    history=history or [],
-                    tools=schemas,
-                    temperature=0.85,
-                    max_tokens=2048,
-                ),
+            tool_resp = llm.chat_with_tools(
+                query=query,
+                system_prompt=system_prompt,
+                history=history or [],
+                tools=schemas,
+                temperature=0.85,
+                max_tokens=2048,
             )
+            if inspect.isawaitable(tool_resp):
+                tool_resp = await asyncio.wait_for(tool_resp, timeout=15.0)
             tool_calls = tool_resp.get("tool_calls") if tool_resp else None
             if not tool_calls:
                 return ""
-        except Exception as e:
+        except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001
             logger.debug("工具意图识别失败: %s", e)
             return ""
 
-        results: list[dict[str, Any]] = []
-        for tc in tool_calls:
+        async def _dispatch(tc: dict[str, Any]) -> dict[str, Any]:
             fn = tc.get("function", {}) if isinstance(tc, dict) else {}
             name = fn.get("name", "") if isinstance(fn, dict) else ""
             args_raw = fn.get("arguments", "{}") if isinstance(fn, dict) else "{}"
             try:
                 args = json.loads(args_raw) if isinstance(args_raw, str) else dict(args_raw)
-            except Exception:
+            except (TypeError, ValueError, json.JSONDecodeError):
                 args = {}
             try:
-                import asyncio
-                loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(
-                    None,
-                    lambda _n=name, _a=args: tools.dispatch(_n, _a, affinity_level=affinity_level),
+                result = await asyncio.to_thread(
+                    tools.dispatch, name, args, affinity_level=affinity_level,
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug("工具 %s 执行异常: %s", name, e)
                 result = ToolResult(False, error="tool_execution_failed")
-            results.append({"name": name, "result": result.to_dict()})
+            return {"name": name, "result": result.to_dict()}
 
-        if not results:
-            return ""
+        results = await asyncio.gather(*(_dispatch(tc) for tc in tool_calls))
         summary = "\n".join(
             f"[{r['name']}] {json.dumps(r['result'], ensure_ascii=False)}"
             for r in results
@@ -431,6 +460,7 @@ class OptimizedOrchestrator:
             self.components["llm"] = get_llm(
                 provider=cfg.llm.provider,
                 models_config=cfg.llm.models_priority,
+                config=cfg.llm,
             )
 
             self.components["safety"].llm_gateway = self.components["llm"]
@@ -519,27 +549,43 @@ class OptimizedOrchestrator:
                 self.components["scheduler"] = None
 
             registry = ToolRegistry()
-            for tool_cls in [WeatherTool, SearchTool, CalendarTool, CalculatorTool]:
-                registry.register(tool_cls())
+            if cfg.tools.enabled:
+                enabled_tools = set(cfg.tools.builtin_tools)
+                simple_tools = {
+                    "weather": WeatherTool,
+                    "search": SearchTool,
+                    "calendar": CalendarTool,
+                    "calculator": CalculatorTool,
+                    "time_awareness": TimeAwarenessTool,
+                    "character_card": CharacterCrawlerTool,
+                    "web_summary": WebSummaryTool,
+                    "image_gen": ImageGenTool,
+                }
+                for name, tool_cls in simple_tools.items():
+                    if name in enabled_tools:
+                        registry.register(tool_cls())
 
-            mem = self.components.get("memory")
-            sm = getattr(mem, "structured_memory", None)
-            if sm:
-                registry.register(ReminderTool(sm))
-                registry.register(CalendarQueryTool(sm))
-                registry.register(MemoryTool(sm))
-                registry.register(SchedulerTool(sm))
-
-            registry.register(TimeAwarenessTool())
-            registry.register(CharacterCrawlerTool())
-            registry.register(WebSummaryTool())
-            registry.register(ImageGenTool())
+                mem = self.components.get("memory")
+                sm = getattr(mem, "structured_memory", None)
+                if sm:
+                    memory_tools = {
+                        "reminder": ReminderTool,
+                        "calendar_query": CalendarQueryTool,
+                        "memory": MemoryTool,
+                        "scheduler": SchedulerTool,
+                    }
+                    for name, tool_cls in memory_tools.items():
+                        if name in enabled_tools:
+                            registry.register(tool_cls(sm))
 
             self.components["tool_registry"] = registry
-            self.components["tools"] = ToolDispatcher(
-                registry,
-                timeout=cfg.tools.execution_timeout_seconds,
-                rate_limit_per_minute=cfg.tools.rate_limit_per_tool_per_minute,
+            self.components["tools"] = (
+                ToolDispatcher(
+                    registry,
+                    timeout=cfg.tools.execution_timeout_seconds,
+                    rate_limit_per_minute=cfg.tools.rate_limit_per_tool_per_minute,
+                )
+                if cfg.tools.enabled else None
             )
 
             rag_vm = self.components.get("vector_memory") or getattr(
@@ -786,11 +832,39 @@ class OptimizedOrchestrator:
     # 共享预处理 / 后处理（process_message 与 process_message_stream 复用）
     # ─────────────────────────────────────────────────────────────
 
+    def _get_request_emotion_engine(
+        self,
+        session_id: str,
+        character_id: str,
+        explicit_engine: Any | None = None,
+    ) -> Any:
+        """返回请求所属的情绪引擎，避免角色切换继承另一人格的情绪。"""
+        if explicit_engine is not None:
+            return explicit_engine
+
+        template = self.components["emotion"]
+        # 测试替身和第三方兼容引擎不强制复制，保持旧接口兼容。
+        if not isinstance(template, EmotionEngine):
+            return template
+
+        key = f"{session_id or 'default'}::{character_id or 'default'}"
+        with self._request_emotion_engines_lock:
+            engine = self._request_emotion_engines.get(key)
+            if engine is None:
+                engine = EmotionEngine(
+                    llm_gateway=getattr(template, "_llm", None),
+                    use_llm=getattr(template, "_classifier", None) is not None,
+                    classifier_mode=getattr(template, "_classifier_mode", "rule"),
+                )
+                self._request_emotion_engines[key] = engine
+            return engine
+
     async def _prepare_context(
         self,
         user_msg_clean: str,
         session_id: str,
         character_id: str,
+        emotion_engine: Any | None = None,
     ) -> dict[str, Any]:
         """共享预处理逻辑。
 
@@ -805,14 +879,11 @@ class OptimizedOrchestrator:
             包含 ``emotion_state``、``system_prompt``、``chat_history``、
             ``affinity_level``、``user_msg_clean`` 的字典。
         """
-        # PersonaExtractor user_id（多用户隔离）
+        # 请求级画像 ID（多用户/多角色隔离）。禁止再切换共享组件的全局 user_id。
         pe = self.components.get("persona_extractor")
-        if pe is not None:
-            effective_user_id = (
-                f"{character_id}:{session_id}" if session_id else f"{character_id}"
-            )
-            if pe.user_id != effective_user_id:
-                pe.set_user_id(effective_user_id)
+        effective_user_id = (
+            f"{character_id}:{session_id}" if session_id else f"{character_id}"
+        )
 
         # 并行执行独立任务
         recent = self.components["memory"].get_recent_context(3)
@@ -821,10 +892,17 @@ class OptimizedOrchestrator:
         tasks: dict[str, Any] = {}
         if pe is not None:
             tasks["persona"] = pe.process_message(
-                message=user_msg_clean, context=recent,
+                message=user_msg_clean,
+                context=recent,
+                user_id=effective_user_id,
             )
+        active_emotion_engine = self._get_request_emotion_engine(
+            session_id,
+            character_id,
+            explicit_engine=emotion_engine,
+        )
         tasks["emotion"] = loop.run_in_executor(
-            None, self.components["emotion"].analyze,
+            None, active_emotion_engine.analyze,
             user_msg_clean, recent,
         )
         tasks["memory"] = loop.run_in_executor(
@@ -834,10 +912,16 @@ class OptimizedOrchestrator:
             ),
         )
         rag = self.components["rag"]
-        if hasattr(rag, "set_character_id"):
-            rag.set_character_id(character_id)
+        retrieve_params = inspect.signature(rag.retrieve).parameters
+        if "character_id" in retrieve_params:
+            def rag_call():
+                return rag.retrieve(user_msg_clean, character_id=character_id)
+        else:
+            # 兼容旧 RAGEngineV2 和测试替身；它们没有角色游标。
+            def rag_call():
+                return rag.retrieve(user_msg_clean)
         tasks["rag"] = loop.run_in_executor(
-            None, rag.retrieve, user_msg_clean,
+            None, rag_call,
         )
 
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
@@ -987,6 +1071,7 @@ class OptimizedOrchestrator:
         session_id: str = "",
         message_type: str = "text",
         character_id: str = "default",
+        emotion_engine: Any | None = None,
     ) -> dict[str, Any]:
         if not self._initialized:
             return {"reply": "系统初始化中, 请稍候...", "error": "not_initialized"}
@@ -1013,7 +1098,12 @@ class OptimizedOrchestrator:
                     user_msg_clean = self.components["injection"].sanitize(user_msg_clean)
 
                 # ── 共享预处理（并行任务、prompt 组装、工具调用） ──
-                ctx = await self._prepare_context(user_msg_clean, session_id, character_id)
+                ctx = await self._prepare_context(
+                    user_msg_clean,
+                    session_id,
+                    character_id,
+                    emotion_engine=emotion_engine,
+                )
                 emotion_state = ctx["emotion_state"]
                 system_prompt = ctx["system_prompt"]
                 chat_history = ctx["chat_history"]
@@ -1036,15 +1126,20 @@ class OptimizedOrchestrator:
 
                 # === 一致性检查（复用 my_character/consistency_checker.py） ===
                 from my_character.consistency_checker import check_and_correct_reply
+
+                character_card = None
+                persona_service = self.components.get("persona")
+                card_loader = getattr(persona_service, "_load_character_card", None)
+                if character_id not in ("default", "demo") and callable(card_loader):
+                    character_card = card_loader(character_id)
                 reply = await check_and_correct_reply(
                     reply=reply,
-                persona_engine=getattr(
-                    self.components.get("persona"), "engine", None
-                ),
-                llm_gateway=self.components.get("llm"),
+                    persona_engine=getattr(persona_service, "engine", None),
+                    llm_gateway=self.components.get("llm"),
                     emotion_state=emotion_state,
                     session_id=session_id,
                     memory=self.components.get("memory"),
+                    character_card=character_card,
                 )
                 # === 检查结束 ===
 
@@ -1111,6 +1206,7 @@ class OptimizedOrchestrator:
         session_id: str = "",
         message_type: str = "text",
         character_id: str = "default",
+        emotion_engine: Any | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """SSE 流式聊天接口 — 真流式接入
 
@@ -1146,7 +1242,11 @@ class OptimizedOrchestrator:
             # ── 降级：伪流式（跑完整 process_message 后按块 yield） ──
             try:
                 result = await self.process_message(
-                    user_msg, session_id, message_type, character_id,
+                    user_msg,
+                    session_id,
+                    message_type,
+                    character_id,
+                    emotion_engine=emotion_engine,
                 )
                 reply = result.get("reply", "")
                 emotion = result.get("emotion")
@@ -1204,12 +1304,18 @@ class OptimizedOrchestrator:
 
             async with lock:
                 # ── 共享预处理（并行任务、prompt 组装、工具调用） ──
-                ctx = await self._prepare_context(user_msg_clean, session_id, character_id)
+                ctx = await self._prepare_context(
+                    user_msg_clean,
+                    session_id,
+                    character_id,
+                    emotion_engine=emotion_engine,
+                )
                 emotion_state = ctx["emotion_state"]
                 system_prompt = ctx["system_prompt"]
                 chat_history = ctx["chat_history"]
 
-                # 9. 真流式 LLM 调用 — 边生成边 yield
+                # 9. 先完整缓冲 LLM 输出。未经一致性和输出安全校验的内容
+                # 不能发送给客户端，否则后续事件也无法撤回泄露内容。
                 full_reply = ""
                 try:
                     async for token in llm.chat_stream(
@@ -1221,7 +1327,6 @@ class OptimizedOrchestrator:
                     ):
                         if token:
                             full_reply += token
-                            yield {"type": "token", "content": token}
                 except Exception as e:
                     logger.warning("真流式调用失败: %s", e)
                     # 流式中途失败：如果已有部分输出，补充提示后继续后处理
@@ -1246,15 +1351,44 @@ class OptimizedOrchestrator:
                     }
                     return
 
-                # 10. 流式后处理（不修改已 yield 的内容）
-                # 注意：一致性检查和输出安全检查需要完整回复且可能修改内容，
-                # 在流式模式下跳过（依赖输入安全 + system prompt 约束输出质量）
+                # 10. 完整回复校验。
                 reply = full_reply
 
-                # ── 共享后处理（after_chat → ASE → 好感度同步）──
-                self._after_process(
-                    user_msg_clean, reply, emotion_state, session_id, character_id,
+                from my_character.consistency_checker import check_and_correct_reply
+
+                character_card = None
+                persona_service = self.components.get("persona")
+                card_loader = getattr(persona_service, "_load_character_card", None)
+                if character_id not in ("default", "demo") and callable(card_loader):
+                    character_card = card_loader(character_id)
+                reply = await check_and_correct_reply(
+                    reply=reply,
+                    persona_engine=getattr(persona_service, "engine", None),
+                    llm_gateway=self.components.get("llm"),
+                    emotion_state=emotion_state,
+                    session_id=session_id,
+                    memory=self.components.get("memory"),
+                    character_card=character_card,
                 )
+
+                output_result = self.components["safety"].check_output(reply)
+                if not output_result.is_safe:
+                    reply = self.components["safety"].safe_alternative(output_result.category)
+
+                # ── 共享后处理（after_chat → ASE → 好感度同步）──
+                await asyncio.to_thread(
+                    self._after_process,
+                    user_msg_clean,
+                    reply,
+                    emotion_state,
+                    session_id,
+                    character_id,
+                )
+
+                # 校验通过后才对外发送最终文本。
+                chunk_size = 8
+                for i in range(0, len(reply), chunk_size):
+                    yield {"type": "token", "content": reply[i:i + chunk_size]}
 
                 process_time = round(time.perf_counter() - stream_start, 3)
                 yield {
@@ -1328,4 +1462,3 @@ class OptimizedOrchestrator:
             result["synthesis"] = {"success": False, "error": str(e)}
 
         return result
-

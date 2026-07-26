@@ -7,9 +7,13 @@ from pydantic import BaseModel, Field
 
 class LLMConfig(BaseModel):
     provider: str = "deepseek"
+    model: str = ""
     primary_model: str = "deepseek-chat"
     fallback_model: str = "deepseek-reasoner"
+    api_key: str = ""
     api_base: str = "https://api.deepseek.com/v1"
+    fallback_chain: list[str] = Field(default_factory=list)
+    cache: dict[str, Any] = Field(default_factory=dict)
     temperature: float = Field(default=0.85, ge=0.0, le=2.0)
     max_tokens: int = Field(default=2048, gt=0)
     stream_enabled: bool = True

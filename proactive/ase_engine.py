@@ -17,17 +17,16 @@ import random
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger("ase_engine")
-from proactive.reflection import InnerMonologue, ReflectionEngine
 from proactive.frequency import FrequencyAdapter, FrequencyController
+from proactive.reflection import InnerMonologue, ReflectionEngine
 
-
+logger = logging.getLogger("ase_engine")
 
 # ═══════════════════════════════════════════════════════════════
 #  类型枚举

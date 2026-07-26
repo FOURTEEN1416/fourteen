@@ -10,7 +10,11 @@ logger = logging.getLogger("main_routes")
 
 # \u2014\u2014 \u5171\u4eab\u5e38\u91cf \u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014
 
-SENSITIVE_FIELDS = {"api_key", "secret", "token", "password", "encryption_key", "api_base"}
+SENSITIVE_FIELDS = {
+    "api_key", "secret", "token", "password", "encryption_key",
+    "access_token", "refresh_token", "client_secret",
+}
+SENSITIVE_SUFFIXES = ("_api_key", "_secret", "_token", "_password", "_key")
 UPLOAD_DIR = Path(__file__).parent.parent / "data" / "uploads"
 MAX_UPLOAD_SIZE = min(
     int(os.environ.get("MAX_UPLOAD_SIZE", str(50 * 1024 * 1024))),
@@ -58,14 +62,18 @@ class ToolToggleRequest(BaseModel):
 
 # \u2014\u2014 \u8f93\u52a9\u51fd\u6570 \u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014
 
-def _sanitize_config(config_dict: dict) -> dict:
-    """\u8165\u654f\u914d\u7f6e\u4e2d\u7684\u654f\u611f\u5b57\u6bb5"""
-    sanitized = {}
-    for k, v in config_dict.items():
-        if isinstance(v, dict):
-            sanitized[k] = _sanitize_config(v)
-        elif k.lower() in SENSITIVE_FIELDS or any(s in k.lower() for s in SENSITIVE_FIELDS):
-            sanitized[k] = "****"
-        else:
-            sanitized[k] = v
-    return sanitized
+def _is_sensitive_config_key(key: str) -> bool:
+    normalized = key.lower()
+    return normalized in SENSITIVE_FIELDS or normalized.endswith(SENSITIVE_SUFFIXES)
+
+
+def _sanitize_config(value):
+    """Recursively mask credentials without hiding harmless fields such as max_tokens."""
+    if isinstance(value, dict):
+        return {
+            key: "****" if _is_sensitive_config_key(key) else _sanitize_config(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_config(item) for item in value]
+    return value

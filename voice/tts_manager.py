@@ -160,14 +160,13 @@ class TTSManager:
         if not self._enabled or not text:
             return None
 
-        if emotion and self._current_engine == "edge-tts":
-            if self._emotion_mapper is not None:
-                try:
-                    emotion_params = self._emotion_mapper.apply_to_edge_tts(emotion)
-                    kwargs.update(emotion_params)
-                    logger.debug("[TTS] 情感参数注入: %s → %s", emotion, emotion_params)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("[TTS] 情感映射失败: %s", e)
+        if emotion and self._current_engine == "edge-tts" and self._emotion_mapper is not None:
+            try:
+                emotion_params = self._emotion_mapper.apply_to_edge_tts(emotion)
+                kwargs.update(emotion_params)
+                logger.debug("[TTS] 情感参数注入: %s → %s", emotion, emotion_params)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[TTS] 情感映射失败: %s", e)
 
         # 注意: 无全局锁，支持并发合成
         # _current_engine/_last_error 的竞态只影响统计日志，不影响正确性

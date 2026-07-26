@@ -494,8 +494,9 @@ def test_config_sanitization():
         "api_base": "https://api.example.com",
     }
     result = _sanitize_config(raw)
-    for key in raw:
+    for key in ("api_key", "secret_key", "token", "password", "encryption_key"):
         assert result[key] == "****", f"Field '{key}' should be masked, got {result[key]}"
+    assert result["api_base"] == "https://api.example.com"
 
 
 def test_config_sanitization_nested():

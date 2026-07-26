@@ -31,6 +31,14 @@ logger = logging.getLogger("api.routers.chat_routes")
 router = APIRouter(tags=["chat"])
 
 
+def _resolve_character_id(character_id: str) -> str:
+    if character_id and character_id != "default":
+        return character_id
+    from api.routers.character_routes import get_active_character_id
+
+    return get_active_character_id()
+
+
 # ═══════════════════════════════════════════════════════
 # Chat / Session
 # ═══════════════════════════════════════════════════════
@@ -47,7 +55,10 @@ async def chat(req: ChatRequest, _auth: bool = Security(verify_api_key_dep)):
         )
     try:
         result = await orch.process_message(
-            req.message, req.session_id, req.message_type, req.character_id,
+            req.message,
+            req.session_id,
+            req.message_type,
+            _resolve_character_id(req.character_id),
         )
     except TimeoutError:
         raise HTTPException(
@@ -80,7 +91,10 @@ async def chat_stream(req: ChatRequest, _auth: bool = Security(verify_api_key_de
 
     async def event_generator():
         stream_gen = orch.process_message_stream(
-            req.message, req.session_id, req.message_type, req.character_id,
+            req.message,
+            req.session_id,
+            req.message_type,
+            _resolve_character_id(req.character_id),
         )
         try:
             async for event in stream_gen:
