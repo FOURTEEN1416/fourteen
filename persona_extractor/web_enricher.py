@@ -28,10 +28,8 @@ import logging
 import os
 import re
 import subprocess
-import sys
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -150,8 +148,8 @@ class DirectScraper:
             target = main_content if main_content else soup
 
             text = target.get_text(separator="\n", strip=True)
-            lines = [l.strip() for l in text.split("\n")
-                     if l.strip() and len(l.strip()) > 15]
+            lines = [line.strip() for line in text.split("\n")
+                     if line.strip() and len(line.strip()) > 15]
             doc.content = "\n\n".join(lines[:200])
 
         except requests.RequestException as e:
@@ -269,7 +267,6 @@ class AgentReachSource:
         # bili-cli 返回的 title 可能带 XML 标签
         title = re.sub(r"<[^>]+>", "", title).strip()
 
-        author = item.get("author", "") or item.get("name", "") or ""
         desc = item.get("description", "") or item.get("sign", "") or ""
         url = item.get("url", "") or ""
         if not url:
@@ -528,11 +525,11 @@ class AgentReachChannels:
 
     def _init_channels(self):
         import sys as _sys
-        _ar_path = r"D:\Desktop\自动化推广gent-reach"
+        _ar_path = r"D:\Desktop\自动化推广\agent-reach"
         if _ar_path not in _sys.path:
             _sys.path.insert(0, _ar_path)
         try:
-            from agent_reach.channels import ALL_CHANNELS, get_channel
+            from agent_reach.channels import ALL_CHANNELS
             for c in ALL_CHANNELS:
                 self._channels[c.name] = c
         except ImportError:
@@ -641,139 +638,6 @@ class AgentReachChannels:
 
 # ══════════════════════════════════════════════
 #  内容源 4: Agent-Reach Python 渠道
-# ══════════════════════════════════════════════
-
-class AgentReachChannels:
-    """直接使用 Agent-Reach 的 Python channels（无需 CLI subprocess）。
-
-    支持 13 种平台：
-      bilibili, web(Jina), exa_search, xiaohongshu, youtube,
-      twitter, github, reddit, v2ex, xueqiu, xiaoyuzhou, linkedin, rss
-
-    用法：
-        ch = AgentReachChannels()
-        docs = ch.search_bilibili("角色名")      # B站搜索
-        doc = ch.read_url("https://...")      # Jina Reader
-        docs = ch.search_xiaohongshu("角色名") # 小红书
-        docs = ch.search_all("角色名")         # 全平台
-    """
-
-    NAME = "agent_reach_channels"
-
-    def __init__(self):
-        self._channels = {}
-        self._init_channels()
-
-    def _init_channels(self):
-        import sys as _sys
-        _ar_path = r"D:\Desktop\自动化推广gent-reach"
-        if _ar_path not in _sys.path:
-            _sys.path.insert(0, _ar_path)
-        try:
-            from agent_reach.channels import ALL_CHANNELS, get_channel
-            for c in ALL_CHANNELS:
-                self._channels[c.name] = c
-        except ImportError:
-            pass
-
-    @property
-    def available_channels(self) -> list[str]:
-        return list(self._channels.keys())
-
-    def read_url(self, url: str) -> RawDocument | None:
-        """通过 WebChannel (Jina Reader) 读取任意网页。"""
-        ch = self._channels.get("web")
-        if not ch:
-            return None
-        try:
-            content = ch.read(url)
-            if content:
-                lines = content.strip().split(chr(10))
-                title = lines[0].strip("# ").strip() if lines else ""
-                return RawDocument(
-                    url=url, title=title, content=content,
-                    source="agent_reach_web",
-                )
-        except Exception as e:
-            logger.debug("AgentReach WebChannel 失败 %s: %s", url, e)
-        return None
-
-    def search_bilibili(self, query: str, num: int = 5) -> list[RawDocument]:
-        """通过 BilibiliChannel 搜索 B站。"""
-        docs: list[RawDocument] = []
-        ch = self._channels.get("bilibili")
-        if not ch or not hasattr(ch, "search"):
-            return docs
-        try:
-            results = ch.search(query, limit=num)
-            for item in (results or []):
-                title = getattr(item, "title", "") or (item.get("title", "") if isinstance(item, dict) else "")
-                url = getattr(item, "url", "") or (item.get("url", "") if isinstance(item, dict) else "")
-                content = getattr(item, "content", "") or (item.get("description", "") if isinstance(item, dict) else "")
-                if isinstance(title, str):
-                    title = re.sub(r"<[^>]+>", "", title).strip()
-                docs.append(RawDocument(
-                    url=str(url) if url else "",
-                    title=str(title) if title else query,
-                    content=str(content) if content else title or query,
-                    source="agent_reach_bilibili",
-                ))
-        except Exception as e:
-            logger.debug("AgentReach BilibiliChannel 失败: %s", e)
-        return docs
-
-    def _search_channel(self, channel_name: str, query: str, num: int = 3) -> list[RawDocument]:
-        """通用渠道搜索。"""
-        docs: list[RawDocument] = []
-        ch = self._channels.get(channel_name)
-        if not ch or not hasattr(ch, "search"):
-            return docs
-        try:
-            results = ch.search(query, limit=num)
-            for item in (results or []):
-                if isinstance(item, dict):
-                    title = str(item.get("title", "") or "")
-                    url = str(item.get("url", "") or "")
-                    content = str(item.get("content", "") or item.get("description", "") or "")
-                    docs.append(RawDocument(
-                        url=url, title=title or query,
-                        content=content or title or query,
-                        source=f"agent_reach_{channel_name}",
-                    ))
-                elif hasattr(item, "title"):
-                    docs.append(RawDocument(
-                        url=getattr(item, "url", ""),
-                        title=getattr(item, "title", query),
-                        content=getattr(item, "content", "") or getattr(item, "title", query),
-                        source=f"agent_reach_{channel_name}",
-                    ))
-        except Exception as e:
-            logger.debug("AgentReach %s 失败: %s", channel_name, e)
-        return docs
-
-    def search_xiaohongshu(self, query: str, num: int = 3) -> list[RawDocument]:
-        return self._search_channel("xiaohongshu", query, num)
-
-    def search_exa(self, query: str, num: int = 3) -> list[RawDocument]:
-        return self._search_channel("exa_search", query, num)
-
-    def search_youtube(self, query: str, num: int = 3) -> list[RawDocument]:
-        return self._search_channel("youtube", query, num)
-
-    def search_all(self, query: str, max_per_source: int = 2) -> list[RawDocument]:
-        """在所有可用渠道上搜索。"""
-        docs: list[RawDocument] = []
-        seen: set[str] = set()
-        for name in ["bilibili", "xiaohongshu", "exa_search", "youtube", "v2ex"]:
-            if name not in self._channels:
-                continue
-            for d in (self._search_channel(name, query, max_per_source) if name != "bilibili"
-                      else self.search_bilibili(query, max_per_source)):
-                key = d.url or d.content[:80]
-                if key and key not in seen and d.content:
-                    seen.add(key)
-                    docs.append(d)
-        return docs
 
 
 # ══════════════════════════════════════════════

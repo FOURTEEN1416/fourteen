@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from persona_extractor.web_enricher import (
-    RawDocument,
     EnrichResult,
+    RawDocument,
     WebPersonaEnricher,
 )
 

@@ -55,14 +55,14 @@ function SettingsLLM() {
         const cfg = res.data ?? {}
         const llm = cfg.llm ?? {}
         setProvider(llm.provider ?? 'auto')
-        setModelName(llm.model ?? '')
-        setApiKey(llm.api_key ?? '')
+        setModelName(llm.model || llm.primary_model || '')
+        setApiKey(llm.api_key && llm.api_key !== '****' ? llm.api_key : '')
         setApiBase(llm.api_base ?? '')
         setTemperature(llm.temperature ?? 0.85)
         setMaxTokens(llm.max_tokens ?? 2048)
-        const cache = cfg.llm_cache ?? cfg.cache ?? {}
+        const cache = llm.cache ?? {}
         setLlmCache(cache.enabled !== false)
-        setCacheDuration(cache.duration ?? cache.ttl ?? 30)
+        setCacheDuration(Math.max(1, Math.round((cache.ttl ?? 1800) / 60)))
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -82,24 +82,26 @@ function SettingsLLM() {
     setSuccess(false)
 
     try {
-      await saveConfig({
-        llm: {
-          provider,
-          model: modelName,
-          api_key: apiKey,
-          api_base: apiBase,
-          temperature,
-          max_tokens: maxTokens,
-        },
-        llm_cache: {
+      const llmConfig: Record<string, unknown> = {
+        provider,
+        model: modelName,
+        primary_model: modelName,
+        api_base: apiBase,
+        temperature,
+        max_tokens: maxTokens,
+        cache: {
           enabled: llmCache,
-          duration: cacheDuration,
+          ttl: cacheDuration * 60,
         },
-      })
+      }
+      // GET /config intentionally returns ****. Empty input means "keep the
+      // stored key"; only a newly entered value is sent back to the server.
+      if (apiKey && apiKey !== '****') llmConfig.api_key = apiKey
+      await saveConfig({ llm: llmConfig })
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
-    } catch {
-      // global toast
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '保存配置失败')
     } finally {
       setSaving(false)
     }
@@ -291,7 +293,7 @@ function SettingsLLM() {
               value={cacheDuration}
               onChange={(e) => setCacheDuration(parseInt(e.target.value) || 0)}
               min={1}
-              max={1440}
+              max={525600}
               className="w-24 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50 text-center"
             />
           </div>

@@ -20,14 +20,14 @@ const DEFAULT_CONFIG = {
     llm: {
       provider: 'deepseek',
       model: 'deepseek-chat',
-      api_key: 'sk-test-key',
+      api_key: '****',
       api_base: 'https://api.deepseek.com/v1',
       temperature: 0.7,
       max_tokens: 4096,
-    },
-    llm_cache: {
-      enabled: true,
-      duration: 60,
+      cache: {
+        enabled: true,
+        ttl: 3600,
+      },
     },
   },
 }
@@ -71,7 +71,7 @@ describe('SettingsLLM', () => {
 
     // API Key input (type=password, but value still rendered)
     const apiKeyInput = screen.getByPlaceholderText('sk-...') as HTMLInputElement
-    expect(apiKeyInput.value).toBe('sk-test-key')
+    expect(apiKeyInput.value).toBe('')
 
     // Model input
     const modelInput = screen.getByPlaceholderText('deepseek-chat') as HTMLInputElement
@@ -116,14 +116,14 @@ describe('SettingsLLM', () => {
         llm: {
           provider: 'deepseek',
           model: 'deepseek-chat',
-          api_key: 'sk-test-key',
+          primary_model: 'deepseek-chat',
           api_base: 'https://api.deepseek.com/v1',
           temperature: 0.7,
           max_tokens: 4096,
-        },
-        llm_cache: {
-          enabled: true,
-          duration: 60,
+          cache: {
+            enabled: true,
+            ttl: 3600,
+          },
         },
       })
     })
@@ -189,7 +189,9 @@ describe('SettingsLLM', () => {
     await waitFor(() => {
       expect(mockSaveConfig).toHaveBeenCalledWith(
         expect.objectContaining({
-          llm_cache: expect.objectContaining({ enabled: false }),
+          llm: expect.objectContaining({
+            cache: expect.objectContaining({ enabled: false, ttl: 3600 }),
+          }),
         }),
       )
     })
@@ -211,9 +213,8 @@ describe('SettingsLLM', () => {
     // Click save — should not crash
     fireEvent.click(screen.getByText('保存设置'))
 
-    // Wait for save to complete — component goes back to "保存设置" (not "保存中...")
     await waitFor(() => {
-      expect(screen.getByText('保存设置')).toBeDefined()
+      expect(screen.getByText('Save failed')).toBeDefined()
     })
   })
 })

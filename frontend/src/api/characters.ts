@@ -60,6 +60,17 @@ export interface PreviewResponse {
   preview: string
 }
 
+export interface CharacterPersonaPreview {
+  reply: string
+  persona: {
+    name: string
+    description?: string
+    core_anchors?: string[]
+    personality?: Record<string, number>
+    speaking_style?: Record<string, number>
+  }
+}
+
 // ════════════════════════════════════════════════════
 //  角色 CRUD
 // ════════════════════════════════════════════════════
@@ -72,6 +83,12 @@ export function listCharacters(params?: ListCharactersParams): Promise<Character
 /** POST /api/characters — 创建新角色 */
 export function createCharacter(payload: UnifiedCharacterCreate): Promise<CharacterCreateResponse> {
   return client.post('/characters', payload).then(r => r.data as CharacterCreateResponse)
+}
+
+/** POST /api/characters/preview-from-description — 生成可编辑人设预览，不落库 */
+export function previewCharacterFromDescription(description: string, archetype = '自定义'): Promise<CharacterPersonaPreview> {
+  return client.post('/characters/preview-from-description', { description, archetype })
+    .then(r => r.data as CharacterPersonaPreview)
 }
 
 /** GET /api/characters/{id} — 获取单个角色详情 */

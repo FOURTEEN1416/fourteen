@@ -82,6 +82,10 @@ htmlcov/
 audit_output.json
 ACA(3)*/
 
+# ── 部署打包产物（一次性 scp payload，不应进入版本控制） ──
+deploy_payload.tar.gz
+*_payload.tar.gz
+
 # ── 设计稿/截图 ──
 *.docx
 createrole-*.png

@@ -1,5 +1,23 @@
 import client from './client'
 
+export interface ClonePersonaPreview {
+  persona: {
+    name: string
+    description?: string
+    core_anchors?: string[]
+    personality?: Record<string, number>
+    speaking_style?: Record<string, number>
+  }
+  sample_count: number
+  style_report: Record<string, unknown>
+}
+
+/** POST /api/clone/preview — 显式读取本机微信解密数据并生成人设预览 */
+export function clonePreview(target: string, maxMessages = 2000): Promise<ClonePersonaPreview> {
+  return client.post('/clone/preview', { target, max_messages: maxMessages })
+    .then(r => r.data as ClonePersonaPreview)
+}
+
 /** GET /api/clone/contacts — 联系人列表 */
 export function cloneContacts(keyword = '') {
   return client.get('/clone/contacts', { params: { keyword } })

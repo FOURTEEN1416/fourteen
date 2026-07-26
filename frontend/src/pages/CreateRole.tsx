@@ -3,7 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { useCreateCharacter } from '../hooks/useQueries'
 import { useErrorStore } from '../store/errorStore'
 import { useCharacterBuilderStore, type PersonaState } from '../store/characterBuilderStore'
-import { chat, listPresets, getPreset } from '../api/client'
+import {
+  clonePreview,
+  getPreset,
+  importCharacter,
+  listPresets,
+  previewCharacterFromDescription,
+} from '../api/client'
 import type { PresetItem } from '../api/characters'
 import {
   MessageSquare, Send, Loader2, Sparkles,
@@ -12,6 +18,40 @@ import {
 
 type CreateMethod = 'ai-chat' | 'wechat-clone' | 'file-import'
 interface ChatMessage { role: 'user' | 'assistant'; content: string }
+
+interface PersonaPayload {
+  name?: string
+  description?: string
+  core_anchors?: string[]
+  personality?: Record<string, number>
+  speaking_style?: Record<string, number>
+}
+
+function toPersonaState(persona: PersonaPayload): Partial<PersonaState> {
+  return {
+    name: persona.name || '',
+    description: persona.description || '',
+    anchors: Array.isArray(persona.core_anchors) ? persona.core_anchors : [],
+    personality: persona.personality || {},
+    speakingStyle: persona.speaking_style || {},
+  }
+}
+
+function getCardPreview(raw: Record<string, unknown>): PersonaPayload {
+  const nested = raw.data
+  const source = nested && typeof nested === 'object' ? nested as Record<string, unknown> : raw
+  return {
+    name: String(source.name || raw.name || ''),
+    description: String(source.description || raw.description || ''),
+    core_anchors: Array.isArray(source.core_anchors)
+      ? source.core_anchors.map(String)
+      : Array.isArray(source.tags) ? source.tags.map(String).slice(0, 8) : [],
+    personality: source.personality && typeof source.personality === 'object'
+      ? source.personality as Record<string, number> : {},
+    speaking_style: source.speaking_style && typeof source.speaking_style === 'object'
+      ? source.speaking_style as Record<string, number> : {},
+  }
+}
 
 const METHODS: { key: CreateMethod; label: string; gradient: string }[] = [
   { key: 'ai-chat', label: 'AI 对话', gradient: 'from-macaron-pink to-macaron-pink-deep' },
@@ -39,10 +79,9 @@ function AIChatTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaSt
     const text = input.trim(); if (!text || loading) return
     setMessages(prev => [...prev, { role: 'user', content: text }]); setInput(''); setLoading(true)
     try {
-      const res = await chat(text, '', 'character_build')
-      const data = res.data as { reply?: string; persona_update?: Partial<PersonaState> }
-      setMessages(prev => [...prev, { role: 'assistant', content: data?.reply || '嗯，我知道了～' }])
-      if (data?.persona_update) onPersonaUpdate(data.persona_update)
+      const data = await previewCharacterFromDescription(text)
+      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
+      onPersonaUpdate(toPersonaState(data.persona))
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: '抱歉，我暂时无法回应。' }])
     } finally { setLoading(false) }
@@ -111,22 +150,32 @@ function AIChatTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaSt
 
 // ═══ WeChat Clone Tab ═══
 function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaState>) => void }) {
-  const [phase, setPhase] = useState<'idle' | 'extracting' | 'analyzing' | 'generating' | 'done'>('idle')
+  const [phase, setPhase] = useState<'idle' | 'extracting' | 'analyzing' | 'generating' | 'done' | 'error'>('idle')
   const [wxid, setWxid] = useState('')
+  const [error, setError] = useState('')
+  const [sampleCount, setSampleCount] = useState(0)
   const STEPS = [
-    { phase: 'extracting' as const, label: '提取聊天记录' },
+    { phase: 'extracting' as const, label: '解密并提取聊天记录' },
     { phase: 'analyzing' as const, label: '分析性格特征' },
     { phase: 'generating' as const, label: '生成角色人设' },
   ]
   const curIdx = STEPS.findIndex(s => s.phase === phase)
 
-  function startClone() {
+  async function startClone() {
     if (!wxid.trim()) return
-    setPhase('extracting'); setTimeout(() => setPhase('analyzing'), 1500); setTimeout(() => setPhase('generating'), 3000)
-    setTimeout(() => {
+    setError('')
+    setPhase('extracting')
+    try {
+      const data = await clonePreview(wxid.trim())
+      setPhase('analyzing')
+      onPersonaUpdate(toPersonaState(data.persona))
+      setPhase('generating')
+      setSampleCount(data.sample_count)
       setPhase('done')
-      onPersonaUpdate({ name: wxid, anchors: ['幽默', '直率', '朋友多'], personality: { warmth: 0.7, playfulness: 0.8, independence: 0.6, jealousy: 0.2, stubbornness: 0.3 } })
-    }, 4500)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '微信克隆失败，请确认微信 4.x 已登录且解密组件可用')
+      setPhase('error')
+    }
   }
 
   return (
@@ -143,10 +192,10 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
           value={wxid}
           onChange={e => setWxid(e.target.value)}
           placeholder="输入微信 ID（如 wxid_xxx）"
-          disabled={phase !== 'idle'}
+          disabled={!['idle', 'error'].includes(phase)}
           className="input-macaron w-full rounded-xl px-4 py-2.5 text-sm outline-none"
         />
-        {phase === 'idle' ? (
+        {phase === 'idle' || phase === 'error' ? (
           <button onClick={startClone} disabled={!wxid.trim()} className="w-full py-2.5 rounded-xl btn-macaron text-white text-sm font-semibold disabled:opacity-40 transition-all">开始克隆</button>
         ) : (
           <div className="space-y-2">
@@ -166,11 +215,12 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
             {phase === 'done' && (
               <div className="glass-green border border-macaron-green/30 rounded-xl px-4 py-3 flex items-center gap-2">
                 <Check className="w-4 h-4 text-macaron-green-deep" />
-                <span className="text-xs text-macaron-green-deep font-medium">克隆完成！人设卡已更新</span>
+                <span className="text-xs text-macaron-green-deep font-medium">已分析 {sampleCount} 轮对话，人设预览已更新</span>
               </div>
             )}
           </div>
         )}
+        {error && <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-xs text-red-600">{error}</div>}
       </div>
     </div>
   )
@@ -182,27 +232,34 @@ function FileImportTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Perso
   const [error, setError] = useState('')
   const [parsed, setParsed] = useState<Record<string, string> | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const setImportFile = useCharacterBuilderStore(s => s.setImportFile)
+
+  function applyRawCard(raw: Record<string, unknown>, file: File) {
+    const preview = getCardPreview(raw)
+    if (!preview.name) throw new Error('角色卡缺少 name 字段')
+    setImportFile(file)
+    setParsed({ 角色名称: preview.name, 角色描述: preview.description || '' })
+    setError('')
+    onPersonaUpdate(toPersonaState(preview))
+  }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return
+    setImportFile(null)
     const reader = new FileReader()
     reader.onload = () => {
       try {
-        const data = JSON.parse(reader.result as string)
-        const f: Record<string, string> = {}
-        if (data.name) f['角色名称'] = data.name; if (data.description) f['角色描述'] = data.description
-        setParsed(f); setError('')
-        onPersonaUpdate({ name: data.name, description: data.description, anchors: Array.isArray(data.core_anchors) ? data.core_anchors : [], personality: data.personality || {} })
-      } catch { setError('JSON 格式无效') }
+        applyRawCard(JSON.parse(reader.result as string) as Record<string, unknown>, file)
+      } catch (err) { setError(err instanceof Error ? err.message : 'JSON 格式无效') }
     }
     reader.readAsText(file)
   }
 
   function handleTextParse() {
     try {
-      const data = JSON.parse(jsonText); setParsed({ 角色名称: data.name || '', 角色描述: data.description || '' }); setError('')
-      onPersonaUpdate({ name: data.name, description: data.description })
-    } catch { setError('JSON 格式无效') }
+      const raw = JSON.parse(jsonText) as Record<string, unknown>
+      applyRawCard(raw, new File([jsonText], 'character.json', { type: 'application/json' }))
+    } catch (err) { setError(err instanceof Error ? err.message : 'JSON 格式无效') }
   }
 
   return (
@@ -220,7 +277,11 @@ function FileImportTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Perso
         <div className="absolute top-2 left-3 text-[10px] text-text-muted">JSON 手动输入</div>
         <textarea
           value={jsonText}
-          onChange={e => setJsonText(e.target.value)}
+          onChange={e => {
+            setJsonText(e.target.value)
+            setImportFile(null)
+            setParsed(null)
+          }}
           rows={6}
           placeholder='{"name": "角色名", "description": "描述"}'
           className="input-macaron w-full rounded-xl px-4 py-4 pt-7 text-xs font-mono text-text-primary placeholder:text-text-dim outline-none resize-none"
@@ -314,19 +375,25 @@ function CreateButton() {
   const createMutation = useCreateCharacter()
   const toast = useErrorStore.getState().addToast
   const persona = useCharacterBuilderStore(s => s.persona)
+  const importFile = useCharacterBuilderStore(s => s.importFile)
   const hasContent = useCharacterBuilderStore(s => s.hasContent)
+  const [isImporting, setIsImporting] = useState(false)
 
   async function handleCreate() {
     if (!hasContent || !persona) { toast({ type: 'warning', message: '请先生成角色人设' }); return }
     try {
-      const result = await createMutation.mutateAsync({ name: persona.name || '未命名角色', description: persona.description || '', core_anchors: persona.anchors, personality: persona.personality, speaking_style: persona.speakingStyle })
+      setIsImporting(Boolean(importFile))
+      const result = importFile
+        ? await importCharacter(importFile)
+        : await createMutation.mutateAsync({ name: persona.name || '未命名角色', description: persona.description || '', core_anchors: persona.anchors, personality: persona.personality, speaking_style: persona.speakingStyle })
       toast({ type: 'success', message: '角色创建成功！' })
       navigate(`/roles/${result.id}/settings`)
     } catch { toast({ type: 'error', message: '创建失败，请重试' }) }
+    finally { setIsImporting(false) }
   }
   return (
-    <button onClick={handleCreate} disabled={createMutation.isPending || !hasContent} className="btn-macaron w-full py-3 rounded-xl text-sm font-semibold disabled:opacity-40 flex items-center justify-center gap-2 transition-all">
-      <Sparkles className="w-4 h-4" /> {createMutation.isPending ? '创建中...' : '创建角色'}
+    <button onClick={handleCreate} disabled={createMutation.isPending || isImporting || !hasContent} className="btn-macaron w-full py-3 rounded-xl text-sm font-semibold disabled:opacity-40 flex items-center justify-center gap-2 transition-all">
+      <Sparkles className="w-4 h-4" /> {createMutation.isPending || isImporting ? '创建中...' : '创建角色'}
     </button>
   )
 }
@@ -337,6 +404,7 @@ function PresetPills({ onSelect }: { onSelect: (p: Partial<PersonaState>) => voi
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const cancelledRef = useRef(false)
+  const setImportFile = useCharacterBuilderStore(s => s.setImportFile)
 
   useEffect(() => {
     listPresets()
@@ -347,6 +415,7 @@ function PresetPills({ onSelect }: { onSelect: (p: Partial<PersonaState>) => voi
   }, [])
 
   async function handleSelect(item: PresetItem) {
+    setImportFile(null)
     setSelectedId(item.id)
     try {
       const detail = await getPreset(item.id)
@@ -398,6 +467,7 @@ function PresetPills({ onSelect }: { onSelect: (p: Partial<PersonaState>) => voi
 export default function CreateRole() {
   const [method, setMethod] = useState<CreateMethod>('ai-chat')
   const setPersona = useCharacterBuilderStore(s => s.setPersona)
+  const setImportFile = useCharacterBuilderStore(s => s.setImportFile)
   const resetPersona = useCharacterBuilderStore(s => s.resetPersona)
   useEffect(() => { resetPersona(); return () => { resetPersona() } }, [resetPersona])
 
@@ -421,7 +491,10 @@ export default function CreateRole() {
           {METHODS.map(m => (
             <button
               key={m.key}
-              onClick={() => setMethod(m.key)}
+              onClick={() => {
+                setMethod(m.key)
+                if (m.key !== 'file-import') setImportFile(null)
+              }}
               className={`flex-1 rounded-xl py-2.5 text-sm font-medium transition-all ${
                 method === m.key
                   ? `bg-gradient-to-r ${m.gradient} text-white shadow-sm`

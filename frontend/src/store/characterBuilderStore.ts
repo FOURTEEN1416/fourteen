@@ -13,8 +13,10 @@ export interface PersonaState {
 
 interface CharacterBuilderState {
   persona: PersonaState | null
+  importFile: File | null
   hasContent: boolean
   setPersona: (p: Partial<PersonaState>) => void
+  setImportFile: (file: File | null) => void
   resetPersona: () => void
 }
 
@@ -28,6 +30,7 @@ const EMPTY: PersonaState = {
 
 export const useCharacterBuilderStore = create<CharacterBuilderState>((set) => ({
   persona: null,
+  importFile: null,
   hasContent: false,
   setPersona: (update) =>
     set((state) => {
@@ -43,5 +46,6 @@ export const useCharacterBuilderStore = create<CharacterBuilderState>((set) => (
         hasContent: next.name !== '' || next.anchors.length > 0 || next.description !== '',
       }
     }),
-  resetPersona: () => set({ persona: null, hasContent: false }),
+  setImportFile: (file) => set({ importFile: file }),
+  resetPersona: () => set({ persona: null, importFile: null, hasContent: false }),
 }))
