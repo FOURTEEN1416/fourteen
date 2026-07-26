@@ -58,8 +58,14 @@
 
 ## 编排器架构
 
-> **注:** 编排逻辑位于 `orchestrator/optimized_orchestrator.py`。`orchestrator/` 包还包含
-> `session_locks.py`（会话锁）和 `voice_detector.py`（语音检测）。
+> **注:** 编排逻辑位于 `orchestrator/` 包，包含 5 个文件：
+> - `optimized_orchestrator.py` (920行) — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / `_prepare_context` / `process_message` / `health_check`
+> - `_init_mixin.py` (438行) — `_InitPhasesMixin`：`initialize` 拆分为 9 个 `_init_*` 阶段
+> - `_stream_mixin.py` (238行) — `_StreamPipelineMixin`：`process_message_stream` SSE 真流式/伪流式降级
+> - `session_locks.py` — 会话锁管理（`SessionLockManager`）
+> - `voice_detector.py` — 语音活动检测
+>
+> `OptimizedOrchestrator` 继承 `_InitPhasesMixin` + `_StreamPipelineMixin`，通过 `self.components` 共享状态。公共 API 100% 兼容。
 >
 > `tools/` 模块提供 12 个内置工具（搜索、天气、日历、提醒、时间感知等），
 > 由编排器在流水线第 7 步调度执行。

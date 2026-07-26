@@ -40,7 +40,7 @@
 ```mermaid
 graph TD
     subgraph ENTRY["入口层 entry"]
-        OA["OptimizedOrchestrator (main.py)"]
+        OA["OptimizedOrchestrator (orchestrator/)"]
     end
     subgraph API["接口层 api"]
         AR["api/ 168+ 路由"]
@@ -79,7 +79,14 @@ graph TD
 
 ## 3. 核心数据流 — process_message 热路径
 
-`OptimizedOrchestrator.process_message`（main.py:881-1138）处理每一条用户消息，是全系统最关键调用链。**最新更新 (2026-07-01)**: PersonaService.build_system_prompt 已重构为**两阶段构造**，第一阶段由 shisi PromptBuilder 生成角色 + RAG 知识 + 情感 + 对话历史，第二阶段注入 PersonaEngine 的 5 层对齐层（世界/时间信息 → RAG 上下文 → 情感 → 风格 → 约束）。
+`OptimizedOrchestrator.process_message`（`orchestrator/optimized_orchestrator.py`）处理每一条用户消息，是全系统最关键调用链。
+
+> **架构变更 (2026-07-26)**: `OptimizedOrchestrator` 现在继承 `_InitPhasesMixin` + `_StreamPipelineMixin`：
+> - `orchestrator/optimized_orchestrator.py` (920行): 主类 `__init__` / 会话锁 / `_prepare_context` / `process_message` / `health_check`
+> - `orchestrator/_init_mixin.py` (438行): `initialize` 拆分为 9 个 `_init_*` 阶段
+> - `orchestrator/_stream_mixin.py` (238行): `process_message_stream` SSE 真流式/伪流式降级
+>
+> **最新更新 (2026-07-01)**: PersonaService.build_system_prompt 已重构为**两阶段构造**，第一阶段由 shisi PromptBuilder 生成角色 + RAG 知识 + 情感 + 对话历史，第二阶段注入 PersonaEngine 的 5 层对齐层（世界/时间信息 → RAG 上下文 → 情感 → 风格 → 约束）。
 
 ```mermaid
 sequenceDiagram

@@ -92,3 +92,6 @@ fi
 log "=== 唯一的你 Deployment Completed Successfully ==="
 log "Check status: systemctl status ai-girlfriend"
 log "Check logs:   journalctl -u ai-girlfriend -f"
+log ""
+log "提示：如需从本地重新上传代码，请在 Windows 开发机上运行："
+log "  powershell -File deploy_ai_girlfriend.ps1"

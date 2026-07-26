@@ -80,14 +80,36 @@ certbot 会自动修改 Nginx 配置并启用 HTTPS。
 
 ### 第五步：部署应用
 
+#### 方式 A：从 Windows 开发机一键部署（推荐）
+
+在项目根目录双击 `deploy_ai_girlfriend.bat` 或运行：
+
+```powershell
+powershell -File deploy_ai_girlfriend.ps1
+```
+
+脚本自动完成：
+1. 本地运行测试套件（可 `-SkipTests` 跳过）
+2. `git archive` 打包已提交的代码
+3. `scp` 上传到服务器 `/opt/ai-girlfriend/`
+4. 远程解压 + 剥离 CRLF + 执行 `deploy/remote_deploy.sh`
+5. 验证服务状态并清理临时文件
+
+> ⚠️ **前提**：SSH 密钥已配置（`ssh-keygen` + `ssh-copy-id deploy@服务器IP`）。
+
+#### 方式 B：在服务器上手动部署
+
 ```bash
 cd /opt/ai-girlfriend
 sudo bash deploy/deploy.sh
 ```
 
+> ⚠️ **注意**：服务器无法访问 GitHub（443 timeout），`deploy.sh` 已移除 `git pull`。
+> 代码必须通过方式 A 上传，或手动 `scp` 后再执行 `deploy.sh`。
+
 部署脚本完成：
 
-1. `git pull` 拉取最新代码
+1. ~~`git pull`~~（已移除，服务器无法访问 GitHub）
 2. `pip install -e .` 更新 Python 依赖
 3. `npm install && npm run build` 构建前端
 4. 复制前端文件到 Nginx 静态目录
@@ -167,12 +189,22 @@ ls -la /opt/ai-girlfriend/backups/
 
 ## 更新应用
 
+### 从 Windows 开发机（推荐）
+
+```powershell
+# 在项目根目录执行
+powershell -File deploy_ai_girlfriend.ps1
+```
+
+### 在服务器上
+
 ```bash
 cd /opt/ai-girlfriend
 sudo bash deploy/deploy.sh
 ```
 
-就这么简单。脚本会自动拉取、构建、重启。
+> 注意：服务器无法访问 GitHub，`deploy.sh` 不再执行 `git pull`。
+> 代码必须先通过 `deploy_ai_girlfriend.ps1` 或手动 `scp` 上传。
 
 如果你要回滚：
 
