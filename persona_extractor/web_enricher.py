@@ -38,7 +38,9 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger("persona_extractor.web_enricher")
 
-_AGENT_REACH_PATH = "D:/Desktop/自动化推广/agent-reach"
+# Agent-Reach 模块路径：通过环境变量配置，避免硬编码本地路径。
+# 服务器（Linux）上若未安装 agent-reach，AgentReachChannels 将优雅降级为空通道列表。
+_AGENT_REACH_PATH = os.environ.get("AGENT_REACH_PATH")
 
 # ── 数据模型 ──
 
