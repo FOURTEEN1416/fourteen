@@ -11,23 +11,11 @@ export const SUB_TABS: { key: RoleSettingsTab; label: string; icon: React.ReactN
 ]
 
 export const ENGINE_OPTIONS = [
-  { value: 'edge-tts', label: 'Edge TTS', desc: '微软免费语音合成，Windows 内置' },
   { value: 'mimo-tts', label: 'MiMo Cloud', desc: '云端专业语音合成，支持克隆' },
-  { value: 'gpt-sovits', label: 'GPT-SoVITS', desc: '本地精细化语音模型' },
-  { value: 'bert-vits2', label: 'Bert-VITS2', desc: '轻量本地语音合成' },
 ]
 
 export const MIMO_MODELS = [
   { value: 'mimo-v2.5-tts', label: '基础合成', desc: '日常对话，情感丰富' },
   { value: 'mimo-v2.5-tts-voiceclone', label: '语音克隆', desc: '上传音频 → 克隆专属音色' },
   { value: 'mimo-v2.5-tts-voicedesign', label: '音色设计', desc: '文字描述 → 生成新音色' },
-]
-
-export const EDGE_SPEAKERS = [
-  { value: 'zh-CN-XiaoxiaoNeural', label: '晓晓（女·活泼）' },
-  { value: 'zh-CN-XiaoyiNeural', label: '晓伊（女·温柔）' },
-  { value: 'zh-CN-YunjianNeural', label: '云健（男·运动）' },
-  { value: 'zh-CN-YunxiNeural', label: '云希（男·叙述）' },
-  { value: 'zh-CN-YunyangNeural', label: '云扬（男·新闻）' },
-  { value: 'zh-CN-XiaochenNeural', label: '晓辰（女·自然）' },
 ]

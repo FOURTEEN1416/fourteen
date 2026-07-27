@@ -150,6 +150,54 @@ if _scheduler is not None:
     _scheduler.register_channel("wechat", _wechat_sender_factory)
     logger.info("已向主动消息调度器注册 websocket/wechat 通道")
 
+# ── 自动恢复微信连接（如果存在持久化凭证） ──
+# 修复 P0-WX3：服务重启后 wechat_state.json 仍显示 connected:true，
+# 但 WeChatConnector 轮询线程未启动，导致消息不被处理。
+# 启动时若凭证存在则自动启动 connector.run() 恢复连接。
+# 注意：uvicorn --workers 4 会启动 4 个进程，需用文件锁确保只有一个 worker 启动 connector。
+def _autostart_wechat_connector():
+    """若 ~/.weixin_cow_credentials.json 存在，自动启动微信连接器恢复消息轮询。
+
+    使用 flock 文件锁确保 4 个 uvicorn worker 中只有一个启动 connector，
+    避免多进程同时轮询导致消息重复处理。
+    """
+    try:
+        import fcntl
+        from wechat_direct import WeChatConnector
+        from wechat_direct.wechat_connector import CREDENTIALS_PATH
+
+        if not os.path.exists(CREDENTIALS_PATH):
+            logger.info("微信凭证不存在，跳过自动连接（需用户扫码登录）")
+            return
+
+        # 文件锁：确保只有一个 worker 进程启动 connector
+        lock_path = "/tmp/ai-girlfriend-wechat-autostart.lock"
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (IOError, OSError):
+            # 其他 worker 已持有锁，本 worker 跳过自动连接
+            logger.info("其他 worker 已持有微信连接锁，本 worker 跳过自动连接")
+            os.close(lock_fd)
+            return
+        # 持有锁直到进程退出（不释放，进程退出时自动释放）
+        logger.info("检测到微信凭证，自动恢复连接（本 worker 持有锁）...")
+
+        def _do_autostart():
+            try:
+                connector = WeChatConnector(user_mgr)
+                connector.run()
+            except Exception as e:  # noqa: BLE001
+                logger.exception("微信自动连接失败: %s", e)
+
+        t = threading.Thread(target=_do_autostart, daemon=True, name="wx_autostart")
+        t.start()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("微信自动连接检查失败: %s", e)
+
+
+_autostart_wechat_connector()
+
 # ── 数据库初始化 + 预加载微信绑定（FastAPI lifespan） ──
 
 async def _init_and_preload():

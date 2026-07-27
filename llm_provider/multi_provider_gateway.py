@@ -30,6 +30,13 @@ from .opencode_zen_provider import OpenCodeZenProvider
 
 logger = logging.getLogger("llm_provider.multi_gateway")
 
+# ── fallback 统计（可选依赖，缺失时静默降级） ──
+try:
+    from observability.metrics import record_provider_fallback as _record_fallback
+except ImportError:  # pragma: no cover
+    def _record_fallback(provider: str, status: str) -> None:
+        return None
+
 # ── 默认 fallback 链 ──
 DEFAULT_FALLBACK_CHAIN = ["sensenova", "zhipu", "xunfei", "baidu", "opencode_zen"]
 
@@ -243,11 +250,14 @@ class MultiProviderGateway:
                     tools=tools, model=model,
                 )
                 if result and not result.startswith("（"):
+                    _record_fallback(key, "success")
                     return result
                 last_error = result
+                _record_fallback(key, "fallback")
                 logger.warning("[MultiGateway] %s returned: %s", key, result)
             except Exception as e:  # noqa: BLE001
                 last_error = str(e)
+                _record_fallback(key, "error")
                 logger.warning("[MultiGateway] %s failed: %s", key, e)
 
         logger.error("[MultiGateway] All providers failed, last_error=%s", last_error)

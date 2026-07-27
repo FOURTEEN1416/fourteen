@@ -332,6 +332,60 @@ async def crawl_persona_knowledge(
     }
 
 
+# ── 火爬虫 + AgentReach 人设增强（与对话内 search 工具区分）──
+
+
+class EnrichRequest(BaseModel):
+    """人设增强请求。
+
+    与对话内 search 工具的区别：
+    - search 工具：对话中实时联网搜索，结果给 LLM 参考（不写入知识库）
+    - 人设增强：离线批量抓取，处理为知识块后写入角色 BM25 索引（持久化）
+    """
+    name: str = Field(..., min_length=1, description="角色名称（用于搜索关键词）")
+    max_docs: int = Field(default=3, ge=1, le=10, description="最大文档数")
+
+
+@router.post("/{character_id}/enrich")
+async def enrich_character_persona(
+    character_id: str,
+    req: EnrichRequest,
+    _auth: bool = Security(verify_api_key_dep),
+):
+    """火爬虫 + AgentReach 人设增强：抓取多源网络素材 → 处理为知识块 → 写入角色知识库。
+
+    数据源：B站、小红书、Firecrawl、Jina Reader、Exa 等多源搜索。
+    与对话内 search 工具不同，本端点将结果持久化到角色知识库供后续 RAG 检索。
+    """
+    card = _load_character_card(character_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
+
+    try:
+        from persona_extractor.web_enricher import WebPersonaEnricher
+        enricher = WebPersonaEnricher()
+        result = enricher.enrich(
+            character_id=character_id,
+            character_name=req.name,
+            max_docs=req.max_docs,
+            interactive=False,
+        )
+        return {
+            "status": "enriched" if result.chunks_added > 0 else "no_new_chunks",
+            "character_id": character_id,
+            "name": req.name,
+            "documents_found": result.documents_found,
+            "chunks_generated": result.chunks_generated,
+            "chunks_added": result.chunks_added,
+            "sources_used": result.sources_used,
+            "duration_seconds": round(result.duration_seconds, 2),
+            "errors": result.errors,
+        }
+    except Exception as e:
+        logger.exception("人设增强失败: %s", character_id)
+        raise HTTPException(status_code=500, detail=f"人设增强失败: {e}") from e
+
+
 # ── 辅助 ──
 
 

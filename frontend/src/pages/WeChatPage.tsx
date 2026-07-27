@@ -1,12 +1,11 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { AnimatedPage } from '../components/shared'
 import { useQueryClient } from '@tanstack/react-query'
-import { useWechatStatus, useWechatBindings, useCharacters, queryKeys } from '../hooks/useQueries'
+import { useWechatStatus, queryKeys } from '../hooks/useQueries'
 import type { WeChatStatus } from '../types/api'
-import { Search, Wifi, WifiOff, Trash2, RefreshCw, X, QrCode, Clock, MessageSquare, AlertTriangle, CheckCircle2, Smartphone } from 'lucide-react'
-import { wechatCreateConnection, unbindWechat } from '../api/wechat'
+import { RefreshCw, X, QrCode, Clock, MessageSquare, AlertTriangle, CheckCircle2, Smartphone } from 'lucide-react'
+import { wechatCreateConnection } from '../api/wechat'
 import { wechatQrCode, wechatConnectionStatus, wechatConnect } from '../api/system'
-import { sanitizeCharacterName } from '../utils/character'
 
 // ── Types ──
 
@@ -98,28 +97,6 @@ function LiveStatusBanner() {
           最后活动: {new Date(status.last_activity).toLocaleString('zh-CN')}
         </p>
       )}
-    </div>
-  )
-}
-
-// ── Stats row ──
-
-function StatsBar({ total, online, offline }: { total: number; online: number; offline: number }) {
-  return (
-    <div className="flex gap-4 mb-5">
-      {[
-        { label: '总绑定', value: total, color: 'glass-blue text-gray-700' },
-        { label: '在线', value: online, color: 'glass-green text-green-700' },
-        { label: '离线', value: offline, color: 'glass-card text-gray-400' },
-      ].map((s) => (
-        <div
-          key={s.label}
-          className={`flex items-center gap-2 rounded-xl px-4 py-2.5 ${s.color}`}
-        >
-          <span className="text-2xl font-bold tabular-nums">{s.value}</span>
-          <span className="text-xs font-medium">{s.label}</span>
-        </div>
-      ))}
     </div>
   )
 }
@@ -391,60 +368,8 @@ export default function WeChatPage() {
   const qc = useQueryClient()
   // SSE 实时更新缓存，轮询作为兜底（30s 一次）
   useWechatStatusStream()
-  const { data: wechatStatus } = useWechatStatus()
-  const { data: bindings = [], isLoading: bindingsLoading } = useWechatBindings()
-  const { data: characters = [] } = useCharacters()
 
-  const [searchQuery, setSearchQuery] = useState('')
   const [showQrModal, setShowQrModal] = useState(false)
-
-  const isGlobalOnline = wechatStatus?.connected ?? false
-
-  const characterNameMap = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const c of characters) {
-      map.set(c.id, sanitizeCharacterName(c.name))
-    }
-    return map
-  }, [characters])
-
-  const rows = useMemo(() => {
-    return bindings.map((b) => ({
-      wxid: b.wxid,
-      nickname: b.nickname || '',
-      characterCardId: b.character_card_id || '',
-      characterName: characterNameMap.get(b.character_card_id || '') || '默认',
-      isOnline: isGlobalOnline,
-    }))
-  }, [bindings, isGlobalOnline, characterNameMap])
-
-  const filtered = useMemo(() => {
-    if (!searchQuery.trim()) return rows
-    const q = searchQuery.toLowerCase()
-    return rows.filter(
-      (c) =>
-        c.wxid.toLowerCase().includes(q) ||
-        c.nickname.toLowerCase().includes(q)
-    )
-  }, [rows, searchQuery])
-
-  const stats = useMemo(() => {
-    const total = rows.length
-    const online = rows.filter((c) => c.isOnline).length
-    return { total, online, offline: total - online }
-  }, [rows])
-
-  const handleDelete = useCallback(
-    async (wxid: string) => {
-      try {
-        await unbindWechat(wxid)
-        qc.invalidateQueries({ queryKey: ['wechat', 'bindings'] })
-      } catch {
-        // 全局 interceptor 已提示
-      }
-    },
-    [qc]
-  )
 
   const handleConnected = useCallback(
     (_wxid: string) => {
@@ -477,94 +402,6 @@ export default function WeChatPage() {
 
           {/* Live Status */}
           <LiveStatusBanner />
-
-          {/* Bindings Stats */}
-          <StatsBar total={stats.total} online={stats.online} offline={stats.offline} />
-
-          {/* Bindings Table */}
-          <div className="glass-card overflow-hidden rounded-xl border border-white/30">
-            <div className="relative border-b border-gray-100 px-4 py-3">
-              <Search className="pointer-events-none absolute left-7 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="搜索 wxid 或昵称..."
-                className="w-full max-w-sm rounded-lg border border-gray-200 bg-white/60 py-2 pl-10 pr-4 text-sm text-gray-700 placeholder:text-gray-300 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-400/20"
-              />
-            </div>
-
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50/50 text-left text-xs font-medium text-gray-400">
-                  <th className="px-4 py-3">状态</th>
-                  <th className="px-4 py-3">wxid</th>
-                  <th className="px-4 py-3">昵称</th>
-                  <th className="px-4 py-3">绑定角色</th>
-                  <th className="px-4 py-3 text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bindingsLoading ? (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-12 text-center text-sm text-gray-300">
-                      加载绑定中...
-                    </td>
-                  </tr>
-                ) : filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-12 text-center text-sm text-gray-300">
-                      {searchQuery ? '未找到匹配的绑定' : '暂无绑定，点击上方 "扫码连接" 添加'}
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((conn) => (
-                    <tr
-                      key={conn.wxid}
-                      className="border-b border-gray-50 transition hover:bg-gray-50/50 last:border-0"
-                    >
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                            conn.isOnline
-                              ? 'bg-green-50 text-green-600'
-                              : 'bg-gray-100 text-gray-400'
-                          }`}
-                        >
-                          {conn.isOnline ? (
-                            <Wifi className="h-3 w-3" />
-                          ) : (
-                            <WifiOff className="h-3 w-3" />
-                          )}
-                          {conn.isOnline ? '在线' : '离线'}
-                        </span>
-                      </td>
-
-                      <td className="px-4 py-3">
-                        <code className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
-                          {conn.wxid}
-                        </code>
-                      </td>
-
-                      <td className="px-4 py-3 text-gray-700">{conn.nickname || '—'}</td>
-
-                      <td className="px-4 py-3 text-gray-700">{conn.characterName}</td>
-
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={() => handleDelete(conn.wxid)}
-                          className="rounded-lg p-1.5 text-gray-300 transition hover:bg-red-50 hover:text-red-500"
-                          title="解绑"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
         </div>
       </div>
 

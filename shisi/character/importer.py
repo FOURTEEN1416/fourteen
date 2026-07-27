@@ -24,6 +24,10 @@ class PersonaImporter:
         if not p.exists():
             return None, f"文件不存在: {p}"
 
+        # PNG 文件：先提取 chara tEXt chunk → JSON → ParserDispatcher
+        if p.suffix.lower() == ".png":
+            return self._import_png(p)
+
         try:
             card, fmt = ParserDispatcher.parse_file(p)
         except Exception as e:  # noqa: BLE001
@@ -34,6 +38,32 @@ class PersonaImporter:
             return None, f"校验失败: {'; '.join(errors)}"
 
         self._save_card(card, fmt)
+        return card, None
+
+    def _import_png(self, path: Path) -> tuple[CharaCardV2 | None, str | None]:
+        """从 PNG tEXt chunk 导入角色卡（SillyTavern 生态标准）"""
+        try:
+            from .png_codec import extract_card_from_png, PNGCodecError
+        except ImportError as e:
+            return None, f"Pillow 未安装，无法导入 PNG: {e}"
+
+        try:
+            data_bytes = path.read_bytes()
+            card_data = extract_card_from_png(data_bytes)
+        except PNGCodecError as e:
+            return None, f"PNG 解析失败: {e}"
+
+        try:
+            card, fmt = ParserDispatcher.parse(card_data)
+        except Exception as e:  # noqa: BLE001
+            return None, f"角色卡解析失败: {e}"
+
+        errors = validate_card(card)
+        if errors:
+            return None, f"校验失败: {'; '.join(errors)}"
+
+        self._save_card(card, fmt)
+        logger.info("PNG 角色卡导入成功: %s", card.data.name)
         return card, None
 
     def import_files(self, paths: list[Path | str]) -> ImportResult:
@@ -51,11 +81,18 @@ class PersonaImporter:
                 logger.info("导入成功: %s (%s)", card.data.name, char_id)  # type: ignore
         return result
 
-    def import_directory(self, dir_path: Path | str, pattern: str = "*.json") -> ImportResult:
+    def import_directory(
+        self, dir_path: Path | str, pattern: str = "*.json",
+    ) -> ImportResult:
         d = Path(dir_path)
         if not d.exists():
             return ImportResult(errors=[f"目录不存在: {d}"])
-        files = sorted(d.glob(pattern))
+        # 同时匹配 JSON 和 PNG 文件
+        files: list[Path] = []
+        for pat in ("*.json", "*.png"):
+            files.extend(sorted(d.glob(pat)))
+        if not files:
+            return ImportResult(errors=[f"目录中无 .json 或 .png 文件: {d}"])
         return self.import_files(files)  # type: ignore
 
     def _save_card(self, card: CharaCardV2, fmt: CardFormat) -> Path:

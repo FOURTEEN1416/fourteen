@@ -12,6 +12,7 @@ from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Column,
     DateTime,
@@ -65,6 +66,9 @@ class User(Base):
     # 状态
     is_active = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)
+
+    # 用户级 LLM 配置（JSON）— 优先于全局默认，实现多用户 API Key 隔离
+    llm_config = Column(JSON, nullable=True)
 
     # 时间
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

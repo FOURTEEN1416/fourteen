@@ -12,7 +12,8 @@ import StorylineEditor from '../storyline/StorylineEditor'
 import type { RoleSettingsTab, RoleSettingsCharacter } from '../../types/framework'
 import type { UnifiedCharacterUpdate } from '../../types/api'
 import { Save, Trash2, Copy, Smile } from 'lucide-react'
-import { ENGINE_OPTIONS, MIMO_MODELS, EDGE_SPEAKERS } from './RoleSettingsConstants'
+import { ENGINE_OPTIONS, MIMO_MODELS } from './RoleSettingsConstants'
+import { enrichCharacter } from '../../api/system'
 import Section from './RoleSettingsSection'
 
 // ═══ Tab: Basic ═══
@@ -173,13 +174,10 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
 // ═══ Tab: Voice ═══
 
 function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
-  const [engine, setEngine] = useState(character.voice_config?.engine || 'mimo-tts')
+  const [engine] = useState(character.voice_config?.engine || 'mimo-tts')
   // voice_config 是 VoiceConfig | 自定义对象 联合类型；mimo_model 是自定义字段，需要运行时安全访问
   const mimoModelInitial = (character.voice_config as { mimo_model?: string } | null | undefined)?.mimo_model
   const [mimoModel, setMimoModel] = useState(mimoModelInitial || 'mimo-v2.5-tts')
-  const [edgeSpeaker, setEdgeSpeaker] = useState('zh-CN-XiaoxiaoNeural')
-  const [edgeRate, setEdgeRate] = useState(1.0)
-  const [edgePitch, setEdgePitch] = useState(0.6)
   const [status] = useState('就绪')
 
   return (
@@ -190,56 +188,15 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
           {ENGINE_OPTIONS.map(opt => (
             <button
               key={opt.value}
-              onClick={() => setEngine(opt.value)}
-              className={`text-left p-3 rounded-xl transition-all ${
-                engine === opt.value
-                  ? `${opt.value === 'mimo-tts' ? 'glass-pink' : opt.value === 'edge-tts' ? 'glass-blue' : opt.value === 'gpt-sovits' ? 'glass-green' : 'glass-card'} ring-1 ring-primary-400/30`
-                  : 'glass-card border border-gray-200 hover:border-gray-300'
-              }`}
+              onClick={() => {}}
+              className={`text-left p-3 rounded-xl transition-all glass-pink ring-1 ring-primary-400/30`}
             >
-              <p className={`text-sm font-medium ${engine === opt.value ? 'text-primary-700' : 'text-gray-700'}`}>{opt.label}</p>
+              <p className="text-sm font-medium text-primary-700">{opt.label}</p>
               <p className="text-[11px] text-gray-400 mt-0.5">{opt.desc}</p>
             </button>
           ))}
         </div>
       </Section>
-
-      {/* Edge TTS config */}
-      {engine === 'edge-tts' && (
-        <Section title="Edge TTS 参数">
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs font-medium text-gray-500 mb-1.5 block">发音人</label>
-              <select value={edgeSpeaker} onChange={e => setEdgeSpeaker(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-700 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20">
-                {EDGE_SPEAKERS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="w-20 shrink-0"><span className="text-xs text-gray-600">语速</span></div>
-              <div className="flex-1"><Slider value={edgeRate} min={0.5} max={2.0} step={0.1} label="语速" onChange={setEdgeRate} /></div>
-              <span className="w-10 text-right text-xs font-mono text-gray-400">{edgeRate.toFixed(1)}x</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="w-20 shrink-0"><span className="text-xs text-gray-600">音调</span></div>
-              <div className="flex-1"><Slider value={edgePitch} min={0} max={1} step={0.01} label="音调" onChange={setEdgePitch} /></div>
-              <span className="w-10 text-right text-xs font-mono text-gray-400">{(edgePitch * 100).toFixed(0)}</span>
-            </div>
-            <div className="flex justify-end gap-2">
-              <span className="px-3 py-1.5 text-xs text-gray-400">试听功能开发中</span>
-            </div>
-          </div>
-        </Section>
-      )}
-
-      {/* GPT-SoVITS / Bert-VITS2 开发中 */}
-      {(engine === 'gpt-sovits' || engine === 'bert-vits2') && (
-        <Section title={`${engine === 'gpt-sovits' ? 'GPT-SoVITS' : 'Bert-VITS2'} 参数`}>
-          <div className="rounded-xl bg-amber-50/50 border border-amber-100 p-4 text-center">
-            <p className="text-sm text-amber-700">该语音引擎接入开发中</p>
-            <p className="text-xs text-amber-500 mt-1">当前请先使用 Edge TTS 或 MiMo Cloud</p>
-          </div>
-        </Section>
-      )}
 
       {/* MiMo Cloud */}
       {engine === 'mimo-tts' && (
@@ -352,6 +309,42 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
 
 function DataTab({ character }: { character: RoleSettingsCharacter }) {
   const [showDelete, setShowDelete] = useState(false)
+  const [enriching, setEnriching] = useState(false)
+  const [enrichResult, setEnrichResult] = useState<{
+    status: string
+    documents_found: number
+    chunks_added: number
+    sources_used: string[]
+    duration_seconds: number
+    errors: string[]
+  } | null>(null)
+  const [enrichError, setEnrichError] = useState<string | null>(null)
+
+  const handleEnrich = async () => {
+    if (!character.name?.trim()) {
+      useErrorStore.getState().addToast({ type: 'warning', message: '请先设置角色名称' })
+      return
+    }
+    setEnriching(true)
+    setEnrichError(null)
+    setEnrichResult(null)
+    try {
+      const res = await enrichCharacter(character.id, character.name)
+      setEnrichResult(res.data)
+      useErrorStore.getState().addToast({
+        type: res.data?.status === 'enriched' ? 'success' : 'info',
+        message: res.data?.status === 'enriched'
+          ? `人设增强完成：写入 ${res.data.chunks_added} 块知识`
+          : '人设增强未新增知识块',
+      })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '人设增强失败'
+      setEnrichError(msg)
+      useErrorStore.getState().addToast({ type: 'error', message: msg })
+    } finally {
+      setEnriching(false)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -371,6 +364,59 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
           ))}
         </div>
         <p className="text-xs text-gray-400 mt-3">导出功能开发中</p>
+      </Section>
+
+      {/* 火爬虫 + AgentReach 人设增强 */}
+      <Section title="网络人设增强（火爬虫 + AgentReach）">
+        <div className="space-y-3">
+          <div className="rounded-xl bg-amber-50/50 border border-amber-100 p-3">
+            <p className="text-xs text-gray-600 leading-relaxed">
+              抓取 B站、小红书、Firecrawl、Jina Reader、Exa 等多源网络素材，
+              处理为知识块后写入角色知识库，供对话时 RAG 检索使用。
+              <span className="text-gray-400">（与对话内 search 工具不同：search 是实时搜索不写入知识库，此处是离线批量写入）</span>
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleEnrich}
+              disabled={enriching || !character.name?.trim()}
+              className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm flex items-center gap-2"
+            >
+              {enriching ? (
+                <>
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  增强中...
+                </>
+              ) : (
+                <>🔥 开始网络增强</>
+              )}
+            </button>
+            <span className="text-xs text-gray-400">
+              以角色名「{character.name || '未命名'}」为关键词搜索
+            </span>
+          </div>
+          {enrichError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-xs">
+              {enrichError}
+            </div>
+          )}
+          {enrichResult && (
+            <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-3 py-2 text-xs space-y-1">
+              <div className="font-medium">
+                {enrichResult.status === 'enriched' ? '✅ 增强成功' : '⚠️ 未写入新知识块'}
+              </div>
+              <div>找到文档：{enrichResult.documents_found} 篇</div>
+              <div>生成知识块：{enrichResult.chunks_added} 块</div>
+              {enrichResult.sources_used?.length > 0 && (
+                <div>数据源：{enrichResult.sources_used.join('、')}</div>
+              )}
+              <div className="text-gray-500">耗时：{enrichResult.duration_seconds}s</div>
+              {enrichResult.errors?.length > 0 && (
+                <div className="text-red-600">错误：{enrichResult.errors.join('；')}</div>
+              )}
+            </div>
+          )}
+        </div>
       </Section>
 
       {/* RAG */}

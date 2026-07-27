@@ -10,12 +10,23 @@ export interface ClonePersonaPreview {
   }
   sample_count: number
   style_report: Record<string, unknown>
+  preview?: Array<{ user: string; reply: string }>
 }
 
-/** POST /api/clone/preview — 显式读取本机微信解密数据并生成人设预览 */
+/** POST /api/clone/preview — 显式读取本机微信解密数据并生成人设预览（本地模式） */
 export function clonePreview(target: string, maxMessages = 2000): Promise<ClonePersonaPreview> {
   return client.post('/clone/preview', { target, max_messages: maxMessages })
     .then(r => r.data as ClonePersonaPreview)
+}
+
+/** POST /api/clone/upload — 上传本地提取的聊天数据，服务器分析生成人设预览 */
+export function cloneUpload(target: string, file: File): Promise<ClonePersonaPreview> {
+  const form = new FormData()
+  form.append('file', file)
+  return client.post('/clone/upload', form, {
+    params: { target },
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then(r => r.data as ClonePersonaPreview)
 }
 
 /** GET /api/clone/contacts — 联系人列表 */

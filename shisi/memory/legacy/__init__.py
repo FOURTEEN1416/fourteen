@@ -1,3 +1,10 @@
+"""shisi.memory.legacy — 记忆管线核心模块。
+
+命名说明：`legacy` 是历史命名（迁移自原根 `memory/` 目录），
+此处的模块**仍在活跃使用**，是 MemoryService 的底层依赖，
+被 shisi/application/memory_service.py 与 tests/test_memory*.py 深度引用。
+**不要按字面意思当作"待删除"处理。**
+"""
 from .diary_summarizer import DiarySummarizer
 from .episodic_memory import EpisodicMemory
 from .fact_extractor import FactExtractor

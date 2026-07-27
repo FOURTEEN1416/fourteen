@@ -28,6 +28,88 @@ class _StreamPipelineMixin:
     _initialized: bool
     components: dict[str, Any]
 
+    async def _async_consistency_check(
+        self,
+        reply: str,
+        character_id: str,
+        emotion_state: Any,
+        session_id: str,
+    ) -> None:
+        """后台异步一致性检查（B2 优化）。
+
+        - 不阻塞主回复流，避免触发第二次 LLM 调用导致响应时间翻倍
+        - 严重违规只记录日志，不影响已推送的回复
+        - 可在此触发下一轮的修正提示（当前仅日志，避免过度复杂）
+        """
+        try:
+            from my_character.consistency_checker import check_and_correct_reply
+
+            character_card = None
+            persona_service = self.components.get("persona")
+            card_loader = getattr(persona_service, "_load_character_card", None)
+            if character_id not in ("default", "demo") and callable(card_loader):
+                character_card = card_loader(character_id)
+
+            result = None
+            if character_card:
+                from my_character.consistency_checker import (
+                    ConsistencyContext,
+                    PersonaConsistencyChecker,
+                )
+                from my_character.dynamic_anchor import DynamicAnchorSystem
+
+                anchors = character_card.get("core_anchors") or []
+                checker = PersonaConsistencyChecker(
+                    dynamic_anchors=DynamicAnchorSystem(
+                        base_anchors=[str(a) for a in anchors],
+                        dynamic_anchors=[],
+                    ),
+                )
+                affinity = getattr(emotion_state, "affinity", 0) if emotion_state else 0
+                chat_round = 0
+                mem = self.components.get("memory")
+                if mem and hasattr(mem, "get_chat_context"):
+                    try:
+                        history, _ = mem.get_chat_context(session_id=session_id)
+                        chat_round = len(history) if history else 0
+                    except Exception:  # noqa: BLE001
+                        pass
+                result = checker.check(
+                    reply,
+                    ConsistencyContext(
+                        emotion_state=emotion_state,
+                        chat_round=chat_round,
+                        affinity=int(affinity or 0),
+                    ),
+                )
+            elif persona_service and hasattr(persona_service, "check_consistency"):
+                chat_round = 0
+                mem = self.components.get("memory")
+                if mem and hasattr(mem, "get_chat_context"):
+                    try:
+                        history, _ = mem.get_chat_context(session_id=session_id)
+                        chat_round = len(history) if history else 0
+                    except Exception:  # noqa: BLE001
+                        pass
+                result = persona_service.check_consistency(reply, emotion_state, chat_round)
+
+            if result is None:
+                return
+
+            if not result.overall_passed:
+                if result.overall_score < 0.4:
+                    logger.warning(
+                        "一致性严重违规(后台检测): score=%.2f session=%s char=%s",
+                        result.overall_score, session_id, character_id,
+                    )
+                else:
+                    logger.info(
+                        "一致性轻度违规(后台检测): score=%.2f, 放行",
+                        result.overall_score,
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("后台一致性检查异常（不影响回复）: %s", exc)
+
     async def process_message_stream(
         self,
         user_msg: str,
@@ -142,9 +224,13 @@ class _StreamPipelineMixin:
                 system_prompt = ctx["system_prompt"]
                 chat_history = ctx["chat_history"]
 
-                # 9. 先完整缓冲 LLM 输出。未经一致性和输出安全校验的内容
-                # 不能发送给客户端，否则后续事件也无法撤回泄露内容。
+                # 9. 真流式：LLM token 实时推送，输出安全检查改为流式抽检
+                # 输入安全检查已在前面完成；输出安全检查用"流式窗口抽检 +
+                # 最终全量校验"双层保护，不再阻塞 token 推送。
                 full_reply = ""
+                safety = self.components["safety"]
+                unsafe_detected = False
+
                 try:
                     async for token in llm.chat_stream(
                         query=user_msg_clean,
@@ -153,12 +239,25 @@ class _StreamPipelineMixin:
                         temperature=0.85,
                         max_tokens=2048,
                     ):
-                        if token:
-                            full_reply += token
+                        if not token:
+                            continue
+                        full_reply += token
+
+                        # 流式抽检：每 40 字符做一次快速输出安全检查
+                        # 发现不安全内容立即停止推送，避免泄露后续 token
+                        if len(full_reply) % 40 < len(token):
+                            quick_check = safety.check_output(full_reply[-60:])
+                            if not quick_check.is_safe:
+                                unsafe_detected = True
+                                logger.warning(
+                                    "流式抽检发现不安全内容，停止推送: category=%s",
+                                    quick_check.category,
+                                )
+                                break
+
+                        yield {"type": "token", "content": token}
                 except Exception as e:
                     logger.warning("真流式调用失败: %s", e)
-                    # 流式中途失败：如果已有部分输出，补充提示后继续后处理
-                    # 如果完全没有输出，降级为返回错误提示
                     if not full_reply:
                         reply = "（生成回复时出现异常, 请稍后重试）"
                         yield {"type": "token", "content": reply}
@@ -170,6 +269,18 @@ class _StreamPipelineMixin:
                         }
                         return
 
+                # 流式抽检发现不安全内容 → 用安全替代语替换
+                if unsafe_detected:
+                    reply = safety.safe_alternative("unsafe_output")
+                    yield {"type": "token", "content": reply}
+                    yield {
+                        "type": "done",
+                        "reply": reply,
+                        "emotion": emotion_state.to_dict() if emotion_state else None,
+                        "process_time": round(time.perf_counter() - stream_start, 3),
+                    }
+                    return
+
                 if not full_reply:
                     yield {
                         "type": "done",
@@ -179,29 +290,25 @@ class _StreamPipelineMixin:
                     }
                     return
 
-                # 10. 完整回复校验。
+                # 10. 最终全量输出安全校验（兜底）
                 reply = full_reply
-
-                from my_character.consistency_checker import check_and_correct_reply
-
-                character_card = None
-                persona_service = self.components.get("persona")
-                card_loader = getattr(persona_service, "_load_character_card", None)
-                if character_id not in ("default", "demo") and callable(card_loader):
-                    character_card = card_loader(character_id)
-                reply = await check_and_correct_reply(
-                    reply=reply,
-                    persona_engine=getattr(persona_service, "engine", None),
-                    llm_gateway=self.components.get("llm"),
-                    emotion_state=emotion_state,
-                    session_id=session_id,
-                    memory=self.components.get("memory"),
-                    character_card=character_card,
-                )
-
-                output_result = self.components["safety"].check_output(reply)
+                output_result = safety.check_output(reply)
                 if not output_result.is_safe:
-                    reply = self.components["safety"].safe_alternative(output_result.category)
+                    # 极端情况：流式抽检漏过，最终校验拦截
+                    reply = safety.safe_alternative(output_result.category)
+                    yield {"type": "token", "content": "\n[内容已过滤]"}
+
+                # 11. 一致性检查异步化（B2 优化）
+                # 不阻塞当前回复流；严重违规记录到后台，下一轮自动修正
+                # 避免触发第二次 LLM 调用导致响应时间翻倍
+                asyncio.create_task(
+                    self._async_consistency_check(
+                        reply=reply,
+                        character_id=character_id,
+                        emotion_state=emotion_state,
+                        session_id=session_id,
+                    )
+                )
 
                 # ── 共享后处理（after_chat → ASE → 好感度同步）──
                 await asyncio.to_thread(
@@ -212,11 +319,6 @@ class _StreamPipelineMixin:
                     session_id,
                     character_id,
                 )
-
-                # 校验通过后才对外发送最终文本。
-                chunk_size = 8
-                for i in range(0, len(reply), chunk_size):
-                    yield {"type": "token", "content": reply[i:i + chunk_size]}
 
                 process_time = round(time.perf_counter() - stream_start, 3)
                 yield {

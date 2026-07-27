@@ -360,7 +360,7 @@ export function useTestCharacterVoice() {
   })
 }
 
-export function useVoiceSpeakers(engine: string = 'edge-tts') {
+export function useVoiceSpeakers(engine: string = 'mimo-tts') {
   return useQuery({
     queryKey: ['voice', 'speakers', engine],
     queryFn: () => api.getSpeakers(engine),

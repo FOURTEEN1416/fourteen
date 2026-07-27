@@ -37,7 +37,7 @@ export interface PersonaCard {
     catchphrases: string[]
   }
   voice: {
-    engine: "edge-tts" | "gpt-sovits" | "bert-vits2"
+    engine: "mimo-tts"
     speaker_name: string
     rate?: number
     pitch?: number

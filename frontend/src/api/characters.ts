@@ -295,12 +295,22 @@ export function synthesizeMiMo(text: string): Promise<Blob> {
 }
 
 // ════════════════════════════════════════════════════
-//  角色卡导入/导出 (统一 API)
+//  角色卡导入/导出 (统一 API — JSON + SillyTavern PNG)
 // ════════════════════════════════════════════════════
 
-/** GET /api/characters/{id}/export — 导出角色卡 JSON */
-export function exportCharacter(id: string): Promise<Blob> {
-  return client.get(`/characters/${id}/export`, { responseType: 'blob' }).then(r => r.data as Blob)
+/** 导出格式: json (chara_card_v2) 或 png (SillyTavern 标准 tEXt chunk) */
+export type CharacterExportFormat = 'json' | 'png'
+
+/** GET /api/characters/{id}/export?format=json|png — 导出角色卡
+ *  - json: chara_card_v2 JSON 文件
+ *  - png:  SillyTavern 标准 PNG 角色卡（chara tEXt chunk，base64 编码 JSON） */
+export function exportCharacter(id: string, format: CharacterExportFormat = 'json'): Promise<Blob> {
+  return client
+    .get(`/characters/${id}/export`, {
+      params: { format },
+      responseType: 'blob',
+    })
+    .then(r => r.data as Blob)
 }
 
 // ════════════════════════════════════════════════════

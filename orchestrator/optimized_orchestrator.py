@@ -577,17 +577,28 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             ),
         )
         rag = self.components["rag"]
-        retrieve_params = inspect.signature(rag.retrieve).parameters
-        if "character_id" in retrieve_params:
-            def rag_call():
-                return rag.retrieve(user_msg_clean, character_id=character_id)
+        # 优先使用 retrieve_async（带超时保护）；回退到 run_in_executor + 同步 retrieve
+        if hasattr(rag, "retrieve_async"):
+            async def _rag_async():
+                retrieve_params = inspect.signature(
+                    rag.retrieve_async
+                ).parameters
+                if "character_id" in retrieve_params:
+                    return await rag.retrieve_async(
+                        user_msg_clean, character_id=character_id,
+                    )
+                return await rag.retrieve_async(user_msg_clean)
+            tasks["rag"] = _rag_async()
         else:
-            # 兼容旧 RAGEngineV2 和测试替身；它们没有角色游标。
-            def rag_call():
-                return rag.retrieve(user_msg_clean)
-        tasks["rag"] = loop.run_in_executor(
-            None, rag_call,
-        )
+            # 兼容无 retrieve_async 的旧实现
+            retrieve_params = inspect.signature(rag.retrieve).parameters
+            if "character_id" in retrieve_params:
+                def rag_call():
+                    return rag.retrieve(user_msg_clean, character_id=character_id)
+            else:
+                def rag_call():
+                    return rag.retrieve(user_msg_clean)
+            tasks["rag"] = loop.run_in_executor(None, rag_call)
 
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
 
@@ -797,6 +808,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 card_loader = getattr(persona_service, "_load_character_card", None)
                 if character_id not in ("default", "demo") and callable(card_loader):
                     character_card = card_loader(character_id)
+                # B4 优化：传入 chat_round 避免重复 get_chat_context 查询
+                # chat_history 已在 _prepare_context 中获取，直接复用长度
                 reply = await check_and_correct_reply(
                     reply=reply,
                     persona_engine=getattr(persona_service, "engine", None),
@@ -805,6 +818,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     session_id=session_id,
                     memory=self.components.get("memory"),
                     character_card=character_card,
+                    chat_round=len(chat_history) if chat_history else 0,
                 )
                 # === 检查结束 ===
 

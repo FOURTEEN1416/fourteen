@@ -743,7 +743,7 @@ class WeChatConnector:
             logger.debug("Cleaned up %d expired context_tokens entries", len(expired))
 
     def _handle_message(self, raw_msg):
-        """处理一条消息"""
+        """处理一条消息（全链路结构化日志：接收 → 路由 → LLM → 回复）"""
         msg_type = raw_msg.get("message_type", 0)
         if msg_type != 1:  # 只看用户消息
             return
@@ -752,10 +752,8 @@ class WeChatConnector:
         if msg_id in self._received_msgs:
             return
         self._received_msgs[msg_id] = True
-        # 超过最大条目时清理最早的记录，防止内存无限增长
         while len(self._received_msgs) > _RECEIVED_MSGS_MAX:
             self._received_msgs.popitem(last=False)
-        # 定期清理过期的 context_tokens
         self._cleanup_context_tokens()
 
         from_user = raw_msg.get("from_user_id", "")
@@ -781,9 +779,9 @@ class WeChatConnector:
                 image_item.get("image_data", "")
 
         if not text and not voice_data:
+            logger.debug("消息无文本和语音内容 msg_id=%s user=%s", msg_id, from_user)
             return
 
-        # 跨天清零今日消息计数
         today = time.strftime("%Y-%m-%d")
         if today != self._last_day:
             self._messages_today = 0
@@ -791,60 +789,101 @@ class WeChatConnector:
         self._messages_today += 1
         _merge_state({"messages_today": self._messages_today})
 
-        logger.info(f"微信消息: from={from_user} text={text[:50]}")
+        t_start = time.perf_counter()
+        logger.info(
+            "[wx][step=receive] msg_id=%s user=%s text=%r",
+            msg_id, from_user, text[:80],
+        )
 
         try:
             result = _call_user_manager(self.user_manager, from_user, text)
-            if not isinstance(result, dict):
-                logger.warning("UserManager 返回非字典结果: %s", type(result))
-                result = {}
-            reply = result.get("reply", "")
-            error = result.get("error", "")
-            if not reply:
-                if error:
-                    logger.warning("处理消息返回错误 (user=%s): %s", from_user, error)
-                else:
-                    logger.warning("LLM 返回空回复 (user=%s)，发送兜底提示", from_user)
-                reply = "（我暂时不知道该怎么回复，可以再说一次吗？）"
+            t_elapsed = time.perf_counter() - t_start
+        except Exception as e:  # noqa: BLE001
+            logger.exception(
+                "[wx][step=route_error] msg_id=%s user=%s error=%s",
+                msg_id, from_user, e,
+            )
+            try:
+                _send_text(
+                    to=from_user, text="（消息处理异常，请稍后重试）",
+                    context_token=self._get_context_token(from_user) or context_token,
+                    token=self.token, base_url=self.base_url,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("[wx][step=notify_fail] msg_id=%s user=%s", msg_id, from_user)
+            return
 
+        if not isinstance(result, dict):
+            logger.warning(
+                "[wx][step=route_bad_result] msg_id=%s user=%s result_type=%s",
+                msg_id, from_user, type(result),
+            )
+            result = {}
+
+        reply = result.get("reply", "")
+        error = result.get("error", "")
+        process_time = result.get("process_time")
+
+        if not reply:
+            logger.warning(
+                "[wx][step=empty_reply] msg_id=%s user=%s error=%s elapsed=%.2fs",
+                msg_id, from_user, error or "unknown", t_elapsed,
+            )
+            reply = "（我暂时不知道该怎么回复，可以再说一次吗？）"
+        else:
+            logger.info(
+                "[wx][step=llm_done] msg_id=%s user=%s reply=%r elapsed=%.2fs llm_time=%s",
+                msg_id, from_user, reply[:80], t_elapsed, process_time,
+            )
+
+        try:
             token = self._get_context_token(from_user) or context_token
             _send_text(
                 to=from_user, text=reply,
                 context_token=token,
                 token=self.token, base_url=self.base_url,
             )
-            logger.info(f"回复已发送给 {from_user}: {reply[:50]}")
-
-            voice_result = result.get("voice")
-            if voice_result:
-                try:
-                    from voice.audio_converter import AudioFormatConverter
-                    converter = AudioFormatConverter()
-                    fmt = "silk"
-                    silk_audio = converter.to_silk(voice_result, "mp3")
-                    if silk_audio is None:
-                        fmt = "amr"
-                        silk_audio = converter.to_amr(voice_result, "mp3")
-                    if silk_audio:
-                        duration_ms = result.get("voice_duration_ms", 3000)
-                        self.send_voice(silk_audio, to_user=from_user,
-                                        duration_ms=duration_ms, fmt=fmt)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("语音发送降级失败: %s", e)
-
-            sticker_result = result.get("sticker")
-            if sticker_result:
-                try:
-                    sticker_path = sticker_result.get("path", "")
-                    if sticker_path:
-                        from pathlib import Path as _Path
-                        img_bytes = _Path(sticker_path).read_bytes()
-                        if img_bytes:
-                            self.send_image(img_bytes, to_user=from_user)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("表情包发送失败: %s", e)
+            logger.info(
+                "[wx][step=reply_sent] msg_id=%s user=%s reply=%r",
+                msg_id, from_user, reply[:80],
+            )
         except Exception as e:  # noqa: BLE001
-            logger.exception(f"处理消息/发回复失败: {e}")
+            logger.exception(
+                "[wx][step=reply_send_failed] msg_id=%s user=%s error=%s",
+                msg_id, from_user, e,
+            )
+            return
+
+        voice_result = result.get("voice")
+        if voice_result:
+            try:
+                from voice.audio_converter import AudioFormatConverter
+                converter = AudioFormatConverter()
+                fmt = "silk"
+                silk_audio = converter.to_silk(voice_result, "mp3")
+                if silk_audio is None:
+                    fmt = "amr"
+                    silk_audio = converter.to_amr(voice_result, "mp3")
+                if silk_audio:
+                    duration_ms = result.get("voice_duration_ms", 3000)
+                    self.send_voice(silk_audio, to_user=from_user,
+                                    duration_ms=duration_ms, fmt=fmt)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[wx][step=voice_failed] msg_id=%s user=%s error=%s",
+                               msg_id, from_user, e)
+
+        sticker_result = result.get("sticker")
+        if sticker_result:
+            try:
+                sticker_path = sticker_result.get("path", "")
+                if sticker_path:
+                    from pathlib import Path as _Path
+                    img_bytes = _Path(sticker_path).read_bytes()
+                    if img_bytes:
+                        self.send_image(img_bytes, to_user=from_user)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[wx][step=sticker_failed] msg_id=%s user=%s error=%s",
+                               msg_id, from_user, e)
 
     # ── 状态 ──
 

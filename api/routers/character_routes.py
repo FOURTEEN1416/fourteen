@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Query, Security, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from api.auth import verify_api_key_dep
@@ -497,18 +497,38 @@ async def import_character(
     file: UploadFile = File(...),  # noqa: B008
     _auth: bool = Security(verify_api_key_dep),
 ):
-    """导入角色卡（JSON 文件）"""
-    if not file.filename or not file.filename.endswith(".json"):
-        raise HTTPException(status_code=400, detail="仅支持 .json 文件")
+    """导入角色卡（JSON 文件 或 SillyTavern PNG 角色卡）
+
+    支持格式:
+      - .json: chara_card_v2/V3 JSON
+      - .png: SillyTavern 标准 PNG 角色卡（chara tEXt chunk，base64 编码 JSON）
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="缺少文件名")
+
+    suffix = file.filename.lower().rsplit(".", 1)[-1] if "." in file.filename else ""
+    if suffix not in ("json", "png"):
+        raise HTTPException(status_code=400, detail="仅支持 .json 或 .png 文件")
 
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="文件大小超过 10MB 限制")
 
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="无效的 JSON 文件") from None
+    # PNG 文件：从 tEXt chunk 提取 JSON
+    if suffix == "png":
+        try:
+            from shisi.character.png_codec import extract_card_from_png, PNGCodecError
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=f"Pillow 未安装: {e}") from e
+        try:
+            data = extract_card_from_png(content)
+        except PNGCodecError as e:
+            raise HTTPException(status_code=400, detail=f"PNG 角色卡解析失败: {e}") from e
+    else:
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="无效的 JSON 文件") from None
 
     # 标准 CharaCard V2/V3 的核心字段位于 data 内；统一展平后再校验，
     # 同时保留原始 spec/scenario/first_mes/mes_example 等完整字段。
@@ -550,12 +570,39 @@ async def import_character(
 @router.get("/characters/{character_id}/export")
 async def export_character(
     character_id: str,
+    format: str = Query("json", pattern="^(json|png)$", description="导出格式: json 或 png"),
     _auth: bool = Security(verify_api_key_dep),
 ):
-    """导出角色卡为 JSON 文件下载"""
+    """导出角色卡
+
+    支持格式:
+      - json (默认): chara_card_v2 JSON 文件
+      - png: SillyTavern 标准 PNG 角色卡（chara tEXt chunk，base64 编码 JSON）
+    """
     data = _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
+
+    if format == "png":
+        # PNG 导出：嵌入 chara tEXt chunk
+        try:
+            from shisi.character.png_codec import embed_card_to_png, PNGCodecError
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=f"Pillow 未安装: {e}") from e
+        try:
+            png_bytes = embed_card_to_png(data)
+        except PNGCodecError as e:
+            raise HTTPException(status_code=500, detail=f"PNG 生成失败: {e}") from e
+
+        safe_name = re.sub(r'[^\w\u4e00-\u9fff]', '_', data.get("name", character_id)).strip('_')[:50]
+        filename = f"{safe_name or character_id}.png"
+        return Response(
+            content=png_bytes,
+            media_type="image/png",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    # 默认 JSON 导出
     return JSONResponse(content=data, media_type="application/json", headers={
         "Content-Disposition": f'attachment; filename="character-{character_id}.json"',
     })

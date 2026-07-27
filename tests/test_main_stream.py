@@ -122,7 +122,12 @@ def test_stream_true_path_yields_tokens_and_done():
     assert "process_time" in done
 
 
-def test_stream_buffers_until_character_check_corrects(monkeypatch):
+def test_stream_true_path_does_not_block_on_consistency_check(monkeypatch):
+    """B1+B2 优化后：流式 token 实时推送，一致性检查异步后台执行不阻塞主回复流。
+
+    旧行为（已废弃）：一致性检查阻塞流式，修正后才推送修正后回复。
+    新行为：token 实时推送原回复，一致性检查在后台异步执行（只记录日志）。
+    """
     from my_character import consistency_checker
 
     orch = _make_orchestrator(with_chat_stream=True)
@@ -134,7 +139,11 @@ def test_stream_buffers_until_character_check_corrects(monkeypatch):
         },
     )
 
+    # 标记 check_and_correct_reply 是否被流式路径调用
+    sync_check_called = []
+
     async def corrected_reply(**kwargs):
+        sync_check_called.append(True)
         return "修正后的回复"
 
     monkeypatch.setattr(consistency_checker, "check_and_correct_reply", corrected_reply)
@@ -145,10 +154,13 @@ def test_stream_buffers_until_character_check_corrects(monkeypatch):
         character_id="role-a",
     ))
 
-    assert not [event for event in events if event["type"] == "replace"]
+    # 流式路径不应调用 check_and_correct_reply（改为后台异步 _async_consistency_check）
+    assert not sync_check_called, "流式路径不应调用同步 check_and_correct_reply"
+
+    # token 实时推送原回复（"你好呀"），不被一致性检查阻塞
     tokens = [event["content"] for event in events if event["type"] == "token"]
-    assert "".join(tokens) == "修正后的回复"
-    assert events[-1]["reply"] == "修正后的回复"
+    assert "".join(tokens) == "你好呀"
+    assert events[-1]["reply"] == "你好呀"
 
 
 def test_stream_safety_blocks():

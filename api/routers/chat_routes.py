@@ -251,10 +251,18 @@ async def get_wechat_status(_auth: bool = Security(verify_api_key_dep)):
 
 @router.get("/api/channels/wechat/status-stream")
 async def wechat_status_stream(_auth: bool = Security(verify_api_key_dep)):
-    """SSE 实时推送微信连接状态，解决前端轮询导致的状态抖动问题。"""
+    """SSE 实时推送微信连接状态，解决前端轮询导致的状态抖动问题。
+
+    优化（B5）：
+    - 只在状态变化时推送，避免无谓的重复数据
+    - 30 秒心跳保活（SSE 注释行），防止代理超时断开
+    - 客户端断开时立即退出循环（捕获 CancelledError）
+    """
     from wechat_direct import get_wechat_state
 
     async def _event_generator():
+        last_signature: tuple = ()
+        heartbeat_counter = 0
         while True:
             try:
                 state = get_wechat_state()
@@ -266,7 +274,23 @@ async def wechat_status_stream(_auth: bool = Security(verify_api_key_dep)):
                     "messages_today": state.get("messages_today", 0),
                     "reconnect_attempts": state.get("reconnect_attempts", 0),
                 }
-                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                # 计算状态签名，只在变化时推送
+                current_signature = (
+                    payload["connected"],
+                    payload["bot_id"],
+                    payload["messages_today"],
+                    payload["reconnect_attempts"],
+                )
+                if current_signature != last_signature:
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                    last_signature = current_signature
+                    heartbeat_counter = 0
+                else:
+                    heartbeat_counter += 1
+                    # 每 15 个周期（约 30 秒）发一次心跳保活
+                    if heartbeat_counter >= 15:
+                        yield ": heartbeat\n\n"
+                        heartbeat_counter = 0
             except asyncio.CancelledError:
                 logger.debug("WeChat status stream client disconnected")
                 break

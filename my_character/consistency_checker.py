@@ -260,6 +260,7 @@ async def check_and_correct_reply(
     session_id: str = "",
     memory: Any = None,
     character_card: dict[str, Any] | None = None,
+    chat_round: int | None = None,
 ) -> str:
     """统一的一致性检查 + 自动修正（供 main.py 和 orchestrator.py 复用）
 
@@ -270,19 +271,22 @@ async def check_and_correct_reply(
         emotion_state: 可选的情感状态
         session_id: 可选会话 ID（用于计算 chat_round）
         memory: 可选记忆管线（用于获取对话历史）
+        chat_round: 可选，调用方已计算的对话轮数。传入时跳过重复查询
+                    （B4 优化：消除 _prepare_context 与此处的重复 get_chat_context 调用）
 
     Returns:
         修正后（或原样放行）的回复文本
     """
     try:
-        # 计算 chat_round
-        chat_round = 0
-        if memory and hasattr(memory, "get_chat_context"):
-            try:
-                history, _ = memory.get_chat_context(session_id=session_id)
-                chat_round = len(history) if history else 0
-            except Exception as e:
-                logger.warning("获取 chat_context 失败，chat_round 降级为 0: %s", e)
+        # 计算 chat_round（若调用方已提供则直接复用，避免重复查询）
+        if chat_round is None:
+            chat_round = 0
+            if memory and hasattr(memory, "get_chat_context"):
+                try:
+                    history, _ = memory.get_chat_context(session_id=session_id)
+                    chat_round = len(history) if history else 0
+                except Exception as e:
+                    logger.warning("获取 chat_context 失败，chat_round 降级为 0: %s", e)
 
         if character_card:
             from my_character.dynamic_anchor import DynamicAnchorSystem

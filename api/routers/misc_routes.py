@@ -19,11 +19,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security
 
 from api.auth import verify_api_key_dep
 from api.auth_jwt import get_current_user, get_current_user_id, require_role
-from api.database import User
+from api.database import User, get_db
 from api.deps import deps
 from api.main_routes import ConfigUpdateRequest, _sanitize_config
 from llm_provider import reconfigure_llm
 from observability.logging_setup import ring_buffer
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("api.routers.misc_routes")
 
@@ -267,6 +268,83 @@ async def save_config(
     except (ValueError, TypeError, KeyError, AttributeError):
         logger.exception("Config save failed")
         raise HTTPException(400, "Invalid config") from None
+
+
+# ═══════════════════════════════════════════════════════
+# 用户级 LLM 配置（多用户 API Key 隔离）
+# ═══════════════════════════════════════════════════════
+
+
+def _sanitize_llm_config(cfg: dict | None) -> dict | None:
+    """脱敏用户级 LLM 配置：API Key 用 **** 替换。"""
+    if not cfg:
+        return None
+    sanitized = dict(cfg)
+    if sanitized.get("api_key"):
+        sanitized["api_key"] = "****"
+    return sanitized
+
+
+@router.get("/api/user/llm-config")
+async def get_user_llm_config(
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """读取当前用户的 LLM 配置。若用户未配置，回退到全局默认（admin 配置）。"""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    user_cfg = _sanitize_llm_config(user.llm_config)
+    if user_cfg:
+        return {"source": "user", "llm": user_cfg}
+
+    # 回退到全局默认
+    cfg = deps.config
+    if cfg:
+        if hasattr(cfg, "get_config_dict"):
+            global_llm = cfg.get_config_dict().get("llm", {})
+        else:
+            global_llm = cfg.config.model_dump().get("llm", {})
+        return {"source": "global", "llm": _sanitize_config(global_llm)}
+    return {"source": "none", "llm": {}}
+
+
+@router.post("/api/user/llm-config")
+async def save_user_llm_config(
+    req: ConfigUpdateRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """保存当前用户的 LLM 配置。普通用户可读写自己的配置，不再 403。"""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    # 提取 LLM 配置块
+    llm_cfg = req.config.get("llm") if isinstance(req.config, dict) else None
+    if not llm_cfg or not isinstance(llm_cfg, dict):
+        raise HTTPException(400, "Missing 'llm' in config")
+
+    # 合并：若新配置未提供 api_key（空字符串），保留原配置中的 api_key
+    existing = user.llm_config or {}
+    if not llm_cfg.get("api_key") and existing.get("api_key"):
+        llm_cfg["api_key"] = existing["api_key"]
+
+    user.llm_config = llm_cfg
+    await db.commit()
+
+    # 清除用户 LLM gateway 缓存，下次对话时按新配置重建
+    try:
+        from llm_provider import invalidate_user_llm
+        invalidate_user_llm(user_id)
+    except Exception as e:
+        logger.warning("Failed to invalidate user %s LLM cache: %s", user_id, e)
+
+    logger.info("User %s updated LLM config (provider=%s)", user_id, llm_cfg.get("provider", "auto"))
+    return {"source": "user", "llm": _sanitize_llm_config(user.llm_config)}
 
 
 # ═══════════════════════════════════════════════════════

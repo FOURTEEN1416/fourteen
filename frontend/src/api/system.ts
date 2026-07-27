@@ -11,6 +11,11 @@ export function dashboardStats() { return client.get('/stats/dashboard') }
 export function config() { return client.get('/config') }
 export function saveConfig(cfg: Record<string, unknown>) { return client.post('/config', { config: cfg }) }
 
+// ── 用户级 LLM 配置（多用户 API Key 隔离） ──
+
+export function userLlmConfig() { return client.get('/user/llm-config') }
+export function saveUserLlmConfig(cfg: Record<string, unknown>) { return client.post('/user/llm-config', { config: cfg }) }
+
 // ── Persona ──
 
 export function personaProfile() { return client.get('/persona/profile') }
@@ -78,7 +83,7 @@ export function ragUpload(file: File) {
 
 export function voiceStatus() { return client.get('/voice/status') }
 /** GET /voice/speakers — 获取引擎发音人列表 */
-export function getSpeakers(engine = 'edge-tts') {
+export function getSpeakers(engine = 'mimo-tts') {
   return client.get('/voice/speakers', { params: { engine } })
 }
 export function voiceSynthesize(text: string, engine = '') {
@@ -92,6 +97,12 @@ export function voiceSynthesize(text: string, engine = '') {
 
 export function plugins() { return client.get('/plugins') }
 export function togglePlugin(name: string, enabled: boolean) { return client.post(`/plugins/${name}/toggle`, null, { params: { enabled } }) }
+
+// ── 火爬虫人设增强 ──
+
+export function enrichCharacter(characterId: string, name: string, maxDocs = 3) {
+  return client.post(`/characters/${characterId}/enrich`, { name, max_docs: maxDocs })
+}
 
 // ── File Upload ──
 

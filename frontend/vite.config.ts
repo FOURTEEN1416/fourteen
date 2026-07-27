@@ -41,6 +41,14 @@ export default defineConfig(({ mode }) => {
             if (id.includes('node_modules/react-dom') || id.includes('node_modules/react/') || id.includes('node_modules/react-router')) return 'vendor';
             if (id.includes('node_modules/lucide-react')) return 'ui';
             if (id.includes('node_modules/zustand')) return 'state';
+            // F3: 分离 framer-motion，避免打进主 chunk（约 50-60kB gzip）
+            if (id.includes('node_modules/framer-motion')) return 'motion';
+            // F3: 分离 react-query，独立 chunk 并行下载
+            if (id.includes('node_modules/@tanstack/react-query')) return 'query';
+            // F3: 分离 Sentry（仅生产环境用，按需加载）
+            if (id.includes('node_modules/@sentry')) return 'sentry';
+            // F3: 分离 react-window（虚拟列表，仅部分页面用）
+            if (id.includes('node_modules/react-window') || id.includes('node_modules/react-virtualized-auto-sizer')) return 'virtual';
           },
         },
       },

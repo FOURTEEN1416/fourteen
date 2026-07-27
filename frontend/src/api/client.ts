@@ -26,7 +26,7 @@ import {
 } from './training'
 import {
   cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset,
-  cloneDeleteConversation, cloneBatchDeleteConversations, clonePreview, cloneStats,
+  cloneDeleteConversation, cloneBatchDeleteConversations, clonePreview, cloneUpload, cloneStats,
 } from './clone'
 import {
   health, stats, dashboardStats, config, saveConfig,
@@ -231,7 +231,7 @@ export default client
 // ── Named re-exports for backward compat (import { chat } from '../api/client') ──
 export { chat, chatStream, createSession, listSessions, chatHistory, emotionState, emotionTrend }
 export { trainingStatus, trainingProgress, trainingExtract, trainingClean, trainingTrain, trainingStop, trainingTest, trainingApply }
-export { cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset, cloneDeleteConversation, cloneBatchDeleteConversations, clonePreview, cloneStats }
+export { cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset, cloneDeleteConversation, cloneBatchDeleteConversations, clonePreview, cloneUpload, cloneStats }
 export {
   listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
   getPersona, updatePersona,
@@ -274,7 +274,7 @@ export const api = {
   trainingStatus, trainingProgress, trainingExtract, trainingClean,
   trainingTrain, trainingStop, trainingTest, trainingApply,
   cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset,
-  cloneDeleteConversation, cloneBatchDeleteConversations, clonePreview, cloneStats,
+  cloneDeleteConversation, cloneBatchDeleteConversations, clonePreview, cloneUpload, cloneStats,
   psychProfile, psychSnapshots, psychReset, psychMentalHealth, psychLiwc,
   safetyStats, safetyLog, safetyConfig,
   ragStats, ragSearch, ragUpload,

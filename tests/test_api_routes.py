@@ -111,14 +111,14 @@ def test_control_plane_critical_routes_are_mounted(app):
 @pytest.mark.parametrize(
     "module,expected_count,label",
     [
-        (misc_routes, 9, "stats/memory/logs/config/channels/routes"),
+        (misc_routes, 11, "stats/memory/logs/config/channels/routes/user-llm-config"),
         (chat_routes, 11, "chat/session + wechat channels"),
         (personality_routes, 9, "emotion/persona/psych"),
         (users_routes, 7, "users/*"),
         (training_routes, 11, "training/* + proactive/*"),
         (tools_routes, 6, "tools/* + plugins/* + health"),
         (safety_routes, 12, "safety/rag/voice/files/cache"),
-        (clone_routes, 8, "clone/*"),
+        (clone_routes, 9, "clone/*"),
     ],
 )
 def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
@@ -135,14 +135,14 @@ def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
     )
 
 
-def test_total_contribution_is_73(app):
-    """The 8 new sub-routers together contribute exactly 73 endpoints."""
+def test_total_contribution_is_76(app):
+    """The 8 new sub-routers together contribute exactly 76 endpoints."""
     modules = [
         misc_routes, chat_routes, personality_routes, users_routes,
         training_routes, tools_routes, safety_routes, clone_routes,
     ]
     total = sum(len(_sub_router_routes(m)) for m in modules)
-    assert total == 73, f"8 sub-routers contribute {total} routes, expected 73"
+    assert total == 76, f"8 sub-routers contribute {total} routes, expected 76"
 
 
 def test_no_duplicate_endpoints_across_sub_routers():

@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 唯一的你 PostgreSQL Database Backup Script
+# AI Girlfriend Database Backup Script
+# 支持 SQLite（默认）和 PostgreSQL，同时备份 ChromaDB 向量数据
+#
 # Environment: Linux (Ubuntu/Debian/CentOS)
 # Features:
-#   1. Parses DATABASE_URL or reads from .env file
-#   2. Uses pg_dump with gzip compression
-#   3. Auto-cleanup backups older than 30 days
-#   4. Supports --test flag for connection testing only
+#   1. 自动检测数据库类型（SQLite / PostgreSQL）
+#   2. SQLite: 用 .backup 命令安全导出（支持 WAL 模式）
+#   3. PostgreSQL: 用 pg_dump + gzip 压缩
+#   4. 同时备份 ChromaDB 向量数据目录
+#   5. 自动清理超过保留期的备份
+#   6. 支持 --test 测试连接
 # Usage:
-#   ./backup.sh              # Run backup
-#   ./backup.sh --test       # Test connection only
-#   DB_BACKUP_DIR=/data/backups ./backup.sh  # Custom backup dir
+#   ./backup.sh              # 执行备份
+#   ./backup.sh --test       # 仅测试连接
+#   DB_BACKUP_DIR=/data/backups ./backup.sh  # 自定义备份目录
 # =============================================================================
 
 set -euo pipefail
@@ -18,19 +22,17 @@ set -euo pipefail
 # -------------------------------------------------------------------------
 # Configuration (overridable via environment variables)
 # -------------------------------------------------------------------------
-# Backup directory, defaults to /opt/ai-girlfriend/backups
 BACKUP_DIR="${DB_BACKUP_DIR:-/opt/ai-girlfriend/backups}"
-
-# Backup retention in days (default 30)
 RETENTION_DAYS="${DB_RETENTION_DAYS:-30}"
-
-# Log file (same directory as backups)
 LOG_FILE="${BACKUP_DIR}/backup.log"
-
-# DATABASE_URL (prefer env var, fallback to .env file)
 DATABASE_URL="${DATABASE_URL:-}"
+# SQLite 数据库文件路径（默认值，可被 DATABASE_URL 覆盖）
+SQLITE_DB_PATH="${SQLITE_DB_PATH:-/opt/ai-girlfriend/data/users.db}"
+# ChromaDB 数据目录
+CHROMA_DB_DIR="${CHROMA_DB_DIR:-/opt/ai-girlfriend/data/chroma}"
+# 项目根目录（用于查找 .env 和 data/ 目录）
+PROJECT_ROOT="${PROJECT_ROOT:-/opt/ai-girlfriend}"
 
-# Test mode flag
 TEST_MODE=false
 
 # -------------------------------------------------------------------------
@@ -50,22 +52,14 @@ for arg in "$@"; do
 done
 
 # -------------------------------------------------------------------------
-# Log functions: timestamp + level + message
+# Log functions
 # -------------------------------------------------------------------------
-log_info() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] $*"
-}
-
-log_error() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $*" >&2
-}
-
-log_warn() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [WARN] $*"
-}
+log_info()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] $*"; }
+log_error() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $*" >&2; }
+log_warn()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [WARN] $*"; }
 
 # -------------------------------------------------------------------------
-# Initialize: create backup directory if not exists
+# Initialize: create backup directory
 # -------------------------------------------------------------------------
 init_dirs() {
     if [ ! -d "$BACKUP_DIR" ]; then
@@ -76,133 +70,219 @@ init_dirs() {
 
 # -------------------------------------------------------------------------
 # Load DATABASE_URL from .env file
-# Search order: script parent dir > BACKUP_DIR parent dir > current dir
 # -------------------------------------------------------------------------
 load_env() {
-    # If env var is already set, use it directly
     if [ -n "$DATABASE_URL" ]; then
         return 0
     fi
 
-    # Try to find .env in various locations
-    local script_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local env_file=""
+    local env_file="${PROJECT_ROOT}/.env"
+    if [ ! -f "$env_file" ]; then
+        # 尝试其他位置
+        for candidate in "$(dirname "$(dirname "${BASH_SOURCE[0]}")")/.env" ".env"; do
+            if [ -f "$candidate" ]; then
+                env_file="$candidate"
+                break
+            fi
+        done
+    fi
 
-    for candidate in "${script_dir}/../.env" "${BACKUP_DIR}/../.env" ".env"; do
-        if [ -f "$candidate" ]; then
-            env_file="$candidate"
-            break
-        fi
-    done
-
-    if [ -z "$env_file" ]; then
-        log_error "No .env file found and DATABASE_URL is not set."
-        log_error "Please set DATABASE_URL or place a .env file in:"
-        log_error "  - ${script_dir}/../.env"
-        log_error "  - ${BACKUP_DIR}/../.env"
-        log_error "  - current directory"
-        exit 1
+    if [ ! -f "$env_file" ]; then
+        log_warn "No .env file found, assuming SQLite at $SQLITE_DB_PATH"
+        DATABASE_URL=""
+        return 0
     fi
 
     log_info "Loading DATABASE_URL from $env_file"
-
-    # Extract DATABASE_URL value (ignore comments, strip quotes)
     local raw_value
-    raw_value="$(grep -E '^DATABASE_URL=' "$env_file" | head -1 | sed 's/^DATABASE_URL=//')"
+    raw_value="$(grep -E '^DATABASE_URL=' "$env_file" 2>/dev/null | head -1 | sed 's/^DATABASE_URL=//' || true)"
 
-    if [ -z "$raw_value" ]; then
-        log_error "DATABASE_URL not found in $env_file"
-        exit 1
+    if [ -n "$raw_value" ]; then
+        DATABASE_URL="$(echo "$raw_value" | sed -e "s/^'//" -e "s/'$//" -e 's/^"//' -e 's/"$//')"
     fi
-
-    # Strip surrounding quotes (single or double)
-    DATABASE_URL="$(echo "$raw_value" | sed -e "s/^'//" -e "s/'$//" -e 's/^"//' -e 's/"$//')"
 }
 
 # -------------------------------------------------------------------------
-# Parse DATABASE_URL into pg_dump connection parameters
-# Format: postgresql://user:password@host:port/database
+# 检测数据库类型
+# 返回: "sqlite" 或 "postgresql"
 # -------------------------------------------------------------------------
-parse_db_url() {
+detect_db_type() {
+    if [ -z "$DATABASE_URL" ]; then
+        echo "sqlite"
+        return
+    fi
+
+    case "$DATABASE_URL" in
+        sqlite*|sqlite3*)
+            echo "sqlite"
+            ;;
+        postgresql*|postgres*)
+            echo "postgresql"
+            ;;
+        *)
+            # 默认假设 SQLite
+            log_warn "Unknown DATABASE_URL format, assuming SQLite"
+            echo "sqlite"
+            ;;
+    esac
+}
+
+# -------------------------------------------------------------------------
+# 从 DATABASE_URL 提取 SQLite 文件路径
+# 格式: sqlite+aiosqlite:///path/to/db.sqlite
+# -------------------------------------------------------------------------
+parse_sqlite_path() {
+    # 移除 sqlite+aiosqlite:/// 或 sqlite:/// 前缀
+    local path="${DATABASE_URL#sqlite+aiosqlite:///}"
+    path="${path#sqlite:///}"
+    # 如果是相对路径，基于 PROJECT_ROOT 解析
+    if [ "${path:0:1}" != "/" ]; then
+        path="${PROJECT_ROOT}/${path}"
+    fi
+    echo "$path"
+}
+
+# -------------------------------------------------------------------------
+# 从 DATABASE_URL 提取 PostgreSQL 连接参数
+# -------------------------------------------------------------------------
+parse_pg_url() {
     DB_USER="$(echo "$DATABASE_URL" | sed -n 's|^postgresql://\([^:]*\):.*|\1|p')"
     DB_PASS="$(echo "$DATABASE_URL" | sed -n 's|^postgresql://[^:]*:\([^@]*\)@.*|\1|p')"
     DB_HOST="$(echo "$DATABASE_URL" | sed -n 's|^postgresql://[^@]*@\([^:]*\):.*|\1|p')"
     DB_PORT="$(echo "$DATABASE_URL" | sed -n 's|^postgresql://[^@]*@[^:]*:\([^/]*\)/.*|\1|p')"
     DB_NAME="$(echo "$DATABASE_URL" | sed -n 's|^postgresql://[^@]*@[^:]*:[^/]*/\(.*\)|\1|p')"
 
-    # Default port to 5432 if not specified
     if [ -z "$DB_PORT" ]; then
         DB_PORT="5432"
     fi
 
-    # Validate parsed components
     if [ -z "$DB_USER" ] || [ -z "$DB_HOST" ] || [ -z "$DB_NAME" ]; then
-        log_error "Failed to parse DATABASE_URL. Please check the format."
+        log_error "Failed to parse PostgreSQL DATABASE_URL"
         log_error "Expected format: postgresql://user:password@host:port/database"
         exit 1
     fi
-
-    log_info "Database backup started (details hidden for security)"
 }
 
 # -------------------------------------------------------------------------
-# Test database connection (via pg_isready or SELECT 1)
+# 测试数据库连接
 # -------------------------------------------------------------------------
 test_connection() {
     log_info "Testing database connection..."
+    local db_type
+    db_type="$(detect_db_type)"
 
-    # Prefer pg_isready (lightweight, no query execution)
-    if command -v pg_isready &>/dev/null; then
-        export PGPASSWORD="$DB_PASS"
-        if pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t 10 &>/dev/null; then
-            log_info "Database connection OK"
-            return 0
+    if [ "$db_type" = "sqlite" ]; then
+        local db_path
+        if [ -n "$DATABASE_URL" ]; then
+            db_path="$(parse_sqlite_path)"
+        else
+            db_path="$SQLITE_DB_PATH"
         fi
-    fi
 
-    # Fallback: use psql to run SELECT 1
-    if command -v psql &>/dev/null; then
-        export PGPASSWORD="$DB_PASS"
-        if psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1" -t -q &>/dev/null; then
-            log_info "Database connection OK"
-            return 0
+        if [ -f "$db_path" ]; then
+            if command -v sqlite3 &>/dev/null; then
+                if sqlite3 "$db_path" "SELECT 1" &>/dev/null; then
+                    log_info "SQLite connection OK: $db_path"
+                    return 0
+                else
+                    log_error "SQLite connection failed: $db_path"
+                    return 1
+                fi
+            else
+                log_warn "sqlite3 not installed, but database file exists: $db_path"
+                return 0
+            fi
+        else
+            log_error "SQLite database file not found: $db_path"
+            return 1
         fi
+    else
+        # PostgreSQL
+        parse_pg_url
+        export PGPASSWORD="$DB_PASS"
+        if command -v pg_isready &>/dev/null; then
+            if pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t 10 &>/dev/null; then
+                log_info "PostgreSQL connection OK"
+                return 0
+            fi
+        fi
+        if command -v psql &>/dev/null; then
+            if psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1" -t -q &>/dev/null; then
+                log_info "PostgreSQL connection OK"
+                return 0
+            fi
+        fi
+        log_error "PostgreSQL connection failed"
+        return 1
     fi
-
-    # If neither pg_isready nor psql is available, check pg_dump
-    if ! command -v pg_dump &>/dev/null; then
-        log_error "pg_dump not found. Please install postgresql-client."
-        log_error "  Ubuntu/Debian: apt-get install postgresql-client"
-        log_error "  CentOS/RHEL:   yum install postgresql"
-        log_error "  Alpine:        apk add postgresql-client"
-    fi
-
-    log_error "Database connection failed"
-    return 1
 }
 
 # -------------------------------------------------------------------------
-# Perform the actual backup
+# 执行 SQLite 备份
+# 使用 .backup 命令（安全，支持 WAL 模式，不阻塞写入）
 # -------------------------------------------------------------------------
-do_backup() {
+backup_sqlite() {
+    local db_path
+    if [ -n "$DATABASE_URL" ]; then
+        db_path="$(parse_sqlite_path)"
+    else
+        db_path="$SQLITE_DB_PATH"
+    fi
+
     local timestamp
     timestamp="$(date '+%Y-%m-%d_%H%M%S')"
-    local backup_file="${BACKUP_DIR}/unique_you_${timestamp}.sql.gz"
+    local backup_file="${BACKUP_DIR}/ai_girlfriend_${timestamp}.db"
     local temp_file="${backup_file}.tmp"
 
-    log_info "Starting backup: $DB_NAME -> $backup_file"
+    log_info "Starting SQLite backup: $db_path -> $backup_file"
 
-    # Export password for pg_dump
-    # 安全风险：PGPASSWORD 在进程环境中短暂可见，建议使用 ~/.pgpass 替代
+    if command -v sqlite3 &>/dev/null; then
+        # 使用 sqlite3 .backup 命令（原子性，支持 WAL）
+        if sqlite3 "$db_path" ".backup '$temp_file'" 2>&1; then
+            mv "$temp_file" "$backup_file"
+            chmod 600 "$backup_file"
+            local file_size
+            file_size="$(du -h "$backup_file" | cut -f1)"
+            log_info "SQLite backup complete: $backup_file (${file_size})"
+            return 0
+        else
+            rm -f "$temp_file"
+            log_error "SQLite backup failed"
+            return 1
+        fi
+    else
+        # 没有 sqlite3 命令，直接复制文件（可能不一致，但比没有备份好）
+        log_warn "sqlite3 not installed, using file copy (may be inconsistent under WAL)"
+        if cp "$db_path" "$temp_file" 2>&1; then
+            # 同时复制 WAL 和 SHM 文件（如果存在）
+            cp "${db_path}-wal" "${temp_file}-wal" 2>/dev/null || true
+            cp "${db_path}-shm" "${temp_file}-shm" 2>/dev/null || true
+            mv "$temp_file" "$backup_file"
+            chmod 600 "$backup_file"
+            log_info "SQLite backup complete (file copy): $backup_file"
+            return 0
+        else
+            rm -f "$temp_file"
+            log_error "SQLite file copy failed"
+            return 1
+        fi
+    fi
+}
+
+# -------------------------------------------------------------------------
+# 执行 PostgreSQL 备份
+# -------------------------------------------------------------------------
+backup_postgresql() {
+    parse_pg_url
+
+    local timestamp
+    timestamp="$(date '+%Y-%m-%d_%H%M%S')"
+    local backup_file="${BACKUP_DIR}/ai_girlfriend_${timestamp}.sql.gz"
+    local temp_file="${backup_file}.tmp"
+
+    log_info "Starting PostgreSQL backup: $DB_NAME -> $backup_file"
+
     export PGPASSWORD="$DB_PASS"
-
-    # Run pg_dump piped to gzip, writing to a temp file first
-    # Flags:
-    #   --no-owner       Skip owner restoration (portable across environments)
-    #   --no-acl         Skip privilege restoration
-    #   --clean          Include DROP statements in output
-    #   --if-exists      Use IF EXISTS with DROP (safer restore)
     if pg_dump \
         --no-owner \
         --no-acl \
@@ -215,57 +295,69 @@ do_backup() {
         2>"${temp_file}.log" \
         | gzip > "$temp_file"; then
 
-        # Success: rename temp to final
         mv "$temp_file" "$backup_file"
-        # 限制备份文件权限，仅所有者可读写
         chmod 600 "$backup_file"
         local file_size
         file_size="$(du -h "$backup_file" | cut -f1)"
         rm -f "${temp_file}.log"
-
-        log_info "Backup complete - File: $backup_file (${file_size})"
+        log_info "PostgreSQL backup complete: $backup_file (${file_size})"
         return 0
     else
-        # Failure: collect error details
         local err_msg
         err_msg="$(cat "${temp_file}.log" 2>/dev/null || echo 'unknown error')"
         rm -f "$temp_file" "${temp_file}.log"
-
-        log_error "Backup failed"
-        log_error "Error details: $err_msg"
-
-        # Write alert log (can be caught by external monitoring)
-        echo "[ALERT] [$(date '+%Y-%m-%d %H:%M:%S')] Backup failed: ${DB_NAME}@${DB_HOST}:${DB_PORT} - ${err_msg}" >> "$LOG_FILE"
-
+        log_error "PostgreSQL backup failed: $err_msg"
         return 1
     fi
 }
 
 # -------------------------------------------------------------------------
-# Clean up backups older than RETENTION_DAYS
+# 备份 ChromaDB 向量数据目录
+# -------------------------------------------------------------------------
+backup_chromadb() {
+    if [ ! -d "$CHROMA_DB_DIR" ]; then
+        log_info "ChromaDB directory not found, skipping: $CHROMA_DB_DIR"
+        return 0
+    fi
+
+    local timestamp
+    timestamp="$(date '+%Y-%m-%d_%H%M%S')"
+    local backup_file="${BACKUP_DIR}/chromadb_${timestamp}.tar.gz"
+
+    log_info "Starting ChromaDB backup: $CHROMA_DB_DIR -> $backup_file"
+
+    if tar czf "$backup_file" -C "$(dirname "$CHROMA_DB_DIR")" "$(basename "$CHROMA_DB_DIR")" 2>&1; then
+        chmod 600 "$backup_file"
+        local file_size
+        file_size="$(du -h "$backup_file" | cut -f1)"
+        log_info "ChromaDB backup complete: $backup_file (${file_size})"
+        return 0
+    else
+        log_error "ChromaDB backup failed"
+        return 1
+    fi
+}
+
+# -------------------------------------------------------------------------
+# 清理旧备份
 # -------------------------------------------------------------------------
 cleanup_old_backups() {
     log_info "Cleaning backups older than ${RETENTION_DAYS} days..."
-
     local deleted_count=0
 
-    # Find files matching naming convention beyond retention period
     while IFS= read -r -d '' old_file; do
         local fsize
         fsize="$(du -h "$old_file" | cut -f1)"
         rm -f "$old_file"
         deleted_count=$((deleted_count + 1))
         log_info "  Removed: $old_file (${fsize})"
-    done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name "unique_you_*.sql.gz" -mtime "+${RETENTION_DAYS}" -print0)
+    done < <(find "$BACKUP_DIR" -maxdepth 1 -type f \( -name "ai_girlfriend_*.db" -o -name "ai_girlfriend_*.sql.gz" -o -name "chromadb_*.tar.gz" \) -mtime "+${RETENTION_DAYS}" -print0)
 
     if [ "$deleted_count" -eq 0 ]; then
         log_info "  Nothing to clean"
     else
         log_info "Removed ${deleted_count} old backup files"
     fi
-
-    # Also clean log archives older than 90 days
-    find "$BACKUP_DIR" -maxdepth 1 -type f -name "backup.log.*" -mtime "+90" -delete 2>/dev/null || true
 }
 
 # -------------------------------------------------------------------------
@@ -279,43 +371,43 @@ rotate_log() {
 }
 
 # -------------------------------------------------------------------------
-# Main execution flow
+# Main
 # -------------------------------------------------------------------------
 main() {
     echo "=============================================="
-    echo " 唯一的你 Database Backup Tool"
+    echo " AI Girlfriend Database Backup Tool"
     echo " Time: $(date '+%Y-%m-%d %H:%M:%S')"
     echo "=============================================="
 
-    # 1. Initialize directories
     init_dirs
-
-    # 2. Rotate log if needed
     rotate_log
-
-    # 3. Load database connection info
     load_env
-    parse_db_url
 
-    # 4. Test connection
+    local db_type
+    db_type="$(detect_db_type)"
+    log_info "Detected database type: $db_type"
+
     if ! test_connection; then
         log_error "Connection test failed, aborting."
         exit 1
     fi
 
-    # 5. If test mode, stop here
     if [ "$TEST_MODE" = true ]; then
         log_info "Test mode, skipping backup."
         exit 0
     fi
 
-    # 6. Execute backup
-    if ! do_backup; then
-        log_error "Backup process failed."
-        exit 1
+    # 主数据库备份
+    if [ "$db_type" = "sqlite" ]; then
+        backup_sqlite || { log_error "SQLite backup failed."; exit 1; }
+    else
+        backup_postgresql || { log_error "PostgreSQL backup failed."; exit 1; }
     fi
 
-    # 7. Clean up old backups
+    # ChromaDB 向量数据备份
+    backup_chromadb || log_warn "ChromaDB backup failed, continuing"
+
+    # 清理旧备份
     cleanup_old_backups
 
     echo "=============================================="

@@ -13,7 +13,9 @@ interface SliderProps {
 
 export default function Slider({ label, value, min = 0, max = 1, step = 0.01, tooltip, disabled, onChange }: SliderProps) {
   const id = useId()
-  const pct = ((value - min) / (max - min)) * 100
+  // 防御性转换：API 可能返回字符串类型的数值，toFixed 仅数字可用
+  const numValue = Number(value) || 0
+  const pct = ((numValue - min) / (max - min)) * 100
 
   return (
     <div className="flex items-center gap-3 group">
@@ -27,7 +29,7 @@ export default function Slider({ label, value, min = 0, max = 1, step = 0.01, to
           min={min}
           max={max}
           step={step}
-          value={value}
+          value={numValue}
           disabled={disabled}
           onChange={(e) => onChange(parseFloat(e.target.value))}
           className="w-full h-1.5 appearance-none bg-gray-200/70 rounded-full cursor-pointer
@@ -44,7 +46,7 @@ export default function Slider({ label, value, min = 0, max = 1, step = 0.01, to
         />
       </div>
       <span className="text-[11px] text-gray-400 w-8 text-right tabular-nums shrink-0">
-        {value.toFixed(2)}
+        {numValue.toFixed(2)}
       </span>
     </div>
   )

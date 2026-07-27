@@ -173,10 +173,47 @@ class MiMoTTSProvider(TTSProviderBase):
             self._last_error = f"请求异常: {e}"
             logger.warning("MiMo TTS异常: %s", e)
 
+        # voiceclone 模型失败时，先降级到 MiMo 基础合成（同 API，仅切换模型）
+        if self._model == "mimo-v2.5-tts-voiceclone":
+            basic_result = await self._synthesize_with_basic_model(text, speed, pitch)
+            if basic_result is not None:
+                return basic_result
+
         # API失败，尝试本地降级
         if self._fallback_local:
             return await self._fallback_to_local(text, **kwargs)
 
+        return None
+
+    async def _synthesize_with_basic_model(
+        self, text: str, speed: float, pitch: float,
+    ) -> bytes | None:
+        """voiceclone 失败时降级到 mimo-v2.5-tts 基础合成（同 API，不依赖本地引擎）"""
+        basic_payload: dict[str, Any] = {
+            "model": "mimo-v2.5-tts",
+            "input": text,
+            "voice": "default",
+            "speed": speed,
+            "pitch": pitch,
+            "response_format": "mp3",
+        }
+        try:
+            async with aiohttp.ClientSession() as session, session.post(
+                f"{self._api_base}{self.ENDPOINTS['tts']}",
+                headers=self._get_headers(),
+                json=basic_payload,
+                timeout=aiohttp.ClientTimeout(total=self._timeout),
+            ) as response:
+                if response.status == 200:
+                    audio_data = await response.read()
+                    logger.info(
+                        "voiceclone 降级到 mimo-v2.5-tts 基础合成成功: %d bytes", len(audio_data),
+                    )
+                    return audio_data
+                error_text = await response.text()
+                logger.warning("基础模型降级也失败: API %s: %s", response.status, error_text)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("基础模型降级异常: %s", e)
         return None
 
     async def synthesize_stream(self, text: str, **kwargs):

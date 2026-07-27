@@ -16,9 +16,6 @@ import { getSpeakers } from '../api/system'
 
 const ENGINE_OPTIONS = [
   { value: 'mimo-tts', label: 'MiMo Cloud' },
-  { value: 'edge-tts', label: 'Edge TTS' },
-  { value: 'gpt-sovits', label: 'GPT-SoVITS' },
-  { value: 'bert-vits2', label: 'Bert-VITS2' },
 ]
 
 const GENDER_OPTIONS = [
@@ -53,7 +50,7 @@ function EngineSwitcher({
             onClick={() => onChange(opt.value)}
             className={`text-left p-3 rounded-xl transition-all ${
               engine === opt.value
-                ? `${opt.value === 'mimo-tts' ? 'glass-pink' : opt.value === 'edge-tts' ? 'glass-blue' : opt.value === 'gpt-sovits' ? 'glass-green' : 'glass-card'} ring-1 ring-primary-400/30`
+                ? 'glass-pink ring-1 ring-primary-400/30'
                 : 'glass-card border border-gray-200 hover:border-gray-300'
             }`}
           >
@@ -307,7 +304,7 @@ function VoiceDesignSection() {
           {/* Speed */}
           <div className="sm:col-span-2">
             <label className="mb-1 block text-xs text-gray-500">
-              语速: {design.speed.toFixed(1)}x
+              语速: {Number(design.speed || 0).toFixed(1)}x
             </label>
             <input
               type="range"

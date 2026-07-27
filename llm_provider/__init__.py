@@ -211,6 +211,69 @@ async def reconfigure_llm(config: Any) -> ReloadableLLMGateway:
     return gateway
 
 
+# ── 用户级 LLM gateway 缓存（多用户 API Key 隔离） ──
+
+_user_gateways: dict[int, ReloadableLLMGateway] = {}
+_user_gateways_lock = threading.Lock()
+
+
+def get_user_llm(user_id: int, user_config: dict | None) -> Any:
+    """返回用户级 LLM gateway。若 user_config 为 None，回退到全局 gateway。
+
+    每个用户维护独立的 ReloadableLLMGateway，配置变更时按 fingerprint 重建。
+    """
+    if not user_config:
+        return get_llm()
+
+    with _user_gateways_lock:
+        gw = _user_gateways.get(user_id)
+        config_dict = _as_dict(user_config)
+        resolved = _resolve_provider(config_dict.get("provider"))
+        effective_models = config_dict.get("models_priority")
+        fingerprint = _config_fingerprint(resolved, config_dict, effective_models)
+
+        if gw is None:
+            gw = ReloadableLLMGateway()
+            _user_gateways[user_id] = gw
+
+        if gw.fingerprint != fingerprint or gw._target is None:
+            backend = _build_backend(resolved, config_dict, effective_models)
+            old = gw.swap(backend, fingerprint)
+            if old is not None:
+                close = getattr(old, "close", None)
+                if close is not None:
+                    try:
+                        result = close()
+                        if asyncio.iscoroutine(result):
+                            try:
+                                asyncio.get_running_loop().create_task(result)
+                            except RuntimeError:
+                                pass
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Failed to close user %s LLM backend: %s", user_id, exc)
+            logger.info("Configured user %s LLM gateway: provider=%s", user_id, resolved)
+
+        return gw
+
+
+def invalidate_user_llm(user_id: int) -> None:
+    """清除指定用户的 LLM gateway 缓存（用户配置变更后调用）。"""
+    with _user_gateways_lock:
+        gw = _user_gateways.pop(user_id, None)
+    if gw:
+        close = getattr(gw, "close", None)
+        if close is not None:
+            try:
+                result = close()
+                if asyncio.iscoroutine(result):
+                    try:
+                        asyncio.get_running_loop().create_task(result)
+                    except RuntimeError:
+                        pass
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to close user %s LLM on invalidate: %s", user_id, exc)
+
+
 def get_llm_names(provider: str | None = None) -> list[str]:
     resolved = _resolve_provider(provider)
     if resolved == "sensenova":

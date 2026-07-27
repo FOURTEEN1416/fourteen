@@ -52,6 +52,11 @@ def _init_metrics():
     _metrics["active_sessions"] = Gauge(        "active_sessions",
         "Currently active sessions",
     )
+    _metrics["llm_provider_status"] = Counter(
+        "llm_provider_status_total",
+        "LLM provider call outcomes in multi-provider gateway",
+        ["provider", "status"],
+    )
 
 
 def setup_metrics(port: int = 9090):
@@ -109,3 +114,15 @@ def record_error(module: str, error_type: str):
 def set_active_sessions(count: int):
     if _metrics.get("active_sessions"):
         _metrics["active_sessions"].set(count)
+
+
+def record_provider_fallback(provider: str, status: str):
+    """记录 multi-provider gateway 中每个 provider 的调用结果。
+
+    status: "success" | "fallback" | "error"
+    - success: 该 provider 成功响应
+    - fallback: 该 provider 返回错误信息（以"（"开头），触发降级到下一个
+    - error: 该 provider 抛出异常
+    """
+    if _metrics.get("llm_provider_status"):
+        _metrics["llm_provider_status"].labels(provider=provider, status=status).inc()

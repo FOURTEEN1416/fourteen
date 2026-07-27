@@ -354,15 +354,22 @@ class ProactiveScheduler:
         return jobs
 
     def _health_check_channels(self) -> None:
-        """检查并重连失效通道"""
+        """检查并重连失效通道
+
+        修复：factory() 返回 None 时不算重连成功（如 wechat connector 尚未注入），
+        避免每分钟刷"通道已重连"的虚假日志。
+        """
         for name in list(self._channel_instances.keys()):
             if self._channel_instances.get(name) is None:
                 factory = self._channels.get(name)
                 if factory:
                     try:
                         instance = factory()
-                        self._channel_instances[name] = instance
-                        logger.info("通道已重连: %s", name)
+                        if instance is not None:
+                            self._channel_instances[name] = instance
+                            logger.info("通道已重连: %s", name)
+                        else:
+                            logger.debug("通道 %s 暂未就绪，等待依赖注入", name)
                     except Exception as e:
                         logger.debug("通道重连失败: %s - %s", name, e)
 

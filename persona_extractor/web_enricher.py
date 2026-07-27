@@ -526,15 +526,18 @@ class AgentReachChannels:
         self._init_channels()
 
     def _init_channels(self):
+        import os as _os
         import sys as _sys
-        _ar_path = r"D:\Desktop\自动化推广\agent-reach"
-        if _ar_path not in _sys.path:
+        # 优先使用 AGENT_REACH_PATH 环境变量；未设置时优雅降级（不导入）
+        _ar_path = _os.environ.get("AGENT_REACH_PATH", "").strip()
+        if _ar_path and _ar_path not in _sys.path:
             _sys.path.insert(0, _ar_path)
         try:
             from agent_reach.channels import ALL_CHANNELS
             for c in ALL_CHANNELS:
                 self._channels[c.name] = c
         except ImportError:
+            # AGENT_REACH_PATH 未配置或导入失败时静默降级
             pass
 
     @property

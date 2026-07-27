@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Toggle } from '../components/shared'
-import { config as fetchConfig, saveConfig } from '../api/system'
+import { config as fetchConfig, saveConfig, userLlmConfig, saveUserLlmConfig } from '../api/system'
+import { useAuthStore } from '../store/authStore'
 
 const PROVIDER_OPTIONS = [
   { value: 'auto', label: '自动回退（推荐）', desc: '按优先级依次尝试可用供应商' },
@@ -27,6 +28,11 @@ function SettingsLLM() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [configSource, setConfigSource] = useState<'user' | 'global'>('global')
+
+  // 获取当前用户角色（从 zustand authStore）
+  const user = useAuthStore(s => s.user)
+  const isAdmin = user?.role === 'admin'
 
   // 核心连接参数
   const [provider, setProvider] = useState('auto')
@@ -42,23 +48,30 @@ function SettingsLLM() {
   const [llmCache, setLlmCache] = useState(true)
   const [cacheDuration, setCacheDuration] = useState(30)
 
-  // 加载配置
+  // 加载配置：普通用户用 /user/llm-config，admin 用全局 /config（默认）或用户级
   /* eslint-disable react-hooks/set-state-in-effect -- data fetching on mount, cancelled flag 防竞态 */
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
 
-    fetchConfig()
+    // 普通用户始终用用户级 API；admin 默认用全局，但也可读用户级
+    const useUserApi = !isAdmin
+    const fetchFn = useUserApi ? userLlmConfig : fetchConfig
+
+    fetchFn()
       .then(res => {
         if (cancelled) return
-        const cfg = res.data ?? {}
-        const llm = cfg.llm ?? {}
+        const data = res.data ?? {}
+        // /user/llm-config 返回 { source, llm }，/config 返回顶层配置对象
+        const llm = useUserApi ? (data.llm ?? {}) : (data.llm ?? {})
+        const source = useUserApi ? (data.source ?? 'global') : 'global'
+        setConfigSource(source)
         setProvider(llm.provider ?? 'auto')
         setModelName(llm.model || llm.primary_model || '')
         setApiKey(llm.api_key && llm.api_key !== '****' ? llm.api_key : '')
         setApiBase(llm.api_base ?? '')
-        setTemperature(llm.temperature ?? 0.85)
+        setTemperature(Number(llm.temperature) || 0.85)
         setMaxTokens(llm.max_tokens ?? 2048)
         const cache = llm.cache ?? {}
         setLlmCache(cache.enabled !== false)
@@ -73,7 +86,7 @@ function SettingsLLM() {
       })
 
     return () => { cancelled = true }
-  }, [])
+  }, [isAdmin])
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleSave = async () => {
@@ -94,10 +107,12 @@ function SettingsLLM() {
           ttl: cacheDuration * 60,
         },
       }
-      // GET /config intentionally returns ****. Empty input means "keep the
-      // stored key"; only a newly entered value is sent back to the server.
+      // GET 返回 ****。空输入表示保留原 key；只有新输入的值才发送。
       if (apiKey && apiKey !== '****') llmConfig.api_key = apiKey
-      await saveConfig({ llm: llmConfig })
+
+      // 普通用户保存到用户级；admin 保存到全局（可扩展为可选）
+      const saveFn = isAdmin ? saveConfig : saveUserLlmConfig
+      await saveFn({ llm: llmConfig })
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
     } catch (err: unknown) {
@@ -120,6 +135,15 @@ function SettingsLLM() {
 
   return (
     <div className="space-y-6 max-w-2xl">
+      {/* 配置来源指示 */}
+      <div className="text-xs text-gray-400">
+        {isAdmin
+          ? '当前编辑：全局默认配置（所有用户回退使用）'
+          : configSource === 'user'
+            ? '当前编辑：你的个人 LLM 配置（独立于其他用户）'
+            : '当前使用全局默认配置，保存后将创建你的个人配置'
+        }
+      </div>
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
           {error}
@@ -231,7 +255,7 @@ function SettingsLLM() {
                 <p className="text-xs text-gray-400">生成随机性（0-1）</p>
               </div>
               <span className="text-sm font-semibold text-gray-700 tabular-nums w-10 text-right">
-                {temperature.toFixed(2)}
+                {Number(temperature || 0).toFixed(2)}
               </span>
             </div>
             <input

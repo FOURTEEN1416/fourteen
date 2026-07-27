@@ -1,4 +1,4 @@
-"""PersonaExporter导出器 — 导出为chara_card_v2 JSON，可重新导入。"""
+"""PersonaExporter导出器 — 导出为chara_card_v2 JSON 或 SillyTavern PNG，可重新导入。"""
 
 from __future__ import annotations
 
@@ -33,3 +33,49 @@ class PersonaExporter:
     def export_json_string(self, card: CharaCardV2, indent: int = 2) -> str:
         data = card.model_dump(mode="json")
         return json.dumps(data, ensure_ascii=False, indent=indent)
+
+    def export_card_png(
+        self,
+        card: CharaCardV2,
+        image_bytes: bytes | None = None,
+        filename: str | None = None,
+    ) -> tuple[bytes, str]:
+        """导出为 SillyTavern 标准 PNG 角色卡（chara tEXt chunk）。
+
+        Args:
+            card: CharaCardV2 模型
+            image_bytes: 可选底图 PNG 字节（通常是角色头像）；
+                         为 None 时生成纯色占位图
+            filename: 输出文件名（None 时自动生成）
+
+        Returns:
+            (png_bytes, filename) — PNG 字节流和文件名
+        """
+        from .png_codec import embed_card_to_png, PNGCodecError
+
+        if filename is None:
+            import re
+            safe_name = re.sub(r'[^\w\u4e00-\u9fff]', '_', card.data.name).strip('_')[:50]
+            filename = f"{safe_name}.png"
+
+        card_data = card.model_dump(mode="json")
+        try:
+            png_bytes = embed_card_to_png(card_data, image_bytes=image_bytes)
+        except PNGCodecError as e:
+            logger.error("PNG 导出失败: %s", e)
+            raise
+
+        logger.info("导出 PNG 角色卡: %s → %s (%d bytes)", card.data.name, filename, len(png_bytes))
+        return png_bytes, filename
+
+    def export_card_png_to_file(
+        self,
+        card: CharaCardV2,
+        image_bytes: bytes | None = None,
+        filename: str | None = None,
+    ) -> Path:
+        """导出 PNG 角色卡并保存到 output_dir，返回文件路径。"""
+        png_bytes, filename = self.export_card_png(card, image_bytes, filename)
+        out_path = self.output_dir / filename
+        out_path.write_bytes(png_bytes)
+        return out_path
