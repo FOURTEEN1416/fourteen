@@ -54,9 +54,8 @@ class TestSessionLockManager:
                 await asyncio.sleep(delay)
                 results.append(f"{session_id}_end")
 
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(task("s1", 0.05))
-            tg.create_task(task("s2", 0.01))
+        # 兼容 Python 3.10+（asyncio.TaskGroup 是 3.11+ 特性）
+        await asyncio.gather(task("s1", 0.05), task("s2", 0.01))
 
         # s2 应该先完成，因为不同 session 的锁不互斥
         assert results[0] == "s1_start"
@@ -79,10 +78,8 @@ class TestSessionLockManager:
                 await asyncio.sleep(0.02)
                 in_flight -= 1
 
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(task())
-            tg.create_task(task())
-            tg.create_task(task())
+        # 兼容 Python 3.10+（asyncio.TaskGroup 是 3.11+ 特性）
+        await asyncio.gather(task(), task(), task())
 
         # 同一 session 最多只有一个任务在锁内
         assert max_in_flight == 1
