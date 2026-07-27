@@ -277,11 +277,17 @@ class TestApplicationFactory:
 
     def test_create_api_app_basic(self) -> None:
         """create_api_app() returns FastAPI instance with correct metadata."""
+        import os
         from api.app_factory import create_api_app
         app = create_api_app()
         assert app.title == "唯一的你 API"
         assert app.version == "3.1.0"
-        assert app.debug is True  # non-prod by default
+        # debug 跟随 ENVIRONMENT 环境变量：生产环境为 False，其他为 True
+        env = os.environ.get("ENVIRONMENT", "").lower()
+        if env == "production":
+            assert app.debug is False  # 生产环境关闭 debug
+        else:
+            assert app.debug is True  # 非生产默认开启 debug
 
     def test_create_api_app_registers_routers(self) -> None:
         """Verify all 8 main sub-routers are mounted.
