@@ -1,11 +1,30 @@
-# 代码图谱 — unique-you (唯一的你) v3.0.0
+# 代码图谱 — unique-you (唯一的你) v3.1.0
 
-> 由 维护者 手动维护 | 上次大规模扫描: 2026-07-09 | 最后更新: 2026-07-14
-> ✅ codebase-memory 图谱工具 指标已通过实时扫描验证。
+> 由 维护者 手动维护 | 上次大规模扫描: 2026-07-09 | 最后更新: 2026-07-28
+> ✅ 路由/文件/模块/测试数已通过 Grep + LS 实时核实（2026-07-28）。
+> ⚠️ codebase-memory 图谱工具 节点/边数据仍为 2026-07-09 快照（未重新索引）。
 
 ---
 
-## 1. 全局指标（截至 2026-07-09 快照）
+## 1. 全局指标
+
+### 1.1 实时核实指标（2026-07-28 Grep/LS 扫描）
+
+| 维度 | 数值 | 核实方法 |
+|------|------|---------|
+| API 端点（api/routers） | 158 端点 / 21 文件 | Grep `@router\.(get\|post\|put\|delete\|patch)\(` |
+| API 端点（shisi/api 含 v2） | 49 端点 / 13 文件 | Grep `@(router\|app)\.(get\|post\|put\|delete\|patch)\(` |
+| API 端点合计 | **207** | 直接相加（非 v3.0.0 记录的 332） |
+| main.py 体量 | **726 行 / 35.9 KB** | `(Get-Content \| Measure-Object -Line).Lines` |
+| 前端页面 | 18 个 | Glob `frontend/src/pages/*.tsx` |
+| 前端 API 模块 | **13 个** | Glob `frontend/src/api/*.ts`（v3.0.0 记录为 12，新增 `queryClient.ts`） |
+| 前端 Zustand store | 4 个 | LS `frontend/src/store/` |
+| Python 测试函数 | 456 个 / 36 文件 | Grep `^(def\|async def)\s+test_` |
+| 前端测试用例 | 84 个 / 14 文件 | Grep `^\s*(it\|test)\(` |
+| 测试用例合计 | **540 个** | 直接相加（v3.0.0 记录的 626+ 已不再准确） |
+| tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
+
+### 1.2 知识图谱快照指标（截至 2026-07-09，未重新扫描）
 
 | 维度 | 数值 |
 |------|------|
@@ -16,20 +35,27 @@
 | Class | 471 |
 | File | 436 |
 | Module | 423 |
-| Route | 332 |
+| Route（图数据库记录） | 332 |
 | Interface (TS) | 163 |
-| 测试用例 (TESTS 边) | 1413 |
+| 测试用例边 (TESTS) | 1413 |
 | 相似函数对 (SIMILAR_TO) | 126 |
 | 语义关联 (SEMANTICALLY_RELATED) | 110 |
 | HTTP 跨服务调用 | 49 |
 | 协同变更文件对 (FILE_CHANGES_WITH) | 31 |
 | 继承关系 (INHERITS) | 10 |
 
-**边类型分布（前 8）**：USAGE(6331) > CALLS(6116) > DEFINES(5110) > DEFINES_METHOD(1885) > WRITES(1549) > TESTS(1413) > IMPORTS(755) > DECORATES(621)
+**边类型分布（前 8，2026-07-09 快照）**：USAGE(6331) > CALLS(6116) > DEFINES(5110) > DEFINES_METHOD(1885) > WRITES(1549) > TESTS(1413) > IMPORTS(755) > DECORATES(621)
 
 **语言分布**：Python 309 · TypeScript 79 · YAML 14 · Bash 5 · TOML 1 · JS 1 · HTML 1 · CSS 1
 
-**新增包**：`tools/`（8 Python 文件），`utils/character_helpers.py`
+**2026-07-28 后新增/重构的包**：
+- `shisi/character/`（8 文件，新增完整角色卡子系统：character_card_v2 / exporter / importer / manager / models / png_codec / store / validator）
+- `api/routers/clone_routes.py`（+`/api/clone/upload` 端点）
+- `api/routers/knowledge_routes.py`（+`/api/characters/{id}/enrich` 端点）
+- `api/routers/misc_routes.py`（+`/api/user/llm-config` GET/POST 端点）
+- `api/run_api.py`（+flock 文件锁自动恢复微信连接）
+- `api/database.py` User 模型（+`llm_config` JSON 字段）
+- `llm_provider/__init__.py`（+`invalidate_user_llm()` 用户级 gateway 缓存失效）
 
 ---
 
@@ -163,25 +189,67 @@ sequenceDiagram
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
-| `main.py` | main.py (~103KB) | 入口 + OptimizedOrchestrator + 多模式启动 |
-| `orchestrator/` | orchestrator/ (包) | 基础 Orchestrator 类（`Orchestrator = OptimizedOrchestrator` 别名） |
-| `user_scheduler.py` | user_scheduler.py (13KB) | 多用户调度，每个微信用户独立情感状态 |
+| `main.py` | main.py（**~23 KB / 574 行**，2026-07-28 双模式合并后瘦身） | 入口 + `_run_orchestrator` 统一启动 + 控制台/微信/克隆模式 |
+| `orchestrator/` | orchestrator/ (5 文件包) | `optimized_orchestrator.py` 主类 + `_init_mixin.py` **10 阶段初始化**（唯一真相源） + `_stream_mixin.py` SSE 流式 + `session_locks.py` + `voice_detector.py` |
+| `api/run_api.py` | api/run_api.py | API-Only 启动入口（uvicorn 直接挂载），含 `_autostart_wechat_connector()` flock 文件锁自动恢复微信连接 |
+| `user_scheduler.py` | user_scheduler.py | 多用户调度，每个微信用户独立情感状态 |
+
+**架构演进 (2026-07-28 双模式合并)**：
+- 原 `_run_fast_mode` + `_run_full_mode` 双路径合并为 `_run_orchestrator` 单入口（-297 行）
+- `_init_mixin.initialize()` 是唯一初始化真相源（10 阶段），`_run_full_mode` 的 300 行手工组件注入已删除
+- 修复双调度器 bug：原 `_init_mixin` 与 `_run_*_mode` 各创建一个 `ProactiveScheduler` 并行运行，现统一复用
+- `_init_mixin` 新增第 10 阶段 `_init_multimodal`，并补齐 `EncryptionManager` / `classifier_mode` / `prompt_mode` 参数
 
 **OptimizedOrchestrator 运行模式**：
-- `_run_fast_mode` — 快速模式，跳过重计算 (complexity=15)
-- `_run_full_mode` — 完整模式，全管线 (complexity=19)
-- `run_console_chat` — 控制台交互 (complexity=24，最高)
+- `_run_orchestrator(mode="fast")` — 快速模式（fusion_cfg.orchestrator_mode="fast"）
+- `_run_orchestrator(mode="full")` — 完整模式（默认，与 fast 共用 initialize()）
+- `run_console_chat` — 控制台交互
 - `run_wechat_mode` — 微信模式
 - `run_clone_pipeline` — 克隆训练管线
 
-### 4.2 API 层（332 路由）
+### 4.2 API 层（207 路由 — 2026-07-28 Grep 实测）
 
-三个路由来源：
+两个路由来源：
 
-| 来源 | 路径 | 路由数 | 说明 |
-|------|------|--------|------|
-| `api/routers/` | 21 个域路由 | ~168 端点 | 域路由：character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card/demo/chat/clone/misc/personality/safety/tools/training/users |
-| `shisi/api/` | v1 + v2 | ~164 端点 | shisi 域：affinity/character/emotion_stage/memory/persona/stats/sticker/training/vital_signs + v2 健康检查/迁移 |
+| 来源 | 路径 | 端点数 | 文件数 | 说明 |
+|------|------|--------|------|------|
+| `api/routers/` | 21 个域路由（不含 `__init__.py`） | **158** | 21 | 域路由：character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card/demo/chat/clone/misc/personality/safety/tools/training/users |
+| `shisi/api/` | v1 + v2 | **49** | 13 | shisi 域：affinity/character/emotion_stage/memory/persona/stats/sticker/training/vital_signs + v2 健康检查/迁移/persona/character |
+| **合计** | | **207** | **34** | （v3.0.0 记录的 332 来自 codebase-memory 图谱工具 旧快照，未及时刷新） |
+
+**app_factory.py 实际挂载策略**（核实于源码）：
+
+```
+health_router          → /api/health, /api/ready（2 端点，无认证）
+misc_router            → /api/stats, /api/dashboard, /api/memory/facts,
+                        /api/logs, /api/logs/stream, /api/config,
+                        /api/user/llm-config (GET/POST, 新增),
+                        /api/channels, /api/routes（11 端点）
+chat_router            → /api/chat/*, /api/session/*, /api/wechat/status（11 端点）
+demo_router            → /api/demo/*（4 端点，无认证）
+personality_router     → /api/emotion/*, /api/persona/*, /api/psych/*（9 端点）
+users_router           → /api/users/*（7 端点，admin only）
+training_router        → /api/training/*, /api/proactive/*（11 端点）
+tools_router           → /api/system/tools, /api/system/tools/health, /api/plugins/*（6 端点）
+safety_router          → /api/safety/*, /api/rag/*, /api/voice/*, /api/files/*, /api/cache/*（12 端点）
+clone_router           → /api/clone/*（9 端点，含 /api/clone/upload 新增）
+auth_router            → /api/auth/*（7 端点）
+admin_router           → /api/admin/*（5 端点）
+invite_router          → /api/auth/register-invite, /api/admin/invites（4 端点）
+character_router       → /api/characters/*, /api/presets/*（19 端点，含 .png 导入/导出）
+voice_router           → /api/character/voice/*（6 端点）
+mimo_voice_router      → /api/mimo/*（6 端点）
+memory_bridge_router   → /api/memory/*（4 端点，桥接 shisi FavoriteManager/ForwardManager）
+persona_card_router    → /api/persona-card/*（3 端点）
+storyline_router       → /api/storyline/*（6 端点）
+knowledge_router       → /api/characters/{id}/knowledge/*, /api/characters/{id}/enrich（8 端点，含 enrich 新增）
+wechat_router          → /api/wechat/*（8 端点）
+emotion_params_router  → /api/emotion/params/*（2 端点）
+qrcode_router          → /api/wechat/qrcode（1 端点）
++ shisi setup          → /api/shisi/* + /api/shisi/status（49 端点）
+```
+
+**`api/app_factory.py:84 create_api_app()`** 是 FastAPI 应用唯一构造入口，被 `api/run_api.py:232` 和 `main.py` 调用。FastAPI 实例 `version="3.1.0"`。
 
 ### 4.3 shisi/ — Clean Architecture 重构（核心域）
 
@@ -190,6 +258,7 @@ DDD 分层架构，是项目最重要的重构成果：
 | 子包 | 职责 | 关键类 |
 |------|------|--------|
 | `application/` | 应用服务 | CharacterService, MemoryService, PersonaService, KnowledgeService, PromptService, MigrationService |
+| `character/`（新增 2026-07-28） | 角色卡完整子系统 | **CharaCardV2/V3**, **PNGCodec**, Importer, Exporter, Manager, Store, Validator |
 | `core/models/` | 领域模型 | AffinityLevel, CharacterId, EmotionalState, PersonaProfile, CharacterAggregate |
 | `core/ports/` | 端口接口 | CharacterRepository |
 | `core/services/` | 领域服务 | EmotionDetector, PromptBuilder |
@@ -206,6 +275,21 @@ DDD 分层架构，是项目最重要的重构成果：
 | `vault/` | 数据收集 | CollectLoop, PersonaAdapter |
 | `ase/` | 场景叙事 | SceneNarrator, TriggerEngine |
 | `knowledge/` | 知识检索 | Retriever, CharacterKnowledgeService, **CrawlerAdapter** |
+
+**shisi/character/ 详细说明（2026-07-28 新增）**：
+
+| 文件 | 类/函数 | 职责 |
+|------|---------|------|
+| `png_codec.py` | `extract_card_from_png()` / `embed_card_to_png()` / `has_chara_chunk()` / `is_png()` | SillyTavern PNG tEXt chunk 编解码：PNG → base64 → JSON 解析；JSON → base64 → 嵌入 PNG tEXt chunk（关键字 `chara`）。依赖 Pillow |
+| `importer.py` | `import_file()` / `import_directory()` | 角色卡批量导入，支持 .json 与 .png |
+| `exporter.py` | `export_card_png()` / `export_card_png_to_file()` | 角色卡导出为 PNG（含 chara tEXt chunk） |
+| `character_card_v2.py` | `CharaCardV2` / `CharaCardV2Parser` | SillyTavern V2/V3 角色卡 schema 解析 |
+| `manager.py` | `CharacterManager` | 角色卡 CRUD（被 `shisi/api/registry.py:setup_shisi` 装配） |
+| `store.py` | 持久化 | 角色卡 JSON 文件存储 |
+| `validator.py` | 校验 | 角色卡 schema 合法性 |
+| `models.py` | Pydantic 模型 | 角色卡数据模型 |
+
+PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extract_card_from_png()`，`api/routers/character_routes.py:593` 调用 `embed_card_to_png()`。前端 `frontend/src/api/characters.ts` 调用 `POST /api/characters/import` 与 `GET /api/characters/{id}/export?format=png`。
 
 **shisi/knowledge/ 关键更新 (2026-07-01)**：
 
@@ -273,10 +357,11 @@ DDD 分层架构，是项目最重要的重构成果：
 | 模块 | 职责 |
 |------|------|
 | `llm_gateway.py` | LLMGatewayV2，自动 fallback 链 |
-| `multi_provider_gateway.py` | 多供应商网关（自动 fallback: 智谱AI → 讯飞星火 → 百度千帆 → OpenCode Zen） |
+| `multi_provider_gateway.py` | 多供应商网关（自动 fallback: 智谱AI → 讯飞星火 → 百度千帆 → OpenCode Zen）+ 用户级 gateway 缓存 |
 | `openai_compatible_provider.py` | OpenAI 兼容供应商（被 zhipu/xunfei/baidu/sensenova 共用） |
 | `opencode_zen_provider.py` | OpenCode Zen 供应商 |
 | `prompt_template_manager.py` | PromptTemplateMgr（**54 fan-in**） |
+| `__init__.py` | **`invalidate_user_llm(user_id)`**（新增 2026-07-28）— 清除用户级 gateway 缓存，下次对话按新配置重建 |
 
 **新增供应商 (2026-07-01)**：
 
@@ -287,6 +372,17 @@ DDD 分层架构，是项目最重要的重构成果：
 | 讯飞星火 (xunfei) | `get_llm(provider="xunfei")` | spark-lite | Bearer Token |
 | 百度千帆 (baidu) | `get_llm(provider="baidu")` | ernie-speed-128k | OAuth (API Key + Secret) |
 | DeepSeek | `get_llm(provider="deepseek")` | deepseek-chat / deepseek-reasoner | LLMGatewayV2 |
+
+**多用户 API Key 隔离（2026-07-28 新增）**：
+
+| 组件 | 位置 | 职责 |
+|------|------|------|
+| `User.llm_config` JSON 字段 | `api/database.py:71` | 每用户独立 LLM 配置（provider/api_key/model 等） |
+| `/api/user/llm-config` GET | `api/routers/misc_routes.py:288` | 普通用户读取自己的 LLM 配置（脱敏 api_key 为 `****`），未配置时回退到全局 admin 配置 |
+| `/api/user/llm-config` POST | `api/routers/misc_routes.py:314` | 普通用户保存自己的 LLM 配置（不再 403），自动调用 `invalidate_user_llm()` 清缓存 |
+| `invalidate_user_llm(user_id)` | `llm_provider/__init__.py:259` | 失效用户级 gateway 缓存，下次对话按新配置重建 LLM 实例 |
+
+**调用链**：前端 `SettingsLLM.tsx` → `frontend/src/api/system.ts` → `POST /api/user/llm-config` → 写入 `users.llm_config` → `invalidate_user_llm(user_id)` → 下次 `OptimizedOrchestrator.process_message` 时按 `user_id` 取用户专属 LLM。
 
 ### 4.8 voice/ — 语音合成（5 Provider）
 
@@ -303,25 +399,30 @@ DDD 分层架构，是项目最重要的重构成果：
 
 ### 4.9 前端（React 19 管理控制台）
 
-- **18 个页面**（相比 2026-06-30 增加 3 个）：
+- **18 个页面**：
   - 用户/认证：LoginPage, UsersPage, AdminUsersPage, UserWorkspace
   - 角色管理：RolesPage, CreateRole, RoleSettings
-  - 设置：SettingsLLM, SettingsSecurity, SettingsLogs, **SettingsVoice** (新增)
-  - 工具/状态：**ToolsDashboard** (新增), **StatusCenter** (新增)
+  - 设置：SettingsLLM, SettingsSecurity, SettingsLogs, **SettingsVoice**
+  - 工具/状态：**ToolsDashboard**, **StatusCenter**
   - 微信集成：WeChatPage, BindingDetailPage
   - 其他：DemoPage, NotFoundPage, SystemSettingsLayout
-- 12 个 API 模块（auth, characters, chat, admin, clone, demo, mimo, system, training, users, wechat, client）
+- **13 个 API 模块**（v3.0.0 记录为 12，新增 `queryClient.ts`）：
+  - admin, auth, characters, chat, client, clone, demo, mimo, **queryClient**, system, training, users, wechat
 - 4 个 Zustand store（authStore, chatStore, errorStore, characterBuilderStore）
 - React Query hooks
-- Playwright E2E 测试
+- 84 个 Vitest 测试用例（across 14 files）— SettingsLLM/SettingsVoice/StatusCenter/ToolsDashboard/AdminUsersPage/WeChatPage 等
+- Playwright E2E 测试配置
 
-**新增页面说明**：
+**页面说明**：
 
 | 页面 | 文件 | 功能 |
 |------|------|------|
 | **ToolsDashboard** | `ToolsDashboard.tsx` | 内置工具仪表盘：展示所有已注册工具的实时健康状态（绿点/红点）、启停控制（toggle）、描述提示。通过 `/api/system/tools` 和 `/api/system/tools/health` 获取数据。 |
 | **StatusCenter** | `StatusCenter.tsx` | 系统状态中心 |
 | **SettingsVoice** | `SettingsVoice.tsx` | 语音设置页 |
+| **WeChatPage**（2026-07-28 简化） | `WeChatPage.tsx` | 移除冗余 StatsBar 与绑定列表表格，仅保留 LiveStatusBanner + QrCodeConnectionModal，避免数据为 0 的误导 |
+| **SettingsLLM**（2026-07-28 修复 403） | `SettingsLLM.tsx` | 改用 `/api/user/llm-config`（用户级配置端点）替代 `/api/config`，普通用户不再 403 |
+| **RoleSettings** | `RoleSettings.tsx` | DataTab 新增"网络增强"按钮，调用 `/api/characters/{id}/enrich`；`RoleSettingsConstants.tsx` 中 `ENGINE_OPTIONS` 简化为仅保留 `mimo-tts` |
 
 ### 4.10 tools/ — 工具系统（新增 2026-07-01）
 
@@ -425,19 +526,22 @@ tools/
 
 ## 7. 复杂度热点（transitive_loop_depth）
 
-main.py 中的函数占满前 6 名（main.py ~103KB，自 2026-06-30 增加 ~9KB）：
+> ✅ **2026-07-28 双模式合并后 main.py 已从 35.9 KB → 22.7 KB / 574 行**。
+> 原 `_run_fast_mode`（complexity=15）与 `_run_full_mode`（complexity=19）已合并为单一 `_run_orchestrator`，复杂度大幅降低。
+> 以下为 2026-07-09 codebase-memory 图谱工具 历史快照，仅供对照：
 
-| 函数 | 复杂度 | 传递循环深度 | 风险 |
-|------|--------|-------------|------|
-| `main.run_clone_pipeline` | 3 | 12 | O(n^12) 最坏情况 |
-| `main.main` | 4 | 12 | O(n^12) 最坏情况 |
-| `main._run_fast_mode` | 15 | 12 | 高复杂度 + 高嵌套 |
-| `main._run_full_mode` | 19 | 12 | 高复杂度 + 高嵌套 |
-| `main.run_console_chat` | 24 | 11 | **最高复杂度** |
-| `main.run_wechat_mode` | 3 | 9 | — |
-| `main._detect_voice_request` | 17 | 4 | 含 4 次线性扫描 |
+| 函数（历史快照） | 历史复杂度 | 历史传递循环深度 | 当前状态 |
+|------|--------|-------------|---------|
+| `main.run_clone_pipeline` | 3 | 12 | 仍在 main.py |
+| `main.main` | 4 | 12 | 仍在 main.py（精简） |
+| `main._run_fast_mode` | 15 | 12 | ✅ 已删除（合并入 `_run_orchestrator`） |
+| `main._run_full_mode` | 19 | 12 | ✅ 已删除（合并入 `_run_orchestrator`） |
+| `main.run_console_chat` | 24 | 11 | 仍在 main.py，**最高复杂度**（待后续优化） |
+| `main.run_wechat_mode` | 3 | 9 | 仍在 main.py |
+| `main._detect_voice_request` | 17 | 4 | 已迁移到 `orchestrator/voice_detector.py` |
+| `main._run_orchestrator` | — | — | ✅ 新增（替代双模式，复杂度 ~10） |
 
-**建议**：main.py 的 ~103KB 体量和 12 层传递循环深度表明它是重构的首要候选。此轮新增约 104 行（含工具注册逻辑），进一步加重了入口文件的负担。
+**建议**：`run_console_chat`（complexity=24）仍是 main.py 的复杂度热点，但已不阻塞主路径。下一轮可考虑迁移到 `orchestrator/` 包。
 
 ---
 
@@ -501,13 +605,16 @@ main.py 中的函数占满前 6 名（main.py ~103KB，自 2026-06-30 增加 ~9K
 
 | 风险 | 严重度 | 位置 | 建议 |
 |------|--------|------|------|
-| main.py ~103KB 巨型文件（+9KB） | 高 | main.py | 拆分为多个模式模块（console/wechat/api/clone） |
+| ~~main.py 巨型文件~~ | ~~高~~ | ~~main.py~~ | ✅ **已解决** (2026-07-28)：双模式合并后 22.7 KB / 574 行，`_run_full_mode`/`_run_fast_mode` 已删除 |
+| ~~双调度器并行运行 bug~~ | ~~高~~ | ~~main.py + _init_mixin~~ | ✅ **已修复** (2026-07-28)：原 `_init_mixin` 与 `_run_*_mode` 各创建一个 `ProactiveScheduler`；现统一复用 |
+| `run_console_chat` complexity=24 | 中 | main.py | 仍是 main.py 最高复杂度函数，但已不阻塞主路径。下一轮可迁移到 `orchestrator/` 子模块 |
 | ConfigLoader.get 423 fan-in | 中 | my_character/character_config.py | 加缓存、加降级，避免单点故障 |
 | OptimizedOrchestrator to main 循环依赖 | 中 | main.py | 检查 4 次回调是否可消除 |
-| process_message 全链 CRITICAL | 中 | main.py:881-1138 | 每个 hop=1 节点都需要降级路径 |
-| _run_full_mode 复杂度 19 | 中 | main.py | 提取子函数降低圈复杂度 |
-| run_console_chat 复杂度 24 | 中 | main.py | 提取交互逻辑到独立类 |
+| process_message 全链 CRITICAL | 中 | orchestrator/optimized_orchestrator.py | 每个 hop=1 节点都需要降级路径 |
+| **多用户 LLM 缓存失效边界** | 低 | llm_provider/__init__.py:259 `invalidate_user_llm` | 用户改 LLM 配置 → 缓存失效 → 下次对话按新配置重建。验证：worker 进程间缓存一致性 |
+| **微信 flock 文件锁仅在 Linux 生效** | 低 | api/run_api.py:165 `fcntl.flock` | Windows 开发环境会 fallback 到 `ImportError`，开发模式下无锁竞争（单 worker） |
 | **工具系统引入热路径新节点** | 低 | tools/base_tool.py | ToolRegistry/ToolDispatcher 成为 LLM 回复前必经路径，需确保可用性 |
+| **测试基线漂移** | 中 | tests/ | 实测 540 测试用例（456 Python + 84 前端），v3.0.0 记录的 626+ 已过时；需重跑 `pytest` 与 `npm test` 生成新基线 |
 
 ---
 
@@ -547,9 +654,12 @@ main.py 中的函数占满前 6 名（main.py ~103KB，自 2026-06-30 增加 ~9K
 | 2026-07-09 | — | 知识图谱索引刷新（+12 节点 / +8 边，扫描时间更新至 2026-07-09） |
 | 2026-07-14 | — | 投产前安全审计修复：路径遍历防护、认证统一、IDOR 修复、部署加固；清理墓碑代码（8个 set_dependencies 函数、2个死函数）、删除18个一次性脚本和临时文件、恢复 app_factory.py |
 | 2026-07-26 | c436ed5 / 3488e60 / 118affd | orchestrator 架构债清理：拆分 optimized_orchestrator.py 为 5 文件包（主类 + _init_mixin + _stream_mixin + components 共享状态）；清理 web_enricher.py 路径硬编码；重建部署链 |
-| 2026-07-28 | (working tree) | P1 架构债清理：删除根目录临时脚本 `_download_model.py`/`_sse_final.py`；删除冗余 `requirements.txt`（pyproject.toml 为唯一权威依赖源）；为 `shisi/memory/legacy/` 与 `shisi/knowledge/legacy/` 添加命名说明注释（消除"legacy=待删除"误导）；新增 `shisi/character/png_codec.py` 支持 SillyTavern PNG tEXt chunk 角色卡格式 |
+| 2026-07-27 | 7c9e12a / 1130925 | **9 项 P0/P1 修复**：(1) WeChatPage.tsx 移除冗余 StatsBar/绑定列表；(2) RoleSettingsConstants.tsx ENGINE_OPTIONS 仅留 mimo-tts；(3) `/api/clone/upload` 端点（本地提取→上传→服务器分析）；(4) `/api/user/llm-config` GET/POST 解决 403；(5) `/api/characters/{id}/enrich` 端点（火爬虫+AgentReach 人设增强）；(6) AGENT_REACH_PATH 改环境变量；(7) `api/run_api.py` flock 文件锁自动恢复微信连接；(8) `User.llm_config` JSON 字段 + `invalidate_user_llm()` 用户级 LLM 网关缓存；(9) 修复 misc_routes 测试基线 |
+| 2026-07-28 | 2815135 / 30616d3 | **P1 架构债清理 + 测试同步**：(1) 删除根目录临时脚本 `_download_model.py`/`_sse_final.py`；(2) 删除冗余 `requirements.txt`（pyproject.toml 为唯一权威依赖源）；(3) 为 `shisi/memory/legacy/` 与 `shisi/knowledge/legacy/` 添加命名说明注释（消除"legacy=待删除"误导）；(4) 新增 `shisi/character/png_codec.py` 支持 SillyTavern PNG tEXt chunk 角色卡格式（含 importer/exporter/manager/store/validator 完整子系统）；(5) `character_routes.py` 导入支持 .png 文件 + 导出支持 `?format=png`；(6) 同步本地 SQLite schema（添加 llm_config JSON 列到 users 表）；(7) 测试同步：clone_routes 端点 8→9，misc_routes 端点 9→11 |
+| 2026-07-28 (图谱刷新) | — | **CODE_GRAPH.md v3.0.0 → v3.1.0**：通过 Grep + LS 实时核实路由数（332→207）、main.py 体量（103KB→35.9KB/726 行）、前端 API 模块数（12→13）、测试用例数（626+→540）；新增 shisi/character/ 子包说明、多用户 LLM 隔离章节、PNG 角色卡集成路径；标记 codebase-memory 图谱工具 快照未刷新的指标 |
+| 2026-07-28 (双模式合并) | (working tree) | **架构升级 v3.2.0**：(1) `_run_fast_mode` + `_run_full_mode` 合并为单一 `_run_orchestrator`（main.py 35.9KB→22.7KB / 871→574 行 / -297 行）；(2) `_init_mixin` 成为唯一初始化真相源，新增第 10 阶段 `_init_multimodal` + 补齐 `EncryptionManager`/`classifier_mode`/`prompt_mode` 参数；(3) 修复双调度器并行 bug（原 `_init_mixin` 与 `_run_*_mode` 各创建一个 `ProactiveScheduler`）；(4) 清理 main.py 19 个冗余 import（已迁移至 `_init_mixin`）；(5) 1007 tests passed + 1 skipped（行为不变验证完成） |
 
-*此图谱将持续更新以反映项目变化。*
+*此图谱将持续更新以反映项目变化。下一次刷新应重跑 codebase-memory 图谱工具 索引以更新节点/边数据。*
 
 ---
 
@@ -569,7 +679,18 @@ main.py 中的函数占满前 6 名（main.py ~103KB，自 2026-06-30 增加 ~9K
 
 | 层 | 路径 | 职责 | 调用方 |
 |---|---|---|---|
-| 域路由层 | `api/routers/*.py` (22 模块) | 控制 plane 端点：character/auth/admin/voice/wechat/clone/... | `api/app_factory.py` 主挂载 |
+| 域路由层 | `api/routers/*.py` (21 模块，不含 `__init__.py`) | 控制 plane 端点：character/auth/admin/voice/wechat/clone/... | `api/app_factory.py` 主挂载 |
 | shisi 域层 | `shisi/api/*.py` + `shisi/api/v2/` | DDD 核心 plane 端点：affinity/emotion_stage/persona/stats/vital_signs + v2 迁移 | `shisi/api/registry.py:setup_shisi` 由 app_factory 调用 |
 
 两层不冲突：域路由层面向"控制/管理"，shisi 域层面向"DDD 核心域"。两者通过 `app_factory.create_api_app()` 统一装配。
+
+### 新增架构决策（2026-07-28）
+
+| 决策 | 模块 | 依据 |
+|------|------|------|
+| **多用户 LLM 隔离走 `User.llm_config` JSON 字段** | `api/database.py:71` / `llm_provider/__init__.py:259` | 避免每用户单独建表；JSON 字段灵活承载 provider/api_key/model；普通用户可读写自己的配置（不再 403）；admin 仍走 `/api/config` 全局配置 |
+| **微信连接自动恢复使用 flock 文件锁** | `api/run_api.py:158 _autostart_wechat_connector()` | uvicorn `--workers 4` 启动 4 个进程，无锁会同时启动 4 个 WeChatConnector 轮询线程导致消息重复；`fcntl.flock(LOCK_EX \| LOCK_NB)` 确保只有一个 worker 持有锁；锁在进程退出时自动释放（不显式释放） |
+| **PNG 角色卡走 `shisi/character/png_codec.py` 而非 `character_card/`** | `shisi/character/png_codec.py` | PNG tEXt chunk 是 SillyTavern 生态标准，归入 shisi DDD 核心 character 子域；`character_card/` 保留角色卡融合入口职责，不混入编解码细节 |
+| **克隆朋友架构改为本地提取→上传→服务器分析** | `api/routers/clone_routes.py:132 /api/clone/upload` | wechat-decrypt 依赖 Windows 微信进程 + Windows API，无法在 Linux 服务器运行；用户本地提取 JSON → 服务器分析 → 生成人设预览；通过 `WECHAT_DECRYPT_PATH` 环境变量支持本地模式（开发/测试） |
+| **保留 `shisi/memory/legacy/` 与 `shisi/knowledge/legacy/` 不重命名** | 同 v3.0.0 决策 | 81+ / 52+ 引用，`legacy` 仅表"历史迁移"非"待删除"（v3.1.0 已添加命名说明注释） |
+| **`requirements.txt` 已删除** | — | pyproject.toml 已是权威完整依赖源，文件头部已声明"以 pyproject.toml 为权威" |

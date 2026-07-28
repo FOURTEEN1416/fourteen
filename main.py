@@ -47,30 +47,10 @@ from api.app_factory import create_api_app  # noqa: E402
 from api.database import WechatBinding, _async_session  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
 from api.websocket_server import WebSocketServer  # noqa: E402
-from llm_provider import get_llm  # noqa: E402
-from my_character.emotion_engine import EmotionEngine  # noqa: E402
-from observability.config_manager import ConfigManager  # noqa: E402
 from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
 from observability.health import health_checker  # noqa: E402
 from observability.logging_setup import setup_logging  # noqa: E402
-from proactive.ase_engine import ASEEngine  # noqa: E402
-from security.content_safety import ContentSafetyFilter  # noqa: E402
-from security.encryption import EncryptionManager  # noqa: E402
-from security.pii_anonymizer import PIIAnonymizer  # noqa: E402
-from security.prompt_injection import PromptInjectionDetector  # noqa: E402
-from shisi.application.knowledge_service import ShisiKnowledgeAdapter  # noqa: E402
-from shisi.application.memory_service import ShisiMemoryService  # noqa: E402
-from shisi.application.persona_service import PersonaService  # noqa: E402
-from tools.base_tool import ToolDispatcher, ToolRegistry  # noqa: E402
-from tools.builtin.calendar_tool import CalculatorTool, CalendarTool  # noqa: E402
-from tools.builtin.character_crawler_tool import CharacterCrawlerTool  # noqa: E402
-from tools.builtin.extra_tools import ImageGenTool, MemoryTool, SchedulerTool, WebSummaryTool  # noqa: E402
-from tools.builtin.reminder_tool import CalendarQueryTool, ReminderTool  # noqa: E402
-from tools.builtin.search_tool import SearchTool  # noqa: E402
-from tools.builtin.time_awareness_tool import TimeAwarenessTool  # noqa: E402
-from tools.builtin.weather_tool import WeatherTool  # noqa: E402
 from user_scheduler import UserManager  # noqa: E402
-from utils.health_check import health_check_all  # noqa: E402
 
 # ── 加载 .env（手动解析，无需 python-dotenv 依赖） ──
 _env_loaded = False
@@ -438,87 +418,106 @@ def main() -> None:
     orchestrator_mode = fusion_cfg.get("orchestrator_mode", "full")
     logger.info("编排器模式: %s", orchestrator_mode)
 
-    if orchestrator_mode == "fast":
-        _run_fast_mode(args, use_console, fusion_cfg)
-    else:
-        _run_full_mode(args, use_console, fusion_cfg)
+    _run_orchestrator(args, use_console, fusion_cfg, orchestrator_mode)
 
 
-def _run_fast_mode(args: argparse.Namespace, use_console: bool,
-                   fusion_cfg: dict[str, Any]) -> None:
-    logger.info("=== fast 模式启动（多用户版） ===")
+def _run_orchestrator(args: argparse.Namespace, use_console: bool,
+                      fusion_cfg: dict[str, Any], mode: str) -> None:
+    """统一编排器启动入口（fast / full 模式共享）。
 
+    历史上 `_run_fast_mode` 与 `_run_full_mode` 各自维护一份组件初始化逻辑，
+    且 `_run_full_mode` 通过手动注入 + `_initialized=True` 绕过 `orchestrator.initialize()`，
+    违反封装且产生 300+ 行重复代码。本函数以 `_init_mixin.initialize()` 为唯一真相源，
+    两个模式仅通过 fusion_cfg 参数差异化配置，不再有独立初始化路径。
+
+    同时修复双调度器 bug：历史上 _init_mixin 与 _run_*_mode 各创建一个 ProactiveScheduler，
+    导致两个调度器并行运行。现在统一使用 _init_mixin 创建的调度器，仅在此注册额外通道。
+    """
+    logger.info("=== %s 模式启动（多用户版） ===", mode)
+
+    # ── 1. 创建并初始化编排器（_init_mixin.initialize() 是唯一初始化真相源） ──
     orchestrator = OptimizedOrchestrator()
-
     if not orchestrator.initialize(config_dir=args.config, fusion_cfg=fusion_cfg):
         logger.error("系统初始化失败, 退出")
         sys.exit(1)
-
-    # 注册 orchestrator 关闭函数，确保线程池被正确释放
     atexit.register(orchestrator.shutdown)
 
     cfg = orchestrator.components["config"].config
 
+    # ── 2. 可观测性 ──
     setup_logging(cfg.observability.log_level, cfg.observability.log_format)
-
     if cfg.observability.metrics_enabled:
         from observability.metrics import setup_metrics
         setup_metrics(cfg.observability.metrics_port)
-
     graceful_shutdown.setup_signal_handlers()
 
+    # ── 3. 健康检查 ──
     health = orchestrator.health_check()
     if not health["healthy"]:
         logger.warning("部分组件健康检查未通过, 继续启动...")
 
-    # ── 创建用户调度器（多用户核心） ──
+    # ── 4. 用户调度器（多用户核心） ──
     user_mgr = UserManager(orchestrator)
     logger.info("用户调度器已创建")
-
     try:
         bindings = asyncio.run(_init_user_bindings(user_mgr))
         logger.info("已从数据库加载 %d 条微信绑定", len(bindings))
     except Exception as e:  # noqa: BLE001
         logger.warning("加载微信绑定失败: %s", e)
 
-    ws_server_fast = None
-    _ws_holder = {}
-    _wechat_holder = {}  # type: ignore[var-annotated]
+    # ── 5. API 服务 ──
+    _ws_holder: dict[str, Any] = {}
+    _wechat_holder: dict[str, Any] = {}
     if not args.no_api:
         logger.info("启动API服务...")
-        ws_server_fast = _start_api_service(orchestrator, cfg, config_mgr=orchestrator.components.get("config"), user_manager=user_mgr)
-        _ws_holder["ws"] = ws_server_fast
+        ws_server = _start_api_service(
+            orchestrator, cfg,
+            config_mgr=orchestrator.components.get("config"),
+            user_manager=user_mgr,
+        )
+        _ws_holder["ws"] = ws_server
     else:
         logger.info("API服务已禁用 (--no-api)")
 
-    scheduler = None
-    if not args.no_scheduler:
-        from proactive.scheduler import ProactiveScheduler
-
-        send_proactive = _create_proactive_sender(
+    # ── 6. 主动消息调度器通道注册（使用 _init_mixin 已创建的调度器，不重复创建） ──
+    # 历史bug：_run_*_mode 曾各自新建 ProactiveScheduler，与 _init_mixin 的调度器并行运行。
+    # 现统一复用 _init_mixin 在 _init_ase_and_scheduler 中创建并启动的调度器，
+    # 仅在此注册 ws/wechat 通道并增强 send_message_func 为多通道出口。
+    scheduler = orchestrator.components.get("scheduler")
+    if args.no_scheduler:
+        # 用户明确禁用 → 停止 _init_mixin 已启动的调度器
+        # 同时设置环境变量供子进程（如 uvicorn worker）继承，避免子进程重新启动调度器
+        os.environ["DISABLE_SCHEDULER"] = "1"
+        if scheduler is not None and hasattr(scheduler, "stop"):
+            scheduler.stop()
+            orchestrator.components["scheduler"] = None
+        logger.info("主动消息系统已禁用 (--no-scheduler)，已设置 DISABLE_SCHEDULER=1 供子进程继承")
+    elif scheduler is not None:
+        # 增强为多通道发送（_init_mixin 默认 send 仅日志输出）
+        scheduler._send = _create_proactive_sender(
             ws_server_holder=_ws_holder,
             wechat_connector_holder=_wechat_holder,
         )
 
-        def daily_maintenance():
+        def _daily_maintenance():
             mem = orchestrator.components.get("memory")
             if mem and hasattr(mem, "daily_maintenance"):
-                mem.daily_maintenance()
+                try:
+                    summary = mem.daily_maintenance()
+                    if summary:
+                        logger.info("每日摘要: %s", summary)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("每日维护异常: %s", e)
+        scheduler._daily_maintenance = _daily_maintenance
 
-        scheduler = ProactiveScheduler(
-            ase_engine=orchestrator.components["ase"],
-            send_message_func=send_proactive,  # 兜底
-            daily_maintenance_func=daily_maintenance,
-            emotion_engine=orchestrator.components.get("emotion"),
+        # 注册 ws / console / wechat 通道（console 覆盖 _init_mixin 的默认注册）
+        ws_server = _ws_holder.get("ws")
+        if ws_server is not None:
+            scheduler.register_channel("websocket", lambda: ws_server.broadcast_proactive)
+        scheduler.register_channel(
+            "console", lambda: lambda msg: logger.info("[主动消息] %s", msg)
         )
 
-        # 注册通道
-        if ws_server_fast:
-            scheduler.register_channel("websocket", lambda: ws_server_fast.broadcast_proactive)
-        scheduler.register_channel("console", lambda: lambda msg: logger.info("[主动消息] %s", msg))
-
-        # 注册微信通道 — 工厂从 holder 延迟读取 connector
-        # connector 在 run_wechat_mode 中注入，调度器健康检查会自动拾取
         def _wechat_sender_factory(_holder=_wechat_holder):
             connector = _holder.get("connector")
             if connector is None:
@@ -527,24 +526,20 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
                 connector.send_text(msg)
             return _send
         scheduler.register_channel("wechat", _wechat_sender_factory)
-
-        if scheduler.start():
-            logger.info("主动消息调度器已启动")
-            atexit.register(scheduler.stop)
-        else:
-            logger.warning("主动消息调度器启动失败")
+        logger.info("主动消息调度器通道已注册（ws/console/wechat）")
     else:
-        logger.info("主动消息系统已禁用 (--no-scheduler)")
+        logger.warning("主动消息调度器未初始化（_init_mixin 启动失败），跳过通道注册")
 
+    # ── 7. init_only 模式 ──
     if args.init_only:
         logger.info("--init-only 模式, 初始化完成")
         return
 
+    # ── 8. 运行聊天通道 ──
     if use_console:
         try:
-            run_console_chat(orchestrator, "fast")
+            run_console_chat(orchestrator, mode)
         finally:
-            # 确保在控制台模式退出时关闭资源
             orchestrator.shutdown()
         if not args.no_api:
             logger.info("控制台聊天已退出, API服务继续保持运行中...")
@@ -552,319 +547,9 @@ def _run_fast_mode(args: argparse.Namespace, use_console: bool,
                 time.sleep(3600)
     else:
         try:
-            run_wechat_mode(user_mgr, "fast", args, wechat_connector_holder=_wechat_holder)
+            run_wechat_mode(user_mgr, mode, args, wechat_connector_holder=_wechat_holder)
         finally:
-            # 确保在微信模式退出时关闭资源
             orchestrator.shutdown()
-
-
-def _run_full_mode(args: argparse.Namespace, use_console: bool,
-                   fusion_cfg: dict[str, Any]) -> None:
-    logger.info("=== full 模式启动（多用户版） ===")
-
-    emotion_fusion = fusion_cfg.get("emotion", {})
-    persona_fusion = fusion_cfg.get("persona", {})
-    memory_fusion = fusion_cfg.get("memory", {})
-    ase_fusion = fusion_cfg.get("ase", {})
-
-    logger.info("[1/12] 加载V2配置...")
-    config_mgr = ConfigManager(config_dir=args.config)
-    cfg = config_mgr.config
-    logger.info("      环境: %s, LLM模型: %s", cfg.env, cfg.llm.primary_model)
-
-    logger.info("[2/12] 初始化可观测性...")
-    setup_logging(cfg.observability.log_level, cfg.observability.log_format)
-
-    if cfg.observability.metrics_enabled:
-        from observability.metrics import setup_metrics
-        setup_metrics(cfg.observability.metrics_port)
-
-    graceful_shutdown.setup_signal_handlers()
-
-    logger.info("[3/12] 初始化安全层...")
-    safety_filter = ContentSafetyFilter(enabled=cfg.safety.input_filter_enabled)
-    pii_anonymizer = PIIAnonymizer(enabled=cfg.safety.pii_anonymizer_enabled)
-    encryption_mgr = EncryptionManager(
-        key_env=cfg.safety.encryption_key_env,
-        enabled=cfg.safety.encryption_enabled,
-    )
-    injection_detector = PromptInjectionDetector(enabled=cfg.safety.prompt_injection_detection)
-
-    logger.info("[4/12] 初始化LLM网关V2...")
-    from llm_provider.prompt_template_manager import PromptTemplateMgr
-
-    llm = get_llm(provider=cfg.llm.provider, models_config=cfg.llm.models_priority, config=cfg.llm)
-    PromptTemplateMgr()
-
-    safety_filter.llm_gateway = llm
-    injection_detector.llm_gateway = llm
-
-    health = llm.health_check()
-    llm_ok = health.get("configured", False) or health.get("reachable", False)
-    if llm_ok:
-        logger.info("      ✅ %s 已配置 (model=%s)", type(llm).__name__, llm.model)
-    else:
-        logger.info("      ⚠️ LLM 未配置或不可用，将使用模拟回复")
-
-    logger.info("[5/12] 初始化角色引擎 (融合)...")
-    from my_character import ConfigLoader
-    config_loader = ConfigLoader(config_dir=args.config)
-
-    classifier_mode = emotion_fusion.get("classifier_mode", "hybrid")
-    blend_ratio = emotion_fusion.get("blend_ratio", cfg.emotion.continuity_blend_ratio)
-    classifier_timeout = emotion_fusion.get("classifier_timeout_ms",
-                                             cfg.emotion.llm_classifier_timeout_ms)
-
-    emotion_engine = EmotionEngine(
-        llm_gateway=llm,
-        use_llm=cfg.emotion.use_llm_classifier,
-        blend_ratio=blend_ratio,
-        classifier_timeout_ms=classifier_timeout,
-        classifier_mode=classifier_mode,
-    )
-
-    prompt_mode = persona_fusion.get("prompt_mode", "layered")
-    anchor_verification = persona_fusion.get("anchor_verification_enabled", True)
-
-    persona_service = PersonaService(
-        config_loader=config_loader,
-        llm_gateway=llm,
-        prompt_mode=prompt_mode,
-        anchor_verification_enabled=anchor_verification,
-    )
-    persona_engine = persona_service.engine
-
-    tone_mimic = None
-    try:
-        from my_character import ToneMimic
-        tone_mimic = ToneMimic(chroma_path=str(project_root / "data" / "chroma_db"))
-    except ImportError:
-        logger.warning("ToneMimic 不可用")
-
-    logger.info("[6/12] 初始化记忆系统 (融合)...")
-    forgetting_model = memory_fusion.get("forgetting_model", "exponential")
-
-    # Shisi 适配层是唯一对外接口；其内部按需懒加载 VectorMemory / StructuredMemory。
-    memory_pipeline = ShisiMemoryService(
-        chroma_path=str(project_root / "data" / "chroma_db"),
-        db_path=str(project_root / "data" / "sqlite.db"),
-        llm_gateway=llm,
-        working_limit=cfg.memory.working_memory_limit,
-        retrieval_timeout=cfg.memory.retrieval_timeout_seconds,
-        forgetting_model=forgetting_model,
-    )
-    vector_memory = memory_pipeline.vector_memory
-    structured_memory = memory_pipeline.structured_memory
-    logger.info("      使用 shisi 记忆服务适配层 (ShisiMemoryService)")
-
-    logger.info("[7/12] 初始化工具系统...")
-    tool_registry = ToolRegistry()
-    tool_dispatcher = ToolDispatcher(
-        tool_registry,
-        timeout=cfg.tools.execution_timeout_seconds,
-        rate_limit_per_minute=cfg.tools.rate_limit_per_tool_per_minute,
-    )
-
-    for tool_cls in [WeatherTool, SearchTool, CalendarTool, CalculatorTool]:
-        tool_registry.register(tool_cls())
-    tool_registry.register(ReminderTool(structured_memory))
-    tool_registry.register(CalendarQueryTool(structured_memory))
-    tool_registry.register(MemoryTool(structured_memory))
-    tool_registry.register(SchedulerTool(structured_memory))
-    tool_registry.register(TimeAwarenessTool())
-    tool_registry.register(CharacterCrawlerTool())
-    tool_registry.register(WebSummaryTool())
-    tool_registry.register(ImageGenTool())
-    logger.info("      已注册 %d 个工具", len(tool_registry.tool_names))
-
-    logger.info("[8/12] 初始化RAG引擎V2...")
-    # Shisi 适配层是唯一对外接口；use_legacy_rag=True 时内部委托给 RAGEngineV2。
-    rag_engine = ShisiKnowledgeAdapter(
-        vector_memory=vector_memory,
-        structured_memory=structured_memory,
-        semantic_memory=memory_pipeline.semantic,
-        tone_mimic=tone_mimic,
-
-    )
-    logger.info("      使用 shisi knowledge 适配层 (ShisiKnowledgeAdapter)")
-
-    logger.info("[9/12] 初始化主动消息 (融合)...")
-    ase_frequency_mode = ase_fusion.get("frequency_mode", "adaptive")
-    ase_generation_mode = ase_fusion.get("generation_mode", "llm")
-    ase_reflection_mode = ase_fusion.get("reflection_mode", "rule")
-
-    ase_engine = ASEEngine(
-        llm_gateway=llm,
-        max_daily_messages=cfg.proactive.max_daily_messages,
-        min_interval_minutes=cfg.proactive.min_interval_minutes,
-        cooldown_after_reply=cfg.proactive.cooldown_after_reply_minutes,
-        urgency_threshold=cfg.proactive.urgency_threshold,
-        frequency_mode=ase_frequency_mode,
-        generation_mode=ase_generation_mode,
-        reflection_mode=ase_reflection_mode,
-    )
-
-    scheduler = None
-    _ws_holder_full = {}  # type: ignore[var-annotated]
-    _wechat_holder_full = {}  # type: ignore[var-annotated]
-    if not args.no_scheduler:
-        from proactive.scheduler import ProactiveScheduler
-
-        _send_proactive = _create_proactive_sender(
-            ws_server_holder=_ws_holder_full,
-            wechat_connector_holder=_wechat_holder_full,
-        )
-
-        def _daily_maintenance():
-            try:
-                summary = memory_pipeline.daily_maintenance()
-                if summary:
-                    logger.info("每日摘要: %s", summary)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("每日维护异常: %s", e)
-
-        scheduler = ProactiveScheduler(
-            ase_engine=ase_engine,
-            send_message_func=_send_proactive,  # 兜底
-            daily_maintenance_func=_daily_maintenance,
-            emotion_engine=emotion_engine,
-        )
-
-        # 注册通道（ws_server在后续API启动后注入）
-        scheduler.register_channel("console", lambda: lambda msg: logger.info("[主动消息] %s", msg))
-
-        # 注册微信通道 — 工厂从 holder 延迟读取 connector
-        # connector 在 run_wechat_mode 中注入，调度器健康检查会自动拾取
-        def _wechat_sender_factory_full(_holder=_wechat_holder_full):
-            connector = _holder.get("connector")
-            if connector is None:
-                return None
-            async def _send(msg: str):
-                connector.send_text(msg)
-            return _send
-        scheduler.register_channel("wechat", _wechat_sender_factory_full)
-
-        if scheduler.start():
-            logger.info("      调度器已启动")
-            atexit.register(scheduler.stop)
-        else:
-            logger.warning("      调度器启动失败，以无调度模式运行")
-            scheduler = None
-    else:
-        logger.info("      主动消息系统已禁用 (--no-scheduler)")
-
-    logger.info("[10/12] 组装对话编排器 (full)...")
-    from multimodal.multimodal_processor import MultimodalProcessor
-    from orchestrator import Orchestrator
-
-    multimodal = MultimodalProcessor(llm_gateway=llm)
-    orchestrator = Orchestrator()
-    # ── 注入 full 模式手动创建的组件（合并后复用 OptimizedOrchestrator 的处理逻辑）──
-    orchestrator.components["llm"] = llm
-    orchestrator.components["emotion"] = emotion_engine
-    orchestrator.components["persona"] = persona_service
-    orchestrator.components["memory"] = memory_pipeline
-    orchestrator.components["rag"] = rag_engine
-    orchestrator.components["tools"] = tool_dispatcher
-    orchestrator.components["multimodal"] = multimodal
-    orchestrator.components["ase"] = ase_engine
-    orchestrator.components["safety"] = safety_filter
-    orchestrator.components["pii"] = pii_anonymizer
-    orchestrator.components["injection"] = injection_detector
-    orchestrator._initialized = True
-
-    # ── 创建用户调度器（多用户核心） ──
-    user_mgr = UserManager(orchestrator)
-    logger.info("用户调度器已创建")
-
-    try:
-        bindings = asyncio.run(_init_user_bindings(user_mgr))
-        logger.info("已从数据库加载 %d 条微信绑定", len(bindings))
-    except Exception as e:  # noqa: BLE001
-        logger.warning("加载微信绑定失败: %s", e)
-
-    if not args.no_api:
-        logger.info("[11/12] 启动API服务...")
-        session_mgr = SessionManager()
-
-        app = create_api_app(
-            orchestrator=orchestrator,
-            health_checker=health_checker,
-            config_manager=config_mgr,
-            session_manager=session_mgr,
-            user_manager=user_mgr,
-        )
-        ws_server = WebSocketServer(
-            orchestrator=orchestrator,
-            port=cfg.api.websocket_port,
-        )
-
-        health_checker.register_defaults(
-            emotion_engine=emotion_engine,
-            tone_mimic=tone_mimic,
-            vector_memory=vector_memory,
-            structured_memory=structured_memory,
-            llm_gateway=llm,
-            ase_engine=ase_engine,
-            scheduler=scheduler,
-        )
-
-        def _run_api():
-            import uvicorn
-            uvicorn.run(app, host=cfg.api.host, port=cfg.api.port, log_level="info")
-
-        def _run_ws():
-            asyncio.run(ws_server.start())
-
-        api_thread = threading.Thread(target=_run_api, daemon=True)
-        api_thread.start()
-        logger.info("      REST API: http://%s:%d", cfg.api.host, cfg.api.port)
-
-        ws_thread = threading.Thread(target=_run_ws, daemon=True)
-        ws_thread.start()
-        logger.info("      WebSocket: ws://%s:%d", cfg.api.host, cfg.api.websocket_port)
-
-        if scheduler:
-            _ws_holder_full["ws"] = ws_server
-            scheduler.register_channel("websocket", lambda: ws_server.broadcast_proactive)
-            logger.info("      WebSocket已注入调度器")
-    else:
-        logger.info("[11/12] API服务已禁用 (--no-api)")
-
-    logger.info("[12/12] 启动聊天通道...")
-
-    components = {
-        "ConfigManager": config_mgr,
-        "EmotionEngine": emotion_engine,
-        "PersonaEngine": persona_engine,
-        "ToneMimic": tone_mimic,
-        "MemoryPipeline": memory_pipeline,
-        "LLMGateway": llm,
-        "ToolRegistry": tool_registry,
-        "RAGEngine": rag_engine,
-        "ASEEngine": ase_engine,
-        "Orchestrator": orchestrator,
-        "ContentSafety": safety_filter,
-        "PIIAnonymizer": pii_anonymizer,
-        "EncryptionManager": encryption_mgr,
-        "PromptInjectionDetector": injection_detector,
-    }
-    health_check_all(components)
-
-    if args.init_only:
-        logger.info("--init-only 模式, 初始化完成")
-        return
-
-    if use_console:
-        run_console_chat(orchestrator, "full",
-                         emotion_engine=emotion_engine,
-                         ase_engine=ase_engine)
-        if not args.no_api:
-            logger.info("控制台聊天已退出, API服务继续保持运行中...")
-            while True:
-                time.sleep(3600)
-    else:
-        run_wechat_mode(user_mgr, "full", args, wechat_connector_holder=_wechat_holder_full)
 
 
 if __name__ == "__main__":

@@ -123,6 +123,59 @@ if HAS_WEBSOCKETS:
             logger.debug("WebSocket 服务器关闭时异常: %s", e)
 
 # ── 向主动消息调度器注册 websocket / wechat 通道 ──
+# 多 worker 单例性保护：uvicorn --workers N 会启动 N 个进程，每个都执行
+# orchestrator.initialize() → _init_ase_and_scheduler → scheduler.start()。
+# 若不加以限制，N 个调度器会并行运行，导致 N 倍主动消息和 APScheduler 线程。
+# 解决方案：用 flock 文件锁确保只有 master worker 持有调度器，其他 worker 停止调度器。
+# 同时支持 DISABLE_SCHEDULER=1 环境变量（等价于 --no-scheduler），供 uvicorn 直接启动场景使用。
+def _ensure_scheduler_singleton() -> None:
+    """确保多 worker 场景下只有一个调度器运行。
+
+    逻辑：
+    1. 若 DISABLE_SCHEDULER=1 → 停止调度器（等价 --no-scheduler）
+    2. 否则用 flock 文件锁竞争 master worker：
+       - 获得锁 → master worker，保持调度器运行
+       - 未获得锁 → 非 master worker，停止调度器避免重复运行
+    """
+    scheduler = orchestrator.components.get("scheduler")
+    if scheduler is None:
+        return  # _init_mixin 启动失败，无需处理
+
+    # 情况 1：环境变量显式禁用
+    if os.environ.get("DISABLE_SCHEDULER", "").lower() in ("1", "true", "yes"):
+        if hasattr(scheduler, "stop"):
+            scheduler.stop()
+        orchestrator.components["scheduler"] = None
+        logger.info("调度器已禁用 (DISABLE_SCHEDULER=1)")
+        return
+
+    # 情况 2：多 worker flock 单例保护
+    try:
+        import fcntl
+        lock_path = "/tmp/ai-girlfriend-scheduler.lock"
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (IOError, OSError):
+            # 其他 worker 已持有锁，本 worker 停止调度器
+            if hasattr(scheduler, "stop"):
+                scheduler.stop()
+            orchestrator.components["scheduler"] = None
+            os.close(lock_fd)
+            logger.info("其他 worker 已持有调度器锁，本 worker 停止调度器")
+            return
+        # 持有锁直到进程退出（不释放，进程退出时自动释放）
+        logger.info("本 worker 持有调度器锁（master worker）")
+    except ImportError:
+        # Windows 无 fcntl，开发模式单 worker 无锁竞争
+        logger.debug("fcntl 不可用（Windows 开发模式），跳过调度器单例保护")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("调度器单例保护检查失败: %s", e)
+
+
+_ensure_scheduler_singleton()
+
+# ── 向调度器注册通道（仅 master worker 的调度器存活时执行） ──
 _scheduler = orchestrator.components.get("scheduler")
 if _scheduler is not None:
     def _websocket_sender_factory(holder: dict[str, WebSocketServer | None] = _ws_holder):

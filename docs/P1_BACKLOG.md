@@ -1,10 +1,11 @@
 # P1 Backlog - 唯一的你
 
 **Created**: 2026-06-03
-**Last Updated**: 2026-06-03 (P0 修复 + CI 加固 + 品牌清洗)
+**Last Updated**: 2026-07-28 (双模式合并 + 架构债清理)
 **Status**: Pending (内测后按需清理)
 
 > ✅ 已解决：P1-3 (orphan pages), P1-12 (AGENTS.md memory), P1-16 (FF-020 CI blocking)
+> ✅ 2026-07-28 架构升级：main.py 双模式合并（35.9KB→22.7KB / -297 行），`_init_mixin` 成为唯一初始化真相源（10 阶段），修复双调度器并行 bug。详见 CODE_GRAPH.md §13。
 
 ## Frontend / UI
 1. **[FF-0007] authStore import admin 类型层耦合**: User explicitly excluded (P0-4).

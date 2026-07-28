@@ -21,6 +21,7 @@ from my_character.tone_mimic import ToneMimic
 from observability.config_manager import ConfigManager
 from observability.health import health_checker
 from security.content_safety import ContentSafetyFilter
+from security.encryption import EncryptionManager
 from security.pii_anonymizer import PIIAnonymizer
 from security.prompt_injection import PromptInjectionDetector
 from shisi.application.knowledge_service import ShisiKnowledgeAdapter
@@ -74,6 +75,7 @@ class _InitPhasesMixin:
             self._init_memory_ext(cfg, fusion_cfg)
             self._init_persona_extractor(fusion_cfg)
             self._init_vault(fusion_cfg)
+            self._init_multimodal(fusion_cfg)
 
             self._initialized = True
             init_time = time.perf_counter() - start_time
@@ -101,6 +103,11 @@ class _InitPhasesMixin:
         self.components["pii"] = PIIAnonymizer(
             enabled=cfg.safety.pii_anonymizer_enabled
         )
+        # EncryptionManager：full 模式历史能力，统一收纳到 _init_core 避免重复初始化
+        self.components["encryption"] = EncryptionManager(
+            key_env=cfg.safety.encryption_key_env,
+            enabled=cfg.safety.encryption_enabled,
+        )
         self.components["injection"] = PromptInjectionDetector(
             enabled=cfg.safety.prompt_injection_detection
         )
@@ -123,20 +130,27 @@ class _InitPhasesMixin:
         classifier_timeout_ms = emotion_fusion.get(
             "classifier_timeout_ms", cfg.emotion.llm_classifier_timeout_ms
         )
+        classifier_mode = emotion_fusion.get("classifier_mode", "hybrid")
 
         self.components["emotion"] = EmotionEngine(
             llm_gateway=self.components["llm"],
             use_llm=cfg.emotion.use_llm_classifier,
             blend_ratio=blend_ratio,
             classifier_timeout_ms=classifier_timeout_ms,
+            classifier_mode=classifier_mode,
         )
 
         from my_character.character_config import ConfigLoader
         config_loader = ConfigLoader(config_dir=config_dir)
+        persona_fusion = fusion_cfg.get("persona", {})
+        prompt_mode = persona_fusion.get("prompt_mode", "layered")
+        anchor_verification = persona_fusion.get("anchor_verification_enabled", True)
         self.components["persona"] = PersonaService(
             config_loader=config_loader,
             llm_gateway=self.components["llm"],
             emotion_engine=self.components["emotion"],
+            prompt_mode=prompt_mode,
+            anchor_verification_enabled=anchor_verification,
         )
         self.components["tone"] = ToneMimic(
             chroma_path=str(_project_root / "data" / "chroma_db")
@@ -436,3 +450,29 @@ class _InitPhasesMixin:
         except Exception as e:  # noqa: BLE001
             logger.warning("知识宝库初始化失败 (不影响运行): %s", e)
             self.components["vault_collector"] = None
+
+    # ─────────────────────────────────────────────────────────────
+    #  阶段 10: 多模态处理 (v3.0)
+    # ─────────────────────────────────────────────────────────────
+    def _init_multimodal(self, fusion_cfg: dict) -> None:
+        """多模态处理器：图片/语音/视频理解。
+
+        历史上仅在 `_run_full_mode` 中手动创建，统一收纳到 _init_mixin 后，
+        fast 与 full 模式均自动获得多模态能力。失败时降级为 None，不影响主流程。
+        """
+        mm_fusion = fusion_cfg.get("multimodal", {})
+        mm_enabled = mm_fusion.get("enabled", True)
+        if not mm_enabled:
+            self.components["multimodal"] = None
+            logger.info("多模态处理已禁用")
+            return
+
+        try:
+            from multimodal.multimodal_processor import MultimodalProcessor
+            self.components["multimodal"] = MultimodalProcessor(
+                llm_gateway=self.components["llm"],
+            )
+            logger.info("多模态处理器已初始化")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("多模态处理器初始化失败 (不影响运行): %s", e)
+            self.components["multimodal"] = None
