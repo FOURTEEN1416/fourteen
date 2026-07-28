@@ -1,11 +1,12 @@
 # P1 Backlog - 唯一的你
 
 **Created**: 2026-06-03
-**Last Updated**: 2026-07-28 (双模式合并 + 架构债清理)
+**Last Updated**: 2026-07-28 (多 worker 调度器单例保护 + 干扰源清理)
 **Status**: Pending (内测后按需清理)
 
 > ✅ 已解决：P1-3 (orphan pages), P1-12 (AGENTS.md memory), P1-16 (FF-020 CI blocking)
 > ✅ 2026-07-28 架构升级：main.py 双模式合并（35.9KB→22.7KB / -297 行），`_init_mixin` 成为唯一初始化真相源（10 阶段），修复双调度器并行 bug。详见 CODE_GRAPH.md §13。
+> ✅ 2026-07-28 多 worker 单例：`api/run_api.py` 新增 `_ensure_scheduler_singleton()` flock 文件锁，确保 4 个 uvicorn worker 中只有 master 持有调度器；`main.py --no-scheduler` 通过 `DISABLE_SCHEDULER=1` 环境变量传递给子进程。生产环境验证：1 master 持锁 + 3 worker 停止调度器；5 个 Web 页面全部 200。
 
 ## Frontend / UI
 1. **[FF-0007] authStore import admin 类型层耦合**: User explicitly excluded (P0-4).

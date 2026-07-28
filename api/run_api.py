@@ -123,11 +123,10 @@ if HAS_WEBSOCKETS:
             logger.debug("WebSocket 服务器关闭时异常: %s", e)
 
 # ── 向主动消息调度器注册 websocket / wechat 通道 ──
-# 多 worker 单例性保护：uvicorn --workers N 会启动 N 个进程，每个都执行
+# 多 worker 单例性保护：uvicorn --workers N 启动 N 个进程，每个都执行
 # orchestrator.initialize() → _init_ase_and_scheduler → scheduler.start()。
-# 若不加以限制，N 个调度器会并行运行，导致 N 倍主动消息和 APScheduler 线程。
-# 解决方案：用 flock 文件锁确保只有 master worker 持有调度器，其他 worker 停止调度器。
-# 同时支持 DISABLE_SCHEDULER=1 环境变量（等价于 --no-scheduler），供 uvicorn 直接启动场景使用。
+# flock 文件锁确保只有 master worker 持有调度器，其他 worker 停止调度器。
+# DISABLE_SCHEDULER=1 环境变量等价 --no-scheduler，供 uvicorn 直接启动场景使用。
 def _ensure_scheduler_singleton() -> None:
     """确保多 worker 场景下只有一个调度器运行。
 
@@ -204,10 +203,9 @@ if _scheduler is not None:
     logger.info("已向主动消息调度器注册 websocket/wechat 通道")
 
 # ── 自动恢复微信连接（如果存在持久化凭证） ──
-# 修复 P0-WX3：服务重启后 wechat_state.json 仍显示 connected:true，
-# 但 WeChatConnector 轮询线程未启动，导致消息不被处理。
-# 启动时若凭证存在则自动启动 connector.run() 恢复连接。
-# 注意：uvicorn --workers 4 会启动 4 个进程，需用文件锁确保只有一个 worker 启动 connector。
+# 启动时若 ~/.weixin_cow_credentials.json 存在，则自动启动 connector.run() 恢复消息轮询，
+# 避免服务重启后 wechat_state.json 仍显示 connected:true 但轮询线程未启动。
+# uvicorn --workers 4 启动 4 个进程，flock 文件锁确保只有一个 worker 启动 connector。
 def _autostart_wechat_connector():
     """若 ~/.weixin_cow_credentials.json 存在，自动启动微信连接器恢复消息轮询。
 

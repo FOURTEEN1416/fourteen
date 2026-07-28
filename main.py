@@ -425,13 +425,9 @@ def _run_orchestrator(args: argparse.Namespace, use_console: bool,
                       fusion_cfg: dict[str, Any], mode: str) -> None:
     """统一编排器启动入口（fast / full 模式共享）。
 
-    历史上 `_run_fast_mode` 与 `_run_full_mode` 各自维护一份组件初始化逻辑，
-    且 `_run_full_mode` 通过手动注入 + `_initialized=True` 绕过 `orchestrator.initialize()`，
-    违反封装且产生 300+ 行重复代码。本函数以 `_init_mixin.initialize()` 为唯一真相源，
-    两个模式仅通过 fusion_cfg 参数差异化配置，不再有独立初始化路径。
-
-    同时修复双调度器 bug：历史上 _init_mixin 与 _run_*_mode 各创建一个 ProactiveScheduler，
-    导致两个调度器并行运行。现在统一使用 _init_mixin 创建的调度器，仅在此注册额外通道。
+    `_init_mixin.initialize()` 是唯一初始化真相源，两个模式仅通过 fusion_cfg 差异化配置。
+    调度器由 _init_mixin 创建，本函数仅在 `--no-scheduler` 时停止调度器并设置 DISABLE_SCHEDULER=1，
+    或在启用时注册 ws/wechat 通道。
     """
     logger.info("=== %s 模式启动（多用户版） ===", mode)
 
@@ -479,10 +475,8 @@ def _run_orchestrator(args: argparse.Namespace, use_console: bool,
     else:
         logger.info("API服务已禁用 (--no-api)")
 
-    # ── 6. 主动消息调度器通道注册（使用 _init_mixin 已创建的调度器，不重复创建） ──
-    # 历史bug：_run_*_mode 曾各自新建 ProactiveScheduler，与 _init_mixin 的调度器并行运行。
-    # 现统一复用 _init_mixin 在 _init_ase_and_scheduler 中创建并启动的调度器，
-    # 仅在此注册 ws/wechat 通道并增强 send_message_func 为多通道出口。
+    # ── 6. 主动消息调度器通道注册 ──
+    # 调度器由 _init_mixin._init_ase_and_scheduler 统一创建并启动，本节仅注册通道。
     scheduler = orchestrator.components.get("scheduler")
     if args.no_scheduler:
         # 用户明确禁用 → 停止 _init_mixin 已启动的调度器
