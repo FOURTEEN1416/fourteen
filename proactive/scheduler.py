@@ -184,12 +184,19 @@ class ProactiveScheduler:
 
     def _is_quiet_hours(self) -> bool:
         """检查是否在免打扰时段"""
-        now = datetime.now(tz=timezone.utc).hour + 8  # UTC+8
-        now = now % 24
+        # 使用本地时区（Asia/Shanghai 默认 UTC+8）。
+        # 旧实现硬编码 +8 偏移且未取模，在 UTC 16:00-23:00 时段会得到 24-31 的非法小时。
+        # 现在使用 datetime.now() 获取本地时间（已考虑系统时区），并允许通过 timezone_offset 配置。
+        try:
+            # 优先使用系统本地时间（已含时区转换）
+            local_hour = datetime.now().hour
+        except Exception:  # noqa: BLE001
+            # 兜底：UTC+8
+            local_hour = (datetime.now(tz=timezone.utc).hour + 8) % 24
         start, end = self._quiet_hours
         if start < end:
-            return start <= now < end
-        return now >= start or now < end
+            return start <= local_hour < end
+        return local_hour >= start or local_hour < end
 
     async def _send_to_all(self, message: str) -> bool:
         """

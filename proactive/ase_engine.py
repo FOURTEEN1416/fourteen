@@ -28,6 +28,25 @@ from proactive.reflection import InnerMonologue, ReflectionEngine
 
 logger = logging.getLogger("ase_engine")
 
+
+def _local_now() -> datetime:
+    """获取本地时间（用于场景触发判断）。
+
+    场景触发配置（morning_hours/night_hours/meal_hours）按北京时间设计。
+    优先用系统本地时间（服务器应配置 Asia/Shanghai）；
+    若系统时区非 UTC+8（如容器内默认 UTC），强制使用 UTC+8。
+    """
+    # 检测系统时区偏移（秒）
+    if time.daylight and time.localtime().tm_isdst:
+        offset_sec = -time.altzone
+    else:
+        offset_sec = -time.timezone
+    # UTC+8 = 28800 秒；偏差超过 1 小时即认为系统非北京时区
+    if abs(offset_sec - 28800) > 3600:
+        return datetime.now(tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
+    return datetime.now()
+
+
 # ═══════════════════════════════════════════════════════════════
 #  类型枚举
 # ═══════════════════════════════════════════════════════════════
@@ -281,7 +300,8 @@ class ContextAnalyzer:
         self._last_analysis_time: float = 0
 
     def analyze(self) -> dict[str, Any]:
-        now = datetime.now(tz=timezone.utc)
+        # 场景触发按本地时间判断（morning/noon/evening/night 等）
+        now = _local_now()
         hour = now.hour
         context = {
             "time_of_day": self._get_time_period(hour),
@@ -679,7 +699,8 @@ class ASEEngine:
             self.urgency.context_bonus = 0.0
 
     def _check_scene_triggers(self) -> dict[str, Any] | None:
-        now = datetime.now(tz=timezone.utc)
+        # 场景触发必须用本地时间，配置的小时区间按北京时间设计
+        now = _local_now()
         hour = now.hour
         today = now.date()
         affinity = self._affinity_level

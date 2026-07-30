@@ -246,9 +246,11 @@ class _InitPhasesMixin:
             mem = self.components.get("memory")
             sm = getattr(mem, "structured_memory", None)
             if sm:
+                # 字典键必须与 system.yaml builtin_tools 中的名称一致，
+                # 否则 `if name in enabled_tools` 判断会失败，工具永不注册。
                 memory_tools = {
-                    "reminder": ReminderTool,
-                    "calendar_query": CalendarQueryTool,
+                    "set_reminder": ReminderTool,
+                    "query_reminders": CalendarQueryTool,
                     "memory": MemoryTool,
                     "scheduler": SchedulerTool,
                 }
