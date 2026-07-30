@@ -4,10 +4,9 @@ LLM Provider 单元测试 — 覆盖 0 测试 P0 风险
 
 测试目标：
 1. ModelEntry / ModelRegistry 冷却机制
-2. OpenCodeZenProvider 消息构建 + fallback 行为（mock 网络）
-3. LLMGatewayV2 mock 回复（无 API key 时的回退）
-4. OpenAICompatibleProvider 配置解析
-5. MultiProviderGateway fallback 链
+2. LLMGatewayV2 mock 回复（无 API key 时的回退）
+3. OpenAICompatibleProvider 配置解析
+4. MultiProviderGateway fallback 链
 
 零网络调用 — 全部用 respx/httpx_mock 或直接传 mock
 """
@@ -131,138 +130,6 @@ class TestModelRegistry:
         assert r.get_available() is None
 
 
-# ── OpenCodeZenProvider 测试（零网络） ─────────────────────────
-
-
-class TestOpenCodeZenProviderMessages:
-    """OpenCodeZenProvider 内部 _build_messages 逻辑"""
-
-    def test_build_messages_simple(self):
-        from llm_provider.opencode_zen_provider import OpenCodeZenProvider
-
-        p = OpenCodeZenProvider(api_base="http://test", model="m")
-        msgs = p._build_messages("hello", "", None, None)
-        assert msgs == [{"role": "user", "content": "hello"}]
-
-    def test_build_messages_with_system(self):
-        from llm_provider.opencode_zen_provider import OpenCodeZenProvider
-
-        p = OpenCodeZenProvider(api_base="http://test", model="m")
-        msgs = p._build_messages("hello", "you are a bot", None, None)
-        assert msgs == [
-            {"role": "system", "content": "you are a bot"},
-            {"role": "user", "content": "hello"},
-        ]
-
-    def test_build_messages_with_history(self):
-        from llm_provider.opencode_zen_provider import OpenCodeZenProvider
-
-        p = OpenCodeZenProvider(api_base="http://test", model="m")
-        history = [
-            {"role": "user", "content": "q1"},
-            {"role": "assistant", "content": "a1"},
-        ]
-        msgs = p._build_messages("q2", "sys", history, None)
-        assert msgs == [
-            {"role": "system", "content": "sys"},
-            {"role": "user", "content": "q1"},
-            {"role": "assistant", "content": "a1"},
-            {"role": "user", "content": "q2"},
-        ]
-
-    def test_build_messages_explicit_messages_takes_precedence(self):
-        from llm_provider.opencode_zen_provider import OpenCodeZenProvider
-
-        p = OpenCodeZenProvider(api_base="http://test", model="m")
-        explicit = [{"role": "user", "content": "explicit"}]
-        msgs = p._build_messages("hello", "sys", [{"role": "user", "content": "ignored"}], explicit)
-        assert msgs == [{"role": "user", "content": "explicit"}]
-
-    def test_build_messages_empty_query_skipped(self):
-        """空 query 应该被跳过（不添加空 user 消息）"""
-        from llm_provider.opencode_zen_provider import OpenCodeZenProvider
-
-        p = OpenCodeZenProvider(api_base="http://test", model="m")
-        msgs = p._build_messages("", "sys", None, None)
-        # 实际行为：空 query 不追加（避免给 LLM 发空消息）
-        assert msgs == [{"role": "system", "content": "sys"}]
-
-
-class TestOpenCodeZenProviderFallback:
-    """Fallback 行为 — 模拟主模型失败，验证切到下一模型"""
-
-    def test_fallback_to_next_model_on_failure(self, monkeypatch):
-        from llm_provider.opencode_zen_provider import OpenCodeZenProvider
-
-        p = OpenCodeZenProvider(api_base="http://test", model="m1")
-        # 手动设置两个模型
-        p.registry = p.registry.__class__([
-            {"name": "m1", "priority": 1},
-            {"name": "m2", "priority": 2},
-        ])
-        p.available_models = ["m1", "m2"]
-        p._chat_url = "http://test/chat/completions"
-
-        # mock httpx.AsyncClient 第一次失败，第二次成功
-        responses = [
-            Exception("first model fails"),
-            _make_httpx_response({"choices": [{"message": {"content": "fallback reply"}}]}, 200),
-        ]
-        call_count = {"n": 0}
-
-        class FakeClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def post(self, *args, **kwargs):
-                call_count["n"] += 1
-                r = responses[call_count["n"] - 1]
-                if isinstance(r, Exception):
-                    raise r
-                return r
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return False
-
-        monkeypatch.setattr("httpx.AsyncClient", FakeClient)
-
-        result = asyncio.run(p.chat("hello", "sys"))
-        assert result == "fallback reply"
-        assert call_count["n"] == 2
-
-    def test_all_models_failing_returns_error_message(self, monkeypatch):
-        from llm_provider.opencode_zen_provider import OpenCodeZenProvider
-
-        p = OpenCodeZenProvider(api_base="http://test", model="m1")
-        p.registry = p.registry.__class__([
-            {"name": "m1", "priority": 1},
-            {"name": "m2", "priority": 2},
-        ])
-        p.available_models = ["m1", "m2"]
-        p._chat_url = "http://test/chat/completions"
-
-        class FakeClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def post(self, *args, **kwargs):
-                raise Exception("boom")
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return False
-
-        monkeypatch.setattr("httpx.AsyncClient", FakeClient)
-        result = asyncio.run(p.chat("hello", "sys"))
-        # 全部失败时返回错误消息字符串
-        assert "失败" in result or "不可用" in result or "error" in result.lower()
-
-
 # ── LLMGatewayV2 测试（mock 模式） ─────────────────────────────
 
 
@@ -308,19 +175,3 @@ class TestLLMGatewayV2MockMode:
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "hi"},
         ]
-
-
-# ── 工具函数 ───────────────────────────────────────────────────
-
-
-def _make_httpx_response(data: dict, status_code: int = 200):
-    """构造一个 httpx.Response mock"""
-    import json
-
-    import httpx
-
-    return httpx.Response(
-        status_code=status_code,
-        content=json.dumps(data).encode("utf-8"),
-        request=httpx.Request("POST", "http://test/"),
-    )

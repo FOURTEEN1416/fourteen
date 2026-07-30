@@ -7,11 +7,11 @@
   3. 所有 provider 都失败 → 返回错误信息
 
 支持的 provider:
-  - opencode_zen: 免费，无需 API Key
-  - deepseek:     DeepSeek API
-  - zhipu:        智谱AI
-  - xunfei:       讯飞星火
-  - baidu:        百度千帆
+  - sensenova: 商汤日日新（glm-5.2）
+  - zhipu:     智谱AI
+  - xunfei:    讯飞星火
+  - baidu:     百度千帆
+  - deepseek:  DeepSeek API
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ from typing import Any
 
 from .llm_gateway import LLMGatewayV2
 from .openai_compatible_provider import OpenAICompatibleProvider
-from .opencode_zen_provider import OpenCodeZenProvider
 
 logger = logging.getLogger("llm_provider.multi_gateway")
 
@@ -38,7 +37,7 @@ except ImportError:  # pragma: no cover
         return None
 
 # ── 默认 fallback 链 ──
-DEFAULT_FALLBACK_CHAIN = ["sensenova", "zhipu", "xunfei", "baidu", "opencode_zen"]
+DEFAULT_FALLBACK_CHAIN = ["sensenova", "zhipu", "xunfei", "baidu"]
 
 # ── 默认提供商配置 ──
 DEFAULT_PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
@@ -146,7 +145,7 @@ class MultiProviderGateway:
     多供应商网关 — 自动在多个 LLM 提供商之间 fallback
 
     按 fallback_chain 顺序尝试:
-      智谱AI → 讯飞星火 → 百度千帆 → OpenCode Zen (免费兜底)
+      商汤日日新 → 智谱AI → 讯飞星火 → 百度千帆
     如果用户配置了 DeepSeek，自动插入到最前面。
     """
 
@@ -165,9 +164,6 @@ class MultiProviderGateway:
         self._current_index: int = 0  # 当前活跃的 provider 索引
 
         for key in self._chain:
-            if key == "opencode_zen":
-                self._providers[key] = OpenCodeZenProvider()
-                continue
             if key == "deepseek":
                 self._providers[key] = LLMGatewayV2()
                 continue
@@ -180,8 +176,8 @@ class MultiProviderGateway:
             # 环境变量覆盖
             cfg = _resolve_env_override(key, cfg)
 
-            # 跳过没有 API Key 的 provider（opencode_zen 除外）
-            if key != "opencode_zen" and not cfg.get("api_key"):
+            # 跳过没有 API Key 的 provider
+            if not cfg.get("api_key"):
                 logger.info("[MultiGateway] %s 未配置 API Key，跳过", key)
                 continue
 
@@ -206,8 +202,10 @@ class MultiProviderGateway:
     def current_provider_key(self) -> str:
         """当前活跃的 provider key"""
         keys = list(self._providers.keys())
+        if not keys:
+            return ""
         idx = min(self._current_index, len(keys) - 1)
-        return keys[idx] if keys else "opencode_zen"
+        return keys[idx]
 
     @property
     def current_provider(self) -> Any:
