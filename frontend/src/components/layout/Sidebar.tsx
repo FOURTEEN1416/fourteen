@@ -4,7 +4,7 @@ import {
   MessageCircle, PanelLeftClose, PanelLeft,
   Sparkles, Mic, Shield, FileText,
   Settings, Activity, Library,
-  User, Wrench, BarChart3,
+  User, Wrench, BarChart3, Server,
 } from 'lucide-react'
 import { useChatStore } from '../../store/chatStore'
 import { useAuthStore } from '../../store/authStore'
@@ -55,7 +55,10 @@ function buildGlobalNavGroups(isAdmin: boolean, activeRoleId?: string): NavGroup
     {
       label: '管理后台',
       items: [
-        ...(isAdmin ? [{ to: '/admin/users', icon: User, label: '用户管理', badge: 'admin' }] : []),
+        ...(isAdmin ? [
+          { to: '/admin/users', icon: User, label: '用户管理', badge: 'admin' },
+          { to: '/admin/providers', icon: Server, label: '供应商管理', badge: 'admin' },
+        ] : []),
       ],
     },
   ]

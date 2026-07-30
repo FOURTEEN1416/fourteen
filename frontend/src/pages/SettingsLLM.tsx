@@ -1,27 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Toggle } from '../components/shared'
 import { config as fetchConfig, saveConfig, userLlmConfig, saveUserLlmConfig } from '../api/system'
+import { listProviders, type ProviderOption } from '../api/llmProviders'
+import ProviderGuideModal from '../components/llm/ProviderGuideModal'
 import { useAuthStore } from '../store/authStore'
-
-const PROVIDER_OPTIONS = [
-  { value: 'auto', label: '自动回退（推荐）', desc: '按优先级依次尝试可用供应商' },
-  { value: 'sensenova', label: '商汤日日新', desc: 'glm-5.2 1M上下文，强力模型，需 API Key' },
-  { value: 'deepseek', label: 'DeepSeek', desc: 'DeepSeek-V2/V3，需 API Key，性价比高' },
-  { value: 'zhipu', label: '智谱AI', desc: 'GLM-4.7-Flash 永久免费，无限 Token' },
-  { value: 'xunfei', label: '讯飞星火', desc: 'Spark Lite 永久免费，无限 Token' },
-  { value: 'baidu', label: '百度千帆', desc: 'ERNIE-Speed 每月 50 万免费 Token' },
-  { value: 'opencode_zen', label: 'OpenCode Zen（兜底）', desc: '完全免费，无需 API Key，质量一般' },
-  { value: 'custom', label: '自定义（OpenAI 兼容）', desc: '任意 OpenAI 兼容 API，如 Ollama、Groq、Together AI 等' },
-]
-
-const PROVIDER_GUIDE: Record<string, { apply_url: string; note: string }> = {
-  sensenova: { apply_url: 'https://platform.sensenova.cn', note: '注册 → 控制台 → API Keys → 创建 sk- 密钥' },
-  deepseek: { apply_url: 'https://platform.deepseek.com', note: '注册 → API Keys → 创建 Key' },
-  zhipu: { apply_url: 'https://open.bigmodel.cn', note: '注册 → API 密钥 → 添加 API Key' },
-  xunfei: { apply_url: 'https://console.xfyun.cn', note: '注册 → 星火大模型 → API Key' },
-  baidu: { apply_url: 'https://console.bce.baidu.com', note: '注册 → 千帆大模型 → 创建应用' },
-  custom: { apply_url: '', note: '填入任意 OpenAI 兼容 API 的地址、Key 和模型名，如 Ollama 本地 http://localhost:11434/v1' },
-}
+import { BookOpen, Loader2 } from 'lucide-react'
 
 function SettingsLLM() {
   const [loading, setLoading] = useState(true)
@@ -29,6 +12,11 @@ function SettingsLLM() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [configSource, setConfigSource] = useState<'user' | 'global'>('global')
+
+  // 供应商清单（从后端拉取，不再硬编码）
+  const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([])
+  const [providersLoading, setProvidersLoading] = useState(true)
+  const [guideModalProvider, setGuideModalProvider] = useState<ProviderOption | null>(null)
 
   // 获取当前用户角色（从 zustand authStore）
   const user = useAuthStore(s => s.user)
@@ -48,14 +36,40 @@ function SettingsLLM() {
   const [llmCache, setLlmCache] = useState(true)
   const [cacheDuration, setCacheDuration] = useState(30)
 
-  // 加载配置：普通用户用 /user/llm-config，admin 用全局 /config（默认）或用户级
+  // ── 拉取供应商清单（不依赖 isAdmin，公开接口） ──
   /* eslint-disable react-hooks/set-state-in-effect -- data fetching on mount, cancelled flag 防竞态 */
+  useEffect(() => {
+    let cancelled = false
+    setProvidersLoading(true)
+    listProviders()
+      .then(res => {
+        if (cancelled) return
+        setProviderOptions(res.providers ?? [])
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        // 拉取失败时降级为最小可用清单，避免页面卡死
+        console.warn('Failed to load providers list:', err)
+        setProviderOptions([
+          {
+            key: 'auto', name: '自动回退（推荐）', description: '按优先级依次尝试可用供应商',
+            sort_order: 0, is_special: true, is_preset: true,
+            guide: { apply_url: '', free_quota: '', steps: [], tips: [], warnings: [] },
+          },
+        ])
+      })
+      .finally(() => {
+        if (!cancelled) setProvidersLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  // 加载配置：普通用户用 /user/llm-config，admin 用全局 /config（默认）或用户级
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
 
-    // 普通用户始终用用户级 API；admin 默认用全局，但也可读用户级
     const useUserApi = !isAdmin
     const fetchFn = useUserApi ? userLlmConfig : fetchConfig
 
@@ -63,7 +77,6 @@ function SettingsLLM() {
       .then(res => {
         if (cancelled) return
         const data = res.data ?? {}
-        // /user/llm-config 返回 { source, llm }，/config 返回顶层配置对象
         const llm = useUserApi ? (data.llm ?? {}) : (data.llm ?? {})
         const source = useUserApi ? (data.source ?? 'global') : 'global'
         setConfigSource(source)
@@ -110,7 +123,6 @@ function SettingsLLM() {
       // GET 返回 ****。空输入表示保留原 key；只有新输入的值才发送。
       if (apiKey && apiKey !== '****') llmConfig.api_key = apiKey
 
-      // 普通用户保存到用户级；admin 保存到全局（可扩展为可选）
       const saveFn = isAdmin ? saveConfig : saveUserLlmConfig
       await saveFn({ llm: llmConfig })
       setSuccess(true)
@@ -122,7 +134,10 @@ function SettingsLLM() {
     }
   }
 
-  const guide = PROVIDER_GUIDE[provider]
+  // 当前选中的供应商对象（用于显示教程按钮）
+  const selectedProvider = providerOptions.find(p => p.key === provider)
+  // 是否需要显示连接参数（auto 不需要，custom 和真实供应商需要）
+  const showConnectionParams = provider !== 'auto'
 
   if (loading) {
     return (
@@ -158,37 +173,73 @@ function SettingsLLM() {
 
       {/* 供应商选择 */}
       <section>
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">LLM 供应商</h3>
-        <div className="glass-card rounded-xl p-4 space-y-2">
-          {PROVIDER_OPTIONS.map((opt) => (
-            <label
-              key={opt.value}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 cursor-pointer transition
-                ${provider === opt.value ? 'bg-primary-50 ring-1 ring-primary-200' : 'hover:bg-gray-50'}`}
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-700">LLM 供应商</h3>
+          {selectedProvider && selectedProvider.guide && (
+            <button
+              onClick={() => setGuideModalProvider(selectedProvider)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-primary-600 bg-primary-50 hover:bg-primary-100 rounded-lg transition-colors"
             >
-              <input
-                type="radio"
-                name="provider"
-                value={opt.value}
-                checked={provider === opt.value}
-                onChange={(e) => setProvider(e.target.value)}
-                className="accent-primary-500"
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-700">{opt.label}</p>
-                <p className="text-xs text-gray-400 truncate">{opt.desc}</p>
-              </div>
-            </label>
-          ))}
+              <BookOpen className="w-3.5 h-3.5" />
+              查看申请教程
+            </button>
+          )}
+        </div>
+        <div className="glass-card rounded-xl p-4 space-y-2">
+          {providersLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="w-4 h-4 animate-spin text-primary-400" />
+              <span className="ml-2 text-xs text-gray-400">加载供应商清单...</span>
+            </div>
+          ) : providerOptions.length === 0 ? (
+            <div className="text-center py-6 text-xs text-gray-400">暂无可用供应商</div>
+          ) : (
+            providerOptions.map((opt) => (
+              <label
+                key={opt.key}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 cursor-pointer transition
+                  ${provider === opt.key ? 'bg-primary-50 ring-1 ring-primary-200' : 'hover:bg-gray-50'}`}
+              >
+                <input
+                  type="radio"
+                  name="provider"
+                  value={opt.key}
+                  checked={provider === opt.key}
+                  onChange={(e) => setProvider(e.target.value)}
+                  className="accent-primary-500"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-gray-700">{opt.name}</p>
+                    {opt.is_special && (
+                      <span className="text-[9px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">特殊</span>
+                    )}
+                    {!opt.is_special && opt.enabled === false && (
+                      <span className="text-[9px] px-1.5 py-0.5 bg-gray-100 text-gray-400 rounded">已禁用</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400 truncate">{opt.description}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); setGuideModalProvider(opt) }}
+                  className="shrink-0 p-1 text-gray-300 hover:text-primary-500 transition-colors"
+                  title="查看教程"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                </button>
+              </label>
+            ))
+          )}
         </div>
       </section>
 
       {/* 连接参数 */}
-      {provider !== 'opencode_zen' && (
+      {showConnectionParams && (
         <section>
           <h3 className="text-sm font-semibold text-gray-700 mb-3">连接参数</h3>
           <div className="glass-card rounded-xl p-4 space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-700">API 地址</p>
                 <p className="text-xs text-gray-400">格式: https://xxx.com/v1</p>
@@ -197,7 +248,7 @@ function SettingsLLM() {
                 type="text"
                 value={apiBase}
                 onChange={(e) => setApiBase(e.target.value)}
-                placeholder="https://api.deepseek.com/v1"
+                placeholder={selectedProvider?.api_base || 'https://api.example.com/v1'}
                 className="w-56 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
               />
             </div>
@@ -217,27 +268,21 @@ function SettingsLLM() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-700">模型名称</p>
-                <p className="text-xs text-gray-400">如 deepseek-chat, glm-4-flash</p>
+                <p className="text-xs text-gray-400">如 glm-5.2, deepseek-chat</p>
               </div>
               <input
                 type="text"
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
-                placeholder="deepseek-chat"
+                placeholder={selectedProvider?.model || 'model-name'}
                 className="w-56 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
               />
             </div>
           </div>
-          {guide && (
+          {selectedProvider?.guide?.apply_url && (
             <p className="mt-2 text-xs text-gray-400">
-              {guide.apply_url ? (
-                <>
-                  申请地址: <a href={guide.apply_url} target="_blank" rel="noopener noreferrer" className="text-primary-500 hover:underline">{guide.apply_url}</a>
-                  &nbsp;— {guide.note}
-                </>
-              ) : (
-                <>{guide.note}</>
-              )}
+              申请地址: <a href={selectedProvider.guide.apply_url} target="_blank" rel="noopener noreferrer" className="text-primary-500 hover:underline">{selectedProvider.guide.apply_url}</a>
+              &nbsp;— {selectedProvider.guide.free_quota}
             </p>
           )}
         </section>
@@ -333,6 +378,13 @@ function SettingsLLM() {
           {saving ? '保存中...' : '保存设置'}
         </button>
       </div>
+
+      {/* 教程弹窗 */}
+      <ProviderGuideModal
+        provider={guideModalProvider}
+        open={!!guideModalProvider}
+        onClose={() => setGuideModalProvider(null)}
+      />
     </div>
   )
 }

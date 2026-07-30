@@ -24,6 +24,7 @@ const LoginPage = lazy(() => import('./pages/LoginPage'))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const WeChatPage = lazy(() => import('./pages/WeChatPage'))
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
+const AdminProvidersPage = lazy(() => import('./pages/AdminProvidersPage'))
 const DemoPage = lazy(() => import('./pages/DemoPage'))
 
 const SettingsLLM = lazy(() => import('./pages/SettingsLLM'))
@@ -144,6 +145,7 @@ export default function App() {
           <Route element={<RoleGuard roles={['admin'] as const} />}>
             <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
             <Route path="/admin/users" element={<AnimatedSuspense><AdminUsersPage /></AnimatedSuspense>} />
+            <Route path="/admin/providers" element={<AnimatedSuspense><AdminProvidersPage /></AnimatedSuspense>} />
           </Route>
         </Route>
 
