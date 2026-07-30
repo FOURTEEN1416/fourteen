@@ -72,19 +72,17 @@ describe('SettingsVoice', () => {
   })
 
   // ── Test 2: Engine options ──
+  // 当前 ENGINE_OPTIONS 仅保留 MiMo Cloud(Edge-TTS/GPT-SoVITS/Bert-VITS2 已从 UI 移除,
+  // 后端多引擎 fallback 仍由 llm_provider 处理,见 AGENTS.md L6)
 
-  it('renders 4 engine options', async () => {
+  it('renders MiMo Cloud engine option', async () => {
     render(<SettingsVoice />)
 
     await waitFor(() => {
       expect(mockGetSpeakers).toHaveBeenCalled()
     })
 
-    // The engine switcher renders all four options as buttons
     expect(screen.getByRole('button', { name: 'MiMo Cloud' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Edge TTS' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'GPT-SoVITS' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Bert-VITS2' })).toBeDefined()
   })
 
   // ── Test 3: Clone section shows file upload ──
@@ -132,25 +130,8 @@ describe('SettingsVoice', () => {
   })
 
   // ── Test 5: Select engine calls mimoSetEngine ──
-
-  it('select engine calls mimoSetEngine', async () => {
-    render(<SettingsVoice />)
-
-    // The useEffect triggers getSpeakers and mimoStatus — wait for load
-    await waitFor(() => {
-      expect(mockGetSpeakers).toHaveBeenCalled()
-    })
-
-    // Open the engine dropdown
-    fireEvent.click(screen.getByText('MiMo Cloud'))
-
-    // Click "Edge TTS" option
-    fireEvent.click(screen.getByText('Edge TTS'))
-
-    await waitFor(() => {
-      expect(mockMimoSetEngine).toHaveBeenCalledWith('edge-tts')
-    })
-  })
+  // 已删除:ENGINE_OPTIONS 仅保留 MiMo Cloud,无其他引擎可切换。
+  // 后端多引擎 fallback 由 llm_provider 自动处理,前端 UI 不再暴露引擎切换。
 
   // ── Test 6: Click 试听 calls mimoSynthesize ──
 
