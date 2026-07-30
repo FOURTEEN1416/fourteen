@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-626+-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-1104-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
@@ -97,7 +97,7 @@ cd frontend && npx vite --port 5173
 ## 怎么测
 
 ```bash
-pytest                          # 全量（626+ 用例）
+pytest                          # 全量（1025 用例,2026-07-30 实测全过）
 pytest -m "not slow"           # 跳过慢的
 pytest -x tests/test_invite_codes.py  # 邀请码专项测试（15 个）
 pytest --cov=. --cov-report=html  # 覆盖率报告
@@ -131,7 +131,7 @@ pytest --cov=. --cov-report=html  # 覆盖率报告
 │   ├── adr/              架构决策记录（10 个：ADR-0001~0006 + ADR-0011~0014）
 │   ├── architecture/     8 层地图 / 设计原则 / Fitness Functions / Bus Factor
 │   └── audits/           审计报告
-├── tests/                626+ 后端单元测试
+├── tests/                1025 后端单元测试 + 79 前端测试 = 1104
 ├── config/               YAML 配置
 └── main.py               入口
 ```

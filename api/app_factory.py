@@ -1,8 +1,9 @@
 """
 REST API 应用工厂
 
-精简版：仅负责创建 FastAPI 实例、配置中间件、挂载子路由。
-业务路由按域拆分为 9 个子路由文件（共 75 端点），模型/常量/Helper 仍保留在 api.main_routes。
+仅负责创建 FastAPI 实例、配置中间件、挂载子路由。
+业务路由按域拆分为 17 个 include_router 调用(共 204 端点,实扫 2026-07-30),
+模型/常量/Helper 仍保留在 api.main_routes。详细端点分布见 CODE_GRAPH.md §4.2。
 """
 
 from __future__ import annotations
@@ -389,6 +390,14 @@ def create_api_app(
         logger.info("邀请码API已挂载 (/api/auth/register-invite + /api/admin/invites)")
     except Exception as e:
         logger.warning("邀请码API挂载失败: %s", e)
+
+    # ── LLM 供应商管理 API（含申请教程） ──
+    try:
+        from api.routers.llm_providers_routes import router as llm_providers_router
+        app.include_router(llm_providers_router)
+        logger.info("LLM供应商管理API已挂载 (/api/llm-providers)")
+    except Exception as e:
+        logger.warning("LLM供应商管理API挂载失败: %s", e)
 
     return app
 
