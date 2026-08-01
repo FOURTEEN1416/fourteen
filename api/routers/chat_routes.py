@@ -21,10 +21,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from fastapi.responses import StreamingResponse
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import require_role
-from api.database import User
+from api.auth_jwt import get_current_user_id, require_role
+from api.database import User, get_db
 from api.deps import deps
 from api.main_routes import ChatRequest, ChatResponse, CreateSessionRequest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("api.routers.chat_routes")
 
@@ -45,7 +46,12 @@ def _resolve_character_id(character_id: str) -> str:
 
 
 @router.post("/api/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, _auth: bool = Security(verify_api_key_dep)):
+async def chat(
+    req: ChatRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
     orch = deps.orch
     if not orch:
         raise HTTPException(
@@ -53,12 +59,24 @@ async def chat(req: ChatRequest, _auth: bool = Security(verify_api_key_dep)):
             detail="Orchestrator not initialized",
             headers={"X-Error-Code": "FEATURE_UNAVAILABLE"},
         )
+
+    # 读取用户级 LLM 配置（API Key 隔离）
+    user_llm_config = None
+    try:
+        user = await db.get(User, user_id)
+        if user and user.llm_config:
+            user_llm_config = user.llm_config if isinstance(user.llm_config, dict) else None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to load user %s LLM config, using global: %s", user_id, e)
+
     try:
         result = await orch.process_message(
             req.message,
             req.session_id,
             req.message_type,
             _resolve_character_id(req.character_id),
+            user_llm_config=user_llm_config,
+            user_id=user_id,
         )
     except TimeoutError:
         raise HTTPException(
@@ -80,7 +98,12 @@ async def chat(req: ChatRequest, _auth: bool = Security(verify_api_key_dep)):
 
 
 @router.post("/api/chat/stream")
-async def chat_stream(req: ChatRequest, _auth: bool = Security(verify_api_key_dep)):
+async def chat_stream(
+    req: ChatRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
     orch = deps.orch
     if not orch or not hasattr(orch, "process_message_stream"):
         raise HTTPException(
@@ -89,12 +112,23 @@ async def chat_stream(req: ChatRequest, _auth: bool = Security(verify_api_key_de
             headers={"X-Error-Code": "FEATURE_UNAVAILABLE"},
         )
 
+    # 读取用户级 LLM 配置（API Key 隔离）— 与 /api/chat 保持一致
+    user_llm_config = None
+    try:
+        user = await db.get(User, user_id)
+        if user and user.llm_config:
+            user_llm_config = user.llm_config if isinstance(user.llm_config, dict) else None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to load user %s LLM config for stream, using global: %s", user_id, e)
+
     async def event_generator():
         stream_gen = orch.process_message_stream(
             req.message,
             req.session_id,
             req.message_type,
             _resolve_character_id(req.character_id),
+            user_llm_config=user_llm_config,
+            user_id=user_id,
         )
         try:
             async for event in stream_gen:
