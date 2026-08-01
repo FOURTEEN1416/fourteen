@@ -115,7 +115,7 @@ def test_control_plane_critical_routes_are_mounted(app):
         (chat_routes, 11, "chat/session + wechat channels"),
         (personality_routes, 9, "emotion/persona/psych"),
         (users_routes, 7, "users/*"),
-        (training_routes, 11, "training/* + proactive/*"),
+        (training_routes, 9, "training/* + proactive/*"),
         (tools_routes, 6, "tools/* + plugins/* + health"),
         (safety_routes, 12, "safety/rag/voice/files/cache"),
         (clone_routes, 9, "clone/*"),
@@ -135,14 +135,14 @@ def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
     )
 
 
-def test_total_contribution_is_76(app):
-    """The 8 new sub-routers together contribute exactly 76 endpoints."""
+def test_total_contribution_is_74(app):
+    """The 8 new sub-routers together contribute exactly 74 endpoints."""
     modules = [
         misc_routes, chat_routes, personality_routes, users_routes,
         training_routes, tools_routes, safety_routes, clone_routes,
     ]
     total = sum(len(_sub_router_routes(m)) for m in modules)
-    assert total == 76, f"8 sub-routers contribute {total} routes, expected 76"
+    assert total == 74, f"8 sub-routers contribute {total} routes, expected 74"
 
 
 def test_no_duplicate_endpoints_across_sub_routers():

@@ -20,16 +20,6 @@ export function trainingClean(acceptScore: number) {
   return client.post('/training/clean', null, { params: { accept_score: acceptScore } })
 }
 
-/** POST /api/training/train — 开始训练 */
-export function trainingTrain(epochs: number, loraRank: number, characterId?: string) {
-  return client.post('/training/train', null, { params: { epochs, lora_rank: loraRank, ...(characterId ? { character_id: characterId } : {}) } })
-}
-
-/** POST /api/training/stop — 停止训练 */
-export function trainingStop() {
-  return client.post('/training/stop')
-}
-
 /** POST /api/training/test — 测试克隆 */
 export function trainingTest(message: string) {
   return client.post('/training/test', null, { params: { message } })

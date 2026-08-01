@@ -15,7 +15,7 @@
     python main.py --no-api                  # 不启动REST/WebSocket API
     python main.py --no-scheduler            # 不启动主动消息调度器
     python main.py --log-level DEBUG         # 调试日志
-    python main.py --clone wxid_xxx          # 风格克隆
+    python main.py --clone wxid_xxx          # 风格克隆（提示词注入模式）
     python main.py --init-only               # 仅初始化
 """
 
@@ -117,7 +117,7 @@ def parse_args() -> argparse.Namespace:
   %(prog)s --no-api                  # 不启动API服务
   %(prog)s --no-scheduler            # 不启动主动消息调度器
   %(prog)s --log-level DEBUG         # 调试日志
-  %(prog)s --clone wxid_xxx --clone-name "小明"  # 风格克隆
+  %(prog)s --clone wxid_xxx --clone-name "小明"  # 风格克隆（提示词注入模式）
   %(prog)s --init-only               # 仅初始化
         """,
     )
@@ -175,7 +175,7 @@ def load_fusion_config(config_dir: str) -> dict[str, Any]:
 
 def run_clone_pipeline(args: argparse.Namespace) -> None:
     print("\n" + "=" * 50)
-    print("  [CLONE] 风格克隆管线")
+    print("  [CLONE] 风格克隆管线（提示词注入模式）")
     print("=" * 50)
     print(f"  目标: {args.clone}")
     print(f"  来源: {args.clone_source}")
@@ -187,19 +187,12 @@ def run_clone_pipeline(args: argparse.Namespace) -> None:
 
     adapter = WeCloneAdapter(
         data_dir=str(project_root / "data" / "clone"),
-        output_dir=str(project_root / "data" / "training"),
     )
-
-    health = adapter.health_check()
-    print(f"  训练器: {'可用' if health['trainer_available'] else '未安装(跳过训练)'}")
-    print(f"  量化: {'可用' if health['quant_available'] else '未安装'}")
-    print()
 
     result = adapter.clone(
         target=args.clone,
         source=args.clone_source,
         name=args.clone_name or None,  # type: ignore[arg-type]
-        do_train=health["trainer_available"],
     )
 
     if result.get("error"):
@@ -211,8 +204,6 @@ def run_clone_pipeline(args: argparse.Namespace) -> None:
     print(f"{'=' * 50}")
     print(f"  提取对话: {result.get('extracted_turns', 0)} 轮")
     print(f"  风格独特性: {result.get('uniqueness', 0):.0%}")
-    if result.get("lora_path"):
-        print(f"  LoRA 模型: {result['lora_path']}")
     print(f"  ToneMimic 注入: {result.get('injected_to_tone_mimic', 0)} 条")
     print()
 

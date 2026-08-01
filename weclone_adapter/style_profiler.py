@@ -4,7 +4,7 @@
 用于：
 - 生成更人性化的 System Prompt
 - 构建 few-shot 示例库
-- 辅助 LoRA 训练时的数据增强
+- 辅助 ToneMimic 提示词注入时的数据增强
 """
 
 import logging

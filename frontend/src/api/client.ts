@@ -22,7 +22,7 @@ import {
 } from './chat'
 import {
   trainingStatus, trainingProgress, trainingExtract, trainingClean,
-  trainingTrain, trainingStop, trainingTest, trainingApply,
+  trainingTest, trainingApply,
 } from './training'
 import {
   cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset,
@@ -230,7 +230,7 @@ export default client
 
 // ── Named re-exports for backward compat (import { chat } from '../api/client') ──
 export { chat, chatStream, createSession, listSessions, chatHistory, emotionState, emotionTrend }
-export { trainingStatus, trainingProgress, trainingExtract, trainingClean, trainingTrain, trainingStop, trainingTest, trainingApply }
+export { trainingStatus, trainingProgress, trainingExtract, trainingClean, trainingTest, trainingApply }
 export { cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset, cloneDeleteConversation, cloneBatchDeleteConversations, clonePreview, cloneUpload, cloneStats }
 export {
   listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
@@ -272,7 +272,7 @@ export const api = {
   logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
   wechatConnectionStatus, wechatQrCode,
   trainingStatus, trainingProgress, trainingExtract, trainingClean,
-  trainingTrain, trainingStop, trainingTest, trainingApply,
+  trainingTest, trainingApply,
   cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset,
   cloneDeleteConversation, cloneBatchDeleteConversations, clonePreview, cloneUpload, cloneStats,
   psychProfile, psychSnapshots, psychReset, psychMentalHealth, psychLiwc,

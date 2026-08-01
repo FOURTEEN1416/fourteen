@@ -8,9 +8,9 @@ WeClone 适配器 — 将 WeChatMsg 数据提取桥接到 唯一的你 项目
         → weclone_adapter (格式适配+清洗)
         → clone_training.DataExtractor
         → clone_training.StyleAnalyzer
-        → clone_training.DatasetBuilder
-        → clone_training.LoRATrainer
-        → 风格注入 ToneMimic / LoRA 模型
+        → 风格注入 ToneMimic 提示词
+
+注意：LoRA 微调训练已移除（项目使用外接 API + RAG + 提示词注入）。
 """
 
 from .adapter import WeCloneAdapter
