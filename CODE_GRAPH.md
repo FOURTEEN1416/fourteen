@@ -22,25 +22,28 @@
 | 测试用例合计 | **1104 个**(1025 Python + 79 前端) | pytest + vitest 实跑 |
 | tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
 
-### 1.2 知识图谱快照指标（截至 2026-07-09，未重新扫描）
+### 1.2 知识图谱快照指标（2026-08-01 重新索引）
 
 | 维度 | 数值 |
 |------|------|
-| 总节点 | 5995 |
-| 总边 | 24931 |
-| Method | 1885 |
-| Function | 1294 |
-| Class | 471 |
-| File | 436 |
-| Module | 423 |
-| Route（图数据库记录） | 332 |
-| Interface (TS) | 163 |
-| 测试用例边 (TESTS) | 1413 |
-| 相似函数对 (SIMILAR_TO) | 126 |
-| 语义关联 (SEMANTICALLY_RELATED) | 110 |
-| HTTP 跨服务调用 | 49 |
-| 协同变更文件对 (FILE_CHANGES_WITH) | 31 |
-| 继承关系 (INHERITS) | 10 |
+| 总节点 | 6771 |
+| 总边 | 26079 |
+| Method | — |
+| Function | — |
+| Class | — |
+| File | — |
+| Module | — |
+| Route（图数据库记录） | — |
+| Interface (TS) | — |
+| 测试用例边 (TESTS) | 1449 |
+| 相似函数对 (SIMILAR_TO) | 122 |
+| 语义关联 (SEMANTICALLY_RELATED) | 86 |
+| HTTP 跨服务调用 | — |
+| 协同变更文件对 (FILE_CHANGES_WITH) | — |
+| 继承关系 (INHERITS) | — |
+
+> **注**: 2026-08-01 使用 codebase-memory 图谱工具 0.9.0 重新索引。详细节点/边类型分布需通过 `get_graph_schema` 工具查询。
+> 旧版 0.8.x 的详细类型分布（Method/Function/Class 等）在新版中需通过 `query_graph` 获取。
 
 **边类型分布（前 8，2026-07-09 快照）**：USAGE(6331) > CALLS(6116) > DEFINES(5110) > DEFINES_METHOD(1885) > WRITES(1549) > TESTS(1413) > IMPORTS(755) > DECORATES(621)
 

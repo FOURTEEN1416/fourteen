@@ -9,7 +9,7 @@ from typing import Any
 
 try:
     import websockets
-    from websockets.server import serve  # type: ignore[attr-defined]
+    from websockets.asyncio.server import serve
     HAS_WEBSOCKETS = True
 except ImportError:
     HAS_WEBSOCKETS = False

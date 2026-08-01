@@ -32,7 +32,7 @@ dependencies = [
     "sentence-transformers>=2.3.0",
     "numpy>=1.24.0",
     "aiohttp>=3.9.0",
-    "websockets>=12.0",
+    "websockets>=17.0",
     "python-multipart>=0.0.9",
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
@@ -107,6 +107,13 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-v --tb=short"
 pythonpath = ["."]
+filterwarnings = [
+    # lark 1.3.1 内部仍使用 sre_parse/sre_constants（Python 3.12 废弃），等上游修复后移除
+    "ignore:module 'sre_parse' is deprecated:DeprecationWarning:lark",
+    "ignore:module 'sre_constants' is deprecated:DeprecationWarning:lark",
+    # websockets 14.0+ legacy API 已废弃，项目已迁移到 asyncio API
+    "ignore:websockets.legacy is deprecated:DeprecationWarning",
+]
 
 [tool.ruff]
 target-version = "py310"
