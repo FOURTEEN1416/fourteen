@@ -766,6 +766,7 @@ class WeChatConnector:
         items = raw_msg.get("item_list", [])
         text = ""
         voice_data = ""
+        image_data = ""
         for item in items:
             item_type = item.get("type", 0)
             if item_type == 1:
@@ -776,10 +777,10 @@ class WeChatConnector:
                 voice_data = voice_item.get("voice_data", "")
             elif item_type == 3:
                 image_item = item.get("image_item", {})
-                image_item.get("image_data", "")
+                image_data = image_item.get("image_data", "")
 
-        if not text and not voice_data:
-            logger.debug("消息无文本和语音内容 msg_id=%s user=%s", msg_id, from_user)
+        if not text and not voice_data and not image_data:
+            logger.debug("消息无文本/语音/图片内容 msg_id=%s user=%s", msg_id, from_user)
             return
 
         today = time.strftime("%Y-%m-%d")

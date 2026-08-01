@@ -102,7 +102,7 @@ async def tool_history(
 @router.get("/api/plugins")
 async def list_plugins(_auth: bool = Security(verify_api_key_dep)):
     try:
-        plugin_path = Path(__file__).parent.parent / "plugins" / "plugins.json"
+        plugin_path = Path(__file__).parent.parent.parent / "plugins" / "plugins.json"
         if plugin_path.exists():
             with open(plugin_path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -119,7 +119,8 @@ async def toggle_plugin(
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
-    plugin_path = Path(__file__).parent.parent / "plugins" / "plugins.json"
+    # 必须与 list_plugins 保持一致：3 个 parent 才能到达项目根目录
+    plugin_path = Path(__file__).parent.parent.parent / "plugins" / "plugins.json"
     data = {}
     if plugin_path.exists():
         with open(plugin_path, encoding="utf-8") as f:

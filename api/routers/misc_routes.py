@@ -80,7 +80,7 @@ async def get_dashboard_stats(_auth: bool = Security(verify_api_key_dep)):
         wechat_info = cache["data"]
     else:
         try:
-            from api._chat_routes import get_wechat_status
+            from api.routers.chat_routes import get_wechat_status
             result = await get_wechat_status()  # type: ignore[func-returns-value]
             if isinstance(result, dict):
                 wechat_info = result

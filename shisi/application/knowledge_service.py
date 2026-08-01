@@ -93,6 +93,10 @@ class ShisiKnowledgeAdapter:
     ) -> dict[str, Any]:
         """基于请求指定角色检索知识，返回兼容字典。"""
         cid = character_id or self._current_character_id or self._default_character_id
+        # 确保索引已加载（重启后首次对话自动从磁盘加载，无 card 时仅尝试磁盘）
+        # ensure_index 内部已处理"索引已加载"的情况，重复调用是安全的。
+        if cid and hasattr(self._service, "ensure_index"):
+            self._service.ensure_index(cid)
         result = self._service.search(cid, query, top_k=top_k)
 
         results: list[dict[str, Any]] = []
