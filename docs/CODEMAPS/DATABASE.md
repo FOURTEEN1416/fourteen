@@ -1,7 +1,7 @@
 # 数据库地图
 
-**最近更新:** 2026-07-13
-**数据库:** PostgreSQL 15 (主) + SQLite (缓存/本地) + ChromaDB (向量)
+**最近更新:** 2026-08-01
+**数据库:** SQLite (主, aiosqlite) + ChromaDB (向量) + 文件系统 (角色卡/知识库)
 
 ---
 
@@ -11,27 +11,30 @@
 ┌─────────────────────────────────────────────────────────┐
 │                     数据存储架构                           │
 │                                                          │
-│  PostgreSQL 15 (:5432)          SQLite                   │
+│  SQLite (aiosqlite)            ChromaDB (向量)           │
 │  ┌────────────────────┐   ┌──────────────────────┐      │
-│  │ 用户 & 会话         │   │ 本地缓存              │      │
-│  │ User               │   │ data/users.db        │      │
-│  │ UserSession        │   │ - 会话缓存            │      │
-│  │ 未来扩展: 角色/消息  │   │ - 临时数据            │      │
+│  │ 用户 & 会话 (主库)  │   │ RAG 嵌入向量存储      │      │
+│  │ data/users.db      │   │ data/chroma_db/      │      │
+│  │ User               │   │ - 文档嵌入            │      │
+│  │ UserSession        │   │ - 知识库索引          │      │
+│  │ llm_config (JSON)  │   │ - 记忆向量            │      │
 │  └────────────────────┘   └──────────────────────┘      │
 │                                                          │
-│  ChromaDB (向量)             文件系统                     │
+│  文件系统                                                 │
 │  ┌────────────────────┐   ┌──────────────────────┐      │
-│  │ RAG 嵌入向量存储    │   │ 知识库数据            │      │
-│  │ data/chroma_db/    │   │ data/knowledge/      │      │
-│  │ - 文档嵌入          │   │ config/characters/   │      │
-│  │ - 知识库索引        │   │ config/prompts/      │      │
+│  │ 角色卡              │   │ 知识库数据            │      │
+│  │ character_card/    │   │ data/knowledge/      │      │
+│  │ my_character/      │   │ config/characters/   │      │
 │  └────────────────────┘   └──────────────────────┘      │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## PostgreSQL 模型
+## SQLite 模型 (api/database.py)
+
+> 数据库连接由 `api/runtime_config.py:get_database_url()` 解析，默认 `sqlite+aiosqlite:///data/users.db`。
+> 若设置 `DATABASE_URL` / `APP_DATABASE_URL` 环境变量，可切换为 PostgreSQL/MySQL（同步驱动自动转异步）。
 
 ### User
 
@@ -43,6 +46,7 @@
 | password_hash | String(128) | bcrypt 哈希密码 |
 | role | String(20), default='user' | 角色 (user/admin) |
 | is_active | Boolean, default=True | 是否激活 |
+| llm_config | JSON, nullable | 用户级 LLM 配置（API Key 隔离） |
 | created_at | DateTime | 创建时间 |
 | updated_at | DateTime | 更新时间 |
 
@@ -59,16 +63,16 @@
 | created_at | DateTime | 创建时间 |
 | last_used_at | DateTime | 最后使用时间 |
 
-### 遗留 SQLAlchemy 模型
+### shisi 业务模型
 
 | 模型 | 文件 | 说明 |
 |------|------|------|
-| User | api/database.py | ✅ 活跃 |
+| User | api/database.py | ✅ 活跃（含 llm_config 字段） |
 | UserSession | api/database.py | ✅ 活跃 |
-| (更多 shisi 模型) | shisi/ | 通过异步 SQLite 访问 |
+| affinity/emotion_stage/persona 等 | shisi/api/v2/ | DDD 核心 plane，异步 SQLite 访问 |
 
-> **注意:** 项目正在从 shisi (异步 SQLite) 向 PostgreSQL 统一迁移。
-> 新功能应使用 `api/database.py` 中的 SQLAlchemy 模型。
+> **注意:** `shisi/` 子系统使用独立 SQLite 异步访问（DDD 分层: affinity/emotion_stage/persona/stats/vital_signs）。
+> `api/database.py` 中的 User/UserSession 是用户认证主模型。
 
 ---
 
@@ -120,10 +124,10 @@ ChromaDB 以持久化模式运行，数据存储在 `data/chroma_db/`。
 
 | 缓存类型 | 位置 | 用途 |
 |----------|------|------|
-| SQLite | data/users.db | 本地会话缓存 |
 | Python dict | memory/ | 运行时内存缓存 |
 | React Query | frontend/ | 前端 API 响应缓存 |
-| ChromaDB | data/chroma_db/ | 向量嵌入缓存 |
+| cache/llm_cache.py | cache/ | LLM 响应缓存 |
+| cache/redis_client.py | cache/ | Redis 缓存（可选） |
 
 ---
 
@@ -136,7 +140,7 @@ LoginPage
     → auth_routes.py
       → auth_jwt.py (bcrypt 验证 + JWT 生成)
         → database.py (User, UserSession)
-          → PostgreSQL
+          → SQLite (data/users.db)
 ```
 
 ### 聊天消息

@@ -48,7 +48,7 @@ python main.py
 | **工具** | 天气、日历、提醒、搜索……需要什么可以加 |
 | **剧情线** | 和角色的关系可以按"剧情"推进，有支线和进度追踪 |
 | **邀请码注册** | 内测期间通过邀请码注册，管理员在控制台生成 |
-| **管理控制台** | React 前端，18 个页面，角色管理/语音设置/系统配置一站式 |
+| **管理控制台** | React 前端，19 个页面，角色管理/语音设置/系统配置一站式 |
 
 ---
 
@@ -121,8 +121,8 @@ pytest --cov=. --cov-report=html  # 覆盖率报告
 ├── llm_provider/         LLM 接入层（自动 fallback）
 ├── frontend/             React 管理控制台
 │   └── src/
-│       ├── api/          13 个 API 模块（按域拆分，含 auth/invites）
-│       ├── pages/        18 个页面（全部注册路由）
+│       ├── api/          14 个 API 模块（按域拆分，含 auth/invites/llmProviders）
+│       ├── pages/        19 个页面（全部注册路由）
 │       ├── store/        Zustand（chatStore/errorStore/characterBuilderStore/authStore）
 │       ├── hooks/        React Query hooks
 │       ├── components/   layout + auth + shared + common + storyline + ui

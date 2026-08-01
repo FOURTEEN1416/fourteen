@@ -1,6 +1,6 @@
 # 代码图谱 — unique-you (唯一的你) v3.1.0
 
-> 由 维护者 手动维护 | 上次大规模扫描: 2026-07-09 | 最后更新: 2026-07-30
+> 由 维护者 手动维护 | 上次大规模扫描: 2026-07-09 | 最后更新: 2026-08-01
 > ✅ 路由/文件/模块/测试数已通过 Grep + LS + pytest + vitest 实时核实（2026-07-30）。
 > ⚠️ codebase-memory 图谱工具 节点/边数据仍为 2026-07-09 快照（未重新索引）。
 
@@ -14,8 +14,8 @@
 |------|------|---------|
 | API 端点（create_api_app 实扫） | **204 端点** / 17 include_router | `python -c "from api.app_factory import create_api_app; app=create_api_app(); sum(len(r.methods-{'HEAD','OPTIONS'}) for r in app.routes if hasattr(r,'methods'))"` |
 | main.py 体量 | **726 行 / 35.9 KB** | `(Get-Content \| Measure-Object -Line).Lines` |
-| 前端页面 | 18 个 | Glob `frontend/src/pages/*.tsx` |
-| 前端 API 模块 | **13 个** | Glob `frontend/src/api/*.ts`（v3.0.0 记录为 12，新增 `queryClient.ts`） |
+| 前端页面 | 19 个 | Glob `frontend/src/pages/*.tsx`（新增 `AdminProvidersPage.tsx`） |
+| 前端 API 模块 | **14 个** | Glob `frontend/src/api/*.ts`（新增 `llmProviders.ts`） |
 | 前端 Zustand store | 4 个 | LS `frontend/src/store/` |
 | Python 测试用例 | **1025 个全部通过 / 36 文件 / 124.44s** | `python -m pytest --tb=short -q`（2026-07-30 实跑,19 warnings,0 failed） |
 | 前端测试用例 | **79 个全部通过 / 14 文件** | `npx vitest run`（2026-07-30 实跑） |
@@ -54,6 +54,9 @@
 - `api/run_api.py`（+flock 文件锁自动恢复微信连接）
 - `api/database.py` User 模型（+`llm_config` JSON 字段）
 - `llm_provider/__init__.py`（+`invalidate_user_llm()` 用户级 gateway 缓存失效）
+- `frontend/src/pages/AdminProvidersPage.tsx`（+LLM 供应商管理页面，admin 角色）
+- `frontend/src/api/llmProviders.ts`（+LLM 供应商管理 API 客户端）
+- `api/routers/llm_providers_routes.py`（+LLM 供应商 CRUD 端点）
 
 ---
 
@@ -396,15 +399,16 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 
 ### 4.9 前端（React 19 管理控制台）
 
-- **18 个页面**：
+- **19 个页面**：
   - 用户/认证：LoginPage, UsersPage, AdminUsersPage, UserWorkspace
   - 角色管理：RolesPage, CreateRole, RoleSettings
   - 设置：SettingsLLM, SettingsSecurity, SettingsLogs, **SettingsVoice**
   - 工具/状态：**ToolsDashboard**, **StatusCenter**
   - 微信集成：WeChatPage, BindingDetailPage
+  - LLM 供应商管理：**AdminProvidersPage**（admin 角色）
   - 其他：DemoPage, NotFoundPage, SystemSettingsLayout
-- **13 个 API 模块**（v3.0.0 记录为 12，新增 `queryClient.ts`）：
-  - admin, auth, characters, chat, client, clone, demo, mimo, **queryClient**, system, training, users, wechat
+- **14 个 API 模块**（新增 `queryClient.ts` + `llmProviders.ts`）：
+  - admin, auth, characters, chat, client, clone, demo, **llmProviders**, mimo, **queryClient**, system, training, users, wechat
 - 4 个 Zustand store（authStore, chatStore, errorStore, characterBuilderStore）
 - React Query hooks
 - 79 个 Vitest 测试用例（across 14 files,全部通过 2026-07-30）— SettingsLLM/SettingsVoice/StatusCenter/ToolsDashboard/AdminUsersPage/WeChatPage 等

@@ -42,7 +42,7 @@ api/                        ← FastAPI 路由层
 │   ├── chat_routes.py      ← 聊天 (10 endpoints)
 │   ├── personality_routes.py ← 人格 (9 endpoints)
 │   ├── users_routes.py     ← 用户 (7 endpoints)
-│   ├── training_routes.py  ← 训练 (11 endpoints)
+│   ├── training_routes.py  ← 训练 (9 endpoints, LoRA 训练端点已移除)
 │   ├── tools_routes.py     ← 工具 (5 endpoints)
 │   ├── safety_routes.py    ← 安全 (12 endpoints)
 │   └── clone_routes.py     ← 克隆 (7 endpoints)
@@ -135,7 +135,7 @@ api/                        ← FastAPI 路由层
 | knowledge_routes.py | /api/knowledge/* | 7 |
 | persona_card_routes.py | /api/persona-card/* | 3 |
 
-### 迁移路由模块 (api/routers/*_routes.py) — 71 endpoints
+### 迁移路由模块 (api/routers/*_routes.py) — 69 endpoints
 
 > 以下模块原位于 `api/` 根目录（带下划线前缀），现已统一迁移至 `api/routers/`。
 
@@ -145,7 +145,7 @@ api/                        ← FastAPI 路由层
 | chat_routes | /api | 10 | 聊天 |
 | personality_routes | /api | 9 | 人格 |
 | users_routes | /api | 7 | 用户 |
-| training_routes | /api | 11 | 训练 |
+| training_routes | /api | 9 | 训练 (LoRA 训练端点已移除) |
 | tools_routes | /api | 5 | 工具 |
 | safety_routes | /api | 12 | 安全 |
 | clone_routes | /api | 7 | 克隆 |

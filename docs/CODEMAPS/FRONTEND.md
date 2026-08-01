@@ -1,6 +1,6 @@
 # 前端地图
 
-**最近更新:** 2026-07-13
+**最近更新:** 2026-08-01
 **技术栈:** React ^19.0.0 + Vite ^8.0.12 + TypeScript ~6.0.2 + Tailwind CSS ^4.1.0 + Zustand ^5.0.0
 **入口:** `frontend/index.html` → `frontend/src/main.tsx`
 
@@ -14,7 +14,7 @@ frontend/src/
 ├── App.tsx               ← 路由定义 + 布局
 ├── vite-env.d.ts
 │
-├── api/                  ← API 客户端模块 (13 文件)
+├── api/                  ← API 客户端模块 (14 文件)
 │   ├── client.ts         ← axios 实例 + 拦截器 (11.5KB)
 │   ├── queryClient.ts    ← TanStack Query 客户端配置
 │   ├── auth.ts           ← 认证 API
@@ -23,13 +23,14 @@ frontend/src/
 │   ├── chat.ts           ← 聊天 API
 │   ├── clone.ts          ← 克隆 API
 │   ├── demo.ts           ← 演示 API
+│   ├── llmProviders.ts   ← LLM 供应商管理 API
 │   ├── mimo.ts           ← MiMo 语音 API
 │   ├── system.ts         ← 系统 API
 │   ├── training.ts       ← 训练 API
 │   ├── users.ts          ← 用户 API
 │   └── wechat.ts         ← 微信 API
 │
-├── pages/                ← 页面组件 (18 pages)
+├── pages/                ← 页面组件 (19 pages)
 │   ├── LoginPage.tsx          ← 登录页 (8.7KB)
 │   ├── WeChatPage.tsx         ← 微信控制台 (20.5KB)
 │   ├── UsersPage.tsx          ← 用户列表 (8.4KB)
@@ -47,6 +48,7 @@ frontend/src/
 │   ├── SettingsLogs.tsx       ← 日志设置 (7.1KB)
 │   ├── ToolsDashboard.tsx     ← 工具仪表盘 (4.6KB)
 │   ├── AdminUsersPage.tsx     ← 用户管理 (41.8KB)
+│   ├── AdminProvidersPage.tsx ← LLM 供应商管理 (admin)
 │   └── NotFoundPage.tsx       ← 404 页面
 │
 ├── components/           ← 组件
@@ -136,6 +138,7 @@ frontend/src/
 | SettingsLogs | /settings/logs | 需要 | logs | 7.1KB |
 | ToolsDashboard | /settings/tools | 需要 | 工具 API | 4.6KB |
 | AdminUsersPage | /admin/users | Admin | admin API | 41.8KB |
+| AdminProvidersPage | /admin/providers | Admin | llmProviders API | — |
 | NotFoundPage | * | 无 | — | 0.7KB |
 
 ---
