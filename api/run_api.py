@@ -43,7 +43,7 @@ os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
 from sqlalchemy import select  # noqa: E402
 
 from api.app_factory import create_api_app  # noqa: E402
-from api.database import WechatBinding, _async_session, init_db  # noqa: E402
+from api.database import User, WechatBinding, _async_session, init_db  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
 from api.websocket_server import HAS_WEBSOCKETS, WebSocketServer  # noqa: E402
 from main import OptimizedOrchestrator, UserManager  # noqa: E402
@@ -268,6 +268,37 @@ async def _init_and_preload():
         ]
         await user_mgr.load_bindings(binding_dicts)
     logger.info("✅ 数据库就绪，已加载 %d 条微信绑定", len(binding_dicts))
+
+    # 一次性数据迁移：清除已下线 provider（opencode_zen）的用户配置
+    # 避免 _build_backend 抛 ValueError 导致用户聊天 500
+    await _migrate_retired_providers()
+
+
+async def _migrate_retired_providers():
+    """清除用户 llm_config 中已下线的 provider（opencode_zen 等）。
+
+    将这些用户的 provider 重置为 "auto"，并清空对应的 api_key/api_base/model，
+    避免遗留配置导致 _build_backend 抛 ValueError。
+    """
+    retired_providers = {"opencode_zen"}
+    try:
+        async with _async_session() as session:
+            result = await session.execute(select(User))
+            users = result.scalars().all()
+            migrated = 0
+            for user in users:
+                cfg = user.llm_config
+                if not isinstance(cfg, dict):
+                    continue
+                if cfg.get("provider") in retired_providers:
+                    # 直接清空整个 llm_config，让用户回退到全局默认配置
+                    user.llm_config = None
+                    migrated += 1
+            if migrated > 0:
+                await session.commit()
+                logger.info("✅ 已迁移 %d 个用户的过期 LLM 配置（opencode_zen → 全局默认）", migrated)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("用户 LLM 配置迁移失败（不影响启动）: %s", e)
 
 
 @asynccontextmanager

@@ -10,7 +10,6 @@ llm:
   #   "xunfei"          → 仅讯飞星火
   #   "baidu"           → 仅百度千帆
   #   "deepseek"        → 仅DeepSeek
-  #   "opencode_zen"    → 仅OpenCode Zen免费模型
   provider: auto
 
   # ── Fallback 链（provider=auto 时生效）──
@@ -21,7 +20,6 @@ llm:
     - zhipu         # 智谱AI GLM-4.7-Flash（永久免费）
     - xunfei        # 讯飞星火 Spark Lite（永久免费）
     - baidu         # 百度千帆 ERNIE-Speed（每月50万免费Token）
-    - opencode_zen  # OpenCode Zen 免费模型（无需API Key，兜底）
 
   temperature: 0.85
   max_tokens: 2048
@@ -71,8 +69,8 @@ tools:
     - search
     - calendar
     - calculator
-    - reminder
-    - calendar_query
+    - set_reminder
+    - query_reminders
     - time_awareness
     - character_card
 

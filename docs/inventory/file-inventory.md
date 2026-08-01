@@ -195,7 +195,6 @@
 | `llm_provider/llm_gateway.py` | LLM 路由网关 |
 | `llm_provider/multi_provider_gateway.py` | 多 Provider Fallback |
 | `llm_provider/openai_compatible_provider.py` | OpenAI 兼容接口 |
-| `llm_provider/opencode_zen_provider.py` | OpenCode Zen 免费模型 |
 | `llm_provider/prompt_template_manager.py` | Prompt 模板管理 |
 
 ### 2.3 Emotion Engine (my_character/)
