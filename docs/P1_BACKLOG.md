@@ -35,5 +35,6 @@
 
 ## 新增观察（2026-08-24 接管体检）
 
-6. **[OBS-1] 生产后端端口直暴露**: 服务器 uvicorn 4 worker 监听 `0.0.0.0:8000`，公网可绕过 nginx 直达后端（nginx 限速/安全头失效）。建议改为绑定 `127.0.0.1:8000`。需生产变更授权。
-7. **[OBS-2] HTTPS 未启用**: 裸 IP 无法签发 certbot 证书，当前 HTTP 服务；`.env.production` 的 CORS 写的却是 https origin。绑定域名后按 nginx conf 注释走 certbot 即可。
+6. ~~**[OBS-1] 生产后端端口直暴露**~~ ✅ **2026-08-24 已修复**：服务器 `/etc/systemd/system/ai-girlfriend.service` 的 `--host 0.0.0.0` → `127.0.0.1`（daemon-reload + restart）。实测：ss 显示仅 `127.0.0.1:8000` 监听；`/docs` 200；nginx 代理链路 200；微信桥接凭 flock 自动恢复登录。仓库模板 workers/keep-alive 已同步生产实况（4 / 30s）。
+7. **[OBS-2] HTTPS 未启用**: 裸 IP 无法签发 certbot 证书，当前 HTTP 服务；`.env.production` 的 CORS 写的却是 https origin。绑定域名后按 nginx conf 注释走 certbot 即可。（用户决策：暂缓，证书+域名需费用）
+8. **[OBS-3] systemd 服务以 root 运行**: 生产 service `User=root`，模板基线是 `www-data`。改运行用户涉及文件权限迁移，需停机窗口规划，暂记录待办。
