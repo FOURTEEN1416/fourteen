@@ -376,11 +376,6 @@
 | `docs/architecture/gap-closure-20260527.md` | 差距闭合计划 |
 | `docs/superpowers/plans/` | 设计计划 |
 | `docs/superpowers/specs/` | 设计规范 |
-| `.triad-navigation/MAP.md` | 三体导航地图 |
-| `.triad-navigation/COMPASS.md` | 三体导航指南针 |
-| `.triad-navigation/CONTROL.md` | 三体导航控制环 |
-| `.triad-navigation/HANDOFF.md` | 交接文档 |
-| `.triad-navigation/design-vs-current-gap.md` | 设计差距分析 |
 | `README.md` | 项目说明 |
 
 ---

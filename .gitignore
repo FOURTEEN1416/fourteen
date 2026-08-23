@@ -106,17 +106,11 @@ create-role-presets.png
 playwright-report/
 test-results/
 
-# ── 大赛提交材料（保留本地，不进入版本控制） ──
-docs/trae_submission/
-
 # ── 用户角色卡数据（保留本地，不进入版本控制） ──
 config/characters/
 
 # ── 第三方依赖代码（保留本地，不进入版本控制） ──
 third_party/
-
-# ── Triad Navigation 运行时进度（保留本地，不进入版本控制） ──
-.triad-navigation/progress.md
 
 .env
 

@@ -1,5 +1,5 @@
 """
-Demo 体验路由 — 无需认证，面向大赛评审与用户试用
+Demo 体验路由 — 无需认证，面向外部访客与用户试用
 
 端点：
 - POST /api/demo/chat/stream   SSE 流式对话

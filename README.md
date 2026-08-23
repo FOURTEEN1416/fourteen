@@ -140,13 +140,10 @@ pytest --cov=. --cov-report=html  # 覆盖率报告
 
 ## 架构
 
-项目采用三体导航（Triad Navigation）方法论管理：
-
-- **地图**（`.triad-navigation/MAP.md`）：8 层代码地图，描述现状
-- **指南针**（`.triad-navigation/COMPASS.md`）：7 条设计原则 + 9 个 ADR
-- **闭环控制**（`.triad-navigation/CONTROL.md`）：Fitness Functions + 审计节奏
-
-深入看 `docs/architecture/8-layer-code-map.md` 和 `.triad-navigation/` 目录。
+- **设计原则**：`docs/architecture/design-principles.md`
+- **架构决策记录**：`docs/adr/`（ADR-0001~0006、ADR-0011~0014）
+- **代码图谱**：`CODE_GRAPH.md`
+- **知识图谱**：`docs/architecture/knowledge-graph.md`
 
 ---
 
