@@ -12,6 +12,9 @@ build/
 venv/
 env/
 
+# ── 视觉图册本地产物（截图含真实用户数据，不进版本控制） ──
+docs/visual-map/
+
 # ── 临时文件 ──
 *.log
 *.tmp
