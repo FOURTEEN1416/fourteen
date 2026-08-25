@@ -1,5 +1,11 @@
 # 前端全量翻新实施计划
 
+> **📋 文档状态卡**（2026-08-26 治理标注 · 决策链见 `docs/DECISION_LEDGER.md`）
+> - **层级**：L2 决策档案 | **结局**：⏸️ 执行中止于 Phase 3
+> - **✅ 已消化部分**：Phase 0-3（骨架/主题/页面迁移/结构层）大体完成
+> - **❌ 搁浅部分**：Phase 4 五项动效任务零执行 → 并入挂起池 SP-5（与 glass 动效层同源）
+> - 中止≠否决。重启需用户批准 SP-5，届时以本计划 Phase 4 原文为任务清单。
+
 > **For agentic workers:** Inline execution.
 
 **Goal:** 按 `frontend-design-framework-v1.md` + `2026-05-27-immersive-glass-design.md` 全量重写前端

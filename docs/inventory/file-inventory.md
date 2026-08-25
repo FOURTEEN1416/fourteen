@@ -1,5 +1,10 @@
 # Project File Inventory
 
+> **📋 文档状态卡**（2026-08-26 治理标注）：**L3 历史快照**（2026-05-31 时点），仅作考古对照，不随代码演进更新。
+> **已失效判断**：本文件「shisi/ 旧架构，逐步废弃」结论已被 `CODE_GRAPH.md` §14 正式推翻（保留 shisi/ 不重命名，legacy 仅表历史迁移非待删除）——见 `docs/DECISION_LEDGER.md` 裁决 C3。
+> **已消失实体**：文中 memory/（根目录）、knowledge_vault/、SettingsGeneral.tsx、StaggerContainer/ParallaxTilt/AnimatedNumber 组件等均不存在于当前代码库。
+> 现行结构以 `CODE_GRAPH.md` + `CODEMAPS/` 为准。
+
 > Generated: 2026-05-31 | Purpose: 全项目文件按域分类，方便维护和快速定位
 
 ---

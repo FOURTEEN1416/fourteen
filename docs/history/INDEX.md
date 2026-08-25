@@ -66,6 +66,20 @@ GirlfriendManager 按 user_id 隔离（记忆/情感/角色卡独立，LLM/安�
 
 产品形态：**多用户微信陪伴系统**——扫码即用 + 19 页管理控制台 + 204 API 端点 + 1104 测试基线。
 
+### 🏛️ 阶段六：文档治理体系建立（2026-08-26 生效）
+
+**触发**：用户批复「仅批准文档治理」，要求严谨科学治理——追踪决策演变、筛选真决策、提炼终极状态，拒绝暴力删除/简单归档。
+
+**产出三层治理体系**：
+
+| 层 | 文件 | 职责 |
+|----|------|------|
+| 决策生死 | `docs/DECISION_LEDGER.md` | 时间轴总账 + C1-C4 裁决 + 挂起池 SP-1~8 |
+| 终态合成 | `docs/VISION.md` | 既成事实基线 / 候选池 / 非目标 三分法 |
+| 本文件 | `docs/history/INDEX.md` | 阶段叙事与漂移登记 |
+
+**同批落盘动作**：ADR-0011/0013 标注 Superseded；L2 决策档案 ×10 加状态卡；L3 快照 ×4 加历史头；CODEMAPS×3 数字漂移声明；`.superpowers/brainstorm/create-role-schemes.html` 按 ADR-0012 处置——**归档为本目录**（保留三案决策链考古价值，非裸删）。
+
 ---
 
 ## 已知真值漂移登记簿
@@ -75,3 +89,6 @@ GirlfriendManager 按 user_id 隔离（记忆/情感/角色卡独立，LLM/安�
 | README 引用不存在的 `.triad-navigation/` 与 `8-layer-code-map.md` | 08-24 | ✅ README 已修，历史地图见 `docs/history/` |
 | CODE_GRAPH 称「19 页面全部注册路由」 | 08-24 | ⚠️ 实为 16 挂载 + 3 孤儿（UsersPage/UserWorkspace/BindingDetailPage），详见 FEATURE_MAP F 区 |
 | progress-tracker / design-expectation 比赛文档过期 | 08-24 | ✅ 已删除（比赛信息源清理 commit 893a906） |
+| `config/shisi.yaml` L148 `default_tts: "edge-tts"` 与 system.yaml `engine: "mimo-tts"` 及 reinit BREAKING 决策冲突 | 08-26 | ⚠️ **待修残留**（一行配置修正，属代码改动，本轮文档治理不动）|
+| CODEMAPS/INDEX「21 注册路由」、FRONTEND「19 含孤儿」、BACKEND 端点数偏差 | 08-26 | ✅ 三份头部均已加漂移声明，权威数字指向 CODE_GRAPH |
+| `.superpowers/brainstorm/` 未按 ADR-0012 清除 | 08-26 | ✅ HTML 已归档至本目录（2026-06-29-create-role-brainstorm.html），原目录已删 |

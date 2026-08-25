@@ -1,5 +1,7 @@
 # 代码地图索引
 
+> **⚠️ 数字漂移声明**（2026-08-26 治理标注）：本文「21 注册路由」口径与实测不符——实际为 **16 挂载 + 3 孤儿页面**（UsersPage/UserWorkspace/BindingDetailPage）。权威数字以 `CODE_GRAPH.md` 为准，详见 `docs/history/INDEX.md` 漂移登记簿。
+
 **最近更新:** 2026-08-01
 **项目版本:** 3.1.0
 **项目规模:** ~356 Python 文件 + ~106 TS/TSX 文件 | 当前分支: `main`

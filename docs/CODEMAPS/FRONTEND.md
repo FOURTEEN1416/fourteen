@@ -1,5 +1,7 @@
 # 前端地图
 
+> **⚠️ 数字漂移声明**（2026-08-26 治理标注）：本文路由统计含 3 个孤儿页面（UsersPage/UserWorkspace/BindingDetailPage 未挂载导航）。权威清单以 `CODE_GRAPH.md` + `docs/FEATURE_MAP.md` F 区为准。
+
 **最近更新:** 2026-08-01
 **技术栈:** React ^19.0.0 + Vite ^8.0.12 + TypeScript ~6.0.2 + Tailwind CSS ^4.1.0 + Zustand ^5.0.0
 **入口:** `frontend/index.html` → `frontend/src/main.tsx`

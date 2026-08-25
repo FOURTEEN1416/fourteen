@@ -1,5 +1,11 @@
 # 唯一的你 沉浸式玻璃态视觉设计 v1.0
 
+> **📋 文档状态卡**（2026-08-26 治理标注 · 决策链见 `docs/DECISION_LEDGER.md`）
+> - **层级**：L2 决策档案 | **结局**：⏸️ 半程生效
+> - **✅ 生效部分**：结构层（配色/毛玻璃/布局/字体）＝现行视觉基线，已写入 `docs/VISION.md` 终态
+> - **❌ 未执行部分**：动效层五任务（gradient-shift/stagger 入场/视差/CountUp 等）零执行 → 挂起池 SP-5；配套三组件已于 06-03 死代码清理中删除
+> - 正文保持原样，生效范围以上述划界为准。
+
 > 状态: **设计定稿**  
 > 基于 `frontend-design-framework-v1.md` 架构框架 + 用户确认的全量沉浸方向  
 > 参考风格: Maze (mazehq.com) · Immersive Garden (immersive-g.com)

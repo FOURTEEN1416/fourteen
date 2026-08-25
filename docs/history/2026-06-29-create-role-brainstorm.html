@@ -1,0 +1,87 @@
+<h2>创建角色页重构方案</h2>
+<p class="subtitle">去掉 emoji，重新组织位置、大小、形状。请选一个方向。</p>
+
+<div class="options">
+  <div class="option" data-choice="A" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>横向标签 + 右侧预览</h3>
+      <p>顶部三个方法改成横向 Macaron 标签（无图标），下方左表单、右实时角色卡，视觉重心稳定。</p>
+      <div class="mockup" style="margin-top:1rem">
+        <div class="mockup-header">方案 A 示意</div>
+        <div class="mockup-body" style="padding:1rem">
+          <div style="display:flex;gap:0.5rem;margin-bottom:1rem">
+            <div style="flex:1;background:linear-gradient(135deg,#F8B4D9,#B4D9F8);color:#fff;padding:0.6rem;border-radius:10px;text-align:center;font-size:0.8rem;font-weight:600">AI 对话</div>
+            <div style="flex:1;background:#f2f2f7;padding:0.6rem;border-radius:10px;text-align:center;font-size:0.8rem;color:#86868b">克隆好友</div>
+            <div style="flex:1;background:#f2f2f7;padding:0.6rem;border-radius:10px;text-align:center;font-size:0.8rem;color:#86868b">文件导入</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1.2fr 0.8fr;gap:1rem">
+            <div style="background:#f2f2f7;border-radius:10px;padding:1rem;min-height:120px">
+              <div style="font-size:0.75rem;color:#86868b;margin-bottom:0.5rem">对话 / 输入区</div>
+              <div style="height:14px;background:#e5e5e7;border-radius:4px;margin-bottom:0.5rem"></div>
+              <div style="height:14px;background:#e5e5e7;border-radius:4px;width:80%"></div>
+            </div>
+            <div style="background:#fff;border:1px solid #d1d1d6;border-radius:10px;padding:1rem">
+              <div style="font-size:0.75rem;color:#86868b;margin-bottom:0.5rem">实时预览卡</div>
+              <div style="height:10px;background:#F8B4D9;border-radius:3px;width:60%;margin-bottom:0.5rem"></div>
+              <div style="height:8px;background:#e5e5e7;border-radius:3px"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="B" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>左侧步骤导航（Wizard）</h3>
+      <p>左侧竖向步骤条显示进度，右侧是不同方式的编辑工作区，更像“创建流程”，适合后续扩展。</p>
+      <div class="mockup" style="margin-top:1rem">
+        <div class="mockup-header">方案 B 示意</div>
+        <div class="mockup-body" style="padding:1rem">
+          <div style="display:flex;gap:1rem">
+            <div style="width:140px;background:#f2f2f7;border-radius:10px;padding:0.75rem">
+              <div style="font-size:0.75rem;font-weight:600;color:#F472B6;margin-bottom:0.75rem">1 AI 对话</div>
+              <div style="font-size:0.75rem;color:#86868b;margin-bottom:0.75rem">2 克隆好友</div>
+              <div style="font-size:0.75rem;color:#86868b">3 文件导入</div>
+            </div>
+            <div style="flex:1;background:#fff;border:1px solid #d1d1d6;border-radius:10px;padding:1rem;min-height:120px">
+              <div style="font-size:0.75rem;color:#86868b;margin-bottom:0.5rem">当前步骤工作区</div>
+              <div style="height:14px;background:#e5e5e7;border-radius:4px;margin-bottom:0.5rem"></div>
+              <div style="height:14px;background:#e5e5e7;border-radius:4px;width:70%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="C" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>中央大卡片 + 底部浮岛预览</h3>
+      <p>方法选择器改成底部三个圆角长按钮，中央是一个统一的玻璃大卡片承载交互，底部浮岛实时展示角色卡。</p>
+      <div class="mockup" style="margin-top:1rem">
+        <div class="mockup-header">方案 C 示意</div>
+        <div class="mockup-body" style="padding:1rem">
+          <div style="background:#fff;border:1px solid #d1d1d6;border-radius:16px;padding:1.5rem;min-height:120px;margin-bottom:1rem">
+            <div style="font-size:0.75rem;color:#86868b;margin-bottom:0.5rem">交互主卡片</div>
+            <div style="height:14px;background:#e5e5e7;border-radius:4px;margin-bottom:0.5rem"></div>
+            <div style="height:14px;background:#e5e5e7;border-radius:4px;width:60%"></div>
+          </div>
+          <div style="display:flex;gap:0.5rem;justify-content:center">
+            <div style="flex:1;max-width:140px;background:#F8B4D9;color:#fff;padding:0.5rem 0;border-radius:20px;text-align:center;font-size:0.75rem;font-weight:600">AI 对话</div>
+            <div style="flex:1;max-width:140px;background:#f2f2f7;padding:0.5rem 0;border-radius:20px;text-align:center;font-size:0.75rem;color:#86868b">克隆好友</div>
+            <div style="flex:1;max-width:140px;background:#f2f2f7;padding:0.5rem 0;border-radius:20px;text-align:center;font-size:0.75rem;color:#86868b">文件导入</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>我的建议</h3>
+  <p class="subtitle">推荐 <strong>方案 A</strong>：和现有三卡布局最接近，改造成本低，同时引入右侧实时预览让“创建”更有成就感，也符合控制台的操作习惯。</p>
+</div>

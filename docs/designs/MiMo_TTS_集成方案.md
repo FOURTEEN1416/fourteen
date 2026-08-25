@@ -1,5 +1,11 @@
 # MiMo TTS 集成方案
 
+> **📋 文档状态卡**（2026-08-26 治理标注 · 决策链见 `docs/DECISION_LEDGER.md`）
+> - **层级**：L2 决策档案 | **结局**：✅ 已实施
+> - **现行效力**：四级降级链（MiMo→CosyVoice→SoVITS→Bert→Edge）与 9 种情感参数映射为后端容灾设计的法律依据；前端仅暴露 MiMo（07-27 reinit BREAKING，裁决 C4 支持方）
+> - **已知残留**：`config/shisi.yaml` L148 `default_tts: "edge-tts"` 为漏改漂移，已登记 INDEX 待修清单
+> - 正文保持原样。
+
 > **架构原则**: 优先API，本地引擎作为降级
 
 ## 概述
