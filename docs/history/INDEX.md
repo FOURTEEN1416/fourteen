@@ -89,6 +89,6 @@ GirlfriendManager 按 user_id 隔离（记忆/情感/角色卡独立，LLM/安�
 | README 引用不存在的 `.triad-navigation/` 与 `8-layer-code-map.md` | 08-24 | ✅ README 已修，历史地图见 `docs/history/` |
 | CODE_GRAPH 称「19 页面全部注册路由」 | 08-24 | ⚠️ 实为 16 挂载 + 3 孤儿（UsersPage/UserWorkspace/BindingDetailPage），详见 FEATURE_MAP F 区 |
 | progress-tracker / design-expectation 比赛文档过期 | 08-24 | ✅ 已删除（比赛信息源清理 commit 893a906） |
-| `config/shisi.yaml` L148 `default_tts: "edge-tts"` 与 system.yaml `engine: "mimo-tts"` 及 reinit BREAKING 决策冲突 | 08-26 | ⚠️ **待修残留**（一行配置修正，属代码改动，本轮文档治理不动）|
+| `config/shisi.yaml` L148 `default_tts: "edge-tts"` 与 system.yaml `engine: "mimo-tts"` 及 reinit BREAKING 决策冲突 | 08-26 | ✅ **已修**（08-26 用户批准后改为 mimo-tts；reinit 六项验证欠账同步补验：4 项 API 层全绿 + 2 项部分验证）|
 | CODEMAPS/INDEX「21 注册路由」、FRONTEND「19 含孤儿」、BACKEND 端点数偏差 | 08-26 | ✅ 三份头部均已加漂移声明，权威数字指向 CODE_GRAPH |
 | `.superpowers/brainstorm/` 未按 ADR-0012 清除 | 08-26 | ✅ HTML 已归档至本目录（2026-06-29-create-role-brainstorm.html），原目录已删 |

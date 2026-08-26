@@ -122,7 +122,7 @@ pytest --cov=. --cov-report=html  # 覆盖率报告
 ├── frontend/             React 管理控制台
 │   └── src/
 │       ├── api/          14 个 API 模块（按域拆分，含 auth/invites/llmProviders）
-│       ├── pages/        19 个页面（全部注册路由）
+│       ├── pages/        19 个页面（16 挂载 + 3 孤儿）
 │       ├── store/        Zustand（chatStore/errorStore/characterBuilderStore/authStore）
 │       ├── hooks/        React Query hooks
 │       ├── components/   layout + auth + shared + common + storyline + ui

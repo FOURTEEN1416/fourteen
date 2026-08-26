@@ -402,7 +402,7 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 
 ### 4.9 前端（React 19 管理控制台）
 
-- **19 个页面**：
+- **19 个页面**（16 挂载路由 + 3 孤儿：UsersPage / UserWorkspace / BindingDetailPage，详见 FEATURE_MAP F 区）：
   - 用户/认证：LoginPage, UsersPage, AdminUsersPage, UserWorkspace
   - 角色管理：RolesPage, CreateRole, RoleSettings
   - 设置：SettingsLLM, SettingsSecurity, SettingsLogs, **SettingsVoice**

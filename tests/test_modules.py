@@ -148,7 +148,8 @@ class TestVoiceEnhancer:
     def test_default_config(self):
         enhancer = VoiceEnhancer()
         config = enhancer.get_tts_config("c1")
-        assert config["tts_engine"] == "edge-tts"
+        # 2026-08-26 对齐 reinit BREAKING 决策：默认引擎收敛为 mimo-tts（前端唯一）
+        assert config["tts_engine"] == "mimo-tts"
         assert config["speed"] == 1.0
 
     def test_emotion_params(self):
