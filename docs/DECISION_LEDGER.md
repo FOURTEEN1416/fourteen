@@ -41,7 +41,7 @@
 |------|------|----------|------|----------|
 | 06-01~04 | 品牌「唯一的你」+ JWT/X-API-Key 双认证体系 | history/HANDOFF | ✅ | 完全生效，P0 安全修复均在位 |
 | 06-03 | 死代码清理（删 StaggerContainer/ParallaxTilt/AnimatedNumber） | DELETION_LOG | 🔄 反噬 | 当时有据可依（未被引用）；但间接导致 glass 动效层失去载体。教训已吸收：删除前须对照规划文档 |
-| 06-29 | **创建角色重设计方案 A 定稿**（横向分段+右侧常驻预览卡） | specs/create-role-redesign-design + brainstorm html | ⏸️ 定稿未实施 | 决策链完整：brainstorm 三案→选A→114行规格。ADR-0013（人设卡进侧边栏）因依赖 ADR-0011 一并失效（C2）。方案 A 本身**未被否决也未被批准**，08-26 用户批复不实施 → 转挂起池 |
+| 06-29 | **创建角色重设计方案 A 定稿**（横向分段+右侧常驻预览卡） | specs/create-role-redesign-design + brainstorm html | 🔄 **主体已实施**（08-26 通读修正） | 决策链完整：brainstorm 三案→选A→114行规格。ADR-0013（人设卡进侧边栏）因依赖 ADR-0011 一并失效（C2）。**08-26 前端通读证实：CreateRole 已是「左侧工作区+右侧常驻 PersonaPreviewCard」布局**（`lg:grid-cols-[2fr_1fr]`），方案A 核心结构落地；剩余差距仅为规格细节核验（见 FEATURE_MAP G-02 修订）。此前「定稿未实施」判断作废 |
 | 06 月 | 产品定位从单用户转向多用户微信陪伴系统 | README v3.x | ✅ | 现行定位 |
 
 ### 2026-07：收敛期
@@ -86,13 +86,14 @@
 
 | 编号 | 事项 | 决策成熟度 | 挂起原因 |
 |------|------|-----------|----------|
-| SP-1 | 状态中心并集补齐（framework-v1 ∪ knowledge-graph L51） | 方案齐备（两版规划并存） | 未获批 |
-| SP-2 | 创建角色方案 A 实施 | 规格定稿 114 行 | 未获批 |
-| SP-3 | Demo 删除（DemoPage.tsx+/demo/demo.ts/demo_routes×4） | 清单明确 | 未获批 |
-| SP-4 | 知识库入口升级（侧边栏一级） | 方向确定、位级未定 | 未获批 |
+| SP-1 | 状态中心并集补齐（framework-v1 ∪ knowledge-graph L51） | 方案齐备 + **数据层 hook 已就绪**（useEmotionTrend 等，工作量下修） | 未获批 |
+| SP-2 | ~~创建角色方案 A 实施~~ → **主体已实施**（08-26 通读修正），仅剩规格细节核验 | 见 FEATURE_MAP G-02 修订 | 待核验清单确认 |
+| SP-3 | ~~Demo 删除~~ → **❌ 立论崩塌撤回**（08-26 通读：DemoPage 为精雕公开获客门面——记忆抽屉/情感徽章/SSE 流式，LoginPage 有直通入口，后端四端点专属支撑。删除=砍掉访客转化路径） | 不再是候选事项 | 已撤销 |
+| SP-4 | 知识库入口升级 → **重新定性**：非新建而是「复活」——KnowledgePreview 组件完整在库（统计+检索测试）、knowledge_routes 8 端点在线，只差挂载 | 工作量大降 | 未获批 |
 | SP-5 | 塑料感动效补课（Phase4×5 任务+恢复三组件） | 任务分解完毕 | 未获批 |
 
 附：拟人化 v2 的 3 个未做模块（WorldInfoScanner/SmartCompressor/EmotionPredictor）同属候选，一并挂起。
+附2（08-26 通读新发现）：**幽灵层复活选项**——UsersPage(我的微信绑定管理)/BindingDetailPage(绑定选角色)/UserWorkspace 三页互链完整、测试维护中，是 F-03 充实与微信↔角色绑定的现成半成品，处置（删/归档/复挂路由）待用户裁决，登记为 SP-9。
 
 ---
 

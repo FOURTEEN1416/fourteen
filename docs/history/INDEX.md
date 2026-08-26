@@ -92,3 +92,4 @@ GirlfriendManager 按 user_id 隔离（记忆/情感/角色卡独立，LLM/安�
 | `config/shisi.yaml` L148 `default_tts: "edge-tts"` 与 system.yaml `engine: "mimo-tts"` 及 reinit BREAKING 决策冲突 | 08-26 | ✅ **已修**（08-26 用户批准后改为 mimo-tts；reinit 六项验证欠账同步补验：4 项 API 层全绿 + 2 项部分验证）|
 | CODEMAPS/INDEX「21 注册路由」、FRONTEND「19 含孤儿」、BACKEND 端点数偏差 | 08-26 | ✅ 三份头部均已加漂移声明，权威数字指向 CODE_GRAPH |
 | `.superpowers/brainstorm/` 未按 ADR-0012 清除 | 08-26 | ✅ HTML 已归档至本目录（2026-06-29-create-role-brainstorm.html），原目录已删 |
+| 「创建角色方案A未实施」「Demo 是可删残留」「知识库功能深埋」三项判断与代码实况不符 | 08-26 晚 | ✅ **前端 src 全文通读后全部修正**（FEATURE_MAP F 区/H 区重写）：方案A主体已在位；Demo=公开获客门面（登录页有直通入口）；知识库组件 KnowledgePreview 完整存在但零挂载。同时发现幽灵层：UsersPage/UserWorkspace/BindingDetailPage 三页互链无路由 + 6 个零引用 hooks（含 useEmotionTrend）。详见 DECISION_LEDGER SP 区修订 |
