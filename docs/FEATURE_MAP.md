@@ -1,6 +1,7 @@
 # 功能现状地图（FEATURE MAP）
 
 > 创建：2026-08-24 | 依据：App.tsx 路由实读 + 页面/端点代码核验 + 1104 测试基线
+> **08-26 前端 src 全文穷举复核**：88/88 源文件 · 11,384 行全部逐行读过，本图各条目以该次通读为准。
 >
 > **用法**：这是你和我之间的「共同坐标系」。想改哪里，直接报编号（如 `F-07`）+ 说期望，
 > 我会按 AGENTS.md 商讨协议先复述、排歧义，你确认后才动手。
@@ -64,7 +65,10 @@
 | F-17 | 用户工作区 | `pages/UserWorkspace.tsx` | 用户维度工作区（角色网格+三统计卡+nested Outlet 设计），navigate 目标 `/users/:id/roles/*` 全部无路由 |
 | F-18 | 绑定详情页 | `pages/BindingDetailPage.tsx` | **为单个微信绑定选择角色**（预设网格+保存），F-16 点卡片即达此页——微信↔角色绑定的核心交互，后端 updateBinding 在线 |
 | G-19 | 知识库预览组件 | `components/storyline/KnowledgePreview.tsx` | **你记忆中的知识库入口本体**：知识库统计（indexed/chunks/来源分布）+ 检索测试（POST knowledge/search）。全项目零 import——组件在库、后端 8 端点全活、挂载为零 |
-| G-20 | 幽灵数据层 | `hooks/useQueries.ts` + `api/system.ts` | 已封装但零 UI 消费：`useEmotionTrend`(7日情绪趋势)、`useRAGStats`、`ragSearch/ragUpload`、`useProactiveHistory`、`usePsychProfile/useMentalHealth` 等 —— SP-1 状态中心富化的数据层已就绪 |
+| G-20 | 幽灵数据层 | `hooks/useQueries.ts` + `api/system.ts` | 已封装但零 UI 消费：`useEmotionTrend`(7日情绪趋势)、`useRAGStats`、`ragSearch/ragUpload`、`useProactiveHistory` 等 —— SP-1 状态中心富化的数据层已就绪 |
+| G-21 | **心理画像体系（零消费的最重能力）** | `/api/psych/*` ×5 封装 + types/api.ts L269-388 + usePsychProfile/Snapshots/Reset/MentalHealth | 用户心理建模全家桶：OCEAN 大五 + PAD 情绪三维 + HEXACO 六维 + 黑暗三联征（自恋/马基雅维利/精神病态分级）+ 抑郁九项/焦虑七项筛查 + 自伤风险分级 + LIWC 语言心理特征 + 认知扭曲检测。**后端在线、前端类型/hook 齐备、无任何页面展示** |
+| G-22 | 收藏与跨角色记忆转发 | characters.ts `listFavorites/addFavorite/removeFavorite/forwardFavorite` | 记忆收藏 + 跨角色转发四端点封装齐备，无 UI 消费 |
+| G-23 | 双用户体系（非残缺，是设计） | `api/users.ts` vs `api/admin.ts` | `/users/*`=微信终端用户域（昵称/亲密度等级/主情感/聊天数/角色卡指派/重置）；`/admin/users`=系统注册账号域（email/role/is_active）。前者部分被 UsersPage 幽灵层引用，后者由 F-14 活页消费 |
 
 ## G. 后端核心能力（API 层，204 端点 / 21 个路由文件）
 
