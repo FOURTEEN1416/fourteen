@@ -435,68 +435,99 @@ class AgentReachSource:
 
 
 # ══════════════════════════════════════════════
-#  内容源 3: Firecrawl SDK
+#  内容源 3: Crawl4AI（免授权替代 Firecrawl）
 # ══════════════════════════════════════════════
 
-class FirecrawlSource:
-    """Firecrawl SDK 搜索和抓取。需 FIRECRAWL_API_KEY 环境变量。"""
+class Crawl4AISource:
+    """Crawl4AI 免授权网页抓取与搜索模块。
 
-    NAME = "firecrawl"
+    不需要 FIRECRAWL API Key，使用 Crawl4AI 的 AsyncWebCrawler。
 
-    def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or os.environ.get("FIRECRAWL_API_KEY", "")
-        self._app: Any = None
+    兼容 FirecrawlSource 同名接口：`search()` 与 `scrape()`。
+    """
+
+    NAME = "crawl4ai"
+
+    def __init__(self):
+        self._crawler: Any = None
 
     @property
     def available(self) -> bool:
-        if not self.api_key:
-            return False
-        try:
-            import firecrawl  # noqa: F401
-            return True
-        except ImportError:
-            return False
+        # Crawl4AI 已预装，永远可用（无需 API Key）
+        return True
 
-    def _get_app(self):
-        if self._app is None:
-            from firecrawl import FirecrawlApp
-            self._app = FirecrawlApp(api_key=self.api_key)
-        return self._app
-
-    def search(self, query: str, max_results: int = 5) -> list[RawDocument]:
-        if not self.available:
-            return []
-        app = self._get_app()
-        docs: list[RawDocument] = []
+    async def _search_async(self, query: str, max_results: int) -> list[RawDocument]:
+        """真正的 async 搜索实现。"""  
+        import re
+        from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, BrowserConfig
+        browser_cfg = BrowserConfig(headless=True, verbose=False)
+        run_cfg = CrawlerRunConfig(cache_mode="bypass", verbose=False)
+        crawler = AsyncWebCrawler(config=browser_cfg)
+        await crawler.start()
         try:
-            results = app.search(query=query, limit=max_results)
-            data_list = results if isinstance(results, list) else (
-                results.get("data", []) if isinstance(results, dict) else [])
-            for item in data_list:
-                url = item.get("url", "") if isinstance(item, dict) else ""
-                title = item.get("title", "") if isinstance(item, dict) else ""
-                content = (item.get("markdown", "") or item.get("content", "")) if isinstance(item, dict) else ""
-                if content:
-                    docs.append(RawDocument(url=url, title=title, content=content, source=FirecrawlSource.NAME))
+            docs: list[RawDocument] = []
+            result = await crawler.arun(f"https://r.jina.ai/search?q={query}&num={max_results}")
+            if result.success and result.markdown:
+                content = result.markdown
+                for line in content.split("\n"):
+                    m = re.match(r"^- \[(.+?)\]\((.+?)\)", line.strip())
+                    if m:
+                        title, url = m.group(1), m.group(2)
+                        docs.append(RawDocument(url=url, title=title, content=title, source=self.NAME))
+                        if len(docs) >= max_results:
+                            break
         except Exception as e:
-            logger.warning("Firecrawl 搜索失败: %s", e)
+            logger.debug("Crawl4AI 搜索异常: %s", e)
+        finally:
+            try:
+                await crawler.close()
+            except Exception:
+                pass
         return docs
 
-    def scrape(self, url: str) -> RawDocument:
-        if not self.available:
-            return RawDocument(url=url, source=FirecrawlSource.NAME)
-        app = self._get_app()
+    async def _scrape_async(self, url: str) -> RawDocument:
+        """真正的 async 抓取实现。"""  
+        from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+        browser_cfg = BrowserConfig(headless=True, verbose=False)
+        run_cfg = CrawlerRunConfig(cache_mode="bypass", verbose=False)
+        crawler = AsyncWebCrawler(config=browser_cfg)
+        await crawler.start()
+        doc = RawDocument(url=url, source=self.NAME)
         try:
-            result = app.scrape_url(url)
-            content = result.get("markdown", "") or result.get("content", "") if isinstance(result, dict) else ""
-            title = result.get("title", "").strip() if isinstance(result, dict) else ""
-            meta = result.get("metadata", {}) if isinstance(result, dict) else {}
-            if not title and isinstance(meta, dict):
-                title = meta.get("title", "")
-            return RawDocument(url=url, title=title, content=content, source=FirecrawlSource.NAME)
+            result = await crawler.arun(url)
+            if result.success and result.markdown:
+                doc.content = result.markdown
+                # 尝试从 markdown 提取 title（首行作为 title）
+                lines = result.markdown.split("\n")
+                doc.title = lines[0].strip() if lines else url
+            else:
+                doc.content = ""
+                doc.title = url
         except Exception as e:
-            logger.warning("Firecrawl 抓取失败 %s: %s", url, e)
-            return RawDocument(url=url, source=FirecrawlSource.NAME)
+            logger.warning("Crawl4AI 抓取失败 %s: %s", url, e)
+        finally:
+            try:
+                await crawler.close()
+            except Exception:
+                pass
+        return doc
+
+    def search(self, query: str, max_results: int = 5) -> list[RawDocument]:
+        """同步入口：用 Crawl4AI 搜索并返回 RawDocument 列表。"""
+        import asyncio
+        try:
+            return asyncio.run(self._search_async(query, max_results))
+        except RuntimeError:
+            # 若已在 loop 中（极少数情况），则创建新 loop
+            return asyncio.new_event_loop().run_until_complete(self._search_async(query, max_results))
+
+    def scrape(self, url: str) -> RawDocument:
+        """同步入口：抓取单个 URL 并返回 RawDocument。"""
+        import asyncio
+        try:
+            return asyncio.run(self._scrape_async(url))
+        except RuntimeError:
+            return asyncio.new_event_loop().run_until_complete(self._scrape_async(url))
 
 
 
@@ -668,17 +699,14 @@ class WebPersonaEnricher:
         self.knowledge_service = knowledge_service
         self.llm = llm_gateway
         self.direct = DirectScraper()
-        self.firecrawl = FirecrawlSource(api_key=firecrawl_api_key)
+        self.crawl4ai = Crawl4AISource()
         self.agent_reach = AgentReachSource()
         self.ar_channels = AgentReachChannels()
         self._available_sources: list[str] = []
         self._detect_sources()
 
     def _detect_sources(self) -> None:
-        self._available_sources = ["direct_scrape"]
-        if self.firecrawl.available:
-            self._available_sources.append("firecrawl")
-            logger.info("Firecrawl: 可用")
+        self._available_sources = ["direct_scrape", "crawl4ai"]
         if self.agent_reach.bili_available:
             self._available_sources.append("bilibili (bili-cli)")
             logger.info("bili-cli: 可用")
@@ -695,7 +723,7 @@ class WebPersonaEnricher:
     def add_url(self, url: str) -> RawDocument | None:
         """抓取并返回单个 URL 内容（含多引擎 fallback）。
 
-        抓取链路: DirectScraper → Jina Reader → Firecrawl
+        抓取链路: DirectScraper → Jina Reader → Crawl4AI
         """
         doc = self.direct.scrape(url)
         if doc.content and len(doc.content) > 100:
@@ -704,11 +732,10 @@ class WebPersonaEnricher:
         jina_doc = self.agent_reach.jina_read(url)
         if jina_doc.content and len(jina_doc.content) > 100:
             return jina_doc
-        # fallback: Firecrawl
-        if self.firecrawl.available:
-            fc_doc = self.firecrawl.scrape(url)
-            if fc_doc.content and len(fc_doc.content) > 100:
-                return fc_doc
+        # fallback: Crawl4AI
+        fc_doc = self.crawl4ai.scrape(url)
+        if fc_doc.content and len(fc_doc.content) > 100:
+            return fc_doc
         return doc if doc.content else None
 
     def add_content(self, text: str, source: str = "pipe_input") -> RawDocument:
@@ -727,8 +754,8 @@ class WebPersonaEnricher:
         return docs
 
     def search_firecrawl(self, query: str, max_results: int = 5) -> list[RawDocument]:
-        """通过 Firecrawl 搜索。"""
-        return self.firecrawl.search(query, max_results)
+        """通过 Crawl4AI 搜索。"""
+        return self.crawl4ai.search(query, max_results)
 
     def search_all_sources(self, query: str, max_per_source: int = 3) -> list[RawDocument]:
         """在所有可用源上搜索并合并结果。"""
@@ -743,8 +770,8 @@ class WebPersonaEnricher:
                 seen_content.add(doc.content[:80])
                 docs.append(doc)
 
-        if self.firecrawl.available:
-            for doc in self.firecrawl.search(query, max_results=max_per_source):
+        if self.crawl4ai.available:
+            for doc in self.crawl4ai.search(query, max_results=max_per_source):
                 key = doc.url or doc.content[:80]
                 if key and key not in seen_urls and key not in seen_content and doc.content:
                     seen_urls.add(key)
@@ -840,16 +867,16 @@ class WebPersonaEnricher:
                     if interactive:
                         print(f"    ✓ [B站] {doc.title[:50]}")
 
-        # Phase 2: Firecrawl（如果可用）
-        if len(all_docs) < max_docs and self.firecrawl.available:
+        # Phase 2: Crawl4AI（如果可用）
+        if len(all_docs) < max_docs:
             if interactive:
-                print("  🔥 Firecrawl ...")
-            for doc in self.firecrawl.search(q, max_results=3):
+                print("  🕷️ Crawl4AI ...")
+            for doc in self.crawl4ai.search(q, max_results=3):
                 if doc.url and doc.url not in seen and len(all_docs) < max_docs:
                     seen.add(doc.url)
                     all_docs.append(doc)
                     if interactive:
-                        print(f"    ✓ [Firecrawl] {doc.title[:50] or doc.url[:50]}")
+                        print(f"    ✓ [Crawl4AI] {doc.title[:50] or doc.url[:50]}")
 
         # Phase 3: Jina Reader
         if len(all_docs) < max_docs:

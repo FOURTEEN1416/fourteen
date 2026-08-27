@@ -1,9 +1,9 @@
 ﻿"""网络人设增强 CLI — 从互联网搜索并完善角色人设知识库。
 
-融合三种内容源：
+融合四种内容源：
 1. Direct URL scraping — requests + BeautifulSoup（通用网页抓取）
 2. Agent-Reach CLI 工具 — bili-cli（B站搜索）、mcporter（Exa搜索）、Jina Reader
-3. Firecrawl — firecrawl-py SDK（需 FIRECRAWL_API_KEY）
+3. Crawl4AI — 免授权网页抓取与搜索（替代 Firecrawl）
 4. 管道模式 — 从 stdin 接收内容（与 LLM/ai-first-scraper 配合）
 
 用法（请选一种模式运行）：
@@ -12,8 +12,8 @@
     python scripts/enrich_persona_web.py --id 上杉绘梨衣 --name "上杉绘梨衣" ^
         --urls "https://zh.moegirl.org.cn/上杉绘梨衣"
 
-  [模式2] 全源搜索（B站 + Firecrawl + Jina，自动收集）:
-    python scripts/enrich_persona_web.py --id 上杉绘梨衣 --name "上杉绘梨衣" --all-sources
+  [模式2] 全源搜索（B站 + Crawl4AI + Jina，自动收集）:
+    python scripts/enrich_persona_web.py --id 上杉绘梨衣 --all-sources
 
   [模式3] 交互搜索 + 手动指定 URL:
     python scripts/enrich_persona_web.py --id 洛十六 --name "洛十六" --interactive
@@ -176,13 +176,12 @@ def main():
                 all_docs.append(doc)
                 print(f"    ✓ [B站] {doc.title[:60]}")
 
-        # Firecrawl
-        if enricher.firecrawl.available:
-            print("  🔥 Firecrawl ...")
-            for doc in enricher.search_firecrawl(q, 2):
-                if doc.content:
-                    all_docs.append(doc)
-                    print(f"    ✓ [Firecrawl] {doc.title[:50] or doc.url[:50]}")
+# Crawl4AI
+        print("  🕷️ Crawl4AI ...")
+        for doc in enricher.search_firecrawl(q, 2):
+            if doc.content:
+                all_docs.append(doc)
+                print(f"    ✓ [Crawl4AI] {doc.title[:50] or doc.url[:50]}")
 
         # Exa
         print("  🔎 Exa (mcporter) ...")
