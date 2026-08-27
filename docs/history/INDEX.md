@@ -93,3 +93,20 @@ GirlfriendManager 按 user_id 隔离（记忆/情感/角色卡独立，LLM/安�
 | CODEMAPS/INDEX「21 注册路由」、FRONTEND「19 含孤儿」、BACKEND 端点数偏差 | 08-26 | ✅ 三份头部均已加漂移声明，权威数字指向 CODE_GRAPH |
 | `.superpowers/brainstorm/` 未按 ADR-0012 清除 | 08-26 | ✅ HTML 已归档至本目录（2026-06-29-create-role-brainstorm.html），原目录已删 |
 | 「创建角色方案A未实施」「Demo 是可删残留」「知识库功能深埋」三项判断与代码实况不符 | 08-26 晚 | ✅ **前端 src 全文通读后全部修正**（FEATURE_MAP F 区/H 区重写）：方案A主体已在位；Demo=公开获客门面（登录页有直通入口）；知识库组件 KnowledgePreview 完整存在但零挂载。同时发现幽灵层：UsersPage/UserWorkspace/BindingDetailPage 三页互链无路由 + 6 个零引用 hooks（含 useEmotionTrend）。详见 DECISION_LEDGER SP 区修订 |
+| AGENTS.md 测试基线「1025 Python 测试」与实收不符 | 08-26 | ⚠️ **pytest --collect-only 实测 1035 collected**（+10 漂移，后续新增测试未同步文档）；建议基线更新为 1035 Python + 79 前端 |
+| 后端 Python 文件总量口径 | 08-26 | ✅ **全量普查澄清**：项目实际代码 ~358 py 文件（此前「19,598 个」口径被 .venv 第三方依赖 19,236 个污染）；核心 49 + 非核心 307 已全部穷举阅读，产出 docs/READING_REPORT_*.md 共 12 份 |
+
+---
+
+## 全库源码穷举阅读记录（2026-08-26 完成）
+
+**覆盖**：除 .venv 外全部 Python 源码（358/358 = 100%）
+**产出**：`docs/READING_REPORT_*.md` ×12（my_character / llm_provider / character_card / orchestrator / voice / persona_extractor / proactive_plugins / wechat_clone / memory_context_multimodal / security_observability / tools_utils_scripts_cache / api / shisi / tests_root）
+
+**关键新发现摘要**：
+1. `persona_extractor/web_enricher.py` — 网络人设增强四内容源架构（DirectScraper/AgentReach/Firecrawl/13平台Channels），SP 相关的「7.5 火爬虫」即此处 Enricher 实例化验证
+2. `proactive/scheduler.py` — 两处时区 bug 修复痕迹在案（_local_now 强制 UTC+8、_is_quiet_hours 未取模历史）
+3. `api/auth_jwt.py` — P0-2 修复在案：生产环境 JWT_SECRET<32 字符直接拒绝启动
+4. `shisi/memory/legacy/` 与 `shisi/knowledge/legacy/` — docstring 双声明「legacy=历史命名仍在活跃使用」，与 AGENTS.md Owner Map 一致
+5. `clone_training/wechat_decrypt_source.py` — 微信 4.x 数据库解密链路（密钥提取→增量解密→zstd 二进制解码），需管理员权限本机运行
+6. LoRA 训练移除决策在 weclone_adapter/__init__.py 与 clone_training/__init__.py 双处文档化为「外接 API + RAG + 提示词注入」
