@@ -94,6 +94,7 @@
 
 附：拟人化 v2 的 3 个未做模块（WorldInfoScanner/SmartCompressor/EmotionPredictor）同属候选，一并挂起。
 附2（08-26 通读新发现）：**幽灵层复活选项**——UsersPage(我的微信绑定管理)/BindingDetailPage(绑定选角色)/UserWorkspace 三页互链完整、测试维护中，是 F-03 充实与微信↔角色绑定的现成半成品，处置（删/归档/复挂路由）待用户裁决，登记为 SP-9。
+附3（08-27 新会话接管批注）：用户 08-27 复核后再次确认 **SP-1/SP-4/SP-5 维持冻结不予实施**（已实测核对文档声称全部属实）；同时裁决 **SP-9 = 直接删除**——三页及连带死代码（api/users.ts 整文件、wechat.ts 绑定区块、useWechatBindings hook）已于本日移除，详见 DELETION_LOG.md [2026-08-27] 条目。后端 /api/wechat/bind* 端点保留。若未来复活绑定管理需从 git 历史恢复页面 + 重挂路由。
 
 ---
 

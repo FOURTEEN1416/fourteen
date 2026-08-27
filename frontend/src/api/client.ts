@@ -26,7 +26,7 @@ import {
 } from './training'
 import {
   cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset,
-  cloneDeleteConversation, cloneBatchDeleteConversations, clonePreview, cloneUpload, cloneStats,
+  cloneDeleteConversation, cloneBatchDeleteConversations, cloneUpload, cloneStats,
 } from './clone'
 import {
   health, stats, dashboardStats, config, saveConfig,
@@ -42,7 +42,6 @@ import {
 } from './system'
 import {
   wechatCreateConnection, wechatListConnections, wechatUpdateConnection, wechatDeleteConnection,
-  bindWechat, listMyBindings, updateBinding, unbindWechat,
 } from './wechat'
 import {
   listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
@@ -55,10 +54,6 @@ import {
   exportCharacter, importCharacter, previewCharacterFromDescription,
   listPresets, getPreset,
 } from './characters'
-import {
-  listUsers, getUserDetail, getUserChatHistory, getUserEmotion,
-  setUserRole, resetUser, deleteUser,
-} from './users'
 import {
   adminListUsers, adminUpdateUser, adminDeleteUser, adminCreateUser,
 } from './admin'
@@ -231,7 +226,7 @@ export default client
 // ── Named re-exports for backward compat (import { chat } from '../api/client') ──
 export { chat, chatStream, createSession, listSessions, chatHistory, emotionState, emotionTrend }
 export { trainingStatus, trainingProgress, trainingExtract, trainingClean, trainingTest, trainingApply }
-export { cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset, cloneDeleteConversation, cloneBatchDeleteConversations, clonePreview, cloneUpload, cloneStats }
+export { cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset, cloneDeleteConversation, cloneBatchDeleteConversations, cloneUpload, cloneStats }
 export {
   listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
   getPersona, updatePersona,
@@ -243,11 +238,9 @@ export {
   exportCharacter, importCharacter, previewCharacterFromDescription,
   listPresets, getPreset,
 }
-export { listUsers, getUserDetail, getUserChatHistory, getUserEmotion, setUserRole, resetUser, deleteUser }
 export { adminListUsers, adminUpdateUser, adminDeleteUser, adminCreateUser }
 export {
   wechatCreateConnection, wechatListConnections, wechatUpdateConnection, wechatDeleteConnection,
-  bindWechat, listMyBindings, updateBinding, unbindWechat,
 }
 export {
   health, stats, dashboardStats, config, saveConfig,
@@ -274,7 +267,7 @@ export const api = {
   trainingStatus, trainingProgress, trainingExtract, trainingClean,
   trainingTest, trainingApply,
   cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset,
-  cloneDeleteConversation, cloneBatchDeleteConversations, clonePreview, cloneUpload, cloneStats,
+  cloneDeleteConversation, cloneBatchDeleteConversations, cloneUpload, cloneStats,
   psychProfile, psychSnapshots, psychReset, psychMentalHealth, psychLiwc,
   safetyStats, safetyLog, safetyConfig,
   ragStats, ragSearch, ragUpload,
@@ -291,11 +284,8 @@ export const api = {
   getVoiceConfig, bindVoice, updateVoice, unbindVoice, testVoice,
   exportCharacter, importCharacter, previewCharacterFromDescription,
   listPresets, getPreset,
-  // users domain
-  listUsers, getUserDetail, getUserChatHistory, getUserEmotion, setUserRole, resetUser, deleteUser,
   // admin domain
   adminListUsers, adminUpdateUser, adminDeleteUser, adminCreateUser,
-  // wechat bindings
+  // wechat connections
   wechatCreateConnection, wechatListConnections, wechatUpdateConnection, wechatDeleteConnection,
-  bindWechat, listMyBindings, updateBinding, unbindWechat,
 }

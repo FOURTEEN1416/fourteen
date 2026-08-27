@@ -3,7 +3,6 @@ import { render, screen } from '../utils/test-utils'
 import WeChatPage from '../../pages/WeChatPage'
 
 // ── Shared mock fns (hoisted so vi.mock factories can reference them) ──
-// 绑定管理已迁移到 UsersPage,本组件只保留扫码连接 + 状态展示
 const { mockUseWechatStatus } = vi.hoisted(() => ({
   mockUseWechatStatus: vi.fn(),
 }))
@@ -19,8 +18,6 @@ vi.mock('../../hooks/useQueries', () => ({
 vi.mock('../../api/wechat', () => ({
   wechatCreateConnection: vi.fn(() => Promise.resolve()),
   wechatDeleteConnection: vi.fn(() => Promise.resolve()),
-  bindWechat: vi.fn(() => Promise.resolve()),
-  unbindWechat: vi.fn(() => Promise.resolve()),
 }))
 
 vi.mock('../../api/system', () => ({

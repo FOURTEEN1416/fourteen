@@ -1,5 +1,30 @@
 ﻿# Code Deletion Log
 
+## [2026-08-27] 接管基线收尾 — clonePreview 死代码 + 幽灵层三页（SP-9 裁决：直接删除）
+
+### Dead Exports Removed (Frontend)
+- `src/api/clone.ts` — Removed `clonePreview()` 函数。对应后端 `POST /api/clone/preview` 端点已于克隆下线（Option B）时删除，前端零调用。`ClonePersonaPreview` 接口保留（`cloneUpload` 仍在使用）。
+
+### Ghost Pages Deleted (SP-9, 用户 08-27 批准「直接删除」)
+三页互链完整但路由已全部摘除（App.tsx 零挂载），属微信↔角色绑定功能的半成品：
+- `src/pages/UsersPage.tsx` + `src/tests/components/UsersPage.test.tsx`
+- `src/pages/BindingDetailPage.tsx` + `src/tests/components/BindingDetailPage.test.tsx`
+- `src/pages/UserWorkspace.tsx` + `src/tests/components/UserWorkspace.test.tsx`
+
+### Transitively Dead Code Removed (跟随幽灵层失去全部消费者)
+- `src/api/users.ts` — 整文件删除（listUsers/getUserDetail/getUserChatHistory/getUserEmotion/setUserRole/resetUser/deleteUser/toUserDisplay 及相关接口；消费者仅 UsersPage 与 client 聚合导出）。注意：管理后台 AdminUsersPage 使用独立的 `api/admin.ts`，不受影响。
+- `src/api/wechat.ts` — 删除绑定管理区块（bindWechat/listMyBindings/updateBinding/unbindWechat + WechatBindingDTO）。后端 `/api/wechat/bind*` 端点保留未动，未来复用无需迁移。
+- `src/hooks/useQueries.ts` — 删除零消费者的 `useWechatBindings()` hook。
+- `src/api/client.ts` — 同步清理 users 组导入/导出与绑定函数聚合。
+- `src/tests/components/WeChatPage.test.tsx` — 移除 mock 工厂中的 bindWechat/unbindWechat 字段及过时注释。
+
+### Impact
+- 前端净删除约 -1000 行；活页 WeChatPage/AdminUsersPage 零影响
+- 后端无任何改动
+- 验证：tsc --noEmit 通过 + vitest 全量通过（数字见 commit 时点）
+
+---
+
 ## [2026-07-14] Routing Fix — Tombstone & Dead Code Cleanup
 
 ### Dead Endpoints Removed

@@ -13,12 +13,6 @@ export interface ClonePersonaPreview {
   preview?: Array<{ user: string; reply: string }>
 }
 
-/** POST /api/clone/preview — 显式读取本机微信解密数据并生成人设预览（本地模式） */
-export function clonePreview(target: string, maxMessages = 2000): Promise<ClonePersonaPreview> {
-  return client.post('/clone/preview', { target, max_messages: maxMessages })
-    .then(r => r.data as ClonePersonaPreview)
-}
-
 /** POST /api/clone/upload — 上传本地提取的聊天数据，服务器分析生成人设预览 */
 export function cloneUpload(target: string, file: File): Promise<ClonePersonaPreview> {
   const form = new FormData()
