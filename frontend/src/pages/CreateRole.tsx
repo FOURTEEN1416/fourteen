@@ -220,7 +220,7 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
         <p className="text-xs text-gray-400 mt-1">下载工具 → 本地提取 → 上传分析 → 生成人设</p>
       </div>
 
-      {/* ═══ 步骤 1：下载工具（三选一） ═══ */}
+      
       <div className="w-full max-w-md rounded-xl bg-blue-50/60 border border-blue-100 p-4 space-y-3">
         <div className="flex items-center gap-2">
           <span className="w-5 h-5 rounded-full bg-macaron-blue text-white text-[10px] font-bold flex items-center justify-center">1</span>

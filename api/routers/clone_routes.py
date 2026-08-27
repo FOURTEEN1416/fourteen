@@ -1,5 +1,5 @@
 """
-好友克隆数据管理路由 — /api/clone/*
+好友克隆数据管理路由 — /api/clone*
 
 来源：原 api.main_routes.py L848/855/862/885/898/912/924 共 7 端点
 
@@ -22,7 +22,6 @@ import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Security, UploadFile
-from pydantic import BaseModel, Field
 
 from api.auth import verify_api_key_dep
 from api.auth_jwt import require_role
@@ -32,11 +31,6 @@ from api.deps import deps
 logger = logging.getLogger("api.routers.clone_routes")
 
 router = APIRouter(tags=["clone"])
-
-
-class ClonePreviewRequest(BaseModel):
-    target: str = Field(..., min_length=1, max_length=128)
-    max_messages: int = Field(default=2000, ge=20, le=5000)
 
 
 def _build_clone_preview_from_conversations(
@@ -87,46 +81,9 @@ def _build_clone_preview_from_conversations(
     }
 
 
-def _build_clone_preview(target: str, max_messages: int) -> dict[str, Any]:
-    """本地模式：从本机 wechat-decrypt 提取数据并生成人设预览。
-
-    仅在 WECHAT_DECRYPT_PATH 环境变量配置时可用（开发/测试）。
-    生产环境应使用 /api/clone/upload 上传数据。
-    """
-    from clone_training.wechat_decrypt_source import DecryptSource, DecryptSourceError
-
-    # 支持环境变量配置 wechat-decrypt 路径
-    decrypt_path = os.environ.get("WECHAT_DECRYPT_PATH", "").strip()
-    try:
-        if decrypt_path:
-            conversations = DecryptSource(decrypt_path=decrypt_path).extract(target, max_messages=max_messages)
-        else:
-            conversations = DecryptSource().extract(target, max_messages=max_messages)
-    except DecryptSourceError:
-        raise
-    return _build_clone_preview_from_conversations(target, conversations)
-
-
 # ═══════════════════════════════════════════════════════
 # Clone Data Management API
 # ═══════════════════════════════════════════════════════
-
-
-@router.post("/api/clone/preview")
-async def preview_clone_persona(
-    req: ClonePreviewRequest,
-    _auth: bool = Security(verify_api_key_dep),
-    _admin: tuple[int, User] = Depends(require_role("admin")),
-):
-    """从本机微信 4.x 解密数据生成人设预览（本地模式，需 WECHAT_DECRYPT_PATH）。
-
-    生产环境请使用 POST /api/clone/upload 上传数据。
-    """
-    try:
-        return await asyncio.to_thread(_build_clone_preview, req.target.strip(), req.max_messages)
-    except Exception as e:
-        logger.warning("微信克隆预览失败: %s", e)
-        raise HTTPException(status_code=422, detail=str(e)) from e
 
 
 @router.post("/api/clone/upload")
