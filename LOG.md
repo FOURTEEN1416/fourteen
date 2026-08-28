@@ -23,4 +23,21 @@
 
 **验证**：`pytest -q` → 1030 passed + 1 skipped（107.26s）；`vitest run` → 59 passed/11 files；`create_api_app` 实扫 199 端点；demo 引用 grep 全零。
 
-**未验证/待办**：① codebase-memory 图谱工具 图谱库重索引（MCP 工具本会话不可用，artifact.json 仍 06-30 快照）；② 愿景板目标用户/用户需求/商业目标待口述；③ 产品介绍页新立项未启动；④ 本会话改动未提交 git（待用户验收后按文件提交）。
+---
+
+## 2026-08-28（续）— 图谱工具修复 + 感染源清零 + 分组提交
+
+**任务**：用户指示①修复 codebase-memory 图谱工具 工具并重索引；②核查文档治理完整性、清除感染源；③愿景板按口述落笔；④按文件分组 git 提交。
+
+**动作与原因**：
+1. 工具修复：GitHub 定位 `DeusData/codebase-memory 图谱工具`（★40.9k，MIT，纯 C 原生可执行）→ pip 安装 v0.10.8 → CLI `index_repository` 重索引成功（**7706 节点 / 32367 边**，schema v2，commit 对齐 c32af54，artifact.json 回写验证；旧 06-30 快照 5983/24923 已覆盖）→ search_graph 查询验证通过。CODE_GRAPH §1.2/头部/更新记录三处回写。
+2. 感染源清零（两轮 grep 全库）：README 根（徽章 1104→1089、19 页→15、demo 子路由行、API 模块 14→12、routers 13→20、pytest 注释）；CODEMAPS/BACKEND+FRONTEND+MODULES（demo 行删除、204/17→199/16）；DECISION_LEDGER §四"1104 不可回退"→1089；VISION SP-3 标记已执行移出候选池。
+3. 删除 `docs/DOCUMENTATION_GOVERNANCE_REPORT.md`（.venv 污染口径不可修复，有效信息收编 docs/README.md），DELETION_LOG 登记。
+4. 愿景板落笔（用户口述）：目标用户=广泛用户；商业目标=完全免费开源 MIT、无订阅不商业化。
+5. git 分组提交×4：`feat!` Demo 全链路删除（8 文件）/ `feat(clone)` 解密剥离收尾（5 文件）/ `docs(truth)` 真源同步（13 文件）/ `docs(governance)` 治理基础设施（3 新文件）。
+
+**发现并上交裁决（未提交）**：工作区存在 8 个来历不明的删除——start_all/start_backend/start_frontend.cmd、deploy_ai_girlfriend.bat/.ps1、weclone_adapter/ 三件套。证据：DELETION_LOG 无登记；08-27 日志记载 adapter.py 为"重写（206→230 行）"而非删除；HANDOFF 仍列其为现存；`main.py:186` 无保护 import WeCloneAdapter（删除将破坏克隆管线）、`training_routes.py:74` 引用。疑似误删，建议 `git checkout -- <paths>` 恢复或用户确认意图后另行提交。
+
+**验证**：重索引 status=indexed + artifact.json 实读；两轮感染源 grep 零残留（除有意保留的历史快照标注）；4 commits 落地；工作区仅剩上交裁决的 8 个删除。
+
+**未验证/待办**：① 8 个不明删除待裁决；② 产品介绍页立项未启动；③ 提交未 push（用户未要求）。
