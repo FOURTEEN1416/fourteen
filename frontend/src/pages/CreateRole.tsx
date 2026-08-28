@@ -13,8 +13,9 @@ import {
 import type { PresetItem } from '../api/characters'
 import {
   MessageSquare, Send, Loader2, Sparkles,
-  FileUp, Check, Users, Eye,
+  FileUp, Check, Users, Eye, Copy, Bot,
 } from 'lucide-react'
+import { CLONE_AGENT_GUIDE } from '../constants/cloneAgentGuide'
 
 type CreateMethod = 'ai-chat' | 'wechat-clone' | 'file-import'
 interface ChatMessage { role: 'user' | 'assistant'; content: string }
@@ -157,7 +158,19 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
   const [preview, setPreview] = useState<Array<{ user: string; reply: string }>>([])
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadProgress, setUploadProgress] = useState(0)
+  const [guideCopied, setGuideCopied] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  async function copyGuide() {
+    try {
+      await navigator.clipboard.writeText(CLONE_AGENT_GUIDE)
+      setGuideCopied(true)
+      setTimeout(() => setGuideCopied(false), 2000)
+    } catch {
+      setError('复制失败，请手动打开 docs/guides/微信克隆-智能体任务书.md 复制')
+      setPhase('error')
+    }
+  }
 
   async function startClone() {
     if (!targetName.trim()) {
@@ -221,128 +234,57 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
       </div>
 
       
+      {/* ═══ 步骤 1：准备 AI 智能体 ═══ */}
       <div className="w-full max-w-md rounded-xl bg-blue-50/60 border border-blue-100 p-4 space-y-3">
         <div className="flex items-center gap-2">
           <span className="w-5 h-5 rounded-full bg-macaron-blue text-white text-[10px] font-bold flex items-center justify-center">1</span>
-          <p className="text-xs font-semibold text-blue-700">下载微信数据提取工具（三选一）</p>
+          <p className="text-xs font-semibold text-blue-700">准备一个 AI 智能体，让它替你跑导出</p>
         </div>
         <div className="space-y-2 pl-7">
           <p className="text-[11px] text-gray-600 leading-relaxed">
-            三个开源工具均可提取微信聊天记录，按需选择。导出 JSON 后上传到服务器分析。
+            聊天记录解密只能在<strong>你登录微信的这台电脑</strong>上做，操作门槛高——所以交给智能体代跑：
+            装一个智能体 → 把我们的任务书喂给它 → 它替你完成提取。
           </p>
-
-          {/* 工具 A：WeChatMsg（推荐，35k+ star，全格式导出） */}
           <div className="bg-white/70 rounded-lg p-2.5 space-y-1.5 border border-blue-100">
             <div className="flex items-center justify-between">
               <p className="text-[11px] font-semibold text-gray-800">
-                A. WeChatMsg <span className="text-[9px] text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded">推荐</span>
+                A. OpenCode <span className="text-[9px] text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded">推荐 · 免费模型充足</span>
               </p>
-              <span className="text-[9px] text-gray-500">35k+ ⭐ · 全格式导出</span>
             </div>
-            <p className="text-[10px] text-gray-600 leading-relaxed">
-              支持微信 3.9.x，HTML/Word/CSV/JSON 多格式导出，内置年度聊天报告分析。
-            </p>
             <div className="flex flex-wrap gap-1.5">
-              <a
-                href="https://github.com/LC044/WeChatMsg"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-gray-900 text-white text-[10px] font-medium hover:bg-gray-800 transition-colors"
-              >
-                <FileUp className="w-3 h-3" /> GitHub
-              </a>
-              <a
-                href="https://memotrace.cn/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-600 text-white text-[10px] font-medium hover:bg-blue-700 transition-colors"
-              >
-                <FileUp className="w-3 h-3" /> 官网
+              <a href="https://opencode.ai" target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-600 text-white text-[10px] font-medium hover:bg-blue-700 transition-colors">
+                <Bot className="w-3 h-3" /> opencode.ai
               </a>
             </div>
           </div>
-
-          {/* 工具 B：PyWxDump（WeClone 推荐，解密+提取） */}
-          <div className="bg-white/70 rounded-lg p-2.5 space-y-1.5 border border-gray-200">
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] font-semibold text-gray-800">B. PyWxDump</p>
-              <span className="text-[9px] text-gray-500">WeClone 推荐</span>
-            </div>
+          <div className="bg-white/70 rounded-lg p-2.5 space-y-1 border border-gray-200">
             <p className="text-[10px] text-gray-600 leading-relaxed">
-              微信数据库解密 + 提取一体化，被 WeClone 数字分身项目推荐，支持微信 4.0。
+              B. Claude Code / Cline / Cursor 等任意能执行终端命令的编码智能体均可。
             </p>
-            <div className="flex flex-wrap gap-1.5">
-              <a
-                href="https://github.com/xaoyaoo/PyWxDump"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-gray-900 text-white text-[10px] font-medium hover:bg-gray-800 transition-colors"
-              >
-                <FileUp className="w-3 h-3" /> GitHub
-              </a>
-            </div>
-          </div>
-
-          {/* 工具 C：wechat-decrypt（备选，内存提取密钥） */}
-          <div className="bg-white/70 rounded-lg p-2.5 space-y-1.5 border border-gray-200">
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] font-semibold text-gray-800">C. wechat-decrypt</p>
-              <span className="text-[9px] text-gray-500">1.6k+ ⭐ · 内存提取</span>
-            </div>
-            <p className="text-[10px] text-gray-600 leading-relaxed">
-              从微信内存提取密钥，支持微信 4.0 SQLCipher 4 解密，适合开发者。
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              <a
-                href="https://github.com/0xlane/wechat-decrypt"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-gray-900 text-white text-[10px] font-medium hover:bg-gray-800 transition-colors"
-              >
-                <FileUp className="w-3 h-3" /> GitHub
-              </a>
-              <a
-                href="https://gitcode.com/gh_mirrors/we/WechatDecrypt"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-orange-500 text-white text-[10px] font-medium hover:bg-orange-600 transition-colors"
-              >
-                <FileUp className="w-3 h-3" /> GitCode 镜像
-              </a>
-            </div>
-          </div>
-
-          <div className="text-[10px] text-gray-500 bg-white/60 rounded-lg p-2 space-y-1">
-            <p><span className="font-medium">环境要求：</span>Windows + 微信已登录 + Python 3.8+</p>
-            <p><span className="font-medium">推荐：</span>新手用 WeChatMsg（图形界面），开发者用 PyWxDump</p>
           </div>
         </div>
       </div>
 
-      {/* ═══ 步骤 2：使用工具提取数据 ═══ */}
+      {/* ═══ 步骤 2：导出工具 + 任务书喂给智能体 ═══ */}
       <div className="w-full max-w-md rounded-xl bg-amber-50/60 border border-amber-100 p-4 space-y-3">
         <div className="flex items-center gap-2">
           <span className="w-5 h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center">2</span>
-          <p className="text-xs font-semibold text-amber-700">在本地电脑运行工具提取数据</p>
+          <p className="text-xs font-semibold text-amber-700">把任务书喂给智能体，让它在本机执行</p>
         </div>
         <div className="space-y-2 pl-7">
-          <div className="text-[11px] text-gray-600 leading-relaxed space-y-1.5">
-            <p><span className="font-medium text-gray-700">① 管理员权限运行：</span></p>
-            <code className="block bg-gray-900 text-green-400 text-[10px] px-2 py-1.5 rounded">python main.py</code>
-            <p><span className="font-medium text-gray-700">② 浏览器访问：</span></p>
-            <code className="block bg-gray-900 text-green-400 text-[10px] px-2 py-1.5 rounded">http://localhost:5678</code>
-            <p><span className="font-medium text-gray-700">③ 在 Web 界面中：</span></p>
-            <ul className="list-disc list-inside text-[10px] text-gray-500 space-y-0.5 ml-2">
-              <li>选择目标好友的聊天会话</li>
-              <li>点击"导出" → 选择 JSON 格式</li>
-              <li>保存文件（如 <code className="bg-white/60 px-1 rounded">聊天记录.json</code>）</li>
-            </ul>
-          </div>
+          <p className="text-[11px] text-gray-600 leading-relaxed">
+            导出工具：<a href="https://github.com/FOURTEEN1416/wechat-decrypt" target="_blank" rel="noopener noreferrer"
+              className="text-blue-600 font-medium hover:underline">github.com/FOURTEEN1416/wechat-decrypt</a>（微信 4.x 解密 + JSON 导出一体化）。
+            点下面按钮复制任务书，粘贴给智能体并告诉它<strong>好友的备注名</strong>，剩余步骤它自己会跑；遇到问题直接问它。
+          </p>
+          <button onClick={copyGuide}
+            className="w-full py-2 rounded-xl bg-gray-900 text-white text-xs font-medium hover:bg-gray-800 transition-colors flex items-center justify-center gap-1.5">
+            {guideCopied ? (<><Check className="w-3.5 h-3.5" /> 已复制，去粘贴给智能体</>) : (<><Copy className="w-3.5 h-3.5" /> 一键复制智能体任务书</>)}
+          </button>
           <div className="text-[10px] text-amber-600 bg-amber-100/50 rounded-lg p-2">
-            <p className="font-medium">⚠️ 常见问题：</p>
-            <p>• 微信必须在运行状态（工具从内存提取密钥）</p>
-            <p>• 需要管理员权限运行 Python</p>
-            <p>• 如导出失败，尝试先在微信中点开几张图片</p>
+            <p>• 智能体会检查管理员权限、微信运行状态，缺什么它会告诉你</p>
+            <p>• 导出的 JSON 请留在本机，上传前确认文件就是这位好友的会话</p>
           </div>
         </div>
       </div>
@@ -351,7 +293,7 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
       <div className="w-full max-w-md rounded-xl bg-green-50/60 border border-green-100 p-4 space-y-3">
         <div className="flex items-center gap-2">
           <span className="w-5 h-5 rounded-full bg-macaron-green text-white text-[10px] font-bold flex items-center justify-center">3</span>
-          <p className="text-xs font-semibold text-green-700">上传提取的数据到服务器分析</p>
+          <p className="text-xs font-semibold text-green-700">上传智能体导出的 JSON 到服务器分析</p>
         </div>
 
         <div className="pl-7 space-y-3">
