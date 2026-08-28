@@ -13,7 +13,7 @@ import type { RoleSettingsTab, RoleSettingsCharacter } from '../../types/framewo
 import type { UnifiedCharacterUpdate } from '../../types/api'
 import { Save, Trash2, Copy, Smile } from 'lucide-react'
 import { ENGINE_OPTIONS, MIMO_MODELS } from './RoleSettingsConstants'
-import { enrichCharacter } from '../../api/system'
+import { enrichCharacter, proactiveGetConfig, proactiveHistory, proactiveSend, proactivePause, updateProactiveConfig } from '../../api/system'
 import Section from './RoleSettingsSection'
 
 // ═══ Tab: Basic ═══
@@ -241,44 +241,121 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
 // ═══ Tab: Message ═══
 
 function MessageTab({ character }: { character: RoleSettingsCharacter }) {
-  const [proactive, setProactive] = useState(character.message?.proactive ?? true)
-  const [dailyLimit, setDailyLimit] = useState(character.message?.dailyLimit ?? 20)
-  const [minInterval, setMinInterval] = useState(character.message?.minInterval ?? 15)
-  const [cooldown, setCooldown] = useState(character.message?.cooldown ?? 30)
-  const [urgency, setUrgency] = useState(character.message?.urgency ?? 0.7)
+  const [threshold, setThreshold] = useState(2.0)
+  const [dailyLimit, setDailyLimit] = useState(8)
+  const [minInterval, setMinInterval] = useState(30)
+  const [cooldown, setCooldown] = useState(15)
+  const [paused, setPaused] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [savedAt, setSavedAt] = useState('')
+  const [sending, setSending] = useState(false)
+  const [sendResult, setSendResult] = useState<string | null>(null)
+  const [history, setHistory] = useState<Array<{ type: string; message: string; at: string }>>([])
+  const qc = useQueryClient()
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const [cfgRes, histRes] = await Promise.all([
+          proactiveGetConfig().catch(() => null),
+          proactiveHistory(10).catch(() => null),
+        ])
+        if (!alive) return
+        if (cfgRes?.data) {
+          setThreshold(cfgRes.data.threshold ?? 2.0)
+          setDailyLimit(cfgRes.data.max_daily_messages ?? 8)
+          setMinInterval(cfgRes.data.min_interval_minutes ?? 30)
+          setCooldown(cfgRes.data.cooldown_after_reply_minutes ?? 15)
+          setPaused(!!cfgRes.data.paused)
+        }
+        if (histRes?.data?.history) setHistory(histRes.data.history)
+      } catch { /* 静默：未初始化引擎时展示占位 */ }
+    })()
+    return () => { alive = false }
+  }, [])
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      await updateProactiveConfig({
+        threshold, max_daily: dailyLimit,
+        min_interval_minutes: minInterval, cooldown_after_reply_minutes: cooldown,
+      })
+      setSavedAt(new Date().toLocaleTimeString('zh-CN'))
+    } catch (e) {
+      useErrorStore.getState().addToast({ type: 'error', message: e instanceof Error ? e.message : '保存失败' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handlePause(next: boolean) {
+    try {
+      await proactivePause(next)
+      setPaused(next)
+    } catch (e) {
+      useErrorStore.getState().addToast({ type: 'error', message: e instanceof Error ? e.message : '操作失败' })
+    }
+  }
+
+  async function handleSendNow() {
+    setSending(true)
+    setSendResult(null)
+    try {
+      const res = await proactiveSend()
+      const msg = res.data?.message ?? ''
+      setSendResult(msg)
+      const histRes = await proactiveHistory(10).catch(() => null)
+      if (histRes?.data?.history) setHistory(histRes.data.history)
+      qc.invalidateQueries({ queryKey: queryKeys.proactive.state })
+    } catch (e) {
+      useErrorStore.getState().addToast({ type: 'error', message: e instanceof Error ? e.message : '发送失败（引擎未初始化？）' })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const todayCount = history.filter(h => (h.at || '').startsWith(new Date().toISOString().slice(0, 10))).length
+  const lastAt = history[0]?.at ? new Date(history[0].at).toLocaleString('zh-CN') : '—'
 
   return (
     <div className="space-y-4">
-      {/* Stats */}
+      {/* Stats（真数据：/api/proactive/history + config） */}
       <Section title="消息统计">
         <div className="grid grid-cols-3 gap-4">
           {[
             { label: '消息总数', value: (character.stats?.messages ?? 0).toLocaleString(), color: 'text-blue-600' },
-            { label: '今日触发', value: '—', color: 'text-green-600' },
-            { label: '最后发送', value: '—', color: 'text-gray-600' },
+            { label: '今日主动', value: String(todayCount), color: 'text-green-600' },
+            { label: '最后发送', value: lastAt, color: 'text-gray-600', small: true },
           ].map(s => (
             <div key={s.label} className="text-center p-3 rounded-xl bg-gray-50">
-              <p className={`text-lg font-bold ${s.color}`}>{s.value}</p>
+              <p className={`font-bold ${s.small ? 'text-xs mt-1' : 'text-lg'} ${s.color}`}>{s.value}</p>
               <p className="text-[11px] text-gray-400 mt-0.5">{s.label}</p>
             </div>
           ))}
         </div>
       </Section>
 
-      {/* Toggle */}
+      {/* Toggle（真控制：暂停/恢复调度） */}
       <Section title="主动对话">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-gray-700">允许角色主动发起对话</p>
-            <p className="text-xs text-gray-400 mt-0.5">角色会在合适的时机主动搭话，如早安问候、事件提醒</p>
+            <p className="text-sm font-medium text-gray-700">{paused ? '主动消息已暂停' : '主动消息运行中'}</p>
+            <p className="text-xs text-gray-400 mt-0.5">暂停后引擎跳过自动触发；下方手动发送不受影响</p>
           </div>
-          <Toggle checked={proactive} onChange={setProactive} />
+          <Toggle checked={!paused} onChange={v => handlePause(!v)} />
         </div>
       </Section>
 
-      {/* Frequency */}
+      {/* Frequency（真生效：写入运行时控制器） */}
       <Section title="频率控制">
-        <div className={`space-y-4 ${!proactive ? 'opacity-40 pointer-events-none' : ''}`}>
+        <div className={`space-y-4 ${paused ? 'opacity-40 pointer-events-none' : ''}`}>
+          <div className="flex items-center gap-4">
+            <div className="w-24 shrink-0"><span className="text-xs text-gray-600">紧迫阈值</span></div>
+            <div className="flex-1"><Slider value={threshold} min={0} max={10} step={0.5} label="紧迫阈值" onChange={setThreshold} /></div>
+            <span className="w-16 text-right text-xs font-mono text-gray-400">{threshold.toFixed(1)}</span>
+          </div>
           {[
             { label: '每日上限', value: dailyLimit, min: 1, max: 50, unit: '条/天', onChange: setDailyLimit },
             { label: '最小间隔', value: minInterval, min: 5, max: 120, unit: '分钟', onChange: setMinInterval },
@@ -290,17 +367,43 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
               <span className="w-16 text-right text-xs font-mono text-gray-400">{s.value} {s.unit}</span>
             </div>
           ))}
-          <div className="flex items-center gap-4">
-            <div className="w-24 shrink-0"><span className="text-xs text-gray-600">紧迫阈值</span></div>
-            <div className="flex-1"><Slider value={urgency} min={0} max={1} step={0.01} label="紧迫阈值" onChange={setUrgency} /></div>
-            <span className="w-16 text-right text-xs font-mono text-gray-400">{(urgency * 100).toFixed(0)}%</span>
-          </div>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="w-full py-2 rounded-xl btn-macaron text-white text-xs font-medium disabled:opacity-50"
+          >
+            {saving ? '保存中…' : savedAt ? `已保存（${savedAt}）` : '保存频率配置'}
+          </button>
         </div>
       </Section>
 
-      <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
-        <p className="text-xs text-gray-400">主动消息配置保存接口开发中，当前仅支持预览配置</p>
-      </div>
+      {/* Manual send（08-28 新增：手动控制） */}
+      <Section title="手动控制">
+        <button
+          onClick={handleSendNow}
+          disabled={sending}
+          className="w-full py-2 rounded-xl bg-macaron-blue text-white text-xs font-medium hover:bg-macaron-blue-deep transition-colors disabled:opacity-50"
+        >
+          {sending ? '生成发送中…' : '立即发送一条主动消息'}
+        </button>
+        {sendResult && (
+          <div className="mt-2 rounded-xl bg-white/70 border border-macaron-blue/30 px-3 py-2">
+            <p className="text-[10px] text-gray-400 mb-0.5">已发送</p>
+            <p className="text-xs text-gray-700">{sendResult}</p>
+          </div>
+        )}
+        {history.length > 0 && (
+          <div className="mt-3 space-y-1.5 max-h-40 overflow-y-auto">
+            {history.slice(0, 5).map((h, i) => (
+              <div key={i} className="rounded-lg bg-gray-50 px-3 py-1.5 flex items-start justify-between gap-2">
+                <span className="text-[10px] text-gray-400 shrink-0">{h.type}</span>
+                <span className="text-[11px] text-gray-600 text-right flex-1 line-clamp-1">{h.message}</span>
+                <span className="text-[10px] text-gray-300 shrink-0">{new Date(h.at).toLocaleTimeString('zh-CN')}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
     </div>
   )
 }

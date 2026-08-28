@@ -35,6 +35,11 @@ export function toggleTool(name: string, enabled: boolean) { return client.post(
 export function toolHistory(limit = 50) { return client.get('/tools/history', { params: { limit } }) }
 export function proactiveState() { return client.get('/proactive/state') }
 export function proactiveHistory(limit = 50) { return client.get('/proactive/history', { params: { limit } }) }
+export function proactiveGetConfig() { return client.get('/proactive/config') }
+export function proactiveSend(messageType?: string) {
+  return client.post('/proactive/send', messageType ? { message_type: messageType } : {})
+}
+export function proactivePause(paused: boolean) { return client.post('/proactive/pause', { paused }) }
 export function updateProactiveConfig(cfg: { threshold?: number; max_daily?: number; min_interval_minutes?: number; cooldown_after_reply_minutes?: number }) {
   return client.post('/proactive/config', cfg)
 }

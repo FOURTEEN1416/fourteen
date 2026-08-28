@@ -556,6 +556,10 @@ class ASEEngine:
 
         self._recent_messages: deque = deque(maxlen=50)
 
+        # 手动控制面（2026-08-28 消息 tab 手动控制需求）
+        self._paused: bool = False
+        self.sent_history: deque = deque(maxlen=200)
+
         self._load_state()
 
         logger.info(
@@ -612,6 +616,8 @@ class ASEEngine:
         dry_run: bool = False,
     ) -> dict[str, Any] | None:
         """定时检查。dry_run=True时只更新紧迫度，不发送消息。"""
+        if getattr(self, "_paused", False):
+            return None
         if emotion_state:
             self._emotion_state = emotion_state
 
@@ -835,6 +841,57 @@ class ASEEngine:
         self._last_proactive_time = datetime.now(tz=timezone.utc)
         if self._freq_controller:
             self._freq_controller.record_sent()
+
+    def record_sent_entry(self, entry: dict[str, Any]) -> None:
+        """记录一条已发送的主动消息（供 /api/proactive/history 真数据）。"""
+        self.sent_history.append({**entry, "at": datetime.now(tz=timezone.utc).isoformat()})
+
+    def get_runtime_config(self) -> dict[str, Any]:
+        """运行时参数真值（修复：旧 config 端点只写 _config 字典不生效）。"""
+        if self._frequency_mode == "adaptive" and self._freq_adapter:
+            max_daily = self._freq_adapter.get_max_daily()
+            min_interval = 30
+            cooldown = 10
+        else:
+            max_daily = self._freq_controller.max_daily if self._freq_controller else 8
+            min_interval = getattr(self._freq_controller, "min_interval_minutes", 30) if self._freq_controller else 30
+            cooldown = getattr(self._freq_controller, "cooldown_after_reply_minutes", 10) if self._freq_controller else 10
+        return {
+            "threshold": self._urgency_threshold,
+            "max_daily_messages": max_daily,
+            "min_interval_minutes": min_interval,
+            "cooldown_after_reply_minutes": cooldown,
+            "paused": self._paused,
+            "frequency_mode": self._frequency_mode,
+            "daily_count": self._daily_message_count,
+        }
+
+    def apply_runtime_config(
+        self,
+        threshold: float | None = None,
+        max_daily_messages: int | None = None,
+        min_interval_minutes: int | None = None,
+        cooldown_after_reply_minutes: int | None = None,
+        paused: bool | None = None,
+    ) -> None:
+        """同步写运行时对象（_urgency_threshold/_freq_*），而非只写展示字典。"""
+        if threshold is not None:
+            self._urgency_threshold = max(0.0, float(threshold))
+        if max_daily_messages is not None or min_interval_minutes is not None or cooldown_after_reply_minutes is not None:
+            max_daily = max_daily_messages if max_daily_messages is not None else (
+                self._freq_adapter.get_max_daily() if self._freq_adapter else 8)
+            min_i = min_interval_minutes if min_interval_minutes is not None else 30
+            cooldown_c = cooldown_after_reply_minutes if cooldown_after_reply_minutes is not None else 10
+            if self._frequency_mode == "adaptive" and self._freq_adapter:
+                self._freq_adapter = FrequencyAdapter(normal_daily=max_daily)
+            elif self._freq_controller:
+                self._freq_controller = FrequencyController(
+                    max_daily=max_daily,
+                    min_interval_minutes=min_i,
+                    cooldown_after_reply_minutes=cooldown_c,
+                )
+        if paused is not None:
+            self._paused = bool(paused)
 
     def _is_duplicate(self, message: str) -> bool:
         return message in self._recent_messages

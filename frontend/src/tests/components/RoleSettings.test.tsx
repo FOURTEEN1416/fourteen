@@ -156,7 +156,7 @@ describe('RoleSettings', () => {
     // 点击「消息」tab
     fireEvent.click(screen.getByText('消息'))
     // 消息 tab 显示「主动对话」相关
-    expect(screen.getByText('允许角色主动发起对话')).toBeDefined()
+    expect(screen.getByText('主动消息运行中')).toBeDefined()
 
     // 点击「数据」tab
     fireEvent.click(screen.getByText('数据'))

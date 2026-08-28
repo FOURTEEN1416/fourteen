@@ -2,7 +2,7 @@
 REST API 应用工厂
 
 仅负责创建 FastAPI 实例、配置中间件、挂载子路由。
-业务路由按域拆分为 16 个 include_router 调用(共 198 端点,实扫 2026-08-28,demo 与 training/extract 已删除),
+业务路由按域拆分为 16 个 include_router 调用(共 197 端点,实扫 2026-08-28,demo/extract 删除 + proactive 手动控制三端点),
 模型/常量/Helper 仍保留在 api.main_routes。详细端点分布见 CODE_GRAPH.md §4.2。
 """
 
@@ -237,7 +237,7 @@ def create_api_app(
     app.include_router(chat_router)         # 10 端点: chat/session + wechat channels
     app.include_router(personality_router)  #  9 端点: emotion/persona/psych
     app.include_router(users_router)        #  7 端点: users/*
-    app.include_router(training_router)     #  8 端点: training/* + proactive/*
+    app.include_router(training_router)     # 11 端点: training/* + proactive/*（含手动控制）
     app.include_router(tools_router)        #  5 端点: tools/* + plugins/*
     app.include_router(safety_router)       # 12 端点: safety/rag/voice/files/cache
     app.include_router(clone_router)        #  7 端点: clone/*
