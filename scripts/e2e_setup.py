@@ -22,6 +22,7 @@ ADMIN_PASSWORD = "E2eTest#2026"
 
 def main() -> None:
     os.environ["APP_DATABASE_URL"] = E2E_URL
+    E2E_DB.parent.mkdir(parents=True, exist_ok=True)
     if E2E_DB.exists():
         E2E_DB.unlink()
     from api.database import User, init_db  # noqa: E402

@@ -40,6 +40,9 @@ def app():
     # （FastAPI 工厂陷阱）。CI 干净环境因此必炸 no such table: users。
     # 根治：真实建表 + 种子 id=1 admin，让真实依赖链走通（本地/CI 行为一致）。
     import asyncio
+    from pathlib import Path as _Path
+
+    _Path("data").mkdir(parents=True, exist_ok=True)
 
     from api.database import User, _async_session, init_db
 
