@@ -1,14 +1,17 @@
 """
-数据提取器 — 从 WeChat 数据库 / 导出的聊天记录中提取对话
+数据提取器 — 从已导出的聊天记录文件中提取对话
 
-支持 4 种数据来源：
-1. WeChatFerry（通过 RPC 实时查询微信进程内数据库）
-2. WeChatMsg (LC044) 导出格式（本地 SQLite 数据库 + 解密）
-3. 手动导出的 txt/csv/json 聊天记录
-4. wechat-decrypt 微信 4.x 数据库解密提取（新增）
+支持 1 种数据来源（已剥离微信本地解密）:
+1. 手动导出的 txt/csv/json 聊天记录（云端可用）
 
 输出格式：统一 JSON 对话列表
     [{"user": "xxx", "reply": "yyy", "timestamp": 123456789, "is_self": true/false}, ...]
+
+剥离历史（2026-08-27）:
+- 删除 WeChatFerry (RPC) 提取 — 需本机微信进程，云端不可能
+- 删除 WeChatMsg SQLite 提取 — 需本机已解密数据库
+- 删除 wechat-decrypt 提取 — 需本机微信内存密钥
+- 全部云端可用的提取路径：仅保留文件导入
 """
 
 import json
@@ -23,7 +26,7 @@ logger = logging.getLogger("clone.extractor")
 
 
 class DataExtractor:
-    """从多种来源提取 WeChat 聊天对话"""
+    """从已导出的聊天记录文件提取对话（云端可用版本）"""
 
     def __init__(self, data_dir: str = "./data/clone_src", single_combine_time_window: int = 2):
         """
@@ -35,205 +38,7 @@ class DataExtractor:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.single_combine_time_window = single_combine_time_window
 
-    # ── 来源1: WeChatFerry (RPC) ─────────────────────────
-
-    def extract_from_wcf(
-        self,
-        target_wxid: str,
-        limit: int = 1000,
-        offset: int = 0,
-    ) -> list[dict[str, Any]]:
-        """
-        通过 WeChatFerry RPC 查询微信进程内数据库
-
-        Args:
-            target_wxid: 目标联系人 wxid
-            limit: 最多拉取消息数
-            offset: 起始偏移
-
-        Returns:
-            清洗后的对话列表
-        """
-        try:
-            import wcf
-        except ImportError:
-            logger.error("WeChatFerry 未安装: pip install wcf")
-            return self._empty_result("wcf_not_installed")
-
-        try:
-            client = wcf.WeChatFerry()
-            raw_msgs = client.query_msg(target_wxid, limit=limit, offset=offset)
-            if not raw_msgs:
-                logger.warning("WCF 未返回消息（微信进程可能未运行或目标不存在）")
-                return self._empty_result("no_messages")
-
-            conversations = self._process_wcf_messages(raw_msgs)
-            logger.info("WCF 提取: %d 条消息 → %d 轮对话",
-                        len(raw_msgs), len(conversations))
-            return conversations
-
-        except Exception as e:
-            logger.exception("WCF 提取失败: %s", e)
-            return self._empty_result(str(e))
-
-    def _process_wcf_messages(
-        self, raw_msgs: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
-        """处理 WCF 原始消息 → 轮次对话"""
-        text_msgs = [
-            m for m in raw_msgs
-            if m.get("type") == 1  # 文本消息
-            and m.get("content")
-            and len(m["content"].strip()) > 0
-        ]
-
-        conversations = []
-        for i in range(0, len(text_msgs) - 1, 2):
-            user_msg = text_msgs[i]
-            reply = text_msgs[i + 1]
-
-            conversations.append({
-                "user": user_msg["content"].strip(),
-                "reply": reply["content"].strip(),
-                "timestamp": user_msg.get("timestamp", 0),
-                "is_self": user_msg.get("is_self", False),
-                "source": "wcf",
-            })
-
-        return conversations
-
-    # ── 来源2: WeChatMsg (LC044) 导出格式 ──────────────────
-
-    def extract_from_wechatmsg(
-        self,
-        db_path: str,
-        target_name: str | None = None,
-        date_from: str | None = None,
-        date_to: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """
-        从 WeChatMsg 导出/解密的 SQLite 数据库提取聊天记录
-
-        Args:
-            db_path: 已解密的 MSG.db 路径
-            target_name: 目标联系人备注名（None = 取所有）
-            date_from: 起始日期 "2024-01-01"
-            date_to: 截止日期 "2024-12-31"
-
-        Returns:
-            清洗后的对话列表
-        """
-        import sqlite3
-
-        if not os.path.exists(db_path):
-            logger.error("数据库不存在: %s", db_path)
-            return self._empty_result("db_not_found")
-
-        try:
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-
-            # 构建 SQL 查询
-            query = "SELECT * FROM MSG WHERE Type = 1 AND IsSender IS NOT NULL"
-            params = []
-
-            if target_name:
-                # 根据备注名查 Talker
-                query += " AND StrTalker IN (SELECT UsrName FROM Contact WHERE Remark=?)"
-                params.append(target_name)
-
-            if date_from:
-                query += " AND CreateTime >= ?"
-                params.append(self._date_to_timestamp(date_from))  # type: ignore[arg-type]
-
-            if date_to:
-                query += " AND CreateTime <= ?"
-                params.append(self._date_to_timestamp(date_to, end_of_day=True))  # type: ignore[arg-type]
-
-            query += " ORDER BY CreateTime ASC LIMIT 5000"
-
-            cursor = conn.execute(query, params)
-            rows = cursor.fetchall()
-            conn.close()
-
-            if not rows:
-                logger.warning("WeChatMsg 数据库无匹配消息")
-                return self._empty_result("no_messages")
-
-            conversations = self._build_conversations_from_rows(rows)
-            logger.info("WeChatMsg 提取: %d 行 → %d 轮对话",
-                        len(rows), len(conversations))
-            return conversations
-
-        except Exception as e:
-            logger.exception("WeChatMsg 提取失败: %s", e)
-            return self._empty_result(str(e))
-
-    def _build_conversations_from_rows(
-        self, rows: list[Any]
-    ) -> list[dict[str, Any]]:
-        """从 SQLite 查询结果构建对话列表"""
-        conversations = []
-        pending_msg = None
-
-        for row in rows:
-            msg_data = {
-                "content": row.get("StrContent", ""),
-                "timestamp": row.get("CreateTime", 0),
-                "is_self": bool(row["IsSender"]) if "IsSender" in row else False,
-                "talker": row.get("StrTalker", ""),
-            }
-
-            if not msg_data["content"]:
-                continue
-
-            content = msg_data["content"].strip()
-
-            # 过滤系统消息、过长消息
-            if self._is_system_message(content):
-                continue
-            if len(content) > 500 or len(content) < 1:
-                continue
-
-            if pending_msg is None:
-                pending_msg = msg_data
-            elif pending_msg["is_self"] != msg_data["is_self"]:
-                # 不同人之间的对话轮次
-                if pending_msg["is_self"]:
-                    conversations.append({
-                        "user": pending_msg["content"],
-                        "reply": msg_data["content"],
-                        "timestamp": pending_msg["timestamp"],
-                        "is_self": pending_msg["is_self"],
-                        "source": "wechatmsg",
-                    })
-                else:
-                    conversations.append({
-                        "user": msg_data["content"],
-                        "reply": pending_msg["content"],
-                        "timestamp": msg_data["timestamp"],
-                        "is_self": msg_data["is_self"],
-                        "source": "wechatmsg",
-                    })
-                pending_msg = None
-            else:
-                # 同一人连续发消息 — 按时间窗口决定合并或替换
-                time_diff = abs(msg_data["timestamp"] - pending_msg["timestamp"])
-                window_seconds = self.single_combine_time_window * 60
-
-                if time_diff <= window_seconds:
-                    # 时间窗口内 → 合并消息，保留说话者身份
-                    pending_msg["content"] = pending_msg["content"] + "，" + msg_data["content"]
-                    pending_msg["timestamp"] = msg_data["timestamp"]
-                    logger.debug("合并同人连续消息 (时间差 %.0f 秒)", time_diff)
-                else:
-                    # 超过时间窗口 → 保留最新一条（视为新会话开始）
-                    pending_msg = msg_data
-                    logger.debug("同人消息超时窗口 (%.0f > %d 秒), 保留最新", time_diff, window_seconds)
-
-        return conversations
-
-    # ── 来源3: 手动导出文件（txt/csv/json） ──────────────
+    # ── 来源: 手动导出文件（txt/csv/json） ──────────────
 
     def extract_from_export(
         self, file_path: str, format: str = "auto",
@@ -399,51 +204,6 @@ class DataExtractor:
         logger.info("TXT 提取: %d 行 → %d 条消息 → %d 轮对话",
                     len(lines), len(parsed), len(conversations))
         return conversations
-
-    # ── 来源4: wechat-decrypt ─────────────────────────────
-
-    def extract_from_decrypt(
-        self,
-        target: str,
-        max_messages: int = 5000,
-        date_from: str | None = None,
-        date_to: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """
-        通过 wechat-decrypt（微信 4.x 数据库解密）提取聊天记录
-
-        自动完成：密钥提取 → 数据库解密 → 消息读取 → 对话构建
-
-        Args:
-            target: 目标联系人 wxid / 备注名 / 昵称
-            max_messages: 最大消息数
-            date_from: 起始日期 "2024-01-01"
-            date_to: 截止日期 "2024-12-31"
-
-        Returns:
-            清洗后的对话列表
-        """
-        try:
-            from clone_training.wechat_decrypt_source import DecryptSource
-        except ImportError:
-            logger.error("decrypt_source 模块不可用，请确保 third_party/wechat-decrypt 已安装")
-            return self._empty_result("decrypt_source_not_found")
-
-        try:
-            ds = DecryptSource()
-            conversations = ds.extract(
-                target=target,
-                max_messages=max_messages,
-                date_from=date_from,
-                date_to=date_to,
-            )
-            logger.info("wechat-decrypt 提取: %d 轮对话 (目标: %s)",
-                        len(conversations), target)
-            return conversations
-
-        except Exception as e:
-            logger.exception("wechat-decrypt 提取失败: %s", e)
-            return self._empty_result(str(e))
 
     # ── 工具方法 ────────────────────────────────────────
 

@@ -5,14 +5,16 @@
 - 按人物分组查看已提取的聊天记录
 - 查看/删除单条或多条记录
 - 按日期/关键词筛选
-- 从解密数据库获取联系人列表
+
+剥离历史（2026-08-27）:
+- 移除"从解密数据库获取联系人列表"路径（需本机微信进程，云端不可用）
+- 联系人来源仅保留：从已有克隆数据 (*_raw.json) 提取
 """
 
 import json
 import logging
 import os
 import re
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -42,23 +44,18 @@ class CloneDataManager:
     # ── 联系人列表（需求4） ──
 
     def get_contacts(self, keyword: str = "", force_refresh: bool = False) -> list[dict[str, Any]]:
-        """获取微信联系人列表（优先从解密数据库，降级到已有克隆数据）
+        """获取已克隆的联系人列表（仅从已有克隆数据 *raw.json 提取）
 
         Args:
             keyword: 搜索关键词（按昵称/wxid筛选）
             force_refresh: 强制刷新缓存
 
         Returns:
-            [{"username": "wxid_xxx", "display_name": "昵称", "source": "decrypt"}, ...]
+            [{"username": "wxid_xxx", "display_name": "昵称", "source": "clone_data"}, ...]
         """
-        # 优先从解密数据库获取
-        contacts = self._get_contacts_from_decrypt()
-        if contacts:
-            self._contacts_cache = contacts
-            self._contacts_cache_time = time.time()
-        else:
-            # 降级：从已有克隆数据中提取
-            contacts = self._get_contacts_from_clone_data()
+        # 2026-08-27 剥离：移除"从解密数据库获取"路径（需本机微信进程，云端不可用）
+        # 联系人来源仅保留：从已有克隆数据 *raw.json 提取
+        contacts = self._get_contacts_from_clone_data()
 
         if keyword:
             keyword = keyword.lower()
@@ -69,21 +66,6 @@ class CloneDataManager:
             ]
 
         return contacts
-
-    def _get_contacts_from_decrypt(self) -> list[dict[str, Any]]:
-        """从 wechat-decrypt 获取联系人"""
-        try:
-            from clone_training.wechat_decrypt_source import DecryptSource
-            ds = DecryptSource()
-            ds.ensure_ready()
-            raw = ds.get_contacts()
-            return [
-                {"username": c["username"], "display_name": c["display_name"], "source": "decrypt"}
-                for c in raw
-            ]
-        except Exception as e:  # noqa: BLE001
-            logger.debug("解密数据库获取联系人失败（降级到克隆数据）: %s", e)
-            return []
 
     def _get_contacts_from_clone_data(self) -> list[dict[str, Any]]:
         """从已有克隆数据提取联系人"""
