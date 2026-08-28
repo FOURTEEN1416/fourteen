@@ -115,7 +115,7 @@
                                    ▼
                   MultiProviderGateway（auto 四级回退）
                                    ▼
-                    MiMo TTS（前端唯一，后端四级容灾）
+                    MiMo TTS（唯一引擎，SAPI 本地兜底）
 ```
 
 ## 四、成功判据（终态的自检问题）
