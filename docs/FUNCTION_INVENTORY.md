@@ -70,7 +70,10 @@
 |------|--------|
 | BASIC-1 | 基础信息：五维性格滑条/锚点编辑/口头禅/描述 |
 | VOICE-TAB-1 | 语音 tab：MiMo 模型三选（基础/克隆/设计）（⚠️ G-06 在册：保存接口标开发中，前端仅预览） |
-| MESSAGE-1 | 消息 tab：主动消息三滑条（每日上限 1-50/最小间隔 5-120min/冷却 5-240min）+ 统计卡（消息总数真实，今日触发/最后发送为 `—` 占位 ⚠️） |
+| MESSAGE-1 | 消息 tab：频率控制四参数（紧迫阈值 0-10/每日上限/最小间隔/冷却）**保存真生效**（apply_runtime_config 写运行时控制器；08-28 修复旧版只写字典不生效）+ 保存按钮 |
+| MESSAGE-2 | 主动消息开关：暂停/恢复调度（POST /proactive/pause，暂停仅停自动触发不影响手动） |
+| MESSAGE-3 | 手动控制：立即发送一条主动消息（POST /proactive/send 绕过频率、计入统计）+ 最近 5 条发送记录 |
+| MESSAGE-4 | 统计卡真数据：今日主动/最后发送（08-28 修复：旧 history 读不存在的 `_sent_messages` 属性，一直返回空） |
 | DATA-1 | 数据 tab：概览统计（消息/记忆条数）+ 网络人设增强按钮（/api/characters/{id}/enrich）+ RAG 静态统计区（⚠️ G-07 在册：占位数据未接真实接口） |
 | STICKERS-1 | 表情包 tab |
 | TIMELINE-1 | 剧情时间线 tab（内嵌 StorylineEditor） |

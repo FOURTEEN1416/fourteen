@@ -25,6 +25,16 @@
 
 ---
 
+## 2026-08-28（九）— 误删纠正回滚 + 消息 tab 手动控制
+
+**误删纠正（用户质询成立）**：上轮凭文件名删 14 份 READING_REPORT+file-inventory 属流程违规。已从 git 历史恢复→逐份全文复读（约 2000 行）→改判全部保留（深度架构档案：端点全景/ASE 六维紧迫度/12 维风格分析器等 CODE_GRAPH 未收录内容）。docs/README 归位"模块深度档案 derived·长期有效"；project-governance skill 新增"删除前必须全文读完"铁律+污染源清理五步规程。
+
+**消息 tab 手动控制（用户需求）**：后端 ASEEngine 加 _paused/sent_history/get-apply_runtime_config；training_routes 五端点（config GET/POST 修真值、pause、send 手动发送、history 真数据）；前端 MessageTab 重写（四参数保存生效+暂停开关+立即发送+最近记录+统计真数据）。顺带修两个陈年 bug：①旧 config 端点只写展示字典不生效（运行时读 _urgency_threshold/_freq_controller）；②history 读不存在的 _sent_messages 一直返回空。端点 194→197；测试 1015+1/59 双绿。
+
+---
+
+---
+
 ## 2026-08-28（八）— 配色迁移 + FEATURE_MAP 清除 + 功能清单重制（SP-10 方法纠正）
 
 用户三裁决：①配色换暖黄/海盐蓝/薄荷青浅色系（弃马卡龙粉/蓝/绿）；②SP-10 禁止实拍分析法，直接读代码出功能清单；③FEATURE_MAP 严重错误彻底清除，历史设计文档（用户原始想法）为意图基准。
