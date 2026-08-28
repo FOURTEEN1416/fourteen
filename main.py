@@ -16,7 +16,6 @@
     python main.py --no-scheduler            # 不启动主动消息调度器
     python main.py --log-level DEBUG         # 调试日志
     python main.py --init-only               # 仅初始化自检
-    python main.py --init-only               # 仅初始化
 """
 
 
@@ -25,7 +24,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import atexit
-import contextlib
 import logging
 import os
 import sys
@@ -37,6 +35,7 @@ from typing import Any
 
 from sqlalchemy import select  # noqa: E402
 
+from orchestrator.console_chat import run_console_chat
 from orchestrator.optimized_orchestrator import OptimizedOrchestrator
 
 # Import project_root
@@ -165,90 +164,7 @@ def load_fusion_config(config_dir: str) -> dict[str, Any]:
     return {}
 
 
-def run_console_chat(orchestrator_or_obj, orchestrator_mode: str,
-                     emotion_engine=None, ase_engine=None) -> None:
-    print("\n" + "=" * 50)
-    print(f"  [CHAT] 控制台聊天模式 ({orchestrator_mode} 模式)")
-    print("  命令: /quit 退出  /status 查看状态  /health 健康检查  /reset 重置记忆")
-    print("=" * 50 + "\n")
-
-    session_id = f"console_{int(time.time())}"
-
-    if orchestrator_mode == "full" and hasattr(orchestrator_or_obj, "_memory"):
-        with contextlib.suppress(Exception):
-            orchestrator_or_obj._memory.working.start_session(session_id, "console")
-
-    try:
-        while True:
-            try:
-                query = input("你 > ").strip()
-            except (EOFError, KeyboardInterrupt):
-                print("\n[BYE] 下次再来找我哦~")
-                break
-
-            if not query:
-                continue
-
-            if query == "/quit":
-                print("[BYE] 笨蛋, 记得想我！")
-                break
-            elif query == "/reset":
-                if orchestrator_mode == "full" and hasattr(orchestrator_or_obj, "_memory"):
-                    try:
-                        orchestrator_or_obj._memory.structured_memory.clear_session("console")
-                        print("[OK] 记忆已重置")
-                    except Exception as e:  # noqa: BLE001
-                        print(f"[WARN] 重置失败: {e}")
-                continue
-            elif query == "/status":
-                if orchestrator_mode == "full" and emotion_engine:
-                    state = emotion_engine.state
-                    print(f"  情感: {state.primary_emotion.value} | "
-                          f"强度: {state.primary_intensity:.2f} | "
-                          f"能量: {state.energy:.1f} | "
-                          f"好感度: {state.affinity}")
-                    if ase_engine:
-                        print(f"  主动消息紧迫度: {ase_engine.urgency:.2f}")
-                elif orchestrator_mode == "fast":
-                    emotion = orchestrator_or_obj.components.get("emotion")
-                    memory = orchestrator_or_obj.components.get("memory")
-                    if emotion and memory:
-                        state = emotion.state
-                        print(f"  情感: {state.primary_emotion.value} | "
-                              f"强度: {state.primary_intensity:.2f} | "
-                              f"能量: {state.energy:.1f} | "
-                              f"好感度: {state.affinity}")
-                        if hasattr(memory, "structured_memory"):
-                            print(f"  今日对话: {memory.structured_memory.count_chats_today()} 条")
-                continue
-            elif query == "/health":
-                if orchestrator_mode == "full":
-                    from observability.health import health_checker
-                    print(f"  系统状态: {health_checker.check()}")
-                elif orchestrator_mode == "fast":
-                    health = orchestrator_or_obj.health_check()
-                    print(f"  系统状态: {'[OK] 健康' if health['healthy'] else '[WARN] 异常'}")
-                    for name, status in health.get("components", {}).items():
-                        print(f"    {name}: {status}")
-                continue
-
-            result = asyncio.run(orchestrator_or_obj.process_message(query, session_id)) if asyncio.iscoroutinefunction(orchestrator_or_obj.process_message) else orchestrator_or_obj.process_message(query, session_id)
-            reply = result.get("reply", "")
-            emotion = result.get("emotion")
-
-            emotion_tag = ""
-            if emotion:
-                emotion_tag = f" [{emotion.get('primary', {}).get('type', '')}]"
-
-            print(f"十四 > {reply}{emotion_tag}")
-
-    except Exception:
-        logger.exception("控制台聊天异常")
-
-
-def run_wechat_mode(user_manager, orchestrator_mode: str,
-                    args: argparse.Namespace,
-                    wechat_connector_holder: dict | None = None) -> None:
+def run_wechat_mode(user_manager, wechat_connector_holder: dict | None = None) -> None:
     from wechat_direct import WeChatConnector
 
     print("\n📱 微信模式启动中（多用户版）...")
@@ -317,7 +233,6 @@ def _create_proactive_sender(ws_server_holder: dict, wechat_connector_holder: di
         ws_server = ws_server_holder.get("ws")
         if ws_server:
             try:
-                import asyncio
                 try:
                     loop = asyncio.get_running_loop()
                     if loop.is_running():
@@ -485,7 +400,7 @@ def _run_orchestrator(args: argparse.Namespace, use_console: bool,
                 time.sleep(3600)
     else:
         try:
-            run_wechat_mode(user_mgr, mode, args, wechat_connector_holder=_wechat_holder)
+            run_wechat_mode(user_mgr, wechat_connector_holder=_wechat_holder)
         finally:
             orchestrator.shutdown()
 
