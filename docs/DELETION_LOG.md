@@ -2,6 +2,31 @@
 
 # Code Deletion Log
 
+## [2026-08-28] FEATURE_MAP 清除（用户裁决：严重错误）+ 配色体系迁移
+
+### 决策依据
+- 用户裁决「FEATURE_MAP F-01~F-15 有严重错误请彻底清除」；功能对齐意图基准改为 docs/history/ 历史设计文档（用户原始想法记录）
+- 配色裁决：弃马卡龙粉/蓝/绿，改暖黄/海盐蓝/薄荷青浅色系
+
+### Files Deleted
+- `docs/FEATURE_MAP.md`（100 行，功能现状地图——因内容严重错误整体清除，非逐条修正）
+
+### Files Created
+- `docs/FUNCTION_INVENTORY.md`（新 truth：页-功能点编号功能清单，代码实况逐页读出 × 历史意图对照，含 GAP-1~5 差距清单）
+
+### Files Modified（配色迁移，frontend/src 全库）
+- `index.css`：@theme 三族重定义（yellow #FDE68A 系 / blue 海盐 #BAE6FD 系 / mint #99F6E4 系）+ primary(暖黄)/accent(海盐蓝) + bg 渐变(#FFFBEB/#F0F9FF/#F0FDFA) + success 同薄荷青
+- 5 个文件类名迁移：macaron-pink→macaron-yellow、macaron-green→macaron-mint（tsx/css 全库，残留 0）
+- `ParticleCanvas.tsx`：粒子双色 hex 同步
+- 真源链：AGENTS §1.3 坐标系、VISION 分工声明、docs/README 索引、DECISION_LEDGER SP-2/SP-10
+
+### Verification
+- tsc --noEmit 0 错误；vitest 59 passed；旧色值 grep 零命中；macaron-pink/green 残留 0
+
+---
+
+# Code Deletion Log
+
 ## [2026-08-28] 语音域 MiMo-only 收敛（用户裁决 A：全语音域只留 MiMo）
 
 ### 决策依据

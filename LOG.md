@@ -25,6 +25,21 @@
 
 ---
 
+## 2026-08-28（八）— 配色迁移 + FEATURE_MAP 清除 + 功能清单重制（SP-10 方法纠正）
+
+用户三裁决：①配色换暖黄/海盐蓝/薄荷青浅色系（弃马卡龙粉/蓝/绿）；②SP-10 禁止实拍分析法，直接读代码出功能清单；③FEATURE_MAP 严重错误彻底清除，历史设计文档（用户原始想法）为意图基准。
+
+**执行**：
+1. 配色：全库类名迁移 macaron-pink→macaron-yellow(暖黄 #FDE68A/#D97706)、macaron-green→macaron-mint(薄荷青 #99F6E4/#0D9488)、macaron-blue→海盐蓝(#BAE6FD/#0284C7)；@theme 三族+primary(暖黄系)+accent(海盐蓝系)+bg 渐变+success(同薄荷青) 重定义；ParticleCanvas 粒子色同步。验证：tsc 0 错、vitest 59 绿。
+2. 删 docs/FEATURE_MAP.md（git rm，DELETION_LOG 待补条目与本条合并登记）；真源链同步：AGENTS §1.3 商讨协议坐标系改指 FUNCTION_INVENTORY、VISION 分工声明、docs/README 索引、DECISION_LEDGER SP-2/SP-10 引用修正。
+3. SP-10 重制：新建 **docs/FUNCTION_INVENTORY.md**（truth，页-功能点两级编号）——App.tsx×15 页组件×api 消费逐页读出功能点（LOGIN-1~LOGS-1 共 40+ 条，全部带文件证据），§0 全局能力对照历史六特性，产出 **GAP-1~5 差距清单**（企微通道未实现/记忆三层前端呈现薄/消息统计占位/两 tab 开发中/状态中心缺丰富化）。
+
+**验证**：tsc --noEmit 0；vitest 59 passed。配色为纯 token 层变更，pytest 不受影响（未重跑，后端零改动）。
+
+**未验证/待办**：① GAP-1（企业微信）需用户裁决是否立项；② SP-5 修复清单（诊断报告 P0-P2）仍待批；③ 本批未部署云端（纯前端 token+docs，下次部署随批）。
+
+---
+
 ## 2026-08-28（七）— 语音域 MiMo-only 收敛（裁决 A）
 
 用户选定 A 口径（全域 MiMo-only，保留 fallback_local）。删除 4 provider + voice_training + shisi 训练 API(4端点) + EmotionVoiceMapper；tts_manager 单引擎重写；**fallback_local 重写为 Windows SAPI 本地合成**（原四级链已删，避免 ImportError 炸降级路径；pywin32 入可选组 win-tts-fallback）；voice_routes/shisi/config/pyproject/测试全链对齐。验证：pytest 1015+1、vitest 59、194 端点实扫、代码层旧引擎零命中。前端 SettingsVoice（克隆/合成唯一入口）本就 MiMo-only，零改动。

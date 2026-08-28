@@ -102,9 +102,9 @@ export function CustomCursor() {
       <style>{`
         /* 不再强制隐藏系统光标：自定义光标可能因层级/初始化问题不可见，保留系统光标保证可用性 */
         .cursor-ring.hovering { width: 56px; height: 56px; }
-        .cursor-ring.hovering-pink { border-color: var(--color-macaron-pink); background: rgba(248,180,217,0.12); }
+        .cursor-ring.hovering-pink { border-color: var(--color-macaron-yellow); background: rgba(248,180,217,0.12); }
         .cursor-ring.hovering-blue { border-color: var(--color-macaron-blue-deep); background: rgba(180,217,248,0.12); }
-        .cursor-ring.hovering-green { border-color: var(--color-macaron-green-deep); background: rgba(180,248,217,0.12); }
+        .cursor-ring.hovering-green { border-color: var(--color-macaron-mint-deep); background: rgba(180,248,217,0.12); }
       `}</style>
     </>
   )

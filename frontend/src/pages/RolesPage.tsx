@@ -111,7 +111,7 @@ export default function RolesPage() {
               ))}
               <button
                 onClick={() => navigate('/roles/create')}
-                className="glass-card rounded-2xl p-4 flex flex-col items-center justify-center text-gray-400 hover:text-macaron-pink-deep hover:bg-white/40 transition-all border-2 border-dashed border-white/50"
+                className="glass-card rounded-2xl p-4 flex flex-col items-center justify-center text-gray-400 hover:text-macaron-yellow-deep hover:bg-white/40 transition-all border-2 border-dashed border-white/50"
               >
                 <Plus className="w-8 h-8 mb-2" />
                 <span className="text-sm font-medium">创建角色</span>

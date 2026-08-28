@@ -11,7 +11,7 @@
 | 文档 | 管辖（唯一权威范围） | Diátaxis 象限 | 生命周期 |
 |------|--------------------|--------------|---------|
 | [VISION.md](VISION.md) | 终态宣言：产品本质/既成事实基线/候选池/Non-Goals/成功判据 | explanation | **truth** |
-| [FEATURE_MAP.md](FEATURE_MAP.md) | 功能现状坐标系（F/G/B 编号，商讨协议的定位基准） | reference | **truth** |
+| [FUNCTION_INVENTORY.md](FUNCTION_INVENTORY.md) | 功能清单（页-功能点编号，商讨协议定位基准；08-28 重制自代码实况×历史意图） | reference | **truth** |
 | [DECISION_LEDGER.md](DECISION_LEDGER.md) | 决策生死账（真决策清单 + 挂起池 SP-*） | reference（决策记录） | **truth** |
 | 根目录 [CODE_GRAPH.md](../CODE_GRAPH.md) | 代码实况：端点/模块/热路径/指标（当前 v3.3.0） | reference | **truth** |
 | [history/INDEX.md](history/INDEX.md) | 漂移登记簿 + 历史文档演进索引 | reference | **truth** |
@@ -47,9 +47,10 @@
 
 | 位置 | 内容 | 说明 |
 |------|------|------|
-| READING_REPORT_*.md（16 份，docs 根） | 08-26 全库穷举通读的模块摘要 | 结论已沉淀进 FEATURE_MAP/CODE_GRAPH |
+| READING_REPORT_*.md（16 份，docs 根） | 08-26 全库穷举通读的模块摘要 | 结论已沉淀进 FUNCTION_INVENTORY/CODE_GRAPH |
 | [reports/](reports/) | 调研/评审报告（含 2026-08-28 治理方法论调研——本次治理的依据） | 产出已/将收编进真源 |
 | [P1_BACKLOG.md](P1_BACKLOG.md) | P1 待办（07 月重写版） | 部分 SP-* 与 DECISION_LEDGER 挂起池重叠，以 DECISION_LEDGER 为准 |
+| ~~FEATURE_MAP.md~~ | 已删除（08-28 用户裁决：严重错误） | 由 FUNCTION_INVENTORY.md 替代 |
 | [inventory/file-inventory.md](inventory/file-inventory.md) | 文件清单快照 | 口径见其头部声明 |
 | [superpowers/](superpowers/) | plans/specs 工作产物 | 历史会话产物 |
 | [audits/](audits/) | 审计产物 | — |

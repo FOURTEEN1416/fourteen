@@ -1,0 +1,108 @@
+
+======================================================================
+## AdminProvidersPage.tsx (366 lines)
+api modules: ['llmProviders']
+imported: ['AnimatedPage', 'BookOpen', 'ConfirmDialog', 'Edit3', 'EmptyState', 'ExternalLink', 'Loader2', 'Plus', 'RefreshCw', 'Shield', 'Trash2', 'createProvider', 'deleteProvider', 'listAllProviders', 'toggleProvider', 'type ProviderCreateRequest', 'type ProviderOption', 'type ProviderUpdateRequest', 'updateProvider', 'useAuthStore', 'useCallback', 'useEffect', 'useErrorStore', 'useState']
+  H: {p.name}
+  buttons: ['刷新', '添加供应商', '重试']
+
+======================================================================
+## AdminUsersPage.tsx (380 lines)
+api modules: ['admin']
+imported: ['AnimatedPage', 'ConfirmDialog', 'EmptyState', 'ROLES', 'ROLE_LABELS', 'Search', 'Shield', 'UserPlus', 'X', 'adminCreateUser', 'adminDeleteUser', 'adminListUsers', 'adminUpdateUser', 'type AdminCreateUserRequest', 'type AdminUpdateUserRequest', 'type AdminUser', 'useAuthStore', 'useCallback', 'useEffect', 'useErrorStore', 'useState', 'validateEmail', 'validatePassword', 'validateUsername']
+  buttons: ['创建用户', '重试']
+
+======================================================================
+## CreateRole.tsx (701 lines)
+api modules: ['client', 'characters']
+imported: ['Bot', 'CLONE_AGENT_GUIDE', 'Check', 'Copy', 'Eye', 'FileUp', 'Loader2', 'MessageSquare', 'Send', 'Sparkles', 'Users', 'cloneUpload', 'getPreset', 'importCharacter', 'listPresets', 'previewCharacterFromDescription', 'type PersonaState', 'useCharacterBuilderStore', 'useCreateCharacter', 'useEffect', 'useErrorStore', 'useNavigate', 'useRef', 'useState']
+  H: 和十四聊一会儿
+  H: 创建角色
+  H: 实时预览
+  buttons: ['重新上传', '上传并分析']
+
+======================================================================
+## LoginPage.tsx (222 lines)
+api modules: []
+imported: ['Navigate', 'type FormEvent', 'useAuth', 'useLocation', 'useNavigate', 'useState']
+  H: 唯一的你——十四
+  buttons: ['注册', '登录']
+
+======================================================================
+## NotFoundPage.tsx (16 lines)
+api modules: []
+imported: ['Link']
+  H: 页面未找到
+
+======================================================================
+## RoleSettings.tsx (84 lines)
+api modules: []
+imported: ['SUB_TABS', 'sanitizeCharacterName', 'useParams', 'useState', 'useUnifiedCharacter']
+  H: {sanitizeCharacterName(character.name)}
+
+======================================================================
+## RolesPage.tsx (125 lines)
+api modules: ['characters']
+imported: ['Plus', 'Sparkles', 'activateCharacter', 'sanitizeCharacterName', 'useNavigate', 'useQueryClient', 'useState', 'useUnifiedCharacters']
+  H: 角色配置
+  queryKeys: ["'characters'"]
+  buttons: ['创建角色']
+
+======================================================================
+## SettingsLLM.tsx (392 lines)
+api modules: ['system', 'llmProviders']
+imported: ['BookOpen', 'Loader2', 'Toggle', 'config', 'listProviders', 'saveConfig', 'saveUserLlmConfig', 'type ProviderOption', 'useAuthStore', 'useEffect', 'useState', 'userLlmConfig']
+  H: LLM 供应商
+  H: 连接参数
+  H: 生成参数
+  H: LLM 缓存
+  buttons: ['查看申请教程']
+
+======================================================================
+## SettingsLogs.tsx (205 lines)
+api modules: ['system']
+imported: ['Select', 'logs', 'useCallback', 'useEffect', 'useMemo', 'useRef', 'useState']
+  H: 日志
+  buttons: ['刷新', '清屏', '导出']
+
+======================================================================
+## SettingsSecurity.tsx (208 lines)
+api modules: ['system']
+imported: ['Shield', 'ShieldAlert', 'safetyConfig', 'safetyLog', 'safetyStats', 'useCallback', 'useEffect', 'useErrorStore', 'useState']
+  buttons: ['重试']
+
+======================================================================
+## SettingsVoice.tsx (496 lines)
+api modules: ['mimo', 'mimo', 'system']
+imported: ['Check', 'Loader2', 'Mic', 'Play', 'Select', 'Upload', 'getSpeakers', 'mimoClone', 'mimoDesign', 'mimoSetEngine', 'mimoStatus', 'mimoSwitchVoice', 'mimoSynthesize', 'useCallback', 'useEffect', 'useState']
+  H: 语音引擎
+  H: 语音克隆
+  H: 语音设计
+  H: 语音合成测试
+  H: 语音工作台
+
+======================================================================
+## StatusCenter.tsx (77 lines)
+api modules: []
+imported: ['useActiveCharacter', 'useDashboard', 'useEmotionState', 'useMemoryFacts']
+
+======================================================================
+## SystemSettingsLayout.tsx (12 lines)
+api modules: []
+imported: ['Outlet']
+  H: 系统设置
+
+======================================================================
+## ToolsDashboard.tsx (178 lines)
+api modules: ['system']
+imported: ['AlertCircle', 'Wifi', 'Wrench', 'toggleTool', 'tools', 'toolsHealth', 'useCallback', 'useEffect', 'useState']
+  H: 工具仪表盘
+
+======================================================================
+## WeChatPage.tsx (413 lines)
+api modules: ['wechat', 'system']
+imported: ['AlertTriangle', 'AnimatedPage', 'CheckCircle2', 'Clock', 'MessageSquare', 'QrCode', 'RefreshCw', 'Smartphone', 'X', 'queryKeys', 'useCallback', 'useEffect', 'useQueryClient', 'useRef', 'useState', 'useWechatStatus', 'wechatConnect', 'wechatConnectionStatus', 'wechatCreateConnection', 'wechatQrCode']
+  H: 扫码连接微信
+  H: 微信接入
+  queryKeys: ["'wechat', 'bindings'"]
+  buttons: ['二维码', '刷新二维码', '完成', '重新获取', '重试', '扫码连接']

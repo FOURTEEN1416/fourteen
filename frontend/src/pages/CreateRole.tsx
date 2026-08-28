@@ -55,16 +55,16 @@ function getCardPreview(raw: Record<string, unknown>): PersonaPayload {
 }
 
 const METHODS: { key: CreateMethod; label: string; gradient: string }[] = [
-  { key: 'ai-chat', label: 'AI 对话', gradient: 'from-macaron-pink to-macaron-pink-deep' },
+  { key: 'ai-chat', label: 'AI 对话', gradient: 'from-macaron-yellow to-macaron-yellow-deep' },
   { key: 'wechat-clone', label: '克隆好友', gradient: 'from-macaron-blue to-macaron-blue-deep' },
-  { key: 'file-import', label: '文件导入', gradient: 'from-macaron-green to-macaron-green-deep' },
+  { key: 'file-import', label: '文件导入', gradient: 'from-macaron-mint to-macaron-mint-deep' },
 ]
 
 const PERSONALITY_KEYS = [
-  { key: 'warmth', label: '温暖', color: 'bg-macaron-pink-deep' },
+  { key: 'warmth', label: '温暖', color: 'bg-macaron-yellow-deep' },
   { key: 'playfulness', label: '活泼', color: 'bg-macaron-blue-deep' },
-  { key: 'independence', label: '独立', color: 'bg-macaron-green-deep' },
-  { key: 'jealousy', label: '占有欲', color: 'bg-macaron-pink-deep' },
+  { key: 'independence', label: '独立', color: 'bg-macaron-mint-deep' },
+  { key: 'jealousy', label: '占有欲', color: 'bg-macaron-yellow-deep' },
   { key: 'stubbornness', label: '固执', color: 'bg-macaron-blue-deep' },
 ]
 
@@ -91,7 +91,7 @@ function AIChatTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaSt
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 mb-4">
-        <MessageSquare className="w-4 h-4 text-macaron-pink-deep" />
+        <MessageSquare className="w-4 h-4 text-macaron-yellow-deep" />
         <h3 className="text-sm font-semibold text-gray-700">和十四聊一会儿</h3>
         <span className="text-[10px] text-gray-400 ml-auto">通过对话让 AI 学习你的期待</span>
       </div>
@@ -108,7 +108,7 @@ function AIChatTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaSt
           <div key={`crmsg-${i}-${msg.role}-${msg.content.slice(0, 16)}`} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
               msg.role === 'user'
-                ? 'bg-gradient-to-br from-macaron-pink to-macaron-pink-deep text-white rounded-br-md shadow-sm'
+                ? 'bg-gradient-to-br from-macaron-yellow to-macaron-yellow-deep text-white rounded-br-md shadow-sm'
                 : 'glass-card text-text-primary rounded-bl-md'
             }`}>
               {msg.content}
@@ -118,7 +118,7 @@ function AIChatTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaSt
         {loading && (
           <div className="flex justify-start">
             <div className="glass-card rounded-2xl rounded-bl-md px-4 py-2.5 flex items-center gap-2">
-              <Loader2 className="w-4 h-4 text-macaron-pink-deep animate-spin" />
+              <Loader2 className="w-4 h-4 text-macaron-yellow-deep animate-spin" />
               <span className="text-xs text-text-muted">正在思考...</span>
             </div>
           </div>
@@ -292,7 +292,7 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
       {/* ═══ 步骤 3：上传数据到服务器 ═══ */}
       <div className="w-full max-w-md rounded-xl bg-green-50/60 border border-green-100 p-4 space-y-3">
         <div className="flex items-center gap-2">
-          <span className="w-5 h-5 rounded-full bg-macaron-green text-white text-[10px] font-bold flex items-center justify-center">3</span>
+          <span className="w-5 h-5 rounded-full bg-macaron-mint text-white text-[10px] font-bold flex items-center justify-center">3</span>
           <p className="text-xs font-semibold text-green-700">上传智能体导出的 JSON 到服务器分析</p>
         </div>
 
@@ -349,9 +349,9 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
           {/* 完成 + 预览 */}
           {phase === 'done' && (
             <div className="space-y-2">
-              <div className="glass-green border border-macaron-green/30 rounded-xl px-4 py-3 flex items-center gap-2">
-                <Check className="w-4 h-4 text-macaron-green-deep" />
-                <span className="text-xs text-macaron-green-deep font-medium">已分析 {sampleCount} 轮对话，人设预览已更新</span>
+              <div className="glass-green border border-macaron-mint/30 rounded-xl px-4 py-3 flex items-center gap-2">
+                <Check className="w-4 h-4 text-macaron-mint-deep" />
+                <span className="text-xs text-macaron-mint-deep font-medium">已分析 {sampleCount} 轮对话，人设预览已更新</span>
               </div>
               {preview.length > 0 && (
                 <div className="rounded-xl border border-gray-200 bg-white/60 p-3 space-y-1.5">
@@ -437,9 +437,9 @@ function FileImportTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Perso
     <div className="space-y-4">
       <div
         onClick={() => fileRef.current?.click()}
-        className="border-2 border-dashed border-white/60 rounded-2xl p-8 text-center hover:border-macaron-pink hover:bg-macaron-pink-light/30 transition-all cursor-pointer"
+        className="border-2 border-dashed border-white/60 rounded-2xl p-8 text-center hover:border-macaron-yellow hover:bg-macaron-yellow-light/30 transition-all cursor-pointer"
       >
-        <FileUp className="w-8 h-8 text-macaron-pink-deep mx-auto mb-2" />
+        <FileUp className="w-8 h-8 text-macaron-yellow-deep mx-auto mb-2" />
         <p className="text-sm text-gray-500">点击上传角色 JSON 文件</p>
         <p className="text-xs text-gray-400 mt-1">支持标准角色卡格式</p>
         <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={handleFile} />
@@ -464,7 +464,7 @@ function FileImportTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Perso
       )}
       {parsed && (
         <div className="glass-card rounded-2xl p-4">
-          <h4 className="text-xs font-semibold text-text-muted mb-3 flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-macaron-green-deep" /> 解析预览</h4>
+          <h4 className="text-xs font-semibold text-text-muted mb-3 flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-macaron-mint-deep" /> 解析预览</h4>
           <div className="grid grid-cols-2 gap-2">
             {Object.entries(parsed).map(([label, value]) => (
               <div key={label} className="bg-white/40 rounded-xl px-3 py-2"><p className="text-[10px] text-text-muted">{label}</p><p className="text-xs text-text-primary mt-0.5 truncate">{value}</p></div>
@@ -623,7 +623,7 @@ function PresetPills({ onSelect }: { onSelect: (p: Partial<PersonaState>) => voi
           onClick={() => handleSelect(item)}
           className={`px-3.5 py-1.5 rounded-full text-sm transition-all border ${
             selectedId === item.id
-              ? 'bg-white/75 border-macaron-pink text-macaron-pink-deep shadow-sm'
+              ? 'bg-white/75 border-macaron-yellow text-macaron-yellow-deep shadow-sm'
               : 'bg-white/25 border-white/40 text-text-secondary hover:bg-white/50'
           }`}
         >
@@ -648,7 +648,7 @@ export default function CreateRole() {
         {/* Header */}
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <Sparkles className="w-5 h-5 text-macaron-pink-deep" />
+            <Sparkles className="w-5 h-5 text-macaron-yellow-deep" />
             <h1 className="text-lg font-bold text-gray-800">创建角色</h1>
           </div>
           <p className="text-sm text-text-muted">选择一种方式来构建你的 AI 角色</p>

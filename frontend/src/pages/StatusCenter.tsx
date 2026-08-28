@@ -35,7 +35,7 @@ export default function StatusCenter() {
 
       <div className="grid grid-cols-3 gap-4">
         <div className="glass-card rounded-xl p-4 text-center">
-          <div className="text-2xl font-bold text-macaron-pink-deep">{emotionLabel}</div>
+          <div className="text-2xl font-bold text-macaron-yellow-deep">{emotionLabel}</div>
           <div className="text-xs text-gray-400 mt-1">当前情绪</div>
         </div>
         <div className="glass-card rounded-xl p-4 text-center">
@@ -43,7 +43,7 @@ export default function StatusCenter() {
           <div className="text-xs text-gray-400 mt-1">亲密等级</div>
         </div>
         <div className="glass-card rounded-xl p-4 text-center">
-          <div className="text-2xl font-bold text-macaron-green-deep">
+          <div className="text-2xl font-bold text-macaron-mint-deep">
             {statsLoading ? '—' : memoryCount}
           </div>
           <div className="text-xs text-gray-400 mt-1">记忆条目</div>
