@@ -25,6 +25,23 @@
 
 ---
 
+## 2026-08-28（四）— main.py 屎山治理 + 克隆智能体代跑 + 前后端对齐验证
+
+**任务**：用户指示①克隆教程改为"智能体代跑"模式（导出工具=用户 GitHub 的 wechat-decrypt，本地最新版 C:\Users\FOUR\wechat-decrypt）；②main.py 屎山检查优化；③前后端对齐验证；④同步 CODE_GRAPH。
+
+**动作与原因**：
+1. 导出程序定位：`FOURTEEN1416/wechat-decrypt`（本地最新版含 AGENTS.md 智能体手册 + `--users` 单联系人导出）；平台 upload 端点原生兼容其 `is_self/text/message_type` 导出格式。
+2. 智能体任务书：权威版 `docs/guides/微信克隆-智能体任务书.md` + 前端内嵌 `constants/cloneAgentGuide.ts`（一键复制）。任务书做薄桥接——解密流程指向工具仓库自己的 AGENTS.md 冷启动决策树，自身只补 unique-you 特有段（格式校验/50MB 分片/上传）。CreateRole 克隆 tab 改三步流（OpenCode 推荐→复制任务书→上传 JSON），移除旧三工具卡片。用户流程：装 OpenCode（免费模型）→ 复制任务书喂智能体 → 收 JSON 上传。
+3. main.py 屎山治理：`run_console_chat`（复杂度 24 单体，CODE_GRAPH §7 热点）迁出为 `orchestrator/console_chat.py`（命令处理函数+分派表）；main.py 494→409 行；清 docstring 重复/函数内 import 遮蔽/banner 死替换/未用形参/contextlib。外部契约 `from main import OptimizedOrchestrator/UserManager` 不变。
+4. 前后端对齐验证：create_api_app 实扫 198 端点 × 前端 api/*.ts 静态解析——**前端调用缺后端 0**（无断链）、消费 118/198（60%）、80 零消费均为已知开放面（shisi 域/psych 幽灵能力/运维）。报告 `docs/reports/2026-08-28_前后端对齐验证.md`。
+5. CODE_GRAPH v3.3.0→v3.4.0（§1.1/§4.1/§4.9/§7/§13）；FEATURE_MAP F-05 措辞同步。
+
+**验证**：tsc --noEmit 0 错误；vitest 59 passed；pytest 1030 passed + 1 skipped（全量）。提交 3 个（73fffb6 / c69db0b / 258c440）。
+
+**未验证/待办**：① wechat-decrypt 仓库为私有——对外发布前用户需自行公开或提供分发渠道（任务书里的 clone URL 才对终端用户可用）；② 产品介绍页立项未启动；③ 提交未 push。
+
+---
+
 ## 2026-08-28（三）— 微信克隆收敛 + 用户删除确认提交
 
 **任务**：用户确认 8 项删除为其本人操作并指示提交；裁决微信克隆方向——解密必须在用户登录微信的本地环境进行，服务器只收 JSON。
