@@ -25,6 +25,26 @@
 
 ---
 
+## 2026-08-28（五）— 三端同步：GitHub 推送 + 云服务器部署（附两个部署链阻断修复）
+
+**任务**：用户问"云服务/GitHub/本地三端同步了吗"。核实：本地✅、GitHub 落后 17 commit、云服务器停在 67f000e（约 07-28）落后一个月。随后执行同步。
+
+**GitHub**：`git push origin main`（60263e0→388bad8，17 commit）。此后每次提交即推。
+
+**云服务器（deploy@→root@139.199.199.174，/opt/ai-girlfriend）**：git archive 直推 + remote_deploy.sh（pip -e / npm ci / build / systemctl restart）。过程中修掉两个部署链阻断 bug：
+
+1. **CRLF 阻断**：deploy/ 全部 8 个脚本/配置在仓库 blob/归档输出中带 CRLF，Linux 端报 `$'\r': command not found`。根因 = git archive 按 core.autocrlf 导出 CRLF。修复：新增 `.gitattributes`（*.sh/*.conf/*.service 强制 eol=lf，属性优先级高于 autocrlf），物理转 LF 提交（6f4a1ce）。
+2. **npm lockfile 漂移**：本地 bun 管包导致 package-lock.json 与 package.json 失同步，服务器 npm ci 报 EUSAGE。修复：lockfile-only 重生成（83e3270）。
+3. **归档推送不删文件**：tar 只增不删，服务器残留幽灵层三页/DemoPage/users.ts 等 29 个已删文件导致 tsc 失败。修复：`git diff --diff-filter=D 67f000e..HEAD` 生成删除清单 + 服务器 xargs rm 对齐。
+
+**云端终验**：service active；/api/health ok（v3.1.0 production）；`/api/demo/*` 404（已删）✓；`/api/training/extract` 404（已删）✓；前端 HTTP 200；uvicorn 4 worker 绑 127.0.0.1:8000（OBS-1 保持）。HTTPS 仍为 OBS-2 待办（域名），与本次无关。
+
+**沉淀**：三端同步规程——本地 commit → push origin → `git archive HEAD | ssh root@139.199.199.174 "tar -x -C /opt/ai-girlfriend"` → 若有删除：`git diff --name-only --diff-filter=D <服务器旧commit>..HEAD | ssh ... xargs rm` → `bash deploy/remote_deploy.sh` → 健康核验。
+
+**未验证/待办**：① 服务器 git 索引仍指 67f000e（archive 同步不更新 git 元数据，下次同步以本次 LOG 记录的 83e3270 为基线）；② HTTPS/域名 OBS-2 未动。
+
+---
+
 ## 2026-08-28（四）— main.py 屎山治理 + 克隆智能体代跑 + 前后端对齐验证
 
 **任务**：用户指示①克隆教程改为"智能体代跑"模式（导出工具=用户 GitHub 的 wechat-decrypt，本地最新版 C:\Users\FOUR\wechat-decrypt）；②main.py 屎山检查优化；③前后端对齐验证；④同步 CODE_GRAPH。
