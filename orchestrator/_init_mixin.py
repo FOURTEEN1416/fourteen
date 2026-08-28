@@ -202,6 +202,31 @@ class _InitPhasesMixin:
                 urgency_threshold=cfg.proactive.urgency_threshold,
             )
 
+        # ── 候选 C：注入知识分享函数（share 类主动消息优先分享爬虫/文档知识库真实内容） ──
+        try:
+            from shisi.knowledge.character_knowledge_service import get_knowledge_service
+
+            _ksvc = get_knowledge_service()
+
+            def _active_cid() -> str:
+                """动态解析当前活跃角色（shisi CharacterManager 单例）。"""
+                try:
+                    from api.deps import deps as _deps
+
+                    cm = getattr(getattr(_deps, "shisi_reg", None), "character_manager", None)
+                    return (cm.get_active_id() if cm else "") or ""
+                except Exception:
+                    return ""
+
+            ase_inst = self.components.get("ase")
+            if ase_inst is not None:
+                ase_inst._knowledge_share_func = (
+                    lambda _cid: _ksvc.get_knowledge_context(_active_cid(), "最近话题 兴趣 资讯", top_k=2)
+                )
+                ase_inst._knowledge_character_id = "dynamic"
+        except Exception:
+            pass
+
         # ── 主动消息调度器（启用 apply_time_decay / ASE / 每日维护） ──
         try:
             from proactive.scheduler import ProactiveScheduler

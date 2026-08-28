@@ -323,6 +323,68 @@ class ProactiveScheduler:
         except Exception as e:  # noqa: BLE001
             logger.warning("好感度衰减任务失败: %s", e)
 
+        # ── 候选 D：重要日期检查（生日/纪念日命中即发祝福） ──
+        self._check_important_dates()
+
+    def _check_important_dates(self) -> None:
+        """候选 D：命中重要日期时以角色口吻发送祝福（LLM 生成，模板兜底）。"""
+        try:
+            from datetime import datetime as _dt
+
+            from utils.important_dates import check_today
+
+            active_id = ""
+            try:
+                from api.deps import deps as _deps
+
+                cm = getattr(getattr(_deps, "shisi_reg", None), "character_manager", None)
+                active_id = (cm.get_active_id() if cm else "") or ""
+                char_name = ""
+                if cm and active_id:
+                    _card = cm.get_card(active_id) if hasattr(cm, "get_card") else None
+                    char_name = (getattr(_card, "name", "") or "") if _card else ""
+            except Exception:
+                char_name = ""
+
+            hits = check_today(active_id, _dt.now())
+            if not hits:
+                return
+
+            names = "、".join(h.get("name", "") for h in hits)
+            kinds = "/".join(sorted({h.get("kind", "custom") for h in hits}))
+            wish = "生日快乐" if "birthday" in kinds else "纪念日快乐"
+            message = f"今天是个特别的日子（{names}）。{wish}呀！"
+            # LLM 润色（失败用模板）
+            try:
+                ase = self.ase
+                llm = getattr(ase, "_llm", None)
+                if llm is not None and hasattr(llm, "chat_sync"):
+                    polished = llm.chat_sync(
+                        query=(
+                            f"以角色口吻给对方发一条{'生日' if 'birthday' in kinds else '纪念日'}祝福，"
+                            f"提到「{names}」，2-3 句话，真挚不说教："
+                        ),
+                        max_tokens=150, temperature=0.8,
+                    )
+                    if polished and str(polished).strip():
+                        message = str(polished).strip()
+            except Exception:
+                pass
+
+            logger.info("[重要日期] 命中 %s，发送祝福", names)
+            try:
+                import asyncio as _asyncio
+                loop = _asyncio.get_event_loop()
+                if loop.is_running():
+                    _asyncio.ensure_future(self._send_to_all(message))
+                else:
+                    loop.run_until_complete(self._send_to_all(message))
+            except RuntimeError:
+                if self._send:
+                    self._send(message)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("重要日期检查失败: %s", e)
+
     def _reset_daily(self) -> None:
         """每日重置"""
         if self.ase and hasattr(self.ase, "reset_daily_count"):

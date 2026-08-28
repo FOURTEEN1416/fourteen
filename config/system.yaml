@@ -96,6 +96,13 @@ voice:
     ffmpeg_path: "ffmpeg"
     preferred_format: "silk"
     silk_sample_rate: 24000
+  asr:                                  # 语音转文字（OpenAI 兼容 /audio/transcriptions，08-28 补实）
+    enabled: false                      # 启用后微信语音消息自动转文字进对话
+    api_base: ""                        # 如 https://api.siliconflow.cn/v1
+    api_key: "${ASR_API_KEY}"
+    model: "FunAudioLLM/SenseVoiceSmall"
+    language: "zh"
+    timeout: 30.0
   engine: "mimo-tts"                   # 唯一引擎（2026-08-28 MiMo-only 收敛）
   emotion_enabled: true                 # 启用情感语音参数注入
   # MiMo TTS配置（优先API，本地引擎作为降级）

@@ -559,6 +559,9 @@ class ASEEngine:
         # 手动控制面（2026-08-28 消息 tab 手动控制需求）
         self._paused: bool = False
         self.sent_history: deque = deque(maxlen=200)
+        # 知识分享（候选 C）：由装配层注入 character_id→检索函数；share 类消息优先分享真实内容
+        self._knowledge_share_func: Any = None
+        self._knowledge_character_id: str = ""
 
         self._load_state()
 
@@ -772,6 +775,36 @@ class ASEEngine:
 
     # ── 消息生成 ─────────────────────────────────────────
 
+    def _try_knowledge_share(self) -> dict[str, Any] | None:
+        """候选 C：从角色知识库检索真实内容，LLM 包装成角色口吻的分享。
+
+        知识库内容源 = 爬虫抓取/文档导入（/api/characters/{id}/knowledge/*）。
+        无函数注入/无索引/检索为空/无 LLM → 返回 None 回退模板消息。
+        """
+        func = self._knowledge_share_func
+        if not func or not self._knowledge_character_id:
+            return None
+        try:
+            context = func(self._knowledge_character_id)
+            if not context or len(context) < 20:
+                return None
+            excerpt = context[:300]
+            if self._llm is not None and hasattr(self._llm, "chat_sync"):
+                prompt = (
+                    "你正在和亲密的人聊天。用你自己的口吻，把下面这段你刚'看到'的内容"
+                    "自然地分享给对方，1-2 句话，口语化，像随手转述，不要总结腔：\n\n"
+                    + excerpt
+                )
+                result = self._llm.chat_sync(query=prompt, max_tokens=120, temperature=0.8)
+                content = str(result or "").strip()
+            else:
+                content = ""
+            if not content:
+                return None
+            return {"type": "share", "message": content, "urgency": round(self.urgency.total, 2), "generated_by": "knowledge"}
+        except Exception:
+            return None
+
     def _generate_proactive_message(self) -> dict[str, Any]:
         total = self.urgency.total
 
@@ -796,6 +829,14 @@ class ASEEngine:
     def _generate_and_return(
         self, msg_type: ProactiveType,
     ) -> dict[str, Any] | None:
+        # 候选 C：share 类优先从角色知识库分享真实内容（爬虫/文档来源）
+        if msg_type == ProactiveType.SHARE:
+            shared = self._try_knowledge_share()
+            if shared:
+                self._record_proactive_sent()
+                self._recent_messages.append(shared["message"])
+                self.urgency.reset()
+                return shared
         if self._generation_mode == "llm":
             content, generated_by = self._message_generator.generate(
                 msg_type=msg_type,

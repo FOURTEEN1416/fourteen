@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import client from '../../api/client'
 import { queryKeys } from '../../hooks/useQueries'
 import { updateCharacter } from '../../api/characters'
 import { useErrorStore } from '../../store/errorStore'
@@ -167,7 +168,102 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
         <Save className="w-4 h-4" />
         {saving ? '保存中…' : '保存设置'}
       </button>
+
+      <ImportantDatesSection characterId={character.id} />
     </div>
+  )
+}
+
+// ═══ 重要日期（候选 D：生日/纪念日/自定义，ASE 每日维护自动检查） ═══
+
+interface DateItem { name: string; date: string; kind: string }
+
+function ImportantDatesSection({ characterId }: { characterId: string }) {
+  const [dates, setDates] = useState<DateItem[]>([])
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    client.get(`/characters/${characterId}/important-dates`)
+      .then((r: { data?: { dates?: DateItem[] } }) => { if (alive) setDates(r.data?.dates ?? []) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [characterId])
+
+  function update(i: number, patch: Partial<DateItem>) {
+    setDates(prev => prev.map((d, j) => (j === i ? { ...d, ...patch } : d)))
+    setDirty(true)
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      await client.put(`/characters/${characterId}/important-dates`, { dates })
+      setDirty(false)
+      useErrorStore.getState().addToast({ type: 'success', message: '重要日期已保存' })
+    } catch {
+      useErrorStore.getState().addToast({ type: 'error', message: '保存失败' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Section title="重要日期">
+      <p className="text-xs text-gray-400 mb-3">生日 / 纪念日命中当天时，角色会主动发来祝福（格式 MM-DD 或 YYYY-MM-DD）</p>
+      <div className="space-y-2">
+        {dates.map((d, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input
+              value={d.name}
+              onChange={e => update(i, { name: e.target.value })}
+              placeholder="名称（如：我的生日）"
+              className="flex-1 rounded-lg bg-white/60 border border-gray-200 px-2.5 py-1.5 text-xs outline-none focus:border-macaron-blue/50"
+            />
+            <input
+              value={d.date}
+              onChange={e => update(i, { date: e.target.value })}
+              placeholder="MM-DD"
+              className="w-24 rounded-lg bg-white/60 border border-gray-200 px-2.5 py-1.5 text-xs font-mono outline-none focus:border-macaron-blue/50"
+            />
+            <select
+              value={d.kind}
+              onChange={e => update(i, { kind: e.target.value })}
+              className="rounded-lg bg-white/60 border border-gray-200 px-1.5 py-1.5 text-xs outline-none"
+            >
+              <option value="birthday">生日</option>
+              <option value="anniversary">纪念日</option>
+              <option value="custom">自定义</option>
+            </select>
+            <button
+              onClick={() => { setDates(prev => prev.filter((_, j) => j !== i)); setDirty(true) }}
+              className="text-gray-300 hover:text-red-400 text-xs px-1"
+              title="删除"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          onClick={() => { setDates(prev => [...prev, { name: '', date: '', kind: 'custom' }]); setDirty(true) }}
+          className="text-xs text-macaron-blue-deep hover:underline"
+        >
+          + 添加日期
+        </button>
+        {dirty && (
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="ml-auto px-3 py-1.5 rounded-lg bg-primary-500 text-white text-xs font-medium hover:bg-primary-600 disabled:opacity-50"
+          >
+            {saving ? '保存中…' : '保存日期'}
+          </button>
+        )}
+      </div>
+    </Section>
   )
 }
 

@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+import client from '../api/client'
 import { useActiveCharacter, useDashboard, useEmotionState, useMemoryFacts } from '../hooks/useQueries'
 import type { DashboardStats } from '../types/api'
 
@@ -50,6 +52,8 @@ export default function StatusCenter() {
         </div>
       </div>
 
+      <DiaryCard />
+
       <div className="glass-card rounded-xl p-4">
         <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
           <span className="section-bar" />
@@ -72,6 +76,43 @@ export default function StatusCenter() {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+
+/** 角色日记（候选 B）：daily_summaries 每日摘要，最近 5 条折叠展示。 */
+function DiaryCard() {
+  const [entries, setEntries] = useState<Array<{ date: string; summary: string }>>([])
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    client.get('/memory/diary', { params: { limit: 5 } })
+      .then((r: { data?: { entries?: Array<{ date: string; summary: string }> } }) => { if (alive) setEntries(r.data?.entries ?? []) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
+
+  if (entries.length === 0) return null
+
+  return (
+    <div className="glass-card rounded-xl p-4">
+      <button onClick={() => setOpen(v => !v)} className="w-full flex items-center gap-2 text-left">
+        <span className="section-bar" />
+        <h3 className="text-sm font-semibold text-gray-700 flex-1">角色日记</h3>
+        <span className="text-[10px] text-gray-400">{open ? '收起' : `${entries.length} 篇`}</span>
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3">
+          {entries.map(e => (
+            <div key={e.date} className="rounded-lg bg-white/50 border border-white/60 px-3 py-2">
+              <p className="text-[10px] text-gray-400 mb-1">{e.date}</p>
+              <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">{e.summary}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security
+from pydantic import BaseModel
 
 from api.auth import verify_api_key_dep
 from api.auth_jwt import get_current_user, get_current_user_id, require_role
@@ -137,6 +138,60 @@ async def get_dashboard_stats(_auth: bool = Security(verify_api_key_dep)):
 # ═══════════════════════════════════════════════════════
 # Memory Facts
 # ═══════════════════════════════════════════════════════
+
+
+@router.get("/api/characters/{character_id}/important-dates")
+async def get_important_dates(
+    character_id: str,
+    _auth: bool = Security(verify_api_key_dep),
+):
+    """重要日期（生日/纪念日/自定义；候选 D）。"""
+    from utils.important_dates import load_dates
+
+    return {"dates": load_dates(character_id)}
+
+
+class ImportantDateItem(BaseModel):
+    name: str
+    date: str  # MM-DD 或 YYYY-MM-DD
+    kind: str = "custom"
+
+
+class ImportantDatesUpdate(BaseModel):
+    dates: list[ImportantDateItem]
+
+
+@router.put("/api/characters/{character_id}/important-dates")
+async def update_important_dates(
+    character_id: str,
+    req: ImportantDatesUpdate,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    from utils.important_dates import save_dates
+
+    save_dates(character_id, [d.model_dump() for d in req.dates])
+    return {"status": "saved", "count": len(req.dates)}
+
+
+@router.get("/api/memory/diary")
+async def memory_diary(
+    limit: int = Query(default=10, le=60),
+    _auth: bool = Security(verify_api_key_dep),
+):
+    """角色日记（每日摘要，daily_summaries 表；候选 B）。"""
+    orch = deps.orch
+    mem = orch.components.get("memory") if orch and orch.components else None
+    ds = getattr(mem, "ds", None)
+    if ds is None:
+        return {"entries": []}
+    try:
+        summaries = ds.get_all_summaries() or {}
+        entries = [{"date": d, "summary": s} for d, s in sorted(summaries.items(), reverse=True)[:limit]]
+        return {"entries": entries}
+    except Exception:
+        logger.warning("读取日记失败", exc_info=True)
+        return {"entries": []}
 
 
 @router.get("/api/memory/facts")

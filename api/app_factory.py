@@ -2,7 +2,7 @@
 REST API 应用工厂
 
 仅负责创建 FastAPI 实例、配置中间件、挂载子路由。
-业务路由按域拆分为 16 个 include_router 调用(共 197 端点,实扫 2026-08-28,demo/extract 删除 + proactive 手动控制三端点),
+业务路由按域拆分为 16 个 include_router 调用(共 200 端点,实扫 2026-08-28,demo/extract 删除 + proactive 手动控制三端点),
 模型/常量/Helper 仍保留在 api.main_routes。详细端点分布见 CODE_GRAPH.md §4.2。
 """
 
