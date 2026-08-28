@@ -25,7 +25,6 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const WeChatPage = lazy(() => import('./pages/WeChatPage'))
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
 const AdminProvidersPage = lazy(() => import('./pages/AdminProvidersPage'))
-const DemoPage = lazy(() => import('./pages/DemoPage'))
 
 const SettingsLLM = lazy(() => import('./pages/SettingsLLM'))
 const SettingsVoice = lazy(() => import('./pages/SettingsVoice'))
@@ -112,9 +111,8 @@ export default function App() {
     <ErrorBoundary>
     <AuthInit>
       <Routes>
-        {/* ─── 公开路由：登录页 + Demo 体验 ─── */}
+        {/* ─── 公开路由：登录页 ─── */}
         <Route path="/login" element={<Suspense fallback={<PageLoadingSkeleton />}><LoginPage /></Suspense>} />
-        <Route path="/demo" element={<AnimatedSuspense><DemoPage /></AnimatedSuspense>} />
 
         {/* ─── 受保护路由：管理控制台 ─── */}
         <Route element={<ProtectedLayout />}>

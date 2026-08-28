@@ -87,22 +87,6 @@ def test_sse_chat_stream_closes_generator_on_disconnect():
     assert gen.closed, "async generator was not closed after client disconnect"
 
 
-def test_sse_demo_stream_closes_generator_on_disconnect():
-    """Demo SSE 客户端断开时，process_message_stream 异步生成器必须被 aclose。"""
-    gen = _TrackedAsyncGen(items=[{"type": "token", "content": "demo"}])
-    app, _orch = _make_app_with_mock_orch(gen)
-
-    client = TestClient(app)
-    with client.stream(
-        "POST",
-        "/api/demo/chat/stream",
-        json={"message": "hi", "session_id": "s2"},
-    ) as response:
-        _ = next(response.iter_text())
-
-    assert gen.closed, "demo async generator was not closed after client disconnect"
-
-
 @pytest.mark.asyncio
 async def test_websocket_handler_closes_stream_generator_on_disconnect():
     """WebSocket 流式响应中途连接断开时，生成器必须被 aclose。"""

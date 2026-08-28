@@ -61,8 +61,6 @@ async def test_global_rate_limit_is_enforced_when_slowapi_is_installed() -> None
     ("method", "path"),
     [
         ("GET", "/api/mimo/status"),
-        ("GET", "/api/demo/memory/recall"),
-        ("GET", "/api/demo/memory/visualization"),
     ],
 )
 async def test_sensitive_routes_require_api_key(method: str, path: str) -> None:

@@ -215,17 +215,6 @@ export default function LoginPage() {
               </span>
             )}
           </div>
-
-          {/* Demo 入口 */}
-          <div className="border-t border-white/30 pt-3 text-center">
-            <button
-              type="button"
-              onClick={() => navigate('/demo')}
-              className="text-xs text-gray-500 hover:text-green-500 transition-colors"
-            >
-              → Demo 体验入口
-            </button>
-          </div>
         </form>
       </div>
     </div>
