@@ -45,17 +45,17 @@
 
 ## 二、终态版图三分法
 
-### ✅ A. 既成事实基线（现状 = 已验证，测试 1089 全过，2026-08-28 刷新）
+### ✅ A. 既成事实基线（现状 = 已验证，测试 1074 全过，2026-08-28 刷新）
 
 **产品形态**
 - 微信扫码登录，文字+语音聊天，多用户严格隔离（user_id 全链路隔离）
 - 15 页管理控制台（邀请码注册 + 角色管理 + LLM 配置 + 数据看板等；SP-9 幽灵层三页与 DemoPage 已删）
 - 角色系统：SillyTavern V2/V3 PNG 卡兼容 + 自有角色卡体系（20 张现役卡，💊熟悉度/心跳值/手写板等玩法均支持）
-- 198 个 API 端点 / 16 路由器 / 四层架构（见 CODE_GRAPH v3.3.0）
+- 194 个 API 端点 / 16 路由器 / 四层架构（见 CODE_GRAPH）
 
 **能力栈**
 - LLM：auto 回退链 sensenova(glm-5.2) → zhipu → xunfei → baidu，支持用户级 API Key 隔离
-- 语音：前端唯一 MiMo Cloud TTS；后端保留 CosyVoice→GPT-SoVITS→Bert-VITS2→Edge 四级容灾降级链（不暴露给用户）
+- 语音：**MiMo 唯一引擎**（08-28 裁决 A 全域收敛）：Cloud 合成/克隆/设计 + Windows SAPI 本地兜底，跨厂商容灾已放弃（知情裁决）
 - 记忆：shisi 双轨适配层（use_shisi_memory=true），legacy 仅表历史迁移
 - 知识：RAGEngineV2 + BM25 混合检索 + 角色知识库 + 火爬虫网络人设增强（角色设置页入口）
 - 工具：天气/搜索/日历/计算器/提醒/时间感知/角色卡查询
@@ -67,7 +67,7 @@
 - React 19 + Vite 8 + Zustand 5 + React Query
 
 **部署形态**
-- Windows 开发机一键打包（deploy_ai_girlfriend.bat/ps1 双版本行为一致）
+- Windows 开发机：python main.py / uvicorn + npm run dev（bat/ps1 打包脚本已删）
 - Linux 生产：Nginx(:443) → uvicorn×4(127.0.0.1:8000) → PostgreSQL；服务器不联外网，代码 scp 上传
 - OBS-1 已修复（后端仅绑 127.0.0.1）；OBS-2 HTTPS 待域名；OBS-3 服务 root 运行待降权
 
@@ -124,7 +124,7 @@
 2. 两个用户同时在线，记忆/情感/角色零串扰？（L3 红线）
 3. 任一 LLM 供应商挂掉，对话不中断？（回退链自动切换）
 4. MiMo 云故障时语音仍可用？（四级降级链）
-5. 1089 测试全绿 + 新功能附测试？（质量法律）
+5. 1074 测试全绿 + 新功能附测试？（质量法律）
 6. 角色行为像「人」而不像「客服」？（情感状态机 + 风格矩阵生效的主观验收）
 
 ---
