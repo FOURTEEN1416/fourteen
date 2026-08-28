@@ -53,7 +53,7 @@ def test_synthesize_with_emotion_param():
 
 def test_get_engine_nonexistent():
     mgr = TTSManager()
-    assert mgr.get_engine("edge-tts") is None
+    assert mgr.get_engine("mimo-tts") is None
 
 
 def test_available_engines_empty():
@@ -93,12 +93,12 @@ def test_initialize_enabled_no_engines():
     assert not mgr.enabled
 
 
-def test_initialize_with_edge_tts():
+def test_initialize_with_mimo_tts():
     mgr = TTSManager()
     config = {
         "enabled": True,
-        "engine": "edge-tts",
-        "edge-tts": {"speaker_name": "zh-CN-XiaoxiaoNeural"},
+        "engine": "mimo-tts",
+        "mimo-tts": {"api_key": "test-key"},
     }
     with patch.dict("sys.modules", {}):
         result = asyncio.run(mgr.initialize(config=config))
@@ -109,13 +109,13 @@ def test_initialize_selects_specified_engine():
     mgr = TTSManager()
     config = {
         "enabled": True,
-        "engine": "edge-tts",
-        "edge-tts": {"speaker_name": "test"},
+        "engine": "mimo-tts",
+        "mimo-tts": {"api_key": "test-key"},
     }
     try:
         asyncio.run(mgr.initialize(config=config))
         if mgr.enabled:
-            assert mgr.current_engine == "edge-tts"
+            assert mgr.current_engine == "mimo-tts"
     except ImportError:
         pass
 
@@ -125,12 +125,12 @@ def test_initialize_fallback_to_first_provider():
     config = {
         "enabled": True,
         "engine": "nonexistent-engine",
-        "edge-tts": {"speaker_name": "test"},
+        "mimo-tts": {"api_key": "test-key"},
     }
     try:
         asyncio.run(mgr.initialize(config=config))
         if mgr.enabled and mgr.available_engines:
-            assert mgr.current_engine == "edge-tts"
+            assert mgr.current_engine == "mimo-tts"
     except ImportError:
         pass
 
@@ -234,21 +234,21 @@ def test_synthesize_sets_last_error_on_failure():
 
 def test_switch_engine_success():
     mgr = TTSManager()
-    p1 = _make_mock_provider("edge-tts", b"data")
-    p2 = _make_mock_provider("gpt-sovits", b"data2")
-    mgr._providers = {"edge-tts": p1, "gpt-sovits": p2}
-    mgr._current_engine = "edge-tts"
-    result = asyncio.run(mgr.switch_engine("gpt-sovits"))
+    p1 = _make_mock_provider("mimo-tts", b"data")
+    p2 = _make_mock_provider("backup-engine", b"data2")
+    mgr._providers = {"mimo-tts": p1, "backup-engine": p2}
+    mgr._current_engine = "mimo-tts"
+    result = asyncio.run(mgr.switch_engine("backup-engine"))
     assert result is True
-    assert mgr.current_engine == "gpt-sovits"
+    assert mgr.current_engine == "backup-engine"
 
 
 def test_switch_engine_to_same():
     mgr = TTSManager()
-    p = _make_mock_provider("edge-tts", b"data")
-    mgr._providers = {"edge-tts": p}
-    mgr._current_engine = "edge-tts"
-    result = asyncio.run(mgr.switch_engine("edge-tts"))
+    p = _make_mock_provider("mimo-tts", b"data")
+    mgr._providers = {"mimo-tts": p}
+    mgr._current_engine = "mimo-tts"
+    result = asyncio.run(mgr.switch_engine("mimo-tts"))
     assert result is True
 
 
@@ -258,33 +258,33 @@ def test_switch_engine_to_same():
 
 def test_health_check_full_fields():
     mgr = TTSManager()
-    p1 = _make_mock_provider("edge-tts", None)
-    p2 = _make_mock_provider("gpt-sovits", None)
-    mgr._providers = {"edge-tts": p1, "gpt-sovits": p2}
-    mgr._current_engine = "edge-tts"
+    p1 = _make_mock_provider("mimo-tts", None)
+    p2 = _make_mock_provider("backup-engine", None)
+    mgr._providers = {"mimo-tts": p1, "backup-engine": p2}
+    mgr._current_engine = "mimo-tts"
     mgr._enabled = True
     mgr._last_error = "test error"
     mgr._synthesize_count = 3
     health = mgr.health_check()
     assert health["enabled"] is True
-    assert health["current_engine"] == "edge-tts"
-    assert health["available_engines"] == ["edge-tts", "gpt-sovits"]
+    assert health["current_engine"] == "mimo-tts"
+    assert health["available_engines"] == ["mimo-tts", "backup-engine"]
     assert health["synthesize_count"] == 3
     assert health["last_error"] == "test error"
     assert "providers" in health
-    assert "edge-tts" in health["providers"]
-    assert "gpt-sovits" in health["providers"]
+    assert "mimo-tts" in health["providers"]
+    assert "backup-engine" in health["providers"]
 
 
 def test_health_check_provider_health():
     mgr = TTSManager()
-    p = _make_mock_provider("edge-tts", None)
-    mgr._providers = {"edge-tts": p}
-    mgr._current_engine = "edge-tts"
+    p = _make_mock_provider("mimo-tts", None)
+    mgr._providers = {"mimo-tts": p}
+    mgr._current_engine = "mimo-tts"
     mgr._enabled = True
     health = mgr.health_check()
-    assert health["providers"]["edge-tts"]["available"] is True
-    assert health["providers"]["edge-tts"]["engine"] == "edge-tts"
+    assert health["providers"]["mimo-tts"]["available"] is True
+    assert health["providers"]["mimo-tts"]["engine"] == "mimo-tts"
 
 
 def test_health_check_no_last_error():
@@ -315,9 +315,9 @@ def test_health_check_disabled_full():
 
 def test_get_engine_existing():
     mgr = TTSManager()
-    p = _make_mock_provider("edge-tts", None)
-    mgr._providers = {"edge-tts": p}
-    assert mgr.get_engine("edge-tts") is p
+    p = _make_mock_provider("mimo-tts", None)
+    mgr._providers = {"mimo-tts": p}
+    assert mgr.get_engine("mimo-tts") is p
 
 
 def test_get_engine_unknown():
@@ -331,11 +331,11 @@ def test_get_engine_unknown():
 
 def test_available_engines_multiple():
     mgr = TTSManager()
-    p1 = _make_mock_provider("edge-tts", None)
-    p2 = _make_mock_provider("gpt-sovits", None)
-    mgr._providers = {"edge-tts": p1, "gpt-sovits": p2}
+    p1 = _make_mock_provider("mimo-tts", None)
+    p2 = _make_mock_provider("backup-engine", None)
+    mgr._providers = {"mimo-tts": p1, "backup-engine": p2}
     engines = mgr.available_engines
-    assert set(engines) == {"edge-tts", "gpt-sovits"}
+    assert set(engines) == {"mimo-tts", "backup-engine"}
 
 
 # ═══════════════════════════════════════════════════════════════

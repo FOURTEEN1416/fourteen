@@ -25,6 +25,12 @@
 
 ---
 
+## 2026-08-28（七）— 语音域 MiMo-only 收敛（裁决 A）
+
+用户选定 A 口径（全域 MiMo-only，保留 fallback_local）。删除 4 provider + voice_training + shisi 训练 API(4端点) + EmotionVoiceMapper；tts_manager 单引擎重写；**fallback_local 重写为 Windows SAPI 本地合成**（原四级链已删，避免 ImportError 炸降级路径；pywin32 入可选组 win-tts-fallback）；voice_routes/shisi/config/pyproject/测试全链对齐。验证：pytest 1015+1、vitest 59、194 端点实扫、代码层旧引擎零命中。前端 SettingsVoice（克隆/合成唯一入口）本就 MiMo-only，零改动。
+
+---
+
 ## 2026-08-28（六）— 下一阶段队列登记
 
 用户确认「前置处理已完成」，点名后续四项：塑料感消除（=SP-5）、页面设计对齐核查、产品介绍页、全面测试。已按商讨协议坐标登记为 **SP-10（设计对齐核查：visual-tour 重拍+逐页比对）/ SP-11（产品介绍页，接替 F-02 门面职责）/ SP-12（全面测试：1089 基线+E2E 冒烟+对齐复跑）**，连同既有 SP-5 构成下一阶段队列（DECISION_LEDGER「下一阶段队列」表）。启动均待用户逐项点名。仅文档变更，本地+GitHub 同步，云端无需部署。

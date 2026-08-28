@@ -96,29 +96,8 @@ voice:
     ffmpeg_path: "ffmpeg"
     preferred_format: "silk"
     silk_sample_rate: 24000
-  engine: "mimo-tts"                   # 默认引擎: mimo-tts / edge-tts / cosyvoice / gpt-sovits / bert-vits2
+  engine: "mimo-tts"                   # 唯一引擎（2026-08-28 MiMo-only 收敛）
   emotion_enabled: true                 # 启用情感语音参数注入
-  edge-tts:
-    speaker_name: "zh-CN-XiaoxiaoNeural" # 中文女声
-    rate: "+0%"
-    volume: "+0%"
-    timeout: 30.0
-  cosyvoice:
-    voice: "中文女"
-    instruct_prompt: "用温柔自然的语气说话"
-    timeout: 120.0
-  gpt-sovits:
-    url: "http://localhost:9880"
-    text_language: "auto"
-    timeout: 60.0
-  bert-vits2:
-    url: "http://localhost:5000"
-    speaker_name: "珊瑚宫心海[中]"
-    sdp_ratio: 0.2
-    noise: 0.2
-    noisew: 0.9
-    speed: 1.0
-    timeout: 60.0
   # MiMo TTS配置（优先API，本地引擎作为降级）
   # 文档: https://platform.xiaomimimo.com/docs
   mimo-tts:

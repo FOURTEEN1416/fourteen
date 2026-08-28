@@ -1,5 +1,45 @@
 ﻿# Code Deletion Log
 
+# Code Deletion Log
+
+## [2026-08-28] 语音域 MiMo-only 收敛（用户裁决 A：全语音域只留 MiMo）
+
+### 决策依据
+- 用户裁决：语音克隆只保留 MiMo TTS → 选定 A 口径（全域收敛，保留 MiMo fallback_local 本地兜底）
+- 前端本就 MiMo-only（07-27 reinit 收敛），本次清后端四引擎与其依赖面
+
+### Files Deleted
+- `voice/edge_tts_provider.py` / `sovits_provider.py` / `cosyvoice_provider.py` / `bert_vits2_provider.py`（4 个 TTS provider）
+- `voice/voice_training.py`（GPT-SoVITS LoRA 音色训练器；克隆改走 MiMo voiceclone API）
+- `shisi/api/training_routes.py`（/api/shisi/voice/training/* 4 端点，零前端消费）
+- `tests/test_voice_training.py` / `tests/test_emotion_tts.py`（对应测试）
+
+### Files Modified
+- `voice/tts_manager.py`：单引擎重写（initialize 只装 MiMo；删多引擎降级循环与 edge 专属情感注入；删 emotion_mapper 形参）
+- `voice/mimo_tts_provider.py`：`fallback_local` 重写——原四级本地引擎链（已删）改为 Windows SAPI 本地合成（零额外服务，非 Windows 返回 None）
+- `voice/__init__.py`：导出面收敛为 TTSManager/TTSProviderBase/MiMoTTSProvider
+- `orchestrator/_init_mixin.py`：去 EmotionVoiceMapper 注入
+- `api/routers/voice_routes.py`：默认引擎 mimo-tts；`GET /voice/speakers` 返回 MiMo 预设音色（原三引擎发音人表删除，端点零 UI 消费）；test 端点去 switch_engine
+- `shisi/voice/emotion_tts.py`：删 EmotionVoiceMapper 整类（Edge 专用 rate/volume 体系）；`shisi/voice/__init__.py` 导出同步
+- `shisi/api/registry.py`：删 training_manager 装配与路由挂载
+- `shisi/wechat/command_handler.py`：删 switch_engine("gpt-sovits") 联动
+- `config/system.yaml`：删 edge-tts/cosyvoice/gpt-sovits/bert-vits2 四配置块；engine 注释收敛
+- `pyproject.toml`：删 edge-tts 依赖；新增可选组 `win-tts-fallback`（pywin32，SAPI 兜底）
+- `tests/test_voice_manager.py` / `test_character_voice.py` / `test_modules.py`：引擎名语义对齐 mimo-tts
+
+### Impact
+- API 端点：198 → **194**（shisi 语音训练 -4）
+- Python 测试：1030 → **1015** + 1 skipped（-15）；vitest 59 不变
+- 语音能力边界：合成/克隆/设计 = MiMo Cloud 全托管；云故障 → Windows SAPI 离线兜底；放弃跨厂商容灾（用户知情裁决）
+- 音色绑定数据兼容：`engine` 字段历史值（edge-tts 等）仍在存储中，读取时引擎维度已不生效（switch_engine 移除于 test 路径）
+
+### Verification
+- `python -m pytest -q` → 1015 passed + 1 skipped（2026-08-28 实跑）
+- `npx vitest run` → 59 passed；tsc 0 错误
+- create_api_app 实扫 194 端点；`grep -rn "edge-tts|sovits|cosyvoice|bert-vits2|voice_training"` 代码层零命中（仅历史标注注释）
+
+---
+
 ## [2026-08-28] 微信克隆服务端管线移除 + 启动部署脚本删除（用户裁决：本地提取 + JSON 上传）
 
 ### 决策依据
@@ -260,7 +300,8 @@
 ## [2026-06-03] Dead Code Cleanup Session
 
 ### Unused Dependencies Removed
-- echarts@^2.15.0 - No imports in any source file; manualChunks entry in vite.config.ts also cleaned up
+- 
+echarts@^2.15.0 - No imports in any source file; manualChunks entry in vite.config.ts also cleaned up
 - @testing-library/user-event@^14.6.1 - No imports in any source or test file
 
 ### Unused Files Deleted — Frontend
@@ -333,4 +374,7 @@
 - common/Badge.tsx kept (used by KnowledgePreview, StorylineEditor, StorylineIndicator)
 - shared/Select, Skeleton, EmptyState, Badge RESTORED after initial deletion — pages use them via barrel imports
 - Legacy backend pi/_*_routes.py files NOT removed — they coexist with pi/routers/ in app_factory.py; only a full endpoint diff can confirm redundancy
-- eact-window and eact-virtualized-auto-sizer kept — used via equire() in MessageList.tsx even though MessageList is unused
+- 
+eact-window and 
+eact-virtualized-auto-sizer kept — used via 
+equire() in MessageList.tsx even though MessageList is unused

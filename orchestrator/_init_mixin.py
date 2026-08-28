@@ -340,15 +340,10 @@ class _InitPhasesMixin:
 
         try:
             from voice import TTSManager
-            # 注入 EmotionVoiceMapper（领域层 → 基础层，避免反向依赖）
-            try:
-                from shisi.voice.emotion_tts import EmotionVoiceMapper
-                _emotion_mapper = EmotionVoiceMapper()
-            except Exception:  # noqa: BLE001
-                _emotion_mapper = None
             # 将 VoiceConfig 对象转换为 dict 以兼容 TTSManager.initialize()
             voice_config = voice_fusion if voice_fusion else cfg.voice.model_dump(by_alias=True)
-            self.components["voice"] = TTSManager(emotion_mapper=_emotion_mapper)
+            # 2026-08-28 MiMo-only 收敛：情感映射由 MiMoTTSProvider 内部处理，不再注入 EmotionVoiceMapper
+            self.components["voice"] = TTSManager()
             self._run_async(self.components["voice"].initialize(
                 voice_config if isinstance(voice_config, dict) else voice_config
             ))

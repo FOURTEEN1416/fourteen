@@ -14,6 +14,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import sys
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -256,74 +260,64 @@ class MiMoTTSProvider(TTSProviderBase):
             logger.warning("MiMo TTS流式合成异常: %s", e)
 
     async def _fallback_to_local(self, text: str, **kwargs) -> bytes | None:
+        """本地降级（2026-08-28 MiMo-only 收敛后）。
+
+        历史四级本地降级链（CosyVoice/GPT-SoVITS/Bert-VITS2/Edge-TTS）已随引擎删除；
+        MiMo-only 后 _fallback_to_local 由 _local_synth 承担（Windows SAPI/本地 mimo 引擎）。
         """
-        降级到本地TTS引擎
+        return await self._local_synth(text, **kwargs)
 
-        降级顺序:
-        1. CosyVoice (如果配置)
-        2. GPT-SoVITS (如果配置)
-        3. Bert-VITS2 (如果配置)
-        4. Edge-TTS (最后保底)
+    async def _local_synth(self, text: str, **kwargs) -> bytes | None:
+        """本地合成兜底：Windows SAPI TTS（无需额外服务，离线可用）。
+
+        生产目标环境为 Windows（AGENTS §3），SAPI 是唯一零依赖本地语音出口。
+        非 Windows 或合成失败返回 None（调用方得到 None 语义不变）。
         """
-        if self._local_fallback_provider is None:
-            self._local_fallback_provider = await self._create_fallback_provider()
-
-        if self._local_fallback_provider:
-            logger.info("MiMo TTS降级到本地引擎: %s", self._local_fallback_provider.name)
-            try:
-                result = await self._local_fallback_provider.synthesize(text, **kwargs)
-                if result is not None:
-                    return result
-            except Exception as e:
-                logger.warning("本地降级引擎失败: %s", e)
-
-        return None
-
-    async def _create_fallback_provider(self) -> TTSProviderBase | None:
-        """创建本地降级引擎（按优先级）"""
-        # 尝试CosyVoice
+        import sys
+        if sys.platform != "win32":
+            logger.info("非 Windows 环境，无本地 TTS 兜底")
+            return None
         try:
-            from .cosyvoice_provider import CosyVoiceProvider
-            provider = CosyVoiceProvider()
-            health = provider.health_check()
-            if health.get("available"):
-                logger.info("降级引擎选择: CosyVoice")
-                return provider
-        except Exception as e:
-            logger.warning("Fallback provider creation failed: %s", e)
+            import win32com.client  # pywin32（仅 Windows，延迟导入）
 
-        # 尝试GPT-SoVITS
-        try:
-            from .sovits_provider import GPTSoVITSProvider
-            provider = GPTSoVITSProvider()
-            health = provider.health_check()
-            if health.get("available"):
-                logger.info("降级引擎选择: GPT-SoVITS")
-                return provider
-        except Exception as e:
-            logger.warning("Fallback provider creation failed: %s", e)
+            def _sapi_synth() -> bytes | None:
+                voice = kwargs.get("speaker_name") or ""
+                pythoncom_ok = False
+                try:
+                    import pythoncom
+                    pythoncom.CoInitialize()
+                    pythoncom_ok = True
+                except Exception:
+                    pass
+                try:
+                    sapi = win32com.client.Dispatch("SAPI.SpVoice")
+                    if voice:
+                        for v in sapi.GetVoices():
+                            if voice.lower() in str(v.GetDescription()).lower():
+                                sapi.Voice = v
+                                break
+                    tmp = Path(tempfile.gettempdir()) / f"mimo_fallback_{os.getpid()}.wav"
+                    stream = win32com.client.Dispatch("SAPI.SpFileStream")
+                    from win32com.client import constants
+                    stream.Format.Type = constants.SAFTFileFormat
+                    stream.Open(str(tmp))
+                    sapi.AudioOutputStream = stream
+                    sapi.Speak(text)
+                    stream.Close()
+                    data = tmp.read_bytes()
+                    tmp.unlink(missing_ok=True)
+                    return data or None
+                finally:
+                    if pythoncom_ok:
+                        pythoncom.CoUninitialize()
 
-        # 尝试Bert-VITS2
-        try:
-            from .bert_vits2_provider import BertVITS2Provider
-            provider = BertVITS2Provider()
-            health = provider.health_check()
-            if health.get("available"):
-                logger.info("降级引擎选择: Bert-VITS2")
-                return provider
+            result = await asyncio.to_thread(_sapi_synth)
+            if result:
+                logger.info("MiMo TTS 降级到 Windows SAPI 本地合成")
+            return result
         except Exception as e:
-            logger.warning("Fallback provider creation failed: %s", e)
-
-        # 最后尝试Edge-TTS（最稳定，无需本地服务）
-        try:
-            from .edge_tts_provider import EdgeTTSProvider
-            provider = EdgeTTSProvider()
-            logger.info("降级引擎选择: Edge-TTS")
-            return provider
-        except Exception as e:
-            logger.warning("所有本地降级引擎不可用: %s", e)
-
-        return None
+            logger.warning("本地 SAPI 合成不可用: %s", e)
+            return None
 
     async def clone_voice(
         self,

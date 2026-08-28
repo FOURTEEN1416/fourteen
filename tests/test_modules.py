@@ -160,9 +160,9 @@ class TestVoiceEnhancer:
 
     def test_bind_character(self):
         enhancer = VoiceEnhancer()
-        enhancer.bind_character_tts("c1", "gpt-sovits", voice_id="v1")
+        enhancer.bind_character_tts("c1", "mimo-tts", voice_id="v1")
         config = enhancer.get_tts_config("c1", "撒娇")
-        assert config["tts_engine"] == "gpt-sovits"
+        assert config["tts_engine"] == "mimo-tts"
         assert config["speed"] < 1.0  # 撒娇speed=0.95
 
 

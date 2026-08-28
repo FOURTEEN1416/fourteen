@@ -1,19 +1,16 @@
 """
-语音合成模块 - 多TTS引擎统一抽象层
+语音合成模块 — MiMo TTS 唯一引擎（2026-08-28 用户裁决 A：全语音域 MiMo-only）
 
 设计原则:
   - 完全异步 (asyncio-native)
   - 无singleton装饰器（使用简单实例管理）
   - 无全局锁（支持并发TTS合成）
-  - 所有外部调用有超时保护
-  - 支持运行时切换引擎
-  - 引擎失败时自动降级
+  - 外部调用有超时保护
+  - 云 API 失败时由 MiMoTTSProvider 内部 fallback_local 本地引擎兜底
 
-支持的引擎:
-  - edge-tts: 免费，无需GPU，需要网络
-  - cosyvoice: CosyVoice 本地/远程服务 (OpenAI兼容API)
-  - gpt-sovits: 本地/远程GPT-SoVITS API
-  - bert-vits2: 本地/远程Bert-VITS2 API
+引擎:
+  - mimo-tts: MiMo Cloud（mimo-v2.5-tts / voiceclone / voicedesign），唯一引擎
+  （历史引擎 Edge-TTS / CosyVoice / GPT-SoVITS / Bert-VITS2 已于 08-28 删除）
 
 使用方式:
     from voice import TTSManager
@@ -21,25 +18,15 @@
     manager = TTSManager()
     await manager.initialize(config)
 
-    # 合成语音
     audio_bytes = await manager.synthesize("你好呀")
-
-    # 切换引擎
-    await manager.switch_engine("gpt-sovits")
 """
 
-from .bert_vits2_provider import BertVITS2Provider
-from .cosyvoice_provider import CosyVoiceProvider
-from .edge_tts_provider import EdgeTTSProvider
-from .sovits_provider import GPTSoVITSProvider
+from .mimo_tts_provider import MiMoTTSProvider
 from .tts_manager import TTSManager
 from .tts_provider_base import TTSProviderBase
 
 __all__ = [
     "TTSManager",
     "TTSProviderBase",
-    "EdgeTTSProvider",
-    "CosyVoiceProvider",
-    "GPTSoVITSProvider",
-    "BertVITS2Provider",
+    "MiMoTTSProvider",
 ]

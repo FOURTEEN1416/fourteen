@@ -1,4 +1,8 @@
-"""角色专属TTS配置 + 情感参数调整。"""
+"""角色专属TTS配置 + 情感参数调整。
+
+2026-08-28 MiMo-only 收敛：原 EmotionVoiceMapper（Edge-TTS 专用）已删除，
+情感参数统一由 MiMoTTSProvider 内部映射处理。
+"""
 
 from __future__ import annotations
 
@@ -12,7 +16,7 @@ logger = logging.getLogger("shisi.voice.emotion_tts")
 
 class VoiceEnhancer:
     def __init__(self):
-        self._default_tts = get_config("voice", "default_tts", "edge-tts")
+        self._default_tts = get_config("voice", "default_tts", "mimo-tts")
         self._emotion_params = get_config("voice", "emotion_params", {})
         self._character_tts: dict[str, dict[str, Any]] = {}
 
@@ -47,47 +51,5 @@ class VoiceEnhancer:
         return self._character_tts.get(character_id)
 
 
-class EmotionVoiceMapper:
-    """
-    情感→语音参数映射器（Edge-TTS专用）
-
-    支持参数: rate(语速), volume(音量)
-    不支持: pitch(音调) - Edge-TTS限制
-
-    扩展 VoiceEnhancer，与其共存不替换
-    """
-
-    _EMOTION_PARAMS: dict[str, dict[str, str]] = {
-        "开心": {"rate": "+10%", "volume": "+10%"},
-        "撒娇": {"rate": "-5%", "volume": "+5%"},
-        "温柔": {"rate": "-10%", "volume": "-5%"},
-        "伤心": {"rate": "-15%", "volume": "-10%"},
-        "生气": {"rate": "+15%", "volume": "+15%"},
-        "害怕": {"rate": "+10%", "volume": "-5%"},
-        "害羞": {"rate": "-8%", "volume": "-10%"},
-        "傲娇": {"rate": "+0%", "volume": "+0%"},
-        "平常": {"rate": "+0%", "volume": "+0%"},
-    }
-
-    def __init__(self):
-        self._character_overrides: dict[str, dict[str, dict[str, str]]] = {}
-
-    def get_params(self, emotion: str, character_id: str = "") -> dict[str, Any]:
-        params = self._EMOTION_PARAMS.get(emotion, self._EMOTION_PARAMS["平常"]).copy()
-        if character_id and character_id in self._character_overrides:
-            override = self._character_overrides[character_id].get(emotion, {})
-            params.update(override)
-        return params
-
-    def apply_to_edge_tts(self, emotion: str, character_id: str = "") -> dict[str, str]:
-        params = self.get_params(emotion, character_id)
-        return {
-            "rate": params.get("rate", "+0%"),
-            "volume": params.get("volume", "+0%"),
-        }
-
-    def set_character_override(self, character_id: str, emotion: str, params: dict[str, str]) -> None:
-        if character_id not in self._character_overrides:
-            self._character_overrides[character_id] = {}
-        self._character_overrides[character_id][emotion] = params
-        logger.info("角色情感语音覆盖: %s/%s → %s", character_id, emotion, params)
+# 2026-08-28 MiMo-only 收敛：EmotionVoiceMapper（Edge-TTS 专用 rate/volume 参数体系）已随
+# 多引擎时代删除；情感→语音参数由 MiMoTTSProvider 内部 8 情感映射承担。

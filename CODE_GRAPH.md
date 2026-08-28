@@ -12,14 +12,14 @@
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| API 端点（create_api_app 实扫） | **198 端点** / 16 include_router | `python -c "from api.app_factory import create_api_app; app=create_api_app(); sum(len(r.methods-{'HEAD','OPTIONS'}) for r in app.routes if hasattr(r,'methods'))"`（demo 4 端点 + training/extract 已删除） |
+| API 端点（create_api_app 实扫） | **194 端点** / 16 include_router | 实扫 2026-08-28（demo/-4、training/extract/-1、shisi 语音训练管线/-4：MiMo-only 收敛） |
 | main.py 体量 | **16 KB / 409 行** | 2026-08-28 两轮瘦身：克隆管线移除 + run_console_chat 迁出 `orchestrator/console_chat.py`（命令分派拆分，复杂度 24 单体消解） |
 | 前端页面 | **15 个** | Glob `frontend/src/pages/*.tsx`（SP-9 幽灵层三页 + DemoPage 已删除） |
 | 前端 API 模块 | **12 个** | Glob `frontend/src/api/*.ts`（demo.ts、users.ts 已删除） |
 | 前端 Zustand store | 4 个 | LS `frontend/src/store/` |
-| Python 测试用例 | **1030 passed + 1 skipped / 107.26s** | `python -m pytest --tb=short -q`（2026-08-28 实跑,0 failed） |
+| Python 测试用例 | **1015 passed + 1 skipped / 80.98s** | 实跑 2026-08-28（旧引擎/训练测试随 MiMo-only 收敛删除 -15） |
 | 前端测试用例 | **59 个全部通过 / 11 文件** | `npx vitest run`（2026-08-28 实跑；SP-9 删除幽灵页测试后 79→59） |
-| 测试用例合计 | **1089 个**(1030 Python + 59 前端) | pytest + vitest 实跑 |
+| 测试用例合计 | **1074 个**(1015 Python + 59 前端) | pytest + vitest 实跑 2026-08-28 |
 | tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
 
 ### 1.2 知识图谱快照指标（✅ 2026-08-28 重新索引）
@@ -264,7 +264,7 @@ DDD 分层架构，是项目最重要的重构成果：
 | `emotion_stage/` | 情感阶段 | StageEngine, EventDispatcher, StageConfig |
 | `vital_signs/` | 生命体征 | VitalEngine, EmotionMapping |
 | `sticker/` | 表情包 | StickerManager, EmotionRecommender, SafetyCheck, Importer |
-| `voice/` | 语音 | CharacterVoice, EmotionTTS |
+| `voice/`（shisi） | 语音 | CharacterVoice（EmotionTTS 仅余 VoiceEnhancer，Mapper 已删） |
 | `wechat/` | 微信集成 | CommandHandler, CommandParser, ProactiveMessenger, StickerAdapter |
 | `vault/` | 数据收集 | CollectLoop, PersonaAdapter |
 | `ase/` | 场景叙事 | SceneNarrator, TriggerEngine |
@@ -377,18 +377,17 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 
 **调用链**：前端 `SettingsLLM.tsx` → `frontend/src/api/system.ts` → `POST /api/user/llm-config` → 写入 `users.llm_config` → `invalidate_user_llm(user_id)` → 下次 `OptimizedOrchestrator.process_message` 时按 `user_id` 取用户专属 LLM。
 
-### 4.8 voice/ — 语音合成（5 Provider）
+### 4.8 voice/ — 语音合成（MiMo 唯一引擎，2026-08-28 收敛）
 
-| Provider | 文件 | 说明 |
-|----------|------|------|
-| MiMo Cloud | `mimo_tts_provider.py` | 默认引擎 |
-| Edge-TTS | `edge_tts_provider.py` | 免费 |
-| SoVITS | `sovits_provider.py` | 本地模型 |
-| Bert-VITS2 | `bert_vits2_provider.py` | 本地模型 |
-| CosyVoice | `cosyvoice_provider.py` | 本地模型 |
-| TTS Manager | `tts_manager.py` | 统一管理 |
-| Voice Training | `voice_training.py` | 语音训练 |
-| Audio Converter | `audio_converter.py` | 音频格式转换 |
+> **MiMo-only 收敛（用户裁决 A）**：Edge-TTS/SoVITS/CosyVoice/Bert-VITS2 四 provider 与 voice_training.py（GPT-SoVITS LoRA 训练器）已删除；`/api/mimo/*` 为唯一语音 API（clone/voices/synthesize/design）；MiMo 云故障由 Windows SAPI 本地合成兜底（fallback_local，pywin32 可选依赖 win-tts-fallback）；语音克隆=MiMo voiceclone（前端 SettingsVoice 唯一入口，本就 MiMo-only 无需改）。shisi 语音训练 API（4 端点）与 EmotionVoiceMapper（Edge 专用）一并删除。
+
+| 文件 | 说明 |
+|------|------|
+| `mimo_tts_provider.py` | 唯一引擎：MiMo Cloud API（8 情感映射内置）+ SAPI 本地兜底 |
+| `tts_manager.py` | 单引擎管理（历史多引擎降级链已删） |
+| `tts_provider_base.py` | Provider 抽象基类 |
+| `audio_converter.py` | 音频格式转换（silk） |
+| `clone_data_manager.py` | 聊天克隆数据管理（克隆域，与 TTS 无关） |
 
 ### 4.9 前端（React 19 管理控制台）
 
@@ -657,6 +656,7 @@ tools/
 | 2026-07-30 (文档对齐) | (working tree) | **Truth 文档对齐 + 前端测试修复**：(1) `api/app_factory.py` 顶部注释从"9 子路由 75 端点"修正为"17 include_router 204 端点"(create_api_app 实扫);(2) CODE_GRAPH.md 测试数 540→1104(1025 Python + 79 前端,pytest+vitest 实跑)、端点数 207→204(实扫)、前端测试 84→79;(3) 修复前端 6 个过时测试:WeChatPage 4 个(绑定功能已迁移到 UsersPage)、SettingsVoice 2 个(ENGINE_OPTIONS 精简为仅 MiMo Cloud)、SettingsLLM 1 个(补全 useAuthStore/listProviders/system.ts importOriginal mock);(4) AGENTS.md Owner Map 补全 6 个缺失目录;(5) docs/CODEMAPS/MODULES.md 修正不存在的文件引用 |
 | 2026-08-28 (增量重建) | (working tree) | **v3.3.0 增量刷新（基于 v3.2 基线，非从零重建）**：(1) Demo 全删落地（用户裁决 D1）：删 `api/routers/demo_routes.py`(4 端点) + app_factory 挂载 + 3 处测试引用，前端 DemoPage.tsx/demo.ts 同步删除，端点 204→**199**（实扫）；(2) SP-9 幽灵层三页（UsersPage/UserWorkspace/BindingDetailPage）+ DemoPage 删除入册，前端页面 19→**15**、API 模块 14→**12**；(3) 测试基线重测：1030 Python + 59 前端 = **1089**（pytest/vitest 实跑全绿）；(4) 消除 §1.2 时间戳矛盾：artifact.json 实读 2026-06-30/5983 节点为权威，543277c 的"08-01 重索引 6771 节点"声明因未持久化而废弃；(5) clone 云端预览链路下线(fb04507)、Firecrawl→Crawl4AI(e1a4cec)、OpenCode Zen 供应商移除(f3dac24)、wechat_decrypt_source.py 删除等变更带核对入册 |
 | 2026-08-28 (图谱重索引) | (working tree) | **§1.2 图数据库重索引消案**：codebase-memory 图谱工具 修复安装（pip，v0.10.8）→ 全量重索引 → **7706 节点 / 32367 边**（schema v2，commit c32af54，artifact.json 回写验证）；search_graph/trace_path/query_graph CLI 查询验证通过；同批感染源修正：README/CODEMAPS×3/DECISION_LEDGER/VISION 旧数字清零，DOCUMENTATION_GOVERNANCE_REPORT.md 删除（污染口径，见 DELETION_LOG） |
+| 2026-08-28 (MiMo-only) | (working tree) | **语音域 MiMo-only 收敛（用户裁决 A）**：删 4 provider + voice_training.py + shisi 语音训练 API（4 端点）与 registry 装配 + EmotionVoiceMapper（Edge 专用）；tts_manager 单引擎重写、_init_mixin 去 emotion_mapper 注入、voice_routes 引擎面收敛（/voice/speakers→MiMo 音色，0 UI 消费）、config 四引擎块删除、pyproject 删 edge-tts + 新增 win-tts-fallback 可选组；fallback_local 重写为 Windows SAPI 本地合成。端点 198→**194**，测试 1030→**1015**+1（vitest 59 不变），全绿 |
 | 2026-08-28 (v3.4 治理) | (working tree) | **v3.4.0**：(1) main.py 屎山治理：`run_console_chat`（复杂度 24 单体）迁出为 `orchestrator/console_chat.py` 命令分派拆分，main.py 494→409 行，清除 docstring 重复/函数内 import 遮蔽/banner 死替换/未用形参；(2) 克隆 tab 智能体代跑改造：CreateRole 三步流（OpenCode 推荐→一键复制任务书→仅上传 JSON），任务书 `docs/guides/微信克隆-智能体任务书.md` + 前端内嵌 `constants/cloneAgentGuide.ts`，指向 wechat-decrypt 仓库 AGENTS.md；(3) **前后端对齐验证**：前端调用缺后端 **0**，消费 118/198（60%），80 零消费均为已知开放面（shisi 域/psych 等幽灵能力/运维），报告 `docs/reports/2026-08-28_前后端对齐验证.md`；(4) 测试基线不变 1089 全绿 |
 
 *此图谱将持续更新以反映项目变化。下一次刷新应重跑 codebase-memory 图谱工具 索引以更新节点/边数据。*

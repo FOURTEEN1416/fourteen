@@ -62,7 +62,6 @@ dependencies = [
     "duckduckgo-search>=6.0.0",
     "chinese-calendar>=1.9.0",
     "lunarcalendar>=0.0.7",
-    "edge-tts>=6.1.0",
     "trafilatura>=1.6.0",
     "cloudscraper>=1.2.71",
     "watchfiles>=0.21.0",
@@ -75,6 +74,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Windows 本地 TTS 兜底（MiMo 云故障时的 fallback_local，仅 win32）
+win-tts-fallback = [
+    "pywin32>=306; sys_platform == 'win32'",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
