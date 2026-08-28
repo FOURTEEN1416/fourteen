@@ -65,6 +65,10 @@
 | 08-24 | 用户裁决：三级侧边栏不需要（P0-2 关闭） | 会话记录→INDEX 阶段三表格 | ✅ | 已落 INDEX |
 | 08-26 | **76 载体穷举读取 + 本账本建立** | 本文件 | ✅ | 治理基线确立 |
 | 08-26 | **用户批复：仅批准文档治理**；状态中心并集/创建角色A/删Demo/知识库入口/塑料感补课 **全部不批准** | 会话记录 | 🅿️ | 五项功能决策全部转挂起池（见第三节），任何一项启动需用户重新逐项批准 |
+| 08-28 | **D1：Demo 全删**（翻案 08-26 驳回）；产品介绍页为新立项 | 治理会话用户裁决 | ✅ 已执行 | 端点 204→199；详见附4 与 DELETION_LOG |
+| 08-28 | **愿景板定调：目标用户=广泛用户；商业目标=完全免费开源（MIT），不商业化** | 用户口述 | ✅ | 载入 VISION §〇；用户级 LLM Key 定位「自带 Key」非计费 |
+| 08-28 | **微信克隆收敛：本地提取 + 上传 JSON**。解密必须在用户登录微信的本地环境进行，服务器不经手微信数据、不做云端提取 | 用户裁决（确认删除 weclone_adapter/ 等 8 项） | ✅ 已执行 | 删 weclone_adapter 三件 + main.py --clone 管线 + /api/training/extract + 前端 trainingExtract；CreateRole 克隆 tab（教程+JSON 上传）为唯一入口；端点 199→198 |
+| 08-28 | **删除启动/部署脚本**：start_all/start_backend/start_frontend.cmd + deploy_ai_girlfriend.bat/.ps1（部署统一走 `deploy/`，启动走 python main.py / uvicorn / npm run dev） | 用户删除+会话确认 | ✅ 已执行 | AGENTS §0 启动方式已同步；L9 教训标记失效 |
 
 ---
 

@@ -1,5 +1,40 @@
 ﻿# Code Deletion Log
 
+## [2026-08-28] 微信克隆服务端管线移除 + 启动部署脚本删除（用户裁决：本地提取 + JSON 上传）
+
+### 决策依据
+- 用户 08-28 裁决：微信克隆解密必须在**用户登录微信的本地环境**进行，不可能在云服务器/网站上进行；服务端只接收本地工具导出的聊天记录 JSON
+- CreateRole 克隆 tab 已具备「三工具教程 → 本地运行说明 → JSON 上传分析」完整形态，为唯一克隆入口；服务端提取路径全部为死代码
+- weclone_adapter/ 三件、start_*.cmd ×3、deploy_ai_girlfriend.bat/.ps1 为**用户本人删除**，本条目补登记；其余为本会话按裁决执行
+
+### Files Deleted（用户删除，会话确认）
+- `weclone_adapter/__init__.py` / `adapter.py` / `style_profiler.py`（WeClone 适配层：服务端 extract/clone/style 分析）
+- `start_all.cmd` / `start_backend.cmd` / `start_frontend.cmd`（Windows 启动脚本）
+- `deploy_ai_girlfriend.bat` / `deploy_ai_girlfriend.ps1`（部署打包脚本；部署统一走 `deploy/`）
+
+### Files Deleted（本会话按裁决执行）
+- `main.py`：`run_clone_pipeline()`（-35 行）+ `--clone/--clone-source/--clone-name` 三参数 + 分发分支 + 帮助文本两处（main.py 574→494 行）
+- `api/routers/training_routes.py`：`POST /api/training/extract` 端点（-30 行，唯一 weclone_adapter API 依赖）
+- `frontend/src/api/training.ts`：`trainingExtract()` 封装（零 UI 消费）
+
+### Files Modified
+- `api/app_factory.py`：training_router 注释 11→8 端点；头部 199→198 端点
+- `tests/test_api_routes.py`：training 计数 9→8、子路由总贡献 73→72
+- 真源同步：CODE_GRAPH §1.1/§4.1/§4.2/§7/§13、AGENTS §0 启动方式+Owner Map+L9 失效、FEATURE_MAP B-07 重写、DECISION_LEDGER 08-28 三行决策、VISION A 区 198、HANDOFF 批注④、CODEMAPS/INDEX 指标
+
+### Impact
+- API 端点：199 → **198**（create_api_app 实扫）
+- main.py：574 → 494 行
+- 服务端从此**零微信数据提取路径**：克隆数据仅经 `/api/clone/upload`（JSON 文件）进入
+- 测试基线不变：1030 Python + 59 前端（提取路径本就无专属测试）
+
+### Verification
+- `grep -rn "weclone" --include="*.py"` + 前端 ts/tsx → 0 命中
+- `python -m pytest -q` → 1030 passed + 1 skipped（2026-08-28 实跑）
+- `npx vitest run` → 59 passed / 11 files（2026-08-28 实跑）
+
+---
+
 ## [2026-08-28] 文档感染源清理（治理会话第二阶段，用户授权"清理删除"）
 
 ### 决策依据

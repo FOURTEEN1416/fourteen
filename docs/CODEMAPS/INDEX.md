@@ -72,7 +72,7 @@ unique-you/
 
 | 指标 | 值 |
 |------|-----|
-| API 端点 | 199 (16 include_router, create_api_app 实扫 2026-08-28, demo 已删) |
+| API 端点 | 198 (16 include_router, create_api_app 实扫 2026-08-28, demo + training/extract 已删) |
 | 前端页面 | 15 页面文件（全部挂载，幽灵层+Demo 已删） |
 | 测试用例 | 1030 Python 测试 + 59 前端测试 = 1089 (2026-08-28 实跑全绿) |
 | 活跃 ADR | 10 |

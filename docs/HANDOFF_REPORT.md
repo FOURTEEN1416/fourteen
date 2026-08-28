@@ -9,7 +9,8 @@
 > ⚠️ **2026-08-28 接管批注**（本报告为 08-27 快照，数字以 CODE_GRAPH v3.3.0 为准）：
 > ① Demo 已按用户裁决 D1 **全链路删除**（前端 08-27 + 后端 08-28，端点 204→199），"改造为系统门面"的旧预期由"产品介绍页"新立项替代，见 DECISION_LEDGER 附4 与 DELETION_LOG [2026-08-28]；
 > ② 测试基线当日实测 **1030 passed + 1 skipped（pytest）/ 59（vitest）= 1089**；
-> ③ 本报告中 1025/1033/1035 等中间数字为历史快照，AGENTS.md 基线已同步为 1089。
+> ③ 本报告中 1025/1033/1035 等中间数字为历史快照，AGENTS.md 基线已同步为 1089；
+> ④ 微信克隆已收敛为「本地工具提取 + 上传 JSON」：weclone_adapter/ 与启动部署脚本（start_*.cmd、deploy bat/ps1）经用户确认删除，main.py --clone 管线与 /api/training/extract 移除，端点 198。
 
 
 ---

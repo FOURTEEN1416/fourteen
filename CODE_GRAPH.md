@@ -12,8 +12,8 @@
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| API 端点（create_api_app 实扫） | **199 端点** / 16 include_router | `python -c "from api.app_factory import create_api_app; app=create_api_app(); sum(len(r.methods-{'HEAD','OPTIONS'}) for r in app.routes if hasattr(r,'methods'))"`（demo 4 端点已删除） |
-| main.py 体量 | **~23 KB / 574 行** | 双模式合并后基线（07-28 核实，08 月未改动 main.py 路由结构） |
+| API 端点（create_api_app 实扫） | **198 端点** / 16 include_router | `python -c "from api.app_factory import create_api_app; app=create_api_app(); sum(len(r.methods-{'HEAD','OPTIONS'}) for r in app.routes if hasattr(r,'methods'))"`（demo 4 端点 + training/extract 已删除） |
+| main.py 体量 | **20.2 KB / 494 行** | 2026-08-28：`--clone` 服务端克隆管线（run_clone_pipeline + 三参数）随 weclone_adapter 移除 |
 | 前端页面 | **15 个** | Glob `frontend/src/pages/*.tsx`（SP-9 幽灵层三页 + DemoPage 已删除） |
 | 前端 API 模块 | **12 个** | Glob `frontend/src/api/*.ts`（demo.ts、users.ts 已删除） |
 | 前端 Zustand store | 4 个 | LS `frontend/src/store/` |
@@ -201,7 +201,6 @@ sequenceDiagram
 - `_run_orchestrator(mode="full")` — 完整模式（默认，与 fast 共用 initialize()）
 - `run_console_chat` — 控制台交互
 - `run_wechat_mode` — 微信模式
-- `run_clone_pipeline` — 克隆训练管线
 
 ### 4.2 API 层（199 路由 — 2026-08-28 create_api_app 实扫)
 
@@ -209,9 +208,9 @@ sequenceDiagram
 
 | 来源 | 路径 | 端点数 | 文件数 | 说明 |
 |------|------|--------|------|------|
-| `api/routers/` | 20 个域路由（不含 `__init__.py`） | ~150 | 20 | 域路由：character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card/chat/clone/misc/personality/safety/tools/training/users（demo 已删除 2026-08-28） |
+| `api/routers/` | 20 个域路由（不含 `__init__.py`） | ~149 | 20 | 域路由：character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card/chat/clone/misc/personality/safety/tools/training/users（demo 08-28 删除、training/extract 08-28 移除） |
 | `shisi/api/` | v1 + v2 | ~49 | 13 | shisi 域：affinity/character/emotion_stage/memory/persona/stats/sticker/training/vital_signs + v2 健康检查/迁移/persona/character |
-| **合计（实扫）** | | **199** | **33** | `app.routes` 实测(2026-08-28) |
+| **合计（实扫）** | | **198** | **33** | `app.routes` 实测(2026-08-28) |
 
 **app_factory.py 实际挂载策略**（核实于源码）：
 
@@ -224,7 +223,7 @@ misc_router            → /api/stats, /api/dashboard, /api/memory/facts,
 chat_router            → /api/chat/*, /api/session/*, /api/wechat/status（11 端点）
 personality_router     → /api/emotion/*, /api/persona/*, /api/psych/*（9 端点）
 users_router           → /api/users/*（7 端点，admin only）
-training_router        → /api/training/*, /api/proactive/*（11 端点）
+training_router        → /api/training/*, /api/proactive/*（8 端点，training/extract 已移除）
 tools_router           → /api/system/tools, /api/system/tools/health, /api/plugins/*（6 端点）
 safety_router          → /api/safety/*, /api/rag/*, /api/voice/*, /api/files/*, /api/cache/*（12 端点）
 clone_router           → /api/clone/*（9 端点，含 /api/clone/upload 新增）
@@ -527,7 +526,7 @@ tools/
 
 | 函数（历史快照） | 历史复杂度 | 历史传递循环深度 | 当前状态 |
 |------|--------|-------------|---------|
-| `main.run_clone_pipeline` | 3 | 12 | 仍在 main.py |
+| `main.run_clone_pipeline` | 3 | 12 | ✅ 已删除（2026-08-28，克隆收敛为本地提取+JSON 上传） |
 | `main.main` | 4 | 12 | 仍在 main.py（精简） |
 | `main._run_fast_mode` | 15 | 12 | ✅ 已删除（合并入 `_run_orchestrator`） |
 | `main._run_full_mode` | 19 | 12 | ✅ 已删除（合并入 `_run_orchestrator`） |

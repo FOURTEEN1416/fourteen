@@ -51,7 +51,7 @@
 - 微信扫码登录，文字+语音聊天，多用户严格隔离（user_id 全链路隔离）
 - 15 页管理控制台（邀请码注册 + 角色管理 + LLM 配置 + 数据看板等；SP-9 幽灵层三页与 DemoPage 已删）
 - 角色系统：SillyTavern V2/V3 PNG 卡兼容 + 自有角色卡体系（20 张现役卡，💊熟悉度/心跳值/手写板等玩法均支持）
-- 199 个 API 端点 / 16 路由器 / 四层架构（见 CODE_GRAPH v3.3.0）
+- 198 个 API 端点 / 16 路由器 / 四层架构（见 CODE_GRAPH v3.3.0）
 
 **能力栈**
 - LLM：auto 回退链 sensenova(glm-5.2) → zhipu → xunfei → baidu，支持用户级 API Key 隔离
