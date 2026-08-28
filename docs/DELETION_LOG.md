@@ -8,8 +8,12 @@
 - 用户裁决「FEATURE_MAP F-01~F-15 有严重错误请彻底清除」；功能对齐意图基准改为 docs/history/ 历史设计文档（用户原始想法记录）
 - 配色裁决：弃马卡龙粉/蓝/绿，改暖黄/海盐蓝/薄荷青浅色系
 
-### Files Deleted
-- `docs/FEATURE_MAP.md`（100 行，功能现状地图——因内容严重错误整体清除，非逐条修正）
+### ⚠️ 2026-08-28（晚）部分撤销：READING_REPORT 群恢复
+- 用户质询"没有完全读取就删除？？"成立——删除时仅凭文件名/年龄判定，未全文阅读
+- 已从 git 历史恢复全部 14 份 READING_REPORT_* + inventory/file-inventory.md，**逐份全文复读**（约 2000 行）
+- 复读判定：全部为高质量深度架构档案（非过期快照，内容未被收编）→ **全部保留**，docs/README 归位为"模块深度档案 derived·长期有效"
+- 唯一维持删除：docs/FEATURE_MAP.md（用户裁决内容严重错误，非阅读判定）
+- 教训入宪：project-governance skill 新增"删除前必须全文读完"铁律
 
 ### Files Created
 - `docs/FUNCTION_INVENTORY.md`（新 truth：页-功能点编号功能清单，代码实况逐页读出 × 历史意图对照，含 GAP-1~5 差距清单）
