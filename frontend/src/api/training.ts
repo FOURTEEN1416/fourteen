@@ -10,11 +10,6 @@ export function trainingProgress() {
   return client.get('/training/progress')
 }
 
-/** POST /api/training/extract — 提取数据 */
-export function trainingExtract(target: string, source: string) {
-  return client.post('/training/extract', null, { params: { target, source } })
-}
-
 /** POST /api/training/clean — 清洗数据 */
 export function trainingClean(acceptScore: number) {
   return client.post('/training/clean', null, { params: { accept_score: acceptScore } })

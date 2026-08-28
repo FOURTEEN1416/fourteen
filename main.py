@@ -15,7 +15,7 @@
     python main.py --no-api                  # 不启动REST/WebSocket API
     python main.py --no-scheduler            # 不启动主动消息调度器
     python main.py --log-level DEBUG         # 调试日志
-    python main.py --clone wxid_xxx          # 风格克隆（提示词注入模式）
+    python main.py --init-only               # 仅初始化自检
     python main.py --init-only               # 仅初始化
 """
 
@@ -117,7 +117,6 @@ def parse_args() -> argparse.Namespace:
   %(prog)s --no-api                  # 不启动API服务
   %(prog)s --no-scheduler            # 不启动主动消息调度器
   %(prog)s --log-level DEBUG         # 调试日志
-  %(prog)s --clone wxid_xxx --clone-name "小明"  # 风格克隆（提示词注入模式）
   %(prog)s --init-only               # 仅初始化
         """,
     )
@@ -133,13 +132,6 @@ def parse_args() -> argparse.Namespace:
                         help="配置文件目录 (默认: config)")
     parser.add_argument("--init-only", action="store_true",
                         help="仅初始化, 用于测试")
-    parser.add_argument("--clone", type=str, default=None,
-                        help="克隆目标 (wxid/文件路径)")
-    parser.add_argument("--clone-source", type=str, default="wcf",
-                        choices=["wcf", "wechatmsg", "decrypt", "txt", "csv", "json"],
-                        help="克隆数据来源 (decrypt=微信4.x数据库解密)")
-    parser.add_argument("--clone-name", type=str, default="",
-                        help="被克隆者名称")
     parser.add_argument("--log-level", type=str, default="INFO",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
                         help="日志级别")
@@ -171,41 +163,6 @@ def load_fusion_config(config_dir: str) -> dict[str, Any]:
         return full_cfg.get("fusion", {})  # type: ignore[no-any-return]
     logger.warning("未找到 %s, 使用默认 fusion 配置", system_yaml)
     return {}
-
-
-def run_clone_pipeline(args: argparse.Namespace) -> None:
-    print("\n" + "=" * 50)
-    print("  [CLONE] 风格克隆管线（提示词注入模式）")
-    print("=" * 50)
-    print(f"  目标: {args.clone}")
-    print(f"  来源: {args.clone_source}")
-    if args.clone_name:
-        print(f"  名称: {args.clone_name}")
-    print()
-
-    from weclone_adapter import WeCloneAdapter
-
-    adapter = WeCloneAdapter(
-        data_dir=str(project_root / "data" / "clone"),
-    )
-
-    result = adapter.clone(
-        target=args.clone,
-        source=args.clone_source,
-        name=args.clone_name or None,  # type: ignore[arg-type]
-    )
-
-    if result.get("error"):
-        print(f"  [FAIL] 克隆失败: {result['error']}")
-        return
-
-    print(f"\n{'=' * 50}")
-    print("  [OK] 克隆完成")
-    print(f"{'=' * 50}")
-    print(f"  提取对话: {result.get('extracted_turns', 0)} 轮")
-    print(f"  风格独特性: {result.get('uniqueness', 0):.0%}")
-    print(f"  ToneMimic 注入: {result.get('injected_to_tone_mimic', 0)} 条")
-    print()
 
 
 def run_console_chat(orchestrator_or_obj, orchestrator_mode: str,
@@ -400,10 +357,6 @@ def main() -> None:
     use_console = args.console or args.no_wechat
 
     print_banner()
-
-    if args.clone:
-        run_clone_pipeline(args)
-        return
 
     fusion_cfg = load_fusion_config(args.config)
     orchestrator_mode = fusion_cfg.get("orchestrator_mode", "full")

@@ -2,14 +2,16 @@
 训练管线 + 主动搭话路由 — /api/training/* + /api/proactive/*
 
 来源：原 api.main_routes.py L365/379/459/512/544/549/590/638/647/664/1252 共 11 端点
+（2026-08-28：/api/training/extract 已移除——微信克隆收敛为"本地工具提取 + 上传 JSON"，
+服务端不做任何微信数据提取，见 /api/clone/upload）
 
 注意：LoRA 微调训练端点已移除（项目使用外接 API + RAG + 提示词注入）。
-保留：数据提取 / 清洗 / 测试 / 应用（克隆到 ToneMimic）+ 主动搭话配置。
+保留：数据清洗 / 测试 / 应用（克隆到 ToneMimic）+ 主动搭话配置。
 
 依赖：
 - deps.orch（_ase 主动搭话引擎）
 - deps.training_mgr（训练状态管理器）
-- 训练管线: clone_training / weclone_adapter / clone_training.data_cleaner / my_character.tone_mimic
+- 训练管线: clone_training.data_cleaner / my_character.tone_mimic
 - ProactiveConfigRequest 模型来自 api.main_routes
 """
 
@@ -48,7 +50,7 @@ async def training_status(_auth: bool = Security(verify_api_key_dep)):
         available = False
         desc = "训练模块未安装"
     return {"available": available, "description": desc, "steps": [
-        "data_extract", "style_analyze", "tone_mimic_inject",
+        "style_analyze", "tone_mimic_inject",
     ]}
 
 
@@ -60,38 +62,6 @@ async def get_training_progress(_auth: bool = Security(verify_api_key_dep)):
 # ═══════════════════════════════════════════════════════
 # Training Pipeline (admin only)
 # ═══════════════════════════════════════════════════════
-
-
-@router.post("/api/training/extract")
-async def start_extraction(
-    target: str = Query(default="", max_length=500),
-    source: str = Query(default="wcf", pattern=r"^(wcf|wechat|csv)$"),
-    _auth: bool = Security(verify_api_key_dep),
-    _admin: tuple[int, User] = Depends(require_role("admin")),
-):
-    def _do_extract():
-        try:
-            from weclone_adapter import WeCloneAdapter
-            adapter = WeCloneAdapter(
-                data_dir=str(Path(__file__).parent.parent.parent / "data" / "clone"),
-            )
-            result = adapter.extract(target=target, source=source)
-            deps.training_mgr.update(
-                status="extracted",
-                extracted_turns=len(result) if isinstance(result, list) else result.get("turns", 0),
-                progress=0.3,
-                step_name="数据提取",
-            )
-        except Exception:
-            logger.exception("Extraction failed")
-            deps.training_mgr.update(status="error", error="internal_error")
-
-    if not target.strip():
-        raise HTTPException(status_code=400, detail="target is required")
-
-    deps.training_mgr.update(status="extracting", start_time=time.time(), step_name="数据提取")
-    deps.training_mgr.submit(_do_extract)
-    return {"status": "started", "task": "extract", "target": target}
 
 
 @router.post("/api/training/clean")
