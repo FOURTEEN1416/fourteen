@@ -46,7 +46,6 @@ class _StreamPipelineMixin:
         - 可在此触发下一轮的修正提示（当前仅日志，避免过度复杂）
         """
         try:
-            from my_character.consistency_checker import check_and_correct_reply
 
             character_card = None
             persona_service = self.components.get("persona")

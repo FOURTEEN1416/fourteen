@@ -85,6 +85,7 @@ class ASRHandler:
 
         # ffmpeg 前置转 WAV（微信语音为 silk；若 ffmpeg 无 silk 解码则按原样尝试）
         import asyncio
+
         from voice.audio_converter import AudioFormatConverter
 
         def _convert() -> tuple[bytes, str]:

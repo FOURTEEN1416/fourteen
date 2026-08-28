@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import time
@@ -107,12 +108,10 @@ class LLMGatewayV2:
             if self._client is not None:
                 # 旧 client 绑定在另一个 loop 上，不能 await aclose()，
                 # 用 call_soon_threadsafe 调度 aclose() 触发底层资源释放。
-                try:
+                with contextlib.suppress(Exception):
                     loop.call_soon_threadsafe(
                         lambda c=self._client: asyncio.ensure_future(c.aclose())
                     )
-                except Exception:  # noqa: BLE001
-                    pass
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(60.0),
                 limits=self._pool_limits,

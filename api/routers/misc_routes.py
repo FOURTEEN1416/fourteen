@@ -17,6 +17,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
 from api.auth_jwt import get_current_user, get_current_user_id, require_role
@@ -25,7 +26,6 @@ from api.deps import deps
 from api.main_routes import ConfigUpdateRequest, _sanitize_config
 from llm_provider import reconfigure_llm
 from observability.logging_setup import ring_buffer
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("api.routers.misc_routes")
 

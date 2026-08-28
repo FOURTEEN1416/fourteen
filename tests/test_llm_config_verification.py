@@ -20,9 +20,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api import app_factory, auth
-from api.auth_jwt import create_access_token, verify_token, get_current_user_id
+from api.auth_jwt import create_access_token, get_current_user_id, verify_token
 from api.database import get_db
-
 
 # ─────────────────────────────────────────────────────
 # 测试替身

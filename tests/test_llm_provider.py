@@ -156,7 +156,6 @@ class TestLLMGatewayV2MockMode:
         assert "test" in result or "query" in result or "收到" in result
 
     def test_chat_with_no_key_uses_mock(self, monkeypatch):
-        import asyncio
 
         from llm_provider.llm_gateway import LLMGatewayV2
 

@@ -51,7 +51,7 @@ class PersonaExporter:
         Returns:
             (png_bytes, filename) — PNG 字节流和文件名
         """
-        from .png_codec import embed_card_to_png, PNGCodecError
+        from .png_codec import PNGCodecError, embed_card_to_png
 
         if filename is None:
             import re

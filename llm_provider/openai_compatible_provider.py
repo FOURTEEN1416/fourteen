@@ -13,6 +13,7 @@ OpenAI 兼容格式通用 Provider — 支持任意 OpenAI-compatible API
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -114,12 +115,10 @@ class OpenAICompatibleProvider:
             if self._client is not None:
                 # 旧 client 绑定在另一个 loop 上，不能 await aclose()，
                 # 用同步 close 触发底层资源释放；httpx 内部会清理连接池。
-                try:
+                with contextlib.suppress(Exception):
                     loop.call_soon_threadsafe(
                         lambda c=self._client: asyncio.ensure_future(c.aclose())
                     )
-                except Exception:  # noqa: BLE001
-                    pass
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(60.0),
                 limits=self._pool_limits,

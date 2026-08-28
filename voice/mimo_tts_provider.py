@@ -273,7 +273,6 @@ class MiMoTTSProvider(TTSProviderBase):
         生产目标环境为 Windows（AGENTS §3），SAPI 是唯一零依赖本地语音出口。
         非 Windows 或合成失败返回 None（调用方得到 None 语义不变）。
         """
-        import sys
         if sys.platform != "win32":
             logger.info("非 Windows 环境，无本地 TTS 兜底")
             return None

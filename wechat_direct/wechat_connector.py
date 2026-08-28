@@ -898,7 +898,6 @@ class WeChatConnector:
     def _transcribe_voice(self, voice_data_b64: str) -> str:
         """微信语音 → 文字（ASRHandler 配置驱动；未启用返回空串走原占位提示）。"""
         try:
-            import asyncio as _asyncio
 
             from multimodal.multimodal_processor import ASRHandler
 
@@ -906,7 +905,7 @@ class WeChatConnector:
                 cfg = {}
                 try:
                     import yaml
-                    cfg_path = project_root_cfg = Path(__file__).parent.parent / "config" / "system.yaml"
+                    cfg_path = Path(__file__).parent.parent / "config" / "system.yaml"
                     if cfg_path.exists():
                         with open(cfg_path, encoding="utf-8") as f:
                             full = yaml.safe_load(f) or {}

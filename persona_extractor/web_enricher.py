@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -457,11 +458,12 @@ class Crawl4AISource:
         return True
 
     async def _search_async(self, query: str, max_results: int) -> list[RawDocument]:
-        """真正的 async 搜索实现。"""  
+        """真正的 async 搜索实现。"""
         import re
-        from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, BrowserConfig
+
+        from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
         browser_cfg = BrowserConfig(headless=True, verbose=False)
-        run_cfg = CrawlerRunConfig(cache_mode="bypass", verbose=False)
+        CrawlerRunConfig(cache_mode="bypass", verbose=False)
         crawler = AsyncWebCrawler(config=browser_cfg)
         await crawler.start()
         try:
@@ -479,17 +481,15 @@ class Crawl4AISource:
         except Exception as e:
             logger.debug("Crawl4AI 搜索异常: %s", e)
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 await crawler.close()
-            except Exception:
-                pass
         return docs
 
     async def _scrape_async(self, url: str) -> RawDocument:
-        """真正的 async 抓取实现。"""  
+        """真正的 async 抓取实现。"""
         from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
         browser_cfg = BrowserConfig(headless=True, verbose=False)
-        run_cfg = CrawlerRunConfig(cache_mode="bypass", verbose=False)
+        CrawlerRunConfig(cache_mode="bypass", verbose=False)
         crawler = AsyncWebCrawler(config=browser_cfg)
         await crawler.start()
         doc = RawDocument(url=url, source=self.NAME)
@@ -506,10 +506,8 @@ class Crawl4AISource:
         except Exception as e:
             logger.warning("Crawl4AI 抓取失败 %s: %s", url, e)
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 await crawler.close()
-            except Exception:
-                pass
         return doc
 
     def search(self, query: str, max_results: int = 5) -> list[RawDocument]:

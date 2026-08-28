@@ -339,12 +339,11 @@ class ProactiveScheduler:
 
                 cm = getattr(getattr(_deps, "shisi_reg", None), "character_manager", None)
                 active_id = (cm.get_active_id() if cm else "") or ""
-                char_name = ""
                 if cm and active_id:
                     _card = cm.get_card(active_id) if hasattr(cm, "get_card") else None
-                    char_name = (getattr(_card, "name", "") or "") if _card else ""
+                    (getattr(_card, "name", "") or "") if _card else ""
             except Exception:
-                char_name = ""
+                pass
 
             hits = check_today(active_id, _dt.now())
             if not hits:

@@ -19,13 +19,13 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
 from api.auth_jwt import get_current_user_id, require_role
 from api.database import User, get_db
 from api.deps import deps
 from api.main_routes import ChatRequest, ChatResponse, CreateSessionRequest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("api.routers.chat_routes")
 

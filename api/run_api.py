@@ -155,7 +155,7 @@ def _ensure_scheduler_singleton() -> None:
         lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except (IOError, OSError):
+        except OSError:
             # 其他 worker 已持有锁，本 worker 停止调度器
             if hasattr(scheduler, "stop"):
                 scheduler.stop()
@@ -214,6 +214,7 @@ def _autostart_wechat_connector():
     """
     try:
         import fcntl
+
         from wechat_direct import WeChatConnector
         from wechat_direct.wechat_connector import CREDENTIALS_PATH
 
@@ -226,7 +227,7 @@ def _autostart_wechat_connector():
         lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except (IOError, OSError):
+        except OSError:
             # 其他 worker 已持有锁，本 worker 跳过自动连接
             logger.info("其他 worker 已持有微信连接锁，本 worker 跳过自动连接")
             os.close(lock_fd)

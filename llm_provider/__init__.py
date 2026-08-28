@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -267,10 +268,8 @@ def get_user_llm(user_id: int, user_config: dict | None) -> Any:
                     try:
                         result = close()
                         if asyncio.iscoroutine(result):
-                            try:
+                            with contextlib.suppress(RuntimeError):
                                 asyncio.get_running_loop().create_task(result)
-                            except RuntimeError:
-                                pass
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("Failed to close user %s LLM backend: %s", user_id, exc)
             logger.info("Configured user %s LLM gateway: provider=%s", user_id, resolved)
@@ -288,10 +287,8 @@ def invalidate_user_llm(user_id: int) -> None:
             try:
                 result = close()
                 if asyncio.iscoroutine(result):
-                    try:
+                    with contextlib.suppress(RuntimeError):
                         asyncio.get_running_loop().create_task(result)
-                    except RuntimeError:
-                        pass
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to close user %s LLM on invalidate: %s", user_id, exc)
 

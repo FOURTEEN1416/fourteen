@@ -517,7 +517,7 @@ async def import_character(
     # PNG 文件：从 tEXt chunk 提取 JSON
     if suffix == "png":
         try:
-            from shisi.character.png_codec import extract_card_from_png, PNGCodecError
+            from shisi.character.png_codec import PNGCodecError, extract_card_from_png
         except ImportError as e:
             raise HTTPException(status_code=500, detail=f"Pillow 未安装: {e}") from e
         try:
@@ -586,7 +586,7 @@ async def export_character(
     if format == "png":
         # PNG 导出：嵌入 chara tEXt chunk
         try:
-            from shisi.character.png_codec import embed_card_to_png, PNGCodecError
+            from shisi.character.png_codec import PNGCodecError, embed_card_to_png
         except ImportError as e:
             raise HTTPException(status_code=500, detail=f"Pillow 未安装: {e}") from e
         try:

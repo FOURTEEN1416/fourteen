@@ -37,10 +37,7 @@ def _local_now() -> datetime:
     若系统时区非 UTC+8（如容器内默认 UTC），强制使用 UTC+8。
     """
     # 检测系统时区偏移（秒）
-    if time.daylight and time.localtime().tm_isdst:
-        offset_sec = -time.altzone
-    else:
-        offset_sec = -time.timezone
+    offset_sec = -time.altzone if time.daylight and time.localtime().tm_isdst else -time.timezone
     # UTC+8 = 28800 秒；偏差超过 1 小时即认为系统非北京时区
     if abs(offset_sec - 28800) > 3600:
         return datetime.now(tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))

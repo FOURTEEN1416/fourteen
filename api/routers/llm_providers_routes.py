@@ -113,9 +113,8 @@ def _sanitize_provider(key: str, cfg: dict[str, Any], is_special: bool = False) 
     out = dict(cfg)
     out["key"] = key
     # 特殊选项没有 api_key 等字段
-    if not is_special:
-        if out.get("api_key"):
-            out["api_key"] = "****"
+    if not is_special and out.get("api_key"):
+        out["api_key"] = "****"
     return out
 
 
