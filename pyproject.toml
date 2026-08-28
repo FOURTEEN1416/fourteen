@@ -142,7 +142,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 exclude = ["third_party/", "wechatmsg_src/", "scripts/"]
 plugins = ["sqlalchemy.ext.mypy.plugin"]
 warn_return_any = false
