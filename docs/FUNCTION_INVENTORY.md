@@ -84,7 +84,17 @@
 | STATUS-1 | 三卡：当前情绪（useEmotionState）/亲密等级（affinity→初识/熟悉/亲密三档）/记忆条目数 |
 | STATUS-2 | 无活跃角色兜底态（引导先创建/激活） |
 | STATUS-3 | 最近记忆列表（useMemoryFacts 前 5 条） |
+| STATUS-4 | **角色日记**（候选 B，08-28）：GET /api/memory/diary 每日摘要最近 5 篇折叠展示 |
 | ⚠️ | SP-1 挂起：情绪分布图/成就/趋势缺（数据层 useEmotionTrend 已就绪零消费） |
+
+## I. 跨域新能力（2026-08-28 候选 A-D，调研对标 awesome-ai-companion 后立项）
+
+| 编号 | 能力 | 关键行为 |
+|------|------|---------|
+| N-ASR-1 | **语音转文字**（候选 A）：微信语音（type34 silk）→ ffmpeg WAV → OpenAI 兼容 /audio/transcriptions → 文字进对话管线；config voice.asr 配置驱动（默认关）；未配置保持占位提示 |
+| N-DIARY-1 | **角色日记**（候选 B）：daily_summaries 每日摘要 → GET /api/memory/diary → StatusCenter 折叠卡片 |
+| N-KSHARE-1 | **知识分享主动消息**（候选 C）：share 类消息优先从角色知识库（爬虫/文档来源）检索真实内容，LLM 包装角色口吻；无索引/无 LLM 回退模板 |
+| N-DATES-1 | **纪念日感知**（候选 D）：重要日期存储（data/important_dates.json）+ GET/PUT /api/characters/{id}/important-dates + 角色设置 Basic tab 编辑器 + 每日维护检查命中即 LLM 祝福（模板兜底） |
 
 ## D. 系统设置域（SystemSettingsLayout 嵌套 Outlet）
 

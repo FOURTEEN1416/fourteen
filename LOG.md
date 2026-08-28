@@ -25,6 +25,18 @@
 
 ---
 
+## 2026-08-28（十）— 候选 A-D 全量落地（用户批复"四个都需要"）
+
+**A ASR 语音转文字**：ASRHandler 补实（OpenAI 兼容 /audio/transcriptions，voice.asr 配置驱动默认关）+ AudioFormatConverter.to_wav + 微信 type34 语音接线（此前语音消息直接丢弃）。
+**B 角色日记**：GET /api/memory/diary（daily_summaries 表）+ StatusCenter 折叠卡片。
+**C 知识分享**：ASE share 类优先从角色知识库检索（get_knowledge_context）→ LLM 包装口吻；_init_mixin 注入（活跃角色动态解析）；无索引回退模板。
+**D 纪念日**：utils/important_dates（data/important_dates.json）+ GET/PUT important-dates 端点 + Basic tab 编辑器 + scheduler 每日维护检查命中即 LLM 祝福。
+验证：200 端点实扫；pytest 1015+1；vitest 59；tsc 0 错。
+
+---
+
+---
+
 ## 2026-08-28（九）— 误删纠正回滚 + 消息 tab 手动控制
 
 **误删纠正（用户质询成立）**：上轮凭文件名删 14 份 READING_REPORT+file-inventory 属流程违规。已从 git 历史恢复→逐份全文复读（约 2000 行）→改判全部保留（深度架构档案：端点全景/ASE 六维紧迫度/12 维风格分析器等 CODE_GRAPH 未收录内容）。docs/README 归位"模块深度档案 derived·长期有效"；project-governance skill 新增"删除前必须全文读完"铁律+污染源清理五步规程。
