@@ -36,6 +36,34 @@ from api.routers import (
 @pytest.fixture(scope="module")
 def app():
     """Build the app once per module; bypass auth to keep tests fast."""
+    # require_role("admin") 是工厂调用（每次返回新函数），dependency_overrides 无法按键覆盖
+    # （FastAPI 工厂陷阱）。CI 干净环境因此必炸 no such table: users。
+    # 根治：真实建表 + 种子 id=1 admin，让真实依赖链走通（本地/CI 行为一致）。
+    import asyncio
+
+    from api.database import User, _async_session, init_db
+
+    async def _seed() -> None:
+        await init_db()
+        from api.auth_jwt import hash_password
+
+        async with _async_session() as session:
+            exists = await session.get(User, 1)
+            if exists is None:
+                session.add(
+                    User(
+                        email="ci-admin@test.local",
+                        username="ci-admin",
+                        hashed_password=hash_password("CiAdmin#2026"),
+                        role="admin",
+                        is_active=True,
+                        is_verified=True,
+                    )
+                )
+                await session.commit()
+
+    asyncio.run(_seed())
+
     a = app_factory.create_api_app()
     # Bypass X-API-Key check so smoke tests don't need a real key
     a.dependency_overrides[auth.verify_api_key_dep] = lambda: True

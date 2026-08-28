@@ -84,8 +84,23 @@ jobs:
       - name: Install Playwright browsers
         run: bunx playwright install chromium
 
+      - name: Setup backend for E2E (seed DB + start uvicorn)
+        working-directory: .
+        run: |
+          pip install -e .
+          python scripts/e2e_setup.py
+          nohup env APP_DATABASE_URL="sqlite+aiosqlite:///data/e2e_users.db" API_KEY_ENABLED=false             python -m uvicorn api.run_api:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/api/health > /dev/null && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8000/api/health > /dev/null || (cat uvicorn.log && exit 1)
+
       - name: Run Playwright E2E (New)
-        # Uses the webServer defined in playwright.config.ts
+        env:
+          E2E_ADMIN: e2e-admin@test.local
+          E2E_PASSWORD: E2eTest#2026
+        # Uses the webServer defined in playwright.config.ts (frontend dev + proxy to :8000)
         run: bunx playwright test
 
   weekly-hygiene:
