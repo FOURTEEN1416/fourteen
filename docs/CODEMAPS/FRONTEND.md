@@ -24,25 +24,19 @@ frontend/src/
 │   ├── characters.ts     ← 角色 API (13.7KB)
 │   ├── chat.ts           ← 聊天 API
 │   ├── clone.ts          ← 克隆 API
-│   ├── demo.ts           ← 演示 API
 │   ├── llmProviders.ts   ← LLM 供应商管理 API
 │   ├── mimo.ts           ← MiMo 语音 API
 │   ├── system.ts         ← 系统 API
 │   ├── training.ts       ← 训练 API
-│   ├── users.ts          ← 用户 API
 │   └── wechat.ts         ← 微信 API
 │
-├── pages/                ← 页面组件 (19 pages)
+├── pages/                ← 页面组件 (15 pages，2026-08-28：幽灵层三页+DemoPage 已删)
 │   ├── LoginPage.tsx          ← 登录页 (8.7KB)
 │   ├── WeChatPage.tsx         ← 微信控制台 (20.5KB)
-│   ├── UsersPage.tsx          ← 用户列表 (8.4KB)
-│   ├── UserWorkspace.tsx      ← 用户工作区 (10.3KB)
 │   ├── RolesPage.tsx          ← 角色列表
 │   ├── CreateRole.tsx         ← 创建角色 (14.5KB)
 │   ├── RoleSettings.tsx       ← 角色设置 (34.6KB)
 │   ├── StatusCenter.tsx       ← 状态中心 (7.9KB)
-│   ├── DemoPage.tsx           ← 演示页面
-│   ├── BindingDetailPage.tsx  ← 绑定详情
 │   ├── SystemSettingsLayout.tsx← 系统设置布局
 │   ├── SettingsLLM.tsx        ← LLM 设置 (12.4KB)
 │   ├── SettingsVoice.tsx      ← 语音设置 (16.2KB)
@@ -132,7 +126,6 @@ frontend/src/
 | RoleSettings | /roles/:roleId/settings | 需要 | useUnifiedCharacter | 34.6KB |
 | StatusCenter | /roles/:roleId/status | 需要 | dashboardStats | 7.9KB |
 | StorylinePage | /roles/:roleId/storyline | 需要 | storyline | (内联在 App.tsx) |
-| DemoPage | /demo | 需要 | demo | — |
 | SystemSettingsLayout | /settings | 需要 | — | 0.3KB |
 | SettingsLLM | /settings/llm | 需要 | 真实 API | 12.4KB |
 | SettingsVoice | /settings/voice | 需要 | mimo/* | 16.2KB |

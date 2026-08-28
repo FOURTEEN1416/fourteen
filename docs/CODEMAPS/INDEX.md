@@ -72,9 +72,9 @@ unique-you/
 
 | 指标 | 值 |
 |------|-----|
-| API 端点 | 204 (17 include_router, create_api_app 实扫) |
-| 前端页面 | 19 页面文件 / 21 注册路由 |
-| 测试用例 | 1025 Python 测试 + 79 前端测试 = 1104 |
+| API 端点 | 199 (16 include_router, create_api_app 实扫 2026-08-28, demo 已删) |
+| 前端页面 | 15 页面文件（全部挂载，幽灵层+Demo 已删） |
+| 测试用例 | 1030 Python 测试 + 59 前端测试 = 1089 (2026-08-28 实跑全绿) |
 | 活跃 ADR | 10 |
 | Fitness Functions | 17 (12 CI + 5 手动) |
 | 总线因子 | 1 (唯一开发者: 默默) |

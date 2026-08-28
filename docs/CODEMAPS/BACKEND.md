@@ -1,6 +1,6 @@
 # 后端地图
 
-> **⚠️ 数字漂移声明**（2026-08-26 治理标注）：本文端点统计与 08-01 实扫存在偏差（07-14 基线后端点有增删）。权威数字以 `CODE_GRAPH.md`（204 端点）为准。
+> **⚠️ 数字漂移声明**（2026-08-28 更新）：本文端点统计为 07-14 基线快照。权威数字以 `CODE_GRAPH.md`（199 端点 / 16 include_router，2026-08-28 实扫；demo_routes 已删除）为准。
 
 **最近更新:** 2026-07-14
 **版本:** 3.1.0
@@ -37,7 +37,8 @@ api/                        ← FastAPI 路由层
 │   ├── memory_routes.py    ← 记忆 (4 endpoints)
 │   ├── knowledge_routes.py ← 知识库 (7 endpoints)
 │   ├── persona_card_routes.py ← 人设卡 (3 endpoints)
-│   └── demo_routes.py      ← 演示 (demo)
+│
+│   （demo_routes.py 已于 2026-08-28 删除——D1 裁决）
 │
 │   (以下为从 api/ 根目录迁移的旧路由，已去除下划线前缀)
 │   ├── misc_routes.py      ← 杂项 (9 endpoints, /api/health 已迁移至 health_routes.py)

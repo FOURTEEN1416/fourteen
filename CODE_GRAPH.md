@@ -1,51 +1,43 @@
-# 代码图谱 — unique-you (唯一的你) v3.1.0
+# 代码图谱 — unique-you (唯一的你) v3.3.0
 
-> 由 维护者 手动维护 | 上次大规模扫描: 2026-07-09 | 最后更新: 2026-08-01
-> ✅ 路由/文件/模块/测试数已通过 Grep + LS + pytest + vitest 实时核实（2026-07-30）。
-> ⚠️ codebase-memory 图谱工具 节点/边数据仍为 2026-07-09 快照（未重新索引）。
+> 由 维护者 手动维护 | 最后核实: 2026-08-28（增量刷新，基线 v3.2 不推翻）
+> ✅ 路由/文件/模块/测试数已通过 create_api_app 实扫 + Glob + pytest + vitest 实时核实（2026-08-28）。
+> ✅ 图数据库已于 2026-08-28 由 codebase-memory 图谱工具 v0.10.8 重新索引（artifact.json schema v2: **7706 节点 / 32367 边**，commit c32af54），历史矛盾（543277c 声称的 6771 节点未持久化）就此消案。
 
 ---
 
 ## 1. 全局指标
 
-### 1.1 实时核实指标（2026-07-30 Grep/LS/pytest/vitest 扫描）
+### 1.1 实时核实指标（2026-08-28 create_api_app/Glob/pytest/vitest 扫描）
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| API 端点（create_api_app 实扫） | **204 端点** / 17 include_router | `python -c "from api.app_factory import create_api_app; app=create_api_app(); sum(len(r.methods-{'HEAD','OPTIONS'}) for r in app.routes if hasattr(r,'methods'))"` |
-| main.py 体量 | **726 行 / 35.9 KB** | `(Get-Content \| Measure-Object -Line).Lines` |
-| 前端页面 | 19 个 | Glob `frontend/src/pages/*.tsx`（新增 `AdminProvidersPage.tsx`） |
-| 前端 API 模块 | **14 个** | Glob `frontend/src/api/*.ts`（新增 `llmProviders.ts`） |
+| API 端点（create_api_app 实扫） | **199 端点** / 16 include_router | `python -c "from api.app_factory import create_api_app; app=create_api_app(); sum(len(r.methods-{'HEAD','OPTIONS'}) for r in app.routes if hasattr(r,'methods'))"`（demo 4 端点已删除） |
+| main.py 体量 | **~23 KB / 574 行** | 双模式合并后基线（07-28 核实，08 月未改动 main.py 路由结构） |
+| 前端页面 | **15 个** | Glob `frontend/src/pages/*.tsx`（SP-9 幽灵层三页 + DemoPage 已删除） |
+| 前端 API 模块 | **12 个** | Glob `frontend/src/api/*.ts`（demo.ts、users.ts 已删除） |
 | 前端 Zustand store | 4 个 | LS `frontend/src/store/` |
-| Python 测试用例 | **1025 个全部通过 / 36 文件 / 124.44s** | `python -m pytest --tb=short -q`（2026-07-30 实跑,19 warnings,0 failed） |
-| 前端测试用例 | **79 个全部通过 / 14 文件** | `npx vitest run`（2026-07-30 实跑） |
-| 测试用例合计 | **1104 个**(1025 Python + 79 前端) | pytest + vitest 实跑 |
+| Python 测试用例 | **1030 passed + 1 skipped / 107.26s** | `python -m pytest --tb=short -q`（2026-08-28 实跑,0 failed） |
+| 前端测试用例 | **59 个全部通过 / 11 文件** | `npx vitest run`（2026-08-28 实跑；SP-9 删除幽灵页测试后 79→59） |
+| 测试用例合计 | **1089 个**(1030 Python + 59 前端) | pytest + vitest 实跑 |
 | tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
 
-### 1.2 知识图谱快照指标（2026-08-01 重新索引）
+### 1.2 知识图谱快照指标（✅ 2026-08-28 重新索引）
 
 | 维度 | 数值 |
 |------|------|
-| 总节点 | 6771 |
-| 总边 | 26079 |
-| Method | — |
-| Function | — |
-| Class | — |
-| File | — |
-| Module | — |
-| Route（图数据库记录） | — |
-| Interface (TS) | — |
-| 测试用例边 (TESTS) | 1449 |
-| 相似函数对 (SIMILAR_TO) | 122 |
-| 语义关联 (SEMANTICALLY_RELATED) | 86 |
-| HTTP 跨服务调用 | — |
-| 协同变更文件对 (FILE_CHANGES_WITH) | — |
-| 继承关系 (INHERITS) | — |
+| 总节点 | **7706**（artifact.json schema v2，2026-08-28T09:17:58Z，commit c32af54） |
+| 总边 | **32367**（同上） |
+| 图谱工具 | codebase-memory 图谱工具 **v0.10.8**（pip 安装，DeusData/codebase-memory 图谱工具 ★40.9k，MIT） |
+| 旧快照 | 2026-06-30 / 5983 节点 / 24923 边（v0.9.0 时代，已覆盖） |
+| 543277c 的 6771 节点声明 | 未持久化（artifact.json 未更新），已废弃消案 |
 
-> **注**: 2026-08-01 使用 codebase-memory 图谱工具 0.9.0 重新索引。详细节点/边类型分布需通过 `get_graph_schema` 工具查询。
-> 旧版 0.8.x 的详细类型分布（Method/Function/Class 等）在新版中需通过 `query_graph` 获取。
+> **注**: `.codebase-memory/artifact.json` 是图谱库状态的唯一权威载体。重新索引命令：
+> `codebase-memory 图谱工具 cli index_repository --repo-path D:/Desktop/ai-girlfriend`
+> 查询：`codebase-memory 图谱工具 cli search_graph --project D-Desktop-ai-girlfriend --name-pattern ".*X.*" --label Function`
+> 索引排除 .git/.venv 类 gitignore 目录（本轮 excluded 69 dirs）。parse_partial 2 处（SettingsLLM.test.tsx / pyrightconfig.json 行段，best-effort 信号不影响图完整性）。
 
-**边类型分布（前 8，2026-07-09 快照）**：USAGE(6331) > CALLS(6116) > DEFINES(5110) > DEFINES_METHOD(1885) > WRITES(1549) > TESTS(1413) > IMPORTS(755) > DECORATES(621)
+**边类型分布（前 8，2026-07-09 历史快照，仅供对照）**：USAGE(6331) > CALLS(6116) > DEFINES(5110) > DEFINES_METHOD(1885) > WRITES(1549) > TESTS(1413) > IMPORTS(755) > DECORATES(621)
 
 **语言分布**：Python 309 · TypeScript 79 · YAML 14 · Bash 5 · TOML 1 · JS 1 · HTML 1 · CSS 1
 
@@ -211,15 +203,15 @@ sequenceDiagram
 - `run_wechat_mode` — 微信模式
 - `run_clone_pipeline` — 克隆训练管线
 
-### 4.2 API 层（204 路由 — 2026-07-30 create_api_app 实扫)
+### 4.2 API 层（199 路由 — 2026-08-28 create_api_app 实扫)
 
 两个路由来源：
 
 | 来源 | 路径 | 端点数 | 文件数 | 说明 |
 |------|------|--------|------|------|
-| `api/routers/` | 21 个域路由（不含 `__init__.py`） | ~155 | 21 | 域路由：character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card/demo/chat/clone/misc/personality/safety/tools/training/users |
+| `api/routers/` | 20 个域路由（不含 `__init__.py`） | ~150 | 20 | 域路由：character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card/chat/clone/misc/personality/safety/tools/training/users（demo 已删除 2026-08-28） |
 | `shisi/api/` | v1 + v2 | ~49 | 13 | shisi 域：affinity/character/emotion_stage/memory/persona/stats/sticker/training/vital_signs + v2 健康检查/迁移/persona/character |
-| **合计（实扫）** | | **204** | **34** | `app.routes` 实测(2026-07-30) |
+| **合计（实扫）** | | **199** | **33** | `app.routes` 实测(2026-08-28) |
 
 **app_factory.py 实际挂载策略**（核实于源码）：
 
@@ -230,7 +222,6 @@ misc_router            → /api/stats, /api/dashboard, /api/memory/facts,
                         /api/user/llm-config (GET/POST, 新增),
                         /api/channels, /api/routes（11 端点）
 chat_router            → /api/chat/*, /api/session/*, /api/wechat/status（11 端点）
-demo_router            → /api/demo/*（4 端点，无认证）
 personality_router     → /api/emotion/*, /api/persona/*, /api/psych/*（9 端点）
 users_router           → /api/users/*（7 端点，admin only）
 training_router        → /api/training/*, /api/proactive/*（11 端点）
@@ -402,19 +393,19 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 
 ### 4.9 前端（React 19 管理控制台）
 
-- **19 个页面**（16 挂载路由 + 3 孤儿：UsersPage / UserWorkspace / BindingDetailPage，详见 FEATURE_MAP F 区）：
-  - 用户/认证：LoginPage, UsersPage, AdminUsersPage, UserWorkspace
+- **15 个页面文件**（全部挂载路由，幽灵层三页 UsersPage/UserWorkspace/BindingDetailPage 与 DemoPage 已于 08 月删除，详见 DELETION_LOG）：
+  - 用户/认证：LoginPage, AdminUsersPage
   - 角色管理：RolesPage, CreateRole, RoleSettings
-  - 设置：SettingsLLM, SettingsSecurity, SettingsLogs, **SettingsVoice**
-  - 工具/状态：**ToolsDashboard**, **StatusCenter**
-  - 微信集成：WeChatPage, BindingDetailPage
-  - LLM 供应商管理：**AdminProvidersPage**（admin 角色）
-  - 其他：DemoPage, NotFoundPage, SystemSettingsLayout
-- **14 个 API 模块**（新增 `queryClient.ts` + `llmProviders.ts`）：
-  - admin, auth, characters, chat, client, clone, demo, **llmProviders**, mimo, **queryClient**, system, training, users, wechat
+  - 设置：SettingsLLM, SettingsSecurity, SettingsLogs, SettingsVoice
+  - 工具/状态：ToolsDashboard, StatusCenter
+  - 微信集成：WeChatPage
+  - LLM 供应商管理：AdminProvidersPage（admin 角色）
+  - 其他：NotFoundPage, SystemSettingsLayout
+- **12 个 API 模块**（demo.ts、users.ts 已删除）：
+  - admin, auth, characters, chat, client, clone, llmProviders, mimo, queryClient, system, training, wechat
 - 4 个 Zustand store（authStore, chatStore, errorStore, characterBuilderStore）
 - React Query hooks
-- 79 个 Vitest 测试用例（across 14 files,全部通过 2026-07-30）— SettingsLLM/SettingsVoice/StatusCenter/ToolsDashboard/AdminUsersPage/WeChatPage 等
+- 59 个 Vitest 测试用例（across 11 files,全部通过 2026-08-28）
 - Playwright E2E 测试配置
 
 **页面说明**：
@@ -664,6 +655,8 @@ tools/
 | 2026-07-28 (双模式合并) | (working tree) | **架构升级 v3.2.0**：(1) `_run_fast_mode` + `_run_full_mode` 合并为单一 `_run_orchestrator`（main.py 35.9KB→22.7KB / 871→574 行 / -297 行）；(2) `_init_mixin` 成为唯一初始化真相源，新增第 10 阶段 `_init_multimodal` + 补齐 `EncryptionManager`/`classifier_mode`/`prompt_mode` 参数；(3) 修复双调度器并行 bug（原 `_init_mixin` 与 `_run_*_mode` 各创建一个 `ProactiveScheduler`）；(4) 清理 main.py 19 个冗余 import（已迁移至 `_init_mixin`）；(5) 1007 tests passed + 1 skipped（行为不变验证完成） |
 | 2026-07-28 (调度器单例) | fb83232 | **多 worker 调度器单例保护**：(1) `api/run_api.py` 新增 `_ensure_scheduler_singleton()` — flock 文件锁（`/tmp/ai-girlfriend-scheduler.lock`）确保 4 个 uvicorn worker 中只有 master 持有调度器，其他 worker 停止调度器避免 N 倍主动消息；(2) `main.py --no-scheduler` 设置 `DISABLE_SCHEDULER=1` 环境变量供子进程继承，停止 `_init_mixin` 已启动的调度器；(3) `api/run_api.py` 启动时检查 `DISABLE_SCHEDULER` 环境变量，等价 `--no-scheduler`；(4) 生产环境验证：日志显示 1 个 master 持锁 + 3 个 worker 停止调度器；Playwright headless 测试 5 个页面（首页 / /wechat / /settings/llm / /api/health / /roles）全部 200，`/settings/llm` 不再 403 |
 | 2026-07-30 (文档对齐) | (working tree) | **Truth 文档对齐 + 前端测试修复**：(1) `api/app_factory.py` 顶部注释从"9 子路由 75 端点"修正为"17 include_router 204 端点"(create_api_app 实扫);(2) CODE_GRAPH.md 测试数 540→1104(1025 Python + 79 前端,pytest+vitest 实跑)、端点数 207→204(实扫)、前端测试 84→79;(3) 修复前端 6 个过时测试:WeChatPage 4 个(绑定功能已迁移到 UsersPage)、SettingsVoice 2 个(ENGINE_OPTIONS 精简为仅 MiMo Cloud)、SettingsLLM 1 个(补全 useAuthStore/listProviders/system.ts importOriginal mock);(4) AGENTS.md Owner Map 补全 6 个缺失目录;(5) docs/CODEMAPS/MODULES.md 修正不存在的文件引用 |
+| 2026-08-28 (增量重建) | (working tree) | **v3.3.0 增量刷新（基于 v3.2 基线，非从零重建）**：(1) Demo 全删落地（用户裁决 D1）：删 `api/routers/demo_routes.py`(4 端点) + app_factory 挂载 + 3 处测试引用，前端 DemoPage.tsx/demo.ts 同步删除，端点 204→**199**（实扫）；(2) SP-9 幽灵层三页（UsersPage/UserWorkspace/BindingDetailPage）+ DemoPage 删除入册，前端页面 19→**15**、API 模块 14→**12**；(3) 测试基线重测：1030 Python + 59 前端 = **1089**（pytest/vitest 实跑全绿）；(4) 消除 §1.2 时间戳矛盾：artifact.json 实读 2026-06-30/5983 节点为权威，543277c 的"08-01 重索引 6771 节点"声明因未持久化而废弃；(5) clone 云端预览链路下线(fb04507)、Firecrawl→Crawl4AI(e1a4cec)、OpenCode Zen 供应商移除(f3dac24)、wechat_decrypt_source.py 删除等变更带核对入册 |
+| 2026-08-28 (图谱重索引) | (working tree) | **§1.2 图数据库重索引消案**：codebase-memory 图谱工具 修复安装（pip，v0.10.8）→ 全量重索引 → **7706 节点 / 32367 边**（schema v2，commit c32af54，artifact.json 回写验证）；search_graph/trace_path/query_graph CLI 查询验证通过；同批感染源修正：README/CODEMAPS×3/DECISION_LEDGER/VISION 旧数字清零，DOCUMENTATION_GOVERNANCE_REPORT.md 删除（污染口径，见 DELETION_LOG） |
 
 *此图谱将持续更新以反映项目变化。下一次刷新应重跑 codebase-memory 图谱工具 索引以更新节点/边数据。*
 

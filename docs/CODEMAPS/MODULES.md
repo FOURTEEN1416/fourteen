@@ -76,10 +76,10 @@
 
 **结构:**
 - 根目录: `app_factory.py`（应用工厂）, `run_api.py`（启动入口）, `main_routes.py`（模型/常量/Helper）, `health_routes.py`（健康检查）, `auth.py`/`auth_jwt.py`（认证）, `database.py`（SQLAlchemy）, `deps.py`（依赖注入）, `session_manager.py`, `websocket_server.py`, `qrcode_store.py`, `path_security.py`, `runtime_config.py`
-- `routers/` 22 个路由模块: `admin_routes`, `auth_routes`, `character_routes`, `chat_routes`, `clone_routes`, `demo_routes`, `emotion_routes`, `invite_routes`, `knowledge_routes`, `llm_providers_routes`, `memory_routes`, `mimo_voice_routes`, `misc_routes`, `persona_card_routes`, `personality_routes`, `safety_routes`, `storyline_routes`, `tools_routes`, `training_routes`, `users_routes`, `voice_routes`, `wechat_routes`
+- `routers/` 21 个路由模块（2026-08-28：demo_routes 已删除，原 22）: `admin_routes`, `auth_routes`, `character_routes`, `chat_routes`, `clone_routes`, `emotion_routes`, `invite_routes`, `knowledge_routes`, `llm_providers_routes`, `memory_routes`, `mimo_voice_routes`, `misc_routes`, `persona_card_routes`, `personality_routes`, `safety_routes`, `storyline_routes`, `tools_routes`, `training_routes`, `users_routes`, `voice_routes`, `wechat_routes`
 - `state/` 3 个状态模块: `safety_log`, `tool_history`, `training_state`
 
-**实际挂载:** 17 个 `include_router` 调用,共 204 端点（2026-07-30 `create_api_app` 实扫）
+**实际挂载:** 16 个 `include_router` 调用,共 199 端点（2026-08-28 `create_api_app` 实扫；07-30 基线为 17/204，demo 删除后 -1 路由 -4 端点）
 **依赖:** shisi, security, llm_provider, database
 
 ---

@@ -1,5 +1,175 @@
 ﻿# Code Deletion Log
 
+## [2026-08-28] 文档感染源清理（治理会话第二阶段，用户授权"清理删除"）
+
+### 决策依据
+- 用户 2026-08-28 指示：文档治理须"清除感染源，修正相关说法……进行相关文档的清理删除"
+- `docs/DOCUMENTATION_GOVERNANCE_REPORT.md` 为 08-26 一次性活动报告（derived），含无法修复的污染口径："19598 个 Python 文件"（.venv 污染）、"前端测试 1034 passed"（实为 Python 数错标）、"SP-3 Demo 删除驳回"（已被 08-28 D1 裁决推翻）；有效信息（阅读报告清单）已收编 `docs/README.md` §五
+
+### Files Deleted
+- `docs/DOCUMENTATION_GOVERNANCE_REPORT.md`（144 行）
+
+### Files Modified（同批感染源修正，非删除）
+- `README.md`（根）：徽章与结构树 1104→1089、19 页→15 页、demo 子路由行移除、14 API 模块→12、routers 13→20、pytest 注释 1025→1030
+- `docs/DECISION_LEDGER.md`：§四"1104 基线不可回退"→"1089（v1.3 重测，旧基线随删除自然缩减）"
+- `docs/VISION.md`：§B 候选池 SP-3 标记"已执行（D1）"移出冻结池；愿景板目标用户（广泛用户）与商业目标（完全免费开源 MIT）按用户口述落笔
+- `docs/CODEMAPS/BACKEND.md`：漂移声明指向 199 端点；demo_routes 行移除
+- `docs/CODEMAPS/FRONTEND.md`：demo.ts/DemoPage/UsersPage/UserWorkspace/BindingDetailPage/api users.ts 条目移除，pages 19→15
+- `docs/CODEMAPS/MODULES.md`：路由模块 22→21（demo 移除）、挂载 17/204→16/199
+- `docs/HANDOFF_REPORT.md`：三处对已删报告的引用改为"已删除+收编"批注
+
+### 保留说明
+- 16 份 READING_REPORT_*.md 保留为 derived（历史通读产物，docs/README.md §五 已标注"仅供追溯"，其历史数字随日期快照有效）；HANDOFF_REPORT 内 1025/1033/1035 等中间数字同理保留（头部已有 08-28 接管批注）
+
+---
+
+## [2026-08-28] Demo 后端全删（D1 裁决：全删，后续改为产品介绍页）
+
+### 决策依据
+- 用户 2026-08-28 治理会话裁决 D1「全删」：推翻 08-26「SP-3 立论崩塌撤回」结论，与 08-27 前端下线（见上条）合并完成 Demo 全链路移除
+- 后端 demo_routes.py 原「保留供未来复用」终止——产品介绍页为静态展示，不走对话/记忆链路，demo 后端无复用价值
+
+### Files Deleted
+- `api/routers/demo_routes.py`（4 端点：POST /api/demo/chat/stream、GET /api/demo/memory/recall、GET /api/demo/memory/visualization、POST /api/demo/exit）
+
+### Files Modified
+- `api/app_factory.py`：
+  - 删除 `from api.routers.demo_routes import router as demo_router`（原 line 26）
+  - 删除 `app.include_router(demo_router)` 挂载行（原 line 239）
+  - 头部注释更新：17 include_router/204 端点 → 16 include_router/199 端点（2026-08-28 实扫）
+- `tests/test_production_hardening.py`：parametrize 移除 `/api/demo/memory/recall`、`/api/demo/memory/visualization` 两行（保留 /api/mimo/status 鉴权用例）
+- `tests/test_connection_lifecycle.py`：删除 `test_sse_demo_stream_closes_generator_on_disconnect`（与上方 `/api/chat/stream` 同链路用例重复覆盖）
+
+### Impact
+- API 端点：204 → **199**（create_api_app 实扫）
+- include_router：17 → 16
+- DECISION_LEDGER SP-3 翻案登记（附4）；FEATURE_MAP F-02 作废；CODE_GRAPH v3.3.0 同步
+
+### Verification
+- `grep -rn "demo_routes\|from api.routers.demo" api/ tests/ main.py` → 0 命中
+- `python -m pytest -q` → **1030 passed + 1 skipped**（2026-08-28 实跑，107.26s）
+- `npx vitest run` → **59 passed / 11 files**（2026-08-28 实跑）
+
+### 后续计划
+- 产品介绍页（原 SP-3b 设想）：公开路由静态页，展示产品定位/玩法/邀请入口，不依赖对话后端——新立项，未启动
+
+---
+
+## [2026-08-27] Demo 页面下线（SP-3 裁决：直接删除，系统门面后续改造为产品介绍页）
+
+### 决策依据
+- 用户 2026-08-27 明确裁决「直接删除 Demo 页面，系统门面后续做成产品介绍页面」
+- SP-3（Demo 删除）属于产品功能去重，非核心价值路径
+- `docs/visual-map/index.html` F-02 已确认 Demo 为独立公开页，无内部依赖
+
+### Files Deleted
+- `frontend/src/pages/DemoPage.tsx`（~250 行 Demo 体验页）
+- `frontend/src/api/demo.ts`（~85 行 demo 4 个端点封装：chat/stream、memory/recall、memory/visualization、exit）
+
+### Files Modified
+- `frontend/src/App.tsx`：
+  - 删除 `const DemoPage = lazy(() => import('./pages/DemoPage'))`（line 28）
+  - 删除 `<Route path="/demo" ...>` 路由（line 116）
+  - 更新公开路由注释：「公开路由：登录页 + Demo 体验」→「公开路由：登录页」
+- `frontend/src/pages/LoginPage.tsx`：
+  - 删除"Demo 入口"按钮（line 219-228，连同其 `navigate('/demo')` 调用）
+  - 登录页底部无外部跳转入口
+- `docs/visual-map/index.html` 后续：F-02 卡片应标记为已废弃（视觉地图静态产物，不在本次范围内）
+
+### Impact
+- 前端净删除：~335 行
+- 路由数：原 19 个公开+受保护路由 → 18 个（删除 /demo）
+- API 端点：原 5 个 demo 端点（`/api/demo/*`）→ 0 个；后端对应实现（`api/routers/demo_routes.py`）未触碰（保留供未来复用，无需迁移）
+- 安全性：消除未鉴权公开访问入口（虽然 Demo 体验页本身不暴露敏感数据）
+
+### Verification
+- `grep -r "DemoPage\|/demo\|api/demo" frontend/src/` → 0 命中
+- `npm run build` / `tsc --noEmit` 待跑（前端测试不在 Python pytest 范围）
+- 后端测试基线 1033 passed, 1 skipped 无变化
+
+### 后续计划
+- 「系统门面改造为产品介绍页」作为新独立任务（暂命名 SP-3b）
+- 目标：在原 /demo 路径（公开页）上做产品介绍/导航/快速演示
+- 入口可能从 LoginPage 底部或 Sidebar 顶部提供
+
+---
+
+## [2026-08-27] 微信本地解密项目剥离（用户 08-27 批准「先把这个剥离出来」）
+
+### 根因
+微信克隆的解密程序（依赖微信进程 + Windows API）必须运行在用户本机电脑，放到云服务器上是逻辑硬伤。
+虽然 `api/routers/clone_routes.py` 已在 7-27 重构时仅保留 `/api/clone/upload`，但 `clone_training/`、
+`weclone_adapter/`、`voice/clone_data_manager.py` 仍保留了"调用本地解密"的旁路（wcf/wechatmsg/decrypt）。
+本轮彻底剥离，确保云端 100% 不可能触发任何本地解密路径。
+
+### Files Deleted
+- `clone_training/wechat_decrypt_source.py`（300+ 行，`DecryptSource` 类 + `DecryptSourceError` + `wechat-decrypt` 适配层）
+
+### Files Rewritten (剥离死分支)
+
+#### `clone_training/data_extractor.py` (509 → 252 行)
+**删除方法**：
+- `extract_from_wcf`（来源1：WeChatFerry RPC，需本机微信进程）— 70 行
+- `extract_from_wechatmsg`（来源2：WeChatMsg SQLite，已解密数据库）— 100+ 行
+- `extract_from_decrypt`（来源4：wechat-decrypt 4.x 解密，调用已删除的 `DecryptSource`）— 40+ 行
+- `_process_wcf_messages`（WCF 辅助）
+- `_build_conversations_from_rows`（SQLite 辅助）
+- `_date_to_timestamp`（辅助）— **注**：仍需保留在 `extract_from_txt` 中？检查后实际未删除
+
+**保留方法**：
+- `extract_from_export`（来源3：txt/csv/json 文件导入）— 云端可用
+- `_extract_from_json / _csv / _txt`
+- `_process_raw_messages / _is_system_message / _empty_result / save_to_json`
+
+#### `weclone_adapter/adapter.py` (206 → 230 行)
+**改动**：
+- `clone()` 的 `source` 默认值：`"wcf"` → `"auto"`
+- `_extract()` 移除 `wcf / wechatmsg / decrypt` 三个分支
+- 拒绝调用：source 不在 `("txt", "csv", "json", "auto")` 时 logger.error + 返回 `[]`
+- `health_check()` 增加 `wechat_local_decrypt_stripped: True` 与 `supported_sources: ["txt", "csv", "json", "auto"]`
+
+#### `voice/clone_data_manager.py` (378 → 354 行)
+**改动**：
+- 移除 `_get_contacts_from_decrypt` 方法（line 73-86，含 `from clone_training.wechat_decrypt_source import DecryptSource`）
+- 移除 `get_contacts` 中的"优先从解密数据库获取"逻辑
+- 移除 `import time`（仅在已删除的缓存逻辑中使用）
+- docstring 标注"剥离历史"
+
+#### `tests/test_request_context_isolation.py` (141 → 120 行)
+**删除测试**：
+- `test_clone_preview_uses_injected_local_extractor` — 该函数已随 Option B 后端清理删除，测试现已是孤立代码
+
+#### `tests/test_api_routes.py`
+**测试断言更新**（不是删除，是更新数字）：
+- `(clone_routes, 9, "clone/*")` → `(clone_routes, 8, "clone/* (2026-08-27 剥离 /api/clone/preview 死路径)")`
+- `test_total_contribution_is_74` → `test_total_contribution_is_73`（73 = 11+11+9+7+9+6+12+8）
+
+### Files Intentionally NOT Touched
+- `wechat_direct/` 整个目录 — 这是微信消息收发通道（不是解密），保留
+- `wechat_direct/wechat_connector.py`（line 22 logger）— 消息通道
+- `main.py`（line 295 `from wechat_direct import WeChatConnector`）— 启动消息通道
+- `api/deps.py`、`api/run_api.py`、`api/routers/chat_routes.py`、`api/routers/misc_routes.py` — 全部是消息收发，与解密无关
+- `tests/test_wechat_connector.py` — 测试消息收发，不是解密
+
+### Impact
+- **代码精简**：约 -300 行（wechat_decrypt_source.py 整体 + data_extractor.py 减半 + adapter.py 微调）
+- **剥离原则**：100% 云端可用的克隆路径只支持文件导入（txt/csv/json/auto），不依赖本机微信进程
+- **安全性**：杜绝任何代码路径触发本机微信内存密钥提取
+- **向后兼容**：API `/api/clone/upload`（已存在）保持不变，仍是生产路径
+- **测试基线**：1033 passed, 1 skipped（无新增失败；2 个测试因 Option B 调整数字，已更新）
+
+### Verification
+- `python -c "from clone_training.data_extractor import DataExtractor; print([m for m in dir(DataExtractor()) if 'extract' in m])"` → `['extract_from_export']`
+- `python -m pytest tests/test_api_routes.py` → 15/15 passed
+- `python -m pytest tests/test_request_context_isolation.py` → 3/3 passed
+- `python -m pytest tests/` → **1033 passed, 1 skipped**（全量回归无失败）
+
+### 后续待办
+- `third_party/wechat-decrypt/` 目录已 .gitignore 忽略，无需操作
+- 旧数据集中标记 `source: "decrypt"` / `source: "wcf"` / `source: "wechatmsg"` 的条目仍存在（已 JSON 落盘），仅影响 `_detect_source` 返回值显示，不影响功能
+
+---
+
 ## [2026-08-27] 接管基线收尾 — clonePreview 死代码 + 幽灵层三页（SP-9 裁决：直接删除）
 
 ### Dead Exports Removed (Frontend)
