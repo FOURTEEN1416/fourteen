@@ -69,6 +69,7 @@
 | 08-28 | **愿景板定调：目标用户=广泛用户；商业目标=完全免费开源（MIT），不商业化** | 用户口述 | ✅ | 载入 VISION §〇；用户级 LLM Key 定位「自带 Key」非计费 |
 | 08-28 | **微信克隆收敛：本地提取 + 上传 JSON**。解密必须在用户登录微信的本地环境进行，服务器不经手微信数据、不做云端提取 | 用户裁决（确认删除 weclone_adapter/ 等 8 项） | ✅ 已执行 | 删 weclone_adapter 三件 + main.py --clone 管线 + /api/training/extract + 前端 trainingExtract；CreateRole 克隆 tab（教程+JSON 上传）为唯一入口；端点 199→198 |
 | 08-28 | **语音域 MiMo-only（裁决 A）**：删 4 provider+训练管线，fallback_local 改 Windows SAPI 兜底；放弃跨厂商容灾 | 用户裁决 | ✅ 已执行 | 端点 198→194；详见 DELETION_LOG [2026-08-28 MiMo-only] |
+| 08-28 | **SP-12 全面测试收官**：1015+1 pytest / 59 vitest / **E2E 5 冒烟全绿**（基建 scripts/e2e_setup.py + frontend/e2e/smoke.spec.ts，独立种子库零污染）/ 对齐复跑缺失=0；确立四项回归门 | 用户点名先执行 | ✅ 已执行 | 报告 docs/reports/2026-08-28_SP12全面测试收官报告.md |
 | 08-28 | **GAP-1 裁决：只做个人微信**，企业微信等其他通道不需要（Non-Goal 入 VISION 不做清单口径） | 用户裁决 | ✅ | FUNCTION_INVENTORY GAP 表结案 |
 | 08-28 | **SP-5 执行**（用户批准）：P0 摘要化管线 deriveCardSummary + 标签语义色 anchorTone；P1 卡片均衡+搜索+WeChat 空态；P2 stagger CSS 动效 | 用户裁决 | ✅ 已执行 | tsc 0 错/vitest 59 绿；SP-5 移出冻结池 |
 | 08-28 | **SP-10 附产：GAP-3 结案**（消息统计占位随 MESSAGE-4 真数据修复解决） | 功能清单 | ✅ | — |

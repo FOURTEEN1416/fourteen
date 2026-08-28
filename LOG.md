@@ -25,6 +25,14 @@
 
 ---
 
+## 2026-08-28（十一）— SP-12 全面测试收官
+
+四项回归门全绿：pytest 1015+1 / vitest 59 / **Playwright E2E 5 冒烟全绿**（10.7s：登录 UI→/wechat、角色网格、LLM 设置集成、聊天主链路 LLM 真实调用、健康探针）/ 对齐复跑缺失=0（200 端点消费 121）。E2E 基建：scripts/e2e_setup.py（独立种子库零污染）+ frontend/e2e/smoke.spec.ts（可复用，CI 可挂）。修正：登录按钮文案实为「登 录」。报告 docs/reports/2026-08-28_SP12全面测试收官报告.md。队列剩 SP-11。
+
+---
+
+---
+
 ## 2026-08-28（十）— 候选 A-D 全量落地（用户批复"四个都需要"）
 
 **A ASR 语音转文字**：ASRHandler 补实（OpenAI 兼容 /audio/transcriptions，voice.asr 配置驱动默认关）+ AudioFormatConverter.to_wav + 微信 type34 语音接线（此前语音消息直接丢弃）。

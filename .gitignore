@@ -123,3 +123,4 @@ node_modules/
 # MCP 索引产物（自动生成，本地使用）
 .codebase-memory/
 memory-config.json
+data/e2e_users.db
