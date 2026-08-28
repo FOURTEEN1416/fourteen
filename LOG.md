@@ -25,6 +25,25 @@
 
 ---
 
+## 2026-08-28（三）— 微信克隆收敛 + 用户删除确认提交
+
+**任务**：用户确认 8 项删除为其本人操作并指示提交；裁决微信克隆方向——解密必须在用户登录微信的本地环境进行，服务器只收 JSON。
+
+**动作与原因**：
+1. 克隆链路调查：CreateRole 克隆 tab 已是「三工具教程→本地运行说明→JSON 上传」完整形态（前端零改动）；死代码为服务端提取路径。
+2. 摘除服务端提取管线：`main.py` run_clone_pipeline + --clone 三参数（574→494 行）；`training_routes.py` /api/training/extract（唯一 weclone API 依赖）；前端 `trainingExtract()` 死封装（零消费）。
+3. 用户删除补登记 + 提交：weclone_adapter/ 三件、start_*.cmd ×3、deploy_ai_girlfriend.bat/.ps1；同步 AGENTS §0 启动方式（python main.py / uvicorn / npm run dev；部署走 deploy/）、L9 教训标记失效。
+4. 真源同步：CODE_GRAPH（198 端点/main.py 494 行/§7 run_clone_pipeline 已删/§13 行）、FEATURE_MAP B-07 重写、DECISION_LEDGER 08-28 三行、VISION 198、HANDOFF 批注④、CODEMAPS/INDEX。
+5. 感染源治理口径（用户问询后确立）：**真源文档=物理修正（错误数字/失效陈述直接改删）；派生报告=备注+归档（历史快照仅供追溯）；既污染且不可修复=物理删除（如 DOCUMENTATION_GOVERNANCE_REPORT）**——与 docs/README.md 的 truth/derived/archive 生命周期一一对应。
+
+**修复事故**：main.py 批量替换曾留下孤儿 `return`（L361 IndentationError），py_compile 定位后修复，全量测试复绿。
+
+**验证**：`create_api_app` 实扫 **198 端点**；pytest **1030 passed + 1 skipped**；vitest **59 passed**；`grep weclone`（py/ts/tsx）全零。
+
+**未验证/待办**：① 产品介绍页立项未启动；② 提交未 push。
+
+---
+
 ## 2026-08-28（续）— 图谱工具修复 + 感染源清零 + 分组提交
 
 **任务**：用户指示①修复 codebase-memory 图谱工具 工具并重索引；②核查文档治理完整性、清除感染源；③愿景板按口述落笔；④按文件分组 git 提交。
