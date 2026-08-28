@@ -1,0 +1,62 @@
+docs\adr\ADR-0001-采用架构决策记录的决定.md | 25行 | 2026-06-01 | # ADR-0001：关于采用架构决策记录的决定
+docs\adr\ADR-0002-统一API全集.md | 37行 | 2026-06-01 | # ADR-0002：采用统一 API 全集
+docs\adr\ADR-0003-纯Tailwind样式体系.md | 21行 | 2026-06-01 | # ADR-0003：采用纯 Tailwind CSS 样式体系
+docs\adr\ADR-0004-LightOnly主题.md | 19行 | 2026-06-01 | # ADR-0004：仅支持 Light 主题
+docs\adr\ADR-0005-客户端按域拆分.md | 27行 | 2026-06-01 | # ADR-0005：前端 API 客户端按业务域拆分
+docs\adr\ADR-0006-状态管理边界约定.md | 29行 | 2026-06-01 | # ADR-0006：UI 状态与 Server 数据状态边界约定
+docs\adr\ADR-0011-unified-design-framework.md | 34行 | 2026-08-26 | # ADR-0011: 统一设计框架：侧边栏+工作区
+docs\adr\ADR-0012-design-drafts-cleanup.md | 19行 | 2026-06-01 | # ADR-0012: 前端设计稿清除，代码即标准
+docs\adr\ADR-0013-character-builder-shared-state.md | 28行 | 2026-08-26 | # ADR-0013: Character Builder 共享状态
+docs\adr\ADR-0014-用户认证与权限体系.md | 98行 | 2026-06-01 | # ADR-0014：用户认证与权限体系
+docs\architecture\design-principles.md | 38行 | 2026-06-01 | # 设计原则（≤7 条）
+docs\architecture\knowledge-graph.md | 218行 | 2026-08-26 | # Project Knowledge Graph
+docs\CODEMAPS\ARCHITECTURE.md | 210行 | 2026-08-01 | # 架构地图
+docs\CODEMAPS\BACKEND.md | 223行 | 2026-08-28 | # 后端地图
+docs\CODEMAPS\DATABASE.md | 163行 | 2026-08-01 | # 数据库地图
+docs\CODEMAPS\FRONTEND.md | 202行 | 2026-08-28 | # 前端地图
+docs\CODEMAPS\INDEX.md | 112行 | 2026-08-28 | # 代码地图索引
+docs\CODEMAPS\MODULES.md | 327行 | 2026-08-28 | # 后端业务模块地图
+docs\DECISION_LEDGER.md | 144行 | 2026-08-28 | # 决策账本 — Decision Ledger
+docs\DELETION_LOG.md | 407行 | 2026-08-28 | ﻿# Code Deletion Log
+docs\designs\MiMo_TTS_集成方案.md | 301行 | 2026-08-26 | # MiMo TTS 集成方案
+docs\FUNCTION_INVENTORY.md | 146行 | 2026-08-28 | # FUNCTION INVENTORY — 功能清单（代码实况 × 历史意图）
+docs\guides\微信克隆-智能体任务书.md | 88行 | 2026-08-28 | # 任务书：导出微信聊天记录 JSON（交给 AI 智能体执行）
+docs\HANDOFF_REPORT.md | 350行 | 2026-08-28 | # 项目交接报告
+docs\history\2026-05-19-PROJECT_OVERVIEW.md | 728行 | 2026-08-24 | # "十四" — AI 虚拟伴侣项目全面文档
+docs\history\2026-05-24-multi-user-design.md | 65行 | 2026-08-24 | # 多微信用户模式设计方案
+docs\history\2026-05-29-design-vs-current-gap.md | 177行 | 2026-08-24 | # 设计稿 vs 当前前端 · 布局差距分析
+docs\history\2026-06-04-HANDOFF.md | 361行 | 2026-08-24 | ﻿# HANDOFF — 工作交接
+docs\history\INDEX.md | 112行 | 2026-08-27 | # 产品意图演进索引 — 真值裁决表
+docs\inventory\file-inventory.md | 432行 | 2026-08-26 | # Project File Inventory
+docs\P1_BACKLOG.md | 40行 | 2026-08-24 | # P1 Backlog - 唯一的你
+docs\plans\极致拟人化升级方案_最终落地方案.md | 1298行 | 2026-08-26 | # "唯一的你" 极致拟人化升级 — 最终落地方案
+docs\READING_REPORT_api.md | 119行 | 2026-08-27 | # 📚 API 模块阅读报告
+docs\READING_REPORT_character_card.md | 126行 | 2026-08-27 | # 📚 Character Card 模块阅读报告
+docs\READING_REPORT_llm_provider.md | 98行 | 2026-08-27 | # 📚 LLM Provider 模块阅读报告
+docs\READING_REPORT_memory_context_multimodal.md | 75行 | 2026-08-27 | # 📚 Memory Ext + Context + Multimodal 模块阅读报告
+docs\READING_REPORT_my_character.md | 105行 | 2026-08-27 | # 📚 my_character 模块阅读报告
+docs\READING_REPORT_orchestrator.md | 127行 | 2026-08-27 | # 📚 Orchestrator 模块阅读报告
+docs\READING_REPORT_persona_extractor.md | 99行 | 2026-08-27 | # 📚 Persona Extractor 模块阅读报告
+docs\READING_REPORT_proactive_plugins.md | 86行 | 2026-08-27 | # 📚 Proactive + Plugins 模块阅读报告
+docs\READING_REPORT_security_observability.md | 96行 | 2026-08-27 | # 📚 Security + Observability 模块阅读报告
+docs\READING_REPORT_shisi.md | 178行 | 2026-08-27 | # 📚 Shisi（十四）DDD 核心模块阅读报告
+docs\READING_REPORT_tests_root.md | 87行 | 2026-08-27 | # 📚 Tests + 根入口 模块阅读报告
+docs\READING_REPORT_tools_utils_scripts_cache.md | 112行 | 2026-08-27 | # 📚 Tools + Utils + Scripts + Deploy + Cache 模块阅读报告
+docs\READING_REPORT_voice.md | 148行 | 2026-08-27 | # 📚 Voice (TTS) 模块阅读报告
+docs\READING_REPORT_wechat_clone.md | 86行 | 2026-08-27 | # 📚 WeChat Direct + WeClone Adapter + Clone Training 模块阅读报告
+docs\README.md | 64行 | 2026-08-28 | # docs/ 文档体系唯一入口
+docs\reports\2026-08-28_SP5塑料感代码级诊断.md | 54行 | 2026-08-28 | # SP-5 塑料感代码级诊断报告
+docs\reports\2026-08-28_前后端对齐验证.md | 209行 | 2026-08-28 | # 前后端对齐验证报告
+docs\reports\2026-08-28_文档与代码图谱治理方法论调研.md | 149行 | 2026-08-28 | # 文档与代码图谱治理方法论调研报告
+docs\reports\AI拟人化技术研究报告.md | 372行 | 2026-08-26 | # AI 拟人化技术研究报告
+docs\reports\AI极致拟人化技术深度研究报告.md | 474行 | 2026-08-26 | # AI极致拟人化技术深度研究报告
+docs\reports\极致拟人化升级方案_评审优化报告.md | 493行 | 2026-08-26 | # "唯一的你" 极致拟人化升级方案 — 代码级评审优化报告
+docs\superpowers\plans\2026-05-27-frontend-rewrite.md | 197行 | 2026-08-26 | # 前端全量翻新实施计划
+docs\superpowers\specs\2026-05-27-immersive-glass-design.md | 430行 | 2026-08-26 | # 唯一的你 沉浸式玻璃态视觉设计 v1.0
+docs\superpowers\specs\2026-06-29-create-role-redesign-design.md | 119行 | 2026-08-26 | # CreateRole 页面重设计 — 方案 A
+docs\superpowers\specs\frontend-design-framework-v1.md | 775行 | 2026-08-26 | # 唯一的你 前端设计框架 v1.0
+docs\VISION.md | 133行 | 2026-08-28 | # VISION — 「唯一的你」终极状态宣言
+AGENTS.md | 201行 | 2026-08-28 | # AGENTS.md — 唯一的你（ai-girlfriend）项目 Agent 宪法
+CODE_GRAPH.md | 698行 | 2026-08-28 | # 代码图谱 — unique-you (唯一的你) v3.4.0
+LOG.md | 126行 | 2026-08-28 | # LOG — 项目操作日志（L2 留痕层）
+README.md | 167行 | 2026-08-28 | # 唯一的你——十四

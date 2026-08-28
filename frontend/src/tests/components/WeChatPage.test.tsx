@@ -59,7 +59,7 @@ describe('WeChatPage', () => {
   it('renders header "微信接入" and "扫码连接" button', () => {
     renderPage()
     expect(screen.getByText('微信接入')).toBeDefined()
-    const connectBtn = screen.getByRole('button', { name: /扫码连接/ })
+    const connectBtn = screen.getByRole('button', { name: '扫码连接' })
     expect(connectBtn).toBeDefined()
   })
 

@@ -69,6 +69,8 @@
 | 08-28 | **愿景板定调：目标用户=广泛用户；商业目标=完全免费开源（MIT），不商业化** | 用户口述 | ✅ | 载入 VISION §〇；用户级 LLM Key 定位「自带 Key」非计费 |
 | 08-28 | **微信克隆收敛：本地提取 + 上传 JSON**。解密必须在用户登录微信的本地环境进行，服务器不经手微信数据、不做云端提取 | 用户裁决（确认删除 weclone_adapter/ 等 8 项） | ✅ 已执行 | 删 weclone_adapter 三件 + main.py --clone 管线 + /api/training/extract + 前端 trainingExtract；CreateRole 克隆 tab（教程+JSON 上传）为唯一入口；端点 199→198 |
 | 08-28 | **语音域 MiMo-only（裁决 A）**：删 4 provider+训练管线，fallback_local 改 Windows SAPI 兜底；放弃跨厂商容灾 | 用户裁决 | ✅ 已执行 | 端点 198→194；详见 DELETION_LOG [2026-08-28 MiMo-only] |
+| 08-28 | **GAP-1 裁决：只做个人微信**，企业微信等其他通道不需要（Non-Goal 入 VISION 不做清单口径） | 用户裁决 | ✅ | FUNCTION_INVENTORY GAP 表结案 |
+| 08-28 | **SP-5 执行**（用户批准）：P0 摘要化管线 deriveCardSummary + 标签语义色 anchorTone；P1 卡片均衡+搜索+WeChat 空态；P2 stagger CSS 动效 | 用户裁决 | ✅ 已执行 | tsc 0 错/vitest 59 绿；SP-5 移出冻结池 |
 | 08-28 | **删除启动/部署脚本**：start_all/start_backend/start_frontend.cmd + deploy_ai_girlfriend.bat/.ps1（部署统一走 `deploy/`，启动走 python main.py / uvicorn / npm run dev） | 用户删除+会话确认 | ✅ 已执行 | AGENTS §0 启动方式已同步；L9 教训标记失效 |
 
 ---

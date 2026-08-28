@@ -126,7 +126,7 @@ export default function Sidebar() {
                     <>
                       <span>{label}</span>
                       {badge && (
-                        <span className="ml-auto text-[9px] rounded px-1 tag-pink">
+                        <span className="ml-auto text-[9px] rounded px-1 tag-yellow">
                           {badge}
                         </span>
                       )}

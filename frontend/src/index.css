@@ -139,6 +139,15 @@ body {
 }
 
 /* ═══ Animations ═══ */
+/* ═══ Stagger 入场（SP-5 P2：CSS 级联，无重库；reduced-motion 降级） ═══ */
+.stagger-item {
+  opacity: 0;
+  animation: fade-in 0.4s ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stagger-item { opacity: 1; animation: none; }
+}
+
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -251,10 +260,10 @@ body {
 }
 .nav-item.active::before { transform: scaleY(1); }
 
-/* ═══ Tags ═══ */
-.tag-pink { background: rgba(248, 180, 217, 0.2); color: var(--color-macaron-yellow-deep); }
-.tag-blue { background: rgba(180, 217, 248, 0.2); color: var(--color-macaron-blue-deep); }
-.tag-green { background: rgba(180, 248, 217, 0.2); color: var(--color-macaron-mint-deep); }
+/* ═══ Tags（语义配色：关系/情感=暖黄，身份/设定=海盐蓝，风格/行为=薄荷青，见 utils/character.ts anchorTone） ═══ */
+.tag-yellow { background: rgba(253, 230, 138, 0.25); color: var(--color-macaron-yellow-deep); }
+.tag-blue { background: rgba(186, 230, 253, 0.25); color: var(--color-macaron-blue-deep); }
+.tag-mint { background: rgba(153, 246, 228, 0.25); color: var(--color-macaron-mint-deep); }
 
 /* ═══ Section Bar ═══ */
 .section-bar {

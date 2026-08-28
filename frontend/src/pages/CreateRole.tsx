@@ -16,6 +16,7 @@ import {
   FileUp, Check, Users, Eye, Copy, Bot,
 } from 'lucide-react'
 import { CLONE_AGENT_GUIDE } from '../constants/cloneAgentGuide'
+import { anchorTone } from '../utils/character'
 
 type CreateMethod = 'ai-chat' | 'wechat-clone' | 'file-import'
 interface ChatMessage { role: 'user' | 'assistant'; content: string }
@@ -512,10 +513,9 @@ function PersonaPreviewCard() {
         <div>
           <div className="text-xs text-text-muted mb-2">核心锚点</div>
           <div className="flex flex-wrap gap-1.5">
-            {anchors.slice(0, 8).map((a, i) => {
-              const colorClass = i % 3 === 0 ? 'tag-pink' : i % 3 === 1 ? 'tag-blue' : 'tag-green'
-              return <span key={a} className={`${colorClass} px-2 py-1 rounded-md text-[10px] font-medium`}>{a}</span>
-            })}
+            {anchors.slice(0, 8).map((a) => (
+              <span key={a} className={`tag-${anchorTone(a)} px-2 py-1 rounded-md text-[10px] font-medium`}>{a}</span>
+            ))}
           </div>
         </div>
       )}

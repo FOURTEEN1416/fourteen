@@ -47,13 +47,13 @@
 
 | 位置 | 内容 | 说明 |
 |------|------|------|
-| READING_REPORT_*.md（16 份，docs 根） | 08-26 全库穷举通读的模块摘要 | 结论已沉淀进 FUNCTION_INVENTORY/CODE_GRAPH |
-| [reports/](reports/) | 调研/评审报告（含 2026-08-28 治理方法论调研——本次治理的依据） | 产出已/将收编进真源 |
+| [reports/](reports/) | 调研/评审报告（治理调研/SP-5 诊断/对齐验证/拟人化研究四件套——均有状态卡标注） | derived |
 | [P1_BACKLOG.md](P1_BACKLOG.md) | P1 待办（07 月重写版） | 部分 SP-* 与 DECISION_LEDGER 挂起池重叠，以 DECISION_LEDGER 为准 |
 | ~~FEATURE_MAP.md~~ | 已删除（08-28 用户裁决：严重错误） | 由 FUNCTION_INVENTORY.md 替代 |
+| ~~READING_REPORT_*.md（16 份）~~ | 已删除（08-28 穷举清理：过期一次性快照，结论已收编 FUNCTION_INVENTORY/CODE_GRAPH） | — |
+| ~~inventory/file-inventory.md~~ | 已删除（08-28：文件清单快照口径过时，可再生成） | — |
 | [inventory/file-inventory.md](inventory/file-inventory.md) | 文件清单快照 | 口径见其头部声明 |
-| [superpowers/](superpowers/) | plans/specs 工作产物 | 历史会话产物 |
-| [audits/](audits/) | 审计产物 | — |
+| [superpowers/](superpowers/) | 4 份设计/计划工作产物（glass 视觉 spec=现行视觉源头、framework-v1=SP-1 方案输入、create-role 方案A=SP-2 决策链、frontend-rewrite=已执行历史计划） | derived（被 DECISION_LEDGER 引用） |
 | [visual-map/](visual-map/) | 前端页面实拍图册（index.html 本地打开） | 重拍：`frontend/visual-tour.mjs` |
 
 ## 六、新文档准入规则
