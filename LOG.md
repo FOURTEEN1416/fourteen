@@ -182,3 +182,18 @@
 **验证**：pytest 全量 969 passed + 6 skipped（0 失败）；vitest 全量 66/66（59 基线+7 新增）；tsc --noEmit 0 错。worktree 与主检出收集数差 56 已查明：config/characters/（gitignored 角色卡素材）不在 Junction 共享范围，test_persona_injection 参数化空回退 [NOTSET] 跳过，与 W2 无关、两环境均 0 失败。
 
 **未验证/待办**：① 待协调者主检出四项回归门收编；② 提交未 push；③ 邀请注册的 UI 侧同意流与普通登录共用 ConsentGate，未见差异处理需求。
+
+## 2026-08-30 — W3-INTRO SP-11 产品介绍页（窗口 wt/w3-intro）
+
+**任务**：W3 任务包五交付物：① IntroPage.tsx（定位/能力卡/邀请入口/MIT 标识）；② 现有设计系统样式+真实文案；③ App.tsx /intro 公开路由 + / 重定向调整；④ LoginPage「了解产品」链接；⑤ 渲染冒烟测试。
+
+**动作与原因**：
+1. 新增 frontend/src/pages/IntroPage.tsx：一句话定位与品牌区取材 docs/VISION.md（「微信扫码即用的多用户 LLM 情感陪伴系统」+ PVB 商业目标「完全免费开源 MIT」）；四能力卡（微信陪伴/长期记忆/主动搭话/语音克隆）与更多能力 chips 取材 docs/FUNCTION_INVENTORY.md 实况条目；邀请码注册入口（/login，注册页勾选「我有邀请码」流程如实描述）；MIT 区含 GitHub 仓库外链。样式全走现有体系：三色 @theme token + glass-card/glass-card-hover/tag-*/btn-macaron/stagger-item + LightOnly，零新依赖（图标复用 lucide-react）。
+2. App.tsx：IntroPage lazy 分包；新增 RootRedirect 组件（useAuthStore selector 判断）——已登录 / 仍跳 /wechat（保持原跳转，不破坏 AuthInit/AuthGuard 链路），未登录 / 改跳 /intro（新门面，接替已删 Demo 页）。/ 路由移出 ProtectedLayout 成公开路由。
+3. LoginPage 底部新增「了解产品 →」链接（/intro）。
+4. 测试：frontend/src/tests/components/IntroPage.test.tsx 4 例（定位语/四卡/邀请链接 href/MIT+GitHub href）+ LoginPage.test.tsx 用例 10（了解产品链接 href）。
+
+**验证**：npx tsc --noEmit 0 错；npx vitest run 71/71 全绿（基线 66+新增 5，13 文件）；npm run build 通过且 IntroPage 独立 chunk（IntroPage-*.js）；eslint 5 个改动文件 0 错。另用 vite preview + Playwright 实测：/ 未登录→/intro 分流正确、/login 链接渲染、能力卡 tag 语义正确（修复过一版：语音克隆卡 tag 误显示「记忆」，已改为每卡自带 tag 文案）。
+
+**未验证/待办**：① 待协调者主检出回归门收编（E2E 冒烟 5 条不依赖 / 行为，已核对无冲突）；② 提交未 push；③ /intro 尚未进 Breadcrumb/侧边栏（公开页无导航体系，当前仅 /login 入口，符合任务包边界）。
+

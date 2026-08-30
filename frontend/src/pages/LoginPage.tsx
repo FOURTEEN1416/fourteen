@@ -5,7 +5,7 @@
  * 认证成功后自动跳转到 /wechat。
  */
 import { useState, type FormEvent } from 'react'
-import { useNavigate, useLocation, Navigate } from 'react-router-dom'
+import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
 type Mode = 'login' | 'register'
@@ -216,6 +216,13 @@ export default function LoginPage() {
             )}
           </div>
         </form>
+
+        {/* 了解产品（SP-11 公开介绍页入口） */}
+        <div className="text-center mt-5">
+          <Link to="/intro" className="text-xs text-gray-400 hover:text-macaron-blue-deep transition-colors">
+            了解产品 →
+          </Link>
+        </div>
       </div>
     </div>
   )

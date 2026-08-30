@@ -21,6 +21,7 @@ import { useAuthStore } from './store/authStore'
 import { refreshToken } from './api/auth'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
+const IntroPage = lazy(() => import('./pages/IntroPage'))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const WeChatPage = lazy(() => import('./pages/WeChatPage'))
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
@@ -50,6 +51,12 @@ function PageLoadingSkeleton() {
 function StorylinePage() {
   const { roleId } = useParams<{ roleId: string }>()
   return <StorylineEditor characterId={roleId!} />
+}
+
+/** 根路径重定向：已登录 → /wechat（保持原跳转），未登录 → /intro（公开门面页，SP-11） */
+function RootRedirect() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  return <Navigate to={isAuthenticated ? '/wechat' : '/intro'} replace />
 }
 
 function AnimatedSuspense({ children }: { children: React.ReactNode }) {
@@ -112,13 +119,13 @@ export default function App() {
     <AuthInit>
       <ConsentGate />
       <Routes>
-        {/* ─── 公开路由：登录页 ─── */}
+        {/* ─── 公开路由：产品介绍 + 登录页 + 根路径分流 ─── */}
+        <Route path="/intro" element={<Suspense fallback={<PageLoadingSkeleton />}><IntroPage /></Suspense>} />
         <Route path="/login" element={<Suspense fallback={<PageLoadingSkeleton />}><LoginPage /></Suspense>} />
+        <Route path="/" element={<RootRedirect />} />
 
         {/* ─── 受保护路由：管理控制台 ─── */}
         <Route element={<ProtectedLayout />}>
-          <Route path="/" element={<Navigate to="/wechat" replace />} />
-
           {/* 连接 */}
           <Route path="/wechat" element={<AnimatedSuspense><WeChatPage /></AnimatedSuspense>} />
 
