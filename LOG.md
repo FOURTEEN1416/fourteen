@@ -212,3 +212,17 @@
 **验证**：npx tsc --noEmit 0 错；npx vitest run 71/71（13 文件）；npm run build 通过；mobile.spec 4/4 三连绿；smoke.spec 5/5（桌面端无回归，lg 断点行为零改动）。测试环境：5199 为主检出旧代码 vite，自起本 worktree vite 5299 + BASE_URL 覆盖跑 E2E；8000 复用协调方 E2E 后端；测试 vite 已停，未动他人进程。
 
 **未验证/待办**：① 待协调者主检出四项回归门收编；② 提交未 push；③ 真机 iOS safe-area 效果待人工目验（E2E 只能断言 CSS 类存在与无溢出，env() 数值需真机）。
+
+## 2026-08-30 19:05 w5-mobile（用户裁决修订：删底栏、侧栏回归左侧固定）
+
+**裁决**：用户审阅第一版后明确——"就要给我左侧固定，下部导航太丑"。推翻第一版"保留底栏+汉堡抽屉"方案，对齐任务包原方案断点（md 768）。
+
+**改动**（commit 162960d，6 文件 +17/-60）：
+1. 删除 MobileNav.tsx 底部 tab 导航（App.tsx 引用与 pb-24 底栏留白同步移除，main 统一 pt-5 pb-6）。
+2. Sidebar hidden lg:flex → hidden md:flex：≥768px 恢复左侧固定侧栏（含折叠能力），平板不再落底栏方案。
+3. 汉堡按钮/MobileDrawer lg:hidden → md:hidden：<768px 隐藏侧栏 + 顶栏汉堡开全量抽屉。
+4. mobile.spec：删底栏断言；新增平板 800px 用例（侧栏可见+汉堡隐藏），现 5 条。
+
+**验证**：tsc 0 错；vitest 71/71；build 通过；mobile spec 5/5；smoke 5/5（1280 桌面无回归）。5299 测试 vite 已停。
+
+**教训**：发现"现状与任务包矛盾"时选择了尊重现状（保留底栏），未向用户确认——现状是历史遗留不等于用户认可。下次同类分歧点应先问一句再动手（商讨协议排歧步骤）。
