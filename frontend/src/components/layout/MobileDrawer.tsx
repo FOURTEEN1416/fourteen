@@ -11,7 +11,7 @@ interface MobileDrawerProps {
   onClose: () => void
 }
 
-/** 移动端全量导航抽屉（<lg）：由 Breadcrumb 顶栏汉堡按钮唤起，入口与桌面 Sidebar 完全一致 */
+/** 移动端全量导航抽屉（<md）：由 Breadcrumb 顶栏汉堡按钮唤起，入口与桌面 Sidebar 完全一致 */
 export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
   const isConnected = useChatStore((s) => s.isConnected)
   const { user } = useAuthStore()
@@ -31,7 +31,7 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
 
   return (
     <div
-      className={`lg:hidden fixed inset-0 z-50 ${open ? '' : 'pointer-events-none'}`}
+      className={`md:hidden fixed inset-0 z-50 ${open ? '' : 'pointer-events-none'}`}
       aria-hidden={!open}
     >
       {/* 遮罩 */}

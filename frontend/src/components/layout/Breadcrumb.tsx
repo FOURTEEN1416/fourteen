@@ -90,7 +90,7 @@ export default function Breadcrumb() {
           onClick={() => setDrawerOpen(true)}
           aria-label="打开菜单"
           aria-expanded={drawerOpen}
-          className="lg:hidden -ml-2 mr-1 w-11 h-11 shrink-0 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-700 hover:bg-white/50 transition-colors"
+          className="md:hidden -ml-2 mr-1 w-11 h-11 shrink-0 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-700 hover:bg-white/50 transition-colors"
         >
           <Menu className="w-5 h-5" />
         </button>

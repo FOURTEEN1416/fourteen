@@ -17,7 +17,7 @@ export default function Sidebar() {
 
   return (
     <aside
-      className={`hidden lg:flex flex-col shrink-0 transition-all duration-300 border-r border-white/20
+      className={`hidden md:flex flex-col shrink-0 transition-all duration-300 border-r border-white/20
         bg-white/60 backdrop-blur-2xl ${collapsed ? 'w-14' : 'w-52'}`}
     >
       {/* Header */}

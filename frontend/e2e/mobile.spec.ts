@@ -1,7 +1,7 @@
 /**
  * W5-mobile E2E —— 375px 移动端视口冒烟。
  * 前置：与 smoke.spec.ts 相同（scripts/e2e_setup.py 种子库 + 后端 8000 + vite 5199）。
- * 覆盖：移动视口渲染无横向溢出 / 底栏导航可见+桌面侧栏隐藏 / 汉堡抽屉开合与导航跳转 / 设置页溢出检查。
+ * 覆盖：移动视口渲染无横向溢出 / 桌面侧栏隐藏+汉堡抽屉开合与导航跳转 / 设置页溢出检查。
  */
 import { test, expect, type Page } from '@playwright/test'
 
@@ -49,16 +49,12 @@ test.describe('W5-mobile 375px 冒烟', () => {
     await expectNoHorizontalOverflow(page)
   })
 
-  test('移动导航：桌面侧栏隐藏 + 底栏可见 + 汉堡抽屉开合跳转', async ({ page }) => {
+  test('移动导航：桌面侧栏隐藏 + 汉堡抽屉开合跳转', async ({ page }) => {
     await loginViaUI(page)
 
-    // 桌面 Sidebar（无 role 的 aside）在 375px 隐藏
+    // 桌面 Sidebar（无 role 的 aside）在 375px 隐藏（<md 抽屉化）
     const desktopSidebar = page.locator('aside:not([role="dialog"])')
     await expect(desktopSidebar).toBeHidden()
-
-    // 底栏导航可见
-    const mobileNav = page.getByRole('navigation', { name: '底部导航' })
-    await expect(mobileNav).toBeVisible()
 
     // 汉堡按钮唤起抽屉
     const hamburger = page.getByRole('button', { name: '打开菜单' })
@@ -77,6 +73,15 @@ test.describe('W5-mobile 375px 冒烟', () => {
     await expect(drawerPanel).toHaveClass(/-translate-x-full/)
 
     await expectNoHorizontalOverflow(page)
+  })
+
+  test('平板 800px：左侧固定侧栏恢复可见，汉堡按钮隐藏', async ({ page }) => {
+    // ≥md(768) 回到左侧固定布局；汉堡/抽屉仅 <md 存在
+    await page.setViewportSize({ width: 800, height: 1024 })
+    await loginViaUI(page)
+    const desktopSidebar = page.locator('aside:not([role="dialog"])')
+    await expect(desktopSidebar).toBeVisible()
+    await expect(page.getByRole('button', { name: '打开菜单' })).toBeHidden()
   })
 
   test('设置页：375px 渲染无横向溢出（SettingsLLM 连接参数堆叠）', async ({ page }) => {
