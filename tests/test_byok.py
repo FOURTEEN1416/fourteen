@@ -1,8 +1,9 @@
 """BYOK 强制策略三态测试（W1，2026-08-28）。"""
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from api.byok import ensure_user_has_key
 

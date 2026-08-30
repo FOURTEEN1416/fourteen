@@ -133,7 +133,10 @@ async def chat_stream(
     except Exception as e:  # noqa: BLE001
         logger.warning("Failed to load user %s LLM config for stream, using global: %s", user_id, e)
 
-    # BYOK 强制（W1）：异常必须在 try 外抛出，避免被上面的兜底吞掉
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to load user %s LLM config for stream, using global: %s", user_id, e)
+
+    # BYOK 强制（W1）：异常必须在读配置的 try 外抛出，避免被兜底吞掉
     from api.byok import ensure_user_has_key
 
     try:
@@ -143,8 +146,6 @@ async def chat_stream(
         raise
     except Exception:
         pass
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to load user %s LLM config for stream, using global: %s", user_id, e)
 
     async def event_generator():
         stream_gen = orch.process_message_stream(
