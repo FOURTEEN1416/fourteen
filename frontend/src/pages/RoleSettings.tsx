@@ -32,7 +32,7 @@ export default function RoleSettings() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-6 py-6">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
         {/* ── Character Header ── */}
         <div className="bg-white/70 backdrop-blur-sm border border-gray-200/60 rounded-2xl p-5 mb-5">
           <div className="flex items-center gap-4">
@@ -51,7 +51,7 @@ export default function RoleSettings() {
                 </span>
               </div>
             </div>
-            <div className="text-right shrink-0">
+            <div className="text-right shrink-0 hidden sm:block">
               <p className="text-xs text-gray-400">最后更新</p>
               <p className="text-sm font-medium text-gray-700">{character.updated_at ? new Date(character.updated_at).toLocaleDateString() : '—'}</p>
             </div>
@@ -59,12 +59,12 @@ export default function RoleSettings() {
         </div>
 
         {/* ── Tabs ── */}
-        <div className="flex gap-1 p-1 bg-gray-100/60 rounded-2xl mb-5">
+        <div className="flex gap-1 p-1 bg-gray-100/60 rounded-2xl mb-5 overflow-x-auto">
           {SUB_TABS.map(t => (
             <button
               key={t.key}
               onClick={() => setActiveTab(t.key)}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ${
+              className={`flex-1 min-w-[72px] shrink-0 flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ${
                 activeTab === t.key
                   ? 'tab-active'
                   : 'text-gray-500 hover:text-gray-700'

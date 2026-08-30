@@ -223,7 +223,7 @@ function SettingsLLM() {
                 <button
                   type="button"
                   onClick={(e) => { e.preventDefault(); setGuideModalProvider(opt) }}
-                  className="shrink-0 p-1 text-gray-300 hover:text-primary-500 transition-colors"
+                  className="shrink-0 p-2.5 text-gray-300 hover:text-primary-500 transition-colors"
                   title="查看教程"
                 >
                   <BookOpen className="w-3.5 h-3.5" />
@@ -239,7 +239,7 @@ function SettingsLLM() {
         <section>
           <h3 className="text-sm font-semibold text-gray-700 mb-3">连接参数</h3>
           <div className="glass-card rounded-xl p-4 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
               <div>
                 <p className="text-sm text-gray-700">API 地址</p>
                 <p className="text-xs text-gray-400">格式: https://xxx.com/v1</p>
@@ -249,10 +249,10 @@ function SettingsLLM() {
                 value={apiBase}
                 onChange={(e) => setApiBase(e.target.value)}
                 placeholder={selectedProvider?.api_base || 'https://api.example.com/v1'}
-                className="w-56 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
+                className="w-full sm:w-56 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
               />
             </div>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
               <div>
                 <p className="text-sm text-gray-700">API Key</p>
                 <p className="text-xs text-gray-400">从供应商后台获取</p>
@@ -262,10 +262,10 @@ function SettingsLLM() {
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="sk-..."
-                className="w-56 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
+                className="w-full sm:w-56 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
               />
             </div>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
               <div>
                 <p className="text-sm text-gray-700">模型名称</p>
                 <p className="text-xs text-gray-400">如 glm-5.2, deepseek-chat</p>
@@ -275,7 +275,7 @@ function SettingsLLM() {
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
                 placeholder={selectedProvider?.model || 'model-name'}
-                className="w-56 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
+                className="w-full sm:w-56 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
               />
             </div>
           </div>
