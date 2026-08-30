@@ -124,3 +124,4 @@ node_modules/
 .codebase-memory/
 memory-config.json
 data/e2e_users.db
+intro-full.png
