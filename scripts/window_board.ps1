@@ -11,7 +11,7 @@ param(
     [string]$Text = "",
     [int]$Count = 10
 )
-$Board = "D:\Desktopi-girlfriend\docsoard\BOARD.md"
+$Board = "D:\Desktop\ai-girlfriend\docs\board\BOARD.md"
 if ($Tail) {
     Get-Content $Board -Tail $Count
     exit 0

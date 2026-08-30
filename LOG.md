@@ -166,3 +166,19 @@
 **验证**：重索引 status=indexed + artifact.json 实读；两轮感染源 grep 零残留（除有意保留的历史快照标注）；4 commits 落地；工作区仅剩上交裁决的 8 个删除。
 
 **未验证/待办**：① 8 个不明删除待裁决；② 产品介绍页立项未启动；③ 提交未 push（用户未要求）。
+
+## 2026-08-30 — W2-CONSENT 使用即同意协议落地（窗口 wt/w2-consent）
+
+**任务**：W2 任务包四交付物：① docs/legal/USER_AGREEMENT.md 协议全文；② 前端全屏同意门；③ POST /api/auth/consent；④ pytest 同意记录单测。
+
+**动作与原因**：
+1. 协议文本 docs/legal/USER_AGREEMENT.md v1.0.0（8 章：使用即同意/数据范围/BYOK/心理边界+热线/微信风险自担/MIT AS-IS/版本更新重同意/管辖）。
+2. 后端：ConsentRecord 表（api/database.py，create_all 自动建表）+ api/consent.py（CURRENT_AGREEMENT_VERSION=1.0.0 + has_consented/record_consent/latest_consent）；auth_routes 注册/登录/refresh 返回 needs_consent；新 POST /api/auth/consent（版本不符 422、幂等、服务端 UTC 时间戳、用户存在性校验 404）；invite_routes 邀请码注册同样返回 needs_consent=True。
+3. 修复用例 test_consent_unknown_user_rejected（200→404）：根因 get_current_user_id 只解 token 不查库 + SQLite 默认不强制外键 → 端点内补 User 存在性校验。
+4. 前端：constants/agreement.ts（版本+全文）；api/auth.ts TokenResponse.needs_consent + consent()；authStore.needsConsent（不持久化）；useAuth.applyTokenResponse + agreeConsent；ConsentGate.tsx 全屏门（同意→落库放行，不同意→登出）；App.tsx AuthInit 同步 needs_consent + 挂载 ConsentGate；auth/index.ts 桶导出。
+5. 测试：tests/test_consent.py 11 用例；frontend ConsentGate.test.tsx 7 用例。
+6. 顺手修 bug：scripts/window_board.ps1 的 $Board 路径行被控制字符污染（\a→BEL、\b→BS，指向不存在的路径），字节级修复还原为 D:\Desktop\ai-girlfriend\docs\board\BOARD.md。
+
+**验证**：pytest 全量 969 passed + 6 skipped（0 失败）；vitest 全量 66/66（59 基线+7 新增）；tsc --noEmit 0 错。worktree 与主检出收集数差 56 已查明：config/characters/（gitignored 角色卡素材）不在 Junction 共享范围，test_persona_injection 参数化空回退 [NOTSET] 跳过，与 W2 无关、两环境均 0 失败。
+
+**未验证/待办**：① 待协调者主检出四项回归门收编；② 提交未 push；③ 邀请注册的 UI 侧同意流与普通登录共用 ConsentGate，未见差异处理需求。
