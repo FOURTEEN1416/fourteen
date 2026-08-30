@@ -28,6 +28,10 @@ export interface TokenResponse {
   refresh_token: string
   token_type: string
   user: UserInfo
+  /** 是否需要同意《用户协议》（未同意过当前版本时为 true） */
+  needs_consent?: boolean
+  /** 服务端当前协议版本 */
+  agreement_version?: string
 }
 
 export interface LoginRequest {
@@ -90,4 +94,11 @@ export function logout(refresh_token?: string): Promise<void> {
 /** GET /api/auth/me — 获取当前用户信息 */
 export function getMe(): Promise<UserInfo> {
   return client.get('/auth/me').then(r => r.data as UserInfo)
+}
+
+/** POST /api/auth/consent — 记录用户同意《用户协议与隐私声明》 */
+export function consent(agreementVersion: string): Promise<void> {
+  return client
+    .post('/auth/consent', { agreement_version: agreementVersion })
+    .then(() => undefined)
 }

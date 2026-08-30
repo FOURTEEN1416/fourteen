@@ -25,6 +25,12 @@ from api.auth_jwt import (
     verify_password,
     verify_token,
 )
+from api.consent import (
+    CURRENT_AGREEMENT_VERSION,
+    has_consented,
+    latest_consent,
+    record_consent,
+)
 from api.database import User, UserSession, get_db
 
 logger = logging.getLogger("auth_routes")
@@ -54,6 +60,9 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     user: dict
+    # 使用即同意（W2-CONSENT）：True 表示该用户尚未同意当前版本协议，前端需弹全屏同意窗
+    needs_consent: bool = False
+    agreement_version: str = CURRENT_AGREEMENT_VERSION
 
 
 class RefreshRequest(BaseModel):
@@ -62,6 +71,10 @@ class RefreshRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     refresh_token: str = ""  # 可选：优先从 body 读，无则退到 cookie
+
+
+class ConsentRequest(BaseModel):
+    agreement_version: str = Field(..., examples=["1.0.0"])
 
 
 class ChangePasswordRequest(BaseModel):
@@ -171,6 +184,7 @@ async def register(
         access_token=access_token,
         refresh_token=refresh_token,
         user=user.to_dict(),
+        needs_consent=True,  # 新用户必然未同意过协议
     )
 
 
@@ -218,6 +232,7 @@ async def login(
         access_token=access_token,
         refresh_token=refresh_token,
         user=user.to_dict(),
+        needs_consent=not await has_consented(db, user.id),
     )
 
 
@@ -284,6 +299,7 @@ async def refresh(
         access_token=new_access_token,
         refresh_token=new_refresh_token,
         user=user.to_dict(),
+        needs_consent=not await has_consented(db, user.id),
     )
 
 
@@ -327,6 +343,48 @@ async def me(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user.to_dict()
+
+
+@router.post("/consent")
+async def consent(
+    req: ConsentRequest,
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """记录用户对《用户协议与隐私声明》的同意（使用即同意，W2-CONSENT）
+
+    - 版本必须等于当前协议版本，否则 422（防止旧版本号绕过重新同意）
+    - 时间戳由服务端 UTC 生成
+    - 幂等：重复同意同版本返回已有记录，不重复落库
+    """
+    if req.agreement_version != CURRENT_AGREEMENT_VERSION:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Agreement version mismatch: expected {CURRENT_AGREEMENT_VERSION}",
+        )
+
+    # 用户必须真实存在（get_current_user_id 只解 token 不查库）
+    result = await db.execute(select(User).where(User.id == user_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # 幂等：已同意同版本则直接返回
+    if await has_consented(db, user_id):
+        existing = await latest_consent(db, user_id)
+        if existing:
+            return {
+                "detail": "Consent already recorded",
+                "agreement_version": existing.agreement_version,
+                "agreed_at": existing.agreed_at.isoformat() if existing.agreed_at else None,
+            }
+
+    record = await record_consent(db, user_id, req.agreement_version)
+    logger.info("用户 %s 同意协议 v%s", user_id, req.agreement_version)
+    return {
+        "detail": "Consent recorded",
+        "agreement_version": record.agreement_version,
+        "agreed_at": record.agreed_at.isoformat() if record.agreed_at else None,
+    }
 
 
 

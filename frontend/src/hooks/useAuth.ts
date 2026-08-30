@@ -12,16 +12,23 @@
  * 此处不再暴露 init/refresh，避免双份初始化路径。
  */
 import * as authApi from '../api/auth'
+import { AGREEMENT_VERSION } from '../constants/agreement'
 import { useAuthStore } from '../store/authStore'
 
 // ── Hook ────────────────────────────────────────────
 
 export function useAuth() {
-  const { user, isAuthenticated } = useAuthStore()
+  const { user, isAuthenticated, needsConsent } = useAuthStore()
+
+  /** 登录/注册响应落地：写认证态 + 同意标志（后端对未同意用户返回 needs_consent=true） */
+  const applyTokenResponse = (res: authApi.TokenResponse) => {
+    useAuthStore.getState().setAuth(res.user, res.access_token)
+    useAuthStore.getState().setNeedsConsent(res.needs_consent ?? false)
+  }
 
   const login = async (loginName: string, password: string) => {
     const res = await authApi.login({ login: loginName, password })
-    useAuthStore.getState().setAuth(res.user, res.access_token)
+    applyTokenResponse(res)
   }
 
   const register = async (data: {
@@ -31,7 +38,7 @@ export function useAuth() {
     display_name?: string
   }) => {
     const res = await authApi.register(data)
-    useAuthStore.getState().setAuth(res.user, res.access_token)
+    applyTokenResponse(res)
   }
 
   const registerWithInvite = async (data: {
@@ -42,7 +49,13 @@ export function useAuth() {
     display_name?: string
   }) => {
     const res = await authApi.registerWithInvite(data)
-    useAuthStore.getState().setAuth(res.user, res.access_token)
+    applyTokenResponse(res)
+  }
+
+  /** 同意《用户协议与隐私声明》当前版本 */
+  const agreeConsent = async () => {
+    await authApi.consent(AGREEMENT_VERSION)
+    useAuthStore.getState().setNeedsConsent(false)
   }
 
   const logout = async () => {
@@ -56,7 +69,7 @@ export function useAuth() {
   }
 
   return {
-    login, register, registerWithInvite, logout,
-    user, isAuthenticated,
+    login, register, registerWithInvite, logout, agreeConsent,
+    user, isAuthenticated, needsConsent,
   }
 }

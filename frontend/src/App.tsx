@@ -16,7 +16,7 @@ import CreateRole from './pages/CreateRole'
 import RoleSettings from './pages/RoleSettings'
 import StatusCenter from './pages/StatusCenter'
 import StorylineEditor from './components/storyline/StorylineEditor'
-import { AuthGuard, RoleGuard } from './components/auth'
+import { AuthGuard, RoleGuard, ConsentGate } from './components/auth'
 import { useAuthStore } from './store/authStore'
 import { refreshToken } from './api/auth'
 
@@ -74,7 +74,7 @@ function AuthInit({ children }: { children: React.ReactNode }) {
       try {
         const res = await refreshToken()
         useAuthStore.getState().setAuth(res.user, res.access_token)
-        useAuthStore.setState({ isInitialized: true })
+        useAuthStore.setState({ isInitialized: true, needsConsent: res.needs_consent ?? false })
       } catch {
         useAuthStore.getState().clearAuth()
         useAuthStore.setState({ isInitialized: true })
@@ -110,6 +110,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
     <ErrorBoundary>
     <AuthInit>
+      <ConsentGate />
       <Routes>
         {/* ─── 公开路由：登录页 ─── */}
         <Route path="/login" element={<Suspense fallback={<PageLoadingSkeleton />}><LoginPage /></Suspense>} />

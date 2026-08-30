@@ -46,9 +46,12 @@ export interface AuthState {
   accessToken: string | null
   isAuthenticated: boolean
   isInitialized: boolean
+  /** 是否需要同意《用户协议》（由后端登录/刷新响应驱动，不持久化） */
+  needsConsent: boolean
 
   // 纯动作（无 API 调用）
   setAuth: (user: UserInfo, accessToken: string) => void
+  setNeedsConsent: (needs: boolean) => void
   clearAuth: () => void
 }
 
@@ -62,12 +65,17 @@ export const useAuthStore = create<AuthState>()(
       accessToken: null,
       isAuthenticated: false,
       isInitialized: false,
+      needsConsent: false,
 
       /** 登录/注册成功后设置认证信息 */
       setAuth: (user: UserInfo, accessToken: string) => {
         setAccessToken(accessToken)
         // accessToken 仅存内存闭包，不再写入 Zustand 状态（避免持久化泄漏）
         set({ user, isAuthenticated: true })
+      },
+
+      setNeedsConsent: (needs: boolean) => {
+        set({ needsConsent: needs })
       },
 
       /** 清除所有认证状态 */

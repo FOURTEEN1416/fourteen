@@ -174,6 +174,31 @@ class UserSession(Base):
         return f"<UserSession(id={self.id}, user_id={self.user_id})>"
 
 
+class ConsentRecord(Base):
+    """用户协议同意记录 — 使用即同意声明（W2-CONSENT）
+
+    每次同意插入一条记录；是否"需同意"按用户最新同意版本与当前协议版本比较得出。
+    独立成表而非 users 列：老库由 create_all 自动建新表，无需 ALTER。
+    """
+
+    __tablename__ = "consent_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    agreement_version = Column(String(32), nullable=False, index=True)
+    agreed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "user_id": self.user_id,
+            "agreement_version": self.agreement_version,
+            "agreed_at": self.agreed_at.isoformat() if self.agreed_at else None,
+        }
+
+    def __repr__(self) -> str:
+        return f"<ConsentRecord(user_id={self.user_id}, v='{self.agreement_version}')>"
+
+
 class WechatBinding(Base):
     """微信绑定 — 将微信账号关联到注册用户，并记录绑定的角色卡"""
 
