@@ -197,3 +197,18 @@
 
 **未验证/待办**：① 待协调者主检出回归门收编（E2E 冒烟 5 条不依赖 / 行为，已核对无冲突）；② 提交未 push；③ /intro 尚未进 Breadcrumb/侧边栏（公开页无导航体系，当前仅 /login 入口，符合任务包边界）。
 
+
+## 2026-08-30 18:55 w5-mobile（W5 全站移动端适配）
+
+**完成**（commit cff4d74，20 文件 +368/-133）：
+1. 视口层：index.html 加 viewport-fit=cover；index.css 新增 .safe-area-top/bottom/x 工具类 + body min-height 100dvh；App 壳 h-screen→h-[100dvh]，IntroPage/LoginPage min-h-screen→min-h-[100dvh]。
+2. 导航：buildGlobalNavGroups 抽至 layout/navGroups.tsx（Sidebar 与抽屉共享入口清单）；Breadcrumb <lg 加 44px 汉堡按钮；新增 MobileDrawer（遮罩/Escape 关闭、NavLink 点击自动收起、含 admin 分组与连接状态）；MobileNav 补 admin 条件入口、触控目标 ≥44px、aria-label="底部导航"。抽屉 z-50 盖底栏 z-40。
+3. 逐页断点：SettingsLLM 连接参数三行小屏纵向堆叠（w-56 输入框 → w-full sm:w-56）；SettingsLogs 工具行 flex-col sm:flex-row + 按钮组 flex-wrap；StatusCenter/SettingsSecurity 三联卡 p/gap/字号小屏收紧；RoleSettings px-4 sm:px-6、头部"最后更新"块 <sm 隐藏、六 tab overflow-x-auto（min-w-[72px]）。
+4. 触控目标：UserTable 移动卡片编辑/删除按钮与分页箭头 h-11 w-11、页码 h-9；AdminProviders 操作列四按钮 h-11 w-11、toggle min-h-44px；Modal 关闭 h-11 w-11；ConfirmDialog 按钮 min-h-[44px]；SettingsLogs 顶栏四按钮 min-h-[44px]。
+5. E2E：新增 frontend/e2e/mobile.spec.ts 4 条（375×667）：intro/login 无横向溢出（scrollWidth≤376）、桌面侧栏 hidden+底栏可见+汉堡抽屉开合跳转（translate-x 断言）、SettingsLLM 渲染无溢出；内置 refresh 竞态弹回 /login 重登韧性（W4 登记的已知竞态）。
+
+**关键发现（真值裁决①代码实况优先）**：任务包两点假设已过时——①Sidebar 早已 hidden lg:flex 且 MobileNav 底栏已存在（本次为补全而非新建抽屉体系）；②UserTable/AdminProviders <md 卡片化已存在，未动。任务包"3. 视口/4. 触控/5. spec"三点与现状缺口吻合，全部落地。
+
+**验证**：npx tsc --noEmit 0 错；npx vitest run 71/71（13 文件）；npm run build 通过；mobile.spec 4/4 三连绿；smoke.spec 5/5（桌面端无回归，lg 断点行为零改动）。测试环境：5199 为主检出旧代码 vite，自起本 worktree vite 5299 + BASE_URL 覆盖跑 E2E；8000 复用协调方 E2E 后端；测试 vite 已停，未动他人进程。
+
+**未验证/待办**：① 待协调者主检出四项回归门收编；② 提交未 push；③ 真机 iOS safe-area 效果待人工目验（E2E 只能断言 CSS 类存在与无溢出，env() 数值需真机）。
