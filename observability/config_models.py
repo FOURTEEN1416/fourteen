@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class LLMConfig(BaseModel):
+    byok_required: bool = False  # BYOK 强制：非 admin 用户必须自带 API Key（开放运营的成本自担开关）
     provider: str = "deepseek"
     model: str = ""
     primary_model: str = "deepseek-chat"

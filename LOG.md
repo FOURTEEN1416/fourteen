@@ -25,6 +25,18 @@
 
 ---
 
+## 2026-08-28（十二）— 多窗口机制落地 + W1-BYOK + CI 五连修全绿
+
+**CI 五连修**（用户报 CLI 报错）：①require_role 工厂陷阱（override 打不中，fixture 真实建表+种子）；②CI 无 data/ 目录（mkdir）；③E2E job 补后端启动；④ruff 37→0；⑤mypy 74 处假门禁降非阻塞+LEDGER 登记恢复条件。终态 backend/frontend/全 FF 绿。
+
+**多窗口机制**（适配 psd-framework §4）：AGENTS v1.3.1 §8 并行纪律 + scripts/new_window_worktree.ps1（Junction 防误删）+ window_board.ps1 + docs/board/BOARD.md + TASK_PACKAGES.md（W1/W2）。
+
+**W1-BYOK**（用户裁决：开放所有人、成本自担）：config llm.byok_required（默认 false）+ api/byok.py（403 BYOK_REQUIRED，admin 豁免，bool 严格防 Mock 泄漏）+ GET /api/meta 公开元信息 + chat/chat_stream 前置检查 + 前端 client 403 拦截跳 /settings/llm?byok=1。测试 +4 三态单测。端点 201；pytest 1019+1/vitest 59/tsc 0 错。
+
+---
+
+---
+
 ## 2026-08-28（十一）— SP-12 全面测试收官
 
 四项回归门全绿：pytest 1015+1 / vitest 59 / **Playwright E2E 5 冒烟全绿**（10.7s：登录 UI→/wechat、角色网格、LLM 设置集成、聊天主链路 LLM 真实调用、健康探针）/ 对齐复跑缺失=0（200 端点消费 121）。E2E 基建：scripts/e2e_setup.py（独立种子库零污染）+ frontend/e2e/smoke.spec.ts（可复用，CI 可挂）。修正：登录按钮文案实为「登 录」。报告 docs/reports/2026-08-28_SP12全面测试收官报告.md。队列剩 SP-11。

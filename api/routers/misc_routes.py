@@ -140,6 +140,15 @@ async def get_dashboard_stats(_auth: bool = Security(verify_api_key_dep)):
 # ═══════════════════════════════════════════════════════
 
 
+@router.get("/api/meta")
+async def public_meta():
+    """公开元信息（无认证）：前端启动判断 BYOK 引导等。"""
+    from api.byok import byok_required
+
+    llm_cfg = deps.orch.components.get("config").config.llm if deps.orch and deps.orch.components else None
+    return {"byok_required": byok_required(llm_cfg), "version": "3.1.0"}
+
+
 @router.get("/api/characters/{character_id}/important-dates")
 async def get_important_dates(
     character_id: str,

@@ -3,6 +3,7 @@ env: dev
 debug: true
 
 llm:
+  byok_required: false              # BYOK 强制：非 admin 必须自带 API Key（开放给所有人时开启，成本自担）
   # ── 供应商模式 ──
   #   "auto"            → MultiProviderGateway（自动fallback链）
   #   "sensenova"       → 商汤日日新 SenseNova（glm-5.2 / deepseek-v4-flash）

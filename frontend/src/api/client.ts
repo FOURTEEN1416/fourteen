@@ -116,6 +116,20 @@ client.interceptors.response.use(
     const data = error.response?.data
     const originalRequest = error.config as (typeof error.config) & { _isRetry?: boolean }
 
+    // ── 403 BYOK_REQUIRED：用户自带 Key 引导（W1，2026-08-28）──
+    const byokCode = (error.response?.headers?.['x-error-code'] ??
+      (data as { detail?: string } | undefined)?.detail) as string | undefined
+    if (
+      status === 403 &&
+      (byokCode === 'BYOK_REQUIRED' ||
+        (typeof data?.detail === 'string' && data.detail.includes('自带 API Key')))
+    ) {
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/settings/llm')) {
+        window.location.assign('/settings/llm?byok=1')
+        return new Promise(() => {}) // 跳转中挂起
+      }
+    }
+
     // ── 401 auto-refresh ──
     // Uses httpOnly cookie (browser auto-sends) instead of stored refresh_token
     if (

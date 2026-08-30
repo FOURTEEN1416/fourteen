@@ -62,12 +62,23 @@ async def chat(
 
     # 读取用户级 LLM 配置（API Key 隔离）
     user_llm_config = None
+    user = None
     try:
         user = await db.get(User, user_id)
         if user and user.llm_config:
             user_llm_config = user.llm_config if isinstance(user.llm_config, dict) else None
     except Exception as e:  # noqa: BLE001
         logger.warning("Failed to load user %s LLM config, using global: %s", user_id, e)
+
+    from api.byok import ensure_user_has_key
+
+    try:
+        llm_cfg = orch.components.get("config").config.llm if orch.components else None
+        ensure_user_has_key(user, llm_cfg)
+    except HTTPException:
+        raise
+    except Exception:
+        pass
 
     try:
         result = await orch.process_message(
@@ -114,10 +125,24 @@ async def chat_stream(
 
     # 读取用户级 LLM 配置（API Key 隔离）— 与 /api/chat 保持一致
     user_llm_config = None
+    user = None
     try:
         user = await db.get(User, user_id)
         if user and user.llm_config:
             user_llm_config = user.llm_config if isinstance(user.llm_config, dict) else None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to load user %s LLM config for stream, using global: %s", user_id, e)
+
+    # BYOK 强制（W1）：异常必须在 try 外抛出，避免被上面的兜底吞掉
+    from api.byok import ensure_user_has_key
+
+    try:
+        llm_cfg = orch.components.get("config").config.llm if orch.components else None
+        ensure_user_has_key(user, llm_cfg)
+    except HTTPException:
+        raise
+    except Exception:
+        pass
     except Exception as e:  # noqa: BLE001
         logger.warning("Failed to load user %s LLM config for stream, using global: %s", user_id, e)
 
