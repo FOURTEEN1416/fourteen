@@ -133,9 +133,6 @@ async def chat_stream(
     except Exception as e:  # noqa: BLE001
         logger.warning("Failed to load user %s LLM config for stream, using global: %s", user_id, e)
 
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to load user %s LLM config for stream, using global: %s", user_id, e)
-
     # BYOK 强制（W1）：异常必须在读配置的 try 外抛出，避免被兜底吞掉
     from api.byok import ensure_user_has_key
 

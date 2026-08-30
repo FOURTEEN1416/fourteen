@@ -198,14 +198,19 @@ export default function IntroPage() {
             <p className="text-[11px] text-gray-500 mb-2.5">
               以下平台均 OpenAI 兼容：拿到 Key 后在「设置 → LLM 配置」粘贴，填对应 API 地址即可。
             </p>
-            <p className="text-xs font-semibold text-gray-700 mb-1.5">🇨🇳 国内直连</p>
+            <p className="text-xs font-semibold text-gray-700 mb-1.5">🇨🇳 国内直连 · 免费且量大管饱</p>
             <ul className="text-xs text-gray-600 leading-relaxed space-y-1.5 list-disc list-inside">
               <li>
-                <span className="font-medium">智谱 AI（推荐起步）</span>：open.bigmodel.cn 注册 → 创建 API Key；
-                <span className="font-medium">GLM-4.7-Flash 永久免费</span>（200K 上下文），无需信用卡。
+                <span className="font-medium">智谱 AI（首选）</span>：open.bigmodel.cn 注册 → 创建 API Key；
+                <span className="font-medium">GLM-Flash 系列多款无限免费</span>（GLM-4.7-Flash 200K 上下文等），
+                日常陪伴完全够用。
               </li>
               <li>
-                <span className="font-medium">阿里云百炼</span>：bailian.console.aliyun.com 注册送额度，多款小参数模型 0 元永久免费；
+                <span className="font-medium">Agnes AI</span>：<span className="font-medium">长期免费使用</span>
+                （注册申请过程需要能访问国际网络；OpenAI 兼容，图片生成能力项目已内置集成）。
+              </li>
+              <li>
+                <span className="font-medium">阿里云百炼</span>：注册送额度，多款小参数模型 0 元永久免费；
                 建议开启「免费额度用完即停」防意外扣费。
               </li>
               <li>
@@ -215,28 +220,9 @@ export default function IntroPage() {
                 <span className="font-medium">火山方舟（豆包）</span>：每模型 50 万 tokens 免费额度，带「安心体验模式」
                 （额度用尽自动停止，不会误扣费）。
               </li>
-              <li>
-                <span className="font-medium">ModelScope 魔搭社区</span>：modelscope.cn 免费推理 API
-                （OpenAI 兼容地址 https://api-inference.modelscope.cn/v1）。
-              </li>
-            </ul>
-            <p className="text-xs font-semibold text-gray-700 mt-3 mb-1.5">🌐 国际平台（需相应网络环境）</p>
-            <ul className="text-xs text-gray-600 leading-relaxed space-y-1.5 list-disc list-inside">
-              <li>
-                <span className="font-medium">OpenRouter</span>：openrouter.ai 聚合站，<span className="font-mono">openrouter/free</span> 路由
-                200 次/小时，另有大量 :free 后缀免费模型。
-              </li>
-              <li>
-                <span className="font-medium">Groq</span>：console.groq.com 免费 tier，Llama 系开源模型，推理速度极快。
-              </li>
-              <li>
-                <span className="font-medium">Mistral AI</span>：console.mistral.ai 免费模式默认开启（无需信用卡），
-                每月附赠 $10 API 额度。
-              </li>
             </ul>
             <p className="text-[11px] text-gray-400 mt-2.5">
-              免费模型通常有并发/速率限制，适合日常陪伴；各平台政策以其现行说明为准。
-              图片生成已内置 Agnes-AI 集成（环境变量 IMAGE_GEN_API_KEY）。
+              免费模型通常有并发限制，适合日常陪伴；各平台政策以其现行说明为准。
             </p>
           </div>
         </section>
