@@ -15,6 +15,10 @@ import {
   Github,
   KeyRound,
   ShieldCheck,
+  ListChecks,
+  Sparkles,
+  HelpCircle,
+  Headset,
 } from 'lucide-react'
 
 /** 能力卡：图标 + 语义色（黄=关系/记忆，蓝=接入/设定，青=风格/主动，与 anchorTone 语义一致） */
@@ -130,9 +134,16 @@ export default function IntroPage() {
             <KeyRound className="w-5 h-5 text-macaron-yellow-deep" />
           </div>
           <h2 className="text-lg font-semibold text-gray-700 mb-2">注册采用邀请码制</h2>
-          <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto leading-relaxed">
+          <p className="text-sm text-gray-500 mb-4 max-w-md mx-auto leading-relaxed">
             获取邀请码后，在注册页勾选「我有邀请码」即可创建账户，绑定你的专属角色开始陪伴。
           </p>
+          <div className="inline-flex items-center gap-2 rounded-xl bg-macaron-yellow-light/70 border border-macaron-yellow/40 px-4 py-2.5 mb-6">
+            <Headset className="w-4 h-4 text-macaron-yellow-deep" />
+            <span className="text-xs text-gray-600">
+              邀请码获取：联系 QQ <span className="font-mono font-semibold text-gray-800">2053769154</span>
+              ，备注「AI伴侣」
+            </span>
+          </div>
           <Link
             to="/login"
             className="btn-macaron inline-flex items-center gap-2 rounded-xl px-8 py-3 text-sm font-medium"
@@ -146,6 +157,134 @@ export default function IntroPage() {
               直接登录 →
             </Link>
           </p>
+        </section>
+
+        {/* ─── 使用指南（五步上手） ─── */}
+        <section className="glass-card rounded-2xl p-6 sm:p-8 mt-10 stagger-item" style={{ animationDelay: '380ms' }} aria-label="使用指南">
+          <div className="flex items-center gap-3 mb-5">
+            <span className="w-9 h-9 rounded-xl bg-macaron-blue-light flex items-center justify-center">
+              <ListChecks className="w-5 h-5 text-macaron-blue-deep" />
+            </span>
+            <h2 className="text-lg font-semibold text-gray-700">五步开始使用</h2>
+          </div>
+          <ol className="space-y-3 max-w-xl mx-auto">
+            {[
+              { title: '注册账户', desc: '用邀请码在登录页注册，邮箱 + 密码即可。' },
+              { title: '配置你的 API Key', desc: '设置 → LLM 配置，填入你自己的 Key（下方有免费获取引导）。对话调用量走你的账户，成本自己可控。', strong: true },
+              { title: '创建或选择角色', desc: '角色页创建专属角色（AI 对话提取 / 导入 SillyTavern 角色卡 / 克隆好友），或直接选用预设。' },
+              { title: '连接微信', desc: '微信页扫码登录你的微信小号，连接成功后好友即可与角色对话。' },
+              { title: '开始陪伴', desc: '文字 / 语音随时聊；角色会记住你说过的事，也会在合适的时机主动找你。' },
+            ].map((s, i) => (
+              <li key={s.title} className="flex gap-3">
+                <span className="shrink-0 w-6 h-6 rounded-full bg-macaron-blue text-white text-[11px] font-bold flex items-center justify-center mt-0.5">
+                  {i + 1}
+                </span>
+                <div>
+                  <p className="text-sm font-medium text-gray-700">
+                    {s.title}
+                    {s.strong && <span className="tag-yellow text-[10px] px-1.5 py-0.5 rounded ml-2">关键</span>}
+                  </p>
+                  <p className="text-xs text-gray-500 leading-relaxed mt-0.5">{s.desc}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+
+          <div className="mt-5 rounded-xl bg-macaron-mint-light/50 border border-macaron-mint/40 p-4">
+            <p className="text-sm font-medium text-gray-700 flex items-center gap-1.5 mb-2">
+              <Sparkles className="w-4 h-4 text-macaron-mint-deep" />
+              免费 API Key 获取引导
+            </p>
+            <p className="text-[11px] text-gray-500 mb-2.5">
+              以下平台均 OpenAI 兼容：拿到 Key 后在「设置 → LLM 配置」粘贴，填对应 API 地址即可。
+            </p>
+            <p className="text-xs font-semibold text-gray-700 mb-1.5">🇨🇳 国内直连</p>
+            <ul className="text-xs text-gray-600 leading-relaxed space-y-1.5 list-disc list-inside">
+              <li>
+                <span className="font-medium">智谱 AI（推荐起步）</span>：open.bigmodel.cn 注册 → 创建 API Key；
+                <span className="font-medium">GLM-4.7-Flash 永久免费</span>（200K 上下文），无需信用卡。
+              </li>
+              <li>
+                <span className="font-medium">阿里云百炼</span>：bailian.console.aliyun.com 注册送额度，多款小参数模型 0 元永久免费；
+                建议开启「免费额度用完即停」防意外扣费。
+              </li>
+              <li>
+                <span className="font-medium">百度千帆</span>：每个模型可独立领取 100 万 tokens 免费额度（含 ERNIE 系）。
+              </li>
+              <li>
+                <span className="font-medium">火山方舟（豆包）</span>：每模型 50 万 tokens 免费额度，带「安心体验模式」
+                （额度用尽自动停止，不会误扣费）。
+              </li>
+              <li>
+                <span className="font-medium">ModelScope 魔搭社区</span>：modelscope.cn 免费推理 API
+                （OpenAI 兼容地址 https://api-inference.modelscope.cn/v1）。
+              </li>
+            </ul>
+            <p className="text-xs font-semibold text-gray-700 mt-3 mb-1.5">🌐 国际平台（需相应网络环境）</p>
+            <ul className="text-xs text-gray-600 leading-relaxed space-y-1.5 list-disc list-inside">
+              <li>
+                <span className="font-medium">OpenRouter</span>：openrouter.ai 聚合站，<span className="font-mono">openrouter/free</span> 路由
+                200 次/小时，另有大量 :free 后缀免费模型。
+              </li>
+              <li>
+                <span className="font-medium">Groq</span>：console.groq.com 免费 tier，Llama 系开源模型，推理速度极快。
+              </li>
+              <li>
+                <span className="font-medium">Mistral AI</span>：console.mistral.ai 免费模式默认开启（无需信用卡），
+                每月附赠 $10 API 额度。
+              </li>
+            </ul>
+            <p className="text-[11px] text-gray-400 mt-2.5">
+              免费模型通常有并发/速率限制，适合日常陪伴；各平台政策以其现行说明为准。
+              图片生成已内置 Agnes-AI 集成（环境变量 IMAGE_GEN_API_KEY）。
+            </p>
+          </div>
+        </section>
+
+        {/* ─── 常见问题 ─── */}
+        <section className="glass-card rounded-2xl p-6 sm:p-8 mt-10 stagger-item" style={{ animationDelay: '400ms' }} aria-label="常见问题">
+          <div className="flex items-center gap-3 mb-4">
+            <span className="w-9 h-9 rounded-xl bg-macaron-yellow-light flex items-center justify-center">
+              <HelpCircle className="w-5 h-5 text-macaron-yellow-deep" />
+            </span>
+            <h2 className="text-lg font-semibold text-gray-700">常见问题</h2>
+          </div>
+          <div className="space-y-2 max-w-xl mx-auto">
+            {[
+              {
+                q: '要花钱吗？',
+                a: '软件本身完全免费开源（MIT）。唯一的成本是 LLM 对话调用，走你自己的 API Key——用上面的免费引导可以零成本起步。',
+              },
+              {
+                q: '微信账号安全吗？',
+                a: '连接使用的是你自己的微信账号。建议使用小号；微信自身的账号防护是第一道屏障，请遵守微信使用规范，风险自担。',
+              },
+              {
+                q: '我的聊天记录存在哪里？',
+                a: '自托管部署时，所有数据（聊天/记忆/角色）都在你自己的服务器或电脑上，不经手任何第三方；平台站点则存储于站点数据库，仅用于提供对话服务。',
+              },
+              {
+                q: '手机上能用吗？',
+                a: '微信内聊天天然在手机上；管理控制台的移动端适配正在推进中，当前建议桌面浏览器使用。',
+              },
+              {
+                q: '心理状态分析是医疗诊断吗？',
+                a: '不是。所有情绪 / 心理画像功能仅供自我参考与陪伴体验，不构成任何医疗建议。如有需要请联系专业机构（全国心理援助热线 400-161-9995）。',
+              },
+              {
+                q: '邀请码申请没回复 / 忘记密码？',
+                a: '联系 QQ 2053769154（备注「AI伴侣」）处理。',
+              },
+            ].map(({ q, a }) => (
+              <details key={q} className="group rounded-xl bg-white/50 border border-white/60 px-4 py-3">
+                <summary className="text-sm font-medium text-gray-700 cursor-pointer list-none flex items-center justify-between">
+                  {q}
+                  <span className="text-gray-300 group-open:rotate-45 transition-transform text-lg leading-none">+</span>
+                </summary>
+                <p className="text-xs text-gray-500 leading-relaxed mt-2">{a}</p>
+              </details>
+            ))}
+          </div>
         </section>
 
         {/* ─── MIT 开源标识 ─── */}
