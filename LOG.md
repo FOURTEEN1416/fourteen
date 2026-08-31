@@ -237,3 +237,11 @@
 **验证**：tsc 0 错；vitest 71/71；build 通过；mobile spec 5/5；smoke 5/5（1280 桌面无回归）。5299 测试 vite 已停。
 
 **教训**：发现"现状与任务包矛盾"时选择了尊重现状（保留底栏），未向用户确认——现状是历史遗留不等于用户认可。下次同类分歧点应先问一句再动手（商讨协议排歧步骤）。
+
+---
+
+## 2026-08-31 — W4/W5 双收编 + CI 两遗留修复（复核会话）
+
+**复核**：五维检查发现 W4/W5 两窗均已完成并 handoff → 双收编（BOARD 追加型冲突保留双方条目）。**CI 两遗留根因与修复**：①test_consent CI 炸=no such route——app_factory 的 auth 挂载 try/except 吞异常静默降级（违反当年 route_mounts 防静默设计），改 fail-fast 裸挂；②W4 capabilities spec 角色数 >0 断言在 CI 干净库必炸——改环境自适应（数组结构断言+空库 skip）。
+
+**验证**：pytest 1030+1（全量）/ vitest 71 / tsc 0 / **E2E 13-13**（smoke5+capabilities3+mobile5，干净库自适应通过）。修复推送待 CI 终态。

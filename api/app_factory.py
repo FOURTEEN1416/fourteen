@@ -244,12 +244,12 @@ def create_api_app(
     logger.info("主路由已拆分为 9 个子路由 (75 端点)")
 
     # ── 用户认证 API ──
-    try:
-        from api.routers.auth_routes import router as auth_router
-        app.include_router(auth_router)
-        logger.info("用户认证API已挂载 (/api/auth)")
-    except Exception as e:
-        logger.warning("用户认证API挂载失败: %s", e)
+    # 2026-08-31：去 try 静默吞——认证路由消失=登录全挂，必须 fail-fast 而非降级
+    # （CI 曾因此炸 test_consent_route_is_mounted：静默少挂路由，测试才暴露）
+    from api.routers.auth_routes import router as auth_router  # noqa: E402
+
+    app.include_router(auth_router)
+    logger.info("用户认证API已挂载 (/api/auth)")
 
     # ═══════════════════════════════════════════════════
     # shisi（十四）模块挂载
