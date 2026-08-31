@@ -22,7 +22,7 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "fastapi>=0.110.0",
+    "fastapi>=0.110.0,<0.139",  # 0.139+ _IncludedRouter 包装改变 app.routes 枚举（测试/健康检查依赖平铺语义），升级需专项验证
     "uvicorn[standard]>=0.27.0",
     "pydantic>=2.6.0",
     "pydantic-settings>=2.1.0",

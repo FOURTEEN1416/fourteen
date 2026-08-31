@@ -99,10 +99,16 @@ async def test_consent_route_is_mounted(module_app):
     """POST /api/auth/consent 已挂载"""
     paths = set()
     for r in module_app.routes:
-        if hasattr(r, "path") and hasattr(r, "methods"):
-            for m in (r.methods or set()):
-                if m != "HEAD":
-                    paths.add((m, r.path))
+        # 兼容 FastAPI 0.139+ _IncludedRouter 包装（平铺展开子路由）
+        stack = [r]
+        while stack:
+            cur = stack.pop()
+            if hasattr(cur, "path") and hasattr(cur, "methods"):
+                for m in (cur.methods or set()):
+                    if m != "HEAD":
+                        paths.add((m, cur.path))
+            elif hasattr(cur, "original_router"):
+                stack.extend(cur.original_router.routes)
     assert ("POST", "/api/auth/consent") in paths
 
 
