@@ -35,6 +35,18 @@ test.describe('SP-12 冒烟', () => {
     await page.waitForURL('**/wechat', { timeout: 15_000 })
 
     await page.goto('/roles')
+    // 韧性（W4）：vite dev 下 StrictMode 双发 /auth/refresh，后端旋转式 session 令败者 401 弹回 /login
+    // （时序竞态；CI 生产构建无 StrictMode 不触发）。检测弹回则重登再进一次，下方断言语义不变。
+    try {
+      await page.waitForURL('**/login', { timeout: 2_000 })
+      await page.locator('input[type="email"], input[placeholder*="邮箱"]').first().fill(ADMIN)
+      await page.locator('input[type="password"]').first().fill(PASSWORD)
+      await page.getByRole('button', { name: '登 录', exact: true }).click()
+      await page.waitForURL('**/wechat', { timeout: 15_000 })
+      await page.goto('/roles')
+    } catch {
+      // 2 秒内未弹回登录页 → 已稳定停留在 /roles
+    }
     await expect(page.getByRole('heading', { name: '角色配置' })).toBeVisible({ timeout: 15_000 })
     // 本地角色库 53 张，网格应有内容；至少「创建角色」入口存在
     await expect(page.getByText('创建角色').first()).toBeVisible()

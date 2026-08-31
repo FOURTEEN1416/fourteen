@@ -196,4 +196,16 @@
 **验证**：npx tsc --noEmit 0 错；npx vitest run 71/71 全绿（基线 66+新增 5，13 文件）；npm run build 通过且 IntroPage 独立 chunk（IntroPage-*.js）；eslint 5 个改动文件 0 错。另用 vite preview + Playwright 实测：/ 未登录→/intro 分流正确、/login 链接渲染、能力卡 tag 语义正确（修复过一版：语音克隆卡 tag 误显示「记忆」，已改为每卡自带 tag 文案）。
 
 **未验证/待办**：① 待协调者主检出回归门收编（E2E 冒烟 5 条不依赖 / 行为，已核对无冲突）；② 提交未 push；③ /intro 尚未进 Breadcrumb/侧边栏（公开页无导航体系，当前仅 /login 入口，符合任务包边界）。
+## 2026-08-30 — W4 E2E 冒烟扩容（窗口 wt/w4-e2e）
 
+**任务**：为新能力补三条 UI 冒烟（角色日记/重要日期/BYOK 引导），frontend/e2e/ 下交付。
+
+**动作与原因**：
+1. 新增 frontend/e2e/capabilities.spec.ts 三条：①角色日记=登录→/roles/:id/status 空态不报错 + GET /api/memory/diary entries 数组契约（按任务包降级——查实 DiarySummarizer._daily_summaries 为启动即空的内存态、无种子写入端点，DiaryCard 空态按设计不渲染，不为测试改业务代码）；②重要日期=设置页 Basic tab（默认 tab）区块渲染 + 「+ 添加日期」填行 + 保存日期 → toast「重要日期已保存」+ GET 断言服务端持久化 + 测试后 PUT 还原共享 data/important_dates.json 至基线（data/ 为跨窗 Junction，测试行名带 E2E-W4 前缀可识别）；③BYOK=GET /api/meta byok_required 布尔 + version 字符串契约（按任务包降级——完整 403→/settings/llm 引导流需 byok_required=true 后端 + 非 admin 用户，成本高）。
+2. smoke.spec.ts 仅给「角色页」测试加弹回重试（waitForURL /login 2s 探测→重登再进一次），5 条断言语义零改动。
+3. 新发现（只读诊断，业务代码未动）：vite dev 下 React StrictMode 双发 POST /auth/refresh，而后端 refresh 为旋转式（删旧 session 存新 hash，auth_routes.refresh），并发败者 401 revoked → AuthInit clearAuth → AuthGuard 弹回 /login，时序竞态（同 run 同流程 3 过 1 挂实证）。CI 收编门走 bun run preview 生产构建无 StrictMode 双发，不受影响。e2e 侧以重试韧性吸收。
+4. 看板 handoff 双写：主检出实时板（scripts/window_board.ps1，$Board 硬编码主检出路径属设计）+ 本 worktree 分支 BOARD.md（随分支收编）。
+
+**验证**：npx playwright test 全量 8/8 passed 连跑三轮（18.4s/18.5s/19.8s，含既有 5 条 + 新增 3 条；复用协调方遗留 8000 E2E 后端（e2e 库实登验证）+ 5199 vite dev）；data/important_dates.json 测试后回读为 {}（还原无痕）；git status 仅 e2e 两文件。
+
+**未验证/待办**：① 待协调者主检出四项回归门收编（E2E 门现 8 条）；② 提交未 push；③ dev 模式 refresh 竞态属业务缺陷（AuthInit 无 in-flight 去重），留待后续窗口裁决是否加单飞锁，本窗按纪律未动业务代码。
