@@ -29,23 +29,23 @@ export default function StatusCenter() {
   const recentFacts = facts ?? []
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-5">
+    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-5">
       <h2 className="text-lg font-bold text-gray-700 flex items-center gap-2">
         <span className="section-bar" />
         状态中心
       </h2>
 
-      <div className="grid grid-cols-3 gap-4">
-        <div className="glass-card rounded-xl p-4 text-center">
-          <div className="text-2xl font-bold text-macaron-yellow-deep">{emotionLabel}</div>
+      <div className="grid grid-cols-3 gap-3 sm:gap-4">
+        <div className="glass-card rounded-xl p-3 sm:p-4 text-center">
+          <div className="text-xl sm:text-2xl font-bold text-macaron-yellow-deep">{emotionLabel}</div>
           <div className="text-xs text-gray-400 mt-1">当前情绪</div>
         </div>
-        <div className="glass-card rounded-xl p-4 text-center">
-          <div className="text-2xl font-bold text-macaron-blue-deep">{affinityLabel}</div>
+        <div className="glass-card rounded-xl p-3 sm:p-4 text-center">
+          <div className="text-xl sm:text-2xl font-bold text-macaron-blue-deep">{affinityLabel}</div>
           <div className="text-xs text-gray-400 mt-1">亲密等级</div>
         </div>
-        <div className="glass-card rounded-xl p-4 text-center">
-          <div className="text-2xl font-bold text-macaron-mint-deep">
+        <div className="glass-card rounded-xl p-3 sm:p-4 text-center">
+          <div className="text-xl sm:text-2xl font-bold text-macaron-mint-deep">
             {statsLoading ? '—' : memoryCount}
           </div>
           <div className="text-xs text-gray-400 mt-1">记忆条目</div>

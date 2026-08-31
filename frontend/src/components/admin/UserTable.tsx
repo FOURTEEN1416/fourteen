@@ -240,16 +240,18 @@ export default function UserTable({
               <div className="flex gap-1 shrink-0">
                 <button
                   onClick={() => onEdit(u)}
-                  className="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-all"
+                  className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-all"
+                  aria-label="编辑用户"
                 >
-                  <Edit className="w-3.5 h-3.5" />
+                  <Edit className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => onDelete(u)}
-                  className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-all"
+                  className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-all"
                   disabled={u.id === currentUserId}
+                  aria-label="删除用户"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -285,7 +287,7 @@ export default function UserTable({
           <button
             onClick={() => onPage(Math.max(1, page - 1))}
             disabled={page <= 1}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-white/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-white/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
@@ -297,7 +299,7 @@ export default function UserTable({
               <button
                 key={p}
                 onClick={() => onPage(p)}
-                className={`min-w-[28px] h-7 text-xs font-medium rounded-lg transition-all ${
+                className={`min-w-[36px] h-9 text-xs font-medium rounded-lg transition-all ${
                   page === p
                     ? 'bg-primary-500 text-white shadow-sm'
                     : 'text-gray-500 hover:bg-white/40'
@@ -311,7 +313,7 @@ export default function UserTable({
           <button
             onClick={() => onPage(Math.min(totalPages, page + 1))}
             disabled={page >= totalPages}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-white/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-white/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
           >
             <ChevronRight className="w-4 h-4" />
           </button>

@@ -124,15 +124,15 @@ function SafetyPanelSection() {
         {/* Stats grid */}
         <div className="grid grid-cols-3 gap-3">
           <div className="rounded-lg border border-gray-100 bg-white/40 p-3 text-center">
-            <p className="text-2xl font-bold text-red-400">{stats?.today_blocked ?? 0}</p>
+            <p className="text-xl sm:text-2xl font-bold text-red-400">{stats?.today_blocked ?? 0}</p>
             <p className="text-[10px] text-gray-400 mt-0.5">🚫 今日拦截</p>
           </div>
           <div className="rounded-lg border border-gray-100 bg-white/40 p-3 text-center">
-            <p className="text-2xl font-bold text-gray-700">{stats?.total_detections ?? 0}</p>
+            <p className="text-xl sm:text-2xl font-bold text-gray-700">{stats?.total_detections ?? 0}</p>
             <p className="text-[10px] text-gray-400 mt-0.5">📊 总检测</p>
           </div>
           <div className="rounded-lg border border-gray-100 bg-white/40 p-3 text-center">
-            <p className="text-2xl font-bold text-yellow-500">
+            <p className="text-xl sm:text-2xl font-bold text-yellow-500">
               {stats?.block_rate != null ? `${stats.block_rate}%` : '—'}
             </p>
             <p className="text-[10px] text-gray-400 mt-0.5">⚠️ 拦截率</p>

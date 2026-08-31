@@ -266,7 +266,7 @@ export default function AdminProvidersPage() {
                       {/* 教程按钮 */}
                       <button
                         onClick={() => setGuideProvider(p)}
-                        className="p-1.5 text-gray-400 hover:text-primary-500 transition-colors"
+                        className="flex h-11 w-11 items-center justify-center text-gray-400 hover:text-primary-500 transition-colors"
                         title="查看教程"
                       >
                         <BookOpen className="w-4 h-4" />
@@ -275,7 +275,7 @@ export default function AdminProvidersPage() {
                       {/* 编辑按钮（特殊选项也允许编辑教程） */}
                       <button
                         onClick={() => setEditingProvider(p)}
-                        className="p-1.5 text-gray-400 hover:text-blue-500 transition-colors"
+                        className="flex h-11 w-11 items-center justify-center text-gray-400 hover:text-blue-500 transition-colors"
                         title="编辑"
                       >
                         <Edit3 className="w-4 h-4" />
@@ -286,7 +286,7 @@ export default function AdminProvidersPage() {
                         <button
                           onClick={() => handleToggle(p)}
                           disabled={togglingKey === p.key}
-                          className={`px-2.5 py-1 text-[10px] font-medium rounded transition-colors ${
+                          className={`inline-flex items-center min-h-[44px] px-3 text-[10px] font-medium rounded transition-colors ${
                             p.enabled
                               ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
                               : 'bg-green-100 text-green-700 hover:bg-green-200'
@@ -303,7 +303,7 @@ export default function AdminProvidersPage() {
                       {!p.is_special && (
                         <button
                           onClick={() => setDeletingProvider(p)}
-                          className="p-1.5 text-gray-400 hover:text-rose-500 transition-colors"
+                          className="flex h-11 w-11 items-center justify-center text-gray-400 hover:text-rose-500 transition-colors"
                           title="删除"
                         >
                           <Trash2 className="w-4 h-4" />

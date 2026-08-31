@@ -71,7 +71,7 @@ const TONE_STYLES = {
 
 export default function IntroPage() {
   return (
-    <div className="min-h-screen relative overflow-hidden">
+    <div className="min-h-[100dvh] relative overflow-hidden">
       {/* 背景光斑：暖黄 / 海盐蓝，呼应三色体系（纯 CSS，无新依赖） */}
       <div aria-hidden className="pointer-events-none absolute -top-32 -left-32 w-96 h-96 rounded-full bg-macaron-yellow/40 blur-3xl" />
       <div aria-hidden className="pointer-events-none absolute top-1/3 -right-32 w-96 h-96 rounded-full bg-macaron-blue/40 blur-3xl" />

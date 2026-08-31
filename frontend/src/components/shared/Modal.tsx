@@ -32,7 +32,7 @@ export default function Modal({ open, title, children, onClose, size = 'md' }: M
       <div className={`${sizeMap[size]} w-[90vw] glass-card rounded-xl p-5 animate-scale-in`}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-gray-800">{title}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors" aria-label="关闭">
+          <button onClick={onClose} className="-mr-2 flex h-11 w-11 items-center justify-center text-gray-400 hover:text-gray-600 transition-colors" aria-label="关闭">
             <X className="w-4 h-4" />
           </button>
         </div>
