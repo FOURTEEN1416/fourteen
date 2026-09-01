@@ -213,3 +213,74 @@ async def test_unauthorized_rejected(module_app, _seeded_tables):
     finally:
         if saved is not None:
             module_app.dependency_overrides[verify_api_key_dep] = saved
+
+
+# ═══════════════════════════════════════════════════════
+# 每日兜底（ADR-0014 第二阶段）：调度器维护路径
+# ═══════════════════════════════════════════════════════
+
+
+def test_daily_maintenance_recalculates_all_characters(module_session_factory, tmp_path, monkeypatch):
+    """run_achievement_maintenance：读角色库全部 id → 幂等重算落库。"""
+
+    import api.database as db_mod
+    import proactive.scheduler as sched
+
+    # 伪造角色库：两个角色（一个有效 id、一个缺 id 跳过、一个坏 JSON 跳过）
+    chars_dir = tmp_path / "config" / "characters"
+    chars_dir.mkdir(parents=True)
+    (chars_dir / "a.json").write_text('{"id": "maint-aaa", "name": "A"}', encoding="utf-8")
+    (chars_dir / "b.json").write_text('{"name": "无ID"}', encoding="utf-8")
+    (chars_dir / "bad.json").write_text("{broken", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    # 会话工厂指向测试库（与 module fixtures 同一引擎族）
+    monkeypatch.setattr(db_mod, "_async_session", module_session_factory)
+
+    # 建表
+    import asyncio as _asyncio
+
+    from api.database import Base
+
+    async def _create():
+        async with module_session_factory().bind.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    _asyncio.run(_create())
+
+    # 事实源：maint-aaa 写 12 条记忆事实（触发 memory_10 解锁）
+    import api.achievement_engine as engine
+
+    facts_dir = tmp_path / "character_memory"
+    facts_dir.mkdir(exist_ok=True)
+    (facts_dir / "maint-aaa.json").write_text(
+        json.dumps([{"id": f"f{i}", "content": f"c{i}"} for i in range(12)]), encoding="utf-8"
+    )
+    monkeypatch.setattr(engine, "_MEMORY_FACTS_DIR", facts_dir)
+
+    handled = sched.run_achievement_maintenance()
+    assert handled == 1  # 仅 maint-aaa（缺 id/坏 JSON 跳过）
+
+    # 落库验证
+    from sqlalchemy import select
+
+    async def _check():
+        async with module_session_factory() as session:
+            rows = (await session.execute(
+                select(db_mod.CharacterAchievement).where(
+                    db_mod.CharacterAchievement.character_id == "maint-aaa"
+                )
+            )).scalars().all()
+            return {r.achievement_id: r for r in rows}
+
+    by_id = _asyncio.run(_check())
+    assert by_id["memory_10"].unlocked_at is not None
+    assert by_id["memory_10"].progress == 12
+
+
+def test_daily_maintenance_no_character_dir(module_session_factory, tmp_path, monkeypatch):
+    """角色库目录不存在 → 返回 0，不抛错。"""
+    import proactive.scheduler as sched
+
+    monkeypatch.chdir(tmp_path)  # tmp 下无 config/characters
+    assert sched.run_achievement_maintenance() == 0

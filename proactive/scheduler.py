@@ -29,6 +29,45 @@ except ImportError:
     logger.warning("APScheduler not installed, scheduler disabled")
 
 
+def run_achievement_maintenance() -> int:
+    """成就每日兜底重算（ADR-0014 每日维护路径，2026-09-01 第二阶段）。
+
+    对角色库（config/characters/*.json 内部 id 字段）全部角色幂等重算：
+    修复漏事件/历史数据漂移；读取时重算（GET achievements）仍是主路径。
+    返回处理的角色数；角色库缺失或为空时返回 0。
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    from api.achievement_engine import recalculate_achievements
+    from api.database import _async_session as _ach_session_factory
+    from api.path_security import sanitize_id as _sanitize_id
+
+    characters_dir = _Path("config/characters")
+    if not characters_dir.exists():
+        return 0
+    ids: list[str] = []
+    for card_file in characters_dir.glob("*.json"):
+        try:
+            data = _json.loads(card_file.read_text(encoding="utf-8"))
+            cid = _sanitize_id(str(data.get("id", "")))
+            if cid:
+                ids.append(cid)
+        except Exception:  # noqa: BLE001
+            logger.warning("成就兜底跳过无法解析的角色文件: %s", card_file.name)
+
+    async def _recalc_all() -> None:
+        async with _ach_session_factory() as session:
+            for cid in ids:
+                try:
+                    await recalculate_achievements(session, cid)
+                except Exception:  # noqa: BLE001
+                    logger.warning("成就兜底重算失败: %s", cid, exc_info=True)
+
+    asyncio.run(_recalc_all())
+    return len(ids)
+
+
 class ProactiveScheduler:
     """
     主动消息调度器
@@ -322,6 +361,14 @@ class ProactiveScheduler:
                         )
         except Exception as e:  # noqa: BLE001
             logger.warning("好感度衰减任务失败: %s", e)
+
+        # ── 成就每日兜底重算（ADR-0014 第二阶段）──
+        try:
+            maintained = run_achievement_maintenance()
+            if maintained:
+                logger.info("成就每日兜底重算完成: %d 个角色", maintained)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("成就兜底重算任务失败: %s", e)
 
         # ── 候选 D：重要日期检查（生日/纪念日命中即发祝福） ──
         self._check_important_dates()
