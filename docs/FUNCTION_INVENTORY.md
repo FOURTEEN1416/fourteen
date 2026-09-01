@@ -69,12 +69,12 @@
 | 编号 | 功能点 |
 |------|--------|
 | BASIC-1 | 基础信息：五维性格滑条/锚点编辑/口头禅/描述 |
-| VOICE-TAB-1 | 语音 tab：MiMo 模型三选（基础/克隆/设计）（⚠️ G-06 在册：保存接口标开发中，前端仅预览） |
+| VOICE-TAB-1 | 语音 tab：MiMo 模型三选（基础/克隆/设计）+ **保存落盘**（GAP-4 结案 09-01：POST /characters/{id}/voice，mimo_model 进 extra_params；克隆/设计音色创建指引至语音工作台） |
 | MESSAGE-1 | 消息 tab：频率控制四参数（紧迫阈值 0-10/每日上限/最小间隔/冷却）**保存真生效**（apply_runtime_config 写运行时控制器；08-28 修复旧版只写字典不生效）+ 保存按钮 |
 | MESSAGE-2 | 主动消息开关：暂停/恢复调度（POST /proactive/pause，暂停仅停自动触发不影响手动） |
 | MESSAGE-3 | 手动控制：立即发送一条主动消息（POST /proactive/send 绕过频率、计入统计）+ 最近 5 条发送记录 |
 | MESSAGE-4 | 统计卡真数据：今日主动/最后发送（08-28 修复：旧 history 读不存在的 `_sent_messages` 属性，一直返回空） |
-| DATA-1 | 数据 tab：概览统计（消息/记忆条数）+ 网络人设增强按钮（/api/characters/{id}/enrich）+ RAG 静态统计区（⚠️ G-07 在册：占位数据未接真实接口） |
+| DATA-1 | 数据 tab：概览统计（消息/记忆条数）+ 网络人设增强按钮（/api/characters/{id}/enrich）+ **知识库真实管理区**（SP-4 结案 09-01：KnowledgePreview 挂载——真实 stats + 检索测试，替换假 RAG 三卡与占位横幅） |
 | STICKERS-1 | 表情包 tab |
 | TIMELINE-1 | 剧情时间线 tab（内嵌 StorylineEditor） |
 
@@ -85,7 +85,9 @@
 | STATUS-2 | 无活跃角色兜底态（引导先创建/激活） |
 | STATUS-3 | 最近记忆列表（useMemoryFacts 前 5 条） |
 | STATUS-4 | **角色日记**（候选 B，08-28）：GET /api/memory/diary 每日摘要最近 5 篇折叠展示 |
-| ⚠️ | SP-1 挂起：情绪分布图/成就/趋势缺（数据层 useEmotionTrend 已就绪零消费） |
+| STATUS-5 | **成就卡**（ADR-0014 第一阶段，09-01）：useAchievements → GET /api/characters/{id}/achievements，已解锁彩色徽章（四类取色）/未解锁灰态进度条，展开显示全部 |
+| STATUS-6 | **记忆三层**（GAP-2 结案，09-01）：角色长期事实（/characters/{id}/memory/facts）+ 珍藏收藏（/favorites）+ 工作记忆（/api/stats working_count，会话域诚实标注）三层计数 + 最近沉淀列表 |
+| ⚠️ | SP-1 剩余：情绪分布图（无专门端点）与亲密度趋势 UI（useEmotionTrend 已就绪零消费）仍未实现；成就已落地 |
 
 ### PSYCH — 心理画像 `/psych`（PsychProfilePage.tsx, 2026-09-01 新增）
 | 编号 | 功能点 |
@@ -96,6 +98,13 @@
 | PSYCH-4 | LIWC 维度（psychLiwc → GET /api/psych/liwc） |
 | PSYCH-5 | 画像重置（psychReset → DELETE /api/psych/profile，需确认） |
 | PSYCH-6 | 侧栏导航入口「心理画像」（navGroups.tsx:36，公开路由 `/psych`） |
+
+### ACH — 角色成就 `/api/characters/{id}/achievements`（ADR-0014 第一阶段，2026-09-01）
+| 编号 | 功能点 |
+|------|--------|
+| ACH-1 | 成就清单（GET，读取即幂等重算）：10 成就×4 类（陪伴/记忆/互动/探索），指标=记忆事实/日记篇数/知识块/重要日期/音色绑定/收藏 |
+| ACH-2 | 显式重算（POST .../recalculate）：幂等，已解锁不回退，unlocked_at 首次达标落库 |
+| ACH-3 | StatusCenter 成就卡消费（STATUS-5），仅展示不推送 |
 
 ## I. 跨域新能力（2026-08-28 候选 A-D，调研对标 awesome-ai-companion 后立项）
 
@@ -166,7 +175,7 @@
 | ~~GAP-1~~ | ~~企业微信通道未实现~~ | 05-19 §1.2 | **❌ 08-28 用户裁决：只做个人微信，其他通道不需要**（Non-Goal） |
 | GAP-2 | 记忆三层仅"条目数+最近事实"入 UI，工作记忆/情景时间线无呈现 | 05-19 §1.2 记忆系统 | 与 SP-1（状态中心丰富化）合并决策 |
 | GAP-3 | MESSAGE-1 统计卡"今日触发/最后发送"为占位 `—`（数据未接） | 主动消息可观测 | 小改动，可并入 SP-5 批次 |
-| GAP-4 | VOICE-TAB-1 / DATA-1 的保存接口标"开发中"、RAG 区静态占位（G-06/G-07） | 页面内实况标注 | 需后端补端点或接既有端点，立项裁决 |
-| GAP-5 | 状态中心缺情绪分布/成就/趋势（SP-1 挂起，数据层就绪）；**成就体系已立项为 ADR-0014 提案**（角色隔离/四类成就/幂等触发/隐私边界，未实现） | 05-29 差距分析 + 09-01 ADR-0014 | 提案待实现 |
+| ~~GAP-4~~ | ✅ 结案（09-01）：语音保存接线 + 知识库真实管理区（G-06/G-07 消案） | 09-01 批次 | 已实现 |
+| GAP-5 | 状态中心：**成就已落地**（09-01 ADR-0014 第一阶段）；剩余=情绪分布（无端点）+ 趋势 UI（hook 就绪） | 05-29 差距分析 + 09-01 ADR-0014 | 部分结案 |
 
 > 本清单由代码读出（App.tsx 路由 × 15 页面组件 × api/*.ts 消费），历史意图对照 `docs/history/`。条目变更随代码同步。

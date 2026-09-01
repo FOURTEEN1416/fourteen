@@ -1,6 +1,6 @@
 # ADR-0014：角色成就体系
 
-**状态**：提案（待实现）  
+**状态**：已采纳（第一阶段 2026-09-01 实现并验证）  
 **日期**：2026-09-01  
 **关联**：`docs/FUNCTION_INVENTORY.md` 状态中心 GAP-5、`docs/history/2026-05-29-design-vs-current-gap.md`
 
@@ -62,3 +62,12 @@
 ## 未决项
 
 成就名称、文案和阈值需在 UI 开发前确认；本 ADR 不代表功能已实现，不得在功能清单中标记为“已完成”。
+
+## 实现记录（2026-09-01 第一阶段）
+
+- 数据模型：`api/database.py` `CharacterAchievement`（character_id + achievement_id 唯一语义，progress/target/unlocked_at）。
+- 引擎：`api/achievement_engine.py`——10 个成就（陪伴 3/记忆 2/互动 2/探索 3），指标全部来自既有事实源（角色记忆事实文件、daily_summaries、知识库 stats、重要日期、音色绑定、收藏）；读取即幂等重算，已解锁不回退。
+- 端点：`GET /api/characters/{id}/achievements`、`POST /api/characters/{id}/achievements/recalculate`。
+- UI：状态中心成就卡（已解锁彩色徽章按四类取色，未解锁灰态+进度条，展开显示全部）。
+- 测试：`tests/test_achievements.py` 6 条（空态/解锁落库/幂等/不回退/角色隔离/日期源/认证在位）。
+- 通知策略按本 ADR：仅状态中心展示，不推送、不进提示词。

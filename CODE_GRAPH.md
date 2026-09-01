@@ -12,14 +12,14 @@
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| API 端点（create_api_app 实扫） | **203 端点** / 16 include_router | 实扫 2026-09-01（demo/-4、training/extract/-1、shisi 语音训练/-4：MiMo-only 收敛；主动消息手动控制 +3、BYOK meta +1、consent +1、日记种子 +1 逐批累加） |
+| API 端点（create_api_app 实扫） | **205 端点** / 16 include_router | 实扫 2026-09-01（demo/-4、training/extract/-1、shisi 语音训练/-4：MiMo-only 收敛；主动消息手动控制 +3、BYOK meta +1、consent +1、日记种子 +1 逐批累加） |
 | main.py 体量 | **约 16 KB / 409 行** | 2026-08-28 两轮瘦身：克隆管线移除 + run_console_chat 迁出 `orchestrator/console_chat.py`（命令分派拆分，复杂度 24 单体消解） |
 | 前端页面 | **15 个** | Glob `frontend/src/pages/*.tsx`（SP-9 幽灵层三页 + DemoPage 已删除） |
 | 前端 API 模块 | **12 个** | Glob `frontend/src/api/*.ts`（demo.ts、users.ts 已删除） |
 | 前端 Zustand store | 4 个 | LS `frontend/src/store/` |
 | Python 测试用例 | **1030 passed + 1 skipped** | 实跑 2026-08-28（旧引擎/训练测试随 MiMo-only 收敛删除 -15） |
 | 前端测试用例 | **71 个全部通过 / 13 文件** | `npx vitest run`（2026-08-28 实跑；SP-9 删除幽灵页测试后 79→59） |
-| 测试用例合计 | **1101 个**(1030 Python + 71 前端) | pytest + vitest 实跑 2026-09-01（1101 = 1030 Python + 71 前端）|
+| 测试用例合计 | **1111 个**(1036 Python + 75 前端) | pytest + vitest 实跑 2026-09-01（1111 = 1036 Python + 75 前端）|
 | tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
 
 ### 1.2 知识图谱快照指标（✅ 2026-08-28 重新索引）
@@ -210,7 +210,7 @@ sequenceDiagram
 |------|------|--------|------|------|
 | `api/routers/` | 20 个域路由（不含 `__init__.py`） | ~149 | 20 | 域路由：character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card/chat/clone/misc/personality/safety/tools/training/users（demo 08-28 删除、training/extract 08-28 移除） |
 | `shisi/api/` | v1 + v2 | ~49 | 13 | shisi 域：affinity/character/emotion_stage/memory/persona/stats/sticker/training/vital_signs + v2 健康检查/迁移/persona/character |
-| **合计（实扫）** | | **203** | **33** | `app.routes` 实测(2026-09-01) |
+| **合计（实扫）** | | **205** | **33** | `app.routes` 实测(2026-09-01) |
 
 **app_factory.py 实际挂载策略**（核实于源码）：
 
@@ -699,3 +699,4 @@ tools/
 | **`--no-scheduler` 通过 `DISABLE_SCHEDULER=1` 环境变量传递给子进程** | `main.py:485 _run_orchestrator` | `main.py` 启动时 `--no-scheduler` 仅停止当前进程的调度器，但 uvicorn 派生的 worker 子进程会重新初始化。通过 `os.environ["DISABLE_SCHEDULER"]="1"` 让子进程继承，`api/run_api.py:_ensure_scheduler_singleton()` 检查到该变量后立即停止调度器，等价于在所有 worker 中执行 `--no-scheduler` |
 
 | 2026-09-01 (T1-T5 批次) | e80b31f/9253690/f6390ef | **T1 mypy 债清零**（78→0：database.py 等 4 表 Mapped[] 升级消 46 处 + misc/stream/provider 等逐处清偿 + FastAPI 依赖工厂真隐患修复；FF-020 恢复条件达成，mypy 实测 0 errors）；**T2 Psych 画像页**（`/psych` 路由+侧栏入口，消费既有 /api/psych/* 五端点）；**T3 日记种子端点**（POST /api/memory/diary/seed，misc_routes 15→16）；**T5 成就体系立项**（ADR-0014 提案：角色隔离/四类成就/幂等触发/隐私边界，明确"提案≠已实现"）。端点 194→**203**（实扫），测试 1030+1 Python / 71 前端 = **1101** 全绿 |
+| 2026-09-01 (第二批) | working tree | **剩余任务一次性完善**：(1) **SP-4 知识库挂载**：KnowledgePreview（统计+检索测试）挂入 RoleSettings DATA tab，替换假 RAG 统计三卡与"开发中"横幅（G-07 消案，使用真实数据）；(2) **GAP-2 记忆三层呈现**：StatusCenter 新增记忆体系卡（角色长期事实/珍藏收藏/工作会话三层计数 + 最近沉淀）；(3) **GAP-4 语音保存接线**：VoiceTab 保存按钮 → POST /characters/{id}/voice（mimo_model 进 extra_params），删两处"开发中"横幅；(4) **成就体系落地（ADR-0014 第一阶段）**：`api/achievement_engine.py`（10 成就×4 类，确定性事实源重算幂等）+ `character_achievements` 表（Mapped[]）+ GET/POST achievements 端点 + StatusCenter 成就卡（已解锁彩色徽章/未解锁进度条）；(5) **refresh 竞态根治**：AuthInit 抽组件化 + 模块级 in-flight 单飞锁（StrictMode 双挂载并发 refresh → 后端旋转 session 败者 401 弹回 /login）。端点 203→**205**，测试 **1036+1 Python + 75 前端 = 1111** + E2E 13 全绿 |

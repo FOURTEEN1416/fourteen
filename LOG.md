@@ -270,3 +270,22 @@
 **上云与 CI（续）**：①上云完成——删除清单 10 文件（83e3270..HEAD）+ LF 归档 + remote_deploy.sh（构建 844ms，PsychProfilePage chunk 在产物）；终验 active/health ok/前端 200//psych 200/diary-seed 401（端点已挂载）//api/meta byok 正常。②CI 首跑红=ruff Hardened 3 处存量违规随批次暴露（database.py 未用 cast、misc_routes 死变量 save_db、persona_service 常量 getattr B009）——修复 9455760，连带 mypy union-attr 补 None 守卫；③CI 复跑 **全绿**（backend 含 ruff+mypy Hardened / frontend / 全部 FF）。④lint 修复三文件已同步服务器树（行为等同，未重建）。
 
 **终态**：本地=GitHub=云端 @9455760（行为一致）；mypy 0 / ruff 0 / pytest 1030+1 / vitest 71 / E2E 13 / 端点 203（实扫）。
+
+---
+
+## 2026-09-01（晚） — 剩余任务一次性完善：SP-4 + GAP-2/4 + 成就体系 + 竞态根治
+
+**用户裁决**：「一次性完善剩余的任务」（SP-4 知识库挂载、GAP-2/4、成就体系实现、refresh 竞态根治）。
+
+**改动**：
+1. **SP-4 知识库挂载**（KnowledgePreview 挂入 RoleSettings DATA tab）——真实 stats + 检索测试替换假 RAG 三卡（vectorDocs/keywordIndex/hitRate 是编造数据，违反"使用真实数据"偏好）与"接口开发中"横幅。G-07 消案。
+2. **GAP-4 语音保存**——VoiceTab 保存按钮 → `POST /characters/{id}/voice`（engine=mimo-tts + extra_params.mimo_model），脏态启用/成功反馈/错误展示；克隆/设计"开发中"提示改为真实指引（创建入口在语音工作台，此处只选模型形态）。G-06 消案。
+3. **GAP-2 记忆三层**——StatusCenter「记忆体系」卡：角色长期事实（/characters/{id}/memory/facts，按角色隔离）+ 珍藏收藏（/favorites）+ 工作记忆（/api/stats working_count，诚实标注"会话"域）+ 最近沉淀列表。
+4. **成就体系（ADR-0014 第一阶段实现）**——`api/achievement_engine.py`：10 成就×4 类（陪伴/记忆/互动/探索），指标全部来自既有事实源（角色记忆事实文件/daily_summaries/知识库 stats/重要日期/音色绑定/收藏），**读取即幂等重算、已解锁不回退、unlocked_at 首次达标落库**；`character_achievements` 表（Mapped[] 范式）；GET achievements + POST recalculate 两端点；StatusCenter 成就卡（解锁彩色徽章四类取色/未解锁灰态进度条）。通知策略守 ADR：仅展示、不推送、不进提示词。
+5. **refresh 竞态根治**——AuthInit 从 App.tsx 抽出为 `components/auth/AuthInit.tsx`，模块级 in-flight 单飞锁：StrictMode 双挂载只发一次 refresh（根因=后端旋转式 session，并发 refresh 败者 401 弹回 /login）；锁释放后真实再挂载带新 cookie 重跑无害。
+
+**新增测试**：`tests/test_achievements.py` 6 条（空态/解锁落库+幂等/不回退/角色隔离/日期源/认证在位）+ `AuthInit.test.tsx` 3 条（StrictMode 双挂载单飞/无用户直初始化/失败清认证）+ StatusCenter 成就卡 1 条。
+
+**验证（四项回归门全绿）**：pytest **1036+1**（+6）· vitest **75/75**（+4）· tsc **0 错** · ruff **0** · mypy **0**（345 文件）· **E2E 13/13**（独立种子库；capabilities 一条断言从"最近记忆"改"记忆体系"= GAP-2 改造的合理选择器更新）。端点实扫 **205**（+2 成就）。E2E 后端/前端进程已杀净。
+
+**真源同步**：CODE_GRAPH §1.1/§4.2/§13（205/1111）、app_factory 头注释（201→205 实扫口径）、FUNCTION_INVENTORY（STATUS-5/6、VOICE-TAB-1、DATA-1、ACH-1~3、GAP-2/4 结案、GAP-5 部分结案）、DECISION_LEDGER（SP-4 ✅ + 09-01 晚批次行）、ADR-0014（提案→已采纳+实现记录）。
