@@ -1,6 +1,6 @@
 # 代码图谱 — unique-you (唯一的你) v3.4.0
 
-> 由 维护者 手动维护 | 最后核实: 2026-08-28（v3.4 增量：main.py 瘦身 + 克隆智能体代跑 + 前后端对齐验证）
+> 由 维护者 手动维护 | 最后核实: 2026-09-01（v3.5 增量：Psych 画像页 + 日记种子 + 主动消息控制 + 成就体系提案）
 > ✅ 路由/文件/模块/测试数已通过 create_api_app 实扫 + Glob + pytest + vitest 实时核实（2026-08-28）。
 > ✅ 图数据库已于 2026-08-28 由 codebase-memory 图谱工具 v0.10.8 重新索引（artifact.json schema v2: **7706 节点 / 32367 边**，commit c32af54），历史矛盾（543277c 声称的 6771 节点未持久化）就此消案。
 
@@ -8,18 +8,18 @@
 
 ## 1. 全局指标
 
-### 1.1 实时核实指标（2026-08-28 create_api_app/Glob/pytest/vitest 扫描）
+### 1.1 实时核实指标（2026-09-01 create_api_app/Glob/pytest/vitest/mypy 扫描）
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| API 端点（create_api_app 实扫） | **194 端点** / 16 include_router | 实扫 2026-08-28（demo/-4、training/extract/-1、shisi 语音训练管线/-4：MiMo-only 收敛） |
-| main.py 体量 | **16 KB / 409 行** | 2026-08-28 两轮瘦身：克隆管线移除 + run_console_chat 迁出 `orchestrator/console_chat.py`（命令分派拆分，复杂度 24 单体消解） |
+| API 端点（create_api_app 实扫） | **202 端点** / 16 include_router | 实扫 2026-08-28（demo/-4、training/extract/-1、shisi 语音训练管线/-4：MiMo-only 收敛） |
+| main.py 体量 | **约 16 KB / 409 行** | 2026-08-28 两轮瘦身：克隆管线移除 + run_console_chat 迁出 `orchestrator/console_chat.py`（命令分派拆分，复杂度 24 单体消解） |
 | 前端页面 | **15 个** | Glob `frontend/src/pages/*.tsx`（SP-9 幽灵层三页 + DemoPage 已删除） |
 | 前端 API 模块 | **12 个** | Glob `frontend/src/api/*.ts`（demo.ts、users.ts 已删除） |
 | 前端 Zustand store | 4 个 | LS `frontend/src/store/` |
-| Python 测试用例 | **1015 passed + 1 skipped / 80.98s** | 实跑 2026-08-28（旧引擎/训练测试随 MiMo-only 收敛删除 -15） |
-| 前端测试用例 | **59 个全部通过 / 11 文件** | `npx vitest run`（2026-08-28 实跑；SP-9 删除幽灵页测试后 79→59） |
-| 测试用例合计 | **1074 个**(1015 Python + 59 前端) | pytest + vitest 实跑 2026-08-28 |
+| Python 测试用例 | **1030 passed + 1 skipped** | 实跑 2026-08-28（旧引擎/训练测试随 MiMo-only 收敛删除 -15） |
+| 前端测试用例 | **71 个全部通过 / 13 文件** | `npx vitest run`（2026-08-28 实跑；SP-9 删除幽灵页测试后 79→59） |
+| 测试用例合计 | **1101 个**(1030 Python + 71 前端) | pytest + vitest 实跑 2026-08-28 |
 | tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
 
 ### 1.2 知识图谱快照指标（✅ 2026-08-28 重新索引）
@@ -202,7 +202,7 @@ sequenceDiagram
 - `run_console_chat` — 控制台交互
 - `run_wechat_mode` — 微信模式
 
-### 4.2 API 层（199 路由 — 2026-08-28 create_api_app 实扫)
+### 4.2 API 层（202 路由 — 2026-08-28 create_api_app 实扫)
 
 两个路由来源：
 
@@ -210,7 +210,7 @@ sequenceDiagram
 |------|------|--------|------|------|
 | `api/routers/` | 20 个域路由（不含 `__init__.py`） | ~149 | 20 | 域路由：character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card/chat/clone/misc/personality/safety/tools/training/users（demo 08-28 删除、training/extract 08-28 移除） |
 | `shisi/api/` | v1 + v2 | ~49 | 13 | shisi 域：affinity/character/emotion_stage/memory/persona/stats/sticker/training/vital_signs + v2 健康检查/迁移/persona/character |
-| **合计（实扫）** | | **198** | **33** | `app.routes` 实测(2026-08-28) |
+| **合计（实扫）** | | **202** | **33** | `app.routes` 实测(2026-09-01) |
 
 **app_factory.py 实际挂载策略**（核实于源码）：
 
@@ -657,7 +657,7 @@ tools/
 | 2026-08-28 (增量重建) | (working tree) | **v3.3.0 增量刷新（基于 v3.2 基线，非从零重建）**：(1) Demo 全删落地（用户裁决 D1）：删 `api/routers/demo_routes.py`(4 端点) + app_factory 挂载 + 3 处测试引用，前端 DemoPage.tsx/demo.ts 同步删除，端点 204→**199**（实扫）；(2) SP-9 幽灵层三页（UsersPage/UserWorkspace/BindingDetailPage）+ DemoPage 删除入册，前端页面 19→**15**、API 模块 14→**12**；(3) 测试基线重测：1030 Python + 59 前端 = **1089**（pytest/vitest 实跑全绿）；(4) 消除 §1.2 时间戳矛盾：artifact.json 实读 2026-06-30/5983 节点为权威，543277c 的"08-01 重索引 6771 节点"声明因未持久化而废弃；(5) clone 云端预览链路下线(fb04507)、Firecrawl→Crawl4AI(e1a4cec)、OpenCode Zen 供应商移除(f3dac24)、wechat_decrypt_source.py 删除等变更带核对入册 |
 | 2026-08-28 (图谱重索引) | (working tree) | **§1.2 图数据库重索引消案**：codebase-memory 图谱工具 修复安装（pip，v0.10.8）→ 全量重索引 → **7706 节点 / 32367 边**（schema v2，commit c32af54，artifact.json 回写验证）；search_graph/trace_path/query_graph CLI 查询验证通过；同批感染源修正：README/CODEMAPS×3/DECISION_LEDGER/VISION 旧数字清零，DOCUMENTATION_GOVERNANCE_REPORT.md 删除（污染口径，见 DELETION_LOG） |
 | 2026-08-28 (MiMo-only) | (working tree) | **语音域 MiMo-only 收敛（用户裁决 A）**：删 4 provider + voice_training.py + shisi 语音训练 API（4 端点）与 registry 装配 + EmotionVoiceMapper（Edge 专用）；tts_manager 单引擎重写、_init_mixin 去 emotion_mapper 注入、voice_routes 引擎面收敛（/voice/speakers→MiMo 音色，0 UI 消费）、config 四引擎块删除、pyproject 删 edge-tts + 新增 win-tts-fallback 可选组；fallback_local 重写为 Windows SAPI 本地合成。端点 198→**194**，测试 1030→**1015**+1（vitest 59 不变），全绿 |
-| 2026-08-28 (v3.4 治理) | (working tree) | **v3.4.0**：(1) main.py 屎山治理：`run_console_chat`（复杂度 24 单体）迁出为 `orchestrator/console_chat.py` 命令分派拆分，main.py 494→409 行，清除 docstring 重复/函数内 import 遮蔽/banner 死替换/未用形参；(2) 克隆 tab 智能体代跑改造：CreateRole 三步流（OpenCode 推荐→一键复制任务书→仅上传 JSON），任务书 `docs/guides/微信克隆-智能体任务书.md` + 前端内嵌 `constants/cloneAgentGuide.ts`，指向 wechat-decrypt 仓库 AGENTS.md；(3) **前后端对齐验证**：前端调用缺后端 **0**，消费 118/198（60%），80 零消费均为已知开放面（shisi 域/psych 等幽灵能力/运维），报告 `docs/reports/2026-08-28_前后端对齐验证.md`；(4) 测试基线不变 1089 全绿 |
+| 2026-08-28 (v3.4 治理) | (working tree) | **v3.5.0**：(1) main.py 屎山治理：`run_console_chat`（复杂度 24 单体）迁出为 `orchestrator/console_chat.py` 命令分派拆分，main.py 494→409 行，清除 docstring 重复/函数内 import 遮蔽/banner 死替换/未用形参；(2) 克隆 tab 智能体代跑改造：CreateRole 三步流（OpenCode 推荐→一键复制任务书→仅上传 JSON），任务书 `docs/guides/微信克隆-智能体任务书.md` + 前端内嵌 `constants/cloneAgentGuide.ts`，指向 wechat-decrypt 仓库 AGENTS.md；(3) **前后端对齐验证**：前端调用缺后端 **0**，消费 118/198（60%），80 零消费均为已知开放面（shisi 域/psych 等幽灵能力/运维），报告 `docs/reports/2026-08-28_前后端对齐验证.md`；(4) 测试基线更新为 1101（1030 Python + 71 前端）全绿 |
 
 *此图谱将持续更新以反映项目变化。下一次刷新应重跑 codebase-memory 图谱工具 索引以更新节点/边数据。*
 
@@ -696,3 +696,5 @@ tools/
 | **`requirements.txt` 已删除** | — | pyproject.toml 已是权威完整依赖源，文件头部已声明"以 pyproject.toml 为权威" |
 | **多 worker 调度器单例走 flock 文件锁** | `api/run_api.py:131 _ensure_scheduler_singleton()` | uvicorn `--workers 4` 启动 4 个进程，每个都执行 `orchestrator.initialize()` → `_init_ase_and_scheduler` → `scheduler.start()`，若无锁会有 4 个调度器并行运行导致 4 倍主动消息。`fcntl.flock(LOCK_EX \| LOCK_NB)` 确保只有 master worker 持锁；锁在进程退出时自动释放；锁文件 `/tmp/ai-girlfriend-scheduler.lock` |
 | **`--no-scheduler` 通过 `DISABLE_SCHEDULER=1` 环境变量传递给子进程** | `main.py:485 _run_orchestrator` | `main.py` 启动时 `--no-scheduler` 仅停止当前进程的调度器，但 uvicorn 派生的 worker 子进程会重新初始化。通过 `os.environ["DISABLE_SCHEDULER"]="1"` 让子进程继承，`api/run_api.py:_ensure_scheduler_singleton()` 检查到该变量后立即停止调度器，等价于在所有 worker 中执行 `--no-scheduler` |
+
+| 2026-09-01 (T1/T2/T3/T5) | working tree | **T1 mypy 类型债清零（mypy 0 errors）；Psych 画像页、日记种子端点、成就体系 ADR-0014 已落地/提案化；当前测试 1030+1 / 71。** |

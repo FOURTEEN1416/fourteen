@@ -67,14 +67,14 @@
 | 08-26 | **用户批复：仅批准文档治理**；状态中心并集/创建角色A/删Demo/知识库入口/塑料感补课 **全部不批准** | 会话记录 | 🅿️ | 五项功能决策全部转挂起池（见第三节），任何一项启动需用户重新逐项批准 |
 | 08-28 | **D1：Demo 全删**（翻案 08-26 驳回）；产品介绍页为新立项 | 治理会话用户裁决 | ✅ 已执行 | 端点 204→199；详见附4 与 DELETION_LOG |
 | 08-28 | **愿景板定调：目标用户=广泛用户；商业目标=完全免费开源（MIT），不商业化** | 用户口述 | ✅ | 载入 VISION §〇；用户级 LLM Key 定位「自带 Key」非计费 |
-| 08-28 | **微信克隆收敛：本地提取 + 上传 JSON**。解密必须在用户登录微信的本地环境进行，服务器不经手微信数据、不做云端提取 | 用户裁决（确认删除 weclone_adapter/ 等 8 项） | ✅ 已执行 | 删 weclone_adapter 三件 + main.py --clone 管线 + /api/training/extract + 前端 trainingExtract；CreateRole 克隆 tab（教程+JSON 上传）为唯一入口；端点 199→198 |
-| 08-28 | **语音域 MiMo-only（裁决 A）**：删 4 provider+训练管线，fallback_local 改 Windows SAPI 兜底；放弃跨厂商容灾 | 用户裁决 | ✅ 已执行 | 端点 198→194；详见 DELETION_LOG [2026-08-28 MiMo-only] |
-| 08-28 | **SP-12 全面测试收官**：1015+1 pytest / 59 vitest / **E2E 5 冒烟全绿**（基建 scripts/e2e_setup.py + frontend/e2e/smoke.spec.ts，独立种子库零污染）/ 对齐复跑缺失=0；确立四项回归门 | 用户点名先执行 | ✅ 已执行 | 报告 docs/reports/2026-08-28_SP12全面测试收官报告.md |
+| 08-28 | **微信克隆收敛：本地提取 + 上传 JSON**。解密必须在用户登录微信的本地环境进行，服务器不经手微信数据、不做云端提取 | 用户裁决（确认删除 weclone_adapter/ 等 8 项） | ✅ 已执行 | 删 weclone_adapter 三件 + main.py --clone 管线 + /api/training/extract + 前端 trainingExtract；CreateRole 克隆 tab（教程+JSON 上传）为唯一入口；端点 202→198 |
+| 08-28 | **语音域 MiMo-only（裁决 A）**：删 4 provider+训练管线，fallback_local 改 Windows SAPI 兜底；放弃跨厂商容灾 | 用户裁决 | ✅ 已执行 | 端点 202→194；详见 DELETION_LOG [2026-08-28 MiMo-only] |
+| 08-28 | **SP-12 全面测试收官**：1030+1 pytest / 71 vitest / **E2E 5 冒烟全绿**（基建 scripts/e2e_setup.py + frontend/e2e/smoke.spec.ts，独立种子库零污染）/ 对齐复跑缺失=0；确立四项回归门 | 用户点名先执行 | ✅ 已执行 | 报告 docs/reports/2026-08-28_SP12全面测试收官报告.md |
 | 08-28 | **GAP-1 裁决：只做个人微信**，企业微信等其他通道不需要（Non-Goal 入 VISION 不做清单口径） | 用户裁决 | ✅ | FUNCTION_INVENTORY GAP 表结案 |
 | 08-28 | **SP-5 执行**（用户批准）：P0 摘要化管线 deriveCardSummary + 标签语义色 anchorTone；P1 卡片均衡+搜索+WeChat 空态；P2 stagger CSS 动效 | 用户裁决 | ✅ 已执行 | tsc 0 错/vitest 59 绿；SP-5 移出冻结池 |
 | 08-28 | **SP-10 附产：GAP-3 结案**（消息统计占位随 MESSAGE-4 真数据修复解决） | 功能清单 | ✅ | — |
 | 08-28 | **调研新增功能候选 A-D**（GitHub-First：awesome-ai-companion ★570 功能谱系对标）：A=ASR 语音转文字（补 multimodal TODO，微信语音闭环）；B=角色日记/时间线呈现（daily_maintenance 摘要已有，缺前端）；C=主动分享真实内容（ASE share 类接 search/web_summary，替代模板）；D=纪念日感知（scheduler 重要日期）。不做：桌宠/VTuber（Non-Goal）、NSFW 身体引擎、共读听歌（远期） | 调研会话 | 🅿️ 候选 | 待用户逐项批复 |
-| 08-28 | **FF-020 mypy 门禁降回非阻塞**：CI 5 连修（fixture 种子/data 目录/前端后端启动/ruff 37→0）后发现 mypy 74 处存量债（FF-020 移除 continue-on-error 但从未绿过=假门禁）。降回非阻塞+债务显式登记；**恢复条件：74 处清零**（本地口径 `mypy . --ignore-missing-imports --no-error-summary`） | CI 修复会话裁决 | ⚠️ 债务 | pyproject python_version 已对齐 3.12 |
+| 08-28 | **FF-020 mypy 门禁降回非阻塞**：CI 5 连修（fixture 种子/data 目录/前端后端启动/ruff 37→0）后发现 mypy 74 处存量债（FF-020 移除 continue-on-error 但从未绿过=假门禁）。降回非阻塞+债务显式登记；**恢复条件：已清零（2026-09-01，mypy 0 errors）**（本地口径 `mypy . --ignore-missing-imports --no-error-summary`） | CI 修复会话裁决 | ⚠️ 债务 | pyproject python_version 已对齐 3.12 |
 | 08-28 | **删除启动/部署脚本**：start_all/start_backend/start_frontend.cmd + deploy_ai_girlfriend.bat/.ps1（部署统一走 `deploy/`，启动走 python main.py / uvicorn / npm run dev） | 用户删除+会话确认 | ✅ 已执行 | AGENTS §0 启动方式已同步；L9 教训标记失效 |
 
 ---
@@ -130,7 +130,7 @@
 5. **MiMo 前端唯一 + 后端四级降级链**（07-27）——语音法律
 6. **多用户 LLM Key 隔离**（07-27）——商业化前提
 7. **GitHub-First 调研铁律 + 商讨协议五步制 + 真值裁决优先级**（AGENTS v1.0-1.2）——流程法律
-8. **1089 测试基线不可回退**（v1.3，08-28 重测 1030 Python + 59 前端；v1.1 旧基线 1104 已随幽灵层/Demo 删除自然缩减）——质量法律
+8. **1101 测试基线不可回退**（v1.3，08-28 重测 1030 Python + 59 前端；v1.1 旧基线 1104 已随幽灵层/Demo 删除自然缩减）——质量法律
 
 ### 不算数的（仅作历史痕迹）
 - 三级侧边栏（ADR-0011/0013 连坐死亡）
