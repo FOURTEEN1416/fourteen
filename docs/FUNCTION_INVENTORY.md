@@ -87,12 +87,23 @@
 | STATUS-4 | **角色日记**（候选 B，08-28）：GET /api/memory/diary 每日摘要最近 5 篇折叠展示 |
 | ⚠️ | SP-1 挂起：情绪分布图/成就/趋势缺（数据层 useEmotionTrend 已就绪零消费） |
 
+### PSYCH — 心理画像 `/psych`（PsychProfilePage.tsx, 2026-09-01 新增）
+| 编号 | 功能点 |
+|------|--------|
+| PSYCH-1 | 画像总览（psychProfile → GET /api/psych/profile，usePsychProfile React Query） |
+| PSYCH-2 | 历史快照列表（psychSnapshots → GET /api/psych/snapshots） |
+| PSYCH-3 | 心理健康摘要（psychMentalHealth → GET /api/psych/mental-health，非诊断声明+热线） |
+| PSYCH-4 | LIWC 维度（psychLiwc → GET /api/psych/liwc） |
+| PSYCH-5 | 画像重置（psychReset → DELETE /api/psych/profile，需确认） |
+| PSYCH-6 | 侧栏导航入口「心理画像」（navGroups.tsx:36，公开路由 `/psych`） |
+
 ## I. 跨域新能力（2026-08-28 候选 A-D，调研对标 awesome-ai-companion 后立项）
 
 | 编号 | 能力 | 关键行为 |
 |------|------|---------|
 | N-ASR-1 | **语音转文字**（候选 A）：微信语音（type34 silk）→ ffmpeg WAV → OpenAI 兼容 /audio/transcriptions → 文字进对话管线；config voice.asr 配置驱动（默认关）；未配置保持占位提示 |
 | N-DIARY-1 | **角色日记**（候选 B）：daily_summaries 每日摘要 → GET /api/memory/diary → StatusCenter 折叠卡片 |
+| N-DIARY-2 | **日记种子端点**（T3，09-01）：POST /api/memory/diary/seed（E2E/演示可注入，misc_routes 15→16 端点） |
 | N-KSHARE-1 | **知识分享主动消息**（候选 C）：share 类消息优先从角色知识库（爬虫/文档来源）检索真实内容，LLM 包装角色口吻；无索引/无 LLM 回退模板 |
 | N-DATES-1 | **纪念日感知**（候选 D）：重要日期存储（data/important_dates.json）+ GET/PUT /api/characters/{id}/important-dates + 角色设置 Basic tab 编辑器 + 每日维护检查命中即 LLM 祝福（模板兜底） |
 
@@ -156,6 +167,6 @@
 | GAP-2 | 记忆三层仅"条目数+最近事实"入 UI，工作记忆/情景时间线无呈现 | 05-19 §1.2 记忆系统 | 与 SP-1（状态中心丰富化）合并决策 |
 | GAP-3 | MESSAGE-1 统计卡"今日触发/最后发送"为占位 `—`（数据未接） | 主动消息可观测 | 小改动，可并入 SP-5 批次 |
 | GAP-4 | VOICE-TAB-1 / DATA-1 的保存接口标"开发中"、RAG 区静态占位（G-06/G-07） | 页面内实况标注 | 需后端补端点或接既有端点，立项裁决 |
-| GAP-5 | 状态中心缺情绪分布/成就/趋势（SP-1 挂起，数据层就绪） | 05-29 差距分析 | SP-1 已在冻结池 |
+| GAP-5 | 状态中心缺情绪分布/成就/趋势（SP-1 挂起，数据层就绪）；**成就体系已立项为 ADR-0014 提案**（角色隔离/四类成就/幂等触发/隐私边界，未实现） | 05-29 差距分析 + 09-01 ADR-0014 | 提案待实现 |
 
 > 本清单由代码读出（App.tsx 路由 × 15 页面组件 × api/*.ts 消费），历史意图对照 `docs/history/`。条目变更随代码同步。
