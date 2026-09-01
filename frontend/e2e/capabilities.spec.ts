@@ -1,5 +1,6 @@
 /**
  * W4 E2E 冒烟扩容 —— 新能力三条：角色日记 / 重要日期 / BYOK 引导。
+ * 2026-09-01 追加「第二批新能力冒烟」describe：成就 / 知识库管理区 / 语音保存（GAP-4/成就/SP-4 收官验证）。
  * 前置同 smoke.spec.ts：scripts/e2e_setup.py 已建种子库；后端 APP_DATABASE_URL 指向 e2e 库、API_KEY_ENABLED=false。
  * 边界：不改业务代码；不触碰 smoke.spec.ts 既有断言。
  *
@@ -143,5 +144,79 @@ test.describe('W4 新能力冒烟', () => {
     // W1-BYOK 契约：前端统一 403 拦截依据该字段；结构存在性即冒烟目标
     expect(typeof body.byok_required).toBe('boolean')
     expect(typeof body.version).toBe('string')
+  })
+})
+
+
+test.describe('第二批新能力冒烟（2026-09-01：成就 / 知识库 / 语音保存）', () => {
+  test('成就：GET achievements 契约（10 项结构 + unlocked_count）+ 有角色时状态中心成就卡渲染', async ({
+    page,
+    request,
+  }) => {
+    const res = await request.get('/api/characters/e2e-probe/achievements')
+    expect(res.ok()).toBeTruthy()
+    const body = await res.json()
+    expect(body.total).toBe(10)
+    expect(Array.isArray(body.achievements)).toBe(true)
+    expect(body.achievements.length).toBe(10)
+    expect(typeof body.unlocked_count).toBe('number')
+    for (const a of body.achievements) {
+      expect(typeof a.achievement_id).toBe('string')
+      expect(typeof a.progress).toBe('number')
+      expect(typeof a.unlocked).toBe('boolean')
+    }
+
+    // 幂等：recalculate 端点与 GET 同语义
+    const recalc = await request.post('/api/characters/e2e-probe/achievements/recalculate')
+    expect(recalc.ok()).toBeTruthy()
+    expect((await recalc.json()).recalculated).toBe(true)
+
+    // UI 断言仅在有角色时执行（干净 E2E 库 skip，同 firstCharacterId 自适应策略）
+    const charRes = await request.get('/api/characters')
+    const list: Array<{ id: string }> = (await charRes.json()).characters ?? []
+    test.skip(list.length === 0, 'E2E 库无角色，跳过成就卡 UI 断言')
+    await gotoProtected(page, `/roles/${list[0].id}/status`)
+    await expect(page.getByText('成就', { exact: true })).toBeVisible()
+    await expect(page.getByText(/已解锁 \d+ \/ 10/)).toBeVisible()
+  })
+
+  test('知识库：GET knowledge/stats 契约 + 有角色时 DATA tab 真实管理区渲染', async ({
+    page,
+    request,
+  }) => {
+    // 该端点校验角色存在（404），与 achievements 不同 → 契约断言也需真实角色 id
+    const charRes = await request.get('/api/characters')
+    const list: Array<{ id: string }> = (await charRes.json()).characters ?? []
+    test.skip(list.length === 0, 'E2E 库无角色，跳过契约与 DATA tab UI 断言')
+    const res = await request.get(`/api/characters/${encodeURIComponent(list[0].id)}/knowledge/stats`)
+    expect(res.ok()).toBeTruthy()
+    const body = await res.json()
+    expect(typeof body.indexed).toBe('boolean')
+    expect(typeof body.total_chunks).toBe('number')
+    expect(typeof body.retriever_type).toBe('string')
+    await gotoProtected(page, `/roles/${encodeURIComponent(list[0].id)}/settings/data`)
+    await page.getByRole('button', { name: '数据', exact: true }).click()
+    await expect(page.getByText('知识库引擎 (RAG)', { exact: true })).toBeVisible()
+    await expect(page.getByText('知识库', { exact: true }).first()).toBeVisible()
+  })
+
+  test('语音保存：GET voice 配置契约（只读无污染）+ 有角色时 Voice tab 保存按钮存在', async ({
+    page,
+    request,
+  }) => {
+    // 只读契约：未配置角色返回 configured=false 结构（不写共享 data/ 文件）
+    const res = await request.get('/api/characters/e2e-probe-voice/voice')
+    expect(res.ok()).toBeTruthy()
+    const body = await res.json()
+    expect(body.configured).toBe(false)
+    expect(body.voice).toBeNull()
+
+    const charRes = await request.get('/api/characters')
+    const list: Array<{ id: string }> = (await charRes.json()).characters ?? []
+    test.skip(list.length === 0, 'E2E 库无角色，跳过 Voice tab UI 断言')
+    await gotoProtected(page, `/roles/${encodeURIComponent(list[0].id)}/settings/voice`)
+    await page.getByRole('button', { name: '语音', exact: true }).click()
+    await expect(page.getByRole('button', { name: '保存语音设置' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '保存语音设置' })).toBeDisabled() // 无脏态时禁用
   })
 })
