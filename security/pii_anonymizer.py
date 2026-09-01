@@ -39,17 +39,17 @@ class PIIAnonymizer:
 
         all_matches.sort(key=lambda item: item[0])
         merged: list[tuple[int, int, str, str]] = []
-        for match in all_matches:
-            if merged and match[0] < merged[-1][1]:
+        for span in all_matches:
+            if merged and span[0] < merged[-1][1]:
                 previous = merged[-1]
                 merged[-1] = (
                     previous[0],
-                    max(previous[1], match[1]),
+                    max(previous[1], span[1]),
                     previous[2],
                     previous[3],
                 )
             else:
-                merged.append(match)
+                merged.append(span)
 
         parts: list[str] = []
         detected: list[dict] = []

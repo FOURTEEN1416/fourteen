@@ -21,6 +21,7 @@ import { refreshToken } from './api/auth'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const IntroPage = lazy(() => import('./pages/IntroPage'))
+const PsychProfilePage = lazy(() => import('./pages/PsychProfilePage'))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const WeChatPage = lazy(() => import('./pages/WeChatPage'))
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
@@ -119,6 +120,7 @@ export default function App() {
       <Routes>
         {/* ─── 公开路由：产品介绍 + 登录页 + 根路径分流 ─── */}
         <Route path="/intro" element={<Suspense fallback={<PageLoadingSkeleton />}><IntroPage /></Suspense>} />
+        <Route path="/psych" element={<Suspense fallback={<PageLoadingSkeleton />}><PsychProfilePage /></Suspense>} />
         <Route path="/login" element={<Suspense fallback={<PageLoadingSkeleton />}><LoginPage /></Suspense>} />
         <Route path="/" element={<RootRedirect />} />
 

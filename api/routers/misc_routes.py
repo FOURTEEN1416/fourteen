@@ -16,7 +16,7 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
@@ -147,6 +147,38 @@ async def public_meta():
 
     llm_cfg = deps.orch.components.get("config").config.llm if deps.orch and deps.orch.components else None
     return {"byok_required": byok_required(llm_cfg), "version": "3.1.0"}
+
+
+class DiarySeedRequest(BaseModel):
+    date: str  # YYYY-MM-DD
+    summary: str = Field(min_length=1, max_length=8000)
+
+
+@router.post("/api/memory/diary/seed")
+async def seed_diary(
+    req: DiarySeedRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """注入/覆盖某日角色日记（T3：补 W4 冒烟降级缺口——日记此前只能由每日维护自动生成）。"""
+    import re as _re
+
+    if not _re.match(r"^\d{4}-\d{2}-\d{2}$", req.date):
+        raise HTTPException(status_code=400, detail="date 格式须为 YYYY-MM-DD")
+    orch = deps.orch
+    mem = orch.components.get("memory") if orch and orch.components else None
+    ds = getattr(mem, "ds", None)
+    if ds is None:
+        raise HTTPException(status_code=503, detail="Diary summarizer not initialized")
+    ds.save_summary(req.date, req.summary.strip())
+    # 有 DB 持久化能力（_legacy 版）时落库，重启不丢
+    save_db = getattr(ds, "save_summary", None)
+    if hasattr(ds, "_structured_memory") and getattr(ds, "_structured_memory", None) is not None:
+        try:
+            ds.save_summary(req.date, req.summary.strip())  # legacy 版内部已写 DB
+        except Exception:
+            logger.warning("diary seed DB 落库失败（内存态已更新）", exc_info=True)
+    return {"status": "seeded", "date": req.date}
 
 
 @router.get("/api/characters/{character_id}/important-dates")

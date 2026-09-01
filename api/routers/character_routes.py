@@ -124,8 +124,8 @@ def _load_character(character_id: str) -> dict[str, Any] | None:
     path = _character_path(character_id)
     if path.exists():
         try:
-            with open(path, encoding="utf-8") as f:
-                return json.load(f)
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
         except (json.JSONDecodeError, OSError) as e:
             logger.error("加载角色 %s 失败: %s", character_id, e)
             return None

@@ -858,7 +858,7 @@ class WebPersonaEnricher:
         if len(all_docs) < max_docs:
             if interactive:
                 print("  📡 bili-cli (B站搜索) ...")
-            for doc in self.agent_reach.search_bilibili(q, max_per_source=3):
+            for doc in self.agent_reach.search_bilibili(q, num_results=3):
                 if doc.url and doc.url not in seen and len(all_docs) < max_docs:
                     seen.add(doc.url)
                     all_docs.append(doc)
@@ -880,7 +880,7 @@ class WebPersonaEnricher:
         if len(all_docs) < max_docs:
             if interactive:
                 print("  📖 Jina Reader ...")
-            jina_docs = self.agent_reach.jina_search(q, max_per_source=3)
+            jina_docs = self.agent_reach.jina_search(q, num_results=3)
             for doc in jina_docs:
                 if doc.url and doc.url not in seen and len(all_docs) < max_docs:
                     seen.add(doc.url)
@@ -892,7 +892,7 @@ class WebPersonaEnricher:
         if len(all_docs) < max_docs:
             if interactive:
                 print("  🔎 Exa (mcporter) ...")
-            for doc in self.agent_reach.search_exa(q, max_per_source=2):
+            for doc in self.agent_reach.search_exa(q, num_results=2):
                 if doc.url and doc.url not in seen and len(all_docs) < max_docs:
                     seen.add(doc.url)
                     all_docs.append(doc)

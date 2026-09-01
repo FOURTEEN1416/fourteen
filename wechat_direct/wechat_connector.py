@@ -902,7 +902,7 @@ class WeChatConnector:
             from multimodal.multimodal_processor import ASRHandler
 
             if getattr(self, "_asr_handler", None) is None:
-                cfg = {}
+                cfg: dict[str, object] = {}
                 try:
                     import yaml
                     cfg_path = Path(__file__).parent.parent / "config" / "system.yaml"

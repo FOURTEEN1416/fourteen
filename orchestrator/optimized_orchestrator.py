@@ -216,8 +216,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         direct_path = chars_dir / f"{character_id}.json"
         if direct_path.exists():
             try:
-                with open(direct_path, encoding="utf-8") as f:
-                    raw_card = _json.load(f)
+                with open(direct_path, encoding="utf-8") as fh:
+                    raw_card = _json.load(fh)
             except (OSError, _json.JSONDecodeError):
                 raw_card = None
 

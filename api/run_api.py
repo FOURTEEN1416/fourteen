@@ -82,11 +82,11 @@ if not health.get("healthy", False):
 user_mgr = UserManager(orchestrator)
 
 # ── 启动 WebSocket 服务器（主动消息 websocket 通道） ──
-_ws_holder: dict[str, WebSocketServer | None] = {}
+_ws_holder: dict[str, object] = {}
 if HAS_WEBSOCKETS:
     _ws_port = getattr(cfg.api, "websocket_port", 8765)
 
-    def _run_ws_server(holder: dict[str, WebSocketServer | None] = _ws_holder, port: int = _ws_port) -> None:
+    def _run_ws_server(holder: dict[str, object] = _ws_holder, port: int = _ws_port) -> None:
         ws_server = WebSocketServer(orchestrator=orchestrator, port=port)
         holder["ws"] = ws_server
         loop = asyncio.new_event_loop()
@@ -112,9 +112,9 @@ if HAS_WEBSOCKETS:
     def _stop_ws_server() -> None:
         ws_server = _ws_holder.get("ws")
         loop = _ws_holder.get("loop")
-        if ws_server is None:
+        if not isinstance(ws_server, WebSocketServer) or not isinstance(loop, asyncio.AbstractEventLoop):
             return
-        if loop is None or loop.is_closed():
+        if loop.is_closed():
             return
         try:
             future = asyncio.run_coroutine_threadsafe(ws_server.stop(), loop)
@@ -150,11 +150,12 @@ def _ensure_scheduler_singleton() -> None:
 
     # 情况 2：多 worker flock 单例保护
     try:
-        import fcntl
+        import fcntl  # type: ignore[import-not-found,attr-defined]  # POSIX-only（Windows 分支见 except）
+
         lock_path = "/tmp/ai-girlfriend-scheduler.lock"
         lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
         try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # type: ignore[attr-defined,union-attr]
         except OSError:
             # 其他 worker 已持有锁，本 worker 停止调度器
             if hasattr(scheduler, "stop"):
@@ -177,9 +178,9 @@ _ensure_scheduler_singleton()
 # ── 向调度器注册通道（仅 master worker 的调度器存活时执行） ──
 _scheduler = orchestrator.components.get("scheduler")
 if _scheduler is not None:
-    def _websocket_sender_factory(holder: dict[str, WebSocketServer | None] = _ws_holder):
+    def _websocket_sender_factory(holder: dict[str, object] = _ws_holder):
         ws_server = holder.get("ws")
-        if ws_server is None:
+        if not isinstance(ws_server, WebSocketServer):
             return None
         return ws_server.broadcast_proactive
 

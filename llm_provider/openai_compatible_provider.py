@@ -115,10 +115,13 @@ class OpenAICompatibleProvider:
             if self._client is not None:
                 # 旧 client 绑定在另一个 loop 上，不能 await aclose()，
                 # 用同步 close 触发底层资源释放；httpx 内部会清理连接池。
+                client_ref = self._client
+
+                def _close_client(c: httpx.AsyncClient = client_ref) -> None:
+                    asyncio.ensure_future(c.aclose())
+
                 with contextlib.suppress(Exception):
-                    loop.call_soon_threadsafe(
-                        lambda c=self._client: asyncio.ensure_future(c.aclose())
-                    )
+                    loop.call_soon_threadsafe(_close_client)
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(60.0),
                 limits=self._pool_limits,
@@ -151,11 +154,14 @@ class OpenAICompatibleProvider:
         model: str | None = None,
     ) -> str:
         """异步聊天（同步包装版）"""
-        return await self._chat(
+        from typing import cast as _cast
+
+        result = await self._chat(
             query=query, system_prompt=system_prompt, history=history,
             messages=messages, temperature=temperature, max_tokens=max_tokens,
             tools=tools, model=model, stream=False,
         )
+        return _cast(str, result)
 
     async def chat_stream(
         self,

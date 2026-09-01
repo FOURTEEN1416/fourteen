@@ -68,11 +68,11 @@ def extract_card_from_png(data: bytes) -> dict[str, Any]:
     # 读取 tEXt chunk
     text_chunks: dict[str, str] = {}
     if hasattr(img, "text") and img.text:
-        text_chunks = dict(img.text)
+        text_chunks = {str(k): str(v) for k, v in dict(img.text).items()}
     else:
         # 某些 PIL 版本需要显式读取 info
         if hasattr(img, "info") and img.info:
-            text_chunks = {k: v for k, v in img.info.items() if isinstance(v, str)}
+            text_chunks = {str(k): str(v) for k, v in img.info.items() if isinstance(v, str)}
 
     if CHARA_KEYWORD not in text_chunks:
         raise PNGCodecError(
@@ -122,7 +122,7 @@ def embed_card_to_png(
         if not is_png(image_bytes):
             raise PNGCodecError("提供的底图不是有效的 PNG")
         try:
-            img = Image.open(io.BytesIO(image_bytes))
+            img: Image.Image = Image.open(io.BytesIO(image_bytes))
             # 转为 RGB 模式确保可保存为 PNG
             if img.mode not in ("RGB", "RGBA"):
                 img = img.convert("RGB")

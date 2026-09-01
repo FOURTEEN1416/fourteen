@@ -175,7 +175,7 @@ async def register(
     refresh_token = create_refresh_token(token_data)
 
     # 存储 refresh token 哈希
-    _save_refresh_token(db, user.id, refresh_token)
+    _save_refresh_token(db, int(user.id), refresh_token)
     await db.commit()
 
     logger.info("新用户注册: %s (%s)", user.email, user.username)
@@ -220,7 +220,7 @@ async def login(
     refresh_token = create_refresh_token(token_data)
 
     # 存储 refresh token 哈希
-    _save_refresh_token(db, user.id, refresh_token)
+    _save_refresh_token(db, int(user.id), refresh_token)
 
     # 更新最后登录时间
     user.last_login_at = datetime.now(timezone.utc)
@@ -232,7 +232,7 @@ async def login(
         access_token=access_token,
         refresh_token=refresh_token,
         user=user.to_dict(),
-        needs_consent=not await has_consented(db, user.id),
+        needs_consent=not await has_consented(db, int(user.id)),
     )
 
 
@@ -278,19 +278,19 @@ async def refresh(
     # 删除旧 session，生成新令牌
     await db.delete(session)
 
-    # 查找用户
-    result = await db.execute(select(User).where(User.id == int(user_id)))
-    user = result.scalar_one_or_none()
-    if not user or not user.is_active:
+    # 查找用户（result 变量重命名，避免与上方 UserSession Result 联合误判）
+    user_result = await db.execute(select(User).where(User.id == int(user_id)))
+    refresh_user = user_result.scalar_one_or_none()
+    if not refresh_user or not refresh_user.is_active:
         await db.commit()
         raise HTTPException(status_code=401, detail="User not found or disabled")
 
     # 生成新令牌
-    token_data = {"sub": str(user.id), "email": user.email, "role": user.role}
+    token_data = {"sub": str(refresh_user.id), "email": refresh_user.email, "role": refresh_user.role}
     new_access_token = create_access_token(token_data)
     new_refresh_token = create_refresh_token(token_data)
 
-    _save_refresh_token(db, user.id, new_refresh_token)
+    _save_refresh_token(db, int(refresh_user.id), new_refresh_token)
     await db.commit()
 
     logger.info("Refresh token 成功刷新: user=%s", user_id)
@@ -298,8 +298,8 @@ async def refresh(
     return TokenResponse(
         access_token=new_access_token,
         refresh_token=new_refresh_token,
-        user=user.to_dict(),
-        needs_consent=not await has_consented(db, user.id),
+        user=refresh_user.to_dict(),
+        needs_consent=not await has_consented(db, int(refresh_user.id)),
     )
 
 

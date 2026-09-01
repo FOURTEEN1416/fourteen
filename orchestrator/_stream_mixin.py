@@ -11,7 +11,7 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger("orchestrator.optimized")
 
@@ -27,6 +27,13 @@ class _StreamPipelineMixin:
     # NOTE: 类型注解使用 Any 避免与主类循环依赖；运行期为 OptimizedOrchestrator 实例。
     _initialized: bool
     components: dict[str, Any]
+
+    # 以下成员由宿主主类提供（mixin 协作契约）；显式声明消除 mypy attr-defined
+    if TYPE_CHECKING:  # pragma: no cover
+        def process_message(self, *args: Any, **kwargs: Any) -> Any: ...
+        def _get_session_lock(self, session_id: str) -> Any: ...
+        def _prepare_context(self, *args: Any, **kwargs: Any) -> Any: ...
+        def _after_process(self, *args: Any, **kwargs: Any) -> Any: ...
     # 后台 task 引用集合（避免被 GC 回收，asyncio.create_task 文档要求）。
     # 必须为实例变量，若为类变量会导致多实例共享同一集合引发 race condition。
     # 实际初始化在 OptimizedOrchestrator.__init__ 中完成。
@@ -251,6 +258,7 @@ class _StreamPipelineMixin:
                 unsafe_category: Any = None
 
                 try:
+                    assert request_llm is not None  # use_true_stream 分支保证非空
                     async for token in request_llm.chat_stream(
                         query=user_msg_clean,
                         system_prompt=system_prompt,

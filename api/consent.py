@@ -36,7 +36,7 @@ async def has_consented(
 ) -> bool:
     """用户是否已同意指定版本（默认当前版本）"""
     record = await latest_consent(db, user_id)
-    return record is not None and record.agreement_version == version
+    return bool(record is not None and record.agreement_version == version)
 
 
 async def record_consent(

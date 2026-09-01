@@ -172,8 +172,8 @@ class PersonaService:
         direct_path = chars_dir / f"{character_id}.json"
         if direct_path.exists():
             try:
-                with open(direct_path, encoding="utf-8") as f:
-                    raw_card = json.load(f)
+                with open(direct_path, encoding="utf-8") as fh:
+                    raw_card = json.load(fh)
             except (OSError, json.JSONDecodeError):
                 pass
 
@@ -287,7 +287,7 @@ class PersonaService:
         else:
             primary = getattr(emotion_state, "primary_emotion", None)
             if hasattr(primary, "value"):
-                primary = primary.value
+                primary = getattr(primary, "value")
             elif primary is None:
                 primary = "平常"
 

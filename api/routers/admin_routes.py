@@ -67,6 +67,7 @@ async def list_users(
 ):
     """获取用户列表（分页、搜索、筛选）"""
     query = select(User)
+    # 计数查询用独立变量，避免与 select(User) 的 query 联合类型互染（mypy）
     count_query = select(func.count(User.id))
 
     # 搜索
@@ -97,9 +98,11 @@ async def list_users(
     query = query.order_by(User.created_at.desc()).offset(offset).limit(page_size)
     result = await db.execute(query)
     users = result.scalars().all()
+    # query 经 count 联合后 mypy 推断退化；显式收窄回 User 行
+    user_rows = [u for u in users if isinstance(u, User)]
 
     return UserListResponse(
-        users=[u.to_dict() for u in users],
+        users=[u.to_dict() for u in user_rows],
         total=total,
         page=page,
         page_size=page_size,
