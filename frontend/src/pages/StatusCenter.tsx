@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import client from '../api/client'
-import { useActiveCharacter, useDashboard, useEmotionState, useMemoryFacts } from '../hooks/useQueries'
-import type { DashboardStats } from '../types/api'
+import {
+  useActiveCharacter,
+  useAchievements,
+  useDashboard,
+  useEmotionState,
+  useMemoryFacts,
+} from '../hooks/useQueries'
+import type { AchievementsResponse, DashboardStats } from '../types/api'
 
 function getAffinityLabel(affinity: number): string {
   if (affinity >= 70) return '亲密'
@@ -9,11 +16,20 @@ function getAffinityLabel(affinity: number): string {
   return '初识'
 }
 
+/** 成就四类的视觉语义（暖黄/海盐蓝/薄荷青体系内取色） */
+const CATEGORY_META: Record<string, { label: string; chip: string }> = {
+  companion: { label: '陪伴', chip: 'border-macaron-yellow bg-macaron-yellow/30 text-macaron-yellow-deep' },
+  memory: { label: '记忆', chip: 'border-macaron-blue bg-macaron-blue/30 text-macaron-blue-deep' },
+  interaction: { label: '互动', chip: 'border-macaron-mint bg-macaron-mint/30 text-macaron-mint-deep' },
+  exploration: { label: '探索', chip: 'border-primary-300 bg-primary-50/60 text-primary-700' },
+}
+
 export default function StatusCenter() {
   const { activeCharacter } = useActiveCharacter()
   const { data: stats, isLoading: statsLoading } = useDashboard()
   const { data: emotionData } = useEmotionState()
   const { data: facts } = useMemoryFacts()
+  const { data: achievements } = useAchievements(activeCharacter?.id)
 
   if (!activeCharacter) {
     return (
@@ -52,34 +68,149 @@ export default function StatusCenter() {
         </div>
       </div>
 
+      <AchievementsCard data={achievements} />
+
       <DiaryCard />
 
-      <div className="glass-card rounded-xl p-4">
-        <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-          <span className="section-bar" />
-          最近记忆
-        </h3>
-        <div className="space-y-2">
-          {recentFacts.length > 0 ? (
-            recentFacts.slice(0, 5).map((fact, idx) => (
-              <div
-                key={idx}
-                className="bg-white/40 rounded-lg px-3 py-2 text-xs text-gray-600"
-              >
-                {fact.content}
-              </div>
-            ))
-          ) : (
-            <p className="py-4 text-center text-xs text-gray-400">
-              还没有沉淀下来的记忆
-            </p>
-          )}
-        </div>
-      </div>
+      <MemorySystemCard characterId={activeCharacter.id} recentFacts={recentFacts} />
     </div>
   )
 }
 
+/** 角色成就（ADR-0014）： unlocked 彩色徽章 / locked 灰态 + 进度。读取即幂等重算。 */
+function AchievementsCard({ data }: { data?: AchievementsResponse }) {
+  const [open, setOpen] = useState(false)
+  if (!data || data.total === 0) return null
+  const unlocked = data.achievements.filter(a => a.unlocked)
+
+  return (
+    <div className="glass-card rounded-xl p-4">
+      <button onClick={() => setOpen(v => !v)} className="w-full flex items-center gap-2 text-left">
+        <span className="section-bar" />
+        <h3 className="text-sm font-semibold text-gray-700 flex-1">成就</h3>
+        <span className="text-[10px] text-gray-400">
+          已解锁 {data.unlocked_count} / {data.total}
+          {open ? ' · 收起' : ''}
+        </span>
+      </button>
+      {(open || unlocked.length > 0) && (
+        <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {data.achievements.map(a => {
+            const meta = CATEGORY_META[a.category] ?? CATEGORY_META.exploration
+            if (!a.unlocked && !open) return null
+            return (
+              <div
+                key={a.achievement_id}
+                title={a.description}
+                className={`rounded-lg border px-2.5 py-2 ${
+                  a.unlocked ? meta.chip : 'border-gray-200 bg-gray-50/60 text-gray-400'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span className={`text-xs font-medium ${a.unlocked ? '' : 'text-gray-500'}`}>
+                    {a.unlocked ? a.name : '？？？'}
+                  </span>
+                  <span className="text-[10px] opacity-70">{meta.label}</span>
+                </div>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <div className="flex-1 h-1 rounded-full bg-black/5 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${a.unlocked ? 'bg-current' : 'bg-gray-300'}`}
+                      style={{ width: `${Math.min(100, (a.progress / a.target) * 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] tabular-nums">
+                    {a.progress}/{a.target}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 记忆三层（GAP-2）：角色长期事实 / 珍藏收藏 / 当前工作记忆 + 最近沉淀列表。 */
+function MemorySystemCard({
+  characterId,
+  recentFacts,
+}: {
+  characterId: string
+  recentFacts: Array<{ content: string }>
+}) {
+  const { data: charFacts } = useQuery({
+    queryKey: ['memory', 'char-facts', characterId],
+    queryFn: () =>
+      client
+        .get(`/characters/${characterId}/memory/facts`)
+        .then(r => (r.data as { total?: number }).total ?? 0),
+    enabled: !!characterId,
+    staleTime: 30 * 1000,
+  })
+  const { data: favorites } = useQuery({
+    queryKey: ['memory', 'favorites', characterId],
+    queryFn: () =>
+      client
+        .get(`/characters/${characterId}/favorites`)
+        .then(r => (r.data as { total?: number }).total ?? 0)
+        .catch(() => 0),
+    enabled: !!characterId,
+    staleTime: 30 * 1000,
+  })
+  const { data: workingCount } = useQuery({
+    queryKey: ['memory', 'working'],
+    queryFn: () =>
+      client
+        .get('/stats')
+        .then(r => (r.data as { working_count?: number }).working_count ?? 0)
+        .catch(() => 0),
+    staleTime: 15 * 1000,
+    refetchInterval: 30 * 1000,
+  })
+
+  const layers = [
+    { label: '角色长期事实', value: charFacts ?? 0, hint: '该角色沉淀的事实记忆' },
+    { label: '珍藏记忆', value: favorites ?? 0, hint: '被标记收藏的记忆' },
+    { label: '工作记忆（会话）', value: workingCount ?? 0, hint: '当前会话上下文中的记忆' },
+  ]
+
+  return (
+    <div className="glass-card rounded-xl p-4">
+      <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+        <span className="section-bar" />
+        记忆体系
+      </h3>
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        {layers.map(l => (
+          <div key={l.label} title={l.hint} className="text-center p-2 rounded-lg bg-white/40">
+            <p className="text-base font-bold text-gray-700 tabular-nums">{l.value}</p>
+            <p className="text-[10px] text-gray-400 mt-0.5">{l.label}</p>
+          </div>
+        ))}
+      </div>
+
+      <p className="text-[10px] text-gray-400 mb-2">最近沉淀</p>
+      <div className="space-y-2">
+        {recentFacts.length > 0 ? (
+          recentFacts.slice(0, 5).map((fact, idx) => (
+            <div
+              key={idx}
+              className="bg-white/40 rounded-lg px-3 py-2 text-xs text-gray-600"
+            >
+              {fact.content}
+            </div>
+          ))
+        ) : (
+          <p className="py-4 text-center text-xs text-gray-400">
+            还没有沉淀下来的记忆
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
 
 /** 角色日记（候选 B）：daily_summaries 每日摘要，最近 5 条折叠展示。 */
 function DiaryCard() {

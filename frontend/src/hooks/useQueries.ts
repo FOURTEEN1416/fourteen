@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '../api/client'
+import client, { api } from '../api/client'
 import { useErrorStore } from '../store/errorStore'
 import type { EmotionState, DashboardStats, HealthStatus, WeChatStatus, TrainingProgress, ProactiveEngineState, MemoryFact, PsychProfile, PsychSnapshot, SafetyStats, SafetyLogEntry, RAGStats, VoiceStatus, PluginsList, ToolHistoryEntry, ProactiveHistoryEntry, MentalHealthSummary } from '../types/api'
 
@@ -19,6 +19,7 @@ export const queryKeys = {
   logs: { all: (params?: Record<string, unknown>) => ['logs', params] as const },
   clone: { contacts: (kw?: string) => ['clone', 'contacts', kw] as const, datasets: ['clone', 'datasets'] as const, stats: ['clone', 'stats'] as const },
   psych: { profile: ['psych', 'profile'] as const, snapshots: ['psych', 'snapshots'] as const, mentalHealth: ['psych', 'mentalHealth'] as const },
+  achievements: (characterId: string) => ['achievements', characterId] as const,
   safety: { stats: ['safety', 'stats'] as const, log: ['safety', 'log'] as const },
   rag: { stats: ['rag', 'stats'] as const },
   voice: { status: ['voice', 'status'] as const },
@@ -152,6 +153,19 @@ export function usePsychProfile() {
     queryKey: queryKeys.psych.profile,
     queryFn: () => api.psychProfile().then(r => r.data as PsychProfile),
     refetchInterval: 30 * 1000,
+  })
+}
+
+/** 角色成就（ADR-0014）：读取即幂等重算，60s 内不重复打后端 */
+export function useAchievements(characterId: string | null | undefined) {
+  return useQuery({
+    queryKey: queryKeys.achievements(characterId ?? ''),
+    queryFn: () =>
+      client
+        .get(`/characters/${characterId}/achievements`)
+        .then(r => r.data as import('../types/api').AchievementsResponse),
+    enabled: !!characterId,
+    staleTime: 60 * 1000,
   })
 }
 

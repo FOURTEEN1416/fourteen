@@ -5,12 +5,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import StatusCenter from '../../pages/StatusCenter'
 
 // ── hoisted mock fns ──
-const { mockUseActiveCharacter, mockUseDashboard, mockUseEmotionState, mockUseMemoryFacts } = vi.hoisted(
+const { mockUseActiveCharacter, mockUseDashboard, mockUseEmotionState, mockUseMemoryFacts, mockUseAchievements } = vi.hoisted(
   () => ({
     mockUseActiveCharacter: vi.fn(),
     mockUseDashboard: vi.fn(),
     mockUseEmotionState: vi.fn(),
     mockUseMemoryFacts: vi.fn(),
+    mockUseAchievements: vi.fn(),
   }),
 )
 
@@ -19,6 +20,7 @@ vi.mock('../../hooks/useQueries', () => ({
   useDashboard: () => mockUseDashboard(),
   useEmotionState: () => mockUseEmotionState(),
   useMemoryFacts: () => mockUseMemoryFacts(),
+  useAchievements: () => mockUseAchievements(),
 }))
 
 const FAKE_CHARACTER = {
@@ -59,6 +61,7 @@ describe('StatusCenter', () => {
     mockUseDashboard.mockReturnValue({ data: undefined, isLoading: false })
     mockUseEmotionState.mockReturnValue({ data: undefined })
     mockUseMemoryFacts.mockReturnValue({ data: undefined })
+    mockUseAchievements.mockReturnValue({ data: undefined })
   })
 
   it('shows empty state when no active character', () => {
@@ -94,6 +97,30 @@ describe('StatusCenter', () => {
 
     expect(screen.getByText('记得喜欢喝咖啡')).toBeDefined()
     expect(screen.getByText('周末常去公园散步')).toBeDefined()
+  })
+
+  it('renders achievements card with unlocked count', () => {
+    mockUseActiveCharacter.mockReturnValue({ activeCharacter: FAKE_CHARACTER })
+    mockUseDashboard.mockReturnValue({ data: FAKE_STATS, isLoading: false })
+    mockUseEmotionState.mockReturnValue({ data: undefined })
+    mockUseMemoryFacts.mockReturnValue({ data: [] })
+    mockUseAchievements.mockReturnValue({
+      data: {
+        character_id: 'char-001',
+        unlocked_count: 2,
+        total: 10,
+        achievements: [
+          { achievement_id: 'companion_first', name: '初次相识', description: 'd', category: 'companion', target: 1, progress: 1, unlocked: true, unlocked_at: '2026-09-01T00:00:00' },
+          { achievement_id: 'memory_10', name: '记忆初绽', description: 'd', category: 'memory', target: 10, progress: 3, unlocked: false, unlocked_at: null },
+        ],
+      },
+    })
+
+    renderWithQuery(<StatusCenter />)
+
+    expect(screen.getByText('已解锁 2 / 10')).toBeDefined()
+    expect(screen.getByText('初次相识')).toBeDefined() // 已解锁显示名字
+    expect(screen.queryByText('记忆初绽')).toBeNull() // 未解锁且有解锁项时默认隐藏
   })
 
   it('shows empty state when no facts', () => {

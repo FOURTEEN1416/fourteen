@@ -46,6 +46,25 @@ export interface MemoryFact {
   timestamp?: string
 }
 
+/** 角色成就（ADR-0014，2026-09-01 实现） */
+export interface CharacterAchievementItem {
+  achievement_id: string
+  name: string
+  description: string
+  category: 'companion' | 'memory' | 'interaction' | 'exploration'
+  target: number
+  progress: number
+  unlocked: boolean
+  unlocked_at: string | null
+}
+
+export interface AchievementsResponse {
+  character_id: string
+  achievements: CharacterAchievementItem[]
+  unlocked_count: number
+  total: number
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
