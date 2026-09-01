@@ -87,7 +87,8 @@
 | STATUS-4 | **角色日记**（候选 B，08-28）：GET /api/memory/diary 每日摘要最近 5 篇折叠展示 |
 | STATUS-5 | **成就卡**（ADR-0014 第一阶段，09-01）：useAchievements → GET /api/characters/{id}/achievements，已解锁彩色徽章（四类取色）/未解锁灰态进度条，展开显示全部 |
 | STATUS-6 | **记忆三层**（GAP-2 结案，09-01）：角色长期事实（/characters/{id}/memory/facts）+ 珍藏收藏（/favorites）+ 工作记忆（/api/stats working_count，会话域诚实标注）三层计数 + 最近沉淀列表 |
-| ⚠️ | SP-1 剩余：情绪分布图（无专门端点）与亲密度趋势 UI（useEmotionTrend 已就绪零消费）仍未实现；成就已落地 |
+| STATUS-7 | **情绪洞察**（SP-1 收官，09-01）：强度趋势迷你折线（useEmotionTrend）+ 情绪分布条（GET /api/emotion/distribution，会话内存态诚实标注） |
+| ⚠️ | 无剩余 SP-1 缺口：情绪分布/趋势/成就均已落地（亲密度趋势=强度趋势折线呈现；如需按"亲密度数值"另画曲线待用户裁决） |
 
 ### PSYCH — 心理画像 `/psych`（PsychProfilePage.tsx, 2026-09-01 新增）
 | 编号 | 功能点 |
@@ -105,6 +106,7 @@
 | ACH-1 | 成就清单（GET，读取即幂等重算）：10 成就×4 类（陪伴/记忆/互动/探索），指标=记忆事实/日记篇数/知识块/重要日期/音色绑定/收藏 |
 | ACH-2 | 显式重算（POST .../recalculate）：幂等，已解锁不回退，unlocked_at 首次达标落库 |
 | ACH-3 | StatusCenter 成就卡消费（STATUS-5），仅展示不推送 |
+| N-EXPORT-1 | **数据导出**（GAP-4 收尾，09-01）：DATA tab 四按钮——角色卡 PNG/JSON（/characters/{id}/export）+ 聊天记录 JSON/CSV（/chat/export），blob 下载 |
 
 ## I. 跨域新能力（2026-08-28 候选 A-D，调研对标 awesome-ai-companion 后立项）
 
@@ -176,6 +178,6 @@
 | GAP-2 | 记忆三层仅"条目数+最近事实"入 UI，工作记忆/情景时间线无呈现 | 05-19 §1.2 记忆系统 | 与 SP-1（状态中心丰富化）合并决策 |
 | GAP-3 | MESSAGE-1 统计卡"今日触发/最后发送"为占位 `—`（数据未接） | 主动消息可观测 | 小改动，可并入 SP-5 批次 |
 | ~~GAP-4~~ | ✅ 结案（09-01）：语音保存接线 + 知识库真实管理区（G-06/G-07 消案） | 09-01 批次 | 已实现 |
-| GAP-5 | 状态中心：**成就已落地**（09-01 ADR-0014 第一阶段）；剩余=情绪分布（无端点）+ 趋势 UI（hook 就绪） | 05-29 差距分析 + 09-01 ADR-0014 | 部分结案 |
+| ~~GAP-5~~ | ✅ 全结案（09-01 晚）：成就落地 + GET /api/emotion/distribution 新端点 + 趋势修复（旧实现读不存在属性恒空，EmotionEngine 补环形历史） | 05-29 差距分析 + 09-01 批次 | 已实现 |
 
 > 本清单由代码读出（App.tsx 路由 × 15 页面组件 × api/*.ts 消费），历史意图对照 `docs/history/`。条目变更随代码同步。

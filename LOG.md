@@ -289,3 +289,22 @@
 **验证（四项回归门全绿）**：pytest **1036+1**（+6）· vitest **75/75**（+4）· tsc **0 错** · ruff **0** · mypy **0**（345 文件）· **E2E 13/13**（独立种子库；capabilities 一条断言从"最近记忆"改"记忆体系"= GAP-2 改造的合理选择器更新）。端点实扫 **205**（+2 成就）。E2E 后端/前端进程已杀净。
 
 **真源同步**：CODE_GRAPH §1.1/§4.2/§13（205/1111）、app_factory 头注释（201→205 实扫口径）、FUNCTION_INVENTORY（STATUS-5/6、VOICE-TAB-1、DATA-1、ACH-1~3、GAP-2/4 结案、GAP-5 部分结案）、DECISION_LEDGER（SP-4 ✅ + 09-01 晚批次行）、ADR-0014（提案→已采纳+实现记录）。
+
+---
+
+## 2026-09-01（深夜） — 收尾批次：SP-1 收官 + 导出接线 + 日记核实 + E2E 16
+
+**用户指令**：「继续执行剩余的任务」（SP-1 剩余/日记持久化/导出/E2E 扩容）。
+
+**改动**（ reconnaissance 修正一个旧判断）：
+1. **trend 幽灵 bug 修复（真 bug）**：`/api/emotion/trend` 自创建起读不存在的 `_emotion_history` 属性，**恒返回空数组**——前端 hook 就绪零消费的真相是端点本身从未工作过。EmotionEngine.analyze 补环形历史记录（deque maxlen=500，内存态）+ `get_history()` 快照接口。
+2. **SP-1 收官**：新增 `GET /api/emotion/distribution`（时间窗聚合各主情绪占比，降序+total）；StatusCenter 新增「情绪洞察」卡（强度迷你 SVG 折线 + 分布条形，空态不渲染，诚实标注"会话内"——数据源环形缓冲重启清零）。
+3. **DATA tab 导出接线**（"导出功能开发中"消案）：ExportRow 四按钮——角色卡 PNG/JSON + 聊天记录 JSON/CSV，blob 下载（端点本就存在，纯前端接线）。
+4. **日记持久化核实结案**：生产链 ShisiMemoryService → MemoryPipeline.ds = `_legacy_diary_summarizer`，构造器即 `load_summaries_from_db()`、save_summary 落 SQLite——**重启不丢，旧判断"日记只有内存态"不成立**，无代码改动。
+5. **E2E 扩容三条**（capabilities.spec 新 describe）：成就契约（10 项结构+recalculate 幂等+成就卡 UI）、知识库管理区（stats 契约+DATA tab 渲染）、语音保存（voice 契约+保存按钮禁用态）。坑：knowledge/stats 校验角色存在（与 achievements 不同），契约断言也需真实角色 id；中文角色 id 需 encodeURIComponent + tab 按钮点击切换。
+
+**测试同步**：test_api_routes personality 9→10、总数 80→81（distribution 新端点）；tests/test_emotion_history.py 6 条（引擎 3 + 路由 3）。
+
+**验证（全绿）**：pytest **1042+1** · vitest **75**/14 files · tsc 0 · ruff 0 · mypy 0（346 files）· **E2E 16/16**。端点实扫 **206**。
+
+**真源同步**：app_factory 头注释/CODE_GRAPH 206+1117/INVENTORY STATUS-7+N-EXPORT-1+GAP-5 全结案/LEDGER 09-01晚批次行。

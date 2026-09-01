@@ -12,14 +12,14 @@
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| API 端点（create_api_app 实扫） | **205 端点** / 16 include_router | 实扫 2026-09-01（demo/-4、training/extract/-1、shisi 语音训练/-4：MiMo-only 收敛；主动消息手动控制 +3、BYOK meta +1、consent +1、日记种子 +1 逐批累加） |
+| API 端点（create_api_app 实扫） | **206 端点** / 16 include_router | 实扫 2026-09-01（demo/-4、training/extract/-1、shisi 语音训练/-4：MiMo-only 收敛；主动消息手动控制 +3、BYOK meta +1、consent +1、日记种子 +1 逐批累加） |
 | main.py 体量 | **约 16 KB / 409 行** | 2026-08-28 两轮瘦身：克隆管线移除 + run_console_chat 迁出 `orchestrator/console_chat.py`（命令分派拆分，复杂度 24 单体消解） |
 | 前端页面 | **15 个** | Glob `frontend/src/pages/*.tsx`（SP-9 幽灵层三页 + DemoPage 已删除） |
 | 前端 API 模块 | **12 个** | Glob `frontend/src/api/*.ts`（demo.ts、users.ts 已删除） |
 | 前端 Zustand store | 4 个 | LS `frontend/src/store/` |
 | Python 测试用例 | **1030 passed + 1 skipped** | 实跑 2026-08-28（旧引擎/训练测试随 MiMo-only 收敛删除 -15） |
 | 前端测试用例 | **71 个全部通过 / 13 文件** | `npx vitest run`（2026-08-28 实跑；SP-9 删除幽灵页测试后 79→59） |
-| 测试用例合计 | **1111 个**(1036 Python + 75 前端) | pytest + vitest 实跑 2026-09-01（1111 = 1036 Python + 75 前端）|
+| 测试用例合计 | **1117 个**(1042 Python + 75 前端) | pytest + vitest 实跑 2026-09-01（1117 = 1042 Python + 75 前端）|
 | tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
 
 ### 1.2 知识图谱快照指标（✅ 2026-08-28 重新索引）
@@ -210,7 +210,7 @@ sequenceDiagram
 |------|------|--------|------|------|
 | `api/routers/` | 20 个域路由（不含 `__init__.py`） | ~149 | 20 | 域路由：character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card/chat/clone/misc/personality/safety/tools/training/users（demo 08-28 删除、training/extract 08-28 移除） |
 | `shisi/api/` | v1 + v2 | ~49 | 13 | shisi 域：affinity/character/emotion_stage/memory/persona/stats/sticker/training/vital_signs + v2 健康检查/迁移/persona/character |
-| **合计（实扫）** | | **205** | **33** | `app.routes` 实测(2026-09-01) |
+| **合计（实扫）** | | **206** | **33** | `app.routes` 实测(2026-09-01) |
 
 **app_factory.py 实际挂载策略**（核实于源码）：
 
