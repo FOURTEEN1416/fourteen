@@ -268,6 +268,69 @@ function ImportantDatesSection({ characterId }: { characterId: string }) {
   )
 }
 
+// ═══ Data: Export（GAP-4 收尾，2026-09-01）——角色卡/聊天记录真实下载 ═══
+
+function ExportRow({ characterId, characterName }: { characterId: string; characterName?: string }) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState('')
+
+  async function download(kind: 'card' | 'chat', format: string) {
+    const key = `${kind}-${format}`
+    setBusy(key)
+    setError('')
+    try {
+      const url = kind === 'card'
+        ? `/characters/${characterId}/export?format=${format}`
+        : `/characters/${characterId}/chat/export?format=${format}`
+      const res = await client.get(url, { responseType: 'blob' })
+      const safeName = (characterName || characterId).replace(/[^\w\u4e00-\u9fff]/g, '_').slice(0, 50)
+      const filename =
+        kind === 'card'
+          ? `${safeName}.${format === 'png' ? 'png' : 'json'}`
+          : `chat-${characterId}.${format}`
+      const blobUrl = URL.createObjectURL(res.data as Blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(blobUrl)
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+      setError(detail || '导出失败，请稍后重试')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const btn = 'px-3 py-1.5 rounded-lg border text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed'
+  return (
+    <div className="mt-3 space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] text-gray-500 mr-1">导出</span>
+        <button onClick={() => download('card', 'png')} disabled={busy !== null}
+          className={`${btn} border-macaron-blue text-macaron-blue-deep hover:bg-macaron-blue/20`}>
+          {busy === 'card-png' ? '导出中…' : '角色卡 PNG'}
+        </button>
+        <button onClick={() => download('card', 'json')} disabled={busy !== null}
+          className={`${btn} border-macaron-blue text-macaron-blue-deep hover:bg-macaron-blue/20`}>
+          {busy === 'card-json' ? '导出中…' : '角色卡 JSON'}
+        </button>
+        <button onClick={() => download('chat', 'json')} disabled={busy !== null}
+          className={`${btn} border-macaron-mint text-macaron-mint-deep hover:bg-macaron-mint/20`}>
+          {busy === 'chat-json' ? '导出中…' : '聊天记录 JSON'}
+        </button>
+        <button onClick={() => download('chat', 'csv')} disabled={busy !== null}
+          className={`${btn} border-macaron-mint text-macaron-mint-deep hover:bg-macaron-mint/20`}>
+          {busy === 'chat-csv' ? '导出中…' : '聊天记录 CSV'}
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-500">{error}</p>}
+    </div>
+  )
+}
+
 // ═══ Tab: Voice ═══
 
 function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
@@ -601,7 +664,7 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
             </div>
           ))}
         </div>
-        <p className="text-xs text-gray-400 mt-3">导出功能开发中</p>
+        <ExportRow characterId={character.id} characterName={character.name} />
       </Section>
 
       {/* 火爬虫 + AgentReach 人设增强 */}
