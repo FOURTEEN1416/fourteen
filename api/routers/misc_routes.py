@@ -172,7 +172,6 @@ async def seed_diary(
         raise HTTPException(status_code=503, detail="Diary summarizer not initialized")
     ds.save_summary(req.date, req.summary.strip())
     # 有 DB 持久化能力（_legacy 版）时落库，重启不丢
-    save_db = getattr(ds, "save_summary", None)
     if hasattr(ds, "_structured_memory") and getattr(ds, "_structured_memory", None) is not None:
         try:
             ds.save_summary(req.date, req.summary.strip())  # legacy 版内部已写 DB

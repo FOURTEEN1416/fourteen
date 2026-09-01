@@ -286,8 +286,8 @@ class PersonaService:
             affection_points = float(emotion_state.get("affection_points", 0.0))
         else:
             primary = getattr(emotion_state, "primary_emotion", None)
-            if hasattr(primary, "value"):
-                primary = getattr(primary, "value")
+            if primary is not None and hasattr(primary, "value"):
+                primary = primary.value
             elif primary is None:
                 primary = "平常"
 
