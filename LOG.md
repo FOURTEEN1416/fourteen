@@ -245,3 +245,24 @@
 **复核**：五维检查发现 W4/W5 两窗均已完成并 handoff → 双收编（BOARD 追加型冲突保留双方条目）。**CI 两遗留根因与修复**：①test_consent CI 炸=no such route——app_factory 的 auth 挂载 try/except 吞异常静默降级（违反当年 route_mounts 防静默设计），改 fail-fast 裸挂；②W4 capabilities spec 角色数 >0 断言在 CI 干净库必炸——改环境自适应（数组结构断言+空库 skip）。
 
 **验证**：pytest 1030+1（全量）/ vitest 71 / tsc 0 / **E2E 13-13**（smoke5+capabilities3+mobile5，干净库自适应通过）。修复推送待 CI 终态。
+
+---
+
+## 2026-09-01 — T1-T5 批次收尾：mypy 债清零 + 真源校准 + 上云（断点续行会话）
+
+**背景**：前会话（T1-T5 一次性执行）LLM 中断断点续行。接手时工作区 28 文件改动+2 新文件；mypy 从 78 已降到 12。
+
+**改动**（4 commit：e80b31f / 9253690 / f6390ef / d767b52）：
+1. **T1 mypy 债清零**（e80b31f）：断点剩余 12 处逐项修复——mimo_voice_routes 补 MiMoTTSProvider 导入（5 处 name-defined）、knowledge_routes CharaCardV2→model_dump()、clone_routes max() 重载改 lambda、multi_provider_gateway 条件 fallback 签名对齐、app_factory SlowAPI handler cast、2 个测试标注。**mypy 全库 0 errors**，FF-020 严格门禁恢复条件达成。
+2. **路由断言同步**：misc_routes 15→16（T3 日记种子端点）、8 子路由贡献 79→80——前会话加端点后测试基准未更新导致的全量跑红，已对齐实况。
+3. **T2 Psych 画像页**（9253690）：`/psych` 公开路由 + 侧栏「心理画像」入口，消费既有 /api/psych/* 五端点（前后端对齐验证报告里的最大幽灵能力落 UI）。
+4. **T5 成就体系立项**（f6390ef）：ADR-0014 提案（角色隔离/陪伴·记忆·互动·探索四类/事件重算+每日兜底/幂等/隐私边界/明确"提案≠已实现"）。
+5. **真源实扫校准**（d767b52）：create_api_app 实扫 **203 端点**（前会话遗留文档写 202/194 均未校准）、pages 实数 **16 页面**（+PsychProfilePage）、测试基线 **1101**（1030 Python+71 前端）；CODE_GRAPH v3.5.0（§1.1/§4.2/页面表/§13 批次行）、AGENTS 基线三处 1089→1101、FUNCTION_INVENTORY 新增 PSYCH-1~6 + N-DIARY-2、GAP-5 挂 ADR-0014；LEDGER 补 09-01 批次行+基线条款更新。历史行 1089 保留不改（派生历史原则）。
+
+**垃圾产物复核**：未跟踪仅 ADR+PsychProfilePage（均任务成果已提交）；.coverage/__pycache__/frontend/dist/playwright-report 全部 gitignore 内不入户；data/app.log 运行时产物未追踪。零垃圾提交。
+
+**验证（四项回归门全绿）**：pytest **1030 passed + 1 skipped**（110s）；vitest **71/71**（13 文件）；tsc --noEmit **0 错**；**Playwright E2E 13/13**（smoke5+capabilities3+mobile5，39.5s，独立种子库 e2e_users.db + 8000/5199 自起自停）；mypy **0 errors**。
+
+**过程小坑**：①并行命令共享 cwd 导致一次 pytest 从 frontend 目录空收集（非真实失败，显式路径重跑绿）；②vite 默认绑 IPv6 ::1，Playwright 配置探 127.0.0.1 失败自起 bun 超时——重启显式 --host 127.0.0.1 解决；③TaskStop 后子进程残留，taskkill 清理 3 PID。测试进程已全部停净。
+
+**上云**：部署后验证（见下条）。
