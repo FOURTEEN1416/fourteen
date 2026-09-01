@@ -266,3 +266,7 @@
 **过程小坑**：①并行命令共享 cwd 导致一次 pytest 从 frontend 目录空收集（非真实失败，显式路径重跑绿）；②vite 默认绑 IPv6 ::1，Playwright 配置探 127.0.0.1 失败自起 bun 超时——重启显式 --host 127.0.0.1 解决；③TaskStop 后子进程残留，taskkill 清理 3 PID。测试进程已全部停净。
 
 **上云**：部署后验证（见下条）。
+
+**上云与 CI（续）**：①上云完成——删除清单 10 文件（83e3270..HEAD）+ LF 归档 + remote_deploy.sh（构建 844ms，PsychProfilePage chunk 在产物）；终验 active/health ok/前端 200//psych 200/diary-seed 401（端点已挂载）//api/meta byok 正常。②CI 首跑红=ruff Hardened 3 处存量违规随批次暴露（database.py 未用 cast、misc_routes 死变量 save_db、persona_service 常量 getattr B009）——修复 9455760，连带 mypy union-attr 补 None 守卫；③CI 复跑 **全绿**（backend 含 ruff+mypy Hardened / frontend / 全部 FF）。④lint 修复三文件已同步服务器树（行为等同，未重建）。
+
+**终态**：本地=GitHub=云端 @9455760（行为一致）；mypy 0 / ruff 0 / pytest 1030+1 / vitest 71 / E2E 13 / 端点 203（实扫）。
