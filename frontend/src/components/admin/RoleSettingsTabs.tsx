@@ -16,6 +16,7 @@ import { Save, Trash2, Copy, Smile } from 'lucide-react'
 import { ENGINE_OPTIONS, MIMO_MODELS } from './RoleSettingsConstants'
 import { enrichCharacter, proactiveGetConfig, proactiveHistory, proactiveSend, proactivePause, updateProactiveConfig } from '../../api/system'
 import Section from './RoleSettingsSection'
+import KnowledgePreview from '../storyline/KnowledgePreview'
 
 // ═══ Tab: Basic ═══
 
@@ -270,11 +271,37 @@ function ImportantDatesSection({ characterId }: { characterId: string }) {
 // ═══ Tab: Voice ═══
 
 function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
+  const qc = useQueryClient()
   const [engine] = useState(character.voice_config?.engine || 'mimo-tts')
   // voice_config 是 VoiceConfig | 自定义对象 联合类型；mimo_model 是自定义字段，需要运行时安全访问
   const mimoModelInitial = (character.voice_config as { mimo_model?: string } | null | undefined)?.mimo_model
   const [mimoModel, setMimoModel] = useState(mimoModelInitial || 'mimo-v2.5-tts')
   const [status] = useState('就绪')
+  // 保存接线（GAP-4 修复，2026-09-01）：POST /characters/{id}/voice 落盘
+  const [saving, setSaving] = useState(false)
+  const [savedTick, setSavedTick] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const dirty = mimoModel !== (mimoModelInitial || 'mimo-v2.5-tts')
+
+  async function handleSaveVoice() {
+    setSaving(true)
+    setSaveError('')
+    try {
+      await client.post(`/characters/${character.id}/voice`, {
+        engine: 'mimo-tts',
+        speaker_name: (character.voice_config as { speaker_name?: string } | null)?.speaker_name ?? '',
+        extra_params: { mimo_model: mimoModel },
+      })
+      setSavedTick(true)
+      setTimeout(() => setSavedTick(false), 2000)
+      qc.invalidateQueries({ queryKey: queryKeys.characters.detail(character.id) })
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+      setSaveError(detail || '保存失败，请稍后重试')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -316,20 +343,32 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
             {(mimoModel === 'mimo-v2.5-tts-voiceclone' || mimoModel === 'mimo-v2.5-tts-voicedesign') && (
               <div className="rounded-xl bg-amber-50/50 border border-amber-100 p-4 text-center">
                 <p className="text-sm text-amber-700">
-                  {mimoModel === 'mimo-v2.5-tts-voiceclone' ? '语音克隆' : '音色设计'}功能开发中
+                  {mimoModel === 'mimo-v2.5-tts-voiceclone' ? '克隆音色' : '设计音色'}的创建在「系统设置 → 语音工作台」
                 </p>
-                <p className="text-xs text-amber-500 mt-1">当前请先使用基础合成</p>
+                <p className="text-xs text-amber-500 mt-1">此处选择要应用于该角色的模型形态</p>
               </div>
             )}
 
             <div className="text-xs text-gray-400">状态: {status}</div>
+
+            <div className="flex items-center justify-end gap-3">
+              {saveError && <span className="text-xs text-red-500">{saveError}</span>}
+              {savedTick && <span className="text-xs text-green-600">已保存</span>}
+              <button
+                onClick={handleSaveVoice}
+                disabled={saving || !dirty}
+                className="px-4 py-2 rounded-lg bg-primary-500 text-white text-xs font-medium hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {saving ? '保存中…' : '保存语音设置'}
+              </button>
+            </div>
           </div>
         </Section>
       )}
 
-      <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
-        <p className="text-xs text-gray-400">语音设置保存接口开发中，当前仅支持预览配置</p>
-      </div>
+      {!dirty && !savedTick && !saveError && (
+        <p className="text-center text-xs text-gray-400">模型选择实时生效于预览，点击「保存语音设置」落盘</p>
+      )}
     </div>
   )
 }
@@ -618,28 +657,12 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
         </div>
       </Section>
 
-      {/* RAG */}
+      {/* RAG（SP-4 + GAP-4 修复，2026-09-01）：真实知识库统计 + 检索测试，替换假数据占位 */}
       <Section title="知识库引擎 (RAG)">
-        <div className="flex items-center gap-2 mb-4">
-          <span className="flex items-center gap-1 text-[11px] text-green-600 font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" /> 运行正常
-          </span>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: '向量文档', value: (character.rag?.vectorDocs ?? 0).toLocaleString() },
-            { label: '关键词索引', value: (character.rag?.keywordIndex ?? 0).toLocaleString() },
-            { label: '检索命中率', value: `${character.rag?.hitRate ?? 0}%` },
-          ].map(s => (
-            <div key={s.label} className="text-center p-2.5 rounded-xl bg-purple-50/50 border border-purple-100/50">
-              <p className="text-lg font-bold text-purple-600">{s.value}</p>
-              <p className="text-[10px] text-gray-400 mt-0.5">{s.label}</p>
-            </div>
-          ))}
-        </div>
-        <div className="mt-3 rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
-          <p className="text-xs text-gray-400">知识库搜索与文档管理接口开发中</p>
-        </div>
+        <p className="text-xs text-gray-400 mb-1">
+          对话时按相关度检索角色知识库（BM25）；来源含角色卡字段、文档导入、vault 与网络爬取。
+        </p>
+        <KnowledgePreview characterId={character.id} />
       </Section>
 
       {/* Timestamps */}
