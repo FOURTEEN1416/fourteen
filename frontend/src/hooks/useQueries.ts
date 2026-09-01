@@ -8,7 +8,7 @@ export const queryKeys = {
 
   dashboard: ['dashboard'] as const,
   health: ['health'] as const,
-  emotion: { state: ['emotion', 'state'] as const, trend: (days: number) => ['emotion', 'trend', days] as const },
+  emotion: { state: ['emotion', 'state'] as const, trend: (days: number) => ['emotion', 'trend', days] as const, distribution: (days: number) => ['emotion', 'distribution', days] as const },
   persona: { profile: ['persona', 'profile'] as const, evolution: ['persona', 'evolution'] as const },
   memory: { facts: (category?: string) => ['memory', 'facts', category] as const },
   config: ['config'] as const,
@@ -68,6 +68,18 @@ export function useEmotionTrend(days = 7) {
   return useQuery({
     queryKey: queryKeys.emotion.trend(days),
     queryFn: () => api.emotionTrend(days).then(r => r.data as { trend: Array<{ timestamp: string; primary_emotion: string; intensity: number }> }),
+    staleTime: 60 * 1000,
+  })
+}
+
+/** 情绪分布（SP-1，2026-09-01）：会话内存态聚合，重启清零 */
+export function useEmotionDistribution(days = 7) {
+  return useQuery({
+    queryKey: queryKeys.emotion.distribution(days),
+    queryFn: () =>
+      client
+        .get('/emotion/distribution', { params: { days } })
+        .then(r => r.data as { distribution: Array<{ emotion: string; count: number }>; total: number; days: number }),
     staleTime: 60 * 1000,
   })
 }

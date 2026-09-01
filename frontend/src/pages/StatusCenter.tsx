@@ -5,7 +5,9 @@ import {
   useActiveCharacter,
   useAchievements,
   useDashboard,
+  useEmotionDistribution,
   useEmotionState,
+  useEmotionTrend,
   useMemoryFacts,
 } from '../hooks/useQueries'
 import type { AchievementsResponse, DashboardStats } from '../types/api'
@@ -30,6 +32,8 @@ export default function StatusCenter() {
   const { data: emotionData } = useEmotionState()
   const { data: facts } = useMemoryFacts()
   const { data: achievements } = useAchievements(activeCharacter?.id)
+  const { data: trendData } = useEmotionTrend(7)
+  const { data: distData } = useEmotionDistribution(7)
 
   if (!activeCharacter) {
     return (
@@ -68,11 +72,91 @@ export default function StatusCenter() {
         </div>
       </div>
 
+      <EmotionInsightCard trend={trendData?.trend ?? []} distribution={distData?.distribution ?? []} distTotal={distData?.total ?? 0} />
+
       <AchievementsCard data={achievements} />
 
       <DiaryCard />
 
       <MemorySystemCard characterId={activeCharacter.id} recentFacts={recentFacts} />
+    </div>
+  )
+}
+
+/** SP-1 收官（2026-09-01）：亲密度情绪趋势（会话内存态迷你折线）+ 情绪分布条。
+ * 数据源 EmotionEngine 环形缓冲（上限 500），重启清零——空态诚实标注"会话内"。 */
+function EmotionInsightCard({
+  trend,
+  distribution,
+  distTotal,
+}: {
+  trend: Array<{ timestamp: string; primary_emotion: string; intensity: number }>
+  distribution: Array<{ emotion: string; count: number }>
+  distTotal: number
+}) {
+  const [open, setOpen] = useState(true)
+  if (trend.length === 0 && distTotal === 0) return null
+
+  // 迷你折线：intensity 0~1 → 40px 高 SVG polyline
+  const W = 280
+  const H = 40
+  const points = trend
+    .slice(-30)
+    .map((t, i, arr) => {
+      const x = arr.length > 1 ? (i / (arr.length - 1)) * W : W / 2
+      const y = H - Math.max(0, Math.min(1, t.intensity)) * (H - 4) - 2
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(' ')
+
+  const maxCount = Math.max(1, ...distribution.map(d => d.count))
+  const emotionColor: Record<string, string> = {
+    开心: 'bg-macaron-yellow', 平常: 'bg-macaron-blue', 期待: 'bg-macaron-mint',
+    害羞: 'bg-pink-300', 惊讶: 'bg-sky-300', 担忧: 'bg-indigo-300',
+    生气: 'bg-red-300', 伤心: 'bg-slate-300', 委屈: 'bg-amber-300', 感动: 'bg-rose-300',
+  }
+
+  return (
+    <div className="glass-card rounded-xl p-4">
+      <button onClick={() => setOpen(v => !v)} className="w-full flex items-center gap-2 text-left">
+        <span className="section-bar" />
+        <h3 className="text-sm font-semibold text-gray-700 flex-1">情绪洞察</h3>
+        <span className="text-[10px] text-gray-400">{open ? '收起' : '展开'} · 会话内</span>
+      </button>
+      {open && (
+        <div className="mt-3 space-y-4">
+          {trend.length > 1 && (
+            <div>
+              <p className="text-[10px] text-gray-400 mb-1">强度趋势（最近 {Math.min(30, trend.length)} 次互动）</p>
+              <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-10" preserveAspectRatio="none">
+                <polyline points={points} fill="none" stroke="currentColor"
+                  className="text-macaron-yellow-deep" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+              </svg>
+            </div>
+          )}
+          {distribution.length > 0 && (
+            <div>
+              <p className="text-[10px] text-gray-400 mb-1.5">情绪分布（共 {distTotal} 次）</p>
+              <div className="space-y-1.5">
+                {distribution.slice(0, 6).map(d => (
+                  <div key={d.emotion} className="flex items-center gap-2">
+                    <span className="text-xs text-gray-600 w-8 shrink-0">{d.emotion}</span>
+                    <div className="flex-1 h-2 rounded-full bg-black/5 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${emotionColor[d.emotion] ?? 'bg-gray-300'}`}
+                        style={{ width: `${(d.count / maxCount) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] text-gray-400 tabular-nums w-10 text-right">
+                      {Math.round((d.count / distTotal) * 100)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

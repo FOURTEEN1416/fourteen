@@ -5,13 +5,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import StatusCenter from '../../pages/StatusCenter'
 
 // ── hoisted mock fns ──
-const { mockUseActiveCharacter, mockUseDashboard, mockUseEmotionState, mockUseMemoryFacts, mockUseAchievements } = vi.hoisted(
+const { mockUseActiveCharacter, mockUseDashboard, mockUseEmotionState, mockUseMemoryFacts, mockUseAchievements, mockUseEmotionTrend, mockUseEmotionDistribution } = vi.hoisted(
   () => ({
     mockUseActiveCharacter: vi.fn(),
     mockUseDashboard: vi.fn(),
     mockUseEmotionState: vi.fn(),
     mockUseMemoryFacts: vi.fn(),
     mockUseAchievements: vi.fn(),
+    mockUseEmotionTrend: vi.fn(),
+    mockUseEmotionDistribution: vi.fn(),
   }),
 )
 
@@ -21,6 +23,8 @@ vi.mock('../../hooks/useQueries', () => ({
   useEmotionState: () => mockUseEmotionState(),
   useMemoryFacts: () => mockUseMemoryFacts(),
   useAchievements: () => mockUseAchievements(),
+  useEmotionTrend: () => mockUseEmotionTrend(),
+  useEmotionDistribution: () => mockUseEmotionDistribution(),
 }))
 
 const FAKE_CHARACTER = {
@@ -62,6 +66,8 @@ describe('StatusCenter', () => {
     mockUseEmotionState.mockReturnValue({ data: undefined })
     mockUseMemoryFacts.mockReturnValue({ data: undefined })
     mockUseAchievements.mockReturnValue({ data: undefined })
+    mockUseEmotionTrend.mockReturnValue({ data: undefined })
+    mockUseEmotionDistribution.mockReturnValue({ data: undefined })
   })
 
   it('shows empty state when no active character', () => {
