@@ -308,3 +308,20 @@
 **验证（全绿）**：pytest **1042+1** · vitest **75**/14 files · tsc 0 · ruff 0 · mypy 0（346 files）· **E2E 16/16**。端点实扫 **206**。
 
 **真源同步**：app_factory 头注释/CODE_GRAPH 206+1117/INVENTORY STATUS-7+N-EXPORT-1+GAP-5 全结案/LEDGER 09-01晚批次行。
+
+---
+
+## 2026-09-02（凌晨） — 通宵待办清零批次（用户指令「完成所有待办和待优化，醒来验收」）
+
+**审计先行**：全库 sweep"开发中/占位/TODO"+ P1_BACKLOG 复核后，真实待办收敛为两项可清项；其余定性归属：
+- P1_BACKLOG 未决 5 项 = 全部用户裁决域（FF-0007 用户明示排除 / P1-9 本地网络 / P1-11 改名决策 / P1-13 低优 / OBS-2 HTTPS+OBS-3 root 用户已裁决暂不管）——**保留不动**。
+- STICKERS 上传 = **未立项功能而非缺陷**（后端无贴图存储 API；shisi/sticker 是推荐/安全检查库）——FUNCTION_INVENTORY 如实登记，未擅自立项（商讨协议）。
+- STATUS-7"亲密度数值曲线" = 待用户裁决的产品决策——保留。
+
+**清零项**：
+1. **成就第二阶段**（ADR-0014 契约内"每日维护兜底"路径）：`proactive/scheduler.py` 新增 `run_achievement_maintenance()`——读 config/characters 全部角色内部 id（缺 id/坏 JSON 跳过告警）→ 逐角色幂等重算落库；挂入 `_run_daily_maintenance`（00:05，BackgroundScheduler 独立线程 asyncio.run 安全）。触发策略三件套至此完整：读取即重算（主）+ 每日兜底（修漏）+ 幂等保证。+2 测试（含 monkeypatch 角色库/会话工厂/事实源的端到端）。
+2. **图谱库重索引**：codebase-memory 图谱工具 CLI 重跑，**7706/32367 → 7992 节点/33182 边**（artifact.json schema v2，commit 3c3e31e5 对齐 HEAD 落盘）；CODE_GRAPH §1.2 三处同步，旧快照链（06-30/5983 → 08-28/7706 → 09-02/7992）完整可溯。
+
+**验证（全绿）**：pytest **1044+1**（+2）· vitest **75** · tsc 0 · ruff 0 · mypy 0 · **E2E 16/16**。测试进程杀净。
+
+**真源同步**：CODE_GRAPH §1.2/§13、FUNCTION_INVENTORY（STICKERS-1 定性 + ACH-4）、ADR-0014 第二阶段实现记录、DECISION_LEDGER 09-02 行。

@@ -75,7 +75,7 @@
 | MESSAGE-3 | 手动控制：立即发送一条主动消息（POST /proactive/send 绕过频率、计入统计）+ 最近 5 条发送记录 |
 | MESSAGE-4 | 统计卡真数据：今日主动/最后发送（08-28 修复：旧 history 读不存在的 `_sent_messages` 属性，一直返回空） |
 | DATA-1 | 数据 tab：概览统计（消息/记忆条数）+ 网络人设增强按钮（/api/characters/{id}/enrich）+ **知识库真实管理区**（SP-4 结案 09-01：KnowledgePreview 挂载——真实 stats + 检索测试，替换假 RAG 三卡与占位横幅） |
-| STICKERS-1 | 表情包 tab |
+| STICKERS-1 | 表情包 tab：常用表情网格展示 + 自定义贴图上传占位（**上传保存为未立项功能，非缺陷**——后端无贴图存储 API，shisi/sticker 仅推荐/安全检查库；立项需用户裁决） |
 | TIMELINE-1 | 剧情时间线 tab（内嵌 StorylineEditor） |
 
 ### STATUS — 状态中心 `/roles/:id/status`（StatusCenter.tsx, 77 行）
@@ -106,6 +106,7 @@
 | ACH-1 | 成就清单（GET，读取即幂等重算）：10 成就×4 类（陪伴/记忆/互动/探索），指标=记忆事实/日记篇数/知识块/重要日期/音色绑定/收藏 |
 | ACH-2 | 显式重算（POST .../recalculate）：幂等，已解锁不回退，unlocked_at 首次达标落库 |
 | ACH-3 | StatusCenter 成就卡消费（STATUS-5），仅展示不推送 |
+| ACH-4 | **每日兜底**（ADR-0014 第二阶段，09-02）：调度器 00:05 维护任务对角色库全部角色幂等重算（run_achievement_maintenance），修复漏事件；读取即重算（ACH-1）仍为主路径 |
 | N-EXPORT-1 | **数据导出**（GAP-4 收尾，09-01）：DATA tab 四按钮——角色卡 PNG/JSON（/characters/{id}/export）+ 聊天记录 JSON/CSV（/chat/export），blob 下载 |
 
 ## I. 跨域新能力（2026-08-28 候选 A-D，调研对标 awesome-ai-companion 后立项）
