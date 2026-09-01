@@ -244,6 +244,42 @@ class WechatBinding(Base):
         return f"<WechatBinding(id={self.id}, wxid='{self.wxid}', user_id={self.user_id}, char='{self.character_card_id}')>"
 
 
+class CharacterAchievement(Base):
+    """角色成就（ADR-0014）— 角色维度隔离，解锁时间以首次达标落库为准。
+
+    进度由 achievement_engine 从既有事实源幂等重算，本表只持久化
+    进度快照与 first-unlock 时间戳；重复重算不会重复解锁。
+    """
+
+    __tablename__ = "character_achievements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    character_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    achievement_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    target: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    unlocked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "achievement_id": self.achievement_id,
+            "character_id": self.character_id,
+            "progress": self.progress,
+            "target": self.target,
+            "unlocked_at": self.unlocked_at.isoformat() if self.unlocked_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"<CharacterAchievement(char='{self.character_id}', "
+            f"ach='{self.achievement_id}', {self.progress}/{self.target})>"
+        )
+
+
 # ═══════════════════════════════════════════════════════
 # 数据库初始化
 # ═══════════════════════════════════════════════════════

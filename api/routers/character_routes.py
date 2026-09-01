@@ -13,11 +13,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, Query, Security, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Security, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
+from api.database import get_db
 from api.deps import deps
 from api.path_security import sanitize_id
 from my_character.persona_card import PersonaCardV3
@@ -965,3 +967,36 @@ async def export_chat(
                  "total": len(messages), "messages": messages},
         headers={"Content-Disposition": f'attachment; filename="chat-{character_id}.json"'},
     )
+
+
+# ═══════════════════════════════════════════════════════
+# 角色成就（ADR-0014，2026-09-01 实现）
+# ═══════════════════════════════════════════════════════
+
+
+@router.get("/characters/{character_id}/achievements")
+async def list_achievements(
+    character_id: str,
+    db: AsyncSession = Depends(get_db),
+    _auth: bool = Security(verify_api_key_dep),
+):
+    """角色成就清单（读取时幂等重算，解锁时间保持首次达标）。"""
+    from api.achievement_engine import recalculate_achievements
+
+    items = await recalculate_achievements(db, sanitize_id(character_id))
+    unlocked = sum(1 for i in items if i["unlocked"])
+    return {"character_id": character_id, "achievements": items, "unlocked_count": unlocked, "total": len(items)}
+
+
+@router.post("/characters/{character_id}/achievements/recalculate")
+async def recalculate_achievements_endpoint(
+    character_id: str,
+    db: AsyncSession = Depends(get_db),
+    _auth: bool = Security(verify_api_key_dep),
+):
+    """显式触发成就重算（幂等；与 GET 同语义，供维护任务/前端手动刷新）。"""
+    from api.achievement_engine import recalculate_achievements
+
+    items = await recalculate_achievements(db, sanitize_id(character_id))
+    unlocked = sum(1 for i in items if i["unlocked"])
+    return {"character_id": character_id, "recalculated": True, "unlocked_count": unlocked, "total": len(items)}
