@@ -91,7 +91,7 @@ test.describe('W4 新能力冒烟', () => {
     await expect(page.getByRole('heading', { name: '状态中心' })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText('当前情绪', { exact: true })).toBeVisible()
     await expect(page.getByText('亲密等级', { exact: true })).toBeVisible()
-    await expect(page.getByText('最近记忆', { exact: true })).toBeVisible()
+    await expect(page.getByText('记忆体系', { exact: true })).toBeVisible()
   })
 
   test('重要日期：设置页 Basic tab 区块渲染 + 添加一行 + 保存成功（测试后还原共享文件）', async ({
