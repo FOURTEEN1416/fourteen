@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate, useParams, Outlet } from 'react-router-dom'
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './api/queryClient'
 import Sidebar from './components/layout/Sidebar'
@@ -15,9 +15,8 @@ import CreateRole from './pages/CreateRole'
 import RoleSettings from './pages/RoleSettings'
 import StatusCenter from './pages/StatusCenter'
 import StorylineEditor from './components/storyline/StorylineEditor'
-import { AuthGuard, RoleGuard, ConsentGate } from './components/auth'
+import { AuthGuard, RoleGuard, ConsentGate, AuthInit } from './components/auth'
 import { useAuthStore } from './store/authStore'
-import { refreshToken } from './api/auth'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const IntroPage = lazy(() => import('./pages/IntroPage'))
@@ -67,29 +66,6 @@ function AnimatedSuspense({ children }: { children: React.ReactNode }) {
       </AnimatedPage>
     </Suspense>
   )
-}
-
-/** 认证初始化：App 启动时 init() 一次 */
-function AuthInit({ children }: { children: React.ReactNode }) {
-  useEffect(() => {
-    const { user } = useAuthStore.getState()
-    if (!user) {
-      useAuthStore.setState({ isInitialized: true })
-      return
-    }
-    const doInit = async () => {
-      try {
-        const res = await refreshToken()
-        useAuthStore.getState().setAuth(res.user, res.access_token)
-        useAuthStore.setState({ isInitialized: true, needsConsent: res.needs_consent ?? false })
-      } catch {
-        useAuthStore.getState().clearAuth()
-        useAuthStore.setState({ isInitialized: true })
-      }
-    }
-    doInit()
-  }, [])
-  return <>{children}</>
 }
 
 /** 受保护的管理控制台布局（含侧边栏+顶栏+AuthGuard） */
