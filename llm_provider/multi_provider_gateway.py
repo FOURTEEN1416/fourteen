@@ -33,7 +33,7 @@ logger = logging.getLogger("llm_provider.multi_gateway")
 try:
     from observability.metrics import record_provider_fallback as _record_fallback
 except ImportError:  # pragma: no cover
-    def _record_fallback(provider: str, status: str) -> None:
+    def _record_fallback(provider: str, status: str) -> Any:
         return None
 
 # ── 默认 fallback 链 ──

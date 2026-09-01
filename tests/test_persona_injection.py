@@ -153,6 +153,7 @@ def test_prompt_builder_includes_knowledge_context() -> None:
 
     ps = PersonaService(config_loader=None, llm_gateway=None)
     character = ps._build_character_from_card(character_id, ps._map_emotional_state(None))
+    assert character is not None
 
     # 确保知识索引存在
     svc = get_knowledge_service()

@@ -12,6 +12,7 @@ import logging
 import os
 import threading
 import time
+from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -172,7 +173,10 @@ def create_api_app(
                 },
             )
 
-        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+        app.add_exception_handler(
+            RateLimitExceeded,
+            cast(Any, _rate_limit_exceeded_handler),
+        )
 
     if _rate_limit_enabled:
         _setup_fallback_rate_limiter(app, max_requests=_rate_limit_per_minute)

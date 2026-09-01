@@ -45,7 +45,7 @@ def _build_clone_preview_from_conversations(
     profile = StyleAnalyzer().analyze(conversations)
     catchphrases = [phrase for phrase, _count in profile.catchphrases[:8]]
     anchors = [*catchphrases[:3], *profile.slang_examples[:3]]
-    dominant_emotion = max(profile.emotion_dist, key=profile.emotion_dist.get) if profile.emotion_dist else "自然"
+    dominant_emotion = max(profile.emotion_dist, key=lambda emotion: profile.emotion_dist[emotion]) if profile.emotion_dist else "自然"
     anchors.append(f"{dominant_emotion}表达")
     anchors = list(dict.fromkeys(anchors))[:8]
 

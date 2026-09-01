@@ -313,7 +313,7 @@ async def crawl_persona_knowledge(
     result = adapter.crawl_and_index(
         character_id=character_id,
         name=req.name,
-        card=card,
+        card=card.model_dump() if card is not None else None,
     )
     if not result.get("success"):
         logger.warning("抓取人物资料失败: %s — %s", character_id, result.get("error"))

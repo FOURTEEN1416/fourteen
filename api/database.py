@@ -3,6 +3,9 @@
 
 使用 SQLAlchemy async + aiosqlite，数据存储在 data/users.db。
 后续可切换 PostgreSQL，只需改 DATABASE_URL 环境变量。
+
+2026-08-31（T1 mypy 债清偿）：Column[] → Mapped[] 注解升级（SQLAlchemy 2.0 标准写法），
+实例属性类型由 mypy 完整推断，消除全库 30+ 处 Column 联合类型错误。运行时行为不变。
 """
 
 from __future__ import annotations
@@ -10,11 +13,11 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
+from typing import cast
 
 from sqlalchemy import (
     JSON,
     Boolean,
-    Column,
     DateTime,
     ForeignKey,
     Integer,
@@ -22,7 +25,7 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 logger = logging.getLogger("database")
 
@@ -34,6 +37,11 @@ DATABASE_URL = get_database_url()
 # ── 异步引擎 ──
 _engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
 _async_session = async_sessionmaker(_engine, expire_on_commit=False)
+
+
+def _utcnow() -> datetime:
+    """SQLite/aiosqlite 存 naive UTC；统一用带时区构造，读回再补 tz。"""
+    return datetime.now(timezone.utc)
 
 
 # ── 基类 ──
@@ -53,32 +61,31 @@ class User(Base):
 
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    email = Column(String(255), unique=True, nullable=False, index=True)
-    username = Column(String(100), unique=True, nullable=False, index=True)
-    hashed_password = Column(String(255), nullable=False)
-    display_name = Column(String(255), default="")
-    avatar_url = Column(String(512), default="")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    avatar_url: Mapped[str] = mapped_column(String(512), default="")
 
     # 角色：admin / editor / viewer
-    role = Column(String(50), default="viewer", nullable=False)
+    role: Mapped[str] = mapped_column(String(50), default="viewer", nullable=False)
 
     # 状态
-    is_active = Column(Boolean, default=True, nullable=False)
-    is_verified = Column(Boolean, default=False, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # 用户级 LLM 配置（JSON）— 优先于全局默认，实现多用户 API Key 隔离
-    llm_config = Column(JSON, nullable=True)
+    llm_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 时间
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(
-        DateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-        nullable=False,
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, nullable=False
     )
-    last_login_at = Column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # 关联
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
@@ -106,14 +113,18 @@ class InviteCode(Base):
 
     __tablename__ = "invite_codes"
 
-    code = Column(String(16), primary_key=True)
-    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    used_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    used_at = Column(DateTime, nullable=True)
-    expires_at = Column(DateTime, nullable=False)
-    is_revoked = Column(Boolean, default=False, nullable=False)
-    note = Column(String(255), default="", nullable=False)
+    code: Mapped[str] = mapped_column(String(16), primary_key=True)
+    created_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    used_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    is_revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    note: Mapped[str] = mapped_column(String(255), default="", nullable=False)
 
     def is_valid(self) -> bool:
         """检查邀请码是否仍可使用"""
@@ -123,7 +134,7 @@ class InviteCode(Base):
         if self.used_by is not None:
             return False
         # SQLite 存的是 naive datetime
-        exp = self.expires_at
+        exp: datetime = self.expires_at
         if exp.tzinfo is None:
             exp = exp.replace(tzinfo=timezone.utc)
         return not (now > exp)
@@ -149,16 +160,18 @@ class UserSession(Base):
 
     __tablename__ = "user_sessions"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    refresh_token_hash = Column(String(255), nullable=False, index=True)
-    device_name = Column(String(255), default="")
-    ip_address = Column(String(45), default="")
-    user_agent = Column(String(512), default="")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    refresh_token_hash: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    device_name: Mapped[str] = mapped_column(String(255), default="")
+    ip_address: Mapped[str] = mapped_column(String(45), default="")
+    user_agent: Mapped[str] = mapped_column(String(512), default="")
 
     # 过期时间
-    expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     # 关联
     user = relationship("User", back_populates="sessions")
@@ -166,9 +179,10 @@ class UserSession(Base):
     def is_expired(self) -> bool:
         now = datetime.now(timezone.utc)
         # SQLite/aiosqlite 不保存时区信息，读回的是 naive datetime
-        if self.expires_at.tzinfo is None:
-            return now > self.expires_at.replace(tzinfo=timezone.utc)
-        return now > self.expires_at
+        exp: datetime = self.expires_at
+        if exp.tzinfo is None:
+            return now > exp.replace(tzinfo=timezone.utc)
+        return now > exp
 
     def __repr__(self) -> str:
         return f"<UserSession(id={self.id}, user_id={self.user_id})>"
@@ -183,10 +197,12 @@ class ConsentRecord(Base):
 
     __tablename__ = "consent_records"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    agreement_version = Column(String(32), nullable=False, index=True)
-    agreed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    agreement_version: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    agreed_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     def to_dict(self) -> dict:
         return {
@@ -204,13 +220,15 @@ class WechatBinding(Base):
 
     __tablename__ = "wechat_bindings"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    wxid = Column(String(255), unique=True, nullable=False, index=True)
-    nickname = Column(String(255), default="")
-    avatar = Column(Text, default="")
-    character_card_id = Column(String(255), default="default")
-    bound_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    wxid: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    nickname: Mapped[str] = mapped_column(String(255), default="")
+    avatar: Mapped[str] = mapped_column(Text, default="")
+    character_card_id: Mapped[str] = mapped_column(String(255), default="default")
+    bound_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     def to_dict(self) -> dict:
         return {

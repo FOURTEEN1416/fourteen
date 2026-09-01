@@ -9,7 +9,7 @@ import pytest
 
 
 class _KnowledgeResult:
-    chunks = []
+    chunks: list[object] = []
     total_chunks = 0
 
     def __init__(self, character_id: str):
