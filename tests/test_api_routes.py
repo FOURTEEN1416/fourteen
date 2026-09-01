@@ -144,7 +144,7 @@ def test_control_plane_critical_routes_are_mounted(app):
     [
         (misc_routes, 16, "stats/memory/diary/dates/meta/logs/config/channels/routes/user-llm-config"),
         (chat_routes, 11, "chat/session + wechat channels"),
-        (personality_routes, 9, "emotion/persona/psych"),
+        (personality_routes, 10, "emotion/persona/psych（08-31? +emotion/distribution SP-1）"),
         (users_routes, 7, "users/*"),
         (training_routes, 11, "training/* + proactive/*（08-28 +config/send/pause 手动控制）"),
         (tools_routes, 6, "tools/* + plugins/* + health"),
@@ -166,7 +166,7 @@ def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
     )
 
 
-def test_total_contribution_is_80(app):
+def test_total_contribution_is_81(app):
     """The 8 new sub-routers together contribute exactly 72 endpoints.
 
     2026-08-27: 微信克隆 Option B 剥离 /api/clone/preview，clone_routes 由 9 端点变 8 端点
@@ -177,7 +177,7 @@ def test_total_contribution_is_80(app):
         training_routes, tools_routes, safety_routes, clone_routes,
     ]
     total = sum(len(_sub_router_routes(m)) for m in modules)
-    assert total == 80, f"8 sub-routers contribute {total} routes, expected 80"
+    assert total == 81, f"8 sub-routers contribute {total} routes, expected 81"
 
 
 def test_no_duplicate_endpoints_across_sub_routers():

@@ -19,6 +19,7 @@ import logging
 import random
 import time
 import weakref
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
@@ -495,6 +496,8 @@ class EmotionEngine:
 
         self._guard = ContinuityGuard(blend_ratio)
         self._state = CompoundEmotionalState()
+        # 情绪历史环形缓冲：trend/distribution 端点数据源（内存态，随引擎生命周期）
+        self._emotion_history: deque = deque(maxlen=500)
 
         self._default_config = {
             "energy_drain_per_message": 0.02,
@@ -548,7 +551,24 @@ class EmotionEngine:
         self._check_affinity_downgrade()
 
         self._total_chats += 1
+        self._record_history(new_state)
         return self._state
+
+    # ---- 情绪历史（trend / distribution 数据源）----
+
+    def _record_history(self, state: CompoundEmotionalState) -> None:
+        self._emotion_history.append(
+            {
+                "timestamp": state.last_update,
+                "primary_emotion": state.primary_emotion.value,
+                "intensity": round(state.primary_intensity, 3),
+            }
+        )
+
+    def get_history(self, limit: int | None = None) -> list[dict[str, Any]]:
+        """返回情绪历史快照（旧→新），limit 为 None 时返回全部。"""
+        items = list(self._emotion_history)
+        return items[-limit:] if limit else items
 
     # ---- V1 兼容入口 ----
 

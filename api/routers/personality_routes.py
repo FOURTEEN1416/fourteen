@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
 
@@ -49,11 +50,46 @@ async def emotion_trend(
     days: int = Query(default=7, ge=1, le=30),
     _auth: bool = Security(verify_api_key_dep),
 ):
+    """情绪趋势（会话内存态）：按时间窗返回历史记录（旧→新）。
+
+    2026-09-01 修复：旧实现读不存在的 `_emotion_history` 属性，端点自创建起
+    恒返回空数组；现统一走 EmotionEngine.get_history()。历史为环形缓冲
+    （500 条上限，重启清零），days 仅作时间窗近似截断。
+    """
     orch = deps.orch
     if not orch or not orch._emotion:
         return {"trend": [], "days": days}
-    trend = getattr(orch._emotion, "_emotion_history", [])
-    return {"trend": trend[-days * 20:], "days": days}
+    history = orch._emotion.get_history()
+    return {"trend": history[-days * 20:], "days": days}
+
+
+@router.get("/api/emotion/distribution")
+async def emotion_distribution(
+    days: int = Query(default=7, ge=1, le=30),
+    _auth: bool = Security(verify_api_key_dep),
+):
+    """情绪分布（会话内存态）：聚合历史中各主情绪的占比。
+
+    SP-1 补齐：与 trend 同源（EmotionEngine 环形缓冲），无持久化——
+    重启后从零累计，前端需诚实标注"会话内"。
+    """
+    orch = deps.orch
+    if not orch or not orch._emotion:
+        return {"distribution": [], "total": 0, "days": days}
+    history = orch._emotion.get_history()
+    cutoff = time.time() - days * 86400
+    counts: dict[str, int] = {}
+    for item in history:
+        ts = item.get("timestamp", 0) or 0
+        if ts and ts < cutoff:
+            continue
+        emotion = item.get("primary_emotion", "平常")
+        counts[emotion] = counts.get(emotion, 0) + 1
+    distribution = [
+        {"emotion": emotion, "count": count}
+        for emotion, count in sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    ]
+    return {"distribution": distribution, "total": sum(counts.values()), "days": days}
 
 
 # ═══════════════════════════════════════════════════════
