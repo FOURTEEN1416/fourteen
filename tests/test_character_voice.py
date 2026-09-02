@@ -13,11 +13,11 @@ def test_bind_and_get():
         path = f.name
     try:
         mgr = CharacterVoiceManager(config_path=path)
-        mgr.bind_voice("char1", "edge-tts", speaker_name="zh-CN-XiaoyiNeural")
+        mgr.bind_voice("char1", "mimo-tts", speaker_name="female-tianmei")
         config = mgr.get_voice_config("char1")
         assert config is not None
-        assert config["engine"] == "edge-tts"
-        assert config["speaker_name"] == "zh-CN-XiaoyiNeural"
+        assert config["engine"] == "mimo-tts"
+        assert config["speaker_name"] == "female-tianmei"
     finally:
         os.unlink(path)
 
@@ -27,7 +27,7 @@ def test_unbind():
         path = f.name
     try:
         mgr = CharacterVoiceManager(config_path=path)
-        mgr.bind_voice("char2", "gpt-sovits")
+        mgr.bind_voice("char2", "mimo-tts")
         assert mgr.unbind_voice("char2") is True
         assert mgr.get_voice_config("char2") is None
         assert mgr.unbind_voice("nonexist") is False
@@ -40,8 +40,8 @@ def test_list_bindings():
         path = f.name
     try:
         mgr = CharacterVoiceManager(config_path=path)
-        mgr.bind_voice("a", "edge-tts")
-        mgr.bind_voice("b", "gpt-sovits")
+        mgr.bind_voice("a", "mimo-tts")
+        mgr.bind_voice("b", "mimo-tts")
         bindings = mgr.list_bindings()
         assert "a" in bindings
         assert "b" in bindings

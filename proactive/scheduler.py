@@ -29,6 +29,45 @@ except ImportError:
     logger.warning("APScheduler not installed, scheduler disabled")
 
 
+def run_achievement_maintenance() -> int:
+    """成就每日兜底重算（ADR-0014 每日维护路径，2026-09-01 第二阶段）。
+
+    对角色库（config/characters/*.json 内部 id 字段）全部角色幂等重算：
+    修复漏事件/历史数据漂移；读取时重算（GET achievements）仍是主路径。
+    返回处理的角色数；角色库缺失或为空时返回 0。
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    from api.achievement_engine import recalculate_achievements
+    from api.database import _async_session as _ach_session_factory
+    from api.path_security import sanitize_id as _sanitize_id
+
+    characters_dir = _Path("config/characters")
+    if not characters_dir.exists():
+        return 0
+    ids: list[str] = []
+    for card_file in characters_dir.glob("*.json"):
+        try:
+            data = _json.loads(card_file.read_text(encoding="utf-8"))
+            cid = _sanitize_id(str(data.get("id", "")))
+            if cid:
+                ids.append(cid)
+        except Exception:  # noqa: BLE001
+            logger.warning("成就兜底跳过无法解析的角色文件: %s", card_file.name)
+
+    async def _recalc_all() -> None:
+        async with _ach_session_factory() as session:
+            for cid in ids:
+                try:
+                    await recalculate_achievements(session, cid)
+                except Exception:  # noqa: BLE001
+                    logger.warning("成就兜底重算失败: %s", cid, exc_info=True)
+
+    asyncio.run(_recalc_all())
+    return len(ids)
+
+
 class ProactiveScheduler:
     """
     主动消息调度器
@@ -184,12 +223,19 @@ class ProactiveScheduler:
 
     def _is_quiet_hours(self) -> bool:
         """检查是否在免打扰时段"""
-        now = datetime.now(tz=timezone.utc).hour + 8  # UTC+8
-        now = now % 24
+        # 使用本地时区（Asia/Shanghai 默认 UTC+8）。
+        # 旧实现硬编码 +8 偏移且未取模，在 UTC 16:00-23:00 时段会得到 24-31 的非法小时。
+        # 现在使用 datetime.now() 获取本地时间（已考虑系统时区），并允许通过 timezone_offset 配置。
+        try:
+            # 优先使用系统本地时间（已含时区转换）
+            local_hour = datetime.now().hour
+        except Exception:  # noqa: BLE001
+            # 兜底：UTC+8
+            local_hour = (datetime.now(tz=timezone.utc).hour + 8) % 24
         start, end = self._quiet_hours
         if start < end:
-            return start <= now < end
-        return now >= start or now < end
+            return start <= local_hour < end
+        return local_hour >= start or local_hour < end
 
     async def _send_to_all(self, message: str) -> bool:
         """
@@ -315,6 +361,75 @@ class ProactiveScheduler:
                         )
         except Exception as e:  # noqa: BLE001
             logger.warning("好感度衰减任务失败: %s", e)
+
+        # ── 成就每日兜底重算（ADR-0014 第二阶段）──
+        try:
+            maintained = run_achievement_maintenance()
+            if maintained:
+                logger.info("成就每日兜底重算完成: %d 个角色", maintained)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("成就兜底重算任务失败: %s", e)
+
+        # ── 候选 D：重要日期检查（生日/纪念日命中即发祝福） ──
+        self._check_important_dates()
+
+    def _check_important_dates(self) -> None:
+        """候选 D：命中重要日期时以角色口吻发送祝福（LLM 生成，模板兜底）。"""
+        try:
+            from datetime import datetime as _dt
+
+            from utils.important_dates import check_today
+
+            active_id = ""
+            try:
+                from api.deps import deps as _deps
+
+                cm = getattr(getattr(_deps, "shisi_reg", None), "character_manager", None)
+                active_id = (cm.get_active_id() if cm else "") or ""
+                if cm and active_id:
+                    _card = cm.get_card(active_id) if hasattr(cm, "get_card") else None
+                    (getattr(_card, "name", "") or "") if _card else ""
+            except Exception:
+                pass
+
+            hits = check_today(active_id, _dt.now())
+            if not hits:
+                return
+
+            names = "、".join(h.get("name", "") for h in hits)
+            kinds = "/".join(sorted({h.get("kind", "custom") for h in hits}))
+            wish = "生日快乐" if "birthday" in kinds else "纪念日快乐"
+            message = f"今天是个特别的日子（{names}）。{wish}呀！"
+            # LLM 润色（失败用模板）
+            try:
+                ase = self.ase
+                llm = getattr(ase, "_llm", None)
+                if llm is not None and hasattr(llm, "chat_sync"):
+                    polished = llm.chat_sync(
+                        query=(
+                            f"以角色口吻给对方发一条{'生日' if 'birthday' in kinds else '纪念日'}祝福，"
+                            f"提到「{names}」，2-3 句话，真挚不说教："
+                        ),
+                        max_tokens=150, temperature=0.8,
+                    )
+                    if polished and str(polished).strip():
+                        message = str(polished).strip()
+            except Exception:
+                pass
+
+            logger.info("[重要日期] 命中 %s，发送祝福", names)
+            try:
+                import asyncio as _asyncio
+                loop = _asyncio.get_event_loop()
+                if loop.is_running():
+                    _asyncio.ensure_future(self._send_to_all(message))
+                else:
+                    loop.run_until_complete(self._send_to_all(message))
+            except RuntimeError:
+                if self._send:
+                    self._send(message)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("重要日期检查失败: %s", e)
 
     def _reset_daily(self) -> None:
         """每日重置"""

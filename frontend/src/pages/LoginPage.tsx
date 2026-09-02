@@ -5,7 +5,7 @@
  * 认证成功后自动跳转到 /wechat。
  */
 import { useState, type FormEvent } from 'react'
-import { useNavigate, useLocation, Navigate } from 'react-router-dom'
+import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
 type Mode = 'login' | 'register'
@@ -69,7 +69,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center">
+    <div className="min-h-[100dvh] flex items-center justify-center">
       <div className="w-full max-w-sm mx-4">
         {/* Logo / 标题 */}
         <div className="text-center mb-8">
@@ -215,18 +215,14 @@ export default function LoginPage() {
               </span>
             )}
           </div>
-
-          {/* Demo 入口 */}
-          <div className="border-t border-white/30 pt-3 text-center">
-            <button
-              type="button"
-              onClick={() => navigate('/demo')}
-              className="text-xs text-gray-500 hover:text-green-500 transition-colors"
-            >
-              → Demo 体验入口
-            </button>
-          </div>
         </form>
+
+        {/* 了解产品（SP-11 公开介绍页入口） */}
+        <div className="text-center mt-5">
+          <Link to="/intro" className="text-xs text-gray-400 hover:text-macaron-blue-deep transition-colors">
+            了解产品 →
+          </Link>
+        </div>
       </div>
     </div>
   )

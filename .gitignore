@@ -12,6 +12,9 @@ build/
 venv/
 env/
 
+# ── 视觉图册本地产物（截图含真实用户数据，不进版本控制） ──
+docs/visual-map/
+
 # ── 临时文件 ──
 *.log
 *.tmp
@@ -106,17 +109,11 @@ create-role-presets.png
 playwright-report/
 test-results/
 
-# ── 大赛提交材料（保留本地，不进入版本控制） ──
-docs/trae_submission/
-
 # ── 用户角色卡数据（保留本地，不进入版本控制） ──
 config/characters/
 
 # ── 第三方依赖代码（保留本地，不进入版本控制） ──
 third_party/
-
-# ── Triad Navigation 运行时进度（保留本地，不进入版本控制） ──
-.triad-navigation/progress.md
 
 .env
 
@@ -126,3 +123,8 @@ node_modules/
 # MCP 索引产物（自动生成，本地使用）
 .codebase-memory/
 memory-config.json
+data/e2e_users.db
+intro-full.png
+
+# 参赛报名/个人资料（隐私，不入公开仓库，AGENTS §3 数据隐私）
+大创赛报名以及后期发展/

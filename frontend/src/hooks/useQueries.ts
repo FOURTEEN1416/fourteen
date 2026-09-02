@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '../api/client'
-import type { WechatBindingDTO } from '../api/wechat'
+import client, { api } from '../api/client'
 import { useErrorStore } from '../store/errorStore'
 import type { EmotionState, DashboardStats, HealthStatus, WeChatStatus, TrainingProgress, ProactiveEngineState, MemoryFact, PsychProfile, PsychSnapshot, SafetyStats, SafetyLogEntry, RAGStats, VoiceStatus, PluginsList, ToolHistoryEntry, ProactiveHistoryEntry, MentalHealthSummary } from '../types/api'
 
@@ -9,7 +8,7 @@ export const queryKeys = {
 
   dashboard: ['dashboard'] as const,
   health: ['health'] as const,
-  emotion: { state: ['emotion', 'state'] as const, trend: (days: number) => ['emotion', 'trend', days] as const },
+  emotion: { state: ['emotion', 'state'] as const, trend: (days: number) => ['emotion', 'trend', days] as const, distribution: (days: number) => ['emotion', 'distribution', days] as const },
   persona: { profile: ['persona', 'profile'] as const, evolution: ['persona', 'evolution'] as const },
   memory: { facts: (category?: string) => ['memory', 'facts', category] as const },
   config: ['config'] as const,
@@ -20,6 +19,7 @@ export const queryKeys = {
   logs: { all: (params?: Record<string, unknown>) => ['logs', params] as const },
   clone: { contacts: (kw?: string) => ['clone', 'contacts', kw] as const, datasets: ['clone', 'datasets'] as const, stats: ['clone', 'stats'] as const },
   psych: { profile: ['psych', 'profile'] as const, snapshots: ['psych', 'snapshots'] as const, mentalHealth: ['psych', 'mentalHealth'] as const },
+  achievements: (characterId: string) => ['achievements', characterId] as const,
   safety: { stats: ['safety', 'stats'] as const, log: ['safety', 'log'] as const },
   rag: { stats: ['rag', 'stats'] as const },
   voice: { status: ['voice', 'status'] as const },
@@ -72,6 +72,18 @@ export function useEmotionTrend(days = 7) {
   })
 }
 
+/** 情绪分布（SP-1，2026-09-01）：会话内存态聚合，重启清零 */
+export function useEmotionDistribution(days = 7) {
+  return useQuery({
+    queryKey: queryKeys.emotion.distribution(days),
+    queryFn: () =>
+      client
+        .get('/emotion/distribution', { params: { days } })
+        .then(r => r.data as { distribution: Array<{ emotion: string; count: number }>; total: number; days: number }),
+    staleTime: 60 * 1000,
+  })
+}
+
 export function useConfig() {
   return useQuery({
     queryKey: queryKeys.config,
@@ -94,14 +106,6 @@ export function useWechatStatus() {
     // SSE 实时推送为主，轮询仅作为兜底
     refetchInterval: 30 * 1000,
     staleTime: 60 * 1000,
-  })
-}
-
-export function useWechatBindings() {
-  return useQuery({
-    queryKey: ['wechat', 'bindings'],
-    queryFn: () => api.listMyBindings().then(r => (r.data as { bindings: WechatBindingDTO[]; total: number }).bindings),
-    refetchInterval: 15 * 1000,
   })
 }
 
@@ -161,6 +165,19 @@ export function usePsychProfile() {
     queryKey: queryKeys.psych.profile,
     queryFn: () => api.psychProfile().then(r => r.data as PsychProfile),
     refetchInterval: 30 * 1000,
+  })
+}
+
+/** 角色成就（ADR-0014）：读取即幂等重算，60s 内不重复打后端 */
+export function useAchievements(characterId: string | null | undefined) {
+  return useQuery({
+    queryKey: queryKeys.achievements(characterId ?? ''),
+    queryFn: () =>
+      client
+        .get(`/characters/${characterId}/achievements`)
+        .then(r => r.data as import('../types/api').AchievementsResponse),
+    enabled: !!characterId,
+    staleTime: 60 * 1000,
   })
 }
 

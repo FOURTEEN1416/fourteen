@@ -43,7 +43,7 @@ os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
 from sqlalchemy import select  # noqa: E402
 
 from api.app_factory import create_api_app  # noqa: E402
-from api.database import WechatBinding, _async_session, init_db  # noqa: E402
+from api.database import User, WechatBinding, _async_session, init_db  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
 from api.websocket_server import HAS_WEBSOCKETS, WebSocketServer  # noqa: E402
 from main import OptimizedOrchestrator, UserManager  # noqa: E402
@@ -82,11 +82,11 @@ if not health.get("healthy", False):
 user_mgr = UserManager(orchestrator)
 
 # ── 启动 WebSocket 服务器（主动消息 websocket 通道） ──
-_ws_holder: dict[str, WebSocketServer | None] = {}
+_ws_holder: dict[str, object] = {}
 if HAS_WEBSOCKETS:
     _ws_port = getattr(cfg.api, "websocket_port", 8765)
 
-    def _run_ws_server(holder: dict[str, WebSocketServer | None] = _ws_holder, port: int = _ws_port) -> None:
+    def _run_ws_server(holder: dict[str, object] = _ws_holder, port: int = _ws_port) -> None:
         ws_server = WebSocketServer(orchestrator=orchestrator, port=port)
         holder["ws"] = ws_server
         loop = asyncio.new_event_loop()
@@ -112,9 +112,9 @@ if HAS_WEBSOCKETS:
     def _stop_ws_server() -> None:
         ws_server = _ws_holder.get("ws")
         loop = _ws_holder.get("loop")
-        if ws_server is None:
+        if not isinstance(ws_server, WebSocketServer) or not isinstance(loop, asyncio.AbstractEventLoop):
             return
-        if loop is None or loop.is_closed():
+        if loop.is_closed():
             return
         try:
             future = asyncio.run_coroutine_threadsafe(ws_server.stop(), loop)
@@ -150,12 +150,13 @@ def _ensure_scheduler_singleton() -> None:
 
     # 情况 2：多 worker flock 单例保护
     try:
-        import fcntl
+        import fcntl  # type: ignore[import-not-found,attr-defined]  # POSIX-only（Windows 分支见 except）
+
         lock_path = "/tmp/ai-girlfriend-scheduler.lock"
         lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
         try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except (IOError, OSError):
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # type: ignore[attr-defined,union-attr]
+        except OSError:
             # 其他 worker 已持有锁，本 worker 停止调度器
             if hasattr(scheduler, "stop"):
                 scheduler.stop()
@@ -177,9 +178,9 @@ _ensure_scheduler_singleton()
 # ── 向调度器注册通道（仅 master worker 的调度器存活时执行） ──
 _scheduler = orchestrator.components.get("scheduler")
 if _scheduler is not None:
-    def _websocket_sender_factory(holder: dict[str, WebSocketServer | None] = _ws_holder):
+    def _websocket_sender_factory(holder: dict[str, object] = _ws_holder):
         ws_server = holder.get("ws")
-        if ws_server is None:
+        if not isinstance(ws_server, WebSocketServer):
             return None
         return ws_server.broadcast_proactive
 
@@ -214,6 +215,7 @@ def _autostart_wechat_connector():
     """
     try:
         import fcntl
+
         from wechat_direct import WeChatConnector
         from wechat_direct.wechat_connector import CREDENTIALS_PATH
 
@@ -226,7 +228,7 @@ def _autostart_wechat_connector():
         lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except (IOError, OSError):
+        except OSError:
             # 其他 worker 已持有锁，本 worker 跳过自动连接
             logger.info("其他 worker 已持有微信连接锁，本 worker 跳过自动连接")
             os.close(lock_fd)
@@ -268,6 +270,37 @@ async def _init_and_preload():
         ]
         await user_mgr.load_bindings(binding_dicts)
     logger.info("✅ 数据库就绪，已加载 %d 条微信绑定", len(binding_dicts))
+
+    # 一次性数据迁移：清除已下线 provider（opencode_zen）的用户配置
+    # 避免 _build_backend 抛 ValueError 导致用户聊天 500
+    await _migrate_retired_providers()
+
+
+async def _migrate_retired_providers():
+    """清除用户 llm_config 中已下线的 provider（opencode_zen 等）。
+
+    将这些用户的 provider 重置为 "auto"，并清空对应的 api_key/api_base/model，
+    避免遗留配置导致 _build_backend 抛 ValueError。
+    """
+    retired_providers = {"opencode_zen"}
+    try:
+        async with _async_session() as session:
+            result = await session.execute(select(User))
+            users = result.scalars().all()
+            migrated = 0
+            for user in users:
+                cfg = user.llm_config
+                if not isinstance(cfg, dict):
+                    continue
+                if cfg.get("provider") in retired_providers:
+                    # 直接清空整个 llm_config，让用户回退到全局默认配置
+                    user.llm_config = None
+                    migrated += 1
+            if migrated > 0:
+                await session.commit()
+                logger.info("✅ 已迁移 %d 个用户的过期 LLM 配置（opencode_zen → 全局默认）", migrated)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("用户 LLM 配置迁移失败（不影响启动）: %s", e)
 
 
 @asynccontextmanager

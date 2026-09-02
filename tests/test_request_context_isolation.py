@@ -9,7 +9,7 @@ import pytest
 
 
 class _KnowledgeResult:
-    chunks = []
+    chunks: list[object] = []
     total_chunks = 0
 
     def __init__(self, character_id: str):
@@ -118,24 +118,3 @@ def test_chat_default_character_resolves_active_role(monkeypatch):
 
     assert chat_routes._resolve_character_id("default") == "active-role"
     assert chat_routes._resolve_character_id("explicit-role") == "explicit-role"
-
-
-def test_clone_preview_uses_injected_local_extractor(monkeypatch):
-    from api.routers.clone_routes import _build_clone_preview
-    from clone_training import wechat_decrypt_source
-
-    conversations = [
-        {"user": f"问{i}", "reply": "哈哈好呀！", "timestamp": i}
-        for i in range(30)
-    ]
-    monkeypatch.setattr(
-        wechat_decrypt_source.DecryptSource,
-        "extract",
-        lambda self, target, max_messages=2000: conversations,
-    )
-
-    result = _build_clone_preview("好友A", 2000)
-
-    assert result["sample_count"] == 30
-    assert result["persona"]["name"] == "好友A"
-    assert result["persona"]["speaking_style"]["catchphrases"]

@@ -148,7 +148,8 @@ class TestVoiceEnhancer:
     def test_default_config(self):
         enhancer = VoiceEnhancer()
         config = enhancer.get_tts_config("c1")
-        assert config["tts_engine"] == "edge-tts"
+        # 2026-08-26 对齐 reinit BREAKING 决策：默认引擎收敛为 mimo-tts（前端唯一）
+        assert config["tts_engine"] == "mimo-tts"
         assert config["speed"] == 1.0
 
     def test_emotion_params(self):
@@ -159,9 +160,9 @@ class TestVoiceEnhancer:
 
     def test_bind_character(self):
         enhancer = VoiceEnhancer()
-        enhancer.bind_character_tts("c1", "gpt-sovits", voice_id="v1")
+        enhancer.bind_character_tts("c1", "mimo-tts", voice_id="v1")
         config = enhancer.get_tts_config("c1", "撒娇")
-        assert config["tts_engine"] == "gpt-sovits"
+        assert config["tts_engine"] == "mimo-tts"
         assert config["speed"] < 1.0  # 撒娇speed=0.95
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import time
@@ -102,6 +103,15 @@ class LLMGatewayV2:
         loop = asyncio.get_running_loop()
         loop_id = id(loop)
         if self._client is None or self._client_loop_id != loop_id:
+            # 切换 loop 时必须关闭旧 client，否则连接池资源会泄漏
+            # （旧 client 持有的 socket 不会被回收，最终耗尽文件描述符）
+            if self._client is not None:
+                # 旧 client 绑定在另一个 loop 上，不能 await aclose()，
+                # 用 call_soon_threadsafe 调度 aclose() 触发底层资源释放。
+                with contextlib.suppress(Exception):
+                    loop.call_soon_threadsafe(
+                        lambda c=self._client: asyncio.ensure_future(c.aclose())
+                    )
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(60.0),
                 limits=self._pool_limits,

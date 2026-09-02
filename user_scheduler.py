@@ -176,7 +176,7 @@ class UserManager:
                 # 查绑定缓存，用绑定的角色和昵称
                 binding = self._bindings.get(user_id)
                 character_card_id = (binding.get("character_card_id") or "default") if binding else "default"
-                nickname = binding.get("nickname") if binding else ""
+                nickname = (binding.get("nickname") or "") if binding else ""
                 instance = UserInstance(
                     user_id=user_id,
                     nickname=nickname,

@@ -144,8 +144,8 @@ logging:
 
 # 语音扩展配置
 voice:
-  # 默认TTS引擎
-  default_tts: "edge-tts"
+  # 默认TTS引擎（2026-08-26 修正：与 system.yaml engine 及 reinit BREAKING 决策对齐，前端唯一 MiMo）
+  default_tts: "mimo-tts"
   # 情感参数配置 - 影响语速和音调
   emotion_params:
     开心:

@@ -33,8 +33,6 @@ def _safe_eval_expr(expr: str) -> Any:
 def _eval_node(node: ast.AST) -> Any:
     if isinstance(node, ast.Constant):
         return node.value
-    if isinstance(node, ast.Num):  # Python 3.7 compat
-        return node.n
     if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_OPS:
         return _SAFE_OPS[type(node.op)](_eval_node(node.operand))  # type: ignore[operator]
     if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_OPS:

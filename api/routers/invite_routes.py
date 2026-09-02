@@ -61,6 +61,8 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     user: dict
+    # 使用即同意（W2-CONSENT）：邀请码注册的新用户必然未同意协议
+    needs_consent: bool = False
 
 
 class CreateInvitesRequest(BaseModel):
@@ -180,6 +182,7 @@ async def register_with_invite(
         access_token=access_token,
         refresh_token=refresh_token,
         user=user.to_dict(),
+        needs_consent=True,
     )
 
 

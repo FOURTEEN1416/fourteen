@@ -1,10 +1,14 @@
-"""角色音色绑定 API — 管理角色与 TTS 音色的绑定关系"""
+"""角色音色绑定 API — 管理角色与 TTS 音色的绑定关系
+
+2026-08-28 MiMo-only 收敛：引擎维度删除（唯一引擎 mimo-tts），音色维度保留
+speaker_name 等参数（MiMo voice_id/预设音色名）。"""
+
 
 from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query, Security
+from fastapi import APIRouter, HTTPException, Security
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -19,7 +23,7 @@ router = APIRouter(prefix="/api", tags=["voice"])
 
 
 class VoiceBindRequest(BaseModel):
-    engine: str = "edge-tts"
+    engine: str = "mimo-tts"
     speaker_name: str = ""
     rate: str = "+0%"
     pitch: str = "0Hz"
@@ -40,44 +44,13 @@ class VoiceTestRequest(BaseModel):
     text: str = "你好，我是你的专属语音助手"
 
 
-# ── Edge-TTS 预定义发音人 ──
+# ── MiMo 预设音色（唯一引擎；克隆/设计音色见 /api/mimo/*）──
 
-_EDGE_SPEAKERS = [
-    {"name": "zh-CN-XiaoxiaoNeural", "gender": "female", "description": "晓晓（女，活泼）"},
-    {"name": "zh-CN-XiaoyiNeural", "gender": "female", "description": "晓伊（女，温柔）"},
-    {"name": "zh-CN-YunjianNeural", "gender": "male", "description": "云健（男，磁性）"},
-    {"name": "zh-CN-YunxiNeural", "gender": "male", "description": "云希（男，阳光）"},
-    {"name": "zh-CN-YunyangNeural", "gender": "male", "description": "云扬（男，沉稳）"},
-    {"name": "zh-CN-XiaochenNeural", "gender": "female", "description": "晓辰（女，知性）"},
-    {"name": "zh-CN-XiaohanNeural", "gender": "female", "description": "晓涵（女，甜美）"},
-    {"name": "zh-CN-XiaomengNeural", "gender": "female", "description": "晓梦（女，可爱）"},
-    {"name": "zh-CN-XiaomoNeural", "gender": "female", "description": "晓墨（女，文艺）"},
-    {"name": "zh-CN-XiaoqiuNeural", "gender": "female", "description": "晓秋（女，感性）"},
-    {"name": "zh-CN-XiaoruiNeural", "gender": "female", "description": "晓睿（女，冷静）"},
-    {"name": "zh-CN-XiaoshuangNeural", "gender": "female", "description": "晓霜（女，高冷）"},
-    {"name": "zh-CN-XiaoyanNeural", "gender": "female", "description": "晓颜（女，自然）"},
-    {"name": "zh-CN-XiaozhenNeural", "gender": "female", "description": "晓珍（女，亲切）"},
-    {"name": "zh-CN-YunjieNeural", "gender": "male", "description": "云杰（男，成熟）"},
-    {"name": "zh-CN-YunhaoNeural", "gender": "male", "description": "云浩（男，厚重）"},
+_MIMO_VOICES = [
+    {"name": "female-tianmei", "description": "甜美女声"},
+    {"name": "female-qingxin", "description": "清新女声"},
+    {"name": "male-chenwen", "description": "沉稳男声"},
 ]
-
-_GPT_SOVITS_SPEAKERS = [
-    {"name": "default", "description": "默认模型"},
-    {"name": "custom", "description": "自定义训练模型（需指定路径）"},
-]
-
-_BERT_VITS2_SPEAKERS = [
-    {"name": "珊瑚宫心海[中]", "description": "珊瑚宫心海（中文）"},
-    {"name": "珊瑚宫心海[日]", "description": "珊瑚宫心海（日文）"},
-    {"name": "纳西妲[中]", "description": "纳西妲（中文）"},
-    {"name": "雷电将军[中]", "description": "雷电将军（中文）"},
-]
-
-_ENGINE_SPEAKERS = {
-    "edge-tts": _EDGE_SPEAKERS,
-    "gpt-sovits": _GPT_SOVITS_SPEAKERS,
-    "bert-vits2": _BERT_VITS2_SPEAKERS,
-}
 
 
 # ── API 端点 ──
@@ -152,7 +125,7 @@ async def update_character_voice(
 
     voice_mgr.bind_voice(
         character_id=character_id,
-        engine=updated.get("engine", "edge-tts"),
+        engine=updated.get("engine", "mimo-tts"),
         speaker_name=updated.get("speaker_name", ""),
         **{k: v for k, v in updated.items() if k not in ("engine", "speaker_name")},
     )
@@ -175,15 +148,13 @@ async def unbind_character_voice(
 
 @router.get("/voice/speakers")
 async def list_speakers(
-    engine: str = Query(default="edge-tts"),
     _auth: bool = Security(verify_api_key_dep),
 ):
-    """获取指定引擎的可用发音人列表"""
-    speakers = _ENGINE_SPEAKERS.get(engine, [])
+    """获取 MiMo 预设音色列表（唯一引擎；克隆/设计音色走 /api/mimo/*）"""
     return {
-        "engine": engine,
-        "speakers": speakers,
-        "total": len(speakers),
+        "engine": "mimo-tts",
+        "speakers": _MIMO_VOICES,
+        "total": len(_MIMO_VOICES),
     }
 
 
@@ -204,8 +175,7 @@ async def test_character_voice(
         raise HTTPException(status_code=400, detail="角色未配置音色，请先绑定")
 
     # 切换到角色配置的引擎
-    engine = voice_config.get("engine", "edge-tts")
-    await tts_mgr.switch_engine(engine)
+    # MiMo-only：不再切换引擎，直接用全局 TTSManager 合成
 
     # 提取合成参数
     tts_kwargs = {

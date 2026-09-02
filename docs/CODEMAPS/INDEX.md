@@ -1,9 +1,11 @@
 # 代码地图索引
 
-**最近更新:** 2026-07-13
+> **⚠️ 数字漂移声明**（2026-08-26 治理标注）：本文「21 注册路由」口径与实测不符——实际为 **16 挂载 + 3 孤儿页面**（UsersPage/UserWorkspace/BindingDetailPage）。权威数字以 `CODE_GRAPH.md` 为准，详见 `docs/history/INDEX.md` 漂移登记簿。
+
+**最近更新:** 2026-08-01
 **项目版本:** 3.1.0
-**项目规模:** ~309 Python 文件 + ~79 TS/TSX 文件 | 当前分支: `main`
-**架构框架:** FastAPI (后端) + React/Vite (前端) + PostgreSQL/SQLite (数据)
+**项目规模:** ~356 Python 文件 + ~106 TS/TSX 文件 | 当前分支: `main`
+**架构框架:** FastAPI (后端) + React/Vite (前端) + SQLite/ChromaDB (数据)
 
 ---
 
@@ -27,7 +29,7 @@
 |----|------|-----------|
 | **前端** | React 19 + Vite 8 + TypeScript 6 + Tailwind CSS 4 | `:5173` |
 | **后端** | Python ≥3.10 + FastAPI + Uvicorn | `:8000` |
-| **数据库** | PostgreSQL 15 (主) + SQLite (缓存/本地) | `:5432` |
+| **数据库** | SQLite (主, aiosqlite) + ChromaDB (向量) | `data/users.db` |
 | **Node** | D:\node.exe v24.14 | 前端构建 |
 | **Bun** | v1.3.12 | 前端包管理/测试 |
 
@@ -57,7 +59,7 @@ unique-you/
 ├── wechat_direct/          # 微信直连 (2 文件)
 ├── weclone_adapter/        # 微信克隆适配 (3 文件)
 ├── my_character/           # 我的角色 (自定义角色)
-├── tests/                  # 测试 (625 passed)
+├── tests/                  # 测试 (1025 Python 测试通过)
 └── docs/                   # 文档
     ├── CODEMAPS/           # ← 本目录
     ├── adr/                # 架构决策记录
@@ -70,9 +72,9 @@ unique-you/
 
 | 指标 | 值 |
 |------|-----|
-| API 端点 | ~177 (12 域路由 + 8 旧路由) |
-| 前端页面 | 15 (全部注册路由) |
-| 测试用例 | 626 pytest + 4 vitest + 3 Playwright |
+| API 端点 | 198 (16 include_router, create_api_app 实扫 2026-08-28, demo + training/extract 已删) |
+| 前端页面 | 15 页面文件（全部挂载，幽灵层+Demo 已删） |
+| 测试用例 | 1030 Python 测试 + 59 前端测试 = 1089 (2026-08-28 实跑全绿) |
 | 活跃 ADR | 10 |
 | Fitness Functions | 17 (12 CI + 5 手动) |
 | 总线因子 | 1 (唯一开发者: 默默) |

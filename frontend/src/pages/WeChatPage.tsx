@@ -15,6 +15,7 @@ type QrStatus = 'loading' | 'waiting' | 'scanned' | 'connected' | 'expired' | 'e
 
 function LiveStatusBanner() {
   const { data: status, isLoading, isError } = useWechatStatus()
+  const [showQrModal, setShowQrModal] = useState(false)
 
   if (isLoading) {
     return (
@@ -41,7 +42,7 @@ function LiveStatusBanner() {
     : '--'
 
   return (
-    <div className="glass-card mb-5 rounded-xl p-4">
+    <div className="glass-card mb-5 rounded-xl p-4 stagger-item">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Left: status */}
         <div className="flex items-center gap-4">
@@ -58,11 +59,11 @@ function LiveStatusBanner() {
           <div className="flex items-center gap-3 text-xs text-gray-400">
             <span className="flex items-center gap-1">
               <Clock className="h-3 w-3" />
-              运行 {uptime}
+              {status.connected ? `运行 ${uptime}` : '未运行'}
             </span>
             <span className="flex items-center gap-1">
               <MessageSquare className="h-3 w-3" />
-              今日 {status.messages_today ?? 0} 条消息
+              {status.connected ? `今日 ${status.messages_today ?? 0} 条消息` : '今日暂无消息'}
             </span>
           </div>
         </div>
@@ -96,6 +97,29 @@ function LiveStatusBanner() {
         <p className="mt-2 text-[10px] text-gray-300">
           最后活动: {new Date(status.last_activity).toLocaleString('zh-CN')}
         </p>
+      )}
+
+      {/* 断开态引导卡（SP-5 P1：空态构图 + 行动指引，替代巨幅空白） */}
+      {!status.connected && (
+        <div className="mt-4 rounded-xl border border-dashed border-macaron-blue/30 bg-macaron-blue-light/20 p-6 text-center stagger-item">
+          <QrCode className="mx-auto h-10 w-10 text-macaron-blue/60" />
+          <p className="mt-3 text-sm font-medium text-gray-700">微信尚未连接</p>
+          <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-gray-400">
+            点击下方按钮扫码登录微信；连接成功后系统自动保持在线（断线自动重连），
+            你的好友即可与角色开始对话。
+          </p>
+          <button
+            onClick={() => setShowQrModal(true)}
+            className="btn-macaron mx-auto mt-4 flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-medium"
+          >
+            <QrCode className="h-3.5 w-3.5" />
+            立即扫码连接
+          </button>
+        </div>
+      )}
+
+      {showQrModal && (
+        <QrCodeConnectionModal onClose={() => setShowQrModal(false)} />
       )}
     </div>
   )

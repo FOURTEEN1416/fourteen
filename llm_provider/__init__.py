@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -22,10 +23,26 @@ def _as_dict(config: Any | None) -> dict[str, Any]:
     raise TypeError("LLM config must be a mapping or Pydantic model")
 
 
+# 已下线的 provider 列表 — 解析时自动回退到 auto，避免启动崩溃
+_RETIRED_PROVIDERS = {"opencode_zen"}
+
+
 def _resolve_provider(provider: str | None = None) -> str:
     if provider:
+        if provider in _RETIRED_PROVIDERS:
+            logger.warning(
+                "Provider '%s' has been retired; falling back to 'auto'. "
+                "Please update your configuration.", provider,
+            )
+            return "auto"
         return provider
     env_provider = os.environ.get("LLM_PROVIDER", "").strip()
+    if env_provider in _RETIRED_PROVIDERS:
+        logger.warning(
+            "Env LLM_PROVIDER='%s' has been retired; falling back to 'auto'. "
+            "Please update your .env file.", env_provider,
+        )
+        return "auto"
     return env_provider or "auto"
 
 
@@ -52,10 +69,16 @@ def _build_backend(
             providers_config=provider_configs,
         )
 
-    if provider == "opencode_zen":
-        from .opencode_zen_provider import OpenCodeZenProvider
-
-        return OpenCodeZenProvider(models_config=models_config)
+    # 已下线 provider 的最终防御：即使绕过 _resolve_provider，
+    # 也回退到 auto 而非抛 ValueError，避免系统启动崩溃
+    if provider in _RETIRED_PROVIDERS:
+        logger.warning(
+            "Provider '%s' has been retired; falling back to 'auto'.", provider,
+        )
+        return MultiProviderGateway(
+            fallback_chain=config.get("fallback_chain") or None,
+            providers_config=config.get("providers") or None,
+        )
 
     if provider == "deepseek":
         from .llm_gateway import LLMGatewayV2
@@ -245,10 +268,8 @@ def get_user_llm(user_id: int, user_config: dict | None) -> Any:
                     try:
                         result = close()
                         if asyncio.iscoroutine(result):
-                            try:
+                            with contextlib.suppress(RuntimeError):
                                 asyncio.get_running_loop().create_task(result)
-                            except RuntimeError:
-                                pass
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("Failed to close user %s LLM backend: %s", user_id, exc)
             logger.info("Configured user %s LLM gateway: provider=%s", user_id, resolved)
@@ -266,10 +287,8 @@ def invalidate_user_llm(user_id: int) -> None:
             try:
                 result = close()
                 if asyncio.iscoroutine(result):
-                    try:
+                    with contextlib.suppress(RuntimeError):
                         asyncio.get_running_loop().create_task(result)
-                    except RuntimeError:
-                        pass
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to close user %s LLM on invalidate: %s", user_id, exc)
 
@@ -284,10 +303,6 @@ def get_llm_names(provider: str | None = None) -> list[str]:
         return ["spark-lite"]
     if resolved == "baidu":
         return ["ernie-speed-128k"]
-    if resolved == "opencode_zen":
-        from .opencode_zen_provider import DEFAULT_MODELS_PRIORITY
-
-        return [m["name"] for m in DEFAULT_MODELS_PRIORITY]
     if resolved == "deepseek":
         return ["deepseek-chat", "deepseek-reasoner"]
     return ["auto (多供应商网关)"]

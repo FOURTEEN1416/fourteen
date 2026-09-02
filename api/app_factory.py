@@ -1,8 +1,9 @@
 """
 REST API 应用工厂
 
-精简版：仅负责创建 FastAPI 实例、配置中间件、挂载子路由。
-业务路由按域拆分为 9 个子路由文件（共 75 端点），模型/常量/Helper 仍保留在 api.main_routes。
+仅负责创建 FastAPI 实例、配置中间件、挂载子路由。
+业务路由按域拆分为 16 个 include_router 调用(共 206 端点,实扫 2026-09-01:含成就 2/emotion distribution/proactive 手动控制/BYOK meta/consent/日记种子+查询/重要日期),
+模型/常量/Helper 仍保留在 api.main_routes。详细端点分布见 CODE_GRAPH.md §4.2。
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import logging
 import os
 import threading
 import time
+from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,7 +24,6 @@ from api.deps import deps
 from api.health_routes import health_router
 from api.routers.chat_routes import router as chat_router
 from api.routers.clone_routes import router as clone_router
-from api.routers.demo_routes import router as demo_router
 from api.routers.misc_routes import router as misc_router
 from api.routers.personality_routes import router as personality_router
 from api.routers.safety_routes import router as safety_router
@@ -172,7 +173,10 @@ def create_api_app(
                 },
             )
 
-        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+        app.add_exception_handler(
+            RateLimitExceeded,
+            cast(Any, _rate_limit_exceeded_handler),
+        )
 
     if _rate_limit_enabled:
         _setup_fallback_rate_limiter(app, max_requests=_rate_limit_per_minute)
@@ -235,22 +239,21 @@ def create_api_app(
 
     app.include_router(misc_router)         # 10 端点: health/stats/memory/logs/config/channels/routes
     app.include_router(chat_router)         # 10 端点: chat/session + wechat channels
-    app.include_router(demo_router)         #  4 端点: demo 体验入口（无认证）
     app.include_router(personality_router)  #  9 端点: emotion/persona/psych
     app.include_router(users_router)        #  7 端点: users/*
-    app.include_router(training_router)     # 11 端点: training/* + proactive/*
+    app.include_router(training_router)     # 11 端点: training/* + proactive/*（含手动控制）
     app.include_router(tools_router)        #  5 端点: tools/* + plugins/*
     app.include_router(safety_router)       # 12 端点: safety/rag/voice/files/cache
     app.include_router(clone_router)        #  7 端点: clone/*
     logger.info("主路由已拆分为 9 个子路由 (75 端点)")
 
     # ── 用户认证 API ──
-    try:
-        from api.routers.auth_routes import router as auth_router
-        app.include_router(auth_router)
-        logger.info("用户认证API已挂载 (/api/auth)")
-    except Exception as e:
-        logger.warning("用户认证API挂载失败: %s", e)
+    # 2026-08-31：去 try 静默吞——认证路由消失=登录全挂，必须 fail-fast 而非降级
+    # （CI 曾因此炸 test_consent_route_is_mounted：静默少挂路由，测试才暴露）
+    from api.routers.auth_routes import router as auth_router  # noqa: E402
+
+    app.include_router(auth_router)
+    logger.info("用户认证API已挂载 (/api/auth)")
 
     # ═══════════════════════════════════════════════════
     # shisi（十四）模块挂载
@@ -389,6 +392,14 @@ def create_api_app(
         logger.info("邀请码API已挂载 (/api/auth/register-invite + /api/admin/invites)")
     except Exception as e:
         logger.warning("邀请码API挂载失败: %s", e)
+
+    # ── LLM 供应商管理 API（含申请教程） ──
+    try:
+        from api.routers.llm_providers_routes import router as llm_providers_router
+        app.include_router(llm_providers_router)
+        logger.info("LLM供应商管理API已挂载 (/api/llm-providers)")
+    except Exception as e:
+        logger.warning("LLM供应商管理API挂载失败: %s", e)
 
     return app
 

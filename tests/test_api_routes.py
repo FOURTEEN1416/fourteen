@@ -36,6 +36,37 @@ from api.routers import (
 @pytest.fixture(scope="module")
 def app():
     """Build the app once per module; bypass auth to keep tests fast."""
+    # require_role("admin") 是工厂调用（每次返回新函数），dependency_overrides 无法按键覆盖
+    # （FastAPI 工厂陷阱）。CI 干净环境因此必炸 no such table: users。
+    # 根治：真实建表 + 种子 id=1 admin，让真实依赖链走通（本地/CI 行为一致）。
+    import asyncio
+    from pathlib import Path as _Path
+
+    _Path("data").mkdir(parents=True, exist_ok=True)
+
+    from api.database import User, _async_session, init_db
+
+    async def _seed() -> None:
+        await init_db()
+        from api.auth_jwt import hash_password
+
+        async with _async_session() as session:
+            exists = await session.get(User, 1)
+            if exists is None:
+                session.add(
+                    User(
+                        email="ci-admin@test.local",
+                        username="ci-admin",
+                        hashed_password=hash_password("CiAdmin#2026"),
+                        role="admin",
+                        is_active=True,
+                        is_verified=True,
+                    )
+                )
+                await session.commit()
+
+    asyncio.run(_seed())
+
     a = app_factory.create_api_app()
     # Bypass X-API-Key check so smoke tests don't need a real key
     a.dependency_overrides[auth.verify_api_key_dep] = lambda: True
@@ -111,14 +142,14 @@ def test_control_plane_critical_routes_are_mounted(app):
 @pytest.mark.parametrize(
     "module,expected_count,label",
     [
-        (misc_routes, 11, "stats/memory/logs/config/channels/routes/user-llm-config"),
+        (misc_routes, 16, "stats/memory/diary/dates/meta/logs/config/channels/routes/user-llm-config"),
         (chat_routes, 11, "chat/session + wechat channels"),
-        (personality_routes, 9, "emotion/persona/psych"),
+        (personality_routes, 10, "emotion/persona/psych（08-31? +emotion/distribution SP-1）"),
         (users_routes, 7, "users/*"),
-        (training_routes, 11, "training/* + proactive/*"),
+        (training_routes, 11, "training/* + proactive/*（08-28 +config/send/pause 手动控制）"),
         (tools_routes, 6, "tools/* + plugins/* + health"),
         (safety_routes, 12, "safety/rag/voice/files/cache"),
-        (clone_routes, 9, "clone/*"),
+        (clone_routes, 8, "clone/* (2026-08-27 剥离 /api/clone/preview 死路径)"),
     ],
 )
 def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
@@ -135,14 +166,18 @@ def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
     )
 
 
-def test_total_contribution_is_76(app):
-    """The 8 new sub-routers together contribute exactly 76 endpoints."""
+def test_total_contribution_is_81(app):
+    """The 8 new sub-routers together contribute exactly 72 endpoints.
+
+    2026-08-27: 微信克隆 Option B 剥离 /api/clone/preview，clone_routes 由 9 端点变 8 端点
+    2026-08-28: training/extract 移除（9→8）；proactive +config(GET)/send/pause 手动控制（8→11）；misc +diary/important-dates×2/meta（11→15）
+    """
     modules = [
         misc_routes, chat_routes, personality_routes, users_routes,
         training_routes, tools_routes, safety_routes, clone_routes,
     ]
     total = sum(len(_sub_router_routes(m)) for m in modules)
-    assert total == 76, f"8 sub-routers contribute {total} routes, expected 76"
+    assert total == 81, f"8 sub-routers contribute {total} routes, expected 81"
 
 
 def test_no_duplicate_endpoints_across_sub_routers():

@@ -11,7 +11,7 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger("orchestrator.optimized")
 
@@ -28,6 +28,17 @@ class _StreamPipelineMixin:
     _initialized: bool
     components: dict[str, Any]
 
+    # 以下成员由宿主主类提供（mixin 协作契约）；显式声明消除 mypy attr-defined
+    if TYPE_CHECKING:  # pragma: no cover
+        def process_message(self, *args: Any, **kwargs: Any) -> Any: ...
+        def _get_session_lock(self, session_id: str) -> Any: ...
+        def _prepare_context(self, *args: Any, **kwargs: Any) -> Any: ...
+        def _after_process(self, *args: Any, **kwargs: Any) -> Any: ...
+    # 后台 task 引用集合（避免被 GC 回收，asyncio.create_task 文档要求）。
+    # 必须为实例变量，若为类变量会导致多实例共享同一集合引发 race condition。
+    # 实际初始化在 OptimizedOrchestrator.__init__ 中完成。
+    _background_tasks: set[Any]
+
     async def _async_consistency_check(
         self,
         reply: str,
@@ -42,7 +53,6 @@ class _StreamPipelineMixin:
         - 可在此触发下一轮的修正提示（当前仅日志，避免过度复杂）
         """
         try:
-            from my_character.consistency_checker import check_and_correct_reply
 
             character_card = None
             persona_service = self.components.get("persona")
@@ -117,6 +127,8 @@ class _StreamPipelineMixin:
         message_type: str = "text",
         character_id: str = "default",
         emotion_engine: Any | None = None,
+        user_llm_config: dict | None = None,
+        user_id: int | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """SSE 流式聊天接口 — 真流式接入
 
@@ -144,9 +156,19 @@ class _StreamPipelineMixin:
             yield {"type": "done", "reply": reply, "emotion": None, "process_time": 0.0}
             return
 
+        # 用户级 LLM gateway（API Key 隔离）：若提供 user_id + user_llm_config，
+        # 本次流式请求使用用户专属 gateway，否则回退到全局共享 gateway。
+        # 与 process_message 保持一致，避免流式响应绕过 API Key 隔离。
+        request_llm = self.components.get("llm")
+        if user_llm_config and user_id is not None:
+            try:
+                from llm_provider import get_user_llm
+                request_llm = get_user_llm(user_id, user_llm_config)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to get user-level LLM gateway for stream, falling back to global: %s", e)
+
         # 检测 LLM 网关是否支持真流式
-        llm = self.components.get("llm")
-        use_true_stream = llm is not None and hasattr(llm, "chat_stream")
+        use_true_stream = request_llm is not None and hasattr(request_llm, "chat_stream")
 
         if not use_true_stream:
             # ── 降级：伪流式（跑完整 process_message 后按块 yield） ──
@@ -157,6 +179,8 @@ class _StreamPipelineMixin:
                     message_type,
                     character_id,
                     emotion_engine=emotion_engine,
+                    user_llm_config=user_llm_config,
+                    user_id=user_id,
                 )
                 reply = result.get("reply", "")
                 emotion = result.get("emotion")
@@ -230,9 +254,12 @@ class _StreamPipelineMixin:
                 full_reply = ""
                 safety = self.components["safety"]
                 unsafe_detected = False
+                # 捕获流式抽检发现的不安全类别，供 safe_alternative 使用
+                unsafe_category: Any = None
 
                 try:
-                    async for token in llm.chat_stream(
+                    assert request_llm is not None  # use_true_stream 分支保证非空
+                    async for token in request_llm.chat_stream(
                         query=user_msg_clean,
                         system_prompt=system_prompt,
                         history=chat_history,
@@ -249,6 +276,7 @@ class _StreamPipelineMixin:
                             quick_check = safety.check_output(full_reply[-60:])
                             if not quick_check.is_safe:
                                 unsafe_detected = True
+                                unsafe_category = quick_check.category
                                 logger.warning(
                                     "流式抽检发现不安全内容，停止推送: category=%s",
                                     quick_check.category,
@@ -271,7 +299,9 @@ class _StreamPipelineMixin:
 
                 # 流式抽检发现不安全内容 → 用安全替代语替换
                 if unsafe_detected:
-                    reply = safety.safe_alternative("unsafe_output")
+                    # safe_alternative 需要 SafetyCategory 枚举，不能用字符串
+                    # 之前 bug: safe_alternative("unsafe_output") 永远走 default 分支
+                    reply = safety.safe_alternative(unsafe_category)
                     yield {"type": "token", "content": reply}
                     yield {
                         "type": "done",
@@ -301,7 +331,8 @@ class _StreamPipelineMixin:
                 # 11. 一致性检查异步化（B2 优化）
                 # 不阻塞当前回复流；严重违规记录到后台，下一轮自动修正
                 # 避免触发第二次 LLM 调用导致响应时间翻倍
-                asyncio.create_task(
+                # 保留 task 引用避免被 GC 回收（Python 官方文档要求）
+                bg_task = asyncio.create_task(
                     self._async_consistency_check(
                         reply=reply,
                         character_id=character_id,
@@ -309,6 +340,8 @@ class _StreamPipelineMixin:
                         session_id=session_id,
                     )
                 )
+                self._background_tasks.add(bg_task)
+                bg_task.add_done_callback(self._background_tasks.discard)
 
                 # ── 共享后处理（after_chat → ASE → 好感度同步）──
                 await asyncio.to_thread(

@@ -114,8 +114,8 @@ function SettingsLogs() {
       </div>
 
       <div className="glass-card rounded-xl p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="w-40">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="w-full sm:w-40">
             <Select
               options={levelOptions}
               value={activeLevel}
@@ -123,23 +123,23 @@ function SettingsLogs() {
               placeholder="选择级别"
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={doFetch}
-              className="px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-all"
+              className="min-h-[44px] px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-all"
               title="手动刷新"
             >
               刷新
             </button>
             <button
               onClick={handleClear}
-              className="px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-all"
+              className="min-h-[44px] px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-all"
             >
               清屏
             </button>
             <button
               onClick={() => setPaused(!paused)}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+              className={`min-h-[44px] px-4 py-2 text-sm font-medium rounded-lg transition-all ${
                 paused ? 'bg-amber-100 text-amber-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
@@ -147,7 +147,7 @@ function SettingsLogs() {
             </button>
             <button
               onClick={handleExport}
-              className="px-4 py-2 text-sm font-medium rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-all"
+              className="min-h-[44px] px-4 py-2 text-sm font-medium rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-all"
             >
               导出
             </button>

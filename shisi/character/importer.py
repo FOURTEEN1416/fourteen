@@ -43,7 +43,7 @@ class PersonaImporter:
     def _import_png(self, path: Path) -> tuple[CharaCardV2 | None, str | None]:
         """从 PNG tEXt chunk 导入角色卡（SillyTavern 生态标准）"""
         try:
-            from .png_codec import extract_card_from_png, PNGCodecError
+            from .png_codec import PNGCodecError, extract_card_from_png
         except ImportError as e:
             return None, f"Pillow 未安装，无法导入 PNG: {e}"
 

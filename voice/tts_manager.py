@@ -31,14 +31,12 @@ class TTSManager:
       - 失败自动降级
     """
 
-    def __init__(self, emotion_mapper=None):
+    def __init__(self):
         self._providers: dict[str, TTSProviderBase] = {}
         self._current_engine: str | None = None
         self._enabled: bool = False
         self._last_error: str | None = None
         self._synthesize_count: int = 0
-        # 依赖注入：情感映射器（由领域层注入，避免基础层反向依赖 shisi.voice）
-        self._emotion_mapper = emotion_mapper
 
     async def initialize(self, config: dict[str, Any] | None = None) -> bool:
         """
@@ -46,9 +44,8 @@ class TTSManager:
 
         Args:
             config: fusion配置中的 voice 节
-                    格式: {"enabled": true, "engine": "edge-tts",
-                          "edge-tts": {"speaker_name": "..."},
-                          "gpt-sovits": {...}, "bert-vits2": {...}}
+                    格式: {"enabled": true, "engine": "mimo-tts",
+                          "mimo-tts": {"api_key": "...", "fallback_local": true}}
         """
         if not config:
             self._enabled = False
@@ -59,50 +56,9 @@ class TTSManager:
         if not self._enabled:
             return True
 
-        # 创建各引擎实例（懒加载，Health check时不实际连接）
-
-        edge_cfg = config.get("edge-tts", {})
-        if edge_cfg:
-            from .edge_tts_provider import EdgeTTSProvider
-            self._providers["edge-tts"] = EdgeTTSProvider(
-                speaker_name=edge_cfg.get("speaker_name", "zh-CN-XiaoxiaoNeural"),
-                rate=edge_cfg.get("rate", "+0%"),
-                volume=edge_cfg.get("volume", "+0%"),
-                timeout=edge_cfg.get("timeout", 30.0),
-            )
-
-        sovits_cfg = config.get("gpt-sovits", {})
-        if sovits_cfg:
-            from .sovits_provider import GPTSoVITSProvider
-            self._providers["gpt-sovits"] = GPTSoVITSProvider(
-                url=sovits_cfg.get("url", "http://localhost:9880"),
-                timeout=sovits_cfg.get("timeout", 60.0),
-                text_language=sovits_cfg.get("text_language", "auto"),
-            )
-
-        cosy_cfg = config.get("cosyvoice", {})
-        if cosy_cfg:
-            from .cosyvoice_provider import CosyVoiceProvider
-            self._providers["cosyvoice"] = CosyVoiceProvider(
-                voice=cosy_cfg.get("voice", "中文女"),
-                instruct_prompt=cosy_cfg.get("instruct_prompt", "用温柔的语气说话"),
-                timeout=cosy_cfg.get("timeout", 120.0),
-            )
-
-        bert_cfg = config.get("bert-vits2", {})
-        if bert_cfg:
-            from .bert_vits2_provider import BertVITS2Provider
-            self._providers["bert-vits2"] = BertVITS2Provider(
-                url=bert_cfg.get("url", "http://localhost:5000"),
-                speaker_name=bert_cfg.get("speaker_name", "珊瑚宫心海[中]"),
-                timeout=bert_cfg.get("timeout", 60.0),
-                sdp_ratio=bert_cfg.get("sdp_ratio", 0.2),
-                noise=bert_cfg.get("noise", 0.2),
-                noisew=bert_cfg.get("noisew", 0.9),
-                speed=bert_cfg.get("speed", 1.0),
-            )
-
-        # MiMo TTS配置（优先API，本地作为降级）
+        # 唯一引擎: MiMo TTS（2026-08-28 用户裁决 A：全语音域 MiMo-only，
+        # 其余四引擎 Edge/SoVITS/CosyVoice/Bert-VITS2 已删除；
+        # 云 API 失败时由 provider 内部 fallback_local 本地降级兜底）
         mimo_cfg = config.get("mimo-tts", {})
         if mimo_cfg and mimo_cfg.get("api_key"):
             from .mimo_tts_provider import MiMoTTSProvider
@@ -117,13 +73,13 @@ class TTSManager:
             logger.info("MiMo TTS已配置: model=%s", mimo_cfg.get("model", "mimo-v2.5-tts"))
 
         # 设置当前引擎
-        engine = config.get("engine", "edge-tts")
+        engine = config.get("engine", "mimo-tts")
         if engine in self._providers:
             self._current_engine = engine
         elif self._providers:
             self._current_engine = list(self._providers.keys())[0]
         else:
-            logger.warning("TTS已启用但未配置任何引擎")
+            logger.warning("TTS已启用但未配置 MiMo TTS（缺 api_key）")
             self._enabled = False
             return False
 
@@ -145,13 +101,11 @@ class TTSManager:
 
     async def synthesize(self, text: str, emotion: str = "", **kwargs) -> bytes | None:
         """
-        合成语音 - 使用当前引擎
-
-        自动降级: 如果当前引擎失败，依次尝试其他引擎
+        合成语音 - 使用当前引擎（MiMo-only；云 API 失败由 provider 内部 fallback_local 兜底）
 
         Args:
             text: 要合成的文本
-            emotion: 情感状态(如"开心"、"伤心")，仅Edge-TTS生效
+            emotion: 情感状态(如"开心"、"伤心")，由 MiMoTTSProvider 内部映射
             **kwargs: 传递给引擎的参数
 
         Returns:
@@ -160,14 +114,8 @@ class TTSManager:
         if not self._enabled or not text:
             return None
 
-        if emotion and self._current_engine == "edge-tts" and self._emotion_mapper is not None:
-            try:
-                emotion_params = self._emotion_mapper.apply_to_edge_tts(emotion)
-                kwargs.update(emotion_params)
-                logger.debug("[TTS] 情感参数注入: %s → %s", emotion, emotion_params)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("[TTS] 情感映射失败: %s", e)
-
+        # 情感映射由 MiMoTTSProvider 内部处理（8 情感→emotion/speed/pitch），
+        # shisi EmotionMapping 注入路径已随多引擎时代结束移除。
         # 注意: 无全局锁，支持并发合成
         # _current_engine/_last_error 的竞态只影响统计日志，不影响正确性
         # 优先使用当前引擎

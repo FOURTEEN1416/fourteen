@@ -9,12 +9,37 @@ const { mockFetchConfig, mockSaveConfig } = vi.hoisted(() => ({
   mockSaveConfig: vi.fn(),
 }))
 
-vi.mock('../../api/system', () => ({
-  config: (...args: unknown[]) => mockFetchConfig(...args),
-  saveConfig: (...args: unknown[]) => mockSaveConfig(...args),
+const { mockListProviders } = vi.hoisted(() => ({
+  mockListProviders: vi.fn(),
 }))
 
-// ── fixture ──
+const { mockUseAuthStore } = vi.hoisted(() => ({
+  mockUseAuthStore: vi.fn(),
+}))
+
+// 部分模拟:保留 system.ts 全部导出(client.ts 会 re-export),只覆盖 config/saveConfig
+vi.mock('../../api/system', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/system')>()
+  return {
+    ...actual,
+    config: (...args: unknown[]) => mockFetchConfig(...args),
+    saveConfig: (...args: unknown[]) => mockSaveConfig(...args),
+  }
+})
+
+vi.mock('../../api/llmProviders', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/llmProviders')>()
+  return {
+    ...actual,
+    listProviders: (...args: unknown[]) => mockListProviders(...args),
+  }
+})
+
+vi.mock('../../store/authStore', () => ({
+  useAuthStore: mockUseAuthStore,
+}))
+
+// ── fixtures ──
 const DEFAULT_CONFIG = {
   data: {
     llm: {
@@ -32,9 +57,40 @@ const DEFAULT_CONFIG = {
   },
 }
 
+const PROVIDERS_FIXTURE = {
+  providers: [
+    {
+      key: 'auto',
+      name: '自动回退(推荐)',
+      description: '按优先级依次尝试可用供应商',
+      sort_order: 0,
+      is_special: true,
+      is_preset: true,
+      guide: { apply_url: '', free_quota: '', steps: [], tips: [], warnings: [] },
+    },
+    {
+      key: 'deepseek',
+      name: 'DeepSeek',
+      description: 'DeepSeek 平台',
+      sort_order: 1,
+      is_special: false,
+      is_preset: true,
+      model: 'deepseek-chat',
+      api_base: 'https://api.deepseek.com/v1',
+      guide: { apply_url: 'https://platform.deepseek.com', free_quota: '送 5000 万 token', steps: [], tips: [], warnings: [] },
+    },
+  ],
+  default_provider: 'auto',
+}
+
 describe('SettingsLLM', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // 默认 admin 用户,走 fetchConfig/saveConfig 路径
+    mockUseAuthStore.mockImplementation((selector: (s: { user: { role: string } | null }) => unknown) =>
+      selector({ user: { role: 'admin' } }),
+    )
+    mockListProviders.mockResolvedValue(PROVIDERS_FIXTURE)
   })
 
   it('shows loading state initially', () => {
@@ -89,7 +145,7 @@ describe('SettingsLLM', () => {
     const cacheToggle = screen.getByRole('switch') as HTMLButtonElement
     expect(cacheToggle.getAttribute('aria-checked')).toBe('true')
 
-    // Cache duration (default 30, fixture 60)
+    // Cache duration: fixture ttl=3600 → cacheDuration=60 分钟
     const cacheDurationInput = screen.getByDisplayValue('60') as HTMLInputElement
     expect(cacheDurationInput).toBeDefined()
   })

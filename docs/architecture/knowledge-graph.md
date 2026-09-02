@@ -1,5 +1,10 @@
 # Project Knowledge Graph
 
+> **📋 文档状态卡**（2026-08-26 治理标注）：**L3 历史快照**（2026-05-31 时点）。
+> 路由树与模块依赖已过时，现行以 `CODE_GRAPH.md`（194 端点/16 路由器，2026-08-28 实扫）为准。
+> **仍具效力部分**：L51 StatusCenter 富化规划描述（4 统计+情绪分布+成就+趋势）为挂起池 SP-1 的方案输入之一；L6 教训表已被 AGENTS.md §7 吸收。
+> 其余章节仅供追溯。
+
 > Generated: 2026-05-31 | Maps module dependencies, routing, and data flow
 
 ---

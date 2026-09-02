@@ -16,6 +16,8 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
 from api.auth_jwt import get_current_user, get_current_user_id, require_role
@@ -24,7 +26,6 @@ from api.deps import deps
 from api.main_routes import ConfigUpdateRequest, _sanitize_config
 from llm_provider import reconfigure_llm
 from observability.logging_setup import ring_buffer
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("api.routers.misc_routes")
 
@@ -80,7 +81,7 @@ async def get_dashboard_stats(_auth: bool = Security(verify_api_key_dep)):
         wechat_info = cache["data"]
     else:
         try:
-            from api._chat_routes import get_wechat_status
+            from api.routers.chat_routes import get_wechat_status
             result = await get_wechat_status()  # type: ignore[func-returns-value]
             if isinstance(result, dict):
                 wechat_info = result
@@ -137,6 +138,100 @@ async def get_dashboard_stats(_auth: bool = Security(verify_api_key_dep)):
 # ═══════════════════════════════════════════════════════
 # Memory Facts
 # ═══════════════════════════════════════════════════════
+
+
+@router.get("/api/meta")
+async def public_meta():
+    """公开元信息（无认证）：前端启动判断 BYOK 引导等。"""
+    from api.byok import byok_required
+
+    llm_cfg = deps.orch.components.get("config").config.llm if deps.orch and deps.orch.components else None
+    return {"byok_required": byok_required(llm_cfg), "version": "3.1.0"}
+
+
+class DiarySeedRequest(BaseModel):
+    date: str  # YYYY-MM-DD
+    summary: str = Field(min_length=1, max_length=8000)
+
+
+@router.post("/api/memory/diary/seed")
+async def seed_diary(
+    req: DiarySeedRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """注入/覆盖某日角色日记（T3：补 W4 冒烟降级缺口——日记此前只能由每日维护自动生成）。"""
+    import re as _re
+
+    if not _re.match(r"^\d{4}-\d{2}-\d{2}$", req.date):
+        raise HTTPException(status_code=400, detail="date 格式须为 YYYY-MM-DD")
+    orch = deps.orch
+    mem = orch.components.get("memory") if orch and orch.components else None
+    ds = getattr(mem, "ds", None)
+    if ds is None:
+        raise HTTPException(status_code=503, detail="Diary summarizer not initialized")
+    ds.save_summary(req.date, req.summary.strip())
+    # 有 DB 持久化能力（_legacy 版）时落库，重启不丢
+    if hasattr(ds, "_structured_memory") and getattr(ds, "_structured_memory", None) is not None:
+        try:
+            ds.save_summary(req.date, req.summary.strip())  # legacy 版内部已写 DB
+        except Exception:
+            logger.warning("diary seed DB 落库失败（内存态已更新）", exc_info=True)
+    return {"status": "seeded", "date": req.date}
+
+
+@router.get("/api/characters/{character_id}/important-dates")
+async def get_important_dates(
+    character_id: str,
+    _auth: bool = Security(verify_api_key_dep),
+):
+    """重要日期（生日/纪念日/自定义；候选 D）。"""
+    from utils.important_dates import load_dates
+
+    return {"dates": load_dates(character_id)}
+
+
+class ImportantDateItem(BaseModel):
+    name: str
+    date: str  # MM-DD 或 YYYY-MM-DD
+    kind: str = "custom"
+
+
+class ImportantDatesUpdate(BaseModel):
+    dates: list[ImportantDateItem]
+
+
+@router.put("/api/characters/{character_id}/important-dates")
+async def update_important_dates(
+    character_id: str,
+    req: ImportantDatesUpdate,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    from utils.important_dates import save_dates
+
+    save_dates(character_id, [d.model_dump() for d in req.dates])
+    return {"status": "saved", "count": len(req.dates)}
+
+
+@router.get("/api/memory/diary")
+async def memory_diary(
+    limit: int = Query(default=10, le=60),
+    _auth: bool = Security(verify_api_key_dep),
+):
+    """角色日记（每日摘要，daily_summaries 表；候选 B）。"""
+    orch = deps.orch
+    mem = orch.components.get("memory") if orch and orch.components else None
+    ds = getattr(mem, "ds", None)
+    if ds is None:
+        return {"entries": []}
+    try:
+        summaries = ds.get_all_summaries() or {}
+        entries = [{"date": d, "summary": s} for d, s in sorted(summaries.items(), reverse=True)[:limit]]
+        return {"entries": entries}
+    except Exception:
+        logger.warning("读取日记失败", exc_info=True)
+        return {"entries": []}
 
 
 @router.get("/api/memory/facts")

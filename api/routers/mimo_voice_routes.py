@@ -14,6 +14,7 @@ from fastapi.responses import Response
 
 from api.auth import verify_api_key_dep
 from api.deps import get_tts_manager
+from voice.mimo_tts_provider import MiMoTTSProvider
 from voice.tts_manager import TTSManager
 
 logger = logging.getLogger("api.mimo_voice")
@@ -46,7 +47,7 @@ async def clone_voice(
     if tts_manager is None:
         raise HTTPException(status_code=400, detail="TTS管理器未初始化")
     provider = tts_manager.get_engine("mimo-tts")
-    if not provider:
+    if not isinstance(provider, MiMoTTSProvider):
         raise HTTPException(status_code=400, detail="MiMo TTS未配置")
 
     # 检查是否为voiceclone模型
@@ -108,7 +109,7 @@ async def design_voice(
     if tts_manager is None:
         raise HTTPException(status_code=400, detail="TTS管理器未初始化")
     provider = tts_manager.get_engine("mimo-tts")
-    if not provider:
+    if not isinstance(provider, MiMoTTSProvider):
         raise HTTPException(status_code=400, detail="MiMo TTS未配置")
 
     # 检查是否为voicedesign模型
@@ -164,7 +165,7 @@ async def switch_voice(
     if tts_manager is None:
         raise HTTPException(status_code=400, detail="TTS管理器未初始化")
     provider = tts_manager.get_engine("mimo-tts")
-    if not provider:
+    if not isinstance(provider, MiMoTTSProvider):
         raise HTTPException(status_code=400, detail="MiMo TTS未配置")
 
     try:
@@ -196,7 +197,7 @@ async def mimo_status(
             "message": "TTS管理器未初始化",
         }
     provider = tts_manager.get_engine("mimo-tts")
-    if not provider:
+    if not isinstance(provider, MiMoTTSProvider):
         return {
             "enabled": False,
             "message": "MiMo TTS未配置",
@@ -231,7 +232,7 @@ async def set_mimo_engine(
     from voice.mimo_tts_provider import MiMoTTSProvider
 
     provider = tts_manager.get_engine("mimo-tts")
-    if not provider:
+    if not isinstance(provider, MiMoTTSProvider):
         raise HTTPException(status_code=400, detail="MiMo TTS未配置")
 
     if model not in MiMoTTSProvider.SUPPORTED_MODELS:
@@ -279,7 +280,7 @@ async def synthesize(
     if tts_manager is None:
         raise HTTPException(status_code=400, detail="TTS管理器未初始化")
     provider = tts_manager.get_engine("mimo-tts")
-    if not provider:
+    if not isinstance(provider, MiMoTTSProvider):
         raise HTTPException(status_code=400, detail="MiMo TTS未配置")
 
     try:

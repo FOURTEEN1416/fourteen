@@ -55,6 +55,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         # 外部显式传入 emotion_engine（如微信 UserManager）时仍优先使用外部实例。
         self._request_emotion_engines: dict[str, EmotionEngine] = {}
         self._request_emotion_engines_lock = threading.Lock()
+        # 后台 task 引用集合（避免被 GC 回收，asyncio.create_task 文档要求）。
+        # 必须为实例变量；若为类变量会导致多实例共享同一集合引发 race condition。
+        self._background_tasks: set[Any] = set()
         # 计数反诘模块：跟踪用户连续说"没事"等敷衍词的次数
         from my_character.counter_rebuttal import CounterRebuttal
         self._counter_rebuttal = CounterRebuttal()
@@ -213,8 +216,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         direct_path = chars_dir / f"{character_id}.json"
         if direct_path.exists():
             try:
-                with open(direct_path, encoding="utf-8") as f:
-                    raw_card = _json.load(f)
+                with open(direct_path, encoding="utf-8") as fh:
+                    raw_card = _json.load(fh)
             except (OSError, _json.JSONDecodeError):
                 raw_card = None
 
@@ -710,16 +713,20 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             session_id=session_id,
         )
         if hasattr(self.components["memory"], "after_chat"):
-            import inspect
             sig = inspect.signature(self.components["memory"].after_chat)
             if "emotion" in sig.parameters:
                 mem_kwargs["emotion"] = emotion_tag
             elif "emotion_tag" in sig.parameters:
                 mem_kwargs["emotion_tag"] = emotion_tag
-            try:
-                self.components["memory"].after_chat(**mem_kwargs)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("after_chat failed, skipping: %s", e)
+            # 后台线程执行 after_chat，避免其内部 async→sync 桥接
+            # （vector_memory._run_async 的 run_coroutine_threadsafe.result()）
+            # 在主事件循环线程自死锁，导致 worker 卡死。
+            def _safe_after_chat(**kw):
+                try:
+                    self.components["memory"].after_chat(**kw)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("after_chat failed, skipping: %s", e)
+            threading.Thread(target=_safe_after_chat, kwargs=mem_kwargs, daemon=True).start()
         self.components["ase"].on_chat(user_msg_clean, reply)
 
         # 好感度同步
@@ -748,6 +755,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         message_type: str = "text",
         character_id: str = "default",
         emotion_engine: Any | None = None,
+        user_llm_config: dict | None = None,
+        user_id: int | None = None,
     ) -> dict[str, Any]:
         if not self._initialized:
             return {"reply": "系统初始化中, 请稍候...", "error": "not_initialized"}
@@ -755,6 +764,16 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         lock = self._get_session_lock(session_id)
         if lock.locked():
             return {"reply": "处理中, 请稍候...", "error": "busy"}
+
+        # 用户级 LLM gateway（API Key 隔离）：若提供 user_id + user_llm_config，
+        # 本次请求使用用户专属 gateway，否则回退到全局共享 gateway。
+        request_llm = self.components["llm"]
+        if user_llm_config and user_id is not None:
+            try:
+                from llm_provider import get_user_llm
+                request_llm = get_user_llm(user_id, user_llm_config)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to get user-level LLM gateway, falling back to global: %s", e)
 
         async with lock:
             start_time = time.perf_counter()
@@ -784,10 +803,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 system_prompt = ctx["system_prompt"]
                 chat_history = ctx["chat_history"]
 
-                # ── 主 LLM 对话（带 30s 超时保护） ──
+                # ── 主 LLM 对话（带 30s 超时保护，使用用户级或全局 gateway） ──
                 try:
                     reply = await asyncio.wait_for(
-                        self.components["llm"].chat(
+                        request_llm.chat(
                             query=user_msg_clean,
                             system_prompt=system_prompt,
                             history=chat_history,
@@ -813,7 +832,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 reply = await check_and_correct_reply(
                     reply=reply,
                     persona_engine=getattr(persona_service, "engine", None),
-                    llm_gateway=self.components.get("llm"),
+                    llm_gateway=request_llm,
                     emotion_state=emotion_state,
                     session_id=session_id,
                     memory=self.components.get("memory"),

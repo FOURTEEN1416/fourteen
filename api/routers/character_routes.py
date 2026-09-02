@@ -13,11 +13,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, Query, Security, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Security, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
+from api.database import get_db
 from api.deps import deps
 from api.path_security import sanitize_id
 from my_character.persona_card import PersonaCardV3
@@ -124,8 +126,8 @@ def _load_character(character_id: str) -> dict[str, Any] | None:
     path = _character_path(character_id)
     if path.exists():
         try:
-            with open(path, encoding="utf-8") as f:
-                return json.load(f)
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
         except (json.JSONDecodeError, OSError) as e:
             logger.error("加载角色 %s 失败: %s", character_id, e)
             return None
@@ -517,7 +519,7 @@ async def import_character(
     # PNG 文件：从 tEXt chunk 提取 JSON
     if suffix == "png":
         try:
-            from shisi.character.png_codec import extract_card_from_png, PNGCodecError
+            from shisi.character.png_codec import PNGCodecError, extract_card_from_png
         except ImportError as e:
             raise HTTPException(status_code=500, detail=f"Pillow 未安装: {e}") from e
         try:
@@ -586,7 +588,7 @@ async def export_character(
     if format == "png":
         # PNG 导出：嵌入 chara tEXt chunk
         try:
-            from shisi.character.png_codec import embed_card_to_png, PNGCodecError
+            from shisi.character.png_codec import PNGCodecError, embed_card_to_png
         except ImportError as e:
             raise HTTPException(status_code=500, detail=f"Pillow 未安装: {e}") from e
         try:
@@ -965,3 +967,36 @@ async def export_chat(
                  "total": len(messages), "messages": messages},
         headers={"Content-Disposition": f'attachment; filename="chat-{character_id}.json"'},
     )
+
+
+# ═══════════════════════════════════════════════════════
+# 角色成就（ADR-0014，2026-09-01 实现）
+# ═══════════════════════════════════════════════════════
+
+
+@router.get("/characters/{character_id}/achievements")
+async def list_achievements(
+    character_id: str,
+    db: AsyncSession = Depends(get_db),
+    _auth: bool = Security(verify_api_key_dep),
+):
+    """角色成就清单（读取时幂等重算，解锁时间保持首次达标）。"""
+    from api.achievement_engine import recalculate_achievements
+
+    items = await recalculate_achievements(db, sanitize_id(character_id))
+    unlocked = sum(1 for i in items if i["unlocked"])
+    return {"character_id": character_id, "achievements": items, "unlocked_count": unlocked, "total": len(items)}
+
+
+@router.post("/characters/{character_id}/achievements/recalculate")
+async def recalculate_achievements_endpoint(
+    character_id: str,
+    db: AsyncSession = Depends(get_db),
+    _auth: bool = Security(verify_api_key_dep),
+):
+    """显式触发成就重算（幂等；与 GET 同语义，供维护任务/前端手动刷新）。"""
+    from api.achievement_engine import recalculate_achievements
+
+    items = await recalculate_achievements(db, sanitize_id(character_id))
+    unlocked = sum(1 for i in items if i["unlocked"])
+    return {"character_id": character_id, "recalculated": True, "unlocked_count": unlocked, "total": len(items)}

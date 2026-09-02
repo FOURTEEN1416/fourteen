@@ -1,34 +1,40 @@
 # P1 Backlog - 唯一的你
 
 **Created**: 2026-06-03
-**Last Updated**: 2026-07-28 (多 worker 调度器单例保护 + 干扰源清理)
-**Status**: Pending (内测后按需清理)
+**Last Updated**: 2026-08-24 (全面核查后重写 — 逐项实测验证)
+**Status**: Active (仅保留真实未决项)
 
-> ✅ 已解决：P1-3 (orphan pages), P1-12 (AGENTS.md memory), P1-16 (FF-020 CI blocking)
-> ✅ 2026-07-28 架构升级：main.py 双模式合并（35.9KB→22.7KB / -297 行），`_init_mixin` 成为唯一初始化真相源（10 阶段），修复双调度器并行 bug。详见 CODE_GRAPH.md §13。
-> ✅ 2026-07-28 多 worker 单例：`api/run_api.py` 新增 `_ensure_scheduler_singleton()` flock 文件锁，确保 4 个 uvicorn worker 中只有 master 持有调度器；`main.py --no-scheduler` 通过 `DISABLE_SCHEDULER=1` 环境变量传递给子进程。生产环境验证：1 master 持锁 + 3 worker 停止调度器；5 个 Web 页面全部 200。
+> ✅ **2026-08-24 全面核查结论**：以下条目经代码实读 + 测试实跑验证，均已在历史提交中修复，原描述过期：
 
-## Frontend / UI
-1. **[FF-0007] authStore import admin 类型层耦合**: User explicitly excluded (P0-4).
-2. **[P1-1] Settings 路由标签冲突**: sidebar="安全" vs tab="状态".
-3. **[P1-2] Storyline 页面数据缺失**: Backend `/api/characters/{id}/storyline` returns 404/Empty.
-4. ~~**[P1-3] 21 Orphan Pages**: Pages exist in code but have no routes or navigation entry.~~ ✅ 2026-06-02 已清零（全部注册路由）
-5. **[P1-4] StatusCenter mock data**: Status center UI is still using placeholder data.
-6. **[P1-5] WeChatPage placeholder**: WeChat integration UI is placeholder only.
+## 已解决（2026-08-24 实测验证）
 
-## Backend / API
-7. **[P1-6] shisi/* 旧路径清理**: Front-end `system.ts` still references old API paths.
-8. **[P1-7] TTS v2 认证**: MiMo/Baidu TTS missing `X-API-Key` check.
-9. **[P1-8] LLM 流式优化**: Current `process_message_stream` is a wrapper around synchronous `process_message` + chunking. Needs true async LLM streaming.
-10. **[P1-9] Proxy Issue**: `http://127.0.0.1:7897` connection resets during `git push`.
+| 原条目 | 验证证据 |
+|--------|---------|
+| ~~[P1-2] Storyline 数据缺失~~ | `api/routers/storyline_routes.py` 6 端点完整；404 仅角色不存在时返回（正确语义）；空配置返回规范 `{enabled:false, configured:false}`；`test_storyline.py` 5 测试过 |
+| ~~[P1-3] 21 Orphan Pages~~ | 2026-06-02 已清零 |
+| ~~[P1-4] StatusCenter mock data~~ | `StatusCenter.tsx` 全接 React Query 真数据（useDashboard/useEmotionState/useMemoryFacts），零 mock |
+| ~~[P1-5] WeChatPage placeholder~~ | `WeChatPage.tsx` 413 行完整实现（状态轮询/二维码/重连），6 测试过 |
+| ~~[P1-6] shisi/* 旧路径~~ | `frontend/src/api/system.ts` 零 shisi 引用 |
+| ~~[P1-7] TTS v2 认证缺失~~ | mimo_voice_routes(7)/voice_routes(7)/safety_routes(13) 全接入 `api/auth.py::verify_api_key_dep`；app_factory 全局 configure_auth；tts/mimo/auth/voice 124 测试过 |
+| ~~[P1-8] LLM 假流式~~ | `orchestrator/_stream_mixin.py` 实现真流式优先（chat_stream token 级推送）+ 伪流式降级，属成熟设计非缺陷 |
+| ~~[P1-12] AGENTS.md pages 数字~~ | 2026-06-03 已修 |
+| ~~[P1-14] deploy/.env.production 占位符~~ | 2026-08-24 SSH 实测服务器 `/opt/ai-girlfriend/.env` 零 CHANGE_ME（模板占位符仅存在于仓库模板，属设计意图）；ai-girlfriend + nginx 服务 active |
+| ~~[P1-15] 硬编码 Secret (CDL Forger)~~ | 2026-08-24 全局 grep 无硬编码 secret；AGENTS.md 当前版本无 API_SECRET |
+| ~~[P1-16] CI continue-on-error~~ | 2026-06-03 CI 加固完成 |
 
-## Infrastructure / Quality
-11. **[P1-10] CI Cron 完整性**: Cron jobs now include Lint/Type/E2E, but need to verify `pytest --cov` still works perfectly.
-12. **[P1-11] Repo Name Mismatch**: GitHub repo is `FOURTEEN1416/fourteen.git`, project is `ai-girlfriend`. (Optional rename)
-13. ~~**[P1-12] `AGENTS.md` 修正**: "15 pages" is correct now, but some sections mention "35 pages". Update memory.~~ ✅ 2026-06-03 HANDOFF.md 已更新
-14. **[P1-13] `AGENTS.md` 认证**: PAT auth in `AGENTS.md` might be redundant with opencode's auth.
+## 未决项
 
-## Security / Compliance
-15. **[P1-14] `deploy/.env.production`**: `API_KEY=CHANGE_ME...` placeholder needs rotation.
-16. **[P1-15] Hardcoded Secret**: `API_SECRET` in `AGENTS.md`/Memory (CDL Forger).
-17. ~~**[P1-16] FF-020 CI Check**: Ruff and MyPy currently `continue-on-error: true`. Needs to be hard-fail.~~ ✅ 2026-06-03 CI 加固已从 blocking 移除 continue-on-error
+### Frontend / UI
+1. **[FF-0007] authStore import admin 类型层耦合**: User explicitly excluded (P0-4)，保持不动。
+
+### Infrastructure
+2. **[P1-9] Proxy Issue**: `http://127.0.0.1:7897` connection resets during `git push`。（本地网络环境问题，非代码）
+3. **[P1-10] CI Cron 完整性**: Lint/Type/E2E 已入 cron，`pytest --cov` 待下次 CI 运行观察。
+4. **[P1-11] Repo Name Mismatch**: GitHub repo `FOURTEEN1416/fourteen.git` vs 项目名 `ai-girlfriend`。（可选改名，需用户决策）
+5. **[P1-13] PAT auth in AGENTS.md**: 与 opencode 内置认证可能冗余。（低优先级）
+
+## 新增观察（2026-08-24 接管体检）
+
+6. ~~**[OBS-1] 生产后端端口直暴露**~~ ✅ **2026-08-24 已修复**：服务器 `/etc/systemd/system/ai-girlfriend.service` 的 `--host 0.0.0.0` → `127.0.0.1`（daemon-reload + restart）。实测：ss 显示仅 `127.0.0.1:8000` 监听；`/docs` 200；nginx 代理链路 200；微信桥接凭 flock 自动恢复登录。仓库模板 workers/keep-alive 已同步生产实况（4 / 30s）。
+7. **[OBS-2] HTTPS 未启用**: 裸 IP 无法签发 certbot 证书，当前 HTTP 服务；`.env.production` 的 CORS 写的却是 https origin。绑定域名后按 nginx conf 注释走 certbot 即可。（用户决策：暂缓，证书+域名需费用）
+8. **[OBS-3] systemd 服务以 root 运行**: 生产 service `User=root`，模板基线是 `www-data`。改运行用户涉及文件权限迁移，需停机窗口规划，暂记录待办。

@@ -1,42 +1,43 @@
 @import "tailwindcss";
 
 /* ════════════════════════════════════════
-   Design System — 马卡龙三色配色系统
+   Design System — 暖黄 · 海盐蓝 · 薄荷青（浅色系）
+   2026-08-28 用户裁决：替换原马卡龙粉/蓝/绿
    ════════════════════════════════════════ */
 @theme {
-  /* ── 马卡龙三色 ── */
-  --color-macaron-pink: #F8B4D9;
-  --color-macaron-pink-light: #FCE7F3;
-  --color-macaron-pink-deep: #EC4899;
-  --color-macaron-blue: #B4D9F8;
-  --color-macaron-blue-light: #DBEAFE;
-  --color-macaron-blue-deep: #3B82F6;
-  --color-macaron-green: #B4F8D9;
-  --color-macaron-green-light: #D1FAE5;
-  --color-macaron-green-deep: #10B981;
+  /* ── 三色 ── */
+  --color-macaron-yellow: #FDE68A;        /* 暖黄 */
+  --color-macaron-yellow-light: #FEF9E7;
+  --color-macaron-yellow-deep: #D97706;
+  --color-macaron-blue: #BAE6FD;          /* 海盐蓝 */
+  --color-macaron-blue-light: #E0F2FE;
+  --color-macaron-blue-deep: #0284C7;
+  --color-macaron-mint: #99F6E4;          /* 薄荷青 */
+  --color-macaron-mint-light: #CCFBF1;
+  --color-macaron-mint-deep: #0D9488;
 
-  /* ── Primary（粉色系，替换原朱砂红） ── */
-  --color-primary-50: #FCE7F3;
-  --color-primary-100: #FBCFE8;
-  --color-primary-200: #F9A8D4;
-  --color-primary-300: #F472B6;
-  --color-primary-400: #F8B4D9;
-  --color-primary-500: #EC4899;
-  --color-primary-600: #DB2777;
-  --color-primary-700: #BE185D;
+  /* ── Primary（暖黄系） ── */
+  --color-primary-50: #FEF9E7;
+  --color-primary-100: #FEF3C7;
+  --color-primary-200: #FDE68A;
+  --color-primary-300: #FCD34D;
+  --color-primary-400: #FBBF24;
+  --color-primary-500: #D97706;
+  --color-primary-600: #B45309;
+  --color-primary-700: #92400E;
 
-  /* ── Accent（蓝色系，替换原古金） ── */
-  --color-accent-50: #DBEAFE;
-  --color-accent-100: #BFDBFE;
-  --color-accent-200: #93C5FD;
-  --color-accent-300: #60A5FA;
-  --color-accent-400: #B4D9F8;
-  --color-accent-500: #3B82F6;
-  --color-accent-600: #2563EB;
-  --color-accent-700: #1D4ED8;
+  /* ── Accent（海盐蓝系） ── */
+  --color-accent-50: #E0F2FE;
+  --color-accent-100: #BAE6FD;
+  --color-accent-200: #7DD3FC;
+  --color-accent-300: #38BDF8;
+  --color-accent-400: #BAE6FD;
+  --color-accent-500: #0284C7;
+  --color-accent-600: #0369A1;
+  --color-accent-700: #075985;
 
   /* ── Background ── */
-  --color-bg-deep: #FDF2F8;
+  --color-bg-deep: #FFFBEB;
   --color-bg-surface: rgba(255, 255, 255, 0.7);
   --color-bg-card: rgba(255, 255, 255, 0.55);
   --color-bg-elevated: rgba(255, 255, 255, 0.4);
@@ -53,8 +54,8 @@
   --color-text-muted: #6B7280;
   --color-text-dim: #9CA3AF;
 
-  /* ── Status ── */
-  --color-success: #10B981;
+  /* ── Status（success 与薄荷青同族） ── */
+  --color-success: #0D9488;
   --color-warning: #F59E0B;
   --color-error: #EF4444;
   --color-info: #3B82F6;
@@ -66,9 +67,9 @@ body {
   font-family: 'Noto Sans SC', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: linear-gradient(135deg, #FDF2F8 0%, #EFF6FF 50%, #ECFDF5 100%);
+  background: linear-gradient(135deg, #FFFBEB 0%, #F0F9FF 50%, #F0FDFA 100%);
   background-attachment: fixed;
-  min-height: 100vh;
+  min-height: 100dvh;
   color: #1F2937;
 }
 
@@ -77,6 +78,11 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.15); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.25); }
+
+/* ═══ Safe Area（iOS 刘海/Home Indicator 安全区；viewport-fit=cover 前提） ═══ */
+.safe-area-top    { padding-top: env(safe-area-inset-top); }
+.safe-area-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.safe-area-x      { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 
 /* ═══ Glass Morphism ═══ */
 .glass-card {
@@ -138,6 +144,15 @@ body {
 }
 
 /* ═══ Animations ═══ */
+/* ═══ Stagger 入场（SP-5 P2：CSS 级联，无重库；reduced-motion 降级） ═══ */
+.stagger-item {
+  opacity: 0;
+  animation: fade-in 0.4s ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stagger-item { opacity: 1; animation: none; }
+}
+
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -221,7 +236,7 @@ body {
 
 /* ═══ Macaron Button ═══ */
 .btn-macaron {
-  background: linear-gradient(135deg, var(--color-macaron-pink), var(--color-macaron-blue), var(--color-macaron-green));
+  background: linear-gradient(135deg, var(--color-macaron-yellow), var(--color-macaron-blue), var(--color-macaron-mint));
   background-size: 200% 200%;
   color: white;
   transition: all 0.4s ease;
@@ -240,7 +255,7 @@ body {
   position: absolute;
   left: 0; top: 0;
   width: 3px; height: 100%;
-  background: linear-gradient(180deg, var(--color-macaron-pink), var(--color-macaron-blue));
+  background: linear-gradient(180deg, var(--color-macaron-yellow), var(--color-macaron-blue));
   transform: scaleY(0);
   transition: transform 0.3s;
 }
@@ -250,27 +265,27 @@ body {
 }
 .nav-item.active::before { transform: scaleY(1); }
 
-/* ═══ Tags ═══ */
-.tag-pink { background: rgba(248, 180, 217, 0.2); color: var(--color-macaron-pink-deep); }
-.tag-blue { background: rgba(180, 217, 248, 0.2); color: var(--color-macaron-blue-deep); }
-.tag-green { background: rgba(180, 248, 217, 0.2); color: var(--color-macaron-green-deep); }
+/* ═══ Tags（语义配色：关系/情感=暖黄，身份/设定=海盐蓝，风格/行为=薄荷青，见 utils/character.ts anchorTone） ═══ */
+.tag-yellow { background: rgba(253, 230, 138, 0.25); color: var(--color-macaron-yellow-deep); }
+.tag-blue { background: rgba(186, 230, 253, 0.25); color: var(--color-macaron-blue-deep); }
+.tag-mint { background: rgba(153, 246, 228, 0.25); color: var(--color-macaron-mint-deep); }
 
 /* ═══ Section Bar ═══ */
 .section-bar {
   width: 4px; height: 16px; border-radius: 2px;
-  background: linear-gradient(180deg, var(--color-macaron-pink), var(--color-macaron-blue));
+  background: linear-gradient(180deg, var(--color-macaron-yellow), var(--color-macaron-blue));
 }
 
 /* ═══ Tab Active ═══ */
 .tab-active {
   background: white;
-  color: var(--color-macaron-pink-deep);
+  color: var(--color-macaron-yellow-deep);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 /* ═══ Input Focus ═══ */
 .input-macaron:focus {
-  border-color: var(--color-macaron-pink);
+  border-color: var(--color-macaron-yellow);
   box-shadow: 0 0 0 3px rgba(248, 180, 217, 0.2);
   outline: none;
 }
@@ -278,7 +293,7 @@ body {
 /* ═══ Toggle ═══ */
 .toggle { transition: all 0.3s; }
 .toggle.on {
-  background: linear-gradient(135deg, var(--color-macaron-pink), var(--color-macaron-blue));
+  background: linear-gradient(135deg, var(--color-macaron-yellow), var(--color-macaron-blue));
 }
 
 /* ═══ Role Card ═══ */
@@ -295,7 +310,7 @@ body {
 }
 .method-card:hover { transform: translateY(-4px) scale(1.03); }
 .method-card.selected {
-  border-color: var(--color-macaron-pink-deep);
+  border-color: var(--color-macaron-yellow-deep);
   box-shadow: 0 8px 24px rgba(236, 72, 153, 0.2);
 }
 .method-card.selected .method-icon {

@@ -61,11 +61,7 @@ class WeChatCommandHandler:
         ok, msg = self._char_mgr.switch_character(match.character_id)
         if not ok:
             return f"切换失败: {msg}"
-        if hasattr(self, "_voice_mgr") and self._voice_mgr:
-            try:
-                self._voice_mgr.switch_engine("gpt-sovits")
-            except Exception as e:  # noqa: BLE001
-                logger.warning("TTS联动切换失败: %s", e)
+        # 2026-08-28 MiMo-only：引擎切换联动已移除（唯一引擎）
         return msg
 
     def _handle_affinity(self, cmd: Command, cid: str) -> str:

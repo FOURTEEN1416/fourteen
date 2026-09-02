@@ -19,7 +19,7 @@ class SemanticMemory:
     def __init__(self, vector_memory, structured_memory):
         self._vm = vector_memory
         self._sm = structured_memory
-        self._fact_cache: set[int] = set()
+        self._fact_cache: set[str] = set()
 
     def add_fact(self, fact: str, category: str = "general",
                  confidence: float = 0.5, source: str = "") -> bool:

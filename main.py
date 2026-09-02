@@ -15,8 +15,7 @@
     python main.py --no-api                  # 不启动REST/WebSocket API
     python main.py --no-scheduler            # 不启动主动消息调度器
     python main.py --log-level DEBUG         # 调试日志
-    python main.py --clone wxid_xxx          # 风格克隆
-    python main.py --init-only               # 仅初始化
+    python main.py --init-only               # 仅初始化自检
 """
 
 
@@ -25,7 +24,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import atexit
-import contextlib
 import logging
 import os
 import sys
@@ -37,6 +35,7 @@ from typing import Any
 
 from sqlalchemy import select  # noqa: E402
 
+from orchestrator.console_chat import run_console_chat
 from orchestrator.optimized_orchestrator import OptimizedOrchestrator
 
 # Import project_root
@@ -117,7 +116,6 @@ def parse_args() -> argparse.Namespace:
   %(prog)s --no-api                  # 不启动API服务
   %(prog)s --no-scheduler            # 不启动主动消息调度器
   %(prog)s --log-level DEBUG         # 调试日志
-  %(prog)s --clone wxid_xxx --clone-name "小明"  # 风格克隆
   %(prog)s --init-only               # 仅初始化
         """,
     )
@@ -133,13 +131,6 @@ def parse_args() -> argparse.Namespace:
                         help="配置文件目录 (默认: config)")
     parser.add_argument("--init-only", action="store_true",
                         help="仅初始化, 用于测试")
-    parser.add_argument("--clone", type=str, default=None,
-                        help="克隆目标 (wxid/文件路径)")
-    parser.add_argument("--clone-source", type=str, default="wcf",
-                        choices=["wcf", "wechatmsg", "decrypt", "txt", "csv", "json"],
-                        help="克隆数据来源 (decrypt=微信4.x数据库解密)")
-    parser.add_argument("--clone-name", type=str, default="",
-                        help="被克隆者名称")
     parser.add_argument("--log-level", type=str, default="INFO",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
                         help="日志级别")
@@ -173,134 +164,7 @@ def load_fusion_config(config_dir: str) -> dict[str, Any]:
     return {}
 
 
-def run_clone_pipeline(args: argparse.Namespace) -> None:
-    print("\n" + "=" * 50)
-    print("  [CLONE] 风格克隆管线")
-    print("=" * 50)
-    print(f"  目标: {args.clone}")
-    print(f"  来源: {args.clone_source}")
-    if args.clone_name:
-        print(f"  名称: {args.clone_name}")
-    print()
-
-    from weclone_adapter import WeCloneAdapter
-
-    adapter = WeCloneAdapter(
-        data_dir=str(project_root / "data" / "clone"),
-        output_dir=str(project_root / "data" / "training"),
-    )
-
-    health = adapter.health_check()
-    print(f"  训练器: {'可用' if health['trainer_available'] else '未安装(跳过训练)'}")
-    print(f"  量化: {'可用' if health['quant_available'] else '未安装'}")
-    print()
-
-    result = adapter.clone(
-        target=args.clone,
-        source=args.clone_source,
-        name=args.clone_name or None,  # type: ignore[arg-type]
-        do_train=health["trainer_available"],
-    )
-
-    if result.get("error"):
-        print(f"  [FAIL] 克隆失败: {result['error']}")
-        return
-
-    print(f"\n{'=' * 50}")
-    print("  [OK] 克隆完成")
-    print(f"{'=' * 50}")
-    print(f"  提取对话: {result.get('extracted_turns', 0)} 轮")
-    print(f"  风格独特性: {result.get('uniqueness', 0):.0%}")
-    if result.get("lora_path"):
-        print(f"  LoRA 模型: {result['lora_path']}")
-    print(f"  ToneMimic 注入: {result.get('injected_to_tone_mimic', 0)} 条")
-    print()
-
-
-def run_console_chat(orchestrator_or_obj, orchestrator_mode: str,
-                     emotion_engine=None, ase_engine=None) -> None:
-    print("\n" + "=" * 50)
-    print(f"  [CHAT] 控制台聊天模式 ({orchestrator_mode} 模式)")
-    print("  命令: /quit 退出  /status 查看状态  /health 健康检查  /reset 重置记忆")
-    print("=" * 50 + "\n")
-
-    session_id = f"console_{int(time.time())}"
-
-    if orchestrator_mode == "full" and hasattr(orchestrator_or_obj, "_memory"):
-        with contextlib.suppress(Exception):
-            orchestrator_or_obj._memory.working.start_session(session_id, "console")
-
-    try:
-        while True:
-            try:
-                query = input("你 > ").strip()
-            except (EOFError, KeyboardInterrupt):
-                print("\n[BYE] 下次再来找我哦~")
-                break
-
-            if not query:
-                continue
-
-            if query == "/quit":
-                print("[BYE] 笨蛋, 记得想我！")
-                break
-            elif query == "/reset":
-                if orchestrator_mode == "full" and hasattr(orchestrator_or_obj, "_memory"):
-                    try:
-                        orchestrator_or_obj._memory.structured_memory.clear_session("console")
-                        print("[OK] 记忆已重置")
-                    except Exception as e:  # noqa: BLE001
-                        print(f"[WARN] 重置失败: {e}")
-                continue
-            elif query == "/status":
-                if orchestrator_mode == "full" and emotion_engine:
-                    state = emotion_engine.state
-                    print(f"  情感: {state.primary_emotion.value} | "
-                          f"强度: {state.primary_intensity:.2f} | "
-                          f"能量: {state.energy:.1f} | "
-                          f"好感度: {state.affinity}")
-                    if ase_engine:
-                        print(f"  主动消息紧迫度: {ase_engine.urgency:.2f}")
-                elif orchestrator_mode == "fast":
-                    emotion = orchestrator_or_obj.components.get("emotion")
-                    memory = orchestrator_or_obj.components.get("memory")
-                    if emotion and memory:
-                        state = emotion.state
-                        print(f"  情感: {state.primary_emotion.value} | "
-                              f"强度: {state.primary_intensity:.2f} | "
-                              f"能量: {state.energy:.1f} | "
-                              f"好感度: {state.affinity}")
-                        if hasattr(memory, "structured_memory"):
-                            print(f"  今日对话: {memory.structured_memory.count_chats_today()} 条")
-                continue
-            elif query == "/health":
-                if orchestrator_mode == "full":
-                    from observability.health import health_checker
-                    print(f"  系统状态: {health_checker.check()}")
-                elif orchestrator_mode == "fast":
-                    health = orchestrator_or_obj.health_check()
-                    print(f"  系统状态: {'[OK] 健康' if health['healthy'] else '[WARN] 异常'}")
-                    for name, status in health.get("components", {}).items():
-                        print(f"    {name}: {status}")
-                continue
-
-            result = asyncio.run(orchestrator_or_obj.process_message(query, session_id)) if asyncio.iscoroutinefunction(orchestrator_or_obj.process_message) else orchestrator_or_obj.process_message(query, session_id)
-            reply = result.get("reply", "")
-            emotion = result.get("emotion")
-
-            emotion_tag = ""
-            if emotion:
-                emotion_tag = f" [{emotion.get('primary', {}).get('type', '')}]"
-
-            print(f"十四 > {reply}{emotion_tag}")
-
-    except Exception:
-        logger.exception("控制台聊天异常")
-
-
-def run_wechat_mode(user_manager, orchestrator_mode: str,
-                    args: argparse.Namespace,
-                    wechat_connector_holder: dict | None = None) -> None:
+def run_wechat_mode(user_manager, wechat_connector_holder: dict | None = None) -> None:
     from wechat_direct import WeChatConnector
 
     print("\n📱 微信模式启动中（多用户版）...")
@@ -369,7 +233,6 @@ def _create_proactive_sender(ws_server_holder: dict, wechat_connector_holder: di
         ws_server = ws_server_holder.get("ws")
         if ws_server:
             try:
-                import asyncio
                 try:
                     loop = asyncio.get_running_loop()
                     if loop.is_running():
@@ -409,10 +272,6 @@ def main() -> None:
     use_console = args.console or args.no_wechat
 
     print_banner()
-
-    if args.clone:
-        run_clone_pipeline(args)
-        return
 
     fusion_cfg = load_fusion_config(args.config)
     orchestrator_mode = fusion_cfg.get("orchestrator_mode", "full")
@@ -541,7 +400,7 @@ def _run_orchestrator(args: argparse.Namespace, use_console: bool,
                 time.sleep(3600)
     else:
         try:
-            run_wechat_mode(user_mgr, mode, args, wechat_connector_holder=_wechat_holder)
+            run_wechat_mode(user_mgr, wechat_connector_holder=_wechat_holder)
         finally:
             orchestrator.shutdown()
 

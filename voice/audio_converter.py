@@ -25,6 +25,13 @@ class AudioFormatConverter:
             return None
         return self._wav_to_silk(wav_bytes)
 
+    def to_wav(self, audio_bytes: bytes, source_format: str = "silk", sample_rate: int = 16000) -> bytes | None:
+        """任意格式→WAV 16k mono（ASR 前置转换；silk 需 ffmpeg 带 silk 解码或 g711a 探测）。"""
+        return self._ffmpeg_convert(
+            audio_bytes, source_format=source_format,
+            target_format="wav", sample_rate=sample_rate, channels=1,
+        )
+
     def to_amr(self, audio_bytes: bytes, source_format: str = "mp3") -> bytes | None:
         return self._ffmpeg_convert(
             audio_bytes, source_format, "amr",

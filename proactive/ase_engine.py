@@ -28,6 +28,22 @@ from proactive.reflection import InnerMonologue, ReflectionEngine
 
 logger = logging.getLogger("ase_engine")
 
+
+def _local_now() -> datetime:
+    """获取本地时间（用于场景触发判断）。
+
+    场景触发配置（morning_hours/night_hours/meal_hours）按北京时间设计。
+    优先用系统本地时间（服务器应配置 Asia/Shanghai）；
+    若系统时区非 UTC+8（如容器内默认 UTC），强制使用 UTC+8。
+    """
+    # 检测系统时区偏移（秒）
+    offset_sec = -time.altzone if time.daylight and time.localtime().tm_isdst else -time.timezone
+    # UTC+8 = 28800 秒；偏差超过 1 小时即认为系统非北京时区
+    if abs(offset_sec - 28800) > 3600:
+        return datetime.now(tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
+    return datetime.now()
+
+
 # ═══════════════════════════════════════════════════════════════
 #  类型枚举
 # ═══════════════════════════════════════════════════════════════
@@ -281,7 +297,8 @@ class ContextAnalyzer:
         self._last_analysis_time: float = 0
 
     def analyze(self) -> dict[str, Any]:
-        now = datetime.now(tz=timezone.utc)
+        # 场景触发按本地时间判断（morning/noon/evening/night 等）
+        now = _local_now()
         hour = now.hour
         context = {
             "time_of_day": self._get_time_period(hour),
@@ -536,6 +553,13 @@ class ASEEngine:
 
         self._recent_messages: deque = deque(maxlen=50)
 
+        # 手动控制面（2026-08-28 消息 tab 手动控制需求）
+        self._paused: bool = False
+        self.sent_history: deque = deque(maxlen=200)
+        # 知识分享（候选 C）：由装配层注入 character_id→检索函数；share 类消息优先分享真实内容
+        self._knowledge_share_func: Any = None
+        self._knowledge_character_id: str = ""
+
         self._load_state()
 
         logger.info(
@@ -592,6 +616,8 @@ class ASEEngine:
         dry_run: bool = False,
     ) -> dict[str, Any] | None:
         """定时检查。dry_run=True时只更新紧迫度，不发送消息。"""
+        if getattr(self, "_paused", False):
+            return None
         if emotion_state:
             self._emotion_state = emotion_state
 
@@ -679,7 +705,8 @@ class ASEEngine:
             self.urgency.context_bonus = 0.0
 
     def _check_scene_triggers(self) -> dict[str, Any] | None:
-        now = datetime.now(tz=timezone.utc)
+        # 场景触发必须用本地时间，配置的小时区间按北京时间设计
+        now = _local_now()
         hour = now.hour
         today = now.date()
         affinity = self._affinity_level
@@ -745,6 +772,36 @@ class ASEEngine:
 
     # ── 消息生成 ─────────────────────────────────────────
 
+    def _try_knowledge_share(self) -> dict[str, Any] | None:
+        """候选 C：从角色知识库检索真实内容，LLM 包装成角色口吻的分享。
+
+        知识库内容源 = 爬虫抓取/文档导入（/api/characters/{id}/knowledge/*）。
+        无函数注入/无索引/检索为空/无 LLM → 返回 None 回退模板消息。
+        """
+        func = self._knowledge_share_func
+        if not func or not self._knowledge_character_id:
+            return None
+        try:
+            context = func(self._knowledge_character_id)
+            if not context or len(context) < 20:
+                return None
+            excerpt = context[:300]
+            if self._llm is not None and hasattr(self._llm, "chat_sync"):
+                prompt = (
+                    "你正在和亲密的人聊天。用你自己的口吻，把下面这段你刚'看到'的内容"
+                    "自然地分享给对方，1-2 句话，口语化，像随手转述，不要总结腔：\n\n"
+                    + excerpt
+                )
+                result = self._llm.chat_sync(query=prompt, max_tokens=120, temperature=0.8)
+                content = str(result or "").strip()
+            else:
+                content = ""
+            if not content:
+                return None
+            return {"type": "share", "message": content, "urgency": round(self.urgency.total, 2), "generated_by": "knowledge"}
+        except Exception:
+            return None
+
     def _generate_proactive_message(self) -> dict[str, Any]:
         total = self.urgency.total
 
@@ -769,6 +826,14 @@ class ASEEngine:
     def _generate_and_return(
         self, msg_type: ProactiveType,
     ) -> dict[str, Any] | None:
+        # 候选 C：share 类优先从角色知识库分享真实内容（爬虫/文档来源）
+        if msg_type == ProactiveType.SHARE:
+            shared = self._try_knowledge_share()
+            if shared:
+                self._record_proactive_sent()
+                self._recent_messages.append(shared["message"])
+                self.urgency.reset()
+                return shared
         if self._generation_mode == "llm":
             content, generated_by = self._message_generator.generate(
                 msg_type=msg_type,
@@ -814,6 +879,57 @@ class ASEEngine:
         self._last_proactive_time = datetime.now(tz=timezone.utc)
         if self._freq_controller:
             self._freq_controller.record_sent()
+
+    def record_sent_entry(self, entry: dict[str, Any]) -> None:
+        """记录一条已发送的主动消息（供 /api/proactive/history 真数据）。"""
+        self.sent_history.append({**entry, "at": datetime.now(tz=timezone.utc).isoformat()})
+
+    def get_runtime_config(self) -> dict[str, Any]:
+        """运行时参数真值（修复：旧 config 端点只写 _config 字典不生效）。"""
+        if self._frequency_mode == "adaptive" and self._freq_adapter:
+            max_daily = self._freq_adapter.get_max_daily()
+            min_interval = 30
+            cooldown = 10
+        else:
+            max_daily = self._freq_controller.max_daily if self._freq_controller else 8
+            min_interval = getattr(self._freq_controller, "min_interval_minutes", 30) if self._freq_controller else 30
+            cooldown = getattr(self._freq_controller, "cooldown_after_reply_minutes", 10) if self._freq_controller else 10
+        return {
+            "threshold": self._urgency_threshold,
+            "max_daily_messages": max_daily,
+            "min_interval_minutes": min_interval,
+            "cooldown_after_reply_minutes": cooldown,
+            "paused": self._paused,
+            "frequency_mode": self._frequency_mode,
+            "daily_count": self._daily_message_count,
+        }
+
+    def apply_runtime_config(
+        self,
+        threshold: float | None = None,
+        max_daily_messages: int | None = None,
+        min_interval_minutes: int | None = None,
+        cooldown_after_reply_minutes: int | None = None,
+        paused: bool | None = None,
+    ) -> None:
+        """同步写运行时对象（_urgency_threshold/_freq_*），而非只写展示字典。"""
+        if threshold is not None:
+            self._urgency_threshold = max(0.0, float(threshold))
+        if max_daily_messages is not None or min_interval_minutes is not None or cooldown_after_reply_minutes is not None:
+            max_daily = max_daily_messages if max_daily_messages is not None else (
+                self._freq_adapter.get_max_daily() if self._freq_adapter else 8)
+            min_i = min_interval_minutes if min_interval_minutes is not None else 30
+            cooldown_c = cooldown_after_reply_minutes if cooldown_after_reply_minutes is not None else 10
+            if self._frequency_mode == "adaptive" and self._freq_adapter:
+                self._freq_adapter = FrequencyAdapter(normal_daily=max_daily)
+            elif self._freq_controller:
+                self._freq_controller = FrequencyController(
+                    max_daily=max_daily,
+                    min_interval_minutes=min_i,
+                    cooldown_after_reply_minutes=cooldown_c,
+                )
+        if paused is not None:
+            self._paused = bool(paused)
 
     def _is_duplicate(self, message: str) -> bool:
         return message in self._recent_messages

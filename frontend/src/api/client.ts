@@ -21,12 +21,12 @@ import {
   chat, chatStream, createSession, listSessions, chatHistory, emotionState, emotionTrend,
 } from './chat'
 import {
-  trainingStatus, trainingProgress, trainingExtract, trainingClean,
-  trainingTrain, trainingStop, trainingTest, trainingApply,
+  trainingStatus, trainingProgress, trainingClean,
+  trainingTest, trainingApply,
 } from './training'
 import {
   cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset,
-  cloneDeleteConversation, cloneBatchDeleteConversations, clonePreview, cloneUpload, cloneStats,
+  cloneDeleteConversation, cloneBatchDeleteConversations, cloneUpload, cloneStats,
 } from './clone'
 import {
   health, stats, dashboardStats, config, saveConfig,
@@ -42,7 +42,6 @@ import {
 } from './system'
 import {
   wechatCreateConnection, wechatListConnections, wechatUpdateConnection, wechatDeleteConnection,
-  bindWechat, listMyBindings, updateBinding, unbindWechat,
 } from './wechat'
 import {
   listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
@@ -55,10 +54,6 @@ import {
   exportCharacter, importCharacter, previewCharacterFromDescription,
   listPresets, getPreset,
 } from './characters'
-import {
-  listUsers, getUserDetail, getUserChatHistory, getUserEmotion,
-  setUserRole, resetUser, deleteUser,
-} from './users'
 import {
   adminListUsers, adminUpdateUser, adminDeleteUser, adminCreateUser,
 } from './admin'
@@ -120,6 +115,20 @@ client.interceptors.response.use(
     const status = error.response?.status
     const data = error.response?.data
     const originalRequest = error.config as (typeof error.config) & { _isRetry?: boolean }
+
+    // ── 403 BYOK_REQUIRED：用户自带 Key 引导（W1，2026-08-28）──
+    const byokCode = (error.response?.headers?.['x-error-code'] ??
+      (data as { detail?: string } | undefined)?.detail) as string | undefined
+    if (
+      status === 403 &&
+      (byokCode === 'BYOK_REQUIRED' ||
+        (typeof data?.detail === 'string' && data.detail.includes('自带 API Key')))
+    ) {
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/settings/llm')) {
+        window.location.assign('/settings/llm?byok=1')
+        return new Promise(() => {}) // 跳转中挂起
+      }
+    }
 
     // ── 401 auto-refresh ──
     // Uses httpOnly cookie (browser auto-sends) instead of stored refresh_token
@@ -230,8 +239,8 @@ export default client
 
 // ── Named re-exports for backward compat (import { chat } from '../api/client') ──
 export { chat, chatStream, createSession, listSessions, chatHistory, emotionState, emotionTrend }
-export { trainingStatus, trainingProgress, trainingExtract, trainingClean, trainingTrain, trainingStop, trainingTest, trainingApply }
-export { cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset, cloneDeleteConversation, cloneBatchDeleteConversations, clonePreview, cloneUpload, cloneStats }
+export { trainingStatus, trainingProgress, trainingClean, trainingTest, trainingApply }
+export { cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset, cloneDeleteConversation, cloneBatchDeleteConversations, cloneUpload, cloneStats }
 export {
   listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
   getPersona, updatePersona,
@@ -243,11 +252,9 @@ export {
   exportCharacter, importCharacter, previewCharacterFromDescription,
   listPresets, getPreset,
 }
-export { listUsers, getUserDetail, getUserChatHistory, getUserEmotion, setUserRole, resetUser, deleteUser }
 export { adminListUsers, adminUpdateUser, adminDeleteUser, adminCreateUser }
 export {
   wechatCreateConnection, wechatListConnections, wechatUpdateConnection, wechatDeleteConnection,
-  bindWechat, listMyBindings, updateBinding, unbindWechat,
 }
 export {
   health, stats, dashboardStats, config, saveConfig,
@@ -271,10 +278,10 @@ export const api = {
   tools, toolsHealth, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,
   logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
   wechatConnectionStatus, wechatQrCode,
-  trainingStatus, trainingProgress, trainingExtract, trainingClean,
-  trainingTrain, trainingStop, trainingTest, trainingApply,
+  trainingStatus, trainingProgress, trainingClean,
+  trainingTest, trainingApply,
   cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset,
-  cloneDeleteConversation, cloneBatchDeleteConversations, clonePreview, cloneUpload, cloneStats,
+  cloneDeleteConversation, cloneBatchDeleteConversations, cloneUpload, cloneStats,
   psychProfile, psychSnapshots, psychReset, psychMentalHealth, psychLiwc,
   safetyStats, safetyLog, safetyConfig,
   ragStats, ragSearch, ragUpload,
@@ -291,11 +298,8 @@ export const api = {
   getVoiceConfig, bindVoice, updateVoice, unbindVoice, testVoice,
   exportCharacter, importCharacter, previewCharacterFromDescription,
   listPresets, getPreset,
-  // users domain
-  listUsers, getUserDetail, getUserChatHistory, getUserEmotion, setUserRole, resetUser, deleteUser,
   // admin domain
   adminListUsers, adminUpdateUser, adminDeleteUser, adminCreateUser,
-  // wechat bindings
+  // wechat connections
   wechatCreateConnection, wechatListConnections, wechatUpdateConnection, wechatDeleteConnection,
-  bindWechat, listMyBindings, updateBinding, unbindWechat,
 }

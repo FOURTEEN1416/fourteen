@@ -766,6 +766,7 @@ class WeChatConnector:
         items = raw_msg.get("item_list", [])
         text = ""
         voice_data = ""
+        image_data = ""
         for item in items:
             item_type = item.get("type", 0)
             if item_type == 1:
@@ -776,11 +777,20 @@ class WeChatConnector:
                 voice_data = voice_item.get("voice_data", "")
             elif item_type == 3:
                 image_item = item.get("image_item", {})
-                image_item.get("image_data", "")
+                image_data = image_item.get("image_data", "")
 
-        if not text and not voice_data:
-            logger.debug("消息无文本和语音内容 msg_id=%s user=%s", msg_id, from_user)
+        if not text and not voice_data and not image_data:
+            logger.debug("消息无文本/语音/图片内容 msg_id=%s user=%s", msg_id, from_user)
             return
+
+        # ── 语音转文字（候选 A，2026-08-28）：voice_data(base64 silk) → ASR → text ──
+        if not text and voice_data:
+            asr_text = self._transcribe_voice(voice_data)
+            if asr_text:
+                text = asr_text
+                logger.info("[wx][step=asr] msg_id=%s user=%s text=%r", msg_id, from_user, text[:60])
+            else:
+                logger.info("[wx][step=asr_unavailable] msg_id=%s user=%s", msg_id, from_user)
 
         today = time.strftime("%Y-%m-%d")
         if today != self._last_day:
@@ -884,6 +894,40 @@ class WeChatConnector:
             except Exception as e:  # noqa: BLE001
                 logger.warning("[wx][step=sticker_failed] msg_id=%s user=%s error=%s",
                                msg_id, from_user, e)
+
+    def _transcribe_voice(self, voice_data_b64: str) -> str:
+        """微信语音 → 文字（ASRHandler 配置驱动；未启用返回空串走原占位提示）。"""
+        try:
+
+            from multimodal.multimodal_processor import ASRHandler
+
+            if getattr(self, "_asr_handler", None) is None:
+                cfg: dict[str, object] = {}
+                try:
+                    import yaml
+                    cfg_path = Path(__file__).parent.parent / "config" / "system.yaml"
+                    if cfg_path.exists():
+                        with open(cfg_path, encoding="utf-8") as f:
+                            full = yaml.safe_load(f) or {}
+                        import os
+                        vc = full.get("voice") or {}
+                        ac = vc.get("asr") or {}
+                        for k, v in ac.items():
+                            if isinstance(v, str) and v.startswith("${") and v.endswith("}"):
+                                ac[k] = os.environ.get(v[2:-1], "")
+                        cfg = ac
+                except Exception:
+                    cfg = {}
+                self._asr_handler = ASRHandler(cfg)
+            handler: ASRHandler = self._asr_handler
+            result = _run_async_coro(handler.process(voice_data_b64, source_format="silk"))
+            text = (result or {}).get("text", "")
+            if text.startswith("[语音消息"):
+                return ""
+            return text
+        except Exception as e:
+            logger.warning("ASR 转录失败: %s", e)
+            return ""
 
     # ── 状态 ──
 

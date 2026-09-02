@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-626+-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-1089-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
@@ -48,7 +48,7 @@ python main.py
 | **工具** | 天气、日历、提醒、搜索……需要什么可以加 |
 | **剧情线** | 和角色的关系可以按"剧情"推进，有支线和进度追踪 |
 | **邀请码注册** | 内测期间通过邀请码注册，管理员在控制台生成 |
-| **管理控制台** | React 前端，18 个页面，角色管理/语音设置/系统配置一站式 |
+| **管理控制台** | React 前端，15 个页面，角色管理/语音设置/系统配置一站式 |
 
 ---
 
@@ -97,7 +97,7 @@ cd frontend && npx vite --port 5173
 ## 怎么测
 
 ```bash
-pytest                          # 全量（626+ 用例）
+pytest                          # 全量（1030 用例,2026-08-28 实测全过）
 pytest -m "not slow"           # 跳过慢的
 pytest -x tests/test_invite_codes.py  # 邀请码专项测试（15 个）
 pytest --cov=. --cov-report=html  # 覆盖率报告
@@ -109,9 +109,9 @@ pytest --cov=. --cov-report=html  # 覆盖率报告
 
 ```
 ├── api/                  FastAPI 后端（168+ 路由）
-│   ├── _*_routes.py      9 子路由（misc/chat/demo/personality/users/training/tools/safety/clone = 75 端点）
+│   ├── _*_routes.py      8 子路由（misc/chat/personality/users/training/tools/safety/clone = 71 端点，demo 已删）
 │   ├── main_routes.py    仅 Pydantic 模型 + 常量 + 空 router 占位（95 行，0 端点）
-│   └── routers/          13 个域路由（character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card）
+│   └── routers/          20 个域路由（character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card/chat/clone/misc/personality/safety/tools/training/users）
 ├── voice/                语音引擎：MiMo Cloud / Edge-TTS / SoVITS / Bert-VITS2
 ├── wechat_direct/        微信直连（扫码登录 + 收发消息）
 ├── user_scheduler.py     多用户调度（每个微信用户独立情感状态）
@@ -121,8 +121,8 @@ pytest --cov=. --cov-report=html  # 覆盖率报告
 ├── llm_provider/         LLM 接入层（自动 fallback）
 ├── frontend/             React 管理控制台
 │   └── src/
-│       ├── api/          13 个 API 模块（按域拆分，含 auth/invites）
-│       ├── pages/        18 个页面（全部注册路由）
+│       ├── api/          12 个 API 模块（按域拆分，含 auth/llmProviders）
+│       ├── pages/        15 个页面（全部挂载，幽灵层+Demo 已删）
 │       ├── store/        Zustand（chatStore/errorStore/characterBuilderStore/authStore）
 │       ├── hooks/        React Query hooks
 │       ├── components/   layout + auth + shared + common + storyline + ui
@@ -131,7 +131,7 @@ pytest --cov=. --cov-report=html  # 覆盖率报告
 │   ├── adr/              架构决策记录（10 个：ADR-0001~0006 + ADR-0011~0014）
 │   ├── architecture/     8 层地图 / 设计原则 / Fitness Functions / Bus Factor
 │   └── audits/           审计报告
-├── tests/                626+ 后端单元测试
+├── tests/                1030 后端单元测试 + 59 前端测试 = 1089
 ├── config/               YAML 配置
 └── main.py               入口
 ```
@@ -140,13 +140,10 @@ pytest --cov=. --cov-report=html  # 覆盖率报告
 
 ## 架构
 
-项目采用三体导航（Triad Navigation）方法论管理：
-
-- **地图**（`.triad-navigation/MAP.md`）：8 层代码地图，描述现状
-- **指南针**（`.triad-navigation/COMPASS.md`）：7 条设计原则 + 9 个 ADR
-- **闭环控制**（`.triad-navigation/CONTROL.md`）：Fitness Functions + 审计节奏
-
-深入看 `docs/architecture/8-layer-code-map.md` 和 `.triad-navigation/` 目录。
+- **设计原则**：`docs/architecture/design-principles.md`
+- **架构决策记录**：`docs/adr/`（ADR-0001~0006、ADR-0011~0014）
+- **代码图谱**：`CODE_GRAPH.md`
+- **知识图谱**：`docs/architecture/knowledge-graph.md`
 
 ---
 

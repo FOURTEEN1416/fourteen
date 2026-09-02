@@ -50,6 +50,21 @@ def _make_app_with_mock_orch(gen):
     orch.process_message_stream = MagicMock(return_value=gen)
     app = app_factory.create_api_app(orchestrator=orch)
     app.dependency_overrides[auth.verify_api_key_dep] = lambda: True
+    # chat_stream 端点依赖 get_current_user_id + get_db（API Key 隔离），
+    # 测试中必须 override，否则请求会 401，根本不触发生成器。
+    from api.auth_jwt import get_current_user_id
+    from api.database import get_db
+
+    async def _fake_db():
+        class _FakeUser:
+            llm_config: dict | None = None
+        class _FakeSession:
+            async def get(self, _model, _uid):
+                return _FakeUser()
+        yield _FakeSession()
+
+    app.dependency_overrides[get_current_user_id] = lambda: 1
+    app.dependency_overrides[get_db] = _fake_db
     return app, orch
 
 
@@ -70,22 +85,6 @@ def test_sse_chat_stream_closes_generator_on_disconnect():
 
     # TestClient 离开上下文后会触发生成器清理
     assert gen.closed, "async generator was not closed after client disconnect"
-
-
-def test_sse_demo_stream_closes_generator_on_disconnect():
-    """Demo SSE 客户端断开时，process_message_stream 异步生成器必须被 aclose。"""
-    gen = _TrackedAsyncGen(items=[{"type": "token", "content": "demo"}])
-    app, _orch = _make_app_with_mock_orch(gen)
-
-    client = TestClient(app)
-    with client.stream(
-        "POST",
-        "/api/demo/chat/stream",
-        json={"message": "hi", "session_id": "s2"},
-    ) as response:
-        _ = next(response.iter_text())
-
-    assert gen.closed, "demo async generator was not closed after client disconnect"
 
 
 @pytest.mark.asyncio

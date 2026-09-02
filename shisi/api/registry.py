@@ -9,8 +9,6 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 
 if TYPE_CHECKING:
-    from voice.voice_training import VoiceTrainingManager
-
     from ..application.character_service import CharacterService
 
 from ..affinity.enhancer import AffinityEnhancer
@@ -35,7 +33,6 @@ from . import (
     persona_routes,
     stats_routes,
     sticker_routes,
-    training_routes,
     vital_signs_routes,
 )
 
@@ -55,7 +52,6 @@ class AiyuRegistry:
     analytics_service: AnalyticsService | None = None
     wechat_handler: WeChatCommandHandler | None = None
     proactive_messenger: WeChatProactiveMessenger | None = None
-    training_manager: VoiceTrainingManager | None = None
     character_service: CharacterService | None = None
 
 
@@ -99,15 +95,8 @@ def setup_shisi(
     reg.voice_enhancer = VoiceEnhancer()
     reg.analytics_service = AnalyticsService()
 
-    try:
-        from voice.voice_training import VoiceTrainingManager
-        reg.training_manager = VoiceTrainingManager()
-    except ImportError as e:
-        reg.training_manager = None
-        logger.warning("语音训练模块未安装: %s", e)
-    except Exception as e:  # noqa: BLE001
-        reg.training_manager = None
-        logger.warning("语音训练模块初始化失败: %s", e)
+    # 2026-08-28 MiMo-only：语音训练（GPT-SoVITS LoRA）管线已随 voice_training 删除，
+    # 音色克隆走 MiMo voiceclone API（/api/mimo/clone）。
 
     reg.wechat_handler = WeChatCommandHandler(
         character_manager=reg.character_manager,
@@ -139,7 +128,6 @@ def _mount_routes(app: FastAPI, reg: AiyuRegistry) -> None:
     vital_signs_routes.set_engine(reg.vital_engine)  # type: ignore
     persona_routes.set_manager(reg.character_manager)  # type: ignore
     stats_routes.set_service(reg.analytics_service)  # type: ignore
-    training_routes.set_manager(reg.training_manager)  # type: ignore
 
     app.include_router(character_routes.router)
     app.include_router(sticker_routes.router)
@@ -149,6 +137,5 @@ def _mount_routes(app: FastAPI, reg: AiyuRegistry) -> None:
     app.include_router(vital_signs_routes.router)
     app.include_router(persona_routes.router)
     app.include_router(stats_routes.router)
-    app.include_router(training_routes.router)
 
     logger.info("十四API路由挂载完成")

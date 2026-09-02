@@ -1,50 +1,6 @@
 {
   "default_provider": "auto",
   "providers": {
-    "xunfei": {
-      "name": "讯飞星火",
-      "model": "spark-lite",
-      "api_base": "https://spark-api-open.xf-yun.com/v1",
-      "api_key": "",
-      "auth_mode": "bearer",
-      "max_tokens": 2048,
-      "temperature": 0.85,
-      "stream_enabled": true,
-      "description": "Spark Lite 永久免费，Token无限，并发5，有效期至2036年"
-    },
-    "zhipu": {
-      "name": "智谱AI",
-      "model": "glm-4-flash",
-      "api_base": "https://open.bigmodel.cn/api/paas/v4",
-      "api_key": "",
-      "auth_mode": "bearer",
-      "max_tokens": 2048,
-      "temperature": 0.85,
-      "stream_enabled": true,
-      "description": "GLM-4.7-Flash 永久免费，无Token上限，200K上下文"
-    },
-    "baidu": {
-      "name": "百度千帆",
-      "model": "ernie-speed-128k",
-      "api_base": "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat",
-      "api_key": "",
-      "auth_mode": "oauth",
-      "max_tokens": 2048,
-      "temperature": 0.85,
-      "stream_enabled": true,
-      "description": "ERNIE-Speed 每月50万Token免费，128K上下文"
-    },
-    "deepseek": {
-      "name": "DeepSeek",
-      "model": "deepseek-chat",
-      "api_base": "https://api.deepseek.com/v1",
-      "api_key": "",
-      "auth_mode": "bearer",
-      "max_tokens": 4096,
-      "temperature": 0.85,
-      "stream_enabled": true,
-      "description": "DeepSeek-V2/V3 高质量模型，需自行申请API Key"
-    },
     "sensenova": {
       "name": "商汤日日新 SenseNova",
       "model": "glm-5.2",
@@ -55,34 +11,230 @@
       "temperature": 0.85,
       "stream_enabled": true,
       "extra_payload": {"reasoning_effort": "none"},
-      "description": "商汤 SenseNova 平台，glm-5.2 1M上下文/13万输出，支持工具调用"
+      "description": "商汤 SenseNova 平台，glm-5.2 1M上下文/13万输出，支持工具调用",
+      "enabled": true,
+      "sort_order": 1,
+      "guide": {
+        "apply_url": "https://platform.sensenova.cn",
+        "free_quota": "新用户赠送 100 万 Token；glm-5.2 按量计费约 0.005 元/千 Token",
+        "steps": [
+          "打开 https://platform.sensenova.cn 用手机号注册账号",
+          "完成实名认证（个人账号即可，无需企业认证）",
+          "登录后进入「控制台」→ 左侧菜单「API Keys」",
+          "点击「创建 API Key」，名称随意填（如 ai-girlfriend）",
+          "复制生成的 sk- 开头的密钥（注意：关闭窗口后无法再查看）",
+          "回到本页面，把密钥粘贴到上方「API Key」输入框",
+          "点击「保存设置」，系统会自动使用 glm-5.2 模型"
+        ],
+        "tips": [
+          "glm-5.2 是当前项目主推模型，支持 1M 超长上下文，适合长篇对话",
+          "reasoning_effort 已自动设为 none，确保对话流畅不打结巴",
+          "赠送的 100 万 Token 约可对话 500-1000 轮，正常使用约 1-2 个月"
+        ],
+        "warnings": []
+      }
+    },
+    "zhipu": {
+      "name": "智谱AI",
+      "model": "glm-4-flash",
+      "api_base": "https://open.bigmodel.cn/api/paas/v4",
+      "api_key": "",
+      "auth_mode": "bearer",
+      "max_tokens": 2048,
+      "temperature": 0.85,
+      "stream_enabled": true,
+      "description": "GLM-4.7-Flash 永久免费，无Token上限，200K上下文",
+      "enabled": true,
+      "sort_order": 2,
+      "guide": {
+        "apply_url": "https://open.bigmodel.cn",
+        "free_quota": "GLM-4.7-Flash 永久免费，无 Token 上限",
+        "steps": [
+          "打开 https://open.bigmodel.cn 用手机号注册账号",
+          "完成实名认证（个人账号即可）",
+          "登录后点击右上角头像 →「API 密钥」",
+          "点击「添加 API Key」，名称随意填",
+          "复制生成的 xxxxxx.xxx 格式的密钥",
+          "回到本页面，把密钥粘贴到上方「API Key」输入框",
+          "点击「保存设置」，系统会自动使用 GLM-4.7-Flash 模型"
+        ],
+        "tips": [
+          "GLM-4.7-Flash 永久免费，无 Token 上限，适合长期使用",
+          "支持 200K 上下文，可以记住很长的对话历史",
+          "智谱是国内顶尖 AI 公司，模型质量稳定可靠"
+        ],
+        "warnings": []
+      }
+    },
+    "xunfei": {
+      "name": "讯飞星火",
+      "model": "spark-lite",
+      "api_base": "https://spark-api-open.xf-yun.com/v1",
+      "api_key": "",
+      "auth_mode": "bearer",
+      "max_tokens": 2048,
+      "temperature": 0.85,
+      "stream_enabled": true,
+      "description": "Spark Lite 永久免费，Token无限，并发5，有效期至2036年",
+      "enabled": true,
+      "sort_order": 3,
+      "guide": {
+        "apply_url": "https://console.xfyun.cn",
+        "free_quota": "Spark Lite 永久免费，Token 无限，有效期至 2036 年",
+        "steps": [
+          "打开 https://console.xfyun.cn 用手机号注册账号",
+          "完成实名认证（个人账号即可）",
+          "登录后进入「星火大模型」→「免费试用」",
+          "找到「Spark Lite」点击「领取免费额度」（永久免费）",
+          "进入「我的应用」→ 创建应用（应用名随意）",
+          "在应用详情页找到「API Key」和「API Secret」",
+          "讯飞 API Key 格式为 {APIKey}:{APISecret}，用冒号拼接两个值",
+          "回到本页面，把拼接后的字符串粘贴到上方「API Key」输入框",
+          "点击「保存设置」，系统会自动使用 Spark Lite 模型"
+        ],
+        "tips": [
+          "Spark Lite 永久免费，Token 无限，适合长期使用",
+          "并发限制为 5，同一时间最多 5 个请求",
+          "有效期至 2036 年，几乎等于永久"
+        ],
+        "warnings": [
+          "讯飞的 API Key 格式特殊，需要把 APIKey 和 APISecret 用冒号拼接",
+          "示例：abc123:xyz789（冒号前后不能有空格）"
+        ]
+      }
+    },
+    "baidu": {
+      "name": "百度千帆",
+      "model": "ernie-speed-128k",
+      "api_base": "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat",
+      "api_key": "",
+      "auth_mode": "oauth",
+      "max_tokens": 2048,
+      "temperature": 0.85,
+      "stream_enabled": true,
+      "description": "ERNIE-Speed 每月50万Token免费，128K上下文",
+      "enabled": true,
+      "sort_order": 4,
+      "guide": {
+        "apply_url": "https://console.bce.baidu.com",
+        "free_quota": "ERNIE-Speed 每月 50 万 Token 免费，128K 上下文",
+        "steps": [
+          "打开 https://console.bce.baidu.com 用百度账号登录",
+          "完成实名认证（个人账号即可）",
+          "进入「千帆大模型平台」→「模型广场」",
+          "找到「ERNIE-Speed」点击「免费试用」领取额度",
+          "进入「应用广场」→「创建应用」",
+          "应用创建后会生成「API Key」和「Secret Key」",
+          "百度使用 OAuth 认证，API Key 格式为 {APIKey}:{SecretKey}（用冒号拼接）",
+          "回到本页面，把拼接后的字符串粘贴到上方「API Key」输入框",
+          "点击「保存设置」，系统会自动使用 ERNIE-Speed 模型"
+        ],
+        "tips": [
+          "ERNIE-Speed 每月 50 万 Token 免费，足够日常使用",
+          "支持 128K 上下文，适合中长篇对话",
+          "百度账号即可，无需企业认证"
+        ],
+        "warnings": [
+          "百度使用 OAuth 认证，API Key 需要用冒号拼接 APIKey 和 SecretKey",
+          "示例：abc123:xyz789（冒号前后不能有空格）",
+          "免费额度每月重置，超额后按量计费"
+        ]
+      }
+    },
+    "deepseek": {
+      "name": "DeepSeek",
+      "model": "deepseek-chat",
+      "api_base": "https://api.deepseek.com/v1",
+      "api_key": "",
+      "auth_mode": "bearer",
+      "max_tokens": 4096,
+      "temperature": 0.85,
+      "stream_enabled": true,
+      "description": "DeepSeek-V2/V3 高质量模型，需自行申请API Key（付费）",
+      "enabled": false,
+      "sort_order": 5,
+      "guide": {
+        "apply_url": "https://platform.deepseek.com",
+        "free_quota": "无免费额度，按量计费（约 0.001 元/千 Token，价格极低）",
+        "steps": [
+          "打开 https://platform.deepseek.com 注册账号",
+          "完成实名认证",
+          "进入「API Keys」页面",
+          "点击「创建 API Key」",
+          "复制生成的 sk- 开头的密钥",
+          "回到本页面，把密钥粘贴到上方「API Key」输入框",
+          "点击「保存设置」，系统会自动使用 DeepSeek 模型"
+        ],
+        "tips": [
+          "DeepSeek-V3 在中文理解、角色扮演、长上下文方面表现优异",
+          "价格极低，约 0.001 元/千 Token，正常对话每月约 1-5 元",
+          "适合对模型质量要求高的用户"
+        ],
+        "warnings": [
+          "DeepSeek 是付费服务，使用前需要充值",
+          "本系统默认已禁用此选项，需要管理员在「供应商管理」页面启用后才会显示给普通用户"
+        ]
+      }
+    }
+  },
+  "special_options": {
+    "auto": {
+      "name": "自动回退（推荐）",
+      "description": "按优先级依次尝试可用供应商，无需手动选择",
+      "sort_order": 0,
+      "guide": {
+        "apply_url": "",
+        "free_quota": "免费（使用已配置的供应商）",
+        "steps": [
+          "选择「自动回退」后无需任何操作",
+          "系统会按以下优先级尝试：商汤 → 智谱 → 讯飞 → 百度",
+          "如果某个供应商不可用（如 API Key 过期），会自动切换到下一个",
+          "建议新用户选择此选项"
+        ],
+        "tips": [
+          "推荐新用户使用，无需关心技术细节",
+          "需要至少配置一个供应商的 API Key 才能正常工作",
+          "建议优先配置商汤或智谱的 API Key（免费且质量好）"
+        ],
+        "warnings": []
+      }
+    },
+    "custom": {
+      "name": "自定义（OpenAI 兼容）",
+      "description": "任意 OpenAI 兼容 API，如 Ollama、Groq、Together AI 等",
+      "sort_order": 98,
+      "guide": {
+        "apply_url": "",
+        "free_quota": "取决于所选服务",
+        "steps": [
+          "在「API 地址」输入框填入 OpenAI 兼容 API 的地址",
+          "常用地址示例：",
+          "  - Ollama 本地：http://localhost:11434/v1",
+          "  - Groq：https://api.groq.com/openai/v1",
+          "  - Together AI：https://api.together.xyz/v1",
+          "  - Moonshot（月之暗面）：https://api.moonshot.cn/v1",
+          "  - SiliconFlow：https://api.siliconflow.cn/v1",
+          "在「API Key」输入框填入对应服务的密钥（Ollama 本地可留空）",
+          "在「模型名称」输入框填入模型名（如 llama3.1, qwen2.5 等）",
+          "点击「保存设置」"
+        ],
+        "tips": [
+          "支持任何符合 OpenAI API 协议的服务",
+          "Ollama 本地部署无需 API Key，地址填 http://localhost:11434/v1",
+          "Groq 免费且速度极快，推荐尝试：https://console.groq.com",
+          "SiliconFlow（硅基流动）有大量免费模型：https://siliconflow.cn"
+        ],
+        "warnings": [
+          "需要自行确认所选服务的 API 兼容性",
+          "不同服务的模型名不同，请参考对应服务文档"
+        ]
+      }
     }
   },
   "fallback_chain": [
     "sensenova",
     "zhipu",
     "xunfei",
-    "baidu",
-    "opencode_zen"
-  ],
-  "deepseek_guide": {
-    "enabled": false,
-    "description": "DeepSeek 是高质量模型推荐选项，需手动配置 API Key",
-    "apply_steps": [
-      "1. 打开 https://platform.deepseek.com 注册账号",
-      "2. 进入控制台 → API Keys → 创建新的 API Key",
-      "3. 复制 API Key，填入上方配置",
-      "4. 保存后系统自动使用 DeepSeek（优先于免费模型）"
-    ],
-    "why_deepseek": "DeepSeek-V3 在中文理解、角色扮演、长上下文方面表现优异，适合 AI 角色扮演 场景"
-  },
-  "notes": {
-    "xunfei": "讯飞星火 Spark Lite - 永久免费，Token无限，并发限制5，有效期至2036年",
-    "zhipu": "智谱AI GLM-4.7-Flash - 永久免费，无Token上限，200K上下文",
-    "baidu": "百度千帆 ERNIE-Speed - 每月50万Token免费，QPS=5，需百度云账号",
-    "deepseek": "DeepSeek - 高质量模型，API Key 从 platform.deepseek.com 获取，按量计费但价格极低",
-    "sensenova": "商汤日日新 SenseNova - glm-5.2 1M上下文/13万输出，API Key 从 platform.sensenova.cn 获取",
-    "opencode_zen": "OpenCode Zen - 完全免费，无需API Key，作为兜底方案"
-  }
+    "baidu"
+  ]
 }
-

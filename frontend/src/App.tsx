@@ -1,10 +1,9 @@
 import { Routes, Route, Navigate, useParams, Outlet } from 'react-router-dom'
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './api/queryClient'
 import Sidebar from './components/layout/Sidebar'
 import Breadcrumb from './components/layout/Breadcrumb'
-import MobileNav from './components/layout/MobileNav'
 import ToastContainer from './components/common/Toast'
 import ErrorBoundary from './components/common/ErrorBoundary'
 import AnimatedPage from './components/shared/AnimatedPage'
@@ -16,15 +15,16 @@ import CreateRole from './pages/CreateRole'
 import RoleSettings from './pages/RoleSettings'
 import StatusCenter from './pages/StatusCenter'
 import StorylineEditor from './components/storyline/StorylineEditor'
-import { AuthGuard, RoleGuard } from './components/auth'
+import { AuthGuard, RoleGuard, ConsentGate, AuthInit } from './components/auth'
 import { useAuthStore } from './store/authStore'
-import { refreshToken } from './api/auth'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
+const IntroPage = lazy(() => import('./pages/IntroPage'))
+const PsychProfilePage = lazy(() => import('./pages/PsychProfilePage'))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const WeChatPage = lazy(() => import('./pages/WeChatPage'))
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
-const DemoPage = lazy(() => import('./pages/DemoPage'))
+const AdminProvidersPage = lazy(() => import('./pages/AdminProvidersPage'))
 
 const SettingsLLM = lazy(() => import('./pages/SettingsLLM'))
 const SettingsVoice = lazy(() => import('./pages/SettingsVoice'))
@@ -52,6 +52,12 @@ function StorylinePage() {
   return <StorylineEditor characterId={roleId!} />
 }
 
+/** 根路径重定向：已登录 → /wechat（保持原跳转），未登录 → /intro（公开门面页，SP-11） */
+function RootRedirect() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  return <Navigate to={isAuthenticated ? '/wechat' : '/intro'} replace />
+}
+
 function AnimatedSuspense({ children }: { children: React.ReactNode }) {
   return (
     <Suspense fallback={<PageLoadingSkeleton />}>
@@ -62,42 +68,18 @@ function AnimatedSuspense({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** 认证初始化：App 启动时 init() 一次 */
-function AuthInit({ children }: { children: React.ReactNode }) {
-  useEffect(() => {
-    const { user } = useAuthStore.getState()
-    if (!user) {
-      useAuthStore.setState({ isInitialized: true })
-      return
-    }
-    const doInit = async () => {
-      try {
-        const res = await refreshToken()
-        useAuthStore.getState().setAuth(res.user, res.access_token)
-        useAuthStore.setState({ isInitialized: true })
-      } catch {
-        useAuthStore.getState().clearAuth()
-        useAuthStore.setState({ isInitialized: true })
-      }
-    }
-    doInit()
-  }, [])
-  return <>{children}</>
-}
-
 /** 受保护的管理控制台布局（含侧边栏+顶栏+AuthGuard） */
 function ProtectedLayout() {
   return (
     <AuthGuard>
-      <div className="flex h-screen overflow-hidden bg-dynamic bg-orbs">
+      <div className="flex h-[100dvh] overflow-hidden bg-dynamic bg-orbs">
         <ScrollProgress />
         <ParticleCanvas />
         <Sidebar />
-        <main className="flex-1 flex flex-col min-w-0 pt-5 pb-24 lg:pb-6 overflow-y-auto">
+        <main className="flex-1 flex flex-col min-w-0 pt-5 pb-6 overflow-y-auto">
           <Breadcrumb />
           <Outlet />
         </main>
-        <MobileNav />
         <ToastContainer />
         <CustomCursor />
       </div>
@@ -110,15 +92,16 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
     <ErrorBoundary>
     <AuthInit>
+      <ConsentGate />
       <Routes>
-        {/* ─── 公开路由：登录页 + Demo 体验 ─── */}
+        {/* ─── 公开路由：产品介绍 + 登录页 + 根路径分流 ─── */}
+        <Route path="/intro" element={<Suspense fallback={<PageLoadingSkeleton />}><IntroPage /></Suspense>} />
+        <Route path="/psych" element={<Suspense fallback={<PageLoadingSkeleton />}><PsychProfilePage /></Suspense>} />
         <Route path="/login" element={<Suspense fallback={<PageLoadingSkeleton />}><LoginPage /></Suspense>} />
-        <Route path="/demo" element={<AnimatedSuspense><DemoPage /></AnimatedSuspense>} />
+        <Route path="/" element={<RootRedirect />} />
 
         {/* ─── 受保护路由：管理控制台 ─── */}
         <Route element={<ProtectedLayout />}>
-          <Route path="/" element={<Navigate to="/wechat" replace />} />
-
           {/* 连接 */}
           <Route path="/wechat" element={<AnimatedSuspense><WeChatPage /></AnimatedSuspense>} />
 
@@ -144,6 +127,7 @@ export default function App() {
           <Route element={<RoleGuard roles={['admin'] as const} />}>
             <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
             <Route path="/admin/users" element={<AnimatedSuspense><AdminUsersPage /></AnimatedSuspense>} />
+            <Route path="/admin/providers" element={<AnimatedSuspense><AdminProvidersPage /></AnimatedSuspense>} />
           </Route>
         </Route>
 

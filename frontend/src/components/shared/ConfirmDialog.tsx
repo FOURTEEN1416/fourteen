@@ -21,13 +21,13 @@ export default function ConfirmDialog({
       <div className="flex gap-2 justify-end">
         <button
           onClick={onCancel}
-          className="px-3 py-1.5 text-xs text-gray-500 bg-gray-100/80 rounded-lg hover:bg-gray-200/60 transition-colors"
+          className="min-h-[44px] px-4 py-2 text-xs text-gray-500 bg-gray-100/80 rounded-lg hover:bg-gray-200/60 transition-colors"
         >
           {cancelText}
         </button>
         <button
           onClick={onConfirm}
-          className={`px-3 py-1.5 text-xs text-white rounded-lg transition-colors
+          className={`min-h-[44px] px-4 py-2 text-xs text-white rounded-lg transition-colors
             ${variant === 'danger' ? 'bg-red-500 hover:bg-red-600' : 'bg-primary-500 hover:bg-primary-400'}`}
         >
           {confirmText}

@@ -253,4 +253,15 @@ describe('LoginPage', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/wechat', { replace: true })
     })
   })
+
+  // ──────────────────────────────────────────────
+  //  10. 底部「了解产品」链接指向 /intro（SP-11）
+  // ──────────────────────────────────────────────
+  it('has a bottom link to /intro labeled 了解产品', () => {
+    renderComponent()
+
+    const link = screen.getByRole('link', { name: '了解产品 →' })
+    expect(link).toBeDefined()
+    expect(link.getAttribute('href')).toBe('/intro')
+  })
 })
