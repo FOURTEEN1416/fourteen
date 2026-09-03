@@ -13,7 +13,7 @@
 | [VISION.md](VISION.md) | 终态宣言：产品本质/既成事实基线/候选池/Non-Goals/成功判据 | explanation | **truth** |
 | [FUNCTION_INVENTORY.md](FUNCTION_INVENTORY.md) | 功能清单（页-功能点编号，商讨协议定位基准；08-28 重制自代码实况×历史意图） | reference | **truth** |
 | [DECISION_LEDGER.md](DECISION_LEDGER.md) | 决策生死账（真决策清单 + 挂起池 SP-*） | reference（决策记录） | **truth** |
-| 根目录 [CODE_GRAPH.md](../CODE_GRAPH.md) | 代码实况：端点/模块/热路径/指标（当前 v3.3.0） | reference | **truth** |
+| 根目录 [CODE_GRAPH.md](../CODE_GRAPH.md) | 代码实况：端点/模块/热路径/指标（当前 v3.5.0，图谱库 2026-09-02 二次重索引 7997/33187 @ef328a2） | reference | **truth** |
 | [history/INDEX.md](history/INDEX.md) | 漂移登记簿 + 历史文档演进索引 | reference | **truth** |
 
 配套操作文档（how-to）：
@@ -32,7 +32,7 @@
 
 | 位置 | 内容 | 生命周期 |
 |------|------|---------|
-| [adr/](adr/) | 10 篇架构决策记录（ADR-0001~0011，MADR 体例） | truth（增补式） |
+| [adr/](adr/) | 11 篇架构决策记录（编号 0001–0014；0008–0010 空缺未使用；**编号冲突已解决（2026-09-02 用户裁决更名）**：JWT 认证体系回填为 `ADR-0007-用户认证与权限体系.md`，成就体系保留 `ADR-0014-achievement-system.md`） | truth（增补式） |
 | [designs/](designs/) | 集成方案设计（如 MiMo TTS） | derived（落地后由真源收编） |
 | [plans/](plans/) | 落地方案（极致拟人化等） | derived |
 | [architecture/](architecture/) | 设计原则 + 知识图谱方法说明 | derived |

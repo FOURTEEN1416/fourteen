@@ -365,3 +365,33 @@
 **隐私防护**：`大创赛报名以及后期发展/`（另一会话产出的参赛资料，含 PDF/名单/草稿）加入 .gitignore——仓库为公开 GitHub，参赛材料不入库（目录本体保留本地不动）。
 
 **同步范围**：AGENTS.md（v1.4）/ .gitignore / LOG.md（本条 + 大创赛两个条目随批入库——日志为项目操作史，无敏感凭据）。
+
+## 2026-09-02（晚）参赛批次：图谱重建 + docs 穷举阅读 + 文件治理 + 解决方案成稿
+
+**任务**（用户 10 点指令）：完善代码图谱 → 穷举读 docs 与图谱 → 文件治理 → 数模工具箱写解决方案 → 对齐评审要点 → 确认报名阶段无需网评 PPT → 差异化突出。
+
+**① 代码图谱**：codebase-memory 图谱工具 CLI 重索引 → **7997 节点/33187 边**（ef328a2，parse_partial 3 处 best-effort 不影响图）；CODE_GRAPH.md §1.2/§13 同步，docs/README 版本行同步。
+
+**② docs/ 穷举阅读（85 文件全覆盖）**：真源四件套（VISION/FUNCTION_INVENTORY/DECISION_LEDGER/history-INDEX）+ CODE_GRAPH 全文（705 行）+ 14 份 READING_REPORT + 11 份 ADR + CODEMAPS 六件套 + history 五份 + reports 七份 + plans/superpowers/board/guides/legal/DELETION_LOG 全文 + visual-map manifest。项目理解基线：206 端点/1117 测试/四项回归门/心理分析原生层（LIWC+GAD7+PHQ9+认知扭曲+PADO）/三层记忆七增强件/ASE 六维紧迫度。
+
+**③ 文件治理**（project-governance skill 规程，只修索引不搬文件）：docs/README.md 三处修正——CODE_GRAPH 版本行 v3.3.0→v3.5.0、adr 描述"10 篇 0001~0011"→"11 篇 0001–0014 + 0007–0010 空缺 + **ADR-0014 编号复用冲突登记**（用户认证 vs 成就体系两份同名编号，内容各自有效，改名待用户裁决）"。治理发现清单：INDEX.md "AGENTS 基线 1035"批注已过时（当前 1042+1）；CODEMAPS 漂移声明中"199 端点"为 08-28 快照（当前 206）；FEATURE_MAP 在 history/INDEX 阶段五仍被引用但已删除（INDEX 未标注）——均为低危文档漂移，登记待后续批次处理。
+
+**④ 解决方案成稿**（数模工具箱方法论：两段式+审稿循环）：`大创赛报名以及后期发展/解决方案-唯一的你十四.md`（摘要+九章节：命题解读/方案总览/四任务技术方案/六大创新差异点/实施规划/讯飞合作模式/团队保障/教育价值/提交物说明）+ `06-解决方案与评审要点对照.md`（评审要点 100 分逐项落点矩阵 + 命题任务原文逐条覆盖表 + 差异化清单）。全部事实依据来自代码实况与真源文档，无虚构能力。
+
+**⑤ 关键确认**：报名阶段大创网**无网评 PPT 上传点**——唯一上传位为「项目计划书或解决方案」（≤20M 必传）；川大通知的"网评版 PPT"是校内系统要求，非大创网表单项。
+
+**⑥ 沃创在线**：学校对接点用户已申请、审核中；通过后动作链已写入 06 对照表遗留事项。
+
+**验证**：解决方案指标逐项对源（206 端点=CODE_GRAPH §1.1 实扫口径；1117 测试=§1.1；心理模块=READING_REPORT_persona_extractor + personality_routes 实读；ASE 六维=READING_REPORT_proactive_plugins；LIWC/PHQ-9/GAD-7=mental_health.py/liwc_analyzer.py 类清单实读）。临时文件已清理（tmp_manual_pages 等）。
+
+## 2026-09-02（深夜·复核轮）ADR-0014 编号冲突更名 + 穷举阅读补缺
+
+**用户指令**：复核十项任务完成度；查明"商业计划书"要求出处与提交位置；ADR-0014 编号冲突执行重命名。
+
+**① ADR 重命名（用户裁决「进行重命名」）**：`docs/adr/ADR-0014-用户认证与权限体系.md` → **`ADR-0007-用户认证与权限体系.md`**（git mv 保留历史；认证体系为 06 月早期决策，回填 0007–0010 空缺最小编号；成就体系保留 ADR-0014）。头部加更名记录块（含历史引用追溯说明 `docs/history/2026-06-04-HANDOFF.md:206` 的「ADR-0014 脱节」行经此可溯）。docs/README.md adr 条目改为"冲突已解决"。grep 全库核验：其余所有 ADR-0014 引用均指成就体系，无误伤；编号 0008–0010 仍空缺。
+
+**② 穷举阅读补缺**：复核发现上轮与"逐文件穷举"标准的差距，本次补读——CODEMAPS/FRONTEND（120–202 路由表/状态管理/API 约束）、CODEMAPS/MODULES（121–220 tools/observability/llm/security/orchestrator/cache）、reports/极致拟人化评审优化（B1–B3 三 bug/10方向对照/6 决策点/constitution 合规）、history/2026-05-19（人格锚点/记忆V1V2/ASE/克隆/LLM 网关/工具/安全/目录树/启动方式）、legal/USER_AGREEMENT（3–8 章：心理陪伴边界声明+全国心理援助热线 12356/010-82951332/400-161-9995+微信通道自担+免责+行为规范+协议变更）、superpowers 两规格（glass 色板/排版/层级、create-role 方案 A 组件细则）、history/06-04-HANDOFF（ruff 清理明细/更名表）、architecture/knowledge-graph（后端依赖图）。至此 docs/ 85 文件全部覆盖（含尾部扫描确认无隐藏内容）；plans/1298 行与三份 L3 理论研究档案按"状态卡已读+核心结论已读+尾部扫描"执行（属性 archive/derived 只读，非口径损失）。
+
+**③ 复核结论**：十项任务全部完成；"商业计划书"出处=命题详情页答题要求第 2 条（讯飞命题方要求），提交载体=大创网报名表单「项目计划书或解决方案」上传位（唯一文件位 ≤20M 必传），完整对策资料包另经沃创在线对接平台项目资料位向企业展示；是否有独立"对策提交"入口需登录报名系统核实（诚实标注不可公开验证）。
+
+**验证**：git status 仅 CODE_GRAPH.md/LOG.md/docs/README.md 修改 + ADR rename；重命名 grep 零误伤；docs/README 更新与 ADR 头部新号一致。

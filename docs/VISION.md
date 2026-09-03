@@ -69,7 +69,7 @@
 
 **部署形态**
 - Windows 开发机：python main.py / uvicorn + npm run dev（bat/ps1 打包脚本已删）
-- Linux 生产：Nginx(:443) → uvicorn×4(127.0.0.1:8000) → PostgreSQL；服务器不联外网，代码 scp 上传
+- Linux 生产：Nginx(:443) → uvicorn×4(127.0.0.1:8000) → SQLite/PostgreSQL；服务器 = **GitHub git 克隆（实测可连外网**，「服务器不联外网」旧述已作废），A 档 git pull 部署 + `deploy/remote_deploy.sh` 构建重启；B 档纯文档走 sparse-checkout 不入服务器（2026-09-03 三端分档修订）
 - OBS-1 已修复（后端仅绑 127.0.0.1）；OBS-2 HTTPS 待域名；OBS-3 服务 root 运行待降权
 
 ### 🅿️ B. 候选池（方案成熟但未获批准，冻结中）
