@@ -395,3 +395,15 @@
 **③ 复核结论**：十项任务全部完成；"商业计划书"出处=命题详情页答题要求第 2 条（讯飞命题方要求），提交载体=大创网报名表单「项目计划书或解决方案」上传位（唯一文件位 ≤20M 必传），完整对策资料包另经沃创在线对接平台项目资料位向企业展示；是否有独立"对策提交"入口需登录报名系统核实（诚实标注不可公开验证）。
 
 **验证**：git status 仅 CODE_GRAPH.md/LOG.md/docs/README.md 修改 + ADR rename；重命名 grep 零误伤；docs/README 更新与 ADR 头部新号一致。
+
+## 2026-09-03 三端统一分档修订（用户裁决：修复）+ 服务器 sparse-checkout 改造
+
+**触发**：用户质疑"文档更新有必要传云服务器吗？三端同步是否有缺陷？"——实证核查后确认缺陷成立，用户裁决修复（"有什么好裁决的，既然问了当然要修复"）。
+
+**实证发现**（SSH 实测 139.199.199.174）：① 服务器 /opt/ai-girlfriend 是**完整 git 克隆**（.git/remote/HEAD 齐全）且**可连 GitHub**（ls-remote 成功——VISION「服务器不联外网」旧述作废）；② 服务器 git 工作区干净（仅 ?? frontend/dist.old/ 无关）；③ docs/(720K)+5 份根 md 纯文档镜像在服务器零消费；④ /opt 下另有 5 个非 git 项目（alumni×3/letter×2）走上传模式，非三端概念范畴；⑤ **行尾教训复现**：裸 md5 三端不一致实为 Windows CRLF vs Linux LF 行尾差异，git hash-object 归一化后一致——「md5 抽验」必须用归一化口径。
+
+**执行**：① AGENTS §3 分档铁律（A 档部署相关=commit→push→服务器 git pull，archive 覆盖废弃；B 档纯文档=仅 commit→push，不上服务器）+ VISION 部署形态同步 + 版本 v1.5；② 服务器 `git sparse-checkout init --no-cone`（排除 docs/ 与根 *.md）→ B 档镜像物理移除（对象仍存 .git 可恢复）→ `git pull --ff-only` 验证 HEAD=72add63；③ A 档 14 目录+main.py+pyproject 完好、api/health 200、服务 active；④ 补齐 AGENTS 版本行/修订历史。
+
+**验证**：三端 HEAD 72add63 ×3 一致；git hash-object 归一化 md5 一致；B 档服务器计数 0；A 档 md5 三端可行（远程部署触发时才需全量）。
+
+**其他项目结论**（仅诊断未动）：alumni-current×2/alumni-embedding/letter×2 均为非 git 上传型部署，无三端一致问题但无版本管理；若要治理须用户另行授权（属校友/他人项目）。
