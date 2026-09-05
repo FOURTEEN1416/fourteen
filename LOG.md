@@ -437,3 +437,5 @@
 **事故与恢复**：filter-repo 的 reset 覆盖了工作区两个未提交修改（AGENTS.md v1.5.1 测试基线修订、LOG.md（五）条目）——bundle 只备份已提交内容，教训：改写历史前必须先 stash/commit 未提交修改。两者均已从会话上下文完整恢复（AGENTS.md 四处 diff 重放、LOG.md 条目重追加），零净损失。
 
 **待办**：服务器端 /opt/ai-girlfriend 需 fetch+reset 对齐新历史（改写后旧 pull 必 non-fast-forward）。
+
+**服务器对齐完成（当日补记）**：/opt/ai-girlfriend fetch+reset --hard origin/main → HEAD 90f4e57 与本地/GitHub 三端一致；服务 ai-girlfriend active、/api/health 200；服务器最近提交身份已全部为统一后单一身份。A 档代码本轮零变更（仅 B 档文档），无需重部署。改写历史后服务器 pull 对旧 hash 的兼容已由 reset 处理。
