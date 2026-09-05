@@ -685,3 +685,13 @@
 **logo 提示词交付（brandkit/imagegen skills 理念）**：三方向中文提示词（极简图形/情感温度/星座叙事）已在对话中交付，品牌色海盐蓝 #4A8FA6 + 薄荷绿 #3D8A7C + 暖黄 #C0913E。
 
 **终产物**：可编辑 docx 1.69MB（等待用户精修）+ PDF 26 页 1.26MB。四轮恶意审稿弧线 64→71→76→78→82→84→87。
+
+---
+
+## 2026-09-06（二十四）— ZCode 中转3 provider 400 报错诊断（read body failed）
+
+**现象**：ZCode 报 "Provider rejected the model request"，trace 0fcd29ef，provider=6d256e2f（中转3，http://38.76.171.157:8081/v1，openai-compatible，glm-5.3-flash），status=400 "The request is invalid: read body failed. Please check the request body, required fields, and request format."
+
+**排查与实证**：① 官方大请求体排除——2.6MB/56万 tokens、13.7MB（仅触发上游 token 超限）、5.6MB 真实 PNG、2.6MB 视频数据全部 200 通过；② 请求形态排除——chunked 编码、stream:true、tools+tool_calls、多模态 content 数组、reasoning_effort 均通过；③ raw socket 截断复现——Content-Length 声明大于实际发送字节时中转站返回 "Failed to read request body"（自有文案，与用户所见不同）；④ 用户所见文案与上游 GLM 网关包装格式一致（T5 垃圾视频数据复现同款 "The request is invalid: 视频输入格式/解析错误. Please check..."）。
+
+**结论**：失败发生在中转站→上游 GLM 网关的转发段（中转站读客户端请求成功，转发时上游读 body 失败——中转站与上游间连接中断/复用竞态），属中转3 服务端间歇性故障，ZCode 侧配置无损坏、请求内容无问题。实测当前 5/5 稳定（延迟 3-11s），重试即可恢复。附带发现：中转1/中转2（47.116.52.40:3456）API Key 已过期（403 "API Key 已过期"），备胎失效，建议续 Key 或优先用官方 bigmodel-start-plan。
