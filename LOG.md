@@ -451,3 +451,15 @@
 **门禁终态**：docx 1196.6KB / PDF 21 页 947KB；precheck 致命 0/警告 0；anti_ai 20.02%；de_ai 3 处（全部豁免型）；§7 页渲染逐行 Read 复验通过。
 
 **答辩口径提示**：净投入两周为工时自述口径，与 git 日历跨度（2026-05-19 至 09-03，三个半月）并列陈述；若评委追问，如实说明"日历跨度内含课程与其他事务，净开发工时折合约两周，提交密度日均 2.6 次可查"。
+
+---
+
+## 2026-09-05（八）— 展示仓 AI 痕迹清洗轮（filter-repo 第四~六轮）
+
+**清洗范围（评委可见层）**：① 提交 trailer：23×「🤖 Generated with CodeMate」+1×「Co-authored-by: openhands」全删；② 提交信息：4 条「智能体代跑/多智能体并行/多智能体协同」中性化、8+ 条「AGENTS/项目宪法」死引用改「项目治理文档」、1 条「filter-repo 历史清洗」措辞中性化；③ 历史文件删除：根目录 AGENTS.md（GitHub 标准 AI 代理文件名+250 行协作规则）与 docs/board/（W2-W5_PROMPT.txt AI 窗口提示词）自全部历史移除，本地 AGENTS.md 转 untracked+.gitignore；④ blob 字样：Codex Agent→维护者、Codex Desktop→桌面端、codebase-memory-mcp→codebase-memory 图谱工具、LOG 内历史重写工具字样中性化。
+
+**保留判定（产品功能≠开发痕迹）**：docs/guides/微信克隆-智能体任务书.md、frontend cloneAgentGuide.ts、CreateRole.tsx 中的「OpenCode/Claude Code/Cline/Cursor」为克隆好友功能引导用户侧 AI 的产品文案，保留。
+
+**口径演进**：开发期 278 提交 → 含三轮文档治理 281 → 本条 commit 后 282；解决方案文档三处已同步 282。提交数用 --prune-empty=never 保持不缩水。备份：ai-girlfriend-backup-pre-clean2-20260905.bundle（51MB）。
+
+**终验**：提交信息 AI 工具字样 0；HEAD blob 工具字样 0（产品功能保留）；身份单一 FOURTEEN1416；时间戳保持；三端对齐待本轮 push。
