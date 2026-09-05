@@ -591,3 +591,15 @@
 **工具箱全接入清单（用户点名后补齐）**：docx_precheck/anti_ai_detector/de_ai_writer/humanities_review/rewrite_quality_gate/citation_checker(0错0警)/paper_data_check(无源跳过)/count_chapter_words(CLI 失配自写脚本替代)——score.py 为数模六题专用不适用。全章字数表：合计 17380，§3 技术 4388 为重心。
 
 **门禁终态**：precheck 0/0；citation 0/0；humanities 0 错误；de_ai 12 处（其中 9 处为锚点/枚举/引注豁免型，新增 3 处为愿景段长句已拆 2 留 1）。PDF 27 页 1.28MB / docx 1.72MB。
+
+---
+
+## 2026-09-05（十九）— 愿景深化轮：从"三段照搬"到"六层生态论述"（用户批评采纳）
+
+**用户批评**：上轮把用户方向素料原样三点照搬，是执行命令而非深化。正确姿势=泛化+头脑风暴+调研优化。
+
+**补采调研**：星火 API 文档实证——兼容 OpenAI SDK（base_url spark-api-open.xf-yun.com/v1/）、function call 已支持（Max/Ultra，HTTP 协议）、Lite~Ultra 版本谱系 → 讯飞生态兼容可写实而非口号。开源商业模式（open core/SaaS 分层/插件/按量计费）补采完成。
+
+**愿景段六层扩写（替换三段版）**：① 基座定位（xiaozhi 路线背书保留）；② 具身延伸（AI 陪伴机器人 2024 约 2 亿美元/CAGR 89.2%，"缺情感大脑"细分定位，SDK+接入协议随开源仓库发布）；③ **讯飞生态兼容是设计前提**（星火兼容 OpenAI SDK/function call 实证句+数据不上报约定→用户自然流入不被锁定）；④ **盈利分层**（免费层 MIT/增值层个性化定制+托管/API 层厂商按调用量——付费的是规模化服务与定制深度，不是体验本身；与 6.1 互为表里）；⑤ 共建机制（厂商/高校/用户三方各有明确所得）；原三段中已并或不重复内容融合入各层。
+
+**门禁终态**：precheck 0/0；citation 0/0；humanities 0 错误；de_ai 超长句新增源于锚点/引注（豁免口径内）。PDF 27 页 1.28MB / docx 1.72MB。
