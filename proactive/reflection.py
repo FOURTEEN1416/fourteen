@@ -93,7 +93,7 @@ class ReflectionEngine:
             mono_type = "miss_you"
             urgency_delta = 1.0
 
-        if any(kw in msg for kw in ["她", "别人", "女生"]):
+        if any(kw in msg for kw in ["别的女孩", "其他女生", "前任", "吃醋"]):
             mono_type = "jealous"
             urgency_delta = 1.5
         elif any(kw in msg for kw in ["开心", "高兴", "笑"]):

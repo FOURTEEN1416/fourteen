@@ -193,7 +193,7 @@ def test_reflection_engine_missing_detection():
 def test_reflection_engine_jealous_detection():
     from proactive.ase_engine import ReflectionEngine
     re = ReflectionEngine(reflection_mode="rule")
-    result = re.reflect("她和别人聊天", "哼", affinity_level=5, hours_since_last=1)
+    result = re.reflect("我跟前任吃了顿饭", "哼", affinity_level=5, hours_since_last=1)
     assert result.type == "jealous"
 
 
