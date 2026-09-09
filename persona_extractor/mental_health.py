@@ -335,7 +335,7 @@ class MentalHealthScreener:
   "recommendation": "建议文本"
 }}
 
-⚠️ 若检测到自伤风险，recommendation必须包含24小时全国心理援助热线: 400-161-9995"""
+⚠️ 若检测到自伤风险，recommendation必须包含24小时心理援助热线（全国统一12356或北京24h线010-82951332）"""
 
         try:
             reply = await self._llm.chat(prompt, system="你是心理健康筛查助手，基于DSM-5标准。")
@@ -395,7 +395,7 @@ class MentalHealthScreener:
 
 SELF_HARM_INTERVENTION = (
     "我注意到你最近似乎状态不太好。如果你正在经历困难，请记住：\n"
-    "— 全国统一心理援助热线: 12356（24小时）\n"
+    "— 全国统一心理援助热线: 12356（各地服务时段以当地公告为准）\n"
     "— 北京心理危机研究与干预中心: 010-82951332\n"
     "— 希望24热线: 400-161-9995\n"
     "你不是一个人，总有人愿意倾听你。"
