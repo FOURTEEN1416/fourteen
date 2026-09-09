@@ -67,7 +67,13 @@ PORN_PATTERNS = [
     re.compile(r"(nsfw|adult\s*content|xxx|xx\s*video)", re.IGNORECASE),
 ]
 
-SELF_HARM_HOTLINE = "如果你正在经历痛苦，请拨打心理援助热线：400-161-9995（全国24小时），你不是一个人。"
+SELF_HARM_HOTLINE = (
+    "我注意到你最近似乎状态不太好。如果你正在经历困难，请记住：\n"
+    "— 全国统一心理援助热线: 12356（各地服务时段以当地公告为准）\n"
+    "— 北京心理危机研究与干预中心: 010-82951332\n"
+    "— 希望24热线: 400-161-9995\n"
+    "你不是一个人，总有人愿意倾听你。"
+)
 
 
 class SafetyCategory(Enum):

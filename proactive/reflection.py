@@ -54,7 +54,7 @@ class ReflectionEngine:
 好感度等级: {affinity}(0=陌生人, 8=羁绊)
 
 内心独白类型(选一个):
-- miss_you: 想他
+- miss_you: 想念对方
 - happy: 开心
 - worry: 担心
 - jealous: 吃醋
@@ -93,7 +93,7 @@ class ReflectionEngine:
             mono_type = "miss_you"
             urgency_delta = 1.0
 
-        if any(kw in msg for kw in ["别的女孩", "其他女生", "前任", "吃醋"]):
+        if any(kw in msg for kw in ["前任", "旧识", "吃醋"]):
             mono_type = "jealous"
             urgency_delta = 1.5
         elif any(kw in msg for kw in ["开心", "高兴", "笑"]):
@@ -104,9 +104,9 @@ class ReflectionEngine:
             urgency_delta = 0.8
 
         thought_map = {
-            "miss_you": f"他{'好久' if hours_since_last > 4 else ''}没找我了...",
-            "happy": "他开心我也开心～",
-            "worry": "不知道他怎么样了...",
+            "miss_you": f"TA{'好久' if hours_since_last > 4 else ''}没找我了...",
+            "happy": "TA开心我也开心～",
+            "worry": "不知道TA最近怎么样了...",
             "jealous": "哼，不想了不想了",
             "bored": "有点无聊，想找人聊天",
         }

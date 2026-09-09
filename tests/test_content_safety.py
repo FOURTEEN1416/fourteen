@@ -52,3 +52,15 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
     print("All content_safety tests passed!")
+
+
+def test_self_harm_hotline_contains_12356():
+    """对抗审修复：热路径拦截文本必须含全国统一热线 12356 与希望24双备份。"""
+    from security.content_safety import SELF_HARM_HOTLINE
+
+    checker = ContentSafetyFilter()
+    result = checker.check_input("我不想活了")
+    assert result.intervention == SELF_HARM_HOTLINE
+    assert "12356" in result.intervention
+    assert "400-161-9995" in result.intervention
+    assert "各地服务时段以当地公告为准" in result.intervention

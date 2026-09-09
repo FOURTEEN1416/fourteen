@@ -506,3 +506,24 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
     print("All proactive tests passed!")
+
+
+def test_reflection_thought_map_no_gendered_words():
+    """对抗审修复：内心独白规则集不得含性别预设词（他/她/女孩/女生）。"""
+    from proactive.ase_engine import ReflectionEngine
+
+    engine = ReflectionEngine(reflection_mode="rule")
+    for msg in ["我好累", "今天好开心", "我跟前任吃了顿饭", "随便聊聊"]:
+        result = engine.reflect(msg, "嗯", affinity_level=3, hours_since_last=2)
+        for banned in ["他", "她", "女孩", "女生"]:
+            assert banned not in result.thought, f"消息[{msg}]独白[{result.thought}]含性别词[{banned}]"
+
+
+def test_reflection_jealous_neutral_trigger():
+    from proactive.ase_engine import ReflectionEngine
+
+    engine = ReflectionEngine(reflection_mode="rule")
+    assert engine.reflect("我跟前任吃了顿饭", "哼", affinity_level=5, hours_since_last=1).type == "jealous"
+    assert engine.reflect("偶遇旧识聊了很久", "哦", affinity_level=5, hours_since_last=1).type == "jealous"
+    # 性别触发词已移除：不再因提到特定性别词触发
+    assert engine.reflect("别的女孩说得对", "是吗", affinity_level=5, hours_since_last=1).type != "jealous"
