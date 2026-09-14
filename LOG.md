@@ -1060,3 +1060,19 @@
 **🔴 零真名裁决广播（BOARD 已发）**：用户令材料内不得出现任何人真实姓名——文档保持占位符，系统字段在系统内填。17 号文档 §三「提交前按大创网实名替换」旧注对文档本体不再适用。真名查证：15-商业计划书/解决方案v3/07-报名表单均零真名合规。
 
 **待办接续**：①代码窗停止→W3 复检（3 红用例+守卫）→CODE_GRAPH 增量刷新 ②软著完善（含 d104ce6 新代码纳入源码材料的取舍评估）③PPT 改写纳入论文+软著支撑 ④佐证包 ⑤视频。
+
+## 2026-09-15（四十七）— W3 验收收编 + 推送部署 + 真源文档刷新（v3.6.0）
+
+**用户指令**：验收窗口三→收编主仓→推送部署→更新过期文档。
+
+**W3 验收（五步制举证）**：w3-code 分支两个提交复审——d104ce6（图片通道：image_attachment.py 归一化 + llm_gateway attachments 透传 + config multimodal.image 四模式）、79dbae3（pilk silk 编解码，实测 ffmpeg 8.1 无 silk decoder）。**发现并补齐致命缺口**：入口守卫 `msg_type != 1` 原封未动（W3 提交信息误判"图片此前以空文本进管线"；协议镜像证据=W4 报告+同文件发送侧 message_type=3/34 与 item type 同源）。收编补丁 d74a8e6：守卫改白名单 `(1,3,34)`（提案 16-A1）+ 并入 W4 232 行测试。
+
+**证据链**：tests/test_wechat_connector.py 13/13 绿（3 红用例全转绿）→ w3-code 全量 **989 passed/6 skipped/0 failed**（基线 986+3）→ ruff 全过 → merge --no-ff 91f2042 → 主检出回归门 **989/0 fail + ruff 过**（合并零前端文件，vitest/E2E 免跑）。
+
+**A 档推送部署**：GitHub `895a80f..91f2042` push 0；服务器 pull f158e82c→91f2042c → `deploy/remote_deploy.sh` 四步跑通（pip/npm ci/build/systemctl restart+nginx reload）→ `systemctl is-active` active + `/api/health` 200（v3.1.0）→ **git hash-object 三端抽验 3/3 一致**（wechat_connector/image_attachment/test 文件）。
+
+**真源文档刷新**：CODE_GRAPH **v3.5.0→v3.6.0**（§1.1 补 09-15 测试口径行 + §13 收编条目）；AGENTS.md 升 **v1.7.1**（§0/§4.3 测试口径注记：文档 1117 与事故后可复现 995/989 并记）；README.md 测试数 1089→实测口径；HANDOFF_REPORT 刷至 91f2042（含事故/宪法 v1.7/四窗状态摘要）。
+
+**P×V 依赖排查（论文联动）**：grep 全文——论文从未陈述"图片被丢弃/未接线"；§4.2"语音转写默认未启用"（ASR 配置仍关）、§7.1"视觉=通用图像理解、缺面部表情识别"（VisionHandler 职责未变）收编后仍逐句为真 → **论文零修订，失衡论据完好**。
+
+**遗留**：w3-code worktree 有未跟踪 `docs/research/`（W3 窗调研笔记，白名单外，未动）；服务器 clone 非 sparse，B 档 docs 会随 pull 落盘（低危，宪法口径的 sparse 收敛另立待办）。

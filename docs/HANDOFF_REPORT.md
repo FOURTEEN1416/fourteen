@@ -6,8 +6,13 @@
 ---
 
 工作目录：`D:\Desktop\ai-girlfriend`（主仓）｜`C:\Users\FOUR\.agents`（Agent 层真源）
-当前日期：2026-09-14 ｜ 分支：`main`（主仓）/ `master`（Agent 层）｜ HEAD：`f158e82`
-当前目标：**云南赛区复赛冲刺**（材料 9/16 截止）＋**代码向多模态/嵌入式推进**＋**软著与论文产出**
+当前日期：2026-09-15 ｜ 分支：`main`（主仓）｜ HEAD：`91f2042`（= origin/main 已 push；服务器已 pull 同 commit 并部署，health 200）
+当前目标：**云南赛区复赛冲刺**（材料 9/16 17:00 截止；必传=商业计划书 PDF+项目展示 PPT PDF+企业对接意向截图）＋**软著提交与论文投稿**＋**多模态已收编（W3 闭环）**
+
+> ⚡ **2026-09-15 增量刷新**（详情见 `LOG.md` 四十五~四十七 + `docs/board/BOARD.md` 追加区）：
+> W1 论文✅（中国科技论文在线投稿版 v2 就绪：署名已填/39 文献独立核验/模板宏保留）｜W2 软著✅（全套待本人提交）｜W3 多模态✅已收编部署（图片通道 d104ce6 + silk 语音 79dbae3 + 守卫放行 1/3/34 d74a8e6）｜W4 验证✅（989 passed/0 failed）。
+> 宪法已升 **v1.7**（§8 Owner 唯一制——09-14 夜并发窗口曾回滚主检出工作树，写入必须同帧 commit）；09-14 夜主仓 `.git` 曾损毁、已重建（`.git.broken-0006` 为残骸备份）。
+> ⚠️ 测试口径：文档 1117（1042 Py+75 FE，09-01 .venv 实测）——该环境随事故丢失；2026-09-15 系统 Python 3.12 复测 **995 收集/989 通过/6 跳过**（差额说明见 docs/verification/W4 报告 §3）。
 
 ---
 
@@ -29,21 +34,14 @@
 
 **主仓 `D:\Desktop\ai-girlfriend`**
 ```text
-分支: main  |  HEAD: f158e82（= origin/main，已 push）
+分支: main  |  HEAD: 91f2042（= origin/main，已 push；服务器已 pull+部署）
 最近 3 提交:
-  f158e82 fix(cache): 修 llm_cache 装饰器返回类型 mypy 报错——用 cast 声明包装器保留原签名
-  e246118 docs(log): 三审修复A档同步记录（6284b67 热线文本+性别中性化）
-  6284b67 fix(security,proactive): 危机热线文本统一+独白去性别化
+  91f2042 merge: 收编 w3-code —— 多模态图片通道 + silk 语音链路 + 入口守卫放行
+  d74a8e6 fix(wechat): 入口守卫放行 type 1/3/34 —— W4 三红用例转绿（13/13，全量 989/0 fail）
+  79dbae3 fix(voice): 补 silk 编解码（pilk）—— 打通微信语音入站/出站
 
-未提交 / 未跟踪（全量，不省略）:
-   M LOG.md                      ← L2 操作日志（本窗口追加了 4 条：三十九~四十二）
-   M docs/README.md              ← 登记了 stages/ 与 board/ 三份新文档
-  ?? .zcode/                     ← 平台配置目录，性质未核（2026-09-03 起未跟踪）
-  ?? docs/board/                 ← 本窗口新建（BOARD.md + TASK_PACKAGES.md）
-  ?? docs/stages/                ← 本窗口新建（SPRINT_2026-09.md）
-  ?? frontend/audit-tabs.mjs     ← 2026-09-03，2301 字节，性质未核
-
-.gitignore 未覆盖 docs/board|stages → 它们会被 track（B 档：commit→push 即可）
+未提交 / 未跟踪（2026-09-15 复核）: `git status` 干净（.zcode/ 与 frontend/audit-tabs.mjs 已入 gitignore，31262d8）
+（2026-09-14 旧快照的未跟踪清单已全部处置完毕）
 ```
 **内部文档仓**：`D:\Desktop\知识库搭建` 下有独立 `.git`（该仓本窗口未改动）。
 

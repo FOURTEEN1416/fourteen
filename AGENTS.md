@@ -11,7 +11,7 @@
 ## 0. 项目身份
 
 - **产品形态**：微信扫码即用的 LLM 智能情感陪伴系统，扫码登录后控制台调角色与语音
-- **技术栈**：Python 3.10+ / React 19 / Vite 8 / TypeScript 6 / Tailwind 4 / Zustand 5 / 1042 Python 测试 + 75 前端测试 = 1117 / MIT
+- **技术栈**：Python 3.10+ / React 19 / Vite 8 / TypeScript 6 / Tailwind 4 / Zustand 5 / 测试 1117（文档口径 1042 Py+75 FE；2026-09-15 系统 Python 复测 995 收集/989 通过，差额系事故丢环境，见 §4.3）/ MIT
 - **核心能力**（见 `README.md`）：
   - 微信聊天（扫码登录，文字/语音，多用户独立）
   - 角色系统（每用户绑角色卡，性格/风格/口头禅可调）
@@ -145,6 +145,7 @@
 
 - 626+ 测试已建立，新功能必须附测试（实测基线:1042 Python + 75 前端 = 1117,2026-09-01 实跑,与 CODE_GRAPH 对齐)
 - 用户明确反对采样验证，要求完整验证
+- **测试口径注记（2026-09-15）**：文档口径 1117（1042 Python + 75 前端，2026-09-01 .venv 实测）——该环境随 09-14 主仓事故丢失；当前可用口径为系统 Python 3.12 实测 **995 收集/989 通过/6 跳过**（新增 3 个 WeChat 收包用例含内），差额 56 主要系 `config/characters/*.json` 夹具丢失，详见 `docs/verification/W4-2026-09-14-验证报告.md` §3。跑测试：`PYTHONPATH= python -m pytest -q`
 - 验证报告：归档到 `docs/`
 - 测试基线：`pytest_true_baseline.log` / `pytest_wip_baseline.log` / `pytest_post_commit.log`
 
@@ -224,6 +225,7 @@
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v1.7.1** | **2026-09-15** | §0/§4.3 测试口径注记：文档口径 1117 之外补充事故后可复现口径（系统 Python 3.12：995 收集/989 通过/6 跳过）；W3 多模态收编（图片通道+silk 语音+守卫 1/3/34），multimodal owner 职责面扩展 |
 | **v1.7** | **2026-09-15** | **§8 新增第 8 条「Owner 唯一制」**（事故驱动）：任何文件同一时刻只能有一个 owner；`BOARD.md`/`TASK_PACKAGES.md` owner 恒为主控（其它窗口只能追加到追加区、不得改登记表与他人条目）；`tests/**` owner 恒为 W4（W3 只改实现）；主检出工作树不是共享草稿区；**主控写入必须在同一帧内 commit**；恢复类操作前必须先 `git status` 保住未提交成果。起因：主检出被两窗口并发改写，BOARD.md 被回滚 3 次、`docs/verification/` 被删、W4 测试 232→138 行 |
 | v1.0 | 2026-07-28 | 初始版本：项目身份 + 顶层原则 + 用户偏好（含调研搜索零容忍硬规则）+ Owner Map + 硬约束 + 工程约定 + 验证命令 + 防漂移规则 + 经验教训 L1-L9 |
 | v1.1 | 2026-07-30 | Owner Map 补全 6 个缺失目录(`shisi/character/` / `shisi/memory/legacy/` / `shisi/knowledge/legacy/` / `shisi/api/v2/` / `shisi/storyline/`);测试基线从 626+ 修正为 1104(1025 Python + 79 前端,pytest+vitest 实跑);§0 技术栈同步 |

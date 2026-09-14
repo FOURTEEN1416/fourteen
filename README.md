@@ -131,7 +131,7 @@ pytest --cov=. --cov-report=html  # 覆盖率报告
 │   ├── adr/              架构决策记录（10 个：ADR-0001~0006 + ADR-0011~0014）
 │   ├── architecture/     8 层地图 / 设计原则 / Fitness Functions / Bus Factor
 │   └── audits/           审计报告
-├── tests/                1030 后端单元测试 + 59 前端测试 = 1089
+├── tests/                989 后端测试通过 + 6 跳过（2026-09-15 实测）+ 75 前端测试
 ├── config/               YAML 配置
 └── main.py               入口
 ```

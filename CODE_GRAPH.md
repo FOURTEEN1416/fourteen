@@ -1,6 +1,6 @@
-# 代码图谱 — unique-you (唯一的你) v3.5.0
+# 代码图谱 — unique-you (唯一的你) v3.6.0
 
-> 由 维护者 手动维护 | 最后核实: 2026-09-01（v3.5 增量：Psych 画像页 + 日记种子 + 主动消息控制 + 成就体系提案）
+> 由 维护者 手动维护 | 最后核实: 2026-09-15（v3.6 增量：W3 多模态收编——图片通道 + silk 语音 + 入口守卫放行 1/3/34；测试口径注记见 §1.1 与 §13）
 > ✅ 路由/文件/模块/测试数已通过 create_api_app 实扫 + Glob + pytest + vitest 实时核实（2026-08-28）。
 > ✅ 图数据库已于 2026-08-28 由 codebase-memory 图谱工具 v0.10.8 重新索引（artifact.json schema v2: **7706 节点 / 32367 边**，commit c32af54），历史矛盾（543277c 声称的 6771 节点未持久化）就此消案。
 
@@ -20,6 +20,7 @@
 | Python 测试用例 | **1030 passed + 1 skipped** | 实跑 2026-08-28（旧引擎/训练测试随 MiMo-only 收敛删除 -15） |
 | 前端测试用例 | **71 个全部通过 / 13 文件** | `npx vitest run`（2026-08-28 实跑；SP-9 删除幽灵页测试后 79→59） |
 | 测试用例合计 | **1117 个**(1042 Python + 75 前端) | pytest + vitest 实跑 2026-09-01（1117 = 1042 Python + 75 前端）|
+| Python 测试（2026-09-15 复测） | **995 收集 / 989 通过 / 6 跳过**（系统 Python 3.12 实跑；1042 口径的 .venv 与夹具随 09-14 主仓事故丢失，差额 56 说明见 `docs/verification/W4-2026-09-14-验证报告.md` §3；本轮新增 3 个 WeChat 收包用例全绿） | pytest 实跑 2026-09-15 |
 | tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
 
 ### 1.2 知识图谱快照指标（✅ 2026-09-02 重新索引·第二次）
@@ -644,6 +645,7 @@ tools/
 
 | 日期 | 提交 | 变更摘要 |
 |------|------|---------|
+| 2026-09-15 | 91f2042 (merge w3-code: d104ce6/79dbae3/d74a8e6) | **v3.6.0 W3 多模态收编**：(1) 新增 `multimodal/image_attachment.py`（入站图片归一化：裸 base64/dataURL→dataURL，magic bytes 判型，全程内存不落盘）；(2) `wechat_direct/wechat_connector.py` 入口守卫 `msg_type not in (1,3,34)`（修复图片 3/语音 34 在入口被丢弃→提案 16-A1）+ 图片处理 auto/direct/describe/off 四模式（默认 auto：配 vision_model 走直传，否则降级 VisionHandler 描述注入）；(3) `llm_provider/llm_gateway.py` chat()/_build_messages 新增 attachments 参数（附件并入末条 user message——不用 messages= 传图，避免 system_prompt 与 history 被整体丢弃）；(4) `orchestrator/optimized_orchestrator.py`/`user_scheduler.py` attachments 全链路透传；`_init_mixin` 补传 asr_config 消除 ASR 双 owner；(5) `voice/audio_converter.py` pilk silk 编解码（可选依赖 voice-silk；实测 ffmpeg 8.1 essentials 无 silk decoder），to_wav 按 rate=16000 重采样防变速变调；(6) `config/system.yaml` 新增 `multimodal.image` 段（mode=off 为零代码回滚路径）；(7) 测试 +3（W4 收包用例转绿并入，tests owner=W4）；端点数不变（无新路由）；(8) 部署闭环：服务器 pull→remote_deploy→health 200，git hash-object 三端抽验 3/3 一致 |
 | 2026-07-01 | 9c0b636..b455222 (7 commits) | 初始创建：新增 tools/ 工具系统、sensenova LLM 供应商、PersonaService 两阶段构造、18 个前端页面、安全日志 |
 | 2026-07-03 | 9a0ca50, 78acdc9 (2 commits) | 修复 ImageGenTool Agnes API 端点 (apihub.agnes-ai.com)，删除 response_format 参数；更新环境模板文档 |
 | 2026-07-09 | — | 知识图谱索引刷新（+12 节点 / +8 边，扫描时间更新至 2026-07-09） |
