@@ -130,11 +130,14 @@ class LLMGatewayV2:
         max_tokens: int = 1024,
         tools: list | None = None,
         model: str | None = None,
+        attachments: list | None = None,
     ) -> str:
         if not self.api_key:
             return self._mock_reply(query)
 
-        built_messages = self._build_messages(query, system_prompt, history, messages)
+        built_messages = self._build_messages(
+            query, system_prompt, history, messages, attachments
+        )
         model_name = model or self.model
         payload = {
             "model": model_name,
@@ -301,7 +304,8 @@ class LLMGatewayV2:
         return False
 
     def _build_messages(self, query: str, system_prompt: str,
-                        history: list | None, messages: list | None) -> list:
+                        history: list | None, messages: list | None,
+                        attachments: list | None = None) -> list:
         if messages:
             return messages
         result = []
@@ -309,8 +313,15 @@ class LLMGatewayV2:
             result.append({"role": "system", "content": system_prompt})
         if history:
             result.extend(history)
-        if query:
-            result.append({"role": "user", "content": query})
+        # 多模态：图片附件追加到末条 user message（不替换整条 messages，
+        # 否则 system_prompt（角色人设）与 history（对话历史）会被丢弃）
+        if query or attachments:
+            content: list | str = query or ""
+            if attachments:
+                parts: list = [{"type": "text", "text": query}] if query else []
+                parts.extend(attachments)
+                content = parts
+            result.append({"role": "user", "content": content})
         return result
 
     async def _try_fallback_async(self, messages: list, temperature: float,

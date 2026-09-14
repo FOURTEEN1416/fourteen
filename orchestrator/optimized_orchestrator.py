@@ -757,6 +757,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         emotion_engine: Any | None = None,
         user_llm_config: dict | None = None,
         user_id: int | None = None,
+        attachments: list | None = None,
     ) -> dict[str, Any]:
         if not self._initialized:
             return {"reply": "系统初始化中, 请稍候...", "error": "not_initialized"}
@@ -812,6 +813,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                             history=chat_history,
                             temperature=0.85,
                             max_tokens=2048,
+                            attachments=attachments,
                         ),
                         timeout=30.0,
                     )

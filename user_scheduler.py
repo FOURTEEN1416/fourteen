@@ -120,18 +120,24 @@ class UserManager:
     # ── 核心入口 ──────────────────────────────────────────
 
     async def process_message(
-        self, user_id: str, text: str, message_type: str = "text"
+        self, user_id: str, text: str, message_type: str = "text",
+        attachments: list | None = None,
     ) -> dict[str, Any]:
         """处理某个用户的消息
 
         注意: 不再使用全局锁，依赖 Orchestrator 的 per-session 锁保证并发安全。
         Orchestrator._get_session_lock(session_id) 为每个 session 提供独立的锁，
         不同用户可并行处理，同一用户消息串行处理，避免情感引擎状态串扰。
+
+        attachments: 多模态附件（图片 content part 列表），由微信通道传入。
         """
-        return await self._process_message_inner(user_id, text, message_type)
+        return await self._process_message_inner(
+            user_id, text, message_type, attachments
+        )
 
     async def _process_message_inner(
-        self, user_id: str, text: str, message_type: str = "text"
+        self, user_id: str, text: str, message_type: str = "text",
+        attachments: list | None = None,
     ) -> dict[str, Any]:
         """实际消息处理：委托给 orchestrator，并追加语音合成逻辑"""
         instance = self._get_or_create(user_id)
@@ -147,6 +153,7 @@ class UserManager:
             message_type,
             character_id=instance.character_card_id,
             emotion_engine=emotion_engine,
+            attachments=attachments,
         )
 
         # 统计

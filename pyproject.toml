@@ -78,6 +78,10 @@ dependencies = [
 win-tts-fallback = [
     "pywin32>=306; sys_platform == 'win32'",
 ]
+# 微信语音 silk 编解码（标准 ffmpeg 不带 silk decoder，入站语音转文字必须靠它）
+voice-silk = [
+    "pilk>=0.3.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

@@ -339,13 +339,14 @@ def _run_async_coro(coro):
     return asyncio.run(coro)
 
 
-def _call_user_manager(mgr, user_id, text):
+def _call_user_manager(mgr, user_id, text, attachments=None):
     """
     调用女友管理器处理消息（多用户路由）。
     process_message 是 async 的，但轮询循环是同步的，
     用全局共享线程池跑 asyncio.run（避免每次创建/销毁线程池的开销）。
+    attachments: 多模态附件（图片 content part 列表），可为 None。
     """
-    coro = mgr.process_message(user_id, text)
+    coro = mgr.process_message(user_id, text, attachments=attachments)
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -745,7 +746,7 @@ class WeChatConnector:
     def _handle_message(self, raw_msg):
         """处理一条消息（全链路结构化日志：接收 → 路由 → LLM → 回复）"""
         msg_type = raw_msg.get("message_type", 0)
-        if msg_type != 1:  # 只看用户消息
+        if msg_type not in (1, 3, 34):  # 放行用户文本(1)/图片(3)/语音(34)，其余（系统通知、自发回显等）仍丢弃
             return
 
         msg_id = str(raw_msg.get("message_id", raw_msg.get("seq", "")))
@@ -783,6 +784,30 @@ class WeChatConnector:
             logger.debug("消息无文本/语音/图片内容 msg_id=%s user=%s", msg_id, from_user)
             return
 
+        # ── 图片（V2）：image_data → 附件直传（B）或描述注入（A 降级）──
+        attachments: list = []
+        if image_data:
+            mode, vision_model, max_bytes = self._image_mode()
+            if mode != "off":
+                from multimodal.image_attachment import build_attachments
+
+                parts = build_attachments([image_data])
+                oversized = len(image_data or "") > max_bytes
+                if parts and not oversized and (mode == "direct" or vision_model):
+                    attachments = parts  # B：多模态直传
+                    logger.info(
+                        "[wx][step=image_direct] msg_id=%s user=%s parts=%d",
+                        msg_id, from_user, len(parts),
+                    )
+                elif mode in ("auto", "describe"):
+                    desc = self._describe_image(image_data)  # A：降级为描述注入
+                    if desc:
+                        text = text or desc
+                        logger.info(
+                            "[wx][step=image_describe] msg_id=%s user=%s len=%d",
+                            msg_id, from_user, len(desc),
+                        )
+
         # ── 语音转文字（候选 A，2026-08-28）：voice_data(base64 silk) → ASR → text ──
         if not text and voice_data:
             asr_text = self._transcribe_voice(voice_data)
@@ -806,7 +831,7 @@ class WeChatConnector:
         )
 
         try:
-            result = _call_user_manager(self.user_manager, from_user, text)
+            result = _call_user_manager(self.user_manager, from_user, text, attachments)
             t_elapsed = time.perf_counter() - t_start
         except Exception as e:  # noqa: BLE001
             logger.exception(
@@ -894,6 +919,50 @@ class WeChatConnector:
             except Exception as e:  # noqa: BLE001
                 logger.warning("[wx][step=sticker_failed] msg_id=%s user=%s error=%s",
                                msg_id, from_user, e)
+
+    def _image_mode(self) -> tuple:
+        """读 config/system.yaml → multimodal.image；返回 (mode, vision_model, max_bytes)。
+
+        未配置或读取失败时按 auto/无视觉模型处理（即自动降级为描述注入）。
+        """
+        cfg = getattr(self, "_image_cfg", None)
+        if cfg is None:
+            cfg = {"mode": "auto", "vision_model": "", "max_bytes": 5242880}
+            try:
+                import yaml
+                cfg_path = Path(__file__).parent.parent / "config" / "system.yaml"
+                if cfg_path.exists():
+                    with open(cfg_path, encoding="utf-8") as f:
+                        full = yaml.safe_load(f) or {}
+                    img = ((full.get("multimodal") or {}).get("image")) or {}
+                    cfg = {
+                        "mode": img.get("mode", cfg["mode"]),
+                        "vision_model": img.get("vision_model", cfg["vision_model"]),
+                        "max_bytes": img.get("max_bytes", cfg["max_bytes"]),
+                    }
+            except Exception:
+                pass
+            self._image_cfg = cfg
+        return str(cfg.get("mode", "auto")), (cfg.get("vision_model") or ""), int(cfg.get("max_bytes", 5242880))
+
+    def _describe_image(self, image_data: str) -> str:
+        """降级路径：用既有 VisionHandler 生成描述文本（图片不落盘）。"""
+        try:
+            from multimodal.multimodal_processor import VisionHandler
+
+            if getattr(self, "_vision_handler", None) is None:
+                llm = None
+                if self.orchestrator:
+                    llm = getattr(self.orchestrator, "components", {}).get("llm")
+                self._vision_handler = VisionHandler(llm)
+            result = _run_async_coro(self._vision_handler.process(image_data))
+            desc = (result or {}).get("text", "") or ""
+            if desc.startswith("[收到一张图片"):
+                return ""
+            return desc
+        except Exception as e:
+            logger.warning("图片描述失败: %s", e)
+            return ""
 
     def _transcribe_voice(self, voice_data_b64: str) -> str:
         """微信语音 → 文字（ASRHandler 配置驱动；未启用返回空串走原占位提示）。"""

@@ -75,7 +75,7 @@ class _InitPhasesMixin:
             self._init_memory_ext(cfg, fusion_cfg)
             self._init_persona_extractor(fusion_cfg)
             self._init_vault(fusion_cfg)
-            self._init_multimodal(fusion_cfg)
+            self._init_multimodal(cfg, fusion_cfg)
 
             self._initialized = True
             init_time = time.perf_counter() - start_time
@@ -476,7 +476,7 @@ class _InitPhasesMixin:
     # ─────────────────────────────────────────────────────────────
     #  阶段 10: 多模态处理 (v3.0)
     # ─────────────────────────────────────────────────────────────
-    def _init_multimodal(self, fusion_cfg: dict) -> None:
+    def _init_multimodal(self, cfg: Any, fusion_cfg: dict) -> None:
         """多模态处理器：图片/语音/视频理解。
 
         历史上仅在 `_run_full_mode` 中手动创建，统一收纳到 _init_mixin 后，
@@ -491,8 +491,18 @@ class _InitPhasesMixin:
 
         try:
             from multimodal.multimodal_processor import MultimodalProcessor
+            # 传入 asr 配置，避免 orchestrator 侧另建一个恒关闭的 ASRHandler
+            # （此前未传 asr_config → 与 wechat_connector 自建实例构成重复 owner）
+            asr_cfg: dict | None = None
+            try:
+                asr = getattr(getattr(cfg, "voice", None), "asr", None)
+                if asr is not None:
+                    asr_cfg = asr.model_dump(by_alias=True) if hasattr(asr, "model_dump") else dict(asr)
+            except Exception:  # noqa: BLE001
+                asr_cfg = None
             self.components["multimodal"] = MultimodalProcessor(
                 llm_gateway=self.components["llm"],
+                asr_config=asr_cfg,
             )
             logger.info("多模态处理器已初始化")
         except Exception as e:  # noqa: BLE001

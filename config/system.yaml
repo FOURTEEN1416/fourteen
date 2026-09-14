@@ -121,6 +121,19 @@ voice:
     timeout: 30.0                       # API调用超时（秒）
     fallback_local: true                # API失败时是否降级到本地引擎
 
+# ── 多模态（图片）配置 ──
+# 收到图片后的处理策略。图片全程只在内存流转，不落盘。
+multimodal:
+  image:
+    mode: "auto"                        # auto | direct | describe | off
+                                        #   auto:     配了 vision_model 走直传，否则降级为描述注入
+                                        #   direct:   只走多模态直传（失败则退占位文案）
+                                        #   describe: 只走描述注入（复用 VisionHandler）
+                                        #   off:      关闭（最快回滚，无需改代码）
+    vision_model: ""                    # 视觉模型名；留空时 auto 自动降级为 describe
+    max_bytes: 5242880                  # 超过该大小（默认 5MB）直接降级
+    timeout: 20.0                       # 视觉调用超时（秒）
+
 # ── 表情包配置 ──
 sticker:
   enabled: true
