@@ -16,7 +16,7 @@ import logging
 import time
 from collections.abc import Callable
 from functools import wraps
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from .redis_client import RedisClient, get_redis_client
 
@@ -327,9 +327,10 @@ def cached_chat(
             return response
 
         # 根据函数类型返回适当的包装器
+        # cast：async/sync 包装器经 @wraps 保留原函数签名，运行时行为不变；仅向类型检查器声明该事实
         import asyncio
         if asyncio.iscoroutinefunction(func):
-            return async_wrapper
-        return sync_wrapper
+            return cast("Callable[..., T]", async_wrapper)
+        return cast("Callable[..., T]", sync_wrapper)
 
     return decorator
