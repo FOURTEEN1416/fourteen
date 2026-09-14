@@ -20,12 +20,26 @@
 
 | 窗口 | 分支 | worktree 路径 | 任务包 | 状态 | 开工时间 | 备注 |
 |------|------|--------------|--------|------|---------|------|
-| 主检出 | `main` | `D:\Desktop\ai-girlfriend` | 协调 + 阶段真源维护 | 进行中 | — | 本轮由歆歆负责 |
-| _（待登记）_ | | | | | | |
+| 主检出 | `main` | `D:\Desktop\ai-girlfriend` | 协调 + 阶段真源维护（包 M） | 进行中 | — | 主控由歆歆担任；真源文档单写 |
+| W1 论文 | 无 | `D:\Desktop\论文-唯一的你十四`（外部） | **包 P** | 待开工 | — | 结构功能主义框架；目标刊《心理学进展》 |
+| W2 软著 | 无 | `D:\Desktop\软著申请-唯一的你十四`（外部） | **包 C** | 待开工 | — | 模式 A（user_data 504 文件已就位） |
+| W3 代码 | `wt/code` | `..\ai-girlfriend-code` | **包 V** | 待开工 | — | 多模态缺口；**须先过商讨协议五步制** |
+| W4 验证 | `wt/verify` | `..\ai-girlfriend-verify` | **包 T** | 待开工 | — | 只碰 `tests/**`；反对采样验证 |
 
 ---
 
 ## 追加区（按时间倒序，新的在上）
+
+### 2026-09-14 23:0x · 主检出 · 多窗口协同启动（4 窗口任务分发）
+
+- **用户裁决**：① 「文档都不进去服务器，服务器能消费的再入」→ 宪法升 **v1.6**，新增**服务器准入原则**（服务器只放 A 档；文档类不上服务器但**必须 `commit→push` 到 GitHub 备份**）；② `AGENTS.md` 解除 gitignore、**纳入版本控制**（此前只存本地、无任何备份）；③ 开启多窗口协同——主控=歆歆，4 窗口分工（论文 / 软著 / 代码修改 / 验证测试）
+- **提交**：`31262d8`（.gitignore + LOG 四十四，**已 push**）｜ `d381063`（AGENTS.md v1.6 + .gitignore，**待 push**，GitHub 直连抖动）
+- **任务包**：`TASK_PACKAGES.md` 重写为 **v2（生效）**——包 P 论文 / 包 C 软著 / 包 V 多模态缺口 / 包 T 验证测试
+- **主控亲自核验的缺口事实**（非照抄交接文档）：`voice/` 5 文件全 TTS；`multimodal/multimodal_processor.py` 内含 `ASRHandler`/`VisionHandler`/`EmojiResponder`；**ASR 已实现已接线**（`wechat_connector.py:899-922`），仅 `config/system.yaml:100-102` `enabled:false` + `api_base:""` → **纯配置**；**图片 `image_data` 全仓无消费者**（`_handle_message:769-782` 已解析但 `VisionHandler` 未接上）→ **1 处接线**；`MultimodalProcessor` 已挂 `orchestrator/_init_mixin.py:493`
+- **宝库定位**：`D:\Desktop\数模竞赛` = **Academic Agent Toolkit（科研工具箱）**——263 技能 / 303 能力目录 / 质量门禁引擎（`engine/quality_gates.py` + `step_manifest` + `audit_store`）/ 三条学术管线。论文与软著窗口所用技能（`paper-*` / `copyright-*`）全部出自此库
+- **未实现任何功能代码**（宪法 §1.3：W3 须先过商讨协议五步制）
+
+---
 
 ### 2026-09-14 20:5x · 主检出 · 阶段立项
 
