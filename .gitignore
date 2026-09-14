@@ -128,7 +128,6 @@ intro-full.png
 
 # 参赛报名/个人资料（隐私，不入公开仓库，AGENTS §3 数据隐私）
 大创赛报名以及后期发展/
-AGENTS.md
 
 # ── 本地审计脚本与平台配置（含生产登录口令，防误入库；文件本体保留本地） ──
 frontend/audit-tabs.mjs
