@@ -113,7 +113,8 @@
 
 | 编号 | 能力 | 关键行为 |
 |------|------|---------|
-| N-ASR-1 | **语音转文字**（候选 A）：微信语音（type34 silk）→ ffmpeg WAV → OpenAI 兼容 /audio/transcriptions → 文字进对话管线；config voice.asr 配置驱动（默认关）；未配置保持占位提示 |
+| N-ASR-1 | **语音转文字**（候选 A）：微信语音（type34 silk）→ WAV → OpenAI 兼容 /audio/transcriptions → 文字进对话管线；config voice.asr 配置驱动（默认关）；未配置保持占位提示。09-15 增补：silk 解码改 pilk（voice-silk 可选依赖；实测 ffmpeg 8.1 无 silk decoder），入站按 rate=16000 重采样 |
+| N-IMG-1 | **图片理解**（09-15 W3 收编）：微信图片（type3）→ 入口守卫白名单放行（1/3/34）→ config `multimodal.image` 驱动四模式（auto/direct/describe/off）：配 vision_model 走多模态附件直传（llm_gateway attachments 并入末条 user message，防 system_prompt/history 丢失），否则降级 VisionHandler 描述注入；image_attachment.py 归一化（magic bytes 判型），全程内存不落盘 |
 | N-DIARY-1 | **角色日记**（候选 B）：daily_summaries 每日摘要 → GET /api/memory/diary → StatusCenter 折叠卡片 |
 | N-DIARY-2 | **日记种子端点**（T3，09-01）：POST /api/memory/diary/seed（E2E/演示可注入，misc_routes 15→16 端点） |
 | N-KSHARE-1 | **知识分享主动消息**（候选 C）：share 类消息优先从角色知识库（爬虫/文档来源）检索真实内容，LLM 包装角色口吻；无索引/无 LLM 回退模板 |

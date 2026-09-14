@@ -1,6 +1,20 @@
-﻿# Code Deletion Log
+# Code Deletion Log
 
 # Code Deletion Log
+
+## [2026-09-15] verify 双仓回收（用户裁决：「最最最最重要的：对这些仓库进行回收和删除」）
+
+### 删除对象
+- `D:/Desktop/ai-girlfriend-verify`（W4 验证窗幸存副本，6.4MB/584 文件）
+- `D:/Desktop/ai-girlfriend-verify-backup-2327`（23:27 保全备份，5.5MB/592 文件）
+
+### 删除前全读清扫（防零损失）
+- 全量盘点：与主仓 diff 后「它们独有」的文件仅 13 个——W3 窗调研文档 2 份（已救回至 `docs/research/`）、孤儿 `.git` 指针 ×2（指向主仓重建前 worktree 注册，本就失效）、`_diag*.txt` ×10（事故恢复期临时探针输出，逐个过目确认为一次性诊断，事故叙事已由 `verification/INCIDENT-*.md` 承载）
+- 价值物已先行并入主仓：W4 232 行测试（d74a8e6 随收编入 main）、W4 验证报告与事故报告（4e17d81）、BOARD 幸存条目（恢复时已并）
+- 两目录 `.git` 均为 69B 文件非仓库本体 → 无需 git rm，直接目录删除
+
+### 验证
+- 删除后 `ls D:/Desktop` 仅剩 `ai-girlfriend`（主仓）与 `ai-girlfriend-code`（W3 worktree，分支已收编，保留待卸窗）
 
 ## [2026-08-28] FEATURE_MAP 清除（用户裁决：严重错误）+ 配色体系迁移
 
@@ -402,7 +416,7 @@ echarts@^2.15.0 - No imports in any source file; manualChunks entry in vite.conf
 - common/EmptyState.tsx and common/Skeleton.tsx were kept restored through shared/ because pages import them via barrel
 - common/Badge.tsx kept (used by KnowledgePreview, StorylineEditor, StorylineIndicator)
 - shared/Select, Skeleton, EmptyState, Badge RESTORED after initial deletion — pages use them via barrel imports
-- Legacy backend pi/_*_routes.py files NOT removed — they coexist with pi/routers/ in app_factory.py; only a full endpoint diff can confirm redundancy
+- Legacy backend pi/_*_routes.py files NOT removed — they coexist with pi/routers/ in app_factory.py; only a full endpoint diff can confirm redundancy
 - 
 eact-window and 
 eact-virtualized-auto-sizer kept — used via 
