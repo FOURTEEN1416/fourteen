@@ -12,7 +12,7 @@
     "proactive",
     "plugins",
     "observability",
-    "clone_training",
+    "clone_training"
   ],
   "exclude": [
     "**/__pycache__",
