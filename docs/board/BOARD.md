@@ -22,13 +22,93 @@
 |------|------|--------------|--------|------|---------|------|
 | 主检出 | `main` | `D:\Desktop\ai-girlfriend` | 协调 + 阶段真源维护（包 M） | 进行中 | — | 主控由歆歆担任；真源文档单写 |
 | W1 论文 | 无 | `D:\Desktop\论文-唯一的你十四`（外部） | **包 P** | 待开工 | — | 结构功能主义框架；目标刊《心理学进展》 |
-| W2 软著 | 无 | `D:\Desktop\软著申请-唯一的你十四`（外部） | **包 C** | 待开工 | — | 模式 A（user_data 504 文件已就位） |
+| W2 软著 | 无 | `D:\Desktop\软著申请-唯一的你十四`（外部） | **包 C** | ✅ 完成 | 2026-09-14 23:13 | 模式 A；60 页代码 + 16 截图 + 5 门禁全真 |
 | W3 代码 | `wt/code` | `..\ai-girlfriend-code` | **包 V** | 待开工 | — | 多模态缺口；**须先过商讨协议五步制** |
 | W4 验证 | `wt/verify` | `..\ai-girlfriend-verify` | **包 T** | 待开工 | — | 只碰 `tests/**`；反对采样验证 |
 
 ---
 
 ## 追加区（按时间倒序，新的在上）
+
+### 2026-09-15 · 主检出 · 主控验收 W1/W2/W3/W4 + 主仓恢复校验 + 论文改投
+
+#### ① 主仓 .git 恢复成功（校验）
+HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fourteen.git` ｜ `git fsck` 仅 1 个 dangling commit ｜ 跟踪文件 582。
+
+#### ② 🔴 恢复引入的回归（已修复，但存在并发窗口反复回滚）
+恢复动作把工作树回滚到 HEAD，覆盖 `e9a063b` 之后的成果：W4 新增的 3 个测试用例（`tests/test_wechat_connector.py` 138↔232 行）、W1/W2 看板条目（BOARD.md 14982↔5449 字节）。**源在 `D://Desktop//ai-girlfriend-verify`，可随时拷回。**
+⚠️ **并发冲突告警**：主控多次写入后被另一窗口回滚，**需明确 BOARD.md 与 tests/ 的唯一 owner**。
+
+#### ③ 主控验收（反对采样验证，不看汇报看证据）
+- **W1 论文 ✅ 真完成**：中文 **10 785** 字（与自述精确一致）、8 章全、39 条文献 1–39 连续、3 图真渲染（323/351/361 KB）、docx 991 KB
+- **W2 软著 ✅ 真完成**：`audit.json` **5 pass/0 fail**；5 门禁布尔全 True；代码 docx 页眉正确、各 **1500 段 = 30 页×50 行**（共 60 页）；源码 3000 行；截图 16 张
+- **W3 代码 🔴 未开工**：`ai-girlfriend-code` 目录从未建立，一行功能代码都没写
+- **W4 验证 ⚠️ 阶段一完成/阶段二阻塞**：986/992 通过、0 failed；新增 3 用例预期红；阶段二待 W3
+- **W4 根因主控亲验**：`wechat_connector.py:747-749` 入口守卫 `if msg_type != 1: return` 丢弃图片(3)/语音(34)；765–785 行 item 级解析成死代码
+
+#### ④ 🆕 论文改投「中国科技论文在线」（用户裁决）
+官方 FAQ：**发表、评审不收取任何费用（￥0）**；教育部科技发展中心主办；初审 7 个工作日；可自助打印刊载证明。
+- **关键红利**：官方明文「版权归作者所有，可向其他期刊投稿」→ 0 元锁首发时间且保留日后投正式期刊的权利
+- **🔴 顺序铁律**：已见刊的论文不可再投这里 → **必须先这里、后期刊，不可逆**
+- 详见 `14-投稿与登记操作手册.md` §1B
+
+#### ⑤ 待办
+1. W1 套中国科技论文在线官方模板（§1B.3 六项）
+2. 补开 W3：修 `wechat_connector.py:747-749` 入口守卫（须先过宪法 §1.3 商讨协议五步制）
+3. 修上游缺陷 `copyright-build/scripts/build_docx_from_md.py` 缺 `import json`
+4. 明确 BOARD.md / tests 的窗口 owner，结束并发冲突
+
+---
+
+### 2026-09-14 23:5x · W2 软著窗口 · 包 C 完成（软著申请资料全套产出）
+
+> ⚠️ **写入位置说明**：与 W1 同因——主仓 `D:\Desktop\ai-girlfriend` 的工作树与 git 元数据已于本会话中被清空（本窗口 23:19 复核：该目录仅剩 `.git` 空壳，`git status` 报 `not a git repository`，`docs/board/` 已不存在）。本条追加写于**全机唯一幸存副本** `D:\Desktop\ai-girlfriend-verify`（W4 worktree）内的看板，与 W1 条目同一落点。
+
+- **结论**：包 C 三步技能流水线全部跑通，软著申请资料全套产出，**可交付申请人去中国版权保护中心提交**。
+- **产出路径**：`D:\Desktop\软著申请-唯一的你十四\`（工作区根 `交付清单.md` 为交付索引；`BOARD-APPEND-W2.md` 为本次看板条目的同文备份）
+  - 正式资料 `软件著作权申请资料\正式资料\`：代码(前30页).docx + 代码(后30页).docx + 操作手册.docx + 申请表信息.txt + 源码材料_源程序.docx/.txt + 生成报告.md
+  - 草稿 `软件著作权申请资料\草稿\`：业务理解.md/.json、代码文件选择.json、申请表信息.md、代码-前30页.md、代码-后30页.md、操作手册.md、操作手册自检记录.md/.json
+  - 截图 `软件著作权申请资料\截图\`：16 张 PNG + 16 份 mock HTML + 截图清单.json
+  - 源码流水线 `source-materials\`：files/cleaned/selection/audit/stats.json + SOURCE_MATERIALS_MANIFEST.json + REPORT.md + rendered/
+- **代码页数**：**60 页**（前 30 + 后 30），每页恰好 **50 行**有效代码，0 空行、0 短页；页眉「唯一的你·十四智能情感陪伴系统 V1.0」，页码连续。
+- **门禁状态**：
+  - `source-materials/audit.json`：**5 pass / 0 warn / 0 fail**（页眉一致 / 每页≥50行 / 末页≥2/3 / 首末页为模块边界 / 无他人署名）
+  - `QualityGate.check_source_materials()` → `ok=true, failures=[]`
+  - `QualityGate.check_step_manifest()` → `ok=true`（stepName=copyright-build）
+  - 5 个门禁 JSON 全部置真：`业务理解.json` / `代码文件选择.json` / `申请表字段确认.json` / `最终生成确认.json`（在 `草稿/`）+ `截图方式确认.json`（在 `软件著作权申请资料/` **根部**，`screenshot_method=html-mock`）
+  - `STEP_MANIFEST.json`：三步各一份（live = copyright-build，另存 `_tools\STEP_MANIFEST.<step>.json`），三份 validate 均 `ok=true`
+- **截图**：16 模块一模块一图，无复用、无空壳；风格由工作区目录名哈希确定性推导（`UISEED=633099085` / `HUE=205` / `SCHEME=1` / `NAV=2` / `RAD=2` / `DENS=1`），全项目统一。
+- **申请主体**：个人（著作权人 侯志脉，中国 / 云南省昆明市 / 自然人）。
+- **需申请人自行办理**：去中国版权保护中心在线填报（**证件号由本人录入**，未落盘任何证件号）并上传鉴别材料。
+- **🔴 发现上游工具缺陷（建议主控修工具箱）**：`科研工具箱/skills/copyright-build/scripts/build_docx_from_md.py` **缺少 `import json`** —— 一旦 `软件著作权申请资料/source-materials/SOURCE_MATERIALS_MANIFEST.json` 存在，`build_all()` 读取 manifest 时抛 `NameError: name 'json' is not defined` 并**中断整个生成**（该分支位于 `except json.JSONDecodeError` 处，异常处理器本身也依赖该名字，无法兜底）。本次已在工作区副本 `_build_scripts/` 修补，**科研工具箱原文件未改动**。
+- **本窗口其他偏离**（详见 `交付清单.md` §8）：① Electron 截图不可用 → 降级 Chrome headless 并加内容高度自动裁切；② `CODE_LINES_PER_PAGE` 48→50（符合「程序每页不少于50行」，且使页数精确为 30+30）；③ 代码选取在默认排除外追加排除测试与再导出文件（`frontend/src/tests`、`*.test.ts(x)`、`*.spec.ts(x)`、`**/index.ts`、`**/__init__.py`），使前 30 页为后端业务代码、后 30 页为前端组件；④ 未做 Word 视觉渲染复核（本机无 LibreOffice、Word 自动化不可用），改为结构级验证（页数 / 每页段数 / 页眉 / 内嵌图片数 / 表格数 / 行宽）。
+- **⚠️ 规程冲突（同 W1，待主控裁决）**：`TASK_PACKAGES.md §3` 声明「BOARD.md 仅主控可写」，而包 C 任务书要求 W2「完成后写回 BOARD.md 追加区」→ 依用户最新指令执行写入；`scripts/window_board.ps1` 仍**不存在**，仍为手工按格式追加。
+- **红线遵守**：对 `D:\Desktop\ai-girlfriend` 全程只读、未做任何写入；代码材料 100% 取自 `user_data/` 真实源码（未另编）。
+
+---
+
+### 2026-09-14 23:4x · W1 论文窗口 · 包 P 成稿完成（8 章 + 3 图 + 39 文献）
+
+> ⚠️ **写入位置说明**：主仓 `D:\Desktop\ai-girlfriend` 已于 ~23:19 被清空（见 `docs/verification/INCIDENT-2026-09-14-主仓工作树与git元数据损毁.md`），其 `docs/board/BOARD.md` 已不存在。本条追加写于**全机唯一幸存副本** `D:\Desktop\ai-girlfriend-verify`（W4 worktree，检出点 `e9a063b`）内的看板。
+
+- **产出路径**：`D:\Desktop\论文-唯一的你十四\`（仓库外工作区，不入 ai-girlfriend 仓库）
+  - `paper\main.md`（**v2 压缩版**，44.6 KB / 10 785 中文字 / 约 13.5 页）｜`paper\main-v1-full.md`（v1 完整版，51.1 KB / 12 783 中文字 / 约 16 页，对照留存）
+  - `唯一的你十四-结构功能主义论文.docx`（991 KB，含 3 图，8 章齐备，已按 v2 导出）
+  - `figures\fig_framework.png` ｜ `fig_structure.png` ｜ `fig_agil_matrix.png`（+ 同名 HTML 源，Chrome headless 渲染）
+  - `PAPER_PLAN.md`（大纲 + FIGURE_MANIFEST）｜`papers_pool.md`（文献池 + 逐条验证状态）｜`参考文献表.md`（39 条 GB/T 7714）｜`W1-汇报.md`
+- **v2 压缩（2026-09-15 00:0x，用户指令「再次优化并压缩」）**：正文中文 **12 783 → 10 785 字（−16%）**，估算页数 **16.0 → 13.5 页**，落入《心理学进展》12–15 页区间。压缩集中于 §1 引言（−32%）与 §2 文献综述（−26%）；**未删** 8 章结构 / 3 图 / 任一参考文献（39 条仍全部被正文引用）/ §7.1 缺口论证（红线区仅 −6%）
+- **章节清单（8 章一章不少）**：1 引言 ／ 2 文献综述与理论框架（图 1 分析框架图）／ 3 研究对象与方法 ／ 4 系统的结构分析（图 2 系统结构图）／ 5 系统的功能分析·AGIL 对照（图 3 对照矩阵）／ 6 显性功能与隐性功能 ／ 7 讨论 ／ 8 结论与展望；另含摘要、Abstract、关键词、参考文献
+- **框架落地**：帕森斯 AGIL 四功能作骨架（A←情感引擎+接入层；G←角色系统+主动关怀；I←编排器；L←三层记忆+角色系统）+ 默顿显/隐功能作批判层次（隐性三项：情感依赖强化 ／ 情感幻觉放大 ／ 真实社交替代，三者相互强化）
+- **未验证项（如实声明）**：① 全文**无任何实测指标**——未做用户实验、未做量表测量、未引用运行统计；② 所有系统陈述来自**代码与配置的静态核验**，不含运行时证据（已写入 §3.3 与 §7.3 局限）；③ §7.1 已如实写明「语音声学情绪与面部表情两条通道尚未实现」，并将其作为「结构—功能失衡」的核心论据而非缺陷披露；④ 单一案分析，结论普适性待多案例检验
+- **缺口事实复核（对幸存副本 `e9a063b` 独立复跑，5/5 一致）**：`voice/` 6 文件全为 TTS + 音频格式转换（唯一 `asr` 字样在 `audio_converter.py:29` 的注释里，属前置转换而非 ASR 实现）；`multimodal/multimodal_processor.py` 含 `MultimodalProcessor`/`VisionHandler`/`ASRHandler`/`EmojiResponder` 四类；`config/system.yaml:100-103` `enabled:false` + `api_base:""`；语音声学情绪识别 0 命中；面部表情识别 0 命中（`VisionHandler` 提示词为「请描述这张图片的内容，简洁20字以内」= 通用视觉理解）
+- **需主控广播的事项**：
+  1. **P×V 依赖已兑现**——论文 §4/§5/§7 引用的缺口事实与主控 2026-09-14 核验结论**完全一致**。**若 W3 改变任一事实（启用 ASR 配置 / 把 `VisionHandler` 接上 `image_data` / 新增表情或语音情绪模型），论文 §5.1 与 §7.1 的失衡论断需同步修订**，请主控在 W3 收编后广播
+  2. **🔴 主仓损毁影响本包**——W1 全部产出落于仓库外目录，**未受影响**；但若走恢复选项 B（以幸存副本原地重建），本 BOARD 条目随副本一并保全
+  3. **目标刊授权问题仍未决**——`13-论文设计-结构功能分析框架.md` §5 提出的「用参赛项目内容发表是否受学校规定限制」属用户裁量，投稿前需主控提请注意
+- **只读合规**：对 `D:\Desktop\ai-girlfriend` 全程只读（该目录已于本会话中被第三方清空，非本窗口所为）；技术调研**零 `WebSearch`**（走 scholar_fetch〔Semantic Scholar/OpenAlex/CrossRef〕+ anysearch + arXiv）
+- **⚠️ 规程冲突待主控裁决**：`TASK_PACKAGES.md §3` 声明「BOARD.md 仅主控可写」，而本次任务书要求 W1「完成后写回 BOARD.md 追加区」。本次**依用户最新指令执行写入**；另 `scripts/window_board.ps1` **实际不存在**（BOARD.md 第 4 行引用了它），已改为手工按格式追加，建议主控补建脚本或修订规程
+
+---
 
 ### 2026-09-14 23:0x · 主检出 · 多窗口协同启动（4 窗口任务分发）
 
