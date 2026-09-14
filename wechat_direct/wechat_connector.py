@@ -746,7 +746,7 @@ class WeChatConnector:
     def _handle_message(self, raw_msg):
         """处理一条消息（全链路结构化日志：接收 → 路由 → LLM → 回复）"""
         msg_type = raw_msg.get("message_type", 0)
-        if msg_type != 1:  # 只看用户消息
+        if msg_type not in (1, 3, 34):  # 放行用户文本(1)/图片(3)/语音(34)，其余（系统通知、自发回显等）仍丢弃
             return
 
         msg_id = str(raw_msg.get("message_id", raw_msg.get("seq", "")))

@@ -136,3 +136,97 @@ class TestHandleMessage:
         args = mock_send.call_args
         text = args.kwargs.get("text", "") or args[0][1]
         assert text == "你好呀"
+
+    # ──────────────────────────────────────────────────────────────────
+    # V5 缺口（包 T · 媒体消息**收包**）—— TDD 红
+    #
+    # 现状（`wechat_direct/wechat_connector.py:747-749`）：
+    #     msg_type = raw_msg.get("message_type", 0)
+    #     if msg_type != 1:      # 只看用户消息
+    #         return
+    # 该守卫会把 `message_type ∈ {3, 34}` 的图片/语音消息在**入口直接丢弃**，
+    # 使下方 item 级 `type ∈ {1, 34, 3}` 的解析（同文件 770-780 行）对媒体消息
+    # 成为**死代码**（对应任务包 V2 缺口：`image_data` 全仓无消费者）。
+    #
+    # 以下用例断言"媒体消息必须与文本消息一样进入处理链路"，
+    # W3 完成 V2 接线后应转绿；在此之前**预期红**。
+    # ──────────────────────────────────────────────────────────────────
+
+    @patch("wechat_direct.wechat_connector._send_text")
+    @patch("wechat_direct.wechat_connector._call_user_manager")
+    def test_image_message_type3_is_routed(self, mock_call, mock_send):
+        """type:3 图片消息不得在入口被丢弃，必须进入处理链路并产生回复。"""
+        from wechat_direct.wechat_connector import WeChatConnector
+        mock_call.return_value = {"reply": "这张图我看到了"}
+        conn = WeChatConnector(MagicMock())
+        conn.token = "test_token"
+        conn._last_user_id = "wx_user_1"
+        conn._context_tokens = {"wx_user_1": {"token": "ctx", "ts": 0}}
+
+        raw_msg = {
+            "message_type": 3,
+            "message_id": "img_1",
+            "from_user_id": "wx_user_1",
+            "context_token": "ctx",
+            "item_list": [{"type": 3, "image_item": {"image_data": "ZmFrZV9pbWFnZV9ieXRlcw=="}}],
+        }
+        conn._handle_message(raw_msg)
+
+        assert mock_call.call_count == 1, (
+            "图片消息(message_type=3) 应在入口被放行并路由到 user_manager，"
+            "而非被 `msg_type != 1` 守卫直接 return"
+        )
+        assert mock_send.call_count == 1, "图片消息应产生一次文本回复"
+
+    @patch("wechat_direct.wechat_connector._send_text")
+    @patch("wechat_direct.wechat_connector._call_user_manager")
+    def test_voice_message_type34_is_transcribed_then_routed(self, mock_call, mock_send):
+        """type:34 语音消息不得在入口被丢弃，应先 ASR 转写、再以转写文本路由。"""
+        from wechat_direct.wechat_connector import WeChatConnector
+        mock_call.return_value = {"reply": "收到你的语音"}
+        conn = WeChatConnector(MagicMock())
+        conn.token = "test_token"
+        conn._last_user_id = "wx_user_1"
+        conn._context_tokens = {"wx_user_1": {"token": "ctx", "ts": 0}}
+        conn._transcribe_voice = MagicMock(return_value="今天天气怎么样")
+
+        raw_msg = {
+            "message_type": 34,
+            "message_id": "voice_1",
+            "from_user_id": "wx_user_1",
+            "context_token": "ctx",
+            "item_list": [{"type": 34, "voice_item": {"voice_data": "ZmFrZV9zaWxr"}}],
+        }
+        conn._handle_message(raw_msg)
+
+        assert conn._transcribe_voice.call_count == 1, (
+            "语音消息(message_type=34) 应触发 ASR 转写（ASRHandler 通路）"
+        )
+        assert mock_call.call_count == 1, "语音消息应被路由到 user_manager"
+        assert mock_call.call_args[0][2] == "今天天气怎么样", "路由文本应为 ASR 转写结果"
+        assert mock_send.call_count == 1
+
+    @patch("wechat_direct.wechat_connector._send_text")
+    @patch("wechat_direct.wechat_connector._call_user_manager")
+    def test_voice_message_type34_falls_back_when_asr_unavailable(self, mock_call, mock_send):
+        """ASR 未启用（返回空串）时，语音消息仍须进入链路，不得被入口守卫丢弃。"""
+        from wechat_direct.wechat_connector import WeChatConnector
+        mock_call.return_value = {"reply": "（我暂时不知道该怎么回复，可以再说一次吗？）"}
+        conn = WeChatConnector(MagicMock())
+        conn.token = "test_token"
+        conn._last_user_id = "wx_user_1"
+        conn._context_tokens = {"wx_user_1": {"token": "ctx", "ts": 0}}
+        conn._transcribe_voice = MagicMock(return_value="")  # 模拟 ASR disabled
+
+        raw_msg = {
+            "message_type": 34,
+            "message_id": "voice_2",
+            "from_user_id": "wx_user_1",
+            "context_token": "ctx",
+            "item_list": [{"type": 34, "voice_item": {"voice_data": "ZmFrZV9zaWxr"}}],
+        }
+        conn._handle_message(raw_msg)
+
+        assert conn._transcribe_voice.call_count == 1, "ASR 未启用时仍应尝试转写（配置驱动）"
+        assert mock_call.call_count == 1, "ASR 不可用时语音消息仍须被路由，不得静默丢弃"
+        assert mock_send.call_count == 1
