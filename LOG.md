@@ -986,3 +986,48 @@
 **五、搜索工具（不是"没装"，是"没接"）**：从 opencode 配置移植 4 个 MCP 到 `~/.workbuddy/mcp.json`——**github**(v1.10.0 实测可跑)、**firecrawl**、**crawl4ai**(import 通过)、**playwright**；凭据 `GITHUB_PERSONAL_ACCESS_TOKEN` 凭环境变量继承，配置未内联。**anysearch 实测可用**（本会话全部调研产出）。
 
 **下一步**：写 `CLAUDE.md` → 产出软著 8 类草稿 + 5 个门禁 JSON → `build_docx_from_md.py` 生成正式 Word/TXT；随后论文 → PPT/BP → 实操视频。
+
+---
+
+## 2026-09-14（四十三）— 交接文档交付（项目侧 + Agent 层双份），供任务转接
+
+**用户指令**：写交接文档交代清楚（随后他要做任务转接）；**记得把 MCP 与 skills 的安装部署、相关记忆与设定页一并交代补上**。
+
+**按 sliver-vibe-coding `context-handoff.md` 规范产出（要求 copy-paste-ready、不得省略 dirty/untracked、不得只说"全过了"而不给命令与结果）**：
+
+1. **项目侧** `docs/HANDOFF_REPORT.md`（刷新版）
+   - 旧 08-28 版**归档** `docs/history/HANDOFF_REPORT-2026-08-28.md`（不删，保审计线索）
+   - 含：必须遵守 9 条（宪法 §1.2/§3三不入/§1.3商讨协议与搜索分域/§3三端统一/§4.4禁 `git add .`/§1.3真值裁决/§8 worktree/反对subagent）· **双仓 git 全量状态（含 2 项未跟踪）** · Current Truth（真源文档 11 份 + 用户确认非目标 + **3 条被拒/作废路线**）· 本窗口完成（按 Agent层/项目层/参赛层 分组）· 变更文件 · **验证证据（命令+结果，明确区分已通过/未验证）** · 运行状态（云服务器 HEAD=f158e82c、active、health 200、端口、微信凭据与陈旧状态警示）· **已知风险 10 项（含微信收发未实测、MIMO_API_KEY 缺失、asr 未开、image_data 零消费者、无表情/声学情绪、图语音 0 测试覆盖、宪法漂移等）** · **漂移警告 8 条** · 下一步 A→D 四段
+2. **Agent 层** `~/.agents/HANDOFF.md`（新建）
+   - **一、MCP 部署状态**：5 个 server 配置全表（含 github/firecrawl/crawl4ai/playwright 的 command/url + 实测证据）+ **激活步骤（用户点「信任」）** + 不依赖 MCP 的搜索技能（anysearch 实测可用 / agent-reach 仅缺 pyyaml）
+   - **二、Skills 部署状态**：三库分工（真源 243 项）· **平台接入矩阵（native/junction，源码实证）** · **关键技术事实（junction 在 Node 下 lstat≠stat、4 种扫描模式兼容表、find 需 -L）** · 本次接入的 30 个 modex-3-skills 清单 · **我上次造成的分类缺陷与修复**
+   - **三、记忆与设定四域**：已完成 10 项清单 + **⛔ 待补页清单 7 处**（IDENTITY.md / USER.md / settings/policy/README.md / memory/rules/README.md / memory/projects 收敛〔16 个哈希工作区〕/ memory/shared 入口 / _rendered 三份提案未应用）+ 平台副本位置对照
+   - **四、工具与命令**（可直接粘）· **五、已知缺陷与坑 8 条**（FTS5 分词器、路径陷阱、PATH、pytest PYTHONPATH、push 代理与凭据、别用 md5 用 git hash-object、别用管道判成败、reg/cmd 被禁）· **六、待用户决定 3 件** · **七、下一步 5 步**
+
+**提交与推送**：
+- Agent 层 `e510117`（HANDOFF.md + README 加指针，已提交）
+- 项目 B 档 `eefd21f`（LOG.md / docs/README.md / docs/HANDOFF_REPORT.md / docs/board/ / docs/stages/ / 归档版）→ **push 成功** `f158e82..eefd21f`，**退出码 0**（本次已用 `PIPESTATUS[0]` 取真实退出码，上一轮的教训当场应用）
+- 主仓未提交项仅剩 2 个未跟踪（`.zcode/`、`frontend/audit-tabs.mjs`，白名单外，符合预期）
+
+---
+
+## 2026-09-14（四十四）— 接手审计 + 未跟踪文件处置（防误入库）
+
+**接手窗口（歆歆）**：读 5 份权威文档（`~/.agents/HANDOFF.md` / `docs/HANDOFF_REPORT.md` / `docs/stages/SPRINT_2026-09.md` / `~/.agents/memory/rules/RULES.md` / `AGENTS.md` v1.5）→ 跑 3 条真值命令。**未改任何功能代码**（宪法 §1.3 商讨协议：未获"确认"前不动代码）。
+
+**真值命令（三条全 exit 0）**：
+- `ruff check .` → `All checks passed!`
+- `pytest --collect-only -q` → `1048 tests collected in 3.24s`
+- `ssh swu-prod 'cd /opt/ai-girlfriend && git rev-parse --short HEAD && systemctl is-active ai-girlfriend'` → `f158e82c` + `active`
+
+**GitHub 远程核验（本窗口首次成功）**：`git -c http.proxy= -c https.proxy= ls-remote --heads origin` → `refs/heads/main = eefd21f5…` = 本地 HEAD → **`eefd21f` 确已推送，三端无落后**。
+⚠️ **本机 git 代理 `127.0.0.1:3128` 仍不通**（`Failed to connect … over proxy`），**必须清空代理直连**（与交接文档一致，且本次实测确认）。
+
+**状态修正（交接文档滞后，非事故）**：`docs/HANDOFF_REPORT.md` 记 HEAD `f158e82`、`~/.agents/HANDOFF.md` 记 `3960836`，均为**提交前快照**；实况主仓 `eefd21f`、Agent 层 `9ffd47a`。`eefd21f` 经核为**纯文档 B 档**（7 文件全在 `LOG.md`/`docs/`）→ 服务器停在 `f158e82c` **正确**。
+
+**未跟踪文件处置（用户批准）**：`.gitignore` 追加 `frontend/audit-tabs.mjs` 与 `.zcode/` → **两项转 ignored，`git status` 复归干净**（仅剩 `.gitignore`/`LOG.md` 两处已跟踪修改）。
+⚠️ `frontend/audit-tabs.mjs` 含生产登录口令明文，**用户确认为其刻意编写**（安全事项暂缓，当前优先性能与功能）→ **仅做防误入库，未改文件内容、未删除**（2301B 原样）。
+
+**发现（待用户裁决，未擅动）**：`AGENTS.md`（项目宪法 v1.5）**不在版本控制中**（`.gitignore` 显式忽略）→ 服务器与其他克隆均无此文件。
+
+**用户本轮裁决**：① 前端 build 暂不做；② `MIMO_API_KEY` 由用户自行解决；③ 微信图/语音端到端测试**后补**，先把代码做到最好；④ 下一步 = 用相关 skills 做**软著**与**论文**，论文需**结构功能分析框架**（不会则先补调研）。
