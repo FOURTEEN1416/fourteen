@@ -1031,3 +1031,20 @@
 **发现（待用户裁决，未擅动）**：`AGENTS.md`（项目宪法 v1.5）**不在版本控制中**（`.gitignore` 显式忽略）→ 服务器与其他克隆均无此文件。
 
 **用户本轮裁决**：① 前端 build 暂不做；② `MIMO_API_KEY` 由用户自行解决；③ 微信图/语音端到端测试**后补**，先把代码做到最好；④ 下一步 = 用相关 skills 做**软著**与**论文**，论文需**结构功能分析框架**（不会则先补调研）。
+
+## 2026-09-15（四十五）— 接手核验：W3 守卫矛盾裁决（实测）+ pyrightconfig 尾逗号修复 + B 档补推
+
+**接手窗口（zcode · 默默方，多智能体协同接棒）**：按 HANDOFF_2026-09-15 → AGENTS.md v1.7 → BOARD → TASK_PACKAGES 顺序读完五仓（主仓 / 大创赛资料仓 / verify 幸存副本 / verify-backup-2327 / 软著 W2 区 / 论文 W1 区）。
+
+**核心发现（反对采样核验，非转述）——W3 提交 d104ce6 与 W4 验收口径存在致命错位**：
+1. W3 worktree（`D:\Desktop\ai-girlfriend-code`，分支 w3-code）已有提交 `d104ce6`（图片通道：多模态直传为主+描述注入降级，含 image_attachment.py 新模块 / llm_gateway attachments 透传 / config multimodal.image 段）——工程方向是提案 16 C1 的超集，本身有价值。
+2. **但入口守卫 `wechat_connector.py:748-749`（`if msg_type != 1: return`）原封未动** → 真实微信图片(3)/语音(34)消息仍在入口被丢弃，整条新管线对真实媒体消息是死代码。W3 提交信息「此前会以空文本进对话管线」与协议事实不符。
+3. 协议层证据：同文件发送侧 `_send_image_message`/`_send_voice_message` 的 msg 级 `message_type` 即 3/34（与 item type 同源）→ W4 用例在 raw_msg 层构造 `message_type=3/34` 的口径正确。
+4. **实跑验证**：将 W4 232 行测试对 W3 worktree 实测 → `3 failed`（`_transcribe_voice.call_count==0`、`_call_user_manager.call_count==0`，死点=入口守卫），与裁决完全一致。探针文件已清理，W3 worktree 保持 clean。
+
+**修复与同步**：
+- `pyrightconfig.json:15` 尾逗号修除（W4 保真检查发现、HANDOFF 待办 #8）→ `66c4e3e`。
+- B 档补推：GitHub 实况落后本地（ls-remote 实查 `9c68787`，本地 origin 引用系重建后未 fetch 的陈旧值）→ 经 gh_push.py 桥接推送 `9c68787..66c4e3e`，**REMOTE=LOCAL=66c4e3e 已核**。
+- BOARD 追加区同步本条裁决，供 W3/W4 窗口对表。
+
+**未动**：W3 分支代码（守卫修改属功能修改，待用户按五步制第④步确认）、论文/软著区、云服务器。
