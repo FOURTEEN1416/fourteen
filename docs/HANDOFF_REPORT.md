@@ -1,350 +1,211 @@
-# 项目交接报告
+# 唯一的你·十四 — 新窗口交接（2026-09-14）
 
-**项目**：unique-you — 唯一的你·十四 — 基于 LLM 的智能情感陪伴系统  
-**版本**：v1.1（2026-08-27 交接版）  
-**交接日期**：2026-08-27  
-**项目根目录**：`D:\Desktop\ai-girlfriend`  
-**Python 版本**：3.10+（见 `pyproject.toml`）
-
-> ⚠️ **2026-08-28 接管批注**（本报告为 08-27 快照，数字以 CODE_GRAPH v3.3.0 为准）：
-> ① Demo 已按用户裁决 D1 **全链路删除**（前端 08-27 + 后端 08-28，端点 204→199），"改造为系统门面"的旧预期由"产品介绍页"新立项替代，见 DECISION_LEDGER 附4 与 DELETION_LOG [2026-08-28]；
-> ② 测试基线当日实测 **1030 passed + 1 skipped（pytest）/ 59（vitest）= 1089**；
-> ③ 本报告中 1025/1033/1035 等中间数字为历史快照，AGENTS.md 基线已同步为 1089；
-> ④ 微信克隆已收敛为「本地工具提取 + 上传 JSON」：weclone_adapter/ 与启动部署脚本（start_*.cmd、deploy bat/ps1）经用户确认删除，main.py --clone 管线与 /api/training/extract 移除，端点 198。
-
+> **上一版交接**（2026-08-28）已归档至 `docs/history/HANDOFF_REPORT-2026-08-28.md`（保留审计线索，未删）
+> 本文件是**接手必读**，随手势刷新。**读它 → 再读 `docs/stages/SPRINT_2026-09.md` → 再动手。**
 
 ---
 
-## 1. 项目概览
+工作目录：`D:\Desktop\ai-girlfriend`（主仓）｜`C:\Users\FOUR\.agents`（Agent 层真源）
+当前日期：2026-09-14 ｜ 分支：`main`（主仓）/ `master`（Agent 层）｜ HEAD：`f158e82`
+当前目标：**云南赛区复赛冲刺**（材料 9/16 截止）＋**代码向多模态/嵌入式推进**＋**软著与论文产出**
 
-### 1.1 产品形态
-微信扫码即用的 LLM 智能情感陪伴系统，扫码登录后控制台调角色与语音。
+---
 
-### 1.2 核心能力（见 `README.md`）
-- 微信聊天（扫码登录，文字/语音，多用户独立）
-- 角色系统（每用户绑角色卡，性格/风格/口头禅可调）
-- 情感引擎（亲密度、情感阶段变化）
-- 主动搭话（不全是被动等待）
-- 语音合成（MiMo 云 / Edge-TTS / 本地模型）
-- 记忆系统（三层：短期 + 情景 + 长期）
-- 工具（天气、日历、提醒、搜索）
-- 剧情线（支线、进度追踪）
-- 邀请码注册 + 管理控制台（19 个页面）
+## 必须遵守（违反即事故）
 
-### 1.3 技术栈
-- 后端：Python 3.10+ / FastAPI / PEP 8 + 类型注解
-- 前端：React 19 + Vite 8 + TypeScript 6 + Tailwind 4 + Zustand 5
-- 测试：1025 Python 测试 + 79 前端测试 = 1104（**实测 1035 待登记漂移**）
-- 部署：`start_all.cmd` / `deploy_ai_girlfriend.bat` / `deploy_ai_girlfriend.ps1`
-- 远程仓库：`https://github.com/FOURTEEN1416/fourteen.git`
+1. **宪法 `AGENTS.md` v1.5 是最高行为准则**；§1.2 **就是 sliver-vibe-coding 执行法则**（本技能是项目既定执行法，非外来）。
+2. **§3 参赛文档三不入**：`大创赛报名以及后期发展/` 下材料**不入 git / 不入 GitHub / 不上云服务器**；仅本地 md→docx→PDF 闭环。（此为用户 2026-09-06 裁决，原话「这种文档不应该推送到云服务」）
+3. **§1.3 商讨协议五步制**：功能修改必须「定位→复述→排歧→**确认**→举证」；**用户说"确认"前不许动代码**。
+4. **§1.3 搜索分域 + §6 防漂移**：代码/技术类任务 **GitHub-First，调用 `WebSearch` 即零容忍违规**；信息采集类可用通用搜索。
+5. **§3 三端统一（A/B 档）**：源码改动 = commit→push→服务器 pull→部署→health+blob 核验；纯文档 = 仅 commit→push。
+6. **§4.4 禁止 `git add .`**，必须按白名单精确 `git add`。
+7. **§1.3 真值裁决**：① 代码实况 > ② 现行文档 > ③ 历史文档。
+8. **§8 多窗口 worktree 协议**：新窗口一律 `pwsh scripts/new_window_worktree.ps1 -Name <窗口名>`；跨窗信息写 `docs/board/BOARD.md`。
+9. **§1.3 反对 subagent**（用户裁决）；必要例外仅限上下文 >80% 的隔离开销只读检索。
 
-### 1.4 项目结构（顶层）
+---
+
+## Git State
+
+**主仓 `D:\Desktop\ai-girlfriend`**
+```text
+分支: main  |  HEAD: f158e82（= origin/main，已 push）
+最近 3 提交:
+  f158e82 fix(cache): 修 llm_cache 装饰器返回类型 mypy 报错——用 cast 声明包装器保留原签名
+  e246118 docs(log): 三审修复A档同步记录（6284b67 热线文本+性别中性化）
+  6284b67 fix(security,proactive): 危机热线文本统一+独白去性别化
+
+未提交 / 未跟踪（全量，不省略）:
+   M LOG.md                      ← L2 操作日志（本窗口追加了 4 条：三十九~四十二）
+   M docs/README.md              ← 登记了 stages/ 与 board/ 三份新文档
+  ?? .zcode/                     ← 平台配置目录，性质未核（2026-09-03 起未跟踪）
+  ?? docs/board/                 ← 本窗口新建（BOARD.md + TASK_PACKAGES.md）
+  ?? docs/stages/                ← 本窗口新建（SPRINT_2026-09.md）
+  ?? frontend/audit-tabs.mjs     ← 2026-09-03，2301 字节，性质未核
+
+.gitignore 未覆盖 docs/board|stages → 它们会被 track（B 档：commit→push 即可）
 ```
-D:\Desktop\ai-girlfriend\
-├── main.py / start_all.cmd / start_backend.cmd / start_frontend.cmd
-├── deploy_ai_girlfriend.bat / .ps1
-├── api/（41文件）           — FastAPI 路由层
-├── character_card/（6文件） — SillyTavern V2/V3 角色卡编解码
-├── clone_training/          — 克隆训练管线（已剥离本地解密）
-├── config/                  — 角色/全局配置
-├── context/                 — 上下文构建
-├── data/                    — 运行时数据
-├── frontend/                — React 19 前端
-├── llm_provider/（5文件）   — LLM 部署/路由
-├── logs/                    — 运行日志
-├── memory_ext/              — 记忆系统
-├── multimodal/              — 多模态
-├── my_character/（21文件）  — 角色子系统
-├── observability/（部分）   — 可观测性
-├── orchestrator/（6文件）   — 流程编排
-├── persona_extractor/（13文件）— 人格抽取
-├── plugins/                 — 插件
-├── proactive/（部分）       — 主动搭话
-├── security/（部分）        — 安全策略
-├── shisi/（124文件）        — 核心算法（legacy/active 双形态）
-├── tests/（65+）            — 测试
-├── third_party/             — 外部仓库（.gitignore，已含 wechat-decrypt）
-├── tools/ utils/ scripts/ deploy/ cache/  — 工具链
-├── voice/（11文件）         — 语音合成
-├── wechat_direct/ weclone_adapter/ clone_training/ — 微信集成
-└── docs/                    — **本文档所在目录**
+**内部文档仓**：`D:\Desktop\知识库搭建` 下有独立 `.git`（该仓本窗口未改动）。
+
+**Agent 层仓 `C:\Users\FOUR\.agents`**
+```text
+分支: master  |  HEAD: 3960836
+最近 3 提交:
+  3960836 chore: 接入30个modex-3-skills(软著/专利/论文) + 清理记录
+  a429ce2 feat(toolchain): 接入4个MCP(github/firecrawl/crawl4ai/playwright) + TOOLCHAIN.md 五链文档
+  f3ec224 chore: 清除 D:\npm（npm 11.3.0 散落副本，六条证据确认无用）
+
+未提交: m skills/stop-slop（submodule 指针变动，非本窗口所为）
 ```
 
 ---
 
-## 2. 本次交接已完成的工作
+## Current Truth
 
-### 2.1 7.5 火爬虫授权改造 → Crawl4AI（已完成）
-
-**问题**：原 `web_enricher.py` (37.9KB) 依赖 Firecrawl SDK，需 `FIRECRAWL_API_KEY` 环境变量，属授权硬伤。
-
-**方案**：用免授权的开源库 **Crawl4AI** 完整替代 Firecrawl。
-
-**文件变更**：
-- `persona_extractor/web_enricher.py`：
-  - 删除了 `FirecrawlSource` 类
-  - 新增 `Crawl4AISource` 类（提供同名的 `search()` / `scrape()` 接口）
-  - 修复：使用了正确的 Crawl4AI API（`arun` 而非 `scrape_url`，`config` 而非 `browser_config`）
-  - 修复：变量 `docs` 必须在 try 块外初始化（避免 `UnboundLocalError`）
-  - `WebPersonaEnricher.__init__()`：移除 `firecrawl_api_key` 参数
-  - `_detect_sources()`：可用源从 `firecrawl` 改为 `crawl4ai`
-  - `add_url()` 抓取链路：`DirectScraper → Jina Reader → Crawl4AI`（原 `→ Firecrawl`）
-  - `search_all_sources()` / `_collect_docs()` Phase 2：Firecrawl 替换为 Crawl4AI
-- `scripts/enrich_persona_web.py`：
-  - 更新帮助文案，Firecrawl 标记为"免授权替代"
-  - CLI 模式从 `🔥 Firecrawl` 改为 `🕷️ Crawl4AI`
-
-**实测结果**：
-- `python scripts/enrich_persona_web.py --id test123 --urls "URL"` ✅ 抓取 61604 字符，源标记为 `crawl4ai`
-- `python scripts/enrich_persona_web.py --id test123 --all-sources` ✅ 运行通过
-
-**意义**：彻底绕开 Firecrawl 授权环节，所有爬取能力免费。
-
-### 2.2 微信克隆功能彻底下线 Option B（后端 + 微信解密项目剥离，全部完成）
-
-**问题**：微信克隆的解密程序（依赖微信进程 + Windows API）必须运行在用户本机，放到云服务器是逻辑硬伤。
-
-**方案（Option B - 彻底下线）**：
-1. 后端删除云上不可能工作的端点
-2. 整个 `clone_training/` / `weclone_adapter/` / `voice/clone_data_manager.py` 中所有调用本地解密的旁路全部剥离
-3. **云端 100% 不可能触发任何本地解密路径**
-
-**后端变更 — `api/routers/clone_routes.py`**：
-- 删除 `ClonePreviewRequest` 类
-- 删除 `_build_clone_preview` 函数
-- 删除 `POST /api/clone/preview` 端点
-- 删除 `from pydantic import BaseModel, Field` 导入
-- 保留 `_build_clone_preview_from_conversations`（upload 端点仍依赖）
-- 保留 `/api/clone/upload`（生产路径：JSON → StyleAnalyzer → 人设预览）
-- 保留所有其他端点（contacts / datasets / batch-delete / stats）
-- **最终**：clone_routes 共 8 个端点（原 9 个）
-
-**微信本地解密项目剥离**（`docs/DELETION_LOG.md` 完整记录）：
-
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `clone_training/wechat_decrypt_source.py` | **整文件删除** | 300+ 行，wechat-decrypt 适配层 |
-| `clone_training/data_extractor.py` | **重写** | 删除 `extract_from_wcf` / `extract_from_wechatmsg` / `extract_from_decrypt`（来源 1/2/4），仅保留 `extract_from_export`（来源 3：txt/csv/json 文件导入）。509 → 252 行 |
-| `weclone_adapter/adapter.py` | **重写** | `_extract()` 移除 wcf/wechatmsg/decrypt 分支，source 仅支持 `(auto, txt, csv, json)`；`health_check` 增加 `wechat_local_decrypt_stripped: True` |
-| `voice/clone_data_manager.py` | **重写** | 移除 `_get_contacts_from_decrypt` 方法与 `import time`，联系人来源仅保留从已有克隆数据 `*_raw.json` 提取 |
-
-**测试代码更新**：
-- `tests/test_request_context_isolation.py`：删除 `test_clone_preview_uses_injected_local_extractor`（孤立测试）
-- `tests/test_api_routes.py`：更新断言（`clone_routes: 9 → 8`，`total: 74 → 73`）
-
-**前端变更 — `frontend/src/pages/CreateRole.tsx`**：
-- 删除 `{/* ═══ 步骤 1：下载工具（三选一） ═══ */}` 整块（97 行 UI 卡片）
-- 保留：步骤 2（在本地电脑运行工具）+ 步骤 3（上传并分析）
-
-**保留的本地流程**（云端 100% 安全）：
-1. 用户在本地电脑用 WeChatMsg / PyWxDump / wechat-decrypt 提取聊天记录
-2. 导出 JSON / CSV / TXT 文件
-3. 通过前端 `WeChatCloneTab` 选中并上传
-4. 服务器 `/api/clone/upload` 调用 `StyleAnalyzer` 分析
-5. 返回人设预览，前端填入角色卡
-
-**影响统计**：
-- 代码精简：约 -300 行（wechat_decrypt_source.py 整文件 + data_extractor.py 减半 + adapter.py 微调）
-- 测试基线：1033 passed, 1 skipped（全量回归无失败）
-- 安全性：100% 云端隔离，杜绝任何代码路径触发本机微信内存密钥提取
-
-### 2.3 项目源码穷举阅读 100% 完成
-
-- 穷举了项目内全部 **358 个 Python 源文件**（剔除了 `.venv` 19,236 个第三方依赖）
-- 生成了 12 份 `docs/READING_REPORT_*.md` 结构化阅读报告 + 1 份综合治理报告（08-28 治理时因 .venv 污染口径无法修复而删除，有效信息收编入 `docs/README.md`）
-- 实测 `pytest --collect-only` 收集 **1035 tests**（基线 1025 已在 INDEX.md 登记漂移）
-- 发现的关键漂移点：测试基线 1025 → 1035（+10）、文件口径"19,598"实际为 .venv 污染
+- **产品边界**：「唯一的你·十四」— 微信扫码即用的 LLM 智能情感陪伴系统；核心能力见 `README.md`；技术栈 Python 3.12 / React 19 / Vite 8 / TS 6（`docs/`+`.venv` 均为 3.12.4）
+- **当前阶段**：`docs/stages/SPRINT_2026-09.md` —— 三线并行（**材料** / **代码** / **证据**），状态 `plan` 待用户确认
+- **主要 owner**：见宪法 §2 Owner Map（**24/24 模块本窗口实测全部真实存在**）
+- **当前真源文档**：`AGENTS.md`（宪法）· `CODE_GRAPH.md`（代码实况 v3.5.0，最后核实 2026-09-01）· `LOG.md`（L2 日志）· `docs/README.md`（文档体系唯一入口）· `docs/FUNCTION_INVENTORY.md`（功能清单，商讨协议定位基准）· `docs/DECISION_LEDGER.md`（决策生死账）· `docs/stages/SPRINT_2026-09.md`（阶段真源）· `docs/board/BOARD.md`（跨窗看板）· `docs/board/TASK_PACKAGES.md`（**⚠️ 已撤回，标「⛔ 暂缓未生效」**）
+- **用户确认过的非目标**：不改技术栈/框架/目录架构/部署形态；不改 DB schema/权限/支付；不把参赛文档入库；不写未实测指标；不重建 `CODE_GRAPH.md`
+- **被拒绝/作废的路线**：
+  - `10-调研简报…md` 的 **§3「微信接图接语音三条官方路线」已作废**（JSSDK/MediaId/小程序 —— 本项目**不在微信官方体系内**，已加 ⛔ 横幅，更正见 `11-`）
+  - `TASK_PACKAGES.md` 的窗口任务分发**已撤回**（用户：「不要着急着分发任务，先将要弄什么东西确定了」）
+  - `docs/FEATURE_MAP.md` **已由用户 2026-08-28 裁决删除**（理由"严重错误"，由 `FUNCTION_INVENTORY.md` 替代）→ **宪法 §1.3 仍引用它，属宪法漂移，待修**
 
 ---
 
-## 3. 待您确认的 4 项 SP 任务
+## 本窗口完成（按 owner 层分组）
 
-按商讨协议（AGENTS.md §1.3），以下 4 项任务需要您交代**“当前真实状态”**（人话），我将基于此继续完成后续实现。
+### Agent 层（`~/.agents`，独立仓）
+- **建四域真源**：`skills/`（243 项）· `memory/profile/PROFILE.md`（取代 5 份画像副本）· `memory/rules/RULES.md`（四平台铁律合一，v1.1 增 §13 临时产物纪律）· `settings/identity/SOUL.md` · `projects/index.json`
+- **233 技能收编**：`.zcode/skills` 217 项 → 真源（**失败 0**）；**78 项目录名规范化**；`.zcode/skills` 现为空（ZCode/opencode 走 `native` 直读 `~/.agents/skills`，源码实证）
+- **30 个 modex-3-skills 接入**（软著/专利/论文链，junction 零拷贝）
+- **治理工具**：`tools/agentctl.py`（scan/plan/sync/verify/new-platform/vault）、`p2_adopt.py`、`p3_normalize.py`、`janitor.py`、`fix_skill_misclassify.py`、`p0_bootstrap.py`、`p5_convergence.py`
+- **4 个 MCP 移植**：github / firecrawl / crawl4ai / playwright → `~/.workbuddy/mcp.json`（**详见 `~/.agents/HANDOFF.md`**）
+- **环境清理 263MB**：项目缓存 189MB + `大创赛/tmp_*` 74MB → 全部回收站
 
-> **2026-08-27 补充**：用户 2026-08-27 明确要求**AI 主动查项目中的代码和设计文档**而非等待人话解释。本节已自动从 `docs/adr/`、`docs/architecture/`、`docs/visual-map/`、`docs/plans/` 抽取起点信息。
+### 项目层（`ai-girlfriend`）
+- **唯一一处代码改动**：`cache/llm_cache.py` 装饰器 `[return-value]` 类型错（全仓 mypy 唯一错误）→ `typing.cast` 修复（纯类型，运行时零变化）
+- **跨云闭环验证**：commit → push → 服务器 reset --hard → 服务重启 → `/api/health` 200 → **git blob 三端一致**
+- **文档**：新建 `docs/stages/SPRINT_2026-09.md`、`docs/board/{BOARD,TASK_PACKAGES}.md`；`docs/README.md` 登记；`LOG.md` 追加 4 条（三十九~四十二）；旧交接报告归档 `docs/history/`
 
-### 起点信息自动抽取（基于项目现有文档）
-
-| 任务 | 起点（从项目文档中抽取） |
-|------|---------------------------|
-| **SP-1 状态中心并集** | `docs/architecture/knowledge-graph.md` L51 / L67：原设计 = **4 统计 + 情绪分布 + 成就 + 亲密度趋势**；当前实现 = `frontend/src/pages/StatusCenter.tsx`（3 卡片：当前情绪/亲密等级/记忆条目 + 最近记忆列表）。`docs/visual-map/index.html` F-07 标注："**已知差距 G-01：较 v10 设计缺情绪分布图、成就、亲密度趋势**"。**任务核心**：补齐 G-01 三个缺失维度。`docs/adr/ADR-0011-unified-design-framework.md`（Superseded）原定侧边栏导航方案已被废止。 |
-| **SP-3 Demo 删除** | `frontend/src/pages/DemoPage.tsx` 是**无鉴权公开演示对话页**（路由 `/demo`），无内部业务依赖，仅 `/api/demo/*` 4 端点独立封装。**2026-08-27 已直接删除**。**后续**：原 `/demo` 路径将改造成"产品介绍/系统门面"页（待立项 SP-3b）。 |
-| **SP-4 知识库入口复活** | `docs/architecture/knowledge-graph.md` L186：`shisi/knowledge/retriever.py` → 知识库（`data/knowledge/` + `llm_gateway.py`）→ 消费方 `api/routers/chat_routes.py`。**当前状态**：知识库后端完整在用；前端**没有独立的知识库管理页面**（知识注入通过 `frontend/src/pages/CreateRole.tsx` 的"文件导入" Tab 间接完成，`character_card/` 写死）。**任务核心**：在前端提供独立的"知识库入库"管理界面。 |
-| **SP-5 塑料感补课** | `frontend/src/index.css` L8-16：定义了 **`--color-macaron-{pink,blue,green}-{light,deep}`** 三色系马卡龙糖果色；L81-113：**`Glass Morphism` 毛玻璃** (.glass-card / .glass-pink / .glass-blue / .glass-green)；L222 **`Macaron Button` 按钮**。**塑料感源头**：糖果色 + 毛玻璃 + 三色渐变（`#FDF2F8 → #EFF6FF → #ECFDF5`）。`docs/architecture/design-principles.md` 无视觉原则约束；`docs/adr/ADR-0003-纯Tailwind样式体系.md` 与 `ADR-0004-LightOnly主题.md` 是仅有的样式 ADR。**任务核心**：替换马卡龙色系 + 减少毛玻璃滥用 + 统一色板/间距/字体。 |
-
-**回复格式示例**：`1✅ 2调整 3❌ 4✅` 或分批确认（先 1/3 后 4/5）。
-
-### 2026-08-27 处置记录
-
-- **SP-3 Demo 删除**：✅ **已完成**（详见 `docs/DELETION_LOG.md` 顶部条目），等待 SP-3b（产品介绍页）立项
-- **SP-1/4/5**：✅ **起点信息已自动抽取**，等待您对起点确认后进入实施
+### 参赛层（`大创赛报名以及后期发展/`，**本地三不入**）
+- `08-云南赛区复赛准备方案.md`（已修正来源错误：区分省级/兄弟院校/本校三层）
+- `09-复赛冲刺阶段计划.md`、`10-调研简报…md`（§3 已作废）、`11-更正-多模态通路真实拓展路径.md`、`12-现状核查与需求台账.md`
+- **软著工作区**：`D:\Desktop\软著申请-唯一的你十四\`（`user_data/` 已导入**真实源码 504 文件 / 43,412 行**，走技能模式 A）
 
 ---
 
-## 4. 已知问题与技术债务
+## 变更文件（未提交部分）
 
-| # | 问题 | 影响范围 | 建议处理 |
-|---|------|----------|----------|
-| L1 | `web_enricher.py` 的 `Crawl4AISource` 搜索功能受外部 `r.jina.ai` 服务可用性影响 | 搜索模式可能因网络原因返回空结果 | 已有 bilibili_api / jina_reader 多源兜底 |
-| L2 | 前端 `CreateRole.tsx` 仍保留 `clonePreview` API 的 TypeScript 类型导出（未被任何组件调用） | 构建时可能产生未使用警告 | 下次重构可顺手清理 |
-| L3 | `AGENTS.md` 中测试基线 1025 实际为 1033（+8 漂移） | 文档与实际不一致 | 需更新 AGENTS.md §4.3 |
-| L4 | 旧克隆数据集中标记 `source: "decrypt"` / `source: "wcf"` / `source: "wechatmsg"` 的条目仍存在（已 JSON 落盘） | `_detect_source` 返回值显示 | 仅影响显示标签，不影响功能；可保留作为历史 |
-| L5 | 后续若有"使用本地解密"的需求，需从 `git log` 找回 `wechat_decrypt_source.py` 历史版本 | 未来复用 | git reflog 可恢复 |
-
----
-
-## 5. 关键决策摘要
-
-详细决策由来见 `DECISION_LEDGER.md`。本节摘录与本次交接最相关的决策：
-
-| 决策 | 日期 | 关键内容 |
-|------|------|----------|
-| 微信本地解密项目彻底剥离 | 2026-08-27 | 用户要求"先把这个剥离出来"；云端 100% 杜绝本地解密路径；删除 wechat_decrypt_source.py + data_extractor 三种本地提取 + adapter 旁路 + clone_data_manager 解密路径 |
-| 7.5 爬虫授权改造 | 2026-08-27 | 用 Crawl4AI 替代 Firecrawl，绕开授权 |
-| 微信克隆功能下云 | 2026-07-27 | wechat-decrypt 必须在本机；服务器仅接受 JSON 上传 |
-| 微信克隆 Option B 端点精简 | 2026-08-27 | 删 /api/clone/preview 死端点；前端删三选一工具卡片 |
-| 测试基线漂移登记 | 2026-08-27 | 1025 → 1033（+8），已记录到 INDEX.md |
-| LoRA 移除决策 | 2026-08-26 | 风格克隆 = 外接 API + RAG + 提示词注入 |
+```text
+主仓:  M LOG.md
+       M docs/README.md
+      ?? docs/board/（BOARD.md + TASK_PACKAGES.md）
+      ?? docs/stages/（SPRINT_2026-09.md）
+Agent: m skills/stop-slop（submodule 指针，非本窗口改动）
+已归档: docs/history/HANDOFF_REPORT-2026-08-28.md（从 docs/ 移入）
+```
 
 ---
 
-## 6. 项目文档导航（接手人必备）
+## 验证证据
 
-本节列出了 `docs/` 目录下的所有关键文档，并标注每个文档的作用，帮助接手人快速了解项目。
+**已通过（命令 + 结果）**
+```bash
+# 代码质量三连（解释器 D:\Desktop\ai-girlfriend\.venv\Scripts\python.exe, 3.12.4）
+ruff check .                # → All checks passed!
+mypy .  --ignore-missing-imports   # → Found 1 error in 1 file (checked 346 source files)；修后单文件 Success: no issues found
+pytest --collect-only -q    # → 1048 tests collected in 15.78s
+pytest -k cache -q          # → 31 passed, 1 skipped, 1016 deselected
+（注：pytest 子进程须 PYTHONPATH= 清空，否则触发 safe-delete 护栏）
 
-### 6.1 核心总览类（必读）
+# A 档三端核验
+git hash-object cache/llm_cache.py                    # 本地 7fded71e30677a3667b6d7b298cbd376adcf34d5
+ssh swu-prod 'cd /opt/ai-girlfriend && git hash-object cache/llm_cache.py'  # 服务器 同 7fded71e…（一致）
+ssh swu-prod 'curl -s http://127.0.0.1:8000/api/health'  # → {"status":"ok",...,"version":"3.1.0"}
+ssh swu-prod 'systemctl is-active ai-girlfriend'          # → active
+```
 
-| 文档 | 作用 | 阅读优先级 |
-|------|------|-----------|
-| ~~`DOCUMENTATION_GOVERNANCE_REPORT.md`~~ | 已删除（2026-08-28 治理：污染口径不可修复，内容收编 docs/README.md） | — |
-| **`HANDOFF_REPORT.md`** | 项目交接报告（本文档），含已完成工作、待办、问题、下一步 | ⭐⭐⭐ |
-| **`VISION.md`** | 项目最顶层的愿景文档，含产品形态、技术栈、核心能力 | ⭐⭐⭐ |
-| **`FEATURE_MAP.md`** | 全局功能映射（编号：F-xx/B-xx/G-xx），含每个功能的当前真实行为 | ⭐⭐⭐ |
-| **`P1_BACKLOG.md`** | P1 优先级待办 | ⭐⭐⭐ |
-
-### 6.2 模块阅读报告（共 12 份）
-
-| 报告文件 | 对应模块 | 关键路径 |
-|----------|----------|----------|
-| `READING_REPORT_api.md` | API 服务 | `api/` (35 文件) |
-| `READING_REPORT_character_card.md` | 角色卡 | `character_card/` + `my_character/` |
-| `READING_REPORT_llm_provider.md` | LLM 提供商 | `llm_provider/` |
-| `READING_REPORT_orchestrator.md` | 编排器 | `orchestrator/` |
-| `READING_REPORT_voice.md` | 语音 | `voice/` |
-| `READING_REPORT_persona_extractor.md` | 人格抽取（含本次改造的 web_enricher） | `persona_extractor/` |
-| `READING_REPORT_proactive_plugins.md` | 主动搭话/插件 | `proactive/` + `plugins/` |
-| `READING_REPORT_wechat_clone.md` | 微信克隆（含本次下线影响） | `wechat_direct/` + `weclone_adapter/` + `clone_training/` |
-| `READING_REPORT_memory_context_multimodal.md` | 记忆/多模态 | `memory_ext/` + `context/` + `multimodal/` |
-| `READING_REPORT_security_observability.md` | 安全/可观测 | `security/` + `observability/` |
-| `READING_REPORT_tools_utils_scripts_cache.md` | 工具/脚本/部署/缓存 | `tools/` + `utils/` + `scripts/` + `deploy/` + `cache/` |
-| `READING_REPORT_shisi.md` | shisi 核心（含 legacy 路径澄清） | `shisi/` (124 文件) |
-| `READING_REPORT_tests_root.md` | 测试根/根目录启动器 | `tests/` + `main.py` + `user_scheduler.py` |
-
-### 6.3 决策与历史类
-
-| 文档 | 作用 |
-|------|------|
-| **`DECISION_LEDGER.md`** | 自项目 inception 以来的关键决策记录，含权衡、推理过程 |
-| **`DELETION_LOG.md`** | 已废弃/删除的功能、代码路径、原因 |
-
-### 6.4 其它资产目录
-
-| 目录 | 内容 |
-|------|------|
-| `adr/` | 架构决策记录（轻量） |
-| `architecture/` | 架构图 |
-| `audits/` | 安全/质量审计报告 |
-| `CODEMAPS/` | 代码结构图 |
-| `designs/` | 设计文档 |
-| `history/` | 历史设计文档归档（含 INDEX.md 漂移登记簿） |
-| `inventory/` | 资产清单 |
-| `plans/` | 规划文档 |
-| `reports/` | 报告 |
-| `superpowers/` | 技能/工具 |
-| `visual-map/` | 可视化映射 |
+**未运行 / 未验证**
+- ❌ **`myapp` 未跑全量 pytest**（只跑了 `--collect-only` + `-k cache`）→ 全量 1048 用例的通过率**未验证**（宪法声明基线 1042 全过，但本窗口未实跑全量）
+- ❌ **前端 `npm test` / `npm run build` 未跑**
+- ❌ **微信图片/语音端到端收包未实测**（见「已知风险」）
+- ❌ **`docs/board/`、`docs/stages/`、`LOG.md` 的 B 档 commit→push 未做**
+- ❌ **4 个 MCP 未激活**（需用户在连接器页点「信任」）
 
 ---
 
-## 7. 下一步推进计划
+## 运行状态
 
-### 7.1 立即可做（无需 SP 起点）
-
-| 任务 | 预计耗时 | 优先级 |
-|------|----------|--------|
-| 更新 `AGENTS.md` §4.3 测试基线 1025 → 1035 | 5 分钟 | 中 |
-| 清理前端 `clonePreview` 未使用类型导出 | 10 分钟 | 低 |
-| 重生成 12 份 `READING_REPORT_*.md` 中提及 7.5 改造、Option B 的影响 | 30 分钟 | 中 |
-
-### 7.2 需 SP 起点后做
-
-#### SP-1 状态中心并集
-- **前置**：用户交代"状态中心当前长什么样、几个小模块、需合并内容"
-- **预计实现**：基于起点回答，合并状态中心各小模块
-
-#### SP-3 Demo 删除（建议驳回）
-- **前置**：用户交代"Demo 页面当前真实行为、驳回后应变成什么样的系统门面"
-- **预计实现**：将 Demo 改造为"系统门面"（产品介绍/导航/快速演示）
-
-#### SP-4 知识库入口复活
-- **前置**：用户交代"知识库入口原来是怎么回事、为什么搁置、复活后需提供什么功能"
-- **预计实现**：复活知识库入口 UI + 后端 API
-
-#### SP-5 塑料感补课
-- **前置**：用户交代"塑料感指什么、补课内容有什么"
-- **预计实现**：根据"塑料感"定义，补足相应逻辑/数据/界面
-
-### 7.3 长期路线
-
-| 阶段 | 内容 |
-|------|------|
-| **短期**（1-2周） | 完成 4 项 SP 任务；清理 L4/L5 文档漂移 |
-| **中期**（1-2月） | shisi/ 模块解耦（legacy 路径拆分）；前端 19 页面统一设计语言 |
-| **长期**（3月+） | 角色系统深度学习增强；多模态扩展；集群部署 |
+**云服务器 `swu-prod`（139.199.199.174，端口 28222，User=root）**
+```text
+应用目录: /opt/ai-girlfriend    服务: ai-girlfriend = active（2026-09-14 22:06:24 CST 重启）
+HEAD: f158e82c
+监听: 127.0.0.1:8000（uvicorn --workers 4，实见 5 个 python 进程）· 0.0.0.0:80（nginx）
+健康: /api/health → 200 {"status":"ok","service":"unique-you-api","version":"3.1.0"}
+微信: /root/.weixin_cow_credentials.json 存在(202B, 07-27)；/tmp/ai-girlfriend-wechat-autostart.lock 存在(07-28)
+      data/wechat_state.json → connected:true, bot_id=21c98b9202ae@im.bot（**文件时间 09-09，状态可能陈旧**）
+      data/proactive_state.json → daily_count:8, last_sent_time=2026-09-14T04:10:55Z, **last_chat_time=null**
+⚠️ 模板与线上不符：仓库 deploy/ai-girlfriend.service 写 User=www-data + ProtectHome=true，
+   线上实测 User=root + ProtectHome=no（服务器 unit 被改过，模板已脱节）
+```
+**本机**：项目 `.venv`（Python 3.12.4）；无本项目常驻服务运行。
 
 ---
 
-## 8. 接手人入门路径（最小阅读集）
+## 已知风险 / 阻塞证据 / 未决用户决策
 
-**15-20 分钟**了解 80% 项目状态：
-
-1. `docs/README.md` — 文档体系入口（原全局状态报告已删除）
-2. `HANDOFF_REPORT.md` — 交接重点（本文档）
-3. `FEATURE_MAP.md` — 功能实现概览
-4. `P1_BACKLOG.md` — 当前最紧急任务
-5. `VISION.md` — 产品定位与技术栈
-
-**第一周计划**：
-
-| 时间 | 任务 |
-|------|------|
-| 第 1 天（前 2 小时） | 读上述 5 个总览类文档 |
-| 第 1 天（剩余时间） | 读 `FEATURE_MAP.md` + `P1_BACKLOG.md` |
-| 第 2 天 | 根据 SP 任务确认起点，开始 SP-1/SP-3/SP-4/SP-5 实施 |
-| 第 3-4 天 | 按模块阅读感兴趣的 `READING_REPORT_*.md` |
+| 级 | 项 | 现状 |
+|----|----|------|
+| 🔴 | **微信图片/语音是否真能到云端 —— 未实测** | 代码链路成立（`_handle_message` 已解析 type 3/34）；云端凭据+锁都在；**但当前日志（9/13–9/14）`wechat_direct` 记录 0 条**，而 `wechat_state.json` 说 connected:true → **两证据矛盾**。**60 秒验证法**：给 bot 发语音+图 → `ssh swu-prod 'tail -f /var/log/ai-girlfriend.log \| grep -E "wx\|wechat"'` 看有无 `[wx][step=receive]`。**此结果决定下一步** |
+| 🔴 | **`MIMO_API_KEY` 本机与云端均缺** | `config/system.yaml` 的 `engine: mimo-tts` 是**唯一 TTS 引擎**（08-28 MiMo-only 收敛）却引用它 → **语音输出可用性未验证**。用户去 `platform.xiaomimimo.com` 取 key（TTS 限免）→ 填本机 + 云端两处 `.env` |
+| 🟠 | **`asr.enabled: false` + `api_base: ""` + 无 `ASR_API_KEY`** | ASR 已实现已接线，**只是没开**（零代码，纯配置）。用户已确认 **MiMo 有 ASR**（`Xiaomi MiMo-V2.5-ASR`，GitHub `XiaomiMiMo/MiMo-V2.5-ASR` 开源）→ 可直接用 MiMo |
+| 🟠 | **`image_data` 零消费者** | 图片收到即丢；`VisionHandler` 已实现却**未接线** → 缺口 = **1 处接线 + 补测试** |
+| 🟠 | **无「表情识别」与「语音声学情绪」实现** | 命题任务 1 两条通道确为空缺（`VisionHandler` 只描述图片；ASR 只取 text，声学信息被丢） |
+| 🟠 | **图/语音收包 0 测试覆盖** | `tests/test_wechat_connector.py::TestHandleMessage` 仅 2 用例且**只测 `type:1` 文本** |
+| 🟡 | **宪法漂移** | `AGENTS.md` §1.3 仍引用**已被用户删除**的 `docs/FEATURE_MAP.md` → 应改指 `FUNCTION_INVENTORY.md`（**改宪法需用户确认**） |
+| 🟡 | **未跟踪 2 项** | `.zcode/`、`frontend/audit-tabs.mjs`(2026-09-03) —— 多窗口开工前应处置 |
+| 🟡 | **赛事阻断（用户已答复自解）** | B1《赛事指南》口径 / B2 省赛系统网址 / B3 指导教师实名 —— 用户 2026-09-14 明确「不算阻塞，我能解决」 |
+| ⚪ | 24 个 `.old` | 全在 `.browser_profile/Default/**/LOG.old`，**浏览器日志轮转残留**，非代码债（我先前误判已纠正） |
 
 ---
 
-## 9. 验证基线
+## 漂移警告（下一手不要做）
 
-- **测试基线**：实测 `pytest` **1033 passed, 1 skipped**（剥离后基线；原文档 1025 需更新）
-- **代码规模**：357 个 Python 源文件（剥离了 `wechat_decrypt_source.py`；不含 `.venv`）
-- **模块数**：14 个 Owner 模块 + shisi 核心 124 文件
-- **核心路由数**：8 个 sub-routers 共 73 个端点（剥离后；原 74）
-- **最近一次验证时间**：2026-08-27
-
----
-
-## 10. 联系方式
-
-- 远程仓库：`https://github.com/FOURTEEN1416/fourteen.git`
-- 详细规则：见项目根 `AGENTS.md`
-- 漂移登记簿：`docs/history/INDEX.md`
-- 删除日志：`docs/DELETION_LOG.md`
+- ❌ **不要**为"多模态"去研究微信公众号/小程序/H5 接入方式 —— 本项目走**第三方协议网关 `https://ilinkai.weixin.qq.com` + HTTP 长轮询**，不在微信官方体系内。
+- ❌ **不要**重建 `CODE_GRAPH.md`（宪法：代码实况文档**永不从零重建**，只增量刷新漂移段）。
+- ❌ **不要**用 `md5sum` 比对本机与服务器文件（**行尾 CRLF/LF 差异**）→ **用 `git hash-object` 比 blob**。
+- ❌ **不要**用 `cmd | tail` 判成败 —— **管道会吃掉退出码**，须取 `PIPESTATUS[0]`。
+- ❌ **不要**在无用户"确认"时改功能代码；不要 `git add .`；不要把参赛文档入库。
+- ❌ **不要**把 `TASK_PACKAGES.md` 当作生效的任务分发（**已撤回**）。
+- ⚠️ push 需 `-c http.proxy= -c https.proxy=`（本机 git 代理 `127.0.0.1:3128` **已失效**）；凭据用环境变量 `GITHUB_PERSONAL_ACCESS_TOKEN`（93 字符）**走 URL，不落盘**。
+- ⚠️ pytest 前须 `PYTHONPATH=` 清空（否则 WorkBuddy shell 的 safe-delete 护栏会打断 tmp 轮转）。
 
 ---
 
-**文档结束。**
+## 下一步（最安全顺序）
 
-**后续待办**：
-1. 用户确认 4 项 SP 任务的"起点人话"（SP-1/3/4/5）—— 已部分确认（SP-3: 直接删除 Demo 页面，系统门面后续做；其余三项等起点人话）
-2. 用户确认是否需要把剥离的 `wechat_decrypt_source.py` 等代码独立成独立子项目（git 保留历史）
+**A. 零代码即可做的两件（价值最高）**
+1. **打开 ASR**：填 `ASR_API_KEY` + `api_base`（可用 MiMo），`config/system.yaml` 置 `asr.enabled: true` → 语音从"占位"变"可用"
+2. **接线图片通道**：`wechat_direct/wechat_connector.py` 的 `_handle_message` 把 `image_data` 送 `VisionHandler.process()`，描述并入 `text`；**补 `type:3/34` 的收包测试**（当前 0 覆盖）
+
+**B. 必做的验证（决定后续路径）**
+3. **60 秒微信收发实测**（见上表 🔴 第一行）—— 链路活 = 只改接线；链路死 = 先修连接
+
+**C. 用户已下令的产出线**
+4. **软著**：工作区已就位（`D:\Desktop\软著申请-唯一的你十四\`）→ 写 `CLAUDE.md` → 产出 8 类草稿 + 5 个门禁 JSON → `copyright-build/scripts/build_docx_from_md.py` 生成正式 Word/TXT → **用户去中国版权保护中心提交**（主体=个人）
+5. **论文**：目标刊已定 **《心理学进展》**（汉斯，开放获取；同题先例 袁小雅/刘仪辉 2025）→ 用 `paper-write-zh(-docx)` + `arxiv` + `auto-paper-improvement-loop`
+6. **PPT + 商业计划书**（可并行）
+7. **实操视频**（最后）
+
+**D. 收尾**
+8. B 档提交：`git add LOG.md docs/README.md docs/board docs/stages` → commit → push（**不加** `.zcode/`、`frontend/audit-tabs.mjs`）
+9. 全量 `pytest` + 前端 `npm test`/`build`（本窗口未跑，属**未验证**）
+
+---
+
+## 关联交接
+
+**Agent 层（MCP / skills / 记忆与设定）的完整交接见**：`C:\Users\FOUR\.agents\HANDOFF.md`
+—— 4 个 MCP 的配置与激活步骤、243 项技能的三库同步机制、memory/settings 四域现状与**待补页清单**，全部在那里。

@@ -23,6 +23,9 @@
 | [HANDOFF_REPORT.md](HANDOFF_REPORT.md) | 接手必读：上一窗口交接了什么、未完成什么（含 08-28 接管批注） | truth（每次接管刷新） |
 | [DELETION_LOG.md](DELETION_LOG.md) | 删除类变更逐条留痕（文件/原因/验证），与 git 历史互补 | truth（追加式） |
 | 根目录 [LOG.md](../LOG.md) | L2 操作日志：每会话一行块（日期/动作/原因/结果），会话收尾必追加 | **truth（追加式，禁删改旧条目）** |
+| [stages/](stages/) | **阶段真源**（每阶段一份，当前 `SPRINT_2026-09.md`）：路由/深度/子阶段/验收/开放问题；`plan→execute→closeout` 门禁 | truth（阶段内唯一） |
+| [board/BOARD.md](board/BOARD.md) | **跨窗口看板**（宪法 §8 载体）：窗口登记 / 追加区 / 阻塞 / 漂移告警 | truth（追加式） |
+| [board/TASK_PACKAGES.md](board/TASK_PACKAGES.md) | **窗口级任务包切分**：各包目标/白名单/验证/并行安全矩阵 | truth（阶段内唯一） |
 
 ## 二、分层地图（reference，代码视角分册）
 

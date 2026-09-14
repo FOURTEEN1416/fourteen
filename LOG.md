@@ -816,3 +816,173 @@
 ## 2026-09-09（三十六）— 三审修复 A 档同步（commit 6284b67）
 
 大创赛解决方案 v3 第（二十六）轮三审（恶意59/对抗73/交叉82）命中的两处代码级失实已真修并完成 A 档三端同步：① security/content_safety.py SELF_HARM_HOTLINE 升级三热线完整文本（12356+北京 010-82951332+希望24），persona_extractor/mental_health.py 孤儿常量 SELF_HARM_INTERVENTION 删除（热路径此前返回无 12356 旧文案，文档展示物≠运行时行为）；② proactive/reflection.py 内心独白与触发词性别中性化（他/女孩/女生→TA/前任/旧识）。新增 3 测试（热线文本内容断言+独白无性别词断言+中性触发断言），全量回归 1047 passed+1 skipped。push（GitHub 443 中断，重试 5 轮第 5 轮通）→服务器 28222 fetch+reset --hard（ca531345..6284b672）→remote_deploy.sh→health 200（v3.1.0）→md5 抽验 blob=服务器全同。参赛文档本身按三不入仅本地闭环（详见大创赛目录 LOG（二十六））。
+
+---
+
+## 2026-09-14（三十七）— 复赛冲刺阶段立项 + 治理载体补建（sliver-vibe-coding 路由）
+
+**任务**：用户手动加载 `sliver-vibe-coding` 技能，要求「两条线并行：一条修代码、一条备材料」，并明确工序「**先立项 → 整理文档 → 补调研 → 对齐需求 → 再动手**」；同时提出多模态表情/语音情绪通道拓展、工程质量、对标抖音产品补数据、软著申请 + 小论文、向嵌入式推进、需并行多智能体故要求留痕。
+
+**路由与判定（按技能启动协议 1–6 步）**：主路由 `立项`（`routes-intake.md`），后续 `整理开发资料`。任务深度 `标准任务`，内含 3 项 `高风险任务`（演示环境 HTTPS / Demo 源码对外脱敏 / 服务器侧变更）**本阶段不授权**。裁定依据：用户原话「进一步完善和优化」属 `routes-feature.md` 点名的 **vague continuation language** —— "Do not treat vague continuation language as permission to code"，故**本轮不实现任何代码**。
+
+**探明（只读实测）**：
+1. **Owner Map 24/24 模块真实存在**，宪法 §2 无失真。
+2. **能力缺口（本阶段关键发现）**：`voice/` 只有 TTS 侧（`mimo_tts_provider`/`tts_manager`/`tts_provider_base`/`audio_converter`/`clone_data_manager`），**无 ASR、无语音情绪识别**；`multimodal/` 仅 `multimodal_processor.py` 一个实现，**无表情/人脸识别** → 命题任务 1 的语音情绪与表情两条通道确为空缺。
+3. **指标口径警告**：我 grep 得 API 端点 175 / Python 测试 806 / 前端测试文件 17，与 `CODE_GRAPH.md` 声明（206 或 199 / 1042 / 75 用例）**差异源于口径不同**（CODE_GRAPH 用运行时 `create_api_app` 实扫 + pytest 收集 + vitest 用例数）。**不可据此判 CODE_GRAPH 失真**，复测须沿用同一方法。本项标 `未验证`。
+4. **两处我自己的误判（已纠正并记教训）**：① `P1_BACKLOG.md` 我判"不存在"——实为**查错路径**（在 `docs/` 下）；② `docs/FEATURE_MAP.md` 我判"缺失待补"——实为 **2026-08-28 用户裁决已删除**（`docs/README.md` §五登记，理由"严重错误"，由 `FUNCTION_INVENTORY.md` 替代）。**根因：只探物理存在性，未查登记簿有无写"已删除"。教训入档。**
+5. **暴露真实漂移**：`AGENTS.md` §1.3 仍引用 `docs/FEATURE_MAP.md` 为真值载体，与 `docs/README.md` 冲突（现行文档层互斥）。拟修订 AGENTS.md §1.3 改指 `FUNCTION_INVENTORY.md`——**因 AGENTS.md 是宪法，待用户确认**。
+6. **Git**：`main`，未跟踪 2 项（`.zcode/`、`frontend/audit-tabs.mjs` 2026-09-03 2301B），**多窗口开工前须处置**。
+
+**产出（4 份文档，均本日新建）**：
+- `docs/stages/SPRINT_2026-09.md` — 阶段真源（`plan` 待确认）：三线目标（材料/代码/证据）、四档演进边界、功能边界与非目标、多模态方向假设（明确非最终选型）、现状探明含两处误判纠正、验收规则、开放问题 Q1–Q6。
+- `docs/board/BOARD.md` — 跨窗口看板（宪法 §8 载体，此前缺失）：窗口登记 + 追加区 + 阻塞登记 + 漂移告警。
+- `docs/board/TASK_PACKAGES.md` — 窗口级任务包切分：M 材料 / Q 工程质量 / V 多模态 / E 嵌入式 / D 证据 / G 治理，含**并行安全矩阵**与共用红线。
+- `docs/README.md` — 按准入规则登记上述三份（象限 + 生命周期）。
+- `大创赛报名以及后期发展/09-复赛冲刺阶段计划.md` — 材料线计划（**本地闭环，按 §3 三不入不入库**）。
+
+**硬约束遵守**：本轮**零代码改动**；未调用 `WebSearch`（宪法 §1.3 + §6 零容忍）；参赛材料未入库；未重建 `CODE_GRAPH.md`。
+
+**待用户裁决（`SPRINT_2026-09.md` §12）**：Q1 对标抖音项目链接 / Q2 小论文目标期刊与能否用参赛内容发表 / Q3 嵌入式目标形态 / Q4 生物特征采集合规边界 / Q5 软著申请主体 / Q6 多智能体窗口分工。另 B1《赛事指南》/B2 系统网址/B3 指导教师实名 —— **用户已答复不阻塞、自行解决**。
+
+---
+
+## 2026-09-14（三十八）— 调研落地 + 修正上次迁移缺陷 + 撤回过早的任务分发
+
+**用户批评（三条，全部成立）**：① 该调研的却去问用户（"这种问题不应该来问我"）② 没确定"要做什么"就急着分发任务（"先将要弄什么东西确定了啊"）③ 没扫完整个仓库（"整个仓库你扫描了吗？？"）。另质问"三不入从哪来的"与"给你继承歆歆时搜索工具没接进来吗"。
+
+**答复与动作**：
+1. **「三不入」出处已查证**：是**用户自己 2026-09-06 的裁决** —— `AGENTS.md:113` + `LOG.md:749` 双重记录，用户原话「**这种文档不应该推送到云服务**」。非我发明；如需废止请明示。
+2. **搜索工具真相——是我上次迁移埋的坑，非"没接"**：`anysearch` 无需 key 实测可用；但 `agent-reach` 被我拆成两份——**能跑的 149 文件完整版（含 `agent_reach/cli.py`+`pyproject.toml`）被我的 `classify()` 误判为"技能集合"扔进 `_collections`，顶层只留 8 文件空壳**。另 `_collections` 中 `deploy-model`/`microsoft-foundry`/`nuwa-skill`/`taste-skill` 四项本就有顶层 SKILL.md，属误判；`_external` 应在 `_vendored`。**已全部修复**（`tools/fix_skill_misclassify.py`，清单 `_manifests/fix-skill-misclassify-20260914-210353.json`）。根因：分类规则把"顶层有 SKILL.md + 内含子技能"的工具型单技能一律判成集合。
+3. **仓库全量扫描完成**（上次只做了定向 grep）：367 py / 153 md / 234 js / 187 ts / 72 tsx / 219 json / 210 png / 17 html / 24 **`.old`** 文件。**发现 Owner Map 漏项**：根目录 `user_scheduler.py`(14190B) 未入宪法 §2；另有 `.trae`/`.codebase-memory`/`playwright-report`/`unique_you.egg-info`/`cache`/`data`/`config` 未声明。
+4. **三项调研（用 anysearch 实做，已改"先调研给推荐"）**：产出 `大创赛报名以及后期发展/10-调研简报-媒体上传与论文落点与机器人架构.md`：
+   - **论文落点**：A《心理学报》"人工智能基础"专栏（中国科协年会征文）/ B **CSIG 情感智能大会**（中科院心理所微表情中心联合主办，"心理健康与情感计算"）/ C 开放获取中文期刊（最快最易，已有同题先例）→ 推荐**先 C 后 B**；主题切点建议打「AI 陪伴的**情感幻觉**评估」与「长期使用 AI 陪伴的心理健康影响」（交大傅小兰组刚发首个情感幻觉评测基准，窗口期正好）
+   - **机器人算力**：查到小智真实架构为**端云分工**——「设备端负责唤醒/采集/播放/外设，**云端负责大模型推理与多轮对话**」；服务端 `xiaozhi-esp32-server` 模块化自由组合 ASR/LLM/TTS → **推荐"机器人=前端端点、程序跑云服务器"**，可直接复用现有 `api/`+`emotion_engine`+`memory_ext`，扩展 `api/websocket_server.py` 为流式
+   - **微信媒体上传**：三条官方路线（① H5/JSSDK 直传自有服务器 ② 公众号 `MediaId`+`/cgi-bin/media/get` 拉取〔48h 窗口/素材 3 天有效/语音需 silk 转码〕③ 小程序 `wx.chooseMedia`）→ 推荐**①为主+②兜底**；现有 `voice/audio_converter.py` 已有转码能力可复用
+
+**撤回**：`docs/board/TASK_PACKAGES.md` 已标 **⛔ 暂缓未生效**（保留共用红线与并行安全矩阵备查），待功能范围确认后重做。`docs/stages/SPRINT_2026-09.md` §12 已重写为"能调研的不再问用户"，并新列 §12.1 我的流程问题。
+
+**仍未定**：Q1 对标产品（用户去找）；"用参赛内容发表"的学校规定（属用户裁量）。**本轮仍零代码改动。**
+
+---
+
+## 2026-09-14（三十九）— 更正 §3 调研方向错误：读代码后重定多模态拓展路径
+
+**用户批评（两条，全部成立）**：① 「用参赛内容发表论文是否受学校限制」被斥为假问题 ——「**我发表论文和学校有什么关系，这个参赛作品就是我自己的**」；② 微信接图/接语音调研被斥「**你是傻逼吗？？现在的接入方式是什么你知道了吗？？？**」。
+
+**错误性质（如实记录）**：
+- **假问题**：我把「三不入」（**分发渠道治理**：不入 git/GitHub/服务器）与「能否发论文」强行挂钩 —— **二者无逻辑关系**。作品归作者，学校无权限制发表。
+- **真空调研**：项目已有 `wechat_direct/`（37572B）+ `multimodal/` + `voice/`，我却去搜微信公众号官方文档，产出**与现状完全无关**的三条路线（JSSDK 直传 / MediaId 拉取 / 小程序 chooseMedia）。`10-` 文书 §3 已加 ⛔ 作废横幅，原文保留追溯。
+
+**读代码后的真实情况**（`wechat_direct/wechat_connector.py`）：
+- **接入方式**：扫码登录 + **第三方协议网关 `https://ilinkai.weixin.qq.com` + HTTP 长轮询**（`LONG_POLL_TIMEOUT=35`、`QR_LOGIN_TIMEOUT_S=480`）。**不是公众号/小程序/H5**；用户是在微信客户端直聊。
+- 消息类型：`1`文本/`3`图片/`34`语音/`47`表情；**发送侧四类全实现**；**接收侧三类全已解析**（`_handle_message` line 766-780）。
+
+**真实缺口（精确到行）**：
+1. **ASR 已实现已接线，只是没开**：`ASRHandler`（`multimodal_processor.py:54`，OpenAI 兼容 `/audio/transcriptions`，模型 `FunAudioLLM/SenseVoiceSmall`，前置 `AudioFormatConverter.to_wav`）；`wechat_connector.py:788 _transcribe_voice()` → `:923`。但 `config/system.yaml:101 asr.enabled=false`、`api_base=""`，`.env` **无 `ASR_API_KEY`** → 当前走占位。**属配置问题非代码问题。**
+2. **图片已收到但被丢弃**：`image_data` **全仓零消费者**，取出后只参与 line 782 有无内容判断，`_call_user_manager()` 只收 `text`。而 `VisionHandler`（`multimodal_processor.py:30`，调 LLM 做视觉理解）**已实现却没接线** → **缺口 = 1 处接线**。
+3. **表情/人脸识别：确无实现**（`VisionHandler` 只"描述图片 20 字内"，不做表情→情绪；`config/system.yaml` 无 vision 节）。
+4. **语音声学情绪：确无**（`_transcribe_voice` 只取 `result["text"]`，声学信息在 ASR 步即被丢弃）。
+
+**产出**：`大创赛报名以及后期发展/11-更正-多模态通路真实拓展路径.md`（含五级改动量排序：①开 ASR〔零代码〕②接线图片通道〔1 处〕③扩展视觉为表情情绪 ④新增声学情绪通道 ⑤讯飞能力接入）。`10-` §3 加作废横幅。
+
+**论文落点已定（按用户指示"直接选这篇越快越好"）**：**《心理学进展》（汉斯出版社，开放获取）** —— 同题先例 袁小雅, 刘仪辉 (2025)《人工智能在大学生心理健康评估与参与中的应用探究》。另发现更高级别可选第二跳：《心理科学进展》2026《基于大模型的智能体在大学生心理咨询中的应用》（郭静）。待办：拉该刊投稿须知/格式/审稿周期。
+
+**新增规矩（升格）**：**任何"如何拓展/接入某能力"的调研，第一步必须读该能力的现有实现与调用链，再决定调研什么。先读代码，后查资料。**
+
+**本轮仍零代码改动。**
+
+---
+
+## 2026-09-14（四十）— 云服务器实探 + 项目全貌摸清 + 需求台账建立
+
+**用户四问**：① 微信端能否发图片/发语音、云服务器能否收到（**这决定下一步怎么走**）② 先把整个项目摸清楚 ③ 论文/软著这些任务呢（忘了？）④ 所有要求是否都有解决方案、能否立项、决策是否落档。
+
+**一、云服务器实探（`ssh swu-prod` = 139.199.199.174，只读）**：
+- `/opt/ai-girlfriend` 在；`systemctl is-active ai-girlfriend` = **active**；进程 `uvicorn api.run_api:app --workers 4`
+- 运行用户实测 **`User=root`**（与仓库模板 `deploy/ai-girlfriend.service` 的 `www-data` **不一致** → 线上 unit 被改过，模板脱节）
+- 微信凭据 `/root/.weixin_cow_credentials.json`（202B, 07-27）**存在**；`/tmp/ai-girlfriend-wechat-autostart.lock`（07-28）**存在** → `_autostart_wechat_connector()` **跑过**
+- `data/wechat_state.json`（09-09 21:36）：`connected:true`、`bot_id:21c98b9202ae@im.bot`、`messages_today:1`；`wechat_qrcode.json`：`liteapp.weixin.qq.com` + `bot_type=3`
+- ⚠️ **但矛盾证据**：当前 `/var/log/ai-girlfriend.log`（9/13–9/14，7262 行）里 **`wechat_direct` 痕迹 0 条**（logger 只有 apscheduler/scheduler/orchestrator.optimized/websockets.server）；而 `log-20260913` 与 `log.1`(118MB) 里**有**。全日志检索「图片/语音/asr/type=3/type=34」= **0**
+- `data/proactive_state.json`（今日 21:25 仍更新）：`daily_count:8`、`last_sent_time:2026-09-14T04:10:55Z`、**`last_chat_time:null`** → **只发不收（发送通道活，无用户对话进来）**
+- 云端 `config/system.yaml asr.enabled: false`（同本地）；云端 `.env` **`XUNFEI_API_KEY` 有值(32字符)**，**无 `ASR_API_KEY`**
+
+**二、结论分级（诚实）**：代码链路✅能收；云端**实际是否在收=未验证**（日志与状态文件矛盾）；**收到也不能用**（语音走占位、图片被丢弃）；发送侧✅通。**已给出 60 秒验证法**：给 bot 发语音+图片 → `ssh swu-prod 'tail -f /var/log/ai-girlfriend.log | grep -E "wx|wechat"'`，看有无 `[wx][step=receive]`。**此结果直接决定下一步是"改接线"还是"先修链路"。**
+
+**三、项目全貌**：367 py / 153 md / 234 js / 187 ts / 72 tsx / 219 json / 210 png / **24 个 `.old`**；Owner Map 24/24 真实存在；微信链路精确到行（type 1/3/34 解析位置 + VisionHandler/ASRHandler 接线状态）；**测试真况：`TestHandleMessage` 仅 2 用例且只测文本，图/语音收包 0 覆盖**。
+
+**四、需求台账（14 条）**：逐条列出「要求 → 解决方案 → 状态 → 落档位置」。其中 **#7 软著、#8 论文目前只有方向、无可执行步骤** → 标为未完成项需补行动项。
+
+**五、立项结论**：**可以立项**，但有一前置待办（§1.5 的 60 秒实测）与一未完成项（软著/论文的行动项）。**立项后第一件事**：①打开 ASR〔零代码〕②接线图片通道〔1 处改动+补测试〕—— 做完「多模态情感感知」从"扩展路线"变**运行时事实**。
+
+**产出**：`大创赛报名以及后期发展/12-现状核查与需求台账.md`；`00-README.md` 登记 10/11/12。**本轮仍零代码改动。**
+
+**规矩**：用户四问中 #1 是"决定下一步"的关键 —— **凡影响下一步路径的事实，必须实测取证，不得在日志与状态文件矛盾时选边下结论。**
+
+---
+
+## 2026-09-14（四十一）— 工具链接入（MCP/技能/环境整理）+ 两项缺陷发现
+
+**用户指令**：整理开发环境（过期文档/日志，"不需要我决策、有公认最优解的直接做"）；软著/论文为什么不做掉；软著有专门 skills（`D:/Desktop/数模竞赛` + GitHub 上各一）；写论文也有专门一套 skills（同目录）；GitHub/云服务器/各 key 都在电脑上自己找；ASR 是否可用小米 MiMo 限免；**把火爬虫 / GitHub API / crawl4ai 先装上**；调研完再确认，需要用户做的很简单。
+
+**一、搜索能力接入（关键：不是"没装"，是"没接"）**：从 `~/.config/opencode/opencode.json` 的 `mcp` 节**移植 4 个已装好的 MCP** 到 `~/.workbuddy/mcp.json`（保留原有 lighthouse-ops）：
+- **github**（stdio，`github-mcp-server.exe v1.10.0 --read-only --toolsets=repos,issues,pull_requests,users`）→ ✅ `--version` 实测返回 1.10.0
+- **firecrawl**（streamableHttp `https://mcp.firecrawl.dev/v2/mcp`）→ ⚠️ 待联调
+- **crawl4ai**（stdio，`python312 .../crawl4ai-mcp/server.py`）→ ✅ `import crawl4ai,mcp` 通过
+- **playwright**（stdio，`D:/node.exe .../@playwright/mcp/cli.js`）→ ✅ 目标在
+- 凭据：`GITHUB_PERSONAL_ACCESS_TOKEN` 在 **HKCU 环境变量（93 字符）** + opencode.json 内联（34 字符）；配置**未内联 token**（靠环境继承）
+- 技能侧：**anysearch 实测可用（本会话全部调研产出）**；`agent-reach` 完整版已从 `_collections` 救回（149 文件含 `cli.py`），仅差 `pyyaml`
+
+**二、论文/软著/专利技能链找到**：`D:/Desktop/数模竞赛/modex-3-skills/modex-3-skills/` **共 90 个**：
+- **软著**：`copyright-draft`(起草) → `copyright-build`(生成正式 Word/TXT) 两步工作流
+- **专利**：`patent-draft` / `patent-build` ← **用户记忆里的"中国专利"实为这套技能，不是 MCP**
+- **论文**：`paper-write-zh`/`-docx`、`paper-plan-zh`、`comp-paper-zh`、`arxiv`、`literature-review`、`paper-figure*`、`paper-compile*`、**`auto-paper-improvement-loop`**、`rebuttal`、`quality-check` 等全套（含 docx 变体）
+
+**三、环境整理（已执行，189MB）**：清 `.mypy_cache`(**188MB**) + `playwright-report`(538KB) + `.pytest_cache`/`.ruff_cache`/`__pycache__`/`unique_you.egg-info` → **6 项 0 失败**，清单 `_manifests/janitor-project-cache-20260914-214013.json`。
+**⚠️ 纠正我自己**：先前记的"24 个 `.old` = AI 生成债"**错了** —— 实测全在 `.browser_profile/Default/**/LOG.old`，是**浏览器 profile 日志轮转残留**，与代码债无关，未清。
+**未清（非公认最优解）**：`大创赛/tmp_*` 18 脚本 + `tmp_docx/`(516) + `tmp_render/`(190) —— LOG 明确记为**「QA 工具留痕」有审计价值**，待用户一句话。
+
+**四、两项缺陷发现**：
+1. ⚠️ **`MIMO_API_KEY` 本机与云端都缺**，而 `config/system.yaml` 的 `engine: mimo-tts`（08-28 MiMo-only 收敛，**唯一 TTS 引擎**）引用它 → **语音输出是否真可用未验证**（今日 8 条主动消息为文本）。云端 `.env` 键名全列已确认无 MIMO/ASR/SENSENOVA/DEEPSEEK。
+2. ✅ **用户记忆正确**：MiMo **有 ASR**（`mimo.xiaomi.com` 的 **Xiaomi MiMo-V2.5-ASR**，GitHub `XiaomiMiMo/MiMo-V2.5-ASR` 开源），且 **TTS 各档位限时免费**（`platform.xiaomimimo.com`）→ **ASR 可直接用 MiMo**，比原计划 SenseVoice 更贴既有供应商。**但需用户去平台取 key**。
+
+**产出**：`~/.agents/TOOLCHAIN.md`（五链现状 + 待办）。**本轮零代码改动**（只动配置文件与回收站）。
+
+**待用户做的 5 件**：①激活 4 个 MCP（点「信任」）②取 MiMo key ③软著线上提交（我先产出资料）④对标抖音链接 ⑤`大创赛/tmp_*` 清或留。
+
+---
+
+## 2026-09-14（四十二）— 环境整理收尾 + 工程质量基线 + 首个 mypy 修复 A 档闭环 + 软著工作区就位
+
+**用户指令（五步顺序）**：①`大创赛/tmp_*` 清洗掉 ②MiMo key/对标链接先不着急（他自己几步完成）③**程序和代码相关的放前面** ④用给定 skills 生产软著与论文（他提交）⑤并行 PPT+商业计划书 ⑥最后补实操视频。另：搜索工具（火爬虫/GitHub API/crawl4ai）先装上。
+
+**一、清理（已执行，共 263MB）**
+- `大创赛报名以及后期发展/tmp_*`：**20 项 74MB**（含 `tmp_docx/` 579 文件 27MB、`tmp_render/` 190 文件 46MB、18 个 QA 脚本）→ 回收站 0 失败。清单 `janitor-dachuangsai-tmp-20260914-215804.json`
+- 项目可再生缓存：**6 项 189MB**（`.mypy_cache` 独占 188MB + playwright-report + pytest/ruff/`__pycache__`/egg-info）→ 回收站 0 失败
+
+**二、工程质量基线（三工具全跑，口径对齐 CODE_GRAPH）**
+| 工具 | 结果 |
+|------|------|
+| `ruff check .` | **All checks passed**（仅 1 条 noqa 格式 warning，非错误） |
+| `mypy .` | **Found 1 error in 1 file（checked 346 source files）** —— 88 条为 `annotation-unchecked` note 非错误 |
+| `pytest --collect-only` | **1048 tests collected**（宪法/CODE_GRAPH 声明 1042 → **+6 为增长非回归**） |
+
+**三、首个修复 + A 档三端闭环**
+- 错误定位：`cache/llm_cache.py:332` 装饰器 `[return-value]`（`decorator(func: Callable[...,T]) -> Callable[...,T]` 里返回 `async_wrapper`/`sync_wrapper` 类型不匹配）
+- 修法：**`typing.cast`**（纯类型标注断言，运行时零变化；未用 `type: ignore`、未加 shim）—— 符合宪法 §1.2 不引入兜底层
+- 验证：mypy 单文件 `Success: no issues found` / ruff 单文件 `All checks passed` / `pytest -k cache` **31 passed + 1 skipped**
+- A 档：commit **f158e82**（精确 `git add cache/llm_cache.py`，未用 `git add .`）→ push origin（`e246118..f158e82`）→ 服务器 `fetch + reset --hard origin/main` → HEAD=f158e82c、`cast` 出现 4 次、文件时间 22:06 → 服务重启 `ActiveEnterTimestamp=2026-09-14 22:06:24 CST` → **`/api/health` HTTP 200**（`version 3.1.0`）→ **git blob 三端一致 `7fded71e30677a3667b6d7b298cbd376adcf34d5`**
+- ⚠️ **A 档执行中的三个我自己的失误（如实记录）**：
+  1. **`| tail -3` 吃掉退出码** → push 实际失败（`could not read Username`，`credential.helper` 为空）却报"成功"。**教训：验证命令必须取 `PIPESTATUS[0]` 或独立判退出码。**
+  2. 代理 `127.0.0.1:3128` 失效致 push 失败（LOG 早有记载）→ 须 `-c http.proxy= -c https.proxy=` 覆盖；凭据用 `GITHUB_PERSONAL_ACCESS_TOKEN`（93 字符，在环境变量里）走 URL，**不落盘**。
+  3. **md5 比对用错尺子**：本地 CRLF vs 服务器 LF 致 md5 不同，**正确口径是 `git hash-object`（blob）**——项目 LOG 早已记录此口径，我未先读。**教训：复用项目既定口径前先查 LOG。**
+  4. health 初次报 000 是我 heredoc 里 `curl -w` 引号被吃，非服务问题；改 python urllib 探测得 200。
+
+**四、软著技能链接入 + 工作区就位**
+- `D:/Desktop/数模竞赛/modex-3-skills/modex-3-skills/` **90 个技能**中，按用户指定接入 **30 个**到真源（junction 零拷贝）并 sync 到 WorkBuddy（现 246 条目/240 链接）：软著 `copyright-draft`+`copyright-build`、专利 `patent-draft`+`patent-build`、论文链 `paper-write-zh(-docx)`/`paper-plan-zh`/`comp-paper-zh(-docx)`/`arxiv`/`literature-review`/`research-lit`/`comm-lit-review`/`paper-figure*`/`paper-illustration`/`paper-compile-zh`/`auto-paper-improvement-loop`/`auto-review-loop`/`quality-check`/`novelty-check`/`paper-analysis`/`rebuttal`/`docx-format-check`/`format-profile`/`paper-slides`/`paper-poster` + `shared-references`/`shared-scripts`
+- **成品脚本已在**：`copyright-build/scripts/build_docx_from_md.py`（+`common.py`）→ 不需要 `$COPYRIGHT_SCRIPT_DIR` 环境变量注入
+- **软著工作区已建**：`D:/Desktop/软著申请-唯一的你十四/`（`CLAUDE.md` 待写 + `user_data/` 已导入**真实源码 504 文件 / 225 源码文件 / 43,412 行** → 走技能**模式 A**「用真实源码，不合成」）
+- 全项目源码总量（源程序量字段用）：**.py/.ts/.tsx 合计 76,939 行**
+
+**五、搜索工具（不是"没装"，是"没接"）**：从 opencode 配置移植 4 个 MCP 到 `~/.workbuddy/mcp.json`——**github**(v1.10.0 实测可跑)、**firecrawl**、**crawl4ai**(import 通过)、**playwright**；凭据 `GITHUB_PERSONAL_ACCESS_TOKEN` 凭环境变量继承，配置未内联。**anysearch 实测可用**（本会话全部调研产出）。
+
+**下一步**：写 `CLAUDE.md` → 产出软著 8 类草稿 + 5 个门禁 JSON → `build_docx_from_md.py` 生成正式 Word/TXT；随后论文 → PPT/BP → 实操视频。
