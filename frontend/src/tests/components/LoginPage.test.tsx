@@ -223,8 +223,8 @@ describe('LoginPage', () => {
     fireEvent.change(screen.getByPlaceholderText('你的昵称'), {
       target: { value: 'Test User' },
     })
-    // 注册模式下密码 placeholder 变为"至少6个字符"
-    fireEvent.change(screen.getByPlaceholderText('至少6个字符'), {
+    // 注册模式下密码 placeholder 变为"至少 8 位，含字母和数字"（与后端 RegisterRequest 对齐）
+    fireEvent.change(screen.getByPlaceholderText('至少 8 位，含字母和数字'), {
       target: { value: 'password123' },
     })
 
@@ -249,6 +249,70 @@ describe('LoginPage', () => {
     })
 
     // 成功之后跳转
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/wechat', { replace: true })
+    })
+  })
+
+  // ──────────────────────────────────────────────
+  //  11. 注册密码规则本地校验（回归护栏）
+  //      2026-09-15 事故：前端写死 minLength=6，后端 /auth/register 要求 ≥8，
+  //      用户按提示填 6 位 → 后端 422（detail 对象数组）→ React error #31 白屏。
+  //      现要求：不合规在本地拦下，绝不发请求。
+  // ──────────────────────────────────────────────
+  function fillRegisterForm(password: string) {
+    fireEvent.click(screen.getByText('注册'))
+    fireEvent.change(screen.getByPlaceholderText('your@email.com'), {
+      target: { value: 'new@test.com' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('至少3个字符'), {
+      target: { value: 'newuser' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('至少 8 位，含字母和数字'), {
+      target: { value: password },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '注 册' }))
+  }
+
+  it('rejects register password shorter than 8 chars locally (no request sent)', async () => {
+    renderComponent()
+    fillRegisterForm('abc123') // 6 位 —— 旧版正是这里放行后把页面打崩
+
+    expect(await screen.findByText('密码至少 8 位')).toBeDefined()
+    expect(mockRegister).not.toHaveBeenCalled()
+    expect(mockRegisterWithInvite).not.toHaveBeenCalled()
+    expect(mockNavigate).not.toHaveBeenCalled()
+  })
+
+  it('rejects register password without a letter', async () => {
+    renderComponent()
+    fillRegisterForm('12345678')
+
+    expect(await screen.findByText('密码必须包含字母')).toBeDefined()
+    expect(mockRegister).not.toHaveBeenCalled()
+  })
+
+  it('rejects register password without a digit', async () => {
+    renderComponent()
+    fillRegisterForm('abcdefgh')
+
+    expect(await screen.findByText('密码必须包含数字')).toBeDefined()
+    expect(mockRegister).not.toHaveBeenCalled()
+  })
+
+  it('submits register when password satisfies backend rules', async () => {
+    mockRegister.mockResolvedValueOnce(undefined)
+    renderComponent()
+    fillRegisterForm('password123')
+
+    await waitFor(() => {
+      expect(mockRegister).toHaveBeenCalledWith({
+        email: 'new@test.com',
+        username: 'newuser',
+        password: 'password123',
+        display_name: undefined,
+      })
+    })
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/wechat', { replace: true })
     })
