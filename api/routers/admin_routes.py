@@ -30,7 +30,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 class AdminCreateUserRequest(BaseModel):
     email: str = Field(..., max_length=255)
     username: str = Field(..., min_length=2, max_length=100)
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)  # ≥8，与 /auth/register 统一（2026-09-15）
     display_name: str = Field("", max_length=255)
     role: str = Field("viewer", pattern=r"^(admin|editor|viewer)$")
 
@@ -38,7 +38,7 @@ class AdminCreateUserRequest(BaseModel):
 class AdminUpdateUserRequest(BaseModel):
     email: str | None = Field(None, max_length=255)
     username: str | None = Field(None, min_length=2, max_length=100)
-    password: str | None = Field(None, min_length=6, max_length=128)
+    password: str | None = Field(None, min_length=8, max_length=128)  # ≥8，与 /auth/register 统一（2026-09-15）
     display_name: str | None = Field(None, max_length=255)
     role: str | None = Field(None, pattern=r"^(admin|editor|viewer)$")
     is_active: bool | None = None

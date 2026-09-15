@@ -213,7 +213,7 @@ async def test_register_invalid_code(module_app, _admin):
     async with AsyncClient(transport=ASGITransport(app=module_app), base_url="http://test") as client:
         resp = await client.post("/api/auth/register-invite", json={
             "invite_code": "nonexist",
-            "email": "a@b.com", "username": "u1", "password": "pass123",
+            "email": "a@b.com", "username": "u1", "password": "pass1234",
         })
         data = resp.json()
         assert resp.status_code == 400
@@ -226,7 +226,7 @@ async def test_register_used_code(module_app, _admin, _used_invite):
     async with AsyncClient(transport=ASGITransport(app=module_app), base_url="http://test") as client:
         resp = await client.post("/api/auth/register-invite", json={
             "invite_code": "usedcode1",
-            "email": "b@c.com", "username": "u2", "password": "pass123",
+            "email": "b@c.com", "username": "u2", "password": "pass1234",
         })
         data = resp.json()
         assert resp.status_code == 400
@@ -239,7 +239,7 @@ async def test_register_revoked_code(module_app, _admin, _revoked_invite):
     async with AsyncClient(transport=ASGITransport(app=module_app), base_url="http://test") as client:
         resp = await client.post("/api/auth/register-invite", json={
             "invite_code": "revoked1",
-            "email": "c@d.com", "username": "u3", "password": "pass123",
+            "email": "c@d.com", "username": "u3", "password": "pass1234",
         })
         data = resp.json()
         assert resp.status_code == 400
@@ -260,7 +260,7 @@ async def test_register_duplicate_email(module_app, module_session_factory, _adm
             "invite_code": "testcode1",
             "email": "dupe@test.com",
             "username": "another",
-            "password": "pass123",
+            "password": "pass1234",
         })
         assert resp.status_code == 409
 
@@ -273,7 +273,7 @@ async def test_register_duplicate_username(module_app, _admin, _invite):
             "invite_code": "testcode1",
             "email": "unique@test.com",
             "username": "admin",  # 已存在（_admin fixture id=1）
-            "password": "pass123",
+            "password": "pass1234",
         })
         assert resp.status_code == 409
 

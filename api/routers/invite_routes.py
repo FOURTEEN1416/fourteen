@@ -52,7 +52,7 @@ class RegisterInviteRequest(BaseModel):
     invite_code: str = Field(..., min_length=1, max_length=16)
     email: str = Field(..., max_length=255)
     username: str = Field(..., min_length=2, max_length=100)
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)  # ≥8，与 /auth/register 统一（2026-09-15）
     display_name: str = Field("", max_length=255)
 
 

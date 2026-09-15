@@ -308,7 +308,7 @@ describe('AdminUsersPage', () => {
     // 填写表单
     const emailInput = screen.getByPlaceholderText('user@example.com')
     const usernameInput = screen.getByPlaceholderText('username')
-    const passwordInput = screen.getByPlaceholderText('至少 6 个字符')
+    const passwordInput = screen.getByPlaceholderText('至少 8 个字符')
 
     fireEvent.change(emailInput, { target: { value: 'newuser@test.com' } })
     fireEvent.change(usernameInput, { target: { value: 'newuser' } })
@@ -346,7 +346,7 @@ describe('AdminUsersPage', () => {
 
     // ── 9a. 空邮箱 → "邮箱不能为空"
     const usernameInput = screen.getByPlaceholderText('username')
-    const passwordInput = screen.getByPlaceholderText('至少 6 个字符')
+    const passwordInput = screen.getByPlaceholderText('至少 8 个字符')
     fireEvent.change(usernameInput, { target: { value: 'testuser' } })
     fireEvent.change(passwordInput, { target: { value: 'password123' } })
 
@@ -376,14 +376,14 @@ describe('AdminUsersPage', () => {
       expect(screen.getByText('用户名至少 3 个字符')).toBeDefined()
     })
 
-    // ── 9d. 密码 "123" → "密码至少 6 个字符"
+    // ── 9d. 密码 "123" → "密码至少 8 个字符"
     fireEvent.change(usernameInput, { target: { value: 'validuser' } })
     fireEvent.change(passwordInput, { target: { value: '123' } })
 
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
     await waitFor(() => {
-      expect(screen.getByText('密码至少 6 个字符')).toBeDefined()
+      expect(screen.getByText('密码至少 8 个字符')).toBeDefined()
     })
   })
 

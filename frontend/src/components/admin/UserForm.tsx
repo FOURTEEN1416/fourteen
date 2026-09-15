@@ -20,7 +20,7 @@ export function validateUsername(v: string): string | null {
 
 export function validatePassword(v: string, required: boolean): string | null {
   if (required && !v) return '密码不能为空'
-  if (v && v.length < 6) return '密码至少 6 个字符'
+  if (v && v.length < 8) return '密码至少 8 个字符'
   return null
 }
 
@@ -151,7 +151,7 @@ export default function UserForm({
             type="password"
             value={(data.password as string) ?? ''}
             onChange={e => set('password', e.target.value)}
-            placeholder={isCreate ? '至少 6 个字符' : '不修改则留空'}
+            placeholder={isCreate ? '至少 8 个字符' : '不修改则留空'}
             className="w-full pl-9 pr-3 py-2 text-sm bg-white/60 border border-white/30 rounded-lg text-gray-700 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-300/50 transition-all"
           />
         </div>

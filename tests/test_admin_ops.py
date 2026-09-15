@@ -386,12 +386,12 @@ async def test_admin_update_user_email_conflict(admin_app):
     # 创建两个用户
     resp = await client.post(
         "/api/admin/users",
-        json={"email": "a@test.com", "username": "user_a", "password": "pass123", "role": "viewer"},
+        json={"email": "a@test.com", "username": "user_a", "password": "pass1234", "role": "viewer"},
     )
     assert resp.status_code == 200
     user_b_resp = await client.post(
         "/api/admin/users",
-        json={"email": "b@test.com", "username": "user_b", "password": "pass123", "role": "viewer"},
+        json={"email": "b@test.com", "username": "user_b", "password": "pass1234", "role": "viewer"},
     )
     assert user_b_resp.status_code == 200
     user_b_id = user_b_resp.json()["id"]
@@ -489,7 +489,7 @@ def test_config_sanitization():
         "api_key": "sk-123456",
         "secret_key": "mysecret",
         "token": "eyJhbGci",
-        "password": "pass123",
+        "password": "pass1234",
         "encryption_key": "aes-key-001",
         "api_base": "https://api.example.com",
     }
