@@ -28,6 +28,7 @@ from api.auth_jwt import (
     require_role,
 )
 from api.database import InviteCode, User, UserSession, get_db
+from api.password_policy import PasswordStr, ensure_password_strength
 
 logger = logging.getLogger("invite_routes")
 
@@ -52,7 +53,7 @@ class RegisterInviteRequest(BaseModel):
     invite_code: str = Field(..., min_length=1, max_length=16)
     email: str = Field(..., max_length=255)
     username: str = Field(..., min_length=2, max_length=100)
-    password: str = Field(..., min_length=8, max_length=128)  # ≥8，与 /auth/register 统一（2026-09-15）
+    password: PasswordStr = Field(..., examples=["password123"])
     display_name: str = Field("", max_length=255)
 
 
@@ -109,6 +110,10 @@ async def register_with_invite(
     db: AsyncSession = Depends(get_db),
 ):
     """使用邀请码注册新用户"""
+    # ── 密码强度（策略唯一真源：api/password_policy.py）──
+    # 置于邀请码校验之前：输入不合规即刻失败，不必先查库
+    ensure_password_strength(req.password)
+
     # ── 校验邀请码 ──
     result = await db.execute(
         select(InviteCode).where(InviteCode.code == req.invite_code.strip().lower())

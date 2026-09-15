@@ -709,3 +709,62 @@ def test_pii_anonymizer_deanonymize():
     pii_map = anon.pii_list_to_map(entities)
     restored2 = anon.deanonymize(anonymized, pii_map)
     assert "user@example.com" in restored2
+
+
+# ═══════════════════════════════════════════════════════════
+# 密码强度（策略唯一真源 api/password_policy.py，2026-09-15）
+# 改前管理端只要 ≥6 且不做字符类型校验，与 /auth/register 不一致
+# ═══════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_admin_create_user_rejects_weak_password(admin_app):
+    """管理员建用户：弱密码 → 422 且不写库"""
+    client, engine, _ = admin_app
+    before = await _db_user_count(engine)
+
+    # 8 位纯数字 → 缺字母
+    resp = await client.post(
+        "/api/admin/users",
+        json={
+            "email": "weak1@test.com",
+            "username": "weakuser1",
+            "password": "12345678",
+            "role": "viewer",
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    assert "密码必须包含字母" in resp.text
+
+    # 8 位纯字母 → 缺数字
+    resp = await client.post(
+        "/api/admin/users",
+        json={
+            "email": "weak2@test.com",
+            "username": "weakuser2",
+            "password": "abcdefgh",
+            "role": "viewer",
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    assert "密码必须包含数字" in resp.text
+
+    assert await _db_user_count(engine) == before, "弱密码不应写入任何用户"
+
+
+@pytest.mark.asyncio
+async def test_admin_update_user_password_rules(admin_app):
+    """管理员改用户：弱密码 → 422；不传密码（不修改）→ 正常"""
+    client, _, _ = admin_app
+
+    resp = await client.put(
+        f"/api/admin/users/{_VIEWER_USER_ID}", json={"password": "12345678"}
+    )
+    assert resp.status_code == 422, resp.text
+    assert "密码必须包含字母" in resp.text
+
+    resp = await client.put(
+        f"/api/admin/users/{_VIEWER_USER_ID}", json={"display_name": "改名不改密码"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["display_name"] == "改名不改密码"

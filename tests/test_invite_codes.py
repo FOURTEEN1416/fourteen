@@ -418,3 +418,43 @@ async def test_admin_revoke_revoked_code(module_app, module_session_factory, _ad
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         assert resp.status_code == 400
+
+
+# ═══════════════════════════════════════════════════════════
+# 密码强度（策略唯一真源 api/password_policy.py，2026-09-15）
+# 改前此路径只要 ≥6 且不校验字符类型，可绕过 /auth/register 的强度要求
+# ═══════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_register_invite_rejects_weak_password(
+    module_app, module_session_factory, _admin, _invite
+):
+    """邀请码注册同样执行强度校验 → 422，且不消耗邀请码"""
+    async with AsyncClient(transport=ASGITransport(app=module_app), base_url="http://test") as client:
+        resp = await client.post("/api/auth/register-invite", json={
+            "invite_code": "testcode1",
+            "email": "weak@test.com", "username": "weakuser", "password": "12345678",
+        })
+        assert resp.status_code == 422, resp.text
+        assert "密码必须包含字母" in resp.text
+
+    # 强度校验先于邀请码消耗，故邀请码应保持未使用
+    async with module_session_factory() as db:
+        invite = await db.get(InviteCode, "testcode1")
+        assert invite.used_by is None
+        assert invite.used_at is None
+
+
+@pytest.mark.asyncio
+async def test_register_invite_short_password_rejected(
+    module_app, _admin, _invite
+):
+    """7 位密码（曾被放行）现在同样 422 —— 与 /auth/register 口径一致"""
+    async with AsyncClient(transport=ASGITransport(app=module_app), base_url="http://test") as client:
+        resp = await client.post("/api/auth/register-invite", json={
+            "invite_code": "testcode1",
+            "email": "short@test.com", "username": "shortuser", "password": "pass123",
+        })
+        assert resp.status_code == 422, resp.text
+        assert "at least 8 characters" in resp.text

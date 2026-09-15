@@ -7,30 +7,9 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { PASSWORD_HINT, PASSWORD_MIN_LENGTH, validatePasswordStrength } from '../utils/passwordPolicy'
 
 type Mode = 'login' | 'register'
-
-/**
- * 注册密码规则 —— 必须与后端一致，改这里就要同步改后端。
- *
- * 后端出处：api/routers/auth_routes.py
- *   · RegisterRequest.password: min_length=8  （:49，Pydantic 校验 → 违反返回 422）
- *   · validate_password_strength(): 需含字母与数字（:94-102）
- *
- * 历史事故（2026-09-15，复赛演示环境）：
- *   前端此处曾写 minLength=6 且只提示「至少6个字符」，用户照提示输入 6~7 位密码，
- *   后端返回 422（detail 是对象数组）→ 登录页把该数组当 React child 渲染
- *   → 「Minified React error #31」整页白屏。
- *   现已对齐规则并前置本地校验，从源头不再产生这次 422。
- */
-const REGISTER_PASSWORD_MIN = 8
-
-function validateRegisterPassword(v: string): string | null {
-  if (v.length < REGISTER_PASSWORD_MIN) return `密码至少 ${REGISTER_PASSWORD_MIN} 位`
-  if (!/[A-Za-z]/.test(v)) return '密码必须包含字母'
-  if (!/\d/.test(v)) return '密码必须包含数字'
-  return null
-}
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -64,7 +43,7 @@ export default function LoginPage() {
         await login(loginValue, password)
       } else {
         // 先在本地拦掉后端必然 422 的情况（历史上这一次 422 直接把页面打崩）
-        const pwError = validateRegisterPassword(password)
+        const pwError = validatePasswordStrength(password)
         if (pwError) {
           setError(pwError)
           return
@@ -211,9 +190,9 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-            placeholder={mode === 'register' ? `至少 ${REGISTER_PASSWORD_MIN} 位，含字母和数字` : '输入密码'}
+            placeholder={mode === 'register' ? PASSWORD_HINT : '输入密码'}
             required
-            minLength={mode === 'register' ? REGISTER_PASSWORD_MIN : 1}
+            minLength={mode === 'register' ? PASSWORD_MIN_LENGTH : 1}
               className="input-macaron w-full glass-card rounded-lg px-3 py-2.5 text-sm"
             />
           </div>

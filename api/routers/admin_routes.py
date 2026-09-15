@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth_jwt import hash_password, require_role
 from api.database import User, get_db
+from api.password_policy import PasswordStr, ensure_password_strength
 
 logger = logging.getLogger("admin_routes")
 
@@ -30,7 +31,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 class AdminCreateUserRequest(BaseModel):
     email: str = Field(..., max_length=255)
     username: str = Field(..., min_length=2, max_length=100)
-    password: str = Field(..., min_length=8, max_length=128)  # ≥8，与 /auth/register 统一（2026-09-15）
+    password: PasswordStr = Field(..., examples=["password123"])
     display_name: str = Field("", max_length=255)
     role: str = Field("viewer", pattern=r"^(admin|editor|viewer)$")
 
@@ -38,7 +39,7 @@ class AdminCreateUserRequest(BaseModel):
 class AdminUpdateUserRequest(BaseModel):
     email: str | None = Field(None, max_length=255)
     username: str | None = Field(None, min_length=2, max_length=100)
-    password: str | None = Field(None, min_length=8, max_length=128)  # ≥8，与 /auth/register 统一（2026-09-15）
+    password: PasswordStr | None = Field(None, examples=["password123"])
     display_name: str | None = Field(None, max_length=255)
     role: str | None = Field(None, pattern=r"^(admin|editor|viewer)$")
     is_active: bool | None = None
@@ -130,6 +131,9 @@ async def create_user(
     db: AsyncSession = Depends(get_db),
 ):
     """管理员创建用户"""
+    # 密码强度（策略唯一真源：api/password_policy.py）
+    ensure_password_strength(req.password)
+
     # 检查邮箱
     result = await db.execute(select(User).where(User.email == req.email))
     if result.scalar_one_or_none():
@@ -185,6 +189,8 @@ async def update_user(
         user.username = req.username
 
     if req.password:
+        # 仅在确实要改密码时校验强度（策略唯一真源：api/password_policy.py）
+        ensure_password_strength(req.password)
         user.hashed_password = hash_password(req.password)
     if req.display_name is not None:
         user.display_name = req.display_name

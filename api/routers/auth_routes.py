@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security
@@ -32,6 +31,7 @@ from api.consent import (
     record_consent,
 )
 from api.database import User, UserSession, get_db
+from api.password_policy import PasswordStr, ensure_password_strength
 
 logger = logging.getLogger("auth_routes")
 
@@ -46,7 +46,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 class RegisterRequest(BaseModel):
     email: str = Field(..., max_length=255, examples=["user@example.com"])
     username: str = Field(..., min_length=2, max_length=100, examples=["demo"])
-    password: str = Field(..., min_length=8, max_length=128, examples=["password123"])
+    password: PasswordStr = Field(..., examples=["password123"])
     display_name: str = Field("", max_length=255)
 
 
@@ -79,11 +79,11 @@ class ConsentRequest(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str = Field(..., min_length=1, max_length=128, examples=["oldPass123"])
-    new_password: str = Field(..., min_length=8, max_length=128, examples=["newPass456"])
+    new_password: PasswordStr = Field(..., examples=["newPass456"])
 
 
 class AdminResetPasswordRequest(BaseModel):
-    new_password: str = Field(..., min_length=8, max_length=128, examples=["resetPass789"])
+    new_password: PasswordStr = Field(..., examples=["resetPass789"])
 
 
 # ═══════════════════════════════════════════════════════
@@ -91,15 +91,7 @@ class AdminResetPasswordRequest(BaseModel):
 # ═══════════════════════════════════════════════════════
 
 
-def validate_password_strength(password: str) -> str | None:
-    """验证密码强度，返回错误信息或 None"""
-    if len(password) < 8:
-        return "密码长度至少8位"
-    if not re.search(r'[A-Za-z]', password):
-        return "密码必须包含字母"
-    if not re.search(r'\d', password):
-        return "密码必须包含数字"
-    return None
+# 密码策略已抽到 api/password_policy.py（唯一真源，2026-09-15）
 
 
 def _set_refresh_cookie(response: Response, refresh_token: str, request: Request) -> None:
@@ -150,10 +142,8 @@ async def register(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Username already taken")
 
-    # 验证密码强度
-    pwd_error = validate_password_strength(req.password)
-    if pwd_error:
-        raise HTTPException(status_code=422, detail=pwd_error)
+    # 验证密码强度（策略唯一真源：api/password_policy.py）
+    ensure_password_strength(req.password)
 
     # 创建用户
     user = User(
@@ -408,10 +398,8 @@ async def change_password(
     if req.current_password == req.new_password:
         raise HTTPException(status_code=400, detail="New password must differ from current password")
 
-    # 验证新密码强度
-    pwd_error = validate_password_strength(req.new_password)
-    if pwd_error:
-        raise HTTPException(status_code=422, detail=pwd_error)
+    # 验证新密码强度（策略唯一真源：api/password_policy.py）
+    ensure_password_strength(req.new_password)
 
     # 更新密码
     user.hashed_password = hash_password(req.new_password)
@@ -434,10 +422,8 @@ async def admin_reset_password(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # 验证新密码强度
-    pwd_error = validate_password_strength(req.new_password)
-    if pwd_error:
-        raise HTTPException(status_code=422, detail=pwd_error)
+    # 验证新密码强度（策略唯一真源：api/password_policy.py）
+    ensure_password_strength(req.new_password)
 
     # 更新密码为管理员指定的新密码
     user.hashed_password = hash_password(req.new_password)
