@@ -36,6 +36,38 @@ except ImportError:  # pragma: no cover
     def _record_fallback(provider: str, status: str) -> Any:
         return None
 
+def _merge_attachments(
+    query: str,
+    system_prompt: str,
+    history: list | None,
+    messages: list | None,
+    attachments: list | None,
+) -> tuple[list | None, str]:
+    """把多模态附件并入末条 user message，返回 (messages, query)。
+
+    与 ``llm_gateway.LLMGateway._build_messages`` 保持同一规则：**不替换整条 messages**，
+    否则 system_prompt（角色人设）与 history（对话历史）会被整个丢弃。合并后 query
+    已进入 messages，故返回空串避免重复拼接。
+
+    为何必须在网关层处理（2026-09-15 线上故障）：``provider.chat()`` 没有 attachments
+    形参，而 ``provider._build_messages`` 只在 messages 为空时才自建 —— 图片只能经
+    messages 传递。此前 orchestrator 传 attachments、本网关却无此形参，导致
+    ``TypeError: MultiProviderGateway.chat() got an unexpected keyword argument
+    'attachments'``，微信每条消息（含纯文本）都返回"处理消息时出现异常"。
+    """
+    if not attachments or messages:
+        return messages, query
+    built: list = []
+    if system_prompt:
+        built.append({"role": "system", "content": system_prompt})
+    if history:
+        built.extend(history)
+    parts: list = [{"type": "text", "text": query}] if query else []
+    parts.extend(attachments)
+    built.append({"role": "user", "content": parts})
+    return built, ""
+
+
 # ── 默认 fallback 链 ──
 DEFAULT_FALLBACK_CHAIN = ["sensenova", "zhipu", "xunfei", "baidu"]
 
@@ -233,9 +265,15 @@ class MultiProviderGateway:
         max_tokens: int = 2048,
         tools: list | None = None,
         model: str | None = None,
+        attachments: list | None = None,
     ) -> str:
         """按 fallback 链尝试各个 provider"""
         last_error = ""
+
+        # 多模态附件先并入 messages 再进入 fallback 链（见 _merge_attachments 注释）
+        messages, query = _merge_attachments(
+            query, system_prompt, history, messages, attachments
+        )
 
         for idx, key in enumerate(self._providers):
             provider = self._providers[key]
@@ -270,12 +308,17 @@ class MultiProviderGateway:
         temperature: float = 0.85,
         max_tokens: int = 2048,
         tools: list | None = None,
+        attachments: list | None = None,
     ) -> AsyncIterator[str]:
         """流式聊天 — 只在第一个可用 provider 上执行"""
         provider = self.current_provider
         if not provider:
             yield "（没有可用的 LLM 提供商）"
             return
+
+        messages, query = _merge_attachments(
+            query, system_prompt, history, messages, attachments
+        )
 
         async for token in provider.chat_stream(
             query=query, system_prompt=system_prompt,
@@ -294,10 +337,15 @@ class MultiProviderGateway:
         temperature: float = 0.85,
         max_tokens: int = 2048,
         tools: list | None = None,
+        attachments: list | None = None,
     ) -> dict[str, Any]:
         provider = self.current_provider
         if not provider:
             return {"content": "（没有可用的 LLM 提供商）", "tool_calls": None}
+
+        messages, query = _merge_attachments(
+            query, system_prompt, history, messages, attachments
+        )
 
         return await provider.chat_with_tools(
             query=query, system_prompt=system_prompt,
