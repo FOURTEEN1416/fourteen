@@ -100,6 +100,38 @@ function processQueue(error: unknown, token: string | null = null) {
   _pendingQueue = []
 }
 
+/**
+ * 把后端返回的 detail 归一化为可读字符串。
+ *
+ * 后端有两种形态：
+ *   • 业务错误 → detail 是字符串（如 "Invalid login credentials"）
+ *   • 请求校验失败（422）→ detail 是对象数组，元素形如
+ *       { type, loc, msg, input, ctx }
+ * 若把后者原样交给 setState / addToast，React 渲染对象 child 会抛
+ * 「Minified React error #31 (object with keys {type, loc, msg, input, ctx})」，
+ * 整页白屏。故统一压平成 "body.login: Field required; ..." 形式。
+ */
+export function normalizeDetail(rawDetail: unknown): string {
+  if (typeof rawDetail === 'string') return rawDetail
+  if (Array.isArray(rawDetail)) {
+    return rawDetail
+      .map((e: unknown) => {
+        if (typeof e === 'string') return e
+        if (e && typeof e === 'object' && 'msg' in e) {
+          const errObj = e as { msg?: unknown; loc?: unknown }
+          const loc = Array.isArray(errObj.loc) ? errObj.loc.join('.') : ''
+          const msg = typeof errObj.msg === 'string' ? errObj.msg : ''
+          return loc ? `${loc}: ${msg}` : msg
+        }
+        return String(e)
+      })
+      .filter((line) => line.length > 0)
+      .join('; ')
+  }
+  if (rawDetail && typeof rawDetail === 'object') return JSON.stringify(rawDetail)
+  return ''
+}
+
 const ERROR_CODE_MAP: Record<string, string> = {
   LLM_TIMEOUT: 'AI思考时间较长，请稍后重试',
   NETWORK_ERROR: '无法连接服务器，请检查网络',
@@ -115,6 +147,13 @@ client.interceptors.response.use(
     const status = error.response?.status
     const data = error.response?.data
     const originalRequest = error.config as (typeof error.config) & { _isRetry?: boolean }
+
+    // ── 第 0 步：detail 归一化（保护所有下游取用点）──
+    // 页面级 catch 常直接读 err.response?.data?.detail 并塞进 state / addToast；
+    // 若此处仍是 422 的对象数组，React 渲染对象 child 会抛 error #31 导致白屏。
+    if (data && typeof data === 'object' && 'detail' in data) {
+      ;(data as { detail?: unknown }).detail = normalizeDetail((data as { detail?: unknown }).detail)
+    }
 
     // ── 403 BYOK_REQUIRED：用户自带 Key 引导（W1，2026-08-28）──
     const byokCode = (error.response?.headers?.['x-error-code'] ??
@@ -179,25 +218,8 @@ client.interceptors.response.use(
 
     // ── Existing error handling (falls through for non-401 / no refresh token) ──
     const errorCode = data?.error_code
-    const rawDetail = data?.detail
-    let detailStr = ''
-    if (typeof rawDetail === 'string') {
-      detailStr = rawDetail
-    } else if (Array.isArray(rawDetail)) {
-      detailStr = rawDetail
-        .map((e: unknown) => {
-          if (typeof e === 'string') return e
-          if (e && typeof e === 'object' && 'msg' in e) {
-            const errObj = e as { msg?: string; loc?: unknown[] }
-            const loc = Array.isArray(errObj.loc) ? errObj.loc.join('.') : ''
-            return loc ? `${loc}: ${errObj.msg}` : (errObj.msg ?? '')
-          }
-          return String(e)
-        })
-        .join('; ')
-    } else if (rawDetail && typeof rawDetail === 'object') {
-      detailStr = JSON.stringify(rawDetail)
-    }
+    // detail 已在上方归一化为字符串（见 normalizeDetail），此处无需再判别类型
+    const detailStr = typeof data?.detail === 'string' ? data.detail : ''
 
     if (errorCode && ERROR_CODE_MAP[errorCode]) {
       const type = errorCode === 'AUTH_ERROR' ? 'error' : errorCode === 'RATE_LIMIT' ? 'warning' : 'warning'
