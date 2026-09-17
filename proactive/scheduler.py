@@ -303,21 +303,29 @@ class ProactiveScheduler:
                 message = result.get("message", "")
                 msg_type = result.get("type", "unknown")
                 logger.info("ASE triggered: [%s] %s", msg_type, message)
-                # 通过事件循环发送（APScheduler在非async上下文运行）
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.ensure_future(self._send_to_all(message))
-                    else:
-                        loop.run_until_complete(self._send_to_all(message))
-                except RuntimeError:
-                    # 无事件循环，兜底
-                    if self._send:
-                        self._send(message)
+                self._deliver(message)
         except Exception as e:  # noqa: BLE001
             logger.error("ASE check failed: %s", e)
         finally:
             self._last_check_time = datetime.now(tz=timezone.utc)
+
+    def _deliver(self, message: str) -> None:
+        """在 APScheduler 工作线程内同步投递主动消息。
+
+        旧实现用 asyncio.get_event_loop()+ensure_future —— 非主线程无事件循环
+        必抛 RuntimeError，导致全部消息落入 console 日志兜底、微信通道从未送达
+        （2026-09-17 生产日志实证：64 次触发 0 次送达）。_send_to_all 内部均为
+        同步 HTTP 调用（requests），asyncio.run 新建临时循环执行是安全的。
+        """
+        try:
+            asyncio.run(self._send_to_all(message))
+        except Exception as e:  # noqa: BLE001
+            logger.error("主动消息投递失败: %s", e)
+            if self._send:
+                try:
+                    self._send(message)
+                except Exception:  # noqa: BLE001
+                    logger.exception("主动消息兜底发送失败")
 
     def _run_daily_maintenance(self) -> None:
         """每日维护"""
@@ -418,16 +426,7 @@ class ProactiveScheduler:
                 pass
 
             logger.info("[重要日期] 命中 %s，发送祝福", names)
-            try:
-                import asyncio as _asyncio
-                loop = _asyncio.get_event_loop()
-                if loop.is_running():
-                    _asyncio.ensure_future(self._send_to_all(message))
-                else:
-                    loop.run_until_complete(self._send_to_all(message))
-            except RuntimeError:
-                if self._send:
-                    self._send(message)
+            self._deliver(message)
         except Exception as e:  # noqa: BLE001
             logger.warning("重要日期检查失败: %s", e)
 

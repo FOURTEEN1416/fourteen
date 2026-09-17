@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -298,6 +299,46 @@ class MultiProviderGateway:
 
         logger.error("[MultiGateway] All providers failed, last_error=%s", last_error)
         return f"（所有 LLM 提供商均不可用，请检查配置。最后错误: {last_error}）"
+
+    def chat_sync(
+        self,
+        query: str = "",
+        system_prompt: str = "",
+        history: list | None = None,
+        messages: list | None = None,
+        temperature: float = 0.85,
+        max_tokens: int = 2048,
+        tools: list | None = None,
+        model: str | None = None,
+    ) -> str:
+        """同步入口 — 供 APScheduler 线程/脚本侧调用方使用。
+
+        2026-09-17 补齐：ASE 主动消息生成（MessageGenerator）等重要日期祝福等
+        消费方以 hasattr(llm, "chat_sync") 探测同步能力，本类此前缺失该方法，
+        导致 LLM 生成静默失败、全部回落模板（生产日志实证全为模板消息）。
+        """
+        try:
+            asyncio.get_running_loop()
+            # 已在事件循环内（不应发生于此方法的设计调用场景）：丢线程池执行
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    asyncio.run,
+                    self.chat(
+                        query=query, system_prompt=system_prompt, history=history,
+                        messages=messages, temperature=temperature,
+                        max_tokens=max_tokens, tools=tools, model=model,
+                    ),
+                )
+                return future.result()
+        except RuntimeError:
+            return asyncio.run(
+                self.chat(
+                    query=query, system_prompt=system_prompt, history=history,
+                    messages=messages, temperature=temperature,
+                    max_tokens=max_tokens, tools=tools, model=model,
+                )
+            )
 
     async def chat_stream(
         self,

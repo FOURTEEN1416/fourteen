@@ -251,9 +251,11 @@ class EmotionStyleCoupler:
             parts.append("适度表达亲近")
 
         if style.emoji_freq > 0.7:
-            parts.append("多用表情符号和语气词")
+            parts.append("可以适当使用表情符号，每条最多两个")
         elif style.emoji_freq < 0.3:
-            parts.append("少用表情，语气克制")
+            parts.append("不使用表情符号，语气克制")
+        else:
+            parts.append("表情克制：每条最多一个表情符号，只在情绪强烈时使用")
 
         if style.sentence_length == "short":
             parts.append("回复简短有力")

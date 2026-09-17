@@ -276,6 +276,14 @@ class UserManager:
     def active_user_count(self) -> int:
         return len(self._users)
 
+    def get_bound_wxids(self) -> list[str]:
+        """当前已绑定微信的 wxid 列表（主动消息投递目标）。
+
+        只读 dict.keys() 在 GIL 下原子；_bindings 的写路径均持有
+        _bindings_lock 整体替换/更新键值，读侧快照足够安全。
+        """
+        return list(self._bindings.keys())
+
     # ── 绑定缓存管理 ───────────────────────────────────
     #
     # 绑定缓存是 SQLite wechat_bindings 表的内存镜像，

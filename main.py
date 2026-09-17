@@ -371,12 +371,18 @@ def _run_orchestrator(args: argparse.Namespace, use_console: bool,
             "console", lambda: lambda msg: logger.info("[主动消息] %s", msg)
         )
 
-        def _wechat_sender_factory(_holder=_wechat_holder):
+        def _wechat_sender_factory(_holder=_wechat_holder, _mgr=user_mgr):
             connector = _holder.get("connector")
             if connector is None:
                 return None
             async def _send(msg: str):
-                connector.send_text(msg)
+                # 优先发给已绑定微信；无绑定时回退最后活跃用户（旧行为）
+                wxids = _mgr.get_bound_wxids() if _mgr else []
+                if wxids:
+                    for wxid in wxids:
+                        connector.send_text(msg, to_user=wxid)
+                else:
+                    connector.send_text(msg)
             return _send
         scheduler.register_channel("wechat", _wechat_sender_factory)
         logger.info("主动消息调度器通道已注册（ws/console/wechat）")

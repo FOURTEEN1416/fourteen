@@ -196,7 +196,14 @@ if _scheduler is not None:
             return None
 
         async def _send(msg: str) -> None:
-            connector.send_text(msg)
+            # 优先发给已绑定微信（多用户各自的角色链路）；
+            # 无任何绑定时回退最后活跃用户（旧行为）
+            wxids = user_mgr.get_bound_wxids() if user_mgr else []
+            if wxids:
+                for wxid in wxids:
+                    connector.send_text(msg, to_user=wxid)
+            else:
+                connector.send_text(msg)
 
         return _send
 

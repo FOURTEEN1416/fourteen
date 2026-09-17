@@ -42,7 +42,7 @@ class PersonaProfile:
             "",
             "【说话风格】",
             f"- 正式度: {self.formality:.1f}",
-            f"- Emoji使用: {self.emoji_frequency:.1f}",
+            f"- 表情符号使用: {self._describe_emoji()}（{self.emoji_frequency:.1f}）",
             f"- 情感表达: {self.emotional_expression:.1f}",
         ]
         if self.core_anchors:
@@ -55,6 +55,14 @@ class PersonaProfile:
         elif self.warmth > 0.4:
             return "温和"
         return "冷淡"
+
+    def _describe_emoji(self) -> str:
+        """emoji_frequency 数值 → 明确的文字指令（裸数字对 LLM 无约束力）"""
+        if self.emoji_frequency > 0.7:
+            return "可以适当使用，每条最多两个"
+        if self.emoji_frequency < 0.3:
+            return "不使用表情符号"
+        return "每条最多一个，仅在情绪强烈时使用"
 
     def to_dict(self) -> dict:
         result = {attr: getattr(self, attr) for attr in self._DIMENSIONS}

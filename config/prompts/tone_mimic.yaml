@@ -6,7 +6,7 @@ style_reference_prompt: |
   
   请参考以上风格的以下维度回复当前消息：
   - 正式程度：{formality}
-  - Emoji频率：{emoji_freq}
+  - 表情符号使用：{emoji_freq}（0=不用 1=常用；≤0.6 时每条最多一个且仅情绪强烈时用）
   - 句子长度：{sentence_length}
   - 情感表达：{emotional_expression}
   - 幽默程度：{humor}

@@ -13,13 +13,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Security, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Security, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
-from api.database import get_db
+from api.auth_jwt import verify_token
+from api.database import WechatBinding, get_db
 from api.deps import deps
 from api.path_security import sanitize_id
 from my_character.persona_card import PersonaCardV3
@@ -402,10 +404,28 @@ async def delete_character(
     return {"status": "deleted", "character_id": character_id}
 
 
+async def _optional_user_id(request: Request) -> int | None:
+    """从请求头尽力提取 JWT 用户身份；无/无效 token 返回 None（不抛错）。
+
+    供既支持 API-Key 又想联动用户级数据（如微信绑定）的端点使用。
+    """
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    try:
+        payload = verify_token(auth[len("Bearer "):], expected_type="access")
+        sub = payload.get("sub")
+        return int(sub) if sub is not None else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @router.post("/characters/{character_id}/activate")
 async def activate_character(
     character_id: str,
+    request: Request,
     _auth: bool = Security(verify_api_key_dep),
+    db: AsyncSession = Depends(get_db),
 ):
     """激活角色（设为当前使用的角色）"""
     data = _load_character(character_id)
@@ -428,6 +448,32 @@ async def activate_character(
         user_id = data.get("user_id", "default")
         deps.gf.set_user_character(user_id, character_id)
         logger.info("角色激活已同步到女友管理器: %s → %s", user_id, character_id)
+
+    # ── 同步当前登录用户的微信绑定（2026-09-17：web 切角色 → 微信实时生效）──
+    # 微信回复人设的真源是 wechat_bindings.character_card_id（UserManager 读取），
+    # 旧实现只改卡文件 is_active，与微信链路断裂。此处带 JWT 时同步绑定并
+    # 通过 upsert_binding 刷新运行中进程的内存缓存（无需重启）。
+    web_user_id = await _optional_user_id(request)
+    if web_user_id is not None:
+        result = await db.execute(
+            select(WechatBinding).where(WechatBinding.user_id == web_user_id)
+        )
+        bindings = result.scalars().all()
+        if bindings:
+            for b in bindings:
+                b.character_card_id = character_id
+            await db.commit()
+            gf = deps.gf
+            if gf:
+                for b in bindings:
+                    await gf.upsert_binding(b.wxid, {
+                        "wxid": b.wxid,
+                        "character_card_id": character_id,
+                    })
+            logger.info(
+                "角色激活已同步 %d 条微信绑定（user=%s → 角色 %s）",
+                len(bindings), web_user_id, character_id,
+            )
 
     return {"status": "activated", "character_id": character_id}
 

@@ -259,10 +259,14 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             lines.append(f"细节设定：{str(creator_notes)[:500]}")
 
         anchors = [str(a) for a in card.get("core_anchors", []) if a]
-        # 过长的锚点（>20 字）通常是整句性格描述，归到性格描述中更自然
-        short_anchors = [a for a in anchors if len(a) <= 20]
-        if short_anchors:
-            lines.append(f"核心锚点：{'、'.join(short_anchors)}")
+        # 长锚点截断保留：>20 字的整段性格描述往往是最丰富的人设，
+        # 旧实现直接丢弃会稀释角色（2026-09-17 修复：截断到 60 字而非过滤）
+        kept_anchors = [
+            a if len(a) <= 20 else a[:60] + ("…" if len(a) > 60 else "")
+            for a in anchors
+        ]
+        if kept_anchors:
+            lines.append(f"核心锚点：{'、'.join(kept_anchors)}")
 
         # 性格维度：优先使用可量化的字典；否则使用文本描述
         personality = card.get("personality", {})

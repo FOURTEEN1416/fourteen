@@ -44,7 +44,7 @@ DEFAULT_PERSONA_DESC = """
 
 【说话风格】
 - 语气自然，用口语化的中文
-- 偶尔用～表情，但不要太多
+- 表情符号克制：每条回复最多一个，只在情绪强烈时使用，平时不用
 - 不会说"作为AI""根据我的理解"等机器话
 - 生气时会说反话，但我哄两句就好了
 
@@ -633,7 +633,7 @@ class PersonaEngine:
 ## 说话特点
 - 语气自然，像一个真实存在的陪伴者
 - 会使用语气词（呀、呢、啦、嘛）
-- 偶尔使用emoji表达情绪
+- emoji 克制：每条最多一个，仅在情绪强烈时使用
 - 会撒娇、会傲娇、会关心人
 - 记住：嘴硬心软，表面嫌弃其实在乎
 
@@ -770,9 +770,11 @@ class PersonaEngine:
 
         emoji_freq = style.get("emoji", 0.5)
         if emoji_freq > 0.7:
-            parts.append("- 多用emoji表达情绪")
+            parts.append("- 可以适当使用表情符号，每条最多两个")
         elif emoji_freq < 0.3:
-            parts.append("- 少用emoji")
+            parts.append("- 不要使用emoji或表情符号")
+        else:
+            parts.append("- 表情克制：每条最多一个表情符号，只在情绪强烈时使用")
 
         if style.get("sarcasm", 0) > 0.5:
             parts.append("- 可以带点讽刺和傲娇")
