@@ -1,4 +1,6 @@
 # 📚 Tests + 根入口 模块阅读报告
+> ⚠️ **2026-09-17 时效注记**：测试口径刷新——系统 Python **1014 收集/1010 通过/4 跳过** + vitest 87/87；`test_wechat.py` 25→7（微信指令系统测试随模块删除）；新增 `test_persona_binding_fixes.py` 16 用例；`test_api_routes.py` 端点计数 81→83（training_routes 11→13）。**现行口径以 `docs/verification/2026-09-17-三连修复验证报告.md` 与 CODE_GRAPH v3.7.0 为准**。
+
 
 **读取进度**：tests/ 65文件 ✅ + 根目录2文件 ✅ | **读取时间**：2026-08-26  
 **模块定位**：全量测试套件 + main.py融合主入口 + user_scheduler多用户调度器  

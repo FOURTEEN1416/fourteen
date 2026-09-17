@@ -1,4 +1,6 @@
 # 📚 my_character 模块阅读报告
+> ⚠️ **2026-09-17 时效注记**：本轮 emoji 收口改了本文覆盖的两文件——`persona_engine.py` 三处 emoji 指令语义化（DEFAULT_PERSONA_DESC「偶尔用～表情」→「每条最多一个仅情绪强烈」；base 层同改；style 层中档补明确文案）、`emotion_style_coupler.py` emoji 段三档化。**现行口径以 `CODE_GRAPH.md` v3.7.0 为准**，本文其余机制描述仍可作深度背景阅读。
+
 
 **读取进度**：21/21 文件 ✅ 已全部穷举阅读  
 **读取时间**：2026-08-26  

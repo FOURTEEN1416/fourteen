@@ -1,4 +1,6 @@
 # 📚 Proactive + Plugins 模块阅读报告
+> ⚠️ **2026-09-17 时效注记**：`proactive/scheduler.py` 本轮大改——① `_deliver()` 用 asyncio.run 替代非主线程必炸的 get_event_loop+ensure_future（生产 64 触发 0 送达的根因）；② `_check_ase` 无外部 get_last_chat_time 时回退 ASE 自身 `_hours_since_last_chat()`（旧回退致 missing_bonus 恒 0）；③ 新增 `set_quiet_hours`/`get_vault_config`/`reload_config` 与 vault_collect 定时任务（`data/scheduler_config.json` 跨 worker 真源）。**现行口径以 `CODE_GRAPH.md` v3.7.0 为准**。plugins/ 未变。
+
 
 **读取进度**：7/7 文件 ✅ 全部穷举阅读 | **读取时间**：2026-08-26  
 **模块定位**：主动搭话引擎（ASE）+ 插件系统  

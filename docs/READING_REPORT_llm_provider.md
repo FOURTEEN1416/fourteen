@@ -1,4 +1,6 @@
 # 📚 LLM Provider 模块阅读报告
+> ⚠️ **2026-09-17 时效注记**：`multi_provider_gateway.py` 新增 `chat_sync`（此前缺失导致 ASE 主动消息 LLM 生成静默回落模板——ReloadableLLMGateway.__getattr__ 探测 hasattr 为 False）。**现行口径以 `CODE_GRAPH.md` v3.7.0 为准**。
+
 
 **读取进度**：5/5 文件 ✅ 已全部穷举阅读  
 **读取时间**：2026-08-26  

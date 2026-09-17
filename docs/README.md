@@ -53,7 +53,7 @@
 | [reports/](reports/) | 调研/评审报告（治理调研/SP-5 诊断/对齐验证/拟人化研究四件套——均有状态卡标注） | derived |
 | [P1_BACKLOG.md](P1_BACKLOG.md) | P1 待办（07 月重写版） | 部分 SP-* 与 DECISION_LEDGER 挂起池重叠，以 DECISION_LEDGER 为准 |
 | ~~FEATURE_MAP.md~~ | 已删除（08-28 用户裁决：严重错误） | 由 FUNCTION_INVENTORY.md 替代 |
-| READING_REPORT_*.md（14 份，docs 根） | **模块深度档案**：08-26 全库 200+ 文件穷举阅读的结构化记录（端点全景/机制细节/设计模式），含 CODE_GRAPH 未收录的深度内容 | derived·长期有效（08-28 全文复读改判保留；voice/clone 两份含已删模块，作历史档案）。⚠️ 09-15 注记：wechat_clone/voice/memory_context_multimodal 三份的守卫/silk/图片接线细节已被 W3 收编更新，现行口径以 CODE_GRAPH v3.6.0 + FUNCTION_INVENTORY N-IMG-1 为准（三份文件头部已加注记） |
+| READING_REPORT_*.md（14 份，docs 根） | **模块深度档案**：08-26 全库 200+ 文件穷举阅读的结构化记录（端点全景/机制细节/设计模式），含 CODE_GRAPH 未收录的深度内容 | derived·长期有效（08-28 全文复读改判保留；voice/clone 两份含已删模块，作历史档案）。⚠️ 09-15 注记：wechat_clone/voice/memory_context_multimodal 三份的守卫/silk/图片接线细节已被 W3 收编更新，现行口径以 CODE_GRAPH v3.6.0 + FUNCTION_INVENTORY N-IMG-1 为准（三份文件头部已加注记）。⚠️ 09-17 注记：本轮代码变更波及 8 份（my_character/orchestrator/proactive_plugins/api/shisi/llm_provider/wechat_clone/tests_root），各头部已加 09-17 时效注记并指向 CODE_GRAPH **v3.7.0**；未波及 6 份（character_card/memory_context_multimodal/persona_extractor/security_observability/tools_utils_scripts_cache/voice） |
 | [inventory/file-inventory.md](inventory/file-inventory.md) | 05-31 文件清单历史快照（自带 08-26 状态卡：已失效判断已标注） | archive |
 | [inventory/file-inventory.md](inventory/file-inventory.md) | 文件清单快照 | 口径见其头部声明 |
 | [superpowers/](superpowers/) | 4 份设计/计划工作产物（glass 视觉 spec=现行视觉源头、framework-v1=SP-1 方案输入、create-role 方案A=SP-2 决策链、frontend-rewrite=已执行历史计划） | derived（被 DECISION_LEDGER 引用） |

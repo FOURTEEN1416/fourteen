@@ -1,4 +1,6 @@
 # 📚 Shisi（十四）DDD 核心模块阅读报告
+> ⚠️ **2026-09-17 时效注记**：`shisi/wechat/command_handler.py` 与 `command_parser.py`（微信指令系统）已删除——生产消息链路从未接线，角色切换裁决走 web 控制台（见 DELETION_LOG 09-17 条）；`shisi/api/registry.py` 装配段与 `api/app_factory.py` status 元组同步变更；`shisi/core/models/persona_profile.py` emoji 行语义化。**现行口径以 `CODE_GRAPH.md` v3.7.0 为准**。
+
 
 **读取进度**：124/124 文件 ✅ 全部穷举阅读 | **读取时间**：2026-08-26  
 **模块定位**：十四APP核心功能融合模块 — DDD四层架构（核心层/应用层/基础设施层/API层）+ 12业务子域  

@@ -1,4 +1,6 @@
 # 📚 API 模块阅读报告
+> ⚠️ **2026-09-17 时效注记**：本轮 API 层变更——`character_routes.py` activate 端点带 JWT 时同步当前用户全部 wechat_bindings（web 切角色→微信实时生效）且 update/activate 触发知识索引失效；`training_routes.py` +`/api/knowledge/collect-config` GET/POST、`/proactive/config` 扩展 quiet_hours_*；`main_routes.py` ProactiveConfigRequest 扩展；`run_api.py` 主动消息发送目标改绑定 wxid 定向；端点 206→208。**现行口径以 `CODE_GRAPH.md` v3.7.0 为准**。
+
 
 **读取进度**：41/41 文件 ✅ 全部穷举阅读 | **读取时间**：2026-08-26  
 **模块定位**：FastAPI REST API 层（应用工厂+17路由域204端点+WebSocket+认证+数据库）  
