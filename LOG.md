@@ -1176,3 +1176,18 @@
 **验证**：`PYTHONPATH= python -m pytest -q -p no:cacheprovider` → **1011 passed / 4 skipped / 0 failed（200.12s）**；本轮终态在 **22:19** 运行（落在免打扰时段内），同时反证 D29 修复有效。渐进收敛过程留痕：首轮后 1011/0/4 → 二轮 D22-D27 后 1011/0/4 → D28/D29 前一次 1 failed/1010/4（即 D29 暴露）→ 全部修复后 1011/0/4。`ruff check` 全部变更文件 **All checks passed**；残留扫描三项归零（`with sqlite3.connect` / 无界 monologues / 已删功能关键词）；`compileall` 通过。第二轮未改任何前端文件，前端沿用首轮 **87 passed / 15 文件 + tsc 0 错**。报告已同步：`docs/verification/2026-09-17-全仓扫描验证报告.md` §1.7（含"查了但不是缺陷"对照表）+ §3.1（D29 专项）+ §4/§5/§6。
 
 **新增待裁决项**：`ASEEngine._monologues` 是否整体删除（当前只写不读）；`security/prompt_injection.py::extract_intent` 是否删除（零调用死方法）；`ReflectionEngine._monologues` 与 `ASEEngine._monologues` 职责重叠是否收敛为单一 owner。建议后续补一条 `get_latest_monologue()` 修复后的**正向**用例（本次未加，避免扩大测试面）。
+
+## 2026-09-17（五十四）— 全仓扫描批次收编提交 + A 档部署闭环（跨零点）
+
+**背景**：五十二/五十三两条目的全仓扫描成果（56 文件 +940/-386 行 + 2 个新文件）此前悬于工作树未提交；本条目完成收尾三件与收编部署闭环。
+
+**收尾三件（22:19 报告终态跑测之后的增量，已并入验证报告 §3/§4/§5）**：
+① D29 第二层隔离——仅 `_CONFIG_PATH` monkeypatch 不够，构造默认免打扰 `(23,7)` 在 23:00–07:00 运行仍触发门禁（当晚 23:40 复跑踩中），补 `_is_quiet_hours` 方法替换，用例与挂钟彻底解耦；
+② 落地五十三条"建议后续补"的 D26 正向用例 `test_reflection_engine_get_latest_after_reflect`（reflect 后必须取到刚生成独白 + `_monologues` 有界性，测试收集 1015→1016）；
+③ LoginPage 补 `autoComplete`（username / current-password / new-password）+ 缩进修正。
+
+**回归门（提交前新鲜实测，非沿用报告数字）**：pytest **1012 passed / 4 skipped（117.85s，收集 1016）** + vitest **87/87** + `tsc --noEmit` 0 错。文档口径随之校准：AGENTS §0/§2/§4.3/§9-v1.8、CODE_GRAPH §1.1+更新记录（补"批次收尾"行）、README badge 1099（=1012 Py + 87 FE）。`.gitignore` 补 `.workbuddy-ai/`（AI 工具目录，不入库）；清理 2 张 Playwright 验证截图（mobile-login/intro-375.png）。**规程教训**：`cd frontend && npm test` 后 shell 工作目录滞留 frontend/，首刀 `.gitignore` 追加误落 `frontend/.gitignore` 并被 `git add -u` 顺带暂存——提交前 status 核查抓出，已还原，规则改写入根 `.gitignore`；此后跨目录操作一律显式绝对路径。
+
+**提交与部署（A 档闭环）**：`56cfa69`（59 文件，+1320/-386）push GitHub（`c1d829a..56cfa69`）；服务器工作树净（仅一个 09-15 dist 回滚备份未跟踪目录，pull 不受影响）→ pull 至 `56cfa69c` → `deploy/remote_deploy.sh` 四步（pip -e / npm ci / 前端构建 838ms / systemctl restart + nginx reload，09-18 00:08 完成）→ `systemctl is-active` active + `/api/health` 200（3.1.0 production）→ `git hash-object` 三端抽验 **3/3 一致**（project_paths / optimized_orchestrator / multi_provider_gateway）。
+
+**待裁决项维持五十三条清单不变**：双角色库权威真源 / bg-dynamic·bg-orbs 背景恢复 / `ASEEngine._monologues` 删除 / `extract_intent` 删除 / 双 `_monologues` 收敛。

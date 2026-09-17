@@ -227,3 +227,11 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **服务器**：24 张唯一卡同步（25 含绑定卡）；remote_deploy 全流程部署（dist 重建）；health 200。
 - **测试口径刷新**：系统 Python 1014 收集/1010 通过/4 跳过 + vitest 87/87。文档：CODE_GRAPH v3.7.0 / HANDOFF_REPORT 头部 / verification/2026-09-17 报告。
 - **用户人工项**：微信实测"你是谁"+切卡人设即时性（verification 报告 §三）。
+
+### 2026-09-17 · 主控窗口（zcode）· 全仓扫描批次收编 + A 档部署闭环（56cfa69）
+
+- **收编**：五十二/五十三全仓扫描成果 59 文件（+1320/-386）入 `56cfa69` 推 GitHub——D1-D29 后端（12 处 CWD 锚定/并发异步/缓存热路径/SQLite 连接泄漏/假接口复活）+ F1-F10 移动端 + DOC1-5 端点口径纠错 208→204 + `utils/project_paths.py`/验证报告两个新文件。
+- **收尾三件**：D29 第二层隔离（构造默认免打扰 (23,7) 在 23:00-07:00 仍触发门禁，23:40 复跑踩中后加固）；D26 正向用例 `test_reflection_engine_get_latest_after_reflect`（收集 1015→1016）；LoginPage autoComplete。
+- **回归门（新鲜实测）**：pytest **1012 passed / 4 skipped**（117.85s，收集 1016）+ vitest 87/87 + tsc 0 错。测试口径全链刷新：AGENTS v1.8 §0/§2/§4.3、CODE_GRAPH §1.1+更新记录、README badge 1099。
+- **A 档闭环**：服务器工作树净 → pull `56cfa69c` → remote_deploy 四步 → active + health 200 + git hash-object 抽验 3/3 一致。
+- **待用户裁决**（验证报告 §5）：双角色库权威真源 / bg-dynamic·bg-orbs 背景恢复 / `ASEEngine._monologues` 删除 / `prompt_injection.extract_intent` 删除 / 双 `_monologues` 收敛单一 owner。
