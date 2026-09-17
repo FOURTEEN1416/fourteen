@@ -278,7 +278,7 @@ def test_scheduler_quiet_hours_settable():
 def test_scheduler_vault_config_persistence(tmp_path, monkeypatch):
     from proactive.scheduler import ProactiveScheduler
 
-    monkeypatch.setattr(ProactiveScheduler, "_VAULT_CONFIG_PATH", tmp_path / "vault.json")
+    monkeypatch.setattr(ProactiveScheduler, "_CONFIG_PATH", tmp_path / "sched.json")
     s = ProactiveScheduler()
     assert s.get_vault_config() == {"enabled": False, "interval_minutes": 60}
 
@@ -289,4 +289,21 @@ def test_scheduler_vault_config_persistence(tmp_path, monkeypatch):
     s2 = ProactiveScheduler()
     assert s2.get_vault_config() == {"enabled": True, "interval_minutes": 30}
     s2.set_vault_collect(False)
-    assert (tmp_path / "vault.json").exists()
+    assert (tmp_path / "sched.json").exists()
+
+
+def test_scheduler_config_file_cross_worker(tmp_path, monkeypatch):
+    """非 master worker 直写文件 → master reload_config 拾取（跨 worker 一致性）。"""
+    from proactive.scheduler import ProactiveScheduler
+
+    monkeypatch.setattr(ProactiveScheduler, "_CONFIG_PATH", tmp_path / "sched.json")
+
+    master = ProactiveScheduler()
+    assert master.get_quiet_hours() == (23, 7)
+
+    # 模拟另一 worker 直接写文件（不经过任何实例）
+    ProactiveScheduler.write_config_file(quiet_hours=(22, 8), vault_enabled=True, vault_interval=45)
+
+    master.reload_config()
+    assert master.get_quiet_hours() == (22, 8)
+    assert master.get_vault_config() == {"enabled": True, "interval_minutes": 45}

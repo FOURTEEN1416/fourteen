@@ -105,10 +105,13 @@ class ProactiveScheduler:
         self._health_check_interval = 60  # 秒
         self._quiet_hours = (23, 7)       # 23:00-07:00 免打扰（web 端可调）
 
-        # 知识库定期采集（Vault collect）— web 控制端开关，持久化跨重启
+        # 知识库定期采集（Vault collect）— web 控制端开关
         self._vault_enabled = False
         self._vault_interval_min = 60
-        self._load_vault_config()
+        # 配置以 data/scheduler_config.json 为跨 worker 真源（4 uvicorn worker
+        # 中仅 master 持有调度器，GET/POST 可能落到任一 worker——文件保证读一
+        # 致，master 每次 _check_ase 重载保证写最终生效 ≤5 分钟）
+        self._load_config_file()
 
         logger.info("ProactiveScheduler initialized (APScheduler=%s)", HAS_APSCHEDULER)
 
@@ -235,6 +238,7 @@ class ProactiveScheduler:
         if not (0 <= int(start) <= 23 and 0 <= int(end) <= 23):
             raise ValueError(f"免打扰小时必须在 0-23：got {start}-{end}")
         self._quiet_hours = (int(start), int(end))
+        self._save_config_file()
         logger.info("免打扰时段已更新: %02d:00-%02d:00", start, end)
 
     def get_quiet_hours(self) -> tuple[int, int]:
@@ -242,7 +246,7 @@ class ProactiveScheduler:
 
     # ── 知识库定期采集（web 开关 + 持久化）──────────────
 
-    _VAULT_CONFIG_PATH = Path("data") / "vault_collect_config.json"
+    _CONFIG_PATH = Path("data") / "scheduler_config.json"
 
     def get_vault_config(self) -> dict[str, Any]:
         return {
@@ -255,29 +259,75 @@ class ProactiveScheduler:
         self._vault_enabled = bool(enabled)
         if interval_minutes is not None:
             self._vault_interval_min = max(10, int(interval_minutes))
-        self._save_vault_config()
+        self._save_config_file()
         self._sync_vault_job()
         logger.info("知识库定期采集: enabled=%s interval=%dmin", self._vault_enabled, self._vault_interval_min)
         return self.get_vault_config()
 
-    def _load_vault_config(self) -> None:
-        try:
-            if self._VAULT_CONFIG_PATH.exists():
-                data = json.loads(self._VAULT_CONFIG_PATH.read_text(encoding="utf-8"))
-                self._vault_enabled = bool(data.get("enabled", False))
-                self._vault_interval_min = max(10, int(data.get("interval_minutes", 60)))
-        except Exception as e:  # noqa: BLE001
-            logger.warning("知识采集配置加载失败（用默认值）: %s", e)
+    # ── 跨 worker 配置文件（data/scheduler_config.json 为真源）──
 
-    def _save_vault_config(self) -> None:
+    @classmethod
+    def _read_config_file(cls) -> dict[str, Any]:
         try:
-            self._VAULT_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            self._VAULT_CONFIG_PATH.write_text(
-                json.dumps(self.get_vault_config(), ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            if cls._CONFIG_PATH.exists():
+                return json.loads(cls._CONFIG_PATH.read_text(encoding="utf-8"))
         except Exception as e:  # noqa: BLE001
-            logger.warning("知识采集配置保存失败: %s", e)
+            logger.warning("调度器配置读取失败: %s", e)
+        return {}
+
+    @classmethod
+    def write_config_file(
+        cls,
+        quiet_hours: tuple[int, int] | None = None,
+        vault_enabled: bool | None = None,
+        vault_interval: int | None = None,
+    ) -> dict[str, Any]:
+        """非 master worker 的 POST 端点直接写文件；master 下个 tick 重载生效。"""
+        data = cls._read_config_file()
+        if quiet_hours is not None:
+            data["quiet_hours"] = {"start": int(quiet_hours[0]), "end": int(quiet_hours[1])}
+        vault = data.get("vault") or {}
+        if vault_enabled is not None:
+            vault["enabled"] = bool(vault_enabled)
+        if vault_interval is not None:
+            vault["interval_minutes"] = max(10, int(vault_interval))
+        data["vault"] = vault
+        try:
+            cls._CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            cls._CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("调度器配置保存失败: %s", e)
+        return data
+
+    def _load_config_file(self) -> None:
+        data = self._read_config_file()
+        qh = data.get("quiet_hours") or {}
+        if "start" in qh and "end" in qh:
+            try:
+                self._quiet_hours = (int(qh["start"]), int(qh["end"]))
+            except (TypeError, ValueError):
+                pass
+        vault = data.get("vault") or {}
+        if "enabled" in vault:
+            self._vault_enabled = bool(vault["enabled"])
+        if "interval_minutes" in vault:
+            self._vault_interval_min = max(10, int(vault["interval_minutes"]))
+
+    def _save_config_file(self) -> None:
+        self.write_config_file(
+            quiet_hours=self._quiet_hours,
+            vault_enabled=self._vault_enabled,
+            vault_interval=self._vault_interval_min,
+        )
+
+    def reload_config(self) -> None:
+        """master worker 周期性从文件重载（其他 worker 的写 ≤5 分钟内生效）。"""
+        before = (self._quiet_hours, self._vault_enabled, self._vault_interval_min)
+        self._load_config_file()
+        after = (self._quiet_hours, self._vault_enabled, self._vault_interval_min)
+        if before != after:
+            self._sync_vault_job()
+            logger.info("调度器配置已重载: quiet=%s vault=%s", self._quiet_hours, self.get_vault_config())
 
     def _sync_vault_job(self) -> None:
         """按当前开关状态增删 APScheduler 任务（幂等）。"""
@@ -385,6 +435,9 @@ class ProactiveScheduler:
         """ASE 主动消息检查（APScheduler同步任务）"""
         if not self.ase:
             return
+
+        # master 每 tick 重载跨 worker 配置文件（其他 worker 的写 ≤5 分钟生效）
+        self.reload_config()
 
         try:
             if self._get_last_chat_time:

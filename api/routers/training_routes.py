@@ -151,6 +151,31 @@ async def proactive_state(_auth: bool = Security(verify_api_key_dep)):
     return {}
 
 
+def _scheduler_or_none():
+    return deps.orch.components.get("scheduler") if deps.orch else None
+
+
+def _file_quiet_hours() -> tuple[int, int]:
+    """无调度器的 worker（4 worker 部署仅 master 持有）从配置文件读免打扰。"""
+    from proactive.scheduler import ProactiveScheduler
+
+    qh = (ProactiveScheduler._read_config_file() or {}).get("quiet_hours") or {}
+    try:
+        return (int(qh.get("start", 23)), int(qh.get("end", 7)))
+    except (TypeError, ValueError):
+        return (23, 7)
+
+
+def _file_vault_config() -> dict:
+    from proactive.scheduler import ProactiveScheduler
+
+    vault = (ProactiveScheduler._read_config_file() or {}).get("vault") or {}
+    return {
+        "enabled": bool(vault.get("enabled", False)),
+        "interval_minutes": int(vault.get("interval_minutes", 60)),
+    }
+
+
 @router.get("/api/proactive/config")
 async def get_proactive_config(_auth: bool = Security(verify_api_key_dep)):
     """运行时参数真值（阈值/频率控制器对象，非展示字典）。"""
@@ -158,11 +183,13 @@ async def get_proactive_config(_auth: bool = Security(verify_api_key_dep)):
     if not orch or not orch._ase:
         raise HTTPException(503, "Proactive engine not initialized")
     config = orch._ase.get_runtime_config()
-    scheduler = orch.components.get("scheduler")
+    scheduler = _scheduler_or_none()
     if scheduler is not None and hasattr(scheduler, "get_quiet_hours"):
         start, end = scheduler.get_quiet_hours()
-        config["quiet_hours_start"] = start
-        config["quiet_hours_end"] = end
+    else:
+        start, end = _file_quiet_hours()
+    config["quiet_hours_start"] = start
+    config["quiet_hours_end"] = end
     return config
 
 
@@ -183,13 +210,22 @@ async def update_proactive_config(
         min_interval_minutes=req.min_interval_minutes,
         cooldown_after_reply_minutes=req.cooldown_after_reply_minutes,
     )
-    # 免打扰时段（09-17 web 可调；运行时语义与阈值一致）
-    scheduler = orch.components.get("scheduler")
-    if (req.quiet_hours_start is not None or req.quiet_hours_end is not None) and scheduler is not None:
-        current_start, current_end = scheduler.get_quiet_hours() if hasattr(scheduler, "get_quiet_hours") else (23, 7)
-        new_start = req.quiet_hours_start if req.quiet_hours_start is not None else current_start
-        new_end = req.quiet_hours_end if req.quiet_hours_end is not None else current_end
-        scheduler.set_quiet_hours(new_start, new_end)
+    # 免打扰时段（09-17 web 可调）：live scheduler 立即生效；
+    # 无论本 worker 是否 master 都写文件（master 下个 tick 重载）
+    if req.quiet_hours_start is not None or req.quiet_hours_end is not None:
+        from proactive.scheduler import ProactiveScheduler
+
+        scheduler = _scheduler_or_none()
+        if scheduler is not None and hasattr(scheduler, "get_quiet_hours"):
+            cur_start, cur_end = scheduler.get_quiet_hours()
+        else:
+            cur_start, cur_end = _file_quiet_hours()
+        new_start = req.quiet_hours_start if req.quiet_hours_start is not None else cur_start
+        new_end = req.quiet_hours_end if req.quiet_hours_end is not None else cur_end
+        if scheduler is not None and hasattr(scheduler, "set_quiet_hours"):
+            scheduler.set_quiet_hours(new_start, new_end)
+        else:
+            ProactiveScheduler.write_config_file(quiet_hours=(new_start, new_end))
     logger.info(
         "Proactive config updated: threshold=%s max_daily=%s",
         ase._urgency_threshold, ase.get_runtime_config()["max_daily_messages"],
@@ -204,11 +240,11 @@ class KnowledgeCollectConfigRequest(BaseModel):
 
 @router.get("/api/knowledge/collect-config")
 async def get_knowledge_collect_config(_auth: bool = Security(verify_api_key_dep)):
-    """知识库定期采集（Vault collect）开关状态。"""
-    scheduler = deps.orch.components.get("scheduler") if deps.orch else None
-    if scheduler is None or not hasattr(scheduler, "get_vault_config"):
-        return {"enabled": False, "interval_minutes": 60, "available": False}
-    return {**scheduler.get_vault_config(), "available": True}
+    """知识库定期采集（Vault collect）开关状态（live 优先，文件兜底）。"""
+    scheduler = _scheduler_or_none()
+    if scheduler is not None and hasattr(scheduler, "get_vault_config"):
+        return {**scheduler.get_vault_config(), "available": True}
+    return {**_file_vault_config(), "available": True}
 
 
 @router.post("/api/knowledge/collect-config")
@@ -218,13 +254,24 @@ async def update_knowledge_collect_config(
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     """web 控制端开关：启用/停用知识库定期采集（立即生效并持久化）。"""
-    scheduler = deps.orch.components.get("scheduler") if deps.orch else None
-    if scheduler is None or not hasattr(scheduler, "set_vault_collect"):
-        raise HTTPException(503, "Scheduler not initialized")
-    result = scheduler.set_vault_collect(
-        enabled=bool(req.enabled),
-        interval_minutes=req.interval_minutes,
-    )
+    scheduler = _scheduler_or_none()
+    if scheduler is not None and hasattr(scheduler, "set_vault_collect"):
+        result = scheduler.set_vault_collect(
+            enabled=bool(req.enabled),
+            interval_minutes=req.interval_minutes,
+        )
+    else:
+        # 非 master worker：写文件，master 下个 ASE tick（≤5 分钟）重载生效
+        from proactive.scheduler import ProactiveScheduler
+
+        if req.enabled is None:
+            current = _file_vault_config()
+            req.enabled = current["enabled"]
+        ProactiveScheduler.write_config_file(
+            vault_enabled=bool(req.enabled),
+            vault_interval=req.interval_minutes,
+        )
+        result = _file_vault_config()
     return {"status": "ok", "config": result}
 
 
