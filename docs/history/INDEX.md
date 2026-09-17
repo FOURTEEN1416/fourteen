@@ -95,6 +95,8 @@ GirlfriendManager 按 user_id 隔离（记忆/情感/角色卡独立，LLM/安�
 | 「创建角色方案A未实施」「Demo 是可删残留」「知识库功能深埋」三项判断与代码实况不符 | 08-26 晚 | ✅ **前端 src 全文通读后全部修正**（FEATURE_MAP F 区/H 区重写）：方案A主体已在位；Demo=公开获客门面（登录页有直通入口）；知识库组件 KnowledgePreview 完整存在但零挂载。同时发现幽灵层：UsersPage/UserWorkspace/BindingDetailPage 三页互链无路由 + 6 个零引用 hooks（含 useEmotionTrend）。详见 DECISION_LEDGER SP 区修订 |
 | AGENTS.md 测试基线「1025 Python 测试」与实收不符 | 08-26 | ⚠️ **pytest --collect-only 实测 1035 collected**（+10 漂移，后续新增测试未同步文档）；建议基线更新为 1035 Python + 79 前端 |
 | 后端 Python 文件总量口径 | 08-26 | ✅ **全量普查澄清**：项目实际代码 ~358 py 文件（此前「19,598 个」口径被 .venv 第三方依赖 19,236 个污染）；核心 49 + 非核心 307 已全部穷举阅读，产出 docs/READING_REPORT_*.md 共 12 份 |
+| CODEMAPS/FRONTEND、MODULES 所列 `chatStore.ts`/`api/chat.ts`/`shared/Badge.tsx`/`command_handler.py`/`command_parser.py` 已被 09-17 死代码清洗删除；BACKEND 的 training_routes 端点数（9→13）与 knowledge 相关清单过期 | 09-17 | ✅ FRONTEND/MODULES 头部已加漂移注记；实况以 CODE_GRAPH v3.7.0（208 端点）为准 |
+| VISION 基线「194 端点/20 张现役卡」过期 | 09-17 | ✅ 已修（208 端点/服务器 25 张卡，基线补 09-17 三事实） |
 
 ---
 

@@ -1,6 +1,7 @@
 # 后端地图
 
 > **⚠️ 数字漂移声明**（2026-08-28 更新）：本文端点统计为 07-14 基线快照。权威数字以 `CODE_GRAPH.md`（199 端点 / 16 include_router，2026-08-28 实扫；demo_routes 已删除）为准。
+> **⚠️ 2026-09-17 漂移注记**：training_routes 端点 9→13（+proactive config/send/pause/history + knowledge/collect-config×2）、全网 208 端点；本文清单未逐条回写，实况以 `CODE_GRAPH.md` v3.7.0 为准。
 
 **最近更新:** 2026-07-14
 **版本:** 3.1.0

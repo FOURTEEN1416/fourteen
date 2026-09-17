@@ -13,7 +13,7 @@
 | [VISION.md](VISION.md) | 终态宣言：产品本质/既成事实基线/候选池/Non-Goals/成功判据 | explanation | **truth** |
 | [FUNCTION_INVENTORY.md](FUNCTION_INVENTORY.md) | 功能清单（页-功能点编号，商讨协议定位基准；08-28 重制自代码实况×历史意图） | reference | **truth** |
 | [DECISION_LEDGER.md](DECISION_LEDGER.md) | 决策生死账（真决策清单 + 挂起池 SP-*） | reference（决策记录） | **truth** |
-| 根目录 [CODE_GRAPH.md](../CODE_GRAPH.md) | 代码实况：端点/模块/热路径/指标（当前 **v3.6.0**，2026-09-15 W3 多模态收编增量；图谱库快照仍为 2026-09-02 二次重索引 7997/33187 @ef328a2，待下次重索引） | reference | **truth** |
+| 根目录 [CODE_GRAPH.md](../CODE_GRAPH.md) | 代码实况：端点/模块/热路径/指标（当前 **v3.7.0**，2026-09-17 人设绑定/主动消息三连修 + web 两开关 + 死代码清洗；**208 端点**；图谱库快照仍为 2026-09-02 二次重索引 7997/33187 @ef328a2，待下次重索引） | reference | **truth** |
 | [history/INDEX.md](history/INDEX.md) | 漂移登记簿 + 历史文档演进索引 | reference | **truth** |
 
 配套操作文档（how-to）：
