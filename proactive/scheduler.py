@@ -285,6 +285,11 @@ class ProactiveScheduler:
             if self._get_last_chat_time:
                 last_chat = self._get_last_chat_time()
                 hours = (datetime.now(tz=timezone.utc) - last_chat).total_seconds() / 3600 if last_chat else 99.0
+            elif hasattr(self.ase, "_hours_since_last_chat"):
+                # ASE 引擎自身持久化了 last_chat_time（on_chat 更新、状态文件落盘）。
+                # 旧实现此处回退"距上次调度检查的时间"（≈5 分钟），
+                # 导致 missing_bonus 恒为 0、紧迫度永远到不了阈值（2026-09-17 修复）。
+                hours = self.ase._hours_since_last_chat()
             else:
                 hours = self._hours_since_last_check()
 

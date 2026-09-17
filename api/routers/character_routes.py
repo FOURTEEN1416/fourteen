@@ -340,6 +340,25 @@ async def get_character(
     return data
 
 
+def _invalidate_knowledge_index(character_id: str) -> None:
+    """角色内容变化后清知识索引（内存+磁盘），下次对话由 prompt_builder 从最新卡重建。
+
+    旧索引一旦落盘，ensure_index 优先磁盘加载且永不重建——卡更新/换绑后
+    知识库停留在旧内容（2026-09-17 排查发现绑定卡索引仅含建卡初期琐碎块，
+    卡内丰富的描述/锚点从未进入检索）。磁盘路径与
+    shisi.knowledge.character_knowledge_service._DEFAULT_INDEX_DIR 保持一致。
+    """
+    try:
+        from shisi.knowledge.character_knowledge_service import get_knowledge_service
+
+        svc = get_knowledge_service()
+        svc.clear(character_id)
+        (Path("data") / "knowledge" / f"{sanitize_id(character_id)}.json").unlink(missing_ok=True)
+        logger.info("知识索引已失效，待下次对话重建: %s", character_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("知识索引失效失败（非阻塞）: %s", e)
+
+
 @router.put("/characters/{character_id}")
 async def update_character(
     character_id: str,
@@ -380,6 +399,9 @@ async def update_character(
     # 清除人设缓存，确保下次对话使用最新角色卡
     if deps.orch and hasattr(deps.orch, "invalidate_character_persona_cache"):
         deps.orch.invalidate_character_persona_cache(character_id)
+
+    # 卡内容已变 → 知识索引同步失效（防陈旧检索）
+    _invalidate_knowledge_index(character_id)
 
     return {"status": "updated", "character_id": character_id}
 
@@ -448,6 +470,9 @@ async def activate_character(
         user_id = data.get("user_id", "default")
         deps.gf.set_user_character(user_id, character_id)
         logger.info("角色激活已同步到女友管理器: %s → %s", user_id, character_id)
+
+    # 换绑后知识索引失效重建（旧索引可能停留在该卡早期版本的贫乏内容）
+    _invalidate_knowledge_index(character_id)
 
     # ── 同步当前登录用户的微信绑定（2026-09-17：web 切角色 → 微信实时生效）──
     # 微信回复人设的真源是 wechat_bindings.character_card_id（UserManager 读取），
