@@ -255,3 +255,38 @@ def test_user_manager_get_bound_wxids():
         "wxid_b": {"character_card_id": "c2"},
     }
     assert sorted(um.get_bound_wxids()) == ["wxid_a", "wxid_b"]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  7. web 控制端开关：免打扰时段 + 知识采集持久化（09-17 第二批）
+# ═══════════════════════════════════════════════════════════════
+
+def test_scheduler_quiet_hours_settable():
+    from proactive.scheduler import ProactiveScheduler
+
+    s = ProactiveScheduler()
+    assert s.get_quiet_hours() == (23, 7)
+    s.set_quiet_hours(22, 8)
+    assert s.get_quiet_hours() == (22, 8)
+    try:
+        s.set_quiet_hours(25, 7)
+        raise AssertionError("应拒绝越界小时")
+    except ValueError:
+        pass
+
+
+def test_scheduler_vault_config_persistence(tmp_path, monkeypatch):
+    from proactive.scheduler import ProactiveScheduler
+
+    monkeypatch.setattr(ProactiveScheduler, "_VAULT_CONFIG_PATH", tmp_path / "vault.json")
+    s = ProactiveScheduler()
+    assert s.get_vault_config() == {"enabled": False, "interval_minutes": 60}
+
+    s.set_vault_collect(True, 30)
+    assert s.get_vault_config() == {"enabled": True, "interval_minutes": 30}
+
+    # 新实例从磁盘恢复（跨重启保持开关状态）
+    s2 = ProactiveScheduler()
+    assert s2.get_vault_config() == {"enabled": True, "interval_minutes": 30}
+    s2.set_vault_collect(False)
+    assert (tmp_path / "vault.json").exists()

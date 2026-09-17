@@ -1,14 +1,14 @@
 import { NavLink, Link } from 'react-router-dom'
 import { useState } from 'react'
 import { PanelLeftClose, PanelLeft } from 'lucide-react'
-import { useChatStore } from '../../store/chatStore'
 import { useAuthStore } from '../../store/authStore'
-import { useActiveCharacter } from '../../hooks/useQueries'
+import { useActiveCharacter, useWechatStatus } from '../../hooks/useQueries'
 import { buildGlobalNavGroups } from './navGroups'
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
-  const isConnected = useChatStore((s) => s.isConnected)
+  const { data: wechatStatus } = useWechatStatus()
+  const isConnected = wechatStatus?.connected ?? false
   const { user } = useAuthStore()
   const isAdmin = user?.role === 'admin'
   const { activeCharacter } = useActiveCharacter()

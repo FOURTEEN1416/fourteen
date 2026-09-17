@@ -18,9 +18,6 @@ import { refreshToken as refreshTokenApi } from './auth'
 
 // ── Domain API imports (for re-export and api namespace) ──
 import {
-  chat, chatStream, createSession, listSessions, chatHistory, emotionState, emotionTrend,
-} from './chat'
-import {
   trainingStatus, trainingProgress, trainingClean,
   trainingTest, trainingApply,
 } from './training'
@@ -260,7 +257,13 @@ client.interceptors.response.use(
 export default client
 
 // ── Named re-exports for backward compat (import { chat } from '../api/client') ──
-export { chat, chatStream, createSession, listSessions, chatHistory, emotionState, emotionTrend }
+// emotion 域自 chat.ts 死代码清理后迁入（useQueries 消费中）；chat 会话域已随僵尸 chatStore 一并删除
+export function emotionState() {
+  return client.get('/emotion/state')
+}
+export function emotionTrend(days = 7) {
+  return client.get('/emotion/trend', { params: { days } })
+}
 export { trainingStatus, trainingProgress, trainingClean, trainingTest, trainingApply }
 export { cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset, cloneDeleteConversation, cloneBatchDeleteConversations, cloneUpload, cloneStats }
 export {
@@ -294,7 +297,7 @@ export {
 
 // Legacy `api` namespace object — keeps `import { api } from '../api/client'` working
 export const api = {
-  chat, chatStream, createSession, listSessions, chatHistory, emotionState, emotionTrend,
+  emotionState, emotionTrend,
   health, stats, dashboardStats, config, saveConfig,
   personaProfile, personaEvolutionLog, memoryFacts,
   tools, toolsHealth, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,

@@ -1,4 +1,6 @@
-"""微信指令系统 单元测试。"""
+"""微信适配层单元测试 — 表情适配 + 主动消息增强。
+
+2026-09-17：指令系统（command_handler/command_parser）测试随模块删除而移除（生产链路未接线，用户裁决清洗）。"""
 
 import sys
 
@@ -13,8 +15,6 @@ from shisi.character.store import CharacterStore
 from shisi.config import reset_config
 from shisi.emotion_stage.stage_engine import EmotionStageEngine
 from shisi.migrations import run_migrations
-from shisi.wechat.command_handler import WeChatCommandHandler
-from shisi.wechat.command_parser import WeChatCommandParser
 from shisi.wechat.proactive_messenger import WeChatProactiveMessenger
 from shisi.wechat.sticker_adapter import WeChatStickerAdapter
 
@@ -29,127 +29,6 @@ def tmp_db(tmp_path):
     db = tmp_path / "test.db"
     run_migrations(db)
     return db
-
-
-@pytest.fixture
-def handler(tmp_db):
-    char_mgr = CharacterManager(store=CharacterStore(tmp_db))
-    char_mgr.initialize()
-    affinity = AffinityEnhancer()
-    stage = EmotionStageEngine()
-    return WeChatCommandHandler(
-        character_manager=char_mgr,
-        affinity_enhancer=affinity,
-        stage_engine=stage,
-    ), char_mgr, affinity, stage
-
-
-class TestWeChatCommandParser:
-    def test_switch_character(self):
-        parser = WeChatCommandParser()
-        cmd = parser.parse("切换角色：椎名真昼")
-        assert cmd is not None
-        assert cmd.action == "switch_character"
-        assert cmd.params["character_name"] == "椎名真昼"
-
-    def test_switch_character_colon_variant(self):
-        parser = WeChatCommandParser()
-        cmd = parser.parse("切换角色:真昼")
-        assert cmd is not None
-        assert cmd.action == "switch_character"
-
-    def test_affinity(self):
-        parser = WeChatCommandParser()
-        cmd = parser.parse("好感度")
-        assert cmd.action == "affinity"
-
-    def test_affinity_short(self):
-        parser = WeChatCommandParser()
-        cmd = parser.parse("好感")
-        assert cmd.action == "affinity"
-
-    def test_emotion_status(self):
-        parser = WeChatCommandParser()
-        cmd = parser.parse("情感状态")
-        assert cmd.action == "emotion_status"
-
-    def test_vital_signs(self):
-        parser = WeChatCommandParser()
-        cmd = parser.parse("生理指标")
-        assert cmd.action == "vital_signs"
-
-    def test_send_sticker(self):
-        parser = WeChatCommandParser()
-        cmd = parser.parse("发表情")
-        assert cmd.action == "send_sticker"
-
-    def test_favorite(self):
-        parser = WeChatCommandParser()
-        cmd = parser.parse("收藏")
-        assert cmd.action == "favorite"
-
-    def test_forward(self):
-        parser = WeChatCommandParser()
-        cmd = parser.parse("转发给：十四")
-        assert cmd.action == "forward"
-        assert cmd.params["target_character"] == "十四"
-
-    def test_normal_message_returns_none(self):
-        parser = WeChatCommandParser()
-        assert parser.parse("你好呀") is None
-        assert parser.parse("今天天气怎么样") is None
-        assert parser.parse("") is None
-
-    def test_command_preserves_raw(self):
-        parser = WeChatCommandParser()
-        cmd = parser.parse("好感度")
-        assert cmd.raw == "好感度"
-
-
-class TestWeChatCommandHandler:
-    def test_affinity_command(self, handler):
-        h, _, affinity, _ = handler
-        affinity.update("test_char", 72, "chat")
-        ok, msg = h.handle("好感度", "test_char")
-        assert ok is True
-        assert "72" in msg
-
-    def test_emotion_status_command(self, handler):
-        h, _, _, stage = handler
-        stage.evaluate("test_char", 60)
-        ok, msg = h.handle("情感状态", "test_char")
-        assert ok is True
-        assert "亲密" in msg
-
-    def test_switch_character_command(self, handler):
-        h, char_mgr, _, _ = handler
-        char_mgr.store.save_character(
-            CharaCardV2(data=CharacterData(name="椎名真昼", description="完美"))
-        )
-        ok, msg = h.handle("切换角色：椎名真昼")
-        assert ok is True
-        assert "椎名真昼" in msg
-
-    def test_favorite_command(self, handler):
-        h = handler[0]
-        ok, msg = h.handle("收藏")
-        assert ok is True
-
-    def test_forward_command(self, handler):
-        h = handler[0]
-        ok, msg = h.handle("转发给：十四")
-        assert ok is True
-        assert "十四" in msg
-
-    def test_normal_message_not_handled(self, handler):
-        h = handler[0]
-        ok, msg = h.handle("普通聊天消息")
-        assert ok is False
-
-    def test_vital_signs_placeholder(self, handler):
-        h = handler[0]
-        ok, msg = h.handle("生理指标")
-        assert ok is True
 
 
 class TestWeChatStickerAdapter:

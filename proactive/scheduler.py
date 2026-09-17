@@ -12,9 +12,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("scheduler")
@@ -101,7 +103,12 @@ class ProactiveScheduler:
         self._channels: dict[str, Callable[[], Any]] = {}        # name → sender_factory
         self._channel_instances: dict[str, Callable | None] = {}  # name → instantiated sender
         self._health_check_interval = 60  # 秒
-        self._quiet_hours = (23, 7)       # 23:00-07:00 免打扰
+        self._quiet_hours = (23, 7)       # 23:00-07:00 免打扰（web 端可调）
+
+        # 知识库定期采集（Vault collect）— web 控制端开关，持久化跨重启
+        self._vault_enabled = False
+        self._vault_interval_min = 60
+        self._load_vault_config()
 
         logger.info("ProactiveScheduler initialized (APScheduler=%s)", HAS_APSCHEDULER)
 
@@ -205,6 +212,8 @@ class ProactiveScheduler:
 
             self._scheduler.start()
             self._last_check_time = datetime.now(tz=timezone.utc)
+            # 知识库定期采集任务按持久化配置恢复
+            self._sync_vault_job()
             logger.info("Scheduler started with %d jobs", len(self._scheduler.get_jobs()))
             return True
 
@@ -220,6 +229,102 @@ class ProactiveScheduler:
             logger.info("Scheduler stopped")
 
     # ── 定时任务 ─────────────────────────────────────────
+
+    def set_quiet_hours(self, start: int, end: int) -> None:
+        """设置免打扰时段（web 控制端可调；0-23 整点）。"""
+        if not (0 <= int(start) <= 23 and 0 <= int(end) <= 23):
+            raise ValueError(f"免打扰小时必须在 0-23：got {start}-{end}")
+        self._quiet_hours = (int(start), int(end))
+        logger.info("免打扰时段已更新: %02d:00-%02d:00", start, end)
+
+    def get_quiet_hours(self) -> tuple[int, int]:
+        return self._quiet_hours
+
+    # ── 知识库定期采集（web 开关 + 持久化）──────────────
+
+    _VAULT_CONFIG_PATH = Path("data") / "vault_collect_config.json"
+
+    def get_vault_config(self) -> dict[str, Any]:
+        return {
+            "enabled": self._vault_enabled,
+            "interval_minutes": self._vault_interval_min,
+        }
+
+    def set_vault_collect(self, enabled: bool, interval_minutes: int | None = None) -> dict[str, Any]:
+        """web 控制端开关：启用/停用知识库定期采集，立即生效并持久化。"""
+        self._vault_enabled = bool(enabled)
+        if interval_minutes is not None:
+            self._vault_interval_min = max(10, int(interval_minutes))
+        self._save_vault_config()
+        self._sync_vault_job()
+        logger.info("知识库定期采集: enabled=%s interval=%dmin", self._vault_enabled, self._vault_interval_min)
+        return self.get_vault_config()
+
+    def _load_vault_config(self) -> None:
+        try:
+            if self._VAULT_CONFIG_PATH.exists():
+                data = json.loads(self._VAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+                self._vault_enabled = bool(data.get("enabled", False))
+                self._vault_interval_min = max(10, int(data.get("interval_minutes", 60)))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("知识采集配置加载失败（用默认值）: %s", e)
+
+    def _save_vault_config(self) -> None:
+        try:
+            self._VAULT_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            self._VAULT_CONFIG_PATH.write_text(
+                json.dumps(self.get_vault_config(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("知识采集配置保存失败: %s", e)
+
+    def _sync_vault_job(self) -> None:
+        """按当前开关状态增删 APScheduler 任务（幂等）。"""
+        if not (self._scheduler and self._scheduler.running):
+            return
+        job_id = "vault_collect"
+        if not self._vault_enabled:
+            if self._scheduler.get_job(job_id):
+                self._scheduler.remove_job(job_id)
+            return
+        self._scheduler.add_job(
+            self._safe_job_wrapper(self._run_vault_collect, "vault_collect"),
+            IntervalTrigger(minutes=self._vault_interval_min),
+            id=job_id,
+            name="知识库定期采集",
+            replace_existing=True,
+            misfire_grace_time=300,
+            coalesce=True,
+        )
+
+    def _run_vault_collect(self) -> None:
+        """对 shisi 角色库全部角色做知识提取+索引（VaultCollector.collect_card）。"""
+        if not self._vault_enabled:
+            return
+        try:
+            from shisi.vault import VaultCollector
+
+            from api.deps import deps as _deps
+
+            cm = getattr(getattr(_deps, "shisi_reg", None), "character_manager", None)
+            if cm is None:
+                return
+            collector = VaultCollector()
+            count = 0
+            for state in cm.list_characters():
+                try:
+                    card = cm.load_character(state.character_id)
+                except Exception:  # noqa: BLE001
+                    card = None
+                if card is None:
+                    continue
+                collector.collect_card(state.character_id, card)
+                count += 1
+            if count:
+                logger.info("知识库定期采集完成: %d 个角色已重建索引", count)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("知识库定期采集失败: %s", e)
 
     def _is_quiet_hours(self) -> bool:
         """检查是否在免打扰时段"""

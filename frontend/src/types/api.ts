@@ -65,20 +65,6 @@ export interface AchievementsResponse {
   total: number
 }
 
-export interface ChatMessage {
-  role: 'user' | 'assistant'
-  content: string
-  emotion?: string
-  timestamp: number
-  interrupted?: boolean
-}
-
-export interface ChatResponse {
-  reply: string
-  trace_id: string
-  emotion: EmotionState | null
-}
-
 export interface HealthStatus {
   status: 'healthy' | 'degraded' | 'unhealthy' | 'unknown'
   checks: Record<string, { connected: boolean; detail?: string }>

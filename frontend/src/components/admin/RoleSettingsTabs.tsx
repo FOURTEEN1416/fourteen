@@ -14,7 +14,7 @@ import type { RoleSettingsTab, RoleSettingsCharacter } from '../../types/framewo
 import type { UnifiedCharacterUpdate } from '../../types/api'
 import { Save, Trash2, Copy, Smile } from 'lucide-react'
 import { ENGINE_OPTIONS, MIMO_MODELS } from './RoleSettingsConstants'
-import { enrichCharacter, proactiveGetConfig, proactiveHistory, proactiveSend, proactivePause, updateProactiveConfig } from '../../api/system'
+import { enrichCharacter, proactiveGetConfig, proactiveHistory, proactiveSend, proactivePause, updateProactiveConfig, knowledgeCollectConfig, updateKnowledgeCollectConfig } from '../../api/system'
 import Section from './RoleSettingsSection'
 import KnowledgePreview from '../storyline/KnowledgePreview'
 
@@ -443,6 +443,8 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
   const [dailyLimit, setDailyLimit] = useState(8)
   const [minInterval, setMinInterval] = useState(30)
   const [cooldown, setCooldown] = useState(15)
+  const [quietStart, setQuietStart] = useState(23)
+  const [quietEnd, setQuietEnd] = useState(7)
   const [paused, setPaused] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState('')
@@ -465,6 +467,8 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
           setDailyLimit(cfgRes.data.max_daily_messages ?? 8)
           setMinInterval(cfgRes.data.min_interval_minutes ?? 30)
           setCooldown(cfgRes.data.cooldown_after_reply_minutes ?? 15)
+          setQuietStart(cfgRes.data.quiet_hours_start ?? 23)
+          setQuietEnd(cfgRes.data.quiet_hours_end ?? 7)
           setPaused(!!cfgRes.data.paused)
         }
         if (histRes?.data?.history) setHistory(histRes.data.history)
@@ -479,6 +483,7 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
       await updateProactiveConfig({
         threshold, max_daily: dailyLimit,
         min_interval_minutes: minInterval, cooldown_after_reply_minutes: cooldown,
+        quiet_hours_start: quietStart, quiet_hours_end: quietEnd,
       })
       setSavedAt(new Date().toLocaleTimeString('zh-CN'))
     } catch (e) {
@@ -558,6 +563,8 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
             { label: '每日上限', value: dailyLimit, min: 1, max: 50, unit: '条/天', onChange: setDailyLimit },
             { label: '最小间隔', value: minInterval, min: 5, max: 120, unit: '分钟', onChange: setMinInterval },
             { label: '冷却时间', value: cooldown, min: 5, max: 240, unit: '分钟', onChange: setCooldown },
+            { label: '免打扰开始', value: quietStart, min: 0, max: 23, unit: '点', onChange: setQuietStart },
+            { label: '免打扰结束', value: quietEnd, min: 0, max: 23, unit: '点', onChange: setQuietEnd },
           ].map(s => (
             <div key={s.label} className="flex items-center gap-4">
               <div className="w-24 shrink-0"><span className="text-xs text-gray-600">{s.label}</span></div>
@@ -620,6 +627,47 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
     errors: string[]
   } | null>(null)
   const [enrichError, setEnrichError] = useState<string | null>(null)
+  // 知识库定期采集（Vault collect）开关 — 2026-09-17 web 控制端接入
+  const [collectEnabled, setCollectEnabled] = useState(false)
+  const [collectInterval, setCollectInterval] = useState(60)
+  const [collectSaving, setCollectSaving] = useState(false)
+  const [collectAvailable, setCollectAvailable] = useState(true)
+
+  useEffect(() => {
+    let alive = true
+    knowledgeCollectConfig().then((res) => {
+      if (!alive) return
+      setCollectEnabled(!!res.data?.enabled)
+      setCollectInterval(res.data?.interval_minutes ?? 60)
+      setCollectAvailable(res.data?.available !== false)
+    }).catch(() => setCollectAvailable(false))
+    return () => { alive = false }
+  }, [])
+
+  const handleCollectToggle = async (next: boolean) => {
+    setCollectSaving(true)
+    try {
+      const res = await updateKnowledgeCollectConfig({ enabled: next, interval_minutes: collectInterval })
+      setCollectEnabled(res.data?.config?.enabled ?? next)
+      useErrorStore.getState().addToast({ type: 'success', message: next ? '知识库定期采集已开启' : '知识库定期采集已关闭' })
+    } catch (e) {
+      useErrorStore.getState().addToast({ type: 'error', message: e instanceof Error ? e.message : '操作失败' })
+    } finally {
+      setCollectSaving(false)
+    }
+  }
+
+  const handleCollectIntervalSave = async () => {
+    setCollectSaving(true)
+    try {
+      await updateKnowledgeCollectConfig({ enabled: collectEnabled, interval_minutes: collectInterval })
+      useErrorStore.getState().addToast({ type: 'success', message: `采集间隔已保存：${collectInterval} 分钟` })
+    } catch (e) {
+      useErrorStore.getState().addToast({ type: 'error', message: e instanceof Error ? e.message : '保存失败' })
+    } finally {
+      setCollectSaving(false)
+    }
+  }
 
   const handleEnrich = async () => {
     if (!character.name?.trim()) {
@@ -726,6 +774,29 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
           对话时按相关度检索角色知识库（BM25）；来源含角色卡字段、文档导入、vault 与网络爬取。
         </p>
         <KnowledgePreview characterId={character.id} />
+        {collectAvailable && (
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-white/40 bg-white/30 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-gray-700">定期采集（Vault）</p>
+              <p className="text-[11px] text-gray-400">周期性对角色库全部角色重建知识索引，防卡更新后索引陈旧</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <input
+                type="number"
+                min={10}
+                max={1440}
+                value={collectInterval}
+                onChange={(e) => setCollectInterval(Number(e.target.value) || 60)}
+                onBlur={handleCollectIntervalSave}
+                disabled={collectSaving}
+                className="w-16 rounded-lg border border-gray-200 px-2 py-1 text-xs"
+                aria-label="采集间隔（分钟）"
+              />
+              <span className="text-[11px] text-gray-400">分钟</span>
+              <Toggle checked={collectEnabled} onChange={handleCollectToggle} />
+            </div>
+          </div>
+        )}
       </Section>
 
       {/* Timestamps */}

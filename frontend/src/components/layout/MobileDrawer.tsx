@@ -1,9 +1,8 @@
 import { useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import { X } from 'lucide-react'
-import { useChatStore } from '../../store/chatStore'
 import { useAuthStore } from '../../store/authStore'
-import { useActiveCharacter } from '../../hooks/useQueries'
+import { useActiveCharacter, useWechatStatus } from '../../hooks/useQueries'
 import { buildGlobalNavGroups } from './navGroups'
 
 interface MobileDrawerProps {
@@ -13,7 +12,8 @@ interface MobileDrawerProps {
 
 /** 移动端全量导航抽屉（<md）：由 Breadcrumb 顶栏汉堡按钮唤起，入口与桌面 Sidebar 完全一致 */
 export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
-  const isConnected = useChatStore((s) => s.isConnected)
+  const { data: wechatStatus } = useWechatStatus()
+  const isConnected = wechatStatus?.connected ?? false
   const { user } = useAuthStore()
   const isAdmin = user?.role === 'admin'
   const { activeCharacter } = useActiveCharacter()

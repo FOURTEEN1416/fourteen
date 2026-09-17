@@ -56,6 +56,8 @@ class ProactiveConfigRequest(BaseModel):
     max_daily: int | None = None
     min_interval_minutes: int | None = None
     cooldown_after_reply_minutes: int | None = None
+    quiet_hours_start: int | None = Field(default=None, ge=0, le=23, description="免打扰开始小时")
+    quiet_hours_end: int | None = Field(default=None, ge=0, le=23, description="免打扰结束小时")
 
 class ToolToggleRequest(BaseModel):
     enabled: bool

@@ -35,27 +35,5 @@ class TestToolRegistryHealthCheck:
         assert "plugin not loaded" in result["fake_tool"]["error"]
 
 
-class TestCommandHandlerSendSticker:
-    def test_send_sticker_with_recommend(self):
-        from shisi.wechat.command_handler import WeChatCommandHandler
-        from shisi.wechat.command_parser import Command
-        sticker_mgr = MagicMock()
-        sticker_mgr.recommend.return_value = [
-            {"sticker_id": "happy_01", "category": "开心", "file_path": "/tmp/happy.png"},
-        ]
-        handler = WeChatCommandHandler(sticker_manager=sticker_mgr)
-        cmd = Command(action="send_sticker", raw="发表情", params={})
-        result = handler._handle_send_sticker(cmd, "")
-        assert "happy_01" in result
-        assert "表情推荐" in result
-
-    def test_send_sticker_no_match(self):
-        from shisi.wechat.command_handler import WeChatCommandHandler
-        from shisi.wechat.command_parser import Command
-        sticker_mgr = MagicMock()
-        sticker_mgr.recommend.return_value = []
-        handler = WeChatCommandHandler(sticker_manager=sticker_mgr)
-        cmd = Command(action="send_sticker", raw="发表情", params={})
-        result = handler._handle_send_sticker(cmd, "")
-        assert "没有匹配" in result
-
+# 2026-09-17：TestCommandHandlerSendSticker 随微信指令处理器删除而移除
+# （shisi/wechat/command_handler.py 生产链路从未接线，用户裁决清洗）

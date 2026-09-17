@@ -40,8 +40,15 @@ export function proactiveSend(messageType?: string) {
   return client.post('/proactive/send', messageType ? { message_type: messageType } : {})
 }
 export function proactivePause(paused: boolean) { return client.post('/proactive/pause', { paused }) }
-export function updateProactiveConfig(cfg: { threshold?: number; max_daily?: number; min_interval_minutes?: number; cooldown_after_reply_minutes?: number }) {
+export function updateProactiveConfig(cfg: { threshold?: number; max_daily?: number; min_interval_minutes?: number; cooldown_after_reply_minutes?: number; quiet_hours_start?: number; quiet_hours_end?: number }) {
   return client.post('/proactive/config', cfg)
+}
+
+// ── Knowledge collect (Vault) ──
+
+export function knowledgeCollectConfig() { return client.get('/knowledge/collect-config') }
+export function updateKnowledgeCollectConfig(cfg: { enabled?: boolean; interval_minutes?: number }) {
+  return client.post('/knowledge/collect-config', cfg)
 }
 
 // ── Logs ──

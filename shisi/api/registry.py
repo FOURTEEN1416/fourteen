@@ -23,7 +23,6 @@ from ..stats.analytics import AnalyticsService
 from ..sticker.sticker_manager import StickerManager
 from ..vital_signs.vital_engine import VitalSignsEngine
 from ..voice.emotion_tts import VoiceEnhancer
-from ..wechat.command_handler import WeChatCommandHandler
 from ..wechat.proactive_messenger import WeChatProactiveMessenger
 from . import (
     affinity_routes,
@@ -50,7 +49,6 @@ class AiyuRegistry:
     vital_engine: VitalSignsEngine | None = None
     voice_enhancer: VoiceEnhancer | None = None
     analytics_service: AnalyticsService | None = None
-    wechat_handler: WeChatCommandHandler | None = None
     proactive_messenger: WeChatProactiveMessenger | None = None
     character_service: CharacterService | None = None
 
@@ -97,15 +95,8 @@ def setup_shisi(
 
     # 2026-08-28 MiMo-only：语音训练（GPT-SoVITS LoRA）管线已随 voice_training 删除，
     # 音色克隆走 MiMo voiceclone API（/api/mimo/clone）。
-
-    reg.wechat_handler = WeChatCommandHandler(
-        character_manager=reg.character_manager,
-        affinity_enhancer=reg.affinity_enhancer,
-        stage_engine=reg.stage_engine,
-        sticker_manager=reg.sticker_manager,
-        favorite_manager=reg.favorite_manager,
-        forward_manager=reg.forward_manager,
-    )
+    # 2026-09-17：WeChatCommandHandler（微信指令处理器）删除——生产消息链路从未
+    # 接线（悬空能力），用户裁决不走微信指令入口（角色切换走 web 控制台）。
 
     reg.proactive_messenger = WeChatProactiveMessenger(
         affinity_enhancer=reg.affinity_enhancer,

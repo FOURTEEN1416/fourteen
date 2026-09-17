@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.auth import verify_api_key_dep
 from api.auth_jwt import require_role
@@ -157,7 +157,13 @@ async def get_proactive_config(_auth: bool = Security(verify_api_key_dep)):
     orch = deps.orch
     if not orch or not orch._ase:
         raise HTTPException(503, "Proactive engine not initialized")
-    return orch._ase.get_runtime_config()
+    config = orch._ase.get_runtime_config()
+    scheduler = orch.components.get("scheduler")
+    if scheduler is not None and hasattr(scheduler, "get_quiet_hours"):
+        start, end = scheduler.get_quiet_hours()
+        config["quiet_hours_start"] = start
+        config["quiet_hours_end"] = end
+    return config
 
 
 @router.post("/api/proactive/config")
@@ -177,11 +183,49 @@ async def update_proactive_config(
         min_interval_minutes=req.min_interval_minutes,
         cooldown_after_reply_minutes=req.cooldown_after_reply_minutes,
     )
+    # 免打扰时段（09-17 web 可调；运行时语义与阈值一致）
+    scheduler = orch.components.get("scheduler")
+    if (req.quiet_hours_start is not None or req.quiet_hours_end is not None) and scheduler is not None:
+        current_start, current_end = scheduler.get_quiet_hours() if hasattr(scheduler, "get_quiet_hours") else (23, 7)
+        new_start = req.quiet_hours_start if req.quiet_hours_start is not None else current_start
+        new_end = req.quiet_hours_end if req.quiet_hours_end is not None else current_end
+        scheduler.set_quiet_hours(new_start, new_end)
     logger.info(
         "Proactive config updated: threshold=%s max_daily=%s",
         ase._urgency_threshold, ase.get_runtime_config()["max_daily_messages"],
     )
-    return {"status": "ok", "config": ase.get_runtime_config()}
+    return {"status": "ok", "config": await get_proactive_config(_auth=True)}
+
+
+class KnowledgeCollectConfigRequest(BaseModel):
+    enabled: bool | None = None
+    interval_minutes: int | None = Field(default=None, ge=10, le=1440)
+
+
+@router.get("/api/knowledge/collect-config")
+async def get_knowledge_collect_config(_auth: bool = Security(verify_api_key_dep)):
+    """知识库定期采集（Vault collect）开关状态。"""
+    scheduler = deps.orch.components.get("scheduler") if deps.orch else None
+    if scheduler is None or not hasattr(scheduler, "get_vault_config"):
+        return {"enabled": False, "interval_minutes": 60, "available": False}
+    return {**scheduler.get_vault_config(), "available": True}
+
+
+@router.post("/api/knowledge/collect-config")
+async def update_knowledge_collect_config(
+    req: KnowledgeCollectConfigRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """web 控制端开关：启用/停用知识库定期采集（立即生效并持久化）。"""
+    scheduler = deps.orch.components.get("scheduler") if deps.orch else None
+    if scheduler is None or not hasattr(scheduler, "set_vault_collect"):
+        raise HTTPException(503, "Scheduler not initialized")
+    result = scheduler.set_vault_collect(
+        enabled=bool(req.enabled),
+        interval_minutes=req.interval_minutes,
+    )
+    return {"status": "ok", "config": result}
 
 
 class ProactivePauseRequest(BaseModel):

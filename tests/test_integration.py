@@ -171,10 +171,6 @@ class TestE2EFlow:
         assert resp.status_code == 200
         assert resp.json()["data"]["stage"] == "亲密"
 
-        ok, msg = reg.wechat_handler.handle("好感度", cid)
-        assert ok is True
-        assert "60" in msg
-
     def test_vital_signs_emotion_flow(self, app_and_reg):
         """E2E: 情感→生理指标→微信格式化"""
         _, reg, _ = app_and_reg
