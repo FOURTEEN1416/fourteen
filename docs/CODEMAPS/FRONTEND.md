@@ -1,5 +1,7 @@
 # 前端地图
 
+> **⚠️ 2026-09-17 漂移注记**：本图所列 `command_handler.py`/`command_parser.py`（微信指令系统）、前端 `chatStore.ts`/`api/chat.ts`、`shared/Badge.tsx` 已于当日死代码清洗中删除（DELETION_LOG 09-17 条）；实况以 `CODE_GRAPH.md` v3.7.0 为准。
+
 > **⚠️ 数字漂移声明**（2026-08-26 治理标注）：本文路由统计含 3 个孤儿页面（UsersPage/UserWorkspace/BindingDetailPage 未挂载导航）。权威清单以 `CODE_GRAPH.md` + `docs/FEATURE_MAP.md` F 区为准。
 
 **最近更新:** 2026-08-01

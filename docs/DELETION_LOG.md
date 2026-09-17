@@ -2,6 +2,20 @@
 
 # Code Deletion Log
 
+## [2026-09-17] 死代码清洗（用户裁决"死代码可以直接清洗掉"）
+
+### 删除对象与证据
+- `frontend/src/components/shared/Badge.tsx`（27 行）：零消费——storyline 三件用 `common/Badge`，admin 用 `UserBadges`；`shared/index.ts` 导出无引用方。删后 tsc 0 错/vitest 87 绿
+- `frontend/src/store/chatStore.ts` + `frontend/src/api/chat.ts`：僵尸聊天域——`setConnected` 零调用（侧栏"已连接"圆点恒 false 撒谎）；Sidebar/MobileDrawer 改接 `useWechatStatus` 真源（React Query 30s 轮询+SSE）；`emotionState/emotionTrend` 两个活函数迁入 `client.ts` 存续；孤儿类型 `ChatMessage/ChatResponse` 一并移除（EmotionState 原定义在 types/api 首行，未动）
+- `shisi/wechat/command_handler.py` + `command_parser.py`：微信指令系统（"切换角色：xxx"等指令集）——生产消息链路**从未接线**（仅 registry 实例化，wechat_connector/UserManager 零调用），用户裁决角色切换走 web 控制台（activate→wechat_bindings 已于同日接线）
+- 测试联动：`test_wechat.py` 25→7（指令 Parser/Handler 用例随模块移除，sticker/proactive_messenger 测试保留）；`test_tool_health.py` TestCommandHandlerSendSticker 2 用例；`test_integration.py` wechat_handler 断言 3 行；`shisi/api/registry.py` 装配段 + `api/app_factory.py` status 元组同步
+
+### 登记未删（悬空但有保留理由，待后续裁决）
+- `shisi/wechat/proactive_messenger.py`：registry 装配但生产主动消息走 `proactive/scheduler.py`——留观
+- `shisi/wechat/sticker_adapter.py`：前端表情包为未立项功能（STICKERS-1），立项时可能复用
+
+---
+
 ## [2026-09-15] 事故残骸与过期恢复产物清扫（用户指令"临时产物垃圾清除干净"）
 
 - `.git.broken-0006/`：09-14 主仓 .git 损毁事故的残骸备份（实测 0 字节空壳）——事故已复盘入档、主仓已重建并三端同步（本地=GitHub=服务器），残骸无恢复价值

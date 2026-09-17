@@ -6,13 +6,12 @@
 ---
 
 工作目录：`D:\Desktop\ai-girlfriend`（主仓）｜`C:\Users\FOUR\.agents`（Agent 层真源）
-当前日期：2026-09-15 ｜ 分支：`main`（主仓）｜ HEAD：`91f2042`（= origin/main 已 push；服务器已 pull 同 commit 并部署，health 200）
-当前目标：**云南赛区复赛冲刺**（材料 9/16 17:00 截止；必传=商业计划书 PDF+项目展示 PPT PDF+企业对接意向截图）＋**软著提交与论文投稿**＋**多模态已收编（W3 闭环）**
+当前日期：2026-09-17 ｜ 分支：`main`（主仓）｜ HEAD：`4f6ed29`（= origin/main 已 push；服务器已 pull + remote_deploy 全流程部署含前端构建，health 200）
+当前目标：**生产体验修复已闭环**（人设绑定/emoji/主动消息三连修 + web 控制端两开关 + 死代码清洗）＋云南复赛材料用户人工项（见 BOARD）
 
-> ⚡ **2026-09-15 增量刷新**（详情见 `LOG.md` 四十五~四十七 + `docs/board/BOARD.md` 追加区）：
-> W1 论文✅（中国科技论文在线投稿版 v2 就绪：署名已填/39 文献独立核验/模板宏保留）｜W2 软著✅（全套待本人提交）｜W3 多模态✅已收编部署（图片通道 d104ce6 + silk 语音 79dbae3 + 守卫放行 1/3/34 d74a8e6）｜W4 验证✅（989 passed/0 failed）。
-> 宪法已升 **v1.7**（§8 Owner 唯一制——09-14 夜并发窗口曾回滚主检出工作树，写入必须同帧 commit）；09-14 夜主仓 `.git` 曾损毁、已重建（`.git.broken-0006` 为残骸备份）。
-> ⚠️ 测试口径：文档 1117（1042 Py+75 FE，09-01 .venv 实测）——该环境随事故丢失；2026-09-15 系统 Python 3.12 复测 **995 收集/989 通过/6 跳过**（差额说明见 docs/verification/W4 报告 §3）。
+> ⚡ **2026-09-17 增量刷新**（详情见 `LOG.md` 五十/五十一 + `docs/verification/2026-09-17-三连修复验证报告.md`）：
+> ① **web 切角色→微信实时生效**（activate 同步当前用户全部 wechat_bindings + upsert_binding 实时缓存；修复 web 激活与微信人设真源两条线断裂）；② **emoji 收口**（默认每条最多 1 个仅情绪强烈，五处提示词语义化）；③ **主动消息打通**（asyncio.run 直投修非主线程投递 bug + 紧迫度回退 ASE 自身 last_chat + MultiProviderGateway 补 chat_sync；生产实证 64 触发 0 送达→1/1 "微信主动发送成功"）；④ **知识索引失效重建**（update/activate 触发，防陈旧检索）；⑤ **web 两开关**（免打扰时段 + 知识库定期采集，`data/scheduler_config.json` 跨 worker 真源）；⑥ **服务器 25 张角色卡**（24 张规范化同步 + 绑定卡 62105bca）；⑦ **死代码清洗**（Badge/chatStore/api-chat/微信指令系统，见 DELETION_LOG 09-17 条）。
+> ⚠️ 测试口径（09-17 系统 Python 复测）：**1014 收集/1010 通过/4 跳过** + vitest **87/87** + tsc 0 错（文档口径 1117 的历史说明见 W4 报告 §3）。
 
 ---
 

@@ -70,11 +70,11 @@
 |------|--------|
 | BASIC-1 | 基础信息：五维性格滑条/锚点编辑/口头禅/描述 |
 | VOICE-TAB-1 | 语音 tab：MiMo 模型三选（基础/克隆/设计）+ **保存落盘**（GAP-4 结案 09-01：POST /characters/{id}/voice，mimo_model 进 extra_params；克隆/设计音色创建指引至语音工作台） |
-| MESSAGE-1 | 消息 tab：频率控制四参数（紧迫阈值 0-10/每日上限/最小间隔/冷却）**保存真生效**（apply_runtime_config 写运行时控制器；08-28 修复旧版只写字典不生效）+ 保存按钮 |
+| MESSAGE-1 | 消息 tab：频率控制参数（紧迫阈值 0-10/每日上限/最小间隔/冷却）**保存真生效**（apply_runtime_config 写运行时控制器；08-28 修复旧版只写字典不生效）+ **免打扰起止时段（09-17 新增，滑条 0-23 点；`data/scheduler_config.json` 持久化跨重启/跨 worker）** + 保存按钮 |
 | MESSAGE-2 | 主动消息开关：暂停/恢复调度（POST /proactive/pause，暂停仅停自动触发不影响手动） |
 | MESSAGE-3 | 手动控制：立即发送一条主动消息（POST /proactive/send 绕过频率、计入统计）+ 最近 5 条发送记录。**09-17：投递链修复——调度器线程内 asyncio.run 直投（旧 get_event_loop 必炸致 64 触发 0 送达）+ 发送目标改绑定 wxid 定向 + MultiProviderGateway 补 chat_sync（LLM 生成此前静默回落模板）** |
 | MESSAGE-4 | 统计卡真数据：今日主动/最后发送（08-28 修复：旧 history 读不存在的 `_sent_messages` 属性，一直返回空） |
-| DATA-1 | 数据 tab：概览统计（消息/记忆条数）+ 网络人设增强按钮（/api/characters/{id}/enrich）+ **知识库真实管理区**（SP-4 结案 09-01：KnowledgePreview 挂载——真实 stats + 检索测试，替换假 RAG 三卡与占位横幅） |
+| DATA-1 | 数据 tab：概览统计（消息/记忆条数）+ 网络人设增强按钮（/api/characters/{id}/enrich）+ **知识库真实管理区**（SP-4 结案 09-01：KnowledgePreview 挂载——真实 stats + 检索测试，替换假 RAG 三卡与占位横幅）+ **定期采集开关（09-17 新增：Toggle+间隔输入，+/api/knowledge/collect-config GET/POST；scheduler vault_collect 周期任务对 shisi 角色库全量重建知识索引；默认关）** |
 | STICKERS-1 | 表情包 tab：常用表情网格展示 + 自定义贴图上传占位（**上传保存为未立项功能，非缺陷**——后端无贴图存储 API，shisi/sticker 仅推荐/安全检查库；立项需用户裁决） |
 | TIMELINE-1 | 剧情时间线 tab（内嵌 StorylineEditor） |
 

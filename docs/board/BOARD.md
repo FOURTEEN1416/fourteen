@@ -218,3 +218,12 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **文档刷新**：CODE_GRAPH v3.6.0；AGENTS v1.7.1（测试口径注记）；README 计数修正；HANDOFF_REPORT 刷至 91f2042；LOG 四十七。
 - **论文联动**：P×V 依赖排查=零冲突零修订（论文从未声称图片被丢弃；ASR 仍关；VisionHandler 职责未变）。
 - **窗口状态**：W1✅ W2✅ W3✅ W4✅——本轮四窗口任务全部闭环。剩余=用户人工项（软著填报/论文投稿/对接意向截图/BP+PPT PDF 导出）。
+
+### 2026-09-17 · 主控窗口（zcode）· 生产体验三连修 + web 两开关 + 死代码清洗（全部收编部署）
+
+- **三连修**（10c8f0f/5e4ecb5）：web 切角色→微信实时生效（activate↔wechat_bindings 接线）；emoji 收口（默认每条≤1 仅情绪强烈）；主动消息打通（asyncio.run 直投+紧迫度接线+chat_sync 补齐）——生产实证 64 触发 0 送达 → 1/1 "微信主动发送成功"。
+- **web 两开关**（8a34b23/4f6ed29）：免打扰时段滑条 + 知识库定期采集 Toggle（+/api/knowledge/collect-config×2，端点 206→208；data/scheduler_config.json 跨 worker 真源）。
+- **死代码清洗**（用户裁决）：Badge/chatStore/api-chat/微信指令系统，DELETION_LOG 09-17 记账；留观 proactive_messenger/sticker_adapter。
+- **服务器**：24 张唯一卡同步（25 含绑定卡）；remote_deploy 全流程部署（dist 重建）；health 200。
+- **测试口径刷新**：系统 Python 1014 收集/1010 通过/4 跳过 + vitest 87/87。文档：CODE_GRAPH v3.7.0 / HANDOFF_REPORT 头部 / verification/2026-09-17 报告。
+- **用户人工项**：微信实测"你是谁"+切卡人设即时性（verification 报告 §三）。

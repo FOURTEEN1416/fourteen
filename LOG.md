@@ -1121,3 +1121,16 @@
 **验证**：pytest 1028 通过/4 跳过（基线 1015+新增 13，零回归）；vitest 87/87；tsc 0 错；部署后 health 200；**主动消息端到端送达实证**："19:14:54 ASE triggered [share] 哼，这么晚了还打扰我…🌙 / 微信主动发送成功 / 主动消息已投递: wechat"（非模板=chat_sync LLM 生成生效）。
 
 **文档**：FUNCTION_INVENTORY（ROLES-2/MESSAGE-3 增强注记）、CODE_GRAPH v3.7.0、DECISION_LEDGER 09-17 两行入账。
+
+
+## 2026-09-17（五十一）— 用户裁决批次：web 两开关 + 死代码清洗 + docs 全面盘点
+
+**用户指令**：① CollectLoop/免打扰"不是需要在 web 控制端来开启和关闭吗"（=做成控制台开关）；② 死代码"可以直接清洗掉"；③ docs/ 大面积未更新质疑——盘点全部文档。
+
+**web 两开关（8a34b23 + 4f6ed29）**：① 免打扰时段滑条（MessageTab，/proactive/config 扩展 quiet_hours_*）；② 知识库定期采集 Toggle+间隔（DATA tab，+/api/knowledge/collect-config GET/POST；scheduler vault_collect APScheduler 任务对 shisi 角色库全量重建索引，默认关）——CollectLoop 死接线以调度任务形态复活，开关交给用户。**跨 worker 一致性**：4 uvicorn worker 仅 master 持调度器 → `data/scheduler_config.json` 为真源（GET 文件兜底 / POST live+文件双写 / master 每 ASE tick reload ≤5min 拾取）；修复前非 master worker 返回 available:false。端点 206→208（training_routes 11→13）。
+
+**死代码清洗（用户裁决，DELETION_LOG 09-17 条记账）**：删 shared/Badge.tsx（零消费）、chatStore.ts+api/chat.ts（setConnected 零调用，侧栏圆点恒 false 撒谎；Sidebar/MobileDrawer 改接 useWechatStatus 真源；emotionState/emotionTrend 迁入 client.ts）、shisi 微信指令系统 command_handler/command_parser（生产链路从未接线，角色切换已裁决走 web；registry/app_factory/测试联动，test_wechat 25→7）。留观：proactive_messenger/sticker_adapter（表情包立项可能复用）。
+
+**docs 盘点（现行层更新 vs 历史快照不回写）**：更新=DELETION_LOG/CODE_GRAPH（v3.7.0 双批次+端点 208）/FUNCTION_INVENTORY（MESSAGE-1/DATA-1/ROLES-2/MESSAGE-3）/DECISION_LEDGER（09-17 三行）/HANDOFF_REPORT（头部刷新至 4f6ed29）/verification 新报告/本 LOG/BOARD 追加区/CODEMAPS FRONTEND+MODULES 漂移注记/AGENTS §4.3 测试口径。不回写=READING_REPORT_*、history/、superpowers/、stages/、inventory/、designs/、research/、legal/、plans/、reports/（时点快照，回写破坏审计线索；CODEMAPS INDEX 已声明实数以 CODE_GRAPH 为准）。
+
+**验证**：pytest 1014 收集/1010 通过/4 跳过（相关套件 123 过）；vitest 87/87；tsc 0 错；remote_deploy 全流程部署（含服务端 npm build，dist 20:45 重建）+ health 200 + collect-config available:true + quiet_hours 字段就位。遗留用户实测项见 verification 报告 §三。

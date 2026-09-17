@@ -1,5 +1,7 @@
 # 后端业务模块地图
 
+> **⚠️ 2026-09-17 漂移注记**：本图所列 `command_handler.py`/`command_parser.py`（微信指令系统）、前端 `chatStore.ts`/`api/chat.ts`、`shared/Badge.tsx` 已于当日死代码清洗中删除（DELETION_LOG 09-17 条）；实况以 `CODE_GRAPH.md` v3.7.0 为准。
+
 **最近更新:** 2026-07-30（修正不存在的文件引用，对齐实际目录结构）
 **Python 版本:** ≥3.10 | **总文件:** ~309 .py 文件
 

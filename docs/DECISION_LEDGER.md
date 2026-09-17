@@ -96,6 +96,8 @@
 | 09-15 | 论文不填中图分类号（整行删除）；软著快照刷新至 `91f2042`+开发完成日期 2026-09-15 | 用户指令 | ✅ | 投稿版 v2 / 软著交付清单 v1.1 |
 | 09-17 | **人设/主动消息三连修**（生产日志实证驱动）：① web"设为活跃"接线 wechat_bindings（带 JWT 同步当前用户全部绑定，upsert_binding 实时缓存；SP-9 删除的绑定页**不恢复**，RolesPage activate 即切换入口）；② emoji 默认=每条最多一个、仅情绪强烈时用（五处提示词语义化）；③ 主动消息投递修复（asyncio.run 直投/绑定 wxid 定向/紧迫度回退 ASE 自身 last_chat/chat_sync 补齐）；④ 角色卡长锚点截断保留；⑤ update/activate 知识索引失效重建 | 用户裁决（web 端切换即可/emoji 推荐/全部跟随/可中断） | ✅ 已执行 | `10c8f0f`+`5e4ecb5`；服务器部署+送达实证；1028 Py+87 FE |
 | 09-17 | **角色卡同步**：本地 data/characters 53 张 → 同名去重 29 → 24 张唯一卡规范化（ASCII id）入服务器 config/characters（保留绑定卡 62105bca 不覆盖） | 用户裁决"这个肯定要" | ✅ 已执行 | 服务器 25 张卡 JSON 校验全过 |
+| 09-17 | **web 控制端两开关**（用户裁决"这个不是需要在 web 控制端来开启和关闭吗"）：① 免打扰时段可调（/proactive/config 扩展 quiet_hours_*，MessageTab 滑条）；② 知识库定期采集开关（+/api/knowledge/collect-config，DATA tab Toggle；CollectLoop 死接线以 vault_collect 调度任务形态复活，开关交用户）；`data/scheduler_config.json` 为跨 worker 真源（4 worker 仅 master 持调度器） | 用户裁决 | ✅ 已执行 | 8a34b23+4f6ed29；端点 206→208；远端验证 available:true |
+| 09-17 | **死代码直接清洗**（用户裁决）：删 shared/Badge.tsx、chatStore.ts+api/chat.ts（僵尸聊天域，侧栏圆点恒 false）、shisi 微信指令系统 command_handler/command_parser（生产未接线；角色切换已裁决走 web）；proactive_messenger/sticker_adapter 登记留观 | 用户裁决"死代码可以直接清洗掉" | ✅ 已执行 | DELETION_LOG 09-17 条；测试 1014 收集/1010 通过 |
 
 ## 二、四项冲突裁决记录（真值仲裁存档）
 
