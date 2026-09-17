@@ -5,11 +5,15 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
 logger = logging.getLogger("proactive.reflection")
+
+# 内心独白保留条数（消费方 get_latest_monologue 只取最后一条）
+_MONOLOGUE_MAX = 200
 
 
 @dataclass
@@ -28,7 +32,7 @@ class ReflectionEngine:
     ):
         self.llm_func = llm_func
         self.reflection_mode = reflection_mode
-        self._monologues: list[InnerMonologue] = []
+        self._monologues: deque[InnerMonologue] = deque(maxlen=_MONOLOGUE_MAX)
 
     def reflect(
         self,
@@ -38,10 +42,16 @@ class ReflectionEngine:
         hours_since_last: float,
     ) -> InnerMonologue:
         if self.reflection_mode == "llm" and self.llm_func:
-            return self._reflect_with_llm(user_message, reply, affinity_level)
-        return self._reflect_with_rules(
-            user_message, reply, affinity_level, hours_since_last,
-        )
+            monologue = self._reflect_with_llm(user_message, reply, affinity_level)
+        else:
+            monologue = self._reflect_with_rules(
+                user_message, reply, affinity_level, hours_since_last,
+            )
+        # 旧实现只 return 不记录：_monologues 从未被写入，导致
+        # get_latest_monologue() **恒返回 None**（暴露但不记录的半成品状态）。
+        # 记录与暴露必须成对，否则该访问器是永远为空的假接口。
+        self._monologues.append(monologue)
+        return monologue
 
     def _reflect_with_llm(
         self, user_msg: str, reply: str, affinity: int,

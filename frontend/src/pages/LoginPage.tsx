@@ -111,6 +111,7 @@ export default function LoginPage() {
                 placeholder="请输入邮箱或用户名"
                 required
                 autoFocus
+                autoComplete="username"
                 className="input-macaron w-full glass-card rounded-lg px-3 py-2.5 text-sm"
               />
             </div>
@@ -190,9 +191,10 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-            placeholder={mode === 'register' ? PASSWORD_HINT : '输入密码'}
-            required
-            minLength={mode === 'register' ? PASSWORD_MIN_LENGTH : 1}
+              placeholder={mode === 'register' ? PASSWORD_HINT : '输入密码'}
+              required
+              minLength={mode === 'register' ? PASSWORD_MIN_LENGTH : 1}
+              autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
               className="input-macaron w-full glass-card rounded-lg px-3 py-2.5 text-sm"
             />
           </div>

@@ -248,7 +248,7 @@ export default function PsychProfilePage() {
                       </h2>
                       <RiskBadge level={mh.overall_risk ?? 'low'} />
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div className="rounded-xl bg-white/50 p-3">
                         <p className="text-[11px] text-gray-400 mb-1">抑郁指征（PHQ-9 口径）</p>
                         <p className="text-lg font-bold text-gray-700">{mh.depression?.total_score ?? 0}<span className="text-xs text-gray-400 font-normal"> / 27</span></p>

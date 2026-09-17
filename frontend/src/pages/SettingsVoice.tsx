@@ -43,7 +43,7 @@ function EngineSwitcher({
   return (
     <section>
       <h3 className="mb-3 text-sm font-semibold text-gray-700">语音引擎</h3>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2">
         {ENGINE_OPTIONS.map((opt) => (
           <button
             key={opt.value}

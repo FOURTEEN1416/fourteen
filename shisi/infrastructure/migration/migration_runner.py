@@ -11,6 +11,10 @@ from pathlib import Path
 
 from shisi.core.models.character_aggregate import CharacterAggregate
 from shisi.infrastructure.persistence.sqlite_repository import SQLiteCharacterRepository
+from utils.project_paths import project_path
+
+_DEFAULT_DB_PATH = project_path("data", "sqlite.db")
+_DEFAULT_CHAR_DIR = project_path("data", "characters")
 
 
 @dataclass
@@ -22,7 +26,10 @@ class MigrationResult:
     backup_path: str | None = None
 
 
-def run(db_path: Path = Path("data/sqlite.db"), char_dir: Path = Path("data/characters")) -> MigrationResult:
+def run(
+    db_path: Path = _DEFAULT_DB_PATH,
+    char_dir: Path = _DEFAULT_CHAR_DIR,
+) -> MigrationResult:
     result = MigrationResult()
 
     backup_path = db_path.parent / f"sqlite.db.backup.{datetime.now(tz=timezone.utc).strftime('%Y%m%d_%H%M%S')}"

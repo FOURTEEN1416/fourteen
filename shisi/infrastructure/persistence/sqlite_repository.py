@@ -12,12 +12,15 @@ from shisi.core.models.character_aggregate import CharacterAggregate
 from shisi.core.models.emotion_type import EmotionType
 from shisi.core.models.emotional_state import EmotionalState
 from shisi.core.models.persona_profile import PersonaProfile
+from utils.project_paths import project_path
 
 from .schema import CHARACTERS_V2_DDL, CHARACTERS_V2_INDEXES
 
+_DEFAULT_DB_PATH = project_path("data", "sqlite.db")
+
 
 class SQLiteCharacterRepository:
-    def __init__(self, db_path: Path = Path("data/sqlite.db")):
+    def __init__(self, db_path: Path = _DEFAULT_DB_PATH):
         self.db_path = db_path
         self._init_schema()
 

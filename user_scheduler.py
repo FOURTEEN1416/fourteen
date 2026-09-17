@@ -109,13 +109,41 @@ class UserManager:
         return EmotionEngine()
 
     def _get_character_engine(self, instance: UserInstance, character_id: str) -> EmotionEngine:
-        """获取“用户 × 角色”专属情绪引擎，并同步兼容属性 emotion_engine。"""
+        """获取“用户 × 角色”专属情绪引擎，并同步兼容属性 emotion_engine。
+
+        容量控制（2026-09-17 修复）：每个 (用户 × 角色) 组合都会创建一个
+        EmotionEngine（内部持有状态与可选线程池）。旧实现只增不删，用户反复
+        切换角色时引擎数量无界增长。现按 LRU 上限淘汰，且**永不淘汰当前活跃角色**。
+        """
         engine = instance.emotion_engines.get(character_id)
         if engine is None:
             engine = self._create_user_engine()
-            instance.emotion_engines[character_id] = engine
+        # 先发布活跃指针，再做淘汰：否则淘汰逻辑无法区分"待回收的旧活跃引擎"
+        # 与"新活跃引擎"，会把旧活跃引擎从字典移除却不 close（资源泄漏）。
         instance.emotion_engine = engine
+        # 记录最近使用顺序（dict 保序，重插即移到末尾）
+        instance.emotion_engines.pop(character_id, None)
+        instance.emotion_engines[character_id] = engine
+        self._evict_stale_engines(instance, keep=character_id)
         return engine
+
+    #: 单个用户最多保留的情绪引擎数（用户 × 角色 组合数上限）
+    _MAX_ENGINES_PER_USER = 8
+
+    def _evict_stale_engines(self, instance: UserInstance, keep: str) -> None:
+        """超出上限时按 LRU 关闭并移除最久未使用的角色引擎。
+
+        dict 保序 + 每次访问重插到末尾 ⇒ 队首即最久未使用（LRU）。
+        """
+        while len(instance.emotion_engines) > self._MAX_ENGINES_PER_USER:
+            victim = next((cid for cid in instance.emotion_engines if cid != keep), None)
+            if victim is None:
+                break
+            stale = instance.emotion_engines.pop(victim)
+            try:
+                stale.close()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("回收角色 %s 情绪引擎失败: %s", victim, e)
 
     # ── 核心入口 ──────────────────────────────────────────
 
@@ -226,10 +254,19 @@ class UserManager:
     # ── 角色卡分配 ───────────────────────────────────────
 
     def set_user_character(self, user_id: str, card_id: str) -> bool:
-        if user_id not in self._users:
-            return False
-        self._users[user_id].character_card_id = card_id
-        self._get_character_engine(self._users[user_id], card_id)
+        """为用户切换角色卡。
+
+        线程安全（2026-09-17 修复）：旧实现直接读写 `self._users[...]` 与
+        `instance.emotion_engines`，**未持 `_users_lock`** —— 与 `_get_or_create` /
+        `remove_user` / `upsert_binding` 并发时可能出现"刚移除又被写回"、
+        字典在迭代中被修改等竞态。现与其他写路径统一加锁。
+        """
+        with self._users_lock:
+            instance = self._users.get(user_id)
+            if instance is None:
+                return False
+            instance.character_card_id = card_id
+            self._get_character_engine(instance, card_id)
         logger.info("用户 %s 角色卡 → %s", user_id, card_id)
         return True
 

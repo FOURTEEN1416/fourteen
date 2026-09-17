@@ -539,7 +539,11 @@ class ASEEngine:
         self._last_sent_type: str | None = None
         self._emotion_state: dict = {}
         self._affinity_level: int = 0
-        self._monologues: list[InnerMonologue] = []
+        # 内心独白：目前仅写入、无任何读取方（全仓 grep 确认）。
+        # 旧实现是**无上限 list**，而 on_chat 每轮对话、reflect 每次 tick 都会 append
+        # ——长跑服务下随消息量无界增长。改为与 _recent_messages / sent_history
+        # 一致的有界 deque，保留调试可读性的同时消除泄漏。
+        self._monologues: deque[InnerMonologue] = deque(maxlen=200)
 
         self._config = {
             "morning_hours": (7, 9),

@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,13 +23,15 @@ from pydantic import BaseModel, Field
 
 from api.auth_jwt import require_role
 from api.database import User
+from utils.project_paths import project_path
 
 logger = logging.getLogger("api.routers.llm_providers")
 
 router = APIRouter(prefix="/api/llm-providers", tags=["llm-providers"])
 
 # ── 配置文件路径 ──────────────────────────────
-_CONFIG_PATH = Path("config/llm_providers.json")
+# 锚定项目根：CWD 相对路径在非仓库根启动时会读到空配置并覆盖写坏真源
+_CONFIG_PATH = project_path("config", "llm_providers.json")
 _CONFIG_LOCK = threading.Lock()
 
 # 预设供应商 key（仅作为元信息标记，前端显示"预设"徽章；不影响增删改）

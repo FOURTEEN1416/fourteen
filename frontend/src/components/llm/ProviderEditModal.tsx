@@ -140,7 +140,7 @@ export default function ProviderEditModal({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="block text-xs text-gray-600 mb-1">显示名称 <span className="text-rose-500">*</span></label>
               <input
@@ -163,7 +163,7 @@ export default function ProviderEditModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div>
               <label className="block text-xs text-gray-600 mb-1">排序</label>
               <input
@@ -231,7 +231,7 @@ export default function ProviderEditModal({
                 className="w-full px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50 font-mono"
               />
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
                 <label className="block text-xs text-gray-600 mb-1">模型名</label>
                 <input

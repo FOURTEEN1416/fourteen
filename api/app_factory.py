@@ -2,8 +2,9 @@
 REST API 应用工厂
 
 仅负责创建 FastAPI 实例、配置中间件、挂载子路由。
-业务路由按域拆分为 16 个 include_router 调用(共 206 端点,实扫 2026-09-01:含成就 2/emotion distribution/proactive 手动控制/BYOK meta/consent/日记种子+查询/重要日期),
-模型/常量/Helper 仍保留在 api.main_routes。详细端点分布见 CODE_GRAPH.md §4.2。
+业务路由按域拆分挂载（2026-09-17 内省实测：**204 个 APIRoute / 171 条唯一路径**，
+其中 95 GET / 74 POST / 20 DELETE / 15 PUT；`len(app.routes)=208` 另含 4 条框架路由
+`/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`）。详细端点分布见 CODE_GRAPH.md §4.2。
 """
 
 from __future__ import annotations
@@ -234,18 +235,18 @@ def create_api_app(
     logger.info("健康检查路由已挂载 (/api/health, /api/ready)")
 
     # ═══════════════════════════════════════════════════
-    # 挂载主路由（已拆分为 9 个子路由，共 75 端点）
+    # 挂载主路由（已拆分为 8 个子路由，共 83 端点；2026-09-17 内省实测）
     # ═══════════════════════════════════════════════════
 
-    app.include_router(misc_router)         # 10 端点: health/stats/memory/logs/config/channels/routes
-    app.include_router(chat_router)         # 10 端点: chat/session + wechat channels
-    app.include_router(personality_router)  #  9 端点: emotion/persona/psych
+    app.include_router(misc_router)         # 16 端点: health/stats/memory/logs/config/channels/routes
+    app.include_router(chat_router)         # 11 端点: chat/session + wechat channels
+    app.include_router(personality_router)  # 10 端点: emotion/persona/psych
     app.include_router(users_router)        #  7 端点: users/*
-    app.include_router(training_router)     # 11 端点: training/* + proactive/*（含手动控制）
-    app.include_router(tools_router)        #  5 端点: tools/* + plugins/*
+    app.include_router(training_router)     # 13 端点: training/* + proactive/*（含手动控制）
+    app.include_router(tools_router)        #  6 端点: tools/* + plugins/*
     app.include_router(safety_router)       # 12 端点: safety/rag/voice/files/cache
-    app.include_router(clone_router)        #  7 端点: clone/*
-    logger.info("主路由已拆分为 9 个子路由 (75 端点)")
+    app.include_router(clone_router)        #  8 端点: clone/*
+    logger.info("主路由已拆分为 8 个子路由 (83 端点)")
 
     # ── 用户认证 API ──
     # 2026-08-31：去 try 静默吞——认证路由消失=登录全挂，必须 fail-fast 而非降级
@@ -411,20 +412,25 @@ def _setup_fallback_rate_limiter(app: FastAPI, max_requests: int = 60) -> None:
     from collections import defaultdict
 
     _rate_limit_store: dict[str, list[float]] = defaultdict(list)
+    # 每个 key 的最近一次请求时间。用于把清理从 O(键数 × 窗口内记录数) 降到 O(键数)：
+    # 旧实现每次清理都要遍历并重建所有 key 的时间戳列表，而清理持有 _rate_limit_lock，
+    # 该锁在**每个请求**的中间件里都会被获取 —— 高基数（扫描/爬虫）下会形成一次
+    # 全站请求停顿。改为按 last_seen 直接判定空闲 key，不再重建列表。
+    _rate_limit_last_seen: dict[str, float] = {}
     _rate_limit_lock = threading.Lock()
     _rate_limit_last_cleanup: list[float] = [time.time()]
     _max_requests = max_requests
+    # 硬上限：清理间隔内 key 数超过此值时立即触发一次清理，防止内存被高基数 key 撑爆
+    _max_keys = 50_000
 
     def _cleanup_expired_records(now: float, window_seconds: int):
-        expired_keys = []
-        for key, timestamps in _rate_limit_store.items():
-            valid_timestamps = [t for t in timestamps if now - t < window_seconds]
-            if valid_timestamps:
-                _rate_limit_store[key] = valid_timestamps
-            else:
-                expired_keys.append(key)
-        for key in expired_keys:
-            del _rate_limit_store[key]
+        idle_keys = [
+            key for key, seen in _rate_limit_last_seen.items()
+            if now - seen >= window_seconds
+        ]
+        for key in idle_keys:
+            _rate_limit_last_seen.pop(key, None)
+            _rate_limit_store.pop(key, None)
 
     def _simple_rate_limit(request: Request, window_seconds: int = 60) -> bool:
         client_ip = request.client.host if request.client else "unknown"
@@ -432,10 +438,12 @@ def _setup_fallback_rate_limiter(app: FastAPI, max_requests: int = 60) -> None:
         now = time.time()
 
         with _rate_limit_lock:
-            if now - _rate_limit_last_cleanup[0] > 300:
+            if (now - _rate_limit_last_cleanup[0] > 300
+                    or len(_rate_limit_last_seen) > _max_keys):
                 _cleanup_expired_records(now, window_seconds)
                 _rate_limit_last_cleanup[0] = now
 
+            _rate_limit_last_seen[key] = now
             _rate_limit_store[key] = [t for t in _rate_limit_store[key] if now - t < window_seconds]
 
             if len(_rate_limit_store[key]) >= _max_requests:

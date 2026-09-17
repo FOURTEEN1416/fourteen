@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -80,7 +81,10 @@ class AffinityEnhancer:
 
     def _record_affinity(self, cid: str, old: float, new: float, delta: float, reason: str, source: str) -> None:
         try:
-            with sqlite3.connect(str(self._db_path)) as conn:
+            # 必须用 closing()：`with sqlite3.connect(...)` 只管理**事务**（退出时
+            # commit/rollback），**不会关闭连接** —— 每次调用都会泄漏一个连接，
+            # 累积后耗尽文件句柄。
+            with closing(sqlite3.connect(str(self._db_path))) as conn, conn:
                 conn.execute(
                     "INSERT INTO affinity_records (character_id, old_value, new_value, delta, reason, source) VALUES (?,?,?,?,?,?)",
                     (cid, old, new, delta, reason, source),
@@ -90,7 +94,7 @@ class AffinityEnhancer:
 
     def _audit(self, cid: str, action: str, detail: str) -> None:
         try:
-            with sqlite3.connect(str(self._db_path)) as conn:
+            with closing(sqlite3.connect(str(self._db_path))) as conn, conn:
                 conn.execute(
                     "INSERT INTO affinity_audit (character_id, action, detail) VALUES (?,?,?)",
                     (cid, action, detail),

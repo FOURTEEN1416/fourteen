@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -335,14 +336,22 @@ async def send_proactive_now(
     delivered = False
     if scheduler is not None:
         try:
-            import asyncio as _asyncio
-            loop = _asyncio.get_event_loop()
-            if loop.is_running():
-                _asyncio.ensure_future(scheduler._send_to_all(result.get("message", "")))
-            else:
-                loop.run_until_complete(scheduler._send_to_all(result.get("message", "")))
+            # 本端点为 async def，事件循环必然在运行中 —— 旧的
+            # get_event_loop()+is_running()+run_until_complete 分支中，
+            # run_until_complete 永不可达（循环已在跑，调用会抛 RuntimeError），
+            # 属于死分支。改用 create_task 并**保留引用**：
+            # asyncio 文档明确要求持有 task 引用，否则可能在执行途中被 GC 回收
+            # （表现为"偶发不投递"）。orchestrator 的 _background_tasks 正是为此存在。
+            task = asyncio.create_task(
+                scheduler._send_to_all(result.get("message", ""))
+            )
+            bg = getattr(orch, "_background_tasks", None)
+            if bg is not None:
+                bg.add(task)
+                task.add_done_callback(bg.discard)
             delivered = True
-        except RuntimeError:
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Proactive 异步投递调度失败，回退同步发送: %s", e)
             if getattr(scheduler, "_send", None):
                 scheduler._send(result.get("message", ""))
                 delivered = True

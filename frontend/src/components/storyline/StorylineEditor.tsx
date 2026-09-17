@@ -295,7 +295,7 @@ export default function StorylineEditor({ characterId }: StorylineEditorProps) {
           {enabled && (
             <>
               {/* 时间参数 */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="block text-[10px] text-gray-500 mb-1">每句话增加（分钟）</label>
                   <input
@@ -354,7 +354,7 @@ export default function StorylineEditor({ characterId }: StorylineEditorProps) {
                       </div>
                       {editingStageIdx === idx && (
                         <div className="space-y-2 pl-1">
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                             <div>
                               <label className="block text-[10px] text-gray-400">开始时间(min)</label>
                               <input type="number" value={stage.timing.start_minutes}

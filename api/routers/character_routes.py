@@ -28,14 +28,15 @@ from my_character.persona_card import PersonaCardV3
 from shisi.knowledge.crawler_adapter import get_crawler_adapter
 from shisi.voice.character_voice import CharacterVoiceManager
 from utils.character_helpers import normalize_character_card, sanitize_character_name
+from utils.project_paths import project_path
 
-PRESETS_DIR = Path("data/presets")
+PRESETS_DIR = project_path("data", "presets")
 
 logger = logging.getLogger("api.character_routes")
 
 router = APIRouter(prefix="/api", tags=["character"])
 
-CHARACTERS_DIR = Path("config/characters")
+CHARACTERS_DIR = project_path("config", "characters")
 
 
 # ── 请求/响应模型 ────────────────────────────────────────

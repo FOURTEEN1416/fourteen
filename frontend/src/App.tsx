@@ -72,7 +72,7 @@ function AnimatedSuspense({ children }: { children: React.ReactNode }) {
 function ProtectedLayout() {
   return (
     <AuthGuard>
-      <div className="flex h-[100dvh] overflow-hidden bg-dynamic bg-orbs">
+      <div className="flex h-[100dvh] overflow-hidden">
         <ScrollProgress />
         <ParticleCanvas />
         <Sidebar />

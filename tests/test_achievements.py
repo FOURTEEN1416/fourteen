@@ -233,6 +233,8 @@ def test_daily_maintenance_recalculates_all_characters(module_session_factory, t
     (chars_dir / "b.json").write_text('{"name": "无ID"}', encoding="utf-8")
     (chars_dir / "bad.json").write_text("{broken", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
+    # 角色库目录已锚定项目根，chdir 不再生效，须显式注入
+    monkeypatch.setattr(sched, "_CHARACTERS_DIR", chars_dir)
 
     # 会话工厂指向测试库（与 module fixtures 同一引擎族）
     monkeypatch.setattr(db_mod, "_async_session", module_session_factory)
@@ -282,5 +284,6 @@ def test_daily_maintenance_no_character_dir(module_session_factory, tmp_path, mo
     """角色库目录不存在 → 返回 0，不抛错。"""
     import proactive.scheduler as sched
 
-    monkeypatch.chdir(tmp_path)  # tmp 下无 config/characters
+    # 角色库目录已锚定项目根，chdir 不再生效，须显式注入不存在的路径
+    monkeypatch.setattr(sched, "_CHARACTERS_DIR", tmp_path / "config" / "characters")
     assert sched.run_achievement_maintenance() == 0

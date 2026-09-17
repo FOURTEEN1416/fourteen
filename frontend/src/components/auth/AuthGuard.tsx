@@ -35,7 +35,7 @@ export default function AuthGuard({ children }: AuthGuardProps) {
   // 未初始化完成 → 显示加载
   if (!isInitialized) {
     return (
-      <div className="flex items-center justify-center h-screen bg-dynamic">
+      <div className="flex items-center justify-center min-h-[100dvh]">
         <div className="flex flex-col items-center gap-3">
           <span className="w-6 h-6 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
           <span className="text-sm text-gray-400">验证身份中…</span>

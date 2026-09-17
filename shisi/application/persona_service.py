@@ -54,6 +54,13 @@ class PersonaService:
             emotion_engine=emotion_engine,
             **engine_kwargs,
         )
+        # 角色卡缓存：character_id -> (mtime, 展平后的卡片 dict)
+        # 命中路径上 build_system_prompt 与一致性检查**每条消息各调一次**
+        # _load_character_card，旧实现每次都要做磁盘 I/O + JSON 解析，未命中
+        # 文件名时还要 glob 整个 config/characters 目录逐个 json.load
+        # （2026-09-17 修复：热路径上最贵的同步 I/O 之一）。
+        self._card_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+        self._card_cache_max = 64
 
     def build_system_prompt(
         self,
@@ -155,8 +162,24 @@ class PersonaService:
         character.emotional_state = emotional_state
         return character
 
+    def invalidate_character_cache(self, character_id: str | None = None) -> None:
+        """清除角色卡缓存。
+
+        character_id 为 None 时清空全部；否则只清指定角色。
+        角色卡被更新/删除后调用，保证下一条消息读到新卡。
+        """
+        if character_id is None:
+            self._card_cache.clear()
+        else:
+            self._card_cache.pop(character_id, None)
+
     def _load_character_card(self, character_id: str) -> dict[str, Any] | None:
-        """从 config/characters 加载角色卡数据，并展平为统一格式。"""
+        """从 config/characters 加载角色卡数据，并展平为统一格式。
+
+        带 mtime 感知缓存：命中且文件未变更时直接返回内存副本，
+        避免每条消息的磁盘 I/O + JSON 解析（含未命中文件名时的整目录 glob）。
+        文件被外部改写（mtime 变化）时自动失效，无需显式清缓存。
+        """
         from pathlib import Path
 
         from utils.character_helpers import normalize_character_card
@@ -166,14 +189,27 @@ class PersonaService:
         if not chars_dir.exists():
             return None
 
+        direct_path = chars_dir / f"{character_id}.json"
+        mtime = 0.0
+        if direct_path.exists():
+            try:
+                mtime = direct_path.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+
+        cached = self._card_cache.get(character_id)
+        if cached is not None and cached[0] == mtime and mtime > 0.0:
+            return cached[1]
+
         raw_card: dict[str, Any] | None = None
+        matched_path: Path | None = None
 
         # 1. 按文件名查
-        direct_path = chars_dir / f"{character_id}.json"
         if direct_path.exists():
             try:
                 with open(direct_path, encoding="utf-8") as fh:
                     raw_card = json.load(fh)
+                matched_path = direct_path
             except (OSError, json.JSONDecodeError):
                 pass
 
@@ -186,17 +222,34 @@ class PersonaService:
                             data = json.load(fh)
                         if data.get("id") == character_id:
                             raw_card = data
+                            matched_path = f
                             break
                     except (OSError, json.JSONDecodeError):
                         continue
             except OSError:
                 pass
 
-        if not raw_card:
-            return None
+        # 记录命中文件的 mtime（文件名直查与 id 遍历两条路径都要记），
+        # 否则 id 遍历命中的卡片 mtime 恒为 0 → 缓存永不生效，每轮都重扫目录。
+        if matched_path is not None:
+            try:
+                mtime = matched_path.stat().st_mtime
+            except OSError:
+                mtime = 0.0
 
         # 展平 SillyTavern 等嵌套格式，确保 name/description/personality 等字段可用
-        return normalize_character_card(raw_card)
+        card = normalize_character_card(raw_card) if raw_card else None
+        self._cache_card(character_id, mtime, card)
+        return card
+
+    def _cache_card(
+        self, character_id: str, mtime: float, card: dict[str, Any] | None
+    ) -> None:
+        """写入角色卡缓存（带容量上限，避免无界增长）。"""
+        if len(self._card_cache) >= self._card_cache_max and character_id not in self._card_cache:
+            # 简单 FIFO 淘汰：角色卡数量级远小于上限，无需 LRU 复杂度
+            self._card_cache.pop(next(iter(self._card_cache)), None)
+        self._card_cache[character_id] = (mtime, card)
 
     def _build_character_from_card(
         self, character_id: str, emotional_state: EmotionalState

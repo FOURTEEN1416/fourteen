@@ -39,11 +39,15 @@ class PersonaEvaluator:
         passing_threshold: float = 0.75,
         anchor_checker: Any = None,
         constraint_validator: Any = None,
+        history_max: int = 200,
     ):
         self._weights = weights or EVALUATION_WEIGHTS
         self._threshold = passing_threshold
         self._anchor_checker = anchor_checker
         self._constraint_validator = constraint_validator
+        # 评估历史按轮次追加，长跑服务下必须设上限（消费方只用最近若干条，
+        # 见 get_average_score 的 last_n 切片）。旧实现只 append 从不裁剪 —— 无界增长。
+        self._history_max = history_max
         self._history: list[EvaluationReport] = []
 
     def evaluate_response(
@@ -87,6 +91,9 @@ class PersonaEvaluator:
             suggestions=suggestions,
         )
         self._history.append(report)
+        if len(self._history) > self._history_max:
+            # 与 EvolutionEngine / persona_extractor.models 的裁剪写法保持一致
+            self._history = self._history[-self._history_max:]
         return report
 
     def _eval_anchor_fidelity(self, anchors: list[str], response: str) -> float:

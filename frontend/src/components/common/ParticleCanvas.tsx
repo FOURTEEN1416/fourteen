@@ -32,7 +32,8 @@ export function ParticleCanvas() {
     const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
-    let animId: number;
+    let animId: number | null = null;
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     let lastDraw = 0;
     const FRAME_INTERVAL = 1000 / 30; // 限制 30fps，降低主线程压力
     const DIST = 120;
@@ -41,17 +42,20 @@ export function ParticleCanvas() {
 
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    const resize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      // 重建粒子：数量随屏幕面积变化
+    /** 重建画布与粒子；尺寸未变化时直接跳过，避免无谓的重分配。 */
+    const rebuild = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      if (canvas.width === w && canvas.height === h) return;
+      canvas.width = w;
+      canvas.height = h;
       particles.length = 0;
-      const count = reducedMotion ? 0 : particleCount(canvas.width, canvas.height);
+      const count = reducedMotion ? 0 : particleCount(w, h);
       for (let i = 0; i < count; i++) {
         const [color, rgb] = COLORS[i % 3];
         particles.push({
-          x: Math.random() * canvas.width,
-          y: Math.random() * canvas.height,
+          x: Math.random() * w,
+          y: Math.random() * h,
           vx: (Math.random() - 0.5) * 0.4,
           vy: (Math.random() - 0.5) * 0.4,
           r: Math.random() * 2 + 1,
@@ -60,24 +64,9 @@ export function ParticleCanvas() {
         });
       }
     };
-    resize();
+    rebuild();
 
-    const handleResize = () => {
-      // 防抖动：避免窗口缩放时频繁重建
-      window.cancelAnimationFrame(animId);
-      resize();
-      animId = requestAnimationFrame(draw);
-    };
-    window.addEventListener('resize', handleResize);
-
-    const draw = (time?: number) => {
-      const now = time ?? performance.now();
-      if (now - lastDraw < FRAME_INTERVAL) {
-        animId = requestAnimationFrame(draw);
-        return;
-      }
-      lastDraw = now;
-
+    const drawFrame = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       for (const p of particles) {
@@ -109,24 +98,53 @@ export function ParticleCanvas() {
           }
         }
       }
-
-      animId = requestAnimationFrame(draw);
     };
 
-    const handleVisibility = () => {
-      cancelAnimationFrame(animId);
-      if (!document.hidden) {
-        animId = requestAnimationFrame(draw);
+    // 帧循环：animId 始终指向"待执行的下一帧"。
+    // 旧实现由 resize 直接 requestAnimationFrame，与正在运行的那一帧各自续帧，
+    // 会派生出两条并行 rAF 循环 → 重复绘制、CPU 翻倍。
+    const loop = (time?: number) => {
+      const now = time ?? performance.now();
+      if (now - lastDraw >= FRAME_INTERVAL) {
+        lastDraw = now;
+        drawFrame();
       }
+      animId = requestAnimationFrame(loop);
+    };
+
+    const start = () => {
+      if (animId !== null) return; // 已在运行，避免重复启动
+      animId = requestAnimationFrame(loop);
+    };
+
+    const stop = () => {
+      if (animId === null) return;
+      cancelAnimationFrame(animId);
+      animId = null;
+    };
+
+    const handleResize = () => {
+      // 防抖：移动端滚动时地址栏收缩/展开会高频触发 resize，
+      // 每次都重建画布会造成粒子跳变与主线程抖动
+      if (resizeTimer !== null) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        resizeTimer = null;
+        rebuild();
+      }, 150);
+    };
+    window.addEventListener('resize', handleResize);
+
+    const handleVisibility = () => {
+      if (document.hidden) stop();
+      else start();
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
-    if (!document.hidden) {
-      animId = requestAnimationFrame(draw);
-    }
+    if (!document.hidden) start();
 
     return () => {
-      cancelAnimationFrame(animId);
+      stop();
+      if (resizeTimer !== null) clearTimeout(resizeTimer);
       window.removeEventListener('resize', handleResize);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
@@ -143,8 +161,7 @@ export function ParticleCanvas() {
         height: '100%',
         zIndex: 0,
         pointerEvents: 'none',
-        contain: 'strict',
-        willChange: 'transform',
+        contain: 'layout paint',
       }}
     />
   );

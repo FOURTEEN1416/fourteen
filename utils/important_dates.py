@@ -8,12 +8,13 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Any
+
+from utils.project_paths import project_path
 
 logger = logging.getLogger("utils.important_dates")
 
-_PATH = Path("data/important_dates.json")
+_PATH = project_path("data", "important_dates.json")
 
 
 def load_dates(character_id: str) -> list[dict[str, Any]]:

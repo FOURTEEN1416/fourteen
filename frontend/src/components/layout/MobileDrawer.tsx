@@ -29,10 +29,24 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
+  // 打开时锁定 body 滚动：抽屉是 fixed 覆盖层，若不锁定，
+  // 底层页面会跟着手势一起滚动（移动端典型串扰），关闭后必须还原原值
+  useEffect(() => {
+    if (!open) return
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prevOverflow
+    }
+  }, [open])
+
   return (
     <div
       className={`md:hidden fixed inset-0 z-50 ${open ? '' : 'pointer-events-none'}`}
       aria-hidden={!open}
+      // 关闭时抽屉只是平移出视口，链接仍在 DOM 中且可被 Tab 聚焦。
+      // inert 一次性解决「焦点落到不可见元素」与读屏误读两个问题
+      inert={!open}
     >
       {/* 遮罩 */}
       <div
@@ -65,7 +79,7 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto py-3 space-y-3">
+        <nav className="flex-1 overflow-y-auto overscroll-contain py-3 space-y-3">
           {globalNavGroups.map((group) => (
             <div key={group.label}>
               <div className="px-4 py-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">

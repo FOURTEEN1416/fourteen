@@ -284,7 +284,9 @@ async def stream_logs(
 
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-        loop = asyncio.get_event_loop()
+        # get_running_loop：本函数为 async generator，循环必然在运行中。
+        # get_event_loop() 已废弃（3.12 起 DeprecationWarning）。
+        loop = asyncio.get_running_loop()
 
         log_queue_handler = logging.Handler()
         log_queue_handler.setLevel(logging.INFO)

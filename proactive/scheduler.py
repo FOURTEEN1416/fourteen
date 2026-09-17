@@ -12,14 +12,21 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
+from utils.project_paths import project_path
+
 logger = logging.getLogger("scheduler")
+
+# 成就兜底重算的角色库目录。锚定项目根而非 CWD（从非仓库根启动时
+# CWD 相对路径会扫到空目录，导致成就兜底静默失效）；
+# 同时保留为模块级常量，便于测试注入临时目录。
+_CHARACTERS_DIR = project_path("config", "characters")
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -39,13 +46,13 @@ def run_achievement_maintenance() -> int:
     返回处理的角色数；角色库缺失或为空时返回 0。
     """
     import json as _json
-    from pathlib import Path as _Path
 
     from api.achievement_engine import recalculate_achievements
     from api.database import _async_session as _ach_session_factory
     from api.path_security import sanitize_id as _sanitize_id
 
-    characters_dir = _Path("config/characters")
+    # 锚定项目根，避免从非仓库根 CWD 启动时扫到空目录（扫不到 = 成就兜底静默失效）
+    characters_dir = _CHARACTERS_DIR
     if not characters_dir.exists():
         return 0
     ids: list[str] = []
@@ -110,7 +117,9 @@ class ProactiveScheduler:
         self._vault_interval_min = 60
         # 配置以 data/scheduler_config.json 为跨 worker 真源（4 uvicorn worker
         # 中仅 master 持有调度器，GET/POST 可能落到任一 worker——文件保证读一
-        # 致，master 每次 _check_ase 重载保证写最终生效 ≤5 分钟）
+        # 致，master 每次 _check_ase 重载保证写最终生效 ≤5 分钟）。
+        # 路径锚定项目根（见 _CONFIG_PATH）：相对路径按 CWD 解析，从非仓库根
+        # 启动时会静默读写另一个文件，表现为"开关保存成功但不生效"。
         self._load_config_file()
 
         logger.info("ProactiveScheduler initialized (APScheduler=%s)", HAS_APSCHEDULER)
@@ -246,7 +255,11 @@ class ProactiveScheduler:
 
     # ── 知识库定期采集（web 开关 + 持久化）──────────────
 
-    _CONFIG_PATH = Path("data") / "scheduler_config.json"
+    # 跨 worker 配置真源路径 —— 必须锚定项目根（绝对路径）。
+    # 旧实现为 Path("data")/"scheduler_config.json"（相对路径）：按进程 CWD 解析，
+    # 从非仓库根启动/测试时读写到另一个文件，导致
+    # ① 开关"保存成功但不生效"；② 测试读到宿主机脏值而失败。
+    _CONFIG_PATH = project_path("data", "scheduler_config.json")
 
     def get_vault_config(self) -> dict[str, Any]:
         return {
@@ -303,10 +316,8 @@ class ProactiveScheduler:
         data = self._read_config_file()
         qh = data.get("quiet_hours") or {}
         if "start" in qh and "end" in qh:
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 self._quiet_hours = (int(qh["start"]), int(qh["end"]))
-            except (TypeError, ValueError):
-                pass
         vault = data.get("vault") or {}
         if "enabled" in vault:
             self._vault_enabled = bool(vault["enabled"])
@@ -353,9 +364,8 @@ class ProactiveScheduler:
         if not self._vault_enabled:
             return
         try:
-            from shisi.vault import VaultCollector
-
             from api.deps import deps as _deps
+            from shisi.vault import VaultCollector
 
             cm = getattr(getattr(_deps, "shisi_reg", None), "character_manager", None)
             if cm is None:

@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 from typing import Any
+
+from utils.project_paths import project_path, resolve_project_path
 
 logger = logging.getLogger("shisi.voice.character_voice")
 
-_DEFAULT_VOICE_DIR = Path("data/voice_samples")
+_DEFAULT_VOICE_DIR = project_path("data", "voice_samples")
 
 
 class CharacterVoiceManager:
@@ -23,7 +24,8 @@ class CharacterVoiceManager:
     """
 
     def __init__(self, config_path: str = "data/character_voices.json"):
-        self._config_path = Path(config_path)
+        # 锚定项目根：从非仓库根 CWD 启动时相对路径会读写到错误位置
+        self._config_path = resolve_project_path(config_path)
         self._bindings: dict[str, dict[str, Any]] = {}
         self._load()
 
@@ -85,7 +87,7 @@ class CharacterVoiceManager:
             logger.debug("角色 %s 无专属音色配置，使用默认", character_id)
             return False
 
-        engine = config.get("engine", "edge-tts")
+        engine = config.get("engine", "mimo-tts")
         if engine not in (tts_manager.available_engines or []):
             logger.warning("角色 %s 配置引擎 %s 不可用，回退默认", character_id, engine)
             return False

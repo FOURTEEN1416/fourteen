@@ -19,7 +19,7 @@ export interface NavGroup {
 
 /** 全站导航清单（Sidebar 桌面侧栏与 MobileDrawer 移动抽屉共用，保证入口一致） */
 export function buildGlobalNavGroups(isAdmin: boolean, activeRoleId?: string): NavGroup[] {
-  return [
+  const groups: NavGroup[] = [
     {
       label: '连接',
       items: [{ to: '/wechat', icon: MessageCircle, label: '微信连接' }],
@@ -50,12 +50,16 @@ export function buildGlobalNavGroups(isAdmin: boolean, activeRoleId?: string): N
     },
     {
       label: '管理后台',
-      items: [
-        ...(isAdmin ? [
-          { to: '/admin/users', icon: User, label: '用户管理', badge: 'admin' },
-          { to: '/admin/providers', icon: Server, label: '供应商管理', badge: 'admin' },
-        ] : []),
-      ],
+      items: isAdmin
+        ? [
+            { to: '/admin/users', icon: User, label: '用户管理', badge: 'admin' },
+            { to: '/admin/providers', icon: Server, label: '供应商管理', badge: 'admin' },
+          ]
+        : [],
     },
   ]
+
+  // 过滤掉空分组：非管理员时"管理后台"items 为空，不过滤会在桌面侧栏与
+  // 移动抽屉里渲染出一个**只有标题、没有任何入口**的分组（视觉缺陷 + 误导）。
+  return groups.filter((group) => group.items.length > 0)
 }

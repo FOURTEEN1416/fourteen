@@ -1,7 +1,8 @@
 # 架构地图
 
-**最近更新:** 2026-08-01
-**演进阶段:** Phase 14 (投产准备) → Phase 15 (品牌清洗) → Phase 16 (P0 全面修复 + CI 加固)
+**最近更新:** 2026-09-17
+**演进阶段:** Phase 14 (投产准备) → Phase 15 (品牌清洗) → Phase 16 (P0 全面修复 + CI 加固) → Phase 17 (全仓性能/正确性扫描)
+**数据口径:** 端点与模块数均为 2026-09-17 实测（`create_api_app()` 内省 + 文件扫描），非文档估算值
 
 ---
 
@@ -25,9 +26,9 @@
 │                    FastAPI 路由层 (:8000)                        │
 │                                                                  │
 │  ┌──────────────┐  ┌────────────────┐  ┌────────────────────┐  │
-│  │ 17 路由模块  │  │ 204 endpoints  │  │ 认证层             │  │
+│  │ 21 路由模块  │  │ 204 endpoints  │  │ 认证层             │  │
 │  │ (api/routers)│  │ (create_api_app│  │ JWT + X-API-Key   │  │
-│  │              │  │ │  实扫)       │  │                    │  │
+│  │ + shisi/api  │  │ │  实扫)       │  │                    │  │
 │  └──────┬───────┘  └───────┬────────┘  └────────────────────┘  │
 └─────────┼──────────────────┼───────────────────────────────────┘
           │                  │
@@ -36,7 +37,7 @@
 │                                                                  │
 │  ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐  │
 │  │ shisi/   │ │ LLM     │ │ 安全     │ │shisi/    │ │shisi/ │  │
-│  │ (96 文件) │ │ Provider│ │ (5 文件)  │ │knowledge │ │memory │  │
+│  │(121 文件) │ │ Provider│ │ (5 文件)  │ │knowledge │ │memory │  │
 │  └──────────┘ └─────────┘ └──────────┘ └──────────┘ └───────┘  │
 │  ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐  │
 │  │ TTS 语音 │ │ 人格提取 │ │ 工具系统  │ │ 编排器    │ │ 缓存  │  │
@@ -59,17 +60,20 @@
 
 ## 编排器架构
 
-> **注:** 编排逻辑位于 `orchestrator/` 包，包含 5 个文件：
-> - `optimized_orchestrator.py` (920行) — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / `_prepare_context` / `process_message` / `health_check`
-> - `_init_mixin.py` (438行) — `_InitPhasesMixin`：`initialize` 拆分为 9 个 `_init_*` 阶段
-> - `_stream_mixin.py` (238行) — `_StreamPipelineMixin`：`process_message_stream` SSE 真流式/伪流式降级
+> **注:** 编排逻辑位于 `orchestrator/` 包，包含 7 个文件（含 `__init__.py`）：
+> - `optimized_orchestrator.py` (1013行) — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / `_prepare_context` / `process_message` / `_after_process` / `health_check`
+> - `_init_mixin.py` (510行) — `_InitPhasesMixin`：`initialize` 调用 10 个 `_init_*` 阶段；其中 `_init_memory_and_rag` 再级联 `_init_ase_and_scheduler` / `_init_tools` / `_init_rag`，共 13 个阶段方法
+> - `_stream_mixin.py` (373行) — `_StreamPipelineMixin`：`process_message_stream` SSE 真流式/伪流式降级
 > - `session_locks.py` — 会话锁管理（`SessionLockManager`）
 > - `voice_detector.py` — 语音活动检测
+> - `console_chat.py` — 控制台聊天通道
 >
 > `OptimizedOrchestrator` 继承 `_InitPhasesMixin` + `_StreamPipelineMixin`，通过 `self.components` 共享状态。公共 API 100% 兼容。
 >
-> `tools/` 模块提供 12 个内置工具（搜索、天气、日历、提醒、时间感知等），
-> 由编排器在流水线第 7 步调度执行。
+> `tools/` 模块提供 12 个内置工具（weather / search / calendar / calculator /
+> time_awareness / character_card / web_summary / image_gen +
+> set_reminder / query_reminders / memory / scheduler），
+> 由编排器在流水线中调度执行。
 >
 > `cache/` 模块（`llm_cache.py` + `redis_client.py`）提供 LLM 响应缓存层。
 
@@ -82,7 +86,7 @@
 ```
 用户消息
   → 前端 ChatInput → chat.ts API → POST /api/chat (Vite proxy)
-    → FastAPI _chat_routes.py
+    → FastAPI api/routers/chat_routes.py
       → Orchestrator (orchestrator/optimized_orchestrator.py, 12 级流水线)
         1. 安全过滤器 (ContentSafety)
         2. PII 匿名化 (PIIAnonymizer)

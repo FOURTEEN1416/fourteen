@@ -217,6 +217,28 @@ def test_reflection_engine_get_latest_empty():
     assert re.get_latest_monologue() is None
 
 
+def test_reflection_engine_get_latest_after_reflect():
+    """D26 回归守卫：reflect() 必须把独白记入 _monologues。
+
+    修复前 reflect() 只 return 不 append，_monologues 全仓从未被写入，
+    导致 get_latest_monologue() **恒返回 None**（永远为空的假接口）。
+    上面那条 empty 用例当时把这个 bug 当成期望行为固化了下来。
+    """
+    from proactive.ase_engine import ReflectionEngine
+    from proactive.reflection import _MONOLOGUE_MAX
+    re = ReflectionEngine(reflection_mode="rule")
+
+    m = re.reflect("今天好开心", "太好了", affinity_level=3, hours_since_last=1)
+    latest = re.get_latest_monologue()
+    assert latest is not None, "reflect() 后必须能取到独白（D26 回归）"
+    assert latest is m, "取到的必须是刚生成的那条"
+
+    # 有界性：超出上限后长度不再增长
+    for _ in range(_MONOLOGUE_MAX + 20):
+        re.reflect("随便说说", "嗯", affinity_level=1, hours_since_last=1)
+    assert len(re._monologues) == _MONOLOGUE_MAX
+
+
 def test_reflection_engine_type_to_urgency():
     from proactive.ase_engine import ReflectionEngine
     re = ReflectionEngine(reflection_mode="rule")

@@ -466,7 +466,7 @@ function FileImportTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Perso
       {parsed && (
         <div className="glass-card rounded-2xl p-4">
           <h4 className="text-xs font-semibold text-text-muted mb-3 flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-macaron-mint-deep" /> 解析预览</h4>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {Object.entries(parsed).map(([label, value]) => (
               <div key={label} className="bg-white/40 rounded-xl px-3 py-2"><p className="text-[10px] text-text-muted">{label}</p><p className="text-xs text-text-primary mt-0.5 truncate">{value}</p></div>
             ))}

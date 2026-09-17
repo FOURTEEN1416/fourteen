@@ -9,6 +9,7 @@
 6. UserManager.get_bound_wxids 返回绑定缓存快照
 """
 import asyncio
+import contextlib
 import sys
 import threading
 
@@ -144,9 +145,18 @@ def test_persona_engine_style_layer_emoji():
 #  4. 调度器投递：无事件循环线程内 _deliver 可用
 # ═══════════════════════════════════════════════════════════════
 
-def test_scheduler_deliver_in_plain_thread():
-    """APScheduler 工作线程场景：线程内无事件循环，_deliver 应成功调用通道。"""
+def test_scheduler_deliver_in_plain_thread(tmp_path, monkeypatch):
+    """APScheduler 工作线程场景：线程内无事件循环，_deliver 应成功调用通道。
+
+    ⚠️ 必须双重隔离免打扰：
+    1) 构造函数默认 _quiet_hours=(23,7)，在 23:00-07:00 之间会触发门禁；
+    2) _CONFIG_PATH 指向真实 scheduler_config.json（含用户设定的 22-08 时段）。
+    若不隔离，本用例在 22:00~08:00 之间运行时会因门禁提前 return 而失败
+    —— 典型的**时间相关假失败**（2026-09-17 实测：21:5x 全绿，22:0x 必红）。
+    """
     from proactive.scheduler import ProactiveScheduler
+
+    monkeypatch.setattr(ProactiveScheduler, "_CONFIG_PATH", tmp_path / "sched.json")
 
     sent: list[str] = []
 
@@ -154,16 +164,17 @@ def test_scheduler_deliver_in_plain_thread():
         sent.append(msg)
 
     sched = ProactiveScheduler(send_message_func=lambda m: sent.append("fallback:" + m))
+    # 禁用免打扰：构造函数默认 (23,7)，且 _is_quiet_hours 的区间语义没有"永不"
+    # 状态（(0,0) 会被解释为"全天"），因此直接替换检测方法
+    monkeypatch.setattr(sched, "_is_quiet_hours", lambda: False)
     sched._channel_instances["wechat"] = fake_sender
 
     result: dict = {}
 
     def runner():
         # 关键：本线程没有事件循环（复现 APScheduler 线程环境）
-        try:
+        with contextlib.suppress(RuntimeError):
             asyncio.get_event_loop()
-        except RuntimeError:
-            pass
         sched._deliver("hello-proactive")
         result["ok"] = True
 
@@ -261,9 +272,13 @@ def test_user_manager_get_bound_wxids():
 #  7. web 控制端开关：免打扰时段 + 知识采集持久化（09-17 第二批）
 # ═══════════════════════════════════════════════════════════════
 
-def test_scheduler_quiet_hours_settable():
+def test_scheduler_quiet_hours_settable(tmp_path, monkeypatch):
     from proactive.scheduler import ProactiveScheduler
 
+    # 必须隔离跨 worker 真源文件：_CONFIG_PATH 指向仓库 data/ 下的真实文件，
+    # 不隔离则读到宿主机残留值（默认值 23/7 被覆盖），测试变成"环境依赖"而非
+    # "行为断言"。兄弟用例 test_scheduler_vault_config_persistence 已用同样手法。
+    monkeypatch.setattr(ProactiveScheduler, "_CONFIG_PATH", tmp_path / "sched.json")
     s = ProactiveScheduler()
     assert s.get_quiet_hours() == (23, 7)
     s.set_quiet_hours(22, 8)

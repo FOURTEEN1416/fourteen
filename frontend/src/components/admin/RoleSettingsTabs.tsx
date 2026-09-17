@@ -370,7 +370,7 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
     <div className="space-y-4">
       {/* Engine Picker */}
       <Section title="语音引擎">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2">
           {ENGINE_OPTIONS.map(opt => (
             <button
               key={opt.value}
@@ -388,7 +388,7 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
       {engine === 'mimo-tts' && (
         <Section title="MiMo Cloud TTS">
           <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {MIMO_MODELS.map(m => (
                 <button
                   key={m.value}
@@ -526,7 +526,7 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
     <div className="space-y-4">
       {/* Stats（真数据：/api/proactive/history + config） */}
       <Section title="消息统计">
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           {[
             { label: '消息总数', value: (character.stats?.messages ?? 0).toLocaleString(), color: 'text-blue-600' },
             { label: '今日主动', value: String(todayCount), color: 'text-green-600' },
@@ -833,7 +833,7 @@ function StickersTab() {
   return (
     <div className="space-y-4">
       <Section title="常用表情">
-        <div className="grid grid-cols-6 gap-2">
+        <div className="grid grid-cols-5 gap-2 sm:grid-cols-6">
           {EMOJIS.map(emoji => (
             <button key={emoji} className="aspect-square rounded-xl bg-white border border-gray-100 text-2xl flex items-center justify-center hover:bg-primary-50 hover:border-primary-200 hover:scale-110 transition-all active:scale-95">
               {emoji}

@@ -95,7 +95,7 @@ export default function UserForm({
         </div>
       </FormField>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <FormField label="用户名" error={errors.username} required={isCreate}>
           <div className="relative">
             <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" />
@@ -120,7 +120,7 @@ export default function UserForm({
         </FormField>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <FormField label="角色" error={undefined} required={isCreate}>
           <select
             value={currentRole}

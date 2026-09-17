@@ -22,7 +22,6 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import suppress
-from pathlib import Path
 from typing import Any
 
 from .llm_gateway import LLMGatewayV2
@@ -71,6 +70,33 @@ def _merge_attachments(
 
 # ── 默认 fallback 链 ──
 DEFAULT_FALLBACK_CHAIN = ["sensenova", "zhipu", "xunfei", "baidu"]
+
+# ── Provider 失败哨兵 ──
+# 各 provider 的 _handle_error()/_mock_reply() 统一返回**全角括号包裹**的固定文案。
+# 2026-09-17 修复：旧实现用 `result.startswith("（")` 判定失败，会误伤正常回复——
+# 本项目人设（傲娇）大量使用括号内心独白（默认配置里就有"（其实在等你哄）"），
+# 这类正常回复会被当成失败：① 被丢弃；② 触发对下一个 provider 的**重复请求**
+# （浪费 token 与延迟）；③ 全链失败时最终返回错误文案。
+# 改为精确匹配错误文案特征词：仍以全角括号包裹，且包含下列任一错误标记。
+_ERROR_SENTINELS: tuple[str, ...] = (
+    "API 请求失败",
+    "网络请求失败",
+    "服务暂时不可用",
+    "生成回复时出现异常",
+    "生成已超时",
+    "未配置 API",
+    "所有 LLM 提供商均不可用",
+)
+
+
+def _is_error_reply(text: str) -> bool:
+    """判断 provider 返回值是否为错误哨兵文案（而非正常回复）。"""
+    if not text:
+        return True
+    stripped = text.strip()
+    if not (stripped.startswith("（") and stripped.endswith("）")):
+        return False
+    return any(sentinel in stripped for sentinel in _ERROR_SENTINELS)
 
 # ── 默认提供商配置 ──
 DEFAULT_PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
@@ -124,8 +150,15 @@ DEFAULT_PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
 
 
 def _load_providers_config() -> dict[str, Any]:
-    """从 config/llm_providers.json 加载配置"""
-    config_path = Path("config/llm_providers.json")
+    """从 config/llm_providers.json 加载配置
+
+    路径锚定项目根（2026-09-17 修复）：旧实现 ``Path("config/llm_providers.json")``
+    按进程 CWD 解析，从非仓库根启动时静默返回 ``{}`` —— provider 配置全部丢失，
+    fallback 链退化为默认值，且**无任何报错**（只打一条 warning）。
+    """
+    from utils.project_paths import project_path
+
+    config_path = project_path("config", "llm_providers.json")
     if not config_path.exists():
         return {}
 
@@ -276,9 +309,14 @@ class MultiProviderGateway:
             query, system_prompt, history, messages, attachments
         )
 
-        for idx, key in enumerate(self._providers):
+        # 并发修复（2026-09-17）：旧实现在循环里写 self._current_index，
+        # 而 chat_stream/chat_with_tools 通过 current_provider 读它。
+        # 多请求并发时 A 请求探测 provider 失败会把索引推到末尾，
+        # B 请求的流式/工具调用就会打到**错误的 provider**（甚至空 provider）。
+        # 现在只记录本次调用"实际成功"的 provider，且仅在成功后才发布，
+        # 使失败探测不再污染全局当前指针。
+        for key in self._providers:
             provider = self._providers[key]
-            self._current_index = idx
             try:
                 result = await provider.chat(
                     query=query, system_prompt=system_prompt,
@@ -286,8 +324,9 @@ class MultiProviderGateway:
                     temperature=temperature, max_tokens=max_tokens,
                     tools=tools, model=model,
                 )
-                if result and not result.startswith("（"):
+                if result and not _is_error_reply(result):
                     _record_fallback(key, "success")
+                    self._publish_current(key)
                     return result
                 last_error = result
                 _record_fallback(key, "fallback")
@@ -299,6 +338,15 @@ class MultiProviderGateway:
 
         logger.error("[MultiGateway] All providers failed, last_error=%s", last_error)
         return f"（所有 LLM 提供商均不可用，请检查配置。最后错误: {last_error}）"
+
+    def _publish_current(self, key: str) -> None:
+        """把"当前活跃 provider"指针发布到 key（线程安全）。
+
+        仅在调用成功后调用；失败探测不再改动全局指针（见 chat() 注释）。
+        """
+        keys = list(self._providers.keys())
+        if key in keys:
+            self._current_index = keys.index(key)
 
     def chat_sync(
         self,

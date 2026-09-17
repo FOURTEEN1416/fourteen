@@ -3,7 +3,9 @@
 模块结构：
 - 本文件：``OptimizedOrchestrator`` 主类，负责 ``__init__`` / 会话锁 / 上下文准备 /
   ``process_message`` / 健康检查等核心流程。
-- ``orchestrator._init_mixin._InitPhasesMixin``：``initialize`` 阶段化拆分（9 个 _init_*）。
+- ``orchestrator._init_mixin._InitPhasesMixin``：``initialize`` 阶段化拆分
+  （``initialize`` 直接调用 10 个 ``_init_*``，``_init_memory_and_rag`` 再级联
+  ``_init_ase_and_scheduler`` / ``_init_tools`` / ``_init_rag``，共 13 个阶段方法）。
 - ``orchestrator._stream_mixin._StreamPipelineMixin``：``process_message_stream`` SSE 流式。
 
 Mixin 通过 ``self.components`` 与主类共享状态，公共 API 100% 兼容。
@@ -23,6 +25,7 @@ from typing import Any
 from my_character.emotion_engine import EmotionEngine
 from orchestrator._init_mixin import _InitPhasesMixin
 from orchestrator._stream_mixin import _StreamPipelineMixin
+from orchestrator.session_locks import SessionLockManager
 from orchestrator.voice_detector import detect_voice_request as _detect_voice_request
 from tools.base_tool import ToolResult
 from utils.character_helpers import normalize_character_card
@@ -38,23 +41,29 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
     简洁流程: 安全→PII脱敏→注入检测→情感→记忆→RAG→LLM→输出安全→存储→ASE
     """
 
-    # Session锁缓存配置：最大缓存数、锁过期时间（秒）
-    _MAX_SESSION_LOCKS = 1000
-    _SESSION_LOCK_TTL_SECONDS = 3600  # 1小时无使用后清理
+    # 请求级情绪引擎缓存配置（与 session 锁同构：TTL 优先，其次按最久未访问淘汰）。
+    # 旧实现只在 shutdown() 里整体清空，运行期**只增不减** —— 每个
+    # (session_id, character_id) 组合都会常驻一个 EmotionEngine（含 500 条情绪历史），
+    # 长跑服务下随会话数无界增长。
+    _MAX_REQUEST_ENGINES = 256
+    _REQUEST_ENGINE_TTL_SECONDS = 3600  # 1小时无使用后回收
 
     def __init__(self, character_manager=None, **_kwargs):
         self.components: dict[str, Any] = {}
         self._initialized = False
-        # per-session 异步锁，使用带TTL的缓存防止内存无限增长
-        self._session_locks: dict[str, tuple[asyncio.Lock, float]] = {}
-        self._session_lock_access_time: dict[str, float] = {}
-        self._locks_mutex = threading.Lock()
-        self._lock_cleanup_counter: int = 0  # 替代 hash() 的概率触发
+        # per-session 异步锁：委托给 SessionLockManager（TTL 缓存 + 淘汰的唯一 owner）。
+        # 旧实现把同一套逻辑（常量/计数器/清理算法）在本类内联复制了一份，
+        # 与 orchestrator/session_locks.py 完全重复 —— 两处必然漂移。
+        self._session_lock_manager = SessionLockManager()
         self._executor = None  # 延迟初始化的共享线程池
+        self._bg_executor = None  # 延迟初始化的后处理串行线程池（见 _get_background_executor）
         # Web/API 调用未经过 UserManager 时，也必须按“会话 × 角色”隔离情绪状态。
         # 外部显式传入 emotion_engine（如微信 UserManager）时仍优先使用外部实例。
         self._request_emotion_engines: dict[str, EmotionEngine] = {}
         self._request_emotion_engines_lock = threading.Lock()
+        # 每个请求级引擎的最近访问时间，用于 TTL/最久未访问淘汰（见 _cleanup_expired_request_engines）
+        self._request_emotion_engines_access: dict[str, float] = {}
+        self._request_engine_cleanup_counter: int = 0
         # 后台 task 引用集合（避免被 GC 回收，asyncio.create_task 文档要求）。
         # 必须为实例变量；若为类变量会导致多实例共享同一集合引发 race condition。
         self._background_tasks: set[Any] = set()
@@ -72,6 +81,23 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 max_workers=4, thread_name_prefix="opt_init"
             )
         return self._executor
+
+    def _get_background_executor(self):
+        """后处理专用线程池（单线程、串行）。
+
+        `_after_process` 需要在后台跑 `memory.after_chat`（内部有
+        async→sync 桥接，在主循环线程里会自死锁）。旧实现**每条消息**
+        `threading.Thread(...).start()` 新建一个线程：
+        高并发下线程数随消息量线性增长，线程创建/销毁本身也是开销，
+        且与 memory 的 SQLite 写竞争（多个 after_chat 并发写同一库）。
+        改为复用单线程 executor：串行化后处理，线程数恒定。
+        """
+        if self._bg_executor is None:
+            import concurrent.futures
+            self._bg_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="opt_after"
+            )
+        return self._bg_executor
 
     def shutdown(self):
         """关闭 OptimizedOrchestrator 并释放资源。
@@ -98,6 +124,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         with self._request_emotion_engines_lock:
             request_engines = list(self._request_emotion_engines.values())
             self._request_emotion_engines.clear()
+            self._request_emotion_engines_access.clear()
         for engine in request_engines:
             try:
                 engine.close()
@@ -108,6 +135,12 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             self._executor.shutdown(wait=True)
             self._executor = None
             logger.info("OptimizedOrchestrator 线程池已关闭")
+
+        if self._bg_executor is not None:
+            # wait=True：确保退出前把已入队的 after_chat（记忆落盘）写完
+            self._bg_executor.shutdown(wait=True)
+            self._bg_executor = None
+            logger.info("OptimizedOrchestrator 后处理线程池已关闭")
 
     # ── backward-compatible property aliases (for rest_api etc.) ──
 
@@ -176,8 +209,13 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
     # ── 角色卡人设动态加载（v3.1 新增）──
     # 缓存：character_id -> 人设片段字符串。避免每条消息都读文件。
+    # 注意：类级共享 + 多线程访问（uvicorn 多 worker / 线程池），必须加锁；
+    # 且必须有淘汰策略——旧实现 `if len(cache) < 100` 只在未满时写入，
+    # 一旦达到 100 条，后续所有角色都会**永久**回退到磁盘读取。
     _character_persona_cache: dict[str, str] = {}
     _character_persona_loaded: bool = False
+    _character_persona_cache_lock: threading.Lock = threading.Lock()
+    _CHARACTER_PERSONA_CACHE_MAX = 100
 
     @classmethod
     def invalidate_character_persona_cache(cls, character_id: str | None = None) -> None:
@@ -186,10 +224,11 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         - character_id 为 None 时清空全部缓存
         - 否则只清除指定角色，供角色更新/删除后即时生效
         """
-        if character_id is None:
-            cls._character_persona_cache.clear()
-        else:
-            cls._character_persona_cache.pop(character_id, None)
+        with cls._character_persona_cache_lock:
+            if character_id is None:
+                cls._character_persona_cache.clear()
+            else:
+                cls._character_persona_cache.pop(character_id, None)
 
     @classmethod
     def _load_character_persona_segment(cls, character_id: str) -> str:
@@ -204,9 +243,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         if not character_id or character_id in ("default", "demo"):
             return ""
 
-        # 命中缓存
-        if character_id in cls._character_persona_cache:
-            return cls._character_persona_cache[character_id]
+        # 命中缓存（加锁：类级字典在多线程下会被并发读写）
+        with cls._character_persona_cache_lock:
+            if character_id in cls._character_persona_cache:
+                return cls._character_persona_cache[character_id]
 
         import json as _json
         chars_dir = project_root / "config" / "characters"
@@ -237,7 +277,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 pass
 
         if not raw_card:
-            cls._character_persona_cache[character_id] = ""
+            cls._store_persona_segment(character_id, "")
             return ""
 
         # 展平嵌套角色卡格式，提取真实 name/description/personality 等
@@ -322,10 +362,26 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             lines.append(f"开场白：{str(first_mes)[:300]}")
 
         segment = "\n".join(lines)
-        # 缓存（最多 100 个，防止内存膨胀）
-        if len(cls._character_persona_cache) < 100:
-            cls._character_persona_cache[character_id] = segment
+        cls._store_persona_segment(character_id, segment)
         return segment
+
+    @classmethod
+    def _store_persona_segment(cls, character_id: str, segment: str) -> None:
+        """写入角色人设缓存（加锁 + FIFO 淘汰）。
+
+        旧实现为 `if len(cache) < 100: cache[id] = segment`：达到上限后
+        **不再写入任何新角色**，且永不淘汰，导致超出部分的角色每次消息都重新
+        读盘解析。现改为满员时先淘汰最早插入的一条。
+        """
+        with cls._character_persona_cache_lock:
+            if (
+                character_id not in cls._character_persona_cache
+                and len(cls._character_persona_cache) >= cls._CHARACTER_PERSONA_CACHE_MAX
+            ):
+                cls._character_persona_cache.pop(
+                    next(iter(cls._character_persona_cache)), None
+                )
+            cls._character_persona_cache[character_id] = segment
 
     def _get_affinity_level(self, emotion_state: Any) -> int:
         """从 emotion_state 中提取整数好感度等级（0-8）。"""
@@ -401,7 +457,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             tool_calls = tool_resp.get("tool_calls") if tool_resp else None
             if not tool_calls:
                 return ""
-        except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            # 旧写法 `except (asyncio.TimeoutError, Exception)`：asyncio.TimeoutError
+            # 本就是 Exception 子类，元组写法纯冗余（易误读为"两类异常分别处理"）。
             logger.debug("工具意图识别失败: %s", e)
             return ""
 
@@ -432,73 +490,11 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
     def _get_session_lock(self, session_id: str) -> asyncio.Lock:
         """获取 per-session 异步锁，确保不同 session 可并行处理。
 
-        注意: asyncio.Lock 必须在 async 上下文中创建以绑定正确的事件循环。
-        采用延迟创建策略，首次在 async 上下文中调用时才实例化 Lock。
-
-        内存优化：
-        - 使用带TTL的锁缓存，防止session过多导致内存无限增长
-        - 定期清理过期的session锁（超过1小时未访问）
-        - 最大缓存数限制为1000个session
+        唯一 owner 是 ``orchestrator.session_locks.SessionLockManager``：
+        TTL（1 小时未访问）+ 最大 1000 的缓存淘汰都在那里实现。
+        本方法只做委托——旧实现在本类内联复制了同一套逻辑，属重复 owner。
         """
-        current_time = time.time()
-
-        with self._locks_mutex:
-            # 清理过期锁（每100次访问触发一次清理，避免频繁清理）
-            self._lock_cleanup_counter = (self._lock_cleanup_counter + 1) % 100
-            if len(self._session_locks) >= self._MAX_SESSION_LOCKS or \
-               (len(self._session_locks) > 0 and self._lock_cleanup_counter == 0):
-                self._cleanup_expired_session_locks(current_time)
-
-            # 检查是否已存在该session的锁
-            if session_id in self._session_locks:
-                lock, _ = self._session_locks[session_id]
-                self._session_lock_access_time[session_id] = current_time
-                return lock
-
-            # 延迟创建：确保 Lock 绑定到当前运行的事件循环
-            try:
-                asyncio.get_running_loop()
-                new_lock = asyncio.Lock()
-            except RuntimeError:
-                # 没有运行中的事件循环时，创建一个未绑定循环的 Lock
-                new_lock = asyncio.Lock()
-
-            self._session_locks[session_id] = (new_lock, current_time)
-            self._session_lock_access_time[session_id] = current_time
-            return new_lock
-
-    def _cleanup_expired_session_locks(self, current_time: float) -> None:
-        """清理过期的session锁，防止内存无限增长。
-
-        清理策略：
-        1. 优先清理超过TTL（1小时）未访问的锁
-        2. 如果仍然超过最大限制，清理最久未访问的锁
-        """
-        expired_sessions = []
-        for sid, (_, created_time) in self._session_locks.items():
-            last_access = self._session_lock_access_time.get(sid, created_time)
-            if current_time - last_access > self._SESSION_LOCK_TTL_SECONDS:
-                expired_sessions.append(sid)
-
-        for sid in expired_sessions:
-            del self._session_locks[sid]
-            if sid in self._session_lock_access_time:
-                del self._session_lock_access_time[sid]
-
-        # 如果仍然超过最大限制，清理最久未访问的
-        if len(self._session_locks) >= self._MAX_SESSION_LOCKS:
-            sorted_sessions = sorted(
-                self._session_lock_access_time.items(),
-                key=lambda x: x[1]
-            )
-            sessions_to_remove = len(self._session_locks) - self._MAX_SESSION_LOCKS + 100
-            for sid, _ in sorted_sessions[:sessions_to_remove]:
-                if sid in self._session_locks:
-                    del self._session_locks[sid]
-                del self._session_lock_access_time[sid]
-
-        if expired_sessions:
-            logger.debug("清理 %d 个过期session锁，当前总数: %d", len(expired_sessions), len(self._session_locks))
+        return self._session_lock_manager.get_lock(session_id)
 
     # ─────────────────────────────────────────────────────────────
     # 共享预处理 / 后处理（process_message 与 process_message_stream 复用）
@@ -520,7 +516,14 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             return template
 
         key = f"{session_id or 'default'}::{character_id or 'default'}"
+        current_time = time.time()
+        evicted: list[Any] = []
         with self._request_emotion_engines_lock:
+            self._request_engine_cleanup_counter = (self._request_engine_cleanup_counter + 1) % 100
+            if len(self._request_emotion_engines) >= self._MAX_REQUEST_ENGINES or \
+               (self._request_emotion_engines and self._request_engine_cleanup_counter == 0):
+                evicted = self._cleanup_expired_request_engines(current_time, keep=key)
+
             engine = self._request_emotion_engines.get(key)
             if engine is None:
                 engine = EmotionEngine(
@@ -529,7 +532,58 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     classifier_mode=getattr(template, "_classifier_mode", "rule"),
                 )
                 self._request_emotion_engines[key] = engine
-            return engine
+            self._request_emotion_engines_access[key] = current_time
+
+        # close() 放到锁外：可能涉及 I/O，不应阻塞其他请求
+        for old in evicted:
+            try:
+                old.close()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("请求级情绪引擎淘汰关闭异常: %s", e)
+        return engine
+
+    def _cleanup_expired_request_engines(
+        self, current_time: float, keep: str | None = None
+    ) -> list[Any]:
+        """回收请求级情绪引擎，返回需要 ``close()`` 的实例（由调用方在锁外关闭）。
+
+        策略与 ``SessionLockManager._cleanup_expired_locks`` 同构：
+
+        1. 优先回收超过 TTL 未访问的。活跃会话每轮消息都会刷新访问时间，
+           因此**不会被回收**——情绪连续性不受影响；被回收的都是已闲置会话。
+        2. 仍超上限时，按最久未访问淘汰。
+
+        ``keep`` 用于保护当前正在取用的 key，避免刚拿到就被自己淘汰掉。
+        """
+        evicted: list[Any] = []
+
+        def _drop(k: str) -> None:
+            engine = self._request_emotion_engines.pop(k, None)
+            self._request_emotion_engines_access.pop(k, None)
+            if engine is not None:
+                evicted.append(engine)
+
+        for k, last in list(self._request_emotion_engines_access.items()):
+            if k == keep:
+                continue
+            if current_time - last > self._REQUEST_ENGINE_TTL_SECONDS:
+                _drop(k)
+
+        if len(self._request_emotion_engines) >= self._MAX_REQUEST_ENGINES:
+            ordered = sorted(
+                ((k, t) for k, t in self._request_emotion_engines_access.items() if k != keep),
+                key=lambda x: x[1],
+            )
+            excess = len(self._request_emotion_engines) - self._MAX_REQUEST_ENGINES + 32
+            for k, _ in ordered[:excess]:
+                _drop(k)
+
+        if evicted:
+            logger.debug(
+                "回收 %d 个请求级情绪引擎，当前总数: %d",
+                len(evicted), len(self._request_emotion_engines),
+            )
+        return evicted
 
     async def _prepare_context(
         self,
@@ -725,12 +779,19 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             # 后台线程执行 after_chat，避免其内部 async→sync 桥接
             # （vector_memory._run_async 的 run_coroutine_threadsafe.result()）
             # 在主事件循环线程自死锁，导致 worker 卡死。
+            # 使用复用的单线程池而非每条消息新建线程（见 _get_background_executor）。
             def _safe_after_chat(**kw):
                 try:
                     self.components["memory"].after_chat(**kw)
                 except Exception as e:  # noqa: BLE001
                     logger.warning("after_chat failed, skipping: %s", e)
-            threading.Thread(target=_safe_after_chat, kwargs=mem_kwargs, daemon=True).start()
+            try:
+                self._get_background_executor().submit(_safe_after_chat, **mem_kwargs)
+            except RuntimeError as e:
+                # executor 已随 shutdown() 关闭（进程收尾阶段）→ 同步执行一次，
+                # 避免后处理被静默丢弃。
+                logger.warning("后处理线程池已关闭，改为同步执行: %s", e)
+                _safe_after_chat(**mem_kwargs)
         self.components["ase"].on_chat(user_msg_clean, reply)
 
         # 好感度同步

@@ -165,7 +165,7 @@ function SettingsLogs() {
         </div>
       </div>
 
-      <div className="max-h-[520px] overflow-y-auto space-y-1 scroll-smooth">
+      <div className="max-h-[60vh] sm:max-h-[520px] overflow-y-auto overscroll-contain space-y-1 scroll-smooth">
         {loading ? (
           <div className="glass-card rounded-xl p-8 text-center">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-500 border-t-transparent mx-auto" />

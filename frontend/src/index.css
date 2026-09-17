@@ -62,15 +62,33 @@
 }
 
 /* ═══ Base Styles ═══ */
+/* 移动端基础：禁止 iOS 横屏字号自动放大；去掉点击默认高亮闪烁（与玻璃拟态配色冲突）。
+   两者均为可继承属性，挂在 html 上即可全站生效。 */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
   margin: 0;
   font-family: 'Noto Sans SC', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: linear-gradient(135deg, #FFFBEB 0%, #F0F9FF 50%, #F0FDFA 100%);
-  background-attachment: fixed;
   min-height: 100dvh;
   color: #1F2937;
+  background-color: #FFFBEB;
+}
+
+/* 固定渐变底：用 position: fixed 伪元素替代 background-attachment: fixed。
+   后者在移动端（尤其 iOS Safari）会随滚动反复重绘，是典型的滚动卡顿来源。 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(135deg, #FFFBEB 0%, #F0F9FF 50%, #F0FDFA 100%);
 }
 
 /* ═══ Scrollbar ═══ */
@@ -141,6 +159,23 @@ body {
 .paper-card-hover:hover {
   transform: translateY(-4px) scale(1.02);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.1);
+}
+
+/* ═══ 移动端毛玻璃降级 ═══
+   backdrop-filter 的代价随模糊半径平方增长；一屏常驻 10+ 张玻璃卡片时，
+   移动 GPU 在滚动中需要逐帧重新栅格化背景。小屏降到 6px 可显著减负，
+   视觉差异很小（浅色低对比底色下几乎不可辨）。 */
+@media (max-width: 767px) {
+  .glass-card,
+  .glass-card-hover,
+  .glass-pink,
+  .glass-blue,
+  .glass-green,
+  .paper-card,
+  .paper-card-hover {
+    backdrop-filter: blur(6px) saturate(140%);
+    -webkit-backdrop-filter: blur(6px) saturate(140%);
+  }
 }
 
 /* ═══ Animations ═══ */

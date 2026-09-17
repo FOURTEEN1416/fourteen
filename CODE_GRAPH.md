@@ -1,6 +1,6 @@
-# 代码图谱 — unique-you (唯一的你) v3.6.0
+# 代码图谱 — unique-you (唯一的你) v3.8.0
 
-> 由 维护者 手动维护 | 最后核实: 2026-09-15（v3.6 增量：W3 多模态收编——图片通道 + silk 语音 + 入口守卫放行 1/3/34；测试口径注记见 §1.1 与 §13）
+> 由 维护者 手动维护 | 最后核实: 2026-09-17（v3.8 增量：全仓性能与正确性扫描——项目根路径锚定 + 12 处 CWD 缺陷 + 并发/缓存/热路径修复 + 移动端适配 + **端点口径系统性纠错 208→204**；测试口径见 §1.1 与 §13）
 > ✅ 路由/文件/模块/测试数已通过 create_api_app 实扫 + Glob + pytest + vitest 实时核实（2026-08-28）。
 > ✅ 图数据库已于 2026-08-28 由 codebase-memory 图谱工具 v0.10.8 重新索引（artifact.json schema v2: **7706 节点 / 32367 边**，commit c32af54），历史矛盾（543277c 声称的 6771 节点未持久化）就此消案。
 
@@ -8,17 +8,17 @@
 
 ## 1. 全局指标
 
-### 1.1 实时核实指标（2026-09-01 create_api_app/Glob/pytest/vitest/mypy 扫描）
+### 1.1 实时核实指标（2026-09-17 create_api_app/Glob/pytest/vitest/mypy 扫描）
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| API 端点（create_api_app 实扫） | **208 端点** / 16 include_router | 实扫 2026-09-17（09-15 基线 206 + knowledge/collect-config GET/POST 2 端点：Vault 定期采集 web 开关） |
-| main.py 体量 | **约 16 KB / 409 行** | 2026-08-28 两轮瘦身：克隆管线移除 + run_console_chat 迁出 `orchestrator/console_chat.py`（命令分派拆分，复杂度 24 单体消解） |
-| 前端页面 | **15 个** | Glob `frontend/src/pages/*.tsx`（SP-9 幽灵层三页 + DemoPage 已删除） |
-| 前端 API 模块 | **12 个** | Glob `frontend/src/api/*.ts`（demo.ts、users.ts 已删除） |
-| 前端 Zustand store | 4 个 | LS `frontend/src/store/` |
-| Python 测试用例 | **1030 passed + 1 skipped** | 实跑 2026-08-28（旧引擎/训练测试随 MiMo-only 收敛删除 -15） |
-| 前端测试用例 | **71 个全部通过 / 13 文件** | `npx vitest run`（2026-08-28 实跑；SP-9 删除幽灵页测试后 79→59） |
+| API 业务端点（`APIRoute` 实扫） | **204 端点 / 171 条唯一路径**（95 GET / 74 POST / 20 DELETE / 15 PUT） / **17 处 include_router** | 2026-09-17 内省 `create_api_app()`：`len([r for r in app.routes if isinstance(r, APIRoute)])`。⚠️ 旧口径"208 端点"实为 `len(app.routes)`，含 4 条框架路由（`/openapi.json`、`/docs`、`/docs/oauth2-redirect`、`/redoc`），非业务端点 |
+| main.py 体量 | **约 16 KB / 415 行** | 2026-08-28 两轮瘦身：克隆管线移除 + run_console_chat 迁出 `orchestrator/console_chat.py`（命令分派拆分，复杂度 24 单体消解） |
+| 前端页面 | **17 个** | Glob `frontend/src/pages/*.tsx`（另有 `StorylinePage` 为 App.tsx 内联包装组件） |
+| 前端 API 模块 | **11 个** | Glob `frontend/src/api/*.ts` |
+| 前端 Zustand store | **3 个** | LS `frontend/src/store/`（authStore / characterBuilderStore / errorStore） |
+| Python 测试用例 | **1012 passed + 4 skipped**（收集 1016） | 2026-09-17 系统 Python 3.12 实跑 `PYTHONPATH= python -m pytest -q -p no:cacheprovider`（117.85s，批次终态=含 D26 正向用例 + D29 双层隔离） |
+| 前端测试用例 | **87 个全部通过 / 15 文件** | 2026-09-17 `npm test`（vitest run，51.93s）+ `tsc --noEmit` 0 错误 |
 | 测试用例合计 | **1117 个**(1042 Python + 75 前端) | pytest + vitest 实跑 2026-09-01（1117 = 1042 Python + 75 前端）|
 | Python 测试（2026-09-15 复测） | **995 收集 / 989 通过 / 6 跳过**（系统 Python 3.12 实跑；1042 口径的 .venv 与夹具随 09-14 主仓事故丢失，差额 56 说明见 `docs/verification/W4-2026-09-14-验证报告.md` §3；本轮新增 3 个 WeChat 收包用例全绿） | pytest 实跑 2026-09-15 |
 | tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
@@ -203,15 +203,37 @@ sequenceDiagram
 - `run_console_chat` — 控制台交互
 - `run_wechat_mode` — 微信模式
 
-### 4.2 API 层（203 路由 — 2026-09-01 create_api_app 实扫)
+### 4.2 API 层（**204 业务端点 / 171 唯一路径** — 2026-09-17 内省实扫）
 
 两个路由来源：
 
 | 来源 | 路径 | 端点数 | 文件数 | 说明 |
 |------|------|--------|------|------|
-| `api/routers/` | 20 个域路由（不含 `__init__.py`） | ~149 | 20 | 域路由：character/auth/admin/invite/voice/mimo/storyline/wechat/emotion/memory/knowledge/persona_card/chat/clone/misc/personality/safety/tools/training/users（demo 08-28 删除、training/extract 08-28 移除） |
-| `shisi/api/` | v1 + v2 | ~49 | 13 | shisi 域：affinity/character/emotion_stage/memory/persona/stats/sticker/training/vital_signs + v2 健康检查/迁移/persona/character |
-| **合计（实扫）** | | **206** | **33** | `app.routes` 实测(2026-09-01) |
+| `api/routers/` | 21 个域路由模块（不含 `__init__.py`） | 170 | 22 | character/auth/admin/invite/voice/mimo_voice/storyline/wechat/emotion/memory/knowledge/persona_card/chat/clone/misc/personality/safety/tools/training/users/llm_providers |
+| `api/`（非 routers） | `health_routes.py` / `qrcode_store.py` | 3 | 2 | health(2) + wechat/qrcode(1) |
+| `shisi/api/` | v1 + v2 | 31 已挂载 | 16 | affinity/character/emotion_stage/memory/persona/stats/sticker/vital_signs + v2 |
+| **合计（`APIRoute` 内省）** | | **204** | | 95 GET / 74 POST / 20 DELETE / 15 PUT |
+
+> ⚠️ **口径纠错（2026-09-17）**：旧口径"206 / 208 端点"取自 `len(app.routes)`，
+> 其中固定含 **4 条 FastAPI 框架自带路由**（`/openapi.json`、`/docs`、
+> `/docs/oauth2-redirect`、`/redoc`），故系统性偏高 4。
+> **业务端点数应取 `APIRoute` 实例数**：`len(app.routes)=208`，`APIRoute=204`。
+
+**按 tag 的端点分布**（内省实测，权威口径）：
+
+```
+character 21 │ misc 16 │ training 13 │ safety-infra 12 │ chat 11
+personality 10 │ memory 10 │ wechat 9 │ clone 8 │ auth 8 │ knowledge 8
+users 7 │ characters 7 │ tools 6 │ voice 6 │ mimo-tts 6 │ storyline 6
+llm-providers 6 │ stickers 5 │ admin 5 │ affinity 4 │ invite 4
+emotion-stage 3 │ persona 3 │ persona-card 3 │ health 2 │ emotion 2
+vital-signs 1 │ stats 1 │ (untagged) 1
+                                          ────────── 合计 204
+```
+
+> 注：`character`(21) 为 `api/routers/character_routes.py`；`characters`(7) 为
+> `shisi/api/character_routes.py` + v2。`memory`(10) = api `memory_routes`(4) +
+> shisi `memory_routes`(6)。`persona`(3) 为 shisi；`persona-card`(3) 为 api。
 
 **app_factory.py 实际挂载策略**（核实于源码）：
 
@@ -219,30 +241,36 @@ sequenceDiagram
 health_router          → /api/health, /api/ready（2 端点，无认证）
 misc_router            → /api/stats, /api/dashboard, /api/memory/facts,
                         /api/logs, /api/logs/stream, /api/config,
-                        /api/user/llm-config (GET/POST, 新增),
-                        /api/channels, /api/routes（11 端点）
+                        /api/user/llm-config (GET/POST),
+                        /api/channels, /api/routes（16 端点）
 chat_router            → /api/chat/*, /api/session/*, /api/wechat/status（11 端点）
-personality_router     → /api/emotion/*, /api/persona/*, /api/psych/*（9 端点）
+personality_router     → /api/emotion/*, /api/persona/*, /api/psych/*（10 端点）
 users_router           → /api/users/*（7 端点，admin only）
-training_router        → /api/training/*, /api/proactive/*（8 端点，training/extract 已移除）
+training_router        → /api/training/*, /api/proactive/*（13 端点）
 tools_router           → /api/system/tools, /api/system/tools/health, /api/plugins/*（6 端点）
 safety_router          → /api/safety/*, /api/rag/*, /api/voice/*, /api/files/*, /api/cache/*（12 端点）
-clone_router           → /api/clone/*（9 端点，含 /api/clone/upload 新增）
-auth_router            → /api/auth/*（7 端点）
+clone_router           → /api/clone/*（8 端点）
+auth_router            → /api/auth/*（8 端点）
 admin_router           → /api/admin/*（5 端点）
 invite_router          → /api/auth/register-invite, /api/admin/invites（4 端点）
-character_router       → /api/characters/*, /api/presets/*（19 端点，含 .png 导入/导出）
+character_router       → /api/characters/*, /api/presets/*（21 端点，含 .png 导入/导出）
 voice_router           → /api/character/voice/*（6 端点）
 mimo_voice_router      → /api/mimo/*（6 端点）
 memory_bridge_router   → /api/memory/*（4 端点，桥接 shisi FavoriteManager/ForwardManager）
 persona_card_router    → /api/persona-card/*（3 端点）
 storyline_router       → /api/storyline/*（6 端点）
-knowledge_router       → /api/characters/{id}/knowledge/*, /api/characters/{id}/enrich（8 端点，含 enrich 新增）
+knowledge_router       → /api/characters/{id}/knowledge/*, /api/characters/{id}/enrich（8 端点）
 wechat_router          → /api/wechat/*（8 端点）
 emotion_params_router  → /api/emotion/params/*（2 端点）
+llm_providers_router   → /api/llm-providers/*（6 端点，admin）
 qrcode_router          → /api/wechat/qrcode（1 端点）
-+ shisi setup          → /api/shisi/* + /api/shisi/status（49 端点）
++ shisi setup          → /api/shisi/* 域路由（31 端点已挂载）
 ```
+
+> **上表端点数为 2026-09-17 按 tag 内省实测**（旧表多处失真：misc 11→**16**、
+> personality 9→**10**、training 8→**13**、clone 9→**8**、auth 7→**8**、
+> character 19→**21**、wechat 8→**8**（另有 qrcode 1 端点独立）、shisi 49→**31**）。
+> 注意 `api/routers/` 内 170 个装饰器 + health 2 + qrcode 1 + shisi 31 = 204。
 
 **`api/app_factory.py:84 create_api_app()`** 是 FastAPI 应用唯一构造入口，被 `api/run_api.py:232` 和 `main.py` 调用。FastAPI 实例 `version="3.1.0"`。
 
@@ -645,6 +673,9 @@ tools/
 
 | 日期 | 提交 | 变更摘要 |
 |------|------|---------|
+| 2026-09-17 (批次收尾) | working tree | **v3.8.0 收尾**：D29 第二层隔离——构造默认 `_quiet_hours=(23,7)` 在 23:00–07:00 运行仍触发门禁（23:40 复跑踩中），补 `_is_quiet_hours` 方法替换使其与挂钟解耦；落地第二轮报告 §5 建议的 D26 正向用例 `test_reflection_engine_get_latest_after_reflect`（收集 1015→1016）；LoginPage 补 `autoComplete`。终态 **1012 通过 / 4 跳过**（117.85s）+ vitest 87/87 + tsc 0 错 |
+| 2026-09-17 (全仓扫描第二轮) | working tree | **v3.8.0 续：类定向扫描覆盖首轮未读的大模块（D22-D29）**：① `_request_emotion_engines` 运行期**无界增长**（仅 `shutdown()` 整体清空）→ TTL(1h) 优先 + 最久未访问淘汰（上限 256，`close()` 锁外，`keep` 保护当前项）；② **重复 owner 消除**——`OptimizedOrchestrator` 内联会话锁逻辑与 `orchestrator/session_locks.py::SessionLockManager` 逐行重复 → 删除副本改委托（该类此前零生产调用）；③ `persona_engine` 人设提示词缓存**半失效**（`reload_config`/`rollback` 漏清 `_prompt_cache`，且其 key 不含人设内容）→ 两处补 clear；④ `persona_evaluator._history` 无界 → `history_max=200` + 裁剪；⑤ `ReflectionEngine._monologues` **只暴露不记录**致 `get_latest_monologue()` 恒返回 `None`（测试还把该 bug 当期望行为断言）→ `reflect()` 收敛后 append + 有界 deque；⑥ `ASEEngine._monologues` 无界且只写不读 → `deque(maxlen=200)`；⑦ `shisi/affinity/enhancer.py` 的 `with sqlite3.connect(...)` **经典陷阱**（上下文管理器只管事务**不关连接**）→ `closing(...)`，否则每次好感度变更/审计都泄漏连接；⑧ 存量**时间相关假失败** `test_scheduler_deliver_in_plain_thread`（读真实免打扰时段 22-08，21:5x 绿 / 22:0x 红）→ 构造前隔离 `_CONFIG_PATH`。同轮留痕「查了但不是缺陷」10 项（工具层 `requests` 已 `to_thread`、`time.sleep` 在独立线程、`extract_intent` 零调用、LRU/deque/FIFO 已就位、两处 `BaseException` 捕获正当、无可变默认参数）。测试终态 **1011 通过 / 4 跳过 / 0 失败**（200.12s，22:19 运行即落在免打扰时段内，反证 ⑧ 修复有效）+ ruff 0 错 + 残留三项归零 |
+| 2026-09-17 (全仓扫描批次) | working tree | **v3.8.0 全仓性能与正确性扫描 + 文档口径系统性纠错**：新增 `utils/project_paths.py`（项目根锚定唯一真源），修复 12 处 CWD 相对路径（scheduler 配置/角色库、LLM 供应商配置、角色库/预设/剧情线/重要日期/音色/表情包/角色 manager/SQLite 仓储/迁移与回滚）；并发与热路径：`MultiProviderGateway` 供应商指针竞态 + 失败判定误报（`startswith("（")` 丢弃含内心独白的合法回复）、`_after_process` 每消息新建线程→共享单线程池、人设缓存无锁 + `len<100` 满后彻底失效→加锁 + FIFO、`UserManager` 引擎无界增长→上限 8 + 淘汰、`set_user_character` 补锁、4 处 `asyncio.get_event_loop()`→`get_running_loop()`、限流器清理 O(K×R)→O(K) 并加 `_max_keys` 上限；正确性：`ConfigLoader.reload()` 伪原子→暂存+单次发布+回滚、`/api/chat/history` `before` 类型不匹配（TEXT 列 vs 秒级整数，翻页恒空）→UTC 格式化 + `to_thread` 去阻塞、`PersonaService._load_character_card` 加 mtime 缓存（修 id-glob 分支 mtime 未记录导致缓存永不命中）；MiMo-only 残留：`VoiceConfig.engine` 默认 `edge-tts`→`mimo-tts` 并删 4 个已删引擎字段；移动端：13 处响应式 grid、MobileDrawer 滚动锁 + `inert`、ParticleCanvas 双 rAF 循环 + resize 防抖、`100dvh`、`bg-dynamic`/`bg-orbs` 死类清理、tap-highlight/text-size-adjust、`background-attachment: fixed`→fixed 伪元素、移动端毛玻璃降级、日志面板视口相对高度；**文档口径纠错**：§1.1 端点 208→**204**（旧口径为 `len(app.routes)`，含 4 条框架路由；业务端点 = `APIRoute` = 204 / 171 唯一路径 / 17 include_router）、页面 15→17、API 模块 12→11、store 4→3、测试 1030→1011+4 跳过；README 与 CODEMAPS/ARCHITECTURE 全面重写；`api/app_factory.py` 内联端点数逐条校正。报告：`docs/verification/2026-09-17-全仓扫描验证报告.md` |
 | 2026-09-17 | 10c8f0f + 5e4ecb5 + 8a34b23 + 4f6ed29 | **v3.7.0 人设/主动消息三连修 + web 控制端开关 + 死代码清洗（生产日志实证驱动）**：**批次一（10c8f0f+5e4ecb5）**：(1) `character_routes.py` activate 带 JWT 时同步当前登录用户全部 `wechat_bindings`（复用 `upsert_binding` 刷新运行中进程缓存，web 切角色→微信实时生效）——修复 web"设为活跃"与微信人设真源断裂；(2) 角色卡长锚点截断保留（旧 >20 字整条丢弃）；(3) emoji 五处提示词语义化（默认=每条最多一个、仅情绪强烈时用）；(4) `scheduler._deliver()` asyncio.run 替代非主线程必炸的 get_event_loop（生产 64 触发 0 送达→修复后 1/1 送达）；`_check_ase` 回退 ASE 自身 `_hours_since_last_chat()`；发送目标改 `get_bound_wxids()` 定向；(5) `MultiProviderGateway` 补 `chat_sync`（ASE LLM 生成静默回落模板根因）；(6) update/activate 新增 `_invalidate_knowledge_index`（ensure_index 优先磁盘旧索引永不重建）；(7) 服务器同步 24 张唯一卡（53 张同名去重）。**批次二（8a34b23+4f6ed29，用户裁决）**：(8) 免打扰时段 web 可调（/proactive/config 扩展 quiet_hours_*；MessageTab 滑条）；(9) 知识库定期采集 web 开关（+/api/knowledge/collect-config GET/POST；DATA tab Toggle；scheduler vault_collect APScheduler 任务）；(10) 跨 worker 一致性：`data/scheduler_config.json` 为真源（4 worker 仅 master 持调度器，GET 文件兜底/POST 双写/master 每 tick reload ≤5min 生效）；(11) 死代码清洗：删 shared/Badge.tsx、chatStore.ts+api/chat.ts（侧栏圆点改接 useWechatStatus 真源）、shisi 微信指令系统 command_handler/command_parser（生产未接线）+ 测试联动。端点 206→208；测试口径 09-17：系统 Python **1014 收集/1010 通过/4 跳过** + vitest **87/87** + tsc 0 错；部署 remote_deploy 全流程（含服务端前端构建）+ health 200 + "微信主动发送成功/主动消息已投递: wechat"送达实证 |
 | 2026-09-15 | 91f2042 (merge w3-code: d104ce6/79dbae3/d74a8e6) | **v3.6.0 W3 多模态收编**：(1) 新增 `multimodal/image_attachment.py`（入站图片归一化：裸 base64/dataURL→dataURL，magic bytes 判型，全程内存不落盘）；(2) `wechat_direct/wechat_connector.py` 入口守卫 `msg_type not in (1,3,34)`（修复图片 3/语音 34 在入口被丢弃→提案 16-A1）+ 图片处理 auto/direct/describe/off 四模式（默认 auto：配 vision_model 走直传，否则降级 VisionHandler 描述注入）；(3) `llm_provider/llm_gateway.py` chat()/_build_messages 新增 attachments 参数（附件并入末条 user message——不用 messages= 传图，避免 system_prompt 与 history 被整体丢弃）；(4) `orchestrator/optimized_orchestrator.py`/`user_scheduler.py` attachments 全链路透传；`_init_mixin` 补传 asr_config 消除 ASR 双 owner；(5) `voice/audio_converter.py` pilk silk 编解码（可选依赖 voice-silk；实测 ffmpeg 8.1 essentials 无 silk decoder），to_wav 按 rate=16000 重采样防变速变调；(6) `config/system.yaml` 新增 `multimodal.image` 段（mode=off 为零代码回滚路径）；(7) 测试 +3（W4 收包用例转绿并入，tests owner=W4）；端点数不变（无新路由）；(8) 部署闭环：服务器 pull→remote_deploy→health 200，git hash-object 三端抽验 3/3 一致 |
 | 2026-07-01 | 9c0b636..b455222 (7 commits) | 初始创建：新增 tools/ 工具系统、sensenova LLM 供应商、PersonaService 两阶段构造、18 个前端页面、安全日志 |

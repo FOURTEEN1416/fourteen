@@ -971,6 +971,7 @@ class PersonaEngine:
 
         self._evolution_log = self._evolution_log[:index]
         self._base_prompt_cache = None
+        self._prompt_cache.clear()  # 回滚改写了 traits/profile，成品提示词缓存同样必须失效
         logger.info("Persona rollback to index %d", index)
         return True
 
@@ -983,7 +984,12 @@ class PersonaEngine:
         if self.anchor_verification_enabled:
             self._original_anchors = list(self._persona.get("core_anchors", self.CORE_ANCHORS))
             self._freeze_anchors()
+        # 两处缓存都必须失效：_base_prompt_cache 存的是基底提示词，
+        # _prompt_cache 存的是"基底 + 注入层"的成品。旧实现只清了前者，
+        # 且 _prompt_cache 的 key 只哈希 emotion/style/history/rag/summary/world_info
+        # ——不含人设内容——因此配置改完后，相同入参会命中**改动前**的提示词。
         self._base_prompt_cache = None
+        self._prompt_cache.clear()
         logger.info("Persona config reloaded")
 
     def to_dict(self) -> dict:

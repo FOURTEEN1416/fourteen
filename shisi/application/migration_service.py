@@ -10,6 +10,10 @@ from shisi.infrastructure.migration.migration_runner import MigrationResult
 from shisi.infrastructure.migration.migration_runner import run as run_migration
 from shisi.infrastructure.migration.rollback_runner import RollbackResult
 from shisi.infrastructure.migration.rollback_runner import run as run_rollback
+from utils.project_paths import project_path
+
+_DEFAULT_DB_PATH = project_path("data", "sqlite.db")
+_DEFAULT_CHAR_DIR = project_path("data", "characters")
 
 
 @dataclass
@@ -23,15 +27,15 @@ class MigrationStatus:
 class MigrationService:
     def execute(
         self,
-        db_path: Path = Path("data/sqlite.db"),
-        char_dir: Path = Path("data/characters"),
+        db_path: Path = _DEFAULT_DB_PATH,
+        char_dir: Path = _DEFAULT_CHAR_DIR,
     ) -> MigrationResult:
         return run_migration(db_path, char_dir)
 
-    def rollback(self, db_path: Path = Path("data/sqlite.db")) -> RollbackResult:
+    def rollback(self, db_path: Path = _DEFAULT_DB_PATH) -> RollbackResult:
         return run_rollback(db_path)
 
-    def status(self, db_path: Path = Path("data/sqlite.db")) -> MigrationStatus:
+    def status(self, db_path: Path = _DEFAULT_DB_PATH) -> MigrationStatus:
         if not db_path.exists():
             return MigrationStatus(
                 v2_table_exists=False,

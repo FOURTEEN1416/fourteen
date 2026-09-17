@@ -210,7 +210,9 @@ class CollectLoop:
                     continue
 
                 # 执行收集（同步方法，在线程池跑以免阻塞事件循环）
-                loop = asyncio.get_event_loop()
+                # get_running_loop：本方法为 async def，循环必然在运行中。
+                # get_event_loop() 已废弃（3.12 起 DeprecationWarning）。
+                loop = asyncio.get_running_loop()
                 await loop.run_in_executor(
                     None, self._collector.collect_card, character_id, card
                 )

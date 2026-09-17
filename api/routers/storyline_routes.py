@@ -16,6 +16,7 @@ from api.path_security import sanitize_id
 from shisi.storyline.config import StorylineConfig
 from shisi.storyline.detector import StorylineDetector
 from shisi.storyline.engine import get_storyline_engine
+from utils.project_paths import project_path
 
 logger = logging.getLogger("api.storyline_routes")
 
@@ -32,7 +33,7 @@ def _persist_state_to_json(character_id: str, state_dict: dict[str, Any]) -> Non
     _save_character(character_id, data)
 
 
-CHARACTERS_DIR = Path("config/characters")
+CHARACTERS_DIR = project_path("config", "characters")
 
 
 def _character_path(character_id: str) -> Path:

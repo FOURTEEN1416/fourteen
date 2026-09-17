@@ -137,7 +137,7 @@ export default function AdminProvidersPage() {
   if (!isAdmin) {
     return (
       <AnimatedPage>
-        <div className="bg-dynamic px-4 py-6 sm:px-6 lg:px-8 flex items-center justify-center min-h-[300px]">
+        <div className="px-4 py-6 sm:px-6 lg:px-8 flex items-center justify-center min-h-[300px]">
           <EmptyState
             icon={<Shield className="w-12 h-12 text-rose-300" />}
             title="无权限访问"
@@ -150,7 +150,7 @@ export default function AdminProvidersPage() {
 
   return (
     <AnimatedPage>
-      <div className="bg-dynamic px-4 py-6 sm:px-6 lg:px-8">
+      <div className="px-4 py-6 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl">
           {/* ═══ Header ═══ */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">

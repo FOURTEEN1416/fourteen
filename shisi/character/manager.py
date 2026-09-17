@@ -7,6 +7,8 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 
+from utils.project_paths import resolve_project_path
+
 from ..config import get_config
 from .character_card_v2 import ParserDispatcher, to_persona_config
 from .exporter import PersonaExporter
@@ -150,7 +152,8 @@ class CharacterManager:
         return result
 
     def load_character_from_file(self, char_id: str) -> CharaCardV2 | None:
-        data_dir = Path(get_config("character", "data_dir", "data/characters"))
+        # 缺省目录锚定项目根，避免非仓库根 CWD 下静默返回 None
+        data_dir = resolve_project_path(get_config("character", "data_dir", "data/characters"))
         path = data_dir / f"{char_id}.json"
         if not path.exists():
             return None

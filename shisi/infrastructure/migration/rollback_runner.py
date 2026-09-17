@@ -7,6 +7,10 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from utils.project_paths import project_path
+
+_DEFAULT_DB_PATH = project_path("data", "sqlite.db")
+
 
 @dataclass
 class RollbackResult:
@@ -15,7 +19,7 @@ class RollbackResult:
     backup_used: str | None = None
 
 
-def run(db_path: Path = Path("data/sqlite.db")) -> RollbackResult:
+def run(db_path: Path = _DEFAULT_DB_PATH) -> RollbackResult:
     backups = sorted(db_path.parent.glob("sqlite.db.backup.*"))
     if not backups:
         return RollbackResult(success=False, message="未找到备份文件，无法回滚")

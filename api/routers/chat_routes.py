@@ -16,6 +16,7 @@ import json
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from fastapi.responses import StreamingResponse
@@ -211,7 +212,7 @@ async def list_sessions(_auth: bool = Security(verify_api_key_dep)):
 async def chat_history(
     session_id: str = "",
     limit: int = Query(default=20, ge=1, le=100),
-    before: int = Query(default=0, ge=0, description="Timestamp to load messages before"),
+    before: int = Query(default=0, ge=0, description="Unix 秒时间戳：只取该时刻之前的消息"),
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
@@ -222,25 +223,42 @@ async def chat_history(
         sm = getattr(orch._memory, "structured_memory", None) or getattr(orch._memory, "_sm", None)
         if sm and hasattr(sm, "get_connection"):
             try:
-                with sm.get_connection() as conn:
-                    conditions = ["session_id = ?"]
-                    params = [session_id]
-                    if before > 0:
-                        conditions.append("created_at < ?")
-                        params.append(str(before))
-                    where_clause = " AND ".join(conditions)
-                    params.append(str(limit))
-                    rows = conn.execute(
-                        f"SELECT role, content, emotion_tag, created_at FROM chat_history "
-                        f"WHERE {where_clause} ORDER BY created_at DESC LIMIT ?",
-                        tuple(params),
-                    ).fetchall()
-                    messages = [dict(r) for r in rows][::-1]
-                    return {"messages": messages, "session_id": session_id}
+                messages = await asyncio.to_thread(
+                    _query_history_sync, sm, session_id, limit, before
+                )
+                return {"messages": messages, "session_id": session_id}
             except Exception as e:
                 logger.warning("Failed to query chat history by session_id: %s", e)
     messages = orch._memory.working.get_recent(limit)
     return {"messages": messages, "session_id": session_id}
+
+
+def _query_history_sync(sm, session_id: str, limit: int, before: int) -> list[dict]:
+    """同步 SQLite 查询（由 asyncio.to_thread 调度，避免阻塞事件循环）。
+
+    分页条件类型修复（2026-09-17）：
+    ``chat_history.created_at`` 由 ``TIMESTAMP DEFAULT CURRENT_TIMESTAMP`` 写入，
+    SQLite 实际以 TEXT ``'YYYY-MM-DD HH:MM:SS'`` 存储。旧实现把整数秒直接
+    ``str(before)`` 后与之比较，字符串字典序下 ``'2026-…' > '1758…'``，
+    导致 ``created_at < ?`` 恒为 false —— 带 ``before`` 的分页**永远返回空**。
+    现按 UTC 格式化为同构文本再比较（CURRENT_TIMESTAMP 即 UTC）。
+    """
+    with sm.get_connection() as conn:
+        conditions = ["session_id = ?"]
+        params: list = [session_id]
+        if before > 0:
+            conditions.append("created_at < ?")
+            params.append(
+                datetime.fromtimestamp(before, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            )
+        where_clause = " AND ".join(conditions)
+        params.append(str(limit))
+        rows = conn.execute(
+            f"SELECT role, content, emotion_tag, created_at FROM chat_history "
+            f"WHERE {where_clause} ORDER BY created_at DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [dict(r) for r in rows][::-1]
 
 
 # ═══════════════════════════════════════════════════════

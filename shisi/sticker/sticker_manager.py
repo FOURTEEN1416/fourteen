@@ -8,6 +8,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from utils.project_paths import resolve_project_path
+
 from ..config import get_config
 
 logger = logging.getLogger("shisi.sticker.sticker_manager")
@@ -18,7 +20,11 @@ _DB_DEFAULT = Path(__file__).resolve().parent.parent.parent / "data" / "sqlite.d
 class StickerManager:
     def __init__(self, db_path: Path | str | None = None, data_dir: Path | str | None = None):
         self._db_path = Path(db_path) if db_path else _DB_DEFAULT
-        self._data_dir = Path(data_dir) if data_dir else Path(get_config("sticker", "data_dir", "data/stickers"))
+        # 配置缺省值也须锚定项目根，否则从非仓库根启动时会写到错误目录
+        self._data_dir = (
+            Path(data_dir) if data_dir
+            else resolve_project_path(get_config("sticker", "data_dir", "data/stickers"))
+        )
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
     def list_by_category(self, category: str | None = None) -> list[dict[str, Any]]:
