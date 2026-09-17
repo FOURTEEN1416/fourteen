@@ -1102,3 +1102,22 @@
 **BP**：以 15-v2-优化稿为基座（命题解读/调研缘起独立成章）合并今晚全部勘误（Nature 假出处删除、338 提交、汉斯审稿中、软著受理中），收编为正式 15-商业计划书.md；运营行升级压测口径。**假数据防线**：删别窗填写的"注册用户 501/日活 113（系统后台实测）"——该实测不存在。
 
 **清扫**：主仓 .git.broken-0006 空壳/data.空库备份-0015、论文区模板解包 4.5MB、PPT 区 tmp 25MB 与旧设计变体，DELETION_LOG 记账。
+
+
+## 2026-09-17（五十）— 人设/emoji/主动消息三连修（生产日志实证驱动）+ 知识库链路排查 + 卡同步
+
+**用户指令**：全仓遍历诊断三问题（角色回答不贴人设/不会主动发消息/每条都带 emoji）→ 云服务器日志取证 → 确认修复方向（web 端切换角色/emoji≤1 仅情绪强烈/全部绑定跟随切换/可中断重启）→ 修复后清理死代码补测试更新文档 + 知识库链路全新扫描。
+
+**诊断阶段（先证明再动手）**：生产日志实证三问题——① 8/8 真实回复全部带 1-2 个文字 emoji（'😊🌟'等）；② 同一会话 5 分钟内身份从"我是十四"漂移到"我是林挽夏"（根因：绑定 17:36 创建+服务 17:38 重启前后内存态差异；且 web"设为活跃"只改卡文件 is_active，`set_user_character("default")` 空转，与微信真源 wechat_bindings 完全断裂）；③ ASE 触发 64 次 0 次送达微信（全部落入 console 日志兜底）。附产发现：`MultiProviderGateway` 无 chat_sync → 主动消息 LLM 生成静默回落模板；`get_last_chat_time` 未注入 → missing_bonus 恒 0、紧迫度结构性到不了阈值。
+
+**修复（10c8f0f + 5e4ecb5）**：① activate 带 JWT 时同步当前登录用户全部 wechat_bindings（复用 upsert_binding 实时缓存，web 切角色→微信即时生效；SP-9 绑定页不恢复）；② 角色卡长锚点截断保留（旧 >20 字整条丢弃）；③ emoji 五处提示词语义化（persona_engine×2/emotion_style_coupler/shisi PersonaProfile/tone_mimic.yaml）；④ scheduler._deliver 用 asyncio.run 替代非主线程必炸的 get_event_loop；_check_ase 回退 ASE 自身 _hours_since_last_chat；发送目标改 get_bound_wxids() 定向（run_api+main 双入口）；⑤ MultiProviderGateway 补 chat_sync；⑥ update/activate 新增 _invalidate_knowledge_index（ensure_index 优先磁盘旧索引永不重建——绑定卡索引仅含建卡初期琐碎块的根因）。
+
+**知识库链路扫描结论**：机械链路完整（卡→分块→BM25→检索→"# 角色知识库"注入，角色隔离正确）；两个缺口=陈旧索引（已修）+ CollectLoop 定时采集定义未启动（死接线，仅手动 enrich 按钮可用，未动——避免行为变更）。
+
+**卡同步**：本地 data/characters 53 张 → 同名去重 29 → 24 张唯一卡 normalize 规范化（ASCII id，防服务器 sanitize_id 拒中文）scp 入服务器 config/characters；保留绑定卡 62105bca 不覆盖；25 张 JSON 校验全过。
+
+**死代码清理**：删 frontend shared/Badge.tsx（零消费，common/Badge 为在用真源，tsc+vitest 验证）；登记未删：chatStore 半僵尸（Sidebar 消费 isConnected）、shisi WeChatCommandHandler 悬空（用户裁决不走微信指令入口）。
+
+**验证**：pytest 1028 通过/4 跳过（基线 1015+新增 13，零回归）；vitest 87/87；tsc 0 错；部署后 health 200；**主动消息端到端送达实证**："19:14:54 ASE triggered [share] 哼，这么晚了还打扰我…🌙 / 微信主动发送成功 / 主动消息已投递: wechat"（非模板=chat_sync LLM 生成生效）。
+
+**文档**：FUNCTION_INVENTORY（ROLES-2/MESSAGE-3 增强注记）、CODE_GRAPH v3.7.0、DECISION_LEDGER 09-17 两行入账。
