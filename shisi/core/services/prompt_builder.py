@@ -96,7 +96,11 @@ def _get_knowledge_context(character: CharacterAggregate, user_message: str, ena
         if not svc.has_index(character.id):
             svc.index_character(character.id, character)
 
-        return svc.get_knowledge_context(character.id, user_message, top_k=3)
+        # top_k 由 3 提到 8（2026-09-18）：知识库规模实测 5~166 块、均值约 40，
+        # 而此前仅注入 3 块（对 166 块的角色只用到 1.8%）。BM25 为 2-gram 关键词
+        # 匹配、召回排序本就弱于语义检索，top_k 过小会把创作者写的人设细节挡在
+        # prompt 之外。8 块在上下文预算内（单块为段落级，数十至数百字）。
+        return svc.get_knowledge_context(character.id, user_message, top_k=8)
     except Exception:
         logger.warning("RAG 知识检索失败（非阻塞）", exc_info=True)
         return ""
