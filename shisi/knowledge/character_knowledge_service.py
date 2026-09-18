@@ -30,6 +30,47 @@ logger = logging.getLogger("shisi.knowledge.character_knowledge_service")
 _DEFAULT_INDEX_DIR = project_path("data", "knowledge")
 
 
+# ── 查询扩展表 ───────────────────────────────────────────────
+# 口语化提问 → 领域关键词。依据：BM25 是 2-gram 关键词匹配，用户口语提问与
+# 知识库原文措辞常无交集（实测见 search() 的 docstring 注释）。
+# 只在命中信号词时触发，零额外依赖、零 API 调用、零延迟增加。
+_QUERY_EXPANSIONS: tuple[tuple[tuple[str, ...], str], ...] = (
+    # ⚠️ 扩展词必须是**领域实词**：泛词（"日常"/"平时"）会引入大量噪声
+    #    （实测：把"日常 平时"加进爱好扩展后，top-1 由正确块变成无关的"互动场景"）。
+    (("爱好", "喜欢做", "平时做", "兴趣", "消遣"), "爱好 兴趣 习惯 消遣"),
+    (("家人", "家庭", "父母", "亲人", "出身", "亲戚", "家里", "家有"), "家庭 家人 父母 亲属 出身 家世"),
+    (("性格", "什么样的人", "脾气", "脾气秉性"), "性格 特质 脾气 内里 底色 为人"),
+    (("是谁", "叫什么", "名字", "称呼"), "名字 称呼 身份"),
+    (("朋友", "同伴", "同学"), "朋友 同学 同伴"),
+    (("经历", "过去", "以前", "背景", "故事"), "经历 过去 背景 往事 早年"),
+    (("能力", "擅长", "会什么", "技能"), "能力 擅长 技能 天赋 特长"),
+    (("外貌", "长相", "样子", "身高", "穿着"), "外貌 长相 身高 穿着 模样"),
+    (("学校", "班级", "工作", "职业"), "学校 班级 职业 工作 单位"),
+    (("讨厌", "不喜欢", "害怕", "弱点"), "讨厌 害怕 弱点 禁忌"),
+)
+
+
+def _expand_query(query: str) -> str:
+    """命中领域信号词时，返回**纯领域关键词串**（不含原查询）。
+
+    ⚠️ 为什么返回纯扩展词而非"原查询 + 扩展词"：后者会让扩展路**仍带着原查询的
+    噪声词**（如「你家里有什么人」中的"有"/"人"会命中无关的"女生小团体"块），
+    实测导致正确块被压到第 3 位。双路检索时两路必须**真正互补**：
+    原路保精度、扩展路提召回（扩展词用知识库惯用措辞）。
+
+    无命中信号词时返回空串，调用方据此跳过双路检索。
+    """
+    if not query:
+        return ""
+    extras: list[str] = []
+    for signals, expansion in _QUERY_EXPANSIONS:
+        if any(s in query for s in signals):
+            extras.append(expansion)
+    if not extras:
+        return ""
+    return " ".join(dict.fromkeys(" ".join(extras).split()))
+
+
 class CharacterKnowledgeService:
     """角色知识服务 — 知识提取 + 检索 + 上下文注入。"""
 
@@ -114,11 +155,36 @@ class CharacterKnowledgeService:
         logger.info("角色知识索引完成(卡): %s → %d 知识块", character_id, len(chunks))
 
     def search(self, character_id: str, query: str, top_k: int = 3) -> RetrievalResult:
-        """检索角色知识。"""
+        """检索角色知识（带查询扩展）。
+
+        2026-09-18 新增查询扩展：BM25 是 2-gram 关键词匹配，对**口语化提问**召回很差。
+        实测（阿哈 166 块）：「你家里有什么人」top-1 命中 4.18 分的**无关内容**
+        （"女生小团体楠楠"，只因同含"人"字）；而扩展为
+        「家庭 家人 父母 亲属 出身 早年」后，命中正确块（"早年家庭经历"）且分数升至 13.46。
+        → 做法：命中领域信号词时，用「原查询 ∪ 扩展查询」双路检索并合并，
+          扩展路优先（其措辞更接近知识库原文）。
+        """
         retriever = self._retrievers.get(character_id)
         if not retriever:
             return RetrievalResult()
-        return retriever.search(query, top_k=top_k)
+
+        expanded = _expand_query(query)
+        if not expanded:
+            return retriever.search(query, top_k=top_k)
+
+        # 双路互补检索：扩展路（知识库惯用措辞，提召回）在前，原路（保精度）在后
+        ext = retriever.search(expanded, top_k=top_k)
+        base = retriever.search(query, top_k=top_k)
+
+        # 合并：扩展路在前，按 content 去重
+        seen: set[str] = set()
+        merged: list[Any] = []
+        for chunk in list(ext.chunks) + list(base.chunks):
+            key = (chunk.content or "").strip()
+            if key and key not in seen:
+                seen.add(key)
+                merged.append(chunk)
+        return RetrievalResult(chunks=merged[:top_k])
 
     def get_knowledge_context(self, character_id: str, query: str, top_k: int = 3) -> str:
         """获取格式化的知识上下文，直接用于 prompt 注入。"""
