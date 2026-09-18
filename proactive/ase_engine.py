@@ -549,6 +549,8 @@ class ASEEngine:
         self._last_morning_date: datetime | None = None
         self._last_night_date: datetime | None = None
         self._last_meal_date: datetime | None = None
+        # 跨日惰性重置基准（本地日期 date 对象），见 _rollover_if_new_day()
+        self._last_reset_date: Any = None
 
         self._recent_messages: deque = deque(maxlen=50)
 
@@ -619,11 +621,24 @@ class ASEEngine:
         if emotion_state:
             self._emotion_state = emotion_state
 
-        if not self._check_frequency():
-            return None
+        # ① 跨日惰性重置（必须先于所有判定）
+        #    原实现只依赖 scheduler 的 CronTrigger(00:00) 重置任务，
+        #    但多 worker 共享状态文件时重置会被旧值覆盖，服务恰在 00:00
+        #    重启也会跳过该任务 → daily_count 卡在上限（2026-09-18 生产实证）。
+        #    改为与 frequency.py 一致的惰性判定：每次 tick 按本地日期自检。
+        self._rollover_if_new_day()
 
+        # ② 紧迫度更新必须**先于**频率检查
+        #    原实现把 _check_frequency() 放在最前，一旦计数达上限/处于30分钟
+        #    冷却内就提前 return，导致 _update_urgency() 永不执行、
+        #    missing_bonus 恒为 0 —— 与 daily_count 卡死形成**连锁死锁**
+        #    （生产实证：daily_count=8 且 urgency 六维全 0）。
+        #    紧迫度是持续累积的状态，本就应与"当前能否发送"解耦。
         actual_hours = hours_since_last_chat or self._hours_since_last_chat()
         self._update_urgency(actual_hours)
+
+        if not self._check_frequency():
+            return None
 
         if dry_run:
             return None
@@ -946,6 +961,7 @@ class ASEEngine:
                 "last_morning_date": str(self._last_morning_date) if self._last_morning_date else None,
                 "last_night_date": str(self._last_night_date) if self._last_night_date else None,
                 "last_meal_date": str(self._last_meal_date) if self._last_meal_date else None,
+                "last_reset_date": str(self._last_reset_date) if self._last_reset_date else None,
                 "recent_messages": list(self._recent_messages),
                 "freq_adapter": self._freq_adapter.to_dict() if self._freq_adapter else None,
                 "freq_controller": self._freq_controller.to_dict() if self._freq_controller else None,
@@ -987,6 +1003,8 @@ class ASEEngine:
                 self._last_night_date = datetime.strptime(state["last_night_date"], "%Y-%m-%d").date()  # type: ignore[assignment]  # noqa: DTZ007
             if state.get("last_meal_date"):
                 self._last_meal_date = datetime.strptime(state["last_meal_date"], "%Y-%m-%d").date()  # type: ignore[assignment]  # noqa: DTZ007
+            if state.get("last_reset_date"):
+                self._last_reset_date = datetime.strptime(state["last_reset_date"], "%Y-%m-%d").date()  # type: ignore[assignment]  # noqa: DTZ007
 
             recent = state.get("recent_messages", [])
             self._recent_messages = deque(recent[-50:], maxlen=50)
@@ -1017,11 +1035,34 @@ class ASEEngine:
     def set_last_chat_time(self, dt: datetime) -> None:
         self._last_chat_time = dt
 
+    def _rollover_if_new_day(self) -> None:
+        """跨日惰性重置（按**本地日期**判定，即北京时间）。
+
+        为什么不用 APScheduler 的 CronTrigger(00:00)：
+        1. 服务恰于 00:00 重启时该任务会被跳过（且它未设 misfire_grace_time，
+           同块的 daily_maintenance 反而设了 60s）；
+        2. 状态文件被多 worker 共享写入，重置结果可能被仍持旧内存值的实例覆盖。
+        生产实证：09-18 00:00 有 "Daily ASE count reset" 日志，但文件中
+        daily_count 仍为 8，且 last_night_date 停在 09-17。
+
+        惰性判定天然幂等且跨 worker 安全：谁先跑谁重置，后跑者见日期已推进即跳过。
+        """
+        today = _local_now().date()
+        if self._last_reset_date != today:
+            self._daily_message_count = 0
+            self._last_reset_date = today
+            # 场景标记同步清理，保证早安/晚安/三餐当天可再次触发
+            self._last_morning_date = None
+            self._last_night_date = None
+            self._last_meal_date = None
+            logger.info("跨日重置：daily_count 归零（本地日期 %s）", today)
+
     def reset_daily_count(self) -> None:
         self._daily_message_count = 0
         self._last_morning_date = None
         self._last_night_date = None
         self._last_meal_date = None
+        self._last_reset_date = _local_now().date()
         if self._freq_adapter:
             self._freq_adapter.on_reply_received()
 

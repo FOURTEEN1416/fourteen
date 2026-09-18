@@ -305,58 +305,78 @@ async def send_proactive_now(
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
-    """手动立即生成并发送一条主动消息（绕过频率限制；计入统计与历史）。"""
+    """手动立即生成并发送一条主动消息（绕过频率限制；计入统计与历史）。
+
+    ⚠️ **不消耗当日自动配额**：原实现直接调 `_generate_and_return` /
+    `_record_and_return`，二者内部都会走 `_record_proactive_sent()` 给
+    `_daily_message_count` +1。结果是用户在控制台自测几次就把当日 8 条配额
+    耗尽，自动主动消息随之全部停发（2026-09-18 生产实证：daily_count=8、
+    last_sent_time 停在手动测试时段）。
+    现改为：**保留**历史记录、recent_messages 与 30 分钟冷却，
+    但**归还**配额计数 —— 测试不应吃掉生产额度。
+    """
     orch = deps.orch
     if not orch or not orch._ase:
         raise HTTPException(503, "Proactive engine not initialized")
     ase = orch._ase
 
-    msg_type = (req.message_type if req else None)
-    if msg_type:
-        try:
-            from proactive.ase_engine import ProactiveType
-            chosen = ProactiveType(msg_type)
-        except ValueError:
-            raise HTTPException(400, f"未知消息类型: {msg_type}") from None
-        result = ase._generate_and_return(chosen)
-    else:
-        # 自动选择：更新紧迫度后按阈值/场景选型（生成不计频率门槛）
-        ase._update_urgency(ase._hours_since_last_chat())
-        scene = ase._check_scene_triggers()
-        if scene and ase.urgency.total >= 2.0:
-            result = ase._record_and_return(scene)
+    # 配额保护：记录入口计数，无论成功失败都在出口归还
+    _quota_before = ase._daily_message_count
+    try:
+        msg_type = (req.message_type if req else None)
+        if msg_type:
+            try:
+                from proactive.ase_engine import ProactiveType
+                chosen = ProactiveType(msg_type)
+            except ValueError:
+                raise HTTPException(400, f"未知消息类型: {msg_type}") from None
+            result = ase._generate_and_return(chosen)
         else:
-            result = ase._generate_and_return(ase._select_type_by_urgency())
+            # 自动选择：更新紧迫度后按阈值/场景选型（生成不计频率门槛）
+            ase._update_urgency(ase._hours_since_last_chat())
+            scene = ase._check_scene_triggers()
+            if scene and ase.urgency.total >= 2.0:
+                result = ase._record_and_return(scene)
+            else:
+                result = ase._generate_and_return(ase._select_type_by_urgency())
 
-    if not result:
-        raise HTTPException(500, "消息生成失败")
+        if not result:
+            raise HTTPException(500, "消息生成失败")
 
-    ase.record_sent_entry(result)
-    scheduler = orch.components.get("scheduler") if orch.components else None
-    delivered = False
-    if scheduler is not None:
-        try:
-            # 本端点为 async def，事件循环必然在运行中 —— 旧的
-            # get_event_loop()+is_running()+run_until_complete 分支中，
-            # run_until_complete 永不可达（循环已在跑，调用会抛 RuntimeError），
-            # 属于死分支。改用 create_task 并**保留引用**：
-            # asyncio 文档明确要求持有 task 引用，否则可能在执行途中被 GC 回收
-            # （表现为"偶发不投递"）。orchestrator 的 _background_tasks 正是为此存在。
-            task = asyncio.create_task(
-                scheduler._send_to_all(result.get("message", ""))
-            )
-            bg = getattr(orch, "_background_tasks", None)
-            if bg is not None:
-                bg.add(task)
-                task.add_done_callback(bg.discard)
-            delivered = True
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Proactive 异步投递调度失败，回退同步发送: %s", e)
-            if getattr(scheduler, "_send", None):
-                scheduler._send(result.get("message", ""))
+        ase.record_sent_entry(result)
+        scheduler = orch.components.get("scheduler") if orch.components else None
+        delivered = False
+        if scheduler is not None:
+            try:
+                # 本端点为 async def，事件循环必然在运行中 —— 旧的
+                # get_event_loop()+is_running()+run_until_complete 分支中，
+                # run_until_complete 永不可达（循环已在跑，调用会抛 RuntimeError），
+                # 属于死分支。改用 create_task 并**保留引用**：
+                # asyncio 文档明确要求持有 task 引用，否则可能在执行途中被 GC 回收
+                # （表现为"偶发不投递"）。orchestrator 的 _background_tasks 正是为此存在。
+                task = asyncio.create_task(
+                    scheduler._send_to_all(result.get("message", ""))
+                )
+                bg = getattr(orch, "_background_tasks", None)
+                if bg is not None:
+                    bg.add(task)
+                    task.add_done_callback(bg.discard)
                 delivered = True
-    logger.info("Proactive manual send: [%s] delivered=%s", result.get("type"), delivered)
-    return {"status": "sent", "delivered": delivered, **result}
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Proactive 异步投递调度失败，回退同步发送: %s", e)
+                if getattr(scheduler, "_send", None):
+                    scheduler._send(result.get("message", ""))
+                    delivered = True
+        logger.info("Proactive manual send: [%s] delivered=%s", result.get("type"), delivered)
+        return {"status": "sent", "delivered": delivered, **result}
+    finally:
+        # 归还配额（_last_proactive_time 保留 → 30 分钟冷却仍然生效，
+        # 避免手动发完自动消息紧接着又发一条）
+        if ase._daily_message_count != _quota_before:
+            logger.info(
+                "手动发送归还当日配额：%d -> %d", ase._daily_message_count, _quota_before
+            )
+            ase._daily_message_count = _quota_before
 
 
 @router.get("/api/proactive/history")
