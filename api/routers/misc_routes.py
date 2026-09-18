@@ -170,13 +170,11 @@ async def seed_diary(
     ds = getattr(mem, "ds", None)
     if ds is None:
         raise HTTPException(status_code=503, detail="Diary summarizer not initialized")
+
+    # 只调用一次：若 ds 为 _legacy 版（带 _structured_memory），save_summary 内部已落
+    # DB（INSERT OR REPLACE）；若为生产版（仅存内存 _daily_summaries），此处也无 DB
+    # 连接可补写。旧实现先调一次、再在 _legacy 分支又调一次造成**重复落库**。
     ds.save_summary(req.date, req.summary.strip())
-    # 有 DB 持久化能力（_legacy 版）时落库，重启不丢
-    if hasattr(ds, "_structured_memory") and getattr(ds, "_structured_memory", None) is not None:
-        try:
-            ds.save_summary(req.date, req.summary.strip())  # legacy 版内部已写 DB
-        except Exception:
-            logger.warning("diary seed DB 落库失败（内存态已更新）", exc_info=True)
     return {"status": "seeded", "date": req.date}
 
 

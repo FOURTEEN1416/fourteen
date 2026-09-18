@@ -20,7 +20,6 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -29,10 +28,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.database import CharacterAchievement
 from api.deps import deps
 from api.path_security import sanitize_id
+from utils.project_paths import project_path
 
 logger = logging.getLogger("api.achievement_engine")
 
-_MEMORY_FACTS_DIR = Path("data") / "character_memory"
+# 锚定项目根，避免依赖进程 CWD（character_routes._facts_path 同源 —— 2026-09 全仓扫描）
+_MEMORY_FACTS_DIR = project_path("data", "character_memory")
 
 
 @dataclass(frozen=True)

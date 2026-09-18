@@ -120,13 +120,21 @@ def _mount_routes(app: FastAPI, reg: AiyuRegistry) -> None:
     persona_routes.set_manager(reg.character_manager)  # type: ignore
     stats_routes.set_service(reg.analytics_service)  # type: ignore
 
-    app.include_router(character_routes.router)
-    app.include_router(sticker_routes.router)
-    app.include_router(memory_routes.router)
-    app.include_router(emotion_stage_routes.router)
-    app.include_router(affinity_routes.router)
-    app.include_router(vital_signs_routes.router)
-    app.include_router(persona_routes.router)
-    app.include_router(stats_routes.router)
+    # 2026-09 安全修复：shisi 全组路由此前无任何认证依赖，生产环境（AUTH_ENABLED=true）
+    # 下角色切换/收藏/转发/CRUD 端点均可匿名调用。这里路由级统一加 verify_api_key_dep；
+    # 认证未启用时该依赖放行，故测试（未 configure_auth）与旧行为一致。
+    from fastapi import Security
+
+    from api.auth import verify_api_key_dep
+
+    _auth_deps = [Security(verify_api_key_dep)]
+    app.include_router(character_routes.router, dependencies=_auth_deps)
+    app.include_router(sticker_routes.router, dependencies=_auth_deps)
+    app.include_router(memory_routes.router, dependencies=_auth_deps)
+    app.include_router(emotion_stage_routes.router, dependencies=_auth_deps)
+    app.include_router(affinity_routes.router, dependencies=_auth_deps)
+    app.include_router(vital_signs_routes.router, dependencies=_auth_deps)
+    app.include_router(persona_routes.router, dependencies=_auth_deps)
+    app.include_router(stats_routes.router, dependencies=_auth_deps)
 
     logger.info("十四API路由挂载完成")

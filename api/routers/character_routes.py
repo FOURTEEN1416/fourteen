@@ -354,7 +354,8 @@ def _invalidate_knowledge_index(character_id: str) -> None:
 
         svc = get_knowledge_service()
         svc.clear(character_id)
-        (Path("data") / "knowledge" / f"{sanitize_id(character_id)}.json").unlink(missing_ok=True)
+        # 与 shisi.knowledge.character_knowledge_service._DEFAULT_INDEX_DIR 同为项目根锚定路径
+        (project_path("data", "knowledge") / f"{sanitize_id(character_id)}.json").unlink(missing_ok=True)
         logger.info("知识索引已失效，待下次对话重建: %s", character_id)
     except Exception as e:  # noqa: BLE001
         logger.warning("知识索引失效失败（非阻塞）: %s", e)
@@ -787,7 +788,8 @@ async def get_preset(
 
 # ── 记忆事实管理 ────────────────────────────────────────
 
-MEMORY_FACTS_DIR = Path("data") / "character_memory"
+# 锚定项目根，避免依赖进程 CWD（achievement_engine._MEMORY_FACTS_DIR 同源）
+MEMORY_FACTS_DIR = project_path("data", "character_memory")
 
 
 def _facts_path(character_id: str) -> Path:

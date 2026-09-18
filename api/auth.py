@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import hmac
 import logging
-import os
 import threading
 from typing import Any
 
 from fastapi import HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
+
+from api.runtime_config import is_production
 
 logger = logging.getLogger("api.auth")
 
@@ -55,8 +56,14 @@ async def verify_api_key_dep(
 
     if not enabled:
         # 认证未启用时放行，但记录警告（生产环境应通过配置启用）
-        if os.getenv("ENVIRONMENT", "development") == "production":
-            logger.warning("API 认证未启用，生产环境存在安全风险，请设置 AUTH_ENABLED=true")
+        # 项目生产方式判定唯一真源为 api.runtime_config.is_production()
+        # （AI_GF_ENV > APP_ENV > ENV）；旧实现取 os.getenv("ENVIRONMENT")
+        # 不在这些变量之列，生产告警永不触发。
+        if is_production():
+            logger.warning(
+                "API 认证未启用，生产环境存在安全风险，"
+                "请设置 API_KEY_ENABLED=true 并配置 API_KEY（见 .env.example）"
+            )
         return True
 
     # 优先从 header 读取，其次从 query 参数（EventSource 场景）

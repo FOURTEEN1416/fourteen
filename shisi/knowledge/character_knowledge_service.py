@@ -15,6 +15,7 @@ from typing import Any
 
 from shisi.character.models import CharaCardV2
 from shisi.core.models.character_aggregate import CharacterAggregate
+from utils.project_paths import project_path
 
 from .retriever import (
     BM25Retriever,
@@ -25,8 +26,8 @@ from .retriever import (
 
 logger = logging.getLogger("shisi.knowledge.character_knowledge_service")
 
-# 默认 BM25 索引缓存目录
-_DEFAULT_INDEX_DIR = Path("data") / "knowledge"
+# 默认 BM25 索引缓存目录（锚定项目根，避免依赖进程 CWD —— 2026-09 全仓扫描）
+_DEFAULT_INDEX_DIR = project_path("data", "knowledge")
 
 
 class CharacterKnowledgeService:
