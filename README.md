@@ -65,7 +65,7 @@ python main.py
 ```yaml
 llm:
   provider: auto          # auto = 自动 fallback 链
-  # fallback_chain: sensenova → zhipu → xunfei → baidu
+  # fallback_chain: agnes → zhipu → xunfei → baidu
   temperature: 0.85
 
 voice:
