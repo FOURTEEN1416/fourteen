@@ -1,7 +1,7 @@
 # AGENTS.md — 唯一的你（ai-girlfriend）项目 Agent 宪法
 
 > **项目**：unique-you — 唯一的你·十四 — 基于 LLM 的智能情感陪伴系统
-> **版本**：v1.8（2026-09-17 全仓性能与正确性扫描批次：测试口径二次刷新 + 项目根路径锚定 + 8 类缺陷修复）
+> **版本**：v1.9（2026-09-18 五项裁决执行批次：双角色库收敛为 `config/characters` 单库 + `ASEEngine._monologues` 冗余副本与 `extract_intent` 死方法删除 + 测试基线 1064 收集 / 1060 通过）
 > **工作目录**：`D:\Desktop\ai-girlfriend`
 > **Python**：3.10+（见 `pyproject.toml`）
 > **主语言**：中文（代码注释遵循用户最新消息语言）

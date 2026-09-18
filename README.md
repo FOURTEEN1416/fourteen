@@ -151,7 +151,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │       ├── store/        Zustand 3 个（authStore / characterBuilderStore / errorStore）
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
-├── tests/                1011 后端测试通过 + 4 跳过（2026-09-17 实测）+ 87 前端测试
+├── tests/                1060 后端测试通过 + 4 跳过（2026-09-18 实测）+ 87 前端测试
 ├── config/               YAML 配置 + config/characters/ 角色卡库
 └── main.py               入口
 ```
