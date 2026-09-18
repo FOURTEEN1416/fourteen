@@ -1218,3 +1218,8 @@
 **验证**：旧路径引用 grep 归零（仅注释一条）；ruff 7 文件全过；全量 pytest **1060 passed / 4 skipped（166.48s，收集 1064）**——较上批 +48 = 25 卡 × `test_persona_injection` 每卡 2 参数化用例（**迁移红利：全部权威卡纳入注入校验覆盖**），0 失败；health 200；hash 抽验 2/2 双端一致；服务器 `data/characters` 不复存在、config 25 张。**自此知识库 enrich 与 vault_collect 定期采集与人设链路同源。**
 
 **文档**：AGENTS v1.9（§0/§2/§4.3 基线 + 修订行）、CODE_GRAPH §1.1 + 更新记录、README badge 1147、DELETION_LOG 09-18 两条、DECISION_LEDGER 09-18 行 ✅。
+
+### 附（09-18 上午）· 服务器时钟核验勘误——"快 8 小时"系主控误报
+
+- 用户要求"矫正"前先诊断：`timedatectl` → 时区 Asia/Beijing (CST)、`System clock synchronized: yes`、chronyd active、与本地偏差 ≤1s——**服务器时钟正常，未做任何改动**（对准的钟跑校时才是破坏）。
+- 误报根因：主控把 `/api/health` 的 `timestamp` 字段（UTC +00:00）误当北京时间与本地挂钟比对（00:27 UTC = 08:27 CST）。教训入档：判断两端时钟偏差必须先各自 `date` 硬对照，禁止拿接口 UTC 时间戳直接比挂钟。本条目时段真实时间线：09-17 23:5x 会话开始 / 09-18 00:08 部署 56cfa69（跨零点）/ 08:12 部署 e7fddbd / 08:26 部署 f62a1f6——五十四~五十六条内时间叙述经此核验全部无误。
