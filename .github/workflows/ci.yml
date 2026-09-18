@@ -118,43 +118,31 @@ jobs:
 
   ff-no-old-api-imports:
     # FF-0003: 前端页面禁止直接 import 旧 API 文件
+    # 门禁逻辑单一真源 = scripts/ci_gates.py（与本地 pre-commit hook 共用同一份实现，
+    # 避免"CI 一份 bash、本地一份复刻"的双实现漂移）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check pages/ 无旧 API import
-        run: |
-          FORBIDDEN="from.*'\.\./api/characterApi\|from.*'\.\./api/memoryApi\|from.*'\.\./api/personaCardApi\|from.*'\.\./api/voiceApi\|from.*'\.\./api/oldClient\|from.*shisiClient\|from.*trainingApi"
-          if grep -rn "$FORBIDDEN" frontend/src/pages/ frontend/src/hooks/ 2>/dev/null; then
-            echo "❌ FF-0003 违规：页面直接 import 了旧 API 文件"
-            exit 1
-          fi
-          echo "✅ FF-0003: 无旧 API import"
+      - name: "FF-0003: pages/ 与 hooks/ 无旧 API import"
+        run: python3 scripts/ci_gates.py FF-0003
 
   ff-client-ts-no-functions:
     # FF-0006: client.ts 禁止定义函数（只做 re-export）
+    # 门禁逻辑单一真源 = scripts/ci_gates.py
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check client.ts 无函数定义
-        run: |
-          if grep -qE "export (async )?function|export const.*=.*\(.*\)" frontend/src/api/client.ts 2>/dev/null; then
-            echo "❌ FF-0006 违规：client.ts 包含函数定义，应移到领域文件中"
-            exit 1
-          fi
-          echo "✅ FF-0006: client.ts 纯 re-export"
+      - name: "FF-0006: client.ts 无函数定义"
+        run: python3 scripts/ci_gates.py FF-0006
 
   ff-stores-no-api-imports:
     # FF-0007: Zustand store 禁止直接调用 API
+    # 门禁逻辑单一真源 = scripts/ci_gates.py
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check stores/ 无 API import
-        run: |
-          if grep -rn "from.*\.\./api/" frontend/src/store/*.ts 2>/dev/null; then
-            echo "❌ FF-0007 违规：Zustand store 直接 import API"
-            exit 1
-          fi
-          echo "✅ FF-0007: Store 无 API 直接调用"
+      - name: "FF-0007: store/ 无 API import"
+        run: python3 scripts/ci_gates.py FF-0007
 
   ff-auth-endpoints:
     # FF-014: 认证模块端点完整性检查
@@ -231,24 +219,12 @@ jobs:
           AI_GF_ENV: test
 
   adr-integrity:
+    # ADR 目录存在性 + Supersedes 引用完整性
+    # 门禁逻辑单一真源 = scripts/ci_gates.py
+    # 注：原 bash 版 `[ ! -f "ADR-$n-*.md" ]` 中 -f 不展开通配符，该断言恒真、
+    #     检查形同虚设；Python 版改用 glob 真实匹配（修正于 2026-09-18）。
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check ADR directory exists and not empty
-        run: |
-          if [ ! -d "docs/adr" ] || [ -z "$(ls -A docs/adr)" ]; then
-            echo "❌ docs/adr/ 目录为空或不存在"
-            exit 1
-          fi
-          echo "✅ docs/adr/ 存在且有 ADR 文件"
-
-      - name: Check ADR Supersedes links are valid
-        run: |
-          for file in docs/adr/*.md; do
-            supersedes=$(grep -oP 'Supersedes ADR-\K\d+' "$file" || true)
-            if [ -n "$supersedes" ] && [ ! -f "docs/adr/ADR-$supersedes-*.md" ]; then
-              echo "⚠️  $file 引用了 ADR-$supersedes，但找不到完全匹配的文件名"
-            fi
-          done
-          echo "✅ ADR 引用完整性检查完成"
+      - name: "ADR: 目录存在性 + Supersedes 引用完整性"
+        run: python3 scripts/ci_gates.py ADR

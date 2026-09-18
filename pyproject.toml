@@ -90,7 +90,11 @@ dev = [
     "mypy>=1.8.0",
     "pre-commit>=3.6.0",
     # 使用 ruff 替代 black/isort/flake8
-    "ruff>=0.3.0",
+    # ⚠️ 锁定到 patch 级（2026-09-18 用户裁决）：ruff 的 **patch 版本之间也会变更规则行为**
+    #    （实证：0.16.6 DTZ901 收紧 / 0.16.7 D211·UP035 诊断修正 / 0.16.8 UP040 fix 转 unsafe），
+    #    原先的无上限声明会让 CI 每周自动拉最新版 = 静默规则漂移。
+    #    升级须显式改此版本号，并同步 .pre-commit-config.yaml 中 ruff-pre-commit 的 rev。
+    "ruff>=0.16.8,<0.16.9",
 ]
 
 [project.scripts]

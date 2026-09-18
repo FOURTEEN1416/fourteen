@@ -1,0 +1,30 @@
+# ═══════════════════════════════════════════════════════════════════
+# pre-commit — 本地门禁（把 CI 的判分提前到提交时）
+#
+# 生效方式： pre-commit install          # 不装则本文件完全无作用，提交不被阻塞
+# 手动全量： pre-commit run --all-files
+# 跳过单次： git commit --no-verify      # CI 仍是唯一权威，钩子只做提前拦截
+#
+# ⚠️ 版本一致性铁律：下方 ruff-pre-commit 的 rev 必须与 pyproject.toml 的
+#    ruff 约束同源（当前 0.16.8）。改一处必须同步另一处，否则又是一处漂移源。
+# ═══════════════════════════════════════════════════════════════════
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.8
+    hooks:
+      # 只启用 check（与 CI 一致）。CI 未跑 ruff format，故此处亦不启用，
+      # 避免引入 CI 不校验的格式化要求。
+      # 注意：hook id 是 ruff-check；`ruff` 为 legacy alias，会打印 "legacy alias" 提示。
+      - id: ruff-check
+
+  - repo: local
+    hooks:
+      # CI 的 ff-* / adr-integrity 门禁的单一真源：
+      # 本地直接调用 CI 用的同一份脚本，口径逐字一致。
+      # 脚本仅依赖标准库（任意 Python 3.10+ 均可），故 language: system 安全。
+      - id: ci-gates
+        name: CI gates (FF-0003 / FF-0006 / FF-0007 / ADR)
+        entry: python scripts/ci_gates.py
+        language: system
+        pass_filenames: false
+        always_run: true
