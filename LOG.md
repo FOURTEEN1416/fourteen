@@ -1223,3 +1223,24 @@
 
 - 用户要求"矫正"前先诊断：`timedatectl` → 时区 Asia/Beijing (CST)、`System clock synchronized: yes`、chronyd active、与本地偏差 ≤1s——**服务器时钟正常，未做任何改动**（对准的钟跑校时才是破坏）。
 - 误报根因：主控把 `/api/health` 的 `timestamp` 字段（UTC +00:00）误当北京时间与本地挂钟比对（00:27 UTC = 08:27 CST）。教训入档：判断两端时钟偏差必须先各自 `date` 硬对照，禁止拿接口 UTC 时间戳直接比挂钟。本条目时段真实时间线：09-17 23:5x 会话开始 / 09-18 00:08 部署 56cfa69（跨零点）/ 08:12 部署 e7fddbd / 08:26 部署 f62a1f6——五十四~五十六条内时间叙述经此核验全部无误。
+
+## 2026-09-18（五十七）— CI 十四连红根治：FF-0006 抽离 + ruff F401 清理
+
+**背景**：GitHub Actions 自 09-15 09:41（`2a675ae`）起**连续 14 次失败**，09-14 及之前为绿。失败作业恒定两个：`ff-client-ts-no-functions`（FF-0006 门禁）+ `backend`（ruff check 步骤）。pytest 与 frontend 作业**始终全绿**——即红的是两条门禁，不是功能回归。
+
+**根因（三条独立链，非同一引入点）**：
+1. **FF-0006 首次违规**：`49c4550`（422 detail 对象数组归一化，根治 React error #31 白屏）在 `client.ts` 内新增 `export function normalizeDetail`（第 114 行）。门禁正则 `export (async )?function|export const.*=.*\(.*\)` 命中 → 09-15 起红。**实测 09-15 时点 head_sha=2a675ae 的 client.ts 唯一命中行即第 114 行**，坐实引入点。
+2. **FF-0006 追加违规**：`8a34b23`（web 控制端两开关 + 死代码清洗）把 emotion 域两个函数**内联定义**进 `client.ts`（第 261/264 行），而非落入领域文件。
+3. **ruff F401 五处**：`tests/test_wechat.py:12-14`（`CharacterManager` / `CharaCardV2` / `CharacterData` / `CharacterStore`）与 `tests/test_tool_health.py:2`（`MagicMock`）——四个符号 grep 全文件**仅出现在 import 行**，属测试重构后遗留的孤儿导入。
+4. **附带**：`api/routers/training_routes.py:33` `# noqa: F401（兼容旧 import）` 触发 ruff `Invalid # noqa directive` 警告——括号内中文使 code 列表解析失败；且该符号**在 199 行作为类型注解真实在用**（ruff 从未对其报 F401），故属**多余抑制**。
+
+**修复**：
+- 新建 `frontend/src/api/normalize.ts`（纯函数工具，零 client 依赖，无循环引用风险）；新建 `frontend/src/api/emotion.ts`（照既有 `training.ts` 领域模式 `import client from './client'`）。
+- `client.ts` 331→298 行：删 3 处内联函数定义，改为顶部 import + 底部 `export { emotionState, emotionTrend }` / `export { normalizeDetail }`；**`api` 命名空间与所有既有具名导出签名不变**，`hooks/useQueries.ts`（`api.emotionState()` / `api.emotionTrend()`）与 `tests/api/client.test.ts`（`import client, { normalizeDetail }`）**零改动即兼容**。
+- 删 5 处孤儿导入；删多余 noqa（该行保留原 import）。
+
+**验证（提交前新鲜实测）**：`PYTHONPATH= python -m pytest -q` → **1060 passed / 4 skipped（154.59s）**，与 09-18 上批基线**同数 = 零回归**；`ruff 0.16.8`（**CI 同版本**）全仓 `All checks passed`；前端 `vitest` **87/87**（15 文件）+ `tsc --noEmit` 0 错；FF-0006 门禁正则本地模拟 **✅ 无命中**。
+
+**规程教训（本条最有价值部分）**：本地 ruff 为 **0.15.16**、CI 装 **0.16.8**（`pyproject` 声明 `ruff>=0.3.0` **无上限**，CI 每次拉最新），且仓库**无 `.pre-commit-config.yaml`**、`pre-commit` 仅为闲置 dev 依赖——**门禁全部只在 CI 跑，本地无任何拦截能力**，红色因此累积 14 次无人察觉。修复本身只值一次提交，**"让本地能提前发现"才是根治**。
+
+**待裁决**：① `pyproject` 锁 ruff 上限（如 `>=0.16.8,<0.17`）以杜绝规则漂移；② 新增 `.pre-commit-config.yaml`（ruff + FF 门禁本地复现，需 `pre-commit install` 才生效，不强制阻塞提交）。

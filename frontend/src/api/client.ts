@@ -54,6 +54,8 @@ import {
 import {
   adminListUsers, adminUpdateUser, adminDeleteUser, adminCreateUser,
 } from './admin'
+import { emotionState, emotionTrend } from './emotion'
+import { normalizeDetail } from './normalize'
 
 const API_BASE = '/api'
 
@@ -95,38 +97,6 @@ function processQueue(error: unknown, token: string | null = null) {
     }
   })
   _pendingQueue = []
-}
-
-/**
- * 把后端返回的 detail 归一化为可读字符串。
- *
- * 后端有两种形态：
- *   • 业务错误 → detail 是字符串（如 "Invalid login credentials"）
- *   • 请求校验失败（422）→ detail 是对象数组，元素形如
- *       { type, loc, msg, input, ctx }
- * 若把后者原样交给 setState / addToast，React 渲染对象 child 会抛
- * 「Minified React error #31 (object with keys {type, loc, msg, input, ctx})」，
- * 整页白屏。故统一压平成 "body.login: Field required; ..." 形式。
- */
-export function normalizeDetail(rawDetail: unknown): string {
-  if (typeof rawDetail === 'string') return rawDetail
-  if (Array.isArray(rawDetail)) {
-    return rawDetail
-      .map((e: unknown) => {
-        if (typeof e === 'string') return e
-        if (e && typeof e === 'object' && 'msg' in e) {
-          const errObj = e as { msg?: unknown; loc?: unknown }
-          const loc = Array.isArray(errObj.loc) ? errObj.loc.join('.') : ''
-          const msg = typeof errObj.msg === 'string' ? errObj.msg : ''
-          return loc ? `${loc}: ${msg}` : msg
-        }
-        return String(e)
-      })
-      .filter((line) => line.length > 0)
-      .join('; ')
-  }
-  if (rawDetail && typeof rawDetail === 'object') return JSON.stringify(rawDetail)
-  return ''
 }
 
 const ERROR_CODE_MAP: Record<string, string> = {
@@ -257,13 +227,11 @@ client.interceptors.response.use(
 export default client
 
 // ── Named re-exports for backward compat (import { chat } from '../api/client') ──
-// emotion 域自 chat.ts 死代码清理后迁入（useQueries 消费中）；chat 会话域已随僵尸 chatStore 一并删除
-export function emotionState() {
-  return client.get('/emotion/state')
-}
-export function emotionTrend(days = 7) {
-  return client.get('/emotion/trend', { params: { days } })
-}
+// emotion 域定义在 ./emotion.ts、normalizeDetail 定义在 ./normalize.ts
+// （FF-0006：client.ts 只做实例装配 + re-export，禁止内部函数定义）；
+// chat 会话域已随僵尸 chatStore 一并删除
+export { emotionState, emotionTrend }
+export { normalizeDetail }
 export { trainingStatus, trainingProgress, trainingClean, trainingTest, trainingApply }
 export { cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset, cloneDeleteConversation, cloneBatchDeleteConversations, cloneUpload, cloneStats }
 export {

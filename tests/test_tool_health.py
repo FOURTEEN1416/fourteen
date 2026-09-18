@@ -1,6 +1,4 @@
 """T-19: 工具健康检测+指令处理器 单元测试"""
-from unittest.mock import MagicMock
-
 from tools.base_tool import BaseTool, ToolResult
 
 

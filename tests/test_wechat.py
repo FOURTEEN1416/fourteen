@@ -9,9 +9,6 @@ sys.path.insert(0, ".")
 import pytest
 
 from shisi.affinity.enhancer import AffinityEnhancer
-from shisi.character.manager import CharacterManager
-from shisi.character.models import CharaCardV2, CharacterData
-from shisi.character.store import CharacterStore
 from shisi.config import reset_config
 from shisi.emotion_stage.stage_engine import EmotionStageEngine
 from shisi.migrations import run_migrations

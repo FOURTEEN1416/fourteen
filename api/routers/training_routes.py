@@ -30,7 +30,7 @@ from api.auth import verify_api_key_dep
 from api.auth_jwt import require_role
 from api.database import User
 from api.deps import deps
-from api.main_routes import ProactiveConfigRequest  # noqa: F401（兼容旧 import）
+from api.main_routes import ProactiveConfigRequest
 
 logger = logging.getLogger("api.routers.training_routes")
 
