@@ -1,6 +1,6 @@
-# 代码图谱 — unique-you (唯一的你) v3.8.0
+# 代码图谱 — unique-you (唯一的你) v3.8.1
 
-> 由 维护者 手动维护 | 最后核实: 2026-09-18（v3.8 增量：**09-17** 全仓性能与正确性扫描——项目根路径锚定 + 12 处 CWD 缺陷 + 并发/缓存/热路径修复 + 移动端适配 + **端点口径系统性纠错 208→204**；**09-18** 续——双角色库收敛为 `config/characters` 唯一权威真源（7 处代码改指向 + `sync_character_files.py` 删除）、CI 门禁十四连红根治（FF-0006 `client.ts` 函数抽离 + ruff F401 清理）；测试口径见 §1.1 与 §13）
+> 由 维护者 手动维护 | 最后核实: 2026-09-18（v3.8 增量：**09-17** 全仓性能与正确性扫描——项目根路径锚定 + 12 处 CWD 缺陷 + 并发/缓存/热路径修复 + 移动端适配 + **端点口径系统性纠错 208→204**；**09-18** 续——双角色库收敛为 `config/characters` 唯一权威真源（7 处代码改指向 + `sync_character_files.py` 删除）、CI 门禁十四连红根治（FF-0006 `client.ts` 函数抽离 + ruff F401 清理）；测试口径见 §1.1 与 §13；**09-18 晚**：`shisi/api/v2/` 死模块（6 文件）删除 → `shisi/api/` 现 **11 文件 / 31 端点**（端点数与合计 204 不变，因 v2 从未挂载）+ `DELETE /api/shisi/memory/{id}` 假端点改 501 + `/api/shisi/status` 纳入认证使 shisi 域 **31/31** 全覆盖）
 > ✅ 路由/文件/模块/测试数已通过 create_api_app 实扫 + Glob + pytest + vitest 实时核实（2026-08-28）。
 > ✅ 图数据库已于 2026-08-28 由 codebase-memory 图谱工具 v0.10.8 重新索引（artifact.json schema v2: **7706 节点 / 32367 边**，commit c32af54），历史矛盾（543277c 声称的 6771 节点未持久化）就此消案。
 
@@ -67,7 +67,7 @@ graph TD
     end
     subgraph API["接口层 api"]
         AR["api/ 168+ 路由"]
-        SA["shisi/api/ v1+v2"]
+        SA["shisi/api/"]
     end
     subgraph CORE["核心层 core (高 fan-in)"]
         APP["application (13 in)"]
@@ -211,7 +211,7 @@ sequenceDiagram
 |------|------|--------|------|------|
 | `api/routers/` | 21 个域路由模块（不含 `__init__.py`） | 170 | 22 | character/auth/admin/invite/voice/mimo_voice/storyline/wechat/emotion/memory/knowledge/persona_card/chat/clone/misc/personality/safety/tools/training/users/llm_providers |
 | `api/`（非 routers） | `health_routes.py` / `qrcode_store.py` | 3 | 2 | health(2) + wechat/qrcode(1) |
-| `shisi/api/` | v1 + v2 | 31 已挂载 | 16 | affinity/character/emotion_stage/memory/persona/stats/sticker/vital_signs + v2 |
+| `shisi/api/` | v1（`v2/` 死模块已于 2026-09-18 删除，见 DELETION_LOG） | 31 已挂载 | 11 | affinity/character/emotion_stage/memory/persona/stats/sticker/vital_signs |
 | **合计（`APIRoute` 内省）** | | **204** | | 95 GET / 74 POST / 20 DELETE / 15 PUT |
 
 > ⚠️ **口径纠错（2026-09-17）**：旧口径"206 / 208 端点"取自 `len(app.routes)`，
@@ -232,7 +232,7 @@ vital-signs 1 │ stats 1 │ (untagged) 1
 ```
 
 > 注：`character`(21) 为 `api/routers/character_routes.py`；`characters`(7) 为
-> `shisi/api/character_routes.py` + v2。`memory`(10) = api `memory_routes`(4) +
+> `shisi/api/character_routes.py`。`memory`(10) = api `memory_routes`(4) +
 > shisi `memory_routes`(6)。`persona`(3) 为 shisi；`persona-card`(3) 为 api。
 
 **app_factory.py 实际挂载策略**（核实于源码）：
@@ -673,6 +673,7 @@ tools/
 
 | 日期 | 提交 | 变更摘要 |
 |------|------|---------|
+| 2026-09-18 (死代码与假端点清理) | 6fdc769 / 9bdf9d7 | **① 删除 `shisi/api/v2/` 全 6 文件**——`v2_router` 全仓零 `include_router` 挂载、零代码 import（grep 取证），推翻 `DELETION_LOG` 早先「保留待将来集成」裁决并就地加 ⚠️ 标注；同步清除 4 处文档引用（AGENTS Owner Map / 本文件分层表·Mermaid·端点数表·注 / CODEMAPS DATABASE·MODULES）。**② `DELETE /api/shisi/memory/{memory_id}` 假端点改 501**——旧实现回「已移入回收站（30天保留期）」却**不做任何事**（谎报成功比显式失败更危险）；`memory_recycle_bin` 表已存在于 `shisi/migrations.py` 而删除链路从未落地；**保留未确认时的 400 前置校验**以免越 `tests/**` 的 owner 边界。**③ `unfavorite_memory` 的 `fav_id` 修复**——路径参数此前被完全忽略（实调 `unfavorite(character_id, memory_id)`，后者两参数有空默认值可被无参省略调用），改为唯一判据 + 新增 `FavoriteManager.unfavorite_by_id`。**④ `/api/shisi/status` 纳入认证** → shisi 域 **31/31** 全覆盖（该端点暴露 12 个内部模块初始化状态，属控制面；探活职责由刻意豁免认证的 `/api/health`·`/api/ready` 承担）。验证：ruff 0.16.8 全绿 + 1060 passed/4 skipped 零回归 + `--collect-only` 1064 收集（无 import 断裂）+ 生产 hash 抽验 3/3 + F1 告警生产实证 |
 | 2026-09-18 (鼠标动效重构) | c755090 | **`CustomCursor` 由「圆环 + 圆点」重构为「遮罩光晕 + 内核 + 拖尾粒子」三层**（结构参考校友网站 `cursorGlow`/`cursorDot`/`firefly`；品牌色保持海盐蓝 `#7DD3FC`＝`--color-accent-200`，暖黄/薄荷青作 `data-hover` 变体）——**刻意规避参考实现的 3 处性能缺陷**：逐帧 `left/top`→`translate3d`、每帧 `createElement`/`removeChild`→**16 节点对象池复用**、`setTimeout` 堆→单 rAF 统一驱动。**修正两处帧率相关缺陷**：① 拖尾寿命按「帧」衰减，高刷屏下寿命只剩 1/4 几乎不可见 → 帧时长归一化（`k = dt/16.67`，lerp 用 `1-(1-α)^k`，`dt` 钳制 50ms 防切页大跳），实测寿命 **601ms**/理论 640ms；② 原停帧条件会把衰减中的粒子**冻结在可见态**（屏幕残留不灭光点，实测 4003ms 不消散）→ 改为「静止超时 **且** 无存活粒子」才停 + 粒子生成**位移闸门**。附带 hover 判定由仅 `data-hover` 扩展为 `a/button/input/select/textarea/label/summary` 等可交互元素。**归因依据（隔离实测，非推断）**：鼠标动效单独跑 **60.6fps / 0% 卡顿**，**并非卡顿主因**；真凶为 `ParticleCanvas` 全帧重绘 × `backdrop-filter` 毛玻璃（**24.1fps / 86.1% 卡顿**，且降模糊半径 12→6px 无效），本批**未动**该组合，留待裁决。验证：tsc 0 错 + vitest 87/87 + 构建通过 + 实测 240fps / p95 4.3ms / 卡顿率 0% |
 | 2026-09-18 (CI 门禁根治) | 4fbcffb | **CI 十四连红根治**（09-15 09:41 `2a675ae` 起连续 14 次失败，红的是**两条门禁**而非功能回归——pytest/frontend 作业始终全绿）：**FF-0006** —— `client.ts` 内的 `normalizeDetail`（`49c4550` 引入）+ `emotionState`/`emotionTrend`（`8a34b23` 引入）抽离为 `api/normalize.ts` + `api/emotion.ts`，client.ts 331→298 行纯 re-export（`api` 命名空间与所有既有具名导出**签名不变**，`useQueries.ts` 与 `client.test.ts` 零改动即兼容）；**ruff F401** —— 删 5 处孤儿 import（`tests/test_wechat.py` ×4、`tests/test_tool_health.py` ×1）+ 1 处多余 `# noqa: F401`（括号内中文使 ruff 指令解析失败）。根因含**本地 ruff 0.15.16 vs CI 0.16.8**（`pyproject` 声明 `ruff>=0.3.0` 无上限）+ 仓库无 `.pre-commit-config.yaml`——**门禁只在 CI 跑，本地零拦截**，红色因此累积 14 次无人察觉。验证：1060 passed / 4 skipped 零回归 + ruff 全仓 All checks passed + vitest 87/87 + tsc 0 错 + FF-0006 门禁正则本地模拟无命中 |
 | 2026-09-18 (双角色库收敛) | working tree + 服务器 | **裁决① 执行：config/characters 为唯一权威真源**——本地/服务器 data/characters 共 53 张旧卡 tar 备份（data/archive/characters-data-backup-20260918.tar.gz）后删除；4 张无对应孤立卡（重度病娇by诗/修仙妹3.0/茉莉/纯对话版仙尊）裁决废弃封存；本地 config 拉齐服务器 25 张（JSON 校验全过）。**7 处代码改指向**：knowledge_routes（删不存在的 characters/ 相对路径与 data 兜底 → 单一 project_path 锚定）、shisi manager 默认 data_dir/importer/exporter 默认输出、migration_service/migration_runner 默认卡目录、preflight_check；**sync_character_files.py（config→data 双库同步脚本）删除**。旧路径引用 grep 归零；新基线 **1060 passed/4 skipped**（+48=25 卡 persona 注入参数化全覆盖） |

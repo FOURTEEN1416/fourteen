@@ -43,7 +43,7 @@
 
 | 子模块 | 职责 | 关键文件 |
 |--------|------|----------|
-| `api/` | shisi DDD 核心 plane 路由 (49 endpoints) | `registry.py`, `affinity_routes.py`, `character_routes.py`, `emotion_stage_routes.py`, `memory_routes.py`, `persona_routes.py`, `stats_routes.py`, `sticker_routes.py`, `training_routes.py`, `vital_signs_routes.py`, `common.py` |
+| `api/` | shisi DDD 核心 plane 路由（31 端点已挂载） | `registry.py`, `affinity_routes.py`, `character_routes.py`, `emotion_stage_routes.py`, `memory_routes.py`, `persona_routes.py`, `stats_routes.py`, `sticker_routes.py`, `vital_signs_routes.py`, `common.py` |
 | `application/` | 应用服务层 | `character_service.py`, `memory_service.py`, `persona_service.py`, `knowledge_service.py`, `prompt_service.py`, `migration_service.py` |
 | `character/` | 角色卡完整子系统（SillyTavern V2/V3 + PNG tEXt chunk） | `character_card_v2.py`, `png_codec.py`, `importer.py`, `exporter.py`, `manager.py`, `store.py`, `validator.py`, `models.py` |
 | `core/models/` | 领域模型 | `affinity_level.py`, `character_id.py`, `emotional_state.py`, `emotion_type.py`, `persona_profile.py`, `character_aggregate.py` |
