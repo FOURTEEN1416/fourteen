@@ -99,6 +99,7 @@
 | 09-17 | **web 控制端两开关**（用户裁决"这个不是需要在 web 控制端来开启和关闭吗"）：① 免打扰时段可调（/proactive/config 扩展 quiet_hours_*，MessageTab 滑条）；② 知识库定期采集开关（+/api/knowledge/collect-config，DATA tab Toggle；CollectLoop 死接线以 vault_collect 调度任务形态复活，开关交用户）；`data/scheduler_config.json` 为跨 worker 真源（4 worker 仅 master 持调度器） | 用户裁决 | ✅ 已执行 | 8a34b23+4f6ed29；端点 206→208；远端验证 available:true |
 | 09-17 | **死代码直接清洗**（用户裁决）：删 shared/Badge.tsx、chatStore.ts+api/chat.ts（僵尸聊天域，侧栏圆点恒 false）、shisi 微信指令系统 command_handler/command_parser（生产未接线；角色切换已裁决走 web）；proactive_messenger/sticker_adapter 登记留观 | 用户裁决"死代码可以直接清洗掉" | ✅ 已执行 | DELETION_LOG 09-17 条；测试 1014 收集/1010 通过 |
 | 09-18 | **五项待裁决全部落槌**（AskUserQuestion 四题，全按推荐）：① 双角色库**收敛为 config/characters 单库**（迁移清单先过目再执行；动因=knowledge_routes 兜底链与 vault_collect 定期采集均在读 data/characters 旧卡的实锤分歧）；② bg-dynamic/bg-orbs 背景**不恢复**（AI 特征偏好+移动端性能）；③ ASE._monologues 冗余副本**删除**（独白唯一 owner=ReflectionEngine）；④ security `extract_intent` 死方法**删除** | 用户裁决（四题批复；迁移清单过目后批准执行；4 张孤立卡裁决废弃） | ✅ 已执行 | ③④⑤=`e7fddbd`；①=双角色库收敛批次（53 旧卡 tar 备份删除 + 7 处代码改指向 + sync 脚本删除，新基线 1060 passed）；②=零动作 |
+| 09-18 | **WEB 端鼠标动效改「遮罩式光晕 + 拖尾」**（用户指令：参考校友网站，品牌色保持现状）。**执行前先做隔离诊断，证伪「卡顿由鼠标动效引起」的假设**——鼠标动效单独跑 60.6fps / 0% 卡顿，真凶为 `ParticleCanvas` 全帧重绘 × `backdrop-filter` 毛玻璃（24.1fps / 86.1% 卡顿，且降模糊半径 12→6px 实测无效） | 用户指令 | ✅ 已执行 | `c755090`（1 文件，+345/−83）；顺带修掉两处帧率相关缺陷（拖尾按帧衰减致高刷屏不可见 / 停帧把粒子冻结在屏幕不消散）；品牌色保持海盐蓝 `#7DD3FC`。**新增待裁决项**：① nginx 未开 gzip（首屏传输量差 3.5 倍）② HTTP/1.1 无多路复用 ③ 静态资源无 `Cache-Control`（每次访问协商缓存）④ 粒子 × 毛玻璃是否解耦 ⑤ 既存 lint error（`utils/character.ts:61`）是否一并修 |
 
 ## 二、四项冲突裁决记录（真值仲裁存档）
 

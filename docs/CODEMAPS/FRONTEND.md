@@ -179,6 +179,36 @@ components/
 |------|------|------|
 | AnimatedPage | 页面过渡 | 纯 opacity 淡入 (0→1, 0.15s) |
 | AnimatedSuspense | 加载骨架 | AnimatedPage + Suspense skeleton |
+| ParticleCanvas | 背景粒子 | 全屏 canvas，30fps 节流，8–18 粒子 + 距离连线；`visibilitychange` 暂停，resize 防抖 |
+| CustomCursor | 遮罩式光标 | 光晕遮罩 + 内核 + 拖尾粒子三层，详见下节 |
+
+### CustomCursor（遮罩式鼠标动效）
+
+2026-09-18 由「圆环 + 圆点」重构为三层（`c755090`），品牌色保持海盐蓝 `#7DD3FC`
+（`--color-accent-200`），暖黄/薄荷青作 `data-hover` 变体。仅挂载于 `ProtectedLayout`，
+公开路由（`/intro` `/login` `/psych`）不含此组件。
+
+| 层 | 尺寸 | 跟随 | 说明 |
+|----|------|------|------|
+| `.cursor-glow` | 200 → 280px (hover) | 滞后（lerp 0.09） | 径向渐变遮罩光晕，滞后跟随形成拖曳感 |
+| `.cursor-core` | 12 → 38px (hover) | 紧跟（lerp 0.38） | 小圆点内核；hover 可交互元素时张开 |
+| `.cursor-trail` | 9px × 16 节点 | 对象池轮转复用 | 拖尾粒子，单颗寿命约 0.64s |
+
+**硬约束（改前必读，均有隔离实测依据）：**
+
+1. 位移一律走 `transform: translate3d`，**禁止**逐帧写 `left/top`（会触发布局）
+2. 拖尾必须用**固定对象池**复用节点，**禁止**在 `mousemove` 里 `createElement`/`removeChild`
+3. 单一 rAF 驱动，**禁止** `setTimeout` 堆；**所有「按帧」系数须经帧时长归一化**
+   （`k = dt / 16.67`，lerp 用 `1-(1-α)^k`）——否则 60Hz 与 240Hz 屏表现不一致
+   （按帧衰减会使高刷屏寿命只剩 1/4，肉眼几乎看不见）
+4. 停帧条件必须是「静止超时 **且** 无存活粒子」，否则衰减中的粒子被冻结在屏幕不消散
+5. 拖尾用 `radial-gradient` 而非大面积 `box-shadow`（模糊成本随半径平方增长）
+6. 触屏（`pointer: coarse`）/ `prefers-reduced-motion` 下不激活；≤1023px 隐藏
+
+> ⚠️ **性能归因（勿误判）**：隔离实测表明鼠标动效单独跑 **60.6fps / 0% 卡顿**，
+> **不是**卡顿主因。真凶是 `ParticleCanvas` 全帧重绘 × `backdrop-filter` 毛玻璃
+> （**24.1fps / 86.1% 卡顿**），且降模糊半径（12→6px）实测无效。
+> 诊断方法论见技能 `perf-isolation-lab`；注意无头浏览器走软件光栅化，性能数值不可信。
 
 ---
 

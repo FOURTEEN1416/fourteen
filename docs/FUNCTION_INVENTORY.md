@@ -172,6 +172,18 @@
 
 ---
 
+## G. 全局装饰层（跨页面，挂载于 `ProtectedLayout`）
+
+| 编号 | 能力 | 关键行为 |
+|------|------|---------|
+| GLOBAL-1 | **遮罩式鼠标动效** `components/common/CustomCursor.tsx` | 三层结构：光晕遮罩（200→280px，滞后跟随 lerp 0.09）+ 内核（12→38px，紧跟 lerp 0.38）+ 拖尾粒子（9px × **16 节点对象池**，单颗寿命约 0.64s，实测停止移动后 601ms 消散）。品牌色海盐蓝 `#7DD3FC`（`--color-accent-200`），`data-hover="yellow\|blue\|mint"` 切暖黄/薄荷青变体；hover 判定覆盖 `a/button/[role=button]/input/select/textarea/label/summary`。**硬约束（改前必读）**：位移走 `translate3d`（禁 `left/top`）、对象池复用节点（禁逐帧增删 DOM）、单 rAF 驱动、**所有按帧系数须经 `k = dt/16.67` 归一化**、停帧条件为「静止超时 **且** 无存活粒子」。2026-09-18 重构前为「圆环 + 圆点」双层（`c755090`） |
+| GLOBAL-2 | **背景粒子画布** `components/common/ParticleCanvas.tsx` | 全屏 canvas，30fps 节流（8–18 粒子 + 距离连线），`visibilitychange` 暂停、resize 防抖、`prefers-reduced-motion` 下降级为 0 粒子。⚠️ **性能注记**：与 `backdrop-filter` 毛玻璃叠加时为**卡顿主因**（隔离实测 24.1fps / 86.1% 卡顿），且降模糊半径（12→6px）实测**无效**；解耦方案待裁决 |
+
+> 两者均**不挂载**于公开路由（`/intro` `/login` `/psych`），仅在登录后的控制台生效。
+> 性能诊断方法论见技能 `perf-isolation-lab`；注意无头浏览器走软件光栅化，性能数值不可信（同场景无头 24fps vs 真实 GPU 240fps）。
+
+---
+
 ## 与历史意图的已知差距汇总（对齐核查产出）
 
 | # | 差距 | 历史出处 | 处置建议 |
