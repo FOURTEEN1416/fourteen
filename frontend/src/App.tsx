@@ -96,7 +96,10 @@ export default function App() {
       <Routes>
         {/* ─── 公开路由：产品介绍 + 登录页 + 根路径分流 ─── */}
         <Route path="/intro" element={<Suspense fallback={<PageLoadingSkeleton />}><IntroPage /></Suspense>} />
-        <Route path="/psych" element={<Suspense fallback={<PageLoadingSkeleton />}><PsychProfilePage /></Suspense>} />
+        {/* 心理画像需登录：包 AuthGuard 让未登录时「不渲染子组件」，
+            请求自然不会发出 —— 此前该页无条件调用 usePsychProfile/usePsychSnapshots，
+            未登录直接打 3 个 401，由 axios 拦截器兜底跳转，造成 console 报错 + 白屏闪烁 */}
+        <Route path="/psych" element={<Suspense fallback={<PageLoadingSkeleton />}><AuthGuard><PsychProfilePage /></AuthGuard></Suspense>} />
         <Route path="/login" element={<Suspense fallback={<PageLoadingSkeleton />}><LoginPage /></Suspense>} />
         <Route path="/" element={<RootRedirect />} />
 

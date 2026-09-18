@@ -15,7 +15,9 @@ describe('IntroPage', () => {
   it('renders the positioning headline and brand', () => {
     renderComponent()
     expect(screen.getByText('唯一的你')).toBeDefined()
-    expect(screen.getByText('微信扫码即用的多用户 LLM 情感陪伴系统')).toBeDefined()
+    // 2026-09-18 首屏改造：定位文案由「微信扫码即用的多用户 LLM 情感陪伴系统」
+    // 改为去术语版「装进微信里的长期 AI 陪伴伙伴」（面向非技术访客/评委）
+    expect(screen.getByText('装进微信里的长期 AI 陪伴伙伴')).toBeDefined()
   })
 
   it('renders the four capability cards', () => {

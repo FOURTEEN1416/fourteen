@@ -14,7 +14,6 @@ import {
   ArrowRight,
   Github,
   KeyRound,
-  ShieldCheck,
   ListChecks,
   Sparkles,
   HelpCircle,
@@ -60,6 +59,7 @@ const EXTRAS = [
   '角色知识库检索',
   '剧情线编辑器',
   '自带 API Key（BYOK）',
+  '数据自托管，不经手第三方',
 ]
 
 /** 卡片图标配色：light 底 + deep 图标 + 语义 tag（tag-* 为 index.css 自定义类，非 Tailwind 工具类） */
@@ -78,11 +78,15 @@ export default function IntroPage() {
       <div aria-hidden className="pointer-events-none absolute bottom-0 left-1/4 w-80 h-80 rounded-full bg-macaron-mint/30 blur-3xl" />
 
       <div className="relative max-w-3xl mx-auto px-6 py-16">
-        {/* ─── Hero：品牌 + 一句话定位 ─── */}
+        {/* ─── Hero：品牌 + 一句话定位 ───
+             2026-09-18 首屏改造：原 badge「自托管·数据留在自己手里」属开发者视角，
+             评委/访客无感；原主标题「多用户 LLM 情感陪伴系统」术语密度过高需翻译。
+             改为「差异化定位 + 人话」，关键信息（微信扫码、多用户隔离、自托管）
+             全部保留并下沉到能力卡 / EXTRAS，不丢事实。 */}
         <header className="text-center stagger-item">
           <div className="inline-flex items-center gap-2 glass-card rounded-full px-4 py-1.5 text-xs text-gray-500 mb-6">
-            <ShieldCheck className="w-3.5 h-3.5 text-macaron-mint-deep" />
-            自托管 · 数据留在自己手里
+            <Sparkles className="w-3.5 h-3.5 text-macaron-yellow-deep" />
+            不只是问答助手 · 是一段会积累的关系
           </div>
           <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
             <span className="bg-gradient-to-r from-macaron-yellow-deep via-macaron-blue-deep to-macaron-mint-deep bg-clip-text text-transparent">
@@ -91,10 +95,11 @@ export default function IntroPage() {
           </h1>
           <p className="text-sm text-gray-400 mt-2 mb-6">unique-you · 主角色「十四」</p>
           <p className="text-lg text-gray-700 font-medium max-w-xl mx-auto leading-relaxed">
-            微信扫码即用的多用户 LLM 情感陪伴系统
+            装进微信里的长期 AI 陪伴伙伴
           </p>
           <p className="text-sm text-gray-500 mt-3 max-w-xl mx-auto leading-relaxed">
-            每个用户绑定专属角色卡，在真实微信里获得有记忆、有情绪、会主动搭话的长期陪伴关系。
+            扫码就能对话：它会记住你说过的话，有自己的情绪，还会主动来找你。
+            每个人拥有专属角色与独立记忆，互不打扰。
           </p>
         </header>
 
