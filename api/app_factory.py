@@ -15,11 +15,11 @@ import threading
 import time
 from typing import Any, cast
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.auth import configure_auth
+from api.auth import configure_auth, verify_api_key_dep
 from api.auth_jwt import verify_token
 from api.deps import deps
 from api.health_routes import health_router
@@ -274,7 +274,10 @@ def create_api_app(
         deps.shisi_reg = shisi_reg
         logger.info("十四模块已挂载到REST API")
 
-        @app.get("/api/shisi/status")
+        # 2026-09-18 裁决：纳入认证。本端点暴露 12 个内部模块的初始化状态（架构侦察
+        # 信息），属控制面而非探活面——探活职责由无认证的 /api/health 承担（含
+        # version/environment，且有测试契约保护）。前端与测试对本端点零消费。
+        @app.get("/api/shisi/status", dependencies=[Security(verify_api_key_dep)])
         async def shisi_status():
             modules = {}
             for attr in (
@@ -289,7 +292,8 @@ def create_api_app(
     except Exception:
         logger.exception("十四模块挂载失败")
 
-        @app.get("/api/shisi/status")
+        # 失败分支同样纳入认证（理由同上，保持两条注册路径口径一致）
+        @app.get("/api/shisi/status", dependencies=[Security(verify_api_key_dep)])
         async def shisi_status():
             return {"available": False, "error": "module_load_failed"}
 

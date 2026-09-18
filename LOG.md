@@ -1344,12 +1344,14 @@
 1. **删除 `shisi/api/v2/`（6 文件）**——零挂载（`v2_router` 全仓无任何 `include_router`）+ 零代码消费（全仓 grep 仅命中文档引用）双重取证成立。同步移除 4 处文档引用（`AGENTS.md` Owner Map / `CODE_GRAPH.md` 分层表 / `CODEMAPS/DATABASE.md` / `CODEMAPS/MODULES.md`）；`docs/DELETION_LOG.md` 早先「保留待将来集成」裁决被**推翻**并就地加 ⚠️ 标注（原文保留，符合「历史记录保留原文」条款）。
 2. **`DELETE /api/shisi/memory/{memory_id}` 假端点 → 501 Not Implemented**——旧实现回「已移入回收站（30天保留期）」而**不做任何事**：谎报成功比显式失败更危险。`memory_recycle_bin` 表已存在于 `shisi/migrations.py`，缺的是删除链路。**保留 `confirm` 前置校验（未确认仍回 400）**，仅把 `confirm=true` 路径由假成功改 501——既消除谎报，又不越 `tests/**` 的 owner 边界（AGENTS §8：`tests/**` owner 恒为 W4，改实现不应连带改测试）。
 3. **`unfavorite_memory` 的 `fav_id` 修复**——旧签名 `(fav_id, character_id="", memory_id="")` 中 `fav_id` 被完全忽略，且另两参数有空默认值可被无参省略调用（行为未定义）；改为 `fav_id` 唯一判据，新增 `FavoriteManager.unfavorite_by_id(fav_id)`（`memory_favorites.id` 为 AUTOINCREMENT 主键）。
+4. **`/api/shisi/status` 纳入认证（同批裁决，补齐 31/31）**——该端点是 31 个 `/api/shisi` 端点中**唯一**未受教育者（注册在 `api/app_factory.py` 而非 `registry._mount_routes` 的 8 组路由内）。裁决依据：① 它暴露 12 个**内部模块的初始化状态**（架构侦察信息），属**控制面**而非探活面；② 探活职责由**刻意豁免认证**的 `/api/health`·`/api/ready` 承担（`api/health_routes.py` 文件头明示「不需要认证」，且两者有测试契约保护）；③ 前端与测试对该端点**零消费**（grep 实证）。两个注册分支（挂载成功 / 失败降级）同步加 `Security(verify_api_key_dep)`，保持口径一致。
 
 **验证（全部实测，无推断）**
 - `ruff check .` → `All checks passed`（0.16.8，与 CI 同版本）
 - 行为实证：临时库写入 3 条收藏 → 首删 `True` / 重删 `False` / **邻居角色未被误删**；HTTP `DELETE /favorite/999999` → 200 `success:false`；`DELETE /memory/x?confirm=true` → **501**
 - `pytest -q` → 1060 passed / 4 skipped（删除 6 文件后零回归）
 - 端点总数不变（v2 从未挂载）；前端 `frontend/src/` 对 `/api/shisi` 零引用，无消费方受影响
+- **认证覆盖内省：`/api/shisi` 31/31 全受保护**（本轮前为 30/31）；行为实测：未启用放行 200 / 启用无 key·错 key → **401** / 正确 key → 200；`/api/health` 与 `/api/ready` 保持无认证（`/api/ready` 在无 orchestrator 时返回 503 属**既有就绪语义**，非认证拦截）
 
 **⚠️ 并行纪律违规留痕**：本批次执行期间，主检出（`D:\Desktop\ai-girlfriend`）上同时存在 **3 个会话**的写入——A＝门禁治理（`ci_gates.py` / `.pre-commit-config.yaml` / `ci.yml` / `pyproject.toml`，已 staged）、B＝F1 安全批次（7 文件未 staged）、C＝本轮核查与清理。**违反 AGENTS §8 第 8 条**（「任何文件同一时刻只能有一个 owner」/「主检出工作树不是共享草稿区」/「主控写入必须在同一帧内 commit」）。本轮处置：以**显式路径分笔提交**，全程未用 `git add -A` / `git commit -a`，未触碰他方 staged 内容。建议后续按 §8 第 1 条起 worktree，或至少在 `docs/board/BOARD.md` 登记后再改主检出。
 
