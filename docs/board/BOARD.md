@@ -250,3 +250,11 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - 7 处代码改指向（knowledge_routes 幽灵路径+兜底链/shisi manager·importer·exporter/migration×2/preflight）+ **删 sync_character_files.py**（双库同步源头脚本）。
 - 服务器部署后**知识索引 25 张全量重建**（清陈旧索引）。
 - 新基线：**pytest 1060 passed / 4 skipped**（+48 = 25 卡 persona 注入参数化全覆盖）；health 200；hash 2/2。**知识库自此与人设同源**；AGENTS v1.9。
+
+### 2026-09-18 09:0x–09:2x · 巡检窗口（WorkBuddy AI）· 仓库状态巡检 + 文档口径一致性收口（dd2a0b4）
+
+- **巡检**：后端 **1060 passed / 4 skipped / 0 failed**、前端 **87/87**、`tsc` 0 错、ruff **0.16.8（=CI 版本）全仓 0 错**、8 个 CI 门禁**本地模拟全过**、服务器 `health` 200（3.1.0 production）。
+- **收口**：5 类文档口径漂移一次修完 —— AGENTS 版本头（v1.8→v1.9）、CODE_GRAPH 头部日期 + §1.1 两处计数（API 模块 11→13、测试合计 1117→1147）+ §13 补 `4fbcffb` 缺行、README 目录树测试数（1011→1060）、ARCHITECTURE 三处计数（19 pages/14 modules/stores x4 → 17/13/x3）。4 文件 10 增 9 删，**纯文档**。
+- **闭环**：上一批遗留的 D29 免打扰假失败，用**假时钟钉 23:30** 复证与挂钟解耦（不替换→`sent=[]`；替换→`sent=['hello-proactive']`）。
+- **未闭环**：① `4fbcffb` 服务器同步**未证实**（五十七条无部署记录 + 沙箱 SSH 不可达 + 哈希比对不构成证据）；② ruff 上限锁定与 `.pre-commit-config.yaml` 两个待裁决仍未落地。
+- **提示**：本条 §13 补行可能与主控窗口后续补录**重复**，请核。并发窗口在 09:03–09:19 期间亦在本仓提交（`4fbcffb` / `24e007b`）。
