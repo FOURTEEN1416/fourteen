@@ -242,3 +242,11 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **已执行**：ase_engine 删 `_monologues`（8 行，独白唯一 owner=ReflectionEngine，行为零变化）；prompt_injection 删 `extract_intent`（21 行死方法拆雷，detect/sanitize 保留）。全量 pytest **1012 passed/4 skipped（165.38s）与删除前同数=零回归**；DELETION_LOG 09-18 记账。
 - **① 迁移清单已呈报待过目**：53 旧卡 → 49 张旧版候选删除 + 4 张无对应候选迁入（重度病娇by诗/修仙妹3.0/茉莉/纯对话版仙尊）+ ACA3 归组疑点人工比对。执行时一并修 knowledge_routes 兜底链与 vault_collect 读旧卡两处实锤分歧。
 - **② 零动作**：背景维持 body 静态渐变。
+
+### 2026-09-18 · 主控窗口（zcode）· 裁决① 执行：双角色库收敛为 config 单库（f62a1f6 三端闭环）
+
+- 迁移清单过目获批；4 张孤立卡（重度病娇by诗/修仙妹3.0/茉莉/纯对话版仙尊）裁决**废弃封存**。
+- 53 旧卡 tar 备份（本地+服务器 `data/archive/characters-data-backup-20260918*.tar.gz`，data/ 不入 git 故 tar 为唯一回滚手段）后删除；本地 config 拉齐服务器 25 张权威卡（JSON 校验 25/25）。
+- 7 处代码改指向（knowledge_routes 幽灵路径+兜底链/shisi manager·importer·exporter/migration×2/preflight）+ **删 sync_character_files.py**（双库同步源头脚本）。
+- 服务器部署后**知识索引 25 张全量重建**（清陈旧索引）。
+- 新基线：**pytest 1060 passed / 4 skipped**（+48 = 25 卡 persona 注入参数化全覆盖）；health 200；hash 2/2。**知识库自此与人设同源**；AGENTS v1.9。

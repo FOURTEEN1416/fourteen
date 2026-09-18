@@ -1204,3 +1204,17 @@
 **① 迁移盘点已完成（清单呈报待过目）**：服务器 config/characters 25 张（24 张规范化 + 绑定卡 62105bca）对本地 data/characters 53 张旧卡按 name 归组——**49 张为已入库 24 角色的旧版本**（persona_* 时间戳版/裸名版/序号版，候选删除）；**4 张无对应新库卡**（人设重度病娇by诗、修仙妹3.0、茉莉、纯对话版纯爱百合性转萝莉仙尊-银子著）= 候选迁入，去留待用户裁决。疑点抽查项：ACA3 旧卡 name "ACA(3)" vs 新库 "ACAね"，归组时需人工比对正文。**执行动因（实锤分歧）**：knowledge_routes `_load_character_data` 先找不存在的 `characters/` 再兜底 data/characters（永不查 config）；vault_collect 定期采集走 shisi character_manager 默认 data/characters——**两条知识库链路都在喂旧卡**，迁移时一并改指向。
 
 **② 不恢复**：维持 body 静态渐变（用户偏好"反对 AI 特征背景"+ 移动端性能刚优化，零动作）。
+
+## 2026-09-18（五十六）— 裁决①执行：双角色库收敛为 config 单库（三端闭环）
+
+**迁移清单过目与批复**：53 旧卡 = 49 旧版本 + 4 孤立卡；A 组 50 张删除清单获批准执行，B 组 4 张（人设重度病娇by诗/修仙妹3.0/茉莉/纯对话版仙尊）裁决**全部废弃封存**。
+
+**执行**：
+- 备份先行：本地 `data/archive/characters-data-backup-20260918.tar.gz`（54 条目）+ 服务器同名 tar（54 条目）——data/ 不入 git，tar 为唯一回滚手段；本地 config 孤立卡 222cdb5a（旧版林晚星，权威版 c907dc57）单独备份后删除。
+- 本地：scp 拉齐服务器 25 张权威卡（JSON 校验 25/25 过）→ `data/characters` 删除。
+- 代码改指向（7 文件，`f62a1f6`）：knowledge_routes（删幽灵 `characters/` 相对路径 + data 兜底 → `project_path("config", "characters")` 单一锚定）、shisi manager 默认 data_dir / importer / exporter、migration_service / migration_runner 默认卡目录、preflight_check；**删 `scripts/sync_character_files.py`**（config→data 双库同步脚本 = 分歧制度化源头，全文阅读确认后删）。
+- 服务器：备份 → `data/characters` 删除 → pull `f62a1f69` → remote_deploy 四步 → **知识索引 25 张全量重建**（清除基于旧卡的陈旧索引）。
+
+**验证**：旧路径引用 grep 归零（仅注释一条）；ruff 7 文件全过；全量 pytest **1060 passed / 4 skipped（166.48s，收集 1064）**——较上批 +48 = 25 卡 × `test_persona_injection` 每卡 2 参数化用例（**迁移红利：全部权威卡纳入注入校验覆盖**），0 失败；health 200；hash 抽验 2/2 双端一致；服务器 `data/characters` 不复存在、config 25 张。**自此知识库 enrich 与 vault_collect 定期采集与人设链路同源。**
+
+**文档**：AGENTS v1.9（§0/§2/§4.3 基线 + 修订行）、CODE_GRAPH §1.1 + 更新记录、README badge 1147、DELETION_LOG 09-18 两条、DECISION_LEDGER 09-18 行 ✅。
