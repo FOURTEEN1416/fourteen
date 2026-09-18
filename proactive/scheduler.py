@@ -444,6 +444,9 @@ class ProactiveScheduler:
     def _check_ase(self) -> None:
         """ASE 主动消息检查（APScheduler同步任务）"""
         if not self.ase:
+            # 原实现此处**静默 return** —— 引擎未注入时生产环境完全不可观测
+            # （2026-09-18 排查代价：数小时，最终靠逐层加日志才定位）。
+            logger.warning("ASE 引擎未注入（components['ase'] 为空），主动消息检查跳过")
             return
 
         # master 每 tick 重载跨 worker 配置文件（其他 worker 的写 ≤5 分钟生效）
@@ -472,6 +475,16 @@ class ProactiveScheduler:
                 return
 
             result = self.ase.tick(hours)
+            # 每 tick 一条可观测记录：这是排查"主动消息不发"时最关键的一行
+            # （此前只有"触发成功"才打日志，未触发的原因完全不可见）
+            logger.info(
+                "ASE tick: hours=%.2f urgency=%.2f daily_count=%d paused=%s result=%s",
+                hours,
+                getattr(getattr(self.ase, "urgency", None), "total", -1.0),
+                getattr(self.ase, "_daily_message_count", -1),
+                getattr(self.ase, "_paused", None),
+                bool(result),
+            )
             if result:
                 message = result.get("message", "")
                 msg_type = result.get("type", "unknown")
