@@ -1441,4 +1441,39 @@
 - 方法论沉淀为技能 `perf-isolation-lab`（含三大陷阱：无头失真 / 按帧系数 / 停帧冻结）
 - 文档同步：`CODE_GRAPH.md` §13 更新记录、`docs/CODEMAPS/FRONTEND.md` §动画设计（新增 `CustomCursor` 三层结构与 6 条硬约束）、`docs/DECISION_LEDGER.md` 时间轴（含 5 项新待裁决）、`docs/FUNCTION_INVENTORY.md` 新增「G. 全局装饰层」（GLOBAL-1 鼠标动效 / GLOBAL-2 背景粒子）
 
+---
+
+## 2026-09-18（六十四）— nginx 传输层整改：gzip + 静态强缓存（410cd99）
+
+**触发**：用户对上一轮把三项 nginx 问题列为"待裁决"表达强烈不满（原话「这种问题也需要来问？？」）——**确实应当直接修**，属执行判断失误，非需求不清。
+
+**根因（比"没配"更重要）**：`deploy/nginx-ai-girlfriend.conf` 里 gzip / `Cache-Control` / 安全头**全部写在 `listen 443 ssl http2` 的 server 块内**。而线上从未启用 HTTPS（无域名 → certbot 无法为裸 IP 签发证书），于是**一切与 TLS 无关的优化全部空转** —— 首屏 8 个资源以 671KB 裸传、每次访问重新协商缓存。
+> **教训（可复用）**：**不要把与 TLS 无关的优化（gzip / 缓存 / 部分安全头）放进只在 HTTPS 时才生效的 server 块。** 优化的生效条件应与优化本身解耦。
+
+**线上实施**（配置已同步回仓库模板，两者现一致）
+
+| 项 | 内容 |
+|---|---|
+| gzip | `comp_level 6` / `min_length 1024` / `proxied any` / 9 类文本类型 |
+| 静态强缓存 | `location ^~ /assets/` → `max-age=31536000, immutable`（文件名带 content-hash，可安全 immutable） |
+| HTML 不强缓存 | `location = /index.html` → `no-cache`（若缓存旧 HTML 会引用已删除的 hash 资源 → 白屏） |
+| 告警清理 | `sub_filter_types` 去掉重复的 `text/html` |
+| fail-safe | 改配置前备份；`nginx -t` 失败则自动回滚 |
+
+**实测收益（线上真实数据，非估算）**
+- **首屏传输量：675,185 B → 204,802 B（↓70%）**，逐文件：`vendor.js` 223,259→70,520｜`index.js` 187,244→57,154｜`motion.js` 138,100→44,871｜`index.css` 78,463→13,289
+- **冷启动 wall-clock：2437ms → 1421ms（↓42%）**（3 轮取中位，TTFB 80ms）
+- 端点回归：`/` 200 / `/api/health` 200 / `/favicon.svg` 200 / `/fastrun` 200 / `/fastrun/api/health` 200
+
+**⚠️ 一处易踩的回归风险（已用探针实测排除）**：我从 `sub_filter_types` 中删掉了 `text/html`（为消除 duplicate 告警），但若 nginx 是「显式设置即覆盖默认值」的语义，就会导致 `/fastrun` 的 HTML 路径重写**静默失效**。为此做了**可逆探针实验**：临时把 `sub_filter_types` 设为仅含 `application/javascript`，并在 `index.html` 注入 `sub_filter "</title>" "</title><!--SF-PROBE-->"` —— 结果探针**成功出现**，证明 `text/html` 由隐式默认值提供、未被覆盖；随后立即恢复正式配置并确认探针消失。
+> 注：`/fastrun` 是另一项目（"十六"），其当前页面不含 `/assets/` 引用，故无法从其响应直接判定改写是否生效 —— 这也是改用探针的原因。
+
+**HTTP/2 仍未启用（客观前提缺失，非未处理）**
+1. certbot / Let's Encrypt **无法为裸 IP**（139.199.199.174）签发公信证书；
+2. **浏览器不支持明文 HTTP/2（h2c）** —— HTTP/2 必须运行在 TLS 之上；
+3. 实测现状：无域名、无证书、未监听 443。
+> 已把完整升级步骤写入模板末尾（域名 A 记录 → `certbot --nginx` → 补 `http2` 与安全头），并**明确标注 HSTS 禁止在纯 HTTP 下开启**（会强制升级 HTTPS 而站点无 HTTPS → 直接导致站点不可访问）。安全头（CSP 等）涉及外部依赖白名单，配错会白屏或静默失效，建议单独窗口逐项验证后再上线，故未随本批一起推。
+
+**部署与三端**：本批为服务器配置变更（不经过 `remote_deploy.sh`，配置类改动直接改 nginx 并 reload）；仓库模板同步为 `410cd99`。
+
 
