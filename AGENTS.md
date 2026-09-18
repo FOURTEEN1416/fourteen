@@ -1,7 +1,7 @@
 # AGENTS.md — 唯一的你（ai-girlfriend）项目 Agent 宪法
 
 > **项目**：unique-you — 唯一的你·十四 — 基于 LLM 的智能情感陪伴系统
-> **版本**：v1.10（2026-09-18 死代码与假端点清理批次：删除 `shisi/api/v2/` 未挂载死模块 + `DELETE /api/shisi/memory/{id}` 假端点改 501 + `unfavorite` 的 `fav_id` 参数失效修复）
+> **版本**：v1.11（2026-09-18/19 体验修复批次：① 人设注入补齐 `personality_text`/`scenario`/`creator_notes` 三字段 ② 主动消息「连锁死锁」修复 ③ LLM 供应商切 Agnes 并移除 sensenova ④ 知识索引重建 + BM25 查询扩展 + 10 张卡描述扩写）
 > **工作目录**：`D:\Desktop\ai-girlfriend`
 > **Python**：3.10+（见 `pyproject.toml`）
 > **主语言**：中文（代码注释遵循用户最新消息语言）
@@ -225,6 +225,7 @@
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v1.11** | **2026-09-19** | **体验修复批次**（用户报四项体验问题，全链路修复，9 个提交 `ff65e60`→`4cb69d7`）：① **人设不贴合**——机制性根因是 `CharacterAggregate.build_system_prompt` **只注入 name+description+人格数值**，而角色卡里承载"怎么说话"的 `personality_text`/`scenario`/`creator_notes` **从未进入 prompt**（原始卡 32/32 均有）；补齐三字段并按其注入（实测阿哈 prompt 3789→13018 字）。配套修 `_extract_from_character` 同类三段只读 `source_data` 的缺口。② **主动消息不发**——`daily_count` 跨日未重置（CronTrigger 无 `misfire_grace_time` + 多 worker 覆盖）+ `tick()` 把频率检查前置导致 `_update_urgency()` 永不执行 → `missing_bonus` 恒 0，**两 bug 连锁死锁**；改跨日惰性重置 + 紧迫度先于频率检查；另修「控制台手动发送吃掉当日配额」；`_check_ase` 静默失败改为每 tick 可观测。③ **响应慢**——fallback 链首选 `sensenova` 但生产 `.env` **从未配置其 key** → 每次对话白跑一轮失败尝试；**移除 sensenova、接入 agnes 为首选**。④ **知识库没用上**——索引块数 520→**1000+**（新增 `scripts/rebuild_knowledge_index.py` 从权威真源重建）；检索注入 `top_k` 3→8；新增 **BM25 查询扩展**（双路互补检索，修「你家里有什么人」高分误命中无关块的排序问题）；新增 `scripts/expand_short_descriptions.py` 按已有素材扩写 10 张描述不足的卡。**前端**：StatusCenter 记忆体系重构为「三层管线」。**文档**：VISION 战略口径统一（基座免费开源 + 增值层商业化，与已提交 BP 对齐）、GAP-2/3 结案、CODE_GRAPH 供应商章节同步。测试 1060 通过 / 4 跳过，零回归 |
 | **v1.10** | **2026-09-18** | **死代码与假端点清理批次**（用户裁决「三项全做」）：① 删除 `shisi/api/v2/` 共 6 文件——`v2_router` 全仓无 `include_router` 挂载，**推翻 `docs/DELETION_LOG.md` 早先"保留待将来集成"裁决**，同步 4 处文档引用（本文件 Owner Map / `CODE_GRAPH.md` 分层表 / `CODEMAPS/DATABASE.md` / `CODEMAPS/MODULES.md`）；② `DELETE /api/shisi/memory/{memory_id}` 由"谎报已移入回收站"改为 **501 Not Implemented**（`memory_recycle_bin` 表已存在但无删除链路；保留未确认时的 400 前置校验）；③ `unfavorite_memory` 的 `fav_id` 路径参数由被忽略改为唯一判据（新增 `FavoriteManager.unfavorite_by_id`）；④ `/api/shisi/status` **纳入认证**，`/api/shisi` **31/31 全覆盖**（该端点暴露 12 个内部模块的初始化状态，属控制面；探活职责由刻意豁免认证的 `/api/health`·`/api/ready` 承担）；并更正 F1 告警文案 `AUTH_ENABLED`→`API_KEY_ENABLED` + 修补 ruff F401/I001 两处门禁破坏。测试 1060 通过 / 4 跳过，零回归 |
 | **v1.9** | **2026-09-18** | **五项裁决执行批次**：① 双角色库收敛——`config/characters` 为唯一权威真源（data/characters 53 张旧卡 tar 备份后删除并入；7 处代码改指向：knowledge_routes 兜底链/shisi manager·importer·exporter/migration×2/preflight；`sync_character_files.py` 双库同步脚本删除；4 张无对应孤立卡裁决废弃封存）；③⑤ `ASEEngine._monologues` 冗余副本删除；④ `extract_intent` 死方法删除；② bg 背景不恢复。测试基线 1064 收集/1060 通过（+48=25 卡 persona 注入参数化全覆盖） |
 | **v1.8** | **2026-09-17** | **全仓性能与正确性扫描批次**：§0/§2/§4.3 测试口径二次刷新（1016 收集/1012 通过/4 跳过 + vitest 87/87 + tsc 0 错）；新增 `utils/project_paths.py` 统一项目根锚定（修复 CWD 相对路径导致的配置静默丢失，覆盖 scheduler/LLM 供应商/角色库/剧情线/重要日期/迁移/音色等 12 处）；修复 8 类性能与正确性问题（见 `docs/verification/2026-09-17-全仓扫描验证报告.md`）；移动端适配推进；文档与代码一致性校正（README/CODEMAPS/CODE_GRAPH 端点口径 208→204） |

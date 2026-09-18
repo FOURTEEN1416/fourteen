@@ -380,20 +380,24 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 | 模块 | 职责 |
 |------|------|
 | `llm_gateway.py` | LLMGatewayV2，自动 fallback 链 |
-| `multi_provider_gateway.py` | 多供应商网关（自动 fallback: 商汤日日新 → 智谱AI → 讯飞星火 → 百度千帆）+ 用户级 gateway 缓存 |
-| `openai_compatible_provider.py` | OpenAI 兼容供应商（被 zhipu/xunfei/baidu/sensenova 共用） |
+| `multi_provider_gateway.py` | 多供应商网关（自动 fallback: **Agnes → 智谱AI → 讯飞星火 → 百度千帆 → DeepSeek**）+ 用户级 gateway 缓存 |
+| `openai_compatible_provider.py` | OpenAI 兼容供应商（被 agnes/zhipu/xunfei/baidu 共用） |
 | `prompt_template_manager.py` | PromptTemplateMgr（**54 fan-in**） |
 | `__init__.py` | **`invalidate_user_llm(user_id)`**（新增 2026-07-28）— 清除用户级 gateway 缓存，下次对话按新配置重建 |
 
-**新增供应商 (2026-07-01)**：
+**供应商现状 (2026-09-18 更新)**：
 
 | 供应商 | 注册方式 | 模型 | 认证方式 |
 |--------|---------|------|---------|
-| **sensenova** | `get_llm(provider="sensenova")` | glm-5.2 / deepseek-v4-flash / sensenova-6.7-flash-lite | Bearer Token |
+| **agnes（首选）** | `get_llm(provider="agnes")` | agnes-3.0-flash / 2.5-flash / 2.5-pro | Bearer Token |
 | 智谱AI (zhipu) | `get_llm(provider="zhipu")` | glm-4-flash | Bearer Token |
 | 讯飞星火 (xunfei) | `get_llm(provider="xunfei")` | spark-lite | Bearer Token |
 | 百度千帆 (baidu) | `get_llm(provider="baidu")` | ernie-speed-128k | OAuth (API Key + Secret) |
 | DeepSeek | `get_llm(provider="deepseek")` | deepseek-chat / deepseek-reasoner | LLMGatewayV2 |
+
+> ⚠️ **sensenova 已于 2026-09-18 移除**（原 fallback 链首选）。原因：生产 `.env`
+> **从未配置 `SENSENOVA_API_KEY`**，导致**每次对话都先白跑一轮失败尝试**才回退到
+> zhipu —— 这是响应慢的固定来源。现首选为 **agnes**（`apihub.agnes-ai.com/v1`）。
 
 **多用户 API Key 隔离（2026-07-28 新增）**：
 
@@ -613,7 +617,7 @@ tools/
 | 数据库 | SQLAlchemy 2.0 + aiosqlite + ChromaDB |
 | 向量 | sentence-transformers + rank-bm25 |
 | LLM | httpx + tenacity（自动 fallback） |
-| LLM 供应商 | 智谱AI (glm-4-flash), 讯飞星火 (spark-lite), 百度千帆 (ernie-speed-128k), DeepSeek, **sensenova (glm-5.2)** |
+| LLM 供应商 | **Agnes (agnes-3.0-flash，首选)**, 智谱AI (glm-4-flash), 讯飞星火 (spark-lite), 百度千帆 (ernie-speed-128k), DeepSeek |
 | 语音 | edge-tts + FFmpeg（可选） |
 | 缓存 | Redis（可选） |
 | 可观测 | prometheus-client + OpenTelemetry + Sentry SDK |
@@ -743,3 +747,4 @@ tools/
 | 2026-09-01 (第二批) | working tree | **剩余任务一次性完善**：(1) **SP-4 知识库挂载**：KnowledgePreview（统计+检索测试）挂入 RoleSettings DATA tab，替换假 RAG 统计三卡与"开发中"横幅（G-07 消案，使用真实数据）；(2) **GAP-2 记忆三层呈现**：StatusCenter 新增记忆体系卡（角色长期事实/珍藏收藏/工作会话三层计数 + 最近沉淀）；(3) **GAP-4 语音保存接线**：VoiceTab 保存按钮 → POST /characters/{id}/voice（mimo_model 进 extra_params），删两处"开发中"横幅；(4) **成就体系落地（ADR-0014 第一阶段）**：`api/achievement_engine.py`（10 成就×4 类，确定性事实源重算幂等）+ `character_achievements` 表（Mapped[]）+ GET/POST achievements 端点 + StatusCenter 成就卡（已解锁彩色徽章/未解锁进度条）；(5) **refresh 竞态根治**：AuthInit 抽组件化 + 模块级 in-flight 单飞锁（StrictMode 双挂载并发 refresh → 后端旋转 session 败者 401 弹回 /login）。端点 203→**205**，测试 **1036+1 Python + 75 前端 = 1111** + E2E 13 全绿 |
 | 2026-09-02 (通宵收尾) | working tree | **待办清零批次**：(1) **成就第二阶段**（ADR-0014 每日维护兜底路径）：`proactive/scheduler.py` 新增 `run_achievement_maintenance()`（读 config/characters 全部角色 id → 幂等重算落库），挂入 `_run_daily_maintenance`（00:05），+2 测试；(2) **图谱库重索引**：7706/32367 → **7992 节点/33182 边**（codebase-memory 图谱工具 CLI，commit 3c3e31e）；(3) STICKERS 上传定性"未立项非缺陷"入册；(4) P1_BACKLOG 未决项复核（全部为用户裁决域，保留）。测试 1044+1 Python / 75 前端 |
 | 2026-09-02 (参赛准备) | working tree | **图谱重索引（第二次）+ 大创赛资料目录**：重索引 7992/33182 → **7997 节点/33187 边**（commit ef328a2，新增 `大创赛报名以及后期发展/` 资料目录入 gitignore；命题名单解析/对接手册解读/报名材料草稿落盘 docs 外目录）；CODE_GRAPH §1.2/§13 同步 |
+| **2026-09-18/19（体验修复批次）** | `ff65e60`→`4cb69d7`（9 个提交） | **用户报四项体验问题的全链路修复**：<br>① **人设不贴合**（机制性根因）：`CharacterAggregate` 新增 `personality_text`/`scenario`/`creator_notes` 并注入 prompt —— 此前**只注入 name+description+人格数值**，而 `creator_notes`（语气基调/口头禅/OOC 禁忌）等**从未进入 prompt**；实测阿哈 prompt 3789→**13018 字**。又：`_extract_from_character` 的同类三段只读 `source_data`，补齐为优先取聚合根字段。<br>② **主动消息不发**（连锁死锁）：`daily_count` 跨日未重置（CronTrigger 无 `misfire_grace_time` + 多 worker 覆盖）→ `_check_frequency()` 恒 False → `tick()` 提前 return → **`_update_urgency()` 永不执行 → `missing_bonus` 恒 0**。改为**跨日惰性重置**（`_rollover_if_new_day`）+ **紧迫度更新先于频率检查**；另修「手动发送消耗当日配额」；`_check_ase` 静默失败改为可观测（每 tick 输出状态）。<br>③ **响应慢**：fallback 链首选 `sensenova` 但生产 `.env` **从未配置其 key** → 每次对话白跑一轮失败。**移除 sensenova、接入 agnes 为首选**。<br>④ **知识库没用上**：索引块数 520→**1000+**（由 `scripts/rebuild_knowledge_index.py` 从权威真源重建）；检索注入 `top_k` 3→**8**；新增 **BM25 查询扩展**（双路互补检索，修「你家里有什么人」误命中无关块的排序问题）；新增 `scripts/expand_short_descriptions.py` 对 10 张描述不足的卡按已有素材扩写（如镜心 152→663 字）。<br>**前端**：StatusCenter 记忆体系重构为「三层管线」显式呈现。<br>**文档**：VISION 战略口径统一为「基座免费开源 + 增值层商业化」（与已提交 BP 对齐）、GAP-2/3 结案。测试 **1060 passed / 4 skipped** |
