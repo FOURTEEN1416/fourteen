@@ -1191,3 +1191,16 @@
 **提交与部署（A 档闭环）**：`56cfa69`（59 文件，+1320/-386）push GitHub（`c1d829a..56cfa69`）；服务器工作树净（仅一个 09-15 dist 回滚备份未跟踪目录，pull 不受影响）→ pull 至 `56cfa69c` → `deploy/remote_deploy.sh` 四步（pip -e / npm ci / 前端构建 838ms / systemctl restart + nginx reload，09-18 00:08 完成）→ `systemctl is-active` active + `/api/health` 200（3.1.0 production）→ `git hash-object` 三端抽验 **3/3 一致**（project_paths / optimized_orchestrator / multi_provider_gateway）。
 
 **待裁决项维持五十三条清单不变**：双角色库权威真源 / bg-dynamic·bg-orbs 背景恢复 / `ASEEngine._monologues` 删除 / `extract_intent` 删除 / 双 `_monologues` 收敛。
+
+## 2026-09-18（五十五）— 五项裁决落槌：③⑤④ 已执行提交，① 迁移清单待过目，② 零动作
+
+**用户裁决**（上一条目遗留的五项待裁决，AskUserQuestion 四题批复、全部按推荐执行）：① 双角色库**收敛为 config/characters 单库**（迁移清单先过目再动手）；② bg-dynamic/bg-orbs 背景**不恢复**；③ ASE._monologues 冗余副本**删除**（与⑤收敛合并为一件）；④ `extract_intent` 死方法**删除**。裁决已入 DECISION_LEDGER 09-18 行。
+
+**已执行（③+⑤、④）**：
+- `proactive/ase_engine.py` 删 `ASEEngine._monologues`（定义+注释 5 行、on_chat/reflect 两处 append）：它存的就是内部 `self._reflection.reflect()` 返回的**同一批对象**，全仓零读取——独白记录唯一 owner=`ReflectionEngine`（`get_latest_monologue` 真接口 + D26 正向用例守卫）。`InnerMonologue` import 保留（582/652 行返回类型注解在用）。行为零变化。
+- `security/prompt_injection.py` 删 `extract_intent`（21 行）：全仓零调用；直调 `chat_sync` 属"接线即阻塞事件循环"的潜伏雷。在用部分 `detect`/`sanitize`（`_init_mixin.py:112` 生产启用）原样保留。
+- 验证：`ast.parse` 过、grep 残留双零、ruff 全过；**全量 pytest 1012 passed / 4 skipped（165.38s）与删除前完全同数 = 零回归**。DELETION_LOG 09-18 条记账（单提交可 revert）。
+
+**① 迁移盘点已完成（清单呈报待过目）**：服务器 config/characters 25 张（24 张规范化 + 绑定卡 62105bca）对本地 data/characters 53 张旧卡按 name 归组——**49 张为已入库 24 角色的旧版本**（persona_* 时间戳版/裸名版/序号版，候选删除）；**4 张无对应新库卡**（人设重度病娇by诗、修仙妹3.0、茉莉、纯对话版纯爱百合性转萝莉仙尊-银子著）= 候选迁入，去留待用户裁决。疑点抽查项：ACA3 旧卡 name "ACA(3)" vs 新库 "ACAね"，归组时需人工比对正文。**执行动因（实锤分歧）**：knowledge_routes `_load_character_data` 先找不存在的 `characters/` 再兜底 data/characters（永不查 config）；vault_collect 定期采集走 shisi character_manager 默认 data/characters——**两条知识库链路都在喂旧卡**，迁移时一并改指向。
+
+**② 不恢复**：维持 body 静态渐变（用户偏好"反对 AI 特征背景"+ 移动端性能刚优化，零动作）。

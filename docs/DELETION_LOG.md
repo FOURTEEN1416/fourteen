@@ -444,3 +444,13 @@ echarts@^2.15.0 - No imports in any source file; manualChunks entry in vite.conf
 eact-window and 
 eact-virtualized-auto-sizer kept — used via 
 equire() in MessageList.tsx even though MessageList is unused
+
+## 2026-09-18 — 用户裁决批次：双 _monologues 收敛 + extract_intent 死方法删除
+
+**Deleted**:
+- `proactive/ase_engine.py` `ASEEngine._monologues`（deque 定义+注释 5 行 + on_chat/reflect 两处 append，共 8 行）——存储对象与内部 `ReflectionEngine.reflect()` 返回值完全相同（`self._reflection` 于 `__init__` 持有），全仓零读取点；独白记录唯一 owner=ReflectionEngine（`get_latest_monologue` 真接口 + D26 正向测试守卫）。`InnerMonologue` import 保留（582/652 返回类型注解在用）。
+- `security/prompt_injection.py` `extract_intent` 方法（21 行）——全仓零调用；内部直调 `chat_sync`，若将来在 async 上下文接线会同步阻塞事件循环（潜伏雷，与生产 64 触发 0 送达同族）。模块在用部分 `detect`/`sanitize`（`_init_mixin.py:112` 生产启用）原样保留。
+
+**Verification**: `ast.parse` 双文件过；grep 残留双零（`_monologues` in ase_engine=0、`extract_intent` 全仓=0）；ruff 两文件 All checks passed；全量 pytest 零回归（数字见 LOG 五十五）。
+
+**Reversible**: 单提交 `git revert` 即可整体恢复。

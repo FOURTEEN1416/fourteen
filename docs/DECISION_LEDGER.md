@@ -98,6 +98,7 @@
 | 09-17 | **角色卡同步**：本地 data/characters 53 张 → 同名去重 29 → 24 张唯一卡规范化（ASCII id）入服务器 config/characters（保留绑定卡 62105bca 不覆盖） | 用户裁决"这个肯定要" | ✅ 已执行 | 服务器 25 张卡 JSON 校验全过 |
 | 09-17 | **web 控制端两开关**（用户裁决"这个不是需要在 web 控制端来开启和关闭吗"）：① 免打扰时段可调（/proactive/config 扩展 quiet_hours_*，MessageTab 滑条）；② 知识库定期采集开关（+/api/knowledge/collect-config，DATA tab Toggle；CollectLoop 死接线以 vault_collect 调度任务形态复活，开关交用户）；`data/scheduler_config.json` 为跨 worker 真源（4 worker 仅 master 持调度器） | 用户裁决 | ✅ 已执行 | 8a34b23+4f6ed29；端点 206→208；远端验证 available:true |
 | 09-17 | **死代码直接清洗**（用户裁决）：删 shared/Badge.tsx、chatStore.ts+api/chat.ts（僵尸聊天域，侧栏圆点恒 false）、shisi 微信指令系统 command_handler/command_parser（生产未接线；角色切换已裁决走 web）；proactive_messenger/sticker_adapter 登记留观 | 用户裁决"死代码可以直接清洗掉" | ✅ 已执行 | DELETION_LOG 09-17 条；测试 1014 收集/1010 通过 |
+| 09-18 | **五项待裁决全部落槌**（AskUserQuestion 四题，全按推荐）：① 双角色库**收敛为 config/characters 单库**（迁移清单先过目再执行；动因=knowledge_routes 兜底链与 vault_collect 定期采集均在读 data/characters 旧卡的实锤分歧）；② bg-dynamic/bg-orbs 背景**不恢复**（AI 特征偏好+移动端性能）；③ ASE._monologues 冗余副本**删除**（独白唯一 owner=ReflectionEngine）；④ security `extract_intent` 死方法**删除** | 用户裁决（四题批复） | 🔄 执行中 | ③④ 本批提交；① 迁移清单待过目；② 零动作 |
 
 ## 二、四项冲突裁决记录（真值仲裁存档）
 

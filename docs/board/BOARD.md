@@ -235,3 +235,10 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **回归门（新鲜实测）**：pytest **1012 passed / 4 skipped**（117.85s，收集 1016）+ vitest 87/87 + tsc 0 错。测试口径全链刷新：AGENTS v1.8 §0/§2/§4.3、CODE_GRAPH §1.1+更新记录、README badge 1099。
 - **A 档闭环**：服务器工作树净 → pull `56cfa69c` → remote_deploy 四步 → active + health 200 + git hash-object 抽验 3/3 一致。
 - **待用户裁决**（验证报告 §5）：双角色库权威真源 / bg-dynamic·bg-orbs 背景恢复 / `ASEEngine._monologues` 删除 / `prompt_injection.extract_intent` 删除 / 双 `_monologues` 收敛单一 owner。
+
+### 2026-09-18 · 主控窗口（zcode）· 五项裁决落槌：③⑤④ 已执行，① 迁移清单待过目
+
+- **裁决**（AskUserQuestion 四题全按推荐）：① 双角色库收敛为 config 单库；② bg 背景不恢复；③⑤ ASE._monologues 副本删除；④ extract_intent 删除。入 DECISION_LEDGER 09-18 行。
+- **已执行**：ase_engine 删 `_monologues`（8 行，独白唯一 owner=ReflectionEngine，行为零变化）；prompt_injection 删 `extract_intent`（21 行死方法拆雷，detect/sanitize 保留）。全量 pytest **1012 passed/4 skipped（165.38s）与删除前同数=零回归**；DELETION_LOG 09-18 记账。
+- **① 迁移清单已呈报待过目**：53 旧卡 → 49 张旧版候选删除 + 4 张无对应候选迁入（重度病娇by诗/修仙妹3.0/茉莉/纯对话版仙尊）+ ACA3 归组疑点人工比对。执行时一并修 knowledge_routes 兜底链与 vault_collect 读旧卡两处实锤分歧。
+- **② 零动作**：背景维持 body 静态渐变。
