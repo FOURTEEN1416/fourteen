@@ -1355,4 +1355,88 @@
 
 **⚠️ 并行纪律违规留痕**：本批次执行期间，主检出（`D:\Desktop\ai-girlfriend`）上同时存在 **3 个会话**的写入——A＝门禁治理（`ci_gates.py` / `.pre-commit-config.yaml` / `ci.yml` / `pyproject.toml`，已 staged）、B＝F1 安全批次（7 文件未 staged）、C＝本轮核查与清理。**违反 AGENTS §8 第 8 条**（「任何文件同一时刻只能有一个 owner」/「主检出工作树不是共享草稿区」/「主控写入必须在同一帧内 commit」）。本轮处置：以**显式路径分笔提交**，全程未用 `git add -A` / `git commit -a`，未触碰他方 staged 内容。建议后续按 §8 第 1 条起 worktree，或至少在 `docs/board/BOARD.md` 登记后再改主检出。
 
+**🔧 pre-commit 新坑（本轮踩到并留痕）**：安装 pre-commit 后，**`git commit -- <paths>` 会静默回滚 index 中不在本次提交范围内的 staged 删除**。实证：`git rm -r shisi/api/v2` 后执行 `git commit -- <6 个其他文件>`，pre-commit 的 stash/restore 流程把 v2 的 staged 删除**还原成正常文件**（工作区与 index 双双复活），删除静默丢失且 HEAD 不含 v2——若无事后 `git cat-file -e HEAD:<path>` 复验就会误判完成。**正解：先把 index 置为完整待提交状态（`git add` 显式路径，含删除），再 `git commit`（不带路径）**。
+
+---
+
+## 2026-09-18（六十二）— 三端闭环部署核实（9bdf9d7）+ F1 生产实证
+
+**部署链路**：服务器 `9c11f3c4` → `git pull` → `9bdf9d7a` → `deploy/remote_deploy.sh` **4/4**（前端 2205 模块 / 886ms、nginx reloaded）→ 服务 `active`。
+
+**三端一致（hash 抽验 3/3 命中）**：`api/auth.py` `ce65420`｜`api/app_factory.py` `82f8e83`｜`shisi/api/memory_routes.py` `4f38533` —— 本地 ＝ GitHub ＝ 服务器。
+
+| 生产行为检查 | 结果 |
+|---|---|
+| `/api/health` | 200 `{"status":"ok",…,"environment":"production"}` |
+| `/api/ready` | 200 |
+| `/api/shisi/status`（认证未启用） | 200 放行（与 `API_KEY_ENABLED=false` 预期一致） |
+| `DELETE /api/shisi/memory/x?confirm=true` | **501 Not Implemented**（新代码已生效） |
+| **F1 告警** | **✅ 已触发并落盘**（见下） |
+
+**F1 生产实证（本批最有价值的验证）**：`/var/log/ai-girlfriend.log` 出现
+`{"event":"API 认证未启用，生产环境存在安全风险，请设置 API_KEY_ENABLED=true 并配置 API_KEY（见 .env.example）","level":"warning","logger":"api.auth"}` ——
+① 证明 F1 修复使生产告警由「**永不触发**」变为**可触发**；② 证明更正后的变量名文案已在生产输出（旧文案指向项目中不存在的 `AUTH_ENABLED`）。触发次数与 curl 次数吻合，且 `/api/health`（无认证依赖）不触发，符合预期。
+
+**⚠️ 运维盲点发现（不在本批范围，待裁决）**
+1. **应用日志不进 journald**：服务单元为 `StandardOutput/Error=append:/var/log/ai-girlfriend.log`，故 `journalctl -u ai-girlfriend` **只能看到 systemd 层日志**——只查 journalctl 会误判「无任何应用日志」。
+2. **日志中文被 JSON 转义为 `\uXXXX`**（`json.dumps` 默认 `ensure_ascii=True`），`grep "认证未启用"` **零命中**，排查须按 `"level": "warning"` 等 ASCII 片段检索。建议日志改为 `ensure_ascii=False`（可读性）或运维侧改用 `jq`。
+
+
+---
+
+## 2026-09-18（六十二）— WEB 端卡顿诊断 + 鼠标动效改遮罩式（c755090）
+
+**触发**：用户报「网站的 WEB 端感觉很卡」，怀疑是鼠标动效引起；要求若属实则改为「遮罩式鼠标动效 + 拖尾」（参考 `D:\Desktop\校友网站`），品牌色保持现状。
+
+**诊断结论：证伪用户假设 —— 鼠标动效不是卡顿主因。**
+
+**实验方法**：构造最小复现页，把嫌疑因素逐个开关做 A/B **隔离实测**；脚本置于临时目录（未污染仓库），以 `NODE_PATH=<frontend>/node_modules` 运行 `playwright-core`。
+
+| 场景 | FPS | 卡顿率 |
+|---|---|---|
+| 纯静态基线 | 60.5 | 0% |
+| **仅鼠标动效（改造前）** | **60.6** | **0%** |
+| 仅 ParticleCanvas | 60.1 | 0% |
+| 仅毛玻璃（20 卡 blur12） | 60.3 | 0.5% |
+| 毛玻璃 + 侧栏（blur40） | 60.0 | 0.6% |
+| **粒子 + 毛玻璃 + 侧栏** | **24.1** | **86.1%** |
+| 粒子静止 + 毛玻璃 | 59.7 | 0.6% |
+
+- **真凶**：`ParticleCanvas` 全屏 canvas 每帧 `clearRect` 重绘 × `backdrop-filter` 毛玻璃 —— 背景每帧变化导致每个玻璃层每帧重新采样背景做模糊。
+- **反直觉实测**：模糊半径**不是**杠杆（12→6px：29.6 vs 27.7fps，在噪声内；侧栏 40→12px 亦无效）；单纯降粒子频率（30→6fps）也只到 51.4fps，不彻底。**唯一决定性手段是让背景不逐帧变**（24.1 → 59.7fps）。
+- **真实页面复测**（生产构建 preview + 伪造登录态）：`/wechat` `/roles` `/settings/*` `/intro` 全部 **240fps / 0 长任务**，关掉鼠标动效无差异 —— **本机（RTX 5060）真实 GPU 下复现不出用户所述的卡顿**。
+- **⚠️ 实验陷阱（代价：一整轮实验作废）**：Chromium **无头模式走 SwiftShader 软件光栅化**，对合成层数量极敏感。同一场景无头 12–27fps vs 真实 GPU **240fps**。用无头跑出的「图层顺序是关键」结论，headed 复测后**整体推翻**。
+
+**改造落地**（用户明确授权的部分，仅 1 文件）
+- `frontend/src/components/common/CustomCursor.tsx` 由「圆环 + 圆点」重构为「遮罩光晕 + 内核 + 拖尾粒子」三层，结构参考校友网站 `cursorGlow`/`cursorDot`/`firefly`；品牌色保持海盐蓝 `#7DD3FC`。
+- **刻意规避参考实现的三处性能缺陷**：参考站用逐帧 `left/top`（触发布局）、每帧 `createElement` 新建粒子节点、`setTimeout` 堆驱动 → 本实现改用 `translate3d`、**16 节点对象池复用**、单 rAF 统一驱动。
+- **浅色背景适配**：本站是暖白→海盐蓝→薄荷的浅色渐变（参考站为深色视频底），同透明度会「发飘」→ 光晕中心不透明度上调、色心加深一档（`#7DD3FC`→`#38BDF8`，同族）。
+- 附带：hover 判定由仅 `data-hover` 扩展为 `a/button/input/select/textarea/label/summary` 等可交互元素。
+
+**改造中暴露并修复的 2 个真实缺陷（均由量化验证发现，非代码审查）**
+1. **帧率相关 bug**：拖尾衰减按「帧」计数 → 240Hz 屏寿命只剩 1/4（≈160ms），肉眼几乎看不见。改为 `k = dt/16.67` 归一化（lerp 用 `1-(1-α)^k`，并钳制 `dt ≤ 50ms` 防切页大跳）。实测修复后寿命 **601ms**（理论 640ms）。
+2. **停帧冻结 bug**：原「静止超时即停帧」把正在衰减的粒子**冻结在可见态** → 屏幕残留不灭光点（实测 4003ms 仍不消散，撞测试上限）。改为「静止超时 **且** 无存活粒子」才停；并给粒子生成加**位移闸门**（`|Δx|+|Δy| > 2`），否则指针静止时仍在原点堆叠。
+
+**验证（全部当场实跑）**
+- DOM：glow 1 + core 1 + trail 16，旧 `.cursor-ring`/`.cursor-dot` 零残留
+- 跟随：内核偏差 8.5px（紧跟）/ 光晕偏差 142.8px（滞后拖曳感）；移动中 16/16 粒子存活
+- hover：命中 `is-hover`，内核 12→38px
+- 性能：**240.2fps / p95 4.3ms / 卡顿率 0.0% / 长任务 0 个**
+- 空闲停帧（rAF 计数法）：移动中 479 次/秒 → 静止后 **244 次/秒**（仅剩采样器自身）→ 重新移动 229 次可唤醒
+- `tsc --noEmit` 0 错 + vitest **87/87** + 构建通过（index chunk 182.97→187.25 kB，gzip 57.95 kB）
+- ⚠️ `bun run lint` 有 **1 error**（`frontend/src/utils/character.ts:61` `no-useless-escape`，`\[` 多余转义）+ 6 warnings —— **均为既存问题，非本批引入**；但若 lint 属 CI 门禁，该项会让门禁红（待裁决）
+
+**顺带查到的线上真实瓶颈（未改动，待裁决）**
+1. **nginx 未开 gzip**：响应头无 `Content-Encoding`，`vendor-*.js` 以 **223,259 字节原始大小**传输；首屏 8 资源合计约 **671KB**（gzip 后应约 190KB）→ **差 3.5 倍**
+2. **HTTP/1.1**（未开 HTTP/2）：无多路复用，8 个 `modulepreload` 串行排队
+3. **无 `Cache-Control`**：静态资源仅 ETag/Last-Modified，无强缓存 → 每次访问协商缓存，高延迟链路多轮 RTT
+4. 实测线上 `/intro` 首屏 **2437ms**（TTFB 98ms / DCL 2432ms）
+5. 生产包**不含 Sentry**（`VITE_SENTRY_DSN` 未设已 tree-shake，`replayIntegration` 虽在源码但未生效）——排除一项嫌疑
+
+**提交与留痕**
+- 提交 `c755090`（1 文件，+345/−83）；pre-commit 门禁 `CI gates (FF-0003/FF-0006/FF-0007/ADR)` Passed
+- 同批工作树另有并行会话的 `api/app_factory.py` 未提交改动，**未触碰、未混批**（全程以显式路径提交，未用 `git add -A` / `git commit -a`）
+- 方法论沉淀为技能 `perf-isolation-lab`（含三大陷阱：无头失真 / 按帧系数 / 停帧冻结）
+- 文档同步：`CODE_GRAPH.md` §13 更新记录、`docs/CODEMAPS/FRONTEND.md` §动画设计
+
 
