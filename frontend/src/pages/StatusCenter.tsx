@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import client from '../api/client'
 import {
@@ -17,6 +17,13 @@ function getAffinityLabel(affinity: number): string {
   if (affinity >= 30) return '熟悉'
   return '初识'
 }
+
+/** 记忆三层管线的语义色（与 CATEGORY_META 同体系） */
+const LAYER_TONE = {
+  blue: { chip: 'bg-macaron-blue-light', num: 'text-macaron-blue-deep' },
+  mint: { chip: 'bg-macaron-mint-light', num: 'text-macaron-mint-deep' },
+  yellow: { chip: 'bg-macaron-yellow-light', num: 'text-macaron-yellow-deep' },
+} as const
 
 /** 成就四类的视觉语义（暖黄/海盐蓝/薄荷青体系内取色） */
 const CATEGORY_META: Record<string, { label: string; chip: string }> = {
@@ -75,8 +82,6 @@ export default function StatusCenter() {
       <EmotionInsightCard trend={trendData?.trend ?? []} distribution={distData?.distribution ?? []} distTotal={distData?.total ?? 0} />
 
       <AchievementsCard data={achievements} />
-
-      <DiaryCard />
 
       <MemorySystemCard characterId={activeCharacter.id} recentFacts={recentFacts} />
     </div>
@@ -216,7 +221,19 @@ function AchievementsCard({ data }: { data?: AchievementsResponse }) {
   )
 }
 
-/** 记忆三层（GAP-2）：角色长期事实 / 珍藏收藏 / 当前工作记忆 + 最近沉淀列表。 */
+/** 记忆体系 · 三层管线（GAP-2 收官，2026-09-18）
+ *
+ * ① 工作记忆（当前会话上下文）
+ * ② 情景归档（daily_summaries 每日摘要，可展开时间线）
+ * ③ 长期记忆（向量库事实 + 珍藏）
+ *
+ * 改造动因：此前三层散落在「三个平行计数 + 独立日记卡」里，看不出**管道结构**，
+ * 而三层记忆恰是本产品最难被复制的部分。现改为显式逐层呈现，
+ * 每层标注「是什么 / 存什么 / 有多少 / 留存多久」。
+ *
+ * 数据全部取自既有端点（/stats、/memory/diary、/characters/{id}/memory/facts、
+ * /characters/{id}/favorites），**不新增后端接口** —— 故不引入新的隔离风险。
+ */
 function MemorySystemCard({
   characterId,
   recentFacts,
@@ -253,26 +270,118 @@ function MemorySystemCard({
     staleTime: 15 * 1000,
     refetchInterval: 30 * 1000,
   })
+  const { data: diary } = useQuery({
+    queryKey: ['memory', 'diary', characterId],
+    queryFn: () =>
+      client
+        .get('/memory/diary', { params: { limit: 10 } })
+        .then(
+          r =>
+            (r.data as { entries?: Array<{ date: string; summary: string }> }).entries ??
+            ([] as Array<{ date: string; summary: string }>),
+        )
+        .catch(() => [] as Array<{ date: string; summary: string }>),
+    enabled: !!characterId,
+    staleTime: 30 * 1000,
+  })
 
-  const layers = [
-    { label: '角色长期事实', value: charFacts ?? 0, hint: '该角色沉淀的事实记忆' },
-    { label: '珍藏记忆', value: favorites ?? 0, hint: '被标记收藏的记忆' },
-    { label: '工作记忆（会话）', value: workingCount ?? 0, hint: '当前会话上下文中的记忆' },
+  const [openDiary, setOpenDiary] = useState(false)
+  const diaryEntries = diary ?? []
+
+  const LAYERS: Array<{
+    no: string
+    name: string
+    desc: string
+    value: number
+    unit: string
+    tone: keyof typeof LAYER_TONE
+  }> = [
+    {
+      no: '①',
+      name: '工作记忆',
+      desc: '当前会话上下文，保留最近 20 条',
+      value: workingCount ?? 0,
+      unit: '条',
+      tone: 'blue',
+    },
+    {
+      no: '②',
+      name: '情景归档',
+      desc: '每 20 轮对话自动归档为当日摘要',
+      value: diaryEntries.length,
+      unit: '篇',
+      tone: 'mint',
+    },
+    {
+      no: '③',
+      name: '长期记忆',
+      desc: '抽取为事实存入向量库，跨会话长期召回',
+      value: charFacts ?? 0,
+      unit: '条',
+      tone: 'yellow',
+    },
   ]
 
   return (
     <div className="glass-card rounded-xl p-4">
-      <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+      <h3 className="text-sm font-semibold text-gray-700 mb-1 flex items-center gap-2">
         <span className="section-bar" />
         记忆体系
+        <span className="text-[10px] font-normal text-gray-400">三层管线</span>
       </h3>
-      <div className="grid grid-cols-3 gap-2 mb-4">
-        {layers.map(l => (
-          <div key={l.label} title={l.hint} className="text-center p-2 rounded-lg bg-white/40">
-            <p className="text-base font-bold text-gray-700 tabular-nums">{l.value}</p>
-            <p className="text-[10px] text-gray-400 mt-0.5">{l.label}</p>
-          </div>
-        ))}
+      <p className="text-[10px] text-gray-400 mb-3 pl-3">
+        对话 → 情景归档 → 长期事实，越往下留存越久
+      </p>
+
+      <div className="space-y-2 mb-3">
+        {LAYERS.map(l => {
+          const t = LAYER_TONE[l.tone]
+          const expandable = l.no === '②' && diaryEntries.length > 0
+          return (
+            <div key={l.name} className="rounded-lg bg-white/40 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`w-5 h-5 shrink-0 rounded-md ${t.chip} flex items-center justify-center text-[10px] ${t.num}`}
+                >
+                  {l.no}
+                </span>
+                <span className="text-xs font-medium text-gray-700">{l.name}</span>
+                <span className={`ml-auto text-sm font-bold tabular-nums ${t.num}`}>{l.value}</span>
+                <span className="text-[10px] text-gray-400">{l.unit}</span>
+                {expandable && (
+                  <button
+                    onClick={() => setOpenDiary(v => !v)}
+                    className="text-[10px] text-macaron-mint-deep hover:underline ml-1 shrink-0"
+                  >
+                    {openDiary ? '收起' : '时间线'}
+                  </button>
+                )}
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1 pl-7">{l.desc}</p>
+
+              {expandable && openDiary && (
+                <div className="mt-2 ml-7 space-y-2">
+                  {diaryEntries.map(e => (
+                    <div
+                      key={e.date}
+                      className="rounded-lg bg-white/50 border border-white/60 px-2.5 py-2"
+                    >
+                      <p className="text-[10px] text-gray-400 mb-0.5">{e.date}</p>
+                      <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">
+                        {e.summary}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="flex items-center gap-2 mb-2">
+        <p className="text-[10px] text-gray-400">珍藏记忆</p>
+        <span className="text-[10px] font-medium text-gray-500 tabular-nums">{favorites ?? 0}</span>
       </div>
 
       <p className="text-[10px] text-gray-400 mb-2">最近沉淀</p>
@@ -296,38 +405,7 @@ function MemorySystemCard({
   )
 }
 
-/** 角色日记（候选 B）：daily_summaries 每日摘要，最近 5 条折叠展示。 */
-function DiaryCard() {
-  const [entries, setEntries] = useState<Array<{ date: string; summary: string }>>([])
-  const [open, setOpen] = useState(false)
-
-  useEffect(() => {
-    let alive = true
-    client.get('/memory/diary', { params: { limit: 5 } })
-      .then((r: { data?: { entries?: Array<{ date: string; summary: string }> } }) => { if (alive) setEntries(r.data?.entries ?? []) })
-      .catch(() => {})
-    return () => { alive = false }
-  }, [])
-
-  if (entries.length === 0) return null
-
-  return (
-    <div className="glass-card rounded-xl p-4">
-      <button onClick={() => setOpen(v => !v)} className="w-full flex items-center gap-2 text-left">
-        <span className="section-bar" />
-        <h3 className="text-sm font-semibold text-gray-700 flex-1">角色日记</h3>
-        <span className="text-[10px] text-gray-400">{open ? '收起' : `${entries.length} 篇`}</span>
-      </button>
-      {open && (
-        <div className="mt-3 space-y-3">
-          {entries.map(e => (
-            <div key={e.date} className="rounded-lg bg-white/50 border border-white/60 px-3 py-2">
-              <p className="text-[10px] text-gray-400 mb-1">{e.date}</p>
-              <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">{e.summary}</p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
+// 2026-09-18：「角色日记」独立卡已并入 MemorySystemCard 的第 ② 层「情景归档」。
+// 原因：日记本就是情景记忆（daily_summaries）的产品化呈现，独立成卡会把三层管线割裂，
+// 让人看不出「对话 → 归档 → 长期事实」的沉淀结构。原实现（useEffect + 本地 state）
+// 一并移除，改由 React Query 缓存管理。
