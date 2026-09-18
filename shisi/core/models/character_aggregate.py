@@ -21,6 +21,19 @@ class CharacterAggregate(BaseModel):
     avatar_url: str | None = None
     tags: list[str] = Field(default_factory=list)
 
+    # ── 人设贴合关键字段（2026-09-18 系统性升级补齐）──
+    # 原实现只注入 name + description + persona 数值，而角色卡里真正承载
+    # "这个角色怎么说话、有什么行为规则"的三个字段**从未进入 prompt**：
+    #   personality_text —— 性格文本（原始卡 32/32 均有；转换后 23/25）
+    #   scenario         —— 场景设定（原始卡 31/32；转换后 24/25）
+    #   creator_notes    —— 创作者规则（语气基调/口头禅/OOC 禁忌；原始卡 32/32；24/25）
+    # 对照 SillyTavern 标准（永久注入 Name/Description/Personality/Scenario），
+    # 此前只注入了 2/4，且最影响"说话像不像"的内容全缺 —— 这是所有角色
+    # 普遍不贴合的机制性根因（非单张卡内容贫乏）。
+    personality_text: str = ""
+    scenario: str = ""
+    creator_notes: str = ""
+
     persona: PersonaProfile = Field(default_factory=PersonaProfile)
     emotional_state: EmotionalState = Field(default_factory=EmotionalState)
 
@@ -113,9 +126,21 @@ class CharacterAggregate(BaseModel):
         knowledge_context: str = "",
         storyline_context: str = "",
     ) -> str:
+        # 注入顺序对齐 SillyTavern 标准（Name → Description → Personality → Scenario）：
+        # 官方文档明确这四个是「永久注入」字段，而本项目此前只注入了前两个，
+        # 导致角色拿到的"人设"仅有名字 + 一段描述 + 一组默认数值。
         parts = [
             f"# 角色设定\n\n你是{self.name}。",
             self.description,
+        ]
+
+        if self.personality_text:
+            parts.extend(["", "# 性格", self.personality_text])
+
+        if self.scenario:
+            parts.extend(["", "# 场景", self.scenario])
+
+        parts.extend([
             "",
             self.persona.to_prompt_segment(),
             "",
@@ -123,7 +148,13 @@ class CharacterAggregate(BaseModel):
             f"- 情感: {self.emotional_state.primary_emotion.name}",
             f"- 能量: {self.emotional_state.energy:.1f}",
             f"- 关系: {self.emotional_state.affinity_level.display_name}",
-        ]
+        ])
+
+        # creator_notes 是创作者写的硬性扮演规则（语气基调 / 固定口头禅 /
+        # OOC 禁忌 / 输出格式），对"贴合度"的约束力最强 —— 单独成节、
+        # 显式要求严格遵守，避免被后续内容稀释。
+        if self.creator_notes:
+            parts.extend(["", "# 扮演规则（必须严格遵守）", self.creator_notes])
 
         if knowledge_context:
             parts.extend(["", "# 角色知识库", knowledge_context])

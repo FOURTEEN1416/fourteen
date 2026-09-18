@@ -291,6 +291,13 @@ class PersonaService:
             persona=persona,
             source_format="shisi_app_card",
             source_data=card,
+            # ── 人设贴合关键字段（2026-09-18 系统性升级）──
+            # 这三个字段在角色卡里覆盖率高（personality_text 23/25、scenario 24/25、
+            # creator_notes 24/25），但此前**从未进入 prompt**，导致角色只有
+            # 「名字 + 描述 + 一组默认数值」可用 → 所有角色普遍不贴合。
+            personality_text=card.get("personality_text", "") or "",
+            scenario=card.get("scenario", "") or "",
+            creator_notes=card.get("creator_notes", "") or "",
         )
         character.emotional_state = emotional_state
         return character
