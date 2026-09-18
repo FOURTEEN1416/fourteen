@@ -1,40 +1,42 @@
 # 后端业务模块地图
 
-> **⚠️ 2026-09-17 漂移注记**：本图所列 `command_handler.py`/`command_parser.py`（微信指令系统）、前端 `chatStore.ts`/`api/chat.ts`、`shared/Badge.tsx` 已于当日死代码清洗中删除（DELETION_LOG 09-17 条）；实况以 `CODE_GRAPH.md` v3.7.0 为准。
+> **✅ 2026-09-19 全量刷新**：文件数按 `ls`/`find` 实测重写；已删模块（weclone_adapter、voice 4 provider、wechat 指令系统、wechat_decrypt_source）条目清除。权威口径以 `CODE_GRAPH.md` v3.8.2 为准。
+> **⚠️ 09-17 死代码清洗留痕**：`shisi/wechat/command_handler.py`/`command_parser.py`（微信指令系统）已删除，正文已同步。
 
-**最近更新:** 2026-07-30（修正不存在的文件引用，对齐实际目录结构）
-**Python 版本:** ≥3.10 | **总文件:** ~309 .py 文件
+**最近更新:** 2026-09-19
+**Python 版本:** ≥3.10 | **总文件:** ~356 .py 文件
 
 ---
 
-## 模块总览
+## 模块总览（2026-09-19 实测）
 
 | 模块 | 文件数 | 路径 | 职责 | 状态 |
 |------|--------|------|------|------|
-| **shisi** | 96 | `shisi/` | 核心业务逻辑（角色/情感/记忆/故事线/知识库等，DDD 分层架构） | ✅ 活跃 |
-| **api** | 36 | `api/` | FastAPI 路由层（22 个 routers + health/main_routes + state） | ✅ 活跃 |
-| **persona_extractor** | ~14 | `persona_extractor/` | 人格提取与注入 | ✅ 活跃 |
-| **voice** | 11 | `voice/` | 语音合成 (TTS) | ✅ 活跃 |
-| **observability** | 9 | `observability/` | 可观测性（日志/指标/追踪/健康检查） | ✅ 活跃 |
+| **shisi** | 115 | `shisi/` | DDD 核心域（角色/情感/记忆/故事线/知识库等，v2 死模块删除后口径） | ✅ 活跃 |
+| **api** | 44 | `api/` | FastAPI 路由层（21 routers + app_factory/achievement_engine/state 等） | ✅ 活跃 |
+| **my_character** | 21 | `my_character/` | 情感引擎 + 角色引擎 | ✅ 活跃 |
+| **persona_extractor** | 13 | `persona_extractor/` | 人格提取与注入（+web_enricher 网络画像增强） | ✅ 活跃 |
+| **observability** | 9 | `observability/` | 可观测性（日志/指标/追踪/健康检查/sentry/优雅停机） | ✅ 活跃 |
 | **tools** | 10 | `tools/` | 工具系统（12 个内置工具） | ✅ 活跃 |
-| **llm_provider** | 6 | `llm_provider/` | LLM 多供应商网关 | ✅ 活跃 |
+| **orchestrator** | 7 | `orchestrator/` | 编排器（主类/init/stream mixin/会话锁/语音检测/console_chat） | ✅ 活跃 |
+| **character_card** | 6 | `character_card/` | 角色卡解析/验证/构建/集成 | ✅ 活跃 |
+| **voice** | 6 | `voice/` | 语音合成（MiMo 唯一引擎，08-28 收敛） | ✅ 活跃 |
+| **llm_provider** | 5 | `llm_provider/` | LLM 多供应商网关 | ✅ 活跃 |
 | **security** | 5 | `security/` | 安全过滤与加密 | ✅ 活跃 |
-| **proactive** | 5 | `proactive/` | 主动消息推送 | ✅ 活跃 |
-| **character_card** | 6 | `character_card/` | 角色卡解析/验证/构建 | ✅ 活跃 |
-| **clone_training** | 5 | `clone_training/` | 克隆训练（数据清洗/数据提取/风格分析；dataset_builder/lora_trainer 已删除） | ✅ 活跃 |
-| **orchestrator** | 5 | `orchestrator/` | 优化编排器（初始化阶段/流式/会话锁/语音检测） | ✅ 活跃 |
-| **weclone_adapter** | 3 | `weclone_adapter/` | 微信克隆适配 | ✅ 活跃 |
-| **multimodal** | 2 | `multimodal/` | 多模态处理 | ✅ 活跃 |
+| **proactive** | 5 | `proactive/` | 主动消息推送（ase_engine/scheduler/frequency/reflection） | ✅ 活跃 |
+| **clone_training** | 4 | `clone_training/` | 克隆训练（数据清洗/数据提取/风格分析） | ✅ 活跃 |
+| **multimodal** | 3 | `multimodal/` | 多模态处理（image_attachment/multimodal_processor） | ✅ 活跃 |
 | **wechat_direct** | 2 | `wechat_direct/` | 微信直连 | ✅ 活跃 |
 | **plugins** | 2 | `plugins/` | 插件系统 | ✅ 活跃 |
-| **cache** | 2 | `cache/` | LLM 缓存 + Redis 客户端 | ✅ 活跃 |
-| **context** | 1 | `context/` | 上下文（世界书提供器） | ✅ 活跃 |
-| **memory_ext** | 1 | `memory_ext/` | 记忆扩展（mem0 后端） | ✅ 活跃 |
-| **my_character** | ~ | `my_character/` | 自定义角色模块 | ✅ 活跃 |
+| **cache** | 3 | `cache/` | LLM 缓存 + Redis 客户端 | ✅ 活跃 |
+| **context** | 2 | `context/` | 上下文（世界书提供器） | ✅ 活跃 |
+| **memory_ext** | 2 | `memory_ext/` | 记忆扩展（mem0 后端） | ✅ 活跃 |
+
+> 文件数含 `__init__.py`；`weclone_adapter/` 已于 08-28 删除（克隆收敛为本地提取+JSON 上传）。
 
 ---
 
-## shisi/ — 核心业务逻辑 (96 文件)
+## shisi/ — DDD 核心域 (115 文件)
 
 **入口:** `shisi/api/registry.py`（由 `api/app_factory.py` 调用 `setup_shisi` 装配）
 **配置:** `shisi/config.py` / `shisi/migrations.py`
@@ -58,8 +60,8 @@
 | `storyline/` | 故事线 | `engine.py`, `detector.py`, `config.py` |
 | `vital_signs/` | 生命指标 | `vital_engine.py`, `emotion_mapping.py` |
 | `sticker/` | 表情包 | `sticker_manager.py`, `emotion_recommender.py`, `safety_check.py`, `importer.py`, `default_provider.py` |
-| `voice/` | 语音 | `character_voice.py`, `emotion_tts.py` |
-| `wechat/` | 微信集成 | `command_handler.py`, `command_parser.py`, `proactive_messenger.py`, `sticker_adapter.py` |
+| `voice/` | 语音 | `character_voice.py`, `emotion_tts.py`（EmotionTTS 仅余 VoiceEnhancer） |
+| `wechat/` | 微信集成 | `proactive_messenger.py`, `sticker_adapter.py`（command_handler/command_parser 已于 09-17 删除） |
 | `knowledge/` | 知识检索 | `retriever.py`, `character_knowledge_service.py`, `crawler_adapter.py` |
 | `knowledge/legacy/` | RAGEngineV2（保留，被 tests/test_rag_engine.py 52 处引用） | `rag_engine.py` |
 | `ase/` | 场景叙事 | `scene_narrator.py`, `trigger_engine.py` |
@@ -71,23 +73,23 @@
 
 ---
 
-## api/ — FastAPI 路由层 (36 文件)
+## api/ — FastAPI 路由层 (44 文件)
 
 **入口:** `api/run_api.py` → `api/app_factory.py:create_api_app()`
 
 **结构:**
-- 根目录: `app_factory.py`（应用工厂）, `run_api.py`（启动入口）, `main_routes.py`（模型/常量/Helper）, `health_routes.py`（健康检查）, `auth.py`/`auth_jwt.py`（认证）, `database.py`（SQLAlchemy）, `deps.py`（依赖注入）, `session_manager.py`, `websocket_server.py`, `qrcode_store.py`, `path_security.py`, `runtime_config.py`
-- `routers/` 21 个路由模块（2026-08-28：demo_routes 已删除，原 22）: `admin_routes`, `auth_routes`, `character_routes`, `chat_routes`, `clone_routes`, `emotion_routes`, `invite_routes`, `knowledge_routes`, `llm_providers_routes`, `memory_routes`, `mimo_voice_routes`, `misc_routes`, `persona_card_routes`, `personality_routes`, `safety_routes`, `storyline_routes`, `tools_routes`, `training_routes`, `users_routes`, `voice_routes`, `wechat_routes`
+- 根目录: `app_factory.py`（应用工厂）, `run_api.py`（启动入口）, `main_routes.py`（模型/常量/Helper）, `health_routes.py`（健康检查）, `auth.py`/`auth_jwt.py`（认证）, `database.py`（SQLAlchemy）, `achievement_engine.py`（成就引擎，ADR-0014）, `deps.py`（依赖注入）, `session_manager.py`, `websocket_server.py`, `qrcode_store.py`, `path_security.py`, `runtime_config.py`
+- `routers/` 21 个路由模块（2026-08-28：demo_routes 已删除）: `admin_routes`, `auth_routes`, `character_routes`, `chat_routes`, `clone_routes`, `emotion_routes`, `invite_routes`, `knowledge_routes`, `llm_providers_routes`, `memory_routes`, `mimo_voice_routes`, `misc_routes`, `persona_card_routes`, `personality_routes`, `safety_routes`, `storyline_routes`, `tools_routes`, `training_routes`, `users_routes`, `voice_routes`, `wechat_routes`
 - `state/` 3 个状态模块: `safety_log`, `tool_history`, `training_state`
 
-**实际挂载:** 16 个 `include_router` 调用,共 199 端点（2026-08-28 `create_api_app` 实扫；07-30 基线为 17/204，demo 删除后 -1 路由 -4 端点）
+**实际挂载:** 16 个 `include_router` 调用 + `setup_shisi(app)` 装配，共 **204 业务端点 / 171 唯一路径**（2026-09-19 `create_api_app` 内省实扫；`len(app.routes)=208` 含 4 条框架路由）
 **依赖:** shisi, security, llm_provider, database
 
 ---
 
-## persona_extractor/ — 人格提取 (~14 文件)
+## persona_extractor/ — 人格提取 (12 模块)
 
-**职责:** 从对话中提取用户人格特征，注入角色回复
+**职责:** 从对话中提取用户人格特征，注入角色回复；web_enricher 网络画像增强
 
 **关键文件:**
 - `fusion.py` — 人格融合主入口
@@ -95,26 +97,25 @@
 - `persona_bank.py` — 人格库
 - `style_vectorizer.py` — 风格向量化
 - `hexaco.py`, `dark_triad.py`, `mental_health.py` — 人格维度分析
+- `web_enricher.py` — 网络人设增强（火爬虫/Crawl4AI）
 
 **依赖:** llm_provider, shisi/memory
 **被依赖:** shisi (通过 Orchestrator)
 
 ---
 
-## voice/ — 语音合成 (11 文件)
+## voice/ — 语音合成 (5 模块 + __init__)
 
-**职责:** 文本转语音，多 TTS 引擎支持
+**职责:** 文本转语音。**MiMo 唯一引擎**（08-28 裁决 A：Edge-TTS/SoVITS/CosyVoice/Bert-VITS2 四 provider 与 voice_training.py 已删除）
 
 **关键文件:**
-- `tts_manager.py` — TTS 管理器
-- `tts_provider_base.py` — TTS 供应商基类
-- `mimo_tts_provider.py` — MiMo TTS 实现
-- `edge_tts_provider.py` — Edge TTS 实现
-- `bert_vits2_provider.py` — Bert-VITS2 实现
-- `cosyvoice_provider.py` — CosyVoice 实现
-- `sovits_provider.py` — So-VITS 实现
+- `mimo_tts_provider.py` — MiMo Cloud API（8 情感映射内置）+ Windows SAPI 本地兜底
+- `tts_manager.py` — 单引擎管理
+- `tts_provider_base.py` — Provider 抽象基类
+- `audio_converter.py` — 音频格式转换（silk 编解码，pilk 可选依赖）
+- `clone_data_manager.py` — 聊天克隆数据管理（克隆域，与 TTS 无关）
 
-**依赖:** config (emotion.yaml)
+**依赖:** config (system.yaml voice 段)
 **被依赖:** api (voice_routes, mimo_voice_routes)
 
 ---
@@ -160,7 +161,7 @@
 
 ---
 
-## llm_provider/ — LLM 供应商 (6 文件)
+## llm_provider/ — LLM 供应商 (5 文件)
 
 **职责:** 多 LLM 供应商统一接入
 
@@ -215,7 +216,7 @@
 
 ---
 
-## cache/ — 缓存层 (2 文件)
+## cache/ — 缓存层 (3 文件)
 
 **职责:** LLM 响应缓存，Redis 客户端管理
 
@@ -244,7 +245,7 @@
 
 ---
 
-## clone_training/ — 克隆训练 (5 文件)
+## clone_training/ — 克隆训练 (4 文件)
 
 **职责:** 微信聊天数据清洗、数据提取、风格分析
 
@@ -252,9 +253,8 @@
 - `data_cleaner.py` — 数据清洗
 - `data_extractor.py` — 数据提取
 - `style_analyzer.py` — 风格分析
-- `wechat_decrypt_source.py` — 微信解密源（Windows 微信进程依赖）
 
-> **注:** `dataset_builder.py` 与 `lora_trainer.py` 已删除（架构改为本地提取→上传→服务器分析）。
+> **注:** `dataset_builder.py`/`lora_trainer.py` 已删除（架构改为本地提取→上传→服务器分析）；`wechat_decrypt_source.py` 已于 08-28 删除（解密必须在用户本地环境进行，服务器不经手微信数据）。
 
 **依赖:** 无
 **被依赖:** api (clone_routes)

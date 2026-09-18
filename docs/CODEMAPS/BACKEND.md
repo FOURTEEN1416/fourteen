@@ -1,9 +1,8 @@
 # 后端地图
 
-> **⚠️ 数字漂移声明**（2026-08-28 更新）：本文端点统计为 07-14 基线快照。权威数字以 `CODE_GRAPH.md`（199 端点 / 16 include_router，2026-08-28 实扫；demo_routes 已删除）为准。
-> **⚠️ 2026-09-17 漂移注记**：training_routes 端点 9→13（+proactive config/send/pause/history + knowledge/collect-config×2）、全网 208 端点；本文清单未逐条回写，实况以 `CODE_GRAPH.md` v3.7.0 为准。
+> **✅ 2026-09-19 全量刷新**：端点统计已按 `create_api_app()` 内省实测重写（**204 业务端点 / 171 唯一路径**；`len(app.routes)=208` 含 4 条框架路由）。逐模块端点数以本图模块级清单 + `CODE_GRAPH.md` v3.8.2 §4.2（按 tag 分布，权威）为准。
 
-**最近更新:** 2026-07-14
+**最近更新:** 2026-09-19
 **版本:** 3.1.0
 **入口文件:** `api/run_api.py`, `api/app_factory.py`, `main.py`, `orchestrator/`
 
@@ -12,147 +11,90 @@
 ## 架构分层
 
 ```
-api/                        ← FastAPI 路由层
-├── run_api.py              ← 启动入口 (uvicorn)
-├── app_factory.py          ← APP 工厂 (create_api_app)
+api/ (44 py 文件)            ← FastAPI 路由层
+├── run_api.py              ← 启动入口 (uvicorn + flock 调度器单例/微信连接自动恢复)
+├── app_factory.py          ← APP 工厂 (create_api_app) — 唯一构造入口
 ├── auth.py                 ← X-API-Key 认证依赖
 ├── auth_jwt.py             ← JWT 认证 (bcrypt + python-jose)
-├── database.py             ← SQLAlchemy 模型 (User, UserSession)
+├── database.py             ← SQLAlchemy 模型 (User/InviteCode/UserSession/
+│                             ConsentRecord/WechatBinding/CharacterAchievement)
+├── achievement_engine.py   ← 成就引擎 (ADR-0014，10 成就×4 类幂等重算)
 ├── deps.py                 ← 依赖注入
 ├── health_routes.py        ← 健康检查路由 (/api/health, /api/ready) — 无需认证
+├── main_routes.py          ← 共享 Pydantic 模型与 Helper（无端点）
 ├── runtime_config.py       ← 运行时环境检测 (is_production, get_database_url)
 ├── websocket_server.py     ← WebSocket 服务
 ├── qrcode_store.py         ← 二维码存储
 ├── session_manager.py      ← 会话管理
+├── state/                  ← safety_log / tool_history / training_state
 │
-├── routers/                ← 路由模块 (13 个)
-│   ├── auth_routes.py      ← 认证注册登录 (9 endpoints)
-│   ├── admin_routes.py     ← 管理员 CRUD (6 endpoints)
-│   ├── invite_routes.py    ← 邀请码 (4 endpoints)
-│   ├── character_routes.py ← 角色管理 (53 endpoints)
-│   ├── voice_routes.py     ← 语音 (16 endpoints)
-│   ├── mimo_voice_routes.py← MiMo 语音 (10 endpoints)
-│   ├── storyline_routes.py ← 故事线 (27 endpoints)
-│   ├── wechat_routes.py    ← 微信集成 (10 endpoints)
-│   ├── emotion_routes.py   ← 情感 (10 endpoints)
-│   ├── memory_routes.py    ← 记忆 (4 endpoints)
-│   ├── knowledge_routes.py ← 知识库 (7 endpoints)
-│   ├── persona_card_routes.py ← 人设卡 (3 endpoints)
+└── routers/                ← 路由模块 (21 个，不含 __init__.py)
+    ├── character_routes.py   (21 endpoints，tag=character)
+    ├── misc_routes.py        (16，含 /api/user/llm-config GET/POST、日记种子)
+    ├── training_routes.py    (13，training/* + proactive/*)
+    ├── safety_routes.py      (12，safety/rag/voice/files/cache)
+    ├── chat_routes.py        (11，chat/session + wechat channels)
+    ├── personality_routes.py (10，emotion/persona/psych)
+    ├── wechat_routes.py      (9，wechat/*；另有 qrcode_store 1 端点独立挂载)
+    ├── clone_routes.py       (8)
+    ├── auth_routes.py        (8)
+    ├── knowledge_routes.py   (8，knowledge/* + enrich)
+    ├── users_routes.py       (7)
+    ├── voice_routes.py       (6，character/voice/*)
+    ├── mimo_voice_routes.py  (6，mimo/*)
+    ├── storyline_routes.py   (6)
+    ├── llm_providers_routes.py (6，admin)
+    ├── invite_routes.py      (4)
+    ├── memory_routes.py      (4，桥接 shisi Favorite/ForwardManager)
+    ├── emotion_routes.py     (2，emotion/params/*)
+    ├── persona_card_routes.py (3)
+    ├── admin_routes.py       (5)
+    └── tools_routes.py       (6，system/tools + plugins/*)
 │
-│   （demo_routes.py 已于 2026-08-28 删除——D1 裁决）
-│
-│   (以下为从 api/ 根目录迁移的旧路由，已去除下划线前缀)
-│   ├── misc_routes.py      ← 杂项 (9 endpoints, /api/health 已迁移至 health_routes.py)
-│   ├── chat_routes.py      ← 聊天 (10 endpoints)
-│   ├── personality_routes.py ← 人格 (9 endpoints)
-│   ├── users_routes.py     ← 用户 (7 endpoints)
-│   ├── training_routes.py  ← 训练 (9 endpoints, LoRA 训练端点已移除)
-│   ├── tools_routes.py     ← 工具 (5 endpoints)
-│   ├── safety_routes.py    ← 安全 (12 endpoints)
-│   └── clone_routes.py     ← 克隆 (7 endpoints)
-│
-└── main_routes.py          ← 共享模型与 Helper (仅 Pydantic 模型 + _sanitize_config)
-                             不再包含 router 实例或端点定义
+└── shisi/api/ (11 py 文件)  ← DDD 核心 plane，setup_shisi(app) 装配，31 端点
+    （affinity 4 / character 7 / emotion_stage 3 / memory 6 / persona 3 /
+      stats 1 / sticker 5 / vital_signs 1 / health* — 均已纳认证 31/31）
 ```
+
+> demo_routes 已于 2026-08-28 删除（D1 裁决）；`shisi/api/v2/` 死模块已于 2026-09-18 删除。
 
 ---
 
-## API 端点清单
+## API 端点清单（模块级，2026-09-19 内省实测）
 
-### 认证模块 (auth_routes.py) — 9 endpoints
-
-| 方法 | 路径 | 描述 | 认证 |
-|------|------|------|------|
-| POST | /api/auth/register | 用户注册 | 无 |
-| POST | /api/auth/login | 用户登录 | 无 |
-| POST | /api/auth/refresh | 刷新 token | Bearer |
-| POST | /api/auth/logout | 退出登录 | Bearer |
-| GET | /api/auth/me | 获取当前用户 | Bearer |
-| PUT | /api/auth/me | 更新当前用户 | Bearer |
-| PUT | /api/auth/password | 修改密码 | Bearer |
-| DELETE | /api/auth/me | 注销账户 | Bearer |
-| POST | /api/auth/check-invite | 检查邀请码 | 无 |
-
-### 管理员模块 (admin_routes.py) — 6 endpoints
-
-| 方法 | 路径 | 描述 | 认证 |
-|------|------|------|------|
-| GET | /api/admin/users | 用户列表 | Admin |
-| GET | /api/admin/users/{id} | 用户详情 | Admin |
-| PUT | /api/admin/users/{id} | 更新用户 | Admin |
-| DELETE | /api/admin/users/{id} | 删除用户 | Admin |
-| PUT | /api/admin/users/{id}/role | 更改角色 | Admin |
-| GET | /api/admin/stats | 系统统计 | Admin |
-
-### 邀请码模块 (invite_routes.py) — 4 endpoints
-
-| 方法 | 路径 | 描述 | 认证 |
-|------|------|------|------|
-| POST | /api/invites | 创建邀请码 | Admin |
-| GET | /api/invites | 列出邀请码 | Admin |
-| DELETE | /api/invites/{id} | 删除邀请码 | Admin |
-| GET | /api/invites/check/{code} | 验证邀请码 | 无 |
-
-### 角色模块 (character_routes.py) — 53 endpoints
-
-| 方法 | 路径 | 描述 |
+| 模块 (tag) | 端点数 | 路径前缀 |
 |------|------|------|
-| GET | /api/characters | 角色列表 |
-| POST | /api/characters | 创建角色 |
-| GET | /api/characters/{id} | 角色详情 |
-| PUT | /api/characters/{id} | 更新角色 |
-| DELETE | /api/characters/{id} | 删除角色 |
-| ... | /api/characters/* | +48 更多 (含配置/导入/导出等) |
-
-### 故事线模块 (storyline_routes.py) — 27 endpoints
-
-| 方法 | 路径 | 描述 |
-|------|------|------|
-| GET | /api/characters/{id}/storyline | 故事线列表 |
-| POST | /api/characters/{id}/storyline | 创建章节 |
-| PUT | /api/characters/{id}/storyline/{sid} | 更新章节 |
-| DELETE | /api/characters/{id}/storyline/{sid} | 删除章节 |
-| ... | 更多 | 分支管理/进度追踪等 |
-
-### 语音模块 (voice_routes.py + mimo_voice_routes.py) — 26 endpoints
-
-| 方法 | 路径 | 描述 |
-|------|------|------|
-| GET | /api/voice/voices | 语音列表 |
-| POST | /api/voice/tts | 文本转语音 |
-| ... | /api/mimo/* | MiMo 语音 API |
-
-### 微信模块 (wechat_routes.py) — 10 endpoints
-
-| 方法 | 路径 | 描述 |
-|------|------|------|
-| GET | /api/wechat/status | 微信状态 |
-| POST | /api/wechat/send | 发送消息 |
-| ... | /api/wechat/* | 联系人/群聊等 |
-
-### 情感/记忆/知识模块 — 21 endpoints
-
-| 模块 | 路径前缀 | 数量 |
-|------|----------|------|
-| emotion_routes.py | /api/emotion/* | 10 |
-| memory_routes.py | /api/memory/* | 4 |
-| knowledge_routes.py | /api/knowledge/* | 7 |
-| persona_card_routes.py | /api/persona-card/* | 3 |
-
-### 迁移路由模块 (api/routers/*_routes.py) — 69 endpoints
-
-> 以下模块原位于 `api/` 根目录（带下划线前缀），现已统一迁移至 `api/routers/`。
-
-| 模块 | 路径前缀 | 数量 | 说明 |
-|------|----------|------|------|
-| misc_routes | /api | 10 | 杂项 (系统状态等) |
-| chat_routes | /api | 10 | 聊天 |
-| personality_routes | /api | 9 | 人格 |
-| users_routes | /api | 7 | 用户 |
-| training_routes | /api | 9 | 训练 (LoRA 训练端点已移除) |
-| tools_routes | /api | 5 | 工具 |
-| safety_routes | /api | 12 | 安全 |
-| clone_routes | /api | 7 | 克隆 |
+| character | 21 | /api/characters/*, /api/presets/*（含 .png 导入/导出） |
+| misc | 16 | /api/stats, /api/dashboard, /api/memory/facts, /api/logs*, /api/config, /api/user/llm-config, /api/channels, /api/routes, /api/memory/diary* |
+| training | 13 | /api/training/*, /api/proactive/*（config/send/pause/history） |
+| safety-infra | 12 | /api/safety/*, /api/rag/*, /api/voice/*, /api/files/*, /api/cache/* |
+| chat | 11 | /api/chat/*, /api/session/*, /api/wechat/status |
+| personality | 10 | /api/emotion/*, /api/persona/*, /api/psych/* |
+| memory | 10 | api memory_routes(4) + shisi memory_routes(6) |
+| wechat | 9 | /api/wechat/*（另有 qrcode 1 端点独立挂载） |
+| clone | 8 | /api/clone/*（含 /api/clone/upload） |
+| auth | 8 | /api/auth/*（register/login/refresh/logout/me GET/PUT/DELETE/password/check-invite） |
+| knowledge | 8 | /api/characters/{id}/knowledge/*, /api/characters/{id}/enrich |
+| users | 7 | /api/users/*（admin only） |
+| characters (shisi) | 7 | /api/shisi/characters |
+| tools | 6 | /api/system/tools*, /api/plugins/* |
+| voice | 6 | /api/character/voice/* |
+| mimo-tts | 6 | /api/mimo/* |
+| storyline | 6 | /api/storyline/* |
+| llm-providers | 6 | /api/llm-providers/*（admin） |
+| stickers | 5 | /api/shisi/stickers |
+| admin | 5 | /api/admin/* |
+| affinity | 4 | /api/shisi/affinity |
+| invite | 4 | /api/auth/register-invite, /api/admin/invites |
+| emotion-stage | 3 | /api/shisi/emotion-stage |
+| persona (shisi) | 3 | /api/shisi/persona |
+| persona-card | 3 | /api/persona-card/* |
+| health | 2 | /api/health, /api/ready（无认证，探活） |
+| emotion | 2 | /api/emotion/params/* |
+| vital-signs | 1 | /api/shisi/vital-signs |
+| stats (shisi) | 1 | /api/shisi/stats |
+| (untagged) | 1 | /api/wechat/qrcode |
+| **合计** | **204** | 95 GET / 74 POST / 20 DELETE / 15 PUT |
 
 ---
 

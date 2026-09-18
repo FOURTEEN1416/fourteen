@@ -1,5 +1,6 @@
 # 📚 LLM Provider 模块阅读报告
-> ⚠️ **2026-09-17 时效注记**：`multi_provider_gateway.py` 新增 `chat_sync`（此前缺失导致 ASE 主动消息 LLM 生成静默回落模板——ReloadableLLMGateway.__getattr__ 探测 hasattr 为 False）。**现行口径以 `CODE_GRAPH.md` v3.7.0 为准**。
+> ⚠️ **2026-09-19 时效注记**：09-18 起 **sensenova 已移除、agnes 为默认链首选**——本文所写 `DEFAULT_FALLBACK_CHAIN=["sensenova","zhipu","xunfei","baidu"]` 及 sensenova 配置段落均已过时，现行默认链为 `["agnes","zhipu","xunfei","baidu"]`（4 家；DeepSeek 注册可用不入链）。**现行口径以 `CODE_GRAPH.md` v3.8.2 §4.7 为准**。
+> ⚠️ **2026-09-17 时效注记**：`multi_provider_gateway.py` 新增 `chat_sync`（此前缺失导致 ASE 主动消息 LLM 生成静默回落模板——ReloadableLLMGateway.__getattr__ 探测 hasattr 为 False）。
 
 
 **读取进度**：5/5 文件 ✅ 已全部穷举阅读  

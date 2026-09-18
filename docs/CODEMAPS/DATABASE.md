@@ -1,6 +1,6 @@
 # 数据库地图
 
-**最近更新:** 2026-08-01
+**最近更新:** 2026-09-19
 **数据库:** SQLite (主, aiosqlite) + ChromaDB (向量) + 文件系统 (角色卡/知识库)
 
 ---
@@ -15,23 +15,24 @@
 │  ┌────────────────────┐   ┌──────────────────────┐      │
 │  │ 用户 & 会话 (主库)  │   │ RAG 嵌入向量存储      │      │
 │  │ data/users.db      │   │ data/chroma_db/      │      │
-│  │ User               │   │ - 文档嵌入            │      │
-│  │ UserSession        │   │ - 知识库索引          │      │
-│  │ llm_config (JSON)  │   │ - 记忆向量            │      │
+│  │ 6 表 (见下)         │   │ - 文档嵌入            │      │
+│  │                    │   │ - 情景记忆 (单 collection， │
+│  │                    │   │   隔离缺口见 FUNCTION_      │
+│  │                    │   │   INVENTORY 差距表)        │
 │  └────────────────────┘   └──────────────────────┘      │
 │                                                          │
 │  文件系统                                                 │
 │  ┌────────────────────┐   ┌──────────────────────┐      │
 │  │ 角色卡              │   │ 知识库数据            │      │
-│  │ character_card/    │   │ data/knowledge/      │      │
-│  │ my_character/      │   │ config/characters/   │      │
+│  │ config/characters/ │   │ data/knowledge/      │      │
+│  │ (25 张，唯一真源)    │   │ BM25 索引 (55 文件)   │      │
 │  └────────────────────┘   └──────────────────────┘      │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## SQLite 模型 (api/database.py)
+## SQLite 模型 (api/database.py，6 表)
 
 > 数据库连接由 `api/runtime_config.py:get_database_url()` 解析，默认 `sqlite+aiosqlite:///data/users.db`。
 > 若设置 `DATABASE_URL` / `APP_DATABASE_URL` 环境变量，可切换为 PostgreSQL/MySQL（同步驱动自动转异步）。
@@ -47,8 +48,7 @@
 | role | String(20), default='user' | 角色 (user/admin) |
 | is_active | Boolean, default=True | 是否激活 |
 | llm_config | JSON, nullable | 用户级 LLM 配置（API Key 隔离） |
-| created_at | DateTime | 创建时间 |
-| updated_at | DateTime | 更新时间 |
+| created_at / updated_at | DateTime | 时间戳 |
 
 ### UserSession
 
@@ -59,19 +59,23 @@
 | token_jti | String(36), Unique | JWT ID |
 | refresh_token | String(255) | 刷新令牌 |
 | is_active | Boolean, default=True | 是否有效 |
-| expires_at | DateTime | 过期时间 |
-| created_at | DateTime | 创建时间 |
-| last_used_at | DateTime | 最后使用时间 |
+| expires_at / created_at / last_used_at | DateTime | 时间戳 |
 
-### shisi 业务模型
+### 其余 4 表
 
-| 模型 | 文件 | 说明 |
+| 模型 | 表名 | 说明 |
 |------|------|------|
-| User | api/database.py | ✅ 活跃（含 llm_config 字段） |
-| UserSession | api/database.py | ✅ 活跃 |
+| InviteCode | invite_codes | 邀请码注册（内测准入） |
+| ConsentRecord | consent_records | 用户同意记录（W2-consent） |
+| WechatBinding | wechat_bindings | 微信 wxid ↔ 角色绑定（**微信人设真源**，09-17 起 web"设为活跃"实时同步） |
+| CharacterAchievement | character_achievements | 角色成就（ADR-0014，10 成就×4 类，幂等重算） |
+
+### shisi 业务表 (shisi/migrations.py，12 张)
+
+`characters` / `characters_v2` / `affinity_records` / `affinity_unlocks` / `affinity_audit` / `emotion_stage_state` / `stickers` / `character_stickers` / `vital_signs_state` / `memory_favorites` / `memory_recycle_bin` / `shisi_schema_version`
 
 > **注意:** `shisi/` 子系统使用独立 SQLite 异步访问（DDD 分层: affinity/emotion_stage/persona/stats/vital_signs）。
-> `api/database.py` 中的 User/UserSession 是用户认证主模型。
+> `api/database.py` 中的 6 表是用户认证与控制面模型。
 
 ---
 
@@ -144,12 +148,9 @@ LoginPage
 
 ### 聊天消息
 ```
-ChatInput
-  → POST /api/chat
-    → routers/chat_routes.py
-      → Orchestrator
-        → 记忆 (memory/) → ChromaDB
-        → RAG (rag_engine/) → ChromaDB + data/knowledge/
+微信消息 → wechat_direct → Orchestrator
+        → 记忆 (shisi/memory) → ChromaDB
+        → RAG (shisi/knowledge/) → BM25 索引 data/knowledge/{id}.json
         → 角色配置 → config/characters/{id}.json
         → LLM 响应
 ```

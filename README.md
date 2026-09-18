@@ -132,7 +132,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │   └── achievement_engine.py / database.py / auth_jwt.py / deps.py ...
 ├── orchestrator/         编排器（7 文件）：主类 + _InitPhasesMixin + _StreamPipelineMixin
 │                         + session_locks + voice_detector + console_chat
-├── shisi/                DDD 领域层（121 文件）：application / core / infrastructure /
+├── shisi/                DDD 领域层（115 文件）：application / core / infrastructure /
 │                         character / knowledge / memory / affinity / voice / vault ...
 ├── voice/                MiMo Cloud TTS + 音频转码（silk）
 ├── wechat_direct/        微信直连（扫码登录 + 收发消息）
@@ -146,7 +146,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 ├── tools/                内置工具（12 个）
 ├── frontend/             React 管理控制台
 │   └── src/
-│       ├── api/          11 个 API 模块（按域拆分）
+│       ├── api/          13 个 API 模块（按域拆分）
 │       ├── pages/        17 个页面
 │       ├── store/        Zustand 3 个（authStore / characterBuilderStore / errorStore）
 │       ├── hooks/        React Query hooks

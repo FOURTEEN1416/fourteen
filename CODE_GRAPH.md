@@ -1,6 +1,6 @@
-# 代码图谱 — unique-you (唯一的你) v3.8.1
+# 代码图谱 — unique-you (唯一的你) v3.8.2
 
-> 由 维护者 手动维护 | 最后核实: 2026-09-18（v3.8 增量：**09-17** 全仓性能与正确性扫描——项目根路径锚定 + 12 处 CWD 缺陷 + 并发/缓存/热路径修复 + 移动端适配 + **端点口径系统性纠错 208→204**；**09-18** 续——双角色库收敛为 `config/characters` 唯一权威真源（7 处代码改指向 + `sync_character_files.py` 删除）、CI 门禁十四连红根治（FF-0006 `client.ts` 函数抽离 + ruff F401 清理）；测试口径见 §1.1 与 §13；**09-18 晚**：`shisi/api/v2/` 死模块（6 文件）删除 → `shisi/api/` 现 **11 文件 / 31 端点**（端点数与合计 204 不变，因 v2 从未挂载）+ `DELETE /api/shisi/memory/{id}` 假端点改 501 + `/api/shisi/status` 纳入认证使 shisi 域 **31/31** 全覆盖）
+> 由 维护者 手动维护 | 最后核实: 2026-09-19（v3.8.2 增量：**09-19** 全仓逐一扫描·文档对齐批次——16 处 include_router + setup_shisi 口径修正（§1.1 旧写"17 处"）、§4.7 默认 fallback 链修正为 **4 家**（DeepSeek 注册可用但不入默认链）、§4.9 前端口径拉齐实测（页面 17 / API 模块 13 / store 3 / vitest 87·15 文件，补 IntroPage=SP-11 介绍页）；**09-18** v3.8 增量：全仓性能与正确性扫描——项目根路径锚定 + 12 处 CWD 缺陷 + 并发/缓存/热路径修复 + 移动端适配 + **端点口径系统性纠错 208→204**；双角色库收敛为 `config/characters` 唯一权威真源（7 处代码改指向 + `sync_character_files.py` 删除）、CI 门禁十四连红根治（FF-0006 `client.ts` 函数抽离 + ruff F401 清理）；测试口径见 §1.1 与 §13；**09-18 晚**：`shisi/api/v2/` 死模块（6 文件）删除 → `shisi/api/` 现 **11 文件 / 31 端点**（端点数与合计 204 不变，因 v2 从未挂载）+ `DELETE /api/shisi/memory/{id}` 假端点改 501 + `/api/shisi/status` 纳入认证使 shisi 域 **31/31** 全覆盖）
 > ✅ 路由/文件/模块/测试数已通过 create_api_app 实扫 + Glob + pytest + vitest 实时核实（2026-08-28）。
 > ✅ 图数据库已于 2026-08-28 由 codebase-memory 图谱工具 v0.10.8 重新索引（artifact.json schema v2: **7706 节点 / 32367 边**，commit c32af54），历史矛盾（543277c 声称的 6771 节点未持久化）就此消案。
 
@@ -12,7 +12,7 @@
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| API 业务端点（`APIRoute` 实扫） | **204 端点 / 171 条唯一路径**（95 GET / 74 POST / 20 DELETE / 15 PUT） / **17 处 include_router** | 2026-09-17 内省 `create_api_app()`：`len([r for r in app.routes if isinstance(r, APIRoute)])`。⚠️ 旧口径"208 端点"实为 `len(app.routes)`，含 4 条框架路由（`/openapi.json`、`/docs`、`/docs/oauth2-redirect`、`/redoc`），非业务端点 |
+| API 业务端点（`APIRoute` 实扫） | **204 端点 / 171 条唯一路径**（95 GET / 74 POST / 20 DELETE / 15 PUT） / **16 处 include_router + setup_shisi**（2026-09-19 复测，与 09-17 一致） | 2026-09-19 内省 `create_api_app()`：`len([r for r in app.routes if isinstance(r, APIRoute)])`。⚠️ 旧口径"208 端点"实为 `len(app.routes)`，含 4 条框架路由（`/openapi.json`、`/docs`、`/docs/oauth2-redirect`、`/redoc`），非业务端点；⚠️ §14 旧写"17 include_router"系把 shisi setup 计入，`api/app_factory.py` 内 `include_router` 调用实测 **16 处**，shisi 31 端点经 `setup_shisi(app)` 装配 |
 | main.py 体量 | **约 16 KB / 415 行** | 2026-08-28 两轮瘦身：克隆管线移除 + run_console_chat 迁出 `orchestrator/console_chat.py`（命令分派拆分，复杂度 24 单体消解） |
 | 前端页面 | **17 个** | Glob `frontend/src/pages/*.tsx`（另有 `StorylinePage` 为 App.tsx 内联包装组件） |
 | 前端 API 模块 | **13 个** | Glob `frontend/src/api/*.ts`（09-18 CI 门禁根治新增 `emotion.ts` / `normalize.ts`，原 11） |
@@ -380,7 +380,7 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 | 模块 | 职责 |
 |------|------|
 | `llm_gateway.py` | LLMGatewayV2，自动 fallback 链 |
-| `multi_provider_gateway.py` | 多供应商网关（自动 fallback: **Agnes → 智谱AI → 讯飞星火 → 百度千帆 → DeepSeek**）+ 用户级 gateway 缓存 |
+| `multi_provider_gateway.py` | 多供应商网关（默认 fallback 链 **Agnes → 智谱AI → 讯飞星火 → 百度千帆**，`DEFAULT_FALLBACK_CHAIN` 与 `config/system.yaml fallback_chain` 一致；DeepSeek 已注册可用但**不在默认链**）+ 用户级 gateway 缓存 |
 | `openai_compatible_provider.py` | OpenAI 兼容供应商（被 agnes/zhipu/xunfei/baidu 共用） |
 | `prompt_template_manager.py` | PromptTemplateMgr（**54 fan-in**） |
 | `__init__.py` | **`invalidate_user_llm(user_id)`**（新增 2026-07-28）— 清除用户级 gateway 缓存，下次对话按新配置重建 |
@@ -398,6 +398,8 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 > ⚠️ **sensenova 已于 2026-09-18 移除**（原 fallback 链首选）。原因：生产 `.env`
 > **从未配置 `SENSENOVA_API_KEY`**，导致**每次对话都先白跑一轮失败尝试**才回退到
 > zhipu —— 这是响应慢的固定来源。现首选为 **agnes**（`apihub.agnes-ai.com/v1`）。
+> 默认链共 4 家；**deepseek** 为第 5 个已注册供应商，可经 `get_llm(provider="deepseek")`
+> 或用户级 llm_config 单独使用，不入 auto 默认链。
 
 **多用户 API Key 隔离（2026-07-28 新增）**：
 
@@ -424,19 +426,20 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 
 ### 4.9 前端（React 19 管理控制台）
 
-- **16 个页面文件**（全部挂载路由；幽灵层三页与 DemoPage 已于 08 月删除；2026-09-01 新增 PsychProfilePage（T2，见 §13 T1-T5 批次））：
-  - 用户/认证：LoginPage, AdminUsersPage
+- **17 个页面文件**（全部挂载路由；幽灵层三页与 DemoPage 已于 08 月删除；2026-09-01 新增 PsychProfilePage（T2，见 §13 T1-T5 批次）；IntroPage=SP-11 产品介绍页（f4aa51c，公开静态门面接替已删 Demo，根路径未登录重定向 `/intro`））：
+  - 公开：IntroPage（`/intro`）, LoginPage, PsychProfilePage（`/psych`，**09-18 起包 AuthGuard 需登录**，修未登录 3×401）
+  - 用户/认证：AdminUsersPage
   - 角色管理：RolesPage, CreateRole, RoleSettings
   - 设置：SettingsLLM, SettingsSecurity, SettingsLogs, SettingsVoice
   - 工具/状态：ToolsDashboard, StatusCenter
   - 微信集成：WeChatPage
   - LLM 供应商管理：AdminProvidersPage（admin 角色）
-  - 其他：NotFoundPage, SystemSettingsLayout
-- **12 个 API 模块**（demo.ts、users.ts 已删除）：
-  - admin, auth, characters, chat, client, clone, llmProviders, mimo, queryClient, system, training, wechat
-- 4 个 Zustand store（authStore, chatStore, errorStore, characterBuilderStore）
+  - 其他：NotFoundPage, SystemSettingsLayout（设置域布局）
+- **13 个 API 模块**（demo.ts、users.ts、chat.ts 已删除；09-18 CI 门禁根治新增 `emotion.ts` / `normalize.ts`）：
+  - admin, auth, characters, client, clone, emotion, llmProviders, mimo, normalize, queryClient, system, training, wechat
+- 3 个 Zustand store（authStore, errorStore, characterBuilderStore；chatStore 已于 09-17 死代码清洗删除）
 - React Query hooks
-- 59 个 Vitest 测试用例（across 11 files,全部通过 2026-08-28）
+- 87 个 Vitest 测试用例（across 15 files，全部通过 2026-09-19）
 - Playwright E2E 测试配置
 
 **页面说明**：
@@ -448,7 +451,8 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 | **SettingsVoice** | `SettingsVoice.tsx` | 语音设置页 |
 | **WeChatPage**（2026-07-28 简化） | `WeChatPage.tsx` | 移除冗余 StatsBar 与绑定列表表格，仅保留 LiveStatusBanner + QrCodeConnectionModal，避免数据为 0 的误导 |
 | **SettingsLLM**（2026-07-28 修复 403） | `SettingsLLM.tsx` | 改用 `/api/user/llm-config`（用户级配置端点）替代 `/api/config`，普通用户不再 403 |
-| **PsychProfilePage**（2026-09-01 新增） | `PsychProfilePage.tsx` | `/psych` 公开路由：心理画像展示（后端 /api/psych/* 五端点就绪后的消费层，差异化卖点页） |
+| **PsychProfilePage**（2026-09-01 新增） | `PsychProfilePage.tsx` | `/psych` 路由：心理画像展示（后端 /api/psych/* 五端点就绪后的消费层，差异化卖点页）。**09-18 起包 AuthGuard 需登录**（修未登录 3×401 + 白屏闪烁） |
+| **IntroPage**（SP-11 产品介绍页，f4aa51c） | `IntroPage.tsx` | `/intro` 公开静态门面：产品定位/玩法/邀请入口，接替已删 Demo 的访客转化职责；根路径 `RootRedirect` 未登录时重定向至此 |
 | **CreateRole**（2026-08-28 智能体代跑改造） | `CreateRole.tsx` | 克隆好友 tab 三步流：①准备 AI 智能体（推荐 OpenCode，免费模型充足）②一键复制「智能体任务书」（内嵌 `constants/cloneAgentGuide.ts`，指向 wechat-decrypt 仓库 AGENTS.md 冷启动决策树）③仅上传 JSON 分析；移除旧"三工具卡片+本地命令教学" |
 | **RoleSettings** | `RoleSettings.tsx` | DataTab 新增"网络增强"按钮，调用 `/api/characters/{id}/enrich`；`RoleSettingsConstants.tsx` 中 `ENGINE_OPTIONS` 简化为仅保留 `mimo-tts` |
 
@@ -617,7 +621,7 @@ tools/
 | 数据库 | SQLAlchemy 2.0 + aiosqlite + ChromaDB |
 | 向量 | sentence-transformers + rank-bm25 |
 | LLM | httpx + tenacity（自动 fallback） |
-| LLM 供应商 | **Agnes (agnes-3.0-flash，首选)**, 智谱AI (glm-4-flash), 讯飞星火 (spark-lite), 百度千帆 (ernie-speed-128k), DeepSeek |
+| LLM 供应商 | **Agnes (agnes-3.0-flash，首选)**, 智谱AI (glm-4-flash), 讯飞星火 (spark-lite), 百度千帆 (ernie-speed-128k)——默认链 4 家；DeepSeek (deepseek-chat) 注册可用不入默认链 |
 | 语音 | edge-tts + FFmpeg（可选） |
 | 缓存 | Redis（可选） |
 | 可观测 | prometheus-client + OpenTelemetry + Sentry SDK |
@@ -677,6 +681,7 @@ tools/
 
 | 日期 | 提交 | 变更摘要 |
 |------|------|---------|
+| 2026-09-19 (全仓扫描·文档对齐) | working tree | **v3.8.2 全仓逐一扫描，文档拉齐代码实况（代码领先、文档落后批次，零代码变更）**：内省复核端点 **204/171** 不变、`include_router` 实测 **16 处 + setup_shisi**（§1.1/§14 旧写"17 处"修正）；默认 fallback 链确认 **agnes→zhipu→xunfei→baidu 4 家**（§4.7 旧写含 DeepSeek 修正；DeepSeek 注册可用不入链）；§4.9 前端口径拉齐实测——页面 **17**（§4.9 旧写 16 且清单漏 IntroPage=SP-11 产品介绍页 f4aa51c）、API 模块 **13**（旧列表残留已删 chat.ts、漏 emotion/normalize）、store **3**（旧写 4 含已删 chatStore）、vitest **87/15 文件**（旧写 59/11）；`/psych` 09-18 起包 AuthGuard。同步刷新 README/AGENTS §0/docs 入口/CODEMAPS 六件/FUNCTION_INVENTORY（PSYCH-6 需登录 + 补 INTRO 条目）/DECISION_LEDGER（09-18/19 体验批次行 + SP-1 已执行）/VISION（链·页面·端点·测试·SP-1/SP-11）/P1_BACKLOG。验证：pytest **1060 passed/4 skipped**（178.27s）+ vitest **87/87** + tsc **0 错** + `--collect-only` 1064 |
 | 2026-09-18 (死代码与假端点清理) | 6fdc769 / 9bdf9d7 | **① 删除 `shisi/api/v2/` 全 6 文件**——`v2_router` 全仓零 `include_router` 挂载、零代码 import（grep 取证），推翻 `DELETION_LOG` 早先「保留待将来集成」裁决并就地加 ⚠️ 标注；同步清除 4 处文档引用（AGENTS Owner Map / 本文件分层表·Mermaid·端点数表·注 / CODEMAPS DATABASE·MODULES）。**② `DELETE /api/shisi/memory/{memory_id}` 假端点改 501**——旧实现回「已移入回收站（30天保留期）」却**不做任何事**（谎报成功比显式失败更危险）；`memory_recycle_bin` 表已存在于 `shisi/migrations.py` 而删除链路从未落地；**保留未确认时的 400 前置校验**以免越 `tests/**` 的 owner 边界。**③ `unfavorite_memory` 的 `fav_id` 修复**——路径参数此前被完全忽略（实调 `unfavorite(character_id, memory_id)`，后者两参数有空默认值可被无参省略调用），改为唯一判据 + 新增 `FavoriteManager.unfavorite_by_id`。**④ `/api/shisi/status` 纳入认证** → shisi 域 **31/31** 全覆盖（该端点暴露 12 个内部模块初始化状态，属控制面；探活职责由刻意豁免认证的 `/api/health`·`/api/ready` 承担）。验证：ruff 0.16.8 全绿 + 1060 passed/4 skipped 零回归 + `--collect-only` 1064 收集（无 import 断裂）+ 生产 hash 抽验 3/3 + F1 告警生产实证 |
 | 2026-09-18 (删除 directus 冗余反代) | b7b2ff9 | **删除 `location /directus/` 反代段**（含 `= /directus` 的 301，共 12 行；线上已实施）。原配置指向 `127.0.0.1:18083`，该端口**从未有服务**（端口扫描 18080-18084 仅 18082 通）→ 持续 502。**归属彻查**：directus 属**校友平台**（docker 栈 `alumni_prod_*`，本项目零关系），其真实入口是 127.0.0.1:**18082**（原配置写错一位数字），且校友平台已有**独立且公网可达**的完整入口 **:8080**（其容器内 nginx 自身就把 directus 挂在 `/directus/` 下，实测 `/directus/admin` 200）→ 本条属「在两个公网端口重复暴露同一后台」，保留只有坏处。**删除前置核查**：参赛材料给评委的 Demo 地址是 `http://139.199.199.174`（根路径），全部材料内 `/directus` 引用 **0** 处。**实测结果**：`:80/directus/` 由 502 变为 **200**（落到 `location /` 的 `try_files ... /index.html` 兜底，**非**预判的 404 —— 预判有误，已在 LOG 如实记录）；本项目 :80 与校友平台 :8080 全路径均 200；`listen`/`server_name` **未动**。另**重建 `alumni_prod-nginx-1` 容器**：其 bind mount 源 `/opt/alumni-current-82a4c1a/deploy/nginx.conf` 已被部署版本切换删除、仅靠 inode 存活 2 个月，重建后挂载源切至现行 `alumni-current-53396f0`，解除「容器重启即挂」隐患（端口映射与 healthz 不变）|
 | 2026-09-18 (nginx 传输层整改) | 410cd99 | **补齐 gzip + 静态强缓存**（线上已实施并实测）。**根因**：`deploy/nginx-ai-girlfriend.conf` 内的 gzip / `Cache-Control` / 安全头**全部写在 `listen 443 ssl http2` 块内**，而线上从未启用 HTTPS（无域名 → certbot 无法为裸 IP 签发证书）→ **一切与 TLS 无关的优化全部空转**：首屏 8 资源裸传 671KB、每次访问重新协商缓存。**实测收益**：首屏传输 **675,185 B → 204,802 B（↓70%）**（`vendor.js` 223,259→70,520 / `index.js` 187,244→57,154 / `index.css` 78,463→13,289）、冷启动 wall-clock **2437ms → 1421ms（↓42%）**、TTFB 80ms。配置要点：`gzip_types` **不可**含 `text/html`（恒被压缩，重复列入触发 duplicate 告警）；`/assets/` → `immutable` 1 年；`index.html` → `no-cache`（否则旧 HTML 引用已删 hash 资源致白屏）；`sub_filter_types` 去重复声明（**已用可逆探针实验证实 `text/html` 仍由隐式默认值提供，未破坏 `/fastrun` 路径重写**）。**HTTP/2 未启用系客观前提缺失**：certbot 无法为裸 IP 签证书 + 浏览器不支持明文 h2c → 需先绑定域名（升级步骤与安全头已写入模板末尾，HSTS 明确标注禁止在纯 HTTP 下开启） |

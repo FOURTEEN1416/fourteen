@@ -25,6 +25,12 @@
 
 ## A. 公开域（无需登录）
 
+### INTRO — 产品介绍页 `/intro`（IntroPage.tsx, 308 行，SP-11 f4aa51c）
+| 编号 | 功能点 |
+|------|--------|
+| INTRO-1 | 公开静态门面：产品定位/玩法/邀请入口，接替已删 Demo 的访客转化职责 |
+| INTRO-2 | 根路径分流（App.tsx RootRedirect）：已登录→`/wechat`，未登录→`/intro` |
+
 ### LOGIN — 登录页 `/login`（LoginPage.tsx, 222 行）
 | 编号 | 功能点（代码证据） |
 |------|------------------|
@@ -74,7 +80,7 @@
 | MESSAGE-2 | 主动消息开关：暂停/恢复调度（POST /proactive/pause，暂停仅停自动触发不影响手动） |
 | MESSAGE-3 | 手动控制：立即发送一条主动消息（POST /proactive/send 绕过频率、计入统计）+ 最近 5 条发送记录。**09-17：投递链修复——调度器线程内 asyncio.run 直投（旧 get_event_loop 必炸致 64 触发 0 送达）+ 发送目标改绑定 wxid 定向 + MultiProviderGateway 补 chat_sync（LLM 生成此前静默回落模板）** |
 | MESSAGE-4 | 统计卡真数据：今日主动/最后发送（08-28 修复：旧 history 读不存在的 `_sent_messages` 属性，一直返回空） |
-| DATA-1 | 数据 tab：概览统计（消息/记忆条数）+ 网络人设增强按钮（/api/characters/{id}/enrich）+ **知识库真实管理区**（SP-4 结案 09-01：KnowledgePreview 挂载——真实 stats + 检索测试，替换假 RAG 三卡与占位横幅）+ **定期采集开关（09-17 新增：Toggle+间隔输入，+/api/knowledge/collect-config GET/POST；scheduler vault_collect 周期任务对 shisi 角色库全量重建知识索引；默认关）** |
+| DATA-1 | 数据 tab：概览统计（消息/记忆条数）+ 网络人设增强按钮（/api/characters/{id}/enrich）+ **知识库真实管理区**（SP-4 结案 09-01：KnowledgePreview 挂载——真实 stats + 检索测试，替换假 RAG 三卡与占位横幅；**09-19 检索增强：BM25 查询扩展双路互补 + 注入 top_k 3→8 + 索引由 scripts/rebuild_knowledge_index.py 从权威真源重建**）+ **定期采集开关（09-17 新增：Toggle+间隔输入，+/api/knowledge/collect-config GET/POST；scheduler vault_collect 周期任务对 shisi 角色库全量重建知识索引；默认关）** |
 | STICKERS-1 | 表情包 tab：常用表情网格展示 + 自定义贴图上传占位（**上传保存为未立项功能，非缺陷**——后端无贴图存储 API，shisi/sticker 仅推荐/安全检查库；立项需用户裁决） |
 | TIMELINE-1 | 剧情时间线 tab（内嵌 StorylineEditor） |
 
@@ -98,7 +104,7 @@
 | PSYCH-3 | 心理健康摘要（psychMentalHealth → GET /api/psych/mental-health，非诊断声明+热线） |
 | PSYCH-4 | LIWC 维度（psychLiwc → GET /api/psych/liwc） |
 | PSYCH-5 | 画像重置（psychReset → DELETE /api/psych/profile，需确认） |
-| PSYCH-6 | 侧栏导航入口「心理画像」（navGroups.tsx:36，公开路由 `/psych`） |
+| PSYCH-6 | 侧栏导航入口「心理画像」（navGroups.tsx:36）。**09-18 起需登录**：路由包 AuthGuard（2957f01，修未登录无条件调 usePsychProfile 等打 3×401 + 白屏闪烁） |
 
 ### ACH — 角色成就 `/api/characters/{id}/achievements`（ADR-0014 第一阶段，2026-09-01）
 | 编号 | 功能点 |
@@ -179,7 +185,7 @@
 | GLOBAL-1 | **遮罩式鼠标动效** `components/common/CustomCursor.tsx` | 三层结构：光晕遮罩（200→280px，滞后跟随 lerp 0.09）+ 内核（12→38px，紧跟 lerp 0.38）+ 拖尾粒子（9px × **16 节点对象池**，单颗寿命约 0.64s，实测停止移动后 601ms 消散）。品牌色海盐蓝 `#7DD3FC`（`--color-accent-200`），`data-hover="yellow\|blue\|mint"` 切暖黄/薄荷青变体；hover 判定覆盖 `a/button/[role=button]/input/select/textarea/label/summary`。**硬约束（改前必读）**：位移走 `translate3d`（禁 `left/top`）、对象池复用节点（禁逐帧增删 DOM）、单 rAF 驱动、**所有按帧系数须经 `k = dt/16.67` 归一化**、停帧条件为「静止超时 **且** 无存活粒子」。2026-09-18 重构前为「圆环 + 圆点」双层（`c755090`） |
 | GLOBAL-2 | **背景粒子画布** `components/common/ParticleCanvas.tsx` | 全屏 canvas，30fps 节流（8–18 粒子 + 距离连线），`visibilitychange` 暂停、resize 防抖、`prefers-reduced-motion` 下降级为 0 粒子。⚠️ **性能注记**：与 `backdrop-filter` 毛玻璃叠加时为**卡顿主因**（隔离实测 24.1fps / 86.1% 卡顿），且降模糊半径（12→6px）实测**无效**；解耦方案待裁决 |
 
-> 两者均**不挂载**于公开路由（`/intro` `/login` `/psych`），仅在登录后的控制台生效。
+> 两者均仅挂载于 `ProtectedLayout`（登录后的控制台）；`/intro` `/login` `/psych` 不含此组件（`/psych` 自 09-18 起需登录）。
 > 性能诊断方法论见技能 `perf-isolation-lab`；注意无头浏览器走软件光栅化，性能数值不可信（同场景无头 24fps vs 真实 GPU 240fps）。
 
 ---
@@ -195,4 +201,4 @@
 | ~~GAP-4~~ | ✅ 结案（09-01）：语音保存接线 + 知识库真实管理区（G-06/G-07 消案） | 09-01 批次 | 已实现 |
 | ~~GAP-5~~ | ✅ 全结案（09-01 晚）：成就落地 + GET /api/emotion/distribution 新端点 + 趋势修复（旧实现读不存在属性恒空，EmotionEngine 补环形历史） | 05-29 差距分析 + 09-01 批次 | 已实现 |
 
-> 本清单由代码读出（App.tsx 路由 × 15 页面组件 × api/*.ts 消费），历史意图对照 `docs/history/`。条目变更随代码同步。
+> 本清单由代码读出（App.tsx 路由 × 17 页面组件 × api/*.ts 消费；2026-09-19 全仓扫描核对），历史意图对照 `docs/history/`。条目变更随代码同步。

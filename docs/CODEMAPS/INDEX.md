@@ -1,10 +1,10 @@
 # 代码地图索引
 
-> **⚠️ 数字漂移声明**（2026-08-26 治理标注）：本文「21 注册路由」口径与实测不符——实际为 **16 挂载 + 3 孤儿页面**（UsersPage/UserWorkspace/BindingDetailPage）。权威数字以 `CODE_GRAPH.md` 为准，详见 `docs/history/INDEX.md` 漂移登记簿。
+> **✅ 2026-09-19 全量刷新**：目录结构与关键指标已按代码实况重写（`ls`/`find` 实测）；历史漂移声明留档见 `docs/history/INDEX.md`。权威数字以 `CODE_GRAPH.md` v3.8.2 为准。
 
-**最近更新:** 2026-08-01
+**最近更新:** 2026-09-19
 **项目版本:** 3.1.0
-**项目规模:** ~356 Python 文件 + ~106 TS/TSX 文件 | 当前分支: `main`
+**项目规模:** ~356 Python 文件 + ~110 TS/TSX 文件 | 当前分支: `main`
 **架构框架:** FastAPI (后端) + React/Vite (前端) + SQLite/ChromaDB (数据)
 
 ---
@@ -30,52 +30,53 @@
 | **前端** | React 19 + Vite 8 + TypeScript 6 + Tailwind CSS 4 | `:5173` |
 | **后端** | Python ≥3.10 + FastAPI + Uvicorn | `:8000` |
 | **数据库** | SQLite (主, aiosqlite) + ChromaDB (向量) | `data/users.db` |
-| **Node** | D:\node.exe v24.14 | 前端构建 |
-| **Bun** | v1.3.12 | 前端包管理/测试 |
 
-### 项目目录结构
+### 项目目录结构（2026-09-19 实测）
 
 ```
 unique-you/
-├── api/                    # FastAPI 路由层 (36 文件)
-├── shisi/                  # 核心业务逻辑 (96 文件)
-├── frontend/               # React 前端 SPA
-├── config/                 # YAML/JSON 配置
-├── security/               # 安全模块 (5 文件)
-├── llm_provider/           # LLM 供应商接入 (6 文件)
-├── voice/                  # TTS 语音合成 (11 文件)
-├── persona_extractor/      # 人格提取 (~14 文件)
-├── tools/                  # 工具系统 (10 文件, 12 内置工具)
-├── orchestrator/           # 编排包 (optimized_orchestrator.py + init/stream mixin, 5 文件)
+├── api/                    # FastAPI 路由层 (44 py 文件：app_factory/run_api/21 routers/
+│                           #   achievement_engine/database/auth/auth_jwt/deps/
+#                           #   health_routes/main_routes/qrcode_store/websocket_server/state/...)
+├── shisi/                  # DDD 核心域 (115 py 文件，v2 死模块删除后口径)
+├── my_character/           # 情感引擎 (21 py 文件)
+├── frontend/               # React 前端 SPA (17 pages / 13 api 模块 / 3 store)
+├── orchestrator/           # 编排包 (7 文件：主类+init/stream mixin+session_locks+voice_detector+console_chat)
+├── persona_extractor/      # 人格提取 (12 模块)
+├── tools/                  # 工具系统 (10 py 文件, 12 内置工具)
+├── observability/          # 可观测性 (9 py 文件)
+├── security/               # 安全模块 (4 模块 + __init__)
+├── llm_provider/           # LLM 供应商接入 (5 py 文件)
+├── voice/                  # MiMo TTS 语音合成 (5 模块 + __init__)
 ├── cache/                  # 缓存层 (LLM 缓存 + Redis)
 ├── character_card/         # 角色卡 (6 文件)
-├── clone_training/         # 克隆训练 (6 文件)
+├── clone_training/         # 克隆训练 (4 文件：清洗/提取/风格分析)
 ├── context/                # 上下文 (世界书)
 ├── memory_ext/             # 记忆扩展 (mem0 后端)
 ├── proactive/              # 主动消息 (5 文件)
-├── observability/          # 可观测性 (9 文件)
+├── multimodal/             # 多模态 (image_attachment + multimodal_processor)
+├── wechat_direct/          # 微信直连 (wechat_connector)
 ├── plugins/                # 插件系统 (2 文件)
-├── multimodal/             # 多模态 (2 文件)
-├── wechat_direct/          # 微信直连 (2 文件)
-├── weclone_adapter/        # 微信克隆适配 (3 文件)
-├── my_character/           # 我的角色 (自定义角色)
-├── tests/                  # 测试 (1025 Python 测试通过)
+├── config/                 # YAML/JSON 配置 + config/characters/ 角色卡库（25 张，唯一真源）
+├── tests/                  # 测试 (1060 Python 通过 + 4 跳过 / 87 前端)
 └── docs/                   # 文档
     ├── CODEMAPS/           # ← 本目录
-    ├── adr/                # 架构决策记录
+    ├── adr/                # 架构决策记录 (11 篇)
     ├── architecture/       # 架构文档
     ├── reports/            # 报告文档
     └── designs/            # 设计文档
 ```
 
-### 关键指标
+> `weclone_adapter/` 已于 08-28 删除（克隆收敛为本地提取+JSON 上传，DECISION_LEDGER 08-28 行）。
+
+### 关键指标（2026-09-19 实测）
 
 | 指标 | 值 |
 |------|-----|
-| API 端点 | 198 (16 include_router, create_api_app 实扫 2026-08-28, demo + training/extract 已删) |
-| 前端页面 | 15 页面文件（全部挂载，幽灵层+Demo 已删） |
-| 测试用例 | 1030 Python 测试 + 59 前端测试 = 1089 (2026-08-28 实跑全绿) |
-| 活跃 ADR | 10 |
+| API 端点 | **204 业务端点 / 171 唯一路径**（16 include_router + setup_shisi，`create_api_app` 内省实扫；⚠️ `len(app.routes)=208` 含 4 条框架路由） |
+| 前端页面 | 17 页面文件（全部挂载；幽灵层三页+DemoPage 已删） |
+| 测试用例 | **1147 = 1060 Python 通过（4 跳过）+ 87 前端通过**（2026-09-19 实跑全绿） |
+| 活跃 ADR | 11（0001–0007 + 0011–0014；0008–0010 空缺未使用） |
 | Fitness Functions | 17 (12 CI + 5 手动) |
 | 总线因子 | 1 (唯一开发者: 默默) |
 
@@ -107,6 +108,6 @@ npm run dev
 
 ## 相关文档
 
-- [ADR 目录](../adr/) — 架构决策记录 (10 篇)
+- [ADR 目录](../adr/) — 架构决策记录 (11 篇)
 - [架构文档](../architecture/) — 设计原则与知识图谱
 - [报告文档](../reports/) — 研究与评审报告

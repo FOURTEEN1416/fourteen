@@ -1,8 +1,8 @@
 # 架构地图
 
-**最近更新:** 2026-09-18
+**最近更新:** 2026-09-19
 **演进阶段:** Phase 14 (投产准备) → Phase 15 (品牌清洗) → Phase 16 (P0 全面修复 + CI 加固) → Phase 17 (全仓性能/正确性扫描)
-**数据口径:** 端点与模块数均为 2026-09-17 实测（`create_api_app()` 内省 + 文件扫描），非文档估算值
+**数据口径:** 端点与模块数均为 2026-09-19 实测（`create_api_app()` 内省 + 文件扫描），非文档估算值
 
 ---
 
@@ -37,7 +37,7 @@
 │                                                                  │
 │  ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐  │
 │  │ shisi/   │ │ LLM     │ │ 安全     │ │shisi/    │ │shisi/ │  │
-│  │(121 文件) │ │ Provider│ │ (5 文件)  │ │knowledge │ │memory │  │
+│  │(115 文件) │ │ Provider│ │ (5 文件)  │ │knowledge │ │memory │  │
 │  └──────────┘ └─────────┘ └──────────┘ └──────────┘ └───────┘  │
 │  ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐  │
 │  │ TTS 语音 │ │ 人格提取 │ │ 工具系统  │ │ 编排器    │ │ 缓存  │  │
@@ -61,7 +61,7 @@
 ## 编排器架构
 
 > **注:** 编排逻辑位于 `orchestrator/` 包，包含 7 个文件（含 `__init__.py`）：
-> - `optimized_orchestrator.py` (1013行) — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / `_prepare_context` / `process_message` / `_after_process` / `health_check`
+> - `optimized_orchestrator.py` (1020行) — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / `_prepare_context` / `process_message` / `_after_process` / `health_check`
 > - `_init_mixin.py` (510行) — `_InitPhasesMixin`：`initialize` 调用 10 个 `_init_*` 阶段；其中 `_init_memory_and_rag` 再级联 `_init_ase_and_scheduler` / `_init_tools` / `_init_rag`，共 13 个阶段方法
 > - `_stream_mixin.py` (373行) — `_StreamPipelineMixin`：`process_message_stream` SSE 真流式/伪流式降级
 > - `session_locks.py` — 会话锁管理（`SessionLockManager`）
@@ -84,24 +84,26 @@
 ### 用户请求流 (聊天)
 
 ```
-用户消息
-  → 前端 ChatInput → chat.ts API → POST /api/chat (Vite proxy)
-    → FastAPI api/routers/chat_routes.py
-      → Orchestrator (orchestrator/optimized_orchestrator.py, 12 级流水线)
+微信用户消息
+  → wechat_direct/wechat_connector.py（扫码登录 + 收发，指数退避重连）
+    → orchestrator (optimized_orchestrator.py, process_message 流水线)
         1. 安全过滤器 (ContentSafety)
         2. PII 匿名化 (PIIAnonymizer)
         3. 提示注入检测 (PromptInjection)
         4. 情感引擎 (EmotionEngine)
-        5. LLM 路由 (MultiProviderGateway)
+        5. LLM 路由 (MultiProviderGateway，默认链 agnes→zhipu→xunfei→baidu)
         6. 记忆提取 (MemoryExtractor)
         7. 工具调度 (ToolDispatcher)
-        8. RAG 检索
+        8. RAG 检索（角色知识库 BM25，top_k=8 + 查询扩展）
         9. 响应生成
         10. 人格注入
         11. 消息记录
         12. 响应格式化
-  → SSE/流式返回 → 前端 MessageBubble 渲染
+  → 回复 (+ 可选 MiMo TTS 语音) → 微信发出
 ```
+
+> **注**：聊天主链路在微信侧。控制台前端无聊天页（chatStore/api/chat.ts 已于
+> 09-17 死代码清洗删除）；`/api/chat/*` 11 端点保留供 API 消费。
 
 ### 管理后台流
 
@@ -171,11 +173,11 @@
 ```
 全局 (global)                     角色 (role)
 ┌────────────┐                   ┌───────────────────┐
-│ /wechat    │                   │ /roles            │
-│ /roles     │                   │ /roles/create     │
+│ /intro     │                   │ /roles            │
+│ /wechat    │                   │ /roles/create     │
 │ /settings  │                   │ /roles/:roleId/   │
-│ /login     │                   │   settings        │
-│ /demo      │                   │ /roles/:roleId/   │
+│ /login     │                   │   settings[/:tab] │
+│ /psych     │                   │ /roles/:roleId/   │
 │ /admin/*   │                   │   status          │
 └────────────┘                   │ /roles/:roleId/   │
                                  │   storyline       │
@@ -183,7 +185,8 @@
 ```
 
 > **注:** 路由已从 `/users/:userId/roles/:roleId/...` 重构为 `/roles/:roleId/...`，
-> 移除了用户层级嵌套，角色直接挂在根路径下。
+> 移除了用户层级嵌套，角色直接挂在根路径下。`/demo` 已删（08-28 D1 裁决），
+> 公开门面为 `/intro`（SP-11 产品介绍页）；`/` 按登录态分流 `/wechat` 或 `/intro`。
 
 ---
 

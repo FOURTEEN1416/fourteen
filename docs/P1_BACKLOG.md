@@ -1,7 +1,8 @@
 # P1 Backlog - 唯一的你
 
 **Created**: 2026-06-03
-**Last Updated**: 2026-09-17（三连修批次核对：本清单未决项 FF-0007/P1-9~11/OBS-2/OBS-3 均不受本轮影响，无新增未决项；`scripts/window_board.ps1` 仍缺待裁决）
+**Last Updated**: 2026-09-19（全仓扫描核对：本清单未决项 FF-0007/P1-9~11/OBS-2/OBS-3 均不受 09-18/19 批次影响，无新增未决项；09-18 nginx 整改落地 gzip/强缓存但 OBS-2 HTTPS 仍待域名）
+**Previous**: 2026-09-17（三连修批次核对：本清单未决项 FF-0007/P1-9~11/OBS-2/OBS-3 均不受本轮影响，无新增未决项；`scripts/window_board.ps1` 仍缺待裁决）
 **Previous**: 2026-09-15（复赛冲刺核对：pyrightconfig.json 尾逗号已修 `66c4e3e`）
 **Previous**: 2026-08-24 (全面核查后重写 — 逐项实测验证)
 **Status**: Active (仅保留真实未决项)

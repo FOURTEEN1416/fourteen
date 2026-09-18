@@ -1515,3 +1515,39 @@
 `listen 80` / `server_name 139.199.199.174` **未动**（网评阶段冻结约束遵守）；仓库模板同步为 `b7b2ff9` 并在删除处**保留完整依据注释**，避免后续会话误判为漏配而加回。
 
 
+
+## 2026-09-19（六十六）— 全仓扫描·文档对齐批次（代码领先、文档落后，零代码变更）
+
+**触发**：用户点名「sliver-vibe-coding 全仓扫描，逐一历遍，更新反映代码现状的文档」，并纠正口径「是文档落后需要进行更新！现在是代码领先」——以代码实况为真源，文档向代码看齐。
+
+**方法**：真源文档全量盘点 → 机器探针实测（`create_api_app` 内省 / `ls`/`find` 文件计数 / git log）→ 逐一对照找漂移 → 增量刷新漂移段落（不从零重建）。全仓 15 个 Owner 模块目录逐一历遍。
+
+**探针结果（2026-09-19 实测）**：
+- 端点：**204 业务端点 / 171 唯一路径**不变（95 GET/74 POST/20 DELETE/15 PUT）；`include_router` **16 处** + `setup_shisi`（旧写"17 处"系把 shisi setup 误计入）
+- 默认 fallback 链：`DEFAULT_FALLBACK_CHAIN = ["agnes","zhipu","xunfei","baidu"]` **4 家**；DeepSeek 注册可用不入链（旧文档写 5 家含 DeepSeek）
+- 前端：17 页面（IntroPage=SP-11 产品介绍页 f4aa51c 在册）/ 13 API 模块 / 3 store / vitest 87 用例 15 文件
+- 模块文件数：shisi **115**（=121−6 v2 删除）/ api **44** / my_character 21 / orchestrator 7 / persona_extractor 12 模块 / voice 5 模块（4 旧 provider 已删）/ clone_training 4（wechat_decrypt_source 已删）/ weclone_adapter 不存在
+- 测试新鲜验证：pytest **1060 passed / 4 skipped**（178.27s，系统 Python 3.12）+ vitest **87/87**（15 文件）+ `tsc --noEmit` **0 错** + `--collect-only` 1064
+- 知识索引：55 文件 / 2771 块 = 25 卡索引 + ~29 persona 增强索引 + vault + 1 旧 id 残留（非孤儿误报）
+- `/psych`：09-18 起（2957f01）路由包 AuthGuard **需登录**（修未登录 3×401）
+
+**文档修订（15 份）**：
+1. `CODE_GRAPH.md` **v3.8.1→v3.8.2**：§1.1 include_router 口径修正；§4.7 默认链 4 家 + DeepSeek 定位；§4.9 前端口径拉齐（16→17 页 + 补 IntroPage/PsychProfilePage 行、12→13 API 模块列表去 chat.ts 补 emotion/normalize、4→3 store、59/11→87/15 vitest）；§10 LLM 行；§13 加 v3.8.2 行
+2. `README.md`：项目结构 api 模块 11→13、shisi 121→115
+3. `AGENTS.md` **v1.12**：§0 页面 19→17、语音行去 Edge-TTS 残留（08-28 已删）+ 修订历史加行
+4. `docs/README.md`：CODE_GRAPH 行 v3.7.0/208 端点 → v3.8.2/204
+5. `docs/CODEMAPS/FRONTEND.md`：全量刷新（api 14→13 去 chat.ts、pages 15→17、路由表去三孤儿页补 /intro /psych、store 4→3、清 FEATURE_MAP 死引用、两个旧漂移注记收敛）
+6. `docs/CODEMAPS/INDEX.md`：目录树重写（删 weclone_adapter、各模块文件数实测）、关键指标 198→204/171、页面 15→17、测试 1089→1147、ADR 10→11
+7. `docs/CODEMAPS/BACKEND.md`：架构分层图重写（21 routers 全列 + shisi/api 31 端点）、API 端点清单改为模块级实测表（旧逐条表 auth 9/admin 6/character 53/storyline 27 等全部失真）
+8. `docs/CODEMAPS/MODULES.md`：总览表全列实测文件数、shisi 96→115、api 36→44+挂载口径、voice/clone_training/persona_extractor 分节重写、shisi/wechat 去 command_handler/parser
+9. `docs/CODEMAPS/ARCHITECTURE.md`：shisi 121→115、聊天数据流改微信主链路（chat.ts 已删）、路由图去 /demo 补 /intro、orchestrator 行数 1013→1020
+10. `docs/CODEMAPS/DATABASE.md`：api/database.py 6 表全列（补 InviteCode/ConsentRecord/WechatBinding/CharacterAchievement）+ shisi migrations 12 表；RAG 数据流去 rag_engine/ 残留
+11. `docs/FUNCTION_INVENTORY.md`：补 INTRO 条目（INTRO-1/2）、PSYCH-6 改需登录、DATA-1 补 09-19 检索增强、尾注 15→17 页、GLOBAL 尾注措辞
+12. `docs/DECISION_LEDGER.md`：补 09-18/19 体验批次行 + 09-19 文档对齐行；挂起池 SP-1 标已执行（09-01 收官）；下一阶段队列 SP-11 标已落地（/intro）
+13. `docs/VISION.md`：A 区 LLM 链去 sensenova 改 agnes 4 家、15→17 页、208→204 端点、补人设注入/主动消息修复既成事实；B 区 SP-1/SP-4 标已执行、SP-3 补介绍页已落地；§三 工具 8→12 内置；§四 1074→1147
+14. `docs/P1_BACKLOG.md`：Last Updated 09-19 核对行（无新增未决项）
+15. `docs/READING_REPORT_llm_provider.md`：加 09-19 时效注记（sensenova 旧链表述过时，档案正文不改）
+
+**未动**：`docs/history/`（archive 禁改）、`docs/stages/SPRINT_2026-09.md`（阶段真源，本轮无阶段变更）、READING_REPORT 其余 13 份（未被本轮变更波及，头部已有各自时效注记）。
+
+**结果**：15 份文档与代码实况一致；测试全绿零回归。B 档 commit → push 即完成（A 档零变更，无需部署）。
