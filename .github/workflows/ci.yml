@@ -249,7 +249,10 @@ jobs:
       - ff-route-guard
       - ff-sub-router-mount
       - adr-integrity
-    if: failure()
+    # ⚠️ 仅主干失败才通知（2026-09-18 实测修正）：此前不限分支，导致 arch/* 等
+    # 实验分支失败时也开出一条标题为「主干 CI 失败」的 Issue —— 标题与实际分支不符，
+    # 属误报。分支失败属开发过程，静默处理；此处限定后标题措辞才成立。
+    if: failure() && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       issues: write
@@ -294,7 +297,8 @@ jobs:
       - ff-route-guard
       - ff-sub-router-mount
       - adr-integrity
-    if: success()
+    # 与 notify 对称限定主干：否则分支 CI 成功会误关主干的真实失败 Issue。
+    if: success() && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       issues: write
