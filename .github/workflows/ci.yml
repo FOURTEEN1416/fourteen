@@ -257,6 +257,9 @@ jobs:
       - name: 开（或更新）CI 失败 Issue
         env:
           GH_TOKEN: ${{ github.token }}
+          # 本 job 刻意不 checkout（保持轻量），故 gh 无法从 .git 推断目标仓库，
+          # 必须显式给出 GH_REPO —— 否则报 "fatal: not a git repository"（2026-09-18 实测踩坑）。
+          GH_REPO: ${{ github.repository }}
           COMMIT_SHA: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EVENT_NAME: ${{ github.event_name }}
@@ -299,6 +302,8 @@ jobs:
       - name: 关闭遗留的 CI 失败 Issue
         env:
           GH_TOKEN: ${{ github.token }}
+          # 同 notify-on-failure：无 checkout，须显式指定仓库，否则 gh 报 "not a git repository"。
+          GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
