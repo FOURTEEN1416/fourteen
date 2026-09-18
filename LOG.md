@@ -1476,4 +1476,42 @@
 
 **部署与三端**：本批为服务器配置变更（不经过 `remote_deploy.sh`，配置类改动直接改 nginx 并 reload）；仓库模板同步为 `410cd99`。
 
+---
+
+## 2026-09-18（六十五）— 删除 `/directus/` 冗余反代 + 重建校友平台 nginx 容器（b7b2ff9）
+
+**触发**：用户裁决「现在就进行修复」，采纳六十四节末尾给出的推荐处置（删除而非修好），并要求同步核查参赛材料里给评委的访问地址。
+
+**一、删除 `/directus/` 反代段（线上已实施）**
+
+前置核查（决定删 or 改端口的关键）：遍历 `大创赛报名以及后期发展/` 全部材料，**给评委的 Demo 地址是 `http://139.199.199.174`（根路径）**；全部 md/pdf/html 中 `/directus` 引用数为 **0**，IP 引用仅 4 处（其中 2 处是内部台账、1 处是修复记录、1 处即 v3 解决方案的 Demo 行）→ **删除安全**，无需保留 80 端口入口。
+
+处置：备份 `bak.before-directus-removal` → Python 精确删除 12 行（`location /directus/` 段 + `location = /directus` 301）→ 残留 grep 为 0 → `nginx -t` 通过 → reload。原片段完整打印留痕。
+
+**⚠️ 实测行为与预期不同（如实记录）**：此前预判 `:80/directus/` 会变为 **404**，实际是 **200** —— 因为 `location /` 的 `try_files $uri $uri/ /index.html` 会兜到 SPA 入口，返回本项目的 `<title>唯一的你——十四</title>`。效果比 502 友好（评审不会看到错误页），但也不具备 404 语义。**原因是我在给建议时低估了 try_files 的兜底作用，预判有误。**
+
+**二、重建校友平台 nginx 容器（解除「重启即挂」隐患）**
+
+隐患：`alumni_prod-nginx-1` 的 bind mount 源为 `/opt/alumni-current-82a4c1a/deploy/nginx.conf`，**该路径已被版本切换删除**（现为 `alumni-current-53396f0`），容器靠已删文件的 inode 存活 **2 个月**未重启；一旦重启（宿主机/docker/OOM）bind mount 源缺失 → 容器起不来 → 校友平台 :8080 整体挂掉。
+
+执行前核查：
+- compose 内 nginx 用**相对路径**挂载 `./deploy/nginx.conf`，从新目录执行即可指向现行配置 ✅
+- 新配置（45 行）确认为**完整 nginx 配置**（含 `events{}` + `http{}` 结构，可直接作 `/etc/nginx/nginx.conf`）✅
+- 原容器 compose 标签：project=`alumni_prod`、working_dir=`/opt/alumni-current-82a4c1a`（旧）、config=`docker-compose.production.yml` ✅
+- 端口表达式 `${NGINX_BIND:-127.0.0.1}:${NGINX_PORT:-18082}:80` **带默认值**，即使 env 缺失也不会走偏 ✅
+
+命令：`cd /opt/alumni-current-53396f0 && docker compose -p alumni_prod --env-file .env.production -f docker-compose.production.yml up -d nginx`
+（仅重建 nginx；postgres/redis/directus/web 显示 Running 未受影响）
+
+结果：容器 `Recreate → Started → healthy`（12 秒）；**挂载源已切为 `/opt/alumni-current-53396f0/deploy/nginx.conf`**；端口映射仍 `127.0.0.1:18082->80`；`healthz` 返回 ok。
+
+**三、双端回归（全部实测）**
+
+| 端 | 路径 | 结果 |
+|---|---|---|
+| 本项目 :80 | `/` `/index.html` `/favicon.svg` `/intro` `/login` `/api/health` `/fastrun` `/letter-0807/` `/directus/` | **全 200** |
+| 校友平台 :8080 | `/` `/healthz` `/directus/` `/directus/admin` `/directus/admin/login` | **全 200**（首页标题「首页 — 校友资源导航」）|
+
+`listen 80` / `server_name 139.199.199.174` **未动**（网评阶段冻结约束遵守）；仓库模板同步为 `b7b2ff9` 并在删除处**保留完整依据注释**，避免后续会话误判为漏配而加回。
+
 
