@@ -153,7 +153,7 @@ class CharacterManager:
 
     def load_character_from_file(self, char_id: str) -> CharaCardV2 | None:
         # 缺省目录锚定项目根，避免非仓库根 CWD 下静默返回 None
-        data_dir = resolve_project_path(get_config("character", "data_dir", "data/characters"))
+        data_dir = resolve_project_path(get_config("character", "data_dir", "config/characters"))
         path = data_dir / f"{char_id}.json"
         if not path.exists():
             return None
@@ -164,7 +164,7 @@ class CharacterManager:
             logger.warning("加载角色卡失败 %s: %s", path, e)
             return None
 
-    def export_character(self, character_id: str, output_dir: Path | str = "data/characters") -> Path | None:
+    def export_character(self, character_id: str, output_dir: Path | str = "config/characters") -> Path | None:
         card = self.load_character(character_id)
         if card is None:
             return None

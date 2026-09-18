@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Security, UploadFile
@@ -17,13 +16,15 @@ from shisi.character.character_card_v2 import CharaCardV2Parser
 from shisi.character.models import CharaCardV2
 from shisi.knowledge.character_knowledge_service import get_knowledge_service
 from shisi.knowledge.crawler_adapter import get_crawler_adapter
+from utils.project_paths import project_path
 
 logger = logging.getLogger("api.knowledge_routes")
 
 router = APIRouter(prefix="/api/characters", tags=["knowledge"])
 
 
-CHARACTER_DIR = Path("characters")
+# 角色卡唯一权威目录（2026-09-18 裁决收敛：data/characters 旧库已删除并入本目录）
+CHARACTER_DIR = project_path("config", "characters")
 
 
 def _load_character_data(character_id: str) -> dict[str, Any] | None:
@@ -32,8 +33,6 @@ def _load_character_data(character_id: str) -> dict[str, Any] | None:
     if not safe_id:
         return None
     filepath = CHARACTER_DIR / f"{safe_id}.json"
-    if not filepath.exists():
-        filepath = Path("data") / "characters" / f"{safe_id}.json"
     if not filepath.exists():
         return None
     try:

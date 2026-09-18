@@ -21,7 +21,7 @@ def preflight_check():
     except Exception as e:  # noqa: BLE001
         issues.append(f"数据库连接失败: {e}")
 
-    char_dir = Path("data/characters")
+    char_dir = Path("config/characters")
     if char_dir.exists():
         json_files = list(char_dir.glob("*.json"))
         print(f"✓ 发现 {len(json_files)} 个角色文件")
@@ -33,7 +33,7 @@ def preflight_check():
             except Exception as e:  # noqa: BLE001
                 issues.append(f"角色文件损坏 {f}: {e}")
     else:
-        print("! data/characters/ 目录不存在（跳过检查）")
+        print("! config/characters/ 目录不存在（跳过检查）")
 
     stat = shutil.disk_usage(".")
     free_gb = stat.free / (1024**3)

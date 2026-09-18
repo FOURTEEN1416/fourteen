@@ -14,7 +14,7 @@ from shisi.infrastructure.persistence.sqlite_repository import SQLiteCharacterRe
 from utils.project_paths import project_path
 
 _DEFAULT_DB_PATH = project_path("data", "sqlite.db")
-_DEFAULT_CHAR_DIR = project_path("data", "characters")
+_DEFAULT_CHAR_DIR = project_path("config", "characters")
 
 
 @dataclass

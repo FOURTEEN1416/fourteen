@@ -8,13 +8,13 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-1099-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-1147-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **测试口径**（2026-09-17 实测）：后端 `1012 passed / 4 skipped`（系统 Python 3.12）；
+> **测试口径**（2026-09-18 实测）：后端 `1060 passed / 4 skipped`（系统 Python 3.12）；
 > 前端 `87 passed`（vitest 15 文件）+ `tsc --noEmit` 0 错误。
 
 ---

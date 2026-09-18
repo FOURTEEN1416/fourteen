@@ -454,3 +454,14 @@ equire() in MessageList.tsx even though MessageList is unused
 **Verification**: `ast.parse` 双文件过；grep 残留双零（`_monologues` in ase_engine=0、`extract_intent` 全仓=0）；ruff 两文件 All checks passed；全量 pytest 零回归（数字见 LOG 五十五）。
 
 **Reversible**: 单提交 `git revert` 即可整体恢复。
+
+## 2026-09-18 — 双角色库收敛（裁决①）：旧角色库删除 + 双库同步脚本删除
+
+**Deleted**:
+- `data/characters/` 全部 53 张旧卡（本地与服务器同步删除）——49 张为 config/characters 权威库 24 角色的旧版本（persona_* 时间戳版/裸名版/序号版，逐张按 name 归组核对）；4 张无对应孤立卡（人设重度病娇by诗/修仙妹3.0/茉莉/纯对话版纯爱百合性转萝莉仙尊-银子著）经用户裁决废弃。**备份**：`data/archive/characters-data-backup-20260918.tar.gz`（53 张全量；data/ 不入 git，tar 为唯一回滚手段）。
+- `config/characters/222cdb5a.json`（本地孤立卡，name=林晚星，服务器权威版 c907dc57）——备份 `data/archive/222cdb5a-localconfig-backup.json`。
+- `scripts/sync_character_files.py`（config→data 双库同步脚本，**双库分歧的制度化源头**）——目标库已删，用途终结；全文阅读确认后删除。
+
+**Verification**: 旧路径引用 grep 归零（仅存 knowledge_routes 注释一条）；本地 config 25 张 JSON 校验 25/25 过；全量 pytest **1060 passed / 4 skipped**（+48 = 25 卡 × test_persona_injection 每卡 2 参数化用例全覆盖，0 失败）；ruff 7 文件全过。
+
+**Reversible**: 代码单提交 revert；卡数据解包 tar 即恢复。

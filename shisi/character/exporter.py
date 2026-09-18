@@ -12,7 +12,7 @@ logger = logging.getLogger("shisi.character.exporter")
 
 
 class PersonaExporter:
-    def __init__(self, output_dir: Path | str = "data/characters"):
+    def __init__(self, output_dir: Path | str = "config/characters"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
