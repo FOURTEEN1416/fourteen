@@ -1,37 +1,30 @@
 {
   "default_provider": "auto",
   "providers": {
-    "sensenova": {
-      "name": "商汤日日新 SenseNova",
-      "model": "glm-5.2",
-      "api_base": "https://token.sensenova.cn/v1",
+    "agnes": {
+      "name": "Agnes AI",
+      "model": "agnes-3.0-flash",
+      "api_base": "https://apihub.agnes-ai.com/v1",
       "api_key": "",
       "auth_mode": "bearer",
       "max_tokens": 8192,
       "temperature": 0.85,
       "stream_enabled": true,
-      "extra_payload": {"reasoning_effort": "none"},
-      "description": "商汤 SenseNova 平台，glm-5.2 1M上下文/13万输出，支持工具调用",
+      "description": "Agnes agnes-3.0-flash（OpenAI 兼容端点），首选供应商",
       "enabled": true,
       "sort_order": 1,
       "guide": {
-        "apply_url": "https://platform.sensenova.cn",
-        "free_quota": "新用户赠送 100 万 Token；glm-5.2 按量计费约 0.005 元/千 Token",
+        "apply_url": "https://apihub.agnes-ai.com",
+        "free_quota": "以平台实际额度为准",
         "steps": [
-          "打开 https://platform.sensenova.cn 用手机号注册账号",
-          "完成实名认证（个人账号即可，无需企业认证）",
-          "登录后进入「控制台」→ 左侧菜单「API Keys」",
-          "点击「创建 API Key」，名称随意填（如 ai-girlfriend）",
-          "复制生成的 sk- 开头的密钥（注意：关闭窗口后无法再查看）",
-          "回到本页面，把密钥粘贴到上方「API Key」输入框",
-          "点击「保存设置」，系统会自动使用 glm-5.2 模型"
+          "获取 Agnes API Key（sk- 开头）",
+          "设置环境变量 AGNES_API_KEY=<key>（或填入下方 API Key 输入框）",
+          "保存设置，系统将优先使用 agnes-3.0-flash"
         ],
         "tips": [
-          "glm-5.2 是当前项目主推模型，支持 1M 超长上下文，适合长篇对话",
-          "reasoning_effort 已自动设为 none，确保对话流畅不打结巴",
-          "赠送的 100 万 Token 约可对话 500-1000 轮，正常使用约 1-2 个月"
-        ],
-        "warnings": []
+          "本供应商为 OpenAI 兼容协议，base_url 须含 /v1",
+          "该 key 亦被图片生成模块复用（IMAGE_GEN_PROVIDER=agnes）"
+        ]
       }
     },
     "zhipu": {
@@ -232,9 +225,10 @@
     }
   },
   "fallback_chain": [
-    "sensenova",
+    "agnes",
     "zhipu",
     "xunfei",
-    "baidu"
+    "baidu",
+    "deepseek"
   ]
 }

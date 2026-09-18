@@ -91,7 +91,7 @@ def _build_backend(
             models_config=models_config,
         )
 
-    if provider in {"sensenova", "zhipu", "xunfei", "baidu", "custom"}:
+    if provider in {"agnes", "zhipu", "xunfei", "baidu", "custom"}:
         from .openai_compatible_provider import OpenAICompatibleProvider
 
         defaults = _provider_defaults(provider)
@@ -295,8 +295,8 @@ def invalidate_user_llm(user_id: int) -> None:
 
 def get_llm_names(provider: str | None = None) -> list[str]:
     resolved = _resolve_provider(provider)
-    if resolved == "sensenova":
-        return ["glm-5.2", "deepseek-v4-flash", "sensenova-6.7-flash-lite"]
+    if resolved == "agnes":
+        return ["agnes-3.0-flash", "agnes-2.5-flash", "agnes-2.5-pro"]
     if resolved == "zhipu":
         return ["glm-4-flash"]
     if resolved == "xunfei":

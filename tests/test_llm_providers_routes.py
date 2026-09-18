@@ -38,10 +38,10 @@ _VIEWER_USER_ID = 2
 _TEST_CONFIG = {
     "default_provider": "auto",
     "providers": {
-        "sensenova": {
-            "name": "商汤日日新",
-            "model": "glm-5.2",
-            "api_base": "https://token.sensenova.cn/v1",
+        "agnes": {
+            "name": "Agnes AI",
+            "model": "agnes-3.0-flash",
+            "api_base": "https://apihub.agnes-ai.com/v1",
             "api_key": "sk-test-secret-key",
             "auth_mode": "bearer",
             "max_tokens": 8192,
@@ -51,7 +51,7 @@ _TEST_CONFIG = {
             "enabled": True,
             "sort_order": 1,
             "guide": {
-                "apply_url": "https://platform.sensenova.cn",
+                "apply_url": "https://apihub.agnes-ai.com",
                 "free_quota": "100万 Token",
                 "steps": ["步骤1", "步骤2"],
                 "tips": ["提示1"],
@@ -93,7 +93,7 @@ _TEST_CONFIG = {
             "guide": {"apply_url": "", "free_quota": "取决于", "steps": [], "tips": [], "warnings": []},
         },
     },
-    "fallback_chain": ["sensenova"],
+    "fallback_chain": ["agnes"],
 }
 
 
@@ -205,8 +205,8 @@ async def test_list_providers_no_auth_required(viewer_app):
     # auto + custom 是特殊选项，总是返回
     assert "auto" in keys
     assert "custom" in keys
-    # sensenova enabled=true，应返回
-    assert "sensenova" in keys
+    # agnes enabled=true，应返回
+    assert "agnes" in keys
     # deepseek enabled=false，不应返回给普通用户
     assert "deepseek" not in keys
 
@@ -238,10 +238,10 @@ async def test_list_providers_includes_guide(viewer_app):
     client, _, _, _ = viewer_app
     resp = await client.get("/api/llm-providers")
     body = resp.json()
-    sensenova = next(p for p in body["providers"] if p["key"] == "sensenova")
-    assert "guide" in sensenova
-    assert sensenova["guide"]["apply_url"] == "https://platform.sensenova.cn"
-    assert len(sensenova["guide"]["steps"]) >= 2
+    agnes = next(p for p in body["providers"] if p["key"] == "agnes")
+    assert "guide" in agnes
+    assert agnes["guide"]["apply_url"] == "https://apihub.agnes-ai.com"
+    assert len(agnes["guide"]["steps"]) >= 2
 
 
 # ═══════════════════════════════════════════════════════════
@@ -265,7 +265,7 @@ async def test_list_all_providers_includes_disabled(admin_app):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     keys = [p["key"] for p in body["providers"]]
-    assert "sensenova" in keys
+    assert "agnes" in keys
     assert "deepseek" in keys  # 禁用的也返回
     assert "fallback_chain" in body
 
@@ -323,10 +323,10 @@ async def test_create_provider_success(admin_app):
 
 @pytest.mark.asyncio
 async def test_create_provider_duplicate_key_fails(admin_app):
-    """创建已存在的 key 失败（sensenova 已在配置中）"""
+    """创建已存在的 key 失败（agnes 已在配置中）"""
     client, _, _, _ = admin_app
     resp = await client.post("/api/llm-providers", json={
-        "key": "sensenova", "name": "重复", "model": "x", "api_base": "x",
+        "key": "agnes", "name": "重复", "model": "x", "api_base": "x",
     })
     assert resp.status_code == 409
 
@@ -345,20 +345,20 @@ async def test_create_provider_reserved_special_key_fails(admin_app):
 async def test_create_provider_reuses_deleted_preset_key(admin_app):
     """删除预设后，可用相同 key 重新添加（按当前配置对待）"""
     client, _, _, tmp_config = admin_app
-    # 先删除 sensenova
-    resp = await client.delete("/api/llm-providers/sensenova")
+    # 先删除 agnes
+    resp = await client.delete("/api/llm-providers/agnes")
     assert resp.status_code == 200
     # 用相同 key 重新创建
     resp = await client.post("/api/llm-providers", json={
-        "key": "sensenova", "name": "新商汤", "model": "glm-5.2",
-        "api_base": "https://token.sensenova.cn/v1", "api_key": "sk-new",
+        "key": "agnes", "name": "新商汤", "model": "agnes-3.0-flash",
+        "api_base": "https://apihub.agnes-ai.com/v1", "api_key": "sk-new",
         "auth_mode": "bearer", "max_tokens": 8192, "temperature": 0.85,
         "stream_enabled": True, "description": "重新添加", "enabled": True, "sort_order": 1,
         "guide": {"apply_url": "", "free_quota": "", "steps": [], "tips": [], "warnings": []},
     })
     assert resp.status_code == 200, resp.text
     cfg = json.loads(tmp_config.read_text(encoding="utf-8"))
-    assert cfg["providers"]["sensenova"]["name"] == "新商汤"
+    assert cfg["providers"]["agnes"]["name"] == "新商汤"
 
 
 @pytest.mark.asyncio
@@ -381,10 +381,10 @@ async def test_update_provider_preserves_api_key_when_empty(admin_app):
     """更新时 api_key 为空字符串，保留原值"""
     client, _, _, tmp_config = admin_app
     # 原值：sk-test-secret-key
-    resp = await client.put("/api/llm-providers/sensenova", json={
-        "name": "商汤日日新（更新）",
-        "model": "glm-5.2",
-        "api_base": "https://token.sensenova.cn/v1",
+    resp = await client.put("/api/llm-providers/agnes", json={
+        "name": "Agnes AI（更新）",
+        "model": "agnes-3.0-flash",
+        "api_base": "https://apihub.agnes-ai.com/v1",
         "api_key": "",  # 空 → 保留原值
         "auth_mode": "bearer",
         "max_tokens": 8192,
@@ -394,7 +394,7 @@ async def test_update_provider_preserves_api_key_when_empty(admin_app):
         "enabled": True,
         "sort_order": 1,
         "guide": {
-            "apply_url": "https://platform.sensenova.cn",
+            "apply_url": "https://apihub.agnes-ai.com",
             "free_quota": "更新",
             "steps": ["新步骤"],
             "tips": [],
@@ -404,17 +404,17 @@ async def test_update_provider_preserves_api_key_when_empty(admin_app):
     assert resp.status_code == 200, resp.text
     # 验证配置文件中原 api_key 仍存在
     cfg = json.loads(tmp_config.read_text(encoding="utf-8"))
-    assert cfg["providers"]["sensenova"]["api_key"] == "sk-test-secret-key"
+    assert cfg["providers"]["agnes"]["api_key"] == "sk-test-secret-key"
 
 
 @pytest.mark.asyncio
 async def test_update_provider_preserves_api_key_when_masked(admin_app):
     """更新时 api_key 为 ****，保留原值"""
     client, _, _, tmp_config = admin_app
-    resp = await client.put("/api/llm-providers/sensenova", json={
+    resp = await client.put("/api/llm-providers/agnes", json={
         "name": "商汤",
-        "model": "glm-5.2",
-        "api_base": "https://token.sensenova.cn/v1",
+        "model": "agnes-3.0-flash",
+        "api_base": "https://apihub.agnes-ai.com/v1",
         "api_key": "****",  # 脱敏占位 → 保留原值
         "auth_mode": "bearer",
         "max_tokens": 8192,
@@ -427,17 +427,17 @@ async def test_update_provider_preserves_api_key_when_masked(admin_app):
     })
     assert resp.status_code == 200, resp.text
     cfg = json.loads(tmp_config.read_text(encoding="utf-8"))
-    assert cfg["providers"]["sensenova"]["api_key"] == "sk-test-secret-key"
+    assert cfg["providers"]["agnes"]["api_key"] == "sk-test-secret-key"
 
 
 @pytest.mark.asyncio
 async def test_update_provider_updates_api_key_when_new_value(admin_app):
     """更新时 api_key 为新值，覆盖原值"""
     client, _, _, tmp_config = admin_app
-    resp = await client.put("/api/llm-providers/sensenova", json={
+    resp = await client.put("/api/llm-providers/agnes", json={
         "name": "商汤",
-        "model": "glm-5.2",
-        "api_base": "https://token.sensenova.cn/v1",
+        "model": "agnes-3.0-flash",
+        "api_base": "https://apihub.agnes-ai.com/v1",
         "api_key": "sk-new-key-123",
         "auth_mode": "bearer",
         "max_tokens": 8192,
@@ -450,7 +450,7 @@ async def test_update_provider_updates_api_key_when_new_value(admin_app):
     })
     assert resp.status_code == 200, resp.text
     cfg = json.loads(tmp_config.read_text(encoding="utf-8"))
-    assert cfg["providers"]["sensenova"]["api_key"] == "sk-new-key-123"
+    assert cfg["providers"]["agnes"]["api_key"] == "sk-new-key-123"
 
 
 @pytest.mark.asyncio
@@ -475,7 +475,7 @@ async def test_update_provider_not_found(admin_app):
 async def test_toggle_provider_admin_only(viewer_app):
     """非 admin 启用/禁用供应商返回 403"""
     client, _, _, _ = viewer_app
-    resp = await client.put("/api/llm-providers/sensenova/toggle", json={"enabled": False})
+    resp = await client.put("/api/llm-providers/agnes/toggle", json={"enabled": False})
     assert resp.status_code == 403
 
 
@@ -483,19 +483,19 @@ async def test_toggle_provider_admin_only(viewer_app):
 async def test_toggle_provider_success(admin_app):
     """admin 启用/禁用供应商成功"""
     client, _, _, tmp_config = admin_app
-    # 禁用 sensenova
-    resp = await client.put("/api/llm-providers/sensenova/toggle", json={"enabled": False})
+    # 禁用 agnes
+    resp = await client.put("/api/llm-providers/agnes/toggle", json={"enabled": False})
     assert resp.status_code == 200, resp.text
     assert resp.json()["enabled"] is False
 
     cfg = json.loads(tmp_config.read_text(encoding="utf-8"))
-    assert cfg["providers"]["sensenova"]["enabled"] is False
+    assert cfg["providers"]["agnes"]["enabled"] is False
 
     # 重新启用
-    resp = await client.put("/api/llm-providers/sensenova/toggle", json={"enabled": True})
+    resp = await client.put("/api/llm-providers/agnes/toggle", json={"enabled": True})
     assert resp.status_code == 200
     cfg = json.loads(tmp_config.read_text(encoding="utf-8"))
-    assert cfg["providers"]["sensenova"]["enabled"] is True
+    assert cfg["providers"]["agnes"]["enabled"] is True
 
 
 @pytest.mark.asyncio
@@ -523,13 +523,13 @@ async def test_delete_provider_admin_only(viewer_app):
 async def test_delete_preset_provider_success(admin_app):
     """admin 可删除预设供应商（删除后从 fallback_chain 移除）"""
     client, _, _, tmp_config = admin_app
-    resp = await client.delete("/api/llm-providers/sensenova")
+    resp = await client.delete("/api/llm-providers/agnes")
     assert resp.status_code == 200, resp.text
     # 验证已从配置文件移除
     cfg = json.loads(tmp_config.read_text(encoding="utf-8"))
-    assert "sensenova" not in cfg["providers"]
+    assert "agnes" not in cfg["providers"]
     # fallback_chain 应同步移除
-    assert "sensenova" not in cfg.get("fallback_chain", [])
+    assert "agnes" not in cfg.get("fallback_chain", [])
 
 
 @pytest.mark.asyncio

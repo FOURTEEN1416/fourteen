@@ -35,7 +35,7 @@ _CONFIG_PATH = project_path("config", "llm_providers.json")
 _CONFIG_LOCK = threading.Lock()
 
 # 预设供应商 key（仅作为元信息标记，前端显示"预设"徽章；不影响增删改）
-_PRESET_KEYS = {"sensenova", "zhipu", "xunfei", "baidu", "deepseek"}
+_PRESET_KEYS = {"agnes", "zhipu", "xunfei", "baidu", "deepseek"}
 # 特殊选项 key（系统行为，不可删除/添加，只能改 guide）
 _SPECIAL_KEYS = {"auto", "custom"}
 
@@ -67,7 +67,7 @@ class ProviderConfig(BaseModel):
     enabled: bool = True
     sort_order: int = Field(50, ge=0, le=999)
     guide: ProviderGuide = Field(default_factory=ProviderGuide)
-    # 可选的额外参数（如 sensenova 的 reasoning_effort）
+    # 可选的额外参数（如 agnes 的 reasoning_effort）
     extra_payload: dict[str, Any] | None = None
 
 
@@ -317,7 +317,7 @@ async def delete_provider(
 ):
     """admin：删除任意供应商
 
-    - 预设供应商（sensenova/zhipu/xunfei/baidu/deepseek）也可删除，删除后可重新添加
+    - 预设供应商（agnes/zhipu/xunfei/baidu/deepseek）也可删除，删除后可重新添加
     - 特殊选项（auto/custom）不可删除（系统行为）
     - 删除时自动从 fallback_chain 移除
     """

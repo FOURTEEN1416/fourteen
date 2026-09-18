@@ -7,7 +7,7 @@
   3. 所有 provider 都失败 → 返回错误信息
 
 支持的 provider:
-  - sensenova: 商汤日日新（glm-5.2）
+  - agnes:     Agnes AI（agnes-3.0-flash，OpenAI 兼容，首选）
   - zhipu:     智谱AI
   - xunfei:    讯飞星火
   - baidu:     百度千帆
@@ -69,7 +69,7 @@ def _merge_attachments(
 
 
 # ── 默认 fallback 链 ──
-DEFAULT_FALLBACK_CHAIN = ["sensenova", "zhipu", "xunfei", "baidu"]
+DEFAULT_FALLBACK_CHAIN = ["agnes", "zhipu", "xunfei", "baidu"]
 
 # ── Provider 失败哨兵 ──
 # 各 provider 的 _handle_error()/_mock_reply() 统一返回**全角括号包裹**的固定文案。
@@ -136,15 +136,14 @@ DEFAULT_PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
         "temperature": 0.85,
         "description": "DeepSeek-V2 高质量模型，需自行申请 API Key",
     },
-    "sensenova": {
-        "name": "商汤日日新 SenseNova",
-        "model": "glm-5.2",
-        "api_base": "https://token.sensenova.cn/v1",
+    "agnes": {
+        "name": "Agnes AI",
+        "model": "agnes-3.0-flash",
+        "api_base": "https://apihub.agnes-ai.com/v1",
         "auth_mode": "bearer",
         "max_tokens": 8192,
         "temperature": 0.85,
-        "description": "商汤 SenseNova 平台，glm-5.2 1M上下文/13万输出，支持工具调用",
-        "extra_payload": {"reasoning_effort": "none"},
+        "description": "Agnes agnes-3.0-flash（OpenAI 兼容），首选供应商",
     },
 }
 
@@ -179,7 +178,7 @@ def _resolve_env_override(provider_key: str, config: dict[str, Any]) -> dict[str
         "xunfei": {"key": "XUNFEI_API_KEY", "base": "XUNFEI_API_BASE", "model": "XUNFEI_MODEL"},
         "baidu": {"key": "BAIDU_API_KEY", "base": "BAIDU_API_BASE", "model": "BAIDU_MODEL"},
         "deepseek": {"key": "DEEPSEEK_API_KEY", "base": "DEEPSEEK_API_BASE", "model": "DEEPSEEK_MODEL"},
-        "sensenova": {"key": "SENSENOVA_API_KEY", "base": "SENSENOVA_API_BASE", "model": "SENSENOVA_MODEL"},
+        "agnes": {"key": "AGNES_API_KEY", "base": "AGNES_API_BASE", "model": "AGNES_MODEL"},
     }
 
     mapping = env_map.get(provider_key)
@@ -211,7 +210,7 @@ class MultiProviderGateway:
     多供应商网关 — 自动在多个 LLM 提供商之间 fallback
 
     按 fallback_chain 顺序尝试:
-      商汤日日新 → 智谱AI → 讯飞星火 → 百度千帆
+      Agnes → 智谱AI → 讯飞星火 → 百度千帆
     如果用户配置了 DeepSeek，自动插入到最前面。
     """
 
