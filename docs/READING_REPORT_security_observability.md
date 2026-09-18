@@ -1,5 +1,7 @@
 # 📚 Security + Observability 模块阅读报告
 
+> ⚠️ **2026-09-19 时效注记**：① `security/prompt_injection.py` 的 `extract_intent` 死方法已于 09-18 删除（零调用，内埋 chat_sync 同步阻塞雷；在用部分 detect/sanitize 保留）——本文 L16 对该函数的描述作废；② `observability/config_models.py` `VoiceConfig` 已于 09-17 修复（engine 默认 `edge-tts`→`mimo-tts`，删除 4 个已删引擎死字段，见 verification/2026-09-17-全仓扫描验证报告.md D20）——本文 L26 的 VoiceConfig 描述作废。**现行口径以 `CODE_GRAPH.md` v3.8.2 为准**。
+
 **读取进度**：14/14 文件 ✅ 全部穷举阅读 | **读取时间**：2026-08-26  
 **模块定位**：安全防护（内容安全/PII脱敏/注入检测/加密）+ 可观测性（日志/追踪/指标/配置/健康/优雅关闭/Sentry）  
 

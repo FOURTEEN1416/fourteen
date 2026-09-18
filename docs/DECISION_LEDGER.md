@@ -50,7 +50,7 @@
 |------|------|----------|------|----------|
 | 07-14~30 | CODEMAPS 六件套建立（架构/后端/数据库/前端/索引/模块） | CODEMAPS/ | ✅ 维护中 | 有效但含数字漂移（INDEX 称 21 注册路由、FRONTEND 称 19 含孤儿、BACKEND 端点数偏差）→ 08-26 已加漂移标注，实数以 CODE_GRAPH 为准 |
 | 07-27 | reinit 八问题修复包 | .trae/reinit-multipoint-fixes | ✅ 代码完成 | WeChatPage 减负/语音收敛/多用户LLM隔离/火爬虫入口/指数退避退避/消息链路日志 全部落地；**6 项验证类子任务未勾**（迁移/隔离/配置链路/403/火爬虫多源/端到端）→ 验证欠账登记 |
-| 07-27 | **语音引擎收敛 BREAKING：前端仅暴露 MiMo Cloud** | reinit spec MODIFIED/REMOVED 区 | ✅ 生效 | Edge/GPT-SoVITS/Bert-VITS2 从前端移除，角色配置自动迁移。⚠️ 但后端 config/system.yaml 保留四引擎降级链（有意为之，MiMo 方案§降级设计）；**config/shisi.yaml L148 `default_tts: "edge-tts"` 为漏改残留** → 新发现的配置漂移，登记待修（属文档/配置治理范围外的一行修正，暂标注不改） |
+| 07-27 | **语音引擎收敛 BREAKING：前端仅暴露 MiMo Cloud** | reinit spec MODIFIED/REMOVED 区 | ✅ 生效 | Edge/GPT-SoVITS/Bert-VITS2 从前端移除，角色配置自动迁移。⚠️ 但后端 config/system.yaml 保留四引擎降级链（有意为之，MiMo 方案§降级设计）——**08-28 裁决 A MiMo-only 后该降级链已整体删除**；**config/shisi.yaml L148 `default_tts: "edge-tts"` 漏改残留 → ✅ 已修**（`ba0e679` 对齐 `mimo-tts`，2026-09-19 核实） |
 | 07-28 | AGENTS.md 宪法 v1.0（含 GitHub-First 零容忍规则） | AGENTS.md | ✅ | 现行 |
 | 07-30 | AGENTS v1.1：测试基线修正 1104 + Owner Map 补全 | AGENTS.md | ✅ | 现行 |
 | 07-30 | 克隆好友全链路优化 + GitHub 七环节对标 | .trae/optimize-clone | ✅ | 完成；多项「理性取消」记录在案（对标后判定不值得做的均留了理由） |
@@ -113,7 +113,7 @@
 | C1 | ADR-0011 三级导航（Accepted）vs 扁平化代码现实 + 用户否决 | **ADR-0011 → Superseded** | AGENTS §1.3 真值裁决优先级第①条：代码实况 > 文档 | 已在本文件登记 + ADR-0011 头部加注 |
 | C2 | ADR-0013 人设卡进侧边栏 vs 06-29 方案A 右侧常驻预览卡 | **从新（06-29 方案A）**，但因整体挂起，二者均不实施 | 决策日期新者胜；ADR-0013 依附于已死的 ADR-0011 | ADR-0013 待加注（同批） |
 | C3 | file-inventory「shisi 逐步废弃」vs CODE_GRAPH §14「保留不重命名」 | **CODE_GRAPH 胜** | 真值裁决优先级第①条 | file-inventory 加历史快照头 |
-| C4 | 多引擎前端暴露（v1/glass/MiMo 方案）vs reinit 仅 MiMo | **reinit 胜**（前端仅 MiMo；后端保留降级链为容灾设计） | 时间新者胜 + MiMo 方案降级链设计意图 | shisi.yaml L148 残留标注为已知漂移 |
+| C4 | 多引擎前端暴露（v1/glass/MiMo 方案）vs reinit 仅 MiMo | **reinit 胜**（前端仅 MiMo）→ **进一步收敛：08-28 裁决 A MiMo-only，后端降级链亦删** | 时间新者胜 + MiMo 方案降级链设计意图 | shisi.yaml L148 残留 ✅ 已修（`ba0e679`） |
 
 ---
 

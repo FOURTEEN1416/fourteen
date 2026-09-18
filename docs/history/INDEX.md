@@ -95,8 +95,9 @@ GirlfriendManager 按 user_id 隔离（记忆/情感/角色卡独立，LLM/安�
 | 「创建角色方案A未实施」「Demo 是可删残留」「知识库功能深埋」三项判断与代码实况不符 | 08-26 晚 | ✅ **前端 src 全文通读后全部修正**（FEATURE_MAP F 区/H 区重写）：方案A主体已在位；Demo=公开获客门面（登录页有直通入口）；知识库组件 KnowledgePreview 完整存在但零挂载。同时发现幽灵层：UsersPage/UserWorkspace/BindingDetailPage 三页互链无路由 + 6 个零引用 hooks（含 useEmotionTrend）。详见 DECISION_LEDGER SP 区修订 |
 | AGENTS.md 测试基线「1025 Python 测试」与实收不符 | 08-26 | ⚠️ **pytest --collect-only 实测 1035 collected**（+10 漂移，后续新增测试未同步文档）；建议基线更新为 1035 Python + 79 前端 |
 | 后端 Python 文件总量口径 | 08-26 | ✅ **全量普查澄清**：项目实际代码 ~358 py 文件（此前「19,598 个」口径被 .venv 第三方依赖 19,236 个污染）；核心 49 + 非核心 307 已全部穷举阅读，产出 docs/READING_REPORT_*.md 共 12 份 |
-| CODEMAPS/FRONTEND、MODULES 所列 `chatStore.ts`/`api/chat.ts`/`shared/Badge.tsx`/`command_handler.py`/`command_parser.py` 已被 09-17 死代码清洗删除；BACKEND 的 training_routes 端点数（9→13）与 knowledge 相关清单过期 | 09-17 | ✅ FRONTEND/MODULES 头部已加漂移注记；实况以 CODE_GRAPH v3.7.0（208 端点）为准 |
-| VISION 基线「194 端点/20 张现役卡」过期 | 09-17 | ✅ 已修（208 端点/服务器 25 张卡，基线补 09-17 三事实） |
+| CODEMAPS/FRONTEND、MODULES 所列 `chatStore.ts`/`api/chat.ts`/`shared/Badge.tsx`/`command_handler.py`/`command_parser.py` 已被 09-17 死代码清洗删除；BACKEND 的 training_routes 端点数（9→13）与 knowledge 相关清单过期 | 09-17 | ✅ FRONTEND/MODULES 头部已加漂移注记；实况以 CODE_GRAPH v3.7.0（208 端点）为准〔本行「208 端点」口径已被次日纠错超越，见下行〕 |
+| VISION 基线「194 端点/20 张现役卡」过期 | 09-17 | ✅ 已修（208 端点/服务器 25 张卡，基线补 09-17 三事实）〔同上，「208」已系统性纠为 **204 业务端点**〕 |
+| 全仓逐一扫描：15 份文档落后于代码实况（代码领先）——CODEMAPS 六件（FRONTEND 路由表含已删孤儿页/BACKEND 端点清单 07-14 基线/MODULES 文件数与已删模块/INDEX 指标 198/1089/ARCHITECTURE /demo+chat.ts/DATABASE 缺 4 表）、FUNCTION_INVENTORY（/psych 已需登录、缺 INTRO 条目）、DECISION_LEDGER（缺 09-18/19 批次行、SP-1/SP-11 未销账）、VISION（sensenova 链/15 页/208 端点/1074 测试）、SPRINT L91 Edge-TTS、6 份 READING_REPORT 指针/注记、knowledge-graph 状态卡 194、ADR-0005 chat.ts、designs MiMo 方案 L148「待修」实已修（ba0e679）、reports 对齐报告 | 09-19 | ✅ **已全量对齐**（commit `32813ab` + 补全批次）：CODE_GRAPH **v3.8.2**（204/171、16 include_router+setup_shisi、默认链 agnes→zhipu→xunfei→baidu 4 家）、AGENTS **v1.12**、CODEMAPS 六件重写、FUNCTION_INVENTORY 补 INTRO/PSYCH-6、LEDGER 补行销账、VISION/SPRINT/ADR-0005 尾注/knowledge-graph 指针/6 档案注记全刷。注：本登记簿早前行内「FEATURE_MAP F 区」指针已随 08-28 FEATURE_MAP 删除失效，演进链见 DECISION_LEDGER |
 
 ---
 

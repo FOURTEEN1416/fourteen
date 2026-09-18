@@ -1,5 +1,6 @@
 # 📚 Shisi（十四）DDD 核心模块阅读报告
-> ⚠️ **2026-09-17 时效注记**：`shisi/wechat/command_handler.py` 与 `command_parser.py`（微信指令系统）已删除——生产消息链路从未接线，角色切换裁决走 web 控制台（见 DELETION_LOG 09-17 条）；`shisi/api/registry.py` 装配段与 `api/app_factory.py` status 元组同步变更；`shisi/core/models/persona_profile.py` emoji 行语义化。**现行口径以 `CODE_GRAPH.md` v3.7.0 为准**。
+> ⚠️ **2026-09-19 补充注记**：`shisi/core/models/character_aggregate.py` 的 `CharacterAggregate` 已于 09-18/19 扩展——新增 `personality_text`/`scenario`/`creator_notes` 三字段并注入 `build_system_prompt`（此前只注入 name+description+人格数值，实测 prompt 3789→13018 字）；本文 L31 对该类的字段与 prompt 组装描述已过时。**现行口径以 `CODE_GRAPH.md` v3.8.2 为准**（上条 09-17 注记中 v3.7.0 指向同步升版）。
+> ⚠️ **2026-09-17 时效注记**：`shisi/wechat/command_handler.py` 与 `command_parser.py`（微信指令系统）已删除——生产消息链路从未接线，角色切换裁决走 web 控制台（见 DELETION_LOG 09-17 条）；`shisi/api/registry.py` 装配段与 `api/app_factory.py` status 元组同步变更；`shisi/core/models/persona_profile.py` emoji 行语义化。
 
 
 **读取进度**：124/124 文件 ✅ 全部穷举阅读 | **读取时间**：2026-08-26  

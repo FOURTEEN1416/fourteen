@@ -1,5 +1,7 @@
 # 📚 Voice (TTS) 模块阅读报告
 
+> ⚠️ **2026-09-19 时效注记**：**08-28 MiMo-only 收敛（裁决 A）已使本文主体作废**——Edge-TTS/GPT-SoVITS/CosyVoice/Bert-VITS2 四 provider 与 voice_training.py 全部删除，`voice/` 现仅 5 模块（mimo_tts_provider/tts_manager/tts_provider_base/audio_converter/clone_data_manager），SAPI 本地兜底替代跨厂商降级链；本文 L17-37 的四引擎描述与 edge-tts 配置示例仅作历史档案。**现行口径以 `CODE_GRAPH.md` v3.8.2 §4.8 为准**。
+
 > ⚠️ **2026-09-15 时效注记**：本文为 2026-07/08 时点的模块快照。此后 W3 多模态收编（merge `91f2042`）变更了本文部分事实——入口守卫已放行 type 1/3/34、图片走附件直传/描述注入双路、silk 编解码改 pilk。**现行口径以 `CODE_GRAPH.md` v3.6.0 与 `FUNCTION_INVENTORY.md` N-IMG-1/N-ASR-1 为准**，本文其余机制描述仍可作深度背景阅读。
 
 **读取进度**：11/11 文件 ✅ 已全部穷举阅读  

@@ -1551,3 +1551,29 @@
 **未动**：`docs/history/`（archive 禁改）、`docs/stages/SPRINT_2026-09.md`（阶段真源，本轮无阶段变更）、READING_REPORT 其余 13 份（未被本轮变更波及，头部已有各自时效注记）。
 
 **结果**：15 份文档与代码实况一致；测试全绿零回归。B 档 commit → push 即完成（A 档零变更，无需部署）。
+
+## 2026-09-19（六十七）— 文档对齐补全批次：剩余 22 项逐一历遍（用户追问「是否完全更新」）
+
+**触发**：用户列出 docs/ 全部 15 目录 + 22 文件追问「这些文档是否完全更新？？？」。如实回答：上轮（六十六）只处理了 15 份，其余未逐一读过——违反「先读再判不凭名字跳过」。本轮补全。
+
+**方法**：全子目录盘点（44 文件）→ 批量 grep 旧口径关键词（sensenova/Edge-TTS/208 端点/孤儿页/chat.ts/旧测试基线/data/characters/rag_engine 等）→ 命中 32 文件逐一抽上下文定性 → 按 lifecycle 三态处置。
+
+**truth 类修订（5 文件）**：
+1. `stages/SPRINT_2026-09.md`：L91 语音行「MiMo/Edge-TTS/本地 三级降级」→ MiMo 唯一引擎 + SAPI 兜底（Edge-TTS 已删）；L236「端点 206→208」加口径纠错括注
+2. `history/INDEX.md`：漂移登记簿追加 09-19 全量对齐行；旧两行「以 CODE_GRAPH v3.7.0（208 端点）为准」加「已被次日纠错超越」标注；注明早前「FEATURE_MAP F 区」指针失效
+3. `adr/ADR-0005`：追加演进注记（决策仍 Accepted；chat.ts 已删、09-18 normalize/emotion 抽离、13 模块现行清单指针）
+4. `architecture/knowledge-graph.md`：状态卡指针 194 端点（08-28）→ 204/171（v3.8.2）；补 SP-1 已收官
+5. `DECISION_LEDGER.md`：07-27 行 + C4 裁决的「shisi.yaml L148 default_tts 残留待修」销账——**实修于 ba0e679**（本轮 grep 核实现为 `mimo-tts`），当时修复后未回写账本
+
+**档案类注记（10 文件，正文不改）**：
+6-11. READING_REPORT 六份——security_observability（extract_intent 已删 + VoiceConfig D20 修复）、tools_utils（sync_character_files.py 已删 + 两个新脚本）、shisi（CharacterAggregate 三字段注入）、tests_root（基线 1064/1060）、voice（MiMo-only 后四引擎描述作废）、wechat_clone（weclone_adapter 已删）——各补 09-19 注记并升 CODE_GRAPH 指针至 v3.8.2
+12. `designs/MiMo_TTS_集成方案.md`：状态卡刷新——四级降级链已被 08-28 裁决 A 删除（原卡称其为「容灾设计法律依据」过时）；L148 残留标注已修
+13. `superpowers/specs/frontend-design-framework-v1.md`：状态卡刷指针——原指 FEATURE_MAP（已删）改指 FUNCTION_INVENTORY+CODE_GRAPH；SP-1 已收官；TTS 引擎选择器已废
+14. `reports/2026-08-28_前后端对齐验证.md`：加 09-19 时效注记（198 端点/118 调用点为时点快照，chat.ts 已删）
+15. `plans/极致拟人化升级方案.md`：状态卡补 09-19 注记（rag_engine 路径迁移、BM25 已增强）
+
+**核实不动（21 项）**：DELETION_LOG（追加式，本轮零删除）、history 三份正文 + HANDOFF_REPORT-2026-08-28 + inventory/file-inventory（archive 正文禁改）、board/BOARD.md（追加式历史条目合法）、HANDOFF_REPORT.md（09-15 接管快照，无旧口径命中）、verification 5 份（一次性验证快照，命中行均为当时修复动作记录）、reports 其余三份（SP5 诊断的 data/characters 53 张为当时事实）、research 2 份（W3 调研历史）、adr 其余 10 篇（无命中）、guides/legal/designs 之外无命中项、stages 其余无。
+
+**误报排除**：config/shisi.yaml「不存在」系 Bash cwd 滞留 docs/ 所致（memory 已有此教训），实存在且 default_tts 已修。
+
+**结果**：docs/ 37 项全部逐一核实完毕；13 文件修订（5 truth + 8 档案注记），21 项核实不动。零代码变更，B 档 commit → push 即完成。

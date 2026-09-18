@@ -1,9 +1,9 @@
 # MiMo TTS 集成方案
 
-> **📋 文档状态卡**（2026-08-26 治理标注 · 决策链见 `docs/DECISION_LEDGER.md`）
-> - **层级**：L2 决策档案 | **结局**：✅ 已实施
-> - **现行效力**：四级降级链（MiMo→CosyVoice→SoVITS→Bert→Edge）与 9 种情感参数映射为后端容灾设计的法律依据；前端仅暴露 MiMo（07-27 reinit BREAKING，裁决 C4 支持方）
-> - **已知残留**：`config/shisi.yaml` L148 `default_tts: "edge-tts"` 为漏改漂移，已登记 INDEX 待修清单
+> **📋 文档状态卡**（2026-08-26 治理标注；2026-09-19 刷新 · 决策链见 `docs/DECISION_LEDGER.md`）
+> - **层级**：L2 决策档案 | **结局**：🔄 部分生效后被收敛
+> - **现行效力**：MiMo Cloud 接入与 9 种情感参数映射 ✅ 仍生效；**四级降级链（MiMo→CosyVoice→SoVITS→Bert→Edge）已于 08-28 裁决 A（MiMo-only）删除**——跨厂商容灾放弃为知情裁决，`voice/` 现为 MiMo + Windows SAPI 本地兜底（现行见 CODE_GRAPH v3.8.2 §4.8）
+> - ~~已知残留：`config/shisi.yaml` L148 `default_tts: "edge-tts"` 待修~~ → **✅ 已修**（`ba0e679` 对齐 `mimo-tts`）
 > - 正文保持原样。
 
 > **架构原则**: 优先API，本地引擎作为降级

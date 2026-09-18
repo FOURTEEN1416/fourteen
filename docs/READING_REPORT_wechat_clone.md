@@ -1,5 +1,6 @@
 # 📚 WeChat Direct + WeClone Adapter + Clone Training 模块阅读报告
 
+> ⚠️ **2026-09-19 补充注记**：`weclone_adapter/` 三文件已于 08-28 删除（克隆收敛为「本地提取 + JSON 上传」，服务器不经手微信数据；DECISION_LEDGER 08-28 行）；`clone_training/wechat_decrypt_source.py` 同批删除。本文 WeClone Adapter 章节仅作历史档案。**现行口径以 `CODE_GRAPH.md` v3.8.2 为准**（下条 09-17 注记中 v3.7.0 指向同步升版）。
 > ⚠️ **2026-09-15 时效注记**：本文为 2026-07/08 时点的模块快照。此后 W3 多模态收编（merge `91f2042`）变更了本文部分事实——入口守卫已放行 type 1/3/34、图片走附件直传/描述注入双路、silk 编解码改 pilk。**现行口径以 `CODE_GRAPH.md` v3.6.0 与 `FUNCTION_INVENTORY.md` N-IMG-1/N-ASR-1 为准**，本文其余机制描述仍可作深度背景阅读。
 > ⚠️ **2026-09-17 补充注记**：主动消息投递目标由「最后活跃用户」改为「全部绑定 wxid 定向」（run_api/main 双入口 sender）。上条 09-15 注记中 CODE_GRAPH 指向升为 **v3.7.0**。
 

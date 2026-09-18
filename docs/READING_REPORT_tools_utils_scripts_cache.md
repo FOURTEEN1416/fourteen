@@ -1,5 +1,7 @@
 # 📚 Tools + Utils + Scripts + Deploy + Cache 模块阅读报告
 
+> ⚠️ **2026-09-19 时效注记**：本文所列 `scripts/sync_character_files.py`（config→data 双库同步）已于 09-18 双角色库收敛时**删除**（config/characters 为唯一权威真源，data/characters 已 tar 备份后删除）；scripts/ 现另含 `rebuild_knowledge_index.py`（索引自权威真源重建）与 `expand_short_descriptions.py`（描述扩写）两个新脚本（09-18/19）。**现行口径以 `CODE_GRAPH.md` v3.8.2 为准**。
+
 **读取进度**：26/26 文件 ✅ 全部穷举阅读 | **读取时间**：2026-08-26  
 **模块定位**：工具系统（BaseTool+8内置工具）+ 通用工具函数 + 运维脚本 + 部署种子 + Redis缓存层  
 
