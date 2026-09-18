@@ -188,8 +188,15 @@ class CharacterKnowledgeService:
                     source_id=f"desc_{i}",
                 ))
 
-        # 3. source_data 中的 personality 长文本
-        personality_text = source_data.get("personality", "") or source_data.get("data", {}).get("personality", "")
+        # 3. personality 长文本
+        #    优先取聚合根字段（2026-09-18 新增 personality_text），回退 source_data
+        #    以兼容按卡直建、未传 source_data 的调用方
+        #    （此前仅读 source_data → 重建索引时该段恒为空，148 块掉到 136 块）。
+        personality_text = (
+            getattr(character, "personality_text", "")
+            or source_data.get("personality", "")
+            or source_data.get("data", {}).get("personality", "")
+        )
         if personality_text:
             for i, paragraph in enumerate(self._split_paragraphs(personality_text)):
                 if paragraph.strip() and len(paragraph) > 10:
@@ -199,16 +206,24 @@ class CharacterKnowledgeService:
                         source_id=f"personality_{i}",
                     ))
 
-        # 4. scenario
-        scenario = source_data.get("scenario", "") or source_data.get("data", {}).get("scenario", "")
+        # 4. scenario（同上：优先聚合根字段）
+        scenario = (
+            getattr(character, "scenario", "")
+            or source_data.get("scenario", "")
+            or source_data.get("data", {}).get("scenario", "")
+        )
         if scenario:
             chunks.append(KnowledgeChunk(
                 content=scenario,
                 source="scenario",
             ))
 
-        # 5. creator_notes
-        creator_notes = source_data.get("creator_notes", "") or source_data.get("data", {}).get("creator_notes", "")
+        # 5. creator_notes（同上：优先聚合根字段）
+        creator_notes = (
+            getattr(character, "creator_notes", "")
+            or source_data.get("creator_notes", "")
+            or source_data.get("data", {}).get("creator_notes", "")
+        )
         if creator_notes:
             for i, section in enumerate(self._split_sections(creator_notes)):
                 if section.strip() and len(section) > 20:
