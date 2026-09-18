@@ -43,6 +43,21 @@ class FavoriteManager:
         finally:
             conn.close()
 
+    def unfavorite_by_id(self, fav_id: int) -> bool:
+        """按主键删除收藏。
+
+        `DELETE /api/shisi/memory/favorite/{fav_id}` 的路由语义即此——2026-09-18 前该端点
+        的 `fav_id` 路径参数被完全忽略（实调 `unfavorite(character_id, memory_id)`，而后者
+        两个参数均有空默认值，可被无参省略调用）。
+        """
+        conn = sqlite3.connect(str(self._db_path))
+        try:
+            cursor = conn.execute("DELETE FROM memory_favorites WHERE id=?", (fav_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
     def list_favorites(self, character_id: str) -> list[dict[str, Any]]:
         conn = sqlite3.connect(str(self._db_path))
         conn.row_factory = sqlite3.Row

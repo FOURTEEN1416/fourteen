@@ -718,7 +718,7 @@ tools/
 | 层 | 路径 | 职责 | 调用方 |
 |---|---|---|---|
 | 域路由层 | `api/routers/*.py` (21 模块，不含 `__init__.py`) | 控制 plane 端点：character/auth/admin/voice/wechat/clone/... | `api/app_factory.py` 主挂载 |
-| shisi 域层 | `shisi/api/*.py` + `shisi/api/v2/` | DDD 核心 plane 端点：affinity/emotion_stage/persona/stats/vital_signs + v2 迁移 | `shisi/api/registry.py:setup_shisi` 由 app_factory 调用 |
+| shisi 域层 | `shisi/api/*.py` | DDD 核心 plane 端点：affinity/emotion_stage/persona/stats/vital_signs | `shisi/api/registry.py:setup_shisi` 由 app_factory 调用 |
 
 两层不冲突：域路由层面向"控制/管理"，shisi 域层面向"DDD 核心域"。两者通过 `app_factory.create_api_app()` 统一装配。
 

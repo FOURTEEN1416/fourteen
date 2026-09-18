@@ -69,7 +69,6 @@
 |------|------|------|
 | User | api/database.py | ✅ 活跃（含 llm_config 字段） |
 | UserSession | api/database.py | ✅ 活跃 |
-| affinity/emotion_stage/persona 等 | shisi/api/v2/ | DDD 核心 plane，异步 SQLite 访问 |
 
 > **注意:** `shisi/` 子系统使用独立 SQLite 异步访问（DDD 分层: affinity/emotion_stage/persona/stats/vital_signs）。
 > `api/database.py` 中的 User/UserSession 是用户认证主模型。

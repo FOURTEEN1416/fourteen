@@ -51,10 +51,16 @@ async def favorite_memory(req: FavoriteRequest):
 
 
 @router.delete("/favorite/{fav_id}", response_model=ApiResponse)
-async def unfavorite_memory(fav_id: int, character_id: str = "", memory_id: str = ""):
+async def unfavorite_memory(fav_id: int):
+    """按收藏主键取消收藏。
+
+    2026-09-18 前签名 `(fav_id, character_id="", memory_id="")` 中 `fav_id` **完全未被使用**，
+    实际删除条件是 character_id + memory_id（两者均有空默认值，可被无参省略调用，
+    行为未定义）。现改为 `fav_id` 唯一判据，与路径参数语义一致。
+    """
     if _fav_mgr is None:
         raise HTTPException(status_code=503, detail="FavoriteManager未初始化")
-    ok = _fav_mgr.unfavorite(character_id, memory_id)
+    ok = _fav_mgr.unfavorite_by_id(fav_id)
     return ApiResponse(data={"success": ok})
 
 
@@ -76,6 +82,17 @@ async def forward_memory(req: ForwardRequest):
 
 @router.delete("/{memory_id}", response_model=ApiResponse)
 async def delete_memory(memory_id: str, character_id: str = "", confirm: bool = False):
+    """占位端点——删除链路**未实现**。
+
+    保留 `confirm` 前置校验（既有契约：未确认回 400，见 `tests/test_integration.py`）；
+    但 `confirm=true` 时**不再返回"已移入回收站（30天保留期）"的谎报成功**，改为 501。
+    依据：`memory_recycle_bin` 表已存在于 `shisi/migrations.py`，删除链路从未落地——谎报
+    成功比显式失败更危险（调用方会误以为数据已按 30 天保留期妥善处置）。
+    参数签名保留以维持路由契约不变。
+    """
     if not confirm:
         raise HTTPException(status_code=400, detail="删除记忆需要二次确认(confirm=true)")
-    return ApiResponse(data={"memory_id": memory_id, "message": "已移入回收站（30天保留期）"})
+    raise HTTPException(
+        status_code=501,
+        detail="记忆删除尚未实现：memory_recycle_bin 表已存在但无删除链路",
+    )

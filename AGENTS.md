@@ -1,7 +1,7 @@
 # AGENTS.md — 唯一的你（ai-girlfriend）项目 Agent 宪法
 
 > **项目**：unique-you — 唯一的你·十四 — 基于 LLM 的智能情感陪伴系统
-> **版本**：v1.9（2026-09-18 五项裁决执行批次：双角色库收敛为 `config/characters` 单库 + `ASEEngine._monologues` 冗余副本与 `extract_intent` 死方法删除 + 测试基线 1064 收集 / 1060 通过）
+> **版本**：v1.10（2026-09-18 死代码与假端点清理批次：删除 `shisi/api/v2/` 未挂载死模块 + `DELETE /api/shisi/memory/{id}` 假端点改 501 + `unfavorite` 的 `fav_id` 参数失效修复）
 > **工作目录**：`D:\Desktop\ai-girlfriend`
 > **Python**：3.10+（见 `pyproject.toml`）
 > **主语言**：中文（代码注释遵循用户最新消息语言）
@@ -96,7 +96,7 @@
 | 主动搭话 | 主动开发 | `proactive/` |
 | 语音 | 语音开发 | `voice/` |
 | 剧情线 | 剧情开发 | `plugins/` / `shisi/storyline/` |
-| 微信集成 | 集成开发 | `wechat_direct/` / `shisi/` / `shisi/api/v2/`（DDD 核心 plane:affinity/emotion_stage/persona/stats/vital_signs + v2 迁移) |
+| 微信集成 | 集成开发 | `wechat_direct/` / `shisi/`（DDD 核心 plane: affinity/emotion_stage/persona/stats/vital_signs） |
 | 克隆训练 | 训练开发 | `clone_training/`（weclone_adapter 已于 08-28 删除，克隆收敛为本地提取+JSON 上传） |
 | 前端 | 前端开发 | `frontend/`（React 19 + Vite 8） |
 | 部署 | 部署开发 | `deploy/`（bat/ps1 双版本部署脚本已于 08-28 删除） |
@@ -225,6 +225,7 @@
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v1.10** | **2026-09-18** | **死代码与假端点清理批次**（用户裁决「三项全做」）：① 删除 `shisi/api/v2/` 共 6 文件——`v2_router` 全仓无 `include_router` 挂载，**推翻 `docs/DELETION_LOG.md` 早先"保留待将来集成"裁决**，同步 4 处文档引用（本文件 Owner Map / `CODE_GRAPH.md` 分层表 / `CODEMAPS/DATABASE.md` / `CODEMAPS/MODULES.md`）；② `DELETE /api/shisi/memory/{memory_id}` 由"谎报已移入回收站"改为 **501 Not Implemented**（`memory_recycle_bin` 表已存在但无删除链路；保留未确认时的 400 前置校验）；③ `unfavorite_memory` 的 `fav_id` 路径参数由被忽略改为唯一判据（新增 `FavoriteManager.unfavorite_by_id`）；并更正 F1 告警文案 `AUTH_ENABLED`→`API_KEY_ENABLED` + 修补 ruff F401/I001 两处门禁破坏。测试 1060 通过 / 4 跳过，零回归 |
 | **v1.9** | **2026-09-18** | **五项裁决执行批次**：① 双角色库收敛——`config/characters` 为唯一权威真源（data/characters 53 张旧卡 tar 备份后删除并入；7 处代码改指向：knowledge_routes 兜底链/shisi manager·importer·exporter/migration×2/preflight；`sync_character_files.py` 双库同步脚本删除；4 张无对应孤立卡裁决废弃封存）；③⑤ `ASEEngine._monologues` 冗余副本删除；④ `extract_intent` 死方法删除；② bg 背景不恢复。测试基线 1064 收集/1060 通过（+48=25 卡 persona 注入参数化全覆盖） |
 | **v1.8** | **2026-09-17** | **全仓性能与正确性扫描批次**：§0/§2/§4.3 测试口径二次刷新（1016 收集/1012 通过/4 跳过 + vitest 87/87 + tsc 0 错）；新增 `utils/project_paths.py` 统一项目根锚定（修复 CWD 相对路径导致的配置静默丢失，覆盖 scheduler/LLM 供应商/角色库/剧情线/重要日期/迁移/音色等 12 处）；修复 8 类性能与正确性问题（见 `docs/verification/2026-09-17-全仓扫描验证报告.md`）；移动端适配推进；文档与代码一致性校正（README/CODEMAPS/CODE_GRAPH 端点口径 208→204） |
 | **v1.7.2** | **2026-09-17** | §4.3 测试口径刷新（1014 收集/1010 通过/4 跳过 + vitest 87/87）；同日三连修+web 两开关+死代码清洗见 CODE_GRAPH v3.7.0 与 DECISION_LEDGER 09-17 行 |

@@ -2,6 +2,30 @@
 
 # Code Deletion Log
 
+## [2026-09-18] shisi v2 死模块删除 + 假端点改 501（用户裁决「三项全做」）
+
+### 删除对象与证据
+- `shisi/api/v2/`（6 文件：`__init__.py` / `character_routes.py` / `health_routes.py` / `migration_routes.py` / `persona_routes.py` / `schemas.py`）
+  - **零挂载**：`v2_router` 在全仓无任何 `include_router` —— `app_factory.create_api_app()` 仅调 `setup_shisi` → `registry._mount_routes`，该函数只挂 8 组 v1 路由
+  - **零消费**：全仓 grep `api.v2` / `api/v2` / `v2_router` / `from .v2`，除自身外只命中文档引用（AGENTS Owner Map、CODE_GRAPH 分层表、CODEMAPS ×2）、本日志早先的保留裁决、LOG 待裁决条目 —— **无任何代码 import**
+  - **推翻早先裁决**：早先"保留待将来集成"的结论见下方 Files NOT Removed 段的 ⚠️ 更新标注
+- 同步文档 4 处引用移除：`AGENTS.md` Owner Map / `CODE_GRAPH.md` 分层表 / `docs/CODEMAPS/DATABASE.md`（整行）/ `docs/CODEMAPS/MODULES.md`（整行）
+
+### 修正（非删除）
+- `shisi/api/memory_routes.py::delete_memory` —— 由「回 `已移入回收站（30天保留期）` 但**不做任何事**」改为 `confirm=true` 时 **501 Not Implemented**；**保留未确认时的 400 前置校验**（既有契约，见 `tests/test_integration.py::test_delete_requires_confirm`，故无需改测试）。**谎报成功比显式失败更危险**（调用方会误以为数据已妥善处置）。依据：`memory_recycle_bin` 表已存在于 `shisi/migrations.py`，但删除链路从未落地
+- `shisi/api/memory_routes.py::unfavorite_memory` —— 签名 `(fav_id, character_id="", memory_id="")` 中 `fav_id` **被完全忽略**（实调 `unfavorite(character_id, memory_id)`，而后者两参数均有空默认值 → 可被无参省略调用，行为未定义）。改为 `fav_id` 唯一判据，新增 `FavoriteManager.unfavorite_by_id(fav_id)`
+
+### 验证
+- `ruff check .` → All checks passed（0.16.8，与 CI 同版本）
+- 行为实证：临时库写入 3 条收藏 → `unfavorite_by_id` 首删 `True` / 重删 `False` / **邻居角色未被误删**；HTTP `DELETE /favorite/999999` → 200 `success:false`；`DELETE /memory/x?confirm=true` → **501**
+- `pytest -q` → 1060 passed / 4 skipped（删除 6 文件后零回归）
+
+### Impact
+- 删除 6 文件（v2 死模块）；**端点总数不变**（v2 从未挂载）
+- 唯一行为变更：1 个端点由假成功改 501。前端 `frontend/src/` 对 `/api/shisi` **零引用**，无消费方受影响
+
+---
+
 ## [2026-09-17] 死代码清洗（用户裁决"死代码可以直接清洗掉"）
 
 ### 删除对象与证据
@@ -353,6 +377,7 @@
 
 ### Files NOT Removed (Intentionally Retained)
 - `shisi/api/v2/health_routes.py` — Defines a `/health` route in the v2 API namespace. The entire `shisi/api/v2/` module (`v2_router`) is never mounted in `app_factory.py`. However, this is part of the shisi v2 API layer and may be activated in future integration work. Left intact to avoid breaking import chains.
+  - ⚠️ **2026-09-18 更新：本保留裁决已被推翻** —— `shisi/api/v2/` 全 6 文件按用户裁决删除（见本文件首条）。"避免破坏 import 链"的顾虑经全仓 grep 证伪：**零代码 import，仅存在文档引用**。
 - `shisi/memory/legacy/` — Despite the "legacy" name, these modules are actively imported by `shisi/application/memory_service.py` and covered by `tests/test_memory.py` + `tests/test_memory_pipeline.py`. Not dead code.
 - `shisi/knowledge/legacy/` — Despite the "legacy" name, `rag_engine.py` is actively imported by `shisi/knowledge/legacy/__init__.py` and tested by `tests/test_rag_engine.py`. Not dead code.
 
