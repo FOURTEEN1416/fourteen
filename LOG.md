@@ -1647,3 +1647,23 @@
 **证据**：`docs/verification/2026-09-19-前端视觉与性能诊断/` 19 张实机截图（6.7MB：桌面 intro/登录、移动 4 页、内部 13 页）。
 **清理**：诊断账号（user 1502）DB 行已清除（users/user_sessions/consent_records）；临时脚本 `frontend/tmp-mobile-shots.mjs` 已删；后台 dev/preview 服务已停；`docs/tmp-fe-diag/` 已移除。
 **修复建议顺序（待用户确认后才动代码）**：① btn-macaron 对比度 → ② 四页补 lazy + preload 收敛 → ③ 粉色残留统一清 → ④ epoch 日期 → ⑤ DPR。
+
+---
+
+## 2026-09-19（七十）— 前端诊断报告全面修复（六十九号五项建议全落地，3728a87）
+
+**任务**：用户指令「全面进行修复」——把六十九号诊断的 ①–⑤ 修复顺序全部执行并验证闭环。
+
+### 逐项修复
+
+- **① btn-macaron 对比度（P0）**：`color: white` → `var(--color-text-primary)`（#1F2937），14px 按钮在粉彩渐变上由 1.25–1.33:1 → ≈10:1；`--color-gray-400` 令牌由 #9CA3AF 单点提亮为 #6B7280（画布底 2.45→4.66:1，183 处 `text-gray-400` + 41 处 `text-gray-300`→400 批量收敛）；三处品牌渐变文字（Sidebar/MobileDrawer/LoginPage）改用 AA 深度色标 `from-primary-600 via-accent-600 to-macaron-mint-deeper`（新增令牌 #0F766E）。
+- **② 四页 lazy + preload 收敛（P0 性能）**：CreateRole/RoleSettings/StatusCenter/StorylineEditor + ScrollProgress 全部 `lazy()`，ProtectedLayout 加 Suspense 边界。**根因追查（本批最大暗坑）**：入口预加载始终消不掉 motion chunk——`vite build --sourcemap` + map.sources 实证 react 核心 4 模块（react/index、react.production、jsx-runtime×2）被 **manualChunks 函数 shim 错误并入 motion chunk**（临时日志证实函数确实返回 'vendor'，即 rolldown-vite 后处理阶段搬运，非匹配规则问题）。改用 rolldown 原生 `advancedChunks.groups` 声明式分组后彻底归位。**实测**：入口 modulepreload 由 6 项含 motion → 5 项纯静态（runtime/vendor/query/ui/state）；/intro 真机网络零 `motion-*.js` 请求；index chunk gzip 58.28→**32.50KB**；进入受保护路由才按需拉 motion（130.45KB/42.64gz，StatusCenter 页实测按需加载）。
+- **③ 粉色残留统一（P1 视觉）**：`glass-pink`/`glass-green` → `glass-yellow`/`glass-mint`（RoleSettingsTabs/SettingsVoice/CreateRole 使用点同步）；CustomCursor 死变体 `data-variant` pink/green 别名删除（全仓仅 `data-hover="yellow"` 在用）；pulse-glow/shimmer 死 CSS 删除；pulse-ring/nav-item.active/input focus 环统一暖色-天蓝系。
+- **④ epoch 日期（P2）**：WeChatPage `last_activity` 后端为 `time.time()` 秒（wechat_connector.py:688），前端按毫秒解析显示 1970——加秒/毫秒自适应换算 + 2010 年前判废不渲染。**真机实证**：修复后显示「最后活动: 2026/7/27 22:45:18」。
+- **⑤ DPR + 字体 + 空态（P2）**：ParticleCanvas 背衬像素 ×`min(dpr,2)` + `setTransform` 逻辑坐标（CDP 模拟 2x 屏实测 canvas 2560×1440）；body 字体栈补齐 CJK 回退（PingFang SC/Microsoft YaHei/Noto Sans SC）；StatusCenter「最近沉淀」过滤空内容条目并给空态文案（实测显示「还没有沉淀下来的记忆」）；index.html 删除误导性 Google-Fonts 预连接注释。
+
+**验证**：`tsc --noEmit` 0 错误；vitest **87/87**；`vite build` 通过（无 sourcemap 终版）；Playwright 真机复验五点位（登录按钮计算样式 rgb(31,41,55)、intro 网络清单、状态中心空态、epoch、DPR）；截图 3 张存 `docs/verification/2026-09-19-frontend-fix/`。
+
+**清理**：一次性验证账号（user 1502，users/user_sessions/consent_records 共 5 行）DB 已清除；临时脚本 `_tmp_chunk_audit.py`、vite.config 临时日志已删；本地 dev 后端与 preview 进程已停；`/tmp` 注册载荷已删。
+
+**已知限制**：状态中心宽屏「左侧留白」为布局特性（内容列居中 max-w），不在本批范围；Lighthouse 本机仍 NO_FCP 不可用，性能结论以 CDP+真机网络清单为准。
