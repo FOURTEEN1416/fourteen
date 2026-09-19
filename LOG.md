@@ -1577,3 +1577,37 @@
 **误报排除**：config/shisi.yaml「不存在」系 Bash cwd 滞留 docs/ 所致（memory 已有此教训），实存在且 default_tts 已修。
 
 **结果**：docs/ 37 项全部逐一核实完毕；13 文件修订（5 truth + 8 档案注记），21 项核实不动。零代码变更，B 档 commit → push 即完成。
+
+---
+
+## 2026-09-19（六十八）— 主动消息「白天一条都不发」根因修复（5e7c33c）
+
+**任务**：用户报障「查一下日志，为什么还是没有给我主动发消息？？」。生产实证驱动，要求全面一次性修复。
+
+**根因（日志闭环证明，非推测）**：**静默时段（23-7）内引擎照常生成消息并扣配额，消息却在投递层被丢弃。**
+`ase.tick()` 内部 `_generate_and_return()` 即调 `_record_proactive_sent()`（`daily_count+1` / 写 `_last_proactive_time` / `urgency.reset()`），而投递发生在 tick 返回**之后**由 `scheduler._deliver()→_send_to_all()` 执行，后者首句即判 `_is_quiet_hours()` 并 `return False`。
+实证：`00:02–04:05` 每 35 分钟一条（30 分钟冷却）、连续 **8 条全被丢弃却全计数** → 配额凌晨 4 点即 **8/8 满额** → 当天 07:00 后每个 tick 都 `result=False`，**全天零投递**；而 urgency 一直挂在 8.50（用户已 90 小时未聊天，missing_bonus 拉满）。09-18 同一模式复现 → **每天重演**。
+
+**排查中的两个认知陷阱（已记账）**：
+1. **日志不在 journald**。`ai-girlfriend.service` 虽有 `StandardOutput=append:/var/log/ai-girlfriend.log`，但 48h 内 journal 只有 systemd 自身消息、**0 条 ERROR** —— 只查 journal 会得出「服务无异常」的错误结论。真源是 `/opt/ai-girlfriend/data/app.log`。
+2. **`result=True` 的行打印 `urgency=0.00` 是假象**（`urgency.reset()` 副作用），`result=False` 才打印真实值 8.50 → 极易误判成「紧迫度不够」，真因是配额。且旧日志 `result=False` **不带原因**，无法区分配额/冷却/阈值。
+
+**修复（7 项）**：
+1. **记账与投递解耦** —— `tick()` 返回**未记账候选**，新增 `commit_sent()`；`_deliver()` 改为**返回 bool**（旧实现丢弃了 `_send_to_all` 的返回值），仅投递成功后扣配额/写冷却/重置紧迫度
+2. **静默前置到生成层** —— `_check_ase` 在 `tick()` 前短路（只 `dry_run` 更新紧迫度）；`ASEEngine.set_quiet_hours()` 由 scheduler 注入并随 `reload_config`/`set_quiet_hours` 同步
+3. **场景日期标记延迟置位** —— `_check_scene_triggers(commit=False)` 返回 `_scene`/`_scene_date`，投递成功才置位（旧实现生成即置位，被丢弃后当天该场景永不补发）
+4. **LLM 输出清洗** —— 新增 `sanitize_message()`，拦截推理泄漏 / 超长（>60 字）/ 多行思考。生产实证泄漏原文：`02:55属于深夜，不在早安、吃饭或晚安的特定时间点（晚上是22:00-0:00），但接近深夜。既然时间是凌晨快3点…`；旧实现只判 `len>5` 等于不判
+5. **去重与节流** —— 归一化精确匹配 + 窗口 **50→6**（模板池仅 3~8 条/类，原窗口会让池子整体判重致彻底发不出）；生成时把最近 6 条注入 prompt 要求换角度；`_select_type_by_urgency()` 加同类消息节流
+6. **可观测性** —— `_check_frequency()` 由 `bool` 改为 `(bool, reason)`；`tick()` 输出 `_last_skip_reason`；`/api/proactive/state` 增 `max_daily`/`quiet_hours`/`last_skip_reason`
+7. **连带修复重要日期祝福** —— `_check_important_dates` 原**只**由 00:05 每日维护调用，恒落在静默内 → 生日/纪念日祝福**从未送达**；改为每小时任务（调度任务 5→6）+ 静默跳过 + 当日幂等键
+
+**⚠️ 一条被否决的方案（留痕）**：最初打算用**相似度去重**解决「夜里连着 8 条都在催睡」，实测后否决 —— 「都半夜了还不睡…」vs「都两点多了还不睡…」的 `SequenceMatcher` 比值仅 **0.37**，而两条正常换说法的「早啊」/「早安呀」也有 **0.25**，**任何阈值都无法区分「同义刷屏」与「正常换说法」**。改由「把近期消息注入 prompt」+「同类消息节流」解决。
+
+**验证**：
+- 测试 `--collect-only` **1086**；分块实跑 **1082 passed / 4 skipped**（+22 用例全在 `tests/test_proactive.py`，零回归）。⚠️ 单进程整跑会在**随机位置**停住（三次分别停在 `test_integration.py`/`test_web_enricher.py`/`test_llm_providers_routes.py`，三者单独跑全通过）→ 属聚合态资源问题，分块跑法已写入 `AGENTS.md` §4.3
+- `ruff check`（本次改动 4 文件）0 错误；`scripts/ci_gates.py` 4/4 通过
+- **生产端到端实证**：配额清零重启后首个 tick 即 `ASE tick: hours=91.33 urgency=8.50 daily_count=0 result=True reason=ok` → `ASE triggered: [worry] 13点啦，该吃饭了…` → `主动消息已投递: wechat` → `主动消息已记账: daily_count 0 -> 1`
+
+**部署**：`5e7c33c` → push → 服务端 `git pull` + `deploy/remote_deploy.sh` 四步全绿；双端 health 200（`unique-you-api` / nginx :80）。
+**解封操作**：`systemctl stop` → 备份并清零 `data/proactive_state.json` 的 `daily_count` → `systemctl start`（⚠️ **重启不解封** —— `_load_state` 会读回旧值，且 `_rollover_if_new_day` 见 `last_reset_date == today` 即跳过，必须先改文件）。
+**中间产物清理**：`_tmp_stage.py`（hunk 精确暂存脚本）、`_tmp_pytest_full.log` 已删；保留 `data/proactive_state.json.bak-before-quota-unblock-*`（唯一改前备份）。
