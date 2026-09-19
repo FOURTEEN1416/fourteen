@@ -267,8 +267,8 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
         <Users className="w-6 h-6" />
       </div>
       <div className="text-center">
-        <p className="text-sm font-medium text-gray-700">从微信聊天记录克隆角色</p>
-        <p className="text-xs text-gray-400 mt-1">下载工具 → 本地提取 → 上传分析 → 生成人设</p>
+        <p className="text-sm font-medium text-text-primary">从微信聊天记录克隆角色</p>
+        <p className="text-xs text-text-muted mt-1">下载工具 → 本地提取 → 上传分析 → 生成人设</p>
       </div>
 
       
@@ -317,7 +317,7 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
             点下面按钮复制任务书，粘贴给智能体并告诉它<strong>好友的备注名</strong>，剩余步骤它自己会跑；遇到问题直接问它。
           </p>
           <button onClick={copyGuide}
-            className="w-full py-2 rounded-xl bg-gray-900 text-white text-xs font-medium hover:bg-gray-800 transition-colors flex items-center justify-center gap-1.5">
+            className="w-full py-2 rounded-xl btn-macaron text-xs font-semibold transition-all flex items-center justify-center gap-1.5">
             {guideCopied ? (<><Check className="w-3.5 h-3.5" /> 已复制，去粘贴给智能体</>) : (<><Copy className="w-3.5 h-3.5" /> 一键复制智能体任务书</>)}
           </button>
           <div className="text-[10px] text-amber-600 bg-amber-100/50 rounded-lg p-2">
@@ -404,7 +404,7 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
               )}
               <button
                 onClick={resetAll}
-                className="w-full py-2 rounded-xl bg-gray-100 text-gray-600 text-xs font-medium hover:bg-gray-200 transition-colors"
+                className="w-full py-2 rounded-xl btn-quiet text-xs font-medium"
               >
                 重新上传
               </button>
@@ -501,11 +501,11 @@ function FileImportTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Perso
         <button onClick={handleTextParse} className="w-full py-2.5 rounded-xl btn-macaron text-sm font-semibold active:scale-[0.98] transition-all">解析 JSON</button>
       )}
       {parsed && (
-        <div className="glass-card rounded-2xl p-4">
+        <div className="mat-raised rounded-2xl p-4">
           <h4 className="text-xs font-semibold text-text-muted mb-3 flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-macaron-mint-deep" /> 解析预览</h4>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {Object.entries(parsed).map(([label, value]) => (
-              <div key={label} className="bg-white/40 rounded-xl px-3 py-2"><p className="text-[10px] text-text-muted">{label}</p><p className="text-xs text-text-primary mt-0.5 truncate">{value}</p></div>
+              <div key={label} className="bg-gray-900/[0.03] rounded-xl px-3 py-2"><p className="text-[10px] text-text-muted">{label}</p><p className="text-xs text-text-primary mt-0.5 truncate">{value}</p></div>
             ))}
           </div>
         </div>
@@ -688,7 +688,7 @@ export default function CreateRole() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Sparkles className="w-5 h-5 text-macaron-yellow-deep" />
-            <h1 className="text-lg font-bold text-gray-800">创建角色</h1>
+            <h1 className="text-lg font-bold text-text-primary">创建角色</h1>
           </div>
           <p className="text-sm text-text-muted">选择一种方式来构建你的 AI 角色</p>
         </div>
