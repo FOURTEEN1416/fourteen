@@ -448,28 +448,38 @@ async def save_user_llm_config(
 
 
 @router.get("/api/channels")
-async def list_channels(_auth: bool = Security(verify_api_key_dep)):
+async def list_channels(
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+):
+    """通道列表：微信项只反映**当前登录用户**自己的通道，不再广播全局 bot。"""
     sessions = deps.sessions
     channels = [
         {"id": "web", "name": "Web 控制台", "type": "web", "status": "connected", "desc": "当前浏览器 WebSocket", "meta": "在线"},
         {"id": "api", "name": "REST API", "type": "api", "status": "connected", "desc": "HTTP API 接口", "meta": "端口 8000"},
     ]
     try:
-        from wechat_direct import get_connector
-        conn = get_connector()
-        if conn and conn.token:
-            uptime = time.time() - conn.started_at if conn.started_at else 0
+        from wechat_direct.wechat_connector import get_wechat_state
+
+        state = get_wechat_state(user_id=user_id)
+        if state.get("connected"):
+            uptime = state.get("uptime_seconds", 0) or 0
             channels.append({
-                "id": "wechat", "name": "个人微信", "type": "wechat",
-                "status": "connected", "desc": "直接微信连接", "meta": f"在线 {uptime:.0f}s",
+                "id": "wechat", "name": "我的微信", "type": "wechat",
+                "status": "connected", "desc": "你的独立微信通道",
+                "meta": f"在线 {uptime:.0f}s",
             })
         else:
             channels.append({
-                "id": "wechat", "name": "个人微信", "type": "wechat",
-                "status": "disconnected", "desc": "直接微信连接", "meta": "",
+                "id": "wechat", "name": "我的微信", "type": "wechat",
+                "status": "disconnected", "desc": "尚未连接你的微信", "meta": "",
             })
-    except ImportError as e:
-        logger.debug("wechat_direct module not available, skipping WeChat channel: %s", e)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("读取用户微信通道失败: %s", e)
+        channels.append({
+            "id": "wechat", "name": "我的微信", "type": "wechat",
+            "status": "disconnected", "desc": "尚未连接你的微信", "meta": "",
+        })
     if sessions:
         active = sessions.get_active_sessions()
         for ses_id in active:

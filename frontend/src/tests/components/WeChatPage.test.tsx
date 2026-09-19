@@ -94,7 +94,7 @@ describe('WeChatPage', () => {
       isError: false,
     })
     renderPage()
-    expect(screen.getByText('微信桥接 已连接')).toBeDefined()
-    expect(screen.getByText('微信桥接 已连接').closest('.glass-card')).toBeDefined()
+    expect(screen.getByText('我的微信 已连接')).toBeDefined()
+    expect(screen.getByText('我的微信 已连接').closest('.glass-card')).toBeDefined()
   })
 })

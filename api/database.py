@@ -244,6 +244,89 @@ class WechatBinding(Base):
         return f"<WechatBinding(id={self.id}, wxid='{self.wxid}', user_id={self.user_id}, char='{self.character_card_id}')>"
 
 
+class WechatChannelSession(Base):
+    """每人独立微信通道会话 — 凭证/状态/轮询按 user_id 隔离。
+
+    一人最多两条（slot=0/1）；全局唯一 bot 通道模型已废弃。
+    """
+
+    __tablename__ = "wechat_channel_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    slot: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    bot_id: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), default="idle", nullable=False
+    )  # idle|waiting_qr|scanned|connected|error
+    nickname: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    last_error: Mapped[str] = mapped_column(String(512), default="", nullable=False)
+    messages_today: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_connected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "slot": self.slot,
+            "bot_id": self.bot_id,
+            "status": self.status,
+            "nickname": self.nickname,
+            "last_error": self.last_error,
+            "messages_today": self.messages_today,
+            "last_connected_at": (
+                self.last_connected_at.isoformat() if self.last_connected_at else None
+            ),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"<WechatChannelSession(user_id={self.user_id}, slot={self.slot}, "
+            f"status='{self.status}', bot_id='{self.bot_id}')>"
+        )
+
+
+class WechatPeerPreference(Base):
+    """通道内好友角色自选 — (通道所有者, 好友wxid) → 角色卡。
+
+    与 wechat_bindings 区分：binding 表达「wxid↔注册用户」身份；
+    本表表达「在 U 的通道里，F 选了哪张卡」。
+    """
+
+    __tablename__ = "wechat_peer_preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    peer_wxid: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    character_card_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    chosen_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "owner_user_id": self.owner_user_id,
+            "peer_wxid": self.peer_wxid,
+            "character_card_id": self.character_card_id,
+            "chosen_at": self.chosen_at.isoformat() if self.chosen_at else None,
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"<WechatPeerPreference(owner={self.owner_user_id}, "
+            f"peer='{self.peer_wxid}', char='{self.character_card_id}')>"
+        )
+
+
 class CharacterAchievement(Base):
     """角色成就（ADR-0014）— 角色维度隔离，解锁时间以首次达标落库为准。
 

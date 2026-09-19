@@ -14,16 +14,16 @@ import asyncio
 import contextlib
 import json
 import logging
-import threading
-import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import get_current_user_id, require_role
+from api.auth_jwt import get_current_user_id, require_role, verify_token
 from api.database import User, get_db
 from api.deps import deps
 from api.main_routes import ChatRequest, ChatResponse, CreateSessionRequest
@@ -31,6 +31,7 @@ from api.main_routes import ChatRequest, ChatResponse, CreateSessionRequest
 logger = logging.getLogger("api.routers.chat_routes")
 
 router = APIRouter(tags=["chat"])
+_bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def _resolve_character_id(character_id: str) -> str:
@@ -262,58 +263,81 @@ def _query_history_sync(sm, session_id: str, limit: int, before: int) -> list[di
 
 
 # ═══════════════════════════════════════════════════════
-# WeChat Channel Management
+# WeChat Channel Management（2026-09-19：改为 admin-only 兼容面）
+# 用户侧一律走 /api/wechat/channel*（JWT，只操作自己的通道）。
 # ═══════════════════════════════════════════════════════
 
 
 @router.post("/api/channels/wechat/connect")
-async def manual_connect_wechat(_auth: bool = Security(verify_api_key_dep)):
-    conn = deps.get_wechat_connector()
-    if conn and conn.token:
-        return {"status": "connected", "message": "微信已连接"}
+async def manual_connect_wechat(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """Admin 兼容：启动遗留全局/管理员通道。普通用户请用 /api/wechat/channel/connect。"""
+    from wechat_direct.connector_registry import get_registry
 
-    def _do_connect():
-        try:
-            from wechat_direct import WeChatConnector
-            # 修复 P0-WX1：必须传入 UserManager（deps.gf），而非 Orchestrator（deps.orch）。
-            # UserManager 负责多用户路由 + 角色隔离；Orchestrator 只处理单条消息。
-            connector = WeChatConnector(deps.gf)
-            connector.run()
-        except Exception as e:
-            logger.exception("微信连接失败: %s", e)
-
-    thread = threading.Thread(target=_do_connect, daemon=True)
-    thread.start()
-    return {"status": "connecting", "message": "微信连接已触发，请看终端/页面二维码扫码登录"}
+    admin_id = _admin[0]
+    try:
+        result = get_registry().start_login(admin_id, slot=0, user_manager=deps.gf)
+        return {**result, "message": "已触发管理员通道扫码（每人独立通道请使用 /api/wechat/channel）"}
+    except Exception as e:  # noqa: BLE001
+        logger.exception("管理员微信连接失败: %s", e)
+        return {"status": "error", "message": str(e)}
 
 
 @router.post("/api/channels/wechat/disconnect")
-async def manual_disconnect_wechat(_auth: bool = Security(verify_api_key_dep)):
+async def manual_disconnect_wechat(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    from wechat_direct.connector_registry import get_registry
+
+    admin_id = _admin[0]
+    get_registry().disconnect(admin_id, 0)
     conn = deps.get_wechat_connector()
     if conn:
-        conn.stop()
-    return {"status": "disconnected", "message": "微信已断开"}
+        with contextlib.suppress(Exception):
+            conn.stop()
+    return {"status": "disconnected", "message": "已断开管理员兼容通道"}
 
 
 @router.get("/api/channels/wechat/connection-status")
-async def get_wechat_connection_status(_auth: bool = Security(verify_api_key_dep)):
-    from wechat_direct import get_wechat_state
-    state = get_wechat_state()
-    if state.get("connected"):
+async def get_wechat_connection_status(
+    _auth: bool = Security(verify_api_key_dep),
+    credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
+):
+    """状态：带 JWT 且为普通用户时返回**自己的**通道；admin 无参兼容返回遗留全局。
+
+    禁止再向未登录/普通用户广播全局 bot 在线状态。
+    """
+    from wechat_direct.wechat_connector import get_wechat_state
+
+    uid = _try_user_id(credentials)
+    if uid is not None:
+        state = get_wechat_state(user_id=uid)
         return {
-            "status": "connected",
-            "connected": True,
-            "message": "已连接",
+            "status": "connected" if state.get("connected") else "idle",
+            "connected": bool(state.get("connected")),
+            "message": "已连接" if state.get("connected") else "未连接",
             "started_at": state.get("started_at", 0),
             "wxid": state.get("bot_id", ""),
+            "owner_user_id": uid,
         }
-    return {"status": "idle", "connected": False, "message": "未连接"}
+    # 无 JWT：仅在 API Key 场景下由 admin 使用；否则视为未连接（不泄露全局状态）
+    raise HTTPException(status_code=401, detail="需要登录后查看你的微信通道状态")
 
 
 @router.get("/api/channels/wechat/status")
-async def get_wechat_status(_auth: bool = Security(verify_api_key_dep)):
-    from wechat_direct import get_wechat_state
-    state = get_wechat_state()
+async def get_wechat_status(
+    _auth: bool = Security(verify_api_key_dep),
+    credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
+):
+    from wechat_direct.wechat_connector import get_wechat_state
+
+    uid = _try_user_id(credentials)
+    if uid is None:
+        raise HTTPException(status_code=401, detail="需要登录后查看你的微信通道状态")
+    state = get_wechat_state(user_id=uid)
     return {
         "connected": bool(state.get("connected")),
         "uptime_seconds": state.get("uptime_seconds", 0),
@@ -321,26 +345,41 @@ async def get_wechat_status(_auth: bool = Security(verify_api_key_dep)):
         "last_activity": state.get("last_activity"),
         "messages_today": state.get("messages_today", 0),
         "reconnect_attempts": state.get("reconnect_attempts", 0),
+        "owner_user_id": uid,
+        "channels": state.get("channels"),
     }
 
 
-@router.get("/api/channels/wechat/status-stream")
-async def wechat_status_stream(_auth: bool = Security(verify_api_key_dep)):
-    """SSE 实时推送微信连接状态，解决前端轮询导致的状态抖动问题。
+def _try_user_id(credentials) -> int | None:
+    if credentials is None:
+        return None
+    try:
+        payload = verify_token(credentials.credentials, expected_type="access")
+        sub = payload.get("sub")
+        return int(sub) if sub is not None else None
+    except (JWTError, HTTPException, TypeError, ValueError):
+        return None
 
-    优化（B5）：
-    - 只在状态变化时推送，避免无谓的重复数据
-    - 30 秒心跳保活（SSE 注释行），防止代理超时断开
-    - 客户端断开时立即退出循环（捕获 CancelledError）
-    """
-    from wechat_direct import get_wechat_state
+
+@router.get("/api/channels/wechat/status-stream")
+async def wechat_status_stream(
+    _auth: bool = Security(verify_api_key_dep),
+    credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
+):
+    """SSE 实时推送**当前登录用户**的微信连接状态。"""
+    from wechat_direct.wechat_connector import get_wechat_state
+
+    uid = _try_user_id(credentials)
+    if uid is None:
+        # EventSource 可能走 query api_key；再试 query 中的 JWT 不可行，直接拒绝
+        raise HTTPException(status_code=401, detail="需要登录后订阅微信状态")
 
     async def _event_generator():
         last_signature: tuple = ()
         heartbeat_counter = 0
         while True:
             try:
-                state = get_wechat_state()
+                state = get_wechat_state(user_id=uid)
                 payload = {
                     "connected": bool(state.get("connected")),
                     "uptime_seconds": state.get("uptime_seconds", 0),
@@ -348,8 +387,8 @@ async def wechat_status_stream(_auth: bool = Security(verify_api_key_dep)):
                     "last_activity": state.get("last_activity"),
                     "messages_today": state.get("messages_today", 0),
                     "reconnect_attempts": state.get("reconnect_attempts", 0),
+                    "owner_user_id": uid,
                 }
-                # 计算状态签名，只在变化时推送
                 current_signature = (
                     payload["connected"],
                     payload["bot_id"],
@@ -362,7 +401,6 @@ async def wechat_status_stream(_auth: bool = Security(verify_api_key_dep)):
                     heartbeat_counter = 0
                 else:
                     heartbeat_counter += 1
-                    # 每 15 个周期（约 30 秒）发一次心跳保活
                     if heartbeat_counter >= 15:
                         yield ": heartbeat\n\n"
                         heartbeat_counter = 0
@@ -381,19 +419,16 @@ async def wechat_status_stream(_auth: bool = Security(verify_api_key_dep)):
 
 
 @router.post("/api/channels/wechat/reconnect")
-async def reconnect_wechat(_auth: bool = Security(verify_api_key_dep)):
-    conn = deps.get_wechat_connector()
-    if conn and conn.token:
-        conn.stop()
+async def reconnect_wechat(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    from wechat_direct import channel_paths
+    from wechat_direct.connector_registry import get_registry
 
-    def _do_reconnect():
-        import wechat_direct.wechat_connector as wc
-        from wechat_direct import WeChatConnector
-        time.sleep(1)
-        wc._clear_credentials()
-        new_conn = WeChatConnector(deps.gf)
-        new_conn.run()
-
-    thread = threading.Thread(target=_do_reconnect, daemon=True)
-    thread.start()
-    return {"status": "reconnecting"}
+    admin_id = _admin[0]
+    path = channel_paths.credentials_path(admin_id, 0)
+    if path.exists():
+        path.unlink()
+    get_registry().disconnect(admin_id, 0)
+    return {"status": "reconnecting", "message": "已清除管理员通道凭证并触发重连"}

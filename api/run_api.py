@@ -188,85 +188,69 @@ if _scheduler is not None:
 
     def _wechat_sender_factory():
         try:
-            from wechat_direct import get_connector
-            connector = get_connector()
+            from wechat_direct.connector_registry import get_registry
         except Exception:  # noqa: BLE001
             return None
-        if connector is None or not getattr(connector, "token", ""):
+        registry = get_registry()
+        if registry.online_count() == 0:
             return None
 
         async def _send(msg: str) -> None:
-            # 优先发给已绑定微信（多用户各自的角色链路）；
-            # 无任何绑定时回退最后活跃用户（旧行为）
-            #
-            # ⚠️ 2026-09-19 生产事故修复：必须**检查 send_text 的返回值**。
-            # 旧实现丢弃返回值，于是「发送失败」在 `_send_to_all()` 看来是成功
-            # ——生产实证：微信接口返回 {"ret": -2, "errmsg": "prepare failed"}
-            # （会话窗口失效）时，日志仍连续多日显示「主动消息已投递: wechat」，
-            # 用户实际一条都没收到，且当日配额被照扣。
-            # 现在：全部目标失败 → 抛异常，由 `_send_to_all()` 记失败、
-            # `_check_ase()` 据此**不提交配额**。
-            wxids = user_mgr.get_bound_wxids() if user_mgr else []
-            if not wxids:
-                if not connector.send_text(msg):
-                    raise RuntimeError("微信投递失败（无绑定用户，或 _last_user_id 为空）")
-                return
-            failed: list[str] = []
-            for wxid in wxids:
-                if not connector.send_text(msg, to_user=wxid):
-                    failed.append(wxid)
-            if len(failed) == len(wxids):
-                raise RuntimeError(f"微信投递失败：{len(wxids)} 个绑定目标全部未送达")
-            if failed:
-                logger.warning("微信部分投递失败（未送达 %d/%d）: %s", len(failed), len(wxids), failed)
+            # 每人独立通道：按 owner 投递到各自通道的 peer，禁止全局 _last_user_id
+            sent_any = False
+            failures: list[str] = []
+            for owner_id, _slot, conn in registry.all():
+                if not getattr(conn, "token", ""):
+                    continue
+                peers: list[str] = []
+                if user_mgr:
+                    for key in user_mgr.get_bound_wxids():
+                        if ":" in key:
+                            left, right = key.split(":", 1)
+                            if left == str(owner_id):
+                                peers.append(right)
+                        elif getattr(conn, "owner_user_id", None) is None:
+                            peers.append(key)
+                for peer in peers:
+                    if conn.send_text(msg, to_user=peer):
+                        sent_any = True
+                    else:
+                        failures.append(f"{owner_id}:{peer}")
+            if not sent_any:
+                raise RuntimeError(
+                    f"微信投递失败：无任何用户通道送达（failures={failures[:5]}）"
+                )
+            if failures:
+                logger.warning("微信部分投递失败: %s", failures[:10])
 
         return _send
 
     _scheduler.register_channel("wechat", _wechat_sender_factory)
     logger.info("已向主动消息调度器注册 websocket/wechat 通道")
 
-# ── 自动恢复微信连接（如果存在持久化凭证） ──
-# 启动时若 ~/.weixin_cow_credentials.json 存在，则自动启动 connector.run() 恢复消息轮询，
-# 避免服务重启后 wechat_state.json 仍显示 connected:true 但轮询线程未启动。
-# uvicorn --workers 4 启动 4 个进程，flock 文件锁确保只有一个 worker 启动 connector。
+# ── 自动恢复微信连接（每人独立通道） ──
+# 2026-09-19：不再读全局 ~/.weixin_cow_credentials.json 作为用户通道真源。
+# 只恢复 data/wechat_sessions/<user_id>/slotN/ 下已有凭证的通道；
+# 遗留全局凭证若存在，一次性迁移到 admin（用户裁决：是）。
 def _autostart_wechat_connector():
-    """若 ~/.weixin_cow_credentials.json 存在，自动启动微信连接器恢复消息轮询。
-
-    使用 flock 文件锁确保 4 个 uvicorn worker 中只有一个启动 connector，
-    避免多进程同时轮询导致消息重复处理。
-    """
+    """恢复 per-user 微信通道轮询；多 worker 时按 user 会话目录文件锁去重。"""
     try:
-        import fcntl
+        from scripts.migrate_legacy_wechat_channel import migrate_legacy_if_needed
+        from wechat_direct import channel_paths
+        from wechat_direct.connector_registry import get_registry
 
-        from wechat_direct import WeChatConnector
-        from wechat_direct.wechat_connector import CREDENTIALS_PATH
-
-        if not os.path.exists(CREDENTIALS_PATH):
-            logger.info("微信凭证不存在，跳过自动连接（需用户扫码登录）")
-            return
-
-        # 文件锁：确保只有一个 worker 进程启动 connector
-        lock_path = "/tmp/ai-girlfriend-wechat-autostart.lock"
-        lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
         try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            # 其他 worker 已持有锁，本 worker 跳过自动连接
-            logger.info("其他 worker 已持有微信连接锁，本 worker 跳过自动连接")
-            os.close(lock_fd)
+            migrate_legacy_if_needed()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("遗留微信凭证迁移检查失败（忽略）: %s", e)
+
+        if channel_paths.count_sessions_with_credentials() == 0:
+            logger.info("无用户微信通道凭证，跳过自动连接（需用户各自扫码）")
             return
-        # 持有锁直到进程退出（不释放，进程退出时自动释放）
-        logger.info("检测到微信凭证，自动恢复连接（本 worker 持有锁）...")
 
-        def _do_autostart():
-            try:
-                connector = WeChatConnector(user_mgr)
-                connector.run()
-            except Exception as e:  # noqa: BLE001
-                logger.exception("微信自动连接失败: %s", e)
-
-        t = threading.Thread(target=_do_autostart, daemon=True, name="wx_autostart")
-        t.start()
+        logger.info("检测到用户微信通道凭证，开始恢复...")
+        restored = get_registry().restore_on_boot(user_manager=user_mgr)
+        logger.info("微信通道自动恢复完成 count=%s", restored)
     except Exception as e:  # noqa: BLE001
         logger.warning("微信自动连接检查失败: %s", e)
 
@@ -291,6 +275,23 @@ async def _init_and_preload():
             for b in bindings
         ]
         await user_mgr.load_bindings(binding_dicts)
+        # 好友自选角色偏好 → 缓存键 pref:owner:peer
+        try:
+            from api.database import WechatPeerPreference
+
+            pref_result = await session.execute(select(WechatPeerPreference))
+            for p in pref_result.scalars().all():
+                key = f"pref:{p.owner_user_id}:{p.peer_wxid}"
+                await user_mgr.upsert_binding(
+                    key,
+                    {
+                        "wxid": p.peer_wxid,
+                        "user_id": p.owner_user_id,
+                        "character_card_id": p.character_card_id,
+                    },
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("加载微信好友角色偏好失败（忽略）: %s", e)
     logger.info("✅ 数据库就绪，已加载 %d 条微信绑定", len(binding_dicts))
 
     # 一次性数据迁移：清除已下线 provider（opencode_zen）的用户配置
