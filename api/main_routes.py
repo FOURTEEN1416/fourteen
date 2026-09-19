@@ -63,6 +63,11 @@ class ProactiveConfigRequest(BaseModel):
     follow_up_delay1_seconds: int | None = Field(default=None, ge=5, le=3600, description="第一次追问延迟（秒）")
     follow_up_delay2_seconds: int | None = Field(default=None, ge=5, le=7200, description="第二次追问延迟（秒）")
     follow_up_daily_max: int | None = Field(default=None, ge=0, le=200, description="单用户每日追问上限")
+    # ── 回复模式（web 控制端可切换，2026-09-19）──
+    reply_mode: str | None = Field(
+        default=None, pattern="^(immersive|novel)$",
+        description="immersive=沉浸式真人聊天（不写动作神态）；novel=小说式（带动作神态）",
+    )
 
 class ToolToggleRequest(BaseModel):
     enabled: bool

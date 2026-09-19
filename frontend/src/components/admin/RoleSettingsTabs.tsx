@@ -87,8 +87,8 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
             <textarea
               value={description}
               onChange={e => setDescription(e.target.value)}
-              rows={2}
-              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 placeholder-gray-300 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20 transition-all resize-none"
+              rows={3}
+              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 placeholder-gray-300 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20 transition-all resize-y min-h-[4.5rem]"
               placeholder="描述角色的身份、性格、背景..."
             />
           </div>
@@ -450,6 +450,8 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
   const [fuDelay1, setFuDelay1] = useState(45)
   const [fuDelay2, setFuDelay2] = useState(150)
   const [fuDailyMax, setFuDailyMax] = useState(12)
+  // 回复模式：沉浸式真人聊天 / 小说式（带动作神态）
+  const [replyMode, setReplyMode] = useState<'immersive' | 'novel'>('immersive')
   const [paused, setPaused] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState('')
@@ -478,6 +480,7 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
           setFuDelay1(cfgRes.data.follow_up?.delay1_seconds ?? 45)
           setFuDelay2(cfgRes.data.follow_up?.delay2_seconds ?? 150)
           setFuDailyMax(cfgRes.data.follow_up?.daily_max ?? 12)
+          setReplyMode(cfgRes.data.reply_mode ?? 'immersive')
           setPaused(!!cfgRes.data.paused)
         }
         if (histRes?.data?.history) setHistory(histRes.data.history)
@@ -497,6 +500,7 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
         follow_up_delay1_seconds: fuDelay1,
         follow_up_delay2_seconds: fuDelay2,
         follow_up_daily_max: fuDailyMax,
+        reply_mode: replyMode,
       })
       setSavedAt(new Date().toLocaleTimeString('zh-CN'))
     } catch (e) {
@@ -567,6 +571,33 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
       {/* Frequency（真生效：写入运行时控制器） */}
       <Section title="频率控制">
         <div className={`space-y-4 ${paused ? 'opacity-40 pointer-events-none' : ''}`}>
+          {/* 回复模式：两种完全不同的回复逻辑 */}
+          <div>
+            <div className="text-xs text-gray-600 mb-1">回复模式</div>
+            <div className="text-[11px] text-gray-400 mb-2">
+              沉浸式＝像真人发微信（不写动作神态）；小说式＝带动作、神态、环境描写
+            </div>
+            <div className="flex gap-2">
+              {([
+                { key: 'immersive', label: '沉浸式聊天', hint: '像真人发微信' },
+                { key: 'novel', label: '小说式', hint: '带动作神态' },
+              ] as const).map(m => (
+                <button
+                  key={m.key}
+                  type="button"
+                  onClick={() => setReplyMode(m.key)}
+                  className={`flex-1 rounded-xl px-3 py-2 text-xs transition ${
+                    replyMode === m.key
+                      ? 'btn-macaron font-medium'
+                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                  }`}
+                >
+                  <div>{m.label}</div>
+                  <div className="text-[10px] opacity-70">{m.hint}</div>
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="flex items-center gap-4">
             <div className="w-24 shrink-0"><span className="text-xs text-gray-600">紧迫阈值</span></div>
             <div className="flex-1"><Slider value={threshold} min={0} max={10} step={0.5} label="紧迫阈值" onChange={setThreshold} /></div>

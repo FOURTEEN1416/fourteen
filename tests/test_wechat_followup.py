@@ -147,7 +147,7 @@ def test_followup_budget_resets_next_day(tmp_path, monkeypatch):
 
 def test_send_followup_sends_and_schedules_second_round(tmp_path, monkeypatch):
     c = _connector(tmp_path, monkeypatch)
-    monkeypatch.setattr(c, "_generate_followup", lambda prompt: "你怎么不理我了")
+    monkeypatch.setattr(c, "_generate_followup", lambda prompt, last_reply="": "那本书你看完了吗")
 
     sent: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -156,7 +156,7 @@ def test_send_followup_sends_and_schedules_second_round(tmp_path, monkeypatch):
 
     c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "在吗"})
 
-    assert sent == [("你怎么不理我了", "u1@im.wechat")]
+    assert sent == [("那本书你看完了吗", "u1@im.wechat")]
     # 还有第二轮延迟 → 已续排，且 step 递增
     assert c._pending_followups["u1@im.wechat"]["step"] == 1
     assert c._followup_daily["u1@im.wechat"] == 1
@@ -164,7 +164,7 @@ def test_send_followup_sends_and_schedules_second_round(tmp_path, monkeypatch):
 
 def test_send_followup_stops_after_last_round(tmp_path, monkeypatch):
     c = _connector(tmp_path, monkeypatch)
-    monkeypatch.setattr(c, "_generate_followup", lambda prompt: "最后一轮")
+    monkeypatch.setattr(c, "_generate_followup", lambda prompt, last_reply="": "风还挺大的")
     monkeypatch.setattr(c, "send_text", lambda text, to_user="": True)
 
     c._send_followup("u1@im.wechat", {"step": 1, "due": 0, "last_reply": "x"})  # 已是第 2 次
@@ -173,7 +173,7 @@ def test_send_followup_stops_after_last_round(tmp_path, monkeypatch):
 
 def test_send_followup_skips_when_delivery_fails(tmp_path, monkeypatch):
     c = _connector(tmp_path, monkeypatch)
-    monkeypatch.setattr(c, "_generate_followup", lambda prompt: "在吗在吗")
+    monkeypatch.setattr(c, "_generate_followup", lambda prompt, last_reply="": "雨停了吗")
     monkeypatch.setattr(c, "send_text", lambda text, to_user="": False)
 
     c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "x"})
@@ -187,7 +187,7 @@ def test_send_followup_respects_budget(tmp_path, monkeypatch):
     c = _connector(tmp_path, monkeypatch)
     c._followup_daily["u1@im.wechat"] = wc.read_follow_up_config()["daily_max"]
     c._followup_daily_date = time.strftime("%Y-%m-%d")
-    monkeypatch.setattr(c, "_generate_followup", lambda prompt: "还在吗")
+    monkeypatch.setattr(c, "_generate_followup", lambda prompt, last_reply="": "花浇完了吗")
     monkeypatch.setattr(c, "send_text", lambda text, to_user="": pytest.fail("超预算不应发送"))
 
     c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "x"})
@@ -195,7 +195,7 @@ def test_send_followup_respects_budget(tmp_path, monkeypatch):
 
 def test_send_followup_skips_empty_generation(tmp_path, monkeypatch):
     c = _connector(tmp_path, monkeypatch)
-    monkeypatch.setattr(c, "_generate_followup", lambda prompt: "")
+    monkeypatch.setattr(c, "_generate_followup", lambda prompt, last_reply="": "")
     monkeypatch.setattr(c, "send_text", lambda text, to_user="": pytest.fail("空文本不应发送"))
     c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "x"})
 
@@ -220,8 +220,8 @@ def _with_llm(c, out: str) -> _FakeLLM:
 
 def test_generate_followup_accepts_normal(tmp_path, monkeypatch):
     c = _connector(tmp_path, monkeypatch)
-    llm = _with_llm(c, "「你怎么不理我了？哼」")
-    assert c._generate_followup("p") == "你怎么不理我了？哼"
+    llm = _with_llm(c, "「那本书你看完了吗？」")
+    assert c._generate_followup("p") == "那本书你看完了吗？"
     assert llm.calls == ["p"]
 
 
@@ -242,3 +242,71 @@ def test_generate_followup_returns_empty_without_llm(tmp_path, monkeypatch):
     c = _connector(tmp_path, monkeypatch)
     c.orchestrator = None
     assert c._generate_followup("p") == ""
+
+
+# ═══════════════════════════════════════════════════════════════
+#  追问必须带真实上下文（2026-09-19 用户反馈）
+#  「追问没有和上下文形成逻辑，而是强行地插入一句『在吗？』『人呢？』」
+# ═══════════════════════════════════════════════════════════════
+
+def test_prompt_includes_real_conversation_context(tmp_path, monkeypatch):
+    """发给 LLM 的追问 prompt 必须含真实往来记录，而不是只有上一句。"""
+    c = _connector(tmp_path, monkeypatch)
+    c._remember_exchange("u1@im.wechat", "你们那下雨啦？", "嗯，下了一下午了")
+    c._remember_exchange("u1@im.wechat", "我在忙呢", "哦，那你先忙")
+
+    seen: list[str] = []
+
+    def _fake_gen(prompt, last_reply=""):
+        seen.append(prompt)
+        return "那雨停了叫我"
+
+    monkeypatch.setattr(c, "_generate_followup", _fake_gen)
+    monkeypatch.setattr(c, "send_text", lambda text, to_user="": True)
+
+    c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "哦，那你先忙"})
+
+    assert seen, "未生成追问"
+    prompt = seen[0]
+    assert "你们那下雨啦？" in prompt, "追问 prompt 必须包含对方的原话"
+    assert "我在忙呢" in prompt
+    assert "接着上面的聊天内容" in prompt
+
+
+def test_prompt_forbids_generic_nags(tmp_path, monkeypatch):
+    c = _connector(tmp_path, monkeypatch)
+    c._remember_exchange("u1@im.wechat", "想你了呗", "就这点出息")
+    seen: list[str] = []
+    monkeypatch.setattr(c, "_generate_followup",
+                        lambda prompt, last_reply="": (seen.append(prompt), "嗯嗯")[1])
+    monkeypatch.setattr(c, "send_text", lambda text, to_user="": True)
+
+    c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "就这点出息"})
+    assert "严禁「在吗」" in seen[0]
+
+
+def test_generic_nag_is_dropped_even_if_model_returns_it(tmp_path, monkeypatch):
+    """防呆：模型无视指令吐通用催促语时必须丢弃（宁可不发）。"""
+
+    c = _connector(tmp_path, monkeypatch)
+    llm = _with_llm(c, "在吗？")
+    assert c._generate_followup("p", last_reply="就这点出息") == ""
+    assert llm.calls == ["p"]          # 确实调用了 LLM，只是结果被守卫丢弃
+
+
+def test_repeated_last_reply_is_dropped(tmp_path, monkeypatch):
+    c = _connector(tmp_path, monkeypatch)
+    _with_llm(c, "就这点出息")
+    assert c._generate_followup("p", last_reply="就这点出息") == ""
+
+
+def test_remember_exchange_is_bounded(tmp_path, monkeypatch):
+    """上下文缓冲不得无限增长。"""
+    from wechat_direct import wechat_connector as wc
+
+    c = _connector(tmp_path, monkeypatch)
+    for i in range(50):
+        c._remember_exchange("u1@im.wechat", f"用户第{i}句", f"回复第{i}句")
+    buf = c._recent_exchanges["u1@im.wechat"]
+    assert len(buf) <= wc._FOLLOWUP_CONTEXT_TURNS
+    assert buf[-1][1] == "回复第49句"

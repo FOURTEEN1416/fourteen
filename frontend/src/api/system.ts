@@ -40,7 +40,7 @@ export function proactiveSend(messageType?: string) {
   return client.post('/proactive/send', messageType ? { message_type: messageType } : {})
 }
 export function proactivePause(paused: boolean) { return client.post('/proactive/pause', { paused }) }
-export function updateProactiveConfig(cfg: { threshold?: number; max_daily?: number; min_interval_minutes?: number; cooldown_after_reply_minutes?: number; quiet_hours_start?: number; quiet_hours_end?: number; follow_up_enabled?: boolean; follow_up_delay1_seconds?: number; follow_up_delay2_seconds?: number; follow_up_daily_max?: number }) {
+export function updateProactiveConfig(cfg: { threshold?: number; max_daily?: number; min_interval_minutes?: number; cooldown_after_reply_minutes?: number; quiet_hours_start?: number; quiet_hours_end?: number; follow_up_enabled?: boolean; follow_up_delay1_seconds?: number; follow_up_delay2_seconds?: number; follow_up_daily_max?: number; reply_mode?: 'immersive' | 'novel' }) {
   return client.post('/proactive/config', cfg)
 }
 

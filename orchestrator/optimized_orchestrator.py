@@ -755,6 +755,22 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         if tool_results:
             system_prompt = f"{system_prompt}\n\n{tool_results}"
 
+        # ── 回复模式（web 控制端可切换，2026-09-19）──
+        # 必须放在**最后**：角色卡/人格块里常写着"必须写动作神态"之类的格式要求，
+        # 而另一处又要求"像真人发微信" —— 两者冲突时模型会随机挑一个，
+        # 表现为同一角色在「（她停下脚步，回头看你）」和「嗯，下了一下午了」之间乱跳。
+        # 放在末尾以获得最高显著性，并明确"本节优先于角色卡中的格式要求"。
+        try:
+            from utils.reply_mode import reply_mode_instruction
+
+            system_prompt = (
+                f"{system_prompt}\n\n"
+                "# 输出格式（本节优先于角色卡中任何与之冲突的格式要求）\n"
+                f"{reply_mode_instruction()}"
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("附加回复模式指令失败（忽略）: %s", e)
+
         return {
             "emotion_state": emotion_state,
             "system_prompt": system_prompt,

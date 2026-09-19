@@ -171,6 +171,9 @@ export interface ProactiveConfig {
   cooldown_after_reply_minutes: number
   quiet_hours_start?: number
   quiet_hours_end?: number
+  /** 回复模式：immersive=沉浸式真人聊天；novel=小说式（带动作神态） */
+  reply_mode?: 'immersive' | 'novel'
+  reply_mode_label?: string
   /** 对话内追问参数（web 控制端可调） */
   follow_up?: {
     enabled: boolean

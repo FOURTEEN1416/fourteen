@@ -195,6 +195,12 @@ async def get_proactive_config(_auth: bool = Security(verify_api_key_dep)):
     from wechat_direct.wechat_connector import read_follow_up_config
 
     config["follow_up"] = read_follow_up_config()
+    # 回复模式（沉浸式真人 / 小说式）：跨 worker 真源，编排器每次组装提示词时读取
+    from utils.reply_mode import read_reply_mode, reply_mode_label
+
+    _mode = read_reply_mode()
+    config["reply_mode"] = _mode
+    config["reply_mode_label"] = reply_mode_label(_mode)
     return config
 
 
@@ -257,6 +263,14 @@ async def update_proactive_config(
             fu["daily_max"] = int(req.follow_up_daily_max)
         ProactiveScheduler.write_config_file(follow_up=fu)
         logger.info("对话内追问配置已更新: %s", fu)
+
+    # 回复模式（沉浸式真人 / 小说式）：编排器每次组装提示词时读该文件，
+    # 写入即对所有 worker 生效，无需重启。
+    if req.reply_mode is not None:
+        from utils.reply_mode import write_reply_mode
+
+        write_reply_mode(req.reply_mode)
+        logger.info("回复模式已切换: %s", req.reply_mode)
 
     logger.info(
         "Proactive config updated: threshold=%s max_daily=%s",

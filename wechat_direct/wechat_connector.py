@@ -14,7 +14,7 @@ import os
 import threading
 import time
 import uuid
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -164,6 +164,8 @@ FOLLOW_UP_DEFAULTS: dict[str, Any] = {
 _FOLLOWUP_TICK = 5.0
 # 追问文本长度上限
 _FOLLOWUP_MAX_CHARS = 40
+# 追问用的上下文轮数（真实往来条数，含双方）
+_FOLLOWUP_CONTEXT_TURNS = 8
 # 「一句一句发」的拆分上限：单条最多 4 段、每段最多 45 字
 _SPLIT_MAX_SEGMENTS = 4
 _SPLIT_MAX_CHARS = 45
@@ -582,6 +584,8 @@ class WeChatConnector:
         self._followup_lock = threading.Lock()
         self._followup_daily: dict[str, int] = {}   # {user_id: 当日已追问条数}
         self._followup_daily_date = ""
+        # 最近若干轮真实往来（供追问用真实上下文，而不是硬插一句"人呢"）
+        self._recent_exchanges: dict[str, deque] = {}
         self._last_user_id: str = ""
         # 每条消息在独立线程中处理，避免阻塞轮询循环
         self._msg_executor = concurrent.futures.ThreadPoolExecutor(
@@ -1021,6 +1025,18 @@ class WeChatConnector:
 
     # ── 对话内追问（见文件头说明）─────────────────────────────
 
+    def _remember_exchange(self, user_id: str, user_text: str, bot_reply: str) -> None:
+        """记住最近几轮真实往来，供追问使用真实上下文。"""
+        if not user_id:
+            return
+        buf = self._recent_exchanges.get(user_id)
+        if buf is None:
+            buf = self._recent_exchanges[user_id] = deque(maxlen=_FOLLOWUP_CONTEXT_TURNS)
+        if user_text:
+            buf.append(("对方", str(user_text)[:120]))
+        if bot_reply:
+            buf.append(("我", str(bot_reply)[:160]))
+
     def _schedule_followup(self, user_id: str, bot_reply: str) -> None:
         """回复成功后登记一次待发追问（参数取自 web 控制端可调的配置）。"""
         if not user_id or not bot_reply:
@@ -1093,14 +1109,23 @@ class WeChatConnector:
 
         step = int(st.get("step", 0)) + 1
         last_reply = str(st.get("last_reply", ""))[:80]
+
+        # ⚠️ 2026-09-19 用户反馈：「追问没有和上下文形成逻辑，而是强行地插入一句
+        # 「在吗？」「人呢？」」—— 旧实现只把**上一句 AI 回复**塞进 prompt，
+        # 等于没有上下文，于是只能产出通用催促语。现改为带上真实往来记录。
+        history = self._recent_exchanges.get(user_id)
+        ctx = "\n".join(f"{who}：{line}" for who, line in history) if history else ""
         prompt = (
-            "你在微信里和人聊天。你刚说过：\n"
-            f"「{last_reply}」\n"
-            "对方没有回你。请像真人一样自然地再补一句（可撒娇/吐槽/追问/换个话题），"
-            "口语化，15 字以内，不要重复刚才的意思，不要解释自己在做什么。"
-            "只输出这一句话。"
+            "下面是你们刚才的真实聊天记录（按时间顺序）：\n"
+            f"{ctx}\n\n"
+            f"你最后说的是：「{last_reply}」\n"
+            "对方之后就没再回你了。现在你要像真人一样自己再补一句 —— "
+            "**必须接着上面的聊天内容**：可以问他/她刚提到的那件具体事，"
+            "也可以就那件事说一句自己的感受或想法。\n"
+            "严禁「在吗」「人呢」「怎么不理我」「你是不是睡着了」这类与内容无关的空话，"
+            "严禁重复你刚说过的话。口语化，15 字以内，只输出这一句话。"
         )
-        text = self._generate_followup(prompt)
+        text = self._generate_followup(prompt, last_reply=last_reply)
         if not text:
             return
         if not self.send_text(text, to_user=user_id):
@@ -1122,7 +1147,7 @@ class WeChatConnector:
                         "last_reply": text,
                     }
 
-    def _generate_followup(self, prompt: str) -> str:
+    def _generate_followup(self, prompt: str, last_reply: str = "") -> str:
         """用角色 LLM 生成一句追问；失败/不合规返回空串（宁可不发）。"""
         orch = self.orchestrator
         llm = (getattr(orch, "components", None) or {}).get("llm") if orch else None
@@ -1136,10 +1161,16 @@ class WeChatConnector:
         text = str(raw or "").strip().strip('"\'“”‘’「」『』')
         if "\n" in text:
             text = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
-        # 简单的合规守卫：过短/过长/含推理腔一律丢弃（宁可不发，也不发怪话）
+        # 简单的合规守卫：过短/过长/含推理腔/含空话催促 一律丢弃（宁可不发，也不发怪话）
         if len(text) < 2 or len(text) > _FOLLOWUP_MAX_CHARS:
             return ""
         if any(marker in text for marker in ("特定时间点", "时间段", "作为AI", "要求：", "消息：")):
+            return ""
+        # 与内容无关的通用催促语：模型偶尔会无视指令直接吐这些
+        if any(generic in text for generic in ("在吗", "人呢", "怎么不理", "睡着了", "还在吗")):
+            return ""
+        # 与上一句几乎重复的也丢弃
+        if last_reply and text.strip() == last_reply.strip():
             return ""
         return text
 
@@ -1301,6 +1332,8 @@ class WeChatConnector:
                 "[wx][step=reply_sent] msg_id=%s user=%s parts=%d reply=%r",
                 msg_id, from_user, len(segments), reply[:80],
             )
+            # 记录本轮真实往来（追问要用它做上下文，不能凭空"人呢"）
+            self._remember_exchange(from_user, text, reply)
             # 回复成功 → 登记对话内追问（以最后一段作为"刚说的话"）
             self._schedule_followup(from_user, segments[-1] if segments else reply)
         except Exception as e:  # noqa: BLE001
