@@ -122,6 +122,58 @@ def test_get_wechat_state_requires_user_for_isolation(tmp_path, monkeypatch):
     assert st.get("bot_id") in ("", None)
 
 
+def test_restore_uses_poll_lock_dedup(monkeypatch):
+    """多 worker：restore 对同一 (user,slot) 只应有一个进程真正启动轮询。"""
+    reg = ConnectorRegistry()
+    calls = {"run": 0}
+
+    class Dummy:
+        def __init__(self, uid, slot):
+            self.owner_user_id = uid
+            self.slot = slot
+            self.token = ""
+            self._stop = False
+
+        def run(self):
+            calls["run"] += 1
+
+        def stop(self):
+            self._stop = True
+
+    monkeypatch.setattr(
+        "wechat_direct.wechat_connector.WeChatConnector",
+        lambda user_manager=None, **kw: Dummy(kw.get("owner_user_id"), kw.get("slot", 0)),
+    )
+    monkeypatch.setattr(channel_paths, "PROJECT_ROOT", Path("/tmp/wx-lock-test"))
+    monkeypatch.setattr(
+        channel_paths, "sessions_root", lambda: Path("/tmp/wx-lock-test/data/wechat_sessions")
+    )
+    Path("/tmp/wx-lock-test/data/wechat_sessions/1/slot0").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        channel_paths,
+        "list_user_slots_with_credentials",
+        lambda uid: [0],
+    )
+    # 模拟第二个 worker 抢锁失败
+    monkeypatch.setattr(
+        ConnectorRegistry,
+        "_try_acquire_poll_lock",
+        staticmethod(lambda uid, slot: None),
+    )
+    n = reg.restore_on_boot()
+    assert n == 0
+    assert calls["run"] == 0
+
+    monkeypatch.setattr(
+        ConnectorRegistry,
+        "_try_acquire_poll_lock",
+        staticmethod(lambda uid, slot: 0),
+    )
+    n2 = reg.restore_on_boot()
+    assert n2 == 1
+    assert calls["run"] == 1
+
+
 def test_peer_character_menu_and_choice():
     from wechat_direct.peer_character import (
         build_character_menu,

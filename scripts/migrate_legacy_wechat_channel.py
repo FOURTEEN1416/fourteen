@@ -123,9 +123,80 @@ def migrate_legacy_if_needed(admin_user_id: int | None = None) -> dict:
     MARKER.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     if moved:
         logger.info("遗留微信通道已迁移到 admin user=%s moved=%s", uid, moved)
+    # 磁盘凭证必须落到 wechat_channel_sessions，否则 admin 列表/状态库面为空
+    try:
+        _sync_disk_sessions_to_db_sync()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("同步通道会话到 DB 失败（忽略）: %s", e)
     return result
+
+
+def _sync_disk_sessions_to_db_sync() -> int:
+    """把 data/wechat_sessions/*/slot*/credentials.json 同步进 wechat_channel_sessions。"""
+    import asyncio
+    import json as _json
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from api.database import WechatChannelSession, _async_session, init_db
+
+    async def _run() -> int:
+        await init_db()
+        n = 0
+        async with _async_session() as session:
+            root = channel_paths.sessions_root()
+            if not root.exists():
+                return 0
+            for user_dir in root.iterdir():
+                if not user_dir.is_dir() or not user_dir.name.isdigit():
+                    continue
+                uid = int(user_dir.name)
+                for slot in channel_paths.list_user_slots_with_credentials(uid):
+                    cred_path = channel_paths.credentials_path(uid, slot)
+                    state_path = channel_paths.state_path(uid, slot)
+                    bot_id = ""
+                    status = "idle"
+                    try:
+                        cred = _json.loads(cred_path.read_text(encoding="utf-8"))
+                        bot_id = str(cred.get("bot_id") or "")
+                    except Exception:  # noqa: BLE001
+                        pass
+                    try:
+                        st = _json.loads(state_path.read_text(encoding="utf-8"))
+                        if st.get("connected") and bot_id:
+                            status = "connected"
+                        elif st.get("status"):
+                            status = str(st.get("status"))
+                    except Exception:  # noqa: BLE001
+                        pass
+                    result = await session.execute(
+                        select(WechatChannelSession).where(
+                            WechatChannelSession.user_id == uid,
+                            WechatChannelSession.slot == slot,
+                        )
+                    )
+                    row = result.scalar_one_or_none()
+                    if row is None:
+                        row = WechatChannelSession(user_id=uid, slot=slot)
+                        session.add(row)
+                    row.bot_id = bot_id or row.bot_id
+                    row.status = status
+                    if status == "connected":
+                        row.last_connected_at = datetime.now(timezone.utc)
+                    n += 1
+            await session.commit()
+        return n
+
+    return asyncio.run(_run())
+
+
+async def sync_disk_sessions_to_db() -> int:
+    """异步包装，供 FastAPI lifespan 调用。"""
+    return _sync_disk_sessions_to_db_sync()
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     print(migrate_legacy_if_needed())
+    print({"synced_rows": _sync_disk_sessions_to_db_sync()})

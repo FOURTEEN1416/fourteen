@@ -292,6 +292,15 @@ async def _init_and_preload():
                 )
         except Exception as e:  # noqa: BLE001
             logger.warning("加载微信好友角色偏好失败（忽略）: %s", e)
+        # 磁盘通道会话 → DB（复核修复：凭证在磁盘但表空）
+        try:
+            from scripts.migrate_legacy_wechat_channel import sync_disk_sessions_to_db
+
+            synced = await sync_disk_sessions_to_db()
+            if synced:
+                logger.info("已同步 %d 条微信通道会话到数据库", synced)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("同步微信通道会话到 DB 失败（忽略）: %s", e)
     logger.info("✅ 数据库就绪，已加载 %d 条微信绑定", len(binding_dicts))
 
     # 一次性数据迁移：清除已下线 provider（opencode_zen）的用户配置

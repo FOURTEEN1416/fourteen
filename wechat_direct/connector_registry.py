@@ -188,7 +188,17 @@ class ConnectorRegistry:
 
     def start_login(self, user_id: int, slot: int | None = None, user_manager=None) -> dict[str, Any]:
         """为指定用户启动扫码登录（异步线程），返回初始状态。"""
-        conn = self.ensure(user_id, slot=slot, user_manager=user_manager)
+        uid = int(user_id)
+        # 多 worker：登录同样抢通道锁，避免双开
+        pick = self._pick_slot(uid, slot) if slot is None else int(slot)
+        lock_fd = self._try_acquire_poll_lock(uid, pick)
+        if lock_fd is None:
+            raise ChannelSlotError(f"用户 {uid} slot={pick} 通道正在被其他进程占用")
+        if lock_fd > 0:
+            if not hasattr(self, "_poll_lock_fds"):
+                self._poll_lock_fds = []
+            self._poll_lock_fds.append(lock_fd)
+        conn = self.ensure(user_id, slot=pick, user_manager=user_manager)
 
         def _run() -> None:
             try:
@@ -206,16 +216,29 @@ class ConnectorRegistry:
         }
 
     def restore_on_boot(self, user_manager=None) -> int:
-        """仅恢复「磁盘上已有凭证」的通道；不读全局 ~/.weixin_cow_credentials.json。"""
+        """仅恢复「磁盘上已有凭证」的通道；不读全局 ~/.weixin_cow_credentials.json。
+
+        多 uvicorn worker：每条通道用 per-(user,slot) flock 去重，
+        只有持锁 worker 启动轮询，避免 4 个进程同时登录同一微信 bot。
+        """
         root = channel_paths.sessions_root()
         restored = 0
         if not root.exists():
             return 0
+        # 持锁 fd 留在进程内，退出时由 OS 释放
+        if not hasattr(self, "_poll_lock_fds"):
+            self._poll_lock_fds: list[int] = []
         for user_dir in root.iterdir():
             if not user_dir.is_dir() or not user_dir.name.isdigit():
                 continue
             uid = int(user_dir.name)
             for slot in channel_paths.list_user_slots_with_credentials(uid):
+                lock_fd = self._try_acquire_poll_lock(uid, slot)
+                if lock_fd is None:
+                    logger.info("通道已有其他 worker 持锁，跳过 user=%s slot=%s", uid, slot)
+                    continue
+                if lock_fd > 0:
+                    self._poll_lock_fds.append(lock_fd)
                 try:
                     conn = self.ensure(uid, slot=slot, user_manager=user_manager)
                     if getattr(conn, "token", ""):
@@ -232,6 +255,33 @@ class ConnectorRegistry:
         if restored:
             logger.info("已恢复 %d 条用户微信通道", restored)
         return restored
+
+    @staticmethod
+    def _try_acquire_poll_lock(user_id: int, slot: int) -> int | None:
+        """获取通道轮询文件锁。
+
+        返回 fd（>0，Linux flock）/ 0（无 flock 环境，放行）/ None（他人已持锁）。
+        """
+        import os
+
+        try:
+            import fcntl
+        except ImportError:
+            # Windows 本地开发无 fcntl：单进程场景直接放行
+            return 0
+        lock_file = channel_paths.lock_path(user_id, slot)
+        try:
+            lock_file.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR, 0o644)
+        except OSError as e:  # noqa: BLE001
+            logger.warning("打开通道锁失败 user=%s slot=%s: %s", user_id, slot, e)
+            return 0
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except OSError:
+            os.close(fd)
+            return None
 
 
 def get_registry() -> ConnectorRegistry:
