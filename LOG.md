@@ -1890,3 +1890,23 @@
 ### 验证
 `ruff check .` 0 错；新增/改写 13 例回归（reply_mode +2、web_enricher +5、test_main_stream 改写 1 拆 2）；
 三项相关测试文件 43 passed；分块 pytest 全量见下。
+
+---
+
+## 2026-09-19（七十四）— 前端审美第二轮（增量走查 7 项：剧情线独立页/消息 tab 滑杆/分段控件统一）
+
+**任务**：用户指令「对最新版本进行前端优化」。基于第一轮 11 项修复后的最新前端（HEAD `40fd22a`，另一窗口已登记「前端优化归本窗口」分工）做增量走查：Playwright 一次性审计账号实拍 intro/剧情线/语音/安全/供应商/用户管理 + 角色设置六 tab × 桌面 1440/移动 390×844，归纳第一轮未覆盖的 7 项问题并全修。
+
+### 逐项修复
+
+- **剧情线独立页（本轮最重）**：`/roles/:id/storyline` 整屏只有一条「剧情线 ▼」折叠线，无页面外壳。`App.tsx` StorylinePage 补统一外壳（max-w-3xl 表单页宽 + 角色头卡 + 玻璃卡包裹编辑器）；`StorylineEditor` 新增 `standalone` prop（去嵌入分隔线、默认展开），时间线 tab 嵌入行为不变。
+- **消息 tab 滑杆双标签**：8 行滑杆每行出现两套标签+两个数值（外层「每日上限 … 8 条/天」+ Slider 内部「每日上限 … 8.00」）。`Slider` 新增 `showLabel`/`showValue`（默认 true，基础 tab 情感滑杆外观不变），消息 tab 三处调用关闭内部标签数值。
+- **tab 焦点环排疑**：走查图中角色设置「消息」tab 图标上的蓝圈经复截证实为 **CustomCursor 跟随鼠标停留**，非焦点环；仍为 tab 按钮补 `focus-visible:ring` 规范化处理。
+- **面包屑英文泄漏**：`Breadcrumb` adminTabLabels 补 `providers: '供应商管理'`，/admin/providers 不再显示裸段「providers」。
+- **安全页 emoji**：统计卡标签去除 🚫/📊/⚠️，与全站 lucide 图标语言统一。
+- **回复模式分段控件**：由旧「渐变大块」改中性分段控件（bg-gray-100/60 轨道 + 白底浮起选中 + ring-1 ring-black/5），与第一轮 CreateRole 方法选择器同款语言。
+- **全宽渐变按钮收敛**：「保存频率配置」「立即发送一条主动消息」由全宽大条改右对齐紧凑主按钮（bg-primary-500 rounded-lg shadow-sm）。
+
+**验证**：`tsc --noEmit` 0 错误；vitest **87/87**；`vite build` 通过；修复后复截桌面+移动全页，6 组 before/after 归档 `docs/verification/2026-09-19-前端审美第二轮/`（含 README 逐项对照表）。
+**清理**：审计账号（user 1502，users/user_sessions/consent_records）DB 行已删；临时脚本 `frontend/tmp-round2{,b,c,d}.mjs` 与 `/tmp/reg2.json` 已删；`docs/tmp-fe-round2/` 已移除；后台 uvicorn/vite 进程已停。
+**已知限制**：① 剧情线页未勾选「启用剧情线」时内容量由数据决定，显空属数据态；② fullPage 截图拉伸伪影同第一轮口径；③ 本轮改动全部在前端 6 文件，未触碰后端与并行窗口文件。
