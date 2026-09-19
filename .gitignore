@@ -29,6 +29,10 @@ Thumbs.db
 .env.production
 .env.*.local
 
+# ── LLM 供应商本地密钥（admin 写路径专用，绝不入库；审查 F-high-2）──
+config/llm_providers.local.json
+config/llm_providers.local.json.tmp
+
 # ── IDE/工具 ──
 .trae/
 .opencode/
