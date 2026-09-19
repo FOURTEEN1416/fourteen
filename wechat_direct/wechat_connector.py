@@ -164,6 +164,88 @@ FOLLOW_UP_DEFAULTS: dict[str, Any] = {
 _FOLLOWUP_TICK = 5.0
 # 追问文本长度上限
 _FOLLOWUP_MAX_CHARS = 40
+# 「一句一句发」的拆分上限：单条最多 4 段、每段最多 45 字
+_SPLIT_MAX_SEGMENTS = 4
+_SPLIT_MAX_CHARS = 45
+
+
+def split_reply_for_wechat(
+    reply: str,
+    max_segments: int = _SPLIT_MAX_SEGMENTS,
+    max_chars: int = _SPLIT_MAX_CHARS,
+) -> list[str]:
+    """把一条回复拆成若干「微信里一句一句发」的短消息。
+
+    ⚠️ 2026-09-19 用户反馈：「一个正常人，怎么会一次性发那么回一大段？
+    ……不应该一句一句的吗？」—— 旧实现把 LLM 返回的整段（含多行）**当一条消息**
+    发出去，体感像在看公告而不是聊天。
+
+    规则：
+    1. 先按换行切块；短回复（≤ max_chars）原样一条发出，不折腾
+    2. 超长块再按句末标点（。！？…；）切句，贪心合并到 ≤ max_chars
+    3. 段数封顶 max_segments：多出来的并进最后一段，避免变成刷屏
+
+    返回 [] 表示无可发送内容（调用方应回落原文本）。
+    """
+    text = (reply or "").strip()
+    if not text:
+        return []
+    # 注意：**带换行就必须拆**（哪怕总长短）—— 否则会带着空行整段发出，
+    # 正是用户抱怨的「一次发一大段」。短且单行才原样发。
+    if "\n" not in text and len(text) <= max_chars:
+        return [text]
+
+    blocks: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line:
+            blocks.append(line)
+    if not blocks:
+        return [text]
+
+    # 逐行处理：**每行各自成一条**（模型用换行分隔的就是一句句独立的话，
+    # 跨行合并会糊成「第0句第1句第2句…」这种读不通的一串）。
+    # 只有**单行本身超长**时，才在该行内部按句末标点切句并合并。
+    sentences: list[str] = []
+    for block in blocks:
+        if len(block) <= max_chars:
+            sentences.append(block)
+            continue
+        parts: list[str] = []
+        buf = ""
+        for ch in block:
+            buf += ch
+            if ch in "。！？!?…":
+                parts.append(buf.strip())
+                buf = ""
+        if buf.strip():
+            rest = buf.strip()
+            while len(rest) > max_chars:      # 长句无标点收尾 → 硬切
+                parts.append(rest[:max_chars])
+                rest = rest[max_chars:]
+            if rest:
+                parts.append(rest)
+        # 仅在同一行内部合并，避免跨句糊在一起
+        merged_line: list[str] = []
+        for s in parts:
+            if merged_line and len(merged_line[-1]) + len(s) <= max_chars:
+                merged_line[-1] += s
+            else:
+                merged_line.append(s)
+        sentences.extend(merged_line)
+
+    if len(sentences) > max_segments:
+        head = sentences[: max_segments - 1]
+        # 尾部**逐字拼接**（不插入任何分隔符）：宁可读起来略紧凑，
+        # 也绝不改写模型的原话 —— 内容必须无损。
+        tail = "".join(sentences[max_segments - 1:])
+        sentences = [*head, tail]
+    return [s for s in sentences if s] or [text]
+
+
+def _segment_delay(prev: str) -> float:
+    """两段之间的「打字停顿」：按上一段长度估算，0.4~1.6s（别让人等太久）。"""
+    return max(0.4, min(1.6, len(prev) * 0.045))
 # 追问配置所在文件（与 scheduler 的 _CONFIG_PATH 同一份真源）
 _SCHEDULER_CONFIG_PATH = (
     Path(__file__).resolve().parent.parent / "data" / "scheduler_config.json"
@@ -1195,27 +1277,32 @@ class WeChatConnector:
 
         try:
             token = self._get_context_token(from_user) or context_token
-            resp = _send_text(
-                to=from_user, text=reply,
-                context_token=token,
-                token=self.token, base_url=self.base_url,
-            )
-            # 2026-09-19：回复路径同样必须校验业务返回码 —— 旧实现只要不抛异常
-            # 就记 [step=reply_sent]，接口 ret<0（如 prepare failed）时同样会被
-            # 记成"已回复"，与主动消息那条链是同一种谎报。
-            ok, errmsg = _api_ok(resp)
-            if not ok:
-                logger.warning(
-                    "[wx][step=reply_send_failed] msg_id=%s user=%s error=%s",
-                    msg_id, from_user, errmsg,
+            # 「一句一句发」：整段按换行/句末标点拆成多条短消息，段间加打字停顿
+            segments = split_reply_for_wechat(reply) or [reply]
+            for idx, seg in enumerate(segments):
+                if idx:
+                    time.sleep(_segment_delay(segments[idx - 1]))
+                resp = _send_text(
+                    to=from_user, text=seg,
+                    context_token=token,
+                    token=self.token, base_url=self.base_url,
                 )
-                return
+                # 2026-09-19：回复路径同样必须校验业务返回码 —— 旧实现只要不抛异常
+                # 就记 [step=reply_sent]，接口 ret<0（如 prepare failed）时同样会被
+                # 记成"已回复"，与主动消息那条链是同一种谎报。
+                ok, errmsg = _api_ok(resp)
+                if not ok:
+                    logger.warning(
+                        "[wx][step=reply_send_failed] msg_id=%s user=%s part=%d/%d error=%s",
+                        msg_id, from_user, idx + 1, len(segments), errmsg,
+                    )
+                    return
             logger.info(
-                "[wx][step=reply_sent] msg_id=%s user=%s reply=%r",
-                msg_id, from_user, reply[:80],
+                "[wx][step=reply_sent] msg_id=%s user=%s parts=%d reply=%r",
+                msg_id, from_user, len(segments), reply[:80],
             )
-            # 回复成功 → 登记对话内追问（对方 45s/150s 内没接话就自己再补一句）
-            self._schedule_followup(from_user, reply)
+            # 回复成功 → 登记对话内追问（以最后一段作为"刚说的话"）
+            self._schedule_followup(from_user, segments[-1] if segments else reply)
         except Exception as e:  # noqa: BLE001
             logger.exception(
                 "[wx][step=reply_send_failed] msg_id=%s user=%s error=%s",

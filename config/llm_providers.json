@@ -10,9 +10,9 @@
       "max_tokens": 8192,
       "temperature": 0.85,
       "stream_enabled": true,
-      "description": "Agnes agnes-3.0-flash（OpenAI 兼容端点），首选供应商",
+      "description": "Agnes agnes-3.0-flash（OpenAI 兼容端点），备用供应商",
       "enabled": true,
-      "sort_order": 1,
+      "sort_order": 2,
       "guide": {
         "apply_url": "https://apihub.agnes-ai.com",
         "free_quota": "以平台实际额度为准",
@@ -36,9 +36,9 @@
       "max_tokens": 2048,
       "temperature": 0.85,
       "stream_enabled": true,
-      "description": "GLM-4.7-Flash 永久免费，无Token上限，200K上下文",
+      "description": "GLM-4.7-Flash 永久免费，无Token上限，200K上下文（首选供应商）",
       "enabled": true,
-      "sort_order": 2,
+      "sort_order": 1,
       "guide": {
         "apply_url": "https://open.bigmodel.cn",
         "free_quota": "GLM-4.7-Flash 永久免费，无 Token 上限",
@@ -180,14 +180,14 @@
         "free_quota": "免费（使用已配置的供应商）",
         "steps": [
           "选择「自动回退」后无需任何操作",
-          "系统会按以下优先级尝试：Agnes → 智谱 → 讯飞 → 百度",
+          "系统会按以下优先级尝试：智谱 → Agnes → 讯飞 → 百度",
           "如果某个供应商不可用（如 API Key 过期），会自动切换到下一个",
           "建议新用户选择此选项"
         ],
         "tips": [
           "推荐新用户使用，无需关心技术细节",
           "需要至少配置一个供应商的 API Key 才能正常工作",
-          "建议优先配置 Agnes 或智谱的 API Key"
+          "建议优先配置智谱或 Agnes 的 API Key"
         ],
         "warnings": []
       }
@@ -225,8 +225,8 @@
     }
   },
   "fallback_chain": [
-    "agnes",
     "zhipu",
+    "agnes",
     "xunfei",
     "baidu",
     "deepseek"

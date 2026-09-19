@@ -355,7 +355,20 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
         scenario = card.get("scenario", "")
         if scenario:
-            lines.append(f"场景设定：{str(scenario)[:500]}")
+            # ⚠️ 2026-09-19 修复：scenario 是**开场情境**，不是「当前正在发生的事」。
+            # 旧实现只写 `场景设定：…` 且该段被 _store_persona_segment 缓存后每轮复用，
+            # 于是角色被永久锚定在开场画面里 —— 生产实证：角色卡 62105bca 的开场是
+            # 「你刚从公交车上下来…她手里拿着一个白色的小风扇…说了句『来了啊』」，
+            # 结果机器人一直追问用户「路上堵不堵/热不热/慢慢走/要不要来家里坐坐」，
+            # 用户回「我没在路上」也纠正不过来（自相矛盾、答非所问的根因）。
+            lines.append(
+                "开场情境（**仅用于开场氛围，不代表当前正在发生**）：\n"
+                f"{str(scenario)[:500]}\n"
+                "⚠️ 只依据**用户实际说过的内容**推进对话；不要假定用户仍在路上／在等车／"
+                "在某个地点，也不要凭空推演用户的处境（地点、天气、行程、身体状态）。"
+                "用户没提过的事，一律不得当作事实提及。"
+                "若用户已否认某情境（如「我没在路上」），立即放弃该情境，不得再提。"
+            )
 
         first_mes = card.get("first_mes", "")
         if first_mes:
