@@ -97,7 +97,7 @@ function AIChatTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaSt
         <span className="text-[10px] text-gray-400 ml-auto">通过对话让 AI 学习你的期待</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-4 p-1 min-h-[260px]">
+      <div className="flex-1 overflow-y-auto space-y-4 p-1 min-h-[240px] lg:min-h-[260px]">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center py-10">
             <MessageSquare className="w-10 h-10 text-gray-200 mb-3" />
@@ -484,7 +484,7 @@ function PersonaPreviewCard() {
 
   if (!hasContent || !persona) {
     return (
-      <div className="glass-card rounded-2xl p-5 h-full flex flex-col items-center justify-center text-center min-h-[280px]">
+      <div className="glass-card rounded-2xl p-5 flex flex-col items-center justify-center text-center min-h-[160px] lg:min-h-[280px]">
         <div className="w-12 h-12 rounded-full btn-macaron flex items-center justify-center text-lg font-bold mb-3">你</div>
         <p className="text-sm text-gray-500">和十四聊聊</p>
         <p className="text-xs text-gray-400 mt-1">角色卡会在这里实时生长</p>
@@ -563,9 +563,11 @@ function CreateButton() {
     finally { setIsImporting(false) }
   }
   return (
-    <button onClick={handleCreate} disabled={createMutation.isPending || isImporting || !hasContent} className="btn-macaron w-full py-3 rounded-xl text-sm font-semibold disabled:opacity-40 flex items-center justify-center gap-2 transition-all">
-      <Sparkles className="w-4 h-4" /> {createMutation.isPending || isImporting ? '创建中...' : '创建角色'}
-    </button>
+    <div className="flex justify-end">
+      <button onClick={handleCreate} disabled={createMutation.isPending || isImporting || !hasContent} className="btn-macaron px-6 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-40 flex items-center justify-center gap-2 transition-all">
+        <Sparkles className="w-4 h-4" /> {createMutation.isPending || isImporting ? '创建中...' : '创建角色'}
+      </button>
+    </div>
   )
 }
 
@@ -657,8 +659,9 @@ export default function CreateRole() {
         {/* Presets */}
         <PresetPills onSelect={setPersona} />
 
-        {/* Method selector */}
-        <div className="glass-card rounded-2xl p-1.5 flex">
+        {/* Method selector — 2026-09-19 审美批次：中性分段控件替代整块渐变填充，
+            选中态用白底浮起，与角色设置 tab 同语言 */}
+        <div className="glass-card rounded-2xl p-1.5 flex bg-gray-100/60">
           {METHODS.map(m => (
             <button
               key={m.key}
@@ -668,10 +671,11 @@ export default function CreateRole() {
               }}
               className={`flex-1 rounded-xl py-2.5 text-sm font-medium transition-all ${
                 method === m.key
-                  ? `bg-gradient-to-r ${m.gradient} text-white shadow-sm`
-                  : 'text-text-muted hover:text-text-secondary hover:bg-white/40'
+                  ? 'bg-white text-gray-800 shadow-sm ring-1 ring-black/5'
+                  : 'text-text-muted hover:text-text-secondary'
               }`}
             >
+              <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 bg-gradient-to-r ${m.gradient} ${method === m.key ? '' : 'opacity-40'}`} />
               {m.label}
             </button>
           ))}
@@ -679,7 +683,7 @@ export default function CreateRole() {
 
         {/* Workspace */}
         <div className="glass-card rounded-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-[2fr_1fr]">
-          <div className="p-5 border-b lg:border-b-0 lg:border-r border-white/40 min-h-[420px]">
+          <div className="p-5 border-b lg:border-b-0 lg:border-r border-white/40 lg:min-h-[420px]">
             {method === 'ai-chat' && <AIChatTab onPersonaUpdate={setPersona} />}
             {method === 'wechat-clone' && <WeChatCloneTab onPersonaUpdate={setPersona} />}
             {method === 'file-import' && <FileImportTab onPersonaUpdate={setPersona} />}
