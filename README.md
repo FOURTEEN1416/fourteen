@@ -19,6 +19,30 @@
 
 ---
 
+## 安全须知（公开仓库必读）
+
+本仓库远程为 **Public**。启动与部署前请阅读：
+
+1. **JWT**：非显式 dev（`AI_GF_ENV`/`APP_ENV`/`ENV` 不是 `dev`/`development`）时 **必须** 设置 `JWT_SECRET`（≥32 字符，`openssl rand -base64 48`），否则 `api/auth_jwt.py` 拒绝启动。公开 DEV 兜底密钥不可用于任何真实环境。
+2. **API Key**：`.env.example` 中的占位符在认证启用且非显式 dev 时会导致启动失败（fail-closed）。生产请替换为 `openssl rand -base64 32` 的随机值。
+3. **部署目标**：`deploy/` 脚本中的主机已改为占位符/环境变量（`DEPLOY_HOST` / `DEPLOY_DOMAIN`）。**若历史版本曾暴露** `139.199.199.174` 或相关 SSH 凭据，请 **轮换凭据** 并复查该主机暴露面；真实 IP/端口/路径只放私密运维文档。
+4. **LLM 供应商密钥**：管理控制台保存的 key 只写入 `config/llm_providers.local.json`（已 gitignore）或环境变量；**不要**把真实 key 提交进 `config/llm_providers.json`。
+5. **历史**：旧 commit 曾提交过 `.env` 占位符（`4d67ca2`）；若当时写过真实凭据，必须轮换。
+
+```bash
+# 本地开发（允许 DEV 兜底，仍建议配置密钥）
+cp .env.example .env   # 确认 AI_GF_ENV=dev，并填写 LLM key
+# JWT_SECRET=$(openssl rand -base64 48)   # 写入 .env 更稳妥
+
+# 生产
+export AI_GF_ENV=prod
+export JWT_SECRET="$(openssl rand -base64 48)"
+export API_KEY="$(openssl rand -base64 32)"
+export API_KEY_ENABLED=true
+```
+
+---
+
 ## 快速开始
 
 ```bash
@@ -79,6 +103,14 @@ wechat: {}                # 微信直连，扫码自动配
 ```
 
 `.env` 里放 LLM 的 key。不填也能跑——fallback 链最底层有免费模型兜底。
+
+> **配置注意（审查修正）**
+> - tracked 的 `config/system.yaml` 默认 `env: dev` / `debug: true`，**仅供本地开发**。
+>   生产必须用环境变量覆盖或部署 prod 配置（`debug: false`，`AI_GF_ENV=prod`）。
+> - `config/characters/` 在 `.gitignore` 中，**不会**随公开仓克隆分发。
+>   文档中的「角色卡库」指运行/部署侧需单独投递的目录（私有包或服务器本地），不是 git 真源。
+> - `config/llm_providers.json` 只存供应商元数据（`api_key` 恒为空）；
+>   真实 key 走 `config/llm_providers.local.json`（gitignored）或 `*_API_KEY` 环境变量。
 
 ---
 
@@ -152,12 +184,13 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
 ├── tests/                1082 后端测试通过 + 4 跳过（2026-09-19 实测）+ 87 前端测试
-├── config/               YAML 配置 + config/characters/ 角色卡库
+├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容）
 └── main.py               入口
 ```
 
 > **注：** 早期文档中的 `rag_engine/` 目录已不存在，检索能力现位于
 > `shisi/knowledge/`（RAGEngineV2 / Retriever / CharacterKnowledgeService）。
+> `start_all.cmd` / `deploy_ai_girlfriend.bat` 等一键脚本已于 2026-08-28 删除，部署统一走 `deploy/`。
 
 ---
 

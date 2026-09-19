@@ -32,33 +32,63 @@ logger = logging.getLogger("auth_jwt")
 # 配置（可被环境变量覆写）
 # ═══════════════════════════════════════════════════════
 
-# 修复 P0-2：旧代码用 dev-jwt-secret-change-in-production-32chars! 弱默认
-# 生产忘配 JWT_SECRET → 任何人都能用此 secret 伪造 admin token
+# 安全修复（审查 F-crit-1）：
+# 公开仓不得把可签名的 JWT 密钥作为生产/未知环境的静默回退。
+# - 生产：JWT_SECRET 必须来自环境且 >=32 字符，否则拒绝启动
+# - 仅当 AI_GF_ENV/APP_ENV/ENV 显式为 dev/development 时，才允许 DEV 兜底密钥
+# - 其它任何环境标记（缺失 / test / staging…）一律 fail-closed，要求注入 JWT_SECRET
 
-# 仅用于 dev/test 兜底——生产环境必须显式提供，且 >=32 字符
+# 仅允许在显式 dev 下使用的兜底密钥——公开仓可读，绝不可用于任何真实环境
 _DEV_ONLY_JWT_SECRET = "dev-only-DO-NOT-USE-IN-PRODUCTION-32chars-ok-ok!"
 _MIN_SECRET_LEN = 32
 
-JWT_SECRET = os.environ.get("JWT_SECRET", "")
-from api.runtime_config import is_production as _is_production  # noqa: E402, I001
-_IS_PROD = _is_production()
+JWT_SECRET = os.environ.get("JWT_SECRET", "").strip()
+from api.runtime_config import is_explicit_dev as _is_explicit_dev  # noqa: E402, I001
+from api.runtime_config import is_production as _is_production  # noqa: E402
 
-if _IS_PROD and (not JWT_SECRET or len(JWT_SECRET) < _MIN_SECRET_LEN):
-    raise RuntimeError(
-        f"JWT_SECRET must be set and >={_MIN_SECRET_LEN} chars in production. "
-        f"Generate with: openssl rand -base64 48"
-    )
+_IS_PROD = _is_production()
+_IS_EXPLICIT_DEV = _is_explicit_dev()
+
+_JWT_SETUP_MSG = (
+    "JWT_SECRET is required. Generate with: openssl rand -base64 48 "
+    "and export JWT_SECRET before start. "
+    "Outside explicit dev/development (AI_GF_ENV|APP_ENV|ENV=dev|development) "
+    "the process refuses to fall back to the public DEV secret. "
+    f"Minimum length: {_MIN_SECRET_LEN} characters."
+)
 
 if not JWT_SECRET:
-    # dev/test 兜底：保留可启动能力，但日志高强度警告
-    JWT_SECRET = _DEV_ONLY_JWT_SECRET
-    logger.warning(
-        "🔓 JWT_SECRET 未设置，使用 DEV-ONLY 默认值（不安全）。"
-        "生产环境必须显式设置 JWT_SECRET>=32 字符，否则任何用户可伪造 token。"
-    )
+    if _IS_EXPLICIT_DEV:
+        # 显式开发环境：允许 DEV 兜底，但大声警告（stdout+logger）
+        JWT_SECRET = _DEV_ONLY_JWT_SECRET
+        _warn = (
+            "🚨🚨🚨 SECURITY WARNING 🚨🚨🚨\n"
+            "JWT_SECRET is NOT set. Using PUBLIC DEV-ONLY signing key.\n"
+            "This key is readable in the public repository — anyone can forge\n"
+            "access/refresh tokens (including role=admin).\n"
+            "Allowed ONLY because AI_GF_ENV/APP_ENV/ENV is explicitly dev/development.\n"
+            "Production/staging MUST set JWT_SECRET (>=32 chars). "
+            "Generate: openssl rand -base64 48"
+        )
+        print(_warn, flush=True)
+        logger.warning(_warn)
+    else:
+        # 生产、未标记、test/staging/未知：一律拒绝启动（fail-closed）
+        raise RuntimeError(
+            f"Refusing to start: JWT_SECRET missing and env is not explicit dev/development "
+            f"(AI_GF_ENV/APP_ENV/ENV). production={_IS_PROD} explicit_dev={_IS_EXPLICIT_DEV}. "
+            + _JWT_SETUP_MSG
+        )
 elif len(JWT_SECRET) < _MIN_SECRET_LEN:
     raise ValueError(
-        f"JWT_SECRET too short ({len(JWT_SECRET)} chars); minimum {_MIN_SECRET_LEN} chars required"
+        f"JWT_SECRET too short ({len(JWT_SECRET)} chars); minimum {_MIN_SECRET_LEN} chars required. "
+        + _JWT_SETUP_MSG
+    )
+elif _IS_PROD and JWT_SECRET == _DEV_ONLY_JWT_SECRET:
+    # 防御：即便有人显式把 DEV 字面量写进生产 JWT_SECRET 也拒绝
+    raise RuntimeError(
+        "Refusing to start: JWT_SECRET equals the public DEV-ONLY constant in production. "
+        + _JWT_SETUP_MSG
     )
 
 JWT_ALGORITHM = "HS256"

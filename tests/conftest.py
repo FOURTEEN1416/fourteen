@@ -7,6 +7,14 @@ import pytest
 # 确保项目根目录在 sys.path 中
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 审查 F-crit-1：auth_jwt 在非显式 dev 环境下无 JWT_SECRET 会 fail-closed 拒绝 import。
+# 测试进程统一注入测试专用密钥（>=32 字符），避免依赖公开 DEV 回退常量。
+# 必须在任何 test module import api.auth_jwt / api.app_factory 之前设置。
+os.environ.setdefault(
+    "JWT_SECRET",
+    "unit-test-only-jwt-secret-minimum-32-characters-ok",
+)
+
 collect_ignore = ["real_e2e_test.py", "real_test.py"]
 
 

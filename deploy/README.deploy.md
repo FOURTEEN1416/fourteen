@@ -61,8 +61,8 @@ nano /opt/ai-girlfriend/.env
 
 | 变量 | 说明 | 生成命令 |
 |------|------|----------|
-| `API_KEY` | API 鉴权密钥 | `openssl rand -base64 48` |
-| `JWT_SECRET` | JWT 签名密钥 | `openssl rand -base64 48` |
+| `API_KEY` | X-API-Key（**禁止**使用 .env.example 占位符；非 dev 启用认证时 fail-closed） | `openssl rand -base64 32` |
+| `JWT_SECRET` | JWT 签名密钥（**非显式 dev 必填**，≥32；缺失则 auth_jwt 拒绝启动） | `openssl rand -base64 48` |
 | `API_CORS_ORIGINS` | 允许的前端域名 | 设为 `https://你的域名` |
 | `DATABASE_URL` | 数据库连接串 | 从 setup.sh 输出获取 |
 
@@ -80,22 +80,24 @@ certbot 会自动修改 Nginx 配置并启用 HTTPS。
 
 ### 第五步：部署应用
 
-#### 方式 A：从 Windows 开发机一键部署（推荐）
+#### 方式 A：从 Windows 开发机部署
 
-在项目根目录双击 `deploy_ai_girlfriend.bat` 或运行：
+> **审查修正**：`deploy_ai_girlfriend.bat` / `.ps1` 已于 **2026-08-28 删除**（见 `docs/DELETION_LOG.md`）。
+> 部署统一走 `deploy/` 目录。下文「一键脚本」仅为历史说明，磁盘上不存在这些文件。
 
-```powershell
-powershell -File deploy_ai_girlfriend.ps1
+可用替代流程（git archive + scp + remote_deploy.sh）：
+
+```bash
+# 在项目根（替换为你的服务器，勿把真实 IP 写回公开仓）
+export DEPLOY_HOST=your.server.ip
+export DEPLOY_USER=deploy
+git archive HEAD | ssh "${DEPLOY_USER}@${DEPLOY_HOST}" "tar -x -C /opt/ai-girlfriend"
+ssh "${DEPLOY_USER}@${DEPLOY_HOST}" "bash /opt/ai-girlfriend/deploy/remote_deploy.sh"
 ```
 
-脚本自动完成：
-1. 本地运行测试套件（可 `-SkipTests` 跳过）
-2. `git archive` 打包已提交的代码
-3. `scp` 上传到服务器 `/opt/ai-girlfriend/`
-4. 远程解压 + 剥离 CRLF + 执行 `deploy/remote_deploy.sh`
-5. 验证服务状态并清理临时文件
-
 > ⚠️ **前提**：SSH 密钥已配置（`ssh-keygen` + `ssh-copy-id deploy@服务器IP`）。
+> **SECURITY**：公开仓勿提交真实生产 IP/SSH 用户；若历史版本曾暴露主机地址或凭据，
+> 请轮换凭据并复查该主机 SSH/nginx 暴露面。部署目标优先用 `DEPLOY_HOST`/`DEPLOY_DOMAIN` 注入。
 
 #### 方式 B：在服务器上手动部署
 
@@ -104,7 +106,7 @@ cd /opt/ai-girlfriend
 sudo bash deploy/deploy.sh
 ```
 
-> ⚠️ **注意**：服务器无法访问 GitHub（443 timeout），`deploy.sh` 已移除 `git pull`。
+> ⚠️ **注意**：部分服务器无法访问 GitHub（443 timeout）。若如此，`deploy.sh` 不做 `git pull`；
 > 代码必须通过方式 A 上传，或手动 `scp` 后再执行 `deploy.sh`。
 
 部署脚本完成：

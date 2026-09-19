@@ -285,9 +285,21 @@ async def test_create_provider_admin_only(viewer_app):
     assert resp.status_code == 403
 
 
+def _local_secrets_for(tmp_config):
+    """与 llm_providers_routes 同目录派生的 gitignored 密钥文件路径"""
+    return tmp_config.with_name(tmp_config.stem + ".local.json")
+
+
+def _read_local_secrets(tmp_config):
+    path = _local_secrets_for(tmp_config)
+    if not path.exists():
+        return {"providers": {}}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 @pytest.mark.asyncio
 async def test_create_provider_success(admin_app):
-    """admin 创建新供应商成功"""
+    """admin 创建新供应商成功；密钥只进 local 文件，不进 tracked json"""
     client, _, _, tmp_config = admin_app
     resp = await client.post("/api/llm-providers", json={
         "key": "groq",
@@ -315,10 +327,13 @@ async def test_create_provider_success(admin_app):
     assert body["detail"] == "Provider 'groq' created"
     assert body["provider"]["api_key"] == "****"  # 脱敏
 
-    # 验证已写入配置文件
+    # tracked 配置：元数据已写入，api_key 必须为空（审查 F-high-2）
     cfg = json.loads(tmp_config.read_text(encoding="utf-8"))
     assert "groq" in cfg["providers"]
-    assert cfg["providers"]["groq"]["api_key"] == "gsk_test_key"  # 原文存储
+    assert cfg["providers"]["groq"]["api_key"] == ""
+    # 密钥落在 gitignored local 文件
+    secrets = _read_local_secrets(tmp_config)
+    assert secrets["providers"]["groq"]["api_key"] == "gsk_test_key"
 
 
 @pytest.mark.asyncio
@@ -378,9 +393,9 @@ async def test_create_provider_invalid_key_fails(admin_app):
 
 @pytest.mark.asyncio
 async def test_update_provider_preserves_api_key_when_empty(admin_app):
-    """更新时 api_key 为空字符串，保留原值"""
+    """更新时 api_key 为空字符串，保留原值（原值在 local 文件，tracked 保持空）"""
     client, _, _, tmp_config = admin_app
-    # 原值：sk-test-secret-key
+    # 原值：sk-test-secret-key（夹具写入 tracked 临时文件；首次保存后迁到 local）
     resp = await client.put("/api/llm-providers/agnes", json={
         "name": "Agnes AI（更新）",
         "model": "agnes-3.0-flash",
@@ -402,14 +417,21 @@ async def test_update_provider_preserves_api_key_when_empty(admin_app):
         },
     })
     assert resp.status_code == 200, resp.text
-    # 验证配置文件中原 api_key 仍存在
+    # tracked 文件不得含明文密钥
     cfg = json.loads(tmp_config.read_text(encoding="utf-8"))
-    assert cfg["providers"]["agnes"]["api_key"] == "sk-test-secret-key"
+    assert cfg["providers"]["agnes"]["api_key"] == ""
+    # 原密钥保留在 local 文件
+    secrets = _read_local_secrets(tmp_config)
+    assert secrets["providers"]["agnes"]["api_key"] == "sk-test-secret-key"
+    # 运行时读取仍能看到有效密钥（脱敏为 ****）
+    list_resp = await client.get("/api/llm-providers/all")
+    agnes = next(p for p in list_resp.json()["providers"] if p["key"] == "agnes")
+    assert agnes["api_key"] == "****"
 
 
 @pytest.mark.asyncio
 async def test_update_provider_preserves_api_key_when_masked(admin_app):
-    """更新时 api_key 为 ****，保留原值"""
+    """更新时 api_key 为 ****，保留原值（local 文件）"""
     client, _, _, tmp_config = admin_app
     resp = await client.put("/api/llm-providers/agnes", json={
         "name": "商汤",
@@ -427,12 +449,14 @@ async def test_update_provider_preserves_api_key_when_masked(admin_app):
     })
     assert resp.status_code == 200, resp.text
     cfg = json.loads(tmp_config.read_text(encoding="utf-8"))
-    assert cfg["providers"]["agnes"]["api_key"] == "sk-test-secret-key"
+    assert cfg["providers"]["agnes"]["api_key"] == ""
+    secrets = _read_local_secrets(tmp_config)
+    assert secrets["providers"]["agnes"]["api_key"] == "sk-test-secret-key"
 
 
 @pytest.mark.asyncio
 async def test_update_provider_updates_api_key_when_new_value(admin_app):
-    """更新时 api_key 为新值，覆盖原值"""
+    """更新时 api_key 为新值 → 只写 local 文件，tracked 保持空"""
     client, _, _, tmp_config = admin_app
     resp = await client.put("/api/llm-providers/agnes", json={
         "name": "商汤",
@@ -450,7 +474,9 @@ async def test_update_provider_updates_api_key_when_new_value(admin_app):
     })
     assert resp.status_code == 200, resp.text
     cfg = json.loads(tmp_config.read_text(encoding="utf-8"))
-    assert cfg["providers"]["agnes"]["api_key"] == "sk-new-key-123"
+    assert cfg["providers"]["agnes"]["api_key"] == ""
+    secrets = _read_local_secrets(tmp_config)
+    assert secrets["providers"]["agnes"]["api_key"] == "sk-new-key-123"
 
 
 @pytest.mark.asyncio

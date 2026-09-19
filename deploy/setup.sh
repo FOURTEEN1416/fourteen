@@ -33,7 +33,9 @@ APP_USER="www-data"  # matches Nginx user; change if needed
 DB_NAME="unique_you"
 DB_USER="unique_you"
 DB_PASS="$(openssl rand -base64 24)"  # auto-generated, save this
-DOMAIN="139.199.199.174"     # CHANGE THIS
+# SECURITY（审查 F-high-3）：公开仓勿写死生产 IP/域名。
+# 运行前注入：DEPLOY_DOMAIN=your.ip.or.domain sudo -E bash deploy/setup.sh
+DOMAIN="${DEPLOY_DOMAIN:-YOUR_SERVER_IP}"
 
 # ═══════════════════════════════════════════════════════════════
 # Step 1: System Packages

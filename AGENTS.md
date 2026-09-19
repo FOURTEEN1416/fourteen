@@ -85,7 +85,7 @@
 
 | 模块 | Owner | 路径 |
 |------|-------|------|
-| 入口 | 后端开发 | `main.py` / `start_all.cmd` |
+| 入口 | 后端开发 | `main.py`（控制台/微信）或 `python -m uvicorn api.run_api:app --host 0.0.0.0 --port 8000`；`start_all.cmd` 已于 2026-08-28 删除 |
 | 编排器 | 编排开发 | `orchestrator/` |
 | API 服务 | 后端开发 | `api/` |
 | 角色系统 | 角色开发 | `character_card/` / `my_character/` / `persona_extractor/` / `shisi/character/`（PNG tEXt chunk 编解码 + SillyTavern V2/V3 角色卡子系统) |
@@ -153,6 +153,7 @@
   for i in 0 1 2 3; do timeout 200 env PYTHONPATH= python -m pytest $(cat /tmp/c$i.txt) -q -p no:cacheprovider; done
   ```
   四块结果相加应等于 `--collect-only` 的收集数（当前 1086）。
+- **测试口径注记（2026-09-17 二次刷新）**：历史文档口径 1117（1042 Python + 75 前端，2026-09-01 .venv 实测）——该环境随 09-14 主仓事故丢失，此后不再作为可复现基线。**当时口径**：系统 Python 3.12 实测 **1064 收集 / 1060 通过 / 4 跳过**（2026-09-18 双角色库收敛后复测，166.48s；较上批 +48 = config 25 张卡 × `test_persona_injection` 每卡 2 个参数化用例全覆盖）+ 前端 vitest **87/87**（15 文件）+ `tsc --noEmit` 0 错误。跑测试：`PYTHONPATH= python -m pytest -q`（`PYTHONPATH=` 前缀用于清空宿主注入的 safe-delete 护栏，见本机环境注记）。
 - 验证报告：归档到 `docs/`
 - 测试基线：`pytest_true_baseline.log` / `pytest_wip_baseline.log` / `pytest_post_commit.log`
 
@@ -171,8 +172,8 @@
 | 后端测试 | `pytest` |
 | 前端测试 | `cd frontend && npm test` |
 | 类型检查 | `mypy .` / `pyright` |
-| 一键启动 | `start_all.cmd` |
-| 部署打包 | `deploy_ai_girlfriend.bat` |
+| 一键启动 | ~~`start_all.cmd`~~（**已删除 2026-08-28**）→ `python main.py` 或 `python -m uvicorn api.run_api:app --host 0.0.0.0 --port 8000` + `cd frontend && npm run dev` |
+| 部署打包 | ~~`deploy_ai_girlfriend.bat`~~（**已删除 2026-08-28**）→ 部署统一走 `deploy/`（systemd + nginx 模板 + remote_deploy.sh） |
 
 ---
 
@@ -203,7 +204,7 @@
 | L3 | 多用户记忆必须严格隔离 — `memory_ext/` 三层记忆（短期+情景+长期）必须按 user_id 隔离，任何串扰都属严重 bug |
 | L4 | LLM 输出 JSON 必须 Schema 校验 — 使用 Pydantic 双重校验，避免 JSON 解析失败导致角色/工具调用中断 |
 | L5 | 角色卡一致性 — `character_card/` 与 `my_character/` 必须保持同步，避免角色人格漂移 |
-| L6 | 语音合成优先级 — MiMo 云 > Edge-TTS > 本地模型，按可用性与延迟动态切换，不能假设单一源永久可用 |
+| L6 | 语音合成优先级 — **MiMo Cloud TTS 为唯一引擎**（2026-08-28 起；Edge-TTS / 本地模型已删除）。不可假设单一源永久可用，故障时走可观测告告警而非静默切换到已删除引擎 |
 | L7 | 626+ 测试必须保持通过 — 任何改动前先跑基线测试，改动后比对 `pytest_true_baseline.log`，回归即阻塞 |
 | L8 | 临时脚本必须清理 — 完成任务后清理一次性脚本与 `deploy_payload.tar.gz` 等构建产物，避免代码库膨胀 |
 | ~~L9~~ | ~~部署脚本双版本一致~~ → **已失效**（2026-08-28 用户删除 bat/ps1 部署脚本，部署统一走 `deploy/`） |
@@ -219,6 +220,49 @@
 5. **跨窗看板**：一切跨窗信息写 `docs/board/BOARD.md`（工具 `scripts/window_board.ps1 -Append/-Tail`）；开窗先读看板再读 `docs/board/TASK_PACKAGES.md`
 6. **记忆库双写**：重大裁决写 BOARD 同时 memory MCP（agent_id=shared）入库
 7. **收编门禁**：窗口完成自检（窗口内 pytest+vitest 绿）→ 协调者 merge --no-ff → 主检出回归门 → 卸窗脚本
+
+---
+
+## 9. 审查修正（2026 安全审查 P0/P1 落地）
+
+> 依据：`MiMo代码审查任务` 报告 v2（F-crit-1 / F-high-1..3 / F-med-2..4）。以下为代码与文档已对齐的硬约束。
+
+### 9.1 认证与启动 fail-closed
+
+| 项 | 规则 |
+|----|------|
+| `JWT_SECRET` | **非显式 dev 必填**（≥32）。生产/未标记/test 等环境无密钥 → `api/auth_jwt.py` **拒绝启动**。公开 DEV 兜底密钥仅当 `AI_GF_ENV`/`APP_ENV`/`ENV` 显式为 `dev`/`development` 时可用，并打印高强度警告。生成：`openssl rand -base64 48` |
+| `API_KEY` 占位符 | 公开占位符（含 `CHANGE_ME_TO_STRONG_RANDOM_KEY_32_CHARS_MIN`）在 **API 认证启用且非显式 dev** 时 → `main.py` / `app_factory` **fail-closed 拒启动** |
+| 环境真源 | `api/runtime_config.py`：`AI_GF_ENV > APP_ENV > ENV`；`is_production()` / `is_explicit_dev()` 为唯一判定。`main.py` 不再只看 `APP_ENV` |
+| `.env` 加载顺序 | `main.py` 在 import `api.*` **之前**加载 `.env`（auth_jwt 在 import 时读环境） |
+
+### 9.2 供应商密钥不入 git
+
+- 管理端写入的 LLM `api_key` **只**写到 `config/llm_providers.local.json`（已 `.gitignore`）或环境变量。
+- tracked 的 `config/llm_providers.json` **保持 `api_key: ""`**；运行时由 local overlay / env 注入。
+- 运行时读取：`llm_provider/multi_provider_gateway._load_providers_config` 会合并 local 密钥。
+
+### 9.3 公开仓部署敏感信息
+
+- **不要删除** `deploy/` 脚本；模板中的生产 IP/账号已改为占位符/环境变量（`DEPLOY_HOST` / `DEPLOY_DOMAIN`）。
+- **若历史曾使用** `139.199.199.174` 或相关 SSH 凭据：**轮换凭据**，复查该主机 SSH/nginx 暴露面；真实 IP/路径只放私密运维文档。
+- 部署目标优先用环境变量注入，勿写回公开仓。
+
+### 9.4 文档与磁盘一致性（残留项）
+
+| 项 | 现状 |
+|----|------|
+| `start_all.cmd` / `deploy_ai_girlfriend.bat` | 2026-08-28 已删除；AGENTS §2/§5 已改写，勿再引用为入口 |
+| `config/characters/` | **`.gitignore` 忽略、不入公开仓**；文档称其为角色卡真源，部署需单独投递（私有包/服务器本地），克隆仓不会自带 |
+| `config/system.yaml` | tracked 默认 `env: dev` / `debug: true` —— **仅本地开发**；生产部署必须用 env 覆盖或提供 prod 配置，`debug: false` |
+| 语音引擎 | MiMo Cloud TTS 唯一；L6 教训已更正 |
+
+### 9.5 SECURITY 摘要（公开仓）
+
+1. 轮换任何曾与 `139.199.199.174` / 旧 deploy 路径一起使用过的凭据。
+2. 生产启动检查清单：`AI_GF_ENV=prod`、`JWT_SECRET`（≥32）、强随机 `API_KEY`、`API_KEY_ENABLED=true`、`debug: false`。
+3. 禁止把真实供应商 key 提交进 `config/llm_providers.json`；CI/人工 review 见 `api_key` 非空即拒绝。
+4. 历史 commit 曾含 `.env` 占位符（`4d67ca2`）；若当时写过真实 key，必须轮换。
 8. **🔴 Owner 唯一制（2026-09-15 事故驱动，血泪条款）**：
    2026-09-15 凌晨，主检出（`D:\Desktop\ai-girlfriend`）工作树被两个窗口同时改写，导致主控写入的 `docs/board/BOARD.md` 被回滚 **3 次**、`docs/verification/` 被整个删除、`tests/test_wechat_connector.py` 的 232 行版本被打回 138 行。**根因不是某个命令，而是没有任何文件有唯一 owner。**
    - **任何文件在同一时刻只能有一个 owner 窗口**；owner 写在 `docs/board/BOARD.md` 的窗口登记表里，改之前先查表
