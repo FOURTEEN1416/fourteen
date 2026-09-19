@@ -102,10 +102,22 @@ export function useSaveConfig() {
 export function useWechatStatus() {
   return useQuery({
     queryKey: queryKeys.wechat.status,
-    queryFn: () => api.wechatStatus().then(r => r.data as WeChatStatus),
-    // SSE 实时推送为主，轮询仅作为兜底
-    refetchInterval: 30 * 1000,
-    staleTime: 60 * 1000,
+    queryFn: () => api.wechatStatus().then(r => {
+      const d = r.data as Record<string, unknown> & WeChatStatus
+      return {
+        connected: Boolean(d.connected),
+        uptime_seconds: Number(d.uptime_seconds ?? 0),
+        bot_id: String(d.bot_id ?? ''),
+        last_activity: (d.last_activity ?? null) as WeChatStatus['last_activity'],
+        messages_today: Number(d.messages_today ?? 0),
+        reconnect_attempts: Number(d.reconnect_attempts ?? 0),
+        owner_user_id: d.owner_user_id,
+        channels: d.channels,
+      } as WeChatStatus
+    }),
+    // 本人通道状态轮询兜底
+    refetchInterval: 15 * 1000,
+    staleTime: 5 * 1000,
   })
 }
 

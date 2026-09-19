@@ -55,7 +55,88 @@ _RECEIVED_MSGS_MAX = 10000       # _received_msgs 最大条目数
 _CONTEXT_TOKENS_TTL = 86400      # _context_tokens 条目 TTL（秒），默认24小时
 
 # ── 连接状态持久化（解决前端状态时连时断问题） ──
+# ⚠️ 2026-09-19：全局单例路径仅保留给「无 owner 的遗留 admin 通道」兼容读取；
+# 用户通道一律走 data/wechat_sessions/<user_id>/slotN/state.json
 _STATE_FILE = Path(__file__).parent.parent / "data" / "wechat_state.json"
+
+
+def load_session_state(user_id: int, slot: int = 0) -> dict:
+    """读取 per-user 通道状态；不存在则返回 idle 结构（绝不读全局他人状态）。"""
+    from wechat_direct import channel_paths
+
+    empty = {
+        "connected": False,
+        "started_at": 0,
+        "bot_id": "",
+        "last_activity": 0,
+        "messages_today": 0,
+        "reconnect_attempts": 0,
+        "status": "idle",
+        "owner_user_id": int(user_id),
+        "slot": int(slot),
+    }
+    path = channel_paths.state_path(user_id, slot)
+    try:
+        if path.exists():
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                empty.update(data)
+                empty["owner_user_id"] = int(user_id)
+                empty["slot"] = int(slot)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("读取用户通道状态失败 user=%s slot=%s: %s", user_id, slot, e)
+    return empty
+
+
+def save_session_state(user_id: int, slot: int, data: dict) -> None:
+    from wechat_direct import channel_paths
+
+    path = channel_paths.state_path(user_id, slot)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = dict(data)
+        payload["owner_user_id"] = int(user_id)
+        payload["slot"] = int(slot)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("保存用户通道状态失败 user=%s slot=%s: %s", user_id, slot, e)
+
+
+def save_session_qrcode(user_id: int, slot: int, qrcode_url: str = "", status: str = "waiting") -> None:
+    from wechat_direct import channel_paths
+
+    path = channel_paths.qrcode_path(user_id, slot)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "qrcode_url": qrcode_url,
+                    "status": status,
+                    "timestamp": time.time(),
+                    "owner_user_id": int(user_id),
+                    "slot": int(slot),
+                },
+                f,
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("保存用户二维码失败 user=%s: %s", user_id, e)
+
+
+def load_session_qrcode(user_id: int, slot: int = 0) -> dict:
+    from wechat_direct import channel_paths
+
+    path = channel_paths.qrcode_path(user_id, slot)
+    if not path.exists():
+        return {"qrcode_url": "", "status": "idle", "timestamp": 0}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {"qrcode_url": "", "status": "idle", "timestamp": 0}
+    except Exception:  # noqa: BLE001
+        return {"qrcode_url": "", "status": "idle", "timestamp": 0}
 
 
 def _load_state() -> dict:
@@ -96,21 +177,34 @@ def _merge_state(updates: dict) -> dict:
     return state
 
 
-# ── 全局单例（供 REST API 读取状态） ──
+# ── 遗留全局单例（仅 admin 兼容层；用户通道用 ConnectorRegistry） ──
 _connector: "WeChatConnector | None" = None
 
 
-def get_connector():
+def get_connector(user_id: int | None = None, slot: int = 0):
+    """有 user_id 时从 Registry 取；否则返回遗留全局单例（admin）。"""
+    if user_id is not None:
+        from wechat_direct.connector_registry import get_registry
+
+        return get_registry().get(user_id, slot)
     return _connector
 
 
-def get_wechat_state() -> dict:
-    """供外部 REST API 调用的稳定状态读取（优先内存实例，回退持久化文件）。"""
+def get_wechat_state(user_id: int | None = None, slot: int = 0) -> dict:
+    """状态读取：指定 user_id 时**只**返回该用户通道；否则返回遗留全局状态。
+
+    用户侧 API 必须传 user_id，禁止用本函数无参形态给普通用户展示「已连接」。
+    """
+    if user_id is not None:
+        from wechat_direct.connector_registry import get_registry
+
+        return get_registry().primary_status(user_id)
     conn = _connector
     if conn:
         if conn.token:
-            return conn.get_status()
-        # 内存实例存在但无 token，说明已断开或尚未登录成功
+            st = conn.get_status()
+            st["owner_user_id"] = getattr(conn, "owner_user_id", None)
+            return st
         return {**_load_state(), "connected": False}
     return _load_state()
 
@@ -562,14 +656,50 @@ class WeChatConnector:
     微信连接器 — 直连微信 API（多用户版）
 
     用法:
+        # 遗留：管理员全局通道（不推荐新代码）
         connector = WeChatConnector(user_manager)
-        connector.run()  # 登录 + 消息轮询
+        # 推荐：每人独立通道
+        connector = WeChatConnector(
+            user_manager,
+            owner_user_id=42,
+            session_dir=Path("data/wechat_sessions/42/slot0"),
+        )
+        connector.run()
     """
 
-    def __init__(self, user_manager, base_url=DEFAULT_BASE_URL):
+    def __init__(
+        self,
+        user_manager,
+        base_url=DEFAULT_BASE_URL,
+        owner_user_id: int | None = None,
+        slot: int = 0,
+        session_dir: Path | str | None = None,
+        credentials_path: str | None = None,
+        state_path: str | None = None,
+        qrcode_path: str | None = None,
+        context_tokens_path: str | None = None,
+    ):
         self.user_manager = user_manager
         self.orchestrator = getattr(user_manager, "_orch", None)
         self.base_url = base_url
+        self.owner_user_id = owner_user_id
+        self.slot = int(slot)
+        self.session_dir = Path(session_dir) if session_dir else None
+        # per-user 路径：owner 通道必须显式提供；遗留全局通道用模块级默认
+        self._credentials_path = credentials_path or (
+            str(self.session_dir / "credentials.json") if self.session_dir else CREDENTIALS_PATH
+        )
+        self._state_path = state_path or (
+            str(self.session_dir / "state.json") if self.session_dir else str(_STATE_FILE)
+        )
+        self._qrcode_path = qrcode_path or (
+            str(self.session_dir / "qrcode.json") if self.session_dir else None
+        )
+        self._context_tokens_path = context_tokens_path or (
+            str(self.session_dir / "context_tokens.json")
+            if self.session_dir
+            else CONTEXT_TOKENS_PATH
+        )
         self.token = ""
         self.bot_id = ""
         self.started_at = 0
@@ -589,7 +719,8 @@ class WeChatConnector:
         self._last_user_id: str = ""
         # 每条消息在独立线程中处理，避免阻塞轮询循环
         self._msg_executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=4, thread_name_prefix="wx_msg"
+            max_workers=2 if owner_user_id is not None else 4,
+            thread_name_prefix=f"wx_msg_{owner_user_id or 'legacy'}",
         )
         # 统计
         self._messages_today = 0
@@ -597,15 +728,42 @@ class WeChatConnector:
         self._last_activity = 0
         self._reconnect_attempts = 0
 
+    def _session_key(self, peer_wxid: str) -> str:
+        """会话隔离键：owner 通道下 peer 好友。遗留全局通道保持 peer_wxid 原样。"""
+        if self.owner_user_id is None:
+            return peer_wxid
+        return f"{int(self.owner_user_id)}:{peer_wxid}"
+
+    def _merge_session_state(self, updates: dict) -> dict:
+        if self.owner_user_id is not None:
+            save_session_state(self.owner_user_id, self.slot, {**self._load_local_state(), **updates})
+            return load_session_state(self.owner_user_id, self.slot)
+        return _merge_state(updates)
+
+    def _load_local_state(self) -> dict:
+        if self.owner_user_id is not None:
+            return load_session_state(self.owner_user_id, self.slot)
+        return _load_state()
+
+    def _save_local_qr(self, qrcode_url: str = "", status: str = "waiting") -> None:
+        if self.owner_user_id is not None:
+            save_session_qrcode(self.owner_user_id, self.slot, qrcode_url, status)
+        else:
+            _save_qr_to_file(qrcode_url, status)
+
     def send_text(self, text: str, to_user: str = "") -> bool:
         """主动发送文本消息（供外部调用）
 
-        ⚠️ 2026-09-19：改为**校验业务返回码**。旧实现丢弃 `_send_text()` 的返回
-        字典，只要不抛异常就 `return True` 并打印「微信主动发送成功」——
-        而 `ret=-2 "prepare failed"`（会话窗口失效）走的正是这条路径，
-        导致上层误判送达成功（用户实际零接收，且配额被记账）。
+        ⚠️ 用户独立通道：禁止依赖 `_last_user_id` 回退到可能属于他人会话的目标。
+        owner 通道必须显式传 to_user（好友 wxid）。
         """
-        target = to_user or self._last_user_id
+        if self.owner_user_id is not None:
+            target = to_user
+            if not target:
+                logger.warning("用户通道主动发送被拒绝：必须显式指定 to_user（owner=%s）", self.owner_user_id)
+                return False
+        else:
+            target = to_user or self._last_user_id
         if not target or not self.token:
             logger.warning("微信主动发送失败: 无目标用户或未登录")
             return False
@@ -717,7 +875,7 @@ class WeChatConnector:
     # ── 登录 ──
 
     def login(self):
-        """登微信 — 先放二维码，再试保存的凭证"""
+        """登微信 — 先放二维码，再试保存的凭证（per-user 路径）"""
         # 0. 快速重连：如果当前已有 token（从 _poll_loop 调用的重连），先试一次
         if self.token:
             logger.info("尝试用现有 token 快速重连...")
@@ -725,7 +883,7 @@ class WeChatConnector:
                 test = _get_updates("", self.token, self.base_url, timeout=5)
                 if test.get("ret") != -14 and test.get("errcode") != -14:
                     logger.info("现有 token 仍有效，重连成功")
-                    _save_qr_to_file("", "connected")
+                    self._save_local_qr("", "connected")
                     return True
             except Exception as e:  # noqa: BLE001
                 logger.debug(f"快速重连测试失败: {e}")
@@ -744,13 +902,13 @@ class WeChatConnector:
 
         # 2. 有二维码就先写到文件
         if qrcode_url:
-            _save_qr_to_file(qrcode_url, "waiting")
+            self._save_local_qr(qrcode_url, "waiting")
             print(f"\n二维码已就绪: {qrcode_url}\n")
         else:
-            _save_qr_to_file("", "idle")
+            self._save_local_qr("", "idle")
 
         # 3. 再试保存的凭证
-        creds = _load_credentials()
+        creds = _load_credentials(self._credentials_path)
         if creds.get("token"):
             logger.info("有保存的凭证，尝试快速登录...")
             self.token = creds["token"]
@@ -760,7 +918,7 @@ class WeChatConnector:
                 test = _get_updates("", self.token, self.base_url, timeout=3)
                 if test.get("ret") != -14 and test.get("errcode") != -14:
                     logger.info("保存的凭证有效，跳过扫码")
-                    _save_qr_to_file(qrcode_url or "", "connected")
+                    self._save_local_qr(qrcode_url or "", "connected")
                     return True
             except Exception as e:  # noqa: BLE001
                 logger.debug(f"凭证快速测试失败: {e}")
@@ -804,7 +962,7 @@ class WeChatConnector:
                     qr_resp = _fetch_qr_code(self.base_url)
                     qrcode = qr_resp.get("qrcode", "")
                     qrcode_url = qr_resp.get("qrcode_img_content", "")
-                    _save_qr_to_file(qrcode_url, "waiting")
+                    self._save_local_qr(qrcode_url, "waiting")
                     print(f"新二维码: {qrcode_url}")
                 except Exception as e:  # noqa: BLE001
                     logger.error(f"刷新二维码失败: {e}")
@@ -818,24 +976,30 @@ class WeChatConnector:
                     logger.error("登录确认但没拿到 token 或 bot_id")
                     return False
 
-                # 存凭证，下次直接连
-                _save_credentials({
-                    "token": bot_token,
-                    "base_url": result_base_url,
-                    "bot_id": bot_id,
-                    "user_id": status_resp.get("ilink_user_id", ""),
-                })
+                # 存凭证，下次直接连（per-user 路径）
+                _save_credentials(
+                    {
+                        "token": bot_token,
+                        "base_url": result_base_url,
+                        "bot_id": bot_id,
+                        "user_id": status_resp.get("ilink_user_id", ""),
+                        "owner_user_id": self.owner_user_id,
+                        "slot": self.slot,
+                    },
+                    self._credentials_path,
+                )
 
-                _save_qr_to_file(qrcode_url, "connected")
-                print(f"微信登录成功！bot_id={bot_id}")
+                self._save_local_qr(qrcode_url, "connected")
+                print(f"微信登录成功！bot_id={bot_id} owner={self.owner_user_id}")
 
                 self.token = bot_token
                 self.base_url = result_base_url
                 self.bot_id = bot_id
                 self._reconnect_attempts = 0
-                _merge_state({
+                self._merge_session_state({
                     "connected": True,
                     "bot_id": bot_id,
+                    "status": "connected",
                     "last_activity": time.time(),
                 })
                 return True
@@ -843,8 +1007,8 @@ class WeChatConnector:
             time.sleep(QR_POLL_INTERVAL)
 
         print("二维码登录超时")
-        _save_qr_to_file("", "expired")
-        _merge_state({"connected": False})
+        self._save_local_qr("", "expired")
+        self._merge_session_state({"connected": False, "status": "idle"})
         return False
 
     # ── 主循环 ──
@@ -852,25 +1016,29 @@ class WeChatConnector:
     def run(self):
         """完整流程：登录 → 收消息 → 传给小十 → 发回复"""
         global _connector
-        _connector = self
+        if self.owner_user_id is None:
+            # 仅遗留全局通道写入单例；用户通道用 Registry
+            _connector = self
 
         if not self.login():
-            logger.error("微信登录失败")
+            logger.error("微信登录失败 owner=%s", self.owner_user_id)
             self._reconnect_attempts += 1
-            _merge_state({
+            self._merge_session_state({
                 "connected": False,
+                "status": "error",
                 "reconnect_attempts": self._reconnect_attempts,
             })
             return
 
         self.started_at = time.time()
-        _merge_state({
+        self._merge_session_state({
             "connected": True,
+            "status": "connected",
             "started_at": self.started_at,
             "bot_id": self.bot_id,
             "reconnect_attempts": 0,
         })
-        logger.info("微信登录成功，开始收消息...")
+        logger.info("微信登录成功，开始收消息... owner=%s slot=%s", self.owner_user_id, self.slot)
         # 对话内追问守护线程（只启一次；run() 可能因重连被多次调用）
         if not getattr(self, "_followup_thread_started", False):
             self._followup_thread_started = True
@@ -879,7 +1047,7 @@ class WeChatConnector:
             ).start()
         self._poll_loop()
         # 轮询退出时持久化断开状态（保留 started_at 方便排查）
-        _merge_state({"connected": False})
+        self._merge_session_state({"connected": False, "status": "disconnected"})
 
     def _poll_loop(self):
         """消息轮询循环"""
@@ -909,9 +1077,9 @@ class WeChatConnector:
                             time.sleep(RETRY_DELAY * session_errors)
                             continue
                         logger.error("会话过期（连续%d次-14），重新登录...", session_errors)
-                        _save_qr_to_file("", "idle")
-                        if os.path.exists(CREDENTIALS_PATH):
-                            os.remove(CREDENTIALS_PATH)
+                        self._save_local_qr("", "idle")
+                        if os.path.exists(self._credentials_path):
+                            os.remove(self._credentials_path)
                         if self.login():
                             self._get_updates_buf = ""
                             consecutive_failures = 0
@@ -940,7 +1108,7 @@ class WeChatConnector:
                 msgs = resp.get("msgs", [])
                 if msgs:
                     self._last_activity = time.time()
-                    _merge_state({"last_activity": self._last_activity})
+                    self._merge_session_state({"last_activity": self._last_activity})
                 for raw_msg in msgs:
                     # 修复 P0-WX2：消息处理放到独立线程，避免阻塞轮询循环
                     # 导致连接状态抖动或心跳超时。
@@ -977,10 +1145,11 @@ class WeChatConnector:
 
     def _load_context_tokens(self) -> None:
         """从磁盘恢复 context_token（重启后仍可在窗口期内主动发送）。"""
+        path = self._context_tokens_path
         try:
-            if not os.path.exists(CONTEXT_TOKENS_PATH):
+            if not os.path.exists(path):
                 return
-            with open(CONTEXT_TOKENS_PATH, encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
                 return
@@ -1001,12 +1170,13 @@ class WeChatConnector:
 
     def _save_context_tokens(self) -> None:
         """原子落盘 context_token，避免服务重启丢失会话窗口。"""
+        path = self._context_tokens_path
         try:
-            Path(CONTEXT_TOKENS_PATH).parent.mkdir(parents=True, exist_ok=True)
-            tmp = CONTEXT_TOKENS_PATH + ".tmp"
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            tmp = path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self._context_tokens, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, CONTEXT_TOKENS_PATH)
+            os.replace(tmp, path)
         except Exception as e:  # noqa: BLE001
             logger.warning("context_token 保存失败（忽略）: %s", e)
 
@@ -1257,21 +1427,22 @@ class WeChatConnector:
             self._messages_today = 0
             self._last_day = today
         self._messages_today += 1
-        _merge_state({"messages_today": self._messages_today})
+        self._merge_session_state({"messages_today": self._messages_today})
 
         t_start = time.perf_counter()
+        session_key = self._session_key(from_user)
         logger.info(
-            "[wx][step=receive] msg_id=%s user=%s text=%r",
-            msg_id, from_user, text[:80],
+            "[wx][step=receive] msg_id=%s owner=%s peer=%s session=%s text=%r",
+            msg_id, self.owner_user_id, from_user, session_key, text[:80],
         )
 
         try:
-            result = _call_user_manager(self.user_manager, from_user, text, attachments)
+            result = _call_user_manager(self.user_manager, session_key, text, attachments)
             t_elapsed = time.perf_counter() - t_start
         except Exception as e:  # noqa: BLE001
             logger.exception(
-                "[wx][step=route_error] msg_id=%s user=%s error=%s",
-                msg_id, from_user, e,
+                "[wx][step=route_error] msg_id=%s session=%s error=%s",
+                msg_id, session_key, e,
             )
             try:
                 _send_text(
@@ -1280,13 +1451,13 @@ class WeChatConnector:
                     token=self.token, base_url=self.base_url,
                 )
             except Exception:  # noqa: BLE001
-                logger.exception("[wx][step=notify_fail] msg_id=%s user=%s", msg_id, from_user)
+                logger.exception("[wx][step=notify_fail] msg_id=%s session=%s", msg_id, session_key)
             return
 
         if not isinstance(result, dict):
             logger.warning(
-                "[wx][step=route_bad_result] msg_id=%s user=%s result_type=%s",
-                msg_id, from_user, type(result),
+                "[wx][step=route_bad_result] msg_id=%s session=%s result_type=%s",
+                msg_id, session_key, type(result),
             )
             result = {}
 
@@ -1296,8 +1467,8 @@ class WeChatConnector:
 
         if not reply:
             logger.warning(
-                "[wx][step=empty_reply] msg_id=%s user=%s error=%s elapsed=%.2fs",
-                msg_id, from_user, error or "unknown", t_elapsed,
+                "[wx][step=empty_reply] msg_id=%s session=%s error=%s elapsed=%.2fs",
+                msg_id, session_key, error or "unknown", t_elapsed,
             )
             # ⚠️ 2026-09-19：兜底语改为**无括号**的纯口语。
             # 旧值「（我暂时不知道该怎么回复，可以再说一次吗？）」自带括号动作，
@@ -1306,8 +1477,8 @@ class WeChatConnector:
             reply = "刚才没接上，你再说一句？"
         else:
             logger.info(
-                "[wx][step=llm_done] msg_id=%s user=%s reply=%r elapsed=%.2fs llm_time=%s",
-                msg_id, from_user, reply[:80], t_elapsed, process_time,
+                "[wx][step=llm_done] msg_id=%s session=%s reply=%r elapsed=%.2fs llm_time=%s",
+                msg_id, session_key, reply[:80], t_elapsed, process_time,
             )
 
         try:
@@ -1328,22 +1499,22 @@ class WeChatConnector:
                 ok, errmsg = _api_ok(resp)
                 if not ok:
                     logger.warning(
-                        "[wx][step=reply_send_failed] msg_id=%s user=%s part=%d/%d error=%s",
-                        msg_id, from_user, idx + 1, len(segments), errmsg,
+                        "[wx][step=reply_send_failed] msg_id=%s session=%s part=%d/%d error=%s",
+                        msg_id, session_key, idx + 1, len(segments), errmsg,
                     )
                     return
             logger.info(
-                "[wx][step=reply_sent] msg_id=%s user=%s parts=%d reply=%r",
-                msg_id, from_user, len(segments), reply[:80],
+                "[wx][step=reply_sent] msg_id=%s session=%s parts=%d reply=%r",
+                msg_id, session_key, len(segments), reply[:80],
             )
             # 记录本轮真实往来（追问要用它做上下文，不能凭空"人呢"）
-            self._remember_exchange(from_user, text, reply)
+            self._remember_exchange(session_key, text, reply)
             # 回复成功 → 登记对话内追问（以最后一段作为"刚说的话"）
-            self._schedule_followup(from_user, segments[-1] if segments else reply)
+            self._schedule_followup(session_key, segments[-1] if segments else reply)
         except Exception as e:  # noqa: BLE001
             logger.exception(
-                "[wx][step=reply_send_failed] msg_id=%s user=%s error=%s",
-                msg_id, from_user, e,
+                "[wx][step=reply_send_failed] msg_id=%s session=%s error=%s",
+                msg_id, session_key, e,
             )
             return
 
@@ -1483,6 +1654,6 @@ class WeChatConnector:
         # 关闭本实例的消息处理线程池
         with suppress(Exception):
             self._msg_executor.shutdown(wait=False)
-        # 持久化断开状态
-        _merge_state({"connected": False})
-        logger.info("微信连接器已停止")
+        # 持久化断开状态（per-user 或遗留全局）
+        self._merge_session_state({"connected": False, "status": "disconnected"})
+        logger.info("微信连接器已停止 owner=%s slot=%s", self.owner_user_id, self.slot)

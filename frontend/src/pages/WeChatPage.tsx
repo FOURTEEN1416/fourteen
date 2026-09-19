@@ -4,7 +4,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useWechatStatus, queryKeys } from '../hooks/useQueries'
 import type { WeChatStatus } from '../types/api'
 import { RefreshCw, X, QrCode, Clock, MessageSquare, AlertTriangle, CheckCircle2, Smartphone } from 'lucide-react'
-import { wechatCreateConnection } from '../api/wechat'
 import { wechatQrCode, wechatConnectionStatus, wechatConnect } from '../api/system'
 
 // ── Types ──
@@ -53,7 +52,7 @@ function LiveStatusBanner() {
               }`}
             />
             <span className="text-sm font-semibold text-gray-700">
-              微信桥接 {status.connected ? '已连接' : '已断开'}
+              我的微信 {status.connected ? '已连接' : '未连接'}
             </span>
           </div>
           <div className="flex items-center gap-3 text-xs text-gray-400">
@@ -116,10 +115,10 @@ function LiveStatusBanner() {
       {!status.connected && (
         <div className="mt-4 rounded-xl border border-dashed border-macaron-blue/30 bg-macaron-blue-light/20 p-6 text-center stagger-item">
           <QrCode className="mx-auto h-10 w-10 text-macaron-blue/60" />
-          <p className="mt-3 text-sm font-medium text-gray-700">微信尚未连接</p>
+          <p className="mt-3 text-sm font-medium text-gray-700">你尚未连接自己的微信</p>
           <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-gray-400">
-            点击下方按钮扫码登录微信；连接成功后系统自动保持在线（断线自动重连），
-            你的好友即可与角色开始对话。
+            点击下方按钮，用**你自己的**微信扫码登录（与他人通道隔离）；
+            连接成功后，你的好友即可与你的角色对话。
           </p>
           <button
             onClick={() => setShowQrModal(true)}
@@ -166,18 +165,9 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
         if (connData.connected || connData.status === 'connected') {
           setStatus('connected')
           if (pollingRef.current) clearInterval(pollingRef.current)
-          if (connData.wxid && !connectedRef.current) {
-            connectedRef.current = true
-            const wxid = connData.wxid
-            try {
-              await wechatCreateConnection({ wxid })
-            } catch {
-              // 忽略保存失败
-            }
-            onConnected?.(wxid)
-            qc.invalidateQueries({ queryKey: queryKeys.wechat.status })
-            qc.invalidateQueries({ queryKey: ['wechat', 'bindings'] })
-          }
+          // 本人通道已在后端落库，不再调用 admin 的 wechatCreateConnection
+          qc.invalidateQueries({ queryKey: queryKeys.wechat.status })
+          qc.invalidateQueries({ queryKey: ['wechat', 'bindings'] })
         } else if (connData.status === 'scanned') {
           setStatus('scanned')
         }
@@ -346,57 +336,9 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
   )
 }
 
-/** SSE 实时订阅微信状态，更新 React Query 缓存，避免轮询抖动。 */
+/** 本人通道状态由 useWechatStatus 轮询驱动（隔离后不再订阅全局 SSE）。 */
 function useWechatStatusStream() {
-  const qc = useQueryClient()
-  const reconnectRef = useRef(0)
-
-  useEffect(() => {
-    // Node.js / 测试环境无 EventSource，优雅跳过
-    if (typeof EventSource === 'undefined') return
-
-    let es: EventSource | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-    let closed = false
-
-    const connect = () => {
-      if (closed) return
-      const apiKey = import.meta.env.VITE_API_KEY || ''
-      const url = apiKey
-        ? `/api/channels/wechat/status-stream?api_key=${encodeURIComponent(apiKey)}`
-        : '/api/channels/wechat/status-stream'
-      es = new EventSource(url)
-
-      es.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data) as WeChatStatus
-          qc.setQueryData(queryKeys.wechat.status, payload)
-          reconnectRef.current = 0
-        } catch {
-          // 忽略非 JSON 数据
-        }
-      }
-
-      es.onerror = () => {
-        if (closed) return
-        if (es) {
-          es.close()
-          es = null
-        }
-        // 指数退避重连：1s / 2s / 4s / 8s，最大 30s
-        const delay = Math.min(1000 * 2 ** reconnectRef.current, 30000)
-        reconnectRef.current = Math.min(reconnectRef.current + 1, 5)
-        reconnectTimer = setTimeout(connect, delay)
-      }
-    }
-
-    connect()
-    return () => {
-      closed = true
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      if (es) es.close()
-    }
-  }, [qc])
+  // no-op：避免误连全局 /api/channels/wechat/status-stream
 }
 
 // ── Main Component ──

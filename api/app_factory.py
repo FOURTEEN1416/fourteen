@@ -322,12 +322,28 @@ def create_api_app(
     # 其他子路由挂载
     # ═══════════════════════════════════════════════════
 
-    # ── 微信二维码 API ──
+    # ── 微信二维码 API（admin 兼容）──
     try:
         from api.qrcode_store import router as qrcode_router
         app.include_router(qrcode_router)
     except Exception as e:
         logger.warning("二维码API挂载失败: %s", e)
+
+    # ── 每人独立微信通道 API（2026-09-19）──
+    try:
+        from api.routers.wechat_channel_routes import (
+            admin_router as wechat_admin_router,
+        )
+        from api.routers.wechat_channel_routes import (
+            router as wechat_channel_router,
+        )
+        app.include_router(wechat_channel_router)
+        app.include_router(wechat_admin_router)
+        deps.route_mounts["wechat_channel"] = True
+        logger.info("每人独立微信通道 API已挂载")
+    except Exception as e:
+        deps.route_mounts["wechat_channel"] = False
+        logger.warning("微信通道API挂载失败: %s", e)
 
     def _mount_required_router(name: str, router) -> None:
         """挂载控制端关键路由，并记录到 readiness 能力矩阵。"""

@@ -5,9 +5,11 @@ import logging
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, Security
+from fastapi import APIRouter, Depends, Security
 
 from api.auth import verify_api_key_dep
+from api.auth_jwt import require_role
+from api.database import User
 
 logger = logging.getLogger("qrcode_store")
 
@@ -60,7 +62,14 @@ def _generate_qr_image(url: str) -> str | None:
 
 
 @router.get("/qrcode")
-def get_qrcode(_auth: bool = Security(verify_api_key_dep)):
+def get_qrcode(
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """Admin-only 兼容：读全局遗留二维码文件。
+
+    普通用户请使用 GET /api/wechat/channel/qrcode（只返回自己的码）。
+    """
     data = _read_qrcode_data()
     url = data.get("qrcode_url", "")
     has_new_qr = url and (time.time() - data.get("timestamp", 0)) < QRCODE_EXPIRY_SECONDS
@@ -76,4 +85,5 @@ def get_qrcode(_auth: bool = Security(verify_api_key_dep)):
         "timestamp": data.get("timestamp", 0),
         "is_expired": is_expired(),
         "message": "请使用微信扫描二维码登录" if has_new_qr else "等待二维码生成...",
+        "scope": "admin-legacy",
     }

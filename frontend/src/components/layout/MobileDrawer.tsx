@@ -127,7 +127,7 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
                 <div className="text-xs text-gray-600 font-medium truncate">{user.email}</div>
                 <div className="flex items-center gap-1.5 text-[11px] text-gray-400">
                   <div className={`w-1.5 h-1.5 rounded-full pulse-ring ${isConnected ? 'bg-green-400' : 'bg-red-400'}`} />
-                  {isConnected ? '微信已连接' : '微信未连接'}
+                  {isConnected ? '我的微信已连接' : '我的微信未连接'}
                 </div>
               </div>
             </div>

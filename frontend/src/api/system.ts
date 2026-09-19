@@ -60,12 +60,15 @@ export function logs(params?: { limit?: number; level?: string; search?: string 
 // ── Channels / WeChat ──
 
 export function channels() { return client.get('/channels') }
-export function wechatStatus() { return client.get('/channels/wechat/status') }
-export function wechatReconnect() { return client.post('/channels/wechat/reconnect') }
-export function wechatConnect() { return client.post('/channels/wechat/connect') }
-export function wechatDisconnect() { return client.post('/channels/wechat/disconnect') }
-export function wechatConnectionStatus() { return client.get('/channels/wechat/connection-status') }
-export function wechatQrCode() { return client.get('/wechat/qrcode') }
+// 微信通道：2026-09-19 起改为每人独立通道
+// 用户侧主接口 = /api/wechat/channel*；旧 /channels/wechat/* 需 JWT 且仅返回自己的状态
+export function wechatStatus() { return client.get('/wechat/channel') }
+export function wechatChannelList() { return client.get('/wechat/channel/list') }
+export function wechatReconnect() { return client.post('/wechat/channel/reconnect') }
+export function wechatConnect() { return client.post('/wechat/channel/connect') }
+export function wechatDisconnect() { return client.post('/wechat/channel/disconnect') }
+export function wechatConnectionStatus() { return client.get('/wechat/channel') }
+export function wechatQrCode() { return client.get('/wechat/channel/qrcode') }
 
 // ── Psychology Profile ──
 

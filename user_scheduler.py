@@ -249,23 +249,24 @@ class UserManager:
     def _get_or_create(self, user_id: str) -> UserInstance:
         """获取或创建用户实例（线程安全）
 
-        注意：此方法为同步方法，内部不包含任何 await 操作。
-        threading.Lock 足以保护简短的字典操作。
-
-        竞态条件分析：
-        - 每个用户有独立的 EmotionEngine 实例，情感状态完全隔离
-        - _users 字典操作在锁保护下是原子的（dict __contains__ / __setitem__ / __getitem__）
-        - EmotionEngine 内部状态变更仅在 process_message 中发生，
-          而 process_message 由 Orchestrator 的 per-session 锁串行化
-        - 因此 _users_lock + per-session 锁两层保护足以防止所有竞态条件
+        2026-09-19：微信通道会话键为 `owner:peer`；角色解析优先级：
+        1) peer 偏好（wechat_peer_preferences，好友自选）
+        2) wechat_bindings 中该 peer 的绑定
+        3) 通道 owner 的默认角色 / default
         """
         with self._users_lock:
             if user_id not in self._users:
                 engine = self._create_user_engine()
-                # 查绑定缓存，用绑定的角色和昵称
+                character_card_id = self._resolve_character_id(user_id)
+                nickname = ""
                 binding = self._bindings.get(user_id)
-                character_card_id = (binding.get("character_card_id") or "default") if binding else "default"
-                nickname = (binding.get("nickname") or "") if binding else ""
+                if not binding and ":" in user_id:
+                    _owner, peer = user_id.split(":", 1)
+                    binding = self._bindings.get(peer) or self._bindings.get(user_id)
+                if binding:
+                    nickname = binding.get("nickname") or ""
+                    if binding.get("character_card_id") and user_id in self._bindings:
+                        character_card_id = binding.get("character_card_id")
                 instance = UserInstance(
                     user_id=user_id,
                     nickname=nickname,
@@ -277,6 +278,25 @@ class UserManager:
                 self._users[user_id] = instance
                 logger.info("✨ 新用户接入: %s → 角色 %s (总用户数: %d)", user_id, character_card_id, len(self._users))
             return self._users[user_id]
+
+    def _resolve_character_id(self, user_id: str) -> str:
+        """按优先级解析会话键对应的角色卡。"""
+        binding = self._bindings.get(user_id)
+        if binding and binding.get("character_card_id"):
+            return str(binding["character_card_id"])
+        if ":" in user_id:
+            owner, peer = user_id.split(":", 1)
+            # peer 偏好缓存键：owner:peer 已在 bindings 中则上面已命中
+            pref = self._bindings.get(f"pref:{user_id}")
+            if pref and pref.get("character_card_id"):
+                return str(pref["character_card_id"])
+            peer_bind = self._bindings.get(peer)
+            if peer_bind and peer_bind.get("character_card_id"):
+                return str(peer_bind["character_card_id"])
+            owner_bind = self._bindings.get(owner)
+            if owner_bind and owner_bind.get("character_card_id"):
+                return str(owner_bind["character_card_id"])
+        return "default"
 
     def remove_user(self, user_id: str) -> bool:
         """移除用户（线程安全）"""
