@@ -7,7 +7,35 @@
 
 ---
 
-## 2026-09-20 — 角色完善与文学导入批次（25→41 张卡 + 知识库激活）
+## 2026-09-20 — 提示词构建行业对齐批次（移除场景字段 + prompt 重排）
+
+**任务**：用户指令三项——① 全部角色卡移除场景（scenario）部分；② 调研角色扮演类提示词的优化实践；③ 检查本项目 prompt 构建并参照行业公认成熟项目改善。
+
+**调研取证**（代码类走 GitHub-First + 官方文档）：
+1. **SillyTavern docs**（docs.sillytavern.app/usage/prompts/ + prompt-manager/）：默认序列 Main → 世界信息 → Persona → 角色描述 → 性格 → 场景 → Chat Examples → Chat History → **Post-History Instructions（最后）**；明确结论「主提示词在远处、近期指令权重更高」，PHI 因位于历史之后而**优先级高于主提示词**。
+2. **chara-card-spec-v2**（github.com/malfoyslastname/character-card-spec-v2）：`post_history_instructions`「置于对话历史之后，因为此类指令对生成的权重远高于历史之前的」；`mes_example` = 示范说话方式的对话示例；`creator_notes` 在规范中是**永不进 prompt** 的元信息（本项目将其用作硬性扮演规则属本地约定，保留但按 PHI 位注入）。
+3. 对照结论：本项目的 creator_notes ≈ 规范的 post_history_instructions 语义，故移至历史之后；mes_example 应作 few-shot 进 prompt（此前只进知识库）；scenario 属可选开场氛围，锁死对话的根源。
+
+**本项目 prompt 构建诊断**（生产 web/微信路径 = optimized_orchestrator → shisi PersonaService → prompt_builder → CharacterAggregate.build_system_prompt）：
+- 知识库**双重注入**：base prompt 注入格式化知识（CharacterKnowledgeService top8）+ PersonaService 再注入同一服务的 JSON dump 版（同源两份、两个同名标题段）。
+- orchestrator 人设片段**截断重复注入**：简介 500 字/备注 500 字/锚点 60 字/数值维度——全部是 base prompt 已有全文的截断版，可能与全文矛盾。
+- creator_notes（硬规则）在历史**之前**——行业结论是历史之后权重最高。
+- mes_example 从未进 prompt；scenario 无守卫直接注入（锚定根因）。
+
+**改动**（提交 86b3ec2）：
+1. 41 卡 scenario 字段全量删除；索引同步重建（scenario 块出库，米彩 18→17 块）。
+2. `CharacterAggregate.build_system_prompt`：扮演规则移至对话历史之后（PHI 位）；新增 # 对话示例（`<START>` 分块、上限 2000 字、注明「仅示范语气与格式」）；scenario 渲染带「仅开场氛围」守卫（兼容导入 ST 卡）。
+3. `PersonaService.build_system_prompt`：知识注入去重（prompt_builder 唯一 owner；base 无知识段时才兜底注入）。
+4. `optimized_orchestrator._load_character_persona_segment`：精简为身份绑定（角色名/口头禅/开场白 + 「以上方内容为准」声明），移除全部截断重复。
+5. 测试：+5 `TestSystemPromptStructure`（PHI 位序/示例位序/场景守卫/无场景/无示例）+ 2 契约测试改写（`test_long_anchor_truncated_not_dropped` → 锚点不得在片段重复；persona 段嵌套断言更新）。
+
+**验证**：分块实跑 **1255 passed / 4 skipped**（收集 1259，另 test_knowledge_routes_index 3 例单独跑全过，零失败）+ vitest 98/98（无前端改动）+ ruff 全绿。prompt 结构 smoke（米卡全链路）：角色设定 → 性格 → 当前状态 → 角色知识库×1 → 对话示例 → 对话历史 → 扮演规则 → 用户。
+
+**三端（已闭环）**：A 档提交 86b3ec2 push + 服务器 pull（git log 复核落点 86b3ec21）+ 41 卡 scp 投递 + 服务器索引重建 + 服务重启 active；生产实证：41 卡含 scenario 数 = 0、米彩 stats 17 块且 sources 无 scenario、检索正常、health 200。文档 B 档 push（CODE_GRAPH v3.8.5 / AGENTS v1.15 / 本 LOG / BOARD）。
+
+**遗留提示**：creator_notes 在卡规范中本义是「不进 prompt 的元信息」——若未来要彻底对齐规范，可考虑新增 post_history_instructions 字段承接硬规则（当前用 creator_notes 顶位是务实选择，不动）。
+
+（25→41 张卡 + 知识库激活）
 
 **任务**：用户指令——对已有角色进行完善；将《我的26岁女房客》主要角色导入；导入《从你的全世界路过》《云边有个小卖部》《某某》《天堂旅行团》主要角色；把各个角色的知识库用起来。
 

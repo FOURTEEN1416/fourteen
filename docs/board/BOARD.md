@@ -290,3 +290,9 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **三端**：代码与文档 commit→push（A/B 档）；`config/characters` 为 gitignore 私有投递（服务器覆盖前 md5 比对 + 服务器端重建索引）。
 - **待用户裁决**：两张「林挽夏」变体卡（62105bca 活跃 / f0860ed2 闲置）是否合并。
 - **闭环补记（同日）**：服务器部署追加修复两真缺陷——① 重建脚本孤立清理从未生效（startswith("") 恒真短路，c37e0a19，服务器残留 29 个旧索引清零）；② knowledge 路由端点降级覆盖全量索引（31b9015，+3 回归）。三端闭环：HEAD 31b90157 + 41 卡 scp 投递（原 25 卡 tar 备份）+ 索引重建；生产实证 41 卡可见 / 米彩 18 块 7 源 / 「昭阳是谁」命中。基线终值 **1254 收集 / 1250 通过 / 4 跳过 + vitest 98/98**。部署教训：远端 git pull 后必须以 git log/status 复核落点（tail 一行截到 Updating 掩盖 Aborting）。
+### 2026-09-20 · 主控窗口（zcode）· 提示词构建行业对齐批次（移除场景字段 + prompt 重排）
+
+- **任务**：用户指令——全部卡移除场景部分；调研角色扮演提示词优化；参照行业成熟项目（SillyTavern/chara-card-spec-v2）改善本项目 prompt 构建。
+- **改动**：41 卡 scenario 删除（根因级修复开场锚定）；creator_notes 移至历史后（PHI 位）；新增 # 对话示例（mes_example 首次进 prompt）；知识库双重注入去重；orchestrator 人设片段精简为身份绑定。scenario 兼容守卫保留（导入卡）。
+- **验证**：1259 收集 / 1255 通过 / 4 跳过 + vitest 98/98 + ruff 全绿；生产实证 41 卡 0 scenario、米彩 17 块无 scenario 源、检索正常。
+- **三端**：86b3ec2 已部署（服务器 HEAD 同步）；文档 CODE_GRAPH v3.8.5 / AGENTS v1.15 / LOG。
