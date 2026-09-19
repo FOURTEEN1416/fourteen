@@ -1908,5 +1908,6 @@
 - **全宽渐变按钮收敛**：「保存频率配置」「立即发送一条主动消息」由全宽大条改右对齐紧凑主按钮（bg-primary-500 rounded-lg shadow-sm）。
 
 **验证**：`tsc --noEmit` 0 错误；vitest **87/87**；`vite build` 通过；修复后复截桌面+移动全页，6 组 before/after 归档 `docs/verification/2026-09-19-前端审美第二轮/`（含 README 逐项对照表）。
+**部署（用户裁决「A」后执行）**：增量 bundle `e56e16d..155ae3e` → swu-prod ff-merge（服务器 HEAD 对齐 `155ae3e8`）；`frontend/dist` 先备份 `dist.rollback-20260919-1847` 再 `npm run build`（纯前端增量，依赖零变化，未跑 pip install、未重启服务，站点无中断）。核验：线上 index.html 引用新入口 `index-Cn5SiZJk.js`、`供应商管理` 字符串已进构建产物、后端 `/api/health` 持续 ok、`App.tsx` 两端 `git hash-object` 一致（`7a68fd69`）。bundle 两端已删。
 **清理**：审计账号（user 1502，users/user_sessions/consent_records）DB 行已删；临时脚本 `frontend/tmp-round2{,b,c,d}.mjs` 与 `/tmp/reg2.json` 已删；`docs/tmp-fe-round2/` 已移除；后台 uvicorn/vite 进程已停。
 **已知限制**：① 剧情线页未勾选「启用剧情线」时内容量由数据决定，显空属数据态；② fullPage 截图拉伸伪影同第一轮口径；③ 本轮改动全部在前端 6 文件，未触碰后端与并行窗口文件。
