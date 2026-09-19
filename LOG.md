@@ -1939,4 +1939,11 @@
 - UTC 仿真（`TZ=UTC`）：`_is_quiet_hours=True`，`tick_calls=[True]`，通过。
 - `tests/test_proactive.py` **81/81**（含新增回归）；`ruff check .` 0 错。
 - 分块后端：chunk0 213 + chunk1 338/4skip + chunk2 296 + chunk3 逐文件全过（含 `test_integration` / `test_web_enricher` / `test_llm_providers_routes` 等历史卡点单独跑绿）。聚合态整跑仍可能随机停住（AGENTS §4.3 已知环境问题，非本批引入）。
-- 无 `DEPLOY_HOST` 环境变量，本机未直连云服务器；scheduler 时区修复属 A 档代码，**需服务器 `git pull` + 服务重启**后才在生产生效。GitHub 侧以 push 后的 CI 转绿为准。
+- GitHub CI run `35443883416` **success**（backend pytest/ruff/mypy + frontend tsc/build/vitest/E2E + 全部 FF 门禁）；Issue #3 已由 `close-ci-failure-issue` 自动关闭。
+
+**三端同步（SSH `swu-prod`，配置见 `C:\Users\FOUR\.ssh\config`）**：
+- 服务器时区实测 **Asia/Beijing (CST +0800)** —— 时区修复在生产为「对齐防御」，不改变当前静默判定结果（原 `datetime.now().hour` 与 `_local_now()` 本就一致）。
+- `/opt/ai-girlfriend`：`git fetch` 后落后 origin 2 个提交，`git pull --ff-only` 至 **`597fb34d`**（与本地/GitHub 一致）。
+- 核验：`HEAD:proactive/scheduler.py` blob `178be693…` 两端相同；服务器该文件已使用 `_local_now().hour`。
+- `systemctl restart ai-girlfriend.service` → active（MainPID 3229286）；`/api/health` 返回 `ok` / `unique-you-api` / `3.1.0` / `production`。
+- 未改依赖、未重建前端（本批无 frontend 产物变更）；服务器仅存 `frontend/dist.rollback-20260919-1847/` 未跟踪备份，未动。
