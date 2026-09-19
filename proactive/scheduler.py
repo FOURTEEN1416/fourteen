@@ -19,9 +19,12 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
-# 消息清洗（拦截 LLM 推理过程泄漏为消息内容）。直接导入而非延迟导入：
+# 消息清洗（拦截 LLM 推理过程泄漏为消息内容）+ 统一本地时钟。
 # proactive.ase_engine 不反向依赖 scheduler，不存在循环导入。
-from proactive.ase_engine import sanitize_message
+# ⚠️ 静默时段判定必须与 ASE 引擎共用 _local_now()：引擎在非 UTC+8 主机
+# （GitHub Actions / 容器默认 UTC）会强制换算到北京时间，若调度器仍用
+# datetime.now().hour，两边小时数差 8，静默短路会静默失效（2026-09-19 CI 实证）。
+from proactive.ase_engine import _local_now, sanitize_message
 from utils.project_paths import project_path
 
 logger = logging.getLogger("scheduler")
@@ -425,16 +428,14 @@ class ProactiveScheduler:
             logger.warning("知识库定期采集失败: %s", e)
 
     def _is_quiet_hours(self) -> bool:
-        """检查是否在免打扰时段"""
-        # 使用本地时区（Asia/Shanghai 默认 UTC+8）。
-        # 旧实现硬编码 +8 偏移且未取模，在 UTC 16:00-23:00 时段会得到 24-31 的非法小时。
-        # 现在使用 datetime.now() 获取本地时间（已考虑系统时区），并允许通过 timezone_offset 配置。
-        try:
-            # 优先使用系统本地时间（已含时区转换）
-            local_hour = datetime.now().hour
-        except Exception:  # noqa: BLE001
-            # 兜底：UTC+8
-            local_hour = (datetime.now(tz=timezone.utc).hour + 8) % 24
+        """检查是否在免打扰时段。
+
+        必须与 ASEEngine._in_quiet_hours 使用同一时钟源 _local_now()。
+        系统时区非北京时间时（CI/容器 UTC），datetime.now().hour 会与引擎
+        相差 8 小时，导致调度器静默短路失效、引擎却在算静默——配额记账
+        与投递判定分裂（v1.13 生产事故的 CI 侧再现）。
+        """
+        local_hour = _local_now().hour
         start, end = self._quiet_hours
         if start < end:
             return start <= local_hour < end

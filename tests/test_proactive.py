@@ -816,6 +816,32 @@ def test_select_type_avoids_recent_types(tmp_path):
     assert "worry" not in picked
 
 
+def test_scheduler_quiet_hours_uses_ase_local_clock():
+    """调度器静默判定必须与 ASE 共用 _local_now，禁止 datetime.now 双真源。
+
+    回归：CI（UTC）上 datetime.now().hour 与 _local_now()（强制 UTC+8）相差 8 小时，
+    静默短路会静默失效（2026-09-19 主干 CI 连红根因之一）。
+    """
+    from datetime import datetime
+    from unittest.mock import patch
+
+    from proactive.scheduler import ProactiveScheduler
+
+    class _FakeASE:
+        def set_quiet_hours(self, start, end):
+            pass
+
+    with patch("proactive.scheduler._local_now") as mock_now:
+        mock_now.return_value = datetime(2026, 1, 1, 20, 30, 0)
+        sched = ProactiveScheduler(ase_engine=_FakeASE())
+        sched.reload_config = lambda: None
+        sched._quiet_hours = (20, 21)
+        assert sched._is_quiet_hours() is True
+        mock_now.assert_called()
+        sched._quiet_hours = (22, 23)
+        assert sched._is_quiet_hours() is False
+
+
 def test_scheduler_quiet_hours_skips_before_generation():
     """调度器在静默时段必须在**生成之前**短路（不生成 = 不扣配额）。"""
     from proactive.ase_engine import _local_now

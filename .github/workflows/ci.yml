@@ -88,10 +88,17 @@ jobs:
 
       - name: Setup backend for E2E (seed DB + start uvicorn)
         working-directory: .
+        env:
+          # auth_jwt fail-closed：非显式 dev 且无 JWT_SECRET 时拒绝 import/启动。
+          # e2e_setup.py（hash_password）与 uvicorn（run_api→auth_jwt）都必须先有密钥。
+          # 固定 CI 专用值（≥32），勿与生产密钥相同。
+          JWT_SECRET: ci-e2e-only-jwt-secret-not-for-production-0123456789
+          APP_DATABASE_URL: "sqlite+aiosqlite:///data/e2e_users.db"
+          API_KEY_ENABLED: "false"
         run: |
           pip install -e .
           python scripts/e2e_setup.py
-          nohup env APP_DATABASE_URL="sqlite+aiosqlite:///data/e2e_users.db" API_KEY_ENABLED=false             python -m uvicorn api.run_api:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
+          nohup env JWT_SECRET="${JWT_SECRET}" APP_DATABASE_URL="${APP_DATABASE_URL}" API_KEY_ENABLED="${API_KEY_ENABLED}" python -m uvicorn api.run_api:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:8000/api/health > /dev/null && break
             sleep 2

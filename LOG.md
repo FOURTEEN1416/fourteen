@@ -1911,3 +1911,32 @@
 **部署（用户裁决「A」后执行）**：增量 bundle `e56e16d..155ae3e` → swu-prod ff-merge（服务器 HEAD 对齐 `155ae3e8`）；`frontend/dist` 先备份 `dist.rollback-20260919-1847` 再 `npm run build`（纯前端增量，依赖零变化，未跑 pip install、未重启服务，站点无中断）。核验：线上 index.html 引用新入口 `index-Cn5SiZJk.js`、`供应商管理` 字符串已进构建产物、后端 `/api/health` 持续 ok、`App.tsx` 两端 `git hash-object` 一致（`7a68fd69`）。bundle 两端已删。
 **清理**：审计账号（user 1502，users/user_sessions/consent_records）DB 行已删；临时脚本 `frontend/tmp-round2{,b,c,d}.mjs` 与 `/tmp/reg2.json` 已删；`docs/tmp-fe-round2/` 已移除；后台 uvicorn/vite 进程已停。
 **已知限制**：① 剧情线页未勾选「启用剧情线」时内容量由数据决定，显空属数据态；② fullPage 截图拉伸伪影同第一轮口径；③ 本轮改动全部在前端 6 文件，未触碰后端与并行窗口文件。
+
+---
+
+## 2026-09-19（七十五）— 主干 CI 连红根因修复（时区双真源 + E2E 缺 JWT_SECRET）
+
+**任务**：用户报「GitHub 有一堆 CI 报错」。近 50 次 Actions 中 26 失败；最近 20 次全红；开放 Issue #3「🔴 主干 CI 失败」。
+
+### 根因（两个，独立）
+
+1. **backend · pytest**：`tests/test_proactive.py::test_scheduler_quiet_hours_skips_before_generation` 在 CI（UTC）必挂，本地（UTC+8）必过。
+   - 测试用 `proactive.ase_engine._local_now().hour` 设置静默窗口；`_local_now()` 在系统时区非 UTC+8 时**强制换算到北京时间**。
+   - `ProactiveScheduler._is_quiet_hours()` 却用 `datetime.now().hour`（CI 上是 UTC），与引擎差 8 小时 → 静默短路失效 → `tick(dry_run=False)` → `assert [False] == [True]`。
+   - 这是 v1.13「静默前置」修复在**非北京时间主机**上的再现：调度器与 ASE 对「现在几点」有两套真源。
+   - UTC 实证（修前）：`system_hour=12` / `_local_now.hour=20` / `_is_quiet_hours=False` / `tick_calls=[False]`。
+
+2. **frontend · E2E**：`Setup backend for E2E` 在启动 uvicorn 前无 `JWT_SECRET`。`api/auth_jwt.py` fail-closed（非显式 dev 且密钥缺失 → 拒绝 import/启动）。`scripts/e2e_setup.py` 的 `hash_password` 与 `run_api` 同样 import 该模块，两处都会炸。
+
+### 修复
+
+- `proactive/scheduler.py`：`_is_quiet_hours()` 改为与 ASE 共用 `_local_now()`；import 处注明禁止再回 `datetime.now().hour` 双真源。
+- `.github/workflows/ci.yml`：E2E 步骤注入固定 CI 专用 `JWT_SECRET`（≥32），`e2e_setup` 与 `nohup uvicorn` 共用。
+- 新增回归：`test_scheduler_quiet_hours_uses_ase_local_clock`（patch `scheduler._local_now`，断言调度器走同一时钟源）。
+
+### 验证
+
+- UTC 仿真（`TZ=UTC`）：`_is_quiet_hours=True`，`tick_calls=[True]`，通过。
+- `tests/test_proactive.py` **81/81**（含新增回归）；`ruff check .` 0 错。
+- 分块后端：chunk0 213 + chunk1 338/4skip + chunk2 296 + chunk3 逐文件全过（含 `test_integration` / `test_web_enricher` / `test_llm_providers_routes` 等历史卡点单独跑绿）。聚合态整跑仍可能随机停住（AGENTS §4.3 已知环境问题，非本批引入）。
+- 无 `DEPLOY_HOST` 环境变量，本机未直连云服务器；scheduler 时区修复属 A 档代码，**需服务器 `git pull` + 服务重启**后才在生产生效。GitHub 侧以 push 后的 CI 转绿为准。
