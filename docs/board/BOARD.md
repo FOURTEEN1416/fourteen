@@ -289,3 +289,4 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **口径**：CODE_GRAPH v3.8.4 / AGENTS v1.14 / VISION / HANDOFF 批注 / LOG 同日条目。
 - **三端**：代码与文档 commit→push（A/B 档）；`config/characters` 为 gitignore 私有投递（服务器覆盖前 md5 比对 + 服务器端重建索引）。
 - **待用户裁决**：两张「林挽夏」变体卡（62105bca 活跃 / f0860ed2 闲置）是否合并。
+- **闭环补记（同日）**：服务器部署追加修复两真缺陷——① 重建脚本孤立清理从未生效（startswith("") 恒真短路，c37e0a19，服务器残留 29 个旧索引清零）；② knowledge 路由端点降级覆盖全量索引（31b9015，+3 回归）。三端闭环：HEAD 31b90157 + 41 卡 scp 投递（原 25 卡 tar 备份）+ 索引重建；生产实证 41 卡可见 / 米彩 18 块 7 源 / 「昭阳是谁」命中。基线终值 **1254 收集 / 1250 通过 / 4 跳过 + vitest 98/98**。部署教训：远端 git pull 后必须以 git log/status 复核落点（tail 一行截到 Updating 掩盖 Aborting）。

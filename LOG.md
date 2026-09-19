@@ -25,11 +25,17 @@
    - `scripts/rebuild_knowledge_index.py` 补透传 `PersonaProfile(core_anchors)` + `source_data`——旧重建比运行时抽取**少锚点与示例对话两类块**，且磁盘索引被运行时 `load_index` 优先加载，缺口常驻。
    - `shisi/knowledge/character_knowledge_service.py` `search()` 双路合并由「ext+base 拼接截断」改**交错合并**——修复扩展路占满注入窗口把原路高 idf 块挤出 top-8 的缺陷（实测米彩卡「昭阳是谁」top-8 曾完全丢掉含"昭阳"块）。
    - 41 卡索引全量重建（合计约 1750 块，character_name/core_anchors/description/personality/scenario/creator_notes/mes_example 七源齐备），典型问题检索冒烟 5/5 命中。
-   - 新增回归测试 2 个：`tests/test_shisi_knowledge.py::TestDualPathInterleave`。
+   - 新增回归测试 5 个：`tests/test_shisi_knowledge.py::TestDualPathInterleave`×2 + `tests/test_knowledge_routes_index.py`×3。
+   - `api/routers/knowledge_routes.py` stats/search/documents 建索引统一聚合根路径（见下方服务器部署追加发现）。
 
-**验证**：pytest 四块分跑 **1247 passed / 4 skipped**（收集 1251，310+338+225+374=1247，零失败）+ 前端 vitest **98/98**（16 文件）+ ruff 永久改动文件全绿；persona 注入测试 41 卡全过（86 passed/3 skipped）。测试基数较文档口径 +165：本批 +34（16 新卡×2 参数化 + 2 回归），其余约 131 为 09-19 晚通道隔离等先前提交增量未同步文档（git log --stat 核对 3e66930/d47a189/7413574 等）。
+**验证**：pytest 分块实跑 **1250 passed / 4 skipped**（收集 1254，零失败）+ 前端 vitest **98/98**（16 文件）+ ruff 全部改动文件全绿；persona 注入测试 41 卡全过（86 passed/3 skipped）。测试基数较文档口径 +168：本批 +37（16 新卡×2 参数化 + 交错合并回归 2 + knowledge 路由建索引回归 3），其余约 131 为 09-19 晚通道隔离等先前提交增量未同步文档（git log --stat 核对 3e66930/d47a189/7413574 等）。
 
-**三端**：`config/characters` 系 §9.4 gitignore 目录——新卡与完善内容**不入公开仓**，按私有投递通道送服务器并在服务器端重建索引（服务端覆盖前先 md5 比对防服务器侧漂移）；代码与文档走 A/B 档正常通道。
+**服务器部署中追加发现并修复的两个真缺陷**：
+1. **重建脚本孤立索引清理从未生效**（提交 c37e0a19）——旧逻辑 startswith(p) for p in ("") 恒为真使任何文件都被 continue，09-18/09-20 两次实跑均 0 删除，服务器实测残留 29 个旧 persona_ 时戳索引与已删卡索引。改精确匹配后清零（41/41）。
+2. **knowledge 路由端点降级覆盖全量索引**（提交 31b9015）——stats/search/documents 端点缺索引时走 index_from_card(CharaCardV2)，该路径不携带 core_anchors（V2 schema 丢弃顶层扩展字段），**首次 API 访问即以 7 块降级索引覆盖重建脚本的全量索引**（生产实测米彩 18 块被覆盖成 7 块、8 锚点全丢）。改与运行时/重建脚本统一的 CharacterAggregate 全量路径，+3 回归测试钉住。
+部署时另踩一坑：先前 scp 脚本到服务器造成工作树本地修改，第二次 git pull --ff-only 被 Aborting（tail 只截到 Updating 行造成成功假象）——教训：**远端拉取不能只看 tail 一行，须以 git log/status 复核落点**。
+
+**三端（已闭环）**：A 档三提交 4ba171f9（主批次）→ c37e0a19（清理修复）→ 31b9015（knowledge 路由修复）全部 push + 服务器 git pull 落地（HEAD 31b90157，systemctl restart ai-girlfriend 后 active、/api/health 200 production）；config/characters 系 §9.4 gitignore 目录——41 卡 scp 私有投递（服务器原 25 卡先 tar 备份至 data/archive/characters-config-backup-20260920.tar.gz，id 集合核对一致后覆盖），服务器端重建索引 41 份；文档 B 档 push。**生产实证**：鉴权后 /api/characters 41 可见（16 新卡逐一 assert）；米彩知识库 stats **18 块/7 源（含 8 锚点）**；「昭阳是谁」检索 top-3 命中含"昭阳"块。
 
 **口径同步**：CODE_GRAPH v3.8.4（头部增量 + §1.1 三行 + 新增卡数行 + §13 新行）、AGENTS v1.14（§0/§2/§4.3/修订历史）、VISION §角色系统、HANDOFF_REPORT 顶部批注、BOARD。
 

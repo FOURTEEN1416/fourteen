@@ -11,7 +11,7 @@
 ## 0. 项目身份
 
 - **产品形态**：微信扫码即用的 LLM 智能情感陪伴系统，扫码登录后控制台调角色与语音
-- **技术栈**：Python 3.10+ / React 19 / Vite 8 / TypeScript 6 / Tailwind 4 / Zustand 5 / 测试 1345（1247 Py 通过 + 4 跳过，98 FE 通过；2026-09-20 系统 Python 3.12 + vitest 实测，见 §4.3）/ MIT
+- **技术栈**：Python 3.10+ / React 19 / Vite 8 / TypeScript 6 / Tailwind 4 / Zustand 5 / 测试 1348（1250 Py 通过 + 4 跳过，98 FE 通过；2026-09-20 系统 Python 3.12 + vitest 实测，见 §4.3）/ MIT
 - **核心能力**（见 `README.md`）：
   - 微信聊天（扫码登录，文字/语音，多用户独立）
   - 角色系统（每用户绑角色卡，性格/风格/口头禅可调）
@@ -102,7 +102,7 @@
 | 部署 | 部署开发 | `deploy/`（bat/ps1 双版本部署脚本已于 08-28 删除） |
 | 可观测性 | 运维开发 | `observability/` |
 | 安全 | 安全开发 | `security/` |
-| 测试 | QA | `tests/`（1247 Python 测试通过 + 4 跳过；前端 98 测试；2026-09-20 实测，口径同 CODE_GRAPH §1.1) |
+| 测试 | QA | `tests/`（1250 Python 测试通过 + 4 跳过；前端 98 测试；2026-09-20 实测，口径同 CODE_GRAPH §1.1) |
 | 工具与脚本 | 工具开发 | `tools/` / `scripts/` / `utils/` |
 
 ---
@@ -143,16 +143,16 @@
 
 ### 4.3 测试约定
 
-- 626+ 测试已建立，新功能必须附测试（实测基线:1247 Python 通过 + 4 跳过 / 98 前端，2026-09-20 实跑,与 CODE_GRAPH §1.1 对齐)
+- 626+ 测试已建立，新功能必须附测试（实测基线:1250 Python 通过 + 4 跳过 / 98 前端，2026-09-20 实跑,与 CODE_GRAPH §1.1 对齐)
 - 用户明确反对采样验证，要求完整验证
-- **测试口径注记（2026-09-20 四次刷新）**：系统 Python 3.12 实测 **1251 收集 / 1247 通过 / 4 跳过**（较上批 +165 = 本批角色卡扩充 +34【16 新卡 × persona 参数化 2 用例 + 交错合并回归 2】+ 09-19 晚通道隔离等先前提交增量约 131 未同步文档；四块分跑合计约 211s）+ 前端 vitest **98/98**（16 文件）。**角色卡现役 41 张**（25 既有 + 16 文学导入），persona 注入参数化用例数 = 2 × 卡数，卡数变动会动基数。
+- **测试口径注记（2026-09-20 四次刷新）**：系统 Python 3.12 实测 **1254 收集 / 1250 通过 / 4 跳过**（较上批 +168 = 本批角色卡扩充 +34【16 新卡 × persona 参数化 2 用例】+ 知识库修复回归 5【交错合并 2 + knowledge 路由建索引 3】+ 09-19 晚通道隔离等先前提交增量约 131 未同步文档；分块实跑合计约 235s）+ 前端 vitest **98/98**（16 文件）。**角色卡现役 41 张**（25 既有 + 16 文学导入），persona 注入参数化用例数 = 2 × 卡数，卡数变动会动基数。
   ⚠️ **已知环境问题：单进程整跑 `pytest -q` 会在 30%~97% 之间的**随机位置**停住**（三次实测分别停在 `test_integration.py` / `test_web_enricher.py` / `test_llm_providers_routes.py`），且这三个文件**单独跑全部通过** —— 属聚合态资源问题（疑似前序用例泄漏线程/事件循环），**不是某个用例失败**。分块跑可稳定复现完整基线，推荐工作流：
   ```bash
   files=$(ls tests/*.py tests/core/*.py | grep test_ | sort)
   for i in 0 1 2 3; do echo "$files" | awk -v i=$i 'NR%4==i' | tr '\n' ' ' > /tmp/c$i.txt; done
   for i in 0 1 2 3; do timeout 200 env PYTHONPATH= python -m pytest $(cat /tmp/c$i.txt) -q -p no:cacheprovider; done
   ```
-  四块结果相加应等于 `--collect-only` 的收集数（当前 1251）。
+  四块结果相加应等于 `--collect-only` 的收集数（当前 1254）。
 - **测试口径注记（2026-09-17 二次刷新）**：历史文档口径 1117（1042 Python + 75 前端，2026-09-01 .venv 实测）——该环境随 09-14 主仓事故丢失，此后不再作为可复现基线。**当时口径**：系统 Python 3.12 实测 **1064 收集 / 1060 通过 / 4 跳过**（2026-09-18 双角色库收敛后复测，166.48s；较上批 +48 = config 25 张卡 × `test_persona_injection` 每卡 2 个参数化用例全覆盖）+ 前端 vitest **87/87**（15 文件）+ `tsc --noEmit` 0 错误。跑测试：`PYTHONPATH= python -m pytest -q`（`PYTHONPATH=` 前缀用于清空宿主注入的 safe-delete 护栏，见本机环境注记）。
 - 验证报告：归档到 `docs/`
 - 测试基线：`pytest_true_baseline.log` / `pytest_wip_baseline.log` / `pytest_post_commit.log`
@@ -276,7 +276,7 @@
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
-| **v1.14** | **2026-09-20** | **角色完善与文学导入批次**：① **角色卡 25→41 张**——新增《我的26岁女房客》（超级大坦克科比）米彩/昭阳/乐瑶/简薇、《从你的全世界路过》（张嘉佳）陈末/幺鸡/茅十八/荔枝/猪头、《云边有个小卖部》（张嘉佳）刘十三/王莺莺/程霜、《某某》（木苏里）江添/盛望、《天堂旅行团》（张嘉佳）宋一鲤/余小聚，共 16 张全字段卡（描述/性格文本/场景/扮演规则/8 锚点/数值字典/示例对话；角色设定经通用搜索核实，来源=百度百科/维基百科/知乎书评，留痕 LOG）；② **既有 25 卡完善**——伊蕾娜·艾斯特莱雅损坏字段（description 3 字/scenario 3 字/creator_notes 2 字）按《魔女之旅》重写，23 卡补 personality/speaking_style 数值字典（此前仅孙颖莎/林挽夏有），25 卡全补 mes_example（示例对话，同时成为知识库可检索语料），椎名真昼/莉莉娅 scenario 扩写、孙颖莎补 personality_text；③ **知识库激活**——`scripts/rebuild_knowledge_index.py` 补透传 `PersonaProfile(core_anchors)`+`source_data`（旧重建比运行时抽取少锚点/示例对话两类块且缺口常驻），`CharacterKnowledgeService.search()` 双路合并改交错式（修复扩展路占满注入窗口挤出原路高 idf 块的缺陷，实测米彩「昭阳是谁」修复后命中），41 卡索引全量重建约 1750 块 + 检索冒烟 5/5。**注意**：`config/characters` 系 gitignore 目录（§9.4），新卡不入公开仓，服务器私有投递 + 服务器端重建索引。测试 **1251 收集 / 1247 通过 / 4 跳过**（本批 +34 用例零失败）+ vitest **98/98** + ruff 全绿 |
+| **v1.14** | **2026-09-20** | **角色完善与文学导入批次**：① **角色卡 25→41 张**——新增《我的26岁女房客》（超级大坦克科比）米彩/昭阳/乐瑶/简薇、《从你的全世界路过》（张嘉佳）陈末/幺鸡/茅十八/荔枝/猪头、《云边有个小卖部》（张嘉佳）刘十三/王莺莺/程霜、《某某》（木苏里）江添/盛望、《天堂旅行团》（张嘉佳）宋一鲤/余小聚，共 16 张全字段卡（描述/性格文本/场景/扮演规则/8 锚点/数值字典/示例对话；角色设定经通用搜索核实，来源=百度百科/维基百科/知乎书评，留痕 LOG）；② **既有 25 卡完善**——伊蕾娜·艾斯特莱雅损坏字段（description 3 字/scenario 3 字/creator_notes 2 字）按《魔女之旅》重写，23 卡补 personality/speaking_style 数值字典（此前仅孙颖莎/林挽夏有），25 卡全补 mes_example（示例对话，同时成为知识库可检索语料），椎名真昼/莉莉娅 scenario 扩写、孙颖莎补 personality_text；③ **知识库激活**——`scripts/rebuild_knowledge_index.py` 补透传 `PersonaProfile(core_anchors)`+`source_data`（旧重建比运行时抽取少锚点/示例对话两类块且缺口常驻），`CharacterKnowledgeService.search()` 双路合并改交错式（修复扩展路占满注入窗口挤出原路高 idf 块的缺陷，实测米彩「昭阳是谁」修复后命中），41 卡索引全量重建约 1750 块 + 检索冒烟 5/5。**注意**：`config/characters` 系 gitignore 目录（§9.4），新卡不入公开仓，服务器私有投递 + 服务器端重建索引。测试 **1254 收集 / 1250 通过 / 4 跳过**（本批 +37 用例零失败）+ vitest **98/98** + ruff 全绿；生产实证：41 卡 API 全可见、米彩知识库 18 块/7 源、「昭阳是谁」检索命中 |
 | **v1.13** | **2026-09-19** | **主动消息「白天一条都不发」根因修复批次**（用户报障「为什么还是没有给我主动发消息」，生产日志实证驱动）。**根因：静默时段（23-7）内引擎照常生成消息并扣配额，消息却在投递层被丢弃** —— `ase.tick()` 内部 `_generate_and_return()` 即调 `_record_proactive_sent()`（`daily_count+1`、写 `_last_proactive_time`、`urgency.reset()`），而投递发生在 tick 返回**之后**由 `scheduler._deliver()→_send_to_all()` 执行，后者首句即判 `_is_quiet_hours()` 并 `return False`。生产实证：`00:02–04:05` 每 35 分钟一条、连续 **8 条全被丢弃却全计数**（30 分钟冷却被空转）→ 配额凌晨 4 点即 **8/8 满额** → 当天 07:00 后每个 tick 都 `result=False`，**全天零投递**，而 urgency 一直挂在 8.50（用户已 90 小时未聊天，missing_bonus 拉满）。09-18 同一模式复现，**每天重演**。修复：① **记账与投递解耦** —— `tick()` 返回值改为**未记账的候选**，新增 `commit_sent()`，由 `_deliver()`（改为**返回 bool**）成功后才扣配额/写冷却/重置紧迫度；未送达不产生任何副作用。② **静默前置到生成层** —— `scheduler._check_ase` 在调 `tick()` 前短路（只 `dry_run` 更新紧迫度），`ASEEngine.set_quiet_hours()` 由 scheduler 注入并随配置重载同步。③ **场景日期标记延迟置位** —— `_check_scene_triggers(commit=False)` 返回 `_scene`/`_scene_date`，投递成功才置位（旧实现生成即置位，被丢弃后当天该场景永不补发）。④ **LLM 输出清洗** —— 新增 `sanitize_message()`，拦截推理过程泄漏（生产实证原文 `02:55属于深夜，不在早安、吃饭或晚安的特定时间点…` 被当成消息投递）、超长（>60 字）、多行思考；旧实现只判 `len>5` 等于不判。⑤ **去重与节流** —— `_is_duplicate` 改归一化精确匹配 + 窗口收敛到 6（模板池仅 3~8 条/类，原 50 窗口会让池子整体判重致彻底发不出）；生成时把最近 6 条注入 prompt 要求换角度；`_select_type_by_urgency()` 加同类消息节流。**注**：相似度去重经实测**不可用** —— 「都半夜了还不睡…」vs「都两点多了还不睡…」的 SequenceMatcher 比值仅 0.37，而正常换说法的「早啊」/「早安呀」也有 0.25，阈值无法区分。⑥ **可观测性** —— `_check_frequency()` 由 `bool` 改为 `(bool, reason)`，`tick()` 输出 `_last_skip_reason`（daily_limit/min_interval/quiet_hours/below_threshold/…），修正 `result=True` 行打印 `urgency=0.00` 的误导（`urgency.reset()` 副作用）；`/api/proactive/state` 增 `max_daily`/`quiet_hours`/`last_skip_reason`。⑦ **连带修复重要日期祝福** —— `_check_important_dates` 原**只**由 00:05 每日维护调用，恒落在静默内 → 生日/纪念日祝福**从未送达**；改为每小时任务 + 静默跳过 + 当日幂等键。**运维要点**：应用日志在 `data/app.log`（**不在 journald**，unit 的 `StandardOutput=append:/var/log/...` 基本无内容，只查 journal 会误判"服务无异常"）。测试 1082 通过 / 4 跳过（+22 用例，零回归） |
 | **v1.12** | **2026-09-19** | **全仓扫描·文档对齐批次（代码领先、文档落后，零代码变更）**：§0 页面 19→**17**（实测 `frontend/src/pages` 17 个 .tsx）；§0 语音行修正——Edge-TTS 已于 08-28 MiMo-only 收敛删除，旧句「MiMo 云 / Edge-TTS / 本地模型」残留误导。同步 CODE_GRAPH v3.8.2 / README / docs 入口 / CODEMAPS 六件 / FUNCTION_INVENTORY / DECISION_LEDGER / VISION / P1_BACKLOG 拉齐代码实况（供应商链 4 家、`/psych` 需登录、shisi 115 文件、SP-1/SP-11 已执行等）。验证：pytest 1060 passed/4 skipped + vitest 87/87 + tsc 0 错 |
 | **v1.11** | **2026-09-19** | **体验修复批次**（用户报四项体验问题，全链路修复，9 个提交 `ff65e60`→`4cb69d7`）：① **人设不贴合**——机制性根因是 `CharacterAggregate.build_system_prompt` **只注入 name+description+人格数值**，而角色卡里承载"怎么说话"的 `personality_text`/`scenario`/`creator_notes` **从未进入 prompt**（原始卡 32/32 均有）；补齐三字段并按其注入（实测阿哈 prompt 3789→13018 字）。配套修 `_extract_from_character` 同类三段只读 `source_data` 的缺口。② **主动消息不发**——`daily_count` 跨日未重置（CronTrigger 无 `misfire_grace_time` + 多 worker 覆盖）+ `tick()` 把频率检查前置导致 `_update_urgency()` 永不执行 → `missing_bonus` 恒 0，**两 bug 连锁死锁**；改跨日惰性重置 + 紧迫度先于频率检查；另修「控制台手动发送吃掉当日配额」；`_check_ase` 静默失败改为每 tick 可观测。③ **响应慢**——fallback 链首选 `sensenova` 但生产 `.env` **从未配置其 key** → 每次对话白跑一轮失败尝试；**移除 sensenova、接入 agnes 为首选**。④ **知识库没用上**——索引块数 520→**1000+**（新增 `scripts/rebuild_knowledge_index.py` 从权威真源重建）；检索注入 `top_k` 3→8；新增 **BM25 查询扩展**（双路互补检索，修「你家里有什么人」高分误命中无关块的排序问题）；新增 `scripts/expand_short_descriptions.py` 按已有素材扩写 10 张描述不足的卡。**前端**：StatusCenter 记忆体系重构为「三层管线」。**文档**：VISION 战略口径统一（基座免费开源 + 增值层商业化，与已提交 BP 对齐）、GAP-2/3 结案、CODE_GRAPH 供应商章节同步。测试 1060 通过 / 4 跳过，零回归 |
