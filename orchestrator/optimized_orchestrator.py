@@ -771,6 +771,29 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         except Exception as e:  # noqa: BLE001
             logger.debug("附加回复模式指令失败（忽略）: %s", e)
 
+        # ── 提示词规模可观测（2026-09-19）──
+        # 为什么必须埋点：此前所有关于"提示词太长/设定压过对话"的判断都只能靠猜。
+        # 实测（25 个角色）角色常驻段仅 364~1843 字符，中位 1415 —— 与"一万三千字"
+        # 的直觉相差一个数量级。没有数字就会做出错误的架构决策。
+        # 见 docs/adr/ADR-0015。含各动态块的实际占比。
+        try:
+            _parts = {
+                "character": len(locals().get("char_segment") or ""),
+                "memory": len(str(memory_context or "")),
+                "rag": len(str(rag_context or "")),
+                "summary": len(str(chat_summary or "")),
+                "world": len(str(world_info or "")),
+                "history_msgs": len(chat_history or []),
+                "total": len(system_prompt),
+            }
+            logger.info(
+                "[prompt] total=%d character=%d rag=%d memory=%d summary=%d world=%d hist_msgs=%d",
+                _parts["total"], _parts["character"], _parts["rag"], _parts["memory"],
+                _parts["summary"], _parts["world"], _parts["history_msgs"],
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("提示词规模埋点失败（忽略）: %s", e)
+
         return {
             "emotion_state": emotion_state,
             "system_prompt": system_prompt,
