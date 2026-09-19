@@ -672,16 +672,32 @@ def test_undelivered_candidate_leaves_quota_intact(tmp_path):
     assert engine._daily_message_count == 0
 
 
-def test_scene_date_marked_only_after_commit(tmp_path):
+def test_scene_date_marked_only_after_commit(tmp_path, monkeypatch):
     """场景「今日已发」标记必须等投递成功才置位。
 
     修复前在生成时就置位 —— 该条若被静默丢弃，当天该场景再也不会补发。
+
+    CI 时区不稳：旧写法用「当前小时」构造 morning_hours=(h,h+1)，当 h=23 时
+    区间变成 (23,0)，`start<=hour<end` 恒假，随后 night 规则抢先命中。
+    现固定本地 hour=8 的早晨窗口，不再依赖 runner 时钟。
     """
-    from proactive.ase_engine import _local_now
+    from datetime import date, datetime
+
+    from proactive import ase_engine as ase_mod
 
     engine = _make_engine(tmp_path)
-    h = _local_now().hour
-    engine._config["morning_hours"] = (h, (h + 1) % 24)
+    fixed = datetime(2026, 9, 19, 8, 30, 0)
+
+    class _FixedNow:
+        hour = fixed.hour
+
+        @staticmethod
+        def date():
+            return fixed.date()
+
+    monkeypatch.setattr(ase_mod, "_local_now", lambda: _FixedNow())
+    engine._config["morning_hours"] = (7, 9)
+    engine._config["night_hours"] = (22, 24)
     engine._config["meal_hours"] = []
     engine._last_morning_date = None
 
@@ -692,6 +708,7 @@ def test_scene_date_marked_only_after_commit(tmp_path):
 
     engine.commit_sent(scene)
     assert engine._last_morning_date is not None, "投递成功后应置位场景日期"
+    assert engine._last_morning_date == date(2026, 9, 19)
 
 
 def test_skip_reason_daily_limit(tmp_path):

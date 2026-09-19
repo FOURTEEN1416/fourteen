@@ -45,20 +45,31 @@ async def verify_api_key_dep(
     request: Request,
     api_key: str | None = Security(_api_key_header),
 ) -> bool:
-    """统一的 API Key 验证依赖注入函数
+    """统一认证：优先放行**有效 JWT**（控制台用户路径，不把 API Key 打进前端）。
 
-    支持 header 或 URL query 参数传递 API Key（EventSource 等场景无法自定义 header）。
-    所有 FastAPI 路由应使用此函数作为 Security 依赖。
+    2026-09-19 裁决：用户侧 API 仅 JWT；API Key 保留给机器/脚本/E2E。
+    - 有效 Bearer access token → 通过
+    - 否则若 API_KEY_ENABLED 且 X-API-Key 匹配 → 通过
+    - API_KEY_ENABLED=false → 保持原放行（生产告警）
     """
+    # 1) JWT 优先：控制台登录用户无需携带全局 API Key
+    auth_header = request.headers.get("Authorization") or ""
+    if auth_header.startswith("Bearer "):
+        try:
+            from api.auth_jwt import verify_token
+
+            verify_token(auth_header[7:].strip(), expected_type="access")
+            return True
+        except HTTPException:
+            pass
+        except Exception as e:  # noqa: BLE001
+            logger.debug("JWT 校验失败，回落 API Key: %s", e)
+
     with _auth_lock:
         enabled = _auth_config["enabled"]
         key = _auth_config["api_key"]
 
     if not enabled:
-        # 认证未启用时放行，但记录警告（生产环境应通过配置启用）
-        # 项目生产方式判定唯一真源为 api.runtime_config.is_production()
-        # （AI_GF_ENV > APP_ENV > ENV）；旧实现取 os.getenv("ENVIRONMENT")
-        # 不在这些变量之列，生产告警永不触发。
         if is_production():
             logger.warning(
                 "API 认证未启用，生产环境存在安全风险，"
@@ -66,7 +77,6 @@ async def verify_api_key_dep(
             )
         return True
 
-    # 优先从 header 读取，其次从 query 参数（EventSource 场景）
     candidate = api_key or request.query_params.get("api_key") or ""
     if key and hmac.compare_digest(candidate, key):
         return True

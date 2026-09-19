@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import StatusCenter from '../../pages/StatusCenter'
 
 // ── hoisted mock fns ──
-const { mockUseActiveCharacter, mockUseDashboard, mockUseEmotionState, mockUseMemoryFacts, mockUseAchievements, mockUseEmotionTrend, mockUseEmotionDistribution } = vi.hoisted(
+const { mockUseActiveCharacter, mockUseDashboard, mockUseEmotionState, mockUseMemoryFacts, mockUseAchievements, mockUseEmotionTrend, mockUseEmotionDistribution, mockClientGet } = vi.hoisted(
   () => ({
     mockUseActiveCharacter: vi.fn(),
     mockUseDashboard: vi.fn(),
@@ -14,6 +14,7 @@ const { mockUseActiveCharacter, mockUseDashboard, mockUseEmotionState, mockUseMe
     mockUseAchievements: vi.fn(),
     mockUseEmotionTrend: vi.fn(),
     mockUseEmotionDistribution: vi.fn(),
+    mockClientGet: vi.fn(),
   }),
 )
 
@@ -25,6 +26,12 @@ vi.mock('../../hooks/useQueries', () => ({
   useAchievements: () => mockUseAchievements(),
   useEmotionTrend: () => mockUseEmotionTrend(),
   useEmotionDistribution: () => mockUseEmotionDistribution(),
+}))
+
+// StatusCenter 用 useQuery 拉 /shisi/emotion-stage/stages；测试固定返回与
+// constants/persona.AFFINITY_STAGES 一致的阶段，避免 CI 无后端时落到空数组。
+vi.mock('../../api/client', () => ({
+  default: { get: (...args: unknown[]) => mockClientGet(...args) },
 }))
 
 const FAKE_CHARACTER = {
@@ -61,6 +68,16 @@ function renderWithQuery(ui: React.ReactNode) {
 describe('StatusCenter', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockClientGet.mockResolvedValue({
+      data: {
+        data: [
+          { name: '陌生', min: 0, max: 25 },
+          { name: '熟悉', min: 25, max: 50 },
+          { name: '亲密', min: 50, max: 75 },
+          { name: '羁绊', min: 75, max: 100 },
+        ],
+      },
+    })
     mockUseActiveCharacter.mockReturnValue({ activeCharacter: null })
     mockUseDashboard.mockReturnValue({ data: undefined, isLoading: false })
     mockUseEmotionState.mockReturnValue({ data: undefined })
@@ -75,7 +92,7 @@ describe('StatusCenter', () => {
     expect(screen.getByText('暂无活跃角色，请先创建或激活角色')).toBeDefined()
   })
 
-  it('renders emotion, affinity level and memory count', () => {
+  it('renders emotion, affinity level and memory count', async () => {
     mockUseActiveCharacter.mockReturnValue({ activeCharacter: FAKE_CHARACTER })
     mockUseDashboard.mockReturnValue({ data: FAKE_STATS, isLoading: false })
     mockUseEmotionState.mockReturnValue({ data: undefined })
@@ -84,7 +101,8 @@ describe('StatusCenter', () => {
     renderWithQuery(<StatusCenter />)
 
     expect(screen.getByText('happy')).toBeDefined()
-    expect(screen.getByText('羁绊')).toBeDefined() // affinity 85 → 羁绊（75-100），非「亲密」（50-75）
+    // stages 经 client mock 异步返回：affinity 85 → 羁绊
+    expect(await screen.findByText('羁绊')).toBeDefined()
     expect(screen.getByText('18')).toBeDefined()
   })
 
