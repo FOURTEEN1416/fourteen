@@ -1611,3 +1611,39 @@
 **部署**：`5e7c33c` → push → 服务端 `git pull` + `deploy/remote_deploy.sh` 四步全绿；双端 health 200（`unique-you-api` / nginx :80）。
 **解封操作**：`systemctl stop` → 备份并清零 `data/proactive_state.json` 的 `daily_count` → `systemctl start`（⚠️ **重启不解封** —— `_load_state` 会读回旧值，且 `_rollover_if_new_day` 见 `last_reset_date == today` 即跳过，必须先改文件）。
 **中间产物清理**：`_tmp_stage.py`（hunk 精确暂存脚本）、`_tmp_pytest_full.log` 已删；保留 `data/proactive_state.json.bak-before-quota-unblock-*`（唯一改前备份）。
+
+---
+
+## 2026-09-19（六十九）— 前端视觉 + 性能双线诊断（只读，零代码变更）
+
+**任务**：用户指令「使用相关 skills，对前端从视觉效果到实际性能进行诊断」。加载 `design-review`（视觉审计）+ `web-perf`（Core Web Vitals）两条技能线，全程只读，未改任何代码。
+
+**方法**：`npm run build` 实测产物 + Playwright 真机走查（桌面 1440×900 / 移动 390×844 DPR2 / 视口高度受限时逐页截图 13 个内部页）+ CDP `Performance.getMetrics` + `PerformanceObserver`（long task / 资源瀑布）+ rAF 帧采样 + 对比度 WCAG 公式逐色核算。
+
+### 视觉线结论
+
+- **P0 · btn-macaron 白字压粉彩渐变，对比度 1.25–1.33:1**（要求 4.5:1）——登录「扫码连接」、ConsentGate「同意并继续」等主 CTA 在实机截图上近乎不可读（`index.css` .btn-macaron：`color: white` + pastel 渐变底）。
+- **P1 · 旧粉彩残留（08-28 已裁决换暖黄/海盐蓝/薄荷青，粉色未清干净）**：`index.css` 8 处（glass-pink、pulse-glow/ring、shimmer、btn-macaron hover 阴影、nav-item.active、input-macaron focus、method-card.selected）；`Sidebar.tsx:27` 与 `MobileDrawer.tsx:69` 品牌渐变仍为 `from-pink-500 via-blue-500 to-green-500` 旧三色；`LoginPage.tsx:162,216,223` text-pink-500 / focus:ring-pink-400；glass-pink/green 使用点 3 文件（RoleSettingsTabs:378、CreateRole:353、SettingsVoice:53）。
+- **P1 · 灰字微文案 gray-400/300 对比度 2.45–2.54:1**，页脚说明/占位符普遍不达标。
+- **P2 · 1970 epoch 日期泄漏**（WeChatPage「最后活动」显示 1970-01-01）；StatusCenter 宽屏左侧空洞 +「最近沉淀」空条；`--color-accent-400`(#BAE6FD) 比 accent-300(#38BDF8) 更浅，色阶非单调；`index.html` Google Fonts link 已注释但 body 仍声明 'Noto Sans SC'——静默回落 system-ui，声明误导。
+
+### 性能线结论
+
+- **P0 等价 · 首载预算过重**：`App.tsx:14-17` 静态 import CreateRole / RoleSettings / StatusCenter / StorylineEditor 四页未 lazy，全部进 eager index chunk；`dist/index.html` modulepreload 全部 7 个 JS chunk——含 motion 45.4KB gz（粒子/光标/动画），**公开页 /intro 也要付 ≈191KB gz JS**。其余 13 页 lazy() 正确。
+- **运行时良好（实测）**：无 long task、JS 堆 ~7MB、无泄漏迹象；ParticleCanvas/CustomCursor 工程化是范例级（rAF 30fps 上限、visibilitychange 暂停、reduced-motion/粗指针禁用、对象池、translate3d、帧归一化）。唯一缺口：ParticleCanvas canvas 尺寸未乘 devicePixelRatio（HiDPI 下发糊）。
+- **构建**：11.05s，产物 hash 与 09-18 dist 一致（无源码变更下的确定性构建）。
+
+### 已撤回疑点（测量污染，非产品缺陷，记录防复发）
+
+1. 「consent 未持久化」——我的点击与 hydration 竞争，实测 POST /auth/consent 200 且弹窗消失。
+2. 「硬刷新即登出」——我自己并发 goto 循环与 token rotation 互踩；干净流程 reload 后仍登录态。
+3. 「/api/characters 502」——仅 Lighthouse+多浏览器并发压满时出现，静默期 curl×5 均 48ms。
+4. 「FCP 10.4s」——无窗口浏览器不提交帧的测量伪影，资源瀑布实证关键路径 ~420ms。
+
+### 环境注记
+
+本机 headless Chrome（含 headless-shell）无法提交帧 → **Lighthouse 12.8.2 NO_FCP 不可用**；性能实测改用 CDP + PerformanceObserver + rAF 采样替代，结论可信度不受影响。
+
+**证据**：`docs/verification/2026-09-19-前端视觉与性能诊断/` 19 张实机截图（6.7MB：桌面 intro/登录、移动 4 页、内部 13 页）。
+**清理**：诊断账号（user 1502）DB 行已清除（users/user_sessions/consent_records）；临时脚本 `frontend/tmp-mobile-shots.mjs` 已删；后台 dev/preview 服务已停；`docs/tmp-fe-diag/` 已移除。
+**修复建议顺序（待用户确认后才动代码）**：① btn-macaron 对比度 → ② 四页补 lazy + preload 收敛 → ③ 粉色残留统一清 → ④ epoch 日期 → ⑤ DPR。
