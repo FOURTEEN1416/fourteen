@@ -97,3 +97,47 @@ class TestWebPersonaEnricher:
         assert hasattr(enricher, "add_content")
         assert hasattr(enricher, "search_all_sources")
         assert hasattr(enricher, "search_agent_reach")
+
+
+class TestCrawl4AIAvailabilityHonesty:
+    """crawl4ai「谎报可用」修复（2026-09-19）。
+
+    旧实现 `Crawl4AISource.available` 写死 `return True`，注释断言「Crawl4AI 已预装，
+    永远可用（无需 API Key）」；而 `pyproject.toml` **从未声明该依赖** —— 按 pyproject
+    安装的生产服务器上 `import crawl4ai` 必然失败。后果链条：
+    `_detect_sources()` 把 crawl4ai 列入可用源 → `search_all_sources()` 无条件调用
+    → `ModuleNotFoundError` 直接抛到 `/enrich` 端点。
+    """
+
+    def test_available_reflects_real_importability(self):
+        import importlib.util
+
+        from persona_extractor.web_enricher import Crawl4AISource
+
+        expected = importlib.util.find_spec("crawl4ai") is not None
+        assert Crawl4AISource().available is expected
+
+    def test_search_returns_empty_instead_of_raising(self, monkeypatch):
+        from persona_extractor.web_enricher import Crawl4AISource
+
+        src = Crawl4AISource()
+        monkeypatch.setattr(type(src), "available", property(lambda self: False))
+        assert src.search("任意查询", 3) == []
+
+    def test_scrape_returns_empty_doc_instead_of_raising(self, monkeypatch):
+        from persona_extractor.web_enricher import Crawl4AISource
+
+        src = Crawl4AISource()
+        monkeypatch.setattr(type(src), "available", property(lambda self: False))
+        doc = src.scrape("https://example.com")
+        assert doc.content == ""
+        assert doc.source == "crawl4ai"
+
+    def test_available_sources_agree_with_detection(self):
+        """可用源列表不得与真探测结果背离（否则又是「谎报」）。"""
+        enricher = WebPersonaEnricher()
+        assert ("crawl4ai" in enricher._available_sources) is enricher.crawl4ai.available
+
+    def test_direct_scrape_always_listed(self):
+        """direct_scrape 只依赖 requests/bs4（已在 pyproject 声明），恒可用。"""
+        assert "direct_scrape" in WebPersonaEnricher()._available_sources

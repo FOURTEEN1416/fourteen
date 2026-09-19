@@ -34,6 +34,18 @@ from utils.health_check import _is_healthy
 logger = logging.getLogger("orchestrator.optimized")
 project_root = Path(__file__).resolve().parent.parent
 
+# ── 会话排队参数（2026-09-19）──
+# 同一 session 的两条消息必须**串行**（情感引擎 / 记忆状态不可并发写），但
+# 「串行」不等于「丢弃」。微信场景下用户连发两条是**常态**，而旧实现在锁被占用时
+# 直接返回「处理中, 请稍候...」—— 既把用户刚发的这句话整个丢掉，又用机器口吻播报状态
+# （慢 provider 下几乎条条触发）。改为有界排队后，用户会依次收到两条**真实回复**，
+# 这也正是真人的做法：先看完两条，再逐条回。
+# 等待上限取 60s：上层 `wechat_connector._call_user_manager` 的线程池预算是 120s，
+# 须给本轮生成留出余量，否则排队会把生成预算吃光。
+_SESSION_QUEUE_TIMEOUT = 60.0
+_SESSION_QUEUE_POLL = 0.2
+
+
 class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
     """
     优化版对话编排器 (fast 模式)
@@ -509,6 +521,30 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         """
         return self._session_lock_manager.get_lock(session_id)
 
+    async def _await_session_free(
+        self, session_id: str, timeout: float | None = None
+    ) -> bool:
+        """等待同会话上一轮处理结束（有界）。本就空闲则立即返回 True。
+
+        为什么不直接 `await lock.acquire()`：调用方随后仍要走既有的
+        `async with lock:` 分支，而 `asyncio.Lock` **不可重入** —— 在这里抢先拿到锁
+        会在 `async with` 处死锁。所以这里只"等它空出来"，真正的互斥仍交给原锁。
+
+        Args:
+            timeout: 等待上限（秒）。None 时取模块级 `_SESSION_QUEUE_TIMEOUT`
+                —— 用 None 而非默认值绑定，是为了让该常量可被运行期/测试覆盖。
+        """
+        budget = _SESSION_QUEUE_TIMEOUT if timeout is None else timeout
+        lock = self._get_session_lock(session_id)
+        if not lock.locked():
+            return True
+        deadline = time.monotonic() + budget
+        while lock.locked():
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(_SESSION_QUEUE_POLL)
+        return True
+
     # ─────────────────────────────────────────────────────────────
     # 共享预处理 / 后处理（process_message 与 process_message_stream 复用）
     # ─────────────────────────────────────────────────────────────
@@ -880,8 +916,14 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             return {"reply": "系统初始化中, 请稍候...", "error": "not_initialized"}
 
         lock = self._get_session_lock(session_id)
-        if lock.locked():
-            return {"reply": "处理中, 请稍候...", "error": "busy"}
+        # ── 会话串行：排队等待，而不是丢掉用户这条消息（2026-09-19 修复）──
+        # 旧实现：`if lock.locked(): return {"reply": "处理中, 请稍候..."}`
+        if not await self._await_session_free(session_id):
+            logger.warning(
+                "[session] 排队等待超时（>%.0fs），放弃本条 session=%s",
+                _SESSION_QUEUE_TIMEOUT, session_id,
+            )
+            return {"reply": "等下，我还没回完上一条", "error": "queue_timeout"}
 
         # 用户级 LLM gateway（API Key 隔离）：若提供 user_id + user_llm_config，
         # 本次请求使用用户专属 gateway，否则回退到全局共享 gateway。

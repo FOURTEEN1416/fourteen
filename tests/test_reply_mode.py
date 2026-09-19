@@ -105,3 +105,31 @@ def test_labels_exist_for_both_modes(monkeypatch, tmp_path):
     rm = _use_tmp(monkeypatch, tmp_path)
     for mode in rm.REPLY_MODES:
         assert rm.reply_mode_label(mode)
+
+
+# ── 沉浸式的「非共处」约束（2026-09-19 第二轮修复）─────────
+
+def test_immersive_forbids_physical_co_presence(monkeypatch, tmp_path):
+    """用户复报「还是展现出小说的感觉，一个人怎么会面对面发消息」。
+
+    根因：角色卡把关系设定成**物理共处**（当时绑定角色 62105bca 的 scenario 写
+    「你刚从公交车上下来…她站在巷口等你…转身走在前面带路」，description 写
+    「从小一起长大的青梅竹马…她家就在巷子尽头那栋楼」），模型据此把「关系设定」
+    演成「此时此地的舞台」，写出「我尝一口」「那我走」「那喝口茶消消食」。
+    故沉浸式指令必须显式声明非共处。
+    """
+    rm = _use_tmp(monkeypatch, tmp_path)
+    text = rm.reply_mode_instruction("immersive")
+    assert "不在同一个地方" in text          # 非共处
+    assert "不能做动作" in text              # 只能说话
+    # 实际踩到的句子应作为反例被写进指令
+    assert "我尝一口" in text
+    assert "那我走" in text
+    # 场景设定必须被降级为「背景」，而不是此刻正在发生
+    assert "背景" in text
+
+
+def test_novel_is_not_hit_by_co_presence_ban(monkeypatch, tmp_path):
+    """小说式本就允许画面感，不应被非共处的措辞误伤。"""
+    rm = _use_tmp(monkeypatch, tmp_path)
+    assert "不在同一个地方" not in rm.reply_mode_instruction("novel")

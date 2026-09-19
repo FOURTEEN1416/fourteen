@@ -111,7 +111,13 @@ class TestHandleMessage:
 
         assert mock_send.call_count == 1
         args = mock_send.call_args
-        assert "不知道该怎么回复" in args.kwargs.get("text", "") or "不知道该怎么回复" in args[0][1]
+        text = args.kwargs.get("text", "") or args[0][1]
+        assert text, "空回复不能变成静默不发"
+        # ⚠️ 2026-09-19：兜底语改为**无括号**的纯口语。旧值
+        # 「（我暂时不知道该怎么回复，可以再说一次吗？）」自带括号动作描写，
+        # 在沉浸式模式下直接违反「严禁括号动作/旁白」—— 一次降级就把模式打回小说味。
+        assert "（" not in text and "(" not in text, f"兜底语不得带括号: {text!r}"
+        assert "再说一句" in text
 
     @patch("wechat_direct.wechat_connector._send_text")
     @patch("wechat_direct.wechat_connector._call_user_manager")

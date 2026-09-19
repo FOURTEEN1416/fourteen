@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import time
 from types import SimpleNamespace
 
 sys.path.insert(0, ".")
@@ -210,10 +211,43 @@ def test_stream_injection_gets_sanitized():
     assert events[-1]["type"] == "done"
 
 
-def test_stream_session_locked_returns_wait():
+def test_stream_session_locked_queues_instead_of_dropping():
+    """锁被占用时应**排队等待后照常处理**，而不是把这一轮丢掉。
+
+    2026-09-19 修复：旧实现直接返回「处理中, 请稍候...」—— 机器口吻的状态播报，
+    且用户刚发的那句话被整个丢弃（慢 provider 下条条触发）。
+    """
+    orch = _make_orchestrator(with_chat_stream=True)
+    calls = {"n": 0}
+
+    class BusyOnceLock:
+        def locked(self):
+            calls["n"] += 1
+            return calls["n"] <= 1      # 首次忙（上一轮未结束），随后空闲
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    orch._get_session_lock = lambda sid: BusyOnceLock()  # type: ignore[method-assign]
+    events = asyncio.run(_collect_stream(orch, user_msg="你好", session_id="s1"))
+    # 排队后必须照常产出真实回复，绝不能是罐头语
+    assert "处理中" not in events[0]["content"]
+    assert events[-1]["type"] == "done"
+    assert calls["n"] >= 2              # 确实轮询等待过
+
+
+def test_session_queue_timeout_is_bounded_and_graceful(monkeypatch):
+    """排队超时必须**有界**，且给出可读回复，不是永远等下去。"""
+    import orchestrator.optimized_orchestrator as oo
+
+    monkeypatch.setattr(oo, "_SESSION_QUEUE_TIMEOUT", 0.3, raising=False)
+    monkeypatch.setattr(oo, "_SESSION_QUEUE_POLL", 0.05, raising=False)
     orch = _make_orchestrator(with_chat_stream=True)
 
-    class FakeLock:
+    class AlwaysBusyLock:
         def locked(self):
             return True
 
@@ -223,9 +257,12 @@ def test_stream_session_locked_returns_wait():
         async def __aexit__(self, *args):
             return False
 
-    orch._get_session_lock = lambda sid: FakeLock()  # type: ignore[method-assign]
+    orch._get_session_lock = lambda sid: AlwaysBusyLock()  # type: ignore[method-assign]
+    t0 = time.monotonic()
     events = asyncio.run(_collect_stream(orch, user_msg="你好", session_id="s1"))
-    assert events[0]["content"] == "处理中, 请稍候..."
+    elapsed = time.monotonic() - t0
+    assert elapsed < 3.0, f"排队必须有界，实测 {elapsed:.1f}s"
+    assert "处理中" not in events[0]["content"]
     assert events[-1]["type"] == "done"
 
 

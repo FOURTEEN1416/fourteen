@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import json
 import logging
 import os
@@ -451,11 +452,28 @@ class Crawl4AISource:
 
     def __init__(self):
         self._crawler: Any = None
+        self._available: bool | None = None
 
     @property
     def available(self) -> bool:
-        # Crawl4AI 已预装，永远可用（无需 API Key）
-        return True
+        """**真探测** crawl4ai 是否可导入，而不是假设。
+
+        ⚠️ 2026-09-19 修复：旧实现写死 `return True`，注释断言「Crawl4AI 已预装，
+        永远可用（无需 API Key）」。**该断言在生产上是错的** —— 实测
+        `import crawl4ai` → `ModuleNotFoundError`，且 `pyproject.toml` 从未声明该依赖，
+        部署时根本不会安装。后果：`_detect_sources()` 把 crawl4ai 列入可用源 →
+        `search_all_sources()` 无条件调用 → `ModuleNotFoundError` 直接抛到
+        `/api/knowledge/.../enrich` 端点。
+
+        这与本日修复的「`search.health_check` 恒返回 available=True」是同一类缺陷：
+        **可用性必须探测，不能靠注释里的假设**。
+        """
+        if self._available is None:
+            try:
+                self._available = importlib.util.find_spec("crawl4ai") is not None
+            except (ImportError, ValueError):
+                self._available = False
+        return self._available
 
     async def _search_async(self, query: str, max_results: int) -> list[RawDocument]:
         """真正的 async 搜索实现。"""
@@ -511,19 +529,35 @@ class Crawl4AISource:
         return doc
 
     def search(self, query: str, max_results: int = 5) -> list[RawDocument]:
-        """同步入口：用 Crawl4AI 搜索并返回 RawDocument 列表。"""
+        """同步入口：用 Crawl4AI 搜索并返回 RawDocument 列表。
+
+        未安装时**返回空列表**而非抛异常 —— 调用方是做「多源聚合、缺一个照样跑」，
+        不该因单一源缺失就把 `ModuleNotFoundError` 抛到端点。
+        """
+        if not self.available:
+            logger.info("Crawl4AI 未安装，该源跳过（返回空）")
+            return []
         import asyncio
         try:
             return asyncio.run(self._search_async(query, max_results))
+        except ImportError as e:
+            logger.warning("Crawl4AI 导入失败，该源跳过: %s", e)
+            return []
         except RuntimeError:
             # 若已在 loop 中（极少数情况），则创建新 loop
             return asyncio.new_event_loop().run_until_complete(self._search_async(query, max_results))
 
     def scrape(self, url: str) -> RawDocument:
         """同步入口：抓取单个 URL 并返回 RawDocument。"""
+        if not self.available:
+            logger.info("Crawl4AI 未安装，抓取跳过（返回空文档）")
+            return RawDocument(url=url, source=self.NAME)
         import asyncio
         try:
             return asyncio.run(self._scrape_async(url))
+        except ImportError as e:
+            logger.warning("Crawl4AI 导入失败，抓取跳过: %s", e)
+            return RawDocument(url=url, source=self.NAME)
         except RuntimeError:
             return asyncio.new_event_loop().run_until_complete(self._scrape_async(url))
 
@@ -704,7 +738,12 @@ class WebPersonaEnricher:
         self._detect_sources()
 
     def _detect_sources(self) -> None:
-        self._available_sources = ["direct_scrape", "crawl4ai"]
+        # ⚠️ 2026-09-19 修复：crawl4ai 原先**硬编码**在可用源列表里（且其 available
+        #    恒为 True），但生产实测未安装 → search_all_sources 无条件调用它 →
+        #    ModuleNotFoundError 直接抛到 /enrich 端点。可用源列表必须与真探测一致。
+        self._available_sources = ["direct_scrape"]
+        if self.crawl4ai.available:
+            self._available_sources.append("crawl4ai")
         if self.agent_reach.bili_available:
             self._available_sources.append("bilibili (bili-cli)")
             logger.info("bili-cli: 可用")

@@ -1299,7 +1299,11 @@ class WeChatConnector:
                 "[wx][step=empty_reply] msg_id=%s user=%s error=%s elapsed=%.2fs",
                 msg_id, from_user, error or "unknown", t_elapsed,
             )
-            reply = "（我暂时不知道该怎么回复，可以再说一次吗？）"
+            # ⚠️ 2026-09-19：兜底语改为**无括号**的纯口语。
+            # 旧值「（我暂时不知道该怎么回复，可以再说一次吗？）」自带括号动作，
+            # 在沉浸式模式下直接违反「严禁括号动作/旁白」的硬约束 ——
+            # 兜底语必须与默认回复模式一致，否则一次降级就把模式打回小说味。
+            reply = "刚才没接上，你再说一句？"
         else:
             logger.info(
                 "[wx][step=llm_done] msg_id=%s user=%s reply=%r elapsed=%.2fs llm_time=%s",

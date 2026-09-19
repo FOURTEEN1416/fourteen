@@ -32,6 +32,7 @@ class _StreamPipelineMixin:
     if TYPE_CHECKING:  # pragma: no cover
         def process_message(self, *args: Any, **kwargs: Any) -> Any: ...
         def _get_session_lock(self, session_id: str) -> Any: ...
+        def _await_session_free(self, session_id: str, timeout: Any = ...) -> Any: ...
         def _prepare_context(self, *args: Any, **kwargs: Any) -> Any: ...
         def _after_process(self, *args: Any, **kwargs: Any) -> Any: ...
     # 后台 task 引用集合（避免被 GC 回收，asyncio.create_task 文档要求）。
@@ -224,9 +225,10 @@ class _StreamPipelineMixin:
                 user_msg_clean = self.components["injection"].sanitize(user_msg_clean)
 
             # 4. 会话锁（防止同 session 并发处理）
-            lock = self._get_session_lock(session_id)
-            if lock.locked():
-                reply = "处理中, 请稍候..."
+            # 2026-09-19：锁被占用时改为**有界排队**，不再直接吐「处理中, 请稍候...」——
+            # 那是机器口吻的状态播报，且用户这一轮的输入会被整个丢弃。
+            if not await self._await_session_free(session_id):
+                reply = "等下，我还没回完上一条"
                 yield {"type": "token", "content": reply}
                 yield {
                     "type": "done",
@@ -236,6 +238,7 @@ class _StreamPipelineMixin:
                 }
                 return
 
+            lock = self._get_session_lock(session_id)
             async with lock:
                 # ── 共享预处理（并行任务、prompt 组装、工具调用） ──
                 ctx = await self._prepare_context(
