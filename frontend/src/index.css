@@ -394,6 +394,12 @@ body::before {
 }
 
 /* ═══ Input Focus ═══ */
+.input-macaron {
+  background: rgba(31, 41, 55, 0.035);
+  border: 1px solid rgba(31, 41, 55, 0.05);
+  box-shadow: inset 0 1px 3px rgba(31, 41, 55, 0.05);
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
 .input-macaron:focus {
   border-color: var(--color-macaron-yellow);
   box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.35);

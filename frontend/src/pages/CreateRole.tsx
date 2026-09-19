@@ -171,7 +171,7 @@ function AIChatTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaSt
           placeholder="描述你想要的 AI 角色..."
           disabled={loading}
           rows={1}
-          className="input-macaron flex-1 rounded-lg bg-white/85 px-3.5 py-2.5 text-sm resize-none text-text-primary placeholder:text-text-dim outline-none border border-gray-900/5"
+          className="input-macaron flex-1 rounded-lg px-3.5 py-2.5 text-sm resize-none text-text-primary placeholder:text-text-dim outline-none"
           style={{ minHeight: 42 }}
         />
         <button
