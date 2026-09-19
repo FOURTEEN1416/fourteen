@@ -53,9 +53,13 @@ const { mockUseUnifiedCharacter, FAKE_CHARACTER } = vi.hoisted(() => {
 //  Module mocks
 // ════════════════════════════════════════════════════════════════
 
-vi.mock('../../hooks/useQueries', () => ({
-  useUnifiedCharacter: (...args: unknown[]) => mockUseUnifiedCharacter(...args),
-}))
+vi.mock('../../hooks/useQueries', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../hooks/useQueries')>()
+  return {
+    ...actual,
+    useUnifiedCharacter: (...args: unknown[]) => mockUseUnifiedCharacter(...args),
+  }
+})
 
 // ════════════════════════════════════════════════════════════════
 //  Render helpers
@@ -117,7 +121,7 @@ describe('RoleSettings', () => {
   // ────────────────────────────────────────────────
   //  3. 渲染 6 个 tab
   // ────────────────────────────────────────────────
-  it('renders 6 tabs: 基础/语音/消息/数据/表情包/时间线', () => {
+  it('renders tabs: 基础/语音/消息/数据/时间线', () => {
     mockUseUnifiedCharacter.mockReturnValue({
       data: FAKE_CHARACTER,
       isLoading: false,
@@ -129,12 +133,11 @@ describe('RoleSettings', () => {
     // 角色名称
     expect(screen.getByText('小雅')).toBeDefined()
 
-    // 6 个 tab 按钮
+    // 当前 SUB_TABS 为 5 项（表情包 tab 已下线，2026-09-19 对齐）
     expect(screen.getByText('基础')).toBeDefined()
     expect(screen.getByText('语音')).toBeDefined()
     expect(screen.getByText('消息')).toBeDefined()
     expect(screen.getByText('数据')).toBeDefined()
-    expect(screen.getByText('表情包')).toBeDefined()
     expect(screen.getByText('时间线')).toBeDefined()
   })
 
@@ -162,11 +165,6 @@ describe('RoleSettings', () => {
     fireEvent.click(screen.getByText('数据'))
     // 数据 tab 显示数据概览
     expect(screen.getByText('数据概览')).toBeDefined()
-
-    // 点击「表情包」tab
-    fireEvent.click(screen.getByText('表情包'))
-    // 表情包 tab 显示常用表情
-    expect(screen.getByText('常用表情')).toBeDefined()
   })
 
   // ────────────────────────────────────────────────

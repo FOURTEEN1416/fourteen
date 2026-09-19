@@ -84,7 +84,7 @@ describe('StatusCenter', () => {
     renderWithQuery(<StatusCenter />)
 
     expect(screen.getByText('happy')).toBeDefined()
-    expect(screen.getByText('亲密')).toBeDefined() // affinity 85
+    expect(screen.getByText('羁绊')).toBeDefined() // affinity 85 → 羁绊（75-100），非「亲密」（50-75）
     expect(screen.getByText('18')).toBeDefined()
   })
 

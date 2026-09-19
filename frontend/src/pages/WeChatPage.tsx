@@ -2,7 +2,6 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { AnimatedPage } from '../components/shared'
 import { useQueryClient } from '@tanstack/react-query'
 import { useWechatStatus, queryKeys } from '../hooks/useQueries'
-import type { WeChatStatus } from '../types/api'
 import { RefreshCw, X, QrCode, Clock, MessageSquare, AlertTriangle, CheckCircle2, Smartphone } from 'lucide-react'
 import { wechatQrCode, wechatConnectionStatus, wechatConnect } from '../api/system'
 
@@ -146,7 +145,6 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollingStartRef = useRef<number>(0)
-  const connectedRef = useRef(false)
   const qc = useQueryClient()
 
   const triggerConnection = useCallback(async () => {
