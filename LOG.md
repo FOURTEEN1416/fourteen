@@ -1815,3 +1815,78 @@
 `[prompt] total=… character=…` 埋点代码虽已部署（`orchestrator/optimized_orchestrator.py:790`），
 但生产 `data/app.log` 中该标记 **0 条**，说明部署后没有真实对话触发。
 需用户正常聊几条后才能取数、进而定 ADR-0015 的预算参数。
+
+---
+
+## 2026-09-19（七十三）— 用户四问落地：crawl4ai 部署缺口 / 搜索体系 / 连发两条罐头语 / 小说感
+
+**任务**：用户四问 ——（1）是不是没部署 crawl4ai 与火爬虫？（2）需不需要升级搜索工具体系？
+（3）连发两条就回「处理中, 请稍候...」；（4）几轮对话仍是小说感、「一个人怎么会面对面发消息」。
+另授权清理服务器上的 `frontend/dist.rollback-20260915-1655/` 与 `/tmp/probe.out`。
+
+### ① crawl4ai / 火爬虫：不是漏部署，是**依赖从未声明** + **可用性谎报**
+
+- 火爬虫（Firecrawl）**已于 08-27 被 Crawl4AI 主动替代**（`e1a4cec`，为免商业授权），不是漏部署。
+- 本机装了 `Crawl4AI 0.9.2`（09-05 调研轮启用）且真能用（实测 `scrape` 经 Playwright 取回真实正文）；
+  **服务器没装** —— 根因是 `pyproject.toml` 里**从来没有 crawl4ai**，而服务器是按 pyproject 装的。
+- **更严重的是代码谎报可用**（本项目当日第 4 例同类缺陷）：
+  | 检查 | 结果 |
+  |---|---|
+  | `Crawl4AISource.available` 声称 | `True`（注释写「已预装，永远可用」） |
+  | 真实 `import crawl4ai` | `ModuleNotFoundError` |
+  | `Crawl4AISource.search()` | **直接抛 ModuleNotFoundError**（未捕获） |
+  | `WebPersonaEnricher._available_sources` | `['direct_scrape', 'crawl4ai', 'jina_reader']` ← 假的可选项 |
+  后果链：`_detect_sources()` 硬编码 crawl4ai 为可用源 → `search_all_sources()`（第 771 行
+  `if self.crawl4ai.available:`）无条件调用 → `ModuleNotFoundError` 抛到 `/enrich` 端点。
+- **修复**：`available` 改 `importlib.util.find_spec("crawl4ai")` 真探测；`_detect_sources` 按真探测
+  构建列表；`search()` / `scrape()` 捕获 `ImportError` 返回空（降级而非端点 500）；
+  另在 `pyproject.toml` 的 `[project.optional-dependencies]` 补 **`web-enrich = ["crawl4ai>=0.9.2"]`**
+  —— 列为可选而非默认，因为 crawl4ai 依赖 playwright + Chromium。
+- **结论（不装到服务器）**：服务器 **内存 3.6GB（可用 1.8GB）、磁盘 78% 已用**；crawl4ai 需常驻
+  Chromium，与 4 个 uvicorn worker + bge 嵌入服务抢内存，OOM 会连带把网评站点打挂。
+  资源不足时该源**自动跳过**，人设增强降级到 `direct_scrape`（requests+bs4，已装）+ `jina_reader`。
+
+### ② 搜索体系：**不建议**把 crawl4ai 引入对话内搜索
+
+- `crawl4ai` 是**浏览器级抓取**，单次秒级~十几秒，重依赖；对话内搜索要求 <1s 返回，二者定位不同。
+- Bing 直抓实测 **5/5、0.6s、10 条**（见 LOG 七十二），已达标。crawl4ai 的正确定位是
+  **离线深度抓取**（人设增强 / 知识库构建），不是实时问答。
+- 真正值得升级的三项（按收益排序，**待用户裁决后再做**）：
+  1. **多后端互补**：现仅 Bing 单源，被限流即整体失效 → 加百度/搜狗抓取作第二源并交叉去重；
+  2. **结果质量**：域名去重、`body` 噪声清理（现带「2026年9月11日 ·」这类时间前缀）；
+  3. **短期缓存**：同 query 复用结果，既降延迟又降被限流概率。
+
+### ③ 连发两条 →「处理中, 请稍候...」：会话锁由**拒绝**改为**有界排队**
+
+- 根因：`optimized_orchestrator.process_message` 与 `_stream_mixin` 两处在 `lock.locked()` 时
+  **直接返回罐头语**。慢 provider 下用户连发两条几乎必触发 —— 更糟的是**用户刚发的那句话被整个丢弃**
+  （等到的不是回复，而是状态播报）。
+- 修复：新增 `_await_session_free()` 有界轮询（60s），锁占用时**等上一轮结束再处理本条**，
+  用户依次收到两条**真实回复** —— 这也正是真人的做法（先看完两条再逐条回）。
+  为何用轮询而非 `acquire()`：调用方随后仍走 `async with lock:`，而 `asyncio.Lock` **不可重入**，
+  抢先 acquire 会在 `async with` 处死锁。
+- 附带修一处**模式自相矛盾**：`wechat_connector.py` 的空回复兜底语原是
+  「（我暂时不知道该怎么回复，可以再说一次吗？）」**自带括号**，在沉浸式模式下直接违反
+  「严禁括号动作」—— 一次降级就把模式打回小说味。改为无括号口语「刚才没接上，你再说一句？」。
+
+### ④ 小说感：根因是**角色卡把关系设定成物理共处**
+
+- 用户复报「还是展现出小说的感觉，一个人怎么会面对面发消息」。括号旁白**确实已消失**
+  （说明沉浸式模式已生效），但角色仍在**演一个面对面场景**。生产原句：
+  「我尝一口，看是不是糖放多了」「那我走」「嗯。那就坐会儿吧」「那喝口茶消消食」。
+- **根因不在格式要求，而在数据**：当时绑定的角色 `62105bca`（林挽夏）——
+  `scenario`：「夏日傍晚的旧城区小巷…**你刚从公交车上下来**，远远看见她站在巷口的树荫下等你…
+  等你走近了，她轻声说了一句「来了啊」，然后**转身走在前面带路**」；
+  `description`：「你是她**从小一起长大的青梅竹马**…她的家位于巷子尽头那栋老旧居民楼的四层」。
+  模型把**关系设定**当成了**此时此地的舞台**。
+- 修复：`_INSTRUCTION_IMMERSIVE` 补 ① **非共处约束**（你和对方不在同一个地方，只能靠手机文字；
+  拿不到/看不到/尝不到/碰不到，也去不了对方身边）② **把实际踩到的句子写成反例**
+  （✗我尝一口 → ✓是糖放多了吗？/ ✗那我走 → ✓那你先忙）③ 明确「场景设定/开场情境只是**背景**，
+  不代表你们此刻在一起」。小说式模式**不受此约束影响**（已有测试守护）。
+
+### 清理
+按用户授权删除服务器 `frontend/dist.rollback-20260915-1655/`（836K）+ `/tmp/probe.out`（34B，09-14 残留）。
+
+### 验证
+`ruff check .` 0 错；新增/改写 13 例回归（reply_mode +2、web_enricher +5、test_main_stream 改写 1 拆 2）；
+三项相关测试文件 43 passed；分块 pytest 全量见下。

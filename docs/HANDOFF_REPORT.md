@@ -65,11 +65,14 @@
 
 ## 3. 当前真相（均为实测）
 
-- **测试**（2026-09-19 16:10 刷新）：`--collect-only` **1189**；分块实跑 **1185 passed / 4 skipped**。
+- **测试**（2026-09-19 16:55 刷新）：`--collect-only` **1197**；分块实跑 **1193 passed / 4 skipped**。
   ⚠️ **基线依赖未追踪数据，不可跨会话复现**：`tests/test_persona_injection.py` 用
   `parametrize(sorted(Path("config/characters").glob("*.json")))`，**用例数 = 2 × 角色卡数 + 7**
   （当前 25 张 → 57 例），而 `config/characters/` **被 `.gitignore:117` 忽略**（磁盘 25 / git 追踪 0）。
   这解释了本页旧记 1105 与实际 1162 的差异。**引用基线必须同时声明卡数。**
+  ⚠️ **`tests/test_llm_providers_routes.py` 是已知 flaky**：单独跑 24 passed / 41~50s，
+  但**聚合态会随机挂死**（本次实测 100s 无输出）。改动后整跑变慢时先逐文件计时归因，
+  不要默认是自己改坏的。同族：`test_integration.py` / `test_web_enricher.py`。
   ⚠️ **单进程整跑 `pytest -q` 会在随机位置停住**（非用例失败，属聚合态资源问题）。
   分块跑法见 `AGENTS.md` §4.3。
 - **前端**：vitest **87 passed / 15 文件**，`tsc --noEmit` 0 错。
@@ -100,6 +103,16 @@
 **未启用但代码存在**：`web_summary`、`image_gen`、`memory`、`scheduler`
 （不在 `builtin_tools` 列表里 → 不会注册；注意「字典键名必须与 system.yaml 一致」这条注释）。
 
+**人设增强（角色设置页的"火爬虫"入口，与对话内 `search` 工具是两回事）**：
+`api/routers/knowledge_routes.py` → `persona_extractor/web_enricher.py`。
+火爬虫（Firecrawl）**已于 08-27 被 Crawl4AI 主动替代**（`e1a4cec`，为免商业授权）。
+⚠️ 2026-09-19 查明：`crawl4ai` **从未写进 `pyproject.toml`** → 按 pyproject 安装的生产服务器
+根本没装；而 `Crawl4AISource.available` 又**写死 True**（注释还写「已预装，永远可用」），
+导致 `_detect_sources()` 把它列为可用源、`search_all_sources()` 无条件调用 →
+**`ModuleNotFoundError` 直接抛到 `/enrich` 端点**。已修为真探测 + 优雅降级，并补
+`[project.optional-dependencies]` 的 `web-enrich` 额外项（**故意不默认安装**：
+服务器内存 3.6GB / 磁盘 78%，crawl4ai 需常驻 Chromium，OOM 会连带打挂站点）。
+
 **调用方式**：`_run_tools_if_needed()` 先用**关键词意图预筛**（`_tool_intent_names`），
 再用 `llm.chat_with_tools` 调用；结果拼进 system prompt。
 → **工具能否真正触发取决于基座模型的 function calling 能力**（当前 glm-4-flash 档位）。
@@ -111,8 +124,16 @@
 2. ~~**`search` 工具脆弱**~~ → ✅ **已修（`6780c5f`）**。
    ⚠️ **原建议「改 `ddgs`」已被生产实测否决**：`ddgs` 9.x 聚合 Google/Brave/Startpage/Yahoo，
    大陆全不可达，实测 **0/5**、单次串行 ≈100s。现行方案是 Bing 直抓为主 + `duckduckgo_search` 8.1.1 为辅。
-3. **会话锁 → 罐头语**：慢 provider 下连发消息得「处理中, 请稍候...」，超 30s 得「抱歉，处理超时」。
-4. **追问与主回复争抢 LLM**：慢 provider 下会加剧 3。是否需要限流待定。
+3. ~~**会话锁 → 罐头语**~~ → ✅ **已修（09-19）**：`process_message` / `_stream_mixin` 两处
+   由「锁被占用即返回罐头语」改为**有界排队**（`_await_session_free`，上限
+   `_SESSION_QUEUE_TIMEOUT=60s`），用户依次收到两条真实回复。
+   ⚠️ 旧行为不只是话术问题 —— 它把用户刚发的那句**整个丢弃**。
+   超 30s 得「抱歉，处理超时」那条仍存（属 provider 慢，非锁）。
+4. **追问与主回复争抢 LLM**：慢 provider 下会加剧排队深度。是否需要限流仍待定。
+5. **沉浸式仍有"小说感"**（09-19 部分修复）：括号旁白已消，但角色会**演面对面场景**
+   （「我尝一口」「那我走」）。根因是**角色卡数据**把关系设成物理共处（如 62105bca 的
+   `scenario`/`description`），已在沉浸式指令里加非共处约束 + 反例；
+   ⚠️ **若仍复现，下一步该动的是卡片数据而不是指令**。
 5. **ADR-0015 第 5 阶段未实施**（段落注册表 + L1 预算 + lorebook 引擎）——
    **先攒埋点数据再动手**：`_prepare_context` 已每轮输出
    `[prompt] total= character= rag= memory= summary= world= hist_msgs=`。
