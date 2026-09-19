@@ -432,12 +432,25 @@ class ProactiveScheduler:
             return start <= local_hour < end
         return local_hour >= start or local_hour < end
 
+    # 仅写日志、不构成真实送达的通道（开发期观察用）。
+    # 它们【不得】计入送达：否则真实通道（微信）失败时会被兜底掩盖成「成功」，
+    # 上层据此提交配额。生产实证 2026-09-19：微信接口连续多日返回
+    # {"ret": -2, "errmsg": "prepare failed"}（会话窗口失效），日志却始终显示
+    # 「主动消息已投递: wechat」—— 因为 console 与旧 send_message_func 都是
+    # `logger.info` 包装，必然「成功」。
+    _LOG_ONLY_CHANNELS = frozenset({"console"})
+    # 真实投递通道（按优先级）
+    _REAL_CHANNELS = ("wechat", "websocket")
+
     async def _send_to_all(self, message: str) -> bool:
         """
         向所有已注册通道发送消息
-        优先级: wechat > websocket > console
+        优先级: wechat > websocket（console 仅留痕）
 
-        Returns: 是否至少一个通道发送成功
+        Returns:
+            **是否真实送达** —— 任一真实通道成功即为 True。
+            仅写日志的兜底通道（console / 旧 `send_message_func`）照常留痕，
+            但**不影响返回值**，因此不会导致「没送达却扣配额」。
 
         2026-09-19：免打扰分支改为**明确说明未投递**。旧日志写「跳过非紧急消息」
         但代码里并不存在紧急消息旁路，措辞掩盖了「消息被丢弃」的事实 ——
@@ -450,9 +463,8 @@ class ProactiveScheduler:
             )
             return False
 
-        priority = ["wechat", "websocket", "console"]
         sent = False
-        for name in priority:
+        for name in self._REAL_CHANNELS:
             sender = self._channel_instances.get(name)
             if sender is None:
                 continue
@@ -461,21 +473,34 @@ class ProactiveScheduler:
                     await sender(message)
                 else:
                     sender(message)
-                logger.info("主动消息已投递: %s", name)
+                logger.info("主动消息已送达: %s", name)
                 sent = True
                 break  # 高优先级成功就不再尝试低优先级
             except Exception as e:
                 logger.warning("通道投递失败: %s - %s", name, e)
-                self._channel_instances[name] = None  # 标记失效
+                # 标记失效；通道健康检查（每 60s）会从 factory 重建
+                self._channel_instances[name] = None
 
-        # 兜底：使用旧的 send_message_func
+        # 仅日志通道：留痕，但**不计入送达**
+        for name in sorted(self._LOG_ONLY_CHANNELS):
+            sender = self._channel_instances.get(name)
+            if sender is None:
+                continue
+            with contextlib.suppress(Exception):
+                if asyncio.iscoroutinefunction(sender):
+                    await sender(message)
+                else:
+                    sender(message)
+
+        # 旧 send_message_func 兜底：生产装配里它是 logger.info 包装，同属「仅留痕」
         if not sent and self._send:
-            try:
+            with contextlib.suppress(Exception):
                 self._send(message)
-                sent = True
-            except Exception as e:
-                logger.error("兜底发送失败: %s", e)
 
+        if not sent:
+            logger.warning(
+                "主动消息未送达任何真实通道（仅留痕），不消耗配额: %.40s", message
+            )
         return sent
 
     def _check_ase(self) -> None:

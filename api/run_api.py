@@ -198,12 +198,27 @@ if _scheduler is not None:
         async def _send(msg: str) -> None:
             # 优先发给已绑定微信（多用户各自的角色链路）；
             # 无任何绑定时回退最后活跃用户（旧行为）
+            #
+            # ⚠️ 2026-09-19 生产事故修复：必须**检查 send_text 的返回值**。
+            # 旧实现丢弃返回值，于是「发送失败」在 `_send_to_all()` 看来是成功
+            # ——生产实证：微信接口返回 {"ret": -2, "errmsg": "prepare failed"}
+            # （会话窗口失效）时，日志仍连续多日显示「主动消息已投递: wechat」，
+            # 用户实际一条都没收到，且当日配额被照扣。
+            # 现在：全部目标失败 → 抛异常，由 `_send_to_all()` 记失败、
+            # `_check_ase()` 据此**不提交配额**。
             wxids = user_mgr.get_bound_wxids() if user_mgr else []
-            if wxids:
-                for wxid in wxids:
-                    connector.send_text(msg, to_user=wxid)
-            else:
-                connector.send_text(msg)
+            if not wxids:
+                if not connector.send_text(msg):
+                    raise RuntimeError("微信投递失败（无绑定用户，或 _last_user_id 为空）")
+                return
+            failed: list[str] = []
+            for wxid in wxids:
+                if not connector.send_text(msg, to_user=wxid):
+                    failed.append(wxid)
+            if len(failed) == len(wxids):
+                raise RuntimeError(f"微信投递失败：{len(wxids)} 个绑定目标全部未送达")
+            if failed:
+                logger.warning("微信部分投递失败（未送达 %d/%d）: %s", len(failed), len(wxids), failed)
 
         return _send
 

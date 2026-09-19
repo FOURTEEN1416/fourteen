@@ -16,6 +16,7 @@ import uuid
 from collections import OrderedDict
 from contextlib import suppress
 from pathlib import Path
+from typing import Any
 
 import requests
 
@@ -126,6 +127,16 @@ def _clear_credentials(path=None):
 
 CREDENTIALS_PATH = os.path.expanduser("~/.weixin_cow_credentials.json")
 
+# context_token 持久化路径。
+# 为什么必须落盘：context_token 只在**收到用户消息**时写入（内存字典），
+# 服务一重启就清空；而主动发送（ASE / 重要日期）依赖它。实测空 token 发送
+# 返回 {"ret": -2, "errmsg": "prepare failed"} —— 2026-09-19 生产事故：
+# 重启后所有主动消息都失败，用户零接收，而日志四层都报「已投递」。
+# 锚定仓库根 data/（与 proactive_state.json 同目录），不走相对 CWD。
+CONTEXT_TOKENS_PATH = str(
+    Path(__file__).resolve().parent.parent / "data" / "wechat_context_tokens.json"
+)
+
 
 def _load_credentials(path=None):
     path = path or CREDENTIALS_PATH
@@ -222,6 +233,35 @@ def _poll_qr_status(qrcode, base_url=DEFAULT_BASE_URL, timeout=35):
         return {"status": "wait"}
 
 
+def _api_ok(resp: Any) -> tuple[bool, str]:
+    """判定微信 API 返回是否**业务成功**，返回 (ok, 错误说明)。
+
+    ⚠️ 2026-09-19 生产事故：旧实现只检查 HTTP 状态码，**从不看业务返回码
+    `ret`**。发送接口在会话窗口失效时返回 `{"ret": -2, "errmsg": "prepare
+    failed"}`，HTTP 200 —— 于是整条链路四层都把「发送失败」报成「成功」，
+    用户在微信里一条都没收到，而日志连续多日显示「主动消息已投递: wechat」。
+    实测原始返回（空 context_token）：
+        {"ret": -2, "errmsg": "prepare failed"}
+    """
+    if not isinstance(resp, dict):
+        return False, f"响应格式异常: {type(resp).__name__}"
+    if resp.get("timeout"):
+        return False, "请求超时（送达状态未知，按失败处理）"
+    ret = resp.get("ret")
+    if ret is None:
+        # 部分端点不返回 ret；以 errcode/errmsg 兜底
+        if resp.get("errcode") or resp.get("errmsg"):
+            return False, str(resp.get("errmsg") or resp.get("errcode"))
+        return True, ""
+    try:
+        code = int(ret)
+    except (TypeError, ValueError):
+        return False, f"ret 非数值: {ret!r}"
+    if code == 0:
+        return True, ""
+    return False, f"ret={code} errmsg={resp.get('errmsg', '') or '-'}"
+
+
 def _post_api(endpoint, body, token="", base_url=DEFAULT_BASE_URL, timeout=15):
     """调用微信 API"""
     url = _ensure_trailing_slash(base_url) + endpoint
@@ -233,7 +273,10 @@ def _post_api(endpoint, body, token="", base_url=DEFAULT_BASE_URL, timeout=15):
         return resp.json()
     except requests.exceptions.Timeout:
         logger.debug(f"API超时: {endpoint}")
-        return {"ret": 0, "msgs": []}
+        # ⚠️ 旧实现返回 {"ret": 0, "msgs": []} —— 对 getupdates 是「无新消息」，
+        # 但对 sendmessage 等于把**超时**伪装成**成功**。加 timeout 标记，
+        # 由 _api_ok() 判定为失败，同时不破坏轮询侧对 ret/msgs 的既有读取。
+        return {"ret": 0, "msgs": [], "timeout": True}
     except Exception as e:
         logger.error(f"API错误 {endpoint}: {e}")
         raise
@@ -391,6 +434,7 @@ class WeChatConnector:
         self._get_updates_buf = ""
         self._received_msgs: OrderedDict = OrderedDict()  # 有序字典，支持按插入顺序淘汰
         self._context_tokens: dict = {}  # {user_id: {"token": str, "ts": float}}
+        self._load_context_tokens()
         self._last_user_id: str = ""
         # 每条消息在独立线程中处理，避免阻塞轮询循环
         self._msg_executor = concurrent.futures.ThreadPoolExecutor(
@@ -403,18 +447,33 @@ class WeChatConnector:
         self._reconnect_attempts = 0
 
     def send_text(self, text: str, to_user: str = "") -> bool:
-        """主动发送文本消息（供外部调用）"""
+        """主动发送文本消息（供外部调用）
+
+        ⚠️ 2026-09-19：改为**校验业务返回码**。旧实现丢弃 `_send_text()` 的返回
+        字典，只要不抛异常就 `return True` 并打印「微信主动发送成功」——
+        而 `ret=-2 "prepare failed"`（会话窗口失效）走的正是这条路径，
+        导致上层误判送达成功（用户实际零接收，且配额被记账）。
+        """
         target = to_user or self._last_user_id
         if not target or not self.token:
             logger.warning("微信主动发送失败: 无目标用户或未登录")
             return False
         try:
             context_token = self._get_context_token(target)
-            _send_text(
+            resp = _send_text(
                 to=target, text=text,
                 context_token=context_token,
                 token=self.token, base_url=self.base_url,
             )
+            ok, errmsg = _api_ok(resp)
+            if not ok:
+                logger.warning(
+                    "微信主动发送失败: %s | target=%s context_token=%s text=%.30s",
+                    errmsg, target,
+                    "有" if context_token else "空（用户需先给机器人发一条消息）",
+                    text,
+                )
+                return False
             logger.info("微信主动发送成功: %s", text[:30])
             return True
         except Exception as e:  # noqa: BLE001
@@ -423,7 +482,7 @@ class WeChatConnector:
 
     def send_voice(self, audio_bytes: bytes, to_user: str = "",
                    duration_ms: int = 0, fmt: str = "silk") -> bool:
-        """发送语音消息"""
+        """发送语音消息（2026-09-19 起校验业务返回码，见 send_text）"""
         target = to_user or self._last_user_id
         if not target or not self.token or not audio_bytes:
             logger.warning("发送语音失败: 无目标用户或未登录或无音频数据")
@@ -431,11 +490,18 @@ class WeChatConnector:
         try:
             audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
             context_token = self._get_context_token(target)
-            _send_voice_message(
+            resp = _send_voice_message(
                 to=target, audio_data_b64=audio_b64,
                 duration_ms=duration_ms, context_token=context_token,
                 token=self.token, base_url=self.base_url, fmt=fmt,
             )
+            ok, errmsg = _api_ok(resp)
+            if not ok:
+                logger.warning(
+                    "语音发送失败: %s | target=%s context_token=%s",
+                    errmsg, target, "有" if context_token else "空",
+                )
+                return False
             logger.info("语音发送成功: %d bytes, fmt=%s", len(audio_bytes), fmt)
             return True
         except Exception as e:  # noqa: BLE001
@@ -444,7 +510,7 @@ class WeChatConnector:
 
     def send_image(self, image_bytes: bytes, to_user: str = "",
                    image_type: str = "png") -> bool:
-        """发送图片消息"""
+        """发送图片消息（2026-09-19 起校验业务返回码，见 send_text）"""
         target = to_user or self._last_user_id
         if not target or not self.token or not image_bytes:
             logger.warning("发送图片失败: 无目标用户或未登录或无图片数据")
@@ -452,12 +518,19 @@ class WeChatConnector:
         try:
             image_b64 = base64.b64encode(image_bytes).decode("utf-8")
             context_token = self._get_context_token(target)
-            _send_image_message(
+            resp = _send_image_message(
                 to=target, image_data_b64=image_b64,
                 context_token=context_token,
                 token=self.token, base_url=self.base_url,
                 image_type=image_type,
             )
+            ok, errmsg = _api_ok(resp)
+            if not ok:
+                logger.warning(
+                    "图片发送失败: %s | target=%s context_token=%s",
+                    errmsg, target, "有" if context_token else "空",
+                )
+                return False
             logger.info("图片发送成功: %d bytes", len(image_bytes))
             return True
         except Exception as e:  # noqa: BLE001
@@ -465,18 +538,25 @@ class WeChatConnector:
             return False
 
     def send_emoji(self, emoji_md5: str, to_user: str = "") -> bool:
-        """发送表情消息"""
+        """发送表情消息（2026-09-19 起校验业务返回码，见 send_text）"""
         target = to_user or self._last_user_id
         if not target or not self.token or not emoji_md5:
             logger.warning("发表情失败: 无目标用户或未登录或无表情数据")
             return False
         try:
             context_token = self._get_context_token(target)
-            _send_emoji_message(
+            resp = _send_emoji_message(
                 to=target, emoji_md5=emoji_md5,
                 context_token=context_token,
                 token=self.token, base_url=self.base_url,
             )
+            ok, errmsg = _api_ok(resp)
+            if not ok:
+                logger.warning(
+                    "表情发送失败: %s | target=%s context_token=%s",
+                    errmsg, target, "有" if context_token else "空",
+                )
+                return False
             logger.info("表情发送成功: md5=%s", emoji_md5)
             return True
         except Exception as e:  # noqa: BLE001
@@ -722,14 +802,56 @@ class WeChatConnector:
         logger.info("消息轮询结束")
 
     def _get_context_token(self, user_id: str) -> str:
-        """获取用户的 context_token，并清理过期条目"""
+        """获取用户的 context_token；**过期不返回**。
+
+        过期的 token 发出去必然换来 `prepare failed`，不如显式返回空 ——
+        这样失败日志能直接指出「会话窗口已失效，用户需重新发一条消息」。
+        """
         entry = self._context_tokens.get(user_id)
         if entry is None:
             return ""
         if isinstance(entry, dict):
+            ts = float(entry.get("ts", 0) or 0)
+            if ts and (time.time() - ts) > _CONTEXT_TOKENS_TTL:
+                return ""
             return entry.get("token", "")  # type: ignore[no-any-return]
         # 兼容旧格式（直接存储的字符串）
         return str(entry)
+
+    def _load_context_tokens(self) -> None:
+        """从磁盘恢复 context_token（重启后仍可在窗口期内主动发送）。"""
+        try:
+            if not os.path.exists(CONTEXT_TOKENS_PATH):
+                return
+            with open(CONTEXT_TOKENS_PATH, encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return
+            now = time.time()
+            alive = {
+                uid: entry for uid, entry in data.items()
+                if isinstance(entry, dict)
+                and entry.get("token")
+                and (now - float(entry.get("ts", 0) or 0)) <= _CONTEXT_TOKENS_TTL
+            }
+            self._context_tokens = alive
+            logger.info(
+                "已恢复 %d 条 context_token（跳过 %d 条过期/无效）",
+                len(alive), len(data) - len(alive),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("context_token 恢复失败（忽略）: %s", e)
+
+    def _save_context_tokens(self) -> None:
+        """原子落盘 context_token，避免服务重启丢失会话窗口。"""
+        try:
+            Path(CONTEXT_TOKENS_PATH).parent.mkdir(parents=True, exist_ok=True)
+            tmp = CONTEXT_TOKENS_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self._context_tokens, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, CONTEXT_TOKENS_PATH)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("context_token 保存失败（忽略）: %s", e)
 
     def _cleanup_context_tokens(self):
         """清理过期的 context_token 条目，防止内存泄漏"""
@@ -741,6 +863,7 @@ class WeChatConnector:
         for uid in expired:
             del self._context_tokens[uid]
         if expired:
+            self._save_context_tokens()
             logger.debug("Cleaned up %d expired context_tokens entries", len(expired))
 
     def _handle_message(self, raw_msg):
@@ -761,6 +884,8 @@ class WeChatConnector:
         context_token = raw_msg.get("context_token", "")
         if context_token and from_user:
             self._context_tokens[from_user] = {"token": context_token, "ts": time.time()}
+            # 落盘：服务重启后仍可在窗口期内主动发送（见 CONTEXT_TOKENS_PATH 注释）
+            self._save_context_tokens()
         if from_user:
             self._last_user_id = from_user
 
@@ -873,11 +998,21 @@ class WeChatConnector:
 
         try:
             token = self._get_context_token(from_user) or context_token
-            _send_text(
+            resp = _send_text(
                 to=from_user, text=reply,
                 context_token=token,
                 token=self.token, base_url=self.base_url,
             )
+            # 2026-09-19：回复路径同样必须校验业务返回码 —— 旧实现只要不抛异常
+            # 就记 [step=reply_sent]，接口 ret<0（如 prepare failed）时同样会被
+            # 记成"已回复"，与主动消息那条链是同一种谎报。
+            ok, errmsg = _api_ok(resp)
+            if not ok:
+                logger.warning(
+                    "[wx][step=reply_send_failed] msg_id=%s user=%s error=%s",
+                    msg_id, from_user, errmsg,
+                )
+                return
             logger.info(
                 "[wx][step=reply_sent] msg_id=%s user=%s reply=%r",
                 msg_id, from_user, reply[:80],
