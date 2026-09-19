@@ -63,9 +63,76 @@ def test_followup_daily_budget(tmp_path, monkeypatch):
     from wechat_direct import wechat_connector as wc
 
     c = _connector(tmp_path, monkeypatch)
+    cap = wc.read_follow_up_config()["daily_max"]
     assert c._followup_budget_ok("u1@im.wechat")
-    c._followup_daily["u1@im.wechat"] = wc._FOLLOWUP_DAILY_MAX
+    c._followup_daily["u1@im.wechat"] = cap
     assert not c._followup_budget_ok("u1@im.wechat")
+
+
+# ── 配置读取（web 控制端可调）───────────────────────────────
+
+def test_read_follow_up_config_defaults(tmp_path, monkeypatch):
+    from wechat_direct import wechat_connector as wc
+
+    monkeypatch.setattr(wc, "_SCHEDULER_CONFIG_PATH", tmp_path / "nope.json")
+    assert wc.read_follow_up_config() == wc.FOLLOW_UP_DEFAULTS
+
+
+def test_read_follow_up_config_file_override(tmp_path, monkeypatch):
+    from wechat_direct import wechat_connector as wc
+
+    path = tmp_path / "scheduler_config.json"
+    path.write_text(
+        '{"quiet_hours": {"start": 23, "end": 7},'
+        ' "follow_up": {"enabled": false, "delay1_seconds": 120,'
+        ' "delay2_seconds": 300, "daily_max": 3}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(wc, "_SCHEDULER_CONFIG_PATH", path)
+
+    cfg = wc.read_follow_up_config()
+    assert cfg == {
+        "enabled": False, "delay1_seconds": 120, "delay2_seconds": 300, "daily_max": 3,
+    }
+
+
+def test_read_follow_up_config_clamps_bad_values(tmp_path, monkeypatch):
+    """控制端写入非法值不得把行为搞坏（值域守卫）。"""
+    from wechat_direct import wechat_connector as wc
+
+    path = tmp_path / "scheduler_config.json"
+    path.write_text(
+        '{"follow_up": {"delay1_seconds": 99999, "delay2_seconds": 1, "daily_max": 9999}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(wc, "_SCHEDULER_CONFIG_PATH", path)
+
+    cfg = wc.read_follow_up_config()
+    assert cfg["delay1_seconds"] == 3600            # 上界
+    assert cfg["delay2_seconds"] >= cfg["delay1_seconds"]   # 二次不早于首次
+    assert cfg["daily_max"] == 200                  # 上界
+
+
+def test_read_follow_up_config_broken_file_falls_back(tmp_path, monkeypatch):
+    from wechat_direct import wechat_connector as wc
+
+    path = tmp_path / "scheduler_config.json"
+    path.write_text("{ not json", encoding="utf-8")
+    monkeypatch.setattr(wc, "_SCHEDULER_CONFIG_PATH", path)
+    assert wc.read_follow_up_config() == wc.FOLLOW_UP_DEFAULTS
+
+
+def test_disabled_config_blocks_scheduling(tmp_path, monkeypatch):
+    """控制端关掉开关后不得再登记追问。"""
+    from wechat_direct import wechat_connector as wc
+
+    path = tmp_path / "scheduler_config.json"
+    path.write_text('{"follow_up": {"enabled": false}}', encoding="utf-8")
+    monkeypatch.setattr(wc, "_SCHEDULER_CONFIG_PATH", path)
+
+    c = _connector(tmp_path, monkeypatch)
+    c._schedule_followup("u1@im.wechat", "在吗")
+    assert c._pending_followups == {}
 
 
 def test_followup_budget_resets_next_day(tmp_path, monkeypatch):
@@ -96,14 +163,11 @@ def test_send_followup_sends_and_schedules_second_round(tmp_path, monkeypatch):
 
 
 def test_send_followup_stops_after_last_round(tmp_path, monkeypatch):
-    from wechat_direct import wechat_connector as wc
-
     c = _connector(tmp_path, monkeypatch)
     monkeypatch.setattr(c, "_generate_followup", lambda prompt: "最后一轮")
     monkeypatch.setattr(c, "send_text", lambda text, to_user="": True)
 
-    last = len(wc._FOLLOWUP_DELAYS) - 1
-    c._send_followup("u1@im.wechat", {"step": last, "due": 0, "last_reply": "x"})
+    c._send_followup("u1@im.wechat", {"step": 1, "due": 0, "last_reply": "x"})  # 已是第 2 次
     assert c._pending_followups == {}          # 不再续排，避免无限骚扰
 
 
@@ -121,7 +185,7 @@ def test_send_followup_respects_budget(tmp_path, monkeypatch):
     from wechat_direct import wechat_connector as wc
 
     c = _connector(tmp_path, monkeypatch)
-    c._followup_daily["u1@im.wechat"] = wc._FOLLOWUP_DAILY_MAX
+    c._followup_daily["u1@im.wechat"] = wc.read_follow_up_config()["daily_max"]
     c._followup_daily_date = time.strftime("%Y-%m-%d")
     monkeypatch.setattr(c, "_generate_followup", lambda prompt: "还在吗")
     monkeypatch.setattr(c, "send_text", lambda text, to_user="": pytest.fail("超预算不应发送"))

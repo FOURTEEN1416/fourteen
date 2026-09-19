@@ -151,14 +151,50 @@ CONTEXT_TOKENS_PATH = str(
 #  回复成功后登记，到点对方仍未接话 → 用刚才的上下文再补一句。
 # ═══════════════════════════════════════════════════════════════
 
-# 追问延迟序列（秒）：第 1 次 45s，第 2 次 150s。之后不再追（避免骚扰）。
-_FOLLOWUP_DELAYS: tuple[float, ...] = (45.0, 150.0)
+# 追问延迟序列的**默认值**（web 控制端可改；写入 data/scheduler_config.json 的
+# follow_up 块，与免打扰时段同一份跨 worker 真源）。
+# 值域守卫见 read_follow_up_config()，避免控制端写入非法值把行为搞坏。
+FOLLOW_UP_DEFAULTS: dict[str, Any] = {
+    "enabled": True,
+    "delay1_seconds": 45,
+    "delay2_seconds": 150,
+    "daily_max": 12,
+}
 # 扫描间隔（秒）
 _FOLLOWUP_TICK = 5.0
-# 单用户每日追问上限（独立预算，不吃 ASE 的 8 条配额）
-_FOLLOWUP_DAILY_MAX = 12
 # 追问文本长度上限
 _FOLLOWUP_MAX_CHARS = 40
+# 追问配置所在文件（与 scheduler 的 _CONFIG_PATH 同一份真源）
+_SCHEDULER_CONFIG_PATH = (
+    Path(__file__).resolve().parent.parent / "data" / "scheduler_config.json"
+)
+
+
+def read_follow_up_config() -> dict[str, Any]:
+    """读取「对话内追问」配置：文件值覆盖默认值，并做值域守卫。
+
+    真源 = `data/scheduler_config.json` 的 `follow_up` 块（web 控制端写入、
+    所有 uvicorn worker 共读，与 quiet_hours 同一机制）。
+    文件缺失/损坏/字段非法一律回落默认值 —— 配置问题不该让功能失效或失控。
+    """
+    cfg = dict(FOLLOW_UP_DEFAULTS)
+    try:
+        if _SCHEDULER_CONFIG_PATH.exists():
+            raw = json.loads(_SCHEDULER_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+            fu = raw.get("follow_up") or {}
+            for key in cfg:
+                if fu.get(key) is not None:
+                    cfg[key] = fu[key]
+    except Exception:  # noqa: BLE001
+        pass
+    with suppress(Exception):
+        cfg["enabled"] = bool(cfg["enabled"])
+        cfg["delay1_seconds"] = max(5, min(3600, int(cfg["delay1_seconds"])))
+        cfg["delay2_seconds"] = max(5, min(7200, int(cfg["delay2_seconds"])))
+        if cfg["delay2_seconds"] < cfg["delay1_seconds"]:
+            cfg["delay2_seconds"] = cfg["delay1_seconds"]
+        cfg["daily_max"] = max(0, min(200, int(cfg["daily_max"])))
+    return cfg
 
 
 def _load_credentials(path=None):
@@ -904,15 +940,18 @@ class WeChatConnector:
     # ── 对话内追问（见文件头说明）─────────────────────────────
 
     def _schedule_followup(self, user_id: str, bot_reply: str) -> None:
-        """回复成功后登记一次待发追问。"""
+        """回复成功后登记一次待发追问（参数取自 web 控制端可调的配置）。"""
         if not user_id or not bot_reply:
+            return
+        cfg = read_follow_up_config()
+        if not cfg["enabled"]:
             return
         with self._followup_lock:
             if self._in_quiet_hours():
                 return
             self._pending_followups[user_id] = {
                 "step": 0,
-                "due": time.time() + _FOLLOWUP_DELAYS[0],
+                "due": time.time() + float(cfg["delay1_seconds"]),
                 "last_reply": bot_reply,
             }
 
@@ -937,12 +976,12 @@ class WeChatConnector:
         return (start <= hour < end) if start < end else (hour >= start or hour < end)
 
     def _followup_budget_ok(self, user_id: str) -> bool:
-        """单用户每日追问上限（独立预算，不吃 ASE 的 8 条）。"""
+        """单用户每日追问上限（web 可调；独立预算，不吃 ASE 的 8 条）。"""
         today = time.strftime("%Y-%m-%d")
         if today != self._followup_daily_date:
             self._followup_daily_date = today
             self._followup_daily.clear()
-        return self._followup_daily.get(user_id, 0) < _FOLLOWUP_DAILY_MAX
+        return self._followup_daily.get(user_id, 0) < int(read_follow_up_config()["daily_max"])
 
     def _followup_thread(self) -> None:
         """守护线程：到点且用户仍未接话 → 生成并发送一条追问。"""
@@ -962,6 +1001,9 @@ class WeChatConnector:
                     logger.warning("[wx][step=followup_error] user=%s error=%s", uid, e)
 
     def _send_followup(self, user_id: str, st: dict[str, Any]) -> None:
+        cfg = read_follow_up_config()
+        if not cfg["enabled"]:
+            return
         if self._in_quiet_hours() or not self._followup_budget_ok(user_id):
             return
         if not user_id or not self.token:
@@ -987,13 +1029,14 @@ class WeChatConnector:
         logger.info(
             "[wx][step=followup_sent] user=%s step=%d text=%r", user_id, step, text[:60],
         )
-        # 还有下一轮延迟且用户仍未接话 → 继续排
-        if step < len(_FOLLOWUP_DELAYS):
+        # 第二轮（delay2）之后不再追 —— 追问上限固定为 2 次，避免无限骚扰；
+        # 每日总量由 daily_max 兜底。
+        if step < 2:
             with self._followup_lock:
                 if user_id not in self._pending_followups:
                     self._pending_followups[user_id] = {
                         "step": step,
-                        "due": time.time() + _FOLLOWUP_DELAYS[step],
+                        "due": time.time() + float(cfg["delay2_seconds"]),
                         "last_reply": text,
                     }
 

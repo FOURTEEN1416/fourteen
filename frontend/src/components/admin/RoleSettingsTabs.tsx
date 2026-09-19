@@ -445,6 +445,11 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
   const [cooldown, setCooldown] = useState(15)
   const [quietStart, setQuietStart] = useState(23)
   const [quietEnd, setQuietEnd] = useState(7)
+  // 对话内追问：回复后对方没接话时自动再补一句（2026-09-19 新增，可调）
+  const [fuEnabled, setFuEnabled] = useState(true)
+  const [fuDelay1, setFuDelay1] = useState(45)
+  const [fuDelay2, setFuDelay2] = useState(150)
+  const [fuDailyMax, setFuDailyMax] = useState(12)
   const [paused, setPaused] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState('')
@@ -469,6 +474,10 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
           setCooldown(cfgRes.data.cooldown_after_reply_minutes ?? 15)
           setQuietStart(cfgRes.data.quiet_hours_start ?? 23)
           setQuietEnd(cfgRes.data.quiet_hours_end ?? 7)
+          setFuEnabled(cfgRes.data.follow_up?.enabled ?? true)
+          setFuDelay1(cfgRes.data.follow_up?.delay1_seconds ?? 45)
+          setFuDelay2(cfgRes.data.follow_up?.delay2_seconds ?? 150)
+          setFuDailyMax(cfgRes.data.follow_up?.daily_max ?? 12)
           setPaused(!!cfgRes.data.paused)
         }
         if (histRes?.data?.history) setHistory(histRes.data.history)
@@ -484,6 +493,10 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
         threshold, max_daily: dailyLimit,
         min_interval_minutes: minInterval, cooldown_after_reply_minutes: cooldown,
         quiet_hours_start: quietStart, quiet_hours_end: quietEnd,
+        follow_up_enabled: fuEnabled,
+        follow_up_delay1_seconds: fuDelay1,
+        follow_up_delay2_seconds: fuDelay2,
+        follow_up_daily_max: fuDailyMax,
       })
       setSavedAt(new Date().toLocaleTimeString('zh-CN'))
     } catch (e) {
@@ -572,6 +585,29 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
               <span className="w-16 text-right text-xs font-mono text-gray-400">{s.value} {s.unit}</span>
             </div>
           ))}
+          {/* 对话内追问：回复后对方没接话，自动再补一句（最多 2 次） */}
+          <div className="pt-3 mt-1 border-t border-gray-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs text-gray-600">对话内追问</div>
+                <div className="text-[11px] text-gray-400">回复后对方没接话时自动再补一句（最多 2 次）</div>
+              </div>
+              <Toggle checked={fuEnabled} onChange={setFuEnabled} />
+            </div>
+          </div>
+          <div className={`space-y-4 ${fuEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
+            {[
+              { label: '首次延迟', value: fuDelay1, min: 10, max: 600, unit: '秒', onChange: setFuDelay1 },
+              { label: '二次延迟', value: fuDelay2, min: 10, max: 1200, unit: '秒', onChange: setFuDelay2 },
+              { label: '追问上限', value: fuDailyMax, min: 0, max: 50, unit: '条/天', onChange: setFuDailyMax },
+            ].map(s => (
+              <div key={s.label} className="flex items-center gap-4">
+                <div className="w-24 shrink-0"><span className="text-xs text-gray-600">{s.label}</span></div>
+                <div className="flex-1"><Slider value={s.value} min={s.min} max={s.max} step={1} label={s.label} onChange={s.onChange} /></div>
+                <span className="w-16 text-right text-xs font-mono text-gray-400">{s.value} {s.unit}</span>
+              </div>
+            ))}
+          </div>
           <button
             onClick={handleSave}
             disabled={saving}

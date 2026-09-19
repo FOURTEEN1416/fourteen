@@ -169,6 +169,15 @@ export interface ProactiveConfig {
   max_daily: number
   min_interval_minutes: number
   cooldown_after_reply_minutes: number
+  quiet_hours_start?: number
+  quiet_hours_end?: number
+  /** 对话内追问参数（web 控制端可调） */
+  follow_up?: {
+    enabled: boolean
+    delay1_seconds: number
+    delay2_seconds: number
+    daily_max: number
+  }
 }
 
 export interface ProactiveEngineState {

@@ -320,11 +320,19 @@ class ProactiveScheduler:
         quiet_hours: tuple[int, int] | None = None,
         vault_enabled: bool | None = None,
         vault_interval: int | None = None,
+        follow_up: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """非 master worker 的 POST 端点直接写文件；master 下个 tick 重载生效。"""
+        """非 master worker 的 POST 端点直接写文件；master 下个 tick 重载生效。
+
+        follow_up：对话内追问参数（enabled / delay1_seconds / delay2_seconds /
+        daily_max），由 wechat_direct 读取执行 —— 与 quiet_hours 同一份跨 worker 真源，
+        因此在 web 控制端改完即时对所有 worker 生效（连接器每次操作都读文件）。
+        """
         data = cls._read_config_file()
         if quiet_hours is not None:
             data["quiet_hours"] = {"start": int(quiet_hours[0]), "end": int(quiet_hours[1])}
+        if follow_up is not None:
+            data["follow_up"] = dict(follow_up)
         vault = data.get("vault") or {}
         if vault_enabled is not None:
             vault["enabled"] = bool(vault_enabled)

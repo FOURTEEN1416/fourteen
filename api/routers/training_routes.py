@@ -191,6 +191,10 @@ async def get_proactive_config(_auth: bool = Security(verify_api_key_dep)):
         start, end = _file_quiet_hours()
     config["quiet_hours_start"] = start
     config["quiet_hours_end"] = end
+    # 对话内追问参数（web 控制端可调；真源 data/scheduler_config.json 的 follow_up 块）
+    from wechat_direct.wechat_connector import read_follow_up_config
+
+    config["follow_up"] = read_follow_up_config()
     return config
 
 
@@ -227,6 +231,33 @@ async def update_proactive_config(
             scheduler.set_quiet_hours(new_start, new_end)
         else:
             ProactiveScheduler.write_config_file(quiet_hours=(new_start, new_end))
+
+    # 对话内追问参数（web 可调，2026-09-19）：连接器每次操作都读该文件，
+    # 因此写入即对所有 worker 生效，无需广播/重启。
+    if any(
+        v is not None
+        for v in (
+            req.follow_up_enabled,
+            req.follow_up_delay1_seconds,
+            req.follow_up_delay2_seconds,
+            req.follow_up_daily_max,
+        )
+    ):
+        from proactive.scheduler import ProactiveScheduler
+        from wechat_direct.wechat_connector import read_follow_up_config
+
+        fu = read_follow_up_config()
+        if req.follow_up_enabled is not None:
+            fu["enabled"] = bool(req.follow_up_enabled)
+        if req.follow_up_delay1_seconds is not None:
+            fu["delay1_seconds"] = int(req.follow_up_delay1_seconds)
+        if req.follow_up_delay2_seconds is not None:
+            fu["delay2_seconds"] = int(req.follow_up_delay2_seconds)
+        if req.follow_up_daily_max is not None:
+            fu["daily_max"] = int(req.follow_up_daily_max)
+        ProactiveScheduler.write_config_file(follow_up=fu)
+        logger.info("对话内追问配置已更新: %s", fu)
+
     logger.info(
         "Proactive config updated: threshold=%s max_daily=%s",
         ase._urgency_threshold, ase.get_runtime_config()["max_daily_messages"],
