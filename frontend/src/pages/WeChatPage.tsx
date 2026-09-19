@@ -439,6 +439,55 @@ export default function WeChatPage() {
 
           {/* Live Status */}
           <LiveStatusBanner />
+
+          {/* 2026-09-19 审美批次：接入页信息量小，用双列说明卡填充构图，
+              替代「一条状态栏 + 整页空白」的失衡布局 */}
+          <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="glass-card rounded-xl p-5">
+              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <span className="section-bar" />
+                连接后怎么用
+              </h3>
+              <ol className="mt-3 space-y-3">
+                {[
+                  ['扫码登录', '点击右上「扫码连接」，用微信扫码确认登录'],
+                  ['好友发消息', '你的微信好友直接给这个微信号发消息即可'],
+                  ['角色回应', '「唯一的你」按当前绑定的角色人设自动回复，支持文字与语音'],
+                ].map(([title, desc], i) => (
+                  <li key={title} className="flex items-start gap-3">
+                    <span className="shrink-0 w-5 h-5 rounded-full bg-macaron-blue-light text-macaron-blue-deep text-[10px] font-bold flex items-center justify-center mt-0.5">
+                      {i + 1}
+                    </span>
+                    <div>
+                      <p className="text-xs font-medium text-gray-700">{title}</p>
+                      <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{desc}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+            <div className="glass-card rounded-xl p-5">
+              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <span className="section-bar" />
+                连接机制
+              </h3>
+              <ul className="mt-3 space-y-3">
+                {[
+                  ['断线自动重连', '登录态失效或网络波动时系统自动尝试恢复，无需手动操作'],
+                  ['多用户独立', '每个给你发消息的微信好友拥有独立的角色、记忆与亲密度，互不串扰'],
+                  ['状态实时同步', '本页通过实时推送展示桥接状态；「最后活动」为最近一次收发消息的时间'],
+                ].map(([title, desc]) => (
+                  <li key={title} className="flex items-start gap-3">
+                    <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-macaron-mint-deep/60 mt-1.5" />
+                    <div>
+                      <p className="text-xs font-medium text-gray-700">{title}</p>
+                      <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{desc}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
         </div>
       </div>
 
