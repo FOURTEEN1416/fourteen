@@ -7,6 +7,21 @@
 
 ---
 
+## 2026-09-19（补）— 复核收口：JWT-only + 前端批次并入部署 + CI 修复 + 残留清理
+
+**任务**：用户要求四项遗留一次性处理：①前端 bundle 不含 API Key；②另一窗口前端完善带上服务器重建部署；③双通道门禁；④清部署残留；并修 GitHub CI。
+
+**动作**：
+1. `verify_api_key_dep`：有效 Bearer JWT 优先放行 → 控制台仅需登录 JWT；API Key 留给机器/E2E。前端 **不**再注入 `VITE_API_KEY`，生产 dist 实测 **无 API Key 明文**。
+2. origin/main 已含另一窗口 `36db310` 前端九项修复；与本批 `7413574` 一并 pull + `remote_deploy` 全量重建（含 persona/StatusCenter/RoleSettings 等）。
+3. CI：`test_scene_date_marked_only_after_commit` 时区 flake（hour=23 时 morning 区间 (23,0) 被 night 抢跑）→ 固定 hour=8；StatusCenter 测试 mock stages API。
+4. 双通道代码门禁：`tests/test_wechat_dual_channel_gate.py`（两用户 connector/状态/会话键隔离）。
+5. 服务器残留：删除 `frontend/dist.rollback-20260919-1847`、`.env.bak-pre-apikey-202609192248`。
+
+**验证**：本地 backend 相关 **173 passed** + FE **98/98** + tsc 0；生产 health production/active；未登录 channel/status/qrcode **401**；`api_key_literal_in_dist=False`；`wechat_channel_sessions`：admin connected + 测试用户 waiting_qr（互不覆盖）。
+
+---
+
 ## 2026-09-19 — 每人独立微信通道：收编 + A 档三端闭环 + 生产隔离实证
 
 **任务**：用户报「他人注册后未扫自己的微信却显示已连接，且连的是管理员通道」；裁决改为每人独立通道（一人两条 / 好友自选角色 / 上限 100 / 遗留凭证迁 admin），并要求执行收编与部署。
