@@ -101,7 +101,7 @@ describe('SettingsLLM', () => {
         <SettingsLLM />
       </MemoryRouter>,
     )
-    expect(screen.getByText('加载配置中...')).toBeDefined()
+    expect(screen.getByRole('status')).toBeDefined()
   })
 
   it('populates form fields from config API response', async () => {

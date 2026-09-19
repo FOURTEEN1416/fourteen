@@ -84,17 +84,16 @@ export default function ToolsDashboard() {
   const allHealthy = totalCount > 0 && onlineCount === totalCount
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      <div>
-        <h2 className="text-lg font-semibold text-gray-700">工具仪表盘</h2>
-        <p className="mt-0.5 text-xs text-gray-400">
-          查看内置工具的真实运行状态与可用性
-        </p>
-      </div>
+    <div className="space-y-6">
+      <p className="text-xs text-gray-400">
+        查看内置工具的真实运行状态与可用性
+      </p>
 
       {loading ? (
-        <div className="flex items-center justify-center py-12" role="status" aria-label="加载中">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="status" aria-label="加载中">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-[4.25rem] rounded-lg animate-pulse bg-white/40" />
+          ))}
         </div>
       ) : (
         <section>
@@ -111,7 +110,7 @@ export default function ToolsDashboard() {
               {onlineCount}/{totalCount} 可用
             </span>
           </h3>
-          <div className="rounded-xl border border-gray-200 bg-white/60 p-4 space-y-2">
+          <div className="rounded-xl border border-gray-200 bg-white/60 p-4 grid grid-cols-1 sm:grid-cols-2 gap-2 content-start">
             {toolNames.map((name) => {
               const enabled = tools[name] ?? false
               const toolHealth = health[name]

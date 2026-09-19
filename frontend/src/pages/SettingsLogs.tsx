@@ -108,10 +108,7 @@ function SettingsLogs() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold text-gray-700 mb-4">日志</h2>
-        <p className="text-xs text-gray-400 mb-2">查看系统运行日志、调试信息与错误记录</p>
-      </div>
+      <p className="text-xs text-gray-400">查看系统运行日志、调试信息与错误记录</p>
 
       <div className="glass-card rounded-xl p-4 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">

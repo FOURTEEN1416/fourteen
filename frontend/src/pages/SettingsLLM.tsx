@@ -141,15 +141,23 @@ function SettingsLLM() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[200px]">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
-        <span className="ml-2 text-sm text-gray-400">加载配置中...</span>
+      <div className="space-y-6" role="status" aria-label="加载配置中">
+        {['模型供应商', '生成参数', 'LLM 缓存'].map(title => (
+          <section key={title}>
+            <h3 className="mb-3 text-sm font-semibold text-gray-400">{title}</h3>
+            <div className="glass-card rounded-xl p-4 space-y-4">
+              <div className="h-4 w-1/3 rounded animate-pulse bg-white/50" />
+              <div className="h-9 w-full rounded-lg animate-pulse bg-white/40" />
+              <div className="h-4 w-1/2 rounded animate-pulse bg-white/40" />
+            </div>
+          </section>
+        ))}
       </div>
     )
   }
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6">
       {/* 配置来源指示 */}
       <div className="text-xs text-gray-400">
         {isAdmin
@@ -171,6 +179,8 @@ function SettingsLLM() {
         </div>
       )}
 
+      {/* 2026-09-19 审美批次：宽屏双列栅格，消除左贴窄列 + 右半全空 */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
       {/* 供应商选择 */}
       <section>
         <div className="flex items-center justify-between mb-3">
@@ -368,6 +378,7 @@ function SettingsLLM() {
           </div>
         </div>
       </section>
+      </div>
 
       <div className="flex justify-end pt-4">
         <button
