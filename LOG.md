@@ -1667,3 +1667,23 @@
 **清理**：一次性验证账号（user 1502，users/user_sessions/consent_records 共 5 行）DB 已清除；临时脚本 `_tmp_chunk_audit.py`、vite.config 临时日志已删；本地 dev 后端与 preview 进程已停；`/tmp` 注册载荷已删。
 
 **已知限制**：状态中心宽屏「左侧留白」为布局特性（内容列居中 max-w），不在本批范围，已登记 `docs/P1_BACKLOG.md` [FE-0001] 待下轮迭代；Lighthouse 本机仍 NO_FCP 不可用，性能结论以 CDP+真机网络清单为准。
+
+---
+
+## 2026-09-19（七十一）— 前端审美升级 + 移动端优化（11 项构图/移动问题全修，逐页定制方案）
+
+**任务**：用户指令「部分页面构图不协调、不专业，从审美角度升级前端，并进一步优化移动端适配」。先真机走查取证（Playwright 16 路由 × 桌面 1440 / 宽屏 1920 / 移动 390×844 共 36 张实拍），归纳 11 项问题清单；用户三项裁决：**布局总方向=逐页定制**（否决统一宽栅格）、**范围=全面修复**、**角色卡 persona 长文本=截断+悬浮全文**。防漂移契约：统一壳（同容器/边距）+ 逐页构图。
+
+### 逐项修复
+
+- **统一壳与标题去重**：`SystemSettingsLayout` 删页级重复 h1，Outlet 容器统一 `px-4 py-6 sm:px-6 lg:px-8 + max-w-6xl`；`Breadcrumb` 组名规则收敛（/wechat、/roles、/psych 不再面包屑/页内双标题）。
+- **角色卡（FE 构图核心）**：`RolesPage` 卡等高 `h-full`；`core_anchors` 长文本（实测整段人格描述被当标签渲染，黄/绿色块撑爆卡片）显示层截断 14 字 + `title` 悬浮全文；活跃卡底部 `mt-auto`「正在陪伴你」状态条，非活跃按钮同基线对齐。
+- **状态中心（FE-0001 结案）**：双列栅格 `lg:grid-cols-[minmax(0,1fr)_400px]`——左列统计/情感洞察/成就，右列记忆体系固定 400px；1920 宽屏实拍留白收敛。
+- **空页补实**：`WeChatPage` 补「连接后怎么用」三步 +「连接机制」三条（全部真实产品事实，无杜撰数据）；`/psych` 由游离的独立 AuthGuard 路由并入 `ProtectedLayout`，获得侧栏+面包屑+合规提示+空态引导。
+- **设置页构图**：`SettingsLLM` 去 max-w-2xl 悬空窄列，改全宽 + `xl:grid-cols-2` 分区；加载态由居中 spinner 升级为分区块骨架屏（测试断言同步改 `getByRole('status')`）；`ToolsDashboard` 删重复 h2、工具行改双列网格 + 6 块骨架屏；`SettingsLogs` 删重复标题。
+- **创建角色页**：方法选择器由整块渐变填充改中性分段控件（白底浮起选中态 + 渐变小圆点，与角色设置 tab 同语言）；「创建角色」按钮由全宽大条改右对齐紧凑主按钮；移动端聊天区/预览卡固定大高度收敛（`min-h` 仅 lg 生效，实测 390 视口面板 373px，修复前 ~560px 空白）。
+- **移动端细节**：`AdminUsersPage`「创建用户」按钮 `self-start`（flex-col 拉伸致全宽橙条）；`MobileDrawer` 美化——头部品牌头像 + 底部用户 chip（邮箱首字母头像 + 「微信已/未连接」状态行）。
+
+**验证**：`tsc --noEmit` 0 错误；vitest **87/87**（15 文件）；`vite build` 通过；修复后全量重拍 37 张，13 组关键 before/after 对比归档 `docs/verification/2026-09-19-前端审美与移动端优化/`（含 README 逐项对照表）。
+**清理**：审计账号（user 1502，users/user_sessions/consent_records）DB 行已删；临时脚本 `frontend/tmp-audit-shots.mjs`/`tmp-retake.mjs`/`tmp-diag*.mjs` 已删；`docs/tmp-fe-audit-0919{,-after}/` 已移除；后台 uvicorn/vite 进程已停。
+**已知限制**：① 新账号无情感/成就数据时状态中心左列偏空——`EmotionInsightCard`/`AchievementsCard` 数据为空按设计返回 null，属数据态非布局缺陷；② fullPage 截图对视口自适应页有拉伸伪影，移动端口径以真机视口实测为准；③ 逐页定制与统一壳的边界只覆盖本轮 11 项涉及页面，其余页未动。
