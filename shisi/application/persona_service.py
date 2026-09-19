@@ -101,7 +101,11 @@ class PersonaService:
         if world_info:
             injection_parts.append(f"# 世界与时间\n{world_info}")
 
-        if rag_context:
+        if rag_context and "# 角色知识库" not in base_prompt:
+            # 知识注入唯一 owner 是 prompt_builder（CharacterKnowledgeService 全量路径）。
+            # rag_context 与其同源（ShisiKnowledgeAdapter 包同一服务），正常路径下
+            # base_prompt 已含「# 角色知识库」→ 不再重复注入（2026-09-20 行业对齐去重，
+            # 旧实现同一知识出现两次且第二份是 JSON dump）。仅在 base 未注入成功时兜底。
             injection_parts.append(f"# 角色知识库\n{rag_context}")
 
         emotion_layer = self._safe_engine_layer(

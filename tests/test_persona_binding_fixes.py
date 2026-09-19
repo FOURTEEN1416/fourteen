@@ -49,11 +49,13 @@ def test_optional_user_id_none_with_garbage_token():
 
 
 # ═══════════════════════════════════════════════════════════════
-#  2. 长锚点截断保留
+#  2. 人设片段精简：不重复注入角色定义（2026-09-20 行业对齐）
 # ═══════════════════════════════════════════════════════════════
 
 def test_long_anchor_truncated_not_dropped(tmp_path, monkeypatch):
-    """>20 字锚点应截断保留进人设片段，而非被过滤丢弃。"""
+    """人设片段只做身份绑定：锚点等完整内容由 prompt_builder 全量注入一次，
+    片段内不得出现截断重复版（旧行为：>20 字锚点截断到 60 字重复注入，
+    与上方全文并存且可能矛盾——SillyTavern 惯例是角色定义只注入一次）。"""
     from orchestrator.optimized_orchestrator import OptimizedOrchestrator
 
     long_anchor = "温柔安静，表面看起来有点冷淡其实内心很细腻。不太善于社交，在熟人面前才会放松。很细心，会注意到别人忽略的细节。"
@@ -75,14 +77,15 @@ def test_long_anchor_truncated_not_dropped(tmp_path, monkeypatch):
     OptimizedOrchestrator._character_persona_cache.clear()
 
     segment = OptimizedOrchestrator._load_character_persona_segment("testcid")
-    assert "核心锚点" in segment
-    # 中长锚点（≤60 字）完整保留（旧实现 >20 字就整条丢弃）
-    assert long_anchor in segment
-    # 超长锚点（>60 字）截断保留头部 + 省略号，不丢弃
-    assert huge_anchor not in segment
-    assert huge_anchor[:60] in segment
-    # 短锚点原样保留
-    assert "手写书信" in segment
+    assert "=== 角色卡人设 ===" in segment
+    assert "测试角色" in segment
+    # 身份绑定声明必须指向完整注入处
+    assert "已在本提示词上方逐节完整注入" in segment
+    # 锚点（任何长度）不得在片段内重复——上方 persona 段已有全文
+    assert long_anchor not in segment
+    assert huge_anchor[:60] not in segment
+    assert "手写书信" not in segment
+    assert "核心锚点" not in segment
     OptimizedOrchestrator._character_persona_cache.clear()
 
 

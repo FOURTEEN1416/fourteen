@@ -56,7 +56,12 @@ def test_character_description_is_present_and_clean(path: Path) -> None:
 
 
 def test_load_character_persona_segment_extracts_nested_data() -> None:
-    """_load_character_persona_segment 应能正确提取嵌套 SillyTavern 格式中的人设。"""
+    """_load_character_persona_segment 应能正确提取嵌套 SillyTavern 格式中的人设。
+
+    2026-09-20 行业对齐精简：片段只承载「身份绑定」（角色名/口头禅/开场白 +
+    指向上方完整注入的声明）；完整设定由 prompt_builder 以全量字段注入，
+    不再在此重复截断版 description/creator_notes/锚点（角色定义只注入一次）。
+    """
     # 使用已知的嵌套格式角色文件
     paths = [p for p in _all_character_files() if "persona_林挽夏" in p.name]
     if not paths:
@@ -70,8 +75,9 @@ def test_load_character_persona_segment_extracts_nested_data() -> None:
 
     assert "=== 角色卡人设 ===" in segment
     assert normalized["name"] in segment
-    assert normalized["description"][:30] in segment
-    assert "场景设定" in segment
+    assert "已在本提示词上方逐节完整注入" in segment
+    # 精简后不得再出现截断重复内容
+    assert normalized["description"][:30] not in segment
 
 
 def test_load_character_persona_segment_no_default() -> None:
@@ -163,3 +169,64 @@ def test_prompt_builder_includes_knowledge_context() -> None:
     prompt = ps.build_system_prompt(character_id=character_id, user_message="她叫什么名字")
     assert character.name in prompt
     assert "角色知识库" in prompt or "知识" in prompt
+
+
+class TestSystemPromptStructure:
+    """行业对齐的 system prompt 结构回归（2026-09-20）。
+
+    依据：SillyTavern 默认序列与 chara-card-spec-v2 —— 历史之后的指令
+    （post_history_instructions）对生成的约束力远高于历史之前；
+    mes_example（对话示例）注入位置在对话历史之前。
+    """
+
+    @staticmethod
+    def _aggregate(**kw) -> object:
+        from shisi.core.models.character_aggregate import CharacterAggregate
+
+        defaults: dict = dict(
+            id="struct01",
+            name="测试角色",
+            description="她是测试角色。",
+            personality_text="她温柔坚韧。",
+            scenario="夏日傍晚的小巷。",
+            creator_notes="【输出限制】每次回复不超过三句。",
+            source_data={"mes_example": "<START>\n用户：你好\n测试角色：嗯。"},
+        )
+        defaults.update(kw)
+        return CharacterAggregate(**defaults)
+
+    def test_creator_notes_after_history(self):
+        """扮演规则必须出现在对话历史之后（post-history 位置）。"""
+        prompt = self._aggregate().build_system_prompt(
+            user_message="在吗", chat_history="用户：早\n测试角色：早。",
+        )
+        assert prompt.index("# 对话历史") < prompt.index("# 扮演规则")
+        assert prompt.index("# 扮演规则") < prompt.index("用户: 在吗")
+
+    def test_dialogue_examples_before_history(self):
+        """mes_example 注入为对话示例段，位于对话历史之前。"""
+        prompt = self._aggregate().build_system_prompt(
+            user_message="在吗", chat_history="用户：早\n测试角色：早。",
+        )
+        assert "# 对话示例" in prompt
+        assert prompt.index("# 对话示例") < prompt.index("# 对话历史")
+        assert "仅示范语气与格式" in prompt
+        assert "用户：你好" in prompt
+
+    def test_scenario_guarded_when_present(self):
+        """scenario 存在时（导入卡）必须带开场氛围守卫，防永久锚定。"""
+        prompt = self._aggregate().build_system_prompt(user_message="嗨")
+        assert "开场情境" in prompt
+        assert "不代表当前正在发生" in prompt
+        assert "# 场景\n" not in prompt
+
+    def test_no_scenario_section_when_absent(self):
+        """卡无 scenario（现役 41 卡状态）时不渲染场景相关段落。"""
+        prompt = self._aggregate(scenario="").build_system_prompt(user_message="嗨")
+        assert "开场情境" not in prompt
+        assert "# 场景" not in prompt
+
+    def test_dialogue_examples_empty_when_no_mes(self):
+        """无 mes_example 时不渲染对话示例段。"""
+        prompt = self._aggregate(source_data={}).build_system_prompt(user_message="嗨")
+        assert "# 对话示例" not in prompt

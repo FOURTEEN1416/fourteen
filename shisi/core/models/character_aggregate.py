@@ -126,9 +126,13 @@ class CharacterAggregate(BaseModel):
         knowledge_context: str = "",
         storyline_context: str = "",
     ) -> str:
-        # 注入顺序对齐 SillyTavern 标准（Name → Description → Personality → Scenario）：
-        # 官方文档明确这四个是「永久注入」字段，而本项目此前只注入了前两个，
-        # 导致角色拿到的"人设"仅有名字 + 一段描述 + 一组默认数值。
+        # 注入顺序对齐行业惯例（SillyTavern 默认序列 + chara-card-spec-v2）：
+        #   角色定义（Name/Description/Personality/Scenario）→ 人设数值 → 状态
+        #   → 知识库（世界信息位）→ 对话示例（dialogueExamples 位，历史之前）
+        #   → 对话历史 → 扮演规则（post_history_instructions 位，历史之后）。
+        # 「历史之后的指令权重远高于历史之前」是 SillyTavern 文档与
+        # chara-card-spec-v2（post_history_instructions 条目）共同明确的结论；
+        # creator_notes 承载硬性扮演规则，因此放到历史之后以获得最高约束力。
         parts = [
             f"# 角色设定\n\n你是{self.name}。",
             self.description,
@@ -138,7 +142,17 @@ class CharacterAggregate(BaseModel):
             parts.extend(["", "# 性格", self.personality_text])
 
         if self.scenario:
-            parts.extend(["", "# 场景", self.scenario])
+            # ⚠️ scenario 是**开场情境**，不是「当前正在发生的事」（2026-09-19 生产实证：
+            # 卡 62105bca 的开场把角色永久锚定在「用户在路上」）。本项目自 2026-09-20 起
+            # 角色卡不再携带 scenario，本段仅为兼容导入的 SillyTavern 卡保留；
+            # 保留时必须带「仅开场氛围」守卫，防止永久锚定。
+            parts.extend([
+                "",
+                "# 开场情境（仅用于开场氛围，不代表当前正在发生）",
+                self.scenario,
+                "⚠️ 只依据用户实际说过的内容推进对话，用户没提过的事一律不得当作事实提及；"
+                "用户否认某情境时立即放弃该情境。",
+            ])
 
         parts.extend([
             "",
@@ -150,25 +164,43 @@ class CharacterAggregate(BaseModel):
             f"- 关系: {self.emotional_state.affinity_level.display_name}",
         ])
 
-        # creator_notes 是创作者写的硬性扮演规则（语气基调 / 固定口头禅 /
-        # OOC 禁忌 / 输出格式），对"贴合度"的约束力最强 —— 单独成节、
-        # 显式要求严格遵守，避免被后续内容稀释。
-        if self.creator_notes:
-            parts.extend(["", "# 扮演规则（必须严格遵守）", self.creator_notes])
-
         if knowledge_context:
             parts.extend(["", "# 角色知识库", knowledge_context])
 
         if storyline_context:
             parts.extend(["", "# 剧情线", storyline_context])
 
+        # 对话示例（SillyTavern dialogueExamples 位：历史之前做 few-shot，
+        # 示范语气与格式；来自卡的 mes_example 字段）
+        dialogue_examples = self._format_dialogue_examples()
+        if dialogue_examples:
+            parts.extend([
+                "",
+                "# 对话示例（仅示范语气与格式，不要照抄示例内容）",
+                dialogue_examples,
+            ])
+
         if chat_history:
             parts.extend(["", "# 对话历史", chat_history])
+
+        # 扮演规则（creator_notes）放在**对话历史之后**——行业惯例的
+        # post-history instructions 位置，对生成的约束力最强。
+        if self.creator_notes:
+            parts.extend(["", "# 扮演规则（必须严格遵守）", self.creator_notes])
 
         if user_message:
             parts.extend(["", f"用户: {user_message}", f"{self.name}:"])
 
         return "\n".join(parts)
+
+    def _format_dialogue_examples(self) -> str:
+        """格式化 mes_example 为对话示例段；无内容返回空串。"""
+        raw = str(self.source_data.get("mes_example", "") or "").strip()
+        if not raw:
+            return ""
+        blocks = [b.strip() for b in raw.split("<START>") if b.strip()]
+        text = "\n\n".join(blocks) if blocks else raw
+        return text[:2000]
 
     def to_dict(self) -> dict:
         return {

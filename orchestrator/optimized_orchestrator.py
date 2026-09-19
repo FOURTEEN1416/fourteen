@@ -295,96 +295,32 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         # 展平嵌套角色卡格式，提取真实 name/description/personality 等
         card = normalize_character_card(raw_card)
 
-        # 构造人设片段
+        # 构造人设片段（2026-09-20 行业对齐精简）：
+        # 角色的完整设定（description / personality_text / creator_notes / 核心锚点 /
+        # 数值维度 / 知识库 / 对话示例）已由 shisi PersonaService → prompt_builder
+        # 以全量字段注入 system prompt。旧实现在这里**再次**注入 500 字截断的简介、
+        # 500 字截断的备注、60 字截断的锚点与数值维度 —— 属重复内容（SillyTavern
+        # 惯例：角色定义只注入一次），且截断版本可能与上方全文矛盾。
+        # 此片段仅保留「身份绑定」职责 + base prompt 覆盖不到的字段
+        # （口头禅 / 开场白）；scenario 守卫已迁移至
+        # CharacterAggregate.build_system_prompt（含导入卡兼容）。
         lines: list[str] = ["=== 角色卡人设 ==="]
         name = card.get("name", "")
         if name:
             lines.append(f"角色名：{name}")
 
-        desc = card.get("description", "")
-        if desc:
-            lines.append(f"简介：{desc[:500]}")
-
-        # 创作者备注通常包含更细致的人设，优先作为补充
-        creator_notes = card.get("creator_notes") or raw_card.get("creator_notes") or ""
-        if creator_notes and creator_notes != desc:
-            lines.append(f"细节设定：{str(creator_notes)[:500]}")
-
-        anchors = [str(a) for a in card.get("core_anchors", []) if a]
-        # 长锚点截断保留：>20 字的整段性格描述往往是最丰富的人设，
-        # 旧实现直接丢弃会稀释角色（2026-09-17 修复：截断到 60 字而非过滤）
-        kept_anchors = [
-            a if len(a) <= 20 else a[:60] + ("…" if len(a) > 60 else "")
-            for a in anchors
-        ]
-        if kept_anchors:
-            lines.append(f"核心锚点：{'、'.join(kept_anchors)}")
-
-        # 性格维度：优先使用可量化的字典；否则使用文本描述
-        personality = card.get("personality", {})
-        personality_text = card.get("personality_text", "")
-        if personality:
-            lines.append("性格维度：")
-            dim_map = {
-                "warmth": "温暖度", "playfulness": "顽皮度", "independence": "独立性",
-                "jealousy": "嫉妒度", "stubbornness": "固执度", "intelligence": "聪慧度",
-                "sweetness": "甜美度", "elegance": "优雅度", "mystery": "神秘度",
-                "loyalty": "忠诚度", "creativity": "创造力",
-            }
-            for k, v in personality.items():
-                label = dim_map.get(k, k)
-                try:
-                    val = float(v)
-                    lines.append(f"- {label} {val:.2f}")
-                except (TypeError, ValueError):
-                    lines.append(f"- {label}: {v}")
-        elif personality_text:
-            lines.append(f"性格描述：{personality_text[:400]}")
-
-        speaking = card.get("speaking_style", {})
-        speaking_text = card.get("speaking_style_text", "")
-        if speaking and isinstance(speaking, dict):
-            style_parts: list[str] = []
-            for k, v in speaking.items():
-                if k == "catchphrases":
-                    continue
-                try:
-                    val = float(v)
-                    if 0 <= val <= 1:
-                        style_parts.append(f"{k}={val:.2f}")
-                    else:
-                        style_parts.append(f"{k}={v}")
-                except (TypeError, ValueError):
-                    style_parts.append(f"{k}={v}")
-            if style_parts:
-                lines.append(f"说话风格：{', '.join(style_parts)}")
-        elif speaking_text:
-            lines.append(f"说话风格：{speaking_text[:400]}")
-
         catchphrases = card.get("catchphrases", [])
         if catchphrases:
             lines.append(f"口头禅：{' / '.join(str(c) for c in catchphrases[:8])}")
 
-        scenario = card.get("scenario", "")
-        if scenario:
-            # ⚠️ 2026-09-19 修复：scenario 是**开场情境**，不是「当前正在发生的事」。
-            # 旧实现只写 `场景设定：…` 且该段被 _store_persona_segment 缓存后每轮复用，
-            # 于是角色被永久锚定在开场画面里 —— 生产实证：角色卡 62105bca 的开场是
-            # 「你刚从公交车上下来…她手里拿着一个白色的小风扇…说了句『来了啊』」，
-            # 结果机器人一直追问用户「路上堵不堵/热不热/慢慢走/要不要来家里坐坐」，
-            # 用户回「我没在路上」也纠正不过来（自相矛盾、答非所问的根因）。
-            lines.append(
-                "开场情境（**仅用于开场氛围，不代表当前正在发生**）：\n"
-                f"{str(scenario)[:500]}\n"
-                "⚠️ 只依据**用户实际说过的内容**推进对话；不要假定用户仍在路上／在等车／"
-                "在某个地点，也不要凭空推演用户的处境（地点、天气、行程、身体状态）。"
-                "用户没提过的事，一律不得当作事实提及。"
-                "若用户已否认某情境（如「我没在路上」），立即放弃该情境，不得再提。"
-            )
-
         first_mes = card.get("first_mes", "")
         if first_mes:
             lines.append(f"开场白：{str(first_mes)[:300]}")
+
+        lines.append(
+            "（该角色的身份、性格、经历、说话风格与扮演规则已在本提示词上方逐节完整注入，"
+            "一律以上方内容为准；如与本段冲突，以上方为准。）"
+        )
 
         segment = "\n".join(lines)
         cls._store_persona_segment(character_id, segment)
