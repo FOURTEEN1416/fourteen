@@ -19,31 +19,44 @@ function RoleCard({
 }) {
   return (
     <div
-      className={`glass-card rounded-2xl p-4 transition-all hover:bg-white/40 flex flex-col stagger-item ${
+      className={`glass-card rounded-2xl p-4 transition-all hover:bg-white/40 flex flex-col h-full stagger-item ${
         character.is_active ? 'border-2 border-macaron-blue/40 relative' : 'cursor-pointer'
       }`}
     >
-      <div className="text-sm font-semibold text-gray-800 mb-1">{sanitizeCharacterName(character.name)}</div>
+      <div className="text-sm font-semibold text-gray-800 mb-1 pr-14 truncate">
+        {sanitizeCharacterName(character.name)}
+      </div>
       <div className="text-xs text-gray-500 mb-3 leading-relaxed line-clamp-2 min-h-[2rem]">
         {deriveCardSummary(character.description, sanitizeCharacterName(character.name), character.core_anchors ?? [])}
       </div>
+      {/* 锚点可能是整段人格长文（角色卡实况），展示层截断保卡片等高，全文悬浮可见 */}
       <div className="flex flex-wrap gap-1 mb-4 min-h-[1.25rem] content-start">
         {(character.core_anchors?.slice(0, 3).map((tag) => (
-          <span key={tag} className={`tag-${anchorTone(tag)} px-2 py-0.5 rounded text-[10px]`}>
-            {tag}
+          <span
+            key={tag}
+            title={tag}
+            className={`tag-${anchorTone(tag)} px-2 py-0.5 rounded text-[10px] max-w-full inline-block truncate align-bottom`}
+            style={{ maxWidth: '100%' }}
+          >
+            {tag.length > 14 ? `${tag.slice(0, 14)}…` : tag}
           </span>
         ))) ?? <span className="text-[10px] text-gray-400">无标签</span>}
       </div>
 
       {character.is_active ? (
-        <div className="absolute top-3 right-3 text-[10px] px-2 py-0.5 rounded-full bg-macaron-blue text-white">
-          当前活跃
-        </div>
+        <>
+          <div className="absolute top-3 right-3 text-[10px] px-2 py-0.5 rounded-full bg-macaron-blue text-white">
+            当前活跃
+          </div>
+          <div className="mt-auto w-full py-1.5 rounded-lg text-xs border border-macaron-blue/20 bg-macaron-blue-light/30 text-macaron-blue-deep text-center">
+            正在陪伴你
+          </div>
+        </>
       ) : (
         <button
           onClick={() => onActivate(character.id)}
           disabled={activating === character.id}
-          className="w-full py-1.5 rounded-lg text-xs border border-macaron-blue/40 text-macaron-blue-deep hover:bg-macaron-blue-light/30 transition-colors disabled:opacity-50"
+          className="mt-auto w-full py-1.5 rounded-lg text-xs border border-macaron-blue/40 text-macaron-blue-deep hover:bg-macaron-blue-light/30 transition-colors disabled:opacity-50"
         >
           {activating === character.id ? '激活中…' : '设为活跃'}
         </button>
@@ -127,7 +140,7 @@ export default function RolesPage() {
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {visible.map((character, i) => (
-                  <div key={character.id} className="stagger-item" style={{ animationDelay: `${Math.min(i, 12) * 60}ms` }}>
+                  <div key={character.id} className="stagger-item h-full" style={{ animationDelay: `${Math.min(i, 12) * 60}ms` }}>
                     <RoleCard
                       character={character}
                       onActivate={handleActivate}
