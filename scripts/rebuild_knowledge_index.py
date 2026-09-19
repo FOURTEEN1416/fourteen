@@ -74,16 +74,15 @@ def main() -> None:
         return
 
     # ── 清理孤立索引 ──
+    # 2026-09-20 修复：旧逻辑的 `startswith(p) for p in ("",)` 恒为真 →
+    # 任何文件都会被 continue，清理从未生效（09-18/09-20 两次实跑均 0 删除，
+    # 服务器实测残留 29 个旧 persona_ 时戳形态与已删卡索引）。
+    # 索引是可重建的派生缓存、运行时仅按卡 id（文件 stem）加载，
+    # 故 stem 不在现役 id 集合内的文件一律为孤立，精确匹配删除。
     print("\n=== 清理孤立索引 ===")
     removed = 0
     for f in sorted(KNOW.glob("*.json")):
-        stem = f.stem
-        if stem in active_ids:
-            continue
-        # 兼容 persona_xxx_timestamp 形态
-        if any(stem.startswith(p) or stem.endswith(i) for i in active_ids for p in ("",)):
-            continue
-        if any(i in stem for i in active_ids):
+        if f.stem in active_ids:
             continue
         f.unlink()
         removed += 1
