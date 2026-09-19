@@ -66,9 +66,12 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
       >
         {/* Header */}
         <div className="flex items-center justify-between h-14 px-4 border-b border-white/30 shrink-0">
-          <span className="text-sm font-semibold bg-gradient-to-r from-primary-600 via-accent-600 to-macaron-mint-deeper bg-clip-text text-transparent">
-            唯一的你——十四
-          </span>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary-400 to-accent-400 flex items-center justify-center text-white text-xs font-bold shadow-sm">你</div>
+            <span className="text-sm font-semibold bg-gradient-to-r from-primary-600 via-accent-600 to-macaron-mint-deeper bg-clip-text text-transparent">
+              唯一的你——十四
+            </span>
+          </div>
           <button
             onClick={onClose}
             aria-label="关闭菜单"
@@ -114,14 +117,27 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
         </nav>
 
         {/* Footer：用户 + 连接状态 */}
-        <div className="px-4 py-3 border-t border-white/30 space-y-1 shrink-0">
+        <div className="px-4 py-3 border-t border-white/30 shrink-0">
           {user && (
-            <div className="text-xs text-gray-500 truncate">{user.email}</div>
+            <div className="flex items-center gap-2.5 mb-2">
+              <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-500 shrink-0">
+                {(user.email || '?')[0].toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs text-gray-600 font-medium truncate">{user.email}</div>
+                <div className="flex items-center gap-1.5 text-[11px] text-gray-400">
+                  <div className={`w-1.5 h-1.5 rounded-full pulse-ring ${isConnected ? 'bg-green-400' : 'bg-red-400'}`} />
+                  {isConnected ? '微信已连接' : '微信未连接'}
+                </div>
+              </div>
+            </div>
           )}
-          <div className="flex items-center gap-2 text-xs text-gray-400">
-            <div className={`w-1.5 h-1.5 rounded-full pulse-ring ${isConnected ? 'bg-green-400' : 'bg-red-400'}`} />
-            {isConnected ? '已连接' : '未连接'}
-          </div>
+          {!user && (
+            <div className="flex items-center gap-2 text-xs text-gray-400">
+              <div className={`w-1.5 h-1.5 rounded-full pulse-ring ${isConnected ? 'bg-green-400' : 'bg-red-400'}`} />
+              {isConnected ? '已连接' : '未连接'}
+            </div>
+          )}
         </div>
       </aside>
     </div>

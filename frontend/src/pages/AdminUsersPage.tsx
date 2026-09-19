@@ -249,7 +249,7 @@ export default function AdminUsersPage() {
             </div>
             <button
               onClick={() => setShowCreate(true)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-primary-500 hover:bg-primary-400 rounded-lg transition-colors shadow-sm"
+              className="inline-flex self-start items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-primary-500 hover:bg-primary-400 rounded-lg transition-colors shadow-sm"
             >
               <UserPlus className="w-4 h-4" />
               创建用户
