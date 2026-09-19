@@ -196,3 +196,47 @@ class TestCharacterKnowledgeService:
         assert stats["indexed"] is True
         assert stats["total_chunks"] == 5
         assert stats["retriever_type"] == "bm25"
+
+
+class TestDualPathInterleave:
+    """双路检索交错合并回归测试（2026-09-20）
+
+    背景：此前 ext+base 顺序拼接再截断，扩展路命中多时会把原路高 idf 块
+    整体挤出注入窗口（实测米彩卡「昭阳是谁」top-8 丢掉含"昭阳"的知识块）。
+    """
+
+    def test_base_path_chunk_not_crowded_out(self):
+        """扩展路占满窗口时，原路高价值块仍应进入结果"""
+        service = CharacterKnowledgeService(use_bm25=True)
+        chunks = [
+            # 扩展词「名字 称呼 身份」命中的 8 个块（模拟身份锚点连发）
+            KnowledgeChunk(content=f"身份锚点第{i}条：名字与称呼与身份的说明。", source="anchors")
+            for i in range(8)
+        ] + [
+            # 原路查询「昭阳是谁」应命中的高价值块
+            KnowledgeChunk(content="原作知识要点：昭阳是她的房客，两人从斗气冤家走到相守。", source="notes"),
+        ]
+        retriever = BM25Retriever()
+        retriever.index(chunks)
+        service._retrievers["char_x"] = retriever
+        service._chunk_counts["char_x"] = len(chunks)
+
+        result = service.search("char_x", "昭阳是谁", top_k=8)
+        contents = [c.content for c in result.chunks]
+        assert any("昭阳" in t for t in contents), f"原路高价值块被挤出: {contents}"
+
+    def test_expansion_path_still_first(self):
+        """交错合并后首位仍应是扩展路结果"""
+        service = CharacterKnowledgeService(use_bm25=True)
+        chunks = [
+            KnowledgeChunk(content="她的名字是小柔，你可以称呼她小柔。", source="name"),
+            KnowledgeChunk(content="小柔喜欢雨天读书。", source="personality"),
+        ]
+        retriever = BM25Retriever()
+        retriever.index(chunks)
+        service._retrievers["char_y"] = retriever
+        service._chunk_counts["char_y"] = len(chunks)
+
+        result = service.search("char_y", "你叫什么名字", top_k=2)
+        assert result.chunks, "应有结果"
+        assert "名字" in result.chunks[0].content

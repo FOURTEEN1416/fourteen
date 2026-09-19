@@ -63,7 +63,7 @@
 - **人设注入完整**（09-18/19）：角色卡 `personality_text`/`scenario`/`creator_notes` 三字段进入 prompt（此前只注入 name+description+人格数值，实测 prompt 3789→13018 字）
 - 图片理解双路（09-15 收编）：附件直传（配 vision_model）/ 描述注入（VisionHandler 降级），config `multimodal.image` 驱动，off 即回滚；图片全程内存不落盘
 - 管理控制台 **17 页**（邀请码注册 + 角色管理 + LLM 配置 + 数据看板等；SP-9 幽灵层三页与 DemoPage 已删；公开门面为 `/intro` 产品介绍页）
-- 角色系统：SillyTavern V2/V3 PNG 卡兼容 + 自有角色卡体系（config/characters **25 张现役卡**唯一真源，💊熟悉度/心跳值/手写板等玩法均支持）
+- 角色系统：SillyTavern V2/V3 PNG 卡兼容 + 自有角色卡体系（config/characters **41 张现役卡**唯一真源——25 既有 + 16 文学导入《我的26岁女房客》《从你的全世界路过》《云边有个小卖部》《某某》《天堂旅行团》，每卡配全量字段与可检索知识语料，💊熟悉度/心跳值/手写板等玩法均支持）
 - **204 个 API 业务端点 / 171 条唯一路径 / 16 include_router + setup_shisi**（见 CODE_GRAPH §4.2）
 
 **能力栈**

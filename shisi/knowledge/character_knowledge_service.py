@@ -161,8 +161,8 @@ class CharacterKnowledgeService:
         实测（阿哈 166 块）：「你家里有什么人」top-1 命中 4.18 分的**无关内容**
         （"女生小团体楠楠"，只因同含"人"字）；而扩展为
         「家庭 家人 父母 亲属 出身 早年」后，命中正确块（"早年家庭经历"）且分数升至 13.46。
-        → 做法：命中领域信号词时，用「原查询 ∪ 扩展查询」双路检索并合并，
-          扩展路优先（其措辞更接近知识库原文）。
+        → 做法：命中领域信号词时，用「原查询 ∪ 扩展查询」双路检索并**交错合并**，
+          首位给扩展路（其措辞更接近知识库原文），两路头部块交替进入注入窗口。
         """
         retriever = self._retrievers.get(character_id)
         if not retriever:
@@ -172,18 +172,26 @@ class CharacterKnowledgeService:
         if not expanded:
             return retriever.search(query, top_k=top_k)
 
-        # 双路互补检索：扩展路（知识库惯用措辞，提召回）在前，原路（保精度）在后
-        ext = retriever.search(expanded, top_k=top_k)
-        base = retriever.search(query, top_k=top_k)
+        # 双路互补检索后**交错合并**（扩展路占奇数位、原路占偶数位）。
+        # 2026-09-20 修复：此前 ext+base 顺序拼接再截断，扩展路命中多时（如「X是谁」
+        # 一路命中 8 个"身份锚点"块）会把原路的高 idf 块整体挤出注入窗口——实测
+        # 米彩卡「昭阳是谁」top-8 完全丢掉含"昭阳"的原作知识块。交错保证两路
+        # 各自的头部块都进入窗口，首位仍是扩展路（其措辞更贴近知识库原文）。
+        ext = list(retriever.search(expanded, top_k=top_k).chunks)
+        base = list(retriever.search(query, top_k=top_k).chunks)
 
-        # 合并：扩展路在前，按 content 去重
+        # 按 content 去重
         seen: set[str] = set()
         merged: list[Any] = []
-        for chunk in list(ext.chunks) + list(base.chunks):
-            key = (chunk.content or "").strip()
-            if key and key not in seen:
-                seen.add(key)
-                merged.append(chunk)
+        for i in range(max(len(ext), len(base))):
+            for chunk in (ext[i] if i < len(ext) else None,
+                          base[i] if i < len(base) else None):
+                if chunk is None:
+                    continue
+                key = (chunk.content or "").strip()
+                if key and key not in seen:
+                    seen.add(key)
+                    merged.append(chunk)
         return RetrievalResult(chunks=merged[:top_k])
 
     def get_knowledge_context(self, character_id: str, query: str, top_k: int = 3) -> str:

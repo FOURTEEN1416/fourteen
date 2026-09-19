@@ -280,3 +280,12 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **产出（docs/reports/ 三件 + README 登记）**：① `2026-09-19_经历因果升级机制研究.md`——小凌蓝图提取 + 逐模块对标 + 50+ 仓库 GitHub 调研（7 域）+ P0-P4 路线图（EventLedger 主轴 + 语义门控/识海/心光/内驱四子系统）；② `2026-09-19_情感真源收敛审查.md`——**P0 前置审计实证：情感状态族全族无持久化闭环**（EmotionEngine 纯内存 4 实例化点、AffinityEnhancer._values 播种 0 且 affinity_records 只写不读、重启即归零）+ **VitalSignsEngine 幽灵系统**（热路径零调用，`GET /api/shisi/vital-signs` 返回恒 default 假数据）+ persona_engine 内嵌第二份情感状态；风险 R1-R6 + 收敛建议 S1-S6（均未实施）；③ `2026-09-19_WrenWen伴侣架构精读.md`——W1-W28 机制条目（账本宪法/门槛制召回/9 维驱动/锚定倒计时/say 档/七踩坑/探针纪律等）+ 对本项目的批次映射。
 - **热路径澄清**：`optimized_orchestrator.py:893` 取 `shisi_reg.affinity_mapper`——热路径与 API 共用同一 registry 单例（此前"两套实例"嫌疑不成立）。
 - **边界**：零代码改动、未触 A 档、未上服务器；三件文档均 B 档（commit→push 即闭环）；所有方案为**提案未获批**，待用户对 P0-P4 路线图与 S1-S6 收敛项裁决。
+
+### 2026-09-20 · 主控窗口（zcode）· 角色完善与文学导入批次（25→41 卡 + 知识库激活）
+
+- **任务**：用户指令四项——完善已有角色、导入《我的26岁女房客》主要角色、导入《从你的全世界路过》《云边有个小卖部》《某某》《天堂旅行团》主要角色、把各角色知识库用起来。
+- **产出**：16 张新卡全字段落库（房客 4 / 路过 5 / 云边 3 / 某某 2 / 天堂旅行团 2）；既有 25 卡补数值字典 + mes_example（伊蕾娜损坏字段重写）；知识索引重建脚本补透传（core_anchors/source_data）+ 检索双路交错合并修复（+2 回归测试）；41 索引重建约 1750 块，检索冒烟 5/5。
+- **验证**：pytest **1247 passed / 4 skipped**（收集 1251，零失败）+ vitest **98/98** + ruff 全绿。
+- **口径**：CODE_GRAPH v3.8.4 / AGENTS v1.14 / VISION / HANDOFF 批注 / LOG 同日条目。
+- **三端**：代码与文档 commit→push（A/B 档）；`config/characters` 为 gitignore 私有投递（服务器覆盖前 md5 比对 + 服务器端重建索引）。
+- **待用户裁决**：两张「林挽夏」变体卡（62105bca 活跃 / f0860ed2 闲置）是否合并。

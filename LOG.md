@@ -7,7 +7,35 @@
 
 ---
 
-## 2026-09-20 — 前端全站材质系统性升级（方向 A+B 混合，纯样式零逻辑）
+## 2026-09-20 — 角色完善与文学导入批次（25→41 张卡 + 知识库激活）
+
+**任务**：用户指令——对已有角色进行完善；将《我的26岁女房客》主要角色导入；导入《从你的全世界路过》《云边有个小卖部》《某某》《天堂旅行团》主要角色；把各个角色的知识库用起来。
+
+**调研**（信息类分域，通用搜索）：核实五部作品主要角色与设定——
+- 《二十六岁女房客》经查证实为**《我的26岁女房客》**（又名《天空的城》，超级大坦克科比 著，非"睡觉会变白"）：昭阳/米彩（26岁女总裁房东）/乐瑶/简薇，"北京没有乐瑶，西塘没有简薇，苏州没有米彩"。（百度百科/Bilibili/知乎书评）
+- 《从你的全世界路过》（张嘉佳）：陈末（电台DJ全城最贱）/幺鸡/茅十八/荔枝/猪头；电影线佐证人物关系。（百度百科/维基百科）
+- 《云边有个小卖部》（张嘉佳）：刘十三/王莺莺/程霜 + 名句「生命是有光的…」。（百度百科/知乎/搜狐书评）
+- 《某某》（木苏里）：江添（制冷机）/盛望，白马弄堂"叫哥"开局。（维基百科）
+- 《天堂旅行团》（张嘉佳）：宋一鲤/余小聚（7岁脑癌女孩），向死而生。（百度百科）
+
+**改动**：
+1. 新增 16 张全字段卡（id 8-hex / schema_version 1 / user_id default / is_active false）：米彩 1d869eff、昭阳 dfdac34b、乐瑶 9f037e9e、简薇 ffa0e43a、陈末 57826d98、幺鸡 f9b609a4、茅十八 a3b1e39f、荔枝 62159b40、猪头 073af3e8、刘十三 42a32783、王莺莺 ffad6fe3、程霜 87d46831、江添 9ba4284e、盛望 5be0e663、宋一鲤 a6144d38、余小聚 44892417。内容为原创二创设定（贴合原作人物关系与声线，未复制原文段落）。
+2. 既有 25 卡完善（纯增量，不覆盖既有内容）：伊蕾娜·艾斯特莱雅 309d2519 损坏字段（description 3 字/scenario 3 字/creator_notes 2 字）按《魔女之旅》重写；23 卡补 personality（warmth/playfulness/independence/jealousy/stubbornness）与 speaking_style（formality/emoji_freq/sentence_length/expressiveness/emotional_expression/humor）数值字典（此前仅孙颖莎/林挽夏有）；**25 卡全补 mes_example** 示例对话；椎名真昼/莉莉娅 scenario 扩写；孙颖莎补 personality_text。
+3. 知识库激活（`config/characters` 每卡知识库 = BM25 索引，从卡字段切块）：
+   - `scripts/rebuild_knowledge_index.py` 补透传 `PersonaProfile(core_anchors)` + `source_data`——旧重建比运行时抽取**少锚点与示例对话两类块**，且磁盘索引被运行时 `load_index` 优先加载，缺口常驻。
+   - `shisi/knowledge/character_knowledge_service.py` `search()` 双路合并由「ext+base 拼接截断」改**交错合并**——修复扩展路占满注入窗口把原路高 idf 块挤出 top-8 的缺陷（实测米彩卡「昭阳是谁」top-8 曾完全丢掉含"昭阳"块）。
+   - 41 卡索引全量重建（合计约 1750 块，character_name/core_anchors/description/personality/scenario/creator_notes/mes_example 七源齐备），典型问题检索冒烟 5/5 命中。
+   - 新增回归测试 2 个：`tests/test_shisi_knowledge.py::TestDualPathInterleave`。
+
+**验证**：pytest 四块分跑 **1247 passed / 4 skipped**（收集 1251，310+338+225+374=1247，零失败）+ 前端 vitest **98/98**（16 文件）+ ruff 永久改动文件全绿；persona 注入测试 41 卡全过（86 passed/3 skipped）。测试基数较文档口径 +165：本批 +34（16 新卡×2 参数化 + 2 回归），其余约 131 为 09-19 晚通道隔离等先前提交增量未同步文档（git log --stat 核对 3e66930/d47a189/7413574 等）。
+
+**三端**：`config/characters` 系 §9.4 gitignore 目录——新卡与完善内容**不入公开仓**，按私有投递通道送服务器并在服务器端重建索引（服务端覆盖前先 md5 比对防服务器侧漂移）；代码与文档走 A/B 档正常通道。
+
+**口径同步**：CODE_GRAPH v3.8.4（头部增量 + §1.1 三行 + 新增卡数行 + §13 新行）、AGENTS v1.14（§0/§2/§4.3/修订历史）、VISION §角色系统、HANDOFF_REPORT 顶部批注、BOARD。
+
+**遗留提示**：① `config/characters` 内有两张「林挽夏」变体卡（62105bca 青梅竹马女友版 is_active=true / f0860ed2 妻子版 is_active=false），内容高度近似，是否合并属用户裁决域，本批仅登记不动；② 服务端投递见本条三端说明。
+
+（方向 A+B 混合，纯样式零逻辑）
 
 **任务**：用户裁决按「A 环境色场+材质阶梯 / B 苹果式克制——玻璃只留给浮动壳层」对全站前端做构图、搭配、协调的系统性升级，取代原「纯白容器+白上白毛玻璃」的廉价观感。
 

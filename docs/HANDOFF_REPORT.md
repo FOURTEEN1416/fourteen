@@ -3,6 +3,10 @@
 > 上一窗口交接已归档：`docs/history/HANDOFF_REPORT-2026-09-14.md`
 > 本文是**当前状态的单一真源**；日常流水见 `LOG.md`，决策见 `docs/DECISION_LEDGER.md` 与 `docs/adr/`。
 
+> ### 📌 接手批注（2026-09-20 角色卡扩充批次）
+> **凡本文出现「25 张卡 / 25 张现役卡 / 2×卡数=50+用例」处已失效**，以本批注为准：
+> `config/characters` 现役 **41 张**（25 既有 + 16 文学导入：我的26岁女房客×4 / 从你的全世界路过×5 / 云边有个小卖部×3 / 某某×2 / 天堂旅行团×2）；既有 25 卡已全量补 personality/speaking_style 数值字典与 mes_example（伊蕾娜损坏字段重写）；知识索引由 `scripts/rebuild_knowledge_index.py`（已补透传 core_anchors/source_data）从权威真源重建 41 份；`CharacterKnowledgeService.search()` 双路合并改交错式。测试口径 **1251 收集 / 1247 通过 / 4 跳过 + vitest 98/98**（详见 AGENTS §4.3 四次刷新注记与 CODE_GRAPH v3.8.4 §13 行）。
+
 > ### 📌 接手批注（2026-09-19 15:50，提交 `6780c5f`）
 > 已按 §7 推进 **第 ② 项**（修 `character_card` + `search`），两项均修复、部署、生产验证。
 > **§4 表格与 §5 前两项已失效，以本批注与 `LOG.md` 七十二为准。** 要点：

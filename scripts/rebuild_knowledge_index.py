@@ -22,6 +22,7 @@ import sys
 sys.path.insert(0, ".")
 
 from shisi.core.models.character_aggregate import CharacterAggregate  # noqa: E402
+from shisi.core.models.persona_profile import PersonaProfile  # noqa: E402
 from shisi.knowledge.character_knowledge_service import get_knowledge_service  # noqa: E402
 
 ROOT = pathlib.Path(".")
@@ -48,6 +49,9 @@ def main() -> None:
         active_ids.add(cid)
         name = card.get("name", "?")
         # 直接用权威真源构造聚合根（不依赖 PersonaService 实例）
+        # 2026-09-20 补齐透传：core_anchors（经 persona）与 source_data（mes_example 等）
+        # 此前不传 → 重建索引比运行时抽取**少两类知识块**（锚点/示例对话），
+        # 磁盘索引被运行时 load_index 优先加载，缺口会一直存在。
         ch = CharacterAggregate(
             id=cid,
             name=name,
@@ -55,6 +59,8 @@ def main() -> None:
             personality_text=card.get("personality_text", "") or "",
             scenario=card.get("scenario", "") or "",
             creator_notes=card.get("creator_notes", "") or "",
+            persona=PersonaProfile(core_anchors=card.get("core_anchors", []) or []),
+            source_data=card,
         )
         if args.dry_run:
             print(f"  [dry] {name[:10]:<12} ({cid})")
