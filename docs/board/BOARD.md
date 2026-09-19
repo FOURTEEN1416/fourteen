@@ -32,7 +32,15 @@
 
 ## 追加区（按时间倒序，新的在上）
 
-### 2026-09-19 · 前端写死数据修复窗口（Qoder）· 九项修复已 push，**A 档部署移交** ⚠️
+### 2026-09-19 · 复核验收（主控）· 前端批次 A 档已落服务器 ✅
+
+- **36db310 前端九项修复 + 通道隔离批次** 已 pull 到 swu-prod 并全量重建 dist（persona/StatusCenter/RoleSettings/WeChatPage 产物在 rontend/dist/assets/）。
+- 服务器 A 档 HEAD=7413574，与 origin 关键文件 git hash-object **10/10 一致**；B 档 LOG 6087ebb 仅 GitHub（设计内不上服务器）。
+- CI：7413574/6087ebb **success**（含 Playwright E2E）；早期 ca5df3a/2ea1544 失败为修复前基线，已由后续提交闭环。
+- 鉴权：用户侧 JWT 通过 erify_api_key_dep；生产 dist **无 API Key 明文**；未登录通道接口 **401**。
+- 部署残留已清；测试用户 ying/胡芷蕊 各自 waiting_qr，与 admin 通道隔离。
+
+### 2026-09-19 · 前端写死数据修复窗口（Qoder）· 九项修复已 push，~~A 档部署移交~~ ✅ 已由主控 2026-09-19 部署
 
 - 前端审计修复批次已入库：`36db310` fix(frontend)（12 文件：constants/persona.ts 单一真源 + normalize 剔脏键、删除角色接线、语音状态接真、is_active 徽章、真排序、StickersTab 撤除、亲密等级接 emotion-stage 端点、Intro 诚实化）+ `ca5df3a` docs LOG 七十六。验证：tsc 0 错 / vitest **98/98** / 浏览器端到端逐面实测（含删除全链路 c80d78be 建→删→404）。
 - **待带上**：本批属 A 档，服务器 `/opt/ai-girlfriend` git pull + `deploy/remote_deploy.sh` 重建前端 dist + health 核验**尚未执行**——用户裁决「让另外的窗口一并带上去」。下次部署任何窗口收口时，请确认 origin `ca5df3a` 及以后已落服务器并重建 bundle，回写本板。
