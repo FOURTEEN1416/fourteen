@@ -12,7 +12,7 @@ import {
 } from '../api/client'
 import type { PresetItem } from '../api/characters'
 import {
-  MessageSquare, Send, Loader2, Sparkles,
+  Send, Loader2, Sparkles,
   FileUp, Check, Users, Eye, Copy, Bot,
 } from 'lucide-react'
 import { CLONE_AGENT_GUIDE } from '../constants/cloneAgentGuide'
@@ -69,6 +69,15 @@ const PERSONALITY_KEYS = (Object.keys(DEFAULT_PERSONALITY) as Array<keyof typeof
 }))
 
 // ═══ AI Chat Tab ═══
+/* 2026-09-20 A+B 批次重构：会话容器改为「凹槽通道 + 实体气泡 + 贴底玻璃坞」——
+   旧版用户气泡白字压浅黄（对比度 1.3:1，09-19 审计漏网）、AI 气泡是白叠白玻璃
+   （与面板同色，分不清发信人）、空态是居中大灰图标模板件。 */
+const CHAT_EXAMPLES = [
+  '她是一个22岁的美术生，温柔细腻，喜欢看展和手冲咖啡',
+  '一个毒舌但靠谱的程序员搭档，说话直接，会追着我问需求',
+  '温柔学姐风格，记得我提过的每件事，晚上催我睡觉',
+]
+
 function AIChatTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaState>) => void }) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -90,43 +99,71 @@ function AIChatTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaSt
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 mb-4">
-        <MessageSquare className="w-4 h-4 text-macaron-yellow-deep" />
-        <h3 className="text-sm font-semibold text-gray-700">和十四聊一会儿</h3>
-        <span className="text-[10px] text-gray-400 ml-auto">通过对话让 AI 学习你的期待</span>
+      <div className="flex items-center gap-2.5 mb-3">
+        <div className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center bg-gradient-to-br from-macaron-yellow to-macaron-yellow-deep/80 ring-1 ring-macaron-yellow-deep/30">
+          <Bot className="w-3.5 h-3.5 text-text-primary" />
+        </div>
+        <div>
+          <h3 className="text-sm font-semibold text-text-primary leading-tight">和十四聊一会儿</h3>
+          <p className="text-[10px] text-text-muted leading-tight">描述得越具体，角色卡生长得越准</p>
+        </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-4 p-1 min-h-[240px] lg:min-h-[260px]">
+      {/* 会话通道：下沉凹槽，与面板拉开明度方向差 */}
+      <div className="chat-channel rounded-2xl flex-1 overflow-y-auto p-3.5 space-y-3 min-h-[240px] lg:min-h-[260px]">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center py-10">
-            <MessageSquare className="w-10 h-10 text-gray-200 mb-3" />
-            <p className="text-sm text-gray-400">描述你想要的 AI 角色</p>
-            <p className="text-xs text-gray-400 mt-1">比如："她是一个22岁的美术生，温柔细腻……"</p>
+          <div className="h-full flex flex-col items-start justify-center gap-3 px-1 py-2">
+            <div className="mat-raised rounded-xl rounded-tl-md px-3.5 py-2.5 text-xs text-text-secondary leading-relaxed max-w-[90%]">
+              你好，我是十四。说说你想要的角色吧——她的年龄、性格、说话方式，想到什么说什么。
+            </div>
+            <div>
+              <p className="text-[10px] text-text-muted mb-1.5 pl-0.5">不知道从哪说起？点一个试试：</p>
+              <div className="flex flex-col gap-1.5">
+                {CHAT_EXAMPLES.map(ex => (
+                  <button
+                    key={ex}
+                    type="button"
+                    onClick={() => setInput(ex)}
+                    className="self-start max-w-full text-left text-xs text-text-secondary bg-white/70 hover:bg-white border border-gray-900/8 hover:border-macaron-yellow-deep/40 rounded-full px-3 py-1.5 transition-colors"
+                  >
+                    “{ex}”
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
         {messages.map((msg, i) => (
-          <div key={`crmsg-${i}-${msg.role}-${msg.content.slice(0, 16)}`} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div key={`crmsg-${i}-${msg.role}-${msg.content.slice(0, 16)}`} className={`flex items-end gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            {msg.role === 'assistant' && (
+              <div className="w-6 h-6 rounded-full shrink-0 mb-0.5 flex items-center justify-center bg-gradient-to-br from-macaron-yellow to-macaron-yellow-deep/80">
+                <Bot className="w-3 h-3 text-text-primary" />
+              </div>
+            )}
             <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
               msg.role === 'user'
-                ? 'bg-gradient-to-br from-macaron-yellow to-macaron-yellow-deep text-white rounded-br-md shadow-sm'
-                : 'glass-card text-text-primary rounded-bl-md'
+                ? 'chat-bubble-out rounded-br-md'
+                : 'chat-bubble-in rounded-bl-md'
             }`}>
               {msg.content}
             </div>
           </div>
         ))}
         {loading && (
-          <div className="flex justify-start">
-            <div className="glass-card rounded-2xl rounded-bl-md px-4 py-2.5 flex items-center gap-2">
-              <Loader2 className="w-4 h-4 text-macaron-yellow-deep animate-spin" />
-              <span className="text-xs text-text-muted">正在思考...</span>
+          <div className="flex items-end gap-2">
+            <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center bg-gradient-to-br from-macaron-yellow to-macaron-yellow-deep/80">
+              <Bot className="w-3 h-3 text-text-primary" />
+            </div>
+            <div className="chat-bubble-in rounded-2xl rounded-bl-md px-4 py-3 flex items-center gap-1.5" aria-label="正在思考">
+              <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
             </div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="flex items-end gap-3 mt-3">
+      {/* 输入坞：贴底玻璃功能层（iOS Messages 语言） */}
+      <div className="chat-dock rounded-xl mt-3 p-2 flex items-end gap-2">
         <textarea
           value={input}
           onChange={e => setInput(e.target.value)}
@@ -134,13 +171,14 @@ function AIChatTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaSt
           placeholder="描述你想要的 AI 角色..."
           disabled={loading}
           rows={1}
-          className="input-macaron flex-1 rounded-xl px-4 py-2.5 text-sm resize-none text-text-primary placeholder:text-text-dim outline-none"
-          style={{ minHeight: 44 }}
+          className="input-macaron flex-1 rounded-lg bg-white/85 px-3.5 py-2.5 text-sm resize-none text-text-primary placeholder:text-text-dim outline-none border border-gray-900/5"
+          style={{ minHeight: 42 }}
         />
         <button
           onClick={handleSend}
           disabled={loading || !input.trim()}
-          className="shrink-0 w-10 h-10 rounded-xl btn-macaron flex items-center justify-center disabled:opacity-40 transition-all"
+          aria-label="发送"
+          className="shrink-0 w-10 h-10 rounded-full btn-macaron flex items-center justify-center disabled:opacity-40 transition-all"
         >
           <Send className="w-4 h-4" />
         </button>
@@ -437,11 +475,11 @@ function FileImportTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Perso
     <div className="space-y-4">
       <div
         onClick={() => fileRef.current?.click()}
-        className="border-2 border-dashed border-white/60 rounded-2xl p-8 text-center hover:border-macaron-yellow hover:bg-macaron-yellow-light/30 transition-all cursor-pointer"
+        className="border-2 border-dashed border-gray-300 bg-gray-900/[0.02] rounded-2xl p-8 text-center hover:border-macaron-yellow-deep/60 hover:bg-macaron-yellow-light/40 transition-all cursor-pointer"
       >
         <FileUp className="w-8 h-8 text-macaron-yellow-deep mx-auto mb-2" />
-        <p className="text-sm text-gray-500">点击上传角色 JSON 文件</p>
-        <p className="text-xs text-gray-400 mt-1">支持标准角色卡格式</p>
+        <p className="text-sm text-text-secondary">点击上传角色 JSON 文件</p>
+        <p className="text-xs text-text-muted mt-1">支持标准角色卡格式</p>
         <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={handleFile} />
       </div>
       <div className="relative">
@@ -483,10 +521,10 @@ function PersonaPreviewCard() {
 
   if (!hasContent || !persona) {
     return (
-      <div className="glass-card rounded-2xl p-5 flex flex-col items-center justify-center text-center min-h-[160px] lg:min-h-[280px]">
+      <div className="mat-raised rounded-2xl p-5 flex flex-col items-center justify-center text-center min-h-[160px] lg:min-h-[280px]">
         <div className="w-12 h-12 rounded-full btn-macaron flex items-center justify-center text-lg font-bold mb-3">你</div>
-        <p className="text-sm text-gray-500">和十四聊聊</p>
-        <p className="text-xs text-gray-400 mt-1">角色卡会在这里实时生长</p>
+        <p className="text-sm text-text-secondary">和十四聊聊</p>
+        <p className="text-xs text-text-muted mt-1">角色卡会在这里实时生长</p>
       </div>
     )
   }
@@ -494,7 +532,7 @@ function PersonaPreviewCard() {
   const anchors = persona.anchors?.length ? persona.anchors : []
 
   return (
-    <div className="glass-card rounded-2xl p-5 space-y-4">
+    <div className="mat-raised rounded-2xl p-5 space-y-4">
       <div className="flex items-center gap-3">
         <div className="w-12 h-12 rounded-full btn-macaron flex items-center justify-center font-bold text-lg">你</div>
         <div>
@@ -527,7 +565,7 @@ function PersonaPreviewCard() {
             return (
               <div key={key} className="flex items-center gap-2 text-[10px]">
                 <span className="w-12 text-text-secondary">{label}</span>
-                <div className="flex-1 h-1.5 bg-white/60 rounded-full overflow-hidden">
+                <div className="flex-1 h-1.5 bg-gray-900/8 rounded-full overflow-hidden">
                   <div className={`h-full ${color} rounded-full`} style={{ width: `${Math.round(value * 100)}%` }} />
                 </div>
               </div>
@@ -624,8 +662,8 @@ function PresetPills({ onSelect }: { onSelect: (p: Partial<PersonaState>) => voi
           onClick={() => handleSelect(item)}
           className={`px-3.5 py-1.5 rounded-full text-sm transition-all border ${
             selectedId === item.id
-              ? 'bg-white/75 border-macaron-yellow text-macaron-yellow-deep shadow-sm'
-              : 'bg-white/25 border-white/40 text-text-secondary hover:bg-white/50'
+              ? 'bg-white border-macaron-yellow-deep/50 text-macaron-yellow-deep shadow-[0_1px_2px_rgba(31,41,55,0.08)]'
+              : 'bg-white/60 border-gray-900/8 text-text-secondary hover:bg-white hover:border-gray-900/15'
           }`}
         >
           {item.name}
@@ -658,9 +696,9 @@ export default function CreateRole() {
         {/* Presets */}
         <PresetPills onSelect={setPersona} />
 
-        {/* Method selector — 2026-09-19 审美批次：中性分段控件替代整块渐变填充，
-            选中态用白底浮起，与角色设置 tab 同语言 */}
-        <div className="glass-card rounded-2xl p-1.5 flex bg-gray-100/60">
+        {/* Method selector — 09-20 A+B 批次：分段控件改为「下沉轨道 + 白面游标」
+            （iOS segmented 语言），旧版 glass-card 叠 bg-gray-100 两层背景互相打架 */}
+        <div className="mat-recess rounded-2xl p-1.5 flex">
           {METHODS.map(m => (
             <button
               key={m.key}
@@ -670,7 +708,7 @@ export default function CreateRole() {
               }}
               className={`flex-1 rounded-xl py-2.5 text-sm font-medium transition-all ${
                 method === m.key
-                  ? 'bg-white text-gray-800 shadow-sm ring-1 ring-black/5'
+                  ? 'bg-white text-text-primary shadow-[0_1px_2px_rgba(31,41,55,0.08)] ring-1 ring-gray-900/5'
                   : 'text-text-muted hover:text-text-secondary'
               }`}
             >
@@ -682,15 +720,15 @@ export default function CreateRole() {
 
         {/* Workspace */}
         <div className="glass-card rounded-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-[2fr_1fr]">
-          <div className="p-5 border-b lg:border-b-0 lg:border-r border-white/40 lg:min-h-[420px]">
+          <div className="p-5 border-b lg:border-b-0 lg:border-r border-gray-900/5 lg:min-h-[420px]">
             {method === 'ai-chat' && <AIChatTab onPersonaUpdate={setPersona} />}
             {method === 'wechat-clone' && <WeChatCloneTab onPersonaUpdate={setPersona} />}
             {method === 'file-import' && <FileImportTab onPersonaUpdate={setPersona} />}
           </div>
-          <div className="bg-white/20 backdrop-blur-sm p-5">
+          <div className="bg-gray-900/[0.03] p-5">
             <div className="flex items-center gap-2 mb-4">
               <Eye className="w-4 h-4 text-macaron-blue-deep" />
-              <h3 className="text-sm font-semibold text-gray-700">实时预览</h3>
+              <h3 className="text-sm font-semibold text-text-primary">实时预览</h3>
             </div>
             <PersonaPreviewCard />
           </div>
