@@ -55,6 +55,34 @@ def _load_character_card(character_id: str) -> CharaCardV2 | None:
         return None
 
 
+def _ensure_full_index(character_id: str, raw: dict[str, Any]) -> None:
+    """确保角色索引存在 —— 从权威真源（卡 dict）走 CharacterAggregate 全量构建。
+
+    2026-09-20 修复：此前端点缺索引时走 `index_from_card(CharaCardV2)`，该路径
+    不携带 core_anchors（V2 schema 丢弃顶层扩展字段）→ 首次访问即以降级索引
+    **覆盖**重建脚本的全量索引（实测米彩 18 块被覆盖成 7 块、锚点全丢）。
+    现与运行时（persona_service）/重建脚本（rebuild_knowledge_index.py）统一。
+    """
+    service = get_knowledge_service()
+    if service.has_index(character_id):
+        return
+    from shisi.core.models.character_aggregate import CharacterAggregate
+    from shisi.core.models.persona_profile import PersonaProfile
+
+    character = CharacterAggregate(
+        id=character_id,
+        name=(raw.get("name") or "未命名").strip() or "未命名",
+        description=raw.get("description", "") or "",
+        personality_text=raw.get("personality_text", "") or "",
+        scenario=raw.get("scenario", "") or "",
+        creator_notes=raw.get("creator_notes", "") or "",
+        persona=PersonaProfile(core_anchors=raw.get("core_anchors", []) or []),
+        source_data=raw,
+    )
+    service.index_character(character_id, character)
+    service.save_index(character_id)
+
+
 # ── API 端点 ──
 
 
@@ -64,16 +92,15 @@ async def get_knowledge_stats(
     _auth: bool = Security(verify_api_key_dep),
 ):
     """获取角色知识库统计。"""
-    card = _load_character_card(character_id)
-    if card is None:
+    raw = _load_character_data(character_id)
+    if raw is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 
     service = get_knowledge_service()
 
     if not service.has_index(character_id):
         try:
-            service.index_from_card(character_id, card)
-            service.save_index(character_id)
+            _ensure_full_index(character_id, raw)
         except Exception:
             logger.exception("索引知识失败: %s", character_id)
             return {
@@ -103,16 +130,15 @@ async def search_knowledge(
     _auth: bool = Security(verify_api_key_dep),
 ):
     """搜索角色知识库。"""
-    card = _load_character_card(character_id)
-    if card is None:
+    raw = _load_character_data(character_id)
+    if raw is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 
     service = get_knowledge_service()
 
     if not service.has_index(character_id):
         try:
-            service.index_from_card(character_id, card)
-            service.save_index(character_id)
+            _ensure_full_index(character_id, raw)
         except Exception as e:
             raise HTTPException(status_code=500, detail="知识索引失败") from e
 
@@ -138,8 +164,8 @@ async def upload_knowledge_document(
     _auth: bool = Security(verify_api_key_dep),
 ):
     """上传文档到角色知识库（文本文件，自动分块索引）"""
-    card = _load_character_card(character_id)
-    if card is None:
+    raw = _load_character_data(character_id)
+    if raw is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 
     content = await file.read()
@@ -155,7 +181,7 @@ async def upload_knowledge_document(
     service = get_knowledge_service()
     if not service.has_index(character_id):
         try:
-            service.index_from_card(character_id, card)
+            _ensure_full_index(character_id, raw)
         except Exception as e:
             raise HTTPException(status_code=500, detail="索引知识失败") from e
 
