@@ -12,6 +12,8 @@ import { CustomCursor } from './components/common/CustomCursor'
 import SystemSettingsLayout from './pages/SystemSettingsLayout'
 import { AuthGuard, RoleGuard, ConsentGate, AuthInit } from './components/auth'
 import { useAuthStore } from './store/authStore'
+import { useUnifiedCharacter } from './hooks/useQueries'
+import { sanitizeCharacterName } from './utils/character'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const IntroPage = lazy(() => import('./pages/IntroPage'))
@@ -51,9 +53,34 @@ function PageLoadingSkeleton() {
   )
 }
 
+/** 剧情线独立页：与角色设置同构的统一外壳（角色头卡 + 表单卡），编辑器组件保持可嵌入复用 */
 function StorylinePage() {
   const { roleId } = useParams<{ roleId: string }>()
-  return <StorylineEditor characterId={roleId!} />
+  const characterId = roleId ? decodeURIComponent(roleId) : ''
+  const { data: character } = useUnifiedCharacter(characterId)
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
+        {character && (
+          <div className="bg-white/70 backdrop-blur-sm border border-gray-200/60 rounded-2xl p-5 mb-5">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-400 to-purple-500 flex items-center justify-center text-white text-xl font-bold shadow-sm shrink-0">
+                {sanitizeCharacterName(character.name)[0]}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h1 className="text-lg font-bold text-gray-800">{sanitizeCharacterName(character.name)}</h1>
+                <p className="text-sm text-gray-500 truncate">{character.description}</p>
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="bg-white/70 backdrop-blur-sm border border-gray-200/60 rounded-2xl p-5">
+          <StorylineEditor characterId={characterId} standalone />
+        </div>
+      </div>
+    </div>
+  )
 }
 
 /** 根路径重定向：已登录 → /wechat（保持原跳转），未登录 → /intro（公开门面页，SP-11） */

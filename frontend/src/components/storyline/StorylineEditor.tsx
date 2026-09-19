@@ -71,17 +71,19 @@ const DEFAULT_ENDING: StorylineEnding = {
 
 interface StorylineEditorProps {
   characterId: string
+  /** 独立页面渲染（/roles/:id/storyline）：去掉嵌入 tab 时的分隔线，默认展开 */
+  standalone?: boolean
 }
 
 // ── 组件 ──
 
-export default function StorylineEditor({ characterId }: StorylineEditorProps) {
+export default function StorylineEditor({ characterId, standalone = false }: StorylineEditorProps) {
   const { data: configData, isLoading } = useStorylineConfig(characterId)
   const updateMutation = useUpdateStorylineConfig()
   const deleteMutation = useDeleteStorylineConfig()
   const detectMutation = useDetectStoryline()
 
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(standalone)
   const [enabled, setEnabled] = useState(false)
   const [timePerTurn, setTimePerTurn] = useState(30)
   const [maxDuration, setMaxDuration] = useState(10080)
@@ -249,7 +251,7 @@ export default function StorylineEditor({ characterId }: StorylineEditorProps) {
 
   if (isLoading) {
     return (
-      <div className="border-t border-gray-100 pt-3 mt-3">
+      <div className={standalone ? '' : 'border-t border-gray-100 pt-3 mt-3'}>
         <div className="text-xs text-gray-400 animate-pulse">加载剧情线配置…</div>
       </div>
     )
@@ -258,7 +260,7 @@ export default function StorylineEditor({ characterId }: StorylineEditorProps) {
   // ── 渲染 ──
 
   return (
-    <div className="border-t border-gray-100 pt-3 mt-3">
+    <div className={standalone ? '' : 'border-t border-gray-100 pt-3 mt-3'}>
       {/* 折叠触发 */}
       <button
         type="button"
