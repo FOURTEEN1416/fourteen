@@ -1,0 +1,180 @@
+"""对话内追问回归（2026-09-19 用户反馈）。
+
+用户报：「只有我发一条消息他才会回一条消息……我不接着发消息他就不回」
+—— 要的是真人式的「回复后没等到接话就自己再补一句」，
+而不是一问一答的客服/豆包式体验。
+"""
+
+from __future__ import annotations
+
+import time
+
+import pytest
+
+
+class _FakeUserMgr:
+    def get_bound_wxids(self):
+        return ["u1@im.wechat"]
+
+
+def _connector(tmp_path, monkeypatch, token="tok"):
+    from wechat_direct import wechat_connector as wc
+
+    monkeypatch.setattr(wc, "CONTEXT_TOKENS_PATH", str(tmp_path / "ctx.json"))
+    c = wc.WeChatConnector(_FakeUserMgr())
+    c.token = token
+    c._context_tokens = {"u1@im.wechat": {"token": "ctx-tok", "ts": time.time()}}
+    monkeypatch.setattr(c, "_in_quiet_hours", lambda: False)
+    return c
+
+
+# ── 登记 / 取消 ────────────────────────────────────────────
+
+def test_reply_schedules_followup(tmp_path, monkeypatch):
+    c = _connector(tmp_path, monkeypatch)
+    c._schedule_followup("u1@im.wechat", "还没呢，正想着你呢")
+
+    st = c._pending_followups["u1@im.wechat"]
+    assert st["step"] == 0
+    assert st["due"] > time.time() + 40          # 首次延迟 45s
+    assert st["last_reply"].startswith("还没呢")
+
+
+def test_user_reply_cancels_pending_followup(tmp_path, monkeypatch):
+    """用户接话后不得再追 —— 这是他反馈里最核心的预期。"""
+    c = _connector(tmp_path, monkeypatch)
+    c._schedule_followup("u1@im.wechat", "在吗")
+    assert c._pending_followups
+
+    c._cancel_followup("u1@im.wechat")
+    assert c._pending_followups == {}
+
+
+def test_no_followup_in_quiet_hours(tmp_path, monkeypatch):
+    c = _connector(tmp_path, monkeypatch)
+    monkeypatch.setattr(c, "_in_quiet_hours", lambda: True)
+    c._schedule_followup("u1@im.wechat", "晚安")
+    assert c._pending_followups == {}
+
+
+# ── 预算 ───────────────────────────────────────────────────
+
+def test_followup_daily_budget(tmp_path, monkeypatch):
+    from wechat_direct import wechat_connector as wc
+
+    c = _connector(tmp_path, monkeypatch)
+    assert c._followup_budget_ok("u1@im.wechat")
+    c._followup_daily["u1@im.wechat"] = wc._FOLLOWUP_DAILY_MAX
+    assert not c._followup_budget_ok("u1@im.wechat")
+
+
+def test_followup_budget_resets_next_day(tmp_path, monkeypatch):
+    c = _connector(tmp_path, monkeypatch)
+    c._followup_daily["u1@im.wechat"] = 999
+    c._followup_daily_date = "2000-01-01"
+    assert c._followup_budget_ok("u1@im.wechat")   # 跨日清零
+    assert c._followup_daily == {}
+
+
+# ── 发送与续排 ─────────────────────────────────────────────
+
+def test_send_followup_sends_and_schedules_second_round(tmp_path, monkeypatch):
+    c = _connector(tmp_path, monkeypatch)
+    monkeypatch.setattr(c, "_generate_followup", lambda prompt: "你怎么不理我了")
+
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        c, "send_text", lambda text, to_user="": (sent.append((text, to_user)), True)[1],
+    )
+
+    c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "在吗"})
+
+    assert sent == [("你怎么不理我了", "u1@im.wechat")]
+    # 还有第二轮延迟 → 已续排，且 step 递增
+    assert c._pending_followups["u1@im.wechat"]["step"] == 1
+    assert c._followup_daily["u1@im.wechat"] == 1
+
+
+def test_send_followup_stops_after_last_round(tmp_path, monkeypatch):
+    from wechat_direct import wechat_connector as wc
+
+    c = _connector(tmp_path, monkeypatch)
+    monkeypatch.setattr(c, "_generate_followup", lambda prompt: "最后一轮")
+    monkeypatch.setattr(c, "send_text", lambda text, to_user="": True)
+
+    last = len(wc._FOLLOWUP_DELAYS) - 1
+    c._send_followup("u1@im.wechat", {"step": last, "due": 0, "last_reply": "x"})
+    assert c._pending_followups == {}          # 不再续排，避免无限骚扰
+
+
+def test_send_followup_skips_when_delivery_fails(tmp_path, monkeypatch):
+    c = _connector(tmp_path, monkeypatch)
+    monkeypatch.setattr(c, "_generate_followup", lambda prompt: "在吗在吗")
+    monkeypatch.setattr(c, "send_text", lambda text, to_user="": False)
+
+    c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "x"})
+    assert c._pending_followups == {}          # 未送达不算，也不续排
+    assert c._followup_daily == {}
+
+
+def test_send_followup_respects_budget(tmp_path, monkeypatch):
+    from wechat_direct import wechat_connector as wc
+
+    c = _connector(tmp_path, monkeypatch)
+    c._followup_daily["u1@im.wechat"] = wc._FOLLOWUP_DAILY_MAX
+    c._followup_daily_date = time.strftime("%Y-%m-%d")
+    monkeypatch.setattr(c, "_generate_followup", lambda prompt: "还在吗")
+    monkeypatch.setattr(c, "send_text", lambda text, to_user="": pytest.fail("超预算不应发送"))
+
+    c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "x"})
+
+
+def test_send_followup_skips_empty_generation(tmp_path, monkeypatch):
+    c = _connector(tmp_path, monkeypatch)
+    monkeypatch.setattr(c, "_generate_followup", lambda prompt: "")
+    monkeypatch.setattr(c, "send_text", lambda text, to_user="": pytest.fail("空文本不应发送"))
+    c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "x"})
+
+
+# ── 生成守卫 ───────────────────────────────────────────────
+
+class _FakeLLM:
+    def __init__(self, out: str):
+        self.out = out
+        self.calls: list[str] = []
+
+    def chat_sync(self, query: str = "", **kw) -> str:
+        self.calls.append(query)
+        return self.out
+
+
+def _with_llm(c, out: str) -> _FakeLLM:
+    llm = _FakeLLM(out)
+    c.orchestrator = type("O", (), {"components": {"llm": llm}})()
+    return llm
+
+
+def test_generate_followup_accepts_normal(tmp_path, monkeypatch):
+    c = _connector(tmp_path, monkeypatch)
+    llm = _with_llm(c, "「你怎么不理我了？哼」")
+    assert c._generate_followup("p") == "你怎么不理我了？哼"
+    assert llm.calls == ["p"]
+
+
+def test_generate_followup_rejects_reasoning_leak(tmp_path, monkeypatch):
+    """与主动消息同源的输出清洗：推理腔不得作为消息发出。"""
+    c = _connector(tmp_path, monkeypatch)
+    _with_llm(c, "02:55属于深夜，不在早安或晚安的特定时间点，但更")
+    assert c._generate_followup("p") == ""
+
+
+def test_generate_followup_rejects_overlong(tmp_path, monkeypatch):
+    c = _connector(tmp_path, monkeypatch)
+    _with_llm(c, "啊" * 200)
+    assert c._generate_followup("p") == ""
+
+
+def test_generate_followup_returns_empty_without_llm(tmp_path, monkeypatch):
+    c = _connector(tmp_path, monkeypatch)
+    c.orchestrator = None
+    assert c._generate_followup("p") == ""

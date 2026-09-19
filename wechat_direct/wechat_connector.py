@@ -11,6 +11,7 @@ import concurrent.futures
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 from collections import OrderedDict
@@ -136,6 +137,28 @@ CREDENTIALS_PATH = os.path.expanduser("~/.weixin_cow_credentials.json")
 CONTEXT_TOKENS_PATH = str(
     Path(__file__).resolve().parent.parent / "data" / "wechat_context_tokens.json"
 )
+
+# ═══════════════════════════════════════════════════════════════
+#  对话内追问（2026-09-19）
+#
+#  用户反馈：「只有我发一条消息他才会回一条消息……我不接着发消息他就不回」
+#  —— 体感是「一问一答的客服」，不是「聊天」。
+#
+#  真人不只是等对方开口：回复完对方没接话时，会自己再补一句。
+#  既有的 ASE 主动消息做不到这件事 —— 它是 5 分钟 tick + 30 分钟冷却 +
+#  每日 8 条的**后台引擎**，消息也是通用的（想你/无聊/担心），
+#  与刚聊的话题无关。所以这里补上**对话内**的短时追问：
+#  回复成功后登记，到点对方仍未接话 → 用刚才的上下文再补一句。
+# ═══════════════════════════════════════════════════════════════
+
+# 追问延迟序列（秒）：第 1 次 45s，第 2 次 150s。之后不再追（避免骚扰）。
+_FOLLOWUP_DELAYS: tuple[float, ...] = (45.0, 150.0)
+# 扫描间隔（秒）
+_FOLLOWUP_TICK = 5.0
+# 单用户每日追问上限（独立预算，不吃 ASE 的 8 条配额）
+_FOLLOWUP_DAILY_MAX = 12
+# 追问文本长度上限
+_FOLLOWUP_MAX_CHARS = 40
 
 
 def _load_credentials(path=None):
@@ -435,6 +458,12 @@ class WeChatConnector:
         self._received_msgs: OrderedDict = OrderedDict()  # 有序字典，支持按插入顺序淘汰
         self._context_tokens: dict = {}  # {user_id: {"token": str, "ts": float}}
         self._load_context_tokens()
+
+        # ── 对话内追问状态（见文件头「对话内追问」）──
+        self._pending_followups: dict[str, dict[str, Any]] = {}  # {user_id: {step,due,last_reply}}
+        self._followup_lock = threading.Lock()
+        self._followup_daily: dict[str, int] = {}   # {user_id: 当日已追问条数}
+        self._followup_daily_date = ""
         self._last_user_id: str = ""
         # 每条消息在独立线程中处理，避免阻塞轮询循环
         self._msg_executor = concurrent.futures.ThreadPoolExecutor(
@@ -720,6 +749,12 @@ class WeChatConnector:
             "reconnect_attempts": 0,
         })
         logger.info("微信登录成功，开始收消息...")
+        # 对话内追问守护线程（只启一次；run() 可能因重连被多次调用）
+        if not getattr(self, "_followup_thread_started", False):
+            self._followup_thread_started = True
+            threading.Thread(
+                target=self._followup_thread, name="wx-followup", daemon=True,
+            ).start()
         self._poll_loop()
         # 轮询退出时持久化断开状态（保留 started_at 方便排查）
         _merge_state({"connected": False})
@@ -866,6 +901,123 @@ class WeChatConnector:
             self._save_context_tokens()
             logger.debug("Cleaned up %d expired context_tokens entries", len(expired))
 
+    # ── 对话内追问（见文件头说明）─────────────────────────────
+
+    def _schedule_followup(self, user_id: str, bot_reply: str) -> None:
+        """回复成功后登记一次待发追问。"""
+        if not user_id or not bot_reply:
+            return
+        with self._followup_lock:
+            if self._in_quiet_hours():
+                return
+            self._pending_followups[user_id] = {
+                "step": 0,
+                "due": time.time() + _FOLLOWUP_DELAYS[0],
+                "last_reply": bot_reply,
+            }
+
+    def _cancel_followup(self, user_id: str) -> None:
+        """用户接话 → 取消待发追问。"""
+        with self._followup_lock:
+            self._pending_followups.pop(user_id, None)
+
+    def _in_quiet_hours(self) -> bool:
+        """免打扰时段判定（读跨 worker 真源 data/scheduler_config.json）。"""
+        start, end = 23, 7
+        try:
+            cfg_path = Path(__file__).resolve().parent.parent / "data" / "scheduler_config.json"
+            if cfg_path.exists():
+                qh = (json.loads(cfg_path.read_text(encoding="utf-8")) or {}).get("quiet_hours") or {}
+                start, end = int(qh.get("start", 23)), int(qh.get("end", 7))
+        except Exception:  # noqa: BLE001
+            pass
+        hour = time.localtime().tm_hour
+        if start == end:
+            return False
+        return (start <= hour < end) if start < end else (hour >= start or hour < end)
+
+    def _followup_budget_ok(self, user_id: str) -> bool:
+        """单用户每日追问上限（独立预算，不吃 ASE 的 8 条）。"""
+        today = time.strftime("%Y-%m-%d")
+        if today != self._followup_daily_date:
+            self._followup_daily_date = today
+            self._followup_daily.clear()
+        return self._followup_daily.get(user_id, 0) < _FOLLOWUP_DAILY_MAX
+
+    def _followup_thread(self) -> None:
+        """守护线程：到点且用户仍未接话 → 生成并发送一条追问。"""
+        while not self._stop:
+            time.sleep(_FOLLOWUP_TICK)
+            now = time.time()
+            due: list[tuple[str, dict[str, Any]]] = []
+            with self._followup_lock:
+                for uid, st in list(self._pending_followups.items()):
+                    if now >= st.get("due", 0):
+                        due.append((uid, st))
+                        del self._pending_followups[uid]
+            for uid, st in due:
+                try:
+                    self._send_followup(uid, st)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[wx][step=followup_error] user=%s error=%s", uid, e)
+
+    def _send_followup(self, user_id: str, st: dict[str, Any]) -> None:
+        if self._in_quiet_hours() or not self._followup_budget_ok(user_id):
+            return
+        if not user_id or not self.token:
+            return
+
+        step = int(st.get("step", 0)) + 1
+        last_reply = str(st.get("last_reply", ""))[:80]
+        prompt = (
+            "你在微信里和人聊天。你刚说过：\n"
+            f"「{last_reply}」\n"
+            "对方没有回你。请像真人一样自然地再补一句（可撒娇/吐槽/追问/换个话题），"
+            "口语化，15 字以内，不要重复刚才的意思，不要解释自己在做什么。"
+            "只输出这一句话。"
+        )
+        text = self._generate_followup(prompt)
+        if not text:
+            return
+        if not self.send_text(text, to_user=user_id):
+            logger.warning("[wx][step=followup_send_failed] user=%s step=%d", user_id, step)
+            return
+
+        self._followup_daily[user_id] = self._followup_daily.get(user_id, 0) + 1
+        logger.info(
+            "[wx][step=followup_sent] user=%s step=%d text=%r", user_id, step, text[:60],
+        )
+        # 还有下一轮延迟且用户仍未接话 → 继续排
+        if step < len(_FOLLOWUP_DELAYS):
+            with self._followup_lock:
+                if user_id not in self._pending_followups:
+                    self._pending_followups[user_id] = {
+                        "step": step,
+                        "due": time.time() + _FOLLOWUP_DELAYS[step],
+                        "last_reply": text,
+                    }
+
+    def _generate_followup(self, prompt: str) -> str:
+        """用角色 LLM 生成一句追问；失败/不合规返回空串（宁可不发）。"""
+        orch = self.orchestrator
+        llm = (getattr(orch, "components", None) or {}).get("llm") if orch else None
+        if llm is None or not hasattr(llm, "chat_sync"):
+            return ""
+        try:
+            raw = llm.chat_sync(query=prompt, max_tokens=60, temperature=0.95)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[wx][step=followup_gen_failed] error=%s", e)
+            return ""
+        text = str(raw or "").strip().strip('"\'“”‘’「」『』')
+        if "\n" in text:
+            text = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+        # 简单的合规守卫：过短/过长/含推理腔一律丢弃（宁可不发，也不发怪话）
+        if len(text) < 2 or len(text) > _FOLLOWUP_MAX_CHARS:
+            return ""
+        if any(marker in text for marker in ("特定时间点", "时间段", "作为AI", "要求：", "消息：")):
+            return ""
+        return text
+
     def _handle_message(self, raw_msg):
         """处理一条消息（全链路结构化日志：接收 → 路由 → LLM → 回复）"""
         msg_type = raw_msg.get("message_type", 0)
@@ -888,6 +1040,8 @@ class WeChatConnector:
             self._save_context_tokens()
         if from_user:
             self._last_user_id = from_user
+            # 用户接话了 → 取消该用户的待发追问（追问只在"对方没接话"时才发）
+            self._cancel_followup(from_user)
 
         items = raw_msg.get("item_list", [])
         text = ""
@@ -1017,6 +1171,8 @@ class WeChatConnector:
                 "[wx][step=reply_sent] msg_id=%s user=%s reply=%r",
                 msg_id, from_user, reply[:80],
             )
+            # 回复成功 → 登记对话内追问（对方 45s/150s 内没接话就自己再补一句）
+            self._schedule_followup(from_user, reply)
         except Exception as e:  # noqa: BLE001
             logger.exception(
                 "[wx][step=reply_send_failed] msg_id=%s user=%s error=%s",
