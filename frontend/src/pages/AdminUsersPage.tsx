@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { AnimatedPage, EmptyState, ConfirmDialog } from '../components/shared'
 import {
   adminListUsers, adminCreateUser, adminUpdateUser, adminDeleteUser,
@@ -108,6 +108,20 @@ export default function AdminUsersPage() {
       return field
     })
   }, [])
+
+  // 排序真正落到数据上（此前 handleSort 只翻转表头箭头，行序纹丝不动）。
+  // 后端 /admin/users 无 sort 参数，排序作用于当前页已加载行。
+  const sortedUsers = useMemo(() => {
+    if (!sortField) return users
+    const dir = sortDir === 'asc' ? 1 : -1
+    return [...users].sort((a, b) => {
+      const av = a[sortField]
+      const bv = b[sortField]
+      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
+      if (typeof av === 'boolean' && typeof bv === 'boolean') return (Number(av) - Number(bv)) * dir
+      return String(av ?? '').localeCompare(String(bv ?? '')) * dir
+    })
+  }, [users, sortField, sortDir])
 
   // ═════════════════════════════════════════════════
   //  CRUD 操作
@@ -315,7 +329,7 @@ export default function AdminUsersPage() {
           {/* ═══ 表格（加载 / 空 / 数据） ═══ */}
           {!error && (
             <UserTable
-              users={users}
+              users={sortedUsers}
               total={total}
               loading={loading}
               sortField={sortField}

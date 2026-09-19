@@ -34,7 +34,7 @@ const CAPABILITIES = [
     tone: 'yellow' as const,
     tag: '记忆',
     title: '长期记忆',
-    desc: '三层记忆管线持续归档——工作记忆、情景记录、长期向量库；8 级好感阶梯随相处慢慢养成。',
+    desc: '三层记忆管线持续归档——工作记忆、情景记录、长期向量库；9 级好感阶梯（陌生人→羁绊）随相处慢慢养成。',
   },
   {
     icon: BellRing,
@@ -202,6 +202,7 @@ export default function IntroPage() {
             </p>
             <p className="text-[11px] text-gray-500 mb-2.5">
               以下平台均 OpenAI 兼容：拿到 Key 后在「设置 → LLM 配置」粘贴，填对应 API 地址即可。
+              登录后的 LLM 配置页内嵌各供应商的实时申请教程，以其为准。
             </p>
             <p className="text-xs font-semibold text-gray-700 mb-1.5">🇨🇳 国内直连 · 免费且量大管饱</p>
             <ul className="text-xs text-gray-600 leading-relaxed space-y-1.5 list-disc list-inside">
@@ -227,7 +228,8 @@ export default function IntroPage() {
               </li>
             </ul>
             <p className="text-[11px] text-gray-400 mt-2.5">
-              免费模型通常有并发限制，适合日常陪伴；各平台政策以其现行说明为准。
+              上述额度为 2026-09 时点的公开信息快照，免费模型通常有并发限制，适合日常陪伴；
+              各平台政策以其现行说明为准。
             </p>
           </div>
         </section>

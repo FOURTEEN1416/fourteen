@@ -1,4 +1,4 @@
-import { User, Mic, MessageSquare, Database, Smile, Clock } from 'lucide-react'
+import { User, Mic, MessageSquare, Database, Clock } from 'lucide-react'
 import type { RoleSettingsTab } from '../../types/framework'
 
 export const SUB_TABS: { key: RoleSettingsTab; label: string; icon: React.ReactNode }[] = [
@@ -6,7 +6,6 @@ export const SUB_TABS: { key: RoleSettingsTab; label: string; icon: React.ReactN
   { key: 'voice', label: '语音', icon: <Mic className="w-3.5 h-3.5" /> },
   { key: 'message', label: '消息', icon: <MessageSquare className="w-3.5 h-3.5" /> },
   { key: 'data', label: '数据', icon: <Database className="w-3.5 h-3.5" /> },
-  { key: 'stickers', label: '表情包', icon: <Smile className="w-3.5 h-3.5" /> },
   { key: 'timeline', label: '时间线', icon: <Clock className="w-3.5 h-3.5" /> },
 ]
 

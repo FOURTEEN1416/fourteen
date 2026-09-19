@@ -16,6 +16,7 @@ import {
   FileUp, Check, Users, Eye, Copy, Bot,
 } from 'lucide-react'
 import { CLONE_AGENT_GUIDE } from '../constants/cloneAgentGuide'
+import { DEFAULT_PERSONALITY, DEFAULT_SPEAKING_STYLE, PERSONALITY_LABELS } from '../constants/persona'
 import { anchorTone } from '../utils/character'
 
 type CreateMethod = 'ai-chat' | 'wechat-clone' | 'file-import'
@@ -61,13 +62,11 @@ const METHODS: { key: CreateMethod; label: string; gradient: string }[] = [
   { key: 'file-import', label: '文件导入', gradient: 'from-macaron-mint to-macaron-mint-deep' },
 ]
 
-const PERSONALITY_KEYS = [
-  { key: 'warmth', label: '温暖', color: 'bg-macaron-yellow-deep' },
-  { key: 'playfulness', label: '活泼', color: 'bg-macaron-blue-deep' },
-  { key: 'independence', label: '独立', color: 'bg-macaron-mint-deep' },
-  { key: 'jealousy', label: '占有欲', color: 'bg-macaron-yellow-deep' },
-  { key: 'stubbornness', label: '固执', color: 'bg-macaron-blue-deep' },
-]
+const PERSONALITY_KEYS = (Object.keys(DEFAULT_PERSONALITY) as Array<keyof typeof DEFAULT_PERSONALITY>).map((key, i) => ({
+  key,
+  label: PERSONALITY_LABELS[key],
+  color: ['bg-macaron-yellow-deep', 'bg-macaron-blue-deep', 'bg-macaron-mint-deep'][i % 3],
+}))
 
 // ═══ AI Chat Tab ═══
 function AIChatTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaState>) => void }) {
@@ -596,8 +595,8 @@ function PresetPills({ onSelect }: { onSelect: (p: Partial<PersonaState>) => voi
         name: detail.name,
         description: detail.description,
         anchors: detail.anchors?.length ? detail.anchors : detail.tags?.slice(0, 8) || [],
-        personality: detail.personality || { warmth: 0.6, playfulness: 0.5, independence: 0.5, jealousy: 0.3, stubbornness: 0.4 },
-        speakingStyle: detail.speakingStyle || { formality: 0.5, expressiveness: 0.5, humor: 0.5, directness: 0.5 },
+        personality: detail.personality || { ...DEFAULT_PERSONALITY },
+        speakingStyle: detail.speakingStyle || { ...DEFAULT_SPEAKING_STYLE },
       })
     } catch (err) {
       if (import.meta.env.DEV) console.warn('获取预设详情失败，使用概要数据:', err)

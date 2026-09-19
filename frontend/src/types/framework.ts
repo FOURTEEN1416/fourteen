@@ -16,49 +16,6 @@ export interface WeChatPageState {
   savedConnections: SavedConnection[]
 }
 
-export interface PersonaCard {
-  id: string
-  name: string
-  avatar?: string
-  description?: string
-  personality: {
-    warmth: number
-    playfulness: number
-    independence: number
-    jealousy: number
-    stubbornness: number
-  }
-  core_anchors: string[]
-  speaking_style: {
-    formality: number
-    humor: number
-    liveliness: number
-    gentleness: number
-    catchphrases: string[]
-  }
-  voice: {
-    engine: "mimo-tts"
-    speaker_name: string
-    rate?: number
-    pitch?: number
-    volume?: number
-    server_url?: string
-    ref_audio?: string
-    ref_text?: string
-  }
-  proactive: {
-    enabled: boolean
-    daily_limit: number
-    min_interval: number
-    cooldown: number
-    urgency_threshold: number
-  }
-  knowledge_docs: string[]
-  created_at: string
-  updated_at: string
-  user_id: string
-}
-
 export interface User {
   id: string
   name: string
@@ -111,7 +68,7 @@ export interface WorkspaceTabs {
 
 export type SettingsTab = "general" | "llm" | "voice" | "security" | "extensions" | "logs"
 
-export type RoleSettingsTab = "basic" | "voice" | "message" | "data" | "stickers" | "timeline"
+export type RoleSettingsTab = "basic" | "voice" | "message" | "data" | "timeline"
 
 export type CreateMethod = "ai-chat" | "wechat-clone" | "file-import"
 

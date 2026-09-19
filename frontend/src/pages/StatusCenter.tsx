@@ -11,11 +11,25 @@ import {
   useMemoryFacts,
 } from '../hooks/useQueries'
 import type { AchievementsResponse, DashboardStats } from '../types/api'
+import { AFFINITY_STAGES, EMOTION_COLORS, type AffinityStage } from '../constants/persona'
 
-function getAffinityLabel(affinity: number): string {
-  if (affinity >= 70) return '亲密'
-  if (affinity >= 30) return '熟悉'
-  return '初识'
+/** 亲密等级：优先用后端 GET /api/shisi/emotion-stage/stages 的真实阶段定义，
+ *  请求失败时回落到 AFFINITY_STAGES 常量（与后端 stage_config.py 默认一致） */
+function useAffinityStages() {
+  return useQuery({
+    queryKey: ['emotion', 'stages'],
+    queryFn: () =>
+      client
+        .get('/shisi/emotion-stage/stages')
+        .then(r => (r.data as { data: AffinityStage[] }).data ?? AFFINITY_STAGES),
+    staleTime: 10 * 60 * 1000,
+  })
+}
+
+function getAffinityLabel(affinity: number, stages: AffinityStage[]): string {
+  if (stages.length === 0) return '—'
+  const hit = stages.find(s => affinity >= s.min && affinity <= s.max)
+  return (hit ?? (affinity >= stages[stages.length - 1].min ? stages[stages.length - 1] : stages[0])).name
 }
 
 /** 记忆三层管线的语义色（与 CATEGORY_META 同体系） */
@@ -41,6 +55,7 @@ export default function StatusCenter() {
   const { data: achievements } = useAchievements(activeCharacter?.id)
   const { data: trendData } = useEmotionTrend(7)
   const { data: distData } = useEmotionDistribution(7)
+  const { data: affinityStages } = useAffinityStages()
 
   if (!activeCharacter) {
     return (
@@ -51,7 +66,10 @@ export default function StatusCenter() {
   }
 
   const emotionLabel = emotionData?.primary?.type || stats?.current_emotion || '—'
-  const affinityLabel = getAffinityLabel((stats as DashboardStats | undefined)?.affinity ?? 0)
+  const affinityLabel = getAffinityLabel(
+    (stats as DashboardStats | undefined)?.affinity ?? 0,
+    affinityStages ?? AFFINITY_STAGES,
+  )
   const memoryCount = (stats as DashboardStats | undefined)?.recent_memories ?? 0
   const recentFacts = facts ?? []
 
@@ -116,11 +134,7 @@ function EmotionInsightCard({
     .join(' ')
 
   const maxCount = Math.max(1, ...distribution.map(d => d.count))
-  const emotionColor: Record<string, string> = {
-    开心: 'bg-macaron-yellow', 平常: 'bg-macaron-blue', 期待: 'bg-macaron-mint',
-    害羞: 'bg-pink-300', 惊讶: 'bg-sky-300', 担忧: 'bg-indigo-300',
-    生气: 'bg-red-300', 伤心: 'bg-slate-300', 委屈: 'bg-amber-300', 感动: 'bg-rose-300',
-  }
+  const emotionColor = EMOTION_COLORS
 
   return (
     <div className="glass-card rounded-xl p-4">

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import client from '../../api/client'
-import { queryKeys } from '../../hooks/useQueries'
+import { queryKeys, useVoiceStatus, useDeleteCharacter } from '../../hooks/useQueries'
 import { updateCharacter } from '../../api/characters'
 import { useErrorStore } from '../../store/errorStore'
 import { sanitizeCharacterName } from '../../utils/character'
@@ -12,8 +13,9 @@ import ConfirmDialog from '../shared/ConfirmDialog'
 import StorylineEditor from '../storyline/StorylineEditor'
 import type { RoleSettingsTab, RoleSettingsCharacter } from '../../types/framework'
 import type { UnifiedCharacterUpdate } from '../../types/api'
-import { Save, Trash2, Copy, Smile } from 'lucide-react'
+import { Save, Trash2, Copy } from 'lucide-react'
 import { ENGINE_OPTIONS, MIMO_MODELS } from './RoleSettingsConstants'
+import { PERSONALITY_LABELS, SPEAKING_STYLE_LABELS, normalizePersonality, normalizeSpeakingStyle } from '../../constants/persona'
 import { enrichCharacter, proactiveGetConfig, proactiveHistory, proactiveSend, proactivePause, updateProactiveConfig, knowledgeCollectConfig, updateKnowledgeCollectConfig } from '../../api/system'
 import Section from './RoleSettingsSection'
 import KnowledgePreview from '../storyline/KnowledgePreview'
@@ -24,9 +26,9 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
   const qc = useQueryClient()
   const [name, setName] = useState(character.name)
   const [description, setDescription] = useState(character.description ?? '')
-  const [personality, setPersonality] = useState<Record<string, number>>(character.personality || {})
+  const [personality, setPersonality] = useState<Record<string, number>>(() => normalizePersonality(character.personality))
   const [anchors, setAnchors] = useState<string[]>(character.core_anchors || [])
-  const [speaking, setSpeaking] = useState<Record<string, number>>(character.speaking_style || {})
+  const [speaking, setSpeaking] = useState<Record<string, number>>(() => normalizeSpeakingStyle(character.speaking_style))
   const [catchphrases, setCatchphrases] = useState<string[]>(character.catchphrases || [])
   const [saving, setSaving] = useState(false)
 
@@ -37,9 +39,9 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
   useEffect(() => {
     setName(character.name)
     setDescription(character.description ?? '')
-    setPersonality(character.personality || {})
+    setPersonality(normalizePersonality(character.personality))
     setAnchors(character.core_anchors || [])
-    setSpeaking(character.speaking_style || {})
+    setSpeaking(normalizeSpeakingStyle(character.speaking_style))
     setCatchphrases(character.catchphrases || [])
   }, [characterId]) // eslint-disable-line react-hooks/exhaustive-deps
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -99,21 +101,21 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
       <Section title="性格特质">
         <div className="space-y-4">
           {(Object.entries(personality) as [string, number][]).map(([key, val]) => {
-            const labels: Record<string, { zh: string; emoji: string }> = {
-              warmth: { zh: '温暖', emoji: '☀️' },
-              playfulness: { zh: '俏皮', emoji: '🎭' },
-              independence: { zh: '独立', emoji: '🦅' },
-              jealousy: { zh: '吃醋', emoji: '💢' },
-              stubbornness: { zh: '固执', emoji: '🧱' },
+            const emoji: Record<string, string> = {
+              warmth: '☀️',
+              playfulness: '🎭',
+              independence: '🦅',
+              jealousy: '💢',
+              stubbornness: '🧱',
             }
-            const info = labels[key] || { zh: key, emoji: '' }
+            const info = { zh: PERSONALITY_LABELS[key] || key, emoji: emoji[key] || '' }
             return (
               <div key={key} className="flex items-center gap-4">
                 <div className="w-20 shrink-0">
                   <span className="text-xs text-gray-600">{info.emoji} {info.zh}</span>
                 </div>
                 <div className="flex-1">
-                  <Slider value={val} min={0} max={1} step={0.01} label={labels[key]?.zh || key} onChange={v => setPersonality((prev: Record<string, number>) => ({ ...prev, [key]: v }))} />
+                  <Slider value={val} min={0} max={1} step={0.01} label={info.zh} onChange={v => setPersonality((prev: Record<string, number>) => ({ ...prev, [key]: v }))} />
                 </div>
                 <span className="w-10 text-right text-xs font-mono text-gray-400">{(val * 100).toFixed(0)}</span>
               </div>
@@ -130,7 +132,7 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
       <Section title="说话风格">
         <div className="space-y-4">
           {(Object.entries(speaking) as [string, number][]).map(([key, val]) => {
-            const labels: Record<string, string> = { formality: '正式度', humor: '幽默感', liveliness: '活泼度', gentleness: '温柔度' }
+            const labels = SPEAKING_STYLE_LABELS
             return (
               <div key={key} className="flex items-center gap-4">
                 <div className="w-20 shrink-0"><span className="text-xs text-gray-600">{labels[key] || key}</span></div>
@@ -339,7 +341,15 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
   // voice_config 是 VoiceConfig | 自定义对象 联合类型；mimo_model 是自定义字段，需要运行时安全访问
   const mimoModelInitial = (character.voice_config as { mimo_model?: string } | null | undefined)?.mimo_model
   const [mimoModel, setMimoModel] = useState(mimoModelInitial || 'mimo-v2.5-tts')
-  const [status] = useState('就绪')
+  // 状态来自 GET /voice/status 真实探测（曾写死 useState('就绪')）
+  const { data: voiceStatus, isLoading: voiceStatusLoading } = useVoiceStatus()
+  const status = voiceStatusLoading
+    ? '检测中…'
+    : voiceStatus?.last_error
+      ? `异常：${voiceStatus.last_error}`
+      : voiceStatus?.enabled
+        ? '就绪'
+        : '语音引擎未启用'
   // 保存接线（GAP-4 修复，2026-09-01）：POST /characters/{id}/voice 落盘
   const [saving, setSaving] = useState(false)
   const [savedTick, setSavedTick] = useState(false)
@@ -687,6 +697,8 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
 // ═══ Tab: Data ═══
 
 function DataTab({ character }: { character: RoleSettingsCharacter }) {
+  const navigate = useNavigate()
+  const deleteMutation = useDeleteCharacter()
   const [showDelete, setShowDelete] = useState(false)
   const [enriching, setEnriching] = useState(false)
   const [enrichResult, setEnrichResult] = useState<{
@@ -891,37 +903,28 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
         </div>
       </Section>
 
-      <ConfirmDialog open={showDelete} title="确认删除角色" message={`确定要删除「${sanitizeCharacterName(character.name)}」吗？此操作不可恢复。`} confirmText="确认删除" cancelText="取消" variant="danger" onConfirm={() => setShowDelete(false)} onCancel={() => setShowDelete(false)} />
-    </div>
-  )
-}
-
-// ═══ Tab: Stickers ═══
-
-function StickersTab() {
-  const EMOJIS = ['😊', '😘', '🥰', '😭', '😤', '🤔', '💕', '✨', '🎉', '😅', '😂', '🥺', '😍', '🙈', '💪', '🔥', '👍', '👋']
-
-  return (
-    <div className="space-y-4">
-      <Section title="常用表情">
-        <div className="grid grid-cols-5 gap-2 sm:grid-cols-6">
-          {EMOJIS.map(emoji => (
-            <button key={emoji} className="aspect-square rounded-xl bg-white border border-gray-100 text-2xl flex items-center justify-center hover:bg-primary-50 hover:border-primary-200 hover:scale-110 transition-all active:scale-95">
-              {emoji}
-            </button>
-          ))}
-        </div>
-      </Section>
-      <Section title="自定义贴图">
-        <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center hover:border-primary-300 transition-colors cursor-pointer">
-          <Smile className="w-8 h-8 text-gray-400 mx-auto" />
-          <p className="text-xs text-gray-400 mt-2">上传自定义贴图</p>
-          <p className="text-[10px] text-gray-400 mt-0.5">PNG / GIF / JPEG · 每张 ≤ 5MB</p>
-        </div>
-      </Section>
-      <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
-        <p className="text-xs text-gray-400">自定义贴图保存接口开发中</p>
-      </div>
+      <ConfirmDialog
+        open={showDelete}
+        title="确认删除角色"
+        message={`确定要删除「${sanitizeCharacterName(character.name)}」吗？此操作不可恢复。`}
+        confirmText={deleteMutation.isPending ? '删除中…' : '确认删除'}
+        cancelText="取消"
+        variant="danger"
+        onConfirm={() => {
+          deleteMutation.mutate(character.id, {
+            onSuccess: () => {
+              useErrorStore.getState().addToast({ type: 'success', message: `角色「${sanitizeCharacterName(character.name)}」已删除` })
+              navigate('/roles', { replace: true })
+            },
+            onError: (err: unknown) => {
+              setShowDelete(false)
+              const msg = err instanceof Error ? err.message : '删除失败，请重试'
+              useErrorStore.getState().addToast({ type: 'error', message: msg })
+            },
+          })
+        }}
+        onCancel={() => setShowDelete(false)}
+      />
     </div>
   )
 }
@@ -947,7 +950,6 @@ function ActiveTab({ tab, character }: { tab: RoleSettingsTab; character: RoleSe
     case 'voice': return <VoiceTab character={character} />
     case 'message': return <MessageTab character={character} />
     case 'data': return <DataTab character={character} />
-    case 'stickers': return <StickersTab />
     case 'timeline': return <TimelineTab character={character} />
   }
 }

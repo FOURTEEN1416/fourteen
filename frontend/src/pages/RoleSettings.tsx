@@ -8,7 +8,7 @@ import { SUB_TABS } from '../components/admin/RoleSettingsConstants'
 import RoleSettingsTabs from '../components/admin/RoleSettingsTabs'
 
 export default function RoleSettings() {
-  const { userId, roleId } = useParams<{ userId: string; roleId: string }>()
+  const { roleId } = useParams<{ roleId: string }>()
   const [activeTab, setActiveTab] = useState<RoleSettingsTab>('basic')
 
   const characterId = roleId ? decodeURIComponent(roleId) : ''
@@ -45,9 +45,10 @@ export default function RoleSettings() {
               <p className="text-sm text-gray-500 truncate">{character.description}</p>
               <div className="flex items-center gap-3 mt-1.5">
                 <span className="text-[11px] text-gray-400">ID: {characterId}</span>
-                <span className="text-[11px] text-gray-400">用户: {userId || 'default'}</span>
-                <span className="flex items-center gap-1 text-[11px] text-green-600">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400" /> 活跃
+                <span className="text-[11px] text-gray-400">用户: {character.user_id || '未绑定'}</span>
+                <span className={`flex items-center gap-1 text-[11px] ${character.is_active ? 'text-green-600' : 'text-gray-400'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${character.is_active ? 'bg-green-400' : 'bg-gray-300'}`} />
+                  {character.is_active ? '活跃' : '未激活'}
                 </span>
               </div>
             </div>

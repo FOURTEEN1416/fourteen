@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { DEFAULT_PERSONALITY, DEFAULT_SPEAKING_STYLE } from '../constants/persona'
 
 // ═══ Character Builder shared state ═══
 // Used by CreateRole page to push live persona updates to sidebar
@@ -24,8 +25,8 @@ const EMPTY: PersonaState = {
   name: '',
   description: '',
   anchors: [],
-  personality: { warmth: 0.5, playfulness: 0.5, independence: 0.5, jealousy: 0.3, stubbornness: 0.3 },
-  speakingStyle: { formality: 0.5, humor: 0.5, liveliness: 0.5, gentleness: 0.7 },
+  personality: { ...DEFAULT_PERSONALITY },
+  speakingStyle: { ...DEFAULT_SPEAKING_STYLE },
 }
 
 export const useCharacterBuilderStore = create<CharacterBuilderState>((set) => ({

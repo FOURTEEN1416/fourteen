@@ -538,4 +538,29 @@ describe('AdminUsersPage', () => {
     const pageCall = mockAdminListUsers.mock.lastCall
     expect(pageCall?.[0]).toBe(2)
   })
+
+  // ────────────────────────────────────────────────
+  //  15. 列排序真实生效（回归：2026-09-19 审计发现排序只翻转表头箭头，行序不动）
+  // ────────────────────────────────────────────────
+  it('column sorting reorders the rendered rows', async () => {
+    const { container } = renderComponent()
+    await waitForUserData('admin@test.com')
+
+    const emailOrder = () =>
+      Array.from(container.querySelectorAll('td'))
+        .map(td => td.textContent?.trim() ?? '')
+        .filter(t => t.endsWith('@test.com'))
+
+    // 初始 sortField=id / sortDir=desc → id 最大的 viewer 在前
+    expect(emailOrder()[0]).toBe('viewer@test.com')
+
+    // 点击 ID 表头 → 同列翻转方向 → asc，admin(id=1) 提到首位
+    const idHeader = Array.from(container.querySelectorAll('th')).find(th => th.textContent?.trim() === 'ID')
+    expect(idHeader).toBeDefined()
+    fireEvent.click(idHeader!)
+
+    await waitFor(() => {
+      expect(emailOrder()[0]).toBe('admin@test.com')
+    })
+  })
 })
