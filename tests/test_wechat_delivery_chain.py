@@ -13,8 +13,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
+
+import pytest
 
 # ═══════════════════════════════════════════════════════════════
 #  ① 业务返回码判定
@@ -303,3 +306,53 @@ def test_delivery_failure_does_not_commit_quota(monkeypatch):
     sched._check_ase()
 
     assert engine._daily_message_count == 0, "未送达不得消耗配额"
+
+
+# ═══════════════════════════════════════════════════════════════
+#  ⑥ websocket 零客户端不得算作送达（生产 13:33 实证：消息只进了
+#     console 日志却被记成「已送达: websocket」并提交配额）
+# ═══════════════════════════════════════════════════════════════
+
+def _ws_server(clients: set):
+    from api.websocket_server import WebSocketServer
+
+    srv = WebSocketServer.__new__(WebSocketServer)  # 跳过 __init__（不起线程）
+    srv._clients = clients
+    srv._client_lock = asyncio.Lock()
+    return srv
+
+
+class _FakeWS:
+    def __init__(self, ok: bool = True):
+        self.ok = ok
+
+    async def send(self, msg: str):
+        if not self.ok:
+            raise RuntimeError("connection closed")
+
+
+def test_websocket_proactive_zero_clients_raises():
+    srv = _ws_server(set())
+    with pytest.raises(RuntimeError, match="未送达任何客户端"):
+        asyncio.run(srv.broadcast_proactive("hi"))
+
+
+def test_websocket_proactive_all_clients_fail_raises():
+    srv = _ws_server({_FakeWS(ok=False)})
+    with pytest.raises(RuntimeError, match="未送达任何客户端"):
+        asyncio.run(srv.broadcast_proactive("hi"))
+
+
+def test_websocket_proactive_success_does_not_raise():
+    srv = _ws_server({_FakeWS(ok=True)})
+    asyncio.run(srv.broadcast_proactive("hi"))  # 不抛即通过
+
+
+def test_send_to_all_skipped_channel_is_logged(caplog):
+    """通道未就绪（instance=None）必须打日志，不得静默跳过。"""
+    sched = _scheduler()
+    sched._channel_instances = {}  # wechat / websocket 均未就绪
+    sched._send = lambda msg: None
+
+    assert asyncio.run(sched._send_to_all("hi")) is False
+    assert any("未就绪" in r.message for r in caplog.records)

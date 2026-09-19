@@ -211,8 +211,52 @@ class WebSocketServer:
                 await websocket.close()
 
     async def broadcast_proactive(self, content: str):
+        """主动消息投递 —— **真实送达语义**（2026-09-19 修复）。
+
+        ⚠️ 旧实现零客户端也正常返回，于是 `_send_to_all()` 把「没有任何人收到」
+        记成「主动消息已送达: websocket」并据此提交配额 —— 与微信通道
+        `ret=-2 prepare failed` 被谎报是同一类问题（第六层）。
+        现在：无客户端或全部客户端发送失败 → 抛异常，由调用方判定为未送达。
+
+        其余 broadcast_*（事件通知）保持 fire-and-forget 语义，不受影响。
+        """
         msg = json.dumps({"type": "proactive", "content": content}, ensure_ascii=False)
-        await self._parallel_broadcast(msg)
+        delivered = await self._broadcast_count_delivered(msg)
+        if delivered == 0:
+            raise RuntimeError(
+                f"websocket 主动消息未送达任何客户端（client_count={self.client_count}）"
+            )
+
+    async def _broadcast_count_delivered(self, message: str) -> int:
+        """广播并返回**实际送达的客户端数**。
+
+        与 `_parallel_broadcast` 的区别：本方法统计成功数而非吞掉结果，
+        供「投递是否真实发生」的判定使用。
+        """
+        disconnected: set = set()
+
+        async def send_to_client(ws) -> bool:
+            try:
+                await ws.send(message)
+                return True
+            except websockets.exceptions.ConnectionClosed:
+                disconnected.add(ws)
+            except Exception:  # noqa: BLE001
+                disconnected.add(ws)
+            return False
+
+        async with self._client_lock:
+            clients = list(self._clients)
+        if not clients:
+            return 0
+        results = await asyncio.gather(
+            *[send_to_client(ws) for ws in clients], return_exceptions=True
+        )
+        delivered = sum(1 for r in results if r is True)
+        if disconnected:
+            async with self._client_lock:
+                self._clients -= disconnected
+        return delivered
 
     async def broadcast_shisi_event(self, event_type: str, data: dict[str, Any]):
         msg = json.dumps({"type": event_type, "data": data}, ensure_ascii=False)

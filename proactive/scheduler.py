@@ -467,6 +467,11 @@ class ProactiveScheduler:
         for name in self._REAL_CHANNELS:
             sender = self._channel_instances.get(name)
             if sender is None:
+                # 「通道未就绪」必须可见：旧实现静默 continue，导致
+                # 「为什么微信一条都没发」在生产日志里完全无线索
+                # （2026-09-19 实测：master 的 wechat 通道为 None，静默跳过后
+                #   websocket 零客户端也"成功"，消息从未到达用户）。
+                logger.warning("主动消息通道 %s 未就绪（instance=None），跳过", name)
                 continue
             try:
                 if asyncio.iscoroutinefunction(sender):
