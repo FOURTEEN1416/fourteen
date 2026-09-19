@@ -1712,3 +1712,106 @@
 
 **验证**：`ruff check .` 全绿；分块 pytest 1101 passed / 4 skipped；前端 87 + tsc 0 错；
 `ci_gates.py` 4/4。
+
+---
+
+## 2026-09-19（七十二）— 修复 search 与 character_card 两项工具缺陷（6780c5f，接手交接报告 §7-②）
+
+**任务**：用户指令「`docs/HANDOFF_REPORT.md` 接手任务」。按交接报告 §7「下一步最安全顺序」推进：
+① 埋点数据 ② 修 character_card + search。①需真实聊天触发（见下「未完成项」），故执行 ②。
+
+**方法**：全程生产实测定根因，不读码推测。两个 bug 的结论都与交接报告的初判**不同**：
+
+### 1. `search` —— 交接报告说「DDG 抛异常→降级 Bing，日志刷 traceback」，实测不符
+
+- 生产日志中 `DuckDuckGo 搜索失败` 出现 **0 次** → DDG 并未在产线抛异常。
+- 真实缺陷是**标题畸变**：`li.b_algo` 内**第一个** `<a>` 是 Bing 站点面包屑，
+  旧代码 `li.find("a")` 取到它 → `title` 变成
+  `'ynu.edu.cnhttps://www.ynu.edu.cn› xxgk › sbyd.htm'`（`body`/`href` 却是对的）。
+- DOM 实证：真实标题在 `h2 a`（`'识别云大-云南大学YunnanUniversity'`，href 同 URL）。
+- **后端优先级由实测数据决定，并否决了直觉方案**：
+
+  | 后端 | 可靠性 | 延迟 | 结果数 |
+  |---|---|---|---|
+  | `ddgs` 9.16.0（新包，直觉方案） | **0/5** | 20s×N（≈100s） | 0 |
+  | `duckduckgo_search` 8.1.1（旧包） | ~1/5 | ~1s | 3 |
+  | **Bing 直抓（选定为主）** | **5/5** | **0.6s** | **10** |
+
+  `ddgs` 9.x 聚合 Google/Brave/Startpage/Yahoo/DDG-html，大陆全不可达 ——
+  装上去等于把一次搜索卡死 100 秒。**已卸载并在模块 docstring 写明"不要装回来"。**
+- 附带修掉两处同类「谎报」：`health_check` 原无条件 `available: True`（改为报 `primary`/`backends`）；
+  DDG 失败改用一行 warning + 抑制改名 `RuntimeWarning`，不再刷全量 traceback。
+
+### 2. `character_card` —— 根因是**体积校验冒充内容校验**
+
+- 百度百科对流控返回**反爬壳页**：HTML **95 KB**（轻松通过原有 `len(resp.text) < 2000`），
+  但正文抽取后只剩「百度百科」**4 个字符**。
+- 旧代码据此判 `success=True` → `_fetch_person_fallback` 降级链**在第 1 步短路** →
+  真正可用的 `search_fetch`（实测 1212 字符）**永不被调用** → 终态 `content` 仅 4 字符。
+  这正是记忆里「语义成功、数据为空」的又一实例。
+- 修复：`_is_usable_profile`（正文/摘要/基础信息阈值 + 反爬特征词）、
+  `_normalize_profile`（统一各来源结构 —— 维基只产 `summary`、百度只产 `content`，
+  调用方固定读 `content` 时维基来源必然读到空）、降级链各层失败原因如实写入 `fallback_chain`。
+- **附带发现并修掉一个可用性障碍**：实测整链 **33.2s** 中维基占 **32.0s（97%）**，
+  而可用的 `search_fetch` 只要 1.1s —— 这样的耗时会让对话内工具调用直接撞「处理超时」。
+  加维基不可达记忆（TTL 600s）+ 单域名超时 8s→4s。
+
+### 3. 部署后复验时**又抓到一个更严重的问题：`_ddg_search` 会无界阻塞**
+
+- 现象：生产代码路径复验的探针**挂死 11 分钟**不退出（远程进程已不在进程表，
+  表现为调用方永远等不到返回）。
+- 定位：对 `tools/builtin/search_tool.py` 全文件排查，**唯一的无界调用**是
+  `DDGS.text()` —— 它**没有超时参数**；其余全部有界
+  （`_bing_search` timeout=10、`_fetch_baike` 15、`_fetch_wikipedia` 4×2、
+  `_try_fetch` 12、`_fetch_generic` 15）。
+- 危害：在 `--workers 4` 的 uvicorn 下，一次挂死即占死一个工人，
+  用户那一轮对话再也不返回 —— 与 §5-③「会话锁 → 罐头语」同源但更极端。
+- 修复：独立线程 + **6s 硬超时**截断；超时后**熔断 300s**（防止挂死线程堆积）。
+- 另修一处**无效修复**：改名 `RuntimeWarning` 实际在**实例化时**抛出（不是 import 时），
+  原先只在 import 处 `catch_warnings` **完全无效**（探针实测警告照旧打印）——
+  改为模块级按消息正则 `warnings.filterwarnings`。
+
+**二次实测（限时探针，23s 跑完）**：
+`_bing_search` 0.57s✅ / `_ddg_search` 0.27s 快速失败✅ / `execute` 0.55s✅ /
+`_fetch_baike` 0.11s（反爬，正确拒绝）/ `_fetch_wikipedia` 16.0s（**记忆生效后第 2 次瞬时**）/
+`_search_and_fetch` 1.09s✅。
+**意外收获**：这一轮 `_fetch_baike` **真的取到了 5000 字符真实内容**
+（`len=5000`，命中 `_MAX_CONTENT_LEN` 上限）—— 证明「保留百度为第一层」是对的，
+百度是**间歇性**返回壳页而非恒定失败。
+另记：`cloudscraper` 会把实际等待放大到约 **2×**（配 4s，两域名实耗 16.0s），
+排障时勿误判为 timeout 参数未生效。
+
+**生产真机实测（修复后）**：
+- `search`：0.63s 返回 3 条，标题全部正常
+- `character_card`：`chain = baike(反爬4字符) → wikipedia(不可达) → search_fetch`，
+  `content_len` **4 → 118~250**；耗时首次 13.2s、**稳态 0.7~0.8s（约 41× 提速）**
+
+**验证**：新增 27 例回归（`tests/test_search_tool.py` 15 + `test_character_crawler.py` 12）；
+分块 pytest **1185 passed / 4 skipped / 0 failed**（收集 **1189**，= `tests/*.py` 1162 + `tests/core/` 27）；
+`ruff check .` 0 错；pre-commit（ruff + ci_gates 四门禁）Passed；前端 `tsc --noEmit` 0 错 / vitest 87。
+
+⚠️ **顺带查明「测试基线为何各会话对不上」**：`tests/test_persona_injection.py` 用
+`@pytest.mark.parametrize("path", sorted(Path("config/characters").glob("*.json")))`
+—— **用例数 = 2 × 角色卡数 + 7**（当前 25 张 → 57 例）。而 `config/characters/` 被
+`.gitignore:117` 忽略（磁盘 25 张、git 追踪 0），故**基线依赖未追踪的本地数据、不可跨会话复现**。
+这解释了交接报告记 1105、本会话实测 1162 的差异。**后续引用基线必须同时声明卡数。**
+
+**部署**：提交 `6780c5f` → 推 GitHub → 服务器 `git pull` **失败**（`fetch-pack: unexpected disconnect`，
+与既有记录一致：并行会话提交含截图二进制）→ 改 `git bundle create 91c02f78..HEAD` + scp +
+`git fetch <bundle> HEAD && git merge --ff-only FETCH_HEAD` 成功 → `systemctl restart ai-girlfriend` →
+`health=200 unique-you-api`；三端 `git hash-object` 抽验一致。
+
+**⚠️ 三个坑（本次踩到，已修正认知）**：
+① `cmd | tail -N; echo $?` 打印的是 `tail` 的退出码，**不是 git 的**（pull 失败却显示 `PULL_EXIT=0`）——
+   幸好未把 deploy 串在同一条命令里。
+② **`git bundle create` 的 ref 名取决于 range 写法**：用 `..HEAD` 生成的是 `HEAD` 而非
+   `refs/heads/main`，故 `git pull <bundle> main` 会报 `couldn't find remote ref main`，
+   须用 `git fetch <bundle> HEAD`。另：git for Windows **不接受 `/c/...` 作为 bundle 输出路径**
+   （静默不产出文件），要用仓库内相对路径。
+③ **跨平台 md5 不能用于文本文件同一性核验**（本地 CRLF / 服务器 LF 必不相同），
+   应比 `git hash-object` 或看 `git status` 是否为空。
+
+**未完成项（需用户参与）**：交接报告 §7-①「攒埋点数据」**无法由本会话完成** ——
+`[prompt] total=… character=…` 埋点代码虽已部署（`orchestrator/optimized_orchestrator.py:790`），
+但生产 `data/app.log` 中该标记 **0 条**，说明部署后没有真实对话触发。
+需用户正常聊几条后才能取数、进而定 ADR-0015 的预算参数。

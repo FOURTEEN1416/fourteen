@@ -3,6 +3,21 @@
 > 上一窗口交接已归档：`docs/history/HANDOFF_REPORT-2026-09-14.md`
 > 本文是**当前状态的单一真源**；日常流水见 `LOG.md`，决策见 `docs/DECISION_LEDGER.md` 与 `docs/adr/`。
 
+> ### 📌 接手批注（2026-09-19 15:50，提交 `6780c5f`）
+> 已按 §7 推进 **第 ② 项**（修 `character_card` + `search`），两项均修复、部署、生产验证。
+> **§4 表格与 §5 前两项已失效，以本批注与 `LOG.md` 七十二为准。** 要点：
+> - `search`：真缺陷是 **title 取到 Bing 面包屑**（非报告所写「DDG 抛异常」——
+>   产线日志中该错误 0 次）。主后端已定为 Bing 直抓（实测 5/5 / 0.6s）；
+>   **`ddgs` 9.x 实测 0/5（大陆全后端不可达、单次≈100s），已卸载，勿装回**。
+> - `character_card`：根因是**体积校验冒充内容校验**——百度反爬壳页 HTML 95KB 但正文仅 4 字符，
+>   旧代码判成功并**短路降级链**。已加内容有效性判定 + 结构归一 + 维基不可达记忆
+>   （整链 33.2s → 稳态 0.7s）。
+> - **测试基线更新**：收集 **1189** / **1185 passed / 4 skipped**（旧记 1105 / 1101 **已过时**）。
+>   差异根因已查明：`test_persona_injection.py` 按 `config/characters/*.json` 参数化
+>   （**用例数 = 2 × 卡数 + 7**），而该目录**被 gitignore**（磁盘 25 张 / git 追踪 0）
+>   → 基线依赖未追踪数据。**引用基线必须同时声明卡数。**
+> - **§7-①「攒埋点数据」仍待用户参与**：`[prompt]` 埋点已部署但日志 0 条 —— 部署后无真实对话。
+
 ## 0. 这个窗口做了什么（一句话）
 
 修掉「主动消息用户收不到」的**六层谎报投递**，接着修了一批对话体验与性能问题，
@@ -46,10 +61,15 @@
 | `cfe0cb8` | **BYOK**：微信路径此前从不传 `user_llm_config`，用户自己的 API Key 形同虚设 |
 | `114f15c` | **两个回复模式**（沉浸式真人 / 小说式，web 可切换）+ 追问改用真实上下文 |
 | `91c02f7` | ADR-0015 系统提示词分层与按需注入 + 提示词规模埋点 |
+| `6780c5f` | **（接手窗口）** `search` title 取到 Bing 面包屑 + `character_card` 反爬壳页谎报成功 —— 两项工具缺陷修复 |
 
 ## 3. 当前真相（均为实测）
 
-- **测试**：`--collect-only` **1105**；分块实跑 **1101 passed / 4 skipped**。
+- **测试**（2026-09-19 16:10 刷新）：`--collect-only` **1189**；分块实跑 **1185 passed / 4 skipped**。
+  ⚠️ **基线依赖未追踪数据，不可跨会话复现**：`tests/test_persona_injection.py` 用
+  `parametrize(sorted(Path("config/characters").glob("*.json")))`，**用例数 = 2 × 角色卡数 + 7**
+  （当前 25 张 → 57 例），而 `config/characters/` **被 `.gitignore:117` 忽略**（磁盘 25 / git 追踪 0）。
+  这解释了本页旧记 1105 与实际 1162 的差异。**引用基线必须同时声明卡数。**
   ⚠️ **单进程整跑 `pytest -q` 会在随机位置停住**（非用例失败，属聚合态资源问题）。
   分块跑法见 `AGENTS.md` §4.3。
 - **前端**：vitest **87 passed / 15 文件**，`tsc --noEmit` 0 错。
@@ -69,13 +89,13 @@
 | 工具 | 实测结果 |
 |------|----------|
 | `weather` | ✅ 真实可用（昆明：小雨 / 20℃ / 湿度 78 / 风 12） |
-| `search` | ⚠️ 能用但脆弱：`duckduckgo_search` **已改名 `ddgs`**，DDG 抛异常 → 降级 Bing 抓取（能拿到真实结果），但日志刷 traceback |
+| `search` | ✅ **已修（`6780c5f`）**。原记录「DDG 抛异常 → 降级 Bing」与产线日志不符（该错误 0 次）；真缺陷是 **title 取到 `li.b_algo` 内第一个 `<a>`（Bing 面包屑）**。现主后端 = Bing 直抓（实测 5/5、0.6s、10 条），标题取自 `h2 a`；`health_check` 如实报 `primary`/`backends`。⚠️ **`ddgs` 9.x 实测 0/5（大陆全后端不可达、单次≈100s），已卸载，勿装回**。 |
 | `calendar` | ✅ |
 | `calculator` | ✅（`12*8+5` → 101） |
 | `time_awareness` | ✅（需传 `action`：`current` / `holiday` / `lunar` / `workday`；实测农历「8月9」正确） |
 | `set_reminder` | ✅（写入成功，返回 reminder_id） |
 | `query_reminders` | ✅（只返回**待触发**项，故刚设的明日提醒返回 `[]` 属正常） |
-| `character_card` | ❌ **半可用**：`fetch_wiki` 大陆网络不可达（**如实报错并指路**）；`fetch_person`（百度）返回 `success=True` 但 `content` 为空 —— **成功但无数据**，属同一类"谎报" |
+| `character_card` | ✅ **已修（`6780c5f`）**。根因：百度反爬壳页 HTML 95 KB 但正文仅「百度百科」**4 字符**，旧代码只校验**体积**（`len(resp.text) < 2000`）便判 `success=True` → 降级链**第 1 步短路** → 可用的 `search_fetch`（1212 字符）永不执行。现加内容有效性判定 + 结构归一 + 维基不可达记忆。实测 `content_len` **4 → 118~250**，整链 33.2s → 稳态 **0.7~0.8s**。`fetch_wiki` 大陆仍不可达（**如实报错并指路**，新增 600s 不可达记忆避免反复白等）。 |
 
 **未启用但代码存在**：`web_summary`、`image_gen`、`memory`、`scheduler`
 （不在 `builtin_tools` 列表里 → 不会注册；注意「字典键名必须与 system.yaml 一致」这条注释）。
@@ -86,8 +106,11 @@
 
 ## 5. 未修 / 遗留风险（按优先级）
 
-1. **`character_card` 工具实际不可用**（见上表）——「语义上成功、数据为空」，需要修提取逻辑或换数据源。
-2. **`search` 工具脆弱**：依赖已改名的包 + Bing 抓取降级；建议改 `ddgs` 并加结果校验。
+1. ~~**`character_card` 工具实际不可用**~~ → ✅ **已修（`6780c5f`）**：加内容有效性判定（体积校验≠内容校验）、
+   各来源结构归一、维基不可达记忆。实测 `content_len` 4→118~250、稳态 0.7s。
+2. ~~**`search` 工具脆弱**~~ → ✅ **已修（`6780c5f`）**。
+   ⚠️ **原建议「改 `ddgs`」已被生产实测否决**：`ddgs` 9.x 聚合 Google/Brave/Startpage/Yahoo，
+   大陆全不可达，实测 **0/5**、单次串行 ≈100s。现行方案是 Bing 直抓为主 + `duckduckgo_search` 8.1.1 为辅。
 3. **会话锁 → 罐头语**：慢 provider 下连发消息得「处理中, 请稍候...」，超 30s 得「抱歉，处理超时」。
 4. **追问与主回复争抢 LLM**：慢 provider 下会加剧 3。是否需要限流待定。
 5. **ADR-0015 第 5 阶段未实施**（段落注册表 + L1 预算 + lorebook 引擎）——
@@ -126,13 +149,43 @@ cd /opt/ai-girlfriend && set -a && . ./.env && set +a
 # ⚠️ 必须先注入 .env，否则 JWT_SECRET 缺失 → 落到 DEV 兜底密钥 → 签出的 token 报 Invalid token
 ```
 
+**⑥ 部署：`git pull` 失败时的 bundle 通道（2026-09-19 实测修正）**
+```bash
+# 症状：fetch-pack: unexpected disconnect / early EOF（提交含截图二进制时必现）
+git bundle create deploy.bundle 91c02f78..HEAD      # ← 用仓库内相对路径！
+scp deploy.bundle swu-prod:/tmp/deploy.bundle
+ssh swu-prod 'cd /opt/ai-girlfriend && git fetch /tmp/deploy.bundle HEAD && git merge --ff-only FETCH_HEAD'
+```
+⚠️ 三个坑：① `cmd | tail -N; echo $?` 打印的是 **tail** 的退出码（pull 失败却显示 0）；
+② 用 `..HEAD` 生成 bundle 时 ref 名是 **`HEAD`**，`git pull <bundle> main` 会报
+`couldn't find remote ref main`，需 `git fetch <bundle> HEAD`；git for Windows **不接受
+`/c/...` 作为 bundle 输出路径**（静默不产出文件）；
+③ **跨端同一性不能用 md5**（本地 CRLF / 服务器 LF 必不同）—— 比 `git hash-object`，
+或直接看两侧 `git status --short` 是否为空。
+
+**⑦ 探针「挂死」如何定位（2026-09-19 实测 11 分钟挂死）**
+```bash
+# 先看远程进程还在不在：不在 = 不是网络慢，是调用方在等一个永不返回的东西
+ssh swu-prod 'ps -eo pid,etimes,args | grep -v grep | grep "\.venv/bin/python"'
+# 再跑“限时探针”：写文件 → scp → timeout -s KILL <N> + python -u（无缓冲，逐步可见）
+ssh swu-prod 'cd /opt/ai-girlfriend && set -a && . ./.env && set +a && timeout -s KILL 150 .venv/bin/python -u /tmp/probe.py'
+```
+⚠️ 排查要点：**先穷举出所有无界调用**。本模块当时唯一的无界调用是
+`DDGS.text()`（无超时参数），其余全部有界（requests timeout 10~15s）。
+另注意 `cloudscraper` 会把实际等待放大到约 **2×**（配 4s → 实耗 8s/域名），
+**勿误判为 timeout 参数未生效**。
+
 ## 7. 下一步最安全顺序
 
-1. **攒埋点数据**：正常聊几条 → 读 `[prompt] total=… character=… rag=… memory=…`，
-   确定「哪一层在吃上下文」→ 再定 ADR-0015 的预算参数（**不要凭直觉定**）。
-2. 修 `character_card`（可用性）与 `search`（依赖已改名）。
+1. **攒埋点数据（⏳ 待用户参与，仍是最优先）**：正常聊几条 → 读
+   `[prompt] total=… character=… rag=… memory=…`，确定「哪一层在吃上下文」
+   → 再定 ADR-0015 的预算参数（**不要凭直觉定**）。
+   ⚠️ 2026-09-19 15:28 核查：埋点代码已部署，但 `data/app.log` 中 `[prompt]` **0 条**
+   —— 部署后无真实对话触发，**本项无法由 AI 单方完成**，需用户先聊几条。
+2. ~~修 `character_card`（可用性）与 `search`（依赖已改名）~~ → ✅ **已完成（`6780c5f`）**，见 §4 / §5。
 3. 评估追问限流（避免与主回复抢 LLM）。
-4. 处理会话锁罐头语（3）。
+4. 处理会话锁罐头语（3）。⚠️ 本批已把 `character_card` 稳态耗时压到 0.7s（原 33.2s），
+   对「工具调用拖长单轮」有直接缓解。
 5. ADR-0015 第 5 阶段（段落注册表 + lorebook 引擎）。
 
 ## 8. 关联交接
