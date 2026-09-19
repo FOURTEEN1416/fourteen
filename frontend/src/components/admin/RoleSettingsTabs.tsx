@@ -239,7 +239,7 @@ function ImportantDatesSection({ characterId }: { characterId: string }) {
             </select>
             <button
               onClick={() => { setDates(prev => prev.filter((_, j) => j !== i)); setDirty(true) }}
-              className="text-gray-300 hover:text-red-400 text-xs px-1"
+              className="text-gray-400 hover:text-red-400 text-xs px-1"
               title="删除"
             >
               ✕
@@ -375,7 +375,7 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
             <button
               key={opt.value}
               onClick={() => {}}
-              className={`text-left p-3 rounded-xl transition-all glass-pink ring-1 ring-primary-400/30`}
+              className={`text-left p-3 rounded-xl transition-all glass-yellow ring-1 ring-primary-400/30`}
             >
               <p className="text-sm font-medium text-primary-700">{opt.label}</p>
               <p className="text-[11px] text-gray-400 mt-0.5">{opt.desc}</p>
@@ -575,7 +575,7 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
           <button
             onClick={handleSave}
             disabled={saving}
-            className="w-full py-2 rounded-xl btn-macaron text-white text-xs font-medium disabled:opacity-50"
+            className="w-full py-2 rounded-xl btn-macaron text-xs font-medium disabled:opacity-50"
           >
             {saving ? '保存中…' : savedAt ? `已保存（${savedAt}）` : '保存频率配置'}
           </button>
@@ -603,7 +603,7 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
               <div key={i} className="rounded-lg bg-gray-50 px-3 py-1.5 flex items-start justify-between gap-2">
                 <span className="text-[10px] text-gray-400 shrink-0">{h.type}</span>
                 <span className="text-[11px] text-gray-600 text-right flex-1 line-clamp-1">{h.message}</span>
-                <span className="text-[10px] text-gray-300 shrink-0">{new Date(h.at).toLocaleTimeString('zh-CN')}</span>
+                <span className="text-[10px] text-gray-400 shrink-0">{new Date(h.at).toLocaleTimeString('zh-CN')}</span>
               </div>
             ))}
           </div>
@@ -843,9 +843,9 @@ function StickersTab() {
       </Section>
       <Section title="自定义贴图">
         <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center hover:border-primary-300 transition-colors cursor-pointer">
-          <Smile className="w-8 h-8 text-gray-300 mx-auto" />
+          <Smile className="w-8 h-8 text-gray-400 mx-auto" />
           <p className="text-xs text-gray-400 mt-2">上传自定义贴图</p>
-          <p className="text-[10px] text-gray-300 mt-0.5">PNG / GIF / JPEG · 每张 ≤ 5MB</p>
+          <p className="text-[10px] text-gray-400 mt-0.5">PNG / GIF / JPEG · 每张 ≤ 5MB</p>
         </div>
       </Section>
       <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">

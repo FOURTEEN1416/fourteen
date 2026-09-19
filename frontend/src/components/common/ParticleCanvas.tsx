@@ -39,6 +39,10 @@ export function ParticleCanvas() {
     const DIST = 120;
     const DIST_SQ = DIST * DIST;
     const particles: Particle[] = [];
+    // 绘制坐标统一用 CSS 逻辑像素；backing store 按 dpr 放大（09-19 诊断 P2：
+    // 原实现 canvas.width=innerWidth 未乘 dpr，HiDPI 屏整幅被拉伸 → 粒子发糊）。
+    let logicalW = window.innerWidth;
+    let logicalH = window.innerHeight;
 
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -46,9 +50,16 @@ export function ParticleCanvas() {
     const rebuild = () => {
       const w = window.innerWidth;
       const h = window.innerHeight;
-      if (canvas.width === w && canvas.height === h) return;
-      canvas.width = w;
-      canvas.height = h;
+      // dpr 上限 2：3x/4x 屏像素数平方级暴涨，16GB 机不值得为粒子付这个渲染成本。
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const bw = Math.round(w * dpr);
+      const bh = Math.round(h * dpr);
+      if (canvas.width === bw && canvas.height === bh) return;
+      canvas.width = bw;
+      canvas.height = bh;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      logicalW = w;
+      logicalH = h;
       particles.length = 0;
       const count = reducedMotion ? 0 : particleCount(w, h);
       for (let i = 0; i < count; i++) {
@@ -67,13 +78,13 @@ export function ParticleCanvas() {
     rebuild();
 
     const drawFrame = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, logicalW, logicalH);
 
       for (const p of particles) {
         p.x += p.vx;
         p.y += p.vy;
-        if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
-        if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+        if (p.x < 0 || p.x > logicalW) p.vx *= -1;
+        if (p.y < 0 || p.y > logicalH) p.vy *= -1;
 
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);

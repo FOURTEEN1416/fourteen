@@ -5,11 +5,9 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>唯一的你——十四</title>
-    <!-- Fonts: 考虑自托管字体文件以消除外部依赖
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    -->
+    <!-- 字体：刻意不加载任何网络字体（Google Fonts 外链已移除，避免阻塞与外部依赖）。
+         正文字体栈在 index.css 的 body 中声明，走系统 CJK 栈（Segoe UI / 苹方 / 微软雅黑…）。
+         如日后需自托管，再在此处补 @font-face，切勿只留 link 而样式不引用。 -->
   </head>
   <body class="bg-bg-deep text-text-primary">
     <div id="root"></div>

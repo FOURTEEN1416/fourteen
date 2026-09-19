@@ -139,7 +139,7 @@ export default function PsychProfilePage() {
             </div>
           ) : !hasData ? (
             <div className="glass-card rounded-2xl p-10 text-center stagger-item">
-              <Brain className="w-10 h-10 mx-auto mb-3 text-gray-300" />
+              <Brain className="w-10 h-10 mx-auto mb-3 text-gray-400" />
               <p className="text-sm font-medium text-gray-600 mb-1">
                 {status === 'insufficient_data' ? '对话样本还不够' : '画像尚未生成'}
               </p>

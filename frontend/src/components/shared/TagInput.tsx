@@ -45,7 +45,7 @@ export default function TagInput({ tags, placeholder = '输入后回车添加', 
         onKeyDown={handleKey}
         onBlur={add}
         placeholder={tags.length === 0 ? placeholder : ''}
-        className="flex-1 min-w-[80px] text-xs outline-none bg-transparent text-gray-700 placeholder:text-gray-300"
+        className="flex-1 min-w-[80px] text-xs outline-none bg-transparent text-gray-700 placeholder:text-gray-400"
       />
     </div>
   )

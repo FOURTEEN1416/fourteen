@@ -142,7 +142,7 @@ function SafetyPanelSection() {
         {/* Toggle */}
         <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-white/40 px-4 py-2.5">
           <div className="flex items-center gap-2">
-            <Shield className={`h-4 w-4 ${enabled ? 'text-green-500' : 'text-gray-300'}`} />
+            <Shield className={`h-4 w-4 ${enabled ? 'text-green-500' : 'text-gray-400'}`} />
             <span className="text-sm text-gray-700">内容安全过滤器</span>
           </div>
           <button

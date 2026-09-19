@@ -37,18 +37,18 @@ export default defineConfig(({ mode }) => {
     build: {
       rollupOptions: {
         output: {
-          manualChunks(id: string) {
-            if (id.includes('node_modules/react-dom') || id.includes('node_modules/react/') || id.includes('node_modules/react-router')) return 'vendor';
-            if (id.includes('node_modules/lucide-react')) return 'ui';
-            if (id.includes('node_modules/zustand')) return 'state';
-            // F3: 分离 framer-motion，避免打进主 chunk（约 50-60kB gzip）
-            if (id.includes('node_modules/framer-motion')) return 'motion';
-            // F3: 分离 react-query，独立 chunk 并行下载
-            if (id.includes('node_modules/@tanstack/react-query')) return 'query';
-            // F3: 分离 Sentry（仅生产环境用，按需加载）
-            if (id.includes('node_modules/@sentry')) return 'sentry';
-            // F3: 分离 react-window（虚拟列表，仅部分页面用）
-            if (id.includes('node_modules/react-window') || id.includes('node_modules/react-virtualized-auto-sizer')) return 'virtual';
+          // rolldown 原生 advancedChunks：manualChunks 函数 shim 在 rolldown-vite 下
+          // 会把 react 核心模块错误并入 motion chunk（实测 sourcemap 证实），入口因此被迫预加载 framer-motion
+          advancedChunks: {
+            groups: [
+              { name: 'vendor', test: /node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/ },
+              { name: 'ui', test: /node_modules[\\/]lucide-react/ },
+              { name: 'state', test: /node_modules[\\/]zustand/ },
+              { name: 'motion', test: /node_modules[\\/](framer-motion|motion-dom|motion-utils)/ },
+              { name: 'query', test: /node_modules[\\/]@tanstack[\\/]/ },
+              { name: 'sentry', test: /node_modules[\\/]@sentry[\\/]/ },
+              { name: 'virtual', test: /node_modules[\\/](react-window|react-virtualized-auto-sizer)/ },
+            ],
           },
         },
       },

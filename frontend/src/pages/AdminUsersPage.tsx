@@ -241,7 +241,7 @@ export default function AdminUsersPage() {
               <p className="mt-0.5 text-sm text-gray-400">
                 管理所有注册用户的角色和权限
                 {!loading && (
-                  <span className="ml-2 text-gray-300">
+                  <span className="ml-2 text-gray-400">
                     · 共 <span className="font-semibold text-gray-500">{total}</span> 位用户
                   </span>
                 )}
@@ -261,18 +261,18 @@ export default function AdminUsersPage() {
             <div className="flex flex-col sm:flex-row gap-3">
               {/* 搜索框 */}
               <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input
                   type="text"
                   value={searchInput}
                   onChange={e => setSearchInput(e.target.value)}
                   placeholder="搜索邮箱、用户名或显示名称..."
-                  className="w-full pl-9 pr-8 py-2 text-sm input-macaron rounded-lg text-gray-700 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-300/50 focus:border-primary-300 transition-all"
+                  className="w-full pl-9 pr-8 py-2 text-sm input-macaron rounded-lg text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-300/50 focus:border-primary-300 transition-all"
                 />
                 {searchInput && (
                   <button
                     onClick={() => { setSearchInput(''); setSearch(''); setPage(1) }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition-colors"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-500 transition-colors"
                   >
                     <X className="w-4 h-4" />
                   </button>

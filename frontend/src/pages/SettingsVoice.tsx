@@ -50,7 +50,7 @@ function EngineSwitcher({
             onClick={() => onChange(opt.value)}
             className={`text-left p-3 rounded-xl transition-all ${
               engine === opt.value
-                ? 'glass-pink ring-1 ring-primary-400/30'
+                ? 'glass-yellow ring-1 ring-primary-400/30'
                 : 'glass-card border border-gray-200 hover:border-gray-300'
             }`}
           >
@@ -100,7 +100,7 @@ function VoiceList({
             >
               <Mic
                 className={`h-4 w-4 ${
-                  activeVoice === v.name ? 'text-primary-500' : 'text-gray-300'
+                  activeVoice === v.name ? 'text-primary-500' : 'text-gray-400'
                 }`}
               />
               <div className="flex-1">
@@ -166,7 +166,7 @@ function VoiceCloneSection() {
               setDone(false)
             }}
             placeholder="自定义语音名称"
-            className="w-full rounded-lg border border-gray-200 bg-white/60 px-3 py-2 text-sm text-gray-700 placeholder:text-gray-300 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-400/20"
+            className="w-full rounded-lg border border-gray-200 bg-white/60 px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-400/20"
           />
 
           <div className="flex items-center gap-3">
@@ -366,7 +366,7 @@ function SynthesizeTest() {
           onChange={(e) => setText(e.target.value)}
           placeholder="输入要合成的文本..."
           rows={3}
-          className="w-full resize-none rounded-lg border border-gray-200 bg-white/60 px-3 py-2 text-sm text-gray-700 placeholder:text-gray-300 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-400/20"
+          className="w-full resize-none rounded-lg border border-gray-200 bg-white/60 px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-400/20"
         />
         <div className="mt-3 flex justify-end">
           <button

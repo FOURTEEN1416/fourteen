@@ -162,7 +162,7 @@ export default function AdminProvidersPage() {
               <p className="mt-0.5 text-sm text-gray-400">
                 管理供应商清单、申请教程、启用/禁用
                 {!loading && (
-                  <span className="ml-2 text-gray-300">
+                  <span className="ml-2 text-gray-400">
                     · 共 <span className="font-semibold text-gray-500">{providers.length}</span> 个
                   </span>
                 )}

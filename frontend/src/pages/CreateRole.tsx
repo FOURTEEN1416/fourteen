@@ -102,7 +102,7 @@ function AIChatTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaSt
           <div className="flex flex-col items-center justify-center h-full text-center py-10">
             <MessageSquare className="w-10 h-10 text-gray-200 mb-3" />
             <p className="text-sm text-gray-400">描述你想要的 AI 角色</p>
-            <p className="text-xs text-gray-300 mt-1">比如："她是一个22岁的美术生，温柔细腻……"</p>
+            <p className="text-xs text-gray-400 mt-1">比如："她是一个22岁的美术生，温柔细腻……"</p>
           </div>
         )}
         {messages.map((msg, i) => (
@@ -141,7 +141,7 @@ function AIChatTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<PersonaSt
         <button
           onClick={handleSend}
           disabled={loading || !input.trim()}
-          className="shrink-0 w-10 h-10 rounded-xl btn-macaron text-white flex items-center justify-center disabled:opacity-40 transition-all"
+          className="shrink-0 w-10 h-10 rounded-xl btn-macaron flex items-center justify-center disabled:opacity-40 transition-all"
         >
           <Send className="w-4 h-4" />
         </button>
@@ -350,7 +350,7 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
           {/* 完成 + 预览 */}
           {phase === 'done' && (
             <div className="space-y-2">
-              <div className="glass-green border border-macaron-mint/30 rounded-xl px-4 py-3 flex items-center gap-2">
+              <div className="glass-mint border border-macaron-mint/30 rounded-xl px-4 py-3 flex items-center gap-2">
                 <Check className="w-4 h-4 text-macaron-mint-deep" />
                 <span className="text-xs text-macaron-mint-deep font-medium">已分析 {sampleCount} 轮对话，人设预览已更新</span>
               </div>
@@ -379,7 +379,7 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
             <button
               onClick={startClone}
               disabled={!targetName.trim() || !selectedFile}
-              className="w-full py-2.5 rounded-xl btn-macaron text-white text-sm font-semibold disabled:opacity-40 transition-all"
+              className="w-full py-2.5 rounded-xl btn-macaron text-sm font-semibold disabled:opacity-40 transition-all"
             >
               上传并分析
             </button>
@@ -461,7 +461,7 @@ function FileImportTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Perso
       </div>
       {error && <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-xs text-red-600">{error}</div>}
       {jsonText.trim() && !error && (
-        <button onClick={handleTextParse} className="w-full py-2.5 rounded-xl btn-macaron text-white text-sm font-semibold active:scale-[0.98] transition-all">解析 JSON</button>
+        <button onClick={handleTextParse} className="w-full py-2.5 rounded-xl btn-macaron text-sm font-semibold active:scale-[0.98] transition-all">解析 JSON</button>
       )}
       {parsed && (
         <div className="glass-card rounded-2xl p-4">
@@ -485,7 +485,7 @@ function PersonaPreviewCard() {
   if (!hasContent || !persona) {
     return (
       <div className="glass-card rounded-2xl p-5 h-full flex flex-col items-center justify-center text-center min-h-[280px]">
-        <div className="w-12 h-12 rounded-full btn-macaron flex items-center justify-center text-white text-lg font-bold mb-3">你</div>
+        <div className="w-12 h-12 rounded-full btn-macaron flex items-center justify-center text-lg font-bold mb-3">你</div>
         <p className="text-sm text-gray-500">和十四聊聊</p>
         <p className="text-xs text-gray-400 mt-1">角色卡会在这里实时生长</p>
       </div>
@@ -497,7 +497,7 @@ function PersonaPreviewCard() {
   return (
     <div className="glass-card rounded-2xl p-5 space-y-4">
       <div className="flex items-center gap-3">
-        <div className="w-12 h-12 rounded-full btn-macaron flex items-center justify-center text-white font-bold text-lg">你</div>
+        <div className="w-12 h-12 rounded-full btn-macaron flex items-center justify-center font-bold text-lg">你</div>
         <div>
           <div className="text-base font-semibold text-text-primary">{persona.name || '未命名角色'}</div>
           <div className="text-xs text-text-muted">有记忆的对话对象</div>

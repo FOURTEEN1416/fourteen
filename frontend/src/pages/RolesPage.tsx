@@ -32,7 +32,7 @@ function RoleCard({
           <span key={tag} className={`tag-${anchorTone(tag)} px-2 py-0.5 rounded text-[10px]`}>
             {tag}
           </span>
-        ))) ?? <span className="text-[10px] text-gray-300">无标签</span>}
+        ))) ?? <span className="text-[10px] text-gray-400">无标签</span>}
       </div>
 
       {character.is_active ? (
@@ -103,11 +103,11 @@ export default function RolesPage() {
             </div>
           ) : characters.length === 0 ? (
             <div className="glass-card rounded-2xl p-8 text-center text-gray-400">
-              <Sparkles className="w-10 h-10 mx-auto mb-3 text-gray-300" />
+              <Sparkles className="w-10 h-10 mx-auto mb-3 text-gray-400" />
               <p className="text-sm">暂无角色</p>
               <button
                 onClick={() => navigate('/roles/create')}
-                className="mt-4 btn-macaron rounded-xl px-5 py-2 text-xs font-medium text-white"
+                className="mt-4 btn-macaron rounded-xl px-5 py-2 text-xs font-medium"
               >
                 创建角色
               </button>

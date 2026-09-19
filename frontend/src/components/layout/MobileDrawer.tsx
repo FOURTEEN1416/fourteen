@@ -66,7 +66,7 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
       >
         {/* Header */}
         <div className="flex items-center justify-between h-14 px-4 border-b border-white/30 shrink-0">
-          <span className="text-sm font-semibold bg-gradient-to-r from-pink-500 via-blue-500 to-green-500 bg-clip-text text-transparent">
+          <span className="text-sm font-semibold bg-gradient-to-r from-primary-600 via-accent-600 to-macaron-mint-deeper bg-clip-text text-transparent">
             唯一的你——十四
           </span>
           <button

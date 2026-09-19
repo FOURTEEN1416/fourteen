@@ -386,20 +386,24 @@ function MemorySystemCard({
 
       <p className="text-[10px] text-gray-400 mb-2">最近沉淀</p>
       <div className="space-y-2">
-        {recentFacts.length > 0 ? (
-          recentFacts.slice(0, 5).map((fact, idx) => (
-            <div
-              key={idx}
-              className="bg-white/40 rounded-lg px-3 py-2 text-xs text-gray-600"
-            >
-              {fact.content}
-            </div>
-          ))
-        ) : (
-          <p className="py-4 text-center text-xs text-gray-400">
-            还没有沉淀下来的记忆
-          </p>
-        )}
+        {(() => {
+          // 空 content 的 fact 会渲染成一条空白盒（09-19 诊断 P2「空条」），先过滤。
+          const visible = recentFacts.filter(f => f.content && f.content.trim()).slice(0, 5);
+          return visible.length > 0 ? (
+            visible.map((fact, idx) => (
+              <div
+                key={idx}
+                className="bg-white/40 rounded-lg px-3 py-2 text-xs text-gray-600"
+              >
+                {fact.content}
+              </div>
+            ))
+          ) : (
+            <p className="py-4 text-center text-xs text-gray-400">
+              还没有沉淀下来的记忆
+            </p>
+          );
+        })()}
       </div>
     </div>
   )

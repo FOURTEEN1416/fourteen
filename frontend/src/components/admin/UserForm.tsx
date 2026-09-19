@@ -84,13 +84,13 @@ export default function UserForm({
     <div className="space-y-4">
       <FormField label="邮箱" error={errors.email} required={isCreate}>
         <div className="relative">
-          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" />
+          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="email"
             value={(data.email as string) ?? ''}
             onChange={e => set('email', e.target.value)}
             placeholder="user@example.com"
-            className="w-full pl-9 pr-3 py-2 text-sm bg-white/60 border border-white/30 rounded-lg text-gray-700 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-300/50 transition-all"
+            className="w-full pl-9 pr-3 py-2 text-sm bg-white/60 border border-white/30 rounded-lg text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-300/50 transition-all"
           />
         </div>
       </FormField>
@@ -98,13 +98,13 @@ export default function UserForm({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <FormField label="用户名" error={errors.username} required={isCreate}>
           <div className="relative">
-            <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" />
+            <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
               value={(data.username as string) ?? ''}
               onChange={e => set('username', e.target.value)}
               placeholder="username"
-              className="w-full pl-9 pr-3 py-2 text-sm bg-white/60 border border-white/30 rounded-lg text-gray-700 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-300/50 transition-all"
+              className="w-full pl-9 pr-3 py-2 text-sm bg-white/60 border border-white/30 rounded-lg text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-300/50 transition-all"
             />
           </div>
         </FormField>
@@ -115,7 +115,7 @@ export default function UserForm({
             value={(data.display_name as string) ?? ''}
             onChange={e => set('display_name', e.target.value)}
             placeholder="可选"
-            className="w-full px-3 py-2 text-sm bg-white/60 border border-white/30 rounded-lg text-gray-700 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-300/50 transition-all"
+            className="w-full px-3 py-2 text-sm bg-white/60 border border-white/30 rounded-lg text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-300/50 transition-all"
           />
         </FormField>
       </div>
@@ -148,13 +148,13 @@ export default function UserForm({
 
       <FormField label={isCreate ? '密码' : '新密码（留空保持不变）'} error={errors.password} required={isCreate}>
         <div className="relative">
-          <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" />
+          <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="password"
             value={(data.password as string) ?? ''}
             onChange={e => set('password', e.target.value)}
             placeholder={isCreate ? PASSWORD_HINT : '不修改则留空'}
-            className="w-full pl-9 pr-3 py-2 text-sm bg-white/60 border border-white/30 rounded-lg text-gray-700 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-300/50 transition-all"
+            className="w-full pl-9 pr-3 py-2 text-sm bg-white/60 border border-white/30 rounded-lg text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-300/50 transition-all"
           />
         </div>
       </FormField>

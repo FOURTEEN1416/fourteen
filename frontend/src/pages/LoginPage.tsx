@@ -82,7 +82,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm mx-4">
         {/* Logo / 标题 */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-pink-500 via-blue-500 to-green-500 bg-clip-text text-transparent">唯一的你——十四</h1>
+          <h1 className="text-3xl font-bold bg-gradient-to-r from-primary-600 via-accent-600 to-macaron-mint-deeper bg-clip-text text-transparent">唯一的你——十四</h1>
           <p className="text-sm text-gray-400 mt-1">
             {mode === 'login' ? '登录管理控制台' : '创建新账户'}
           </p>
@@ -159,7 +159,7 @@ export default function LoginPage() {
                   type="checkbox"
                   checked={useInvite}
                   onChange={(e) => setUseInvite(e.target.checked)}
-                  className="rounded border-gray-300 text-pink-500 focus:ring-pink-400/30"
+                  className="rounded border-gray-300 text-primary-500 focus:ring-primary-400/40"
                 />
                 <label htmlFor="useInvite" className="text-sm text-gray-500 cursor-pointer select-none">
                   我有邀请码
@@ -213,14 +213,14 @@ export default function LoginPage() {
             {mode === 'login' ? (
               <span>
                 没有账户？{' '}
-                <button type="button" onClick={toggleMode} className="text-pink-500 hover:text-pink-600 font-medium">
+                <button type="button" onClick={toggleMode} className="text-accent-600 hover:text-accent-700 font-medium">
                   注册
                 </button>
               </span>
             ) : (
               <span>
                 已有账户？{' '}
-                <button type="button" onClick={toggleMode} className="text-pink-500 hover:text-pink-600 font-medium">
+                <button type="button" onClick={toggleMode} className="text-accent-600 hover:text-accent-700 font-medium">
                   登录
                 </button>
               </span>

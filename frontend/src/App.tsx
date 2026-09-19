@@ -7,14 +7,9 @@ import Breadcrumb from './components/layout/Breadcrumb'
 import ToastContainer from './components/common/Toast'
 import ErrorBoundary from './components/common/ErrorBoundary'
 import AnimatedPage from './components/shared/AnimatedPage'
-import ScrollProgress from './components/shared/ScrollProgress'
 import { ParticleCanvas } from './components/common/ParticleCanvas'
 import { CustomCursor } from './components/common/CustomCursor'
 import SystemSettingsLayout from './pages/SystemSettingsLayout'
-import CreateRole from './pages/CreateRole'
-import RoleSettings from './pages/RoleSettings'
-import StatusCenter from './pages/StatusCenter'
-import StorylineEditor from './components/storyline/StorylineEditor'
 import { AuthGuard, RoleGuard, ConsentGate, AuthInit } from './components/auth'
 import { useAuthStore } from './store/authStore'
 
@@ -32,6 +27,15 @@ const SettingsSecurity = lazy(() => import('./pages/SettingsSecurity'))
 const ToolsDashboard = lazy(() => import('./pages/ToolsDashboard'))
 const SettingsLogs = lazy(() => import('./pages/SettingsLogs'))
 const RolesPage = lazy(() => import('./pages/RolesPage'))
+
+// ScrollProgress 是 eager 图里唯一拉 framer-motion 的组件；改 lazy 后 motion chunk
+// （≈45KB gz）退出首屏 modulepreload 关键路径（公开页 /intro 不再为其付费）。
+// 四个重型页面同批拆出 index chunk，随各自动画路由边界惰性加载。
+const ScrollProgress = lazy(() => import('./components/shared/ScrollProgress'))
+const CreateRole = lazy(() => import('./pages/CreateRole'))
+const RoleSettings = lazy(() => import('./pages/RoleSettings'))
+const StatusCenter = lazy(() => import('./pages/StatusCenter'))
+const StorylineEditor = lazy(() => import('./components/storyline/StorylineEditor'))
 
 function PageLoadingSkeleton() {
   return (
@@ -73,7 +77,9 @@ function ProtectedLayout() {
   return (
     <AuthGuard>
       <div className="flex h-[100dvh] overflow-hidden">
-        <ScrollProgress />
+        <Suspense fallback={null}>
+          <ScrollProgress />
+        </Suspense>
         <ParticleCanvas />
         <Sidebar />
         <main className="flex-1 flex flex-col min-w-0 pt-5 pb-6 overflow-y-auto">

@@ -223,7 +223,7 @@ function SettingsLLM() {
                 <button
                   type="button"
                   onClick={(e) => { e.preventDefault(); setGuideModalProvider(opt) }}
-                  className="shrink-0 p-2.5 text-gray-300 hover:text-primary-500 transition-colors"
+                  className="shrink-0 p-2.5 text-gray-400 hover:text-primary-500 transition-colors"
                   title="查看教程"
                 >
                   <BookOpen className="w-3.5 h-3.5" />
@@ -312,7 +312,7 @@ function SettingsLLM() {
               onChange={(e) => setTemperature(parseFloat(e.target.value))}
               className="w-full accent-primary-500"
             />
-            <div className="flex justify-between text-[10px] text-gray-300">
+            <div className="flex justify-between text-[10px] text-gray-400">
               <span>0（确定）</span>
               <span>0.5（平衡）</span>
               <span>1（随机）</span>

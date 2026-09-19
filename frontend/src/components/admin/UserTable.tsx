@@ -25,7 +25,7 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50] as const
 // ════════════════════════════════════════════════════
 
 function SortIcon({ field, sortField, sortDir }: { field: SortField; sortField: SortField | null; sortDir: SortDir }) {
-  if (field !== sortField) return <ArrowUpDown className="w-3 h-3 text-gray-300 group-hover:text-gray-500 transition-colors" />
+  if (field !== sortField) return <ArrowUpDown className="w-3 h-3 text-gray-400 group-hover:text-gray-500 transition-colors" />
   return sortDir === 'asc'
     ? <ArrowUp className="w-3 h-3 text-primary-500" />
     : <ArrowDown className="w-3 h-3 text-primary-500" />
@@ -294,7 +294,7 @@ export default function UserTable({
 
           {pageNumbers.map((p, i) =>
             p === '...' ? (
-              <span key={`ellipsis-${i}`} className="px-2 text-xs text-gray-300">...</span>
+              <span key={`ellipsis-${i}`} className="px-2 text-xs text-gray-400">...</span>
             ) : (
               <button
                 key={p}

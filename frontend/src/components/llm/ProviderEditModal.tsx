@@ -388,7 +388,7 @@ function ListEditor({
               />
               <button
                 onClick={() => onRemove(idx)}
-                className="shrink-0 mt-1 p-0.5 text-gray-300 hover:text-rose-500 transition-colors"
+                className="shrink-0 mt-1 p-0.5 text-gray-400 hover:text-rose-500 transition-colors"
               >
                 <X className="w-3 h-3" />
               </button>

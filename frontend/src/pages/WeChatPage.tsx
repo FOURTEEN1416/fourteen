@@ -93,11 +93,24 @@ function LiveStatusBanner() {
         </div>
       </div>
 
-      {status.last_activity && (
-        <p className="mt-2 text-[10px] text-gray-300">
-          最后活动: {new Date(status.last_activity).toLocaleString('zh-CN')}
-        </p>
-      )}
+      {(() => {
+        // 后端 wechat_connector 用 time.time() 记录活动时刻（**秒**），
+        // 直接 new Date(秒) 会被当毫秒解析 → 显示 1970-01-21（09-19 诊断 P2）。
+        // 启发式：<1e12 视为秒需 ×1000；再叠年份守卫，任何 epoch 哨兵值都不外泄。
+        const raw = status.last_activity;
+        if (raw === null || raw === undefined || raw === '') return null;
+        const n = Number(raw);
+        const ms =
+          Number.isFinite(n) && n > 0 ? (n < 1e12 ? n * 1000 : n) : Date.parse(String(raw));
+        if (!Number.isFinite(ms) || ms <= 0) return null;
+        const d = new Date(ms);
+        if (d.getFullYear() < 2010) return null;
+        return (
+          <p className="mt-2 text-[10px] text-gray-400">
+            最后活动: {d.toLocaleString('zh-CN')}
+          </p>
+        );
+      })()}
 
       {/* 断开态引导卡（SP-5 P1：空态构图 + 行动指引，替代巨幅空白） */}
       {!status.connected && (
@@ -230,7 +243,7 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-base font-semibold text-gray-800">扫码连接微信</h3>
-          <button onClick={handleClose} className="text-gray-300 hover:text-gray-500">
+          <button onClick={handleClose} className="text-gray-400 hover:text-gray-500">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -238,7 +251,7 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
         {status === 'loading' && (
           <div className="py-10 flex flex-col items-center gap-3">
             <div className="h-48 w-48 rounded-xl bg-gray-100 animate-pulse flex items-center justify-center">
-              <Smartphone className="h-8 w-8 text-gray-300" />
+              <Smartphone className="h-8 w-8 text-gray-400" />
             </div>
             <p className="text-sm text-gray-400">获取二维码中...</p>
           </div>

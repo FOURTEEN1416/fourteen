@@ -270,7 +270,7 @@ export default function IntroPage() {
               <details key={q} className="group rounded-xl bg-white/50 border border-white/60 px-4 py-3">
                 <summary className="text-sm font-medium text-gray-700 cursor-pointer list-none flex items-center justify-between">
                   {q}
-                  <span className="text-gray-300 group-open:rotate-45 transition-transform text-lg leading-none">+</span>
+                  <span className="text-gray-400 group-open:rotate-45 transition-transform text-lg leading-none">+</span>
                 </summary>
                 <p className="text-xs text-gray-500 leading-relaxed mt-2">{a}</p>
               </details>

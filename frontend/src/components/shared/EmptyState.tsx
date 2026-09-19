@@ -14,7 +14,7 @@ export default function EmptyState({ icon, title, description, action }: EmptySt
         {icon || <Inbox className="w-10 h-10" />}
       </div>
       <p className="text-sm text-gray-400 font-medium">{title}</p>
-      {description && <p className="text-xs text-gray-300 mt-1 max-w-[200px]">{description}</p>}
+      {description && <p className="text-xs text-gray-400 mt-1 max-w-[200px]">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   )

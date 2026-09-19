@@ -26,15 +26,22 @@
   --color-primary-600: #B45309;
   --color-primary-700: #92400E;
 
-  /* ── Accent（海盐蓝系） ── */
+  /* ── Accent（海盐蓝系；400 修正为 sky-500，恢复 300→500 单调加深） ── */
   --color-accent-50: #E0F2FE;
   --color-accent-100: #BAE6FD;
   --color-accent-200: #7DD3FC;
   --color-accent-300: #38BDF8;
-  --color-accent-400: #BAE6FD;
+  --color-accent-400: #0EA5E9;
   --color-accent-500: #0284C7;
   --color-accent-600: #0369A1;
   --color-accent-700: #075985;
+
+  /* ── 深薄荷（渐变文字收口色；#0D9488 小字对比度 3.75:1 不达 AA，再深一档到 5.5:1） ── */
+  --color-macaron-mint-deeper: #0F766E;
+
+  /* ── 灰字对比度修正（09-19 诊断：gray-400 #9CA3AF 白底仅 2.45:1，
+      183 处正文小文案全部不达标；提亮到原 gray-500 值 → 4.66:1 过 AA） ── */
+  --color-gray-400: #6B7280;
 
   /* ── Background ── */
   --color-bg-deep: #FFFBEB;
@@ -72,7 +79,9 @@ html {
 
 body {
   margin: 0;
-  font-family: 'Noto Sans SC', system-ui, sans-serif;
+  /* 系统 CJK 字体栈：不加载网络字体（Google Fonts link 已移除，此前声明
+     'Noto Sans SC' 但从未加载，属误导性声明）。已本机安装 Noto Sans SC 者仍会命中。 */
+  font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100dvh;
@@ -122,11 +131,11 @@ body::before {
   transform: translateY(-4px) scale(1.02);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.1);
 }
-.glass-pink {
-  background: rgba(252, 231, 243, 0.5);
+.glass-yellow {
+  background: rgba(253, 230, 138, 0.5);
   backdrop-filter: blur(12px) saturate(150%);
   -webkit-backdrop-filter: blur(12px) saturate(150%);
-  border: 1px solid rgba(248, 180, 217, 0.35);
+  border: 1px solid rgba(252, 211, 77, 0.35);
 }
 .glass-blue {
   background: rgba(219, 234, 254, 0.5);
@@ -134,11 +143,11 @@ body::before {
   -webkit-backdrop-filter: blur(12px) saturate(150%);
   border: 1px solid rgba(180, 217, 248, 0.35);
 }
-.glass-green {
-  background: rgba(209, 250, 229, 0.5);
+.glass-mint {
+  background: rgba(204, 251, 241, 0.5);
   backdrop-filter: blur(12px) saturate(150%);
   -webkit-backdrop-filter: blur(12px) saturate(150%);
-  border: 1px solid rgba(180, 248, 217, 0.35);
+  border: 1px solid rgba(153, 246, 228, 0.35);
 }
 
 /* ═══ Paper Surfaces（兼容旧类名） ═══ */
@@ -168,9 +177,9 @@ body::before {
 @media (max-width: 767px) {
   .glass-card,
   .glass-card-hover,
-  .glass-pink,
+  .glass-yellow,
   .glass-blue,
-  .glass-green,
+  .glass-mint,
   .paper-card,
   .paper-card-hover {
     backdrop-filter: blur(6px) saturate(140%);
@@ -194,16 +203,10 @@ body::before {
 }
 .animate-fade-in { animation: fade-in 0.3s ease-out; }
 
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 4px rgba(248, 180, 217, 0.20); }
-  50% { box-shadow: 0 0 12px rgba(248, 180, 217, 0.35); }
-}
-.animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
-
 @keyframes pulse-ring {
-  0% { box-shadow: 0 0 0 0 rgba(248, 180, 217, 0.4); }
-  70% { box-shadow: 0 0 0 12px rgba(248, 180, 217, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(248, 180, 217, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(186, 230, 253, 0.45); }
+  70% { box-shadow: 0 0 0 12px rgba(186, 230, 253, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(186, 230, 253, 0); }
 }
 .pulse-ring { animation: pulse-ring 2s infinite; }
 
@@ -247,16 +250,6 @@ body::before {
 }
 .animate-scale-in { animation: scale-in 0.15s ease-out; }
 
-@keyframes shimmer {
-  0% { background-position: -200% center; }
-  100% { background-position: 200% center; }
-}
-.animate-shimmer {
-  background: linear-gradient(90deg, transparent, rgba(248, 180, 217, 0.15), transparent);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
-}
-
 @keyframes btnGradient {
   0%, 100% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
@@ -270,16 +263,18 @@ body::before {
 .card-hover:hover { transform: translateY(-6px) scale(1.03); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1); }
 
 /* ═══ Macaron Button ═══ */
+/* 09-19 诊断 P0：白字压浅粉彩渐变对比度仅 1.25–1.33:1，主 CTA 近乎不可读。
+   浅色系底（#FDE68A/#BAE6FD/#99F6E4 均 L>0.55）唯一解是深色字 → 11:1。 */
 .btn-macaron {
   background: linear-gradient(135deg, var(--color-macaron-yellow), var(--color-macaron-blue), var(--color-macaron-mint));
   background-size: 200% 200%;
-  color: white;
+  color: var(--color-text-primary);
   transition: all 0.4s ease;
   animation: btnGradient 3s ease infinite;
 }
 .btn-macaron:hover {
   transform: translateY(-2px) scale(1.05);
-  box-shadow: 0 12px 24px rgba(236, 72, 153, 0.25);
+  box-shadow: 0 12px 24px rgba(217, 119, 6, 0.22);
 }
 .btn-macaron:active { transform: scale(0.98); }
 
@@ -296,7 +291,7 @@ body::before {
 }
 .nav-item:hover::before { transform: scaleY(1); }
 .nav-item.active {
-  background: linear-gradient(135deg, rgba(248, 180, 217, 0.15), rgba(180, 217, 248, 0.15));
+  background: linear-gradient(135deg, rgba(253, 230, 138, 0.22), rgba(186, 230, 253, 0.18));
 }
 .nav-item.active::before { transform: scaleY(1); }
 
@@ -321,7 +316,7 @@ body::before {
 /* ═══ Input Focus ═══ */
 .input-macaron:focus {
   border-color: var(--color-macaron-yellow);
-  box-shadow: 0 0 0 3px rgba(248, 180, 217, 0.2);
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.35);
   outline: none;
 }
 
@@ -346,7 +341,7 @@ body::before {
 .method-card:hover { transform: translateY(-4px) scale(1.03); }
 .method-card.selected {
   border-color: var(--color-macaron-yellow-deep);
-  box-shadow: 0 8px 24px rgba(236, 72, 153, 0.2);
+  box-shadow: 0 8px 24px rgba(217, 119, 6, 0.18);
 }
 .method-card.selected .method-icon {
   transform: scale(1.15) rotate(-5deg);

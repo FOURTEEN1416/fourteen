@@ -98,7 +98,7 @@ export default function Breadcrumb() {
           const isLast = i === crumbs.length - 1
           return (
             <span key={crumb.label} className="flex items-center gap-1">
-              {i > 0 && <span className="text-gray-300">/</span>}
+              {i > 0 && <span className="text-gray-400">/</span>}
               {crumb.to && !isLast ? (
                 <Link to={crumb.to} className="text-gray-400 hover:text-primary-500 transition-colors">
                   {crumb.label}

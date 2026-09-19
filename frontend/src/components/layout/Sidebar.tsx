@@ -24,7 +24,7 @@ export default function Sidebar() {
       <div className={`flex items-center h-14 border-b border-white/20
         ${collapsed ? 'justify-center px-0' : 'px-4 justify-between'}`}>
         {!collapsed && (
-          <Link to="/wechat" className="text-sm font-semibold bg-gradient-to-r from-pink-500 via-blue-500 to-green-500 bg-clip-text text-transparent hover:opacity-80 transition-opacity">
+          <Link to="/wechat" className="text-sm font-semibold bg-gradient-to-r from-primary-600 via-accent-600 to-macaron-mint-deeper bg-clip-text text-transparent hover:opacity-80 transition-opacity">
             唯一的你——十四
           </Link>
         )}

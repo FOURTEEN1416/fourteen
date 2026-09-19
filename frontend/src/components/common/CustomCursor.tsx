@@ -325,21 +325,18 @@ export function CustomCursor() {
           z-index: 9998;
         }
 
-        /* ── 配色变体：data-hover="yellow|blue|mint"（旧名 pink/green 保留兼容）── */
-        .cursor-core[data-variant='yellow'],
-        .cursor-core[data-variant='pink'] {
+        /* ── 配色变体：data-hover="yellow|mint"（默认蓝=无 data-variant）── */
+        .cursor-core[data-variant='yellow'] {
           border-color: #FDE68A;
           background: rgba(253, 230, 138, 0.35);
           box-shadow: 0 0 10px rgba(253, 230, 138, 0.55);
         }
-        .cursor-core[data-variant='mint'],
-        .cursor-core[data-variant='green'] {
+        .cursor-core[data-variant='mint'] {
           border-color: #99F6E4;
           background: rgba(153, 246, 228, 0.35);
           box-shadow: 0 0 10px rgba(153, 246, 228, 0.55);
         }
-        .cursor-glow[data-variant='yellow'],
-        .cursor-glow[data-variant='pink'] {
+        .cursor-glow[data-variant='yellow'] {
           background: radial-gradient(
             circle,
             rgba(251, 191, 36, 0.30) 0%,
@@ -348,8 +345,7 @@ export function CustomCursor() {
             transparent 80%
           );
         }
-        .cursor-glow[data-variant='mint'],
-        .cursor-glow[data-variant='green'] {
+        .cursor-glow[data-variant='mint'] {
           background: radial-gradient(
             circle,
             rgba(45, 212, 191, 0.30) 0%,
