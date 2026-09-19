@@ -7,6 +7,22 @@
 
 ---
 
+## 2026-09-19 — 每人独立微信通道：收编 + A 档三端闭环 + 生产隔离实证
+
+**任务**：用户报「他人注册后未扫自己的微信却显示已连接，且连的是管理员通道」；裁决改为每人独立通道（一人两条 / 好友自选角色 / 上限 100 / 遗留凭证迁 admin），并要求执行收编与部署。
+
+**动作与原因**：
+1. 根因：通道层全局单例（凭证/状态/`_connector`），状态与接口无 user 维度；数据面隔离早已存在，通道面从未多租户化。方案见 `docs/plans/2026-09-19-每人独立微信通道方案.md`。
+2. 收编：worktree `wt/wx-channel` → 主检出 merge `83fbd77`；回归门收尾 `531b92b`。
+3. 实现：`channel_paths` + `ConnectorRegistry` + 好友自选角色；连接器按 owner/slot 隔离；`/api/wechat/channel*` 仅 JWT 本人；旧全局端点未登录 401；会话键 `owner:peer`。
+4. A 档：origin/main `531b92b` → 服务器 pull + `remote_deploy.sh`；`API_KEY_ENABLED=true` + 前端 `VITE_API_KEY` 重建；遗留通道迁 admin `user_id=1`。
+
+**验证**：本地 pytest **1207 passed / 4 skipped** + vitest **94/94** + tsc 0 错；服务器 health 200 / active；hash-object 三文件与本地一致；未登录 channel/status/qrcode 均为 **401**；服务器 venv 隔离测试 **13 passed**；`data/wechat_sessions/1/slot0/` 凭证已迁移。双号真实扫码待用户实测。
+
+**遗留**：主检出另有未提交前端改动（非本任务包）；前端 bundle 含 API Key（后续宜用户 API 仅 JWT）；双通道产品级并发实测待操作。
+
+---
+
 ## 2026-08-28 — 文档与代码图谱治理（P0~P3 全量落地）
 
 **任务**：用户点名 5 痛点（文档混杂/方向不明/代码不反映现状/治理三任务/操作无日志），要求方法论先行 → 调研 → 增量治理。
