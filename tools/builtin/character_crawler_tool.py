@@ -6,6 +6,7 @@ import logging
 import random
 import re
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -71,6 +72,28 @@ _BLOCKED_PREFIXES = ("10.", "172.16.", "172.17.", "172.18.", "172.19.",
                      "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
                      "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
                      "172.30.", "172.31.", "192.168.")
+
+# ── 正文有效性阈值（2026-09-19 新增）──
+# 为什么必须有：百度百科对爬虫返回反爬壳页，HTML 体积很大（实测 95 KB）能通过
+# 原有的 `len(resp.text) < 2000` 校验，但正文抽取后只剩「百度百科」4 个字符。
+# 旧代码据此判定 success=True，使 _fetch_person_fallback 的降级链在第 1 步就短路，
+# 真正可用的 search_fetch（实测 1212 字符）永远不会被调用 —— 表现为
+# 「语义上成功、数据为空」。体积校验 ≠ 内容校验。
+_MIN_USEFUL_CONTENT = 200
+_MIN_USEFUL_SUMMARY = 60
+_ANTI_BOT_MARKERS = (
+    "百度安全验证", "请输入验证码", "网络不给力", "请稍后再试",
+    "访问过于频繁", "点击进行验证", "系统检测到",
+)
+
+# ── 维基不可达记忆（2026-09-19 新增）──
+# 中国大陆网络下 zh/en 维基均被持续阻断，每次调用都要白等 2×timeout。生产实测：
+# 整条降级链 33.2s，其中维基占 32.0s（97%），而真正可用的 search_fetch 只要 1.1s。
+# 这么大的耗时会让对话内工具调用直接撞上「处理超时」。故把失败记下来短期跳过。
+_WIKI_TIMEOUT = 4.0          # 单域名超时（原 8s，实测双域名合计 32s）
+_WIKI_MEMO_TTL = 600.0       # 不可达记忆有效期（秒）
+_WIKI_MEMO: dict[str, float] = {}
+_WIKI_MEMO_LOCK = threading.Lock()
 
 
 class CharacterCrawlerTool(BaseTool):
@@ -148,6 +171,45 @@ class CharacterCrawlerTool(BaseTool):
             },
         }
 
+    # ── 内容有效性 & 结构归一 ──
+    @staticmethod
+    def _is_usable_profile(profile: dict[str, Any]) -> tuple[bool, str]:
+        """判定抓取结果是否真带到了人物信息。
+
+        Returns:
+            (是否可用, 不可用原因)
+        """
+        content = (profile.get("content") or "").strip()
+        summary = (profile.get("summary") or "").strip()
+        basic = profile.get("basic_info") or {}
+
+        for marker in _ANTI_BOT_MARKERS:
+            if marker in content:
+                return False, f"命中反爬特征「{marker}」"
+        if basic or len(summary) >= _MIN_USEFUL_SUMMARY or len(content) >= _MIN_USEFUL_CONTENT:
+            return True, ""
+        return False, f"正文 {len(content)} 字符/摘要 {len(summary)} 字符/基础信息 0 项，均低于阈值"
+
+    @staticmethod
+    def _normalize_profile(profile: dict[str, Any]) -> dict[str, Any]:
+        """统一各来源的返回结构。
+
+        各来源产出不一致：`_fetch_baike` 有 content+summary，`_fetch_wikipedia` 只有
+        summary，`_search_and_fetch` 只有 content。调用方若固定读 `content`，
+        维基来源必然读到空 —— 与「百度壳页」同属一类「成功但无数据」。
+        """
+        if not isinstance(profile, dict):
+            return profile
+        content = profile.get("content") or ""
+        summary = profile.get("summary") or ""
+        if not content and summary:
+            profile["content"] = summary[:_MAX_CONTENT_LEN]
+        if not summary and content:
+            profile["summary"] = content[:_MAX_CONTENT_LEN]
+        profile.setdefault("basic_info", {})
+        profile["content_length"] = len(profile.get("content") or "")
+        return profile
+
     def execute(self, action: str, **kwargs) -> ToolResult:  # type: ignore[override]
         if not HAS_REQUESTS:
             return ToolResult(False, error="请安装: pip install requests beautifulsoup4")
@@ -163,6 +225,8 @@ class CharacterCrawlerTool(BaseTool):
             return ToolResult(False, error=f"未知操作: {action}")
         try:
             result = handler()
+            if result.success and isinstance(result.data, dict):
+                result.data = self._normalize_profile(result.data)
             if kwargs.get("output_file") and result.success:
                 self._save(result.data, kwargs["output_file"])
             return result
@@ -178,20 +242,38 @@ class CharacterCrawlerTool(BaseTool):
             return ToolResult(False, error="请提供人物名称")
         # 尝试多个域名（zh.wikipedia.org 被墙时，en.wikipedia.org 某些地区可用）
         domains = ["https://zh.wikipedia.org", "https://en.wikipedia.org"]
-        for domain in domains:
+        pending = [d for d in domains if not self._wiki_domain_blocked(d)]
+        if not pending:
+            return ToolResult(False, error="维基百科近期不可达（已记忆，跳过）")
+        for domain in pending:
             url = f"{domain}/wiki/{quote(name)}"
             try:
-                resp = self.session.get(url, timeout=8)
+                resp = self.session.get(url, timeout=_WIKI_TIMEOUT)
                 if resp.status_code == 200:
                     soup = BeautifulSoup(resp.text, "html.parser")
                     profile = self._parse_wikipedia(soup)
+                    usable, reason = self._is_usable_profile(profile)
+                    if not usable:
+                        logger.warning("维基百科 %s 页面无有效内容（%s），尝试下一个域名", domain, reason)
+                        continue
                     profile["source_url"] = url
                     profile["crawled_at"] = datetime.now(tz=timezone.utc).isoformat()
                     return ToolResult(True, data=profile)
             except requests.RequestException:
-                logger.warning("维基域名 %s 不可达，尝试下一个", domain)
+                self._mark_wiki_domain_blocked(domain)
+                logger.warning("维基域名 %s 不可达（已记忆 %ds），尝试下一个", domain, int(_WIKI_MEMO_TTL))
                 continue
         return ToolResult(False, error="维基百科不可达（中国大陆网络限制），请用 search_fetch 或 fetch_person")
+
+    @staticmethod
+    def _wiki_domain_blocked(domain: str) -> bool:
+        with _WIKI_MEMO_LOCK:
+            return time.monotonic() < _WIKI_MEMO.get(domain, 0.0)
+
+    @staticmethod
+    def _mark_wiki_domain_blocked(domain: str) -> None:
+        with _WIKI_MEMO_LOCK:
+            _WIKI_MEMO[domain] = time.monotonic() + _WIKI_MEMO_TTL
 
     def _parse_wikipedia(self, soup) -> dict[str, Any]:
         profile: dict[str, Any] = {
@@ -246,7 +328,9 @@ class CharacterCrawlerTool(BaseTool):
             result["content"] = r.data.get("content", "")
             result["source_url"] = baidu_url
         result["content_length"] = len(result.get("content", ""))
-        return ToolResult(bool(result["content"]), data=result)
+        if result["content"]:
+            return ToolResult(True, data=result)
+        return ToolResult(False, error="百度搜索未返回可解析正文")
 
     # ──────────────────────────────
     #  fetch_person — 多重降级自动获取
@@ -255,6 +339,10 @@ class CharacterCrawlerTool(BaseTool):
         """完整降级链:
            有 cloudscraper: 百度百科(L1) → 维基(L2) → 百度搜索(L3)
            无 cloudscraper: 维基(L1) → 百度搜索(L2) → 报错
+
+        ⚠️ 每一层都必须先过 `_is_usable_profile` 才算成功。否则百度反爬壳页会让
+        链条在第 1 步短路（2026-09-19 实测：终态 content 仅 4 字符，而本可用的
+        search_fetch 能拿到 1212 字符）。
         """
         if not name:
             return ToolResult(False, error="请提供人物名称")
@@ -266,21 +354,21 @@ class CharacterCrawlerTool(BaseTool):
             if baike_result.success:
                 baike_result.data["fallback_chain"] = ["baike.baidu.com"]
                 return baike_result
-            chain.append("baike(unreachable)")
+            chain.append(f"baike({(baike_result.error or 'failed')[:60]})")
 
         # ── 其次维基百科 ──
         wiki_result = self._fetch_wikipedia(name)
         if wiki_result.success:
-            wiki_result.data["fallback_chain"] = chain + ["wikipedia"]
+            wiki_result.data["fallback_chain"] = [*chain, "wikipedia"]
             return wiki_result
-        chain.append("wikipedia(unreachable)")
+        chain.append(f"wikipedia({(wiki_result.error or 'failed')[:60]})")
 
         # ── 最后百度搜索（片段） ──
         search_result = self._search_and_fetch(name)
         if search_result.success:
-            search_result.data["fallback_chain"] = chain + ["search_fetch"]
+            search_result.data["fallback_chain"] = [*chain, "search_fetch"]
             return search_result
-        chain.append("search_fetch(empty)")
+        chain.append(f"search_fetch({(search_result.error or 'empty')[:60]})")
 
         return ToolResult(False, error=f"无法获取 '{name}' 的信息：所有来源均不可达。降级链: {' → '.join(chain)}")
 
@@ -337,6 +425,13 @@ class CharacterCrawlerTool(BaseTool):
             tag.decompose()
         profile["content"] = soup.get_text(strip=True)[:_MAX_CONTENT_LEN]
         profile["crawled_at"] = datetime.now(tz=timezone.utc).isoformat()
+
+        # ⚠️ 体积校验（上面的 len(resp.text) < 2000）不足以防反爬：实测百度壳页
+        #    HTML 95 KB 却只有 4 个字符正文。必须校验**抽取后**的内容。
+        usable, reason = self._is_usable_profile(profile)
+        if not usable:
+            logger.warning("百度百科未返回有效内容（%s）", reason)
+            return ToolResult(False, error=f"百度百科返回反爬/空壳页面（{reason}）")
         return ToolResult(True, data=profile)
 
     # ──────────────────────────────
