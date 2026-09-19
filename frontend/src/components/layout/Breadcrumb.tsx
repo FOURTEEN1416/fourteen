@@ -15,8 +15,10 @@ function useBreadcrumbs(): Crumb[] {
   const { data } = useUnifiedCharacters()
   const characters = data?.characters ?? []
 
+  // 单段路径：面包屑显示**分组名**，页名交给页内 h1（2026-09-19 审美批次：消除
+  // 面包屑与 h1 逐字重复）
   // /wechat
-  if (pathname === '/wechat') return [{ label: '微信连接' }]
+  if (pathname === '/wechat') return [{ label: '连接' }]
 
   // /settings/*
   const settingsMatch = pathname.match(/^\/settings\/(.+)/)
@@ -50,7 +52,10 @@ function useBreadcrumbs(): Crumb[] {
   }
 
   // /roles
-  if (pathname === '/roles') return [{ label: '角色配置' }]
+  if (pathname === '/roles') return [{ label: '角色' }]
+
+  // /psych
+  if (pathname === '/psych') return [{ label: '角色' }]
 
   // /roles/create
   if (pathname === '/roles/create') return [{ label: '角色配置', to: '/roles' }, { label: '创建角色' }]

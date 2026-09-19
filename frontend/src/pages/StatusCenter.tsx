@@ -44,7 +44,7 @@ export default function StatusCenter() {
 
   if (!activeCharacter) {
     return (
-      <div className="p-6 max-w-4xl mx-auto text-center text-gray-400 text-sm">
+      <div className="px-4 sm:px-6 lg:px-8 py-16 mx-auto w-full max-w-6xl text-center text-gray-400 text-sm">
         暂无活跃角色，请先创建或激活角色
       </div>
     )
@@ -55,35 +55,36 @@ export default function StatusCenter() {
   const memoryCount = (stats as DashboardStats | undefined)?.recent_memories ?? 0
   const recentFacts = facts ?? []
 
+  // 2026-09-19 审美批次：宽屏双列栅格（左：情绪/成就，右：记忆管线），
+  // 页名由面包屑末段承担，删除重复 h2；FE-0001 两侧空洞随 max-w-6xl 容器收敛。
   return (
-    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-5">
-      <h2 className="text-lg font-bold text-gray-700 flex items-center gap-2">
-        <span className="section-bar" />
-        状态中心
-      </h2>
-
-      <div className="grid grid-cols-3 gap-3 sm:gap-4">
-        <div className="glass-card rounded-xl p-3 sm:p-4 text-center">
-          <div className="text-xl sm:text-2xl font-bold text-macaron-yellow-deep">{emotionLabel}</div>
-          <div className="text-xs text-gray-400 mt-1">当前情绪</div>
-        </div>
-        <div className="glass-card rounded-xl p-3 sm:p-4 text-center">
-          <div className="text-xl sm:text-2xl font-bold text-macaron-blue-deep">{affinityLabel}</div>
-          <div className="text-xs text-gray-400 mt-1">亲密等级</div>
-        </div>
-        <div className="glass-card rounded-xl p-3 sm:p-4 text-center">
-          <div className="text-xl sm:text-2xl font-bold text-macaron-mint-deep">
-            {statsLoading ? '—' : memoryCount}
+    <div className="px-4 py-6 sm:px-6 lg:px-8 mx-auto w-full max-w-6xl">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] gap-5 items-start">
+        <div className="space-y-5 min-w-0">
+          <div className="grid grid-cols-3 gap-3 sm:gap-4">
+            <div className="glass-card rounded-xl p-3 sm:p-4 text-center">
+              <div className="text-xl sm:text-2xl font-bold text-macaron-yellow-deep">{emotionLabel}</div>
+              <div className="text-xs text-gray-400 mt-1">当前情绪</div>
+            </div>
+            <div className="glass-card rounded-xl p-3 sm:p-4 text-center">
+              <div className="text-xl sm:text-2xl font-bold text-macaron-blue-deep">{affinityLabel}</div>
+              <div className="text-xs text-gray-400 mt-1">亲密等级</div>
+            </div>
+            <div className="glass-card rounded-xl p-3 sm:p-4 text-center">
+              <div className="text-xl sm:text-2xl font-bold text-macaron-mint-deep">
+                {statsLoading ? '—' : memoryCount}
+              </div>
+              <div className="text-xs text-gray-400 mt-1">记忆条目</div>
+            </div>
           </div>
-          <div className="text-xs text-gray-400 mt-1">记忆条目</div>
+
+          <EmotionInsightCard trend={trendData?.trend ?? []} distribution={distData?.distribution ?? []} distTotal={distData?.total ?? 0} />
+
+          <AchievementsCard data={achievements} />
         </div>
+
+        <MemorySystemCard characterId={activeCharacter.id} recentFacts={recentFacts} />
       </div>
-
-      <EmotionInsightCard trend={trendData?.trend ?? []} distribution={distData?.distribution ?? []} distTotal={distData?.total ?? 0} />
-
-      <AchievementsCard data={achievements} />
-
-      <MemorySystemCard characterId={activeCharacter.id} recentFacts={recentFacts} />
     </div>
   )
 }
