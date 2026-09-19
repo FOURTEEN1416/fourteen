@@ -812,11 +812,11 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
             <button
               onClick={handleEnrich}
               disabled={enriching || !character.name?.trim()}
-              className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm flex items-center gap-2"
+              className="px-4 py-2 text-sm font-semibold text-text-primary rounded-lg btn-macaron disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
             >
               {enriching ? (
                 <>
-                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-text-primary border-t-transparent" />
                   增强中...
                 </>
               ) : (

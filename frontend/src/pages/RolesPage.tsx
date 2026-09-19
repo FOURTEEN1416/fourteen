@@ -45,7 +45,7 @@ function RoleCard({
 
       {character.is_active ? (
         <>
-          <div className="absolute top-3 right-3 text-[10px] px-2 py-0.5 rounded-full bg-macaron-blue text-white">
+          <div className="absolute top-3 right-3 text-[10px] px-2 py-0.5 rounded-full bg-macaron-blue text-text-primary">
             当前活跃
           </div>
           <div className="mt-auto w-full py-1.5 rounded-lg text-xs border border-macaron-blue/20 bg-macaron-blue-light/30 text-macaron-blue-deep text-center">

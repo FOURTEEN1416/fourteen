@@ -275,7 +275,7 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
       {/* ═══ 步骤 1：准备 AI 智能体 ═══ */}
       <div className="w-full max-w-md rounded-xl bg-blue-50/60 border border-blue-100 p-4 space-y-3">
         <div className="flex items-center gap-2">
-          <span className="w-5 h-5 rounded-full bg-macaron-blue text-white text-[10px] font-bold flex items-center justify-center">1</span>
+          <span className="w-5 h-5 rounded-full bg-macaron-blue text-text-primary text-[10px] font-bold flex items-center justify-center">1</span>
           <p className="text-xs font-semibold text-blue-700">准备一个 AI 智能体，让它替你跑导出</p>
         </div>
         <div className="space-y-2 pl-7">
@@ -291,7 +291,7 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
             </div>
             <div className="flex flex-wrap gap-1.5">
               <a href="https://opencode.ai" target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-600 text-white text-[10px] font-medium hover:bg-blue-700 transition-colors">
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-accent-600 text-white text-[10px] font-medium hover:bg-accent-700 transition-colors">
                 <Bot className="w-3 h-3" /> opencode.ai
               </a>
             </div>
@@ -307,7 +307,7 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
       {/* ═══ 步骤 2：导出工具 + 任务书喂给智能体 ═══ */}
       <div className="w-full max-w-md rounded-xl bg-amber-50/60 border border-amber-100 p-4 space-y-3">
         <div className="flex items-center gap-2">
-          <span className="w-5 h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center">2</span>
+          <span className="w-5 h-5 rounded-full bg-amber-600 text-white text-[10px] font-bold flex items-center justify-center">2</span>
           <p className="text-xs font-semibold text-amber-700">把任务书喂给智能体，让它在本机执行</p>
         </div>
         <div className="space-y-2 pl-7">
@@ -330,7 +330,7 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
       {/* ═══ 步骤 3：上传数据到服务器 ═══ */}
       <div className="w-full max-w-md rounded-xl bg-green-50/60 border border-green-100 p-4 space-y-3">
         <div className="flex items-center gap-2">
-          <span className="w-5 h-5 rounded-full bg-macaron-mint text-white text-[10px] font-bold flex items-center justify-center">3</span>
+          <span className="w-5 h-5 rounded-full bg-macaron-mint text-text-primary text-[10px] font-bold flex items-center justify-center">3</span>
           <p className="text-xs font-semibold text-green-700">上传智能体导出的 JSON 到服务器分析</p>
         </div>
 

@@ -29,7 +29,7 @@ export default function Modal({ open, title, children, onClose, size = 'md' }: M
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm animate-fade-in"
       onClick={(e) => { if (e.target === overlayRef.current) onClose() }}
     >
-      <div className={`${sizeMap[size]} w-[90vw] glass-card rounded-xl p-5 animate-scale-in`}>
+      <div className={`${sizeMap[size]} w-[90vw] mat-floating rounded-2xl p-5 animate-scale-in`}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-gray-800">{title}</h3>
           <button onClick={onClose} className="-mr-2 flex h-11 w-11 items-center justify-center text-gray-400 hover:text-gray-600 transition-colors" aria-label="关闭">

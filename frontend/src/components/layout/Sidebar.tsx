@@ -17,11 +17,11 @@ export default function Sidebar() {
 
   return (
     <aside
-      className={`hidden md:flex flex-col shrink-0 transition-all duration-300 border-r border-white/20
-        bg-white/60 backdrop-blur-2xl ${collapsed ? 'w-14' : 'w-52'}`}
+      className={`hidden md:flex flex-col shrink-0 transition-all duration-300 mat-floating
+        ${collapsed ? 'w-14' : 'w-52'}`}
     >
       {/* Header */}
-      <div className={`flex items-center h-14 border-b border-white/20
+      <div className={`flex items-center h-14 border-b border-gray-900/5
         ${collapsed ? 'justify-center px-0' : 'px-4 justify-between'}`}>
         {!collapsed && (
           <Link to="/wechat" className="text-sm font-semibold bg-gradient-to-r from-primary-600 via-accent-600 to-macaron-mint-deeper bg-clip-text text-transparent hover:opacity-80 transition-opacity">
@@ -83,7 +83,7 @@ export default function Sidebar() {
 
       {/* Connection status */}
       {!collapsed && (
-        <div className="px-4 py-3 border-t border-white/20">
+        <div className="px-4 py-3 border-t border-gray-900/5">
           <div className="flex items-center gap-2 text-xs text-gray-400">
             <div className={`w-1.5 h-1.5 rounded-full pulse-ring ${isConnected ? 'bg-green-400' : 'bg-red-400'}`} />
             {isConnected ? '已连接' : '未连接'}

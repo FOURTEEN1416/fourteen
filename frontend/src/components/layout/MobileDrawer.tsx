@@ -61,13 +61,13 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
         aria-modal="true"
         aria-label="导航菜单"
         className={`absolute left-0 top-0 bottom-0 w-72 max-w-[85vw] flex flex-col safe-area-x
-          bg-white/80 backdrop-blur-2xl border-r border-white/40 shadow-xl
+          mat-floating rounded-none border-y-0 border-l-0
           transition-transform duration-300 ease-out ${open ? 'translate-x-0' : '-translate-x-full'}`}
       >
         {/* Header */}
-        <div className="flex items-center justify-between h-14 px-4 border-b border-white/30 shrink-0">
+        <div className="flex items-center justify-between h-14 px-4 border-b border-gray-900/5 shrink-0">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary-400 to-accent-400 flex items-center justify-center text-white text-xs font-bold shadow-sm">你</div>
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-macaron-yellow to-accent-400 text-text-primary flex items-center justify-center text-xs font-bold shadow-sm">你</div>
             <span className="text-sm font-semibold bg-gradient-to-r from-primary-600 via-accent-600 to-macaron-mint-deeper bg-clip-text text-transparent">
               唯一的你——十四
             </span>
@@ -117,7 +117,7 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
         </nav>
 
         {/* Footer：用户 + 连接状态 */}
-        <div className="px-4 py-3 border-t border-white/30 shrink-0">
+        <div className="px-4 py-3 border-t border-gray-900/5 shrink-0">
           {user && (
             <div className="flex items-center gap-2.5 mb-2">
               <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-500 shrink-0">

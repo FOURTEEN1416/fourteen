@@ -58,6 +58,14 @@
   --color-gray-300: #D6D3D1;  --color-gray-500: #78716C;  --color-gray-600: #57534E;
   --color-gray-700: #44403C;  --color-gray-800: #292524;  --color-gray-900: #1C1917;
 
+  /* purple/violet/orange 属装饰性脱缰色相（安全设置图标、"特殊"徽标、提取按钮），
+     一并收编：紫→海盐蓝深族、橙→暖黄深族。rose/pink/indigo 不在此列——它们是
+     EMOTION_COLORS 分类数据色（伤心/撒娇/傲娇/疲惫…），重映射会造成色相碰撞。 */
+  --color-purple-100: #E0F2FE; --color-purple-200: #BAE6FD; --color-purple-500: #0284C7;
+  --color-purple-700: #0369A1; --color-purple-800: #075985;
+  --color-violet-100: #E0F2FE; --color-violet-500: #0284C7; --color-violet-700: #0369A1;
+  --color-orange-400: #F59E0B; --color-orange-500: #D97706; --color-orange-600: #B45309;
+
   /* ── Background ── */
   --color-bg-deep: #FFFBEB;
   --color-bg-surface: rgba(255, 255, 255, 0.7);

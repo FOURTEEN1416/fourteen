@@ -34,15 +34,15 @@ export default function RoleSettings() {
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
         {/* ── Character Header ── */}
-        <div className="bg-white/70 backdrop-blur-sm border border-gray-200/60 rounded-2xl p-5 mb-5">
+        <div className="glass-card rounded-2xl p-5 mb-5">
           <div className="flex items-center gap-4">
             {/* Avatar */}
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-400 to-purple-500 flex items-center justify-center text-white text-xl font-bold shadow-sm shrink-0">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-macaron-yellow to-macaron-blue text-text-primary flex items-center justify-center text-xl font-bold shadow-sm shrink-0">
               {sanitizeCharacterName(character.name)[0]}
             </div>
             <div className="min-w-0 flex-1">
-              <h1 className="text-lg font-bold text-gray-800">{sanitizeCharacterName(character.name)}</h1>
-              <p className="text-sm text-gray-500 truncate">{character.description}</p>
+              <h1 className="text-lg font-bold text-text-primary">{sanitizeCharacterName(character.name)}</h1>
+              <p className="text-sm text-text-muted truncate">{character.description}</p>
               <div className="flex items-center gap-3 mt-1.5">
                 <span className="text-[11px] text-gray-400">ID: {characterId}</span>
                 <span className="text-[11px] text-gray-400">用户: {character.user_id || '未绑定'}</span>

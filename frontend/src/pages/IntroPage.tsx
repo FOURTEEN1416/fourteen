@@ -181,7 +181,7 @@ export default function IntroPage() {
               { title: '开始陪伴', desc: '文字 / 语音随时聊；角色会记住你说过的事，也会在合适的时机主动找你。' },
             ].map((s, i) => (
               <li key={s.title} className="flex gap-3">
-                <span className="shrink-0 w-6 h-6 rounded-full bg-macaron-blue text-white text-[11px] font-bold flex items-center justify-center mt-0.5">
+                <span className="shrink-0 w-6 h-6 rounded-full bg-macaron-blue text-text-primary text-[11px] font-bold flex items-center justify-center mt-0.5">
                   {i + 1}
                 </span>
                 <div>
