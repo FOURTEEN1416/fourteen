@@ -1,7 +1,8 @@
 # P1 Backlog - 唯一的你
 
 **Created**: 2026-06-03
-**Last Updated**: 2026-09-19（全仓扫描核对：本清单未决项 FF-0007/P1-9~11/OBS-2/OBS-3 均不受 09-18/19 批次影响，无新增未决项；09-18 nginx 整改落地 gzip/强缓存但 OBS-2 HTTPS 仍待域名）
+**Last Updated**: 2026-09-19（前端修复批次收口：六十九号诊断五项建议已于七十号全落地 [3728a87]；新增遗留项 FE-0001 状态中心宽屏留白；其余未决项 FF-0007/P1-9~11/OBS-2/OBS-3 不受影响）
+**Previous**: 2026-09-19（全仓扫描核对：未决项 FF-0007/P1-9~11/OBS-2/OBS-3 均不受 09-18/19 批次影响；09-18 nginx 整改落地 gzip/强缓存但 OBS-2 HTTPS 仍待域名）
 **Previous**: 2026-09-17（三连修批次核对：本清单未决项 FF-0007/P1-9~11/OBS-2/OBS-3 均不受本轮影响，无新增未决项；`scripts/window_board.ps1` 仍缺待裁决）
 **Previous**: 2026-09-15（复赛冲刺核对：pyrightconfig.json 尾逗号已修 `66c4e3e`）
 **Previous**: 2026-08-24 (全面核查后重写 — 逐项实测验证)
@@ -41,3 +42,8 @@
 6. ~~**[OBS-1] 生产后端端口直暴露**~~ ✅ **2026-08-24 已修复**：服务器 `/etc/systemd/system/ai-girlfriend.service` 的 `--host 0.0.0.0` → `127.0.0.1`（daemon-reload + restart）。实测：ss 显示仅 `127.0.0.1:8000` 监听；`/docs` 200；nginx 代理链路 200；微信桥接凭 flock 自动恢复登录。仓库模板 workers/keep-alive 已同步生产实况（4 / 30s）。
 7. **[OBS-2] HTTPS 未启用**: 裸 IP 无法签发 certbot 证书，当前 HTTP 服务；`.env.production` 的 CORS 写的却是 https origin。绑定域名后按 nginx conf 注释走 certbot 即可。（用户决策：暂缓，证书+域名需费用）
 8. **[OBS-3] systemd 服务以 root 运行**: 生产 service `User=root`，模板基线是 `www-data`。改运行用户涉及文件权限迁移，需停机窗口规划，暂记录待办。
+
+## 新增未决项（2026-09-19 前端修复批次收口）
+
+9. **[FE-0001] StatusCenter 宽屏左侧留白**：≥1280px 视口下内容列居中（max-w），侧栏与内容列之间视觉空洞明显（七十号截图实证）。属布局特性非缺陷，下轮迭代候选——方向：内容列加宽/双列栅格或左对齐贴合侧栏，需先出对比稿再裁决。关联 LOG 六十九/七十。
+10. **[FE-ENV-1] Lighthouse 本机不可用（环境约束，非产品项）**：本机 headless Chrome 无法提交帧 → NO_FCP。前端性能验证固定改用 CDP `Performance.getMetrics` + PerformanceObserver + 真机网络清单口径。关联 LOG 六十九「环境注记」。
