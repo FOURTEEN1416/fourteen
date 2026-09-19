@@ -577,7 +577,7 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
             <div className="text-[11px] text-gray-400 mb-2">
               沉浸式＝像真人发微信（不写动作神态）；小说式＝带动作、神态、环境描写
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-1 p-1 bg-gray-100/60 rounded-xl">
               {([
                 { key: 'immersive', label: '沉浸式聊天', hint: '像真人发微信' },
                 { key: 'novel', label: '小说式', hint: '带动作神态' },
@@ -586,10 +586,10 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
                   key={m.key}
                   type="button"
                   onClick={() => setReplyMode(m.key)}
-                  className={`flex-1 rounded-xl px-3 py-2 text-xs transition ${
+                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/50 ${
                     replyMode === m.key
-                      ? 'btn-macaron font-medium'
-                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                      ? 'bg-white text-gray-800 font-medium shadow-sm ring-1 ring-black/5'
+                      : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
                   <div>{m.label}</div>
@@ -600,7 +600,7 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
           </div>
           <div className="flex items-center gap-4">
             <div className="w-24 shrink-0"><span className="text-xs text-gray-600">紧迫阈值</span></div>
-            <div className="flex-1"><Slider value={threshold} min={0} max={10} step={0.5} label="紧迫阈值" onChange={setThreshold} /></div>
+            <div className="flex-1"><Slider value={threshold} min={0} max={10} step={0.5} label="紧迫阈值" showLabel={false} showValue={false} onChange={setThreshold} /></div>
             <span className="w-16 text-right text-xs font-mono text-gray-400">{threshold.toFixed(1)}</span>
           </div>
           {[
@@ -612,7 +612,7 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
           ].map(s => (
             <div key={s.label} className="flex items-center gap-4">
               <div className="w-24 shrink-0"><span className="text-xs text-gray-600">{s.label}</span></div>
-              <div className="flex-1"><Slider value={s.value} min={s.min} max={s.max} step={1} label={s.label} onChange={s.onChange} /></div>
+              <div className="flex-1"><Slider value={s.value} min={s.min} max={s.max} step={1} label={s.label} showLabel={false} showValue={false} onChange={s.onChange} /></div>
               <span className="w-16 text-right text-xs font-mono text-gray-400">{s.value} {s.unit}</span>
             </div>
           ))}
@@ -634,30 +634,34 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
             ].map(s => (
               <div key={s.label} className="flex items-center gap-4">
                 <div className="w-24 shrink-0"><span className="text-xs text-gray-600">{s.label}</span></div>
-                <div className="flex-1"><Slider value={s.value} min={s.min} max={s.max} step={1} label={s.label} onChange={s.onChange} /></div>
+                <div className="flex-1"><Slider value={s.value} min={s.min} max={s.max} step={1} label={s.label} showLabel={false} showValue={false} onChange={s.onChange} /></div>
                 <span className="w-16 text-right text-xs font-mono text-gray-400">{s.value} {s.unit}</span>
               </div>
             ))}
           </div>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="w-full py-2 rounded-xl btn-macaron text-xs font-medium disabled:opacity-50"
-          >
-            {saving ? '保存中…' : savedAt ? `已保存（${savedAt}）` : '保存频率配置'}
-          </button>
+          <div className="flex justify-end">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-primary-500 hover:bg-primary-400 rounded-lg transition-colors shadow-sm disabled:opacity-50"
+            >
+              {saving ? '保存中…' : savedAt ? `已保存（${savedAt}）` : '保存频率配置'}
+            </button>
+          </div>
         </div>
       </Section>
 
       {/* Manual send（08-28 新增：手动控制） */}
       <Section title="手动控制">
-        <button
-          onClick={handleSendNow}
-          disabled={sending}
-          className="w-full py-2 rounded-xl bg-macaron-blue text-white text-xs font-medium hover:bg-macaron-blue-deep transition-colors disabled:opacity-50"
-        >
-          {sending ? '生成发送中…' : '立即发送一条主动消息'}
-        </button>
+        <div className="flex justify-end">
+          <button
+            onClick={handleSendNow}
+            disabled={sending}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-primary-500 hover:bg-primary-400 rounded-lg transition-colors shadow-sm disabled:opacity-50"
+          >
+            {sending ? '生成发送中…' : '立即发送一条主动消息'}
+          </button>
+        </div>
         {sendResult && (
           <div className="mt-2 rounded-xl bg-white/70 border border-macaron-blue/30 px-3 py-2">
             <p className="text-[10px] text-gray-400 mb-0.5">已发送</p>

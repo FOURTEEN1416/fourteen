@@ -8,10 +8,13 @@ interface SliderProps {
   step?: number
   tooltip?: string
   disabled?: boolean
+  /** 调用方自带标题/数值时置 false，避免同一行出现两套标签与数值 */
+  showLabel?: boolean
+  showValue?: boolean
   onChange: (value: number) => void
 }
 
-export default function Slider({ label, value, min = 0, max = 1, step = 0.01, tooltip, disabled, onChange }: SliderProps) {
+export default function Slider({ label, value, min = 0, max = 1, step = 0.01, tooltip, disabled, showLabel = true, showValue = true, onChange }: SliderProps) {
   const id = useId()
   // 防御性转换：API 可能返回字符串类型的数值，toFixed 仅数字可用
   const numValue = Number(value) || 0
@@ -19,9 +22,11 @@ export default function Slider({ label, value, min = 0, max = 1, step = 0.01, to
 
   return (
     <div className="flex items-center gap-3 group">
-      <label htmlFor={id} className="text-xs text-gray-500 w-14 shrink-0 truncate" title={tooltip}>
-        {label}
-      </label>
+      {showLabel && (
+        <label htmlFor={id} className="text-xs text-gray-500 w-14 shrink-0 truncate" title={tooltip}>
+          {label}
+        </label>
+      )}
       <div className="flex-1 relative">
         <input
           id={id}
@@ -45,9 +50,11 @@ export default function Slider({ label, value, min = 0, max = 1, step = 0.01, to
           }}
         />
       </div>
-      <span className="text-[11px] text-gray-400 w-8 text-right tabular-nums shrink-0">
-        {numValue.toFixed(2)}
-      </span>
+      {showValue && (
+        <span className="text-[11px] text-gray-400 w-8 text-right tabular-nums shrink-0">
+          {numValue.toFixed(2)}
+        </span>
+      )}
     </div>
   )
 }
