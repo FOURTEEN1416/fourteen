@@ -19,6 +19,9 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
+# 消息清洗（拦截 LLM 推理过程泄漏为消息内容）。直接导入而非延迟导入：
+# proactive.ase_engine 不反向依赖 scheduler，不存在循环导入。
+from proactive.ase_engine import sanitize_message
 from utils.project_paths import project_path
 
 logger = logging.getLogger("scheduler")
@@ -111,6 +114,8 @@ class ProactiveScheduler:
         self._channel_instances: dict[str, Callable | None] = {}  # name → instantiated sender
         self._health_check_interval = 60  # 秒
         self._quiet_hours = (23, 7)       # 23:00-07:00 免打扰（web 端可调）
+        # 重要日期当日幂等记录（每小时任务 + 00:05 维护可能同日命中）
+        self._important_dates_sent: set[str] = set()
 
         # 知识库定期采集（Vault collect）— web 控制端开关
         self._vault_enabled = False
@@ -222,6 +227,21 @@ class ProactiveScheduler:
                 coalesce=True,
             )
 
+            # 6. 重要日期补发检查（每小时）
+            #    00:05 的每日维护恒落在免打扰时段(23-7)内 → 生日/纪念日祝福
+            #    会被 _send_to_all() 静默丢弃。改为每小时重试一次，由
+            #    _check_important_dates() 内的静默判定 + 当日幂等键保证
+            #    「静默结束后第一时间送达，且当日只发一次」。
+            self._scheduler.add_job(
+                self._safe_job_wrapper(self._check_important_dates, "important_dates"),
+                IntervalTrigger(hours=1),
+                id="important_dates",
+                name="重要日期补发检查",
+                replace_existing=True,
+                misfire_grace_time=300,
+                coalesce=True,
+            )
+
             self._scheduler.start()
             self._last_check_time = datetime.now(tz=timezone.utc)
             # 知识库定期采集任务按持久化配置恢复
@@ -243,10 +263,16 @@ class ProactiveScheduler:
     # ── 定时任务 ─────────────────────────────────────────
 
     def set_quiet_hours(self, start: int, end: int) -> None:
-        """设置免打扰时段（web 控制端可调；0-23 整点）。"""
+        """设置免打扰时段（web 控制端可调；0-23 整点）。
+
+        同步注入 ASE 引擎：引擎需在**生成前**就知道静默时段，否则会生成
+        消息→扣配额→投递被丢弃（2026-09-19 生产事故根因）。
+        """
         if not (0 <= int(start) <= 23 and 0 <= int(end) <= 23):
             raise ValueError(f"免打扰小时必须在 0-23：got {start}-{end}")
         self._quiet_hours = (int(start), int(end))
+        if self.ase is not None and hasattr(self.ase, "set_quiet_hours"):
+            self.ase.set_quiet_hours(self._quiet_hours[0], self._quiet_hours[1])
         self._save_config_file()
         logger.info("免打扰时段已更新: %02d:00-%02d:00", start, end)
 
@@ -318,6 +344,10 @@ class ProactiveScheduler:
         if "start" in qh and "end" in qh:
             with contextlib.suppress(TypeError, ValueError):
                 self._quiet_hours = (int(qh["start"]), int(qh["end"]))
+        # 免打扰时段必须同步注入 ASE 引擎：引擎在生成前就要知道静默时段，
+        # 否则会「生成→扣配额→投递被丢弃」（2026-09-19 生产事故根因）。
+        if self.ase is not None and hasattr(self.ase, "set_quiet_hours"):
+            self.ase.set_quiet_hours(self._quiet_hours[0], self._quiet_hours[1])
         vault = data.get("vault") or {}
         if "enabled" in vault:
             self._vault_enabled = bool(vault["enabled"])
@@ -408,9 +438,16 @@ class ProactiveScheduler:
         优先级: wechat > websocket > console
 
         Returns: 是否至少一个通道发送成功
+
+        2026-09-19：免打扰分支改为**明确说明未投递**。旧日志写「跳过非紧急消息」
+        但代码里并不存在紧急消息旁路，措辞掩盖了「消息被丢弃」的事实 ——
+        配合「生成时即扣配额」，静默时段静默烧光全天配额而无人察觉。
         """
         if self._is_quiet_hours():
-            logger.info("免打扰时段(%s-%s)，跳过非紧急消息", self._quiet_hours[0], self._quiet_hours[1])
+            logger.warning(
+                "免打扰时段(%s-%s)：消息未投递（无紧急旁路），内容不计数不扣配额",
+                self._quiet_hours[0], self._quiet_hours[1],
+            )
             return False
 
         priority = ["wechat", "websocket", "console"]
@@ -474,44 +511,92 @@ class ProactiveScheduler:
                     self.ase.tick(hours, dry_run=True)
                 return
 
+            # 免打扰时段：在**生成之前**短路。
+            # 旧实现只在投递层（_send_to_all）判静默 —— 引擎照常生成、照常扣
+            # 配额，消息却在投递时被丢弃，静默时段成了「配额焚化炉」。
+            # 生产实证 2026-09-19：00:02–04:05 每 35 分钟一条、连续 8 条被丢弃
+            # 却全部计数 → 配额凌晨即满 → 全天零投递。
+            if self._is_quiet_hours():
+                if hasattr(self.ase, 'tick'):
+                    self.ase.tick(hours, dry_run=True)
+                logger.info(
+                    "ASE tick: 免打扰时段(%02d-%02d)静默，仅累积紧迫度 "
+                    "hours=%.2f urgency=%.2f daily_count=%d reason=quiet_hours",
+                    self._quiet_hours[0], self._quiet_hours[1], hours,
+                    getattr(getattr(self.ase, "urgency", None), "total", -1.0),
+                    getattr(self.ase, "_daily_message_count", -1),
+                )
+                return
+
+            count_before = getattr(self.ase, "_daily_message_count", -1)
             result = self.ase.tick(hours)
+            urgency_after = getattr(getattr(self.ase, "urgency", None), "total", -1.0)
+            count_after = getattr(self.ase, "_daily_message_count", -1)
             # 每 tick 一条可观测记录：这是排查"主动消息不发"时最关键的一行
             # （此前只有"触发成功"才打日志，未触发的原因完全不可见）
+            # 2026-09-19 补 reason：只有 result=True/False 时无法区分
+            # 「配额满」「冷却中」「阈值不够」「静默」，排查代价极高。
             logger.info(
-                "ASE tick: hours=%.2f urgency=%.2f daily_count=%d paused=%s result=%s",
+                "ASE tick: hours=%.2f urgency=%.2f daily_count=%d paused=%s "
+                "result=%s reason=%s",
                 hours,
-                getattr(getattr(self.ase, "urgency", None), "total", -1.0),
-                getattr(self.ase, "_daily_message_count", -1),
+                urgency_after,
+                count_after,
                 getattr(self.ase, "_paused", None),
                 bool(result),
+                getattr(self.ase, "_last_skip_reason", "") or ("ok" if result else "unknown"),
             )
             if result:
                 message = result.get("message", "")
                 msg_type = result.get("type", "unknown")
                 logger.info("ASE triggered: [%s] %s", msg_type, message)
-                self._deliver(message)
+                # ✅ 只有**真正投递成功**才提交记账（扣配额/写冷却/重置紧迫度）。
+                # 未送达的候选不产生任何副作用 —— 这是本次修复的核心。
+                if self._deliver(message):
+                    if hasattr(self.ase, "commit_sent"):
+                        self.ase.commit_sent(result)
+                    logger.info(
+                        "主动消息已记账: daily_count %d -> %d",
+                        count_before,
+                        getattr(self.ase, "_daily_message_count", -1),
+                    )
+                else:
+                    logger.warning(
+                        "主动消息未送达，不消耗配额（daily_count=%d 保持不变）: %r",
+                        count_before,
+                        message[:40],
+                    )
         except Exception as e:  # noqa: BLE001
             logger.error("ASE check failed: %s", e)
         finally:
             self._last_check_time = datetime.now(tz=timezone.utc)
 
-    def _deliver(self, message: str) -> None:
+    def _deliver(self, message: str) -> bool:
         """在 APScheduler 工作线程内同步投递主动消息。
 
         旧实现用 asyncio.get_event_loop()+ensure_future —— 非主线程无事件循环
         必抛 RuntimeError，导致全部消息落入 console 日志兜底、微信通道从未送达
         （2026-09-17 生产日志实证：64 次触发 0 次送达）。_send_to_all 内部均为
         同步 HTTP 调用（requests），asyncio.run 新建临时循环执行是安全的。
+
+        2026-09-19：**改为返回投递结果**。旧实现丢弃了 `_send_to_all` 的返回值，
+        调用方无从得知消息是否真的送出，而配额已在生成时被扣 —— 这是静默时段
+        「丢弃却计数」能持续多日无人发现的直接原因。
+
+        Returns:
+            是否至少有一个通道投递成功（免打扰拦截、通道全失败 → False）。
         """
         try:
-            asyncio.run(self._send_to_all(message))
+            return bool(asyncio.run(self._send_to_all(message)))
         except Exception as e:  # noqa: BLE001
             logger.error("主动消息投递失败: %s", e)
             if self._send:
                 try:
                     self._send(message)
+                    return True
                 except Exception:  # noqa: BLE001
                     logger.exception("主动消息兜底发送失败")
+            return False
 
     def _run_daily_maintenance(self) -> None:
         """每日维护"""
@@ -568,7 +653,20 @@ class ProactiveScheduler:
         self._check_important_dates()
 
     def _check_important_dates(self) -> None:
-        """候选 D：命中重要日期时以角色口吻发送祝福（LLM 生成，模板兜底）。"""
+        """候选 D：命中重要日期时以角色口吻发送祝福（LLM 生成，模板兜底）。
+
+        ⚠️ 2026-09-19 修复：本方法原先**只**由 `_run_daily_maintenance`（00:05）
+        调用，而免打扰时段默认 23-7 —— 00:05 恒在静默内，`_send_to_all()` 直接
+        返回 False，祝福被无声吞掉。即：生日/纪念日祝福从未送达过。
+        现改为幂等 + 静默跳过，并由独立的每小时任务（见 start()）在静默结束后
+        第一时间补发，当日只发一次。
+        """
+        if self._is_quiet_hours():
+            logger.info(
+                "[重要日期] 处于免打扰时段(%02d-%02d)，等待静默结束后补发",
+                self._quiet_hours[0], self._quiet_hours[1],
+            )
+            return
         try:
             from datetime import datetime as _dt
 
@@ -592,6 +690,11 @@ class ProactiveScheduler:
 
             names = "、".join(h.get("name", "") for h in hits)
             kinds = "/".join(sorted({h.get("kind", "custom") for h in hits}))
+            # 当日幂等：每小时任务与 00:05 维护都可能命同一天，避免重复轰炸
+            dedup_key = f"{_dt.now():%Y-%m-%d}|{active_id}|{names}"
+            if dedup_key in self._important_dates_sent:
+                return
+
             wish = "生日快乐" if "birthday" in kinds else "纪念日快乐"
             message = f"今天是个特别的日子（{names}）。{wish}呀！"
             # LLM 润色（失败用模板）
@@ -606,13 +709,18 @@ class ProactiveScheduler:
                         ),
                         max_tokens=150, temperature=0.8,
                     )
-                    if polished and str(polished).strip():
-                        message = str(polished).strip()
+                    cleaned = sanitize_message(str(polished or ""))
+                    if cleaned:
+                        message = cleaned
             except Exception:
                 pass
 
             logger.info("[重要日期] 命中 %s，发送祝福", names)
-            self._deliver(message)
+            if self._deliver(message):
+                self._important_dates_sent.add(dedup_key)
+                logger.info("[重要日期] 祝福已送达: %s", names)
+            else:
+                logger.warning("[重要日期] 祝福未送达，将在下一个非静默小时重试: %s", names)
         except Exception as e:  # noqa: BLE001
             logger.warning("重要日期检查失败: %s", e)
 

@@ -368,7 +368,9 @@ async def send_proactive_now(
                     scheduler._send(result.get("message", ""))
                     delivered = True
         logger.info("Proactive manual send: [%s] delivered=%s", result.get("type"), delivered)
-        return {"status": "sent", "delivered": delivered, **result}
+        # 剔除内部记账字段（_committed / _scene / _scene_date），不对外暴露
+        public = {k: v for k, v in result.items() if not k.startswith("_")}
+        return {"status": "sent", "delivered": delivered, **public}
     finally:
         # 归还配额（_last_proactive_time 保留 → 30 分钟冷却仍然生效，
         # 避免手动发完自动消息紧接着又发一条）

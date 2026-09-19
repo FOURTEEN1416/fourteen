@@ -1,4 +1,11 @@
 # 📚 Proactive + Plugins 模块阅读报告
+> ⚠️ **2026-09-19 时效注记（本文件为 08-26 阅读快照，正文保留原文不回溯改写）**：`proactive/` 又有两轮大改，正文口径已过时之处如下——
+> ① 定时任务 **5 个 → 6 个**（新增「重要日期补发检查」每小时；因 00:05 的每日维护恒落在免打扰 23-7 内，生日/纪念日祝福此前**从未送达**）；
+> ② **免打扰时段从投递层前置到生成层**（`scheduler._check_ase` 在调用 `tick()` 前短路，配 `ASEEngine.set_quiet_hours`），根治「静默丢弃却扣配额」；
+> ③ **记账与投递解耦**：`tick()` 返回值改为**未记账的候选**，投递成功后由 `commit_sent()` 记账（`_deliver()` 改为返回 bool）；
+> ④ `_check_frequency()` 由 `bool` 改为 `(bool, reason)`，`tick()` 新增 `_last_skip_reason`；
+> ⑤ 新增输出清洗 `sanitize_message`（拦截 LLM 推理过程泄漏为消息内容）与归一化去重窗口 6。
+> **现行口径以 `CODE_GRAPH.md` v3.8.3 与 `AGENTS.md` v1.13 为准**。plugins/ 未变。
 > ⚠️ **2026-09-17 时效注记**：`proactive/scheduler.py` 本轮大改——① `_deliver()` 用 asyncio.run 替代非主线程必炸的 get_event_loop+ensure_future（生产 64 触发 0 送达的根因）；② `_check_ase` 无外部 get_last_chat_time 时回退 ASE 自身 `_hours_since_last_chat()`（旧回退致 missing_bonus 恒 0）；③ 新增 `set_quiet_hours`/`get_vault_config`/`reload_config` 与 vault_collect 定时任务（`data/scheduler_config.json` 跨 worker 真源）。**现行口径以 `CODE_GRAPH.md` v3.7.0 为准**。plugins/ 未变。
 
 

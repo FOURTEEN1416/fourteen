@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 import time
 from collections import deque
 from collections.abc import Callable
@@ -42,6 +43,111 @@ def _local_now() -> datetime:
     if abs(offset_sec - 28800) > 3600:
         return datetime.now(tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
     return datetime.now()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  消息清洗与去重（2026-09-19）
+#
+#  生产事故：2026-09-19 02:55 一条消息内容为
+#  「02:55属于深夜，不在早安、吃饭或晚安的特定时间点（晚上是22:00-0:00），
+#   但接近深夜。既然时间是凌晨快3点，这属于"其他时间"，但更」——
+#  LLM 的**推理过程**被原样当成消息投递出去。旧实现只校验
+#  `len(response) > 5`，等于不校验。
+#
+#  相似度去重**不适用**于本场景（实测：'都半夜了还不睡…' vs
+#  '都两点多了还不睡…' 的 SequenceMatcher 比值仅 0.37，而两条正常的
+#  '早啊' / '早安呀' 也只有 0.25 —— 阈值无法区分「同义刷屏」与
+#  「正常换说法」）。故去重采用：① 归一化精确匹配 ② 同类消息节流
+#  ③ 把最近发过的消息注入 prompt 要求换角度。
+# ═══════════════════════════════════════════════════════════════
+
+# 主动消息长度上限（prompt 要求 20 字以内，留 3 倍余量）
+_MAX_MESSAGE_CHARS = 60
+
+# 推理泄漏特征：指向「消息类型/时间点判断」的元话语，不会出现在正常口语消息里
+_REASONING_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"特定时间点"),
+    re.compile(r"时间段"),
+    re.compile(r"属于.{0,4}(深夜|凌晨|早晨|上午|中午|下午|傍晚|晚上|其他时间|夜间)"),
+    re.compile(r"(不在|不属于).{0,8}(早安|晚安|吃饭|问候|场景|范畴)"),
+    re.compile(r"既然(时间|是)"),
+    re.compile(r"半(夜|晚)(了|的)?"),  # 仅作为组合条件使用，见 _looks_like_reasoning
+    re.compile(r"(作为|我是)(一个)?(AI|人工智能|语言模型|助手)"),
+    re.compile(r"(要求|消息|类型|输出|提示词)[：:]"),
+    re.compile(r"^\s*(好的|明白了)[，,].{0,10}(我来|我将|我会)?(生成|输出|写)"),
+)
+
+# 上面 ^半(夜|晚) 过于宽泛（"半夜了还不睡"是正常消息），单独用词表精确判定
+_REASONING_PHRASES: tuple[str, ...] = (
+    "特定时间点",
+    "时间段",
+    "属于深夜",
+    "属于其他时间",
+    "既然时间是",
+    "凌晨快",
+    "不在早安",
+    "不在晚安",
+    "不吃饭",
+    "要求：",
+    "消息：",
+    "类型：",
+    "输出：",
+)
+
+_EMOJI_RE = re.compile(
+    "[\U0001f300-\U0001faff\u2600-\u27bf\ufe0f\u2190-\u21ff\u2b00-\u2bff]+"
+)
+_PUNCT_RE = re.compile(r"[\s\u3000，。！？、；：\"'“”‘’（）()\[\]【】~～…\.\,\!\?\:\;]+")
+
+
+def normalize_message(text: str) -> str:
+    """归一化：去空白/标点/emoji，用于「完全一致」判定。
+
+    只用于等价判定，**不做相似度**（理由见文件头注释）。
+    """
+    if not text:
+        return ""
+    return _PUNCT_RE.sub("", _EMOJI_RE.sub("", text)).lower()
+
+
+def looks_like_reasoning(text: str) -> bool:
+    """是否为 LLM 推理过程泄漏（而非可直接投递的消息）。"""
+    if not text:
+        return True
+    stripped = text.strip()
+    if len(stripped) > _MAX_MESSAGE_CHARS:
+        return True
+    # 正常口语消息不含换行；出现多行基本是「思考+正文」结构
+    if stripped.count("\n") >= 2:
+        return True
+    if any(p in stripped for p in _REASONING_PHRASES):
+        return True
+    return any(pat.search(stripped) for pat in _REASONING_PATTERNS)
+
+
+def sanitize_message(text: str) -> str | None:
+    """清洗 LLM 输出；返回 None 表示该输出不可用（调用方应回退模板）。
+
+    成功时返回可直接投递的单行消息。
+    """
+    if not text:
+        return None
+    cleaned = text.strip().strip('"').strip("'").strip("“”‘’")
+    # 多行 = 典型的「思考 + 正文」结构，取最后一段作为候选；但整段总长
+    # 仍受限 —— 推理 dump 往往极长，不能靠「取末行」把它抢救成合法消息。
+    # 阈值取 2 倍上限：prompt 要求 ≤20 字，任何超过 2 倍上限的多行输出
+    # 都应视为「思考残留」而非正常消息。
+    if "\n" in cleaned:
+        if len(cleaned) > _MAX_MESSAGE_CHARS * 2:
+            return None
+        lines = [ln.strip() for ln in cleaned.splitlines() if ln.strip()]
+        if not lines:
+            return None
+        cleaned = lines[-1]
+    cleaned = cleaned.strip()
+    if len(cleaned) < 2 or looks_like_reasoning(cleaned):
+        return None
+    return cleaned
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -373,6 +479,7 @@ class MessageGenerator:
         emotion_state: dict,
         affinity_level: int,
         context: str = "",
+        recent_messages: list[str] | None = None,
     ) -> str | None:
         if not self._llm:
             return None
@@ -384,6 +491,18 @@ class MessageGenerator:
         ]
         affinity_name = affinity_names[min(affinity_level, 8)]
         type_label = msg_type.value
+
+        # 把最近发过的消息喂回去，明确要求换角度 —— 根治「夜里连着 8 条
+        # 都在催睡」这类同义刷屏（相似度阈值做不到，见文件头注释）。
+        avoid_block = ""
+        recent = [m for m in (recent_messages or []) if m][-6:]
+        if recent:
+            avoid_block = (
+                "\n你最近已经说过下面这些话，这次必须换一个完全不同的角度、"
+                "开头和句式，不要再重复同样的意思：\n"
+                + "\n".join(f"- {m}" for m in recent)
+                + "\n"
+            )
 
         if self._proactive_prompt:
             now_str = datetime.now().strftime("%H:%M")  # noqa: DTZ005
@@ -400,6 +519,8 @@ class MessageGenerator:
                 type_label=type_label,
                 context=context,
             )
+            if avoid_block:
+                prompt = f"{prompt}\n{avoid_block}"
         else:
             now_time = datetime.now().strftime("%H:%M")  # noqa: DTZ005
             prompt = f"""作为"十四"，你想主动给用户发一条消息。
@@ -411,7 +532,7 @@ class MessageGenerator:
 - 想表达的类型：{type_label}
 
 {context}
-
+{avoid_block}
 要求：
 1. 语气要符合你们的关系等级（{affinity_name}）
 2. 要自然、有情感温度，不要太正式
@@ -432,9 +553,15 @@ class MessageGenerator:
                 response = self._llm(prompt)
             else:
                 return None
-            response = response.strip().strip('"').strip("'")
-            if len(response) > 5:
-                return response  # type: ignore[no-any-return]
+            # 输出清洗：拦截推理泄漏 / 超长 / 多行（旧实现只判 len>5，等于不判）
+            cleaned = sanitize_message(str(response or ""))
+            if cleaned is None:
+                logger.warning(
+                    "LLM 主动消息输出被清洗拦截（疑似推理泄漏/超长），回退模板: %r",
+                    str(response or "")[:120],
+                )
+                return None
+            return cleaned
         except Exception as e:  # noqa: BLE001
             logger.debug("LLM message generation failed: %s", e)
         return None
@@ -445,6 +572,7 @@ class MessageGenerator:
         emotion_state: dict,
         affinity_level: int,
         use_llm: bool = True,
+        recent_messages: list[str] | None = None,
     ) -> tuple[str, str]:
         content = None
         generated_by = "template"
@@ -452,6 +580,7 @@ class MessageGenerator:
         if use_llm and self._llm:
             content = self.generate_with_llm(
                 msg_type, emotion_state, affinity_level,
+                recent_messages=recent_messages,
             )
             if content:
                 generated_by = "llm"
@@ -553,6 +682,18 @@ class ASEEngine:
         self._last_reset_date: Any = None
 
         self._recent_messages: deque = deque(maxlen=50)
+        # 最近发送的消息类型（节流用）：防止「夜里连着 8 条都在催睡」
+        self._recent_types: deque = deque(maxlen=6)
+
+        # 免打扰时段（本地时间整点区间）—— 由 scheduler 注入，与投递层同源。
+        # 引擎侧同步拦截，保证「静默时段不生成」，而非生成后被丢弃。
+        self._quiet_hours: tuple[int, int] = (23, 7)
+
+        # 上一次 tick 未发送的原因（daily_limit / cooldown / min_interval /
+        # below_threshold / quiet_hours / paused / dry_run / duplicate /
+        # generate_failed / ok）。旧实现只有 result=True/False，
+        # 「为什么不发」在生产日志里完全不可见（2026-09-19 排查困难根源）。
+        self._last_skip_reason: str = ""
 
         # 手动控制面（2026-08-28 消息 tab 手动控制需求）
         self._paused: bool = False
@@ -615,8 +756,22 @@ class ASEEngine:
         emotion_state: dict | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any] | None:
-        """定时检查。dry_run=True时只更新紧迫度，不发送消息。"""
+        """定时检查。dry_run=True 时只更新紧迫度，不生成、不计账。
+
+        ⚠️ **返回值语义（2026-09-19 修复）**：返回的消息是**候选**，尚未记账。
+        调用方必须在**投递成功后**调用 `commit_sent(result)`，才会扣配额 /
+        写冷却时间 / 重置紧迫度。未投递的候选不产生任何副作用。
+
+        旧实现（生产事故根因）：记账发生在 `_generate_and_return()` 内部，
+        而投递在本方法返回**之后**才由 `scheduler._send_to_all()` 执行 ——
+        该方法在免打扰时段(23-7)直接 return False 丢弃消息，配额却已被扣。
+        生产实证：00:02–04:05 每 35 分钟一条、连续 8 条全被丢弃、8 条全计数
+        → 配额凌晨 4 点即 8/8 满额 → 此后全天 `result=False` 零投递，
+        而 urgency 一直挂在 8.50（用户已 90 小时未聊天）。
+        """
+        self._last_skip_reason = ""
         if getattr(self, "_paused", False):
+            self._last_skip_reason = "paused"
             return None
         if emotion_state:
             self._emotion_state = emotion_state
@@ -637,20 +792,42 @@ class ASEEngine:
         actual_hours = hours_since_last_chat or self._hours_since_last_chat()
         self._update_urgency(actual_hours)
 
-        if not self._check_frequency():
+        # ③ 免打扰时段：只累积紧迫度，**不生成、不计账、不投递**
+        #    旧实现把静默判定只放在投递层（_send_to_all），导致引擎照常生成、
+        #    照常扣配额，消息却被丢弃 —— 静默时段成了「配额焚化炉」。
+        if self._in_quiet_hours():
+            self._last_skip_reason = "quiet_hours"
+            return None
+
+        # ④ 频率门槛（配额 / 最小间隔 / 回复后冷却）
+        ok, reason = self._check_frequency()
+        if not ok:
+            self._last_skip_reason = reason
             return None
 
         if dry_run:
+            self._last_skip_reason = "dry_run"
             return None
 
-        scene_msg = self._check_scene_triggers()
-        if scene_msg and self.urgency.total >= 2.0 and not self._is_duplicate(scene_msg.get("message", "")):
-            return self._record_and_return(scene_msg)
+        # ⑤ 场景触发（早安/晚安/三餐）优先于紧迫度阈值
+        #    commit=False：场景日期标记由 commit_sent() 在投递成功后才置位，
+        #    否则未送达的早安会「标记为已发」，当天再也不补发。
+        scene_msg = self._check_scene_triggers(commit=False)
+        if (
+            scene_msg
+            and self.urgency.total >= 2.0
+            and not self._is_duplicate(scene_msg.get("message", ""))
+        ):
+            return scene_msg
 
         if self.urgency.total >= self._urgency_threshold:
             msg_type = self._select_type_by_urgency()
-            return self._generate_and_return(msg_type)
+            candidate = self._generate_and_return(msg_type, commit=False)
+            if candidate is None:
+                self._last_skip_reason = "generate_failed"
+            return candidate
 
+        self._last_skip_reason = "below_threshold"
         return None
 
     def reflect(
@@ -668,27 +845,56 @@ class ASEEngine:
 
     # ── 频率控制 ─────────────────────────────────────────
 
-    def _check_frequency(self) -> bool:
+    def _check_frequency(self) -> tuple[bool, str]:
+        """频率门槛检查。返回 (是否可发, 原因)。
+
+        原因取值：ok / daily_limit / min_interval / cooldown。
+        旧实现只返回 bool，日志里只有 result=False，无法区分
+        「配额满」与「冷却中」与「阈值不够」（2026-09-19 排查困难根源）。
+        """
         if self._frequency_mode == "adaptive" and self._freq_adapter:
             max_daily = self._freq_adapter.get_max_daily()
             if self._daily_message_count >= max_daily:
-                return False
+                return False, "daily_limit"
             if self._last_proactive_time:
                 minutes_since = (
                     datetime.now(tz=timezone.utc) - self._last_proactive_time
                 ).total_seconds() / 60
                 if minutes_since < 30:
-                    return False
-            return True
+                    return False, "min_interval"
+            return True, "ok"
 
         if self._freq_controller:
             can_send, reason = self._freq_controller.can_send()
             if not can_send:
                 logger.debug("Cannot send: %s", reason)
-                return False
-            return True
+                return False, reason
+            return True, "ok"
 
-        return self._daily_message_count < 8
+        if self._daily_message_count < 8:
+            return True, "ok"
+        return False, "daily_limit"
+
+    # ── 免打扰时段 ───────────────────────────────────────
+
+    def set_quiet_hours(self, start: int, end: int) -> None:
+        """注入免打扰时段（与 scheduler 同源，web 端可调）。"""
+        try:
+            s, e = int(start), int(end)
+        except (TypeError, ValueError):
+            return
+        if 0 <= s <= 23 and 0 <= e <= 23:
+            self._quiet_hours = (s, e)
+
+    def _in_quiet_hours(self) -> bool:
+        """当前是否处于免打扰时段（按本地时间判定，与 scheduler 一致）。"""
+        start, end = self._quiet_hours
+        hour = _local_now().hour
+        if start == end:
+            return False
+        if start < end:
+            return start <= hour < end
+        return hour >= start or hour < end
 
     # ── 紧迫度管理 ───────────────────────────────────────
 
@@ -716,71 +922,80 @@ class ASEEngine:
         else:
             self.urgency.context_bonus = 0.0
 
-    def _check_scene_triggers(self) -> dict[str, Any] | None:
+    def _check_scene_triggers(self, commit: bool = True) -> dict[str, Any] | None:
+        """场景触发（早安 / 晚安 / 三餐），每场景每日一次。
+
+        commit=False 时**不置位**「今日已发」日期标记，改为在返回字典里带
+        `_scene` / `_scene_date`，由 `commit_sent()` 在投递成功后置位。
+        旧实现生成时就置位 —— 若该条被免打扰丢弃，当天该场景再也不会补发。
+        """
         # 场景触发必须用本地时间，配置的小时区间按北京时间设计
         now = _local_now()
         hour = now.hour
         today = now.date()
         affinity = self._affinity_level
 
-        start, end = self._config["morning_hours"]
-        if start <= hour < end and self._last_morning_date != today:  # type: ignore[operator]
-            self._last_morning_date = today  # type: ignore[assignment]
-            templates = _get_messages("morning_greeting", affinity)
-            msg = random.choice(templates) if templates else "早安"
-            self.urgency.scene_bonus = 1.5
-            return {
-                "type": "morning_greeting",
+        def _hit(kind: str, scene_date: Any, msg_key: str, default: str, bonus: float) -> dict[str, Any]:
+            if commit:
+                if kind == "morning":
+                    self._last_morning_date = scene_date
+                elif kind == "night":
+                    self._last_night_date = scene_date
+                else:
+                    self._last_meal_date = scene_date
+            templates = _get_messages(msg_key, affinity)
+            msg = random.choice(templates) if templates else default
+            self.urgency.scene_bonus = bonus
+            out: dict[str, Any] = {
+                "type": msg_key,
                 "message": msg,
                 "urgency": self.urgency.total,
             }
+            if not commit:
+                out["_scene"] = kind
+                out["_scene_date"] = scene_date
+            return out
+
+        start, end = self._config["morning_hours"]
+        if start <= hour < end and self._last_morning_date != today:  # type: ignore[operator]
+            return _hit("morning", today, "morning_greeting", "早安", 1.5)
 
         start, end = self._config["night_hours"]
         if hour >= start or hour < 1:  # type: ignore[operator]
             check_date = today if hour >= start else (today - timedelta(days=1))  # type: ignore[operator]
             if self._last_night_date != check_date:
-                self._last_night_date = check_date  # type: ignore[assignment]
-                templates = _get_messages("night_greeting", affinity)
-                msg = random.choice(templates) if templates else "晚安"
-                self.urgency.scene_bonus = 1.5
-                return {
-                    "type": "night_greeting",
-                    "message": msg,
-                    "urgency": self.urgency.total,
-                }
+                return _hit("night", check_date, "night_greeting", "晚安", 1.5)
 
         for meal_start, meal_end in self._config["meal_hours"]:  # type: ignore[misc]
             if meal_start <= hour < meal_end and self._last_meal_date != today:  # type: ignore[has-type]
-                self._last_meal_date = today  # type: ignore[assignment]
-                templates = _get_messages("care_meal", affinity)
-                msg = random.choice(templates) if templates else "记得吃饭"
-                self.urgency.scene_bonus = 1.0
-                return {
-                    "type": "care_meal",
-                    "message": msg,
-                    "urgency": self.urgency.total,
-                }
+                return _hit("meal", today, "care_meal", "记得吃饭", 1.0)
 
         return None
 
     def _select_type_by_urgency(self) -> ProactiveType:
         total = self.urgency.total
         if total >= 8:
-            return ProactiveType.MISS_YOU
+            candidates = [
+                ProactiveType.MISS_YOU, ProactiveType.WORRY, ProactiveType.CARE_WEATHER,
+            ]
         elif total >= 6:
-            return random.choice(
-                [ProactiveType.MISS_YOU, ProactiveType.WORRY],
-            )
+            candidates = [ProactiveType.MISS_YOU, ProactiveType.WORRY]
         elif total >= 4:
             if self._last_sent_type == "care":
-                return random.choice(
-                    [ProactiveType.MISS_YOU, ProactiveType.BORED],
-                )
-            return random.choice(
-                [ProactiveType.CARE_WEATHER, ProactiveType.CARE_MEAL, ProactiveType.SHARE],
-            )
+                candidates = [ProactiveType.MISS_YOU, ProactiveType.BORED]
+            else:
+                candidates = [
+                    ProactiveType.CARE_WEATHER, ProactiveType.CARE_MEAL, ProactiveType.SHARE,
+                ]
         else:
-            return ProactiveType.SHARE
+            candidates = [ProactiveType.SHARE]
+
+        # 同类节流：同类型连续出现会退化成「同一句话换个说法」刷屏
+        # （生产实证 2026-09-19：夜里连续 8 条全是催睡，类型在
+        # miss_you/worry 间轮换但语义完全相同）。
+        blocked = set(list(self._recent_types)[-2:])
+        fresh = [c for c in candidates if c.value not in blocked]
+        return random.choice(fresh or candidates)
 
     # ── 消息生成 ─────────────────────────────────────────
 
@@ -805,7 +1020,7 @@ class ASEEngine:
                     + excerpt
                 )
                 result = self._llm.chat_sync(query=prompt, max_tokens=120, temperature=0.8)
-                content = str(result or "").strip()
+                content = sanitize_message(str(result or "")) or ""
             else:
                 content = ""
             if not content:
@@ -836,15 +1051,21 @@ class ASEEngine:
         return {"type": msg_type, "message": msg, "urgency": total}
 
     def _generate_and_return(
-        self, msg_type: ProactiveType,
+        self, msg_type: ProactiveType, commit: bool = True,
     ) -> dict[str, Any] | None:
+        """生成候选消息。
+
+        commit=True（默认）时立即记账 —— 供 `/api/proactive/send` 等
+        「调用方自己负责投递」的入口使用，保持既有语义不变。
+        commit=False 由 `tick()` 使用：只生成候选，投递成功后由调用方
+        `commit_sent()` 记账。返回 None 表示本轮无可用候选（调用方不应投递）。
+        """
         # 候选 C：share 类优先从角色知识库分享真实内容（爬虫/文档来源）
         if msg_type == ProactiveType.SHARE:
             shared = self._try_knowledge_share()
-            if shared:
-                self._record_proactive_sent()
-                self._recent_messages.append(shared["message"])
-                self.urgency.reset()
+            if shared and sanitize_message(shared.get("message", "")):
+                if commit:
+                    self.commit_sent(shared)
                 return shared
         if self._generation_mode == "llm":
             content, generated_by = self._message_generator.generate(
@@ -852,6 +1073,7 @@ class ASEEngine:
                 emotion_state=self._emotion_state,
                 affinity_level=self._affinity_level,
                 use_llm=True,
+                recent_messages=list(self._recent_messages),
             )
         else:
             content = self._message_generator.generate_from_template(
@@ -868,6 +1090,13 @@ class ASEEngine:
                     break
             generated_by = "template_fallback"
 
+        if self._is_duplicate(content):
+            # 兜底：模板池仅 3~8 条/类，极端情况下最近窗口会覆盖整个池子。
+            # 此时**本轮放弃**（返回 None，不记账、不投递）——重复投递同一句话
+            # 比这轮不发体验更差；紧迫度会继续累积，下个 tick 换说法再试。
+            logger.info("主动消息去重命中且模板回退仍重复，本轮放弃: %r", content[:40])
+            return None
+
         result = {
             "type": msg_type.value,
             "message": content,
@@ -875,16 +1104,52 @@ class ASEEngine:
             "generated_by": generated_by,
         }
 
-        self._record_proactive_sent()
-        self._recent_messages.append(content)
-        self.urgency.reset()
+        if commit:
+            self.commit_sent(result)
         return result
 
-    def _record_and_return(self, scene_msg: dict[str, Any]) -> dict[str, Any]:
-        self._record_proactive_sent()
-        self._recent_messages.append(scene_msg.get("message", ""))
-        self.urgency.scene_bonus = 0
+    def _record_and_return(
+        self, scene_msg: dict[str, Any], commit: bool = True,
+    ) -> dict[str, Any]:
+        """场景消息记账包装（兼容入口，语义同 `_generate_and_return`）。"""
+        if commit:
+            self.commit_sent(scene_msg)
         return scene_msg
+
+    def commit_sent(self, result: dict[str, Any]) -> None:
+        """**投递成功后**才记账：配额 / 冷却时间 / 紧迫度 / 场景标记 / 历史。
+
+        这是「生成」与「投递」的解耦点（2026-09-19 生产事故修复）：
+        旧实现在生成时就扣配额，而投递可能被免打扰时段丢弃 ——
+        实测凌晨被丢弃 8 条却扣满 8 条配额，全天零投递。
+
+        幂等：同一 result 重复提交只生效一次。
+        """
+        if not result or result.get("_committed"):
+            return
+        result["_committed"] = True
+
+        self._record_proactive_sent()
+        message = result.get("message", "")
+        if message:
+            self._recent_messages.append(message)
+        sent_type = str(result.get("type", ""))
+        if sent_type:
+            self._recent_types.append(sent_type)
+            self._last_sent_type = sent_type
+
+        scene = result.pop("_scene", None)
+        scene_date = result.pop("_scene_date", None)
+        if scene:
+            if scene == "morning":
+                self._last_morning_date = scene_date
+            elif scene == "night":
+                self._last_night_date = scene_date
+            else:
+                self._last_meal_date = scene_date
+            self.urgency.scene_bonus = 0.0
+        else:
+            self.urgency.reset()
 
     def _record_proactive_sent(self) -> None:
         self._daily_message_count += 1
@@ -943,8 +1208,27 @@ class ASEEngine:
         if paused is not None:
             self._paused = bool(paused)
 
+    # 去重比对窗口。取 6（而非 _recent_messages 的 50）：模板池仅 3~8 条/类，
+    # 窗口过大会让整个池子都被判为重复，导致彻底发不出消息。
+    _DUPLICATE_WINDOW = 6
+
     def _is_duplicate(self, message: str) -> bool:
-        return message in self._recent_messages
+        """去重：归一化后与最近 `_DUPLICATE_WINDOW` 条精确比对。
+
+        **刻意不用相似度**：实测「都半夜了还不睡…」vs「都两点多了还不睡…」
+        的 SequenceMatcher 比值仅 0.37，而两条正常换说法的「早啊」/「早安呀」
+        也只有 0.25 —— 任何阈值都无法把「同义刷屏」与「正常换说法」分开。
+        同义刷屏改由两条更可靠的机制解决：
+          ① 生成时把最近消息注入 prompt，明确要求换角度（LLM 路径）；
+          ② `_select_type_by_urgency()` 的同类消息节流。
+        """
+        if not message:
+            return True
+        target = normalize_message(message)
+        if not target:
+            return False
+        window = list(self._recent_messages)[-self._DUPLICATE_WINDOW:]
+        return any(normalize_message(m) == target for m in window)
 
     # ── 状态持久化 ───────────────────────────────────────
 
@@ -1118,6 +1402,13 @@ class ASEEngine:
             "urgency_level": self.urgency.level,
             "urgency_threshold": self._urgency_threshold,
             "daily_count": self._daily_message_count,
+            "max_daily": (
+                self._freq_adapter.get_max_daily()
+                if self._freq_adapter
+                else (self._freq_controller.max_daily if self._freq_controller else 8)
+            ),
+            "quiet_hours": list(self._quiet_hours),
+            "last_skip_reason": self._last_skip_reason,
             "frequency": freq_info,
             "modes": {
                 "frequency": self._frequency_mode,

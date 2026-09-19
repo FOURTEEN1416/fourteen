@@ -14,7 +14,7 @@
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **测试口径**（2026-09-18 实测）：后端 `1060 passed / 4 skipped`（系统 Python 3.12）；
+> **测试口径**（2026-09-19 实测）：后端 `1082 passed / 4 skipped`（系统 Python 3.12，收集 1086；⚠️ 单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3）；
 > 前端 `87 passed`（vitest 15 文件）+ `tsc --noEmit` 0 错误。
 
 ---
@@ -151,7 +151,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │       ├── store/        Zustand 3 个（authStore / characterBuilderStore / errorStore）
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
-├── tests/                1060 后端测试通过 + 4 跳过（2026-09-18 实测）+ 87 前端测试
+├── tests/                1082 后端测试通过 + 4 跳过（2026-09-19 实测）+ 87 前端测试
 ├── config/               YAML 配置 + config/characters/ 角色卡库
 └── main.py               入口
 ```

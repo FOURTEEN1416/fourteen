@@ -549,3 +549,400 @@ def test_reflection_jealous_neutral_trigger():
     assert engine.reflect("偶遇旧识聊了很久", "哦", affinity_level=5, hours_since_last=1).type == "jealous"
     # 性别触发词已移除：不再因提到特定性别词触发
     assert engine.reflect("别的女孩说得对", "是吗", affinity_level=5, hours_since_last=1).type != "jealous"
+
+
+# ═══════════════════════════════════════════════════════════════
+#  配额/投递解耦 + 免打扰前置 + 输出清洗（2026-09-19 生产事故回归）
+#
+#  事故：静默时段(23-7)内引擎照常生成消息并**扣配额**，投递层却丢弃消息
+#  → 00:02–04:05 每 35 分钟一条、连续 8 条全丢全计数 → 配额凌晨即 8/8 满
+#  → 当天 07:00 后每个 tick 都 result=False，全天零投递。
+# ═══════════════════════════════════════════════════════════════
+
+def _make_engine(tmp_path, **kw):
+    from proactive.ase_engine import ASEEngine, _local_now
+
+    engine = ASEEngine(
+        state_path=str(tmp_path / "ase_state_quota.json"),
+        generation_mode="template",
+        **kw,
+    )
+    # 固定跨日重置基准为今天：否则首个 tick 的 _rollover_if_new_day()
+    # 会把测试预置的 daily_count 归零，让「配额满」用例失效。
+    engine._last_reset_date = _local_now().date()
+    return engine
+
+
+def _silence_now(engine):
+    """把免打扰时段设为「包含当前本地小时」，用于模拟夜间静默。"""
+    from proactive.ase_engine import _local_now
+
+    h = _local_now().hour
+    engine.set_quiet_hours(h, (h + 1) % 24)
+
+
+def _open_now(engine):
+    """把免打扰时段挪到当前小时之外。"""
+    from proactive.ase_engine import _local_now
+
+    h = _local_now().hour
+    engine.set_quiet_hours((h + 2) % 24, (h + 3) % 24)
+
+
+def _no_scene(engine):
+    """屏蔽场景触发，隔离「紧迫度阈值」这条判定链。"""
+    engine._check_scene_triggers = lambda commit=True: None
+
+
+def test_quiet_hours_does_not_consume_quota(tmp_path):
+    """核心回归：静默时段重复 tick 不得消耗配额。
+
+    修复前该循环会把 daily_count 推到 8（=上限），这正是白天零投递的根因。
+    """
+    engine = _make_engine(tmp_path, max_daily_messages=8)
+    engine._last_proactive_time = None
+    _silence_now(engine)
+
+    for _ in range(8):
+        assert engine.tick(90.0) is None
+        assert engine._last_skip_reason == "quiet_hours"
+
+    assert engine._daily_message_count == 0
+
+
+def test_quiet_hours_blocks_engine_generation(tmp_path):
+    """静默时段引擎自身也不生成消息（不只是投递层拦截）。"""
+    engine = _make_engine(tmp_path)
+    _silence_now(engine)
+    engine.urgency.base = 9.0
+    assert engine.tick(99.0) is None
+    assert engine._last_skip_reason == "quiet_hours"
+
+
+def test_tick_candidate_is_not_committed(tmp_path):
+    """tick 返回候选但**不记账**：配额 / 冷却时间 / 紧迫度均不变。"""
+    engine = _make_engine(tmp_path, max_daily_messages=8)
+    engine._last_proactive_time = None
+    _open_now(engine)
+    _no_scene(engine)
+    engine.urgency.base = 9.0
+
+    candidate = engine.tick(90.0)
+
+    assert candidate is not None
+    assert engine._daily_message_count == 0
+    assert engine._last_proactive_time is None
+    assert candidate.get("_committed") is None
+
+
+def test_commit_sent_records_once(tmp_path):
+    """投递成功后提交记账，且重复提交幂等。"""
+    engine = _make_engine(tmp_path, max_daily_messages=8)
+    engine._last_proactive_time = None
+    _open_now(engine)
+    _no_scene(engine)
+    engine.urgency.base = 9.0
+
+    candidate = engine.tick(90.0)
+    assert candidate is not None and engine._daily_message_count == 0
+
+    engine.commit_sent(candidate)
+    assert engine._daily_message_count == 1
+    assert engine._last_proactive_time is not None
+    assert candidate["message"] in engine._recent_messages
+
+    engine.commit_sent(candidate)
+    assert engine._daily_message_count == 1
+
+
+def test_undelivered_candidate_leaves_quota_intact(tmp_path):
+    """模拟投递失败：调用方不 commit → 配额保持不变，可继续重试。"""
+    engine = _make_engine(tmp_path, max_daily_messages=8)
+    _open_now(engine)
+    _no_scene(engine)
+
+    for _ in range(5):
+        engine._last_proactive_time = None
+        engine.urgency.base = 9.0
+        candidate = engine.tick(90.0)
+        assert candidate is not None
+        # 投递失败 → 不 commit
+        assert engine._daily_message_count == 0
+
+    assert engine._daily_message_count == 0
+
+
+def test_scene_date_marked_only_after_commit(tmp_path):
+    """场景「今日已发」标记必须等投递成功才置位。
+
+    修复前在生成时就置位 —— 该条若被静默丢弃，当天该场景再也不会补发。
+    """
+    from proactive.ase_engine import _local_now
+
+    engine = _make_engine(tmp_path)
+    h = _local_now().hour
+    engine._config["morning_hours"] = (h, (h + 1) % 24)
+    engine._config["meal_hours"] = []
+    engine._last_morning_date = None
+
+    scene = engine._check_scene_triggers(commit=False)
+    assert scene is not None
+    assert scene["_scene"] == "morning"
+    assert engine._last_morning_date is None, "未投递不应置位场景日期"
+
+    engine.commit_sent(scene)
+    assert engine._last_morning_date is not None, "投递成功后应置位场景日期"
+
+
+def test_skip_reason_daily_limit(tmp_path):
+    """配额满时给出明确原因，而不是只有一个 result=False。"""
+    engine = _make_engine(tmp_path, max_daily_messages=8)
+    _open_now(engine)
+    engine._daily_message_count = 8
+
+    assert engine.tick(90.0) is None
+    assert engine._last_skip_reason == "daily_limit"
+
+
+def test_skip_reason_min_interval(tmp_path):
+    from datetime import datetime, timezone
+
+    engine = _make_engine(tmp_path, max_daily_messages=8)
+    _open_now(engine)
+    engine._daily_message_count = 0
+    engine._last_proactive_time = datetime.now(tz=timezone.utc)
+
+    assert engine.tick(90.0) is None
+    assert engine._last_skip_reason == "min_interval"
+
+
+def test_skip_reason_below_threshold(tmp_path):
+    from datetime import datetime, timezone
+
+    engine = _make_engine(tmp_path, max_daily_messages=8)
+    _open_now(engine)
+    _no_scene(engine)
+    engine._last_chat_time = datetime.now(tz=timezone.utc)
+    engine.urgency.reset()
+
+    assert engine.tick(0.0) is None
+    assert engine._last_skip_reason == "below_threshold"
+
+
+def test_check_frequency_returns_reason(tmp_path):
+    """_check_frequency 由 bool 改为 (bool, reason)，便于区分配额/冷却。"""
+    engine = _make_engine(tmp_path, max_daily_messages=2)
+    _open_now(engine)
+
+    assert engine._check_frequency() == (True, "ok")
+
+    engine._daily_message_count = 2
+    assert engine._check_frequency() == (False, "daily_limit")
+
+
+def test_sanitize_blocks_reasoning_leak():
+    """生产实证泄漏原文必须被拦截（LLM 把推理过程当成了消息）。"""
+    from proactive.ase_engine import sanitize_message
+
+    leak = (
+        "02:55属于深夜，不在早安、吃饭或晚安的特定时间点（晚上是22:00-0:00），"
+        "但接近深夜。既然时间是凌晨快3点，这属于“其他时间”，但更"
+    )
+    assert sanitize_message(leak) is None
+
+
+def test_sanitize_blocks_overlong_and_multiline():
+    from proactive.ase_engine import sanitize_message
+
+    assert sanitize_message("啊" * 200) is None
+    # 超长推理 dump 不做「取末行」抢救（整段长度即判据）
+    assert sanitize_message("分析：" + "很长的推理" * 40 + "\n早呀") is None
+    # 末行过短（疑似碎片）→ 拒绝
+    assert sanitize_message("思考中\n再想想\n\n第") is None
+
+
+def test_sanitize_extracts_last_line_of_multiline():
+    """多行时取最后一段（推理在前、正文在后）。"""
+    from proactive.ase_engine import sanitize_message
+
+    assert sanitize_message("判断时间：\n要发早安吗\n早呀，新的一天") == "早呀，新的一天"
+
+
+def test_sanitize_keeps_normal_message():
+    from proactive.ase_engine import sanitize_message
+
+    msg = "哼，都这个点了还不睡？快点休息！"
+    assert sanitize_message(msg) == msg
+    assert sanitize_message('"早点睡啦，晚安"') == "早点睡啦，晚安"
+
+
+def test_sanitize_rejects_empty():
+    from proactive.ase_engine import sanitize_message
+
+    assert sanitize_message("") is None
+    assert sanitize_message("   ") is None
+
+
+def test_is_duplicate_normalizes_punctuation(tmp_path):
+    """去重按归一化后的等价判定（同句不同标点/表情视为重复）。"""
+    engine = _make_engine(tmp_path)
+    engine._recent_messages.clear()
+    engine._recent_messages.append("哼，都这个点了还不睡？快点休息！🌙")
+
+    assert engine._is_duplicate("哼 都这个点了还不睡 快点休息")
+    assert not engine._is_duplicate("早呀，新的一天")
+
+
+def test_is_duplicate_window_is_bounded(tmp_path):
+    """去重窗口有界（6）：模板池仅 3~8 条/类，窗口过大会彻底发不出消息。"""
+    engine = _make_engine(tmp_path)
+    engine._recent_messages.clear()
+    for i in range(20):
+        engine._recent_messages.append(f"很久以前说过的第{i}句")
+    assert not engine._is_duplicate("很久以前说过的第0句")
+
+
+def test_select_type_avoids_recent_types(tmp_path):
+    """同类节流：最近两条用过的类型不再被选中（避免同义刷屏）。"""
+    engine = _make_engine(tmp_path)
+    engine._recent_types.clear()
+    engine.urgency.base = 9.0
+    engine.urgency.missing_bonus = 0.0
+    engine._last_sent_type = "miss_you"
+    engine._recent_types.extend(["miss_you", "worry"])
+
+    picked = {engine._select_type_by_urgency().value for _ in range(30)}
+    assert "miss_you" not in picked
+    assert "worry" not in picked
+
+
+def test_scheduler_quiet_hours_skips_before_generation():
+    """调度器在静默时段必须在**生成之前**短路（不生成 = 不扣配额）。"""
+    from proactive.ase_engine import _local_now
+    from proactive.scheduler import ProactiveScheduler
+
+    class _FakeASE:
+        _daily_message_count = 0
+        _paused = False
+        urgency = type("U", (), {"total": 8.5})()
+        _last_skip_reason = ""
+
+        def __init__(self):
+            self.tick_calls: list[bool] = []
+            self.commit_calls: list[dict] = []
+
+        def _hours_since_last_chat(self):
+            return 90.0
+
+        def tick(self, hours, emotion_state=None, dry_run=False):
+            self.tick_calls.append(dry_run)
+            return None
+
+        def commit_sent(self, result):
+            self.commit_calls.append(result)
+
+    ase = _FakeASE()
+    sched = ProactiveScheduler(ase_engine=ase)
+    sched.reload_config = lambda: None
+    h = _local_now().hour
+    sched._quiet_hours = (h, (h + 1) % 24)
+
+    sched._check_ase()
+
+    assert ase.tick_calls == [True], "静默时段应只以 dry_run 更新紧迫度"
+    assert ase.commit_calls == []
+
+
+def test_scheduler_does_not_commit_when_delivery_fails():
+    """投递失败（返回 False）时绝不提交记账 —— 本次修复的核心不变量。"""
+    from proactive.ase_engine import _local_now
+    from proactive.scheduler import ProactiveScheduler
+
+    class _FakeASE:
+        _daily_message_count = 0
+        _paused = False
+        urgency = type("U", (), {"total": 8.5})()
+        _last_skip_reason = ""
+
+        def __init__(self):
+            self.commit_calls: list[dict] = []
+
+        def _hours_since_last_chat(self):
+            return 90.0
+
+        def tick(self, hours, emotion_state=None, dry_run=False):
+            if dry_run:
+                return None
+            self._last_skip_reason = "ok"
+            return {"type": "miss_you", "message": "想你了", "urgency": 8.5}
+
+        def commit_sent(self, result):
+            self.commit_calls.append(result)
+
+    ase = _FakeASE()
+    sched = ProactiveScheduler(ase_engine=ase)
+    sched.reload_config = lambda: None
+    h = _local_now().hour
+    sched._quiet_hours = ((h + 2) % 24, (h + 3) % 24)
+    sched._deliver = lambda message: False  # 所有通道失败
+
+    sched._check_ase()
+
+    assert ase.commit_calls == []
+    assert ase._daily_message_count == 0
+
+
+def test_scheduler_commits_after_successful_delivery():
+    """投递成功才记账，且只记一次。"""
+    from proactive.ase_engine import _local_now
+    from proactive.scheduler import ProactiveScheduler
+
+    class _FakeASE:
+        _daily_message_count = 0
+        _paused = False
+        urgency = type("U", (), {"total": 8.5})()
+        _last_skip_reason = ""
+
+        def __init__(self):
+            self.commit_calls: list[dict] = []
+
+        def _hours_since_last_chat(self):
+            return 90.0
+
+        def tick(self, hours, emotion_state=None, dry_run=False):
+            if dry_run:
+                return None
+            self._last_skip_reason = "ok"
+            return {"type": "miss_you", "message": "想你了", "urgency": 8.5}
+
+        def commit_sent(self, result):
+            self.commit_calls.append(result)
+            self._daily_message_count += 1
+
+    ase = _FakeASE()
+    sched = ProactiveScheduler(ase_engine=ase)
+    sched.reload_config = lambda: None
+    h = _local_now().hour
+    sched._quiet_hours = ((h + 2) % 24, (h + 3) % 24)
+    sent: list[str] = []
+    sched._deliver = lambda message: (sent.append(message), True)[1]
+
+    sched._check_ase()
+
+    assert sent == ["想你了"]
+    assert len(ase.commit_calls) == 1
+    assert ase._daily_message_count == 1
+
+
+def test_scheduler_send_to_all_returns_false_in_quiet_hours():
+    """投递层兜底：静默时段返回 False（供上游判定「未送达、不记账」）。"""
+    import asyncio as _asyncio
+
+    from proactive.ase_engine import _local_now
+    from proactive.scheduler import ProactiveScheduler
+
+    sched = ProactiveScheduler(ase_engine=None)
+    h = _local_now().hour
+    sched._quiet_hours = (h, (h + 1) % 24)
+
+    assert _asyncio.run(sched._send_to_all("测试消息")) is False
