@@ -12,8 +12,8 @@
 | # | 角色 | 工作区 | 分支 | 任务包 | 可否立即开工 |
 |---|------|--------|------|--------|-------------|
 | **M** | **主控（歆歆）** | `D:\Desktop\ai-girlfriend`（主检出） | `main` | 协调 / 看板 / 收编 / 三端统一 / 记忆 | ✅ |
-| **W1** | **论文窗口** | `D:\Desktop\论文-唯一的你十四\`（外部，**非 git**） | 无 | **P · 论文线** | ✅ |
-| **W2** | **软著窗口** | `D:\Desktop\软著申请-唯一的你十四\`（外部，**非 git**） | 无 | **C · 软著线** | ✅ |
+| **W1** | **论文窗口** | `D:\Desktop\ai-girlfriend\大创赛报名以及后期发展\论文-唯一的你十四\`（仓库外，**非 git**） | 无 | **P · 论文线** | ✅ |
+| **W2** | **软著窗口** | `D:\Desktop\ai-girlfriend\大创赛报名以及后期发展\软著申请-唯一的你十四\`（仓库外，**非 git**） | 无 | **C · 软著线** | ✅ |
 | **W3** | **代码窗口** | `..\ai-girlfriend-code`（worktree） | `wt/code` | **V · 多模态缺口线** | ✅ |
 | **W4** | **验证窗口** | `..\ai-girlfriend-verify`（worktree） | `wt/verify` | **T · 验证与测试线** | ✅ |
 
@@ -29,7 +29,7 @@ pwsh scripts/new_window_worktree.ps1 -Name verify
 
 - ❌ **禁止 `git add .`** —— 只提交本包白名单文件，精确点名
 - ❌ **禁止 `WebSearch` 做代码/技术类调研**（宪法 §1.3 + §6，零容忍）→ 走 `github-search-strategy`；学术面走 arXiv / Semantic Scholar / anysearch
-- ❌ **参赛材料不入库**（宪法 §3 三不入：`大创赛报名以及后期发展/`）
+- ❌ **参赛材料不入库**（宪法 §3 三不入：`大创赛报名以及后期发展/`）—— 2026-09-19 起该目录同时作为四套参赛/知识产权工作区的物理归拢地（`大赛附件包` / `软著申请-唯一的你十四` / `论文-唯一的你十四` / `专利-唯一的你十四`），由 `.gitignore:130` 全目录排除，**约束不变、且不得为提高可读性而取消该排除**
 - ✅ **服务器准入原则（宪法 §3，2026-09-14 新）**：服务器只放它能消费的（A 档 = 代码/依赖/配置模板/部署件/测试）；**文档类不上服务器，但必须 `commit → push` 到 GitHub 备份**
 - ❌ 不重建 `CODE_GRAPH.md`，只增量刷新漂移段
 - ❌ 不引入兜底层 / 兼容 shim / 重复 owner / 投机抽象
@@ -48,9 +48,9 @@ pwsh scripts/new_window_worktree.ps1 -Name verify
 | 目标 | 用**结构功能主义**分析框架，完成一篇可投稿的中文小论文成稿 |
 | 框架真源 | `大创赛报名以及后期发展/13-论文设计-结构功能分析框架.md`（8 章骨架 + AGIL 四功能 + 默顿显/隐功能 + 3 张图表需求 + 结构/功能举证表） |
 | 目标刊 | **C 档《心理学进展》**（汉斯，开放获取，审稿快）→ 后续扩展投 B 档情感智能大会 |
-| 工作区 | `D:\Desktop\论文-唯一的你十四\`（不存在则创建，参照 `D:\Desktop\软著申请-唯一的你十四\` 的扁平布局） |
+| 工作区 | `D:\Desktop\ai-girlfriend\大创赛报名以及后期发展\论文-唯一的你十四\`（参照同层 `软著申请-唯一的你十四\` 的扁平布局） |
 | 技能（已在 `~/.agents/skills/`） | `paper-plan-zh` → `literature-review` → `paper-write-zh-docx` → `paper-figure` → `auto-paper-improvement-loop` → `paper-compile-zh` |
-| 白名单 | 仅 `D:\Desktop\论文-唯一的你十四\**`；**只读**引用 `D:\Desktop\ai-girlfriend` 与 `13-` 文书 |
+| 白名单 | 仅 `D:\Desktop\ai-girlfriend\大创赛报名以及后期发展\论文-唯一的你十四\**`；**只读**引用 `D:\Desktop\ai-girlfriend` 与 `13-` 文书 |
 | 红线 | ① **不写未实测指标**；② 第 7 章必须**如实写"语音情绪与表情两条通道尚未实现"**（缺口本身是"结构—功能失衡"论据）；③ 不得把参赛材料内容直接搬进公开仓库 |
 | 验证 | 成稿 md + docx；章节完整；参考文献真实可溯源（**禁止编造文献**） |
 
@@ -59,7 +59,7 @@ pwsh scripts/new_window_worktree.ps1 -Name verify
 | 项 | 内容 |
 |----|------|
 | 目标 | 产出**中国版权保护中心可提交**的软著申请资料全套 |
-| 工作区 | `D:\Desktop\软著申请-唯一的你十四\`（**已就位**：`user_data/` 已导入真实源码 **504 文件**；`软件著作权申请资料/草稿`、`/截图` 尚空） |
+| 工作区 | `D:\Desktop\ai-girlfriend\大创赛报名以及后期发展\软著申请-唯一的你十四\`（**已就位**：`user_data/` 已导入真实源码 **504 文件**；`软件著作权申请资料/草稿`、`/截图` 尚空） |
 | 输入模式 | **模式 A（用户已上传真实材料）** → 代码材料**必须取自 `user_data/` 真实源码**，不得另编 |
 | 技能（已在 `~/.agents/skills/`） | `copyright-source-materials`（**必跑**，产出 `source-materials/*.json` + MANIFEST）→ `copyright-draft`（8 类草稿 + 5 门禁 JSON）→ `copyright-build`（`build_docx_from_md.py` → 正式 Word/TXT） |
 | 白名单 | 仅 `D:\Desktop\软著申请-唯一的你十四\**` |
