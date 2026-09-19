@@ -43,6 +43,7 @@ function useBreadcrumbs(): Crumb[] {
   if (adminMatch) {
     const adminTabLabels: Record<string, string> = {
       users: '用户管理',
+      providers: '供应商管理',
       logs: '日志审计',
     }
     return [

@@ -64,7 +64,7 @@ export default function RoleSettings() {
             <button
               key={t.key}
               onClick={() => setActiveTab(t.key)}
-              className={`flex-1 min-w-[72px] shrink-0 flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ${
+              className={`flex-1 min-w-[72px] shrink-0 flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/50 ${
                 activeTab === t.key
                   ? 'tab-active'
                   : 'text-gray-500 hover:text-gray-700'
