@@ -1687,3 +1687,28 @@
 **验证**：`tsc --noEmit` 0 错误；vitest **87/87**（15 文件）；`vite build` 通过；修复后全量重拍 37 张，13 组关键 before/after 对比归档 `docs/verification/2026-09-19-前端审美与移动端优化/`（含 README 逐项对照表）。
 **清理**：审计账号（user 1502，users/user_sessions/consent_records）DB 行已删；临时脚本 `frontend/tmp-audit-shots.mjs`/`tmp-retake.mjs`/`tmp-diag*.mjs` 已删；`docs/tmp-fe-audit-0919{,-after}/` 已移除；后台 uvicorn/vite 进程已停。
 **已知限制**：① 新账号无情感/成就数据时状态中心左列偏空——`EmotionInsightCard`/`AchievementsCard` 数据为空按设计返回 null，属数据态非布局缺陷；② fullPage 截图对视口自适应页有拉伸伪影，移动端口径以真机视口实测为准；③ 逐页定制与统一壳的边界只覆盖本轮 11 项涉及页面，其余页未动。
+
+---
+
+## 2026-09-19（六十九）— 工具审计 + 会话交接（用户报「上下文太长」）
+
+**任务**：用户要求「检查配了多少工具、工具是否真能用（天气/搜索等），完成后写工作交接」。
+
+**工具审计（生产中逐个真跑，非读码）**：配置启用 8 个。
+- ✅ 真实可用：`weather`（昆明 小雨/20℃/湿度78）、`calendar`、`calculator`（12*8+5→101）、
+  `time_awareness`（农历 8月9 正确）、`set_reminder`、`query_reminders`
+- ⚠️ `search` 能用但脆弱：`duckduckgo_search` **已改名 `ddgs`**，DDG 抛异常 → 降级 Bing 抓取，
+  能拿到真实结果但日志刷 traceback
+- ❌ `character_card` **半可用**：`fetch_wiki` 大陆网络不可达（如实报错并指路）；
+  `fetch_person`（百度）返回 `success=True` 但 `content` 为空 —— **成功但无数据**
+- 未启用（代码在）：`web_summary` / `image_gen` / `memory` / `scheduler`
+- 调用链：`_run_tools_if_needed` 先关键词意图预筛 → `llm.chat_with_tools` → 结果拼进 prompt。
+  **能否触发取决于基座模型的 function calling 能力。**
+
+**交接文档**：旧版归档为 `docs/history/HANDOFF_REPORT-2026-09-14.md`，
+新交接写入 `docs/HANDOFF_REPORT.md` —— 含本窗口 12 个提交、当前真相（1101 passed/4 skipped、
+健康 200）、工具审计表、7 项遗留风险、**排查手册**（判断"是不是我刚改坏的"一条命令 /
+日志真源 / 微信投递四查 / 签发 admin JWT）、下一步安全顺序。
+
+**验证**：`ruff check .` 全绿；分块 pytest 1101 passed / 4 skipped；前端 87 + tsc 0 错；
+`ci_gates.py` 4/4。
