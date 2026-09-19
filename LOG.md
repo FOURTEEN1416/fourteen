@@ -1963,3 +1963,31 @@
 - 核验：`HEAD:proactive/scheduler.py` blob `178be693…` 两端相同；服务器该文件已使用 `_local_now().hour`。
 - `systemctl restart ai-girlfriend.service` → active（MainPID 3229286）；`/api/health` 返回 `ok` / `unique-you-api` / `3.1.0` / `production`。
 - 未改依赖、未重建前端（本批无 frontend 产物变更）；服务器仅存 `frontend/dist.rollback-20260919-1847/` 未跟踪备份，未动。
+
+---
+
+## 2026-09-19（七十六）— 前端写死数据全面审计 + 九项修复批次（标签字典单一真源 / 假状态接真 / 删除接线）
+
+**任务**：用户报「很多前端数据写死且没有同步」→ 全量审计（非采样，逐条 file:line + 后端真源比对）→ 用户裁决「所有建议项目全部修复」。
+
+### 修复清单（9 项 + 实测中新发现 1 项）
+
+1. **标签字典收敛**：新建 `frontend/src/constants/persona.ts` 为唯一真源——`PERSONALITY_LABELS`（5 维）、`SPEAKING_STYLE_LABELS`（对齐 `my_character/persona_card.py SpeakingStyle` 四维 formality/expressiveness/humor/directness）、`EMOTION_COLORS`（对齐 `emotion_engine.py Emotion` 十中文态）、`AFFINITY_STAGES`（对齐 `shisi/emotion_stage/stage_config.py` 默认四段）。RoleSettingsTabs/CreateRole/characterBuilderStore/StatusCenter 全部改为引用。
+2. **伪键清除**：前端曾写死后端不存在的 `liveliness`/`gentleness` 并漏掉真实维度致裸露英文键 → 删除（含 `types/framework.ts` 死接口 `PersonaCard`）。
+3. **删除角色接线**：DataTab 危险区域原 ConfirmDialog 只弹不删 → 接 `useDeleteCharacter`，成功 toast + `navigate('/roles')`，失败回退弹窗。
+4. **语音假状态「就绪」**：VoiceTab 原 `useState('就绪')` 硬编码 → 接 `useVoiceStatus()`（GET /api/voice/status），实测后端 `enabled:false` 时 UI 显示「语音引擎未启用」。
+5. **头卡假「活跃」徽章**：RoleSettings 头卡改读 `character.is_active`（实测未激活卡显示「未激活」灰色），`user_id` 空时显「未绑定」。
+6. **假排序**：AdminUsersPage 表头点击原先只改图标不排序 → `useMemo` 真排序当前页行（后端 /admin/users 无 sort 参数，属已知边界）；新增回归用例断言行序真实变化。
+7. **StickersTab 撤除**：无后端支撑的装饰 tab 整体删除（SUB_TABS / case / 组件 / 类型联合），tab 集收敛为 5。
+8. **亲密等级接真源**：StatusCenter 好感标签由写死阈值 → 运行时 GET `/api/shisi/emotion-stage/stages`，失败回落 `AFFINITY_STAGES` 兜底（与后端默认一致）。
+9. **IntroPage 诚实化**：「8 级好感阶梯」改「9 级」（后端 `AffinityLevel.LEVELS` 实为 9）；供应商免费额度文案加「2026-09 时点快照」标注 + 指向登录后 LLM 配置页的实时 guide（不新增公开端点）。
+10. **（实测新发现）存量脏键渲染**：浏览器实测发现角色存量 `speaking_style` 携带旧卡脏键（liveliness/gentleness/catchphrases）被逐键渲染成英文滑条 → 新增 `normalizePersonality`/`normalizeSpeakingStyle`（只渲染规范键集、缺失补默认、保存不再回写脏键），锁定用例 +3。
+
+### 验证（完成声明四要素）
+
+- **验证证据**：`npm run typecheck` 0 错；vitest **98/98（16 文件）** 全绿（含新增 `personaConstants.test.ts` 10 用例 + AdminUsers 排序回归）；浏览器实测（e2e 种子库 + 本地后端 :8000 + Vite :5199）逐面核验——5 tab 无表情包、说话风格仅 4 中文标签、语音状态真实、**删除全链路**（API 建一次性角色 c80d78be → UI 确认删除 → toast → 跳转 → 后端 404）、活跃/未激活徽章正确、状态中心亲密等级「陌生」由端点驱动、Intro 三处新文案在页、协议弹窗 v1.0.0 与 `api/consent.py` 一致。
+- **边界检查**：改动全部在 frontend/ 12 文件；未触后端、未触并行窗口文件（提交前 `git status` 核验工作树只含本批文件）。
+- **已知限制**：① 用户管理排序仅作用于当前页行（后端无 sort 参数）；② IntroPage 额度文案仍为静态（已加 as-of 标注 + 实时源指针，属有意裁决）；③ CreateRole 滑条位于 LLM 对话分支后，e2e 环境无 LLM key 未实跑该分支（由 tsc + 单元测试覆盖）。
+- **置信度**：高（单元 + 类型 + 浏览器端到端三层证据齐）。
+
+**三端**：本批 frontend 源码属 **A 档**——commit→push 后需服务器 `git pull` + `remote_deploy.sh` 重建 dist + health 核验（另窗执行中/待执行）。
