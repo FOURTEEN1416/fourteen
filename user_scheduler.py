@@ -21,6 +21,10 @@ from my_character.emotion_engine import AffinityLevel, EmotionEngine
 
 logger = logging.getLogger("user_scheduler")
 
+# 用户专属 LLM 配置（BYOK）缓存 TTL：配置变更罕见，避免每条微信消息都查库；
+# 改完最多 30s 生效。
+_LLM_CFG_CACHE_TTL = 30.0
+
 
 @dataclass
 class UserInstance:
@@ -163,6 +167,51 @@ class UserManager:
             user_id, text, message_type, attachments
         )
 
+    async def _get_user_llm_config(self, wxid: str) -> tuple[int | None, dict | None]:
+        """取该 wxid 对应用户的**专属 LLM 配置**（BYOK）。
+
+        ⚠️ 2026-09-19 修复：微信路径此前**从不传 user_llm_config** ——
+        用户在 web 控制端填的自己的 API Key 在微信聊天里**完全不生效**，
+        一直用全局 key；而 web 聊天路径（chat_routes）是传的，两边行为不对称。
+        用户问「用户使用自己的 API key 能不能顺利用上」时，答案在微信端是「不能」。
+
+        缓存 30s：配置变更罕见，避免每条消息都查库；改完最多 30s 生效。
+        """
+        binding = self._bindings.get(wxid) or {}
+        numeric_id = binding.get("user_id")
+        if not numeric_id:
+            return None, None
+
+        cache = getattr(self, "_llm_cfg_cache", None)
+        if cache is None:
+            cache = self._llm_cfg_cache = {}
+        now = time.time()
+        hit = cache.get(wxid)
+        if hit and now - hit[0] < _LLM_CFG_CACHE_TTL:
+            return int(numeric_id), hit[1]
+
+        cfg: dict | None = None
+        try:
+            from api.database import User, _async_session
+
+            async with _async_session() as db:
+                user = await db.get(User, int(numeric_id))
+                raw = getattr(user, "llm_config", None) if user else None
+                # 只接受非空 dict：空配置应回落全局 gateway
+                cfg = raw if isinstance(raw, dict) and raw else None
+        except Exception as e:  # noqa: BLE001
+            logger.debug("读取用户专属 LLM 配置失败（回落全局）: %s", e)
+
+        # 变更时打一条日志，便于排查「用户配了 key 却没生效」
+        prev = hit[1] if hit else None
+        if cfg != prev:
+            logger.info(
+                "用户 %s 专属 LLM 配置%s", wxid,
+                "已加载（BYOK 生效）" if cfg else "为空（使用全局 key）",
+            )
+        cache[wxid] = (now, cfg)
+        return int(numeric_id), cfg
+
     async def _process_message_inner(
         self, user_id: str, text: str, message_type: str = "text",
         attachments: list | None = None,
@@ -171,6 +220,9 @@ class UserManager:
         instance = self._get_or_create(user_id)
         session_id = instance.session_id
         emotion_engine = self._get_character_engine(instance, instance.character_card_id)
+
+        # BYOK：把用户专属 LLM 配置传下去（此前漏传 → 用户的 key 在微信端不生效）
+        numeric_uid, user_llm_cfg = await self._get_user_llm_config(user_id)
 
         # 修复：传入 character_id，否则多用户角色隔离失效
         # 使用关键字参数以兼容 Orchestrator（character_id 为第 5 参）和
@@ -181,6 +233,8 @@ class UserManager:
             message_type,
             character_id=instance.character_card_id,
             emotion_engine=emotion_engine,
+            user_llm_config=user_llm_cfg,
+            user_id=numeric_uid,
             attachments=attachments,
         )
 
