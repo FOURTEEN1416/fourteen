@@ -273,3 +273,10 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **闭环**：上一批遗留的 D29 免打扰假失败，用**假时钟钉 23:30** 复证与挂钟解耦（不替换→`sent=[]`；替换→`sent=['hello-proactive']`）。
 - **~~未闭环~~ → 已核实**：① `4fbcffb` **已完整部署**（SSH 实测：服务器 HEAD=`24e007b`，`dist` 构建 09:17:47、服务重启 09:17:52，线上产物与磁盘逐条一致，旧产物 404）——主控已执行 A 档闭环，仅漏记入五十七条；服务器落后 origin/main 2 笔 = 本批纯文档（B 档），**无需 pull**。② ruff 上限锁定与 `.pre-commit-config.yaml` 两个待裁决**仍未落地**。
 - **提示**：本条 §13 补行可能与主控窗口后续补录**重复**，请核。并发窗口在 09:03–09:19 期间亦在本仓提交（`4fbcffb` / `24e007b`）。
+
+### 2026-09-19 · 研究窗口（zcode）· 「经历因果」升级机制研究批次（纯研究零代码，B 档三件）
+
+- **任务**：用户指令「研究小凌报告 + GitHub 调研，为 ai-girlfriend 设计升级机制，只研究不动手」；后续追加指令「按推荐继续，先不进行代码实际修改」→ 执行 P0 前置审查 + WrenWen 全量精读 + 三件归档。
+- **产出（docs/reports/ 三件 + README 登记）**：① `2026-09-19_经历因果升级机制研究.md`——小凌蓝图提取 + 逐模块对标 + 50+ 仓库 GitHub 调研（7 域）+ P0-P4 路线图（EventLedger 主轴 + 语义门控/识海/心光/内驱四子系统）；② `2026-09-19_情感真源收敛审查.md`——**P0 前置审计实证：情感状态族全族无持久化闭环**（EmotionEngine 纯内存 4 实例化点、AffinityEnhancer._values 播种 0 且 affinity_records 只写不读、重启即归零）+ **VitalSignsEngine 幽灵系统**（热路径零调用，`GET /api/shisi/vital-signs` 返回恒 default 假数据）+ persona_engine 内嵌第二份情感状态；风险 R1-R6 + 收敛建议 S1-S6（均未实施）；③ `2026-09-19_WrenWen伴侣架构精读.md`——W1-W28 机制条目（账本宪法/门槛制召回/9 维驱动/锚定倒计时/say 档/七踩坑/探针纪律等）+ 对本项目的批次映射。
+- **热路径澄清**：`optimized_orchestrator.py:893` 取 `shisi_reg.affinity_mapper`——热路径与 API 共用同一 registry 单例（此前"两套实例"嫌疑不成立）。
+- **边界**：零代码改动、未触 A 档、未上服务器；三件文档均 B 档（commit→push 即闭环）；所有方案为**提案未获批**，待用户对 P0-P4 路线图与 S1-S6 收敛项裁决。

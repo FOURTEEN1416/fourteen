@@ -2006,3 +2006,30 @@
 - **置信度**：高（单元 + 类型 + 浏览器端到端三层证据齐）。
 
 **三端**：本批 frontend 源码属 **A 档**——commit→push 后需服务器 `git pull` + `remote_deploy.sh` 重建 dist + health 核验（另窗执行中/待执行）。
+
+---
+
+## 2026-09-19（七十七）— 「经历因果」升级机制研究批次（小凌报告精读 + GitHub 广域调研 + P0 前置审计，纯研究零代码）
+
+**任务**：用户两段指令——①「研究 `D:\Desktop\产物隔离_小凌研究` 报告 + GitHub 等调研，为 ai-girlfriend 研究升级机制，只研究不动手，深度广度必须足够」；②「按推荐继续，先不要进行代码的实际修改」。技能加载：`sliver-vibe-coding`（用户点名）+ `github-search-strategy`（代码类调研 GitHub-First）。
+
+### 产出（docs/reports/ 三件，B 档）
+
+1. **`2026-09-19_经历因果升级机制研究.md`**：小凌架构蓝图提取（不写死人格/经历因果闭环/识海四层+遗忘工程/心光门控/Deep Pattern/关系解释器）→ 与本项目逐模块对标（16 行表，已确认缺口=事件账本/注意门控/深层种子/身份连续）→ GitHub 7 域 50+ 仓调研（20+ 仓验证星数与活跃度，6 仓源码级精读：WrenWen/kiwi-mem/jiwen/revive-companion/GWA/HumanoidAgents）→ **P0-P4 路线图**（EventLedger 唯一新增真源主轴 + 语义门控/识海升级/心光分层注入/内驱多轴+成长层四子系统，每批独立可回滚、有验收标准与借鉴对象）+ 快赢三件 + 不做清单 + 双向论证。
+2. **`2026-09-19_情感真源收敛审查.md`**（P0 前置审计，纯只读实证）：2026-09-15 体检"四套真源并存"的模糊判断精确化为「**1 主 3 仆 + 全族无持久化闭环**」——EmotionEngine.affection_points 是事实主源但纯内存且 4 处实例化（模板/调度器 per 用户×角色/请求级/persona_engine 内嵌）；AffinityEnhancer._values 播种 0.0，`affinity_records`/`affinity_audit` **只写不读**（全仓零 SELECT）→ **重启亲密度归零**；**VitalSignsEngine 为幽灵系统**（仅 registry 装配 + GET 端点消费，热路径零调用 → 端点返回恒 default 假数据，同类 09-18 假端点风险未波及项）；风险 R1-R6 + 收敛建议 S1-S6（**全部未实施，待裁决**）。澄清：热路径 `optimized_orchestrator.py:893` 经 `api.deps.shisi_reg` 取 mapper——与 API 共用单例，"两套实例"嫌疑不成立。
+3. **`2026-09-19_WrenWen伴侣架构精读.md`**：43★ 文档仓库（生产 24/7 伴侣系统架构文档，17 章+7 深入篇全读）提炼 W1-W28 机制条目——账本宪法/三层记忆/门槛制召回+75 标定法/"定阈值的方法比数值钱"/记忆销账只建议/9 维驱动+意图仲裁/"联系用户是出口不是方向"/锚定倒计时/追问去台阶（"方差是裁量的指纹"）/say 档绕过模型/人格四层做梦转正/四条写作纪律/三区装配+缓存断点/七踩坑（情绪判断红线/位置就是内容/硬指标=幻觉订单等）/探针突变验红/部署点火/“查不到≠确实没有”——并给出对本项目 P0-P4 的批次映射表。
+
+### 登记与治理
+
+- `docs/README.md` §五 登记三件（derived，标注"方案均为提案未获批"）。
+- `docs/board/BOARD.md` 追加区登记本批次。
+- 零代码改动：未触任何 .py/.ts/.tsx/配置；未触 A 档；无需服务器同步（B 档 commit→push 即闭环）。
+
+### 验证（完成声明四要素）
+
+- **验证证据**：三件文档落盘且 README 登记；审查结论全部带 file:line 证据（enhancer.py:36-42/:83-103、mapper.py:31/:92-117、registry.py:79-92、optimized_orchestrator.py:570-600/:885-900、persona_engine.py:185、sqlite_repository.py:150-172、user_scheduler.py:95-135）+ 全仓 grep 证词（affinity_records 1 INSERT/0 SELECT、VitalSignsEngine 热路径零命中）；GitHub 数据为 2026-09-19 gh api 实查快照。
+- **边界检查**：工作树仅含本批 5 文件（3 reports + README + BOARD + LOG，见提交清单）；git status 提交前核验。
+- **已知限制**：① MemoryBank/Generative Agents 公式细节未逐行验证（文档已标注）；② aggregate.emotional_state 快照写回链路未逐行核实（审查 R5 列待办）；③ WrenWen 数字为单来源自述。
+- **置信度**：高（代码结论三层交叉：逐文件实读 + grep 接线 + 真源文档对齐）。
+
+**三端**：本批全属 **B 档纯文档**——commit→push GitHub 备份即完成，服务器不上文档、无需 pull。
