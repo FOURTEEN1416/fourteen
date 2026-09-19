@@ -131,8 +131,21 @@ def migrate_legacy_if_needed(admin_user_id: int | None = None) -> dict:
     return result
 
 
+def _load_env_for_api_import() -> None:
+    """脚本入口先加载 .env，再 import api.*（auth_jwt 在 import 时读 JWT_SECRET）。"""
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(PROJECT_ROOT / ".env")
+    except Exception:  # noqa: BLE001
+        pass
+    # 最低限度：若环境仍无 JWT_SECRET，脚本侧注入占位仅用于 DB 同步（不启动 HTTP）
+    os.environ.setdefault("JWT_SECRET", "script-only-not-for-http-use-32chars-minimum!!")
+
+
 def _sync_disk_sessions_to_db_sync() -> int:
     """把 data/wechat_sessions/*/slot*/credentials.json 同步进 wechat_channel_sessions。"""
+    _load_env_for_api_import()
     import asyncio
     import json as _json
     from datetime import datetime, timezone
@@ -192,11 +205,12 @@ def _sync_disk_sessions_to_db_sync() -> int:
 
 
 async def sync_disk_sessions_to_db() -> int:
-    """异步包装，供 FastAPI lifespan 调用。"""
+    """异步包装，供 FastAPI lifespan 调用（进程内已有 JWT_SECRET）。"""
     return _sync_disk_sessions_to_db_sync()
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    _load_env_for_api_import()
     print(migrate_legacy_if_needed())
     print({"synced_rows": _sync_disk_sessions_to_db_sync()})
