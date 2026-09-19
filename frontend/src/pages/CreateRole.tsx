@@ -195,7 +195,6 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
   const [sampleCount, setSampleCount] = useState(0)
   const [preview, setPreview] = useState<Array<{ user: string; reply: string }>>([])
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [uploadProgress, setUploadProgress] = useState(0)
   const [guideCopied, setGuideCopied] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -223,15 +222,8 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
     }
     setError('')
     setPhase('uploading')
-    setUploadProgress(10)
     try {
-      // 模拟上传进度
-      const progressInterval = setInterval(() => {
-        setUploadProgress(p => Math.min(p + 15, 80))
-      }, 300)
       const data = await cloneUpload(targetName.trim(), selectedFile)
-      clearInterval(progressInterval)
-      setUploadProgress(100)
       setPhase('analyzing')
       onPersonaUpdate(toPersonaState(data.persona))
       setSampleCount(data.sample_count)
@@ -240,7 +232,6 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
     } catch (err) {
       setError(err instanceof Error ? err.message : '上传分析失败，请检查文件格式')
       setPhase('error')
-      setUploadProgress(0)
     }
   }
 
@@ -257,7 +248,6 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
     setError('')
     setPreview([])
     setSelectedFile(null)
-    setUploadProgress(0)
     setSampleCount(0)
   }
 
@@ -360,18 +350,15 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
             </button>
           </div>
 
-          {/* 上传进度 */}
+          {/* 上传中（fetch 无真实进度事件，用不定量滑条诚实表达，不造假百分比） */}
           {phase === 'uploading' && (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-[10px] text-gray-500">
-                <span>{uploadProgress < 100 ? '上传中...' : '上传完成，分析中...'}</span>
-                <span>{uploadProgress}%</span>
+                <span>上传中...</span>
+                <Loader2 className="w-3 h-3 animate-spin text-macaron-blue-deep" />
               </div>
-              <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-macaron-blue to-macaron-blue-deep transition-all duration-300"
-                  style={{ width: `${uploadProgress}%` }}
-                />
+              <div className="h-1.5 bg-gray-900/8 rounded-full overflow-hidden relative">
+                <div className="progress-slide absolute inset-y-0 w-1/3 rounded-full bg-gradient-to-r from-macaron-blue to-macaron-blue-deep" />
               </div>
             </div>
           )}

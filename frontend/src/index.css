@@ -481,6 +481,13 @@ body::before {
   30% { transform: translateY(-3px); opacity: 1; }
 }
 
+/* 不定量进度条（fetch 无真实上传进度，不造假百分比） */
+@keyframes progress-slide {
+  0% { left: -33%; }
+  100% { left: 100%; }
+}
+.progress-slide { animation: progress-slide 1.1s ease-in-out infinite; }
+
 /* ═══ Drawer（抽屉折叠） ═══ */
 .drawer {
   max-height: 500px;
