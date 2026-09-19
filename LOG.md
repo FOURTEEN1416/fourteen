@@ -56,7 +56,11 @@
 
 **验证**：`tsc --noEmit` 0 错误；vitest **98/98**（16 文件）零回归；Playwright 无后端渲染截图核验 8 页（AI 聊天/克隆/导入/角色列表/微信接入/引导/404/分段控件激活态），环境色场、浮动壳层、内凹字段、气泡对比度均确认生效。临时截图目录 `.shots/` 与验证用 vite dev（:5199）已清理。
 
-**已知限制**：① 截图核验走 mock 路由（无后端），「加载预设角色」常驻 loading 属 mock 产物非缺陷；② 未逐页像素巡检全部 17 页，收敛靠令牌级重映射兜底；③ A 档部署（push→服务器 pull→重建前端）待裁决执行。
+**已知限制**：① 截图核验走 mock 路由（无后端），「加载预设角色」常驻 loading 属 mock 产物非缺陷；② 未逐页像素巡检全部 17 页，收敛靠令牌级重映射兜底。
+
+**A 档部署闭环（2026-09-20 用户裁决「部署」后执行）**：origin/main → 服务器 `git pull --ff-only` 至 `7301ab6`；发现生产 `frontend/dist` 系 09-19 23:15 旧产物（`grep mat-floating/chat-dock/mat-recess` 全 0，材质批次从未上生产）→ 备份后 `npm run build` 重建；核验：新 dist `index-DOhN2yg0.css` 含 `mat-floating/chat-dock/mat-recess/chat-bubble-out/progress-slide` 全 5 类，nginx :80 入口 HTML 引用新 hash、`/api/health` 200、`ai-girlfriend` active。后端零改动（本批纯前端），未重启服务、站点无中断。备份目录已清理。
+
+**Mock 排查（用户裁决「排查 mock，如存在请完善」）**：全站扫 `mock/假数据/硬编码/Math.random/演示/stub/占位`——唯一真实残留为克隆好友上传的**假进度百分比**（`setInterval` 每 300ms +15% 硬凑到 80%，fetch 本无上传进度事件，属造假反馈）→ 撤除，改 `.progress-slide` 不定量滑条 + Loader 诚实表达（`058ac14`，tsc 0 错 / vitest 98/98 零回归）。其余命中均为测试桩（`vi.mock`，正常）或已修复的历史写死（`constants/persona.ts` 真实默认值、`passwordPolicy.ts` 对齐后端 ≥8、`RoleSettingsTabs` 注释「曾写死…现真实探测」）；`/api/presets` 生产 401 系 API Key 门禁（端点存活，非 mock）。
 
 ---
 
