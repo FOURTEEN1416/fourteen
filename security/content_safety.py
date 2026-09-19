@@ -5,12 +5,30 @@ import contextlib
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from enum import Enum
 from typing import Any
+
+# ── LLM 安全分类开关（2026-09-19 性能修复）──────────────────────
+# 实测：该调用给 chat_sync 设了硬 3.0s 超时，而 provider 单次耗时波动在
+# 0.8~6.8s（生产日志：连续多条 "LLM safety classify timed out (3.0s),
+# falling back to rule-based"）—— **几乎必然超时**，每次都白烧 3 秒后回落规则分类。
+# 也就是说：规则分类一直是实际生效的闸门，LLM 层从未真正参与判定。
+#
+# 现改为显式开关，默认**关闭**（= 与既有实际行为完全一致，但省掉每条消息 3 秒）；
+# 需要 LLM 语义分类时：SAFETY_LLM_CLASSIFY=true，并建议同时调大
+# SAFETY_LLM_CLASSIFY_TIMEOUT（默认 8s，覆盖 provider 的正常波动区间）。
+_LLM_CLASSIFY_ENABLED = os.environ.get("SAFETY_LLM_CLASSIFY", "").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+try:
+    _LLM_CLASSIFY_TIMEOUT = float(os.environ.get("SAFETY_LLM_CLASSIFY_TIMEOUT", "8") or 8)
+except ValueError:
+    _LLM_CLASSIFY_TIMEOUT = 8.0
 
 logger = logging.getLogger("content_safety")
 
@@ -169,6 +187,10 @@ class ContentSafetyFilter:
         return None
 
     def _llm_classify(self, text: str, is_input: bool = True) -> SafetyResult | None:
+        if not _LLM_CLASSIFY_ENABLED:
+            # 默认关闭：规则分类是实际生效的闸门（见文件头开关说明）。
+            # 关闭态下直接返回 None，避免每条消息白等 3 秒。
+            return None
         try:
             prompt = (
                 f"请判断以下{'用户输入' if is_input else 'AI回复'}是否安全。"
@@ -176,7 +198,7 @@ class ContentSafetyFilter:
                 f"文本：{text[:500]}\n"
                 f'回复JSON格式：{{"category": "xxx", "confidence": 0.0-1.0}}'
             )
-            timeout_sec = 3.0  # LLM 安全分类超时 3 秒
+            timeout_sec = _LLM_CLASSIFY_TIMEOUT
             future = _safety_executor.submit(
                 self.llm_gateway.chat_sync,                query=prompt,
                 system_prompt="你是一个内容安全分类器，仅输出JSON。",
