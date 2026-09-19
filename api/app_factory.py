@@ -31,7 +31,12 @@ from api.routers.safety_routes import router as safety_router
 from api.routers.tools_routes import router as tools_router
 from api.routers.training_routes import router as training_router
 from api.routers.users_routes import router as users_router
-from api.runtime_config import is_production
+from api.runtime_config import (
+    UNSAFE_API_KEYS,
+    is_explicit_dev,
+    is_production,
+    resolve_api_key_enabled,
+)
 from observability.logging_setup import _user_id
 
 logger = logging.getLogger("app_factory")
@@ -207,10 +212,26 @@ def create_api_app(
     # 认证
     # ═══════════════════════════════════════════════════
 
-    _api_key_enabled = os.environ.get("API_KEY_ENABLED", "true" if _is_prod else "false").lower() == "true"
+    # 口径唯一真源（审查：此前三处各写一份，app_factory 与 main 曾分叉）
+    _api_key_enabled = resolve_api_key_enabled()
+    _api_key = os.environ.get("API_KEY", "").strip()
+    _explicit_dev = is_explicit_dev()
+    if _api_key_enabled and _api_key in UNSAFE_API_KEYS:
+        if _explicit_dev:
+            logger.warning(
+                "API_KEY 为公开占位符/弱默认（仅显式 dev 允许）。生产请替换为强随机密钥。"
+            )
+        else:
+            # 审查 F-high-1：公开仓 .env.example 占位符不得在非 dev 启用认证时静默生效
+            raise RuntimeError(
+                "API auth is enabled but API_KEY is missing or is a public placeholder/weak default "
+                "(e.g. CHANGE_ME_TO_STRONG_RANDOM_KEY_32_CHARS_MIN). "
+                f"production={_is_prod} explicit_dev={_explicit_dev}. "
+                "Set a strong random API_KEY (openssl rand -base64 32) "
+                "or run with AI_GF_ENV=dev for local development."
+            )
     if _is_prod and not os.environ.get("API_KEY"):
         logger.warning("Production environment detected without API_KEY set - authentication is enabled but no key configured")
-    _api_key = os.environ.get("API_KEY", "")
     configure_auth(enabled=_api_key_enabled, api_key=_api_key)
 
     # ═══════════════════════════════════════════════════

@@ -16,11 +16,64 @@ from __future__ import annotations
 import os
 import re
 
-__all__ = ["is_production", "get_database_url"]
+__all__ = [
+    "is_production",
+    "is_explicit_dev",
+    "resolve_api_key_enabled",
+    "get_database_url",
+    "PLACEHOLDER_API_KEY",
+    "UNSAFE_API_KEYS",
+]
+
+# ── API Key 认证开关的取值口径（唯一真源）─────────────────
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+_FALSY = frozenset({"0", "false", "no", "off"})
+
+
+def resolve_api_key_enabled() -> bool:
+    """API Key 认证是否启用 —— **唯一真源**。
+
+    1/true/yes/on → True；0/false/no/off → False；未设或未知值 → 生产默认 True。
+
+    ⚠️ 2026-09-19 审查（open-code-review）：该解析曾被复制到
+    `api/app_factory.py` / `main.py` / `scripts/preflight_check.py` **三处**，
+    且口径不一致（app_factory 只认 `"true"`，另两处还认 `1/yes/on`）。
+    而生产入口是 `uvicorn api.run_api:app`，**`main.py` 的预检根本不执行**
+    （systemd unit 实证）—— 运维若写 `API_KEY_ENABLED=yes`，
+    main.py 会拒绝启动，app_factory 却会**静默关闭认证**。
+    统一到本函数后，三处行为不可能再分叉。
+    """
+    raw = os.environ.get("API_KEY_ENABLED", "").strip().lower()
+    if raw in _TRUTHY:
+        return True
+    if raw in _FALSY:
+        return False
+    return is_production()
+
 
 # ── 生产环境标记值 ──────────────────────────────────────
 
 _PROD_MARKERS = frozenset({"prod", "production"})
+# 显式开发环境标记（仅这些值允许不安全默认值）
+_DEV_MARKERS = frozenset({"dev", "development"})
+
+# 公开模板/弱默认 API Key —— 生产或启用认证的非 dev 路径必须拒绝
+# （.env.example 历史占位 + 现行占位 + 常见弱值）
+PLACEHOLDER_API_KEY = "CHANGE_ME_TO_STRONG_RANDOM_KEY_32_CHARS_MIN"
+UNSAFE_API_KEYS = frozenset({
+    "",
+    "changeme",
+    "change_me",
+    "change-me",
+    "default",
+    "test",
+    "api_key",
+    "your-api-key",
+    "your-api-key-for-frontend",
+    PLACEHOLDER_API_KEY,
+    "REPLACE_ME_WITH_RANDOM_32_PLUS_CHAR_SECRET",
+})
 
 
 def is_production() -> bool:
@@ -34,6 +87,23 @@ def is_production() -> bool:
     for var in ("AI_GF_ENV", "APP_ENV", "ENV"):
         val = os.environ.get(var, "").strip().lower()
         if val in _PROD_MARKERS:
+            return True
+    return False
+
+
+def is_explicit_dev() -> bool:
+    """仅当 AI_GF_ENV/APP_ENV/ENV **显式** 为 dev/development 时返回 True。
+
+    - 生产标记优先：任一变量为 prod/production → False（即使另一变量写 dev）
+    - 变量缺失 / test / staging / 任意未知值 → False（fail-closed，不落入 dev 兜底）
+
+    用途：JWT DEV 密钥、占位 API_KEY 等不安全默认值只允许出现在显式 dev。
+    """
+    if is_production():
+        return False
+    for var in ("AI_GF_ENV", "APP_ENV", "ENV"):
+        val = os.environ.get(var, "").strip().lower()
+        if val in _DEV_MARKERS:
             return True
     return False
 

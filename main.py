@@ -42,16 +42,7 @@ from orchestrator.optimized_orchestrator import OptimizedOrchestrator
 project_root = Path(__file__).parent.absolute()
 sys.path.insert(0, str(project_root))
 
-from api.app_factory import create_api_app  # noqa: E402
-from api.database import WechatBinding, _async_session  # noqa: E402
-from api.session_manager import SessionManager  # noqa: E402
-from api.websocket_server import WebSocketServer  # noqa: E402
-from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
-from observability.health import health_checker  # noqa: E402
-from observability.logging_setup import setup_logging  # noqa: E402
-from user_scheduler import UserManager  # noqa: E402
-
-# ── 加载 .env（手动解析，无需 python-dotenv 依赖） ──
+# ── 加载 .env（必须在 api.* 导入之前：auth_jwt / app_factory 在 import 时读取环境） ──
 _env_loaded = False
 def _load_env() -> None:
     global _env_loaded
@@ -72,6 +63,21 @@ def _load_env() -> None:
     _env_loaded = True
 
 _load_env()
+
+from api.app_factory import create_api_app  # noqa: E402
+from api.database import WechatBinding, _async_session  # noqa: E402
+from api.runtime_config import (  # noqa: E402
+    UNSAFE_API_KEYS,
+    is_explicit_dev,
+    is_production,
+    resolve_api_key_enabled,
+)
+from api.session_manager import SessionManager  # noqa: E402
+from api.websocket_server import WebSocketServer  # noqa: E402
+from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
+from observability.health import health_checker  # noqa: E402
+from observability.logging_setup import setup_logging  # noqa: E402
+from user_scheduler import UserManager  # noqa: E402
 
 
 def _setup_basic_logging(log_level: str = "INFO") -> logging.Logger:
@@ -260,13 +266,30 @@ def main() -> None:
     # P0: 从 --log-level 开始配置日志（不等到 setup_logging 才生效）
     _setup_basic_logging(args.log_level)
 
-    # P0: 检查 API_KEY 是否为出厂默认值
-    _default_api_key = "CHANGE_ME_TO_STRONG_RANDOM_KEY_32_CHARS_MIN"
-    _api_key_env = os.environ.get("API_KEY", _default_api_key)
-    if _api_key_env == _default_api_key:
-        logger.warning("⚠️ API_KEY 使用出厂默认值！生产环境必须修改！")
-        if os.environ.get("APP_ENV", "").lower() in ("prod", "production"):
-            logger.critical("生产环境禁止使用默认 API_KEY！请设置环境变量 API_KEY 后再启动。")
+    # 安全预检：API_KEY 占位符 / 弱默认 + 环境判定（审查 F-high-1）
+    # 真源 api.runtime_config.is_production / is_explicit_dev（AI_GF_ENV > APP_ENV > ENV）
+    _api_key_env = os.environ.get("API_KEY", "").strip()
+    _prod = is_production()
+    _explicit_dev = is_explicit_dev()
+    # 口径唯一真源：与 app_factory / preflight 共用，杜绝三处分叉
+    _api_key_enabled = resolve_api_key_enabled()
+
+    if _api_key_enabled and _api_key_env in UNSAFE_API_KEYS:
+        if _explicit_dev:
+            logger.warning(
+                "⚠️ API_KEY 使用公开占位符/弱默认值（仅显式 dev 允许，不安全）。"
+                "请在 .env 中替换为随机密钥：openssl rand -base64 32"
+            )
+        else:
+            logger.critical(
+                "启动失败：API Key 认证已启用，但 API_KEY 缺失或仍为公开占位符/弱默认值"
+                "（含 CHANGE_ME_TO_STRONG_RANDOM_KEY_32_CHARS_MIN）。"
+                " production=%s explicit_dev=%s。"
+                "请设置强随机 API_KEY（openssl rand -base64 32），"
+                "或在本地开发时显式设置 AI_GF_ENV=dev。",
+                _prod,
+                _explicit_dev,
+            )
             sys.exit(1)
 
     use_console = args.console or args.no_wechat

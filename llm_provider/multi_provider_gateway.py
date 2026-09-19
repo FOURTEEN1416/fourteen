@@ -20,12 +20,47 @@ import asyncio
 import json
 import logging
 import os
+import threading
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from typing import Any
 
 from .llm_gateway import LLMGatewayV2
 from .openai_compatible_provider import OpenAICompatibleProvider
+
+# ═══════════════════════════════════════════════════════════════
+#  同步入口的常驻事件循环（2026-09-19 性能修复）
+#
+#  问题：chat_sync 原用 `asyncio.run(...)`，**每次调用都新建并销毁一个事件循环**。
+#  而 OpenAICompatibleProvider._async_client 是按「event loop id」缓存的 ——
+#  于是每个 LLM 调用都会重建 httpx.AsyncClient：
+#    ① **连接池完全失效**，每次请求都要重做 TCP + TLS 握手（延迟大头）
+#    ② 旧 client 的 aclose() 落在已关闭的 loop 上 → 生产日志持续刷
+#       "Task exception was never retrieved ... RuntimeError: Event loop is closed"
+#  生产实证（09-19 14:1x）：单条微信消息 2 次 LLM 调用累计 11~20s，
+#  而同样的 provider 在稳态连接下只需 ~2.7s。
+#
+#  修法：所有同步调用方（ASE / 内容安全 / 一致性修正）共用**一个常驻守护线程
+#  里的事件循环**，让 AsyncClient 与连接池真正复用。
+# ═══════════════════════════════════════════════════════════════
+
+_sync_loop: asyncio.AbstractEventLoop | None = None
+_sync_loop_lock = threading.Lock()
+
+
+def _get_sync_loop() -> asyncio.AbstractEventLoop:
+    """返回常驻的专用事件循环（守护线程内 run_forever，进程存活期间复用）。"""
+    global _sync_loop  # noqa: PLW0603
+    if _sync_loop is not None and _sync_loop.is_running():
+        return _sync_loop
+    with _sync_loop_lock:
+        if _sync_loop is None or not _sync_loop.is_running():
+            loop = asyncio.new_event_loop()
+            threading.Thread(
+                target=loop.run_forever, name="llm-sync-loop", daemon=True,
+            ).start()
+            _sync_loop = loop
+    return _sync_loop
 
 logger = logging.getLogger("llm_provider.multi_gateway")
 
@@ -149,26 +184,47 @@ DEFAULT_PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
 
 
 def _load_providers_config() -> dict[str, Any]:
-    """从 config/llm_providers.json 加载配置
+    """从 config/llm_providers.json 加载配置，并 overlay gitignored 本地密钥。
 
     路径锚定项目根（2026-09-17 修复）：旧实现 ``Path("config/llm_providers.json")``
     按进程 CWD 解析，从非仓库根启动时静默返回 ``{}`` —— provider 配置全部丢失，
     fallback 链退化为默认值，且**无任何报错**（只打一条 warning）。
+
+    安全（审查 F-high-2）：tracked json 只含空 api_key；真实密钥优先来自
+    ``config/llm_providers.local.json``（gitignored），其次环境变量覆盖。
     """
     from utils.project_paths import project_path
 
     config_path = project_path("config", "llm_providers.json")
-    if not config_path.exists():
-        return {}
+    data: dict[str, Any] = {}
+    if config_path.exists():
+        try:
+            # 用 utf-8-sig 兼容 BOM 头（utf-8 会在首个 BOM 字节处抛 UnicodeDecodeError）
+            with open(config_path, encoding="utf-8-sig") as f:
+                data = json.load(f)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to load llm_providers.json: %s", e)
+            return {}
 
-    try:
-        # 用 utf-8-sig 兼容 BOM 头（utf-8 会在首个 BOM 字节处抛 UnicodeDecodeError）
-        with open(config_path, encoding="utf-8-sig") as f:
-            data = json.load(f)
-        return data
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to load llm_providers.json: %s", e)
-        return {}
+    # overlay：local 密钥文件（admin 控制台写入的真实 key 不进 git）
+    local_path = config_path.with_name(config_path.stem + ".local.json")
+    if local_path.exists():
+        try:
+            with open(local_path, encoding="utf-8-sig") as f:
+                local = json.load(f)
+            local_providers = (local or {}).get("providers", {})
+            file_providers = data.setdefault("providers", {})
+            for key, secret_cfg in local_providers.items():
+                secret_val = (secret_cfg or {}).get("api_key", "") if isinstance(secret_cfg, dict) else ""
+                if secret_val and key in file_providers and isinstance(file_providers[key], dict):
+                    file_providers[key]["api_key"] = secret_val
+                elif secret_val and key not in file_providers:
+                    # local 中有密钥但 tracked 无该 provider 元数据时，仅注入 key
+                    file_providers[key] = {"api_key": secret_val}
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to load %s: %s", local_path, e)
+
+    return data
 
 
 def _resolve_env_override(provider_key: str, config: dict[str, Any]) -> dict[str, Any]:
@@ -363,29 +419,32 @@ class MultiProviderGateway:
         2026-09-17 补齐：ASE 主动消息生成（MessageGenerator）等重要日期祝福等
         消费方以 hasattr(llm, "chat_sync") 探测同步能力，本类此前缺失该方法，
         导致 LLM 生成静默失败、全部回落模板（生产日志实证全为模板消息）。
+
+        2026-09-19 性能修复：改为提交到**常驻事件循环**（见 `_get_sync_loop`），
+        不再每个调用 `asyncio.run` 新建/销毁循环 —— 那是 httpx 连接池失效、
+        每次请求重做 TLS 握手、以及 aclose() 异常刷屏的根因。
         """
-        try:
-            asyncio.get_running_loop()
-            # 已在事件循环内（不应发生于此方法的设计调用场景）：丢线程池执行
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(
-                    asyncio.run,
-                    self.chat(
-                        query=query, system_prompt=system_prompt, history=history,
-                        messages=messages, temperature=temperature,
-                        max_tokens=max_tokens, tools=tools, model=model,
-                    ),
-                )
-                return future.result()
-        except RuntimeError:
-            return asyncio.run(
+
+        def _run() -> str:
+            return asyncio.run_coroutine_threadsafe(
                 self.chat(
                     query=query, system_prompt=system_prompt, history=history,
                     messages=messages, temperature=temperature,
                     max_tokens=max_tokens, tools=tools, model=model,
-                )
-            )
+                ),
+                _get_sync_loop(),
+            ).result()
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # 常规路径：调用线程无运行中的循环（wx 消息线程 / APScheduler / 脚本）
+            return _run()
+
+        # 嵌套场景（调用线程本已有循环）：丢线程池，避免阻塞调用方的循环
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(_run).result()
 
     async def chat_stream(
         self,

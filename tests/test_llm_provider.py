@@ -174,3 +174,32 @@ class TestLLMGatewayV2MockMode:
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "hi"},
         ]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  chat_sync 必须复用**同一个**常驻事件循环
+#  （2026-09-19：原实现每次 asyncio.run 新建/销毁循环 → httpx 连接池
+#   每次失效、每请求重做 TLS 握手、aclose() 在死循环上抛异常刷屏）
+# ═══════════════════════════════════════════════════════════════
+
+def test_chat_sync_reuses_persistent_event_loop():
+    import threading
+
+    from llm_provider.multi_provider_gateway import _get_sync_loop
+
+    seen: list[int] = []
+    lock = threading.Lock()
+
+    def grab() -> None:
+        with lock:
+            seen.append(id(_get_sync_loop()))
+
+    threads = [threading.Thread(target=grab, daemon=True) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    seen.append(id(_get_sync_loop()))
+    assert len(set(seen)) == 1, f"事件循环未复用，出现 {len(set(seen))} 个不同实例"
+    assert _get_sync_loop().is_running()
