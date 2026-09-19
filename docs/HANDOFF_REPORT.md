@@ -215,3 +215,27 @@ ssh swu-prod 'cd /opt/ai-girlfriend && set -a && . ./.env && set +a && timeout -
 - **架构决策**：`docs/adr/ADR-0015-系统提示词分层与按需注入.md`（含行业调研与一次自我纠正）
 - **日常流水**：`LOG.md`（本窗口条目 68 号起）
 - **上一窗口**：`docs/history/HANDOFF_REPORT-2026-09-14.md`
+
+## 9. 并行会话分工与冲突规避（2026-09-19 18:25 登记）
+
+| 归属 | 范围 | 状态 |
+|---|---|---|
+| **本窗口** | 后端 / 工具链 / 提示词 / 部署与生产排查 | 已交付两批（`6780c5f`…`e56e16d`），**无未提交改动** |
+| **另一窗口** | **前端优化**（`frontend/`，用户 09-19 指派） | 进行中 |
+
+⚠️ 双方都适用的三条硬约束：
+1. **不碰对方目录**：本窗口不动 `frontend/`；前端窗口不要动后端文件。
+2. **严禁 `git add -A` / `git commit -a`** —— 一律显式路径提交。`LOG.md` / `AGENTS.md` /
+   `README.md` / `docs/HANDOFF_REPORT.md` 是**共享追加型文件**，混批高发。
+   本窗口最后条目为 LOG **七十三**，前端窗口请从 **七十四** 起。
+3. **服务器部署互斥**：`remote_deploy.sh` 末尾会 `systemctl restart ai-girlfriend`，
+   两会话同时部署会互相打断。部署前先 `git log --oneline -1` 对齐服务器 HEAD，
+   用 `dbdd6e3` 之后的**增量 bundle**（配方见 §6-⑥）。
+
+**给前端窗口的一条关键提醒**：线上 `frontend/dist` 的 mtime 是 09-19 15:16
+（上一会话跑 `remote_deploy.sh` 留下的），**内容来自 `91c02f78` 时期的前端源码**，
+不含 `22375da`…`e640341` 这批前端改动 —— 即**线上 UI 目前落后于仓库源码**。
+重建前务必先备份，网评期内站点不可中断：
+```bash
+cd /opt/ai-girlfriend/frontend && cp -r dist dist.rollback-$(date +%Y%m%d-%H%M) && npm run build
+```
