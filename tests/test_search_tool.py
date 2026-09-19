@@ -8,6 +8,7 @@
   与「只剩降级路径」—— 与「投递链路六层谎报」同类。
 """
 import sys
+import time as _time
 from unittest.mock import patch
 
 sys.path.insert(0, ".")
@@ -176,3 +177,67 @@ def test_health_check_self_consistent():
     assert h["backends"]["bing"] == (h["primary"] == "bing")
     # available 必须与 error 自洽（成功 ⇔ 无错误信息）
     assert h["available"] == (h["error"] == "")
+
+
+# ─────────── DDG 硬超时与熔断（实测曾挂死 11 分钟）───────────
+
+
+def test_ddg_search_is_hard_bounded():
+    """`DDGS.text()` 无超时参数且实测会无界阻塞 —— 必须被硬超时截断。
+
+    生产事故：一次探针因此挂死 11 分钟（进程不再推进）。在 FastAPI worker 里
+    这等于工人被占死、用户那一轮对话再也回不来。
+    """
+    import concurrent.futures
+
+    import tools.builtin.search_tool as stm
+
+    orig_raw = stm.SearchTool._ddg_raw
+    orig_timeout = stm._DDG_TIMEOUT
+    orig_exec = stm._DDG_EXECUTOR
+    orig_blocked = stm._DDG_BLOCKED_UNTIL
+    stm._DDG_BLOCKED_UNTIL = 0.0
+    stm._DDG_TIMEOUT = 0.3
+    stm._DDG_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    stm.SearchTool._ddg_raw = staticmethod(lambda q, n: _time.sleep(1.0))
+    try:
+        t0 = _time.monotonic()
+        r = stm.SearchTool()._ddg_search("q", 3)
+        elapsed = _time.monotonic() - t0
+        assert not r.success
+        assert "超时" in (r.error or "")
+        assert elapsed < 0.9, f"必须被硬超时截断，实测 {elapsed:.2f}s"
+        # 超时应触发熔断
+        assert _time.monotonic() < stm._DDG_BLOCKED_UNTIL
+    finally:
+        stm.SearchTool._ddg_raw = orig_raw
+        stm._DDG_TIMEOUT = orig_timeout
+        stm._DDG_EXECUTOR = orig_exec
+        stm._DDG_BLOCKED_UNTIL = orig_blocked
+
+
+def test_ddg_circuit_breaker_short_circuits_without_calling():
+    """熔断期内必须瞬时返回，且不得再发起调用（防线程堆积）。"""
+    import tools.builtin.search_tool as stm
+
+    orig_blocked = stm._DDG_BLOCKED_UNTIL
+    orig_raw = stm.SearchTool._ddg_raw
+    called = {"n": 0}
+
+    def _boom(q, n):
+        called["n"] += 1
+        raise AssertionError("熔断期内不应发起调用")
+
+    stm._DDG_BLOCKED_UNTIL = _time.monotonic() + 60
+    stm.SearchTool._ddg_raw = staticmethod(_boom)
+    try:
+        t0 = _time.monotonic()
+        r = stm.SearchTool()._ddg_search("q", 3)
+        elapsed = _time.monotonic() - t0
+        assert not r.success
+        assert "熔断" in (r.error or "")
+        assert elapsed < 0.2
+        assert called["n"] == 0
+    finally:
+        stm._DDG_BLOCKED_UNTIL = orig_blocked
+        stm.SearchTool._ddg_raw = orig_raw

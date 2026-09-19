@@ -15,8 +15,10 @@
 """
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import re
+import time
 import warnings
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -25,15 +27,26 @@ from tools.base_tool import BaseTool, ToolResult
 
 logger = logging.getLogger("search_tool")
 
-# `duckduckgo_search` 已改名 `ddgs`，导入时会抛 RuntimeWarning —— 抑制它以免刷日志。
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore", RuntimeWarning)
-    try:
-        from duckduckgo_search import DDGS
+# `duckduckgo_search` 已改名 `ddgs`。该警告在**实例化时**抛出（不是 import 时），
+# 故必须在模块级按消息正则抑制 —— 只在 import 处 catch_warnings 是无效的（实测踩过）。
+warnings.filterwarnings("ignore", message=r".*renamed to `ddgs`.*", category=RuntimeWarning)
+try:
+    from duckduckgo_search import DDGS
 
-        HAS_DDG = True
-    except ImportError:
-        HAS_DDG = False
+    HAS_DDG = True
+except ImportError:
+    HAS_DDG = False
+
+# ── DuckDuckGo 调用的硬超时保护（2026-09-19 新增）──
+# `DDGS.text()` 没有超时参数，且实测会**无界阻塞**：一次生产探针因此挂死 11 分钟
+# （表现为整个探针进程不再推进）。在 FastAPI worker 里这意味着工人被占死、
+# 用户那一轮对话再也回不来。故用独立线程 + 硬超时截断，并加熔断避免线程堆积。
+_DDG_TIMEOUT = 6.0                              # 单次硬超时（秒）
+_DDG_CIRCUIT_TTL = 300.0                        # 超时后熔断时长（秒）
+_DDG_BLOCKED_UNTIL = 0.0                        # 熔断截止（monotonic）
+_DDG_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="ddg"
+)
 
 _BING_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -163,11 +176,32 @@ class SearchTool(BaseTool):
             return ToolResult(True, data=items)
         return ToolResult(False, error="未解析到结果")
 
+    @staticmethod
+    def _ddg_raw(query: str, max_results: int) -> list[dict[str, Any]]:
+        """真正发起 DDG 调用 —— 独立出来便于测试替换，且必须可被硬超时截断。"""
+        with DDGS() as ddgs:
+            return list(ddgs.text(query, max_results=max_results))
+
     def _ddg_search(self, query: str, max_results: int = 5) -> ToolResult:
-        """DuckDuckGo 副后端（内部走 Bing）。限流是常态，失败只记一行警告。"""
+        """DuckDuckGo 副后端（内部走 Bing）。
+
+        限流是常态；`DDGS.text()` 无超时参数且实测会无界阻塞，故这里用独立线程 +
+        硬超时截断，超时后熔断一段时间以杜绝线程堆积。
+        """
+        global _DDG_BLOCKED_UNTIL
+        if time.monotonic() < _DDG_BLOCKED_UNTIL:
+            return ToolResult(False, error="ddg 熔断中（上次超时）")
+
         try:
-            with DDGS() as ddgs:
-                raw = list(ddgs.text(query, max_results=max_results))
+            raw = _DDG_EXECUTOR.submit(self._ddg_raw, query, max_results).result(
+                timeout=_DDG_TIMEOUT
+            )
+        except concurrent.futures.TimeoutError:
+            _DDG_BLOCKED_UNTIL = time.monotonic() + _DDG_CIRCUIT_TTL
+            logger.warning(
+                "DuckDuckGo 超时（>%.0fs）→ 熔断 %.0fs", _DDG_TIMEOUT, _DDG_CIRCUIT_TTL
+            )
+            return ToolResult(False, error=f"ddg 超时(>{_DDG_TIMEOUT:.0f}s)")
         except Exception as e:  # noqa: BLE001 - DDG 抛自有异常类型
             # 不打全量 traceback：限流属常态，刷栈会淹没真正的故障。
             logger.warning(

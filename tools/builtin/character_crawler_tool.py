@@ -90,8 +90,11 @@ _ANTI_BOT_MARKERS = (
 # 中国大陆网络下 zh/en 维基均被持续阻断，每次调用都要白等 2×timeout。生产实测：
 # 整条降级链 33.2s，其中维基占 32.0s（97%），而真正可用的 search_fetch 只要 1.1s。
 # 这么大的耗时会让对话内工具调用直接撞上「处理超时」。故把失败记下来短期跳过。
-_WIKI_TIMEOUT = 4.0          # 单域名超时（原 8s，实测双域名合计 32s）
-_WIKI_MEMO_TTL = 600.0       # 不可达记忆有效期（秒）
+_WIKI_TIMEOUT = 4.0          # 单域名超时（原 8s）
+# ⚠️ 实测：cloudscraper 会把实际等待放大到约 2×（配 4s 时两域名共耗 16.0s）——
+#    排障时不要以为 timeout 参数没生效。
+_WIKI_MEMO_TTL = 1800.0      # 不可达记忆有效期（秒）。大陆对维基的封锁是持续性的，
+                             # 600s 会让 16s 白等每 10 分钟重演一次，故放宽到 30 分钟。
 _WIKI_MEMO: dict[str, float] = {}
 _WIKI_MEMO_LOCK = threading.Lock()
 
