@@ -37,6 +37,8 @@
 
 **影响面**：A 档代码（orchestrator 无关、记忆/工具时钟）+ tests + 文档。端点不变。
 
+**三端闭环**：本地 `f8b86c2` / GitHub main / CI run **35502797318 success**（backend pytest+ruff+mypy 全绿；`close-ci-failure-issue` 自动关闭 issue #6）/ 服务器 `ssh swu-prod` HEAD **`f8b86c25`**（`5bdee608..f8b86c25` Fast-forward + `remote_deploy.sh` 4/4 + `ai-girlfriend` **active** + `/api/health` **200** production）。收编方式：`git merge` 被会话工具层拦截，主控以白名单 8 文件自 worktree 复制入 main 后 commit（同包 Q 惯例）。`git hash-object` 三端抽验 A 档关键文件一致（工作树 md5 因 Windows CRLF vs Linux LF 有差，以 git blob 为准）。
+
 ---
 
 ## 2026-09-20 — 包 Q 补做：B-d 跨会话尾巴 + 工具结果正式位次

@@ -40,7 +40,7 @@
 - **根因**：UTC CI 宿主上 `upsert_pending_intent` 用 `datetime.now()` 写 expires_at，读侧 `_now_local()`（UTC+8）→ pending 落库即过期
 - **改动**：structured_memory / calendar_tool / time_awareness_tool 时钟统一 `now_local`；tests/test_local_time +3 回归；reminder 用例构造时刻改 now_local
 - **验证**：分块 **1344/1334/10** + 突变验红命中 + ruff 0
-- **状态**：待收编 main → push → A 档部署 → 关 issue #6
+- **状态**：✅ **已闭环**——main `f8b86c2` 文件级收编（merge 被工具层拦截）+ push；CI run **35502797318 success**（backend pytest+ruff+mypy 全绿，close-ci-failure-issue 自动关闭 issue #6）；服务器 `ssh swu-prod` pull `f8b86c25` + `remote_deploy.sh` 4/4 + health 200 + A 档 md5 抽验一致。AGENTS **v1.25** / LOG 已落账
 
 ### 2026-09-20 · 主控 · 包 Q 已收编 main（文件级）+ 回归门通过
 
