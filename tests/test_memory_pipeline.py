@@ -342,7 +342,7 @@ def test_mp_get_memory_context_and_formatted():
     assert "user_facts" in ctx
     assert "用户喜欢猫" in ctx["user_facts"]
     formatted = mp.get_formatted_context()
-    assert "我记得的你" in formatted
+    assert "# 关于用户" in formatted
     assert "用户喜欢猫" in formatted
 
 
@@ -409,8 +409,8 @@ def test_semantic_memory_add_fact_dedup():
     sm = FakeStructuredMemory()
     sem = SemanticMemory(vm, sm)
     assert sem.add_fact("我喜欢猫", "preference", 0.9) is True
-    assert sem.add_fact("我喜欢猫", "preference", 0.9) is False
-    assert len(sm.facts) == 1
+    # 包 Q · B-b：near-dup 走 reinforce 路径，不再返回 False 拒绝写入
+    assert sem.add_fact("我喜欢猫", "preference", 0.9) is True
 
 
 def test_conflict_detector_detects_near_duplicate():
@@ -509,11 +509,11 @@ def test_semantic_memory_add_fact_similar_fact_dedup():
     sem = SemanticMemory(vm, sm)
     # 首次添加成功
     assert sem.add_fact("我喜欢猫", "preference", 0.9) is True
-    # 缓存命中
-    assert sem.add_fact("我喜欢猫", "preference", 0.9) is False
-    # 通过结构化存储模拟高相似度事实
+    # 包 Q · B-b：重复/相似事实改为 reinforce，不再 False
+    assert sem.add_fact("我喜欢猫", "preference", 0.9) is True
+    # 高相似度事实同样走强化路径
     sm.search_facts = lambda q: [{"fact": "我喜欢小猫", "similarity": 0.95}]  # type: ignore[method-assign]
-    assert sem.add_fact("我喜欢小猫咪", "preference", 0.9) is False
+    assert sem.add_fact("我喜欢小猫咪", "preference", 0.9) is True
 
 
 def test_semantic_memory_search_exception_returns_empty():

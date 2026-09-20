@@ -14,7 +14,12 @@ import json
 import logging
 from typing import Any
 
-from my_character.persona_engine import PersonaEngine
+from my_character.persona_engine import (
+    PersonaEngine,
+    build_external_constraint_layer,
+    is_external_character_id,
+    strip_default_identity,
+)
 from shisi.core.models.affinity_level import AffinityLevel
 from shisi.core.models.character_aggregate import CharacterAggregate
 from shisi.core.models.emotion_type import EmotionType
@@ -96,6 +101,14 @@ class PersonaService:
             use_storyline=False,
         )
 
+        # 身份唯一 Owner（包 Q · A1）：
+        # - default/demo：PersonaEngine 默认人格可注入
+        # - 外部 character_id：身份以角色卡为唯一真源；PersonaEngine 只保留
+        #   数值/风格映射/约束规则，禁止注入 DEFAULT_PERSONA_DESC /「你叫十四」
+        external = is_external_character_id(character_id)
+        engine_name = "" if external else str(self._engine.get_name() or "")
+        engine_name = engine_name.strip()
+
         injection_parts: list[str] = []
 
         if world_info:
@@ -126,16 +139,26 @@ class PersonaService:
         if style_layer:
             injection_parts.append(style_layer)
 
-        constraint_layer = self._safe_engine_layer(
-            "constraint", self._engine.build_constraint_layer
-        )
+        if external:
+            # 外部角色：约束层用身份中性版本（无「你是唯一的我/十四」断言）
+            constraint_layer = build_external_constraint_layer()
+        else:
+            constraint_layer = self._safe_engine_layer(
+                "constraint", self._engine.build_constraint_layer
+            )
         if constraint_layer:
             injection_parts.append(constraint_layer)
 
         if not injection_parts:
-            return base_prompt
+            return strip_default_identity(base_prompt) if external else base_prompt
 
-        return f"{base_prompt}\n\n" + "\n\n".join(injection_parts)
+        assembled = f"{base_prompt}\n\n" + "\n\n".join(injection_parts)
+        if external:
+            assembled = strip_default_identity(assembled)
+            if engine_name and engine_name in assembled:
+                # 外部角色路径下引擎默认名不得出现（防御：某注入层误带）
+                assembled = assembled.replace(engine_name, "").replace("\n\n\n", "\n\n")
+        return assembled
 
     @property
     def engine(self) -> PersonaEngine:
@@ -153,10 +176,22 @@ class PersonaService:
         """
         emotional_state = self._map_emotional_state(emotion_state)
 
-        if character_id and character_id not in ("default", "demo"):
-            card_character = self._build_character_from_card(character_id, emotional_state)
+        if is_external_character_id(character_id):
+            card_character = self._build_character_from_card(
+                str(character_id), emotional_state
+            )
             if card_character is not None:
                 return card_character
+            # 外部 ID 但角色卡缺失：不得回落默认「十四」身份
+            # 身份由 orchestrator 片段/后续恢复的卡补齐；此处仅保留数值画像
+            placeholder = CharacterAggregate(
+                id=str(character_id or "external"),
+                name=str(character_id or "角色"),
+                description="",
+                persona=self._build_shisi_persona(),
+            )
+            placeholder.emotional_state = emotional_state
+            return placeholder
 
         name = self._engine.get_name()
         description = self._engine.get_description()

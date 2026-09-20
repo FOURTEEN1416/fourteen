@@ -67,6 +67,10 @@ tools:
   enabled: true
   execution_timeout_seconds: 10.0
   rate_limit_per_tool_per_minute: 3
+  # 包 Q · C2 运行时限额（对齐 Artemis runtime_limits）
+  max_tool_calls_per_turn: 3
+  max_same_tool_per_turn: 1
+  tool_result_chars_max: 6000
   builtin_tools:
     - weather
     - search

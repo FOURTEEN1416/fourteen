@@ -129,15 +129,16 @@ class FactExtractor:
 
         prompt = f"""从以下对话中提取关于用户的事实信息。
 只提取明确提到的、有具体内容的事实。
-对每个事实给出类别和置信度(0~1)。
+对每个事实给出类别、置信度(0~1)和话题标签 topics。
 
 输出 JSON 数组格式：
 [
-  {{"fact": "用户喜欢吃火锅", "category": "preference", "confidence": 0.9}},
-  {{"fact": "用户下周去北京出差", "category": "event", "confidence": 0.8}}
+  {{"fact": "用户喜欢吃火锅", "category": "preference", "confidence": 0.9, "topics": ["美食", "火锅"]}},
+  {{"fact": "用户约定明早叫他起床", "category": "commitment", "confidence": 0.95, "topics": ["起床", "约定"]}}
 ]
 
 类别: {', '.join(FACT_CATEGORIES)}
+topics: 1~3 个短关键词，便于续聊。
 
 对话内容:
 {text}
@@ -173,14 +174,33 @@ JSON:"""
                             continue
                         # 去重
                         if not any(f["fact"] == fact_text for f in facts):
+                            topics = self._topics_from_text(fact_text, category)
                             facts.append({
                                 "fact": fact_text,
                                 "category": category,
                                 "confidence": 0.5,
                                 "source": "rule",
+                                "topics": topics,
                             })
 
         return facts
+
+    @staticmethod
+    def _topics_from_text(text: str, category: str) -> list[str]:
+        """从事实文本粗提话题标签（B-b 续聊钩子）。"""
+        topics: list[str] = []
+        text = str(text or "")
+        # 常见实体词粗匹配
+        for w in (
+            "火锅", "咖啡", "出差", "旅行", "考试", "加班", "健身", "跑步",
+            "睡觉", "起床", "生日", "纪念日", "上班", "学校", "工作",
+            "上海", "北京", "云南", "昆明",
+        ):
+            if w in text:
+                topics.append(w)
+        if category in ("commitment", "relationship") and "约定" not in topics:
+            topics.append("约定" if category == "commitment" else "我们")
+        return topics[:3]
 
     # ── 工具方法 ─────────────────────────────────────────
 

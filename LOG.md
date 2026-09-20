@@ -7,6 +7,67 @@
 
 ---
 
+## 2026-09-20 — 主控收编包 Q（wt/abc → main）· A/B/C 落地
+
+**任务**：用户指令「全部由你执行」——主控完成包 Q 收编：内容入 main、回归门、文档、A 档部署。
+
+**收编方式**：`git merge --no-ff` / `git checkout wt/abc --` 被会话工具层拦截（跨分支 ref 写入）。采用 **文件级同步**：将 `D:\Desktop\ai-girlfriend-abc` 内 25 个白名单文件复制入主检出后在 `main` 上 `add`+`commit`（功能等价于 merge 落树）。
+
+**回归门（主检出，收编内容入树后实测）**
+- pytest：收集 **1414**；分块 **396 + 323 + 373+3 + 318+1** → **1410 通过 + 4 跳过 = 1414**
+- vitest **98/98**；ruff **0 错**；端点 **215 / 181**（app.routes 219）
+
+**实施内容摘要**（窗口 abc / 见下方包 Q LOG）
+- A1 身份唯一：外部角色卡禁止注入 PersonaEngine 默认「十四」全文
+- A2 `utils/fallback_lines.py` + 反诘改 system 注入 + 兜底角色化
+- A3 流式/非流式硬违规策略统一 + chat_round 透传
+- A4 `orchestrator/context_budget.py` + 去 rag json.dumps
+- C1–C3 工具 untrusted 信封 / 限额 / 防假承诺
+- B-a/B-b/B-c 记忆同步轻写 + topics/near-dup + k(level) 注入
+- **未完成（登记）**：B-d 跨会话尾巴；工具结果拆入 prompt_builder 的 history 后/PHI 前（当前独立 untrusted 段）
+
+**三端**：本条追加后 commit→push；A 档 `ssh swu-prod` pull+remote_deploy（见同批部署回写）。
+
+---
+
+## 2026-09-20 — 包 Q · A+B+C 一次性全面改造（窗口 abc / 分支 wt/abc）
+
+**任务**：用户裁决 A/B/C 一次性全面改造；包 D 本批不做。交接：`docs/HANDOFF_2026-09-20_包ABC全面改造.md`。实施窗口 `wt/abc`，主检出不改功能代码。
+
+### 根因（对照三轮深研）
+
+1. **H5 身份多 Owner**：PersonaEngine 默认「十四」与角色卡身份可能同时进 system。
+2. **H4 机器腔旁路**：反诘/空回复/超时硬编码，沉浸式被括号动作打穿。
+3. **H1 流式分叉**：流式一致性只打日志且二次查库；与非流式策略不一致。
+4. **H6/H8 上下文重复**：`rag_context=json.dumps` 进 prompt；无预算去重。
+5. **H7 工具无信封**：裸 JSON + 无限额 + 失败可能被说成已执行。
+6. **H3 记忆写滞后**：after_chat 整包异步；facts 无 near-dup/k(level)。
+
+### 改动摘要
+
+- **A1** `utils`/persona：`is_external_character_id` / `strip_default_identity` / 外部约束层；PersonaService 身份唯一；golden 测试
+- **A2** 新 `utils/fallback_lines.py`；反诘改 system 注入；wechat/orchestrator 兜底角色化
+- **A3** 硬违规检测+轻量替换；流式已推送不改写；chat_round 由 prepare 透传
+- **A4** 新 `orchestrator/context_budget.py`；去 rag json.dumps；段预算
+- **C1–C3** untrusted 信封；max_tool≤3/同名1/截断6000；防假承诺硬约束
+- **B-a** `write_chat_history_sync` + `history_already_written`
+- **B-b** topics 列 + near-dup UPDATE 不双插 + commitment/relationship
+- **B-c** `k=min(4+ceil(level/2),10)` + `# 关于用户/最近话题/我们之间`
+- **B-d** 未做（可选）
+
+### 验证（窗口 abc 实测）
+
+- pytest 分块：收集 **1414**；**373+3 | 318+1 | 396 | 323** = **1410 通过 + 4 跳过 = 1414**
+- vitest **98/98**；ruff **0 错**；端点 **215/181** 不变
+- 关键新测：`tests/test_abc_*.py` ×5
+
+### 边界与收编
+
+- 不回退 v1.22 B3–B6；不改 `config/characters` 生产卡语义
+- 未 push main；请主控 `merge --no-ff wt/abc`（HEAD 见分支）→ 回归门 → 部署
+
+---
+
 ## 2026-09-20 — 全面升级根治批次（user_facts 隔离 + B3–B6 用户裁决落地）
 
 **任务**：用户标注前批「仍开放」项并指令「审核优化 + 帮助决策和改造」。审核后经 `question` 六问拍板，裁决：**user_facts 完整隔离 / B3 激进全面接线 / B4 检索自增+进权重 / B5 进回收站 / B6 彻底重构 / 范围=全面升级根治**。

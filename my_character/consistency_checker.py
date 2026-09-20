@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +21,54 @@ if TYPE_CHECKING:
     from my_character.persona_schema import PersonaSchema
 
 logger = logging.getLogger("consistency_checker")
+
+# 硬违规：自称 AI / 明显人设名错误（包 Q · A3：生成后仅处理这类问题）
+_HARD_AI_MARKERS = (
+    "作为AI",
+    "作为 AI",
+    "我是AI",
+    "我是 AI",
+    "作为人工智能",
+    "作为语言模型",
+    "AI语言模型",
+    "AI 语言模型",
+    "人工智能助手",
+)
+
+
+def detect_hard_violation(reply: str, character_name: str | None = None) -> str | None:
+    """检测硬违规（自称 AI / 明显错误人设名）。返回违规类型或 None。
+
+    A3 统一策略：流式/非流式生成后**仅**处理硬违规；软性风格问题靠 prompt 约束。
+    """
+    text = (reply or "").strip()
+    if not text:
+        return None
+    for marker in _HARD_AI_MARKERS:
+        if marker in text:
+            return "self_as_ai"
+    name = (character_name or "").strip()
+    if len(name) >= 2 and name in text:
+        # 角色名出现本身正常；若同时自称 AI 已在上面拦截
+        return None
+    return None
+
+
+def light_sanitize_hard_violation(reply: str) -> str:
+    """硬违规轻量替换：去掉自称 AI 的元声明，不重写整段（控制延迟）。"""
+    text = reply or ""
+    for marker in _HARD_AI_MARKERS:
+        if marker in text:
+            # 句级删除含 marker 的片段
+            parts = []
+            for seg in re.split(r"(?<=[。！？!?\n])", text):
+                if marker not in seg:
+                    parts.append(seg)
+            cleaned = "".join(parts).strip()
+            if cleaned:
+                return cleaned
+            return "嗯，我在。"
+    return text
 
 
 @dataclass

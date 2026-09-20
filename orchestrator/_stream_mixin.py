@@ -46,20 +46,34 @@ class _StreamPipelineMixin:
         character_id: str,
         emotion_state: Any,
         session_id: str,
+        chat_round: int = 0,
     ) -> None:
-        """后台异步一致性检查（B2 优化）。
+        """后台异步一致性检查（A3 统一策略）。
 
         - 不阻塞主回复流，避免触发第二次 LLM 调用导致响应时间翻倍
-        - 严重违规只记录日志，不影响已推送的回复
-        - 可在此触发下一轮的修正提示（当前仅日志，避免过度复杂）
+        - 生成后仅对**硬违规**（自称 AI 等）记日志；已推送文本不做静默改写
+        - chat_round 由 _prepare_context 透传，禁止 stream 内二次查库
         """
         try:
-
             character_card = None
             persona_service = self.components.get("persona")
             card_loader = getattr(persona_service, "_load_character_card", None)
-            if character_id not in ("default", "demo") and callable(card_loader):
+            from my_character.persona_engine import is_external_character_id
+            if is_external_character_id(character_id) and callable(card_loader):
                 character_card = card_loader(character_id)
+
+            from my_character.consistency_checker import detect_hard_violation
+
+            char_name = ""
+            if isinstance(character_card, dict):
+                char_name = str(character_card.get("name") or "")
+            hard = detect_hard_violation(reply, char_name)
+            if hard:
+                # 已推送 → 不静默改写；下一轮 system 由 prompt 层约束
+                logger.warning(
+                    "硬违规(流式已推送不改写): type=%s session=%s char=%s reply=%r",
+                    hard, session_id, character_id, (reply or "")[:80],
+                )
 
             result = None
             if character_card:
@@ -77,14 +91,6 @@ class _StreamPipelineMixin:
                     ),
                 )
                 affinity = getattr(emotion_state, "affinity", 0) if emotion_state else 0
-                chat_round = 0
-                mem = self.components.get("memory")
-                if mem and hasattr(mem, "get_chat_context"):
-                    try:
-                        history, _ = mem.get_chat_context(session_id=session_id)
-                        chat_round = len(history) if history else 0
-                    except Exception:  # noqa: BLE001
-                        pass
                 result = checker.check(
                     reply,
                     ConsistencyContext(
@@ -94,14 +100,6 @@ class _StreamPipelineMixin:
                     ),
                 )
             elif persona_service and hasattr(persona_service, "check_consistency"):
-                chat_round = 0
-                mem = self.components.get("memory")
-                if mem and hasattr(mem, "get_chat_context"):
-                    try:
-                        history, _ = mem.get_chat_context(session_id=session_id)
-                        chat_round = len(history) if history else 0
-                    except Exception:  # noqa: BLE001
-                        pass
                 result = persona_service.check_consistency(reply, emotion_state, chat_round)
 
             if result is None:
@@ -250,6 +248,8 @@ class _StreamPipelineMixin:
                 emotion_state = ctx["emotion_state"]
                 system_prompt = ctx["system_prompt"]
                 chat_history = ctx["chat_history"]
+                # A3：chat_round 由 prepare 透传，禁止 stream 内二次 get_chat_context
+                chat_round = int(ctx.get("chat_round") or 0)
 
                 # 9. 真流式：LLM token 实时推送，输出安全检查改为流式抽检
                 # 输入安全检查已在前面完成；输出安全检查用"流式窗口抽检 +
@@ -341,6 +341,7 @@ class _StreamPipelineMixin:
                         character_id=character_id,
                         emotion_state=emotion_state,
                         session_id=session_id,
+                        chat_round=chat_round,
                     )
                 )
                 self._background_tasks.add(bg_task)

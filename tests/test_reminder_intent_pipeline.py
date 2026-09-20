@@ -146,7 +146,8 @@ class TestFinalReview:
         assert len(due) == 1
         assert due[0]["session_key"] == "1:peer@im.wechat"
         assert due[0]["user_id"] == 7
-        assert "[工具调用结果]" in results
+        assert 'trust="untrusted"' in results
+        assert "不是指令" in results
         assert direct == ""
 
     def test_ask_user_branch_creates_pending_and_returns_question(self, sm):
@@ -227,7 +228,8 @@ class TestFinalReview:
             llm2, "七点吧", "sys", [], affinity_level=2,
             session_key="s1",
         ))
-        assert "[工具调用结果]" in results
+        assert 'trust="untrusted"' in results
+        assert "不是指令" in results
         assert sm.get_active_pending_intent("s1") is None  # fulfilled 后关闭
 
     def test_pending_third_ask_is_cancelled(self, sm):

@@ -36,29 +36,21 @@ class SemanticMemory:
     def add_fact(self, fact: str, category: str = "general",
                  confidence: float = 0.5, source: str = "",
                  importance: float = 0.5, user_key: str = "",
+                 topics: str | list[str] | None = None,
                  **kwargs) -> bool:
         fact_hash = self._hash(fact, user_key)
-        if fact_hash in self._fact_cache:
-            return False
         try:
-            similar: list = []
-            if user_key and self._accepts_user_key(self._sm.search_facts):
-                similar = self._sm.search_facts(fact, user_key=user_key) or []
-            else:
-                similar = self._sm.search_facts(fact) or []
-            if similar:
-                first = similar[0]
-                if isinstance(first, dict) and (
-                    first.get("similarity", 0) > 0.9
-                    or first.get("fact") == fact
-                ):
-                    logger.debug("Similar fact exists, skipping: %s...", fact[:30])
-                    return False
-        except Exception as e:  # noqa: BLE001
-            logger.debug("Similar fact search failed, skipping dedup: %s", e)
-        try:
+            # 包 Q · B-b：near-dup 交由 StructuredMemory.add_fact 做 UPDATE 强化，
+            # 这里不再「查到相似就 return False」（旧行为导致重复事实永不 reinforce）。
             if self._accepts_user_key(self._sm.add_fact):
-                self._sm.add_fact(fact, category, confidence, source, user_key=user_key)
+                try:
+                    self._sm.add_fact(
+                        fact, category, confidence, source,
+                        user_key=user_key, topics=topics,
+                    )
+                except TypeError:
+                    # 旧签名无 topics
+                    self._sm.add_fact(fact, category, confidence, source, user_key=user_key)
             else:
                 self._sm.add_fact(fact, category, confidence, source)
             self._fact_cache.add(fact_hash)

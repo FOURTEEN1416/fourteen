@@ -71,11 +71,27 @@ _SYSTEM_ERROR_REPLIES = frozenset({
     "系统初始化中, 请稍候...",
     "等下，我还没回完上一条",
 })
+_SYSTEM_ERROR_MARKERS = (
+    "处理超时",
+    "消息处理异常",
+    "处理消息时出现异常",
+)
 
 
 def _is_system_error_reply(reply: str) -> bool:
-    """是否为系统错误占位（非角色真实回复）。"""
-    return (reply or "").strip() in _SYSTEM_ERROR_REPLIES
+    """是否为系统错误占位（非角色真实回复）。
+
+    包 Q · A2：同步识别 utils.fallback_lines 的角色化兜底句，
+    避免新的 timeout/empty/exception 旁路句污染 chat_history。
+    """
+    try:
+        from utils.fallback_lines import is_system_fallback_line
+        return is_system_fallback_line(reply)
+    except Exception:  # noqa: BLE001
+        text = (reply or "").strip()
+        if not text:
+            return True
+        return text in _SYSTEM_ERROR_REPLIES or any(m in text for m in _SYSTEM_ERROR_MARKERS)
 
 # 深夜时段范围（24小时制，含两端）
 LATE_NIGHT_START_HOUR = 23
@@ -321,12 +337,41 @@ class MemoryPipeline:
         # 规则3：默认存为事实
         return True
 
+    def write_chat_history_sync(
+        self,
+        user_msg: str,
+        reply: str,
+        emotion_tag: str = "",
+        session_id: str = "",
+    ) -> bool:
+        """包 Q · B-a：同步轻写 chat_history 两行 + 工作记忆。
+
+        orchestrator 在返回回复**之前**调用本方法，保证下一轮能读到刚说的内容；
+        向量/事实抽取/日记等重活仍走 after_chat 异步路径。
+        """
+        effective_session = session_id or self.session_id
+        store_assistant = not _is_system_error_reply(reply)
+        try:
+            self.sm.add_chat("user", user_msg, emotion_tag=emotion_tag,
+                             session_id=effective_session)
+            if store_assistant:
+                self.sm.add_chat("assistant", reply, emotion_tag=emotion_tag,
+                                 session_id=effective_session)
+            self.working.add("user", user_msg, emotion_tag, 0.5)
+            if store_assistant:
+                self.working.add("assistant", reply, emotion_tag, 0.5)
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.warning("write_chat_history_sync failed: %s", e)
+            return False
+
     def after_chat(
         self,
         user_msg: str,
         reply: str,
         emotion_tag: str = "",
         session_id: str = "",
+        history_already_written: bool = False,
     ) -> dict[str, Any]:
         effective_session = session_id or self.session_id
         result = {
@@ -358,24 +403,28 @@ class MemoryPipeline:
         except Exception as e:  # noqa: BLE001
             logger.debug("Late-night importance boost failed: %s", e)
 
-        # 2. 存储到结构化记忆
-        #    系统错误占位（超时/异常罐头语）只保留用户原话，不把罐头语写成
-        #    assistant 发言——否则会污染后续上下文（2026-09-20 LOG 遗留项）。
+        # 2. 存储到结构化记忆（B-a：若 orchestrator 已同步写过则跳过，防双插）
         store_assistant = not _is_system_error_reply(reply)
-        try:
-            self.sm.add_chat("user", user_msg, emotion_tag=emotion_tag,
-                             session_id=effective_session)
-            if store_assistant:
-                self.sm.add_chat("assistant", reply, emotion_tag=emotion_tag,
+        if not history_already_written:
+            try:
+                self.sm.add_chat("user", user_msg, emotion_tag=emotion_tag,
                                  session_id=effective_session)
-            result["stored_chat"] = True
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to store chat: %s", e)
+                if store_assistant:
+                    self.sm.add_chat("assistant", reply, emotion_tag=emotion_tag,
+                                     session_id=effective_session)
+                result["stored_chat"] = True
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to store chat: %s", e)
 
-        # 3. 存储到工作记忆
-        self.working.add("user", user_msg, emotion_tag, importance)
-        if store_assistant:
-            self.working.add("assistant", reply, emotion_tag, importance)
+            # 3. 存储到工作记忆
+            self.working.add("user", user_msg, emotion_tag, importance)
+            if store_assistant:
+                self.working.add("assistant", reply, emotion_tag, importance)
+        else:
+            result["stored_chat"] = True
+
+        # B-a：chat_history 两行已在上方**同步**写入（即使 after_chat 整体被
+        # 提交到后台线程，orchestrator 会先调 write_chat_history_sync 保证返回前可见）。
 
         # 4. 存储到向量库（线程池异步执行，不阻塞主流程）
         if store_assistant:
@@ -727,13 +776,24 @@ class MemoryPipeline:
 
     # ── V1 兼容接口 ──────────────────────────────────────
 
-    def get_memory_context(self, n_chats: int = 10) -> dict[str, Any]:
-        """V1兼容：获取当前对话需要的记忆上下文"""
+    def get_memory_context(self, n_chats: int = 10, affinity_level: int = 0) -> dict[str, Any]:
+        """V1兼容：获取当前对话需要的记忆上下文
+
+        包 Q · B-c：注入条数 k = min(4 + ceil(level/2), 10)；
+        优先 relationship/commitment > preference > 普通 fact。
+        """
+        import math
+
+        k = min(4 + math.ceil(max(0, int(affinity_level)) / 2), 10)
         context = {
             "recent_chats": [],
             "user_facts": [],
+            "user_fact_rows": [],
+            "topics": [],
+            "relationship_facts": [],
             "today_summary": "",
             "emotion_trend": {},
+            "injection_k": k,
         }
 
         try:
@@ -742,13 +802,36 @@ class MemoryPipeline:
             logger.warning("Failed to get recent chats: %s", e)
 
         try:
-            # 完整隔离：只注入当前会话归属的事实（user_key 从 session 派生）
-            # 2026-09-20 MEM-USER-1 用户裁决；存量 user_key='' 不注入任何会话。
+            # 完整隔离：只注入当前会话归属的事实（user_key 从 session 澄清）
             uk = _user_key_from_session(self.session_id)
-            facts = self.sm.get_facts(min_confidence=0.3, user_key=uk)
-            context["user_facts"] = [f["fact"] for f in facts]
+            facts = self.sm.get_facts(min_confidence=0.3, user_key=uk, limit=50)
+
+            def _prio(row: dict) -> int:
+                cat = str(row.get("category") or "")
+                if cat in ("relationship", "commitment"):
+                    return 0
+                if cat == "preference":
+                    return 1
+                return 2
+
+            facts_sorted = sorted(facts, key=lambda r: (_prio(r), -(r.get("confidence") or 0)))
+            selected = facts_sorted[:k]
+            context["user_facts"] = [f["fact"] for f in selected]
+            context["user_fact_rows"] = selected
+            topics: list[str] = []
+            rel: list[str] = []
+            for f in selected:
+                if f.get("category") in ("relationship", "commitment"):
+                    rel.append(str(f.get("fact") or ""))
+                tp = str(f.get("topics") or "")
+                for t in tp.split(","):
+                    t = t.strip()
+                    if t and t not in topics:
+                        topics.append(t)
+            context["topics"] = topics[:3]
+            context["relationship_facts"] = rel[:2]
             # B4：被注入上下文即算一次「回忆」→ access_count+1
-            ids = [f.get("id") for f in facts if f.get("id") is not None]
+            ids = [f.get("id") for f in selected if f.get("id") is not None]
             if ids and hasattr(self.sm, "increment_fact_access"):
                 try:
                     self.sm.increment_fact_access(ids)
@@ -772,14 +855,26 @@ class MemoryPipeline:
 
         return context
 
-    def get_formatted_context(self, n_chats: int = 6) -> str:
-        """V1兼容：获取格式化的记忆上下文文本（用于注入 prompt）"""
-        ctx = self.get_memory_context(n_chats)
+    def get_formatted_context(self, n_chats: int = 6, affinity_level: int = 0) -> str:
+        """V1兼容：获取格式化的记忆上下文文本（用于注入 prompt）
+
+        包 Q · B-c 标题：# 关于用户 / # 最近话题 / # 我们之间
+        """
+        ctx = self.get_memory_context(n_chats, affinity_level=affinity_level)
         parts = []
 
         if ctx["user_facts"]:
-            parts.append("[我记得的你]")
-            for fact in ctx["user_facts"][:5]:
+            parts.append("# 关于用户")
+            for fact in ctx["user_facts"]:
+                parts.append(f"- {fact}")
+
+        if ctx.get("topics"):
+            parts.append("# 最近话题")
+            parts.append("、".join(ctx["topics"][:3]))
+
+        if ctx.get("relationship_facts"):
+            parts.append("# 我们之间")
+            for fact in ctx["relationship_facts"]:
                 parts.append(f"- {fact}")
 
         if ctx["today_summary"]:
@@ -894,24 +989,22 @@ class MemoryPipeline:
                     )
                     continue
 
-                # 去重检查（B3：按会话隔离后仍查本人事实；exact 命中则跳过）
-                if hasattr(self.sm, "search_facts"):
-                    try:
-                        existing = self.sm.search_facts(fact["fact"], user_key=_uk)
-                    except TypeError:
-                        existing = self.sm.search_facts(fact["fact"])
+                # B-b：near-dup 由 add_fact 内部 UPDATE 强化，不再「查到就 continue」
+                # （旧逻辑 search_facts 任一命中即跳过 → 重复事实永不 reinforce）。
+                topics = fact.get("topics")
+                if isinstance(topics, str):
+                    topics_list: list[str] | str | None = topics
+                elif isinstance(topics, (list, tuple)):
+                    topics_list = list(topics)
                 else:
-                    existing = []
-                if existing:
-                    continue
-
-                # 存储事实（带 user_key 归属）
+                    topics_list = None
                 if self.semantic.add_fact(
                     fact["fact"],
                     fact.get("category", "general"),
                     fact.get("confidence", 0.5),
                     fact.get("source", ""),
                     user_key=_uk,
+                    topics=topics_list,
                 ):
                     count += 1
 

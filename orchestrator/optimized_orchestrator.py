@@ -23,6 +23,10 @@ from pathlib import Path
 from typing import Any
 
 from my_character.emotion_engine import EmotionEngine
+from my_character.persona_engine import (
+    is_external_character_id,
+    strip_default_identity,
+)
 from orchestrator import tool_gate
 from orchestrator._init_mixin import _InitPhasesMixin
 from orchestrator._stream_mixin import _StreamPipelineMixin
@@ -253,7 +257,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
           personality/speaking_style/scenario 等字段被正确提取
         - 结果缓存，避免重复 IO
         """
-        if not character_id or character_id in ("default", "demo"):
+        if not is_external_character_id(character_id):
             return ""
 
         # 命中缓存（加锁：类级字典在多线程下会被并发读写）
@@ -511,24 +515,36 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             )
             return "", str(ask.get("question") or "信息有点不全，我再跟你确认下哈。")
 
-        real_calls = [
-            tc for tc in tool_calls
-            if (tc.get("function", {}) or {}).get("name") != "ask_user"
-        ]
+        real_calls = tool_gate.limit_tool_calls(
+            [
+                tc for tc in tool_calls
+                if (tc.get("function", {}) or {}).get("name") != "ask_user"
+            ]
+        )
         if real_calls:
-            # 分支二：真工具执行（pending 任务即视为完成）
+            # 分支二：真工具执行（pending 任务即视为完成）；C2 限额已应用
             if pending and sm is not None:
                 sm.resolve_pending_intent(session_key, "fulfilled")
             results = await asyncio.gather(*(_dispatch(tc) for tc in real_calls))
-            summary = "\n".join(
-                f"[{r['name']}] {json.dumps(r['result'], ensure_ascii=False)}"
-                for r in results
+            # C1：untrusted 信封 + 失败禁称成功 + C2 结果截断
+            try:
+                _cfg = getattr(self, "components", {}).get("config") or {}
+                _tools_cfg = (
+                    _cfg.get("tools") if isinstance(_cfg, dict) else None
+                ) if hasattr(_cfg, "get") else None
+                limits = tool_gate.load_tool_limits(
+                    _tools_cfg if isinstance(_tools_cfg, dict) else _cfg
+                )
+            except Exception:  # noqa: BLE001
+                limits = tool_gate.load_tool_limits(None)
+            wrapped = tool_gate.wrap_tool_results(
+                results, chars_max=limits["tool_result_chars_max"]
             )
             logger.info(
                 "[tool_gate] 终审调度工具 session=%s tools=%s",
                 session_key, [r["name"] for r in results],
             )
-            return f"\n\n[工具调用结果]\n{summary}\n请根据以上结果自然地回复用户。", ""
+            return wrapped, ""
 
         # 分支三：模型判纯闲聊（无承诺、无工具）——pending 存在说明用户转移话题
         if pending and sm is not None:
@@ -752,11 +768,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             elif name == "memory":
                 memory_context = task_result or ""  # type: ignore[assignment]
             elif name == "rag":
-                if task_result:
-                    import json
-                    rag_context = json.dumps(task_result, sort_keys=True, ensure_ascii=False)
-                else:
-                    rag_context = ""
+                # A4：禁止 json.dumps 整包进 prompt —— 只取可读 content 文本
+                from orchestrator.context_budget import rag_payload_to_text
+
+                rag_context = rag_payload_to_text(task_result)
 
         # 对话历史 + 摘要
         chat_history: list = []
@@ -776,7 +791,25 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             except Exception as e:  # noqa: BLE001
                 logger.debug("World info render failed: %s", e)
 
+        # ── A4 上下文预算与去重（知识优先，memory 行级去重）──
+        from orchestrator.context_budget import DEFAULT_BUDGET, apply_budget
+
+        budgeted = apply_budget(
+            rag_context=rag_context,
+            memory_context=str(memory_context or ""),
+            chat_summary=str(chat_summary or ""),
+            chat_history=chat_history,
+            budget=DEFAULT_BUDGET,
+        )
+        rag_context = budgeted["rag_context"]
+        memory_context = budgeted["memory_context"]
+        chat_summary = budgeted["chat_summary"]
+        chat_history = budgeted["chat_history"]
+        context_lengths = budgeted["lengths"]
+
         # 组装 system prompt
+        # 注入顺序对齐 research：角色设定（prompt_builder）→ 世界/知识/记忆/状态
+        # （PersonaService）→ 角色片段 → 工具结果(untrusted，C1) → reply_mode
         system_prompt = self.components["persona"].build_system_prompt(
             emotion_state=emotion_state,
             memory_context=memory_context,
@@ -786,8 +819,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             character_id=character_id,
         )
 
-        # 角色卡人设动态注入（v3.1）
-        if character_id and character_id not in ("default", "demo"):
+        # 角色卡人设动态注入（v3.1）；身份唯一（包 Q · A1）：外部 character_id
+        if is_external_character_id(character_id):
             char_segment = self._load_character_persona_segment(character_id)
             if char_segment:
                 system_prompt = (
@@ -798,6 +831,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     f"回复时必须使用该角色的名字、身份、性格、说话风格和口头禅；"
                     f"不要以'十四'或通用 AI 身份自居。"
                 )
+            # 防御：外部角色路径下系统 prompt 不得残留默认人格身份断言
+            system_prompt = strip_default_identity(system_prompt)
 
         if persona_enhancement:
             system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
@@ -845,9 +880,11 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 "rag": len(str(rag_context or "")),
                 "summary": len(str(chat_summary or "")),
                 "world": len(str(world_info or "")),
-                "history_msgs": len(chat_history or []),
+                "history_msgs": len(chat_history or []) if isinstance(chat_history, list) else 0,
                 "total": len(system_prompt),
             }
+            if context_lengths:
+                _parts.update(context_lengths)
             logger.info(
                 "[prompt] total=%d character=%d rag=%d memory=%d summary=%d world=%d hist_msgs=%d",
                 _parts["total"], _parts["character"], _parts["rag"], _parts["memory"],
@@ -863,6 +900,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             "affinity_level": affinity_level,
             "user_msg_clean": user_msg_clean,
             "direct_reply": direct_reply,
+            # A3：chat_round 由 prepare 透传，禁止 stream 内二次查库
+            "chat_round": len(chat_history) if isinstance(chat_history, list) else 0,
+            "context_lengths": context_lengths,
         }
 
     def _after_process(
@@ -885,26 +925,36 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             reply=reply,
             session_id=session_id,
         )
-        if hasattr(self.components["memory"], "after_chat"):
-            sig = inspect.signature(self.components["memory"].after_chat)
+        memory = self.components["memory"]
+        if hasattr(memory, "after_chat"):
+            sig = inspect.signature(memory.after_chat)
             if "emotion" in sig.parameters:
                 mem_kwargs["emotion"] = emotion_tag
             elif "emotion_tag" in sig.parameters:
                 mem_kwargs["emotion_tag"] = emotion_tag
-            # 后台线程执行 after_chat，避免其内部 async→sync 桥接
-            # （vector_memory._run_async 的 run_coroutine_threadsafe.result()）
-            # 在主事件循环线程自死锁，导致 worker 卡死。
-            # 使用复用的单线程池而非每条消息新建线程（见 _get_background_executor）。
+            if "history_already_written" in sig.parameters:
+                mem_kwargs["history_already_written"] = True
+            # 包 Q · B-a：chat_history 两行**同步**轻写，返回前下一轮即可读到
+            if hasattr(memory, "write_chat_history_sync"):
+                try:
+                    memory.write_chat_history_sync(
+                        user_msg=user_msg_clean,
+                        reply=reply,
+                        emotion_tag=emotion_tag,
+                        session_id=session_id,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("sync history write failed: %s", e)
+            # 后台线程执行 after_chat 重活（向量/事实/日记），
+            # 避免其内部 async→sync 桥接在主事件循环线程自死锁。
             def _safe_after_chat(**kw):
                 try:
-                    self.components["memory"].after_chat(**kw)
+                    memory.after_chat(**kw)
                 except Exception as e:  # noqa: BLE001
                     logger.warning("after_chat failed, skipping: %s", e)
             try:
                 self._get_background_executor().submit(_safe_after_chat, **mem_kwargs)
             except RuntimeError as e:
-                # executor 已随 shutdown() 关闭（进程收尾阶段）→ 同步执行一次，
-                # 避免后处理被静默丢弃。
                 logger.warning("后处理线程池已关闭，改为同步执行: %s", e)
                 _safe_after_chat(**mem_kwargs)
         self.components["ase"].on_chat(user_msg_clean, reply)
@@ -996,6 +1046,19 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 if ctx.get("direct_reply"):
                     reply = ctx["direct_reply"]
                 else:
+                    # ── A2 反诘：生成前检查，连续否认 N 次写入 system（不 append 机器腔）──
+                    try:
+                        rebuttal_count = self._counter_rebuttal.check_and_increment(
+                            user_msg_clean, session_id
+                        )
+                        if rebuttal_count:
+                            from utils.fallback_lines import inject_rebuttal_constraint
+                            system_prompt = inject_rebuttal_constraint(
+                                system_prompt, rebuttal_count
+                            )
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("计数反诘检查异常: %s", e)
+
                     # ── 主 LLM 对话（带 30s 超时保护，使用用户级或全局 gateway） ──
                     try:
                         reply = await asyncio.wait_for(
@@ -1011,7 +1074,14 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                         )
                     except asyncio.TimeoutError:
                         logger.warning("LLM 调用超时 (30s), session=%s", session_id)
-                        return {"reply": "抱歉，处理超时，请稍后重试", "error": "timeout"}
+                        from utils.fallback_lines import get_fallback_line
+                        from utils.reply_mode import read_reply_mode
+                        return {
+                            "reply": get_fallback_line(
+                                character_id, "timeout", read_reply_mode()
+                            ),
+                            "error": "timeout",
+                        }
 
                 # === 一致性检查（复用 my_character/consistency_checker.py） ===
                 from my_character.consistency_checker import check_and_correct_reply
@@ -1019,7 +1089,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 character_card = None
                 persona_service = self.components.get("persona")
                 card_loader = getattr(persona_service, "_load_character_card", None)
-                if character_id not in ("default", "demo") and callable(card_loader):
+                if is_external_character_id(character_id) and callable(card_loader):
                     character_card = card_loader(character_id)
                 # B4 优化：传入 chat_round 避免重复 get_chat_context 查询
                 # chat_history 已在 _prepare_context 中获取，直接复用长度
@@ -1035,16 +1105,29 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 )
                 # === 检查结束 ===
 
-                # === 计数反诘：用户连续说"没事"达到阈值时追加反诘 ===
-                try:
-                    rebuttal = self._counter_rebuttal.check_and_increment(
-                        user_msg_clean, session_id
+                # A2 空回复兜底：角色化，沉浸式无括号
+                if not str(reply or "").strip():
+                    from utils.fallback_lines import get_fallback_line
+                    from utils.reply_mode import read_reply_mode
+                    reply = get_fallback_line(
+                        character_id, "empty_reply", read_reply_mode()
                     )
-                    if rebuttal:
-                        reply = f"{reply}\n{rebuttal}"
-                except Exception as e:  # noqa: BLE001
-                    logger.debug("计数反诘检查异常: %s", e)
-                # === 反诘结束 ===
+
+                # A3：生成后仅对硬违规做轻量替换（流式已推送不改写）
+                try:
+                    from my_character.consistency_checker import (
+                        detect_hard_violation,
+                        light_sanitize_hard_violation,
+                    )
+
+                    _char_name = ""
+                    if isinstance(character_card, dict):
+                        _char_name = str(character_card.get("name") or "")
+                    if detect_hard_violation(reply, _char_name):
+                        reply = light_sanitize_hard_violation(reply)
+                        logger.info("A3 硬违规轻量替换 session=%s", session_id)
+                except Exception:  # noqa: BLE001
+                    pass
 
                 output_result = self.components["safety"].check_output(reply)
                 if not output_result.is_safe:

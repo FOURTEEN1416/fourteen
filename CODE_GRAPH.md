@@ -1,6 +1,6 @@
-# 代码图谱 — unique-you (唯一的你) v3.8.12
+# 代码图谱 — unique-you (唯一的你) v3.8.13
 
-> 由 维护者 手动维护 | 最后核实: 2026-09-20（v3.8.12 增量：**全面升级根治批次**（用户裁决：user_facts 完整隔离 / B3 激进接线 / B4 回忆强化 / B5 回收站 / B6 刻度彻底重构）——① **MEM-USER-1**：`user_facts` +`user_key`/`access_count`/`status` 列；读写按会话归属过滤（`N:wxid`/`1:wxid`→wxid）；存量 `user_key=''` 不注入任何会话；② **B3**：`config/shisi.yaml memory:` 五键接线（capacity/extraction_enabled/long_term_threshold→fact_extract_interval/similarity_threshold 等）；③ **B4**：检索/注入时 `access_count+1`，遗忘权重 `effective_importance+衰减时钟刷新`；④ **B5**：`delete_fact` 默认写 `memory_recycle_bin` 再删主表，可 `restore_fact_from_recycle`；⑤ **B6**：新 `shisi/affinity/scale.py` 刻度唯一真源 + mapper 委托 + `utils/affinity_state.py` 持久化 affection_points（user_scheduler 恢复/落盘）。验证：分块 **1351 收集/1347 通过/4 跳过** + vitest 98/98 + ruff 0 错；端点 215/181 不变。v3.8.11 增量：全仓扫描·在制品收口。v3.8.10 增量：**复核补漏批次**> ✅ 路由/文件/模块/测试数已通过 create_api_app 实扫 + Glob + pytest + vitest 实时核实（2026-08-28）。
+> 由 维护者 手动维护 | 最后核实: 2026-09-20（v3.8.13 增量：**包 Q · A+B+C 收编**——A1 身份唯一 Owner；A2 `utils/fallback_lines.py`；A3 流式/非流式硬违规统一；A4 `orchestrator/context_budget.py`；C1–C3 工具 untrusted 信封/限额/防假承诺；B-a/b/c 记忆同步写、topics/near-dup、k(level) 注入。验证 **1414 收集/1410 通过/4 跳过** + vitest 98 + ruff 0；端点 **215/181** 不变。v3.8.12 增量：全面升级根治（user_facts 隔离/B3–B6）。（用户裁决：user_facts 完整隔离 / B3 激进接线 / B4 回忆强化 / B5 回收站 / B6 刻度彻底重构）——① **MEM-USER-1**：`user_facts` +`user_key`/`access_count`/`status` 列；读写按会话归属过滤（`N:wxid`/`1:wxid`→wxid）；存量 `user_key=''` 不注入任何会话；② **B3**：`config/shisi.yaml memory:` 五键接线（capacity/extraction_enabled/long_term_threshold→fact_extract_interval/similarity_threshold 等）；③ **B4**：检索/注入时 `access_count+1`，遗忘权重 `effective_importance+衰减时钟刷新`；④ **B5**：`delete_fact` 默认写 `memory_recycle_bin` 再删主表，可 `restore_fact_from_recycle`；⑤ **B6**：新 `shisi/affinity/scale.py` 刻度唯一真源 + mapper 委托 + `utils/affinity_state.py` 持久化 affection_points（user_scheduler 恢复/落盘）。验证：分块 **1351 收集/1347 通过/4 跳过** + vitest 98/98 + ruff 0 错；端点 215/181 不变。v3.8.11 增量：全仓扫描·在制品收口。v3.8.10 增量：**复核补漏批次**> ✅ 路由/文件/模块/测试数已通过 create_api_app 实扫 + Glob + pytest + vitest 实时核实（2026-08-28）。
 > ✅ 图数据库已于 2026-08-28 由 codebase-memory 图谱工具 v0.10.8 重新索引（artifact.json schema v2: **7706 节点 / 32367 边**，commit c32af54），历史矛盾（543277c 声称的 6771 节点未持久化）就此消案。
 
 ---
@@ -16,10 +16,10 @@
 | 前端页面 | **17 个** | Glob `frontend/src/pages/*.tsx`（另有 `StorylinePage` 为 App.tsx 内联包装组件） |
 | 前端 API 模块 | **13 个** | Glob `frontend/src/api/*.ts`（09-18 CI 门禁根治新增 `emotion.ts` / `normalize.ts`，原 11） |
 | 前端 Zustand store | **3 个** | LS `frontend/src/store/`（authStore / characterBuilderStore / errorStore） |
-| Python 测试用例 | **1347 passed + 4 skipped**（收集 1351） | 2026-09-20 系统 Python 3.12 分块实跑（305 +357+3 +308+1 +377，与 `--collect-only` 1351 精确吻合）。⚠️ **单进程整跑会在随机位置停住**，分块跑法见 `AGENTS.md` §4.3 |
+| Python 测试用例 | **1410 passed + 4 skipped**（收集 1414） | 2026-09-20 主检出分块实跑（396 +323 +373+3 +318+1） |
 | 现役角色卡 | **41 张**（`config/characters/*.json`） | Glob 实扫 2026-09-20：25 既有 + 16 文学导入（我的26岁女房客×4 / 从你的全世界路过×5 / 云边有个小卖部×3 / 某某×2 / 天堂旅行团×2）；目录 gitignore（不入公开仓，服务器私有投递）；persona 注入参数化用例数 = 2 × 卡数 |
 | 前端测试用例 | **98 个全部通过 / 16 文件** | 2026-09-20 `npm test -- --run`（vitest）+ `tsc --noEmit` 0 错误 |
-| 测试用例合计 | **1445 个**（1347 Python 通过 + 98 前端通过） | pytest + vitest 实跑 2026-09-20（全面升级批次后）。⚠️ 旧口径 1117（1042 Python + 75 前端，2026-09-01 .venv 实测）随 09-14 主仓事故丢失环境后**已作废**，不再作为可复现基线 |
+| 测试用例合计 | **1508 个**（1410 Python 通过 + 98 前端通过） | pytest + vitest 实跑 2026-09-20（包 Q 收编后）。⚠️ 旧口径 1117 已作废 |
 | tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
 
 ### 1.2 知识图谱快照指标（✅ 2026-09-02 重新索引·第二次）
@@ -713,6 +713,7 @@ tools/
 
 | 日期 | 提交 | 变更摘要 |
 |------|------|---------|
+| 2026-09-20 (包Q A+B+C收编) | main | **v3.8.13** 身份唯一/context_budget/工具信封/记忆同步写+k(level)；**1414/1410/4** + vitest 98 + 端点 215/181 |
 | 2026-09-20 (全面升级根治) | working tree | **v3.8.12**（用户裁决五项全做）：user_facts 完整隔离 + B3 配置接线 + B4 access_count 回忆强化 + B5 回收站 + B6 `shisi/affinity/scale.py` 刻度真源与 affinity_state 持久化。验证 **1351/1347/4** + vitest 98/98 + ruff 0 错 |
 | 2026-09-20 (全仓扫描·在制品收口) | working tree | **v3.8.11**（用户指令：全仓扫描/审查/修 bug/更新文档）：收编 v3.8.10 登记的并行窗口在制品 4 类纯缺陷——FrequencyController 日界本地化+last_reset_date 状态落盘+record_sent 钉日界、analytics/important_dates 墙钟收口、after_chat 系统错误占位不入库。B3-B6 行为项仍留 W-D §八待裁决；user_facts 无用户维度仍开放。验证：**1332 收集/1328 通过/4 跳过** + vitest 98/98 + ruff 0 错 + 端点 215/181 不变 |
 | 2026-09-20 (复核补漏) | working tree + 服务器 | **v3.8.10 复核补漏**（用户「进行复核」→ 对 v3.8.9 对抗性自查，4 项）：① **修 v3.8.9 引入的口径脱钩**——写入键已本地化而取数窗口仍是 SQLite `date('now')`（UTC 日）→ 新增 `utils/local_time.local_day_utc_bounds()`，`get_chats_today`/`count_chats_today` 改按本地日 UTC 区间过滤；对外统计「今日对话数」（`api/routers/misc_routes.py:108`）此前本地 08:00 才换日，**生产只读实证：旧口径 28 vs 新口径 42（少算 14 条，本地上午对话被计入昨天）**；② **自纠 helper bug**——`local_day_utc_bounds` 早期版本用「传入时刻 − 当前 UTC」求偏移，仅在 now 恰为此刻时成立（传构造时刻得 0 偏移），由同批用例 `test_explicit_now_is_inside_its_own_window` 抓出 → 改 `_current_utc_offset()` 恒取此刻读数；③ **穷举同模式实例**（按"发现一个即穷举全部"）——补收 `shisi/memory/legacy/structured_memory.py::_now_local()`（提醒时间串）、`orchestrator/tool_gate.py::now_beijing()`（注入终审 prompt 的"现在"）、`proactive/ase_engine.py` 两处 `%H:%M` prompt 串，原均"依赖主机时区、无 UTC+8 回退" → 统一 `now_local()`；④ **测试加固**——回归用例改「钉时钟来源 + 钉调用实参」（原真实墙钟写法实测存在巧合假通过），SQL 侧补左闭右开边界 + 两方法同窗口不变量，并用**行断言**而非 count（count 会巧合）；突变验红两次精确命中。验证：分块 **1328 收集 / 1324 通过 / 4 跳过**（241+386+328+369 精确吻合）+ ruff 0.16.8 全仓 0 错 + CI 4/4 + 服务器 health 200 + HEAD 三端一致 `0bc5d6bc`；**端点/路径/DB 表/路由数不变**。⚠️ 并发：工作树有并行窗口在制品 7 文件（`frequency.py` 配额日界 UTC→本地 / `analytics.py` / `important_dates.py` / `memory_pipeline.py` 系统错误占位过滤 / 3 测试）未纳入本提交 → **已由 v3.8.11 收口** |

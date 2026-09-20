@@ -330,6 +330,9 @@ class StructuredMemory:
             "user_key": "ALTER TABLE user_facts ADD COLUMN user_key TEXT NOT NULL DEFAULT ''",
             "access_count": "ALTER TABLE user_facts ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0",
             "status": "ALTER TABLE user_facts ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+            # 包 Q · B-b：话题标签 + 近重复强化时间
+            "topics": "ALTER TABLE user_facts ADD COLUMN topics TEXT NOT NULL DEFAULT ''",
+            "last_seen_at": "ALTER TABLE user_facts ADD COLUMN last_seen_at TEXT",
         }
         for column, ddl in migrations.items():
             if column not in existing:
@@ -416,15 +419,96 @@ class StructuredMemory:
 
     # ── 用户事实 ──────────────────────────────────────────
 
+    @staticmethod
+    def _fact_bigrams(text: str) -> set[str]:
+        t = "".join(str(text or "").lower().split())
+        # 常见同义归一：阿拉伯数字与中文数字、标点
+        trans = str.maketrans({"０": "0", "１": "1", "２": "2", "３": "3", "４": "4",
+                              "５": "5", "６": "6", "７": "7", "８": "8", "９": "9"})
+        t = t.translate(trans)
+        for a, b in (("十二", "12"), ("十一", "11"), ("十", "10"), ("一点", "1点")):
+            t = t.replace(a, b)
+        if len(t) < 2:
+            return {t} if t else set()
+        return {t[i : i + 2] for i in range(len(t) - 1)}
+
+    @classmethod
+    def facts_near_duplicate(cls, a: str, b: str, threshold: float = 0.72) -> bool:
+        """bigram 相似度 + 子串包含（对齐 my-raze spirit）；视为近重复则 True。"""
+        def _norm(s: str) -> str:
+            t = "".join(str(s or "").lower().split())
+            for x, y in (("十二", "12"), ("十一", "11"), ("十", "10")):
+                t = t.replace(x, y)
+            return t
+        ta, tb = _norm(a), _norm(b)
+        if not ta or not tb:
+            return False
+        if ta == tb:
+            return True
+        if ta in tb or tb in ta:
+            return True
+        ba, bb = cls._fact_bigrams(a), cls._fact_bigrams(b)
+        if not ba or not bb:
+            return False
+        inter = len(ba & bb)
+        union = len(ba | bb)
+        if union == 0:
+            return False
+        return (inter / union) >= threshold or inter / max(len(ba), len(bb)) >= threshold
+
     def add_fact(self, fact: str, category: str = "general",
                  confidence: float = 0.5, source: str = "",
-                 user_key: str = "") -> int:
-        """添加用户事实（按 user_key 隔离）。"""
+                 user_key: str = "", topics: str | list[str] | None = None) -> int:
+        """添加用户事实（按 user_key 隔离）。
+
+        包 Q · B-b：同 user_key 下 near-dup → UPDATE（confidence/access/last_seen/topics），
+        **不双插**。
+        """
+        topics_text = (
+            ",".join(str(t).strip() for t in topics if str(t).strip())
+            if isinstance(topics, (list, tuple))
+            else str(topics or "")
+        )
+        fact = str(fact or "").strip()
+        if not fact:
+            return -1
+
         with self._conn(write=True) as conn:
+            # near-dup 扫描（同 user_key + active）
+            rows = conn.execute(
+                "SELECT id, fact, confidence, access_count, category, topics FROM user_facts "
+                "WHERE user_key = ? AND status = 'active'",
+                (user_key or "",),
+            ).fetchall()
+            for row in rows:
+                existing = dict(row)
+                if self.facts_near_duplicate(fact, existing.get("fact") or ""):
+                    new_conf = max(float(existing.get("confidence") or 0.0), float(confidence))
+                    merged_topics = existing.get("topics") or ""
+                    if topics_text:
+                        parts = [p for p in (merged_topics.split(",") + topics_text.split(",")) if p]
+                        merged_topics = ",".join(dict.fromkeys(parts))
+                    # 语义升级：relationship/commitment 覆盖 general/preference
+                    new_cat = existing.get("category") or category
+                    if category in ("relationship", "commitment") and new_cat not in (
+                        "relationship",
+                        "commitment",
+                    ):
+                        new_cat = category
+                    conn.execute(
+                        "UPDATE user_facts SET confidence = ?, access_count = access_count + 1, "
+                        "category = ?, topics = ?, last_seen_at = CURRENT_TIMESTAMP, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (new_conf, new_cat, merged_topics, existing["id"]),
+                    )
+                    conn.commit()
+                    return int(existing["id"])
+
             cursor = conn.execute(
-                "INSERT INTO user_facts (fact, category, confidence, source, user_key, access_count, status) "
-                "VALUES (?, ?, ?, ?, ?, 0, 'active')",
-                (fact, category, confidence, source, user_key or ""),
+                "INSERT INTO user_facts "
+                "(fact, category, confidence, source, user_key, access_count, status, topics, last_seen_at) "
+                "VALUES (?, ?, ?, ?, ?, 0, 'active', ?, CURRENT_TIMESTAMP)",
+                (fact, category, confidence, source, user_key or "", topics_text),
             )
             conn.commit()
             return cursor.lastrowid  # type: ignore[no-any-return]

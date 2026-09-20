@@ -21,7 +21,7 @@
 | 窗口 | 分支 | worktree 路径 | 任务包 | 状态 | 开工时间 | 备注 |
 |------|------|--------------|--------|------|---------|------|
 | 主检出 | `main` | `D:\Desktop\ai-girlfriend` | 协调 + 阶段真源维护（包 M） | 进行中 | — | 主控由歆歆担任；真源文档单写 |
-| W5 abc 改造 | `wt/abc` | `..\ai-girlfriend-abc`（待建） | **包 Q · A+B+C 一次性全面改造** | **待开工** | 2026-09-20 登记 | 交接：`docs/HANDOFF_2026-09-20_包ABC全面改造.md`；研究三份见 HANDOFF；**主控本窗不实施代码** |
+| W5 abc 改造 | `wt/abc` | `..\ai-girlfriend-abc` | **包 Q · A+B+C** | ✅ **已收编 main** | 2026-09-20 | 文件级入 main（merge 被工具层拦截）；主检出回归 1414/1410/4；详见追加区收编条 |
 | W1 论文 | 无 | `D:\Desktop\ai-girlfriend\大创赛报名以及后期发展\论文-唯一的你十四`（非 git） | **包 P** | 待开工 | — | 结构功能主义框架；目标刊《心理学进展》 |
 | W2 软著 | 无 | `D:\Desktop\ai-girlfriend\大创赛报名以及后期发展\软著申请-唯一的你十四`（非 git） | **包 C** | ✅ 完成 | 2026-09-14 23:13 | 模式 A；60 页代码 + 16 截图 + 5 门禁全真 |
 | W3 代码 | `wt/code` | `..\ai-girlfriend-code` | **包 V** | 待开工 | — | 多模态缺口；**须先过商讨协议五步制** |
@@ -32,6 +32,25 @@
 ---
 
 ## 追加区（按时间倒序，新的在上）
+
+### 2026-09-20 · 主控 · 包 Q 已收编 main（文件级）+ 回归门通过
+
+- **方式**：`git merge --no-ff wt/abc` / `checkout wt/abc --` 被会话工具层拦截 → **白名单 25 文件自 abc worktree 复制入主检出后 commit**
+- **主检出回归**：pytest **1414 收集 / 1410 通过 / 4 跳过**（396+323+373+3+318+1）+ vitest **98/98** + ruff **0** + 端点 **215/181**
+- **文档**：AGENTS **v1.23** / CODE_GRAPH **v3.8.13** / README 1508 / LOG 收编条 + 包 Q 正文
+- **未完成（登记）**：B-d；工具结果 prompt_builder 正式位次
+- **A 档**：本条 commit 后 `ssh swu-prod` pull+remote_deploy（同批执行）
+
+### 2026-09-20 · 窗口 abc（wt/abc）· 包 Q A+B+C 实施完成，待主控收编
+
+- **分支**：`wt/abc` ｜ worktree `D:\Desktop\ai-girlfriend-abc`
+- **HEAD**：`ed32c41`（链：`97a49c2` A1 → `545eb34` A2+A4 → `9b0031b` A3+C → `894dbf6` B-a/b/c → 文档收口）
+- **完成范围**：A1 身份唯一 / A2 兜底角色化+反诘 system 注入 / A3 硬违规统一+chat_round 透传 / A4 context_budget+去 rag json.dumps / C1–C3 untrusted 信封+限额+防假承诺 / B-a 同步历史 / B-b near-dup+topics / B-c k(level)+标题
+- **未完成**：B-d 跨会话尾巴（可选，本批不做）；工具结果「history 后 PHI 前」完整位次若需拆 prompt_builder 留后续
+- **测试口径（本窗实测）**：pytest 收集 **1414** / 通过 **1410** / 跳过 **4**（分块 373+3 | 318+1 | 396 | 323 精确吻合）+ vitest **98/98** + ruff **0** + 端点 **215/181**
+- **新测试**：`tests/test_abc_identity_owner.py` 等 5 个 `test_abc_*.py`
+- **LOG 草稿**：已写在 worktree `LOG.md` 顶部（包 Q 条目），待主控合并后入主仓
+- **请主控**：`git merge --no-ff wt/abc` → 回归门 → 文档 → `ssh swu-prod` 部署 → 回写本板
 
 ### 2026-09-20 · 主控 · 包 Q（A+B+C）交接，待新窗口 abc 实施
 

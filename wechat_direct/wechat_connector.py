@@ -1464,8 +1464,14 @@ class WeChatConnector:
                 msg_id, session_key, e,
             )
             try:
+                from utils.fallback_lines import get_fallback_line
+                from utils.reply_mode import read_reply_mode
+                _exc_text = get_fallback_line(None, "exception", read_reply_mode())
+            except Exception:  # noqa: BLE001
+                _exc_text = "刚才好像出问题了，再说一次好吗"
+            try:
                 _send_text(
-                    to=from_user, text="（消息处理异常，请稍后重试）",
+                    to=from_user, text=_exc_text,
                     context_token=self._get_context_token(from_user) or context_token,
                     token=self.token, base_url=self.base_url,
                 )
@@ -1489,11 +1495,15 @@ class WeChatConnector:
                 "[wx][step=empty_reply] msg_id=%s session=%s error=%s elapsed=%.2fs",
                 msg_id, session_key, error or "unknown", t_elapsed,
             )
-            # ⚠️ 2026-09-19：兜底语改为**无括号**的纯口语。
-            # 旧值「（我暂时不知道该怎么回复，可以再说一次吗？）」自带括号动作，
-            # 在沉浸式模式下直接违反「严禁括号动作/旁白」的硬约束 ——
-            # 兜底语必须与默认回复模式一致，否则一次降级就把模式打回小说味。
-            reply = "刚才没接上，你再说一句？"
+            # A2：兜底句角色化 + 当日去重；沉浸式无括号
+            try:
+                from utils.fallback_lines import get_fallback_line
+                from utils.reply_mode import read_reply_mode
+                # character_id 可能藏在 result 里；拿不到则用 default 池
+                _cid = result.get("character_id") or result.get("character") or None
+                reply = get_fallback_line(_cid, "empty_reply", read_reply_mode())
+            except Exception:  # noqa: BLE001
+                reply = "刚才没接上，你再说一句？"
         else:
             logger.info(
                 "[wx][step=llm_done] msg_id=%s session=%s reply=%r elapsed=%.2fs llm_time=%s",

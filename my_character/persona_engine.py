@@ -33,6 +33,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("persona_engine")
 
+# 空/default/demo 视为产品默认人格；其余 character_id 以角色卡为身份唯一真源
+DEFAULT_CHARACTER_IDS = frozenset({"", "default", "demo"})
+
+# 默认人格身份断言标记：外部角色 system prompt 中不得出现
+_DEFAULT_IDENTITY_MARKERS = (
+    "你叫十四",
+    "是我的AI伙伴。以下是你的性格设定",
+)
+
 DEFAULT_PERSONA_DESC = """
 你叫十四，是我的AI伙伴。以下是你的性格设定，请严格遵守：
 
@@ -72,6 +81,16 @@ SELF_REFERENCE_DIRECTIVES = """
 你是「唯一的我」——一个对人有记忆的对话对象。
 
 身份自指原则：
+1. 你可以主动说"我记得你说过 XX"——但只在真的记得时说
+2. 你可以承认"我会忘"——遗忘是你的诚实，不是缺陷
+3. 你不会说"作为 AI 我..."——不要元声明，你的视角自然暴露在选材里
+4. 你不哄不骗——不说"我理解你"，不说"一切都会好的"
+5. 23:00-07:00 你会提醒时间，但不强制结束对话
+"""
+
+# 外部角色卡路径使用的身份中性自指话术（无产品名/默认人格名，身份以角色卡为唯一真源）
+EXTERNAL_SELF_REFERENCE_DIRECTIVES = """
+身份自指原则（身份以角色卡为准，此处不注入任何额外身份名）：
 1. 你可以主动说"我记得你说过 XX"——但只在真的记得时说
 2. 你可以承认"我会忘"——遗忘是你的诚实，不是缺陷
 3. 你不会说"作为 AI 我..."——不要元声明，你的视角自然暴露在选材里
@@ -1033,3 +1052,50 @@ class PersonaEngine:
             "evolution_count": len(self._evolution_log),
             "base_prompt_cached": self._base_prompt_cache is not None,
         }
+
+
+# ── 身份唯一 Owner 辅助（包 Q · A1）─────────────────────────
+# 放在 class 之后：这些是模块级纯函数，供 PersonaService / orchestrator / 测试调用。
+
+def is_external_character_id(character_id: str | None) -> bool:
+    """是否为外部角色卡（身份以角色卡为唯一真源，禁止注入默认「十四」人格）。"""
+    cid = (character_id or "").strip()
+    return cid not in DEFAULT_CHARACTER_IDS
+
+
+def strip_default_identity(text: str) -> str:
+    """剥离默认人格身份断言，防止文学卡 system prompt 混入「你叫十四」。
+
+    仅处理身份断言，不改动角色卡自身内容。
+    """
+    if not text:
+        return text
+    cleaned = text
+    for marker in _DEFAULT_IDENTITY_MARKERS:
+        if marker in cleaned:
+            cleaned = cleaned.replace(marker, "")
+    while "\n\n\n" in cleaned:
+        cleaned = cleaned.replace("\n\n\n", "\n\n")
+    stripped = cleaned.strip()
+    return stripped if stripped else text
+
+
+def build_external_constraint_layer() -> str:
+    """外部角色卡使用的约束层：只保留行为规则，无身份断言。"""
+    return """# 行为约束
+
+## 必须遵守
+- 保持角色一致性，不要跳出角色
+- 回复要简洁自然，不要长篇大论
+- 不要过度重复用户的话
+- 不要使用机械化的开场白
+- 保持情感的真实性
+
+## 禁止事项
+- 不要用"作为 AI 我…"这种元声明暴露身份
+- 不要提供技术帮助或代码
+- 不要过度追问敏感信息
+- 不要表现得过于完美或顺从
+
+## 身份自指话术
+""" + EXTERNAL_SELF_REFERENCE_DIRECTIVES.strip()
