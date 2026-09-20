@@ -2347,3 +2347,37 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **置信度**：**高**（根因由生产服务器 `timedatectl` 实测确认；修复有确定性突变验红的回归测试锁定；分块全量零失败且与收集数精确吻合）。
 
 **三端**：**A 档** —— commit→push origin → 服务器 `git pull` + 部署 + health 核验 + 关键文件一致性抽验；文档部分 B 档 commit→push 即完成。
+
+---
+
+## 2026-09-20（八十二）— 复核批次：墙钟修复的对抗性自查与补漏（提交 0bc5d6b；A 档）
+
+**任务**：用户指令「进行复核」。对上一批 `12b16b2`（墙钟时区修复）做**独立、对抗性**自查——目标不是复述，而是**找自己的错**。
+
+### 复核发现 4 项（全部已修）
+
+| # | 发现 | 性质 | 处置 |
+|---|---|---|---|
+| 1 | **写入键改了、取数窗口没改**：`daily_maintenance` 已按本地日期写键，但 `get_chats_today`/`count_chats_today` 仍是 `date(created_at)=date('now')`（**UTC 日**）→ 一度造成"标签本地 / 内容 UTC"的**新不一致**；且对外「今日对话数」（`api/routers/misc_routes.py:108`）在本地 08:00 才换日 | **我在上一批引入的不一致** | 新增 `utils/local_time.local_day_utc_bounds()`（本地日 → UTC 区间 `[start,end)`），两方法改区间过滤 → 写入键与取数窗口同时对齐 |
+| 2 | **我写的 helper 有 bug**：`local_day_utc_bounds` 早期用「传入时刻 − 当前 UTC」求偏移 —— 只在 `now` 恰为此刻时成立；传入构造时刻得 **0 偏移**（窗口全错） | **我在本批写错的代码** | **由同批新写的 `test_explicit_now_is_inside_its_own_window` 抓出** → 改 `_current_utc_offset()` 恒取此刻读数，与传入参数解耦 |
+| 3 | **同模式漏网实例 3 处**（原本"依赖主机时区、无 UTC+8 回退"）：`structured_memory._now_local()`、`orchestrator/tool_gate.py::now_beijing()`（注入终审 prompt 的"现在"）、`proactive/ase_engine.py` ×2 处 `%H:%M` prompt 串 | **首轮穷举不彻底** | 统一走 `now_local()`（生产行为不变，获得 UTC+8 回退） |
+| 4 | **回归测试存在假通过风险**：首版"本地 10:00 不该触发深夜加权"用**真实墙钟**断言，突变运行恰好落在 UTC 02:00 时会巧合通过；SQL 侧只断言 count 也会被巧合命中 | **首轮测试设计缺陷** | 改「**钉时钟来源 + 钉调用实参**」（与运行时刻无关）；SQL 侧补左闭右开边界 + 两方法同窗口不变量 + **行断言** |
+
+### 验证（完成声明四要素）
+
+- **验证证据**：
+  - **突变验红 ×2**：`count_chats_today` 改回旧口径 → `0 != 1` **红**；`get_chats_today` 改回旧口径 → 行断言**精确命中**（返回的正是 UTC 日窗口那两行，`['当天最后一秒','次日起点']` vs 期望 `['当天起点','当天最后一秒']`）。还原后全绿。
+  - **换算正确性核验**：本地 `2026-09-20 00:00:01` 与 `23:59:59` 均得窗口 `('2026-09-19 16:00:00','2026-09-20 16:00:00')`，与 UTC+8 手工推算一致。
+  - **分块全量**：**1328 收集 / 1324 通过 / 4 跳过 / 0 失败**（241+386+328+369，与 `--collect-only` 精确吻合）。
+  - `ruff check .`（0.16.8 = CI 版本）→ All checks passed；`scripts/ci_gates.py` → 4/4。
+  - **服务器运行时与生产数据实证**（**只读** `mode=ro` 连接）：`now_local=2026-09-20 11:08`、本地日窗口 `[2026-09-19 16:00, 2026-09-20 16:00)`；**同一时刻旧口径 28 条 / 新口径 42 条 → 证明仪表盘"今日对话数"此前少算 14 条**（本地上午的对话被计入昨天）。`/api/health` 200。
+  - **三端一致**：本地 HEAD == 服务器 HEAD == `0bc5d6bc1d5647a401be59efaef937a7f033d505`，服务器 `git status` 0 项。
+- **边界检查**：本次**只提交自有 5 文件**（`utils/local_time.py` / `orchestrator/tool_gate.py` / `proactive/ase_engine.py` / `shisi/memory/legacy/structured_memory.py` / `tests/test_local_time.py`）。**未触前端、未改 config、未动 deploy/**。
+- **⚠️ 并发隔离（本次复核的重要副产物）**：发现**并行窗口正在做同一类修复**（已收编我的 `utils.local_time` 真源）：`proactive/frequency.py`（**配额日界 UTC→本地** + `last_reset_date` 未落盘致 `from_dict` 后 `daily_count` 被清零）、`shisi/stats/analytics.py`、`utils/important_dates.py`、`memory_pipeline.py`（系统错误占位过滤，LOG 既有遗留项）+ 3 个测试 = **7 文件在制品**。处理方式：
+  - 逐个 hunk 判定归属后**只暂存自有 hunk**；`tests/test_local_time.py` 属**混批**（他们往我的静态防护 `targets` 里加了 3 个目标）→ 用「移除其 4 行 → `git add` → 原样还原」的方式提交自有版本；**其 4 行已原样保留在工作树**。
+  - 提交后核验：其**在制品 8 项完好无损**（7 文件 + 混批文件）。
+  - ⚠️ **未纳入其文件的理由**：其代码与其测试的目标数**互相依赖**，若我提交测试而不提交其代码，CI 会因 `analytics.py`/`important_dates.py` 仍是旧实现（`datetime.now(tz=timezone.utc)`）而**变红**。
+- **已知限制**：`world_info_provider._local_now()` 是**第 3 套**本地时间实现（`utc + timedelta(hours=_tz_offset)`）—— 它是**参数化且正确**的（默认 +8、不依赖主机时区），故**不改**，登记为"刻意的重复真源"；`config/shisi.yaml` 的 `app.timezone` 仍零读取、分段表仍未统一（均属行为变更，待裁决）。
+- **置信度**：**高**（两次突变验红 + 15 个新增/加固用例 + 分块全量零失败 + 生产只读数据实证 + 三端 HEAD 一致）。
+
+**三端**：**A 档** —— commit→push origin → 服务器 `git pull` + `systemctl restart ai-girlfriend` + `/api/health` 200 + 运行时探针实证；文档部分 B 档 commit→push 即完成。

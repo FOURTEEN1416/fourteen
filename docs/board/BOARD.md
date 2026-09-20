@@ -358,3 +358,16 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **⚠️ 副作用已登记**：`diary_summaries` 中修复前写入的行仍以 **UTC 日期**为键 → 历史行一次性键错位，**不迁移**、自然过期（旧摘要仍可经 `detect_mood_trend` 全量读取）。
 - **待裁决（同文档 J 表）**：`config/shisi.yaml` 的 `app.timezone`（接上/删）+ 分段表统一（ASE 6 段 vs `TimeContext` 6 段但边界不同）—— 两者属行为变更。
 - **三端**：A 档 —— commit→push origin→服务器 pull+部署→health 核验（见 LOG 同批次条目）。
+
+### 2026-09-20 · 主控窗口 · 复核批次：墙钟修复的对抗性自查与补漏（A 档：代码 + 文档）
+
+- **任务**：用户指令「进行复核」→ 对刚完成的墙钟时区修复批次（`12b16b2`）做**独立、对抗性**自查（不是复述，是找自己的错）。
+- **复核发现 4 项（全部已修，提交 `0bc5d6b`）**：
+  1. **【我引入的不一致】写入键改了、取数窗口没改** —— `daily_maintenance` 已按本地日期写日记/摘要键，但 `get_chats_today`/`count_chats_today` 仍是 SQLite `date(created_at)=date('now')`（**UTC 日**）→ 一度造成"标签本地、内容 UTC"的**新不一致**；且对外「今日对话数」（`api/routers/misc_routes.py:108`）在本地 08:00 才换日。→ 新增 `utils/local_time.local_day_utc_bounds()`（本地日 → UTC 区间 `[start,end)`），两方法改区间过滤。**生产只读实证：同一时刻旧口径 28 条 / 新口径 42 条（少算 14 条）**。
+  2. **【自纠 · 我写的 helper 有 bug】** `local_day_utc_bounds` 早期版本用「传入时刻 − 当前 UTC」求时区偏移 —— 只在 `now` 恰为此刻时成立，传入构造时刻会算出 **0 偏移**（后果：窗口完全错）。**由同批新写的 `test_explicit_now_is_inside_its_own_window` 抓出** → 改为 `_current_utc_offset()` 恒取此刻读数，与传入参数解耦。
+  3. **【穷举同模式实例】** 按"发现一个实例即穷举全部分类"补收 3 处「依赖主机时区、无 UTC+8 回退」的墙钟点：`structured_memory._now_local()`（提醒时间串）、`orchestrator/tool_gate.py::now_beijing()`（注入终审 prompt 的"现在"）、`proactive/ase_engine.py` 两处 `%H:%M` prompt 串 → 统一走 `now_local()`。
+  4. **【测试加固】** 回归用例改「**钉时钟来源 + 钉调用实参**」——首版用"本地 10:00 不该触发"的**真实墙钟**断言，突变运行恰好落在 UTC 02:00 时会**巧合假通过**；SQL 侧补左闭右开边界 + 两方法同窗口不变量，并改用**行断言**（只断言 count 会被巧合命中）。
+- **验证（含两次突变验红）**：① `count_chats_today` 改回旧口径 → `0 != 1` **红**；② `get_chats_today` 改回旧口径 → **行断言精确命中**（返回的正是 UTC 日窗口那两行）。分块 pytest **1328 收集 / 1324 通过 / 4 跳过**（241+386+328+369 精确吻合）+ ruff 0.16.8 全仓 0 错 + CI 门禁 4/4。**三端一致**：本地/服务器 HEAD 均为 `0bc5d6bc`、服务器 `git status` 0 项、`/api/health` 200；服务器只读实证本地日窗口 `[2026-09-19 16:00, 2026-09-20 16:00)` 正确。
+- **文档同步**：AGENTS **v1.20** / CODE_GRAPH **v3.8.10** / README 徽章 **1422** / CODEMAPS INDEX / 设计文档（新增 **B7** + 修复状态更新）/ BOARD / LOG（八十二）。
+- **⚠️ 并发隔离（重要）**：复核期间发现**并行窗口正在做同一类修复**（已收编我的 `utils.local_time` 真源）：`proactive/frequency.py`（配额日界 UTC→本地 + `last_reset_date` 落盘缺失）、`shisi/stats/analytics.py`、`utils/important_dates.py`、`memory_pipeline.py`（系统错误占位过滤）+ 3 个测试，**共 7 个文件为其在制品**。本次提交**仅含自有 5 文件**；`tests/test_local_time.py` 属**混批**（他们往我的静态防护里加了 3 个目标）→ 用「移除其 4 行 → 暂存 → 原样还原」的方式只提交自有 hunk，**他们的在制品 8 项已核验完好**。
+- **三端**：A 档 —— commit→push origin→服务器 pull+重启+health 核验（见 LOG 同批次条目）。
