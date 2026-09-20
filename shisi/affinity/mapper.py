@@ -1,23 +1,23 @@
 """情感引擎 affection_points 与 shisi affinity 的对齐映射器。
 
-消除 `*0.05` 这类 magic number，映射公式完全基于 AffinityLevel 的阈值体系：
+**刻度唯一真源**：`shisi.affinity.scale`（2026-09-20 B6 彻底重构）。
 - emotion 维度：affection_points 满级为 AffinityLevel.BOND.threshold (500)
 - shisi 维度：AffinityEnhancer 的尺度为配置中的 [min_value, max_value]（默认 0~100）
-- shisi_affinity = affection_points / BOND_THRESHOLD * max_value
+- 映射一律走 `scale.points_to_shisi` / `scale.shisi_to_points`
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from shisi.core.models import AffinityLevel
+from shisi.affinity import scale as affinity_scale
 
 if TYPE_CHECKING:
     from ..emotion_stage.stage_engine import EmotionStageEngine
     from .enhancer import AffinityEnhancer
 
 # 情感引擎 affection_points 的满级刻度 = AffinityLevel 9 级阶梯的终点
-_EMOTION_AFFECTION_MAX = float(AffinityLevel.BOND.threshold)
+_EMOTION_AFFECTION_MAX = affinity_scale.POINTS_MAX
 
 
 class AffinityMapper:
@@ -45,7 +45,17 @@ class AffinityMapper:
     @staticmethod
     def emotion_max() -> float:
         """情感引擎 affection_points 的理论上限（AffinityLevel.BOND 阈值）。"""
-        return _EMOTION_AFFECTION_MAX
+        return affinity_scale.POINTS_MAX
+
+    @staticmethod
+    def points_to_level(points: float) -> int:
+        """affection_points → 0–8 档（经 scale 唯一真源）。"""
+        return affinity_scale.points_to_level(points)
+
+    @staticmethod
+    def points_to_shisi(points: float) -> float:
+        """affection_points → shisi 0–100（不依赖 enhancer 时用默认刻度）。"""
+        return affinity_scale.points_to_shisi(points)
 
     def to_shisi(self, affection_points: float) -> float:
         """把 emotion affection_points 映射为 shisi affinity 绝对值。"""
@@ -53,10 +63,7 @@ class AffinityMapper:
             raise RuntimeError("AffinityEnhancer 未设置")
         min_value = self._enhancer._min
         max_value = self._enhancer._max
-        if _EMOTION_AFFECTION_MAX <= 0 or max_value <= min_value:
-            return min_value
-        ratio = max(0.0, float(affection_points)) / _EMOTION_AFFECTION_MAX
-        return max(min_value, min(max_value, ratio * max_value))
+        return affinity_scale.points_to_shisi(affection_points, min_value, max_value)
 
     def to_emotion(self, shisi_affinity: float) -> float:
         """把 shisi affinity 反向映射为 emotion affection_points。"""
@@ -64,11 +71,7 @@ class AffinityMapper:
             raise RuntimeError("AffinityEnhancer 未设置")
         min_value = self._enhancer._min
         max_value = self._enhancer._max
-        if max_value <= min_value:
-            return 0.0
-        clamped = max(min_value, min(max_value, float(shisi_affinity)))
-        ratio = (clamped - min_value) / (max_value - min_value)
-        return ratio * _EMOTION_AFFECTION_MAX
+        return affinity_scale.shisi_to_points(shisi_affinity, min_value, max_value)
 
     def sync(
         self,

@@ -312,7 +312,57 @@ class StructuredMemory:
                 END;
             """)
             self._migrate_reminders_columns(conn)
+            self._migrate_user_facts_columns(conn)
             conn.commit()
+
+    def _migrate_user_facts_columns(self, conn) -> None:
+        """user_facts 幂等迁移：多用户隔离 + 回忆强化 + 遗忘状态。
+
+        - user_key：事实归属（从 session_id 派生，见 memory_pipeline）；
+          存量行默认 ''（legacy），完整隔离策略下**不注入任何会话**。
+        - access_count：检索/注入时自增（B4 回忆强化）。
+        - status：active|forgotten；遗忘进回收站后本表删除行，status 供软路径。
+        """
+        existing = {
+            row["name"] for row in conn.execute("PRAGMA table_info(user_facts)").fetchall()
+        }
+        migrations = {
+            "user_key": "ALTER TABLE user_facts ADD COLUMN user_key TEXT NOT NULL DEFAULT ''",
+            "access_count": "ALTER TABLE user_facts ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0",
+            "status": "ALTER TABLE user_facts ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+        }
+        for column, ddl in migrations.items():
+            if column not in existing:
+                conn.execute(ddl)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_facts_user_key "
+            "ON user_facts(user_key, status, confidence)"
+        )
+        # 回收站表（shisi 侧已存在同名结构；StructuredMemory 独立库可能没有）
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS memory_recycle_bin (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                character_id TEXT NOT NULL,
+                memory_id TEXT NOT NULL,
+                memory_content TEXT NOT NULL,
+                deleted_at TEXT NOT NULL DEFAULT (datetime('now')),
+                restore_before TEXT NOT NULL,
+                restored INTEGER NOT NULL DEFAULT 0
+            )"""
+        )
+
+    @staticmethod
+    def user_key_from_session(session_id: str) -> str:
+        """session_id → 事实归属 user_key。
+
+        形态：`N:wxid` / `1:wxid` / `42:wxid` → `wxid`；裸 `wxid` 原样；空 → `''`。
+        """
+        if not session_id:
+            return ""
+        s = str(session_id).strip()
+        if ":" in s:
+            return s.split(":", 1)[1] or s
+        return s
 
     def _migrate_reminders_columns(self, conn) -> None:
         """老库幂等迁移：reminders 补列（会话归属/投递状态）。
@@ -367,77 +417,197 @@ class StructuredMemory:
     # ── 用户事实 ──────────────────────────────────────────
 
     def add_fact(self, fact: str, category: str = "general",
-                 confidence: float = 0.5, source: str = "") -> int:
-        """添加用户事实"""
+                 confidence: float = 0.5, source: str = "",
+                 user_key: str = "") -> int:
+        """添加用户事实（按 user_key 隔离）。"""
         with self._conn(write=True) as conn:
-            cursor = conn.execute(                "INSERT INTO user_facts (fact, category, confidence, source) VALUES (?, ?, ?, ?)",
-                (fact, category, confidence, source),
+            cursor = conn.execute(
+                "INSERT INTO user_facts (fact, category, confidence, source, user_key, access_count, status) "
+                "VALUES (?, ?, ?, ?, ?, 0, 'active')",
+                (fact, category, confidence, source, user_key or ""),
             )
             conn.commit()
             return cursor.lastrowid  # type: ignore[no-any-return]
 
     def get_facts(self, category: str | None = None,
                   min_confidence: float = 0.0,
-                  limit: int = 50) -> list[dict[str, Any]]:
-        """获取用户事实"""
+                  limit: int = 50,
+                  user_key: str | None = None,
+                  include_legacy: bool = False) -> list[dict[str, Any]]:
+        """获取用户事实。
+
+        Args:
+            user_key: 指定归属；`None` 表示**不按用户过滤**（仅管理/内部维护路径）。
+            include_legacy: 是否附带 user_key='' 的历史孤儿事实（完整隔离默认 False）。
+        """
         with self._conn() as conn:
+            clauses = ["status = 'active'", "confidence >= ?"]
+            params: list[Any] = [min_confidence]
+            if user_key is not None:
+                if include_legacy:
+                    clauses.append("(user_key = ? OR user_key = '')")
+                    params.append(user_key or "")
+                else:
+                    clauses.append("user_key = ?")
+                    params.append(user_key or "")
             if category:
-                rows = conn.execute(                    "SELECT * FROM user_facts WHERE category = ? AND confidence >= ? ORDER BY updated_at DESC LIMIT ?",
-                    (category, min_confidence, limit),
-                ).fetchall()
-            else:
-                rows = conn.execute(                    "SELECT * FROM user_facts WHERE confidence >= ? ORDER BY updated_at DESC LIMIT ?",
-                    (min_confidence, limit),
-                ).fetchall()
+                clauses.append("category = ?")
+                params.append(category)
+            sql = (
+                "SELECT * FROM user_facts WHERE " + " AND ".join(clauses)
+                + " ORDER BY updated_at DESC LIMIT ?"
+            )
+            params.append(limit)
+            rows = conn.execute(sql, params).fetchall()
             return [dict(r) for r in rows]
 
-    def search_facts(self, keyword: str) -> list[dict[str, Any]]:
-        """关键词搜索事实 — 优先FTS5，降级LIKE"""
+    def search_facts(self, keyword: str, user_key: str | None = None,
+                     include_legacy: bool = False) -> list[dict[str, Any]]:
+        """关键词搜索事实 — 优先FTS5，降级LIKE；可按 user_key 隔离。"""
         with self._conn() as conn:
+            def _filter(rows: list) -> list[dict[str, Any]]:
+                out = [dict(r) for r in rows]
+                if user_key is None:
+                    return [r for r in out if r.get("status", "active") == "active"]
+                allowed = {user_key or ""}
+                if include_legacy:
+                    allowed.add("")
+                return [
+                    r for r in out
+                    if r.get("status", "active") == "active" and r.get("user_key", "") in allowed
+                ]
+
             try:
-                rows = conn.execute(                    """SELECT f.* FROM user_facts f
+                rows = conn.execute(
+                    """SELECT f.* FROM user_facts f
                        JOIN user_facts_fts fts ON f.id = fts.rowid
                        WHERE user_facts_fts MATCH ?
                        ORDER BY rank
                        LIMIT 20""",
                     (keyword,),
                 ).fetchall()
-                if rows:
-                    return [dict(r) for r in rows]
+                filtered = _filter(rows)
+                if filtered:
+                    return filtered
             except Exception as e:  # noqa: BLE001
                 logger.debug("FTS5 search failed, falling back to LIKE: %s", e)
-            rows = conn.execute(                "SELECT * FROM user_facts WHERE fact LIKE ? ORDER BY confidence DESC LIMIT 20",
+            rows = conn.execute(
+                "SELECT * FROM user_facts WHERE fact LIKE ? ORDER BY confidence DESC LIMIT 20",
                 (f"%{keyword}%",),
             ).fetchall()
-            return [dict(r) for r in rows]
+            return _filter(rows)
 
     def update_fact_confidence(self, fact_id: int, confidence: float) -> None:
         """更新事实置信度"""
         with self._conn(write=True) as conn:
-            conn.execute(                "UPDATE user_facts SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            conn.execute(
+                "UPDATE user_facts SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (confidence, fact_id),
             )
             conn.commit()
-    def delete_fact(self, fact_id: int) -> None:
-        """删除事实"""
+
+    def increment_fact_access(self, fact_ids: list[int]) -> int:
+        """检索/注入时自增 access_count（B4 回忆强化）。返回实际更新行数。"""
+        ids = [int(i) for i in fact_ids or [] if i is not None]
+        if not ids:
+            return 0
         with self._conn(write=True) as conn:
+            placeholders = ",".join("?" * len(ids))
+            cur = conn.execute(
+                f"UPDATE user_facts SET access_count = access_count + 1 WHERE id IN ({placeholders})",  # noqa: S608
+                ids,
+            )
+            conn.commit()
+            return cur.rowcount or 0
+
+    def delete_fact(self, fact_id: int, recycle: bool = True,
+                    user_key: str = "", retain_days: int = 30) -> bool:
+        """删除事实。
+
+        B5 裁决「进回收站表」：默认先写入 `memory_recycle_bin` 再删主表行，
+        数据可恢复、只增不减。`recycle=False` 时物理删除（维护路径）。
+        """
+        with self._conn(write=True) as conn:
+            row = conn.execute(
+                "SELECT * FROM user_facts WHERE id = ?", (fact_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            data = dict(row)
+            if recycle:
+                import json
+                from datetime import datetime as _dt
+                from datetime import timedelta as _td
+                content = json.dumps(data, ensure_ascii=False, default=str)
+                uk = user_key or data.get("user_key", "") or "legacy"
+                deleted_at = _dt.now()
+                restore_before = (deleted_at + _td(days=retain_days)).strftime("%Y-%m-%d %H:%M:%S")
+                conn.execute(
+                    "INSERT INTO memory_recycle_bin "
+                    "(character_id, memory_id, memory_content, deleted_at, restore_before, restored) "
+                    "VALUES (?, ?, ?, ?, ?, 0)",
+                    (
+                        f"user_fact:{uk}",
+                        str(fact_id),
+                        content,
+                        deleted_at.strftime("%Y-%m-%d %H:%M:%S"),
+                        restore_before,
+                    ),
+                )
             conn.execute("DELETE FROM user_facts WHERE id = ?", (fact_id,))
             conn.commit()
-    def add_facts_batch(self, facts: list[dict[str, Any]]) -> list[int]:
+            return True
+
+    def restore_fact_from_recycle(self, recycle_id: int) -> int | None:
+        """从回收站恢复事实到 user_facts；返回新 fact_id（失败 None）。"""
+        import json
+        with self._conn(write=True) as conn:
+            row = conn.execute(
+                "SELECT * FROM memory_recycle_bin WHERE id = ? AND restored = 0",
+                (recycle_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            data = json.loads(dict(row)["memory_content"])
+            cur = conn.execute(
+                "INSERT INTO user_facts (fact, category, confidence, source, user_key, access_count, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'active')",
+                (
+                    data.get("fact", ""),
+                    data.get("category", "general"),
+                    data.get("confidence", 0.5),
+                    data.get("source", ""),
+                    data.get("user_key", ""),
+                    int(data.get("access_count", 0) or 0),
+                ),
+            )
+            conn.execute(
+                "UPDATE memory_recycle_bin SET restored = 1 WHERE id = ?", (recycle_id,)
+            )
+            conn.commit()
+            return cur.lastrowid  # type: ignore[no-any-return]
+
+    def add_facts_batch(self, facts: list[dict[str, Any]], user_key: str = "") -> list[int]:
         """批量添加事实"""
         if not facts:
             return []
+        ids: list[int] = []
         with self._conn(write=True) as conn:
-            rows = self._execute_write(
-                lambda: (
-                    conn.executemany(                        "INSERT INTO user_facts (fact, category, confidence, source) VALUES (?, ?, ?, ?)",
-                        [(f.get("fact", ""), f.get("category", "general"),
-                          f.get("confidence", 0.5), f.get("source", "")) for f in facts],
+            for f in facts:
+                cur = conn.execute(
+                    "INSERT INTO user_facts (fact, category, confidence, source, user_key, access_count, status) "
+                    "VALUES (?, ?, ?, ?, ?, 0, 'active')",
+                    (
+                        f.get("fact", ""),
+                        f.get("category", "general"),
+                        f.get("confidence", 0.5),
+                        f.get("source", ""),
+                        f.get("user_key", user_key or ""),
                     ),
-                    conn.commit(),                    conn.execute("SELECT last_insert_rowid()").fetchone()[0],                )[2]
-            )
-            start_id = rows - len(facts) + 1
-            return list(range(start_id, start_id + len(facts)))
+                )
+                ids.append(int(cur.lastrowid or 0))
+            conn.commit()
+            return ids
 
     # ── 记忆反思 ──────────────────────────────────────────
 

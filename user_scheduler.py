@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from my_character.emotion_engine import AffinityLevel, EmotionEngine
+from shisi.affinity import scale as affinity_scale
+from utils import affinity_state
 
 logger = logging.getLogger("user_scheduler")
 
@@ -118,10 +120,14 @@ class UserManager:
         容量控制（2026-09-17 修复）：每个 (用户 × 角色) 组合都会创建一个
         EmotionEngine（内部持有状态与可选线程池）。旧实现只增不删，用户反复
         切换角色时引擎数量无界增长。现按 LRU 上限淘汰，且**永不淘汰当前活跃角色**。
+
+        B6 持久化：引擎创建/切换时从 `data/affinity_state.json` 恢复
+        affection_points（进程重启不丢亲密度）。
         """
         engine = instance.emotion_engines.get(character_id)
         if engine is None:
             engine = self._create_user_engine()
+            self._restore_affinity(instance.user_id, character_id, engine)
         # 先发布活跃指针，再做淘汰：否则淘汰逻辑无法区分"待回收的旧活跃引擎"
         # 与"新活跃引擎"，会把旧活跃引擎从字典移除却不 close（资源泄漏）。
         instance.emotion_engine = engine
@@ -130,6 +136,36 @@ class UserManager:
         instance.emotion_engines[character_id] = engine
         self._evict_stale_engines(instance, keep=character_id)
         return engine
+
+    @staticmethod
+    def _restore_affinity(user_id: str, character_id: str, engine: EmotionEngine) -> None:
+        try:
+            points = affinity_state.load_points(user_id, character_id)
+            if points <= 0:
+                return
+            level = affinity_scale.points_to_level(points)
+            state = getattr(engine, "state", None) or getattr(engine, "_state", None)
+            if state is None:
+                return
+            state.affection_points = points
+            state.affinity = level
+            logger.debug(
+                "恢复亲密度 %s/%s → points=%.1f level=%d",
+                user_id, character_id, points, level,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("恢复亲密度失败 %s/%s: %s", user_id, character_id, e)
+
+    @staticmethod
+    def _persist_affinity(user_id: str, character_id: str, engine: EmotionEngine) -> None:
+        try:
+            state = getattr(engine, "state", None) or getattr(engine, "_state", None)
+            if state is None:
+                return
+            points = float(getattr(state, "affection_points", 0.0) or 0.0)
+            affinity_state.save_points(user_id, character_id, points)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("持久化亲密度失败 %s/%s: %s", user_id, character_id, e)
 
     #: 单个用户最多保留的情绪引擎数（用户 × 角色 组合数上限）
     _MAX_ENGINES_PER_USER = 8
@@ -241,6 +277,8 @@ class UserManager:
         # 统计
         instance.total_chats += 1
         instance.last_active = time.time()
+        # B6：对话后持久化 affection_points（重启不丢）
+        self._persist_affinity(user_id, instance.character_card_id, emotion_engine)
 
         return result
 
@@ -322,6 +360,10 @@ class UserManager:
             for engine in instance.emotion_engines.values():
                 engine.reset()
             instance.total_chats = 0
+            try:
+                affinity_state.clear(user_id, instance.character_card_id)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("清除亲密度持久化失败: %s", e)
             logger.info("用户重置: %s", user_id)
             return True
 

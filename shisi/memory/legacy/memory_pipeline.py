@@ -23,12 +23,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from shisi.config import get_config
 from utils.local_time import now_local
 
 from ._legacy_diary_summarizer import DiarySummarizer
 from ._legacy_episodic_memory import EpisodicMemory
 from ._legacy_importance_scorer import ImportanceScorer
-from ._legacy_semantic_memory import SemanticMemory
 from ._legacy_working_memory import WorkingMemory
 from .conflict_detector import ConflictDetector
 from .conversation_summarizer import ConversationSummarizer
@@ -36,6 +36,7 @@ from .cross_session_reasoner import CrossSessionReasoner
 from .fact_extractor import FactExtractor
 from .forgetting_manager import ForgettingManager
 from .reflection_engine import ReflectionEngine
+from .semantic_memory import SemanticMemory
 from .structured_memory import StructuredMemory
 from .vector_memory import VectorMemory
 
@@ -93,6 +94,34 @@ class MemoryConfig:
     fact_min_confidence: float = 0.2
     conflict_similarity_threshold: float = 0.3
     cache_ttl: int = 30  # 上下文缓存 TTL（秒），代替硬编码值
+    # ── B3：config/shisi.yaml memory: 五键接线（2026-09-20 用户裁决「全面升级」）──
+    extraction_enabled: bool = True
+    fact_dedup_similarity: float = 0.85  # yaml similarity_threshold：同事实去重门槛
+    short_term_retention_hours: int = 24
+    long_term_threshold: int = 5  # 与 fact_extract_interval 同源（长期记忆触发间隔）
+
+
+def _user_key_from_session(session_id: str) -> str:
+    """session_id → user_facts 归属键（N:wxid / 1:wxid → wxid）。"""
+    return StructuredMemory.user_key_from_session(session_id)
+
+
+def _load_shisi_memory_config() -> dict:
+    """从 config/shisi.yaml memory: 读取（B3 接线）；失败时回落硬编码默认。"""
+    defaults = {
+        "working_memory_capacity": 20,
+        "short_term_retention_hours": 24,
+        "long_term_threshold": 5,
+        "similarity_threshold": 0.85,
+        "extraction_enabled": True,
+    }
+    try:
+        mem = get_config("memory") or {}
+        if not isinstance(mem, dict):
+            return defaults
+        return {k: mem.get(k, v) for k, v in defaults.items()}
+    except Exception:  # noqa: BLE001
+        return defaults
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -133,11 +162,25 @@ class MemoryPipeline:
         conflict_similarity_threshold: float = 0.3,
         fact_extract_interval: int = 5,
     ):
+        _mem_cfg = _load_shisi_memory_config()
+        # yaml 优先；显式构造参数若非默认值则覆盖（保持单测可注入）
+        _wl = int(_mem_cfg.get("working_memory_capacity", working_limit) or working_limit)
+        if working_limit != 20:
+            _wl = working_limit
+        _fei = int(_mem_cfg.get("long_term_threshold", fact_extract_interval) or fact_extract_interval)
+        if fact_extract_interval != 5:
+            _fei = fact_extract_interval
         self._config = MemoryConfig(
-            working_limit=working_limit,
+            working_limit=_wl,
             retrieval_timeout=retrieval_timeout,
-            fact_extract_interval=fact_extract_interval,
+            fact_extract_interval=_fei,
+            extraction_enabled=bool(_mem_cfg.get("extraction_enabled", True)),
+            fact_dedup_similarity=float(_mem_cfg.get("similarity_threshold", 0.85) or 0.85),
+            short_term_retention_hours=int(_mem_cfg.get("short_term_retention_hours", 24) or 24),
+            long_term_threshold=_fei,
         )
+        working_limit = _wl
+        fact_extract_interval = _fei
 
         # 存储后端
         if vector_memory is None:
@@ -453,7 +496,7 @@ class MemoryPipeline:
         # 3. 结构化事实补充（降级回退）
         if not context["facts"]:
             try:
-                facts = self.sm.get_facts(min_confidence=0.3)
+                facts = self.sm.get_facts(min_confidence=0.3, user_key=_user_key_from_session(self.session_id))
                 context["facts"] = [f["fact"] for f in facts[:top_k]]
             except Exception as e:  # noqa: BLE001
                 logger.debug("Structured fact fallback failed: %s", e)
@@ -551,7 +594,7 @@ class MemoryPipeline:
 
         if not context["facts"]:
             try:
-                facts = self.sm.get_facts(min_confidence=0.3)
+                facts = self.sm.get_facts(min_confidence=0.3, user_key=_user_key_from_session(self.session_id))
                 context["facts"] = [f["fact"] for f in facts[:top_k]]
             except Exception as e:  # noqa: BLE001
                 logger.debug("Structured fact fallback failed: %s", e)
@@ -699,8 +742,18 @@ class MemoryPipeline:
             logger.warning("Failed to get recent chats: %s", e)
 
         try:
-            facts = self.sm.get_facts(min_confidence=0.3)
+            # 完整隔离：只注入当前会话归属的事实（user_key 从 session 派生）
+            # 2026-09-20 MEM-USER-1 用户裁决；存量 user_key='' 不注入任何会话。
+            uk = _user_key_from_session(self.session_id)
+            facts = self.sm.get_facts(min_confidence=0.3, user_key=uk)
             context["user_facts"] = [f["fact"] for f in facts]
+            # B4：被注入上下文即算一次「回忆」→ access_count+1
+            ids = [f.get("id") for f in facts if f.get("id") is not None]
+            if ids and hasattr(self.sm, "increment_fact_access"):
+                try:
+                    self.sm.increment_fact_access(ids)
+                except Exception as ie:  # noqa: BLE001
+                    logger.debug("increment_fact_access failed: %s", ie)
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to get facts: %s", e)
 
@@ -746,7 +799,7 @@ class MemoryPipeline:
         """根据遗忘模型路由应用遗忘"""
         forgotten = 0
         try:
-            facts = self.sm.get_facts(min_confidence=0.0, limit=1000)
+            facts = self.sm.get_facts(min_confidence=0.0, limit=1000, user_key=None)
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to load facts for forgetting: %s", e)
             return 0
@@ -770,8 +823,9 @@ class MemoryPipeline:
 
             should_remove = False
             if self._forgetting_model == "exponential":
+                # B4：access_count 进入权重（越回忆越牢）
                 should_remove = self.forgetting.should_delete(
-                    importance, days_old
+                    importance, days_old, access_count=access_count
                 )
             elif self._forgetting_model == "threshold":
                 should_remove = not self.scorer.should_retain(
@@ -780,7 +834,9 @@ class MemoryPipeline:
 
             if should_remove:
                 try:
-                    self.sm.delete_fact(fact["id"])
+                    # B5：进回收站再删主表行（数据只增不减，可 restore）
+                    uk = fact.get("user_key", "") or ""
+                    self.sm.delete_fact(fact["id"], recycle=True, user_key=uk)
                     forgotten += 1
                 except Exception as e:  # noqa: BLE001
                     logger.warning("Failed to delete fact (id=%s): %s", fact.get("id"), e)
@@ -797,8 +853,13 @@ class MemoryPipeline:
 
         集成选择性记忆：通过 should_store_as_fact 过滤敷衍消息，
         避免把"没事/还行"等无信息量内容提取为事实。
+        B3：`extraction_enabled=false` 时整段跳过（配置可关）。
         """
+        if not getattr(self._config, "extraction_enabled", True):
+            logger.debug("Fact extraction disabled by config memory.extraction_enabled")
+            return 0
         count = 0
+        _uk = _user_key_from_session(session_id)
         try:
             recent = self.sm.get_recent_chats(10)
             # 选择性记忆：过滤掉敷衍且无情感的消息
@@ -833,17 +894,24 @@ class MemoryPipeline:
                     )
                     continue
 
-                # 去重检查
-                existing = self.sm.search_facts(fact["fact"])
+                # 去重检查（B3：按会话隔离后仍查本人事实；exact 命中则跳过）
+                if hasattr(self.sm, "search_facts"):
+                    try:
+                        existing = self.sm.search_facts(fact["fact"], user_key=_uk)
+                    except TypeError:
+                        existing = self.sm.search_facts(fact["fact"])
+                else:
+                    existing = []
                 if existing:
                     continue
 
-                # 存储事实
+                # 存储事实（带 user_key 归属）
                 if self.semantic.add_fact(
                     fact["fact"],
                     fact.get("category", "general"),
                     fact.get("confidence", 0.5),
                     fact.get("source", ""),
+                    user_key=_uk,
                 ):
                     count += 1
 
@@ -862,7 +930,7 @@ class MemoryPipeline:
         # 记忆反思：事实足够时生成更高层洞察
         if count > 0:
             try:
-                facts = self.semantic.get_facts(limit=20)
+                facts = self.semantic.get_facts(limit=20, user_key=_user_key_from_session(session_id))
                 episodes = self.episodic.search("", top_k=3)
                 self.reflection.maybe_reflect(
                     facts=[{"fact": f.get("fact", ""), "category": f.get("category", "general")} for f in facts],

@@ -60,13 +60,37 @@ class MemoryTool(BaseTool):
         if not self._sm:
             return ToolResult(False, error="Memory system not available")
         try:
-            if hasattr(self._sm, "search_facts"):
+            # 多用户隔离：工具层若能拿到会话 user_key，只查本人事实
+            user_key = kwargs.get("user_key") or kwargs.get("session_id") or ""
+            if user_key and hasattr(self._sm, "user_key_from_session"):
+                user_key = self._sm.user_key_from_session(str(user_key))
+            facts: list = []
+            if user_key and hasattr(self._sm, "search_facts"):
+                try:
+                    facts = self._sm.search_facts(query, user_key=user_key)
+                except TypeError:
+                    facts = self._sm.search_facts(query)
+            elif hasattr(self._sm, "search_facts"):
                 facts = self._sm.search_facts(query)
             elif hasattr(self._sm, "get_facts"):
-                facts = self._sm.get_facts(category=None, limit=limit)
+                if user_key:
+                    try:
+                        facts = self._sm.get_facts(
+                            category=None, limit=limit, user_key=user_key
+                        )
+                    except TypeError:
+                        facts = self._sm.get_facts(category=None, limit=limit)
+                else:
+                    facts = self._sm.get_facts(category=None, limit=limit)
             else:
                 return ToolResult(False, error="Memory query not supported")
-            return ToolResult(True, data={"query": query, "facts": facts[:limit]})
+            ids = [f.get("id") for f in facts[:limit] if isinstance(f, dict) and f.get("id")]
+            if ids and hasattr(self._sm, "increment_fact_access"):
+                try:
+                    self._sm.increment_fact_access(ids)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("increment_fact_access failed: %s", exc)
+            return ToolResult(True, data={"query": query, "facts": facts[:limit], "user_key": user_key})
         except Exception:
             logger.exception("记忆查询失败")
             return ToolResult(False, error="memory_query_failed")

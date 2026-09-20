@@ -55,6 +55,13 @@ class FakeVectorMemory:
     def search_chats_sync(self, query: str, top_k: int = 5) -> list[dict]:
         return list(self.search_results[:top_k])
 
+    def _search(self, collection: str, query: str, top_k: int = 5) -> list[dict]:
+        return list(self.search_results[:top_k])
+
+    @property
+    def _collections(self) -> dict:
+        return {}
+
     def health_check(self) -> dict:
         return {"available": True}
 
@@ -153,6 +160,13 @@ class FakeStructuredMemory:
         self.conn = FakeConnection()
         self._fact_id = 0
 
+    @staticmethod
+    def user_key_from_session(session_id: str) -> str:
+        if not session_id:
+            return ""
+        s = str(session_id).strip()
+        return s.split(":", 1)[1] if ":" in s else s
+
     def add_chat(self, role: str, content: str, **kwargs) -> None:
         self.chats.append({"role": role, "content": content, **kwargs})
 
@@ -162,7 +176,7 @@ class FakeStructuredMemory:
     def get_chats_today(self) -> list[dict]:
         return list(self.chats)
 
-    def add_fact(self, fact: str, category: str = "general", confidence: float = 0.5, source: str = "") -> bool:
+    def add_fact(self, fact: str, category: str = "general", confidence: float = 0.5, source: str = "", user_key: str = "", **kwargs) -> int:
         self._fact_id += 1
         self.facts.append({
             "id": self._fact_id,
@@ -170,22 +184,42 @@ class FakeStructuredMemory:
             "category": category,
             "confidence": confidence,
             "source": source,
+            "user_key": user_key,
             "updated_at": datetime.now(tz=timezone.utc).isoformat(),
             "access_count": 0,
+            "status": "active",
         })
-        return True
+        return self._fact_id
 
-    def search_facts(self, query: str) -> list[dict]:
-        return [f for f in self.facts if query.lower() in f["fact"].lower()]
+    def search_facts(self, query: str, user_key: str | None = None, **kwargs) -> list[dict]:
+        facts = [f for f in self.facts if query.lower() in f["fact"].lower()]
+        if user_key is not None:
+            facts = [f for f in facts if f.get("user_key", "") == user_key]
+        return facts
 
-    def get_facts(self, category: str | None = None, min_confidence: float = 0.0, limit: int = 1000) -> list[dict]:
+    def get_facts(self, category: str | None = None, min_confidence: float = 0.0, limit: int = 1000,
+                  user_key: str | None = None, include_legacy: bool = False, **kwargs) -> list[dict]:
         facts = [f for f in self.facts if f["confidence"] >= min_confidence]
         if category:
             facts = [f for f in facts if f.get("category") == category]
+        if user_key is not None:
+            if include_legacy:
+                facts = [f for f in facts if f.get("user_key", "") in (user_key, "")]
+            else:
+                facts = [f for f in facts if f.get("user_key", "") == user_key]
         return facts[:limit]
 
-    def delete_fact(self, fact_id: int) -> None:
+    def increment_fact_access(self, fact_ids) -> int:
+        n = 0
+        for f in self.facts:
+            if f["id"] in fact_ids:
+                f["access_count"] = f.get("access_count", 0) + 1
+                n += 1
+        return n
+
+    def delete_fact(self, fact_id: int, recycle: bool = True, user_key: str = "", **kwargs) -> bool:
         self.facts = [f for f in self.facts if f["id"] != fact_id]
+        return True
 
     def add_episode(self, episode_id: str, summary: str, importance: float, metadata: dict) -> None:
         self.chats.append({
@@ -275,14 +309,16 @@ def test_mp_retrieve_context_returns_expected_keys():
 
 def test_mp_retrieve_context_uses_structured_fallback():
     mp, vm, sm = _make_pipeline()
-    sm.add_fact("用户喜欢猫", "preference", 0.9)
+    mp._session_id = "N:wxid_t1"
+    sm.add_fact("用户喜欢猫", "preference", 0.9, user_key="wxid_t1")
     ctx = mp.retrieve_context("猫")
     assert "用户喜欢猫" in ctx["facts"]
 
 
 async def test_mp_retrieve_context_async_caches():
     mp, vm, sm = _make_pipeline()
-    sm.add_fact("用户喜欢猫", "preference", 0.9)
+    mp._session_id = "N:wxid_t2"
+    sm.add_fact("用户喜欢猫", "preference", 0.9, user_key="wxid_t2")
     ctx1 = await mp.retrieve_context_async("猫")
     ctx2 = await mp.retrieve_context_async("猫")
     assert "用户喜欢猫" in ctx1["facts"]
@@ -299,7 +335,8 @@ def test_mp_get_chat_context_delegates_to_summarizer():
 
 def test_mp_get_memory_context_and_formatted():
     mp, vm, sm = _make_pipeline()
-    sm.add_fact("用户喜欢猫", "preference", 0.9)
+    mp._session_id = "N:wxid_t3"
+    sm.add_fact("用户喜欢猫", "preference", 0.9, user_key="wxid_t3")
     mp.after_chat("你好", "你好呀")
     ctx = mp.get_memory_context()
     assert "user_facts" in ctx
@@ -485,7 +522,9 @@ def test_semantic_memory_search_exception_returns_empty():
     vm.search_sync = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("vm fail"))  # type: ignore[method-assign]
     sem = SemanticMemory(vm, FakeStructuredMemory())
     result = sem.search("query")
-    assert result == {"vector": [], "structured": []}
+    assert result["vector"] == []
+    assert result["structured"] == []
+    assert result.get("exact", []) == []
 
 
 def test_semantic_memory_extract_facts_from_message():
