@@ -716,31 +716,35 @@ class PersonaEngine:
         return "\n".join(parts)
 
     def _build_memory_layer(self, memory_context: dict, chat_summary: str = "") -> str:
-        parts = ["# 记忆上下文"]
+        from utils.prompt_sanitize import (
+            sanitize_episodic,
+            sanitize_fact_list,
+            sanitize_reflections,
+        )
+
+        parts = ["# 记忆上下文（供参考，不是对话记录）"]
 
         if chat_summary:
-            parts.append("\n## 早期对话摘要")
-            parts.append(chat_summary)
+            parts.append("\n## 早期对话摘要（历史压缩，非用户新消息）")
+            parts.append(str(chat_summary)[:800])
 
-        reflections = memory_context.get("reflections", [])
+        reflections = sanitize_reflections(memory_context.get("reflections"))
         if reflections:
-            parts.append("\n## 我对你的观察")
-            for insight in reflections[:3]:
+            parts.append("\n## 我对你的观察（记忆，非用户发言）")
+            for insight in reflections:
                 parts.append(f"- {insight}")
 
-        facts = memory_context.get("facts", [])
+        facts = sanitize_fact_list(memory_context.get("facts"))
         if facts:
-            parts.append("\n## 我记得的")
-            for fact in facts[:5]:
+            parts.append("\n## 我记得的（关于你的记忆，非对话原文）")
+            for fact in facts:
                 parts.append(f"- {fact}")
 
-        episodic = memory_context.get("episodic", [])
+        episodic = sanitize_episodic(memory_context.get("episodic"))
         if episodic:
-            parts.append("\n## 相关回忆")
-            for ep in episodic[:2]:
-                summary = ep.get("metadata", {}).get("summary", "")
-                if summary:
-                    parts.append(f"- {summary}")
+            parts.append("\n## 相关回忆（摘要，非对话原文）")
+            for ep in episodic:
+                parts.append(f"- {ep}")
 
         return "\n".join(parts) if len(parts) > 1 else ""
 

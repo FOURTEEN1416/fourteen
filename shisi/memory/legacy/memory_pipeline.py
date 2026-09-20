@@ -885,6 +885,12 @@ class MemoryPipeline:
 
             facts_sorted = sorted(facts, key=lambda r: (_prio(r), -(r.get("confidence") or 0)))
             selected = facts_sorted[:k]
+            try:
+                from utils.prompt_sanitize import is_injectable_fact
+
+                selected = [f for f in selected if is_injectable_fact(str(f.get("fact") or ""))][:k]
+            except Exception:  # noqa: BLE001
+                pass
             context["user_facts"] = [f["fact"] for f in selected]
             context["user_fact_rows"] = selected
             topics: list[str] = []

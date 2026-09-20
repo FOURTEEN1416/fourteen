@@ -200,12 +200,15 @@ class ReflectionEngine:
                     content = (r.get("content") or "").strip()
                     if not content:
                         continue
+                    from utils.prompt_sanitize import looks_like_dialogue
+
+                    if looks_like_dialogue(content):
+                        continue
                     meta = r.get("metadata") or {}
                     r_sid = str(meta.get("session_id") or r.get("session_id") or "")
                     if session_id is not None:
                         if r_sid and r_sid == str(session_id):
                             results.append(content)
-                        # 无 session 元数据的反思不注入具体会话
                         continue
                     results.append(content)
             except Exception as e:  # noqa: BLE001
@@ -213,19 +216,31 @@ class ReflectionEngine:
 
         if not results and self._sm and hasattr(self._sm, "get_reflections"):
             try:
+                from utils.prompt_sanitize import looks_like_dialogue
+
                 rows = self._sm.get_reflections(
                     limit=top_k, session_id=session_id
                 ) if session_id is not None else self._sm.get_reflections(limit=top_k)
-                results = [r.get("content", "").strip() for r in rows if r.get("content")]
+                results = [
+                    r.get("content", "").strip()
+                    for r in rows
+                    if r.get("content") and not looks_like_dialogue(str(r.get("content")))
+                ]
             except TypeError:
                 try:
+                    from utils.prompt_sanitize import looks_like_dialogue
+
                     rows = self._sm.get_reflections(limit=top_k)
                     if session_id is not None:
                         rows = [
                             r for r in rows
                             if str(r.get("session_id") or "") == str(session_id)
                         ]
-                    results = [r.get("content", "").strip() for r in rows if r.get("content")]
+                    results = [
+                        r.get("content", "").strip()
+                        for r in rows
+                        if r.get("content") and not looks_like_dialogue(str(r.get("content")))
+                    ]
                 except Exception as e:  # noqa: BLE001
                     logger.debug("Structured reflection search failed: %s", e)
             except Exception as e:  # noqa: BLE001

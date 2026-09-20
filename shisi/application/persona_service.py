@@ -92,12 +92,47 @@ class PersonaService:
         )
 
         character = self._build_character(effective_emotion, character_id=character_id)
-        chat_history = self._build_chat_history(memory_context, chat_summary)
+        # 2026-09-21：记忆层**不得**再走 prompt_builder 的 chat_history 槽
+        # （该槽会被 CharacterAggregate 标成「# 对话历史」，模型会把记忆当成聊天记录，
+        #  分不清哪句是用户/哪句是自己）。记忆改为独立标注段，真对话只走 messages。
+        from utils.prompt_sanitize import (
+            ROLE_CLARITY_RULE,
+            sanitize_episodic,
+            sanitize_fact_list,
+            sanitize_reflections,
+        )
+
+        mem_ctx = memory_context if isinstance(memory_context, dict) else {}
+        mem_parts: list[str] = ["# 记忆上下文（供参考，**不是**本轮对话记录）"]
+        if chat_summary:
+            mem_parts.append("\n## 早期对话摘要（历史压缩，非用户新消息）")
+            mem_parts.append(str(chat_summary)[:800])
+        reflections = sanitize_reflections(mem_ctx.get("reflections"))
+        if reflections:
+            mem_parts.append("\n## 我对你的观察（记忆，非用户发言）")
+            for insight in reflections:
+                mem_parts.append(f"- {insight}")
+        facts = sanitize_fact_list(mem_ctx.get("facts") or mem_ctx.get("user_facts"))
+        if facts:
+            mem_parts.append("\n## 我记得的（关于你的记忆，非对话原文）")
+            for fact in facts:
+                mem_parts.append(f"- {fact}")
+        episodic = sanitize_episodic(mem_ctx.get("episodic"))
+        if episodic:
+            mem_parts.append("\n## 相关回忆（摘要，非对话原文）")
+            for ep in episodic:
+                mem_parts.append(f"- {ep}")
+        memory_block = "\n".join(mem_parts) if len(mem_parts) > 1 else ""
+        if chat_summary and not memory_block:
+            memory_block = (
+                "# 记忆上下文（供参考，**不是**本轮对话记录）\n\n"
+                f"## 早期对话摘要（历史压缩，非用户新消息）\n{chat_summary[:800]}"
+            )
 
         base_prompt = prompt_builder.build(
             character,
-            user_message=user_message,
-            chat_history=chat_history,
+            user_message="",  # 当前用户消息只经 messages/query 传入，避免 system 重复
+            chat_history="",
             use_knowledge=True,
             use_storyline=False,
             tool_context=tool_context or "",
@@ -112,6 +147,11 @@ class PersonaService:
         engine_name = engine_name.strip()
 
         injection_parts: list[str] = []
+
+        if memory_block:
+            injection_parts.append(memory_block)
+        # 角色归属硬约束：真对话只在 messages；system 记忆不是用户发言
+        injection_parts.append(ROLE_CLARITY_RULE.strip())
 
         if world_info:
             injection_parts.append(f"# 世界与时间\n{world_info}")
@@ -154,7 +194,7 @@ class PersonaService:
         if not injection_parts:
             return strip_default_identity(base_prompt) if external else base_prompt
 
-        assembled = f"{base_prompt}\n\n" + "\n\n".join(injection_parts)
+        assembled = f"{base_prompt}\n\n" + "\n\n".join(p for p in injection_parts if p)
         if external:
             assembled = strip_default_identity(assembled)
             if engine_name and engine_name in assembled:

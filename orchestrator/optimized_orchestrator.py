@@ -828,7 +828,29 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             elif name == "emotion":
                 emotion_state = task_result
             elif name == "memory":
-                memory_context = task_result or ""  # type: ignore[assignment]
+                raw_mem = task_result
+                # 清洗注入 system 的记忆：去掉对话痕迹反射与碎片事实
+                try:
+                    from utils.prompt_sanitize import (
+                        sanitize_episodic,
+                        sanitize_fact_list,
+                        sanitize_reflections,
+                    )
+
+                    if isinstance(raw_mem, dict):
+                        raw_mem = dict(raw_mem)
+                        raw_mem["facts"] = sanitize_fact_list(
+                            raw_mem.get("facts") or raw_mem.get("semantic")
+                        )
+                        raw_mem["reflections"] = sanitize_reflections(
+                            raw_mem.get("reflections")
+                        )
+                        raw_mem["episodic"] = sanitize_episodic(raw_mem.get("episodic"))
+                        raw_mem.pop("working", None)  # 工作记忆走 messages，不进 system
+                        raw_mem.pop("pending_events", None)  # 待办不进 system 当对话
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("sanitize memory_context failed: %s", e)
+                memory_context = raw_mem or ""  # type: ignore[assignment]
             elif name == "rag":
                 # A4：禁止 json.dumps 整包进 prompt —— 只取可读 content 文本
                 from orchestrator.context_budget import rag_payload_to_text
@@ -843,6 +865,16 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             chat_history, chat_summary = mem.get_chat_context(
                 session_id=session_id,
             )
+        # 2026-09-21：清洗交给 LLM 的历史 — 只保留 user/assistant 角色、去空/系统错误、
+        # 防止「当前用户消息」与 history 重复，避免模型分不清该回哪句。
+        try:
+            from utils.prompt_sanitize import sanitize_llm_history
+
+            chat_history = sanitize_llm_history(
+                chat_history, current_user_message=user_msg_clean
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("sanitize_llm_history failed: %s", e)
 
         # 世界信息动态注入
         world_info = ""
