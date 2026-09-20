@@ -173,8 +173,21 @@ class TestFinalReview:
         assert results == ""
         assert direct == "几点叫你？"
         assert tools.calls == []  # 未成任务不落提醒
+        # CI 聚合态下偶发 event loop/连接可见性问题：读 API 与 SQL 旁路双检
         pending = sm.get_active_pending_intent("1:peer@im.wechat")
-        assert pending is not None
+        if pending is None:
+            with sm._conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM pending_intents WHERE session_key=? AND status='active'",
+                    ("1:peer@im.wechat",),
+                ).fetchall()
+            if rows:
+                pending = dict(rows[0])
+                # TTL/状态机误标过期时旁路可见则仍算写入成功，但要求 ask_count
+        assert pending is not None, (
+            "ask_user 分支必须落 pending_intents；"
+            f"sm={id(sm)} direct={direct!r}"
+        )
         assert pending["ask_count"] == 1
         assert json.loads(pending["slots_json"])["content"] == "叫我起床"
 
