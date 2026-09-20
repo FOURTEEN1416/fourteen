@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from datetime import datetime, timezone
@@ -674,6 +675,69 @@ def test_mp_apply_forgetting_load_facts_exception_returns_zero():
     mp, vm, sm = _make_pipeline()
     sm.get_facts = lambda **kwargs: (_ for _ in ()).throw(RuntimeError("db fail"))  # type: ignore[method-assign]
     assert mp._apply_forgetting() == 0
+
+
+# ── 深夜情感加权必须走本地时钟（2026-09-20 修复回归）────────────────────
+# 缺陷：after_chat 原用 datetime.now(tz=timezone.utc) 取小时，对 UTC+8 主机使
+# _is_late_night(23:00–05:00) 实际落在本地 07:00–13:59 → 重要性 +0.3 整体错位 8 小时。
+#
+# ⚠️ 设计纪律：**不得用"真实墙钟"做断言**（例如"本地 10:00 不该触发"）——
+# 那种写法会随测试运行的时刻巧合通过/失败。下面用"钉时钟来源 + 钉调用实参"的
+# 方式，使断言与运行时刻无关，且改回 UTC 必红。
+
+
+def test_mp_after_chat_feeds_local_clock_to_late_night(monkeypatch):  # type: ignore[no-untyped-def]
+    """after_chat 必须把 now_local() 的值喂给 _is_late_night。
+
+    改回 datetime.now(tz=timezone.utc) 时，now_local 根本不会被调用 →
+    ref 为空 → 本用例变红（与运行时刻无关）。
+    """
+    import shisi.memory.legacy.memory_pipeline as mp_mod
+
+    mp, _, _ = _make_pipeline(fact_extract_interval=10)
+
+    ref: dict = {}
+
+    def _stub_now_local():  # 与 now_local 契约一致：naive 本地时间
+        ref["value"] = datetime.now()
+        return ref["value"]
+
+    monkeypatch.setattr(mp_mod, "now_local", _stub_now_local)
+
+    seen: list = []
+    monkeypatch.setattr(mp, "_is_late_night", lambda ts: (seen.append(ts), False)[1])
+
+    mp.after_chat("我有点难过", "抱抱你")
+
+    assert ref, "after_chat 未调用 now_local —— 墙钟判定走了别的时钟（UTC 回归）"
+    assert seen, "_is_late_night 未被调用"
+    assert seen[0] is ref["value"], "喂给 _is_late_night 的不是 now_local 的值"
+
+
+def test_mp_after_chat_boosts_importance_when_late_night(monkeypatch, caplog):  # type: ignore[no-untyped-def]
+    """深夜分支本身有效：判定为深夜 + 含深夜情感词 → 触发重要性提升。"""
+    mp, _, _ = _make_pipeline(fact_extract_interval=10)
+    monkeypatch.setattr(mp, "_is_late_night", lambda ts: True)  # 钉死为深夜
+
+    with caplog.at_level(logging.DEBUG, logger="memory_pipeline"):
+        mp.after_chat("我有点难过", "抱抱你")
+
+    assert any(
+        "Late-night emotion importance boost" in r.message for r in caplog.records
+    ), "深夜 + 情感词应触发重要性提升"
+
+
+def test_mp_after_chat_skips_boost_when_not_late_night(monkeypatch, caplog):  # type: ignore[no-untyped-def]
+    """非深夜（或消息不含深夜情感词）不得触发提升。"""
+    mp, _, _ = _make_pipeline(fact_extract_interval=10)
+    monkeypatch.setattr(mp, "_is_late_night", lambda ts: False)  # 钉死为非深夜
+
+    with caplog.at_level(logging.DEBUG, logger="memory_pipeline"):
+        mp.after_chat("我有点难过", "抱抱你")
+
+    assert not any(
+        "Late-night emotion importance boost" in r.message for r in caplog.records
+    ), "非深夜不应触发重要性提升"
 
 
 if __name__ == "__main__":

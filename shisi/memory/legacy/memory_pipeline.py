@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from utils.local_time import now_local
+
 from ._legacy_diary_summarizer import DiarySummarizer
 from ._legacy_episodic_memory import EpisodicMemory
 from ._legacy_importance_scorer import ImportanceScorer
@@ -281,9 +283,11 @@ class MemoryPipeline:
         importance = self.scorer.score(user_msg, emotion_tag)
 
         # 1.1 选择性记忆：深夜情感词提升重要性
-        now = datetime.now(tz=timezone.utc)
+        # 2026-09-20 修复：原用 datetime.now(tz=timezone.utc)，对 UTC+8 主机使
+        # _is_late_night（23:00–05:00）实际落在本地 07:00–13:59 —— 深夜加权错位。
+        local_now = now_local()
         try:
-            if self._is_late_night(now):
+            if self._is_late_night(local_now):
                 has_late_night_emotion = any(
                     w in user_msg for w in LATE_NIGHT_EMOTION_WORDS
                 )
@@ -577,7 +581,9 @@ class MemoryPipeline:
                 logger.info("No chats today, skipping daily maintenance")
                 return None
             summary = self.ds.summarize_day(today_chats)
-            date_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+            # 2026-09-20 修复：日记日期键改用本地日期（原用 UTC，本地 00:00–08:00
+            # 的日记会被标成前一天，且与 get_formatted_context 的查询键错位）。
+            date_str = now_local().strftime("%Y-%m-%d")
             self.ds.save_summary(date_str, summary)
             self._last_daily_summary = summary
 
@@ -679,8 +685,10 @@ class MemoryPipeline:
         try:
             summaries = self.ds.get_all_summaries()
             if summaries:
+                # 2026-09-20 修复：查询键必须与 save_summary 的写入键同源（本地日期），
+                # 否则日记写进去却查不出来。
                 context["today_summary"] = summaries.get(
-                    datetime.now(tz=timezone.utc).strftime("%Y-%m-%d"), ""
+                    now_local().strftime("%Y-%m-%d"), ""
                 )
                 trend = self.ds.detect_mood_trend(summaries)
                 context["emotion_trend"] = trend
@@ -772,7 +780,9 @@ class MemoryPipeline:
         try:
             recent = self.sm.get_recent_chats(10)
             # 选择性记忆：过滤掉敷衍且无情感的消息
-            now = datetime.now(tz=timezone.utc)
+            # 2026-09-20 修复：该 now 会被传入 should_store_as_fact → _is_late_night，
+            # 属墙钟判定，须用本地时间（原先 UTC 使深夜规则整体错位 8 小时）。
+            now = now_local()
             user_msgs = [
                 c["content"] for c in recent
                 if c["role"] == "user"

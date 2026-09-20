@@ -2309,3 +2309,41 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **已知限制**：① 主检出现另一窗口并行批次（v1.17 回复质量根治，`e7fb801`），本批测试基线顺延无冲突；② 澄清提问直接作为本轮回复（跳过主链一致性检查/回复模式后处理）——口吻由终审 prompt 角色上下文保证，后续观察；③ 微信通道离线期（token 失效且用户未发消息）提醒投递会失败重试 3 分钟后判死——通道自愈依赖用户任一时刻发消息，属微信 web 协议固有限制。
 
 **三端**：A 档代码 3 端闭环（本地+GitHub+服务器）；本段连同 AGENTS/CODE_GRAPH/DECISION_LEDGER/FUNCTION_INVENTORY/README 为 B 档 commit→push 即完成。
+
+---
+
+## 2026-09-20（八十一）— 墙钟时区缺陷修复批次（B1a/B1b + 死代码清理；A 档）
+
+**任务**：用户指令「修吧」——承接本会话深研 W-D 设计文档（`docs/plans/2026-09-20_小凌架构收敛与双向映射设计.md`）§五的缺陷清单。**范围裁决：只修纯缺陷**（B1a 已生效 UTC 错位 / B1b 潜伏 UTC / B2 死代码）；**B3 接线门槛、B4 回忆强化、B5 遗忘改降级、B6 刻度重构均未动**（涉行为变更，留在该文档 §八 J1-J6 待用户裁决）。
+
+### 根因（先定位再改）
+
+生产服务器实测 `TZ=Asia/Beijing (CST, +0800)` → 凡**显式强制 UTC** 取"小时/日期"做墙钟判定的地方全部错位 8 小时：
+
+| 站点 | 原实现 | 后果 |
+|---|---|---|
+| `memory_pipeline.after_chat`（`:286`） | `datetime.now(tz=timezone.utc)` → `_is_late_night` | `_is_late_night`（23:00–05:00）实落在**本地 07:00–13:59** → "深夜情感记忆加权 `importance + 0.3`"**错位到上午/中午**（真正的深夜零加权）——**功能反向，非崩溃** |
+| `memory_pipeline.daily_maintenance`（`:582`）/ `get_formatted_context`（`:686`） | 同上（`date_str`） | 日记/当日摘要**按 UTC 切日**（本地 00:00–08:00 归入前一天），且写入键与查询键仅在同一墙钟窗口内自洽 |
+| `_do_fact_extraction`（`:778`） | 同上（传入 `should_store_as_fact`） | 同上错位 |
+| `enhanced_prompt_engine.TimeContext.now()`（`:36`） | 同上（`hour` / `is_weekend`） | 潜伏：生产 `config/system.yaml:173 prompt_mode: layered`（`_init_mixin.py:146`）**不走 `enhanced` 分支**，故此前未生效 |
+
+**⚠️ 精度更正（本次查明）**：`should_store_as_fact` 的**规则 3 默认 `return True`** → 规则 2（深夜+情感词→强制存事实）的**布尔值与默认等价、只影响日志**。故 B1a 的**真实活影响只在 `after_chat` 的 importance 加权**，设计文档中"强制存事实"的表述已同步修正。
+
+### 改动
+
+1. **新公共真源** `utils/local_time.py::now_local()` —— 逻辑取自全项目**唯一正确**处理非 UTC+8 主机的那处 `proactive/ase_engine._local_now`（含显式 UTC+8 回退）；返回值形态与原实现**逐字一致**（系统时区正确时 naive、回退时 aware），并写明"只可用于墙钟字段，不得与历史时间戳做跨时区算术"。
+2. `proactive/ase_engine._local_now` → **委托** `now_local()`（**保留函数名**，`proactive/scheduler.py:24-27` 的"静默时段判定必须共用同一时钟源"import 契约与注释继续成立）。
+3. `memory_pipeline.py` 上述 4 处改 `now_local()`；`enhanced_prompt_engine.TimeContext.now()` 改 `now_local()`（并移除因此不再使用的 `datetime/timezone` 导入）。
+4. **删死代码** `my_character/persona_utils.py::build_time_context()`（13 行；全仓 grep 仅定义处 1 命中、**零调用者**；其函数体只调 `TimeContext.now()`——"看着像接好的线"，本次即被它误导过一次），入 `DELETION_LOG`。
+5. **有意保留 UTC（不视为缺陷）**：`memory_pipeline` 的 `session_id` 生成（`:206`）与 `_apply_forgetting` 的 `updated_at`/`days_old` 时间差运算（`:738-739`）—— 墙钟语义与时间差运算两类别**混用会算错经过时长**。
+6. **勘误**：`dynamic_anchor.py:65 time_of_day` 原被设计文档列为"第三套分类器" —— 实为 `AnchorContext` 的 dataclass 字段（默认 `"daytime"`，**全仓零 setter**），非分类器。
+7. **观察项（未改）**：`utils/important_dates.py:54` 用裸 `datetime.now()`（naive 本地）—— 在生产 `TZ=Asia/Beijing` 下**正确**，但**主机时区一旦变更即静默失效**（ASE 有 UTC+8 回退，此处没有）。
+
+### 验证（完成声明四要素）
+
+- **验证证据（含突变验红）**：① **突变验红已做**——将 `after_chat` 改回 `datetime.now(tz=timezone.utc)` → `test_mp_after_chat_feeds_local_clock_to_late_night`（报"after_chat 未调用 now_local"）+ 静态防护 `test_no_wall_clock_utc_regression_in_fixed_sites`（报"4 处 > 允许 3 处"）**同时变红**；还原后全绿。② ⚠️ **首版回归用例存在假通过风险，已重构**——原写法"本地 10:00 不该触发深夜 boost"依赖**真实墙钟**，突变运行恰好落在 UTC 02:00（深夜区间）时会巧合通过；改为"**钉时钟来源 + 钉调用实参**"（`now_local` 打桩记录、断言 `_is_late_night` 收到的正是该值），**与运行时刻无关**。③ 新增 `tests/test_local_time.py`（13 用例：`now_local` 时区契约 2 / `_is_late_night` 边界参数化 6 + 语义钉死 1 / `TimeContext` 本地时钟 2 / 静态防护 1 / `_local_now` 委托 1）+ `tests/test_memory_pipeline.py` 3 用例。④ 分块全量 **1323 收集 / 1319 通过 / 4 跳过 / 0 失败**（241+386+328+364，与 `--collect-only` 1323 **精确吻合**；=v1.18 口径 1307/1303 + 本批 16）。⑤ `ruff check .`（**0.16.8**，与 CI 同版本）→ All checks passed；`scripts/ci_gates.py` → 4/4 门禁通过。⑥ **端点 215 / 唯一路径 181 / DB 表 / 路由数全部不变**（本次无 API 变更）。
+- **边界检查**：`git status` 提交前核验仅含本批文件；**未触前端**；未改 `config/`；未动 `deploy/`（nginx 冻结配置无涉）。
+- **已知限制 / 副作用（已登记）**：① `diary_summaries` 中修复前写入的行仍以 **UTC 日期**为键 → 历史行**一次性键错位**，**不迁移**、自然过期（旧摘要仍可经 `detect_mood_trend` 全量读取）；② **分段表仍未统一**（ASE 6 段 `5-9/9-12/12-14/14-18/18-22/else` vs `TimeContext` 6 段 `6-9/9-12/12-18/18-22/22-24/else`，`noon`/`late_night` 各只在一套里）—— 属**行为变更**，未做，留待裁决；③ `config/shisi.yaml` 的 `app.timezone: "Asia/Shanghai"` 仍**零读取**（与 `now_local` 自身探测系统时区语义重叠，接/删属产品决策）。
+- **置信度**：**高**（根因由生产服务器 `timedatectl` 实测确认；修复有确定性突变验红的回归测试锁定；分块全量零失败且与收集数精确吻合）。
+
+**三端**：**A 档** —— commit→push origin → 服务器 `git pull` + 部署 + health 核验 + 关键文件一致性抽验；文档部分 B 档 commit→push 即完成。

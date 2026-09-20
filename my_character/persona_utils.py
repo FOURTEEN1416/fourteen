@@ -67,19 +67,6 @@ def build_anchor_context(
     )
 
 
-def build_time_context() -> Any:
-    """构建当前时间的 TimeContext
-
-    Returns:
-        TimeContext 实例，或 None（模块不可用时）
-    """
-    try:
-        from my_character.enhanced_prompt_engine import TimeContext
-        return TimeContext.now()
-    except ImportError:
-        return None
-
-
 def extract_context_vars(emotion_state: Any = None, time_context: Any = None) -> dict[str, Any]:
     """从 emotion_state + time_context 提取行为规则所需的上下文变量
 

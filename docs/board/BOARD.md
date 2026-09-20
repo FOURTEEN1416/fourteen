@@ -346,3 +346,15 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **修复**：上下文真源改 DB（重启不失忆+会话隔离+双形态合并）；fact_extractor 增 commitment；追问链键错位双修（ret=-3 全灭根因）；沉浸式放宽 10~80 字（小说式不动）；41 卡多轮示例+19 卡弹性化。
 - **验证**：1269 通过/4 跳过零失败 + ruff；生产实证空 RAM 恢复 50 条历史。三端闭环 e7fb801f。
 - **遗留**：错误占位回复入历史污染 / user_facts 无用户维度（均登记 LOG 待后续批次）。
+
+### 2026-09-20 · 主控窗口 · 墙钟时区缺陷修复批次（A 档：代码 + 文档，用户裁决「修吧」）
+
+- **任务**：承接本会话深研 W-D 设计文档（`docs/plans/2026-09-20_小凌架构收敛与双向映射设计.md`）§五缺陷清单。用户裁决「修吧」→ **只修纯缺陷（B1a/B1b/B2）**；涉行为变更的 B3（接线门槛）/B4（回忆强化）/B5（遗忘改降级）/B6（刻度重构）**未动**，留在该文档 §八 J1-J6 待裁决。
+- **改动**：① 新 **`utils/local_time.py::now_local()`** 公共时钟真源（逻辑取自全项目唯一正确处理非 UTC+8 主机的那处 `proactive/ase_engine._local_now`；`_local_now` 改为**委托**，**保留函数名**使 `proactive/scheduler.py:24-27` 的"静默时段判定必须共用同一时钟源"import 契约不变）；② **`shisi/memory/legacy/memory_pipeline.py` 4 处墙钟判定由 UTC 改本地** —— `after_chat` 深夜情感加权（`:286`）、`daily_maintenance` 日记日期键（`:582`）、`get_formatted_context` 当日摘要查询键（`:686`）、`_do_fact_extraction` 的 `should_store_as_fact` 入参（`:778`）；③ **`my_character/enhanced_prompt_engine.py::TimeContext.now()`** 改本地；④ **删死代码** `my_character/persona_utils.py::build_time_context()`（13 行，全仓零调用者，入 `DELETION_LOG`）。
+- **根因**：UTC+8 部署（生产 `TZ=Asia/Beijing`，已实测确认）下 `_is_late_night`（23:00–05:00）实落在**本地 07:00–13:59** → 为深夜情绪专门设计的"重要性 +0.3"整体错位到上午/中午（**功能反向，非崩溃**）；日记/当日摘要按 UTC 切日。**精度更正**：`should_store_as_fact` 规则 3 默认 `return True`，故规则 2 的布尔值与默认等价、**真实活影响只在 importance 加权**（原设计文档"强制存事实"表述已在本次修正）。
+- **有意保留 UTC**：`session_id` 生成（`:206`）与 `_apply_forgetting` 的 `updated_at`/`days_old` 时间差运算（`:738-739`）—— 墙钟语义与时间差运算两类别混用会算错经过时长。
+- **验证（含突变验红）**：把 `after_chat` 改回 `datetime.now(tz=timezone.utc)` → `test_mp_after_chat_feeds_local_clock_to_late_night` 与静态防护 `test_no_wall_clock_utc_regression_in_fixed_sites` **同时变红**，还原后全绿。⚠️ 首版回归用例用"真实墙钟"断言（本地 10:00 不该触发），**实测发现会随运行时刻巧合假通过**，已改为"钉时钟来源 + 钉调用实参"的确定性写法（与运行时刻无关）。分块 pytest **1323 收集 / 1319 通过 / 4 跳过**（241+386+328+364 精确吻合）+ ruff 0.16.8 全仓 0 错 + CI 门禁 4/4。**端点/路径/DB 表/路由数全部不变**。
+- **文档同步**：AGENTS **v1.19**（版本头 + Owner Map + §0 技术栈 + §4.3 七次刷新 + 修订历史行）/ CODE_GRAPH **v3.8.9**（§1.1 测试行 + 版本头 + 修订历史行）/ README（徽章 1417 + 口径 + 目录树）/ CODEMAPS INDEX（两处 + 头部 v3.8.9）/ DELETION_LOG。
+- **⚠️ 副作用已登记**：`diary_summaries` 中修复前写入的行仍以 **UTC 日期**为键 → 历史行一次性键错位，**不迁移**、自然过期（旧摘要仍可经 `detect_mood_trend` 全量读取）。
+- **待裁决（同文档 J 表）**：`config/shisi.yaml` 的 `app.timezone`（接上/删）+ 分段表统一（ASE 6 段 vs `TimeContext` 6 段但边界不同）—— 两者属行为变更。
+- **三端**：A 档 —— commit→push origin→服务器 pull+部署→health 核验（见 LOG 同批次条目）。

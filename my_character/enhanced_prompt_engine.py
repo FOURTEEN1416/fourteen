@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
+
+from utils.local_time import now_local
 
 if TYPE_CHECKING:
     from my_character.contextual_behavior import ContextualBehavior
@@ -33,7 +34,10 @@ class TimeContext:
 
     @classmethod
     def now(cls) -> TimeContext:
-        now = datetime.now(tz=timezone.utc)
+        # 2026-09-20 修复：原用 datetime.now(tz=timezone.utc) 取 hour/weekday 做墙钟
+        # 判定，对 UTC+8 主机使时段判断（含 is_weekend）整体错位 8 小时。
+        # 现统一走 utils.local_time.now_local（公共真源）。
+        now = now_local()
         hour = now.hour
         if 6 <= hour < 9:
             period = "morning"

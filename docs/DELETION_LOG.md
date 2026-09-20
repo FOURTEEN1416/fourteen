@@ -490,3 +490,31 @@ equire() in MessageList.tsx even though MessageList is unused
 **Verification**: 旧路径引用 grep 归零（仅存 knowledge_routes 注释一条）；本地 config 25 张 JSON 校验 25/25 过；全量 pytest **1060 passed / 4 skipped**（+48 = 25 卡 × test_persona_injection 每卡 2 参数化用例全覆盖，0 失败）；ruff 7 文件全过。
 
 **Reversible**: 代码单提交 revert；卡数据解包 tar 即恢复。
+
+---
+
+## [2026-09-20] 删除死代码 `persona_utils.build_time_context`（墙钟时区缺陷修复批次附带）
+
+### 删除对象与证据
+- `my_character/persona_utils.py::build_time_context()`（13 行：函数体 + docstring）
+  - **零调用者**：全仓 grep `build_time_context`，除本定义处外**零命中**（含 `tests/`、`shisi/`、`orchestrator/`）
+  - **它是"看着像接好的线"**：函数体只做一件事 —— `TimeContext.now()`，而该实现原有 UTC 墙钟缺陷（本次同批修复）。留着会误导后续窗口以为"时间上下文已接线"
+  - 替代路径：需要 `TimeContext` 的调用方**直接** `TimeContext.now()`（现为本地时钟，见 `my_character/persona_engine.py:418`）
+
+### 同批修复（非删除）
+- `shisi/memory/legacy/memory_pipeline.py` 4 处墙钟判定由 UTC 改本地：`after_chat` 深夜情感加权（`:286`）、`daily_maintenance` 日记日期键（`:582`）、`get_formatted_context` 当日摘要查询键（`:686`）、`_do_fact_extraction` 的 `should_store_as_fact` 入参（`:778`）
+- `my_character/enhanced_prompt_engine.py::TimeContext.now()` 由 UTC 改本地
+- 新增公共真源 `utils/local_time.py::now_local()`；`proactive/ase_engine._local_now` 改为委托它（**保留函数名**，`proactive/scheduler.py` 既有 import 与"共用时钟源"注释继续成立）
+- **保留不动**：`memory_pipeline` 中 `session_id` 生成（`:206`）与 `_apply_forgetting` 的 `updated_at`/`days_old` 时间差运算（`:738-739`）—— 这两类**必须**用 UTC
+
+### 验证
+- `ruff check`（0.16.8，CI 同版本）→ All checks passed
+- 新增 `tests/test_local_time.py`（13 用例）+ `tests/test_memory_pipeline.py` 3 用例；**突变验红已做**：把 `after_chat` 改回 `datetime.now(tz=timezone.utc)` → `test_mp_after_chat_feeds_local_clock_to_late_night` 与静态防护 `test_no_wall_clock_utc_regression_in_fixed_sites` **同时变红**，还原后全绿（两用例均与运行时刻无关，无墙钟巧合）
+- 分块全量 pytest 见 LOG 同批次条目
+
+### Impact
+- 删除 1 个死函数（13 行）；**无行为变更**（零调用者）
+- 修复：UTC+8 部署下"深夜情感记忆加权"由错位在本地 07:00–13:59 恢复为真正的 23:00–05:00；日记/当日摘要按本地日期切分
+- 副作用（已登记）：`diary_summaries` 中修复前写入的行仍以 **UTC 日期**为键，修复后当日查询键为本地日期 → **历史行存在一次性键错位**，不迁移、自然过期（旧摘要仍可经 `detect_mood_trend` 全量读取）
+
+**Reversible**: 代码单提交 revert 即恢复；死函数无调用方，删除不影响任何路径。

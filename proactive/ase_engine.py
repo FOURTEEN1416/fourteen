@@ -26,6 +26,7 @@ from typing import Any
 
 from proactive.frequency import FrequencyAdapter, FrequencyController
 from proactive.reflection import InnerMonologue, ReflectionEngine
+from utils.local_time import now_local
 
 logger = logging.getLogger("ase_engine")
 
@@ -34,15 +35,11 @@ def _local_now() -> datetime:
     """获取本地时间（用于场景触发判断）。
 
     场景触发配置（morning_hours/night_hours/meal_hours）按北京时间设计。
-    优先用系统本地时间（服务器应配置 Asia/Shanghai）；
-    若系统时区非 UTC+8（如容器内默认 UTC），强制使用 UTC+8。
+    实现已提为公共真源 ``utils.local_time.now_local``（2026-09-20）：
+    原先全项目只有这里正确处理了非 UTC+8 主机，现由公共模块统一，
+    本函数保留为兼容入口 —— ``proactive/scheduler.py`` 等既有调用方无需改动。
     """
-    # 检测系统时区偏移（秒）
-    offset_sec = -time.altzone if time.daylight and time.localtime().tm_isdst else -time.timezone
-    # UTC+8 = 28800 秒；偏差超过 1 小时即认为系统非北京时区
-    if abs(offset_sec - 28800) > 3600:
-        return datetime.now(tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
-    return datetime.now()
+    return now_local()
 
 
 # ═══════════════════════════════════════════════════════════════
