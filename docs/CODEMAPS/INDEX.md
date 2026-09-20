@@ -1,10 +1,10 @@
 # 代码地图索引
 
-> **✅ 2026-09-19 全量刷新**：目录结构与关键指标已按代码实况重写（`ls`/`find` 实测）；历史漂移声明留档见 `docs/history/INDEX.md`。权威数字以 `CODE_GRAPH.md` v3.8.2 为准。
+> **✅ 2026-09-20 增量刷新**：在 09-19 全量刷新基线上，逐一历遍补齐 09-19 晚通道隔离批次等代码漂移（端点 215 / api 45 文件 / 41 张卡 / 测试 1353）；历史漂移声明留档见 `docs/history/INDEX.md`。权威数字以 `CODE_GRAPH.md` v3.8.6 为准。
 
-**最近更新:** 2026-09-19
+**最近更新:** 2026-09-20
 **项目版本:** 3.1.0
-**项目规模:** ~356 Python 文件 + ~110 TS/TSX 文件 | 当前分支: `main`
+**项目规模:** ~511 Python 文件（含 tests；核心模块 351 + tests 80 + scripts/tools 等） + ~108 TS/TSX 文件 | 当前分支: `main`
 **架构框架:** FastAPI (后端) + React/Vite (前端) + SQLite/ChromaDB (数据)
 
 ---
@@ -35,14 +35,14 @@
 
 ```
 unique-you/
-├── api/                    # FastAPI 路由层 (44 py 文件：app_factory/run_api/21 routers/
+├── api/                    # FastAPI 路由层 (45 py 文件：app_factory/run_api/22 routers/
 │                           #   achievement_engine/database/auth/auth_jwt/deps/
 #                           #   health_routes/main_routes/qrcode_store/websocket_server/state/...)
 ├── shisi/                  # DDD 核心域 (115 py 文件，v2 死模块删除后口径)
 ├── my_character/           # 情感引擎 (21 py 文件)
 ├── frontend/               # React 前端 SPA (17 pages / 13 api 模块 / 3 store)
 ├── orchestrator/           # 编排包 (7 文件：主类+init/stream mixin+session_locks+voice_detector+console_chat)
-├── persona_extractor/      # 人格提取 (12 模块)
+├── persona_extractor/      # 人格提取 (13 文件)
 ├── tools/                  # 工具系统 (10 py 文件, 12 内置工具)
 ├── observability/          # 可观测性 (9 py 文件)
 ├── security/               # 安全模块 (4 模块 + __init__)
@@ -55,10 +55,10 @@ unique-you/
 ├── memory_ext/             # 记忆扩展 (mem0 后端)
 ├── proactive/              # 主动消息 (5 文件)
 ├── multimodal/             # 多模态 (image_attachment + multimodal_processor)
-├── wechat_direct/          # 微信直连 (wechat_connector)
+├── wechat_direct/          # 微信直连 (5 文件：每人独立通道 registry/paths/peer + connector)
 ├── plugins/                # 插件系统 (2 文件)
-├── config/                 # YAML/JSON 配置 + config/characters/ 角色卡库（25 张，唯一真源）
-├── tests/                  # 测试 (1060 Python 通过 + 4 跳过 / 87 前端)
+├── config/                 # YAML/JSON 配置 + config/characters/ 角色卡库（41 张，唯一真源）
+├── tests/                  # 测试 (1255 Python 通过 + 4 跳过 / 98 前端)
 └── docs/                   # 文档
     ├── CODEMAPS/           # ← 本目录
     ├── adr/                # 架构决策记录 (11 篇)
@@ -69,13 +69,13 @@ unique-you/
 
 > `weclone_adapter/` 已于 08-28 删除（克隆收敛为本地提取+JSON 上传，DECISION_LEDGER 08-28 行）。
 
-### 关键指标（2026-09-19 实测）
+### 关键指标（2026-09-20 实测）
 
 | 指标 | 值 |
 |------|-----|
-| API 端点 | **204 业务端点 / 171 唯一路径**（16 include_router + setup_shisi，`create_api_app` 内省实扫；⚠️ `len(app.routes)=208` 含 4 条框架路由） |
+| API 端点 | **215 业务端点 / 181 唯一路径**（18 include_router + setup_shisi，`create_api_app` 内省实扫；⚠️ `len(app.routes)=219` 含 4 条框架路由） |
 | 前端页面 | 17 页面文件（全部挂载；幽灵层三页+DemoPage 已删） |
-| 测试用例 | **1147 = 1060 Python 通过（4 跳过）+ 87 前端通过**（2026-09-19 实跑全绿） |
+| 测试用例 | **1353 = 1255 Python 通过（4 跳过）+ 98 前端通过**（2026-09-20 实跑全绿） |
 | 活跃 ADR | 11（0001–0007 + 0011–0014；0008–0010 空缺未使用） |
 | Fitness Functions | 17 (12 CI + 5 手动) |
 | 总线因子 | 1 (唯一开发者: 默默) |

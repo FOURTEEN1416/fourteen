@@ -303,3 +303,12 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **产出**：`docs/reports/2026-09-20_经历因果研究交接与深研任务包.md`——① 已耕区域勿重复清单（六项，含勘误规则）；② 前置阅读顺序；③ **W-A~W-G 七个可并行工作包**（W-A 小凌一手素材深掘【用户点名优先：transcripts 79MB+手稿 10 图+弱信息层作品+迭代史还原+评论区共创线索，带 ASR 校正表】/ W-B 公式×学术文献对照批判 / W-C GitHub 补深与代码级验证 / W-D P0-P4 方案细化【EventLedger ADR/标定方案/注入基线测量/五轴映射/S1-S6 实施设计】/ W-E 评测验证体系 / W-F 商业竞品【上轮零覆盖】/ W-G 作者动态追踪）；④ 并行安全矩阵（各包独立产出，共享触点仅 BOARD/LOG 追加区，认领走追加区）；⑤ 产出规范（B 档闭环+验证=结论可溯源）。
 - **注意**：W-D 的 EventLedger 设计须衔接本日主控两批次的新事实——41 卡基数（persona 参数化用例数已变）与 v1.15 prompt 重排（creator_notes 已在 PHI 位、对话示例段已存在），五轴映射与注入排序设计以 v1.15 后的 prompt 结构为基准。
 - **边界**：纯文档；深化研究全程只读代码；待用户裁决项（P0-P4/S1-S6）不因深化研究而默认获批。
+
+### 2026-09-20 · 主控窗口（zcode）· 全仓遍历·文档对齐批次（精读所有代码，逐一历遍；零代码变更，B 档）
+
+- **任务**：用户点名「项目高速迭代，反映代码现状的文档基本全部落后——精读所有代码，逐一历遍，更新文档」。
+- **方法**：project-governance 增量重建七步——变更带 `54c3b1a..HEAD`（111 文件 +7682/−1154）全量核对 + 探针实扫（`create_api_app` 端点内省 / Glob 清点 / 分块 pytest 全量 / vitest / tsc）。
+- **核心发现**：09-19 白天文档对齐**之后**当晚落地的「每人独立微信通道隔离」（`3e66930`，+2195 行）与「JWT-only 复核收口」从未回扫代码实况文档——端点 204→**215**/路径 **181**、include_router 16→**18**、routers 21→**22**、api 44→**45**、DB 6→**8 表**、wechat_direct 2→**5 文件**；另认证口径改 JWT 优先、新增 `utils/reply_mode.py`（沉浸式/小说式）+ 追问 follow_up、安全 LLM 分类默认关闭、RoleSettings 六 tab→**五 tab**、链双真源（llm_providers.json 自带链 zhipu 首选 vs 生产主链 system.yaml agnes 首选）等。
+- **回写**：CODE_GRAPH **v3.8.6**（含新增 §4.7.1 通道子系统）+ README + AGENTS **v1.16** + docs 入口 + CODEMAPS 六件 + FUNCTION_INVENTORY（WECHAT-1..4/N-CHANNEL-1/MESSAGE-5,6/STORY/GLOBAL-3/五 tab/行数校准）+ DECISION_LEDGER 六行 + VISION + P1_BACKLOG + LOG + 本板。
+- **验证**：分块 pytest **1255 passed/4 skipped**（与收集 1259 精确吻合）+ vitest **98/98** + tsc **0 错** + 端点内省 215/181。
+- **三端**：B 档纯文档 commit→push 即闭环；服务器不上文档。

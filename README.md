@@ -8,14 +8,14 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-1147-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-1353-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **测试口径**（2026-09-19 实测）：后端 `1082 passed / 4 skipped`（系统 Python 3.12，收集 1086；⚠️ 单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3）；
-> 前端 `87 passed`（vitest 15 文件）+ `tsc --noEmit` 0 错误。
+> **测试口径**（2026-09-20 实测）：后端 `1255 passed / 4 skipped`（系统 Python 3.12，收集 1259；⚠️ 单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3）；
+> 前端 `98 passed`（vitest 16 文件）+ `tsc --noEmit` 0 错误。
 
 ---
 
@@ -66,7 +66,7 @@ python main.py
 
 | 能力 | 说明 |
 |------|------|
-| **微信聊天** | 扫码登录，文字/语音消息都支持。多用户可以同时聊，各自独立 |
+| **微信聊天** | 扫码登录，文字/语音消息都支持。**每人独立微信通道**（一人最多 2 条，互不干扰；好友可在微信里回复「角色」自选扮演角色），多用户同时聊，各自独立 |
 | **角色系统** | 每个微信用户绑一个角色卡，性格、说话风格、口头禅都能调 |
 | **情感引擎** | 聊得越久越了解你，有亲密度和情感阶段变化 |
 | **主动搭话** | 不全是等你发消息，系统也会主动找话题 |
@@ -155,19 +155,20 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 ## 项目结构
 
 ```
-├── api/                  FastAPI 后端（204 端点 / 171 条路径，2026-09-17 内省实测）
+├── api/                  FastAPI 后端（215 端点 / 181 条路径，2026-09-20 内省实测）
 │   ├── app_factory.py    create_api_app() —— 唯一 app 工厂
-│   ├── routers/          21 个域路由模块（character/chat/misc/personality/users/
+│   ├── routers/          22 个域路由模块（character/chat/misc/personality/users/
 │   │                     training/tools/safety/clone/auth/admin/invite/voice/
-│   │                     mimo_voice/storyline/wechat/emotion/memory/knowledge/
-│   │                     persona_card/llm_providers）
+│   │                     mimo_voice/storyline/wechat/wechat_channel/emotion/memory/
+│   │                     knowledge/persona_card/llm_providers）
 │   └── achievement_engine.py / database.py / auth_jwt.py / deps.py ...
 ├── orchestrator/         编排器（7 文件）：主类 + _InitPhasesMixin + _StreamPipelineMixin
 │                         + session_locks + voice_detector + console_chat
 ├── shisi/                DDD 领域层（115 文件）：application / core / infrastructure /
 │                         character / knowledge / memory / affinity / voice / vault ...
 ├── voice/                MiMo Cloud TTS + 音频转码（silk）
-├── wechat_direct/        微信直连（扫码登录 + 收发消息）
+├── wechat_direct/        微信直连（每人独立通道：connector_registry + channel_paths
+│                         + peer_character + wechat_connector）
 ├── user_scheduler.py     多用户调度（每个微信用户独立情感状态）
 ├── my_character/         情感引擎 + 角色卡
 ├── llm_provider/         LLM 接入层（多供应商 fallback）
@@ -183,7 +184,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │       ├── store/        Zustand 3 个（authStore / characterBuilderStore / errorStore）
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
-├── tests/                1082 后端测试通过 + 4 跳过（2026-09-19 实测）+ 87 前端测试
+├── tests/                1255 后端测试通过 + 4 跳过（2026-09-20 实测）+ 98 前端测试
 ├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容）
 └── main.py               入口
 ```

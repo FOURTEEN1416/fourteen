@@ -1,8 +1,8 @@
 # 架构地图
 
-**最近更新:** 2026-09-19
-**演进阶段:** Phase 14 (投产准备) → Phase 15 (品牌清洗) → Phase 16 (P0 全面修复 + CI 加固) → Phase 17 (全仓性能/正确性扫描)
-**数据口径:** 端点与模块数均为 2026-09-19 实测（`create_api_app()` 内省 + 文件扫描），非文档估算值
+**最近更新:** 2026-09-20
+**演进阶段:** Phase 14 (投产准备) → Phase 15 (品牌清洗) → Phase 16 (P0 全面修复 + CI 加固) → Phase 17 (全仓性能/正确性扫描) → Phase 18 (每人独立微信通道)
+**数据口径:** 端点与模块数均为 2026-09-20 实测（`create_api_app()` 内省 + 文件扫描），非文档估算值
 
 ---
 
@@ -26,9 +26,9 @@
 │                    FastAPI 路由层 (:8000)                        │
 │                                                                  │
 │  ┌──────────────┐  ┌────────────────┐  ┌────────────────────┐  │
-│  │ 21 路由模块  │  │ 204 endpoints  │  │ 认证层             │  │
-│  │ (api/routers)│  │ (create_api_app│  │ JWT + X-API-Key   │  │
-│  │ + shisi/api  │  │ │  实扫)       │  │                    │  │
+│  │ 22 路由模块  │  │ 215 endpoints  │  │ 认证层             │  │
+│  │ (api/routers)│  │ (create_api_app│  │ JWT 优先 + X-API-Key│  │
+│  │ + shisi/api  │  │ │  实扫)       │  │ （JWT=用户，Key=机器）│  │
 │  └──────┬───────┘  └───────┬────────┘  └────────────────────┘  │
 └─────────┼──────────────────┼───────────────────────────────────┘
           │                  │
@@ -61,9 +61,9 @@
 ## 编排器架构
 
 > **注:** 编排逻辑位于 `orchestrator/` 包，包含 7 个文件（含 `__init__.py`）：
-> - `optimized_orchestrator.py` (1020行) — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / `_prepare_context` / `process_message` / `_after_process` / `health_check`
+> - `optimized_orchestrator.py` (1050行) — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / `_prepare_context` / `process_message` / `_after_process` / `health_check`
 > - `_init_mixin.py` (510行) — `_InitPhasesMixin`：`initialize` 调用 10 个 `_init_*` 阶段；其中 `_init_memory_and_rag` 再级联 `_init_ase_and_scheduler` / `_init_tools` / `_init_rag`，共 13 个阶段方法
-> - `_stream_mixin.py` (373行) — `_StreamPipelineMixin`：`process_message_stream` SSE 真流式/伪流式降级
+> - `_stream_mixin.py` (376行) — `_StreamPipelineMixin`：`process_message_stream` SSE 真流式/伪流式降级
 > - `session_locks.py` — 会话锁管理（`SessionLockManager`）
 > - `voice_detector.py` — 语音活动检测
 > - `console_chat.py` — 控制台聊天通道

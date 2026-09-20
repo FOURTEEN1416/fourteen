@@ -1,8 +1,8 @@
 # 后端地图
 
-> **✅ 2026-09-19 全量刷新**：端点统计已按 `create_api_app()` 内省实测重写（**204 业务端点 / 171 唯一路径**；`len(app.routes)=208` 含 4 条框架路由）。逐模块端点数以本图模块级清单 + `CODE_GRAPH.md` v3.8.2 §4.2（按 tag 分布，权威）为准。
+> **✅ 2026-09-20 增量刷新**：在 09-19 全量刷新基线上补齐 09-19 晚通道隔离批次——端点统计已按 `create_api_app()` 内省实测重写（**215 业务端点 / 181 唯一路径**；`len(app.routes)=219` 含 4 条框架路由）。逐模块端点数以本图模块级清单 + `CODE_GRAPH.md` v3.8.6 §4.2（按 tag 分布，权威）为准。
 
-**最近更新:** 2026-09-19
+**最近更新:** 2026-09-20
 **版本:** 3.1.0
 **入口文件:** `api/run_api.py`, `api/app_factory.py`, `main.py`, `orchestrator/`
 
@@ -11,7 +11,7 @@
 ## 架构分层
 
 ```
-api/ (44 py 文件)            ← FastAPI 路由层
+api/ (45 py 文件)            ← FastAPI 路由层
 ├── run_api.py              ← 启动入口 (uvicorn + flock 调度器单例/微信连接自动恢复)
 ├── app_factory.py          ← APP 工厂 (create_api_app) — 唯一构造入口
 ├── auth.py                 ← X-API-Key 认证依赖
@@ -28,13 +28,14 @@ api/ (44 py 文件)            ← FastAPI 路由层
 ├── session_manager.py      ← 会话管理
 ├── state/                  ← safety_log / tool_history / training_state
 │
-└── routers/                ← 路由模块 (21 个，不含 __init__.py)
+└── routers/                ← 路由模块 (22 个，不含 __init__.py)
     ├── character_routes.py   (21 endpoints，tag=character)
-    ├── misc_routes.py        (16，含 /api/user/llm-config GET/POST、日记种子)
+    ├── misc_routes.py        (16，含 /api/user/llm-config GET/POST、日记种子、follow_up/reply_mode 配置)
     ├── training_routes.py    (13，training/* + proactive/*)
     ├── safety_routes.py      (12，safety/rag/voice/files/cache)
-    ├── chat_routes.py        (11，chat/session + wechat channels)
+    ├── chat_routes.py        (11，chat/session + wechat channels；旧全局微信端点已收敛 admin 兼容面)
     ├── personality_routes.py (10，emotion/persona/psych)
+    ├── wechat_channel_routes.py (11，tag=wechat-channel 9 + admin-wechat 2；每人独立通道，JWT)
     ├── wechat_routes.py      (9，wechat/*；另有 qrcode_store 1 端点独立挂载)
     ├── clone_routes.py       (8)
     ├── auth_routes.py        (8)
@@ -57,21 +58,25 @@ api/ (44 py 文件)            ← FastAPI 路由层
 ```
 
 > demo_routes 已于 2026-08-28 删除（D1 裁决）；`shisi/api/v2/` 死模块已于 2026-09-18 删除。
+> **每人独立微信通道（2026-09-19）**：`/api/wechat/channel/*` 仅 JWT 本人
+> （状态/list/connect/qrcode/disconnect/reconnect/好友选角 peers+characters）；
+> `/api/admin/wechat/*` 为 admin 运维面（全局通道摘要/强制下线）。
 
 ---
 
-## API 端点清单（模块级，2026-09-19 内省实测）
+## API 端点清单（模块级，2026-09-20 内省实测）
 
 | 模块 (tag) | 端点数 | 路径前缀 |
 |------|------|------|
 | character | 21 | /api/characters/*, /api/presets/*（含 .png 导入/导出） |
 | misc | 16 | /api/stats, /api/dashboard, /api/memory/facts, /api/logs*, /api/config, /api/user/llm-config, /api/channels, /api/routes, /api/memory/diary* |
-| training | 13 | /api/training/*, /api/proactive/*（config/send/pause/history） |
+| training | 13 | /api/training/*, /api/proactive/*（config 含 follow_up/reply_mode、send/pause/history） |
 | safety-infra | 12 | /api/safety/*, /api/rag/*, /api/voice/*, /api/files/*, /api/cache/* |
 | chat | 11 | /api/chat/*, /api/session/*, /api/wechat/status |
+| wechat-channel | 9 | /api/wechat/channel/*（每人独立通道，JWT 本人） |
 | personality | 10 | /api/emotion/*, /api/persona/*, /api/psych/* |
 | memory | 10 | api memory_routes(4) + shisi memory_routes(6) |
-| wechat | 9 | /api/wechat/*（另有 qrcode 1 端点独立挂载） |
+| wechat | 9 | /api/wechat/*（另有 qrcode 1 端点独立挂载，admin 兼容） |
 | clone | 8 | /api/clone/*（含 /api/clone/upload） |
 | auth | 8 | /api/auth/*（register/login/refresh/logout/me GET/PUT/DELETE/password/check-invite） |
 | knowledge | 8 | /api/characters/{id}/knowledge/*, /api/characters/{id}/enrich |
@@ -90,11 +95,12 @@ api/ (44 py 文件)            ← FastAPI 路由层
 | persona (shisi) | 3 | /api/shisi/persona |
 | persona-card | 3 | /api/persona-card/* |
 | health | 2 | /api/health, /api/ready（无认证，探活） |
+| admin-wechat | 2 | /api/admin/wechat/*（通道摘要/强制下线） |
 | emotion | 2 | /api/emotion/params/* |
 | vital-signs | 1 | /api/shisi/vital-signs |
 | stats (shisi) | 1 | /api/shisi/stats |
 | (untagged) | 1 | /api/wechat/qrcode |
-| **合计** | **204** | 95 GET / 74 POST / 20 DELETE / 15 PUT |
+| **合计** | **215** | 101 GET / 78 POST / 16 PUT / 20 DELETE |
 
 ---
 
@@ -102,15 +108,19 @@ api/ (44 py 文件)            ← FastAPI 路由层
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    双轨认证系统                            │
+│              认证体系（2026-09-19 起 JWT 优先）            │
 │                                                          │
-│  JWT Bearer Token (用户认证)      X-API-Key (内部服务)     │
+│  JWT Bearer Token (用户认证，优先)   X-API-Key (机器)     │
 │  ┌──────────────────────┐      ┌──────────────────────┐  │
 │  │ /api/auth/login      │      │ 请求头: X-API-Key   │  │
-│  │ ↓ access_token (15m) │      │ 用于服务间通信        │  │
-│  │ ↓ refresh_token (7d) │      │ 不经过用户身份验证     │  │
+│  │ ↓ access_token (15m) │      │ 用于服务间通信/脚本/  │  │
+│  │ ↓ refresh_token (7d) │      │ E2E；不经过用户身份   │  │
 │  │ ↓ bcrypt 密码哈希     │      │                      │  │
 │  └──────────────────────┘      └──────────────────────┘  │
+│                                                          │
+│  verify_api_key_dep：有效 Bearer JWT → 直接放行（控制台    │
+│  用户无需携带全局 API Key，前端 bundle 不含 Key 明文）；   │
+│  否则 API_KEY_ENABLED 且 X-API-Key 匹配 → 放行            │
 └─────────────────────────────────────────────────────────┘
 ```
 

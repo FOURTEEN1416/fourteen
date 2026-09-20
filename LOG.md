@@ -7,6 +7,39 @@
 
 ---
 
+## 2026-09-20 — 全仓遍历·文档对齐批次（精读所有代码，逐一历遍，更新文档；零代码变更）
+
+**任务**：用户点名「项目高速迭代，反映代码现状的文档基本全部落后——精读所有代码，逐一历遍，更新文档」。技能加载：`project-governance`（增量重建七步规程）+ `repo-governance-scan`（只读探针）。
+
+**方法**（增量重建，不从零推倒）：① 文档全景盘点（根 4 md + docs 14 md + CODEMAPS 六件全读）；② 变更带提取 `git diff --stat 54c3b1a..HEAD`（=09-19 白天全仓扫描落账之后）——**111 文件 +7682/−1154** 全量核对；③ 探针实扫：`create_api_app()` 端点内省 + Glob/`ls` 文件清点 + 分块 pytest 全量 + vitest + tsc。
+
+**核心发现**：09-19 白天文档对齐落账后，当晚 22:26 `3e66930` 落地**每人独立微信通道隔离**（+2195 行）与 **JWT-only 复核收口**，次日又有材质/克隆假进度/角色/提示词四批次——均只落 LOG/AGENTS 批次行，**代码实况文档从未回扫**。具体漂移（全部实证）：
+- **端点 204→215 / 唯一路径 171→181**：新增 `wechat-channel`(9)+`admin-wechat`(2)（`api/routers/wechat_channel_routes.py` 一个文件双 router）；方法分布 95/74/20/15→**101 GET/78 POST/16 PUT/20 DELETE**；include_router 16→**18**
+- **api/ 44→45 文件**（routers 21→**22**；byok/consent/password_policy 三个早前 helper 此前未被 CODEMAPS 登记）
+- **DB 6→8 表**：+`wechat_channel_sessions`（(user_id,slot) 通道会话，status 五态）+`wechat_peer_preferences`（好友自选角色 (owner,peer)→card）
+- **wechat_direct 2→5 文件（2191 行）**：channel_paths（`data/wechat_sessions/<uid>/slotN/` 路径唯一真源，一人 2 条/全局 100）、connector_registry（per-user×slot 注册表+每会话 poll.lock）、peer_character（微信内「角色」指令选角）、wechat_connector（回复拆分/追问引擎/按 owner+slot 状态）
+- **认证口径**：`verify_api_key_dep` 有效 Bearer JWT 优先放行——用户侧 API 仅 JWT、API Key 留机器/脚本/E2E（09-19 裁决，文档一直写「双认证」未提优先级）
+- **链双真源**：`config/llm_providers.json` 新增顶层 `fallback_chain: [zhipu,agnes,xunfei,baidu,deepseek]`（供应商页 sort_order 同步 zhipu 第一）——但生产主链仍 system.yaml 的 agnes 首选（编排器显式传入）；裸 `get_llm()` 路径才用 json 链
+- **llm_provider**：网关新增**常驻同步事件循环**（修 chat_sync 每次 asyncio.run 重建 httpx 连接池，单条消息 2 次 LLM 11~20s→~2.7s）
+- **新模块 `utils/reply_mode.py`**：沉浸式真人/小说式回复模式（web 切换，真源 `data/scheduler_config.json`）+ **对话内追问 follow_up**（delay1/delay2/daily_max web 可调）——MESSAGE tab 新增两组控件
+- **安全**：`SAFETY_LLM_CLASSIFY`/`PROMPT_INJECTION_LLM` 默认关闭（生产实证 LLM 层从未真正参与判定，规则闸门一直是实际生效层，每消息白烧 3~6s 已省）；注入检测超时不再误判为攻击
+- **前端**：RoleSettings **六 tab→五 tab**（StickersTab 撤除）；`constants/persona.ts` 标签字典单一真源；App.tsx 重型页面 lazy 化+`/psych` 并入控制台外壳；WeChatPage 改「我的微信」通道语义；剧情线独立页统一外壳；材质体系（环境色场+三档材质阶梯）全站落地
+- **websocket `_send_to_all` 真实送达语义**（0 送达抛异常，不再谎报 websocket 送达）
+- **页面行数普遍漂移**：StatusCenter 77→430、RolesPage 125→170、CreateRole 701→729 等 10 处
+- **CODE_GRAPH 内部矛盾**：§1.1 main.py 415 行 vs §4.1 574 行（实测 438）；§10 语音行残留 edge-tts（08-28 已删）
+
+**回写清单**（13 文件，零代码变更）：CODE_GRAPH **v3.8.6**（头部增量/§1.1 六行/§2 mermaid/§4.1/§4.2 三处/新增 §4.7.1 通道子系统/§4.7 链注记+性能修复/§4.9 vitest/§10 两行/§13 新行）+ README（徽章 1353/测试口径段/微信聊天行/结构树）+ AGENTS **v1.16**（头部/§0 微信行/§4.3 分块注记修正/修订历史）+ docs/README（v3.8.6 行）+ CODEMAPS 六件（INDEX 45 文件/215 端点/1353 测试/41 卡；ARCHITECTURE Phase 18/JWT 优先/行数；BACKEND 22 路由清单/端点表 215/认证体系改 JWT 优先；FRONTEND constants 目录/五 tab/材质体系节/98 测试；DATABASE 8 表+两新表/41 卡/42 索引文件/通道凭证目录；MODULES wechat_direct 5 文件+新节/api 45/orchestrator 7 文件/字数头修正）+ FUNCTION_INVENTORY（WECHAT-1..4 重写、N-CHANNEL-1、MESSAGE-5/6、STICKERS-1 撤除登记、STORY-1/2 新节、GLOBAL-3 材质、10 处行数校准）+ DECISION_LEDGER（09-19 晚通道隔离/JWT-only + 09-20 四批次 + 本批共 6 行）+ VISION（基线段重写：通道隔离/JWT 优先/prompt 重排/215 端点/判据 1353）+ P1_BACKLOG（09-20 核对头）+ 本 LOG + BOARD。
+
+**验证**（完成声明四要素）：
+- 证据：分块 pytest **410+317+319+209 = 1255 passed / 4 skipped**（与 `--collect-only` 1259 精确吻合；⚠️ AGENTS 旧注记「test_knowledge_routes_index.py 需单独跑」已证伪——该文件在分块清单内，已修正）+ vitest **98/98**（16 文件）+ `tsc --noEmit` **0 错** + `create_api_app` 内省 **215/181**（tag 分布 32 组全录）+ 各模块 `find`/`wc -l` 清点
+- 边界检查：`git status` 全程只含文档文件，未触任何 .py/.ts/.tsx；遵循 CODE_GRAPH §7 增量重建规程（未变章节不碰）
+- 已知限制：① `.codebase-memory` 图谱快照仍为 2026-09-02（7997/33187），本次未重索引（工具性刷新，不影响静态指标，§1.2 已如实标注）；② CODE_GRAPH §5/§6/§7/§8 聚类与热点数据为 07-09 图谱历史快照，头部已声明仅供对照，未伪造刷新；③ 通道批次遗留「双通道产品级并发实测」属用户实测域，已在 P1_BACKLOG 头注记
+- 置信度：高（全部数字为本次实测，标注了实测方法与日期）
+
+**三端**：本批全属 **B 档纯文档**——commit→push GitHub 备份即完成；服务器不上文档、无需 pull。
+
+---
+
 ## 2026-09-20 — 提示词构建行业对齐批次（移除场景字段 + prompt 重排）
 
 **任务**：用户指令三项——① 全部角色卡移除场景（scenario）部分；② 调研角色扮演类提示词的优化实践；③ 检查本项目 prompt 构建并参照行业公认成熟项目改善。

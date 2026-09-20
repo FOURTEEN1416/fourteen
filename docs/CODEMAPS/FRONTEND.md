@@ -1,9 +1,9 @@
 # 前端地图
 
-> **✅ 2026-09-19 全量刷新**：本图已按代码实况重写（17 页面 / 13 API 模块 / 3 store，`ls`+`App.tsx` 实测）；已删文件（chat.ts/chatStore/Badge）条目清除。权威数字以 `CODE_GRAPH.md` v3.8.2 为准。
+> **✅ 2026-09-20 增量刷新**：在 09-19 全量刷新基线上补齐通道隔离 UI、材质体系、五 tab 收敛与 constants/ 目录。权威数字以 `CODE_GRAPH.md` v3.8.6 为准。
 > 功能级清单（页-功能点编号）见 `docs/FUNCTION_INVENTORY.md`。
 
-**最近更新:** 2026-09-19
+**最近更新:** 2026-09-20
 **技术栈:** React ^19.0.0 + Vite ^8.0.12 + TypeScript ~6.0.2 + Tailwind CSS ^4.1.0 + Zustand ^5.0.0
 **入口:** `frontend/index.html` → `frontend/src/main.tsx`
 
@@ -31,6 +31,12 @@ frontend/src/
 │   ├── system.ts         ← 系统 API（含 /api/user/llm-config）
 │   ├── training.ts       ← 训练 API（training/* + proactive/*）
 │   └── wechat.ts         ← 微信 API
+│
+├── constants/            ← 常量单一真源
+│   ├── cloneAgentGuide.ts     ← 克隆智能体任务书（CreateRole 内嵌）
+│   └── persona.ts             ← 人设标签字典唯一真源（PERSONALITY_LABELS/
+│                                SPEAKING_STYLE_LABELS/EMOTION_COLORS/AFFINITY_STAGES，
+│                                09-19「前端写死数据审计」批次新建）
 │
 ├── pages/                ← 页面组件 (17 个 .tsx)
 │   ├── IntroPage.tsx          ← 产品介绍页 /intro（SP-11，公开静态门面）
@@ -91,7 +97,8 @@ frontend/src/
 │   │   ├── StorylineIndicator.tsx  ← 故事线指示器
 │   │   └── KnowledgePreview.tsx    ← 知识预览（DATA tab 真实管理区）
 │   │
-│   └── admin/RoleSettingsTabs.tsx ← 角色设置六 tab 实现（VOICE/MESSAGE/DATA/STICKERS/TIMELINE）
+│   └── admin/RoleSettingsTabs.tsx ← 角色设置**五 tab** 实现（basic/voice/message/data/timeline；
+│                                    StickersTab 已于 09-19 撤除——无后端支撑的装饰 tab）
 │
 ├── hooks/                ← 自定义 Hooks (5 文件)
 │   ├── index.ts                ← 统一导出
@@ -109,7 +116,7 @@ frontend/src/
 │   ├── api.ts                  ← API 类型
 │   └── framework.ts            ← 框架类型
 │
-└── tests/                ← 前端测试（vitest 87 用例 / 15 文件，2026-09-19 实测全绿）
+└── tests/                ← 前端测试（vitest 98 用例 / 16 文件，2026-09-20 实测全绿）
     ├── components/
     └── hooks/
 ```
@@ -121,7 +128,7 @@ frontend/src/
 | 页面 | 路径 | 认证 | API 源 |
 |------|------|------|--------|
 | IntroPage | /intro | 无（公开门面） | — |
-| PsychProfilePage | /psych | **AuthGuard**（09-18 起需登录） | psych/* |
+| PsychProfilePage | /psych | **需登录**（09-19 起并入控制台外壳，带侧栏/面包屑；更早 09-18 起即需登录） | psych/* |
 | LoginPage | /login | 无 | authStore |
 | RootRedirect | / | 无 | 登录→/wechat，未登录→/intro |
 | WeChatPage | /wechat | 需要 | wechat/status |
@@ -177,7 +184,15 @@ components/
 
 ---
 
-## 动画设计
+## 动画与材质设计
+
+> **材质体系（2026-09-20 全站升级，用户裁决 A+B）**：`index.css` 新增固定**环境色场**
+> （暖黄/天蓝/薄荷四团大半径径向渐变）+ **三档材质阶梯** `.mat-recess`（内凹）/
+> `.mat-raised`（实体+彩色发丝线）/`.mat-floating`（玻璃特权层）；`.glass-card` 重做。
+> 壳层组件（Sidebar/Breadcrumb/MobileDrawer/Modal）统一 `.mat-floating`；
+> CreateRole 聊天容器为 iOS Messages 语言（`.chat-channel` 凹槽 + `.chat-bubble-in/out` +
+> `.chat-dock` 玻璃输入坞）；全站输入框基态 `.input-macaron`（一处修好 20+ 无边框输入框）。
+> 色板经令牌级重映射收敛（blue→sky、green→teal、gray→stone、purple→sky、orange→amber）。
 
 | 动画 | 类型 | 详情 |
 |------|------|------|

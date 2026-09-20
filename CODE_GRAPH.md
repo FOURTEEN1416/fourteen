@@ -1,6 +1,6 @@
-# 代码图谱 — unique-you (唯一的你) v3.8.5
+# 代码图谱 — unique-you (唯一的你) v3.8.6
 
-> 由 维护者 手动维护 | 最后核实: 2026-09-20（v3.8.4 增量：**角色卡库扩充 + 知识库激活批次** —— ① `config/characters` **25 → 41 张**：新增《我的26岁女房客》4 张（米彩/昭阳/乐瑶/简薇）、《从你的全世界路过》5 张（陈末/幺鸡/茅十八/荔枝/猪头）、《云边有个小卖部》3 张（刘十三/王莺莺/程霜）、《某某》2 张（江添/盛望）、《天堂旅行团》2 张（宋一鲤/余小聚），全部含全量字段（personality/speaking_style 数值字典 + core_anchors×8 + mes_example 示例对话）；② **既有 25 卡全量完善**：伊蕾娜卡损坏字段（desc 3 字/scenario 3 字/notes 2 字）按《魔女之旅》重写、23 张补 persona/speaking_style 数值字典、25 张全补 mes_example、椎名真昼/莉莉娅 scenario 扩写、孙颖莎补 personality_text；③ **知识库激活**：`scripts/rebuild_knowledge_index.py` 补透传 `persona(core_anchors)`+`source_data`（此前重建比运行时抽取少两类块：锚点/示例对话），`CharacterKnowledgeService.search()` 双路合并改**交错式**（修复扩展路占满窗口把原路高 idf 块挤出 top-8 的缺陷，实测米彩「昭阳是谁」修复前 top-8 丢块/修复后命中），41 索引全量重建（合计约 1750 块，7 类知识源齐备）。v3.8.5 增量（同日二批）：**提示词构建行业对齐**——41 卡移除 scenario（根因级修复开场锚定；代码保留守卫渲染兼容导入卡）、creator_notes 移至历史后（SillyTavern/卡规范的 post-history 位）、新增 # 对话示例 段（mes_example）、PersonaService 知识库双重注入去重、orchestrator 人设片段精简为身份绑定（SillyTavern docs + chara-card-spec-v2 取证，详见 LOG）。测试 1259 收集 / 1255 通过 / 4 跳过 + vitest 98/98（16 文件）；生产实证：服务器 41 卡 API 全可见、知识库 stats 全源（米彩 18 块含 8 锚点）、「昭阳是谁」检索命中。v3.8.3 增量：**主动消息「配额/投递解耦」批次** —— `ASEEngine.tick()` 返回值语义变更（未记账候选）＋新增 `commit_sent()`、`scheduler._deliver()` 改为返回 bool、免打扰前置到生成层（`ASEEngine.set_quiet_hours` + `_check_ase` 短路）、`_check_frequency()` 签名 `bool → (bool, reason)`、新增 `sanitize_message()` 输出清洗与归一化去重（窗口 6）、调度任务 **5 → 6**（新增「重要日期补发检查」每小时）、`/api/proactive/state` 增 3 字段、`/api/proactive/send` 响应剔除内部字段；端点数不变（training_router 13）。修复根因：静默时段内引擎生成即扣配额、投递层却丢弃 → 配额凌晨被空耗致全天零投递（详见 §13）；v3.8.2 增量：**09-19** 全仓逐一扫描·文档对齐批次——16 处 include_router + setup_shisi 口径修正（§1.1 旧写"17 处"）、§4.7 默认 fallback 链修正为 **4 家**（DeepSeek 注册可用但不入默认链）、§4.9 前端口径拉齐实测（页面 17 / API 模块 13 / store 3 / vitest 87·15 文件，补 IntroPage=SP-11 介绍页）；**09-18** v3.8 增量：全仓性能与正确性扫描——项目根路径锚定 + 12 处 CWD 缺陷 + 并发/缓存/热路径修复 + 移动端适配 + **端点口径系统性纠错 208→204**；双角色库收敛为 `config/characters` 唯一权威真源（7 处代码改指向 + `sync_character_files.py` 删除）、CI 门禁十四连红根治（FF-0006 `client.ts` 函数抽离 + ruff F401 清理）；测试口径见 §1.1 与 §13；**09-18 晚**：`shisi/api/v2/` 死模块（6 文件）删除 → `shisi/api/` 现 **11 文件 / 31 端点**（端点数与合计 204 不变，因 v2 从未挂载）+ `DELETE /api/shisi/memory/{id}` 假端点改 501 + `/api/shisi/status` 纳入认证使 shisi 域 **31/31** 全覆盖）
+> 由 维护者 手动维护 | 最后核实: 2026-09-20（v3.8.6 增量：**全仓遍历·文档对齐批次（零代码变更）**——09-19 白天全仓扫描落账之后，当晚 22:26 落地了**每人独立微信通道隔离**大型批次（`3e66930`，+2195 行）与 **JWT-only 复核收口**，次日又有材质/角色/提示词三批次，均未回扫本图谱：本次逐一历遍补齐——**端点 204→215 / 唯一路径 171→181**（新增 `wechat-channel` 9 + `admin-wechat` 2，`api/routers/wechat_channel_routes.py`）、include_router 16→**18**、api/ 44→**45 文件**（+byok/consent/password_policy 补登记 + wechat_channel_routes）、routers 21→**22 模块**、api/database.py **6→8 表**（+`wechat_channel_sessions`/`wechat_peer_preferences`）、wechat_direct 2→**5 文件**（+`channel_paths`/`connector_registry`/`peer_character`）、默认链双真源补注（system.yaml agnes 首选经编排器传入 vs `config/llm_providers.json` 自带链 zhipu 首选仅裸 `get_llm()` 生效）、认证口径改 **JWT 优先**（用户侧 API 仅 JWT，API Key 留给机器/E2E）、新增 `utils/reply_mode.py`（沉浸式/小说式回复模式）与**对话内追问**（follow_up）、安全 LLM 分类/注入检测默认关闭改规则闸门为实际生效、RoleSettings **六 tab→五 tab**（StickersTab 撤除）、§10 语音行残留 edge-tts 清除；测试口径复测不变 1259 收集/1255 通过/4 跳过 + vitest 98/98 + tsc 0 错。v3.8.5 增量（同日二批）：**提示词构建行业对齐**——41 卡移除 scenario（根因级修复开场锚定；代码保留守卫渲染兼容导入卡）、creator_notes 移至历史后（SillyTavern/卡规范的 post-history 位）、新增 # 对话示例 段（mes_example）、PersonaService 知识库双重注入去重、orchestrator 人设片段精简为身份绑定（SillyTavern docs + chara-card-spec-v2 取证，详见 LOG）。测试 1259 收集 / 1255 通过 / 4 跳过 + vitest 98/98（16 文件）；生产实证：服务器 41 卡 API 全可见、知识库 stats 全源（米彩 18 块含 8 锚点）、「昭阳是谁」检索命中。v3.8.3 增量：**主动消息「配额/投递解耦」批次** —— `ASEEngine.tick()` 返回值语义变更（未记账候选）＋新增 `commit_sent()`、`scheduler._deliver()` 改为返回 bool、免打扰前置到生成层（`ASEEngine.set_quiet_hours` + `_check_ase` 短路）、`_check_frequency()` 签名 `bool → (bool, reason)`、新增 `sanitize_message()` 输出清洗与归一化去重（窗口 6）、调度任务 **5 → 6**（新增「重要日期补发检查」每小时）、`/api/proactive/state` 增 3 字段、`/api/proactive/send` 响应剔除内部字段；端点数不变（training_router 13）。修复根因：静默时段内引擎生成即扣配额、投递层却丢弃 → 配额凌晨被空耗致全天零投递（详见 §13）；v3.8.2 增量：**09-19** 全仓逐一扫描·文档对齐批次——16 处 include_router + setup_shisi 口径修正（§1.1 旧写"17 处"）、§4.7 默认 fallback 链修正为 **4 家**（DeepSeek 注册可用但不入默认链）、§4.9 前端口径拉齐实测（页面 17 / API 模块 13 / store 3 / vitest 87·15 文件，补 IntroPage=SP-11 介绍页）；**09-18** v3.8 增量：全仓性能与正确性扫描——项目根路径锚定 + 12 处 CWD 缺陷 + 并发/缓存/热路径修复 + 移动端适配 + **端点口径系统性纠错 208→204**；双角色库收敛为 `config/characters` 唯一权威真源（7 处代码改指向 + `sync_character_files.py` 删除）、CI 门禁十四连红根治（FF-0006 `client.ts` 函数抽离 + ruff F401 清理）；测试口径见 §1.1 与 §13；**09-18 晚**：`shisi/api/v2/` 死模块（6 文件）删除 → `shisi/api/` 现 **11 文件 / 31 端点**（端点数与合计 204 不变，因 v2 从未挂载）+ `DELETE /api/shisi/memory/{id}` 假端点改 501 + `/api/shisi/status` 纳入认证使 shisi 域 **31/31** 全覆盖）v3.8.4 增量：**角色卡库扩充 + 知识库激活批次** —— ① `config/characters` **25 → 41 张**：新增《我的26岁女房客》4 张（米彩/昭阳/乐瑶/简薇）、《从你的全世界路过》5 张（陈末/幺鸡/茅十八/荔枝/猪头）、《云边有个小卖部》3 张（刘十三/王莺莺/程霜）、《某某》2 张（江添/盛望）、《天堂旅行团》2 张（宋一鲤/余小聚），全部含全量字段（personality/speaking_style 数值字典 + core_anchors×8 + mes_example 示例对话）；② **既有 25 卡全量完善**：伊蕾娜卡损坏字段（desc 3 字/scenario 3 字/notes 2 字）按《魔女之旅》重写、23 张补 persona/speaking_style 数值字典、25 张全补 mes_example、椎名真昼/莉莉娅 scenario 扩写、孙颖莎补 personality_text；③ **知识库激活**：`scripts/rebuild_knowledge_index.py` 补透传 `persona(core_anchors)`+`source_data`（此前重建比运行时抽取少两类块：锚点/示例对话），`CharacterKnowledgeService.search()` 双路合并改**交错式**（修复扩展路占满窗口把原路高 idf 块挤出 top-8 的缺陷，实测米彩「昭阳是谁」修复前 top-8 丢块/修复后命中），41 索引全量重建（合计约 1750 块，7 类知识源齐备）。v3.8.5 增量（同日二批）：**提示词构建行业对齐**——41 卡移除 scenario（根因级修复开场锚定；代码保留守卫渲染兼容导入卡）、creator_notes 移至历史后（SillyTavern/卡规范的 post-history 位）、新增 # 对话示例 段（mes_example）、PersonaService 知识库双重注入去重、orchestrator 人设片段精简为身份绑定（SillyTavern docs + chara-card-spec-v2 取证，详见 LOG）。测试 1259 收集 / 1255 通过 / 4 跳过 + vitest 98/98（16 文件）；生产实证：服务器 41 卡 API 全可见、知识库 stats 全源（米彩 18 块含 8 锚点）、「昭阳是谁」检索命中。v3.8.3 增量：**主动消息「配额/投递解耦」批次** —— `ASEEngine.tick()` 返回值语义变更（未记账候选）＋新增 `commit_sent()`、`scheduler._deliver()` 改为返回 bool、免打扰前置到生成层（`ASEEngine.set_quiet_hours` + `_check_ase` 短路）、`_check_frequency()` 签名 `bool → (bool, reason)`、新增 `sanitize_message()` 输出清洗与归一化去重（窗口 6）、调度任务 **5 → 6**（新增「重要日期补发检查」每小时）、`/api/proactive/state` 增 3 字段、`/api/proactive/send` 响应剔除内部字段；端点数不变（training_router 13）。修复根因：静默时段内引擎生成即扣配额、投递层却丢弃 → 配额凌晨被空耗致全天零投递（详见 §13）；v3.8.2 增量：**09-19** 全仓逐一扫描·文档对齐批次——16 处 include_router + setup_shisi 口径修正（§1.1 旧写"17 处"）、§4.7 默认 fallback 链修正为 **4 家**（DeepSeek 注册可用但不入默认链）、§4.9 前端口径拉齐实测（页面 17 / API 模块 13 / store 3 / vitest 87·15 文件，补 IntroPage=SP-11 介绍页）；**09-18** v3.8 增量：全仓性能与正确性扫描——项目根路径锚定 + 12 处 CWD 缺陷 + 并发/缓存/热路径修复 + 移动端适配 + **端点口径系统性纠错 208→204**；双角色库收敛为 `config/characters` 唯一权威真源（7 处代码改指向 + `sync_character_files.py` 删除）、CI 门禁十四连红根治（FF-0006 `client.ts` 函数抽离 + ruff F401 清理）；测试口径见 §1.1 与 §13；**09-18 晚**：`shisi/api/v2/` 死模块（6 文件）删除 → `shisi/api/` 现 **11 文件 / 31 端点**（端点数与合计 204 不变，因 v2 从未挂载）+ `DELETE /api/shisi/memory/{id}` 假端点改 501 + `/api/shisi/status` 纳入认证使 shisi 域 **31/31** 全覆盖）
 > ✅ 路由/文件/模块/测试数已通过 create_api_app 实扫 + Glob + pytest + vitest 实时核实（2026-08-28）。
 > ✅ 图数据库已于 2026-08-28 由 codebase-memory 图谱工具 v0.10.8 重新索引（artifact.json schema v2: **7706 节点 / 32367 边**，commit c32af54），历史矛盾（543277c 声称的 6771 节点未持久化）就此消案。
 
@@ -8,20 +8,19 @@
 
 ## 1. 全局指标
 
-### 1.1 实时核实指标（2026-09-18 create_api_app/Glob/pytest/vitest/mypy 扫描）
+### 1.1 实时核实指标（2026-09-20 create_api_app/Glob/pytest/vitest/tsc 全量复测）
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| API 业务端点（`APIRoute` 实扫） | **204 端点 / 171 条唯一路径**（95 GET / 74 POST / 20 DELETE / 15 PUT） / **16 处 include_router + setup_shisi**（2026-09-19 复测，与 09-17 一致） | 2026-09-19 内省 `create_api_app()`：`len([r for r in app.routes if isinstance(r, APIRoute)])`。⚠️ 旧口径"208 端点"实为 `len(app.routes)`，含 4 条框架路由（`/openapi.json`、`/docs`、`/docs/oauth2-redirect`、`/redoc`），非业务端点；⚠️ §14 旧写"17 include_router"系把 shisi setup 计入，`api/app_factory.py` 内 `include_router` 调用实测 **16 处**，shisi 31 端点经 `setup_shisi(app)` 装配 |
-| main.py 体量 | **约 16 KB / 415 行** | 2026-08-28 两轮瘦身：克隆管线移除 + run_console_chat 迁出 `orchestrator/console_chat.py`（命令分派拆分，复杂度 24 单体消解） |
+| API 业务端点（`APIRoute` 实扫） | **215 端点 / 181 条唯一路径**（101 GET / 78 POST / 16 PUT / 20 DELETE） / **18 处 include_router + setup_shisi**（2026-09-20 复测；较 09-17 口径 +11 = `wechat-channel` 9 + `admin-wechat` 2） | 2026-09-20 内省 `create_api_app()`：`len([r for r in app.routes if isinstance(r, APIRoute)])`。⚠️ 旧口径"208 端点"实为 `len(app.routes)`，含 4 条框架路由（`/openapi.json`、`/docs`、`/docs/oauth2-redirect`、`/redoc`），非业务端点；本轮 `len(app.routes)=219` |
+| main.py 体量 | **约 17.4 KB / 438 行** | 2026-09-20 实测（08-28 两轮瘦身基线后随通道批次 ± 微调） |
 | 前端页面 | **17 个** | Glob `frontend/src/pages/*.tsx`（另有 `StorylinePage` 为 App.tsx 内联包装组件） |
 | 前端 API 模块 | **13 个** | Glob `frontend/src/api/*.ts`（09-18 CI 门禁根治新增 `emotion.ts` / `normalize.ts`，原 11） |
 | 前端 Zustand store | **3 个** | LS `frontend/src/store/`（authStore / characterBuilderStore / errorStore） |
-| Python 测试用例 | **1255 passed + 4 skipped**（收集 1259） | 2026-09-20 系统 Python 3.12 实跑（较上批 +173 = 角色卡参数化 34 + 知识库回归 5 + 提示词结构回归 5 + 09-19 晚通道隔离等先前提交增量约 131 未同步文档；⚠️ 分块清单不含 test_knowledge_routes_index.py 3 例，需单独跑）。⚠️ **单进程整跑会在随机位置停住**（非用例失败，属聚合态资源问题），分块跑法见 `AGENTS.md` §4.3 口径注记 |
+| Python 测试用例 | **1255 passed + 4 skipped**（收集 1259） | 2026-09-20 系统 Python 3.12 分块实跑（410+317+319+209，与 `--collect-only` 1259 精确吻合；`test_knowledge_routes_index.py` 已在分块清单内，无需再单独跑）。⚠️ **单进程整跑会在随机位置停住**（非用例失败，属聚合态资源问题），分块跑法见 `AGENTS.md` §4.3 口径注记 |
 | 现役角色卡 | **41 张**（`config/characters/*.json`） | Glob 实扫 2026-09-20：25 既有 + 16 文学导入（我的26岁女房客×4 / 从你的全世界路过×5 / 云边有个小卖部×3 / 某某×2 / 天堂旅行团×2）；目录 gitignore（不入公开仓，服务器私有投递）；persona 注入参数化用例数 = 2 × 卡数 |
-| 前端测试用例 | **98 个全部通过 / 16 文件** | 2026-09-20 `npm test -- --run`（vitest）+ `tsc` 无本批改动（较上批 87/15 = 先前批次增量） |
+| 前端测试用例 | **98 个全部通过 / 16 文件** | 2026-09-20 `npm test -- --run`（vitest）+ `tsc --noEmit` 0 错误 |
 | 测试用例合计 | **1353 个**（1255 Python 通过 + 98 前端通过） | pytest + vitest 实跑 2026-09-20。⚠️ 旧口径 1117（1042 Python + 75 前端，2026-09-01 .venv 实测）随 09-14 主仓事故丢失环境后**已作废**，不再作为可复现基线 |
-| Python 测试（2026-09-15 复测） | **995 收集 / 989 通过 / 6 跳过**（系统 Python 3.12 实跑；1042 口径的 .venv 与夹具随 09-14 主仓事故丢失，差额 56 说明见 `docs/verification/W4-2026-09-14-验证报告.md` §3；本轮新增 3 个 WeChat 收包用例全绿） | pytest 实跑 2026-09-15 |
 | tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
 
 ### 1.2 知识图谱快照指标（✅ 2026-09-02 重新索引·第二次）
@@ -67,7 +66,7 @@ graph TD
         OA["OptimizedOrchestrator (orchestrator/)"]
     end
     subgraph API["接口层 api"]
-        AR["api/ 168+ 路由"]
+        AR["api/ 215 路由"]
         SA["shisi/api/"]
     end
     subgraph CORE["核心层 core (高 fan-in)"]
@@ -187,7 +186,7 @@ sequenceDiagram
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
-| `main.py` | main.py（**~23 KB / 574 行**，2026-07-28 双模式合并后瘦身） | 入口 + `_run_orchestrator` 统一启动 + 控制台/微信/克隆模式 |
+| `main.py` | main.py（**~17.4 KB / 438 行**，2026-09-20 实测） | 入口 + `_run_orchestrator` 统一启动 + 控制台/微信模式 |
 | `orchestrator/` | orchestrator/ (7 文件包) | `optimized_orchestrator.py` 主类 + `_init_mixin.py` **10 阶段初始化**（唯一真相源） + `_stream_mixin.py` SSE 流式 + `session_locks.py` + `voice_detector.py` + `console_chat.py`（2026-08-28 自 main.py 迁入，命令处理函数拆分） |
 | `api/run_api.py` | api/run_api.py | API-Only 启动入口（uvicorn 直接挂载），含 `_autostart_wechat_connector()` flock 文件锁自动恢复微信连接 |
 | `user_scheduler.py` | user_scheduler.py | 多用户调度，每个微信用户独立情感状态 |
@@ -204,16 +203,16 @@ sequenceDiagram
 - `run_console_chat` — 控制台交互
 - `run_wechat_mode` — 微信模式
 
-### 4.2 API 层（**204 业务端点 / 171 唯一路径** — 2026-09-17 内省实扫）
+### 4.2 API 层（**215 业务端点 / 181 唯一路径** — 2026-09-20 内省实扫）
 
 两个路由来源：
 
 | 来源 | 路径 | 端点数 | 文件数 | 说明 |
 |------|------|--------|------|------|
-| `api/routers/` | 21 个域路由模块（不含 `__init__.py`） | 170 | 22 | character/auth/admin/invite/voice/mimo_voice/storyline/wechat/emotion/memory/knowledge/persona_card/chat/clone/misc/personality/safety/tools/training/users/llm_providers |
-| `api/`（非 routers） | `health_routes.py` / `qrcode_store.py` | 3 | 2 | health(2) + wechat/qrcode(1) |
+| `api/routers/` | 22 个域路由模块（不含 `__init__.py`） | 181 | 23 | character/auth/admin/invite/voice/mimo_voice/storyline/wechat/wechat_channel/emotion/memory/knowledge/persona_card/chat/clone/misc/personality/safety/tools/training/users/llm_providers |
+| `api/`（非 routers） | `health_routes.py` / `qrcode_store.py` | 3 | 2 | health(2) + wechat/qrcode(1，admin 兼容面) |
 | `shisi/api/` | v1（`v2/` 死模块已于 2026-09-18 删除，见 DELETION_LOG） | 31 已挂载 | 11 | affinity/character/emotion_stage/memory/persona/stats/sticker/vital_signs |
-| **合计（`APIRoute` 内省）** | | **204** | | 95 GET / 74 POST / 20 DELETE / 15 PUT |
+| **合计（`APIRoute` 内省）** | | **215** | | 101 GET / 78 POST / 16 PUT / 20 DELETE |
 
 > ⚠️ **口径纠错（2026-09-17）**：旧口径"206 / 208 端点"取自 `len(app.routes)`，
 > 其中固定含 **4 条 FastAPI 框架自带路由**（`/openapi.json`、`/docs`、
@@ -224,17 +223,19 @@ sequenceDiagram
 
 ```
 character 21 │ misc 16 │ training 13 │ safety-infra 12 │ chat 11
-personality 10 │ memory 10 │ wechat 9 │ clone 8 │ auth 8 │ knowledge 8
+wechat-channel 9 │ personality 10 │ memory 10 │ wechat 9 │ clone 8 │ auth 8 │ knowledge 8
 users 7 │ characters 7 │ tools 6 │ voice 6 │ mimo-tts 6 │ storyline 6
 llm-providers 6 │ stickers 5 │ admin 5 │ affinity 4 │ invite 4
-emotion-stage 3 │ persona 3 │ persona-card 3 │ health 2 │ emotion 2
+emotion-stage 3 │ persona 3 │ persona-card 3 │ health 2 │ admin-wechat 2 │ emotion 2
 vital-signs 1 │ stats 1 │ (untagged) 1
-                                          ────────── 合计 204
+                                          ────────── 合计 215
 ```
 
 > 注：`character`(21) 为 `api/routers/character_routes.py`；`characters`(7) 为
 > `shisi/api/character_routes.py`。`memory`(10) = api `memory_routes`(4) +
 > shisi `memory_routes`(6)。`persona`(3) 为 shisi；`persona-card`(3) 为 api。
+> `wechat-channel`(9)+`admin-wechat`(2) 为 09-19 新增的每人独立微信通道域
+> `api/routers/wechat_channel_routes.py`（一个文件双 router）。
 
 **app_factory.py 实际挂载策略**（核实于源码）：
 
@@ -264,14 +265,16 @@ knowledge_router       → /api/characters/{id}/knowledge/*, /api/characters/{id
 wechat_router          → /api/wechat/*（8 端点）
 emotion_params_router  → /api/emotion/params/*（2 端点）
 llm_providers_router   → /api/llm-providers/*（6 端点，admin）
-qrcode_router          → /api/wechat/qrcode（1 端点）
+qrcode_router          → /api/wechat/qrcode（1 端点，admin 兼容面）
+wechat_channel_router  → /api/wechat/channel/*（9 端点，JWT 本人：状态/list/connect/
+                         qrcode/disconnect/reconnect/peers/{wxid}/character GET+PUT/characters）
+wechat_admin_router    → /api/admin/wechat/*（2 端点，admin：通道摘要/强制下线）
 + shisi setup          → /api/shisi/* 域路由（31 端点已挂载）
 ```
 
-> **上表端点数为 2026-09-17 按 tag 内省实测**（旧表多处失真：misc 11→**16**、
-> personality 9→**10**、training 8→**13**、clone 9→**8**、auth 7→**8**、
-> character 19→**21**、wechat 8→**8**（另有 qrcode 1 端点独立）、shisi 49→**31**）。
-> 注意 `api/routers/` 内 170 个装饰器 + health 2 + qrcode 1 + shisi 31 = 204。
+> **上表端点数为 2026-09-20 按 tag 内省实测**（09-17 基线 204 之上，
+> 09-19 晚通道批次 +11：wechat-channel 9 + admin-wechat 2）。
+> 注意 `api/routers/` 内 181 个装饰器 + health 2 + qrcode 1 + shisi 31 = 215。
 
 **`api/app_factory.py:84 create_api_app()`** 是 FastAPI 应用唯一构造入口，被 `api/run_api.py:232` 和 `main.py` 调用。FastAPI 实例 `version="3.1.0"`。
 
@@ -381,12 +384,19 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 | 模块 | 职责 |
 |------|------|
 | `llm_gateway.py` | LLMGatewayV2，自动 fallback 链 |
-| `multi_provider_gateway.py` | 多供应商网关（默认 fallback 链 **Agnes → 智谱AI → 讯飞星火 → 百度千帆**，`DEFAULT_FALLBACK_CHAIN` 与 `config/system.yaml fallback_chain` 一致；DeepSeek 已注册可用但**不在默认链**）+ 用户级 gateway 缓存 |
+| `multi_provider_gateway.py` | 多供应商网关（默认 fallback 链 **Agnes → 智谱AI → 讯飞星火 → 百度千帆**，生产经编排器传 `config/system.yaml fallback_chain`；`DEFAULT_FALLBACK_CHAIN` 同序）+ 用户级 gateway 缓存 + **常驻同步事件循环**（09-19 性能修复：`chat_sync` 原每次 `asyncio.run` 新建事件循环致 httpx 连接池失效、单条消息 2 次 LLM 累计 11~20s → 守护线程常驻 loop 后稳态 ~2.7s） |
 | `openai_compatible_provider.py` | OpenAI 兼容供应商（被 agnes/zhipu/xunfei/baidu 共用） |
 | `prompt_template_manager.py` | PromptTemplateMgr（**54 fan-in**） |
 | `__init__.py` | **`invalidate_user_llm(user_id)`**（新增 2026-07-28）— 清除用户级 gateway 缓存，下次对话按新配置重建 |
 
-**供应商现状 (2026-09-18 更新)**：
+> ⚠️ **链双真源补注（2026-09-20）**：运行时链有两处声明——① `config/system.yaml`
+> `llm.fallback_chain`（agnes 首选）：编排器 `_init_llm` 经 `get_llm(provider=auto,
+> config=cfg.llm)` **显式传入**，是生产主链；② `config/llm_providers.json` 顶层
+> `fallback_chain`（**zhipu 首选**，[zhipu, agnes, xunfei, baidu, deepseek]，与供应商
+> 管理页 sort_order 一致）：仅在**未显式传链**的裸 `get_llm()` 路径生效。生产口径
+> 以 ① 为准（agnes 首选不变）。
+
+**供应商现状 (2026-09-20 更新)**：
 
 | 供应商 | 注册方式 | 模型 | 认证方式 |
 |--------|---------|------|---------|
@@ -412,6 +422,28 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 | `invalidate_user_llm(user_id)` | `llm_provider/__init__.py:259` | 失效用户级 gateway 缓存，下次对话按新配置重建 LLM 实例 |
 
 **调用链**：前端 `SettingsLLM.tsx` → `frontend/src/api/system.ts` → `POST /api/user/llm-config` → 写入 `users.llm_config` → `invalidate_user_llm(user_id)` → 下次 `OptimizedOrchestrator.process_message` 时按 `user_id` 取用户专属 LLM。
+
+### 4.7.1 wechat_direct/ — 每人独立微信通道（2026-09-19 新架构，5 文件 2191 行）
+
+> 用户裁决 2026-09-19（报障「他人注册后未扫自己的微信却显示已连接，且连的是管理员通道」）：
+> 通道层由**全局单例**改为 **per-user × slot 多租户**；一人最多 2 条通道
+> （`MAX_CHANNELS_PER_USER=2`），全局并发上限 `WECHAT_MAX_CHANNELS`（默认 100）。
+> 方案文档：`docs/plans/2026-09-19-每人独立微信通道方案.md`。
+
+| 文件 | 职责 |
+|------|------|
+| `channel_paths.py` | 磁盘路径唯一真源：`data/wechat_sessions/<user_id>/slotN/`（credentials/state/qrcode/context_tokens/poll.lock）；全局上限解析 `max_channels()`；`list_user_slots_with_credentials()` |
+| `connector_registry.py` | `ConnectorRegistry`（`get_registry()` 单例）：`(owner_user_id, slot)` 键控连接器注册表；`ensure/disconnect/status_for_user/primary_status/start_login/restore_on_boot`；`ChannelQuotaError`/`ChannelSlotError`；**每会话目录 poll.lock 文件锁**去重多 worker 轮询；`get_connector_for_user()` |
+| `peer_character.py` | **好友自选角色**（用户裁决「让他们自己选」）：`(owner_user_id, peer_wxid) → character_card_id`（DB 表 `wechat_peer_preferences`）；微信内回复「角色」弹菜单、回复序号切换（`try_handle_character_choice`）；会话键 `owner:peer` |
+| `wechat_connector.py`（1659 行） | 连接器本体按 owner/slot 隔离：`load_session_state/qrcode(user_id, slot)`、`get_wechat_state(user_id)`、**`split_reply_for_wechat()` 回复拆分**（修连发罐头语）、**对话内追问引擎**（`_schedule_followup/_followup_thread/_send_followup`，没等到接话自动补一句，参数 `data/scheduler_config.json` follow_up 块 web 可调）、图片/语音/emoji 发送、收包入口守卫（1/3/34） |
+| `__init__.py` | 导出 |
+
+**遗留通道迁移**：`scripts/migrate_legacy_wechat_channel.py` 启动时一次性把旧全局
+`~/.weixin_cow_credentials.json` 迁入 admin（user_id=1）`data/wechat_sessions/1/slot0/`；
+`api/run_api.py:_autostart_wechat_connector()` 改为按 `channel_paths` 逐 user/slot 恢复
+（旧全局单例 flock 启动方式废止，改每会话目录锁）。
+旧全局端点语义变化：`/api/channels/wechat/*` 与 `/api/wechat/qrcode` 收敛为 **admin 兼容面**；
+普通用户一律走 `/api/wechat/channel*`（仅 JWT，只操作自己的通道）。
 
 ### 4.8 voice/ — 语音合成（MiMo 唯一引擎，2026-08-28 收敛）
 
@@ -440,7 +472,7 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
   - admin, auth, characters, client, clone, emotion, llmProviders, mimo, normalize, queryClient, system, training, wechat
 - 3 个 Zustand store（authStore, errorStore, characterBuilderStore；chatStore 已于 09-17 死代码清洗删除）
 - React Query hooks
-- 87 个 Vitest 测试用例（across 15 files，全部通过 2026-09-19）
+- 98 个 Vitest 测试用例（across 16 files，全部通过 2026-09-20）
 - Playwright E2E 测试配置
 
 **页面说明**：
@@ -622,8 +654,8 @@ tools/
 | 数据库 | SQLAlchemy 2.0 + aiosqlite + ChromaDB |
 | 向量 | sentence-transformers + rank-bm25 |
 | LLM | httpx + tenacity（自动 fallback） |
-| LLM 供应商 | **Agnes (agnes-3.0-flash，首选)**, 智谱AI (glm-4-flash), 讯飞星火 (spark-lite), 百度千帆 (ernie-speed-128k)——默认链 4 家；DeepSeek (deepseek-chat) 注册可用不入默认链 |
-| 语音 | edge-tts + FFmpeg（可选） |
+| LLM 供应商 | **Agnes (agnes-3.0-flash，首选)**, 智谱AI (glm-4-flash), 讯飞星火 (spark-lite), 百度千帆 (ernie-speed-128k)——生产主链 4 家（system.yaml，经编排器传入）；DeepSeek (deepseek-chat) 注册可用，仅在 llm_providers.json 自带链的第 5 位 |
+| 语音 | MiMo Cloud TTS（唯一引擎）+ Windows SAPI 本地兜底 + FFmpeg（可选，转码） |
 | 缓存 | Redis（可选） |
 | 可观测 | prometheus-client + OpenTelemetry + Sentry SDK |
 | 安全 | pycryptodome + python-jose + passlib[bcrypt] |
@@ -682,6 +714,7 @@ tools/
 
 | 日期 | 提交 | 变更摘要 |
 |------|------|---------|
+| 2026-09-20 (全仓遍历·文档对齐) | working tree（零代码变更） | **v3.8.6 逐一历遍补齐 09-19 晚以来的代码漂移**：09-19 白天全仓扫描落账后，当晚 22:26 `3e66930` 落地**每人独立微信通道隔离**（+2195 行：`wechat_direct` 新增 `channel_paths`/`connector_registry`/`peer_character` 三模块、`api/routers/wechat_channel_routes.py` 双 router 11 端点、DB 新表 `wechat_channel_sessions`+`wechat_peer_preferences`（6→**8 表**）、`scripts/migrate_legacy_wechat_channel.py` 遗留凭证迁 admin、旧全局端点 `/api/channels/wechat/*` 与 `/api/wechat/qrcode` 收敛 admin 兼容面、前端 WeChatPage 改「我的微信」+ system.ts 五函数切 `/wechat/channel*`）＋ **JWT-only 复核收口**（`verify_api_key_dep` 有效 Bearer JWT 优先放行——用户侧 API 仅 JWT，API Key 留给机器/E2E，前端 dist 不再含 API Key 明文）＋ 后续 09-20 材质/克隆假进度/角色/提示词四批次。本次实扫修正：端点 **204→215**（唯一路径 171→181，+`wechat-channel` 9+`admin-wechat` 2）、include_router 16→**18**、routers 21→**22 模块**、api/ 44→**45 文件**（补登记 byok/consent/password_policy）、wechat_direct 2→**5 文件**、main.py 438 行；§4.7 补**链双真源**注记（system.yaml agnes 首选=生产主链 vs llm_providers.json 自带链 zhipu 首选仅裸 get_llm 生效）+ 网关**常驻同步事件循环**性能修复（单条消息 2 次 LLM 11~20s→~2.7s）；新增 §4.7.1 通道子系统；§10 语音行清除 edge-tts 残留；安全侧 **LLM 分类/注入检测默认关闭**（`SAFETY_LLM_CLASSIFY`/`PROMPT_INJECTION_LLM` 开关，规则闸门为实际生效层，注入超时不再误判为攻击）；`utils/reply_mode.py` 新模块（沉浸式/小说式回复模式，web 可切，真源 `data/scheduler_config.json`）+ **对话内追问** follow_up（delay1/delay2/daily_max web 可调）；websocket `_send_to_all` 改**真实送达语义**（0 送达抛异常，不再谎报 websocket 送达）。验证：分块实跑 **1255 passed/4 skipped**（410+317+319+209，与收集 1259 精确吻合）+ vitest **98/98** + tsc **0 错** + 端点内省 215/181 |
 | 2026-09-20 (提示词构建行业对齐) | working tree | **v3.8.5 移除场景字段 + prompt 重排**：① 41 卡 scenario 字段全量删除（scenario 是开场情境却被缓存每轮复用 → 角色永久锚定开场画面，09-19 生产实证 62105bca；`CharacterAggregate.build_system_prompt` 保留带守卫的场景渲染兼容导入 ST 卡）；② 参照 [SillyTavern docs](https://docs.sillytavern.app/usage/prompts/) 默认序列与 [chara-card-spec-v2](https://github.com/malfoyslastname/character-card-spec-v2) post_history_instructions 条目——**历史之后的指令权重远高于历史之前**：creator_notes（扮演规则）移至对话历史之后；新增 **# 对话示例**（mes_example → dialogueExamples 位，`<START>` 分块、上限 2000 字，此前该字段只进知识库从未进 prompt）；③ PersonaService 知识去重（rag_context 与 prompt_builder 同源，旧实现同一知识注入两次且一份为 JSON dump；仅 base 无知识段时兜底）；④ orchestrator `_load_character_persona_segment` 精简为身份绑定（移除简介/备注 500 字、锚点 60 字截断重复与数值维度——全量版已在 base prompt，SillyTavern 惯例角色定义只注入一次）；口头禅/开场白保留。验证：分块 **1255 passed / 4 skipped**（收集 1259，含 +5 TestSystemPromptStructure 结构回归：PHI 位序/示例位序/场景守卫/无场景不渲染/无示例不渲染）+ 2 契约测试改写（锚点不再截断重复）+ vitest 98/98 + ruff 全绿；部署 HEAD `86b3ec21`，生产 41 卡 0 scenario、米彩 stats 17 块无 scenario 源、检索正常 |
 | 2026-09-20 (角色卡库扩充+知识库激活) | working tree | **v3.8.4 角色完善与文学导入批次**：① `config/characters` **25→41 张**——《我的26岁女房客》米彩/昭阳/乐瑶/简薇、《从你的全世界路过》陈末/幺鸡/茅十八/荔枝/猪头、《云边有个小卖部》刘十三/王莺莺/程霜、《某某》江添/盛望、《天堂旅行团》宋一鲤/余小聚（角色设定经通用搜索核实：百度百科/维基百科/知乎书评，来源见 LOG）；② 既有 25 卡全量完善——伊蕾娜损坏字段按《魔女之旅》重写、23 卡补 personality/speaking_style 数值字典（此前仅孙颖莎/林挽夏有）、**25 卡全补 mes_example**、椎名真昼/莉莉娅 scenario 扩写、孙颖莎补 personality_text；③ **知识库激活三修**——`scripts/rebuild_knowledge_index.py` 补透传 `PersonaProfile(core_anchors)` + `source_data`（旧重建比运行时抽取**少 core_anchors 与 mes_example 两类块**，且磁盘索引被运行时 `load_index` 优先加载致缺口常驻）；`CharacterKnowledgeService.search()` 双路合并由 ext+base 拼接截断改**交错合并**（缺陷：扩展路「X是谁」命中 8 个身份锚点块时把原路高 idf 块整体挤出注入窗口，实测米彩卡「昭阳是谁」top-8 无含"昭阳"块）；41 卡索引全量重建（约 1750 块，character_name/core_anchors/description/personality/scenario/creator_notes/mes_example 7 源齐备）+ 典型问题检索冒烟 5/5 命中。**新增回归测试 2 个**（`tests/test_shisi_knowledge.py::TestDualPathInterleave`）。验证：分块实跑 **1250 passed / 4 skipped**（收集 1254，零失败）+ vitest **98/98** + ruff 全绿。**三端闭环**：A 档 3 提交（`4ba171f9`/`c37e0a19` 孤立清理失效修复【startswith("")恒真短路整段逻辑】/`31b9015` knowledge 路由建索引统一聚合根路径——旧 `index_from_card(CharaCardV2)` 路径缺 core_anchors 且**首次 API 访问即降级覆盖全量索引**，实测米彩 18 块被覆盖成 7 块）已部署服务器（HEAD `31b90157`，health 200，unit `ai-girlfriend` active）；`config/characters` 41 卡 scp 私有投递（服务器原 25 卡 tar 备份 `data/archive/characters-config-backup-20260920.tar.gz`）+ 服务器端索引重建 41 份；生产实证：`/api/characters` 41 可见、米彩 stats 18 块 7 源、「昭阳是谁」top-3 命中（`config/characters` 仍为 gitignore 不入公开仓） |
 | 2026-09-19 (主动消息配额/投递解耦) | working tree | **v3.8.3 修复「白天一条主动消息都不发」**：根因是**静默时段（23-7）内引擎照常生成消息并扣配额，消息却在投递层被丢弃** —— `ase.tick()` 内部 `_generate_and_return()` 即调 `_record_proactive_sent()`（daily_count+1 / 写 `_last_proactive_time` / `urgency.reset()`），而投递在 tick 返回**之后**由 `_deliver()→_send_to_all()` 执行，后者首句判 `_is_quiet_hours()` 即 `return False`。生产实证 `00:02–04:05` 每 35 分钟一条、**8 条全丢却全计数** → 配额凌晨即 8/8 → 07:00 后全天 `result=False` 零投递（09-18 同模式，每天重演）。修复：(1) **记账与投递解耦** —— `tick()` 返回**未记账候选**，新增 `ASEEngine.commit_sent()`，`scheduler._deliver()` 改为**返回 bool**，仅投递成功后 commit；(2) **免打扰前置到生成层** —— `_check_ase` 在 `tick()` 前短路（只 `dry_run` 更新紧迫度），新增 `ASEEngine.set_quiet_hours()` 并随 `reload_config`/`set_quiet_hours` 同步；(3) **场景日期标记延迟置位**（`_check_scene_triggers(commit=False)` 带 `_scene`/`_scene_date`）；(4) **LLM 输出清洗** 新增 `sanitize_message()`，拦截推理泄漏/超长(>60字)/多行（旧只判 `len>5`）；(5) **去重** 归一化精确匹配 + 窗口 50→**6**（模板池 3~8 条/类），并把最近 6 条注入 prompt 要求换角度 ＋ `_select_type_by_urgency()` 同类节流（⚠️ 相似度去重实测不可用，见 AGENTS v1.13）；(6) **可观测性** `_check_frequency()` `bool→(bool,reason)`、`tick()` 输出 `_last_skip_reason`、修正 `result=True` 行 `urgency=0.00` 误导；(7) **连带修重要日期祝福** —— 原仅 00:05 每日维护调用（恒在静默内）→ **从未送达**，改为每小时任务 + 静默跳过 + 当日幂等。**端点数不变**（training_router 13；`/api/proactive/state` 增 `max_daily`/`quiet_hours`/`last_skip_reason`，`/api/proactive/send` 剔除内部字段）。调度任务 **5→6**。验证：`--collect-only` **1086**、分块实跑 **1082 passed / 4 skipped**（164.2s，+22 用例零回归） |

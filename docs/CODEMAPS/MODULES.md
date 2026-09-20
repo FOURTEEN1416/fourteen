@@ -1,19 +1,19 @@
 # 后端业务模块地图
 
-> **✅ 2026-09-19 全量刷新**：文件数按 `ls`/`find` 实测重写；已删模块（weclone_adapter、voice 4 provider、wechat 指令系统、wechat_decrypt_source）条目清除。权威口径以 `CODE_GRAPH.md` v3.8.2 为准。
+> **✅ 2026-09-20 增量刷新**：在 09-19 全量刷新基线上补齐 09-19 晚通道隔离批次（wechat_direct 2→5 文件、api 44→45、routers 21→22）。权威口径以 `CODE_GRAPH.md` v3.8.6 为准。
 > **⚠️ 09-17 死代码清洗留痕**：`shisi/wechat/command_handler.py`/`command_parser.py`（微信指令系统）已删除，正文已同步。
 
-**最近更新:** 2026-09-19
-**Python 版本:** ≥3.10 | **总文件:** ~356 .py 文件
+**最近更新:** 2026-09-20
+**Python 版本:** ≥3.10 | **总文件:** ~511 .py 文件（含 tests/）
 
 ---
 
-## 模块总览（2026-09-19 实测）
+## 模块总览（2026-09-20 实测）
 
 | 模块 | 文件数 | 路径 | 职责 | 状态 |
 |------|--------|------|------|------|
 | **shisi** | 115 | `shisi/` | DDD 核心域（角色/情感/记忆/故事线/知识库等，v2 死模块删除后口径） | ✅ 活跃 |
-| **api** | 44 | `api/` | FastAPI 路由层（21 routers + app_factory/achievement_engine/state 等） | ✅ 活跃 |
+| **api** | 45 | `api/` | FastAPI 路由层（22 routers + app_factory/achievement_engine/state 等） | ✅ 活跃 |
 | **my_character** | 21 | `my_character/` | 情感引擎 + 角色引擎 | ✅ 活跃 |
 | **persona_extractor** | 13 | `persona_extractor/` | 人格提取与注入（+web_enricher 网络画像增强） | ✅ 活跃 |
 | **observability** | 9 | `observability/` | 可观测性（日志/指标/追踪/健康检查/sentry/优雅停机） | ✅ 活跃 |
@@ -26,7 +26,7 @@
 | **proactive** | 5 | `proactive/` | 主动消息推送（ase_engine/scheduler/frequency/reflection） | ✅ 活跃 |
 | **clone_training** | 4 | `clone_training/` | 克隆训练（数据清洗/数据提取/风格分析） | ✅ 活跃 |
 | **multimodal** | 3 | `multimodal/` | 多模态处理（image_attachment/multimodal_processor） | ✅ 活跃 |
-| **wechat_direct** | 2 | `wechat_direct/` | 微信直连 | ✅ 活跃 |
+| **wechat_direct** | 5 | `wechat_direct/` | 微信直连（**每人独立通道**：connector_registry/channel_paths/peer_character/wechat_connector） | ✅ 活跃 |
 | **plugins** | 2 | `plugins/` | 插件系统 | ✅ 活跃 |
 | **cache** | 3 | `cache/` | LLM 缓存 + Redis 客户端 | ✅ 活跃 |
 | **context** | 2 | `context/` | 上下文（世界书提供器） | ✅ 活跃 |
@@ -73,21 +73,21 @@
 
 ---
 
-## api/ — FastAPI 路由层 (44 文件)
+## api/ — FastAPI 路由层 (45 文件)
 
 **入口:** `api/run_api.py` → `api/app_factory.py:create_api_app()`
 
 **结构:**
-- 根目录: `app_factory.py`（应用工厂）, `run_api.py`（启动入口）, `main_routes.py`（模型/常量/Helper）, `health_routes.py`（健康检查）, `auth.py`/`auth_jwt.py`（认证）, `database.py`（SQLAlchemy）, `achievement_engine.py`（成就引擎，ADR-0014）, `deps.py`（依赖注入）, `session_manager.py`, `websocket_server.py`, `qrcode_store.py`, `path_security.py`, `runtime_config.py`
-- `routers/` 21 个路由模块（2026-08-28：demo_routes 已删除）: `admin_routes`, `auth_routes`, `character_routes`, `chat_routes`, `clone_routes`, `emotion_routes`, `invite_routes`, `knowledge_routes`, `llm_providers_routes`, `memory_routes`, `mimo_voice_routes`, `misc_routes`, `persona_card_routes`, `personality_routes`, `safety_routes`, `storyline_routes`, `tools_routes`, `training_routes`, `users_routes`, `voice_routes`, `wechat_routes`
+- 根目录: `app_factory.py`（应用工厂）, `run_api.py`（启动入口）, `main_routes.py`（模型/常量/Helper）, `health_routes.py`（健康检查）, `auth.py`/`auth_jwt.py`（认证，09-19 起 **JWT 优先**）, `database.py`（SQLAlchemy **8 表**）, `achievement_engine.py`（成就引擎，ADR-0014）, `byok.py`（W1 用户自带 Key 强制策略）, `consent.py`（W2 使用即同意协议）, `password_policy.py`（密码策略唯一真源 ≥8 含字母数字）, `deps.py`（依赖注入）, `session_manager.py`, `websocket_server.py`, `qrcode_store.py`, `path_security.py`, `runtime_config.py`
+- `routers/` 22 个路由模块: `admin_routes`, `auth_routes`, `character_routes`, `chat_routes`, `clone_routes`, `emotion_routes`, `invite_routes`, `knowledge_routes`, `llm_providers_routes`, `memory_routes`, `mimo_voice_routes`, `misc_routes`, `persona_card_routes`, `personality_routes`, `safety_routes`, `storyline_routes`, `tools_routes`, `training_routes`, `users_routes`, `voice_routes`, `wechat_channel_routes`（每人独立通道，09-19）, `wechat_routes`
 - `state/` 3 个状态模块: `safety_log`, `tool_history`, `training_state`
 
-**实际挂载:** 16 个 `include_router` 调用 + `setup_shisi(app)` 装配，共 **204 业务端点 / 171 唯一路径**（2026-09-19 `create_api_app` 内省实扫；`len(app.routes)=208` 含 4 条框架路由）
+**实际挂载:** 18 个 `include_router` 调用 + `setup_shisi(app)` 装配，共 **215 业务端点 / 181 唯一路径**（2026-09-20 `create_api_app` 内省实扫；`len(app.routes)=219` 含 4 条框架路由）
 **依赖:** shisi, security, llm_provider, database
 
 ---
 
-## persona_extractor/ — 人格提取 (12 模块)
+## persona_extractor/ — 人格提取 (13 文件)
 
 **职责:** 从对话中提取用户人格特征，注入角色回复；web_enricher 网络画像增强
 
@@ -198,21 +198,38 @@
 
 ---
 
-## orchestrator/ — 优化编排器 (5 文件)
+## orchestrator/ — 优化编排器 (7 文件)
 
 **职责:** 聊天流水线编排，组件初始化阶段化，SSE 流式输出，会话锁管理，语音检测
 
 **关键文件:**
-- `optimized_orchestrator.py` — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / 上下文准备 / `process_message` / 健康检查（920 行）
+- `optimized_orchestrator.py` — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / 上下文准备 / `process_message` / 健康检查（1050 行）
 - `_init_mixin.py` — `_InitPhasesMixin`：`initialize` 拆分为 10 个 `_init_*` 阶段
 - `_stream_mixin.py` — `_StreamPipelineMixin`：`process_message_stream` SSE 真流式/伪流式降级
 - `session_locks.py` — 会话锁管理（`SessionLockManager`）
 - `voice_detector.py` — 语音活动检测
+- `console_chat.py` — 控制台聊天通道（08-28 自 main.py 迁入）
 
 > **架构:** `OptimizedOrchestrator` 继承 `_InitPhasesMixin` + `_StreamPipelineMixin`，通过 `self.components` 共享状态。公共 API 100% 兼容，外部导入路径 `from orchestrator import Orchestrator` 不变。
 
 **依赖:** shisi, llm_provider, security, tools, cache
 **被依赖:** api (chat_routes)
+
+---
+
+## wechat_direct/ — 微信直连 (5 文件)
+
+**职责:** 每人独立微信通道（2026-09-19 起多租户化：一人最多 2 条、全局上限 100、好友自选角色）
+
+**关键文件:**
+- `connector_registry.py` — `ConnectorRegistry`：(owner_user_id, slot) 键控注册表，ensure/disconnect/status/start_login/restore_on_boot，每会话 poll.lock 去重多 worker
+- `channel_paths.py` — 磁盘路径唯一真源 `data/wechat_sessions/<uid>/slotN/`
+- `peer_character.py` — 好友自选角色（(owner, peer)→card 落库 + 微信内「角色」指令菜单）
+- `wechat_connector.py` — 连接器本体（1659 行）：回复拆分/追问引擎/图片语音 emoji/收包守卫
+- `__init__.py`
+
+**依赖:** api/database（通道会话表）, utils/project_paths
+**被依赖:** api (chat/wechat/wechat_channel 路由), orchestrator, user_scheduler, proactive
 
 ---
 
@@ -261,7 +278,7 @@
 
 ---
 
-## context/ — 上下文 (1 文件)
+## context/ — 上下文 (2 文件，含 __init__)
 
 **职责:** 世界书上下文提供
 
@@ -273,7 +290,7 @@
 
 ---
 
-## memory_ext/ — 记忆扩展 (1 文件)
+## memory_ext/ — 记忆扩展 (2 文件，含 __init__)
 
 **职责:** 基于 mem0 的扩展记忆后端
 

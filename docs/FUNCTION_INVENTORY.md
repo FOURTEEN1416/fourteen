@@ -25,13 +25,13 @@
 
 ## A. 公开域（无需登录）
 
-### INTRO — 产品介绍页 `/intro`（IntroPage.tsx, 308 行，SP-11 f4aa51c）
+### INTRO — 产品介绍页 `/intro`（IntroPage.tsx, 310 行，SP-11 f4aa51c）
 | 编号 | 功能点 |
 |------|--------|
 | INTRO-1 | 公开静态门面：产品定位/玩法/邀请入口，接替已删 Demo 的访客转化职责 |
 | INTRO-2 | 根路径分流（App.tsx RootRedirect）：已登录→`/wechat`，未登录→`/intro` |
 
-### LOGIN — 登录页 `/login`（LoginPage.tsx, 222 行）
+### LOGIN — 登录页 `/login`（LoginPage.tsx, 240 行）
 | 编号 | 功能点（代码证据） |
 |------|------------------|
 | LOGIN-1 | 账号密码登录（useAuth → `/api/auth/login`），登录后跳 `/wechat` |
@@ -39,16 +39,17 @@
 
 ## B. 微信连接域
 
-### WECHAT — 微信接入 `/wechat`（WeChatPage.tsx, 413 行）
+### WECHAT — 微信接入 `/wechat`（WeChatPage.tsx, 439 行）
 | 编号 | 功能点 |
 |------|--------|
-| WECHAT-1 | 实时连接状态横幅：连接状态/运行时长/今日消息数/重连次数（`useWechatStatus` 5s 轮询） |
-| WECHAT-2 | 扫码连接弹窗：创建连接 → 获取二维码 → 刷新二维码 → 完成确认（wechatCreateConnection/wechatQrCode） |
-| WECHAT-3 | 断开态引导卡（QrCode 图标+连接指引+「立即扫码连接」按钮，stagger 入场）；状态字段语义化（未运行/今日暂无消息替代裸值） |
+| WECHAT-1 | 实时连接状态横幅：「**我的微信**」连接状态/运行时长/今日消息数/重连次数（`useWechatStatus` 轮询，指向 `/api/wechat/channel` 仅本人通道；隔离后不再订阅全局 SSE） |
+| WECHAT-2 | 扫码连接弹窗：**触发自己的通道扫码**（POST `/api/wechat/channel/connect`）→ 本人二维码（GET `/api/wechat/channel/qrcode`，600s 有效期/过期提示）→ 完成确认；断开/重连均只作用于本人 slot |
+| WECHAT-3 | 断开态引导卡（「用**你自己的**微信扫码登录（与他人通道隔离）」+「立即扫码连接」按钮，stagger 入场）；状态字段语义化（未运行/今日暂无消息替代裸值）；最后活动时间戳秒/毫秒自愈解析（09-19 诊断 P2 修复） |
+| WECHAT-4 | **每人独立通道语义**（09-19 裁决落地）：一人最多 2 条（slot 0/1）、全局并发上限 100；本人通道后端落库 `wechat_channel_sessions`，前端不再调 admin 的 wechatCreateConnection |
 
 ## C. 角色域
 
-### ROLES — 角色配置 `/roles`（RolesPage.tsx, 125 行）
+### ROLES — 角色配置 `/roles`（RolesPage.tsx, 170 行）
 | 编号 | 功能点 |
 |------|--------|
 | ROLES-1 | 角色卡网格：名称/**摘要化描述**（deriveCardSummary：方括号字段提取/「你是」转第三人称/≤60 字）/**语义色锚点**（anchorTone：关系=黄 设定=蓝 风格=青）/激活态徽章 |
@@ -56,9 +57,9 @@
 | ROLES-3 | 创建角色入口（网格尾虚线卡 + 空态 CTA）；骨架屏加载态 |
 | ROLES-4 | 搜索框（>6 卡显示，匹配名称/描述/标签）+ 无结果空态 |
 | ROLES-5 | 入场动效（stagger CSS 级联 ≤12×60ms，prefers-reduced-motion 降级） |
-| ⚠️ | SP-5 在册：prompt 原文直出（`[姓名:x]`/「你是」类 description 未摘要化，卡库实扫 7+10 张）；53 卡无搜索无分组 |
+| ⚠️ | SP-5 在册：prompt 原文直出（`[姓名:x]`/「你是」类 description 未摘要化，卡库实扫 7+10 张）；41 卡无搜索无分组 |
 
-### CREATE — 创建角色 `/roles/create`（CreateRole.tsx, 701 行）
+### CREATE — 创建角色 `/roles/create`（CreateRole.tsx, 729 行）
 | 编号 | 功能点 |
 |------|--------|
 | CREATE-AI-1 | 「和十四聊一会儿」AI 对话提取人设（previewCharacterFromDescription，SSE） |
@@ -71,23 +72,24 @@
 | CREATE-IMPORT-1 | 文件导入角色卡（importCharacter，JSON/PNG SillyTavern 兼容） |
 | CREATE-PREVIEW-1 | 右侧常驻实时预览卡（PersonaPreviewCard：名称/描述/锚点/五维性格条，`lg:grid-cols-[2fr_1fr]`） |
 
-### SETTINGS — 角色设置 `/roles/:id/settings[/:tab]`（RoleSettings.tsx 84 行 + RoleSettingsTabs.tsx 528 行，六 tab）
+### SETTINGS — 角色设置 `/roles/:id/settings[/:tab]`（RoleSettings.tsx 85 行 + RoleSettingsTabs.tsx，**五 tab**：basic/voice/message/data/timeline；StickersTab 已于 09-19 撤除——无后端支撑的装饰 tab）
 | 编号 | 功能点 |
 |------|--------|
-| BASIC-1 | 基础信息：五维性格滑条/锚点编辑/口头禅/描述 |
+| BASIC-1 | 基础信息：五维性格滑条（标签字典单一真源 `constants/persona.ts`，脏键自动归一化不渲染）/锚点编辑/口头禅/描述 |
 | VOICE-TAB-1 | 语音 tab：MiMo 模型三选（基础/克隆/设计）+ **保存落盘**（GAP-4 结案 09-01：POST /characters/{id}/voice，mimo_model 进 extra_params；克隆/设计音色创建指引至语音工作台） |
 | MESSAGE-1 | 消息 tab：频率控制参数（紧迫阈值 0-10/每日上限/最小间隔/冷却）**保存真生效**（apply_runtime_config 写运行时控制器；08-28 修复旧版只写字典不生效）+ **免打扰起止时段（09-17 新增，滑条 0-23 点；`data/scheduler_config.json` 持久化跨重启/跨 worker）** + 保存按钮 |
 | MESSAGE-2 | 主动消息开关：暂停/恢复调度（POST /proactive/pause，暂停仅停自动触发不影响手动） |
 | MESSAGE-3 | 手动控制：立即发送一条主动消息（POST /proactive/send 绕过频率、计入统计）+ 最近 5 条发送记录。**09-17：投递链修复——调度器线程内 asyncio.run 直投（旧 get_event_loop 必炸致 64 触发 0 送达）+ 发送目标改绑定 wxid 定向 + MultiProviderGateway 补 chat_sync（LLM 生成此前静默回落模板）** **09-19：响应体剔除内部记账字段（`_committed`/`_scene`/`_scene_date`）；本端点仍以 commit=True 生成（吃配额后 finally 归还），语义不变** |
 | MESSAGE-4 | 统计卡真数据：今日主动/最后发送（08-28 修复：旧 history 读不存在的 `_sent_messages` 属性，一直返回空） |
-| DATA-1 | 数据 tab：概览统计（消息/记忆条数）+ 网络人设增强按钮（/api/characters/{id}/enrich）+ **知识库真实管理区**（SP-4 结案 09-01：KnowledgePreview 挂载——真实 stats + 检索测试，替换假 RAG 三卡与占位横幅；**09-19 检索增强：BM25 查询扩展双路互补 + 注入 top_k 3→8 + 索引由 scripts/rebuild_knowledge_index.py 从权威真源重建**）+ **定期采集开关（09-17 新增：Toggle+间隔输入，+/api/knowledge/collect-config GET/POST；scheduler vault_collect 周期任务对 shisi 角色库全量重建知识索引；默认关）** |
-| STICKERS-1 | 表情包 tab：常用表情网格展示 + 自定义贴图上传占位（**上传保存为未立项功能，非缺陷**——后端无贴图存储 API，shisi/sticker 仅推荐/安全检查库；立项需用户裁决） |
+| MESSAGE-5 | **对话内追问参数**（09-19 新增，滑条+开关）：没等到接话自动再补一句——开关/第一次延迟/第二次延迟/单用户每日上限（`follow_up_*` → `/api/proactive/config`，真源 `data/scheduler_config.json` 跨 worker 即时生效） |
+| MESSAGE-6 | **回复模式分段控件**（09-19 新增）：沉浸式真人聊天（不写动作神态）/ 小说式（带动作神态）二选一（`reply_mode: immersive\|novel`，真源 `data/scheduler_config.json`，编排器每次组装提示词时读取） |
+| DATA-1 | 数据 tab：概览统计（消息/记忆条数）+ 网络人设增强按钮（/api/characters/{id}/enrich）+ **知识库真实管理区**（SP-4 结案 09-01：KnowledgePreview 挂载——真实 stats + 检索测试，替换假 RAG 三卡与占位横幅；**09-19 检索增强：BM25 查询扩展双路互补 + 注入 top_k 3→8 + 索引由 scripts/rebuild_knowledge_index.py 从权威真源重建**）+ **定期采集开关（09-17 新增：Toggle+间隔输入，+/api/knowledge/collect-config GET/POST；scheduler vault_collect 周期任务对 shisi 角色库全量重建知识索引；默认关）** + **危险区删除角色真接线**（09-19：ConfirmDialog 确认 → useDeleteCharacter → toast + 跳回 /roles） |
 | TIMELINE-1 | 剧情时间线 tab（内嵌 StorylineEditor） |
 
-### STATUS — 状态中心 `/roles/:id/status`（StatusCenter.tsx, 77 行）
+### STATUS — 状态中心 `/roles/:id/status`（StatusCenter.tsx, 430 行；09-18/19 记忆三层管线重构 + 双列栅格）
 | 编号 | 功能点 |
 |------|--------|
-| STATUS-1 | 三卡：当前情绪（useEmotionState）/亲密等级（affinity→初识/熟悉/亲密三档）/记忆条目数 |
+| STATUS-1 | 三卡：当前情绪（useEmotionState）/亲密等级（**运行时真源** GET /api/shisi/emotion-stage/stages，失败回落 `AFFINITY_STAGES` 常量兜底——09-19 接真）/记忆条目数 |
 | STATUS-2 | 无活跃角色兜底态（引导先创建/激活） |
 | STATUS-3 | 最近记忆列表（useMemoryFacts 前 5 条） |
 | STATUS-4 | **角色日记**（候选 B，08-28）：GET /api/memory/diary 每日摘要最近 5 篇折叠展示 |
@@ -119,6 +121,7 @@
 
 | 编号 | 能力 | 关键行为 |
 |------|------|---------|
+| N-CHANNEL-1 | **每人独立微信通道**（09-19 用户裁决）：通道层多租户化——`(owner_user_id, slot)` 键控 `ConnectorRegistry`、凭证落 `data/wechat_sessions/<uid>/slotN/`、一人两条/全局上限 100（`WECHAT_MAX_CHANNELS`）；旧全局端点收敛 admin 兼容面（`/api/admin/wechat/*` 摘要+强制下线）；**好友自选角色**：通道内好友回复「角色」弹菜单、回复序号切换，偏好落 `wechat_peer_preferences`；遗留全局凭证一次性迁 admin（scripts/migrate_legacy_wechat_channel.py） |
 | N-ASR-1 | **语音转文字**（候选 A）：微信语音（type34 silk）→ WAV → OpenAI 兼容 /audio/transcriptions → 文字进对话管线；config voice.asr 配置驱动（默认关）；未配置保持占位提示。09-15 增补：silk 解码改 pilk（voice-silk 可选依赖；实测 ffmpeg 8.1 无 silk decoder），入站按 rate=16000 重采样 |
 | N-IMG-1 | **图片理解**（09-15 W3 收编）：微信图片（type3）→ 入口守卫白名单放行（1/3/34）→ config `multimodal.image` 驱动四模式（auto/direct/describe/off）：配 vision_model 走多模态附件直传（llm_gateway attachments 并入末条 user message，防 system_prompt/history 丢失），否则降级 VisionHandler 描述注入；image_attachment.py 归一化（magic bytes 判型），全程内存不落盘 |
 | N-DIARY-1 | **角色日记**（候选 B）：daily_summaries 每日摘要 → GET /api/memory/diary → StatusCenter 折叠卡片 |
@@ -128,7 +131,7 @@
 
 ## D. 系统设置域（SystemSettingsLayout 嵌套 Outlet）
 
-### LLM — LLM 设置 `/settings/llm`（SettingsLLM.tsx, 392 行）
+### LLM — LLM 设置 `/settings/llm`（SettingsLLM.tsx, 403 行）
 | 编号 | 功能点 |
 |------|--------|
 | LLM-1 | 供应商清单（listProviders：预设/自定义/特殊三态）+ 连接参数 + 生成参数 + 缓存配置 |
@@ -143,7 +146,7 @@
 | SVOICE-3 | 语音设计：性别/风格/年龄/音调/语速 → mimoDesign（voicedesign 模型） |
 | SVOICE-4 | 合成试听（mimoSynthesize） |
 
-### TOOLS — 工具面板 `/settings/tools`（ToolsDashboard.tsx, 178 行）
+### TOOLS — 工具面板 `/settings/tools`（ToolsDashboard.tsx, 177 行）
 | 编号 | 功能点 |
 |------|--------|
 | TOOLS-1 | 内置工具健康状态（tools/toolsHealth：可用性+错误提示+配置指引）+ 启停开关（toggleTool） |
@@ -154,14 +157,14 @@
 | SEC-1 | 安全统计：今日拦截/总检测/拦截率（safetyStats） |
 | SEC-2 | 过滤器开关（safetyConfig）+ 最近安全日志（safetyLog 前 10 条，拦截/放行） |
 
-### LOGS — 日志查看 `/settings/logs`（SettingsLogs.tsx, 205 行）
+### LOGS — 日志查看 `/settings/logs`（SettingsLogs.tsx, 202 行）
 | 编号 | 功能点 |
 |------|--------|
 | LOGS-1 | 级别过滤/关键词搜索/5s 轮询（可暂停）/清屏/TXT 导出（system.logs） |
 
 ## E. 管理后台（admin 角色，RoleGuard）
 
-### ADMIN-USERS — 用户管理 `/admin/users`（AdminUsersPage.tsx, 380 行）
+### ADMIN-USERS — 用户管理 `/admin/users`（AdminUsersPage.tsx, 394 行）
 | 编号 | 功能点 |
 |------|--------|
 | AUSER-1 | 注册账号 CRUD（adminCreateUser/Update/Delete）+ 角色分配（ROLES/ROLE_LABELS）+ 启停 |
@@ -176,6 +179,12 @@
 
 ### 404 — NotFoundPage：返回首页链接。
 
+### STORYLINE — 剧情线独立页 `/roles/:roleId/storyline`（App.tsx 内联 `StorylinePage` + StorylineEditor `standalone` 模式）
+| 编号 | 功能点 |
+|------|--------|
+| STORY-1 | 统一外壳（09-19 审美第二轮）：与角色设置同构——角色头卡（头像/名称/描述，useUnifiedCharacter）+ 玻璃卡包裹编辑器；编辑器默认展开、去嵌入分隔线 |
+| STORY-2 | 编辑器本体复用（同 TIMELINE-1 组件，`standalone` prop 区分嵌入/独立形态） |
+
 ---
 
 ## G. 全局装饰层（跨页面，挂载于 `ProtectedLayout`）
@@ -184,6 +193,7 @@
 |------|------|---------|
 | GLOBAL-1 | **遮罩式鼠标动效** `components/common/CustomCursor.tsx` | 三层结构：光晕遮罩（200→280px，滞后跟随 lerp 0.09）+ 内核（12→38px，紧跟 lerp 0.38）+ 拖尾粒子（9px × **16 节点对象池**，单颗寿命约 0.64s，实测停止移动后 601ms 消散）。品牌色海盐蓝 `#7DD3FC`（`--color-accent-200`），`data-hover="yellow\|blue\|mint"` 切暖黄/薄荷青变体；hover 判定覆盖 `a/button/[role=button]/input/select/textarea/label/summary`。**硬约束（改前必读）**：位移走 `translate3d`（禁 `left/top`）、对象池复用节点（禁逐帧增删 DOM）、单 rAF 驱动、**所有按帧系数须经 `k = dt/16.67` 归一化**、停帧条件为「静止超时 **且** 无存活粒子」。2026-09-18 重构前为「圆环 + 圆点」双层（`c755090`） |
 | GLOBAL-2 | **背景粒子画布** `components/common/ParticleCanvas.tsx` | 全屏 canvas，30fps 节流（8–18 粒子 + 距离连线），`visibilitychange` 暂停、resize 防抖、`prefers-reduced-motion` 下降级为 0 粒子。⚠️ **性能注记**：与 `backdrop-filter` 毛玻璃叠加时为**卡顿主因**（隔离实测 24.1fps / 86.1% 卡顿），且降模糊半径（12→6px）实测**无效**；解耦方案待裁决 |
+| GLOBAL-3 | **全站材质体系**（2026-09-20 用户裁决 A+B，`index.css` 令牌层） | 固定环境色场（暖黄/天蓝/薄荷四团径向渐变）+ 三档材质阶梯 `.mat-recess`（内凹）/.mat-raised（实体+彩色发丝线）/.mat-floating（玻璃特权层，Sidebar/Breadcrumb/MobileDrawer/Modal 壳层统一）；`.glass-card` 半透明玻璃重做；CreateRole 聊天 iOS Messages 语言（`.chat-channel`/`.chat-bubble-in,out`/`.chat-dock`）；全站输入框基态 `.input-macaron`；色板令牌级重映射（blue→sky/green→teal/gray→stone/purple→sky/orange→amber）。克隆重传假进度已撤除，改 `.progress-slide` 不定量滑条诚实表达（09-20） |
 
 > 两者均仅挂载于 `ProtectedLayout`（登录后的控制台）；`/intro` `/login` `/psych` 不含此组件（`/psych` 自 09-18 起需登录）。
 > 性能诊断方法论见技能 `perf-isolation-lab`；注意无头浏览器走软件光栅化，性能数值不可信（同场景无头 24fps vs 真实 GPU 240fps）。
@@ -196,9 +206,9 @@
 |---|------|---------|---------|
 | ~~GAP-1~~ | ~~企业微信通道未实现~~ | 05-19 §1.2 | **❌ 08-28 用户裁决：只做个人微信，其他通道不需要**（Non-Goal） |
 | GAP-2 | ~~记忆三层仅"条目数+最近事实"入 UI，工作记忆/情景时间线无呈现~~ **✅ 结案（2026-09-18）** | 05-19 §1.2 记忆系统 | 已实现：`StatusCenter.MemorySystemCard` 重构为「**记忆体系 · 三层管线**」——① 工作记忆（会话上下文）／② 情景归档（`daily_summaries`，可展开时间线）／③ 长期记忆（向量库事实 + 珍藏）逐层显式呈现，每层标注「是什么/存什么/有多少」。原独立的「角色日记」卡已并入第②层（日记本就是情景记忆的产品化呈现）。**数据全用既有端点，未新增后端接口** |
-| GAP-3 | ~~MESSAGE-1 统计卡「今日触发/最后发送」为占位 `—`（数据未接）~~ **✅ 结案（2026-09-18 核实）——本条系过时记录** | 主动消息可观测 | **无需改动**：`components/admin/RoleSettingsTabs.tsx` 第 524-525 行本就从 `/api/proactive/history` **真实统计**（`todayCount` 按当日过滤、`lastAt` 取最新一条），`—` 仅在**该角色从未发过主动消息**时作为空态兜底显示，**非占位符** |
+| GAP-3 | ~~MESSAGE-1 统计卡「今日触发/最后发送」为占位 `—`（数据未接）~~ **✅ 结案（2026-09-18 核实）——本条系过时记录** | 主动消息可观测 | **无需改动**：`components/admin/RoleSettingsTabs.tsx` MessageTab 本就从 `/api/proactive/history` **真实统计**（`todayCount` 按当日过滤、`lastAt` 取最新一条），`—` 仅在**该角色从未发过主动消息**时作为空态兜底显示，**非占位符** |
 | — | **三层记忆的「情景层」在生产中是全局未隔离的**（本轮审计新发现） | 架构审计 | ⚠️ `shisi/memory/legacy/episodic_memory.py` 只写单一 ChromaDB collection（`episodic_memory`），`store_episode` 的 meta **不含 character_id / user_id**，`get_recent_episodes()` 亦无过滤；`VectorMemory` 是按路径缓存的**单例**。故本轮可视化**刻意不新暴露该层数据**（改用已隔离的 `daily_summaries` 端点替代），避免引入 L3 串扰。**该项需专项评估后再动** |
 | ~~GAP-4~~ | ✅ 结案（09-01）：语音保存接线 + 知识库真实管理区（G-06/G-07 消案） | 09-01 批次 | 已实现 |
 | ~~GAP-5~~ | ✅ 全结案（09-01 晚）：成就落地 + GET /api/emotion/distribution 新端点 + 趋势修复（旧实现读不存在属性恒空，EmotionEngine 补环形历史） | 05-29 差距分析 + 09-01 批次 | 已实现 |
 
-> 本清单由代码读出（App.tsx 路由 × 17 页面组件 × api/*.ts 消费；2026-09-19 全仓扫描核对），历史意图对照 `docs/history/`。条目变更随代码同步。
+> 本清单由代码读出（App.tsx 路由 × 17 页面组件 × api/*.ts 消费；2026-09-20 全仓遍历核对），历史意图对照 `docs/history/`。条目变更随代码同步。

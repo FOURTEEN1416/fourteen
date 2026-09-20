@@ -1,6 +1,6 @@
 # 数据库地图
 
-**最近更新:** 2026-09-19
+**最近更新:** 2026-09-20
 **数据库:** SQLite (主, aiosqlite) + ChromaDB (向量) + 文件系统 (角色卡/知识库)
 
 ---
@@ -15,7 +15,7 @@
 │  ┌────────────────────┐   ┌──────────────────────┐      │
 │  │ 用户 & 会话 (主库)  │   │ RAG 嵌入向量存储      │      │
 │  │ data/users.db      │   │ data/chroma_db/      │      │
-│  │ 6 表 (见下)         │   │ - 文档嵌入            │      │
+│  │ 8 表 (见下)         │   │ - 文档嵌入            │      │
 │  │                    │   │ - 情景记忆 (单 collection， │
 │  │                    │   │   隔离缺口见 FUNCTION_      │
 │  │                    │   │   INVENTORY 差距表)        │
@@ -25,14 +25,21 @@
 │  ┌────────────────────┐   ┌──────────────────────┐      │
 │  │ 角色卡              │   │ 知识库数据            │      │
 │  │ config/characters/ │   │ data/knowledge/      │      │
-│  │ (25 张，唯一真源)    │   │ BM25 索引 (55 文件)   │      │
+│  │ (41 张，唯一真源)    │   │ BM25 索引 (42 文件，   │      │
+│  │                    │   │ 约 1750 块)           │      │
 │  └────────────────────┘   └──────────────────────┘      │
+│  ┌────────────────────┐                                 │
+│  │ 微信通道凭证         │                                 │
+│  │ data/wechat_       │                                 │
+│  │ sessions/<uid>/    │                                 │
+│  │ slotN/ (每用户独立) │                                 │
+│  └────────────────────┘                                 │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## SQLite 模型 (api/database.py，6 表)
+## SQLite 模型 (api/database.py，8 表)
 
 > 数据库连接由 `api/runtime_config.py:get_database_url()` 解析，默认 `sqlite+aiosqlite:///data/users.db`。
 > 若设置 `DATABASE_URL` / `APP_DATABASE_URL` 环境变量，可切换为 PostgreSQL/MySQL（同步驱动自动转异步）。
@@ -61,13 +68,15 @@
 | is_active | Boolean, default=True | 是否有效 |
 | expires_at / created_at / last_used_at | DateTime | 时间戳 |
 
-### 其余 4 表
+### 其余 6 表
 
 | 模型 | 表名 | 说明 |
 |------|------|------|
 | InviteCode | invite_codes | 邀请码注册（内测准入） |
 | ConsentRecord | consent_records | 用户同意记录（W2-consent） |
 | WechatBinding | wechat_bindings | 微信 wxid ↔ 角色绑定（**微信人设真源**，09-17 起 web"设为活跃"实时同步） |
+| **WechatChannelSession** | wechat_channel_sessions | **每人独立微信通道会话**（09-19）：(user_id, slot 0/1) 一人多条；status=idle/waiting_qr/scanned/connected/error；bot_id/nickname/messages_today/last_error（凭证本体在文件系统，不落库） |
+| **WechatPeerPreference** | wechat_peer_preferences | **通道内好友自选角色**（09-19）：(owner_user_id, peer_wxid) → character_card_id；与 wechat_bindings 区分——binding 表达「wxid↔注册用户」身份，本表表达「在 U 的通道里 F 选了哪张卡」 |
 | CharacterAchievement | character_achievements | 角色成就（ADR-0014，10 成就×4 类，幂等重算） |
 
 ### shisi 业务表 (shisi/migrations.py，12 张)
