@@ -23,7 +23,7 @@
 
 **文档**：AGENTS **v1.22** / CODE_GRAPH **v3.8.12** / README **1445** / CODEMAPS / DECISION_LEDGER / P1_BACKLOG / 本 LOG。
 
-**三端**：代码+测试 A 档（commit→push→服务器 pull）；文档 B 档 push 即完成。
+**三端**：代码+测试 A 档与文档 B 档均已闭环——本地 `50e29e3` / GitHub main / 服务器 `/opt/ai-girlfriend` HEAD `50e29e30`（经 `ssh swu-prod`：`git pull` + `remote_deploy.sh`；`ai-girlfriend` active，`/api/health` 200，`scale.py`/`affinity_state.py` 等关键文件存在）。SSH 方式：`C:\Users\FOUR\.ssh\config` 别名 `swu-prod` → `root@139.199.199.174:28222`。
 
 ---
 
