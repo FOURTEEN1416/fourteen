@@ -173,6 +173,22 @@ class FakeStructuredMemory:
     def get_recent_chats(self, n: int = 10) -> list[dict]:
         return list(self.chats[-n:])
 
+    def get_chats_by_session_limit(self, session_id: str, limit: int) -> list[dict]:
+        """会话过滤（与生产 get_chats_by_session_limit 对齐：支持 N:wxid / 裸 wxid）。"""
+        if not session_id:
+            return []
+        forms = {session_id}
+        if ":" in session_id:
+            forms.add(session_id.split(":", 1)[1])
+        matched = [
+            c for c in self.chats
+            if c.get("session_id") in forms and c.get("role") != "episode"
+        ]
+        return matched[-limit:]
+
+    def get_chats_by_session(self, session_id: str) -> list[dict]:
+        return self.get_chats_by_session_limit(session_id, limit=10_000)
+
     def get_chats_today(self) -> list[dict]:
         return list(self.chats)
 
@@ -333,12 +349,49 @@ def test_mp_get_chat_context_delegates_to_summarizer():
     assert isinstance(summary, str)
 
 
-def test_mp_get_memory_context_and_formatted():
+def test_mp_get_memory_context_and_formatted(tmp_path):
+    """get_memory_context / get_formatted_context：会话隔离 + k 注入 + 标题。"""
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.structured_memory import StructuredMemory
+
+    sm = StructuredMemory(str(tmp_path / "ctx.db"))
+    try:
+        sm.add_chat("user", "A喜欢猫", session_id="1:alice@im.wechat")
+        sm.add_chat("assistant", "喵", session_id="1:alice@im.wechat")
+        sm.add_chat("user", "B喜欢狗", session_id="1:bob@im.wechat")
+        # user_key 必须与 user_key_from_session(session) 同源：N:wxid → wxid
+        sm.add_fact("A喜欢猫", category="preference", user_key="alice@im.wechat")
+        sm.add_fact("B喜欢狗", category="preference", user_key="bob@im.wechat")
+        mp = MemoryPipeline(
+            vector_memory=FakeVectorMemory(),
+            structured_memory=sm,
+            llm_gateway=None,
+        )
+        # 会话 A：不得出现 B 的聊天/事实
+        ctx_a = mp.get_memory_context(session_id="1:alice@im.wechat", affinity_level=2)
+        assert any("A喜欢猫" in c.get("content", "") for c in ctx_a["recent_chats"])
+        assert not any("B喜欢狗" in c.get("content", "") for c in ctx_a["recent_chats"])
+        assert "A喜欢猫" in ctx_a["user_facts"]
+        assert "B喜欢狗" not in ctx_a["user_facts"]
+        text_a = mp.get_formatted_context(session_id="1:alice@im.wechat", affinity_level=2)
+        assert "关于用户" in text_a
+        assert "B喜欢狗" not in text_a
+        # 会话 B：对称隔离
+        ctx_b = mp.get_memory_context(session_id="1:bob@im.wechat")
+        assert not any("A喜欢猫" in c.get("content", "") for c in ctx_b["recent_chats"])
+        assert "B喜欢狗" in ctx_b["user_facts"]
+        assert "A喜欢猫" not in ctx_b["user_facts"]
+    finally:
+        sm.close()
+
+
+def test_mp_get_memory_context_pipeline_session():
+    """pipeline 级 session 注入 facts（沿用原用例语义，补齐会话归属）。"""
     mp, vm, sm = _make_pipeline()
     mp._session_id = "N:wxid_t3"
     sm.add_fact("用户喜欢猫", "preference", 0.9, user_key="wxid_t3")
-    mp.after_chat("你好", "你好呀")
-    ctx = mp.get_memory_context()
+    mp.after_chat("你好", "你好呀", session_id="N:wxid_t3")
+    ctx = mp.get_memory_context(session_id="N:wxid_t3")
     assert "user_facts" in ctx
     assert "用户喜欢猫" in ctx["user_facts"]
     formatted = mp.get_formatted_context()

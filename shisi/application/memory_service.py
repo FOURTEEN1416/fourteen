@@ -211,11 +211,15 @@ class ShisiMemoryService:
     def get_cross_session_tail(self, session_id: str = "", limit: int = 8) -> list[str]:
         return self._pipeline.get_cross_session_tail(session_id=session_id, limit=limit)
 
-    def get_memory_context(self, n_chats: int = 10) -> dict[str, Any]:
-        return self._pipeline.get_memory_context(n_chats=n_chats)
+    def get_memory_context(
+        self, n_chats: int = 10, session_id: str = "",
+    ) -> dict[str, Any]:
+        return self._pipeline.get_memory_context(n_chats=n_chats, session_id=session_id)
 
-    def get_formatted_context(self, n_chats: int = 6) -> str:
-        return self._pipeline.get_formatted_context(n_chats=n_chats)
+    def get_formatted_context(
+        self, n_chats: int = 6, session_id: str = "",
+    ) -> str:
+        return self._pipeline.get_formatted_context(n_chats=n_chats, session_id=session_id)
 
     def store_episode(
         self,
@@ -237,12 +241,15 @@ class ShisiMemoryService:
         category: str = "general",
         confidence: float = 0.5,
         source: str = "",
+        user_key: str = "",
     ) -> bool:
+        # 隔离：调用方应传会话归属 user_key；缺省 '' 表示无主/内部维护路径
         return self._pipeline.semantic.add_fact(
             fact=fact,
             category=category,
             confidence=confidence,
             source=source,
+            user_key=user_key,
         )
 
     def reset_session(self) -> None:

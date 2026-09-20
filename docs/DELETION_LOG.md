@@ -1,7 +1,5 @@
 # Code Deletion Log
 
-# Code Deletion Log
-
 ## [2026-09-18] shisi v2 死模块删除 + 假端点改 501（用户裁决「三项全做」）
 
 ### 删除对象与证据

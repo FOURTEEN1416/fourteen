@@ -264,6 +264,58 @@ def test_calendar_and_time_awareness_use_shared_wall_clock() -> None:
     assert "now_local" in time_src
 
 
+def test_storyline_updated_at_uses_utc_iso_not_naive_now() -> None:
+    """剧情线 updated_at 必须 UTC ISO（与 character_routes 同源），禁止裸 datetime.now()。"""
+    import inspect
+
+    from api.routers import storyline_routes
+
+    raw = inspect.getsource(storyline_routes)
+    assert "timezone.utc" in raw
+    assert "datetime.now()" not in raw.replace("datetime.now(tz=", "")
+
+
+def test_memory_fact_extraction_is_session_isolated() -> None:
+    """事实抽取只读本会话消息，禁止全局 get_recent_chats 串用户。"""
+    import inspect
+
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
+
+    raw = inspect.getsource(MemoryPipeline._do_fact_extraction)
+    assert "get_recent_chats" not in raw.replace("get_recent_chats(10)", ""), (
+        "_do_fact_extraction 不得读全局 chat_history；必须按 session_id 过滤"
+    )
+    assert "_load_session_history" in raw
+
+
+def test_retrieve_context_facts_fallback_uses_call_session() -> None:
+    """retrieve_context 降级取 facts 时必须用调用方 session_id，不得退回 pipeline 全局 session。"""
+    import inspect
+
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
+
+    for name in ("retrieve_context", "retrieve_context_async"):
+        raw = inspect.getsource(getattr(MemoryPipeline, name))
+        assert "session_id or self.session_id" in raw, (
+            f"{name} 的 facts 降级必须优先用传入 session_id"
+        )
+
+
+def test_get_memory_context_recent_chats_session_isolated() -> None:
+    """get_memory_context.recent_chats 不得再调用全局 get_recent_chats。"""
+    import inspect
+
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
+
+    raw = inspect.getsource(MemoryPipeline.get_memory_context)
+    # 排除 docstring 中的历史说明
+    code = raw.split('"""', 2)[-1] if '"""' in raw else raw
+    assert "self.sm.get_recent_chats" not in code, (
+        "get_memory_context 不得读全局聊天；必须 _load_session_history(session)"
+    )
+    assert "_load_session_history" in raw
+
+
 _SQL_FMT = "%Y-%m-%d %H:%M:%S"
 
 

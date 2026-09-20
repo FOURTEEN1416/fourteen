@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +29,8 @@ def _persist_state_to_json(character_id: str, state_dict: dict[str, Any]) -> Non
     if data is None:
         return
     data["storyline_state"] = state_dict
-    data["updated_at"] = datetime.now().isoformat()
+    # 墙钟/元数据时间戳统一 UTC ISO（与 character_routes 同源，主机时区无关）
+    data["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
     _save_character(character_id, data)
 
 
@@ -161,7 +162,7 @@ async def update_storyline_config(
     }
 
     data["storyline_config"] = config_data
-    data["updated_at"] = datetime.now().isoformat()
+    data["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
 
     if not _save_character(character_id, data):
         raise HTTPException(status_code=500, detail="保存剧情线配置失败")

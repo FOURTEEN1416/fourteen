@@ -7,6 +7,29 @@
 
 ---
 
+## 2026-09-20 — 全仓复核：记忆会话隔离补漏 + 文档口径对齐
+
+**任务**：用户指令「复核一下整仓」。
+
+**实扫结论**
+- 端点内省：**215 / 181**（GET 101 / POST 78 / PUT 16 / DELETE 20），`app.routes=219` —— 与 CODE_GRAPH 一致。
+- 主检出（含 41 角色卡）pytest 分块：**1424 收集 / 1420 通过 / 4 跳过**（326+1 +403 +320 +371+3）。
+- worktree/CI（无 config/characters）收集 **1344**（persona 参数化 −80）。
+- FE vitest **98/98**；ruff 全仓 **0**。
+- 文档漂移：README 内 1417/1421 与 1324 自相矛盾；AGENTS §0/§2/§4.3 仍写 1410/1414；CODE_GRAPH 仍写 1421。
+
+**缺陷（隔离硬约束 L3）与修复**
+1. **`MemoryPipeline._do_fact_extraction`**：源消息读全局 `get_recent_chats(10)`，却按当前 `session_id` 的 `user_key` 落库 → 多用户并发时会把**他人消息**提取成**当前用户**的事实。改为 `_load_session_history(session_id)`。
+2. **`get_memory_context.recent_chats`**：同样全局读表，`get_formatted_context` 会把他人聊天注入当前用户 prompt 文本。改为会话过滤；`get_formatted_context`/`MemoryService` 透传 `session_id`。
+3. **`retrieve_context` / `retrieve_context_async` facts 降级**：`user_key` 误用 pipeline 级 `self.session_id`，忽略调用方传入的 `session_id`。改为 `session_id or self.session_id`。
+4. **`MemoryService.add_fact`**：缺 `user_key` 透传（写侧隔离断链）。补参数。
+5. **`storyline_routes.updated_at`**：裸 `datetime.now()` → 与 `character_routes` 同源的 UTC ISO。
+6. 文档：README / AGENTS / CODE_GRAPH 测试口径对齐；DELETION_LOG 重复标题删除。
+
+**验证**：静态隔离契约 + 会话隔离 behavior 用例 + memory 相关套件回归；端点不变。
+
+---
+
 ## 2026-09-20 — CI 修复：pending_intents 写读时钟不一致（UTC 主机立即过期）
 
 **任务**：用户指令「处理 github 上的 ci 报错」。GitHub Actions `main` 连续多次红，唯一失败点：

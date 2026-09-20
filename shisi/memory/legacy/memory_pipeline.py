@@ -543,9 +543,11 @@ class MemoryPipeline:
             )
 
         # 3. 结构化事实补充（降级回退）
+        # 用调用方传入的 session_id 澄清归属，禁止退回 pipeline 全局 session
         if not context["facts"]:
             try:
-                facts = self.sm.get_facts(min_confidence=0.3, user_key=_user_key_from_session(self.session_id))
+                _uk_fb = _user_key_from_session(session_id or self.session_id)
+                facts = self.sm.get_facts(min_confidence=0.3, user_key=_uk_fb)
                 context["facts"] = [f["fact"] for f in facts[:top_k]]
             except Exception as e:  # noqa: BLE001
                 logger.debug("Structured fact fallback failed: %s", e)
@@ -643,7 +645,8 @@ class MemoryPipeline:
 
         if not context["facts"]:
             try:
-                facts = self.sm.get_facts(min_confidence=0.3, user_key=_user_key_from_session(self.session_id))
+                _uk_fb = _user_key_from_session(session_id or self.session_id)
+                facts = self.sm.get_facts(min_confidence=0.3, user_key=_uk_fb)
                 context["facts"] = [f["fact"] for f in facts[:top_k]]
             except Exception as e:  # noqa: BLE001
                 logger.debug("Structured fact fallback failed: %s", e)
@@ -788,14 +791,24 @@ class MemoryPipeline:
 
     # ── V1 兼容接口 ──────────────────────────────────────
 
-    def get_memory_context(self, n_chats: int = 10, affinity_level: int = 0) -> dict[str, Any]:
+    def get_memory_context(
+        self,
+        n_chats: int = 10,
+        affinity_level: int = 0,
+        session_id: str = "",
+    ) -> dict[str, Any]:
         """V1兼容：获取当前对话需要的记忆上下文
 
         包 Q · B-c：注入条数 k = min(4 + ceil(level/2), 10)；
         优先 relationship/commitment > preference > 普通 fact。
+
+        2026-09-20 全仓复核：`recent_chats` 与事实归属必须按会话隔离——
+        旧实现 `get_recent_chats` 读全局表，多用户并发时会把他人聊天
+        注入当前用户的记忆上下文（违反隔离硬约束）。
         """
         import math
 
+        sess = session_id or self.session_id
         k = min(4 + math.ceil(max(0, int(affinity_level)) / 2), 10)
         context = {
             "recent_chats": [],
@@ -809,13 +822,16 @@ class MemoryPipeline:
         }
 
         try:
-            context["recent_chats"] = self.sm.get_recent_chats(n_chats)
+            if sess:
+                context["recent_chats"] = self._load_session_history(sess, limit=n_chats)
+            else:
+                context["recent_chats"] = []
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to get recent chats: %s", e)
 
         try:
             # 完整隔离：只注入当前会话归属的事实（user_key 从 session 澄清）
-            uk = _user_key_from_session(self.session_id)
+            uk = _user_key_from_session(sess)
             facts = self.sm.get_facts(min_confidence=0.3, user_key=uk, limit=50)
 
             def _prio(row: dict) -> int:
@@ -867,12 +883,19 @@ class MemoryPipeline:
 
         return context
 
-    def get_formatted_context(self, n_chats: int = 6, affinity_level: int = 0) -> str:
+    def get_formatted_context(
+        self,
+        n_chats: int = 6,
+        affinity_level: int = 0,
+        session_id: str = "",
+    ) -> str:
         """V1兼容：获取格式化的记忆上下文文本（用于注入 prompt）
 
         包 Q · B-c 标题：# 关于用户 / # 最近话题 / # 我们之间
         """
-        ctx = self.get_memory_context(n_chats, affinity_level=affinity_level)
+        ctx = self.get_memory_context(
+            n_chats, affinity_level=affinity_level, session_id=session_id,
+        )
         parts = []
 
         if ctx["user_facts"]:
@@ -968,7 +991,9 @@ class MemoryPipeline:
         count = 0
         _uk = _user_key_from_session(session_id)
         try:
-            recent = self.sm.get_recent_chats(10)
+            # 隔离：只抽取**本会话**消息。旧实现读全局 get_recent_chats(10)，
+            # 多用户并发时会把他人消息提取后写进当前 user_key（违反隔离硬约束）。
+            recent = self._load_session_history(session_id, limit=10) if session_id else []
             # 选择性记忆：过滤掉敷衍且无情感的消息
             # 2026-09-20 修复：该 now 会被传入 should_store_as_fact → _is_late_night，
             # 属墙钟判定，须用本地时间（原先 UTC 使深夜规则整体错位 8 小时）。
