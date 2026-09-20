@@ -596,8 +596,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             f"{character_id}:{session_id}" if session_id else f"{character_id}"
         )
 
-        # 并行执行独立任务
-        recent = self.components["memory"].get_recent_context(3)
+        # 并行执行独立任务（recent 传 session_id：会话隔离，防跨用户串扰）
+        recent = self.components["memory"].get_recent_context(3, session_id=session_id)
         loop = asyncio.get_running_loop()
 
         tasks: dict[str, Any] = {}

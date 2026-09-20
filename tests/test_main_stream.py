@@ -48,7 +48,7 @@ def _make_orchestrator(with_chat_stream: bool = True):
 
     # 记忆 mock
     memory = SimpleNamespace(
-        get_recent_context=lambda n: "最近上下文",
+        get_recent_context=lambda n, session_id="": "最近上下文",
         retrieve_context=lambda query, session_id, top_k: {"facts": ["喜欢猫"]},
         get_chat_context=lambda session_id: ([{"role": "user", "content": "hi"}], ""),
         after_chat=lambda **kwargs: None,
@@ -329,7 +329,7 @@ def test_stream_after_chat_exception_does_not_break_flow():
         raise RuntimeError("memory fail")
 
     orch.components["memory"] = SimpleNamespace(
-        get_recent_context=lambda n: "最近上下文",
+        get_recent_context=lambda n, session_id="": "最近上下文",
         retrieve_context=lambda query, session_id, top_k: {"facts": ["喜欢猫"]},
         get_chat_context=lambda session_id: ([{"role": "user", "content": "hi"}], ""),
         after_chat=failing_after_chat,
@@ -342,7 +342,7 @@ def test_stream_after_chat_exception_does_not_break_flow():
 def test_stream_retrieve_context_exception_returns_done():
     orch = _make_orchestrator(with_chat_stream=True)
     orch.components["memory"] = SimpleNamespace(
-        get_recent_context=lambda n: "最近上下文",
+        get_recent_context=lambda n, session_id="": "最近上下文",
         retrieve_context=lambda query, session_id, top_k: (_ for _ in ()).throw(RuntimeError("context fail")),
         get_chat_context=lambda session_id: ([{"role": "user", "content": "hi"}], ""),
         after_chat=lambda **kwargs: None,

@@ -193,8 +193,8 @@ class ShisiMemoryService:
             top_k=top_k,
         )
 
-    def get_recent_context(self, n: int = 3) -> str:
-        return self._pipeline.get_recent_context(n=n)
+    def get_recent_context(self, n: int = 3, session_id: str = "") -> str:
+        return self._pipeline.get_recent_context(n=n, session_id=session_id)
 
     def get_chat_context(
         self,

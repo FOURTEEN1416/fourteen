@@ -475,6 +475,22 @@ class StructuredMemory:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def get_chats_by_session_limit(
+        self, session_id: str, limit: int
+    ) -> list[dict[str, Any]]:
+        """获取某会话最近 limit 条聊天（时间正序）。
+
+        2026-09-20 新增：对话上下文真源改读 chat_history 表后，按会话拉最近
+        N 条的受限量查询（旧 get_chats_by_session 全量拉取，长会话会拖慢热路径）。
+        """
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM chat_history WHERE session_id = ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (session_id, limit),
+            ).fetchall()
+            return [dict(r) for r in rows][::-1]  # 反转成时间正序
+
     def get_chats_today(self) -> list[dict[str, Any]]:
         """获取今天的聊天"""
         with self._conn() as conn:

@@ -16,6 +16,7 @@ import asyncio
 import concurrent.futures
 import hashlib
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -548,9 +549,10 @@ class MemoryPipeline:
 
         return {k: v for k, v in context.items() if k != "_ts"}
 
-    def get_recent_context(self, n: int = 3) -> str:
-        """获取最近对话上下文文本"""
-        recent = self.working.get_recent(n=n)
+    def get_recent_context(self, n: int = 3, session_id: str = "") -> str:
+        """获取最近对话上下文文本（会话隔离，2026-09-20：改读 DB 真源）"""
+        sess = session_id or self.working.session_id
+        recent = self._load_session_history(sess, limit=max(n, 6))[-n:] if sess else []
         return "\n".join(
             f"{m.get('role', '?')}: {m.get('content', '')}" for m in recent
         )
@@ -599,15 +601,58 @@ class MemoryPipeline:
         keep_recent: int = 50,
         summary_trigger: int = 80,
     ):
-        working_messages = self.working.get_recent(n=200)
-        if not working_messages:
+        # 2026-09-20 根因修复：对话上下文的唯一真源改为**持久化 chat_history 表**，
+        # 不再读全局 RAM deque。旧实现三重缺陷（生产实证 2026-09-20）：
+        # ① 重启即失忆——deque 是进程内存，服务重启后历史为空，用户上午聊的
+        #   「答应提醒起床」下午全忘（日志 hist_msgs 归零实证）；
+        # ② 跨会话串扰——deque 不带 session 标签，两个好友同时聊天时消息互相
+        #   混入对方上下文（违反多用户隔离硬约束）；
+        # ③ 会话形态分裂——历史数据同时存在 `1:wxid`（owner 通道）与裸 `wxid`
+        #   （遗留全局通道）两种 session_id，按单形态查询会丢一半历史。
+        # working deque 保留给后台归档/情景记忆任务，不再承担上下文供给。
+        sess = session_id or self.working.session_id
+        messages = self._load_session_history(sess, limit=keep_recent + 40)
+        if not messages:
             return [], ""
         return self.summarizer.get_chat_context(
-            working_messages,
-            session_id=session_id or self.working.session_id,
+            messages,
+            session_id=sess,
             keep_recent=keep_recent,
             summary_trigger=summary_trigger,
         )
+
+    def _load_session_history(self, session_id: str, limit: int) -> list[dict[str, Any]]:
+        """从 chat_history 表按会话加载最近对话（兼容新旧 session_id 形态）。
+
+        - owner 通道形态 `N:wxid` 与遗留裸 `wxid` 双形合并，修复历史分裂；
+        - 返回时间正序、summarizer 可直接消费的 {role, content, ...} 列表；
+        - 单会话最多拉 limit 条（含两形态），sqlite 本地表开销可忽略。
+        """
+        if not session_id:
+            return []
+        forms = [session_id]
+        legacy = re.match(r"^\d+:(.+)$", session_id)
+        if legacy:
+            forms.append(legacy.group(1))
+        rows: dict[tuple[str, str], dict[str, Any]] = {}
+        try:
+            for form in forms:
+                for r in self.sm.get_chats_by_session_limit(form, limit):
+                    rows[(str(r.get("created_at", "")), str(r.get("content", "")))] = r
+        except Exception as e:  # noqa: BLE001
+            logger.warning("按会话加载历史失败 session=%s: %s", session_id, e)
+            return []
+        msgs = sorted(rows.values(), key=lambda r: str(r.get("created_at", "")))
+        return [
+            {
+                "role": r.get("role", "user"),
+                "content": r.get("content", ""),
+                "emotion": r.get("emotion_tag", ""),
+                "importance": 0.5,
+                "timestamp": r.get("created_at", ""),
+            }
+            for r in msgs[-limit:]
+        ]
 
     # ── V1 兼容接口 ──────────────────────────────────────
 

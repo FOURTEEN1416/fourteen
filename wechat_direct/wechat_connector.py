@@ -11,6 +11,7 @@ import concurrent.futures
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -734,6 +735,18 @@ class WeChatConnector:
             return peer_wxid
         return f"{int(self.owner_user_id)}:{peer_wxid}"
 
+    @staticmethod
+    def _peer_wxid_from_session(session_key: str) -> str:
+        """从会话隔离键还原裸 peer wxid（`N:wxid` → `wxid`；裸形态原样返回）。
+
+        2026-09-20 修复追问链 ret=-3：`_schedule_followup` 登记的键是 session_key，
+        而 `_send_text` 的 `to_user_id` 与 `_context_tokens` 的键都是**裸 wxid** —
+        旧实现直接拿 session_key 当发送目标与查 token，两者都错（invalid arguments +
+        token 恒空），追问全线失败。
+        """
+        m = re.match(r"^\d+:(.+)$", session_key or "")
+        return m.group(1) if m else session_key
+
     def _merge_session_state(self, updates: dict) -> dict:
         if self.owner_user_id is not None:
             save_session_state(self.owner_user_id, self.slot, {**self._load_local_state(), **updates})
@@ -1298,7 +1311,10 @@ class WeChatConnector:
         text = self._generate_followup(prompt, last_reply=last_reply)
         if not text:
             return
-        if not self.send_text(text, to_user=user_id):
+        # 2026-09-20 修复：user_id 是会话隔离键（`N:wxid`），而发送 API 与
+        # context_token 查找要的都是**裸 peer wxid** —— 直接传会 ret=-3。
+        peer = self._peer_wxid_from_session(user_id)
+        if not self.send_text(text, to_user=peer):
             logger.warning("[wx][step=followup_send_failed] user=%s step=%d", user_id, step)
             return
 
@@ -1366,8 +1382,11 @@ class WeChatConnector:
             self._save_context_tokens()
         if from_user:
             self._last_user_id = from_user
-            # 用户接话了 → 取消该用户的待发追问（追问只在"对方没接话"时才发）
-            self._cancel_followup(from_user)
+            # 用户接话了 → 取消该用户的待发追问（追问只在"对方没接话"时才发）。
+            # 2026-09-20 修复：待发追问以**会话隔离键**（`N:wxid`）登记，
+            # 取消时必须用同一形态 —— 旧实现传裸 wxid 永远匹配不上，
+            # 用户接话后追问照样发（追问时序错乱 + 白耗每日预算）。
+            self._cancel_followup(self._session_key(from_user))
 
         items = raw_msg.get("item_list", [])
         text = ""
