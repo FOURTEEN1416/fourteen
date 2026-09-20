@@ -32,6 +32,13 @@
 
 **验证**：主检出收仓回归门 pytest **1429/1425/4** + vitest **98/98** + ruff **0** + 端点 **215/181**；端点零变更。
 
+**A 档三端闭环**
+- GitHub：`origin/main` = `b509ba3`（`c120367` 代码收编 + 文档/看板）
+- 服务器：`ssh swu-prod` pull `b509ba3b` + `remote_deploy.sh` 4/4（pip editable + npm + vite dist + nginx reload）
+- health/ready：**200/200**；服务 `active`
+- A 档抽验：`git hash-object` 三文件本地=服务器=HEAD blob（`716fea27…` / `59fb13ca…` / `1f24f08d…`）；服务器侧隔离关键字在位（`session_id or self.session_id` / `_load_session_history` / storyline `timezone.utc`）
+- 卸窗：audit / abc / ci-fix 目录与 `wt/*` 分支均已删除；`git worktree list` 仅剩主检出 + 遗留 `w3-code`
+
 ---
 
 ## 2026-09-20 — CI 修复：pending_intents 写读时钟不一致（UTC 主机立即过期）

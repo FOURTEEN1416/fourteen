@@ -48,8 +48,8 @@
   - ruff 全仓 **0**
   - 端点 **APIRoute=215 / 唯一路径 181**（GET 101/POST 78/PUT 16/DELETE 20；`app.routes=219`）
 - **文档**：AGENTS **v1.26** / CODE_GRAPH **v3.8.15** / README / LOG 口径统一为 **1429/1425/4**
-- **卸窗**：`scripts/new_window_worktree.ps1 -Remove -ForceBranch -Name audit/abc/ci-fix`（Junction 先摘再删树）
-- **A 档**：本条 commit → push → 服务器 pull + remote_deploy（同批执行）
+- **卸窗**：`scripts/new_window_worktree.ps1 -Remove -ForceBranch -Name audit/abc/ci-fix`（Junction 先摘再删树）✅ 目录与分支均已删
+- **A 档闭环**：push `b509ba3` → `ssh swu-prod` pull `b509ba3b` + `remote_deploy.sh` 4/4 + health/ready **200/200** + `git hash-object` 三文件本地=服务器=HEAD（CRLF/LF 差异不影响 blob 一致）
 
 ### 2026-09-20 · 主控窗 audit（wt/audit）· 全仓复核：记忆会话隔离补漏
 
