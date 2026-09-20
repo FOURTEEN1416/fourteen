@@ -2279,3 +2279,33 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **置信度**：本项目侧 **高**（逐文件实读 + grep 穷举）；转写架构侧 **中**（证据分级已逐项标注）。
 
 **三端**：本批全属 **B 档纯文档**——commit→push GitHub 备份即完成，服务器不上文档、无需 pull。
+
+
+---
+
+## 2026-09-20 · 提醒意图管线批次（AGENTS v1.18 / CODE_GRAPH v3.8.8）— 「六点叫起床」事故全链路修复
+
+**报障**：用户「昨晚让她提醒我今早六点叫我起床，她没有做」。
+
+**排查（本地代码 + 生产 data/app.log + sqlite.db 三重实证）**：
+- 23:50:42 收到「明早六点记得发消息给我，叫我起床，听到没有？」→ 23:50:48 LLM 仅回「听到啦」，无任何工具调用；
+- 根因四层：① `optimized_orchestrator._tool_intent_names` 关键词**裁决**漏检（白名单无「叫我/记得发消息」，工具 schema 根本没进 LLM 视野）；② 提醒只写不读——`get_pending_reminders` 仅查询工具调用、`mark_reminder_triggered` 全仓零调用方、proactive scheduler 7 任务无一轮询提醒（DB 中 09-19 07:22 的「喝水 09:00」过期未触发即铁证）；③ SQL `datetime('now')`=UTC 与写入的北京时间差 8h（09:00 提醒要 17:00 才判到期）；④ reminders 无 session/user 归属，无投递目标。
+
+**用户裁决**：「分级思路进行；涉及可能需要调动工具的情况，发出自然提问确定信息，得到明确指令后再调度工具；C 方案加 A/B 配套 + 优化提升；补一轮搜索调研」。AskUserQuestion 三项未答，按全局「未反对即按推荐」：两轮澄清 / 防假承诺开启 / LLM 文案+原文兜底。
+
+**调研（GitHub-First，firecrawl）**：arXiv 2511.08798 SAGE-Agent（澄清三原则：何时问/问什么/何时停；冗余提问 1.5-2.7× 削减）、scallopbot（无工具回执不得声称成功；用户原话提醒保持确定性；投递前一刻生成文案）、ST Extension-CharacterWakeUp（定时唤醒先例）、NVIDIA llm-router（小意图集 LLM 终审为工业首选）。本地能力确认：`chat_with_tools` 支持 tool_choice=auto + 多 tool_calls 并行 dispatch（asyncio.gather），agnes 链已被 07:22 喝水提醒实证。
+
+**实现**（`7a6e6f1` +9 文件 +1297/-103；`2ab5ffb` 诊断日志）：
+- **L0** `orchestrator/tool_gate.py` `should_escalate`：钟点/相对偏移强时间信号 + 托付动词 + 查询组（旧行为兼容）+ pending 强制；纯日期/星期词删（「今天周几」误晋级率高且强信号已覆盖）；只晋级不裁决，误晋级由终审兜底；
+- **L1** `_run_tools_if_needed` 重构（tuple 返回 + direct_reply 直复通道）：全量权限内工具 + `ask_user` 伪工具 → 三分支（真工具 dispatch（`_meta` 服务端注入 session_key/user_id）/ 澄清提问（pending_intents 落库）/ 闲聊）；**防假承诺守卫**：无回执含承诺措辞 → 强制复核一次，仍无则弃内容走主链；
+- **澄清状态机** `pending_intents` 表（StructuredMemory/sqlite.db）：槽位合并、ask_count≥2 强制 cancelled、15min TTL、`expire_stale_intents` 节流清理；
+- **L2** `proactive/reminder_delivery.py` `ReminderDeliveryTask` + scheduler `register_reminder_task`（第 7 任务 `reminder_check` 每分钟）：session_key 定向（`@im.wechat` → registry owner 匹配 `send_text(to_user)`；web 会话 → ws 广播）、**豁免静默时段**、文案 LLM 8s 超时生成 + `sanitize_message` 清洗 + 原文兜底、失败 3 次判 failed；
+- **reminders 迁移** `_migrate_reminders_columns` 幂等 +5 列（session_key/user_id/status/delivered_at/fail_count）；存量无主提醒（session_key 空）永不投递；时区统一应用层北京时间 `_now_local`。
+
+**验证（完成声明四要素）**：
+- 分块全量 **1307 收集 / 1303 通过 / 4 跳过**（373+336+391+203 与收集精确吻合；= v1.17 口径 1269 + 本批 34 新用例 `test_reminder_intent_pipeline`，含昨晚原话「明早六点记得发消息给我，叫我起床」为头号回归用例）；ruff 全绿；mypy（改动文件）0 错；`create_api_app` 内省 219 = 215 业务 + 4 框架（零端点变更）；
+- 部署闭环：`7a6e6f1`/`2ab5ffb` push → 服务器 pull（git log 复核落点）→ `remote_deploy.sh` → health ok；
+- **生产实证**：注入 70s 后到期验证提醒 → `[reminder] 已投递`（id=3 `delivered`@10:27:12，用户微信实收）+ 首验 id=2 三连失败后判 `failed`（判死机制同批实证）。首验失败系微信 web 协议会话窗口失效（`prepare failed`，09-19 晚已存在，L2 既有脆弱性），每分钟重试机制兜住；
+- **已知限制**：① 主检出现另一窗口并行批次（v1.17 回复质量根治，`e7fb801`），本批测试基线顺延无冲突；② 澄清提问直接作为本轮回复（跳过主链一致性检查/回复模式后处理）——口吻由终审 prompt 角色上下文保证，后续观察；③ 微信通道离线期（token 失效且用户未发消息）提醒投递会失败重试 3 分钟后判死——通道自愈依赖用户任一时刻发消息，属微信 web 协议固有限制。
+
+**三端**：A 档代码 3 端闭环（本地+GitHub+服务器）；本段连同 AGENTS/CODE_GRAPH/DECISION_LEDGER/FUNCTION_INVENTORY/README 为 B 档 commit→push 即完成。

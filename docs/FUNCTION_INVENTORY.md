@@ -83,6 +83,7 @@
 | MESSAGE-4 | 统计卡真数据：今日主动/最后发送（08-28 修复：旧 history 读不存在的 `_sent_messages` 属性，一直返回空） |
 | MESSAGE-5 | **对话内追问参数**（09-19 新增，滑条+开关）：没等到接话自动再补一句——开关/第一次延迟/第二次延迟/单用户每日上限（`follow_up_*` → `/api/proactive/config`，真源 `data/scheduler_config.json` 跨 worker 即时生效） |
 | MESSAGE-6 | **回复模式分段控件**（09-19 新增）：沉浸式真人聊天（不写动作神态）/ 小说式（带动作神态）二选一（`reply_mode: immersive\|novel`，真源 `data/scheduler_config.json`，编排器每次组装提示词时读取） |
+| MESSAGE-7 | **提醒意图管线与到点叫醒**（09-20 新增，AGENTS v1.18）：自然语言托付（如「明早六点叫我起床」）经三级管线处理——L0 零成本晋级线（时间/托付动词/查询信号，未命中零影响）→ L1 LLM function calling 终审（信息齐全直接调度 set_reminder；不全则角色口吻自然澄清提问，最多两轮，第二轮为猜测+复述确认；15min 未答作废）→ L2 确定性到期投递（每分钟轮询，session_key 定向发回原微信会话，豁免静默时段 23-7，文案按角色口吻生成、失败用原文兜底，失败 3 次判死可查）。防假承诺守卫：无工具回执不得空口答应 |
 | DATA-1 | 数据 tab：概览统计（消息/记忆条数）+ 网络人设增强按钮（/api/characters/{id}/enrich）+ **知识库真实管理区**（SP-4 结案 09-01：KnowledgePreview 挂载——真实 stats + 检索测试，替换假 RAG 三卡与占位横幅；**09-19 检索增强：BM25 查询扩展双路互补 + 注入 top_k 3→8 + 索引由 scripts/rebuild_knowledge_index.py 从权威真源重建**）+ **定期采集开关（09-17 新增：Toggle+间隔输入，+/api/knowledge/collect-config GET/POST；scheduler vault_collect 周期任务对 shisi 角色库全量重建知识索引；默认关）** + **危险区删除角色真接线**（09-19：ConfirmDialog 确认 → useDeleteCharacter → toast + 跳回 /roles） |
 | TIMELINE-1 | 剧情时间线 tab（内嵌 StorylineEditor） |
 
