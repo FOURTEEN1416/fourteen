@@ -252,6 +252,15 @@ if _scheduler is not None:
                     and conn.send_text(text, to_user=peer)
                 ):
                     return True
+            # 诊断留痕：通道空/token 空导致的投递失败必须可与 send 失败区分
+            snapshot = [
+                (uid, slot, bool(getattr(conn, "token", "")))
+                for uid, slot, conn in registry.all()
+            ]
+            logger.warning(
+                "[reminder] 微信定向投递未命中可用通道 owner=%s registry=%s",
+                owner_id, snapshot,
+            )
             return False
 
         def _ws_send(text: str) -> bool:
