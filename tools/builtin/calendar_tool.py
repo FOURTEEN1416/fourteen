@@ -3,10 +3,10 @@ from __future__ import annotations
 import ast
 import logging
 import operator
-from datetime import datetime
 from typing import Any
 
 from tools.base_tool import BaseTool, ToolResult
+from utils.local_time import now_local
 
 logger = logging.getLogger("calendar_tool")
 
@@ -56,7 +56,9 @@ class CalendarTool(BaseTool):
     }
 
     def execute(self, **kwargs) -> ToolResult:
-        now = datetime.now()  # noqa: DTZ005
+        # 墙钟语义（用户问「现在几点」）必须走北京时间公共真源；
+        # UTC 主机上裸 datetime.now() 会把凌晨报成前一天傍晚。
+        now = now_local()
         weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
         return ToolResult(True, data={
             "date": now.strftime("%Y-%m-%d"),

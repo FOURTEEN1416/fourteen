@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from tools.base_tool import BaseTool, ToolResult
+from utils.local_time import now_local
 
 logger = logging.getLogger("time_awareness_tool")
 
@@ -89,7 +90,8 @@ class TimeAwarenessTool(BaseTool):
             return ToolResult(False, error="time_awareness_failed")
 
     def _get_current(self) -> ToolResult:
-        now = datetime.now()  # noqa: DTZ005
+        # 墙钟语义走公共真源（与 ASE/提醒/日历工具共用北京时间口径）
+        now = now_local()
         today = now.date()
         result: dict = {
             "date": now.strftime("%Y-%m-%d"),

@@ -365,13 +365,19 @@ class TestReminderDelivery:
         assert sent == ["x"]
 
     def test_timezone_semantics_local_beijing(self, sm):
-        """到期比较必须用北京时间口径：未来 8 小时内的提醒应当到期。"""
-        from datetime import datetime, timedelta
+        """到期比较必须用北京时间口径：未来/过去时刻相对 now_local 构造。
 
-        future_local = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        CI/容器主机为 UTC 时，裸 datetime.now() 会比读侧 _now_local 慢 8 小时，
+        「未来 1 小时」会被提前判到期。
+        """
+        from datetime import timedelta
+
+        from utils.local_time import now_local
+
+        future_local = (now_local() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
         sm.add_reminder("soon", future_local, session_key="1:p@im.wechat")
         assert len(sm.get_due_reminders()) == 0  # 未到期
-        past_local = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        past_local = (now_local() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
         sm.add_reminder("past", past_local, session_key="1:p@im.wechat")
         due = sm.get_due_reminders()
         assert [r["content"] for r in due] == ["past"]

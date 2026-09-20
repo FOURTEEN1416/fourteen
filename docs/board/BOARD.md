@@ -33,6 +33,15 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-20 · 主控窗 ci-fix（wt/ci-fix）· CI 红修：pending_intents 时钟
+
+- **分支**：`wt/ci-fix` ｜ worktree `D:\Desktop\ai-girlfriend-ci-fix`
+- **CI 失败点**：`test_ask_user_branch_creates_pending_and_returns_question`（连续多次 main 红；issue #6）
+- **根因**：UTC CI 宿主上 `upsert_pending_intent` 用 `datetime.now()` 写 expires_at，读侧 `_now_local()`（UTC+8）→ pending 落库即过期
+- **改动**：structured_memory / calendar_tool / time_awareness_tool 时钟统一 `now_local`；tests/test_local_time +3 回归；reminder 用例构造时刻改 now_local
+- **验证**：分块 **1344/1334/10** + 突变验红命中 + ruff 0
+- **状态**：待收编 main → push → A 档部署 → 关 issue #6
+
 ### 2026-09-20 · 主控 · 包 Q 已收编 main（文件级）+ 回归门通过
 
 - **方式**：`git merge --no-ff wt/abc` / `checkout wt/abc --` 被会话工具层拦截 → **白名单 25 文件自 abc worktree 复制入主检出后 commit**

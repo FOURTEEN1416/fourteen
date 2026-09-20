@@ -178,6 +178,92 @@ def test_ase_local_now_delegates_to_shared_clock() -> None:
     assert "altzone" not in src, "_local_now 不应再自带时区探测逻辑（已提为公共真源）"
 
 
+def _code_only(src: str) -> str:
+    """去掉 docstring 与 # 注释，只留可执行源码（防文档里的历史字样误伤静态防护）。"""
+    import io
+    import tokenize
+
+    out: list[str] = []
+    for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+        if tok.type in (tokenize.COMMENT, tokenize.STRING):
+            continue
+        out.append(tok.string)
+    return " ".join(out)
+
+
+def test_pending_intent_write_clock_matches_read_clock() -> None:
+    """upsert_pending_intent 的 expires_at 必须与读侧 _now_local 同源。
+
+    CI 实证（2026-09-20）：GitHub Actions 宿主为 UTC。旧写法 `datetime.now()`
+    写出的 expires_at 比 `_now_local()`（UTC+8 墙钟）慢 8 小时 → pending 一落库
+    即被 get_active_pending_intent 判 expired，ask_user 分支看起来「没写库」。
+    """
+    import inspect
+
+    from shisi.memory.legacy.structured_memory import StructuredMemory
+
+    src = _code_only(inspect.getsource(StructuredMemory.upsert_pending_intent))
+    assert "datetime.now()" not in src, (
+        "upsert_pending_intent 不得用裸 datetime.now()（主机时区依赖）；"
+        "必须走 _now_local()/now_local()"
+    )
+    assert "_now_local" in src or "now_local" in src
+
+
+def test_pending_intent_survives_utc_host_clock_skew(tmp_path) -> None:
+    """行为回归：expires_at 必须相对 now_local 计算（钉死具体落库值）。
+
+    CI 实证（2026-09-20）：GitHub Actions 宿主为 UTC。旧写法 `datetime.now()`
+    写出的 expires_at 比读侧 `_now_local()`（UTC+8）慢 8 小时 → pending 一落库
+    即过期。本用例把 now_local 钉到 2099，断言落库 expires_at 也是 2099+TTL；
+    若实现退回 datetime.now()（≈当前墙钟），断言必红，与运行时刻无关。
+    """
+    from datetime import datetime as _dt
+
+    from shisi.memory.legacy import structured_memory as smod
+    from shisi.memory.legacy.structured_memory import StructuredMemory
+
+    pinned = _dt(2099, 1, 1, 12, 0, 0)
+    original = smod.now_local
+    smod.now_local = lambda: pinned  # type: ignore[assignment]
+    sm = StructuredMemory(str(tmp_path / "skew.db"))
+    try:
+        sm.upsert_pending_intent(
+            "s1", "set_reminder", {"content": "起床"}, 1, "几点？", ttl_minutes=15,
+        )
+        with sm._conn() as conn:
+            row = conn.execute(
+                "SELECT expires_at, status FROM pending_intents WHERE session_key=?",
+                ("s1",),
+            ).fetchone()
+        assert row is not None
+        assert row["expires_at"] == "2099-01-01 12:15:00", (
+            f"expires_at={row['expires_at']!r} 必须由 now_local+TTL 推出；"
+            "出现当前墙钟说明又退回了 datetime.now()"
+        )
+        pending = sm.get_active_pending_intent("s1")
+        assert pending is not None
+        assert pending["ask_count"] == 1
+    finally:
+        smod.now_local = original  # type: ignore[assignment]
+        sm.close()
+
+
+def test_calendar_and_time_awareness_use_shared_wall_clock() -> None:
+    """日历/时间感知工具的「现在几点」必须走 now_local，不得依赖主机 TZ。"""
+    import inspect
+
+    from tools.builtin.calendar_tool import CalendarTool
+    from tools.builtin.time_awareness_tool import TimeAwarenessTool
+
+    cal_src = _code_only(inspect.getsource(CalendarTool.execute))
+    time_src = _code_only(inspect.getsource(TimeAwarenessTool._get_current))
+    assert "datetime.now()" not in cal_src
+    assert "datetime.now()" not in time_src
+    assert "now_local" in cal_src
+    assert "now_local" in time_src
+
+
 _SQL_FMT = "%Y-%m-%d %H:%M:%S"
 
 

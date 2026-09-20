@@ -7,6 +7,38 @@
 
 ---
 
+## 2026-09-20 — CI 修复：pending_intents 写读时钟不一致（UTC 主机立即过期）
+
+**任务**：用户指令「处理 github 上的 ci 报错」。GitHub Actions `main` 连续多次红，唯一失败点：
+
+`tests/test_reminder_intent_pipeline.py::TestFinalReview::test_ask_user_branch_creates_pending_and_returns_question`
+
+报错：`ask_user 分支必须落 pending_intents；direct='几点叫你？'`（澄清句已返回，pending 却查无）。
+
+**根因（生产缺陷，非测试 flaky）**：
+- GitHub Actions 宿主时区为 **UTC**。
+- `StructuredMemory.upsert_pending_intent` 写 `expires_at` 用裸 `datetime.now()`（**主机墙钟**，CI 上=UTC）。
+- 读侧 `get_active_pending_intent` / `expire_stale_intents` 用 `_now_local()` → `now_local()`（**北京时间墙钟**，非 UTC+8 主机自动回退 UTC+8）。
+- 两侧差 8 小时：`expires_at(UTC) <= now_local(UTC+8)` 恒成立 → pending **一落库即被标 expired**。orchestrator 确实走了 ask_user 分支并写库，但测试（以及生产轮询）立刻读不到 active 行。
+- 同类连带：`test_timezone_semantics_local_beijing` 用 `datetime.now()` 构造「未来 1 小时」，在 UTC CI 上会被 `_now_local` 提前判到期（`-x` 未轮到，修本缺陷时一并收口）。
+- 产品侧同类墙钟：`CalendarTool` / `TimeAwarenessTool._get_current` 的「现在几点」也用裸 `datetime.now()`，UTC 部署会向 LLM/用户报错 8 小时。
+
+**改动**
+1. `shisi/memory/legacy/structured_memory.py::upsert_pending_intent`：`expires_at`/`updated_at` 改走 `_now_local()`（与读侧同源）。
+2. `tools/builtin/calendar_tool.py` / `tools/builtin/time_awareness_tool.py`：墙钟改 `utils.local_time.now_local`。
+3. `tests/test_reminder_intent_pipeline.py::test_timezone_semantics_local_beijing`：构造时刻改 `now_local()`。
+4. `tests/test_local_time.py`：+3 回归——静态防护（`upsert`/两工具不得用裸 `datetime.now()`，docstring 剥离防误伤）+ 行为钉死 `expires_at == now_local+TTL`（钉 2099，与运行时刻无关）。
+
+**验证**
+- 突变验红：实现改回 `datetime.now()` → 静态 + 行为两用例同时变红；恢复后转绿。
+- 分块 pytest（worktree / CI 同口径，无 config/characters）：**1344 收集 / 1334 通过 / 10 跳过**（326+1 +399+4 +320 +289+5 精确吻合）。
+- ruff 改动文件 **0 错**。
+- 主检出本地有角色卡时收集数更高（persona 参数化 2×卡数），属既有口径差，与本修复无关。
+
+**影响面**：A 档代码（orchestrator 无关、记忆/工具时钟）+ tests + 文档。端点不变。
+
+---
+
 ## 2026-09-20 — 包 Q 补做：B-d 跨会话尾巴 + 工具结果正式位次
 
 **任务**：用户标注「未完成项也顺便做」。

@@ -970,10 +970,15 @@ class StructuredMemory:
         user_id: int | None = None,
         ttl_minutes: int = _PENDING_INTENT_TTL_MIN,
     ) -> int:
-        """记录/更新一条待澄清任务（同会话只保留最新一条）"""
-        now = datetime.now()
-        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-        expires = (now + timedelta(minutes=ttl_minutes)).strftime("%Y-%m-%d %H:%M:%S")
+        """记录/更新一条待澄清任务（同会话只保留最新一条）
+
+        过期时刻必须与读侧 ``get_active_pending_intent`` / ``_now_local`` 同源：
+        旧写法用裸 ``datetime.now()``（依赖主机时区），在 UTC CI/容器上比
+        北京墙钟慢 8 小时，pending 一落库就被判过期。
+        """
+        now_str = self._now_local()
+        now_dt = datetime.strptime(now_str, "%Y-%m-%d %H:%M:%S")
+        expires = (now_dt + timedelta(minutes=ttl_minutes)).strftime("%Y-%m-%d %H:%M:%S")
         with self._conn(write=True) as conn:
             row = conn.execute(
                 "SELECT id FROM pending_intents "
