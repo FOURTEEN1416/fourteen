@@ -807,9 +807,46 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         chat_history = budgeted["chat_history"]
         context_lengths = budgeted["lengths"]
 
+        # ── B-d 跨会话尾巴：实时窗口尚浅时注入持久化历史切片（untrusted）──
+        session_tail = ""
+        hist_len = (
+            len(chat_history) if isinstance(chat_history, list) else 0
+        )
+        if hist_len < 2 and mem is not None:
+            try:
+                tail_lines: list[str] = []
+                if hasattr(mem, "get_cross_session_tail"):
+                    tail_lines = mem.get_cross_session_tail(session_id, limit=8) or []
+                elif hasattr(mem, "structured_memory") and hasattr(
+                    mem.structured_memory, "get_cross_session_tail"
+                ):
+                    tail_lines = mem.structured_memory.get_cross_session_tail(
+                        session_id, limit=8
+                    ) or []
+                from orchestrator.context_budget import (
+                    SESSION_TAIL_INJECT_MAX_RECENT_MESSAGES,
+                    format_session_tail,
+                )
+
+                if hist_len < SESSION_TAIL_INJECT_MAX_RECENT_MESSAGES and tail_lines:
+                    session_tail = format_session_tail(tail_lines)
+                    if session_tail:
+                        context_lengths = dict(context_lengths or {})
+                        context_lengths["session_tail"] = len(session_tail)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("跨会话尾巴注入失败（忽略）: %s", e)
+
+        if session_tail:
+            # 追加到 memory 段之后（系统提示内独立 untrusted 块）
+            memory_context = (
+                f"{memory_context}\n\n{session_tail}".strip()
+                if memory_context
+                else session_tail
+            )
+
         # 组装 system prompt
         # 注入顺序对齐 research：角色设定（prompt_builder）→ 世界/知识/记忆/状态
-        # （PersonaService）→ 角色片段 → 工具结果(untrusted，C1) → reply_mode
+        # （PersonaService）→ 角色片段 → 工具结果(历史后/PHI前) → reply_mode
         system_prompt = self.components["persona"].build_system_prompt(
             emotion_state=emotion_state,
             memory_context=memory_context,
@@ -850,7 +887,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             user_id=user_id,
         )
         if tool_results:
-            system_prompt = f"{system_prompt}\n\n{tool_results}"
+            # C 正式位次：工具结果插入「对话历史之后 / 扮演规则之前」
+            from orchestrator.context_budget import inject_tool_context_before_phi
+
+            system_prompt = inject_tool_context_before_phi(system_prompt, tool_results)
 
         # ── 回复模式（web 控制端可切换，2026-09-19）──
         # 必须放在**最后**：角色卡/人格块里常写着"必须写动作神态"之类的格式要求，

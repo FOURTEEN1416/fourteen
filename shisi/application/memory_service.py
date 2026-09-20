@@ -208,6 +208,9 @@ class ShisiMemoryService:
             summary_trigger=summary_trigger,
         )
 
+    def get_cross_session_tail(self, session_id: str = "", limit: int = 8) -> list[str]:
+        return self._pipeline.get_cross_session_tail(session_id=session_id, limit=limit)
+
     def get_memory_context(self, n_chats: int = 10) -> dict[str, Any]:
         return self._pipeline.get_memory_context(n_chats=n_chats)
 

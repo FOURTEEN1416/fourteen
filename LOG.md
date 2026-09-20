@@ -7,6 +7,18 @@
 
 ---
 
+## 2026-09-20 — 包 Q 补做：B-d 跨会话尾巴 + 工具结果正式位次
+
+**任务**：用户标注「未完成项也顺便做」。
+
+**改动**
+1. **B-d**：`StructuredMemory.get_cross_session_tail`（user_key 双形态会话历史）→ `MemoryPipeline/MemoryService.get_cross_session_tail` → `context_budget.format_session_tail`（untrusted）→ orchestrator `_prepare_context` 在 `len(history)<2` 时注入 memory 段。
+2. **工具结果正式位次**：`CharacterAggregate.build_system_prompt(tool_context=)` / `prompt_builder.build` / `PersonaService.build_system_prompt` 透传；序列 **#对话历史 → 工具结果(untrusted) → #扮演规则**；`inject_tool_context_before_phi` 替代 system 尾追加。
+
+**验证**：分块 pytest **1421 收集 / 1417 通过 / 4 跳过** + vitest **98/98** + ruff **0** + 端点 **215/181**；新测 `tests/test_abc_bd_and_tool_phi.py` 7 例。
+
+---
+
 ## 2026-09-20 — 主控收编包 Q（wt/abc → main）· A/B/C 落地
 
 **任务**：用户指令「全部由你执行」——主控完成包 Q 收编：内容入 main、回归门、文档、A 档部署。

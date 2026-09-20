@@ -77,13 +77,14 @@ class PersonaService:
         character_id: str | None = None,
         character_overrides: dict[str, Any] | None = None,
         user_message: str = "",
+        tool_context: str = "",
     ) -> str:
         """构建系统提示词。
 
         流程：
         1. 将 emotion_state 映射为 shisi EmotionalState；
         2. 用当前角色卡（如可用）或 PersonaEngine 的配置构造 CharacterAggregate；
-        3. 通过 prompt_builder 生成基础 prompt（角色设定 + 人设 + RAG 知识 + 状态 + 对话历史）；
+        3. 通过 prompt_builder 生成基础 prompt（角色设定 + 人设 + RAG 知识 + 状态 + 对话历史 + 工具位）；
         4. 注入 PersonaEngine 的人格对齐规则：世界信息、RAG、情感层、风格层、约束层。
         """
         effective_emotion = (
@@ -99,6 +100,7 @@ class PersonaService:
             chat_history=chat_history,
             use_knowledge=True,
             use_storyline=False,
+            tool_context=tool_context or "",
         )
 
         # 身份唯一 Owner（包 Q · A1）：

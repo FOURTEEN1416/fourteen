@@ -797,6 +797,50 @@ class StructuredMemory:
             ).fetchall()
             return [dict(r) for r in rows][::-1]  # 反转成时间正序
 
+    def get_cross_session_tail(
+        self,
+        session_id: str,
+        limit: int = 8,
+        user_key: str | None = None,
+    ) -> list[str]:
+        """跨会话尾巴：按 user_key 取最近持久化消息（含会话双形态）。
+
+        用于 B-d：实时窗口尚浅时注入「上次会话尾巴」，避免新会话冷启动失忆。
+        返回 `- 用户：...` / `- 助手：...` 文本行（时间正序）。
+        """
+        if limit <= 0:
+            return []
+        uk = user_key if user_key is not None else self.user_key_from_session(session_id)
+        if not uk:
+            return []
+        forms = {uk, f"N:{uk}"}
+        if session_id:
+            forms.add(str(session_id).strip())
+            bare = self.user_key_from_session(session_id)
+            if bare:
+                forms.add(bare)
+                forms.add(f"N:{bare}")
+        placeholders = ",".join("?" for _ in forms)
+        sql = (
+            "SELECT role, content FROM chat_history "
+            f"WHERE session_id IN ({placeholders}) "
+            "ORDER BY created_at DESC, id DESC LIMIT ?"
+        )
+        with self._conn() as conn:
+            rows = conn.execute(sql, (*forms, limit)).fetchall()
+        lines: list[str] = []
+        for r in reversed([dict(x) for x in rows]):
+            role = "用户" if r.get("role") == "user" else "助手"
+            content = str(r.get("content") or "").strip()
+            if not content:
+                continue
+            if "处理超时" in content or content.startswith("（处理消息"):
+                continue
+            if len(content) > 200:
+                content = content[:200] + "…"
+            lines.append(f"- {role}：{content}")
+        return lines[-limit:]
+
     def get_chats_today(self) -> list[dict[str, Any]]:
         """获取「今天」（**本地日**）的聊天。
 

@@ -125,11 +125,12 @@ class CharacterAggregate(BaseModel):
         chat_history: str = "",
         knowledge_context: str = "",
         storyline_context: str = "",
+        tool_context: str = "",
     ) -> str:
         # 注入顺序对齐行业惯例（SillyTavern 默认序列 + chara-card-spec-v2）：
         #   角色定义（Name/Description/Personality/Scenario）→ 人设数值 → 状态
         #   → 知识库（世界信息位）→ 对话示例（dialogueExamples 位，历史之前）
-        #   → 对话历史 → 扮演规则（post_history_instructions 位，历史之后）。
+        #   → 对话历史 → 工具结果(untrusted) → 扮演规则（post_history_instructions 位，历史之后）。
         # 「历史之后的指令权重远高于历史之前」是 SillyTavern 文档与
         # chara-card-spec-v2（post_history_instructions 条目）共同明确的结论；
         # creator_notes 承载硬性扮演规则，因此放到历史之后以获得最高约束力。
@@ -182,6 +183,10 @@ class CharacterAggregate(BaseModel):
 
         if chat_history:
             parts.extend(["", "# 对话历史", chat_history])
+
+        # 工具结果：历史之后 / PHI 之前（untrusted 参考，非指令；包 Q 正式位次）
+        if tool_context:
+            parts.extend(["", tool_context])
 
         # 扮演规则（creator_notes）放在**对话历史之后**——行业惯例的
         # post-history instructions 位置，对生成的约束力最强。

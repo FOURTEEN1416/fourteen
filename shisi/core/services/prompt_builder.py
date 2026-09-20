@@ -17,6 +17,7 @@ def build(
     chat_history: str = "",
     use_knowledge: bool = True,
     use_storyline: bool = True,
+    tool_context: str = "",
 ) -> str:
     """构建系统提示词。
 
@@ -24,20 +25,19 @@ def build(
     1. 基础角色设定 + 人设
     2. 剧情线上下文（时间、阶段规则）
     3. RAG 知识库上下文
-    4. 对话历史 + 用户消息
+    4. 对话历史
+    5. **工具结果（untrusted，历史后 / PHI 前）**
+    6. 用户消息
     """
-    # 1. 先获取剧情线上下文（需要推进时间）
     storyline_context = _get_storyline_context(character, use_storyline)
-
-    # 2. 获取 RAG 知识库上下文
     knowledge_context = _get_knowledge_context(character, user_message, use_knowledge)
 
-    # 3. 构建完整 prompt
     prompt = character.build_system_prompt(
         user_message=user_message,
         chat_history=chat_history,
         knowledge_context=knowledge_context,
         storyline_context=storyline_context,
+        tool_context=tool_context,
     )
 
     return prompt

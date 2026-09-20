@@ -741,6 +741,18 @@ class MemoryPipeline:
             summary_trigger=summary_trigger,
         )
 
+    def get_cross_session_tail(self, session_id: str = "", limit: int = 8) -> list[str]:
+        """B-d：跨会话尾巴（delegate structured_memory）。"""
+        sess = session_id or self.working.session_id
+        sm = self.sm
+        if sm is None or not hasattr(sm, "get_cross_session_tail"):
+            return []
+        try:
+            return sm.get_cross_session_tail(sess, limit=limit) or []
+        except Exception as e:  # noqa: BLE001
+            logger.debug("get_cross_session_tail failed: %s", e)
+            return []
+
     def _load_session_history(self, session_id: str, limit: int) -> list[dict[str, Any]]:
         """从 chat_history 表按会话加载最近对话（兼容新旧 session_id 形态）。
 
