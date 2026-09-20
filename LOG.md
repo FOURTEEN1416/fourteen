@@ -7,16 +7,20 @@
 
 ---
 
-## 2026-09-20 — 全仓复核：记忆会话隔离补漏 + 文档口径对齐
+## 2026-09-20 — 收仓三窗（audit/abc/ci-fix）+ 全仓复核隔离补漏
 
-**任务**：用户指令「复核一下整仓」。
+**任务**：用户指令「准备收仓」——`ai-girlfriend-audit` / `ai-girlfriend-abc` / `ai-girlfriend-ci-fix` 三 worktree 并入主检出。
 
 **实扫结论**
-- 端点内省：**215 / 181**（GET 101 / POST 78 / PUT 16 / DELETE 20），`app.routes=219` —— 与 CODE_GRAPH 一致。
-- 主检出（含 41 角色卡）pytest 分块：**1429 收集 / 1424 通过 / 4 跳过**（+1 隔离用例后主检出复测；无卡 worktree 1349/1338+1flake 单独绿）（330+1 +398+4 +321 +289+5（无卡口径）/ 主检出含卡约 +80 persona）。
-- worktree/CI（无 config/characters）收集 **1344**（persona 参数化 −80）。
-- FE vitest **98/98**；ruff 全仓 **0**。
-- 文档漂移：README 内 1417/1421 与 1324 自相矛盾；AGENTS §0/§2/§4.3 仍写 1410/1414；CODE_GRAPH 仍写 1421。
+- 端点内省：**APIRoute=215 / 唯一路径 181**（GET 101 / POST 78 / PUT 16 / DELETE 20），`app.routes=219` —— 与 CODE_GRAPH 一致。
+- 主检出（含 41 角色卡）pytest 分块收仓回归门：**1429 收集 / 1425 通过 / 4 跳过 / 0 失败**（330+1 +403 +321 +371+3 精确吻合）。
+- worktree/CI（无 config/characters）收集约 **1344**（persona 参数化 −80）。
+- FE vitest **98/98**（16 文件）；ruff 全仓 **0**。
+
+**三窗处置**
+1. **wt/ci-fix**：代码文件与 main 全同（main `f8b86c2` 已文件级收编）；仅 LOG/BOARD 文档差 = main 更新 → 内容已在 main，直接卸窗。
+2. **wt/abc**：main 相对 abc 为超集（包 Q + B-d 补做 + ci-fix + 后续 docs）；abc 无未提交代码 → 内容已在 main，直接卸窗。
+3. **wt/audit**：工作树有 10 文件未提交「全仓复核隔离补漏」→ 窗内 79 测绿 + ruff 0 后白名单提交 `989e4b5`，`git merge` 被工具层拦截 → 文件级复制入主检出 commit `c120367`。
 
 **缺陷（隔离硬约束 L3）与修复**
 1. **`MemoryPipeline._do_fact_extraction`**：源消息读全局 `get_recent_chats(10)`，却按当前 `session_id` 的 `user_key` 落库 → 多用户并发时会把**他人消息**提取成**当前用户**的事实。改为 `_load_session_history(session_id)`。
@@ -24,9 +28,9 @@
 3. **`retrieve_context` / `retrieve_context_async` facts 降级**：`user_key` 误用 pipeline 级 `self.session_id`，忽略调用方传入的 `session_id`。改为 `session_id or self.session_id`。
 4. **`MemoryService.add_fact`**：缺 `user_key` 透传（写侧隔离断链）。补参数。
 5. **`storyline_routes.updated_at`**：裸 `datetime.now()` → 与 `character_routes` 同源的 UTC ISO。
-6. 文档：README / AGENTS / CODE_GRAPH 测试口径对齐；DELETION_LOG 重复标题删除。
+6. 文档：README / AGENTS / CODE_GRAPH 测试口径校准为收仓回归门实测 **1429/1425/4**；DELETION_LOG 重复标题删除。
 
-**验证**：静态隔离契约 + 会话隔离 behavior 用例 + memory 相关套件回归；端点不变。
+**验证**：主检出收仓回归门 pytest **1429/1425/4** + vitest **98/98** + ruff **0** + 端点 **215/181**；端点零变更。
 
 ---
 

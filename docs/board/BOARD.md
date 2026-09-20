@@ -21,7 +21,9 @@
 | 窗口 | 分支 | worktree 路径 | 任务包 | 状态 | 开工时间 | 备注 |
 |------|------|--------------|--------|------|---------|------|
 | 主检出 | `main` | `D:\Desktop\ai-girlfriend` | 协调 + 阶段真源维护（包 M） | 进行中 | — | 主控由歆歆担任；真源文档单写 |
-| W5 abc 改造 | `wt/abc` | `..\ai-girlfriend-abc` | **包 Q · A+B+C** | ✅ **已收编 main** | 2026-09-20 | 文件级入 main（merge 被工具层拦截）；主检出回归 1414/1410/4；详见追加区收编条 |
+| W5 abc 改造 | `wt/abc` | ~~`..\ai-girlfriend-abc`~~ 已卸载 | **包 Q · A+B+C** | ✅ **已收编 main·已卸窗** | 2026-09-20 | 文件级入 main（merge 被工具层拦截）；内容已在 main（B-d 补做后为超集）；收仓回归门 **1429/1425/4** |
+| audit 复核窗 | `wt/audit` | ~~`..\ai-girlfriend-audit`~~ 已卸载 | **全仓复核隔离补漏** | ✅ **已收编 main·已卸窗** | 2026-09-20 | 未提交 10 文件窗内自检后 `989e4b5`，文件级入 main `c120367`；回归门 **1429/1425/4** |
+| ci-fix 窗 | `wt/ci-fix` | ~~`..\ai-girlfriend-ci-fix`~~ 已卸载 | **CI pending_intents 时钟** | ✅ **已收编 main·已卸窗** | 2026-09-20 | main `f8b86c2` 已含代码；worktree 无未提交实质改动；收仓时确认全同后卸窗 |
 | W1 论文 | 无 | `D:\Desktop\ai-girlfriend\大创赛报名以及后期发展\论文-唯一的你十四`（非 git） | **包 P** | 待开工 | — | 结构功能主义框架；目标刊《心理学进展》 |
 | W2 软著 | 无 | `D:\Desktop\ai-girlfriend\大创赛报名以及后期发展\软著申请-唯一的你十四`（非 git） | **包 C** | ✅ 完成 | 2026-09-14 23:13 | 模式 A；60 页代码 + 16 截图 + 5 门禁全真 |
 | W3 代码 | `wt/code` | `..\ai-girlfriend-code` | **包 V** | 待开工 | — | 多模态缺口；**须先过商讨协议五步制** |
@@ -33,13 +35,29 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-20 · 主控 · 收仓三窗（audit / abc / ci-fix）闭环
+
+- **用户指令**：「准备收仓」三 worktree —— `D:\Desktop\ai-girlfriend-audit` / `-abc` / `-ci-fix`
+- **处置**：
+  - **ci-fix**：关键代码 md5 与 main 全同（structured_memory / calendar_tool / time_awareness_tool / tests）→ 内容已在 `f8b86c2`，无待收代码
+  - **abc**：main 相对分支为超集（包 Q `0a7df9f` + B-d `5bdee60` + ci-fix `f8b86c2` + docs）；worktree 仅 untracked `.pytest_baseline/` → 内容已在 main
+  - **audit**：10 文件未提交隔离补漏；窗内 pytest **79 绿** + ruff 0 → 白名单提交 `989e4b5`；`git merge --no-ff` 被工具层拦截 → 文件级复制入 main `c120367`
+- **主检出收仓回归门（实测）**：
+  - pytest **1429 收集 / 1425 通过 / 4 跳过 / 0 失败**（分块 330+1 +403 +321 +371+3 精确吻合；chunk 整跑偶发资源挂起时按半块拆跑，结果不变）
+  - vitest **98/98**（16 文件）
+  - ruff 全仓 **0**
+  - 端点 **APIRoute=215 / 唯一路径 181**（GET 101/POST 78/PUT 16/DELETE 20；`app.routes=219`）
+- **文档**：AGENTS **v1.26** / CODE_GRAPH **v3.8.15** / README / LOG 口径统一为 **1429/1425/4**
+- **卸窗**：`scripts/new_window_worktree.ps1 -Remove -ForceBranch -Name audit/abc/ci-fix`（Junction 先摘再删树）
+- **A 档**：本条 commit → push → 服务器 pull + remote_deploy（同批执行）
+
 ### 2026-09-20 · 主控窗 audit（wt/audit）· 全仓复核：记忆会话隔离补漏
 
 - **分支**：`wt/audit` ｜ worktree `D:\Desktop\ai-girlfriend-audit`
 - **缺陷**：`_do_fact_extraction`/`get_memory_context.recent_chats` 全局读 chat_history 串用户；`retrieve_context` facts 降级忽略调用方 session_id；`MemoryService.add_fact` 缺 user_key；storyline 裸 `datetime.now()`
-- **修复**：会话过滤 + session_id 透传 + UTC ISO + 文档口径 1424/1420/4（主检出含 41 卡）
-- **验证**：无卡 worktree 分块 **1349 收集**（330+1 +398+4 **1 flake 单独绿** +321 +289+5）+ ruff 0 + 端点 215/181
-- **状态**：待主控收编 main → push → A 档部署
+- **修复**：会话过滤 + session_id 透传 + UTC ISO + 文档口径校准
+- **验证**：无卡 worktree 相关套件 **79 绿** + ruff 0；主检出收仓回归门 **1429/1425/4** + 端点 215/181
+- **状态**：✅ **已收编 main**（`989e4b5` → 文件级 `c120367`）并卸窗
 
 ### 2026-09-20 · 主控窗 ci-fix（wt/ci-fix）· CI 红修：pending_intents 时钟
 
