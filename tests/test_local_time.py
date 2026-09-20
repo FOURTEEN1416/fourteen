@@ -23,15 +23,38 @@ class TestNowLocal:
     """now_local 的时区语义契约。"""
 
     def test_matches_system_local_wall_clock(self) -> None:
-        """系统时区正确时，now_local 应≈系统本地墙钟（naive、无回退）。"""
+        """系统时区正确时，now_local 应≈系统本地墙钟（naive、无回退）。
+
+        CI 宿主（ubuntu-latest）时区为 UTC：`now_local()` 会走 UTC+8
+        **aware 回退分支**，不能与 naive `datetime.now()` 直接比大小
+        （TypeError: can't compare offset-naive and offset-aware）。
+        本用例先探测宿主时区，再按分支断言语义。
+        """
+        import time as _time
+
+        offset_sec = (
+            -_time.altzone
+            if _time.daylight and _time.localtime().tm_isdst
+            else -_time.timezone
+        )
+        host_is_utc8 = abs(offset_sec - 8 * 3600) <= 3600
         before = datetime.now()
         dt = now_local()
         after = datetime.now()
-        # 不逐字段比 hour（会在整点/整分边界抖动），直接卡在两次读数之间
-        assert before <= dt <= after
-        # 系统时区（Asia/Shanghai）正确 → 走 naive 分支，与原
-        # ase_engine._local_now 行为一致（不回退）
-        assert dt.tzinfo is None
+
+        if host_is_utc8:
+            # 系统时区（Asia/Shanghai）正确 → 走 naive 分支
+            assert dt.tzinfo is None
+            assert before <= dt <= after
+        else:
+            # 非 UTC+8 主机 → 强制 aware UTC+8 回退（生产防护）
+            assert dt.tzinfo is not None
+            assert dt.utcoffset() == timedelta(hours=8)
+            # 与同一瞬间的 UTC 读数比墙钟：换算后应落在 [before, after] 窗口
+            # （允许 ±2h 时钟噪声，核心断言是 offset=+8）
+            utc_now = datetime.now(tz=timezone.utc)
+            local_from_utc = (utc_now + timedelta(hours=8)).replace(tzinfo=None)
+            assert abs((dt.replace(tzinfo=None) - local_from_utc).total_seconds()) < 2
 
     def test_forces_utc8_when_host_is_not_utc8(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """非 UTC+8 主机（如容器默认 UTC）必须强制回退到 UTC+8。
