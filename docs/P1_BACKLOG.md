@@ -1,8 +1,8 @@
 # P1 Backlog - 唯一的你
 
 **Created**: 2026-06-03
-**Last Updated**: 2026-09-20（全仓扫描·在制品收口批次：错误占位污染 chat_history 结案；FrequencyController/analytics/important_dates 墙钟收口；**仍开放** user_facts 无用户维度 + W-D §八 B3-B6 待裁决 + 既有未决项 FF-0007/P1-9~11/OBS-2/OBS-3/FE-ENV-1）
-**Previous**: 2026-09-20（全仓遍历核对：未决项 FF-0007/P1-9~11/OBS-2/OBS-3/FE-ENV-1 均不受 09-19 晚通道隔离/JWT-only 及 09-20 材质/角色/提示词批次影响，无新增未决项；通道批次遗留「双通道产品级并发实测待操作」属用户实测域，登记于 LOG 09-19 通道条目）
+**Last Updated**: 2026-09-20（全面升级根治批次：MEM-USER-1 user_facts 完整隔离、B3 配置接线、B4 回忆强化、B5 回收站、B6 刻度真源+持久化 **均已落地**；既有未决项 FF-0007/P1-9~11/OBS-2/OBS-3/FE-ENV-1 不受影响）
+**Previous**: 2026-09-20（全仓扫描·在制品收口批次：错误占位污染 chat_history 结案；FrequencyController/analytics/important_dates 墙钟收口；**仍开放** user_facts 无用户维度 + W-D §八 B3-B6 待裁决 + 既有未决项）
 **Previous**: 2026-09-19（前端审美升级+移动端优化批次收口：FE-0001 结案——StatusCenter 双列栅格+统一壳，宽屏留白实证收敛；其余未决项 FF-0007/P1-9~11/OBS-2/OBS-3/FE-ENV-1 不受影响）
 **Previous**: 2026-09-19（前端修复批次收口：六十九号诊断五项建议已于七十号全落地 [3728a87]；新增遗留项 FE-0001 状态中心宽屏留白；其余未决项 FF-0007/P1-9~11/OBS-2/OBS-3 不受影响）
 **Previous**: 2026-09-19（全仓扫描核对：未决项 FF-0007/P1-9~11/OBS-2/OBS-3 均不受 09-18/19 批次影响；09-18 nginx 整改落地 gzip/强缓存但 OBS-2 HTTPS 仍待域名）
@@ -53,5 +53,5 @@
 
 ## 新增未决项（2026-09-20 全仓扫描·在制品收口）
 
-11. **[MEM-USER-1] user_facts 无用户维度**：`StructuredMemory.user_facts` 表无 user_id 列，跨用户共享事实（违反多用户隔离硬约束的存量债）。需 schema 级迁移 + 读写路径改造，独立批次。关联 AGENTS v1.17/v1.21、LOG 09-20 遗留登记。
-12. **[W-D-B3~B6] 小凌架构缺陷清单待裁决**：B3 `config/shisi.yaml memory:` 整段 5 键零消费点（含 `similarity_threshold`）；B4 `access_count` 只读不自增（回忆强化不存在）；B5 遗忘是物理删除无保底留痕；B6 亲密度四套刻度并行（各自自洽，只登记）。属产品行为变更，须用户裁决后才能动。见 `docs/plans/2026-09-20_小凌架构收敛与双向映射设计.md` §五/§八。
+11. ~~**[MEM-USER-1] user_facts 无用户维度**~~ ✅ **2026-09-20 全面升级批次已修**：+user_key 列与会话过滤，完整隔离；存量 '' 不注入。
+12. ~~**[W-D-B3~B6] 小凌架构缺陷清单待裁决**~~ ✅ **2026-09-20 用户裁决后已落地**：B3 五键接线 / B4 access_count 回忆强化 / B5 回收站 / B6 scale 唯一真源+持久化。

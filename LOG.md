@@ -7,6 +7,26 @@
 
 ---
 
+## 2026-09-20 — 全面升级根治批次（user_facts 隔离 + B3–B6 用户裁决落地）
+
+**任务**：用户标注前批「仍开放」项并指令「审核优化 + 帮助决策和改造」。审核后经 `question` 六问拍板，裁决：**user_facts 完整隔离 / B3 激进全面接线 / B4 检索自增+进权重 / B5 进回收站 / B6 彻底重构 / 范围=全面升级根治**。
+
+**改造**：
+1. **MEM-USER-1 user_facts 完整隔离**：表 +`user_key`/`access_count`/`status`（幂等迁移）；`add_fact/get_facts/search_facts/delete_fact` 按 user_key 过滤；`session_id→user_key`（`N:wxid`/`1:wxid`→wxid）；上下文注入与工具查询只取本人事实；**存量 `user_key=''` 不注入任何会话**。
+2. **B3 配置接线**：`config/shisi.yaml memory:` 五键经 `_load_shisi_memory_config()` 进入 `MemoryConfig`（working_memory_capacity→limit、extraction_enabled→事实提取开关、long_term_threshold→提取间隔、similarity_threshold 等）。
+3. **B4 回忆强化**：`increment_fact_access`（注入/工具检索时 +1）；`ForgettingManager.retrieval_weight(importance, days, access_count)` 等效重要性加分 + 衰减时钟按 `0.7^access` 刷新。
+4. **B5 回收站**：`delete_fact(recycle=True)` 默认写入 `memory_recycle_bin`（character_id=`user_fact:{user_key}`）再删主表；新增 `restore_fact_from_recycle`。
+5. **B6 刻度彻底重构**：新 `shisi/affinity/scale.py` 唯一真源（points 0–500 ↔ level 0–8 ↔ shisi 0–100 ↔ unlock 25/50/75/90）；`AffinityMapper` 全部委托 scale；`utils/affinity_state.py` 持久化 `data/affinity_state.json`；`user_scheduler` 引擎创建恢复 + 对话后落盘 + reset 清除（治「重启亲密度归零」）。
+6. **semantic_memory 收敛**：`_legacy_semantic_memory` 改为转发 `semantic_memory.py`（双实现消除）；add_fact 保持 bool 契约 + user_key。
+
+**验证**：分块 pytest **1351 收集 / 1347 通过 / 4 跳过**（305 +357+3 +308+1 +377 精确吻合）+ vitest **98/98** + ruff 全仓 **0 错** + 端点内省 215/181 不变；+19 回归（`tests/test_memory_upgrade_overhaul.py` 19 用例：隔离/回收站/access/配置/刻度/持久化）。
+
+**文档**：AGENTS **v1.22** / CODE_GRAPH **v3.8.12** / README **1445** / CODEMAPS / DECISION_LEDGER / P1_BACKLOG / 本 LOG。
+
+**三端**：代码+测试 A 档（commit→push→服务器 pull）；文档 B 档 push 即完成。
+
+---
+
 ## 2026-09-20 — 全仓扫描·在制品收口批次（代码审查/修 bug/文档同步）
 
 **任务**：用户指令「最近该仓库进行了多次迭代更新，需要你进行代码审查，全仓扫描，更新文档，找 bug 进行修复」。
