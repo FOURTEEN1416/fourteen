@@ -1,6 +1,6 @@
 # 代码图谱 — unique-you (唯一的你) v3.8.14
 
-> 由 维护者 手动维护 | 最后核实: 2026-09-20（**v3.8.15 全仓复核**：记忆会话隔离补漏 + 文档口径；主检出测试 **1424 收集 / 1420 通过 / 4 跳过**（326+1+403+320+371+3）+ FE 98 + 端点 **215/181** 复测不变。v3.8.14：**B-d 跨会话尾巴 + 工具结果 PHI 前正式位次**——`get_cross_session_tail` / `format_session_tail` / `inject_tool_context_before_phi` / `build_system_prompt(tool_context=)`；测试 **1421/1417/4**；端点 215/181。v3.8.13：包 Q A+B+C 收编）。
+> 由 维护者 手动维护 | 最后核实: 2026-09-20（**v3.8.15 全仓复核**：记忆会话隔离补漏 + 文档口径；主检出测试 **1429 收集 / 1424 通过 / 4 跳过**（+1 隔离用例后主检出复测；无卡 worktree 1349/1338+1flake 单独绿）（326+1+403+320+371+3）+ FE 98 + 端点 **215/181** 复测不变。v3.8.14：**B-d 跨会话尾巴 + 工具结果 PHI 前正式位次**——`get_cross_session_tail` / `format_session_tail` / `inject_tool_context_before_phi` / `build_system_prompt(tool_context=)`；测试 **1421/1417/4**；端点 215/181。v3.8.13：包 Q A+B+C 收编）。
 
 > 由 维护者 手动维护 | 最后核实: 2026-09-20（v3.8.13 增量：**包 Q · A+B+C 收编**——A1 身份唯一 Owner；A2 `utils/fallback_lines.py`；A3 流式/非流式硬违规统一；A4 `orchestrator/context_budget.py`；C1–C3 工具 untrusted 信封/限额/防假承诺；B-a/b/c 记忆同步写、topics/near-dup、k(level) 注入。验证 **1414 收集/1410 通过/4 跳过** + vitest 98 + ruff 0；端点 **215/181** 不变。v3.8.12 增量：全面升级根治（user_facts 隔离/B3–B6）。（用户裁决：user_facts 完整隔离 / B3 激进接线 / B4 回忆强化 / B5 回收站 / B6 刻度彻底重构）——① **MEM-USER-1**：`user_facts` +`user_key`/`access_count`/`status` 列；读写按会话归属过滤（`N:wxid`/`1:wxid`→wxid）；存量 `user_key=''` 不注入任何会话；② **B3**：`config/shisi.yaml memory:` 五键接线（capacity/extraction_enabled/long_term_threshold→fact_extract_interval/similarity_threshold 等）；③ **B4**：检索/注入时 `access_count+1`，遗忘权重 `effective_importance+衰减时钟刷新`；④ **B5**：`delete_fact` 默认写 `memory_recycle_bin` 再删主表，可 `restore_fact_from_recycle`；⑤ **B6**：新 `shisi/affinity/scale.py` 刻度唯一真源 + mapper 委托 + `utils/affinity_state.py` 持久化 affection_points（user_scheduler 恢复/落盘）。验证：分块 **1351 收集/1347 通过/4 跳过** + vitest 98/98 + ruff 0 错；端点 215/181 不变。v3.8.11 增量：全仓扫描·在制品收口。v3.8.10 增量：**复核补漏批次**> ✅ 路由/文件/模块/测试数已通过 create_api_app 实扫 + Glob + pytest + vitest 实时核实（2026-08-28）。
 > ✅ 图数据库已于 2026-08-28 由 codebase-memory 图谱工具 v0.10.8 重新索引（artifact.json schema v2: **7706 节点 / 32367 边**，commit c32af54），历史矛盾（543277c 声称的 6771 节点未持久化）就此消案。
@@ -18,7 +18,7 @@
 | 前端页面 | **17 个** | Glob `frontend/src/pages/*.tsx`（另有 `StorylinePage` 为 App.tsx 内联包装组件） |
 | 前端 API 模块 | **13 个** | Glob `frontend/src/api/*.ts`（09-18 CI 门禁根治新增 `emotion.ts` / `normalize.ts`，原 11） |
 | 前端 Zustand store | **3 个** | LS `frontend/src/store/`（authStore / characterBuilderStore / errorStore） |
-| Python 测试用例 | **1420 passed + 4 skipped**（收集 **1424**） | 2026-09-20 全仓复核·主检出分块实跑（326+1 +403 +320 +371+3）；无卡 CI 约 1344 |
+| Python 测试用例 | **1420 passed + 4 skipped**（收集 **1429**） | 2026-09-20 全仓复核·主检出分块实跑（330+1 +398+4 +321 +289+5（无卡口径）/ 主检出含卡约 +80 persona）；无卡 CI 约 1344 |
 | 现役角色卡 | **41 张**（`config/characters/*.json`） | Glob 实扫 2026-09-20：25 既有 + 16 文学导入（我的26岁女房客×4 / 从你的全世界路过×5 / 云边有个小卖部×3 / 某某×2 / 天堂旅行团×2）；目录 gitignore（不入公开仓，服务器私有投递）；persona 注入参数化用例数 = 2 × 卡数 |
 | 前端测试用例 | **98 个全部通过 / 16 文件** | 2026-09-20 `npm test -- --run`（vitest）+ `tsc --noEmit` 0 错误 |
 | 测试用例合计 | **1515 个**（1417 Python 通过 + 98 前端通过） | pytest + vitest 实跑 2026-09-20（B-d+PHI 补做后） |
@@ -715,7 +715,7 @@ tools/
 
 | 日期 | 提交 | 变更摘要 |
 |------|------|---------|
-| 2026-09-20 (全仓复核) | working tree | **v3.8.15** 记忆会话隔离补漏 + 文档口径；测试 **1424/1420/4** + 端点 215/181 |
+| 2026-09-20 (全仓复核) | working tree | **v3.8.15** 记忆会话隔离补漏 + 文档口径；测试 **1429/1424/4** + 端点 215/181 |
 | 2026-09-20 (包Q A+B+C收编) | main | **v3.8.13** 身份唯一/context_budget/工具信封/记忆同步写+k(level)；**1414/1410/4** + vitest 98 + 端点 215/181 |
 | 2026-09-20 (全面升级根治) | working tree | **v3.8.12**（用户裁决五项全做）：user_facts 完整隔离 + B3 配置接线 + B4 access_count 回忆强化 + B5 回收站 + B6 `shisi/affinity/scale.py` 刻度真源与 affinity_state 持久化。验证 **1351/1347/4** + vitest 98/98 + ruff 0 错 |
 | 2026-09-20 (全仓扫描·在制品收口) | working tree | **v3.8.11**（用户指令：全仓扫描/审查/修 bug/更新文档）：收编 v3.8.10 登记的并行窗口在制品 4 类纯缺陷——FrequencyController 日界本地化+last_reset_date 状态落盘+record_sent 钉日界、analytics/important_dates 墙钟收口、after_chat 系统错误占位不入库。B3-B6 行为项仍留 W-D §八待裁决；user_facts 无用户维度仍开放。验证：**1332 收集/1328 通过/4 跳过** + vitest 98/98 + ruff 0 错 + 端点 215/181 不变 |

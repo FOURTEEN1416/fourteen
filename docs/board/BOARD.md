@@ -33,6 +33,14 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-20 · 主控窗 audit（wt/audit）· 全仓复核：记忆会话隔离补漏
+
+- **分支**：`wt/audit` ｜ worktree `D:\Desktop\ai-girlfriend-audit`
+- **缺陷**：`_do_fact_extraction`/`get_memory_context.recent_chats` 全局读 chat_history 串用户；`retrieve_context` facts 降级忽略调用方 session_id；`MemoryService.add_fact` 缺 user_key；storyline 裸 `datetime.now()`
+- **修复**：会话过滤 + session_id 透传 + UTC ISO + 文档口径 1424/1420/4（主检出含 41 卡）
+- **验证**：无卡 worktree 分块 **1349 收集**（330+1 +398+4 **1 flake 单独绿** +321 +289+5）+ ruff 0 + 端点 215/181
+- **状态**：待主控收编 main → push → A 档部署
+
 ### 2026-09-20 · 主控窗 ci-fix（wt/ci-fix）· CI 红修：pending_intents 时钟
 
 - **分支**：`wt/ci-fix` ｜ worktree `D:\Desktop\ai-girlfriend-ci-fix`
