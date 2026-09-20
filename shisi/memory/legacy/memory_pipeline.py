@@ -60,6 +60,22 @@ EMOTION_KEYWORDS = (
 # 深夜情感关键词：深夜时段需要特别关注的情感信号
 LATE_NIGHT_EMOTION_WORDS = ("怕", "想", "孤独", "难过", "寂寞", "睡不着", "失眠", "崩溃")
 
+# 系统错误占位回复：不得写入 chat_history / 工作记忆 / 向量库（LOG 遗留项）。
+# 这些文本一旦被当成 assistant 真实发言入库，会污染后续上下文——模型会把
+# 「处理超时」当成角色说过的台词继续演。只存用户原话，不存罐头错误语。
+_SYSTEM_ERROR_REPLIES = frozenset({
+    "抱歉，处理超时，请稍后重试",
+    "（处理消息时出现异常, 请稍后重试）",
+    "（生成回复时出现异常, 请稍后重试）",
+    "系统初始化中, 请稍候...",
+    "等下，我还没回完上一条",
+})
+
+
+def _is_system_error_reply(reply: str) -> bool:
+    """是否为系统错误占位（非角色真实回复）。"""
+    return (reply or "").strip() in _SYSTEM_ERROR_REPLIES
+
 # 深夜时段范围（24小时制，含两端）
 LATE_NIGHT_START_HOUR = 23
 LATE_NIGHT_END_HOUR = 5
@@ -300,31 +316,37 @@ class MemoryPipeline:
             logger.debug("Late-night importance boost failed: %s", e)
 
         # 2. 存储到结构化记忆
+        #    系统错误占位（超时/异常罐头语）只保留用户原话，不把罐头语写成
+        #    assistant 发言——否则会污染后续上下文（2026-09-20 LOG 遗留项）。
+        store_assistant = not _is_system_error_reply(reply)
         try:
             self.sm.add_chat("user", user_msg, emotion_tag=emotion_tag,
                              session_id=effective_session)
-            self.sm.add_chat("assistant", reply, emotion_tag=emotion_tag,
-                             session_id=effective_session)
+            if store_assistant:
+                self.sm.add_chat("assistant", reply, emotion_tag=emotion_tag,
+                                 session_id=effective_session)
             result["stored_chat"] = True
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to store chat: %s", e)
 
         # 3. 存储到工作记忆
         self.working.add("user", user_msg, emotion_tag, importance)
-        self.working.add("assistant", reply, emotion_tag, importance)
+        if store_assistant:
+            self.working.add("assistant", reply, emotion_tag, importance)
 
         # 4. 存储到向量库（线程池异步执行，不阻塞主流程）
-        self._executor.submit(
-            self.vm.store_chat_sync,
-            user_msg,
-            reply,
-            {
-                "emotion": emotion_tag,
-                "session_id": effective_session,
-                "importance": importance,
-            },
-        )
-        result["stored_vector"] = True  # 乐观标记，错误在内部日志
+        if store_assistant:
+            self._executor.submit(
+                self.vm.store_chat_sync,
+                user_msg,
+                reply,
+                {
+                    "emotion": emotion_tag,
+                    "session_id": effective_session,
+                    "importance": importance,
+                },
+            )
+            result["stored_vector"] = True  # 乐观标记，错误在内部日志
 
         # 5. 事实提取（每 N 条对话触发）
         # 注意：所有对 _chat_count_since_extract 的操作必须在锁保护下完成

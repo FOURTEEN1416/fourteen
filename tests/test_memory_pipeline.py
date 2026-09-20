@@ -740,6 +740,35 @@ def test_mp_after_chat_skips_boost_when_not_late_night(monkeypatch, caplog):  # 
     ), "非深夜不应触发重要性提升"
 
 
+def test_mp_after_chat_skips_storing_system_error_placeholder():
+    """系统错误占位（处理超时等）不得写成 assistant 发言污染上下文。
+
+    用户原话仍入库；罐头错误语不进 chat_history / 工作记忆 / 向量库。
+    """
+    from shisi.memory.legacy.memory_pipeline import _is_system_error_reply
+
+    assert _is_system_error_reply("抱歉，处理超时，请稍后重试")
+    assert _is_system_error_reply("（处理消息时出现异常, 请稍后重试）")
+    assert not _is_system_error_reply("好的，我记下了")
+
+    mp, vm, sm = _make_pipeline(fact_extract_interval=10)
+    mp.after_chat(
+        "帮我明早六点叫我起床",
+        "抱歉，处理超时，请稍后重试",
+        session_id="N:test",
+    )
+    roles = [(c["role"], c["content"]) for c in sm.chats if c.get("role") in ("user", "assistant")]
+    assert ("user", "帮我明早六点叫我起床") in roles
+    assert not any(r == "assistant" and "处理超时" in c for r, c in roles), "错误占位不得入库为 assistant"
+    # 向量库也不应收到错误占位
+    assert all("处理超时" not in (c.get("reply") or "") for c in vm.chats)
+
+    mp.after_chat("今天天气怎么样", "记得带伞哦", session_id="N:test")
+    assert any(
+        c.get("role") == "assistant" and c.get("content") == "记得带伞哦" for c in sm.chats
+    ), "正常回复仍应入库"
+
+
 if __name__ == "__main__":
     import asyncio
     for name, fn in list(globals().items()):

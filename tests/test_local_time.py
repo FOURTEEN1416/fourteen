@@ -118,6 +118,7 @@ def test_no_wall_clock_utc_regression_in_fixed_sites() -> None:
     允许的例外（属时间差运算 / 无害 ID 生成）：
       - memory_pipeline: session_id 生成 1 处 + _apply_forgetting 的
         updated_at / days_old 计算 2 处 —— 这三处**必须**用 UTC。
+      - frequency.py: 冷却/最小间隔的时间差比较 3 处 —— 日界走 now_local。
     """
     from pathlib import Path
 
@@ -125,6 +126,9 @@ def test_no_wall_clock_utc_regression_in_fixed_sites() -> None:
     targets = {
         "shisi/memory/legacy/memory_pipeline.py": 3,
         "my_character/enhanced_prompt_engine.py": 0,
+        "shisi/stats/analytics.py": 0,
+        "utils/important_dates.py": 0,
+        "proactive/frequency.py": 3,  # can_send/record_sent/record_reply 的时间差
     }
     needle = "datetime.now(tz=timezone.utc)"
     for rel, allowed in targets.items():

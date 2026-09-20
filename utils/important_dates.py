@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from utils.local_time import now_local
 from utils.project_paths import project_path
 
 logger = logging.getLogger("utils.important_dates")
@@ -50,8 +51,12 @@ def save_dates(character_id: str, dates: list[dict[str, Any]]) -> None:
 
 
 def check_today(character_id: str, today: datetime | None = None) -> list[dict[str, Any]]:
-    """今天命中的日期（MM-DD 匹配；YYYY-MM-DD 存储忽略年份部分）。"""
-    now = today or datetime.now()
+    """今天命中的日期（MM-DD 匹配；YYYY-MM-DD 存储忽略年份部分）。
+
+    墙钟一律走 `now_local`：原用裸 `datetime.now()` 在主机时区非北京时
+    会静默错位（AGENTS v1.19 观察项，本批收口）。
+    """
+    now = today or now_local()
     mmdd = now.strftime("%m-%d")
     hits = []
     for d in load_dates(character_id):

@@ -182,6 +182,15 @@ class TestAnalyticsService:
         stats = svc.get_stats()
         assert stats["total_messages"] == 0
 
+    def test_daily_key_uses_local_wall_clock(self):
+        """日键必须按本地墙钟（原 UTC 会在 UTC+8 的 00:00–08:00 记到昨天）。"""
+        from utils.local_time import now_local
+
+        svc = AnalyticsService()
+        svc.record_message("c1", "开心", 60)
+        today = now_local().strftime("%Y-%m-%d")
+        assert svc._daily_counts.get(today) == 1
+
 
 class TestFavoriteManager:
     def test_favorite_and_list(self, tmp_db):

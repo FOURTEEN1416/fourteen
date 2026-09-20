@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from datetime import datetime, timezone
 from typing import Any
+
+from utils.local_time import now_local
 
 logger = logging.getLogger("shisi.stats.analytics")
 
@@ -23,7 +24,8 @@ class AnalyticsService:
         self._character_usage[character_id] += 1
         if emotion:
             self._emotion_counts[emotion] += 1
-        today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+        # 日键走本地墙钟：原用 UTC，UTC+8 下本地 00:00–08:00 的消息会被记到“昨天”
+        today = now_local().strftime("%Y-%m-%d")
         self._daily_counts[today] = self._daily_counts.get(today, 0) + 1
         if affinity is not None:
             history = self._affinity_history.setdefault(character_id, [])

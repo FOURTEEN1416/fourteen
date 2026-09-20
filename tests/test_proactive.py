@@ -338,8 +338,10 @@ def test_frequency_controller_can_send_initial():
 
 def test_frequency_controller_daily_limit():
     from proactive.ase_engine import FrequencyController
+    from utils.local_time import now_local
+
     fc = FrequencyController(max_daily=3, min_interval_minutes=0, cooldown_after_reply_minutes=0)
-    fc._last_reset_date = datetime.now(tz=timezone.utc).date()
+    fc._last_reset_date = now_local().date()
     for _ in range(3):
         fc.record_sent()
     can, reason = fc.can_send()
@@ -349,8 +351,10 @@ def test_frequency_controller_daily_limit():
 
 def test_frequency_controller_daily_limit_boundary():
     from proactive.ase_engine import FrequencyController
+    from utils.local_time import now_local
+
     fc = FrequencyController(max_daily=3, min_interval_minutes=0, cooldown_after_reply_minutes=0)
-    fc._last_reset_date = datetime.now(tz=timezone.utc).date()
+    fc._last_reset_date = now_local().date()
     fc.record_sent()
     fc.record_sent()
     can, _ = fc.can_send()
@@ -408,16 +412,55 @@ def test_frequency_controller_from_dict():
 
 def test_frequency_controller_daily_reset():
     from proactive.ase_engine import FrequencyController
+    from utils.local_time import now_local
+
     fc = FrequencyController(max_daily=2, min_interval_minutes=0, cooldown_after_reply_minutes=0)
-    fc._last_reset_date = datetime.now(tz=timezone.utc).date()
+    fc._last_reset_date = now_local().date()
     fc.record_sent()
     fc.record_sent()
     can, _ = fc.can_send()
     assert can is False
-    fc._last_reset_date = (datetime.now(tz=timezone.utc) - timedelta(days=1)).date()
+    fc._last_reset_date = (now_local() - timedelta(days=1)).date()
     fc._last_sent_time = datetime.now(tz=timezone.utc) - timedelta(minutes=60)
     can, _ = fc.can_send()
     assert can is True
+
+
+def test_frequency_controller_to_from_dict_preserves_daily_count():
+    """状态往返后 daily_count 不得被 can_send 清零（日界字段必须落盘）。"""
+    from proactive.ase_engine import FrequencyController
+    from utils.local_time import now_local
+
+    src = FrequencyController(max_daily=8, min_interval_minutes=0, cooldown_after_reply_minutes=0)
+    src.record_sent()
+    src.record_sent()
+    payload = src.to_dict()
+    assert payload.get("last_reset_date") is not None
+
+    dst = FrequencyController(max_daily=8, min_interval_minutes=0, cooldown_after_reply_minutes=0)
+    dst.from_dict(payload)
+    assert dst._daily_count == 2
+    can, reason = dst.can_send()
+    assert can is True
+    assert reason == "ok"
+    assert dst._daily_count == 2, "恢复后的配额计数不得被日界惰性重置抹掉"
+    assert dst._last_reset_date == now_local().date()
+
+
+def test_frequency_controller_daily_reset_uses_local_date():
+    """日界必须按本地墙钟：钉住昨天的本地日期 → 本拍应重置配额。"""
+    from proactive.ase_engine import FrequencyController
+    from utils.local_time import now_local
+
+    fc = FrequencyController(max_daily=2, min_interval_minutes=0, cooldown_after_reply_minutes=0)
+    fc._last_reset_date = (now_local() - timedelta(days=1)).date()
+    fc.record_sent()
+    fc.record_sent()
+    assert fc._daily_count == 2
+    can, reason = fc.can_send()
+    assert can is True
+    assert reason == "ok"
+    assert fc._daily_count == 0
 
 
 # ═══════════════════════════════════════════════════════════════
