@@ -1,10 +1,10 @@
 # 代码地图索引
 
-> **✅ 2026-09-20 增量刷新**：全仓扫描·在制品收口批次（端点 215 / api 45 文件 / 41 张卡 / 测试 1445【1347 Py + 98 FE】）；历史漂移声明留档见 `docs/history/INDEX.md`。权威数字以 `CODE_GRAPH.md` **v3.8.12** 为准。
+> **✅ 2026-09-20 全仓历遍刷新**：`orchestrator` 7→**9** 文件 / `proactive` 5→**6** / `shisi` 115→**116** / 新增 **`utils/`** 行；测试口径为 **1436 收集 / 1432 通过 / 4 跳过**（现役角色卡 **41 张**；⚠️ 卡目录被 gitignore、内容不随 git 复现，用例数 = 2 × 卡数 + 7）；活跃 ADR 11→**12**（补 **ADR-0015**）。历史漂移声明留档见 `docs/history/INDEX.md`。权威数字以 `CODE_GRAPH.md` **v3.8.16** 为准。
 
 **最近更新:** 2026-09-20
 **项目版本:** 3.1.0
-**项目规模:** ~511 Python 文件（含 tests；核心模块 351 + tests 80 + scripts/tools 等） + ~108 TS/TSX 文件 | 当前分支: `main`
+**项目规模:** **389** 个 Python 文件（模块 283 + 根级 2 + `scripts/` 11 + `tests/` 92 + `deploy/` 1；**不含** `frontend/` 与内嵌 `大创赛报名以及后期发展/`） + **~108** TS/TSX 文件 | 当前分支: `main`
 **架构框架:** FastAPI (后端) + React/Vite (前端) + SQLite/ChromaDB (数据)
 
 ---
@@ -38,12 +38,15 @@ unique-you/
 ├── api/                    # FastAPI 路由层 (45 py 文件：app_factory/run_api/22 routers/
 │                           #   achievement_engine/database/auth/auth_jwt/deps/
 #                           #   health_routes/main_routes/qrcode_store/websocket_server/state/...)
-├── shisi/                  # DDD 核心域 (115 py 文件，v2 死模块删除后口径)
+├── shisi/                  # DDD 核心域 (116 py 文件，v2 死模块删除后口径)
 ├── my_character/           # 情感引擎 (21 py 文件)
 ├── frontend/               # React 前端 SPA (17 pages / 13 api 模块 / 3 store)
-├── orchestrator/           # 编排包 (7 文件：主类+init/stream mixin+session_locks+voice_detector+console_chat)
+├── orchestrator/           # 编排包 (9 文件：主类+init/stream mixin+session_locks+voice_detector
+│                           #   +console_chat+tool_gate+context_budget)
 ├── persona_extractor/      # 人格提取 (13 文件)
 ├── tools/                  # 工具系统 (10 py 文件, 12 内置工具)
+├── utils/                  # 公共工具 (11 文件：local_time/fallback_lines/affinity_state/
+│                           #   reply_mode/async_utils/important_dates/...)
 ├── observability/          # 可观测性 (9 py 文件)
 ├── security/               # 安全模块 (4 模块 + __init__)
 ├── llm_provider/           # LLM 供应商接入 (5 py 文件)
@@ -53,15 +56,16 @@ unique-you/
 ├── clone_training/         # 克隆训练 (4 文件：清洗/提取/风格分析)
 ├── context/                # 上下文 (世界书)
 ├── memory_ext/             # 记忆扩展 (mem0 后端)
-├── proactive/              # 主动消息 (5 文件)
+├── proactive/              # 主动消息 (6 文件：ase_engine/scheduler/frequency/reflection/
+│                           #   reminder_delivery)
 ├── multimodal/             # 多模态 (image_attachment + multimodal_processor)
 ├── wechat_direct/          # 微信直连 (5 文件：每人独立通道 registry/paths/peer + connector)
 ├── plugins/                # 插件系统 (2 文件)
-├── config/                 # YAML/JSON 配置 + config/characters/ 角色卡库（41 张，唯一真源）
-├── tests/                  # 测试 (1324 Python 通过 + 4 跳过 / 98 前端)
+├── config/                 # YAML/JSON 配置 + config/characters/ 角色卡库（gitignore；现役 41 张）
+├── tests/                  # 测试 (1432 Python 通过 + 4 跳过 / 98 前端)
 └── docs/                   # 文档
     ├── CODEMAPS/           # ← 本目录
-    ├── adr/                # 架构决策记录 (11 篇)
+    ├── adr/                # 架构决策记录 (12 篇)
     ├── architecture/       # 架构文档
     ├── reports/            # 报告文档
     └── designs/            # 设计文档
@@ -75,8 +79,8 @@ unique-you/
 |------|-----|
 | API 端点 | **215 业务端点 / 181 唯一路径**（18 include_router + setup_shisi，`create_api_app` 内省实扫；⚠️ `len(app.routes)=219` 含 4 条框架路由） |
 | 前端页面 | 17 页面文件（全部挂载；幽灵层三页+DemoPage 已删） |
-| 测试用例 | **1422 = 1324 Python 通过（4 跳过）+ 98 前端通过**（2026-09-20 实跑全绿） |
-| 活跃 ADR | 11（0001–0007 + 0011–0014；0008–0010 空缺未使用） |
+| 测试用例 | **1530 = 1432 Python 通过（4 跳过）+ 98 前端通过**（2026-09-20 全仓历遍实跑全绿，收集 1436；⚠️ 随 `config/characters/` 卡数浮动 = 2 × 卡数 + 7，现役 41 张） |
+| 活跃 ADR | **12**（0001–0007 + 0011–**0015**；0008–0010 空缺未使用） |
 | Fitness Functions | 17 (12 CI + 5 手动) |
 | 总线因子 | 1 (唯一开发者: 默默) |
 
@@ -108,6 +112,6 @@ npm run dev
 
 ## 相关文档
 
-- [ADR 目录](../adr/) — 架构决策记录 (11 篇)
+- [ADR 目录](../adr/) — 架构决策记录 (**12 篇**，含 ADR-0015 系统提示词分层与按需注入)
 - [架构文档](../architecture/) — 设计原则与知识图谱
 - [报告文档](../reports/) — 研究与评审报告

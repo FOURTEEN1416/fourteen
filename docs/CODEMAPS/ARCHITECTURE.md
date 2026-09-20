@@ -37,7 +37,7 @@
 │                                                                  │
 │  ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐  │
 │  │ shisi/   │ │ LLM     │ │ 安全     │ │shisi/    │ │shisi/ │  │
-│  │(115 文件) │ │ Provider│ │ (5 文件)  │ │knowledge │ │memory │  │
+│  │(116 文件) │ │ Provider│ │ (5 文件)  │ │knowledge │ │memory │  │
 │  └──────────┘ └─────────┘ └──────────┘ └──────────┘ └───────┘  │
 │  ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐  │
 │  │ TTS 语音 │ │ 人格提取 │ │ 工具系统  │ │ 编排器    │ │ 缓存  │  │
@@ -60,13 +60,15 @@
 
 ## 编排器架构
 
-> **注:** 编排逻辑位于 `orchestrator/` 包，包含 7 个文件（含 `__init__.py`）：
-> - `optimized_orchestrator.py` (1050行) — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / `_prepare_context` / `process_message` / `_after_process` / `health_check`
+> **注:** 编排逻辑位于 `orchestrator/` 包，包含 **9 个文件**（含 `__init__.py`）：
+> - `optimized_orchestrator.py` (**1270 行**) — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / `_prepare_context` / `process_message` / `_after_process` / `health_check`
 > - `_init_mixin.py` (510行) — `_InitPhasesMixin`：`initialize` 调用 10 个 `_init_*` 阶段；其中 `_init_memory_and_rag` 再级联 `_init_ase_and_scheduler` / `_init_tools` / `_init_rag`，共 13 个阶段方法
-> - `_stream_mixin.py` (376行) — `_StreamPipelineMixin`：`process_message_stream` SSE 真流式/伪流式降级
-> - `session_locks.py` — 会话锁管理（`SessionLockManager`）
-> - `voice_detector.py` — 语音活动检测
-> - `console_chat.py` — 控制台聊天通道
+> - `_stream_mixin.py` (377行) — `_StreamPipelineMixin`：`process_message_stream` SSE 真流式/伪流式降级
+> - `session_locks.py` (92行) — 会话锁管理（`SessionLockManager`）
+> - `voice_detector.py` (106行) — 语音活动检测
+> - `console_chat.py` (134行) — 控制台聊天通道
+> - **`tool_gate.py` (330行，09-20)** — 三级工具意图管线（L0 晋级线 / L1 LLM 终审 / 防假承诺）+ 工具结果 untrusted 信封
+> - **`context_budget.py` (236行，09-20)** — 上下文预算与去重、跨会话尾巴信封、工具结果注入位次
 >
 > `OptimizedOrchestrator` 继承 `_InitPhasesMixin` + `_StreamPipelineMixin`，通过 `self.components` 共享状态。公共 API 100% 兼容。
 >

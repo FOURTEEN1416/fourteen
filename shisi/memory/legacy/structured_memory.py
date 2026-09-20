@@ -356,16 +356,103 @@ class StructuredMemory:
 
     @staticmethod
     def user_key_from_session(session_id: str) -> str:
-        """session_id → 事实归属 user_key。
+        """session_id → 事实/记忆归属 user_key（隔离硬约束）。
 
-        形态：`N:wxid` / `1:wxid` / `42:wxid` → `wxid`；裸 `wxid` 原样；空 → `''`。
+        2026-09-21 生产串台修复：**返回完整会话键**，禁止剥掉 owner。
+        隔离域 = `(channel_owner, peer_wxid)`，即 `N:wxid` 本身。
+        旧实现 `N:wxid → wxid` 会让同一 peer 下不同注册账号共用
+        user_facts / 跨会话尾巴 / 工具记忆检索（生产实证 user1 与 user4）。
         """
         if not session_id:
             return ""
-        s = str(session_id).strip()
+        return str(session_id).strip()
+
+    @staticmethod
+    def bare_peer_from_session(session_id: str) -> str:
+        """仅用于迁移/诊断：从 `N:wxid` 还原裸 peer，不得用于运行时读路径。"""
+        s = str(session_id or "").strip()
         if ":" in s:
             return s.split(":", 1)[1] or s
         return s
+
+    def migrate_legacy_isolation_keys(self) -> dict[str, int]:
+        """一次性迁移：把「剥 owner 的裸 peer」事实/历史迁到唯一 owner 的完整会话键。
+
+        规则：
+        - 裸 user_key / 裸 session_id 在 chat_history 中若只被**一个** owner
+          形态 `N:peer` 使用 → 迁到该完整键；
+        - 多个 owner 共用同一 peer → **保持裸键不注入**（孤儿），避免串台；
+        - 空键事实保持空键（默认不注入）。
+        """
+        stats = {
+            "facts_migrated": 0,
+            "facts_orphaned": 0,
+            "chats_migrated": 0,
+            "chats_orphaned": 0,
+        }
+        try:
+            with self._conn(write=True) as conn:
+                bare_keys: set[str] = set()
+                for row in conn.execute(
+                    "SELECT DISTINCT user_key FROM user_facts "
+                    "WHERE user_key != '' AND user_key NOT LIKE '%:%'"
+                ):
+                    bare_keys.add(str(row["user_key"] or ""))
+                bare_sessions: set[str] = set()
+                for row in conn.execute(
+                    "SELECT DISTINCT session_id FROM chat_history "
+                    "WHERE session_id != '' AND session_id NOT LIKE '%:%'"
+                ):
+                    bare_sessions.add(str(row["session_id"] or ""))
+
+                def _unique_owner(peer: str) -> str | None:
+                    owners: set[str] = set()
+                    for row in conn.execute(
+                        "SELECT DISTINCT session_id FROM chat_history "
+                        "WHERE session_id = ? OR session_id LIKE ?",
+                        (peer, f"%:{peer}"),
+                    ):
+                        sid = str(row["session_id"] or "")
+                        if sid == peer:
+                            continue
+                        if ":" in sid:
+                            owners.add(sid.split(":", 1)[0])
+                    if len(owners) == 1:
+                        only = next(iter(owners))
+                        return f"{only}:{peer}"
+                    return None
+
+                for bare in bare_keys:
+                    if not bare:
+                        continue
+                    target = _unique_owner(bare)
+                    if target:
+                        conn.execute(
+                            "UPDATE user_facts SET user_key = ? WHERE user_key = ?",
+                            (target, bare),
+                        )
+                        stats["facts_migrated"] += 1
+                    else:
+                        stats["facts_orphaned"] += 1
+
+                for bare in bare_sessions:
+                    if not bare:
+                        continue
+                    target = _unique_owner(bare)
+                    if target:
+                        conn.execute(
+                            "UPDATE chat_history SET session_id = ? WHERE session_id = ?",
+                            (target, bare),
+                        )
+                        stats["chats_migrated"] += 1
+                    else:
+                        stats["chats_orphaned"] += 1
+                conn.commit()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("migrate_legacy_isolation_keys failed: %s", e)
+        if any(stats.values()):
+            logger.info("隔离键迁移完成: %s", stats)
+        return stats
 
     def _migrate_reminders_columns(self, conn) -> None:
         """老库幂等迁移：reminders 补列（会话归属/投递状态）。
@@ -708,13 +795,21 @@ class StructuredMemory:
             conn.commit()
             return cursor.lastrowid  # type: ignore[no-any-return]
 
-    def get_reflections(self, limit: int = 10) -> list[dict[str, Any]]:
-        """获取最近反思洞察"""
+    def get_reflections(self, limit: int = 10,
+                        session_id: str | None = None) -> list[dict[str, Any]]:
+        """获取最近反思洞察（session_id 非 None 时按会话隔离）。"""
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM reflections ORDER BY created_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            if session_id is not None:
+                rows = conn.execute(
+                    "SELECT * FROM reflections WHERE session_id = ? "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (str(session_id), limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM reflections ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
             return [dict(r) for r in rows]
 
     def search_reflections(self, keyword: str, limit: int = 5) -> list[dict[str, Any]]:
@@ -803,23 +898,21 @@ class StructuredMemory:
         limit: int = 8,
         user_key: str | None = None,
     ) -> list[str]:
-        """跨会话尾巴：按 user_key 取最近持久化消息（含会话双形态）。
+        """跨会话尾巴：按**完整会话隔离键**取最近持久化消息。
 
-        用于 B-d：实时窗口尚浅时注入「上次会话尾巴」，避免新会话冷启动失忆。
-        返回 `- 用户：...` / `- 助手：...` 文本行（时间正序）。
+        2026-09-21 串台修复：禁止把裸 peer / `N:bare` 并入 owner 会话——
+        旧双形态合并会让 user1/user4 同时注入同一批遗留历史。
         """
         if limit <= 0:
             return []
         uk = user_key if user_key is not None else self.user_key_from_session(session_id)
-        if not uk:
+        forms: set[str] = set()
+        for key in (uk, session_id):
+            k = str(key or "").strip()
+            if k:
+                forms.add(k)
+        if not forms:
             return []
-        forms = {uk, f"N:{uk}"}
-        if session_id:
-            forms.add(str(session_id).strip())
-            bare = self.user_key_from_session(session_id)
-            if bare:
-                forms.add(bare)
-                forms.add(f"N:{bare}")
         placeholders = ",".join("?" for _ in forms)
         sql = (
             "SELECT role, content FROM chat_history "
@@ -841,23 +934,23 @@ class StructuredMemory:
             lines.append(f"- {role}：{content}")
         return lines[-limit:]
 
-    def get_chats_today(self) -> list[dict[str, Any]]:
-        """获取「今天」（**本地日**）的聊天。
-
-        2026-09-20 修复：原实现用 ``date(created_at) = date('now')`` ——
-        ``created_at`` 由 ``DEFAULT CURRENT_TIMESTAMP`` 写入（UTC），
-        ``date('now')`` 同样是 UTC 日，两者同源但**都不是本地日**：
-        在 UTC+8 上「今天」实际从**本地 08:00** 才换日（凌晨对话被算进昨天），
-        且与按本地日期写入的日记/摘要键**口径脱钩**。
-        现改为应用层按本地日划 UTC 区间（与 ``utils.local_time`` 同源）。
-        """
+    def get_chats_today(self, session_id: str | None = None) -> list[dict[str, Any]]:
+        """获取「今天」（**本地日**）的聊天；session_id 非 None 时按会话隔离。"""
         start, end = local_day_utc_bounds()
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM chat_history WHERE created_at >= ? AND created_at < ? "
-                "ORDER BY created_at ASC",
-                (start, end),
-            ).fetchall()
+            if session_id is not None:
+                rows = conn.execute(
+                    "SELECT * FROM chat_history "
+                    "WHERE created_at >= ? AND created_at < ? AND session_id = ? "
+                    "ORDER BY created_at ASC",
+                    (start, end, str(session_id)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM chat_history WHERE created_at >= ? AND created_at < ? "
+                    "ORDER BY created_at ASC",
+                    (start, end),
+                ).fetchall()
             return [dict(r) for r in rows]
 
     def count_chats_today(self) -> int:

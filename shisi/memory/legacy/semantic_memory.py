@@ -91,22 +91,43 @@ class SemanticMemory:
             logger.warning("Failed to add fact: %s", e)
             return False
 
+    @staticmethod
+    def _meta_user_key(row: dict) -> str:
+        meta = row.get("metadata") or {}
+        return str(meta.get("user_key") or row.get("user_key") or "")
+
     def search(self, query: str, top_k: int = 5,
                user_key: str | None = None) -> dict[str, list]:
+        """语义检索。user_key 非 None 时**强制隔离**，禁止回退全库。
+
+        2026-09-21 串台修复：向量结果按 meta.user_key 精确匹配；
+        空 user_key 的历史向量/事实不注入任何具体会话。
+        """
         results: dict[str, list] = {"vector": [], "structured": [], "exact": []}
         try:
             if hasattr(self._vm, "search_sync"):
-                results["vector"] = self._vm.search_sync(
+                raw_vec = self._vm.search_sync(
                     query, top_k=top_k, filter_dict={"type": "fact"}
                 ) or []
             elif hasattr(self._vm, "_search"):
                 vr = self._vm._search("semantic_knowledge", query, top_k)
-                results["vector"] = vr if isinstance(vr, list) else []
+                raw_vec = vr if isinstance(vr, list) else []
+            else:
+                raw_vec = []
+            if user_key is not None:
+                raw_vec = [
+                    r for r in raw_vec
+                    if self._meta_user_key(r) == str(user_key)
+                ]
+            results["vector"] = raw_vec[:top_k]
         except Exception as e:  # noqa: BLE001
             logger.warning("Vector fact search failed: %s", e)
         try:
-            if user_key is not None and self._accepts_user_key(self._sm.search_facts):
-                structured = self._sm.search_facts(query, user_key=user_key) or []
+            if user_key is not None:
+                if self._accepts_user_key(self._sm.search_facts):
+                    structured = self._sm.search_facts(query, user_key=user_key) or []
+                else:
+                    structured = []
             else:
                 structured = self._sm.search_facts(query) or []
             results["structured"] = structured

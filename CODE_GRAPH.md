@@ -1,6 +1,12 @@
-# 代码图谱 — unique-you (唯一的你) v3.8.14
+# 代码图谱 — unique-you (唯一的你) v3.8.16
 
-> 由 维护者 手动维护 | 最后核实: 2026-09-20（**v3.8.15 收仓回归门**：记忆会话隔离补漏 + 三窗收仓；主检出测试 **1429 收集 / 1425 通过 / 4 跳过**（330+1 +403 +321 +371+3）+ FE 98 + 端点 **215/181** 复测不变。v3.8.14：**B-d 跨会话尾巴 + 工具结果 PHI 前正式位次**——`get_cross_session_tail` / `format_session_tail` / `inject_tool_context_before_phi` / `build_system_prompt(tool_context=)`；测试 **1421/1417/4**；端点 215/181。v3.8.13：包 Q A+B+C 收编）。
+> 由 维护者 手动维护 | 最后核实: 2026-09-20（**v3.8.16 全仓历遍·文档对齐 + 3 处代码缺陷修复**（用户指令「全仓历遍，更新文档，修复bug」）：
+> ① **`proactive/reminder_delivery.py::_maybe_gc_intents` 批量过期清理从未执行**——旧实现是**同步**函数却调用 `asyncio.run(self._sm.expire_stale_intents())`，而该方法本身是同步的（`asyncio.run` 只收协程对象），且它由 `_run_once()` 在**已运行的事件循环内**同步调用（再抛 `RuntimeError: asyncio.run() cannot be called from a running event loop`）；异常被 `except Exception` 吞进 debug 级 → `pending_intents` 的 active 行只在「会话被再次读取」时惰性过期，长期不活跃会话的行永久残留（**表无界增长**）。改为 `async` + `await asyncio.to_thread(...)`。
+> ② **`orchestrator/context_budget.py::format_session_tail` untrusted 信封结构错误**——开标签 `<context …>` 被排在**被包裹正文之后**（引言→正文→开标签→说明→闭标签），正文落在信封之外，与 `tool_gate.TOOL_RESULT_ENVELOPE_HEAD/TAIL` 的包夹约定不一致。改为「开标签→正文→闭标签」，并抽出 `SESSION_TAIL_ENVELOPE_HEAD/TAIL` 常量。
+> ③ **`shisi/memory/legacy/vector_memory.py::_run_async` 同线程死锁分支**——「已处于事件循环中」分支用 `asyncio.run_coroutine_threadsafe(coro, loop).result()`，而 `loop` 取自 `get_running_loop()`（**当前线程正在跑的那个循环**）→ 同线程阻塞等待自身循环推进 = **必然死锁**。改为委托公共真源 `utils.async_utils.run_async`（消除重复实现）。
+> **验证**：新增 `tests/test_async_bridge_contract.py`（5 例）+ 2 处测试加固；**突变验红 4 次全中**（含「保持 async 但改回 `asyncio.run(...)`」的行为断言命中）；主检出分块 **1436 收集 / 1432 通过 / 4 跳过**（314 + 384+3 + 330+1 + 404，与 `--collect-only` 精确吻合，**0 失败**）+ vitest **98/98** + `tsc --noEmit` 0 错 + ruff **0.16.8** 全仓 0 错 + `ci_gates.py` 4/4。
+> ⚠️ **基线口径说明（本批实测 + 已处置）**：本批途中发现 `config/characters/`（被 `.gitignore:117` 忽略）**曾为空（0 张卡）** → `tests/test_persona_injection.py` 的「2 × 卡数 + 7」参数化塌缩，当时收集数仅 1356，文档既往的「41 卡 → 1429/1425/4」**不可复现**。**已按用户指令恢复**：从服务器 `/opt/ai-girlfriend/config/characters/` 取回 41 张卡并**逐文件 `sha256sum` 校验 41/41 一致**（全部 JSON 可解析，含 v1.14 的 16 张文学导入卡）→ 基线回到 **1436/1432/4**（= 1429/1425/4 + 本批 7 个新用例）。**纪律**：引用基线必须同时声明「角色卡是否在位」——该目录内容**不随 git 复现**。端点/路径/DB 表/路由数不变。
+> v3.8.15 收仓回归门：记忆会话隔离补漏 + 三窗收仓；端点 **215/181** 复测不变。v3.8.14：**B-d 跨会话尾巴 + 工具结果 PHI 前正式位次**——`get_cross_session_tail` / `format_session_tail` / `inject_tool_context_before_phi` / `build_system_prompt(tool_context=)`；端点 215/181。v3.8.13：包 Q A+B+C 收编）。
 
 > 由 维护者 手动维护 | 最后核实: 2026-09-20（v3.8.13 增量：**包 Q · A+B+C 收编**——A1 身份唯一 Owner；A2 `utils/fallback_lines.py`；A3 流式/非流式硬违规统一；A4 `orchestrator/context_budget.py`；C1–C3 工具 untrusted 信封/限额/防假承诺；B-a/b/c 记忆同步写、topics/near-dup、k(level) 注入。验证 **1414 收集/1410 通过/4 跳过** + vitest 98 + ruff 0；端点 **215/181** 不变。v3.8.12 增量：全面升级根治（user_facts 隔离/B3–B6）。（用户裁决：user_facts 完整隔离 / B3 激进接线 / B4 回忆强化 / B5 回收站 / B6 刻度彻底重构）——① **MEM-USER-1**：`user_facts` +`user_key`/`access_count`/`status` 列；读写按会话归属过滤（`N:wxid`/`1:wxid`→wxid）；存量 `user_key=''` 不注入任何会话；② **B3**：`config/shisi.yaml memory:` 五键接线（capacity/extraction_enabled/long_term_threshold→fact_extract_interval/similarity_threshold 等）；③ **B4**：检索/注入时 `access_count+1`，遗忘权重 `effective_importance+衰减时钟刷新`；④ **B5**：`delete_fact` 默认写 `memory_recycle_bin` 再删主表，可 `restore_fact_from_recycle`；⑤ **B6**：新 `shisi/affinity/scale.py` 刻度唯一真源 + mapper 委托 + `utils/affinity_state.py` 持久化 affection_points（user_scheduler 恢复/落盘）。验证：分块 **1351 收集/1347 通过/4 跳过** + vitest 98/98 + ruff 0 错；端点 215/181 不变。v3.8.11 增量：全仓扫描·在制品收口。v3.8.10 增量：**复核补漏批次**> ✅ 路由/文件/模块/测试数已通过 create_api_app 实扫 + Glob + pytest + vitest 实时核实（2026-08-28）。
 > ✅ 图数据库已于 2026-08-28 由 codebase-memory 图谱工具 v0.10.8 重新索引（artifact.json schema v2: **7706 节点 / 32367 边**，commit c32af54），历史矛盾（543277c 声称的 6771 节点未持久化）就此消案。
@@ -18,10 +24,10 @@
 | 前端页面 | **17 个** | Glob `frontend/src/pages/*.tsx`（另有 `StorylinePage` 为 App.tsx 内联包装组件） |
 | 前端 API 模块 | **13 个** | Glob `frontend/src/api/*.ts`（09-18 CI 门禁根治新增 `emotion.ts` / `normalize.ts`，原 11） |
 | 前端 Zustand store | **3 个** | LS `frontend/src/store/`（authStore / characterBuilderStore / errorStore） |
-| Python 测试用例 | **1425 passed + 4 skipped**（收集 **1429**） | 2026-09-20 收仓回归门·主检出分块实跑（330+1 +403 +321 +371+3）；无卡 CI 约 1344 |
-| 现役角色卡 | **41 张**（`config/characters/*.json`） | Glob 实扫 2026-09-20：25 既有 + 16 文学导入（我的26岁女房客×4 / 从你的全世界路过×5 / 云边有个小卖部×3 / 某某×2 / 天堂旅行团×2）；目录 gitignore（不入公开仓，服务器私有投递）；persona 注入参数化用例数 = 2 × 卡数 |
+| Python 测试用例 | **1432 passed + 4 skipped**（收集 **1436**） | 2026-09-20 全仓历遍·分块实跑（314 + 384+3 + 330+1 + 404，与 `--collect-only` 吻合；0 失败）。⚠️ **基线随 `config/characters/` 卡数浮动**：该目录被 gitignore（不入公开仓），`test_persona_injection` 的用例数 = **2 × 卡数 + 7**。**引用基线必须同时声明卡数** |
+| 现役角色卡 | **41 张**（`config/characters/*.json`，2026-09-20 从服务器**逐字节恢复**） | 41/41 文件 `sha256sum` 与服务器 `/opt/ai-girlfriend/config/characters/` **完全一致**；全部 JSON 可解析。目录被 `.gitignore:117` 忽略 → **卡数不随 git 复现**，本行是「本检出当前状态」而非版本事实 |
 | 前端测试用例 | **98 个全部通过 / 16 文件** | 2026-09-20 `npm test -- --run`（vitest）+ `tsc --noEmit` 0 错误 |
-| 测试用例合计 | **1523 个**（1425 Python 通过 + 98 前端通过） | pytest + vitest 实跑 2026-09-20 收仓回归门 |
+| 测试用例合计 | **1530 个**（1432 Python 通过 + 98 前端通过） | pytest + vitest 实跑 2026-09-20 全仓历遍（⚠️ Python 侧跳过 4 不计入通过数） |
 | tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
 
 ### 1.2 知识图谱快照指标（✅ 2026-09-02 重新索引·第二次）
@@ -106,7 +112,7 @@ graph TD
 `OptimizedOrchestrator.process_message`（`orchestrator/optimized_orchestrator.py`）处理每一条用户消息，是全系统最关键调用链。
 
 > **架构变更 (2026-07-26)**: `OptimizedOrchestrator` 现在继承 `_InitPhasesMixin` + `_StreamPipelineMixin`：
-> - `orchestrator/optimized_orchestrator.py` (920行): 主类 `__init__` / 会话锁 / `_prepare_context` / `process_message` / `health_check`
+> - `orchestrator/optimized_orchestrator.py` (**1270 行**): 主类 `__init__` / 会话锁 / `_prepare_context` / `process_message` / `health_check`
 > - `orchestrator/_init_mixin.py` (438行): `initialize` 拆分为 9 个 `_init_*` 阶段
 > - `orchestrator/_stream_mixin.py` (238行): `process_message_stream` SSE 真流式/伪流式降级
 >
@@ -188,7 +194,7 @@ sequenceDiagram
 | 模块 | 文件 | 职责 |
 |------|------|------|
 | `main.py` | main.py（**~17.4 KB / 438 行**，2026-09-20 实测） | 入口 + `_run_orchestrator` 统一启动 + 控制台/微信模式 |
-| `orchestrator/` | orchestrator/ (8 文件包) | `optimized_orchestrator.py` 主类 + `_init_mixin.py` **10 阶段初始化**（唯一真相源） + `_stream_mixin.py` SSE 流式 + `session_locks.py` + `voice_detector.py` + `console_chat.py`（2026-08-28 自 main.py 迁入，命令处理函数拆分） |
+| `orchestrator/` | orchestrator/ (**9 文件包**) | `optimized_orchestrator.py` 主类（**1270 行**） + `_init_mixin.py` **10 阶段初始化**（唯一真相源） + `_stream_mixin.py` SSE 流式 + `session_locks.py` + `voice_detector.py` + `console_chat.py`（2026-08-28 自 main.py 迁入，命令处理函数拆分） + **`tool_gate.py`**（三级工具意图管线，09-20 新） + **`context_budget.py`**（上下文预算/去重/信封，09-20 新） |
 | `api/run_api.py` | api/run_api.py | API-Only 启动入口（uvicorn 直接挂载），含 `_autostart_wechat_connector()` flock 文件锁自动恢复微信连接 |
 | `user_scheduler.py` | user_scheduler.py | 多用户调度，每个微信用户独立情感状态 |
 
@@ -215,10 +221,12 @@ sequenceDiagram
 | `shisi/api/` | v1（`v2/` 死模块已于 2026-09-18 删除，见 DELETION_LOG） | 31 已挂载 | 11 | affinity/character/emotion_stage/memory/persona/stats/sticker/vital_signs |
 | **合计（`APIRoute` 内省）** | | **215** | | 101 GET / 78 POST / 16 PUT / 20 DELETE |
 
-> ⚠️ **口径纠错（2026-09-17）**：旧口径"206 / 208 端点"取自 `len(app.routes)`，
+> ⚠️ **口径纠错（2026-09-17 首记，2026-09-20 更新读数）**：旧口径"206 / 208 端点"取自 `len(app.routes)`，
 > 其中固定含 **4 条 FastAPI 框架自带路由**（`/openapi.json`、`/docs`、
 > `/docs/oauth2-redirect`、`/redoc`），故系统性偏高 4。
-> **业务端点数应取 `APIRoute` 实例数**：`len(app.routes)=208`，`APIRoute=204`。
+> **业务端点数应取 `APIRoute` 实例数**。**当前读数（2026-09-20 复测）**：
+> `len(app.routes)=219`，`APIRoute=215`，唯一路径 181。（首记时点为 `len(app.routes)=208` / `APIRoute=204`，
+> 其后 09-19 晚通道批次 +11 端点 → 现读数如上。）
 
 **按 tag 的端点分布**（内省实测，权威口径）：
 
@@ -277,7 +285,7 @@ wechat_admin_router    → /api/admin/wechat/*（2 端点，admin：通道摘要
 > 09-19 晚通道批次 +11：wechat-channel 9 + admin-wechat 2）。
 > 注意 `api/routers/` 内 181 个装饰器 + health 2 + qrcode 1 + shisi 31 = 215。
 
-**`api/app_factory.py:84 create_api_app()`** 是 FastAPI 应用唯一构造入口，被 `api/run_api.py:232` 和 `main.py` 调用。FastAPI 实例 `version="3.1.0"`。
+**`api/app_factory.py:91 create_api_app()`** 是 FastAPI 应用唯一构造入口，被 `api/run_api.py:411`（`import` 于 `:45`）和 `main.py` 调用。FastAPI 实例 `version="3.1.0"`。
 
 ### 4.3 shisi/ — Clean Architecture 重构（核心域）
 
@@ -715,7 +723,8 @@ tools/
 
 | 日期 | 提交 | 变更摘要 |
 |------|------|---------|
-| 2026-09-20 (收仓回归门) | main | **v3.8.15** 记忆会话隔离补漏 + 三窗收仓；测试 **1429/1425/4** + vitest 98 + 端点 215/181 |
+| 2026-09-20 (全仓历遍·文档对齐+缺陷修复) | working tree | **v3.8.16**（用户指令「全仓历遍，更新文档，修复bug」）：**① 修复 `proactive/reminder_delivery.py::_maybe_gc_intents` 批量过期清理从未执行** —— 旧为**同步**函数却 `asyncio.run(self._sm.expire_stale_intents())`：该方法本身同步（`asyncio.run` 只收协程对象），且由 `_run_once()` 在**运行中的事件循环内**同步调用（`RuntimeError: asyncio.run() cannot be called from a running event loop`）；两异常均被 `except Exception` 吞入 debug → `pending_intents` active 行只能靠「会话被再次读取」惰性过期，长期不活跃会话的行永久残留（表无界增长）。改 `async` + `await asyncio.to_thread(...)`。**② 修复 `orchestrator/context_budget.py::format_session_tail` 信封结构错误** —— 开标签 `<context …>` 排在**被包裹正文之后**，正文落在 untrusted 信封之外（与 `tool_gate` 包夹约定不一致）→ 改为「开标签→正文→闭标签」，抽出 `SESSION_TAIL_ENVELOPE_HEAD/TAIL`。**③ 修复 `shisi/memory/legacy/vector_memory.py::_run_async` 同线程死锁分支** —— 「已处于事件循环中」分支 `run_coroutine_threadsafe(coro, get_running_loop()).result()` 同线程阻塞等待自身循环 = **必然死锁** → 委托公共真源 `utils.async_utils.run_async`。**测试**：新增 `tests/test_async_bridge_contract.py`（5 例）+ `format_session_tail` 信封位次断言 + `_maybe_gc_intents` 真执行断言（读**原始行**，避开惰性过期掩盖）；**突变验红 4 次全中**（第 4 次为「保持 async 但改回 `asyncio.run(...)`」，由行为断言命中）。验证：主检出分块 **1436 收集 / 1432 通过 / 4 跳过**（314 + 384+3 + 330+1 + 404 精确吻合，0 失败）+ vitest 98/98 + tsc 0 错 + ruff 0.16.8 全仓 0 错 + ci_gates 4/4；端点 215/181 / 路径 181 / DB 表 / 路由数不变。**角色卡恢复**：本批途中发现 `config/characters/` 为空（0 张）→ 从服务器逐字节取回 **41 张**（`sha256sum` 41/41 一致、JSON 全可解析）→ 基线可复现。**文档对齐**：`api/app_factory.py` 模块 docstring 数字（204/171 → 215/181）、§4.1 orchestrator 8→9 文件包与 `optimized_orchestrator.py` 920→1270 行、§4.2 app_factory 行号 84→91 与 run_api 232→411、口径纠错注更新读数、README / MODULES / DATABASE / INDEX / AGENTS 同步。⚠️ **纪律**：`config/characters/` 被 gitignore，**引用基线必须同时声明卡数** |
+| 2026-09-20 (收仓回归门) | main | **v3.8.15** 记忆会话隔离补漏 + 三窗收仓；端点 215/181。该行测试数 **1429/1425/4** 依赖 41 张角色卡在位；本批途中该目录曾为空（基线塌缩至 1356），**已从服务器逐字节恢复 41 张**（sha256 41/41 一致）→ 现基线 **1436/1432/4** = 1429/1425/4 + 本批 7 用例 |
 | 2026-09-20 (包Q A+B+C收编) | main | **v3.8.13** 身份唯一/context_budget/工具信封/记忆同步写+k(level)；**1414/1410/4** + vitest 98 + 端点 215/181 |
 | 2026-09-20 (全面升级根治) | working tree | **v3.8.12**（用户裁决五项全做）：user_facts 完整隔离 + B3 配置接线 + B4 access_count 回忆强化 + B5 回收站 + B6 `shisi/affinity/scale.py` 刻度真源与 affinity_state 持久化。验证 **1351/1347/4** + vitest 98/98 + ruff 0 错 |
 | 2026-09-20 (全仓扫描·在制品收口) | working tree | **v3.8.11**（用户指令：全仓扫描/审查/修 bug/更新文档）：收编 v3.8.10 登记的并行窗口在制品 4 类纯缺陷——FrequencyController 日界本地化+last_reset_date 状态落盘+record_sent 钉日界、analytics/important_dates 墙钟收口、after_chat 系统错误占位不入库。B3-B6 行为项仍留 W-D §八待裁决；user_facts 无用户维度仍开放。验证：**1332 收集/1328 通过/4 跳过** + vitest 98/98 + ruff 0 错 + 端点 215/181 不变 |

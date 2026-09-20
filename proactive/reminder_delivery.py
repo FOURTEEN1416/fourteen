@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -73,7 +74,7 @@ class ReminderDeliveryTask:
                 await asyncio.to_thread(
                     self._sm.mark_reminder_result, reminder.get("id"), False,
                 )
-        self._maybe_gc_intents()
+        await self._maybe_gc_intents()
 
     async def _deliver(self, reminder: dict[str, Any]) -> None:
         text = await self._compose_text(reminder)
@@ -148,16 +149,27 @@ class ReminderDeliveryTask:
         cleaned = sanitize_message(str(reply or "").strip())
         return cleaned or content
 
-    def _maybe_gc_intents(self) -> None:
-        """节流清理过期澄清任务（失败不影响投递主流程）"""
-        import time as _time
+    async def _maybe_gc_intents(self) -> None:
+        """节流清理过期澄清任务（失败不影响投递主流程）。
 
-        now = _time.monotonic()
+        ⚠️ 2026-09-20 修复：旧实现是**同步**函数并调用
+        ``asyncio.run(self._sm.expire_stale_intents())``，有两处同时成立的错误：
+        ① ``expire_stale_intents`` 是**同步**方法 —— ``asyncio.run`` 只接受协程对象，
+           传入同步调用的返回值必抛 ``ValueError: a coroutine was expected``；
+        ② 它由 ``_run_once()``（本身已在 ``asyncio.run`` 的事件循环里）**同步调用**，
+           ``asyncio.run`` 在运行中的循环内必抛
+           ``RuntimeError: asyncio.run() cannot be called from a running event loop``。
+        异常被 ``except Exception`` 吞掉（只在 debug 级留痕），因此
+        **批量过期清理在生产中从未执行**：``pending_intents`` 的 active 行只有在
+        「该会话被再次读取」时才由 ``get_active_pending_intent`` 惰性置为 expired，
+        长期不活跃会话的行永久残留（表无界增长）。现改为 async + ``asyncio.to_thread``。
+        """
+        now = time.monotonic()
         if now - self._last_intent_gc < _INTENT_GC_INTERVAL_SECONDS:
             return
         self._last_intent_gc = now
         try:
-            expired = asyncio.run(self._sm.expire_stale_intents())
+            expired = await asyncio.to_thread(self._sm.expire_stale_intents)
             if expired:
                 logger.info("[reminder] 过期澄清任务清理: %s 条", expired)
         except Exception:  # noqa: BLE001

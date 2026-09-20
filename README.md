@@ -14,8 +14,9 @@
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **测试口径**（2026-09-20 收仓回归门实测）：后端 **1425 passed / 4 skipped**（主检出含 41 角色卡，收集 **1429**；无卡 worktree/CI 约 **1344**）；⚠️ 单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> **测试口径**（2026-09-20 全仓历遍实测）：后端 **1432 passed / 4 skipped**（收集 **1436**，0 失败；现役角色卡 **41 张**）；⚠️ 单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
 > 前端 `98 passed`（vitest 16 文件）+ `tsc --noEmit` 0 错误。
+> ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 7）。**引用基线必须同时声明卡数**。
 
 ---
 
@@ -162,10 +163,13 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │   │                     mimo_voice/storyline/wechat/wechat_channel/emotion/memory/
 │   │                     knowledge/persona_card/llm_providers）
 │   └── achievement_engine.py / database.py / auth_jwt.py / deps.py ...
-├── orchestrator/         编排器（7 文件）：主类 + _InitPhasesMixin + _StreamPipelineMixin
+├── orchestrator/         编排器（9 文件）：主类 + _InitPhasesMixin + _StreamPipelineMixin
 │                         + session_locks + voice_detector + console_chat
-├── shisi/                DDD 领域层（115 文件）：application / core / infrastructure /
+│                         + tool_gate（工具意图分级）+ context_budget（上下文预算/信封）
+├── shisi/                DDD 领域层（116 文件）：application / core / infrastructure /
 │                         character / knowledge / memory / affinity / voice / vault ...
+├── utils/                公共工具（11 文件）：local_time（墙钟真源）/ fallback_lines /
+│                         affinity_state / reply_mode / async_utils / important_dates ...
 ├── voice/                MiMo Cloud TTS + 音频转码（silk）
 ├── wechat_direct/        微信直连（每人独立通道：connector_registry + channel_paths
 │                         + peer_character + wechat_connector）
@@ -184,8 +188,8 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │       ├── store/        Zustand 3 个（authStore / characterBuilderStore / errorStore）
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
-├── tests/                1425 后端测试通过 + 4 跳过（主检出 2026-09-20 收仓回归门分块实测，收集 1429）+ 98 前端测试
-├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容）
+├── tests/                1432 后端测试通过 + 4 跳过（2026-09-20 全仓历遍分块实测，收集 1436）+ 98 前端测试
+├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 41 张）
 └── main.py               入口
 ```
 
@@ -199,7 +203,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 
 - **架构地图**：`docs/CODEMAPS/ARCHITECTURE.md`
 - **设计原则**：`docs/architecture/design-principles.md`
-- **架构决策记录**：`docs/adr/`（11 份，ADR-0001~0007 + ADR-0011~0014）
+- **架构决策记录**：`docs/adr/`（**12 份**，ADR-0001~0007 + ADR-0011~**0015**；0015 = 系统提示词分层与按需注入）
 - **代码图谱**：`CODE_GRAPH.md`
 - **知识图谱**：`docs/architecture/knowledge-graph.md`
 

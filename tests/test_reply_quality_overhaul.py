@@ -63,16 +63,16 @@ class TestDBBackedChatContext:
         assert "我下周考试" in joined
         assert "火锅" not in joined
 
-    def test_legacy_session_form_merged(self, tmp_path):
-        """`N:wxid` 与裸 `wxid` 双形态合并查询——治历史分裂。"""
+    def test_legacy_session_form_not_merged_into_owner(self, tmp_path):
+        """owner 会话不得并入裸 peer 遗留历史（2026-09-21 隔离硬约束）。"""
         pipe = self._make_pipeline_with_db(tmp_path, [
             ("wxid_abc", "user", "旧的遗留通道消息", "2026-09-19 10:00:00"),
             ("1:wxid_abc", "user", "新的owner通道消息", "2026-09-20 10:00:00"),
         ])
         history, _ = pipe.get_chat_context(session_id="1:wxid_abc", keep_recent=50)
         joined = "".join(m.get("content", "") for m in history)
-        assert "旧的遗留通道消息" in joined
         assert "新的owner通道消息" in joined
+        assert "旧的遗留通道消息" not in joined
 
     def test_recent_context_session_scoped(self, tmp_path):
         pipe = self._make_pipeline_with_db(tmp_path, [

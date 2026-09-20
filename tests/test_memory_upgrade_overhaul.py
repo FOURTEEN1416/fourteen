@@ -101,9 +101,13 @@ class TestUserFactsIsolation:
         db.close()
 
     def test_user_key_from_session(self, sm):
-        assert sm.user_key_from_session("N:wxid_abc") == "wxid_abc"
+        # 2026-09-21 隔离硬约束：完整会话键，禁止剥 owner
+        assert sm.user_key_from_session("N:wxid_abc") == "N:wxid_abc"
+        assert sm.user_key_from_session("1:wxid_abc") == "1:wxid_abc"
+        assert sm.user_key_from_session("4:wxid_abc") != sm.user_key_from_session("1:wxid_abc")
         assert sm.user_key_from_session("wxid_abc") == "wxid_abc"
         assert sm.user_key_from_session("") == ""
+        assert sm.bare_peer_from_session("N:wxid_abc") == "wxid_abc"
 
     def test_facts_isolated_by_user_key(self, sm):
         sm.add_fact("A喜欢猫", "preference", 0.9, user_key="wxid_a")
@@ -324,11 +328,11 @@ class TestPipelineIsolation:
 
     def test_context_only_injects_own_facts(self):
         mp, sm = self._pipeline()
-        sm.add_fact("A喜欢猫", user_key="wxid_a")
-        sm.add_fact("B喜欢狗", user_key="wxid_b")
-        # pipeline session → user_key
+        # user_key = 完整会话键（与 user_key_from_session 同源）
+        sm.add_fact("A喜欢猫", user_key="N:wxid_a")
+        sm.add_fact("B喜欢狗", user_key="N:wxid_b")
         mp._session_id = "N:wxid_a"
-        ctx = mp.get_memory_context()
+        ctx = mp.get_memory_context(session_id="N:wxid_a")
         assert "A喜欢猫" in ctx["user_facts"]
         assert "B喜欢狗" not in ctx["user_facts"]
         # 注入即回忆强化

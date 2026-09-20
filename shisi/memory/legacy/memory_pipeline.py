@@ -16,7 +16,6 @@ import asyncio
 import concurrent.futures
 import hashlib
 import logging
-import re
 import threading
 import time
 from dataclasses import dataclass
@@ -118,7 +117,7 @@ class MemoryConfig:
 
 
 def _user_key_from_session(session_id: str) -> str:
-    """session_id → user_facts 归属键（N:wxid / 1:wxid → wxid）。"""
+    """session_id → user_facts 归属键（**完整会话键** `N:peer`，2026-09-21 隔离修复）。"""
     return StructuredMemory.user_key_from_session(session_id)
 
 
@@ -242,6 +241,13 @@ class MemoryPipeline:
 
         # 对话摘要器（方案二：摘要+滑动窗口）
         self.summarizer = ConversationSummarizer(llm_gateway)
+
+        # 2026-09-21：启动时一次性把「剥 owner 的裸 peer」迁到完整会话键
+        try:
+            if hasattr(self.sm, "migrate_legacy_isolation_keys"):
+                self.sm.migrate_legacy_isolation_keys()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("isolation key migration skipped: %s", e)
 
         # 遗忘模型路由
         self._forgetting_model = forgetting_model
@@ -492,11 +498,12 @@ class MemoryPipeline:
         top_k: int = 5,
     ) -> dict[str, Any]:
         """
-        检索记忆上下文 — 并行检索三层记忆，向量检索超时降级
+        检索记忆上下文 — 并行检索三层记忆，**全部按会话/user_key 隔离**。
 
-        Returns:
-            {"working": [], "episodic": [], "semantic": [], "facts": []}
+        2026-09-21 生产串台修复：旧实现 working/episodic/semantic/pending/
+        reflections 均无用户过滤，多用户并发时会把他人事实/回忆注入当前 prompt。
         """
+        uk = _user_key_from_session(session_id) if session_id else ""
         context = {  # type: ignore[var-annotated]
             "working": [],
             "episodic": [],
@@ -505,22 +512,37 @@ class MemoryPipeline:
             "reflections": [],
         }
 
-        # 1. 工作记忆（最快，无超时风险）
-        context["working"] = self.working.get_recent(n=10)
+        # 1. 工作记忆：共享 deque 仅当 session 匹配时可用，否则改读 DB 会话历史
+        try:
+            if session_id and getattr(self.working, "session_id", "") == session_id:
+                context["working"] = self.working.get_recent(n=10)
+            elif session_id:
+                context["working"] = self._load_session_history(session_id, limit=10)
+            else:
+                context["working"] = []
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Working memory retrieve failed: %s", e)
+            context["working"] = []
 
-        # 2. 向量检索 — 情景记忆（独立超时检测）
+        # 2. 情景记忆 — 按 session_id 过滤向量元数据
         start_episodic = time.perf_counter()
         try:
-            episodic_results = self.episodic.search(query, top_k=top_k)
+            episodic_results = self.episodic.search(
+                query, top_k=top_k, session_id=session_id or None
+            )
             context["episodic"] = episodic_results
         except Exception as e:  # noqa: BLE001
             logger.warning("Episodic retrieval failed, degraded: %s", e)
         elapsed_episodic = time.perf_counter() - start_episodic
 
-        # 3. 语义检索（独立超时检测，不依赖 episodic 耗时）
+        # 3. 语义检索 — 强制 user_key（有会话时禁止全库 search_facts）
         start_semantic = time.perf_counter()
         try:
-            semantic_results = self.semantic.search(query, top_k=top_k)
+            semantic_results = self.semantic.search(
+                query,
+                top_k=top_k,
+                user_key=uk if session_id else None,
+            )
             context["semantic"] = semantic_results.get("structured", [])
             context["facts"] = [
                 s.get("fact", "") for s in context["semantic"]
@@ -530,7 +552,6 @@ class MemoryPipeline:
             logger.warning("Semantic retrieval failed, degraded: %s", e)
         elapsed_semantic = time.perf_counter() - start_semantic
 
-        # 超时日志（各自独立检测）
         if elapsed_episodic > self._config.retrieval_timeout:
             logger.warning(
                 "Episodic retrieval slow (%.2fs > %.1fs)",
@@ -542,26 +563,28 @@ class MemoryPipeline:
                 elapsed_semantic, self._config.retrieval_timeout,
             )
 
-        # 3. 结构化事实补充（降级回退）
-        # 用调用方传入的 session_id 澄清归属，禁止退回 pipeline 全局 session
-        if not context["facts"]:
+        # 3b. 结构化事实补充（降级回退）— 只认当前会话 user_key
+        if not context["facts"] and session_id:
             try:
-                _uk_fb = _user_key_from_session(session_id or self.session_id)
-                facts = self.sm.get_facts(min_confidence=0.3, user_key=_uk_fb)
+                facts = self.sm.get_facts(min_confidence=0.3, user_key=uk, limit=top_k)
                 context["facts"] = [f["fact"] for f in facts[:top_k]]
             except Exception as e:  # noqa: BLE001
                 logger.debug("Structured fact fallback failed: %s", e)
 
-        # 4. 待处理事件
+        # 4. 待处理事件 — 按会话过滤
         try:
-            context["pending_events"] = self.cross_session.get_pending_events()
+            context["pending_events"] = self.cross_session.get_pending_events(
+                session_id=session_id or None
+            )
         except Exception as e:  # noqa: BLE001
             logger.debug("Failed to get pending events: %s", e)
             context["pending_events"] = []
 
-        # 5. 记忆反思洞察
+        # 5. 记忆反思洞察 — 按会话过滤
         try:
-            context["reflections"] = self.reflection.get_insights(query=query, top_k=3)
+            context["reflections"] = self.reflection.get_insights(
+                query=query, top_k=3, session_id=session_id or None
+            )
         except Exception as e:  # noqa: BLE001
             logger.debug("Failed to get reflections: %s", e)
             context["reflections"] = []
@@ -598,26 +621,37 @@ class MemoryPipeline:
             "facts": [],
             "reflections": [],
         }
+        uk = _user_key_from_session(session_id) if session_id else ""
 
         start = time.perf_counter()
 
         async def _get_working():
             try:
-                return self.working.get_recent(n=10)
+                if session_id and getattr(self.working, "session_id", "") == session_id:
+                    return self.working.get_recent(n=10)
+                if session_id:
+                    return self._load_session_history(session_id, limit=10)
+                return []
             except Exception as e:  # noqa: BLE001
                 logger.debug("Failed to get working memory: %s", e)
                 return []
 
         async def _search_episodic():
             try:
-                return self.episodic.search(query, top_k=top_k)
+                return self.episodic.search(
+                    query, top_k=top_k, session_id=session_id or None
+                )
             except Exception as e:  # noqa: BLE001
                 logger.warning("Episodic retrieval failed, degraded: %s", e)
                 return []
 
         async def _search_semantic():
             try:
-                return self.semantic.search(query, top_k=top_k)
+                return self.semantic.search(
+                    query,
+                    top_k=top_k,
+                    user_key=uk if session_id else None,
+                )
             except Exception as e:  # noqa: BLE001
                 logger.warning("Semantic retrieval failed, degraded: %s", e)
                 return {}
@@ -643,23 +677,26 @@ class MemoryPipeline:
         elapsed = time.perf_counter() - start
         logger.debug("Async retrieve_context completed in %.3fs", elapsed)
 
-        if not context["facts"]:
+        if not context["facts"] and session_id:
             try:
-                _uk_fb = _user_key_from_session(session_id or self.session_id)
-                facts = self.sm.get_facts(min_confidence=0.3, user_key=_uk_fb)
+                facts = self.sm.get_facts(min_confidence=0.3, user_key=uk)
                 context["facts"] = [f["fact"] for f in facts[:top_k]]
             except Exception as e:  # noqa: BLE001
                 logger.debug("Structured fact fallback failed: %s", e)
 
         try:
-            context["pending_events"] = self.cross_session.get_pending_events()
+            context["pending_events"] = self.cross_session.get_pending_events(
+                session_id=session_id or None
+            )
         except Exception as e:  # noqa: BLE001
             logger.debug("Failed to get pending events (async): %s", e)
             context["pending_events"] = []
 
         # 记忆反思洞察
         try:
-            context["reflections"] = self.reflection.get_insights(query=query, top_k=3)
+            context["reflections"] = self.reflection.get_insights(
+                query=query, top_k=3, session_id=session_id or None
+            )
         except Exception as e:  # noqa: BLE001
             logger.debug("Failed to get reflections (async): %s", e)
             context["reflections"] = []
@@ -692,17 +729,24 @@ class MemoryPipeline:
             # 1. 遗忘
             self._apply_forgetting()
 
-            # 2. 生成摘要
+            # 2. 生成每日摘要 — 按会话分桶，禁止全员混写（2026-09-21 隔离）
+            date_str = now_local().strftime("%Y-%m-%d")
             today_chats = self.sm.get_chats_today()
             if not today_chats:
                 logger.info("No chats today, skipping daily maintenance")
                 return None
-            summary = self.ds.summarize_day(today_chats)
-            # 2026-09-20 修复：日记日期键改用本地日期（原用 UTC，本地 00:00–08:00
-            # 的日记会被标成前一天，且与 get_formatted_context 的查询键错位）。
-            date_str = now_local().strftime("%Y-%m-%d")
-            self.ds.save_summary(date_str, summary)
-            self._last_daily_summary = summary
+            buckets: dict[str, list[dict[str, Any]]] = {}
+            for c in today_chats:
+                sid = str(c.get("session_id") or "")
+                buckets.setdefault(sid, []).append(c)
+            last_summary = None
+            for sid, chats in buckets.items():
+                uk = _user_key_from_session(sid) if sid else ""
+                summary = self.ds.summarize_day(chats)
+                diary_key = f"{uk}|{date_str}" if uk else date_str
+                self.ds.save_summary(diary_key, summary)
+                last_summary = summary
+            self._last_daily_summary = last_summary
 
             # 3. 清理低置信度事实
             self._cleanup_low_confidence_facts()
@@ -712,7 +756,7 @@ class MemoryPipeline:
                 self._context_cache.clear()
 
             logger.info("Daily maintenance complete: %s", date_str)
-            return summary
+            return last_summary
 
         except Exception as e:  # noqa: BLE001
             logger.error("Daily maintenance failed: %s", e)
@@ -729,9 +773,8 @@ class MemoryPipeline:
         # ① 重启即失忆——deque 是进程内存，服务重启后历史为空，用户上午聊的
         #   「答应提醒起床」下午全忘（日志 hist_msgs 归零实证）；
         # ② 跨会话串扰——deque 不带 session 标签，两个好友同时聊天时消息互相
-        #   混入对方上下文（违反多用户隔离硬约束）；
-        # ③ 会话形态分裂——历史数据同时存在 `1:wxid`（owner 通道）与裸 `wxid`
-        #   （遗留全局通道）两种 session_id，按单形态查询会丢一半历史。
+        #   混入对方上下文（违反多用户隔离硬约束）；上下文供给已改读 DB 会话真源。
+        # ③ 历史裸形态遗留：owner 会话不再并入裸 peer 历史（2026-09-21）。
         # working deque 保留给后台归档/情景记忆任务，不再承担上下文供给。
         sess = session_id or self.working.session_id
         messages = self._load_session_history(sess, limit=keep_recent + 40)
@@ -757,18 +800,16 @@ class MemoryPipeline:
             return []
 
     def _load_session_history(self, session_id: str, limit: int) -> list[dict[str, Any]]:
-        """从 chat_history 表按会话加载最近对话（兼容新旧 session_id 形态）。
+        """从 chat_history 表按会话加载最近对话（**严格会话隔离**）。
 
-        - owner 通道形态 `N:wxid` 与遗留裸 `wxid` 双形合并，修复历史分裂；
-        - 返回时间正序、summarizer 可直接消费的 {role, content, ...} 列表；
-        - 单会话最多拉 limit 条（含两形态），sqlite 本地表开销可忽略。
+        2026-09-21 串台修复：owner 形态 `N:peer` **只读自己的 session_id**，
+        禁止自动并入裸 `peer` 遗留历史——旧双形态合并会让同一 peer 下多个
+        owner 同时看见同一批旧全局通道消息（生产实证 user1/user4）。
+        会话键本身是裸形态时（遗留/单用户 web）照原样读取。
         """
         if not session_id:
             return []
         forms = [session_id]
-        legacy = re.match(r"^\d+:(.+)$", session_id)
-        if legacy:
-            forms.append(legacy.group(1))
         rows: dict[tuple[str, str], dict[str, Any]] = {}
         try:
             for form in forms:
@@ -869,12 +910,15 @@ class MemoryPipeline:
             logger.warning("Failed to get facts: %s", e)
 
         try:
+            # 2026-09-21：日记/情绪趋势按会话隔离写读（键 = user_key|本地日）
+            uk = _user_key_from_session(sess) if sess else ""
+            date_str = now_local().strftime("%Y-%m-%d")
             summaries = self.ds.get_all_summaries()
             if summaries:
-                # 2026-09-20 修复：查询键必须与 save_summary 的写入键同源（本地日期），
-                # 否则日记写进去却查不出来。
-                context["today_summary"] = summaries.get(
-                    now_local().strftime("%Y-%m-%d"), ""
+                diary_key = f"{uk}|{date_str}" if uk else date_str
+                # 同时兼容未加前缀的旧全局键（仅当无会话归属时）
+                context["today_summary"] = summaries.get(diary_key, "") or (
+                    summaries.get(date_str, "") if not uk else ""
                 )
                 trend = self.ds.detect_mood_trend(summaries)
                 context["emotion_trend"] = trend
@@ -1061,7 +1105,9 @@ class MemoryPipeline:
         if count > 0:
             try:
                 facts = self.semantic.get_facts(limit=20, user_key=_user_key_from_session(session_id))
-                episodes = self.episodic.search("", top_k=3)
+                episodes = self.episodic.search(
+                    "", top_k=3, session_id=session_id or None
+                )
                 self.reflection.maybe_reflect(
                     facts=[{"fact": f.get("fact", ""), "category": f.get("category", "general")} for f in facts],
                     episodes=episodes,

@@ -162,10 +162,10 @@ class FakeStructuredMemory:
 
     @staticmethod
     def user_key_from_session(session_id: str) -> str:
+        """与生产 StructuredMemory.user_key_from_session 同源：完整会话键。"""
         if not session_id:
             return ""
-        s = str(session_id).strip()
-        return s.split(":", 1)[1] if ":" in s else s
+        return str(session_id).strip()
 
     def add_chat(self, role: str, content: str, **kwargs) -> None:
         self.chats.append({"role": role, "content": content, **kwargs})
@@ -359,9 +359,9 @@ def test_mp_get_memory_context_and_formatted(tmp_path):
         sm.add_chat("user", "A喜欢猫", session_id="1:alice@im.wechat")
         sm.add_chat("assistant", "喵", session_id="1:alice@im.wechat")
         sm.add_chat("user", "B喜欢狗", session_id="1:bob@im.wechat")
-        # user_key 必须与 user_key_from_session(session) 同源：N:wxid → wxid
-        sm.add_fact("A喜欢猫", category="preference", user_key="alice@im.wechat")
-        sm.add_fact("B喜欢狗", category="preference", user_key="bob@im.wechat")
+        # user_key 必须与 user_key_from_session(session) 同源：完整 N:wxid
+        sm.add_fact("A喜欢猫", category="preference", user_key="1:alice@im.wechat")
+        sm.add_fact("B喜欢狗", category="preference", user_key="1:bob@im.wechat")
         mp = MemoryPipeline(
             vector_memory=FakeVectorMemory(),
             structured_memory=sm,
@@ -386,15 +386,15 @@ def test_mp_get_memory_context_and_formatted(tmp_path):
 
 
 def test_mp_get_memory_context_pipeline_session():
-    """pipeline 级 session 注入 facts（沿用原用例语义，补齐会话归属）。"""
+    """pipeline 级 session 注入 facts（user_key = 完整会话键）。"""
     mp, vm, sm = _make_pipeline()
     mp._session_id = "N:wxid_t3"
-    sm.add_fact("用户喜欢猫", "preference", 0.9, user_key="wxid_t3")
+    sm.add_fact("用户喜欢猫", "preference", 0.9, user_key="N:wxid_t3")
     mp.after_chat("你好", "你好呀", session_id="N:wxid_t3")
     ctx = mp.get_memory_context(session_id="N:wxid_t3")
     assert "user_facts" in ctx
     assert "用户喜欢猫" in ctx["user_facts"]
-    formatted = mp.get_formatted_context()
+    formatted = mp.get_formatted_context(session_id="N:wxid_t3")
     assert "# 关于用户" in formatted
     assert "用户喜欢猫" in formatted
 

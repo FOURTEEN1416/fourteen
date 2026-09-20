@@ -96,13 +96,18 @@ def _do_silence_stdout():
 
 
 def _run_async(coro):
-    """在同步上下文中运行 coroutine；若已处于事件循环中则复用该循环。"""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    # 已处于事件循环中：提交到同一线程的事件循环，避免创建额外线程/事件循环
-    return asyncio.run_coroutine_threadsafe(coro, loop).result()
+    """在同步上下文中运行 coroutine；已处于事件循环中则改投独立线程执行。
+
+    ⚠️ 2026-09-20 修复：旧实现在「已处于事件循环中」的分支用
+    ``asyncio.run_coroutine_threadsafe(coro, loop).result()`` —— 但 ``loop`` 取自
+    ``asyncio.get_running_loop()``，即**当前线程正在运行的那个循环**；同线程阻塞
+    等待该循环推进结果 = **必然死锁**（循环被本线程挡住，永远跑不到该协程）。
+    现统一委托公共真源 :func:`utils.async_utils.run_async`（有循环时改在新线程里
+    新建循环执行），消除这条死锁分支与重复实现。
+    """
+    from utils.async_utils import run_async
+
+    return run_async(coro)
 
 
 def _get_default_embedding_function() -> Any:

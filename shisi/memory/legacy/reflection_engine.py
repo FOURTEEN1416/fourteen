@@ -177,32 +177,63 @@ class ReflectionEngine:
         query: str = "",
         top_k: int = 3,
         use_cache: bool = True,
+        session_id: str | None = None,
     ) -> list[str]:
-        """检索反思洞察。"""
-        if use_cache and self._insights_cache and time.time() - self._cache_ts < 300:
+        """检索反思洞察。session_id 非 None 时按会话隔离（缓存键含 session）。"""
+        cache_key = f"{session_id or ''}|{query[:32]}"
+        if (
+            use_cache
+            and self._insights_cache
+            and time.time() - self._cache_ts < 300
+            and getattr(self, "_insights_cache_key", "") == cache_key
+        ):
             return self._insights_cache[:top_k]
 
         results: list[str] = []
         if self._vm and query:
             try:
                 vector_results = self._vm.search_sync(
-                    query, top_k=top_k, filter_dict={"type": "reflection"}
+                    query, top_k=top_k * 3 if session_id else top_k,
+                    filter_dict={"type": "reflection"},
                 )
-                results = [
-                    r.get("content", "").strip()
-                    for r in vector_results
-                    if r.get("content")
-                ]
+                for r in vector_results:
+                    content = (r.get("content") or "").strip()
+                    if not content:
+                        continue
+                    meta = r.get("metadata") or {}
+                    r_sid = str(meta.get("session_id") or r.get("session_id") or "")
+                    if session_id is not None:
+                        if r_sid and r_sid == str(session_id):
+                            results.append(content)
+                        # 无 session 元数据的反思不注入具体会话
+                        continue
+                    results.append(content)
             except Exception as e:  # noqa: BLE001
                 logger.debug("Vector reflection search failed: %s", e)
 
         if not results and self._sm and hasattr(self._sm, "get_reflections"):
             try:
-                rows = self._sm.get_reflections(limit=top_k)
+                rows = self._sm.get_reflections(
+                    limit=top_k, session_id=session_id
+                ) if session_id is not None else self._sm.get_reflections(limit=top_k)
                 results = [r.get("content", "").strip() for r in rows if r.get("content")]
+            except TypeError:
+                try:
+                    rows = self._sm.get_reflections(limit=top_k)
+                    if session_id is not None:
+                        rows = [
+                            r for r in rows
+                            if str(r.get("session_id") or "") == str(session_id)
+                        ]
+                    results = [r.get("content", "").strip() for r in rows if r.get("content")]
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("Structured reflection search failed: %s", e)
             except Exception as e:  # noqa: BLE001
                 logger.debug("Structured reflection search failed: %s", e)
 
+        self._insights_cache = results[:top_k]
+        self._insights_cache_key = cache_key
+        self._cache_ts = time.time()
         return results[:top_k]
 
     @staticmethod

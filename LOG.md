@@ -7,6 +7,35 @@
 
 ---
 
+## 2026-09-21 — 用户隔离全链路 P0 根治（生产串台）
+
+**任务**：用户报「感觉像串台 / 你是不是弄错人了 / 怎么还可以记错人」，指令「在本仓库和窗口直接进行全链路检查，用户隔离这是严重生产问题」。
+
+**生产实证（`ssh swu-prod`）**
+- 日志：user2「你是不是弄错人了」「你怎么还可以记错人」；user4 角色承认「是我记混了」；两会话 prompt `memory=2501` 相同。
+- 双库：user1 与 user4 会话共用 peer `o9cq805ifq…@im.wechat`；裸形态历史 134 条；user_facts 按裸 peer 共用；4 条 `user_key=''` 孤儿。
+- 通道：DB 仅 user1=connected，磁盘上 user2/4/7 有 credentials 且 state=connected → **状态脱节**。
+
+**根因与修复（主检出本窗，P0）**
+1. `StructuredMemory.user_key_from_session` 剥 owner → **返回完整会话键**；新增 `bare_peer_from_session` 仅迁移用。
+2. `_load_session_history` / `get_cross_session_tail` 双形态并入裸历史 → **只读自己的 session_id**。
+3. `retrieve_context`/`_async`：working/episodic/semantic/pending/reflections 无过滤 → **全层 session/user_key 过滤**。
+4. 日记全员混写 → **按会话分桶**键 `user_key|本地日`。
+5. reflections/pending/episodic 增加 session 过滤。
+6. 通道 API 以 registry/磁盘真源 **回写** DB。
+7. 启动 `migrate_legacy_isolation_keys`：唯一 owner 裸键回收；多 owner 裸键孤儿化。
+
+**验证**
+- 新增 `tests/test_user_isolation_chain.py` 12 例；突变验红（剥 owner）命中。
+- 分块 pytest：**1448 收集 / 1444 通过 / 4 跳过 / 0 失败**（377+3 + 351+1 + 360 + 356）；角色卡 **41 张**。
+- ruff 改动文件 0 错。投递链测试静默窗改 `(25,26)` 消除凌晨墙钟误伤。
+
+**仍开放（P1）**：ASE 全局单实例；affinity 仅 character_id；情景层无 meta 历史片段。
+
+**A 档**：commit → push → `ssh swu-prod` pull + remote_deploy。
+
+---
+
 ## 2026-09-20 — 收仓三窗（audit/abc/ci-fix）+ 全仓复核隔离补漏
 
 **任务**：用户指令「准备收仓」——`ai-girlfriend-audit` / `ai-girlfriend-abc` / `ai-girlfriend-ci-fix` 三 worktree 并入主检出。
@@ -2569,3 +2598,90 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **⚠️ 发现但未代改的一处不一致（属并行窗口在制品）**：`CODE_GRAPH.md` 的「测试用例合计」行（其未提交编辑）写作 `1426 个（1328 Python 通过 + 98 前端通过）`，**把"收集数"当成了"通过数"**（该时刻正确口径应为 `1422 = 1324 通过 + 98 前端`，且现亦已过期）。**未代改**：该行属其在制品，代改会在其提交时被覆盖；已在此报告，待其落地时以「passed ≠ collected」口径校正。
 
 **三端**：**A 档** —— commit→push origin → 服务器 `git pull` + `systemctl restart ai-girlfriend` + `/api/health` 200 + 运行时探针实证；文档部分 B 档 commit→push 即完成。
+
+---
+
+## 2026-09-20 — 全仓历遍：文档对齐 + 3 处代码缺陷修复
+
+**任务**：用户指令「全仓历遍，更新文档，修复bug」。范围 = 全仓代码实况复核 + 文档对账 + 缺陷修复 + 收尾清理。
+
+**一、代码实况基线（内省/Glob/find 实测，全部只读）**
+
+| 维度 | 实测值 | 方法 |
+|------|--------|------|
+| API 业务端点 | **215 `APIRoute` / 181 唯一路径**（101 GET / 78 POST / 16 PUT / 20 DELETE）；`len(app.routes)=219` | `create_api_app()` 内省 |
+| 端点 tag 分布 | 逐 tag 内省**与 `CODE_GRAPH.md` §4.2 表格 32 项逐项一致，合计 215** | 内省 |
+| `api/routers/` | 22 路由模块（+`__init__.py` = 23 文件）；api/ 共 **45** py | Glob/find |
+| 全仓 py（排除 `frontend/` 与内嵌 `大创赛…/`） | **389**（模块 283 + 根级 2 + scripts 11 + tests 92 + deploy 1） | find |
+| DB | `users.db` **8** 表；`sqlite.db` **26** 表（另有 FTS 影子表） | sqlite 只读连接 |
+| 前端 | pages 17 / api 13 / store 3；vitest **98/98**（16 文件）；`tsc --noEmit` **0 错** | 实跑 |
+| 后端测试 | 分块 **1356 收集 / 1346 通过 / 10 跳过 / 0 失败**（314 + 302+5 + 326+5 + 404，与 `--collect-only` 吻合） | pytest 分块 |
+
+**二、修复的缺陷（3 处，均属「静默失效」家族）**
+
+1. **`proactive/reminder_delivery.py::_maybe_gc_intents`——批量过期清理从未执行（最高价值）**
+   旧实现是**同步**函数却调用 `asyncio.run(self._sm.expire_stale_intents())`，两处错误同时成立：
+   ① `StructuredMemory.expire_stale_intents` 本身是**同步**方法 —— `asyncio.run` 只接受协程对象；
+   ② 该函数由 `_run_once()` 在**已运行的事件循环内**同步调用 → `RuntimeError: asyncio.run() cannot be called from a running event loop`。
+   异常被 `except Exception` 吞进 **debug 级** → 长期无人发现。后果：`pending_intents` 的 `active` 行
+   只能靠 `get_active_pending_intent` 的**惰性过期**（要求该会话被再次读取）清理，**长期不活跃会话的行永久残留 → 表无界增长**。
+   修复：改 `async def` + `await asyncio.to_thread(self._sm.expire_stale_intents)`（同步 DB 方法移出事件循环）。
+2. **`orchestrator/context_budget.py::format_session_tail`——untrusted 信封结构错误**
+   渲染顺序为「引言 → **正文** → **开标签** → 说明 → 闭标签」，开标签排在被包裹正文**之后**，正文实际落在信封之外；
+   与 `tool_gate.TOOL_RESULT_ENVELOPE_HEAD/TAIL` 的「开标签→正文→闭标签」包夹约定不一致。
+   修复：抽出 `SESSION_TAIL_ENVELOPE_HEAD/TAIL` 常量并改为标准包夹顺序。
+3. **`shisi/memory/legacy/vector_memory.py::_run_async`——同线程死锁分支**
+   「已处于事件循环中」分支 `asyncio.run_coroutine_threadsafe(coro, loop).result()`，而 `loop` 取自
+   `asyncio.get_running_loop()`（**当前线程正在运行的那个循环**）→ 同线程阻塞等待自身循环推进 = **必然死锁**。
+   修复：委托公共真源 `utils.async_utils.run_async`（有循环时改在新线程新建循环执行），同时消除第 3 份重复实现。
+
+**三、验证（完成声明四要素）**
+
+- **验证证据**：
+  - **突变验红 ×4 全中**：① `format_session_tail` 信封倒置 → 位次断言红（`assert 56 < 41`）；② `_maybe_gc_intents` 改回同步 → `iscoroutinefunction` 断言红；③ `_run_async` 改回 `run_coroutine_threadsafe` → AST 静态防护红；④ **附加突变**（保持 `async` 但把 `to_thread` 改回 `asyncio.run`）→ **行为断言红**（`assert 'active' == 'expired'`，证明「读原始行」的写法确实能抓到静默失效，而非只靠类型断言兜住）。
+  - **新增/加固测试**：`tests/test_async_bridge_contract.py`（5 例：AST 静态防护 + 同步上下文 + 事件循环内 + 守护线程超时判定防挂死 + `run_async` 为同步函数）；`test_format_session_tail_envelope_wraps_body`（信封位次）；`test_tick_actually_runs_batch_intent_gc`（**读原始行**避开惰性过期掩盖 + 协程类型断言）。
+  - 分块全量 **1356 收集 / 1346 通过 / 10 跳过 / 0 失败** + vitest 98/98 + tsc 0 错 + `ruff check .`（**0.16.8** = CI 版本）全仓 0 错 + `scripts/ci_gates.py` **4/4**。
+- **边界检查**：未触前端；未改 `config/`；未动 `deploy/`（nginx 冻结配置无涉）；**端点/路径/DB 表/路由数零变更**；提交前 `git status --short` **0 项**（无并行窗口在制品）。
+- **已知限制 / 观察项（本次发现，未自行处置）**：
+  - 🔴 **`config/characters/` 在本检出为空（0 张卡）** —— 该目录被 `.gitignore:117` 忽略，卡数不可跨检出复现。**后果**：`tests/test_persona_injection.py` 用例数 = `2 × 卡数 + 7` 塌缩，文档既往记载的「主检出含 41 卡 → **1429 收集 / 1425 通过 / 4 跳过**」**不可复现**。**只读实测服务器 `/opt/ai-girlfriend/config/characters/` 仍有 41 张卡**，且 `data/archive/characters-config-backup-20260920.tar.gz` 在库 → 恢复命令：`scp -r swu-prod:/opt/ai-girlfriend/config/characters/ ./config/characters/`（恢复后基线回到约 1429/1425；**是否恢复留待用户裁决**，本次未自动执行）。已把该耦合写入 `AGENTS.md` §4.3 / `CODE_GRAPH.md` §1.1 / `DATABASE.md` / `INDEX.md`。
+  - `orchestrator/` 的 `context_budget.py` / `tool_gate.py` 与 `proactive/reminder_delivery.py`、`utils/` 整节长期未同步进 `docs/CODEMAPS/MODULES.md`（CODE_GRAPH 已登记）—— 本次补齐。
+  - `utils/local_time.py` 的时区偏移判定依赖「系统时区 ± 1h 内即视为 UTC+8」，未覆盖 UTC+7/+9 之类邻近时区（当前部署面不涉及，登记为观察项）。
+- **置信度**：**高**（3 处缺陷均有确定性突变验红；分块全量零失败且与收集数精确吻合；端点/tag 分布 32 项逐项比对一致）。
+
+**四、文档同步（本批覆盖面）**
+
+`AGENTS.md` **v1.27**（版本头 + Owner Map 测试行 + §0 技术栈 + §4.3 十一次刷新与基线口径更正 + 修订历史 + v1.26 行补 ⚠️ 注）｜ `CODE_GRAPH.md` **v3.8.16**（版本头 + §1.1 测试/角色卡/合计行 + §4.1 orchestrator 8→9 文件包 + `optimized_orchestrator.py` 920→1270 行 + §4.2 app_factory `:84`→`:91` / run_api `:232`→`:411` + §4.2 口径纠错注更新读数 + 修订历史）｜ `docs/CODEMAPS/MODULES.md`（orchestrator 7→9、proactive 5→6、shisi 115→116、**补 `utils/` 整行**、总文件 ~511→389、`optimized_orchestrator.py` 1050→1270）｜ `docs/CODEMAPS/DATABASE.md`（**自纠**「api/database.py 6 表」→8 表 + 新增 `sqlite.db` 26 表清单 + 角色卡归档/gitignore 注记）｜ `docs/CODEMAPS/INDEX.md`（规模 389 / 测试 1444 / **ADR 11→12（补 ADR-0015）**/ 目录树）｜ `docs/CODEMAPS/ARCHITECTURE.md`（orchestrator 9 文件 + 行数 + 补两模块）｜ `README.md`（测试口径 + 结构树 orchestrator 9 / shishi 116 / 新增 utils + **ADR 12 份含 0015**）｜ `api/app_factory.py` 模块 docstring（204/171/95/74/20/15 → 215/181/101/78/16/20；`len(app.routes)` 208→219）｜ 本 LOG ｜ `docs/board/BOARD.md`。
+
+**⚠️ 文档同步期间发现并修正的两处「从未登记」**：① **ADR-0015「系统提示词分层与按需注入」自 09-19（`91c02f7`）起在 README/AGENTS/CODE_GRAPH/CODEMAPS 中**零登记****（README 仍写「11 份 ADR-0001~0007 + 0011~0014」）；② `orchestrator/` 与 `proactive/` 的新模块、`utils/` 整节在 `MODULES.md` 中**零命中**。
+
+**收尾三件**：① 中间产物清理 —— 探针/突变脚本全部落在 `%TEMP%`（仓外），仓内仅新增测试 1 个 + 测试缓存（未跟踪）；② 文档已更新至代码现状（上表）；③ **跨文件 grep 扫残留** —— 端点 215/181、orchestrator 9 文件、shishi 116、ADR 12、测试 1444 等口径在各文档一致，**0 残留**。
+
+**提交**：B 档（代码 + 文档，无部署动作；服务器侧不受影响——本次无端点/DB/配置变更）。
+
+---
+
+## 2026-09-20 — 角色卡库恢复（用户指令「修复」）
+
+**任务**：承接上一条「全仓历遍」条目登记的已知限制 —— 本检出 `config/characters/` 为空（0 张卡）导致测试基线不可复现。用户指令「修复」→ 执行恢复。
+
+**执行（全程可核验）**
+
+1. **只读探测**服务器 `/opt/ai-girlfriend/config/characters/`：**41 个 `*.json` / 448K**。
+2. 服务器端 `sha256sum *.json | sort > /tmp/characters.sha256`（41 行）+ `tar czf /tmp/characters.tar.gz -C /opt/ai-girlfriend/config characters`（145554 字节）。
+3. `scp` 取回两件产物；本地 `tar xzf ... -C config/` 解包。
+4. **逐文件校验**：本地 41 份 `sha256sum` 与服务器清单 **41/41 哈希完全相同**
+   （⚠️ 首次 `diff` 报差异是 GNU `sha256sum` 的二进制模式标记 `*` 造成的格式差，非内容差；改用**只比哈希列**后 `diff` 为空 → 确认逐字节一致）。
+5. **内容校验**：41 份 JSON 全部 `json.loads` 成功（0 解析失败）；角色名覆盖文档记载的 v1.14 阵容
+   （米彩/昭阳/乐瑶/简薇、陈末/幺鸡/茅十八/荔枝/猪头、刘十三/王莺莺/程霜、江添/盛望、宋一鲤/余小聚 等）。
+
+**验证**
+
+- `pytest --collect-only` → **1436**（恢复前 1356，差 +80 = 40 × 2，与「`test_persona_injection` 用例数 = 2 × 卡数 + 7」一致）。
+- 分块全量实跑 **1436 收集 / 1432 通过 / 4 跳过 / 0 失败**（**314 + 384+3 + 330+1 + 404** 精确吻合）= 文档既载 `1429/1425/4` + 本批 7 个新用例 → **基线回到可复现口径**。
+- `ruff check .`（0.16.8）→ All checks passed；`scripts/ci_gates.py` → 4/4。
+- **`git status --short` 仍为 16 项（仅本会话改动）** —— 恢复的 41 份卡落在 `.gitignore:117` 覆盖范围内，**未污染版本库**（`git check-ignore -v` 复核生效）。
+
+**边界与副作用**
+
+- ⚠️ **未动服务器**：服务器侧只做了 `sha256sum` + `tar` 只读打包（`/tmp/` 两件临时产物，不影响服务）。
+- ⚠️ **卡目录内容不随 git 复现** → 已把「引用基线必须同时声明**卡数**与**工作树状态**」写进 `AGENTS.md` §4.3（十一次刷新注记）、`CODE_GRAPH.md` §1.1、`DATABASE.md`、`INDEX.md`、`README.md`。

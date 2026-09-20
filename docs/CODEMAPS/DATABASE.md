@@ -25,8 +25,9 @@
 │  ┌────────────────────┐   ┌──────────────────────┐      │
 │  │ 角色卡              │   │ 知识库数据            │      │
 │  │ config/characters/ │   │ data/knowledge/      │      │
-│  │ (41 张，唯一真源)    │   │ BM25 索引 (42 文件，   │      │
-│  │                    │   │ 约 1750 块)           │      │
+│  │ (gitignore；现役     │   │ BM25 索引 (42 文件，   │      │
+│  │  41 张，2026-09-20  │   │ 约 1750 块)           │      │
+│  │  自服务器逐字节恢复) │   │                      │      │
 │  └────────────────────┘   └──────────────────────┘      │
 │  ┌────────────────────┐                                 │
 │  │ 微信通道凭证         │                                 │
@@ -84,7 +85,21 @@
 `characters` / `characters_v2` / `affinity_records` / `affinity_unlocks` / `affinity_audit` / `emotion_stage_state` / `stickers` / `character_stickers` / `vital_signs_state` / `memory_favorites` / `memory_recycle_bin` / `shisi_schema_version`
 
 > **注意:** `shisi/` 子系统使用独立 SQLite 异步访问（DDD 分层: affinity/emotion_stage/persona/stats/vital_signs）。
-> `api/database.py` 中的 6 表是用户认证与控制面模型。
+> `api/database.py` 中的 **8 表**是用户认证与控制面模型（`users` / `user_sessions` / `invite_codes` /
+> `consent_records` / `wechat_bindings` / `wechat_channel_sessions` / `wechat_peer_preferences` / `character_achievements`）。
+>
+> ⚠️ **口径自纠（2026-09-20 全仓历遍）**：本节此前写「`api/database.py` 中的 **6 表**」，与本文首段
+> 「SQLite 模型 (api/database.py，**8 表**)」自相矛盾。以实测 `data/users.db` 的 8 张表为准。
+
+### `data/sqlite.db` 全量表清单（26 张，2026-09-20 实测）
+
+`shisi/migrations.py` 只建 12 张（上表）。同库另由 `structured_memory.py` / `working_memory.py` /
+`_legacy_diary_summarizer.py` 等建表，**合计 26 张**（不含 `sqlite_sequence` 与 `user_facts_fts*` FTS 影子表）：
+
+| 来源 | 表 |
+|------|-----|
+| `shisi/migrations.py`（12） | `characters` / `characters_v2` / `affinity_records` / `affinity_unlocks` / `affinity_audit` / `emotion_stage_state` / `stickers` / `character_stickers` / `vital_signs_state` / `memory_favorites` / `memory_recycle_bin` / `shisi_schema_version` |
+| `structured_memory.py` 等（14） | `chat_history`（**对话上下文真源，09-20 起按 session 隔离读取**） / `user_facts`（+`user_facts_fts` 全文索引） / `sessions` / `working_memory` / `daily_summaries` / `emotion_trajectory` / `reflections` / `tool_call_log` / `trace_log` / `persona_evolution_log` / `pending_events` / **`pending_intents`**（09-20 澄清状态机：槽位合并 / 两轮上限 / 15min TTL） / **`reminders`**（09-20 迁移 +session_key/user_id/status/delivered_at/fail_count） / `affinity_log` |
 
 ---
 
@@ -109,6 +124,14 @@ config/characters/
 ├── {character_id}.json   ← 每个角色的独立配置文件
 └── ...
 ```
+
+> ⚠️ **该目录被 `.gitignore:117` 忽略**，内容由本地/部署私有投递，**卡数不可跨检出复现**。
+> 2026-09-20 状态：**现役 41 张**（本批途中曾为空 → 已按用户指令从服务器
+> `/opt/ai-girlfriend/config/characters/` **逐字节恢复**，逐文件 `sha256sum` **41/41 一致**、
+> JSON 全可解析，含 v1.14 的 16 张文学导入卡）。
+> **测试基线随之浮动**：`tests/test_persona_injection.py` 用例数 = **2 × 卡数 + 7**
+> ——0 卡时参数化整体塌缩（本批途中实测收集数从 1436 掉到 1356）。
+> **引用测试基线必须同时声明卡数**（见 `AGENTS.md` §4.3）。
 
 ### 知识库 (data/knowledge/)
 

@@ -52,13 +52,31 @@ class EpisodicMemory:
             logger.warning("Failed to store episode: %s", e)
             return ""
 
-    def search(self, query: str, top_k: int = 5) -> list[dict]:
+    def search(self, query: str, top_k: int = 5,
+               session_id: str | None = None) -> list[dict]:
+        """情景检索。session_id 非 None 时按 meta.session_id 过滤（隔离）。
+
+        2026-09-21：禁止把无归属/他人会话的 episode 注入当前用户 prompt。
+        """
         try:
-            return self._vm.search_sync(query, top_k=top_k,  # type: ignore[no-any-return]
-                                   filter_dict={"type": "episode"})
+            raw = self._vm.search_sync(
+                query,
+                top_k=top_k * 3 if session_id else top_k,
+                filter_dict={"type": "episode"},
+            ) or []
         except Exception as e:  # noqa: BLE001
             logger.warning("Episode search failed: %s", e)
             return []
+        if session_id is None:
+            return list(raw)[:top_k]
+        sid = str(session_id)
+        filtered = []
+        for r in raw:
+            meta = r.get("metadata") or {}
+            ep_sid = str(meta.get("session_id") or r.get("session_id") or "")
+            if ep_sid == sid:
+                filtered.append(r)
+        return filtered[:top_k]
 
     def _generate_summary(self, messages: list[dict]) -> str:
         user_msgs = [m["content"] for m in messages if m.get("role") == "user"]

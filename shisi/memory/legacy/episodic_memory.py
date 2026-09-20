@@ -42,22 +42,47 @@ class EpisodicMemory:
             logger.warning("store_episode failed: %s", e)
             return None
 
-    def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
-        result = self._vm._search("episodic_memory", query, top_k)
-        return result if isinstance(result, list) else []
+    def search(self, query: str, top_k: int = 5,
+               session_id: str | None = None) -> list[dict[str, Any]]:
+        """情景检索。session_id 非 None 时按 meta.session_id 过滤。
 
-    def get_recent_episodes(self, n: int = 10) -> list[dict[str, Any]]:
+        2026-09-21：旧实现全局 Chroma 检索无用户维度，多用户并发会串台。
+        空 session_id 元数据的历史片段不注入任何具体会话。
+        """
+        raw = self._vm._search("episodic_memory", query, top_k * 3 if session_id else top_k)
+        items = raw if isinstance(raw, list) else []
+        if session_id is None:
+            return items[:top_k]
+        sid = str(session_id)
+        filtered = []
+        for r in items:
+            meta = r.get("metadata") or {}
+            ep_session = str(meta.get("session_id") or r.get("session_id") or "")
+            if ep_session and ep_session == sid:
+                filtered.append(r)
+            elif not ep_session and sid:
+                # 无归属元数据的片段不得注入具体会话
+                continue
+        return filtered[:top_k]
+
+    def get_recent_episodes(self, n: int = 10,
+                            session_id: str | None = None) -> list[dict[str, Any]]:
         coll = self._vm._collections.get("episodic_memory")
         if coll is None:
             return []
         try:
-            results = coll.get(limit=n)
+            results = coll.get(limit=n * 3 if session_id else n)
             if not results or not results.get("documents"):
                 return []
             items = []
             for doc, meta in zip(results["documents"], results.get("metadatas", [{}] * len(results["documents"])), strict=False):
+                meta = meta or {}
+                if session_id is not None:
+                    ep_session = str(meta.get("session_id") or "")
+                    if not ep_session or ep_session != str(session_id):
+                        continue
                 items.append({"content": doc, "metadata": meta})
-            return items
+            return items[:n]
         except Exception as e:  # noqa: BLE001
             logger.warning("get_recent_episodes failed: %s", e)
             return []

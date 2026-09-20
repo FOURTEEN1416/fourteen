@@ -203,7 +203,8 @@ def _scheduler():
     from proactive.scheduler import ProactiveScheduler
 
     sched = ProactiveScheduler(ase_engine=None)
-    sched._quiet_hours = (0, 1)  # 远离当前小时的静默窗口
+    # 投递用例脱离真实墙钟：无效小时窗 → start<end 且 hour 永不落入
+    sched._quiet_hours = (25, 26)
     return sched
 
 

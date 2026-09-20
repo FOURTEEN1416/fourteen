@@ -1,10 +1,11 @@
 # 后端业务模块地图
 
-> **✅ 2026-09-20 增量刷新**：在 09-19 全量刷新基线上补齐 09-19 晚通道隔离批次（wechat_direct 2→5 文件、api 44→45、routers 21→22）。权威口径以 `CODE_GRAPH.md` v3.8.6 为准。
+> **✅ 2026-09-20 全仓历遍刷新**：`orchestrator` 7→**9** 文件（+`tool_gate.py` / `context_budget.py`，09-20 新模块，此前两版刷新均漏登）、`proactive` 5→**6**（+`reminder_delivery.py`，09-20）、`shisi` 115→**116**、新增 **`utils/`** 行（此前整节缺失）；`optimized_orchestrator.py` 1050→**1270 行**。权威口径以 `CODE_GRAPH.md` **v3.8.16** 为准。
+> **✅ 2026-09-20 增量刷新**：在 09-19 全量刷新基线上补齐 09-19 晚通道隔离批次（wechat_direct 2→5 文件、api 44→45、routers 21→22）。
 > **⚠️ 09-17 死代码清洗留痕**：`shisi/wechat/command_handler.py`/`command_parser.py`（微信指令系统）已删除，正文已同步。
 
 **最近更新:** 2026-09-20
-**Python 版本:** ≥3.10 | **总文件:** ~511 .py 文件（含 tests/）
+**Python 版本:** ≥3.10 | **总文件:** **389** 个 .py（find 实测：模块 283 + 根级 2 + `scripts/` 11 + `tests/` 92 + `deploy/` 1；**不含** `frontend/` 与工作区内嵌的 `大创赛报名以及后期发展/` 目录）
 
 ---
 
@@ -12,18 +13,19 @@
 
 | 模块 | 文件数 | 路径 | 职责 | 状态 |
 |------|--------|------|------|------|
-| **shisi** | 115 | `shisi/` | DDD 核心域（角色/情感/记忆/故事线/知识库等，v2 死模块删除后口径） | ✅ 活跃 |
+| **shisi** | 116 | `shisi/` | DDD 核心域（角色/情感/记忆/故事线/知识库等，v2 死模块删除后口径） | ✅ 活跃 |
 | **api** | 45 | `api/` | FastAPI 路由层（22 routers + app_factory/achievement_engine/state 等） | ✅ 活跃 |
 | **my_character** | 21 | `my_character/` | 情感引擎 + 角色引擎 | ✅ 活跃 |
 | **persona_extractor** | 13 | `persona_extractor/` | 人格提取与注入（+web_enricher 网络画像增强） | ✅ 活跃 |
+| **utils** | 11 | `utils/` | 公共工具：`local_time`（墙钟真源）/`fallback_lines`/`affinity_state`/`reply_mode`/`async_utils`/`important_dates`/`health_check`/`project_paths`/`bootstrap`/`character_helpers` | ✅ 活跃 |
 | **observability** | 9 | `observability/` | 可观测性（日志/指标/追踪/健康检查/sentry/优雅停机） | ✅ 活跃 |
 | **tools** | 10 | `tools/` | 工具系统（12 个内置工具） | ✅ 活跃 |
-| **orchestrator** | 7 | `orchestrator/` | 编排器（主类/init/stream mixin/会话锁/语音检测/console_chat） | ✅ 活跃 |
+| **orchestrator** | 9 | `orchestrator/` | 编排器（主类/init/stream mixin/会话锁/语音检测/console_chat/**tool_gate**/**context_budget**） | ✅ 活跃 |
 | **character_card** | 6 | `character_card/` | 角色卡解析/验证/构建/集成 | ✅ 活跃 |
 | **voice** | 6 | `voice/` | 语音合成（MiMo 唯一引擎，08-28 收敛） | ✅ 活跃 |
 | **llm_provider** | 5 | `llm_provider/` | LLM 多供应商网关 | ✅ 活跃 |
 | **security** | 5 | `security/` | 安全过滤与加密 | ✅ 活跃 |
-| **proactive** | 5 | `proactive/` | 主动消息推送（ase_engine/scheduler/frequency/reflection） | ✅ 活跃 |
+| **proactive** | 6 | `proactive/` | 主动消息推送（ase_engine/scheduler/frequency/reflection/**reminder_delivery**） | ✅ 活跃 |
 | **clone_training** | 4 | `clone_training/` | 克隆训练（数据清洗/数据提取/风格分析） | ✅ 活跃 |
 | **multimodal** | 3 | `multimodal/` | 多模态处理（image_attachment/multimodal_processor） | ✅ 活跃 |
 | **wechat_direct** | 5 | `wechat_direct/` | 微信直连（**每人独立通道**：connector_registry/channel_paths/peer_character/wechat_connector） | ✅ 活跃 |
@@ -32,7 +34,8 @@
 | **context** | 2 | `context/` | 上下文（世界书提供器） | ✅ 活跃 |
 | **memory_ext** | 2 | `memory_ext/` | 记忆扩展（mem0 后端） | ✅ 活跃 |
 
-> 文件数含 `__init__.py`；`weclone_adapter/` 已于 08-28 删除（克隆收敛为本地提取+JSON 上传）。
+> 文件数含 `__init__.py`（Glob/find 实测 2026-09-20）；`weclone_adapter/` 已于 08-28 删除（克隆收敛为本地提取+JSON 上传）。
+> ⚠️ **`utils/` 与 `orchestrator/` 的新模块此前长期漏登**：`orchestrator/tool_gate.py`、`orchestrator/context_budget.py`、`proactive/reminder_delivery.py`、`utils/local_time.py`、`utils/fallback_lines.py`、`utils/affinity_state.py`、`shisi/affinity/scale.py` 均已在 CODE_GRAPH 落账但本表未同步 —— 本次补齐。
 
 ---
 
@@ -198,17 +201,19 @@
 
 ---
 
-## orchestrator/ — 优化编排器 (7 文件)
+## orchestrator/ — 优化编排器 (9 文件)
 
-**职责:** 聊天流水线编排，组件初始化阶段化，SSE 流式输出，会话锁管理，语音检测
+**职责:** 聊天流水线编排，组件初始化阶段化，SSE 流式输出，会话锁管理，语音检测，工具意图分级与上下文预算
 
 **关键文件:**
-- `optimized_orchestrator.py` — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / 上下文准备 / `process_message` / 健康检查（1050 行）
+- `optimized_orchestrator.py` — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / 上下文准备 / `process_message` / 健康检查（**1270 行**）
 - `_init_mixin.py` — `_InitPhasesMixin`：`initialize` 拆分为 10 个 `_init_*` 阶段
 - `_stream_mixin.py` — `_StreamPipelineMixin`：`process_message_stream` SSE 真流式/伪流式降级
 - `session_locks.py` — 会话锁管理（`SessionLockManager`）
 - `voice_detector.py` — 语音活动检测
 - `console_chat.py` — 控制台聊天通道（08-28 自 main.py 迁入）
+- **`tool_gate.py`** — 三级工具意图管线（09-20）：`should_escalate` L0 晋级线 → L1 LLM 终审 `build_review_messages`/`ASK_USER_TOOL` → 防假承诺 `contains_promise`；工具结果 untrusted 信封 `wrap_tool_results`
+- **`context_budget.py`** — 上下文预算与去重（09-20）：`ContextBudget`/`clip_text`/`rag_payload_to_text`/`dedup_memory_against_knowledge`/`apply_budget`/`format_session_tail`/`inject_tool_context_before_phi`
 
 > **架构:** `OptimizedOrchestrator` 继承 `_InitPhasesMixin` + `_StreamPipelineMixin`，通过 `self.components` 共享状态。公共 API 100% 兼容，外部导入路径 `from orchestrator import Orchestrator` 不变。
 

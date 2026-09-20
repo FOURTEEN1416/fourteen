@@ -85,10 +85,32 @@ def _safe_channel_payload(st: dict) -> dict:
 @router.get("")
 async def get_my_channel(
     user_id: int = Security(get_current_user_id),
+    db=Depends(get_db),
 ):
-    """我的微信通道状态（主槽位优先 connected）。"""
-    primary = get_registry().primary_status(user_id)
-    channels = [_safe_channel_payload(s) for s in get_registry().status_for_user(user_id)]
+    """我的微信通道状态（主槽位优先 connected）。
+
+    2026-09-21：以磁盘/registry 真源回写 DB，消除「凭证已连、库里 waiting_qr」
+    的状态脱节（生产串台观感来源之一）。
+    """
+    registry = get_registry()
+    primary = registry.primary_status(user_id)
+    statuses = registry.status_for_user(user_id)
+    for st in statuses:
+        slot = int(st.get("slot", 0))
+        connected = bool(st.get("connected"))
+        status = "connected" if connected else (
+            st.get("status") or "idle"
+        )
+        if status in ("waiting_qr", "scanned") and connected:
+            status = "connected"
+        await _upsert_session_row(
+            db,
+            user_id,
+            slot,
+            status=status,
+            bot_id=str(st.get("bot_id") or ""),
+        )
+    channels = [_safe_channel_payload(s) for s in statuses]
     return {
         **_safe_channel_payload(primary),
         "channels": channels,
@@ -99,8 +121,23 @@ async def get_my_channel(
 
 
 @router.get("/list")
-async def list_my_channels(user_id: int = Security(get_current_user_id)):
-    channels = [_safe_channel_payload(s) for s in get_registry().status_for_user(user_id)]
+async def list_my_channels(
+    user_id: int = Security(get_current_user_id),
+    db=Depends(get_db),
+):
+    statuses = get_registry().status_for_user(user_id)
+    for st in statuses:
+        slot = int(st.get("slot", 0))
+        connected = bool(st.get("connected"))
+        status = "connected" if connected else (st.get("status") or "idle")
+        if status in ("waiting_qr", "scanned") and connected:
+            status = "connected"
+        await _upsert_session_row(
+            db, user_id, slot,
+            status=status,
+            bot_id=str(st.get("bot_id") or ""),
+        )
+    channels = [_safe_channel_payload(s) for s in statuses]
     return {"channels": channels, "max_per_user": channel_paths.MAX_CHANNELS_PER_USER}
 
 

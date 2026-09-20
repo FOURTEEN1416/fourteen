@@ -316,6 +316,38 @@ class TestPendingIntentStore:
 
 
 class TestReminderDelivery:
+    def test_tick_actually_runs_batch_intent_gc(self, sm):
+        """每 tick 的批量过期清理必须**真的执行**（2026-09-20 修复锁定）。
+
+        ⚠️ 旧实现 `_maybe_gc_intents` 是同步函数且调用
+        `asyncio.run(self._sm.expire_stale_intents())` —— ① 该方法本身是同步的
+        （`asyncio.run` 只收协程对象）；② 它由 `_run_once()` 在已运行的事件循环里
+        同步调用（`asyncio.run` 在运行中循环内必抛 RuntimeError）。两个异常都被
+        `except Exception` 吞掉，于是批量清理**从未执行**。
+
+        断言必须读**原始行**：`get_active_pending_intent` 自带惰性过期，会掩盖缺陷。
+        """
+        import inspect
+
+        assert inspect.iscoroutinefunction(ReminderDeliveryTask._maybe_gc_intents), (
+            "_maybe_gc_intents 必须是协程（同步版在运行中的事件循环里无法安全执行 DB 调用）"
+        )
+
+        sm.upsert_pending_intent("gc-s1", "set_reminder", {}, 1, "q", ttl_minutes=-1)
+        with sm._conn() as conn:
+            before = conn.execute(
+                "SELECT status FROM pending_intents WHERE session_key = 'gc-s1'"
+            ).fetchone()["status"]
+        assert before == "active"  # 前提：写入后确实处于 active
+
+        ReminderDeliveryTask(sm, llm=None)()  # 同步入口 → asyncio.run(_run_once())
+
+        with sm._conn() as conn:
+            after = conn.execute(
+                "SELECT status FROM pending_intents WHERE session_key = 'gc-s1'"
+            ).fetchone()["status"]
+        assert after == "expired", "批量过期清理未执行（行仍为 active → pending_intents 无界增长）"
+
     def test_due_delivered_via_wechat_with_fallback_text(self, sm):
         sent: list[tuple[int, str, str]] = []
 

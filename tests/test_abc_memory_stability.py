@@ -98,9 +98,10 @@ class TestKLevelInjectionC:
         pipe.ds = _DS()
         pipe.working = _W()
         pipe._session_id = "N:test_k"
-        # user_key 派生：N:test_k → test_k
+        # user_key 派生：完整会话键（2026-09-21 隔离修复，禁止剥 owner）
         from shisi.memory.legacy.memory_pipeline import _user_key_from_session
         uk = _user_key_from_session("N:test_k")
+        assert uk == "N:test_k"
         for i in range(12):
             sm.add_fact(f"关于用户的事{i}", category="preference", user_key=uk)
         ctx0 = pipe.get_memory_context(5, affinity_level=0)

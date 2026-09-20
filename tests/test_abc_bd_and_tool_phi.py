@@ -41,6 +41,21 @@ class TestToolContextPhiPosition:
 
 
 class TestCrossSessionTailBd:
+    def test_format_session_tail_envelope_wraps_body(self):
+        """信封必须是「开标签 → 正文 → 闭标签」的**包夹**结构。
+
+        ⚠️ 2026-09-20 回归锁定：旧实现把开标签排在正文之后
+        （引言 → 正文 → 开标签 → 说明 → 闭标签），正文落在信封之外。
+        仅断言 `trust="untrusted" in text` 无法发现该缺陷 —— 必须断言**相对位次**。
+        """
+        text = format_session_tail(["- 用户：昨天说的事", "- 助手：记下了"])
+        head = text.index('<context id="session_state.recent_history"')
+        body = text.index("昨天说的事")
+        tail = text.index("</context>")
+        assert head < body < tail, "untrusted 信封必须包住正文（开标签在前、闭标签在后）"
+        # 与工具结果信封的约定保持一致
+        assert text.index('trust="untrusted"') < text.index("昨天说的事")
+
     def test_format_session_tail_untrusted(self):
         text = format_session_tail(["- 用户：昨天说的事", "- 助手：记下了"])
         assert "历史事实" in text or "最近会话状态" in text
@@ -52,7 +67,8 @@ class TestCrossSessionTailBd:
         assert format_session_tail([]) == ""
         assert format_session_tail(None) == ""
 
-    def test_structured_memory_tail_dual_forms(self, tmp_path):
+    def test_structured_memory_tail_session_isolated(self, tmp_path):
+        """跨会话尾巴只取**完整会话键**自己的历史（2026-09-21 隔离）。"""
         sm = StructuredMemory(str(tmp_path / "tail.db"))
         try:
             sm.add_chat("user", "帮我记着周末去公园", session_id="1:wxid_t1")
@@ -60,8 +76,12 @@ class TestCrossSessionTailBd:
             sm.add_chat("user", "今天好累", session_id="N:wxid_t1")
             lines = sm.get_cross_session_tail("1:wxid_t1", limit=5)
             assert any("周末去公园" in x for x in lines)
-            assert any("今天好累" in x for x in lines)
+            # 不同 owner（N vs 1）禁止串入
+            assert not any("今天好累" in x for x in lines)
             assert all(x.startswith("- 用户") or x.startswith("- 助手") for x in lines)
+            lines_n = sm.get_cross_session_tail("N:wxid_t1", limit=5)
+            assert any("今天好累" in x for x in lines_n)
+            assert not any("周末去公园" in x for x in lines_n)
         finally:
             sm.close()
 

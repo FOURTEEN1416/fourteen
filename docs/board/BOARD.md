@@ -436,3 +436,22 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **文档同步**：AGENTS **v1.20** / CODE_GRAPH **v3.8.10** / README 徽章 **1422** / CODEMAPS INDEX / 设计文档（新增 **B7** + 修复状态更新）/ BOARD / LOG（八十二）。
 - **⚠️ 并发隔离（重要）**：复核期间发现**并行窗口正在做同一类修复**（已收编我的 `utils.local_time` 真源）：`proactive/frequency.py`（配额日界 UTC→本地 + `last_reset_date` 落盘缺失）、`shisi/stats/analytics.py`、`utils/important_dates.py`、`memory_pipeline.py`（系统错误占位过滤）+ 3 个测试，**共 7 个文件为其在制品**。本次提交**仅含自有 5 文件**；`tests/test_local_time.py` 属**混批**（他们往我的静态防护里加了 3 个目标）→ 用「移除其 4 行 → 暂存 → 原样还原」的方式只提交自有 hunk，**他们的在制品 8 项已核验完好**。
 - **三端**：A 档 —— commit→push origin→服务器 pull+重启+health 核验（见 LOG 同批次条目）。
+
+### 2026-09-20 · 主控窗口 · 全仓历遍：文档对齐 + 3 处代码缺陷修复（B 档：代码 + 文档，用户指令「全仓历遍，更新文档，修复bug」）
+
+- **任务**：全仓代码实况复核 + 文档对账 + 缺陷修复 + 收尾清理（单窗口，提交前 `git status` 为 0 项，无并行在制品）。
+- **修复的 3 处缺陷（均属「静默失效」家族）**：
+  1. 🔴 **`proactive/reminder_delivery.py::_maybe_gc_intents` —— 批量过期清理从未执行**。旧为**同步**函数却 `asyncio.run(self._sm.expire_stale_intents())`：① 该方法本身是**同步**的（`asyncio.run` 只接受协程对象）；② 它由 `_run_once()` 在**已运行的事件循环内**同步调用 → `RuntimeError: asyncio.run() cannot be called from a running event loop`。异常被 `except Exception` 吞进 **debug 级** → 后果：`pending_intents` 的 `active` 行只能靠 `get_active_pending_intent` 的**惰性过期**（要求该会话被再次读取）清理，**长期不活跃会话的行永久残留（表无界增长）**。修复 = `async def` + `await asyncio.to_thread(...)`。
+  2. **`orchestrator/context_budget.py::format_session_tail` —— untrusted 信封结构错误**。渲染顺序「引言 → **正文** → **开标签** → 说明 → 闭标签」，开标签排在被包裹正文**之后**，正文落在信封之外；与 `tool_gate.TOOL_RESULT_ENVELOPE_HEAD/TAIL` 的包夹约定不一致。修复 = 抽出 `SESSION_TAIL_ENVELOPE_HEAD/TAIL` 并改标准包夹顺序。
+  3. **`shisi/memory/legacy/vector_memory.py::_run_async` —— 同线程死锁分支**。`asyncio.run_coroutine_threadsafe(coro, get_running_loop()).result()` 同线程阻塞等待**自身**循环推进 = **必然死锁**。修复 = 委托公共真源 `utils.async_utils.run_async`（同时消除第 3 份重复实现）。
+- **验证**：**突变验红 ×4 全中**（含第 4 次「保持 `async` 但把 `to_thread` 改回 `asyncio.run`」→ **行为断言** `assert 'active' == 'expired'` 命中，证明「读原始行」写法确实能抓静默失效）；新增 `tests/test_async_bridge_contract.py` 5 例 + 2 处断言加固；分块 **1356 收集 / 1346 通过 / 10 跳过 / 0 失败**（314 + 302+5 + 326+5 + 404，与 `--collect-only` 吻合）+ vitest **98/98** + `tsc` 0 错 + ruff **0.16.8** 全仓 0 错 + `ci_gates.py` **4/4**；端点 215/181 / 唯一路径 181 / DB 表 / 路由数**零变更**。
+- **文档同步**：AGENTS **v1.27** / CODE_GRAPH **v3.8.16** / MODULES（orchestrator 7→9、proactive 5→6、shisi 115→116、**补 `utils/` 整行**、总文件 ~511→389）/ DATABASE（自纠 6→8 表 + `sqlite.db` 26 表清单 + 角色卡注记）/ INDEX（ADR **11→12**）/ ARCHITECTURE / README（**ADR 12 份含 0015**）/ `api/app_factory.py` docstring（204/171 → 215/181）。
+- **⚠️ 本批两次「从未登记」修复**：① **ADR-0015「系统提示词分层与按需注入」自 09-19（`91c02f7`）起在 README/AGENTS/CODE_GRAPH/CODEMAPS 中零登记**；② `orchestrator/{tool_gate,context_budget}.py`、`proactive/reminder_delivery.py`、`utils/` 整节在 `MODULES.md` 中**零命中**。
+- **⚠️ 基线口径更正**：`config/characters/` 被 `.gitignore:117` 忽略且**本检出为空（0 张卡）** → 既往「主检出含 41 卡 → 1429/1425/4」**不可复现**；本检出实际 **1356 收集 / 1346 通过 / 10 跳过**。**只读实测服务器仍有 41 张卡**（`data/archive/characters-config-backup-20260920.tar.gz` 亦在库）→ 恢复命令 `scp -r swu-prod:/opt/ai-girlfriend/config/characters/ ./config/characters/`，**是否恢复留待用户裁决**（本次未自动执行）。耦合已写入 AGENTS §4.3 / CODE_GRAPH §1.1 / DATABASE / INDEX。
+
+### 2026-09-20 · 主控窗口 · 角色卡库恢复（用户指令「修复」）
+
+- **背景**：「全仓历遍」批次登记的已知限制 —— 本检出 `config/characters/` 为空（0 张卡），`test_persona_injection` 的「2 × 卡数 + 7」参数化塌缩，收集数掉到 1356，文档既载的「41 卡 → 1429/1425/4」不可复现。
+- **执行**：服务器只读探测（41 json / 448K）→ 服务器端 `sha256sum` 清单 + `tar` 打包 → `scp` 取回 → 本地解包 → **逐文件哈希校验 41/41 一致**（首次 `diff` 的差异是 GNU `sha256sum` 二进制模式标记 `*` 的格式差，改用只比哈希列后为空）→ 41 份 JSON 全部可解析。
+- **验证**：`--collect-only` **1436**（差 +80 = 40 × 2，与「2 × 卡数 + 7」一致）；分块全量 **1436 / 1432 / 4 / 0 失败**（314 + 384+3 + 330+1 + 404 精确吻合）= 1429/1425/4 + 本批 7 新用例 → **基线回到可复现口径**；ruff 0.16.8 全仓 0 错 + ci_gates 4/4；`git status` 仍 16 项（仅本会话改动）→ **恢复内容落在 `.gitignore:117` 覆盖内，未污染版本库**。
+- **副作用**：服务器仅做只读打包（`/tmp/` 两件临时产物）；「基线必须同时声明卡数与工作树状态」已写入 AGENTS §4.3 / CODE_GRAPH §1.1 / DATABASE / INDEX / README。

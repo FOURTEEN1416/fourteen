@@ -41,9 +41,27 @@ class CrossSessionReasoner:
         except Exception as e:  # noqa: BLE001
             logger.warning("store_pending_event failed: %s", e)
 
-    def get_pending_events(self) -> list[dict[str, Any]]:
+    def get_pending_events(self, session_id: str | None = None) -> list[dict[str, Any]]:
+        """待处理事件。session_id 非 None 时按 source_session_id 隔离。
+
+        2026-09-21：旧实现 `WHERE is_resolved=0` 全表返回，多用户会互相
+        看见对方未完成事项（串台）。
+        """
         try:
             with self._sm.get_connection() as conn:
+                if session_id is not None:
+                    sid = str(session_id)
+                    rows = conn.execute(
+                        "SELECT * FROM pending_events WHERE is_resolved = 0 "
+                        "AND (source_session_id = ? OR source_session_id = '') "
+                        "ORDER BY created_at ASC",
+                        (sid,),
+                    ).fetchall()
+                    # 空 source 的历史事件不注入具体会话
+                    return [
+                        dict(r) for r in rows
+                        if str(dict(r).get("source_session_id") or "") == sid
+                    ]
                 rows = conn.execute(
                     "SELECT * FROM pending_events WHERE is_resolved = 0 "
                     "ORDER BY created_at ASC"

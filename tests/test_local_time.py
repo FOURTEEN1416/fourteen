@@ -289,15 +289,19 @@ def test_memory_fact_extraction_is_session_isolated() -> None:
 
 
 def test_retrieve_context_facts_fallback_uses_call_session() -> None:
-    """retrieve_context 降级取 facts 时必须用调用方 session_id，不得退回 pipeline 全局 session。"""
+    """retrieve_context 降级取 facts 时必须用调用方 session_id 派生 user_key。"""
     import inspect
 
     from shisi.memory.legacy.memory_pipeline import MemoryPipeline
 
     for name in ("retrieve_context", "retrieve_context_async"):
         raw = inspect.getsource(getattr(MemoryPipeline, name))
-        assert "session_id or self.session_id" in raw, (
-            f"{name} 的 facts 降级必须优先用传入 session_id"
+        assert "if session_id" in raw and "user_key=uk" in raw, (
+            f"{name} 的 facts 降级必须以传入 session_id 派生 user_key，"
+            "不得退回 pipeline 全局 session，也不得无过滤全库扫"
+        )
+        assert "session_id or self.session_id" not in raw, (
+            f"{name} 不得把 pipeline 全局 session 当作 facts 归属回退"
         )
 
 
