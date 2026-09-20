@@ -2227,3 +2227,54 @@
 - **置信度**：**高**（图像与元数据直接读取，非二手转述）；Excel 参数表部分为**中**（已逐处标注）。
 
 **三端**：本批全属 **B 档纯文档**——commit→push GitHub 备份即完成，服务器不上文档、无需 pull。
+
+---
+
+## 2026-09-20（八十）— W-D（限定范围）：小凌架构收敛与双向映射设计（纯设计，零代码）
+
+**任务**：用户指令——「我们只是借鉴这个转写出来的信息进行深度研究，如何借助这个思路和现有的项目和研究，来**完善这一套转写出来的架构**，借以来**完善我们现有的项目**」。承接交接任务包 §W-D 的**设计级**部分；范围为「架构规范化 + 双向映射 + 落地方案」，**不做** W-D 原列的五份独立实施设计。
+
+### 产出
+
+- `docs/plans/2026-09-20_小凌架构收敛与双向映射设计.md`。方法为**三源合一**（转写架构 × 本次逐文件实读的项目实况 × 已有研究基线①②③），全程标注**证据分级 A/B/C/D**。
+
+### 三步核心结论
+
+1. **转写架构缺的不是模块，是"域"**：B 级参数表（`frames/7684439164087726043`）证实其核心结构是 **`initial / min / max / plasticity` 四元域 + `State` 运行时变量** 两层。本项目有**全局** `min/max`（`shisi/affinity/enhancer.py:26-27`，0~100）但**无 `plasticity`、无逐参数边界** → "防无限漂移"全缺。**这是最值得移植的一件。**
+2. **公式三版本消歧决议**：激活值 → 采用「**5 因子基础集 + 3 项可关闭增益项**（`β·novelty` / `ρ·repeat_gain` / `τ·threat`，默认 0）」，理由是 5 因子版是唯一有手稿+权重符号者，而 6/7 项是口播口语化追加（混层即当前歧义成因）；检索 R → **只借代码结构（Cue 主导），权重值必须重标定**（原值系反解拟合）；片段数 → 以 `forget.py` 代码为准 `max(1, floor(F0·e^{−λ_f·t}))`；λ 修正公式 `λ0(1−αC)(1−β…)(γI)` → **因仅 D 级证据不采用**，改用本项目既有双 λ 分层做等价实现。
+3. **双向映射 23 行（逐行 `file:line`）**：✅ **已有且接线 6 项** / ⚠️ 部分有 7 项 / ❌ 真缺口 8 项 / 🔴 新发现缺陷 6 项。
+
+### ⚑ 对基线①的修订（3 处低估 + 1 处误判）
+
+| 基线①原判定 | 实况（本次实读） |
+|---|---|
+| ❌ "12 个工具**全量暴露**" | **误判**。实为**双重门**：零成本规则**意图门**（`optimized_orchestrator.py:397 _tool_intent_names`，12 个语义组，**不匹配则 `:398-399` 直接 return 不暴露任何工具**）× **关系权限门**（`tools/base_tool.py:80`，`public0/friend2/intimate6/admin99`），**取交集**（`:400-403`）。基线①疑将"12 个**意图组**"误读为"12 个工具" → **P3 的"工具抽屉"已完成，应从路线图移除** |
+| ❌ P1 语义门控"缺" | **半部已实现**：`should_store_as_fact()`（`memory_pipeline:769/789`）已过滤敷衍消息、防"一句话改人格" → 只缺"分类 + 入账权重" |
+| ⚠️ 内驱"单轴" | **已有六维** `UrgencyState`（`ase_engine.py:357`：base/missing_bonus/event/scene/emotion/context，`total=min(10,Σ)`，`level` 四档 8/5/3）+ 自适应频率 → 缺口是**自失效**与**轴间制衡**，不是轴数 |
+| （基线①未提） | **已实现双 λ 分层衰减**：`forgetting_manager.py:18` `lambda_low=0.1 / lambda_high=0.01`（**10×**），与小凌 `lambda_d=0.36 / lambda_e=0.034`（**10.6×**）**同量级** → **独立跨源收敛证据**，可作 S/D 分离衰减的现成先验 |
+
+### ⚑ B1-B6 六条新发现真实缺陷（此前均无记录；按真实暴露面分级）
+
+- **B3（中）`config/shisi.yaml` 的 `memory:` 整段 5 键零消费点**——`get_config("memory",…)` 全仓 **0 命中**（`shisi/config.py` 用 `yaml.safe_load` 整文件载入，故键在内存中存在、只是无人读）；有效值实为代码硬编码默认（`working_memory.py:10 limit=20`），**且配置值 20 与硬编码 20 数值巧合，掩盖了未接线事实**。其中 **`similarity_threshold: 0.85` 正是 D3 要用的"绝对门槛"，属"差一步"而非从零设计**。
+- **B5（中）遗忘是物理删除**：`_apply_forgetting` → `sm.delete_fact`（`memory_pipeline.py:751-756`），门槛 0.05，**无保底留痕** → 用户告诉过角色的事可能被彻底删掉（不可逆、产品可感）。小凌 A 级代码为 `max(1, floor(...))`（永不归零）。
+- **B4（中）`access_count` 只读、从不自增，且指数遗忘模式下不参与计算** → **"回忆强化"机制不存在**（`memory_pipeline.py:739/748` 读 + 全仓 grep 无写入点；旧实现 `_legacy_importance_scorer.py:46` 的 `access_bonus` 随该文件退役）。
+- **B1（中·潜伏）三套 time-of-day 分类器并行**，其中 `my_character/enhanced_prompt_engine.py:35 TimeContext.now()` 用 **UTC 小时**（对 UTC+8 产品差 8 小时）。**诚实定级：潜伏未生效**——生产 `config/system.yaml:173 prompt_mode: layered`（`_init_mixin.py:146`）不走 `enhanced` 分支；但① 切 `enhanced` 即全量错位，② **三套分段表本身不一致**（`noon` / `late_night` 各只在一套里），③ `config/shisi.yaml:6 app.timezone: "Asia/Shanghai"` **零读取**（"声明了不读"）。
+- **B6（低-中）亲密度 4 套刻度并行**：0-8 整数（`emotion_engine.py:300`）/ 0-500（affection_points）/ 0-100（`AffinityMapper.to_shisi`）/ 解锁 25-50-75-90（`config/shisi.yaml:204-216`）。**各自自洽、无已知错算 → 只登记 + 建议加断言，不做重构**（避免无收益改动触碰热路径）。
+- **B2（低）`my_character/persona_utils.py:70 build_time_context()` 死代码**（定义处全仓唯一命中，零调用），且它调的正是带 B1 缺陷的实现——"看着像接好的线"，本次即被其误导过一次。
+
+### D1-D8 八项落地设计（均落在既有 owner，不引入新真源）
+
+D1 参数域（`Δp = plasticity_i × α × (evidence − p)` 后 clamp；身份 0 / 关系 0.1-0.2 / 偏好 0.4-0.6；ΔTrust 多变量化**不改 `enhancer.update()` 签名**，把结果作为一个 delta 传入）· D2 遗忘**只改"选键"**（按 `importance` → 按变量 S/D/E，λ 直接复用现存 0.1/0.01；+ 回忆强化；+ 保底留痕）+ 线性（好感度）与指数（事实）差异**显式记账** · D3 门槛接线既有 `similarity_threshold` + 三档拒答（<0.25 不注入 / >0.65 才连贯讲述），门槛先取**分位数**挂靠既有 BM25 水位线 · D4 **推断/事实三值标记**（`fact`/`inferred`/`reconstructed`，在产物流水线上加字段而非加提示词层，**成本最低**）· D5 时间真源收敛为**单一 `get_local_now()`**（把 `ase_engine._now_local` 的正确实现提为公共 util）· D6 心光**数值门控**（容量 5 / 阈值 0.58，均取自 B 级参数表并与口播交叉验证；**必须证明 token 净减才落地**，红线：不得再加新提示词层）· D7 内驱 **7a missing_bonus 自失效**（沉默≠需要）+ **7b 撤掉"用户伤心/生气→提高打扰意愿"** + **7c 锚定最后一条用户消息的随机倒计时**（替固定 30 分钟）+ **7d 轴间制衡**（connection 高 × pride 高 → 不投递）+ 7e 阈值三处不一致（config 2.0 / 构造默认 4.0 / 硬编码 2.0@`:818`）收敛为一处 · D8 语义层补"四分类 + 权重"（复用 `persona_extractor/`，**不新增 LLM 调用**）。
+
+### 待用户裁决 J1-J6
+
+P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是否改"降级留痕"（数据只增不减）· 心光容量 5 / 阈值 0.58 是否作初始值上生产 · 是否**撤掉**"用户伤心/生气 → 提高打扰意愿"规则（用户可感）· B2 死代码是否清理（需入 `DELETION_LOG`）· `plasticity` 三档是否采纳。
+
+### 验证（完成声明四要素）
+
+- **验证证据**：本项目侧结论**全部为本次逐文件实读 + grep 穷举接线**——`forgetting_manager.py:18`、`memory_pipeline.py:370-449/:715-761/:769,789/:739,748`、`enhancer.py:26-27,36-54`、`mapper.py:50-107`、`decay_engine.py`、`vital_engine.py`、`working_memory.py:10`、`shisi/config.py`、`config/shisi.yaml:6,70-80,198-216`、`config/system.yaml:56,173`、`enhanced_prompt_engine.py:27-60,128-152,232-274`、`persona_engine.py:181,411-431`、`persona_utils.py:70-78`、`emotion_engine.py:285-340`、`_init_mixin.py:146-152`、`optimized_orchestrator.py:397-403`、`base_tool.py:63-88`、`ase_engine.py:35-50,357-395,400-425,737-760,783-800,818-843`。小凌侧结论溯源至 W-A 报告的帧路径与分级。
+- **边界检查**：`git status` 提交前核验仅含本批 4 文件（新计划文档 + README + BOARD + LOG）；**未触任何 .py/.ts/.tsx/配置**（零代码改动）；未触 A 档；**未新增提示词层**（成本红线）；映射全部落在既有 owner，**未引入新真源 / 兜底层 / 兼容 shim**。
+- **已知限制**：① 参数表未 100% 数字化（B 级证据约 33 行可读，多数行的四值缺失）；② `forget.py` 只见约 100–201 行；③ `Q_recon` 只有口播、代码里未出现；④ `dynamic_anchor.py:65 time_of_day` 时区处理未核实（B1 只覆盖前两套）；⑤ `access_count` 是否在别处（DDL/触发器）自增未做全库核实，B4 结论基于 Python 层 grep。
+- **置信度**：本项目侧 **高**（逐文件实读 + grep 穷举）；转写架构侧 **中**（证据分级已逐项标注）。
+
+**三端**：本批全属 **B 档纯文档**——commit→push GitHub 备份即完成，服务器不上文档、无需 pull。
