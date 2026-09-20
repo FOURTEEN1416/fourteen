@@ -7,6 +7,31 @@
 
 ---
 
+## 2026-09-20 — 全仓扫描·在制品收口批次（代码审查/修 bug/文档同步）
+
+**任务**：用户指令「最近该仓库进行了多次迭代更新，需要你进行代码审查，全仓扫描，更新文档，找 bug 进行修复」。
+
+**并发语境**：HEAD 已有并行窗口 `0bc5d6b`（v3.8.10 复核补漏）+ `e9aea50`（文档落账）；其 CODE_GRAPH 明确登记工作树并行在制品 7 文件未纳入提交。本批即收口该在制品 + 补扫同类纯缺陷。
+
+**修复（纯缺陷，不涉 B3-B6 行为裁决）**：
+1. **FrequencyController 三连**（`proactive/frequency.py`）：日界改 `now_local()`（原 UTC date 在 UTC+8 使配额到本地 08:00 才归零）；`to_dict`/`from_dict` 落盘 `last_reset_date`（原缺字段 → 状态恢复后首次 `can_send` 把已持久化 `daily_count` 清零）；`record_sent` 钉日界。生产默认 `frequency_mode: adaptive` 不走该路径，但 fixed 模式与状态恢复属真缺陷。
+2. **Analytics 日键**（`shisi/stats/analytics.py`）：`strftime("%Y-%m-%d")` 原用 UTC，UTC+8 下本地 00:00–08:00 消息记到「昨天」。
+3. **important_dates 观察项收口**（`utils/important_dates.py`）：`check_today` 裸 `datetime.now()` → `now_local()`（v1.19 登记的主机时区静默失效风险）。
+4. **错误占位不入库**（`shisi/memory/legacy/memory_pipeline.py`）：`after_chat` 增 `_SYSTEM_ERROR_REPLIES` 守卫——「处理超时」等罐头语不再写成 assistant 发言（用户原话仍入库），结案 v1.17 LOG 遗留项①。
+5. **静态防护扩展**：`tests/test_local_time.py::test_no_wall_clock_utc_regression_in_fixed_sites` 覆盖 analytics / important_dates / frequency（frequency 允许 3 处 UTC 时间差）。
+
+**文档**：CODE_GRAPH **v3.8.11**（标题纠正 v3.8.7→实际版本 + §1.1 测试口径 + 更新记录）+ README 1426 + AGENTS **v1.21**（§0/§2/§4.3/修订历史）+ CODEMAPS INDEX + DECISION_LEDGER + P1_BACKLOG + 本 LOG。
+
+**验证（完成声明四要素）**：
+- 证据：分块 pytest **1332 收集 / 1328 通过 / 4 跳过**（362+3 +354 +350+1 +262 精确吻合）+ vitest **98/98** + ruff 全仓 **0 错** + `create_api_app` 内省 **215/181** 不变
+- 边界：只修纯缺陷；B3 死配置接线 / B4 回忆强化 / B5 遗忘降级 / B6 四套刻度仍留 W-D §八待裁决；user_facts 无用户维度仍开放
+- 置信度：高（全量分块回归 + 静态防护 + 端点内省）
+- 三端：代码+测试为 **A 档**（需 commit→push→服务器 pull）；文档为 **B 档**（commit→push 即完成）
+
+**仍开放**：① user_facts 无用户维度（跨用户共享，需 schema 级治理独立批次）；② B3-B6（待用户裁决）；③ agnes 偶发网络失败降级 zhipu（外部波动）。
+
+---
+
 ## 2026-09-20 — 全仓遍历·文档对齐批次（精读所有代码，逐一历遍，更新文档；零代码变更）
 
 **任务**：用户点名「项目高速迭代，反映代码现状的文档基本全部落后——精读所有代码，逐一历遍，更新文档」。技能加载：`project-governance`（增量重建七步规程）+ `repo-governance-scan`（只读探针）。
