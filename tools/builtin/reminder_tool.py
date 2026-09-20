@@ -10,7 +10,10 @@ logger = logging.getLogger("reminder_tool")
 class ReminderTool(BaseTool):
     name = "set_reminder"
     description = "设置提醒事项（到点会主动发消息提醒用户）"
-    permission_level = "friend"
+    # 2026-09-21 生产修复：托付提醒是用户显式请求，不得绑亲密度门槛。
+    # 旧 permission_level=friend（affinity>=2）导致新用户（level 0）调用被拒、
+    # 提醒未落库，pending 却已被标 fulfilled → 「说了会叫却没叫」。
+    permission_level = "public"
     # 编排器终审调度本工具时注入调用归属（_meta），提醒按会话投递
     wants_call_context = True
     parameters_schema = {
@@ -65,7 +68,8 @@ class ReminderTool(BaseTool):
 class CalendarQueryTool(BaseTool):
     name = "query_reminders"
     description = "查询待触发的提醒事项"
-    permission_level = "friend"
+    # 与 set_reminder 同理：查询自己的提醒不应受亲密度门槛限制
+    permission_level = "public"
     wants_call_context = True
     parameters_schema = {
         "type": "object",

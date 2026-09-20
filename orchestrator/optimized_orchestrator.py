@@ -522,10 +522,72 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             ]
         )
         if real_calls:
-            # 分支二：真工具执行（pending 任务即视为完成）；C2 限额已应用
-            if pending and sm is not None:
-                sm.resolve_pending_intent(session_key, "fulfilled")
+            # 2026-09-21：禁止「先标 fulfilled 再执行」——旧实现任何工具
+            # （含 calendar）都会把 pending 标完成，set_reminder 被权限拒绝时
+            # 提醒未落库、状态却已完成 → 到点永不投递。
             results = await asyncio.gather(*(_dispatch(tc) for tc in real_calls))
+            tool_names = [r.get("name", "") for r in results]
+            any_ok = any(
+                bool((r.get("result") or {}).get("success")) for r in results
+            )
+            has_set_reminder = "set_reminder" in tool_names
+            if pending and sm is not None:
+                # 仅当真正写入提醒（set_reminder 成功）或其它真工具成功时才结案
+                if has_set_reminder:
+                    set_ok = any(
+                        bool((r.get("result") or {}).get("success"))
+                        for r in results
+                        if r.get("name") == "set_reminder"
+                    )
+                    if set_ok:
+                        sm.resolve_pending_intent(session_key, "fulfilled")
+                    else:
+                        # 工具失败：保持 pending，允许下一轮重试；记日志
+                        logger.warning(
+                            "[tool_gate] set_reminder 执行失败 session=%s results=%s",
+                            session_key,
+                            [
+                                (r.get("name"), (r.get("result") or {}).get("error"))
+                                for r in results
+                            ],
+                        )
+                elif any_ok and pending.get("intent") != "set_reminder":
+                    sm.resolve_pending_intent(session_key, "fulfilled")
+                elif has_set_reminder is False and pending.get("intent") == "set_reminder":
+                    # 模型调度了别的工具但用户托付是提醒 → 不结案，防假完成
+                    logger.warning(
+                        "[tool_gate] 托付=set_reminder 但调度了 %s，pending 不结案 session=%s",
+                        tool_names, session_key,
+                    )
+                    # 若调度了查询类工具且消息含托付信号，强制补跑 set_reminder
+                    # （用 pending 槽位最优猜测；无时间则不补）
+                    slots = pending.get("slots_json") if isinstance(pending.get("slots_json"), dict) else {}
+                    if not slots:
+                        import json as _json
+                        try:
+                            slots = _json.loads(pending.get("slots_json") or "{}")
+                        except Exception:  # noqa: BLE001
+                            slots = {}
+                    content = str(slots.get("content") or "").strip()
+                    trigger = str(slots.get("trigger_time") or "").strip()
+                    if content and trigger:
+                        forced = await _dispatch({
+                            "function": {
+                                "name": "set_reminder",
+                                "arguments": json.dumps(
+                                    {"content": content, "trigger_time": trigger},
+                                    ensure_ascii=False,
+                                ),
+                            }
+                        })
+                        results.append(forced)
+                        tool_names.append("set_reminder")
+                        if bool((forced.get("result") or {}).get("success")):
+                            sm.resolve_pending_intent(session_key, "fulfilled")
+                            logger.info(
+                                "[tool_gate] 已强制补跑 set_reminder session=%s trigger=%s",
+                                session_key, trigger,
+                            )
             # C1：untrusted 信封 + 失败禁称成功 + C2 结果截断
             try:
                 _cfg = getattr(self, "components", {}).get("config") or {}
@@ -541,8 +603,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 results, chars_max=limits["tool_result_chars_max"]
             )
             logger.info(
-                "[tool_gate] 终审调度工具 session=%s tools=%s",
-                session_key, [r["name"] for r in results],
+                "[tool_gate] 终审调度工具 session=%s tools=%s any_ok=%s",
+                session_key, tool_names, any_ok,
             )
             return wrapped, ""
 

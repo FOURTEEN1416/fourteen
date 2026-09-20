@@ -658,10 +658,14 @@ class ProactiveScheduler:
         hub: ASEHub = self.ase  # type: ignore[assignment]
         user_keys = self._collect_ase_user_keys()
         if not user_keys:
-            logger.debug("ASE tick: 无用户目标，跳过")
+            logger.info("ASE tick: 无用户目标，跳过（hub_known=%s）", hub.known_user_keys())
             return
 
         quiet = self._is_quiet_hours()
+        logger.info(
+            "ASE tick per-user: targets=%d quiet=%s %s",
+            len(user_keys), quiet, user_keys[:8],
+        )
         for user_key in user_keys:
             try:
                 eng = hub.get(user_key)

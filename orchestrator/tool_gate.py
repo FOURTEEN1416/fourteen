@@ -151,6 +151,10 @@ def build_review_messages(
         f"当前时间：{now_beijing()}（北京时间）。",
         "分析用户这句话是否包含对未来的托付（提醒/叫醒/预约/查询提醒等）:",
         "- 信息齐全 → 直接调用对应工具，不要复述确认。",
+        "- 【工具选择】用户托付「提醒/叫起床/到点叫我/定闹钟」→ **必须调用 set_reminder**",
+        "  （参数 content + trigger_time，北京时间 YYYY-MM-DD HH:MM）。",
+        "  禁止只调 calendar/query_reminders 等查询工具来「表示会提醒」——查询不会落库、不会到点投递。",
+        "- 查询已有提醒 → query_reminders；看日程/日期 → calendar。",
         "- 信息不全（典型：缺具体时间）→ 调用 ask_user 问一句，不要猜、不要闲聊、不要空口答应。",
         "- 只是闲聊、没有任何托付 → 一个工具都不调，正常聊天。",
         "- 【硬约束】没有 tool_calls 时，**禁止输出任何承诺句**",
@@ -164,7 +168,7 @@ def build_review_messages(
         rules.append(
             f"待继续任务：用户此前托付了 {pending_slots.get('intent', 'set_reminder')}，"
             f"已收集信息 {pending_slots}，你已经追问 {pending_ask_count} 次。"
-            "把这条新消息和已收集信息合并判断：齐了就调工具；"
+            "把这条新消息和已收集信息合并判断：齐了就调 set_reminder 落库；"
             "用户在回答别人的话题则不调工具正常聊天。"
         )
         if pending_ask_count >= 1:

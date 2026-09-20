@@ -261,7 +261,8 @@ class SchedulerTool(BaseTool):
     """定时提醒与调度"""
     name = "scheduler"
     description = "设置一次性提醒或日程安排"
-    permission_level = "friend"
+    # 2026-09-21：与 set_reminder 对齐，托付类工具不设亲密度门槛
+    permission_level = "public"
     parameters_schema = {
         "type": "object",
         "properties": {
