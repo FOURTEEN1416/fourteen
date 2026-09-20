@@ -21,6 +21,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any
 
+from utils.local_time import local_day_utc_bounds, now_local
+
 logger = logging.getLogger("structured_memory")
 
 # 全局注册表，用于跟踪所有 StructuredMemory 实例，确保程序退出时关闭连接
@@ -542,16 +544,32 @@ class StructuredMemory:
             return [dict(r) for r in rows][::-1]  # 反转成时间正序
 
     def get_chats_today(self) -> list[dict[str, Any]]:
-        """获取今天的聊天"""
+        """获取「今天」（**本地日**）的聊天。
+
+        2026-09-20 修复：原实现用 ``date(created_at) = date('now')`` ——
+        ``created_at`` 由 ``DEFAULT CURRENT_TIMESTAMP`` 写入（UTC），
+        ``date('now')`` 同样是 UTC 日，两者同源但**都不是本地日**：
+        在 UTC+8 上「今天」实际从**本地 08:00** 才换日（凌晨对话被算进昨天），
+        且与按本地日期写入的日记/摘要键**口径脱钩**。
+        现改为应用层按本地日划 UTC 区间（与 ``utils.local_time`` 同源）。
+        """
+        start, end = local_day_utc_bounds()
         with self._conn() as conn:
-            rows = conn.execute(                "SELECT * FROM chat_history WHERE date(created_at) = date('now') ORDER BY created_at ASC"
+            rows = conn.execute(
+                "SELECT * FROM chat_history WHERE created_at >= ? AND created_at < ? "
+                "ORDER BY created_at ASC",
+                (start, end),
             ).fetchall()
             return [dict(r) for r in rows]
 
     def count_chats_today(self) -> int:
-        """今天聊了多少条"""
+        """今天（**本地日**）聊了多少条 —— 口径同 :meth:`get_chats_today`。"""
+        start, end = local_day_utc_bounds()
         with self._conn() as conn:
-            row = conn.execute(                "SELECT COUNT(*) as cnt FROM chat_history WHERE date(created_at) = date('now')"
+            row = conn.execute(
+                "SELECT COUNT(*) as cnt FROM chat_history "
+                "WHERE created_at >= ? AND created_at < ?",
+                (start, end),
             ).fetchone()
             return row["cnt"] if row else 0
 
@@ -559,12 +577,16 @@ class StructuredMemory:
 
     @staticmethod
     def _now_local() -> str:
-        """本地时间字符串（服务器时区 = 北京时间）。
+        """本地时间字符串（与 ``utils.local_time.now_local`` **同源**）。
 
         提醒的时间比较统一走应用层：SQLite ``datetime('now')`` 是 UTC，
-        与 LLM 写入的北京时间字符串差 8 小时（历史缺陷，此处为唯一口径）。
+        与 LLM 写入的北京时间字符串差 8 小时（历史缺陷）。
+
+        ⚠️ 2026-09-20：原先直接 ``datetime.now()``（**依赖主机时区**，在非
+        UTC+8 主机上会静默错 8 小时且无回退）—— 现统一委托公共真源，
+        自动获得 UTC+8 回退，与 ASE/记忆管线共用同一时钟。
         """
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return now_local().strftime("%Y-%m-%d %H:%M:%S")
 
     def add_reminder(
         self,

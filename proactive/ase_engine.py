@@ -502,7 +502,8 @@ class MessageGenerator:
             )
 
         if self._proactive_prompt:
-            now_str = datetime.now().strftime("%H:%M")  # noqa: DTZ005
+            # 2026-09-20：墙钟串统一走公共真源（原裸 datetime.now() 依赖主机时区，无回退）
+            now_str = now_local().strftime("%H:%M")
             prompt = self._proactive_prompt.format(
                 # proactive.yaml 模板需要的变量
                 user_name="你",
@@ -519,7 +520,7 @@ class MessageGenerator:
             if avoid_block:
                 prompt = f"{prompt}\n{avoid_block}"
         else:
-            now_time = datetime.now().strftime("%H:%M")  # noqa: DTZ005
+            now_time = now_local().strftime("%H:%M")
             prompt = f"""作为"十四"，你想主动给用户发一条消息。
 
 当前情境：

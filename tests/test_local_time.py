@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from utils import local_time
-from utils.local_time import now_local
+from utils.local_time import local_day_utc_bounds, now_local
 
 
 class TestNowLocal:
@@ -149,3 +149,111 @@ def test_ase_local_now_delegates_to_shared_clock() -> None:
     src = inspect.getsource(ase_engine._local_now)
     assert "now_local()" in src
     assert "altzone" not in src, "_local_now 不应再自带时区探测逻辑（已提为公共真源）"
+
+
+_SQL_FMT = "%Y-%m-%d %H:%M:%S"
+
+
+class TestLocalDayUtcBounds:
+    """「本地当天」→ UTC 区间的换算契约（SQLite 时间戳格式，左闭右开）。"""
+
+    def test_spans_exactly_24h(self) -> None:
+        start, end = local_day_utc_bounds()
+        delta = datetime.strptime(end, _SQL_FMT) - datetime.strptime(start, _SQL_FMT)
+        assert delta == timedelta(days=1)
+
+    def test_current_instant_falls_inside_today_window(self) -> None:
+        """不变量（与主机时区无关）：此刻必然落在「今天」的窗口内。"""
+        start, end = local_day_utc_bounds()
+        now_utc = datetime.now(tz=timezone.utc).replace(tzinfo=None).strftime(_SQL_FMT)
+        assert start <= now_utc < end, f"{start} <= {now_utc} < {end}"
+
+    def test_explicit_now_is_inside_its_own_window(self) -> None:
+        """显式传入任意本地时刻，该时刻的 UTC 读数必须落在自己那天的窗口内。
+
+        独立推导偏移（不用被测函数的内部口径）：`start` 必然等于「本地零点 − 偏移」，
+        故 `本地零点 − start` 就是偏移本身。
+        """
+        for local in (
+            datetime(2026, 9, 20, 0, 0, 1),   # 本地日凌晨（UTC 仍在昨日）
+            datetime(2026, 9, 20, 12, 0, 0),
+            datetime(2026, 9, 20, 23, 59, 59),
+        ):
+            start, end = local_day_utc_bounds(local)
+            midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+            offset = midnight - datetime.strptime(start, _SQL_FMT)
+            # 时区偏移必须是整刻钟的倍数（合法时区性质）—— 防止"偏移算成 0"
+            assert offset % timedelta(minutes=15) == timedelta(0), f"异常偏移 {offset}"
+            utc_read = (local - offset).strftime(_SQL_FMT)  # 本地读数 → UTC 读数
+            assert start <= utc_read < end, f"local={local} start={start} end={end}"
+
+
+class TestStructuredMemoryTodayUsesLocalDay:
+    """真实 SQL 回归：`get_chats_today`/`count_chats_today` 必须按**本地日**划窗。
+
+    旧实现 `date(created_at) = date('now')` 是 UTC 日 —— 在 UTC+8 上"今天"
+    从本地 08:00 才换日，凌晨对话被算进昨天，且与按本地日期写入的日记键脱钩。
+    """
+
+    @staticmethod
+    def _insert(sm, rows: list[tuple[str, str]]) -> None:
+        with sm._conn(write=True) as conn:  # noqa: SLF001
+            for ts, text in rows:
+                conn.execute(
+                    "INSERT INTO chat_history (role, content, created_at) VALUES (?, ?, ?)",
+                    ("user", text, ts),
+                )
+            conn.commit()
+
+    def test_window_is_left_closed_right_open(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        from datetime import timedelta as _td
+
+        from shisi.memory.legacy.structured_memory import StructuredMemory
+
+        sm = StructuredMemory(str(tmp_path / "today.db"))
+        try:
+            start, end = local_day_utc_bounds()
+            start_dt = datetime.strptime(start, _SQL_FMT)
+            end_dt = datetime.strptime(end, _SQL_FMT)
+
+            self._insert(
+                sm,
+                [
+                    ((start_dt - _td(seconds=1)).strftime(_SQL_FMT), "前一天最后一秒"),
+                    (start, "当天起点（应计入）"),
+                    ((end_dt - _td(seconds=1)).strftime(_SQL_FMT), "当天最后一秒（应计入）"),
+                    (end, "次日起点（不应计入）"),
+                ],
+            )
+
+            assert sm.count_chats_today() == 2
+            today = sm.get_chats_today()
+            # ⚠️ 只断言 count 会与实际数据巧合（旧口径在多数时刻也能凑出 2）；
+            # 因此必须断言**取到的行本身**，并加一条两方法同窗口的一致性不变量。
+            assert [r["content"] for r in today] == [
+                "当天起点（应计入）",
+                "当天最后一秒（应计入）",
+            ]
+            assert sm.count_chats_today() == len(today), "两个方法必须使用同一窗口"
+        finally:
+            sm.close()
+
+    def test_local_early_morning_is_counted_as_today(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        """本地凌晨 00:00–08:00 的对话属于「今天」（旧实现会算成昨天）。
+
+        构造方式与运行时刻无关：取窗口起点 +1 秒 —— 该时刻的 UTC 日期必然是
+        前一日（UTC+8 下），旧实现必然漏计。
+        """
+        from datetime import timedelta as _td
+
+        from shisi.memory.legacy.structured_memory import StructuredMemory
+
+        sm = StructuredMemory(str(tmp_path / "early.db"))
+        try:
+            start, _end = local_day_utc_bounds()
+            early = (datetime.strptime(start, _SQL_FMT) + _td(seconds=1)).strftime(_SQL_FMT)
+            self._insert(sm, [(early, "本地凌晨，UTC 日期还是昨天")])
+            assert sm.count_chats_today() == 1, "本地日凌晨的对话必须计入今天"
+        finally:
+            sm.close()
+

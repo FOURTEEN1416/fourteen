@@ -19,8 +19,9 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
 from typing import Any
+
+from utils.local_time import now_local
 
 # ── L0 晋级线 ─────────────────────────────────────────────
 
@@ -122,8 +123,13 @@ ASK_USER_TOOL = {
 
 
 def now_beijing() -> str:
-    """当前服务器本地时间（=北京时间）的可读串，注入终审 prompt 供模型换算相对时间。"""
-    return datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+    """当前本地时间（=北京时间）的可读串，注入终审 prompt 供模型换算相对时间。
+
+    ⚠️ 2026-09-20：原用裸 ``datetime.now()``（**依赖主机时区**，非 UTC+8 主机上
+    会静默错 8 小时）—— 现统一走 ``utils.local_time.now_local``（公共真源，
+    自带 UTC+8 回退），保证注入给模型的"现在"在任何部署环境都正确。
+    """
+    return now_local().strftime("%Y-%m-%d %H:%M (%A)")
 
 
 def build_review_messages(
