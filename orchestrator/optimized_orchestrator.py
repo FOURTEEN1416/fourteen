@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from my_character.emotion_engine import EmotionEngine
+from orchestrator import tool_gate
 from orchestrator._init_mixin import _InitPhasesMixin
 from orchestrator._stream_mixin import _StreamPipelineMixin
 from orchestrator.session_locks import SessionLockManager
@@ -356,30 +357,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         except (TypeError, ValueError):
             return 0
 
-    @staticmethod
-    def _tool_intent_names(query: str) -> set[str]:
-        """用零成本规则筛选明显工具意图，普通聊天不额外调用一次模型。"""
-        text = query.strip().lower()
-        if not text:
-            return set()
-        groups = {
-            "weather": ("天气", "气温", "温度", "下雨", "降雨", "weather"),
-            "search": ("搜索", "查一下", "查询资料", "网上找", "最新消息", "新闻", "search"),
-            "calendar": ("今天几号", "星期几", "当前日期", "现在几点", "日期", "calendar"),
-            "calculator": ("计算", "算一下", "等于多少", "calculator"),
-            "set_reminder": ("提醒我", "设个提醒", "到点叫我", "remind"),
-            "query_reminders": ("有哪些提醒", "查看提醒", "我的提醒"),
-            "time_awareness": ("节假日", "农历", "工作日", "放假吗"),
-            "memory": ("你还记得", "记得我", "我的偏好", "关于我的记忆"),
-            "character_card": ("创建角色", "角色卡", "人物资料", "构建角色"),
-            "web_summary": ("总结网页", "概括网页", "这个链接", "网页摘要", "http://", "https://"),
-            "image_gen": ("生成图片", "画一张", "画个", "生成一张图", "image"),
-            "scheduler": ("安排日程", "创建日程", "定时任务"),
-        }
-        return {
-            name for name, keywords in groups.items()
-            if any(keyword in text for keyword in keywords)
-        }
+    # （旧 _tool_intent_names 关键词裁决已删除：关键词从"裁决"降级为"晋级"，
+    #  规则 owner 迁至 orchestrator/tool_gate.should_escalate —— 2026-09-20）
 
     async def _run_tools_if_needed(
         self,
@@ -388,41 +367,100 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         system_prompt: str,
         history: list | None,
         affinity_level: int = 0,
-    ) -> str:
-        """只对明显工具意图调用模型，并并行执行互不依赖的工具。"""
+        session_key: str = "",
+        user_id: int | None = None,
+    ) -> tuple[str, str]:
+        """三级意图管线：L0 零成本晋级线 → L1 LLM 终审（function calling）
+        → 工具执行。
+
+        Args:
+            session_key: 会话键（微信侧即 ``owner:peer@im.wechat``），用于
+                澄清状态机归属与提醒投递目标。
+            user_id: 用户 id，随 ``_meta`` 注入需要归属的工具（服务端注入，
+                不由 LLM 决定归属）。
+
+        Returns:
+            ``(tool_results, direct_reply)`` —— ``tool_results`` 非空时按旧惯例
+            拼入 system_prompt 交主链生成；``direct_reply`` 非空时直接作为本轮
+            回复（澄清提问场景，跳过主链避免二次生成）。
+        """
         tools = self.components.get("tools")
         if not tools or not tools.registry or llm is None:
-            return ""
+            return "", ""
 
-        intent_names = self._tool_intent_names(query)
-        if not intent_names:
-            return ""
-        schemas = [
-            schema for schema in tools.registry.get_tools_by_permission(affinity_level)
-            if schema.get("function", {}).get("name") in intent_names
-        ]
-        if not schemas:
-            return ""
+        sm = getattr(self.components.get("memory"), "structured_memory", None)
+        pending: dict | None = None
+        if sm is not None and session_key:
+            try:
+                pending = sm.get_active_pending_intent(session_key)
+            except Exception:  # noqa: BLE001
+                logger.debug("查询待澄清任务失败", exc_info=True)
 
-        try:
-            tool_resp = llm.chat_with_tools(
-                query=query,
-                system_prompt=system_prompt,
-                history=history or [],
-                tools=schemas,
-                temperature=0.85,
-                max_tokens=2048,
+        # L0：零成本晋级线——未命中直接走主聊天链路（普通闲聊零影响）
+        if not tool_gate.should_escalate(query, has_pending_intent=pending is not None):
+            return "", ""
+
+        pending_slots: dict | None = None
+        pending_ask_count = 0
+        if pending:
+            try:
+                pending_slots = {
+                    "intent": pending.get("intent", "set_reminder"),
+                    **json.loads(pending.get("slots_json") or "{}"),
+                }
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pending_slots = {"intent": pending.get("intent", "set_reminder")}
+            pending_ask_count = int(pending.get("ask_count") or 0)
+
+        review_system, review_query = tool_gate.build_review_messages(
+            query,
+            system_prompt,
+            history,
+            pending_slots=pending_slots,
+            pending_ask_count=pending_ask_count,
+        )
+
+        async def _review_call(extra_rule: str = "") -> dict[str, Any] | None:
+            """L1 终审调用（独立低温度；失败降级主链，不阻塞聊天）"""
+            try:
+                resp = llm.chat_with_tools(
+                    query=review_query,
+                    system_prompt=(
+                        review_system + extra_rule if extra_rule else review_system
+                    ),
+                    history=history or [],
+                    tools=[
+                        *tools.registry.get_tools_by_permission(affinity_level),
+                        tool_gate.ASK_USER_TOOL,
+                    ],
+                    temperature=0.3,
+                    max_tokens=1024,
+                )
+                if inspect.isawaitable(resp):
+                    resp = await asyncio.wait_for(resp, timeout=15.0)
+                return resp if isinstance(resp, dict) else None
+            except Exception as e:  # noqa: BLE001
+                logger.debug("工具终审失败，降级主链: %s", e)
+                return None
+
+        resp = await _review_call()
+        if resp is None:
+            return "", ""
+        tool_calls = resp.get("tool_calls") or []
+
+        # 防假承诺：声称会做却没调任何工具（生产实证「听到啦」）→ 强制复核一次
+        if not tool_calls and tool_gate.contains_promise(resp.get("content") or ""):
+            logger.info("[tool_gate] 拦截空口承诺，强制复核一次")
+            resp = await _review_call(
+                extra_rule=(
+                    "\n【系统复核】你上一轮答应了用户却没有调用任何工具。"
+                    "重新判断：信息齐全必须真的调用工具；不全就调 ask_user 提问；"
+                    "做不到承诺就不要承诺。"
+                )
             )
-            if inspect.isawaitable(tool_resp):
-                tool_resp = await asyncio.wait_for(tool_resp, timeout=15.0)
-            tool_calls = tool_resp.get("tool_calls") if tool_resp else None
-            if not tool_calls:
-                return ""
-        except Exception as e:  # noqa: BLE001
-            # 旧写法 `except (asyncio.TimeoutError, Exception)`：asyncio.TimeoutError
-            # 本就是 Exception 子类，元组写法纯冗余（易误读为"两类异常分别处理"）。
-            logger.debug("工具意图识别失败: %s", e)
-            return ""
+            if resp is None:
+                return "", ""
+            tool_calls = resp.get("tool_calls") or []
 
         async def _dispatch(tc: dict[str, Any]) -> dict[str, Any]:
             fn = tc.get("function", {}) if isinstance(tc, dict) else {}
@@ -432,6 +470,13 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 args = json.loads(args_raw) if isinstance(args_raw, str) else dict(args_raw)
             except (TypeError, ValueError, json.JSONDecodeError):
                 args = {}
+            # 服务端注入调用归属（仅声明需要的工具；不由 LLM 决定归属）
+            tool_inst = (
+                tools.registry.get(name)
+                if hasattr(tools.registry, "get") else None
+            )
+            if tool_inst is not None and getattr(tool_inst, "wants_call_context", False):
+                args["_meta"] = {"session_key": session_key, "user_id": user_id}
             try:
                 result = await asyncio.to_thread(
                     tools.dispatch, name, args, affinity_level=affinity_level,
@@ -441,12 +486,54 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 result = ToolResult(False, error="tool_execution_failed")
             return {"name": name, "result": result.to_dict()}
 
-        results = await asyncio.gather(*(_dispatch(tc) for tc in tool_calls))
-        summary = "\n".join(
-            f"[{r['name']}] {json.dumps(r['result'], ensure_ascii=False)}"
-            for r in results
-        )
-        return f"\n\n[工具调用结果]\n{summary}\n请根据以上结果自然地回复用户。"
+        # 分支一：ask_user 澄清（只有 ask_user、无真工具时才走这里）
+        ask = tool_gate.extract_ask_user(tool_calls)
+        if ask is not None:
+            if sm is None or not session_key:
+                return "", ""
+            if pending_ask_count >= 2:
+                # 两轮澄清仍未成 → 放弃，回归闲聊（防无限追问骚扰）
+                sm.resolve_pending_intent(session_key, "cancelled")
+                return "", ""
+            known = ask.get("known") if isinstance(ask.get("known"), dict) else {}
+            slots = {"intent": "set_reminder", **(known or {})}
+            sm.upsert_pending_intent(
+                session_key,
+                slots.get("intent", "set_reminder"),
+                slots,
+                pending_ask_count + 1,
+                str(ask.get("question") or ""),
+                user_id=user_id,
+            )
+            logger.info(
+                "[tool_gate] 澄清提问 session=%s ask_count=%s missing=%s",
+                session_key, pending_ask_count + 1, ask.get("missing"),
+            )
+            return "", str(ask.get("question") or "信息有点不全，我再跟你确认下哈。")
+
+        real_calls = [
+            tc for tc in tool_calls
+            if (tc.get("function", {}) or {}).get("name") != "ask_user"
+        ]
+        if real_calls:
+            # 分支二：真工具执行（pending 任务即视为完成）
+            if pending and sm is not None:
+                sm.resolve_pending_intent(session_key, "fulfilled")
+            results = await asyncio.gather(*(_dispatch(tc) for tc in real_calls))
+            summary = "\n".join(
+                f"[{r['name']}] {json.dumps(r['result'], ensure_ascii=False)}"
+                for r in results
+            )
+            logger.info(
+                "[tool_gate] 终审调度工具 session=%s tools=%s",
+                session_key, [r["name"] for r in results],
+            )
+            return f"\n\n[工具调用结果]\n{summary}\n请根据以上结果自然地回复用户。", ""
+
+        # 分支三：模型判纯闲聊（无承诺、无工具）——pending 存在说明用户转移话题
+        if pending and sm is not None:
+            sm.resolve_pending_intent(session_key, "cancelled")
+        return "", ""
 
     def _get_session_lock(self, session_id: str) -> asyncio.Lock:
         """获取 per-session 异步锁，确保不同 session 可并行处理。
@@ -576,6 +663,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         session_id: str,
         character_id: str,
         emotion_engine: Any | None = None,
+        user_id: int | None = None,
     ) -> dict[str, Any]:
         """共享预处理逻辑。
 
@@ -714,15 +802,17 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         if persona_enhancement:
             system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
 
-        # 工具调用
+        # 工具调用（三级意图管线；direct_reply 为澄清提问，直接作为本轮回复）
         affinity_level = self._get_affinity_level(emotion_state)
         llm = self.components.get("llm")
-        tool_results = await self._run_tools_if_needed(
+        tool_results, direct_reply = await self._run_tools_if_needed(
             llm,
             user_msg_clean,
             system_prompt,
             chat_history,
             affinity_level=affinity_level,
+            session_key=session_id,
+            user_id=user_id,
         )
         if tool_results:
             system_prompt = f"{system_prompt}\n\n{tool_results}"
@@ -772,6 +862,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             "chat_history": chat_history,
             "affinity_level": affinity_level,
             "user_msg_clean": user_msg_clean,
+            "direct_reply": direct_reply,
         }
 
     def _after_process(
@@ -894,27 +985,33 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     session_id,
                     character_id,
                     emotion_engine=emotion_engine,
+                    user_id=user_id,
                 )
                 emotion_state = ctx["emotion_state"]
                 system_prompt = ctx["system_prompt"]
                 chat_history = ctx["chat_history"]
 
-                # ── 主 LLM 对话（带 30s 超时保护，使用用户级或全局 gateway） ──
-                try:
-                    reply = await asyncio.wait_for(
-                        request_llm.chat(
-                            query=user_msg_clean,
-                            system_prompt=system_prompt,
-                            history=chat_history,
-                            temperature=0.85,
-                            max_tokens=2048,
-                            attachments=attachments,
-                        ),
-                        timeout=30.0,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning("LLM 调用超时 (30s), session=%s", session_id)
-                    return {"reply": "抱歉，处理超时，请稍后重试", "error": "timeout"}
+                # ── 澄清直复通道：终审产出澄清提问时跳过主链生成 ──
+                # （提问文本已带角色口吻，再过一次主链反而会稀释追问意图）
+                if ctx.get("direct_reply"):
+                    reply = ctx["direct_reply"]
+                else:
+                    # ── 主 LLM 对话（带 30s 超时保护，使用用户级或全局 gateway） ──
+                    try:
+                        reply = await asyncio.wait_for(
+                            request_llm.chat(
+                                query=user_msg_clean,
+                                system_prompt=system_prompt,
+                                history=chat_history,
+                                temperature=0.85,
+                                max_tokens=2048,
+                                attachments=attachments,
+                            ),
+                            timeout=30.0,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning("LLM 调用超时 (30s), session=%s", session_id)
+                        return {"reply": "抱歉，处理超时，请稍后重试", "error": "timeout"}
 
                 # === 一致性检查（复用 my_character/consistency_checker.py） ===
                 from my_character.consistency_checker import check_and_correct_reply

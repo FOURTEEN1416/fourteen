@@ -116,6 +116,8 @@ class ProactiveScheduler:
         self._channels: dict[str, Callable[[], Any]] = {}        # name → sender_factory
         self._channel_instances: dict[str, Callable | None] = {}  # name → instantiated sender
         self._health_check_interval = 60  # 秒
+        # 提醒到期投递任务（api 装配层注入；每分钟轮询，豁免静默时段）
+        self._reminder_task: Callable[[], None] | None = None
         self._quiet_hours = (23, 7)       # 23:00-07:00 免打扰（web 端可调）
         # 重要日期当日幂等记录（每小时任务 + 00:05 维护可能同日命中）
         self._important_dates_sent: set[str] = set()
@@ -150,6 +152,25 @@ class ProactiveScheduler:
         except Exception as e:
             logger.warning("消息通道初始化失败: %s - %s（稍后重试）", name, e)
             self._channel_instances[name] = None
+
+    def register_reminder_task(self, task: Callable[[], None]) -> None:
+        """注册提醒到期轮询任务（每分钟；静默豁免与定向投递由 task 内部负责）。
+
+        可在 start() 之后调用（api 装配时序晚于 scheduler.start()），
+        此时立即挂 job；start() 之前注册则由 start() 统一挂。
+        """
+        self._reminder_task = task
+        if self._scheduler is not None and getattr(self._scheduler, "running", False):
+            self._scheduler.add_job(
+                self._safe_job_wrapper(task, "reminder_check"),
+                IntervalTrigger(minutes=1),
+                id="reminder_check",
+                name="提醒到期投递检查",
+                replace_existing=True,
+                misfire_grace_time=30,
+                coalesce=True,
+            )
+            logger.info("提醒到期投递任务已注册（scheduler 运行中，立即挂载）")
 
     def _safe_job_wrapper(self, job_fn: Callable, job_name: str) -> Callable:
         def wrapper(*args, **kwargs):
@@ -244,6 +265,21 @@ class ProactiveScheduler:
                 misfire_grace_time=300,
                 coalesce=True,
             )
+
+            # 7. 提醒到期投递检查（每分钟；豁免静默时段）
+            #    叫醒类提醒（如 06:00）恰落在静默窗内，绝不能套用主动消息的
+            #    静默闸门 —— 用户明确要求「六点叫我起床」却收不到，即此缺陷。
+            #    task 由 api 装配层注入（register_reminder_task）；未注入则不挂。
+            if self._reminder_task is not None:
+                self._scheduler.add_job(
+                    self._safe_job_wrapper(self._reminder_task, "reminder_check"),
+                    IntervalTrigger(minutes=1),
+                    id="reminder_check",
+                    name="提醒到期投递检查",
+                    replace_existing=True,
+                    misfire_grace_time=30,
+                    coalesce=True,
+                )
 
             self._scheduler.start()
             self._last_check_time = datetime.now(tz=timezone.utc)

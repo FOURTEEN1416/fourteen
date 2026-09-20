@@ -11,12 +11,14 @@
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 import os
 import sqlite3
 import threading
 import time
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from typing import Any
 
 logger = logging.getLogger("structured_memory")
@@ -164,8 +166,31 @@ class StructuredMemory:
                     trigger_time TIMESTAMP,
                     active BOOLEAN DEFAULT 1,
                     triggered BOOLEAN DEFAULT 0,
+                    session_key TEXT DEFAULT '',
+                    user_id INTEGER,
+                    status TEXT DEFAULT 'pending',
+                    delivered_at TIMESTAMP,
+                    fail_count INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS pending_intents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_key TEXT NOT NULL,
+                    user_id INTEGER,
+                    intent TEXT NOT NULL DEFAULT 'set_reminder',
+                    slots_json TEXT NOT NULL DEFAULT '{}',
+                    ask_count INTEGER NOT NULL DEFAULT 0,
+                    last_question TEXT DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_pending_intents_session
+                    ON pending_intents(session_key, status);
+                CREATE INDEX IF NOT EXISTS idx_reminders_due
+                    ON reminders(trigger_time, active, triggered);
 
                 CREATE TABLE IF NOT EXISTS sessions (
                     id TEXT PRIMARY KEY,
@@ -284,7 +309,32 @@ class StructuredMemory:
                     VALUES ('delete', old.id, old.fact);
                 END;
             """)
+            self._migrate_reminders_columns(conn)
             conn.commit()
+
+    def _migrate_reminders_columns(self, conn) -> None:
+        """老库幂等迁移：reminders 补列（会话归属/投递状态）。
+
+        存量行 session_key 保持空串——轮询只投递 session_key 非空的提醒，
+        历史无主提醒自然静默（等价于旧行为：存了但永远不触发）。
+        """
+        existing = {
+            row["name"] for row in conn.execute("PRAGMA table_info(reminders)").fetchall()
+        }
+        migrations = {
+            "session_key": "ALTER TABLE reminders ADD COLUMN session_key TEXT DEFAULT ''",
+            "user_id": "ALTER TABLE reminders ADD COLUMN user_id INTEGER",
+            "status": "ALTER TABLE reminders ADD COLUMN status TEXT DEFAULT 'pending'",
+            "delivered_at": "ALTER TABLE reminders ADD COLUMN delivered_at TIMESTAMP",
+            "fail_count": "ALTER TABLE reminders ADD COLUMN fail_count INTEGER DEFAULT 0",
+        }
+        for column, ddl in migrations.items():
+            if column not in existing:
+                conn.execute(ddl)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reminders_due "
+            "ON reminders(trigger_time, active, triggered)"
+        )
 
     @contextmanager
     def _conn(self, write: bool = False):
@@ -507,31 +557,178 @@ class StructuredMemory:
 
     # ── 提醒 ──────────────────────────────────────────────
 
-    def add_reminder(self, content: str, trigger_time: str | None = None) -> int:
-        """添加提醒"""
+    @staticmethod
+    def _now_local() -> str:
+        """本地时间字符串（服务器时区 = 北京时间）。
+
+        提醒的时间比较统一走应用层：SQLite ``datetime('now')`` 是 UTC，
+        与 LLM 写入的北京时间字符串差 8 小时（历史缺陷，此处为唯一口径）。
+        """
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def add_reminder(
+        self,
+        content: str,
+        trigger_time: str | None = None,
+        session_key: str = "",
+        user_id: int | None = None,
+    ) -> int:
+        """添加提醒（session_key 为空 = 无投递目标，轮询不会投递它）"""
         with self._conn(write=True) as conn:
-            cursor = conn.execute(                "INSERT INTO reminders (content, trigger_time) VALUES (?, ?)",
-                (content, trigger_time),
+            cursor = conn.execute(
+                "INSERT INTO reminders (content, trigger_time, session_key, user_id) "
+                "VALUES (?, ?, ?, ?)",
+                (content, trigger_time, session_key, user_id),
             )
             conn.commit()
             return cursor.lastrowid  # type: ignore[no-any-return]
 
-    def get_pending_reminders(self) -> list[dict[str, Any]]:
-        """获取待触发的提醒"""
+    def get_pending_reminders(self, session_key: str = "") -> list[dict[str, Any]]:
+        """查询未触发的提醒（query 工具用；session_key 空 = 不过滤）"""
         with self._conn() as conn:
-            rows = conn.execute(                "SELECT * FROM reminders WHERE active = 1 AND triggered = 0 "
-                "AND (trigger_time IS NULL OR trigger_time <= datetime('now')) "
-                "ORDER BY created_at ASC"
+            sql = (
+                "SELECT * FROM reminders WHERE active = 1 AND triggered = 0 "
+                "AND trigger_time IS NOT NULL"
+            )
+            params: list[Any] = []
+            if session_key:
+                sql += " AND session_key = ?"
+                params.append(session_key)
+            sql += " ORDER BY trigger_time ASC"
+            rows = conn.execute(sql, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_due_reminders(self, now_local: str | None = None) -> list[dict[str, Any]]:
+        """轮询专用：已到期且具备投递目标的提醒（北京时间应用层比较）"""
+        now_local = now_local or self._now_local()
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM reminders WHERE active = 1 AND triggered = 0 "
+                "AND status = 'pending' AND session_key != '' "
+                "AND trigger_time IS NOT NULL AND trigger_time <= ? "
+                "ORDER BY trigger_time ASC",
+                (now_local,),
             ).fetchall()
             return [dict(r) for r in rows]
 
-    def mark_reminder_triggered(self, reminder_id: int) -> None:
-        """标记提醒已触发"""
+    def mark_reminder_result(self, reminder_id: int, delivered: bool) -> None:
+        """记录投递结果：成功=已触发；失败累计，3 次后判死（可查不可发）"""
+        now = self._now_local()
         with self._conn(write=True) as conn:
-            conn.execute(                "UPDATE reminders SET triggered = 1 WHERE id = ?",
-                (reminder_id,),
+            if delivered:
+                conn.execute(
+                    "UPDATE reminders SET triggered = 1, status = 'delivered', "
+                    "delivered_at = ? WHERE id = ?",
+                    (now, reminder_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE reminders SET fail_count = fail_count + 1, "
+                    "status = CASE WHEN fail_count + 1 >= 3 "
+                    "THEN 'failed' ELSE status END, "
+                    "active = CASE WHEN fail_count + 1 >= 3 "
+                    "THEN 0 ELSE active END WHERE id = ?",
+                    (reminder_id,),
+                )
+            conn.commit()
+
+    def mark_reminder_triggered(self, reminder_id: int) -> None:
+        """标记提醒已触发（兼容旧签名）"""
+        self.mark_reminder_result(reminder_id, delivered=True)
+
+    # ── 澄清任务状态机（pending_intents）──────────────────
+
+    _PENDING_INTENT_TTL_MIN = 15
+
+    def upsert_pending_intent(
+        self,
+        session_key: str,
+        intent: str,
+        slots: dict[str, Any],
+        ask_count: int,
+        last_question: str = "",
+        user_id: int | None = None,
+        ttl_minutes: int = _PENDING_INTENT_TTL_MIN,
+    ) -> int:
+        """记录/更新一条待澄清任务（同会话只保留最新一条）"""
+        now = datetime.now()
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        expires = (now + timedelta(minutes=ttl_minutes)).strftime("%Y-%m-%d %H:%M:%S")
+        with self._conn(write=True) as conn:
+            row = conn.execute(
+                "SELECT id FROM pending_intents "
+                "WHERE session_key = ? AND status = 'active'",
+                (session_key,),
+            ).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE pending_intents SET intent = ?, slots_json = ?, "
+                    "ask_count = ?, last_question = ?, updated_at = ?, expires_at = ? "
+                    "WHERE id = ?",
+                    (
+                        intent,
+                        json.dumps(slots, ensure_ascii=False),
+                        ask_count,
+                        last_question,
+                        now_str,
+                        expires,
+                        row["id"],
+                    ),
+                )
+                return row["id"]  # type: ignore[no-any-return]
+            cursor = conn.execute(
+                "INSERT INTO pending_intents (session_key, user_id, intent, slots_json, "
+                "ask_count, last_question, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    session_key,
+                    user_id,
+                    intent,
+                    json.dumps(slots, ensure_ascii=False),
+                    ask_count,
+                    last_question,
+                    expires,
+                ),
             )
             conn.commit()
+            return cursor.lastrowid  # type: ignore[no-any-return]
+
+    def get_active_pending_intent(self, session_key: str) -> dict[str, Any] | None:
+        """取会话当前待澄清任务；过期的顺带惰性置为 expired"""
+        with self._conn(write=True) as conn:
+            row = conn.execute(
+                "SELECT * FROM pending_intents "
+                "WHERE session_key = ? AND status = 'active'",
+                (session_key,),
+            ).fetchone()
+            if row and row["expires_at"] and row["expires_at"] <= self._now_local():
+                conn.execute(
+                    "UPDATE pending_intents SET status = 'expired' WHERE id = ?",
+                    (row["id"],),
+                )
+                conn.commit()
+                return None
+            return dict(row) if row else None
+
+    def resolve_pending_intent(self, session_key: str, status: str = "fulfilled") -> None:
+        """关闭会话的待澄清任务（fulfilled / cancelled）"""
+        with self._conn(write=True) as conn:
+            conn.execute(
+                "UPDATE pending_intents SET status = ?, updated_at = ? "
+                "WHERE session_key = ? AND status = 'active'",
+                (status, self._now_local(), session_key),
+            )
+            conn.commit()
+
+    def expire_stale_intents(self) -> int:
+        """批量过期超时任务（调度器周期调用；返回过期条数）"""
+        with self._conn(write=True) as conn:
+            cursor = conn.execute(
+                "UPDATE pending_intents SET status = 'expired', updated_at = ? "
+                "WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= ?",
+                (self._now_local(), self._now_local()),
+            )
+            conn.commit()
+            return cursor.rowcount  # type: ignore[no-any-return]
     # ── 统计 ──────────────────────────────────────────────
 
     def get_stats(self) -> dict[str, Any]:

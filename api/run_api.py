@@ -228,6 +228,60 @@ if _scheduler is not None:
     _scheduler.register_channel("wechat", _wechat_sender_factory)
     logger.info("已向主动消息调度器注册 websocket/wechat 通道")
 
+    # ── 提醒到期投递任务（每分钟轮询；豁免静默时段；定向投递到发起会话）──
+    # 2026-09-20：修复「六点叫起床」事故——旧提醒链路只写库不触发（无轮询）、
+    # 关键词裁决漏检意图、SQL UTC 与北京时间差 8 小时、投递目标缺失。
+    def _install_reminder_delivery() -> None:
+        from proactive.reminder_delivery import ReminderDeliveryTask
+
+        sm = getattr(orchestrator.components.get("memory"), "structured_memory", None)
+        if sm is None:
+            logger.warning("提醒投递未装配：structured_memory 不可用")
+            return
+        registry_holder: dict[str, object] = {}
+
+        def _wechat_send(owner_id: int, peer: str, text: str) -> bool:
+            from wechat_direct.connector_registry import get_registry
+
+            registry = registry_holder.get("r") or get_registry()
+            registry_holder["r"] = registry
+            for uid, _slot, conn in registry.all():
+                if (
+                    uid == owner_id
+                    and getattr(conn, "token", "")
+                    and conn.send_text(text, to_user=peer)
+                ):
+                    return True
+            return False
+
+        def _ws_send(text: str) -> bool:
+            ws_server = _ws_holder.get("ws")
+            if not isinstance(ws_server, WebSocketServer):
+                return False
+            try:
+                ws_server.broadcast_proactive(text)
+                return True
+            except Exception as e:  # noqa: BLE001
+                logger.warning("提醒 websocket 投递失败: %s", e)
+                return False
+
+        persona = orchestrator.components.get("persona")
+        character_name = getattr(persona, "current_character_name", "") or ""
+        task = ReminderDeliveryTask(
+            sm,
+            llm=orchestrator.components.get("llm"),
+            wechat_sender=_wechat_send,
+            ws_sender=_ws_send,
+            character_name=str(character_name),
+        )
+        _scheduler.register_reminder_task(task)
+        logger.info("提醒到期投递任务已装配（每分钟轮询，豁免静默时段）")
+
+    try:
+        _install_reminder_delivery()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("提醒投递装配失败（不影响其他通道）: %s", e)
+
 # ── 自动恢复微信连接（每人独立通道） ──
 # 2026-09-19：不再读全局 ~/.weixin_cow_credentials.json 作为用户通道真源。
 # 只恢复 data/wechat_sessions/<user_id>/slotN/ 下已有凭证的通道；

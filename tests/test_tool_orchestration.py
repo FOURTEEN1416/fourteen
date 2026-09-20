@@ -40,6 +40,7 @@ class _Tools:
 
 
 def test_normal_chat_does_not_pay_tool_intent_llm_call():
+    """普通闲聊不命中晋级线 → 不发起终审调用（L0 零成本保留）。"""
     orch = OptimizedOrchestrator()
     tools = _Tools()
     llm = SimpleNamespace(chat_with_tools=lambda **kwargs: (_ for _ in ()).throw(
@@ -49,11 +50,12 @@ def test_normal_chat_does_not_pay_tool_intent_llm_call():
 
     result = asyncio.run(orch._run_tools_if_needed(llm, "你好呀", "system", []))
 
-    assert result == ""
+    assert result == ("", "")
     assert tools.calls == []
 
 
-def test_async_tool_intent_call_is_awaited_and_dispatches_filtered_schema():
+def test_query_intent_escalates_and_dispatches_with_ask_user_schema():
+    """查询意图晋级 → LLM 终审 → 真工具执行；schema 含全量工具 + ask_user。"""
     orch = OptimizedOrchestrator()
     tools = _Tools()
     seen: dict = {}
@@ -72,7 +74,7 @@ def test_async_tool_intent_call_is_awaited_and_dispatches_filtered_schema():
         }
 
     orch.components = {"tools": tools}
-    result = asyncio.run(orch._run_tools_if_needed(
+    tool_results, direct_reply = asyncio.run(orch._run_tools_if_needed(
         SimpleNamespace(chat_with_tools=chat_with_tools),
         "北京今天天气怎么样",
         "system",
@@ -80,9 +82,12 @@ def test_async_tool_intent_call_is_awaited_and_dispatches_filtered_schema():
         affinity_level=2,
     ))
 
-    assert [schema["function"]["name"] for schema in seen["tools"]] == ["weather"]
+    schema_names = [schema["function"]["name"] for schema in seen["tools"]]
+    assert "weather" in schema_names
+    assert "ask_user" in schema_names
     assert tools.calls == [("weather", {"city": "北京"}, 2)]
-    assert '"temperature": 21' in result
+    assert '"temperature": 21' in tool_results
+    assert direct_reply == ""
 
 
 def test_disabled_tools_short_circuit():
@@ -91,4 +96,4 @@ def test_disabled_tools_short_circuit():
     result = asyncio.run(orch._run_tools_if_needed(
         SimpleNamespace(), "查一下天气", "system", []
     ))
-    assert result == ""
+    assert result == ("", "")
