@@ -2253,22 +2253,23 @@
 | ⚠️ 内驱"单轴" | **已有六维** `UrgencyState`（`ase_engine.py:357`：base/missing_bonus/event/scene/emotion/context，`total=min(10,Σ)`，`level` 四档 8/5/3）+ 自适应频率 → 缺口是**自失效**与**轴间制衡**，不是轴数 |
 | （基线①未提） | **已实现双 λ 分层衰减**：`forgetting_manager.py:18` `lambda_low=0.1 / lambda_high=0.01`（**10×**），与小凌 `lambda_d=0.36 / lambda_e=0.034`（**10.6×**）**同量级** → **独立跨源收敛证据**，可作 S/D 分离衰减的现成先验 |
 
-### ⚑ B1-B6 六条新发现真实缺陷（此前均无记录；按真实暴露面分级）
+### ⚑ B1a/B1b + B2-B6 七条新发现真实缺陷（此前均无记录；按真实暴露面分级）
 
+- 🔴 **B1a（中–高 · 唯一"已生效且功能反向"的一条）`memory_pipeline` 的"深夜情感记忆加权"用 UTC 判定**：`_is_late_night`（`:210`，判据 `hour>=23 or hour<=5`）被喂 `:284` `now = datetime.now(tz=timezone.utc)`（另一处 `:250` 的 `timestamp` 实由 `:775` 传入，同样 UTC）。对 UTC+8 → **该标志实际在本地 07:00–13:59 触发，真正的本地深夜 23:00–05:59 反而不触发**。后果：专项为深夜情绪设计的"强制存为事实（`:243-258` 规则2）+ 重要性 +0.3（`:280-292`）"**完全错位到上午/中午执行，真正的深夜零加权** —— **不是崩溃，是既有功能反向失效**。兼 `:580`/`:683` 的 `date_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")` 使**日记/维护按 UTC 切日**（本地 00:00–08:00 的消息归入"前一天"）。**修法一行级，收益/成本比全场最高 → 列为快赢清单第 1 位（J8）**。
+- **B1b（中 · 潜伏）三套 time-of-day 分类器并行且分段表互不相同**：`enhanced_prompt_engine.py:35 TimeContext.now()` 用 UTC 小时（6-9/9-12/12-18/18-22/22-24/else）；`ase_engine.py:400 _get_time_period` ✅ 用 UTC+8（5-9/9-12/12-14/14-18/18-22/else）；`dynamic_anchor.py:65 time_of_day` 另一套。**诚实定级：`TimeContext` 当前未生效**（生产 `config/system.yaml:173 prompt_mode: layered`，`_init_mixin.py:146` 不走 `enhanced` 分支），但分段表分歧 + `config/shisi.yaml:6 app.timezone: "Asia/Shanghai"` **零读取**构成隐性债务。（注：`_is_late_night` 属第 4 套，已计入 B1a。）
 - **B3（中）`config/shisi.yaml` 的 `memory:` 整段 5 键零消费点**——`get_config("memory",…)` 全仓 **0 命中**（`shisi/config.py` 用 `yaml.safe_load` 整文件载入，故键在内存中存在、只是无人读）；有效值实为代码硬编码默认（`working_memory.py:10 limit=20`），**且配置值 20 与硬编码 20 数值巧合，掩盖了未接线事实**。其中 **`similarity_threshold: 0.85` 正是 D3 要用的"绝对门槛"，属"差一步"而非从零设计**。
 - **B5（中）遗忘是物理删除**：`_apply_forgetting` → `sm.delete_fact`（`memory_pipeline.py:751-756`），门槛 0.05，**无保底留痕** → 用户告诉过角色的事可能被彻底删掉（不可逆、产品可感）。小凌 A 级代码为 `max(1, floor(...))`（永不归零）。
 - **B4（中）`access_count` 只读、从不自增，且指数遗忘模式下不参与计算** → **"回忆强化"机制不存在**（`memory_pipeline.py:739/748` 读 + 全仓 grep 无写入点；旧实现 `_legacy_importance_scorer.py:46` 的 `access_bonus` 随该文件退役）。
-- **B1（中·潜伏）三套 time-of-day 分类器并行**，其中 `my_character/enhanced_prompt_engine.py:35 TimeContext.now()` 用 **UTC 小时**（对 UTC+8 产品差 8 小时）。**诚实定级：潜伏未生效**——生产 `config/system.yaml:173 prompt_mode: layered`（`_init_mixin.py:146`）不走 `enhanced` 分支；但① 切 `enhanced` 即全量错位，② **三套分段表本身不一致**（`noon` / `late_night` 各只在一套里），③ `config/shisi.yaml:6 app.timezone: "Asia/Shanghai"` **零读取**（"声明了不读"）。
 - **B6（低-中）亲密度 4 套刻度并行**：0-8 整数（`emotion_engine.py:300`）/ 0-500（affection_points）/ 0-100（`AffinityMapper.to_shisi`）/ 解锁 25-50-75-90（`config/shisi.yaml:204-216`）。**各自自洽、无已知错算 → 只登记 + 建议加断言，不做重构**（避免无收益改动触碰热路径）。
-- **B2（低）`my_character/persona_utils.py:70 build_time_context()` 死代码**（定义处全仓唯一命中，零调用），且它调的正是带 B1 缺陷的实现——"看着像接好的线"，本次即被其误导过一次。
+- **B2（低）`my_character/persona_utils.py:70 build_time_context()` 死代码**（定义处全仓唯一命中，零调用），且它调的正是带 B1b 缺陷的实现——"看着像接好的线"，本次即被其误导过一次。
 
 ### D1-D8 八项落地设计（均落在既有 owner，不引入新真源）
 
 D1 参数域（`Δp = plasticity_i × α × (evidence − p)` 后 clamp；身份 0 / 关系 0.1-0.2 / 偏好 0.4-0.6；ΔTrust 多变量化**不改 `enhancer.update()` 签名**，把结果作为一个 delta 传入）· D2 遗忘**只改"选键"**（按 `importance` → 按变量 S/D/E，λ 直接复用现存 0.1/0.01；+ 回忆强化；+ 保底留痕）+ 线性（好感度）与指数（事实）差异**显式记账** · D3 门槛接线既有 `similarity_threshold` + 三档拒答（<0.25 不注入 / >0.65 才连贯讲述），门槛先取**分位数**挂靠既有 BM25 水位线 · D4 **推断/事实三值标记**（`fact`/`inferred`/`reconstructed`，在产物流水线上加字段而非加提示词层，**成本最低**）· D5 时间真源收敛为**单一 `get_local_now()`**（把 `ase_engine._now_local` 的正确实现提为公共 util）· D6 心光**数值门控**（容量 5 / 阈值 0.58，均取自 B 级参数表并与口播交叉验证；**必须证明 token 净减才落地**，红线：不得再加新提示词层）· D7 内驱 **7a missing_bonus 自失效**（沉默≠需要）+ **7b 撤掉"用户伤心/生气→提高打扰意愿"** + **7c 锚定最后一条用户消息的随机倒计时**（替固定 30 分钟）+ **7d 轴间制衡**（connection 高 × pride 高 → 不投递）+ 7e 阈值三处不一致（config 2.0 / 构造默认 4.0 / 硬编码 2.0@`:818`）收敛为一处 · D8 语义层补"四分类 + 权重"（复用 `persona_extractor/`，**不新增 LLM 调用**）。
 
-### 待用户裁决 J1-J6
+### 待用户裁决 J1-J8
 
-P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是否改"降级留痕"（数据只增不减）· 心光容量 5 / 阈值 0.58 是否作初始值上生产 · 是否**撤掉**"用户伤心/生气 → 提高打扰意愿"规则（用户可感）· B2 死代码是否清理（需入 `DELETION_LOG`）· `plasticity` 三档是否采纳。
+P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是否改"降级留痕"（数据只增不减）· 心光容量 5 / 阈值 0.58 是否作初始值上生产 · 是否**撤掉**"用户伤心/生气 → 提高打扰意愿"规则（用户可感）· B2 死代码是否清理（需入 `DELETION_LOG`）· `plasticity` 三档是否采纳 · **`commitment` 事实是否补"兑现回执"字段**（不做则 ΔTrust 的 `βC` 项空转）· **是否立即修 B1a**（一行级、收益/成本比最高，但触碰记忆热路径 `should_store_as_fact`/`after_chat`，须授权 + 完整 pytest + 突变验红）。
 
 ### 验证（完成声明四要素）
 
