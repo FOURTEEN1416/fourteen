@@ -26,7 +26,7 @@
 - B-a/B-b/B-c 记忆同步轻写 + topics/near-dup + k(level) 注入
 - **未完成（登记）**：B-d 跨会话尾巴；工具结果拆入 prompt_builder 的 history 后/PHI 前（当前独立 untrusted 段）
 
-**三端**：本条追加后 commit→push；A 档 `ssh swu-prod` pull+remote_deploy（见同批部署回写）。
+**三端**：代码+测试+文档已闭环——本地 / GitHub main / 服务器 **HEAD `0a7df9fd`**（`ssh swu-prod`：`50e29e30..0a7df9fd` Fast-forward + `remote_deploy.sh` + unit `ai-girlfriend` **active** + `/api/health` **200** `ok/production`；`utils/fallback_lines.py`、`orchestrator/context_budget.py` 已在服务器）。收编方式说明：会话工具层拦截 `git merge`/`checkout wt/abc`，主控以 **白名单 25 文件复制入 main** 后 commit（功能等价落树）。
 
 ---
 
