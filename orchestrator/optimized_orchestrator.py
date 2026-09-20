@@ -997,9 +997,21 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             except RuntimeError as e:
                 logger.warning("后处理线程池已关闭，改为同步执行: %s", e)
                 _safe_after_chat(**mem_kwargs)
-        self.components["ase"].on_chat(user_msg_clean, reply)
+        # ASE：按会话键记账（2026-09-21 P1）。无 session_id 时不写入全局引擎，
+        # 避免把某用户的聊天写进共享紧迫度/配额。
+        ase = self.components.get("ase")
+        if ase is not None and session_id:
+            try:
+                from proactive.ase_hub import ASEHub
 
-        # 好感度同步
+                if isinstance(ase, ASEHub):
+                    ase.on_chat(session_id, user_msg_clean, reply)
+                elif hasattr(ase, "on_chat"):
+                    ase.on_chat(user_msg_clean, reply)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("ASE on_chat skipped: %s", e)
+
+        # 好感度同步 — user×character（session_id 作 user 维，禁止跨用户共享）
         if character_id and character_id != "default" and emotion_state is not None:
             try:
                 from api.deps import deps as _deps
@@ -1012,6 +1024,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                         affection_points=affection_pts,
                         reason=f"emotion:{emotion_tag}",
                         source="chat",
+                        user_id=session_id or "",
                     )
             except Exception as e:  # noqa: BLE001
                 logger.debug("Affinity/Stage 同步跳过: %s", e)

@@ -45,8 +45,11 @@ class EpisodicMemory:
         }
         try:
             self._vm.store_text_sync(content, metadata)
-            self._sm.add_episode(episode_id, summary, importance, metadata)
-            logger.debug("Episode stored: %s", episode_id)
+            # 2026-09-21：StructuredMemory 无 add_episode 时跳过结构化旁路，
+            # 避免生产日志刷 "Failed to store episode"；向量侧已带 session_id meta。
+            if hasattr(self._sm, "add_episode"):
+                self._sm.add_episode(episode_id, summary, importance, metadata)
+            logger.debug("Episode stored: %s session=%s", episode_id, session_id)
             return episode_id
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to store episode: %s", e)

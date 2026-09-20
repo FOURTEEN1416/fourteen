@@ -29,6 +29,23 @@ from utils.project_paths import project_path
 
 logger = logging.getLogger("scheduler")
 
+
+def _accepts_key(fn: Callable | None) -> bool:
+    """回调是否接受 user_key 参数（兼容旧零参/无 key 签名）。"""
+    if fn is None:
+        return False
+    import inspect
+
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return any(
+        p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY, p.VAR_KEYWORD)
+        and name in ("user_key", "session_key", "session_id")
+        for name, p in params.items()
+    ) or any(p.kind == p.VAR_KEYWORD for p in params.values())
+
 # 成就兜底重算的角色库目录。锚定项目根而非 CWD（从非仓库根启动时
 # CWD 相对路径会扫到空目录，导致成就兜底静默失效）；
 # 同时保留为模块级常量，便于测试注入临时目录。
@@ -553,25 +570,151 @@ class ProactiveScheduler:
             )
         return sent
 
+    def _collect_ase_user_keys(self) -> list[str]:
+        """收集需要 tick 的 user_key（完整会话键 / 用户实例键）。"""
+        keys: list[str] = []
+        seen: set[str] = set()
+
+        def _add(k: str) -> None:
+            k = str(k or "").strip()
+            if k and k not in seen:
+                seen.add(k)
+                keys.append(k)
+
+        try:
+            from proactive.ase_hub import ASEHub, load_user_key_index
+
+            if isinstance(self.ase, ASEHub):
+                for k in self.ase.known_user_keys():
+                    _add(k)
+                for k in load_user_key_index():
+                    _add(k)
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            from api.deps import deps as _deps
+
+            gf = getattr(_deps, "gf", None)
+            if gf is not None and hasattr(gf, "get_all_users"):
+                for u in gf.get_all_users() or []:
+                    _add(str(u.get("user_id") or ""))
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            from wechat_direct.connector_registry import get_registry
+
+            registry = get_registry()
+            from api.deps import deps as _deps
+
+            user_mgr = getattr(_deps, "gf", None)
+            bound = list(user_mgr.get_bound_wxids()) if user_mgr and hasattr(user_mgr, "get_bound_wxids") else []
+            for owner_id, _slot, conn in registry.all():
+                if not getattr(conn, "token", ""):
+                    continue
+                peers: list[str] = []
+                for key in bound:
+                    if ":" in key:
+                        left, right = key.split(":", 1)
+                        if left == str(owner_id):
+                            peers.append(right)
+                    # 裸 wxid 不归属具体 owner，不注入任何通道（隔离）
+                for peer in peers:
+                    _add(f"{owner_id}:{peer}")
+        except Exception:  # noqa: BLE001
+            pass
+
+        return keys
+
     def _check_ase(self) -> None:
-        """ASE 主动消息检查（APScheduler同步任务）"""
+        """ASE 主动消息检查（APScheduler同步任务）
+
+        2026-09-21 P1：ASEHub 按 user_key 分引擎 tick，消息**定向投递**到
+        该会话，不再一条内容广播给所有人。
+        """
         if not self.ase:
-            # 原实现此处**静默 return** —— 引擎未注入时生产环境完全不可观测
-            # （2026-09-18 排查代价：数小时，最终靠逐层加日志才定位）。
             logger.warning("ASE 引擎未注入（components['ase'] 为空），主动消息检查跳过")
             return
 
-        # master 每 tick 重载跨 worker 配置文件（其他 worker 的写 ≤5 分钟生效）
         self.reload_config()
 
+        try:
+            from proactive.ase_hub import ASEHub
+
+            if isinstance(self.ase, ASEHub):
+                self._check_ase_per_user()
+                return
+            # 兼容：全局单例引擎（旧路径）
+            self._check_ase_global()
+        except Exception as e:  # noqa: BLE001
+            logger.error("ASE check failed: %s", e)
+        finally:
+            self._last_check_time = datetime.now(tz=timezone.utc)
+
+    def _check_ase_per_user(self) -> None:
+        from proactive.ase_hub import ASEHub
+
+        hub: ASEHub = self.ase  # type: ignore[assignment]
+        user_keys = self._collect_ase_user_keys()
+        if not user_keys:
+            logger.debug("ASE tick: 无用户目标，跳过")
+            return
+
+        quiet = self._is_quiet_hours()
+        for user_key in user_keys:
+            try:
+                eng = hub.get(user_key)
+                # 每用户引擎自带 last_chat 状态；全局 last_chat 回调不适用多用户
+                hours = eng._hours_since_last_chat()
+
+                is_online = True
+                if self._is_online_check:
+                    try:
+                        if _accepts_key(self._is_online_check):
+                            is_online = bool(self._is_online_check(user_key))
+                        else:
+                            is_online = bool(self._is_online_check())
+                    except TypeError:
+                        is_online = bool(self._is_online_check())
+
+                if quiet or not is_online:
+                    eng.tick(hours, dry_run=True)
+                    continue
+
+                count_before = getattr(eng, "_daily_message_count", -1)
+                result = eng.tick(hours)
+                logger.info(
+                    "ASE tick user=%s hours=%.2f urgency=%.2f daily_count=%d result=%s reason=%s",
+                    user_key,
+                    hours,
+                    getattr(getattr(eng, "urgency", None), "total", -1.0),
+                    count_before,
+                    bool(result),
+                    getattr(eng, "_last_skip_reason", "") or ("ok" if result else "unknown"),
+                )
+                if not result:
+                    continue
+                message = result.get("message", "")
+                logger.info("ASE triggered user=%s [%s] %s", user_key, result.get("type"), message[:40])
+                if self._deliver(message, session_key=user_key):
+                    hub.commit_sent(user_key, result)
+                    logger.info(
+                        "主动消息已记账 user=%s daily_count %s -> %s",
+                        user_key,
+                        count_before,
+                        getattr(eng, "_daily_message_count", -1),
+                    )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("ASE per-user tick failed user=%s: %s", user_key, e)
+
+    def _check_ase_global(self) -> None:
+        """旧全局 ASE 单例路径（兼容；新装配走 ASEHub）。"""
         try:
             if self._get_last_chat_time:
                 last_chat = self._get_last_chat_time()
                 hours = (datetime.now(tz=timezone.utc) - last_chat).total_seconds() / 3600 if last_chat else 99.0
             elif hasattr(self.ase, "_hours_since_last_chat"):
-                # ASE 引擎自身持久化了 last_chat_time（on_chat 更新、状态文件落盘）。
-                # 旧实现此处回退"距上次调度检查的时间"（≈5 分钟），
-                # 导致 missing_bonus 恒为 0、紧迫度永远到不了阈值（2026-09-17 修复）。
                 hours = self.ase._hours_since_last_chat()
             else:
                 hours = self._hours_since_last_check()
@@ -581,16 +724,10 @@ class ProactiveScheduler:
                 is_online = self._is_online_check()
 
             if not is_online:
-                logger.debug("用户离线，仅更新紧迫度不发送")
                 if hasattr(self.ase, 'tick'):
                     self.ase.tick(hours, dry_run=True)
                 return
 
-            # 免打扰时段：在**生成之前**短路。
-            # 旧实现只在投递层（_send_to_all）判静默 —— 引擎照常生成、照常扣
-            # 配额，消息却在投递时被丢弃，静默时段成了「配额焚化炉」。
-            # 生产实证 2026-09-19：00:02–04:05 每 35 分钟一条、连续 8 条被丢弃
-            # 却全部计数 → 配额凌晨即满 → 全天零投递。
             if self._is_quiet_hours():
                 if hasattr(self.ase, 'tick'):
                     self.ase.tick(hours, dry_run=True)
@@ -603,66 +740,29 @@ class ProactiveScheduler:
                 )
                 return
 
-            count_before = getattr(self.ase, "_daily_message_count", -1)
             result = self.ase.tick(hours)
-            urgency_after = getattr(getattr(self.ase, "urgency", None), "total", -1.0)
-            count_after = getattr(self.ase, "_daily_message_count", -1)
-            # 每 tick 一条可观测记录：这是排查"主动消息不发"时最关键的一行
-            # （此前只有"触发成功"才打日志，未触发的原因完全不可见）
-            # 2026-09-19 补 reason：只有 result=True/False 时无法区分
-            # 「配额满」「冷却中」「阈值不够」「静默」，排查代价极高。
             logger.info(
                 "ASE tick: hours=%.2f urgency=%.2f daily_count=%d paused=%s "
                 "result=%s reason=%s",
                 hours,
-                urgency_after,
-                count_after,
+                getattr(getattr(self.ase, "urgency", None), "total", -1.0),
+                getattr(self.ase, "_daily_message_count", -1),
                 getattr(self.ase, "_paused", None),
                 bool(result),
                 getattr(self.ase, "_last_skip_reason", "") or ("ok" if result else "unknown"),
             )
             if result:
                 message = result.get("message", "")
-                msg_type = result.get("type", "unknown")
-                logger.info("ASE triggered: [%s] %s", msg_type, message)
-                # ✅ 只有**真正投递成功**才提交记账（扣配额/写冷却/重置紧迫度）。
-                # 未送达的候选不产生任何副作用 —— 这是本次修复的核心。
-                if self._deliver(message):
-                    if hasattr(self.ase, "commit_sent"):
-                        self.ase.commit_sent(result)
-                    logger.info(
-                        "主动消息已记账: daily_count %d -> %d",
-                        count_before,
-                        getattr(self.ase, "_daily_message_count", -1),
-                    )
-                else:
-                    logger.warning(
-                        "主动消息未送达，不消耗配额（daily_count=%d 保持不变）: %r",
-                        count_before,
-                        message[:40],
-                    )
+                logger.info("ASE triggered: [%s] %s", result.get("type"), message)
+                if self._deliver(message) and hasattr(self.ase, "commit_sent"):
+                    self.ase.commit_sent(result)
         except Exception as e:  # noqa: BLE001
-            logger.error("ASE check failed: %s", e)
-        finally:
-            self._last_check_time = datetime.now(tz=timezone.utc)
+            logger.error("ASE global check failed: %s", e)
 
-    def _deliver(self, message: str) -> bool:
-        """在 APScheduler 工作线程内同步投递主动消息。
-
-        旧实现用 asyncio.get_event_loop()+ensure_future —— 非主线程无事件循环
-        必抛 RuntimeError，导致全部消息落入 console 日志兜底、微信通道从未送达
-        （2026-09-17 生产日志实证：64 次触发 0 次送达）。_send_to_all 内部均为
-        同步 HTTP 调用（requests），asyncio.run 新建临时循环执行是安全的。
-
-        2026-09-19：**改为返回投递结果**。旧实现丢弃了 `_send_to_all` 的返回值，
-        调用方无从得知消息是否真的送出，而配额已在生成时被扣 —— 这是静默时段
-        「丢弃却计数」能持续多日无人发现的直接原因。
-
-        Returns:
-            是否至少有一个通道投递成功（免打扰拦截、通道全失败 → False）。
-        """
+    def _deliver(self, message: str, session_key: str | None = None) -> bool:
+        """投递主动消息。session_key 非空时**定向**到该会话，否则广播（旧路径）。"""
         try:
-            return bool(asyncio.run(self._send_to_all(message)))
+            return bool(asyncio.run(self._send_targeted(message, session_key)))
         except Exception as e:  # noqa: BLE001
             logger.error("主动消息投递失败: %s", e)
             if self._send:
@@ -672,6 +772,36 @@ class ProactiveScheduler:
                 except Exception:  # noqa: BLE001
                     logger.exception("主动消息兜底发送失败")
             return False
+
+    async def _send_targeted(self, message: str, session_key: str | None = None) -> bool:
+        if self._is_quiet_hours():
+            logger.warning(
+                "免打扰时段(%s-%s)：消息未投递（无紧急旁路），内容不计数不扣配额",
+                self._quiet_hours[0], self._quiet_hours[1],
+            )
+            return False
+
+        if session_key:
+            sender = self._channel_instances.get("wechat")
+            if sender is not None:
+                try:
+                    if asyncio.iscoroutinefunction(sender):
+                        await sender(message, session_key=session_key)
+                    else:
+                        try:
+                            sender(message, session_key=session_key)
+                        except TypeError:
+                            # 旧签名只收 message → 退回广播（仍记日志）
+                            sender(message)
+                    logger.info("主动消息已定向投递: wechat session=%s", session_key)
+                    return True
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("定向投递失败 session=%s: %s", session_key, e)
+                    self._channel_instances["wechat"] = None
+            # websocket 兜底（无 session 过滤，仅日志/在线面板）
+            return await self._send_to_all(message)
+
+        return await self._send_to_all(message)
 
     def _run_daily_maintenance(self) -> None:
         """每日维护"""
@@ -691,28 +821,31 @@ class ProactiveScheduler:
         except Exception as e:  # noqa: BLE001
             logger.warning("情感时间衰减任务失败: %s", e)
 
-        # 好感度衰减 — 对所有已记录角色应用每日衰减
-        # DecayEngine 逻辑正确但此前未被调度调用，此处补全
+        # 好感度衰减 — 对所有已记录键（含 user×character）应用每日衰减
         try:
             from api.deps import deps as _deps
             shisi_reg = getattr(_deps, "shisi_reg", None)
             if shisi_reg is not None:
                 enhancer = getattr(shisi_reg, "affinity_enhancer", None)
                 if enhancer is not None:
-                    # 遍历所有已记录好感度的角色，逐一应用衰减
-                    character_ids = list(getattr(enhancer, "_values", {}).keys())
-                    total_decay = 0.0
-                    decayed_count = 0
-                    for cid in character_ids:
-                        decay = enhancer.apply_decay(cid)
-                        if decay > 0:
-                            total_decay += decay
-                            decayed_count += 1
-                    if decayed_count > 0:
-                        logger.info(
-                            "好感度衰减完成: %d/%d 个角色衰减, 总衰减 %.2f",
-                            decayed_count, len(character_ids), total_decay,
-                        )
+                    if hasattr(enhancer, "decay_all"):
+                        total_decay = enhancer.decay_all()
+                        if total_decay > 0:
+                            logger.info("好感度衰减完成 total=%.2f", total_decay)
+                    else:
+                        character_ids = list(getattr(enhancer, "_values", {}).keys())
+                        total_decay = 0.0
+                        decayed_count = 0
+                        for cid in character_ids:
+                            decay = enhancer.apply_decay(cid)
+                            if decay > 0:
+                                total_decay += decay
+                                decayed_count += 1
+                        if decayed_count > 0:
+                            logger.info(
+                                "好感度衰减完成: %d/%d 个角色衰减, 总衰减 %.2f",
+                                decayed_count, len(character_ids), total_decay,
+                            )
         except Exception as e:  # noqa: BLE001
             logger.warning("好感度衰减任务失败: %s", e)
 

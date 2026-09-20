@@ -195,30 +195,53 @@ if _scheduler is not None:
         if registry.online_count() == 0:
             return None
 
-        async def _send(msg: str) -> None:
-            # 每人独立通道：按 owner 投递到各自通道的 peer，禁止全局 _last_user_id
+        async def _send(msg: str, session_key: str | None = None) -> None:
+            # 2026-09-21 P1：session_key=`owner:peer@im.wechat` 时定向投递；
+            # 禁止把 A 的主动消息广播给所有通道用户。
+            from wechat_direct.connector_registry import get_registry
+
+            registry = get_registry()
             sent_any = False
             failures: list[str] = []
-            for owner_id, _slot, conn in registry.all():
-                if not getattr(conn, "token", ""):
-                    continue
+
+            def _peers_for_owner(owner_id: int) -> list[str]:
                 peers: list[str] = []
-                if user_mgr:
-                    for key in user_mgr.get_bound_wxids():
-                        if ":" in key:
-                            left, right = key.split(":", 1)
-                            if left == str(owner_id):
-                                peers.append(right)
-                        elif getattr(conn, "owner_user_id", None) is None:
-                            peers.append(key)
-                for peer in peers:
-                    if conn.send_text(msg, to_user=peer):
+                if not user_mgr:
+                    return peers
+                for key in user_mgr.get_bound_wxids():
+                    if ":" in key:
+                        left, right = key.split(":", 1)
+                        if left == str(owner_id):
+                            peers.append(right)
+                return peers
+
+            targets: list[tuple[int, str]] = []
+            if session_key and ":" in str(session_key):
+                owner_raw, peer = str(session_key).split(":", 1)
+                if owner_raw.isdigit() and peer:
+                    targets.append((int(owner_raw), peer))
+            if not targets:
+                # 兼容旧广播路径：仅投递各 owner 自己绑定的 peer（仍不跨 owner）
+                for owner_id, _slot, conn in registry.all():
+                    if not getattr(conn, "token", ""):
+                        continue
+                    for peer in _peers_for_owner(int(owner_id)):
+                        targets.append((int(owner_id), peer))
+
+            for owner_id, peer in targets:
+                delivered = False
+                for uid, _slot, conn in registry.all():
+                    if int(uid) != int(owner_id):
+                        continue
+                    if getattr(conn, "token", "") and conn.send_text(msg, to_user=peer):
+                        delivered = True
                         sent_any = True
-                    else:
-                        failures.append(f"{owner_id}:{peer}")
+                if not delivered:
+                    failures.append(f"{owner_id}:{peer}")
+
             if not sent_any:
                 raise RuntimeError(
-                    f"微信投递失败：无任何用户通道送达（failures={failures[:5]}）"
+                    f"微信投递失败：无任何用户通道送达 session={session_key} failures={failures[:5]}"
                 )
             if failures:
                 logger.warning("微信部分投递失败: %s", failures[:10])

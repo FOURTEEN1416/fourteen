@@ -73,6 +73,11 @@ class AffinityMapper:
         max_value = self._enhancer._max
         return affinity_scale.shisi_to_points(shisi_affinity, min_value, max_value)
 
+    @staticmethod
+    def _track_key(character_id: str, user_id: str = "") -> str:
+        uid = str(user_id or "").strip()
+        return f"{uid}::{character_id}" if uid else str(character_id)
+
     def sync(
         self,
         character_id: str,
@@ -80,31 +85,38 @@ class AffinityMapper:
         reason: str = "emotion_sync",
         source: str = "chat",
         max_delta: float = 3.0,
+        user_id: str = "",
     ) -> dict[str, Any] | None:
         """同步一次 emotion affection_points 到 shisi 体系。
 
-        Returns:
-            包含 ``affinity`` 和 ``unlocks`` 的字典；未初始化时返回 None。
+        2026-09-21：支持 user×character —— 不同用户的同一角色互不影响。
         """
         if self._enhancer is None:
             return None
 
         target = self.to_shisi(affection_points)
+        track = self._track_key(character_id, user_id)
 
-        # 首次同步以当前 enhancer 值为基准，避免一次性跳变过大
-        if character_id not in self._last_shisi:
-            self._last_shisi[character_id] = self._enhancer.get_value(character_id)
+        if track not in self._last_shisi:
+            self._last_shisi[track] = self._enhancer.get_value(
+                character_id, user_id=user_id
+            )
 
-        last = self._last_shisi[character_id]
+        last = self._last_shisi[track]
         delta = target - last
         if abs(delta) < 0.01:
             return {"affinity": last, "unlocks": []}
 
         delta = max(-max_delta, min(max_delta, delta))
-        new_val, unlocks = self._enhancer.update(character_id, delta, reason, source)
-        self._last_shisi[character_id] = new_val
+        new_val, unlocks = self._enhancer.update(
+            character_id, delta, reason, source, user_id=user_id
+        )
+        self._last_shisi[track] = new_val
 
         if self._stage_engine is not None:
-            self._stage_engine.evaluate(character_id, new_val)
+            try:
+                self._stage_engine.evaluate(track, new_val)
+            except Exception:  # noqa: BLE001
+                self._stage_engine.evaluate(character_id, new_val)
 
         return {"affinity": new_val, "unlocks": unlocks}

@@ -180,27 +180,63 @@ class _InitPhasesMixin:
 
     def _init_ase_and_scheduler(self, cfg: Any, fusion_cfg: dict) -> None:
         ase_fusion = fusion_cfg.get("ase", {})
-        try:
-            from proactive.ase_engine import ASEEngine as ASEEngineOptimized
-            self.components["ase"] = ASEEngineOptimized(
-                llm_gateway=self.components["llm"],
-                max_daily_messages=cfg.proactive.max_daily_messages,
-                min_interval_minutes=cfg.proactive.min_interval_minutes,
-                cooldown_after_reply=cfg.proactive.cooldown_after_reply_minutes,
-                urgency_threshold=cfg.proactive.urgency_threshold,
-                frequency_mode=ase_fusion.get("frequency_mode", "adaptive"),
-                generation_mode=ase_fusion.get("generation_mode", "llm"),
-                reflection_mode=ase_fusion.get("reflection_mode", "rule"),
-            )
-        except ImportError:
-            from proactive.ase_engine import ASEEngine as ASEEngineV2
-            self.components["ase"] = ASEEngineV2(
-                llm_gateway=self.components["llm"],
-                max_daily_messages=cfg.proactive.max_daily_messages,
-                min_interval_minutes=cfg.proactive.min_interval_minutes,
-                cooldown_after_reply=cfg.proactive.cooldown_after_reply_minutes,
-                urgency_threshold=cfg.proactive.urgency_threshold,
-            )
+
+        def _affinity_level_for_user(user_key: str = "") -> int:
+            try:
+                from shisi.affinity import scale as affinity_scale
+                from utils import affinity_state
+
+                character_id = "default"
+                try:
+                    from api.deps import deps as _deps
+
+                    gf = getattr(_deps, "gf", None)
+                    if gf is not None and user_key:
+                        character_id = gf.get_user_character(user_key) or "default"
+                except Exception:  # noqa: BLE001
+                    character_id = "default"
+                if not user_key:
+                    return 0
+                pts = affinity_state.load_points(user_key, character_id)
+                return int(affinity_scale.points_to_level(pts))
+            except Exception:  # noqa: BLE001
+                return 0
+
+        def _make_ase_engine(user_key: str = "", state_path: str = ""):
+            uk = str(user_key or "")
+            affinity_fn = (lambda: _affinity_level_for_user(uk)) if uk else None
+            try:
+                from proactive.ase_engine import ASEEngine as ASEEngineOptimized
+
+                return ASEEngineOptimized(
+                    llm_gateway=self.components["llm"],
+                    max_daily_messages=cfg.proactive.max_daily_messages,
+                    min_interval_minutes=cfg.proactive.min_interval_minutes,
+                    cooldown_after_reply=cfg.proactive.cooldown_after_reply_minutes,
+                    urgency_threshold=cfg.proactive.urgency_threshold,
+                    frequency_mode=ase_fusion.get("frequency_mode", "adaptive"),
+                    generation_mode=ase_fusion.get("generation_mode", "llm"),
+                    reflection_mode=ase_fusion.get("reflection_mode", "rule"),
+                    affinity_level_func=affinity_fn,
+                    state_path=state_path or "",
+                )
+            except ImportError:
+                from proactive.ase_engine import ASEEngine as ASEEngineV2
+
+                return ASEEngineV2(
+                    llm_gateway=self.components["llm"],
+                    max_daily_messages=cfg.proactive.max_daily_messages,
+                    min_interval_minutes=cfg.proactive.min_interval_minutes,
+                    cooldown_after_reply=cfg.proactive.cooldown_after_reply_minutes,
+                    urgency_threshold=cfg.proactive.urgency_threshold,
+                    affinity_level_func=affinity_fn,
+                    state_path=state_path or "",
+                )
+
+        # 2026-09-21 P1：ASE 按 user_key 隔离（配额/紧迫度/口吻不串用户）
+        from proactive.ase_hub import ASEHub
+
+        self.components["ase"] = ASEHub(_make_ase_engine)
 
         # ── 候选 C：注入知识分享函数（share 类主动消息优先分享爬虫/文档知识库真实内容） ──
         try:
@@ -215,16 +251,21 @@ class _InitPhasesMixin:
 
                     cm = getattr(getattr(_deps, "shisi_reg", None), "character_manager", None)
                     return (cm.get_active_id() if cm else "") or ""
-                except Exception:
+                except Exception:  # noqa: BLE001
                     return ""
 
             ase_inst = self.components.get("ase")
-            if ase_inst is not None:
+            if isinstance(ase_inst, ASEHub):
+                # 按用户创建引擎时由 factory 注入；此处仅保留动态角色解析能力
+                ase_inst._knowledge_share_func = (
+                    lambda _cid: _ksvc.get_knowledge_context(_active_cid(), "最近话题 兴趣 资讯", top_k=2)
+                )
+            elif ase_inst is not None:
                 ase_inst._knowledge_share_func = (
                     lambda _cid: _ksvc.get_knowledge_context(_active_cid(), "最近话题 兴趣 资讯", top_k=2)
                 )
                 ase_inst._knowledge_character_id = "dynamic"
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
 
         # ── 主动消息调度器（启用 apply_time_decay / ASE / 每日维护） ──
@@ -238,11 +279,13 @@ class _InitPhasesMixin:
             )
             # 至少注册一个控制台通道作为兜底；后续可通过 register_channel 注入 ws/wechat
             scheduler.register_channel(
-                "console", lambda: lambda msg: logger.info("[主动消息/console] %s", msg)
+                "console", lambda: lambda msg, session_key=None: logger.info(
+                    "[主动消息/console] session=%s %s", session_key or "-", msg
+                )
             )
             if scheduler.start():
                 self.components["scheduler"] = scheduler
-                logger.info("主动消息调度器已启动")
+                logger.info("主动消息调度器已启动（ASE 按用户隔离）")
             else:
                 logger.warning("主动消息调度器启动失败，时间衰减/ASE 将不可用")
                 self.components["scheduler"] = None

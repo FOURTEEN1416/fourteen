@@ -7,6 +7,23 @@
 
 ---
 
+## 2026-09-21 — P1 隔离收口（ASE 分用户 / affinity user×character / 情景层 meta）
+
+**任务**：用户指令对 P1 开放项「全面修复」。
+
+**改动**
+1. **`proactive/ase_hub.py`（新）**：`ASEHub` 按 `user_key` 懒创建 ASEEngine，状态 `data/ase_states/<md5>.json` + `index.json`；`on_chat/tick/commit_sent` 全按用户。
+2. **scheduler**：`_check_ase_per_user` 对每个 user_key 独立 tick；`_deliver(message, session_key=)` 定向；微信 sender 支持 `session_key=owner:peer`（`api/run_api.py`）。
+3. **orchestrator**：`ase.on_chat(session_id,…)`；`mapper.sync(..., user_id=session_id)`。
+4. **AffinityEnhancer/Mapper**：键 `user_id::character_id`；`get_value` 有 user 时不回退全局键；`decay_all`。
+5. **情景层**：search 空 meta 不注入；`store_episode` 不再强制 `sm.add_episode`。
+
+**验证**：`tests/test_p1_isolation_proactive_affinity.py` 7 例 + 分块 **1455 收集 / 1451 通过 / 4 跳过 / 0 失败**（341 + 366+4 + 325 + 419）+ ruff 0。
+
+**A 档**：commit → push → 服务器 deploy。
+
+---
+
 ## 2026-09-21 — 用户隔离全链路 P0 根治（生产串台）
 
 **任务**：用户报「感觉像串台 / 你是不是弄错人了 / 怎么还可以记错人」，指令「在本仓库和窗口直接进行全链路检查，用户隔离这是严重生产问题」。
