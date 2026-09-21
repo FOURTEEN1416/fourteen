@@ -89,18 +89,20 @@ def detect_voice_request(text: str) -> bool:
             return True
 
     # Tier 5: 上下文触发（排除误触发）
+    # 修复：旧判定 `pat == "说话"` 拿编译后的 re.Pattern 与 str 比较恒为 False，
+    # 长度守卫从未生效，任何含"说话/语音"的长句陈述（如"他发了一段语音过来"）
+    # 都落到无条件 return True 被误判为语音请求。守卫按原意接线。
     for pat in _RE_CONTEXT:
         m = pat.search(text)
-        if m:
-            surrounding = text[max(0, m.start() - 2):m.end() + 2]
-            if any(x in surrounding for x in ["识别", "输入", "转文字", "普通", "导航", "搜索"]):
-                continue
-            if "说句话" in text and ("听听" in text or "吗" in text or "吧" in text):
-                return True
-            if pat == "说话" and len(text) < 8:
-                return True
-            if pat == "语音" and len(text) < 10 and "吗" in text:
-                return True
-            return True
+        if not m:
+            continue
+        surrounding = text[max(0, m.start() - 2):m.end() + 2]
+        if any(x in surrounding for x in ["识别", "输入", "转文字", "普通", "导航", "搜索"]):
+            continue
+        if pat.pattern == "说话" and len(text) >= 8:
+            continue  # 长句中孤立的"说话"多为普通语义（否定/能力/情感层已在上面处理）
+        if pat.pattern == "语音" and not (len(text) < 10 and "吗" in text):
+            continue  # 仅"语音吗"式短疑问触发；长句陈述不触发
+        return True
 
     return False

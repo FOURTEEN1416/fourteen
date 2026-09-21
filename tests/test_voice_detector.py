@@ -120,6 +120,16 @@ class TestFalsePositives:
     def test_false_positives(self, text: str) -> None:
         assert detect_voice_request(text) is False
 
+    @pytest.mark.parametrize("text", [
+        # 6b 项5 回归：旧 `pat == "说话"` 恒 False（Pattern vs str），
+        # 长度守卫从未生效 → 长句陈述全部误触发
+        "他刚才说话声音太大了",
+        "她给我发了一段很长的语音过来",
+        "你和我说话的时候看着眼睛",
+    ])
+    def test_bare_word_guards_effective(self, text: str) -> None:
+        assert detect_voice_request(text) is False
+
 
 class TestEdgeCases:
     """场景8: 边界情况"""
