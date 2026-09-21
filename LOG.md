@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-09-21 — agnes 降级出链首（A 档配置，用户裁决「做选中这条，其余留并行窗」）
+
+- **改动** `7123dc7`：`config/system.yaml` `llm.fallback_chain` 由 `agnes→zhipu→…` 改为 **`zhipu→agnes→xunfei→baidu`**；agnes **不删除**（留作 zhipu 故障时的第二选择，端点恢复后可提回链首），注释记原因。与 09-18「sensenova 无 key 白跑一轮」同类根因，差别是这次有 key 而端点僵死，故降级而非移除。
+- **为什么值得做**：上一批部署（`ecd6ce2` 的 25s provider 超时 + 熔断）已能保住回复不再走兜底句，但每 worker 前 2 条仍要付 ~26s，且熔断 60s 到期半开会再探 agnes——**慢仍会周期性回来**；把僵死的一家挪出链首才是治本。
+- **验证**：① 本地 yaml 解析 = `['zhipu','agnes','xunfei','baidu']`，`test_llm_provider`+`test_llm_providers_routes`+`test_p1_batch3_llm_gateway` **59 passed**（无测试钉住该链序）；② 生产以 orchestrator 同路径实测 **call1 0.46s / call2 0.29s / call3 0.64s**，agnes 零调用（改动前同法实测 25.96s/25.89s 才出真回复）；③ 第二次重启微信通道再次恢复（`12:27:51 微信登录成功 owner=2/4/7`，其余 worker 让锁），health 200，A 档 blob 三端一致 = `7123dc7`。
+- **边界与未做（用户裁定留并行窗）**：provider 链双真源（`config/llm_providers.json` 管理台 ≠ `system.yaml` 运行时）、systemd `TimeoutStopSec` 到点 SIGKILL 的优雅停机、`同步微信通道会话到 DB` 的既有 `asyncio.run` 告警，本窗**一律未动**。
+- **并发**：本窗仅提交 `config/system.yaml`（+ 上一条 `LOG.md`）；并行窗在主检出的 10 个在制品文件（P1批4 proactive hub 方向，+441/−82）经 pre-commit stash/restore 后**核验完好未动**。
+- **口径注记**：本次 pull 显示服务器也拉到了 `LOG.md` → AGENTS「B 档永不出现在 `/opt/ai-girlfriend`」的 sparse-checkout 说法与实况不符（待并行窗核查，本窗不改文档口径）。
+
 ## 2026-09-21 — 生产「等我一下，刚才有点卡」根因 + 部署 P1 批次 + 通道回归根治（A 档闭环）
 
 - **触发**：用户报微信端连续收到超时兜底句，令查日志；查清后用户裁决「执行部署并重启」。
