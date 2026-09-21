@@ -125,9 +125,12 @@ async def get_dashboard_stats(_auth: bool = Security(verify_api_key_dep)):
                 try:
                     structured = getattr(memory, "structured_memory", None)
                     if structured:
-                        chats_today = structured.count_chats_today()
+                        # P1-10（2026-09-21 审查修复）：count_* 是同步 SQLite 查询，
+                        # 走记忆**共享连接**——旧实现直接在事件循环上跑，与聊天路径
+                        # 的 DB 写争锁时会阻塞整条循环。挪到线程池。
+                        chats_today = await asyncio.to_thread(structured.count_chats_today)
                         if hasattr(structured, "count_facts"):
-                            facts_count = structured.count_facts()
+                            facts_count = await asyncio.to_thread(structured.count_facts)
                 except Exception as e:
                     logger.debug("Failed to get memory stats for dashboard: %s", e)
     except Exception as e:

@@ -82,7 +82,8 @@ class _Tools:
         self.registry = _Registry(tools)
         self.calls: list[tuple[str, dict]] = []
 
-    def dispatch(self, name: str, arguments: dict, affinity_level: int = 0):
+    def dispatch(self, name: str, arguments: dict, affinity_level: int = 0,
+                 caller_id: str = ""):
         self.calls.append((name, arguments))
         tool = self.registry.get(name)
         if tool is None:

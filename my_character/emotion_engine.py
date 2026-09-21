@@ -384,6 +384,10 @@ class LLMEmotionClassifier:
         self._cache_size = cache_size
         # 类级别共享线程池，避免每次 classify 调用都创建新线程池
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="emotion_llm")
+        # P1-7（2026-09-21 审查修复）：跟踪在飞分类任务。旧实现 result(0.5s)
+        # 超时后**不取消**底层 LLM 调用——照跑几十秒占死单 worker，且后续每轮
+        # 继续往队列里堆 future，每个都全量执行（结果早已作废），白烧 token。
+        self._pending = None
 
     def _get_llm(self) -> Any | None:
         """获取 LLM 网关实例（通过弱引用）
@@ -426,10 +430,31 @@ class LLMEmotionClassifier:
 
         try:
             timeout_sec = self.timeout_ms / 1000.0
+            # P1-7：上一次分类仍在飞（LLM 还在跑）→ 本轮直接不提交，走规则降级。
+            # 宁可少一次分类，也不把注定丢弃的 LLM 调用堆进队列全量执行。
+            if self._pending is not None and not self._pending.done():
+                logger.debug("情感分类 worker 忙，本轮跳过 LLM 分类")
+                return None
             future = self._executor.submit(
                 llm.chat_sync, query=prompt, max_tokens=128, temperature=0.1
             )
-            response = future.result(timeout=timeout_sec)
+            self._pending = future
+
+            def _settle(f) -> None:
+                if self._pending is f:
+                    self._pending = None
+
+            future.add_done_callback(_settle)
+            try:
+                response = future.result(timeout=timeout_sec)
+            except FuturesTimeoutError:
+                # 未起跑则取消；已起跑则不阻塞等待——完成回调把结果写进缓存，
+                # 同一消息若再出现（重发/重试路径）可直接命中，不再白烧一次
+                future.cancel()
+                future.add_done_callback(
+                    lambda f: self._absorb_late_result(cache_key, f)
+                )
+                raise
 
             result = json.loads(response)
 
@@ -447,6 +472,18 @@ class LLMEmotionClassifier:
         except Exception as e:  # noqa: BLE001
             logger.debug("LLM分类失败: %s", e)
             return None
+
+    def _absorb_late_result(self, cache_key: str, future) -> None:
+        """超时后迟到的分类结果：能解析就入缓存（P1-7 减少重复烧调用）。"""
+        try:
+            result = json.loads(future.result())
+            if not isinstance(result, dict):
+                return
+            if cache_key not in self._cache and len(self._cache) >= self._cache_size:
+                self._cache.popitem(last=False)
+            self._cache[cache_key] = result
+        except Exception:  # noqa: BLE001
+            pass
 
     def clear_cache(self) -> None:
         self._cache.clear()

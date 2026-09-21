@@ -34,12 +34,14 @@ router = APIRouter(tags=["chat"])
 _bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def _resolve_character_id(character_id: str) -> str:
+async def _resolve_character_id(character_id: str) -> str:
     if character_id and character_id != "default":
         return character_id
+    # P1-10：目录扫描是磁盘 IO（现已带指纹缓存，见 character_routes），
+    # 仍不在事件循环上直接跑。
     from api.routers.character_routes import get_active_character_id
 
-    return get_active_character_id()
+    return await asyncio.to_thread(get_active_character_id)
 
 
 # ═══════════════════════════════════════════════════════
@@ -87,7 +89,7 @@ async def chat(
             req.message,
             req.session_id,
             req.message_type,
-            _resolve_character_id(req.character_id),
+            await _resolve_character_id(req.character_id),
             user_llm_config=user_llm_config,
             user_id=user_id,
         )
@@ -151,7 +153,7 @@ async def chat_stream(
             req.message,
             req.session_id,
             req.message_type,
-            _resolve_character_id(req.character_id),
+            await _resolve_character_id(req.character_id),
             user_llm_config=user_llm_config,
             user_id=user_id,
         )

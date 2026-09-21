@@ -32,6 +32,9 @@ except ImportError:
 
 logger = logging.getLogger("llm_provider.openai_compatible")
 
+# OAuth 刷新失败/缺 secret 时的重试冷却（秒）——避免每请求白打 token 端点
+_OAUTH_RETRY_COOLDOWN = 300.0
+
 
 class OpenAICompatibleProvider:
     """
@@ -93,12 +96,21 @@ class OpenAICompatibleProvider:
         # OAuth token 缓存（百度千帆用）
         self._oauth_token: str = ""
         self._oauth_expires_at: float = 0.0
+        self._oauth_warned_no_secret: bool = False
 
         # 连接池
         self._pool_limits = httpx.Limits(max_keepalive_connections=10, max_connections=50)
-        self._client: httpx.AsyncClient | None = None
-        self._client_loop_id: int | None = None
+        # P1-5（2026-09-21 审查修复）：AsyncClient 按**所属 loop** 缓存一格，
+        # 而不是单格槽位轮换重建。uvicorn 主循环与常驻 sync loop 交替命中是常态
+        # （web 聊天 vs ASE/调度线程），旧写法每次切换整体弃建 → 每轮重做 TLS
+        # 握手，且把旧 client 的 aclose() 调度到**新** loop 上执行（跨 loop 关闭
+        # 未定义）。现在各 loop 复用各自的 client；宿主 loop 已关闭/被回收的条目
+        # 连同引用丢弃（不能跨 loop await，交给 GC）。
+        self._clients: dict[int, tuple[Any, httpx.AsyncClient]] = {}  # loop_id -> (loop, client)
         self._sync_client: httpx.Client | None = None
+        # P1-2：非流式单请求超时 25s —— 必须小于编排层整链预算（30s），
+        # 否则链首网络黑洞一个 provider 就能烧光整条链的时间。
+        self._request_timeout = httpx.Timeout(25.0, connect=10.0)
 
         logger.info(
             "OpenAICompatibleProvider [%s]: api_base=%s, model=%s, auth=%s",
@@ -109,26 +121,36 @@ class OpenAICompatibleProvider:
     def _async_client(self) -> httpx.AsyncClient:
         loop = asyncio.get_running_loop()
         loop_id = id(loop)
-        if self._client is None or self._client_loop_id != loop_id:
-            # 切换 loop 时必须关闭旧 client，否则连接池资源会泄漏
-            # （旧 client 持有的 socket 不会被回收，最终耗尽文件描述符）
-            if self._client is not None:
-                # 旧 client 绑定在另一个 loop 上，不能 await aclose()，
-                # 用同步 close 触发底层资源释放；httpx 内部会清理连接池。
-                client_ref = self._client
+        entry = self._clients.get(loop_id)
+        if entry is not None:
+            owner, client = entry
+            if owner is loop and not owner.is_closed():
+                return client
+            # 宿主 loop 已关闭（或 id 被复用）：丢弃该格，不再跨 loop 关闭
+            del self._clients[loop_id]
+        # headers 传引用语义由 httpx 拷贝快照——OAuth 刷新后需 _refresh_client_headers
+        client = httpx.AsyncClient(
+            timeout=self._request_timeout,
+            limits=self._pool_limits,
+            headers=self._headers,
+        )
+        self._clients[loop_id] = (loop, client)
+        return client
 
-                def _close_client(c: httpx.AsyncClient = client_ref) -> None:
-                    asyncio.ensure_future(c.aclose())
+    def _refresh_client_headers(self) -> None:
+        """把最新的 self._headers 同步进所有仍存活的 client（OAuth token 轮换后调用）。
 
-                with contextlib.suppress(Exception):
-                    loop.call_soon_threadsafe(_close_client)
-            self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(60.0),
-                limits=self._pool_limits,
-                headers=self._headers,
-            )
-            self._client_loop_id = loop_id
-        return self._client
+        P1-3③：此前只改 dict，client 构造时已拷贝快照 → 新 token 永远不生效。
+        """
+        for loop, client in list(self._clients.items()):
+            try:
+                if not loop.is_closed():
+                    client.headers.update(self._headers)
+            except Exception:  # noqa: BLE001
+                pass
+        if self._sync_client is not None:
+            with contextlib.suppress(Exception):
+                self._sync_client.headers.update(self._headers)
 
     @property
     def _sync(self) -> httpx.Client:
@@ -324,7 +346,18 @@ class OpenAICompatibleProvider:
     async def _stream_chat(
         self, payload: dict, model_name: str,
     ) -> AsyncIterator[str]:
+        """流式产出 token。
+
+        P1-1（2026-09-21 审查修复）：错误不再 yield 成"内容"——旧实现把
+        （xx API 请求失败，错误代码 401）逐字推给前端、计入 full_reply、
+        经 after_chat 写进 chat_history 污染下轮上下文，且网关看不到失败
+        （流式绕开了 fallback 链）。现在：
+        - 首 token 前失败 → raise（网关 chat_stream 捕获后走下一 provider）；
+        - 已产出内容后失败 → 记日志干净收尾（重放会造成半句+整句重复）；
+        - SSE 200 + error 事件帧 → 同样 raise，不再 KeyError 静默吞。
+        """
         first_token_time = None
+        emitted = False
         start = time.perf_counter()
         try:
             async with self._async_client.stream("POST", self._chat_url, json=payload) as resp:
@@ -338,22 +371,37 @@ class OpenAICompatibleProvider:
                             break
                         try:
                             chunk = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        if isinstance(chunk, dict) and chunk.get("error"):
+                            # 部分供应商在 200 SSE 里下发 error 事件帧
+                            raise RuntimeError(
+                                f"[{self.provider_name}] SSE error 帧: {str(chunk['error'])[:200]}"
+                            )
+                        try:
                             delta = chunk["choices"][0]["delta"]
                             if "content" in delta and delta["content"]:
                                 if first_token_time is None:
                                     first_token_time = time.perf_counter()
                                     if first_token_time - start > 3.0:
                                         logger.warning("[%s] Stream first token timeout (>3s)", self.provider_name)
+                                emitted = True
                                 yield delta["content"]
-                        except (json.JSONDecodeError, KeyError, IndexError):
+                        except (KeyError, IndexError):
+                            # 无 choices 的心跳/角色帧继续，其余保持宽松跳过
                             continue
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             logger.warning("[%s] Stream timeout (60s)", self.provider_name)
-            yield "（生成已超时，请重试）"
+            if emitted:
+                return
+            raise RuntimeError(f"[{self.provider_name}] 流式生成超时") from e
         except Exception as e:  # noqa: BLE001
             if HAS_METRICS:
                 record_error("llm_stream", type(e).__name__)
-            yield self._handle_error(e)
+            if emitted:
+                logger.warning("[%s] Stream 中断（已部分内容下发，不重放）: %s", self.provider_name, e)
+                return
+            raise
 
     async def _try_fallback(
         self, messages: list, temperature: float,
@@ -387,30 +435,55 @@ class OpenAICompatibleProvider:
         return None
 
     async def _refresh_oauth_if_needed(self) -> None:
-        """百度千帆 OAuth token 刷新"""
+        """百度千帆 OAuth token 刷新。
+
+        P1-3（2026-09-21 审查修复）：
+        ① 旧实现用**同步** httpx.post——在 async 函数里触发即冻结整个 worker 循环；
+        ② secret 恒空（网关构造不传）时旧实现每次请求都白打一发 token 端点再吞掉；
+           现在缺 secret 直接判不可用并置冷却，失败同样置冷却；
+        ③ 刷新成功后必须把新 Authorization 同步进已缓存的 httpx client
+           （构造时拷贝过快照），否则 token 轮换不生效。
+        """
         if self.auth_mode != "oauth":
             return
-        if time.time() < self._oauth_expires_at - 60:
-            return  # token 还有效
+        now = time.time()
+        if now < self._oauth_expires_at - 60:
+            return  # token 还有效（含失败冷却：冷却期内 _oauth_expires_at 被拨到未来）
+        if not self._api_secret:
+            if not self._oauth_warned_no_secret:
+                logger.error(
+                    "[%s] OAuth 模式缺少 api_secret，token 永远换不到——"
+                    "请在配置中补 BAIDU/对应 provider 的 api_secret 或改用 bearer",
+                    self.provider_name,
+                )
+                self._oauth_warned_no_secret = True
+            self._oauth_expires_at = now + _OAUTH_RETRY_COOLDOWN
+            return
         try:
-            # 百度千帆 access_token 获取
             token_url = "https://aip.baidubce.com/oauth/2.0/token"
             params = {
                 "grant_type": "client_credentials",
                 "client_id": self.api_key,
                 "client_secret": self._api_secret,
             }
-            resp = httpx.post(token_url, params=params, timeout=10)
+            resp = await self._async_client.post(token_url, params=params, timeout=10.0)
             resp.raise_for_status()
             data = resp.json()
             self._oauth_token = data.get("access_token", "")
+            if not self._oauth_token:
+                raise RuntimeError(f"token 响应无 access_token: {str(data)[:200]}")
             expires_in = data.get("expires_in", 2592000)  # 默认30天
             self._oauth_expires_at = time.time() + expires_in
-            # 更新 Authorization header
+            # 更新 Authorization header —— 对后续请求真正生效需要同时更新 client 快照
             self._headers["Authorization"] = f"Bearer {self._oauth_token}"
+            self._refresh_client_headers()
             logger.info("[%s] OAuth token refreshed, expires in %ds", self.provider_name, expires_in)
         except Exception as e:  # noqa: BLE001
-            logger.warning("[%s] OAuth refresh failed: %s", self.provider_name, e)
+            self._oauth_expires_at = now + _OAUTH_RETRY_COOLDOWN
+            logger.warning(
+                "[%s] OAuth refresh failed（%.0f 分钟冷却后重试）: %s",
+                self.provider_name, _OAUTH_RETRY_COOLDOWN / 60, e,
+            )
 
     def _build_messages(
         self, query: str, system_prompt: str,
@@ -441,9 +514,15 @@ class OpenAICompatibleProvider:
         return f"（{self.provider_name} 未配置 API Key，无法生成回复）"
 
     async def close(self) -> None:
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+        # 只 await 本 loop 持有的 client；其他 loop 的格子丢弃引用
+        # （跨 loop aclose 未定义，宿主 loop 多已停止）
+        clients = list(self._clients.values())
+        self._clients.clear()
+        me = id(asyncio.get_running_loop())
+        for loop, client in clients:
+            with contextlib.suppress(Exception):
+                if id(loop) == me:
+                    await client.aclose()
         if self._sync_client is not None:
             self._sync_client.close()
             self._sync_client = None

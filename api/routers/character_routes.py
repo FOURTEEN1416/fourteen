@@ -79,12 +79,38 @@ class CharacterPreviewResponse(BaseModel):
     persona: dict[str, Any]
 
 
+_ACTIVE_ID_FP: str = ""
+_ACTIVE_ID_VALUE: str = ""
+
+
 def get_active_character_id() -> str:
-    """返回控制端当前激活角色；未配置时回退 default。"""
+    """返回控制端当前激活角色；未配置时回退 default。
+
+    P1-10（2026-09-21 审查修复）：本函数在 web 聊天**每条消息**路径上被调
+    （chat_routes._resolve_character_id），旧实现对目录内全部 JSON 逐张
+    open+json.load（现役 41 张）。现在先算目录轻量指纹（文件名+mtime+size），
+    未变化直接复用上次的 active id；任何卡变更（含 is_active 切换、增删卡）
+    都会改指纹，不会读到陈旧值。
+    """
+    global _ACTIVE_ID_FP, _ACTIVE_ID_VALUE
+    chars_dir = _get_characters_dir()
+    try:
+        parts: list[str] = []
+        for f in sorted(chars_dir.glob("*.json")):
+            st = f.stat()
+            parts.append(f"{f.name}:{st.st_mtime_ns}:{st.st_size}")
+        fp = "|".join(parts)
+    except OSError:
+        fp = ""
+    if fp and fp == _ACTIVE_ID_FP and _ACTIVE_ID_VALUE:
+        return _ACTIVE_ID_VALUE
+    active = "default"
     for character in _list_all_characters(normalize=False):
         if character.get("is_active"):
-            return str(character.get("id") or "default")
-    return "default"
+            active = str(character.get("id") or "default")
+            break
+    _ACTIVE_ID_FP, _ACTIVE_ID_VALUE = fp, active
+    return active
 
 
 class MemoryFactCreate(BaseModel):

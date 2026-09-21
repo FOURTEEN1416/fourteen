@@ -73,6 +73,16 @@ _PROFILE_PATTERNS = (
 _PROFILE_RE = re.compile("|".join(_PROFILE_PATTERNS))
 
 
+def has_profile_signal(text: str) -> bool:
+    """画像/记忆同步的 L0 信号判定（P1-6）。
+
+    对话后 profile_sync_agent 是一次真实的 LLM 工具链调用，旧实现**每条消息
+    无条件跑**（白烧一次调用、与 after_chat 排队互阻）。只有用户原话命中
+    身份/更正/偏好信号时才值得同步。
+    """
+    return bool(_PROFILE_RE.search((text or "").strip()))
+
+
 def should_escalate(query: str, has_pending_intent: bool = False) -> bool:
     """L0 晋级判定。
 

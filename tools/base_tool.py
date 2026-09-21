@@ -4,9 +4,17 @@ import json
 import logging
 import threading
 import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as _FutTimeout
 from typing import Any, ClassVar
 
 logger = logging.getLogger("tool_system")
+
+
+class ToolTimeoutError(Exception):
+    """工具执行超过 self.timeout —— 与"工具抛异常"区分，单独记错误并降级。"""
+
 
 
 class ToolResult:
@@ -102,19 +110,60 @@ class ToolRegistry:
 
 
 class ToolDispatcher:
+    # 工具执行专用**有界**线程池（P1-11）：挂死工具只占这里的槽，
+    # 不再占满全局默认 to_thread 池（后者被记忆/画像/统计等所有 to_thread 共用）。
+    _EXECUTOR_MAX_WORKERS = 16
+
     def __init__(self, registry: ToolRegistry, timeout: float = 10.0,
                  rate_limit_per_minute: int = 3,
                  retry_count: int = 1, retry_tools: set | None = None):
         self.registry = registry
         self.timeout = timeout
         self.rate_limit = rate_limit_per_minute
-        self._call_times: dict[str, list[float]] = {}
+        # 限速键 = (tool_name, caller_id)：按调用者隔离，第 N 个用户不再被
+        # 前 N 个用户耗尽同一工具的配额（旧实现按工具名全局共享 → 用户互耗）
+        self._call_times: dict[tuple[str, str], list[float]] = {}
         self._lock = threading.Lock()
+        self._executor: ThreadPoolExecutor | None = None
+        self._executor_lock = threading.Lock()
         self.retry_count = retry_count
         self.retry_tools = retry_tools or {"search", "weather"}
 
+    def _get_executor(self) -> ThreadPoolExecutor:
+        if self._executor is None:
+            with self._executor_lock:
+                if self._executor is None:
+                    self._executor = ThreadPoolExecutor(
+                        max_workers=self._EXECUTOR_MAX_WORKERS,
+                        thread_name_prefix="tool_exec",
+                    )
+        return self._executor
+
+    def _call_with_timeout(self, fn: Callable[[], ToolResult]) -> ToolResult:
+        """在专用有界池执行 fn 并消费 self.timeout。
+
+        - timeout<=0：直接内联执行（保留旧的无超时行为）。
+        - 超时抛 ToolTimeoutError（底层线程无法强杀，但已返回控制权给调用方，
+          且挂死线程被限制在本池 16 槽内，不再饿死全局 to_thread）。
+        """
+        if self.timeout <= 0:
+            return fn()
+        fut = self._get_executor().submit(fn)
+        try:
+            return fut.result(timeout=self.timeout)
+        except _FutTimeout as e:
+            fut.cancel()
+            raise ToolTimeoutError(f"工具执行超过 {self.timeout}s") from e
+
+    def close(self) -> None:
+        """释放工具执行线程池（编排器 shutdown 时调用）。"""
+        if self._executor is not None:
+            self._executor.shutdown(wait=False)
+            self._executor = None
+
     def dispatch(self, tool_name: str, arguments: dict[str, Any],
-                 affinity_level: int = 0, trace_id: str = "") -> ToolResult:
+                 affinity_level: int = 0, trace_id: str = "",
+                 caller_id: str = "") -> ToolResult:
         tool = self.registry.get(tool_name)
         if not tool:
             return ToolResult(False, error=f"Tool not found: {tool_name}")
@@ -122,39 +171,54 @@ class ToolDispatcher:
         if not self._check_permission(tool, affinity_level):
             return ToolResult(False, error=f"Permission denied for tool: {tool_name}")
 
-        if not self._check_rate_limit(tool_name):
+        if not self._check_rate_limit(tool_name, caller_id):
             return ToolResult(False, error=f"Rate limit exceeded for tool: {tool_name}")
 
         start = time.perf_counter()
         try:
-            result = tool.execute(**arguments)
-            duration_ms = (time.perf_counter() - start) * 1000
-            from observability.metrics import record_tool_call
-            record_tool_call(tool_name, duration_ms / 1000, result.success)
+            result = self._call_with_timeout(lambda: tool.execute(**arguments))
+            self._record(tool_name, start, result.success)
             return result
+        except ToolTimeoutError as e:
+            self._record(tool_name, start, False)
+            logger.warning("工具执行超时: %s — %s", tool_name, e)
+            return ToolResult(False, error=f"tool_timeout: {e}")
         except Exception:
-            duration_ms = (time.perf_counter() - start) * 1000
-            from observability.metrics import record_tool_call
-            record_tool_call(tool_name, duration_ms / 1000, False)
+            self._record(tool_name, start, False)
             if tool_name in self.retry_tools and self.retry_count > 0:
                 return self._execute_with_retry(tool, arguments, tool_name)
             logger.exception("工具执行失败: %s", tool_name)
             return ToolResult(False, error="tool_execution_failed")
+
+    @staticmethod
+    def _record(tool_name: str, start: float, success: bool) -> None:
+        duration_ms = (time.perf_counter() - start) * 1000
+        try:
+            from observability.metrics import record_tool_call
+            record_tool_call(tool_name, duration_ms / 1000, success)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _check_permission(self, tool: BaseTool, affinity: int) -> bool:
         permission_affinity = {"public": 0, "friend": 2, "intimate": 6, "admin": 99}
         required = permission_affinity.get(tool.permission_level, 0)
         return affinity >= required
 
-    def _check_rate_limit(self, tool_name: str) -> bool:
+    def _check_rate_limit(self, tool_name: str, caller_id: str = "") -> bool:
         now = time.time()
+        key = (tool_name, caller_id or "__global__")
         with self._lock:
-            times = self._call_times.get(tool_name, [])
-            times = [t for t in times if now - t < 60]
-            self._call_times[tool_name] = times
+            times = [t for t in self._call_times.get(key, []) if now - t < 60]
             if len(times) >= self.rate_limit:
+                self._call_times[key] = times
                 return False
             times.append(now)
+            self._call_times[key] = times
+            # 顺带回收已空闲的键，避免长跑进程里 per-caller 键无界增长
+            if len(self._call_times) > 512:
+                for k in [k for k, v in self._call_times.items()
+                          if not v or now - v[-1] >= 60]:
+                    self._call_times.pop(k, None)
             return True
 
     def _execute_with_retry(self, tool: BaseTool, arguments: dict[str, Any],
@@ -162,9 +226,11 @@ class ToolDispatcher:
         for attempt in range(self.retry_count):
             time.sleep(0.5 * (attempt + 1))
             try:
-                result = tool.execute(**arguments)
+                result = self._call_with_timeout(lambda: tool.execute(**arguments))
                 if result.success:
                     return result
+            except ToolTimeoutError as e:
+                logger.warning("工具重试 %s (%d/%d) 超时: %s", tool_name, attempt + 1, self.retry_count, e)
             except Exception as e:  # noqa: BLE001
                 logger.warning("工具重试 %s (%d/%d) 失败: %s", tool_name, attempt + 1, self.retry_count, e)
         return ToolResult(False, error=f"Tool {tool_name} failed after {self.retry_count} retries")

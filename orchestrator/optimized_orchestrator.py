@@ -74,6 +74,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         self._session_lock_manager = SessionLockManager()
         self._executor = None  # 延迟初始化的共享线程池
         self._bg_executor = None  # 延迟初始化的后处理串行线程池（见 _get_background_executor）
+        # P1-6：profile_sync_agent 在飞会话集（同会话最多一个并发同步，防连发叠跑）
+        self._profile_sync_inflight: set[str] = set()
         # Web/API 调用未经过 UserManager 时，也必须按“会话 × 角色”隔离情绪状态。
         # 外部显式传入 emotion_engine（如微信 UserManager）时仍优先使用外部实例。
         self._request_emotion_engines: dict[str, EmotionEngine] = {}
@@ -137,6 +139,14 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 logger.info("MemoryPipeline 已关闭")
             except Exception as e:  # noqa: BLE001
                 logger.warning("MemoryPipeline 关闭异常: %s", e)
+
+        tools = self.components.get("tools")
+        if tools is not None and hasattr(tools, "close"):
+            try:
+                tools.close()
+                logger.info("ToolDispatcher 执行线程池已关闭")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("ToolDispatcher 关闭异常: %s", e)
 
         with self._request_emotion_engines_lock:
             request_engines = list(self._request_emotion_engines.values())
@@ -483,7 +493,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 args["_meta"] = {"session_key": session_key, "user_id": user_id}
             try:
                 result = await asyncio.to_thread(
-                    tools.dispatch, name, args, affinity_level=affinity_level,
+                    tools.dispatch, name, args,
+                    affinity_level=affinity_level,
+                    caller_id=str(user_id or session_key or ""),
                 )
             except Exception as e:  # noqa: BLE001
                 logger.debug("工具 %s 执行异常: %s", name, e)
@@ -763,8 +775,14 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         )
 
         # 并行执行独立任务（recent 传 session_id：会话隔离，防跨用户串扰）
-        recent = self.components["memory"].get_recent_context(3, session_id=session_id)
+        # P1-10（2026-09-21 审查修复）：get_recent_context 自 v1.17 起读 DB——
+        # 旧实现直接在事件循环上同步调用（同函数内 retrieve_context 已包 executor，
+        # 两种口径）。挪到 executor，与其余并行任务同规。
         loop = asyncio.get_running_loop()
+        recent = await loop.run_in_executor(
+            None,
+            lambda: self.components["memory"].get_recent_context(3, session_id=session_id),
+        )
 
         tasks: dict[str, Any] = {}
         if pe is not None:
@@ -859,12 +877,15 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 rag_context = rag_payload_to_text(task_result)
 
         # 对话历史 + 摘要
+        # P1-10：get_chat_context 内含 DB 读 + 可能触发摘要 LLM 调用
+        # （ConversationSummarizer._summarize），旧实现直接在事件循环上同步调用。
         chat_history: list = []
         chat_summary: str = ""
         mem = self.components.get("memory")
         if mem and hasattr(mem, 'get_chat_context'):
-            chat_history, chat_summary = mem.get_chat_context(
-                session_id=session_id,
+            chat_history, chat_summary = await loop.run_in_executor(
+                None,
+                lambda: mem.get_chat_context(session_id=session_id),
             )
         # 2026-09-21：清洗交给 LLM 的历史 — 只保留 user/assistant 角色、去空/系统错误、
         # 防止「当前用户消息」与 history 重复，避免模型分不清该回哪句。
@@ -1163,21 +1184,42 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 )
             except Exception as e:  # noqa: BLE001
                 logger.debug("ledger turn events failed: %s", e)
+            # P1-6（2026-09-21 审查修复）：
+            # ① 旧实现**每条消息无条件**跑一次 profile_sync_agent LLM 工具链——
+            #    现在只在用户原话命中画像/记忆信号（L0 晋级线）时触发；
+            # ② 旧实现占用单 worker 的 after_chat 串行池、lambda 里再
+            #    asyncio.run 新建/销毁循环（与 provider 的按 loop 缓存互相
+            #    乒乓）——现在直接提交到常驻 sync loop，不再挤占后处理队列。
             try:
-                llm_for_sync = self.components.get("llm")
-                sm_for_sync = None
-                mem = self.components.get("memory")
-                if mem is not None:
-                    sm_for_sync = getattr(mem, "structured_memory", None)
-                from tools.builtin.profile_agent_tools import run_profile_sync_agent
+                from orchestrator.tool_gate import has_profile_signal
 
-                self._get_background_executor().submit(
-                    lambda: __import__("asyncio").run(
-                        run_profile_sync_agent(
-                            llm_for_sync, session_id, user_msg_clean, reply, sm_for_sync
+                if has_profile_signal(user_msg_clean):
+                    llm_for_sync = self.components.get("llm")
+                    sm_for_sync = None
+                    mem = self.components.get("memory")
+                    if mem is not None:
+                        sm_for_sync = getattr(mem, "structured_memory", None)
+                    if session_id not in self._profile_sync_inflight:
+                        from llm_provider.multi_provider_gateway import _get_sync_loop
+                        from tools.builtin.profile_agent_tools import (
+                            run_profile_sync_agent,
                         )
-                    )
-                )
+
+                        fut = asyncio.run_coroutine_threadsafe(
+                            run_profile_sync_agent(
+                                llm_for_sync, session_id, user_msg_clean,
+                                reply if isinstance(reply, str) else "",
+                                sm_for_sync,
+                            ),
+                            _get_sync_loop(),
+                        )
+                        self._profile_sync_inflight.add(session_id)
+                        fut.add_done_callback(
+                            lambda _f, _s=session_id: (
+                                self._profile_sync_inflight.discard(_s),
+                                _f.exception(),  # 取出异常，避免 "never retrieved" 刷屏
+                            )
+                        )
             except Exception as e:  # noqa: BLE001
                 logger.debug("profile_sync_agent schedule failed: %s", e)
 

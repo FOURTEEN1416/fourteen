@@ -32,10 +32,11 @@ class _Registry:
 class _Tools:
     def __init__(self):
         self.registry = _Registry()
-        self.calls: list[tuple[str, dict, int]] = []
+        self.calls: list[tuple[str, dict, int, str]] = []
 
-    def dispatch(self, name: str, arguments: dict, affinity_level: int = 0):
-        self.calls.append((name, arguments, affinity_level))
+    def dispatch(self, name: str, arguments: dict, affinity_level: int = 0,
+                 caller_id: str = ""):
+        self.calls.append((name, arguments, affinity_level, caller_id))
         return ToolResult(True, {"temperature": 21})
 
 
@@ -85,7 +86,7 @@ def test_query_intent_escalates_and_dispatches_with_ask_user_schema():
     schema_names = [schema["function"]["name"] for schema in seen["tools"]]
     assert "weather" in schema_names
     assert "ask_user" in schema_names
-    assert tools.calls == [("weather", {"city": "北京"}, 2)]
+    assert tools.calls == [("weather", {"city": "北京"}, 2, "")]
     assert '"temperature": 21' in tool_results
     assert direct_reply == ""
 

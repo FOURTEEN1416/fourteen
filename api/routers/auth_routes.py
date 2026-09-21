@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -146,10 +147,12 @@ async def register(
     ensure_password_strength(req.password)
 
     # 创建用户
+    # P1-10（2026-09-21 审查修复）：bcrypt ~0.2-0.5s 纯 CPU，旧实现直接在
+    # async 路由里同步跑——撞库时每个错误请求冻结整个事件循环一次。
     user = User(
         email=req.email,
         username=req.username,
-        hashed_password=hash_password(req.password),
+        hashed_password=await asyncio.to_thread(hash_password, req.password),
         display_name=req.display_name or req.username,
         role="viewer",     # 新注册用户默认 viewer
         is_active=True,
@@ -197,7 +200,7 @@ async def login(
         raise HTTPException(status_code=401, detail="Invalid login credentials")
 
     # 验证密码
-    if not verify_password(req.password, user.hashed_password):
+    if not await asyncio.to_thread(verify_password, req.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid login credentials")
 
     # 检查账号是否激活
@@ -391,7 +394,7 @@ async def change_password(
         raise HTTPException(status_code=404, detail="User not found")
 
     # 验证当前密码
-    if not verify_password(req.current_password, user.hashed_password):
+    if not await asyncio.to_thread(verify_password, req.current_password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
     # 新旧密码不能一样
@@ -402,7 +405,7 @@ async def change_password(
     ensure_password_strength(req.new_password)
 
     # 更新密码
-    user.hashed_password = hash_password(req.new_password)
+    user.hashed_password = await asyncio.to_thread(hash_password, req.new_password)
     await db.commit()
 
     logger.info("用户 %s 修改了密码", user.email)
@@ -426,7 +429,7 @@ async def admin_reset_password(
     ensure_password_strength(req.new_password)
 
     # 更新密码为管理员指定的新密码
-    user.hashed_password = hash_password(req.new_password)
+    user.hashed_password = await asyncio.to_thread(hash_password, req.new_password)
 
     # 吊销该用户所有 refresh token（强制重新登录）
     result = await db.execute(

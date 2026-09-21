@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -340,7 +341,11 @@ async def crawl_persona_knowledge(
     card = _load_character_card(character_id)
     # 允许角色卡不存在，此时仅建立爬虫来源的索引
     adapter = get_crawler_adapter()
-    result = adapter.crawl_and_index(
+    # P1-10（2026-09-21 审查修复）：多源网络长链（实测单次 33.2s）不得在
+    # 事件循环上裸跑——同仓 character_routes._schedule_character_crawl 已示范
+    # asyncio.to_thread 包同一函数。
+    result = await asyncio.to_thread(
+        adapter.crawl_and_index,
         character_id=character_id,
         name=req.name,
         card=card.model_dump() if card is not None else None,
@@ -394,7 +399,8 @@ async def enrich_character_persona(
     try:
         from persona_extractor.web_enricher import WebPersonaEnricher
         enricher = WebPersonaEnricher()
-        result = enricher.enrich(
+        result = await asyncio.to_thread(
+            enricher.enrich,
             character_id=character_id,
             character_name=req.name,
             max_docs=req.max_docs,

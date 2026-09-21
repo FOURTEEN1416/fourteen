@@ -376,11 +376,12 @@ def test_conversation_summarizer_clear_cache_all():
 def test_conversation_summarizer_clear_cache_by_session():
     from shisi.memory.legacy.conversation_summarizer import ConversationSummarizer
     cs = ConversationSummarizer(llm_gateway=None)
-    cs._cache["sess1:1"] = "a"
-    cs._cache["sess2:1"] = "b"
+    # P1-8：缓存按 session_id 单键（旧 `{session}:{count}` 键每轮必 miss）
+    cs._cache["sess1"] = "a"
+    cs._cache["sess2"] = "b"
     cs.clear_cache(session_id="sess1")
-    assert "sess1:1" not in cs._cache
-    assert "sess2:1" in cs._cache
+    assert "sess1" not in cs._cache
+    assert "sess2" in cs._cache
 
 
 # ═══════════════════════════════════════════════════════════════

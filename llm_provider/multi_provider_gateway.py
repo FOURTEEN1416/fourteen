@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import threading
+import time
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from typing import Any
@@ -49,16 +50,30 @@ _sync_loop_lock = threading.Lock()
 
 
 def _get_sync_loop() -> asyncio.AbstractEventLoop:
-    """返回常驻的专用事件循环（守护线程内 run_forever，进程存活期间复用）。"""
+    """返回常驻的专用事件循环（守护线程内 run_forever，进程存活期间复用）。
+
+    P1-4（2026-09-21 审查修复）：旧实现在线程尚未进入 run_forever 前就把
+    loop 发布为全局 —— 首个 run_coroutine_threadsafe 可能落在未启动的循环上，
+    任务永远排队不执行、调用方 .result() 挂死。现在用 started 事件确认
+    循环已跑起来才发布。
+    """
     global _sync_loop  # noqa: PLW0603
     if _sync_loop is not None and _sync_loop.is_running():
         return _sync_loop
     with _sync_loop_lock:
         if _sync_loop is None or not _sync_loop.is_running():
             loop = asyncio.new_event_loop()
+            started = threading.Event()
+
+            def _serve() -> None:
+                loop.call_soon(started.set)
+                loop.run_forever()
+
             threading.Thread(
-                target=loop.run_forever, name="llm-sync-loop", daemon=True,
+                target=_serve, name="llm-sync-loop", daemon=True,
             ).start()
+            if not started.wait(timeout=5.0):
+                logger.warning("llm-sync-loop 线程 5s 未就绪，仍返回循环（可能延迟首调用）")
             _sync_loop = loop
     return _sync_loop
 
@@ -232,7 +247,8 @@ def _resolve_env_override(provider_key: str, config: dict[str, Any]) -> dict[str
     env_map = {
         "zhipu": {"key": "ZHIPU_API_KEY", "base": "ZHIPU_API_BASE", "model": "ZHIPU_MODEL"},
         "xunfei": {"key": "XUNFEI_API_KEY", "base": "XUNFEI_API_BASE", "model": "XUNFEI_MODEL"},
-        "baidu": {"key": "BAIDU_API_KEY", "base": "BAIDU_API_BASE", "model": "BAIDU_MODEL"},
+        "baidu": {"key": "BAIDU_API_KEY", "base": "BAIDU_API_BASE", "model": "BAIDU_MODEL",
+                  "secret": "BAIDU_API_SECRET"},
         "deepseek": {"key": "DEEPSEEK_API_KEY", "base": "DEEPSEEK_API_BASE", "model": "DEEPSEEK_MODEL"},
         "agnes": {"key": "AGNES_API_KEY", "base": "AGNES_API_BASE", "model": "AGNES_MODEL"},
     }
@@ -258,6 +274,14 @@ def _resolve_env_override(provider_key: str, config: dict[str, Any]) -> dict[str
     if env_model:
         cfg["model"] = env_model
 
+    # P1-3②：oauth 型 provider（百度）还需 secret_key（app secret），
+    # 旧实现 env_map 无 secret 位 → 换 token 永远失败且无告警
+    secret_key = mapping.get("secret", "")
+    if secret_key:
+        env_secret = os.environ.get(secret_key, "")
+        if env_secret:
+            cfg["api_secret"] = env_secret
+
     return cfg
 
 
@@ -269,6 +293,10 @@ class MultiProviderGateway:
       Agnes → 智谱AI → 讯飞星火 → 百度千帆
     如果用户配置了 DeepSeek，自动插入到最前面。
     """
+
+    # P1-2：provider 级熔断参数
+    _BREAKER_THRESHOLD = 2      # 连续失败次数达到即开闸
+    _BREAKER_COOLDOWN = 60.0    # 开闸后跳过该 provider 的秒数（到期半开重探）
 
     def __init__(
         self,
@@ -283,6 +311,10 @@ class MultiProviderGateway:
         # 构建 provider 实例
         self._providers: dict[str, Any] = {}
         self._current_index: int = 0  # 当前活跃的 provider 索引
+        # P1-2（2026-09-21 审查修复）：无熔断时链首网络黑洞会每轮从链首重探，
+        # 30s 整链预算被单个坏 provider 烧光、健康 provider 永远轮不到。
+        self._breaker_failures: dict[str, int] = {}
+        self._breaker_open_until: dict[str, float] = {}
 
         for key in self._chain:
             if key == "deepseek":
@@ -321,6 +353,10 @@ class MultiProviderGateway:
                 max_tokens=cfg.get("max_tokens", 2048),
                 temperature=cfg.get("temperature", 0.85),
                 extra_payload=cfg.get("extra_payload"),
+                # P1-3②：oauth（百度）换 token 需要 app_id + api_secret，
+                # 旧实现构造时不传 → auth_mode=oauth 的 provider 永远拿不到 token
+                app_id=cfg.get("app_id", ""),
+                api_secret=cfg.get("api_secret", ""),
             )
 
         logger.info(
@@ -352,6 +388,44 @@ class MultiProviderGateway:
     def all_providers(self) -> dict[str, Any]:
         return self._providers
 
+    # ─── P1-2 熔断 ─────────────────────────────────
+
+    def _breaker_open(self, key: str) -> bool:
+        """该 provider 是否处于开闸期。到期自动半开（清除状态、允许重探）。"""
+        until = self._breaker_open_until.get(key, 0.0)
+        if until <= 0:
+            return False
+        if time.time() >= until:
+            self._breaker_open_until.pop(key, None)
+            self._breaker_failures.pop(key, None)
+            return False
+        return True
+
+    def _mark_provider_result(self, key: str, ok: bool) -> None:
+        if ok:
+            self._breaker_failures.pop(key, None)
+            self._breaker_open_until.pop(key, None)
+            return
+        n = self._breaker_failures.get(key, 0) + 1
+        self._breaker_failures[key] = n
+        if n >= self._BREAKER_THRESHOLD:
+            self._breaker_open_until[key] = time.time() + self._BREAKER_COOLDOWN
+            logger.warning(
+                "[MultiGateway] provider %s 连续失败 %d 次，熔断 %.0fs",
+                key, n, self._BREAKER_COOLDOWN,
+            )
+
+    def _chain_keys(self, start_key: str = "") -> list[str]:
+        """本轮可选 provider 顺序：start_key 优先，过滤开闸项。
+
+        全开闸时退回完整链（宁可重探也不让请求无 LLM 可用）。
+        """
+        keys = list(self._providers.keys())
+        if start_key and start_key in keys:
+            keys = [start_key] + [k for k in keys if k != start_key]
+        available = [k for k in keys if not self._breaker_open(k)]
+        return available or keys
+
     # ─── 公共接口 ────────────────────────────────
 
     async def chat(
@@ -380,7 +454,7 @@ class MultiProviderGateway:
         # B 请求的流式/工具调用就会打到**错误的 provider**（甚至空 provider）。
         # 现在只记录本次调用"实际成功"的 provider，且仅在成功后才发布，
         # 使失败探测不再污染全局当前指针。
-        for key in self._providers:
+        for key in self._chain_keys():
             provider = self._providers[key]
             try:
                 result = await provider.chat(
@@ -391,14 +465,17 @@ class MultiProviderGateway:
                 )
                 if result and not _is_error_reply(result):
                     _record_fallback(key, "success")
+                    self._mark_provider_result(key, True)
                     self._publish_current(key)
                     return result
                 last_error = result
                 _record_fallback(key, "fallback")
+                self._mark_provider_result(key, False)
                 logger.warning("[MultiGateway] %s returned: %s", key, result)
             except Exception as e:  # noqa: BLE001
                 last_error = str(e)
                 _record_fallback(key, "error")
+                self._mark_provider_result(key, False)
                 logger.warning("[MultiGateway] %s failed: %s", key, e)
 
         logger.error("[MultiGateway] All providers failed, last_error=%s", last_error)
@@ -451,7 +528,11 @@ class MultiProviderGateway:
             # 常规路径：调用线程无运行中的循环（wx 消息线程 / APScheduler / 脚本）
             return _run()
 
-        # 嵌套场景（调用线程本已有循环）：丢线程池，避免阻塞调用方的循环
+        # 嵌套场景（调用线程本已有循环）：转交给一次性线程池执行。
+        # 注意（P1-4 澄清，旧注释误称"避免阻塞调用方的循环"）：.result() 仍然
+        # **阻塞调用线程**，被保护的只是循环上其他协程不被独占——循环若在本
+        # 线程上跑，阻塞线程同样冻结该循环上的全部任务。异步调用方必须直接
+        # await chat()，不得走 chat_sync。
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(_run).result()
@@ -467,23 +548,57 @@ class MultiProviderGateway:
         tools: list | None = None,
         attachments: list | None = None,
     ) -> AsyncIterator[str]:
-        """流式聊天 — 只在第一个可用 provider 上执行"""
-        provider = self.current_provider
-        if not provider:
-            yield "（没有可用的 LLM 提供商）"
-            return
+        """流式聊天 — P1-1（2026-09-21 审查修复）：与 chat() 同规走 fallback 链。
 
+        旧实现只绑 current_provider，且 provider 把错误文案 yield 成"内容"：
+        失败既不降级、错误文本又被计入 full_reply 写进 chat_history 污染下轮。
+        语义：
+        - 首 token 前失败/空回复 → 记失败、切下一 provider；
+        - 已下发内容后中断 → 直接上抛（重放会半句+整句重复），由调用方兜底；
+        - 全部失败 → raise（错误文案不再伪装成回复内容）。
+        """
         messages, query = _merge_attachments(
             query, system_prompt, history, messages, attachments
         )
 
-        async for token in provider.chat_stream(
-            query=query, system_prompt=system_prompt,
-            history=history, messages=messages,
-            temperature=temperature, max_tokens=max_tokens,
-            tools=tools,
-        ):
-            yield token
+        keys = self._chain_keys(self.current_provider_key)
+        if not keys:
+            yield "（没有可用的 LLM 提供商）"
+            return
+
+        last_exc: Exception | None = None
+        for key in keys:
+            provider = self._providers[key]
+            emitted = False
+            try:
+                async for token in provider.chat_stream(
+                    query=query, system_prompt=system_prompt,
+                    history=history, messages=messages,
+                    temperature=temperature, max_tokens=max_tokens,
+                    tools=tools,
+                ):
+                    emitted = True
+                    yield token
+            except Exception as e:  # noqa: BLE001
+                if emitted:
+                    raise
+                last_exc = e
+                self._mark_provider_result(key, False)
+                _record_fallback(key, "error")
+                logger.warning("[MultiGateway] %s 流式失败，降级下一个: %s", key, e)
+                continue
+            if emitted:
+                self._mark_provider_result(key, True)
+                _record_fallback(key, "success")
+                self._publish_current(key)
+                return
+            self._mark_provider_result(key, False)
+            _record_fallback(key, "fallback")
+            logger.warning("[MultiGateway] %s 流式空回复，降级下一个", key)
+
+        if last_exc:
+            raise RuntimeError(f"所有 LLM 提供商流式均不可用: {last_exc}") from last_exc
+        # 全体零 token 且无异常：不 yield 错误文案——上层空回复分支会取角色化兜底句
 
     async def chat_with_tools(
         self,

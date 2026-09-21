@@ -326,23 +326,34 @@ def profile_sync_tool_schemas() -> list[dict]:
     ]
 
 
+_PROFILE_SYNC_DISP: Any = None
+
+
+def _profile_sync_dispatcher() -> Any:
+    """画像同步专用调度器（模块级单例，限速状态跨调用累积）。"""
+    global _PROFILE_SYNC_DISP
+    if _PROFILE_SYNC_DISP is None:
+        from tools.base_tool import ToolDispatcher, ToolRegistry
+
+        reg = ToolRegistry()
+        reg.register(UpdateUserProfileTool())
+        reg.register(RememberFactsTool())
+        reg.register(ForgetFactsTool())
+        reg.register(QueryProfileTool())
+        _PROFILE_SYNC_DISP = ToolDispatcher(reg, rate_limit_per_minute=30)
+    return _PROFILE_SYNC_DISP
+
+
 def apply_profile_sync_calls(session_key: str, tool_calls: list[dict], sm: Any = None) -> list[dict]:
     """执行智能体同步产生的 tool_calls（服务端注入 session_key）。"""
-    from tools.base_tool import ToolDispatcher, ToolRegistry
+    import json
 
-    reg = ToolRegistry()
-    reg.register(UpdateUserProfileTool())
-    reg.register(RememberFactsTool())
-    reg.register(ForgetFactsTool())
-    reg.register(QueryProfileTool())
-    disp = ToolDispatcher(reg, rate_limit_per_minute=30)
+    disp = _profile_sync_dispatcher()
     out = []
     for tc in tool_calls or []:
         fn = tc.get("function", {}) if isinstance(tc, dict) else {}
         name = str(fn.get("name") or "")
         raw = fn.get("arguments", "{}")
-        import json
-
         try:
             args = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
         except Exception:  # noqa: BLE001
@@ -350,7 +361,10 @@ def apply_profile_sync_calls(session_key: str, tool_calls: list[dict], sm: Any =
         args["_meta"] = {"session_key": session_key}
         if sm is not None:
             args["structured_memory"] = sm
-        result = disp.dispatch(name, args, affinity_level=0)
+        result = disp.dispatch(
+            name, args, affinity_level=0,
+            caller_id=str(session_key or ""),
+        )
         out.append({"name": name, "result": result.to_dict()})
     return out
 

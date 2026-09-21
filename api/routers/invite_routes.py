@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
@@ -152,7 +153,7 @@ async def register_with_invite(
     user = User(
         email=req.email,
         username=req.username,
-        hashed_password=hash_password(req.password),
+        hashed_password=await asyncio.to_thread(hash_password, req.password),
         display_name=req.display_name or req.username,
         role="viewer",
         is_active=True,

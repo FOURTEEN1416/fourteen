@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -147,7 +148,7 @@ async def create_user(
     user = User(
         email=req.email,
         username=req.username,
-        hashed_password=hash_password(req.password),
+        hashed_password=await asyncio.to_thread(hash_password, req.password),
         display_name=req.display_name or req.username,
         role=req.role,
         is_active=True,
@@ -191,7 +192,7 @@ async def update_user(
     if req.password:
         # 仅在确实要改密码时校验强度（策略唯一真源：api/password_policy.py）
         ensure_password_strength(req.password)
-        user.hashed_password = hash_password(req.password)
+        user.hashed_password = await asyncio.to_thread(hash_password, req.password)
     if req.display_name is not None:
         user.display_name = req.display_name
     if req.role is not None:

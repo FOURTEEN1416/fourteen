@@ -323,12 +323,19 @@ class VectorMemory:
 
     # ── 通用 ──────────────────────────────────────────────
 
-    async def _search(self, collection_name: str, query: str, top_k: int) -> list[dict[str, Any]]:
+    async def _search(
+        self, collection_name: str, query: str, top_k: int,
+        where: dict | None = None,
+    ) -> list[dict[str, Any]]:
         coll = self._collections.get(collection_name)
         if coll is None:
             return []
         try:
-            results = await asyncio.to_thread(coll.query, query_texts=[query], n_results=top_k)
+            kwargs: dict[str, Any] = {"query_texts": [query], "n_results": top_k}
+            if where:
+                # P1-9：元数据过滤下推给 Chroma，取该集合内的目标子集
+                kwargs["where"] = where
+            results = await asyncio.to_thread(coll.query, **kwargs)
             if not results or not results.get("documents"):
                 return []
             items = []
@@ -344,15 +351,20 @@ class VectorMemory:
             logger.warning("Search failed on %s: %s", collection_name, e)
             return []
 
+    # P1-9（2026-09-21 审查修复）：逻辑 type → (物理集合, 元数据过滤)。
+    # 反思写入的是 episodic_memory（metadata type=reflection），旧实现映射表
+    # 里没有它 → filter 落到"扫全部 6 个集合"分支，每轮 O(6×k) 向量查询。
+    _SEARCH_ROUTES = {
+        "episode": ("episodic_memory", None),
+        "fact": ("user_facts", None),
+        "reflection": ("episodic_memory", {"type": "reflection"}),
+    }
+
     async def search(self, query: str, top_k: int = 5, filter_dict: dict | None = None) -> list[dict[str, Any]]:
-        collection_map = {
-            "episode": "episodic_memory",
-            "fact": "user_facts",
-        }
         if filter_dict and isinstance(filter_dict, dict):
-            coll_name = collection_map.get(filter_dict.get("type", ""))
-            if coll_name:
-                return await self._search(coll_name, query, top_k)
+            route = self._SEARCH_ROUTES.get(filter_dict.get("type", ""))
+            if route:
+                return await self._search(route[0], query, top_k, where=route[1])
         all_results: list[dict[str, Any]] = []
         for coll in self._collections.values():
             if coll is not None:
