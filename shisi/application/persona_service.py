@@ -67,6 +67,27 @@ class PersonaService:
         self._card_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
         self._card_cache_max = 64
 
+    # 6b 项9④：/api/persona/profile 与 /api/persona/evolution-log 端点直接读
+    # orch._persona（即本服务）的 .profile / .get_evolution_log，此前缺委托
+    # → AttributeError → 500（前端 useQueries 消费这两个端点）。
+
+    @property
+    def profile(self) -> Any:
+        return self._engine.profile
+
+    @property
+    def style_coupler(self) -> Any:
+        return getattr(self._engine, "_emotion_style_coupler", None)
+
+    def get_evolution_log(self, limit: int = 50) -> list[dict]:
+        return self._engine.get_evolution_log(limit)
+
+    def check_consistency(self, response: str, emotion_state: Any = None,
+                          chat_round: int = 0) -> Any:
+        # _stream_mixin 的兜底分支 hasattr(persona_service, "check_consistency")
+        # 过去恒为 False → 默认角色（非外部卡）的后台一致性检测整段落空。补委托。
+        return self._engine.check_consistency(response, emotion_state, chat_round)
+
     def build_system_prompt(
         self,
         emotion_state: Any = None,

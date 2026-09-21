@@ -1,5 +1,49 @@
 # Code Deletion Log
 
+## [2026-09-21] orchestrator 角色卡挂线删除（P2 批6b 项9⑤）
+
+### 删除对象与证据
+- `orchestrator/_init_mixin.py::_init_character_card`（阶段 5 整方法 + initialize 调用点）
+  - **零读者挂线**：其唯一产出 `components["character_card"]`（CharacterCardAdapter 实例）
+    与 `components["card_mode"]` 全仓 grep（含 `.get("` 与引号键名两种取法）——除挂线
+    自身写入外**无任何读取者**；tests 亦无引用
+  - 角色卡运行真源是 `persona_service._load_character_card` 直接读
+    `config/characters/*.json`，与该适配器并行存在且从未被后者使用
+  - `character_card/` 包本体暂留（其 `integration.py` mtime 失效缺陷与包生产面
+    清点归 6b 项10 死码批次）；本项只拆 orchestrator 侧无人读的装配线
+  - 反向钉防复活：`test_p2_batch6_persona.py::test_character_card_wiring_removed_from_init`
+
+### 同批修复（审计 :139 persona P2 ①-④）
+- **① verify_anchors 自比同义反复**：`persona_engine.py:366` 旧遍历 `_anchor_hashes`
+  自身、把基线文本重哈希与存的值比较→恒真。改比对 `_persona["core_anchors"]`
+  现值哈希集 vs 冻结基线哈希集（增/删/改均可检出）；回归 +3
+- **② 一致性修正回路**：`coupled_style` 在全部构造点接线（新增共享归一
+  `consistency_checker.normalize_emotion_for_coupler`/`couple_style_for`，
+  `_build_emotion_style_segment` 同源复用）；修正触发增**硬违规旁路**——四维加权
+  <0.4 数学上几乎不可达（style 下限 0.75），自称AI/危险建议从不触发重生成，
+  persona 维度违规即旁路进修正分支；流式后台日志同口径
+- **③ emotion.yaml 死配置**：生产 `EmotionEngine` 过去不收 config（唯一收 config
+  的路径是 PersonaEngine 永不执行的自建兜底，且 `get("emotion")` 构造时序上恒 `{}`）；
+  `_init_emotion_persona_tone` 显式传 `load_emotion()`，引擎内把 `emotion.decay`/
+  `affection` 两段提升为平铺参数表（读键平铺、文件分层，旧嵌套原样存下恒回落默认）
+- **④ /api/persona/profile 与 /api/persona/evolution-log 500**：端点直读
+  `orch._persona.profile` / `.get_evolution_log`，PersonaService 缺委托 → AttributeError；
+  补 `profile`/`style_coupler` 属性与 `get_evolution_log`/`check_consistency` 委托
+  （后者顺带修复流式兜底分支 `hasattr(persona_service, "check_consistency")` 恒 False
+  → 默认角色后台一致性检测整段落空）
+
+### 验证
+- `test_p2_batch6_persona.py` **30 通过**（+13 用例）；受影响 33 文件合跑
+  **546 通过 / 3 跳过 / 0 失败**；ruff 改动 7 文件 0 错
+- **突变验红 4/4**：M1 verify_anchors 恒真→漂移用例双红；M2 摘旁路→硬违规红；
+  M3 摘 coupled_style→接线钉红；M4 回退扁平化→KeyError 红；全部精确复原
+
+### Impact
+- 删除死挂线约 32 行；锚点完整性检测从恒真变可检出漂移；硬违规可触发重生成；
+  emotion.yaml 参数改为真实生效（默认文件数值与引擎默认相同，行为不变、可配置性恢复）
+
+**Reversible**: git revert 即恢复；无数据迁移。
+
 ## [2026-09-21] memory_pipeline 死异步检索路径删除 + ForwardManager 落库（P2 批6b 项8）
 
 ### 删除对象与证据

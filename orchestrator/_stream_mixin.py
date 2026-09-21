@@ -80,6 +80,7 @@ class _StreamPipelineMixin:
                 from my_character.consistency_checker import (
                     ConsistencyContext,
                     checker_for_card,
+                    couple_style_for,
                 )
 
                 affinity = getattr(emotion_state, "affinity", 0) if emotion_state else 0
@@ -87,6 +88,11 @@ class _StreamPipelineMixin:
                     reply,
                     ConsistencyContext(
                         emotion_state=emotion_state,
+                        # 6b 项9②：风格维度接线（后台检测与主链同一 coupled_style 语义）
+                        coupled_style=couple_style_for(
+                            emotion_state,
+                            getattr(persona_service, "style_coupler", None),
+                        ),
                         chat_round=chat_round,
                         affinity=int(affinity or 0),
                     ),
@@ -98,7 +104,11 @@ class _StreamPipelineMixin:
                 return
 
             if not result.overall_passed:
-                if result.overall_score < 0.4:
+                # 6b 项9②：与修正触发同一旁路口径——persona 维度违规即硬违规，
+                # 加权总分到不了 0.4 也应按严重记 WARNING（流式已推送不改写，仅观测）。
+                persona_dim = result.dimensions.get("persona")
+                hard_persona = persona_dim is not None and not persona_dim.passed
+                if result.overall_score < 0.4 or hard_persona:
                     logger.warning(
                         "一致性严重违规(后台检测): score=%.2f session=%s char=%s",
                         result.overall_score, session_id, character_id,

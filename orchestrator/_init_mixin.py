@@ -70,7 +70,9 @@ class _InitPhasesMixin:
             self._init_emotion_persona_tone(cfg, fusion_cfg, config_dir)
             self._init_memory_and_rag(cfg, fusion_cfg)
             self._init_world_info(cfg)
-            self._init_character_card(cfg, fusion_cfg)
+            # 6b 项9⑤：角色卡挂线删除——其注册的 components 键全仓零读者
+            # （卡片真源是 persona_service._load_character_card 直接读
+            # config/characters），详见 docs/DELETION_LOG.md
             self._init_voice(cfg, fusion_cfg)
             self._init_memory_ext(cfg, fusion_cfg)
             self._init_persona_extractor(fusion_cfg)
@@ -132,7 +134,14 @@ class _InitPhasesMixin:
         )
         classifier_mode = emotion_fusion.get("classifier_mode", "hybrid")
 
+        from my_character.character_config import ConfigLoader
+        config_loader = ConfigLoader(config_dir=config_dir)
+
+        # 6b 项9③：emotion.yaml 过去只被 PersonaEngine 自建兜底的 EmotionEngine
+        # 消费（生产注入外部引擎，该路径永不执行）→ 生产引擎的衰减/好感度
+        # 参数从未读过配置文件。此处显式传入。
         self.components["emotion"] = EmotionEngine(
+            config=config_loader.load_emotion(),
             llm_gateway=self.components["llm"],
             use_llm=cfg.emotion.use_llm_classifier,
             blend_ratio=blend_ratio,
@@ -140,8 +149,6 @@ class _InitPhasesMixin:
             classifier_mode=classifier_mode,
         )
 
-        from my_character.character_config import ConfigLoader
-        config_loader = ConfigLoader(config_dir=config_dir)
         persona_fusion = fusion_cfg.get("persona", {})
         prompt_mode = persona_fusion.get("prompt_mode", "layered")
         anchor_verification = persona_fusion.get("anchor_verification_enabled", True)
@@ -383,38 +390,6 @@ class _InitPhasesMixin:
             if hasattr(cfg, "system") and hasattr(cfg.system, "timezone_offset_hours")
             else 8
         )
-
-    # ─────────────────────────────────────────────────────────────
-    #  阶段 5: 角色卡系统 (v3.0)
-    # ─────────────────────────────────────────────────────────────
-    def _init_character_card(self, cfg: Any, fusion_cfg: dict) -> None:
-        card_fusion = fusion_cfg.get("character_card", {})
-        card_enabled = card_fusion.get("enabled", cfg.character_card.enabled)
-        card_mode = card_fusion.get("mode", "merge")
-
-        if not card_enabled:
-            logger.info("角色卡系统已禁用")
-            return
-
-        try:
-            from character_card.integration import CharacterCardAdapter
-            char_dir = card_fusion.get("card_dir", cfg.character_card.card_dir) or "config/characters"
-            default_card = card_fusion.get("default_card", cfg.character_card.default_card) or ""
-
-            self.components["character_card"] = CharacterCardAdapter(
-                card_dir=str(_project_root / char_dir),
-                default_card_path=str(_project_root / default_card) if default_card else None,
-                enabled=True,
-            )
-            self.components["card_mode"] = card_mode
-            # 自动加载默认卡
-            if default_card and self.components["character_card"].load_default():
-                logger.info("默认角色卡已加载: %s", default_card)
-            else:
-                logger.info("未配置默认角色卡，跳过")
-        except Exception as e:  # noqa: BLE001
-            logger.warning("角色卡系统初始化失败 (不影响运行): %s", e)
-            self.components["character_card"] = None
 
     # ─────────────────────────────────────────────────────────────
     #  阶段 6: 语音 TTS (v3.0)

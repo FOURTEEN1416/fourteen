@@ -202,7 +202,9 @@ class PersonaEngine:
     ):
         self.config = config_loader or ConfigLoader()
         self.emotion = emotion_engine or EmotionEngine(
-            config=self.config.get("emotion", {})
+            # 6b 项9③：get("emotion") 依赖 _merged 已被填充，构造顺序上恒为 {}；
+            # 直接 load_emotion() 拿到 emotion.yaml 根表（含 emotion/affection 段）。
+            config=self.config.load_emotion(),
         )
         self.tone = tone_mimic or ToneMimic()
         self._llm = llm_gateway
@@ -282,9 +284,16 @@ class PersonaEngine:
         if self._consistency_checker is None:
             return None
         try:
-            from my_character.consistency_checker import ConsistencyContext
+            from my_character.consistency_checker import (
+                ConsistencyContext,
+                couple_style_for,
+            )
+            state = emotion_state or (self.emotion._state if self.emotion else None)
             ctx = ConsistencyContext(
-                emotion_state=emotion_state or (self.emotion._state if self.emotion else None),
+                emotion_state=state,
+                # 6b 项9②：风格维度接线（旧三处构造点都不传 coupled_style，
+                # 风格分恒 0.9、耦合器形同虚设）
+                coupled_style=couple_style_for(state, self._emotion_style_coupler),
                 chat_round=chat_round,
                 affinity=self.emotion._state.affinity if self.emotion and hasattr(self.emotion, "_state") else 0,
             )
@@ -364,14 +373,23 @@ class PersonaEngine:
     # ── 锚点保护双机制 ────────────────────────────────────────
 
     def verify_anchors(self) -> bool:
-        """V2 SHA256哈希校验"""
+        """V2 SHA256哈希校验 — 比对**当前**锚点文本与冻结基线。
+
+        6b 项9①：旧实现遍历 _anchor_hashes 自身、把每个 key（基线文本）
+        重新哈希与存的值比较——自比恒真，锚点漂移检不出来。基线在
+        __init__/reload_config 冻结（_freeze_anchors），合法演化走 reload 重设基线；
+        此处检测的是运行期 _persona["core_anchors"] 被改写/增删而基线未动的漂移。
+        """
         if not self.anchor_verification_enabled:
             return True
-        for anchor, expected_hash in self._anchor_hashes.items():
-            current_hash = hashlib.sha256(anchor.encode()).hexdigest()
-            if current_hash != expected_hash:  # noqa: BLE001
-                logger.error("Anchor integrity violation detected for: %s", anchor[:20])
-                return False
+        current = list(self._persona.get("core_anchors", self.CORE_ANCHORS))
+        current_hashes = {hashlib.sha256(a.encode()).hexdigest() for a in current}
+        if current_hashes != set(self._anchor_hashes.values()):
+            logger.error(
+                "Anchor integrity violation detected: current=%d baseline=%d",
+                len(current_hashes), len(self._anchor_hashes),
+            )
+            return False
         return True
 
     def _clamp_trait_change(self, name: str, old_val: float, new_val: float) -> float:
@@ -466,34 +484,22 @@ class PersonaEngine:
         return result
 
     def _build_emotion_style_segment(self, emotion_state: EmotionalState | None) -> str:
-        """构建情感-风格耦合指导段"""
+        """构建情感-风格耦合指导段
+
+        6b 项9②：形态归一收敛到 consistency_checker.normalize_emotion_for_coupler
+        （唯一 owner），与一致性检测的风格接线共用同一份 dict 契约；
+        item43 的枚举/双 dict 形态兼容语义不变。
+        """
         if not emotion_state or not self._emotion_style_coupler:
             return ""
         try:
-            # 审计 item43：coupler 矩阵键是中文 str（"开心"/"伤心"…），旧实现把
-            # Emotion **枚举对象**直接当 type 传入 → 恒 miss、情感调整量恒 0。
-            # 同时兼容两种 dict 形态（to_dict 的 primary.type / 扁平 primary_emotion）。
-            if isinstance(emotion_state, dict):
-                primary = emotion_state.get("primary")
-                if isinstance(primary, dict):
-                    p_type = primary.get("type", "平常")
-                else:
-                    p_type = emotion_state.get("primary_emotion", "平常")
-                aff = emotion_state.get("affinity", 0)
-            else:
-                p_type = getattr(emotion_state, "primary_emotion", "平常")
-                aff = getattr(emotion_state, "affinity", 0)
-            p_type = getattr(p_type, "value", p_type)
-            if isinstance(aff, dict):
-                aff = aff.get("level", 0)
-            emotion_dict = {
-                "primary": {"type": p_type},
-                "affinity": aff,
-            }
-            coupled_style = self._emotion_style_coupler.couple(emotion_dict)
-            segment = self._emotion_style_coupler.get_style_prompt_segment(coupled_style)
-            if segment:
-                return f"[当前风格指导] {segment}"
+            from my_character.consistency_checker import couple_style_for
+
+            coupled_style = couple_style_for(emotion_state, self._emotion_style_coupler)
+            if coupled_style is not None:
+                segment = self._emotion_style_coupler.get_style_prompt_segment(coupled_style)
+                if segment:
+                    return f"[当前风格指导] {segment}"
         except Exception as e:  # noqa: BLE001
             logger.debug("Emotion-style segment generation failed: %s", e)
         return ""

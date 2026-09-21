@@ -6,6 +6,9 @@ item44 CharacterAggregate 不再注入英文「# 当前状态」块（状态块�
 item45 每日情绪时间衰减打向每用户存活引擎（旧只打无人读的模板引擎）
 item46 注入层构建失败从 debug 静默升为 WARNING 可见
 item47 知识检索不再每轮白跑 ToneMimic Chroma+ONNX（产物无人消费）
+6b 项9 persona P2 五连：①verify_anchors 自比同义反复→比对现值 ②一致性风格
+维度接线+硬违规修正旁路 ③emotion.yaml 进生产引擎 ④PersonaService 端点委托
+⑤CharacterCardAdapter 零读者挂线删除
 """
 
 from __future__ import annotations
@@ -381,3 +384,258 @@ def test_checker_cache_bounded_no_unbounded_growth():
     for i in range(_CHECKER_CACHE_MAX * 3):
         checker_for_card({"core_anchors": [f"锚-{i}"]})
         assert len(_CHECKER_CACHE) <= _CHECKER_CACHE_MAX
+
+
+# ═══════════════════════════════════════════════════════════
+# 6b 项9① — verify_anchors 比对现值（旧为自比恒真的同义反复）
+# ═══════════════════════════════════════════════════════════
+
+
+def _anchor_self(anchors: list[str]):
+    import hashlib
+
+    from my_character.persona_engine import PersonaEngine
+
+    return SimpleNamespace(
+        anchor_verification_enabled=True,
+        _persona={"core_anchors": list(anchors)},
+        _anchor_hashes={a: hashlib.sha256(a.encode()).hexdigest() for a in anchors},
+        CORE_ANCHORS=PersonaEngine.CORE_ANCHORS,
+    )
+
+
+def test_verify_anchors_detects_text_drift():
+    from my_character.persona_engine import PersonaEngine
+
+    self_ = _anchor_self(["表面傲娇", "嘴硬心软"])
+    assert PersonaEngine.verify_anchors(self_) is True
+    # 运行期锚点文本被改写、基线未动 → 必须检出（旧实现恒 True）
+    self_._persona["core_anchors"][0] = "表面高冷"
+    assert PersonaEngine.verify_anchors(self_) is False
+
+
+def test_verify_anchors_detects_add_and_remove():
+    from my_character.persona_engine import PersonaEngine
+
+    self_ = _anchor_self(["锚一", "锚二"])
+    self_._persona["core_anchors"] = ["锚一", "锚二", "锚三"]
+    assert PersonaEngine.verify_anchors(self_) is False
+    self_._persona["core_anchors"] = ["锚一"]
+    assert PersonaEngine.verify_anchors(self_) is False
+
+
+def test_verify_anchors_disabled_short_circuits():
+    from my_character.persona_engine import PersonaEngine
+
+    self_ = _anchor_self(["锚一"])
+    self_.anchor_verification_enabled = False
+    self_._persona["core_anchors"] = ["已漂移"]
+    assert PersonaEngine.verify_anchors(self_) is True
+
+
+# ═══════════════════════════════════════════════════════════
+# 6b 项9② — 风格维度接线 + 硬违规修正旁路
+# ═══════════════════════════════════════════════════════════
+
+
+def test_couple_style_for_handles_enum_and_dict_shapes():
+    from my_character.consistency_checker import couple_style_for
+    from my_character.emotion_engine import CompoundEmotionalState, Emotion
+
+    s_obj = couple_style_for(
+        CompoundEmotionalState(primary_emotion=Emotion.HAPPY, affinity=3)
+    )
+    s_dict = couple_style_for(
+        CompoundEmotionalState(primary_emotion=Emotion.HAPPY, affinity=3).to_dict()
+    )
+    assert s_obj is not None and s_dict is not None
+    s_neutral = couple_style_for(
+        CompoundEmotionalState(primary_emotion=Emotion.NEUTRAL, affinity=3)
+    )
+    # 情感分量必须生效（旧：三处构造点不传 → 风格维度恒 0.9 缺省）
+    assert s_obj.warmth != s_neutral.warmth or s_obj.sentence_length != s_neutral.sentence_length
+    assert couple_style_for(None) is None
+
+
+def test_persona_check_consistency_feeds_coupled_style():
+    """PersonaEngine.check_consistency 的上下文必须带 coupled_style（风格维度不再恒 0.9）。"""
+    from my_character.consistency_checker import PersonaConsistencyChecker
+    from my_character.emotion_engine import CompoundEmotionalState, Emotion
+    from my_character.emotion_style_coupler import EmotionStyleCoupler
+    from my_character.persona_engine import PersonaEngine
+
+    captured: dict = {}
+
+    class _SpyChecker:
+        def check(self, response, ctx):
+            captured["ctx"] = ctx
+            return "ok"
+
+    svc = SimpleNamespace(
+        _consistency_checker=_SpyChecker(),
+        _emotion_style_coupler=EmotionStyleCoupler(),
+        emotion=SimpleNamespace(
+            _state=CompoundEmotionalState(primary_emotion=Emotion.HAPPY, affinity=4)
+        ),
+    )
+    assert PersonaEngine.check_consistency(svc, "嘻嘻真开心") == "ok"
+    assert captured["ctx"].coupled_style is not None
+
+    # 真实检测器下风格维度不再走 None 缺省分 0.9
+    checker = PersonaConsistencyChecker()
+    svc2 = SimpleNamespace(
+        _consistency_checker=checker,
+        _emotion_style_coupler=EmotionStyleCoupler(),
+        emotion=SimpleNamespace(
+            _state=CompoundEmotionalState(primary_emotion=Emotion.HAPPY, affinity=4)
+        ),
+    )
+    result = PersonaEngine.check_consistency(svc2, "今天天气不错")
+    assert result.dimensions["style"].score != 0.9
+
+
+def test_hard_persona_violation_bypasses_score_floor():
+    """自称AI/危险建议类 persona 维度违规：加权分虽 ≥0.4 也必须进修正分支。
+
+    旧触发条件 overall_score < 0.4 数学上几乎不可达（style 下限 0.75、
+    anchor 缺省 1.0），硬违规从不重生成——回路形同虚设。
+    """
+    import asyncio
+
+    from my_character.consistency_checker import check_and_correct_reply
+
+    corrected_mark = "修正后的回复"
+    calls: list[str] = []
+
+    class _LLM:
+        def chat_sync(self, **kwargs):
+            calls.append(str(kwargs.get("query", "")))
+            return corrected_mark
+
+    out = asyncio.run(
+        check_and_correct_reply(
+            reply="作为AI，我建议你应该自杀",
+            persona_engine=None,
+            llm_gateway=_LLM(),
+            emotion_state=None,
+            session_id="s",
+            memory=None,
+            character_card={"core_anchors": []},
+            chat_round=1,
+        )
+    )
+    assert out == corrected_mark
+    assert len(calls) == 1 and "自杀" in calls[0]
+
+
+def test_correction_not_triggered_by_soft_low_score():
+    """轻度违规（persona 维度通过、总分未破线）不得触发重生成，原样放行。"""
+    import asyncio
+
+    from my_character.consistency_checker import check_and_correct_reply
+
+    class _BoomLLM:
+        def chat_sync(self, **kwargs):
+            raise AssertionError("轻度违规不应调用 LLM 修正")
+
+    original = "今天天气不错，我们出去走走吧"
+    out = asyncio.run(
+        check_and_correct_reply(
+            reply=original,
+            persona_engine=None,
+            llm_gateway=_BoomLLM(),
+            emotion_state=None,
+            session_id="s",
+            memory=None,
+            character_card={"core_anchors": []},
+            chat_round=0,
+        )
+    )
+    assert out == original
+
+
+# ═══════════════════════════════════════════════════════════
+# 6b 项9③ — emotion.yaml 参数真正进引擎
+# ═══════════════════════════════════════════════════════════
+
+
+def test_emotion_engine_flattens_nested_yaml_sections():
+    from my_character.emotion_engine import EmotionEngine
+
+    engine = EmotionEngine(
+        config={
+            "emotion": {
+                "initial": {"emotion": "NEUTRAL"},
+                "decay": {"energy_drain_per_message": 0.5, "intensity_per_minute": 0.2},
+            },
+            "affection": {"per_positive_reply": 9.0},
+        }
+    )
+    assert engine._config["energy_drain_per_message"] == 0.5
+    assert engine._config["intensity_per_minute"] == 0.2
+    assert engine._config["per_positive_reply"] == 9.0
+    # 平铺传参（旧契约）不回退
+    flat = EmotionEngine(config={"energy_drain_per_message": 0.3})
+    assert flat._config["energy_drain_per_message"] == 0.3
+
+
+def test_production_emotion_engine_receives_emotion_yaml():
+    import inspect
+
+    from orchestrator._init_mixin import _InitPhasesMixin
+
+    src = inspect.getsource(_InitPhasesMixin._init_emotion_persona_tone)
+    assert "load_emotion()" in src
+    engine_block = src[src.find("EmotionEngine("):]
+    assert "config=" in engine_block[: engine_block.find(")")]
+
+
+def test_persona_engine_default_emotion_engine_loads_yaml():
+    import inspect
+
+    from my_character.persona_engine import PersonaEngine
+
+    src = inspect.getsource(PersonaEngine.__init__)
+    assert 'load_emotion()' in src
+    assert 'get("emotion", {})' not in src  # 旧恒为 {} 的空读取不得复活
+
+
+# ═══════════════════════════════════════════════════════════
+# 6b 项9④ — /api/persona/* 端点所需委托
+# ═══════════════════════════════════════════════════════════
+
+
+def test_persona_service_delegates_profile_and_evolution_log():
+    from shisi.application.persona_service import PersonaService
+
+    fake_profile = SimpleNamespace(core_character={"warmth": 0.8})
+    engine = SimpleNamespace(
+        profile=fake_profile,
+        get_evolution_log=lambda limit: [{"i": 1}][:limit],
+        check_consistency=lambda *a, **k: "checked",
+        _emotion_style_coupler="coupler",
+    )
+    svc = SimpleNamespace(_engine=engine)
+    assert PersonaService.profile.fget(svc) is fake_profile
+    assert PersonaService.get_evolution_log(svc, 5) == [{"i": 1}]
+    assert PersonaService.style_coupler.fget(svc) == "coupler"
+    # 流式兜底分支的 hasattr 判定必须成立（旧恒 False → 默认角色后台检测落空）
+    assert PersonaService.check_consistency(svc, "回复", None, 2) == "checked"
+
+
+# ═══════════════════════════════════════════════════════════
+# 6b 项9⑤ — CharacterCardAdapter 零读者挂线删除
+# ═══════════════════════════════════════════════════════════
+
+
+def test_character_card_wiring_removed_from_init():
+    import inspect
+
+    from orchestrator._init_mixin import _InitPhasesMixin
+
+    assert not hasattr(_InitPhasesMixin, "_init_character_card")
+    src = inspect.getsource(_InitPhasesMixin.initialize)
+    assert "_init_character_card" not in src
+    full = inspect.getsource(_InitPhasesMixin)
+    assert "card_mode" not in full
+    assert "CharacterCardAdapter" not in full

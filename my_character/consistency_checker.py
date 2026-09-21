@@ -96,6 +96,74 @@ class ConsistencyResult:
     correction_prompt: str = ""
 
 
+# ── 6b 项9②：emotion_state → CoupledStyle 共享归一 ──────────
+# coupler 矩阵键是中文 str（"开心"/"伤心"…）。历史上出过两次形态错位事故：
+# item43（Emotion 枚举对象当键传 → 恒 miss）与风格维度恒不接线
+# （三处 ConsistencyContext 构造点都不传 coupled_style → 风格维度恒 0.9）。
+# 归一逻辑唯一 owner 在此，persona_engine 的提示词段构建同样复用。
+
+_DEFAULT_COUPLER: EmotionStyleCoupler | None = None
+
+
+def normalize_emotion_for_coupler(emotion_state: Any) -> dict[str, Any] | None:
+    """把多形态 emotion_state 归一为 coupler.couple() 的 dict 契约。
+
+    兼容：to_dict 的 primary.type / 扁平 primary_emotion / 对象属性 /
+    枚举 .value / affinity 为 dict 的 level。
+    """
+    if emotion_state is None:
+        return None
+    try:
+        if isinstance(emotion_state, dict):
+            primary = emotion_state.get("primary")
+            if isinstance(primary, dict):
+                p_type = primary.get("type", "平常")
+            else:
+                p_type = emotion_state.get("primary_emotion", "平常")
+            aff = emotion_state.get("affinity", 0)
+        else:
+            p_type = getattr(emotion_state, "primary_emotion", "平常")
+            aff = getattr(emotion_state, "affinity", 0)
+        p_type = getattr(p_type, "value", p_type)
+        if isinstance(aff, dict):
+            aff = aff.get("level", 0)
+        return {"primary": {"type": p_type}, "affinity": aff}
+    except Exception as e:  # noqa: BLE001
+        logger.debug("normalize_emotion_for_coupler failed: %s", e)
+        return None
+
+
+def couple_style_for(
+    emotion_state: Any, coupler: EmotionStyleCoupler | None = None,
+) -> CoupledStyle | None:
+    """由 emotion_state 生成 CoupledStyle；任何失败返回 None（风格维度走缺省）。"""
+    emotion_dict = normalize_emotion_for_coupler(emotion_state)
+    if emotion_dict is None:
+        return None
+    global _DEFAULT_COUPLER
+    try:
+        c = coupler
+        if c is None:
+            if _DEFAULT_COUPLER is None:
+                from pathlib import Path
+
+                from my_character.emotion_style_coupler import EmotionStyleCoupler
+
+                # 与 PersonaEngine 自建 coupler 同口径（同一矩阵覆盖文件），
+                # 否则提示词风格段与检测风格维度会分叉
+                _DEFAULT_COUPLER = EmotionStyleCoupler(
+                    config_path=str(
+                        Path(__file__).parent.parent
+                        / "config" / "emotion_style_matrix.yaml"
+                    ),
+                )
+            c = _DEFAULT_COUPLER
+        return c.couple(emotion_dict)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("couple_style_for failed: %s", e)
+        return None
+
+
 class PersonaConsistencyChecker:
     """人设一致性检测器 — 多维度校验"""
 
@@ -370,6 +438,10 @@ async def check_and_correct_reply(
                 reply,
                 ConsistencyContext(
                     emotion_state=emotion_state,
+                    coupled_style=couple_style_for(
+                        emotion_state,
+                        getattr(persona_engine, "_emotion_style_coupler", None),
+                    ),
                     chat_round=chat_round,
                     affinity=int(affinity or 0),
                 ),
@@ -382,7 +454,17 @@ async def check_and_correct_reply(
         if result is None:
             return reply
 
-        if not result.overall_passed and result.overall_score < 0.4 and result.correction_prompt:
+        # 6b 项9②：修正回路旁路。四维加权和 <0.4 数学上几乎不可达
+        # （style 下限 0.75、anchor 通过时 1.0，单维 persona 违规仅拉到 ~0.78），
+        # 导致"我是AI/危险建议"这类必须重生成的硬违规从不触发修正。
+        # persona 维度违规 = 硬违规，直接旁路进修正分支。
+        persona_dim = result.dimensions.get("persona")
+        hard_persona_violation = persona_dim is not None and not persona_dim.passed
+        if (
+            not result.overall_passed
+            and result.correction_prompt
+            and (result.overall_score < 0.4 or hard_persona_violation)
+        ):
             # 严重违规：用修正 prompt 重新生成
             if llm_gateway and (hasattr(llm_gateway, "chat") or hasattr(llm_gateway, "chat_sync")):
                 correction_query = (

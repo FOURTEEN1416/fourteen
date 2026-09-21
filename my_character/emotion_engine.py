@@ -522,7 +522,21 @@ class EmotionEngine:
         classifier_timeout_ms: int = 500,
         classifier_mode: str = "hybrid",
     ):
-        self._config = config or {}
+        # 6b 项9③：emotion.yaml 是分层表（衰减参数在 emotion.decay、好感度
+        # 参数在顶层 affection），而读键是平铺的 `_config.get("energy_drain_per_message")`
+        # ——旧路径把嵌套表原样存下 → 逐键 get 恒 miss、全部回落默认值，
+        # "配置在文件里、参数从没生效"。此处把两段提升到平铺参数表。
+        raw = config or {}
+        flat: dict = dict(raw)
+        emotion_block = raw.get("emotion")
+        if isinstance(emotion_block, dict):
+            decay_block = emotion_block.get("decay")
+            if isinstance(decay_block, dict):
+                flat.update(decay_block)
+        affection_block = raw.get("affection")
+        if isinstance(affection_block, dict):
+            flat.update(affection_block)
+        self._config = flat
         self._llm = llm_gateway
         self._classifier_mode = classifier_mode
         self._total_chats = 0
