@@ -1106,14 +1106,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             except Exception as e:  # noqa: BLE001
                 logger.debug("ASE on_chat skipped: %s", e)
 
-        # 用户画像：正则仅作弱兜底；主路径是对话后 profile_sync_agent（LLM 工具）
+        # 用户画像：正则关键字提取已从聊天热路径剔除（2026-09-21 用户裁决）。
+        # 唯一主路径：对话后 profile_sync_agent + L1 的画像/记忆工具。
         if session_id:
-            try:
-                from shisi.memory.legacy.user_profile import default_store
-
-                default_store().apply_user_utterance(session_id, user_msg_clean)
-            except Exception as e:  # noqa: BLE001
-                logger.debug("user_profile update failed: %s", e)
             try:
                 llm_for_sync = self.components.get("llm")
                 sm_for_sync = None

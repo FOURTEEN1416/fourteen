@@ -123,7 +123,29 @@ def test_orchestrator_schedules_profile_agent():
 
     src = inspect.getsource(orch.OptimizedOrchestrator)
     assert "run_profile_sync_agent" in src
-    assert "apply_user_utterance" in src  # 正则仅兜底
+    # 正则画像热路径必须已剔除
+    assert "apply_user_utterance" not in src
+    assert "default_store().apply_user_utterance" not in src
+
+
+def test_apply_user_utterance_deprecated_not_in_chat_path():
+    import inspect
+    import tempfile
+    import warnings
+    from pathlib import Path
+
+    from orchestrator import optimized_orchestrator as orch
+    from shisi.memory.legacy.user_profile import UserProfileStore
+
+    orch_src = inspect.getsource(orch)
+    assert "apply_user_utterance" not in orch_src
+    src = inspect.getsource(UserProfileStore.apply_user_utterance)
+    assert "DeprecationWarning" in src
+    st = UserProfileStore(Path(tempfile.mkdtemp()) / "x.db")
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        st.apply_user_utterance("u@x", "我的生日是腊月初一")
+        assert any(issubclass(x.category, DeprecationWarning) for x in w)
 
 
 def test_is_injectable_rejects_agent_unsafe():

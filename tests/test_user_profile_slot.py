@@ -61,5 +61,6 @@ def test_orchestrator_updates_profile_from_user_only():
     from orchestrator import optimized_orchestrator as orch
 
     src = inspect.getsource(orch.OptimizedOrchestrator)
-    assert "apply_user_utterance" in src
-    assert "user_msg_clean" in src
+    # 正则热路径已剔除；只剩 LLM profile_sync_agent
+    assert "apply_user_utterance" not in src
+    assert "run_profile_sync_agent" in src

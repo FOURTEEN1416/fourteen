@@ -151,7 +151,22 @@ class UserProfileStore:
         return self.get(uk)
 
     def apply_user_utterance(self, user_key: str, text: str) -> dict[str, Any]:
-        """从用户原话抽取/更正画像字段（只信用户说的，不信模型编的）。"""
+        """【已废弃·禁止聊天热路径调用】关键字/正则画像提取。
+
+        2026-09-21 用户裁决：关键字外信息全漏，硬编码不可接受。
+        生产路径唯一：LLM 工具 `update_user_profile` / `remember_facts`
+        + 对话后 `profile_sync_agent`（tools/builtin/profile_agent_tools.py）。
+
+        本方法仅保留给：单测钉行为、运维脚本、一次性数据修复。
+        orchestrator **不得**再调用本方法。
+        """
+        import warnings
+
+        warnings.warn(
+            "apply_user_utterance 已废弃；聊天路径请使用 profile_agent LLM 工具",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         uk = str(user_key or "").strip()
         s = str(text or "").strip()
         if not uk or not s:
