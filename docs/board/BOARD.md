@@ -37,6 +37,14 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-21 · 主检出 · 包 AX P2 全量落地（用户三条裁决）
+
+- **① 主动消息**：LLM 判时机/文案 **+** 人设（角色卡摘要）/用户画像投影/**web 控制台**（开关、风格提示、力度 low/normal/high、免打扰是否写入 prompt、角色补充提示）注入决策上下文；真源 `data/scheduler_config.json` 的 `llm_proactive`；前端「消息」tab 可调
+- **② 画像全面清洗**：`scripts/ax_clean_profiles.py --apply` 已在生产执行——垃圾事实归档 2 条（`上班`/`叫我`），画像 seed 账本 2 键；报告 `data/ax_profile_clean_report.json`
+- **③ P2 一次做完**：夜间 curator（02:17）+ `/api/agent-plane/{replay,profile,events,curate,probes}` + 控制台回放/整理面板 + 工具结果入账本 + 探针 API
+- **验证**：Py P2 套件 **8+25 绿** + vitest **98/98** + tsc 构建过；服务器 `b7cd513c` health/ready **200/200**
+- **状态**：✅ 已部署生产
+
 ### 2026-09-21 · 主检出 · 包 AX **P1 生产接线**（用户裁决执行，非仅文档）
 
 - **裁决落地**：① 画像工具写权威=**EventLedger**（`write_profile_from_tool`，物化表仅缓存）；② `persona_service` 画像槽读 **投影**（`get_profile_prompt_block`）；③ 主动消息 **`decide_proactive` LLM 判断时机与内容**，per-user 路径**去掉 quiet/online/frequency 发送闸**（仅投递成功才记账）；④ orchestrator 每轮 `append_chat_events`
