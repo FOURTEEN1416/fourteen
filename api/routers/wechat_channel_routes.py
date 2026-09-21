@@ -254,6 +254,22 @@ async def put_peer_character(
 ):
     await set_peer_preference(db, user_id, peer_wxid, req.character_card_id)
     await db.commit()
+    # P1-审查 item28：旧实现只写 DB，运行中进程的绑定缓存与用户实例从不刷新
+    # （_resolve_character_id 仅在实例首建时读缓存）→ 控制台换角色不重启永不生效。
+    gf = deps.gf
+    if gf is not None:
+        try:
+            await gf.upsert_binding(
+                f"pref:{int(user_id)}:{peer_wxid}",
+                {
+                    "wxid": peer_wxid,
+                    "user_id": int(user_id),
+                    "character_card_id": req.character_card_id,
+                },
+            )
+            gf.set_user_character(f"{int(user_id)}:{peer_wxid}", req.character_card_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("好友角色热更失败 owner=%s peer=%s: %s", user_id, peer_wxid, e)
     return {
         "status": "ok",
         "owner_user_id": user_id,

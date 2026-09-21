@@ -5,7 +5,6 @@
 """
 
 import asyncio
-import atexit
 import base64
 import concurrent.futures
 import json
@@ -24,19 +23,6 @@ import requests
 
 logger = logging.getLogger("wechat_direct")
 
-# ── 共享线程池（供 _call_user_manager 复用，避免反复创建/销毁） ──
-_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="wx_async")
-
-# ── 进程退出时自动关闭线程池，防止资源泄漏 ──
-def _shutdown_executor():
-    try:
-        _executor.shutdown(wait=False)
-        logger.info("全局线程池已关闭 (atexit)")
-    except Exception:  # noqa: BLE001
-        pass
-
-atexit.register(_shutdown_executor)
-
 # ── 微信 API 地址 ──
 DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
 
@@ -54,11 +40,28 @@ BACKOFF_DELAY = 60
 # ── 内存泄漏防护 ──
 _RECEIVED_MSGS_MAX = 10000       # _received_msgs 最大条目数
 _CONTEXT_TOKENS_TTL = 86400      # _context_tokens 条目 TTL（秒），默认24小时
+_PEER_CHOICE_TTL = 600.0         # 好友「角色」菜单的选择待确认有效期（秒）
 
 # ── 连接状态持久化（解决前端状态时连时断问题） ──
 # ⚠️ 2026-09-19：全局单例路径仅保留给「无 owner 的遗留 admin 通道」兼容读取；
 # 用户通道一律走 data/wechat_sessions/<user_id>/slotN/state.json
 _STATE_FILE = Path(__file__).parent.parent / "data" / "wechat_state.json"
+
+# ── P1-审查 item29（2026-09-21）：状态文件必须互斥读写 + 原子写 ──
+# 旧 save_session_state 是「内存 dict 整文件覆盖」的无锁 RMW：login 线程写
+# connected 与轮询线程写 last_activity 交错时互相抹掉对方；且非原子写，
+# 崩溃留下半截 JSON → load_session_state 落进 except，状态恒读成 idle。
+_FILE_STATE_LOCK = threading.RLock()
+
+
+def _atomic_write_json(path: Path | str, payload: Any) -> None:
+    """tmp + os.replace 原子写 JSON（tmp 名带 pid，避免并发写者互踩）。"""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(f".tmp.{p.name}.{os.getpid()}")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+    os.replace(tmp, p)
 
 
 def load_session_state(user_id: int, slot: int = 0) -> dict:
@@ -95,14 +98,22 @@ def save_session_state(user_id: int, slot: int, data: dict) -> None:
 
     path = channel_paths.state_path(user_id, slot)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
         payload = dict(data)
         payload["owner_user_id"] = int(user_id)
         payload["slot"] = int(slot)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
+        with _FILE_STATE_LOCK:
+            _atomic_write_json(path, payload)
     except Exception as e:  # noqa: BLE001
         logger.debug("保存用户通道状态失败 user=%s slot=%s: %s", user_id, slot, e)
+
+
+def update_session_state(user_id: int, slot: int, updates: dict) -> dict:
+    """加锁读-改-写用户通道状态文件，返回合并后的完整状态（item29）。"""
+    with _FILE_STATE_LOCK:
+        state = load_session_state(user_id, slot)
+        state.update(updates)
+        save_session_state(user_id, slot, state)
+        return state
 
 
 def save_session_qrcode(user_id: int, slot: int, qrcode_url: str = "", status: str = "waiting") -> None:
@@ -161,21 +172,21 @@ def _load_state() -> dict:
 
 
 def _save_state(data: dict) -> None:
-    """持久化连接状态。"""
+    """持久化连接状态（遗留全局通道）。"""
     try:
-        _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(_STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
+        with _FILE_STATE_LOCK:
+            _atomic_write_json(_STATE_FILE, data)
     except Exception as e:  # noqa: BLE001
         logger.debug("保存微信状态文件失败: %s", e)
 
 
 def _merge_state(updates: dict) -> dict:
-    """合并并保存状态更新。"""
-    state = _load_state()
-    state.update(updates)
-    _save_state(state)
-    return state
+    """合并并保存状态更新（同锁读-改-写，item29）。"""
+    with _FILE_STATE_LOCK:
+        state = _load_state()
+        state.update(updates)
+        _save_state(state)
+        return state
 
 
 # ── 遗留全局单例（仅 admin 兼容层；用户通道用 ConnectorRegistry） ──
@@ -623,29 +634,33 @@ def _run_async_coro(coro):
 def _call_user_manager(mgr, user_id, text, attachments=None):
     """
     调用女友管理器处理消息（多用户路由）。
-    process_message 是 async 的，但轮询循环是同步的，
-    用全局共享线程池跑 asyncio.run（避免每次创建/销毁线程池的开销）。
+
+    process_message 是 async 的，但轮询/消息线程是同步的。旧实现每条消息
+    asyncio.run 开一个**新事件循环**，而 orchestrator/session_locks 按会话
+    缓存 asyncio.Lock 跨线程复用 → 同用户连发第二条时锁挂在新循环上，
+    唤醒永远丢失（P1-审查 item27）。现统一委托进程常驻共享循环。
     attachments: 多模态附件（图片 content part 列表），可为 None。
     """
+    from utils.async_utils import run_on_shared_loop
+
     coro = mgr.process_message(user_id, text, attachments=attachments)
     try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        # 当前无线程事件循环，直接运行
-        return asyncio.run(coro)
-
-    # 已有事件循环（例如在异步 FastAPI handler 中），用线程池执行
-    try:
-        future = _executor.submit(_run_async_coro, coro)
-        return future.result(timeout=120)
+        return run_on_shared_loop(coro, timeout=120)
     except concurrent.futures.TimeoutError:
         logger.warning("处理消息超时 (user=%s)", user_id)
         return {"reply": "", "error": "timeout"}
-    except RuntimeError as e:
-        if "shutdown" in str(e).lower():
-            logger.warning("全局线程池已关闭，降级为同步运行: %s", e)
-            return asyncio.run(coro)
-        raise
+
+
+def _log_msg_task_failure(future: "concurrent.futures.Future") -> None:
+    """P1-审查 item26：submit 后的 Future 被丢弃 → 消息线程内崩溃完全静默。
+
+    挂 done 回调把异常打出来（含堆栈），否则一条消息消失得无声无息。
+    """
+    if future.cancelled():
+        return
+    exc = future.exception()
+    if exc is not None:
+        logger.error("[wx][step=msg_task_failed] 消息处理线程崩溃: %s", exc, exc_info=exc)
 
 
 # ═══════════════════════════════════════════════
@@ -706,6 +721,10 @@ class WeChatConnector:
         self.started_at = 0
         self._stop = False
         self._get_updates_buf = ""
+        # P1-审查 item26：去重表 / context_tokens / _last_user_id / 计数
+        # 都在 _msg_executor 多线程里被读写，旧实现裸奔（OrderedDict 的
+        # `in` + 赋值两步非原子 → 同一条消息可被双线程各处理一次）。
+        self._state_lock = threading.RLock()
         self._received_msgs: OrderedDict = OrderedDict()  # 有序字典，支持按插入顺序淘汰
         self._context_tokens: dict = {}  # {user_id: {"token": str, "ts": float}}
         self._load_context_tokens()
@@ -718,6 +737,8 @@ class WeChatConnector:
         # 最近若干轮真实往来（供追问用真实上下文，而不是硬插一句"人呢"）
         self._recent_exchanges: dict[str, deque] = {}
         self._last_user_id: str = ""
+        # 好友自选角色（P1-审查 item28 接线）：peer_wxid → (菜单过期时刻, 发菜单时的卡列表快照)
+        self._peer_choice_pending: dict[str, tuple[float, list[dict]]] = {}
         # 每条消息在独立线程中处理，避免阻塞轮询循环
         self._msg_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=2 if owner_user_id is not None else 4,
@@ -749,8 +770,7 @@ class WeChatConnector:
 
     def _merge_session_state(self, updates: dict) -> dict:
         if self.owner_user_id is not None:
-            save_session_state(self.owner_user_id, self.slot, {**self._load_local_state(), **updates})
-            return load_session_state(self.owner_user_id, self.slot)
+            return update_session_state(self.owner_user_id, self.slot, updates)
         return _merge_state(updates)
 
     def _load_local_state(self) -> dict:
@@ -764,19 +784,29 @@ class WeChatConnector:
         else:
             _save_qr_to_file(qrcode_url, status)
 
+    def _resolve_send_target(self, to_user: str, kind: str) -> str:
+        """主动发送目标解析（P1-审查 item30：隔离护栏补腿）。
+
+        owner 通道必须显式 to_user —— 禁止回退到 `_last_user_id`（那可能是
+        别人的会话）；遗留全局通道保留回退。返回空串表示应拒绝发送。
+        """
+        if self.owner_user_id is not None:
+            if not to_user:
+                logger.warning(
+                    "用户通道主动发送%s被拒绝：必须显式指定 to_user（owner=%s）",
+                    kind, self.owner_user_id,
+                )
+                return ""
+            return to_user
+        return to_user or self._last_user_id
+
     def send_text(self, text: str, to_user: str = "") -> bool:
         """主动发送文本消息（供外部调用）
 
         ⚠️ 用户独立通道：禁止依赖 `_last_user_id` 回退到可能属于他人会话的目标。
         owner 通道必须显式传 to_user（好友 wxid）。
         """
-        if self.owner_user_id is not None:
-            target = to_user
-            if not target:
-                logger.warning("用户通道主动发送被拒绝：必须显式指定 to_user（owner=%s）", self.owner_user_id)
-                return False
-        else:
-            target = to_user or self._last_user_id
+        target = self._resolve_send_target(to_user, "文本")
         if not target or not self.token:
             logger.warning("微信主动发送失败: 无目标用户或未登录")
             return False
@@ -805,7 +835,7 @@ class WeChatConnector:
     def send_voice(self, audio_bytes: bytes, to_user: str = "",
                    duration_ms: int = 0, fmt: str = "silk") -> bool:
         """发送语音消息（2026-09-19 起校验业务返回码，见 send_text）"""
-        target = to_user or self._last_user_id
+        target = self._resolve_send_target(to_user, "语音")
         if not target or not self.token or not audio_bytes:
             logger.warning("发送语音失败: 无目标用户或未登录或无音频数据")
             return False
@@ -833,7 +863,7 @@ class WeChatConnector:
     def send_image(self, image_bytes: bytes, to_user: str = "",
                    image_type: str = "png") -> bool:
         """发送图片消息（2026-09-19 起校验业务返回码，见 send_text）"""
-        target = to_user or self._last_user_id
+        target = self._resolve_send_target(to_user, "图片")
         if not target or not self.token or not image_bytes:
             logger.warning("发送图片失败: 无目标用户或未登录或无图片数据")
             return False
@@ -861,7 +891,7 @@ class WeChatConnector:
 
     def send_emoji(self, emoji_md5: str, to_user: str = "") -> bool:
         """发送表情消息（2026-09-19 起校验业务返回码，见 send_text）"""
-        target = to_user or self._last_user_id
+        target = self._resolve_send_target(to_user, "表情")
         if not target or not self.token or not emoji_md5:
             logger.warning("发表情失败: 无目标用户或未登录或无表情数据")
             return False
@@ -1079,6 +1109,21 @@ class WeChatConnector:
                 ret = resp.get("ret", 0)
                 errcode = resp.get("errcode", 0)
 
+                if resp.get("timeout"):
+                    # P1-审查 item31：_post_api 超时伪装成 {"ret":0,"msgs":[]}，
+                    # 旧轮询把它当健康空轮询并把 consecutive_failures 清零 ——
+                    # 网络半死状态下会零退避地持续快轮。按失败处理走退避。
+                    consecutive_failures += 1
+                    logger.warning(
+                        "轮询请求超时（按失败处理，连续 %d/%d 次）owner=%s",
+                        consecutive_failures, MAX_CONSECUTIVE_FAILURES, self.owner_user_id,
+                    )
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                        time.sleep(BACKOFF_DELAY)
+                    else:
+                        time.sleep(RETRY_DELAY)
+                    continue
+
                 if ret != 0 or errcode != 0:
                     if errcode == -14 or ret == -14:
                         session_errors += 1
@@ -1125,7 +1170,9 @@ class WeChatConnector:
                 for raw_msg in msgs:
                     # 修复 P0-WX2：消息处理放到独立线程，避免阻塞轮询循环
                     # 导致连接状态抖动或心跳超时。
-                    self._msg_executor.submit(self._handle_message, raw_msg)
+                    # P1-审查 item26：Future 必须挂失败回调，否则线程内异常静默吞掉。
+                    fut = self._msg_executor.submit(self._handle_message, raw_msg)
+                    fut.add_done_callback(_log_msg_task_failure)
 
             except Exception as e:  # noqa: BLE001
                 if self._stop:
@@ -1182,29 +1229,29 @@ class WeChatConnector:
             logger.warning("context_token 恢复失败（忽略）: %s", e)
 
     def _save_context_tokens(self) -> None:
-        """原子落盘 context_token，避免服务重启丢失会话窗口。"""
+        """落盘 context_token（锁内快照 + 原子写），避免服务重启丢失会话窗口。"""
         path = self._context_tokens_path
         try:
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
-            tmp = path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self._context_tokens, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, path)
+            with self._state_lock:
+                snapshot = dict(self._context_tokens)
+            _atomic_write_json(path, snapshot)
         except Exception as e:  # noqa: BLE001
             logger.warning("context_token 保存失败（忽略）: %s", e)
 
     def _cleanup_context_tokens(self):
-        """清理过期的 context_token 条目，防止内存泄漏"""
-        now = time.time()
-        expired = [
-            uid for uid, entry in self._context_tokens.items()
-            if isinstance(entry, dict) and (now - entry.get("ts", 0)) > _CONTEXT_TOKENS_TTL
-        ]
-        for uid in expired:
-            del self._context_tokens[uid]
-        if expired:
-            self._save_context_tokens()
-            logger.debug("Cleaned up %d expired context_tokens entries", len(expired))
+        """清理过期的 context_token 条目，防止内存泄漏（与消息线程互斥，item26）"""
+        with self._state_lock:
+            now = time.time()
+            expired = [
+                uid for uid, entry in self._context_tokens.items()
+                if isinstance(entry, dict) and (now - entry.get("ts", 0)) > _CONTEXT_TOKENS_TTL
+            ]
+            for uid in expired:
+                del self._context_tokens[uid]
+            if not expired:
+                return
+        self._save_context_tokens()
+        logger.debug("Cleaned up %d expired context_tokens entries", len(expired))
 
     # ── 对话内追问（见文件头说明）─────────────────────────────
 
@@ -1360,6 +1407,128 @@ class WeChatConnector:
             return ""
         return text
 
+    # ── 好友「角色」自选指令链（P1-审查 item28：整链接线）────────
+    # AGENTS v1.16 记载的「回复『角色』弹菜单、回序号切换」此前只有纯函数
+    # （peer_character.py）而无任何调用者 —— 功能实际不存在。此处接线：
+    # _handle_message 在进主 LLM 前拦截显式指令/待确认序号，切换后
+    # 落库（wechat_peer_preferences）+ 热更绑定缓存与运行中实例。
+
+    def _send_peer_text(self, to: str, text: str) -> bool:
+        """角色指令链的底层直发（不走主 LLM 链）。"""
+        try:
+            resp = _send_text(
+                to=to, text=text,
+                context_token=self._get_context_token(to),
+                token=self.token, base_url=self.base_url,
+            )
+            ok, errmsg = _api_ok(resp)
+            if not ok:
+                logger.warning("[wx][step=peer_cmd_send_failed] to=%s errmsg=%s", to, errmsg)
+            return ok
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[wx][step=peer_cmd_send_error] to=%s error=%s", to, e)
+            return False
+
+    def _apply_peer_character(self, peer_wxid: str, card_id: str) -> bool:
+        """把好友选择的角色持久化并热更到运行中实例（同步线程 → 共享循环桥接）。"""
+        from utils.async_utils import run_on_shared_loop
+
+        owner = self.owner_user_id
+        if owner is None or not card_id:
+            return False
+
+        async def _persist() -> None:
+            from api.database import _async_session
+            from wechat_direct.peer_character import set_peer_preference
+
+            async with _async_session() as db:
+                await set_peer_preference(db, int(owner), peer_wxid, card_id)
+                await db.commit()
+
+        try:
+            run_on_shared_loop(_persist(), timeout=10)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "[wx][step=peer_char_persist_failed] owner=%s peer=%s card=%s error=%s",
+                owner, peer_wxid, card_id, e,
+            )
+            return False
+
+        mgr = self.user_manager
+        if mgr is not None:
+            pref_key = f"pref:{int(owner)}:{peer_wxid}"
+            pref_data = {
+                "wxid": peer_wxid,
+                "user_id": int(owner),
+                "character_card_id": card_id,
+            }
+
+            async def _sync_cache() -> None:
+                await mgr.upsert_binding(pref_key, pref_data)
+
+            try:
+                run_on_shared_loop(_sync_cache(), timeout=5)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[wx][step=peer_char_cache_sync_failed] %s: %s", pref_key, e)
+            try:
+                # 会话实例热切（首条消息后实例已存在；不存在时返回 False，
+                # 新实例首建会经绑定缓存拿到正确角色）
+                mgr.set_user_character(f"{int(owner)}:{peer_wxid}", card_id)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[wx][step=peer_char_instance_sync_failed] %s: %s", peer_wxid, e)
+        logger.info(
+            "[wx][step=peer_char_applied] owner=%s peer=%s card=%s", owner, peer_wxid, card_id,
+        )
+        return True
+
+    def _try_peer_character_flow(self, peer_wxid: str, text: str) -> bool:
+        """处理好友角色指令；返回 True = 该消息已被角色流消费，不再进主 LLM。"""
+        from wechat_direct.peer_character import (
+            build_character_menu,
+            is_character_command,
+            list_owner_characters,
+            try_handle_character_choice,
+        )
+
+        owner = self.owner_user_id
+        if owner is None or not peer_wxid:
+            return False
+        raw = (text or "").strip()
+        if not raw:
+            return False
+
+        now = time.time()
+        entry = self._peer_choice_pending.get(peer_wxid)
+        if entry is not None and entry[0] < now:
+            self._peer_choice_pending.pop(peer_wxid, None)
+            entry = None
+
+        if not is_character_command(raw) and entry is None:
+            return False
+
+        pending_view = {peer_wxid: entry} if entry is not None else {}
+        # 序号映射到**发菜单时的卡列表快照**（菜单期间卡列表变化也不错位）
+        cards = entry[1] if entry is not None else list_owner_characters(int(owner))
+        act = try_handle_character_choice(raw, int(owner), peer_wxid, cards, pending_view)
+        if act is None:
+            # 越界/无卡片的裸数字 → 作废待确认，放行回普通对话（不困住用户）
+            self._peer_choice_pending.pop(peer_wxid, None)
+            return False
+
+        if act["action"] == "show_menu":
+            # 菜单永远展示最新卡列表（cards 无 pending 时已是最新）
+            fresh = cards if entry is None else list_owner_characters(int(owner))
+            self._peer_choice_pending[peer_wxid] = (now + _PEER_CHOICE_TTL, fresh)
+            self._send_peer_text(peer_wxid, build_character_menu(fresh))
+            return True
+
+        self._peer_choice_pending.pop(peer_wxid, None)
+        if self._apply_peer_character(peer_wxid, str(act.get("character_id") or "")):
+            self._send_peer_text(peer_wxid, str(act.get("message", "已切换角色。")))
+        else:
+            self._send_peer_text(peer_wxid, "角色切换没有成功，稍后再回复「角色」试试")
+        return True
+
     def _handle_message(self, raw_msg):
         """处理一条消息（全链路结构化日志：接收 → 路由 → LLM → 回复）"""
         msg_type = raw_msg.get("message_type", 0)
@@ -1367,21 +1536,24 @@ class WeChatConnector:
             return
 
         msg_id = str(raw_msg.get("message_id", raw_msg.get("seq", "")))
-        if msg_id in self._received_msgs:
-            return
-        self._received_msgs[msg_id] = True
-        while len(self._received_msgs) > _RECEIVED_MSGS_MAX:
-            self._received_msgs.popitem(last=False)
+        with self._state_lock:
+            if msg_id in self._received_msgs:
+                return
+            self._received_msgs[msg_id] = True
+            while len(self._received_msgs) > _RECEIVED_MSGS_MAX:
+                self._received_msgs.popitem(last=False)
         self._cleanup_context_tokens()
 
         from_user = raw_msg.get("from_user_id", "")
         context_token = raw_msg.get("context_token", "")
         if context_token and from_user:
-            self._context_tokens[from_user] = {"token": context_token, "ts": time.time()}
+            with self._state_lock:
+                self._context_tokens[from_user] = {"token": context_token, "ts": time.time()}
             # 落盘：服务重启后仍可在窗口期内主动发送（见 CONTEXT_TOKENS_PATH 注释）
             self._save_context_tokens()
         if from_user:
-            self._last_user_id = from_user
+            with self._state_lock:
+                self._last_user_id = from_user
             # 用户接话了 → 取消该用户的待发追问（追问只在"对方没接话"时才发）。
             # 2026-09-20 修复：待发追问以**会话隔离键**（`N:wxid`）登记，
             # 取消时必须用同一形态 —— 旧实现传裸 wxid 永远匹配不上，
@@ -1406,6 +1578,16 @@ class WeChatConnector:
 
         if not text and not voice_data and not image_data:
             logger.debug("消息无文本/语音/图片内容 msg_id=%s user=%s", msg_id, from_user)
+            return
+
+        # ── 好友「角色」自选指令拦截（P1-审查 item28 接线）：仅纯文本消息参与 ──
+        if (
+            self.owner_user_id is not None
+            and text.strip()
+            and not voice_data
+            and not image_data
+            and self._try_peer_character_flow(from_user, text)
+        ):
             return
 
         # ── 图片（V2）：image_data → 附件直传（B）或描述注入（A 降级）──
@@ -1442,11 +1624,13 @@ class WeChatConnector:
                 logger.info("[wx][step=asr_unavailable] msg_id=%s user=%s", msg_id, from_user)
 
         today = time.strftime("%Y-%m-%d")
-        if today != self._last_day:
-            self._messages_today = 0
-            self._last_day = today
-        self._messages_today += 1
-        self._merge_session_state({"messages_today": self._messages_today})
+        with self._state_lock:
+            if today != self._last_day:
+                self._messages_today = 0
+                self._last_day = today
+            self._messages_today += 1
+            _today_count = self._messages_today
+        self._merge_session_state({"messages_today": _today_count})
 
         t_start = time.perf_counter()
         session_key = self._session_key(from_user)
@@ -1675,9 +1859,8 @@ class WeChatConnector:
     def stop(self):
         """停止微信连接器并清理资源。
 
-        注意: 不再关闭全局共享线程池（_executor），否则重新连接后
-        消息处理会报错 cannot schedule new futures after shutdown。
-        只关闭本实例的消息处理线程池。
+        只关闭本实例的消息处理线程池；LLM 编排统一走进程常驻共享循环
+        （utils.async_utils.get_shared_loop），无全局池可关（P1-审查 item27）。
         """
         self._stop = True
         # 关闭本实例的消息处理线程池

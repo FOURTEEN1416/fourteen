@@ -45,7 +45,7 @@ project_root = Path(__file__).resolve().parent.parent
 # 直接返回「处理中, 请稍候...」—— 既把用户刚发的这句话整个丢掉，又用机器口吻播报状态
 # （慢 provider 下几乎条条触发）。改为有界排队后，用户会依次收到两条**真实回复**，
 # 这也正是真人的做法：先看完两条，再逐条回。
-# 等待上限取 60s：上层 `wechat_connector._call_user_manager` 的线程池预算是 120s，
+# 等待上限取 60s：上层 `wechat_connector._call_user_manager` 的共享循环桥接超时是 120s，
 # 须给本轮生成留出余量，否则排队会把生成预算吃光。
 _SESSION_QUEUE_TIMEOUT = 60.0
 _SESSION_QUEUE_POLL = 0.2

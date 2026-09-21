@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 from sqlalchemy import select
 
@@ -116,12 +117,17 @@ def build_character_menu(cards: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def is_character_command(text: str) -> bool:
+    """是否为显式「角色」指令（无歧义措辞才拦截，普通聊天不受影响）。"""
+    return bool(_CHOICE_CMD.match((text or "").strip()))
+
+
 def try_handle_character_choice(
     text: str,
     owner_user_id: int | None,
     peer_wxid: str,
     cards: list[dict],
-    pending_choices: dict[str, list[dict]],
+    pending_choices: dict[str, Any],
 ) -> dict | None:
     """同步侧解析选择指令；需要落库时返回动作，由异步层写 DB。
 
@@ -129,6 +135,10 @@ def try_handle_character_choice(
     返回 dict:
       {"action":"show_menu","menu": str}
       {"action":"selected","character_id": str,"message": str}
+
+    ⚠️ P1-审查 item28：纯数字**只在有待确认菜单时**生效 —— 旧实现收到任意
+    1~20 的数字都会劫持进角色流（用户回「1」「2」这种自然应答被吞掉），
+    且 pending_choices 参数收了却从未使用。
     """
     if owner_user_id is None:
         return None
@@ -136,7 +146,7 @@ def try_handle_character_choice(
     if _CHOICE_CMD.match(raw):
         return {"action": "show_menu", "menu": build_character_menu(cards)}
     m = _CHOICE_NUM.match(raw)
-    if m and cards:
+    if m and cards and pending_choices.get(peer_wxid):
         idx = int(m.group(1))
         if 1 <= idx <= len(cards):
             card = cards[idx - 1]
