@@ -211,11 +211,15 @@ class MemoryPipeline:
         self.semantic = SemanticMemory(self.vm, self.sm)
 
         # V1 组件
-        self.fe = fact_extractor or FactExtractor(
-            llm_func=self._llm if callable(self._llm) else None
-        )
+        # 2026-09-21 重扫：`callable(self._llm)` 判据恒为 False（网关对象不可调用）
+        # → LLM 事实抽取/日记摘要/记忆反思三条能力**从未启用**，事实只能由正则
+        # 规则产出（生产实证的碎片「叫我」「上班」）。统一由 utils.llm_bridge 适配。
+        from utils.llm_bridge import to_sync_callable
+
+        llm_callable = to_sync_callable(self._llm)
+        self.fe = fact_extractor or FactExtractor(llm_func=llm_callable)
         self.ds = diary_summarizer or DiarySummarizer(
-            llm_func=self._llm if callable(self._llm) else None,
+            llm_func=llm_callable,
             structured_memory=self.sm,
         )
         self.emotion = emotion_engine
@@ -230,7 +234,7 @@ class MemoryPipeline:
 
         # 记忆反思引擎：将零散事实沉淀为洞察
         self.reflection = ReflectionEngine(
-            llm_func=self._llm if callable(self._llm) else None,
+            llm_func=llm_callable,
             vector_memory=self.vm,
             structured_memory=self.sm,
             reflection_interval=max(1, fact_extract_interval * 2),
@@ -342,20 +346,37 @@ class MemoryPipeline:
         reply: str,
         emotion_tag: str = "",
         session_id: str = "",
+        character_id: str = "",
+        turn_id: str = "",
+        importance: float = 0.0,
+        channel: str = "",
     ) -> bool:
         """包 Q · B-a：同步轻写 chat_history 两行 + 工作记忆。
 
         orchestrator 在返回回复**之前**调用本方法，保证下一轮能读到刚说的内容；
         向量/事实抽取/日记等重活仍走 after_chat 异步路径。
+
+        2026-09-21 重扫：两行都写入**归属**（``character_id``/``user_key``/
+        ``turn_id``/``importance``/``channel``）—— 旧实现只有 role + session_id，
+        assistant 行没有身份，同会话切换角色后新角色会把上一角色的回复当成
+        自己说过的（"分不清谁说的"的存储层根因）。
         """
         effective_session = session_id or self.session_id
+        user_key = _user_key_from_session(effective_session)
         store_assistant = not _is_system_error_reply(reply)
+        common = dict(
+            character_id=str(character_id or ""),
+            user_key=user_key,
+            turn_id=str(turn_id or ""),
+            importance=float(importance or 0.0),
+            channel=str(channel or ""),
+        )
         try:
             self.sm.add_chat("user", user_msg, emotion_tag=emotion_tag,
-                             session_id=effective_session)
+                             session_id=effective_session, **common)
             if store_assistant:
                 self.sm.add_chat("assistant", reply, emotion_tag=emotion_tag,
-                                 session_id=effective_session)
+                                 session_id=effective_session, **common)
             self.working.add("user", user_msg, emotion_tag, 0.5, session_id=effective_session)
             if store_assistant:
                 self.working.add("assistant", reply, emotion_tag, 0.5, session_id=effective_session)
@@ -371,8 +392,12 @@ class MemoryPipeline:
         emotion_tag: str = "",
         session_id: str = "",
         history_already_written: bool = False,
+        character_id: str = "",
+        turn_id: str = "",
+        channel: str = "",
     ) -> dict[str, Any]:
         effective_session = session_id or self.session_id
+        user_key = _user_key_from_session(effective_session)
         result = {
             "stored_chat": False,
             "stored_vector": False,
@@ -406,11 +431,18 @@ class MemoryPipeline:
         store_assistant = not _is_system_error_reply(reply)
         if not history_already_written:
             try:
+                common = dict(
+                    character_id=str(character_id or ""),
+                    user_key=user_key,
+                    turn_id=str(turn_id or ""),
+                    importance=float(importance or 0.0),
+                    channel=str(channel or ""),
+                )
                 self.sm.add_chat("user", user_msg, emotion_tag=emotion_tag,
-                                 session_id=effective_session)
+                                 session_id=effective_session, **common)
                 if store_assistant:
                     self.sm.add_chat("assistant", reply, emotion_tag=emotion_tag,
-                                     session_id=effective_session)
+                                     session_id=effective_session, **common)
                 result["stored_chat"] = True
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to store chat: %s", e)
@@ -640,6 +672,7 @@ class MemoryPipeline:
         session_id: str = "",
         keep_recent: int = 50,
         summary_trigger: int = 80,
+        character_id: str = "",
     ):
         # 2026-09-20 根因修复：对话上下文的唯一真源改为**持久化 chat_history 表**，
         # 不再读全局 RAM deque。旧实现三重缺陷（生产实证 2026-09-20）：
@@ -650,7 +683,7 @@ class MemoryPipeline:
         # ③ 历史裸形态遗留：owner 会话不再并入裸 peer 历史（2026-09-21）。
         # working deque 保留给后台归档/情景记忆任务，不再承担上下文供给。
         sess = session_id or self.working.session_id
-        messages = self._load_session_history(sess, limit=keep_recent + 40)
+        messages = self._load_session_history(sess, limit=keep_recent + 40, character_id=character_id)
         if not messages:
             return [], ""
         return self.summarizer.get_chat_context(
@@ -672,36 +705,57 @@ class MemoryPipeline:
             logger.debug("get_cross_session_tail failed: %s", e)
             return []
 
-    def _load_session_history(self, session_id: str, limit: int) -> list[dict[str, Any]]:
-        """从 chat_history 表按会话加载最近对话（**严格会话隔离**）。
+    def _load_session_history(
+        self, session_id: str, limit: int, character_id: str = ""
+    ) -> list[dict[str, Any]]:
+        """从 chat_history 表按会话加载最近对话（**严格会话隔离 + 归属完整**）。
 
-        2026-09-21 串台修复：owner 形态 `N:peer` **只读自己的 session_id**，
-        禁止自动并入裸 `peer` 遗留历史——旧双形态合并会让同一 peer 下多个
-        owner 同时看见同一批旧全局通道消息（生产实证 user1/user4）。
-        会话键本身是裸形态时（遗留/单用户 web）照原样读取。
+        2026-09-21 重扫（与「模型分不清谁说的」直接相关，三处根治）：
+
+        ① **删除内容去重**：旧实现把结果塞进以 ``(created_at, content)`` 为键的
+           dict —— 秒级时间戳下，**内容相同的两条消息被静默折叠成一条**
+           （连续两条"嗯"、"好的"只剩一条），上下文缺句。
+        ② **排序改用 `id`**：`created_at` 只有秒精度，用户与角色的同秒消息
+           相对次序不保证（"谁先说的"取决于扫描方向）→ 现由存储层按
+           AUTOINCREMENT 的 `id`（= 写入序）判序。
+        ③ **不再丢弃归属**：返回体带 ``character_id`` / ``user_key`` /
+           ``turn_id`` / ``channel`` / **真实 importance**（旧实现硬编码 0.5，
+           属假指标）；下游据此可把每句归到具体角色，切换角色不再继承他人台词。
+
+        owner 形态 `N:peer@im.wechat` **只读自己的 session_id**，禁止并入裸 peer
+        遗留历史（旧双形态合并会让同一 peer 下多个 owner 看见同一批消息）。
         """
         if not session_id:
             return []
-        forms = [session_id]
-        rows: dict[tuple[str, str], dict[str, Any]] = {}
         try:
-            for form in forms:
-                for r in self.sm.get_chats_by_session_limit(form, limit):
-                    rows[(str(r.get("created_at", "")), str(r.get("content", "")))] = r
+            if character_id:
+                rows = self.sm.get_chats_by_session_limit(
+                    session_id, limit, character_id=character_id,
+                )
+            else:
+                # 不传角色时保持旧签名调用（兼容未升级的 StructuredMemory 替身）
+                rows = self.sm.get_chats_by_session_limit(session_id, limit)
         except Exception as e:  # noqa: BLE001
             logger.warning("按会话加载历史失败 session=%s: %s", session_id, e)
             return []
-        msgs = sorted(rows.values(), key=lambda r: str(r.get("created_at", "")))
-        return [
-            {
+        out: list[dict[str, Any]] = []
+        for r in rows or []:
+            content = str(r.get("content") or "").strip()
+            if not content:
+                continue
+            out.append({
+                "id": int(r.get("id") or 0),
                 "role": r.get("role", "user"),
-                "content": r.get("content", ""),
+                "content": content,
                 "emotion": r.get("emotion_tag", ""),
-                "importance": 0.5,
+                "importance": float(r.get("importance") or 0.0),
                 "timestamp": r.get("created_at", ""),
-            }
-            for r in msgs[-limit:]
-        ]
+                "character_id": str(r.get("character_id") or ""),
+                "user_key": str(r.get("user_key") or "") or str(r.get("session_id") or ""),
+                "turn_id": str(r.get("turn_id") or ""),
+                "channel": str(r.get("channel") or ""),
+            })
+        return out
 
     # ── V1 兼容接口 ──────────────────────────────────────
 

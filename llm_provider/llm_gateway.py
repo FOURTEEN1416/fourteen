@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import os
 import time
@@ -79,6 +78,7 @@ class LLMGatewayV2:
         api_base: str | None = None,
         model: str | None = None,
         models_config: list[dict] | None = None,
+        request_timeout: float | None = None,
     ):
         self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "")
         self.api_base = (api_base or os.environ.get("DEEPSEEK_API_BASE") or DEFAULT_API_BASE).rstrip("/")
@@ -90,8 +90,12 @@ class LLMGatewayV2:
             "Content-Type": "application/json",
         }
         self._pool_limits = httpx.Limits(max_keepalive_connections=20, max_connections=100)
-        self._client = None
-        self._client_loop_id = None
+        self.request_timeout = float(request_timeout or 60.0)
+        # 每事件循环一个 client：httpx.AsyncClient **不可跨循环复用**（其传输层
+        # 持有循环绑定的 socket/锁）。旧实现只留一个 client 并在切换循环时把
+        # `aclose()` 投递到**新**循环上关闭**旧**循环的 client —— 注释与实现相反，
+        # 且旧 client 的资源实际未被释放。现按 loop 记账，在**所属循环**上关闭。
+        self._clients: dict[int, tuple[asyncio.AbstractEventLoop, httpx.AsyncClient]] = {}
 
         if self.api_key:
             logger.info("LLMGatewayV2 ready, primary model=%s", self.model)
@@ -99,26 +103,39 @@ class LLMGatewayV2:
             logger.warning("LLMGatewayV2: no API key, using mock replies")
 
     @property
-    def _async_client(self):
+    def _async_client(self) -> httpx.AsyncClient:
         loop = asyncio.get_running_loop()
-        loop_id = id(loop)
-        if self._client is None or self._client_loop_id != loop_id:
-            # 切换 loop 时必须关闭旧 client，否则连接池资源会泄漏
-            # （旧 client 持有的 socket 不会被回收，最终耗尽文件描述符）
-            if self._client is not None:
-                # 旧 client 绑定在另一个 loop 上，不能 await aclose()，
-                # 用 call_soon_threadsafe 调度 aclose() 触发底层资源释放。
-                with contextlib.suppress(Exception):
-                    loop.call_soon_threadsafe(
-                        lambda c=self._client: asyncio.ensure_future(c.aclose())
-                    )
-            self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(60.0),
-                limits=self._pool_limits,
-                headers=self._headers,
-            )
-            self._client_loop_id = loop_id
-        return self._client
+        entry = self._clients.get(id(loop))
+        if entry is not None and entry[0] is loop:
+            return entry[1]
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(self.request_timeout),
+            limits=self._pool_limits,
+            headers=self._headers,
+        )
+        self._clients[id(loop)] = (loop, client)
+        self._reap_stale_clients(loop)
+        return client
+
+    def _reap_stale_clients(self, current: asyncio.AbstractEventLoop) -> None:
+        """回收其它事件循环上的 client。
+
+        - 对方循环仍在跑 → 用 ``run_coroutine_threadsafe`` 投递到**它自己**的循环关闭；
+        - 对方循环已停但未关闭 → 就地 ``run_until_complete`` 收尾；
+        - 对方循环已关闭 → 直接丢弃引用（socket 随循环销毁，等待 GC 回收）。
+        """
+        for key, (loop, client) in list(self._clients.items()):
+            if loop is current:
+                continue
+            try:
+                if loop.is_running():
+                    asyncio.run_coroutine_threadsafe(client.aclose(), loop)
+                elif not loop.is_closed():
+                    loop.run_until_complete(client.aclose())
+            except Exception as e:  # noqa: BLE001
+                logger.debug("回收旧事件循环上的 LLM client 失败: %s", e)
+            finally:
+                self._clients.pop(key, None)
 
     async def chat(
         self,
@@ -223,22 +240,38 @@ class LLMGatewayV2:
         tools: list | None = None,
         model: str | None = None,
     ) -> str:
-        try:
-            asyncio.get_running_loop()
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, self.chat(
-                    query=query, system_prompt=system_prompt, history=history,
-                    messages=messages, temperature=temperature, max_tokens=max_tokens,
-                    tools=tools, model=model,
-                ))
-                return future.result()
-        except RuntimeError:
-            return asyncio.run(self.chat(
+        """同步入口 —— 供 APScheduler 线程 / 微信消息线程 / 脚本调用。
+
+        2026-09-21 审查修复：旧实现是「一次性 ``ThreadPoolExecutor`` +
+        ``asyncio.run``」，与 ``MultiProviderGateway.chat_sync`` 在 09-19 已修掉的
+        是**同一个根因**（每次调用新建并销毁事件循环 → httpx 连接池随循环失效、
+        每轮请求重做 TLS 握手、``_async_client`` 的跨循环回收被反复触发）。
+        该修复只落在网关一处，本类的同型实现留了尾巴。现统一委托
+        ``utils.async_utils``（全项目唯一的同步→异步桥）：协程投递到**常驻
+        共享循环**，连接池与事件循环绑定原语跨调用保持有效。
+        """
+        from utils.async_utils import get_shared_loop, run_on_shared_loop
+
+        def _call() -> str:
+            return self.chat(
                 query=query, system_prompt=system_prompt, history=history,
                 messages=messages, temperature=temperature, max_tokens=max_tokens,
                 tools=tools, model=model,
-            ))
+            )
+
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            # 常规路径：调用线程无运行中的循环（微信消息线程 / APScheduler / 脚本）
+            return run_on_shared_loop(_call())
+
+        if running is get_shared_loop():
+            # 已在共享循环内部：不能再向它投递（必死锁），退化为临时线程执行
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, _call()).result()
+
+        return run_on_shared_loop(_call())
 
     async def chat_stream(
         self,
@@ -250,13 +283,26 @@ class LLMGatewayV2:
         max_tokens: int = 2048,
         tools: list | None = None,
     ) -> AsyncIterator[str]:
+        """流式聊天。
+
+        2026-09-21 审查修复（与 `MultiProviderGateway.chat_stream` 的 P1-1 同规）：
+        `MultiProviderGateway` 的降级链依赖「**首 token 前失败必须上抛**」这一契约
+        （见 P1-1 注释：provider 把错误文案 yield 成"内容"会让链整体失效）。
+        `OpenAICompatibleProvider` 遵守该契约，本类此前**不遵守** —— 失败时
+        `yield self._handle_error(e)`，网关把它当成首个 token（`emitted=True`），
+        于是：① 不再降级到其它 provider；② 「（API 请求失败，错误代码 500）」
+        被当作回复写给用户，并被计入 chat_history 污染下一轮。
+        现改为：首 token 前失败上抛（网关据此切换 provider），已下发内容后中断
+        仍上抛（重放会造成半句+整句重复），由调用方兜底。
+        """
         if not self.api_key:
             yield self._mock_reply(query)
             return
 
         built_messages = self._build_messages(query, system_prompt, history, messages)
+        model_name = self.model
         payload = {
-            "model": self.model,
+            "model": model_name,
             "messages": built_messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -265,35 +311,46 @@ class LLMGatewayV2:
         if tools:
             payload["tools"] = tools
 
-        first_token_time = None
         start = time.perf_counter()
+        emitted = False
         try:
+            # 空闲超时由 httpx 的 read timeout 承担（逐次读取计时）。
+            # 旧实现额外套了一层 `asyncio.timeout(60)` 的**整段总时限**：
+            # 慢供应商下 2048 token 的长回复会被硬切，且与链首 20s 预算口径不一。
             async with self._async_client.stream("POST", self._chat_url, json=payload) as resp:
                 resp.raise_for_status()
-                async with asyncio.timeout(60):  # type: ignore[attr-defined]
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
-                        data_str = line[6:]
-                        if data_str.strip() == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data_str)
-                            delta = chunk["choices"][0]["delta"]
-                            if "content" in delta and delta["content"]:
-                                if first_token_time is None:
-                                    first_token_time = time.perf_counter()
-                                    if first_token_time - start > 3.0:
-                                        logger.warning("First token timeout (>3s)")
-                                yield delta["content"]
-                        except (json.JSONDecodeError, KeyError, IndexError):
-                            continue
-        except asyncio.TimeoutError:
-            logger.warning("LLM 流式生成超时 (60s)")
-            yield "（生成已超时，请重试）"
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]
+                    if data_str.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = chunk["choices"][0]["delta"]
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
+                    if delta.get("content"):
+                        if not emitted:
+                            emitted = True
+                            first = time.perf_counter() - start
+                            if first > 3.0:
+                                logger.warning("首 token 延迟 %.1fs（模型 %s）", first, model_name)
+                        yield delta["content"]
         except Exception as e:  # noqa: BLE001
             record_error("llm_stream", type(e).__name__)
-            yield self._handle_error(e)
+            entry = self.registry.get_by_name(model_name)
+            if entry:
+                entry.mark_failed()
+            logger.warning(
+                "LLM 流式失败（已下发 %s）: %s", "部分内容" if emitted else "零内容", e
+            )
+            # 零内容 → 上抛交给降级链；已有内容 → 上抛避免重放重复
+            raise
+        else:
+            entry = self.registry.get_by_name(model_name)
+            if entry:
+                entry.mark_success()
 
     def switch_model(self, model_name: str) -> bool:
         entry = self.registry.get_by_name(model_name)
@@ -351,10 +408,13 @@ class LLMGatewayV2:
         return None
 
     async def close(self):
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
-            self._client_loop_id = None
+        """关闭本地循环上的 client；其它循环上的交由 `_reap_stale_clients` 回收。"""
+        loop = asyncio.get_running_loop()
+        entry = self._clients.pop(id(loop), None)
+        if entry is not None and entry[0] is loop:
+            await entry[1].aclose()
+        self._reap_stale_clients(loop)
+        if not self._clients:
             logger.info("LLMGatewayV2 connection pool closed")
 
     def _handle_error(self, e: Exception) -> str:

@@ -89,6 +89,7 @@ def _build_backend(
             api_base=api_base or os.environ.get("DEEPSEEK_API_BASE") or defaults.get("api_base"),
             model=model or os.environ.get("DEEPSEEK_MODEL") or defaults.get("model"),
             models_config=models_config,
+            request_timeout=config.get("request_timeout") or defaults.get("request_timeout"),
         )
 
     if provider in {"agnes", "zhipu", "xunfei", "baidu", "custom"}:

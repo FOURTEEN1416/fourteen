@@ -13,10 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import logging
-import os
-import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -27,6 +24,8 @@ from typing import Any
 # （GitHub Actions / 容器默认 UTC）会强制换算到北京时间，若调度器仍用
 # datetime.now().hour，两边小时数差 8，静默短路会静默失效（2026-09-19 CI 实证）。
 from proactive.ase_engine import _local_now, sanitize_message
+from utils import json_state
+from utils import session_key as session_key_mod
 from utils.project_paths import project_path
 
 logger = logging.getLogger("scheduler")
@@ -385,8 +384,6 @@ class ProactiveScheduler:
     # 从非仓库根启动/测试时读写到另一个文件，导致
     # ① 开关"保存成功但不生效"；② 测试读到宿主机脏值而失败。
     _CONFIG_PATH = project_path("data", "scheduler_config.json")
-    # P1-53：write_config_file 是全文件读-改-写，4 worker 下并发写互相覆盖/半文件。
-    _CONFIG_LOCK = threading.RLock()
 
     def get_vault_config(self) -> dict[str, Any]:
         return {
@@ -408,12 +405,8 @@ class ProactiveScheduler:
 
     @classmethod
     def _read_config_file(cls) -> dict[str, Any]:
-        try:
-            if cls._CONFIG_PATH.exists():
-                return json.loads(cls._CONFIG_PATH.read_text(encoding="utf-8"))
-        except Exception as e:  # noqa: BLE001
-            logger.warning("调度器配置读取失败: %s", e)
-        return {}
+        data = json_state.read_json(cls._CONFIG_PATH, default={})
+        return data if isinstance(data, dict) else {}
 
     @classmethod
     def write_config_file(
@@ -424,10 +417,12 @@ class ProactiveScheduler:
         follow_up: dict[str, Any] | None = None,
         llm_proactive: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        # P1-53：全文件读-改-写必须加锁 + 原子替换。旧实现无锁、直接 write_text，
-        # 4 uvicorn worker 下训练页每次保存都是并发 RMW，互相覆盖半文件风险。
-        with cls._CONFIG_LOCK:
-            data = cls._read_config_file()
+        # P1-53 续（2026-09-21）：读-改-写必须**跨进程**互斥。旧实现只持
+        # `cls._CONFIG_LOCK`（进程内 threading.Lock），而本文件是 4 个 uvicorn
+        # worker 共读的跨 worker 真源 —— 多 worker 同时保存仍是陈旧快照互相覆盖，
+        # 注释宣称的「加锁」在生产拓扑下不成立。现委托 `utils.json_state`
+        # （flock + os.replace），全项目状态文件统一走这一个 owner。
+        def _mutate(data: dict[str, Any]) -> None:
             if quiet_hours is not None:
                 data["quiet_hours"] = {"start": int(quiet_hours[0]), "end": int(quiet_hours[1])}
             if follow_up is not None:
@@ -439,21 +434,19 @@ class ProactiveScheduler:
                 cur.update({k: v for k, v in llm_proactive.items() if v is not None})
                 data["llm_proactive"] = cur
             vault = data.get("vault") or {}
+            if not isinstance(vault, dict):
+                vault = {}
             if vault_enabled is not None:
                 vault["enabled"] = bool(vault_enabled)
             if vault_interval is not None:
                 vault["interval_minutes"] = max(10, int(vault_interval))
             data["vault"] = vault
-            try:
-                cls._CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-                tmp = cls._CONFIG_PATH.with_name(
-                    f"{cls._CONFIG_PATH.name}.tmp.{os.getpid()}"
-                )
-                tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-                os.replace(tmp, cls._CONFIG_PATH)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("调度器配置保存失败: %s", e)
-        return data
+
+        try:
+            return json_state.update_json(cls._CONFIG_PATH, _mutate)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("调度器配置保存失败: %s", e)
+            return cls._read_config_file()
 
     def get_llm_proactive_config(self) -> dict[str, Any]:
         from proactive.llm_proactive import DEFAULT_WEB_CONFIG, read_web_proactive_config
@@ -969,13 +962,14 @@ class ProactiveScheduler:
 
     @staticmethod
     def _is_wechat_session_key(session_key: str) -> bool:
-        sk = str(session_key or "")
-        if "@im.wechat" in sk:
-            return True
-        if ":" in sk:
-            left, right = sk.split(":", 1)
-            return left.isdigit() and bool(right.strip())
-        return False
+        """是否微信会话键（判据唯一真源：`utils.session_key`）。
+
+        旧实现在此手写「含 `@im.wechat` **或** 二段式（左段数字）」两套规则，
+        与 `reminder_delivery`（只认 `@im.wechat`）、`run_api`（只认二段）
+        三处口径互不一致 —— 收敛到单一 owner。生产实测键为
+        `N:wxid@im.wechat`（见 utils.session_key docstring 取样）。
+        """
+        return session_key_mod.is_wechat_key(session_key)
 
     async def _send_targeted(self, message: str, session_key: str | None = None) -> bool:
         if self._is_quiet_hours():
@@ -986,6 +980,14 @@ class ProactiveScheduler:
             return False
 
         if session_key:
+            if not self._is_wechat_session_key(session_key):
+                # 非微信（web / WS）会话键：微信通道**不参与**。
+                # 旧实现无论什么键都先调 wechat 通道发送器 —— web 键
+                # `N:web:hex` 被判成微信后：① 向不存在的 wxid 发送；
+                # ② 异常路径把 wechat 通道实例置 None，后续微信主动消息全失效；
+                # ③ 因「微信绝不广播」策略拒绝对 web 面板投递（消息静默丢失）。
+                return await self._send_to_all(message)
+
             sender = self._channel_instances.get("wechat")
             if sender is not None:
                 try:
@@ -1007,14 +1009,11 @@ class ProactiveScheduler:
                 except Exception as e:  # noqa: BLE001
                     logger.warning("定向投递失败 session=%s: %s", session_key, e)
                     self._channel_instances["wechat"] = None
-            if self._is_wechat_session_key(session_key):
-                # P1-21：微信会话键在 wechat 通道缺失/失败时直接返回 False。
-                # 旧实现落到 _send_to_all —— instance=None 时整段跳过（微信形态
-                # 零送达却继续白烧 LLM），有实例时变跨用户广播 + 记「定向成功」。
-                logger.warning("微信定向投递未成功（通道不可用），不回退广播: session=%s", session_key)
-                return False
-            # 非微信（web 会话）定向：退回 ws 广播（在线面板，无跨微信用户问题）
-            return await self._send_to_all(message)
+            # P1-21：微信会话键在 wechat 通道缺失/失败时直接返回 False。
+            # 旧实现落到 _send_to_all —— instance=None 时整段跳过（微信形态
+            # 零送达却继续白烧 LLM），有实例时变跨用户广播 + 记「定向成功」。
+            logger.warning("微信定向投递未成功（通道不可用），不回退广播: session=%s", session_key)
+            return False
 
         return await self._send_to_all(message)
 

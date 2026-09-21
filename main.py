@@ -78,6 +78,7 @@ from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
 from observability.health import health_checker  # noqa: E402
 from observability.logging_setup import setup_logging  # noqa: E402
 from user_scheduler import UserManager  # noqa: E402
+from utils import session_key as session_key_mod  # noqa: E402
 
 
 def _setup_basic_logging(log_level: str = "INFO") -> logging.Logger:
@@ -426,15 +427,16 @@ def _run_orchestrator(args: argparse.Namespace, use_console: bool,
                 # P1-21：必须收 session_key —— 旧签名不收，调度器 async 分支
                 # `await sender(message, session_key=...)` 抛 TypeError 被吞，
                 # wechat 通道被反复置 None → main.py 形态主动消息零送达。
+                # 2026-09-21 重扫：取对端标识改由唯一真源 `utils.session_key` 提供。
+                # ⚠️ 旧 `_clean` 会把 `@im.wechat` 后缀**剥掉**，而该后缀是 wxid
+                # 自身的一部分（生产 `chat_history.session_id`
+                # = `2:o9cq80-_y...@im.wechat`；`connector._context_tokens` 的键、
+                # `send_text(to_user=)` 的测试夹具均为带后缀形态）→ 发送目标错误。
                 def _clean(target: str) -> str:
-                    t = str(target or "")
-                    if ":" in t:
-                        t = t.split(":", 1)[1]
-                    return t.split("@", 1)[0].strip()
+                    return session_key_mod.peer_of(str(target or ""))
 
                 if session_key:
-                    peer = _clean(session_key) if ":" in str(session_key) else str(session_key)
-                    peer = _clean(peer) if peer else ""
+                    peer = _clean(session_key)
                     if not peer:
                         raise RuntimeError(f"微信投递拒绝：session_key 解析不出 peer（{session_key}）")
                     if not connector.send_text(msg, to_user=peer):

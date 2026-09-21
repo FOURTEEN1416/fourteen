@@ -433,6 +433,11 @@ class ContextAnalyzer:
 class MessageGenerator:
     def __init__(self, llm_gateway=None):
         self._llm = llm_gateway
+        # 生成走唯一适配点（utils.llm_bridge）；旧实现内联「chat_sync / callable」
+        # 两分支，与记忆管道三处同型判据各自漂移。
+        from utils.llm_bridge import to_sync_callable
+
+        self._call = to_sync_callable(llm_gateway, max_tokens=50, temperature=0.8)
         self._proactive_prompt = self._load_proactive_prompt()
 
     def _load_proactive_prompt(self) -> str:
@@ -464,6 +469,10 @@ class MessageGenerator:
         affinity_level: int,
         context: str = "",
         recent_messages: list[str] | None = None,
+        hours_since_chat: float | None = None,
+        user_profile: str = "",
+        last_user_message: str = "",
+        response_rate: float | None = None,
     ) -> str | None:
         if not self._llm:
             return None
@@ -475,6 +484,40 @@ class MessageGenerator:
         ]
         affinity_name = affinity_names[min(affinity_level, 8)]
         type_label = msg_type.value
+
+        # ── 2026-09-21 重扫：把"真实状态"喂进提示词（对标 nana heartbeat.md）──
+        #
+        # 旧实现三处空转：`hours_since_chat` 被网关硬编码传 0.0（提示词里永远写
+        # 「距上次聊天 0 小时」）、`user_name` 写死"你"、**完全没有**用户画像与
+        # 用户最后一句 → 模型只能靠时间+情感类型即兴编，产出自然泛化
+        # （"在忙什么呀"），且无法与用户当下处境（军训/加班/生日）呼应。
+        # nana 的做法：提示词里给 mood / time_context / relationship_context /
+        # user_info / recent_context / hours_since_interaction / response_rate，
+        # 并按"距上次互动时长"给出**内心感受分档**作为决策依据。
+        hours_val = 0.0 if hours_since_chat is None else max(0.0, float(hours_since_chat))
+        if hours_val < 0.5:
+            distance_hint = "刚聊完（不到半小时），别显得黏人"
+        elif hours_val < 1.0:
+            distance_hint = "半小时到一小时，有点在意你在干嘛"
+        elif hours_val < 3.0:
+            distance_hint = "一两个小时没说话了，可以找个由头搭话"
+        elif hours_val < 12.0:
+            distance_hint = "大半天没聊，挺想你的，但别一上来就抱怨"
+        else:
+            distance_hint = "很久没聊了（超过半天），关心一下对方近况，不要指责"
+
+        grounded_parts: list[str] = [f"- 距上次聊天：{hours_val:.1f} 小时（{distance_hint}）"]
+        if user_profile.strip():
+            grounded_parts.append(f"- 你记得的用户信息：\n{user_profile.strip()[:600]}")
+        if last_user_message.strip():
+            grounded_parts.append(f"- 用户最后一句：{last_user_message.strip()[:200]}")
+        if response_rate is not None:
+            # 注意力信号：用户最近回应越少，越该"轻"（避免自说自话刷屏）
+            grounded_parts.append(
+                f"- 最近的互动热度：{max(0.0, min(1.0, float(response_rate))):.2f}"
+                "（越低说明对方最近越少回应，消息要更短更轻、不要追问）"
+            )
+        grounded_block = "\n".join(grounded_parts)
 
         # 把最近发过的消息喂回去，明确要求换角度 —— 根治「夜里连着 8 条
         # 都在催睡」这类同义刷屏（相似度阈值做不到，见文件头注释）。
@@ -494,7 +537,7 @@ class MessageGenerator:
             prompt = self._proactive_prompt.format(
                 # proactive.yaml 模板需要的变量
                 user_name="你",
-                hours_since_chat=0.0,
+                hours_since_chat=hours_val,
                 current_time=now_str,
                 affinity_level=affinity_level,
                 # 代码历史传过的变量（向后兼容，避免其他模板断裂）
@@ -504,6 +547,11 @@ class MessageGenerator:
                 type_label=type_label,
                 context=context,
             )
+            # ⚠️ 接地段必须**附在模板之外**：`proactive.yaml` 的模板里根本没有
+            # `{context}` 占位符（实测），把状态只塞进 format 参数会被静默丢弃
+            # —— 「修了但不生效」的典型形态。这里统一追加，保证任何模板都带上。
+            if grounded_block:
+                prompt = f"{prompt}\n\n【当前真实状态（必须据此生成，不得编造）】\n{grounded_block}"
             if avoid_block:
                 prompt = f"{prompt}\n{avoid_block}"
         else:
@@ -515,29 +563,24 @@ class MessageGenerator:
 - 你的情感状态：{emotion}
 - 关系等级：{affinity_name}
 - 想表达的类型：{type_label}
+- 距上次聊天：{hours_val:.1f} 小时（{distance_hint}）
+{grounded_block}
 
-{context}
-{avoid_block}
 要求：
 1. 语气要符合你们的关系等级（{affinity_name}）
 2. 要自然、有情感温度，不要太正式
-3. 可以带一点小情绪（撒娇、傲娇等）
-4. 长度控制在20字以内
-5. 直接输出消息内容，不要解释
+3. **必须与上面「你记得的用户信息 / 用户最后一句」有关联**（自己提起对方
+   说过的事，例如问"军训累不累"）；完全没有关联信息时就从时间与情境切入
+4. 不要编造对方没说过的处境
+5. 长度控制在 20 字以内
+6. 直接输出消息内容，不要解释
 
 消息："""
 
         try:
-            if hasattr(self._llm, "chat_sync"):
-                response = self._llm.chat_sync(
-                    query=prompt,
-                    max_tokens=50,
-                    temperature=0.8,
-                )
-            elif callable(self._llm):
-                response = self._llm(prompt)
-            else:
+            if self._call is None:
                 return None
+            response = self._call(prompt)
             # 输出清洗：拦截推理泄漏 / 超长 / 多行（旧实现只判 len>5，等于不判）
             cleaned = sanitize_message(str(response or ""))
             if cleaned is None:
@@ -558,6 +601,10 @@ class MessageGenerator:
         affinity_level: int,
         use_llm: bool = True,
         recent_messages: list[str] | None = None,
+        hours_since_chat: float | None = None,
+        user_profile: str = "",
+        last_user_message: str = "",
+        response_rate: float | None = None,
     ) -> tuple[str, str]:
         content = None
         generated_by = "template"
@@ -566,6 +613,10 @@ class MessageGenerator:
             content = self.generate_with_llm(
                 msg_type, emotion_state, affinity_level,
                 recent_messages=recent_messages,
+                hours_since_chat=hours_since_chat,
+                user_profile=user_profile,
+                last_user_message=last_user_message,
+                response_rate=response_rate,
             )
             if content:
                 generated_by = "llm"
@@ -580,6 +631,14 @@ class MessageGenerator:
 # ═══════════════════════════════════════════════════════════════
 
 _STATE_PATH = Path(__file__).resolve().parent.parent / "data" / "proactive_state.json"
+
+# ── 注意力（response_rate）动力学参数 —— 对标 nana HeartbeatSystem ──
+# 旧实现没有任何"用户最近是否在回应"的信号；这组常数把 nana 的
+# 衰减/累加/互动提升三件套搬过来，只用于**提示词接地**（不设硬闸门）。
+_INTERACTION_BOOST = 0.4          # 用户互动时 response_rate 提升到的下限
+_RESPONSE_DECAY_FACTOR = 0.997    # 每 tick 乘性衰减
+_SILENCE_THRESHOLD_SECONDS = 1800  # 沉默 30 分钟后开始缓慢累加
+_ACCUMULATION_RATE = 0.003        # 每 tick 累加量
 
 
 class ASEEngine:
@@ -616,18 +675,11 @@ class ASEEngine:
 
         self.urgency = UrgencyState()
 
-        llm_func: Callable[[str], str] | None = None
-        if llm_gateway is not None:
-            if hasattr(llm_gateway, "chat_sync"):
-                def llm_func(prompt: str) -> str:
-                    result = llm_gateway.chat_sync(
-                        query=prompt, max_tokens=100, temperature=0.7,
-                    )
-                    return str(result) if result else ""
-            elif callable(llm_gateway):
-                def llm_func(prompt: str) -> str:
-                    result = llm_gateway(prompt)
-                    return str(result) if result else ""
+        # 统一走 utils.llm_bridge（唯一适配点）—— 旧实现在此内联「是否有
+        # chat_sync / 是否 callable」两分支，与记忆管道三处同型判据各自漂移。
+        from utils.llm_bridge import to_sync_callable
+
+        llm_func = to_sync_callable(llm_gateway, max_tokens=100, temperature=0.7)
         self._reflection = ReflectionEngine(
             llm_func=llm_func,
             reflection_mode=reflection_mode,
@@ -662,6 +714,18 @@ class ASEEngine:
         self._last_sent_type: str | None = None
         self._emotion_state: dict = {}
         self._affinity_level: int = 0
+
+        # ── 交互新鲜度与注意力（2026-09-21 重扫，对标 nana HeartbeatSystem）──
+        # nana：`response_rate` 每 tick 乘性衰减（0.997）、沉默超 30 分钟后累加
+        # （+0.003/tick）、用户互动时置 0.4；低于阈值不调 LLM。
+        # 本项目旧实现**没有任何"用户最近是否在回应"的信号**，主动消息只能靠
+        # 时间+紧迫度决定，既不感知"对方刚回完"也不感知"对方连着不理"。
+        self._last_user_message: str = ""
+        self._last_user_interaction: datetime | None = None
+        self.response_rate: float = 0.0
+        self._user_key: str = ""
+        self._user_profile_cache: str = ""
+        self._user_profile_loaded_at: float = 0.0
 
         self._config = {
             "morning_hours": (7, 9),
@@ -718,6 +782,10 @@ class ASEEngine:
         self._last_chat_time = now
         self._last_proactive_time = now
         self._emotion_state = emotion_state or {}
+        # 交互新鲜度 + 注意力（对标 nana：用户互动即置高并刷新基准）
+        self._last_user_message = str(user_message or "")
+        self._last_user_interaction = now
+        self.response_rate = max(self.response_rate, _INTERACTION_BOOST)
         if affinity_level is not None:
             self._affinity_level = affinity_level
         else:
@@ -745,6 +813,63 @@ class ASEEngine:
         )
 
         return monologue
+
+    # ── 交互新鲜度 / 注意力 / 画像接地（2026-09-21 重扫）──────────
+
+    def note_user_interaction(self) -> None:
+        """记录"用户刚开口"（由编排器在每轮结束后调用）。
+
+        对标 nana `HeartbeatSystem.notify_interaction`：交互即把注意力拉满并
+        刷新「上次互动」基准 —— 没有这条信号，主动消息就无法区分
+        「刚聊完」与「三天没理我」（旧实现 `hours_since_chat` 恒 0.0）。
+        """
+        self._last_user_interaction = datetime.now(tz=timezone.utc)
+        self.response_rate = max(self.response_rate, _INTERACTION_BOOST)
+
+    def decay_response_rate(self) -> None:
+        """每 tick 更新注意力：乘性衰减 + 沉默超阈值后缓慢累加。
+
+        与 nana 同构（DECAY_FACTOR=0.997 / SILENCE_THRESHOLD=1800s /
+        ACCUMULATION_RATE=0.003），此值只作**生成提示词的依据**（越久没回应，
+        消息越短越轻），不做硬闸门 —— 本项目已有配额/冷却/静默时段三层硬约束，
+        再加硬闸门会让主动消息直接归零。
+        """
+        self.response_rate *= _RESPONSE_DECAY_FACTOR
+        ref = self._last_user_interaction
+        if ref is not None:
+            silence = (datetime.now(tz=timezone.utc) - ref).total_seconds()
+            if silence > _SILENCE_THRESHOLD_SECONDS:
+                self.response_rate = min(1.0, self.response_rate + _ACCUMULATION_RATE)
+
+    def set_user_key(self, user_key: str) -> None:
+        """绑定本引擎归属的会话键（画像注入按它取数，禁止跨用户读取）。"""
+        uk = str(user_key or "").strip()
+        if uk and uk != self._user_key:
+            self._user_key = uk
+            self._user_profile_cache = ""
+            self._user_profile_loaded_at = 0.0
+
+    def _user_profile_snippet(self, ttl_seconds: float = 600.0) -> str:
+        """取本会话用户的画像文本（带 TTL 缓存；失败返回空，不阻塞生成）。
+
+        旧实现**完全不读画像**，于是主动消息永远无法接上"用户说过的事"
+        （军训/加班/生日），只能泛泛问候。
+        """
+        if not self._user_key:
+            return ""
+        now = time.time()
+        if self._user_profile_cache and (now - self._user_profile_loaded_at) < ttl_seconds:
+            return self._user_profile_cache
+        block = ""
+        try:
+            from shisi.memory.legacy.user_profile import default_store
+
+            block = str(default_store().to_prompt_block(self._user_key) or "")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("主动消息画像读取失败（忽略）: %s", e)
+        self._user_profile_cache = block
+        self._user_profile_loaded_at = now
+        return block
 
     def tick(
         self,
@@ -778,6 +903,10 @@ class ASEEngine:
         #    重启也会跳过该任务 → daily_count 卡在上限（2026-09-18 生产实证）。
         #    改为与 frequency.py 一致的惰性判定：每次 tick 按本地日期自检。
         self._rollover_if_new_day()
+
+        # ②-0 注意力动力学（2026-09-21 重扫，对标 nana `_update_response_rate`）：
+        # 每 tick 衰减 + 沉默累加，供本轮生成提示词使用。
+        self.decay_response_rate()
 
         # ② 紧迫度更新必须**先于**频率检查
         #    原实现把 _check_frequency() 放在最前，一旦计数达上限/处于30分钟
@@ -1054,6 +1183,12 @@ class ASEEngine:
                 affinity_level=self._affinity_level,
                 use_llm=True,
                 recent_messages=list(self._recent_messages),
+                # 2026-09-21 重扫：真实状态喂入（旧实现 hours 恒 0.0、无画像、
+                # 无用户最后一句 → 生成必然泛化）
+                hours_since_chat=self._hours_since_last_chat(),
+                user_profile=self._user_profile_snippet(),
+                last_user_message=self._last_user_message,
+                response_rate=self.response_rate,
             )
         else:
             content = self._message_generator.generate_from_template(
@@ -1250,6 +1385,13 @@ class ASEEngine:
                 # （旧实现只进内存对象，重启即回 yaml 默认值）
                 "min_interval_minutes": self._min_interval_minutes,
                 "cooldown_after_reply_minutes": self._cooldown_after_reply_minutes,
+                # 交互新鲜度 / 注意力（2026-09-21 重扫）：不落盘则重启即失
+                "last_user_message": self._last_user_message[:200],
+                "last_user_interaction": (
+                    self._last_user_interaction.isoformat()
+                    if self._last_user_interaction else None
+                ),
+                "response_rate": float(self.response_rate),
                 "saved_at": datetime.now(tz=timezone.utc).isoformat(),
             }
             state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1285,6 +1427,17 @@ class ASEEngine:
                     self._cooldown_after_reply_minutes = max(0, int(state["cooldown_after_reply_minutes"]))
             self._last_sent_type = state.get("last_sent_type")
             self._affinity_level = state.get("affinity_level", 0)
+
+            # 交互新鲜度 / 注意力（2026-09-21 重扫）：重启后仍能判断
+            # 「刚聊完」还是「三天没理我」，否则 hours_since_chat 又会退化成 0
+            self._last_user_message = str(state.get("last_user_message") or "")
+            if state.get("last_user_interaction"):
+                with contextlib.suppress(TypeError, ValueError):
+                    self._last_user_interaction = datetime.fromisoformat(
+                        state["last_user_interaction"]
+                    )
+            with contextlib.suppress(TypeError, ValueError):
+                self.response_rate = float(state.get("response_rate") or 0.0)
 
             urgency_data = state.get("urgency", {})
             if urgency_data:
@@ -1324,9 +1477,16 @@ class ASEEngine:
     # ── 工具 ──────────────────────────────────────────────
 
     def _hours_since_last_chat(self) -> float:
-        if self._last_chat_time:
-            delta = datetime.now(tz=timezone.utc) - self._last_chat_time
-            return delta.total_seconds() / 3600
+        """距**用户最后一次开口**的小时数（不是距我们上次主动发消息）。
+
+        优先用 `_last_user_interaction`（只在用户互动时推进；`_last_chat_time`
+        是兼容旧状态文件的同类基准）。旧实现在无记录时返回 99.0，而生成提示词
+        里又被硬编码成 0.0 —— 两处口径矛盾，模型收到的是"刚聊完"。
+        """
+        ref = self._last_user_interaction or self._last_chat_time
+        if ref:
+            delta = datetime.now(tz=timezone.utc) - ref
+            return max(0.0, delta.total_seconds() / 3600)
         return 99.0
 
     def set_last_chat_time(self, dt: datetime) -> None:

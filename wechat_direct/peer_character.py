@@ -18,17 +18,10 @@ _CHOICE_NUM = re.compile(r"^\s*#?(\d{1,2})\s*$")
 
 
 def session_key(owner_user_id: int, peer_wxid: str) -> str:
-    return f"{int(owner_user_id)}:{peer_wxid}"
+    """会话键构造（委托唯一真源 `utils.session_key.build`）。"""
+    from utils.session_key import build
 
-
-def parse_session_key(key: str) -> tuple[int | None, str]:
-    if ":" in key:
-        left, right = key.split(":", 1)
-        try:
-            return int(left), right
-        except ValueError:
-            return None, key
-    return None, key
+    return build(owner_user_id, peer_wxid)
 
 
 async def get_peer_preference(db, owner_user_id: int, peer_wxid: str) -> str | None:

@@ -20,7 +20,6 @@ import asyncio
 import json
 import logging
 import os
-import threading
 import time
 from collections.abc import AsyncIterator
 from contextlib import suppress
@@ -43,39 +42,22 @@ from .openai_compatible_provider import OpenAICompatibleProvider
 #
 #  修法：所有同步调用方（ASE / 内容安全 / 一致性修正）共用**一个常驻守护线程
 #  里的事件循环**，让 AsyncClient 与连接池真正复用。
+#
+#  2026-09-21 审查收敛：本段当时自行实现了一份「常驻循环」；而 P1 批次又在
+#  `utils/async_utils` 实现了同样的一份（`get_shared_loop`），两边都不知道对方
+#  存在 → **同进程并存两个常驻循环**。后果正是本注释要治的病的一半：跨模块
+#  缓存的 asyncio 原语（per-session Lock）与 httpx 连接池分属不同循环，互不复用；
+#  `wechat_connector` 走 A 循环、`MultiProviderGateway.chat_sync` 走 B 循环。
+#  现统一委托 `utils.async_utils.get_shared_loop`（全项目唯一真源）。
 # ═══════════════════════════════════════════════════════════════
-
-_sync_loop: asyncio.AbstractEventLoop | None = None
-_sync_loop_lock = threading.Lock()
 
 
 def _get_sync_loop() -> asyncio.AbstractEventLoop:
-    """返回常驻的专用事件循环（守护线程内 run_forever，进程存活期间复用）。
+    """返回进程级常驻事件循环（真源：`utils.async_utils.get_shared_loop`）。"""
+    from utils.async_utils import get_shared_loop
 
-    P1-4（2026-09-21 审查修复）：旧实现在线程尚未进入 run_forever 前就把
-    loop 发布为全局 —— 首个 run_coroutine_threadsafe 可能落在未启动的循环上，
-    任务永远排队不执行、调用方 .result() 挂死。现在用 started 事件确认
-    循环已跑起来才发布。
-    """
-    global _sync_loop  # noqa: PLW0603
-    if _sync_loop is not None and _sync_loop.is_running():
-        return _sync_loop
-    with _sync_loop_lock:
-        if _sync_loop is None or not _sync_loop.is_running():
-            loop = asyncio.new_event_loop()
-            started = threading.Event()
+    return get_shared_loop()
 
-            def _serve() -> None:
-                loop.call_soon(started.set)
-                loop.run_forever()
-
-            threading.Thread(
-                target=_serve, name="llm-sync-loop", daemon=True,
-            ).start()
-            if not started.wait(timeout=5.0):
-                logger.warning("llm-sync-loop 线程 5s 未就绪，仍返回循环（可能延迟首调用）")
-            _sync_loop = loop
-    return _sync_loop
 
 logger = logging.getLogger("llm_provider.multi_gateway")
 
@@ -329,7 +311,12 @@ class MultiProviderGateway:
                 if not ds_key:
                     logger.info("[MultiGateway] deepseek 未配置 API Key，跳过（避免 mock 入链）")
                     continue
-                self._providers[key] = LLMGatewayV2(api_key=ds_key)
+                self._providers[key] = LLMGatewayV2(
+                    api_key=ds_key,
+                    # P1-3 同规：与 OpenAICompatibleProvider 一样接受 provider 级
+                    # 请求超时，避免 deepseek 挂死时按硬编码 60s 烧穿整链预算
+                    request_timeout=ds_cfg.get("request_timeout"),
+                )
                 continue
 
             # 从文件配置或默认配置创建

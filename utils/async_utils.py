@@ -19,7 +19,7 @@ def run_async(coro) -> Any:
 
     设计:
       - 无运行中事件循环 -> asyncio.run()
-      - 有运行中事件循环 -> 在新线程中新建事件循环运行（阻塞等待结果）
+      - 有运行中事件循环 -> 投递到**进程级常驻循环**（见 :func:`run_on_shared_loop`）
 
     Args:
         coro: 要运行的协程对象
@@ -27,20 +27,27 @@ def run_async(coro) -> Any:
     Returns:
         协程的返回值
 
-    注意:
-        如果需要在已有事件循环中以 fire-and-forget 方式调度协程，
-        请直接使用 asyncio.ensure_future()，而非此函数。
+    注意（2026-09-21 审查修订）:
+        1. 有循环分支此前是「临时线程 + ``asyncio.run``」——协程里缓存的
+           ``asyncio`` 原语（Lock / Queue / httpx 连接池）会绑定在一个**用完即弃**
+           的循环上，跨调用唤醒失灵、连接池反复重建。现统一投递到常驻循环。
+           唯一例外：调用方**已在常驻循环内部**时无法再向它投递（必死锁），
+           只能退回一次性循环。
+        2. 该函数是**同步**入口，无论哪条分支都会阻塞调用线程。协程内的调用方
+           必须直接 ``await``，不得经此函数（在事件循环线程上调用会冻结该循环）。
     """
     try:
-        asyncio.get_running_loop()
-        # 有运行中事件循环，不能直接 asyncio.run
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, coro)
-            return future.result()
+        running = asyncio.get_running_loop()
     except RuntimeError:
         # 无运行中事件循环
         return asyncio.run(coro)
+
+    if _shared_loop is not None and _shared_loop is running:
+        # 已在常驻循环内部：向自身投递 = 死锁，退回一次性循环
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
+    return run_on_shared_loop(coro)
 
 
 # ── 进程级共享常驻事件循环（P1-27，2026-09-21 审查修复）──────────

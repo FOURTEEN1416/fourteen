@@ -191,31 +191,15 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
     def _tools(self):
         return self.components.get("tools")
 
-    # ── 额外向后兼容属性（合并自根目录 orchestrator.py）──
+    # ── 组件快捷访问器 ──
 
     @property
     def _llm(self):
         return self.components.get("llm")
 
     @property
-    def _rag(self):
-        return self.components.get("rag")
-
-    @property
     def _safety(self):
         return self.components.get("safety")
-
-    @property
-    def _pii(self):
-        return self.components.get("pii")
-
-    @property
-    def _injection(self):
-        return self.components.get("injection")
-
-    @property
-    def _multimodal(self):
-        return self.components.get("multimodal")
 
     @property
     def _character_manager(self):
@@ -690,6 +674,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     classifier_mode=getattr(template, "_classifier_mode", "rule"),
                 )
                 self._restore_request_affinity(engine, session_id, character_id)
+                self._restore_request_emotion(engine, session_id, character_id)
                 self._request_emotion_engines[key] = engine
             self._request_emotion_engines_access[key] = current_time
 
@@ -700,6 +685,27 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             except Exception as e:  # noqa: BLE001
                 logger.debug("请求级情绪引擎淘汰关闭异常: %s", e)
         return engine
+
+    @staticmethod
+    def _restore_request_emotion(
+        engine: Any, session_id: str, character_id: str
+    ) -> None:
+        """新建请求级引擎必须从持久化情绪恢复（并按离线时长衰减）。
+
+        2026-09-21 重扫：旧实现只恢复好感度，**情绪/能量/轮次计数一律归零** ——
+        重启或引擎 LRU 淘汰后角色"记得你但心情归零"，人设状态自相矛盾。
+        对标 nana `EmotionalState`：加载即 `decay_mood()`。
+        """
+        if not session_id or not hasattr(engine, "restore"):
+            return
+        try:
+            from utils.emotion_state import load_emotion_state
+
+            snapshot = load_emotion_state(session_id, str(character_id or ""))
+            if snapshot:
+                engine.restore(snapshot)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("情感状态恢复跳过: %s", e)
 
     @staticmethod
     def _restore_request_affinity(
@@ -907,9 +913,14 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         chat_summary: str = ""
         mem = self.components.get("memory")
         if mem and hasattr(mem, 'get_chat_context'):
+            # 2026-09-21 重扫：按角色取历史（切换角色不再继承他人台词）
+            _hist_sig = inspect.signature(mem.get_chat_context)
+            _hist_kwargs: dict[str, Any] = {"session_id": session_id}
+            if "character_id" in _hist_sig.parameters:
+                _hist_kwargs["character_id"] = str(character_id or "")
             chat_history, chat_summary = await loop.run_in_executor(
                 None,
-                lambda: mem.get_chat_context(session_id=session_id),
+                lambda: mem.get_chat_context(**_hist_kwargs),
             )
         # 2026-09-21：清洗交给 LLM 的历史 — 只保留 user/assistant 角色、去空/系统错误、
         # 防止「当前用户消息」与 history 重复，避免模型分不清该回哪句。
@@ -1145,6 +1156,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             user_msg=user_msg_clean,
             reply=reply,
             session_id=session_id,
+            # 2026-09-21 重扫：归属随写入落库（旧实现两行无身份 → 切换角色后
+            # 新角色把上一角色的话当自己的；「分不清谁说的」的存储层根因）
+            character_id=str(character_id or ""),
+            turn_id=ax_turn_id,
         )
         memory = self.components["memory"]
         if hasattr(memory, "after_chat"):
@@ -1163,6 +1178,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                         reply=reply,
                         emotion_tag=emotion_tag,
                         session_id=session_id,
+                        character_id=str(character_id or ""),
+                        turn_id=ax_turn_id,
                     )
                 except Exception as e:  # noqa: BLE001
                     logger.warning("sync history write failed: %s", e)
@@ -1268,6 +1285,30 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     )
             except Exception as e:  # noqa: BLE001
                 logger.debug("Affinity/Stage 同步跳过: %s", e)
+
+        # 情感状态持久化 + 主动消息「注意力」信号（2026-09-21 重扫）。
+        # 旧实现：情绪仅在进程内存里 —— 重启或请求级引擎 LRU 淘汰后回到中性，
+        # 而好感度（affection_points）是持久化的 → 人设状态自相矛盾
+        # （"记得你但心情归零"）。对标 nana `emotional_state.py`：mood 与
+        # relationship 同文件持久化、加载时按时间衰减。
+        if session_id:
+            try:
+                from utils.emotion_state import save_emotion_state
+
+                eng = self._get_request_emotion_engine(session_id, character_id)
+                snapshot = eng.snapshot() if hasattr(eng, "snapshot") else None
+                if snapshot:
+                    save_emotion_state(session_id, str(character_id or ""), snapshot)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("情感状态持久化跳过: %s", e)
+            # 主动消息注意力：用户开口 = 交互信号（提升 response_rate、刷新
+            # hours_since_chat 基准）。旧实现把 hours_since_chat 硬编码为 0.0。
+            try:
+                ase = self.components.get("ase")
+                if ase is not None and hasattr(ase, "note_user_interaction"):
+                    ase.note_user_interaction(session_id)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("ASE 交互信号记录跳过: %s", e)
 
         return emotion_tag
 

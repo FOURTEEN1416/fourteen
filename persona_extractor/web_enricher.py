@@ -533,33 +533,35 @@ class Crawl4AISource:
 
         未安装时**返回空列表**而非抛异常 —— 调用方是做「多源聚合、缺一个照样跑」，
         不该因单一源缺失就把 `ModuleNotFoundError` 抛到端点。
+
+        2026-09-21 审查修复：旧实现在「已在事件循环内」分支写
+        ``asyncio.new_event_loop().run_until_complete(...)`` —— 每次调用泄漏一个
+        未关闭的事件循环（fd/selector 不释放），且是全项目第 4 份自建同步→异步桥。
+        现统一委托 ``utils.async_utils.run_async``（唯一真源）。
         """
         if not self.available:
             logger.info("Crawl4AI 未安装，该源跳过（返回空）")
             return []
-        import asyncio
+        from utils.async_utils import run_async
+
         try:
-            return asyncio.run(self._search_async(query, max_results))
+            return run_async(self._search_async(query, max_results))
         except ImportError as e:
             logger.warning("Crawl4AI 导入失败，该源跳过: %s", e)
             return []
-        except RuntimeError:
-            # 若已在 loop 中（极少数情况），则创建新 loop
-            return asyncio.new_event_loop().run_until_complete(self._search_async(query, max_results))
 
     def scrape(self, url: str) -> RawDocument:
-        """同步入口：抓取单个 URL 并返回 RawDocument。"""
+        """同步入口：抓取单个 URL 并返回 RawDocument（桥接同 :meth:`search`）。"""
         if not self.available:
             logger.info("Crawl4AI 未安装，抓取跳过（返回空文档）")
             return RawDocument(url=url, source=self.NAME)
-        import asyncio
+        from utils.async_utils import run_async
+
         try:
-            return asyncio.run(self._scrape_async(url))
+            return run_async(self._scrape_async(url))
         except ImportError as e:
             logger.warning("Crawl4AI 导入失败，抓取跳过: %s", e)
             return RawDocument(url=url, source=self.NAME)
-        except RuntimeError:
-            return asyncio.new_event_loop().run_until_complete(self._scrape_async(url))
 
 
 

@@ -107,7 +107,9 @@ def test_hub_known_keys_prunes_missing_state(tmp_path, monkeypatch):
     monkeypatch.setattr(hub_mod, "_INDEX_PATH", tmp_path / "index.json")
     alive = tmp_path / "u1.json"
     alive.write_text("{}", encoding="utf-8")
-    hub_mod._write_index({"u1": str(alive), "u2": str(tmp_path / "gone.json")})
+    hub_mod._update_index(
+        lambda data: data.update({"u1": str(alive), "u2": str(tmp_path / "gone.json")})
+    )
     hub = ASEHub(FakeEngine)
     hub._state_dir = tmp_path
     assert hub.known_user_keys() == ["u1"]

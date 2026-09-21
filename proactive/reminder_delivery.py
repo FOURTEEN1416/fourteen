@@ -22,6 +22,7 @@ from collections.abc import Callable
 from typing import Any
 
 from proactive.ase_engine import sanitize_message
+from utils import session_key as session_key_mod
 
 logger = logging.getLogger("reminder_delivery")
 
@@ -96,25 +97,33 @@ class ReminderDeliveryTask:
         await asyncio.to_thread(self._sm.mark_reminder_result, reminder.get("id"), delivered)
 
     async def _send_to_session(self, session_key: str, text: str) -> bool:
-        """按会话键定向投递：``owner:peer@im.wechat`` → 微信；其余 → websocket。"""
-        if not session_key:
+        """按会话键定向投递：微信会话 → 微信通道；其余 → websocket。
+
+        ⚠️ 2026-09-21 重扫修复（微信提醒恒不送达的机制级根因）：
+        旧判据是 ``"@im.wechat" in session_key``，而**生产微信键由
+        `wechat_connector._session_key` 构造为 ``N:wxid``（无后缀）** ——
+        条件永假 → 微信分支**不可达**，到期提醒恒走 websocket 广播：
+        微信用户收不到（未开 web 控制台），开着控制台时还可能因 ws 广播
+        返回 True 而把提醒记成「已投递」。判据现由唯一真源
+        `utils.session_key.is_wechat_key` 提供（三种方言口径见其 docstring）。
+        """
+        sk = str(session_key or "").strip()
+        if not sk:
             return False
-        if "@im.wechat" in session_key and ":" in session_key:
-            owner_raw, peer = session_key.split(":", 1)
-            if not self._wechat_sender:
-                logger.warning("[reminder] 微信投递通道未注入，session=%s", session_key)
+        if session_key_mod.is_wechat_key(sk):
+            parsed = session_key_mod.parse(sk)
+            if parsed.owner is None or not parsed.peer:
+                logger.warning("[reminder] 微信会话键无法解析为 owner:peer: %s", sk)
                 return False
-            try:
-                owner_id = int(owner_raw)
-            except ValueError:
-                logger.warning("[reminder] session_key owner 非法: %s", session_key)
+            if not self._wechat_sender:
+                logger.warning("[reminder] 微信投递通道未注入，session=%s", sk)
                 return False
             try:
                 return bool(await asyncio.to_thread(
-                    self._wechat_sender, owner_id, peer, text,
+                    self._wechat_sender, parsed.owner, parsed.peer, text,
                 ))
             except Exception as e:  # noqa: BLE001
-                logger.warning("[reminder] 微信投递异常 session=%s: %s", session_key, e)
+                logger.warning("[reminder] 微信投递异常 session=%s: %s", sk, e)
                 return False
         if self._ws_sender:
             try:

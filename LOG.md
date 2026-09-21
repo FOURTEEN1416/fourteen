@@ -7,6 +7,27 @@
 
 ---
 
+## 2026-09-21 — 「谁说的 / 隔离 / 记忆 / 情感 / 主动」脊柱重构（激进式，非补丁）
+
+- **触发**：用户指令「另外一个窗口已经停止，剩下的任务全部交给你，一次性解决、激进重构、不要一直补丁式」+「用户隔离、LLM 是否分清哪句话是谁说的、记忆、情感、主动提醒都很羸弱」+「补搜索调研，对标成熟项目，深入研究其实现」。
+- **对标（**读源码**，非看描述）**：`D:\Desktop\peer-projects\` 实仓 —— SillyTavern `public/scripts/openai.js::setOpenAIMessages()`（每条历史带 `name` 字段 + 多人场景 `content = "${name}: ${content}"`，三档 `names_behavior`；`extra{type: NARRATOR|…, api, model}` 出处元数据）；nana `backend/conversation.py`（`ConversationTurn(ask, answer)` 成对存储，渲染即 `user:/assistant:`）、`emotional_state.py`（mood{valence,arousal,dominant,intensity} + relationship{affection,trust,familiarity,stage} 单文件持久化，**加载即 `decay_mood()`**、跨天重置、阶段自带行为 hint）、`heartbeat.py` + `prompts/heartbeat.md`（60s tick + 五道门控 + **response_rate 注意力动力学**：0.997/tick 衰减、30min 沉默后 +0.003 累加、互动置 0.4、低于阈值不调 LLM；LLM 输出 `{"action":"send_message"|"wait"}` JSON）、`prompts/memory_extract.md`（结构化抽取 summary/topics/valence/importance/user_facts 分桶，明示"只提取明确说过的"）。
+- **诊断（四条症状同一根因）**：「谁、对谁、何时说了什么」在**存储层就丢了**。
+  ① `chat_history` 只有 `role`+`session_id` → assistant 行**无身份**（同会话切角色后新角色继承上一角色台词）；`ORDER BY created_at` 秒精度 + 以 `(created_at, content)` 为去重键 → **同秒次序不保证 + 内容相同的两条被静默折叠**；`importance` 算完即弃（重建时硬编码 0.5 假指标）。
+  ② 情绪只在进程内存（`emotion_trajectory` 表建了**从未 INSERT**）→ 重启/引擎 LRU 淘汰后「记得你但心情归零」，好感度却持久化。
+  ③ 主动消息生成提示词 `hours_since_chat` **被硬编码 0.0**、`user_name` 写死、**完全无用户画像与用户最后一句** → 生成必然泛化。
+  ④ **记忆 LLM 能力被静默关停**：`FactExtractor/DairySummarizer/ReflectionEngine` 三处同一坏判据 `self._llm if callable(self._llm) else None` —— 网关对象不可调用 ⇒ 恒 False ⇒ 三条 LLM 记忆能力**从未启用**，事实只剩正则碎片（生产实证「叫我」「上班」）。
+- **改动**：
+  - 新增 `shisi/core/conversation_turn.py`（Speaker/Turn/`build_turns`/`render_turns`（显式 `用户:`/`我:` 标注）/`filter_by_character`/`isolation_key`）。
+  - `structured_memory`：`chat_history` 幂等迁移 **+5 列**（character_id/user_key/turn_id/importance/channel）+ 排序改 **`id`（写入序）** + 新增 `get_session_rows`；`add_chat` 带归属参数。
+  - `memory_pipeline`：`_load_session_history` **删内容去重**、按 id 判序、返回全归属 + **真实 importance**；`write_chat_history_sync`/`after_chat` 落归属；`get_chat_context(character_id=)` 贯通 memory_service → orchestrator（切角色不再继承他人台词）。
+  - 新增 `utils/emotion_state.py`（按 `user_key::character_id` 隔离、走 `utils.json_state` 原子写 + flock）+ `EmotionEngine.snapshot()/restore()`（**加载即按离线时长衰减**）；`_get_request_emotion_engine` 恢复情绪、`_after_process` 每轮落盘。
+  - 新增 `utils/llm_bridge.py`（唯一 `prompt→str` 适配器，消灭 **5 处**同型判据漂移：记忆三件套 + 摘要器 + ASE）；记忆管道三条 LLM 能力**真正启用**（仍受 `fact_extract_interval` 节流）；`ConversationSummarizer` 同步桥与 `_format_history` 丢归属一并修（历史归属现贯通到 `_prepare_context`，仅在下发 LLM 前由 `sanitize_llm_history` 白名单收敛为 role/content）。
+  - `ase_engine`：生成提示词接地（**真实 hours_since_chat** + 用户画像 + 用户最后一句 + 注意力热度 + 距上次时长分档内心感受）、`note_user_interaction`/`decay_response_rate`（对标 nana）、`_last_user_message`/`response_rate` 随状态落盘；`ASEHub.note_user_interaction` 定向到本人引擎 + 引擎绑定 `user_key` 供画像取数。⚠️ 实测发现 `proactive.yaml` 模板**没有 `{context}` 占位符** → 接地段改为附在模板之外（否则"修了但不生效"）。
+- **验证**：新增 `tests/test_attribution_isolation_state.py` **19 例**（含"同秒重复内容两条都在""切角色不继承""离线衰减""提示词含真实小时/画像/最后一句""LLM 桥必须接上 FactExtractor"）；受影响 39 文件 **740 passed / 3 skipped**、专项 184+157+19 全绿；ruff 0.16.8 全仓 0 错；ci_gates 4/4。
+- **未做**：`emotion_trajectory` 死表未删（需 DELETION_LOG 流程）；`CODE_GRAPH/MODULES/INDEX` 等文档同步未做（本批只落地代码 + LOG）；服务器未 pull。
+
+
+
 ## 2026-09-21 — 全量代码审查修复战役收口（v1.34，工作单 `docs/verification/2026-09-21-full-code-audit.md`）
 
 - **触发**：用户指令「进行全面修复，所有问题都需要进行修复，同时需要你将 GitHub CI 报错处理好」+「全程自主进行，直到所有问题修复完成为止」。

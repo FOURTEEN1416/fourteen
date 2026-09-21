@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import json
 import logging
 import threading
 from collections import OrderedDict
@@ -17,11 +16,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from utils import json_state
+
 logger = logging.getLogger("proactive.ase_hub")
 
 _STATE_DIR = Path(__file__).resolve().parent.parent / "data" / "ase_states"
 _INDEX_PATH = _STATE_DIR / "index.json"
-_INDEX_LOCK = threading.Lock()
 _MAX_ENGINES = 64
 
 
@@ -31,39 +31,33 @@ def safe_state_name(user_key: str) -> str:
 
 
 def _remember_index(user_key: str, state_path: str) -> None:
-    _write_index({**_read_index_raw(), str(user_key): str(state_path)})
+    _update_index(lambda data: data.__setitem__(str(user_key), str(state_path)))
 
 
 def _forget_index(user_key: str) -> None:
     """状态文件已删除时同步移除索引项（旧实现只记不删，索引只增不减）。"""
-    data = _read_index_raw()
-    if str(user_key) in data:
-        data.pop(str(user_key))
-        _write_index(data)
+    _update_index(lambda data: data.pop(str(user_key), None))
 
 
 def _read_index_raw() -> dict[str, str]:
-    try:
-        if not _INDEX_PATH.exists():
-            return {}
-        raw = json.loads(_INDEX_PATH.read_text(encoding="utf-8"))
-        if isinstance(raw, dict):
-            return {str(k): str(v) for k, v in raw.items()}
-    except Exception as e:  # noqa: BLE001
-        logger.debug("ASE index read failed: %s", e)
+    raw = json_state.read_json(_INDEX_PATH, default={})
+    if isinstance(raw, dict):
+        return {str(k): str(v) for k, v in raw.items()}
     return {}
 
 
-def _write_index(data: dict[str, str]) -> None:
-    with _INDEX_LOCK:
-        try:
-            _STATE_DIR.mkdir(parents=True, exist_ok=True)
-            # P1-18：原子写（tmp + replace），半写 JSON 会让整个索引不可读
-            tmp = _INDEX_PATH.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-            tmp.replace(_INDEX_PATH)
-        except Exception as e:  # noqa: BLE001
-            logger.debug("ASE index write failed: %s", e)
+def _update_index(mutate: Callable[[dict[str, Any]], Any]) -> None:
+    """锁内读改写索引。
+
+    旧实现是 ``_write_index({**_read_index_raw(), ...})`` —— 「读」发生在
+    取锁**之前**，两个并发建引擎的请求会各自基于旧快照写回，后写者覆盖先写者
+    （索引丢项 → 该用户状态文件不再被恢复）。现委托 `utils.json_state`，
+    读改写全程持同一把跨进程锁。
+    """
+    try:
+        json_state.update_json(_INDEX_PATH, lambda data: mutate(data))
+    except Exception as e:  # noqa: BLE001
+        logger.debug("ASE index write failed: %s", e)
 
 
 def load_user_key_index() -> list[str]:
@@ -135,6 +129,11 @@ class ASEHub:
             state_path = str(self._state_dir / safe_state_name(key))
             eng = self._factory(user_key=key, state_path=state_path)
             self._apply_replay(eng)
+            # 绑定归属：引擎据此取**本人**画像（禁止跨用户读取）
+            binder = getattr(eng, "set_user_key", None)
+            if callable(binder):
+                with contextlib.suppress(Exception):
+                    binder(key)
             self._engines[key] = eng
             while len(self._engines) > _MAX_ENGINES:
                 old_key, _old = self._engines.popitem(last=False)
@@ -233,6 +232,22 @@ class ASEHub:
 
     def tick(self, user_key: str, hours: float, dry_run: bool = False) -> Any:
         return self.get(user_key).tick(hours, dry_run=dry_run)
+
+    def note_user_interaction(self, user_key: str) -> None:
+        """记录「该用户刚开口」（编排器每轮结束调用）。
+
+        没有这条信号，引擎无法区分「刚聊完」与「几天没理我」——
+        旧实现把 `hours_since_chat` 硬编码为 0.0 传给生成提示词。
+        """
+        key = str(user_key or "").strip()
+        if not key:
+            return
+        try:
+            eng = self.get(key)
+            if hasattr(eng, "note_user_interaction"):
+                eng.note_user_interaction()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("ASE 交互信号写入失败 user=%s: %s", key, e)
 
     def commit_sent(self, user_key: str, result: dict) -> None:
         eng = self.get(user_key)

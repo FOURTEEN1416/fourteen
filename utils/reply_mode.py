@@ -27,10 +27,11 @@ web 控制端写入即对所有 worker 生效，无需重启）。
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
+
+from utils import json_state
 
 logger = logging.getLogger("reply_mode")
 
@@ -77,33 +78,28 @@ _INSTRUCTION_NOVEL = """【回复模式：小说式】
 
 def read_reply_mode() -> str:
     """读取当前回复模式；缺失/非法一律回落默认（沉浸式）。"""
-    try:
-        if _CONFIG_PATH.exists():
-            raw: Any = json.loads(_CONFIG_PATH.read_text(encoding="utf-8")) or {}
-            mode = raw.get("reply_mode")
-            if mode in REPLY_MODES:
-                return str(mode)
-    except Exception:  # noqa: BLE001
-        logger.debug("读取 reply_mode 失败，回落默认值", exc_info=True)
+    raw: Any = json_state.read_json(_CONFIG_PATH, default={}) or {}
+    mode = raw.get("reply_mode")
+    if mode in REPLY_MODES:
+        return str(mode)
     return DEFAULT_REPLY_MODE
 
 
 def write_reply_mode(mode: str) -> str:
-    """写入回复模式（保留文件内其他键）。返回实际生效值。"""
+    """写入回复模式（保留文件内其他键）。返回实际生效值。
+
+    与其他 ``data/*.json`` 状态文件共用 `utils.json_state` 的原子写 + 跨进程锁
+    —— 本文件是 4 个 uvicorn worker 共读的跨 worker 运行时配置，
+    「控制端写入 / worker 读取」不允许出现半写。
+    """
     if mode not in REPLY_MODES:
         raise ValueError(f"unknown reply_mode: {mode!r}; expected one of {REPLY_MODES}")
-    data: dict[str, Any] = {}
+
+    def _mutate(data: dict) -> None:
+        data["reply_mode"] = mode
+
     try:
-        if _CONFIG_PATH.exists():
-            data = json.loads(_CONFIG_PATH.read_text(encoding="utf-8")) or {}
-    except Exception:  # noqa: BLE001
-        data = {}
-    data["reply_mode"] = mode
-    try:
-        _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = _CONFIG_PATH.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(_CONFIG_PATH)
+        json_state.update_json(_CONFIG_PATH, _mutate)
     except Exception as e:  # noqa: BLE001
         logger.warning("写入 reply_mode 失败: %s", e)
     return mode

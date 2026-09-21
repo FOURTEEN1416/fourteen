@@ -8,6 +8,8 @@ P0-10：全部端点为**控制面/调试面**，须 admin 角色。旧实现仅
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.auth_jwt import require_role
@@ -21,6 +23,30 @@ def _ledger():
     from shisi.agent_plane.event_ledger import default_ledger
 
     return default_ledger()
+
+
+def _distinct_user_keys(limit: int = 200) -> list[str]:
+    """读 `user_facts` 去重 user_key（**同步** SQLite）。
+
+    ⚠️ 必须经 `asyncio.to_thread` 调用：`curate` 端点是 `async def`，
+    旧实现在事件循环里直接 `sqlite3.connect` + 全表扫描 → 阻塞整个 loop
+    （本端点扫的是全量 user_facts，不是小表）。
+    """
+    import sqlite3
+    from contextlib import closing
+
+    from utils.project_paths import project_path
+
+    # P1-52：锚定项目根（旧 Path("data/sqlite.db") 按 CWD 解析，
+    # 非仓库根启动时全库扫描静默返回空 keys）
+    db = project_path("data", "sqlite.db")
+    if not db.exists():
+        return []
+    with closing(sqlite3.connect(str(db))) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT user_key FROM user_facts WHERE user_key != ''"
+        ).fetchall()
+    return [str(r[0]) for r in rows[:limit]]
 
 
 @router.get("/api/agent-plane/replay")
@@ -106,20 +132,7 @@ async def agent_plane_curate(
         return run_curator_for_session(session_key, sm=sm, llm=llm, apply=True)
     keys: list[str] = []
     try:
-        import sqlite3
-        from contextlib import closing
-
-        from utils.project_paths import project_path
-
-        # P1-52：锚定项目根（旧 Path("data/sqlite.db") 按 CWD 解析，
-        # 非仓库根启动时全库扫描静默返回空 keys）
-        db = project_path("data", "sqlite.db")
-        if db.exists():
-            with closing(sqlite3.connect(str(db))) as conn:
-                rows = conn.execute(
-                    "SELECT DISTINCT user_key FROM user_facts WHERE user_key != ''"
-                ).fetchall()
-                keys = [r[0] for r in rows[:200]]
+        keys = await asyncio.to_thread(_distinct_user_keys)
     except Exception:  # noqa: BLE001
         keys = []
     return run_curator_all_known(sm, llm=llm, session_keys=keys)

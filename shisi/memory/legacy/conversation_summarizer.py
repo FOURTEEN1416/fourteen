@@ -27,6 +27,12 @@ SUMMARY_PROMPT = """将以下对话内容压缩成一段简洁的摘要（不超
 class ConversationSummarizer:
     def __init__(self, llm_gateway):
         self._llm = llm_gateway
+        # 唯一适配点（utils.llm_bridge）：旧实现在 _summarize 里内联三分支
+        # （chat_sync / chat + 一次性线程池 asyncio.run / 放弃），是项目第 5 份
+        # 「同步跑协程」实现 —— 与记忆管道其余三处各自漂移。
+        from utils.llm_bridge import to_sync_callable
+
+        self._call = to_sync_callable(llm_gateway, max_tokens=256, temperature=0.3)
         self._cache: dict[str, str] = {}
         self._cache_boundary: dict[str, int] = {}
 
@@ -70,15 +76,26 @@ class ConversationSummarizer:
         return self._format_history(recent), summary
 
     def _format_history(self, messages: list[dict[str, Any]]) -> list[dict[str, str]]:
-        result = []
+        """保留归属字段（character_id/turn_id/importance/timestamp）。
+
+        2026-09-21 重扫：旧实现只回 role+content，把存储层的归属**再次丢掉** ——
+        这里返回的列表会一路传到 `_prepare_context`，中间任何一环丢字段，
+        「哪句是谁说的」就断了。发给 LLM 前的 `utils.prompt_sanitize.
+        sanitize_llm_history` 只白名单取 role/content，故带上归属是安全的。
+        """
+        result: list[dict[str, Any]] = []
         for msg in messages:
             role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if role == "user":
-                result.append({"role": "user", "content": content})
-            elif role == "assistant":
-                result.append({"role": "assistant", "content": content})
-        return result
+            if role not in {"user", "assistant"}:
+                continue
+            entry: dict[str, Any] = {"role": role, "content": msg.get("content", "")}
+            for key in ("character_id", "turn_id", "user_key", "timestamp", "emotion"):
+                if msg.get(key):
+                    entry[key] = msg[key]
+            if msg.get("importance") is not None:
+                entry["importance"] = msg["importance"]
+            result.append(entry)
+        return result  # type: ignore[return-value]
 
     def _summarize(self, messages: list[dict[str, Any]]) -> str:
         if not self._llm:
@@ -97,19 +114,10 @@ class ConversationSummarizer:
         prompt = SUMMARY_PROMPT.format(messages=full_text)
 
         try:
-            if hasattr(self._llm, "chat_sync"):
-                result = self._llm.chat_sync(query=prompt, system_prompt="", max_tokens=256, temperature=0.3)
-            elif hasattr(self._llm, "chat"):
-                import asyncio
-                try:
-                    asyncio.get_running_loop()
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                        future = pool.submit(asyncio.run, self._llm.chat(query=prompt, max_tokens=256, temperature=0.3))
-                        result = future.result()
-                except RuntimeError:
-                    result = asyncio.run(self._llm.chat(query=prompt, max_tokens=256, temperature=0.3))
-            else:
+            if self._call is None:
+                return ""
+            result = self._call(prompt)
+            if not result:
                 return ""
             logger.info("Conversation summary generated (%d messages → %d chars)", len(messages), len(result))
             return result.strip()  # type: ignore[no-any-return]

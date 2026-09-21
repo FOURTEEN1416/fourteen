@@ -825,6 +825,65 @@ class EmotionEngine:
     def get_affinity_level_name(self) -> str:
         return AffinityLevel.get_name(self._state.affinity)
 
+    # ── 状态快照 / 恢复（2026-09-21 重扫：情绪不落盘的根治）──────
+    #
+    # 旧实现情绪只在进程内存，重启或请求级引擎 LRU 淘汰即回中性，而好感度是
+    # 持久化的 → 人设状态自相矛盾。对标 nana `emotional_state.py`：状态落盘 +
+    # **加载时按经过时间衰减**（离线越久，能量恢复、强度衰减、跨天扣好感）。
+
+    def snapshot(self) -> dict[str, Any]:
+        """导出可持久化的状态快照（含 total_chats 与 last_update）。"""
+        return {
+            "primary_emotion": self._state.primary_emotion.value,
+            "primary_intensity": float(self._state.primary_intensity),
+            "secondary_emotions": [
+                [e.value, float(i)] for e, i in self._state.secondary_emotions
+            ],
+            "energy": float(self._state.energy),
+            "affinity": int(self._state.affinity),
+            "affection_points": float(self._state.affection_points),
+            "last_update": float(self._state.last_update),
+            "total_chats": int(self._total_chats),
+        }
+
+    def restore(self, snapshot: dict[str, Any] | None) -> bool:
+        """从快照恢复并按**经过时间**衰减。返回是否成功恢复。
+
+        恢复失败（字段非法/半写）时保持默认状态，不抛异常 —— 调用方在构建
+        请求级引擎的热路径上。
+        """
+        if not isinstance(snapshot, dict) or not snapshot:
+            return False
+        try:
+            primary = Emotion(str(snapshot.get("primary_emotion") or Emotion.NEUTRAL.value))
+        except (ValueError, TypeError):
+            return False
+        try:
+            secondary: list[tuple[Emotion, float]] = []
+            for item in snapshot.get("secondary_emotions") or []:
+                if isinstance(item, (list, tuple)) and len(item) == 2:
+                    secondary.append((Emotion(str(item[0])), float(item[1])))
+            self._state = CompoundEmotionalState(
+                primary_emotion=primary,
+                primary_intensity=float(snapshot.get("primary_intensity") or 0.5),
+                secondary_emotions=secondary,
+                energy=float(snapshot.get("energy") if snapshot.get("energy") is not None else 1.0),
+                affinity=int(snapshot.get("affinity") or 0),
+                affection_points=float(snapshot.get("affection_points") or 0.0),
+                last_update=float(snapshot.get("last_update") or time.time()),
+            )
+            self._total_chats = int(snapshot.get("total_chats") or 0)
+        except (ValueError, TypeError) as e:
+            logger.warning("情感状态恢复失败（保持默认）: %s", e)
+            return False
+
+        # 离线衰减：按经过小时数补算（封顶 30 天，避免长期停服后一次性大幅跳变）
+        elapsed_hours = max(0.0, (time.time() - self._state.last_update) / 3600.0)
+        if elapsed_hours >= 0.5:
+            self.apply_time_decay(min(elapsed_hours, 24.0 * 30))
+        self._record_history(self._state)
+        return True
+
     def reset(self) -> None:
         self._state = CompoundEmotionalState()
         self._total_chats = 0

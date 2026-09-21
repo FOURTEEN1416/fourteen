@@ -36,8 +36,6 @@ logger = logging.getLogger("api.wechat_channel")
 router = APIRouter(prefix="/api/wechat/channel", tags=["wechat-channel"])
 admin_router = APIRouter(prefix="/api/admin/wechat", tags=["admin-wechat"])
 
-_bearer = None  # 通道 API 统一走 JWT Bearer（get_current_user_id）
-
 QRCODE_EXPIRY_SECONDS = 600
 
 

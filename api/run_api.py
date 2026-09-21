@@ -50,6 +50,7 @@ from main import OptimizedOrchestrator, UserManager  # noqa: E402
 from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
 from observability.health import health_checker  # noqa: E402
 from observability.logging_setup import setup_logging  # noqa: E402
+from utils import session_key as session_key_mod  # noqa: E402
 
 logger = logging.getLogger("run_api")
 
@@ -220,18 +221,20 @@ if _scheduler is not None:
                 if not user_mgr:
                     return peers
                 for key in user_mgr.get_bound_wxids():
-                    if ":" in key:
-                        left, right = key.split(":", 1)
-                        if left == str(owner_id):
-                            peers.append(right)
+                    parsed = session_key_mod.parse(key)
+                    if parsed.owner is not None and parsed.owner == owner_id:
+                        peers.append(parsed.peer)
                 return peers
 
             targets: list[tuple[int, str]] = []
             sk = str(session_key or "")
-            if sk and ":" in sk:
-                owner_raw, peer = sk.split(":", 1)
-                if owner_raw.isdigit() and peer:
-                    targets.append((int(owner_raw), peer))
+            # 判据唯一真源 `utils/session_key`：旧实现「含 `:` 且左段是数字」会把
+            # **web 键 `N:web:hex`** 也当成微信（peer 变成 `web:hex`）→
+            # 向不存在的 wxid 发送并静默失败。现先判定是否微信键。
+            if sk and session_key_mod.is_wechat_key(sk):
+                parsed = session_key_mod.parse(sk)
+                if parsed.owner is not None and parsed.peer:
+                    targets.append((parsed.owner, parsed.peer))
             if sk and not targets:
                 # P0-4-3：给了 session_key 却解析不出 owner:peer → 拒发。
                 # 旧实现让坏键掉进"全员兜底"分支，A 的私信变广播。

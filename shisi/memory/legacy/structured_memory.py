@@ -313,7 +313,39 @@ class StructuredMemory:
             """)
             self._migrate_reminders_columns(conn)
             self._migrate_user_facts_columns(conn)
+            self._migrate_chat_history_columns(conn)
             conn.commit()
+
+    def _migrate_chat_history_columns(self, conn) -> None:
+        """chat_history 幂等迁移：发言者归属（2026-09-21 重扫）。
+
+        旧表只有 ``role``(=user/assistant) + ``session_id``：
+        - **assistant 行没有身份** → 同会话切换角色后，新角色把上一角色的回复
+          当成"自己说过的话"（模型分不清哪句是谁说的）；
+        - 重要性评分算完即弃（重建上下文时硬编码 0.5）；
+        - 排序/去重都靠秒级 ``created_at``。
+
+        新增列全部带默认值，存量行为 legacy 归属（读取时按"通用行"处理，
+        升级不丢历史）。
+        """
+        existing = {
+            row["name"] for row in conn.execute("PRAGMA table_info(chat_history)").fetchall()
+        }
+        migrations = {
+            "character_id": "ALTER TABLE chat_history ADD COLUMN character_id TEXT NOT NULL DEFAULT ''",
+            "user_key": "ALTER TABLE chat_history ADD COLUMN user_key TEXT NOT NULL DEFAULT ''",
+            "turn_id": "ALTER TABLE chat_history ADD COLUMN turn_id TEXT NOT NULL DEFAULT ''",
+            "importance": "ALTER TABLE chat_history ADD COLUMN importance REAL NOT NULL DEFAULT 0.0",
+            "channel": "ALTER TABLE chat_history ADD COLUMN channel TEXT NOT NULL DEFAULT ''",
+        }
+        for column, ddl in migrations.items():
+            if column not in existing:
+                conn.execute(ddl)
+        # 上下文重建的读取索引：会话 + 写入序（id 即 rowid，无需额外列）
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_session_character "
+            "ON chat_history(session_id, character_id, id)"
+        )
 
     def _migrate_user_facts_columns(self, conn) -> None:
         """user_facts 幂等迁移：多用户隔离 + 回忆强化 + 遗忘状态。
@@ -369,11 +401,15 @@ class StructuredMemory:
 
     @staticmethod
     def bare_peer_from_session(session_id: str) -> str:
-        """仅用于迁移/诊断：从 `N:wxid` 还原裸 peer，不得用于运行时读路径。"""
-        s = str(session_id or "").strip()
-        if ":" in s:
-            return s.split(":", 1)[1] or s
-        return s
+        """仅用于迁移/诊断：从 `N:wxid@im.wechat` 还原对端标识，不得用于运行时读路径。
+
+        2026-09-21 重扫：格式解析统一委托 `utils.session_key`（唯一真源），
+        不再本地手写 `split(":", 1)`。注意 `@im.wechat` 是 wxid 自身后缀，
+        **不剥离**（生产 `chat_history.session_id` 取样实证）。
+        """
+        from utils.session_key import peer_of
+
+        return peer_of(str(session_id or "")) or str(session_id or "")
 
     def migrate_legacy_isolation_keys(self) -> dict[str, int]:
         """一次性迁移：把「剥 owner 的裸 peer」事实/历史迁到唯一 owner 的完整会话键。
@@ -861,11 +897,22 @@ class StructuredMemory:
     # ── 聊天历史 ──────────────────────────────────────────
 
     def add_chat(self, role: str, content: str,
-                 emotion_tag: str = "", session_id: str = "") -> int:
-        """添加聊天记录"""
+                 emotion_tag: str = "", session_id: str = "",
+                 character_id: str = "", user_key: str = "",
+                 turn_id: str = "", importance: float = 0.0,
+                 channel: str = "") -> int:
+        """添加聊天记录（带**归属**落库）。
+
+        2026-09-21 重扫：新增 `character_id` / `user_key` / `turn_id` /
+        `importance` / `channel` 五列。旧实现只有 role + session_id ——
+        同一会话切换角色后，新角色会把上一角色的回复当成"自己说过的话"
+        （assistant 行没有任何身份信息）；且重要性评分算完即弃
+        （重建上下文时硬编码 0.5，属假指标）。
+        """
         with self._conn(write=True) as conn:
-            cursor = conn.execute(                "INSERT INTO chat_history (role, content, emotion_tag, session_id) VALUES (?, ?, ?, ?)",
-                (role, content, emotion_tag, session_id),
+            cursor = conn.execute(                "INSERT INTO chat_history (role, content, emotion_tag, session_id, character_id, user_key, turn_id, importance, channel) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (role, content, emotion_tag, session_id, character_id, user_key,
+                 turn_id, float(importance or 0.0), channel),
             )
             conn.commit()
             return cursor.lastrowid  # type: ignore[no-any-return]
@@ -873,7 +920,7 @@ class StructuredMemory:
     def get_recent_chats(self, n: int = 20) -> list[dict[str, Any]]:
         """获取最近 N 条聊天"""
         with self._conn() as conn:
-            rows = conn.execute(                "SELECT * FROM chat_history ORDER BY created_at DESC LIMIT ?",
+            rows = conn.execute(                "SELECT * FROM chat_history ORDER BY id DESC LIMIT ?",
                 (n,),
             ).fetchall()
             return [dict(r) for r in rows][::-1]  # 反转成时间正序
@@ -881,26 +928,55 @@ class StructuredMemory:
     def get_chats_by_session(self, session_id: str) -> list[dict[str, Any]]:
         """获取某次会话的聊天"""
         with self._conn() as conn:
-            rows = conn.execute(                "SELECT * FROM chat_history WHERE session_id = ? ORDER BY created_at ASC",
+            rows = conn.execute(                "SELECT * FROM chat_history WHERE session_id = ? ORDER BY id ASC",
                 (session_id,),
             ).fetchall()
             return [dict(r) for r in rows]
 
     def get_chats_by_session_limit(
-        self, session_id: str, limit: int
+        self, session_id: str, limit: int, character_id: str = ""
     ) -> list[dict[str, Any]]:
-        """获取某会话最近 limit 条聊天（时间正序）。
+        """获取某会话最近 limit 条聊天（**时间正序**）。
 
-        2026-09-20 新增：对话上下文真源改读 chat_history 表后，按会话拉最近
-        N 条的受限量查询（旧 get_chats_by_session 全量拉取，长会话会拖慢热路径）。
+        ⚠️ 2026-09-21 重扫修复排序口径：`created_at` 是 ``CURRENT_TIMESTAMP``
+        （秒级精度）—— 用户消息与角色回复常落在同一秒，仅按时间排序时相对次序
+        不保证（"谁先说的"取决于扫描方向）。改为按 **`id`**（AUTOINCREMENT，
+        等于写入序）判序，时间仅作展示。
+
+        ``character_id`` 非空时只取该角色与无归属（迁移前）的行。
         """
+        sql = "SELECT * FROM chat_history WHERE session_id = ?"
+        params: list[Any] = [session_id]
+        if character_id:
+            sql += " AND (character_id = ? OR character_id = '')"
+            params.append(character_id)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(int(limit))
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM chat_history WHERE session_id = ? "
-                "ORDER BY created_at DESC LIMIT ?",
-                (session_id, limit),
-            ).fetchall()
-            return [dict(r) for r in rows][::-1]  # 反转成时间正序
+            rows = conn.execute(sql, tuple(params)).fetchall()
+            return [dict(r) for r in rows][::-1]
+
+    def get_session_rows(
+        self,
+        session_ids: list[str] | tuple[str, ...],
+        limit: int = 8,
+        character_id: str = "",
+    ) -> list[dict[str, Any]]:
+        """多会话键取最近 limit 行（时间正序、按 id 判序）。"""
+        forms = [str(s) for s in (session_ids or []) if str(s or "").strip()]
+        if not forms:
+            return []
+        placeholders = ",".join("?" for _ in forms)
+        sql = f"SELECT * FROM chat_history WHERE session_id IN ({placeholders})"
+        params: list[Any] = list(forms)
+        if character_id:
+            sql += " AND (character_id = ? OR character_id = '')"
+            params.append(character_id)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(int(limit))
+        with self._conn() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        return [dict(r) for r in rows][::-1]
 
     def get_cross_session_tail(
         self,

@@ -161,16 +161,24 @@ class ShisiMemoryService:
         emotion_tag: str = "",
         session_id: str = "",
         history_already_written: bool = False,
+        character_id: str = "",
+        turn_id: str = "",
+        channel: str = "",
     ) -> dict[str, Any]:
         # P1-16（2026-09-21 审查修复）：pipeline 早已支持 history_already_written
         # 与 write_chat_history_sync，但服务壳没转发——orchestrator 的 hasattr/
         # 签名探测恒 False，B-a 同步轻写整层失效（慢工具轮次表现为"吞消息"竞态）。
+        # 2026-09-21 重扫：归属参数（character_id/turn_id/channel）同样必须转发，
+        # 否则管道收到的仍是"无身份"的两行。
         return self._pipeline.after_chat(
             user_msg=user_msg,
             reply=reply,
             emotion_tag=emotion_tag,
             session_id=session_id,
             history_already_written=history_already_written,
+            character_id=character_id,
+            turn_id=turn_id,
+            channel=channel,
         )
 
     def write_chat_history_sync(
@@ -179,12 +187,20 @@ class ShisiMemoryService:
         reply: str,
         emotion_tag: str = "",
         session_id: str = "",
+        character_id: str = "",
+        turn_id: str = "",
+        importance: float = 0.0,
+        channel: str = "",
     ) -> bool:
         return self._pipeline.write_chat_history_sync(
             user_msg=user_msg,
             reply=reply,
             emotion_tag=emotion_tag,
             session_id=session_id,
+            character_id=character_id,
+            turn_id=turn_id,
+            importance=importance,
+            channel=channel,
         )
 
     def retrieve_context(
@@ -205,11 +221,13 @@ class ShisiMemoryService:
         session_id: str = "",
         keep_recent: int = 50,
         summary_trigger: int = 80,
+        character_id: str = "",
     ) -> tuple[list, str]:
         return self._pipeline.get_chat_context(
             session_id=session_id,
             keep_recent=keep_recent,
             summary_trigger=summary_trigger,
+            character_id=character_id,
         )
 
     def get_cross_session_tail(self, session_id: str = "", limit: int = 8) -> list[str]:

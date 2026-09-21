@@ -193,21 +193,43 @@ class ToolDispatcher:
         if not self._check_rate_limit(tool_name, caller_id):
             return ToolResult(False, error=f"Rate limit exceeded for tool: {tool_name}")
 
+        # 重试策略（2026-09-21 审查统一）：
+        #   - 只对 retry_tools（网络型工具）开放，总尝试次数 = retry_count + 1；
+        #   - **只有异常/超时才算"没跑完"，值得重试**；`ToolResult(success=False)`
+        #     是工具内部 fallback 链（weather→wttr.in、search→多后端+断路器）
+        #     已定论的结果，再重试只是重复烧时间；
+        #   - 旧实现把重试劈成两处：dispatch 只在**异常**时重试，而
+        #     `_execute_with_retry` 又按 `result.success` 重试、其超时分支永远
+        #     不可达（dispatch 已先捕获 ToolTimeoutError）——两套语义都记不完指标。
+        max_attempts = self.retry_count + 1 if tool_name in self.retry_tools else 1
         start = time.perf_counter()
-        try:
-            result = self._call_with_timeout(lambda: tool.execute(**arguments))
+        last_error = "tool_execution_failed"
+        for attempt in range(max_attempts):
+            if attempt:
+                time.sleep(0.5 * attempt)
+            try:
+                result = self._call_with_timeout(lambda: tool.execute(**arguments))
+            except ToolTimeoutError as e:
+                last_error = f"tool_timeout: {e}"
+                logger.warning(
+                    "工具执行超时: %s — %s（第 %d/%d 次）",
+                    tool_name, e, attempt + 1, max_attempts,
+                )
+                continue
+            except Exception:  # noqa: BLE001
+                last_error = "tool_execution_failed"
+                logger.exception(
+                    "工具执行失败: %s（第 %d/%d 次）", tool_name, attempt + 1, max_attempts,
+                )
+                continue
+            # 指标只记最终结果（旧实现为失败的首跳记一次失败，重试成功却不再记录）
             self._record(tool_name, start, result.success)
             return result
-        except ToolTimeoutError as e:
-            self._record(tool_name, start, False)
-            logger.warning("工具执行超时: %s — %s", tool_name, e)
-            return ToolResult(False, error=f"tool_timeout: {e}")
-        except Exception:
-            self._record(tool_name, start, False)
-            if tool_name in self.retry_tools and self.retry_count > 0:
-                return self._execute_with_retry(tool, arguments, tool_name)
-            logger.exception("工具执行失败: %s", tool_name)
-            return ToolResult(False, error="tool_execution_failed")
+
+        self._record(tool_name, start, False)
+        if max_attempts > 1:
+            return ToolResult(False, error=f"{last_error}（已重试 {max_attempts - 1} 次）")
+        return ToolResult(False, error=last_error)
 
     @staticmethod
     def _record(tool_name: str, start: float, success: bool) -> None:
@@ -240,16 +262,3 @@ class ToolDispatcher:
                     self._call_times.pop(k, None)
             return True
 
-    def _execute_with_retry(self, tool: BaseTool, arguments: dict[str, Any],
-                            tool_name: str) -> ToolResult:
-        for attempt in range(self.retry_count):
-            time.sleep(0.5 * (attempt + 1))
-            try:
-                result = self._call_with_timeout(lambda: tool.execute(**arguments))
-                if result.success:
-                    return result
-            except ToolTimeoutError as e:
-                logger.warning("工具重试 %s (%d/%d) 超时: %s", tool_name, attempt + 1, self.retry_count, e)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("工具重试 %s (%d/%d) 失败: %s", tool_name, attempt + 1, self.retry_count, e)
-        return ToolResult(False, error=f"Tool {tool_name} failed after {self.retry_count} retries")
