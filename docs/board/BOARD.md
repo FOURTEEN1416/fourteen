@@ -22,6 +22,7 @@
 |------|------|--------------|--------|------|---------|------|
 | 主检出 | `main` | `D:\Desktop\ai-girlfriend` | 协调 + 阶段真源维护（包 M） | 进行中 | — | 主控由歆歆担任；真源文档单写 |
 | **AX 智能体转型** | `wt/agent-x`（待开） | `..\ai-girlfriend-agent-x`（待建） | **包 AX · 重大决策转型** | **待开工** | — | 交接书 `docs/HANDOFF_2026-09-21_智能体转型深研与架构.md`；须重克隆 peer-projects；实现级学习+架构选型；禁止报告堆叠 |
+| **AX-R 独立评审** | `wt/ax-review` | `D:\Desktop\ai-girlfriend-ax-review` | **包 AX-R · 只评不施** | **待开工** | 2026-09-21 | 空白独立窗；任务书 `docs/HANDOFF_2026-09-21_AX独立评审窗.md`；产出 `docs/reviews/**`；与 agent-x 隔离 |
 | W5 abc 改造 | `wt/abc` | ~~`..\ai-girlfriend-abc`~~ 已卸载 | **包 Q · A+B+C** | ✅ **已收编 main·已卸窗** | 2026-09-20 | 文件级入 main（merge 被工具层拦截）；内容已在 main（B-d 补做后为超集）；收仓回归门 **1429/1425/4** |
 | audit 复核窗 | `wt/audit` | ~~`..\ai-girlfriend-audit`~~ 已卸载 | **全仓复核隔离补漏** | ✅ **已收编 main·已卸窗** | 2026-09-20 | 未提交 10 文件窗内自检后 `989e4b5`，文件级入 main `c120367`；回归门 **1429/1425/4** |
 | ci-fix 窗 | `wt/ci-fix` | ~~`..\ai-girlfriend-ci-fix`~~ 已卸载 | **CI pending_intents 时钟** | ✅ **已收编 main·已卸窗** | 2026-09-20 | main `f8b86c2` 已含代码；worktree 无未提交实质改动；收仓时确认全同后卸窗 |
@@ -35,6 +36,14 @@
 ---
 
 ## 追加区（按时间倒序，新的在上）
+
+### 2026-09-21 · 主控 · AX-R 独立评审窗就绪
+
+- **用户指令**：构建对窗 AX 独立评审窗口与任务；需要**空白独立窗口**评审
+- **worktree**：`D:\Desktop\ai-girlfriend-ax-review` 分支 `wt/ax-review`（已建，基于 `36f7346`）
+- **任务书**：`docs/HANDOFF_2026-09-21_AX独立评审窗.md`（AX-R：R1–R6，只评不施）
+- **开窗提示词**：见任务书 §4；评审产出仅 `docs/reviews/**`
+- **纪律**：与 `wt/agent-x` 隔离；禁实施；证据必须 file:line
 
 ### 2026-09-21 · 主控 · 包 AX 交接（智能体转型 · 重大决策）
 
