@@ -2864,3 +2864,19 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **修复后终局四块：1652 通过 / 5 跳过 / 1 已知环境依赖失败 / 0 其余失败**（318 + 401+3+1 + 529+1 + 404 = 收集 1657，账实相符；跳过比本地多 1 系 Linux 平台性 skip）。
 
 **三端终态**：A 档三端一致 @ **`51be49f`**（conftest 属 `tests/` 为 A 档，已随服务器 pull 生效）；其后文档提交仅 GitHub（B 档）。
+
+---
+
+## v1.35 补记（四）· selftalk 四项修复移植 + 两个尾巴根治（2026-09-21）
+
+**指令链**：用户对补记三所列开放项「想办法解决」。
+
+**① `wt/selftalk-fix` 四项修复移植（分支从死档变 main 内容）**：取证发现分支 `d8b7046`（送达回写记忆 / 唯一身份路径 / 档位口径静态门禁 / 追问收口，29 文件 +1280/−671）为**未进 main 的真修复**（新测试 `test_outbound_memory_closure` / `test_provider_description_consistency` 与「档位门禁」在 main 零痕迹）→ cherry-pick 入 main（`988cf9d`）。死码地雷不适用于 cherry-pick：该提交自身 diff 不含任何已删死码文件（「A 类 27 文件」只是 fork 继承的树差）。仅 2 处文本冲突：LOG 取 main 版；`reminder_delivery` 合流 main 的 CI 节流锚点（`3d0abf2`）与分支的 `self._memory`（送达回写参数）。**语义冲突一处**：项11（`d646938`，fork 后落 main）激活每轮 RAG 后，知识槽把本卡身份块当知识回声，「锚点只注入一次」不变量被打破 → `743a98e` 知识槽出口按来源过滤身份自源块（`character_name` / `personality.core_anchors` / `description`，恒由角色设定/人设段唯一注入）+ 项11 契约用例对齐（`rag_context` 降级为槽未产出时的兜底，新契约用例钉死）。移植净增 32 用例（4 处旧 skip 随用例重写吸收，跳过 4→1）。
+
+**② channel-status 宿主依赖根治**：`edd3c47` 用例 monkeypatch `channel_paths.sessions_root` 至空 tmp（全部磁盘读经其晚期导入函数，单点隔离）→ 服务器（owner=2 真实在连）转绿，补记三遗留项销账。
+
+**③ 部署与双端验证**：`edd3c47` 已部署（health 200、三通道重连；重启后瞬时 502 仅为 8 秒 worker 启动窗）。**本地与服务器双端全绿**：1688 通过 + 1 跳过 = 1689 收集、0 失败（本地 500+314+485+1+389；服务器 501+336+483+1+368）+ vitest 98/98。口径 1657→1689。**观察项（非本批引入）**：`run_api` 启动警告「同步微信通道会话到 DB 失败（忽略）： asyncio.run() cannot be called from a running event loop」今晨 07:26 即存在（累计 76 条），留待后续批次根治。
+
+**④ 分支归档**：`wt/selftalk-fix` → tag `archive/selftalk-fix`（`1d93ae3`，本地+origin）后删除本地与远端分支；恢复：`git branch wt/selftalk-fix archive/selftalk-fix`；完整收口记录 `git show archive/selftalk-fix:docs/board/BOARD.md`。BOARD 追加区已登记。
+
+**三端终态**：A 档三端一致 @ **`edd3c47`**。

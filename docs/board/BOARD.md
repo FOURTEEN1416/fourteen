@@ -38,6 +38,13 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-21 · 主检出 · selftalk 四项修复移植 main + 分支归档（用户「想办法解决」）
+
+- **移植**：`d8b7046` cherry-pick 入 main = `988cf9d`（仅 2 冲突：LOG 取 main 版；`reminder_delivery` 合流 main 的 CI 节流锚点与分支的 `self._memory`）。语义冲突一处收口：批6b 项11 激活每轮 RAG 后「锚点只注入一次」被知识槽 self-echo 打破 → `743a98e` 知识槽身份自源块（`character_name` / `personality.core_anchors` / `description`）出口过滤 + 项11 契约用例对齐
+- **channel-status 宿主隔离**：`edd3c47` monkeypatch `channel_paths.sessions_root` → 服务器（owner=2 真实在连）转绿
+- **验证**：本地与服务器**双端全绿**——1688 通过 + 1 跳过 = 1689 收集、0 失败（本地 500+314+485+1+389；服务器 501+336+483+1+368）+ vitest 98/98；已部署 `edd3c47`（health 200、三通道重连；原分支预警的 `delay2_seconds: 10` 已随部署被代码下限 60s 钳制）
+- **归档**：分支 `wt/selftalk-fix` → tag `archive/selftalk-fix`（`1d93ae3`，本地+origin）后删除（本地+远端）；恢复：`git branch wt/selftalk-fix archive/selftalk-fix`；完整收口记录原文：`git show archive/selftalk-fix:docs/board/BOARD.md`
+
 ### 2026-09-21 · 主检出 · 包 AX P2 全量落地（用户三条裁决）
 
 - **① 主动消息**：LLM 判时机/文案 **+** 人设（角色卡摘要）/用户画像投影/**web 控制台**（开关、风格提示、力度 low/normal/high、免打扰是否写入 prompt、角色补充提示）注入决策上下文；真源 `data/scheduler_config.json` 的 `llm_proactive`；前端「消息」tab 可调
