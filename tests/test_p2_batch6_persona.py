@@ -310,3 +310,74 @@ def test_stream_and_shared_paths_use_cached_checker():
     assert "checker_for_card(" in shared_body
     assert "PersonaConsistencyChecker(" not in shared_body
     assert "DynamicAnchorSystem(" not in shared_body
+
+
+# ── checker 缓存安全回归（映射 2026 安全事件复盘的三类缓存风险）────
+# 事件教训 → 本地不变量：①内容变即缓存失效（stale content）②键精确匹配、
+# 禁前缀/拼接碰撞误命中（permission by substring）③共享缓存对象被使用中
+# 污染（shared-state mutation）。
+
+def test_checker_cache_invalidated_on_anchor_content_change():
+    """卡片锚点被原地修改（同 dict 对象）后，不得继续拿旧锚点检测器。"""
+    from my_character.consistency_checker import _CHECKER_CACHE, checker_for_card
+
+    _CHECKER_CACHE.clear()
+    card = {"core_anchors": ["原锚点"]}
+    c_before = checker_for_card(card)
+    card["core_anchors"].append("新增锚点")  # 原地变更，模拟改卡热更新
+    c_after = checker_for_card(card)
+    assert c_after is not c_before
+    active_after = [da.text for da in c_after._anchors._dynamic_anchors]
+    assert "新增锚点" in active_after
+    # 旧对象仍持旧内容且不再被工厂返回——新请求绝不命中 stale checker
+    active_before = [da.text for da in c_before._anchors._dynamic_anchors]
+    assert active_before == ["原锚点"]
+    assert checker_for_card(card) is c_after
+
+
+def test_checker_cache_keys_exact_no_prefix_collision():
+    """["A","B"] 与 ["AB"] 之类的拼接/前缀相似键不得共享检测器。"""
+    from my_character.consistency_checker import _CHECKER_CACHE, checker_for_card
+
+    _CHECKER_CACHE.clear()
+    c1 = checker_for_card({"core_anchors": ["傲娇", "温柔"]})
+    c2 = checker_for_card({"core_anchors": ["傲娇温", "柔"]})
+    c3 = checker_for_card({"core_anchors": ["傲娇温柔"]})
+    assert len({id(c1), id(c2), id(c3)}) == 3
+    # 完全相同内容才复用
+    assert checker_for_card({"core_anchors": ["傲娇", "温柔"]}) is c1
+
+
+def test_checker_cache_not_poisoned_by_use():
+    """check() 使用共享缓存对象后不得引入任何状态漂移（幂等判定）。"""
+    from my_character.consistency_checker import (
+        _CHECKER_CACHE,
+        ConsistencyContext,
+        checker_for_card,
+    )
+
+    _CHECKER_CACHE.clear()
+    card = {"core_anchors": ["想念一个人"]}
+    checker = checker_for_card(card)
+    ctx = ConsistencyContext(emotion_state=None, chat_round=3, affinity=5)
+    r1 = checker.check("才没有想你呢", ctx)
+    r2 = checker.check("才没有想你呢", ctx)
+    assert r1.overall_score == r2.overall_score
+    assert r1.overall_passed == r2.overall_passed
+    # 锚点内部状态未被写（reinforcement 计数器仍为 0，列表长度不变）
+    assert checker._anchors._reinforcement_counter == 0
+    assert len(checker._anchors._dynamic_anchors) == 1
+
+
+def test_checker_cache_bounded_no_unbounded_growth():
+    """持续注入不同锚点集，缓存必须被上限约束（防无界内存增长）。"""
+    from my_character.consistency_checker import (
+        _CHECKER_CACHE,
+        _CHECKER_CACHE_MAX,
+        checker_for_card,
+    )
+
+    _CHECKER_CACHE.clear()
+    for i in range(_CHECKER_CACHE_MAX * 3):
+        checker_for_card({"core_anchors": [f"锚-{i}"]})
+        assert len(_CHECKER_CACHE) <= _CHECKER_CACHE_MAX
