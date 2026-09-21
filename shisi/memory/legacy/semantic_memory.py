@@ -123,12 +123,18 @@ class SemanticMemory:
         """
         results: dict[str, list] = {"vector": [], "structured": [], "exact": []}
         try:
-            if hasattr(self._vm, "search_sync"):
+            if user_key is not None and hasattr(self._vm, "_search"):
+                # 2026-09-22：user_key 过滤下推 Chroma where——旧实现全库 top_k
+                # 取回后 Python 过滤，他人事实占满窗口时本人向量召回被挤空。
+                raw_vec = self._vm._search(
+                    "user_facts", query, top_k, where={"user_key": str(user_key)}
+                ) or []
+            elif hasattr(self._vm, "search_sync"):
                 raw_vec = self._vm.search_sync(
                     query, top_k=top_k, filter_dict={"type": "fact"}
                 ) or []
             elif hasattr(self._vm, "_search"):
-                vr = self._vm._search("semantic_knowledge", query, top_k)
+                vr = self._vm._search("user_facts", query, top_k)
                 raw_vec = vr if isinstance(vr, list) else []
             else:
                 raw_vec = []

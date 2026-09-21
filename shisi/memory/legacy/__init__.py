@@ -6,7 +6,6 @@
 **不要按字面意思当作"待删除"处理。**
 """
 from .conflict_detector import ConflictDetector
-from .cross_session_reasoner import CrossSessionReasoner
 from .diary_summarizer import DiarySummarizer
 from .episodic_memory import EpisodicMemory
 from .fact_extractor import FactExtractor
@@ -22,10 +21,12 @@ from .working_memory import WorkingMemory
 # ForgettingManager 曾从 importance_scorer 导入——那是**无隔离**的旧副本
 # （get_pending_events 全表返回、check_conflict 不带 user_key），与 pipeline
 # 实际使用的独立模块形成双实现地雷。包入口现唯一指向现役实现。
+# 2026-09-22：CrossSessionReasoner（pending_events 死链）整体拆除出库，
+# 见 docs/DELETION_LOG.md。
 
 __all__ = [
     "VectorMemory", "StructuredMemory", "FactExtractor", "DiarySummarizer",
     "MemoryPipeline",
     "WorkingMemory", "EpisodicMemory", "SemanticMemory",
-    "ImportanceScorer", "ForgettingManager", "ConflictDetector", "CrossSessionReasoner",
+    "ImportanceScorer", "ForgettingManager", "ConflictDetector",
 ]

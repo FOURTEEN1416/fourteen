@@ -204,20 +204,33 @@ class EventLedger:
             out.append(self.append(**data))
         return out
 
-    def prune(self, retention_days: int = 30) -> int:
+    def prune(
+        self,
+        retention_days: int = 30,
+        preserve_types: Iterable[str] = (),
+    ) -> int:
         """P1-51：账本保留策略——删除早于 retention_days 的事件行，返回删除数。
 
         旧实现只 append 不 prune，chat/tool/profile/web_disabled 全类型常驻，
         data/agent_plane.db 无界增长。由夜间 curator 任务（02:17）每日调用。
+
+        2026-09-22：``preserve_types`` 豁免类型——``profile_update/profile_correct``
+        是用户画像的**唯一写权威**（user_profile 表仅投影缓存），给它们套 30 天
+        TTL 意味着不活跃用户的画像事件被清空后只能靠缓存 re-seed 兜底，缓存
+        一旦丢失画像即静默清零。curator 现传入画像两类型永久保留。
         """
         days = max(1, int(retention_days))
         cutoff = (datetime.now().astimezone() - timedelta(days=days)).isoformat(
             timespec="seconds"
         )
+        keep = [str(t) for t in preserve_types if str(t)]
+        sql = "DELETE FROM event_ledger WHERE created_at < ?"
+        params: list[Any] = [cutoff]
+        if keep:
+            sql += f" AND event_type NOT IN ({','.join('?' * len(keep))})"  # noqa: S608
+            params.extend(keep)
         with closing(self._conn()) as conn, conn:
-            cur = conn.execute(
-                "DELETE FROM event_ledger WHERE created_at < ?", (cutoff,)
-            )
+            cur = conn.execute(sql, params)
             return cur.rowcount
 
     @staticmethod
@@ -248,6 +261,7 @@ class EventLedger:
         since: str | None = None,
         until: str | None = None,
         limit: int = 200,
+        order: str = "ASC",
     ) -> list[LedgerEvent]:
         sql = ["SELECT * FROM event_ledger WHERE 1=1"]
         params: list[Any] = []
@@ -269,7 +283,8 @@ class EventLedger:
         if until:
             sql.append("AND created_at <= ?")
             params.append(str(until))
-        sql.append("ORDER BY id ASC LIMIT ?")
+        direction = "DESC" if str(order).upper() == "DESC" else "ASC"
+        sql.append(f"ORDER BY id {direction} LIMIT ?")  # noqa: S608
         params.append(int(limit))
         with closing(self._conn()) as conn:
             rows = conn.execute(" ".join(sql), params).fetchall()

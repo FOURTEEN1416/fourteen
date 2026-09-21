@@ -29,7 +29,6 @@ from ._legacy_importance_scorer import ImportanceScorer
 from ._legacy_working_memory import WorkingMemory
 from .conflict_detector import ConflictDetector
 from .conversation_summarizer import ConversationSummarizer
-from .cross_session_reasoner import CrossSessionReasoner
 from .fact_extractor import FactExtractor
 from .forgetting_manager import ForgettingManager
 from .reflection_engine import ReflectionEngine
@@ -259,7 +258,11 @@ class MemoryPipeline:
         self.conflict_detector = ConflictDetector(
             self.semantic, conflict_similarity_threshold
         )
-        self.cross_session = CrossSessionReasoner(self.sm)
+        # 2026-09-22：CrossSessionReasoner/pending_events 死链整体拆除——
+        # 每轮「提取→存储→检索」后 orchestrator 第一件事就是 pop 丢弃
+        # （optimized_orchestrator「待办不进 system 当对话」），resolve 零调用，
+        # 表无界增长；提醒语义由 set_reminder + reminder_delivery 确定性承载。
+        # 详见 docs/DELETION_LOG.md。
 
         # 记忆反思引擎：将零散事实沉淀为洞察
         self.reflection = ReflectionEngine(
@@ -549,17 +552,7 @@ class MemoryPipeline:
             self._executor.submit(self._do_fact_extraction, effective_session)
             result["facts_extracted"] = 0  # 后台异步提取中，具体数量由线程日志记录
 
-        # 6. 跨会话推理：检测未来事件
-        try:
-            pending = self.cross_session.extract_pending_event(user_msg)
-            if pending:
-                self.cross_session.store_pending_event(
-                    pending["event_desc"], session_id=effective_session
-                )
-        except Exception as e:  # noqa: BLE001
-            logger.debug("Cross-session reasoning failed: %s", e)
-
-        # 7. 情绪记录
+        # 6. 情绪记录
         if emotion_tag:
             try:
                 self.vm.store_emotion_log_sync(
@@ -657,16 +650,7 @@ class MemoryPipeline:
             except Exception as e:  # noqa: BLE001
                 logger.debug("Structured fact fallback failed: %s", e)
 
-        # 4. 待处理事件 — 按会话过滤
-        try:
-            context["pending_events"] = self.cross_session.get_pending_events(
-                session_id=session_id or None
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.debug("Failed to get pending events: %s", e)
-            context["pending_events"] = []
-
-        # 5. 记忆反思洞察 — 按会话过滤
+        # 4. 记忆反思洞察 — 按会话过滤
         try:
             context["reflections"] = self.reflection.get_insights(
                 query=query, top_k=3, session_id=session_id or None
@@ -1073,15 +1057,6 @@ class MemoryPipeline:
                     topics=topics_list,
                 ):
                     count += 1
-
-                    # 跨会话：检测未来事件
-                    pending = self.cross_session.extract_pending_event(
-                        fact["fact"]
-                    )
-                    if pending:
-                        self.cross_session.store_pending_event(
-                            pending["event_desc"], session_id=session_id
-                        )
 
         except Exception as e:  # noqa: BLE001
             logger.warning("Fact extraction failed: %s", e)

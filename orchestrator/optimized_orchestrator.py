@@ -779,7 +779,6 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                         )
                         raw_mem["episodic"] = sanitize_episodic(raw_mem.get("episodic"))
                         raw_mem.pop("working", None)  # 工作记忆走 messages，不进 system
-                        raw_mem.pop("pending_events", None)  # 待办不进 system 当对话
                         raw_mem["_user_key"] = session_id or ""
                 except Exception as e:  # noqa: BLE001
                     logger.debug("sanitize memory_context failed: %s", e)

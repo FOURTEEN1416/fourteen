@@ -214,15 +214,6 @@ class StructuredMemory:
                     FOREIGN KEY (session_id) REFERENCES sessions(id)
                 );
 
-                CREATE TABLE IF NOT EXISTS pending_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_desc TEXT NOT NULL,
-                    expected_time TIMESTAMP,
-                    source_session_id TEXT,
-                    is_resolved BOOLEAN DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-
                 CREATE TABLE IF NOT EXISTS persona_evolution_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     dimension TEXT NOT NULL,
@@ -279,7 +270,6 @@ class StructuredMemory:
                 CREATE INDEX IF NOT EXISTS idx_affinity_time ON affinity_log(created_at);
                 CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active);
                 CREATE INDEX IF NOT EXISTS idx_working_session ON working_memory(session_id);
-                CREATE INDEX IF NOT EXISTS idx_pending_time ON pending_events(expected_time);
                 CREATE INDEX IF NOT EXISTS idx_trace_id ON trace_log(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_emotion_traj_time ON emotion_trajectory(created_at);
 
@@ -314,6 +304,11 @@ class StructuredMemory:
             self._migrate_reminders_columns(conn)
             self._migrate_user_facts_columns(conn)
             self._migrate_chat_history_columns(conn)
+            # 2026-09-22：pending_events 死表清除（CrossSessionReasoner 拆除的
+            # 收尾）。该表历史上「只写不读不回收」——写入的行从未被任何运行时
+            # 路径消费（orchestrator 检索后即丢弃），行内数据无保留价值；
+            # 幂等 DROP 兼顾存量库清理与新库跳过。
+            conn.execute("DROP TABLE IF EXISTS pending_events")
             conn.commit()
 
     def _migrate_chat_history_columns(self, conn) -> None:
@@ -670,9 +665,26 @@ class StructuredMemory:
 
     def search_facts(self, keyword: str, user_key: str | None = None,
                      include_legacy: bool = False) -> list[dict[str, Any]]:
-        """关键词搜索事实 — 优先FTS5，降级LIKE；可按 user_key 隔离。"""
+        """关键词搜索事实 — 优先FTS5，降级LIKE；user_key 过滤**下推 SQL**。
+
+        2026-09-22 修复：旧实现先全库 ``LIMIT 20`` 再在 Python 侧按 user_key
+        过滤——多用户下若命中窗口被他人事实占满，本人明明有匹配事实也被挤成
+        空（静默漏检）。现在过滤条件下推，LIMIT 在过滤后生效。
+        """
         with self._conn() as conn:
+            # 归属过滤段（与 get_facts 同口径）
+            key_sql = ""
+            key_params: list[Any] = []
+            if user_key is not None:
+                if include_legacy:
+                    key_sql = " AND user_key IN (?, ?)"
+                    key_params = [user_key or "", ""]
+                else:
+                    key_sql = " AND user_key = ?"
+                    key_params = [user_key or ""]
+
             def _filter(rows: list) -> list[dict[str, Any]]:
+                # SQL 已带归属+active 过滤；此处仅兜底替身（假库不走 SQL 过滤）
                 out = [dict(r) for r in rows]
                 if user_key is None:
                     return [r for r in out if r.get("status", "active") == "active"]
@@ -688,10 +700,12 @@ class StructuredMemory:
                 rows = conn.execute(
                     """SELECT f.* FROM user_facts f
                        JOIN user_facts_fts fts ON f.id = fts.rowid
-                       WHERE user_facts_fts MATCH ?
+                       WHERE user_facts_fts MATCH ? AND f.status = 'active'"""
+                    + key_sql.replace("user_key", "f.user_key")
+                    + """
                        ORDER BY rank
                        LIMIT 20""",
-                    (keyword,),
+                    (keyword, *key_params),
                 ).fetchall()
                 filtered = _filter(rows)
                 if filtered:
@@ -699,8 +713,10 @@ class StructuredMemory:
             except Exception as e:  # noqa: BLE001
                 logger.debug("FTS5 search failed, falling back to LIKE: %s", e)
             rows = conn.execute(
-                "SELECT * FROM user_facts WHERE fact LIKE ? ORDER BY confidence DESC LIMIT 20",
-                (f"%{keyword}%",),
+                "SELECT * FROM user_facts WHERE fact LIKE ? AND status = 'active'"
+                + key_sql
+                + " ORDER BY confidence DESC LIMIT 20",
+                (f"%{keyword}%", *key_params),
             ).fetchall()
             return _filter(rows)
 

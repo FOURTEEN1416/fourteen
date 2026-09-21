@@ -118,3 +118,42 @@ def test_count_by_session(ledger: EventLedger) -> None:
     ledger.append(session_key="N:bob", event_type=EVENT_MEMORY_WRITE)
     counts = ledger.count_by_session("N:alice")
     assert counts[EVENT_MEMORY_WRITE] == 2
+
+
+# ── prune 类型豁免 + 投影窗口取最新（2026-09-22 修复锁定）────────────
+
+
+def test_query_order_desc_takes_latest(tmp_path: Path) -> None:
+    ledger = EventLedger(tmp_path / "ledger.db")
+    for i in range(5):
+        ledger.append(session_key="N:u", event_type="user_message", payload={"i": i})
+    newest_first = ledger.query(session_key="N:u", limit=2, order="DESC")
+    assert [e.payload["i"] for e in newest_first] == [4, 3]
+    oldest_first = ledger.query(session_key="N:u", limit=2)
+    assert [e.payload["i"] for e in oldest_first] == [0, 1]
+
+
+def test_prune_preserves_profile_events(tmp_path: Path) -> None:
+    """profile_update/correct 是画像唯一写权威——prune 必须豁免。"""
+    from shisi.agent_plane.event_ledger import (
+        EVENT_PROFILE_UPDATE,
+        EVENT_USER_MESSAGE,
+    )
+
+    ledger = EventLedger(tmp_path / "ledger.db")
+    ledger.append(
+        session_key="N:u",
+        event_type=EVENT_PROFILE_UPDATE,
+        payload={"birthday": "11-14"},
+        created_at="2020-01-01T00:00:00+08:00",
+    )
+    ledger.append(
+        session_key="N:u",
+        event_type=EVENT_USER_MESSAGE,
+        payload={"text": "旧消息"},
+        created_at="2020-01-01T00:00:00+08:00",
+    )
+    removed = ledger.prune(retention_days=30, preserve_types=(EVENT_PROFILE_UPDATE,))
+    assert removed == 1
+    remaining_types = {e.event_type for e in ledger.query(session_key="N:u", limit=100)}
+    assert remaining_types == {EVENT_PROFILE_UPDATE}

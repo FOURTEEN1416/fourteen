@@ -154,7 +154,8 @@ def test_memory_context_injects_only_own_facts_and_history():
         sm.close()
 
 
-def test_reflections_and_pending_events_session_scoped():
+def test_reflections_session_scoped():
+    """反思洞察按会话隔离（pending_events 死链已拆除，原半段用例随删）。"""
     tmp = Path(tempfile.mkdtemp())
     sm = _sm(tmp)
     try:
@@ -167,26 +168,14 @@ def test_reflections_and_pending_events_session_scoped():
         assert any("B 的观察" in r["content"] for r in rb)
         assert not any("A 的观察" in r["content"] for r in rb)
 
-        conn_cm = sm.get_connection()
-        with conn_cm as conn:
-            conn.execute(
-                "INSERT INTO pending_events (event_desc, source_session_id, is_resolved) "
-                "VALUES ('A 待办', '1:r@im.wechat', 0)"
-            )
-            conn.execute(
-                "INSERT INTO pending_events (event_desc, source_session_id, is_resolved) "
-                "VALUES ('B 待办', '2:r@im.wechat', 0)"
-            )
-            conn.commit()
-        from shisi.memory.legacy.cross_session_reasoner import CrossSessionReasoner
-
-        csr = CrossSessionReasoner(sm)
-        ea = csr.get_pending_events(session_id="1:r@im.wechat")
-        eb = csr.get_pending_events(session_id="2:r@im.wechat")
-        assert any("A 待办" in e.get("event_desc", "") for e in ea)
-        assert not any("B 待办" in e.get("event_desc", "") for e in ea)
-        assert any("B 待办" in e.get("event_desc", "") for e in eb)
-        assert not any("A 待办" in e.get("event_desc", "") for e in eb)
+        # pending_events 表已随死链拆除（StructructMemory 初始化即 DROP）
+        with sm.get_connection() as conn:
+            tables = {
+                r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+        assert "pending_events" not in tables
     finally:
         sm.close()
 
@@ -257,5 +246,37 @@ def test_semantic_search_requires_user_key_when_provided():
         texts = [x.get("fact", "") for x in ra["structured"]]
         assert "A fact" in texts
         assert "B fact" not in texts
+    finally:
+        sm.close()
+
+
+def test_search_facts_filter_pushdown():
+    """他人事实占满检索窗口时本人事实仍可召回（2026-09-22 过滤下推 SQL：
+    旧实现先全库 LIMIT 20 再 Python 过滤，多用户下静默漏检本人事实）。"""
+    tmp = Path(tempfile.mkdtemp())
+    sm = _sm(tmp)
+    try:
+        # SQL 直插 25 条 A 事实塞满 LIMIT 20 窗口（绕过 add_fact 的 near-dup
+        # 合并——本用例目标是检索过滤语义，不是写入去重）。
+        with sm.get_connection(write=True) as conn:
+            for i in range(25):
+                conn.execute(
+                    "INSERT INTO user_facts (fact, category, confidence, user_key, status) "
+                    "VALUES (?, 'general', 0.5, '1:a@im.wechat', 'active')",
+                    (f"篮球档案第{i}期：用户A的第{i}条独立记录",),
+                )
+            conn.execute(
+                "INSERT INTO user_facts (fact, category, confidence, user_key, status) "
+                "VALUES ('B 喜欢篮球鞋收藏', 'general', 0.5, '2:b@im.wechat', 'active')"
+            )
+            conn.commit()
+        assert len(sm.search_facts("篮球", user_key="1:a@im.wechat")) >= 20, (
+            "A 的事实必须塞满窗口（>=20 行），否则本用例失去构造前提"
+        )
+        hits = sm.search_facts("篮球", user_key="2:b@im.wechat")
+        assert any("篮球鞋" in h["fact"] for h in hits), "本人事实被他人挤出窗口"
+        assert all(h.get("user_key") == "2:b@im.wechat" for h in hits)
+        # 全库视角（user_key=None 管理路径）不受影响
+        assert sm.search_facts("篮球")
     finally:
         sm.close()

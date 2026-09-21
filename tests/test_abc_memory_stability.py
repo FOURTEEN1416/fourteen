@@ -189,9 +189,6 @@ class TestSyncHistoryBa:
         pipe._executor = __import__("concurrent").futures.ThreadPoolExecutor(max_workers=1)
         pipe.scorer = type("S", (), {"score": staticmethod(lambda *a, **k: 0.5)})()
         pipe.fe = FactExtractor()
-        pipe.cross_session = type("X", (), {
-            "extract_pending_event": staticmethod(lambda m: None),
-        })()
         pipe._forgetting_model = "exponential"
         pipe.conflict_detector = type("C", (), {"check_conflict": staticmethod(lambda *a, **k: None)})()
         pipe.semantic = type("Sem", (), {"add_fact": staticmethod(lambda *a, **k: True), "get_facts": staticmethod(lambda **k: [])})()

@@ -70,7 +70,8 @@ def test_memory_pipeline_init_default():
     assert hasattr(mp, "scorer")
     assert hasattr(mp, "forgetting")
     assert hasattr(mp, "conflict_detector")
-    assert hasattr(mp, "cross_session")
+    # cross_session 已随 pending_events 死链拆除（2026-09-22），反向钉住防复活
+    assert not hasattr(mp, "cross_session")
     assert hasattr(mp, "summarizer")
 
 
@@ -107,7 +108,7 @@ def test_memory_pipeline_retrieve_context_keys():
     from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     mp = MemoryPipeline()
     ctx = mp.retrieve_context("你好")
-    expected_keys = {"working", "episodic", "semantic", "facts", "pending_events", "reflections"}
+    expected_keys = {"working", "episodic", "semantic", "facts", "reflections"}
     assert set(ctx.keys()) == expected_keys
 
 

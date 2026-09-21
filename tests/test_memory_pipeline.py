@@ -99,12 +99,6 @@ class FakeConnection:
                 cols = [c.strip() for c in m.group(2).split(",")]
                 self._tables.setdefault(table, [])
                 row = dict(zip(cols, list(parameters), strict=True))
-                # 自增 id
-                if "id" not in row and table in ("pending_events",):
-                    row["id"] = len(self._tables[table]) + 1
-                # 默认 unresolved
-                if table == "pending_events" and "is_resolved" not in row:
-                    row["is_resolved"] = 0
                 self._tables[table].append(row)
             return self
 
@@ -318,7 +312,7 @@ def test_mp_retrieve_context_returns_expected_keys():
     mp, vm, sm = _make_pipeline()
     mp.after_chat("我喜欢猫", "记住了", emotion_tag="开心")
     ctx = mp.retrieve_context("猫")
-    assert set(ctx.keys()) >= {"working", "episodic", "semantic", "facts", "pending_events", "reflections"}
+    assert set(ctx.keys()) >= {"working", "episodic", "semantic", "facts", "reflections"}
     assert isinstance(ctx["working"], list)
     assert isinstance(ctx["facts"], list)
 
@@ -467,19 +461,6 @@ def test_conflict_detector_detects_near_duplicate():
     conflict = cd.check_conflict("我喜欢小猫咪", "preference")
     assert conflict is not None
     assert conflict["existing_fact"] == "我喜欢小猫"
-
-
-def test_cross_session_reasoner_crud():
-    from shisi.memory.legacy.memory_pipeline import CrossSessionReasoner
-    sm = FakeStructuredMemory()
-    csr = CrossSessionReasoner(sm)
-    assert csr.extract_pending_event("我明天去上海") is not None
-    assert csr.extract_pending_event("我喜欢猫") is None
-    csr.store_pending_event("我明天去上海", session_id="s1")
-    events = csr.get_pending_events()
-    assert len(events) == 1
-    # resolve_event 不应抛异常
-    csr.resolve_event(events[0]["id"])
 
 
 def test_fact_extractor_llm_mode():

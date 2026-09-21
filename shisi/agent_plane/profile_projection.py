@@ -81,11 +81,15 @@ def project_profile(ledger: EventLedger, session_key: str, limit: int = 500) -> 
     """按 session_key 重放画像事件，得到投影。隔离：永不读其它 session。
 
     只拉取 profile_* 类型，避免被大量 chat/tool 事件挤出 query 窗口（B2）。
+    2026-09-22：窗口取**最新** limit 条（旧实现 ``ORDER BY id ASC LIMIT`` 取的是
+    最早的——画像事件累计超限后，新更新永远进不了投影，画像卡死旧值）。
     """
     sk = str(session_key or "")
     events: list[Any] = []
     for et in (EVENT_PROFILE_UPDATE, EVENT_PROFILE_CORRECT):
-        events.extend(ledger.query(session_key=sk, event_type=et, limit=limit))
+        batch = ledger.query(session_key=sk, event_type=et, limit=limit, order="DESC")
+        batch.reverse()  # 反转为时间升序，供逐条 apply
+        events.extend(batch)
     import contextlib
 
     with contextlib.suppress(Exception):

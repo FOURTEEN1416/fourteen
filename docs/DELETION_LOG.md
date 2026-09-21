@@ -785,3 +785,32 @@ equire() in MessageList.tsx even though MessageList is unused
 
 **Reversible**: 全部改动均在 tracked 文件内，`git checkout -- <path>` 或 revert 单提交即整体恢复；被删文件（4 个模块）同属 tracked，`git checkout` 可还原。
 
+
+## 2026-09-22 六域根治批次（块3：pending_events 死链拆除）
+
+**指令**：「按推荐全面修复……不接受补丁式的修复，备注式的删除，激进一点，彻底一点」。
+本块拆除六域排查确认的「只写不读不回收」死链（同 chat_history 白存/reminders 只写不读反模式）。
+
+### 拆除对象
+- `shisi/memory/legacy/cross_session_reasoner.py` 整文件（`git rm`）——CrossSessionReasoner
+  及其 pending_events 四方法。生产链路：每轮 after_chat 提取未来事件→落库→retrieve_context
+  检索→orchestrator（optimized_orchestrator.py 原 :782）**立即 pop 丢弃**（「待办不进 system」）；
+  `resolve_event` 全仓零调用。功能性语义（提醒/跟进）由 set_reminder + reminder_delivery
+  确定性管线承载，无能力缺口。
+- `structured_memory.py`：`pending_events` CREATE TABLE 与 `idx_pending_time` 出库；
+  `_init_db` 增幂等 `DROP TABLE IF EXISTS pending_events`（存量库下次启动即清；行数据
+  从未被任何运行时路径消费，无保留价值）。
+- `legacy/__init__.py`：import 与 `__all__` 移除 CrossSessionReasoner。
+- `memory_pipeline.py`：after_chat 步骤6、retrieve_context 段4、_do_fact_extraction 的
+  pending 块、`self.cross_session` 成员、import——共 4 处接线全部移除（非注释式）。
+- `optimized_orchestrator.py`：`raw_mem.pop("pending_events", None)` 随键消失一并删除。
+- `importance_scorer.py` P1-17 注释刷新（live impl 指针失效）。
+
+### 反向钉住（防复活）
+- `tests/test_memory.py::test_memory_pipeline_init_default`：`not hasattr(mp, "cross_session")`
+- `tests/test_p1_batch4a_memory.py::test_legacy_exports_point_to_live_modules`：包导出双查
+
+### Verification
+- 块3相关 10 测试文件 193 passed / 0 failed；ruff 改动域 0 错
+- 突变验红 3/3：prune 去豁免→红；投影回 ASC→红；search_facts LIKE 去 key_sql→红
+  （首版未红系测试夹具被 near-dup 合并塞不满窗口，改 SQL 直插构造后验红命中）

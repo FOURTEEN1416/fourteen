@@ -29,7 +29,8 @@ class ImportanceScorer:
         return raw
 
 # P1-17（2026-09-21 审查修复）：此处的 ForgettingManager/ConflictDetector/
-# CrossSessionReasoner 是**无隔离旧副本**（get_pending_events 全表、冲突检测
-# 不传 user_key），现役实现分别在同包 forgetting_manager.py /
-# conflict_detector.py / cross_session_reasoner.py，全仓零消费者——已删除并入
+# CrossSessionReasoner 曾是**无隔离旧副本**，现役实现分别在同包
+# forgetting_manager.py / conflict_detector.py，全仓零消费者——已删除并入
 # docs/DELETION_LOG.md，杜绝 `from … import X` 拿错版本的双实现地雷。
+# 2026-09-22：cross_session_reasoner（pending_events 死链）亦整体拆除，
+# 同入 DELETION_LOG。

@@ -1086,10 +1086,19 @@ class ProactiveScheduler:
             logger.warning("memory curator failed: %s", e)
         # P1-51：账本保留（30 天）——旧实现 event_ledger 只 append 不 prune，
         # chat/tool/profile/web_disabled 全类型常驻 → agent_plane.db 无界增长。
+        # 2026-09-22：画像事件（profile_update/correct）是画像唯一写权威，
+        # 永久豁免——否则 30 天不活跃用户的画像事件被清，缓存丢失即画像清零。
         try:
-            from shisi.agent_plane.event_ledger import default_ledger
+            from shisi.agent_plane.event_ledger import (
+                EVENT_PROFILE_CORRECT,
+                EVENT_PROFILE_UPDATE,
+                default_ledger,
+            )
 
-            removed = default_ledger().prune(retention_days=30)
+            removed = default_ledger().prune(
+                retention_days=30,
+                preserve_types=(EVENT_PROFILE_UPDATE, EVENT_PROFILE_CORRECT),
+            )
             if removed:
                 logger.info("event_ledger 保留清理：删除 %d 条 30 天前事件", removed)
         except Exception as e:  # noqa: BLE001

@@ -190,12 +190,14 @@ def test_service_exposes_write_chat_history_sync():
 
 def test_legacy_exports_point_to_live_modules():
     from shisi.memory.legacy.conflict_detector import ConflictDetector as LiveCD
-    from shisi.memory.legacy.cross_session_reasoner import CrossSessionReasoner as LiveCSR
     from shisi.memory.legacy.forgetting_manager import ForgettingManager as LiveFM
 
     assert legacy.ConflictDetector is LiveCD
-    assert legacy.CrossSessionReasoner is LiveCSR
     assert legacy.ForgettingManager is LiveFM
+    # 2026-09-22：CrossSessionReasoner（pending_events 死链）已拆除出库，
+    # 反向钉住防复活（import 与 __all__ 双查）。
+    assert not hasattr(legacy, "CrossSessionReasoner")
+    assert "CrossSessionReasoner" not in legacy.__all__
 
 
 def test_importance_scorer_old_copies_removed():

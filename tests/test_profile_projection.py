@@ -88,3 +88,14 @@ def test_seed_baseline_projects(ledger: EventLedger) -> None:
     assert proj["preferences"] == ["安静"]
     # 不污染他人
     assert project_profile(ledger, "N:user2")["birthday"] == ""
+
+
+def test_projection_window_takes_latest_events(ledger: EventLedger) -> None:
+    """画像事件超限后投影必须反映**最新**状态（旧实现取最早 limit 条，
+    事件累计超限后画像卡死旧值）。用 limit=5 + 8 次更名驱动窗口溢出。"""
+    for i in range(8):
+        write_profile_event(
+            ledger, session_key="N:win", payload={"nickname": f"名字{i}"}
+        )
+    proj = project_profile(ledger, "N:win", limit=5)
+    assert proj["nickname"] == "名字7"
