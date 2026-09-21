@@ -86,6 +86,16 @@ _MIGRATIONS: list[str] = [
         favorited_at TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE(character_id, memory_id)
     )""",
+    # 批6b 项8：转发历史落库。旧 ForwardManager 只存进程内 list，
+    # 重启即丢（前端「转发收藏」端点的历史记录随之蒸发）。
+    """CREATE TABLE IF NOT EXISTS memory_forwards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        from_character TEXT NOT NULL,
+        to_character TEXT NOT NULL,
+        memory_id TEXT NOT NULL,
+        content TEXT DEFAULT '',
+        forwarded_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )""",
     """CREATE TABLE IF NOT EXISTS memory_recycle_bin (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         character_id TEXT NOT NULL,
@@ -104,6 +114,7 @@ _MIGRATIONS: list[str] = [
     """CREATE INDEX IF NOT EXISTS idx_affinity_unlocks_cid ON affinity_unlocks(character_id)""",
     """CREATE INDEX IF NOT EXISTS idx_stickers_category ON stickers(category)""",
     """CREATE INDEX IF NOT EXISTS idx_memory_fav_cid ON memory_favorites(character_id)""",
+    """CREATE INDEX IF NOT EXISTS idx_memory_forwards_to ON memory_forwards(to_character)""",
     """CREATE INDEX IF NOT EXISTS idx_memory_recycle_cid ON memory_recycle_bin(character_id)""",
     """CREATE TABLE IF NOT EXISTS characters_v2 (
         id TEXT PRIMARY KEY,
@@ -130,7 +141,7 @@ def get_table_names() -> list[str]:
     return [
         "characters", "affinity_records", "affinity_unlocks", "affinity_audit",
         "emotion_stage_state", "stickers", "character_stickers",
-        "vital_signs_state", "memory_favorites", "memory_recycle_bin",
+        "vital_signs_state", "memory_favorites", "memory_forwards", "memory_recycle_bin",
         "shisi_schema_version", "characters_v2",
     ]
 

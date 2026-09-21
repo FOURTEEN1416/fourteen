@@ -1,5 +1,38 @@
 # Code Deletion Log
 
+## [2026-09-21] memory_pipeline 死异步检索路径删除 + ForwardManager 落库（P2 批6b 项8）
+
+### 删除对象与证据
+- `shisi/memory/legacy/memory_pipeline.py::retrieve_context_async`（:598-719，约 120 行）及其独占的
+  `_context_cache` / `_context_cache_max` / `_cache_lock` / `MemoryConfig.cache_ttl`
+  - **生产零调用**：全仓 grep `.retrieve_context_async(` —— 除测试外唯一"调用者"是
+    `shisi/application/memory_service.py::retrieve_context_async`（同批删除的零调用薄包装，
+    其自身到 `asyncio.to_thread(self.retrieve_context)` 根本不走 pipeline 异步版）；
+    生产检索链唯一入口 `optimized_orchestrator.py:833` 走**同步** `retrieve_context`
+  - 缓存面只服务于该死路径（P1-17 曾把无界 dict 收敛为 LRU，本批连宿主一并删除）；
+    `daily_maintenance` 第 4 步 clear 与 `test_local_time` 的 async 静态钉同步移除
+  - 反向钉防复活：`test_p1_batch4a_memory.py::test_pipeline_dead_async_context_cache_removed`
+
+### 同批修复（审计 :147 后半句）
+- `shisi/memory/forward_manager.py::ForwardManager` 旧为**纯进程内 list**——前端
+  「转发收藏」端点（`api/routers/memory_routes.py:76`）的转发历史**重启即丢**。
+  改 sqlite 落库：新表 `memory_forwards`（`shisi/migrations.py` 12→**13 表** +
+  `idx_memory_forwards_to`），`_conn()` 建表自愈；写侧保留上限 `_MAX_LOG=1000`
+  （旧 list 亦只增不减）；`get_forwards` 键名兼容（`from`/`to` 别名，测试零改语义）。
+  回归 +2：`test_forwards_survive_restart` / `test_log_bounded`；
+  `test_shisi_features`/`test_modules` 的 ForwardManager 夹具改 tmp_db（旧 `ForwardManager()`
+  无参构造在测试里会直写真实 `data/sqlite.db`）。
+
+### 验证
+- `test_memory_pipeline / test_p1_batch4a_memory / test_local_time / test_shisi_features /
+  test_modules / test_memory / test_shisi_migrations / test_user_isolation_chain`
+  **217 通过 / 0 失败**；ruff 改动 9 文件 0 错
+
+### Impact
+- 删除死代码约 140 行；转发历史由易失变持久（行为增强，端点契约不变）
+
+**Reversible**: git revert 即恢复；`memory_forwards` 表留在 DB 无消费者即无害。
+
 ## [2026-09-21] llm_provider/prompt_template_manager.py 零调用死文件删除（P2 批6b 项4）
 
 ### 删除对象与证据

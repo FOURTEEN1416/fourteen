@@ -203,11 +203,12 @@ class TestFavoriteManager:
 
 
 class TestForwardManager:
-    """转发管理器 — 纯内存，无需数据库"""
+    """转发管理器 — 落库持久化（批6b 项8：旧为纯内存，重启丢）"""
 
     @pytest.fixture
-    def fwd(self):
-        return ForwardManager()
+    def fwd(self, tmp_db):
+        run_migrations(tmp_db)
+        return ForwardManager(db_path=Path(tmp_db))
 
     def test_get_forwards_empty(self, fwd):
         assert fwd.get_forwards("char_1") == []
@@ -233,3 +234,19 @@ class TestForwardManager:
         fwd.forward("char_c", "char_b", "mem_002", "内容2")
         items = fwd.get_forwards("char_b")
         assert len(items) == 2
+
+    def test_forwards_survive_restart(self, tmp_db):
+        """持久化不变量：新实例（= 进程重启）必须还能读到转发历史。"""
+        run_migrations(tmp_db)
+        ForwardManager(db_path=Path(tmp_db)).forward("a", "b", "mem_x", "内容")
+        items = ForwardManager(db_path=Path(tmp_db)).get_forwards("b")
+        assert len(items) == 1
+        assert items[0]["memory_id"] == "mem_x"
+
+    def test_log_bounded(self, fwd):
+        """保留上限：超出裁最旧，表不无界增长。"""
+        import shisi.memory.forward_manager as fm_mod
+
+        for i in range(fm_mod._MAX_LOG + 50):
+            fwd.forward("a", "b", f"mem_{i}")
+        assert len(fwd.get_forwards("b")) == fm_mod._MAX_LOG

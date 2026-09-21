@@ -294,7 +294,7 @@ def test_retrieve_context_facts_fallback_uses_call_session() -> None:
 
     from shisi.memory.legacy.memory_pipeline import MemoryPipeline
 
-    for name in ("retrieve_context", "retrieve_context_async"):
+    for name in ("retrieve_context",):
         raw = inspect.getsource(getattr(MemoryPipeline, name))
         assert "if session_id" in raw and "user_key=uk" in raw, (
             f"{name} 的 facts 降级必须以传入 session_id 派生 user_key，"

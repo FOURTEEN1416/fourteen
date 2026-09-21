@@ -197,21 +197,6 @@ class ShisiMemoryService:
             query=query, session_id=session_id, top_k=top_k,
         )
 
-    async def retrieve_context_async(
-        self,
-        query: str,
-        session_id: str = "",
-        top_k: int = 5,
-    ) -> dict[str, Any]:
-        """异步检索上下文（通过 asyncio.to_thread 包装同步方法）。"""
-        import asyncio
-        return await asyncio.to_thread(
-            self.retrieve_context,
-            query=query,
-            session_id=session_id,
-            top_k=top_k,
-        )
-
     def get_recent_context(self, n: int = 3, session_id: str = "") -> str:
         return self._pipeline.get_recent_context(n=n, session_id=session_id)
 

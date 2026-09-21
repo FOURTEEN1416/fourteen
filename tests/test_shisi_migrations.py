@@ -1,4 +1,4 @@
-"""shisi 数据库迁移测试 — 12张表创建 + 幂等性验证"""
+"""shisi 数据库迁移测试 — 13张表创建 + 幂等性验证"""
 
 from pathlib import Path
 
@@ -15,7 +15,7 @@ class TestTableNames:
     EXPECTED_TABLES = {
         "characters", "affinity_records", "affinity_unlocks", "affinity_audit",
         "emotion_stage_state", "stickers", "character_stickers",
-        "vital_signs_state", "memory_favorites", "memory_recycle_bin",
+        "vital_signs_state", "memory_favorites", "memory_forwards", "memory_recycle_bin",
         "shisi_schema_version", "characters_v2",
     }
 

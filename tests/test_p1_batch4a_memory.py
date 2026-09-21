@@ -204,10 +204,11 @@ def test_importance_scorer_old_copies_removed():
     assert hasattr(isc, "ImportanceScorer")
 
 
-def test_pipeline_context_cache_is_bounded_lru():
-    src = inspect.getsource(MemoryPipeline.__init__)
-    assert "OrderedDict" in src and "_context_cache_max" in src
+def test_pipeline_dead_async_context_cache_removed():
+    """批6b 项8：retrieve_context_async 生产零调用，连同其 _context_cache
+    （曾为无界 dict，P1-17 收敛为 LRU 后仍无人消费）一并删除；反向钉住防复活。"""
+    assert not hasattr(MemoryPipeline, "retrieve_context_async")
     body = inspect.getsource(MemoryPipeline)
-    assert "move_to_end" in body and "popitem(last=False)" in body, (
-        "P1-17：缓存读命中须置顶、写侧须有淘汰（旧为无界 dict）"
-    )
+    assert "_context_cache" not in body, "死检索路径的缓存面不得复活（生产只走同步 retrieve_context）"
+    init = inspect.getsource(MemoryPipeline.__init__)
+    assert "_cache_lock" not in init

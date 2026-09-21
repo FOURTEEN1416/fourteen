@@ -12,13 +12,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import concurrent.futures
-import hashlib
 import logging
 import threading
 import time
-from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -109,7 +106,6 @@ class MemoryConfig:
     fact_extract_interval: int = 5
     fact_min_confidence: float = 0.2
     conflict_similarity_threshold: float = 0.3
-    cache_ttl: int = 30  # 上下文缓存 TTL（秒），代替硬编码值
     # ── B3：config/shisi.yaml memory: 五键接线（2026-09-20 用户裁决「全面升级」）──
     extraction_enabled: bool = True
     fact_dedup_similarity: float = 0.85  # yaml similarity_threshold：同事实去重门槛
@@ -269,12 +265,6 @@ class MemoryPipeline:
         self._executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=4, thread_name_prefix="memory_pipeline"
         )
-
-        # 缓存
-        # P1-17：有界 LRU（旧为普通 dict，仅日维护 clear → 长跑进程随查询数无界增长）
-        self._context_cache: OrderedDict[str, Any] = OrderedDict()
-        self._context_cache_max = 256
-        self._cache_lock = threading.Lock()
 
         logger.info(
             "MemoryPipeline initialized (forgetting=%s, working_limit=%d)",
@@ -595,129 +585,6 @@ class MemoryPipeline:
 
         return context
 
-    async def retrieve_context_async(
-        self,
-        query: str,
-        session_id: str = "",
-        top_k: int = 5,
-    ) -> dict[str, Any]:
-        """
-        异步检索记忆上下文 — 并行检索三层记忆，向量检索超时降级
-
-        Returns:
-            {"working": [], "episodic": [], "semantic": [], "facts": []}
-        """
-        # 使用稳定的 hash 函数（hashlib.md5）替代 Python 内置 hash()，
-        # 避免 Python 3.3+ 的 hash randomization 导致缓存命中率低下
-        query_hash = hashlib.md5(query.encode()).hexdigest()[:16]
-        cache_key = f"{session_id}:{query_hash}"
-        with self._cache_lock:
-            if cache_key in self._context_cache:
-                cached = self._context_cache[cache_key]
-                if time.time() - cached.get("_ts", 0) < self._config.cache_ttl:
-                    logger.debug("retrieve_context_async cache hit")
-                    self._context_cache.move_to_end(cache_key)
-                    return {k: v for k, v in cached.items() if k != "_ts"}
-
-        context = {  # type: ignore[var-annotated]
-            "working": [],
-            "episodic": [],
-            "semantic": [],
-            "facts": [],
-            "reflections": [],
-        }
-        uk = _user_key_from_session(session_id) if session_id else ""
-
-        start = time.perf_counter()
-
-        async def _get_working():
-            try:
-                if session_id:
-                    bucket = self.working.get_recent(n=10, session_id=session_id)
-                    return bucket or self._load_session_history(session_id, limit=10)
-                return []
-            except Exception as e:  # noqa: BLE001
-                logger.debug("Failed to get working memory: %s", e)
-                return []
-
-        async def _search_episodic():
-            try:
-                return self.episodic.search(
-                    query, top_k=top_k, session_id=session_id or None
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Episodic retrieval failed, degraded: %s", e)
-                return []
-
-        async def _search_semantic():
-            try:
-                return self.semantic.search(
-                    query,
-                    top_k=top_k,
-                    user_key=uk if session_id else None,
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Semantic retrieval failed, degraded: %s", e)
-                return {}
-
-        results = await asyncio.gather(
-            _get_working(),
-            _search_episodic(),
-            _search_semantic(),
-            return_exceptions=True,
-        )
-
-        context["working"] = results[0] if not isinstance(results[0], Exception) else []  # type: ignore
-        context["episodic"] = results[1] if not isinstance(results[1], Exception) else []  # type: ignore
-
-        semantic_result = results[2] if not isinstance(results[2], Exception) else {}
-        if isinstance(semantic_result, dict):
-            context["semantic"] = semantic_result.get("structured", [])
-            context["facts"] = [
-                s.get("fact", "") for s in context["semantic"]
-                if isinstance(s, dict)
-            ]
-
-        elapsed = time.perf_counter() - start
-        logger.debug("Async retrieve_context completed in %.3fs", elapsed)
-
-        if not context["facts"] and session_id:
-            try:
-                facts = self.sm.get_facts(min_confidence=0.3, user_key=uk)
-                context["facts"] = [f["fact"] for f in facts[:top_k]]
-            except Exception as e:  # noqa: BLE001
-                logger.debug("Structured fact fallback failed: %s", e)
-
-        try:
-            context["pending_events"] = self.cross_session.get_pending_events(
-                session_id=session_id or None
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.debug("Failed to get pending events (async): %s", e)
-            context["pending_events"] = []
-
-        # 记忆反思洞察
-        try:
-            context["reflections"] = self.reflection.get_insights(
-                query=query, top_k=3, session_id=session_id or None
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.debug("Failed to get reflections (async): %s", e)
-            context["reflections"] = []
-
-        context["_ts"] = time.time()  # type: ignore
-        with self._cache_lock:
-            self._context_cache[cache_key] = context
-            # P1-17：超界先丢最旧，再回收已过期项（写入侧顺带 GC）
-            while len(self._context_cache) > self._context_cache_max:
-                self._context_cache.popitem(last=False)
-            now = time.time()
-            for k in [k for k, v in self._context_cache.items()
-                      if now - v.get("_ts", 0) >= self._config.cache_ttl]:
-                self._context_cache.pop(k, None)
-
-        return {k: v for k, v in context.items() if k != "_ts"}
-
     def get_recent_context(self, n: int = 3, session_id: str = "") -> str:
         """获取最近对话上下文文本（会话隔离，2026-09-20：改读 DB 真源）"""
         sess = session_id or self.working.session_id
@@ -734,7 +601,6 @@ class MemoryPipeline:
         1. 应用遗忘模型（exponential / threshold）
         2. 生成每日摘要
         3. 清理低置信度事实
-        4. 清理缓存
         """
         try:
             # 1. 遗忘
@@ -761,10 +627,6 @@ class MemoryPipeline:
 
             # 3. 清理低置信度事实
             self._cleanup_low_confidence_facts()
-
-            # 4. 清理缓存
-            with self._cache_lock:
-                self._context_cache.clear()
 
             logger.info("Daily maintenance complete: %s", date_str)
             return last_summary

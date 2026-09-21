@@ -331,16 +331,6 @@ def test_mp_retrieve_context_uses_structured_fallback():
     assert "用户喜欢猫" in ctx["facts"]
 
 
-async def test_mp_retrieve_context_async_caches():
-    mp, vm, sm = _make_pipeline()
-    mp._session_id = "N:wxid_t2"
-    sm.add_fact("用户喜欢猫", "preference", 0.9, user_key="wxid_t2")
-    ctx1 = await mp.retrieve_context_async("猫")
-    ctx2 = await mp.retrieve_context_async("猫")
-    assert "用户喜欢猫" in ctx1["facts"]
-    assert ctx1["facts"] == ctx2["facts"]
-
-
 def test_mp_get_chat_context_delegates_to_summarizer():
     mp, vm, sm = _make_pipeline()
     mp.after_chat("你好", "你好呀")
@@ -680,16 +670,6 @@ def test_memory_pipeline_retrieve_context_exception_paths():
     assert ctx["episodic"] == []
     assert ctx["semantic"] == []
     assert ctx["facts"] == []
-
-
-@pytest.mark.asyncio
-async def test_memory_pipeline_retrieve_context_async_cache_hit():
-    mp, vm, sm = _make_pipeline()
-    sm.add_fact("用户喜欢猫", "preference", 0.9)
-    ctx1 = await mp.retrieve_context_async("猫")
-    # 第二次应命中缓存
-    ctx2 = await mp.retrieve_context_async("猫")
-    assert ctx1["facts"] == ctx2["facts"]
 
 
 def test_memory_pipeline_daily_maintenance_no_chats():
