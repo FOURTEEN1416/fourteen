@@ -1,6 +1,6 @@
-# 代码图谱 — unique-you (唯一的你) v3.8.20
+# 代码图谱 — unique-you (唯一的你) v3.8.21（2026-09-22 六域根治：四块分块落地 9a54fca/f6a4637/8d3acf9/11bdc57/1ba015a——遗忘时钟/提醒校验/衰减基准/enhancer 审计回放/重要日期多用户化/检索下推/pending_events 死链整拆/prune 画像豁免+投影取最新/死类死表真删/web 定向收口；测试 1750/1749/1 双端全绿；端点 220/186 不变；跨库表 sqlite.db 五死表 DROP，agent_plane.db prune 画像豁免）；上一版 v3.8.20
 
-> 由 维护者 手动维护 | 最后核实: 2026-09-21（**v3.8.19 selftalk 四项修复移植 + 双尾巴根治**：`d8b7046` cherry-pick 入 main（`988cf9d`，送达回写记忆/唯一身份路径/档位静态门禁/追问收口，净增 32 用例）；知识槽身份自源块出口过滤（`743a98e`，收口项11 每轮 RAG 与「锚点只注入一次」的语义冲突）；channel-status 用例 `sessions_root` 隔离（`edd3c47`）；§1.1 刷新 **1689 收集 / 1688 通过 / 1 跳过**，本地与服务器双端全绿；分支 `wt/selftalk-fix` 归档为 tag `archive/selftalk-fix` 后删除）
+> 由 维护者 手动维护 | 最后核实: 2026-09-21（**v3.8.19 selftalk 四项修复移植 + 双尾巴根治**：`d8b7046` cherry-pick 入 main（`988cf9d`，送达回写记忆/唯一身份路径/档位静态门禁/追问收口，净增 32 用例）；知识槽身份自源块出口过滤（`743a98e`，收口项11 每轮 RAG 与「锚点只注入一次」的语义冲突）；channel-status 用例 `sessions_root` 隔离（`edd3c47`）；§1.1 刷新 **1750 收集 / 1749 通过 / 1 跳过 / 0 失败（2026-09-22 六域根治分块双端实测，服务器同口径全绿）
 > 由 维护者 手动维护 | 上一核实: 2026-09-21（**v3.8.18 v1.35 收仓口径统一 + shisi.yaml 行数勘误**：§1.1 Python 测试行刷新 **1615→1657 收集 / 1611→1653 通过 / 4 跳过**（分块 **341 + 387+3 + 494+1 + 431**，0 失败；+42 = 并行窗收编 `test_attribution_isolation_state` / `test_code_review_r2_state_and_llm` / `test_session_key_owner`）；测试合计 **1709→1751**（1653 Py + 98 FE）；**勘误** `config/shisi.yaml` 实为 **91 行**（65 有效行），v1.35 头部「41 行」系 voice 段恢复前中间态误记；端点 **220/186** 不变；vitest **98/98** 复跑。同步 AGENTS §0/§2/§4.3、README 徽章/口径/结构树、LOG 勘误两处。）
 > 由 维护者 手动维护 | 上一核实: 2026-09-21（**v3.8.17 全量代码审查修复战役收口**（工作单 `docs/verification/2026-09-21-full-code-audit.md`；AGENTS v1.34）：
 > **端点重测**：`create_api_app` 内省（`AI_GF_ENV=dev`）——**APIRoute 220 / 唯一路径 186**，`len(app.routes)=224`（含 4 条框架路由）；方法分布 **105 GET / 79 POST / 16 PUT / 20 DELETE**；较 v3.8.16 口径 215/181 **+5 = agent_plane_routes 路由组**（AX P2 批次并入，非本战役新增，此前未回扫）。
@@ -727,6 +727,7 @@ tools/
 
 | 日期 | 提交 | 变更摘要 |
 |------|------|---------|
+| v3.8.21 | 2026-09-22 | 六域根治四块（遗忘时钟/提醒校验/衰减基准/enhancer 回放/重要日期多用户/检索下推/pending_events 拆除/prune 豁免+投影取最新/死表真删/web 定向）；测试 1750/1749/1 双端；端点 220/186 不变 |
 | 2026-09-22 (身份拷问剧本进卡) | 86af331 | **v3.8.20**：persona.yaml（内置十四卡真源）+creator_notes 身份拷问应答剧本（PHI 位注入）+ persona_engine get_creator_notes()/约束层「身份拷问应对」身份中性通用规则 + 内置卡接线 + 知识槽排除源 +creator_notes（IDENTITY_KNOWLEDGE_SOURCES 常量化）；+5 用例，生产探针智谱照抄剧本在戏。全量基线未刷新（并行窗在制品，见 LOG 09-22） |
 | 2026-09-21 (selftalk 移植+双尾巴根治) | edd3c47 | **v3.8.19**：`d8b7046` cherry-pick 入 main（送达回写记忆/唯一身份路径/档位静态门禁/追问收口，净增 32 用例，1689 收集/1688 通过/1 跳过双端全绿）；知识槽身份自源过滤收口项11 语义冲突；channel-status `sessions_root` 隔离；分支 `wt/selftalk-fix` 归档为 tag `archive/selftalk-fix` 后删除 |
 | 2026-09-21 (v1.35 收仓口径统一) | a672617 后 | **v3.8.18** 测试口径统一 + 勘误：§1.1 刷新 **1657 收集 / 1653 通过 / 4 跳过 / 0 失败**（分块 341 + 387+3 + 494+1 + 431；+42 = 并行窗收编 `test_attribution_isolation_state` / `test_code_review_r2_state_and_llm` / `test_session_key_owner`）；合计 **1709→1751**；`shisi.yaml` 行数勘误 41→**91**（65 有效行）；端点 220/186 不变；vitest 98/98 复跑 |

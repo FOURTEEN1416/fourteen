@@ -7,6 +7,20 @@
 
 ---
 
+## 2026-09-22 — 六域全面排查根治（人设/记忆/情感/主动关怀/定时提醒/用户隔离，四块分块验收，A 档闭环）
+
+- **触发**：用户指令「全面排查，人设系统，记忆系统，情感系统，主动关怀，定时提醒，用户隔离」→ 排查报告 14 项分级发现 → 用户裁决「按推荐全面修复，所有部分都需要修，但是需要你发分块进行，修一块，查一块，验收一块，足够可靠再进行推进，不接受补丁式的修复，备注式的删除，激进一点，彻底一点」。全程不派 subagent、亲自通读六域约 40 文件。
+- **块1/P0（`9a54fca`）**：① 遗忘模型时间输入根治——`updated_at`（SQLite naive UTC 串）与 aware 相减恒抛 TypeError 被吞成 `days_old=30.0` 恒值 → 低置信度事实每晚误删/高置信度永不遗忘；新 `_fact_age_days`（naive 按 UTC、坏值钳 0 fail-safe）。既有测试用 aware ISO 喂假库与生产形态不符=漏网根因，新用例一律生产同构 naive 串。② `set_reminder` trigger_time 三关校验+归一（畸形串「明早六点」字典序永不到期=「说了会叫却没叫」残留通道）。③ 情绪衰减基准独立记账（旧误用距 ASE tick ≈0.08h，每日衰减形同关闭）；`_last_check_time`/`_hours_since_last_check` 失去读者整删。
+- **块2/P1（`f6a4637`+`1ba015a`）**：④ AffinityEnhancer 审计回放恢复（重启归零 → mapper ±3 爬坡/解锁重复触发/get_progress 归 0）；`created_at` naive 转 aware（DecayEngine 相减否则崩）；`setup_shisi` db_path 接线到 enhancer（集成测试 affinity 得 100 实锤宿主污染，既有 6 用例同步改 tmp_path 隔离——edd3c47 同类教训二次发生）。⑤ 重要日期多用户化：画像生日 `parse_birthday_hint`（农历宁缺毋错）+ 逐用户定向投递 + dedup 带 user_key（旧全局广播+dedup 无用户维度，A 发过同日 B 被吞）。
+- **块3/P2（`8d3acf9`）**：⑥ search_facts/向量通道过滤下推（先 LIMIT 后滤在多用户下静默漏检本人事实；向量回落集合顺带纠正 semantic_knowledge→user_facts）。⑦ pending_events 死链整拆（每轮提取→存储→检索后被 orchestrator pop 丢弃、resolve 零调用、表无界增长）：CrossSessionReasoner `git rm` + 4 处接线 + 幂等 DROP 表 + 反向钉住防复活。⑧ `event_ledger.prune` 增 `preserve_types`（画像事件=唯一写权威永久豁免 30 天 TTL）；`project_profile` 取最新 limit 条（旧取最早，超限卡死旧值）。
+- **块4/P3（`11bdc57`）**：⑨ DB 版 WorkingMemory 整删（两死表唯一写入者、零消费者）；五死表出库+幂等 DROP；affinity_log CRUD + `StructuredMemory.get_stats` 零消费者删除；vector_memory 集合表清理。⑩ web 投递收口为按会话键定向（WebSocketServer 连接→会话映射 + `send_proactive_to_session`；提醒 ws_sender 签名 `(session_key, text)`；scheduler web 分支拒降级广播）+ 提醒文案角色名按会话解析 + `query_reminders` 无 `_meta` 拒绝（旧返回全表=跨用户泄露纵深缺口）。
+- **验证**：本地分块 **1750 收集 / 1749 通过 / 1 跳过 / 0 失败**（461+382+553+1+353 精确吻合）+ vitest 98/98 + ruff 全仓 0 错；端点 openapi.json 实测 **220/186 不变**（105 GET/79 POST/16 PUT/20 DELETE）；服务器 Fast-forward `f699a8e→1ba015a`（此前另一窗口 pull 时已把本案前四块带上但未重启）→ 重启后 health 200、服务 active、git blob 哈希 5/5 三端一致（直接 md5 被 CRLF 骗，沿用归一化口径教训）、服务器分块全量 **1750/1749/1**（465+362+544+1+378）+ 六域冒烟 196 通过。
+- **质量纪律**：突变验红 **8/8** 命中（每次突变后从副本还原；search_facts 首版验红假通过系夹具被 near-dup 合并塞不满窗口，改 SQL 直插构造后真红）。既有用例契约更新全部随提交留痕（写死过去日期改动态未来、ws_sender 新签名、「web 键回退广播」断言随行为反转更新）。
+- **并发登记**：并行窗口 `86af331`（身份拷问剧本进卡）+ `f699a8e`（docs 落账+十七次刷新）与本案四块在 main 串行交错，无文件冲突；本地全量回归晚于其提交，已覆盖。
+- **遗留**：① `reminder_delivery._compose_text` 的 LLM 文案与 `set_reminder` 校验为 prompt+代码双保险，LLM 换算错误率待生产观察；② web 定向投递要求客户端发过消息（映射来源），纯登录未发言会话的 web 提醒将判失败重试 3 次判死——与微信侧诚实度对齐，前端如需「登录即登记会话」另开批次；③ 农历生日祝福不做换算（宁缺毋错），如需支持引入农历库另裁决；④ `user_profile.updated_at` 用裸 `datetime.now()`（展示字段，无比较语义，观察项）。
+
+---
+
 ## 2026-09-22 — 身份拷问应答剧本进卡（「我是人工智能」破防根治第一层，A 档闭环）
 
 - **触发**：用户指令「将身份拷问写到角色卡里面」。接 09-22 全链诊断：09-21 五组「我是人工智能」告白（12:46/12:47/13:59/14:03/16:12，全在 owner=2 内置十四会话，chat_history 与 app.log 双源核对）逐轮核对**全部为智谱降级轮出词**；agnes 同题实战在戏（14:02「你是什么」→「十四」；22:03「那我就是十四。不是代码，不是程序」）——天然对照实验钉死供应商为破防决定性变量。放大器：告白时段跑旧代码 8d87134，persona.yaml 人设散文尚未注入（988cf9d 查出的「DEFAULT_PERSONA_DESC 运行时从未注入」缺陷当时仍在），prompt 只有名字+数值+约束层孤条元声明禁令，**无身份拷问的角色内应答剧本**，降级模型无词可抄即坍缩成坦白+客服腔。
