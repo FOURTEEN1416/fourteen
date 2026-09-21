@@ -48,6 +48,8 @@ def test_normalize_commitment_text():
     assert normalize_commitment_text("叫我") is None
     assert normalize_commitment_text("明天早上七点二十分叫") is None
     assert normalize_commitment_text("明天早上七点二十分叫我起床") is not None
+    # 完整托付不得被残句规则误杀（CI 红回归：11 字「提醒我…」曾被长度/前缀双拦）
+    assert normalize_commitment_text("提醒我明早六点叫我起床") is not None
 
 
 def test_rules_extractor_rejects_bare_commitment():

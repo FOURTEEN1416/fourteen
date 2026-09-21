@@ -70,8 +70,9 @@ PATTERNS = {
     ],
 }
 
-_COMMITMENT_MIN_LEN = 12
-_COMMITMENT_FORBID = re.compile(r"^(叫我|叫我起床|提醒我|记得|明天要|后天也要|记得多少)")
+_COMMITMENT_MIN_LEN = 8
+# 只禁「整句即残句」；完整托付（如「提醒我明早六点叫我起床」）不得被前缀误杀
+_COMMITMENT_FORBID = re.compile(r"^(?:叫我|叫我起床|提醒我|记得|明天要|后天也要|记得多少)[，。！？!?,.\s]*$")
 
 
 def normalize_commitment_text(text: str) -> str | None:
