@@ -32,8 +32,12 @@ _OCC_PATTERNS = [
     re.compile(r"我是(?:上班族|学生|老师|程序员|护士|医生)"),
 ]
 _NAME_PATTERNS = [
-    re.compile(r"(?:叫我|我是|我叫)\s*([一-龥A-Za-z]{1,12})\s*[吧啊呀呢]?$"),
+    re.compile(r"(?:叫我|我叫|我是)\s*([一-龥A-Za-z]{1,4})\s*[吧啊呀呢~～!！。]*$"),
 ]
+_NAME_STOP = {
+    "你", "您", "这个", "那个", "不是", "不是我", "什么", "怎么", "为什么",
+    "上班", "学生", "军训", "起不来", "叫你", "叫你叫",
+}
 
 
 class UserProfileStore:
@@ -181,14 +185,17 @@ class UserProfileStore:
         elif re.search(r"(?:我)(?:在)?(?:上学|读书|学生)", s):
             updates["occupation"] = "上学"
 
-        # 称呼
+        # 称呼：仅接受极短干净昵称，避免「叫我不是我起不来」这类整句被当成名字
         for pat in _NAME_PATTERNS:
             m = pat.search(s)
-            if m:
-                name = m.group(1).strip()
-                if name not in {"你", "您", "这个", "那个"} and len(name) >= 1:
-                    updates["nickname"] = name
-                    break
+            if not m:
+                continue
+            name = m.group(1).strip()
+            if name in _NAME_STOP or any(x in name for x in ("不是", "什么", "怎么", "我")):
+                continue
+            if 1 <= len(name) <= 4:
+                updates["nickname"] = name
+                break
 
         # 约定类（起床提醒等）并入 commitments
         if re.search(r"叫我|提醒我|记得.*叫我|到点", s) and re.search(
