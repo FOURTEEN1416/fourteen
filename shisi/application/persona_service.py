@@ -492,9 +492,13 @@ class PersonaService:
         return "\n\n".join(parts)
 
     def _safe_engine_layer(self, name: str, builder: Any, *args: Any, **kwargs: Any) -> str:
-        """安全调用 PersonaEngine 的私有构建方法，失败时返回空字符串并记录日志。"""
+        """安全调用 PersonaEngine 的私有构建方法，失败时返回空字符串并记录日志。
+
+        审计 item46：旧实现只打 debug——生产 INFO 级下注入层任一抛错即从 system
+        **无声缺件**，角色行为突变无从排查。失败属功能降级，必须 WARNING 可见。
+        """
         try:
             return builder(*args, **kwargs)
         except Exception:  # noqa: BLE001
-            logger.debug("注入层 %s 构建失败（非阻塞）", name, exc_info=True)
+            logger.warning("注入层 %s 构建失败，本轮 prompt 缺失该层", name, exc_info=True)
             return ""

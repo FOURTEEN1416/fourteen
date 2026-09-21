@@ -117,14 +117,12 @@ class ProactiveScheduler:
         daily_maintenance_func: Callable[[], None] | None = None,
         get_last_chat_time: Callable[[], datetime | None] | None = None,
         is_online_check: Callable[[], bool] | None = None,
-        emotion_engine: Any | None = None,
     ):
         self.ase = ase_engine
         self._send = send_message_func
         self._daily_maintenance = daily_maintenance_func
         self._get_last_chat_time = get_last_chat_time
         self._is_online_check = is_online_check
-        self._emotion_engine = emotion_engine
         # LLM 主动决策（用户裁决：时机与内容由模型判断，无策略闸）
         self._llm_provider: Any | None = None
         # AX 审查 B3：执行 LLM 自己给出的 wait_minutes（非硬编码日程表）
@@ -1118,12 +1116,19 @@ class ProactiveScheduler:
             except Exception as e:  # noqa: BLE001
                 logger.error("Daily maintenance failed: %s", e)
 
-        # 情感时间衰减 — 应用自上次检查以来的能量恢复与强度衰减
+        # 情感时间衰减 — 审计 item45：打向**每用户存活引擎**（UserManager 真态）。
+        # 旧实现打在 orchestrator 模板引擎上，其 state 无任何读者=功能不存在。
         try:
             hours = self._hours_since_last_check()
-            if hours > 0 and self._emotion_engine is not None and hasattr(self._emotion_engine, 'apply_time_decay'):
-                self._emotion_engine.apply_time_decay(hours)
-                logger.info("情感时间衰减已应用: %.2f 小时", hours)
+            if hours > 0:
+                from api.deps import deps as _deps
+                user_mgr = getattr(_deps, "gf", None)
+                decayed = 0
+                if user_mgr is not None and hasattr(user_mgr, "apply_time_decay_all"):
+                    decayed = user_mgr.apply_time_decay_all(hours)
+                logger.info(
+                    "情感时间衰减已应用: %.2f 小时，覆盖 %d 个用户引擎", hours, decayed
+                )
         except Exception as e:  # noqa: BLE001
             logger.warning("情感时间衰减任务失败: %s", e)
 

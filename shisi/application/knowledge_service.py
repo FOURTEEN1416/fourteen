@@ -110,16 +110,13 @@ class ShisiKnowledgeAdapter:
                 "score": chunk.score,
             })
 
-        style_examples: list[Any] = []
-        if self._tone_mimic is not None:
-            try:
-                style_examples = self._tone_mimic.retrieve_style_examples(query, top_k=3)
-            except Exception as e:  # noqa: BLE001
-                logger.debug("Style example retrieval failed: %s", e)
-
+        # 审计 item47：旧实现每轮同步跑 ToneMimic Chroma+ONNX 嵌入查询，产物塞进
+        # "style_examples" 却无人消费（context_budget.rag_payload_to_text 只读
+        # results/chunks，persona 风格层也不读该键）——纯烧钱烧算力。检索调用删除；
+        # 键保留为空（与 RAGEngineV2 的兼容字典形状），供显式预览端点另行获取。
         return {
             "results": results,
-            "style_examples": style_examples,
+            "style_examples": [],
             "total_vector": 0,
             "total_keyword": len(result.chunks),
             "total_facts": result.total_chunks,

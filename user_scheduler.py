@@ -156,6 +156,24 @@ class UserManager:
         except Exception as e:  # noqa: BLE001
             logger.warning("恢复亲密度失败 %s/%s: %s", user_id, character_id, e)
 
+    def apply_time_decay_all(self, hours: float) -> int:
+        """对所有存活的 用户×角色 情绪引擎应用时间衰减（审计 item45）。
+
+        旧实现的每日衰减只打在 orchestrator 注入的**模板引擎**上——对话/调度
+        各自用请求级与用户级引擎，模板 state 无人读取，「情绪自然冷却」名存实亡。
+        """
+        with self._users_lock:
+            instances = list(self._users.values())
+        applied = 0
+        for inst in instances:
+            for engine in list(inst.emotion_engines.values()):
+                try:
+                    engine.apply_time_decay(hours)
+                    applied += 1
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("用户 %s 情绪引擎时间衰减失败: %s", inst.user_id, e)
+        return applied
+
     @staticmethod
     def _persist_affinity(user_id: str, character_id: str, engine: EmotionEngine) -> None:
         try:

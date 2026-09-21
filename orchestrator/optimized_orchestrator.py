@@ -693,6 +693,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     use_llm=getattr(template, "_classifier", None) is not None,
                     classifier_mode=getattr(template, "_classifier_mode", "rule"),
                 )
+                self._restore_request_affinity(engine, session_id, character_id)
                 self._request_emotion_engines[key] = engine
             self._request_emotion_engines_access[key] = current_time
 
@@ -703,6 +704,33 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             except Exception as e:  # noqa: BLE001
                 logger.debug("请求级情绪引擎淘汰关闭异常: %s", e)
         return engine
+
+    @staticmethod
+    def _restore_request_affinity(
+        engine: Any, session_id: str, character_id: str
+    ) -> None:
+        """审计 item42：新建请求级引擎必须从已持久化好感度恢复起点。
+
+        旧实现从 affection_points=0 起步，而对话尾 AffinityMapper.sync 按
+        delta=目标−已存 增量同步——每条消息都把 shisi 侧已存好感度向 0 拉低
+        最多 3 分（聊得越久好感度越低）。恢复后首轮 delta≈0，漂移消失。
+        """
+        try:
+            from api.deps import deps as _deps
+            mapper = getattr(getattr(_deps, "shisi_reg", None), "affinity_mapper", None)
+            if mapper is None:
+                return
+            points = mapper.current_points(character_id or "", session_id or "")
+            if not points or points <= 0:
+                return
+            from shisi.affinity import scale as affinity_scale
+            state = getattr(engine, "state", None)
+            if state is None:
+                return
+            state.affection_points = float(points)
+            state.affinity = affinity_scale.points_to_level(points)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("请求级情绪引擎恢复好感度失败: %s", e)
 
     def _cleanup_expired_request_engines(
         self, current_time: float, keep: str | None = None

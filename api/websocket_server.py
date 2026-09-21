@@ -183,6 +183,7 @@ class WebSocketServer:
                                 "message_type": message_type,
                             }))
                             stream_gen = self._orch.process_message_stream(user_msg, session_id)
+                            ended = False
                             try:
                                 async for event in stream_gen:
                                     # 兼容旧版返回字符串的生成器
@@ -195,6 +196,7 @@ class WebSocketServer:
                                             "message_type": message_type,
                                         }, ensure_ascii=False))
                                     elif event.get("type") == "done":
+                                        ended = True
                                         await websocket.send(json.dumps({
                                             "type": "stream_end",
                                             "session_id": session_id,
@@ -205,11 +207,15 @@ class WebSocketServer:
                             finally:
                                 with contextlib.suppress(Exception):
                                     await stream_gen.aclose()
-                            await websocket.send(json.dumps({
-                                "type": "stream_end",
-                                "session_id": session_id,
-                                "message_type": message_type,
-                            }))
+                            if not ended:
+                                # 生成器未产出 done（异常/提前结束）时的兜底收口帧；
+                                # 正常完成路径不再补发第二帧（旧实现每轮双 stream_end，
+                                # 前端按帧计数会闪断/重复收尾）。
+                                await websocket.send(json.dumps({
+                                    "type": "stream_end",
+                                    "session_id": session_id,
+                                    "message_type": message_type,
+                                }))
                         elif self._orch:
                             result = await self._orch.process_message(user_msg, session_id)
                             await websocket.send(json.dumps({

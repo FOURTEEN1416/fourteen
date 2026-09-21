@@ -73,6 +73,15 @@ class AffinityMapper:
         max_value = self._enhancer._max
         return affinity_scale.shisi_to_points(shisi_affinity, min_value, max_value)
 
+    def current_points(self, character_id: str, user_id: str = "") -> float:
+        """读取 (user × character) 当前持久 shisi 好感度并反转为 emotion 点数。
+
+        供对话路径新建情绪引擎时恢复起点（审计 item42）；enhancer 缺失时 0.0。
+        """
+        if self._enhancer is None:
+            return 0.0
+        return self.to_emotion(self._enhancer.get_value(character_id, user_id=user_id))
+
     @staticmethod
     def _track_key(character_id: str, user_id: str = "") -> str:
         uid = str(user_id or "").strip()

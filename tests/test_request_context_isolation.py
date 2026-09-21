@@ -104,7 +104,7 @@ async def test_orchestrator_passes_request_scoped_persona_and_rag_ids():
     assert "character-b" in b["system_prompt"]
 
 
-def test_chat_default_character_resolves_active_role(monkeypatch):
+async def test_chat_default_character_resolves_active_role(monkeypatch):
     from api.routers import character_routes, chat_routes
 
     monkeypatch.setattr(
@@ -116,5 +116,5 @@ def test_chat_default_character_resolves_active_role(monkeypatch):
         ],
     )
 
-    assert chat_routes._resolve_character_id("default") == "active-role"
-    assert chat_routes._resolve_character_id("explicit-role") == "explicit-role"
+    assert await chat_routes._resolve_character_id("default") == "active-role"
+    assert await chat_routes._resolve_character_id("explicit-role") == "explicit-role"

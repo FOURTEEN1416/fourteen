@@ -470,17 +470,26 @@ class PersonaEngine:
         if not emotion_state or not self._emotion_style_coupler:
             return ""
         try:
-            emotion_dict = {}
+            # 审计 item43：coupler 矩阵键是中文 str（"开心"/"伤心"…），旧实现把
+            # Emotion **枚举对象**直接当 type 传入 → 恒 miss、情感调整量恒 0。
+            # 同时兼容两种 dict 形态（to_dict 的 primary.type / 扁平 primary_emotion）。
             if isinstance(emotion_state, dict):
-                emotion_dict = {
-                    "primary": {"type": emotion_state.get("primary_emotion", "平常")},
-                    "affinity": emotion_state.get("affinity", 0),
-                }
+                primary = emotion_state.get("primary")
+                if isinstance(primary, dict):
+                    p_type = primary.get("type", "平常")
+                else:
+                    p_type = emotion_state.get("primary_emotion", "平常")
+                aff = emotion_state.get("affinity", 0)
             else:
-                emotion_dict = {
-                    "primary": {"type": getattr(emotion_state, "primary_emotion", "平常")},
-                    "affinity": getattr(emotion_state, "affinity", 0),
-                }
+                p_type = getattr(emotion_state, "primary_emotion", "平常")
+                aff = getattr(emotion_state, "affinity", 0)
+            p_type = getattr(p_type, "value", p_type)
+            if isinstance(aff, dict):
+                aff = aff.get("level", 0)
+            emotion_dict = {
+                "primary": {"type": p_type},
+                "affinity": aff,
+            }
             coupled_style = self._emotion_style_coupler.couple(emotion_dict)
             segment = self._emotion_style_coupler.get_style_prompt_segment(coupled_style)
             if segment:

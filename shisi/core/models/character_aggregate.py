@@ -155,14 +155,13 @@ class CharacterAggregate(BaseModel):
                 "用户否认某情境时立即放弃该情境。",
             ])
 
+        # 审计 item44：base_prompt 不再注入「# 当前状态」块——状态块唯一 owner 是
+        # PersonaEngine 的中文情感层（persona_service 每次 build_system_prompt 都注入）。
+        # 旧实现在同一条 prompt 里出现两个状态块，且这一块用英文枚举名
+        # （NEUTRAL/LOVELY…），对中文角色扮演是纯噪声。
         parts.extend([
             "",
             self.persona.to_prompt_segment(),
-            "",
-            "# 当前状态",
-            f"- 情感: {self.emotional_state.primary_emotion.name}",
-            f"- 能量: {self.emotional_state.energy:.1f}",
-            f"- 关系: {self.emotional_state.affinity_level.display_name}",
         ])
 
         if knowledge_context:

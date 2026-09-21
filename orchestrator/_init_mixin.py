@@ -268,14 +268,13 @@ class _InitPhasesMixin:
         except Exception:  # noqa: BLE001
             pass
 
-        # ── 主动消息调度器（启用 apply_time_decay / ASE / 每日维护） ──
+        # ── 主动消息调度器（ASE / 每日维护 / 每用户情绪时间衰减） ──
         try:
             from proactive.scheduler import ProactiveScheduler
 
             scheduler = ProactiveScheduler(
                 ase_engine=self.components["ase"],
                 send_message_func=lambda msg: logger.info("[主动消息] %s", msg),
-                emotion_engine=self.components["emotion"],
             )
             # 至少注册一个控制台通道作为兜底；后续可通过 register_channel 注入 ws/wechat
             scheduler.register_channel(
