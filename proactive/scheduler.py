@@ -1165,13 +1165,19 @@ class ProactiveScheduler:
         self._check_important_dates()
 
     def _check_important_dates(self) -> None:
-        """候选 D：命中重要日期时以角色口吻发送祝福（LLM 生成，模板兜底）。
+        """重要日期祝福（生日/纪念日）：LLM 生成、模板兜底、**按会话定向**投递。
 
-        ⚠️ 2026-09-19 修复：本方法原先**只**由 `_run_daily_maintenance`（00:05）
-        调用，而免打扰时段默认 23-7 —— 00:05 恒在静默内，`_send_to_all()` 直接
-        返回 False，祝福被无声吞掉。即：生日/纪念日祝福从未送达过。
-        现改为幂等 + 静默跳过，并由独立的每小时任务（见 start()）在静默结束后
-        第一时间补发，当日只发一次。
+        ⚠️ 2026-09-19 修复：原只由 00:05 每日维护调用，恒落在免打扰时段内被
+        `_send_to_all()` 静默丢弃——生日/纪念日祝福从未送达过。现由独立的
+        每小时任务在静默结束后第一时间补发，当日只发一次。
+
+        ⚠️ 2026-09-22 多用户根治（此前是单用户时代遗存）：
+        - 旧实现只查角色级全局日期配置，`_deliver(message)` 不带 session_key
+          → 广播给**所有** owner 的全部绑定 peer；dedup 键无用户维度——
+          A 的生日发过，同日生日的 B 就被吞掉。
+        - 现按用户两路检查：① **用户画像生日**（EventLedger 投影，公历可解析
+          形态；农历表述宁缺毋错不发）；② 角色级全局日期（保留既有配置语义），
+          但投递逐会话定向、dedup 键带 user_key。
         """
         if self._is_quiet_hours():
             logger.info(
@@ -1180,64 +1186,103 @@ class ProactiveScheduler:
             )
             return
         try:
-            from utils.important_dates import check_today
+            from utils.important_dates import check_today, parse_birthday_hint
 
+            now_local_ts = _local_now()
+            today_key = f"{now_local_ts:%Y-%m-%d}"
+            mmdd = now_local_ts.strftime("%m-%d")
+            user_keys = self._collect_ase_user_keys()
+
+            # 全局角色级日期（既有配置语义，逐用户定向化）
             active_id = ""
             try:
                 from api.deps import deps as _deps
 
                 cm = getattr(getattr(_deps, "shisi_reg", None), "character_manager", None)
                 active_id = (cm.get_active_id() if cm else "") or ""
-                if cm and active_id:
-                    _card = cm.get_card(active_id) if hasattr(cm, "get_card") else None
-                    (getattr(_card, "name", "") or "") if _card else ""
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001
+                active_id = ""
+            global_hits = check_today(active_id, now_local_ts) if active_id else []
 
-            # P1-24：与 _is_quiet_hours 共用 _local_now()（北京墙钟）。旧实现把裸
-            # _dt.now()（依赖主机时区）显式喂给 v1.21 刚收口为 now_local 的
-            # check_today，dedup_key 也不同钟——UTC 主机上北京 00:00-07:59 命中的
-            # 祝福被算成前一天（换机即静默失效类）。
-            _now_local = _local_now()
-            hits = check_today(active_id, _now_local)
-            if not hits:
+            if not user_keys:
                 return
+            for user_key in user_keys:
+                # ① 用户画像生日
+                birthday_hit = False
+                try:
+                    from shisi.agent_plane.runtime import project_profile_for
 
-            names = "、".join(h.get("name", "") for h in hits)
-            kinds = "/".join(sorted({h.get("kind", "custom") for h in hits}))
-            # 当日幂等：每小时任务与 00:05 维护都可能命同一天，避免重复轰炸
-            dedup_key = f"{_now_local:%Y-%m-%d}|{active_id}|{names}"
-            if dedup_key in self._important_dates_sent:
-                return
-
-            wish = "生日快乐" if "birthday" in kinds else "纪念日快乐"
-            message = f"今天是个特别的日子（{names}）。{wish}呀！"
-            # LLM 润色（失败用模板）
-            try:
-                ase = self.ase
-                llm = getattr(ase, "_llm", None)
-                if llm is not None and hasattr(llm, "chat_sync"):
-                    polished = llm.chat_sync(
-                        query=(
-                            f"以角色口吻给对方发一条{'生日' if 'birthday' in kinds else '纪念日'}祝福，"
-                            f"提到「{names}」，2-3 句话，真挚不说教："
-                        ),
-                        max_tokens=150, temperature=0.8,
+                    hint = str((project_profile_for(user_key) or {}).get("birthday") or "")
+                    birthday_hit = bool(parse_birthday_hint(hint) == mmdd)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("[重要日期] 画像生日读取失败 user=%s: %s", user_key, e)
+                if birthday_hit:
+                    self._send_date_wish(
+                        user_key, today_key, label="你的生日",
+                        kind="birthday", names="你的生日",
                     )
-                    cleaned = sanitize_message(str(polished or ""))
-                    if cleaned:
-                        message = cleaned
-            except Exception:
-                pass
-
-            logger.info("[重要日期] 命中 %s，发送祝福", names)
-            if self._deliver(message):
-                self._important_dates_sent.add(dedup_key)
-                logger.info("[重要日期] 祝福已送达: %s", names)
-            else:
-                logger.warning("[重要日期] 祝福未送达，将在下一个非静默小时重试: %s", names)
+                # ② 全局角色级日期（同人当日只发一条：生日与全局命中并列时合并）
+                if global_hits and not birthday_hit:
+                    names = "、".join(h.get("name", "") for h in global_hits)
+                    kinds = "/".join(sorted({h.get("kind", "custom") for h in global_hits}))
+                    self._send_date_wish(
+                        user_key, today_key, label=names,
+                        kind="birthday" if "birthday" in kinds else "anniversary",
+                        names=names,
+                    )
         except Exception as e:  # noqa: BLE001
             logger.warning("重要日期检查失败: %s", e)
+
+    def _send_date_wish(self, user_key: str, today_key: str, *,
+                        label: str, kind: str, names: str) -> None:
+        """向单个会话定向发送一条祝福（当日幂等 + LLM 口吻润色 + 模板兜底）。"""
+        dedup_key = f"{today_key}|{user_key}|{label}"
+        if dedup_key in self._important_dates_sent:
+            return
+        wish = "生日快乐" if kind == "birthday" else "纪念日快乐"
+        message = f"今天是个特别的日子（{names}）。{wish}呀！"
+        # LLM 按该用户绑定角色的口吻润色（失败用模板）
+        try:
+            persona_hint = ""
+            try:
+                from api.deps import deps as _deps
+
+                gf = getattr(_deps, "gf", None)
+                char_id = (gf.get_user_character(user_key) if gf else "") or ""
+            except Exception:  # noqa: BLE001
+                char_id = ""
+            if char_id:
+                try:
+                    from proactive.llm_proactive import load_persona_hint
+
+                    persona_hint = load_persona_hint(char_id) or ""
+                except Exception:  # noqa: BLE001
+                    persona_hint = ""
+            llm = self._resolve_proactive_llm()
+            if llm is not None and hasattr(llm, "chat_sync"):
+                polished = llm.chat_sync(
+                    query=(
+                        f"以角色口吻给对方发一条{'生日' if kind == 'birthday' else '纪念日'}祝福，"
+                        f"提到「{names}」，2-3 句话，真挚不说教："
+                    ),
+                    system_prompt=persona_hint or "",
+                    max_tokens=150, temperature=0.8,
+                )
+                cleaned = sanitize_message(str(polished or ""))
+                if cleaned:
+                    message = cleaned
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[重要日期] LLM 润色失败，用模板: %s", e)
+
+        logger.info("[重要日期] 命中 %s（user=%s），定向发送祝福", names, user_key)
+        if self._deliver(message, session_key=user_key):
+            self._important_dates_sent.add(dedup_key)
+            logger.info("[重要日期] 祝福已送达: %s user=%s", names, user_key)
+        else:
+            logger.warning(
+                "[重要日期] 祝福未送达，将在下一个非静默小时重试: %s user=%s",
+                names, user_key,
+            )
 
     def _reset_daily(self) -> None:
         """每日重置"""

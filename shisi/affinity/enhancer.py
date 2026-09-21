@@ -40,10 +40,53 @@ class AffinityEnhancer:
         self._audit_enabled = get_config("affinity", "audit_enabled", True)
         self._values: dict[str, float] = {}
         self._last_interaction: dict[str, datetime] = {}
+        # 2026-09-22 重启归零根治：`_values` 原为纯内存 dict，重启后全部键归 0
+        # —— mapper.sync 以「目标−已存」差分且钳 ±3，每轮只能爬回 3 分；解锁
+        # 在爬坡途中重复触发；get_progress 恒显 ≈0。affinity_records 是本类
+        # 自己逐次写入的审计日志（character_id 列即完整隔离键），现作为恢复源
+        # 回放每键最新值（含 _last_interaction，衰减宽限期据此跨重启连续）。
+        self._restore_from_audit()
 
     @property
     def unlock_manager(self) -> UnlockManager:
         return self._unlock
+
+    def _restore_from_audit(self) -> None:
+        """从 affinity_records 审计日志回放每键最新值（进程重启恢复）。
+
+        - ``created_at`` 由 SQLite ``datetime('now')`` 写入（**naive UTC** 串），
+          统一转为 aware UTC —— DecayEngine 用 aware now 相减，naive 会
+          TypeError 使 decay_all 崩溃；
+        - 回放失败只告警不抛（构造在装配热路径上，降级为旧行为从 0 起步）。
+        """
+        try:
+            with closing(sqlite3.connect(str(self._db_path))) as conn, conn:
+                rows = conn.execute(
+                    "SELECT ar.character_id, ar.new_value, ar.created_at "
+                    "FROM affinity_records ar "
+                    "JOIN (SELECT character_id AS cid, MAX(id) AS mid "
+                    "      FROM affinity_records GROUP BY character_id) latest "
+                    "  ON ar.id = latest.mid"
+                ).fetchall()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("好感度审计回放失败（从 0 起步）: %s", e)
+            return
+        for key, value, created_at in rows:
+            k = str(key or "")
+            if not k:
+                continue
+            self._values[k] = max(self._min, min(self._max, float(value or 0)))
+            ts: datetime | None = None
+            if created_at:
+                try:
+                    ts = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    ts = None
+            self._last_interaction[k] = ts or datetime.now(tz=timezone.utc)
+        if self._values:
+            logger.info("好感度审计回放恢复 %d 个隔离键", len(self._values))
 
     @staticmethod
     def _key(character_id: str, user_id: str = "") -> str:
