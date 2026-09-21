@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -172,6 +173,67 @@ def test_restore_uses_poll_lock_dedup(monkeypatch):
     n2 = reg.restore_on_boot()
     assert n2 == 1
     assert calls["run"] == 1
+
+
+def test_poll_lock_fds_linux_fd_positive(tmp_path, monkeypatch):
+    """Linux 真实分支（flock fd>0）：fd 必须按 (user,slot) 记账并可释放。
+
+    生产回归（2026-09-21 部署 ecd6ce2 后微信通道全灭）：上一用例只覆盖了
+    None（他人持锁）与 0（Windows 无 fcntl），fd>0 分支在本机永不执行，
+    旧实现 `_poll_lock_fds` 未在 __init__ 初始化 → restore_on_boot 第一把锁
+    即 AttributeError，被 run_api 宽 except 吞成一条 WARNING。
+    """
+    reg = ConnectorRegistry()
+    calls = {"run": 0}
+
+    class Dummy:
+        def __init__(self, uid, slot):
+            self.owner_user_id = uid
+            self.slot = slot
+            self.token = ""
+            self._stop = False
+
+        def run(self):
+            calls["run"] += 1
+
+        def stop(self):
+            self._stop = True
+
+    monkeypatch.setattr(
+        "wechat_direct.wechat_connector.WeChatConnector",
+        lambda user_manager=None, **kw: Dummy(kw.get("owner_user_id"), kw.get("slot", 0)),
+    )
+    monkeypatch.setattr(channel_paths, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        channel_paths,
+        "sessions_root",
+        lambda: tmp_path / "data" / "wechat_sessions",
+    )
+    monkeypatch.setattr(
+        channel_paths, "list_user_slots_with_credentials", lambda uid: [0]
+    )
+    (tmp_path / "data" / "wechat_sessions" / "1" / "slot0").mkdir(parents=True)
+    # 模拟 Linux：每次拿锁得到一个真实 fd（假整数会在释放时关掉无关 CRT 描述符）
+    def _fake_lock(uid: int, slot: int) -> int:
+        return os.open(
+            str(tmp_path / f"lock-{uid}-{slot}.lock"),
+            os.O_CREAT | os.O_RDWR,
+            0o644,
+        )
+
+    monkeypatch.setattr(ConnectorRegistry, "_try_acquire_poll_lock", staticmethod(_fake_lock))
+
+    assert reg.restore_on_boot() == 1
+    assert list(reg._poll_lock_fds) == [(1, 0)]
+
+    # 释放后按键弹出，fd 不再被本进程持有
+    reg._release_poll_lock(1, 0)
+    assert reg._poll_lock_fds == {}
+
+    # start_login 同一路径：fd>0 也必须按 (uid,slot) 记账（旧实现建成 list 并 append）
+    reg.start_login(1, slot=0)
+    assert list(reg._poll_lock_fds) == [(1, 0)]
+    reg._release_poll_lock(1, 0)
 
 
 def test_peer_character_menu_and_choice():

@@ -32,6 +32,8 @@ class ConnectorRegistry:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._connectors: dict[tuple[int, int], Any] = {}
+        # 本进程持有的通道 flock fd，键为 (user_id, slot)；Linux 才有真实 fd
+        self._poll_lock_fds: dict[tuple[int, int], int] = {}
 
     def _key(self, user_id: int, slot: int) -> tuple[int, int]:
         return (int(user_id), int(slot))
@@ -221,9 +223,7 @@ class ConnectorRegistry:
         if lock_fd is None:
             raise ChannelSlotError(f"用户 {uid} slot={pick} 通道正在被其他进程占用")
         if lock_fd > 0:
-            if not hasattr(self, "_poll_lock_fds"):
-                self._poll_lock_fds = []
-            self._poll_lock_fds.append(lock_fd)
+            self._poll_lock_fds[(uid, pick)] = lock_fd
         conn = self.ensure(user_id, slot=pick, user_manager=user_manager)
 
         def _run() -> None:
