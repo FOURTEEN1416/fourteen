@@ -7,6 +7,17 @@
 
 ---
 
+## 2026-09-21 — 生产「等我一下，刚才有点卡」根因 + 部署 P1 批次 + 通道回归根治（A 档闭环）
+
+- **触发**：用户报微信端连续收到超时兜底句，令查日志；查清后用户裁决「执行部署并重启」。
+- **取证（生产实证，非推断）**：兜底句唯一来源 `orchestrator/optimized_orchestrator.py:1329-1349` 的 `asyncio.wait_for(..., 30.0)` → `utils/fallback_lines.py:37`（kind=timeout）；`/opt/ai-girlfriend/data/app.log` 今日 **12 次**超时（07:42–12:00）。真因＝首选供应商 agnes 补全端点挂死：直连实测 `POST /v1/chat/completions` ttfb=0、20s 零字节，而 `GET /v1/models` 200/0.76s 且 `agnes-3.0-flash` 在列（服务活着、只补全不回）。放大三层：① 服务器版 provider httpx 超时 **60s** > 外层 **30s**（单家挂死吃光全链预算）；② 生产链（`config/system.yaml`）agnes 居首，实测 zhipu **0.49s 正常**却排在死家之后永不得位；③ `chat()` 非流式路径**完全无熔断闸门**（`is_available()` 只在 `chat_stream` 检查），日志每轮打 "entering cooldown" 而下一轮照样全价重付。
+- **版本落差**：服务器停在 `39a7546f`，落后本地 7 个提交；`70ef90d`(P1批3 LLM 网关熔断+25s 超时) 正是本故障的既有修复——**已写完测完但没部署**。
+- **部署**：本地 `ecd6ce2` push → 服务器 `git pull --ff-only`（工作树仅 3 个未跟踪 `_tmp_*` 脚本，无 tracked 改动，安全）→ 重启前 compileall + `import api.run_api` 冒烟（39 路由）→ `systemctl restart` → health 200。`pyproject`/`frontend` 在该区间零改动，跳过 pip/npm。
+- **回归与根治（本窗新引入的 P0，当场闭环）**：重启后 `微信自动连接检查失败: 'ConnectorRegistry' object has no attribute '_poll_lock_fds'` → **四条用户微信通道全部未恢复**。根因三处口径不一致：`__init__` 从未建该属性、`restore_on_boot` 按 dict 写 `[(uid,slot)]`（Linux fd>0 分支）、`start_login` 惰性建成 **list** 再 `append(fd)`（与 `_release_poll_lock` 的 `pop((uid,slot))` 冲突）。本地 41 例全绿的原因：**Windows 无 fcntl → `_try_acquire_poll_lock` 恒返回 0，`fd>0` 这条 Linux 生产分支从未被任何测试执行**。修复 `ce793cb`：统一 `(user_id,slot)→fd` dict 并在 `__init__` 初始化；回归 `test_poll_lock_fds_linux_fd_positive` 用**真实 os.open fd** 打中该分支（记账/释放/重登录三步）——突变验红：撤掉 `__init__` 初始化即复现同一 AttributeError。注：探针首版用假整数 fd 导致 `os.close(7)` 关掉无关 CRT 描述符并炸掉 playwright 夹具，已改真实 fd。
+- **验证证据**：① 通道：`12:18:03 微信登录成功 owner=2/4/7`，其余 worker 正确「已有其他 worker 持锁，跳过」（flock 去重按设计工作），AttributeError 归零；② 网关：以 orchestrator 同路径（`get_llm(config=system.yaml.llm)`，runtime chain `['agnes','zhipu','xunfei','baidu']`）连发 4 次 —— call1 **25.96s**、call2 **25.89s** 均返回**真回复**（agnes 25s 判死→zhipu 接上，落在 30s 闸内，不再发兜底句），call2 后 `provider agnes 连续失败 2 次，熔断 60s`，call3 **1.99s** / call4 **1.02s** 直接跳过 agnes；③ 部署后 app.log `LLM 调用超时` 计数 **0**；④ 本地 `tests/test_wechat_channel_isolation.py` 等 4 文件 **29 passed** + ruff 0 错 + pre-commit CI 门禁 4/4。
+- **边界与遗留（登记未做）**：① 每 worker 前 2 条消息仍要付 ~26s（紧贴 30s 闸），且熔断 60s 到期半开会再探 agnes → **仍可能被拖到 26s**；治本建议＝把 agnes 摘出 `config/system.yaml` 链首或为其单独设 8–10s 超时（一行配置，待用户裁决）；② provider 链**双真源**仍在：`config/llm_providers.json`（管理台，zhipu 居首）≠ `config/system.yaml`（运行时，agnes 居首），本窗实测两次踩到；③ 旧服务停止需 systemd `TimeoutStopSec` 到点 SIGKILL（journal `Failed with result 'timeout'`，优雅关闭未接线）；④ `同步微信通道会话到 DB 失败: asyncio.run() cannot be called from a running event loop` 为**部署前既有**（当前日志 56 次／轮转文件 76 次），属审计 async-bridge 组，未在本窗处理；⑤ 工作树另有 4 文件在制品（`training_routes.py`/`ase_engine.py`/`ase_hub.py`/`scheduler.py`，P1-19/20/25 主动消息侧）**未提交未部署**，本窗刻意不纳入。
+- **三端一致**：A 档 = 本地 `ce793cb` = origin/main = 服务器 `ce793cb1`，health 200；本 LOG 为 B 档（仅 commit→push，不上服务器）。
+
 ## 2026-09-21 — 增量复核（b76d6c6 → 3e96a7c · AX P2 批次，只读，B 档）
 
 - **触发**：用户令「开始进行复核」——并行窗 AX P2 批次（`b7cd513`+`3e96a7c`，13 文件 +1022/−31）落地后，对此前审查基线做增量复核；按全量核验纪律逐文件逐条对码，不采信提交信息与 BOARD「生产闭环」宣称。
