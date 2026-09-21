@@ -27,6 +27,27 @@ def reset_config_each():
     yield
 
 
+@pytest.fixture(autouse=True)
+def reset_auth_state_each():
+    """每个测试前复位进程级认证开关（api.auth._auth_config 是全局单例）。
+
+    服务器实测实证（2026-09-21，/opt/ai-girlfriend 分块跑）：同一进程内
+    先序测试组合一旦令 create_api_app() 在生产判定下执行
+    configure_auth(True, ...)（resolve_api_key_enabled 未设时默认
+    is_production()，而服务器 .env 使其成立；本地 .env 无此键故本地
+    一直绿），后续「裸 FastAPI + setup_shisi」用例即整批 401——
+    单文件/两文件探针均不触发，属多文件组合态污染。
+    此处统一复位，使套件与执行顺序、宿主 .env 差异解耦。
+    """
+    try:
+        from api.auth import configure_auth
+
+        configure_auth(False, "")
+    except Exception:
+        pass
+    yield
+
+
 @pytest.fixture
 def tmp_db(tmp_path):
     """提供临时数据库路径（Windows 兼容：清理 WAL/SHM + 重试）"""
