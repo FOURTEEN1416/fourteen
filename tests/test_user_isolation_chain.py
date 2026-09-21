@@ -280,3 +280,36 @@ def test_search_facts_filter_pushdown():
         assert sm.search_facts("篮球")
     finally:
         sm.close()
+
+
+def test_dead_tables_dropped_on_init():
+    """五张死表（pending_events/affinity_log/emotion_trajectory/working_memory/
+    sessions）在 StructuredMemory 初始化时幂等清除（2026-09-22 清理锁定）。"""
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+
+    from shisi.memory.legacy.structured_memory import StructuredMemory
+
+    dead = {
+        "pending_events", "affinity_log", "emotion_trajectory",
+        "working_memory", "sessions",
+    }
+    tmp = Path(tempfile.mkdtemp())
+    db = tmp / "legacy.db"
+    conn = sqlite3.connect(str(db))
+    for t in dead:
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {t} (id INTEGER PRIMARY KEY)")  # noqa: S608
+    conn.commit()
+    conn.close()
+    sm = StructuredMemory(db_path=str(db))
+    try:
+        with sm.get_connection() as conn:
+            names = {
+                r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+        assert not (dead & names), f"死表未被清除: {dead & names}"
+    finally:
+        sm.close()

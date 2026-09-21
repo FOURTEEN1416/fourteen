@@ -1021,12 +1021,33 @@ class ProactiveScheduler:
 
         if session_key:
             if not self._is_wechat_session_key(session_key):
-                # 非微信（web / WS）会话键：微信通道**不参与**。
-                # 旧实现无论什么键都先调 wechat 通道发送器 —— web 键
-                # `N:web:hex` 被判成微信后：① 向不存在的 wxid 发送；
-                # ② 异常路径把 wechat 通道实例置 None，后续微信主动消息全失效；
-                # ③ 因「微信绝不广播」策略拒绝对 web 面板投递（消息静默丢失）。
-                return await self._send_to_all(message)
+                # 非微信（web / WS）会话键：**定向**到 websocket 通道。
+                # 2026-09-22：旧实现落到 `_send_to_all` 全连接广播——A 的主动
+                # 消息/提醒推给所有打开控制台的人（跨用户可见），且「广播成功
+                # 即送达」把无归属连接也算进去。现与微信分支同纪律：通道缺失、
+                # 旧签名不收 session_key、或 0 送达 → 判失败，绝不降级广播。
+                sender = self._channel_instances.get("websocket")
+                if sender is not None:
+                    try:
+                        if asyncio.iscoroutinefunction(sender):
+                            await sender(message, session_key=session_key)
+                        else:
+                            sender(message, session_key=session_key)
+                        logger.info("主动消息已定向投递: websocket session=%s", session_key)
+                        return True
+                    except TypeError as e:
+                        logger.warning(
+                            "websocket 通道不接受 session_key，定向消息拒绝降级为广播: session=%s %s",
+                            session_key, e,
+                        )
+                        return False
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("web 定向投递失败 session=%s: %s", session_key, e)
+                        self._channel_instances["websocket"] = None
+                logger.warning(
+                    "web 会话定向投递未成功（通道不可用），不回退广播: session=%s", session_key
+                )
+                return False
 
             sender = self._channel_instances.get("wechat")
             if sender is not None:

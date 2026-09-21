@@ -38,18 +38,23 @@ class ReminderDeliveryTask:
         structured_memory: Any,
         llm: Any = None,
         wechat_sender: Callable[[int, str, str], bool] | None = None,
-        ws_sender: Callable[[str], bool] | None = None,
+        ws_sender: Callable[[str, str], bool] | None = None,
         character_name: str = "",
         memory: Any | None = None,
+        character_resolver: Callable[[str], str] | None = None,
     ):
         """Args:
         structured_memory: StructuredMemory 实例（get_due_reminders 等）。
         llm: LLM gateway（投递文案生成；None 时直接用原文）。
         wechat_sender: ``(owner_id, peer_wxid, text) -> bool`` 定向投递，
             由 api 装配层闭包持有 connector registry 注入。
-        ws_sender: ``(text) -> bool`` websocket 广播（web 控制台会话）。
-        character_name: 当前角色名（文案 prompt 用；可选）。
+        ws_sender: ``(session_key, text) -> bool`` websocket **定向**投递
+            （2026-09-22 起按会话键定向，旧 ``(text)`` 广播签名废弃——
+            广播会把 A 的提醒推给所有打开控制台的人）。
+        character_name: 兜底角色名（会话解析失败时用）。
         memory: MemoryService（送达后回写对话历史；缺省则不回写）。
+        character_resolver: ``(session_key) -> 角色名``——多用户绑不同角色，
+            文案口吻按会话归属解析（旧实现装配时取全局单值，绑错角色口吻）。
         """
         self._sm = structured_memory
         self._llm = llm
@@ -57,6 +62,7 @@ class ReminderDeliveryTask:
         self._ws_sender = ws_sender
         self._character_name = character_name
         self._memory = memory
+        self._character_resolver = character_resolver
         # 节流基准锚在「已过一整个间隔」而非 0：Linux 上 time.monotonic() 以**开机**为起点，
         # 新启动的宿主（如 CI runner，开机 <300s）会让首 tick 误判为「刚清理过」而跳过批量 GC。
         self._last_intent_gc = time.monotonic() - _INTENT_GC_INTERVAL_SECONDS
@@ -137,21 +143,34 @@ class ReminderDeliveryTask:
                 return False
         if self._ws_sender:
             try:
-                result = self._ws_sender(text)
+                result = self._ws_sender(session_key, text)
                 if inspect.isawaitable(result):
                     result = await result
                 return bool(result)
             except Exception as e:  # noqa: BLE001
-                logger.warning("[reminder] websocket 投递异常: %s", e)
+                logger.warning("websocket 定向投递异常 session=%s: %s", session_key, e)
                 return False
         return False
+
+    def _resolve_character_name(self, session_key: str) -> str:
+        """按会话解析角色名（多用户绑不同角色）；失败回落装配时兜底名。"""
+        if self._character_resolver is not None:
+            try:
+                name = str(self._character_resolver(session_key) or "").strip()
+                if name:
+                    return name
+            except Exception as e:  # noqa: BLE001
+                logger.debug("会话角色名解析失败 session=%s: %s", session_key, e)
+        return self._character_name
 
     async def _compose_text(self, reminder: dict[str, Any]) -> str:
         """投递文案：LLM 按口吻生成一句（投递前一刻生成）；失败兜底用户原话。"""
         content = str(reminder.get("content") or "").strip() or "提醒时间到了"
         if self._llm is None:
             return content
-        who = f"（你是{self._character_name}）" if self._character_name else ""
+        who = f"（你是{self._resolve_character_name(str(reminder.get('session_key') or ''))}）" if (
+            self._character_name or self._character_resolver is not None
+        ) else ""
         try:
             reply = await asyncio.wait_for(
                 self._llm.chat(

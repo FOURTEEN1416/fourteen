@@ -387,3 +387,68 @@ def test_send_to_all_skipped_channel_is_logged(caplog):
 
     assert asyncio.run(sched._send_to_all("hi")) is False
     assert any("未就绪" in r.message for r in caplog.records)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  ⑦ web 侧定向投递（2026-09-22）：A 的提醒/主动消息不得广播给所有
+#     控制台连接——send_proactive_to_session 按会话键定向，0 送达判失败
+# ═══════════════════════════════════════════════════════════════
+
+def _ws_server_with_sessions(sessions: dict):
+    from api.websocket_server import WebSocketServer
+
+    srv = WebSocketServer.__new__(WebSocketServer)  # 跳过 __init__（不起线程）
+    srv._clients = set(sessions.keys())
+    srv._client_lock = asyncio.Lock()
+    srv._client_sessions = sessions
+    return srv
+
+
+def test_send_proactive_to_session_targets_only_owner_connection():
+    a, b = _FakeWS(ok=True), _FakeWS(ok=True)
+    srv = _ws_server_with_sessions({a: "2:a@im.wechat", b: "3:b@im.wechat"})
+    delivered = asyncio.run(srv.send_proactive_to_session("2:a@im.wechat", "起床啦"))
+    assert delivered == 1
+
+
+def test_send_proactive_to_session_without_mapped_connection_is_zero():
+    srv = _ws_server_with_sessions({})
+    assert asyncio.run(srv.send_proactive_to_session("2:a@im.wechat", "x")) == 0
+
+
+def test_send_proactive_to_session_cleans_disconnected():
+    a = _FakeWS(ok=False)
+    srv = _ws_server_with_sessions({a: "2:a@im.wechat"})
+    delivered = asyncio.run(srv.send_proactive_to_session("2:a@im.wechat", "x"))
+    assert delivered == 0
+    assert a not in srv._clients
+    assert a not in srv._client_sessions
+
+
+def test_scheduler_web_session_key_targets_ws_not_broadcast():
+    from proactive.scheduler import ProactiveScheduler
+
+    sched = ProactiveScheduler()
+    sched._is_quiet_hours = lambda: False  # 钉死：不随运行时刻撞真实静默窗
+    calls: list = []
+
+    async def _sender(msg, session_key=None):
+        calls.append((msg, session_key))
+
+    sched._channel_instances = {"websocket": _sender}
+    ok = asyncio.run(sched._send_targeted("晚安", "7:web:ab12cd34"))
+    assert ok is True
+    assert calls == [("晚安", "7:web:ab12cd34")]
+
+
+def test_scheduler_web_old_signature_refuses_broadcast():
+    from proactive.scheduler import ProactiveScheduler
+
+    sched = ProactiveScheduler()
+
+    def _legacy(msg):
+        raise TypeError("unexpected keyword argument 'session_key'")
+
+    sched._channel_instances = {"websocket": _legacy}
+    ok = asyncio.run(sched._send_targeted("晚安", "7:web:ab12cd34"))
+    assert ok is False, "旧签名通道不得降级为广播"

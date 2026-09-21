@@ -103,16 +103,18 @@ class _SchedHarness:
         return ProactiveScheduler._is_wechat_session_key(key)
 
 
-def test_web_session_key_routes_to_broadcast_not_wechat():
-    """web 键必须回退 ws 广播；旧实现判成微信后拒发（消息静默丢失）。"""
+def test_web_session_key_never_touches_wechat_channel():
+    """web 键不得调微信通道（2026-09-22 契约更新：web 定向 ws、不再回退
+    广播——广播会把 A 的消息推给所有控制台连接，跨用户可见）。"""
     calls: list = []
 
     async def _wechat_sender(message, session_key=None):
         calls.append(session_key)
 
     h = _SchedHarness(wechat_sender=_wechat_sender)
-    assert asyncio.run(h._targeted("hi", "7:web:ab12cd34")) is True
-    assert h.broadcast_calls == ["hi"], "web 会话键必须走 ws 广播"
+    ok = asyncio.run(h._targeted("hi", "7:web:ab12cd34"))
+    assert ok is False, "无 websocket 通道时 web 定向必须判失败（不降级广播）"
+    assert h.broadcast_calls == [], "web 会话键不得回退全员广播"
     assert calls == [], "web 会话键不得调用微信通道"
 
 
@@ -165,15 +167,17 @@ def test_reminder_routes_wechat_key_to_wechat_sender_with_full_peer():
 
 
 def test_reminder_routes_web_key_to_ws_sender():
+    """ws_sender 契约（2026-09-22）：签名 ``(session_key, text)``——web 投递
+    从无归属广播收口为按会话键定向。"""
     ws: list = []
     task = _reminder_task(
         wechat_sender=lambda *a: pytest.fail("web 键不得走微信通道"),
-        ws_sender=lambda text: (ws.append(text), True)[1],
+        ws_sender=lambda sk, text: (ws.append((sk, text)), True)[1],
     )
     assert asyncio.run(task._send_to_session("7:web:ab12cd34", "喝水")) is True
-    assert ws == ["喝水"]
+    assert ws == [("7:web:ab12cd34", "喝水")]
 
 
 def test_reminder_empty_key_is_noop():
-    task = _reminder_task(wechat_sender=lambda *a: True, ws_sender=lambda t: True)
+    task = _reminder_task(wechat_sender=lambda *a: True, ws_sender=lambda sk, t: True)
     assert asyncio.run(task._send_to_session("", "x")) is False

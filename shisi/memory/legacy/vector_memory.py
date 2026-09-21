@@ -134,7 +134,7 @@ class VectorMemory:
     同一路径的 VectorMemory 实例会被进程级缓存复用，避免重复初始化 collection。
     """
 
-    COLLECTIONS = ["chat_history", "user_facts", "emotion_logs", "episodic_memory", "semantic_knowledge", "emotion_trajectory"]
+    COLLECTIONS = ["chat_history", "user_facts", "emotion_logs", "episodic_memory", "semantic_knowledge"]
 
     _instances: dict[str, VectorMemory] = {}
     _instance_lock = threading.Lock()

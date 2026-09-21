@@ -814,3 +814,30 @@ equire() in MessageList.tsx even though MessageList is unused
 - 块3相关 10 测试文件 193 passed / 0 failed；ruff 改动域 0 错
 - 突变验红 3/3：prune 去豁免→红；投影回 ASC→红；search_facts LIKE 去 key_sql→红
   （首版未红系测试夹具被 near-dup 合并塞不满窗口，改 SQL 直插构造后验红命中）
+
+## 2026-09-22 六域根治批次（块4：死类死表与跨用户广播收口）
+
+### 拆除对象
+- `shisi/memory/legacy/working_memory.py` 整文件（`git rm`）——DB 版 WorkingMemory，
+  `working_memory`/`sessions` 两表的**唯一写入者**，全仓零生产零测试消费者
+  （test_memory.py 的 WorkingMemory 组经查 import 自 memory_pipeline=deque 版）。
+- `structured_memory.py`：`working_memory`/`sessions`/`affinity_log`/`emotion_trajectory`
+  四张死表的 CREATE 与索引出库（affinity_log/emotion_trajectory 零写入零读取；
+  后两张的 CRUD 与 `get_stats` 全仓零消费者一并删除），初始化幂等 DROP 五表
+  （含块3的 pending_events）。
+- `vector_memory.py`：`emotion_trajectory` 预创建集合项移除。
+
+### 行为收口（非删除）
+- web 侧投递从「无归属广播」收口为**按会话键定向**：`WebSocketServer` 增
+  连接→会话归属映射（chat 消息登记/断开清理）与 `send_proactive_to_session`；
+  提醒投递 ws_sender 签名改 ``(session_key, text)``；scheduler `_send_targeted`
+  web 分支不再回退 `_send_to_all`（旧签名/0 送达判失败，与微信侧同纪律）。
+  契约反转登记：`test_session_key_owner` 旧断言「web 键回退广播」已随反转更新。
+- 提醒文案角色名按会话解析：`ReminderDeliveryTask` 增 `character_resolver`
+  （run_api 装配：会话绑定角色卡名 → 兜底全局名），旧实现装配时取全局单值。
+- `query_reminders` 无 `_meta` 拒绝执行（旧实现返回全表=跨用户泄露纵深缺口）。
+
+### Verification
+- 块4相关 6 测试文件 212 passed / 0 failed；ruff 改动域 0 错
+- 新增钉子：ws 定向三态（命中/无归属 0 送达/断线清理）、scheduler web 分支
+  定向与拒降级、query 无 meta 拒绝、死表 DROP、resolver 口吻

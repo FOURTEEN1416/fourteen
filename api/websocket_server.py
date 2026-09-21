@@ -31,6 +31,11 @@ class WebSocketServer:
         self._client_tasks: dict[Any, asyncio.Task] = {}
         # websocket → 认证身份 {"user_id": int|None, "method": "jwt"|"apikey"|"open"}
         self._client_identity: dict[Any, dict[str, Any]] = {}
+        # 2026-09-22：websocket → 会话键归属（该连接最近一条 chat 消息的
+        # session_id，已带 owner 前缀）。供提醒/主动消息**定向**投递——
+        # 旧实现 web 侧只有 broadcast：A 的提醒广播给所有连接（跨用户可见），
+        # 且零归属连接也能「代收」成送达。断开即清理。
+        self._client_sessions: dict[Any, str] = {}
         # P0-5: 认证开关走唯一真源 resolve_api_key_enabled()（生产 fail-closed），
         # 不再自抄一份默认 "false" 的解析——否则 nginx 反代的 /ws/ 成匿名聊天入口。
         from api.runtime_config import resolve_api_key_enabled
@@ -171,6 +176,10 @@ class WebSocketServer:
                         # session_id 无法伪装成他人（记忆/工具/LLM 配额按此隔离）。
                         if authed_user_id is not None:
                             session_id = f"{authed_user_id}:{session_id}"
+                        # 登记连接的会话归属（定向投递映射，断开时清理）
+                        if session_id:
+                            async with self._client_lock:
+                                self._client_sessions[websocket] = str(session_id)
                         use_stream = data.get("stream", False)
                         # P0: 支持 message_type 和 file_url 字段
                         message_type = data.get("message_type", "text")
@@ -250,8 +259,47 @@ class WebSocketServer:
                 self._clients.discard(websocket)
                 self._client_tasks.pop(websocket, None)
                 self._client_identity.pop(websocket, None)
+                self._client_sessions.pop(websocket, None)
             with contextlib.suppress(Exception):
                 await websocket.close()
+
+    async def send_proactive_to_session(self, session_key: str, content: str) -> int:
+        """按会话键**定向**投递主动消息/提醒，返回实际送达连接数。
+
+        2026-09-22：web 侧从「无归属广播」收口为定向——只有登记了该
+        session_key（发过消息）的连接才算送达；0 送达由调用方判失败
+        （提醒重试 3 次判死，与微信侧诚实度一致）。找不到归属连接也是 0。
+        """
+        msg = json.dumps({"type": "proactive", "content": content}, ensure_ascii=False)
+        target = str(session_key or "")
+        if not target:
+            return 0
+        async with self._client_lock:
+            clients = [
+                ws for ws, sid in self._client_sessions.items()
+                if sid == target and ws in self._clients
+            ]
+        if not clients:
+            return 0
+        disconnected: set = set()
+        delivered = 0
+
+        async def _send(ws) -> bool:
+            try:
+                await ws.send(msg)
+                return True
+            except Exception:  # noqa: BLE001
+                disconnected.add(ws)
+                return False
+
+        results = await asyncio.gather(*[_send(ws) for ws in clients])
+        delivered = sum(1 for ok in results if ok)
+        if disconnected:
+            async with self._client_lock:
+                self._clients -= disconnected
+                for ws in disconnected:
+                    self._client_sessions.pop(ws, None)
+        return delivered
 
     async def broadcast_proactive(self, content: str):
         """主动消息投递 —— **真实送达语义**（2026-09-19 修复）。

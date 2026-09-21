@@ -3,9 +3,14 @@
 
 管理结构化数据：
 - user_facts: 用户事实（偏好、习惯、事件）
-- affinity_log: 好感度变化记录
-- chat_history: 对话历史（结构化版本）
+- chat_history: 对话历史（结构化版本，带角色/会话归属）
 - reminders: 提醒事项
+- pending_intents: 澄清任务状态机
+- reflections / trace_log / tool_call_log: 洞察与诊断
+
+2026-09-22 清理：affinity_log（零写入）、emotion_trajectory（零写入）、
+working_memory/sessions（唯一写入者 DB 版 WorkingMemory 已拆除）四张死表
+出库并在初始化时幂等 DROP，见 docs/DELETION_LOG.md。
 """
 
 from __future__ import annotations
@@ -144,15 +149,6 @@ class StructuredMemory:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
-                CREATE TABLE IF NOT EXISTS affinity_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    level INTEGER NOT NULL,
-                    level_name TEXT NOT NULL DEFAULT '',
-                    affection_points REAL NOT NULL DEFAULT 0,
-                    reason TEXT DEFAULT '',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-
                 CREATE TABLE IF NOT EXISTS chat_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
@@ -194,26 +190,6 @@ class StructuredMemory:
                 CREATE INDEX IF NOT EXISTS idx_reminders_due
                     ON reminders(trigger_time, active, triggered);
 
-                CREATE TABLE IF NOT EXISTS sessions (
-                    id TEXT PRIMARY KEY,
-                    channel TEXT NOT NULL DEFAULT 'wechat',
-                    user_id TEXT NOT NULL DEFAULT 'default',
-                    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    ended_at TIMESTAMP,
-                    is_active BOOLEAN DEFAULT 1
-                );
-
-                CREATE TABLE IF NOT EXISTS working_memory (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
-                    content TEXT NOT NULL,
-                    emotion_tag TEXT DEFAULT '',
-                    importance REAL DEFAULT 0.5,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (session_id) REFERENCES sessions(id)
-                );
-
                 CREATE TABLE IF NOT EXISTS persona_evolution_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     dimension TEXT NOT NULL,
@@ -232,18 +208,6 @@ class StructuredMemory:
                     result TEXT DEFAULT '',
                     duration_ms REAL DEFAULT 0,
                     success BOOLEAN DEFAULT 1,
-                    trace_id TEXT DEFAULT '',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-
-                CREATE TABLE IF NOT EXISTS emotion_trajectory (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    primary_emotion TEXT NOT NULL,
-                    primary_intensity REAL NOT NULL,
-                    secondary_emotions TEXT DEFAULT '[]',
-                    energy REAL DEFAULT 1.0,
-                    affinity_level INTEGER DEFAULT 0,
-                    trigger_msg TEXT DEFAULT '',
                     trace_id TEXT DEFAULT '',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
@@ -267,18 +231,12 @@ class StructuredMemory:
 
                 CREATE INDEX IF NOT EXISTS idx_facts_category ON user_facts(category);
                 CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chat_history(created_at);
-                CREATE INDEX IF NOT EXISTS idx_affinity_time ON affinity_log(created_at);
-                CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active);
-                CREATE INDEX IF NOT EXISTS idx_working_session ON working_memory(session_id);
                 CREATE INDEX IF NOT EXISTS idx_trace_id ON trace_log(trace_id);
-                CREATE INDEX IF NOT EXISTS idx_emotion_traj_time ON emotion_trajectory(created_at);
 
                 CREATE INDEX IF NOT EXISTS idx_facts_category_confidence_updated
                     ON user_facts(category, confidence, updated_at);
                 CREATE INDEX IF NOT EXISTS idx_chat_session_created
                     ON chat_history(session_id, created_at);
-                CREATE INDEX IF NOT EXISTS idx_emotion_traj_affinity_time
-                    ON emotion_trajectory(affinity_level, created_at);
 
                 CREATE INDEX IF NOT EXISTS idx_reflections_created
                     ON reflections(created_at DESC);
@@ -304,11 +262,19 @@ class StructuredMemory:
             self._migrate_reminders_columns(conn)
             self._migrate_user_facts_columns(conn)
             self._migrate_chat_history_columns(conn)
-            # 2026-09-22：pending_events 死表清除（CrossSessionReasoner 拆除的
-            # 收尾）。该表历史上「只写不读不回收」——写入的行从未被任何运行时
-            # 路径消费（orchestrator 检索后即丢弃），行内数据无保留价值；
-            # 幂等 DROP 兼顾存量库清理与新库跳过。
-            conn.execute("DROP TABLE IF EXISTS pending_events")
+            # 2026-09-22：死表批量清除（详见 docs/DELETION_LOG.md）——
+            # pending_events（CrossSessionReasoner 死链）、affinity_log /
+            # emotion_trajectory（零写入零读取）、working_memory / sessions
+            # （唯一写入者 DB 版 WorkingMemory 已拆除）。行数据从未被任何
+            # 运行时路径消费；幂等 DROP 兼顾存量库清理与新库跳过。
+            for dead in (
+                "pending_events",
+                "affinity_log",
+                "emotion_trajectory",
+                "working_memory",
+                "sessions",
+            ):
+                conn.execute(f"DROP TABLE IF EXISTS {dead}")  # noqa: S608
             conn.commit()
 
     def _migrate_chat_history_columns(self, conn) -> None:
@@ -883,33 +849,6 @@ class StructuredMemory:
             ).fetchall()
             return [dict(r) for r in rows]
 
-    # ── 好感度日志 ────────────────────────────────────────
-
-    def add_affinity_log(self, level: int, level_name: str,
-                         affection_points: float, reason: str = "") -> int:
-        """记录好感度变化"""
-        with self._conn(write=True) as conn:
-            cursor = conn.execute(                "INSERT INTO affinity_log (level, level_name, affection_points, reason) VALUES (?, ?, ?, ?)",
-                (level, level_name, affection_points, reason),
-            )
-            conn.commit()
-            return cursor.lastrowid  # type: ignore[no-any-return]
-
-    def get_affinity_history(self, limit: int = 50) -> list[dict[str, Any]]:
-        """获取好感度历史"""
-        with self._conn() as conn:
-            rows = conn.execute(                "SELECT * FROM affinity_log ORDER BY created_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-            return [dict(r) for r in rows]
-
-    def get_latest_affinity(self) -> dict[str, Any] | None:
-        """获取最新好感度记录"""
-        with self._conn() as conn:
-            row = conn.execute(                "SELECT * FROM affinity_log ORDER BY created_at DESC LIMIT 1"
-            ).fetchone()
-            return dict(row) if row else None
-
     # ── 聊天历史 ──────────────────────────────────────────
 
     def add_chat(self, role: str, content: str,
@@ -1250,25 +1189,6 @@ class StructuredMemory:
             )
             conn.commit()
             return cursor.rowcount  # type: ignore[no-any-return]
-    # ── 统计 ──────────────────────────────────────────────
-
-    def get_stats(self) -> dict[str, Any]:
-        """获取记忆统计"""
-        with self._conn() as conn:
-            fact_count = conn.execute("SELECT COUNT(*) FROM user_facts").fetchone()[0]
-            chat_count = conn.execute("SELECT COUNT(*) FROM chat_history").fetchone()[0]
-            today_chats = self.count_chats_today()
-            affinity_count = conn.execute("SELECT COUNT(*) FROM affinity_log").fetchone()[0]
-            latest_affinity = self.get_latest_affinity()
-
-            return {
-                "total_facts": fact_count,
-                "total_chats": chat_count,
-                "today_chats": today_chats,
-                "affinity_records": affinity_count,
-                "latest_affinity": latest_affinity,
-            }
-
     def health_check(self) -> dict:
         """健康检查"""
         try:

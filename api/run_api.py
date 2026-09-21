@@ -183,7 +183,20 @@ if _scheduler is not None:
         ws_server = holder.get("ws")
         if not isinstance(ws_server, WebSocketServer):
             return None
-        return ws_server.broadcast_proactive
+
+        async def _send(msg: str, session_key: str | None = None) -> None:
+            # 2026-09-22：带 session_key 的调用**定向**（web 会话主动消息），
+            # 0 送达抛异常由调度器判失败；无 session_key 的系统级消息保留广播。
+            if session_key:
+                delivered = await ws_server.send_proactive_to_session(session_key, msg)
+                if delivered == 0:
+                    raise RuntimeError(
+                        f"websocket 定向投递未送达任何归属连接（session={session_key}）"
+                    )
+                return
+            await ws_server.broadcast_proactive(msg)
+
+        return _send
 
     _scheduler.register_channel("websocket", _websocket_sender_factory)
     # P1-23：ws 连接/锁属 _run_ws 线程的事件循环——调度线程 _deliver 必须
@@ -306,18 +319,39 @@ if _scheduler is not None:
             )
             return False
 
-        async def _ws_send(text: str) -> bool:
+        async def _ws_send(session_key: str, text: str) -> bool:
             ws_server = _ws_holder.get("ws")
             if not isinstance(ws_server, WebSocketServer):
                 return False
             try:
-                # P0-6: broadcast_proactive 是 async，必须 await——旧实现同步调用
-                # 只创建协程对象即 return True（协程从未执行），使 web 提醒假送达。
-                await ws_server.broadcast_proactive(text)
-                return True
+                # P0-6: 必须 await——旧实现同步调用只创建协程对象即 return True
+                #（协程从未执行），使 web 提醒假送达。
+                # 2026-09-22: 从 broadcast 收口为**定向**（按会话键），广播会把
+                # A 的提醒推给所有打开控制台的连接。
+                delivered = await ws_server.send_proactive_to_session(session_key, text)
+                return delivered > 0
             except Exception as e:  # noqa: BLE001
-                logger.warning("提醒 websocket 投递失败: %s", e)
+                logger.warning("提醒 websocket 定向投递失败 session=%s: %s", session_key, e)
                 return False
+
+        def _character_resolver(session_key: str) -> str:
+            # 2026-09-22：多用户各绑不同角色——文案口吻按会话归属解析，
+            # 旧实现装配时取全局单值 current_character_name（绑错角色口吻）。
+            try:
+                char_id = str(user_mgr.get_user_character(session_key) or "")
+            except Exception:  # noqa: BLE001
+                char_id = ""
+            if not char_id:
+                return str(getattr(orchestrator.components.get("persona"), "current_character_name", "") or "")
+            try:
+                from api.deps import deps as _deps
+
+                cm = getattr(getattr(_deps, "shisi_reg", None), "character_manager", None)
+                card = cm.get_card(char_id) if cm else None
+                name = (getattr(card, "name", "") or "") if card else ""
+                return str(name)
+            except Exception:  # noqa: BLE001
+                return str(getattr(orchestrator.components.get("persona"), "current_character_name", "") or "")
 
         persona = orchestrator.components.get("persona")
         character_name = getattr(persona, "current_character_name", "") or ""
@@ -328,6 +362,7 @@ if _scheduler is not None:
             ws_sender=_ws_send,
             character_name=str(character_name),
             memory=orchestrator.components.get("memory"),
+            character_resolver=_character_resolver,
         )
         _scheduler.register_reminder_task(task)
         logger.info("提醒到期投递任务已装配（每分钟轮询，豁免静默时段）")

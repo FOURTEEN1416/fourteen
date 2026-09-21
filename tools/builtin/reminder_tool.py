@@ -135,6 +135,10 @@ class CalendarQueryTool(BaseTool):
             return ToolResult(False, error="Memory system not available")
         meta = kwargs.pop("_meta", None) if isinstance(kwargs.get("_meta"), dict) else None
         session_key = str((meta or {}).get("session_key") or "")
+        # 2026-09-22 防御收口：无 _meta（调用归属缺失）不得返回**全表**——
+        # 旧实现会跨用户泄露全部提醒。生产路径恒注入 _meta，此为纵深防线。
+        if not session_key:
+            return ToolResult(False, error="missing_session_key")
         try:
             reminders = self._sm.get_pending_reminders(session_key=session_key)
             return ToolResult(True, data=reminders)

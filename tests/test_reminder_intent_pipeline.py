@@ -403,20 +403,18 @@ class TestReminderDelivery:
         assert sm.get_due_reminders() == []  # 判死后不再投递
 
     def test_web_session_routes_to_ws(self, sm):
-        """ws_sender 契约=可返回 awaitable 且必须被 await（P0-6 假送达回归钉）。
+        """ws_sender 契约=``(session_key, text)``、可返回 awaitable 且必须被
+        await（P0-6 假送达回归钉 + 2026-09-22 定向签名）。"""
+        sent: list[tuple[str, str]] = []
 
-        旧测试用同步 list.append 钉死了「协程未执行也返回 True」的错误契约。
-        """
-        sent: list[str] = []
-
-        async def ws_send(text: str) -> bool:
-            sent.append(text)
+        async def ws_send(session_key: str, text: str) -> bool:
+            sent.append((session_key, text))
             return True
 
         sm.add_reminder("x", "2020-01-01 06:00", session_key="web-console-s1")
         task = ReminderDeliveryTask(sm, llm=None, ws_sender=ws_send)
         task()
-        assert sent == ["x"]
+        assert sent == [("web-console-s1", "x")]
         with sm._conn() as conn:
             row = conn.execute("SELECT status FROM reminders").fetchone()
         assert row["status"] == "delivered"
@@ -569,3 +567,31 @@ class TestTriggerTimeValidation:
         assert len(stored) == 1
         # 归一输出与输入同源：分钟精度 + ":00" 秒（与投递轮询的比较格式同构）
         assert stored[0]["trigger_time"] == f"{raw}:00"
+
+
+def test_query_reminders_without_meta_rejected(sm):
+    """无 _meta（调用归属缺失）不得返回全表——跨用户泄露纵深防线（2026-09-22）。"""
+    sm.add_reminder("someone", "2099-01-01 08:00", session_key="s1")
+    result = CalendarQueryTool(sm).execute()
+    assert result.success is False
+    assert result.error == "missing_session_key"
+
+
+def test_character_resolver_drives_prompt_name(sm):
+    """多用户各绑不同角色：文案口吻按会话归属解析（2026-09-22）。"""
+    captured: dict = {}
+
+    class _LLM:
+        async def chat(self, **kwargs):
+            captured["query"] = kwargs.get("query")
+            captured["system_prompt"] = kwargs.get("system_prompt")
+            return "到点啦，喝水去"
+
+    def resolver(session_key: str) -> str:
+        return "小凌" if session_key == "s9" else ""
+
+    sm.add_reminder("喝水", "2020-01-01 06:00", session_key="s9")
+    task = ReminderDeliveryTask(sm, llm=_LLM(), character_resolver=resolver)
+    task()
+    assert "喝水" in (captured.get("query") or "")
+    assert "小凌" in (captured.get("system_prompt") or "")
