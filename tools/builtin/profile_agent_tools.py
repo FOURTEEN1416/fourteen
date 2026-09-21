@@ -1,15 +1,6 @@
-"""智能体式画像/记忆工具 — LLM 直接编辑用户画像与记忆（非正则）。
+"""智能体式画像/记忆工具 — 写权威=EventLedger，profile 表仅投影。
 
-2026-09-21：用户裁决「像 opencode/Claude Code，让 LLM 编辑画像、同步记忆、长出手脚」。
-对标学习成果在 docs/research/2026-09-20_*（nana memory_extract / my-raze reinforce /
-Artemis curator）：**状态回写绑在模型侧结构化输出 + 工具**，而不是关键字正则。
-
-本模块提供：
-- update_user_profile：模型按 JSON 字段写/清画像
-- remember_facts：模型写入/强化用户事实（可带 category）
-- forget_facts：模型删除错误事实（回收站）
-- query_profile：模型查询当前画像（决策用）
-- profile_sync_agent：对话后由 LLM 工具调用同步画像（替代正则主路径）
+用户裁决 2026-09-21：写全走 ledger；对话后 profile_sync_agent；L1 可直接调工具。
 """
 
 from __future__ import annotations
@@ -26,6 +17,12 @@ def _profile_store():
     from shisi.memory.legacy.user_profile import default_store
 
     return default_store()
+
+
+def _runtime():
+    from shisi.agent_plane import runtime as apruntime
+
+    return apruntime
 
 
 def _sm_from_kwargs(kwargs: dict) -> Any:
@@ -46,7 +43,7 @@ def _sm_from_kwargs(kwargs: dict) -> Any:
 
 
 class UpdateUserProfileTool(BaseTool):
-    """LLM 编辑用户画像（结构化字段，不是正则）。"""
+    """LLM 编辑用户画像 — 写走 EventLedger，返回投影。"""
 
     name = "update_user_profile"
     description = (
@@ -86,54 +83,54 @@ class UpdateUserProfileTool(BaseTool):
         session_key = str((meta or {}).get("session_key") or kwargs.get("session_key") or "")
         if not session_key:
             return ToolResult(False, error="missing_session_key")
-        store = _profile_store()
-        fields: dict[str, Any] = {}
+        payload: dict[str, Any] = {}
         for k in ("nickname", "birthday", "occupation", "location", "notes"):
             if k in kwargs and kwargs[k] is not None:
-                fields[k] = kwargs[k]
+                payload[k] = kwargs[k]
         if kwargs.get("clear_birthday"):
-            fields["clear_birthday"] = True
-            fields["birthday"] = ""
+            payload["clear_birthday"] = True
+            payload["birthday"] = ""
         if kwargs.get("commitments_clear"):
-            fields["commitments"] = []
-        add_p = list(kwargs.get("preferences_add") or [])
-        rm_p = list(kwargs.get("preferences_remove") or [])
-        if add_p or rm_p:
-            cur = store.get(session_key)
-            prefs = [x for x in (cur.get("preferences") or []) if x not in rm_p]
-            for p in add_p:
-                if p and p not in prefs:
-                    prefs.append(p)
-            fields["preferences"] = prefs[-20:]
-        add_c = list(kwargs.get("commitments_add") or [])
-        if add_c:
-            cur = store.get(session_key)
-            commits = list(cur.get("commitments") or [])
-            for c in add_c:
-                c = str(c or "").strip()
-                if c and c not in commits:
-                    commits.append(c)
-            fields["commitments"] = commits[-8:]
-        if not fields:
+            payload["commitments_clear"] = True
+        if kwargs.get("preferences_add"):
+            payload["preferences_add"] = list(kwargs.get("preferences_add") or [])
+        if kwargs.get("preferences_remove"):
+            payload["preferences_remove"] = list(kwargs.get("preferences_remove") or [])
+        if kwargs.get("commitments_add"):
+            payload["commitments_add"] = list(kwargs.get("commitments_add") or [])
+        if not payload:
             return ToolResult(False, error="no_fields")
-        profile = store.upsert(session_key, **fields)
+        reason = str(kwargs.get("reason") or "")
+        try:
+            rt = _runtime()
+            profile = rt.write_profile_from_tool(
+                session_key,
+                payload,
+                reason=reason,
+                actor="profile_tool",
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("profile ledger write failed: %s", e)
+            return ToolResult(False, error=f"ledger_write_failed:{e}")
         logger.info(
             "[profile_agent] update user=%s reason=%s fields=%s",
             session_key,
-            kwargs.get("reason"),
-            list(fields.keys()),
+            reason,
+            list(payload.keys()),
         )
         return ToolResult(True, data={
             "profile": {k: profile.get(k) for k in (
                 "nickname", "birthday", "occupation", "location",
                 "preferences", "commitments", "notes",
             )},
-            "reason": kwargs.get("reason") or "",
+            "user_key": session_key,
+            "source": "event_ledger",
+            "reason": reason,
         })
 
 
 class RememberFactsTool(BaseTool):
-    """LLM 写入/强化用户事实（对齐 nana/my-raze：模型侧抽取）。"""
+    """LLM 写入/强化用户事实（memory 真源 + ledger 事件）。"""
 
     name = "remember_facts"
     description = (
@@ -208,6 +205,12 @@ class RememberFactsTool(BaseTool):
                 logger.warning("remember_facts write failed: %s", e)
         if not written:
             return ToolResult(False, error="no_valid_facts")
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            _runtime().append_memory_write_event(
+                session_key=user_key, facts=written, action="write"
+            )
         logger.info("[profile_agent] remember user=%s n=%d", user_key, len(written))
         return ToolResult(True, data={"written": written, "user_key": user_key})
 
@@ -273,8 +276,11 @@ class QueryProfileTool(BaseTool):
         session_key = str((meta or {}).get("session_key") or kwargs.get("session_key") or "")
         if not session_key:
             return ToolResult(False, error="missing_session_key")
-        store = _profile_store()
-        profile = store.get(session_key)
+        try:
+            profile = _runtime().project_profile_for(session_key)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("query_profile projection failed: %s", e)
+            profile = _profile_store().get(session_key)
         facts = []
         sm = _sm_from_kwargs(kwargs)
         if sm is not None:
@@ -290,7 +296,11 @@ class QueryProfileTool(BaseTool):
                     })
             except Exception:  # noqa: BLE001
                 pass
-        return ToolResult(True, data={"profile": profile, "facts": facts})
+        return ToolResult(True, data={
+            "profile": profile,
+            "facts": facts,
+            "source": "event_ledger_projection",
+        })
 
 
 # ── 对话后智能体同步（替代正则主路径）─────────────────────

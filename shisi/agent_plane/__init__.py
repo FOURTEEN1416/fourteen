@@ -16,6 +16,12 @@ from shisi.agent_plane.profile_projection import (
     seed_profile_baseline,
     write_profile_event,
 )
+from shisi.agent_plane.runtime import (
+    append_chat_events,
+    get_profile_prompt_block,
+    project_profile_for,
+    write_profile_from_tool,
+)
 
 __all__ = [
     "EventLedger",
@@ -26,4 +32,8 @@ __all__ = [
     "project_profile",
     "seed_profile_baseline",
     "write_profile_event",
+    "append_chat_events",
+    "get_profile_prompt_block",
+    "project_profile_for",
+    "write_profile_from_tool",
 ]

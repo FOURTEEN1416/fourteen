@@ -52,7 +52,11 @@ def test_persona_service_uses_profile_slot():
 
     src = inspect.getsource(persona_service.PersonaService.build_system_prompt)
     assert "用户画像" in src
-    assert "to_prompt_block" in src or "user_profile" in src
+    assert (
+        "get_profile_prompt_block" in src
+        or "to_prompt_block" in src
+        or "user_profile" in src
+    )
 
 
 def test_orchestrator_updates_profile_from_user_only():

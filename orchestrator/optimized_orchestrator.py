@@ -1107,8 +1107,23 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 logger.debug("ASE on_chat skipped: %s", e)
 
         # 用户画像：正则关键字提取已从聊天热路径剔除（2026-09-21 用户裁决）。
-        # 唯一主路径：对话后 profile_sync_agent + L1 的画像/记忆工具。
+        # 唯一写权威：profile_sync_agent / L1 工具 → EventLedger 投影。
         if session_id:
+            try:
+                from shisi.agent_plane.runtime import append_chat_events, get_profile_prompt_block
+
+                append_chat_events(
+                    session_key=session_id,
+                    character_id=str(character_id or ""),
+                    user_msg=user_msg_clean,
+                    reply=reply if isinstance(reply, str) else "",
+                    slots={
+                        "has_profile_block": bool(get_profile_prompt_block(session_id)),
+                        "emotion_tag": str(emotion_tag or ""),
+                    },
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("ledger turn events failed: %s", e)
             try:
                 llm_for_sync = self.components.get("llm")
                 sm_for_sync = None

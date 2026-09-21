@@ -185,6 +185,13 @@ if _scheduler is not None:
         return ws_server.broadcast_proactive
 
     _scheduler.register_channel("websocket", _websocket_sender_factory)
+    try:
+        _llm = orchestrator.components.get("llm")
+        if _llm is not None and hasattr(_scheduler, "set_llm_provider"):
+            _scheduler.set_llm_provider(_llm)
+            logger.info("主动消息 LLM 决策已注入调度器")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("set_llm_provider failed: %s", e)
 
     def _wechat_sender_factory():
         try:

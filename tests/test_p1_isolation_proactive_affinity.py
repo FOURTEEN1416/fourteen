@@ -145,7 +145,8 @@ def test_scheduler_source_targets_session_key():
 
     src = inspect.getsource(sched_mod.ProactiveScheduler._send_targeted)
     assert "session_key" in src
-    src2 = inspect.getsource(sched_mod.ProactiveScheduler._check_ase_per_user)
+    # P1：定向投递在 LLM 主动路径；闸门类源码不再承担发送
+    src2 = inspect.getsource(sched_mod.ProactiveScheduler._llm_proactive_one_user)
     assert "session_key=user_key" in src2 or "session_key=" in src2
 
 

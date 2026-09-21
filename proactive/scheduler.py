@@ -123,6 +123,8 @@ class ProactiveScheduler:
         self._get_last_chat_time = get_last_chat_time
         self._is_online_check = is_online_check
         self._emotion_engine = emotion_engine
+        # LLM 主动决策（用户裁决：时机与内容由模型判断，无策略闸）
+        self._llm_provider: Any | None = None
 
         self._scheduler: Any = None
         self._active_tasks: dict[str, bool] = {}
@@ -150,6 +152,28 @@ class ProactiveScheduler:
         self._load_config_file()
 
         logger.info("ProactiveScheduler initialized (APScheduler=%s)", HAS_APSCHEDULER)
+
+    def set_llm_provider(self, llm: Any | None) -> None:
+        """注入 LLM，供主动消息决策（P1：LLM 判时机与文案）。"""
+        self._llm_provider = llm
+
+    def _resolve_proactive_llm(self, eng: Any | None = None) -> Any | None:
+        if self._llm_provider is not None:
+            return self._llm_provider
+        if eng is not None:
+            llm = getattr(eng, "_llm", None)
+            if llm is not None:
+                return llm
+        try:
+            from api.deps import deps
+
+            orch = getattr(deps, "orch", None)
+            comps = getattr(orch, "components", None)
+            if isinstance(comps, dict):
+                return comps.get("llm")
+        except Exception:  # noqa: BLE001
+            pass
+        return None
 
     def register_channel(self, name: str, sender_factory: Callable[[], Any]) -> None:
         """
@@ -653,6 +677,11 @@ class ProactiveScheduler:
             self._last_check_time = datetime.now(tz=timezone.utc)
 
     def _check_ase_per_user(self) -> None:
+        """P1：主动消息由 **LLM 判断**是否开口、说什么（用户裁决：无策略闸）。
+
+        系统仅保证投递正确性：LLM=false 不发；**投递成功才记账**。
+        urgency 仅作上下文信号，不作为发送硬闸。
+        """
         from proactive.ase_hub import ASEHub
 
         hub: ASEHub = self.ase  # type: ignore[assignment]
@@ -660,57 +689,113 @@ class ProactiveScheduler:
         if not user_keys:
             logger.info("ASE tick: 无用户目标，跳过（hub_known=%s）", hub.known_user_keys())
             return
-
-        quiet = self._is_quiet_hours()
-        logger.info(
-            "ASE tick per-user: targets=%d quiet=%s %s",
-            len(user_keys), quiet, user_keys[:8],
-        )
+        logger.info("proactive LLM tick per-user: targets=%d %s", len(user_keys), user_keys[:8])
         for user_key in user_keys:
             try:
-                eng = hub.get(user_key)
-                # 每用户引擎自带 last_chat 状态；全局 last_chat 回调不适用多用户
-                hours = eng._hours_since_last_chat()
-
-                is_online = True
-                if self._is_online_check:
-                    try:
-                        if _accepts_key(self._is_online_check):
-                            is_online = bool(self._is_online_check(user_key))
-                        else:
-                            is_online = bool(self._is_online_check())
-                    except TypeError:
-                        is_online = bool(self._is_online_check())
-
-                if quiet or not is_online:
-                    eng.tick(hours, dry_run=True)
-                    continue
-
-                count_before = getattr(eng, "_daily_message_count", -1)
-                result = eng.tick(hours)
-                logger.info(
-                    "ASE tick user=%s hours=%.2f urgency=%.2f daily_count=%d result=%s reason=%s",
-                    user_key,
-                    hours,
-                    getattr(getattr(eng, "urgency", None), "total", -1.0),
-                    count_before,
-                    bool(result),
-                    getattr(eng, "_last_skip_reason", "") or ("ok" if result else "unknown"),
-                )
-                if not result:
-                    continue
-                message = result.get("message", "")
-                logger.info("ASE triggered user=%s [%s] %s", user_key, result.get("type"), message[:40])
-                if self._deliver(message, session_key=user_key):
-                    hub.commit_sent(user_key, result)
-                    logger.info(
-                        "主动消息已记账 user=%s daily_count %s -> %s",
-                        user_key,
-                        count_before,
-                        getattr(eng, "_daily_message_count", -1),
-                    )
+                self._llm_proactive_one_user(hub, user_key)
             except Exception as e:  # noqa: BLE001
-                logger.warning("ASE per-user tick failed user=%s: %s", user_key, e)
+                logger.warning("proactive LLM tick failed user=%s: %s", user_key, e)
+
+    def _llm_proactive_one_user(self, hub: Any, user_key: str) -> None:
+        from proactive.ase_engine import _local_now, sanitize_message
+        from proactive.llm_proactive import build_proactive_context, decide_proactive
+        from shisi.agent_plane.runtime import (
+            append_proactive_event,
+            get_profile_prompt_block,
+            project_profile_for,
+        )
+
+        eng = hub.get(user_key) if hasattr(hub, "get") else None
+        hours = eng._hours_since_last_chat() if eng is not None and hasattr(eng, "_hours_since_last_chat") else 0.0
+        # urgency 只更新/读取作信号，不作发送闸
+        urgency = None
+        if eng is not None:
+            try:
+                eng.tick(hours, dry_run=True)
+                urgency = float(getattr(getattr(eng, "urgency", None), "total", 0.0) or 0.0)
+            except Exception:  # noqa: BLE001
+                urgency = None
+        try:
+            profile = project_profile_for(user_key)
+        except Exception:  # noqa: BLE001
+            profile = {}
+        rel = ""
+        try:
+            block = get_profile_prompt_block(user_key)
+            if block:
+                rel = block.split("\n", 1)[0][:80]
+        except Exception:  # noqa: BLE001
+            rel = ""
+        now = _local_now()
+        ctx = build_proactive_context(
+            session_key=str(user_key),
+            hours_since_last_chat=float(hours or 0.0),
+            local_time=now.strftime("%Y-%m-%d %H:%M %A"),
+            profile=profile,
+            relationship_hint=rel,
+            urgency_signal=urgency,
+        )
+        llm = self._resolve_proactive_llm(eng)
+        if llm is None:
+            logger.info("proactive LLM unavailable user=%s skip", user_key)
+            append_proactive_event(
+                session_key=user_key, sent=False, reason="llm_unavailable"
+            )
+            return
+        decision = decide_proactive(llm, ctx)
+        logger.info(
+            "proactive LLM decision user=%s should=%s wait=%s reason=%s",
+            user_key,
+            decision.get("should_contact"),
+            decision.get("wait_minutes"),
+            (decision.get("reason") or "")[:80],
+        )
+        if not decision.get("should_contact"):
+            append_proactive_event(
+                session_key=user_key,
+                sent=False,
+                reason=str(decision.get("reason") or "llm_false"),
+                wait_minutes=decision.get("wait_minutes"),
+            )
+            return
+        message = sanitize_message(str(decision.get("message") or ""))
+        if not message:
+            append_proactive_event(
+                session_key=user_key,
+                sent=False,
+                reason="empty_message_after_sanitize",
+                wait_minutes=decision.get("wait_minutes"),
+            )
+            return
+        if self._deliver(message, session_key=user_key):
+            # 仅投递正确性记账（非频率策略）
+            if eng is not None and hasattr(eng, "commit_sent"):
+                import contextlib
+
+                with contextlib.suppress(Exception):
+                    eng.commit_sent(
+                        {
+                            "message": message,
+                            "type": "llm_proactive",
+                            "reason": decision.get("reason") or "",
+                        }
+                    )
+            append_proactive_event(
+                session_key=user_key,
+                sent=True,
+                message=message,
+                reason=str(decision.get("reason") or ""),
+                wait_minutes=decision.get("wait_minutes"),
+            )
+            logger.info("proactive LLM delivered user=%s %s", user_key, message[:40])
+        else:
+            append_proactive_event(
+                session_key=user_key,
+                sent=False,
+                reason="deliver_failed",
+                message=message[:80],
+                wait_minutes=decision.get("wait_minutes"),
+            )
 
     def _check_ase_global(self) -> None:
         """旧全局 ASE 单例路径（兼容；新装配走 ASEHub）。"""
