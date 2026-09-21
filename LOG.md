@@ -2832,3 +2832,17 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 **文档刷新清单**：`AGENTS.md`（v1.35 头部 41→91 勘误 + 验证句精确化 + §0 + §2 测试行 + §4.3 十五次刷新 + 分块配方行）；`CODE_GRAPH.md` **v3.8.18**（标题 + 前言块 + §1.1 Python 测试行 + 合计行 + 修订历史行）；`README.md`（徽章 1709→**1751** + 测试口径 + 结构树）；`docs/board/BOARD.md` 登记表（agent-x ✅ 已收编·已卸窗 / ax-review ✅ 产出留分支·已卸窗 + 新增 selftalk 🔴 存档·不可 merge 行）；本 LOG v1.35 条目勘误两处（行数 + 四块之和 1630≠1657）。
 
 **部署**：push 后按 A 档标准链上服务器（预检 → pull → remote_deploy.sh → health + md5 抽验），结果见下一条补记。
+
+---
+
+## v1.35 补记（二）· A 档三端同步部署（2026-09-21）
+
+**执行链**：push `8ae7e30..78b6a47`（37a72ab / c8dc2b1 / a672617 / 78b6a47 共 4 提交）→ 服务器只读预检 → `git pull --ff-only` → `deploy/remote_deploy.sh` → 四项核验。
+
+**预检实证（修正此前认知）**：服务器起点并非 v1.33（`3f5a4c6`）而是 **`8d87134e`**（agnes 回链首 + 人机味修复，已含 v1.34 P0批1/批2 与批5 `5f5dc87d`）——真实缺口为 **22 提交 / 125 文件 +4658/−6998**（persona 项42-47、批6b 项2-11、CI 修复、v1.35 收仓、口径统一）。env 三项预检全绿（`JWT_SECRET≥32` ✓ / `API_KEY` 在且无占位符 ✓ / `AI_GF_ENV=prod` ✓），fail-closed 重启风险排除。服务器工作树仅 3 个 untracked 临时脚本（`scripts/_tmp_*`，不挡 pull，未擅动）。BOARD 追加区所载「b7cd513 已部署生产」经核实为真（`b7cd513` 为 main 祖先且早于服务器起点）。
+
+**执行**：`git pull --ff-only origin main` Fast-forward `8d87134e→78b6a478`（完整输出核验，无 Aborting，sparse-checkout 正常排除 B 档）→ `remote_deploy.sh` 四步全过（pip install -e → npm ci → 前端构建 925ms → `systemctl restart ai-girlfriend` → nginx reload @22:20:39）。
+
+**四项核验全绿**：① health 200（`environment: production`）；② `systemctl is-active` = **active**，app.log 显示三 owner 微信通道（owner=2/4/7）凭证免扫码重连并进入消息轮询；③ 死模块/新模块服务器侧落点正确（`tracing.py`/`character_card/`/`style_enhancer.py`/`rag_engine.py` gone；`utils/session_key`、`llm_bridge`、`emotion_state`、`json_state`、`shisi/core/conversation_turn` EXISTS）；④ **md5 抽验 4/4 一致**（归一化行尾：`config/shisi.yaml` / `orchestrator/tool_gate.py` / `api/app_factory.py` / `main.py`）。
+
+**三端终态**：本地 = origin/main = 服务器 HEAD = **`78b6a47`**；工作树双端 clean（服务器余 3 个 untracked 临时脚本待用户处置）。
