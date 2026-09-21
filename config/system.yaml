@@ -101,7 +101,6 @@ api:
   rate_limit_per_minute: 60
 
 observability:
-  tracing_enabled: true
   metrics_enabled: true
   metrics_port: 9090
   health_check_enabled: true
@@ -112,10 +111,6 @@ observability:
 # ── 语音合成配置 ──
 voice:
   enabled: true                         # 是否启用语音合成
-  audio_converter:
-    ffmpeg_path: "ffmpeg"
-    preferred_format: "silk"
-    silk_sample_rate: 24000
   asr:                                  # 语音转文字（OpenAI 兼容 /audio/transcriptions，08-28 补实）
     enabled: false                      # 启用后微信语音消息自动转文字进对话
     api_base: ""                        # 如 https://api.siliconflow.cn/v1
@@ -124,7 +119,6 @@ voice:
     language: "zh"
     timeout: 30.0
   engine: "mimo-tts"                   # 唯一引擎（2026-08-28 MiMo-only 收敛）
-  emotion_enabled: true                 # 启用情感语音参数注入
   # MiMo TTS配置（优先API，本地引擎作为降级）
   # 文档: https://platform.xiaomimimo.com/docs
   mimo-tts:
@@ -156,30 +150,15 @@ multimodal:
 # ── 表情包配置 ──
 sticker:
   enabled: true
-  auto_recommend: true
-  send_mode: "image_channel"
-  emotion_mapping:
-    "开心": ["开心", "可爱", "撒娇"]
-    "伤心": ["伤心", "委屈"]
-    "生气": ["生气", "傲娇"]
-    "撒娇": ["撒娇", "可爱", "开心"]
-    "害怕": ["害怕", "紧张"]
-    "害羞": ["害羞", "可爱"]
-    "默认": ["可爱"]
-  send_delay_ms: 300
 
 # ── 角色卡配置 ──
 character_card:
   enabled: true                         # 是否启用角色卡兼容
-  default_card: ""                      # 默认角色卡路径 (空=不加载)
-  card_dir: "config/characters"          # 角色卡扫描目录
-  auto_load: true                        # 启动时自动加载默认角色卡
 
 # ── 长期记忆增强配置 ──
 memory_ext:
-  enabled: true                         # 是否启用记忆增强（与 fusion.memory_ext.enabled 保持一致）
+  enabled: true                         # 是否启用记忆增强
   collection_name: "long_term_memories"  # ChromaDB集合名
-  auto_extract: true                     # 是否自动从对话提取记忆
 
 fusion:
   emotion:
@@ -190,15 +169,6 @@ fusion:
     anchor_verification_enabled: true
   memory:
     forgetting_model: exponential
-    # 是否使用 shisi 记忆服务适配层（双轨架构开关）
-    # true  → 使用 shisi.application.memory_service.ShisiMemoryService
-    # false → 使用 memory.memory_pipeline.MemoryPipeline（已废弃，默认 true）
-    use_shisi_memory: true
-  rag:
-    # 是否使用 shisi knowledge 适配层（历史双轨开关，代码从不读取它做分支）
-    # true  → 使用 shisi.application.knowledge_service.ShisiKnowledgeAdapter（唯一路径；
-    #         旧 RAGEngineV2 死码已于 2026-09-21 删除，见 docs/DELETION_LOG.md）
-    use_shisi_rag: true
   ase:
     frequency_mode: adaptive
     generation_mode: llm
@@ -206,12 +176,7 @@ fusion:
   orchestrator_mode: fast               # full=12步流程, fast=精简流程
   # ── 新模块控制在fusion层 ──
   character_card:
-    enabled: true
     mode: "merge"                        # merge=合并, replace=替换, append=追加
-  voice:
-    enabled: true
-  memory_ext:
-    enabled: true
   persona_extractor:
     enabled: true
     mode: lite

@@ -1,4 +1,4 @@
-﻿"""网络人设增强 CLI — 从互联网搜索并完善角色人设知识库。
+"""网络人设增强 CLI — 从互联网搜索并完善角色人设知识库。
 
 融合四种内容源：
 1. Direct URL scraping — requests + BeautifulSoup（通用网页抓取）

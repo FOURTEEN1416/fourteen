@@ -221,13 +221,6 @@ def get_wechat_state(user_id: int | None = None, slot: int = 0) -> dict:
     return _load_state()
 
 
-def _clear_credentials(path=None):
-    path = path or CREDENTIALS_PATH
-    if os.path.exists(path):
-        os.remove(path)
-        logger.info("已清除保存的微信凭证")
-
-
 # ═══════════════════════════════════════════════
 # 工具函数
 # ═══════════════════════════════════════════════

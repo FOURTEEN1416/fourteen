@@ -730,3 +730,58 @@ equire() in MessageList.tsx even though MessageList is unused
 - 副作用（已登记）：`diary_summaries` 中修复前写入的行仍以 **UTC 日期**为键，修复后当日查询键为本地日期 → **历史行存在一次性键错位**，不迁移、自然过期（旧摘要仍可经 `detect_mood_trend` 全量读取）
 
 **Reversible**: 代码单提交 revert 即恢复；死函数无调用方，删除不影响任何路径。
+
+---
+
+## [2026-09-21] 备注式删除与逻辑矛盾专项收口
+
+**依据**：用户指令「扫描仓库中的备注式删除、逻辑矛盾的代码设计」+ 复核指令「按推荐进行、激进一次性根治、严禁备注式清除」。
+**方法**：AST 零引用分析（全仓 token 化，主仓 405 个 .py）+ 配置键消费矩阵 + 同名常量异值比对。
+
+### 配置层（零消费键 · 双真源收口）
+- `config/shisi.yaml` 234 → 41 行：删 app / character / conversation / emotion / websocket / security / performance / logging / voice / features 全部段 + `affinity.initial_value`/`growth_rate`/`daily_interaction_limit`。
+  依据：`shisi.config.get_config` 全仓调用点**仅**消费 `memory`(5 键) 与 `affinity`(max_value/min_value/decay_rate/unlocks)。其中 `security.*` 与 `system.yaml` 的 `safety.*` 构成**双套安全配置**（改前者静默无效）。
+- `config/emotion.yaml`：删 `emotion.initial` / `emotion.affinity_levels` / `emotion.style_influence` / `energy` + `affection.max`/`per_miss_day`。
+  依据：EmotionEngine 平铺读取 decay+affection 共 6 键；`affinity_levels` 的消费者读的是 `emotion_style_matrix.yaml`（EmotionStyleCoupler 两处实例化均指向它）。
+- `config/system.yaml`：删 `observability.tracing_enabled`、`voice.audio_converter.*`、`voice.emotion_enabled`、`sticker.auto_recommend`/`send_mode`/`send_delay_ms`/`emotion_mapping`、`character_card.auto_load`/`default_card`/`card_dir`、`memory_ext.auto_extract`、`fusion.memory.use_shisi_memory`、`fusion.rag.use_shisi_rag`、`fusion.voice.enabled`/`fusion.character_card.enabled`/`fusion.memory_ext.enabled`（后三与顶层同名段构成双真源）。
+- `my_character/character_config.py::_default_emotion()`：兜底表键集与文件严格对齐。
+
+### 死模块（整文件）
+- `observability/tracing.py` —— `tracer.span()` 全仓 **0 调用**、`start_trace()` 0 调用 → `get_trace_id()` 恒空；`TRACE_NODES`(18 节点) 纯声明。连带 `observability/__init__.py` 导出、`orchestrator/_init_mixin.py` 的 `components["tracer"]` 注册。
+- `my_character/style_enhancer.py` —— `StyleEnhancer`/`EnhancedStyle`/`enhance_style`/`generate_style_prompt_segment`/`STYLE_DIMENSIONS` 全仓零消费者。连带 `my_character/__init__.py` 导出。
+- `shisi/core/services/emotion_detector.py` —— 仅 `__init__.py` 墓碑式 re-export。其 `POSITIVE_WORDS` 含「对不起/想/好」致「好烦」净 **+0.5**（抱怨加好感）的内在矛盾随之消除。
+- `shisi/wechat/proactive_messenger.py` —— registry 实例化但 5 个方法零生产调用（与 2026-09-17 用户裁决「未接线微信能力删除」同例）。连带 `shisi/api/registry.py` 3 处、`api/app_factory.py` 状态清单、`tests/test_wechat.py::TestWeChatProactiveMessenger`、`tests/test_integration.py::test_proactive_message_with_context`。
+
+### 死函数 / 死属性 / 兼容别名
+- `api/path_security.py::safe_join_path`（+ `_SAFE_ID_PATTERN` 死常量 + 无用 `Path` import）——零调用，且 `startswith` 前缀校验存在绕过缺陷。
+- `wechat_direct/wechat_connector.py::_clear_credentials` —— 已被 per-connector 凭证（`session_dir/credentials.json`；连续 -14 会话自愈时自删凭证）取代。
+- `api/routers/storyline_routes.py::_persist_state_to_json`、`StorylineDetectResponse`；`api/routers/character_routes.py::MemoryFactResponse`。
+- `orchestrator/optimized_orchestrator.py`：`_rag`/`_pii`/`_injection`/`_multimodal` 四个零读取 property。
+- 零引用兼容别名：`my_character.__init__` 的 `EmotionEngineV2`/`EmotionEngineOptimized`/`PersonaEngineV2`/`PersonaEngineOptimized`；`shisi.memory.legacy.__init__` 的 `MemoryPipelineV2`/`MemoryPipelineOptimized`。
+
+### 残留修复
+- BOM(U+FEFF) 清除：`api/routers/auth_routes.py`、`scripts/enrich_persona_web.py`（此前使 `ast.parse(str)` 直接 SyntaxError）。
+- `MIN_CHUNKS` 双阈值统一：`deploy/seed.py` 2 → 3（与 `scripts/enrich_knowledge.py` 同源）。
+- 根目录残留审计脚本 `.audit_block.py` / `.audit_dup.py` 删除（untracked、未被 gitignore 覆盖）。
+
+### 收仓期修复（2026-09-21 复核）
+- **`config/shisi.yaml` 的 `voice` 段误删回归**：`shisi/voice/emotion_tts.py` 经
+  `get_config("voice", "default_tts")` / `get_config("voice", "emotion_params")` **真实消费**该段
+  （情感→语速/音调映射，9 个中文情感键）。初版消费矩阵核查因 `head -30` **截断输出**而漏检
+  → `tests/test_modules.py::TestVoiceEnhancer` 2 例失败（`speed` 回落默认 1.0）。
+  已恢复该段（与 HEAD **逐键一致**，root 键现为 memory / affinity / voice），复测 `test_modules.py` **27 passed**。
+  🔑 **教训**：配置消费矩阵核查**禁止用 head 截断输出**——父键（如 `emotion_params`）的消费者可能出现在被截断的行里。
+
+### Verification
+- ruff 0.16.8（CI 同版本）改动域 → **All checks passed**
+- `test_wechat.py` + `test_config_manager.py` + `test_p2_batch6_persona.py` + `test_integration.py` → **72 passed / 0 failed**
+- 三份 yaml 解析通过；`my_character` / `shisi.core.services` / `observability` 导入冒烟通过
+
+### 遗留（未在本批次处理）
+- `tests/test_code_review_r2_state_and_llm.py` 的 4 处 ruff 错误属**并行窗口在制品**（17:08 未跟踪）；`.chunk{0,1,2}.txt` 亦为该窗口分块跑测试所用。
+- `proactive/scheduler.py::_accepts_key`、`proactive/ase_hub.py::_forget`、`llm_provider/__init__.py::get_llm_names` 三项零引用**因文件处于并行在制品状态未触碰**。
+- `tests/test_main_stream.py:273` 的 `if False: yield ""` 经复核为**空 async generator 的标准写法**（`# noqa: PIE798`），非死分支，保留。
+- `tests/test_memory_pipeline.py` / `test_memory.py` 首行 TODO 经复核为**真实未完成的迁移状态表**（shisi 无等价类），非垃圾注释，保留待迁移批次。
+
+**Reversible**: 全部改动均在 tracked 文件内，`git checkout -- <path>` 或 revert 单提交即整体恢复；被删文件（4 个模块）同属 tracked，`git checkout` 可还原。
+

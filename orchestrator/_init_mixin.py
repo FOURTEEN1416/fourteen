@@ -93,9 +93,6 @@ class _InitPhasesMixin:
     # ─────────────────────────────────────────────────────────────
     def _init_core(self, config_dir: str) -> None:
         self.components["config"] = ConfigManager(config_dir=config_dir)
-
-        from observability.tracing import tracer
-        self.components["tracer"] = tracer
         self.components["health"] = health_checker
 
         cfg = self.components["config"].config

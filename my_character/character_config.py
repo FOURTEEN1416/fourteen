@@ -161,14 +161,12 @@ class ConfigLoader:
 
     @staticmethod
     def _default_emotion() -> dict:
+        """emotion.yaml 的兜底表——键集与文件严格一致（仅 emotion.decay 与 affection）。"""
         return {
             "emotion": {
-                "initial": {"emotion": "NEUTRAL", "energy": 1.0, "affinity": 0, "intensity": 0.5},
                 "decay": {"intensity_per_minute": 0.001, "energy_recovery_per_hour": 0.05,
                           "energy_drain_per_message": 0.02},
             },
-            "energy": {"max": 1.0, "min": 0.0, "recovery_rate": 0.05, "drain_per_reply": 0.02,
-                       "critical_threshold": 0.2},
-            "affection": {"max": 500, "per_positive_reply": 1.0, "per_negative_reply": -0.5,
-                          "per_day_decay": 0.1, "per_miss_day": -1.0},
+            "affection": {"per_positive_reply": 1.0, "per_negative_reply": -0.5,
+                          "per_day_decay": 0.1},
         }

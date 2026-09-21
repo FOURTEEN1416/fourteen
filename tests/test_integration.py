@@ -180,11 +180,3 @@ class TestE2EFlow:
         state = reg.vital_engine.get_current("c1")
         assert state.heart_rate > 90
 
-    def test_proactive_message_with_context(self, app_and_reg):
-        """E2E: 主动消息附带情感摘要"""
-        _, reg, _ = app_and_reg
-        reg.affinity_enhancer.update("c1", 72, "chat")
-        reg.stage_engine.evaluate("c1", 72)
-        result = reg.proactive_messenger.enhance_proactive_message("早安~", "c1", "开心")
-        assert result["summary"] is not None
-        assert "开心" in result["summary"]

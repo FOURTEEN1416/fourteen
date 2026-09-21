@@ -41,7 +41,6 @@ from observability.metrics import (
     set_active_sessions,
     setup_metrics,
 )
-from observability.tracing import Tracer, TraceSpan, tracer
 
 __all__ = [
     # Logging
@@ -71,10 +70,6 @@ __all__ = [
     "MemoryExtConfig",
     # Config manager
     "ConfigManager",
-    # Tracing
-    "Tracer",
-    "TraceSpan",
-    "tracer",
     # Metrics
     "setup_metrics",
     "record_chat_duration",

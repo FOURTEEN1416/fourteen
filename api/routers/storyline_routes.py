@@ -23,17 +23,6 @@ logger = logging.getLogger("api.storyline_routes")
 router = APIRouter(prefix="/api/characters", tags=["storyline"])
 
 
-def _persist_state_to_json(character_id: str, state_dict: dict[str, Any]) -> None:
-    """将剧情线状态持久化到角色 JSON 文件。"""
-    data = _load_character(character_id)
-    if data is None:
-        return
-    data["storyline_state"] = state_dict
-    # 墙钟/元数据时间戳统一 UTC ISO（与 character_routes 同源，主机时区无关）
-    data["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
-    _save_character(character_id, data)
-
-
 CHARACTERS_DIR = project_path("config", "characters")
 
 
@@ -77,13 +66,6 @@ class StorylineConfigRequest(BaseModel):
     max_duration_minutes: int = 10080
     stages: list[dict[str, Any]] = []
     ending: dict[str, Any] = {}
-
-
-class StorylineDetectResponse(BaseModel):
-    has_storyline: bool
-    confidence: float
-    matched_patterns: list[str]
-    suggested: dict[str, Any] | None = None
 
 
 # ── API 端点 ──

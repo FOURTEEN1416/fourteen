@@ -19,7 +19,6 @@ from ..stats.analytics import AnalyticsService
 from ..sticker.sticker_manager import StickerManager
 from ..vital_signs.vital_engine import VitalSignsEngine
 from ..voice.emotion_tts import VoiceEnhancer
-from ..wechat.proactive_messenger import WeChatProactiveMessenger
 from . import (
     affinity_routes,
     character_routes,
@@ -45,7 +44,6 @@ class AiyuRegistry:
     vital_engine: VitalSignsEngine | None = None
     voice_enhancer: VoiceEnhancer | None = None
     analytics_service: AnalyticsService | None = None
-    proactive_messenger: WeChatProactiveMessenger | None = None
 
 
 def setup_shisi(
@@ -93,10 +91,6 @@ def setup_shisi(
     # 2026-09-17：WeChatCommandHandler（微信指令处理器）删除——生产消息链路从未
     # 接线（悬空能力），用户裁决不走微信指令入口（角色切换走 web 控制台）。
 
-    reg.proactive_messenger = WeChatProactiveMessenger(
-        affinity_enhancer=reg.affinity_enhancer,
-        stage_engine=reg.stage_engine,
-    )
 
     if app is not None:
         _mount_routes(app, reg)

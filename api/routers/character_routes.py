@@ -119,15 +119,6 @@ class MemoryFactCreate(BaseModel):
     tags: list[str] = []
 
 
-class MemoryFactResponse(BaseModel):
-    id: str
-    content: str
-    category: str
-    tags: list[str]
-    created_at: str
-    character_id: str
-
-
 # ── 数据持久化工具 ───────────────────────────────────────
 
 

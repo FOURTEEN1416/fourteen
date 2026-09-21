@@ -313,7 +313,7 @@ def create_api_app(
                 "character_manager", "affinity_enhancer", "stage_engine",
                 "sticker_manager", "favorite_manager", "forward_manager",
                 "vital_engine", "voice_enhancer", "analytics_service",
-                "proactive_messenger", "training_manager",
+                "training_manager",
             ):
                 modules[attr] = getattr(shisi_reg, attr, None) is not None
             return {"available": True, "modules": modules}

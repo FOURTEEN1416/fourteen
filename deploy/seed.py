@@ -42,7 +42,7 @@ if str(_project_root) not in sys.path:
 
 CHARS_DIR = Path("config/characters")
 PRESETS_DIR = Path("data/presets")
-MIN_CHUNKS = 2
+MIN_CHUNKS = 3  # 知识覆盖度达标线，与 scripts/enrich_knowledge.py 同源
 
 
 def build_preset_index():

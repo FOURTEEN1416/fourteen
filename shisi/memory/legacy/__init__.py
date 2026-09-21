@@ -23,12 +23,9 @@ from .working_memory import WorkingMemory
 # （get_pending_events 全表返回、check_conflict 不带 user_key），与 pipeline
 # 实际使用的独立模块形成双实现地雷。包入口现唯一指向现役实现。
 
-MemoryPipelineV2 = MemoryPipeline
-MemoryPipelineOptimized = MemoryPipeline
-
 __all__ = [
     "VectorMemory", "StructuredMemory", "FactExtractor", "DiarySummarizer",
-    "MemoryPipeline", "MemoryPipelineV2", "MemoryPipelineOptimized",
+    "MemoryPipeline",
     "WorkingMemory", "EpisodicMemory", "SemanticMemory",
     "ImportanceScorer", "ForgettingManager", "ConflictDetector", "CrossSessionReasoner",
 ]

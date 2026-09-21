@@ -1,73 +1,11 @@
-# 唯一的你 - 核心配置文件
-# Unique You AI Virtual Companion System - Core Configuration
+# 唯一的你 - 核心配置（shisi 域）
+#
+# 消费方：shisi/config.py::get_config
+# 仅以下键被代码读取。其余历史键（app / character / conversation / emotion /
+# websocket / security / performance / logging / features）从未被任何
+# 代码读取，已于 2026-09-21 清除，见 docs/DELETION_LOG.md。
 
-# 应用基础配置
-app:
-  name: "唯一的你"
-  version: "3.0.0"
-  description: "AI 系统"
-  # 运行模式: development, production, testing
-  mode: "development"
-  # 时区设置
-  timezone: "Asia/Shanghai"
-  # 默认语言
-  language: "zh-CN"
-
-# 角色配置
-character:
-  # 默认角色名称
-  default_name: "十四"
-  # 角色性格特征
-  personality:
-    - "温柔体贴"
-    - "善解人意"
-    - "活泼可爱"
-    - "略带傲娇"
-  # 说话风格
-  speaking_style:
-    - "使用颜文字表达情感"
-    - "偶尔使用网络流行语"
-    - "语气温和亲切"
-  # 兴趣爱好
-  interests:
-    - "阅读"
-    - "音乐"
-    - "动漫"
-    - "游戏"
-
-# 对话配置
-conversation:
-  # 最大上下文长度
-  max_context_length: 20
-  # 消息历史保留时间(天)
-  history_retention_days: 30
-  # 空闲会话超时时间(分钟)
-  session_timeout_minutes: 30
-  # 是否启用情感分析
-  emotion_analysis_enabled: true
-  # 是否启用主动对话
-  proactive_enabled: true
-
-# 情感系统配置
-emotion:
-  # 情感状态更新频率(秒)
-  update_interval: 5
-  # 情感衰减系数
-  decay_factor: 0.95
-  # 情感强度阈值
-  intensity_threshold: 0.3
-  # 情感类型映射
-  emotion_types:
-    - "开心"
-    - "伤心"
-    - "生气"
-    - "撒娇"
-    - "害怕"
-    - "害羞"
-    - "惊讶"
-    - "平静"
-
-# 记忆系统配置
+# 记忆系统配置（消费方：shisi/memory/legacy/memory_pipeline.py::_load_shisi_memory_config）
 memory:
   # 工作记忆容量
   working_memory_capacity: 20
@@ -80,71 +18,38 @@ memory:
   # 是否启用记忆提取
   extraction_enabled: true
 
-# WebSocket配置
-websocket:
-  # 心跳间隔(秒)
-  heartbeat_interval: 30
-  # 心跳超时(秒)
-  heartbeat_timeout: 10
-  # 最大连接数
-  max_connections: 1000
-  # 消息最大长度(字节)
-  max_message_size: 1048576
-  # 支持的协议版本
-  supported_protocols:
-    - "chat"
-    - "ping"
-    - "file"
-    - "voice"
-
-# 安全与隐私配置
-security:
-  # 内容过滤级别: strict, normal, relaxed
-  content_filter_level: "normal"
-  # 敏感词检测
-  sensitive_word_detection: true
-  # PII信息匿名化
-  pii_anonymization: true
-  # 输入验证
-  input_validation: true
-  # 速率限制
-  rate_limit:
-    enabled: true
-    requests_per_minute: 60
-    burst_size: 10
-
-# 性能优化配置
-performance:
-  # 是否启用缓存
-  cache_enabled: true
-  # 缓存TTL(秒)
-  cache_ttl: 3600
-  # 并发处理数
-  max_workers: 4
-  # 请求超时(秒)
-  request_timeout: 30
-  # 是否启用压缩
-  compression_enabled: true
-
-# 日志配置
-logging:
-  # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
-  level: "INFO"
-  # 日志格式: json, text
-  format: "json"
-  # 日志输出: console, file, both
-  output: "both"
-  # 日志文件路径
-  file_path: "logs/shisi.log"
-  # 日志轮转
-  rotation:
-    enabled: true
-    max_size_mb: 100
-    backup_count: 5
+# 亲密度系统配置
+# 消费方：shisi/affinity/enhancer.py、shisi/affinity/decay_engine.py、
+#         shisi/affinity/unlock_manager.py
+affinity:
+  # 最大亲密度
+  max_value: 100
+  # 最小亲密度
+  min_value: 0
+  # 亲密度衰减系数
+  decay_rate: 0.1
+  # 解锁配置 - 好感度阈值对应的解锁内容
+  unlocks:
+    - threshold: 25
+      type: "topic"
+      name: "个人话题"
+    - threshold: 50
+      type: "topic"
+      name: "亲密话题"
+    - threshold: 50
+      type: "sticker"
+      name: "专属表情包"
+    - threshold: 75
+      type: "voice"
+      name: "专属语音"
+    - threshold: 90
+      type: "special"
+      name: "特殊互动"
 
 # 语音扩展配置
+# 消费方：shisi/voice/emotion_tts.py::VoiceEnhancer（default_tts / emotion_params）
 voice:
-  # 默认TTS引擎（2026-08-26 修正：与 system.yaml engine 及 reinit BREAKING 决策对齐，前端唯一 MiMo）
+  # 默认TTS引擎（与 system.yaml voice.engine 对齐，前端唯一 MiMo）
   default_tts: "mimo-tts"
   # 情感参数配置 - 影响语速和音调
   emotion_params:
@@ -184,50 +89,3 @@ voice:
       speed: 1.0
       pitch: 1.0
       volume: 1.0
-
-# 亲密度系统配置
-affinity:
-  # 初始亲密度（统一为 0，从陌生人开始，与 emotion.yaml initial.affinity 保持一致）
-  initial_value: 0
-  # 最大亲密度
-  max_value: 100
-  # 最小亲密度
-  min_value: 0
-  # 亲密度增长系数
-  growth_rate: 1.0
-  # 亲密度衰减系数
-  decay_rate: 0.1
-  # 每日互动上限
-  daily_interaction_limit: 50
-  # 解锁配置 - 好感度阈值对应的解锁内容
-  unlocks:
-    - threshold: 25
-      type: "topic"
-      name: "个人话题"
-    - threshold: 50
-      type: "topic"
-      name: "亲密话题"
-    - threshold: 50
-      type: "sticker"
-      name: "专属表情包"
-    - threshold: 75
-      type: "voice"
-      name: "专属语音"
-    - threshold: 90
-      type: "special"
-      name: "特殊互动"
-
-# 功能开关
-features:
-  # 语音合成
-  voice_synthesis: true
-  # 表情包推荐
-  sticker_recommendation: true
-  # 主动消息
-  proactive_messaging: true
-  # 多角色切换
-  multi_character: true
-  # 长期记忆
-  long_term_memory: true
-  # 情感可视化
-  emotion_visualization: true
