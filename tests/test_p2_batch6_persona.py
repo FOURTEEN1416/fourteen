@@ -9,6 +9,12 @@ item47 知识检索不再每轮白跑 ToneMimic Chroma+ONNX（产物无人消费
 6b 项9 persona P2 五连：①verify_anchors 自比同义反复→比对现值 ②一致性风格
 维度接线+硬违规修正旁路 ③emotion.yaml 进生产引擎 ④PersonaService 端点委托
 ⑤CharacterCardAdapter 零读者挂线删除
+6b 项10 persona 域死码清单清除（防复活钉见文件末尾 TestBatch6bItem10 区段）：
+build_complete_prompt/build_system_prompt 双模式与两级缓存、evolve/evolve_dimension/
+rollback_to/auto_evolve、validate_response/auto_correct_response/
+check_anchor_consistency、enhanced_prompt_engine 等 8 模块、dynamic_anchor 强化回路、
+EmotionEngine 风格修饰器双接口、persona_service._build_chat_history、
+CharacterService 全链、character_card/ 包、prompt_mode 管线。
 """
 
 from __future__ import annotations
@@ -367,8 +373,8 @@ def test_checker_cache_not_poisoned_by_use():
     r2 = checker.check("才没有想你呢", ctx)
     assert r1.overall_score == r2.overall_score
     assert r1.overall_passed == r2.overall_passed
-    # 锚点内部状态未被写（reinforcement 计数器仍为 0，列表长度不变）
-    assert checker._anchors._reinforcement_counter == 0
+    # 锚点内部状态未被写（6b 项10：强化计数器已随死回路删除，改钉纯只读语义）
+    assert not hasattr(checker._anchors, "should_reinforce")
     assert len(checker._anchors._dynamic_anchors) == 1
 
 
@@ -639,3 +645,155 @@ def test_character_card_wiring_removed_from_init():
     full = inspect.getsource(_InitPhasesMixin)
     assert "card_mode" not in full
     assert "CharacterCardAdapter" not in full
+
+
+# ═══════════════════════════════════════════════════════════
+# 6b 项10 — persona 域死码清除防复活钉
+# ═══════════════════════════════════════════════════════════
+
+_DEAD_PERSONA_MODULES = [
+    "my_character.enhanced_prompt_engine",
+    "my_character.contextual_behavior",
+    "my_character.style_enhancer_v2",
+    "my_character.evolution_engine",
+    "my_character.emotion_memory",
+    "my_character.persona_evaluator",
+    "my_character.anchor_protection",
+    "my_character.constraint_validator",
+]
+
+_DEAD_ENGINE_ATTRS = [
+    "build_complete_prompt",
+    "build_system_prompt",
+    "evolve",
+    "evolve_dimension",
+    "rollback_to",
+    "auto_evolve",
+    "validate_response",
+    "auto_correct_response",
+    "check_anchor_consistency",
+]
+
+
+def test_dead_persona_modules_removed():
+    import importlib.util
+
+    for name in _DEAD_PERSONA_MODULES:
+        assert importlib.util.find_spec(name) is None, f"{name} 已作为死码删除，不得复活"
+
+
+def test_persona_engine_dead_api_removed_and_live_api_kept():
+    from my_character.persona_engine import PersonaEngine
+
+    for attr in _DEAD_ENGINE_ATTRS:
+        assert not hasattr(PersonaEngine, attr), f"{attr} 零调用已删除，不得复活"
+    for attr in ("get_evolution_log", "check_consistency", "verify_anchors",
+                 "build_emotion_layer", "build_style_layer", "build_constraint_layer",
+                 "build_memory_layer", "build_emotion_style_segment"):
+        assert callable(getattr(PersonaEngine, attr, None)), f"{attr} 是现役路径，不得误删"
+
+
+def test_persona_engine_prompt_mode_plumbing_removed():
+    import inspect
+
+    from my_character.persona_engine import PersonaEngine
+
+    assert "prompt_mode" not in inspect.signature(PersonaEngine.__init__).parameters
+    src = inspect.getsource(PersonaEngine.__init__)
+    assert "prompt_mode" not in src
+    # 两级 prompt 缓存随 build_system_prompt 一并移除
+    assert not hasattr(PersonaEngine, "_prompt_cache")
+    hsrc = inspect.getsource(PersonaEngine.health_check) + inspect.getsource(PersonaEngine.to_dict)
+    assert "prompt_mode" not in hsrc and "base_prompt_cached" not in hsrc
+
+
+def test_persona_engine_evo_log_readonly_contract():
+    """演化写路径已删、只读日志保留：/api/persona/evolution-log 依赖 get_evolution_log；
+    日志恒空为已登记限制（DELETION_LOG 6b 项10）。"""
+    import inspect
+
+    from my_character.persona_engine import PersonaEngine
+
+    src = inspect.getsource(PersonaEngine)
+    assert "_evolution_log.append" not in src, "演化日志不得再有写者（写路径已全删）"
+
+
+def test_dynamic_anchor_reinforcement_circuit_removed():
+    from dataclasses import fields
+
+    from my_character.dynamic_anchor import AnchorCheckResult, DynamicAnchorSystem
+
+    for attr in ("should_reinforce", "generate_reinforcement"):
+        assert not hasattr(DynamicAnchorSystem, attr), f"{attr} 零消费者已删除"
+    names = {f.name for f in fields(AnchorCheckResult)}
+    assert "reinforcement_needed" not in names
+    sys_ = DynamicAnchorSystem(base_anchors=["a"])
+    assert not hasattr(sys_, "_reinforcement_counter")
+
+
+def test_emotion_engine_style_modifier_api_removed():
+    from my_character.emotion_engine import EmotionEngine
+
+    for attr in ("get_style_modifiers", "get_emotion_style_map"):
+        assert not hasattr(EmotionEngine, attr), f"{attr} 零调用已删除（穷举同模式）"
+
+
+def test_persona_service_dead_history_helper_removed():
+    from shisi.application.persona_service import PersonaService
+
+    assert not hasattr(PersonaService, "_build_chat_history")
+
+
+def test_character_service_chain_removed():
+    import importlib.util
+
+    assert importlib.util.find_spec("shisi.application.character_service") is None
+    import shisi.application as app_pkg
+
+    assert "CharacterService" not in app_pkg.__all__
+    from shisi.api.registry import AiyuRegistry
+
+    assert not hasattr(AiyuRegistry, "character_service")
+    from orchestrator.optimized_orchestrator import OptimizedOrchestrator
+
+    assert not hasattr(OptimizedOrchestrator, "_character_service")
+    import inspect
+
+    import api.app_factory as af
+
+    assert "character_service" not in inspect.getsource(af)
+
+
+def test_character_card_package_removed():
+    import importlib.util
+    from pathlib import Path
+
+    import my_character
+
+    assert importlib.util.find_spec("character_card") is None
+    root = Path(my_character.__file__).resolve().parent.parent
+    assert not (root / "character_card").exists(), "character_card/ 包零读者已删除，不得复活"
+
+
+def test_prompt_mode_config_key_removed():
+    from pathlib import Path
+
+    import my_character
+
+    root = Path(my_character.__file__).resolve().parent.parent
+    src = (root / "config" / "system.yaml").read_text(encoding="utf-8")
+    assert "prompt_mode" not in src
+    init_src = (root / "orchestrator" / "_init_mixin.py").read_text(encoding="utf-8")
+    assert "prompt_mode" not in init_src
+
+
+def test_tone_mimic_add_conversation_still_alive():
+    """审计更正：add_conversation 曾被列为零调用，实际 training_routes.py
+    /api/training/apply 克隆摄入在用（:169）——此钉防误删。"""
+    import inspect
+
+    from api.routers import training_routes
+    from my_character.tone_mimic import ToneMimic
+
+    assert callable(getattr(ToneMimic, "add_conversation", None))
+    assert "add_conversation" in inspect.getsource(training_routes)

@@ -188,19 +188,6 @@ def _build_emotion_transition_matrix() -> dict[tuple[Emotion, Emotion], float]:
 
 EMOTION_TRANSITION_MATRIX = _build_emotion_transition_matrix()
 
-EMOTION_STYLE_MAP = {
-    Emotion.JEALOUS: {"rhetorical_prob": 0.8, "hint_prob": 0.7, "caring_prob": 0.2, "teasing_prob": 0.1, "emoji_freq": 0.3},
-    Emotion.SULLEN:  {"rhetorical_prob": 0.7, "hint_prob": 0.6, "caring_prob": 0.4, "teasing_prob": 0.3, "emoji_freq": 0.5},
-    Emotion.CARING:  {"rhetorical_prob": 0.2, "hint_prob": 0.1, "caring_prob": 0.9, "teasing_prob": 0.1, "emoji_freq": 0.4},
-    Emotion.HAPPY:   {"rhetorical_prob": 0.3, "hint_prob": 0.2, "caring_prob": 0.5, "teasing_prob": 0.6, "emoji_freq": 0.8},
-    Emotion.ANGRY:   {"rhetorical_prob": 0.9, "hint_prob": 0.3, "caring_prob": 0.1, "teasing_prob": 0.0, "emoji_freq": 0.1},
-    Emotion.LOVELY:  {"rhetorical_prob": 0.4, "hint_prob": 0.5, "caring_prob": 0.7, "teasing_prob": 0.5, "emoji_freq": 0.9},
-    Emotion.PLAYFUL: {"rhetorical_prob": 0.5, "hint_prob": 0.3, "caring_prob": 0.3, "teasing_prob": 0.8, "emoji_freq": 0.7},
-    Emotion.SAD:     {"rhetorical_prob": 0.3, "hint_prob": 0.4, "caring_prob": 0.6, "teasing_prob": 0.0, "emoji_freq": 0.2},
-    Emotion.TIRED:   {"rhetorical_prob": 0.2, "hint_prob": 0.1, "caring_prob": 0.5, "teasing_prob": 0.1, "emoji_freq": 0.2},
-    Emotion.NEUTRAL: {"rhetorical_prob": 0.3, "hint_prob": 0.2, "caring_prob": 0.4, "teasing_prob": 0.3, "emoji_freq": 0.4},
-}
-
 KEYWORD_EMOTION_MAP = {
     "开心": (Emotion.HAPPY, 0.7), "高兴": (Emotion.HAPPY, 0.7),
     "哈哈": (Emotion.HAPPY, 0.6), "嘻嘻": (Emotion.HAPPY, 0.6),
@@ -832,32 +819,6 @@ class EmotionEngine:
             self._check_affinity_downgrade()
 
         self._state.last_update = time.time()
-
-    # ---- 风格修饰器双接口 ----
-
-    def get_style_modifiers(self) -> dict[str, Any]:
-        """V1风格: warmth/energy/intimacy/playfulness修饰"""
-        pleasure = EMOTION_PLEASURE_MAP.get(self._state.primary_emotion, 0.0)
-        return {
-            "warmth_mod": max(-0.3, min(0.3, pleasure * 0.3)),
-            "energy_mod": self._state.energy - 0.5,
-            "intimacy_mod": self._state.affinity / 8.0 - 0.5,
-            "playfulness_mod": max(
-                -0.3, min(0.3, pleasure * 0.2 + (self._state.energy - 0.5) * 0.3)
-            ),
-            "needs_comfort": self._state.primary_emotion in (Emotion.SAD, Emotion.TIRED),
-            "is_flirty": (
-                self._state.primary_emotion in (Emotion.LOVELY, Emotion.PLAYFUL)
-                and self._state.affinity >= 5
-            ),
-        }
-
-    def get_emotion_style_map(self) -> dict[str, float]:
-        """V2风格: 基于EMOTION_STYLE_MAP的修辞概率"""
-        return EMOTION_STYLE_MAP.get(
-            self._state.primary_emotion,
-            EMOTION_STYLE_MAP[Emotion.NEUTRAL],
-        )
 
     # ---- 辅助 ----
 

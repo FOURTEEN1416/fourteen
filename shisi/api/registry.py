@@ -4,12 +4,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
-
-if TYPE_CHECKING:
-    from ..application.character_service import CharacterService
 
 from ..affinity.enhancer import AffinityEnhancer
 from ..affinity.mapper import AffinityMapper
@@ -50,7 +46,6 @@ class AiyuRegistry:
     voice_enhancer: VoiceEnhancer | None = None
     analytics_service: AnalyticsService | None = None
     proactive_messenger: WeChatProactiveMessenger | None = None
-    character_service: CharacterService | None = None
 
 
 def setup_shisi(

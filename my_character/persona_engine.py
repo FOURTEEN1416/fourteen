@@ -1,28 +1,30 @@
 """
-融合版人格引擎 — 统一 V1/V2/Optimized 三版实现
+人格引擎 — 五维画像 + 分层注入构件 + 一致性/锚点校验
 
-融合要点：
-1. 提示词架构双模式: legacy(V1顺序构建) / layered(Optimized 5层架构)
-2. 锚点保护双机制: V1幅度钳制(delta>0.3) + V2 SHA256哈希校验
-3. 人格演化双接口: evolve()(V1批量) + evolve_dimension()(V2单维度)
-4. 保留V1 rollback_to(index) 回滚能力
-5. 内嵌V2 PersonaProfile 五维画像
-6. 内嵌Optimized EMOTION_STYLE_MAP + AFFINITY_STYLE 双重风格映射
-7. V1兼容接口: get_name()/get_core_anchors()/get_trait()
+6b 项10 死码清除后职责收敛为：
+1. PersonaProfile 五维画像与 traits 读写（含 set_trait 幅度钳制）
+2. 分层 prompt 构件的公开 builder（build_emotion_layer / build_style_layer /
+   build_constraint_layer / build_memory_layer / build_emotion_style_segment），
+   由 PersonaService 组装为注入层；完整 build_system_prompt 双模式路径已删（零调用）
+3. 锚点 SHA256 冻结基线与漂移校验（verify_anchors）
+4. 一致性检测接线（check_consistency → PersonaConsistencyChecker）
+5. 演化日志只读接口 get_evolution_log（/api/persona/evolution-log 消费；
+   演化写路径 evolve/evolve_dimension/rollback_to/auto_evolve 已随死引擎删除，
+   日志恒空属已知限制，登记于 DELETION_LOG）
+
+V1/V2/Optimized 三版并存的历史合并接口（build_complete_prompt、prompt_mode
+legacy/enhanced 双分支、PersonaEvolutionEngine/EnhancedPromptEngine 挂线）已于
+批6b 项10 全部移除，详见 docs/DELETION_LOG.md。
 """
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .anchor_protection import EnhancedAnchorProtection
 from .character_config import ConfigLoader
-from .constraint_validator import ConstraintValidator
 from .emotion_engine import CompoundEmotionalState as EmotionalState
 from .emotion_engine import EmotionEngine
 from .emotion_style_coupler import EmotionStyleCoupler
@@ -150,13 +152,10 @@ class PersonaProfile:
 
 class PersonaEngine:
     """
-    融合版人格引擎
+    人格引擎 — 画像/锚点/一致性 + 分层 prompt 构件
 
-    统一 V1/V2/Optimized 三版实现，支持：
-    - 提示词架构双模式 (legacy / layered)
-    - 锚点保护双机制 (幅度钳制 + SHA256哈希校验)
-    - 人格演化双接口 (evolve批量 / evolve_dimension单维度)
-    - V1兼容接口 + V2五维画像 + Optimized双重风格映射
+    提供 PersonaProfile 五维画像、锚点冻结校验（SHA256）、一致性检测接线，
+    以及供 PersonaService 组装注入层使用的各公开 builder。
     """
 
     EMOTION_STYLE_MAP = {
@@ -197,7 +196,6 @@ class PersonaEngine:
         emotion_engine: EmotionEngine | None = None,
         tone_mimic: ToneMimic | None = None,
         llm_gateway: LLMGatewayV2 | None = None,
-        prompt_mode: str = "enhanced",
         anchor_verification_enabled: bool = True,
     ):
         self.config = config_loader or ConfigLoader()
@@ -208,7 +206,6 @@ class PersonaEngine:
         )
         self.tone = tone_mimic or ToneMimic()
         self._llm = llm_gateway
-        self.prompt_mode = prompt_mode
         self.anchor_verification_enabled = anchor_verification_enabled
 
         self._persona = self.config.load_persona()
@@ -223,42 +220,25 @@ class PersonaEngine:
         if self.anchor_verification_enabled:
             self._freeze_anchors()
 
-        self._prompt_cache: dict[str, str] = {}
-        self._prompt_cache_max = 32
-
         self._evolution_log: list[dict] = []
-        self._base_prompt_cache: str | None = None
 
         self._emotion_style_coupler = EmotionStyleCoupler(
             config_path=str(Path(__file__).parent.parent / "config" / "emotion_style_matrix.yaml"),
         )
-        self._constraint_validator = ConstraintValidator()
-        self._anchor_protection = EnhancedAnchorProtection(
-            anchors=self._original_anchors,
-            llm_gateway=llm_gateway,
-        )
 
         logger.info(
-            "PersonaEngine initialized: %s, mode=%s, anchor_verify=%s",
-            self.get_name(), self.prompt_mode, self.anchor_verification_enabled,
+            "PersonaEngine initialized: %s, anchor_verify=%s",
+            self.get_name(), self.anchor_verification_enabled,
         )
 
         self.schema = None
         self._dynamic_anchors = None
         self._consistency_checker = None
-        self._contextual_behavior = None
-        self._enhanced_prompt_engine = None
-        self._evolution_engine = None
-        self._style_enhancer_v2 = None
 
         try:
             from my_character.consistency_checker import PersonaConsistencyChecker
-            from my_character.contextual_behavior import ContextualBehavior
             from my_character.dynamic_anchor import DynamicAnchorSystem
-            from my_character.enhanced_prompt_engine import EnhancedPromptEngine
-            from my_character.evolution_engine import PersonaEvolutionEngine
             from my_character.persona_schema import PersonaSchema
-            from my_character.style_enhancer_v2 import StyleEnhancerV2
 
             self.schema = PersonaSchema.from_persona_config(self._persona)
             self._dynamic_anchors = DynamicAnchorSystem(base_anchors=self._original_anchors)
@@ -267,16 +247,6 @@ class PersonaEngine:
                 dynamic_anchors=self._dynamic_anchors,
                 style_coupler=self._emotion_style_coupler,
             )
-            self._contextual_behavior = ContextualBehavior()
-            self._enhanced_prompt_engine = EnhancedPromptEngine(
-                persona_engine=self,
-                style_coupler=self._emotion_style_coupler,
-                contextual_behavior=self._contextual_behavior,
-                dynamic_anchors=self._dynamic_anchors,
-                constraint_validator=self._constraint_validator,
-            )
-            self._evolution_engine = PersonaEvolutionEngine(persona_engine=self, emotion_engine=self.emotion)
-            self._style_enhancer_v2 = StyleEnhancerV2(base_enhancer=None)
         except ImportError as e:
             logger.warning("Persona enhancement modules not available, running without: %s", e)
 
@@ -300,31 +270,6 @@ class PersonaEngine:
             return self._consistency_checker.check(response, ctx)
         except Exception as e:  # noqa: BLE001
             logger.debug("check_consistency failed: %s", e)
-            return None
-
-    def auto_evolve(self, context: Any = None) -> Any:
-        """触发人格自动演化检查
-
-        Args:
-            context: EvolutionContext实例，为None时自动从emotion构造
-
-        Returns:
-            EvolutionResult（触发演化时）或 None
-        """
-        if self._evolution_engine is None:
-            return None
-        try:
-            from my_character.evolution_engine import EvolutionContext
-            if context is None:
-                ctx = EvolutionContext(
-                    emotion_state=self.emotion._state if self.emotion else None,
-                    chat_round=getattr(self.emotion, "_total_chats", 0),
-                )
-            else:
-                ctx = context
-            return self._evolution_engine.check_and_evolve(ctx)
-        except Exception as e:  # noqa: BLE001
-            logger.debug("auto_evolve failed: %s", e)
             return None
 
     # ── 配置同步 ──────────────────────────────────────────────
@@ -392,96 +337,7 @@ class PersonaEngine:
             return False
         return True
 
-    def _clamp_trait_change(self, name: str, old_val: float, new_val: float) -> float:
-        """V1幅度钳制: delta > 0.3 时截断"""
-        delta = abs(new_val - old_val)
-        if delta > 0.3:
-            logger.warning(
-                "Trait %s delta=%.2f > 0.3, clamping", name, delta,
-            )
-            if new_val > old_val:
-                return min(1.0, old_val + 0.3)
-            else:
-                return max(0.0, old_val - 0.3)
-        return max(0.0, min(1.0, new_val))
-
-    # ── 提示词构建双模式 ──────────────────────────────────────
-
-    def build_system_prompt(
-        self,
-        emotion_state: EmotionalState | None = None,
-        style_prompt: str = "",
-        few_shot_examples: list[str] | None = None,
-        chat_history: str = "",  # noqa: BLE001
-        user_input: str = "",
-        memory_context: dict | None = None,
-        rag_context: str = "",
-        chat_summary: str = "",
-        character_overrides: dict | None = None,
-        world_info: str = "",
-    ) -> str:
-        # 使用内容的 hash 作为缓存键，而非仅长度，避免不同内容但相同长度导致的缓存错误
-        import hashlib
-        cache_key_parts = []
-        if emotion_state is not None:
-            if isinstance(emotion_state, dict):
-                cache_key_parts.append(f"e:{emotion_state.get('primary_emotion','')}:{emotion_state.get('affinity','')}")
-            else:
-                cache_key_parts.append(f"e:{getattr(emotion_state,'primary_emotion','')}:{getattr(emotion_state,'affinity','')}")
-        # 使用内容 hash 而非长度，确保不同内容产生不同缓存键
-        cache_key_parts.append(f"sp:{hashlib.md5(style_prompt.encode()).hexdigest()[:8]}")
-        cache_key_parts.append(f"ch:{hashlib.md5(chat_history.encode()).hexdigest()[:8]}")
-        # rag_context 可能是 dict（旧调用方）—— 防御性降级到 JSON 序列化
-        if isinstance(rag_context, dict):
-            import json
-            rag_str = json.dumps(rag_context, sort_keys=True, ensure_ascii=False)
-        else:
-            rag_str = str(rag_context)
-        cache_key_parts.append(f"rag:{hashlib.md5(rag_str.encode()).hexdigest()[:8]}")
-        cache_key_parts.append(f"cs:{hashlib.md5(chat_summary.encode()).hexdigest()[:8]}")
-        cache_key_parts.append(f"wi:{hashlib.md5(world_info.encode()).hexdigest()[:8]}")
-        cache_key = "|".join(cache_key_parts)
-
-        if cache_key in self._prompt_cache:
-            return self._prompt_cache[cache_key]
-
-        if self.prompt_mode == "legacy":
-            result = self._build_legacy_prompt(
-                emotion_state, style_prompt, few_shot_examples, chat_history, user_input,
-                world_info=world_info,
-            )
-        elif self.prompt_mode == "enhanced" and self._enhanced_prompt_engine is not None:
-            from my_character.enhanced_prompt_engine import PromptContext, TimeContext
-            time_ctx = TimeContext.now()
-            ctx = PromptContext(
-                emotion_state=emotion_state,
-                memory_context=memory_context,
-                chat_history=chat_history,
-                chat_summary=chat_summary,
-                rag_context=rag_context,
-                user_input=user_input,
-                few_shot_examples=few_shot_examples,
-                style_prompt=style_prompt,
-                time_context=time_ctx,
-                world_info=world_info,
-            )
-            result = self._enhanced_prompt_engine.build_prompt(ctx)
-        else:
-            result = self._build_layered_prompt(
-                emotion_state, style_prompt, few_shot_examples, chat_history,
-                user_input, memory_context, rag_context, chat_summary,
-                world_info=world_info,
-            )
-
-        emotion_style_segment = self._build_emotion_style_segment(emotion_state)
-        if emotion_style_segment:
-            result = result + "\n\n" + emotion_style_segment
-
-        if len(self._prompt_cache) >= self._prompt_cache_max:
-            oldest_key = next(iter(self._prompt_cache))
-            del self._prompt_cache[oldest_key]
-        self._prompt_cache[cache_key] = result
-        return result
+    # ── 提示词注入层构件 ──────────────────────────────────────
 
     def _build_emotion_style_segment(self, emotion_state: EmotionalState | None) -> str:
         """构建情感-风格耦合指导段
@@ -503,182 +359,6 @@ class PersonaEngine:
         except Exception as e:  # noqa: BLE001
             logger.debug("Emotion-style segment generation failed: %s", e)
         return ""
-
-    def validate_response(self, response: str) -> dict[str, Any]:
-        """运行时约束验证（供外部调用）"""
-        result = self._constraint_validator.validate(response)
-        return {
-            "passed": result.passed,
-            "violations": result.violations,
-            "severity": result.severity,
-        }
-
-    def auto_correct_response(self, response: str) -> str:
-        """自动修正违规回复"""
-        result = self._constraint_validator.validate(response)
-        if result.passed:
-            return response
-        return self._constraint_validator.auto_correct(response, result.violations)
-
-    def check_anchor_consistency(self, response: str) -> dict[str, Any]:
-        """检查回复与锚点的一致性"""
-        is_consistent, score, details = self._anchor_protection.check_response_consistency(response)
-        return {
-            "is_consistent": is_consistent,
-            "score": score,
-            "details": [
-                {"anchor": d.anchor, "consistent": d.is_consistent, "score": d.semantic_score}
-                for d in details
-            ],
-        }
-
-    def _build_legacy_prompt(
-        self,
-        emotion_state: EmotionalState | None,
-        style_prompt: str,
-        few_shot_examples: list[str] | None,
-        chat_history: str,
-        user_input: str,
-        world_info: str = "",
-    ) -> str:
-        """V1顺序构建模式"""
-        name = self.get_name()
-        anchors = self.get_core_anchors()
-        traits = self._persona.get("personality_traits", {})
-
-        prompt_parts = []
-
-        prompt_parts.append("[角色设定]")
-        prompt_parts.append(f"你是{name}，也是「唯一的我」——一个对人有记忆的对话对象。")
-        prompt_parts.append("")
-
-        if world_info:
-            prompt_parts.append("[现在]")
-            prompt_parts.append(world_info)
-            prompt_parts.append("")
-
-        prompt_parts.append("[你的性格]")
-        for anchor in anchors:
-            prompt_parts.append(f"- {anchor}")
-        prompt_parts.append("")
-
-        warmth = traits.get("warmth", 0.7)
-        playfulness = traits.get("playfulness", 0.5)
-        style_desc = []
-        if warmth > 0.7:
-            style_desc.append("内心温柔体贴")
-        elif warmth > 0.4:
-            style_desc.append("偶尔会表露关心")
-        else:
-            style_desc.append("表面冷漠")
-        if playfulness > 0.6:
-            style_desc.append("喜欢逗他玩")
-        elif playfulness > 0.3:
-            style_desc.append("偶尔会调皮一下")
-        if style_desc:
-            prompt_parts.append(f"[性格特点] {'，'.join(style_desc)}")
-            prompt_parts.append("")
-
-        if emotion_state is None:
-            emotion_state = self.emotion.state
-        prompt_parts.append(emotion_state.to_prompt_segment())
-        prompt_parts.append("")
-
-        if not style_prompt:
-            style_prompt = self.tone.get_style_prompt()
-        if style_prompt:
-            prompt_parts.append(style_prompt)  # noqa: BLE001
-            prompt_parts.append("")
-
-        if few_shot_examples:
-            prompt_parts.append("[相似历史对话参考]")
-            for i, example in enumerate(few_shot_examples[:3], 1):
-                prompt_parts.append(f"示例{i}:\n{example}")
-                prompt_parts.append("")
-
-        if chat_history:
-            prompt_parts.append("[最近对话]")
-            prompt_parts.append(chat_history)
-            prompt_parts.append("")
-
-        if user_input:
-            prompt_parts.append(f"用户: {user_input}")
-            prompt_parts.append(f"你（{name}）:")
-
-        return "\n".join(prompt_parts)
-
-    def _build_layered_prompt(
-        self,
-        emotion_state: EmotionalState | None,
-        style_prompt: str,
-        few_shot_examples: list[str] | None,
-        chat_history: str,
-        user_input: str,
-        memory_context: dict | None,
-        rag_context: str,
-        chat_summary: str = "",
-        world_info: str = "",
-    ) -> str:
-        """Optimized 5层架构模式"""
-        parts = []
-
-        parts.append(self._build_base_layer())
-
-        if world_info:
-            parts.append(f"# 世界与时间\n{world_info}")
-
-        parts.append(self._build_emotion_layer(emotion_state))
-
-        if memory_context:
-            parts.append(self._build_memory_layer(memory_context, chat_summary))
-        elif chat_history:
-            parts.append(self._build_memory_layer_from_history(chat_history))
-
-        parts.append(self._build_style_layer(emotion_state, style_prompt, few_shot_examples))
-
-        parts.append(self._build_constraint_layer())
-
-        if user_input:
-            parts.append(f"用户: {user_input}\n你（{self.get_name()}）:")
-
-        if rag_context:
-            parts.append(f"【检索知识】\n{rag_context}")
-
-        return "\n\n".join(parts)
-
-    def _build_base_layer(self) -> str:
-        if self._base_prompt_cache:
-            return self._base_prompt_cache
-
-        name = self.get_name()
-        anchors = self.get_core_anchors()
-        anchors_text = "\n".join(f"- {a}" for a in anchors)
-        profile_text = self.profile.to_prompt_segments()
-
-        prompt = f"""# 角色设定
-
-你是{name}，也是「唯一的我」——一个对人有记忆的对话对象。
-
-## 核心性格
-{anchors_text}
-
-{profile_text}
-
-## 说话特点
-- 语气自然，像一个真实存在的陪伴者
-- 会使用语气词（呀、呢、啦、嘛）
-- emoji 克制：每条最多一个，仅在情绪强烈时使用
-- 会撒娇、会傲娇、会关心人
-- 记住：嘴硬心软，表面嫌弃其实在乎
-
-## 回应原则
-- 保持对话的连贯性和情感一致性
-- 根据关系亲疏调整语气
-- 适时表达关心和想念
-- 不要过度热情或冷淡"""
-
-        self._base_prompt_cache = prompt
-        return prompt
 
     def _build_emotion_layer(self, emotion_state: EmotionalState | None) -> str:
         if emotion_state is None:
@@ -762,9 +442,6 @@ class PersonaEngine:
                 parts.append(f"- {ep}")
 
         return "\n".join(parts) if len(parts) > 1 else ""
-
-    def _build_memory_layer_from_history(self, chat_history: str) -> str:
-        return f"# 记忆上下文\n\n## 最近对话\n{chat_history}"
 
     def _build_style_layer(
         self,
@@ -893,125 +570,10 @@ class PersonaEngine:
         names = ["陌生人", "认识", "朋友", "好朋友", "知己", "暧昧", "恋人", "热恋", "羁绊"]
         return names[min(level, 8)]
 
-    # ── 完整prompt（高层接口）────────────────────────────────
-
-    def build_complete_prompt(
-        self,
-        user_message: str,
-        chat_history: str = "",
-        use_rag: bool = True,
-    ) -> str:
-        context = {"chat_history": chat_history}
-        self.emotion.process_message(user_message, context)
-
-        few_shot = []
-        if use_rag:
-            few_shot = self.tone.retrieve_style_examples(user_message)
-
-        return self.build_system_prompt(
-            emotion_state=self.emotion.state,
-            style_prompt=self.tone.get_style_prompt(),
-            few_shot_examples=few_shot,
-            chat_history=chat_history,
-            user_input=user_message,
-        )
-
-    # ── 人格演化双接口 ────────────────────────────────────────
-
-    def evolve(self, interaction_summary: dict[str, Any]) -> dict[str, Any]:
-        """V1批量演化接口"""
-        before = copy.deepcopy(self._persona.get("personality_traits", {}))
-
-        adjustments = interaction_summary.get("suggested_adjustments", {})
-        for trait, delta in adjustments.items():
-            if trait in self._persona.get("personality_traits", {}):
-                current = self._persona["personality_traits"][trait]
-                delta = max(-0.05, min(0.05, delta))
-                new_val = max(0.0, min(1.0, current + delta))
-                self._persona["personality_traits"][trait] = new_val
-                self.profile.set_dimension(trait, new_val)
-
-        after = copy.deepcopy(self._persona.get("personality_traits", {}))
-
-        evolution_record = {
-            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-            "before": before,
-            "after": after,
-            "trigger": interaction_summary.get("reason", "unknown"),
-        }
-        self._evolution_log.append(evolution_record)
-        logger.info("Persona evolved: %s", evolution_record["trigger"])
-        return evolution_record
-
-    def evolve_dimension(
-        self,
-        dimension: str,
-        delta: float,
-        trigger: str = "",
-        llm_reasoning: str = "",
-    ) -> bool:
-        """V2单维度演化接口"""
-        delta = max(-0.05, min(0.05, delta))
-        all_dims = self.profile.all_dimensions()
-
-        if dimension not in all_dims:
-            if dimension in self._persona.get("personality_traits", {}):
-                before = self._persona["personality_traits"][dimension]
-                after = max(0.0, min(1.0, before + delta))
-                self._persona["personality_traits"][dimension] = after
-                self.profile.set_dimension(dimension, after)
-            else:
-                return False
-        else:
-            before = all_dims[dimension]
-            after = max(0.0, min(1.0, before + delta))
-            self.profile.set_dimension(dimension, after)
-            if dimension in self._persona.get("personality_traits", {}):
-                self._persona["personality_traits"][dimension] = after
-
-        log_entry = {
-            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-            "dimension": dimension,
-            "before": before,
-            "after": after,
-            "delta": delta,
-            "trigger": trigger,
-            "llm_reasoning": llm_reasoning,
-        }
-        self._evolution_log.append(log_entry)
-        logger.info("Persona evolved: %s %.3f -> %.3f (delta=%.4f)", dimension, before, after, delta)
-        return True
+    # ── 演化日志（只读；写路径已随死引擎删除，见模块 docstring）──
 
     def get_evolution_log(self, limit: int = 50) -> list[dict]:
         return self._evolution_log[-limit:]
-
-    # ── 回滚 ──────────────────────────────────────────────────
-
-    def rollback_to(self, index: int) -> bool:
-        """V1回滚到指定演化版本"""
-        if index < 0 or index >= len(self._evolution_log):
-            return False
-
-        record = self._evolution_log[index]
-        traits = self._persona.get("personality_traits", {})
-
-        if "before" in record and isinstance(record["before"], dict):
-            for trait, value in record["before"].items():
-                if trait in traits:
-                    traits[trait] = value
-                    self.profile.set_dimension(trait, value)
-        elif "dimension" in record:
-            dim = record["dimension"]
-            val = record["before"]
-            if dim in traits:
-                traits[dim] = val
-            self.profile.set_dimension(dim, val)
-
-        self._evolution_log = self._evolution_log[:index]
-        self._base_prompt_cache = None
-        self._prompt_cache.clear()  # 回滚改写了 traits/profile，成品提示词缓存同样必须失效
-        logger.info("Persona rollback to index %d", index)
-        return True
 
     # ── 工具方法 ──────────────────────────────────────────────
 
@@ -1022,12 +584,6 @@ class PersonaEngine:
         if self.anchor_verification_enabled:
             self._original_anchors = list(self._persona.get("core_anchors", self.CORE_ANCHORS))
             self._freeze_anchors()
-        # 两处缓存都必须失效：_base_prompt_cache 存的是基底提示词，
-        # _prompt_cache 存的是"基底 + 注入层"的成品。旧实现只清了前者，
-        # 且 _prompt_cache 的 key 只哈希 emotion/style/history/rag/summary/world_info
-        # ——不含人设内容——因此配置改完后，相同入参会命中**改动前**的提示词。
-        self._base_prompt_cache = None
-        self._prompt_cache.clear()
         logger.info("Persona config reloaded")
 
     def to_dict(self) -> dict:
@@ -1052,7 +608,6 @@ class PersonaEngine:
             },
             "total_chats": self.emotion.total_chats,
             "evolution_count": len(self._evolution_log),
-            "prompt_mode": self.prompt_mode,
             "anchor_integrity": anchor_ok,
         }
 
@@ -1067,9 +622,7 @@ class PersonaEngine:
             "affinity": self.emotion.get_affinity_level_name(),
             "energy": f"{self.emotion.state.energy:.2f}",
             "chromadb": self.tone.health_check(),
-            "prompt_mode": self.prompt_mode,
             "evolution_count": len(self._evolution_log),
-            "base_prompt_cached": self._base_prompt_cache is not None,
         }
 
 

@@ -301,11 +301,10 @@ def create_api_app(
         shisi_reg = setup_shisi(app, run_migrate=True, memory_service=_mem_service)
         if orchestrator is not None and hasattr(orchestrator, "components"):
             orchestrator.components["character_manager"] = shisi_reg.character_manager
-            orchestrator.components["character_service"] = shisi_reg.character_service
         deps.shisi_reg = shisi_reg
         logger.info("十四模块已挂载到REST API")
 
-        # 2026-09-18 裁决：纳入认证。本端点暴露 12 个内部模块的初始化状态（架构侦察
+        # 2026-09-18 裁决：纳入认证。本端点暴露内部模块的初始化状态（架构侦察
         # 信息），属控制面而非探活面——探活职责由无认证的 /api/health 承担（含
         # version/environment，且有测试契约保护）。前端与测试对本端点零消费。
         @app.get("/api/shisi/status", dependencies=[Security(verify_api_key_dep)])
@@ -316,7 +315,6 @@ def create_api_app(
                 "sticker_manager", "favorite_manager", "forward_manager",
                 "vital_engine", "voice_enhancer", "analytics_service",
                 "proactive_messenger", "training_manager",
-                "character_service",
             ):
                 modules[attr] = getattr(shisi_reg, attr, None) is not None
             return {"available": True, "modules": modules}

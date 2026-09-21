@@ -1,8 +1,8 @@
 """本地时间单一真源测试 —— 钉住 2026-09-20「墙钟判定错用 UTC」修复。
 
-背景：`memory_pipeline` 与 `enhanced_prompt_engine` 曾用
-``datetime.now(tz=timezone.utc)`` 取「小时 / 日期」做墙钟判定，对 UTC+8 部署
-使深夜时段判定错位 8 小时、日记按 UTC 切日。修复后全部走
+背景：`memory_pipeline` 与 `enhanced_prompt_engine`（后者已于批6b 项10 随死路径
+删除）曾用 ``datetime.now(tz=timezone.utc)`` 取「小时 / 日期」做墙钟判定，对
+UTC+8 部署使深夜时段判定错位 8 小时、日记按 UTC 切日。修复后全部走
 ``utils.local_time.now_local``。
 
 这些测试的目的不是"验证函数能跑"，而是**把时区语义钉死**：
@@ -109,30 +109,16 @@ class TestLateNightWallClockContract:
 
 
 class TestTimeContextUsesLocalClock:
-    """TimeContext.now() 必须走本地时钟（修复前用 UTC，时段整体错位 8 小时）。"""
+    """（已随宿主模块删除）TimeContext 曾在 enhanced_prompt_engine，
+    6b 项10 死码清除后该模块整体移除，本地时钟契约由 memory_pipeline /
+    frequency / calendar 工具等现存站点用例守护。"""
 
-    def test_now_uses_patched_local_clock(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from my_character.enhanced_prompt_engine import TimeContext
+    def test_enhanced_prompt_engine_module_removed(self) -> None:
+        import importlib.util
 
-        fixed = datetime(2026, 9, 20, 23, 30)  # 周日 深夜
-        monkeypatch.setattr(
-            "my_character.enhanced_prompt_engine.now_local", lambda: fixed
+        assert importlib.util.find_spec("my_character.enhanced_prompt_engine") is None, (
+            "enhanced_prompt_engine 已作为死路径删除，不得复活"
         )
-        ctx = TimeContext.now()
-        assert ctx.hour == 23
-        assert ctx.period == "night"
-        assert ctx.is_weekend is True  # 2026-09-20 为周日
-
-    def test_morning_afternoon_noon_buckets(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from my_character.enhanced_prompt_engine import TimeContext
-
-        cases = {7: "morning", 10: "forenoon", 13: "afternoon", 20: "evening", 23: "night"}
-        for hour, expected in cases.items():
-            monkeypatch.setattr(
-                "my_character.enhanced_prompt_engine.now_local",
-                lambda h=hour: datetime(2026, 9, 20, h, 0),
-            )
-            assert TimeContext.now().period == expected, f"hour={hour}"
 
 
 def test_no_wall_clock_utc_regression_in_fixed_sites() -> None:
@@ -148,7 +134,6 @@ def test_no_wall_clock_utc_regression_in_fixed_sites() -> None:
     root = Path(__file__).resolve().parent.parent
     targets = {
         "shisi/memory/legacy/memory_pipeline.py": 3,
-        "my_character/enhanced_prompt_engine.py": 0,
         "shisi/stats/analytics.py": 0,
         "utils/important_dates.py": 0,
         "proactive/frequency.py": 3,  # can_send/record_sent/record_reply 的时间差

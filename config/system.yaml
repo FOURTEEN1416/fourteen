@@ -187,7 +187,6 @@ fusion:
     blend_ratio: 0.4
     classifier_timeout_ms: 500
   persona:
-    prompt_mode: layered
     anchor_verification_enabled: true
   memory:
     forgetting_model: exponential

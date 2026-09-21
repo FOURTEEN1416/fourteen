@@ -500,18 +500,6 @@ class PersonaService:
             affection_points=affection_points,
         )
 
-    def _build_chat_history(self, memory_context: Any, chat_summary: str) -> str:
-        """将记忆上下文与对话摘要格式化为 prompt_builder 可用的 chat_history 字符串。"""
-        if isinstance(memory_context, dict):
-            return self._engine.build_memory_layer(memory_context, chat_summary)
-
-        parts: list[str] = []
-        if chat_summary:
-            parts.append(f"## 早期对话摘要\n{chat_summary}")
-        if memory_context:
-            parts.append(f"## 最近对话\n{memory_context}")
-        return "\n\n".join(parts)
-
     def _safe_engine_layer(self, name: str, builder: Any, *args: Any, **kwargs: Any) -> str:
         """安全调用 PersonaEngine 的私有构建方法，失败时返回空字符串并记录日志。
 

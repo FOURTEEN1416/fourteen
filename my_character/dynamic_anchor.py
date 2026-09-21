@@ -1,7 +1,9 @@
 """
 动态锚点系统 — 扩展静态锚点为动态锚点
 
-支持锚点优先级、条件激活、情感相关锚点权重调整和长对话周期性强化注入。
+支持锚点优先级、条件激活、情感相关锚点权重调整。
+（周期性强化注入回路批6b 项10 已删：should_reinforce/generate_reinforcement
+零消费者，唯一使用方是已删除的 enhanced_prompt_engine 死路径。）
 """
 
 from __future__ import annotations
@@ -86,7 +88,6 @@ class AnchorCheckResult:
     is_consistent: bool
     overall_score: float
     violations: list[AnchorViolation] = field(default_factory=list)
-    reinforcement_needed: bool = False
 
 
 DEFAULT_DYNAMIC_ANCHORS = [
@@ -121,18 +122,12 @@ class DynamicAnchorSystem:
     def __init__(
         self,
         base_anchors: list[str] | None = None,
-        anchor_config: dict | None = None,
         dynamic_anchors: list[DynamicAnchor] | None = None,
     ):
         self._base_anchors = base_anchors or []
-        self._config = anchor_config
         self._dynamic_anchors: list[DynamicAnchor] = (
             list(DEFAULT_DYNAMIC_ANCHORS) if dynamic_anchors is None else list(dynamic_anchors)
         )
-        self._reinforcement_counter: int = 0
-        self._reinforcement_interval: int = 5
-        if anchor_config and hasattr(anchor_config, "reinforcement_interval"):
-            self._reinforcement_interval = anchor_config.reinforcement_interval
 
         for anchor in self._base_anchors:
             if not any(da.text == anchor for da in self._dynamic_anchors):
@@ -167,32 +162,6 @@ class DynamicAnchorSystem:
             result.append(WeightedAnchor(anchor=da.text, weight=weight))
 
         return result
-
-    def should_reinforce(self) -> bool:
-        self._reinforcement_counter += 1
-        if self._reinforcement_counter >= self._reinforcement_interval:
-            self._reinforcement_counter = 0
-            return True
-        return False
-
-    def generate_reinforcement(self, context: AnchorContext) -> str:
-        active = self.get_active_anchors(context)
-        if not active:
-            return ""
-
-        top_anchors = sorted(active, key=lambda a: a.weight, reverse=True)[:5]
-        lines = ["# 核心性格锚点强化（再次提醒）"]
-        for wa in top_anchors:
-            lines.append(f"- {wa.anchor}")
-
-        max_len = 200
-        if self._config and hasattr(self._config, "max_reinforcement_length"):
-            max_len = self._config.max_reinforcement_length
-
-        text = "\n".join(lines)
-        if len(text) > max_len:
-            text = text[:max_len - 3] + "..."
-        return text
 
     def check_consistency(self, response: str, context: AnchorContext) -> AnchorCheckResult:
         active = self.get_active_anchors(context)
@@ -231,7 +200,6 @@ class DynamicAnchorSystem:
             is_consistent=is_consistent,
             overall_score=overall_score,
             violations=violations,
-            reinforcement_needed=not is_consistent,
         )
 
     def get_all_anchors(self) -> list[str]:
@@ -241,5 +209,4 @@ class DynamicAnchorSystem:
         return {
             "base_anchors_count": len(self._base_anchors),
             "dynamic_anchors_count": len(self._dynamic_anchors),
-            "reinforcement_counter": self._reinforcement_counter,
         }

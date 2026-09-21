@@ -371,8 +371,7 @@ class PersonaConsistencyChecker:
 
 # 6b 项6：检测器按 core_anchors 缓存复用——旧路径每条消息（流式后台检查 +
 # 非流式 check_and_correct_reply）都重建 PersonaConsistencyChecker +
-# DynamicAnchorSystem。check() 路径对锚点系统只读（reinforcement 计数器仅
-# enhanced_prompt_engine 旧路使用），缓存不改变任何判定结果。
+# DynamicAnchorSystem。check() 路径对锚点系统只读，缓存不改变任何判定结果。
 _CHECKER_CACHE: dict[tuple[str, ...], PersonaConsistencyChecker] = {}
 _CHECKER_CACHE_MAX = 64
 

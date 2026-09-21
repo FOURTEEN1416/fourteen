@@ -150,13 +150,11 @@ class _InitPhasesMixin:
         )
 
         persona_fusion = fusion_cfg.get("persona", {})
-        prompt_mode = persona_fusion.get("prompt_mode", "layered")
         anchor_verification = persona_fusion.get("anchor_verification_enabled", True)
         self.components["persona"] = PersonaService(
             config_loader=config_loader,
             llm_gateway=self.components["llm"],
             emotion_engine=self.components["emotion"],
-            prompt_mode=prompt_mode,
             anchor_verification_enabled=anchor_verification,
         )
         self.components["tone"] = ToneMimic(

@@ -27,8 +27,6 @@ class AnchorConfig:
     semantic_threshold: float = 0.3
     keyword_check: bool = True
     llm_check: bool = False
-    reinforcement_interval: int = 5
-    max_reinforcement_length: int = 200
 
 
 @dataclass

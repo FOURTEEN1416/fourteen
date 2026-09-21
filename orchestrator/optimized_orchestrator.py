@@ -221,10 +221,6 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
     def _character_manager(self):
         return self.components.get("character_manager")
 
-    @property
-    def _character_service(self):
-        return self.components.get("character_service")
-
     @staticmethod
     def _run_async(coro) -> Any:
         """安全运行协程，支持有/无事件循环两种情况。
@@ -1485,7 +1481,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 try:
                     status = component.health_check()
                     results[name] = status
-                    # 用 _is_healthy 过滤掉懒加载字段（base_prompt_cached, card_loaded 等）
+                    # 用 _is_healthy 过滤掉懒加载字段（card_loaded 等，见 utils/health_check）
                     if not _is_healthy(status):
                         all_ok = False
                 except Exception:

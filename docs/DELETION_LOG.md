@@ -1,5 +1,73 @@
 # Code Deletion Log
 
+## [2026-09-21] persona 域死码清单整批删除（P2 批6b 项10，审计 :149）
+
+### 删除对象与证据（逐项 grep 调用面证实；含 `.get("键")`/引号键/测试/脚本/tools 全搜）
+- **PersonaEngine 死 API**（`my_character/persona_engine.py`）：
+  `build_complete_prompt`（零调用）及其独占下游 `build_system_prompt`——连带
+  `_prompt_cache`/`_base_prompt_cache` 两级缓存、legacy/enhanced 双分支、
+  `_build_legacy_prompt`/`_build_layered_prompt`/`_build_base_layer`/
+  `_build_memory_layer_from_history`；`validate_response`/`auto_correct_response`/
+  `check_anchor_consistency`（三公开方法零调用）；`evolve`/`evolve_dimension`/
+  `rollback_to`/`auto_evolve`（演化写路径零调用；`evolve_dimension` 唯一调用者是
+  死模块 evolution_engine）。**保留**：`_evolution_log` + `get_evolution_log`
+  （`/api/persona/evolution-log` 经项9④委托为活路径）、`check_consistency`、
+  schema/_dynamic_anchors/_consistency_checker 挂线、四个公开分层 builder
+  （persona_service 注入层消费）。
+  ⚠️ **已知限制登记**：演化写路径删尽后 `_evolution_log` 恒空 → 该端点返回空表
+  （端点 200 不再 500，语义为「尚无演化记录」）。
+- **整文件删除 9 个**（生产零读者，仅剩 `__init__` 导出或死分支互引）：
+  `my_character/enhanced_prompt_engine.py`（仅被死分支引用）、`contextual_behavior.py`、
+  `style_enhancer_v2.py`（`_style_enhancer_v2` 赋值后无使用）、`evolution_engine.py`、
+  `emotion_memory.py`（仅类型注解）、`persona_evaluator.py`（全仓无实例化）、
+  `anchor_protection.py`、`constraint_validator.py`（宿主方法删后孤立）；
+  根包 `character_card/`（6 文件——项9⑤ 挂线删除后整包零 import；其
+  `integration.py` 目录 mtime 过期缺陷随包消亡）。
+- **DynamicAnchorSystem 强化回路**（`my_character/dynamic_anchor.py`）：
+  `should_reinforce`/`generate_reinforcement`/`_reinforcement_counter`/
+  `_reinforcement_interval`/`AnchorCheckResult.reinforcement_needed`/
+  `anchor_config` 形参（零消费者，唯一使用方是已删 enhanced 死路）；
+  `persona_schema.AnchorConfig` 独占两字段 `reinforcement_interval`/
+  `max_reinforcement_length` 一并清除。
+- **EmotionEngine 风格修饰器双接口**（`emotion_engine.py`）：审计钉
+  `get_style_modifiers` 零调用；**穷举同模式**发现 `get_emotion_style_map` 同样零调用
+  （其独占消费模块级 `EMOTION_STYLE_MAP`，三件一并删除）。
+- **`persona_service._build_chat_history`**：零调用滞留函数（既有反向钉
+  `test_prompt_role_and_memory_quality:83-85` 语义不变，保留）。
+- **CharacterService 全链**（审计「类无实例化点」证实：`CharacterService(` 全仓零）：
+  `shisi/application/character_service.py` + `application/__init__` 导出 +
+  `api/registry.py` TYPE_CHECKING 导入与 `character_service` 字段 +
+  `app_factory.py` components 挂线与 `/api/shisi/status` 模块名 +
+  `optimized_orchestrator._character_service` 属性（零读者）。
+- **prompt_mode 管线拆除**（唯一分支点在死路 `build_system_prompt` 内，
+  传什么都不影响）：`PersonaEngine` 形参/属性/日志/to_dict/health_check、
+  `_init_mixin` 读取透传、`config/system.yaml:190` 键、
+  `utils/health_check.py::_HEALTH_OK_KEYS` 两枚失效键
+  （`prompt_mode`/`base_prompt_cached`）。
+
+### 审计误报更正（删前核实现状驳回一条）
+- `ToneMimic.add_conversation` 原列「零调用」——实为
+  `api/routers/training_routes.py:169`（/api/training/apply 克隆摄入）**在用**，**保留**；
+  防误删钉 `test_tone_mimic_add_conversation_still_alive`。
+
+### 反向钉防复活
+`tests/test_p2_batch6_persona.py` 新增 10 钉（死模块 find_spec、PersonaEngine 死/活
+API 双向钉、prompt_mode 管线、_evolution_log 无写者、强化回路、风格修饰器双接口、
+_build_chat_history、CharacterService 全链、character_card 包、add_conversation 存活）；
+`tests/test_local_time.py` 删除随宿主消亡的 TimeContext 两用例并在静态防护目标表除名。
+
+### 验证
+- 定向套件 **65 + 242 + 119 通过 / 0 失败**（persona/shisi/api/my_character 全消费者面）；
+  `create_api_app` 内省端点数不因本批变化（无路由删除）；ruff 全仓 0 错；
+  **突变验红 4/4**（复活死模块文件 / reinforcement_needed 字段 / prompt_mode 形参 /
+  registry character_service 字段，逐条打红后精确撤销）。
+
+### Impact
+- 删除死代码约 **2600+ 行**（9 文件 2100 行 + persona_engine 内 500 行 + 分散件）；
+  PersonaEngine 职责收敛为「画像 + 分层构件 + 锚点/一致性」，三版并存化石清零。
+
+**Reversible**: git revert 即恢复；无 DB/配置迁移（system.yaml 死键删除，读者已消亡）。
+
 ## [2026-09-21] orchestrator 角色卡挂线删除（P2 批6b 项9⑤）
 
 ### 删除对象与证据
