@@ -53,7 +53,9 @@ class ReminderDeliveryTask:
         self._wechat_sender = wechat_sender
         self._ws_sender = ws_sender
         self._character_name = character_name
-        self._last_intent_gc = 0.0
+        # 节流基准锚在「已过一整个间隔」而非 0：Linux 上 time.monotonic() 以**开机**为起点，
+        # 新启动的宿主（如 CI runner，开机 <300s）会让首 tick 误判为「刚清理过」而跳过批量 GC。
+        self._last_intent_gc = time.monotonic() - _INTENT_GC_INTERVAL_SECONDS
 
     def __call__(self) -> None:
         asyncio.run(self._run_once())
