@@ -33,6 +33,9 @@ class MemoryTool(BaseTool):
     name = "memory"
     description = "查询与用户相关的长期记忆事实"
     permission_level = "public"
+    # 会话归属只信编排器服务端注入的 _meta；kwargs 里的 user_key/session_id
+    # 是 LLM 可自填参数，旧实现直接采用 → 指定他人键即可跨用户读事实
+    wants_call_context = True
     parameters_schema = {
         "type": "object",
         "properties": {
@@ -59,32 +62,39 @@ class MemoryTool(BaseTool):
             return ToolResult(False, error="query is required")
         if not self._sm:
             return ToolResult(False, error="Memory system not available")
+        meta = kwargs.pop("_meta", None) if isinstance(kwargs.get("_meta"), dict) else None
+        session_key = str((meta or {}).get("session_key") or "")
+        if not session_key:
+            # 无归属即拒绝：回落全库检索等于跨用户读记忆
+            return ToolResult(False, error="missing_session_key")
         try:
-            # 多用户隔离：工具层若能拿到会话 user_key，只查本人事实
-            user_key = kwargs.get("user_key") or kwargs.get("session_id") or ""
-            if user_key and hasattr(self._sm, "user_key_from_session"):
-                user_key = self._sm.user_key_from_session(str(user_key))
+            if hasattr(self._sm, "user_key_from_session"):
+                user_key = self._sm.user_key_from_session(session_key)
+            else:
+                user_key = session_key
             facts: list = []
-            if user_key and hasattr(self._sm, "search_facts"):
+            searched = False
+            if hasattr(self._sm, "search_facts"):
                 try:
                     facts = self._sm.search_facts(query, user_key=user_key)
+                    searched = True
                 except TypeError:
-                    facts = self._sm.search_facts(query)
-            elif hasattr(self._sm, "search_facts"):
-                facts = self._sm.search_facts(query)
-            elif hasattr(self._sm, "get_facts"):
-                if user_key:
-                    try:
-                        facts = self._sm.get_facts(
-                            category=None, limit=limit, user_key=user_key
-                        )
-                    except TypeError:
-                        facts = self._sm.get_facts(category=None, limit=limit)
-                else:
-                    facts = self._sm.get_facts(category=None, limit=limit)
-            else:
-                return ToolResult(False, error="Memory query not supported")
-            ids = [f.get("id") for f in facts[:limit] if isinstance(f, dict) and f.get("id")]
+                    searched = False  # 实现不支持 user_key 形参，不得走无过滤检索
+            if not searched and hasattr(self._sm, "get_facts"):
+                try:
+                    facts = self._sm.get_facts(
+                        category=None, limit=limit, user_key=user_key
+                    )
+                except TypeError:
+                    # 无用户维度的旧实现：返回结果也必须按键过滤
+                    facts = [
+                        f for f in (self._sm.get_facts(category=None, limit=200) or [])
+                        if isinstance(f, dict) and f.get("user_key") == user_key
+                    ]
+            elif not searched:
+                return ToolResult(False, error="memory query not supported")
+            facts = [f for f in facts[:200] if isinstance(f, dict)]
+            ids = [f.get("id") for f in facts[:limit] if f.get("id")]
             if ids and hasattr(self._sm, "increment_fact_access"):
                 try:
                     self._sm.increment_fact_access(ids)
@@ -117,15 +127,62 @@ class WebSummaryTool(BaseTool):
             return {"available": False, "error": "缺少依赖: pip install requests beautifulsoup4"}
         return {"available": True, "error": ""}
 
+    @staticmethod
+    def _check_url_ssrf(url: str) -> str | None:
+        """SSRF 闸门：仅 http(s)，且主机不得解析到内网/回环/链路本地等保留地址。"""
+        import ipaddress
+        import socket
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return "仅允许 http/https URL"
+        host = parsed.hostname or ""
+        if not host:
+            return "URL 缺少主机名"
+        try:
+            infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
+        except socket.gaierror:
+            return "主机名无法解析"
+        for info in infos:
+            try:
+                ip = ipaddress.ip_address(info[4][0])
+            except ValueError:
+                return "地址解析异常"
+            ip = getattr(ip, "ipv4_mapped", None) or ip  # ::ffff:127.0.0.1 这类映射地址不得绕过回环检查
+            if (ip.is_private or ip.is_loopback or ip.is_link_local
+                    or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+                return "禁止访问内网/保留地址"
+        return None
+
     def execute(self, url: str = "", **kwargs) -> ToolResult:
         if not url:
             return ToolResult(False, error="url is required")
         if not HAS_REQUESTS:
             return ToolResult(False, error="缺少依赖: pip install requests beautifulsoup4")
+        ssrf_err = self._check_url_ssrf(url)
+        if ssrf_err:
+            logger.warning("web_summary 拒绝可疑 URL: %s (%s)", url, ssrf_err)
+            return ToolResult(False, error=f"web_summary_blocked: {ssrf_err}")
         try:
-            resp = requests.get(url, timeout=15, headers={
+            # allow_redirects=False：重定向目标同样可能被解析到内网，
+            # 逐跳放行等于绕过上面的闸门
+            resp = requests.get(url, timeout=15, allow_redirects=False, headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             })
+            if resp.status_code in (301, 302, 303, 307, 308):
+                location = resp.headers.get("location", "")
+                if not location:
+                    return ToolResult(False, error="web_summary_failed: 重定向缺少 location")
+                from urllib.parse import urljoin
+                target = urljoin(url, location)
+                ssrf_err = self._check_url_ssrf(target)
+                if ssrf_err:
+                    logger.warning("web_summary 拒绝重定向目标: %s (%s)", target, ssrf_err)
+                    return ToolResult(False, error=f"web_summary_blocked: 重定向被拒（{ssrf_err}）")
+                resp = requests.get(target, timeout=15, allow_redirects=False, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                })
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "html.parser")
             title = soup.find("title")
@@ -263,6 +320,9 @@ class SchedulerTool(BaseTool):
     description = "设置一次性提醒或日程安排"
     # 2026-09-21：与 set_reminder 对齐，托付类工具不设亲密度门槛
     permission_level = "public"
+    # 归属由编排器服务端注入（_meta）。旧实现不带 session_key 落库 →
+    # 无投递目标，轮询永远不会发它（静默丢提醒）
+    wants_call_context = True
     parameters_schema = {
         "type": "object",
         "properties": {
@@ -289,12 +349,20 @@ class SchedulerTool(BaseTool):
             return ToolResult(False, error="content is required")
         if not self._sm:
             return ToolResult(False, error="Memory system not available")
+        meta = kwargs.pop("_meta", None) if isinstance(kwargs.get("_meta"), dict) else None
+        session_key = str((meta or {}).get("session_key") or "")
+        user_id = (meta or {}).get("user_id")
+        if not session_key:
+            return ToolResult(False, error="missing_session_key")
         try:
-            reminder_id = self._sm.add_reminder(content, trigger_time)
+            reminder_id = self._sm.add_reminder(
+                content, trigger_time, session_key=session_key, user_id=user_id
+            )
             return ToolResult(True, data={
                 "reminder_id": reminder_id,
                 "content": content,
                 "trigger_time": trigger_time,
+                "deliver_to": session_key,
                 "message": f"已安排：{content}",
             })
         except Exception:

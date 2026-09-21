@@ -80,7 +80,9 @@ class UpdateUserProfileTool(BaseTool):
 
     def execute(self, **kwargs) -> ToolResult:
         meta = kwargs.pop("_meta", None) if isinstance(kwargs.get("_meta"), dict) else None
-        session_key = str((meta or {}).get("session_key") or kwargs.get("session_key") or "")
+        # session_key 只信服务端注入的 _meta；kwargs["session_key"] 是 LLM 可自填
+        # 的参数，回落过去等于让模型指定"写谁的画像"（跨用户注入向量）→ 拒绝执行
+        session_key = str((meta or {}).get("session_key") or "")
         if not session_key:
             return ToolResult(False, error="missing_session_key")
         payload: dict[str, Any] = {}
@@ -171,7 +173,9 @@ class RememberFactsTool(BaseTool):
 
     def execute(self, **kwargs) -> ToolResult:
         meta = kwargs.pop("_meta", None) if isinstance(kwargs.get("_meta"), dict) else None
-        session_key = str((meta or {}).get("session_key") or kwargs.get("session_key") or "")
+        # session_key 只信服务端注入的 _meta；kwargs["session_key"] 是 LLM 可自填
+        # 的参数，回落过去等于让模型指定"写谁的画像"（跨用户注入向量）→ 拒绝执行
+        session_key = str((meta or {}).get("session_key") or "")
         if not session_key:
             return ToolResult(False, error="missing_session_key")
         sm = _sm_from_kwargs(kwargs)
@@ -236,7 +240,9 @@ class ForgetFactsTool(BaseTool):
 
     def execute(self, **kwargs) -> ToolResult:
         meta = kwargs.pop("_meta", None) if isinstance(kwargs.get("_meta"), dict) else None
-        session_key = str((meta or {}).get("session_key") or kwargs.get("session_key") or "")
+        # session_key 只信服务端注入的 _meta；kwargs["session_key"] 是 LLM 可自填
+        # 的参数，回落过去等于让模型指定"写谁的画像"（跨用户注入向量）→ 拒绝执行
+        session_key = str((meta or {}).get("session_key") or "")
         sm = _sm_from_kwargs(kwargs)
         if sm is None or not session_key:
             return ToolResult(False, error="memory_unavailable")
@@ -273,7 +279,9 @@ class QueryProfileTool(BaseTool):
 
     def execute(self, **kwargs) -> ToolResult:
         meta = kwargs.pop("_meta", None) if isinstance(kwargs.get("_meta"), dict) else None
-        session_key = str((meta or {}).get("session_key") or kwargs.get("session_key") or "")
+        # session_key 只信服务端注入的 _meta；kwargs["session_key"] 是 LLM 可自填
+        # 的参数，回落过去等于让模型指定"写谁的画像"（跨用户注入向量）→ 拒绝执行
+        session_key = str((meta or {}).get("session_key") or "")
         if not session_key:
             return ToolResult(False, error="missing_session_key")
         try:

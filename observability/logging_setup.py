@@ -98,6 +98,10 @@ class UserContextFilter(logging.Filter):
 
 # Global log handler to be attached during setup
 ring_buffer = RingBufferHandler()
+# 上下文过滤器必须挂在 **handler** 上：logging.Filter 挂在 logger 时只对
+# 直接在该 logger 上产生的记录生效，子 logger propagate 上来的记录不经过
+# 父 logger 的 filter → record.user_id 永不注入，/api/logs 按用户过滤恒为空。
+ring_buffer.addFilter(UserContextFilter())
 
 
 def _add_rotating_file_handler(root_logger: logging.Logger, log_level: int) -> None:
@@ -126,7 +130,6 @@ def setup_logging(log_level: str = "INFO", log_format: str = "json") -> None:
     if not HAS_STRUCTLOG:
         logging.basicConfig(level=level)
         root_logger = logging.getLogger()
-        root_logger.addFilter(UserContextFilter())
         root_logger.addHandler(ring_buffer)
         _add_rotating_file_handler(root_logger, level)
         return
@@ -170,7 +173,6 @@ def setup_logging(log_level: str = "INFO", log_format: str = "json") -> None:
     handler.setFormatter(formatter)
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
-    root_logger.addFilter(UserContextFilter())
     root_logger.addHandler(handler)
     root_logger.addHandler(ring_buffer)  # capture recent logs for API
     _add_rotating_file_handler(root_logger, level)

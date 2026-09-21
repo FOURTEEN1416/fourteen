@@ -100,15 +100,28 @@ async def get_dashboard_stats(_auth: bool = Security(verify_api_key_dep)):
     if cache["data"] is not None and (now - cache["ts"]) < deps.WECHAT_STATUS_TTL:
         wechat_info = cache["data"]
     else:
+        # P1-审查 item32：旧实现 `await get_wechat_status()` 绕过 FastAPI DI 直调
+        # 路由函数 —— credentials 默认 None → 内部抛 401 被 except 吞 →
+        # 恒 disconnected，且失败值还被写入缓存毒一个 TTL 周期。
+        # 管理台语义改读真源：遗留全局通道状态 + 注册表在线通道数。
         try:
-            from api.routers.chat_routes import get_wechat_status
-            result = await get_wechat_status()  # type: ignore[func-returns-value]
-            if isinstance(result, dict):
-                wechat_info = result
+            from wechat_direct.connector_registry import get_registry
+            from wechat_direct.wechat_connector import get_wechat_state
+
+            state = get_wechat_state()
+            online = get_registry().online_count()
+            wechat_info = {
+                "connected": bool(state.get("connected")) or online > 0,
+                "uptime_seconds": state.get("uptime_seconds", 0),
+                "bot_id": state.get("bot_id", ""),
+                "messages_today": state.get("messages_today", 0),
+                "reconnect_attempts": state.get("reconnect_attempts", 0),
+                "online_channels": online,
+            }
+            cache["data"] = wechat_info
+            cache["ts"] = now
         except Exception as e:
             logger.debug("Failed to get wechat status for dashboard: %s", e)
-        cache["data"] = wechat_info
-        cache["ts"] = now
 
     try:
         if orch:

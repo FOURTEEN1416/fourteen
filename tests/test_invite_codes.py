@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import uuid
@@ -17,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 # 项目根路径
@@ -201,6 +203,36 @@ async def test_register_with_valid_invite(module_app, module_session_factory, _a
         assert invite is not None
         assert invite.used_by is not None
         assert invite.used_at is not None
+
+
+@pytest.mark.asyncio
+async def test_concurrent_register_same_invite_consumed_once(
+    module_app, module_session_factory, _admin, _invite
+):
+    """P1 审查 item40：并发双注册只能成功一个（CAS 原子消费）。
+
+    旧实现「先读校验、后写标记」：两个请求都在各自事务里读到 is_valid()，
+    各建一个用户、同一个邀请码被消费两次。
+    """
+    async def _register(client: AsyncClient, email: str, username: str):
+        return await client.post("/api/auth/register-invite", json={
+            "invite_code": "testcode1",
+            "email": email, "username": username, "password": "password123",
+        })
+
+    async with AsyncClient(transport=ASGITransport(app=module_app), base_url="http://test") as client:
+        r1, r2 = await asyncio.gather(
+            _register(client, "race1@test.com", "raceuser1"),
+            _register(client, "race2@test.com", "raceuser2"),
+        )
+    codes = sorted([r1.status_code, r2.status_code])
+    assert codes == [200, 400], f"应恰好一个成功、一个被拒: {r1.text[:120]} / {r2.text[:120]}"
+
+    async with module_session_factory() as db:
+        users = (await db.execute(
+            select(User).where(User.email.in_(("race1@test.com", "race2@test.com")))
+        )).scalars().all()
+        assert len(users) == 1, "落败方的用户必须随事务回滚"
 
 
 # ═══════════════════════════════════════════════════════

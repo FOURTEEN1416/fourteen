@@ -70,12 +70,14 @@ async def toggle_tool(
     if not orch or not orch._tools or not orch._tools.registry:
         raise HTTPException(503, "Tool system not initialized")
     registry = orch._tools.registry
-    tool = registry.get(name)
-    if not tool:
-        raise HTTPException(404, f"Tool not found: {name}")
     if req.enabled:
-        registry.register(tool)
+        if registry.get(name) is not None:
+            return {"status": "ok", "tool": name, "enabled": True}
+        if not registry.reenable(name):
+            raise HTTPException(404, f"Tool not found: {name}")
     else:
+        if registry.get(name) is None and name not in registry.disabled_names:
+            raise HTTPException(404, f"Tool not found: {name}")
         registry.unregister(name)
     deps.tool_history_mgr.append({
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),

@@ -483,7 +483,10 @@ async def activate_character(
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 
     # 将所有其他角色设为非激活
-    for c in _list_all_characters():
+    # ⚠️ P1-审查 item37：必须用 normalize=False 的**原始卡**做写回——
+    # _list_all_characters() 默认逐张跑 normalize_character_card（含文本清洗），
+    # 把派生结果存回磁盘会用有损版本覆盖真源（历次英文卡「by 子串被抠」事故根因）。
+    for c in _list_all_characters(normalize=False):
         if c.get("id") != character_id and c.get("is_active"):
             c["is_active"] = False
             _save_character(c["id"], c)
@@ -590,6 +593,13 @@ async def update_character_persona(
     data["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
     if not _save_character(character_id, data):
         raise HTTPException(status_code=500, detail="保存人设失败")
+
+    # P1-审查 item34：人设 PUT 与 PUT /characters 改的是同一张卡，此前却不做
+    # 任何失效—— persona 缓存与知识索引停留在旧人设。补齐同款失效。
+    if deps.orch and hasattr(deps.orch, "invalidate_character_persona_cache"):
+        deps.orch.invalidate_character_persona_cache(character_id)
+    _invalidate_knowledge_index(character_id)
+
     return {"status": "updated", "character_id": character_id}
 
 

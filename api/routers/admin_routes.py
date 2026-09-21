@@ -12,11 +12,11 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth_jwt import hash_password, require_role
-from api.database import User, get_db
+from api.database import User, WechatBinding, WechatChannelSession, get_db
 from api.password_policy import PasswordStr, ensure_password_strength
 
 logger = logging.getLogger("admin_routes")
@@ -224,8 +224,15 @@ async def delete_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # P1-审查 item33：SQLite 连接未开 PRAGMA foreign_keys（默认 OFF），
+    # ON DELETE CASCADE 不生效——删用户后 wechat_bindings 遗留孤儿行，
+    # wxid 唯一键仍被占 → 同一微信再绑新号恒 409「已被其他账号绑定」。
+    # 删除前显式清依赖行（通道会话同理，防脏状态复活）。
+    email = user.email
+    await db.execute(delete(WechatBinding).where(WechatBinding.user_id == user_id))
+    await db.execute(delete(WechatChannelSession).where(WechatChannelSession.user_id == user_id))
     await db.delete(user)
     await db.commit()
 
-    logger.info("管理员删除用户: %s (id=%d)", user.email, user_id)
-    return {"detail": f"User {user.email} deleted"}
+    logger.info("管理员删除用户: %s (id=%d)", email, user_id)
+    return {"detail": f"User {email} deleted"}

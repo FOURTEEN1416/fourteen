@@ -78,7 +78,7 @@ async def start_cleaning(
             from llm_provider import get_llm
             llm = get_llm()
             cleaner = DataCleaner(llm=llm, accept_score=accept_score)
-            data_dir = Path(__file__).parent.parent.parent / "data" / "training"
+            data_dir = _training_dir()
             json_files = sorted(data_dir.glob("*.jsonl"))
             if not json_files:
                 raise FileNotFoundError("No dataset found")
@@ -107,6 +107,27 @@ async def start_cleaning(
     return {"status": "started", "task": "clean", "accept_score": accept_score}
 
 
+def _live_tone_mimic():
+    """优先用编排器在跑的 ToneMimic（与 RAG 检索同一实例）；无则按需构建。"""
+    orch = deps.orch
+    tone = orch.components.get("tone") if orch and orch.components else None
+    if tone is not None:
+        return tone
+    from my_character.tone_mimic import ToneMimic
+
+    chroma_path = str(Path(__file__).parent.parent.parent / "data" / "chroma_db")
+    return ToneMimic(chroma_path=chroma_path)
+
+
+def _style_preview_sync(message: str) -> dict:
+    """同步段：ToneMimic 构造（Chroma/ONNX 首次加载可达数秒）+ 风格画像读取。"""
+    mimic = _live_tone_mimic()
+    style_prompt = mimic.get_style_prompt()
+    examples = mimic.retrieve_style_examples(message, top_k=3)
+    return {"message": message, "style_output": style_prompt,
+            "style_examples": examples, "status": "ok"}
+
+
 @router.post("/api/training/test")
 async def test_clone(
     message: str = Query(..., max_length=1000),
@@ -114,14 +135,43 @@ async def test_clone(
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     try:
-        from my_character.tone_mimic import ToneMimic
-        chroma_path = str(Path(__file__).parent.parent.parent / "data" / "chroma_db")
-        mimic = ToneMimic(chroma_path=chroma_path)
-        style_prompt = mimic.get_style_prompt()
-        return {"message": message, "style_output": style_prompt, "status": "ok"}
+        # 构造/检索是同步阻塞 IO，必须在 worker 线程跑，否则卡住整个事件循环
+        return await asyncio.to_thread(_style_preview_sync, message)
     except (ImportError, OSError, ValueError):
         logger.exception("Test clone failed")
         return {"message": message, "style_output": "", "status": "error", "detail": "internal_error"}
+
+
+def _training_dir() -> Path:
+    return Path(__file__).parent.parent.parent / "data" / "training"
+
+
+def _apply_cleaned_sync() -> dict:
+    """把最近一轮清洗产物（*_cleaned.json）真实灌入在跑的 ToneMimic 风格库。"""
+    data_dir = _training_dir()
+    cleaned_files = sorted(data_dir.glob("*_cleaned.json"))
+    if not cleaned_files:
+        raise FileNotFoundError("No cleaned dataset found; run /api/training/clean first")
+    latest = cleaned_files[-1]
+    with open(latest, encoding="utf-8") as f:
+        cleaned = json.load(f)
+    if not isinstance(cleaned, list):
+        raise ValueError(f"清洗结果格式异常: {type(cleaned).__name__}")
+    mimic = _live_tone_mimic()
+    added = 0
+    for conv in cleaned:
+        if not isinstance(conv, dict):
+            continue
+        user_msg = (conv.get("user_msg") or conv.get("user") or "").strip()
+        reply_msg = (conv.get("reply_msg") or conv.get("reply") or "").strip()
+        if not user_msg or not reply_msg:
+            continue
+        mimic.add_conversation(
+            user_msg, reply_msg,
+            metadata={"source": "training_apply", "file": latest.name},
+        )
+        added += 1
+    return {"status": "applied", "path": str(latest), "applied": added}
 
 
 @router.post("/api/training/apply")
@@ -129,12 +179,16 @@ async def apply_clone(
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
+    # 旧实现只做 Path 拼接就返回 "applied"——从未写入任何风格库（假成功）。
     try:
-        result_path = str(Path(__file__).parent.parent.parent / "data" / "training")
-        return {"status": "applied", "path": result_path}
+        result = await asyncio.to_thread(_apply_cleaned_sync)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from None
     except (ValueError, OSError):
         logger.exception("Apply clone failed")
         raise HTTPException(status_code=500, detail="internal_error") from None
+    deps.training_mgr.update(status="applied", step_name="克隆应用", progress=1.0)
+    return result
 
 
 # ═══════════════════════════════════════════════════════

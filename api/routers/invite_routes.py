@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth_jwt import (
@@ -115,9 +115,10 @@ async def register_with_invite(
     # 置于邀请码校验之前：输入不合规即刻失败，不必先查库
     ensure_password_strength(req.password)
 
-    # ── 校验邀请码 ──
+    # ── 校验邀请码（快速失败；真正的消费在下方原子 CAS）──
+    code_norm = req.invite_code.strip().lower()
     result = await db.execute(
-        select(InviteCode).where(InviteCode.code == req.invite_code.strip().lower())
+        select(InviteCode).where(InviteCode.code == code_norm)
     )
     invite = result.scalar_one_or_none()
     if not invite:
@@ -162,10 +163,30 @@ async def register_with_invite(
     db.add(user)
     await db.flush()
 
-    # ── 标记邀请码已使用 ──
-    invite.used_by = user.id
-    invite.used_at = datetime.now(timezone.utc)  # type: ignore[assignment]
-    await db.flush()
+    # ── 原子消费邀请码（compare-and-swap）──
+    # 旧实现是「先读校验、后写标记」：并发窗口内两个注册都通过 is_valid()
+    # → 同一邀请码注册两个用户。改为条件 UPDATE，rowcount≠1 即回滚整笔注册。
+    # naive-UTC：与列存储格式一致（DateTime 无 tz、_utcnow=utcnow()），
+    # 且会话中已加载的 invite 会触发 ORM 的 Python 端 WHERE 求值，
+    # aware/naive 混比直接 TypeError。
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    claim = await db.execute(
+        update(InviteCode)
+        .where(
+            InviteCode.code == code_norm,
+            InviteCode.used_by.is_(None),
+            InviteCode.is_revoked.is_(False),
+            InviteCode.expires_at > now,
+        )
+        .values(used_by=user.id, used_at=now)
+    )
+    if claim.rowcount != 1:
+        await db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="邀请码已被使用",
+            headers={"X-Error-Code": "INVITE_INVALID"},
+        )
 
     # ── 生成令牌 ──
     token_data = {"sub": str(user.id), "email": user.email, "role": user.role}
@@ -183,7 +204,7 @@ async def register_with_invite(
     await db.commit()
     await db.refresh(user)
 
-    logger.info("邀请码注册成功: %s (%s) | code=%s", user.email, user.username, invite.code)
+    logger.info("邀请码注册成功: %s (%s) | code=%s", user.email, user.username, code_norm)
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,

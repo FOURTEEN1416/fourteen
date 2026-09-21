@@ -53,9 +53,13 @@ def sanitize_character_name(name: str) -> str:
     return cleaned or name.strip().removesuffix(".json").strip() or "未命名角色"
 
 
-# 常见作者/署名/定制标记词
+# 常见作者/署名/定制标记词（残留清理用）
+# ⚠️ P1-审查 item37：裸 "by"/"BY" **不在**此列 —— 旧实现把它当无约束子串删除，
+# baby/standby/abyss 等英文词连同正文一起被抠掉，且 activate 循环把清洗结果
+# 写回磁盘后损坏不可逆（角色卡真源被污染）。by 类署名只由第 1/2 步的
+# 「括号内」「词尾锚定 $」模式处理，那两处有明确边界、不会误伤。
 _AUTHOR_KEYWORDS = [
-    "by", "BY", "定制", "作者", "著", "听得见", "银子", "银子著", "BY诗", "by诗",
+    "定制", "作者", "著", "听得见", "银子", "银子著", "BY诗", "by诗",
 ]
 
 

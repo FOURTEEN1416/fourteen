@@ -71,13 +71,32 @@ class BaseTool:
 class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, BaseTool] = {}
+        # unregister 的实例保留在这里：旧实现直接 pop 丢引用，导致
+        # /api/tools/{name}/toggle 关闭后永远无法再开启（get 返回 None → 404）
+        self._disabled: dict[str, BaseTool] = {}
 
     def register(self, tool: BaseTool):
+        self._disabled.pop(tool.name, None)
         self._tools[tool.name] = tool
         logger.info("Tool registered: %s (permission: %s)", tool.name, tool.permission_level)
 
     def unregister(self, name: str):
-        self._tools.pop(name, None)
+        tool = self._tools.pop(name, None)
+        if tool is not None:
+            self._disabled[name] = tool
+
+    def reenable(self, name: str) -> bool:
+        """恢复此前被 unregister 的工具；成功返回 True。"""
+        tool = self._disabled.pop(name, None)
+        if tool is None:
+            return False
+        self._tools[name] = tool
+        logger.info("Tool re-enabled: %s", name)
+        return True
+
+    @property
+    def disabled_names(self) -> list[str]:
+        return list(self._disabled.keys())
 
     def get(self, name: str) -> BaseTool | None:
         return self._tools.get(name)
