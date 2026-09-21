@@ -201,29 +201,41 @@ JSON:"""
     # ── 规则模式 ─────────────────────────────────────────
 
     def _extract_with_rules(self, messages: list[str]) -> list[dict[str, Any]]:
-        """使用正则规则提取事实"""
+        """使用正则规则提取事实。
+
+        命中模式时以「整句用户原话」作为事实文本（我→用户），而非正则捕获的
+        残片段——否则「我明天去北京出差」只会得到「明天去」这类残句，
+        被注入闸门判为碎片后事件类事实整体丢失（生产回归）。
+        """
         facts = []  # type: ignore[var-annotated]
 
         for msg in messages:
             for category, patterns in PATTERNS.items():
-                for pattern in patterns:
-                    matches = re.findall(pattern, msg)
-                    for m in matches:
-                        fact_text = m.strip()
-                        if len(fact_text) < 2:
-                            continue
-                        # 去重
-                        if not any(f["fact"] == fact_text for f in facts):
-                            topics = self._topics_from_text(fact_text, category)
-                            facts.append({
-                                "fact": fact_text,
-                                "category": category,
-                                "confidence": 0.5,
-                                "source": "rule",
-                                "topics": topics,
-                            })
+                if not any(re.search(pattern, msg) for pattern in patterns):
+                    continue
+                fact_text = self._rule_fact_text(msg)
+                if len(fact_text) < 4:
+                    continue
+                if any(f["fact"] == fact_text for f in facts):
+                    continue
+                topics = self._topics_from_text(fact_text, category)
+                facts.append({
+                    "fact": fact_text,
+                    "category": category,
+                    "confidence": 0.5,
+                    "source": "rule",
+                    "topics": topics,
+                })
 
         return facts
+
+    @staticmethod
+    def _rule_fact_text(msg: str) -> str:
+        """整句去噪：首人称→「用户」，截断到合理长度，去掉尾部标点。"""
+        s = re.sub(r"\s+", " ", str(msg or "")).strip()
+        s = re.sub(r"^(我们|咱们|我|咱|本人)[，,]?\s*", "用户", s)
+        s = s.rstrip("。.！!？?、,，")
+        return s[:60]
 
     @staticmethod
     def _topics_from_text(text: str, category: str) -> list[str]:

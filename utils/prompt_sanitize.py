@@ -54,8 +54,9 @@ def is_injectable_fact(fact: str) -> bool:
         return False
     if _CMD_LIKE.search(s):
         return False
-    # 截断承诺：以「叫/提醒/喊」结尾且过短（生产 id14「…二十分叫」）
-    if re.search(r"(叫|提醒|喊|催)$", s) and len(s) <= 18:
+    # 截断承诺：以「叫/提醒/喊」结尾且过短（生产 id14「…二十分叫」）。
+    # 「催」仅当非「被催」时判残——「不喜欢被催」是正当偏好，不得误杀。
+    if len(s) <= 18 and (re.search(r"(叫|提醒|喊)$", s) or re.search(r"[^被]催$", s)):
         return False
     if re.match(r"^(提醒我|叫我|喊我).{0,12}(就好了|就行|吧)[吧啊呀呢~～!！。]*$", s):
         return False
