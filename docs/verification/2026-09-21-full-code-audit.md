@@ -167,8 +167,39 @@
 14. **persona 子审计两处误报（驳回，防下次误报）**：① 「`build_system_prompt` 调用面=0」——对 `CharacterAggregate.build_system_prompt` **不成立**，其经 `prompt_builder.py:35` ← persona_service:152 活着（正因活着才有 P1-44 状态块重复）；死的是 `persona_engine.build_system_prompt`，两者同名不同物；② 「`apply_time_decay` 无人调用」——有调用点但打在模板引擎上，已按实况改述为 P1-45 而非排除。
 15. `EmotionEngine/LLMEmotionClassifier` 线程池：注释「类级别共享」为谎（实为实例级，`emotion_engine.py:385-386`），但 `close()` 级联正确释放（:454-459/:823-826）、请求级引擎 LRU 淘汰即关——**无泄漏**，只按注释失实记，不上功能缺陷。
 
+## 复核实录（b76d6c6 → 3e96a7c · AX P2 批次增量复核）
+
+> 复核对象：并行窗两提交 `b7cd513`（agent-plane P2 全量）+ `3e96a7c`（BOARD 收账），13 文件 +1022/−31。**逐文件逐条对码核验**，不采信提交信息与 BOARD「生产闭环」宣称。
+> 工作树声明：复核时工作树含并行窗**未提交在制品** 7 文件（scheduler wait 门控、projection 按 event_type 拉取、runtime 种子判定等——恰与本复核新登记的部分 P1 同题，属他窗修复中），**不在本次口径内**；其提交后需再增量复核。
+
+### 新增 P0-10 — agent-plane 全部端点无管理员门槛：任一用户 JWT 可跨用户读因果账本、可全库破坏性 curate
+- `api/routers/agent_plane_routes.py`（新 153 行）6 端点（replay / profile / events / curate / probes，含 GET+POST）鉴权**全部只有 `Security(verify_api_key_dep)`**；而 `api/auth.py:44-74` 语义 = **任一有效用户 access token 即放行，role 不参与判定**。仓库已有 `api/auth_jwt.py:196-221 require_role("admin")` 未被使用。
+- `replay/profile/events` 的 `session_key` 为**自由查询参数、无归属校验** → user4 传 user2 的会话键即可重放他人全部画像/工具/对话因果事件（P0-4 同族：隔离又只做了数据层键，没做接口层键）。
+- `POST /curate` `apply=True` 为**破坏性**（delete_fact 进回收站 + 改写）；`session_key` 传空 → `run_curator_all_known` **全库所有用户**执行。前端 `frontend/src/api/system.ts:43-62` 已把该 destructive POST 暴露为普通客户端函数。
+- **修复方向**：6 端点统一 `dependencies=[Security(require_role("admin"))]`（或至少 session_key 归属校验 + curate admin-only）。
+
+### 新增 P1（AX P2 批次）
+48. **persona_hint 注入链三处断、恒为空**：`proactive/llm_proactive.py::load_persona_hint` 本体正确，但调用侧拿不到 character_id——`_llm_proactive_one_user` 取 `eng._character_id`，**ASEEngine 无此属性**（真实属性是 `_knowledge_character_id`，`ase_engine.py:701`），异常/空被吞后传 `""`；即便走 hub 键推断，键形如 `N:peer` 无 `|` 分隔；`profile_projection` 产物也无 character_id 槽。**三源全空 → 每轮「人格提示」恒 `""`**，BOARD 宣称的 persona 闭环是空壳（文件解析、41 卡 glob 全跑，产物进不了 prompt）。
+49. **`wait_minutes` 只入账不生效 + LLM 决策无静默前置闸 → 每用户约 288 次/天 LLM 空烧**：`ase_check` 为 5 分钟 IntervalTrigger（`scheduler.py:245-252`），`_llm_proactive_one_user` 每次调远端 LLM 决策；决策返回的 `wait_minutes` 仅写 ledger 事件，**无任何下一 tick 门控**；且 23:00–07:00 静默只在投递层硬闸（:570/:916/:965/:1039），LLM 调用发生在闸**之前** → 夜间照烧。消息不刷屏，token 恒流失。（他窗工作树在制品正在修 wait 门控，入账后本条应复核降级。）
+50. **TOOL_RESULT 事件缺 turn_id → 回放/探针的 tool 维度是死壳**：`orchestrator/optimized_orchestrator.py:986-1003` append 时只带 session_key/payload，**不带 turn_id/character_id**；`replay(turn_id=…)` 按列切片永远命中 0 条 tool 事件；`scripts/ax_acceptance_probes` live 模式取最新 tool 事件作 turn 锚 → 恒 `no_turn_id_yet`。且该 append 为异步热路径内的同步 sqlite 写，失败仅 `logger.debug`。
+51. **`data/agent_plane.db` 无保留策略**：`event_ledger.py` 只 append 不 prune，chat/tool/profile/web_disabled 全类型常驻 → 无界增长（`web_disabled` 在 enabled=false 时**每 tick 每用户写一行**，关闭态反而涨得最快）。
+52. **CWD 相对路径两处回归（v1.8 教训同模式）**：① `load_persona_hint` 用 `Path("config/characters")` 且 cid 空时 **glob 解析全部 41 张卡 JSON**——每 5 分钟每用户一次；② `agent_plane_routes.curate` 全库扫描用 `Path("data/sqlite.db")`。工作目录非项目根的启动方式下双双静默失效。仓库真源是 `utils/project_paths.PROJECT_ROOT`。
+53. **`write_config_file` 非原子读改写**（`scheduler.py:416-431`）：4 worker 下训练页每次保存配置都是全文件 RMW，无锁无临时文件 rename，并发写互相覆盖半文件风险；「下一 tick 生效」依赖各进程自行重读。
+
+### 旧 P0 复核（该批次是否顺带修复）
+- P0-1（dict→str 记忆蒸发）**未修**；P0-2（`user_profile.py:269` 画像库路径差三级）**未修**；P0-6（`run_api.py:296-303` 未 await 即 return True）**未修**；P0-8（`connector_registry.py:115-127` disconnect 不释放 flock fd）**未修**。
+
+### 复核核实无恙（新代码中验过不是问题的）
+- `curator.py` 对 `StructuredMemory` 的三处调用契约与真实签名逐一比对相符（`user_key_from_session:358`、`get_facts:603`、`delete_fact:694`），回收站语义用法正确（但 `memory_recycle_bin` 仍只增，归旧 P2）。
+- `event_ledger.default_path()` 已正确锚定 `parents[2]/data/agent_plane.db`；每操作独立 `sqlite3.connect(timeout=30)`，无跨线程共享连接问题。
+- `scripts/ax_clean_profiles.py` ROOT 锚定正确、默认 dry-run、`--apply` 显式开关，质量合格。
+
+### 口径刷新
+- 端点：`create_api_app` 内省（`AI_GF_ENV=dev`）**224 路由 / 190 唯一路径**（原 219/181，+5 路径组全为 agent-plane）。
+- 本窗零代码变更，测试口径沿用 1455 收集 / 1451 通过 / 4 跳过、角色卡 41 张在位（**主检出工作树当前含他窗在制品**，上述数字对应 3e96a7c 提交态）。
+
 ## 完成声明四要素
-- **验证证据**：本报告每条 P0/P1 附主审亲验行号与实况摘录；P0-2 含运行时探针实证（OperationalError）；AST 全仓扫描复核 async 内同步调用面；六路审计的「自查排除」段落逐条对码。
-- **边界检查**：只读审查零改动；未跑全量测试基线（零代码变更故沿用 1455/1451/4 口径并声明）；服务器侧运行态取证未做；六路子审计（含 persona）**全部回收并逐条对码**——证实者入册、误报者入排除清单（第 14 条）。
-- **已知限制**：P1 部分后果（如 zhipu 限流频率、bcrypt 时长）依赖生产运行态，未在生产复现即定级者已注明触发条件；`大创赛…/user_data/` 镜像目录命中未计入正式清单（非活动代码）。
-- **置信度**：P0 全部高（行级+运行时证据）；P1 高（行级）个别中（成本量化）；P2 高。
+- **验证证据**：本报告每条 P0/P1 附主审亲验行号与实况摘录；P0-2 含运行时探针实证（OperationalError）；AST 全仓扫描复核 async 内同步调用面；六路审计的「自查排除」段落逐条对码。复核实录（P0-10、P1-48~53）为 b7cd513/3e96a7c 变更带逐文件通读 + `create_api_app` 端点内省实跑（224/190）+ 属性存在性实测（`ASEEngine` 无 `_character_id`）。
+- **边界检查**：只读审查零改动；未跑全量测试基线（零代码变更故沿用 1455/1451/4 口径并声明）；服务器侧运行态取证未做；六路子审计（含 persona）**全部回收并逐条对码**——证实者入册、误报者入排除清单（第 14 条）；增量复核覆盖 b76d6c6..3e96a7c 全部 13 文件，工作树他窗未提交在制品**未纳入**本口径。
+- **已知限制**：P1 部分后果（如 zhipu 限流频率、bcrypt 时长、288 次/天为单用户满配间隔推算）依赖生产运行态，未在生产复现即定级者已注明触发条件；`大创赛…/user_data/` 镜像目录命中未计入正式清单（非活动代码）。
+- **置信度**：P0 全部高（行级+运行时证据，含新增 P0-10）；P1 高（行级）个别中（成本量化）；P2 高；复核实录与「核实无恙」项均行级证据。
