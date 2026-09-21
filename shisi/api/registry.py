@@ -68,7 +68,10 @@ def setup_shisi(
     reg.character_manager = CharacterManager(store=store)
     reg.character_manager.initialize()
 
-    reg.affinity_enhancer = AffinityEnhancer()
+    # 2026-09-22：db_path 必须传到 AffinityEnhancer——旧实现无视 db_path 恒用
+    # 默认 data/sqlite.db，① 测试夹具给了隔离库 enhancer 仍读写宿主真库；
+    # ② 审计回放恢复上线后宿主历史值会被带回（集成测试 affinity 两例翻车实锤）。
+    reg.affinity_enhancer = AffinityEnhancer(db_path=db_path) if db_path else AffinityEnhancer()
     reg.stage_engine = EmotionStageEngine()
     reg.affinity_mapper = AffinityMapper(
         enhancer=reg.affinity_enhancer,
