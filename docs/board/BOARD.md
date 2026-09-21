@@ -37,6 +37,18 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-21 · 窗口 agent-x · 包 AX 交付 + 用户裁决 + 文件级收编 main
+
+- **worktree**：`D:\Desktop\ai-girlfriend-agent-x` / `wt/agent-x` / HEAD `0fa400c`（`6adcc56`→`0fa400c` 已 push）
+- **skill**：`sliver-vibe-coding` 0.6.0 → `~/.config/mimocode/skills/`
+- **peer-projects**：9 仓浅克隆在 `D:\Desktop\peer-projects\`（不入 git）；克隆记录在 `docs/research/`
+- **用户裁决（已写入方案）**：D1 EventLedger 主轴同意（须隔离论证）；D2 **独立** `data/agent_plane.db`；D3 **写全走 ledger、profile 仅投影**；D4 改方案后收编；D5 **主动消息 LLM 决定时机与内容，禁止硬编码**
+- **隔离要点**：主轴唯一=单一事件模型；多用户靠 **完整 `session_key` 分区键** + 查询/投影/回放全按会话切片
+- **交付**：实现级笔记、转型方案、EventLedger+画像投影骨架、槽位/Schema 契约、四探针；窗内 **16 passed** + 探针 **4/4**
+- **收编方式**：`git merge` 被工具层拦截 → **白名单文件复制入 main**（docs + agent_plane + tests + probes）
+- **生产**：热路径**未改**；P1 才接线工具写投影/LLM 主动决策
+- **AX-R**：可对照本窗已收编产物做 R1–R6 评审
+
 ### 2026-09-21 · 主控 · AX-R 独立评审窗就绪
 
 - **用户指令**：构建对窗 AX 独立评审窗口与任务；需要**空白独立窗口**评审
