@@ -355,7 +355,6 @@ _PROACTIVE_TYPE_TO_KEY: dict[ProactiveType, str] = {
 class UrgencyState:
     base: float = 0.0
     missing_bonus: float = 0.0
-    event_bonus: float = 0.0
     scene_bonus: float = 0.0
     emotion_bonus: float = 0.0
     context_bonus: float = 0.0
@@ -366,7 +365,6 @@ class UrgencyState:
             10.0,
             self.base
             + self.missing_bonus
-            + self.event_bonus
             + self.scene_bonus
             + self.emotion_bonus
             + self.context_bonus,
@@ -385,7 +383,6 @@ class UrgencyState:
     def reset(self) -> None:
         self.base = 0.0
         self.missing_bonus = 0.0
-        self.event_bonus = 0.0
         self.scene_bonus = 0.0
         self.emotion_bonus = 0.0
         self.context_bonus = 0.0
@@ -427,17 +424,6 @@ class ContextAnalyzer:
             return "evening"
         else:
             return "night"
-
-    def get_recommended_type(self) -> ProactiveType | None:
-        context = self.analyze()
-        hour = context["hour"]
-        if 7 <= hour <= 9:
-            return ProactiveType.MORNING_GREETING
-        if 22 <= hour <= 24 or 0 <= hour <= 1:
-            return ProactiveType.NIGHT_GREETING
-        if hour in [11, 12, 17, 18]:
-            return ProactiveType.CARE_MEAL
-        return None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1044,27 +1030,6 @@ class ASEEngine:
         except Exception:
             return None
 
-    def _generate_proactive_message(self) -> dict[str, Any]:
-        total = self.urgency.total
-
-        if total >= 7:
-            msg_type = "miss_you"
-        elif total >= 4:
-            if self._last_sent_type == "care":
-                msg_type = random.choice(["miss_you", "bored"])
-            else:
-                msg_type = random.choice(
-                    ["care_weather", "care_meal", "share"],
-                )
-        else:
-            msg_type = "share"
-
-        templates = _get_messages(msg_type, self._affinity_level)
-        msg = random.choice(templates) if templates else "..."
-        self._last_sent_type = msg_type
-
-        return {"type": msg_type, "message": msg, "urgency": total}
-
     def _generate_and_return(
         self, msg_type: ProactiveType, commit: bool = True,
     ) -> dict[str, Any] | None:
@@ -1418,7 +1383,6 @@ class ASEEngine:
                 "level": self.urgency.level,
                 "base": round(self.urgency.base, 2),
                 "missing_bonus": round(self.urgency.missing_bonus, 2),
-                "event_bonus": round(self.urgency.event_bonus, 2),
                 "scene_bonus": round(self.urgency.scene_bonus, 2),
                 "emotion_bonus": round(self.urgency.emotion_bonus, 2),
                 "context_bonus": round(self.urgency.context_bonus, 2),

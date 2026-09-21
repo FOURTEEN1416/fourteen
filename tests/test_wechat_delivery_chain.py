@@ -282,24 +282,54 @@ def test_send_to_all_quiet_hours_returns_false():
 #  端到端：投递失败 → 不提交配额
 # ═══════════════════════════════════════════════════════════════
 
-def test_delivery_failure_does_not_commit_quota(monkeypatch):
-    """把④⑤连起来：微信报失败时 ASE 配额必须保持不动。"""
+def test_delivery_failure_does_not_commit_quota(monkeypatch, tmp_path):
+    """把④⑤连起来：微信报失败时 ASE 配额必须保持不动。
+
+    批6b 项7：旧 `_check_ase_global` 全局路径已删（非 ASEHub 注入直接判装配
+    缺陷跳过），本用例随之迁移到生产真实装配——ASEHub + 真 ASEEngine +
+    真 _deliver 通道链，钉住「通道失败 → commit_sent 从未发生」。
+    """
+    import proactive.ase_hub as hub_mod
+    import proactive.llm_proactive as lp
+    import shisi.agent_plane.runtime as rt
     from proactive.ase_engine import ASEEngine, _local_now
+    from proactive.ase_hub import ASEHub
     from proactive.scheduler import ProactiveScheduler
 
-    engine = ASEEngine(state_path="/tmp/ase_unused_state.json", generation_mode="template")
+    monkeypatch.setattr(hub_mod, "_STATE_DIR", tmp_path)
+    monkeypatch.setattr(hub_mod, "_INDEX_PATH", tmp_path / "index.json")
+    monkeypatch.setattr(lp, "read_web_proactive_config", lambda: {"enabled": True})
+    monkeypatch.setattr(lp, "load_persona_hint", lambda cid="": "")
+    monkeypatch.setattr(
+        lp, "decide_proactive",
+        lambda llm, ctx: {
+            "should_contact": True, "reason": "test",
+            "wait_minutes": None, "message": "在干嘛呀",
+        },
+    )
+    monkeypatch.setattr(rt, "project_profile_for", lambda uk: {})
+    monkeypatch.setattr(rt, "get_profile_prompt_block", lambda uk: "")
+    monkeypatch.setattr(rt, "append_proactive_event", lambda **kw: None)
+
+    hub = ASEHub(
+        lambda user_key="", state_path="", **kw: ASEEngine(
+            state_path=state_path, generation_mode="template",
+        )
+    )
+    key = "4:peer@im.wechat"
+    engine = hub.get(key)
     engine._last_reset_date = _local_now().date()
     engine._last_proactive_time = None
-    engine.urgency.base = 9.0
-    engine._check_scene_triggers = lambda commit=True: None
 
-    sched = ProactiveScheduler(ase_engine=engine)
+    sched = ProactiveScheduler(ase_engine=hub)
     sched.reload_config = lambda: None
+    sched._collect_ase_user_keys = lambda: [key]
+    sched._resolve_proactive_llm = lambda eng=None: object()
     h = _local_now().hour
-    sched._quiet_hours = ((h + 2) % 24, (h + 3) % 24)
+    sched._quiet_hours = ((h + 2) % 24, (h + 3) % 24)  # 非静默，放行到投递层
     # 微信通道真实存在但投递失败；console 也在（旧实现下会被 console 掩盖）
     sched._channel_instances = {
-        "wechat": lambda msg: (_ for _ in ()).throw(RuntimeError("prepare failed")),
+        "wechat": lambda msg, session_key=None: (_ for _ in ()).throw(RuntimeError("prepare failed")),
         "console": lambda msg: None,
     }
     sched._send = lambda msg: None

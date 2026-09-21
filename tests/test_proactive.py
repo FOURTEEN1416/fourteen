@@ -147,7 +147,7 @@ def test_urgency_state_defaults():
 
 def test_urgency_state_total_capped():
     from proactive.ase_engine import UrgencyState
-    us = UrgencyState(base=5, missing_bonus=3, event_bonus=2, scene_bonus=2)
+    us = UrgencyState(base=5, missing_bonus=3, scene_bonus=2, emotion_bonus=1)
     assert us.total == 10.0
 
 
@@ -165,7 +165,7 @@ def test_urgency_state_levels():
 
 def test_urgency_state_reset():
     from proactive.ase_engine import UrgencyState
-    us = UrgencyState(base=5, missing_bonus=3, event_bonus=2)
+    us = UrgencyState(base=5, missing_bonus=3, scene_bonus=2)
     us.reset()
     assert us.total == 0.0
 
@@ -906,18 +906,27 @@ def test_scheduler_quiet_hours_uses_ase_local_clock():
         assert sched._is_quiet_hours() is False
 
 
-def test_scheduler_quiet_hours_skips_before_generation():
-    """调度器在静默时段必须在**生成之前**短路（不生成 = 不扣配额）。"""
-    from proactive.ase_engine import _local_now
+def _hub_sched(monkeypatch, tmp_path):
+    """批6b 项7：旧 `_check_ase_global` 全局路径已删（生产唯一装配是 ASEHub，
+    _init_mixin 注入）。「静默不烧配额 / 投递失败不记账 / 投递成功才记一次」
+    三条回归随之迁移到 hub + LLM 决策语义。"""
+    import proactive.ase_hub as hub_mod
+    import proactive.llm_proactive as lp
+    import shisi.agent_plane.runtime as rt
+    from proactive.ase_hub import ASEHub
     from proactive.scheduler import ProactiveScheduler
 
-    class _FakeASE:
-        _daily_message_count = 0
-        _paused = False
-        urgency = type("U", (), {"total": 8.5})()
-        _last_skip_reason = ""
+    monkeypatch.setattr(hub_mod, "_STATE_DIR", tmp_path)
+    monkeypatch.setattr(hub_mod, "_INDEX_PATH", tmp_path / "index.json")
 
-        def __init__(self):
+    class _FakeASE:
+        def __init__(self, user_key: str = "", state_path: str = ""):
+            self.user_key = user_key
+            self.state_path = state_path
+            self._daily_message_count = 0
+            self._paused = False
+            self._last_skip_reason = ""
+            self.urgency = type("U", (), {"total": 8.5})()
             self.tick_calls: list[bool] = []
             self.commit_calls: list[dict] = []
 
@@ -930,98 +939,117 @@ def test_scheduler_quiet_hours_skips_before_generation():
 
         def commit_sent(self, result):
             self.commit_calls.append(result)
+            self._daily_message_count += 1
 
-    ase = _FakeASE()
-    sched = ProactiveScheduler(ase_engine=ase)
+    hub = ASEHub(_FakeASE)
+    sched = ProactiveScheduler(ase_engine=hub)
     sched.reload_config = lambda: None
+    key = "4:peer@im.wechat"
+    sched._collect_ase_user_keys = lambda: [key]
+    sched._resolve_proactive_llm = lambda eng=None: object()
+
+    monkeypatch.setattr(lp, "read_web_proactive_config", lambda: {"enabled": True})
+    monkeypatch.setattr(lp, "load_persona_hint", lambda cid="": "")
+    monkeypatch.setattr(rt, "project_profile_for", lambda uk: {})
+    monkeypatch.setattr(rt, "get_profile_prompt_block", lambda uk: "")
+    monkeypatch.setattr(rt, "append_proactive_event", lambda **kw: None)
+    return sched, hub, key
+
+
+def test_scheduler_rejects_non_hub_ase_injection():
+    """装配缺陷必须显式可见：注入非 ASEHub 引擎时整段跳过，不静默走旧路径。"""
+    from proactive.scheduler import ProactiveScheduler
+
+    class _LegacyEngine:
+        def __init__(self):
+            self.tick_calls: list[bool] = []
+
+        def tick(self, hours, dry_run=False):
+            self.tick_calls.append(dry_run)
+            return None
+
+    eng = _LegacyEngine()
+    sched = ProactiveScheduler(ase_engine=eng)
+    sched.reload_config = lambda: None
+
+    sched._check_ase()
+
+    assert eng.tick_calls == [], "非 hub 注入属装配缺陷，禁止静默兼容运行"
+
+
+def test_scheduler_quiet_hours_skips_before_generation(monkeypatch, tmp_path):
+    """静默时段必须在 **LLM 决策/生成之前** 短路：不决策、不记账、不扣配额。"""
+    import proactive.llm_proactive as lp
+    from proactive.ase_engine import _local_now
+
+    sched, hub, key = _hub_sched(monkeypatch, tmp_path)
+    decide_calls: list[int] = []
+    monkeypatch.setattr(lp, "decide_proactive", lambda llm, ctx: decide_calls.append(1) or {})
     h = _local_now().hour
     sched._quiet_hours = (h, (h + 1) % 24)
 
     sched._check_ase()
 
-    assert ase.tick_calls == [True], "静默时段应只以 dry_run 更新紧迫度"
-    assert ase.commit_calls == []
+    eng = hub.get(key)
+    assert decide_calls == [], "P1-49：静默时段不得先烧 LLM 再在投递层丢弃"
+    assert eng.tick_calls == []
+    assert eng.commit_calls == []
+    assert eng._daily_message_count == 0
 
 
-def test_scheduler_does_not_commit_when_delivery_fails():
-    """投递失败（返回 False）时绝不提交记账 —— 本次修复的核心不变量。"""
+def test_scheduler_does_not_commit_when_delivery_fails(monkeypatch, tmp_path):
+    """投递失败（返回 False）时绝不提交记账 —— 本条修复的核心不变量（hub 语义）。"""
+    import proactive.llm_proactive as lp
     from proactive.ase_engine import _local_now
-    from proactive.scheduler import ProactiveScheduler
 
-    class _FakeASE:
-        _daily_message_count = 0
-        _paused = False
-        urgency = type("U", (), {"total": 8.5})()
-        _last_skip_reason = ""
-
-        def __init__(self):
-            self.commit_calls: list[dict] = []
-
-        def _hours_since_last_chat(self):
-            return 90.0
-
-        def tick(self, hours, emotion_state=None, dry_run=False):
-            if dry_run:
-                return None
-            self._last_skip_reason = "ok"
-            return {"type": "miss_you", "message": "想你了", "urgency": 8.5}
-
-        def commit_sent(self, result):
-            self.commit_calls.append(result)
-
-    ase = _FakeASE()
-    sched = ProactiveScheduler(ase_engine=ase)
-    sched.reload_config = lambda: None
+    sched, hub, key = _hub_sched(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        lp, "decide_proactive",
+        lambda llm, ctx: {
+            "should_contact": True, "reason": "miss",
+            "wait_minutes": None, "message": "想你啦，在干嘛",
+        },
+    )
     h = _local_now().hour
-    sched._quiet_hours = ((h + 2) % 24, (h + 3) % 24)
-    sched._deliver = lambda message: False  # 所有通道失败
+    sched._quiet_hours = ((h + 2) % 24, (h + 3) % 24)  # 非静默，放行到投递层
+    sched._deliver = lambda message, session_key=None: False
 
     sched._check_ase()
 
-    assert ase.commit_calls == []
-    assert ase._daily_message_count == 0
+    eng = hub.get(key)
+    assert eng.commit_calls == []
+    assert eng._daily_message_count == 0
 
 
-def test_scheduler_commits_after_successful_delivery():
+def test_scheduler_commits_after_successful_delivery(monkeypatch, tmp_path):
     """投递成功才记账，且只记一次。"""
+    import proactive.llm_proactive as lp
     from proactive.ase_engine import _local_now
-    from proactive.scheduler import ProactiveScheduler
 
-    class _FakeASE:
-        _daily_message_count = 0
-        _paused = False
-        urgency = type("U", (), {"total": 8.5})()
-        _last_skip_reason = ""
-
-        def __init__(self):
-            self.commit_calls: list[dict] = []
-
-        def _hours_since_last_chat(self):
-            return 90.0
-
-        def tick(self, hours, emotion_state=None, dry_run=False):
-            if dry_run:
-                return None
-            self._last_skip_reason = "ok"
-            return {"type": "miss_you", "message": "想你了", "urgency": 8.5}
-
-        def commit_sent(self, result):
-            self.commit_calls.append(result)
-            self._daily_message_count += 1
-
-    ase = _FakeASE()
-    sched = ProactiveScheduler(ase_engine=ase)
-    sched.reload_config = lambda: None
+    sched, hub, key = _hub_sched(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        lp, "decide_proactive",
+        lambda llm, ctx: {
+            "should_contact": True, "reason": "miss",
+            "wait_minutes": None, "message": "想你啦，在干嘛",
+        },
+    )
     h = _local_now().hour
     sched._quiet_hours = ((h + 2) % 24, (h + 3) % 24)
     sent: list[str] = []
-    sched._deliver = lambda message: (sent.append(message), True)[1]
+
+    def _deliver(message, session_key=None):
+        sent.append(message)
+        return True
+
+    sched._deliver = _deliver
 
     sched._check_ase()
 
-    assert sent == ["想你了"]
-    assert len(ase.commit_calls) == 1
-    assert ase._daily_message_count == 1
+    eng = hub.get(key)
+    assert sent == ["想你啦，在干嘛"]
+    assert len(eng.commit_calls) == 1
+    assert eng._daily_message_count == 1
 
 
 def test_scheduler_send_to_all_returns_false_in_quiet_hours():

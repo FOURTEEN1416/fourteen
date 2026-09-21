@@ -115,14 +115,10 @@ class ProactiveScheduler:
         ase_engine: Any | None = None,
         send_message_func: Callable[[str], None] | None = None,
         daily_maintenance_func: Callable[[], None] | None = None,
-        get_last_chat_time: Callable[[], datetime | None] | None = None,
-        is_online_check: Callable[[], bool] | None = None,
     ):
         self.ase = ase_engine
         self._send = send_message_func
         self._daily_maintenance = daily_maintenance_func
-        self._get_last_chat_time = get_last_chat_time
-        self._is_online_check = is_online_check
         # LLM 主动决策（用户裁决：时机与内容由模型判断，无策略闸）
         self._llm_provider: Any | None = None
         # AX 审查 B3：执行 LLM 自己给出的 wait_minutes（非硬编码日程表）
@@ -726,11 +722,15 @@ class ProactiveScheduler:
         try:
             from proactive.ase_hub import ASEHub
 
-            if isinstance(self.ase, ASEHub):
-                self._check_ase_per_user()
+            if not isinstance(self.ase, ASEHub):
+                # 6b 项7：旧 `_check_ase_global` 兼容路径已删——生产唯一装配是
+                # ASEHub（_init_mixin 注入）；非 hub 注入只可能是错误装配。
+                logger.error(
+                    "ASE 注入非 ASEHub（%s），主动消息跳过——装配缺陷，不静默走旧路径",
+                    type(self.ase).__name__,
+                )
                 return
-            # 兼容：全局单例引擎（旧路径）
-            self._check_ase_global()
+            self._check_ase_per_user()
         except Exception as e:  # noqa: BLE001
             logger.error("ASE check failed: %s", e)
         finally:
@@ -925,57 +925,6 @@ class ProactiveScheduler:
                 message=message[:80],
                 wait_minutes=decision.get("wait_minutes"),
             )
-
-    def _check_ase_global(self) -> None:
-        """旧全局 ASE 单例路径（兼容；新装配走 ASEHub）。"""
-        try:
-            if self._get_last_chat_time:
-                last_chat = self._get_last_chat_time()
-                hours = (datetime.now(tz=timezone.utc) - last_chat).total_seconds() / 3600 if last_chat else 99.0
-            elif hasattr(self.ase, "_hours_since_last_chat"):
-                hours = self.ase._hours_since_last_chat()
-            else:
-                hours = self._hours_since_last_check()
-
-            is_online = True
-            if self._is_online_check:
-                is_online = self._is_online_check()
-
-            if not is_online:
-                if hasattr(self.ase, 'tick'):
-                    self.ase.tick(hours, dry_run=True)
-                return
-
-            if self._is_quiet_hours():
-                if hasattr(self.ase, 'tick'):
-                    self.ase.tick(hours, dry_run=True)
-                logger.info(
-                    "ASE tick: 免打扰时段(%02d-%02d)静默，仅累积紧迫度 "
-                    "hours=%.2f urgency=%.2f daily_count=%d reason=quiet_hours",
-                    self._quiet_hours[0], self._quiet_hours[1], hours,
-                    getattr(getattr(self.ase, "urgency", None), "total", -1.0),
-                    getattr(self.ase, "_daily_message_count", -1),
-                )
-                return
-
-            result = self.ase.tick(hours)
-            logger.info(
-                "ASE tick: hours=%.2f urgency=%.2f daily_count=%d paused=%s "
-                "result=%s reason=%s",
-                hours,
-                getattr(getattr(self.ase, "urgency", None), "total", -1.0),
-                getattr(self.ase, "_daily_message_count", -1),
-                getattr(self.ase, "_paused", None),
-                bool(result),
-                getattr(self.ase, "_last_skip_reason", "") or ("ok" if result else "unknown"),
-            )
-            if result:
-                message = result.get("message", "")
-                logger.info("ASE triggered: [%s] %s", result.get("type"), message)
-                if self._deliver(message) and hasattr(self.ase, "commit_sent"):
-                    self.ase.commit_sent(result)
-        except Exception as e:  # noqa: BLE001
-            logger.error("ASE global check failed: %s", e)
 
     def set_delivery_loop(self, getter: Callable[[], Any]) -> None:
         """P1-23：装配层注入「通道资产所属事件循环」的 getter（如 ws 线程 loop）。
@@ -1250,7 +1199,10 @@ class ProactiveScheduler:
         """每日重置"""
         if self.ase and hasattr(self.ase, "reset_daily_count"):
             self.ase.reset_daily_count()
-            logger.info("Daily ASE count reset")
+            n = 1
+            if hasattr(self.ase, "iter_engines"):
+                n = sum(1 for _ in self.ase.iter_engines())
+            logger.info("Daily ASE count reset (engines=%d)", n)
         self._save_state()
 
     def _save_state(self) -> None:
