@@ -298,6 +298,11 @@ class CharacterKnowledgeService:
             or source_data.get("personality", "")
             or source_data.get("data", {}).get("personality", "")
         )
+        if not isinstance(personality_text, str):
+            # 归一化卡的 `personality` 是**数值字典**（warmth/playfulness…），
+            # 散文在 `personality_text`。数值喂给分段器会 AttributeError
+            # （2026-09-21 由被静默跳过的用例暴露：卡无 personality_text 时索引即崩）。
+            personality_text = ""
         if personality_text:
             for i, paragraph in enumerate(self._split_paragraphs(personality_text)):
                 if paragraph.strip() and len(paragraph) > 10:

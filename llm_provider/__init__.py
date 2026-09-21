@@ -298,7 +298,7 @@ def get_llm_names(provider: str | None = None) -> list[str]:
     if resolved == "agnes":
         return ["agnes-3.0-flash", "agnes-2.5-flash", "agnes-2.5-pro"]
     if resolved == "zhipu":
-        return ["glm-4-flash"]
+        return ["glm-4.5-flash", "glm-4-flash"]
     if resolved == "xunfei":
         return ["spark-lite"]
     if resolved == "baidu":

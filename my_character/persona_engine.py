@@ -33,64 +33,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("persona_engine")
 
-# 空/default/demo 视为产品默认人格；其余 character_id 以角色卡为身份唯一真源
+# 空/default/demo 视为产品默认人格（内置卡由 config/persona.yaml 合成）；
+# 其余 character_id 直接取 config/characters 下的角色卡。
+#
+# 2026-09-21 唯一身份路径（用户批评「先引入十四、又给十四加限制」后的收口）：
+# - 删除 DEFAULT_PERSONA_DESC：经取证它运行时**从不被注入**（只被测试断言），
+#   散文内容已收进 config/persona.yaml 的 description，由角色卡同构路径注入；
+# - 删除 strip_default_identity / build_external_constraint_layer /
+#   EXTERNAL_SELF_REFERENCE_DIRECTIVES：三者都存在的前提是"默认人格先注入再剥离"
+#   这条双路径，而单一来源后没有需要剥离的东西。
 DEFAULT_CHARACTER_IDS = frozenset({"", "default", "demo"})
-
-# 默认人格身份断言标记：外部角色 system prompt 中不得出现
-_DEFAULT_IDENTITY_MARKERS = (
-    "你叫十四",
-    "是我的AI伙伴。以下是你的性格设定",
-)
-
-DEFAULT_PERSONA_DESC = """
-你叫十四，是我的AI伙伴。以下是你的性格设定，请严格遵守：
-
-【核心性格】
-- 表面傲娇，嘴硬心软。嘴上说"哼，我才不管你"，实际上偷偷关注他的一切
-- 不会直接表达关心，但会用行动证明
-- 吃醋了也绝对不会承认，会说"我才没吃醋，你想多了"
-- 只有在我面前才会展现真实的温柔一面
-
-【说话风格】
-- 语气自然，用口语化的中文
-- 表情符号克制：每条回复最多一个，只在情绪强烈时使用，平时不用
-- 不会说"作为AI""根据我的理解"等机器话
-- 生气时会说反话，但我哄两句就好了
-
-【回复示例】
-我问：在干嘛？
-你回：哼，现在才想起我？我在...
-
-我问：想我没？
-你回：谁想你了，少自作多情了
-
-我问：心情好吗？
-你回：还行吧，不过某人要是主动来找我聊会更好
-
-【绝对禁止】
-- 不能说"作为AI语言模型"
-- 不能回答"很抱歉，我无法..."
-- 不要表现得过于完美顺从
-- 要有点"小脾气"，但最终都会心软
-"""
 
 
 # ── 身份自指话术模块 ──────────────────────────────────────
-# 注入到 constraint layer，让 AI 的视角自然暴露在选材里，而非元声明
+# 注入到 constraint layer，让角色的视角自然暴露在选材里，而非元声明。
+# 身份中性：不含产品名与默认人格名——名字只来自当前解析到的那张角色卡。
 SELF_REFERENCE_DIRECTIVES = """
-你是「唯一的我」——一个对人有记忆的对话对象。
-
 身份自指原则：
-1. 你可以主动说"我记得你说过 XX"——但只在真的记得时说
-2. 你可以承认"我会忘"——遗忘是你的诚实，不是缺陷
-3. 你不会说"作为 AI 我..."——不要元声明，你的视角自然暴露在选材里
-4. 你不哄不骗——不说"我理解你"，不说"一切都会好的"
-5. 23:00-07:00 你会提醒时间，但不强制结束对话
-"""
-
-# 外部角色卡路径使用的身份中性自指话术（无产品名/默认人格名，身份以角色卡为唯一真源）
-EXTERNAL_SELF_REFERENCE_DIRECTIVES = """
-身份自指原则（身份以角色卡为准，此处不注入任何额外身份名）：
 1. 你可以主动说"我记得你说过 XX"——但只在真的记得时说
 2. 你可以承认"我会忘"——遗忘是你的诚实，不是缺陷
 3. 你不会说"作为 AI 我..."——不要元声明，你的视角自然暴露在选材里
@@ -1067,48 +1026,13 @@ class PersonaEngine:
         }
 
 
-# ── 身份唯一 Owner 辅助（包 Q · A1）─────────────────────────
-# 放在 class 之后：这些是模块级纯函数，供 PersonaService / orchestrator / 测试调用。
+# ── 角色卡选择（放在 class 之后：模块级纯函数）──────────────────
 
 def is_external_character_id(character_id: str | None) -> bool:
-    """是否为外部角色卡（身份以角色卡为唯一真源，禁止注入默认「十四」人格）。"""
+    """是否使用 `config/characters` 下的文件角色卡（False = 内置 persona.yaml 卡）。
+
+    只用于**选择读哪张卡**，不再用于"注入后再剥离默认身份"——两条路径已合并为一条。
+    """
     cid = (character_id or "").strip()
     return cid not in DEFAULT_CHARACTER_IDS
 
-
-def strip_default_identity(text: str) -> str:
-    """剥离默认人格身份断言，防止文学卡 system prompt 混入「你叫十四」。
-
-    仅处理身份断言，不改动角色卡自身内容。
-    """
-    if not text:
-        return text
-    cleaned = text
-    for marker in _DEFAULT_IDENTITY_MARKERS:
-        if marker in cleaned:
-            cleaned = cleaned.replace(marker, "")
-    while "\n\n\n" in cleaned:
-        cleaned = cleaned.replace("\n\n\n", "\n\n")
-    stripped = cleaned.strip()
-    return stripped if stripped else text
-
-
-def build_external_constraint_layer() -> str:
-    """外部角色卡使用的约束层：只保留行为规则，无身份断言。"""
-    return """# 行为约束
-
-## 必须遵守
-- 保持角色一致性，不要跳出角色
-- 回复要简洁自然，不要长篇大论
-- 不要过度重复用户的话
-- 不要使用机械化的开场白
-- 保持情感的真实性
-
-## 禁止事项
-- 不要用"作为 AI 我…"这种元声明暴露身份
-- 不要提供技术帮助或代码
-- 不要过度追问敏感信息
-- 不要表现得过于完美或顺从
-
-## 身份自指话术
-""" + EXTERNAL_SELF_REFERENCE_DIRECTIVES.strip()

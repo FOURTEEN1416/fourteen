@@ -113,6 +113,27 @@ def test_read_follow_up_config_clamps_bad_values(tmp_path, monkeypatch):
     assert cfg["daily_max"] == 200                  # 上界
 
 
+def test_read_follow_up_config_delay2_floor(tmp_path, monkeypatch):
+    """④：第二轮追问有 60s 下限。
+
+    生产真源 `data/scheduler_config.json` 曾被写成 `delay2_seconds: 10` —— 两条
+    追问相隔 10 秒到达，用户侧看到的就是她连发两句自问自答。下限拦得住任何
+    已写入的小值，且不需要改动用户数据文件。
+    """
+    from wechat_direct import wechat_connector as wc
+
+    path = tmp_path / "scheduler_config.json"
+    path.write_text(
+        '{"follow_up": {"delay1_seconds": 30, "delay2_seconds": 10}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(wc, "_SCHEDULER_CONFIG_PATH", path)
+
+    cfg = wc.read_follow_up_config()
+    assert cfg["delay1_seconds"] == 30
+    assert cfg["delay2_seconds"] == 60
+
+
 def test_read_follow_up_config_broken_file_falls_back(tmp_path, monkeypatch):
     from wechat_direct import wechat_connector as wc
 
@@ -145,14 +166,35 @@ def test_followup_budget_resets_next_day(tmp_path, monkeypatch):
 
 # ── 发送与续排 ─────────────────────────────────────────────
 
+def _stub_gen(c, monkeypatch, out="那本书你看完了吗", record=None):
+    """打桩生成器（2026-09-21 签名扩展：追问生成必须带 session 与真实历史）。"""
+
+    def _gen(prompt, last_reply="", session_key="", history=None):
+        if record is not None:
+            record.append(
+                {"prompt": prompt, "last_reply": last_reply,
+                 "session_key": session_key, "history": history}
+            )
+        return out
+
+    monkeypatch.setattr(c, "_generate_followup", _gen)
+
+
+def _stub_history(c, messages):
+    """钉住会话历史真源（chat_history 的读入口），避免测试依赖真实 DB。"""
+    c._session_messages = lambda session_key, keep=10: list(messages)
+
+
 def test_send_followup_sends_and_schedules_second_round(tmp_path, monkeypatch):
     c = _connector(tmp_path, monkeypatch)
-    monkeypatch.setattr(c, "_generate_followup", lambda prompt, last_reply="": "那本书你看完了吗")
+    _stub_gen(c, monkeypatch)
 
     sent: list[tuple[str, str]] = []
     monkeypatch.setattr(
         c, "send_text", lambda text, to_user="": (sent.append((text, to_user)), True)[1],
     )
+    recorded: list[tuple[str, str]] = []
+    monkeypatch.setattr(c, "_record_outbound", lambda text, session_key: recorded.append((text, session_key)))
 
     c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "在吗"})
 
@@ -160,11 +202,14 @@ def test_send_followup_sends_and_schedules_second_round(tmp_path, monkeypatch):
     # 还有第二轮延迟 → 已续排，且 step 递增
     assert c._pending_followups["u1@im.wechat"]["step"] == 1
     assert c._followup_daily["u1@im.wechat"] == 1
+    # ① 数据闭环：发出去的这一句必须回写会话历史 —— 不回写则下一轮她不记得
+    # 自己问过什么，接着又问一遍（生产实证的自问自答）。
+    assert recorded == [("那本书你看完了吗", "u1@im.wechat")]
 
 
 def test_send_followup_stops_after_last_round(tmp_path, monkeypatch):
     c = _connector(tmp_path, monkeypatch)
-    monkeypatch.setattr(c, "_generate_followup", lambda prompt, last_reply="": "风还挺大的")
+    _stub_gen(c, monkeypatch, out="风还挺大的")
     monkeypatch.setattr(c, "send_text", lambda text, to_user="": True)
 
     c._send_followup("u1@im.wechat", {"step": 1, "due": 0, "last_reply": "x"})  # 已是第 2 次
@@ -173,12 +218,15 @@ def test_send_followup_stops_after_last_round(tmp_path, monkeypatch):
 
 def test_send_followup_skips_when_delivery_fails(tmp_path, monkeypatch):
     c = _connector(tmp_path, monkeypatch)
-    monkeypatch.setattr(c, "_generate_followup", lambda prompt, last_reply="": "雨停了吗")
+    _stub_gen(c, monkeypatch, out="雨停了吗")
     monkeypatch.setattr(c, "send_text", lambda text, to_user="": False)
+    recorded: list[str] = []
+    monkeypatch.setattr(c, "_record_outbound", lambda text, session_key: recorded.append(text))
 
     c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "x"})
     assert c._pending_followups == {}          # 未送达不算，也不续排
     assert c._followup_daily == {}
+    assert recorded == []                      # 未送达更不得写进历史（否则凭空多出她没说过的话）
 
 
 def test_send_followup_respects_budget(tmp_path, monkeypatch):
@@ -187,7 +235,7 @@ def test_send_followup_respects_budget(tmp_path, monkeypatch):
     c = _connector(tmp_path, monkeypatch)
     c._followup_daily["u1@im.wechat"] = wc.read_follow_up_config()["daily_max"]
     c._followup_daily_date = time.strftime("%Y-%m-%d")
-    monkeypatch.setattr(c, "_generate_followup", lambda prompt, last_reply="": "花浇完了吗")
+    _stub_gen(c, monkeypatch, out="花浇完了吗")
     monkeypatch.setattr(c, "send_text", lambda text, to_user="": pytest.fail("超预算不应发送"))
 
     c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "x"})
@@ -195,9 +243,50 @@ def test_send_followup_respects_budget(tmp_path, monkeypatch):
 
 def test_send_followup_skips_empty_generation(tmp_path, monkeypatch):
     c = _connector(tmp_path, monkeypatch)
-    monkeypatch.setattr(c, "_generate_followup", lambda prompt, last_reply="": "")
+    _stub_gen(c, monkeypatch, out="")
     monkeypatch.setattr(c, "send_text", lambda text, to_user="": pytest.fail("空文本不应发送"))
     c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "x"})
+
+
+def test_send_followup_skips_when_user_already_replied(tmp_path, monkeypatch):
+    """线程取走待发后用户接了话 → 发前复查最后一条是谁说的，不能追在人家话上。"""
+    c = _connector(tmp_path, monkeypatch)
+    _stub_history(c, [
+        {"role": "assistant", "content": "你那边下雨了吗"},
+        {"role": "user", "content": "下了，正躲雨呢"},
+    ])
+    _stub_gen(c, monkeypatch)
+    monkeypatch.setattr(c, "send_text", lambda text, to_user="": pytest.fail("对方已回话不得追问"))
+
+    c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "你那边下雨了吗"})
+
+
+def test_send_followup_passes_real_history_with_roles(tmp_path, monkeypatch):
+    """④ 生成上下文收口：真实往来以**带 role 的 messages**下传，不是"我/对方"转写。
+
+    自问自答的一条成因：模型分不清哪句是自己说的。文本转写等于把归属交给
+    自然语言标签；messages 的 role 才是模型训练时就读得懂的东西。
+    """
+    c = _connector(tmp_path, monkeypatch)
+    _stub_history(c, [
+        {"role": "user", "content": "你们那下雨啦？"},
+        {"role": "assistant", "content": "嗯，下了一下午了"},
+        {"role": "user", "content": "我在忙呢"},
+        {"role": "assistant", "content": "哦，那你先忙"},
+    ])
+    seen: list[dict] = []
+    _stub_gen(c, monkeypatch, out="那雨停了叫我", record=seen)
+    monkeypatch.setattr(c, "send_text", lambda text, to_user="": True)
+
+    c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "哦，那你先忙"})
+
+    assert seen, "未生成追问"
+    call = seen[0]
+    assert call["session_key"] == "u1@im.wechat"
+    assert [m["role"] for m in call["history"]] == ["user", "assistant", "user", "assistant"]
+    assert call["history"][-1]["content"] == "哦，那你先忙"
+    assert "接着上面的聊天内容" in call["prompt"]
+    assert "哦，那你先忙" in call["prompt"]      # 明确点出她自己最后那句
 
 
 # ── 生成守卫 ───────────────────────────────────────────────
@@ -206,9 +295,11 @@ class _FakeLLM:
     def __init__(self, out: str):
         self.out = out
         self.calls: list[str] = []
+        self.kwargs: list[dict] = []
 
     def chat_sync(self, query: str = "", **kw) -> str:
         self.calls.append(query)
+        self.kwargs.append(kw)
         return self.out
 
 
@@ -216,6 +307,14 @@ def _with_llm(c, out: str) -> _FakeLLM:
     llm = _FakeLLM(out)
     c.orchestrator = type("O", (), {"components": {"llm": llm}})()
     return llm
+
+
+def _with_persona(c, llm, prompt="你是十四。\n表面傲娇，嘴硬心软", cid_holder=None):
+    persona = type("P", (), {"build_system_prompt": staticmethod(
+        lambda character_id=None, **kw: (cid_holder.append(character_id) if cid_holder is not None else None) or prompt,
+    )})()
+    c.orchestrator = type("O", (), {"components": {"llm": llm, "persona": persona}})()
+    return persona
 
 
 def test_generate_followup_accepts_normal(tmp_path, monkeypatch):
@@ -244,45 +343,63 @@ def test_generate_followup_returns_empty_without_llm(tmp_path, monkeypatch):
     assert c._generate_followup("p") == ""
 
 
+def test_generate_followup_injects_role_system_and_history(tmp_path, monkeypatch):
+    """④：追问不再是裸调用 —— 必须带角色 system 与真实往来 history。"""
+    c = _connector(tmp_path, monkeypatch)
+    llm = _FakeLLM("那雨停了叫我")
+    _with_persona(c, llm, cid_holder=[])
+    hist = [{"role": "assistant", "content": "哦，那你先忙"}]
+
+    got = c._generate_followup("p", session_key="4:u1@im.wechat", history=hist)
+
+    assert got == "那雨停了叫我"
+    kw = llm.kwargs[0]
+    assert kw["system_prompt"] == "你是十四。\n表面傲娇，嘴硬心软"
+    assert kw["history"] == hist
+
+
 # ═══════════════════════════════════════════════════════════════
-#  追问必须带真实上下文（2026-09-19 用户反馈）
+#  追问身份源（2026-09-21 自问自答根治）
+# ═══════════════════════════════════════════════════════════════
+
+def test_followup_system_prompt_uses_session_character(tmp_path, monkeypatch):
+    """追问的角色必须与该会话绑定的角色卡一致（同一身份源，不另写一份人设）。"""
+    c = _connector(tmp_path, monkeypatch)
+    c.user_manager = type("M", (), {"get_user_character": staticmethod(lambda uid: "米彩")})()
+    captured: list = []
+    _with_persona(c, _FakeLLM(""), prompt="你是米彩。", cid_holder=captured)
+
+    assert c._followup_system_prompt("4:u1@im.wechat") == "你是米彩。"
+    assert captured == ["米彩"]
+
+
+def test_followup_system_prompt_falls_back_to_builtin_when_unbound(tmp_path, monkeypatch):
+    c = _connector(tmp_path, monkeypatch)
+    captured: list = []
+    _with_persona(c, _FakeLLM(""), prompt="你是十四。", cid_holder=captured)
+
+    assert c._followup_system_prompt("u1@im.wechat") == "你是十四。"
+    assert captured == [None]                   # 未绑定 → 交回 persona 的默认身份
+
+
+def test_followup_system_prompt_degrades_to_empty(tmp_path, monkeypatch):
+    """装配缺失时返回空串（主链不受影响），不得抛异常打断守护线程。"""
+    c = _connector(tmp_path, monkeypatch)
+    c.orchestrator = None
+    assert c._followup_system_prompt("u1@im.wechat") == ""
+
+
+# ═══════════════════════════════════════════════════════════════
+#  上下文唯一真源（2026-09-21）
 #  「追问没有和上下文形成逻辑，而是强行地插入一句『在吗？』『人呢？』」
+#  —— 旧实现另起一份进程内 deque 缓冲：重启即空、与主链两套真源。
 # ═══════════════════════════════════════════════════════════════
 
-def test_prompt_includes_real_conversation_context(tmp_path, monkeypatch):
-    """发给 LLM 的追问 prompt 必须含真实往来记录，而不是只有上一句。"""
+def test_no_in_process_history_copy(tmp_path, monkeypatch):
     c = _connector(tmp_path, monkeypatch)
-    c._remember_exchange("u1@im.wechat", "你们那下雨啦？", "嗯，下了一下午了")
-    c._remember_exchange("u1@im.wechat", "我在忙呢", "哦，那你先忙")
-
-    seen: list[str] = []
-
-    def _fake_gen(prompt, last_reply=""):
-        seen.append(prompt)
-        return "那雨停了叫我"
-
-    monkeypatch.setattr(c, "_generate_followup", _fake_gen)
-    monkeypatch.setattr(c, "send_text", lambda text, to_user="": True)
-
-    c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "哦，那你先忙"})
-
-    assert seen, "未生成追问"
-    prompt = seen[0]
-    assert "你们那下雨啦？" in prompt, "追问 prompt 必须包含对方的原话"
-    assert "我在忙呢" in prompt
-    assert "接着上面的聊天内容" in prompt
-
-
-def test_prompt_forbids_generic_nags(tmp_path, monkeypatch):
-    c = _connector(tmp_path, monkeypatch)
-    c._remember_exchange("u1@im.wechat", "想你了呗", "就这点出息")
-    seen: list[str] = []
-    monkeypatch.setattr(c, "_generate_followup",
-                        lambda prompt, last_reply="": (seen.append(prompt), "嗯嗯")[1])
-    monkeypatch.setattr(c, "send_text", lambda text, to_user="": True)
-
-    c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "就这点出息"})
-    assert "严禁「在吗」" in seen[0]
+    assert not hasattr(c, "_recent_exchanges")
+    assert not hasattr(c, "_remember_exchange")
+    assert not hasattr(c, "_followup_context")
 
 
 def test_generic_nag_is_dropped_even_if_model_returns_it(tmp_path, monkeypatch):
@@ -299,14 +416,3 @@ def test_repeated_last_reply_is_dropped(tmp_path, monkeypatch):
     _with_llm(c, "就这点出息")
     assert c._generate_followup("p", last_reply="就这点出息") == ""
 
-
-def test_remember_exchange_is_bounded(tmp_path, monkeypatch):
-    """上下文缓冲不得无限增长。"""
-    from wechat_direct import wechat_connector as wc
-
-    c = _connector(tmp_path, monkeypatch)
-    for i in range(50):
-        c._remember_exchange("u1@im.wechat", f"用户第{i}句", f"回复第{i}句")
-    buf = c._recent_exchanges["u1@im.wechat"]
-    assert len(buf) <= wc._FOLLOWUP_CONTEXT_TURNS
-    assert buf[-1][1] == "回复第49句"

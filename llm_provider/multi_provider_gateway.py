@@ -152,12 +152,16 @@ def _is_error_reply(text: str) -> bool:
 DEFAULT_PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
     "zhipu": {
         "name": "智谱AI",
-        "model": "glm-4-flash",
+        "model": "glm-4.5-flash",
         "api_base": "https://open.bigmodel.cn/api/paas/v4",
         "auth_mode": "bearer",
         "max_tokens": 2048,
         "temperature": 0.85,
-        "description": "GLM-4.7-Flash 永久免费，无限 Token，200K 上下文",
+        # GLM-4.5-Flash 默认**开思考**：实测 max_tokens=60 时预算全被推理吃掉、
+        # content 截断成半句，100 时恒空。本项目的回复预算普遍很小，
+        # 不换这行就会把「客服腔」换成「空回复」。
+        "extra_payload": {"thinking": {"type": "disabled"}},
+        "description": "GLM-4.5-Flash 免费档（thinking=disabled），链上第 2 位降级选项",
     },
     "xunfei": {
         "name": "讯飞星火",
@@ -175,7 +179,7 @@ DEFAULT_PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
         "auth_mode": "oauth",
         "max_tokens": 2048,
         "temperature": 0.85,
-        "description": "ERNIE-Speed 每月 50 万 Token 免费，128K 上下文",
+        "description": "ERNIE-Speed-128k 每月 50 万 Token 免费，128K 上下文",
     },
     "deepseek": {
         "name": "DeepSeek",
@@ -184,7 +188,7 @@ DEFAULT_PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
         "auth_mode": "bearer",
         "max_tokens": 4096,
         "temperature": 0.85,
-        "description": "DeepSeek-V2 高质量模型，需自行申请 API Key",
+        "description": "DeepSeek-V3（deepseek-chat）高质量模型，需自行申请 API Key",
     },
     "agnes": {
         "name": "Agnes AI",

@@ -282,6 +282,12 @@ class _InitPhasesMixin:
                     "[主动消息/console] session=%s %s", session_key or "-", msg
                 )
             )
+            # 数据闭环：主动消息**送达后**回写 chat_history。memory 组件在本方法
+            # 之前（_init_memory_and_rag 首段）已就绪，这里是唯一注入点——
+            # 同时覆盖 main.py 与 run_api.py 两条入口。
+            # 不回写的后果（生产实证 2026-09-21）：已发主动消息/追问在四张记忆表
+            # 全部 0 命中，她下一轮完全不记得自己说过什么 → 自问自答。
+            scheduler.set_memory(self.components.get("memory"))
             if scheduler.start():
                 self.components["scheduler"] = scheduler
                 logger.info("主动消息调度器已启动（ASE 按用户隔离）")

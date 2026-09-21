@@ -125,6 +125,8 @@ class ProactiveScheduler:
         self._is_online_check = is_online_check
         # LLM 主动决策（用户裁决：时机与内容由模型判断，无策略闸）
         self._llm_provider: Any | None = None
+        # 自问自答根治：主动消息送达后回写历史需要记忆服务
+        self._memory: Any | None = None
         # AX 审查 B3：执行 LLM 自己给出的 wait_minutes（非硬编码日程表）
         self._llm_proactive_next_ok: dict[str, float] = {}
         # P1-22：投递连续失败计数（指数退避；旧实现失败零退避，
@@ -169,6 +171,37 @@ class ProactiveScheduler:
     def set_llm_provider(self, llm: Any | None) -> None:
         """注入 LLM，供主动消息决策（P1：LLM 判时机与文案）。"""
         self._llm_provider = llm
+
+    def set_memory(self, memory: Any | None) -> None:
+        """注入记忆服务，供主动消息**送达后回写对话历史**（自问自答根治）。"""
+        self._memory = memory
+
+    def _resolve_memory(self) -> Any | None:
+        if self._memory is not None:
+            return self._memory
+        try:
+            from api.deps import deps
+
+            orch = getattr(deps, "orch", None)
+            comps = getattr(orch, "components", None)
+            if isinstance(comps, dict):
+                return comps.get("memory")
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+    def _record_outbound(self, message: str, session_key: str | None) -> None:
+        """定向投递成功后把这句写进该会话历史（无会话键的广播无法归属，不写）。"""
+        if not session_key:
+            return
+        mem = self._resolve_memory()
+        record = getattr(mem, "record_outbound_message", None)
+        if record is None:
+            return
+        try:
+            record(message=message, session_id=str(session_key))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("主动消息回写历史失败 session=%s: %s", session_key, e)
 
     def _resolve_proactive_llm(self, eng: Any | None = None) -> Any | None:
         if self._llm_provider is not None:
@@ -1007,12 +1040,16 @@ class ProactiveScheduler:
     def _deliver(self, message: str, session_key: str | None = None) -> bool:
         """投递主动消息。session_key 非空时**定向**到该会话，否则广播（旧路径）。"""
         try:
-            return bool(self._run_blocking(lambda: self._send_targeted(message, session_key)))
+            delivered = bool(self._run_blocking(lambda: self._send_targeted(message, session_key)))
+            if delivered:
+                self._record_outbound(message, session_key)
+            return delivered
         except Exception as e:  # noqa: BLE001
             logger.error("主动消息投递失败: %s", e)
             if self._send:
                 try:
                     self._send(message)
+                    self._record_outbound(message, session_key)
                     return True
                 except Exception:  # noqa: BLE001
                     logger.exception("主动消息兜底发送失败")

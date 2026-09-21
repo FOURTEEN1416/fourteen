@@ -39,6 +39,7 @@ class ReminderDeliveryTask:
         wechat_sender: Callable[[int, str, str], bool] | None = None,
         ws_sender: Callable[[str], bool] | None = None,
         character_name: str = "",
+        memory: Any | None = None,
     ):
         """Args:
         structured_memory: StructuredMemory 实例（get_due_reminders 等）。
@@ -47,12 +48,14 @@ class ReminderDeliveryTask:
             由 api 装配层闭包持有 connector registry 注入。
         ws_sender: ``(text) -> bool`` websocket 广播（web 控制台会话）。
         character_name: 当前角色名（文案 prompt 用；可选）。
+        memory: MemoryService（送达后回写对话历史；缺省则不回写）。
         """
         self._sm = structured_memory
         self._llm = llm
         self._wechat_sender = wechat_sender
         self._ws_sender = ws_sender
         self._character_name = character_name
+        self._memory = memory
         self._last_intent_gc = 0.0
 
     def __call__(self) -> None:
@@ -82,6 +85,13 @@ class ReminderDeliveryTask:
         session_key = str(reminder.get("session_key") or "")
         delivered = await self._send_to_session(session_key, text)
         if delivered:
+            # 自问自答根治：她主动说的话必须进历史，否则下一轮她自己不记得提醒过
+            recorder = getattr(self._memory, "record_outbound_message", None)
+            if recorder is not None and session_key:
+                try:
+                    await asyncio.to_thread(recorder, message=text, session_id=session_key)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[reminder] 回写历史失败 session=%s: %s", session_key, e)
             logger.info(
                 "[reminder] 已投递 id=%s session=%s content=%.40s",
                 reminder.get("id"), session_key, reminder.get("content", ""),

@@ -723,7 +723,7 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
           <div className={`space-y-4 ${fuEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
             {[
               { label: '首次延迟', value: fuDelay1, min: 10, max: 600, unit: '秒', onChange: setFuDelay1 },
-              { label: '二次延迟', value: fuDelay2, min: 10, max: 1200, unit: '秒', onChange: setFuDelay2 },
+              { label: '二次延迟', value: fuDelay2, min: 60, max: 1200, unit: '秒', onChange: setFuDelay2 },
               { label: '追问上限', value: fuDailyMax, min: 0, max: 50, unit: '条/天', onChange: setFuDailyMax },
             ].map(s => (
               <div key={s.label} className="flex items-center gap-4">

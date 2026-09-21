@@ -324,6 +324,7 @@ if _scheduler is not None:
             wechat_sender=_wechat_send,
             ws_sender=_ws_send,
             character_name=str(character_name),
+            memory=orchestrator.components.get("memory"),
         )
         _scheduler.register_reminder_task(task)
         logger.info("提醒到期投递任务已装配（每分钟轮询，豁免静默时段）")

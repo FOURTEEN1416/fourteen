@@ -7,6 +7,32 @@
 
 ---
 
+## 2026-09-21 — 微信「自问自答」根治四项（①送达回写 ②唯一身份路径 ③档位口径对齐+静态门禁 ④追问参数与上下文收口）——**未部署**
+
+- **触发**：用户报「为什么现在开始自问自答了」，令排查日志；诊断呈报后用户点单 **「一二三四全部做」**，并对补丁堆叠给出结构性批评：「你先引入了十四，然后又给十四加限制，很奇怪，类似的补丁修复都很多」「为什么 4.7 不能用？？？不行也可以换成 4.5flash」「一个原因很可能是 LLM 分不清哪一句是他说的，哪一句是我说的」。
+- **取证（生产只读实测，非推断）**：
+  - 追问参数真源 `data/scheduler_config.json` 的 `follow_up` 块 = `{enabled:true, delay1_seconds:45, delay2_seconds:10, daily_max:12}` —— **第二轮只隔 10 秒**，两条 AI 消息背靠背到达，用户侧读到的就是"她自己问自己答"。本窗收尾时再次 SSH 只读复核，**生产至今仍是 `delay2_seconds: 10`**（未部署）。
+  - 已送达消息不回写记忆：抽查 6 条实际发出的主动/追问消息，在 `chat_history` / `working_memory` / `daily_summaries` / `user_facts` **四表 0 命中** ⇒ 模型下一轮根本看不到"自己刚说过什么"，重复发问无阻断。
+  - 追问生成是**裸调用**：基线 `_generate_followup` 仅 `llm.chat_sync(query=prompt)`（无 system ⇒ 身份缺席），往来记录以「我：/对方：」**纯文本**塞进 user 消息（转写标签帮不了模型分角色，与 v1.31「记忆层被标成 # 对话历史」同一缺陷家族）。
+- **改动（四项，全在 worktree `wt/selftalk-fix`）**：
+  - **① 数据闭环**：`MemoryPipeline.record_outbound_message()`（新）作为"已送达的 AI 消息"唯一落库口 —— 只接受 role=assistant、拒空、拒兜底句哨兵（`FALLBACK_POOL_LINES`），同时写 `chat_history` 与 working memory 并挂 `session_id`；`ShisiMemoryService.record_outbound_message` 委托同一实现；三条投递链（`proactive/scheduler._deliver`（含 legacy 广播兜底分支）、`proactive/reminder_delivery`、`wechat_direct/wechat_connector._send_followup`）**仅在发送返回成功后**记账，无 session_key 的广播不记（不污染他人会话）。
+  - **② 唯一身份路径**（用户批评的补丁堆叠本身）：`strip_default_identity` 与 `is_external_character_id` 双分支、外部专属约束层、引擎名擦除**全部删除**，内置「十四」改走与文件卡**同构**的一条 `_resolve_character_card → _character_from_card` 路径，身份在 prompt 里只以 `你是{name}。` 断言一次。附带查出真缺陷：`persona.yaml` 只有 `name`+锚点+数值，**DEFAULT_PERSONA_DESC 那段人格散文运行时从未注入**（只被测试断言）⇒ 默认角色实际只有「名字 + 一组浮点数」可用，模型必然退回助手腔；现把人格收进 `config/persona.yaml`（description/说话风格/示例/禁止项），单一注入路径。
+  - **③ 档位口径对齐（LLM 透明）**：智谱实配由 `glm-4-flash` 改 **`glm-4.5-flash` + `extra_payload.thinking=disabled`**（`config/llm_providers.json` 与 `DEFAULT_PROVIDER_CONFIG` 两处同改），描述/guide/`get_llm_names()`/`.env.example`/`system.yaml` 注释/`IntroPage.tsx`/`CODE_GRAPH.md` 全部改为与实调模型一致的口径（链首=Agnes、智谱=降级位）；顺带纠正两处陈旧文案：DeepSeek 描述由 "V2" 改 "V3（deepseek-chat）"、百度补齐精确档位名 `ERNIE-Speed-128k`。新增静态门禁 `tests/test_provider_description_consistency.py`（15 例：每档 description 与 guide 必须点名**完整** model、两处档位真源必须等值、`thinking=disabled` 必须存在且被文档说明、`system.yaml`/`DEFAULT_FALLBACK_CHAIN`/json 链序必须同源、`auto` 教程展示的链序必须与实际一致、`get_llm_names` 不得列网关不会用的档位、引导页不得再宣称 GLM-4.7/智谱首选）。
+  - **④ 追问收口**：`delay2_seconds` 读取侧下限 **60s**（`max(60, …)` 且不得小于 delay1）+ API `Field(ge=60)` + 前端 slider `min:60` 三处夹住（**不改用户数据文件**，控制端写多小都拦得住）；追问生成接回**与主链同一身份源**（`_followup_system_prompt(session_key)` 走 `PersonaService.build_system_prompt(character_id=该会话绑定角色)`）；往来历史改为按**正确 role** 经 `history=` 传消息（不再"我/对方"转写），并删掉进程内 `_recent_exchanges` deque（唯一真源=持久化 `chat_history`，重启不失忆）；发送前复查"用户是否已回话"（末条 role=user 即放弃）。
+- **验证证据**：
+  - 分块 pytest（worktree、**41 张角色卡在位**）：`284` + `526 通过/1 跳过` + `381` + `477` = **1669 收集 / 1668 通过 / 1 跳过 / 0 失败**，与 `--collect-only 1669` 精确吻合。⚠️ 口径声明：该数含并行窗 `3a2e4b4`（P2 批 6a）新增用例，**不等于 main 的 1455 口径**。
+  - 前端 vitest **98/98**、`tsc --noEmit` **0 错**、`ruff check .` 全仓 **0 错**（修掉自己新测试里一处 F401）、`scripts/ci_gates.py` **4/4**。
+  - 新增/改写测试：`test_outbound_memory_closure.py` 12 例（真 `StructuredMemory` + 真 pipeline，非 mock 库；含跨会话隔离、兜底句拒写、三链记账/不记账分支）、`test_provider_description_consistency.py` 15 例、`test_wechat_followup.py` 29 例（含"追问必须带角色 system + 真实 role 历史""无进程内历史副本""delay2 下限"）。
+  - **突变验红 4 次全中**：json 档位改回 `glm-4-flash` → 双真源一致例红；zhipu description 档位改成 GLM-4.7 → 描述一致性例红；摘掉 `extra_payload.thinking` → 开关例红；`system.yaml` 链首改成 zhipu → 链序例红。**首轮门禁本身被突变证明太松**：曾用"前缀也算命中"，`glm-4.5-air`（正当说明文字）即可放过一条错误档位描述 → 改严格全档位名匹配，并因此暴露百度描述缺精确档位。
+  - 智谱逐模型实调（今天，key 由用户当场提供，仅用于探针，**未写入任何文件/日志/提交**）：`glm-4.7`、`glm-4.5-air` → **1113「余额不足或无可用资源包」**（付费档，该 key 无余额）；`glm-4.7-flash` → **1305「该模型当前访问量过大」**（免费池拥挤，不可依赖）；`glm-4.5-flash` 默认开思考，`max_tokens=60` 时 content 被推理吃光、100 时恒空，加 `thinking:{"type":"disabled"}` 后 0.7s/10 tokens 出真内容；`model_reasoning_effort:"minimal"` **无效**（仍空）。4.5-flash 相对 4-flash 的两项胜出：角色扮演对齐更强、时间语义不幻觉（4-flash 曾把提醒时间编成 `2022-10-18T06:00:00`）。
+- **自纠留痕（防后人误当生产缺陷）**：本窗中段我曾把 `_remember_exchange` 的**定义**先删、调用未删，造成一次 `AttributeError` 被外层宽 `except` 吞掉的断链（`_schedule_followup` 不再执行）。`git show HEAD` 复核确认**基线里该函数有定义且调用正常**，故这条**不是**线上缺陷、不进根因；如实登记以免与"追问从未触发"的假设混淆。另：本窗一次结论修正——早前把 1305 误读为"全部 429/此路不通"并已撤回重测。
+- **边界与未做**：
+  - **未部署**（服务器 pull + 重启永由用户裁决）：线上仍是 `delay2=10s` 与旧口径；部署后 10s 会被代码下限钳为 60s，无需改数据文件。
+  - **AGENTS.md 测试口径本窗未刷**：main 已前进 9 个提交（`1f2b1be` 等 P2 6b 批次），1669 是本分支口径；合并后由主控在主检出重测刷新。
+  - 智谱 1305 属**外部免费池容量**，本窗只把它摆到"降级位 + 如实描述"，未解；agnes 挂死风险仍由上批的按供应商 20s 超时 + P1-2 熔断承担。
+  - ①只闭合"送达→记忆"，未做记忆层对"我刚说过什么"的显式去重 prompt 槽（对标 my-raze reinforce，留后续）。
+- **并发声明**：全部改动在 `D:\Desktop\ai-girlfriend-selftalk-fix`（分支 `wt/selftalk-fix`，基线 `3a2e4b4`）；主检出本窗**零写入**。收编时预计与 `c628a79`（proactive 旧 ASE 死路径删除）、`1f2b1be`（memory 死路径删除）在 `proactive/scheduler.py`、`shisi/memory/legacy/memory_pipeline.py` 有交集，需主控逐处核对。
+
 ## 2026-09-21 — 「人机味」根因取证 + agnes 回链首（A 方案，按供应商超时闸门）
 
 - **触发**：agnes 降级上线同日下午，用户报「是不是因为换了 LLM，为什么现在人机味那么重」。

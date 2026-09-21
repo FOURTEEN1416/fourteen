@@ -23,6 +23,22 @@ def _all_character_files() -> list[Path]:
     return sorted(CHARACTERS_DIR.glob("*.json"))
 
 
+def _card_path_by_name(name: str) -> Path | None:
+    """按**展平后的角色名**定位卡文件。
+
+    旧用例用文件名子串 "persona_林挽夏" 匹配，而目录里的文件全部按 id 命名
+    （`06479d4c.json` 等）—— 该条件恒不成立，用例**从未真正执行**（静默 skip）。
+    """
+    for path in _all_character_files():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if str(normalize_character_card(data).get("name") or "") == name:
+            return path
+    return None
+
+
 @pytest.mark.parametrize("path", _all_character_files(), ids=lambda p: p.name)
 def test_character_name_is_cleaned(path: Path) -> None:
     """所有角色文件的名称都应被清洗，去除作者、定制、时间戳等噪声。"""
@@ -55,36 +71,48 @@ def test_character_description_is_present_and_clean(path: Path) -> None:
         )
 
 
-def test_load_character_persona_segment_extracts_nested_data() -> None:
-    """_load_character_persona_segment 应能正确提取嵌套 SillyTavern 格式中的人设。
+def test_persona_service_resolves_nested_card() -> None:
+    """嵌套 SillyTavern 格式的角色卡应经唯一路径解析并进 prompt。
 
-    2026-09-20 行业对齐精简：片段只承载「身份绑定」（角色名/口头禅/开场白 +
-    指向上方完整注入的声明）；完整设定由 prompt_builder 以全量字段注入，
-    不再在此重复截断版 description/creator_notes/锚点（角色定义只注入一次）。
+    2026-09-21 唯一身份路径：orchestrator 的第二身份段（`=== 角色卡人设 ===`）
+    已删除，角色定义只由 `PersonaService` → `prompt_builder` 注入一次。
     """
-    # 使用已知的嵌套格式角色文件
-    paths = [p for p in _all_character_files() if "persona_林挽夏" in p.name]
-    if not paths:
+    from shisi.application.persona_service import PersonaService
+
+    path = _card_path_by_name("林挽夏")
+    if path is None:
         pytest.skip("未找到林挽夏角色文件")
 
-    data = json.loads(paths[0].read_text(encoding="utf-8"))
-    normalized = normalize_character_card(data)
+    normalized = normalize_character_card(json.loads(path.read_text(encoding="utf-8")))
     character_id = normalized["id"]
 
-    segment = OptimizedOrchestrator._load_character_persona_segment(character_id)
+    ps = PersonaService(config_loader=None, llm_gateway=None)
+    card = ps._resolve_character_card(character_id)
+    assert card is not None
+    assert card["name"] == normalized["name"]
 
-    assert "=== 角色卡人设 ===" in segment
-    assert normalized["name"] in segment
-    assert "已在本提示词上方逐节完整注入" in segment
-    # 精简后不得再出现截断重复内容
-    assert normalized["description"][:30] not in segment
+    prompt = ps.build_system_prompt(character_id=character_id, user_message="你好")
+    assert f"你是{normalized['name']}" in prompt
+    # 完整描述只注入一次，且不再有第二身份段
+    description = str(normalized.get("description") or "")
+    if description:
+        assert prompt.count(description) == 1
+    assert "=== 角色卡人设 ===" not in prompt
+    assert "# 当前必须扮演的角色" not in prompt
 
 
-def test_load_character_persona_segment_no_default() -> None:
-    """default/demo/空角色 ID 不注入额外人设。"""
-    assert OptimizedOrchestrator._load_character_persona_segment("") == ""
-    assert OptimizedOrchestrator._load_character_persona_segment("default") == ""
-    assert OptimizedOrchestrator._load_character_persona_segment("demo") == ""
+def test_builtin_default_card_is_not_empty() -> None:
+    """default/demo/空 → 内置 persona.yaml 卡（与文件卡同构，且带人格散文）。"""
+    from shisi.application.persona_service import PersonaService
+
+    ps = PersonaService(config_loader=None, llm_gateway=None)
+    for cid in ("", "default", "demo", None):
+        card = ps._resolve_character_card(cid)
+        assert isinstance(card, dict), f"{cid!r} 应解析为内置卡"
+        assert card["name"] == ps.engine.get_name()
+        assert str(card.get("description") or "").strip()
+    prompt = ps.build_system_prompt(character_id="default", user_message="你好")
+    assert f"你是{ps.engine.get_name()}" in prompt
 
 
 def test_sanitize_character_text_removes_author_marks() -> None:
@@ -104,18 +132,29 @@ def test_sanitize_character_name_removes_metadata() -> None:
     assert sanitize_character_name("年上偏s女朋友林初夏(定制by诗)") == "年上偏s女朋友林初夏"
 
 
-def test_character_persona_cache_invalidation() -> None:
-    """缓存失效方法应能清除指定角色或全部角色缓存。"""
-    OptimizedOrchestrator._character_persona_cache.clear()
-    OptimizedOrchestrator._character_persona_cache["c1"] = "segment1"
-    OptimizedOrchestrator._character_persona_cache["c2"] = "segment2"
+def test_character_card_cache_invalidation() -> None:
+    """角色卡缓存失效应能清除指定角色或全部角色。
 
-    OptimizedOrchestrator.invalidate_character_persona_cache("c1")
-    assert "c1" not in OptimizedOrchestrator._character_persona_cache
-    assert "c2" in OptimizedOrchestrator._character_persona_cache
+    2026-09-21：orchestrator 不再自建第二套人设缓存，缓存唯一 owner 是
+    `PersonaService`；`OptimizedOrchestrator.invalidate_character_persona_cache`
+    退化为转发入口（API 侧仍按原名调用）。
+    """
+    from shisi.application.persona_service import PersonaService
 
-    OptimizedOrchestrator.invalidate_character_persona_cache()
-    assert not OptimizedOrchestrator._character_persona_cache
+    ps = PersonaService(config_loader=None, llm_gateway=None)
+    ps._card_cache.clear()
+    ps._card_cache["c1"] = (1.0, {"name": "one"})
+    ps._card_cache["c2"] = (1.0, {"name": "two"})
+
+    ps.invalidate_character_cache("c1")
+    assert "c1" not in ps._card_cache
+    assert "c2" in ps._card_cache
+
+    ps.invalidate_character_cache()
+    assert not ps._card_cache
+
+    # 转发入口存在且不报错（无 orch 实例时亦安全）
+    assert hasattr(OptimizedOrchestrator, "invalidate_character_persona_cache")
 
 
 def test_knowledge_base_indexes_character_card() -> None:
@@ -123,11 +162,11 @@ def test_knowledge_base_indexes_character_card() -> None:
     from shisi.knowledge.character_knowledge_service import CharacterKnowledgeService
     from shisi.knowledge.crawler_adapter import CharacterCrawlerAdapter
 
-    paths = [p for p in _all_character_files() if "persona_林挽夏" in p.name]
-    if not paths:
+    path = _card_path_by_name("林挽夏")
+    if path is None:
         pytest.skip("未找到林挽夏角色文件")
 
-    data = json.loads(paths[0].read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"))
     card = normalize_character_card(data)
     character_id = card["id"]
 
@@ -144,16 +183,17 @@ def test_knowledge_base_indexes_character_card() -> None:
     assert card["name"] in context or "林挽夏" in context
 
 
-def test_prompt_builder_includes_knowledge_context() -> None:
-    """PersonaService 构建的 system prompt 应包含角色知识库上下文。"""
+def test_prompt_builder_retrieves_knowledge_for_query() -> None:
+    """prompt_builder 自身的检索能力：带 user_message 时必须注入知识块。"""
     from shisi.application.persona_service import PersonaService
+    from shisi.core.services import prompt_builder
     from shisi.knowledge.character_knowledge_service import get_knowledge_service
 
-    paths = [p for p in _all_character_files() if "persona_林挽夏" in p.name]
-    if not paths:
+    path = _card_path_by_name("林挽夏")
+    if path is None:
         pytest.skip("未找到林挽夏角色文件")
 
-    data = json.loads(paths[0].read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"))
     card = normalize_character_card(data)
     character_id = card["id"]
 
@@ -166,9 +206,34 @@ def test_prompt_builder_includes_knowledge_context() -> None:
     if not svc.has_index(character_id):
         svc.index_character(character_id, character)
 
-    prompt = ps.build_system_prompt(character_id=character_id, user_message="她叫什么名字")
+    prompt = prompt_builder.build(character, user_message="她叫什么名字", chat_history="")
     assert character.name in prompt
-    assert "角色知识库" in prompt or "知识" in prompt
+    assert "# 角色知识库" in prompt, "带查询时知识块必须注入"
+
+
+def test_persona_service_injects_rag_exactly_once() -> None:
+    """PersonaService 路由的知识注入只出现一次（v1.15 去重的真实契约）。
+
+    该路由给 prompt_builder 传 user_message=""（当前消息只走 messages），
+    所以本轮检索结果由 `rag_context` 承载；两处同时注入即为重复。
+    """
+    from shisi.application.persona_service import PersonaService
+
+    path = _card_path_by_name("林挽夏")
+    if path is None:
+        pytest.skip("未找到林挽夏角色文件")
+    character_id = normalize_character_card(
+        json.loads(path.read_text(encoding="utf-8"))
+    )["id"]
+
+    ps = PersonaService(config_loader=None, llm_gateway=None)
+    prompt = ps.build_system_prompt(
+        character_id=character_id,
+        user_message="她叫什么名字",
+        rag_context="她的名字是林挽夏，住在巷子尽头的四楼。",
+    )
+    assert prompt.count("# 角色知识库") == 1
+    assert "她的名字是林挽夏" in prompt
 
 
 class TestSystemPromptStructure:

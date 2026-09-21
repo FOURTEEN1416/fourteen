@@ -374,6 +374,37 @@ class MemoryPipeline:
             logger.warning("write_chat_history_sync failed: %s", e)
             return False
 
+    def record_outbound_message(
+        self,
+        message: str,
+        session_id: str = "",
+        emotion_tag: str = "",
+    ) -> bool:
+        """角色**主动发出**的消息（追问 / 主动消息 / 到期提醒）回写对话历史。
+
+        2026-09-21 自问自答根因：这三类消息只发送、从不入库，下一轮 prompt 里
+        没有她自己问过的那句 → 重复发同一个问题，并把用户对追问的回应误当成
+        用户新起的话题（生产实证 1032 行「我确实提过，但具体是什么事…」）。
+        与 write_chat_history_sync 的区别就是**只有 assistant 一行**。
+        """
+        text = str(message or "").strip()
+        effective_session = session_id or self.session_id
+        if not text or not effective_session or _is_system_error_reply(text):
+            return False
+        try:
+            self.sm.add_chat(
+                "assistant", text, emotion_tag=emotion_tag,
+                session_id=effective_session,
+            )
+            self.working.add(
+                "assistant", text, emotion_tag, 0.5,
+                session_id=effective_session,
+            )
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.warning("record_outbound_message failed: %s", e)
+            return False
+
     def after_chat(
         self,
         user_msg: str,

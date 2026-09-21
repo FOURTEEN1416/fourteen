@@ -207,13 +207,15 @@ export default function IntroPage() {
             <p className="text-xs font-semibold text-gray-700 mb-1.5">🇨🇳 国内直连 · 免费且量大管饱</p>
             <ul className="text-xs text-gray-600 leading-relaxed space-y-1.5 list-disc list-inside">
               <li>
-                <span className="font-medium">智谱 AI（首选）</span>：open.bigmodel.cn 注册 → 创建 API Key；
-                <span className="font-medium">GLM-Flash 系列多款无限免费</span>（GLM-4.7-Flash 200K 上下文等），
-                日常陪伴完全够用。
+                <span className="font-medium">Agnes AI（链首，角色扮演首选）</span>：
+                <span className="font-medium">长期免费使用</span>
+                （注册申请过程需要能访问国际网络；OpenAI 兼容，图片生成能力项目已内置集成）。
               </li>
               <li>
-                <span className="font-medium">Agnes AI</span>：<span className="font-medium">长期免费使用</span>
-                （注册申请过程需要能访问国际网络；OpenAI 兼容，图片生成能力项目已内置集成）。
+                <span className="font-medium">智谱 AI（降级位）</span>：open.bigmodel.cn 注册 → 创建 API Key；
+                <span className="font-medium">GLM-Flash 系列多款无限免费</span>，项目实配
+                <span className="font-medium"> GLM-4.5-Flash</span>（该档默认开思考，已配置关闭后方可用于短回复），
+                响应快但角色扮演弱于 Agnes。
               </li>
               <li>
                 <span className="font-medium">阿里云百炼</span>：注册送额度，多款小参数模型 0 元永久免费；

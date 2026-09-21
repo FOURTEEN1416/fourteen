@@ -30,19 +30,24 @@
     },
     "zhipu": {
       "name": "智谱AI",
-      "model": "glm-4-flash",
+      "model": "glm-4.5-flash",
       "api_base": "https://open.bigmodel.cn/api/paas/v4",
       "api_key": "",
       "auth_mode": "bearer",
       "max_tokens": 2048,
       "temperature": 0.85,
       "stream_enabled": true,
-      "description": "GLM-4.7-Flash 永久免费，无Token上限，200K上下文（09-21 起第二位：角色扮演对齐弱，裸提示下 4/4 自称「人工智能助手」）",
+      "extra_payload": {
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "description": "GLM-4.5-Flash（免费，链上第 2 位）。必须带 thinking=disabled：实测该模型默认开思考，max_tokens=60 时预算被推理吃光 → content 为空/截断，100 时恒空。不用 GLM-4.7 的真因（09-21 逐模型实调）：glm-4.7 与 glm-4.5-air 返回 1113「余额不足或无可用资源包」= 付费档、该 key 无余额；glm-4.7-flash 返回 1305「该模型当前访问量过大」= 免费池拥挤不可依赖",
       "enabled": true,
       "sort_order": 2,
       "guide": {
         "apply_url": "https://open.bigmodel.cn",
-        "free_quota": "GLM-4.7-Flash 永久免费，无 Token 上限",
+        "free_quota": "GLM-4.5-Flash 免费档（本系统已关闭其思考模式以适配短句对话）",
         "steps": [
           "打开 https://open.bigmodel.cn 用手机号注册账号",
           "完成实名认证（个人账号即可）",
@@ -50,12 +55,12 @@
           "点击「添加 API Key」，名称随意填",
           "复制生成的 xxxxxx.xxx 格式的密钥",
           "回到本页面，把密钥粘贴到上方「API Key」输入框",
-          "点击「保存设置」，系统会自动使用 GLM-4.7-Flash 模型"
+          "点击「保存设置」，系统会自动使用 GLM-4.5-Flash 模型"
         ],
         "tips": [
-          "GLM-4.7-Flash 永久免费，无 Token 上限，适合长期使用",
-          "支持 200K 上下文，可以记住很长的对话历史",
-          "智谱是国内顶尖 AI 公司，模型质量稳定可靠"
+          "本位是 agnes 挂死/超时后的降级位，角色扮演对齐弱于 agnes（实测同会话 agnes 出角色腔、智谱出客服腔）",
+          "GLM-4.7 / GLM-4.5-Air 需付费余额（实测错误码 1113），GLM-4.7-Flash 免费池拥挤（实测 1305），均不作为默认档位",
+          "可用 ZHIPU_MODEL 环境变量覆盖档位（覆盖后仍需保留 thinking=disabled，否则短回复会变空）"
         ],
         "warnings": []
       }
@@ -106,12 +111,12 @@
       "max_tokens": 2048,
       "temperature": 0.85,
       "stream_enabled": true,
-      "description": "ERNIE-Speed 每月50万Token免费，128K上下文",
+      "description": "ERNIE-Speed-128k 每月 50 万 Token 免费，128K 上下文",
       "enabled": true,
       "sort_order": 4,
       "guide": {
         "apply_url": "https://console.bce.baidu.com",
-        "free_quota": "ERNIE-Speed 每月 50 万 Token 免费，128K 上下文",
+        "free_quota": "ERNIE-Speed-128k 每月 50 万 Token 免费，128K 上下文",
         "steps": [
           "打开 https://console.bce.baidu.com 用百度账号登录",
           "完成实名认证（个人账号即可）",
@@ -121,7 +126,7 @@
           "应用创建后会生成「API Key」和「Secret Key」",
           "百度使用 OAuth 认证，API Key 格式为 {APIKey}:{SecretKey}（用冒号拼接）",
           "回到本页面，把拼接后的字符串粘贴到上方「API Key」输入框",
-          "点击「保存设置」，系统会自动使用 ERNIE-Speed 模型"
+          "点击「保存设置」，系统会自动使用 ERNIE-Speed-128k 模型"
         ],
         "tips": [
           "ERNIE-Speed 每月 50 万 Token 免费，足够日常使用",
@@ -144,7 +149,7 @@
       "max_tokens": 4096,
       "temperature": 0.85,
       "stream_enabled": true,
-      "description": "DeepSeek-V2/V3 高质量模型，需自行申请API Key（付费）",
+      "description": "DeepSeek-V3（deepseek-chat）高质量模型，需自行申请API Key（付费）",
       "enabled": false,
       "sort_order": 5,
       "guide": {
@@ -157,7 +162,7 @@
           "点击「创建 API Key」",
           "复制生成的 sk- 开头的密钥",
           "回到本页面，把密钥粘贴到上方「API Key」输入框",
-          "点击「保存设置」，系统会自动使用 DeepSeek 模型"
+          "点击「保存设置」，系统会自动使用 DeepSeek-V3（deepseek-chat）模型"
         ],
         "tips": [
           "DeepSeek-V3 在中文理解、角色扮演、长上下文方面表现优异",
@@ -181,14 +186,14 @@
         "free_quota": "免费（使用已配置的供应商）",
         "steps": [
           "选择「自动回退」后无需任何操作",
-          "系统会按以下优先级尝试：智谱 → Agnes → 讯飞 → 百度",
+          "系统会按以下优先级尝试：Agnes → 智谱 → 讯飞 → 百度（与 fallback_chain 同一真源）",
           "如果某个供应商不可用（如 API Key 过期），会自动切换到下一个",
           "建议新用户选择此选项"
         ],
         "tips": [
           "推荐新用户使用，无需关心技术细节",
           "需要至少配置一个供应商的 API Key 才能正常工作",
-          "建议优先配置智谱或 Agnes 的 API Key"
+          "链首 Agnes 承担角色扮演主链（实测角色扮演对齐明显优于智谱免费档），建议优先配置"
         ],
         "warnings": []
       }

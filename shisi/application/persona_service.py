@@ -16,9 +16,7 @@ from typing import Any
 
 from my_character.persona_engine import (
     PersonaEngine,
-    build_external_constraint_layer,
     is_external_character_id,
-    strip_default_identity,
 )
 from shisi.core.models.affinity_level import AffinityLevel
 from shisi.core.models.character_aggregate import CharacterAggregate
@@ -166,14 +164,10 @@ class PersonaService:
             tool_context=tool_context or "",
         )
 
-        # 身份唯一 Owner（包 Q · A1）：
-        # - default/demo：PersonaEngine 默认人格可注入
-        # - 外部 character_id：身份以角色卡为唯一真源；PersonaEngine 只保留
-        #   数值/风格映射/约束规则，禁止注入 DEFAULT_PERSONA_DESC /「你叫十四」
-        external = is_external_character_id(character_id)
-        engine_name = "" if external else str(self._engine.get_name() or "")
-        engine_name = engine_name.strip()
-
+        # 身份唯一 Owner（2026-09-21 收口）：身份只来自 `_build_character` 解析到的
+        # 那张卡（内置卡 or 文件卡），prompt 里不存在"默认人格 + 再剥离"的第二条路径，
+        # 因此这里不需要 external 分支、不需要 strip_default_identity、不需要引擎名擦除。
+        # PersonaEngine 只提供数值/风格/约束等**身份中性**的注入层。
         injection_parts: list[str] = []
 
         if memory_block:
@@ -185,10 +179,11 @@ class PersonaService:
             injection_parts.append(f"# 世界与时间\n{world_info}")
 
         if rag_context and "# 角色知识库" not in base_prompt:
-            # 知识注入唯一 owner 是 prompt_builder（CharacterKnowledgeService 全量路径）。
-            # rag_context 与其同源（ShisiKnowledgeAdapter 包同一服务），正常路径下
-            # base_prompt 已含「# 角色知识库」→ 不再重复注入（2026-09-20 行业对齐去重，
-            # 旧实现同一知识出现两次且第二份是 JSON dump）。仅在 base 未注入成功时兜底。
+            # 本轮检索结果由 rag_context 承载注入（orchestrator 的 RAG 任务产出）。
+            # `prompt_builder._get_knowledge_context` 在本路由**不生效**——它要求
+            # user_message 非空，而这里传 ""（当前消息只走 messages，避免 system 重复），
+            # 故 base_prompt 恒不含知识块，此分支即唯一注入处；守卫保留给
+            # 直接带 user_message 的调用方，防止同一知识出现两份。
             injection_parts.append(f"# 角色知识库\n{rag_context}")
 
         emotion_layer = self._safe_engine_layer(
@@ -209,26 +204,16 @@ class PersonaService:
         if style_layer:
             injection_parts.append(style_layer)
 
-        if external:
-            # 外部角色：约束层用身份中性版本（无「你是唯一的我/十四」断言）
-            constraint_layer = build_external_constraint_layer()
-        else:
-            constraint_layer = self._safe_engine_layer(
-                "constraint", self._engine.build_constraint_layer
-            )
+        constraint_layer = self._safe_engine_layer(
+            "constraint", self._engine.build_constraint_layer
+        )
         if constraint_layer:
             injection_parts.append(constraint_layer)
 
         if not injection_parts:
-            return strip_default_identity(base_prompt) if external else base_prompt
+            return base_prompt
 
-        assembled = f"{base_prompt}\n\n" + "\n\n".join(p for p in injection_parts if p)
-        if external:
-            assembled = strip_default_identity(assembled)
-            if engine_name and engine_name in assembled:
-                # 外部角色路径下引擎默认名不得出现（防御：某注入层误带）
-                assembled = assembled.replace(engine_name, "").replace("\n\n\n", "\n\n")
-        return assembled
+        return f"{base_prompt}\n\n" + "\n\n".join(p for p in injection_parts if p)
 
     @property
     def engine(self) -> PersonaEngine:
@@ -238,38 +223,117 @@ class PersonaService:
     # ── 内部构建 ──────────────────────────────────────────────
 
     def _build_character(self, emotion_state: Any, character_id: str | None = None) -> CharacterAggregate:
-        """构造 shisi CharacterAggregate。
+        """构造 shisi CharacterAggregate —— **所有角色共用同一条构建路径**。
 
-        优先级：
-        1. 若提供了 character_id 且对应角色卡存在，用角色卡构建（source_data 保留完整卡数据，供 RAG 索引）；
-        2. 否则回退到 PersonaEngine 的基线人设。
+        2026-09-21 唯一身份路径（用户批评「先引入十四、又给十四加限制」）：
+        内置「十四」不再走 PersonaEngine 基线、外部角色不再走「注入后剥离」的
+        双分支。两者都先解析成**同构的角色卡字典**（`_resolve_character_card`），
+        再由 `_character_from_card` 一次性构建 —— 身份只来自当前解析到的那张卡，
+        因此不需要 strip_default_identity / 引擎名擦除 / 两套约束层。
         """
         emotional_state = self._map_emotional_state(emotion_state)
-
-        if is_external_character_id(character_id):
-            card_character = self._build_character_from_card(
-                str(character_id), emotional_state
+        card = self._resolve_character_card(character_id)
+        if card:
+            character = self._character_from_card(
+                card, str(character_id or card.get("name") or ""), emotional_state
             )
-            if card_character is not None:
-                return card_character
-            # 外部 ID 但角色卡缺失：不得回落默认「十四」身份
-            # 身份由 orchestrator 片段/后续恢复的卡补齐；此处仅保留数值画像
-            placeholder = CharacterAggregate(
-                id=str(character_id or "external"),
-                name=str(character_id or "角色"),
-                description="",
-                persona=self._build_shisi_persona(),
-            )
-            placeholder.emotional_state = emotional_state
-            return placeholder
+            if character is not None:
+                return character
 
-        name = self._engine.get_name()
-        description = self._engine.get_description()
-        persona = self._build_shisi_persona()
+        # 外部 ID 但角色卡缺失：**不得**回落默认「十四」身份
+        placeholder = CharacterAggregate(
+            id=str(character_id or "external"),
+            name=str(character_id or "角色"),
+            description="",
+            persona=self._map_persona_from_traits({}),
+        )
+        placeholder.emotional_state = emotional_state
+        return placeholder
 
-        character = CharacterAggregate(name=name, description=description, persona=persona)
+    def _resolve_character_card(self, character_id: str | None) -> dict[str, Any] | None:
+        """把任意 character_id 解析成**同构**的角色卡字典（唯一解析入口）。
+
+        - 外部 id：读 `config/characters/*.json`（展平后）；缺失返回 None
+        - 空 / default / demo：由 PersonaEngine 的 `config/persona.yaml` 合成一张
+          内置卡（name / description / core_anchors / 数值），与文件卡同构
+        """
+        cid = str(character_id or "")
+        if is_external_character_id(cid):
+            return self._load_character_card(cid)
+        return self._builtin_character_card()
+
+    def _builtin_character_card(self) -> dict[str, Any]:
+        """内置十四的角色卡形状视图（值全部来自 persona.yaml，不另写一份散文）。"""
+        traits = self._engine.get_personality_traits() or {}
+        profile = self._engine.profile
+        return {
+            "name": self._engine.get_name(),
+            "description": self._engine.get_description(),
+            "personality_text": "",
+            "creator_notes": "",
+            "scenario": "",
+            "first_mes": "",
+            "catchphrases": [],
+            "core_anchors": list(self._engine.get_core_anchors() or []),
+            "personality": {
+                "warmth": profile.core_character.get("warmth", 0.7),
+                "playfulness": profile.core_character.get("playfulness", 0.5),
+                "independence": profile.core_character.get("independence", 0.6),
+                "jealousy": profile.core_character.get("jealousy", 0.4),
+                "stubbornness": profile.core_character.get("stubbornness", 0.5),
+                **{k: v for k, v in traits.items() if k in {
+                    "warmth", "playfulness", "independence", "jealousy", "stubbornness",
+                }},
+            },
+            "speaking_style": dict(profile.speaking_style or {}),
+        }
+
+    def _character_from_card(
+        self, card: dict[str, Any], character_id: str, emotional_state: EmotionalState
+    ) -> CharacterAggregate | None:
+        """由同构卡字典构建 CharacterAggregate（内置卡与文件卡共用）。"""
+        if not card:
+            return None
+
+        name = card.get("name", "未命名角色")
+        description = card.get("description", "")
+        anchors = card.get("core_anchors", []) or []
+
+        # 将 personality dict（如 warmth/playfulness）映射到 shisi PersonaProfile
+        traits = card.get("personality", {}) if isinstance(card.get("personality"), dict) else {}
+        style = card.get("speaking_style", {}) if isinstance(card.get("speaking_style"), dict) else {}
+
+        persona = self._map_persona_from_traits(
+            traits, style=style, anchors=anchors
+        )
+
+        character = CharacterAggregate(
+            id=character_id,
+            name=name,
+            description=description,
+            persona=persona,
+            source_format="shisi_app_card",
+            source_data=card,
+            # ── 人设贴合关键字段（2026-09-18 系统性升级）──
+            # 这三个字段在角色卡里覆盖率高（personality_text 23/25、scenario 24/25、
+            # creator_notes 24/25），但此前**从未进入 prompt**，导致角色只有
+            # 「名字 + 描述 + 一组默认数值」可用 → 所有角色普遍不贴合。
+            personality_text=card.get("personality_text", "") or "",
+            scenario=card.get("scenario", "") or "",
+            creator_notes=card.get("creator_notes", "") or "",
+            catchphrases=[str(c) for c in (card.get("catchphrases") or []) if str(c).strip()][:8],
+            first_mes=str(card.get("first_mes", "") or ""),
+        )
         character.emotional_state = emotional_state
         return character
+
+    def _build_character_from_card(
+        self, character_id: str, emotional_state: EmotionalState
+    ) -> CharacterAggregate | None:
+        """从 app 角色卡格式构建 CharacterAggregate。"""
+        return self._character_from_card(
+            self._load_character_card(character_id), character_id, emotional_state
+        )
 
     def invalidate_character_cache(self, character_id: str | None = None) -> None:
         """清除角色卡缓存。
@@ -360,79 +424,40 @@ class PersonaService:
             self._card_cache.pop(next(iter(self._card_cache)), None)
         self._card_cache[character_id] = (mtime, card)
 
-    def _build_character_from_card(
-        self, character_id: str, emotional_state: EmotionalState
-    ) -> CharacterAggregate | None:
-        """从 app 角色卡格式构建 CharacterAggregate。"""
-        card = self._load_character_card(character_id)
-        if not card:
-            return None
+    def _map_persona_from_traits(
+        self,
+        traits: dict[str, Any],
+        style: dict[str, Any] | None = None,
+        anchors: list[Any] | None = None,
+    ) -> ShisiPersonaProfile:
+        """人格数值 → shisi PersonaProfile —— 内置卡与文件卡共用的**唯一映射**。
 
-        name = card.get("name", "未命名角色")
-        description = card.get("description", "")
-        anchors = card.get("core_anchors", []) or []
+        键名差异在收敛处一次处理：文件卡用 `expressiveness`/`emoji_freq`，
+        PersonaProfile 用 `emotional_expression`。
+        """
+        style = style if isinstance(style, dict) else {}
 
-        # 将 personality dict（如 warmth/playfulness）映射到 shisi PersonaProfile
-        traits = card.get("personality", {}) if isinstance(card.get("personality"), dict) else {}
-        style = card.get("speaking_style", {}) if isinstance(card.get("speaking_style"), dict) else {}
-
-        def _trait(name: str, fallback: float) -> float:
-            return float(traits.get(name, fallback) or fallback)
-
-        persona = ShisiPersonaProfile(
-            warmth=_trait("warmth", 0.7),
-            playfulness=_trait("playfulness", 0.5),
-            independence=_trait("independence", 0.6),
-            jealousy=_trait("jealousy", 0.4),
-            stubbornness=_trait("stubbornness", 0.5),
-            formality=float(style.get("formality", 0.3) or 0.3),
-            emoji_frequency=float(style.get("emoji_freq", style.get("emoji_frequency", 0.6)) or 0.6),
-            sentence_length=float(style.get("sentence_length", 0.5) or 0.5),
-            emotional_expression=float(style.get("expressiveness", 0.7) or 0.7),
-            humor=float(style.get("humor", 0.5) or 0.5),
-            core_anchors=anchors,
-        )
-
-        character = CharacterAggregate(
-            id=character_id,
-            name=name,
-            description=description,
-            persona=persona,
-            source_format="shisi_app_card",
-            source_data=card,
-            # ── 人设贴合关键字段（2026-09-18 系统性升级）──
-            # 这三个字段在角色卡里覆盖率高（personality_text 23/25、scenario 24/25、
-            # creator_notes 24/25），但此前**从未进入 prompt**，导致角色只有
-            # 「名字 + 描述 + 一组默认数值」可用 → 所有角色普遍不贴合。
-            personality_text=card.get("personality_text", "") or "",
-            scenario=card.get("scenario", "") or "",
-            creator_notes=card.get("creator_notes", "") or "",
-        )
-        character.emotional_state = emotional_state
-        return character
-
-    def _build_shisi_persona(self) -> ShisiPersonaProfile:
-        """将 PersonaEngine 的人格画像映射为 shisi PersonaProfile。"""
-        profile = self._engine.profile
-        traits = self._engine.get_personality_traits()
-
-        def _trait(name: str, fallback: float) -> float:
-            if name in traits:
-                return float(traits[name])
-            return float(getattr(profile, name, fallback) or fallback)
+        def _num(source: dict[str, Any], keys: tuple[str, ...], fallback: float) -> float:
+            for key in keys:
+                if key in source:
+                    try:
+                        return float(source[key] or fallback)
+                    except (TypeError, ValueError):
+                        return fallback
+            return fallback
 
         return ShisiPersonaProfile(
-            warmth=_trait("warmth", profile.core_character.get("warmth", 0.7)),
-            playfulness=_trait("playfulness", profile.core_character.get("playfulness", 0.5)),
-            independence=_trait("independence", profile.core_character.get("independence", 0.6)),
-            jealousy=_trait("jealousy", profile.core_character.get("jealousy", 0.4)),
-            stubbornness=_trait("stubbornness", profile.core_character.get("stubbornness", 0.5)),
-            formality=profile.speaking_style.get("formality", 0.3),
-            emoji_frequency=profile.speaking_style.get("emoji_freq", 0.6),
-            sentence_length=profile.speaking_style.get("sentence_length", 0.5),
-            emotional_expression=profile.speaking_style.get("emotional_expression", 0.7),
-            humor=profile.speaking_style.get("humor", 0.5),
-            core_anchors=self._engine.get_core_anchors(),
+            warmth=_num(traits, ("warmth",), 0.7),
+            playfulness=_num(traits, ("playfulness",), 0.5),
+            independence=_num(traits, ("independence",), 0.6),
+            jealousy=_num(traits, ("jealousy",), 0.4),
+            stubbornness=_num(traits, ("stubbornness",), 0.5),
+            formality=_num(style, ("formality",), 0.3),
+            emoji_frequency=_num(style, ("emoji_freq", "emoji_frequency"), 0.6),
+            sentence_length=_num(style, ("sentence_length",), 0.5),
+            emotional_expression=_num(style, ("expressiveness", "emotional_expression"), 0.7),
+            humor=_num(style, ("humor",), 0.5),
+            core_anchors=[str(a) for a in (anchors or [])],
         )
 
     def _map_emotional_state(self, emotion_state: Any) -> EmotionalState:

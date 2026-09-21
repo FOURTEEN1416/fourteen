@@ -29,7 +29,7 @@ llm:
   # 不再产生兜底句；且 P1-2 熔断（连续 2 次失败开闸 60s）会跳过挂死的 agnes。
   fallback_chain:
     - agnes         # Agnes agnes-3.0-flash（OpenAI 兼容，角色扮演首选；request_timeout 20s）
-    - zhipu         # 智谱AI GLM-4.7-Flash（永久免费；快但角色扮演弱，作降级位）
+    - zhipu         # 智谱AI GLM-4.5-Flash（免费档，thinking 必须关；快但角色扮演弱，作降级位）
     - xunfei        # 讯飞星火 Spark Lite（永久免费）
     - baidu         # 百度千帆 ERNIE-Speed（每月50万免费Token）
 
