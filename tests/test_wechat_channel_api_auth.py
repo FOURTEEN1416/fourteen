@@ -13,13 +13,21 @@ os.environ.setdefault("JWT_SECRET", "test-secret-for-wx-channel-isolation-32char
 
 
 @pytest.fixture()
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
     from sqlalchemy.pool import StaticPool
 
+    # 隔离磁盘通道状态：/api/wechat/channel 经 connector_registry 读真实
+    # sessions_root（data/wechat_sessions），生产宿主上 owner=2 真实在连，
+    # 「connected is False」断言被宿主状态打破（2026-09-21 服务器实测发现，
+    # 本地无通道凭证故恒绿）。全部磁盘读均经 channel_paths 的函数晚期导入，
+    # 重定向根目录到空 tmp 后用例与宿主状态解耦。
+    import wechat_direct.channel_paths as channel_paths_mod
     from api.auth_jwt import create_access_token
     from api.database import Base, User, get_db
     from api.routers.wechat_channel_routes import admin_router, router
+
+    monkeypatch.setattr(channel_paths_mod, "sessions_root", lambda: tmp_path)
 
     engine = create_async_engine(
         "sqlite+aiosqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
