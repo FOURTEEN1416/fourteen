@@ -42,7 +42,7 @@
 - **裁决落地**：① 画像工具写权威=**EventLedger**（`write_profile_from_tool`，物化表仅缓存）；② `persona_service` 画像槽读 **投影**（`get_profile_prompt_block`）；③ 主动消息 **`decide_proactive` LLM 判断时机与内容**，per-user 路径**去掉 quiet/online/frequency 发送闸**（仅投递成功才记账）；④ orchestrator 每轮 `append_chat_events`
 - **代码**：`shisi/agent_plane/runtime.py` / `proactive/llm_proactive.py` / 调度与工具改写 / `run_api` 注入 `set_llm_provider`
 - **验证**：相关套件 **70 passed** + ruff 改动 0；账本库 `data/agent_plane.db`
-- **状态**：已 push main；服务器 pull/deploy 见本条后续回写
+- **状态**：已 push main；**服务器已 pull `5b2a343` + remote_deploy 4/4 + 前端 dist 重建 + 服务重启**（health/ready 见运维日志）
 
 ### 2026-09-21 · 窗口 agent-x · 包 AX 交付 + 用户裁决 + 文件级收编 main
 
