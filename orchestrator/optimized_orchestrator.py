@@ -848,6 +848,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                         raw_mem["episodic"] = sanitize_episodic(raw_mem.get("episodic"))
                         raw_mem.pop("working", None)  # 工作记忆走 messages，不进 system
                         raw_mem.pop("pending_events", None)  # 待办不进 system 当对话
+                        raw_mem["_user_key"] = session_id or ""
                 except Exception as e:  # noqa: BLE001
                     logger.debug("sanitize memory_context failed: %s", e)
                 memory_context = raw_mem or ""  # type: ignore[assignment]
@@ -1104,6 +1105,15 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     ase.on_chat(user_msg_clean, reply)
             except Exception as e:  # noqa: BLE001
                 logger.debug("ASE on_chat skipped: %s", e)
+
+        # 用户画像：只从**用户原话**更新（模型回复不得写入画像，防编造沉淀）
+        if session_id:
+            try:
+                from shisi.memory.legacy.user_profile import default_store
+
+                default_store().apply_user_utterance(session_id, user_msg_clean)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("user_profile update failed: %s", e)
 
         # 好感度同步 — user×character（session_id 作 user 维，禁止跨用户共享）
         if character_id and character_id != "default" and emotion_state is not None:

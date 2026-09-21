@@ -104,6 +104,27 @@ class PersonaService:
 
         mem_ctx = memory_context if isinstance(memory_context, dict) else {}
         mem_parts: list[str] = ["# 记忆上下文（供参考，**不是**本轮对话记录）"]
+
+        # 用户画像槽（A3）：稳定事实优先；无画像则不编
+        profile_key = str(
+            mem_ctx.get("user_key")
+            or (memory_context if isinstance(memory_context, str) else "")
+            or ""
+        )
+        # orchestrator 会把 user_key 放进 memory dict
+        if not profile_key and isinstance(mem_ctx, dict):
+            profile_key = str(mem_ctx.get("_user_key") or "")
+        try:
+            from shisi.memory.legacy.user_profile import default_store
+
+            store = default_store()
+            if profile_key:
+                block = store.to_prompt_block(profile_key)
+                if block:
+                    mem_parts.append("\n" + block)
+        except Exception:  # noqa: BLE001
+            pass
+
         if chat_summary:
             mem_parts.append("\n## 早期对话摘要（历史压缩，非用户新消息）")
             mem_parts.append(str(chat_summary)[:800])
