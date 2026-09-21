@@ -1,6 +1,6 @@
 # 后端地图
 
-> **✅ 2026-09-20 增量刷新**：在 09-19 全量刷新基线上补齐 09-19 晚通道隔离批次——端点统计已按 `create_api_app()` 内省实测重写（**215 业务端点 / 181 唯一路径**；`len(app.routes)=219` 含 4 条框架路由）。逐模块端点数以本图模块级清单 + `CODE_GRAPH.md` v3.8.6 §4.2（按 tag 分布，权威）为准。
+> **✅ 2026-09-21 增量刷新**：在 09-20 基线上补齐 09-21 全量代码审查修复战役口径——端点统计已按 `create_api_app()` 内省实测重写（**220 业务端点 / 186 唯一路径**；`len(app.routes)=224` 含 4 条框架路由）。较 09-20 口径 +5 端点 = agent-plane 路由组。逐模块端点数以本图模块级清单 + `CODE_GRAPH.md` v3.8.17 §4.2（按 tag 分布，权威）为准。
 
 **最近更新:** 2026-09-20
 **版本:** 3.1.0
@@ -64,7 +64,7 @@ api/ (45 py 文件)            ← FastAPI 路由层
 
 ---
 
-## API 端点清单（模块级，2026-09-20 内省实测）
+## API 端点清单（模块级，2026-09-21 内省实测）
 
 | 模块 (tag) | 端点数 | 路径前缀 |
 |------|------|------|
@@ -89,6 +89,7 @@ api/ (45 py 文件)            ← FastAPI 路由层
 | llm-providers | 6 | /api/llm-providers/*（admin） |
 | stickers | 5 | /api/shisi/stickers |
 | admin | 5 | /api/admin/* |
+| agent-plane | 5 | /api/agent-plane/*（replay/profile/events/curate/probes，admin 门槛，09-21 审查战役 P0-10 收口） |
 | affinity | 4 | /api/shisi/affinity |
 | invite | 4 | /api/auth/register-invite, /api/admin/invites |
 | emotion-stage | 3 | /api/shisi/emotion-stage |
@@ -100,7 +101,7 @@ api/ (45 py 文件)            ← FastAPI 路由层
 | vital-signs | 1 | /api/shisi/vital-signs |
 | stats (shisi) | 1 | /api/shisi/stats |
 | (untagged) | 1 | /api/wechat/qrcode |
-| **合计** | **215** | 101 GET / 78 POST / 16 PUT / 20 DELETE |
+| **合计** | **220** | 105 GET / 79 POST / 16 PUT / 20 DELETE |
 
 ---
 

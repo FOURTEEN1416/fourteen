@@ -9,19 +9,19 @@
 
 ---
 
-## 模块总览（2026-09-20 实测）
+## 模块总览（2026-09-21 实测，批6b 项10 死码清除后）
 
 | 模块 | 文件数 | 路径 | 职责 | 状态 |
 |------|--------|------|------|------|
 | **shisi** | 116 | `shisi/` | DDD 核心域（角色/情感/记忆/故事线/知识库等，v2 死模块删除后口径） | ✅ 活跃 |
 | **api** | 45 | `api/` | FastAPI 路由层（22 routers + app_factory/achievement_engine/state 等） | ✅ 活跃 |
-| **my_character** | 21 | `my_character/` | 情感引擎 + 角色引擎 | ✅ 活跃 |
+| **my_character** | 13 | `my_character/` | 情感引擎 + 角色引擎（批6b 项10 死码清除：21→13，删 enhanced_prompt_engine/emotion_memory/persona_evaluator/style_enhancer_v2/anchor_protection/constraint_validator/contextual_behavior/evolution_engine 8 模块） | ✅ 活跃 |
 | **persona_extractor** | 13 | `persona_extractor/` | 人格提取与注入（+web_enricher 网络画像增强） | ✅ 活跃 |
 | **utils** | 11 | `utils/` | 公共工具：`local_time`（墙钟真源）/`fallback_lines`/`affinity_state`/`reply_mode`/`async_utils`/`important_dates`/`health_check`/`project_paths`/`bootstrap`/`character_helpers` | ✅ 活跃 |
 | **observability** | 9 | `observability/` | 可观测性（日志/指标/追踪/健康检查/sentry/优雅停机） | ✅ 活跃 |
 | **tools** | 10 | `tools/` | 工具系统（12 个内置工具） | ✅ 活跃 |
 | **orchestrator** | 9 | `orchestrator/` | 编排器（主类/init/stream mixin/会话锁/语音检测/console_chat/**tool_gate**/**context_budget**） | ✅ 活跃 |
-| **character_card** | 6 | `character_card/` | 角色卡解析/验证/构建/集成 | ✅ 活跃 |
+| ~~character_card~~ | 0 | ~~`character_card/`~~ | 角色卡解析/验证/构建/集成 —— **整包 6 文件已于批6b 项10 删除**（`CharacterCardAdapter` 零读者挂线，角色卡运行真源为 `persona_service._load_character_card` 直读 + `shisi/character/` PNG 子系统） | ❌ 已删 |
 | **voice** | 6 | `voice/` | 语音合成（MiMo 唯一引擎，08-28 收敛） | ✅ 活跃 |
 | **llm_provider** | 5 | `llm_provider/` | LLM 多供应商网关 | ✅ 活跃 |
 | **security** | 5 | `security/` | 安全过滤与加密 | ✅ 活跃 |
@@ -34,12 +34,12 @@
 | **context** | 2 | `context/` | 上下文（世界书提供器） | ✅ 活跃 |
 | **memory_ext** | 2 | `memory_ext/` | 记忆扩展（mem0 后端） | ✅ 活跃 |
 
-> 文件数含 `__init__.py`（Glob/find 实测 2026-09-20）；`weclone_adapter/` 已于 08-28 删除（克隆收敛为本地提取+JSON 上传）。
+> 文件数含 `__init__.py`（Glob/find 实测 2026-09-21）；`weclone_adapter/` 已于 08-28 删除（克隆收敛为本地提取+JSON 上传）。**批6b 项10 persona 域死码整批清除**：`character_card/` 包（6 文件）+ `my_character/` 8 模块 + `shisi/application/character_service.py` 删除，共约 −2600+ 行（见 `docs/DELETION_LOG.md`）。
 > ⚠️ **`utils/` 与 `orchestrator/` 的新模块此前长期漏登**：`orchestrator/tool_gate.py`、`orchestrator/context_budget.py`、`proactive/reminder_delivery.py`、`utils/local_time.py`、`utils/fallback_lines.py`、`utils/affinity_state.py`、`shisi/affinity/scale.py` 均已在 CODE_GRAPH 落账但本表未同步 —— 本次补齐。
 
 ---
 
-## shisi/ — DDD 核心域 (115 文件)
+## shisi/ — DDD 核心域 (118 文件，2026-09-21 实测；含 agent-plane 子平面，`character_service.py`/`api/v2/`/knowledge legacy `RAGEngineV2` 包已删)
 
 **入口:** `shisi/api/registry.py`（由 `api/app_factory.py` 调用 `setup_shisi` 装配）
 **配置:** `shisi/config.py` / `shisi/migrations.py`
@@ -49,7 +49,7 @@
 | 子模块 | 职责 | 关键文件 |
 |--------|------|----------|
 | `api/` | shisi DDD 核心 plane 路由（31 端点已挂载） | `registry.py`, `affinity_routes.py`, `character_routes.py`, `emotion_stage_routes.py`, `memory_routes.py`, `persona_routes.py`, `stats_routes.py`, `sticker_routes.py`, `vital_signs_routes.py`, `common.py` |
-| `application/` | 应用服务层 | `character_service.py`, `memory_service.py`, `persona_service.py`, `knowledge_service.py`, `prompt_service.py`, `migration_service.py` |
+| `application/` | 应用服务层 | `memory_service.py`, `persona_service.py`, `knowledge_service.py`, `prompt_service.py`, `migration_service.py`（`character_service.py` 及其 `CharacterService` 全链已随批6b 项10 删除——类无实例化点） |
 | `character/` | 角色卡完整子系统（SillyTavern V2/V3 + PNG tEXt chunk） | `character_card_v2.py`, `png_codec.py`, `importer.py`, `exporter.py`, `manager.py`, `store.py`, `validator.py`, `models.py` |
 | `core/models/` | 领域模型 | `affinity_level.py`, `character_id.py`, `emotional_state.py`, `emotion_type.py`, `persona_profile.py`, `character_aggregate.py` |
 | `core/ports/` | 端口接口 | `character_repository.py` |
@@ -84,7 +84,7 @@
 - `routers/` 22 个路由模块: `admin_routes`, `auth_routes`, `character_routes`, `chat_routes`, `clone_routes`, `emotion_routes`, `invite_routes`, `knowledge_routes`, `llm_providers_routes`, `memory_routes`, `mimo_voice_routes`, `misc_routes`, `persona_card_routes`, `personality_routes`, `safety_routes`, `storyline_routes`, `tools_routes`, `training_routes`, `users_routes`, `voice_routes`, `wechat_channel_routes`（每人独立通道，09-19）, `wechat_routes`
 - `state/` 3 个状态模块: `safety_log`, `tool_history`, `training_state`
 
-**实际挂载:** 18 个 `include_router` 调用 + `setup_shisi(app)` 装配，共 **215 业务端点 / 181 唯一路径**（2026-09-20 `create_api_app` 内省实扫；`len(app.routes)=219` 含 4 条框架路由）
+**实际挂载:** 19 个 `include_router` 调用 + `setup_shisi(app)` 装配，共 **220 业务端点 / 186 唯一路径**（2026-09-21 `create_api_app` 内省实扫；`len(app.routes)=224` 含 4 条框架路由；较 09-20 口径 +5 = agent-plane 路由组）
 **依赖:** shisi, security, llm_provider, database
 
 ---
@@ -249,19 +249,9 @@
 
 ---
 
-## character_card/ — 角色卡 (6 文件)
+## ~~character_card/~~ — 已删除（批6b 项10）
 
-**职责:** 角色卡解析、验证、提示构建
-
-**关键文件:**
-- `parser.py` — 角色卡解析器
-- `validator.py` — 角色卡验证器
-- `models.py` — 数据模型
-- `prompt_builder.py` — 提示构建器
-- `integration.py` — 集成接口（被 `orchestrator/_init_mixin.py` 装配）
-
-**依赖:** 无
-**被依赖:** shisi, api
+> 原 6 文件包（`__init__/integration/models/parser/prompt_builder/validator`）经复核证为**零读者死码**：`CharacterCardAdapter` 除 `orchestrator/_init_mixin.py` 挂线自身写入 `components["character_card"]/["card_mode"]` 外全仓无消费点；角色卡运行真源是 `persona_service._load_character_card` 直接读 + `shisi/character/`（SillyTavern V2/V3 + PNG tEXt）子系统。整包已随批6b 项10 删除，详见 `docs/DELETION_LOG.md`。防复活钉：`tests/test_p2_batch6_persona.py::test_character_card_package_removed`。
 
 ---
 

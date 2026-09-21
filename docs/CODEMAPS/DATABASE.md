@@ -105,17 +105,9 @@
 
 ## 文件型存储
 
-### 人设卡模块 (character_card/)
+### ~~人设卡模块 (character_card/)~~ — 已删除（批6b 项10）
 
-```
-character_card/
-├── __init__.py           ← 模块入口
-├── integration.py        ← 集成接口
-├── models.py             ← 数据模型
-├── parser.py             ← 解析器
-├── prompt_builder.py     ← 提示词构建
-└── validator.py          ← 校验器
-```
+> 原 6 文件包（`__init__/integration/models/parser/prompt_builder/validator`）为**零读者死码**，已随批6b 项10 删除（见 `docs/DELETION_LOG.md`）。角色卡的真源为下方的 `config/characters/*.json` + `shisi/character/`（SillyTavern V2/V3 + PNG tEXt）子系统。
 
 ### 角色配置 (config/characters/)
 

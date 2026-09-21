@@ -14,7 +14,7 @@
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **测试口径**（2026-09-20 全仓历遍实测）：后端 **1432 passed / 4 skipped**（收集 **1436**，0 失败；现役角色卡 **41 张**）；⚠️ 单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> **测试口径**（2026-09-21 全量审查修复战役终局实测）：后端 **1611 passed / 4 skipped**（收集 **1615**，0 失败；现役角色卡 **41 张**）；⚠️ 单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
 > 前端 `98 passed`（vitest 16 文件）+ `tsc --noEmit` 0 错误。
 > ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 7）。**引用基线必须同时声明卡数**。
 
@@ -156,7 +156,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 ## 项目结构
 
 ```
-├── api/                  FastAPI 后端（215 端点 / 181 条路径，2026-09-20 内省实测）
+├── api/                  FastAPI 后端（220 端点 / 186 条路径，2026-09-21 内省实测）
 │   ├── app_factory.py    create_api_app() —— 唯一 app 工厂
 │   ├── routers/          22 个域路由模块（character/chat/misc/personality/users/
 │   │                     training/tools/safety/clone/auth/admin/invite/voice/
@@ -188,7 +188,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │       ├── store/        Zustand 3 个（authStore / characterBuilderStore / errorStore）
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
-├── tests/                1432 后端测试通过 + 4 跳过（2026-09-20 全仓历遍分块实测，收集 1436）+ 98 前端测试
+├── tests/                1611 后端测试通过 + 4 跳过（2026-09-21 审查修复战役终局分块实测，收集 1615）+ 98 前端测试
 ├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 41 张）
 └── main.py               入口
 ```

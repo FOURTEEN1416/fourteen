@@ -1,6 +1,10 @@
-# 代码图谱 — unique-you (唯一的你) v3.8.16
+# 代码图谱 — unique-you (唯一的你) v3.8.17
 
-> 由 维护者 手动维护 | 最后核实: 2026-09-20（**v3.8.16 全仓历遍·文档对齐 + 3 处代码缺陷修复**（用户指令「全仓历遍，更新文档，修复bug」）：
+> 由 维护者 手动维护 | 最后核实: 2026-09-21（**v3.8.17 全量代码审查修复战役收口**（工作单 `docs/verification/2026-09-21-full-code-audit.md`；AGENTS v1.34）：
+> **端点重测**：`create_api_app` 内省（`AI_GF_ENV=dev`）——**APIRoute 220 / 唯一路径 186**，`len(app.routes)=224`（含 4 条框架路由）；方法分布 **105 GET / 79 POST / 16 PUT / 20 DELETE**；较 v3.8.16 口径 215/181 **+5 = agent_plane_routes 路由组**（AX P2 批次并入，非本战役新增，此前未回扫）。
+> **本战役主线（P0×10 + P1 1–53 + persona 42–47 + 批6b 项1–11）**：P0批1 记忆/画像/知识/隔离生产脱钩根治（`0bdb91e`）、P0批2 WS认证/唤醒/flock/mock/控制面越权/worker互盲（`741b5d2`+P0-10 agent-plane admin 门槛）、P1批3 LLM 网关熔断+流式真 fallback+工具超时/按人限速（`70ef90d`）、P1批4 记忆12–17+ASEHub真扇出/定向隔离（`ecd6ce2`/`4fc2d2b`）、P1批5 微信消息链+审查项32–41（`1f2e6b5`/`5f5dc87`）、persona 42–47（`3a2e4b4`）、批6b 项1–8（死模块 RAGEngineV2/trigger_engine 死桩/prompt_template_manager/voice 死守卫/checker 缓存/旧全局 ASE+event_bonus/异步检索死路径+ForwardManager 落库）、项9 persona P2 五连（`f5472f9`）、**项10 persona 域死码整批清除**（`a1ae96d`，−3566 行：`character_card/` 包 + 三版并存化石 + 强化回路 + CharacterService 全链 + prompt_mode 管线 + EmotionEngine 风格修饰器 + enhanced_prompt_engine 等 8 模块）、**项11 知识槽检索查询与 system 回显解耦**（`d646938`：`prompt_builder.build(knowledge_query=)` 新通道，每轮 RAG 真正发生、rag 失败不再裸奔）。CI 修复（残句规则误杀 `f9725d3`/`b3fd1bc`）。
+> **终局验证**：分块 **1615 收集 / 1611 通过 / 4 跳过 / 0 失败**（**410 + 380+1 + 406 + 415+3** 精确吻合，角色卡 **41 张**在位、工作树 clean）+ vitest **98/98** + `tsc --noEmit` **0** + ruff 全仓 **0** + pre-commit 门禁全过。**遗留登记**：`/api/persona/evolution-log` 恒空（写路径随项10删除，只读接口保留，`DELETION_LOG` 在案）；前端 `api.ts` event_bonus 字段清理归并行窗；**服务器 pull 上线归用户裁决（本批未部署）**。）
+> 由 维护者 手动维护 | 上一核实: 2026-09-20（**v3.8.16 全仓历遍·文档对齐 + 3 处代码缺陷修复**（用户指令「全仓历遍，更新文档，修复bug」）：
 > ① **`proactive/reminder_delivery.py::_maybe_gc_intents` 批量过期清理从未执行**——旧实现是**同步**函数却调用 `asyncio.run(self._sm.expire_stale_intents())`，而该方法本身是同步的（`asyncio.run` 只收协程对象），且它由 `_run_once()` 在**已运行的事件循环内**同步调用（再抛 `RuntimeError: asyncio.run() cannot be called from a running event loop`）；异常被 `except Exception` 吞进 debug 级 → `pending_intents` 的 active 行只在「会话被再次读取」时惰性过期，长期不活跃会话的行永久残留（**表无界增长**）。改为 `async` + `await asyncio.to_thread(...)`。
 > ② **`orchestrator/context_budget.py::format_session_tail` untrusted 信封结构错误**——开标签 `<context …>` 被排在**被包裹正文之后**（引言→正文→开标签→说明→闭标签），正文落在信封之外，与 `tool_gate.TOOL_RESULT_ENVELOPE_HEAD/TAIL` 的包夹约定不一致。改为「开标签→正文→闭标签」，并抽出 `SESSION_TAIL_ENVELOPE_HEAD/TAIL` 常量。
 > ③ **`shisi/memory/legacy/vector_memory.py::_run_async` 同线程死锁分支**——「已处于事件循环中」分支用 `asyncio.run_coroutine_threadsafe(coro, loop).result()`，而 `loop` 取自 `get_running_loop()`（**当前线程正在跑的那个循环**）→ 同线程阻塞等待自身循环推进 = **必然死锁**。改为委托公共真源 `utils.async_utils.run_async`（消除重复实现）。
@@ -15,19 +19,19 @@
 
 ## 1. 全局指标
 
-### 1.1 实时核实指标（2026-09-20 create_api_app/Glob/pytest/vitest/tsc 全量复测）
+### 1.1 实时核实指标（2026-09-21 create_api_app/Glob/pytest/vitest/tsc 全量复测）
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| API 业务端点（`APIRoute` 实扫） | **215 端点 / 181 条唯一路径**（101 GET / 78 POST / 16 PUT / 20 DELETE） / **18 处 include_router + setup_shisi**（2026-09-20 复测；较 09-17 口径 +11 = `wechat-channel` 9 + `admin-wechat` 2） | 2026-09-20 内省 `create_api_app()`：`len([r for r in app.routes if isinstance(r, APIRoute)])`。⚠️ 旧口径"208 端点"实为 `len(app.routes)`，含 4 条框架路由（`/openapi.json`、`/docs`、`/docs/oauth2-redirect`、`/redoc`），非业务端点；本轮 `len(app.routes)=219` |
+| API 业务端点（`APIRoute` 实扫） | **220 端点 / 186 条唯一路径**（105 GET / 79 POST / 16 PUT / 20 DELETE） / **19 处 include_router + setup_shisi**（2026-09-21 复测；较 09-20 口径 215/181 +5 = agent-plane 路由组） | 2026-09-21 内省 `create_api_app()`：`len([r for r in app.routes if isinstance(r, APIRoute)])`。⚠️ 旧口径"208 端点"实为 `len(app.routes)`，含 4 条框架路由（`/openapi.json`、`/docs`、`/docs/oauth2-redirect`、`/redoc`），非业务端点；本轮 `len(app.routes)=224` |
 | main.py 体量 | **约 17.4 KB / 438 行** | 2026-09-20 实测（08-28 两轮瘦身基线后随通道批次 ± 微调） |
 | 前端页面 | **17 个** | Glob `frontend/src/pages/*.tsx`（另有 `StorylinePage` 为 App.tsx 内联包装组件） |
 | 前端 API 模块 | **13 个** | Glob `frontend/src/api/*.ts`（09-18 CI 门禁根治新增 `emotion.ts` / `normalize.ts`，原 11） |
 | 前端 Zustand store | **3 个** | LS `frontend/src/store/`（authStore / characterBuilderStore / errorStore） |
-| Python 测试用例 | **1432 passed + 4 skipped**（收集 **1436**） | 2026-09-20 全仓历遍·分块实跑（314 + 384+3 + 330+1 + 404，与 `--collect-only` 吻合；0 失败）。⚠️ **基线随 `config/characters/` 卡数浮动**：该目录被 gitignore（不入公开仓），`test_persona_injection` 的用例数 = **2 × 卡数 + 7**。**引用基线必须同时声明卡数** |
+| Python 测试用例 | **1611 passed + 4 skipped**（收集 **1615**） | 2026-09-21 全量审查修复战役终局·分块实跑（410 + 380+1 + 406 + 415+3，与 `--collect-only` 吻合；0 失败）。⚠️ **基线随 `config/characters/` 卡数浮动**：该目录被 gitignore（不入公开仓），`test_persona_injection` 的用例数 = **2 × 卡数 + 7**。**引用基线必须同时声明卡数**（本次 41 张在位） |
 | 现役角色卡 | **41 张**（`config/characters/*.json`，2026-09-20 从服务器**逐字节恢复**） | 41/41 文件 `sha256sum` 与服务器 `/opt/ai-girlfriend/config/characters/` **完全一致**；全部 JSON 可解析。目录被 `.gitignore:117` 忽略 → **卡数不随 git 复现**，本行是「本检出当前状态」而非版本事实 |
-| 前端测试用例 | **98 个全部通过 / 16 文件** | 2026-09-20 `npm test -- --run`（vitest）+ `tsc --noEmit` 0 错误 |
-| 测试用例合计 | **1530 个**（1432 Python 通过 + 98 前端通过） | pytest + vitest 实跑 2026-09-20 全仓历遍（⚠️ Python 侧跳过 4 不计入通过数） |
+| 前端测试用例 | **98 个全部通过 / 16 文件** | 2026-09-21 `npm test -- --run`（vitest）+ `tsc --noEmit` 0 错误 |
+| 测试用例合计 | **1709 个**（1611 Python 通过 + 98 前端通过） | pytest + vitest 实跑 2026-09-21 全量审查修复战役终局（⚠️ Python 侧跳过 4 不计入通过数） |
 | tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
 
 ### 1.2 知识图谱快照指标（✅ 2026-09-02 重新索引·第二次）
@@ -210,7 +214,7 @@ sequenceDiagram
 - `run_console_chat` — 控制台交互
 - `run_wechat_mode` — 微信模式
 
-### 4.2 API 层（**215 业务端点 / 181 唯一路径** — 2026-09-20 内省实扫）
+### 4.2 API 层（**220 业务端点 / 186 唯一路径** — 2026-09-21 内省实扫）
 
 两个路由来源：
 
@@ -224,20 +228,20 @@ sequenceDiagram
 > ⚠️ **口径纠错（2026-09-17 首记，2026-09-20 更新读数）**：旧口径"206 / 208 端点"取自 `len(app.routes)`，
 > 其中固定含 **4 条 FastAPI 框架自带路由**（`/openapi.json`、`/docs`、
 > `/docs/oauth2-redirect`、`/redoc`），故系统性偏高 4。
-> **业务端点数应取 `APIRoute` 实例数**。**当前读数（2026-09-20 复测）**：
-> `len(app.routes)=219`，`APIRoute=215`，唯一路径 181。（首记时点为 `len(app.routes)=208` / `APIRoute=204`，
-> 其后 09-19 晚通道批次 +11 端点 → 现读数如上。）
+> **业务端点数应取 `APIRoute` 实例数**。**当前读数（2026-09-21 复测）**：
+> `len(app.routes)=224`，`APIRoute=220`，唯一路径 186。（上一读数 2026-09-20 为 `APIRoute=215` / 唯一路径 181，
+> 其后 agent-plane 路由组 +5 端点 → 现读数如上。）
 
 **按 tag 的端点分布**（内省实测，权威口径）：
 
 ```
 character 21 │ misc 16 │ training 13 │ safety-infra 12 │ chat 11
-wechat-channel 9 │ personality 10 │ memory 10 │ wechat 9 │ clone 8 │ auth 8 │ knowledge 8
+personality 10 │ memory 10 │ wechat 9 │ wechat-channel 9 │ clone 8 │ auth 8 │ knowledge 8
 users 7 │ characters 7 │ tools 6 │ voice 6 │ mimo-tts 6 │ storyline 6
-llm-providers 6 │ stickers 5 │ admin 5 │ affinity 4 │ invite 4
+llm-providers 6 │ agent-plane 5 │ stickers 5 │ admin 5 │ affinity 4 │ invite 4
 emotion-stage 3 │ persona 3 │ persona-card 3 │ health 2 │ admin-wechat 2 │ emotion 2
 vital-signs 1 │ stats 1 │ (untagged) 1
-                                          ────────── 合计 215
+                                          ────────── 合计 220
 ```
 
 > 注：`character`(21) 为 `api/routers/character_routes.py`；`characters`(7) 为
@@ -278,6 +282,8 @@ qrcode_router          → /api/wechat/qrcode（1 端点，admin 兼容面）
 wechat_channel_router  → /api/wechat/channel/*（9 端点，JWT 本人：状态/list/connect/
                          qrcode/disconnect/reconnect/peers/{wxid}/character GET+PUT/characters）
 wechat_admin_router    → /api/admin/wechat/*（2 端点，admin：通道摘要/强制下线）
+agent_plane_router     → /api/agent-plane/*（5 端点：replay/profile/events/curate/probes，
+                         admin 门槛，P0-10 收口）
 + shisi setup          → /api/shisi/* 域路由（31 端点已挂载）
 ```
 
@@ -340,25 +346,23 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 | `_build_character()` | 双路径解析：角色卡优先（character_id）→ PersonaEngine 回退 |
 | `normalize_character_card()` | 新增 `utils/character_helpers.py`，统一展平 SillyTavern 角色卡格式 |
 
-### 4.4 my_character/ — 角色引擎（21 模块）
+### 4.4 my_character/ — 角色引擎（12 模块 + `__init__`，批6b 项10 死码清除后实况）
+
+> 项10 已删除：`emotion_memory.py`、`enhanced_prompt_engine.py`（含 `TimeContext`，原 103 fan-in 快照作废）、`persona_evaluator.py`、`style_enhancer_v2.py`（收敛为 `style_enhancer.py` 单版）、`anchor_protection.py`、`constraint_validator.py`、`contextual_behavior.py`、`evolution_engine.py`（详见 `docs/DELETION_LOG.md`）。`PersonaEngine` 三版并存 merge 化石（`build_complete_prompt`/`evolve`/`auto_evolve`/`validate_response` 等）一并移除，收敛为「五维画像 + 公共分层构建器 + verify_anchors + check_consistency + 只读 get_evolution_log」。
 
 | 模块 | 职责 | 备注 |
 |------|------|------|
-| `character_config.py` | ConfigLoader | **423 fan-in，全项目最高** |
-| `emotion_engine.py` | 情感引擎核心 | — |
-| `emotion_memory.py` | 情感记忆 | — |
+| `character_config.py` | ConfigLoader | 全项目最高 fan-in（08-28 图谱快照 423） |
+| `emotion_engine.py` | 情感引擎核心 | 风格修饰器双接口（`get_style_modifiers`/`get_emotion_style_map`）已随项10 删除 |
 | `emotion_style_coupler.py` | 情感-风格耦合 | — |
-| `enhanced_prompt_engine.py` | TimeContext | **103 fan-in** |
-| `persona_engine.py` | 人格引擎 | — |
-| `persona_evaluator.py` | 人格评估 | — |
-| `style_enhancer.py` / `style_enhancer_v2.py` | 风格增强 | v1/v2 共存 |
-| `tone_mimic.py` | 语气模仿 | — |
-| `consistency_checker.py` | 回复一致性检查 | 热路径节点 |
+| `persona_engine.py` | 人格引擎 | 项10 收敛为存活面（prompt_mode 管线/两级缓存/演化写路径已删；`/api/persona/evolution-log` 只读、日志恒空属已知限制） |
+| `persona_card.py` / `persona_schema.py` | 角色卡 schema | — |
+| `persona_utils.py` | 人格工具 | `build_time_context()` 已于 v1.19 删（零调用） |
+| `style_enhancer.py` | 风格增强（v1） | — |
+| `tone_mimic.py` | 语气模仿 | `add_conversation` 由 `training_routes` 克隆摄入在用（非死码） |
+| `consistency_checker.py` | 回复一致性检查 | 热路径；项6 起按 `core_anchors` 缓存复用 |
 | `counter_rebuttal.py` | 反驳计数器 | 热路径节点 |
-| `dynamic_anchor.py` | 动态锚点系统 | 热路径节点 |
-| `anchor_protection.py` | 锚点保护 | — |
-| `constraint_validator.py` | 约束验证 | — |
-| `contextual_behavior.py` | 上下文行为 | — |
+| `dynamic_anchor.py` | 动态锚点系统 | 强化回路（`should_reinforce`/`generate_reinforcement`）已随项10 删除 |
 
 ### 4.5 persona_extractor/ — 人格提取器（12 模块）
 
@@ -596,6 +600,8 @@ tools/
 
 **风险**：ConfigLoader.get 的 423 fan-in 意味着它是单点故障 — 出问题则 423 个调用点受影响。
 
+> ⚠️ 本表为 **2026-08-28 codebase-memory 图谱快照**（fan-in 计数不随代码变更刷新）。其中 **#4 `TimeContext.now`（`enhanced_prompt_engine.py`）与 #7 `PromptTemplateMgr.get`（`prompt_template_manager.py`）指向的文件已分别于批6b 项10 / 项4 作为死码删除**——快照读数滞后于现状，实际热节点以 §4.4 与代码为准。
+
 ---
 
 ## 7. 复杂度热点（transitive_loop_depth）
@@ -776,8 +782,8 @@ tools/
 | 模块 | 评估结论 | 依据 |
 |------|---------|------|
 | `shisi/memory/legacy/` | **保留，不重命名** | 被 `shisi/application/memory_service.py` + `tests/test_memory*.py` 81 处引用；`legacy` 仅表"历史迁移"非"待删除" |
-| `shisi/knowledge/legacy/` | **保留，不重命名** | 被 `tests/test_rag_engine.py` 52 处引用，提供 RAGEngineV2 等核心 RAG 抽象 |
-| `character_card/` | **保留** | 被 `orchestrator/_init_mixin.py` 通过 `from character_card.integration import CharacterCardAdapter` 引用，是角色卡融合入口 |
+| `shisi/knowledge/legacy/` | ~~保留~~ → **RAGEngineV2 死包已删（批6b 项2）** | 2026-07-28 曾判「保留（被 `test_rag_engine.py` 引用）」；复核证 RAGEngineV2 生产零读者，`legacy/` 内死模块整包连同其测试删除（`Retriever`/`CharacterKnowledgeService` 等现役知识检索不受影响，见 `DELETION_LOG`） |
+| `character_card/` | ~~保留~~ → **死码包已删（批6b 项10）** | 2026-07-28 曾判「保留（角色卡融合入口）」；复核证 `CharacterCardAdapter` 除 `_init_mixin` 挂线自身写入外全仓零读者（角色卡运行真源是 `persona_service._load_character_card` 直接读），整包 6 文件删除（见 `DELETION_LOG`） |
 | `shisi/api/` | **保留** | 被 `api/app_factory.py` 通过 `from shisi.api.registry import setup_shisi` 引用；与 `api/routers/` 形成双 API 层分工（见下） |
 | `requirements.txt` | **已删除** | pyproject.toml 已是权威完整依赖源，文件头部已声明"以 pyproject.toml 为权威" |
 

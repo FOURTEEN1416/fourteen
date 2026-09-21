@@ -1,6 +1,6 @@
 # 代码地图索引
 
-> **✅ 2026-09-20 全仓历遍刷新**：`orchestrator` 7→**9** 文件 / `proactive` 5→**6** / `shisi` 115→**116** / 新增 **`utils/`** 行；测试口径为 **1436 收集 / 1432 通过 / 4 跳过**（现役角色卡 **41 张**；⚠️ 卡目录被 gitignore、内容不随 git 复现，用例数 = 2 × 卡数 + 7）；活跃 ADR 11→**12**（补 **ADR-0015**）。历史漂移声明留档见 `docs/history/INDEX.md`。权威数字以 `CODE_GRAPH.md` **v3.8.16** 为准。
+> **✅ 2026-09-21 全量代码审查修复战役终局刷新**：测试口径为 **1615 收集 / 1611 通过 / 4 跳过**（现役角色卡 **41 张**；⚠️ 卡目录被 gitignore、内容不随 git 复现，用例数 = 2 × 卡数 + 7）；端点重测 **220 APIRoute / 186 唯一路径 / 19 include_router**（`len(app.routes)=224`）。09-20 批次刷新留档：`orchestrator` 7→**9** 文件 / `proactive` 5→**6** / `shisi` 115→**116** / 新增 **`utils/`** 行；活跃 ADR 11→**12**（补 **ADR-0015**）。历史漂移声明留档见 `docs/history/INDEX.md`。权威数字以 `CODE_GRAPH.md` **v3.8.17** 为准。
 
 **最近更新:** 2026-09-20
 **项目版本:** 3.1.0
@@ -52,17 +52,17 @@ unique-you/
 ├── llm_provider/           # LLM 供应商接入 (5 py 文件)
 ├── voice/                  # MiMo TTS 语音合成 (5 模块 + __init__)
 ├── cache/                  # 缓存层 (LLM 缓存 + Redis)
-├── character_card/         # 角色卡 (6 文件)
+├── character_card/         # 已删除（批6b 项10，零读者死码包，见 docs/DELETION_LOG.md）
 ├── clone_training/         # 克隆训练 (4 文件：清洗/提取/风格分析)
 ├── context/                # 上下文 (世界书)
 ├── memory_ext/             # 记忆扩展 (mem0 后端)
 ├── proactive/              # 主动消息 (6 文件：ase_engine/scheduler/frequency/reflection/
-│                           #   reminder_delivery)
+│                           #   reminder_delivery/ase_hub)
 ├── multimodal/             # 多模态 (image_attachment + multimodal_processor)
 ├── wechat_direct/          # 微信直连 (5 文件：每人独立通道 registry/paths/peer + connector)
 ├── plugins/                # 插件系统 (2 文件)
 ├── config/                 # YAML/JSON 配置 + config/characters/ 角色卡库（gitignore；现役 41 张）
-├── tests/                  # 测试 (1432 Python 通过 + 4 跳过 / 98 前端)
+├── tests/                  # 测试 (1611 Python 通过 + 4 跳过 / 98 前端)
 └── docs/                   # 文档
     ├── CODEMAPS/           # ← 本目录
     ├── adr/                # 架构决策记录 (12 篇)
@@ -73,13 +73,13 @@ unique-you/
 
 > `weclone_adapter/` 已于 08-28 删除（克隆收敛为本地提取+JSON 上传，DECISION_LEDGER 08-28 行）。
 
-### 关键指标（2026-09-20 实测）
+### 关键指标（2026-09-21 实测，批6b 项10 死码清除后）
 
 | 指标 | 值 |
 |------|-----|
-| API 端点 | **215 业务端点 / 181 唯一路径**（18 include_router + setup_shisi，`create_api_app` 内省实扫；⚠️ `len(app.routes)=219` 含 4 条框架路由） |
+| API 端点 | **220 业务端点 / 186 唯一路径**（19 include_router + setup_shisi，`create_api_app` 内省实扫；⚠️ `len(app.routes)=224` 含 4 条框架路由；较 09-20 口径 +5 = agent-plane 路由组） |
 | 前端页面 | 17 页面文件（全部挂载；幽灵层三页+DemoPage 已删） |
-| 测试用例 | **1530 = 1432 Python 通过（4 跳过）+ 98 前端通过**（2026-09-20 全仓历遍实跑全绿，收集 1436；⚠️ 随 `config/characters/` 卡数浮动 = 2 × 卡数 + 7，现役 41 张） |
+| 测试用例 | **1709 = 1611 Python 通过（4 跳过）+ 98 前端通过**（2026-09-21 全量审查修复战役终局实跑全绿，收集 1615；⚠️ 随 `config/characters/` 卡数浮动 = 2 × 卡数 + 7，现役 41 张） |
 | 活跃 ADR | **12**（0001–0007 + 0011–**0015**；0008–0010 空缺未使用） |
 | Fitness Functions | 17 (12 CI + 5 手动) |
 | 总线因子 | 1 (唯一开发者: 默默) |

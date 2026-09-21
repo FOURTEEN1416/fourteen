@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-09-21 — 全量代码审查修复战役收口（v1.34，工作单 `docs/verification/2026-09-21-full-code-audit.md`）
+
+- **触发**：用户指令「进行全面修复，所有问题都需要进行修复，同时需要你将 GitHub CI 报错处理好」+「全程自主进行，直到所有问题修复完成为止」。
+- **范围**：审查报告全部条目修毕——P0×10、P1 1–41、persona 42–47、AX 复核 48–53、批6a、批6b 项1–11；另修 GitHub Actions 红（`f9725d3`/`b3fd1bc`）。自 v1.33 基线 `3f5a4c6` 起共 **47 个提交** 至 `d646938`（项11 知识槽检索与 system 回显解耦——生产每轮 RAG 此前恒不触发；`knowledge_query` 贯通 orchestrator→persona_service→prompt_builder，回归 5 例 + 突变验红 2/2）。
+- **代表成果**：persona 域死码整批清除（批6b 项10，−3566 行：顶层 `character_card/` 包、PromptData/PromptProcessor/PromptMerger 三版并存化石、`prompt_mode` 旁路、强化回路双引擎分裂、`CharacterService` 全链）；锚点校验去同义反复（项6）；一致性 checker 缓存复用（项7）；ASEHub 真扇出；LLM 网关熔断/流式真 fallback；隔离/SSRF/CAS 收口。删除面全部先全仓 grep 证真零调用者，各处留防复活钉（如 `test_character_card_pkg_stays_deleted`）。
+- **终局验证**：分块 **1615 收集 / 1611 通过 / 4 跳过 / 0 失败**（410 + 380+1 + 406 + 415+3 精确吻合；41 卡在位、工作树无他窗在制品）+ vitest 98/98 + tsc 0 错 + ruff 全仓 0 + ci_gates 4/4。端点重测 `create_api_app` 内省：**APIRoute 220 / 唯一路径 186 / `len(app.routes)=224` / 19 include_router**（较 09-20 口径 +5 = agent-plane 路由组，09-21 并入未回扫所致，非本战役新增）。
+- **文档对齐（本批 push 即完成，B 档）**：AGENTS **v1.34**（含 `character_card/` 三处陈旧引用清除）、CODE_GRAPH **v3.8.17**（§1.1/§4.2/§4.4/§14）、CODEMAPS 五件、README、docs/README、VISION、`api/app_factory.py` docstring；跨文件 grep 残留清零（历史条目口径保留不改）。
+- **遗留登记**：① evolution-log 恒空（归 DELETION_LOG，先前已裁决）；② 前端 `api.ts` event_bonus 注释归并行窗（本窗未动前端）；③ **服务器 pull 上线归用户裁决，本战役未部署**——A 档代码已在 origin/main，上线需服务器 `git pull` + `deploy/remote_deploy.sh` + health 核验。
+- **临时产物清理**：删除本会话探针脚本 `scripts/_tmp_dump_memory_state.py`、`scripts/_tmp_p0_before.txt`、`scripts/_tmp_wipe_memory_data.py`。
+
 ## 2026-09-21 — 「人机味」根因取证 + agnes 回链首（A 方案，按供应商超时闸门）
 
 - **触发**：agnes 降级上线同日下午，用户报「是不是因为换了 LLM，为什么现在人机味那么重」。
