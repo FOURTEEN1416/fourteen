@@ -62,12 +62,28 @@ PATTERNS = {
     # 这类事实是「你不是答应提醒我吗」追问的全部答案来源，此前无类别可落、
     # 提取器直接漏掉（生产实证：user_facts 全库仅 3 条）。
     "commitment": [
-        r"(?:提醒我|叫我|喊我|叫醒我|催我).{0,25}",
-        r"(?:记得|别忘了|帮我记着|帮我记住).{0,25}",
-        r"(?:说好了|说定了|约好|答应[了你]?|一言为定|拉钩).{0,30}",
-        r"(?:明早|明天|睡前|下班|到点|几点).{0,15}(?:叫|提醒|喊|催)",
+        # 必须含时间/对象动作的完整托付；禁止「叫我」「记得」裸句入库
+        r"(?:提醒我|叫我|喊我|叫醒我|催我)[^。！？\n]{0,20}(?:起床|吃饭|睡觉|上班|上课|打卡|带|交|回)",
+        r"(?:明早|明天早上|明天|今晚|睡前|下班|到点|早上)?\s*\d{1,2}[:：点]\d{0,2}[^。！？\n]{0,20}(?:叫我|提醒|喊我|叫醒)",
+        r"(?:记得|别忘了)[^。！？\n]{0,10}(?:带|交|回|吃|吃药|打卡|上课|上班)[^。！？\n]{0,15}",
+        r"(?:说好了|说定了|约好|答应[了你]?)[^。！？\n]{2,40}",
     ],
 }
+
+_COMMITMENT_MIN_LEN = 12
+_COMMITMENT_FORBID = re.compile(r"^(叫我|叫我起床|提醒我|记得|明天要|后天也要|记得多少)")
+
+
+def normalize_commitment_text(text: str) -> str | None:
+    """承诺类事实过短/截断/口头禅 → 不入库（生产「…二十分叫」）。"""
+    s = str(text or "").strip()
+    if len(s) < _COMMITMENT_MIN_LEN:
+        return None
+    if _COMMITMENT_FORBID.match(s):
+        return None
+    if re.search(r"(叫|提醒|喊|催)$", s) and len(s) < 20:
+        return None
+    return s
 
 
 class FactExtractor:
@@ -97,9 +113,32 @@ class FactExtractor:
         Returns:
             [{"fact": str, "category": str, "confidence": float, "source": str}, ...]
         """
-        if self.llm_func:
-            return self._extract_with_llm(user_messages)
-        return self._extract_with_rules(user_messages)
+        facts = (
+            self._extract_with_llm(user_messages)
+            if self.llm_func
+            else self._extract_with_rules(user_messages)
+        )
+        out = []
+        for f in facts or []:
+            if not isinstance(f, dict):
+                continue
+            cat = str(f.get("category") or "general")
+            fact = str(f.get("fact") or "").strip()
+            if cat == "commitment":
+                norm = normalize_commitment_text(fact)
+                if not norm:
+                    continue
+                f = dict(f)
+                f["fact"] = norm
+            try:
+                from utils.prompt_sanitize import is_injectable_fact
+
+                if fact and not is_injectable_fact(f["fact"] if cat == "commitment" else fact):
+                    continue
+            except Exception:  # noqa: BLE001
+                pass
+            out.append(f)
+        return out
 
     def extract_from_chat(self, chat_history: list[dict[str, str]]) -> list[dict[str, Any]]:
         """

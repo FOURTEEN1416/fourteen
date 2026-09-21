@@ -16,8 +16,22 @@ _DIALOGUE_MARKERS = re.compile(
 )
 
 # 过短/像指令/像残句的「事实」不注入
-_TOO_SHORT = 2
+_TOO_SHORT = 3
 _QUESTIONISH = re.compile(r"[？?]\s*$")
+# 生产实证残句/口头禅/截断承诺（2026-09-21 审查）
+_FRAGMENT = re.compile(
+    r"^(明天|后天|今天|今晚)?也?要[吧啊呀呢~～!！。]*$"
+    r"|^(明天|后天|今天).{0,3}$"
+    r"|^(记得|叫我|喊我|提醒我)[吧啊呀呢~～!！。]*$"
+    r"|^叫我起床[吧啊呀呢~～!！。]*$"
+)
+_EMOTION_SLANG = re.compile(
+    r"^(不喜欢你哦|我是委屈啊|我才没有|讨厌你|你好烦)[吧啊呀呢~～!！。]*$"
+)
+_CMD_LIKE = re.compile(
+    r"^(记得多少|一一说来|你先|快说|没有没有|那你)[，,。！？?].*$"
+    r"|^(记得多少，一一说来)$"
+)
 
 
 def looks_like_dialogue(text: str) -> bool:
@@ -32,10 +46,21 @@ def is_injectable_fact(fact: str) -> bool:
         return False
     if looks_like_dialogue(s):
         return False
-    # 纯疑问句/残缺祈使（「叫我」「来自哪里」）不作为稳定事实
-    if _QUESTIONISH.search(s) and len(s) <= 12:
+    if _QUESTIONISH.search(s) and len(s) <= 16:
         return False
-    return s not in {"叫我", "帮我", "什么", "消息", "好的", "嗯", "哦"}
+    if _FRAGMENT.search(s):
+        return False
+    if _EMOTION_SLANG.search(s):
+        return False
+    if _CMD_LIKE.search(s):
+        return False
+    # 截断承诺：以「叫/提醒/喊」结尾且过短（生产 id14「…二十分叫」）
+    if re.search(r"(叫|提醒|喊|催)$", s) and len(s) <= 18:
+        return False
+    if re.match(r"^(提醒我|叫我|喊我).{0,12}(就好了|就行|吧)[吧啊呀呢~～!！。]*$", s):
+        return False
+    blocked = {"叫我", "帮我", "什么", "消息", "好的", "嗯", "哦", "明天要", "后天也要", "明天也要"}
+    return s not in blocked
 
 
 def sanitize_fact_list(facts: Any, limit: int = 8) -> list[str]:
