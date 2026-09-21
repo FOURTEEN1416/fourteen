@@ -7,6 +7,18 @@
 
 ---
 
+## 2026-09-21 — 「人机味」根因取证 + agnes 回链首（A 方案，按供应商超时闸门）
+
+- **触发**：agnes 降级上线同日下午，用户报「是不是因为换了 LLM，为什么现在人机味那么重」。
+- **取证（生产实证，同会话天然对照）**：`data/app.log` + `data/sqlite.db`（`created_at` 是 UTC，已与本地时间日志逐条对齐）。同一 `session=2:o9cq80-…`、**同一 prompt 形状**下：agnes 出角色腔（07:15–07:22「现在才七点一刻…是你自己没看手机。」；11:35「说完整点。／我是十四。」，`llm_time=26.5s` 撞在 30s 限前一刻）；zhipu `glm-4-flash` 出客服腔（12:39–12:46「在的，怎么了？有什么我可以帮忙的吗？😊」「我是十四，一个喜欢和你聊天的**虚拟角色**」「**是的，我是人工智能**…」，httpx 全为 `open.bigmodel.cn`）。裸 system prompt 对照探针：agnes 6/6 认「我是十四」，zhipu **4/4 自称「人工智能助手」**。**结论：换模型是主因**，不是配置或人设丢失。
+- **排除项（先怀疑后撤回，留痕防重走）**：`[prompt] character=0` **不是**人设没注入——该埋点只统计**外部角色卡叠加段**（`optimized_orchestrator.py:1065` 读 `char_segment`，仅 `is_external_character_id` 分支赋值；`wechat_peer_preferences` 为空 ⇒ 全员默认「十四」），默认人设在 `build_system_prompt` 内，部署前后同为 0 而风格截然不同 ⇒ 它不是本次变量。`first_token_timeout: 5.0` 是**死配置**（`observability/config_models.py:21` 定义后全仓零消费者；流式里那句「Stream first token timeout (>3s)」只是 log，不中断），所以「首字超时」当时根本不存在可用闸门。
+- **放大器（非本窗引入）**：`data/sqlite.db` 的 `chat_history` 仅剩 36 行且 **id 从 1025 起**（序列 1060 ⇒ 前 1024 条被删），`user_facts`/`working_memory`/`user_persona`/`daily_summaries`/`sessions` **全为 0**。全仓 grep + `741b5d2..HEAD` 全 diff **无任何删除 chat_history 的代码路径** ⇒ 属并行窗记忆清洗的手动动作（服务器留有 `scripts/_tmp_wipe_extra.py` 等未跟踪脚本），`data/` 下无 `sqlite.db.bak*`，前 1024 条疑不可恢复。
+- **改动（用户点单 A）**：① `config/system.yaml` 链序回调 **`agnes→zhipu→xunfei→baidu`**；② 新增**按供应商超时** `request_timeout`（`openai_compatible_provider.py` 构造参数 → `httpx.Timeout`；`multi_provider_gateway.py` 从 provider 配置透传；`llm_providers.json` agnes=20s + `DEFAULT_PROVIDER_CONFIG` 同步），把「链首挂死」从烧穿 30s 整链预算改为 20s 即降级；③ `llm_providers.json` 的 `fallback_chain`/`sort_order`/描述与 yaml 对齐（双真源结构性统一仍留并行窗）。
+- **验证证据**：① 现测 agnes 6 样本 = 成功 3.8/10.9/12.1/17.5/19.8s + 挂死 1 次恒 25.0s ⇒ 20s 闸门保住 5/6、只切挂死；② **端到端新链**（本地、真实 agnes 端点、编排层同 30s `wait_for`、唯一 query 避缓存）5 发 **全部由 agnes 出词**，耗时 1.15/1.20/3.03/4.59/18.39s，文本带人格（「十四在此」「别客气哈」）；③ **降级路径单独强制复现**：把链首指向本地黑洞端点（收请求 120s 不返回）→ **20.0s 整准点判死**、网关记 `agnes returned 网络请求失败` 并落到 zhipu，总 **21.43s 返回真回复**，未触及 30s 外层 ⇒ 不再产生兜底句；④ 新 `tests/test_llm_per_provider_timeout.py` 6 例（默认值/透传/真正进 httpx client/yaml 链首/双真源一致/挂死后剩余预算≥8s）+ `test_p1_batch3_llm_gateway` 17 例 = 23 passed；⑤ **突变验红两次命中**：撤掉网关 `request_timeout=` 透传 → 透传用例红；把 json 链序改回 zhipu 居首 → 链首与预算两例同时红；⑥ ruff `llm_provider/ config/ tests/` 0 错。
+- **顺带闭环（非本批引入）**：`tests/test_multi_provider_attachments.py` 3 例自 `70ef90d`（P1-2 熔断）起即 `AttributeError: _breaker_open_until`——其 `_gateway_with` 用 `__new__` 绕过 `__init__` 却未带熔断状态，与我上一批修的 `_poll_lock_fds` 同一缺陷类；补 2 行使 32/32 绿。
+- **部署状态（提交时口径）**：本窗功能提交 `0e941e1` 仅本地，写留痕时并行窗尚未推。写完后并行窗已自行推收（origin 由 `bcd43ea` → `5f5dc87`，含 `4fc2d2b`/`1f2e6b5`/`5f5dc87` 三批 P1 成品），故本窗改动随后 push 只发布自有内容。**服务器仍停在 `7123dc74`**——`git pull` 会把上述三批 P1 一并带上生产（属并行窗成品，是否上线不由本窗代答），需用户裁决。未部署期间线上行为不变（zhipu 链首、人机味仍在）；生效后最坏路径 agnes 20s → zhipu ~1s，不再产生兜底句。
+- **仍未做**：`first_token_timeout` 死配置（接线或删除，属 LLM 网关 owner）；同步路径 `_sync_client` 仍固定 60s（一致性/ASE 侧挂死不在本闸门覆盖内）；provider 链结构性单源；记忆清洗是否有意与历史可恢复性。
+
 ## 2026-09-21 — agnes 降级出链首（A 档配置，用户裁决「做选中这条，其余留并行窗」）
 
 - **改动** `7123dc7`：`config/system.yaml` `llm.fallback_chain` 由 `agnes→zhipu→…` 改为 **`zhipu→agnes→xunfei→baidu`**；agnes **不删除**（留作 zhipu 故障时的第二选择，端点恢复后可提回链首），注释记原因。与 09-18「sensenova 无 key 白跑一轮」同类根因，差别是这次有 key 而端点僵死，故降级而非移除。
