@@ -14,7 +14,7 @@ import re
 import threading
 import time
 import uuid
-from collections import OrderedDict, deque
+from collections import OrderedDict
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -263,7 +263,7 @@ FOLLOW_UP_DEFAULTS: dict[str, Any] = {
 _FOLLOWUP_TICK = 5.0
 # 追问文本长度上限
 _FOLLOWUP_MAX_CHARS = 40
-# 追问用的上下文轮数（真实往来条数，含双方）
+# 追问上下文条数（读持久化 chat_history，含双方）
 _FOLLOWUP_CONTEXT_TURNS = 8
 # 「一句一句发」的拆分上限：单条最多 4 段、每段最多 45 字
 _SPLIT_MAX_SEGMENTS = 4
@@ -373,7 +373,10 @@ def read_follow_up_config() -> dict[str, Any]:
     with suppress(Exception):
         cfg["enabled"] = bool(cfg["enabled"])
         cfg["delay1_seconds"] = max(5, min(3600, int(cfg["delay1_seconds"])))
-        cfg["delay2_seconds"] = max(5, min(7200, int(cfg["delay2_seconds"])))
+        # 第二轮下限 60s（2026-09-21 自问自答根治）：生产真源里曾被写成 10s，
+        # 两条追问相隔 10 秒到达 → 用户侧看到的是她连发两句自问自答。
+        # 下限而非改默认值：控制端写多小都拦得住，且不碰用户数据文件。
+        cfg["delay2_seconds"] = max(60, min(7200, int(cfg["delay2_seconds"])))
         if cfg["delay2_seconds"] < cfg["delay1_seconds"]:
             cfg["delay2_seconds"] = cfg["delay1_seconds"]
         cfg["daily_max"] = max(0, min(200, int(cfg["daily_max"])))
@@ -727,8 +730,6 @@ class WeChatConnector:
         self._followup_lock = threading.Lock()
         self._followup_daily: dict[str, int] = {}   # {user_id: 当日已追问条数}
         self._followup_daily_date = ""
-        # 最近若干轮真实往来（供追问用真实上下文，而不是硬插一句"人呢"）
-        self._recent_exchanges: dict[str, deque] = {}
         self._last_user_id: str = ""
         # 好友自选角色（P1-审查 item28 接线）：peer_wxid → (菜单过期时刻, 发菜单时的卡列表快照)
         self._peer_choice_pending: dict[str, tuple[float, list[dict]]] = {}
@@ -1248,17 +1249,33 @@ class WeChatConnector:
 
     # ── 对话内追问（见文件头说明）─────────────────────────────
 
-    def _remember_exchange(self, user_id: str, user_text: str, bot_reply: str) -> None:
-        """记住最近几轮真实往来，供追问使用真实上下文。"""
-        if not user_id:
+    def _memory_service(self) -> Any | None:
+        """本会话记忆服务（对话历史唯一真源的入口），装配缺失时返回 None。"""
+        orch = self.orchestrator
+        comps = getattr(orch, "components", None) if orch else None
+        return (comps or {}).get("memory")
+
+    def _session_messages(self, session_key: str, keep: int = 10) -> list[dict[str, str]]:
+        """按会话读最近若干条**持久化**对话（与主链同一真源）。"""
+        getter = getattr(self._memory_service(), "get_chat_context", None)
+        if getter is None or not session_key:
+            return []
+        try:
+            messages, _summary = getter(session_id=session_key, keep_recent=keep)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[wx][step=history_read_failed] session=%s error=%s", session_key, e)
+            return []
+        return list(messages or [])
+
+    def _record_outbound(self, text: str, session_key: str) -> None:
+        """她主动说的话回写会话历史（自问自答根治；写入唯一 owner 在记忆层）。"""
+        recorder = getattr(self._memory_service(), "record_outbound_message", None)
+        if recorder is None or not session_key or not text:
             return
-        buf = self._recent_exchanges.get(user_id)
-        if buf is None:
-            buf = self._recent_exchanges[user_id] = deque(maxlen=_FOLLOWUP_CONTEXT_TURNS)
-        if user_text:
-            buf.append(("对方", str(user_text)[:120]))
-        if bot_reply:
-            buf.append(("我", str(bot_reply)[:160]))
+        try:
+            recorder(message=text, session_id=session_key)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[wx][step=outbound_record_failed] session=%s error=%s", session_key, e)
 
     def _schedule_followup(self, user_id: str, bot_reply: str) -> None:
         """回复成功后登记一次待发追问（参数取自 web 控制端可调的配置）。"""
@@ -1331,24 +1348,38 @@ class WeChatConnector:
             return
 
         step = int(st.get("step", 0)) + 1
-        last_reply = str(st.get("last_reply", ""))[:80]
 
         # ⚠️ 2026-09-19 用户反馈：「追问没有和上下文形成逻辑，而是强行地插入一句
-        # 「在吗？」「人呢？」」—— 旧实现只把**上一句 AI 回复**塞进 prompt，
-        # 等于没有上下文，于是只能产出通用催促语。现改为带上真实往来记录。
-        history = self._recent_exchanges.get(user_id)
-        ctx = "\n".join(f"{who}：{line}" for who, line in history) if history else ""
+        # 「在吗？」「人呢？」」—— 旧实现只把**上一句 AI 回复**塞进 prompt。
+        # 2026-09-21 再根治：上下文不再另起一份进程内 deque（重启即空、与主链
+        # 两套真源），直接读持久化 chat_history；同时**发前复查最后一条是谁说的**
+        # ——旧取消逻辑靠内存里的 pending 表，线程取走待发后用户接话就取消不掉。
+        history = self._session_messages(user_id, keep=_FOLLOWUP_CONTEXT_TURNS)
+        if history and history[-1].get("role") == "user":
+            with self._followup_lock:
+                self._pending_followups.pop(user_id, None)
+            logger.info("[wx][step=followup_skip_replied] user=%s", user_id)
+            return
+        last_reply = str(st.get("last_reply", "") or (history[-1].get("content") if history else ""))[:80]
+        # 往来历史经 history= 以**正确的 role** 传给模型（不是"我/对方"文本转写）——
+        # 自问自答的一条实证成因：模型分不清哪句是自己说的，转写标签帮不了它。
+        hist = [
+            {"role": "assistant" if m.get("role") == "assistant" else "user",
+             "content": str(m.get("content", ""))[:200]}
+            for m in history
+            if str(m.get("content", "")).strip()
+        ]
         prompt = (
-            "下面是你们刚才的真实聊天记录（按时间顺序）：\n"
-            f"{ctx}\n\n"
-            f"你最后说的是：「{last_reply}」\n"
-            "对方之后就没再回你了。现在你要像真人一样自己再补一句 —— "
-            "**必须接着上面的聊天内容**：可以问他/她刚提到的那件具体事，"
+            "上面是你们的真实对话记录，你说了最后那句"
+            f"「{last_reply}」之后对方就没再回你。\n"
+            "现在你自己再补一句 —— **必须接着上面的聊天内容**："
+            "可以问对方刚提到的那件具体事，"
             "也可以就那件事说一句自己的感受或想法。\n"
-            "严禁「在吗」「人呢」「怎么不理我」「你是不是睡着了」这类与内容无关的空话，"
-            "严禁重复你刚说过的话。口语化，15 字以内，只输出这一句话。"
+            "不要重复你刚说过的话。口语化，15 字以内，只输出这一句话。"
         )
-        text = self._generate_followup(prompt, last_reply=last_reply)
+        text = self._generate_followup(
+            prompt, last_reply=last_reply, session_key=user_id, history=hist,
+        )
         if not text:
             return
         # 2026-09-20 修复：user_id 是会话隔离键（`N:wxid`），而发送 API 与
@@ -1357,6 +1388,8 @@ class WeChatConnector:
         if not self.send_text(text, to_user=peer):
             logger.warning("[wx][step=followup_send_failed] user=%s step=%d", user_id, step)
             return
+        # 自问自答根治：这句追问必须进历史，否则下一轮她不记得自己问过什么
+        self._record_outbound(text, user_id)
 
         self._followup_daily[user_id] = self._followup_daily.get(user_id, 0) + 1
         logger.info(
@@ -1373,14 +1406,51 @@ class WeChatConnector:
                         "last_reply": text,
                     }
 
-    def _generate_followup(self, prompt: str, last_reply: str = "") -> str:
-        """用角色 LLM 生成一句追问；失败/不合规返回空串（宁可不发）。"""
+    def _followup_system_prompt(self, session_key: str) -> str:
+        """追问用的角色 system —— 与主链**同一身份源**。
+
+        2026-09-21 自问自答根治：旧实现 `_generate_followup` 是 `chat_sync(query=...)`
+        **裸调用**（无 system、无历史），模型以通用助手口吻产出，人称与上一句她的
+        回复对不上，用户侧体感就是「她在跟自己说话」。这里复用 persona 服务，
+        身份只来自该会话绑定的角色卡（内置「十四」与文件卡同构，无第二套路径）。
+        """
+        persona = (getattr(self.orchestrator, "components", None) or {}).get("persona")
+        builder = getattr(persona, "build_system_prompt", None)
+        if builder is None:
+            return ""
+        cid = ""
+        try:
+            get_char = getattr(self.user_manager, "get_user_character", None)
+            if get_char is not None and session_key:
+                cid = str(get_char(session_key) or "")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[wx] 追问角色解析失败 session=%s: %s", session_key, e)
+        try:
+            return str(builder(character_id=cid or None) or "")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[wx][step=followup_persona_failed] session=%s error=%s", session_key, e)
+            return ""
+
+    def _generate_followup(
+        self,
+        prompt: str,
+        last_reply: str = "",
+        session_key: str = "",
+        history: list[dict[str, str]] | None = None,
+    ) -> str:
+        """用角色口吻 + 真实往来历史生成一句追问；失败/不合规返回空串（宁可不发）。"""
         orch = self.orchestrator
         llm = (getattr(orch, "components", None) or {}).get("llm") if orch else None
         if llm is None or not hasattr(llm, "chat_sync"):
             return ""
         try:
-            raw = llm.chat_sync(query=prompt, max_tokens=60, temperature=0.95)
+            raw = llm.chat_sync(
+                query=prompt,
+                system_prompt=self._followup_system_prompt(session_key),
+                history=history or None,
+                max_tokens=60,
+                temperature=0.95,
+            )
         except Exception as e:  # noqa: BLE001
             logger.warning("[wx][step=followup_gen_failed] error=%s", e)
             return ""
@@ -1713,9 +1783,8 @@ class WeChatConnector:
                 "[wx][step=reply_sent] msg_id=%s session=%s parts=%d reply=%r",
                 msg_id, session_key, len(segments), reply[:80],
             )
-            # 记录本轮真实往来（追问要用它做上下文，不能凭空"人呢"）
-            self._remember_exchange(session_key, text, reply)
             # 回复成功 → 登记对话内追问（以最后一段作为"刚说的话"）
+            # 往来历史不落内存副本 —— 追问侧直接读持久化 chat_history（唯一真源）
             self._schedule_followup(session_key, segments[-1] if segments else reply)
         except Exception as e:  # noqa: BLE001
             logger.exception(

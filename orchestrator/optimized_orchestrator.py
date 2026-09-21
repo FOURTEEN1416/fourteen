@@ -23,17 +23,13 @@ from pathlib import Path
 from typing import Any
 
 from my_character.emotion_engine import EmotionEngine
-from my_character.persona_engine import (
-    is_external_character_id,
-    strip_default_identity,
-)
+from my_character.persona_engine import is_external_character_id
 from orchestrator import tool_gate
 from orchestrator._init_mixin import _InitPhasesMixin
 from orchestrator._stream_mixin import _StreamPipelineMixin
 from orchestrator.session_locks import SessionLockManager
 from orchestrator.voice_detector import detect_voice_request as _detect_voice_request
 from tools.base_tool import ToolResult
-from utils.character_helpers import normalize_character_card
 from utils.health_check import _is_healthy
 
 logger = logging.getLogger("orchestrator.optimized")
@@ -214,130 +210,18 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         from utils.async_utils import run_async
         return run_async(coro)
 
-    # ── 角色卡人设动态加载（v3.1 新增）──
-    # 缓存：character_id -> 人设片段字符串。避免每条消息都读文件。
-    # 注意：类级共享 + 多线程访问（uvicorn 多 worker / 线程池），必须加锁；
-    # 且必须有淘汰策略——旧实现 `if len(cache) < 100` 只在未满时写入，
-    # 一旦达到 100 条，后续所有角色都会**永久**回退到磁盘读取。
-    _character_persona_cache: dict[str, str] = {}
-    _character_persona_loaded: bool = False
-    _character_persona_cache_lock: threading.Lock = threading.Lock()
-    _CHARACTER_PERSONA_CACHE_MAX = 100
+    def invalidate_character_persona_cache(self, character_id: str | None = None) -> None:
+        """清除角色卡人设缓存（character_id 为 None 时清空全部）。
 
-    @classmethod
-    def invalidate_character_persona_cache(cls, character_id: str | None = None) -> None:
-        """清除角色卡人设缓存。
-
-        - character_id 为 None 时清空全部缓存
-        - 否则只清除指定角色，供角色更新/删除后即时生效
+        2026-09-21 唯一身份路径：这里**不再**自建第二套人设缓存。角色卡的读取与
+        mtime 感知缓存唯一 owner 是 `PersonaService._load_character_card`；本方法
+        只把 API 侧（角色增/删/改）的失效请求转发给它。
         """
-        with cls._character_persona_cache_lock:
-            if character_id is None:
-                cls._character_persona_cache.clear()
-            else:
-                cls._character_persona_cache.pop(character_id, None)
-
-    @classmethod
-    def _load_character_persona_segment(cls, character_id: str) -> str:
-        """根据 character_id 加载角色卡人设，返回可追加到 system prompt 的片段。
-
-        - character_id 为空 / "default" / "demo" 时返回空串（保持基线人设）
-        - 先按 {character_id}.json 找文件，找不到再遍历 config/characters/ 匹配 JSON 内部 id
-        - 使用 normalize_character_card 展平 SillyTavern 等嵌套格式，确保 name/description/
-          personality/speaking_style/scenario 等字段被正确提取
-        - 结果缓存，避免重复 IO
-        """
-        if not is_external_character_id(character_id):
-            return ""
-
-        # 命中缓存（加锁：类级字典在多线程下会被并发读写）
-        with cls._character_persona_cache_lock:
-            if character_id in cls._character_persona_cache:
-                return cls._character_persona_cache[character_id]
-
-        import json as _json
-        chars_dir = project_root / "config" / "characters"
-        raw_card: dict | None = None
-
-        # 1. 直接按文件名查
-        direct_path = chars_dir / f"{character_id}.json"
-        if direct_path.exists():
-            try:
-                with open(direct_path, encoding="utf-8") as fh:
-                    raw_card = _json.load(fh)
-            except (OSError, _json.JSONDecodeError):
-                raw_card = None
-
-        # 2. 遍历匹配 JSON 内部 id 字段
-        if raw_card is None and chars_dir.exists():
-            try:
-                for f in chars_dir.glob("*.json"):
-                    try:
-                        with open(f, encoding="utf-8") as fh:
-                            data = _json.load(fh)
-                        if data.get("id") == character_id:
-                            raw_card = data
-                            break
-                    except (OSError, _json.JSONDecodeError):
-                        continue
-            except OSError:
-                pass
-
-        if not raw_card:
-            cls._store_persona_segment(character_id, "")
-            return ""
-
-        # 展平嵌套角色卡格式，提取真实 name/description/personality 等
-        card = normalize_character_card(raw_card)
-
-        # 构造人设片段（2026-09-20 行业对齐精简）：
-        # 角色的完整设定（description / personality_text / creator_notes / 核心锚点 /
-        # 数值维度 / 知识库 / 对话示例）已由 shisi PersonaService → prompt_builder
-        # 以全量字段注入 system prompt。旧实现在这里**再次**注入 500 字截断的简介、
-        # 500 字截断的备注、60 字截断的锚点与数值维度 —— 属重复内容（SillyTavern
-        # 惯例：角色定义只注入一次），且截断版本可能与上方全文矛盾。
-        # 此片段仅保留「身份绑定」职责 + base prompt 覆盖不到的字段
-        # （口头禅 / 开场白）；scenario 守卫已迁移至
-        # CharacterAggregate.build_system_prompt（含导入卡兼容）。
-        lines: list[str] = ["=== 角色卡人设 ==="]
-        name = card.get("name", "")
-        if name:
-            lines.append(f"角色名：{name}")
-
-        catchphrases = card.get("catchphrases", [])
-        if catchphrases:
-            lines.append(f"口头禅：{' / '.join(str(c) for c in catchphrases[:8])}")
-
-        first_mes = card.get("first_mes", "")
-        if first_mes:
-            lines.append(f"开场白：{str(first_mes)[:300]}")
-
-        lines.append(
-            "（该角色的身份、性格、经历、说话风格与扮演规则已在本提示词上方逐节完整注入，"
-            "一律以上方内容为准；如与本段冲突，以上方为准。）"
+        invalidate = getattr(
+            self.components.get("persona"), "invalidate_character_cache", None
         )
-
-        segment = "\n".join(lines)
-        cls._store_persona_segment(character_id, segment)
-        return segment
-
-    @classmethod
-    def _store_persona_segment(cls, character_id: str, segment: str) -> None:
-        """写入角色人设缓存（加锁 + FIFO 淘汰）。
-
-        旧实现为 `if len(cache) < 100: cache[id] = segment`：达到上限后
-        **不再写入任何新角色**，且永不淘汰，导致超出部分的角色每次消息都重新
-        读盘解析。现改为满员时先淘汰最早插入的一条。
-        """
-        with cls._character_persona_cache_lock:
-            if (
-                character_id not in cls._character_persona_cache
-                and len(cls._character_persona_cache) >= cls._CHARACTER_PERSONA_CACHE_MAX
-            ):
-                cls._character_persona_cache.pop(
-                    next(iter(cls._character_persona_cache)), None
-                )
-            cls._character_persona_cache[character_id] = segment
+        if callable(invalidate):
+            invalidate(character_id)
 
     def _get_affinity_level(self, emotion_state: Any) -> int:
         """从 emotion_state 中提取整数好感度等级（0-8）。"""
@@ -1017,20 +901,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             user_message=user_msg_clean,
         )
 
-        # 角色卡人设动态注入（v3.1）；身份唯一（包 Q · A1）：外部 character_id
-        if is_external_character_id(character_id):
-            char_segment = self._load_character_persona_segment(character_id)
-            if char_segment:
-                system_prompt = (
-                    f"{system_prompt}\n\n"
-                    f"# 当前必须扮演的角色（最高优先级）\n"
-                    f"{char_segment}\n\n"
-                    f"你当前正在扮演以上角色。"
-                    f"回复时必须使用该角色的名字、身份、性格、说话风格和口头禅；"
-                    f"不要以'十四'或通用 AI 身份自居。"
-                )
-            # 防御：外部角色路径下系统 prompt 不得残留默认人格身份断言
-            system_prompt = strip_default_identity(system_prompt)
+        # 身份唯一 owner = PersonaService 解析到的那张卡（内置卡 / 文件卡），
+        # 已在 build_system_prompt 内一次性注入。2026-09-21 拆除此前的第二身份段
+        # （「当前必须扮演的角色（最高优先级）」+ strip_default_identity）：
+        # 角色卡若与默认人格同现，才需要"以谁为准"的补丁；单一来源后不需要。
 
         if persona_enhancement:
             system_prompt = f"{system_prompt}\n\n{persona_enhancement}"
@@ -1098,8 +972,17 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         # 的直觉相差一个数量级。没有数字就会做出错误的架构决策。
         # 见 docs/adr/ADR-0015。含各动态块的实际占比。
         try:
+            # `character` = 常驻角色段（prompt_builder 产物）长度：即 system 中第一段
+            # 动态注入块之前的部分。旧实现统计的是**已删除**的第二身份段
+            # （`locals().get("char_segment")`），默认角色恒为 0，曾把人引向
+            # 「人设没注入」的错判（见 LOG 2026-09-21）。
+            _cut = len(system_prompt)
+            for _marker in ("# 记忆上下文", "# 对话角色说明", "# 世界与时间", "# 角色知识库"):
+                _i = system_prompt.find(_marker)
+                if 0 <= _i < _cut:
+                    _cut = _i
             _parts = {
-                "character": len(locals().get("char_segment") or ""),
+                "character": _cut,
                 "memory": len(str(memory_context or "")),
                 "rag": len(str(rag_context or "")),
                 "summary": len(str(chat_summary or "")),

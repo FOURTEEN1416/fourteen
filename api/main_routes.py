@@ -61,7 +61,7 @@ class ProactiveConfigRequest(BaseModel):
     # ── 对话内追问（web 控制端可调，2026-09-19）──
     follow_up_enabled: bool | None = Field(default=None, description="回复后没等到接话是否自动再补一句")
     follow_up_delay1_seconds: int | None = Field(default=None, ge=5, le=3600, description="第一次追问延迟（秒）")
-    follow_up_delay2_seconds: int | None = Field(default=None, ge=5, le=7200, description="第二次追问延迟（秒）")
+    follow_up_delay2_seconds: int | None = Field(default=None, ge=60, le=7200, description="第二次追问延迟（秒），下限 60 防追问粘连成自问自答")
     follow_up_daily_max: int | None = Field(default=None, ge=0, le=200, description="单用户每日追问上限")
     # ── 回复模式（web 控制端可切换，2026-09-19）──
     reply_mode: str | None = Field(

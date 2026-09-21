@@ -203,6 +203,19 @@ class ShisiMemoryService:
             channel=channel,
         )
 
+    def record_outbound_message(
+        self,
+        message: str,
+        session_id: str = "",
+        emotion_tag: str = "",
+    ) -> bool:
+        """角色主动发出的消息（追问/主动消息/提醒）回写历史——唯一 owner。"""
+        return self._pipeline.record_outbound_message(
+            message=message,
+            session_id=session_id,
+            emotion_tag=emotion_tag,
+        )
+
     def retrieve_context(
         self,
         query: str,

@@ -411,7 +411,7 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 | 供应商 | 注册方式 | 模型 | 认证方式 |
 |--------|---------|------|---------|
 | **agnes（首选）** | `get_llm(provider="agnes")` | agnes-3.0-flash / 2.5-flash / 2.5-pro | Bearer Token |
-| 智谱AI (zhipu) | `get_llm(provider="zhipu")` | glm-4-flash | Bearer Token |
+| 智谱AI (zhipu) | `get_llm(provider="zhipu")` | glm-4.5-flash（`extra_payload.thinking=disabled`） | Bearer Token |
 | 讯飞星火 (xunfei) | `get_llm(provider="xunfei")` | spark-lite | Bearer Token |
 | 百度千帆 (baidu) | `get_llm(provider="baidu")` | ernie-speed-128k | OAuth (API Key + Secret) |
 | DeepSeek | `get_llm(provider="deepseek")` | deepseek-chat / deepseek-reasoner | LLMGatewayV2 |
@@ -666,7 +666,7 @@ tools/
 | 数据库 | SQLAlchemy 2.0 + aiosqlite + ChromaDB |
 | 向量 | sentence-transformers + rank-bm25 |
 | LLM | httpx + tenacity（自动 fallback） |
-| LLM 供应商 | **Agnes (agnes-3.0-flash，首选)**, 智谱AI (glm-4-flash), 讯飞星火 (spark-lite), 百度千帆 (ernie-speed-128k)——生产主链 4 家（system.yaml，经编排器传入）；DeepSeek (deepseek-chat) 注册可用，仅在 llm_providers.json 自带链的第 5 位 |
+| LLM 供应商 | **Agnes (agnes-3.0-flash，链首首选)**, 智谱AI (glm-4.5-flash，需关思考；免费档 `1113`=无资源包 / `1305`=免费池拥挤，故只作降级位), 讯飞星火 (spark-lite), 百度千帆 (ernie-speed-128k)——生产主链 4 家（system.yaml，经编排器传入）；DeepSeek (deepseek-chat) 注册可用，仅在 llm_providers.json 自带链的第 5 位 |
 | 语音 | MiMo Cloud TTS（唯一引擎）+ Windows SAPI 本地兜底 + FFmpeg（可选，转码） |
 | 缓存 | Redis（可选） |
 | 可观测 | prometheus-client + OpenTelemetry + Sentry SDK |

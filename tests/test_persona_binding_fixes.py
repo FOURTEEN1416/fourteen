@@ -52,41 +52,37 @@ def test_optional_user_id_none_with_garbage_token():
 #  2. 人设片段精简：不重复注入角色定义（2026-09-20 行业对齐）
 # ═══════════════════════════════════════════════════════════════
 
-def test_long_anchor_truncated_not_dropped(tmp_path, monkeypatch):
+def test_anchor_injected_once_no_truncated_duplicate(monkeypatch):
     """人设片段只做身份绑定：锚点等完整内容由 prompt_builder 全量注入一次，
     片段内不得出现截断重复版（旧行为：>20 字锚点截断到 60 字重复注入，
-    与上方全文并存且可能矛盾——SillyTavern 惯例是角色定义只注入一次）。"""
-    from orchestrator.optimized_orchestrator import OptimizedOrchestrator
+    与上方全文并存且可能矛盾——SillyTavern 惯例是角色定义只注入一次）。
+
+    2026-09-21 唯一身份路径后，orchestrator 的第二身份段已删除；本用例改为钉
+    「聚合根只注入一次全文、且无第二处截断副本」。
+    """
+    from shisi.application.persona_service import PersonaService
 
     long_anchor = "温柔安静，表面看起来有点冷淡其实内心很细腻。不太善于社交，在熟人面前才会放松。很细心，会注意到别人忽略的细节。"
-    huge_anchor = long_anchor + "感性但克制，不会轻易表露情绪。喜欢安静的事物：老旧电影、手写书信、下雨的声音。恋旧，喜欢保存有纪念意义的小物件。"
-    monkeypatch.setattr(
-        "orchestrator.optimized_orchestrator.normalize_character_card",
-        lambda raw: {
-            "name": "测试角色",
-            "description": "desc",
-            "core_anchors": [long_anchor, huge_anchor, "手写书信"],
-        },
-    )
-    chars_dir = tmp_path / "config" / "characters"
-    chars_dir.mkdir(parents=True)
-    (chars_dir / "testcid.json").write_text('{"id": "testcid"}', encoding="utf-8")
-    monkeypatch.setattr(
-        "orchestrator.optimized_orchestrator.project_root", tmp_path
-    )
-    OptimizedOrchestrator._character_persona_cache.clear()
+    huge_anchor = "感性但克制，不会轻易表露情绪。喜欢安静的事物：老旧电影、手写书信、下雨的声音。恋旧，喜欢保存有纪念意义的小物件，抽屉里放着十几张过期的电影票根。"
+    card = {
+        "name": "测试角色",
+        "description": "desc",
+        "core_anchors": [long_anchor, huge_anchor],
+    }
 
-    segment = OptimizedOrchestrator._load_character_persona_segment("testcid")
-    assert "=== 角色卡人设 ===" in segment
-    assert "测试角色" in segment
-    # 身份绑定声明必须指向完整注入处
-    assert "已在本提示词上方逐节完整注入" in segment
-    # 锚点（任何长度）不得在片段内重复——上方 persona 段已有全文
-    assert long_anchor not in segment
-    assert huge_anchor[:60] not in segment
-    assert "手写书信" not in segment
-    assert "核心锚点" not in segment
-    OptimizedOrchestrator._character_persona_cache.clear()
+    ps = PersonaService(config_loader=None, llm_gateway=None)
+    monkeypatch.setattr(ps, "_resolve_character_card", lambda cid: card)
+    prompt = ps.build_system_prompt(character_id="testcid", user_message="你好")
+
+    # 全文锚点各出现一次（唯一注入处 = persona 段）
+    assert prompt.count(long_anchor) == 1
+    assert prompt.count(huge_anchor) == 1
+    # 不得出现旧的 60 字截断副本（前缀只随全文出现一次）
+    assert prompt.count(huge_anchor[:60]) == prompt.count(huge_anchor) == 1
+    # 唯一注入路径：不再有第二身份段
+    assert "=== 角色卡人设 ===" not in prompt
+    assert "# 当前必须扮演的角色" not in prompt
+    assert "你是测试角色" in prompt
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -106,11 +102,20 @@ def test_persona_profile_emoji_semantic_text():
     assert "每条最多两个" in seg_high
 
 
-def test_persona_engine_default_desc_emoji_constraint():
-    from my_character.persona_engine import DEFAULT_PERSONA_DESC
+def test_builtin_persona_description_emoji_constraint():
+    """emoji 收口的现行真源是 `config/persona.yaml` 的 description。
 
-    assert "偶尔用～表情" not in DEFAULT_PERSONA_DESC
-    assert "最多一个" in DEFAULT_PERSONA_DESC
+    （旧断言对象 `DEFAULT_PERSONA_DESC` 经取证运行时从不被注入，已随唯一身份
+    路径一起删除；此处改钉**实际进 prompt 的那段**。）
+    """
+    from shisi.application.persona_service import PersonaService
+
+    ps = PersonaService(config_loader=None, llm_gateway=None)
+    desc = ps.engine.get_description()
+    assert desc.strip(), "persona.yaml 必须提供内置人格描述"
+    assert "偶尔用～表情" not in desc
+    assert "最多一个" in desc
+    assert "最多一个" in ps.build_system_prompt(character_id="default", user_message="在吗")
 
 
 def test_style_layer_emoji_default_tier():

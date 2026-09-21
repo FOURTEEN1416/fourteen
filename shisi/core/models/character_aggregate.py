@@ -34,6 +34,13 @@ class CharacterAggregate(BaseModel):
     scenario: str = ""
     creator_notes: str = ""
 
+    # 口头禅 / 开场白（2026-09-21 唯一身份路径：从 orchestrator 的角色卡片段收编）
+    # 这两项此前只有 `OptimizedOrchestrator._load_character_persona_segment` 注入，
+    # 而该片段与上方角色设定属于**同一个身份 owner**（两段并存 → 需要"以上方为准"
+    # 的补丁消歧）。收敛到聚合根后，卡片字段进 prompt 只有一条路径。
+    catchphrases: list[str] = Field(default_factory=list)
+    first_mes: str = ""
+
     persona: PersonaProfile = Field(default_factory=PersonaProfile)
     emotional_state: EmotionalState = Field(default_factory=EmotionalState)
 
@@ -163,6 +170,20 @@ class CharacterAggregate(BaseModel):
             "",
             self.persona.to_prompt_segment(),
         ])
+
+        if self.catchphrases:
+            parts.extend([
+                "",
+                "# 口头禅",
+                " / ".join(str(c) for c in self.catchphrases[:8]),
+            ])
+
+        if self.first_mes:
+            parts.extend([
+                "",
+                "# 开场白（我们第一次说话时我说的，只作语气参考，不要每轮重复）",
+                str(self.first_mes)[:300],
+            ])
 
         if knowledge_context:
             parts.extend(["", "# 角色知识库", knowledge_context])
