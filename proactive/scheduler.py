@@ -648,8 +648,23 @@ class ProactiveScheduler:
 
             gf = getattr(_deps, "gf", None)
             if gf is not None and hasattr(gf, "get_all_users"):
+                # P0-4-3：禁止裸 user_id 当会话键——裸键引擎无对话数据、紧迫度恒顶格，
+                # 投递解析不出目标会演变成跨用户广播。只为有绑定 peer 的用户生成完整键。
+                bound: list[str] = []
+                if hasattr(gf, "get_bound_wxids"):
+                    try:
+                        bound = list(gf.get_bound_wxids() or [])
+                    except Exception:  # noqa: BLE001
+                        bound = []
                 for u in gf.get_all_users() or []:
-                    _add(str(u.get("user_id") or ""))
+                    uid = str(u.get("user_id") or "")
+                    if not uid:
+                        continue
+                    for key in bound:
+                        if ":" in key:
+                            left, right = key.split(":", 1)
+                            if left == uid and right:
+                                _add(f"{uid}:{right}")
         except Exception:  # noqa: BLE001
             pass
 

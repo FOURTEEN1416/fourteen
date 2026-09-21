@@ -891,7 +891,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
         budgeted = apply_budget(
             rag_context=rag_context,
-            memory_context=str(memory_context or ""),
+            memory_context=memory_context,  # P0-1：dict 保型下传，禁止 str() 打碎契约
             chat_summary=str(chat_summary or ""),
             chat_history=chat_history,
             budget=DEFAULT_BUDGET,
@@ -932,12 +932,16 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 logger.debug("跨会话尾巴注入失败（忽略）: %s", e)
 
         if session_tail:
-            # 追加到 memory 段之后（系统提示内独立 untrusted 块）
-            memory_context = (
-                f"{memory_context}\n\n{session_tail}".strip()
-                if memory_context
-                else session_tail
-            )
+            # 尾巴入记忆结构体独立键（persona_service 渲染为 untrusted 段；
+            # dict 契约下不得再做 f-string 拼接）
+            if isinstance(memory_context, dict):
+                memory_context["session_tail"] = session_tail
+            else:
+                memory_context = (
+                    f"{memory_context}\n\n{session_tail}".strip()
+                    if memory_context
+                    else session_tail
+                )
 
         # 组装 system prompt
         # 注入顺序对齐 research：角色设定（prompt_builder）→ 世界/知识/记忆/状态

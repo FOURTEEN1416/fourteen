@@ -363,9 +363,9 @@ class MemoryPipeline:
             if store_assistant:
                 self.sm.add_chat("assistant", reply, emotion_tag=emotion_tag,
                                  session_id=effective_session)
-            self.working.add("user", user_msg, emotion_tag, 0.5)
+            self.working.add("user", user_msg, emotion_tag, 0.5, session_id=effective_session)
             if store_assistant:
-                self.working.add("assistant", reply, emotion_tag, 0.5)
+                self.working.add("assistant", reply, emotion_tag, 0.5, session_id=effective_session)
             return True
         except Exception as e:  # noqa: BLE001
             logger.warning("write_chat_history_sync failed: %s", e)
@@ -422,10 +422,10 @@ class MemoryPipeline:
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to store chat: %s", e)
 
-            # 3. 存储到工作记忆
-            self.working.add("user", user_msg, emotion_tag, importance)
+            # 3. 存储到工作记忆（P0-4-4：按会话分桶，禁止全员混写一桶）
+            self.working.add("user", user_msg, emotion_tag, importance, session_id=effective_session)
             if store_assistant:
-                self.working.add("assistant", reply, emotion_tag, importance)
+                self.working.add("assistant", reply, emotion_tag, importance, session_id=effective_session)
         else:
             result["stored_chat"] = True
 
@@ -484,9 +484,11 @@ class MemoryPipeline:
             except Exception as e:  # noqa: BLE001
                 logger.warning("Emotion log failed: %s", e)
 
-        # 8. 归档检查
-        if self.working.should_archive(self._config.episodic_archive_trigger):
-            self._archive_working_memory()
+        # 8. 归档检查（只归档本会话桶）
+        if self.working.should_archive(
+            self._config.episodic_archive_trigger, session_id=effective_session
+        ):
+            self._archive_working_memory(session_id=effective_session)
             result["archived"] = True
 
         return result
@@ -512,12 +514,11 @@ class MemoryPipeline:
             "reflections": [],
         }
 
-        # 1. 工作记忆：共享 deque 仅当 session 匹配时可用，否则改读 DB 会话历史
+        # 1. 工作记忆：分桶后直接按会话取；桶空回落 DB 会话历史
         try:
-            if session_id and getattr(self.working, "session_id", "") == session_id:
-                context["working"] = self.working.get_recent(n=10)
-            elif session_id:
-                context["working"] = self._load_session_history(session_id, limit=10)
+            if session_id:
+                bucket = self.working.get_recent(n=10, session_id=session_id)
+                context["working"] = bucket or self._load_session_history(session_id, limit=10)
             else:
                 context["working"] = []
         except Exception as e:  # noqa: BLE001
@@ -627,10 +628,9 @@ class MemoryPipeline:
 
         async def _get_working():
             try:
-                if session_id and getattr(self.working, "session_id", "") == session_id:
-                    return self.working.get_recent(n=10)
                 if session_id:
-                    return self._load_session_history(session_id, limit=10)
+                    bucket = self.working.get_recent(n=10, session_id=session_id)
+                    return bucket or self._load_session_history(session_id, limit=10)
                 return []
             except Exception as e:  # noqa: BLE001
                 logger.debug("Failed to get working memory: %s", e)
@@ -1124,9 +1124,10 @@ class MemoryPipeline:
 
         return count
 
-    def _archive_working_memory(self) -> None:
-        """归档工作记忆到情景记忆"""
-        messages = self.working.get_for_archive()
+    def _archive_working_memory(self, session_id: str = "") -> None:
+        """归档工作记忆到情景记忆（P0-4-4：只取本会话桶，不再全员混档）"""
+        sid = str(session_id or "") or self.working.session_id
+        messages = self.working.get_for_archive(session_id=sid)
         if not messages:
             return
 
@@ -1155,10 +1156,10 @@ class MemoryPipeline:
                 messages,
                 summary=summary,
                 importance=avg_importance,
-                session_id=self.working.session_id,
+                session_id=sid,
             )
             # 仅在归档成功后清空工作记忆（防止数据丢失）
-            self.working.clear()
+            self.working.clear(session_id=sid)
             logger.info("Working memory archived: %d messages", len(messages))
         except Exception as e:  # noqa: BLE001
             logger.error("归档工作记忆失败，保留数据: %s", e)

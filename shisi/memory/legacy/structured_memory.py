@@ -705,6 +705,16 @@ class StructuredMemory:
             if row is None:
                 return False
             data = dict(row)
+            # P0-4 写侧越权封堵：调用方声明了归属（user_key 非空）而该行不属于
+            # 该归属 → 拒删（模型幻觉/恶意构造他人 fact_id 的防线）。
+            if user_key and str(data.get("user_key") or "") != str(user_key):
+                logger.warning(
+                    "delete_fact 拒绝跨用户删除: id=%s 归属=%r 调用键=%r",
+                    fact_id,
+                    data.get("user_key"),
+                    user_key,
+                )
+                return False
             if recycle:
                 import json
                 from datetime import datetime as _dt

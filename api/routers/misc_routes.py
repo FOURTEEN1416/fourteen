@@ -32,6 +32,26 @@ logger = logging.getLogger("api.routers.misc_routes")
 router = APIRouter(tags=["misc"])
 
 
+def _memory_scope_prefix(request: Request) -> str | None:
+    """P0-4：普通 JWT 用户的数据面归属前缀（user_key 以 "user_id:" 开头）。
+
+    返回 None = 不限制：管理员 JWT，或机器侧纯 API Key（无 Bearer）。
+    """
+    auth = str(request.headers.get("Authorization") or "")
+    if not auth.startswith("Bearer "):
+        return None
+    try:
+        from api.auth_jwt import verify_token
+
+        payload = verify_token(auth[len("Bearer ") :], "access")
+        if str(payload.get("role") or "") == "admin":
+            return None
+        uid = int(payload.get("sub") or 0)
+    except Exception:  # noqa: BLE001
+        return None
+    return f"{uid}:" if uid else "::__denied__"
+
+
 # ═══════════════════════════════════════════════════════
 # Stats / Dashboard
 # 健康检查路由 (/api/health, /api/ready) 已迁移至 api/health_routes.py
@@ -214,6 +234,7 @@ async def update_important_dates(
 
 @router.get("/api/memory/diary")
 async def memory_diary(
+    request: Request,
     limit: int = Query(default=10, le=60),
     _auth: bool = Security(verify_api_key_dep),
 ):
@@ -223,9 +244,14 @@ async def memory_diary(
     ds = getattr(mem, "ds", None)
     if ds is None:
         return {"entries": []}
+    prefix = _memory_scope_prefix(request)
     try:
         summaries = ds.get_all_summaries() or {}
-        entries = [{"date": d, "summary": s} for d, s in sorted(summaries.items(), reverse=True)[:limit]]
+        items = sorted(summaries.items(), reverse=True)
+        if prefix is not None:
+            # 日记键形如 user_key|date，user_key 形如 "4:peer" —— 按归属前缀过滤
+            items = [kv for kv in items if str(kv[0]).startswith(prefix)]
+        entries = [{"date": d, "summary": s} for d, s in items[:limit]]
         return {"entries": entries}
     except Exception:
         logger.warning("读取日记失败", exc_info=True)
@@ -234,13 +260,19 @@ async def memory_diary(
 
 @router.get("/api/memory/facts")
 async def memory_facts(
+    request: Request,
     category: str | None = None,
-    limit: int = Query(default=50),
+    limit: int = Query(default=50, le=500),
     _auth: bool = Security(verify_api_key_dep),
 ):
     orch = deps.orch
     if orch and orch._memory:
-        return {"facts": orch._memory.semantic.get_facts(category, limit=limit)}
+        prefix = _memory_scope_prefix(request)
+        if prefix is None:
+            return {"facts": orch._memory.semantic.get_facts(category, limit=limit)}
+        rows = orch._memory.semantic.get_facts(category, limit=5000) or []
+        mine = [r for r in rows if str(r.get("user_key") or "").startswith(prefix)]
+        return {"facts": mine[:limit]}
     return {"facts": []}
 
 

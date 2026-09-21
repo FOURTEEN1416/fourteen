@@ -170,7 +170,7 @@ class TestSyncHistoryBa:
                 self.items = []
             def add(self, *a, **k):
                 self.items.append(a)
-            def should_archive(self, n):
+            def should_archive(self, n=20, session_id=""):
                 return False
         class _VM:
             def store_chat_sync(self, *a, **k):

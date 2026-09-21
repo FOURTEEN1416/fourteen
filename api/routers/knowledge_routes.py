@@ -199,11 +199,16 @@ async def upload_knowledge_document(
         ))
 
     retriever = service._retrievers.get(character_id)
-    if retriever and hasattr(retriever, 'index'):
-        retriever.index(knowledge_chunks)
+    if retriever is not None and hasattr(retriever, "add_chunks"):
+        # P0-3：index() 是替换语义——旧实现在此调用会把该角色既有索引块
+        # （锚点/示例对话）整体覆盖销毁并落盘。追加必须走 add_chunks。
+        retriever.add_chunks(knowledge_chunks)
+    elif retriever is not None and hasattr(retriever, "index"):
+        retriever.index(list(retriever._chunks) + knowledge_chunks)  # type: ignore[attr-defined]
 
-    if character_id in service._chunk_counts:
-        service._chunk_counts[character_id] += len(knowledge_chunks)
+    # 计数以检索器实际块数为准，不再累加假数字
+    if retriever is not None:
+        service._chunk_counts[character_id] = len(retriever._chunks)  # type: ignore[attr-defined]
     else:
         service._chunk_counts[character_id] = len(knowledge_chunks)
 

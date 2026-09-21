@@ -106,13 +106,9 @@ class PersonaService:
         mem_parts: list[str] = ["# 记忆上下文（供参考，**不是**本轮对话记录）"]
 
         # 用户画像槽（A3 + AX P1）：读 EventLedger 投影；禁止编造画像外信息
-        profile_key = str(
-            mem_ctx.get("user_key")
-            or (memory_context if isinstance(memory_context, str) else "")
-            or ""
-        )
-        if not profile_key and isinstance(mem_ctx, dict):
-            profile_key = str(mem_ctx.get("_user_key") or "")
+        # P0-1：画像键只取结构化 user_key/_user_key——旧实现把整段 memory 字符串
+        # 当键必然 miss，属"repr 兜底"谎言。
+        profile_key = str(mem_ctx.get("user_key") or mem_ctx.get("_user_key") or "")
         try:
             from shisi.agent_plane.runtime import get_profile_prompt_block
 
@@ -129,8 +125,8 @@ class PersonaService:
                     block = store.to_prompt_block(profile_key)
                     if block:
                         mem_parts.append("\n" + block)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as e:  # noqa: BLE001
+                logger.warning("画像槽注入失败（agent-plane 与 legacy 双路均断）: %s", e)
 
         if chat_summary:
             mem_parts.append("\n## 早期对话摘要（历史压缩，非用户新消息）")
@@ -150,6 +146,10 @@ class PersonaService:
             mem_parts.append("\n## 相关回忆（摘要，非对话原文）")
             for ep in episodic:
                 mem_parts.append(f"- {ep}")
+        # B-d 跨会话尾巴：orchestrator 已包 untrusted 信封，原样透传
+        tail = str(mem_ctx.get("session_tail") or "").strip()
+        if tail:
+            mem_parts.append("\n" + tail)
         memory_block = "\n".join(mem_parts) if len(mem_parts) > 1 else ""
         if chat_summary and not memory_block:
             memory_block = (

@@ -144,20 +144,53 @@ def clip_history(history: list | str | None, budget: ContextBudget | None = None
     return clip_text(str(history), budget.history_msgs_max * 200)
 
 
+def budget_memory_context(memory: Any, know: str, budget: ContextBudget) -> Any:
+    """记忆段预算裁剪。dict（P0-1 契约：facts/episodic/reflections 结构体）
+    保持 dict 原样返回、逐条目裁剪限量；str 走行级去重+截断。"""
+    if isinstance(memory, dict):
+        out = dict(memory)
+        for key in ("facts", "user_facts", "episodic", "reflections"):
+            val = out.get(key)
+            if isinstance(val, list):
+                kept = [
+                    str(x)
+                    for x in val
+                    if x and not memory_overlaps_knowledge(str(x), know)
+                ]
+                out[key] = kept[: budget.memory_items_max]
+            elif isinstance(val, str) and val:
+                out[key] = dedup_memory_against_knowledge(val, know, budget)
+        return out
+    return dedup_memory_against_knowledge(str(memory or ""), know, budget)
+
+
+def _memory_display_len(memory: Any) -> int:
+    if isinstance(memory, dict):
+        total = 0
+        for val in memory.values():
+            if isinstance(val, str):
+                total += len(val)
+            elif isinstance(val, list):
+                total += sum(len(str(x)) for x in val)
+        return total
+    return len(str(memory or ""))
+
+
 def apply_budget(
     *,
     rag_context: str = "",
-    memory_context: str = "",
+    memory_context: Any = "",
     chat_summary: str = "",
     chat_history: Any = None,
     tool_results: str = "",
     session_tail: str = "",
     budget: ContextBudget | None = None,
 ) -> dict[str, Any]:
-    """返回裁剪后的各段与长度埋点。"""
+    """返回裁剪后的各段与长度埋点。memory_context 允许 dict（结构体记忆，
+    dict 原样保型返回，供 persona_service 按键渲染；禁止 str() 打碎契约）。"""
     budget = budget or DEFAULT_BUDGET
     know = clip_text(rag_context or "", budget.knowledge_chars_max)
-    mem = dedup_memory_against_knowledge(memory_context or "", know, budget)
+    mem = budget_memory_context(memory_context, know, budget)
     summary = clip_text(chat_summary or "", budget.chat_summary_chars_max)
     history = clip_history(chat_history, budget)
     tools = clip_text(tool_results or "", budget.tool_chars_max)
@@ -173,7 +206,7 @@ def apply_budget(
         "session_tail": tail,
         "lengths": {
             "rag": len(know),
-            "memory": len(mem),
+            "memory": _memory_display_len(mem),
             "chat_summary": len(summary),
             "history": hist_len,
             "tool": len(tools),

@@ -266,5 +266,7 @@ class UserProfileStore:
 
 def default_store(db_path: Path | str | None = None) -> UserProfileStore:
     if db_path is None:
-        db_path = Path(__file__).resolve().parent.parent.parent / "data" / "sqlite.db"
+        from utils.project_paths import PROJECT_ROOT
+
+        db_path = PROJECT_ROOT / "data" / "sqlite.db"
     return UserProfileStore(db_path)

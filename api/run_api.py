@@ -223,12 +223,18 @@ if _scheduler is not None:
                 return peers
 
             targets: list[tuple[int, str]] = []
-            if session_key and ":" in str(session_key):
-                owner_raw, peer = str(session_key).split(":", 1)
+            sk = str(session_key or "")
+            if sk and ":" in sk:
+                owner_raw, peer = sk.split(":", 1)
                 if owner_raw.isdigit() and peer:
                     targets.append((int(owner_raw), peer))
+            if sk and not targets:
+                # P0-4-3：给了 session_key 却解析不出 owner:peer → 拒发。
+                # 旧实现让坏键掉进"全员兜底"分支，A 的私信变广播。
+                raise RuntimeError(f"微信投递拒绝：session_key 无法解析为 owner:peer（{sk}）")
             if not targets:
-                # 兼容旧广播路径：仅投递各 owner 自己绑定的 peer（仍不跨 owner）
+                # 兼容旧广播路径（仅 session_key 为空的系统级消息）：
+                # 仍只投递各 owner 自己绑定的 peer，不跨 owner
                 for owner_id, _slot, conn in registry.all():
                     if not getattr(conn, "token", ""):
                         continue

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -121,15 +122,20 @@ async def rag_upload_document(
         text = content.decode("gbk", errors="replace")
     chunk_size = 2000
     chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)] if len(text) > chunk_size else [text]
-    for idx, chunk in enumerate(chunks):
-        rag._sm.add_fact({
-            "fact": chunk,
-            "category": "upload",
-            "source": file.filename,
-            "confidence": 1.0,
-            "chunk_index": idx,
-            "total_chunks": len(chunks),
-        })
+
+    def _store_chunks() -> None:
+        # P0-4：add_fact 第一参是 fact 字符串——旧实现把整个 dict 位置传入，
+        # str(dict) 的 repr 垃圾落进 user_facts 并被检索注入他人 prompt。
+        for idx, chunk in enumerate(chunks):
+            rag._sm.add_fact(
+                chunk,
+                category="upload",
+                confidence=1.0,
+                source=f"{file.filename}#{idx}",
+            )
+
+    # P1-10：同步 SQLite 写挪出事件循环
+    await asyncio.to_thread(_store_chunks)
     return {"status": "indexed", "filename": file.filename, "size": len(content), "chunks": len(chunks)}
 
 
