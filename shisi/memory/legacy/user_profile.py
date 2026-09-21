@@ -94,23 +94,28 @@ class UserProfileStore:
         if not uk:
             return {}
         cur = self.get(uk)
+
+        def _pick(key: str) -> str:
+            if key in fields:
+                return str(fields.get(key) or "")
+            return str(cur.get(key) or "")
+
         merged = {
-            "nickname": str(fields.get("nickname") or cur.get("nickname") or ""),
-            "birthday": str(fields.get("birthday") or cur.get("birthday") or ""),
-            "occupation": str(fields.get("occupation") or cur.get("occupation") or ""),
-            "location": str(fields.get("location") or cur.get("location") or ""),
-            "preferences": fields.get("preferences")
-            if fields.get("preferences") is not None
-            else cur.get("preferences") or [],
-            "commitments": fields.get("commitments")
-            if fields.get("commitments") is not None
-            else cur.get("commitments") or [],
-            "notes": str(fields.get("notes") or cur.get("notes") or ""),
+            "nickname": _pick("nickname"),
+            "birthday": _pick("birthday"),
+            "occupation": _pick("occupation"),
+            "location": _pick("location"),
+            "preferences": fields["preferences"]
+            if "preferences" in fields
+            else (cur.get("preferences") or []),
+            "commitments": fields["commitments"]
+            if "commitments" in fields
+            else (cur.get("commitments") or []),
+            "notes": _pick("notes"),
         }
-        # 生日否定：用户明确说「不是 X」时清空错误生日
         if fields.get("clear_birthday"):
             merged["birthday"] = ""
-        if fields.get("birthday") is not None and fields.get("birthday") != "":
+        elif "birthday" in fields and fields.get("birthday"):
             merged["birthday"] = str(fields["birthday"]).strip()
         prefs = merged["preferences"] if isinstance(merged["preferences"], list) else []
         commits = merged["commitments"] if isinstance(merged["commitments"], list) else []
