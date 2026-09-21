@@ -364,7 +364,8 @@ class _InitPhasesMixin:
             self.components["memory"], "structured_memory", None)
         rag_sem = getattr(self.components["memory"], "semantic", None)
 
-        # Shisi 适配层是唯一对外接口；use_legacy_rag=True 时内部委托给 RAGEngineV2。
+        # Shisi 适配层是唯一对外接口（旧 RAGEngineV2 双轨委托从未接线，
+        # 2026-09-21 死码删除，见 docs/DELETION_LOG.md）。
         self.components["rag"] = ShisiKnowledgeAdapter(
             vector_memory=rag_vm,
             structured_memory=rag_sm,

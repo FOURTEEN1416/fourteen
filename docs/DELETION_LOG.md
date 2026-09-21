@@ -1,5 +1,27 @@
 # Code Deletion Log
 
+## [2026-09-21] shisi/knowledge/legacy（RAGEngineV2 整包）+ test_rag_engine 删除（P2 批6b）
+
+### 删除对象与证据
+- `shisi/knowledge/legacy/`（`__init__.py` + `rag_engine.py`，313 行）与 `tests/test_rag_engine.py`（613 行）
+  - **零生产消费**：全仓 grep `RAGEngineV2(`、`use_legacy_rag`、`knowledge.legacy` —— 除自身与其测试文件外**无任何 import / 实例化**；`orchestrator._init_mixin._init_rag` 无条件构造 `ShisiKnowledgeAdapter`，注释所述"use_legacy_rag=True 时内部委托"从未存在（垃圾注释，已同步更正）
+  - **配置开关是假的**：`config/system.yaml` 的 `rag.use_shisi_rag` 代码从不读取做分支（仅 config 持久化测试透传），yaml 注释已改为如实描述
+  - **模块本身带缺陷**：其 `BM25Index` 中文分词用 `\w+` 整段匹配，中文查询 token 与 2-gram 语料 token 无交集 → 中文召回≈0（审查报告 6b 项2）；现役检索真源是 `shisi/knowledge/retriever.py`（BM25Retriever/KeywordRetriever），修复无消费方，删除即根治
+  - `legacy/__init__.py` 自称"仍在活跃使用"为**虚假声明**（与 v1.10 删除 shisi/api/v2 时 `docs` 旧裁决被推翻同型）
+
+### 同批修正（非删除）
+- `orchestrator/_init_mixin.py` `_init_rag` 注释更正（不再宣称存在 legacy 委托）
+- `config/system.yaml` rag 双轨注释更正为"历史开关、代码不读取"
+
+### 验证
+- 删除后 `ruff check`（改动文件）+ `tests/test_shisi_knowledge.py`/`test_knowledge_order.py`/`test_config_manager.py` 全绿
+- 端点数不变（legacy 包从未挂载/接入路由）
+
+### Impact
+- 删除 3 文件；**零行为变更**（无调用者）；测试收集数 −（test_rag_engine 用例数），终局基线口径随之刷新
+
+**Reversible**: git revert 即恢复；无数据迁移。
+
 ## [2026-09-21] importance_scorer 无隔离旧副本三类删除（P1 批4a · 审查报告 item 17）
 
 ### 删除对象与证据

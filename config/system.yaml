@@ -196,9 +196,9 @@ fusion:
     # false → 使用 memory.memory_pipeline.MemoryPipeline（已废弃，默认 true）
     use_shisi_memory: true
   rag:
-    # 是否使用 shisi knowledge 适配层（双轨架构开关）
-    # true  → 使用 shisi.application.knowledge_service.ShisiKnowledgeAdapter
-    # false → 使用 rag_engine.rag_engine.RAGEngineV2（已废弃，默认 true）
+    # 是否使用 shisi knowledge 适配层（历史双轨开关，代码从不读取它做分支）
+    # true  → 使用 shisi.application.knowledge_service.ShisiKnowledgeAdapter（唯一路径；
+    #         旧 RAGEngineV2 死码已于 2026-09-21 删除，见 docs/DELETION_LOG.md）
     use_shisi_rag: true
   ase:
     frequency_mode: adaptive
