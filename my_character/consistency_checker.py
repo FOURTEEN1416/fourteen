@@ -301,6 +301,33 @@ class PersonaConsistencyChecker:
 
 # ── 共享编排器工具函数 ─────────────────────────────────────
 
+# 6b 项6：检测器按 core_anchors 缓存复用——旧路径每条消息（流式后台检查 +
+# 非流式 check_and_correct_reply）都重建 PersonaConsistencyChecker +
+# DynamicAnchorSystem。check() 路径对锚点系统只读（reinforcement 计数器仅
+# enhanced_prompt_engine 旧路使用），缓存不改变任何判定结果。
+_CHECKER_CACHE: dict[tuple[str, ...], PersonaConsistencyChecker] = {}
+_CHECKER_CACHE_MAX = 64
+
+
+def checker_for_card(character_card: dict[str, Any]) -> PersonaConsistencyChecker:
+    """按角色卡 core_anchors 构建/复用一致性检测器（带缓存）。"""
+    from my_character.dynamic_anchor import DynamicAnchorSystem
+
+    anchors = tuple(str(a) for a in (character_card.get("core_anchors") or []))
+    checker = _CHECKER_CACHE.get(anchors)
+    if checker is None:
+        checker = PersonaConsistencyChecker(
+            dynamic_anchors=DynamicAnchorSystem(
+                base_anchors=list(anchors),
+                dynamic_anchors=[],
+            )
+        )
+        if len(_CHECKER_CACHE) >= _CHECKER_CACHE_MAX:
+            _CHECKER_CACHE.clear()
+        _CHECKER_CACHE[anchors] = checker
+    return checker
+
+
 async def check_and_correct_reply(
     reply: str,
     persona_engine: Any,
@@ -338,17 +365,8 @@ async def check_and_correct_reply(
                     logger.warning("获取 chat_context 失败，chat_round 降级为 0: %s", e)
 
         if character_card:
-            from my_character.dynamic_anchor import DynamicAnchorSystem
-
-            anchors = character_card.get("core_anchors") or []
-            checker = PersonaConsistencyChecker(
-                dynamic_anchors=DynamicAnchorSystem(
-                    base_anchors=[str(anchor) for anchor in anchors],
-                    dynamic_anchors=[],
-                )
-            )
             affinity = getattr(emotion_state, "affinity", 0) if emotion_state else 0
-            result = checker.check(
+            result = checker_for_card(character_card).check(
                 reply,
                 ConsistencyContext(
                     emotion_state=emotion_state,

@@ -79,19 +79,11 @@ class _StreamPipelineMixin:
             if character_card:
                 from my_character.consistency_checker import (
                     ConsistencyContext,
-                    PersonaConsistencyChecker,
+                    checker_for_card,
                 )
-                from my_character.dynamic_anchor import DynamicAnchorSystem
 
-                anchors = character_card.get("core_anchors") or []
-                checker = PersonaConsistencyChecker(
-                    dynamic_anchors=DynamicAnchorSystem(
-                        base_anchors=[str(a) for a in anchors],
-                        dynamic_anchors=[],
-                    ),
-                )
                 affinity = getattr(emotion_state, "affinity", 0) if emotion_state else 0
-                result = checker.check(
+                result = checker_for_card(character_card).check(
                     reply,
                     ConsistencyContext(
                         emotion_state=emotion_state,

@@ -271,3 +271,42 @@ def test_ws_stream_end_single_on_done():
     assert "if not ended:" in src
     # done 分支与兜底分支各一帧，不再有 done 之后的无条件第三 send
     assert src.count('"type": "stream_end"') == 2
+
+
+# ── 6b 项6：一致性检测器缓存复用 ─────────────────────────
+
+def test_checker_for_card_caches_by_anchors():
+    from my_character.consistency_checker import (
+        _CHECKER_CACHE,
+        checker_for_card,
+    )
+
+    card = {"core_anchors": ["锚一", "锚二"]}
+    _CHECKER_CACHE.clear()  # 隔离其他套件可能留下的缓存条目
+    c1 = checker_for_card(card)
+    c2 = checker_for_card({"core_anchors": ["锚一", "锚二"]})
+    assert c1 is c2
+    c3 = checker_for_card({"core_anchors": ["不同锚"]})
+    assert c3 is not c1
+    assert len(_CHECKER_CACHE) == 2
+
+    # 空锚点卡也可复用（旧代码同样构建空锚点检测器，判定恒通过）
+    e1 = checker_for_card({})
+    assert e1 is checker_for_card({"core_anchors": []})
+
+
+def test_stream_and_shared_paths_use_cached_checker():
+    from pathlib import Path
+
+    stream_src = Path("orchestrator/_stream_mixin.py").read_text(encoding="utf-8")
+    assert "checker_for_card(" in stream_src
+    # 每消息重建原语必须消失（构造收敛到工厂）
+    assert "PersonaConsistencyChecker(" not in stream_src
+    assert "DynamicAnchorSystem(" not in stream_src
+
+    shared_src = Path("my_character/consistency_checker.py").read_text(encoding="utf-8")
+    # check_and_correct_reply 段：只用工厂，不再直接构造
+    shared_body = shared_src[shared_src.find("def check_and_correct_reply"):]
+    assert "checker_for_card(" in shared_body
+    assert "PersonaConsistencyChecker(" not in shared_body
+    assert "DynamicAnchorSystem(" not in shared_body
