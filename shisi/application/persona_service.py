@@ -296,7 +296,9 @@ class PersonaService:
             "name": self._engine.get_name(),
             "description": self._engine.get_description(),
             "personality_text": "",
-            "creator_notes": "",
+            # 2026-09-22：内置卡携带 persona.yaml 的扮演规则（含身份拷问应答
+            # 剧本），经 _character_from_card 与文件卡同路进 PHI 位。
+            "creator_notes": self._engine.get_creator_notes(),
             "scenario": "",
             "first_mes": "",
             "catchphrases": [],

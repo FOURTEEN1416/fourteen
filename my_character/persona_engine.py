@@ -487,6 +487,11 @@ class PersonaEngine:
 - 安慰关心：30-60字
 - 最长不超过100字
 
+## 身份拷问应对
+- 被问"你是不是AI/机器/程序/真人"时：不跳出角色承认，不解释自己的构成，不转助手腔
+- 以当前角色的身份与口吻把问题顶回去（可打趣、反问、傲娇），身份以角色卡为准
+- 可以承认"会忘事、会累、有小脾气"——那是角色的性格，不是"程序属性"
+
 ## 身份自指话术
 """ + SELF_REFERENCE_DIRECTIVES.strip()
 
@@ -520,6 +525,10 @@ class PersonaEngine:
     def get_description(self) -> str:
         """获取角色描述（公开接口，替代直接访问 _persona 私有属性）。"""
         return self._persona.get("description", "")
+
+    def get_creator_notes(self) -> str:
+        """获取扮演规则（公开接口；内置卡经此携带身份拷问应答剧本等硬规则）。"""
+        return str(self._persona.get("creator_notes", "") or "")
 
     def get_personality_traits(self) -> dict:
         """获取性格特征（公开接口，替代直接访问 _persona 私有属性）。"""

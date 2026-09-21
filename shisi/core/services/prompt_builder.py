@@ -10,6 +10,18 @@ from ..models.character_aggregate import CharacterAggregate
 
 logger = logging.getLogger("shisi.core.services.prompt_builder")
 
+# 卡片身份字段的知识块恒由角色设定/人设段注入（唯一身份 owner），经知识槽
+# 再回声即成同文本双份（2026-09-21 服务器实测：项11 激活每轮 RAG 后
+# 「锚点只注入一次」不变量被 self-echo 打破）。检索出口按来源排除。
+# 2026-09-22 +creator_notes：身份拷问应答剧本进卡后同样只从 PHI 位注入一份，
+# 不再以「知识」名义二次出现。
+IDENTITY_KNOWLEDGE_SOURCES = {
+    "character_name",
+    "personality.core_anchors",
+    "description",
+    "creator_notes",
+}
+
 
 def build(
     character: CharacterAggregate,
@@ -101,7 +113,7 @@ def _get_knowledge_context(character: CharacterAggregate, query: str, enabled: b
     # 卡片身份字段的知识块恒由角色设定/人设段注入（唯一身份 owner），经知识槽
     # 再回声即成同文本双份（2026-09-21 服务器实测：项11 激活每轮 RAG 后
     # 「锚点只注入一次」不变量被 self-echo 打破）。检索出口按来源排除。
-    identity_sources = {"character_name", "personality.core_anchors", "description"}
+    identity_sources = IDENTITY_KNOWLEDGE_SOURCES
 
     try:
         svc = get_knowledge_service()
