@@ -36,6 +36,18 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-21 · 窗口 agent-x（wt/agent-x）· 包 AX 阶段 A–C 交付（研究+骨架，待收编）
+
+- **分支**：`wt/agent-x` ｜ worktree `D:\Desktop\ai-girlfriend-agent-x`
+- **skill 移植**：`sliver-vibe-coding` 0.6.0 → `~/.config/mimocode/skills/sliver-vibe-coding/`（指导本轮路由/owner/验收门禁）
+- **peer-projects 重克隆**：`D:\Desktop\peer-projects\` 9 仓（nana/Artemis/MetaPact/my-raze/SillyTavern/awesome-ai-companion/jiwen/WrenWen/generative_agents），**不入 git**；记录见 `docs/research/2026-09-21_AX_peer-projects克隆记录.md`
+- **实现级笔记**：`docs/research/2026-09-21_AX_实现级学习笔记.md`（≥8 机制：调用链/字段/失败降级/落点）
+- **转型方案**：`docs/plans/2026-09-21_智能体架构转型方案.md`（B1–B7 + 小凌进产/不做表 + P0–P3 + F1–F6 规避）
+- **骨架**：`shisi/agent_plane/event_ledger.py` + 槽位契约/画像Schema/迁移说明 + `tests/test_event_ledger_contract.py` + `tests/test_prompt_slot_contract.py` + `scripts/ax_acceptance_probes.py`
+- **纪律**：研究阶段**不改生产热路径**；EventLedger 默认独立 db `data/agent_plane.db`
+- **窗内验证（2026-09-21 实测）**：`tests/test_event_ledger_contract.py` + `tests/test_prompt_slot_contract.py` **11 passed**；`scripts/ax_acceptance_probes.py --self-test` **4/4 PASS**（因果回放/串台/画像更正/工具回执）；ruff 改动文件 **0 错**。主检出全量回归门待收编时执行
+- **请主控**：评审方案 §B3/§B5 → 通过后 merge --no-ff `wt/agent-x`（或文件级收编）→ 回归门 → 回写本板
+
 ### 2026-09-21 · 主控 · 包 AX 交接（智能体转型 · 重大决策）
 
 - **用户裁决**：对标改造效果很差；小凌学习未落到实处；下一窗口须调研+重克隆+**实现级**学习+改造方案/框架/技术选型
