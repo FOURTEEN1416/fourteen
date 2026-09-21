@@ -170,7 +170,6 @@
 **关键文件:**
 - `multi_provider_gateway.py` — `MultiProviderGateway` 主入口
 - `openai_compatible_provider.py` — OpenAI 兼容 API
-- `prompt_template_manager.py` — 提示模板管理
 - `llm_gateway.py` — LLM 网关（LLMGatewayV2）
 - `__init__.py` — `invalidate_user_llm()` 用户级 gateway 缓存失效
 

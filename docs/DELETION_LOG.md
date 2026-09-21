@@ -1,5 +1,20 @@
 # Code Deletion Log
 
+## [2026-09-21] llm_provider/prompt_template_manager.py 零调用死文件删除（P2 批6b 项4）
+
+### 删除对象与证据
+- `llm_provider/prompt_template_manager.py`（`PromptTemplateMgr`）
+  - **零调用**：全仓 grep `prompt_template_manager` / `PromptTemplateMgr` / `PromptTemplateManager` —— 除自身与 `大创赛报名以及后期发展/` 软著归档复制件（不入库）外**无任何 import/实例化/测试引用**；`llm_provider/__init__.py` 不导出
+  - **文档虚报**：`CODE_GRAPH.md` 标其 "54 fan-in / OptimizedOrchestrator to prompt_template_manager 14"——代码实况为 0，属陈旧/虚构度量，终局文档对齐批统一清除；`docs/CODEMAPS/MODULES.md` 行本次已删
+
+### 验证
+- 删除后 import 面零报错（`pytest` 相邻套件 + `ruff check llm_provider/` 绿）
+
+### Impact
+- 删除 1 文件；零行为变更
+
+**Reversible**: git revert 即恢复。
+
 ## [2026-09-21] shisi/ase/trigger_engine 死桩删除（P2 批6b 项3）
 
 ### 删除对象与证据
