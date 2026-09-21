@@ -314,17 +314,39 @@ class _InitPhasesMixin:
             mem = self.components.get("memory")
             sm = getattr(mem, "structured_memory", None)
             if sm:
-                # 字典键必须与 system.yaml builtin_tools 中的名称一致，
-                # 否则 `if name in enabled_tools` 判断会失败，工具永不注册。
+                from tools.builtin.profile_agent_tools import (
+                    ForgetFactsTool,
+                    QueryProfileTool,
+                    RememberFactsTool,
+                    UpdateUserProfileTool,
+                )
+
                 memory_tools = {
                     "set_reminder": ReminderTool,
                     "query_reminders": CalendarQueryTool,
                     "memory": MemoryTool,
                     "scheduler": SchedulerTool,
+                    # 智能体画像/记忆：LLM 直接编辑，非正则（2026-09-21）
+                    "update_user_profile": UpdateUserProfileTool,
+                    "remember_facts": RememberFactsTool,
+                    "forget_facts": ForgetFactsTool,
+                    "query_profile": QueryProfileTool,
                 }
                 for name, tool_cls in memory_tools.items():
-                    if name in enabled_tools:
-                        registry.register(tool_cls(sm))
+                    if name not in enabled_tools:
+                        continue
+                    try:
+                        if name in (
+                            "update_user_profile",
+                            "remember_facts",
+                            "forget_facts",
+                            "query_profile",
+                        ):
+                            registry.register(tool_cls())
+                        else:
+                            registry.register(tool_cls(sm))
+                    except Exception:  # noqa: BLE001
+                        logger.warning("工具注册失败: %s", name)
 
         self.components["tool_registry"] = registry
         self.components["tools"] = (

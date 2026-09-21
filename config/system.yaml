@@ -80,6 +80,10 @@ tools:
     - query_reminders
     - time_awareness
     - character_card
+    - update_user_profile
+    - remember_facts
+    - forget_facts
+    - query_profile
 
 api:
   host: "127.0.0.1"

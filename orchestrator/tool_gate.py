@@ -61,6 +61,17 @@ _TIME_RE = re.compile("|".join(_TIME_PATTERNS))
 _COMMAND_RE = re.compile("|".join(_COMMAND_PATTERNS))
 _QUERY_RE = re.compile("|".join(_QUERY_PATTERNS))
 
+# 画像/记忆智能体信号：用户陈述身份、更正、偏好 → 晋级让 LLM 调 update_user_profile/remember_facts
+_PROFILE_PATTERNS = (
+    r"我的?生日",
+    r"我叫|叫我[一-龥A-Za-z]{1,4}$|我是[一-龥]{1,4}$",
+    r"我(?:现在)?(?:在)?(?:上班|上学|工作|打工|军训|读书|学生)",
+    r"我(?:喜欢|不喜欢|讨厌|爱好|住在|来自|家在)",
+    r"你还记得我|你记错|弄错人|不是我说的",
+    r"别再|以后不要|以后不可以",
+)
+_PROFILE_RE = re.compile("|".join(_PROFILE_PATTERNS))
+
 
 def should_escalate(query: str, has_pending_intent: bool = False) -> bool:
     """L0 晋级判定。
@@ -76,7 +87,10 @@ def should_escalate(query: str, has_pending_intent: bool = False) -> bool:
     if not text:
         return False
     return bool(
-        _TIME_RE.search(text) or _COMMAND_RE.search(text) or _QUERY_RE.search(text)
+        _TIME_RE.search(text)
+        or _COMMAND_RE.search(text)
+        or _QUERY_RE.search(text)
+        or _PROFILE_RE.search(text)
     )
 
 
@@ -154,7 +168,10 @@ def build_review_messages(
         "- 【工具选择】用户托付「提醒/叫起床/到点叫我/定闹钟」→ **必须调用 set_reminder**",
         "  （参数 content + trigger_time，北京时间 YYYY-MM-DD HH:MM）。",
         "  禁止只调 calendar/query_reminders 等查询工具来「表示会提醒」——查询不会落库、不会到点投递。",
-        "- 查询已有提醒 → query_reminders；看日程/日期 → calendar。",
+        "- 用户陈述/更正个人信息（生日、称呼、上班/上学/军训、喜欢讨厌、约定偏好）→",
+        "  调用 **update_user_profile** 和/或 **remember_facts** 写入画像与记忆；",
+        "  用户否认错误信息 → update_user_profile 的 clear_* 或 forget_facts。",
+        "- 查询已有提醒 → query_reminders；看日程/日期 → calendar；查画像 → query_profile。",
         "- 信息不全（典型：缺具体时间）→ 调用 ask_user 问一句，不要猜、不要闲聊、不要空口答应。",
         "- 只是闲聊、没有任何托付 → 一个工具都不调，正常聊天。",
         "- 【硬约束】没有 tool_calls 时，**禁止输出任何承诺句**",

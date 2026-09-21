@@ -1106,7 +1106,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             except Exception as e:  # noqa: BLE001
                 logger.debug("ASE on_chat skipped: %s", e)
 
-        # 用户画像：只从**用户原话**更新（模型回复不得写入画像，防编造沉淀）
+        # 用户画像：正则仅作弱兜底；主路径是对话后 profile_sync_agent（LLM 工具）
         if session_id:
             try:
                 from shisi.memory.legacy.user_profile import default_store
@@ -1114,6 +1114,23 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 default_store().apply_user_utterance(session_id, user_msg_clean)
             except Exception as e:  # noqa: BLE001
                 logger.debug("user_profile update failed: %s", e)
+            try:
+                llm_for_sync = self.components.get("llm")
+                sm_for_sync = None
+                mem = self.components.get("memory")
+                if mem is not None:
+                    sm_for_sync = getattr(mem, "structured_memory", None)
+                from tools.builtin.profile_agent_tools import run_profile_sync_agent
+
+                self._get_background_executor().submit(
+                    lambda: __import__("asyncio").run(
+                        run_profile_sync_agent(
+                            llm_for_sync, session_id, user_msg_clean, reply, sm_for_sync
+                        )
+                    )
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("profile_sync_agent schedule failed: %s", e)
 
         # 好感度同步 — user×character（session_id 作 user 维，禁止跨用户共享）
         if character_id and character_id != "default" and emotion_state is not None:
