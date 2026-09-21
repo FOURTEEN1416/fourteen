@@ -11,6 +11,11 @@ from shisi.agent_plane.event_ledger import (
     default_ledger,
     set_default_ledger,
 )
+from shisi.agent_plane.profile_projection import (
+    project_profile,
+    seed_profile_baseline,
+    write_profile_event,
+)
 
 __all__ = [
     "EventLedger",
@@ -18,4 +23,7 @@ __all__ = [
     "ReplayBundle",
     "default_ledger",
     "set_default_ledger",
+    "project_profile",
+    "seed_profile_baseline",
+    "write_profile_event",
 ]

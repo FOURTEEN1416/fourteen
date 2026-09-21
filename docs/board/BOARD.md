@@ -36,6 +36,14 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-21 · 窗口 agent-x（wt/agent-x）· 包 AX 裁决落账 + 骨架收编
+
+- **用户裁决**：D1 EventLedger 主轴 **同意**（须隔离论证）；D2 **独立** `data/agent_plane.db`；D3 **写全走 ledger、profile 仅投影**；D4 **改方案后立刻收编**；D5 **主动消息 LLM 决定时机与内容，禁止硬编码阶段表**
+- **隔离设计**：主轴唯一≠状态揉成一坨——强制完整 `session_key` 分区键；查询/投影/回放全部按会话切片；探针 userB 读 userA 必须空
+- **新增骨架**：`shisi/agent_plane/profile_projection.py` + `tests/test_profile_projection.py`
+- **方案已改**：`docs/plans/2026-09-21_智能体架构转型方案.md` §B3/B4/B5 + 裁决落账节
+- **状态**：worktree 提交后 **文件级/merge 收编 main**；生产热路径仍待 P1 接线
+
 ### 2026-09-21 · 窗口 agent-x（wt/agent-x）· 包 AX 阶段 A–C 交付（研究+骨架，待收编）
 
 - **分支**：`wt/agent-x` ｜ worktree `D:\Desktop\ai-girlfriend-agent-x`
