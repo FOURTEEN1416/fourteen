@@ -2796,7 +2796,7 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 
 **执行（全程可核验）**
 
-1. **配置真源收口**：`config/shisi.yaml` **234→41 行**（仅存 `memory` 5 键 + `affinity` 4 键 + `voice` 段）；`config/emotion.yaml` 删 `emotion.initial`/`affinity_levels`/`style_influence`/`energy` 四段；`config/system.yaml` 删 20 死键（含 3 处与顶层同名的 fusion 双真源）。**消除 `shisi.yaml security.*` 与 `system.yaml safety.*` 双套安全配置**——改前者静默无效。
+1. **配置真源收口**：`config/shisi.yaml` **234→91 行**（65 有效行；仅存 `memory` 5 键 + `affinity` 4 键 + `voice` 段；**勘误（同日补记）**：原文「41」系 voice 段误删未恢复的中间态读数，恢复该段后未回改——提交态实为 91 物理行）；`config/emotion.yaml` 删 `emotion.initial`/`affinity_levels`/`style_influence`/`energy` 四段；`config/system.yaml` 删 20 死键（含 3 处与顶层同名的 fusion 双真源）。**消除 `shisi.yaml security.*` 与 `system.yaml safety.*` 双套安全配置**——改前者静默无效。
 2. **4 个整模块删除**：`observability/tracing.py`（`tracer.span()` 全仓 **0 调用**、`start_trace()` 0 调用 → `get_trace_id()` 恒空的**假可观测性**；`TRACE_NODES` 18 节点纯声明）、`my_character/style_enhancer.py`、`shisi/core/services/emotion_detector.py`（仅墓碑式 re-export，其 `POSITIVE_WORDS` 含「好/想/对不起」致「好烦」净 **+0.5** 的内在矛盾随之消除）、`shisi/wechat/proactive_messenger.py`（registry 实例化但 5 方法零生产调用，同 2026-09-17 未接线微信能力裁决例）；连带 `shisi/api/registry.py` 3 处 + `api/app_factory.py` 状态清单 + 2 个测试。
 3. **死函数 / 死属性 / 兼容别名**：`api/path_security.py::safe_join_path`（含 `startswith` 前缀绕过缺陷）、`wechat_direct/wechat_connector.py::_clear_credentials`（已被 per-connector 凭证自愈取代）、`api/routers/storyline_routes.py::_persist_state_to_json` + `StorylineDetectResponse`、`api/routers/character_routes.py::MemoryFactResponse`、orchestrator 4 个零读取 property、6 个 `*V2`/`*Optimized` 兼容别名。
 4. **残留**：BOM(U+FEFF) 清除 ×2（`api/routers/auth_routes.py`、`scripts/enrich_persona_web.py`——此前使 `ast.parse(str)` 直接 SyntaxError）、`MIN_CHUNKS` 双阈值统一为 3、根目录 `.audit_block.py`/`.audit_dup.py` 删除。
@@ -2806,7 +2806,7 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 **验证**
 
 - `ruff check .`（0.16.8，CI 同版本）→ **All checks passed**；`pre-commit` 门禁（FF-0003/FF-0006/FF-0007/ADR）**两次提交均 Passed**。
-- `pytest --collect-only` → **1657**；分块实跑四块（306 + 442 + 466 + 416）**失败标记均为 0**。
+- `pytest --collect-only` → **1657**；分块实跑四块（306 + 442 + 466 + 416）**失败标记均为 0**。（**勘误（同日补记）**：该四块之和 1630 ≠ 收集 1657，当次分块清单漏 27 例且汇总行缺失；同日复跑修正为 **341 + 387+3 + 494+1 + 431 = 1653 通过 + 4 跳过**，与收集精确吻合、0 失败、汇总行正常——钩子现象未复现。）
   ⚠️ 本机 `safe-delete` 钩子在 pytest 打印汇总行**之前**清理临时目录 → **exit=1 且日志无汇总行，属环境机制非测试失败**（判定须看进度条 `F` 标记，曾据此误判一次）。
 - 端点重测 `create_api_app` 内省：**APIRoute 220 / 唯一路径 186 / `len(app.routes)`=224**（105 GET / 79 POST / 16 PUT / 20 DELETE），与 v1.34 逐项一致（本次删的 4 模块均不含路由）。
 - 三份 yaml 解析通过；`voice` / `memory` 段与 HEAD **逐键一致**（回归修复校验）。
@@ -2818,3 +2818,17 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - 🔴 **`wt/selftalk-fix` 不可 merge**：其 fork 基点早于项2–10 死码清除，`git diff --name-status main wt/selftalk-fix` 的 A 类 **27 文件全是 main 已删死码**（`character_card/` 整包、`style_enhancer.py`+`v2`、`tracing.py`、`emotion_detector.py`、`proactive_messenger.py`、`knowledge/legacy/rag_engine.py`、`ase/trigger_engine.py`、`enhanced_prompt_engine.py` 等）→ merge 会**复活死码并把 132 文件回退到旧版**。分支保留作历史存档。
 - worktree 移除采用**分步执行**：三者的 `data/` 均是指向主仓的 **symlink**（`sqlite.db` inode 相同），`rm -rf <wt>/data/`（带尾斜杠）会**跟随链接删光主仓数据** → 先 `rm` 链接 → 验证主仓 `data/` 逐字节未变 → 再 `rm -rf` 残留目录。
 - **未部署服务器**（部署归用户裁决）；`peer-projects`（~250M，9 个外部克隆可 `git clone` 重建）与 `产物隔离_小凌研究`（393M，抖音原创采集**不可重建**）按裁决保留。
+
+---
+
+## v1.35 补记 · 交接复核 + 测试口径统一（2026-09-21，同日）
+
+**指令链**：上一窗收仓汇报交接本窗 → 用户两项裁决：「push + 服务器部署」「补跑分块测试统一刷新」。
+
+**交接复核（只读）**：收仓汇报声明逐项实证全部一致——HEAD `a672617` / 工作树 clean（ahead 3）/ 3 worktree 注销且分支保留 / 4 死模块物理删除 / 角色卡 41 张 / 收集 1657 / 端点 220/186。**发现 2 处 v1.35 文档同步未扫到的失实**：① **测试口径断层 9 处**——AGENTS §0/§2/§4.3、CODE_GRAPH §1.1 两行+合计、README 徽章/口径/结构树均停在 v1.34 的 1615/1611/1709，与 v1.35 头部 1657 自相矛盾；② `shisi.yaml`「234→41 行」系 voice 段恢复前中间态误记（实况 **91 物理行 / 65 有效行**）。
+
+**精确口径（本窗复跑实测，替代 v1.35 首跑的无汇总行读数）**：分块 **341 + 387+3 + 494+1 + 431 = 1653 通过 + 4 跳过**（=收集 1657，0 失败，四块汇总行均正常——首跑「钩子吞汇总行」现象未复现）+ 前端 vitest **98/98**（16 文件，复跑）→ **通过数合计 1751**（1653 Py + 98 FE）；收集 +42 = 并行窗收编 3 个新测试文件（`test_attribution_isolation_state` / `test_code_review_r2_state_and_llm` / `test_session_key_owner`）。
+
+**文档刷新清单**：`AGENTS.md`（v1.35 头部 41→91 勘误 + 验证句精确化 + §0 + §2 测试行 + §4.3 十五次刷新 + 分块配方行）；`CODE_GRAPH.md` **v3.8.18**（标题 + 前言块 + §1.1 Python 测试行 + 合计行 + 修订历史行）；`README.md`（徽章 1709→**1751** + 测试口径 + 结构树）；`docs/board/BOARD.md` 登记表（agent-x ✅ 已收编·已卸窗 / ax-review ✅ 产出留分支·已卸窗 + 新增 selftalk 🔴 存档·不可 merge 行）；本 LOG v1.35 条目勘误两处（行数 + 四块之和 1630≠1657）。
+
+**部署**：push 后按 A 档标准链上服务器（预检 → pull → remote_deploy.sh → health + md5 抽验），结果见下一条补记。
