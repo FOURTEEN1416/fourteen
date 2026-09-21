@@ -85,20 +85,17 @@ graph TD
         CS["content_safety (8 in)"]
         FUS["fusion (6 in)"]
         PI["prompt_injection (5 in)"]
-        PTM["prompt_template_manager (23 in)"]
         SCHED["scheduler (4 in)"]
         WS["websocket_server (5 in)"]
     end
     subgraph INTERNAL["内部层 internal"]
         MAIN["main (4 in/14 out)"]
     end
-    OA -->|"14 calls"| PTM
     OA -->|"13 calls"| APP
     OA -->|"8 calls"| CS
     OA -->|"6 calls"| FUS
     OA -->|"5 calls"| PI
     OA -->|"4 calls"| SCHED
-    MAIN -->|"9 calls"| PTM
     MAIN -->|"5 calls"| WS
     AR --> SA
 ```
@@ -166,7 +163,6 @@ sequenceDiagram
         O->>T: 工具结果注入 prompt 上下文
     end
 
-    O->>L: PromptTemplateMgr.get() then render()
     O->>L: LLMGatewayV2.chat() with fallback
 
     rect rgb(255, 230, 230)
@@ -399,8 +395,9 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 | `llm_gateway.py` | LLMGatewayV2，自动 fallback 链 |
 | `multi_provider_gateway.py` | 多供应商网关（默认 fallback 链 **Agnes → 智谱AI → 讯飞星火 → 百度千帆**，生产经编排器传 `config/system.yaml fallback_chain`；`DEFAULT_FALLBACK_CHAIN` 同序）+ 用户级 gateway 缓存 + **常驻同步事件循环**（09-19 性能修复：`chat_sync` 原每次 `asyncio.run` 新建事件循环致 httpx 连接池失效、单条消息 2 次 LLM 累计 11~20s → 守护线程常驻 loop 后稳态 ~2.7s） |
 | `openai_compatible_provider.py` | OpenAI 兼容供应商（被 agnes/zhipu/xunfei/baidu 共用） |
-| `prompt_template_manager.py` | PromptTemplateMgr（**54 fan-in**） |
 | `__init__.py` | **`invalidate_user_llm(user_id)`**（新增 2026-07-28）— 清除用户级 gateway 缓存，下次对话按新配置重建 |
+
+> 注（2026-09-21）：`prompt_template_manager.py`（PromptTemplateMgr）已随批6b 项4 删除，本表同步除名。
 
 > ⚠️ **链双真源补注（2026-09-20）**：运行时链有两处声明——① `config/system.yaml`
 > `llm.fallback_chain`（agnes 首选）：编排器 `_init_llm` 经 `get_llm(provider=auto,
@@ -629,9 +626,7 @@ tools/
 
 | 调用方 to 被调方 | 调用次数 | 性质 |
 |------------------|---------|------|
-| OptimizedOrchestrator to prompt_template_manager | 14 | 编排 to Prompt |
 | OptimizedOrchestrator to application | 13 | 编排 to 应用服务 |
-| main to prompt_template_manager | 9 | 入口 to Prompt |
 | OptimizedOrchestrator to content_safety | 8 | 编排 to 安全 |
 | OptimizedOrchestrator to fusion | 6 | 编排 to 人格融合 |
 | main to websocket_server | 5 | 入口 to WebSocket |
@@ -641,6 +636,8 @@ tools/
 | OptimizedOrchestrator to main | 4 | 编排到入口（循环依赖风险） |
 
 **注意**：`OptimizedOrchestrator to main` 的 4 次调用可能形成循环依赖。
+
+> ⚠️ 本表与 §6 同为 **2026-08-28 图谱快照**（含已证伪的 prompt_template_manager 两行，2026-09-21 批6b 项4 对齐时删除；其余读数不随代码刷新）。
 
 ---
 

@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-1515-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-1709-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
