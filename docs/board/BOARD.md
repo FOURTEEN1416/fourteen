@@ -37,6 +37,14 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-21 · wt/selftalk-fix 窗口 · 微信「自问自答」根治四项（用户点单「一二三四全部做」）
+
+- **产出**：`d8b7046`（29 文件 +1280/−671，分支 `wt/selftalk-fix`，基线 `3a2e4b4`）① 送达回写 `chat_history`（三链只在发送成功后记账）② 唯一身份路径（删 `strip_default_identity`/external 双分支；查出 `persona.yaml` 无人格描述、`DEFAULT_PERSONA_DESC` 运行时从未注入）③ 档位口径对齐 + 15 例静态门禁（智谱 → `glm-4.5-flash` + `thinking=disabled`）④ 追问 `delay2` 下限 60s + 角色 system + 真实 role 历史（删进程内 deque）
+- **验证**：分块 **1669 收集 / 1668 通过 / 1 跳过 / 0 失败**（284 + 526+1 + 381 + 477，41 卡在位）+ vitest 98/98 + tsc 0 错 + ruff 0 错 + ci_gates 4/4 + 突变验红 4 次全中
+- **⚠️ 给主控的合并预警**：本窗收尾时 main 已前进 **9 个提交**（`97eb64b..1f2b1be`，P2 6b 批次），预计与 `c628a79`（proactive 旧 ASE 死路径删除）在 `proactive/scheduler.py`、与 `1f2b1be`（memory 死路径删除）在 `shisi/memory/legacy/memory_pipeline.py` 有交集；AGENTS §0/§4.3 测试口径**本窗刻意未刷**（1669 含并行窗新增用例，非 main 口径），收编后请按主检出重测再刷新
+- **⚠️ 生产仍是旧行为（未部署，用户裁决项）**：服务器 `data/scheduler_config.json` 的 `follow_up` 本窗 SSH 只读复核，实测至今 `delay2_seconds: 10`，部署后由代码下限钳为 60s；本窗**不代跑 pull/重启**
+- **自纠登记**：窗内一次「先删定义、后删调用」造成 `AttributeError` 被宽 `except` 吞掉的中间态；`git show HEAD` 复核确认**基线正常** → 非线上缺陷，已入 LOG 同条以免后人误判
+
 ### 2026-09-21 · 主检出 · 包 AX P2 全量落地（用户三条裁决）
 
 - **① 主动消息**：LLM 判时机/文案 **+** 人设（角色卡摘要）/用户画像投影/**web 控制台**（开关、风格提示、力度 low/normal/high、免打扰是否写入 prompt、角色补充提示）注入决策上下文；真源 `data/scheduler_config.json` 的 `llm_proactive`；前端「消息」tab 可调
