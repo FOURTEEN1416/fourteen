@@ -15,6 +15,7 @@
 - **终局验证**：分块 **1615 收集 / 1611 通过 / 4 跳过 / 0 失败**（410 + 380+1 + 406 + 415+3 精确吻合；41 卡在位、工作树无他窗在制品）+ vitest 98/98 + tsc 0 错 + ruff 全仓 0 + ci_gates 4/4。端点重测 `create_api_app` 内省：**APIRoute 220 / 唯一路径 186 / `len(app.routes)=224` / 19 include_router**（较 09-20 口径 +5 = agent-plane 路由组，09-21 并入未回扫所致，非本战役新增）。
 - **文档对齐（本批 push 即完成，B 档）**：AGENTS **v1.34**（含 `character_card/` 三处陈旧引用清除）、CODE_GRAPH **v3.8.17**（§1.1/§4.2/§4.4/§14）、CODEMAPS 五件、README、docs/README、VISION、`api/app_factory.py` docstring；跨文件 grep 残留清零（历史条目口径保留不改）。
 - **遗留登记**：① evolution-log 恒空（归 DELETION_LOG，先前已裁决）；② 前端 `api.ts` event_bonus 注释归并行窗（本窗未动前端）；③ **服务器 pull 上线归用户裁决，本战役未部署**——A 档代码已在 origin/main，上线需服务器 `git pull` + `deploy/remote_deploy.sh` + health 核验。
+- **CI 时序性飘红根治（收口后追加，`3d0abf2`）**：终局推送后核查 Actions 发现今日多次 push 红在 `test_tick_actually_runs_batch_intent_gc`——非时区问题：`ReminderDeliveryTask._last_intent_gc` 初始化 `0.0` 隐含「monotonic 起点=从未清理」，但 **Linux 上 `time.monotonic()` 以开机为起点**，GitHub runner 开机 <300s 时首 tick 误判「刚清理过」跳过批量 GC → 测试红（本地开机数小时故恒绿；08:21 run 恰好 >300s 又绿，典型时序依赖）。修复：初始化偏移到 `monotonic() - 间隔`，新实例首 tick 必做清理、长活实例节流不变。突变验红（改为「刚清理过」即复现红）命中后精确还原；`test_reminder_intent_pipeline` 36 例 + `test_async_bridge_contract` 5 例绿。
 - **临时产物清理**：删除本会话探针脚本 `scripts/_tmp_dump_memory_state.py`、`scripts/_tmp_p0_before.txt`、`scripts/_tmp_wipe_memory_data.py`。
 
 ## 2026-09-21 — 「人机味」根因取证 + agnes 回链首（A 方案，按供应商超时闸门）
