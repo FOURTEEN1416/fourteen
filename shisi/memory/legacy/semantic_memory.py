@@ -55,17 +55,35 @@ class SemanticMemory:
                 self._sm.add_fact(fact, category, confidence, source)
             self._fact_cache.add(fact_hash)
             try:
-                store = getattr(self._vm, "store_fact", None) or getattr(
-                    self._vm, "store_text_sync", None
-                )
+                # P1-12（2026-09-21 审查修复）：旧实现把 **async** 的
+                # vector_memory.store_fact 当同步函数调——返回协程被直接丢弃、
+                # 不抛 TypeError，兜底分支永不命中 → user_facts 向量通道整体
+                # 空转，向量召回恒空只剩 SQLite。现显式识别协程并经公共桥执行，
+                # 且写入必须带 user_key（读侧按 meta.user_key 隔离）。
+                store = getattr(self._vm, "store_fact", None)
+                stored = False
                 if callable(store):
-                    try:
-                        store(fact, category, confidence)
-                    except TypeError:
-                        store(fact, {
-                            "type": "fact", "category": category,
-                            "confidence": confidence, "user_key": user_key or "",
-                        })
+                    import inspect
+
+                    if inspect.iscoroutinefunction(store):
+                        from utils.async_utils import run_async
+                        if self._accepts_user_key(store):
+                            run_async(store(fact, category, confidence,
+                                            user_key=user_key))
+                        else:
+                            run_async(store(fact, category, confidence))
+                        stored = True
+                    else:
+                        try:
+                            store(fact, category, confidence, user_key=user_key)
+                        except TypeError:
+                            store(fact, category, confidence)
+                        stored = True
+                if not stored and callable(getattr(self._vm, "store_text_sync", None)):
+                    self._vm.store_text_sync(fact, {
+                        "type": "fact", "category": category,
+                        "confidence": confidence, "user_key": user_key or "",
+                    })
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to store fact vector: %s", e)
             try:

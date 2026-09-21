@@ -160,8 +160,27 @@ class ShisiMemoryService:
         reply: str,
         emotion_tag: str = "",
         session_id: str = "",
+        history_already_written: bool = False,
     ) -> dict[str, Any]:
+        # P1-16（2026-09-21 审查修复）：pipeline 早已支持 history_already_written
+        # 与 write_chat_history_sync，但服务壳没转发——orchestrator 的 hasattr/
+        # 签名探测恒 False，B-a 同步轻写整层失效（慢工具轮次表现为"吞消息"竞态）。
         return self._pipeline.after_chat(
+            user_msg=user_msg,
+            reply=reply,
+            emotion_tag=emotion_tag,
+            session_id=session_id,
+            history_already_written=history_already_written,
+        )
+
+    def write_chat_history_sync(
+        self,
+        user_msg: str,
+        reply: str,
+        emotion_tag: str = "",
+        session_id: str = "",
+    ) -> bool:
+        return self._pipeline.write_chat_history_sync(
             user_msg=user_msg,
             reply=reply,
             emotion_tag=emotion_tag,

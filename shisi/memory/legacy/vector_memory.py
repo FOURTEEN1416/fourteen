@@ -219,7 +219,8 @@ class VectorMemory:
 
     # ── 用户事实 ──────────────────────────────────────────
 
-    async def store_fact(self, fact: str, category: str = "general", confidence: float = 0.5) -> str | None:
+    async def store_fact(self, fact: str, category: str = "general",
+                         confidence: float = 0.5, user_key: str = "") -> str | None:
         coll = self._collections.get("user_facts")
         if coll is None:
             return None
@@ -228,6 +229,9 @@ class VectorMemory:
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "category": category,
             "confidence": confidence,
+            # P1-12：读侧按 meta.user_key 精确隔离，此处不落键 → 向量通道
+            # 写入即被过滤清零（等于永不召回）。user_key 必须由写侧带上。
+            "user_key": user_key or "",
         }
         try:
             await asyncio.to_thread(coll.add, documents=[fact], metadatas=[meta], ids=[doc_id])
@@ -236,8 +240,9 @@ class VectorMemory:
             logger.warning("store_fact failed: %s", e)
             return None
 
-    def store_fact_sync(self, fact: str, category: str = "general", confidence: float = 0.5) -> str | None:
-        return _run_async(self.store_fact(fact, category, confidence))  # type: ignore[no-any-return]
+    def store_fact_sync(self, fact: str, category: str = "general",
+                        confidence: float = 0.5, user_key: str = "") -> str | None:
+        return _run_async(self.store_fact(fact, category, confidence, user_key))  # type: ignore[no-any-return]
 
     async def add_batch(self, documents: list[str], metadatas: list[dict[str, Any]],
                   ids: list[str], collection: str = "user_facts") -> bool:

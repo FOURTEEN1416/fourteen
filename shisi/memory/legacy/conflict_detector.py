@@ -22,9 +22,12 @@ class ConflictDetector:
         self._sem = semantic_memory
         self._threshold = similarity_threshold
 
-    def check_conflict(self, new_fact: str, category: str) -> dict[str, Any] | None:
+    def check_conflict(self, new_fact: str, category: str,
+                       user_key: str | None = None) -> dict[str, Any] | None:
         try:
-            search_results = self._sem.search(new_fact, top_k=3)
+            # P1-13（2026-09-21 审查修复）：旧实现不传 user_key → A 的历史事实
+            # 可让 B 刚抽取的事实被判冲突丢弃（写侧串扰）。非 None 时按会话隔离检索。
+            search_results = self._sem.search(new_fact, top_k=3, user_key=user_key)
             vector_results = search_results.get("vector", [])
             for result in vector_results:
                 existing = result.get("content", "")

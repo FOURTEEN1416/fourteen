@@ -244,6 +244,7 @@ class _StreamPipelineMixin:
                     session_id,
                     character_id,
                     emotion_engine=emotion_engine,
+                    user_id=user_id,  # P1-15：工具 _meta 调用归属（缺它 web 流式下 user_id=None）
                 )
                 emotion_state = ctx["emotion_state"]
                 system_prompt = ctx["system_prompt"]

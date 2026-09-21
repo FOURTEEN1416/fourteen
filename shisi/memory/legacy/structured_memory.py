@@ -1103,6 +1103,7 @@ class StructuredMemory:
                         row["id"],
                     ),
                 )
+                conn.commit()  # P1-14：_conn 上下文不自动提交，UPDATE 分支旧漏 commit
                 return row["id"]  # type: ignore[no-any-return]
             cursor = conn.execute(
                 "INSERT INTO pending_intents (session_key, user_id, intent, slots_json, "

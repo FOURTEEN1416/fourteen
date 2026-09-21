@@ -18,6 +18,7 @@ import hashlib
 import logging
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -270,7 +271,9 @@ class MemoryPipeline:
         )
 
         # 缓存
-        self._context_cache: dict[str, Any] = {}
+        # P1-17：有界 LRU（旧为普通 dict，仅日维护 clear → 长跑进程随查询数无界增长）
+        self._context_cache: OrderedDict[str, Any] = OrderedDict()
+        self._context_cache_max = 256
         self._cache_lock = threading.Lock()
 
         logger.info(
@@ -613,6 +616,7 @@ class MemoryPipeline:
                 cached = self._context_cache[cache_key]
                 if time.time() - cached.get("_ts", 0) < self._config.cache_ttl:
                     logger.debug("retrieve_context_async cache hit")
+                    self._context_cache.move_to_end(cache_key)
                     return {k: v for k, v in cached.items() if k != "_ts"}
 
         context = {  # type: ignore[var-annotated]
@@ -704,6 +708,13 @@ class MemoryPipeline:
         context["_ts"] = time.time()  # type: ignore
         with self._cache_lock:
             self._context_cache[cache_key] = context
+            # P1-17：超界先丢最旧，再回收已过期项（写入侧顺带 GC）
+            while len(self._context_cache) > self._context_cache_max:
+                self._context_cache.popitem(last=False)
+            now = time.time()
+            for k in [k for k, v in self._context_cache.items()
+                      if now - v.get("_ts", 0) >= self._config.cache_ttl]:
+                self._context_cache.pop(k, None)
 
         return {k: v for k, v in context.items() if k != "_ts"}
 
@@ -1064,9 +1075,10 @@ class MemoryPipeline:
                 if not self.should_store_as_fact(fact.get("fact", ""), now):
                     continue
 
-                # 冲突检测
+                # 冲突检测（P1-13：按本人 user_key 隔离，禁止跨用户判冲突）
                 conflict = self.conflict_detector.check_conflict(
-                    fact["fact"], fact.get("category", "general")
+                    fact["fact"], fact.get("category", "general"),
+                    user_key=_uk,
                 )
                 if conflict:
                     existing_fact = conflict.get("existing_fact", "")
