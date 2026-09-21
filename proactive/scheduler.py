@@ -140,6 +140,8 @@ class ProactiveScheduler:
         self._quiet_hours = (23, 7)       # 23:00-07:00 免打扰（web 端可调）
         # 重要日期当日幂等记录（每小时任务 + 00:05 维护可能同日命中）
         self._important_dates_sent: set[str] = set()
+        # AX P2：夜间记忆 curator
+        self._curator_enabled = True
 
         # 知识库定期采集（Vault collect）— web 控制端开关
         self._vault_enabled = False
@@ -258,6 +260,16 @@ class ProactiveScheduler:
                 name="每日维护",
                 replace_existing=True,
                 misfire_grace_time=60,
+                coalesce=True,
+            )
+            # AX P2：夜间记忆 curator（02:17）
+            self._scheduler.add_job(
+                self._safe_job_wrapper(self._run_memory_curator, "memory_curator"),
+                CronTrigger(hour=2, minute=17),
+                id="memory_curator",
+                name="夜间记忆整理",
+                replace_existing=True,
+                misfire_grace_time=600,
                 coalesce=True,
             )
 
@@ -401,18 +413,19 @@ class ProactiveScheduler:
         vault_enabled: bool | None = None,
         vault_interval: int | None = None,
         follow_up: dict[str, Any] | None = None,
+        llm_proactive: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """非 master worker 的 POST 端点直接写文件；master 下个 tick 重载生效。
-
-        follow_up：对话内追问参数（enabled / delay1_seconds / delay2_seconds /
-        daily_max），由 wechat_direct 读取执行 —— 与 quiet_hours 同一份跨 worker 真源，
-        因此在 web 控制端改完即时对所有 worker 生效（连接器每次操作都读文件）。
-        """
         data = cls._read_config_file()
         if quiet_hours is not None:
             data["quiet_hours"] = {"start": int(quiet_hours[0]), "end": int(quiet_hours[1])}
         if follow_up is not None:
             data["follow_up"] = dict(follow_up)
+        if llm_proactive is not None:
+            cur = data.get("llm_proactive") or {}
+            if not isinstance(cur, dict):
+                cur = {}
+            cur.update({k: v for k, v in llm_proactive.items() if v is not None})
+            data["llm_proactive"] = cur
         vault = data.get("vault") or {}
         if vault_enabled is not None:
             vault["enabled"] = bool(vault_enabled)
@@ -425,6 +438,18 @@ class ProactiveScheduler:
         except Exception as e:  # noqa: BLE001
             logger.warning("调度器配置保存失败: %s", e)
         return data
+
+    def get_llm_proactive_config(self) -> dict[str, Any]:
+        from proactive.llm_proactive import DEFAULT_WEB_CONFIG, read_web_proactive_config
+
+        cfg = read_web_proactive_config()
+        qs, qe = self.get_quiet_hours() if hasattr(self, "get_quiet_hours") else (23, 7)
+        return {
+            **DEFAULT_WEB_CONFIG,
+            **cfg,
+            "quiet_hours_start": qs,
+            "quiet_hours_end": qe,
+        }
 
     def _load_config_file(self) -> None:
         data = self._read_config_file()
@@ -698,16 +723,25 @@ class ProactiveScheduler:
 
     def _llm_proactive_one_user(self, hub: Any, user_key: str) -> None:
         from proactive.ase_engine import _local_now, sanitize_message
-        from proactive.llm_proactive import build_proactive_context, decide_proactive
+        from proactive.llm_proactive import (
+            build_proactive_context,
+            decide_proactive,
+            load_persona_hint,
+            read_web_proactive_config,
+        )
         from shisi.agent_plane.runtime import (
             append_proactive_event,
             get_profile_prompt_block,
             project_profile_for,
         )
 
+        web_cfg = read_web_proactive_config()
+        if not web_cfg.get("enabled", True):
+            append_proactive_event(session_key=user_key, sent=False, reason="web_disabled")
+            return
+
         eng = hub.get(user_key) if hasattr(hub, "get") else None
         hours = eng._hours_since_last_chat() if eng is not None and hasattr(eng, "_hours_since_last_chat") else 0.0
-        # urgency 只更新/读取作信号，不作发送闸
         urgency = None
         if eng is not None:
             try:
@@ -726,7 +760,23 @@ class ProactiveScheduler:
                 rel = block.split("\n", 1)[0][:80]
         except Exception:  # noqa: BLE001
             rel = ""
+        # 人设：会话绑定角色优先
+        persona = ""
+        try:
+            cid = str(user_key).split("|")[-1] if "|" in str(user_key) else ""
+            # 常见形态 N:peer 或 N:peer|char — 兼容从 hub/eng 读 character
+            char_id = getattr(eng, "_character_id", "") or ""
+            if not char_id and cid and not cid.startswith("im.wechat"):
+                char_id = cid
+            persona = load_persona_hint(char_id) or load_persona_hint(str(profile.get("character_id") or ""))
+        except Exception:  # noqa: BLE001
+            persona = ""
         now = _local_now()
+        quiet = None
+        try:
+            quiet = self.get_quiet_hours() if hasattr(self, "get_quiet_hours") else None
+        except Exception:  # noqa: BLE001
+            quiet = None
         ctx = build_proactive_context(
             session_key=str(user_key),
             hours_since_last_chat=float(hours or 0.0),
@@ -734,13 +784,14 @@ class ProactiveScheduler:
             profile=profile,
             relationship_hint=rel,
             urgency_signal=urgency,
+            persona_hint=persona,
+            web_config=web_cfg,
+            quiet_hours=quiet,
         )
         llm = self._resolve_proactive_llm(eng)
         if llm is None:
             logger.info("proactive LLM unavailable user=%s skip", user_key)
-            append_proactive_event(
-                session_key=user_key, sent=False, reason="llm_unavailable"
-            )
+            append_proactive_event(session_key=user_key, sent=False, reason="llm_unavailable")
             return
         decision = decide_proactive(llm, ctx)
         logger.info(
@@ -768,7 +819,6 @@ class ProactiveScheduler:
             )
             return
         if self._deliver(message, session_key=user_key):
-            # 仅投递正确性记账（非频率策略）
             if eng is not None and hasattr(eng, "commit_sent"):
                 import contextlib
 
@@ -891,6 +941,34 @@ class ProactiveScheduler:
             return await self._send_to_all(message)
 
         return await self._send_to_all(message)
+
+    def _run_memory_curator(self) -> None:
+        """AX P2：夜间记忆整理（垃圾归档 / near-dup 合并 / 账本事件）。"""
+        try:
+            from shisi.agent_plane.curator import run_curator_all_known
+
+            orch = None
+            try:
+                from api.deps import deps
+
+                orch = getattr(deps, "orch", None)
+            except Exception:  # noqa: BLE001
+                orch = None
+            sm = None
+            llm = self._llm_provider
+            if orch is not None:
+                comps = getattr(orch, "components", None) or {}
+                mem = comps.get("memory")
+                sm = getattr(mem, "structured_memory", None) or getattr(mem, "_sm", None)
+                if llm is None:
+                    llm = comps.get("llm")
+            if sm is None:
+                logger.info("memory curator: structured_memory 不可用，跳过")
+                return
+            result = run_curator_all_known(sm, llm=llm)
+            logger.info("memory curator done: %s", result.get("sessions"))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("memory curator failed: %s", e)
 
     def _run_daily_maintenance(self) -> None:
         """每日维护"""

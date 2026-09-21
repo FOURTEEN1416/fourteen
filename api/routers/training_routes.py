@@ -201,6 +201,14 @@ async def get_proactive_config(_auth: bool = Security(verify_api_key_dep)):
     _mode = read_reply_mode()
     config["reply_mode"] = _mode
     config["reply_mode_label"] = reply_mode_label(_mode)
+    # LLM 主动决策 web 参数（2026-09-21）
+    scheduler2 = _scheduler_or_none()
+    if scheduler2 is not None and hasattr(scheduler2, "get_llm_proactive_config"):
+        config["llm_proactive"] = scheduler2.get_llm_proactive_config()
+    else:
+        from proactive.llm_proactive import read_web_proactive_config
+
+        config["llm_proactive"] = read_web_proactive_config()
     return config
 
 
@@ -271,6 +279,31 @@ async def update_proactive_config(
 
         write_reply_mode(req.reply_mode)
         logger.info("回复模式已切换: %s", req.reply_mode)
+
+    # LLM 主动决策参数（web 可调；注入 prompt，非硬编码日程表）
+    if any(
+        v is not None
+        for v in (
+            req.llm_proactive_enabled,
+            req.llm_proactive_style_hint,
+            req.llm_proactive_intensity,
+            req.llm_proactive_respect_quiet,
+            req.llm_proactive_character_hint,
+        )
+    ):
+        from proactive.scheduler import ProactiveScheduler
+
+        payload = {
+            "enabled": req.llm_proactive_enabled,
+            "style_hint": req.llm_proactive_style_hint,
+            "intensity": req.llm_proactive_intensity,
+            "respect_quiet_hours": req.llm_proactive_respect_quiet,
+            "character_hint": req.llm_proactive_character_hint,
+        }
+        ProactiveScheduler.write_config_file(
+            llm_proactive={k: v for k, v in payload.items() if v is not None}
+        )
+        logger.info("LLM 主动决策配置已更新: %s", {k: v for k, v in payload.items() if v is not None})
 
     logger.info(
         "Proactive config updated: threshold=%s max_daily=%s",

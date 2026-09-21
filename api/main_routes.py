@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import os
@@ -68,6 +68,15 @@ class ProactiveConfigRequest(BaseModel):
         default=None, pattern="^(immersive|novel)$",
         description="immersive=沉浸式真人聊天（不写动作神态）；novel=小说式（带动作神态）",
     )
+    # ── LLM 主动决策（web 可调，2026-09-21 用户裁决）──
+    llm_proactive_enabled: bool | None = Field(default=None, description="是否启用 LLM 主动决策")
+    llm_proactive_style_hint: str | None = Field(default=None, max_length=200, description="主动消息风格提示")
+    llm_proactive_intensity: str | None = Field(
+        default=None, pattern="^(low|normal|high)$",
+        description="控制台力度提示：low/normal/high（注入 LLM，非硬闸）",
+    )
+    llm_proactive_respect_quiet: bool | None = Field(default=None, description="是否将免打扰时段写入 prompt 供 LLM 遵守")
+    llm_proactive_character_hint: str | None = Field(default=None, max_length=200, description="角色补充提示")
 
 class ToolToggleRequest(BaseModel):
     enabled: bool

@@ -270,6 +270,13 @@ def create_api_app(
     app.include_router(tools_router)        #  6 端点: tools/* + plugins/*
     app.include_router(safety_router)       # 12 端点: safety/rag/voice/files/cache
     app.include_router(clone_router)        #  8 端点: clone/*
+    try:
+        from api.routers.agent_plane_routes import router as agent_plane_router
+
+        app.include_router(agent_plane_router)
+        logger.info("Agent Plane 路由已挂载 (/api/agent-plane/*)")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Agent Plane 路由挂载失败: %s", e)
     logger.info("主路由已拆分为 8 个子路由 (83 端点)")
 
     # ── 用户认证 API ──

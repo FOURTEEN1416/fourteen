@@ -462,6 +462,16 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
   const [fuDailyMax, setFuDailyMax] = useState(12)
   // 回复模式：沉浸式真人聊天 / 小说式（带动作神态）
   const [replyMode, setReplyMode] = useState<'immersive' | 'novel'>('immersive')
+  // LLM 主动决策（web 可调：人设/画像/风格注入 LLM，非硬编码日程）
+  const [llmEnabled, setLlmEnabled] = useState(true)
+  const [llmStyle, setLlmStyle] = useState('')
+  const [llmIntensity, setLlmIntensity] = useState<'low' | 'normal' | 'high'>('normal')
+  const [llmRespectQuiet, setLlmRespectQuiet] = useState(true)
+  const [llmCharHint, setLlmCharHint] = useState('')
+  // Agent Plane 回放
+  const [replayKey, setReplayKey] = useState('')
+  const [replayTurn, setReplayTurn] = useState('')
+  const [replayOut, setReplayOut] = useState<string>('')
   const [paused, setPaused] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState('')
@@ -492,6 +502,12 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
           setFuDailyMax(cfgRes.data.follow_up?.daily_max ?? 12)
           setReplyMode(cfgRes.data.reply_mode ?? 'immersive')
           setPaused(!!cfgRes.data.paused)
+          const lp = cfgRes.data.llm_proactive || {}
+          setLlmEnabled(lp.enabled !== false)
+          setLlmStyle(lp.style_hint || '')
+          setLlmIntensity((lp.intensity as 'low' | 'normal' | 'high') || 'normal')
+          setLlmRespectQuiet(lp.respect_quiet_hours !== false)
+          setLlmCharHint(lp.character_hint || '')
         }
         if (histRes?.data?.history) setHistory(histRes.data.history)
       } catch { /* 静默：未初始化引擎时展示占位 */ }
@@ -511,6 +527,11 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
         follow_up_delay2_seconds: fuDelay2,
         follow_up_daily_max: fuDailyMax,
         reply_mode: replyMode,
+        llm_proactive_enabled: llmEnabled,
+        llm_proactive_style_hint: llmStyle,
+        llm_proactive_intensity: llmIntensity,
+        llm_proactive_respect_quiet: llmRespectQuiet,
+        llm_proactive_character_hint: llmCharHint,
       })
       setSavedAt(new Date().toLocaleTimeString('zh-CN'))
     } catch (e) {
@@ -549,8 +570,71 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
   const todayCount = history.filter(h => (h.at || '').startsWith(new Date().toISOString().slice(0, 10))).length
   const lastAt = history[0]?.at ? new Date(history[0].at).toLocaleString('zh-CN') : '—'
 
+  async function handleReplay() {
+    try {
+      const { agentPlaneReplay } = await import('../../api/system')
+      const res = await agentPlaneReplay(replayKey.trim(), replayTurn.trim())
+      setReplayOut(JSON.stringify(res.data, null, 2).slice(0, 4000))
+    } catch (e) {
+      setReplayOut(e instanceof Error ? e.message : '回放失败')
+    }
+  }
+
+  async function handleCurate() {
+    try {
+      const { agentPlaneCurate } = await import('../../api/system')
+      const res = await agentPlaneCurate(replayKey.trim() || undefined)
+      setReplayOut(JSON.stringify(res.data, null, 2).slice(0, 4000))
+    } catch (e) {
+      setReplayOut(e instanceof Error ? e.message : '整理失败')
+    }
+  }
+
   return (
     <div className="space-y-4">
+      {/* LLM 主动决策 web 可调 */}
+      <Section title="LLM 主动决策（人设·画像·控制台）">
+        <p className="text-xs text-gray-500 mb-2">时机与文案由 LLM 综合判断；此处参数注入决策提示词，可动态调整。</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={llmEnabled} onChange={e => setLlmEnabled(e.target.checked)} />
+            启用 LLM 主动决策
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={llmRespectQuiet} onChange={e => setLlmRespectQuiet(e.target.checked)} />
+            免打扰时段写入 prompt（由 LLM 遵守）
+          </label>
+          <div>
+            <p className="text-xs text-gray-500 mb-1">力度提示</p>
+            <select className="w-full border rounded-lg px-2 py-1.5 text-sm" value={llmIntensity} onChange={e => setLlmIntensity(e.target.value as 'low' | 'normal' | 'high')}>
+              <option value="low">低（克制）</option>
+              <option value="normal">中（自然）</option>
+              <option value="high">高（更主动）</option>
+            </select>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 mb-1">风格提示（进 LLM）</p>
+            <input className="w-full border rounded-lg px-2 py-1.5 text-sm" value={llmStyle} onChange={e => setLlmStyle(e.target.value)} placeholder="例如：温柔、少用感叹号" maxLength={200} />
+          </div>
+          <div className="sm:col-span-2">
+            <p className="text-xs text-gray-500 mb-1">角色补充提示</p>
+            <input className="w-full border rounded-lg px-2 py-1.5 text-sm" value={llmCharHint} onChange={e => setLlmCharHint(e.target.value)} placeholder="可选，覆盖/补充角色人设口吻" maxLength={200} />
+          </div>
+        </div>
+      </Section>
+
+      {/* 因果回放 + curator */}
+      <Section title="状态账本 · 因果回放 / 记忆整理">
+        <div className="grid gap-2 sm:grid-cols-3">
+          <input className="border rounded-lg px-2 py-1.5 text-sm" placeholder="session_key 如 N:wxid" value={replayKey} onChange={e => setReplayKey(e.target.value)} />
+          <input className="border rounded-lg px-2 py-1.5 text-sm" placeholder="turn_id（回放用）" value={replayTurn} onChange={e => setReplayTurn(e.target.value)} />
+          <div className="flex gap-2">
+            <button className="flex-1 rounded-lg bg-sky-500 text-white text-sm py-1.5" onClick={handleReplay}>回放</button>
+            <button className="flex-1 rounded-lg bg-emerald-500 text-white text-sm py-1.5" onClick={handleCurate}>整理记忆</button>
+          </div>
+        </div>
+        {replayOut ? <pre className="mt-2 text-xs bg-gray-50 rounded-lg p-2 overflow-auto max-h-64 whitespace-pre-wrap">{replayOut}</pre> : null}
+      </Section>
       {/* Stats（真数据：/api/proactive/history + config） */}
       <Section title="消息统计">
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">

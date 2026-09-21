@@ -986,6 +986,23 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             from orchestrator.context_budget import inject_tool_context_before_phi
 
             system_prompt = inject_tool_context_before_phi(system_prompt, tool_results)
+            # AX P2：工具结果入因果账本（可回放「这句是否因工具而变」）
+            if session_id:
+                try:
+                    from shisi.agent_plane.event_ledger import EVENT_TOOL_RESULT
+                    from shisi.agent_plane.runtime import get_ledger
+
+                    get_ledger().append(
+                        session_key=session_id,
+                        event_type=EVENT_TOOL_RESULT,
+                        actor="orchestrator",
+                        payload={
+                            "chars": len(str(tool_results)),
+                            "preview": str(tool_results)[:400],
+                        },
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("tool result ledger append failed: %s", e)
 
         # ── 回复模式（web 控制端可切换，2026-09-19）──
         # 必须放在**最后**：角色卡/人格块里常写着"必须写动作神态"之类的格式要求，
