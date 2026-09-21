@@ -342,9 +342,9 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 | `_build_character()` | 双路径解析：角色卡优先（character_id）→ PersonaEngine 回退 |
 | `normalize_character_card()` | 新增 `utils/character_helpers.py`，统一展平 SillyTavern 角色卡格式 |
 
-### 4.4 my_character/ — 角色引擎（12 模块 + `__init__`，批6b 项10 死码清除后实况）
+### 4.4 my_character/ — 角色引擎（11 模块 + `__init__`，项10 + v1.35 死码清除后实况）
 
-> 项10 已删除：`emotion_memory.py`、`enhanced_prompt_engine.py`（含 `TimeContext`，原 103 fan-in 快照作废）、`persona_evaluator.py`、`style_enhancer_v2.py`（收敛为 `style_enhancer.py` 单版）、`anchor_protection.py`、`constraint_validator.py`、`contextual_behavior.py`、`evolution_engine.py`（详见 `docs/DELETION_LOG.md`）。`PersonaEngine` 三版并存 merge 化石（`build_complete_prompt`/`evolve`/`auto_evolve`/`validate_response` 等）一并移除，收敛为「五维画像 + 公共分层构建器 + verify_anchors + check_consistency + 只读 get_evolution_log」。
+> 项10 已删除：`emotion_memory.py`、`enhanced_prompt_engine.py`（含 `TimeContext`，原 103 fan-in 快照作废）、`persona_evaluator.py`、`style_enhancer_v2.py`（v2 于项10 删；v1 于 v1.35 删——`StyleEnhancer`/`EnhancedStyle`/`STYLE_DIMENSIONS` 全仓零消费者）、`anchor_protection.py`、`constraint_validator.py`、`contextual_behavior.py`、`evolution_engine.py`（详见 `docs/DELETION_LOG.md`）。`PersonaEngine` 三版并存 merge 化石（`build_complete_prompt`/`evolve`/`auto_evolve`/`validate_response` 等）一并移除，收敛为「五维画像 + 公共分层构建器 + verify_anchors + check_consistency + 只读 get_evolution_log」。
 
 | 模块 | 职责 | 备注 |
 |------|------|------|
@@ -354,7 +354,6 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 | `persona_engine.py` | 人格引擎 | 项10 收敛为存活面（prompt_mode 管线/两级缓存/演化写路径已删；`/api/persona/evolution-log` 只读、日志恒空属已知限制） |
 | `persona_card.py` / `persona_schema.py` | 角色卡 schema | — |
 | `persona_utils.py` | 人格工具 | `build_time_context()` 已于 v1.19 删（零调用） |
-| `style_enhancer.py` | 风格增强（v1） | — |
 | `tone_mimic.py` | 语气模仿 | `add_conversation` 由 `training_routes` 克隆摄入在用（非死码） |
 | `consistency_checker.py` | 回复一致性检查 | 热路径；项6 起按 `core_anchors` 缓存复用 |
 | `counter_rebuttal.py` | 反驳计数器 | 热路径节点 |

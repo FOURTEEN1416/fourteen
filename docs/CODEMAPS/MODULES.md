@@ -4,8 +4,8 @@
 > **✅ 2026-09-20 增量刷新**：在 09-19 全量刷新基线上补齐 09-19 晚通道隔离批次（wechat_direct 2→5 文件、api 44→45、routers 21→22）。
 > **⚠️ 09-17 死代码清洗留痕**：`shisi/wechat/command_handler.py`/`command_parser.py`（微信指令系统）已删除，正文已同步。
 
-**最近更新:** 2026-09-20
-**Python 版本:** ≥3.10 | **总文件:** **389** 个 .py（find 实测：模块 283 + 根级 2 + `scripts/` 11 + `tests/` 92 + `deploy/` 1；**不含** `frontend/` 与工作区内嵌的 `大创赛报名以及后期发展/` 目录）
+**最近更新:** 2026-09-21
+**Python 版本:** ≥3.10 | **总文件:** **406** 个 .py（find 实测：模块 283 + 根级 2 + `scripts/` 11 + `tests/` 92 + `deploy/` 1；**不含** `frontend/` 与工作区内嵌的 `大创赛报名以及后期发展/` 目录）
 
 ---
 
@@ -15,10 +15,10 @@
 |------|--------|------|------|------|
 | **shisi** | 116 | `shisi/` | DDD 核心域（角色/情感/记忆/故事线/知识库等，v2 死模块删除后口径） | ✅ 活跃 |
 | **api** | 45 | `api/` | FastAPI 路由层（22 routers + app_factory/achievement_engine/state 等） | ✅ 活跃 |
-| **my_character** | 13 | `my_character/` | 情感引擎 + 角色引擎（批6b 项10 死码清除：21→13，删 enhanced_prompt_engine/emotion_memory/persona_evaluator/style_enhancer_v2/anchor_protection/constraint_validator/contextual_behavior/evolution_engine 8 模块） | ✅ 活跃 |
+| **my_character** | 12 | `my_character/` | 情感引擎 + 角色引擎（批6b 项10 + v1.35 死码清除：21→12，删 enhanced_prompt_engine/emotion_memory/persona_evaluator/style_enhancer_v2/style_enhancer/anchor_protection/constraint_validator/contextual_behavior/evolution_engine 8 模块） | ✅ 活跃 |
 | **persona_extractor** | 13 | `persona_extractor/` | 人格提取与注入（+web_enricher 网络画像增强） | ✅ 活跃 |
-| **utils** | 11 | `utils/` | 公共工具：`local_time`（墙钟真源）/`fallback_lines`/`affinity_state`/`reply_mode`/`async_utils`/`important_dates`/`health_check`/`project_paths`/`bootstrap`/`character_helpers` | ✅ 活跃 |
-| **observability** | 9 | `observability/` | 可观测性（日志/指标/追踪/健康检查/sentry/优雅停机） | ✅ 活跃 |
+| **utils** | 16 | `utils/` | 公共工具：`local_time`（墙钟真源）/`fallback_lines`/`affinity_state`/`reply_mode`/`async_utils`/`important_dates`/`health_check`/`project_paths`/`bootstrap`/`character_helpers`/`prompt_sanitize`/`session_key`（会话键唯一解析，脊柱重构）/`llm_bridge`（LLM→同步桥）/`emotion_state`（按 user_key::character_id 情感状态）/`json_state`（data/*.json 原子写+flock） | ✅ 活跃 |
+| **observability** | 8 | `observability/` | 可观测性（日志/指标/健康检查/sentry/优雅停机；tracing 于 v1.35 删——span/start_trace 全仓零调用） | ✅ 活跃 |
 | **tools** | 10 | `tools/` | 工具系统（12 个内置工具） | ✅ 活跃 |
 | **orchestrator** | 9 | `orchestrator/` | 编排器（主类/init/stream mixin/会话锁/语音检测/console_chat/**tool_gate**/**context_budget**） | ✅ 活跃 |
 | ~~character_card~~ | 0 | ~~`character_card/`~~ | 角色卡解析/验证/构建/集成 —— **整包 6 文件已于批6b 项10 删除**（`CharacterCardAdapter` 零读者挂线，角色卡运行真源为 `persona_service._load_character_card` 直读 + `shisi/character/` PNG 子系统） | ❌ 已删 |
@@ -53,7 +53,7 @@
 | `character/` | 角色卡完整子系统（SillyTavern V2/V3 + PNG tEXt chunk） | `character_card_v2.py`, `png_codec.py`, `importer.py`, `exporter.py`, `manager.py`, `store.py`, `validator.py`, `models.py` |
 | `core/models/` | 领域模型 | `affinity_level.py`, `character_id.py`, `emotional_state.py`, `emotion_type.py`, `persona_profile.py`, `character_aggregate.py` |
 | `core/ports/` | 端口接口 | `character_repository.py` |
-| `core/services/` | 领域服务 | `emotion_detector.py`, `prompt_builder.py` |
+| `core/services/` | 领域服务 | `prompt_builder.py`（`emotion_detector.py` 于 v1.35 删——仅墓碑式 re-export，且其「好烦」净 +0.5 存在内在矛盾） |
 | `infrastructure/persistence/` | 持久化 | `sqlite_repository.py`, `schema.py` |
 | `infrastructure/migration/` | 迁移 | `migration_runner.py`, `rollback_runner.py` |
 | `memory/legacy/` | 记忆管线（生产路径，`legacy` 仅表历史迁移非待删除） | `memory_pipeline.py`, `working_memory.py`, `episodic_memory.py`, `semantic_memory.py`, `structured_memory.py`, `vector_memory.py`, `fact_extractor.py`, `importance_scorer.py`, `reflection_engine.py`, `conversation_summarizer.py`, `diary_summarizer.py`, `conflict_detector.py`, `cross_session_reasoner.py`, `forgetting_manager.py` |
@@ -64,7 +64,7 @@
 | `vital_signs/` | 生命指标 | `vital_engine.py`, `emotion_mapping.py` |
 | `sticker/` | 表情包 | `sticker_manager.py`, `emotion_recommender.py`, `safety_check.py`, `importer.py`, `default_provider.py` |
 | `voice/` | 语音 | `character_voice.py`, `emotion_tts.py`（EmotionTTS 仅余 VoiceEnhancer） |
-| `wechat/` | 微信集成 | `proactive_messenger.py`, `sticker_adapter.py`（command_handler/command_parser 已于 09-17 删除） |
+| `wechat/` | 微信集成 | `sticker_adapter.py`（`proactive_messenger.py` 于 v1.35 删——registry 实例化但 5 方法零生产调用）（command_handler/command_parser 已于 09-17 删除） |
 | `knowledge/` | 知识检索 | `retriever.py`, `character_knowledge_service.py`, `crawler_adapter.py` |
 | `ase/` | 场景叙事 | `scene_narrator.py` |
 | `vault/` | 数据收集 | `collect_loop.py`, `_persona_adapter.py` |

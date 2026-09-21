@@ -2784,3 +2784,37 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 
 - ⚠️ **未动服务器**：服务器侧只做了 `sha256sum` + `tar` 只读打包（`/tmp/` 两件临时产物，不影响服务）。
 - ⚠️ **卡目录内容不随 git 复现** → 已把「引用基线必须同时声明**卡数**与**工作树状态**」写进 `AGENTS.md` §4.3（十一次刷新注记）、`CODE_GRAPH.md` §1.1、`DATABASE.md`、`INDEX.md`、`README.md`。
+
+---
+
+## v1.35 · 备注式删除与逻辑矛盾收口 + 多窗口收仓（2026-09-21）
+
+**指令链**：「扫描仓库中的备注式删除，逻辑矛盾的代码设计」→「按推荐进行、激进一次性根治、严禁备注式清除」→「另一个窗口已经停止写了，全权交给你处理，进行最后的复核和收仓」。
+
+**方法**：AST 零引用分析（全仓 token 化，主仓 **406** 个 .py）+ 配置键消费矩阵（`get_config` 调用点全量核对）+ 同名常量异值比对。
+🔑 **两条实测教训**：① 通用词键（`name`/`mode`/`enabled`/`max`）的 token 计数**严重假阴性**，必须建消费矩阵；② **核查禁止 `head` 截断输出**——`voice.emotion_params` 的消费者恰在被截断的行里，直接导致一次真实回归（见「边界」）。
+
+**执行（全程可核验）**
+
+1. **配置真源收口**：`config/shisi.yaml` **234→41 行**（仅存 `memory` 5 键 + `affinity` 4 键 + `voice` 段）；`config/emotion.yaml` 删 `emotion.initial`/`affinity_levels`/`style_influence`/`energy` 四段；`config/system.yaml` 删 20 死键（含 3 处与顶层同名的 fusion 双真源）。**消除 `shisi.yaml security.*` 与 `system.yaml safety.*` 双套安全配置**——改前者静默无效。
+2. **4 个整模块删除**：`observability/tracing.py`（`tracer.span()` 全仓 **0 调用**、`start_trace()` 0 调用 → `get_trace_id()` 恒空的**假可观测性**；`TRACE_NODES` 18 节点纯声明）、`my_character/style_enhancer.py`、`shisi/core/services/emotion_detector.py`（仅墓碑式 re-export，其 `POSITIVE_WORDS` 含「好/想/对不起」致「好烦」净 **+0.5** 的内在矛盾随之消除）、`shisi/wechat/proactive_messenger.py`（registry 实例化但 5 方法零生产调用，同 2026-09-17 未接线微信能力裁决例）；连带 `shisi/api/registry.py` 3 处 + `api/app_factory.py` 状态清单 + 2 个测试。
+3. **死函数 / 死属性 / 兼容别名**：`api/path_security.py::safe_join_path`（含 `startswith` 前缀绕过缺陷）、`wechat_direct/wechat_connector.py::_clear_credentials`（已被 per-connector 凭证自愈取代）、`api/routers/storyline_routes.py::_persist_state_to_json` + `StorylineDetectResponse`、`api/routers/character_routes.py::MemoryFactResponse`、orchestrator 4 个零读取 property、6 个 `*V2`/`*Optimized` 兼容别名。
+4. **残留**：BOM(U+FEFF) 清除 ×2（`api/routers/auth_routes.py`、`scripts/enrich_persona_web.py`——此前使 `ast.parse(str)` 直接 SyntaxError）、`MIN_CHUNKS` 双阈值统一为 3、根目录 `.audit_block.py`/`.audit_dup.py` 删除。
+5. **多窗口收仓**：`37a72ab`（死码收口，25 文件 +115/−863）+ `c8dc2b1`（并行窗口在制品，34 文件 +2499/−444，含 `utils/session_key`/`llm_bridge`/`emotion_state`/`json_state` 与 `shisi/core/conversation_turn` 三大 owner 唯一化）。3 个 worktree（`-agent-x`/`-ax-review`/`-selftalk-fix`）已注销并移除目录、**分支全部保留**。
+6. **文档同步**：`AGENTS.md` v1.35；`CODE_GRAPH.md` §4.4（12→**11 模块**）+ 删除 `style_enhancer.py` 表格行；`docs/CODEMAPS/MODULES.md`（my_character 13→**12**、observability 9→**8**、utils 11→**16**、总文件 389→**406**、`core/services` 与 `wechat` 模块列表去死码、utils 补 4 新模块）。
+
+**验证**
+
+- `ruff check .`（0.16.8，CI 同版本）→ **All checks passed**；`pre-commit` 门禁（FF-0003/FF-0006/FF-0007/ADR）**两次提交均 Passed**。
+- `pytest --collect-only` → **1657**；分块实跑四块（306 + 442 + 466 + 416）**失败标记均为 0**。
+  ⚠️ 本机 `safe-delete` 钩子在 pytest 打印汇总行**之前**清理临时目录 → **exit=1 且日志无汇总行，属环境机制非测试失败**（判定须看进度条 `F` 标记，曾据此误判一次）。
+- 端点重测 `create_api_app` 内省：**APIRoute 220 / 唯一路径 186 / `len(app.routes)`=224**（105 GET / 79 POST / 16 PUT / 20 DELETE），与 v1.34 逐项一致（本次删的 4 模块均不含路由）。
+- 三份 yaml 解析通过；`voice` / `memory` 段与 HEAD **逐键一致**（回归修复校验）。
+- 跨文件 grep 扫残留：`CODE_GRAPH.md` / `MODULES.md` 中已删模块**仅剩「已删」注记**，无实指残留。
+
+**边界与副作用**
+
+- 🔴 **一次真实回归（本批次引入，已修复）**：`config/shisi.yaml` 的 `voice` 段被误删 → `shisi/voice/emotion_tts.py` 经 `get_config("voice","default_tts"/"emotion_params")` **真实消费** → `tests/test_modules.py::TestVoiceEnhancer` 2 例失败（`speed` 回落默认 1.0）。已恢复该段并复测 **27 passed**。根因：消费矩阵核查用 `head -30` 截断了输出。
+- 🔴 **`wt/selftalk-fix` 不可 merge**：其 fork 基点早于项2–10 死码清除，`git diff --name-status main wt/selftalk-fix` 的 A 类 **27 文件全是 main 已删死码**（`character_card/` 整包、`style_enhancer.py`+`v2`、`tracing.py`、`emotion_detector.py`、`proactive_messenger.py`、`knowledge/legacy/rag_engine.py`、`ase/trigger_engine.py`、`enhanced_prompt_engine.py` 等）→ merge 会**复活死码并把 132 文件回退到旧版**。分支保留作历史存档。
+- worktree 移除采用**分步执行**：三者的 `data/` 均是指向主仓的 **symlink**（`sqlite.db` inode 相同），`rm -rf <wt>/data/`（带尾斜杠）会**跟随链接删光主仓数据** → 先 `rm` 链接 → 验证主仓 `data/` 逐字节未变 → 再 `rm -rf` 残留目录。
+- **未部署服务器**（部署归用户裁决）；`peer-projects`（~250M，9 个外部克隆可 `git clone` 重建）与 `产物隔离_小凌研究`（393M，抖音原创采集**不可重建**）按裁决保留。
