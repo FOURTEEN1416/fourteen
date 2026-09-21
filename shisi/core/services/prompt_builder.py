@@ -18,6 +18,7 @@ def build(
     use_knowledge: bool = True,
     use_storyline: bool = True,
     tool_context: str = "",
+    knowledge_query: str = "",
 ) -> str:
     """构建系统提示词。
 
@@ -28,9 +29,15 @@ def build(
     4. 对话历史
     5. **工具结果（untrusted，历史后 / PHI 前）**
     6. 用户消息
+
+    ``knowledge_query``（批6b 项11）：RAG 检索查询与 system 回显解耦——
+    调用方把当前用户消息放这里仅作检索命中用，system prompt 中不回显
+    （回显会与 messages 末条重复）。缺省回落到 ``user_message``。
     """
     storyline_context = _get_storyline_context(character, use_storyline)
-    knowledge_context = _get_knowledge_context(character, user_message, use_knowledge)
+    knowledge_context = _get_knowledge_context(
+        character, knowledge_query or user_message, use_knowledge
+    )
 
     prompt = character.build_system_prompt(
         user_message=user_message,
@@ -86,9 +93,9 @@ def _get_storyline_context(character: CharacterAggregate, enabled: bool) -> str:
         return ""
 
 
-def _get_knowledge_context(character: CharacterAggregate, user_message: str, enabled: bool) -> str:
-    """获取 RAG 知识库上下文。"""
-    if not enabled or not character.id or not user_message:
+def _get_knowledge_context(character: CharacterAggregate, query: str, enabled: bool) -> str:
+    """获取 RAG 知识库上下文（query 为空则不检索）。"""
+    if not enabled or not character.id or not query:
         return ""
 
     try:
@@ -100,7 +107,7 @@ def _get_knowledge_context(character: CharacterAggregate, user_message: str, ena
         # 而此前仅注入 3 块（对 166 块的角色只用到 1.8%）。BM25 为 2-gram 关键词
         # 匹配、召回排序本就弱于语义检索，top_k 过小会把创作者写的人设细节挡在
         # prompt 之外。8 块在上下文预算内（单块为段落级，数十至数百字）。
-        return svc.get_knowledge_context(character.id, user_message, top_k=8)
+        return svc.get_knowledge_context(character.id, query, top_k=8)
     except Exception:
         logger.warning("RAG 知识检索失败（非阻塞）", exc_info=True)
         return ""

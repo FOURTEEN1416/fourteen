@@ -154,7 +154,7 @@
 1. `chat()` 失败不再改全局 `_current_index`（09-17 并发修复）语义正确；`_publish_current` 只在成功后发布。
 2. `_is_error_reply` 7 个哨兵与各 provider `_handle_error` 文案逐一比对无误伤/漏判（deepseek mock 是「无哨兵可判」，归 P0-9）。
 3. BM25 IDF 重建、`save/load_index` 全量序列化仅在建/换索引时发生，不在每轮路径。
-4. ~~prompt_builder 每轮 BM25 检索~~——更正：`prompt_builder.py:89-92` 知识槽要求 `user_message` 非空，而 persona_service:152-159 恒传 `user_message=""` → **该检索每轮根本不发生**（v1.15「prompt_builder 为知识注入唯一 owner」为注释谎；知识实际全靠 persona_service:180-186 的 rag_context 兜底段，单份注入成立、但 orchestrator rag 任务失败时**无任何兜底**，角色知识当轮整体消失——记入 P2）。
+4. ~~prompt_builder 每轮 BM25 检索~~——更正：`prompt_builder.py:89-92` 知识槽要求 `user_message` 非空，而 persona_service:152-159 恒传 `user_message=""` → **该检索每轮根本不发生**（v1.15「prompt_builder 为知识注入唯一 owner」为注释谎；知识实际全靠 persona_service:180-186 的 rag_context 兜底段，单份注入成立、但 orchestrator rag 任务失败时**无任何兜底**，角色知识当轮整体消失——记入 P2）。**【批6b 项11 已修，2026-09-21】**：`prompt_builder.build` 新增 `knowledge_query` 通道（检索查询与 system 回显解耦，缺省回落 user_message 保旧调用方语义）；persona_service 将收到的 `user_message` 转 `knowledge_query`（回显槽仍 `""`）；orchestrator `_prepare_context` 下传 `user_message=user_msg_clean` 接通生产路径。回归 5 例 + 突变验红 2/2（`tests/test_p2_batch6_persona.py` 项11 区段）。
 5. `asyncio.timeout` 需 3.11 而 pyproject 写 3.10——生产 venv 固定 3.12，仅声明口径问题。
 6. `_merge_attachments` 在已传 messages 时丢 attachments——主链从不同传两者，无现实触发。
 7. 卡文件名/id 不一致（有 glob 兜底）、`persona_extractor` 可 await 性、init 期 `_run_async`、`ensure_index` 已加载短路——均核实无恙。

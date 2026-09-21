@@ -15,6 +15,9 @@ rollback_to/auto_evolve、validate_response/auto_correct_response/
 check_anchor_consistency、enhanced_prompt_engine 等 8 模块、dynamic_anchor 强化回路、
 EmotionEngine 风格修饰器双接口、persona_service._build_chat_history、
 CharacterService 全链、character_card/ 包、prompt_mode 管线。
+6b 项11 知识槽检索查询与 system 回显解耦（审计 :157 排除项4更正）：persona_service
+恒传 user_message="" 使 prompt_builder 检索门槛（query 非空）永不满足→每轮 RAG
+不发生；新增 knowledge_query 通道，orchestrator 下传本轮原话只作检索命中。
 """
 
 from __future__ import annotations
@@ -797,3 +800,124 @@ def test_tone_mimic_add_conversation_still_alive():
 
     assert callable(getattr(ToneMimic, "add_conversation", None))
     assert "add_conversation" in inspect.getsource(training_routes)
+
+
+# ═══════════════════════════════════════════════════════════
+# 6b 项11 — 知识槽检索查询与 system 回显解耦（审计 :157）
+# ═══════════════════════════════════════════════════════════
+
+
+def _kb_aggregate(**kw):
+    from shisi.core.models.character_aggregate import CharacterAggregate
+
+    defaults: dict = dict(
+        id="kb0011",
+        name="测试角色",
+        description="她是测试角色。",
+    )
+    defaults.update(kw)
+    return CharacterAggregate(**defaults)
+
+
+class _RecordingKnowledgeSvc:
+    def __init__(self, ret="她最爱喝茉莉花茶。"):
+        self.queries: list[tuple[str, str]] = []
+        self._ret = ret
+
+    def has_index(self, cid):
+        return True
+
+    def index_character(self, cid, character):
+        raise AssertionError("索引在位时不应触发重建路径")
+
+    def get_knowledge_context(self, cid, query, top_k=8):
+        self.queries.append((cid, query))
+        return self._ret
+
+
+def test_prompt_builder_knowledge_query_decoupled_from_echo(monkeypatch):
+    """核心回归：user_message="" 时 knowledge_query 仍能驱动检索，且检索到的
+    知识入 system、用户原话不回显（修复前该组合下检索根本不发生）。"""
+    from shisi.core.services import prompt_builder
+
+    svc = _RecordingKnowledgeSvc()
+    monkeypatch.setattr(prompt_builder, "get_knowledge_service", lambda: svc)
+
+    prompt = prompt_builder.build(
+        _kb_aggregate(),
+        user_message="",
+        chat_history="",
+        use_knowledge=True,
+        use_storyline=False,
+        knowledge_query="她爱喝什么",
+    )
+    assert svc.queries == [("kb0011", "她爱喝什么")]
+    assert "# 角色知识库" in prompt
+    assert "她最爱喝茉莉花茶。" in prompt
+    assert "用户: 她爱喝什么" not in prompt  # 查询只检索，不回显
+
+
+def test_prompt_builder_knowledge_query_falls_back_to_user_message(monkeypatch):
+    """缺省回落：不传 knowledge_query 时用 user_message 做检索查询
+    （PromptService/test_storyline 等旧调用方语义不变）。"""
+    from shisi.core.services import prompt_builder
+
+    svc = _RecordingKnowledgeSvc()
+    monkeypatch.setattr(prompt_builder, "get_knowledge_service", lambda: svc)
+
+    prompt = prompt_builder.build(
+        _kb_aggregate(), user_message="还记得我吗", use_storyline=False
+    )
+    assert svc.queries == [("kb0011", "还记得我吗")]
+    assert "# 角色知识库" in prompt
+
+
+def test_prompt_builder_no_query_skips_retrieval(monkeypatch):
+    """两者皆空 → 零检索、无知识段（开场/无人工查询路径不受本批影响）。"""
+    from shisi.core.services import prompt_builder
+
+    svc = _RecordingKnowledgeSvc()
+    monkeypatch.setattr(prompt_builder, "get_knowledge_service", lambda: svc)
+
+    prompt = prompt_builder.build(_kb_aggregate(), use_storyline=False)
+    assert svc.queries == []
+    assert "# 角色知识库" not in prompt
+
+
+def test_persona_service_forwards_user_message_as_knowledge_query(monkeypatch):
+    """接线钉：persona_service 必须把收到的 user_message 转成 knowledge_query，
+    而 system 回显槽仍为 ""（v1.31 去重语义保留）。"""
+    from shisi.application import persona_service as ps_mod
+    from shisi.core.services import prompt_builder
+
+    captured: dict = {}
+    real_build = prompt_builder.build
+
+    def _spy(character, **kw):
+        captured.update(kw)
+        return real_build(character, **kw)
+
+    monkeypatch.setattr(prompt_builder, "build", _spy)
+    svc = _RecordingKnowledgeSvc()
+    monkeypatch.setattr(prompt_builder, "get_knowledge_service", lambda: svc)
+
+    ps = ps_mod.PersonaService(config_loader=None, llm_gateway=None)
+    token = "紫罗兰问题731"
+    prompt = ps.build_system_prompt(character_id="default", user_message=token)
+    assert captured["knowledge_query"] == token
+    assert captured["user_message"] == ""
+    assert ("default", token) in svc.queries or svc.queries, (
+        "user_message 非空时检索必须真实发生（经 knowledge_query 通道）"
+    )
+    assert f"用户: {token}" not in prompt
+
+
+def test_orchestrator_passes_current_message_for_knowledge_query():
+    """orchestrator 必须下传本轮原话——否则整条链在生产路径上仍是空查询。"""
+    from orchestrator.optimized_orchestrator import OptimizedOrchestrator
+
+    src = inspect.getsource(OptimizedOrchestrator._prepare_context)
+    assert "user_message=user_msg_clean" in src, (
+        "_prepare_context 必须把本轮消息传给 PersonaService（批6b 项11 接线），"
+        "否则知识检索在生产路径永不触发"
+    )

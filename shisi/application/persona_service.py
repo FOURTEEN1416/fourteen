@@ -185,6 +185,11 @@ class PersonaService:
             use_knowledge=True,
             use_storyline=False,
             tool_context=tool_context or "",
+            # 批6b 项11：检索查询与 system 回显解耦——旧实现 user_message="" 使
+            # prompt_builder 知识槽的检索门槛（query 非空）恒不满足，每轮 RAG 根本
+            # 不发生，角色知识只剩 orchestrator rag_context 兜底段（rag 任务失败即
+            # 当轮整体消失）。本轮原话只作检索命中，不回显进 system。
+            knowledge_query=user_message,
         )
 
         # 身份唯一 Owner（包 Q · A1）：

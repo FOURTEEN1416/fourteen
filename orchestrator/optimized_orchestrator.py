@@ -1002,6 +1002,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             chat_summary=chat_summary,
             world_info=world_info,
             character_id=character_id,
+            # 批6b 项11：仅作 prompt_builder 知识槽的检索查询，不回显进 system
+            user_message=user_msg_clean,
         )
 
         # 角色卡人设动态注入（v3.1）；身份唯一（包 Q · A1）：外部 character_id
