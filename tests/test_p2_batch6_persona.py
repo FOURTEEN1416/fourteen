@@ -830,7 +830,7 @@ class _RecordingKnowledgeSvc:
     def index_character(self, cid, character):
         raise AssertionError("索引在位时不应触发重建路径")
 
-    def get_knowledge_context(self, cid, query, top_k=8):
+    def get_knowledge_context(self, cid, query, top_k=8, exclude_sources=None):
         self.queries.append((cid, query))
         return self._ret
 

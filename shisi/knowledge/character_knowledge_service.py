@@ -219,9 +219,23 @@ class CharacterKnowledgeService:
                     merged.append(chunk)
         return RetrievalResult(chunks=merged[:top_k], ranked=True)
 
-    def get_knowledge_context(self, character_id: str, query: str, top_k: int = 3) -> str:
-        """获取格式化的知识上下文，直接用于 prompt 注入。"""
+    def get_knowledge_context(
+        self,
+        character_id: str,
+        query: str,
+        top_k: int = 3,
+        exclude_sources: set[str] | None = None,
+    ) -> str:
+        """获取格式化的知识上下文，直接用于 prompt 注入。
+
+        ``exclude_sources``：按块的来源字段排除（如卡片身份字段
+        ``character_name`` / ``personality.core_anchors`` / ``description``——
+        这些内容恒由角色设定/人设段以唯一 owner 注入，再以「知识」名义
+        回声即成同文本双份；批6b 项11 激活每轮 RAG 后由 prompt_builder 传入）。
+        """
         result = self.search(character_id, query, top_k=top_k)
+        if exclude_sources:
+            result.chunks = [c for c in result.chunks if c.source not in exclude_sources]
         context = result.to_prompt_context(k=top_k)
         return context
 

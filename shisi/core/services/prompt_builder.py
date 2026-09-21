@@ -98,6 +98,11 @@ def _get_knowledge_context(character: CharacterAggregate, query: str, enabled: b
     if not enabled or not character.id or not query:
         return ""
 
+    # 卡片身份字段的知识块恒由角色设定/人设段注入（唯一身份 owner），经知识槽
+    # 再回声即成同文本双份（2026-09-21 服务器实测：项11 激活每轮 RAG 后
+    # 「锚点只注入一次」不变量被 self-echo 打破）。检索出口按来源排除。
+    identity_sources = {"character_name", "personality.core_anchors", "description"}
+
     try:
         svc = get_knowledge_service()
         if not svc.has_index(character.id):
@@ -107,7 +112,9 @@ def _get_knowledge_context(character: CharacterAggregate, query: str, enabled: b
         # 而此前仅注入 3 块（对 166 块的角色只用到 1.8%）。BM25 为 2-gram 关键词
         # 匹配、召回排序本就弱于语义检索，top_k 过小会把创作者写的人设细节挡在
         # prompt 之外。8 块在上下文预算内（单块为段落级，数十至数百字）。
-        return svc.get_knowledge_context(character.id, query, top_k=8)
+        return svc.get_knowledge_context(
+            character.id, query, top_k=8, exclude_sources=identity_sources
+        )
     except Exception:
         logger.warning("RAG 知识检索失败（非阻塞）", exc_info=True)
         return ""

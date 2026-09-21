@@ -211,13 +211,28 @@ def test_prompt_builder_retrieves_knowledge_for_query() -> None:
     assert "# 角色知识库" in prompt, "带查询时知识块必须注入"
 
 
-def test_persona_service_injects_rag_exactly_once() -> None:
-    """PersonaService 路由的知识注入只出现一次（v1.15 去重的真实契约）。
+def test_persona_service_injects_rag_exactly_once(monkeypatch) -> None:
+    """PersonaService 路由的知识注入只出现一次（v1.15 去重契约 + 项11 演进）。
 
-    该路由给 prompt_builder 传 user_message=""（当前消息只走 messages），
-    所以本轮检索结果由 `rag_context` 承载；两处同时注入即为重复。
+    批6b 项11 后知识槽每轮真实检索（knowledge_query=user_message），
+    rag_context（orchestrator RAG 产出）降级为槽未产出时的唯一兜底；
+    两者由「# 角色知识库」在位守卫互斥。本用例以无索引服务钉兜底路径：
+    rag_context 是唯一知识段且内容在场。
     """
     from shisi.application.persona_service import PersonaService
+    from shisi.core.services import prompt_builder as pb
+
+    class _NoIndexSvc:
+        def has_index(self, cid):
+            return False
+
+        def index_character(self, cid, character):
+            pass
+
+        def get_knowledge_context(self, cid, query, top_k=8, exclude_sources=None):
+            return ""
+
+    monkeypatch.setattr(pb, "get_knowledge_service", lambda: _NoIndexSvc())
 
     path = _card_path_by_name("林挽夏")
     if path is None:
