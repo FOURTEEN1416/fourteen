@@ -18,9 +18,14 @@ llm:
   # 2026-09-18 调整：首选由 sensenova 改为 agnes，并移除 sensenova ——
   # 原链首选 sensenova 但生产 .env 从未配置 SENSENOVA_API_KEY，
   # 导致**每次对话都先白跑一轮失败尝试**才回退到 zhipu，是响应慢的固定来源。
+  # 2026-09-21 调整：agnes 由链首降到第二位（用户裁决）——
+  # agnes 的 /chat/completions 挂死（直连实测 ttfb=0、20s 零字节，而 /models 200、
+  # 模型在列、鉴权有效），单家就要付满 provider 超时 25s，用户侧表现为连续收到
+  # 超时兜底句「等我一下，刚才有点卡」。zhipu 实测 0.49s 正常出词，改居首位。
+  # agnes **不删除**：留作 zhipu 故障时的第二选择，其端点恢复后仍可提到链首。
   fallback_chain:
-    - agnes         # Agnes agnes-3.0-flash（OpenAI 兼容，首选）
     - zhipu         # 智谱AI GLM-4.7-Flash（永久免费）
+    - agnes         # Agnes agnes-3.0-flash（OpenAI 兼容，09-21 起第二位）
     - xunfei        # 讯飞星火 Spark Lite（永久免费）
     - baidu         # 百度千帆 ERNIE-Speed（每月50万免费Token）
 
