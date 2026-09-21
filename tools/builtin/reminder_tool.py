@@ -1,10 +1,54 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 
 from tools.base_tool import BaseTool, ToolResult
 
 logger = logging.getLogger("reminder_tool")
+
+# trigger_time 的合法格式与归一输出（到期轮询按字符串比较，必须与
+# StructuredMemory._now_local() 的 "%Y-%m-%d %H:%M:%S" 同构）。
+_TRIGGER_ACCEPT_FORMATS = ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S")
+_TRIGGER_STORE_FORMAT = "%Y-%m-%d %H:%M:%S"
+# 过去时刻容忍窗：容忍几分钟内的舍入误差（"现在马上提醒"），超过即视为
+# LLM 换算错误（算成了昨天/上礼拜）——照单全收会在下一拍立即投递并假成功。
+_PAST_TOLERANCE = timedelta(minutes=5)
+
+
+class TriggerTimeError(ValueError):
+    """trigger_time 非法（格式不符 / 不是真实存在的日历时刻 / 早于容忍窗）。"""
+
+
+def normalize_trigger_time(raw: str, now: datetime | None = None) -> str:
+    """校验并归一 trigger_time；非法抛 :class:`TriggerTimeError`。
+
+    2026-09-22 根治：旧实现把 LLM 给的任意字符串直接落库，到期判定是
+    **字符串比较** —— 「明早六点」「6:00」等畸形值按 Unicode 字典序恒大于
+    ``2026-…`` 前缀，**永不到期、永不投递、永不判死**，pending 却已 fulfilled
+    （v1.30「说了会叫却没叫」修复后的残留通道）。现在格式/日历有效性/过去
+    时刻三关全过才落库，失败信息回给终审模型重问或 ask_user。
+    """
+    text = str(raw or "").strip()
+    if not text:
+        raise TriggerTimeError("trigger_time_empty")
+    parsed: datetime | None = None
+    for fmt in _TRIGGER_ACCEPT_FORMATS:
+        try:
+            parsed = datetime.strptime(text, fmt)
+            break
+        except ValueError:
+            continue
+    if parsed is None:
+        raise TriggerTimeError(
+            f"trigger_time_bad_format:{text}（必须为北京时间 YYYY-MM-DD HH:MM）"
+        )
+    ref = now if now is not None else datetime.now()
+    if parsed < ref - _PAST_TOLERANCE:
+        raise TriggerTimeError(
+            f"trigger_time_in_past:{text}（已过去，请按当前时间 {ref:%Y-%m-%d %H:%M} 重新换算）"
+        )
+    return parsed.strftime(_TRIGGER_STORE_FORMAT)
 
 
 class ReminderTool(BaseTool):
@@ -50,15 +94,21 @@ class ReminderTool(BaseTool):
         session_key = str((meta or {}).get("session_key") or "")
         user_id = (meta or {}).get("user_id")
         try:
+            normalized = normalize_trigger_time(trigger_time)
+        except TriggerTimeError as e:
+            # 失败信息回给终审模型：格式错→重试换算；过去时刻→重新换算或 ask_user
+            logger.info("[reminder] trigger_time 校验失败: %s", e)
+            return ToolResult(False, error=str(e))
+        try:
             reminder_id = self._sm.add_reminder(
-                content, trigger_time, session_key=session_key, user_id=user_id,
+                content, normalized, session_key=session_key, user_id=user_id,
             )
             return ToolResult(True, data={
                 "reminder_id": reminder_id,
                 "content": content,
-                "trigger_time": trigger_time,
+                "trigger_time": normalized,
                 "deliver_to": session_key or "(无投递目标)",
-                "message": f"已设置提醒：{content}，时间 {trigger_time}",
+                "message": f"已设置提醒：{content}，时间 {normalized}",
             })
         except Exception:
             logger.exception("设置提醒失败")

@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -747,6 +747,80 @@ def test_mp_apply_forgetting_load_facts_exception_returns_zero():
     mp, vm, sm = _make_pipeline()
     sm.get_facts = lambda **kwargs: (_ for _ in ()).throw(RuntimeError("db fail"))  # type: ignore[method-assign]
     assert mp._apply_forgetting() == 0
+
+
+# ── 遗忘模型时间输入契约（2026-09-22 修复回归）────────────────────
+# 缺陷：user_facts.updated_at 是 SQLite CURRENT_TIMESTAMP 的 **naive UTC** 串，
+# 旧实现拿它与 aware UTC 相减必抛 TypeError，被 except 吞成 days_old=30.0 恒值
+# → 低置信度事实每晚误删、高置信度永不遗忘。既有测试用 aware ISO 串喂假库，
+# 与生产形态不符，因此从未抓到 —— 以下用例一律用**生产同构的 naive 串**。
+
+
+class TestFactAgeDays:
+    def test_naive_sqlite_string_treated_as_utc(self):
+        from shisi.memory.legacy.memory_pipeline import _fact_age_days
+
+        now = datetime(2026, 9, 22, 12, 0, 0, tzinfo=timezone.utc)
+        # naive 串 = UTC 30 天前
+        ts = (now - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+        assert _fact_age_days(ts, now=now) == pytest.approx(30.0, abs=0.01)
+
+    def test_aware_iso_keeps_tz(self):
+        from shisi.memory.legacy.memory_pipeline import _fact_age_days
+
+        now = datetime(2026, 9, 22, 12, 0, 0, tzinfo=timezone.utc)
+        aware = (now - timedelta(days=2)).isoformat()
+        assert _fact_age_days(aware, now=now) == pytest.approx(2.0, abs=0.01)
+
+    @pytest.mark.parametrize("bad", ["", None, "not-a-date", "2026-13-40 99:00"])
+    def test_unparsable_or_missing_is_zero_not_30(self, bad):
+        from shisi.memory.legacy.memory_pipeline import _fact_age_days
+
+        assert _fact_age_days(bad) == 0.0
+
+    def test_future_timestamp_clamped_to_zero(self):
+        from shisi.memory.legacy.memory_pipeline import _fact_age_days
+
+        now = datetime(2026, 9, 22, 12, 0, 0, tzinfo=timezone.utc)
+        future = (now + timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+        assert _fact_age_days(future, now=now) == 0.0
+
+
+def _naive_utc_in(hours_delta: float) -> str:
+    """生产同构时间戳：SQLite CURRENT_TIMESTAMP 形态（naive UTC）。"""
+    return (
+        datetime.now(tz=timezone.utc) - timedelta(hours=hours_delta)
+    ).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def test_fresh_low_confidence_fact_survives_forgetting():
+    """1 小时前写入的 0.5 置信度事实**不得**被遗忘（旧实现因 days_old=30 恒值必删）。"""
+    mp, vm, sm = _make_pipeline(forgetting_model="exponential")
+    sm.add_fact("刚说的爱好", "preference", 0.5)
+    sm.facts[0]["updated_at"] = _naive_utc_in(1.0)
+    assert mp._apply_forgetting() == 0
+    assert len(sm.facts) == 1
+
+
+def test_truly_old_low_confidence_fact_is_forgotten():
+    """60 天前的 0.5 置信度事实**应当**被遗忘（按龄衰减在两个方向都生效）。"""
+    mp, vm, sm = _make_pipeline(forgetting_model="exponential")
+    sm.add_fact("很久以前的碎片", "general", 0.5)
+    sm.facts[0]["updated_at"] = _naive_utc_in(24.0 * 60.0)
+    assert mp._apply_forgetting() >= 1
+    assert sm.facts == []
+
+
+def test_recent_accessed_fact_survives_and_old_garbage_ts_kept():
+    """回忆强化生效（access 抬高等效重要性）+ 坏时间戳 fail-safe 保留。"""
+    mp, vm, sm = _make_pipeline(forgetting_model="exponential")
+    sm.add_fact("常被想起的事", "preference", 0.5)
+    sm.facts[0]["updated_at"] = _naive_utc_in(24.0 * 60.0)
+    sm.facts[0]["access_count"] = 10  # +0.3 封顶 → eff=0.8 → lam=high，不删
+    sm.add_fact("时间戳损坏的事实", "general", 0.5)
+    sm.facts[1]["updated_at"] = "???"
+    assert mp._apply_forgetting() == 0
+    assert len(sm.facts) == 2
 
 
 # ── 深夜情感加权必须走本地时钟（2026-09-20 修复回归）────────────────────

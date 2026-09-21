@@ -211,13 +211,61 @@ def test_scheduler_daily_maintenance_targets_live_engines(monkeypatch):
     monkeypatch.setattr(deps_mod.deps, "gf", fake_mgr)
     # 好感度衰减块不碰真库
     monkeypatch.setattr(deps_mod.deps, "shisi_reg", None)
-    monkeypatch.setattr(sched, "_hours_since_last_check", lambda: 3.0)
+    # 2026-09-22 契约：衰减时长改用独立基准（旧 `_hours_since_last_check` 是
+    # 「距上次 ASE tick」≈5 分钟，衰减实际从未发生）
+    monkeypatch.setattr(sched, "_hours_since_last_emotion_decay", lambda: 3.0)
     monkeypatch.setattr(sched, "_check_important_dates", lambda: None)
     monkeypatch.setattr(
         sched_mod, "run_achievement_maintenance", lambda: 0, raising=False
     )
     sched._run_daily_maintenance()
     assert recorded == [3.0]
+
+
+def test_emotion_decay_baseline_semantics(monkeypatch):
+    """衰减专用基准三契约（2026-09-22 修复锁定）：
+    ① 进程内未衰减过 → 0 小时（首夜不衰减，离线冷却由引擎 restore 承担）；
+    ② 基准为 24h 前 → 返回 ≈24（每日维护传真实时长，而非距 ASE tick 的 ≈5 分钟）；
+    ③ 维护执行后基准推进；apply 失败不推进（线性衰减下次补足，总量守恒）。"""
+    from datetime import datetime, timedelta, timezone
+
+    from proactive import scheduler as sched_mod
+    from proactive.scheduler import ProactiveScheduler
+
+    sched = ProactiveScheduler()
+    # ①
+    assert sched._hours_since_last_emotion_decay() == 0.0
+    # ②
+    sched._last_emotion_decay = datetime.now(tz=timezone.utc) - timedelta(hours=24)
+    assert sched._hours_since_last_emotion_decay() == pytest.approx(24.0, abs=0.01)
+
+    # ③-a 成功路径：基准推进
+    recorded: list[float] = []
+    fake_mgr = SimpleNamespace(apply_time_decay_all=lambda h: (recorded.append(h), 2)[1])
+    import api.deps as deps_mod
+
+    monkeypatch.setattr(deps_mod.deps, "gf", fake_mgr)
+    monkeypatch.setattr(deps_mod.deps, "shisi_reg", None)
+    monkeypatch.setattr(sched, "_hours_since_last_emotion_decay", lambda: 24.0)
+    monkeypatch.setattr(sched, "_check_important_dates", lambda: None)
+    monkeypatch.setattr(sched_mod, "run_achievement_maintenance", lambda: 0, raising=False)
+    before = datetime.now(tz=timezone.utc)
+    sched._run_daily_maintenance()
+    assert recorded == [24.0]
+    assert sched._last_emotion_decay is not None
+    assert sched._last_emotion_decay >= before - timedelta(seconds=1)
+
+    # ③-b 失败路径：apply 抛异常 → 基准不推进（下个维护日补足时长）
+    def _boom(hours):
+        recorded.append(hours)
+        raise RuntimeError("mgr down")
+
+    sched._last_emotion_decay = datetime.now(tz=timezone.utc) - timedelta(hours=48)
+    monkeypatch.setattr(deps_mod.deps, "gf", SimpleNamespace(apply_time_decay_all=_boom))
+    monkeypatch.setattr(sched, "_hours_since_last_emotion_decay", lambda: 48.0)
+    sched._run_daily_maintenance()
+    assert recorded == [24.0, 48.0]
+    assert sched._last_emotion_decay < before
 
 
 # ═══════════════════════════════════════════════════════════

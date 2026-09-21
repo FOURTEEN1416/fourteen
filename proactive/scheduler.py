@@ -137,7 +137,13 @@ class ProactiveScheduler:
         self._scheduler: Any = None
         self._active_tasks: dict[str, bool] = {}
 
-        self._last_check_time: datetime | None = None
+        # 情绪时间衰减的独立基准（2026-09-22 修复）。
+        # 旧实现误用「距上次 ASE tick」当衰减时长——ASE 每 5 分钟跑一次并刷新
+        # 基准，每日维护时刻 hours≈0.08，`apply_time_decay`（线性按小时）形同
+        # 关闭，用户级引擎情绪永不冷却。现单独记录上次衰减时刻；None 表示
+        # 本进程尚未衰减过（首次维护不衰减：离线冷却已由引擎 restore 按真实
+        # 离线时长承担，避免重启后首夜重复计衰减）。
+        self._last_emotion_decay: datetime | None = None
 
         # 通道注册表（支持多通道投递）
         self._channels: dict[str, Callable[[], Any]] = {}        # name → sender_factory
@@ -374,7 +380,6 @@ class ProactiveScheduler:
                 )
 
             self._scheduler.start()
-            self._last_check_time = datetime.now(tz=timezone.utc)
             # 知识库定期采集任务按持久化配置恢复
             self._sync_vault_job()
             logger.info("Scheduler started with %d jobs", len(self._scheduler.get_jobs()))
@@ -759,8 +764,6 @@ class ProactiveScheduler:
             self._check_ase_per_user()
         except Exception as e:  # noqa: BLE001
             logger.error("ASE check failed: %s", e)
-        finally:
-            self._last_check_time = datetime.now(tz=timezone.utc)
 
     def _check_ase_per_user(self) -> None:
         """P1：主动消息由 **LLM 判断**是否开口、说什么（用户裁决：无策略闸）。
@@ -1103,14 +1106,19 @@ class ProactiveScheduler:
 
         # 情感时间衰减 — 审计 item45：打向**每用户存活引擎**（UserManager 真态）。
         # 旧实现打在 orchestrator 模板引擎上，其 state 无任何读者=功能不存在。
+        # 2026-09-22：衰减时长改用独立基准 `_hours_since_last_emotion_decay`
+        # （旧实现误用距上次 ASE tick 的 ≈5 分钟，衰减实际从未发生）。
         try:
-            hours = self._hours_since_last_check()
+            hours = self._hours_since_last_emotion_decay()
             if hours > 0:
                 from api.deps import deps as _deps
                 user_mgr = getattr(_deps, "gf", None)
                 decayed = 0
                 if user_mgr is not None and hasattr(user_mgr, "apply_time_decay_all"):
                     decayed = user_mgr.apply_time_decay_all(hours)
+                    # 衰减线性于 hours，成功后推进基准；失败不推进（下次把
+                    # 未衰减的时长补上，总量守恒）
+                    self._last_emotion_decay = datetime.now(tz=timezone.utc)
                 logger.info(
                     "情感时间衰减已应用: %.2f 小时，覆盖 %d 个用户引擎", hours, decayed
                 )
@@ -1251,11 +1259,16 @@ class ProactiveScheduler:
 
     # ── 工具方法 ─────────────────────────────────────────
 
-    def _hours_since_last_check(self) -> float:
-        if self._last_check_time:
-            delta = datetime.now(tz=timezone.utc) - self._last_check_time
-            return delta.total_seconds() / 3600
-        return 0.0
+    def _hours_since_last_emotion_decay(self) -> float:
+        """距上次**成功执行**情绪时间衰减的小时数（衰减专用基准）。
+
+        2026-09-22：取代误用作衰减时长的 `_hours_since_last_check`（后者是
+        「距上次 ASE tick」，≤5 分钟，导致每日衰减形同关闭）。
+        """
+        if self._last_emotion_decay is None:
+            return 0.0
+        delta = datetime.now(tz=timezone.utc) - self._last_emotion_decay
+        return max(0.0, delta.total_seconds() / 3600)
 
     def get_jobs(self) -> list[dict[str, Any]]:
         """获取所有任务状态"""

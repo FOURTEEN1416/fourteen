@@ -118,6 +118,35 @@ def _user_key_from_session(session_id: str) -> str:
     return StructuredMemory.user_key_from_session(session_id)
 
 
+def _fact_age_days(updated_at: Any, now: datetime | None = None) -> float:
+    """``user_facts.updated_at`` → 距今**天数**（遗忘模型的时间输入）。
+
+    存储层该列由 SQLite ``CURRENT_TIMESTAMP`` 写入 —— **无时区标记的 UTC**
+    墙钟串（``YYYY-MM-DD HH:MM:SS``）。旧实现拿它直接与
+    ``datetime.now(tz=timezone.utc)`` 相减：naive − aware 必抛 ``TypeError``，
+    被 except 吞成 ``days_old = 30.0`` 恒值 → 遗忘判定与真实记忆年龄完全脱钩
+    （低置信度事实每晚误删、高置信度永不遗忘，按龄指数衰减整体失效）。
+
+    本函数即修复：
+    - naive 串按项目约定解释为 **UTC**（时间差运算统一 UTC，见 utils/local_time
+      使用纪律），aware ISO 串原样保留时区；
+    - 解析失败/缺失返回 ``0.0``（视为"刚写入"）—— 年龄未知时**不得**触发遗忘
+      （fail-safe 保留数据；垃圾数据仍由低置信度清理兜底）；
+    - 负年龄（未来时间戳，坏数据）钳到 0。
+    """
+    ref = now if now is not None else datetime.now(tz=timezone.utc)
+    if not isinstance(updated_at, str) or not updated_at.strip():
+        return 0.0
+    try:
+        parsed = datetime.fromisoformat(updated_at.strip().replace("Z", "+00:00"))
+    except ValueError:
+        logger.debug("updated_at 无法解析，按 0 天龄处理: %r", updated_at)
+        return 0.0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return max(0.0, (ref - parsed).total_seconds() / 86400)
+
+
 def _load_shisi_memory_config() -> dict:
     """从 config/shisi.yaml memory: 读取（B3 接线）；失败时回落硬编码默认。"""
     defaults = {
@@ -943,18 +972,9 @@ class MemoryPipeline:
             return 0
 
         for fact in facts:
-            try:
-                updated_at_str = fact.get("updated_at", "")
-                if updated_at_str:
-                    updated_dt = datetime.fromisoformat(
-                        updated_at_str.replace("Z", "+00:00")
-                    ) if isinstance(updated_at_str, str) else datetime.now(tz=timezone.utc)
-                    days_old = (datetime.now(tz=timezone.utc) - updated_dt).total_seconds() / 86400
-                else:
-                    days_old = 30.0
-            except Exception as e:  # noqa: BLE001
-                logger.debug("Failed to parse fact updated_at, using default: %s", e)
-                days_old = 30.0
+            # 2026-09-22 修复：时间输入统一经 _fact_age_days —— 旧实现 naive/aware
+            # 相减恒抛 TypeError 被 except 吞成 30.0，按龄遗忘整体失效（见其 docstring）。
+            days_old = _fact_age_days(fact.get("updated_at"))
 
             importance = fact.get("confidence", 0.5)
             access_count = fact.get("access_count", 0)

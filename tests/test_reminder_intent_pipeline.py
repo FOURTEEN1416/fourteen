@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -18,10 +19,21 @@ from orchestrator.optimized_orchestrator import OptimizedOrchestrator
 from proactive.reminder_delivery import ReminderDeliveryTask
 from shisi.memory.legacy.structured_memory import StructuredMemory
 from tools.base_tool import ToolResult
-from tools.builtin.reminder_tool import CalendarQueryTool, ReminderTool
+from tools.builtin.reminder_tool import (
+    CalendarQueryTool,
+    ReminderTool,
+    TriggerTimeError,
+    normalize_trigger_time,
+)
 
 # 昨晚事故原话——必须命中的头号回归用例
 LAST_NIGHT_MSG = "明早六点记得发消息给我，叫我起床，听到没有？"
+
+
+def _future_trigger(days: int = 1, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """动态未来时刻：trigger_time 过去校验（2026-09-22 契约）下写死日期会随
+    时间推移整体翻车，统一用例内计算。"""
+    return (datetime.now() + timedelta(days=days)).strftime(fmt)
 
 
 # ── L0 晋级线 ─────────────────────────────────────────────
@@ -127,7 +139,7 @@ class TestFinalReview:
                     "name": "set_reminder",
                     "arguments": json.dumps({
                         "content": "叫我起床",
-                        "trigger_time": "2026-09-20 06:00",
+                        "trigger_time": _future_trigger(),
                     }),
                 }
             }],
@@ -220,7 +232,7 @@ class TestFinalReview:
                 "function": {
                     "name": "set_reminder",
                     "arguments": json.dumps({
-                        "content": "起床", "trigger_time": "2026-09-21 07:00",
+                        "content": "起床", "trigger_time": _future_trigger(),
                     }),
                 }
             }],
@@ -494,3 +506,66 @@ class TestLegacyMigration:
             assert memory.get_due_reminders() == []
         finally:
             memory.close()
+
+
+# ── trigger_time 校验契约（2026-09-22 根治批次）──────────────
+# 缺陷：LLM 给的任意字符串直接落库，到期判定是字符串比较——「明早六点」
+# 「6:00」按字典序恒大于 "2026-…" 前缀，永不到期、永不投递，pending 却已
+# fulfilled（「说了会叫却没叫」的残留通道）。以下锁定三关校验行为。
+
+
+class TestTriggerTimeValidation:
+    def test_minute_format_normalized_to_seconds(self):
+        assert (
+            normalize_trigger_time("2026-10-01 06:00", now=datetime(2026, 9, 22, 12, 0, 0))
+            == "2026-10-01 06:00:00"
+        )
+
+    def test_seconds_format_passthrough(self):
+        assert (
+            normalize_trigger_time("2026-10-01 06:30:15", now=datetime(2026, 9, 22, 12, 0, 0))
+            == "2026-10-01 06:30:15"
+        )
+
+    @pytest.mark.parametrize("bad", [
+        "明早六点",           # LLM 未换算的中式表达
+        "6:00",               # 缺日期（字典序恒大于日期前缀 → 原本永不到期）
+        "明天早上七点",
+        "2026-13-40 08:00",   # 非真实日历时刻
+        "",
+    ])
+    def test_bad_format_rejected(self, bad):
+        with pytest.raises(TriggerTimeError) as ei:
+            normalize_trigger_time(bad, now=datetime(2026, 9, 22, 12, 0, 0))
+        assert "trigger_time_bad_format" in str(ei.value) or "trigger_time_empty" in str(ei.value)
+
+    def test_distant_past_rejected(self):
+        with pytest.raises(TriggerTimeError) as ei:
+            normalize_trigger_time("2020-01-01 08:00", now=datetime(2026, 9, 22, 12, 0, 0))
+        assert "trigger_time_in_past" in str(ei.value)
+
+    def test_near_past_within_tolerance_accepted(self):
+        near = datetime.now() - timedelta(minutes=2)
+        normalized = normalize_trigger_time(near.strftime("%Y-%m-%d %H:%M:%S"))
+        assert normalized  # 容忍窗内（"现在马上"）接受
+
+    def test_tool_rejects_without_writing(self, sm):
+        tool = ReminderTool(sm)
+        result = tool.execute(content="叫我起床", trigger_time="明早六点")
+        assert result.success is False
+        assert "trigger_time_bad_format" in str(result.error)
+        assert sm.get_pending_reminders() == []
+
+    def test_tool_normalizes_on_success(self, sm):
+        tool = ReminderTool(sm)
+        raw = _future_trigger()  # "%Y-%m-%d %H:%M"
+        result = tool.execute(
+            content="叫我起床",
+            trigger_time=raw,
+            _meta={"session_key": "2:oX@im.wechat", "user_id": 2},
+        )
+        assert result.success is True
+        stored = sm.get_pending_reminders(session_key="2:oX@im.wechat")
+        assert len(stored) == 1
+        # 归一输出与输入同源：分钟精度 + ":00" 秒（与投递轮询的比较格式同构）
+        assert stored[0]["trigger_time"] == f"{raw}:00"
