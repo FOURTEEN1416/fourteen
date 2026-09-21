@@ -1,5 +1,25 @@
 # Code Deletion Log
 
+## [2026-09-21] shisi/ase/trigger_engine 死桩删除（P2 批6b 项3）
+
+### 删除对象与证据
+- `shisi/ase/trigger_engine.py`（252 行，五类触发器 + TriggerEngine）与 `tests/test_shisi_ase.py`（148 行，全部为该死桩的 dataclass 构造测试）
+  - **零调用**：全仓 grep `check_time_triggers / check_stage_triggers / check_affinity_triggers / check_event_triggers / check_idle_triggers / register_default_triggers / get_all_triggers` **无任何调用者**；`get_all_triggers` 本身就是 `return []` 死桩
+  - 唯一"使用"是 `WeChatProactiveMessenger.__init__` 构造一个实例并挂 `trigger_engine` 属性——该属性全仓无人读取 → 一并移除 import/字段/属性
+  - 现役主动消息链路（`proactive/ase_engine.py` + `scheduler`）从不经过此引擎
+
+### 同批修正
+- `shisi/ase/__init__.py` docstring 去除"多类型触发器"能力宣称（虚假声明）
+- `docs/CODEMAPS/MODULES.md` 删除 `knowledge/legacy/` 行（上条已删模块）与 `ase/` 行中的 `trigger_engine.py`
+
+### 验证
+- `tests/test_wechat.py` / `test_integration.py`（WeChatProactiveMessenger 现役接口）全绿
+
+### Impact
+- 删除 2 文件 + 死属性；现役主动消息行为零变更
+
+**Reversible**: git revert 即恢复。
+
 ## [2026-09-21] shisi/knowledge/legacy（RAGEngineV2 整包）+ test_rag_engine 删除（P2 批6b）
 
 ### 删除对象与证据

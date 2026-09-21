@@ -9,7 +9,6 @@ import logging
 from typing import Any
 
 from shisi.ase.scene_narrator import SceneNarrator
-from shisi.ase.trigger_engine import TriggerEngine
 from shisi.storyline.engine import get_storyline_engine
 
 from ..affinity.enhancer import AffinityEnhancer
@@ -32,11 +31,6 @@ class WeChatProactiveMessenger:
         self._affinity = affinity_enhancer
         self._stage = stage_engine
         self._scene_narrator = SceneNarrator(get_storyline_engine())
-        self._trigger_engine = TriggerEngine(get_storyline_engine())
-
-    @property
-    def trigger_engine(self) -> TriggerEngine:
-        return self._trigger_engine
 
     # ── 原有接口（向后兼容） ──
 

@@ -66,8 +66,7 @@
 | `voice/` | 语音 | `character_voice.py`, `emotion_tts.py`（EmotionTTS 仅余 VoiceEnhancer） |
 | `wechat/` | 微信集成 | `proactive_messenger.py`, `sticker_adapter.py`（command_handler/command_parser 已于 09-17 删除） |
 | `knowledge/` | 知识检索 | `retriever.py`, `character_knowledge_service.py`, `crawler_adapter.py` |
-| `knowledge/legacy/` | RAGEngineV2（保留，被 tests/test_rag_engine.py 52 处引用） | `rag_engine.py` |
-| `ase/` | 场景叙事 | `scene_narrator.py`, `trigger_engine.py` |
+| `ase/` | 场景叙事 | `scene_narrator.py` |
 | `vault/` | 数据收集 | `collect_loop.py`, `_persona_adapter.py` |
 | `stats/` | 统计 | `analytics.py` |
 
