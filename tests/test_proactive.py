@@ -770,19 +770,23 @@ def test_skip_reason_min_interval(tmp_path):
     engine = _make_engine(tmp_path, max_daily_messages=8)
     _open_now(engine)
     engine._daily_message_count = 0
-    engine._last_proactive_time = datetime.now(tz=timezone.utc)
+    # P1-25：adaptive 的 min_interval 以**投递记账时刻**为基准
+    # （_last_proactive_time 会被 on_chat 拨到回复时刻，不再兼任该闸）
+    engine._last_delivery_time = datetime.now(tz=timezone.utc)
 
     assert engine.tick(90.0) is None
     assert engine._last_skip_reason == "min_interval"
 
 
 def test_skip_reason_below_threshold(tmp_path):
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
 
     engine = _make_engine(tmp_path, max_daily_messages=8)
     _open_now(engine)
     _no_scene(engine)
-    engine._last_chat_time = datetime.now(tz=timezone.utc)
+    # 默认即 adaptive：回复冷却（10 分钟）与最小间隔都要避开才能测到紧迫度闸。
+    # 上次聊天 15 分钟前 → 过冷却，且 _hours_since_last_chat()≈0.25 < 0.5 不升紧迫度。
+    engine._last_chat_time = datetime.now(tz=timezone.utc) - timedelta(minutes=15)
     engine.urgency.reset()
 
     assert engine.tick(0.0) is None

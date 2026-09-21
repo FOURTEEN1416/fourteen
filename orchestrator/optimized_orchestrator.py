@@ -1027,8 +1027,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     get_ledger().append(
                         session_key=session_id,
                         event_type=EVENT_TOOL_RESULT,
+                        character_id=str(character_id or ""),
                         actor="orchestrator",
                         turn_id=str(_tid),
+                        reply_id=str(ax_reply_id),
                         payload={
                             "chars": len(str(tool_results)),
                             "preview": str(tool_results)[:400],

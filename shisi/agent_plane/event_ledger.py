@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Iterable
 from contextlib import closing
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -203,6 +203,22 @@ class EventLedger:
             data = dict(raw)
             out.append(self.append(**data))
         return out
+
+    def prune(self, retention_days: int = 30) -> int:
+        """P1-51：账本保留策略——删除早于 retention_days 的事件行，返回删除数。
+
+        旧实现只 append 不 prune，chat/tool/profile/web_disabled 全类型常驻，
+        data/agent_plane.db 无界增长。由夜间 curator 任务（02:17）每日调用。
+        """
+        days = max(1, int(retention_days))
+        cutoff = (datetime.now().astimezone() - timedelta(days=days)).isoformat(
+            timespec="seconds"
+        )
+        with closing(self._conn()) as conn, conn:
+            cur = conn.execute(
+                "DELETE FROM event_ledger WHERE created_at < ?", (cutoff,)
+            )
+            return cur.rowcount
 
     @staticmethod
     def _row_to_event(row: sqlite3.Row) -> LedgerEvent:

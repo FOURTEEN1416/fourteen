@@ -108,9 +108,12 @@ async def agent_plane_curate(
     try:
         import sqlite3
         from contextlib import closing
-        from pathlib import Path
 
-        db = Path("data/sqlite.db")
+        from utils.project_paths import project_path
+
+        # P1-52：锚定项目根（旧 Path("data/sqlite.db") 按 CWD 解析，
+        # 非仓库根启动时全库扫描静默返回空 keys）
+        db = project_path("data", "sqlite.db")
         if db.exists():
             with closing(sqlite3.connect(str(db))) as conn:
                 rows = conn.execute(

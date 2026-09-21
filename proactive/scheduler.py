@@ -15,6 +15,8 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
+import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -127,6 +129,15 @@ class ProactiveScheduler:
         self._llm_provider: Any | None = None
         # AX 审查 B3：执行 LLM 自己给出的 wait_minutes（非硬编码日程表）
         self._llm_proactive_next_ok: dict[str, float] = {}
+        # P1-22：投递连续失败计数（指数退避；旧实现失败零退避，
+        # 不可达用户每 5 分钟「生成→失败→再生成」，一天 288 次 LLM 零投递）
+        self._deliver_fail_counts: dict[str, int] = {}
+        # P1-23：通道资产（WebSocketServer 连接/锁）所属事件循环的 getter，
+        # 由装配层注入——调度线程直接 asyncio.run 跨循环调用属未定义行为
+        self._delivery_loop_getter: Callable[[], Any] | None = None
+        # P1-51：web_disabled 账本事件每用户每日至多一条（旧实现每 tick 写一行，
+        # 关闭态反而涨得最快）
+        self._disabled_event_day: dict[str, str] = {}
 
         self._scheduler: Any = None
         self._active_tasks: dict[str, bool] = {}
@@ -380,6 +391,8 @@ class ProactiveScheduler:
     # 从非仓库根启动/测试时读写到另一个文件，导致
     # ① 开关"保存成功但不生效"；② 测试读到宿主机脏值而失败。
     _CONFIG_PATH = project_path("data", "scheduler_config.json")
+    # P1-53：write_config_file 是全文件读-改-写，4 worker 下并发写互相覆盖/半文件。
+    _CONFIG_LOCK = threading.RLock()
 
     def get_vault_config(self) -> dict[str, Any]:
         return {
@@ -417,28 +430,35 @@ class ProactiveScheduler:
         follow_up: dict[str, Any] | None = None,
         llm_proactive: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        data = cls._read_config_file()
-        if quiet_hours is not None:
-            data["quiet_hours"] = {"start": int(quiet_hours[0]), "end": int(quiet_hours[1])}
-        if follow_up is not None:
-            data["follow_up"] = dict(follow_up)
-        if llm_proactive is not None:
-            cur = data.get("llm_proactive") or {}
-            if not isinstance(cur, dict):
-                cur = {}
-            cur.update({k: v for k, v in llm_proactive.items() if v is not None})
-            data["llm_proactive"] = cur
-        vault = data.get("vault") or {}
-        if vault_enabled is not None:
-            vault["enabled"] = bool(vault_enabled)
-        if vault_interval is not None:
-            vault["interval_minutes"] = max(10, int(vault_interval))
-        data["vault"] = vault
-        try:
-            cls._CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            cls._CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception as e:  # noqa: BLE001
-            logger.warning("调度器配置保存失败: %s", e)
+        # P1-53：全文件读-改-写必须加锁 + 原子替换。旧实现无锁、直接 write_text，
+        # 4 uvicorn worker 下训练页每次保存都是并发 RMW，互相覆盖半文件风险。
+        with cls._CONFIG_LOCK:
+            data = cls._read_config_file()
+            if quiet_hours is not None:
+                data["quiet_hours"] = {"start": int(quiet_hours[0]), "end": int(quiet_hours[1])}
+            if follow_up is not None:
+                data["follow_up"] = dict(follow_up)
+            if llm_proactive is not None:
+                cur = data.get("llm_proactive") or {}
+                if not isinstance(cur, dict):
+                    cur = {}
+                cur.update({k: v for k, v in llm_proactive.items() if v is not None})
+                data["llm_proactive"] = cur
+            vault = data.get("vault") or {}
+            if vault_enabled is not None:
+                vault["enabled"] = bool(vault_enabled)
+            if vault_interval is not None:
+                vault["interval_minutes"] = max(10, int(vault_interval))
+            data["vault"] = vault
+            try:
+                cls._CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+                tmp = cls._CONFIG_PATH.with_name(
+                    f"{cls._CONFIG_PATH.name}.tmp.{os.getpid()}"
+                )
+                tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.replace(tmp, cls._CONFIG_PATH)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("调度器配置保存失败: %s", e)
         return data
 
     def get_llm_proactive_config(self) -> dict[str, Any]:
@@ -754,7 +774,17 @@ class ProactiveScheduler:
 
         web_cfg = read_web_proactive_config()
         if not web_cfg.get("enabled", True):
-            append_proactive_event(session_key=user_key, sent=False, reason="web_disabled")
+            # P1-51：关闭态账本事件每用户每日至多一条（旧实现每 tick 写一行，
+            # enabled=false 反而让 agent_plane.db 涨得最快）
+            today = _local_now().date().isoformat()
+            if self._disabled_event_day.get(str(user_key)) != today:
+                self._disabled_event_day[str(user_key)] = today
+                append_proactive_event(session_key=user_key, sent=False, reason="web_disabled")
+            return
+        # P1-49：静默时段在 LLM 决策**之前**前置闸。旧实现静默只挡投递层，
+        # 23:00-07:00 每 5 分钟照调一次远端 LLM（消息不发、token 恒流失）。
+        if self._is_quiet_hours():
+            logger.debug("proactive LLM 前置静默闸命中 user=%s，跳过决策", user_key)
             return
         # 执行 LLM 上次决策的 wait_minutes（模型自判时机，非策略闸）
         import time as _time
@@ -790,15 +820,21 @@ class ProactiveScheduler:
                 rel = block.split("\n", 1)[0][:80]
         except Exception:  # noqa: BLE001
             rel = ""
-        # 人设：会话绑定角色优先
+        # 人设：会话绑定角色优先。P1-48：旧实现读 eng._character_id——该属性
+        # 根本不存在（真实为 _knowledge_character_id），异常被吞后 persona 恒 ""
         persona = ""
         try:
-            cid = str(user_key).split("|")[-1] if "|" in str(user_key) else ""
-            # 常见形态 N:peer 或 N:peer|char — 兼容从 hub/eng 读 character
-            char_id = getattr(eng, "_character_id", "") or ""
-            if not char_id and cid and not cid.startswith("im.wechat"):
-                char_id = cid
-            persona = load_persona_hint(char_id) or load_persona_hint(str(profile.get("character_id") or ""))
+            char_id = str(getattr(eng, "_knowledge_character_id", "") or "")
+            if not char_id:
+                # hub 键兼容 N:peer|char 形态（纯 N:peer 无角色槽则留空，禁空转 glob）
+                sk = str(user_key)
+                if "|" in sk:
+                    tail = sk.split("|")[-1].strip()
+                    if tail and not tail.startswith("im.wechat"):
+                        char_id = tail
+            if not char_id:
+                char_id = str(profile.get("character_id") or "")
+            persona = load_persona_hint(char_id) if char_id else ""
         except Exception:  # noqa: BLE001
             persona = ""
         now = _local_now()
@@ -871,11 +907,23 @@ class ProactiveScheduler:
                 wait_minutes=decision.get("wait_minutes"),
             )
             logger.info("proactive LLM delivered user=%s %s", user_key, message[:40])
+            self._deliver_fail_counts.pop(str(user_key), None)
         else:
+            # P1-22：投递失败指数退避（5m→15m→45m→2h 封顶），成功送达即清零。
+            # 旧实现失败侧无任何 backoff：不可达用户每 5 分钟「生成→失败→再生成」，
+            # 一天 288 次 LLM 零投递（v1.13 把记账移到投递后是对的，但没补退避）。
+            fails = self._deliver_fail_counts.get(str(user_key), 0) + 1
+            self._deliver_fail_counts[str(user_key)] = fails
+            backoff_min = min(5 * (3 ** (fails - 1)), 120)
+            self._llm_proactive_next_ok[str(user_key)] = _time.time() + backoff_min * 60.0
+            logger.info(
+                "proactive 投递失败 user=%s 连续第%d次 → 退避 %d 分钟",
+                user_key, fails, backoff_min,
+            )
             append_proactive_event(
                 session_key=user_key,
                 sent=False,
-                reason="deliver_failed",
+                reason=f"deliver_failed_backoff_{backoff_min}m",
                 message=message[:80],
                 wait_minutes=decision.get("wait_minutes"),
             )
@@ -931,10 +979,37 @@ class ProactiveScheduler:
         except Exception as e:  # noqa: BLE001
             logger.error("ASE global check failed: %s", e)
 
+    def set_delivery_loop(self, getter: Callable[[], Any]) -> None:
+        """P1-23：装配层注入「通道资产所属事件循环」的 getter（如 ws 线程 loop）。
+
+        调度任务跑在 APScheduler worker 线程；WebSocketServer 的连接与
+        asyncio.Lock 属另一条循环。旧实现直接 asyncio.run 在新循环里 await
+        这些资产 = 跨循环未定义行为：轻则误判未送达，重则 future 永不
+        resolve、占死 executor worker（ase_check 无 max_instances）。
+        """
+        self._delivery_loop_getter = getter
+
+    def _run_blocking(self, coro_factory: Callable[[], Any]) -> Any:
+        """把协程桥到投递循环执行（无注入循环时退回独立循环）。"""
+        loop = None
+        if self._delivery_loop_getter is not None:
+            with contextlib.suppress(Exception):
+                loop = self._delivery_loop_getter()
+        if loop is not None and not loop.is_closed():
+            try:
+                running = asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            if running is not loop:
+                fut = asyncio.run_coroutine_threadsafe(coro_factory(), loop)
+                return fut.result(timeout=90)
+            raise RuntimeError("投递循环与当前运行循环相同，阻塞等待必死锁")
+        return asyncio.run(coro_factory())
+
     def _deliver(self, message: str, session_key: str | None = None) -> bool:
         """投递主动消息。session_key 非空时**定向**到该会话，否则广播（旧路径）。"""
         try:
-            return bool(asyncio.run(self._send_targeted(message, session_key)))
+            return bool(self._run_blocking(lambda: self._send_targeted(message, session_key)))
         except Exception as e:  # noqa: BLE001
             logger.error("主动消息投递失败: %s", e)
             if self._send:
@@ -944,6 +1019,16 @@ class ProactiveScheduler:
                 except Exception:  # noqa: BLE001
                     logger.exception("主动消息兜底发送失败")
             return False
+
+    @staticmethod
+    def _is_wechat_session_key(session_key: str) -> bool:
+        sk = str(session_key or "")
+        if "@im.wechat" in sk:
+            return True
+        if ":" in sk:
+            left, right = sk.split(":", 1)
+            return left.isdigit() and bool(right.strip())
+        return False
 
     async def _send_targeted(self, message: str, session_key: str | None = None) -> bool:
         if self._is_quiet_hours():
@@ -960,17 +1045,28 @@ class ProactiveScheduler:
                     if asyncio.iscoroutinefunction(sender):
                         await sender(message, session_key=session_key)
                     else:
-                        try:
-                            sender(message, session_key=session_key)
-                        except TypeError:
-                            # 旧签名只收 message → 退回广播（仍记日志）
-                            sender(message)
+                        sender(message, session_key=session_key)
                     logger.info("主动消息已定向投递: wechat session=%s", session_key)
                     return True
+                except TypeError as e:
+                    # P1-21：通道不收 session_key（旧签名）——定向消息**绝不**
+                    # 静默转广播（A 的私信发给全员 = 跨用户泄漏），直接判失败。
+                    # 旧实现此处回退 sender(message) 广播并记「定向投递成功」。
+                    logger.warning(
+                        "wechat 通道不接受 session_key，定向消息拒绝降级为广播: session=%s %s",
+                        session_key, e,
+                    )
+                    return False
                 except Exception as e:  # noqa: BLE001
                     logger.warning("定向投递失败 session=%s: %s", session_key, e)
                     self._channel_instances["wechat"] = None
-            # websocket 兜底（无 session 过滤，仅日志/在线面板）
+            if self._is_wechat_session_key(session_key):
+                # P1-21：微信会话键在 wechat 通道缺失/失败时直接返回 False。
+                # 旧实现落到 _send_to_all —— instance=None 时整段跳过（微信形态
+                # 零送达却继续白烧 LLM），有实例时变跨用户广播 + 记「定向成功」。
+                logger.warning("微信定向投递未成功（通道不可用），不回退广播: session=%s", session_key)
+                return False
+            # 非微信（web 会话）定向：退回 ws 广播（在线面板，无跨微信用户问题）
             return await self._send_to_all(message)
 
         return await self._send_to_all(message)
@@ -1002,6 +1098,16 @@ class ProactiveScheduler:
             logger.info("memory curator done: %s", result.get("sessions"))
         except Exception as e:  # noqa: BLE001
             logger.warning("memory curator failed: %s", e)
+        # P1-51：账本保留（30 天）——旧实现 event_ledger 只 append 不 prune，
+        # chat/tool/profile/web_disabled 全类型常驻 → agent_plane.db 无界增长。
+        try:
+            from shisi.agent_plane.event_ledger import default_ledger
+
+            removed = default_ledger().prune(retention_days=30)
+            if removed:
+                logger.info("event_ledger 保留清理：删除 %d 条 30 天前事件", removed)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("event_ledger prune failed: %s", e)
 
     def _run_daily_maintenance(self) -> None:
         """每日维护"""
@@ -1076,8 +1182,6 @@ class ProactiveScheduler:
             )
             return
         try:
-            from datetime import datetime as _dt
-
             from utils.important_dates import check_today
 
             active_id = ""
@@ -1092,14 +1196,19 @@ class ProactiveScheduler:
             except Exception:
                 pass
 
-            hits = check_today(active_id, _dt.now())
+            # P1-24：与 _is_quiet_hours 共用 _local_now()（北京墙钟）。旧实现把裸
+            # _dt.now()（依赖主机时区）显式喂给 v1.21 刚收口为 now_local 的
+            # check_today，dedup_key 也不同钟——UTC 主机上北京 00:00-07:59 命中的
+            # 祝福被算成前一天（换机即静默失效类）。
+            _now_local = _local_now()
+            hits = check_today(active_id, _now_local)
             if not hits:
                 return
 
             names = "、".join(h.get("name", "") for h in hits)
             kinds = "/".join(sorted({h.get("kind", "custom") for h in hits}))
             # 当日幂等：每小时任务与 00:05 维护都可能命同一天，避免重复轰炸
-            dedup_key = f"{_dt.now():%Y-%m-%d}|{active_id}|{names}"
+            dedup_key = f"{_now_local:%Y-%m-%d}|{active_id}|{names}"
             if dedup_key in self._important_dates_sent:
                 return
 

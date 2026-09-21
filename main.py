@@ -193,6 +193,11 @@ def run_wechat_mode(user_manager, wechat_connector_holder: dict | None = None) -
         connector.stop()
 
 
+# P1-23：ws 服务器所属事件循环（_run_ws 线程创建后放入）。
+# 调度线程投递必须桥到这条循环，直接 asyncio.run 属跨循环未定义行为。
+_WS_LOOP_HOLDER: dict = {}
+
+
 def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None, user_manager=None):
     session_mgr = SessionManager()
 
@@ -217,7 +222,20 @@ def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None, user_manager=N
         uvicorn.run(app, host=cfg.api.host, port=cfg.api.port, log_level="info")
 
     def _run_ws():
-        asyncio.run(ws_server.start())
+        loop = asyncio.new_event_loop()
+        _WS_LOOP_HOLDER["loop"] = loop
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(ws_server.start())
+        finally:
+            try:
+                loop.run_until_complete(ws_server.stop())
+            except Exception as e:  # noqa: BLE001
+                logger.debug("ws 关闭异常: %s", e)
+            try:
+                loop.close()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("ws 循环关闭异常: %s", e)
 
     api_thread = threading.Thread(target=_run_api, daemon=True)
     api_thread.start()
@@ -394,16 +412,39 @@ def _run_orchestrator(args: argparse.Namespace, use_console: bool,
             "console", lambda: lambda msg: logger.info("[主动消息] %s", msg)
         )
 
+        # P1-23：调度线程的投递桥到 ws 所属循环（微信 _send 内部是同步
+        # send_text，任一圈执行均可，与 ws 共用一条最简）
+        if hasattr(scheduler, "set_delivery_loop"):
+            scheduler.set_delivery_loop(lambda: _WS_LOOP_HOLDER.get("loop"))
+
         def _wechat_sender_factory(_holder=_wechat_holder, _mgr=user_mgr):
             connector = _holder.get("connector")
             if connector is None:
                 return None
-            async def _send(msg: str):
-                # 优先发给已绑定微信；无绑定时回退最后活跃用户（旧行为）
+
+            async def _send(msg: str, session_key: str | None = None) -> None:
+                # P1-21：必须收 session_key —— 旧签名不收，调度器 async 分支
+                # `await sender(message, session_key=...)` 抛 TypeError 被吞，
+                # wechat 通道被反复置 None → main.py 形态主动消息零送达。
+                def _clean(target: str) -> str:
+                    t = str(target or "")
+                    if ":" in t:
+                        t = t.split(":", 1)[1]
+                    return t.split("@", 1)[0].strip()
+
+                if session_key:
+                    peer = _clean(session_key) if ":" in str(session_key) else str(session_key)
+                    peer = _clean(peer) if peer else ""
+                    if not peer:
+                        raise RuntimeError(f"微信投递拒绝：session_key 解析不出 peer（{session_key}）")
+                    if not connector.send_text(msg, to_user=peer):
+                        raise RuntimeError(f"微信定向投递失败 peer={peer}")
+                    return
+                # 无定向目标：发给全部已绑定用户（旧广播行为，仅限系统级消息）
                 wxids = _mgr.get_bound_wxids() if _mgr else []
                 if wxids:
                     for wxid in wxids:
-                        connector.send_text(msg, to_user=wxid)
+                        connector.send_text(msg, to_user=_clean(wxid))
                 else:
                     connector.send_text(msg)
             return _send

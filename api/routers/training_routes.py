@@ -396,7 +396,17 @@ async def send_proactive_now(
     orch = deps.orch
     if not orch or not orch._ase:
         raise HTTPException(503, "Proactive engine not initialized")
-    ase = orch._ase
+    # P1-19：hub 化后必须落在**具体引擎**上——经 __getattr__ 代理读配额、
+    # 再在 hub 实例上赋值归还，会在 hub 上创建真实属性遮蔽代理，
+    # 引擎侧 +1 永不归还（自测吃配额缺陷回归）。
+    _ase_obj = orch._ase
+    if hasattr(_ase_obj, "resolve_engine_for_manual_send"):
+        _resolved = _ase_obj.resolve_engine_for_manual_send()
+        if _resolved is None:
+            raise HTTPException(503, "无可用的主动消息引擎（暂无会话）")
+        ase = _resolved[1]
+    else:
+        ase = _ase_obj
 
     # 配额保护：记录入口计数，无论成功失败都在出口归还
     _quota_before = ase._daily_message_count

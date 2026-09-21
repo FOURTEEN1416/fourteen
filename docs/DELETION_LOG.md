@@ -1,5 +1,17 @@
 # Code Deletion Log
 
+## [2026-09-21] importance_scorer 无隔离旧副本三类删除（P1 批4a · 审查报告 item 17）
+
+### 删除对象与证据
+- `shisi/memory/legacy/importance_scorer.py` 内的 `ForgettingManager` / `ConflictDetector` / `CrossSessionReasoner` 三个旧副本类（共 ~70 行）
+  - **零消费**：全仓 grep 确认无任何模块从 `importance_scorer` 导入这三类；现役实现分别在同包 `forgetting_manager.py` / `conflict_detector.py` / `cross_session_reasoner.py`（`memory_pipeline` 实际使用的即后者）
+  - **危害**：与 `legacy/__init__.py` 旧导出叠成**双实现地雷**——旧副本的 `get_pending_events` 全表返回、`check_conflict` 不带 `user_key`，一旦 `from …legacy import ConflictDetector` 拿到旧版本即静默回到跨用户串扰语义（v1.28 隔离根治的反向通道）
+- 联动修正：`legacy/__init__.py` 三类导入改指向现役独立模块（唯一真源），并加注释禁止回退
+
+### 验证
+- `tests/test_p1_batch4a_memory.py::test_legacy_exports_point_to_live_modules`（导出身份断言）+ `test_importance_scorer_old_copies_removed`（旧副本不得复活）
+- 分块回归：test_memory / 隔离 / proactive / agent-plane 套件全绿（12+134+103 passed）
+
 ## [2026-09-18] shisi v2 死模块删除 + 假端点改 501（用户裁决「三项全做」）
 
 ### 删除对象与证据

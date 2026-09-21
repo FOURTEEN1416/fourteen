@@ -11,6 +11,7 @@ ASE（Active Speaking Engine）主动发言引擎 — 融合版 v2
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import random
@@ -648,6 +649,10 @@ class ASEEngine:
 
         self._freq_adapter: FrequencyAdapter | None = None
         self._freq_controller: FrequencyController | None = None
+        # P1-25：min_interval/cooldown 两配置在 adaptive 模式同样必须生效
+        # （旧实现 adaptive 分支写死 30 分钟，get_runtime_config 照实谎报）
+        self._min_interval_minutes = max(0, int(min_interval_minutes))
+        self._cooldown_after_reply_minutes = max(0, int(cooldown_after_reply))
         if frequency_mode == "adaptive":
             self._freq_adapter = FrequencyAdapter(normal_daily=max_daily_messages)
         else:
@@ -662,6 +667,11 @@ class ASEEngine:
 
         self._last_chat_time: datetime | None = None
         self._last_proactive_time: datetime | None = None
+        # 仅由「主动消息投递成功记账」推进（_last_proactive_time 会被 on_chat
+        # 拨到回复时刻，不能兼任 min_interval 基准）
+        self._last_delivery_time: datetime | None = None
+        # P1-20：上一条主动消息之后用户是否回复过（驱动 FrequencyAdapter.on_no_reply）
+        self._replied_since_proactive = True
         self._daily_message_count = 0
         self._last_sent_type: str | None = None
         self._emotion_state: dict = {}
@@ -731,6 +741,8 @@ class ASEEngine:
             self._freq_adapter.on_reply_received()
         if self._freq_controller:
             self._freq_controller.record_reply()
+        # P1-20：用户回复解除「上一条未应答」状态
+        self._replied_since_proactive = True
 
         self.urgency.base = 0
         self.urgency.missing_bonus = 0
@@ -854,12 +866,17 @@ class ASEEngine:
             max_daily = self._freq_adapter.get_max_daily()
             if self._daily_message_count >= max_daily:
                 return False, "daily_limit"
-            if self._last_proactive_time:
-                minutes_since = (
-                    datetime.now(tz=timezone.utc) - self._last_proactive_time
-                ).total_seconds() / 60
-                if minutes_since < 30:
+            now = datetime.now(tz=timezone.utc)
+            # P1-25：min_interval 以**投递记账时刻**为基准（旧实现写死 30 分钟，
+            # 且 _last_proactive_time 被 on_chat 拨动，语义混作回复冷却）
+            if self._last_delivery_time:
+                minutes_since = (now - self._last_delivery_time).total_seconds() / 60
+                if minutes_since < self._min_interval_minutes:
                     return False, "min_interval"
+            if self._last_chat_time:
+                since_reply = (now - self._last_chat_time).total_seconds() / 60
+                if since_reply < self._cooldown_after_reply_minutes:
+                    return False, "cooldown"
             return True, "ok"
 
         if self._freq_controller:
@@ -1152,8 +1169,14 @@ class ASEEngine:
     def _record_proactive_sent(self) -> None:
         self._daily_message_count += 1
         self._last_proactive_time = datetime.now(tz=timezone.utc)
+        self._last_delivery_time = self._last_proactive_time
         if self._freq_controller:
             self._freq_controller.record_sent()
+        # P1-20：上一条仍无人应答又发出新一条 → 未应答计数 +1（normal→low→minimal
+        # 自适应降档在生产真正生效；旧实现 on_no_reply 全仓零调用，adaptive 名存实亡）
+        if self._frequency_mode == "adaptive" and self._freq_adapter and not self._replied_since_proactive:
+            self._freq_adapter.on_no_reply()
+        self._replied_since_proactive = False
 
     def record_sent_entry(self, entry: dict[str, Any]) -> None:
         """记录一条已发送的主动消息（供 /api/proactive/history 真数据）。"""
@@ -1163,12 +1186,15 @@ class ASEEngine:
         """运行时参数真值（修复：旧 config 端点只写 _config 字典不生效）。"""
         if self._frequency_mode == "adaptive" and self._freq_adapter:
             max_daily = self._freq_adapter.get_max_daily()
-            min_interval = 30
-            cooldown = 10
+            # P1-25：报引擎真实生效值（旧实现写死 30/10 与展示口径都不符）
+            min_interval = self._min_interval_minutes
+            cooldown = self._cooldown_after_reply_minutes
         else:
             max_daily = self._freq_controller.max_daily if self._freq_controller else 8
-            min_interval = getattr(self._freq_controller, "min_interval_minutes", 30) if self._freq_controller else 30
-            cooldown = getattr(self._freq_controller, "cooldown_after_reply_minutes", 10) if self._freq_controller else 10
+            # FrequencyController 只暴露 timedelta（旧 getattr 恒取不到
+            # min_interval_minutes → 永远报默认 30/10，与真实配置脱钩）
+            min_interval = self._min_interval_minutes
+            cooldown = self._cooldown_after_reply_minutes
         return {
             "threshold": self._urgency_threshold,
             "max_daily_messages": max_daily,
@@ -1193,10 +1219,16 @@ class ASEEngine:
         if max_daily_messages is not None or min_interval_minutes is not None or cooldown_after_reply_minutes is not None:
             max_daily = max_daily_messages if max_daily_messages is not None else (
                 self._freq_adapter.get_max_daily() if self._freq_adapter else 8)
-            min_i = min_interval_minutes if min_interval_minutes is not None else 30
-            cooldown_c = cooldown_after_reply_minutes if cooldown_after_reply_minutes is not None else 10
+            min_i = min_interval_minutes if min_interval_minutes is not None else self._min_interval_minutes
+            cooldown_c = cooldown_after_reply_minutes if cooldown_after_reply_minutes is not None else self._cooldown_after_reply_minutes
+            # P1-25：配置真值落引擎字段（adaptive 分支直接读它们）
+            self._min_interval_minutes = max(0, int(min_i))
+            self._cooldown_after_reply_minutes = max(0, int(cooldown_c))
             if self._frequency_mode == "adaptive" and self._freq_adapter:
+                # P1-20/25：重建时保留已积累的降档状态（旧实现整表清零）
+                old = self._freq_adapter.to_dict()
                 self._freq_adapter = FrequencyAdapter(normal_daily=max_daily)
+                self._freq_adapter.from_dict({**old, "normal_daily": max_daily})
             elif self._freq_controller:
                 self._freq_controller = FrequencyController(
                     max_daily=max_daily,
@@ -1236,6 +1268,8 @@ class ASEEngine:
             state = {
                 "daily_count": self._daily_message_count,
                 "last_sent_time": self._last_proactive_time.isoformat() if self._last_proactive_time else None,
+                "last_delivery_time": self._last_delivery_time.isoformat() if self._last_delivery_time else None,
+                "replied_since_proactive": self._replied_since_proactive,
                 "last_chat_time": self._last_chat_time.isoformat() if self._last_chat_time else None,
                 "last_sent_type": self._last_sent_type,
                 "affinity_level": self._affinity_level,
@@ -1247,6 +1281,10 @@ class ASEEngine:
                 "recent_messages": list(self._recent_messages),
                 "freq_adapter": self._freq_adapter.to_dict() if self._freq_adapter else None,
                 "freq_controller": self._freq_controller.to_dict() if self._freq_controller else None,
+                # P1-25：控制台改过的 min_interval/cooldown 必须随状态复现
+                # （旧实现只进内存对象，重启即回 yaml 默认值）
+                "min_interval_minutes": self._min_interval_minutes,
+                "cooldown_after_reply_minutes": self._cooldown_after_reply_minutes,
                 "saved_at": datetime.now(tz=timezone.utc).isoformat(),
             }
             state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1268,6 +1306,18 @@ class ASEEngine:
                 self._last_chat_time = datetime.fromisoformat(state["last_chat_time"])
             if state.get("last_sent_time"):
                 self._last_proactive_time = datetime.fromisoformat(state["last_sent_time"])
+            if state.get("last_delivery_time"):
+                self._last_delivery_time = datetime.fromisoformat(state["last_delivery_time"])
+            elif self._last_proactive_time:
+                # 旧状态文件无此字段：退回最近记账时刻，冷却不失真
+                self._last_delivery_time = self._last_proactive_time
+            self._replied_since_proactive = bool(state.get("replied_since_proactive", True))
+            if "min_interval_minutes" in state:
+                with contextlib.suppress(TypeError, ValueError):
+                    self._min_interval_minutes = max(0, int(state["min_interval_minutes"]))
+            if "cooldown_after_reply_minutes" in state:
+                with contextlib.suppress(TypeError, ValueError):
+                    self._cooldown_after_reply_minutes = max(0, int(state["cooldown_after_reply_minutes"]))
             self._last_sent_type = state.get("last_sent_type")
             self._affinity_level = state.get("affinity_level", 0)
 

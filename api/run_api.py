@@ -185,6 +185,10 @@ if _scheduler is not None:
         return ws_server.broadcast_proactive
 
     _scheduler.register_channel("websocket", _websocket_sender_factory)
+    # P1-23：ws 连接/锁属 _run_ws 线程的事件循环——调度线程 _deliver 必须
+    # 经 run_coroutine_threadsafe 桥到该循环，直接 asyncio.run 为跨循环未定义行为
+    if hasattr(_scheduler, "set_delivery_loop"):
+        _scheduler.set_delivery_loop(lambda: _ws_holder.get("loop"))
     try:
         _llm = orchestrator.components.get("llm")
         if _llm is not None and hasattr(_scheduler, "set_llm_provider"):
