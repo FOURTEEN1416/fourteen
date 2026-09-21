@@ -38,6 +38,9 @@ def _gateway_with(provider) -> MultiProviderGateway:
     gw = MultiProviderGateway.__new__(MultiProviderGateway)
     gw._providers = {"fake": provider}
     gw._current_index = 0
+    # P1-2 熔断状态：chat() 会读 _breaker_open_until，绕过 __init__ 时必须自带
+    gw._breaker_failures = {}
+    gw._breaker_open_until = {}
     return gw
 
 

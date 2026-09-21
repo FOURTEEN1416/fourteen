@@ -193,6 +193,7 @@ DEFAULT_PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
         "auth_mode": "bearer",
         "max_tokens": 8192,
         "temperature": 0.85,
+        "request_timeout": 20.0,
         "description": "Agnes agnes-3.0-flash（OpenAI 兼容），首选供应商",
     },
 }
@@ -357,6 +358,7 @@ class MultiProviderGateway:
                 # 旧实现构造时不传 → auth_mode=oauth 的 provider 永远拿不到 token
                 app_id=cfg.get("app_id", ""),
                 api_secret=cfg.get("api_secret", ""),
+                request_timeout=cfg.get("request_timeout"),
             )
 
         logger.info(

@@ -18,14 +18,18 @@ llm:
   # 2026-09-18 调整：首选由 sensenova 改为 agnes，并移除 sensenova ——
   # 原链首选 sensenova 但生产 .env 从未配置 SENSENOVA_API_KEY，
   # 导致**每次对话都先白跑一轮失败尝试**才回退到 zhipu，是响应慢的固定来源。
-  # 2026-09-21 调整：agnes 由链首降到第二位（用户裁决）——
-  # agnes 的 /chat/completions 挂死（直连实测 ttfb=0、20s 零字节，而 /models 200、
-  # 模型在列、鉴权有效），单家就要付满 provider 超时 25s，用户侧表现为连续收到
-  # 超时兜底句「等我一下，刚才有点卡」。zhipu 实测 0.49s 正常出词，改居首位。
-  # agnes **不删除**：留作 zhipu 故障时的第二选择，其端点恢复后仍可提到链首。
+  # 2026-09-21 调整：agnes 由链首降到第二位（用户裁决）——agnes 的 /chat/completions
+  # 当时挂死（直连实测 ttfb=0、20s 零字节），单家就要付满 provider 超时，用户侧
+  # 连续收到超时兜底句「等我一下，刚才有点卡」。
+  # 2026-09-21 同日回调：agnes 回链首（用户裁决 A）。降级后实测「人机味」根因是
+  # 模型而非延迟：同一会话同一 prompt 形状下，agnes 出角色腔（「说完整点。/我是十四。」），
+  # glm-4-flash 出客服腔并 4/4 自称「人工智能助手」、甚至自报虚拟角色身份。
+  # 挂死风险改由**按供应商超时**兜：agnes 配 request_timeout=20s（实测健康 3.8~19.8s、
+  # 挂死恒为 read 超时 25s），最坏 agnes 20s → zhipu ~1s = 21s，仍在编排层 30s 预算内，
+  # 不再产生兜底句；且 P1-2 熔断（连续 2 次失败开闸 60s）会跳过挂死的 agnes。
   fallback_chain:
-    - zhipu         # 智谱AI GLM-4.7-Flash（永久免费）
-    - agnes         # Agnes agnes-3.0-flash（OpenAI 兼容，09-21 起第二位）
+    - agnes         # Agnes agnes-3.0-flash（OpenAI 兼容，角色扮演首选；request_timeout 20s）
+    - zhipu         # 智谱AI GLM-4.7-Flash（永久免费；快但角色扮演弱，作降级位）
     - xunfei        # 讯飞星火 Spark Lite（永久免费）
     - baidu         # 百度千帆 ERNIE-Speed（每月50万免费Token）
 

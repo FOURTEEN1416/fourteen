@@ -61,6 +61,7 @@ class OpenAICompatibleProvider:
         temperature: float = 0.85,
         stream_enabled: bool = True,
         extra_payload: dict[str, Any] | None = None,
+        request_timeout: float | None = None,
         **kwargs: Any,
     ):
         self.provider_name = provider_name
@@ -110,7 +111,12 @@ class OpenAICompatibleProvider:
         self._sync_client: httpx.Client | None = None
         # P1-2：非流式单请求超时 25s —— 必须小于编排层整链预算（30s），
         # 否则链首网络黑洞一个 provider 就能烧光整条链的时间。
-        self._request_timeout = httpx.Timeout(25.0, connect=10.0)
+        # 可按供应商收紧（request_timeout）：实测 agnes-3.0-flash 健康时 3.8~19.8s、
+        # 挂死时恒为 read 超时 25s，而链尾 zhipu 只要 ~1s；给 agnes 配 20s 后
+        # 「挂死 → 降级 zhipu」最坏 21s 仍在 30s 预算内，不再吐出超时兜底句。
+        self._request_timeout = httpx.Timeout(
+            float(request_timeout) if request_timeout else 25.0, connect=10.0
+        )
 
         logger.info(
             "OpenAICompatibleProvider [%s]: api_base=%s, model=%s, auth=%s",

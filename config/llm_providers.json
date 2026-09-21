@@ -10,9 +10,10 @@
       "max_tokens": 8192,
       "temperature": 0.85,
       "stream_enabled": true,
-      "description": "Agnes agnes-3.0-flash（OpenAI 兼容端点），备用供应商",
+      "request_timeout": 20,
+      "description": "Agnes agnes-3.0-flash（OpenAI 兼容端点），首选供应商；挂死时 20s 降级，不烧穿 30s 整链预算",
       "enabled": true,
-      "sort_order": 2,
+      "sort_order": 1,
       "guide": {
         "apply_url": "https://apihub.agnes-ai.com",
         "free_quota": "以平台实际额度为准",
@@ -36,9 +37,9 @@
       "max_tokens": 2048,
       "temperature": 0.85,
       "stream_enabled": true,
-      "description": "GLM-4.7-Flash 永久免费，无Token上限，200K上下文（首选供应商）",
+      "description": "GLM-4.7-Flash 永久免费，无Token上限，200K上下文（09-21 起第二位：角色扮演对齐弱，裸提示下 4/4 自称「人工智能助手」）",
       "enabled": true,
-      "sort_order": 1,
+      "sort_order": 2,
       "guide": {
         "apply_url": "https://open.bigmodel.cn",
         "free_quota": "GLM-4.7-Flash 永久免费，无 Token 上限",
@@ -225,8 +226,8 @@
     }
   },
   "fallback_chain": [
-    "zhipu",
     "agnes",
+    "zhipu",
     "xunfei",
     "baidu",
     "deepseek"
