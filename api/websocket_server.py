@@ -29,8 +29,13 @@ class WebSocketServer:
         self._running = False
         self._server_done: asyncio.Future | None = None
         self._client_tasks: dict[Any, asyncio.Task] = {}
-        # P0: API Key 认证配置
-        self._api_key_enabled = os.environ.get("API_KEY_ENABLED", "false").lower() == "true"
+        # websocket → 认证身份 {"user_id": int|None, "method": "jwt"|"apikey"|"open"}
+        self._client_identity: dict[Any, dict[str, Any]] = {}
+        # P0-5: 认证开关走唯一真源 resolve_api_key_enabled()（生产 fail-closed），
+        # 不再自抄一份默认 "false" 的解析——否则 nginx 反代的 /ws/ 成匿名聊天入口。
+        from api.runtime_config import resolve_api_key_enabled
+
+        self._auth_required = resolve_api_key_enabled()
         self._api_key = os.environ.get("API_KEY", "")
 
     async def start(self):
@@ -78,33 +83,55 @@ class WebSocketServer:
         if close_tasks:
             await asyncio.gather(*close_tasks, return_exceptions=True)
 
-    def _verify_api_key(self, token: str) -> bool:
-        """验证 API Key，参考 app_factory.py 的 _verify_api_key 实现"""
-        if not self._api_key_enabled:
-            return True
+    def _authenticate(self, api_token: str, jwt_token: str) -> dict[str, Any] | None:
+        """认证并返回身份；None 表示拒绝。
+
+        优先 JWT（web 用户，身份从 token 解出，客户端不可自报）；
+        其次 API Key（机器/E2E）。未启用认证（显式 dev）时放行匿名。
+        """
+        if jwt_token:
+            try:
+                from api.auth_jwt import verify_token
+
+                payload = verify_token(jwt_token, expected_type="access")
+            except Exception:  # noqa: BLE001  verify_token 抛 HTTPException
+                return None
+            sub = payload.get("sub")
+            try:
+                user_id = int(sub) if sub is not None else None
+            except (TypeError, ValueError):
+                user_id = None
+            if user_id is None:
+                return None
+            return {"user_id": user_id, "method": "jwt"}
+        if not self._auth_required:
+            return {"user_id": None, "method": "open"}
         import hmac
-        return hmac.compare_digest(token or "", self._api_key)
+
+        if api_token and self._api_key and hmac.compare_digest(api_token, self._api_key):
+            return {"user_id": None, "method": "apikey"}
+        return None
 
     async def _handler(self, websocket):
-        # P0: API Key 认证 - 检查 URL query 中的 token 参数
-        token = None
+        # P0-5: 凭证从 URL query（token=APIKey / jwt=Bearer）或首帧取，身份从 token 解出
+        api_token = ""
+        jwt_token = ""
         try:
-            # 从 URL query 参数中获取 token
             path = websocket.request.path if hasattr(websocket.request, 'path') else str(websocket.request)
             if '?' in path:
                 query = path.split('?', 1)[1]
                 params = dict(p.split('=', 1) for p in query.split('&') if '=' in p)
-                token = params.get('token', '')
+                api_token = params.get('token', '') or ''
+                jwt_token = params.get('jwt', '') or params.get('access_token', '') or ''
         except Exception as e:
             logger.debug("token parse failed, falling back: %s", e)
 
-        # 如果 URL 中没有 token，等待首条消息进行认证
-        if not token and self._api_key_enabled:
+        identity = self._authenticate(api_token, jwt_token)
+        # URL 无凭证且需要认证时，等待首帧认证
+        if identity is None and self._auth_required and not jwt_token and not api_token:
             try:
-                # 设置较短的超时时间等待认证消息
                 auth_message = await asyncio.wait_for(websocket.recv(), timeout=10.0)
                 auth_data = json.loads(auth_message)
-                token = auth_data.get("token", "")
             except asyncio.TimeoutError:
                 logger.warning("WebSocket 认证超时")
                 await websocket.close(code=1008, reason="Authentication timeout")
@@ -113,12 +140,16 @@ class WebSocketServer:
                 logger.warning("WebSocket 认证消息格式错误")
                 await websocket.close(code=1008, reason="Invalid authentication format")
                 return
+            api_token = str(auth_data.get("token", "") or "")
+            jwt_token = str(auth_data.get("jwt", "") or auth_data.get("access_token", "") or "")
+            identity = self._authenticate(api_token, jwt_token)
 
-        # 验证 API Key
-        if not self._verify_api_key(token):
-            logger.warning("WebSocket 认证失败: 无效的 API Key")
-            await websocket.close(code=1008, reason="Invalid or missing API key")
+        if identity is None:
+            logger.warning("WebSocket 认证失败：缺少有效 JWT/API Key")
+            await websocket.close(code=1008, reason="Authentication required")
             return
+
+        authed_user_id = identity["user_id"]
 
         async with self._client_lock:
             if len(self._clients) >= MAX_CLIENTS:
@@ -126,6 +157,7 @@ class WebSocketServer:
                 return
             self._clients.add(websocket)
             self._client_tasks[websocket] = asyncio.current_task()
+            self._client_identity[websocket] = identity
 
         try:
             async for message in websocket:
@@ -135,6 +167,10 @@ class WebSocketServer:
                     if msg_type == "chat":
                         user_msg = data.get("message", "")
                         session_id = data.get("session_id", "")
+                        # P0-5: JWT 身份强制归属——服务端加用户前缀，客户端自报的
+                        # session_id 无法伪装成他人（记忆/工具/LLM 配额按此隔离）。
+                        if authed_user_id is not None:
+                            session_id = f"{authed_user_id}:{session_id}"
                         use_stream = data.get("stream", False)
                         # P0: 支持 message_type 和 file_url 字段
                         message_type = data.get("message_type", "text")
@@ -207,6 +243,7 @@ class WebSocketServer:
             async with self._client_lock:
                 self._clients.discard(websocket)
                 self._client_tasks.pop(websocket, None)
+                self._client_identity.pop(websocket, None)
             with contextlib.suppress(Exception):
                 await websocket.close()
 

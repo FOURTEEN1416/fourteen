@@ -167,6 +167,43 @@ class TestCharacterKnowledgeService:
         ok = service.load_index("no_such_char")
         assert ok is False
 
+    def test_ensure_index_evicts_stale_cache_on_disk_change(self, tmp_path: Path):
+        """P0-7 回归：磁盘索引被外部更新后，ensure_index 必须丢弃过期的内存缓存。
+
+        此前命中 self._retrievers 即直接 return True，改卡/重建脚本后进程永久用旧索引。
+        """
+        index_dir = tmp_path / "knowledge_index"
+        service = CharacterKnowledgeService(use_bm25=True, index_dir=index_dir)
+
+        retriever = BM25Retriever()
+        retriever.index(_make_chunks())
+        service._retrievers["char_stale"] = retriever
+        service._chunk_counts["char_stale"] = len(_make_chunks())
+        service.save_index("char_stale")
+        assert service._index_mtimes["char_stale"] == (index_dir / "char_stale.json").stat().st_mtime_ns
+
+        # 模拟外部重建脚本随后覆写了磁盘文件（缓存条目的 mtime 记录变旧）
+        service._index_mtimes["char_stale"] = 1
+        stale_marker = service._retrievers["char_stale"]
+
+        ok = service.ensure_index("char_stale")
+        assert ok is True
+        assert service._retrievers["char_stale"] is not stale_marker, "过期缓存未被丢弃"
+        assert service._index_mtimes["char_stale"] != 1
+
+    def test_ensure_index_keeps_cache_when_disk_unchanged(self, tmp_path: Path):
+        """磁盘未变时 ensure_index 仍走内存缓存（不重复读盘）。"""
+        index_dir = tmp_path / "knowledge_index"
+        service = CharacterKnowledgeService(use_bm25=True, index_dir=index_dir)
+
+        retriever = BM25Retriever()
+        retriever.index(_make_chunks())
+        service._retrievers["char_fresh"] = retriever
+        service.save_index("char_fresh")
+
+        assert service.ensure_index("char_fresh") is True
+        assert service._retrievers["char_fresh"] is retriever
+
     def test_has_index_and_clear(self):
         """has_index / clear 接口"""
         service = CharacterKnowledgeService()

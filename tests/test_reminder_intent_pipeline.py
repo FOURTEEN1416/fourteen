@@ -390,11 +390,34 @@ class TestReminderDelivery:
         assert sm.get_due_reminders() == []  # 判死后不再投递
 
     def test_web_session_routes_to_ws(self, sm):
+        """ws_sender 契约=可返回 awaitable 且必须被 await（P0-6 假送达回归钉）。
+
+        旧测试用同步 list.append 钉死了「协程未执行也返回 True」的错误契约。
+        """
         sent: list[str] = []
+
+        async def ws_send(text: str) -> bool:
+            sent.append(text)
+            return True
+
         sm.add_reminder("x", "2020-01-01 06:00", session_key="web-console-s1")
-        task = ReminderDeliveryTask(sm, llm=None, ws_sender=sent.append)
+        task = ReminderDeliveryTask(sm, llm=None, ws_sender=ws_send)
         task()
         assert sent == ["x"]
+        with sm._conn() as conn:
+            row = conn.execute("SELECT status FROM reminders").fetchone()
+        assert row["status"] == "delivered"
+
+    def test_web_session_ws_failure_not_marked_delivered(self, sm):
+        async def ws_fail(text: str) -> bool:
+            return False
+
+        sm.add_reminder("y", "2020-01-01 06:00", session_key="web-console-s2")
+        task = ReminderDeliveryTask(sm, llm=None, ws_sender=ws_fail)
+        task()
+        with sm._conn() as conn:
+            row = conn.execute("SELECT status FROM reminders").fetchone()
+        assert row["status"] != "delivered"
 
     def test_timezone_semantics_local_beijing(self, sm):
         """到期比较必须用北京时间口径：未来/过去时刻相对 now_local 构造。

@@ -8,7 +8,11 @@ User=www-data
 Group=www-data
 WorkingDirectory=/opt/ai-girlfriend
 EnvironmentFile=/opt/ai-girlfriend/.env
-ExecStart=/opt/ai-girlfriend/.venv/bin/python -m uvicorn api.run_api:app --host 127.0.0.1 --port 8000 --workers 4 --timeout-keep-alive 30
+# --workers 1（P0-7，2026-09-21）：微信通道 registry、scheduler/主动任务、LLM 网关、
+# 知识索引均为**进程内单例**，4 worker 各自一份互不可见——消息在 A 进程登录、
+# B 进程 poll 不到；定时任务在 4 个进程里重复注册。产品并发是 LLM I/O 等待型，
+# asyncio 单进程足够；多 worker 需先引入跨进程投递队列（当前不存在该架构）。
+ExecStart=/opt/ai-girlfriend/.venv/bin/python -m uvicorn api.run_api:app --host 127.0.0.1 --port 8000 --workers 1 --timeout-keep-alive 30
 Restart=always
 RestartSec=5
 StandardOutput=append:/var/log/ai-girlfriend.log

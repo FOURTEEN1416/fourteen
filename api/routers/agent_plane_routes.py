@@ -1,10 +1,17 @@
-"""Agent Plane 控制面 API：因果回放 / 画像投影 / curator / 探针。"""
+"""Agent Plane 控制面 API：因果回放 / 画像投影 / curator / 探针。
+
+P0-10：全部端点为**控制面/调试面**，须 admin 角色。旧实现仅 `verify_api_key_dep`
+（任意有效用户 JWT 即放行），且 `session_key` 无归属校验 → 任一登录用户可读
+他人账本回放/事件/画像投影，`curate` 空键 `apply=True` 更会全库改写。
+改用 `require_role("admin")`，与 `admin_routes` 同规。
+"""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Security
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from api.auth import verify_api_key_dep
+from api.auth_jwt import require_role
+from api.database import User
 from api.deps import deps
 
 router = APIRouter(tags=["agent-plane"])
@@ -21,7 +28,7 @@ async def agent_plane_replay(
     session_key: str = Query(..., min_length=1),
     turn_id: str = Query(""),
     reply_id: str = Query(""),
-    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     """因果回放：按 session+turn/reply 查账本切片（回答「角色为何这样答」）。"""
     if not turn_id and not reply_id:
@@ -47,7 +54,7 @@ async def agent_plane_replay(
 @router.get("/api/agent-plane/profile")
 async def agent_plane_profile(
     session_key: str = Query(..., min_length=1),
-    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     from shisi.agent_plane.runtime import get_profile_prompt_block, project_profile_for
 
@@ -65,7 +72,7 @@ async def agent_plane_events(
     session_key: str = Query(..., min_length=1),
     event_type: str = Query(""),
     limit: int = Query(50, ge=1, le=200),
-    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     events = _ledger().query(
         session_key=session_key,
@@ -80,7 +87,7 @@ async def agent_plane_events(
 @router.post("/api/agent-plane/curate")
 async def agent_plane_curate(
     session_key: str = "",
-    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     """记忆 curator：规则整理垃圾/near-dup；可选全会话。"""
     from shisi.agent_plane.curator import run_curator_all_known, run_curator_for_session
@@ -118,7 +125,7 @@ async def agent_plane_curate(
 @router.get("/api/agent-plane/probes")
 async def agent_plane_probes(
     session_key: str = Query("", min_length=0),
-    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     """验收探针骨架：空 session_key 时跑逻辑自检；有 key 时读真实账本。"""
     from scripts.ax_acceptance_probes import (

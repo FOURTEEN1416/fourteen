@@ -123,11 +123,37 @@ class ConnectorRegistry:
             logger.warning("断开通道异常 user=%s slot=%s: %s", user_id, slot, e)
         with self._lock:
             self._connectors.pop(self._key(user_id, slot), None)
+        self._release_poll_lock(int(user_id), int(slot))
         return True
 
     def remove(self, user_id: int, slot: int = 0) -> None:
         with self._lock:
             self._connectors.pop(self._key(user_id, slot), None)
+        self._release_poll_lock(int(user_id), int(slot))
+
+    def _release_poll_lock(self, user_id: int, slot: int) -> None:
+        """释放并关闭本进程持有的 (user,slot) 通道 flock fd。
+
+        否则同进程重连时旧 fd 仍持锁 → 新 flock EWOULDBLOCK → 恒 429，
+        只能重启整服务（Linux 生产必现，Windows 无 fcntl 掩盖）。
+        """
+        with self._lock:
+            fd = self._poll_lock_fds.pop((user_id, slot), None)
+        if fd is None:
+            return
+        try:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            import os
+
+            os.close(fd)
+        except Exception:  # noqa: BLE001
+            pass
+        logger.info("已释放通道锁 fd user=%s slot=%s", user_id, slot)
 
     def status_for_user(self, user_id: int) -> list[dict[str, Any]]:
         """返回该用户全部通道状态（永不回退到全局他人通道）。"""
@@ -225,9 +251,6 @@ class ConnectorRegistry:
         restored = 0
         if not root.exists():
             return 0
-        # 持锁 fd 留在进程内，退出时由 OS 释放
-        if not hasattr(self, "_poll_lock_fds"):
-            self._poll_lock_fds: list[int] = []
         for user_dir in root.iterdir():
             if not user_dir.is_dir() or not user_dir.name.isdigit():
                 continue
@@ -238,7 +261,7 @@ class ConnectorRegistry:
                     logger.info("通道已有其他 worker 持锁，跳过 user=%s slot=%s", uid, slot)
                     continue
                 if lock_fd > 0:
-                    self._poll_lock_fds.append(lock_fd)
+                    self._poll_lock_fds[(uid, slot)] = lock_fd
                 try:
                     conn = self.ensure(uid, slot=slot, user_manager=user_manager)
                     if getattr(conn, "token", ""):

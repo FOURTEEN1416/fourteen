@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from collections.abc import Callable
@@ -115,7 +116,10 @@ class ReminderDeliveryTask:
                 return False
         if self._ws_sender:
             try:
-                return bool(self._ws_sender(text))
+                result = self._ws_sender(text)
+                if inspect.isawaitable(result):
+                    result = await result
+                return bool(result)
             except Exception as e:  # noqa: BLE001
                 logger.warning("[reminder] websocket 投递异常: %s", e)
                 return False

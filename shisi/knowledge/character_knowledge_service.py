@@ -78,12 +78,22 @@ class CharacterKnowledgeService:
         self._use_bm25 = use_bm25
         self._retrievers: dict[str, KeywordRetriever | BM25Retriever] = {}
         self._chunk_counts: dict[str, int] = {}
+        # 内存缓存条目对应的磁盘索引 mtime_ns（P0-7：改卡/重建脚本后必须核对，
+        # 否则进程内命中缓存即永久用旧索引）
+        self._index_mtimes: dict[str, int] = {}
         self._index_dir = Path(index_dir) if index_dir else _DEFAULT_INDEX_DIR
 
     # ── 索引持久化 ──
 
     def _index_path(self, character_id: str) -> Path:
         return self._index_dir / f"{character_id}.json"
+
+    def _disk_mtime(self, character_id: str) -> int:
+        """磁盘索引文件的 mtime_ns；文件不存在或不可读返回 0（视为无需核对）。"""
+        try:
+            return self._index_path(character_id).stat().st_mtime_ns
+        except OSError:
+            return 0
 
     def save_index(self, character_id: str) -> None:
         """将角色 BM25 索引保存到磁盘。"""
@@ -92,6 +102,10 @@ class CharacterKnowledgeService:
             return
         path = self._index_path(character_id)
         retriever.save(path)
+        try:
+            self._index_mtimes[character_id] = path.stat().st_mtime_ns
+        except OSError:
+            self._index_mtimes.pop(character_id, None)
         logger.info("BM25 索引已保存: %s (%d 块)", path, self._chunk_counts.get(character_id, 0))
 
     def load_index(self, character_id: str) -> bool:
@@ -103,6 +117,7 @@ class CharacterKnowledgeService:
             retriever = BM25Retriever.from_file(path)
             self._retrievers[character_id] = retriever
             self._chunk_counts[character_id] = len(retriever._chunks)  # type: ignore[attr-defined]
+            self._index_mtimes[character_id] = path.stat().st_mtime_ns
             logger.info("BM25 索引已加载: %s (%d 块)", path, self._chunk_counts[character_id])
             return True
         except Exception as e:
@@ -116,9 +131,19 @@ class CharacterKnowledgeService:
         - 失败则从 card/character 建索引
         - 建索引后自动保存到磁盘
         返回是否索引可用。
+
+        P0-7：进程内命中缓存前先核对磁盘 mtime——改卡或跑过
+        rebuild_knowledge_index.py 之后，旧缓存必须失效而不是永久使用。
         """
         if character_id in self._retrievers:
-            return True
+            disk_mtime = self._disk_mtime(character_id)
+            if disk_mtime and disk_mtime != self._index_mtimes.get(character_id):
+                logger.info("磁盘索引已更新，丢弃内存缓存: %s", character_id)
+                del self._retrievers[character_id]
+                self._chunk_counts.pop(character_id, None)
+                self._index_mtimes.pop(character_id, None)
+            else:
+                return True
         # 尝试从磁盘加载
         if self.load_index(character_id):
             return True
@@ -214,9 +239,11 @@ class CharacterKnowledgeService:
         if character_id:
             self._retrievers.pop(character_id, None)
             self._chunk_counts.pop(character_id, None)
+            self._index_mtimes.pop(character_id, None)
         else:
             self._retrievers.clear()
             self._chunk_counts.clear()
+            self._index_mtimes.clear()
 
     def add_knowledge_chunks(self, character_id: str, chunks: list[KnowledgeChunk]) -> None:
         """向指定角色追加知识块；若索引不存在则自动创建。"""

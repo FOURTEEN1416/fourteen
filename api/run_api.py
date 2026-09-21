@@ -299,12 +299,14 @@ if _scheduler is not None:
             )
             return False
 
-        def _ws_send(text: str) -> bool:
+        async def _ws_send(text: str) -> bool:
             ws_server = _ws_holder.get("ws")
             if not isinstance(ws_server, WebSocketServer):
                 return False
             try:
-                ws_server.broadcast_proactive(text)
+                # P0-6: broadcast_proactive 是 async，必须 await——旧实现同步调用
+                # 只创建协程对象即 return True（协程从未执行），使 web 提醒假送达。
+                await ws_server.broadcast_proactive(text)
                 return True
             except Exception as e:  # noqa: BLE001
                 logger.warning("提醒 websocket 投递失败: %s", e)

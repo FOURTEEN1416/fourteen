@@ -286,7 +286,17 @@ class MultiProviderGateway:
 
         for key in self._chain:
             if key == "deepseek":
-                self._providers[key] = LLMGatewayV2()
+                # P0-9: 与其他 provider 同规查 key（env DEEPSEEK_API_KEY 或配置文件），
+                # 无 key 直接 skip——否则 LLMGatewayV2 无 key 会返回**拟真角色台词**
+                # 的 mock（不含任何错误哨兵），既被 chat() 判成功污染路由指针，
+                # 又让 chat_stream/chat_with_tools（不降级）整段打到罐头句。
+                ds_cfg = provider_configs.get("deepseek") or DEFAULT_PROVIDER_CONFIG.get("deepseek", {})
+                ds_cfg = _resolve_env_override("deepseek", ds_cfg)
+                ds_key = ds_cfg.get("api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
+                if not ds_key:
+                    logger.info("[MultiGateway] deepseek 未配置 API Key，跳过（避免 mock 入链）")
+                    continue
+                self._providers[key] = LLMGatewayV2(api_key=ds_key)
                 continue
 
             # 从文件配置或默认配置创建

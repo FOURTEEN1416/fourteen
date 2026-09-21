@@ -177,6 +177,28 @@ class TestLLMGatewayV2MockMode:
 
 
 # ═══════════════════════════════════════════════════════════════
+#  P0-9：deepseek 无 key 不得以 mock 入 fallback 链
+#  （旧实现无条件 LLMGatewayV2() 入链，mock 罐头台词被 chat() 判成功、
+#   _publish_current("deepseek") 污染路由指针，chat_stream/chat_with_tools 不降级全打 mock）
+# ═══════════════════════════════════════════════════════════════
+
+def test_deepseek_skipped_without_key(monkeypatch):
+    from llm_provider.multi_provider_gateway import MultiProviderGateway
+
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    g = MultiProviderGateway(fallback_chain=["deepseek"], providers_config={"deepseek": {}})
+    assert "deepseek" not in g._providers
+
+
+def test_deepseek_in_chain_with_key(monkeypatch):
+    from llm_provider.multi_provider_gateway import MultiProviderGateway
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek-key")
+    g = MultiProviderGateway(fallback_chain=["deepseek"], providers_config={"deepseek": {}})
+    assert "deepseek" in g._providers
+
+
+# ═══════════════════════════════════════════════════════════════
 #  chat_sync 必须复用**同一个**常驻事件循环
 #  （2026-09-19：原实现每次 asyncio.run 新建/销毁循环 → httpx 连接池
 #   每次失效、每请求重做 TLS 握手、aclose() 在死循环上抛异常刷屏）
