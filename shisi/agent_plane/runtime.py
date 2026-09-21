@@ -40,8 +40,11 @@ def ensure_profile_seeded(session_key: str) -> dict[str, Any]:
     if not sk:
         return {}
     ledger = get_ledger()
-    rows = ledger.query(session_key=sk, limit=500)
-    if any(e.event_type in (EVENT_PROFILE_UPDATE, EVENT_PROFILE_CORRECT) for e in rows):
+    has_profile = bool(
+        ledger.query(session_key=sk, event_type=EVENT_PROFILE_UPDATE, limit=1)
+        or ledger.query(session_key=sk, event_type=EVENT_PROFILE_CORRECT, limit=1)
+    )
+    if has_profile:
         return project_profile(ledger, sk)
     try:
         row = _store().get(sk) or {}
@@ -61,14 +64,12 @@ def materialize_profile_cache(session_key: str, projection: dict[str, Any]) -> N
         store = _store()
         fields: dict[str, Any] = {}
         for k in ("nickname", "birthday", "occupation", "location", "notes"):
-            if projection.get(k):
-                fields[k] = str(projection[k])
-        if projection.get("preferences"):
-            fields["preferences"] = list(projection["preferences"])
-        if projection.get("commitments"):
-            fields["commitments"] = list(projection["commitments"])
-        # 清空语义：投影为空时显式 clear（correct 已发生）
-        if "birthday" in projection and not projection.get("birthday"):
+            if k in projection:
+                fields[k] = str(projection.get(k) or "")
+        for k in ("preferences", "commitments"):
+            if k in projection and isinstance(projection[k], list):
+                fields[k] = list(projection[k])
+        if fields.get("birthday") == "":
             fields["clear_birthday"] = True
         if fields:
             store.upsert(sk, **fields)

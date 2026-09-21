@@ -355,6 +355,8 @@ class _StreamPipelineMixin:
                     emotion_state,
                     session_id,
                     character_id,
+                    turn_id=str(ctx.get("ax_turn_id") or ""),
+                    reply_id=str(ctx.get("ax_reply_id") or ""),
                 )
 
                 process_time = round(time.perf_counter() - stream_start, 3)

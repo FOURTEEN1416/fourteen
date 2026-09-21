@@ -125,6 +125,8 @@ class ProactiveScheduler:
         self._emotion_engine = emotion_engine
         # LLM 主动决策（用户裁决：时机与内容由模型判断，无策略闸）
         self._llm_provider: Any | None = None
+        # AX 审查 B3：执行 LLM 自己给出的 wait_minutes（非硬编码日程表）
+        self._llm_proactive_next_ok: dict[str, float] = {}
 
         self._scheduler: Any = None
         self._active_tasks: dict[str, bool] = {}
@@ -739,6 +741,19 @@ class ProactiveScheduler:
         if not web_cfg.get("enabled", True):
             append_proactive_event(session_key=user_key, sent=False, reason="web_disabled")
             return
+        # 执行 LLM 上次决策的 wait_minutes（模型自判时机，非策略闸）
+        import time as _time
+
+        _now = _time.time()
+        _next_ok = self._llm_proactive_next_ok.get(str(user_key))
+        if _next_ok and _now < _next_ok:
+            append_proactive_event(
+                session_key=user_key,
+                sent=False,
+                reason="llm_wait_window",
+                wait_minutes=int(max(0, (_next_ok - _now) // 60)),
+            )
+            return
 
         eng = hub.get(user_key) if hasattr(hub, "get") else None
         hours = eng._hours_since_last_chat() if eng is not None and hasattr(eng, "_hours_since_last_chat") else 0.0
@@ -801,6 +816,9 @@ class ProactiveScheduler:
             decision.get("wait_minutes"),
             (decision.get("reason") or "")[:80],
         )
+        wait_m = decision.get("wait_minutes")
+        if isinstance(wait_m, int) and wait_m > 0:
+            self._llm_proactive_next_ok[str(user_key)] = _now + float(wait_m) * 60.0
         if not decision.get("should_contact"):
             append_proactive_event(
                 session_key=user_key,

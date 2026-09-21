@@ -192,22 +192,22 @@ def load_persona_hint(character_id: str = "") -> str:
         import json as _json
         from pathlib import Path
 
+        from utils.project_paths import project_path
+
         cid = (character_id or "").strip()
         if not cid:
             return ""
-        p = Path("config/characters") / f"{cid}.json"
-        if not p.exists():
-            # 兼容 id 写在卡内
-            root = Path("config/characters")
-            if root.exists():
-                for f in root.glob("*.json"):
-                    try:
-                        d = _json.loads(f.read_text(encoding="utf-8"))
-                        if str(d.get("id") or "") == cid or str(d.get("name") or "") == cid:
-                            p = f
-                            break
-                    except Exception:  # noqa: BLE001
-                        continue
+        root = Path(project_path("config", "characters"))
+        p = root / f"{cid}.json"
+        if not p.exists() and root.exists():
+            for f in root.glob("*.json"):
+                try:
+                    d = _json.loads(f.read_text(encoding="utf-8"))
+                    if str(d.get("id") or "") == cid or str(d.get("name") or "") == cid:
+                        p = f
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
         if not p.exists():
             return ""
         d = _json.loads(p.read_text(encoding="utf-8"))

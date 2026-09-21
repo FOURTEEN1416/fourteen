@@ -40,17 +40,13 @@ def apply_profile_ops_to_state(state: dict[str, Any], op: dict[str, Any]) -> dic
         if k not in out or not isinstance(out[k], list):
             out[k] = list(out.get(k) or [])
 
-    # 标量：非空覆盖；clear_* / 空串在 correct 中显式清空
+    # 标量：非空覆盖；clear_* / correct 空串可清空
     for field in PROFILE_SCALAR_FIELDS:
         if field in op and op.get(field) is not None:
             val = str(op.get(field) or "")
-            # update 时空串不覆盖（nana basic_info 非空才写）；correct 允许清空
-            if op.get("_event") == EVENT_PROFILE_CORRECT or val != "" or field in op:
-                if op.get("_event") == EVENT_PROFILE_UPDATE and val == "" and field not in op.get(
-                    "_explicit_clear", ()
-                ):
-                    continue
-                out[field] = val
+            if op.get("_event") == EVENT_PROFILE_UPDATE and val == "":
+                continue
+            out[field] = val
 
     if op.get("clear_birthday"):
         out["birthday"] = ""
@@ -82,8 +78,18 @@ def apply_profile_ops_to_state(state: dict[str, Any], op: dict[str, Any]) -> dic
 
 
 def project_profile(ledger: EventLedger, session_key: str, limit: int = 500) -> dict[str, Any]:
-    """按 session_key 重放全部画像事件，得到投影。隔离：永不读其它 session。"""
-    events = ledger.query(session_key=str(session_key), limit=limit)
+    """按 session_key 重放画像事件，得到投影。隔离：永不读其它 session。
+
+    只拉取 profile_* 类型，避免被大量 chat/tool 事件挤出 query 窗口（B2）。
+    """
+    sk = str(session_key or "")
+    events: list[Any] = []
+    for et in (EVENT_PROFILE_UPDATE, EVENT_PROFILE_CORRECT):
+        events.extend(ledger.query(session_key=sk, event_type=et, limit=limit))
+    import contextlib
+
+    with contextlib.suppress(Exception):
+        events.sort(key=lambda e: int(getattr(e, "id", 0) or 0))
     state = _empty_profile()
     for ev in events:
         if ev.event_type not in (EVENT_PROFILE_UPDATE, EVENT_PROFILE_CORRECT):

@@ -91,7 +91,6 @@ def run_curator_for_session(
             except Exception:  # noqa: BLE001
                 continue
         for m in result["merged"]:
-            # near-dup：尝试删掉后出现的那条（保留 hit）
             fid = m.get("id")
             if fid is None:
                 continue
@@ -100,6 +99,18 @@ def run_curator_for_session(
                     pass
             except Exception:  # noqa: BLE001
                 continue
+        # B3/R3：near-dup 保留项在库侧强化（不是只改内存）
+        import contextlib
+
+        for k in result["kept"]:
+            kid = k.get("id")
+            if kid is None:
+                continue
+            if hasattr(sm, "update_fact_confidence"):
+                with contextlib.suppress(Exception):
+                    sm.update_fact_confidence(
+                        int(kid), min(1.0, float(k.get("confidence") or 0.7) + 0.05)
+                    )
     summary = ""
     if llm is not None:
         try:

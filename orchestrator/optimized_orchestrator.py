@@ -942,6 +942,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         # 组装 system prompt
         # 注入顺序对齐 research：角色设定（prompt_builder）→ 世界/知识/记忆/状态
         # （PersonaService）→ 角色片段 → 工具结果(历史后/PHI前) → reply_mode
+        import uuid as _uuid
+
+        ax_turn_id = _uuid.uuid4().hex[:12]
+        ax_reply_id = _uuid.uuid4().hex[:12]
         system_prompt = self.components["persona"].build_system_prompt(
             emotion_state=emotion_state,
             memory_context=memory_context,
@@ -989,13 +993,17 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             # AX P2：工具结果入因果账本（可回放「这句是否因工具而变」）
             if session_id:
                 try:
+                    import uuid as _uuid
+
                     from shisi.agent_plane.event_ledger import EVENT_TOOL_RESULT
                     from shisi.agent_plane.runtime import get_ledger
 
+                    _tid = ax_turn_id
                     get_ledger().append(
                         session_key=session_id,
                         event_type=EVENT_TOOL_RESULT,
                         actor="orchestrator",
+                        turn_id=str(_tid),
                         payload={
                             "chars": len(str(tool_results)),
                             "preview": str(tool_results)[:400],
@@ -1055,6 +1063,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             # A3：chat_round 由 prepare 透传，禁止 stream 内二次查库
             "chat_round": len(chat_history) if isinstance(chat_history, list) else 0,
             "context_lengths": context_lengths,
+            "ax_turn_id": ax_turn_id,
+            "ax_reply_id": ax_reply_id,
         }
 
     def _after_process(
@@ -1064,6 +1074,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         emotion_state: Any,
         session_id: str,
         character_id: str,
+        turn_id: str = "",
+        reply_id: str = "",
     ) -> str:
         """共享后处理：after_chat → ASE on_chat → 好感度同步。
 
@@ -1071,6 +1083,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             emotion_tag 字符串。
         """
         emotion_tag = emotion_state.primary_emotion.value if emotion_state else ""
+        import uuid as _uuid
+
+        ax_turn_id = str(turn_id or _uuid.uuid4().hex[:12])
+        ax_reply_id = str(reply_id or _uuid.uuid4().hex[:12])
 
         mem_kwargs: dict[str, Any] = dict(
             user_msg=user_msg_clean,
@@ -1127,16 +1143,18 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         # 唯一写权威：profile_sync_agent / L1 工具 → EventLedger 投影。
         if session_id:
             try:
-                from shisi.agent_plane.runtime import append_chat_events, get_profile_prompt_block
+                from shisi.agent_plane.runtime import append_chat_events
 
                 append_chat_events(
                     session_key=session_id,
                     character_id=str(character_id or ""),
+                    turn_id=ax_turn_id,
+                    reply_id=ax_reply_id,
                     user_msg=user_msg_clean,
                     reply=reply if isinstance(reply, str) else "",
                     slots={
-                        "has_profile_block": bool(get_profile_prompt_block(session_id)),
                         "emotion_tag": str(emotion_tag or ""),
+                        "turn_id": ax_turn_id,
                     },
                 )
             except Exception as e:  # noqa: BLE001
@@ -1336,7 +1354,13 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
                 # ── 共享后处理（after_chat → ASE → 好感度同步）──
                 emotion_tag = self._after_process(
-                    user_msg_clean, reply, emotion_state, session_id, character_id,
+                    user_msg_clean,
+                    reply,
+                    emotion_state,
+                    session_id,
+                    character_id,
+                    turn_id=str(ctx.get("ax_turn_id") or ""),
+                    reply_id=str(ctx.get("ax_reply_id") or ""),
                 )
 
                 # ── 语音合成（用户明确要求时触发）──
