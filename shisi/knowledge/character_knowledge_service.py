@@ -217,7 +217,7 @@ class CharacterKnowledgeService:
                 if key and key not in seen:
                     seen.add(key)
                     merged.append(chunk)
-        return RetrievalResult(chunks=merged[:top_k])
+        return RetrievalResult(chunks=merged[:top_k], ranked=True)
 
     def get_knowledge_context(self, character_id: str, query: str, top_k: int = 3) -> str:
         """获取格式化的知识上下文，直接用于 prompt 注入。"""

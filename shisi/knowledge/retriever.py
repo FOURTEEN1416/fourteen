@@ -9,7 +9,7 @@ import json
 import math
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 
@@ -26,8 +26,13 @@ class KnowledgeChunk:
 class RetrievalResult:
     chunks: list[KnowledgeChunk] = field(default_factory=list)
     total_chunks: int = 0
+    # ranked=True 表示 chunks 已是最终注入顺序（如双路交错合并结果），
+    # get_top 只截断不再按 score 重排——否则交错合并会被 score 排序打散（6b）。
+    ranked: bool = False
 
     def get_top(self, k: int = 3) -> list[KnowledgeChunk]:
+        if self.ranked:
+            return self.chunks[:k]
         return sorted(self.chunks, key=lambda c: c.score, reverse=True)[:k]
 
     def to_prompt_context(self, k: int = 3) -> str:
@@ -81,11 +86,11 @@ class KeywordRetriever:
     def search(self, query: str, top_k: int = 5) -> RetrievalResult:
         """检索：基于查询词在各块中的 TF 评分。"""
         if not self._chunks or not query.strip():
-            return RetrievalResult(chunks=self._chunks, total_chunks=self._total_chunks)
+            return RetrievalResult(chunks=list(self._chunks), total_chunks=self._total_chunks)
 
         query_tokens = self._tokenize(query)
         if not query_tokens:
-            return RetrievalResult(chunks=self._chunks, total_chunks=self._total_chunks)
+            return RetrievalResult(chunks=list(self._chunks), total_chunks=self._total_chunks)
 
         query_counter = Counter(query_tokens)
 
@@ -98,9 +103,10 @@ class KeywordRetriever:
 
         result_chunks: list[KnowledgeChunk] = []
         for score, idx in scored[:top_k]:
-            chunk = self._chunks[idx]
-            chunk.score = score
-            result_chunks.append(chunk)
+            # 返回带分数的**副本**：直接写 self._chunks[idx].score 会让共享索引对象
+            # 被每次查询覆盖（双路检索时扩展路/原路互相污染，且污染 save() 持久化），
+            # 跨路分数不可比却冒充可比。6b。
+            result_chunks.append(replace(self._chunks[idx], score=score))
 
         return RetrievalResult(chunks=result_chunks, total_chunks=self._total_chunks)
 
