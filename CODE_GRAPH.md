@@ -24,7 +24,7 @@
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| API 业务端点（`APIRoute` 实扫） | **220 端点 / 186 条唯一路径**（105 GET / 79 POST / 16 PUT / 20 DELETE） / **19 处 include_router + setup_shisi**（2026-09-21 复测；较 09-20 口径 215/181 +5 = agent-plane 路由组） | 2026-09-21 内省 `create_api_app()`：`len([r for r in app.routes if isinstance(r, APIRoute)])`。⚠️ 旧口径"208 端点"实为 `len(app.routes)`，含 4 条框架路由（`/openapi.json`、`/docs`、`/docs/oauth2-redirect`、`/redoc`），非业务端点；本轮 `len(app.routes)=224` |
+| API 业务端点（`APIRoute` 实扫） | **220 端点 / 186 条唯一路径**（105 GET / 79 POST / 16 PUT / 20 DELETE） / **19 处 include_router + setup_shisi**（2026-09-21 复测；较 09-20 口径 215/181 +5 = agent-plane 路由组） | 2026-09-21 内省 `create_api_app()`：`len([r for r in app.routes if isinstance(r, APIRoute)])`。⚠️ 旧口径"208 端点"实为 `len(app.routes)`，含 4 条框架路由（`/openapi.json`、`/docs`、`/docs/oauth2-redirect`、`/redoc`），非业务端点；本轮 `len(app.routes)=224`。⚠️ **测量方法注记（09-21 服务器实测补）**：`create_api_app()` 裸调用走惰性挂载（路由为 `_IncludedRouter` 待展开对象，裸内省仅 39 条），端点口径以运行期展开后为准——生产实例 `openapi.json` 实测 186 唯一路径与口径吻合 |
 | main.py 体量 | **约 17.4 KB / 438 行** | 2026-09-20 实测（08-28 两轮瘦身基线后随通道批次 ± 微调） |
 | 前端页面 | **17 个** | Glob `frontend/src/pages/*.tsx`（另有 `StorylinePage` 为 App.tsx 内联包装组件） |
 | 前端 API 模块 | **13 个** | Glob `frontend/src/api/*.ts`（09-18 CI 门禁根治新增 `emotion.ts` / `normalize.ts`，原 11） |

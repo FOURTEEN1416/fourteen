@@ -2846,3 +2846,21 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 **四项核验全绿**：① health 200（`environment: production`）；② `systemctl is-active` = **active**，app.log 显示三 owner 微信通道（owner=2/4/7）凭证免扫码重连并进入消息轮询；③ 死模块/新模块服务器侧落点正确（`tracing.py`/`character_card/`/`style_enhancer.py`/`rag_engine.py` gone；`utils/session_key`、`llm_bridge`、`emotion_state`、`json_state`、`shisi/core/conversation_turn` EXISTS）；④ **md5 抽验 4/4 一致**（归一化行尾：`config/shisi.yaml` / `orchestrator/tool_gate.py` / `api/app_factory.py` / `main.py`）。
 
 **三端终态**：本地 = origin/main = 服务器 HEAD = **`78b6a47`**；工作树双端 clean（服务器余 3 个 untracked 临时脚本待用户处置）。
+
+---
+
+## v1.35 补记（三）· 遗留项处置 + 服务器生产实测（2026-09-21）
+
+**指令链**：用户「由你进行实际测试然后按照你的推荐进行」——对交接复核遗留项实际取证后按推荐处置。
+
+**① 服务器临时脚本删除（审计 N7 销账）**：`scripts/_tmp_dump_memory_state.py` / `_tmp_wipe_extra.py` / `_tmp_wipe_memory_data.py` **全文读取后删除**。取证：三者均为 09-21 上午生产数据清洗的一次性脚本（mtime 09:51/10:03），其操作已执行完毕；本地同名脚本早经删除（LOG 有载）；`docs/verification/2026-09-21-全仓审计复核与修复现状.md` N7（P3）本就建议删除（L8 违例：后者是对生产库整表 DELETE 的清库脚本，误执行即数据销毁）。删后 `_tmp_*` 零残留。`wt/selftalk-fix` 等存档项维持不变。
+
+**② 服务器生产实测（首次在生产宿主整跑套件）**：
+- **端点口径方法论勘误**：`create_api_app()` 裸调用现走**惰性挂载**（路由为 `_IncludedRouter` 待展开对象，裸内省仅 39 条）——裸内省数端点的方法已失效；以**运行实例 `openapi.json` 实测 186 条唯一路径**确认生产 API 面完整，与 §1.1 口径吻合；五路由抽探全部 401（存在且认证生效）。CODE_GRAPH §1.1 已补测量注记。
+- **首轮四块：1652 通过 / 5 跳过 / 17 失败**（本地同码 1653/4/0）——三个根因，两个当场修复：
+  1. `test_character_card_package_removed`：`character_card/` 目录被 untracked `__pycache__` 钉住 + venv editable 安装 finder 映射残留已删包名（`find_spec` 仍返回 namespace spec）→ 现场清理孤儿目录 + `pip install -e .` 刷新映射 → **转绿**；
+  2. `test_integration.py` 15 例 `assert 401 == 200`：**进程级认证全局污染**——`api.auth._auth_config` 仅 `configure_auth` 可置位且无测试间复位；组合态前置测试令 `create_api_app()` 在生产判定下开启认证（`resolve_api_key_enabled` 未设时默认 `is_production()`，服务器 `.env` 使其成立、本地 `.env` 无 `API_KEY_ENABLED` 键故本地恒绿），后续「裸 FastAPI + setup_shisi」用例整批 401。单文件/两文件探针均不触发，属多文件组合态。**根治**：`tests/conftest.py` 新增 autouse `reset_auth_state_each`（每测前 `configure_auth(False, "")`），`51be49f` 推送后服务器复跑验证通过；本地回归 auth 三件套 + integration 50/50 绿；
+  3. `test_wechat_channel_api_auth.py::test_channel_status_is_per_user_not_global`：断言 user2 通道 `connected is False`，但生产 owner=2 真实在连 → **测试读真实通道注册表、无隔离**（本地无通道凭证故恒绿）。登记为已知环境依赖用例（建议后续 mock 注册表路径），非代码缺陷——端点对真实数据的 per-user 隔离行为反而得到一次真实验证。
+- **修复后终局四块：1652 通过 / 5 跳过 / 1 已知环境依赖失败 / 0 其余失败**（318 + 401+3+1 + 529+1 + 404 = 收集 1657，账实相符；跳过比本地多 1 系 Linux 平台性 skip）。
+
+**三端终态**：A 档三端一致 @ **`51be49f`**（conftest 属 `tests/` 为 A 档，已随服务器 pull 生效）；其后文档提交仅 GitHub（B 档）。
