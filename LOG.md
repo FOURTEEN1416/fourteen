@@ -12,7 +12,7 @@
 - **触发**：用户令「开始进行复核」——并行窗 AX P2 批次（`b7cd513`+`3e96a7c`，13 文件 +1022/−31）落地后，对此前审查基线做增量复核；按全量核验纪律逐文件逐条对码，不采信提交信息与 BOARD「生产闭环」宣称。
 - **产出**：`docs/verification/2026-09-21-full-code-audit.md` 新增「复核实录」节——**新 P0×1**（agent-plane 6 端点仅 `verify_api_key_dep`，任一用户 JWT 可跨用户读因果账本、`POST /curate apply=True` 空键全库破坏性执行；仓库已有 `require_role("admin")` 未用）；**新 P1×6**（persona_hint 注入链三处断恒为空——`ASEEngine` 无 `_character_id` 属性实证；`wait_minutes` 只入账不门控 + LLM 决策在静默闸前 → 约 288 次/天/用户 token 空烧；TOOL_RESULT 事件缺 turn_id → 回放/探针 tool 维度死壳；agent_plane.db 无保留策略、web_disabled 每 tick 写行；CWD 相对路径两处回归；`write_config_file` 非原子 RMW）；**旧 P0-1/-2/-6/-8 复核均未修**；**核实无恙**：curator↔StructuredMemory 契约、ledger 路径锚定、ax_clean_profiles。
 - **口径刷新**：端点内省 219/181 → **224/190**（+5 路径组全为 agent-plane，`AI_GF_ENV=dev` 实跑）。
-- **边界**：只读零代码改动；工作树含并行窗**未提交在制品 7 文件**（其正在自修 wait 门控/投影窗口等同题项），未纳入本口径，待其提交后再增量复核；测试沿用 1455/1451/4（对应 3e96a7c 提交态）、角色卡 41 张在位；服务器侧取证仍未做（另批）。
+- **边界**：只读零代码改动；工作树他窗在制品随后提交为 `1ec283d` 并已并入复核逐条对码（turn_id 真修✓、persona_hint 半修仍恒空、P0-10 未动、wait 门控落地但静默前置闸仍缺）；测试沿用 1455/1451/4（对应提交态）、角色卡 41 张在位；服务器侧取证未做（另批）。
 - **下一步**：等用户点单排序修复；本窗未动码。
 
 ## 2026-09-21 — 全量代码审查（只读，B 档）

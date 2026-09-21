@@ -170,7 +170,7 @@
 ## 复核实录（b76d6c6 → 3e96a7c · AX P2 批次增量复核）
 
 > 复核对象：并行窗两提交 `b7cd513`（agent-plane P2 全量）+ `3e96a7c`（BOARD 收账），13 文件 +1022/−31。**逐文件逐条对码核验**，不采信提交信息与 BOARD「生产闭环」宣称。
-> 工作树声明：复核时工作树含并行窗**未提交在制品** 7 文件（scheduler wait 门控、projection 按 event_type 拉取、runtime 种子判定等——恰与本复核新登记的部分 P1 同题，属他窗修复中），**不在本次口径内**；其提交后需再增量复核。
+> 工作树声明：复核时工作树含并行窗未提交在制品 7 文件；该在制品随后提交为 **`1ec283d`（代码审查修复）并已并入本复核口径逐条对码**——结果：P1-50 已真修（`ax_turn_id` 在 prepare 生成、贯穿 tool append/`_after_process`/stream 三处，行级证实）；P1-52① 的 `load_persona_hint` 已改 `utils/project_paths.project_path` 且空 cid 直接短路（glob 开销消失）；P1-49 的 wait 门控已落地（`_llm_proactive_next_ok` 下一 tick 生效），但静默时段 LLM 前置闸仍缺（仅把 quiet_hours 塞进 LLM 上下文，调用照跑）；**P1-48 只修一半**——`eng._character_id` 依旧不存在（scheduler:783）、`profile_projection` 产物仍无 character_id 槽 → char_id 恒 `""` → `load_persona_hint("")` 直返，**persona_hint 恒空依旧**（修法从"glob 41 卡浪费"变成"提前 return 彻底不注入"）；**P0-10 完全未动**（agent_plane_routes.py 不在该提交内）；P1-51/53 与旧 P0-1/-2/-6/-8 均未修。
 
 ### 新增 P0-10 — agent-plane 全部端点无管理员门槛：任一用户 JWT 可跨用户读因果账本、可全库破坏性 curate
 - `api/routers/agent_plane_routes.py`（新 153 行）6 端点（replay / profile / events / curate / probes，含 GET+POST）鉴权**全部只有 `Security(verify_api_key_dep)`**；而 `api/auth.py:44-74` 语义 = **任一有效用户 access token 即放行，role 不参与判定**。仓库已有 `api/auth_jwt.py:196-221 require_role("admin")` 未被使用。
@@ -180,7 +180,7 @@
 
 ### 新增 P1（AX P2 批次）
 48. **persona_hint 注入链三处断、恒为空**：`proactive/llm_proactive.py::load_persona_hint` 本体正确，但调用侧拿不到 character_id——`_llm_proactive_one_user` 取 `eng._character_id`，**ASEEngine 无此属性**（真实属性是 `_knowledge_character_id`，`ase_engine.py:701`），异常/空被吞后传 `""`；即便走 hub 键推断，键形如 `N:peer` 无 `|` 分隔；`profile_projection` 产物也无 character_id 槽。**三源全空 → 每轮「人格提示」恒 `""`**，BOARD 宣称的 persona 闭环是空壳（文件解析、41 卡 glob 全跑，产物进不了 prompt）。
-49. **`wait_minutes` 只入账不生效 + LLM 决策无静默前置闸 → 每用户约 288 次/天 LLM 空烧**：`ase_check` 为 5 分钟 IntervalTrigger（`scheduler.py:245-252`），`_llm_proactive_one_user` 每次调远端 LLM 决策；决策返回的 `wait_minutes` 仅写 ledger 事件，**无任何下一 tick 门控**；且 23:00–07:00 静默只在投递层硬闸（:570/:916/:965/:1039），LLM 调用发生在闸**之前** → 夜间照烧。消息不刷屏，token 恒流失。（他窗工作树在制品正在修 wait 门控，入账后本条应复核降级。）
+49. **`wait_minutes` 只入账不生效 + LLM 决策无静默前置闸 → 每用户约 288 次/天 LLM 空烧**：`ase_check` 为 5 分钟 IntervalTrigger（`scheduler.py:245-252`），`_llm_proactive_one_user` 每次调远端 LLM 决策；决策返回的 `wait_minutes` 仅写 ledger 事件，**无任何下一 tick 门控**；且 23:00–07:00 静默只在投递层硬闸（:570/:916/:965/:1039），LLM 调用发生在闸**之前** → 夜间照烧。消息不刷屏，token 恒流失。（`1ec283d` 已落 wait 门控；**静默时段 LLM 前置闸仍缺**，本条按剩余部分成立。）
 50. **TOOL_RESULT 事件缺 turn_id → 回放/探针的 tool 维度是死壳**：`orchestrator/optimized_orchestrator.py:986-1003` append 时只带 session_key/payload，**不带 turn_id/character_id**；`replay(turn_id=…)` 按列切片永远命中 0 条 tool 事件；`scripts/ax_acceptance_probes` live 模式取最新 tool 事件作 turn 锚 → 恒 `no_turn_id_yet`。且该 append 为异步热路径内的同步 sqlite 写，失败仅 `logger.debug`。
 51. **`data/agent_plane.db` 无保留策略**：`event_ledger.py` 只 append 不 prune，chat/tool/profile/web_disabled 全类型常驻 → 无界增长（`web_disabled` 在 enabled=false 时**每 tick 每用户写一行**，关闭态反而涨得最快）。
 52. **CWD 相对路径两处回归（v1.8 教训同模式）**：① `load_persona_hint` 用 `Path("config/characters")` 且 cid 空时 **glob 解析全部 41 张卡 JSON**——每 5 分钟每用户一次；② `agent_plane_routes.curate` 全库扫描用 `Path("data/sqlite.db")`。工作目录非项目根的启动方式下双双静默失效。仓库真源是 `utils/project_paths.PROJECT_ROOT`。
