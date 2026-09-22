@@ -144,9 +144,15 @@ def _load_env_for_api_import() -> None:
 
 
 def _sync_disk_sessions_to_db_sync() -> int:
+    """CLI/脚本入口（进程内无运行中事件循环时可用）。"""
+    import asyncio
+
+    return asyncio.run(_sync_disk_sessions_async())
+
+
+async def _sync_disk_sessions_async() -> int:
     """把 data/wechat_sessions/*/slot*/credentials.json 同步进 wechat_channel_sessions。"""
     _load_env_for_api_import()
-    import asyncio
     import json as _json
     from datetime import datetime, timezone
 
@@ -154,59 +160,61 @@ def _sync_disk_sessions_to_db_sync() -> int:
 
     from api.database import WechatChannelSession, _async_session, init_db
 
-    async def _run() -> int:
-        await init_db()
-        n = 0
-        async with _async_session() as session:
-            root = channel_paths.sessions_root()
-            if not root.exists():
-                return 0
-            for user_dir in root.iterdir():
-                if not user_dir.is_dir() or not user_dir.name.isdigit():
-                    continue
-                uid = int(user_dir.name)
-                for slot in channel_paths.list_user_slots_with_credentials(uid):
-                    cred_path = channel_paths.credentials_path(uid, slot)
-                    state_path = channel_paths.state_path(uid, slot)
-                    bot_id = ""
-                    status = "idle"
-                    try:
-                        cred = _json.loads(cred_path.read_text(encoding="utf-8"))
-                        bot_id = str(cred.get("bot_id") or "")
-                    except Exception:  # noqa: BLE001
-                        pass
-                    try:
-                        st = _json.loads(state_path.read_text(encoding="utf-8"))
-                        if st.get("connected") and bot_id:
-                            status = "connected"
-                        elif st.get("status"):
-                            status = str(st.get("status"))
-                    except Exception:  # noqa: BLE001
-                        pass
-                    result = await session.execute(
-                        select(WechatChannelSession).where(
-                            WechatChannelSession.user_id == uid,
-                            WechatChannelSession.slot == slot,
-                        )
+    await init_db()
+    n = 0
+    async with _async_session() as session:
+        root = channel_paths.sessions_root()
+        if not root.exists():
+            return 0
+        for user_dir in root.iterdir():
+            if not user_dir.is_dir() or not user_dir.name.isdigit():
+                continue
+            uid = int(user_dir.name)
+            for slot in channel_paths.list_user_slots_with_credentials(uid):
+                cred_path = channel_paths.credentials_path(uid, slot)
+                state_path = channel_paths.state_path(uid, slot)
+                bot_id = ""
+                status = "idle"
+                try:
+                    cred = _json.loads(cred_path.read_text(encoding="utf-8"))
+                    bot_id = str(cred.get("bot_id") or "")
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    st = _json.loads(state_path.read_text(encoding="utf-8"))
+                    if st.get("connected") and bot_id:
+                        status = "connected"
+                    elif st.get("status"):
+                        status = str(st.get("status"))
+                except Exception:  # noqa: BLE001
+                    pass
+                result = await session.execute(
+                    select(WechatChannelSession).where(
+                        WechatChannelSession.user_id == uid,
+                        WechatChannelSession.slot == slot,
                     )
-                    row = result.scalar_one_or_none()
-                    if row is None:
-                        row = WechatChannelSession(user_id=uid, slot=slot)
-                        session.add(row)
-                    row.bot_id = bot_id or row.bot_id
-                    row.status = status
-                    if status == "connected":
-                        row.last_connected_at = datetime.now(timezone.utc)
-                    n += 1
-            await session.commit()
-        return n
-
-    return asyncio.run(_run())
+                )
+                row = result.scalar_one_or_none()
+                if row is None:
+                    row = WechatChannelSession(user_id=uid, slot=slot)
+                    session.add(row)
+                row.bot_id = bot_id or row.bot_id
+                row.status = status
+                if status == "connected":
+                    row.last_connected_at = datetime.now(timezone.utc)
+                n += 1
+        await session.commit()
+    return n
 
 
 async def sync_disk_sessions_to_db() -> int:
-    """异步包装，供 FastAPI lifespan 调用（进程内已有 JWT_SECRET）。"""
-    return _sync_disk_sessions_to_db_sync()
+    """异步入口，供 FastAPI lifespan 调用。
+
+    旧实现在这里同步调 `_sync_disk_sessions_to_db_sync()`（内部 `asyncio.run`），
+    在运行中的事件循环里必抛 RuntimeError——生产 app.log 每次 worker 启动
+    刷一条「同步微信通道会话到 DB 失败（忽略）」，该启动同步从未成功。
+    """
+    return await _sync_disk_sessions_async()
 
 
 if __name__ == "__main__":
