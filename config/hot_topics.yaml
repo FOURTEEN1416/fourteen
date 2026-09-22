@@ -1,0 +1,16 @@
+# 热点知识链配置（owner: shisi/knowledge/hot_topics.py，逐键默认值容错，缺文件=全默认）
+# 链路：本表 queries 采集 → data/hot_topics.json 全局池 → 主动消息知识供出口（_try_knowledge_share）
+# ⚠️ 顶层键与 load_config 逐一对应，勿再包一层 section（会成死配置）。
+enabled: true
+# 公共热点查询表——只搜公开资讯，禁用户隐私入参
+queries:
+  - "今日热搜 热点事件"
+  - "本周新闻热点 社会"
+  - "近期电影 电视剧 热议"
+  - "体育赛事 最新赛果"
+  - "科技 互联网 热门话题"
+interval_minutes: 60   # 采集自限速间隔（collect_if_due 内判，任意轮询频率安全）
+ttl_hours: 48          # 条目存活时长（读侧过滤 + 写侧剪枝）
+max_pool: 50           # 全局池上限（溢出丢最旧）
+max_results_per_query: 3
+max_items_inject: 2    # 每次供出注入条数
