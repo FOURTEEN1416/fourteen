@@ -7,6 +7,17 @@
 
 ---
 
+## 2026-09-22 W1 窗口 — v1.38 遗留项①收口：好感度刻度标记启动迁移
+
+- **触发**：开窗任务单（遗留①：`df59752~1766b2e` 之间本机以旧标记 `user_scheduler_persist` 写过的 shisi 刻度行，回放会被误 ÷5 一次；推荐方案已在上一条 LOG 给出，照做）。
+- **落地**：
+  - `shisi/api/registry.py` 新增 `migrate_affinity_mirror_reason(db_path)`——`UPDATE affinity_records SET reason=MIRROR_REASON_SHISI WHERE reason=MIRROR_REASON_POINTS`（reason 值全部 import enhancer `MIRROR_REASON_*` 常量，不写字面串，判据唯一真源不破）；`setup_shisi` 在建 `AffinityEnhancer`（其构造即触发 `_restore_from_audit` 回放换算）**之前**调用。幂等（二次 0 行）；表不可用告警降级返回 0 不阻塞启动；迁移/跳过均 INFO 日志含行数。不挂在 `run_migrate` 分支下——`run_migrate=False` 时回放照样发生。
+  - 新增 `tests/test_affinity_reason_migration.py`（4 例）：混刻度行迁移+回放停止换算（含迁移**前**误换算对照，钉现状非纸面主张、无 reason 裸行不受波及）/ 幂等二次 0 行 / 缺表降级 / setup_shisi 接线时序（spy 在 enhancer 构造时刻查表钉旧标记残留=0 + 回放值=50 直取）。
+  - 新增 `scripts/clean_local_affinity_test_rows.py`（一次性、仅本机 dev 库）：dry-run 默认、--apply 先 cp 备份再删调度器镜像残留。本机实跑：候选恰为实证 21 行（`alice::default`、值全 0.0），备份 `data/sqlite.db.bak-20260922-180027`，删除后镜像残留=0、总行数 1179→1158。
+- **验证**：新文件 4/4 绿 + 受影响面（round3 12 + block_e 35 + integration 19）**70 passed / 0 failed**；ruff 改动文件 0 错；`scripts/ci_gates.py` 4/4；**突变验红命中**——WHERE 参数改为 `(SHISI, SHISI)` → 换算对照/幂等/接线时序 **3 例转红**（缺表降级例与判据无关，正确保绿），还原复跑全绿。
+- **边界**：生产 `user_scheduler_persist` 行实证 0 条（只读探针在前批已核）——本迁移上线时生产为 no-op，属防御性收口；无 reason 裸行（生产 3 条、值 50.0）按既定裁决保持不换算。
+- **归属**：仅 `shisi/api/registry.py`、新测试文件、`scripts/` 清理脚本、本 LOG 条目；未触碰 scheduler/session_key/AGENTS 修订历史。
+
 ## 2026-09-22 六域三次排查 — 好感度刻度判据 / 阶段键空间与落盘 / 主动人设假接线（P0+P1+P2 根治，收窗补账）
 
 - **触发**：用户指令「昨日进行了重大更新多次，需要你继续全面排查，人设系统，记忆系统，情感系统，主动关怀，定时提醒，用户隔离」。

@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from fastapi import FastAPI
 
-from ..affinity.enhancer import AffinityEnhancer
+from ..affinity.enhancer import (
+    MIRROR_REASON_POINTS,
+    MIRROR_REASON_SHISI,
+    AffinityEnhancer,
+    default_db_path,
+)
 from ..affinity.mapper import AffinityMapper
 from ..character.manager import CharacterManager
 from ..character.store import CharacterStore
@@ -46,6 +53,33 @@ class AiyuRegistry:
     analytics_service: AnalyticsService | None = None
 
 
+def migrate_affinity_mirror_reason(db_path: str | Path | None = None) -> int:
+    """v1.38 遗留①收口：审计镜像旧刻度标记 → shisi 标记（幂等，启动迁移）。
+
+    df59752~1766b2e 之间写侧曾以旧标记 `user_scheduler_persist`（points 刻度
+    判据）写入 **shisi 刻度**的行，读侧回放按 points 误换算一次（50→10）。
+    写读两侧现已收口到 enhancer.MIRROR_REASON_*（唯一真源），旧标记行不再新增，
+    本迁移把存量旧标记统一转为新标记（直取）。表不可用时告警降级、不阻塞启动。
+    """
+    path = Path(db_path) if db_path else default_db_path()
+    try:
+        with closing(sqlite3.connect(str(path))) as conn, conn:
+            n = conn.execute(
+                "UPDATE affinity_records SET reason = ? WHERE reason = ?",
+                (MIRROR_REASON_POINTS, MIRROR_REASON_SHISI),
+            ).rowcount
+    except Exception as e:  # noqa: BLE001
+        logger.warning("好感度刻度标记迁移跳过（affinity_records 不可用）: %s", e)
+        return 0
+    if n:
+        logger.info(
+            "好感度刻度标记迁移: %d 行 %s → %s", n, MIRROR_REASON_POINTS, MIRROR_REASON_SHISI
+        )
+    else:
+        logger.info("好感度刻度标记迁移: 无 %s 存量行，跳过", MIRROR_REASON_POINTS)
+    return n
+
+
 def setup_shisi(
     app: FastAPI | None = None,
     run_migrate: bool = True,
@@ -63,6 +97,11 @@ def setup_shisi(
 
     if run_migrate:
         run_migrations(db_path)
+
+    # 遗留①收口：必须在下方 AffinityEnhancer 构造**之前**——其 _restore_from_audit
+    # 按 reason 判据回放换算，先转标记才不会把存量 shisi 行误 ÷5。
+    # 不挂在 run_migrate 分支下：run_migrate=False 时回放照样发生。
+    migrate_affinity_mirror_reason(db_path)
 
     store = CharacterStore(db_path) if db_path else CharacterStore()
     reg.character_manager = CharacterManager(store=store)
