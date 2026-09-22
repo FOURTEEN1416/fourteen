@@ -2958,3 +2958,5 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 **④ 分支归档**：`wt/selftalk-fix` → tag `archive/selftalk-fix`（`1d93ae3`，本地+origin）后删除本地与远端分支；恢复：`git branch wt/selftalk-fix archive/selftalk-fix`；完整收口记录 `git show archive/selftalk-fix:docs/board/BOARD.md`。BOARD 追加区已登记。
 
 **三端终态**：A 档三端一致 @ **`edd3c47`**。
+
+- 2026-09-22 W2 laya 真源审计（wt/laya-audit，零代码变更）：真项目/包干净/Apache-2.0，参数量属实（safetensors 头实测 421.3M/321.9M F16），CPU 延迟 193–464ms 未证实（仓内 sweep 实测 1392.5ms 且自相矛盾），zero-shot 官方自认低于多数类；三接线点（decide_proactive / tool_gate L0 / ASE 紧迫度）全部建议不替代，判定=有条件引入；产物 `docs/research/2026-09-22_laya真源审计与接线评估.md`；待主控核验：服务器 RAM/依赖、试跑授权（文档 §2.5）。
