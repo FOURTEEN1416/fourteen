@@ -1,6 +1,7 @@
 """热点知识链 —— 采集 → 全局热点池 → 经主动消息知识供出口供出。
 
-链路（W3 热点知识链窗，2026-09-22，设计见 BOARD 同日条目）：
+链路（W3 热点知识链窗，2026-09-22，设计见
+``docs/design/2026-09-22_热点入知识库主动消息链设计.md``）：
 
 1. **采集**：复用 ``tools.builtin.search_tool.SearchTool``（Bing 主 + DDG 副熔断
    为现成能力），查询表来自 ``config/hot_topics.yaml``，全部为公共热点关键词，
@@ -13,7 +14,8 @@
    ``get_hot_context(character_id)`` 把新鲜热点前置拼入 excerpt——收口在既有
    知识供出口，不另造通道、不写角色 BM25 索引文件（41 卡索引结构零变更）。
 4. **触发**：``collect_if_due()`` 同步幂等自限速，任意轮询频率下重复调用安全；
-   scheduler 侧注册归主控（接线契约已写 BOARD）。
+   scheduler 侧注册归主控（接线契约见 ``docs/board/W3_HANDOFF_WIRING.md``，
+   手动一轮走 ``scripts/run_hot_topics_collect.py``）。
 
 失败降级：搜索全挂 → 只记 warning 返回 ``{ok: False}``，池保留旧未过期条目；
 供出侧任何异常 → 空串 → 回退既有知识索引/模板路径，链路永不因热点炸掉主动消息。
