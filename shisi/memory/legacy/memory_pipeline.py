@@ -422,6 +422,10 @@ class MemoryPipeline:
         message: str,
         session_id: str = "",
         emotion_tag: str = "",
+        character_id: str = "",
+        channel: str = "",
+        importance: float = 0.0,
+        turn_id: str = "",
     ) -> bool:
         """角色**主动发出**的消息（追问 / 主动消息 / 到期提醒）回写对话历史。
 
@@ -429,15 +433,30 @@ class MemoryPipeline:
         没有她自己问过的那句 → 重复发同一个问题，并把用户对追问的回应误当成
         用户新起的话题（生产实证 1032 行「我确实提过，但具体是什么事…」）。
         与 write_chat_history_sync 的区别就是**只有 assistant 一行**。
+
+        🔴 2026-09-22 二次根治：本方法此前只落 `role + session_id`，而
+        `get_chats_by_session_limit` 的角色过滤含 `OR character_id = ''`
+        —— 空归属行**恒被保留** ⇒ 主动消息/提醒/追问写下的 assistant 行
+        在切换角色后仍进入新角色上下文，"新角色继承上一角色台词"在这条
+        出站路径上原样复发（conversation_turn 那次修复只覆盖了入站两行）。
+        现与 `write_chat_history_sync` 同构：写入 `character_id` / `user_key` /
+        `turn_id` / `importance` / `channel` 五项归属。
         """
         text = str(message or "").strip()
         effective_session = session_id or self.session_id
         if not text or not effective_session or _is_system_error_reply(text):
             return False
+        common = dict(
+            character_id=str(character_id or ""),
+            user_key=_user_key_from_session(effective_session),
+            turn_id=str(turn_id or ""),
+            importance=float(importance or 0.0),
+            channel=str(channel or ""),
+        )
         try:
             self.sm.add_chat(
                 "assistant", text, emotion_tag=emotion_tag,
-                session_id=effective_session,
+                session_id=effective_session, **common,
             )
             self.working.add(
                 "assistant", text, emotion_tag, 0.5,

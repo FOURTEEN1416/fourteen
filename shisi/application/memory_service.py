@@ -208,12 +208,24 @@ class ShisiMemoryService:
         message: str,
         session_id: str = "",
         emotion_tag: str = "",
+        character_id: str = "",
+        channel: str = "",
+        importance: float = 0.0,
+        turn_id: str = "",
     ) -> bool:
-        """角色主动发出的消息（追问/主动消息/提醒）回写历史——唯一 owner。"""
+        """角色主动发出的消息（追问/主动消息/提醒）回写历史——唯一 owner。
+
+        🔴 2026-09-22：补 `character_id` 等归属参数（此前签名根本没有该参数，
+        出站 assistant 行永久无归属 → 切角色后继承他人台词）。
+        """
         return self._pipeline.record_outbound_message(
             message=message,
             session_id=session_id,
             emotion_tag=emotion_tag,
+            character_id=character_id,
+            channel=channel,
+            importance=importance,
+            turn_id=turn_id,
         )
 
     def retrieve_context(

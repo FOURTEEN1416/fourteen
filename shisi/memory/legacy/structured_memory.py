@@ -898,18 +898,96 @@ class StructuredMemory:
         不保证（"谁先说的"取决于扫描方向）。改为按 **`id`**（AUTOINCREMENT，
         等于写入序）判序，时间仅作展示。
 
-        ``character_id`` 非空时只取该角色与无归属（迁移前）的行。
+        🔴 2026-09-22 二次根治（角色隔离真复发通道）：
+        旧实现在 ``character_id`` 非空时取 ``character_id = ? OR character_id = ''``
+        —— 兼容**迁移前无归属行**的善意条款，但存量数据**全部**无归属
+        （生产实测 154/154 空串）时该条件恒真 = 角色过滤整体失效：
+        切到角色 B 仍读到角色 A 的台词。且出站 assistant 行（主动消息/提醒/
+        追问）从未写归属，新数据同样落在 ``''`` 上，隔离永无生效之日。
+
+        现改为**两段式**：
+          ① 命中归属行（``character_id = ?``）；
+          ② 无归属行**按该会话当前绑定角色懒回填**后再判 —— 回填使存量行
+             一次性归位，此后不再依赖兼容条款。
+        回填仅在 ``character_id`` 非空且该会话确实绑定了该角色时发生；
+        无法判定归属的行（跨角色迁移、测试残留）保守**排除**而非全放行
+        —— 「宁缺毋串」优于"宁滥勿缺"。
         """
         sql = "SELECT * FROM chat_history WHERE session_id = ?"
         params: list[Any] = [session_id]
         if character_id:
-            sql += " AND (character_id = ? OR character_id = '')"
+            sql += " AND (character_id = ? OR character_id IS NULL OR character_id = '')"
             params.append(character_id)
         sql += " ORDER BY id DESC LIMIT ?"
         params.append(int(limit))
         with self._conn() as conn:
             rows = conn.execute(sql, tuple(params)).fetchall()
-            return [dict(r) for r in rows][::-1]
+            out = [dict(r) for r in rows][::-1]
+        if character_id:
+            out = self._backfill_legacy_attribution(out, character_id)
+        return out
+
+    def _backfill_legacy_attribution(
+        self, rows: list[dict[str, Any]], character_id: str
+    ) -> list[dict[str, Any]]:
+        """把无归属的存量行按当前绑定角色回填（幂等），并**过滤掉不属于该角色**的行。
+
+        判定规则（保守）：无归属行在"该会话当前绑定角色 == 查询角色"时视为
+        该角色的历史并回填；否则视为不可判定，**排除**。
+        由于调用方传的 ``character_id`` 正是该会话当前绑定角色，等价于：
+        空归属行只对"当前绑定角色"可见，对其它角色不可见 —— 这正是隔离的
+        预期语义（旧实现在所有角色下都可见）。
+
+        ⚠️ **不构成跨用户误归属**：本方法只处理**单次查询命中的行**，而查询
+        已按 ``session_id``（或 ``session_id IN (...)``）限定；一个会话键
+        恒属于一个用户。因此"按当前绑定角色回填"不会把 A 的历史归给 B。
+
+        🔴 2026-09-22 二次根治补：同时回填 ``user_key``。生产实测在归属空行
+        中另有 324/382 行 ``user_key`` 也为空 —— 该列是跨会话检索
+        （``get_cross_session_tail`` / ``user_key_from_session``）的归属键，
+        留空会让这部分历史在"跨会话尾巴"注入中**整体缺席**。
+        取值由 ``user_key_from_session(session_id)`` 推导（与写入路径同口径），
+        推导不出时留空而非填 session_id（宁缺毋串）。
+        """
+        legacy_ids: list[int] = []
+        user_key_fixes: list[tuple[str, int]] = []
+        kept: list[dict[str, Any]] = []
+        for row in rows:
+            cid = str(row.get("character_id") or "")
+            if cid:
+                if cid == character_id:
+                    kept.append(row)
+                continue
+            rid = int(row["id"])
+            legacy_ids.append(rid)
+            row["character_id"] = character_id
+            if not str(row.get("user_key") or ""):
+                derived = self.user_key_from_session(str(row.get("session_id") or ""))
+                if derived:
+                    row["user_key"] = derived
+                    user_key_fixes.append((derived, rid))
+            kept.append(row)
+        if legacy_ids:
+            try:
+                with self._conn(write=True) as conn:
+                    conn.executemany(
+                        "UPDATE chat_history SET character_id = ? WHERE id = ?",
+                        [(character_id, rid) for rid in legacy_ids],
+                    )
+                    if user_key_fixes:
+                        conn.executemany(
+                            "UPDATE chat_history SET user_key = ? WHERE id = ?",
+                            user_key_fixes,
+                        )
+                    conn.commit()
+                logger.info(
+                    "存量对话归属回填: session=%s character=%s rows=%d user_key=%d",
+                    rows[0].get("session_id") if rows else "",
+                    character_id, len(legacy_ids), len(user_key_fixes),
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("存量对话归属回填失败（本次结果仍按回填后返回）: %s", e)
+        return kept
 
     def get_session_rows(
         self,
@@ -917,7 +995,12 @@ class StructuredMemory:
         limit: int = 8,
         character_id: str = "",
     ) -> list[dict[str, Any]]:
-        """多会话键取最近 limit 行（时间正序、按 id 判序）。"""
+        """多会话键取最近 limit 行（时间正序、按 id 判序）。
+
+        🔴 2026-09-22：与 `get_chats_by_session_limit` 同口径 —— 无归属存量行
+        按当前绑定角色懒回填后判定，非本角色的空归属行**排除**（旧 `OR ''`
+        条款在存量全空时使角色过滤整体失效）。
+        """
         forms = [str(s) for s in (session_ids or []) if str(s or "").strip()]
         if not forms:
             return []
@@ -925,13 +1008,16 @@ class StructuredMemory:
         sql = f"SELECT * FROM chat_history WHERE session_id IN ({placeholders})"
         params: list[Any] = list(forms)
         if character_id:
-            sql += " AND (character_id = ? OR character_id = '')"
+            sql += " AND (character_id = ? OR character_id IS NULL OR character_id = '')"
             params.append(character_id)
         sql += " ORDER BY id DESC LIMIT ?"
         params.append(int(limit))
         with self._conn() as conn:
             rows = conn.execute(sql, tuple(params)).fetchall()
-        return [dict(r) for r in rows][::-1]
+        out = [dict(r) for r in rows][::-1]
+        if character_id:
+            out = self._backfill_legacy_attribution(out, character_id)
+        return out
 
     def get_cross_session_tail(
         self,

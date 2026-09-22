@@ -24,7 +24,7 @@ from typing import Any
 # （GitHub Actions / 容器默认 UTC）会强制换算到北京时间，若调度器仍用
 # datetime.now().hour，两边小时数差 8，静默短路会静默失效（2026-09-19 CI 实证）。
 from proactive.ase_engine import _local_now, sanitize_message
-from utils import json_state
+from utils import character_resolver, json_state
 from utils import session_key as session_key_mod
 from utils.project_paths import project_path
 
@@ -200,7 +200,12 @@ class ProactiveScheduler:
         return None
 
     def _record_outbound(self, message: str, session_key: str | None) -> None:
-        """定向投递成功后把这句写进该会话历史（无会话键的广播无法归属，不写）。"""
+        """定向投递成功后把这句写进该会话历史（无会话键的广播无法归属，不写）。
+
+        🔴 2026-09-22：必须带 **character_id**。出站 assistant 行此前无归属，
+        而角色过滤含 `OR character_id = ''`（空归属恒保留）→ 切角色后新角色
+        把上一角色的主动消息当成自己说过的。
+        """
         if not session_key:
             return
         mem = self._resolve_memory()
@@ -208,9 +213,28 @@ class ProactiveScheduler:
         if record is None:
             return
         try:
-            record(message=message, session_id=str(session_key))
+            record(
+                message=message,
+                session_id=str(session_key),
+                character_id=self._resolve_character_id(str(session_key)),
+                channel="proactive",
+            )
         except Exception as e:  # noqa: BLE001
             logger.warning("主动消息回写历史失败 session=%s: %s", session_key, e)
+
+    @staticmethod
+    def _resolve_character_id(session_key: str) -> str:
+        """会话键 → 角色 id（唯一 owner：utils.character_resolver）。
+
+        `"default"`（内置十四）是合法值非"解析失败"；解析不到时回落内置卡。
+        """
+        try:
+            from api.deps import deps
+
+            gf = getattr(deps, "gf", None)
+        except Exception:  # noqa: BLE001
+            gf = None
+        return character_resolver.resolve_character_id(session_key, gf)
 
     def _resolve_proactive_llm(self, eng: Any | None = None) -> Any | None:
         if self._llm_provider is not None:

@@ -1268,14 +1268,44 @@ class WeChatConnector:
         return list(messages or [])
 
     def _record_outbound(self, text: str, session_key: str) -> None:
-        """她主动说的话回写会话历史（自问自答根治；写入唯一 owner 在记忆层）。"""
+        """她主动说的话回写会话历史（自问自答根治；写入唯一 owner 在记忆层）。
+
+        🔴 2026-09-22：必须带 character_id —— 出站 assistant 行此前无归属，
+        而角色过滤含 `OR character_id = ''`（空归属恒保留）→ 切角色后新角色
+        继承上一角色台词。
+        """
         recorder = getattr(self._memory_service(), "record_outbound_message", None)
         if recorder is None or not session_key or not text:
             return
         try:
-            recorder(message=text, session_id=session_key)
+            recorder(
+                message=text,
+                session_id=session_key,
+                character_id=self._resolve_character_id(session_key),
+                channel="wechat",
+            )
         except Exception as e:  # noqa: BLE001
             logger.warning("[wx][step=outbound_record_failed] session=%s error=%s", session_key, e)
+
+    @staticmethod
+    def _resolve_character_id(session_key: str) -> str:
+        """会话键 → 角色 id（唯一 owner：utils.character_resolver）。
+
+        延迟导入避免与 utils 层形成模块级循环依赖。
+        """
+        try:
+            from utils import character_resolver
+
+            try:
+                from api.deps import deps
+
+                gf = getattr(deps, "gf", None)
+            except Exception:  # noqa: BLE001
+                gf = None
+            return character_resolver.resolve_character_id(session_key, gf)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[wx] 角色解析失败 session=%s: %s", session_key, e)
+            return "default"
 
     def _schedule_followup(self, user_id: str, bot_reply: str) -> None:
         """回复成功后登记一次待发追问（参数取自 web 控制端可调的配置）。"""

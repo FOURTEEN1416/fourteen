@@ -337,21 +337,15 @@ if _scheduler is not None:
         def _character_resolver(session_key: str) -> str:
             # 2026-09-22：多用户各绑不同角色——文案口吻按会话归属解析，
             # 旧实现装配时取全局单值 current_character_name（绑错角色口吻）。
-            try:
-                char_id = str(user_mgr.get_user_character(session_key) or "")
-            except Exception:  # noqa: BLE001
-                char_id = ""
-            if not char_id:
-                return str(getattr(orchestrator.components.get("persona"), "current_character_name", "") or "")
-            try:
-                from api.deps import deps as _deps
+            # 2026-09-22 块C 二次根治：旧实现以 `if not char_id` 判断"未绑定"，
+            # 但未绑定用户的 id 恰为内置默认角色 "default"（非空真值）→ 走
+            # get_card("default") 取不到文件卡 → 静默回落全局 current_character_name
+            # （A 的提醒用 B 的角色口吻）。现统一走 utils.character_resolver
+            # 唯一 owner，解析失败由它兜底为内置角色，**不再回落全局单值**。
+            from utils import character_resolver as _cr
 
-                cm = getattr(getattr(_deps, "shisi_reg", None), "character_manager", None)
-                card = cm.get_card(char_id) if cm else None
-                name = (getattr(card, "name", "") or "") if card else ""
-                return str(name)
-            except Exception:  # noqa: BLE001
-                return str(getattr(orchestrator.components.get("persona"), "current_character_name", "") or "")
+            char_id = _cr.resolve_character_id(session_key, user_mgr)
+            return _cr.display_name(char_id)
 
         persona = orchestrator.components.get("persona")
         character_name = getattr(persona, "current_character_name", "") or ""

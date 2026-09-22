@@ -22,6 +22,7 @@ from collections.abc import Callable
 from typing import Any
 
 from proactive.ase_engine import sanitize_message
+from utils import character_resolver
 from utils import session_key as session_key_mod
 
 logger = logging.getLogger("reminder_delivery")
@@ -95,10 +96,17 @@ class ReminderDeliveryTask:
         delivered = await self._send_to_session(session_key, text)
         if delivered:
             # 自问自答根治：她主动说的话必须进历史，否则下一轮她自己不记得提醒过
+            # 🔴 2026-09-22：必须带 character_id（出站行此前无归属 → 切角色继承台词）
             recorder = getattr(self._memory, "record_outbound_message", None)
             if recorder is not None and session_key:
                 try:
-                    await asyncio.to_thread(recorder, message=text, session_id=session_key)
+                    await asyncio.to_thread(
+                        recorder,
+                        message=text,
+                        session_id=session_key,
+                        character_id=self._resolve_character_id(session_key),
+                        channel="reminder",
+                    )
                 except Exception as e:  # noqa: BLE001
                     logger.warning("[reminder] 回写历史失败 session=%s: %s", session_key, e)
             logger.info(
@@ -153,7 +161,12 @@ class ReminderDeliveryTask:
         return False
 
     def _resolve_character_name(self, session_key: str) -> str:
-        """按会话解析角色名（多用户绑不同角色）；失败回落装配时兜底名。"""
+        """按会话解析角色名（多用户绑不同角色）。
+
+        🔴 2026-09-22 二次根治：解析失败不再回落 `self._character_name`
+        （装配时取的**全局单值**）—— 多用户绑不同角色时，回落到全局 = 用
+        别人的角色口吻说话。解析不到即返回空串（调用方留空，宁缺毋串）。
+        """
         if self._character_resolver is not None:
             try:
                 name = str(self._character_resolver(session_key) or "").strip()
@@ -161,16 +174,33 @@ class ReminderDeliveryTask:
                     return name
             except Exception as e:  # noqa: BLE001
                 logger.debug("会话角色名解析失败 session=%s: %s", session_key, e)
-        return self._character_name
+        # 无 resolver 时（单角色部署/测试夹具）才用装配兜底名
+        if self._character_resolver is None:
+            return str(self._character_name or "").strip()
+        return ""
+
+    @staticmethod
+    def _resolve_character_id(session_key: str) -> str:
+        """按会话解析**角色 id**（回写历史归属用；唯一 owner utils.character_resolver）。"""
+        try:
+            from api.deps import deps
+
+            gf = getattr(deps, "gf", None)
+        except Exception:  # noqa: BLE001
+            gf = None
+        return character_resolver.resolve_character_id(session_key, gf)
 
     async def _compose_text(self, reminder: dict[str, Any]) -> str:
         """投递文案：LLM 按口吻生成一句（投递前一刻生成）；失败兜底用户原话。"""
         content = str(reminder.get("content") or "").strip() or "提醒时间到了"
         if self._llm is None:
             return content
-        who = f"（你是{self._resolve_character_name(str(reminder.get('session_key') or ''))}）" if (
-            self._character_name or self._character_resolver is not None
-        ) else ""
+        # 🔴 2026-09-22 二次根治：条件判据原用 `self._character_name`（装配时
+        # 取的**全局单值**）而非解析结果 —— resolver 存在但解析失败时会注入
+        # 全局角色名（多用户串口吻）。现改为**按解析结果**定夺：解析到角色名
+        # 才注入，解析不到则整段留空（宁缺毋串）。
+        resolved_name = self._resolve_character_name(str(reminder.get("session_key") or ""))
+        who = f"（你是{resolved_name}）" if resolved_name else ""
         try:
             reply = await asyncio.wait_for(
                 self._llm.chat(
