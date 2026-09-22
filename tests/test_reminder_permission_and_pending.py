@@ -8,6 +8,14 @@ from tools.base_tool import ToolDispatcher, ToolRegistry
 from tools.builtin.reminder_tool import CalendarQueryTool, ReminderTool
 
 
+def _future_trigger() -> str:
+    """动态未来时刻：trigger_time 过去校验（2026-09-22 契约）下写死日期会随
+    时间推移腐烂（本文件曾因写死 2026-09-22 06:00 在当日 08:21 翻车）。"""
+    from datetime import datetime, timedelta
+    return (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d %H:%M")
+
+
+
 def test_reminder_tools_are_public():
     assert ReminderTool.permission_level == "public"
     assert CalendarQueryTool.permission_level == "public"
@@ -25,7 +33,7 @@ def test_set_reminder_works_at_zero_affinity(tmp_path):
             "set_reminder",
             {
                 "content": "叫我起床",
-                "trigger_time": "2026-09-22 06:00",
+                "trigger_time": _future_trigger(),
                 "_meta": {"session_key": "2:p@im.wechat", "user_id": 2},
             },
             affinity_level=0,
@@ -56,7 +64,7 @@ def test_set_reminder_denied_at_zero_affinity_would_fail_if_friend():
         disp = ToolDispatcher(reg, rate_limit_per_minute=10)
         result = disp.dispatch(
             "set_reminder",
-            {"content": "x", "trigger_time": "2026-09-22 06:00",
+            {"content": "x", "trigger_time": _future_trigger(),
              "_meta": {"session_key": "1:a@im.wechat"}},
             affinity_level=0,
         )

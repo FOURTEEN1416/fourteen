@@ -18,6 +18,14 @@ import pytest
 from tools.base_tool import BaseTool, ToolRegistry, ToolResult
 
 
+def _future_trigger() -> str:
+    """动态未来时刻：trigger_time 过去校验（2026-09-22 契约）下写死日期会随
+    时间推移腐烂（本文件曾因写死 2026-09-22 06:00 在当日 08:21 翻车）。"""
+    from datetime import datetime, timedelta
+    return (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d %H:%M")
+
+
+
 class _DummyTool(BaseTool):
     name = "dummy_toggle"
     description = "d"
@@ -361,7 +369,7 @@ def test_scheduler_tool_binds_session_from_meta() -> None:
     r0 = tool.execute(content="叫我")
     assert not r0.success and r0.error == "missing_session_key", "无主提醒永不可投递"
     assert sm.got == ()
-    r1 = tool.execute(content="叫我", trigger_time="2026-09-22 06:00",
+    r1 = tool.execute(content="叫我", trigger_time=_future_trigger(),
                       _meta={"session_key": "4:u@im.wechat", "user_id": 4})
     assert r1.success
     assert sm.got == ("4:u@im.wechat", 4)

@@ -14,7 +14,15 @@ from types import SimpleNamespace
 import pytest
 
 from proactive.scheduler import ProactiveScheduler
-from utils.important_dates import parse_birthday_hint
+from utils.important_dates import (
+    lunar_birthday_matches as lunar_matches,
+)
+from utils.important_dates import (
+    parse_birthday_hint,
+)
+from utils.important_dates import (
+    parse_lunar_birthday_hint as parse_lunar_hint,
+)
 from utils.local_time import now_local
 
 
@@ -174,3 +182,87 @@ def test_deliver_failure_not_marked_sent(sched, monkeypatch):
     monkeypatch.setattr(sched, "_resolve_proactive_llm", lambda eng=None: None)
     sched._check_important_dates()
     assert sched._important_dates_sent == set()
+
+
+# ── 农历生日（2026-09-22 裁决「引入农历库」，复用既有依赖 lunarcalendar）──
+
+
+class TestParseLunarBirthdayHint:
+    @pytest.mark.parametrize("text,expected", [
+        ("腊月初一", (12, 1, False)),
+        ("正月初五", (1, 5, False)),
+        ("冬月廿三", (11, 23, False)),
+        ("闰四月初八", (4, 8, True)),
+        ("腊月三十", (12, 30, False)),
+        ("十月初三", (10, 3, False)),
+        ("正月初十", (1, 10, False)),
+    ])
+    def test_lunar_forms(self, text, expected):
+        assert parse_lunar_hint(text) == expected
+
+    @pytest.mark.parametrize("text", [
+        "八月十五",      # 无显式农历标记 → 不走农历（仍按公历 08-15，宁缺毋错）
+        "三月十四",      # 中文数字但无标记 → 公历
+        "11月14",        # 阿拉伯数字 → 公历
+        "腊月",          # 缺日
+        "我冬天生的",    # 误中"冬"但无月日结构
+        "",
+    ])
+    def test_not_lunar(self, text):
+        assert parse_lunar_hint(text) is None
+
+
+class TestLunarBirthdayMatches:
+    """公→农换算对照取著名日期（与运行时刻无关）：2026-02-17=正月初一、
+    2023-03-25=闰二月初四、2023-12-13=冬月初一。"""
+
+    def test_cny_hit(self):
+        from datetime import datetime
+
+        assert lunar_matches("正月初一", datetime(2026, 2, 17, 9, 0)) is True
+
+    def test_lag_month_hit(self):
+        from datetime import datetime
+
+        assert lunar_matches("冬月初一", datetime(2023, 12, 13, 9, 0)) is True
+        assert lunar_matches("腊月初一", datetime(2023, 12, 13, 9, 0)) is False
+
+    def test_leap_month_strict(self):
+        """闰月生日只在真闰月命中；普通生日撞上闰X月不补过（宁缺毋错）。"""
+        from datetime import datetime
+
+        assert lunar_matches("闰二月初四", datetime(2023, 3, 25, 9, 0)) is True
+        assert lunar_matches("二月初四", datetime(2023, 3, 25, 9, 0)) is False
+
+    def test_unmarked_text_never_lunar(self):
+        from datetime import datetime
+
+        assert lunar_matches("八月十五", datetime(2024, 9, 17, 9, 0)) is False
+
+
+def test_scheduler_lunar_birthday_delivered(sched, monkeypatch):
+    """调度器农历生日通道：固定"今天"=2026-02-17（正月初一），画像生日
+    「正月初一」必须定向送达（时间无关：now 由 monkeypatch 钉死）。"""
+    from datetime import datetime
+
+    import proactive.scheduler as sched_mod
+    from shisi.agent_plane import runtime as runtime_mod
+    from utils import important_dates as dates_mod
+
+    monkeypatch.setattr(
+        sched_mod, "_local_now",
+        lambda: datetime(2026, 2, 17, 9, 0), raising=False,
+    )
+    monkeypatch.setattr(
+        runtime_mod, "project_profile_for",
+        lambda uk: {"birthday": "正月初一"},
+    )
+    monkeypatch.setattr(dates_mod, "check_today", lambda cid, today: [])
+    rec = _DeliverRecorder()
+    monkeypatch.setattr(sched, "_deliver", rec)
+    monkeypatch.setattr(sched, "_resolve_proactive_llm", lambda eng=None: None)
+
+    sched._check_important_dates()
+    targets = [sk for _msg, sk in rec.calls]
+    assert set(targets) == {"2:peerA@im.wechat", "3:peerB@im.wechat"}
+    assert all("生日快乐" in msg for msg, _sk in rec.calls)

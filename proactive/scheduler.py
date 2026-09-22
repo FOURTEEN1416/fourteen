@@ -1237,13 +1237,21 @@ class ProactiveScheduler:
             if not user_keys:
                 return
             for user_key in user_keys:
-                # ① 用户画像生日
+                # ① 用户画像生日（公历 + 农历双通道，2026-09-22 裁决引入农历：
+                #    复用既有依赖 lunarcalendar；闰月生日只在真闰月命中）
                 birthday_hit = False
                 try:
                     from shisi.agent_plane.runtime import project_profile_for
+                    from utils.important_dates import (
+                        lunar_birthday_matches,
+                        parse_birthday_hint,
+                    )
 
                     hint = str((project_profile_for(user_key) or {}).get("birthday") or "")
-                    birthday_hit = bool(parse_birthday_hint(hint) == mmdd)
+                    birthday_hit = bool(
+                        parse_birthday_hint(hint) == mmdd
+                        or lunar_birthday_matches(hint, now_local_ts)
+                    )
                 except Exception as e:  # noqa: BLE001
                     logger.debug("[重要日期] 画像生日读取失败 user=%s: %s", user_key, e)
                 if birthday_hit:
