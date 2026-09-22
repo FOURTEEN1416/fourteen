@@ -868,6 +868,16 @@ class ProactiveScheduler:
                 urgency = float(getattr(getattr(eng, "urgency", None), "total", 0.0) or 0.0)
             except Exception:  # noqa: BLE001
                 urgency = None
+        # 块D：决策层的接地事实（用户最后一句 / 注意力热度）。
+        # 取不到即留空/None，提示词相应段落整段不出现（宁缺毋串，不注入假值）。
+        last_user_message = ""
+        response_rate: float | None = None
+        if eng is not None:
+            with contextlib.suppress(Exception):
+                last_user_message = str(getattr(eng, "_last_user_message", "") or "")
+            with contextlib.suppress(Exception):
+                _rr = getattr(eng, "response_rate", None)
+                response_rate = float(_rr) if _rr is not None else None
         try:
             profile = project_profile_for(user_key)
         except Exception:  # noqa: BLE001
@@ -912,6 +922,11 @@ class ProactiveScheduler:
             persona_hint=persona,
             web_config=web_cfg,
             quiet_hours=quiet,
+            # 🔴 2026-09-22 二次根治（块D 接地贯通）：补用户最后一句 + 注意力热度。
+            # 生成层早已接上这两项，**决策层被漏掉** —— 决策层更早决定"是否开口"，
+            # 缺了它模型只能按时间泛泛开口，接不住用户上一轮提到的具体事。
+            last_user_message=last_user_message,
+            response_rate=response_rate,
         )
         llm = self._resolve_proactive_llm(eng)
         if llm is None:
@@ -948,8 +963,10 @@ class ProactiveScheduler:
             return
         if self._deliver(message, session_key=user_key):
             if eng is not None and hasattr(eng, "commit_sent"):
-                import contextlib
-
+                # 注意：模块顶部已导入 contextlib。此处**禁止**再写函数内局部导入
+                # —— 局部导入会让该名在整个函数作用域被视为局部，任何在它
+                # 之前的引用都会 UnboundLocalError（2026-09-22 块D 引入上方
+                # contextlib.suppress 到接地解析时即刻踩中）。
                 with contextlib.suppress(Exception):
                     eng.commit_sent(
                         {

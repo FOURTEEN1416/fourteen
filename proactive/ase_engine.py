@@ -822,9 +822,23 @@ class ASEEngine:
         对标 nana `HeartbeatSystem.notify_interaction`：交互即把注意力拉满并
         刷新「上次互动」基准 —— 没有这条信号，主动消息就无法区分
         「刚聊完」与「三天没理我」（旧实现 `hours_since_chat` 恒 0.0）。
+
+        🔴 2026-09-22 二次根治（信号落盘）：旧实现只改内存，而
+        「状态持久化」是**每 10 分钟**的调度任务 —— 10 分钟窗口内重启，
+        刚刚拉满的注意力与新鲜时间戳**全部丢失**，退化成"很久没聊"
+        （正是本条修复要消除的症状）。用户开口是低频事件（不是每 tick），
+        每次都落盘的成本可忽略；且这里只落盘不新建文件锁竞争
+        （与 10 分钟批量持久化同写一个路径，后者覆盖式写入幂等）。
+
+        ⚠️ 落盘失败只降级为 debug 日志 —— 注意力信号是**提示词依据**而非
+        硬闸门，写失败不该影响本轮对话。
         """
         self._last_user_interaction = datetime.now(tz=timezone.utc)
         self.response_rate = max(self.response_rate, _INTERACTION_BOOST)
+        try:
+            self.save_state()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("交互信号落盘失败（仅内存生效）: %s", e)
 
     def decay_response_rate(self) -> None:
         """每 tick 更新注意力：乘性衰减 + 沉默超阈值后缓慢累加。
@@ -930,30 +944,47 @@ class ASEEngine:
             self._last_skip_reason = reason
             return None
 
-        if dry_run:
-            self._last_skip_reason = "dry_run"
-            return None
-
         # ⑤ 场景触发（早安/晚安/三餐）优先于紧迫度阈值
         #    commit=False：场景日期标记由 commit_sent() 在投递成功后才置位，
         #    否则未送达的早安会「标记为已发」，当天再也不补发。
+        #
+        # 🔴 2026-09-22 二次根治：`dry_run` 闸门从"频率检查之后、生成之前"
+        #    下移到**仅屏蔽返回值**。旧实现把 `if dry_run: return None` 放在
+        #    这里，使得 dry_run 调用**永远走不到**场景触发与紧迫度生成
+        #    （第 950/962 行）—— 即 `_generate_and_return` →
+        #    `generate_with_llm` 这条链路在 dry_run 下**整条不可达**。
+        #    而唯一的 dry_run 调用点（`scheduler._llm_proactive_one_user`）
+        #    正是要用它算 urgency 供 LLM 决策 —— 于是 LLM 决策层拿到的
+        #    urgency **恒 None**（异常分支），"紧迫度已累积却不影响决策"。
+        #    现在 dry_run 照常跑完生成链路（内部 commit=False 本就不记账），
+        #    只在返回前丢弃候选 —— 副作用与旧实现一致（不计账、不投递），
+        #    但 urgency / 场景判定 / 生成可达性全部恢复。
         scene_msg = self._check_scene_triggers(commit=False)
         if (
             scene_msg
             and self.urgency.total >= 2.0
             and not self._is_duplicate(scene_msg.get("message", ""))
         ):
+            if dry_run:
+                self._last_skip_reason = "dry_run"
+                return None
             return scene_msg
 
+        candidate: dict[str, Any] | None = None
         if self.urgency.total >= self._urgency_threshold:
             msg_type = self._select_type_by_urgency()
             candidate = self._generate_and_return(msg_type, commit=False)
             if candidate is None:
                 self._last_skip_reason = "generate_failed"
-            return candidate
+        else:
+            self._last_skip_reason = "below_threshold"
 
-        self._last_skip_reason = "below_threshold"
-        return None
+        if dry_run:
+            # 干跑：完成全部判定与生成以刷新 urgency，但**不交出候选**
+            # （调用方只取 urgency / _last_skip_reason，不会投递）
+            self._last_skip_reason = self._last_skip_reason or "dry_run"
+            return None
+        return candidate
 
     def reflect(
         self,

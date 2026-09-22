@@ -271,8 +271,17 @@ def test_hub_note_user_interaction_routes_to_that_user_only(tmp_path, monkeypatc
     monkeypatch.setattr(hub_mod, "_STATE_DIR", tmp_path)
     monkeypatch.setattr(hub_mod, "_INDEX_PATH", tmp_path / "index.json")
 
+    counter = {"n": 0}
+
     def _factory(user_key: str = "", state_path: str = ""):
-        return _engine(tmp_path)
+        # ⚠️ 每个 user_key 必须用**独立状态文件**：`note_user_interaction` 现在会
+        # 就近落盘（块D 修复 10 分钟窗口丢注意力），若两用户共用 ase.json，
+        # 第二个引擎构造时会读到第一个的状态 —— 那是**夹具串台**而非代码缺陷。
+        # 生产同构：hub 的 `_resolve_state_path(user_key)` 本就按用户分文件。
+        counter["n"] += 1
+        eng = _engine(tmp_path)
+        eng._state_path = tmp_path / f"ase-{counter['n']}.json"
+        return eng
 
     hub = hub_mod.ASEHub(_factory)
     hub.note_user_interaction("2:a@im.wechat")

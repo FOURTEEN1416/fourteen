@@ -73,7 +73,24 @@ def build_proactive_context(
     web_config: dict[str, Any] | None = None,
     quiet_hours: tuple[int, int] | None = None,
     extra: str = "",
+    last_user_message: str = "",
+    response_rate: float | None = None,
 ) -> str:
+    """组装主动决策提示词上下文。
+
+    🔴 2026-09-22 二次根治（接地缺口）：补 `last_user_message` 与 `response_rate`。
+
+    旧实现只有 `hours_since_last_chat` 一个时间信号、**没有用户最后一句**，
+    于是"该不该开口 / 开口说什么"缺了最关键的事实依据 —— 模型只能按时间
+    泛泛地说"在忙什么呀"，无法接住用户上一轮提到的具体事（军训/加班/生日）。
+    相同的接地缺口在**生成层**（`ase_engine.generate_with_llm` 的
+    `last_user_message` / `response_rate` / `user_profile`）已修，但决策层
+    被漏掉 —— 决策层比生成层更早决定"是否开口"，其泛化会让整轮沟通失焦。
+    `response_rate` 是注意力信号（用户最近是否在回应），越低越该"轻"。
+
+    这两个参数均为**可选**：调用方拿不到时留空/为 None，提示词相应段落
+    整段不出现（宁缺毋串，不注入占位假值）。
+    """
     prof = profile or {}
     web = {**DEFAULT_WEB_CONFIG, **(web_config or {})}
     parts = [
@@ -93,6 +110,13 @@ def build_proactive_context(
         bits.append("约定=" + "；".join(str(x) for x in prof["commitments"][:3]))
     if bits:
         parts.append("【用户画像投影】" + "；".join(bits))
+    if last_user_message.strip():
+        parts.append("【用户最后一句】" + last_user_message.strip()[:200])
+    if response_rate is not None:
+        parts.append(
+            f"【最近互动热度】{max(0.0, min(1.0, float(response_rate))):.2f}"
+            "（越低说明对方最近越少回应；此时消息要更短更轻，不要追问）"
+        )
     if recent_topics:
         parts.append("最近话题：" + "、".join(str(t) for t in recent_topics[:5]))
     if proactive_history:
