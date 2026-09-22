@@ -42,6 +42,27 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-22 · W3 窗口（wt/hot-knowledge）· 热点知识链设计一页 + 接线契约（交主控收仓落）
+
+**设计（采集→入库→供出，非现场调搜索）**：
+
+- **触发方式**：新模块 `shisi/knowledge/hot_topics.py` 暴露同步幂等自限速入口 `collect_if_due()`（内部判 enabled + `interval_minutes` 间隔，未到即 `skipped` 返回，任意轮询频率下重复调用安全）。**推荐经 scheduler 注册**（与 `vault_collect` 同构：`_safe_job_wrapper` + IntervalTrigger + misfire_grace + coalesce）；❌ 不选独立 cron/asyncio 任务——4 uvicorn worker 下会各自起线程重复采集，且绕过 scheduler 任务治理与可观测。**🔌 接线契约（本窗禁改 scheduler，请主控收仓时代落）**：
+  ```python
+  # proactive/scheduler.py（仿 _sync_vault_job/_run_vault_collect）：
+  #   job id "hot_topics_collect"，IntervalTrigger(minutes=60)，startup 即注册（开关在 yaml 内判，不在 scheduler 侧重复造配置）
+  def _run_hot_topics_collect(self) -> None:
+      from shisi.knowledge.hot_topics import collect_if_due
+      collect_if_due()   # 同步、自限速、吞异常返回 dict，永不抛出
+  ```
+- **采集**：复用 `tools/builtin/search_tool.SearchTool`（Bing 主 + DDG 副 6s 硬超时/熔断为现成能力，本窗零改动）；查询表 = 配置的**公共热点关键词**（微博热搜/新闻/影视/体育/科技类），**零用户隐私入参**。
+- **去重与 TTL**：池落 `data/hot_topics.json`（`utils/json_state` 唯一 owner，flock 跨 worker）；条目 `{title, body, href, fetched_at_epoch, expires_at_epoch}`，**epoch 绝对时刻存算**（避开墙钟/UTC 双口径陷阱）；去重键 = 归一化标题（去空白小写）+ href；TTL 默认 48h（读侧过滤过期项 + 写侧剪枝），池上限默认 50（溢出丢最旧）。
+- **整理形态**：**全局热点池 + 读取时按角色人设轻过滤**（相关度 = 条目标题/正文 2-gram 与人设卡文本 token 重叠，复用 `retriever` 分词；无卡可读退化为取最新）——不逐角色现场采集（41 卡 × LLM 成本红线），**不写角色 BM25 索引文件**（`data/knowledge/{cid}.json` 结构与 41 卡索引零变更，TTL 靠读侧自然过期，无"过期块残留磁盘索引"问题）。
+- **供出收口**：仍走 `_knowledge_share_func` 所在机制——`proactive/ase_engine.py::_try_knowledge_share` 内把 `get_hot_context(character_id)`（带「热点」标注的格式化段）**前置拼入 excerpt**，LLM 按角色口吻转述；既有 `_init_mixin` 注入链零改动。热点在而知识索引空时也能出分享候选；两者皆空 → 返回 None 走原模板兜底（**静默降级**）。
+- **失败降级**：搜索全挂 → `collect_once` 吞异常返回 `{ok: False, errors: [...]}`（warning 级，不抛）；池保持旧未过期条目；供出侧任何异常 → `""` → 回退既有知识/模板路径。热点消息类型复用现有 `share`（`generated_by: "knowledge"` 不变），不新增消息类型、不动冷却/配额账本。
+- **配置真源**：`config/hot_topics.yaml`（enabled/queries/interval_minutes/ttl_hours/max_pool/max_results_per_query/max_items_inject），装载器在 hot_topics 模块内、**逐键默认值 + 畸形值钳制**（仿节流账本容错口径），接线读取无死键。
+
+**本窗 owner 文件**：`shisi/knowledge/hot_topics.py`（新）、`proactive/ase_engine.py`（仅 `_try_knowledge_share` 一处）、`config/hot_topics.yaml`（新）、`tests/test_hot_topics_chain.py`（新）、本 BOARD 条目。**请主控顺手**：`tests/conftest.py` 的 `isolate_runtime_state_files` 增列 `data/hot_topics.json`（本窗测试已自行 monkeypatch 不落真库，但为既有夹具纪律补全）。
+
 ### 2026-09-22 · 主检出 · R3 四窗并行开工登记（W1 刻度迁移 / W2 laya 审计 / W3 热点知识链 / W4 部署）
 
 - **W1**（主检出直接做）：v1.38 遗留①收口——setup_shisi 幂等启动迁移 `UPDATE affinity_records SET reason=MIRROR_REASON_SHISI WHERE reason=MIRROR_REASON_POINTS`（值走 enhancer 常量导入，禁硬编码）+ 端到端回放测试 + 突变验红；owner 文件见登记表
