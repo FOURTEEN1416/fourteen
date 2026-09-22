@@ -17,6 +17,7 @@
 - **验证**：新文件 4/4 绿 + 受影响面（round3 12 + block_e 35 + integration 19）**70 passed / 0 failed**；ruff 改动文件 0 错；`scripts/ci_gates.py` 4/4；**突变验红命中**——WHERE 参数改为 `(SHISI, SHISI)` → 换算对照/幂等/接线时序 **3 例转红**（缺表降级例与判据无关，正确保绿），还原复跑全绿。
 - **边界**：生产 `user_scheduler_persist` 行实证 0 条（只读探针在前批已核）——本迁移上线时生产为 no-op，属防御性收口；无 reason 裸行（生产 3 条、值 50.0）按既定裁决保持不换算。
 - **归属**：仅 `shisi/api/registry.py`、新测试文件、`scripts/` 清理脚本、本 LOG 条目；未触碰 scheduler/session_key/AGENTS 修订历史。
+- **⚠️ 并发事故登记（§8.9 再现）**：本窗首次提交（`a0f0af2`）被 pre-commit 中断期间，**他窗并发 `git add` 污染了 index**——落库版 `migrate_affinity_mirror_reason` 的 UPDATE 参数被换向（SET=POINTS/WHERE=SHISI，方向反了会把好行改坏，若上线即 P0）。本窗以工作树正确版复验 4 例绿后单独修正提交；四窗并行期（R3 开工登记在案）主检出 index 非可信暂存区，**每次 commit 前必须 `git diff --cached` 核对自己的 hunk**。
 
 ## 2026-09-22 六域三次排查 — 好感度刻度判据 / 阶段键空间与落盘 / 主动人设假接线（P0+P1+P2 根治，收窗补账）
 

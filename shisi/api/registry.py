@@ -66,7 +66,7 @@ def migrate_affinity_mirror_reason(db_path: str | Path | None = None) -> int:
         with closing(sqlite3.connect(str(path))) as conn, conn:
             n = conn.execute(
                 "UPDATE affinity_records SET reason = ? WHERE reason = ?",
-                (MIRROR_REASON_POINTS, MIRROR_REASON_SHISI),
+                (MIRROR_REASON_SHISI, MIRROR_REASON_POINTS),
             ).rowcount
     except Exception as e:  # noqa: BLE001
         logger.warning("好感度刻度标记迁移跳过（affinity_records 不可用）: %s", e)
