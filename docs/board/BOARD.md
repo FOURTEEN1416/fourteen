@@ -31,12 +31,24 @@
 | W2 软著 | 无 | `D:\Desktop\ai-girlfriend\大创赛报名以及后期发展\软著申请-唯一的你十四`（非 git） | **包 C** | ✅ 完成 | 2026-09-14 23:13 | 模式 A；60 页代码 + 16 截图 + 5 门禁全真 |
 | W3 代码 | `wt/code` | `..\ai-girlfriend-code` | **包 V** | 待开工 | — | 多模态缺口；**须先过商讨协议五步制** |
 | W4 验证 | `wt/verify` | `..\ai-girlfriend-verify` | **包 T** | 待开工 | — | 只碰 `tests/**`；反对采样验证 |
+| **W1 刻度迁移** | 主检出 `main` | `D:\Desktop\ai-girlfriend`（本窗直接做） | 包 R3-W1 · v1.38 遗留① | 待开工 | 2026-09-22 登记 | owner：`shisi/api/registry.py` + enhancer 常量导入 + 新测试；禁碰 scheduler/session_key |
+| **W2 laya 审计** | `wt/laya-audit` | `..\ai-girlfriend-laya-audit` | 包 R3-W2 · 只读调研 | 待开工 | 2026-09-22 登记 | 只写 `docs/research/2026-09-22_laya真源审计与接线评估.md` + LOG 一行；不改代码不装依赖 |
+| **W3 热点知识链** | `wt/hot-knowledge` | `..\ai-girlfriend-hot-knowledge` | 包 R3-W3 · 采集→入库→供出 | 待开工 | 2026-09-22 登记 | owner：tools/builtin、shisi/knowledge、新热点模块、tests 新增；**禁改 proactive/scheduler.py 与 _init_mixin.py**（scheduler 单写者=主控），需接线点写本看板追加区 |
+| **W4 部署** | 无（主控执行） | 主检出 + swu-prod | 包 R3-W4 · push+服务器 | 待默默点头 | 2026-09-22 登记 | 12 提交 `1766b2e`；bundle 通道、nginx 零操作（大赛入口冻结）、服务器 pull 归默默裁决 |
 
 > ⚠️ **2026-09-19 路径收编**：W1/W2 工作区原位于 `D:\Desktop\` 根（仓库外），已收编至 `大创赛报名以及后期发展\` 下；仍为**仓库外非 git 工作区**，受 `.gitignore:130` 全目录排除，故宪法 §3「参赛材料不入库」约束不变。同期收编 `大赛附件包`、`专利-唯一的你十四`。**追加区内历史条目所载旧路径按「历史记录保留原文」准则未作改动**。完整映射见 `大创赛报名以及后期发展\PATH-MIGRATION-2026-09-19.md`。
 
 ---
 
 ## 追加区（按时间倒序，新的在上）
+
+### 2026-09-22 · 主检出 · R3 四窗并行开工登记（W1 刻度迁移 / W2 laya 审计 / W3 热点知识链 / W4 部署）
+
+- **W1**（主检出直接做）：v1.38 遗留①收口——setup_shisi 幂等启动迁移 `UPDATE affinity_records SET reason=MIRROR_REASON_SHISI WHERE reason=MIRROR_REASON_POINTS`（值走 enhancer 常量导入，禁硬编码）+ 端到端回放测试 + 突变验红；owner 文件见登记表
+- **W2**（wt/laya-audit）：laya 真源审计**只读**，产物一份 `docs/research/2026-09-22_laya真源审计与接线评估.md`；接线候选=decide_proactive / tool_gate L0 / ASE 发不发决策；不装依赖不跑第三方代码
+- **W3**（wt/hot-knowledge）：默默裁决方向=**采集→整理入知识库→经 `_knowledge_share_func` 供出主动消息**（不是现场调搜索）；设计先行一页；**proactive/scheduler.py 与 orchestrator/_init_mixin.py 归主控单写**，W3 需接线点写本追加区交收仓时落
+- **W4**（主控执行）：本地 HEAD `1766b2e` 领先 origin 12 跳；bundle 通道部署、**nginx 零操作（大赛期间网站入口冻结，禁 `${DOMAIN}` 模板重生成）**、服务器 pull 触发归默默
+- **收仓口径**：各窗只跑目标+受影响面测试 + ruff 0；四分块全量基线（当前 1864/1863/1）由主控收仓时统一复跑
 
 ### 2026-09-21 · 主检出 · selftalk 四项修复移植 main + 分支归档（用户「想办法解决」）
 
