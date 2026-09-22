@@ -272,6 +272,21 @@ class ASEHub:
                 logger.warning("ASEHub 手动发送建引擎失败 user=%s: %s", k, e)
         return None
 
+    # ── 健康检查（端点级显式实现，不走 __getattr__ 代理）────
+    def health_check(self) -> dict[str, Any]:
+        """`/api/proactive/state` 的 hub 真源实现。
+
+        旧实现依赖 ``__getattr__`` 兜底——**无引擎时抛 AttributeError**，
+        端点 500（部署验收生产 traceback 实锤）。端点语义是"主动引擎健康态"，
+        空 hub 的正确回答是可消费的零态而非炸。
+        """
+        with self._lock:
+            count = len(self._engines)
+            last = next(reversed(self._engines.values()), None)
+        state = dict(last.health_check()) if last is not None else {}
+        state["engine_count"] = count
+        return state
+
     # ── 兼容全局单例用法（调度器探测属性）────────────────
     def __getattr__(self, name: str) -> Any:
         # 仅当至少一个用户引擎存在时代理到「最近」引擎，避免误把全局状态当用户状态

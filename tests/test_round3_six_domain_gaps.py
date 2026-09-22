@@ -368,3 +368,28 @@ def test_send_date_wish_uses_bound_persona(monkeypatch):
     assert seen.get("system") == "昭阳人设", "人设必须进 LLM system_prompt"
     assert delivered == ["生日快乐呀，今天属于你。"]
     assert any("birthday" in k for k in s._important_dates_sent), "送达后当日幂等必须记录"
+
+
+def test_ase_hub_health_check_empty_engines_degrades():
+    """部署验收 500 复现：`GET /api/proactive/state` → `hub.health_check()`，
+    旧 hub 无显式方法、`__getattr__` 无引擎即抛 AttributeError（生产 traceback
+    实锤 `ase_hub.py:280`）→ 端点 500。空引擎必须降级为可消费的零态。
+    """
+    from proactive.ase_hub import ASEHub
+
+    hub = ASEHub(engine_factory=lambda **kw: None)
+    assert hub.health_check() == {"engine_count": 0}
+
+
+def test_ase_hub_health_check_delegates_latest_engine():
+    """有引擎时委托最近使用引擎的 health_check，并附引擎计数（多用户真源）。"""
+    from proactive.ase_hub import ASEHub
+
+    class _Eng:
+        def health_check(self):
+            return {"initialized": True, "max_daily": 8}
+
+    hub = ASEHub(engine_factory=lambda **kw: None)
+    hub._engines["u1"] = _Eng()
+    state = hub.health_check()
+    assert state["max_daily"] == 8 and state["engine_count"] == 1
