@@ -7,6 +7,28 @@
 
 ---
 
+## 2026-09-22 六域三次排查 — 好感度刻度判据 / 阶段键空间与落盘 / 主动人设假接线（P0+P1+P2 根治，收窗补账）
+
+- **触发**：用户指令「昨日进行了重大更新多次，需要你继续全面排查，人设系统，记忆系统，情感系统，主动关怀，定时提醒，用户隔离」。
+- **排查结论**（五域在 v1.36/v1.37 已收口，本轮深挖情感域交叉缺陷 + 主动/人设域假接线）：
+  - **P0 好感度刻度混用**：`affection_points`（0–500）与 shisi（0–100）双刻度互相污染——①`_restore_missing_from_points` 把点存 affection_points 直接钳入 `_values`（shisi），250 points→100（应 50）；②审计镜像写 points 与 `enhancer._record_affinity` 的 shisi 同列混存（**写侧改 shisi 已在 `df59752` 落地**，本批补的是读侧）；③`_restore_from_audit` 回放不区分来源。后果：`mapper.current_points` 反转后好感度系统性放大，解锁阈值/档位全错。
+  - **P0 续（收窗核实的新变体）**：在制品读侧最初以 `reason=="user_scheduler_persist"` 为判据无差别换算——而 `df59752` 写侧对**同一 reason** 已写 shisi → 新行回放被**二次 ÷5**（250→镜像 50→回放 10），恰是本批要根治的刻度混用换了个位置复发；block_e 两例分钉写侧/读侧、无 round-trip 用例，故全绿漏检。
+  - **P1 EmotionStage 键空间分裂 + 状态不落盘**：`mapper.sync` 异常回退 `evaluate(character_id,…)` 裸角色键（跨用户阶段互相覆盖）；`emotion_stage_state` 表建了却零读写，阶段纯内存重启回「陌生」。
+  - **P1 主动/人设域假接线四处**：①`ASEHub` 工厂不给每引擎注入 `_knowledge_character_id`/`_knowledge_share_func`（hub 级 setattr 不落到实例 → persona 三源全空，「谎言家族」例）；②每日情绪衰减只打 UserManager 引擎，orchestrator **请求级**缓存从不衰减（web 路径情绪永不冷却，item45 半修）；③`load_persona_hint("default")` 查 `config/characters/default.json` 必 miss → 内置十四主动决策人设恒空；④scheduler persona 回落链与 `_send_date_wish` 对 default 角色无解析通道。
+  - **P2 键口径不一致**：`affinity_state._key("", c)`→`"::c"` 而 `affinity_key(c,"")`→`"c"`，点存兜底永对不上键。
+- **根治**（一次到位，禁补丁）：
+  1. `enhancer._restore_missing_from_points` 经 `scale.points_to_shisi` 换算。
+  2. **刻度判据唯一真源**：enhancer 模块头新增 `MIRROR_REASON_POINTS`（旧 points 行）/ `MIRROR_REASON_SHISI`（新 shisi 行）常量；写侧 `_persist_affinity` 换用新标记并**从 enhancer 导入常量**（不再各写各的字面串）；读侧仅对旧标记换算、新标记与 enhancer 自有行直取；消除 `source==emotion and reason==…` 死分支。
+  3. `mapper.sync` 阶段评估只用 `track`（user::character），异常记日志**不回退**裸键。
+  4. `EmotionStageEngine` 读写 `emotion_stage_state`（UPSERT + 构造回放）；`setup_shisi` 传 `db_path`。
+  5. `affinity_state._key` 与 `affinity_key` 同构（空 user 退裸 character_id）。
+  6. conftest `isolate_runtime_state_files` 扩展：`affinity_enhancer._DB_DEFAULT` / `stage_engine._DB_DEFAULT` 重定向临时库（防测试写宿主 `data/sqlite.db`）；**独立 try 块**（嵌在 ase_hub 导入的 try 内会因前项失败连带静默跳过）。
+  7. 假接线四处：`_init_mixin` 工厂逐引擎注入知识三源；`optimized_orchestrator.apply_request_emotion_decay` + `_run_daily_maintenance` 接入；`llm_proactive.load_persona_hint("default")` 读 `persona.yaml`；scheduler persona 回落 `character_resolver`/`BUILTIN_CHARACTER_ID`、`_send_date_wish` 支持 default。
+  8. **阶段路由收口**（收窗新增）：`POST /api/shisi/emotion-stage/{cid}/evaluate` 端点无用户维度，旧走 `engine.evaluate` 以裸角色键 UPSERT 进同一张被回放的表 → 改调新增纯映射 `resolve_stage`（无状态变更/不落盘/不发事件）。
+  9. 既有 3 处把错误刻度固化成契约的用例改写为 shisi 契约；`llm_proactive` YAML 解析 `split(":",1)`→`partition`（静态门禁误伤收口）。
+- **验证**：四分块 **467+1跳过 / 430 / 563 / 400**，合计 **1861 收集 / 1860 通过 / 1 跳过 / 0 失败**（收窗复测，含本窗新增 3 用例；41 卡在位）+ ruff 全仓 0 错 + ci_gates 4/4；**突变验红 3/3**（写侧退回旧标记 → round-trip 红 / 读侧对两标记都换算 → 红 / 路由退回 evaluate → 纯查询例红），还原后复跑 round3 全绿。
+- **遗留**：①生产 `affinity_records` 无 reason 的裸 points 行无法区分刻度（宁保持 shisi 不换算）；`df59752`~本批之间本机写入的 `user_scheduler_persist` shisi 行会被按 points 误换算一次（本机测试污染，生产无此类行——批次未部署过）；②hub 日记键 `split("|")` 两处手写未收口（utils/session_key 无 hub 键 helper，非会话键语义）；③round3 用例中 6 例为 `inspect.getsource` 文本断言（防删行不防行为改坏），行为用例已补 3 例。本批未部署（归用户裁决）。
+
 ## 2026-09-22 补记 — 农历生日祝福落地（六域批遗留项③收口，A 档闭环）
 
 - **触发**：用户追问六域批遗留项「Web 端是什么意思」+ 裁决「引入农历库」。
