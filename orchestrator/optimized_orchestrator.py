@@ -1150,20 +1150,37 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             except Exception as e:  # noqa: BLE001
                 logger.debug("profile_sync_agent schedule failed: %s", e)
 
-        # 好感度同步 — user×character（session_id 作 user 维，禁止跨用户共享）
-        if character_id and character_id != "default" and emotion_state is not None:
+        # 好感度同步 — user×character。
+        # 🔴 块E（2026-09-22）双真源根治：`user_id` 此前传 **session_id**
+        # （`<owner>:<peer>`），而写入侧 `user_scheduler._persist_affinity`
+        # 用的是 **裸 user_id**（如 `o9cq80-...@im.wechat`）。两套键空间
+        # 按构造**零交集** —— 该字段由 2026-09-21 隔离批（73ded57）引入
+        # 「user×character」时未与写入侧对齐口径。生产实证（129 行审计 vs
+        # affinity_state.json 3 键）：
+        #   · `affinity_records` 主键是 `4:o9cq80...@im.wechat::62105bca`（带 owner）
+        #   · `affinity_state.json` 主键是 `4:o9cq805...@im.wechat::62105bca`（带 owner）
+        #   即"带 owner 的那份"被写进审计日志，"回放源"却是另一份。
+        # 归类：本项目最高频缺陷家族 —— **格式类事实由推断而非生产取样确定**。
+        # 现统一为 `user_key_from_session`（唯一 owner，语义 = 会话键原样返回，
+        # 与 memory / 事实 / 工具记忆的归属键同口径）。
+        if character_id and emotion_state is not None:
             try:
                 from api.deps import deps as _deps
                 shisi_reg = getattr(_deps, "shisi_reg", None)
                 mapper = getattr(shisi_reg, "affinity_mapper", None)
                 if mapper is not None:
                     affection_pts = getattr(emotion_state, "affection_points", 0.0)
+                    from shisi.memory.legacy.structured_memory import (
+                        StructuredMemory,
+                    )
+
+                    aura_user_key = StructuredMemory.user_key_from_session(session_id or "")
                     mapper.sync(
                         character_id=character_id,
                         affection_points=affection_pts,
                         reason=f"emotion:{emotion_tag}",
                         source="chat",
-                        user_id=session_id or "",
+                        user_id=aura_user_key,
                     )
             except Exception as e:  # noqa: BLE001
                 logger.debug("Affinity/Stage 同步跳过: %s", e)

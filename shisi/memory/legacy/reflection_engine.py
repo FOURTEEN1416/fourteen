@@ -190,6 +190,7 @@ class ReflectionEngine:
             return self._insights_cache[:top_k]
 
         results: list[str] = []
+        legacy_dropped = 0
         if self._vm and query:
             try:
                 vector_results = self._vm.search_sync(
@@ -207,10 +208,25 @@ class ReflectionEngine:
                     meta = r.get("metadata") or {}
                     r_sid = str(meta.get("session_id") or r.get("session_id") or "")
                     if session_id is not None:
-                        if r_sid and r_sid == str(session_id):
+                        # 2026-09-22 块E：空归属行**不属任何会话**，必须排除 ——
+                        # 旧实现 `if r_sid and r_sid == sid: append` 语义其实
+                        # 正确，但由此产生的后果是：所有历史反思（写入时
+                        # session_id 为空串）在按会话检索时**恒被丢弃**，
+                        # 且无任何日志 —— 表现为"反思功能像没生效"。
+                        # 与块C（chat_history 归属）同口径：此处**不回填**
+                        # （反思的归属无法从载体反推，回填等于编造），保持
+                        # 「宁缺毋串」，但把丢弃计数记进日志使现场可见。
+                        if r_sid == str(session_id):
                             results.append(content)
+                        elif not r_sid:
+                            legacy_dropped += 1
                         continue
                     results.append(content)
+                if legacy_dropped:
+                    logger.info(
+                        "反思向量检索: %d 条历史反思无会话归属，已按当前会话(%s)排除",
+                        legacy_dropped, session_id,
+                    )
             except Exception as e:  # noqa: BLE001
                 logger.debug("Vector reflection search failed: %s", e)
 
@@ -218,31 +234,31 @@ class ReflectionEngine:
             try:
                 from utils.prompt_sanitize import looks_like_dialogue
 
-                rows = self._sm.get_reflections(
-                    limit=top_k, session_id=session_id
-                ) if session_id is not None else self._sm.get_reflections(limit=top_k)
+                # 2026-09-22 块E：与向量分支同口径 —— 按会话取时，**空归属行
+                # 一并取回再排除**。旧实现直接 `WHERE session_id = ?`，历史反思
+                # （session_id 为空串）连候选都进不来，反思在"按会话"调用下
+                # 永远是空的；这不是数据缺失而是查询口径把存量全部挡在门外。
+                if session_id is not None:
+                    fetched = self._sm.get_reflections(limit=top_k * 3)
+                    legacy_dropped = sum(
+                        1 for r in fetched if not str(r.get("session_id") or "")
+                    )
+                    rows = [
+                        r for r in fetched
+                        if str(r.get("session_id") or "") == str(session_id)
+                    ][:top_k]
+                    if legacy_dropped:
+                        logger.info(
+                            "反思结构化检索: %d 条历史反思无会话归属，已按当前会话(%s)排除",
+                            legacy_dropped, session_id,
+                        )
+                else:
+                    rows = self._sm.get_reflections(limit=top_k)
                 results = [
                     r.get("content", "").strip()
                     for r in rows
                     if r.get("content") and not looks_like_dialogue(str(r.get("content")))
                 ]
-            except TypeError:
-                try:
-                    from utils.prompt_sanitize import looks_like_dialogue
-
-                    rows = self._sm.get_reflections(limit=top_k)
-                    if session_id is not None:
-                        rows = [
-                            r for r in rows
-                            if str(r.get("session_id") or "") == str(session_id)
-                        ]
-                    results = [
-                        r.get("content", "").strip()
-                        for r in rows
-                        if r.get("content") and not looks_like_dialogue(str(r.get("content")))
-                    ]
-                except Exception as e:  # noqa: BLE001
-                    logger.debug("Structured reflection search failed: %s", e)
             except Exception as e:  # noqa: BLE001
                 logger.debug("Structured reflection search failed: %s", e)
 

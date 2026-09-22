@@ -150,9 +150,37 @@ def test_scheduler_source_targets_session_key():
     assert "session_key=user_key" in src2 or "session_key=" in src2
 
 
-def test_orchestrator_ase_call_uses_session():
+def test_orchestrator_affinity_sync_uses_canonical_user_key():
+    """好感度同步的 user 维必须是**规范归属键**，不是原始 session_id。
+
+    2026-09-22 块E：旧断言 `"user_id=session_id" in src` 是**源码字符串守卫**，
+    它把缺陷本身固化成契约 —— 当时 `mapper.sync` 收 session_id（`<owner>:<peer>`），
+    而写入侧 `user_scheduler._persist_affinity` 收裸 user_id，两套键空间按构造
+    零交集（生产实证：审计 129 行 vs 点存 3 键，无一重合）。
+    源码字符串断言无法发现这类**跨文件口径不一致**，故改为：
+      ① 行为断言：同一 user 的两种入口产出同一个键；
+      ② 反例断言：带 owner 的键与裸键**不相等**（证明它们确实是两套空间）。
+    """
+    from shisi.memory.legacy.structured_memory import StructuredMemory
+
+    session_key = "4:o9cq805ifqDz9eaFN5YWuUFHF-10@im.wechat"
+    canonical = StructuredMemory.user_key_from_session(session_key)
+    # ① 规范键就是会话键原样（唯一 owner 的既有语义）
+    assert canonical == session_key
+    # ② 旧实现的"裸 peer"形态与之不等 —— 这正是双真源的成因
+    bare = session_key.split(":", 1)[1]
+    assert bare != canonical
+    # ③ 空入参不产生伪造键
+    assert StructuredMemory.user_key_from_session("") == ""
+
+
+def test_orchestrator_affinity_sync_not_raw_session_variable():
+    """防止再次把原始 session 变量直接当 user_id 传给 mapper.sync。"""
     import orchestrator.optimized_orchestrator as orch_mod
 
     src = inspect.getsource(orch_mod)
-    assert "ASEHub" in src
-    assert "user_id=session_id" in src or "user_id=session_id or" in src
+    # 旧写法必须消失（它不是口径问题而是"用了未规范化的变量"）
+    assert "user_id=session_id or" not in src
+    assert "user_id=session_id\n" not in src
+    # 新路径必须存在
+    assert "user_key_from_session" in src

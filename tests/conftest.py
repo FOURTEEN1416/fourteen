@@ -1,3 +1,4 @@
+import contextlib
 import os
 import shutil
 import sys
@@ -46,6 +47,69 @@ def reset_auth_state_each():
     except Exception:
         pass
     yield
+
+
+@pytest.fixture(autouse=True)
+def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
+    """把**运行时状态文件**重定向到临时目录，禁止测试写真实 `data/*`。
+
+    2026-09-22 块E 实证事故：给 `ProactiveScheduler` 加上节流账本落盘后，
+    未隔离 `_CONFIG_PATH` 的既有夹具（如 `test_proactive._hub_sched`）把
+    测试键（`4:peer@im.wechat` 等）写进了**开发机真实的**
+    `data/scheduler_config.json` —— 该文件不进版本控制，污染不会被 git 发现，
+    却会反向改变后续用例的行为（真实文件里的 `llm_proactive_next_ok` 让
+    "投递成功"用例走到等待窗分支直接 return）。
+
+    此处做进程级兜底：所有已知运行时状态文件指向 per-test 临时目录。
+    需要真实文件的用例可用 `monkeypatch` 覆盖回原路径。
+    """
+    sandbox = tmp_path_factory.mktemp("runtime_state")
+    patched: list[tuple[object, str, object]] = []
+
+    def _redirect(owner: object, attr: str, filename: str) -> None:
+        if not hasattr(owner, attr):
+            return
+        patched.append((owner, attr, getattr(owner, attr)))
+        monkeypatch.setattr(owner, attr, sandbox / filename, raising=False)
+
+    # ProactiveScheduler 的跨 worker 配置真源（节流账本 + 衰减基准 + 开关）
+    try:
+        from proactive.scheduler import ProactiveScheduler
+
+        _redirect(ProactiveScheduler, "_CONFIG_PATH", "scheduler_config.json")
+    except Exception:
+        pass
+
+    # 好感度点存
+    try:
+        from utils import affinity_state
+
+        _redirect(affinity_state, "_PATH", "affinity_state.json")
+    except Exception:
+        pass
+
+    # 重要日期
+    try:
+        from utils import important_dates
+
+        _redirect(important_dates, "_PATH", "important_dates.json")
+    except Exception:
+        pass
+
+    # ASEHub 的 per-user 状态与索引
+    try:
+        from proactive import ase_hub
+
+        _redirect(ase_hub, "_STATE_DIR", "ase_state")
+        _redirect(ase_hub, "_INDEX_PATH", "ase_index.json")
+    except Exception:
+        pass
+
+    yield sandbox
+
+    for owner, attr, old in patched:
+        with contextlib.suppress(Exception):
+            setattr(owner, attr, old)
 
 
 @pytest.fixture

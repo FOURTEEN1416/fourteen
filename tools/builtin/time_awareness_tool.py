@@ -72,8 +72,12 @@ class TimeAwarenessTool(BaseTool):
     def execute(self, **kwargs) -> ToolResult:
         action = kwargs.get("action", "")
         date_str = kwargs.get("date", "")
-        from datetime import date as date_type
-        target = self._parse_date(date_str) if date_str else date_type.today()  # noqa: DTZ011
+        # 2026-09-22 块E：「今天」必须是**本地日**（Asia/Beijing），不能取
+        # 宿主墙钟的 `date.today()` —— 服务器 TZ 已设为 +0800 时两者巧合一致，
+        # 但一旦在容器/CI（TZ=UTC）里跑，UTC 的 00:00–08:00 段落日期比北京
+        # **早一天**：模型问"今天是不是节假日/今天农历几号"会拿到昨天的答案。
+        # 项目铁律：墙钟语义一律走 utils.local_time.now_local()。
+        target = self._parse_date(date_str) if date_str else now_local().date()
         handlers = {
             "current": self._get_current,
             "holiday": lambda: self._check_holiday(target),

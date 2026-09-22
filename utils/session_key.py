@@ -112,3 +112,29 @@ def owner_of(session_key: str) -> int | None:
 def peer_of(session_key: str) -> str:
     """取对端标识：`N:wxid@im.wechat` → `wxid@im.wechat`（后缀保留）；裸键原样返回。"""
     return parse(session_key).peer
+
+
+def split_owner(session_key: str) -> tuple[str, str]:
+    """把键切成 ``(owner 段, 其余段)`` —— **原样字符串**，不做 int 转换、不剥后缀。
+
+    返回 ``(owner, rest)``；无法判定 owner 时 owner 为空串、rest 为原串。
+
+    2026-09-22 收口：项目里曾有 4 处手写 ``split(":", 1)`` 做同一件事
+    （`scheduler` ×2 用于"该键属于哪个 owner"、`user_scheduler` ×2 用于
+    binding 回退查找、`structured_memory` 用于从历史行反推唯一 owner）。
+    行为恰好都对，但**没走唯一 owner** ⇒ 会话键家族一旦再增方言就会各自漂移
+    （本项目已经发生过一次：`@im.wechat` 后缀被猜错导致解析结论相反）。
+
+    与 :func:`parse` 的差别：本函数**只做切分不做通道判定**，专供
+    "拆出 owner 做归属比较/拼装"这类不需要判通道的场景，避免调用方
+    为了拿 owner 而被迫依赖通道判据。
+    """
+    raw = str(session_key or "").strip()
+    if not raw:
+        return "", ""
+    head, sep, rest = raw.partition(":")
+    if not sep:
+        return "", raw
+    if _OWNER_RE.match(head):
+        return head, rest
+    return "", raw

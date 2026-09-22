@@ -94,7 +94,6 @@ class PersonaService:
         chat_summary: str = "",
         world_info: str = "",
         character_id: str | None = None,
-        character_overrides: dict[str, Any] | None = None,
         user_message: str = "",
         tool_context: str = "",
     ) -> str:

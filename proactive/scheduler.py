@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -123,6 +124,17 @@ class ProactiveScheduler:
         # 自问自答根治：主动消息送达后回写历史需要记忆服务
         self._memory: Any | None = None
         # AX 审查 B3：执行 LLM 自己给出的 wait_minutes（非硬编码日程表）
+        # ── 节流账本（三步：init → _load_throttle_ledger → 变更时 _persist）──
+        # 🔴 块E（2026-09-22 二次根治）：这四个账本此前**只存内存**，进程重启
+        # 即归零。后果按账本分述：
+        #   · `_llm_proactive_next_ok`：LLM 自判的 wait_minutes 与**投递失败的
+        #     指数退避**一起丢 ⇒ 重启后立刻重试 → 形成「重启即打满」的循环。
+        #   · `_deliver_fail_counts`：退避阶梯从 0 重新开始（5m 永远重新开始，
+        #     永远升不到 120m 封顶）——不可达用户依旧每 5 分钟烧一次 LLM。
+        #   · `_disabled_event_day`：每用户每日去重失效 ⇒ 重启当日再写一行。
+        #   · `_important_dates_sent`：当日已发祝福重启后再发一遍（重复祝福）。
+        # 现统一落盘到 `data/scheduler_config.json` 的 `throttle` 段（走
+        # `utils.json_state` 原子写 + flock，与 `last_emotion_decay` 同源）。
         self._llm_proactive_next_ok: dict[str, float] = {}
         # P1-22：投递连续失败计数（指数退避；旧实现失败零退避，
         # 不可达用户每 5 分钟「生成→失败→再生成」，一天 288 次 LLM 零投递）
@@ -174,6 +186,9 @@ class ProactiveScheduler:
         # 路径锚定项目根（见 _CONFIG_PATH）：相对路径按 CWD 解析，从非仓库根
         # 启动时会静默读写另一个文件，表现为"开关保存成功但不生效"。
         self._load_config_file()
+        # 节流账本从同一真源回填（必须在 _load_config_file 之后：两者共用
+        # `_CONFIG_PATH`，且账本不参与上面那几个开关的同步逻辑）。
+        self._load_throttle_ledger()
 
         logger.info("ProactiveScheduler initialized (APScheduler=%s)", HAS_APSCHEDULER)
 
@@ -738,10 +753,10 @@ class ProactiveScheduler:
                     if not uid:
                         continue
                     for key in bound:
-                        if ":" in key:
-                            left, right = key.split(":", 1)
-                            if left == uid and right:
-                                _add(f"{uid}:{right}")
+                        # 2026-09-22 收口：拆 owner 走唯一 owner（禁手写 split）
+                        left, right = session_key_mod.split_owner(key)
+                        if left and left == uid and right:
+                            _add(f"{uid}:{right}")
         except Exception:  # noqa: BLE001
             pass
 
@@ -758,10 +773,10 @@ class ProactiveScheduler:
                     continue
                 peers: list[str] = []
                 for key in bound:
-                    if ":" in key:
-                        left, right = key.split(":", 1)
-                        if left == str(owner_id):
-                            peers.append(right)
+                    # 2026-09-22 收口：拆 owner 走唯一 owner（禁手写 split）
+                    left, right = session_key_mod.split_owner(key)
+                    if left and left == str(owner_id) and right:
+                        peers.append(right)
                     # 裸 wxid 不归属具体 owner，不注入任何通道（隔离）
                 for peer in peers:
                     _add(f"{owner_id}:{peer}")
@@ -839,6 +854,8 @@ class ProactiveScheduler:
             if self._disabled_event_day.get(str(user_key)) != today:
                 self._disabled_event_day[str(user_key)] = today
                 append_proactive_event(session_key=user_key, sent=False, reason="web_disabled")
+                # 块E：账本变更即落盘（否则重启当日再写一行）
+                self._persist_throttle_ledger()
             return
         # P1-49：静默时段在 LLM 决策**之前**前置闸。旧实现静默只挡投递层，
         # 23:00-07:00 每 5 分钟照调一次远端 LLM（消息不发、token 恒流失）。
@@ -983,7 +1000,9 @@ class ProactiveScheduler:
                 wait_minutes=decision.get("wait_minutes"),
             )
             logger.info("proactive LLM delivered user=%s %s", user_key, message[:40])
-            self._deliver_fail_counts.pop(str(user_key), None)
+            if self._deliver_fail_counts.pop(str(user_key), None) is not None:
+                # 块E：成功送达清零退避（仅当确实有计数时落盘）
+                self._persist_throttle_ledger()
         else:
             # P1-22：投递失败指数退避（5m→15m→45m→2h 封顶），成功送达即清零。
             # 旧实现失败侧无任何 backoff：不可达用户每 5 分钟「生成→失败→再生成」，
@@ -992,6 +1011,9 @@ class ProactiveScheduler:
             self._deliver_fail_counts[str(user_key)] = fails
             backoff_min = min(5 * (3 ** (fails - 1)), 120)
             self._llm_proactive_next_ok[str(user_key)] = _time.time() + backoff_min * 60.0
+            # 块E：退避阶梯与下一次可试时刻一并落盘 —— 重启不重置阶梯，
+            # 否则 5m 永远重新开始、永远升不到 120m 封顶。
+            self._persist_throttle_ledger()
             logger.info(
                 "proactive 投递失败 user=%s 连续第%d次 → 退避 %d 分钟",
                 user_key, fails, backoff_min,
@@ -1372,6 +1394,8 @@ class ProactiveScheduler:
         logger.info("[重要日期] 命中 %s（user=%s），定向发送祝福", names, user_key)
         if self._deliver(message, session_key=user_key):
             self._important_dates_sent.add(dedup_key)
+            # 块E：当日幂等记录落盘（否则重启当日重复发同一祝福）
+            self._persist_throttle_ledger()
             logger.info("[重要日期] 祝福已送达: %s user=%s", names, user_key)
         else:
             logger.warning(
@@ -1464,6 +1488,86 @@ class ProactiveScheduler:
             json_state.update_json(self._CONFIG_PATH, _mutate)
         except Exception as e:  # noqa: BLE001
             logger.warning("持久化情绪衰减基准失败: %s", e)
+
+    # ── 节流账本持久化（块E：重启不再丢失退避/节流状态）──────────
+
+    #: `data/scheduler_config.json` 中承载节流账本的键
+    _THROTTLE_KEY = "throttle"
+
+    def _load_throttle_ledger(self) -> None:
+        """从 `data/scheduler_config.json` 的 `throttle` 段回填四个账本。
+
+        容错原则：**逐字段独立**解析，任一字段损坏只丢该字段（不整段丢弃），
+        更不抛异常 —— 账本属优化型状态，构造期崩掉会让调度器整个起不来。
+        数值侧统一做有界钳制（失败计数 ≥0、时间戳有限正数），避免外部改坏
+        文件后把退避算成负数/NaN。
+        """
+        try:
+            data = json_state.read_json(self._CONFIG_PATH, default={}) or {}
+        except Exception as e:  # noqa: BLE001
+            logger.warning("读取节流账本失败（按空账本启动）: %s", e)
+            return
+        raw = data.get(self._THROTTLE_KEY)
+        if not isinstance(raw, dict):
+            return
+
+        next_ok = raw.get("llm_proactive_next_ok")
+        if isinstance(next_ok, dict):
+            loaded: dict[str, float] = {}
+            for k, v in next_ok.items():
+                try:
+                    fv = float(v)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(fv) and fv > 0:
+                    loaded[str(k)] = fv
+            self._llm_proactive_next_ok = loaded
+
+        fails = raw.get("deliver_fail_counts")
+        if isinstance(fails, dict):
+            loaded_f: dict[str, int] = {}
+            for k, v in fails.items():
+                try:
+                    iv = int(v)
+                except (TypeError, ValueError):
+                    continue
+                if iv > 0:
+                    loaded_f[str(k)] = iv
+            self._deliver_fail_counts = loaded_f
+
+        disabled = raw.get("disabled_event_day")
+        if isinstance(disabled, dict):
+            self._disabled_event_day = {
+                str(k): str(v) for k, v in disabled.items() if str(v or "")
+            }
+
+        sent = raw.get("important_dates_sent")
+        if isinstance(sent, list):
+            self._important_dates_sent = {str(x) for x in sent if str(x or "")}
+
+    def _persist_throttle_ledger(self) -> None:
+        """把四个账本原子落盘；失败仅告警不阻断（内存态仍然生效）。
+
+        只在**账本真的变化**时调用（见各处调用点注释）——本函数每次都全量覆写
+        该段，若挂到热路径上会造成无谓的磁盘写。
+        """
+        try:
+            def _mutate(data: dict[str, Any]) -> None:
+                data[self._THROTTLE_KEY] = {
+                    "llm_proactive_next_ok": {
+                        k: float(v) for k, v in self._llm_proactive_next_ok.items()
+                    },
+                    "deliver_fail_counts": {
+                        k: int(v) for k, v in self._deliver_fail_counts.items()
+                    },
+                    "disabled_event_day": dict(self._disabled_event_day),
+                    # 只保留最近 7 天（防无界增长；口径与 dedup_key 的日期前缀一致）
+                    "important_dates_sent": sorted(self._important_dates_sent)[-200:],
+                }
+
+            json_state.update_json(self._CONFIG_PATH, _mutate)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("持久化节流账本失败（内存态仍生效）: %s", e)
 
     def get_jobs(self) -> list[dict[str, Any]]:
         """获取所有任务状态"""

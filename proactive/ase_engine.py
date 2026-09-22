@@ -27,6 +27,7 @@ from typing import Any
 
 from proactive.frequency import FrequencyAdapter, FrequencyController
 from proactive.reflection import InnerMonologue, ReflectionEngine
+from utils import json_state
 from utils.local_time import now_local
 
 logger = logging.getLogger("ase_engine")
@@ -1394,6 +1395,15 @@ class ASEEngine:
     # ── 状态持久化 ───────────────────────────────────────
 
     def save_state(self, path: str = "") -> None:
+        """把引擎状态原子落盘。
+
+        2026-09-22 块E：改走 `utils.json_state.atomic_write_json`（同目录 tmp +
+        `os.replace`）。旧实现 `open(...,"w")` + `json.dump` 直接覆写目标文件，
+        与 `_load_state` 的读取之间**没有互斥**，且写入中途失败/崩溃会留下
+        截断的 JSON —— 下一次 `_load_state` 解析失败即静默丢弃**全部**引擎状态
+        （日配额、注意力、退避基准一起归零）。跨进程口径见 `utils/json_state`
+        模块 docstring（flock + 进程内锁）。
+        """
         state_path = Path(path) if path else self._state_path
         try:
             state = {
@@ -1425,9 +1435,7 @@ class ASEEngine:
                 "response_rate": float(self.response_rate),
                 "saved_at": datetime.now(tz=timezone.utc).isoformat(),
             }
-            state_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(state_path, "w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False, indent=2)
+            json_state.atomic_write_json(state_path, state)
             logger.debug("State saved to %s", state_path)
         except Exception as e:  # noqa: BLE001
             logger.warning("State save failed: %s", e)
@@ -1436,8 +1444,11 @@ class ASEEngine:
         if not self._state_path.exists():
             return
         try:
-            with open(self._state_path, encoding="utf-8") as f:
-                state = json.load(f)
+            raw = self._state_path.read_text(encoding="utf-8")
+            state = json.loads(raw)
+            if not isinstance(state, dict):
+                logger.warning("State file 不是对象，忽略: %s", self._state_path)
+                return
 
             self._daily_message_count = state.get("daily_count", 0)
             if state.get("last_chat_time"):

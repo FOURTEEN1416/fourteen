@@ -26,6 +26,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any
 
+from utils import session_key as session_key_mod
 from utils.local_time import local_day_utc_bounds, now_local
 
 logger = logging.getLogger("structured_memory")
@@ -412,8 +413,10 @@ class StructuredMemory:
                         sid = str(row["session_id"] or "")
                         if sid == peer:
                             continue
-                        if ":" in sid:
-                            owners.add(sid.split(":", 1)[0])
+                        # 2026-09-22 收口：拆 owner 走唯一 owner（禁手写 split）
+                        head, _rest = session_key_mod.split_owner(sid)
+                        if head:
+                            owners.add(head)
                     if len(owners) == 1:
                         only = next(iter(owners))
                         return f"{only}:{peer}"
@@ -1041,10 +1044,17 @@ class StructuredMemory:
         if not forms:
             return []
         placeholders = ",".join("?" for _ in forms)
+        # 2026-09-22 块E：排序**一律按 `id`（写入序）** —— 与
+        # `_load_session_history`（2026-09-21 已改）同口径。旧实现
+        # `ORDER BY created_at DESC, id DESC` 以秒级时间戳为主键：同秒写入的
+        # 用户/助手消息取哪几条由 `id` 兜底，但**跨秒边界**时"最近 limit 条"
+        # 可能漏掉刚写入的消息（created_at 是写库时刻而非事件时刻，且 SQLite
+        # `CURRENT_TIMESTAMP` 只有秒精度）。项目铁律：排序与去重禁止再用
+        # 秒级 created_at 判序。
         sql = (
             "SELECT role, content FROM chat_history "
             f"WHERE session_id IN ({placeholders}) "
-            "ORDER BY created_at DESC, id DESC LIMIT ?"
+            "ORDER BY id DESC LIMIT ?"
         )
         with self._conn() as conn:
             rows = conn.execute(sql, (*forms, limit)).fetchall()

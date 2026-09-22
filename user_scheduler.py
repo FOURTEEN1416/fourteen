@@ -12,14 +12,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 import threading
 import time
+from contextlib import closing
 from dataclasses import dataclass, field
 from typing import Any
 
 from my_character.emotion_engine import AffinityLevel, EmotionEngine
 from shisi.affinity import scale as affinity_scale
-from utils import affinity_state
+from utils import affinity_state, session_key
 
 logger = logging.getLogger("user_scheduler")
 
@@ -176,12 +178,45 @@ class UserManager:
 
     @staticmethod
     def _persist_affinity(user_id: str, character_id: str, engine: EmotionEngine) -> None:
+        """持久化亲密度：**点存 + 审计日志双写**（块E，2026-09-22）。
+
+        为什么要双写：`shisi.affinity.enhancer.AffinityEnhancer` 重启后从
+        `affinity_records`（它自己的审计日志）**回放**恢复 `_values`，而本类
+        只往 `data/affinity_state.json` 写点存 —— 两份键空间由 09-21 隔离批
+        引入 user×character 后出现口径分叉（详见 orchestrator 内同批注释）。
+        生产实证两份的键**零交集**，导致 enhancer 的"重启归零根治"（v1.36
+        块2）在生产拿不到任何可回放数据。
+
+        现同时写审计日志，使**回放源覆盖写入源**。注意审计写入失败必须只告警：
+        点存是既有真源，不能因新路径失败而丢点存。
+        """
         try:
             state = getattr(engine, "state", None) or getattr(engine, "_state", None)
             if state is None:
                 return
             points = float(getattr(state, "affection_points", 0.0) or 0.0)
             affinity_state.save_points(user_id, character_id, points)
+            # 审计镜像：enhancer 的恢复真源
+            try:
+                from shisi.affinity.enhancer import affinity_key, default_db_path
+
+                key = affinity_key(character_id, user_id)
+                with closing(sqlite3.connect(str(default_db_path()))) as conn, conn:
+                    conn.execute(
+                        "INSERT INTO affinity_records "
+                        "(character_id, old_value, new_value, delta, reason, source) "
+                        "VALUES (?,?,?,?,?,?)",
+                        (
+                            key,
+                            0.0,
+                            points,
+                            0.0,
+                            "user_scheduler_persist",
+                            "emotion",
+                        ),
+                    )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("好感度审计镜像写入失败（点存已成功）: %s", e)
         except Exception as e:  # noqa: BLE001
             logger.debug("持久化亲密度失败 %s/%s: %s", user_id, character_id, e)
 
@@ -316,9 +351,11 @@ class UserManager:
                 character_card_id = self._resolve_character_id(user_id)
                 nickname = ""
                 binding = self._bindings.get(user_id)
-                if not binding and ":" in user_id:
-                    _owner, peer = user_id.split(":", 1)
-                    binding = self._bindings.get(peer) or self._bindings.get(user_id)
+                if not binding:
+                    # 2026-09-22 收口：拆 owner 走唯一 owner（禁手写 split）
+                    _owner, peer = session_key.split_owner(user_id)
+                    if peer and peer != user_id:
+                        binding = self._bindings.get(peer) or self._bindings.get(user_id)
                 if binding:
                     nickname = binding.get("nickname") or ""
                     if binding.get("character_card_id") and user_id in self._bindings:
@@ -340,8 +377,9 @@ class UserManager:
         binding = self._bindings.get(user_id)
         if binding and binding.get("character_card_id"):
             return str(binding["character_card_id"])
-        if ":" in user_id:
-            owner, peer = user_id.split(":", 1)
+        # 2026-09-22 收口：拆 owner 走唯一 owner（禁手写 split）
+        owner, peer = session_key.split_owner(user_id)
+        if owner:
             # peer 偏好缓存键：owner:peer 已在 bindings 中则上面已命中
             pref = self._bindings.get(f"pref:{user_id}")
             if pref and pref.get("character_card_id"):

@@ -91,6 +91,12 @@ def get_active_character_id() -> str:
     open+json.load（现役 41 张）。现在先算目录轻量指纹（文件名+mtime+size），
     未变化直接复用上次的 active id；任何卡变更（含 is_active 切换、增删卡）
     都会改指纹，不会读到陈旧值。
+
+    🔴 2026-09-22 块E 缓存污染修复：`_list_all_characters` 可能被**替换**
+    （测试替身 / 未来热插拔角色源），此时目录指纹不变、缓存判定依然成立，
+    于是继续返回与当前数据源无关的陈旧值 —— 缓存击穿的不是存储层而是
+    **数据源身份**。缓存键补齐「当前数据源 callable 的 id」：一旦调用方
+    把 `character_routes._list_all_characters` 换掉，缓存立即失效。
     """
     global _ACTIVE_ID_FP, _ACTIVE_ID_VALUE
     chars_dir = _get_characters_dir()
@@ -102,14 +108,17 @@ def get_active_character_id() -> str:
         fp = "|".join(parts)
     except OSError:
         fp = ""
-    if fp and fp == _ACTIVE_ID_FP and _ACTIVE_ID_VALUE:
+    # 数据源身份参与缓存键：换掉 _list_all_characters 即失效
+    source_id = id(_list_all_characters)
+    cache_key = f"{fp}#{source_id}"
+    if cache_key == _ACTIVE_ID_FP and _ACTIVE_ID_VALUE:
         return _ACTIVE_ID_VALUE
     active = "default"
     for character in _list_all_characters(normalize=False):
         if character.get("is_active"):
             active = str(character.get("id") or "default")
             break
-    _ACTIVE_ID_FP, _ACTIVE_ID_VALUE = fp, active
+    _ACTIVE_ID_FP, _ACTIVE_ID_VALUE = cache_key, active
     return active
 
 

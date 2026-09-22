@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import logging
 import re
 
@@ -123,21 +124,40 @@ class SemanticMemory:
         """
         results: dict[str, list] = {"vector": [], "structured": [], "exact": []}
         try:
-            if user_key is not None and hasattr(self._vm, "_search"):
-                # 2026-09-22：user_key 过滤下推 Chroma where——旧实现全库 top_k
-                # 取回后 Python 过滤，他人事实占满窗口时本人向量召回被挤空。
-                raw_vec = self._vm._search(
-                    "user_facts", query, top_k, where={"user_key": str(user_key)}
-                ) or []
+            raw_vec: list = []
+            # 2026-09-22 块E：读侧与写侧同源判据 —— `vector_memory._search` 是
+            # **协程函数**（`async def`），旧实现两个分支都把它当同步函数直接调：
+            #   · `self._vm._search(...)` 返回 coroutine，`or []` 不触发（coroutine
+            #     恒为真）→ `raw_vec` 是协程对象；后续 `for r in raw_vec` 抛
+            #     TypeError（coroutine 不可迭代）→ 被下方 except 吞掉 → **向量
+            #     召回恒空**，warning 里只有一句 "Vector fact search failed"。
+            #   · `elif hasattr(self._vm, "search_sync")` 分支同样 `or []` 不生效，
+            #     且 `search_sync` 虽非协程，其内部 `_run_async` 在**已运行的事件
+            #     循环**里会退化（见 utils.async_utils 注释）。
+            # 现统一走 `utils.async_utils.run_async`（同步桥唯一 owner），并把
+            # Chroma `where` 下推保留（写侧 store_fact 已按 P1-12 修复，向量通道
+            # 需要读写两侧同口径才真正接通）。
+            from utils.async_utils import run_async
+
+            _where = {"user_key": str(user_key)} if user_key is not None else None
+            if hasattr(self._vm, "_search"):
+                # `where` 是较新参数：老实现/测试替身可能没有。不支持时退回
+                # 不带过滤的调用，再由下方 Python 侧按 meta.user_key 过滤兜底
+                # （语义安全，只是失去"下推"性能收益）——不能因替身签名不同
+                # 就整条向量通道报错。
+                try:
+                    _ret = self._vm._search("user_facts", query, top_k, where=_where)
+                except TypeError:
+                    _ret = self._vm._search("user_facts", query, top_k)
+                # `_search` 在真实现里是 async（需过桥）；测试替身可能是同步
+                # 返回列表。两者都要正确处理 —— 旧实现直接当同步用，遇 async
+                # 拿到 coroutine，迭代时抛 TypeError 被吞 ⇒ 向量召回恒空。
+                raw_vec = (run_async(_ret) or []) if inspect.isawaitable(_ret) else (_ret or [])
             elif hasattr(self._vm, "search_sync"):
                 raw_vec = self._vm.search_sync(
                     query, top_k=top_k, filter_dict={"type": "fact"}
                 ) or []
-            elif hasattr(self._vm, "_search"):
-                vr = self._vm._search("user_facts", query, top_k)
-                raw_vec = vr if isinstance(vr, list) else []
-            else:
-                raw_vec = []
+            raw_vec = raw_vec if isinstance(raw_vec, list) else []
             if user_key is not None:
                 raw_vec = [
                     r for r in raw_vec

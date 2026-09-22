@@ -23,6 +23,11 @@ logger = logging.getLogger("shisi.affinity.enhancer")
 _DB_DEFAULT = Path(__file__).resolve().parent.parent.parent / "data" / "sqlite.db"
 
 
+def default_db_path() -> Path:
+    """审计库默认路径（供 `user_scheduler` 等外部写入方对齐，避免各自拼路径）。"""
+    return _DB_DEFAULT
+
+
 def affinity_key(character_id: str, user_id: str = "") -> str:
     """隔离键：有 user_id 时为 `user::character`，否则退回 character。"""
     cid = str(character_id or "")
@@ -58,7 +63,13 @@ class AffinityEnhancer:
           统一转为 aware UTC —— DecayEngine 用 aware now 相减，naive 会
           TypeError 使 decay_all 崩溃；
         - 回放失败只告警不抛（构造在装配热路径上，降级为旧行为从 0 起步）。
+
+        🔴 块E（2026-09-22）：审计**读取失败时不再 `return`**，而是继续走点存
+        兜底。旧实现 `except: return` —— 审计表缺失（全新库 / 迁移未跑）时
+        连兜底回填也一并跳过，两条恢复路径同时失效，且日志只说"审计回放失败"，
+        完全看不出"点存其实有数据却没用"。恢复路径应当**彼此独立降级**。
         """
+        rows: list = []
         try:
             with closing(sqlite3.connect(str(self._db_path))) as conn, conn:
                 rows = conn.execute(
@@ -69,8 +80,7 @@ class AffinityEnhancer:
                     "  ON ar.id = latest.mid"
                 ).fetchall()
         except Exception as e:  # noqa: BLE001
-            logger.warning("好感度审计回放失败（从 0 起步）: %s", e)
-            return
+            logger.warning("好感度审计回放失败（转点存兜底）: %s", e)
         for key, value, created_at in rows:
             k = str(key or "")
             if not k:
@@ -85,8 +95,40 @@ class AffinityEnhancer:
                 except ValueError:
                     ts = None
             self._last_interaction[k] = ts or datetime.now(tz=timezone.utc)
+        # 🔴 块E（2026-09-22）：审计日志可能**没有**该键的历史（生产实证审计
+        # 与点存两份键空间零交集），但点存里有 —— 此时用点存补齐，避免
+        # "回放成功但值仍为 0"。仅补审计缺失的键，不覆盖已有值。
+        self._restore_missing_from_points()
         if self._values:
             logger.info("好感度审计回放恢复 %d 个隔离键", len(self._values))
+
+    def _restore_missing_from_points(self) -> None:
+        """点存兜底回填：审计无记录但点存有值的键（键格式**完全一致**才匹配）。
+
+        键口径已由 `orchestrator` 统一为 `user_key_from_session`（会话键原样），
+        与 `user_scheduler._persist_affinity` 写入点存时的 `user_id` 同源。
+        """
+        try:
+            from utils import affinity_state, json_state
+
+            data = json_state.read_json(affinity_state._PATH, default={}) or {}
+        except Exception as e:  # noqa: BLE001
+            logger.debug("好感度点存兜底读取失败（忽略）: %s", e)
+            return
+        restored = 0
+        for key, val in data.items():
+            k = str(key or "")
+            if not k or k in self._values:
+                continue
+            try:
+                pts = float((val or {}).get("affection_points", 0.0) or 0.0)
+            except (TypeError, ValueError, AttributeError):
+                continue
+            self._values[k] = max(self._min, min(self._max, pts))
+            self._last_interaction[k] = datetime.now(tz=timezone.utc)
+            restored += 1
+        if restored:
+            logger.info("好感度点存兜底回填 %d 个审计缺失键", restored)
 
     @staticmethod
     def _key(character_id: str, user_id: str = "") -> str:
