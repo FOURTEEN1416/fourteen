@@ -426,6 +426,19 @@ class ProactiveScheduler:
                     coalesce=True,
                 )
 
+            # 8. 热点知识采集（每60分钟）
+            #    开关与真实间隔由 config/hot_topics.yaml 单一真源判——
+            #    collect_if_due 内部自限速，注册频率高于配置间隔只是空转 skip。
+            self._scheduler.add_job(
+                self._safe_job_wrapper(self._run_hot_topics_collect, "hot_topics_collect"),
+                IntervalTrigger(minutes=60),
+                id="hot_topics_collect",
+                name="热点知识采集",
+                replace_existing=True,
+                misfire_grace_time=300,
+                coalesce=True,
+            )
+
             self._scheduler.start()
             # 知识库定期采集任务按持久化配置恢复
             self._sync_vault_job()
@@ -622,6 +635,25 @@ class ProactiveScheduler:
                 logger.info("知识库定期采集完成: %d 个角色已重建索引", count)
         except Exception as e:  # noqa: BLE001
             logger.warning("知识库定期采集失败: %s", e)
+
+    def _run_hot_topics_collect(self) -> None:
+        """热点知识采集（同步、自限速、吞异常返回 dict，永不抛出）。
+
+        唯一注册契约见 docs/board/W3_HANDOFF_WIRING.md §1：开关/间隔真源在
+        config/hot_topics.yaml，本方法只负责按拍触发。
+        """
+        from shisi.knowledge.hot_topics import collect_if_due
+
+        stats = collect_if_due()
+        if stats.get("skipped"):
+            logger.debug("热点采集跳过: %s", stats["skipped"])
+        elif stats.get("ok"):
+            logger.info(
+                "热点采集完成: 新增 %s 条，池 %s 条",
+                stats.get("added"), stats.get("pool_size"),
+            )
+        else:
+            logger.warning("热点采集未成功: %s", str(stats)[:200])
 
     def _is_quiet_hours(self) -> bool:
         """检查是否在免打扰时段。

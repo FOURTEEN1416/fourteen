@@ -198,3 +198,65 @@ def test_hot_context_persona_relevance_ranking(monkeypatch):
     monkeypatch.setattr(hot_topics, "_persona_tokens", lambda cid: set())
     ctx2 = hot_topics.get_hot_context("", max_items=1)
     assert "综艺录制花絮" in ctx2
+
+
+# ═══════════════════════════════════════════════════════════════
+#  scheduler 接线（契约 W3_HANDOFF_WIRING §1：不注册则池永不增长）
+# ═══════════════════════════════════════════════════════════════
+
+
+class _FakeAPScheduler:
+    """记录 add_job 的最小替身——真 BackgroundScheduler 会起线程。"""
+
+    def __init__(self, **_kw):
+        self.jobs: dict[str, dict] = {}
+        self.running = False
+
+    def add_job(self, func, trigger=None, id=None, name=None, **kw):
+        self.jobs[id] = {"func": func, "trigger": trigger, "name": name, **kw}
+
+    def get_jobs(self):
+        return list(self.jobs.values())
+
+    def get_job(self, job_id):
+        return self.jobs.get(job_id)
+
+    def remove_job(self, job_id):
+        self.jobs.pop(job_id, None)
+
+    def start(self):
+        self.running = True
+
+
+def test_scheduler_start_registers_hot_topics_collect(monkeypatch):
+    import proactive.scheduler as sched_mod
+    from proactive.scheduler import ProactiveScheduler
+
+    fake = _FakeAPScheduler()
+    monkeypatch.setattr(sched_mod, "BackgroundScheduler", lambda **kw: fake)
+    s = ProactiveScheduler(ase_engine=None, send_message_func=None)
+    assert s.start() is True
+
+    job = fake.jobs.get("hot_topics_collect")
+    assert job is not None, "hot_topics_collect 未注册——热点池将永不增长"
+    assert type(job["trigger"]).__name__ == "IntervalTrigger"
+
+
+def test_registered_hot_topics_job_calls_collect_if_due(monkeypatch):
+    """注册回调真触发 collect_if_due（而非只挂了个空壳函数）。"""
+    import proactive.scheduler as sched_mod
+    from proactive.scheduler import ProactiveScheduler
+
+    fake = _FakeAPScheduler()
+    monkeypatch.setattr(sched_mod, "BackgroundScheduler", lambda **kw: fake)
+    called: list[int] = []
+    monkeypatch.setattr(
+        hot_topics,
+        "collect_if_due",
+        lambda: (called.append(1), {"skipped": "interval"})[1],
+    )
+    s = ProactiveScheduler(ase_engine=None, send_message_func=None)
+    assert s.start() is True
+
+    fake.jobs["hot_topics_collect"]["func"]()
+    assert called == [1]
