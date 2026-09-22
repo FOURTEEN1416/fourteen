@@ -32,8 +32,8 @@
 | W3 代码 | `wt/code` | `..\ai-girlfriend-code` | **包 V** | 待开工 | — | 多模态缺口；**须先过商讨协议五步制** |
 | W4 验证 | `wt/verify` | `..\ai-girlfriend-verify` | **包 T** | 待开工 | — | 只碰 `tests/**`；反对采样验证 |
 | **W1 刻度迁移** | 主检出 `main` | `D:\Desktop\ai-girlfriend`（本窗直接做） | 包 R3-W1 · v1.38 遗留① | ✅ **已由并发窗闭环**（`a0f0af2`→纠反 `48e1868`），本窗复验 4/4 绿 | 2026-09-22 登记 | owner：`shisi/api/registry.py` + enhancer 常量导入 + 新测试；禁碰 scheduler/session_key |
-| **W2 laya 审计** | `wt/laya-audit` | `..\ai-girlfriend-laya-audit` | 包 R3-W2 · 只读调研 | 🟢 进行中（本窗派后台智能体，锁 worktree） | 2026-09-22 登记 | 只写 `docs/research/2026-09-22_laya真源审计与接线评估.md` + LOG 一行；不改代码不装依赖 |
-| **W3 热点知识链** | `wt/hot-knowledge` | `..\ai-girlfriend-hot-knowledge` | 包 R3-W3 · 采集→入库→供出 | 🟢 进行中（本窗派后台智能体，锁 worktree；挂线契约落 `docs/board/W3_HANDOFF_WIRING.md`） | 2026-09-22 登记 | owner：tools/builtin、shisi/knowledge、新热点模块、tests 新增；**禁改 proactive/scheduler.py 与 _init_mixin.py**（scheduler 单写者=主控），需接线点写本看板追加区 |
+| **W2 laya 审计** | `wt/laya-audit`（分支保留） | ~~`..\ai-girlfriend-laya-audit`~~ 可卸 | 包 R3-W2 · 只读调研 | ✅ **已收编 main**（merge `wt/laya-audit`：审计报告 222 行 + LOG 两条含勘误） | 2026-09-22 登记 | 结论=有条件引入（候选① llm_proactive 前置 gate 四步路径；不建议 tool_gate L0.5/直替）；未证实项与试跑授权见文档 §2.5，归默默裁决 |
+| **W3 热点知识链** | `wt/hot-knowledge`（分支保留） | ~~`..\ai-girlfriend-hot-knowledge`~~ 可卸 | 包 R3-W3 · 采集→入库→供出 | ✅ **已收编 main + 挂线完成**（merge 7 提交；主控补 `hot_topics_collect` 注册 + 2 行为断言，`f2c51ba`） | 2026-09-22 登记 | 契约 §1 硬缺口已闭合：scheduler 60min IntervalTrigger → `collect_if_due()`（自限速/永不抛出，开关真源 `config/hot_topics.yaml`）；conftest 池隔离随批保留 |
 | **W4 部署** | 无（主控执行） | 主检出 + swu-prod | 包 R3-W4 · push+服务器 | ✅ **完成**（默默对 push 与服务器 pull 分别明确点头）——三端统一 `7578e57`；服务器 bundle 三跳 ff + remote_deploy 4/4 + health 200；服务器全量 **1868 收集 / 1867 通过 / 1 跳过 / 0 失败** + CI 35714334710 绿；详见 LOG「W4 部署窗口」条目 | 2026-09-22 登记 | nginx 零配置改动（入口冻结铁律遵守）；拦下 W1 迁移参数换向与 CI 墙钟用例两枚缺陷后放行（`5cc70ee`/`48e1868`）；临时 bundle 已清 |
 
 > ⚠️ **2026-09-19 路径收编**：W1/W2 工作区原位于 `D:\Desktop\` 根（仓库外），已收编至 `大创赛报名以及后期发展\` 下；仍为**仓库外非 git 工作区**，受 `.gitignore:130` 全目录排除，故宪法 §3「参赛材料不入库」约束不变。同期收编 `大赛附件包`、`专利-唯一的你十四`。**追加区内历史条目所载旧路径按「历史记录保留原文」准则未作改动**。完整映射见 `大创赛报名以及后期发展\PATH-MIGRATION-2026-09-19.md`。
@@ -41,6 +41,11 @@
 ---
 
 ## 追加区（按时间倒序，新的在上）
+
+### 2026-09-22 · 主控 · R3 收仓：W2/W3 合入 main + 热点挂线落地
+- **W3**：merge `wt/hot-knowledge`（7 提交，`6e3e9a2`）——热点模块/供出/测试/设计/契约/conftest 池隔离全量入 main，与 main 侧零文件冲突；随后主控落契约 §1 挂线（`f2c51ba`）：`start()` 注册 `hot_topics_collect`（IntervalTrigger 60min，仿既有 job 风格 misfire_grace+coalesce），`_run_hot_topics_collect` 只按拍触发 `collect_if_due()`（开关/间隔真源 `config/hot_topics.yaml`，scheduler 侧不造第二配置）。新增 2 行为断言（注册存在 + 回调真触发），**突变验红**：改 job id → 2 例转红，还原复绿 14/14。
+- **W2**：merge `wt/laya-audit`（`842a1e4` 含勘误条）——LOG 冲突面（main +34 行尾 vs 分支 +4 行尾）由 ort 自动合入，落位核验为分支两条追加于 main 尾部之后，无内容丢失。
+- **两 worktree 可卸**（分支保留即回滚路径）；收仓后全量分块回归与 push 随本条目后进行，读数记 LOG。
 
 ### 2026-09-22 · W1 窗 · ⚠️ 全窗行为变更：提交前门禁——staged 与工作树分叉即拒（`718a66a`）
 
