@@ -61,7 +61,9 @@ def _extract_install_python(lines: list[str]) -> str:
     for line in lines:
         if line.startswith("INSTALL_PYTHON="):
             return line.split("=", 1)[1].strip().strip("'\"")
-    return "python"
+    # 无框架钩子可参照时绑定**运行安装器的解释器**：裸 "python" 在其不在 PATH 的
+    # 环境（服务器只有 python3/.venv，2026-09-22 部署验收实锤）装出的钩子提交必败。
+    return sys.executable
 
 
 def install(repo: Path, gate_script: Path) -> str:

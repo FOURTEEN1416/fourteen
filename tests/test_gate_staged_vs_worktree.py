@@ -155,6 +155,18 @@ def test_installer_creates_hook_when_absent(tmp_path):
     assert MARKER_BEGIN in _hook_text(repo)
 
 
+def test_bare_install_binds_running_interpreter(tmp_path):
+    """无框架钩子时门禁必须绑定**运行安装器的解释器**（sys.executable）。
+
+    旧兜底写死裸 `python`：`python` 不在 PATH 的环境（服务器只有 python3/.venv，
+    部署验收实锤）装出的钩子每次 `git commit` 必败 —— 钩子执行时没有 sys.executable，
+    唯一可靠绑定只能是安装器自己的解释器。
+    """
+    repo = _repo(tmp_path)
+    assert _install_gate(repo).returncode == 0
+    assert Path(sys.executable).as_posix() in _hook_text(repo)
+
+
 def test_checker_detects_overwrite_by_precommit_install(tmp_path):
     """`pre-commit install` 覆写原生钩子 → 自检必须报警（防静默失踪）。"""
     repo = _repo(tmp_path)
