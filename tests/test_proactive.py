@@ -298,6 +298,26 @@ def test_frequency_adapter_recover_on_reply():
     assert fa.level == "normal"
 
 
+def test_frequency_adapter_recovers_from_minimal():
+    """minimal 不可永久粘滞：生产实证 level=minimal 且 unanswered_count=1（用户持续回复，
+    级别却永远回不去）→ 活跃用户被永久限到 1 条/日。未应答归零先回 low，再一答回 normal。"""
+    from proactive.ase_engine import FrequencyAdapter
+    fa = FrequencyAdapter()
+    for _ in range(5):
+        fa.on_no_reply()
+    assert fa.level == "minimal"
+    for _ in range(4):
+        fa.on_reply_received()
+    assert fa.to_dict()["unanswered_count"] == 1
+    assert fa.level == "minimal"  # 计数未归零不回升
+    fa.on_reply_received()
+    assert fa.level == "low"
+    assert fa.get_max_daily() == 3
+    fa.on_reply_received()
+    assert fa.level == "normal"
+    assert fa.get_max_daily() == 8
+
+
 def test_frequency_adapter_to_dict():
     from proactive.ase_engine import FrequencyAdapter
     fa = FrequencyAdapter()

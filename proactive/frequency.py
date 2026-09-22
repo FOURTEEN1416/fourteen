@@ -28,8 +28,13 @@ class FrequencyAdapter:
 
     def on_reply_received(self) -> None:
         self._unanswered_count = max(0, self._unanswered_count - 1)
-        if self._current_level == "low" and self._unanswered_count == 0:
-            self._current_level = "normal"
+        if self._unanswered_count == 0:
+            # 逐级回升：minimal→low→normal（旧实现只认 low→normal，
+            # 落入 minimal 后永久粘滞——生产实证用户持续回复仍被限 1 条/日）
+            if self._current_level == "minimal":
+                self._current_level = "low"
+            elif self._current_level == "low":
+                self._current_level = "normal"
 
     def on_no_reply(self) -> None:
         self._unanswered_count += 1
