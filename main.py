@@ -406,9 +406,36 @@ def _run_orchestrator(args: argparse.Namespace, use_console: bool,
         scheduler._daily_maintenance = _daily_maintenance
 
         # 注册 ws / console / wechat 通道（console 覆盖 _init_mixin 的默认注册）
+        # 🔴 2026-09-22 二次根治：旧实现把 websocket 通道注册成
+        # `lambda: ws_server.broadcast_proactive` —— 该函数只收 1 个参数，
+        # 而 `_send_targeted` 对非微信会话键执行
+        # `sender(message, session_key=session_key)` → TypeError → 按 P1-21
+        # 「定向消息拒绝降级为广播」直接判失败 ⇒ **本入口下 web 提醒/主动
+        # 消息恒判失败**（3 次后提醒判死）。现与 `api/run_api.py` 同构：
+        # 带 session_key 走 `send_proactive_to_session`（0 送达即抛，判失败），
+        # 无 session_key 的系统级消息保留广播。
         ws_server = _ws_holder.get("ws")
         if ws_server is not None:
-            scheduler.register_channel("websocket", lambda: ws_server.broadcast_proactive)
+
+            def _websocket_sender_factory(_holder=_ws_holder):
+                _ws = _holder.get("ws")
+                if _ws is None:
+                    return None
+
+                async def _send(msg: str, session_key: str | None = None) -> None:
+                    if session_key:
+                        delivered = await _ws.send_proactive_to_session(session_key, msg)
+                        if delivered == 0:
+                            raise RuntimeError(
+                                "websocket 定向投递未送达任何归属连接"
+                                f"（session={session_key}）"
+                            )
+                        return
+                    await _ws.broadcast_proactive(msg)
+
+                return _send
+
+            scheduler.register_channel("websocket", _websocket_sender_factory)
         scheduler.register_channel(
             "console", lambda: lambda msg: logger.info("[主动消息] %s", msg)
         )

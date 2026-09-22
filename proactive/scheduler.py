@@ -991,22 +991,27 @@ class ProactiveScheduler:
         return asyncio.run(coro_factory())
 
     def _deliver(self, message: str, session_key: str | None = None) -> bool:
-        """投递主动消息。session_key 非空时**定向**到该会话，否则广播（旧路径）。"""
+        """投递主动消息。session_key 非空时**定向**到该会话，否则广播（旧路径）。
+
+        🔴 2026-09-22 二次根治：异常分支曾回落 `self._send(message)`（生产 =
+        `logger.info` 包装的纯日志通道，见 `_LOG_ONLY_CHANNELS` 的告诫），
+        随后 `_record_outbound` + `return True` —— **从未发出的消息被记成
+        「已送达」**：扣配额、写冷却、置位场景标记、并把这句写进对话历史
+        （下轮 prompt 里出现她"说过"但从没说过的话 = 自问自答）。
+        现异常一律返回 False（`_send_targeted` 自身已用返回值表达失败，
+        `_run_blocking` 的异常属基础设施故障，同样不能算送达），
+        由调用方走失败退避；记账只由「投递成功」触发。
+        """
         try:
-            delivered = bool(self._run_blocking(lambda: self._send_targeted(message, session_key)))
-            if delivered:
-                self._record_outbound(message, session_key)
-            return delivered
+            delivered = bool(
+                self._run_blocking(lambda: self._send_targeted(message, session_key))
+            )
         except Exception as e:  # noqa: BLE001
-            logger.error("主动消息投递失败: %s", e)
-            if self._send:
-                try:
-                    self._send(message)
-                    self._record_outbound(message, session_key)
-                    return True
-                except Exception:  # noqa: BLE001
-                    logger.exception("主动消息兜底发送失败")
+            logger.error("主动消息投递失败（不记账、不扣配额）: %s", e)
             return False
+        if delivered:
+            self._record_outbound(message, session_key)
+        return delivered
 
     @staticmethod
     def _is_wechat_session_key(session_key: str) -> bool:

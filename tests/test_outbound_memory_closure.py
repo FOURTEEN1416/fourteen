@@ -165,6 +165,87 @@ def test_scheduler_missing_memory_does_not_break_delivery():
     assert s._record_outbound("一句", SESSION) is None
 
 
+# ── 🔴 2026-09-22 二次根治：投递异常不得被纯日志通道掩盖成「已送达」 ──
+# 旧实现：`_deliver` 的 except 分支回落 `self._send(message)`（生产 = logger.info
+# 包装，见 _LOG_ONLY_CHANNELS 的明确告诫），随后 `_record_outbound` + `return True`
+# —— 从未发出的消息被记成送达：扣配额、写冷却、置位场景标记、写进对话历史
+# （下轮 prompt 出现她"说过"但从没说过的话 = 自问自答）。
+
+
+def test_deliver_exception_does_not_record_or_report_success(monkeypatch):
+    """`_run_blocking` 抛异常（超时/跨循环死锁等基础设施故障）→ 必须 False + 不回写。"""
+    s = _scheduler()
+    rec = _Recorder()
+    s.set_memory(rec)
+    sent_via_log_only: list[str] = []
+    s._send = sent_via_log_only.append       # 生产形态：仅留痕的假通道
+
+    def _boom(coro_factory):
+        raise RuntimeError("投递循环与当前运行循环相同，阻塞等待必死锁")
+
+    monkeypatch.setattr(s, "_run_blocking", _boom)
+
+    assert s._deliver("早安呀", session_key=SESSION) is False, (
+        "异常分支把「仅写日志」当成了真实送达 —— 未发出的消息会被记账"
+    )
+    assert rec.calls == [], "未送达却回写了对话历史"
+    assert sent_via_log_only == [], "异常分支仍走了仅留痕通道（等于谎报）"
+
+
+def test_deliver_exception_without_send_func_also_fails(monkeypatch):
+    """无 `_send` 兜底时行为一致（都判失败），避免路径分叉。"""
+    s = _scheduler()
+    s._send = None
+    monkeypatch.setattr(
+        s, "_run_blocking", lambda _f: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    assert s._deliver("一句", session_key=SESSION) is False
+
+
+def test_deliver_success_still_records(monkeypatch):
+    """反向钉子：真送达时回写必须保留（防止修复顺手砍掉正常记账）。"""
+    s = _scheduler()
+    rec = _Recorder()
+    s.set_memory(rec)
+    monkeypatch.setattr(s, "_run_blocking", lambda _f: True)
+    assert s._deliver("早安呀", session_key=SESSION) is True
+    assert rec.calls == [("早安呀", SESSION)]
+
+
+# ── websocket 通道工厂必须接受 session_key（定向契约）──────
+
+
+def test_websocket_channel_factory_accepts_session_key():
+    """主入口注册的 websocket 通道必须支持**定向**签名。
+
+    旧 main.py 注册 `lambda: ws_server.broadcast_proactive`（只收 1 参）→
+    `_send_targeted` 传 session_key 时 TypeError → 按 P1-21 拒绝降级广播 →
+    web 提醒/主动消息恒判失败。本用例按 run_api/main 同一契约构造工厂并断言。
+    """
+    import inspect as _inspect
+
+    from api.websocket_server import WebSocketServer
+
+    assert hasattr(WebSocketServer, "send_proactive_to_session"), (
+        "WebSocketServer 缺少定向投递方法，web 定向不可能成功"
+    )
+    sig = _inspect.signature(WebSocketServer.send_proactive_to_session)
+    assert list(sig.parameters) == ["self", "session_key", "content"]
+
+
+def test_main_entry_registers_targeted_websocket_factory():
+    """静态门禁：main.py 不得再注册只收 1 参的广播 lambda。"""
+    import pathlib
+
+    src = pathlib.Path("main.py").read_text(encoding="utf-8")
+    assert 'register_channel("websocket", lambda: ws_server.broadcast_proactive)' not in src, (
+        "main.py 仍注册广播签名的 websocket 通道 —— web 定向投递会恒抛 TypeError"
+    )
+    assert "send_proactive_to_session" in src, (
+        "main.py 的 websocket 工厂未走定向投递（send_proactive_to_session）"
+    )
+
+
 def _ok(msg: str):
     async def _coro():
         return True
