@@ -29,6 +29,14 @@
 - **验证**：四分块 **467+1跳过 / 430 / 563 / 400**，合计 **1861 收集 / 1860 通过 / 1 跳过 / 0 失败**（收窗复测，含本窗新增 3 用例；41 卡在位）+ ruff 全仓 0 错 + ci_gates 4/4；**突变验红 3/3**（写侧退回旧标记 → round-trip 红 / 读侧对两标记都换算 → 红 / 路由退回 evaluate → 纯查询例红），还原后复跑 round3 全绿。
 - **遗留**：①生产 `affinity_records` 无 reason 的裸 points 行无法区分刻度（宁保持 shisi 不换算）；`df59752`~本批之间本机写入的 `user_scheduler_persist` shisi 行会被按 points 误换算一次（本机测试污染，生产无此类行——批次未部署过）；②hub 日记键 `split("|")` 两处手写未收口（utils/session_key 无 hub 键 helper，非会话键语义）；③round3 用例中 6 例为 `inspect.getsource` 文本断言（防删行不防行为改坏），行为用例已补 3 例。本批未部署（归用户裁决）。
 
+## 2026-09-22 v1.38 遗留收口（②hub 键解析 + ③文本断言转行为）+ 生产刻度数据实证勘误
+
+- **触发**：用户质询「遗留项为什么不修复」→ 按「遗留禁止登记即不动」执行：可修的当场修，裁不了的给实证+推荐。
+- **② 收口**：`utils/session_key` 新增 `character_suffix_of`（`N:peer|char` → 角色 id；日期尾段与通道片段判空），`scheduler` 两处手写 `split("|")[-1]`+`startswith("im.wechat")` 经验式守卫改为调用该 owner（守卫真实语义=排除日记键 `user_key|date`，现用日期正则精确表达）。**实况登记**：当前代码无该形态构造点（角色自选走绑定表/peer 偏好表；生产 ASE 索引实测无 `|` 键）——回落分支按「兼容历史落盘/外部形态」保留并文档化，未夸大其现行作用。
+- **③ 收口**：`test_round3_six_domain_gaps.py` 五处文本断言全部转**行为断言**——决策人设回落（真跑 `_llm_proactive_one_user`，钉 `load_persona_hint` 收到 resolver 卡 id + 投递/记账本事件）、hub 工厂逐引擎注入（真跑 `_InitPhasesMixin._init_ase_and_scheduler`，钉引擎实例持 `_knowledge_share_func`/`_knowledge_character_id`）、resolver 命中真实卡（钉 `== "micai"`）、每日维护衰减（钉 24h 基准两侧衰减各被调一次 + 基准推进）、祝福口吻（钉 hub 后缀角色优先 default + system_prompt 收到人设文本）。
+- **① 生产实证与勘误**（服务器 `data/sqlite.db` 只读探针）：`affinity_records` 按 reason 分组——生产 `user_scheduler_persist` 行 **0 条**（`df59752` 未部署，前窗本机行未扩散）；无 reason 行 **仅 3 条、new_value=50.0**（均在 0–100 内）。**勘误**：上一条遗留句「生产无此类行——批次未部署过」不精确——生产**一直存在**无 reason 裸行（旧 `mapper._record` 所写），只是取值均在 shisi 区间、保持不换算正确。本机另有 21 条 `user_scheduler_persist` 测试污染行（值 0.0，两刻度等价，零影响）。**推荐（待点单）**：`setup_shisi` 增幂等启动迁移——`UPDATE affinity_records SET reason='user_scheduler_persist_shisi' WHERE reason='user_scheduler_persist'`（本批部署前执行一次，免上线后误换算）；可选一次性清理本机 21 条测试键行。
+- **验证**：`test_round3`（12 例）+ `test_session_key_owner`（14 例）单跑全绿；ruff 全仓 0 错；**四分块全量复跑 470 + 430 + 564 + 400 = 1864 收集 / 1863 通过 / 1 跳过 / 0 失败**（41 卡在位、工作树仅本批文件；较上一条 +3 = 文本断言拆行为断言净增，口径注记十九→刷新至二十）。round3 中 `inspect.getsource` 文本断言清零。
+
 ## 2026-09-22 补记 — 农历生日祝福落地（六域批遗留项③收口，A 档闭环）
 
 - **触发**：用户追问六域批遗留项「Web 端是什么意思」+ 裁决「引入农历库」。

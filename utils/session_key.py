@@ -138,3 +138,28 @@ def split_owner(session_key: str) -> tuple[str, str]:
     if _OWNER_RE.match(head):
         return head, rest
     return "", raw
+
+
+_DATE_TAIL_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def character_suffix_of(key: str) -> str:
+    """从带 `|` 后缀的键中取角色 id：`N:peer|char` → `char`；无角色后缀 → 空串。
+
+    2026-09-22 收口：scheduler 两处（主动人设回落、祝福角色回落）手写
+    ``split("|")[-1]`` + ``startswith("im.wechat")`` 守卫做同一件事。守卫的
+    真实语义是**排除 `user_key|date` 形态的日记键**（如 hub 日记键
+    `4:peer@im.wechat|2026-09-22` 的尾段是日期而非角色）——收进本函数后
+    用「日期尾段」精确判定，不再依赖"以 im.wechat 开头"这一经验式。
+
+    注意：当前代码中没有本形态的构造点（角色自选走绑定表 / peer 偏好表，
+    ASE 索引实测无 `|` 键）。保留解析是为了兼容历史落盘键与外部投递形态，
+    一旦键家族再增 `|` 方言，只需改这里。
+    """
+    raw = str(key or "").strip()
+    if "|" not in raw:
+        return ""
+    tail = raw.rsplit("|", 1)[-1].strip()
+    if not tail or _DATE_TAIL_RE.match(tail) or tail.startswith(WECHAT_CHANNEL):
+        return ""
+    return tail

@@ -13,7 +13,6 @@
 
 from __future__ import annotations
 
-import inspect
 import sqlite3
 import threading
 from types import SimpleNamespace
@@ -115,34 +114,127 @@ def test_get_user_character_prefers_live_instance():
     assert mgr.get_user_character("1:a") == "live_card"
 
 
-def test_llm_proactive_persona_falls_back_to_character_resolver():
+def _bare_scheduler():
     from proactive.scheduler import ProactiveScheduler
 
-    src = inspect.getsource(ProactiveScheduler._llm_proactive_one_user)
-    assert "character_resolver.resolve_character_id" in src
-    assert "BUILTIN_CHARACTER_ID" in src
-    # 禁止再读不存在的属性（注释里的历史说明允许出现字面串）
-    assert 'getattr(eng, "_character_id"' not in src
-    assert "getattr(eng, \"_character_id\"" not in src
+    s = ProactiveScheduler()
+    s._llm_proactive_next_ok.clear()
+    s._deliver_fail_counts.clear()
+    s._important_dates_sent.clear()
+    s._disabled_event_day.clear()
+    return s
 
 
-def test_init_mixin_injects_knowledge_per_engine():
-    from orchestrator import _init_mixin as mod
+def test_llm_proactive_persona_falls_back_to_character_resolver(monkeypatch):
+    """引擎无 `_knowledge_character_id` 时，决策层必须真实走 resolver→load_persona_hint。
 
-    src = inspect.getsource(mod)
-    assert "_inject_ase_knowledge" in src
-    assert "_knowledge_share_func = _share" in src or "eng._knowledge_share_func" in src
-    hub_branch = src.split("if isinstance(ase_inst, ASEHub):", 1)[-1]
-    if "elif ase_inst" in hub_branch:
-        hub_branch = hub_branch.split("elif ase_inst", 1)[0]
-    assert "ase_inst._knowledge_share_func" not in hub_branch
+    行为断言（不再读源码文本）：跑一次 `_llm_proactive_one_user`，
+    钉 load_persona_hint 收到的是 resolver 返回的卡 id，且消息按决策送达。
+    """
+    import types
+
+    import proactive.llm_proactive as lp_mod
+    import proactive.scheduler as sched_mod
+    import shisi.agent_plane.runtime as apr
+    import utils.character_resolver as resolver_mod
+
+    s = _bare_scheduler()
+    monkeypatch.setattr(lp_mod, "read_web_proactive_config", lambda: {"enabled": True})
+    monkeypatch.setattr(s, "_is_quiet_hours", lambda: False)
+    delivered: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        s, "_deliver",
+        lambda msg, session_key=None: delivered.append((msg, session_key)) or True,
+    )
+    monkeypatch.setattr(s, "_resolve_proactive_llm", lambda eng=None: object())
+
+    hints: list[str] = []
+    monkeypatch.setattr(
+        lp_mod, "load_persona_hint",
+        lambda cid="": (hints.append(cid), "persona文本")[1],
+    )
+    monkeypatch.setattr(
+        lp_mod, "decide_proactive",
+        lambda llm, ctx: {"should_contact": True, "message": "在忙什么呢", "reason": "test", "wait_minutes": None},
+    )
+    monkeypatch.setattr(sched_mod, "sanitize_message", lambda t: t)
+    monkeypatch.setattr(resolver_mod, "resolve_character_id", lambda key, user_manager=None: "bound_card")
+    monkeypatch.setattr(apr, "project_profile_for", lambda uk: {})
+    monkeypatch.setattr(apr, "get_profile_prompt_block", lambda uk: "")
+    events: list[dict] = []
+    monkeypatch.setattr(apr, "append_proactive_event", lambda **kw: events.append(kw))
+
+    eng = types.SimpleNamespace(
+        _hours_since_last_chat=lambda: 3.0,
+        tick=lambda h, dry_run=False: False,
+    )
+    hub = types.SimpleNamespace(get=lambda uk: eng)
+    s._llm_proactive_one_user(hub, "4:wxid_x@im.wechat")
+
+    assert hints == ["bound_card"], (
+        f"persona 必须以 resolver 回落解析的卡为源，实得 {hints}"
+    )
+    assert delivered and delivered[0][0] == "在忙什么呢"
+    assert delivered[0][1] == "4:wxid_x@im.wechat"
+    assert any(ev.get("sent") for ev in events), "送达必须记账本事件"
 
 
-def test_engine_factory_sets_knowledge_character_id():
-    from orchestrator import _init_mixin as mod
+def test_init_mixin_injects_knowledge_per_engine(tmp_path, monkeypatch):
+    """工厂真实创建引擎后，知识三源必须挂在**引擎实例**上（hub 级 setattr 读不到）。"""
+    from types import SimpleNamespace
 
-    src = inspect.getsource(mod)
-    assert '_knowledge_character_id = str(resolved or "dynamic")' in src
+    from orchestrator._init_mixin import _InitPhasesMixin as Mixin
+    from proactive import ase_hub
+    hub_dir = tmp_path / "ase_states"
+    monkeypatch.setattr(ase_hub, "_STATE_DIR", hub_dir)
+    monkeypatch.setattr(ase_hub, "_INDEX_PATH", hub_dir / "index.json")
+
+    self_ = SimpleNamespace(components={"llm": None})
+    cfg = SimpleNamespace(proactive=SimpleNamespace(
+        max_daily_messages=8,
+        min_interval_minutes=30,
+        cooldown_after_reply_minutes=5,
+        urgency_threshold=5.0,
+    ))
+    Mixin._init_ase_and_scheduler(self_, cfg, {})
+
+    hub = self_.components["ase"]
+    from proactive.ase_hub import ASEHub
+
+    assert isinstance(hub, ASEHub)
+    eng = hub.get("4:wxid_x@im.wechat")
+    # 注入成功的判据：引擎自身持有可调用 share + 非空角色 id
+    assert callable(getattr(eng, "_knowledge_share_func", None)), "知识分享函数必须挂在引擎实例上"
+    assert str(getattr(eng, "_knowledge_character_id", "")), (
+        "工厂必须逐引擎写入角色 id（未绑定用户解析为内置 default 也算注入成功）；"
+        "hub 级 setattr 假接线会让引擎属性根本不存在"
+    )
+
+
+def test_engine_factory_sets_knowledge_character_id(tmp_path, monkeypatch):
+    """resolver 解析出真实卡时，引擎角色 id 必须等于该卡（不是 'dynamic' 兜底）。"""
+    from types import SimpleNamespace
+
+    import utils.character_resolver as resolver_mod
+    from orchestrator._init_mixin import _InitPhasesMixin as Mixin
+    from proactive import ase_hub
+
+    hub_dir = tmp_path / "ase_states"
+    monkeypatch.setattr(ase_hub, "_STATE_DIR", hub_dir)
+    monkeypatch.setattr(ase_hub, "_INDEX_PATH", hub_dir / "index.json")
+    monkeypatch.setattr(resolver_mod, "resolve_character_id", lambda key, user_manager=None: "micai")
+
+    self_ = SimpleNamespace(components={"llm": None})
+    cfg = SimpleNamespace(proactive=SimpleNamespace(
+        max_daily_messages=8,
+        min_interval_minutes=30,
+        cooldown_after_reply_minutes=5,
+        urgency_threshold=5.0,
+    ))
+    Mixin._init_ase_and_scheduler(self_, cfg, {})
+
+    eng = self_.components["ase"].get("9:wxid_y@im.wechat")
+    assert eng._knowledge_character_id == "micai"
 
 
 def test_apply_request_emotion_decay_exists_and_iterates():
@@ -161,12 +253,40 @@ def test_apply_request_emotion_decay_exists_and_iterates():
     assert OptimizedOrchestrator.apply_request_emotion_decay(inst, 0) == 0
 
 
-def test_daily_maintenance_calls_request_emotion_decay():
-    from proactive.scheduler import ProactiveScheduler
+def test_daily_maintenance_applies_request_emotion_decay(monkeypatch):
+    """每日维护必须**真实调用**请求级衰减与 UserManager 全量衰减，并推进基准。
 
-    src = inspect.getsource(ProactiveScheduler._run_daily_maintenance)
-    assert "apply_request_emotion_decay" in src
-    assert "apply_time_decay_all" in src
+    行为断言：钉 24h 前的衰减基准跑一次维护，断言两侧衰减各被调一次、
+    收到的 hours≈24、基准被推进（旧文本断言只防删行，不防接线被改坏）。
+    """
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    import api.deps as deps_mod
+    import proactive.scheduler as sched_mod
+
+    calls: dict[str, float] = {}
+    user_mgr = SimpleNamespace(
+        apply_time_decay_all=lambda h: (calls.__setitem__("mgr", h), 3)[1]
+    )
+    orch = SimpleNamespace(
+        apply_request_emotion_decay=lambda h: (calls.__setitem__("orch", h), 2)[1]
+    )
+    monkeypatch.setattr(deps_mod, "deps", SimpleNamespace(gf=user_mgr, orch=orch, shisi_reg=None))
+    monkeypatch.setattr(sched_mod, "run_achievement_maintenance", lambda: 0)
+
+    s = _bare_scheduler()
+    monkeypatch.setattr(s, "_check_important_dates", lambda: None)
+    s._last_emotion_decay = datetime.now(tz=timezone.utc) - timedelta(hours=24)
+    base_before = s._last_emotion_decay
+
+    s._run_daily_maintenance()
+
+    assert "mgr" in calls and "orch" in calls, (
+        f"两侧衰减必须都被调用，实得 {list(calls)}"
+    )
+    assert 23.5 <= calls["orch"] <= 24.5, f"衰减时长应以独立基准计算，实得 {calls['orch']}"
+    assert s._last_emotion_decay > base_before, "成功后基准必须推进"
 
 
 def test_emotion_stage_route_evaluate_is_pure_query(tmp_path, monkeypatch):
@@ -203,8 +323,48 @@ def test_emotion_stage_route_evaluate_is_pure_query(tmp_path, monkeypatch):
     assert rows == [], f"evaluate 端点不得落阶段表，实得 {rows}"
     assert engine.get_progress("test_char")["stage_index"] == 0
 
-    from proactive.scheduler import ProactiveScheduler
 
-    src = inspect.getsource(ProactiveScheduler._send_date_wish)
-    assert '"default"' in src
-    assert "load_persona_hint" in src
+def test_send_date_wish_uses_bound_persona(monkeypatch):
+    """祝福必须以会话绑定角色的口吻生成（default/缺失回落链真实生效）。
+
+    行为断言：deps.gf 返回 "default" 而 hub 键带 `|char` 自选后缀时，
+    load_persona_hint 必须收到后缀角色；LLM system_prompt 收到人设文本。
+    """
+    from types import SimpleNamespace
+
+    import api.deps as deps_mod
+    import proactive.llm_proactive as lp_mod
+    import proactive.scheduler as sched_mod
+
+    s = _bare_scheduler()
+    monkeypatch.setattr(deps_mod, "deps", SimpleNamespace(
+        gf=SimpleNamespace(get_user_character=lambda uk: "default")
+    ))
+    hints: list[str] = []
+    monkeypatch.setattr(
+        lp_mod, "load_persona_hint",
+        lambda cid="": (hints.append(str(cid)), "昭阳人设")[1],
+    )
+    seen: dict[str, str] = {}
+
+    class _LLM:
+        def chat_sync(self, query="", system_prompt="", **kw):
+            seen["system"] = system_prompt
+            return "生日快乐呀，今天属于你。"
+
+    monkeypatch.setattr(s, "_resolve_proactive_llm", lambda: _LLM())
+    monkeypatch.setattr(sched_mod, "sanitize_message", lambda t: t)
+    delivered: list[str] = []
+    monkeypatch.setattr(
+        s, "_deliver",
+        lambda msg, session_key=None: delivered.append(msg) or True,
+    )
+
+    s._send_date_wish(
+        "4:wxid_x@im.wechat|昭阳", "2026-09-22", label="birthday", kind="birthday", names="默默",
+    )
+
+    assert hints == ["昭阳"], f"hub 键自选角色后缀必须优先于 default，实得 {hints}"
+    assert seen.get("system") == "昭阳人设", "人设必须进 LLM system_prompt"
+    assert delivered == ["生日快乐呀，今天属于你。"]
+    assert any("birthday" in k for k in s._important_dates_sent), "送达后当日幂等必须记录"

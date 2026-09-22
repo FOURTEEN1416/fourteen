@@ -918,11 +918,7 @@ class ProactiveScheduler:
                 char_id = character_resolver.resolve_character_id(str(user_key)) or ""
             if not char_id or char_id == character_resolver.BUILTIN_CHARACTER_ID:
                 # hub 键 N:peer|char 形态（好友自选）优先于 default 兜底
-                sk = str(user_key)
-                if "|" in sk:
-                    tail = sk.split("|")[-1].strip()
-                    if tail and not tail.startswith("im.wechat"):
-                        char_id = tail
+                char_id = session_key_mod.character_suffix_of(str(user_key)) or char_id
             if not char_id:
                 char_id = str(profile.get("character_id") or "")
             persona = load_persona_hint(char_id) if char_id else ""
@@ -1384,11 +1380,7 @@ class ProactiveScheduler:
             # 内置 default 也要读 persona.yaml（load_persona_hint 已支持），
             # 但 hub 键 N:peer|char 形态优先（好友自选角色）
             if not char_id or char_id == "default":
-                sk = str(user_key)
-                if "|" in sk:
-                    tail = sk.split("|")[-1].strip()
-                    if tail and not tail.startswith("im.wechat"):
-                        char_id = tail
+                char_id = session_key_mod.character_suffix_of(str(user_key)) or char_id
             if char_id:
                 try:
                     from proactive.llm_proactive import load_persona_hint

@@ -78,6 +78,29 @@ def test_bare_peer_from_session_keeps_suffix():
     )
 
 
+# ── ①b 角色后缀解析（2026-09-22 收口 hub 键两处手写 split("|")） ──
+
+def test_character_suffix_of_extracts_role_and_rejects_date():
+    assert sk.character_suffix_of("2:peer@im.wechat|米彩") == "米彩"
+    assert sk.character_suffix_of("4:peer|char1") == "char1"
+    # 日记键 user_key|date：尾段是日期，不是角色
+    assert sk.character_suffix_of(f"4:peer@im.wechat|{sk.WECHAT_CHANNEL}") == ""
+    assert sk.character_suffix_of("4:peer@im.wechat|2026-09-22") == ""
+    assert sk.character_suffix_of("4:peer@im.wechat") == ""
+    assert sk.character_suffix_of("") == ""
+
+
+def test_scheduler_no_handwritten_pipe_split():
+    """两处角色回落必须走 session_key 唯一 owner，不得回退手写 split("|")。"""
+    from pathlib import Path
+
+    import proactive.scheduler
+
+    src = Path(proactive.scheduler.__file__).read_text(encoding="utf-8")
+    assert 'split("|")' not in src, "hub 角色后缀解析必须走 utils.session_key.character_suffix_of"
+    assert src.count("character_suffix_of") >= 2
+
+
 # ── ② scheduler 定向路由 ───────────────────────────────────
 
 class _SchedHarness:
