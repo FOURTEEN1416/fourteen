@@ -19,6 +19,20 @@ repos:
 
   - repo: local
     hooks:
+      # 并发 index 门禁（2026-09-22 W1 事故驱动）分两层：
+      # ① 真拦截在**原生** .git/hooks/pre-commit 链（scripts/install_native_gate.py 注入，
+      #    先于本框架执行——框架 autostash 会把工作树拉平到 index，分叉在框架内不可见，
+      #    故门禁脚本不可作为本框架钩子接线，那是结构性失明）。
+      # ② 本钩子只做**完整性自检**：原生链里门禁标记还在不在——他窗重跑
+      #    `pre-commit install` 覆盖 .git/hooks/pre-commit 时，提交即被拒并给出重装指引，
+      #    防止防护静默失踪（谎言家族：装过≠还在）。
+      - id: native-gate-installed
+        name: native gate hook intact (staged-vs-worktree guard chain)
+        entry: python scripts/gate_native_hook_installed.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
       # CI 的 ff-* / adr-integrity 门禁的单一真源：
       # 本地直接调用 CI 用的同一份脚本，口径逐字一致。
       # 脚本仅依赖标准库（任意 Python 3.10+ 均可），故 language: system 安全。
