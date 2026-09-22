@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-09-22 W1 窗口 — 并发 index 污染机制化根治（原生钩子链门禁，`718a66a`）
+
+- **触发**：W1 迁移批首次提交遭他窗并发 `git add` 污染共享 index，`a0f0af2` 落库版 UPDATE 参数被换向（P0，事后人工纠反 `48e1868`）。默默点单「想办法解决」——把事后核对升级为提交时机制必拦。
+- **关键发现（为何不能在 pre-commit 框架内接线）**：installed pre-commit 4.6.0 源码实证 `commands/run.py` autostash 无条件生效（非 `--all-files/--files` 即 stash），钩子运行期工作树被 `git checkout -- .` 拉平到 index——**分叉在框架内结构性不可见**；且首版误写的 `skip_build_git_stash` 键在 4.6.0 不存在（grep 零命中），未知键直接炸配置。→ 真拦截必须前置到**框架之前**。
+- **两层设计**：① `scripts/install_native_gate.py` 向 `.git/hooks/pre-commit`（`git rev-parse --git-path hooks` 解析 `core.hooksPath`）注入标记块，先于框架 `exec` 调 `scripts/gate_staged_vs_worktree.py`——比对 `git diff --cached` 与 `git diff` 文件集交集，分叉即拒并点名文件＋处置指引；故意的部分 hunk 提交用 `AI_GF_ALLOW_DIRTY_STAGE=1` 显式放行；安装器幂等（标记块剥离重插不堆叠）。② 框架钩子 `native-gate-installed`（`scripts/gate_native_hook_installed.py`）自检原生标记仍在——他窗重跑 `pre-commit install` 覆盖钩子时提交即被拒并给出一条重装命令，防防护静默失踪（谎言家族「装过≠还在」）。
+- **实证**：`tests/test_gate_staged_vs_worktree.py` 9 例全绿（分叉拒/复 add 放行/未暂存脏不触发/放行阀 WARN/安装器幂等/防失踪检测/tmp 真实 `git commit` e2e 拦截与放行）；**真实仓负向实证**：staged 探针后分叉工作树 → `bash .git/hooks/pre-commit` rc=1 输出「[gate] 拒绝提交」点名 `gate_probe_tmp.txt`（顺带点名了当场真实存在的两处 MM 分叉——`git add` 之后 index 被并发改写的事故形态当场复现）；**正向实证**：本批提交 `718a66a` 即干净暂存区经门禁+框架三钩子放行落库。ruff 改动文件 0 错 + ci_gates 4/4。
+- **并发处置（如实记）**：提交前本窗门禁拦下 `.pre-commit-config.yaml`（index 残留首版失明钩子＋坏键）与 `docs/board/BOARD.md`（W4 窗 staged 表格行）两处 staged-vs-worktree 分叉——config 复 add 本窗修正版；BOARD 以内容保全方式出暂存（staged diff 先落 patch 备份，未代提交、未丢字节），W4 窗随后自行提交（`67e9c97`），其成果未由本窗代持。
+- **边界与遗留**：① 防护作用于**主检出**（钩子装在 `.git`，worktree 共享同一 hooks 目录，实测于 tmp 独立仓另证）；② 拦截时机是「index 有分叉即拒」，不区分分叉来源（自己续改也需复 add——符合预期，复 add 即宣告确认最新版）；③ `git commit --only/--amend` 等旁路不经此门禁，多窗纪律仍要求提交后 `git show HEAD` 举证。
+
 ## 2026-09-22 W4 部署窗口 — R3-W4：六域根治批 push + 服务器上线（A 档三端闭环）
 
 - **触发**：任务包 R3-W4（执行手册 `docs/HANDOFF_2026-09-22_六域二次根治五块收官.md` §2）；默默对「push」与「服务器 pull」**分别明确点头**后开工（开窗 HEAD=`1766b2e`，领先 origin 12 跳）。
