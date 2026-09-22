@@ -2996,3 +2996,12 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - 2026-09-22 W2 laya 真源审计（wt/laya-audit，零代码变更）：真项目/包干净/Apache-2.0，参数量属实（safetensors 头实测 421.3M/321.9M F16），CPU 延迟 193–464ms 未证实（仓内 sweep 实测 1392.5ms 且自相矛盾），zero-shot 官方自认低于多数类；三接线点（decide_proactive / tool_gate L0 / ASE 紧迫度）全部建议不替代，判定=有条件引入；产物 `docs/research/2026-09-22_laya真源审计与接线评估.md`；待主控核验：服务器 RAM/依赖、试跑授权（文档 §2.5）。
 
 - 2026-09-22 W2 勘误（主控举证修正，对象=上一条；文档实况为准，`2a916c2` 提交信息同误一并勘正）：① CPU 延迟并非「未证实/自相矛盾」——仓库内原始 benchmark 佐证成立（`research/results/cpu_51_language_sweep.json`，device=cpu/torch2.8/threads4）：英文 192ms/问、多语 84ms/问；1392.5ms 为 typed-decisions **每 case（≈4 问）**口径≈348ms/问，与声称区间吻合不矛盾；② 判定并非「三接线点全部不替代」——文档结论=**有条件引入**：候选① `llm_proactive` 前置 gate 给四步落地路径（本项目语料微调→中文域温度校准→影子模式→接线，缺一退回），明确**不建议**的是候选② `tool_gate` L0.5（违 L0 零成本设计、每消息加 84–460ms）与候选③ 直替；③ zero-shot 低于多数类基线（0.36<0.46，官方自曝）与「当前不可直接替代任何判断模块」两条原表述无误。
+
+## 2026-09-22 R3 收仓 — W2/W3 合入 main + 热点挂线落地（主控收口）
+
+- **触发**：R3 四窗并行批收官——W1（他窗闭环、本窗复验 4/4）、W4（部署收口 `7578e57` 三端一致）已在前条目；本条收 W2/W3。
+- **W3 收编**（merge `6e3e9a2`，分支 `wt/hot-knowledge` 7 提交，与 main 侧零文件冲突）：`shisi/knowledge/hot_topics.py`（采集→全局池 `data/hot_topics.json`，epoch TTL/归一化去重/池上限/逐键钳制）+ `proactive/ase_engine.py` `_try_knowledge_share` 热点前置（唯一一处改动，经既有 share 通道供出、不造第二通道）+ `config/hot_topics.yaml` + `scripts/run_hot_topics_collect.py` + 12 测试 + conftest 池隔离（独立 try 块，按契约 §2 保留）+ 设计文档与 `W3_HANDOFF_WIRING.md` 契约。
+- **挂线落地**（`f2c51ba`，契约 §1 唯一硬缺口，scheduler 单写者=主控）：`start()` 注册 `hot_topics_collect`（IntervalTrigger 60min + misfire_grace 300 + coalesce，仿既有 job 风格）；`_run_hot_topics_collect` 只按拍触发 `collect_if_due()`（同步/自限速/永不抛出；开关与真实间隔真源在 `config/hot_topics.yaml`，scheduler 侧不造第二配置）。**新增 2 行为断言**钉注册存在与回调真触发（非文本断言）；**突变验红**：改 job id → 2 例转红，还原复绿 14/14、MUTATED 残留 0。
+- **W2 收编**（merge `35f5afe`）：`docs/research/2026-09-22_laya真源审计与接线评估.md`（222 行，判定=**有条件引入**：候选① llm_proactive 前置 gate 四步路径，不建议 tool_gate L0.5 与直替）+ LOG 两条（含 `842a1e4` 勘误——审计摘要两处与文档实况不符，以文档为准）。LOG 尾两侧各有追加（main +34 / 分支 +4）由 ort 自动合入，落位逐行核验无丢失。
+- **验证**：主检出四分块全量 **1891 收集 / 1890 通过 / 1 跳过 / 0 失败**（分块 **434 + 548+1 + 439 + 469** 精确吻合收集数；41 卡在位、工作树 clean）+ ruff 全仓 0 错 + `scripts/ci_gates.py` 4/4；热点 14 例单跑全绿。**未跑**真网采集冒烟复测（W3 窗内 `--force` 实测 ok=true added=15，同码不重造宿主池文件）。
+- **登记**：两 worktree（laya-audit / hot-knowledge）标记**可卸**、分支全部保留即回滚路径；BOARD 登记表与追加区已刷新（`374b2ba`）。**遗留**：laya 试跑授权与服务器 RAM/依赖核验归默默（审计文档 §2.5）；本批 push 后即三端中两端一致，**服务器 pull 上线归默默裁决**（A 档含 `hot_topics.py`/scheduler/ase_engine 代码变更）。
