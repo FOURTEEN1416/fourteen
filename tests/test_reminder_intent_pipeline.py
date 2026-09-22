@@ -33,8 +33,9 @@ LAST_NIGHT_MSG = "明早六点记得发消息给我，叫我起床，听到没�
 
 def _future_trigger(days: int = 1, fmt: str = "%Y-%m-%d %H:%M") -> str:
     """动态未来时刻：trigger_time 过去校验（2026-09-22 契约）下写死日期会随
-    时间推移整体翻车，统一用例内计算。"""
-    return (datetime.now() + timedelta(days=days)).strftime(fmt)
+    时间推移整体翻车，统一用例内计算。参照必须走 `now_local()`——落库串是
+    北京时间，UTC 宿主（CI）上裸 `datetime.now()` 会慢 8 小时。"""
+    return (now_local() + timedelta(days=days)).strftime(fmt)
 
 
 # ── L0 晋级线 ─────────────────────────────────────────────
@@ -544,7 +545,9 @@ class TestTriggerTimeValidation:
         assert "trigger_time_in_past" in str(ei.value)
 
     def test_near_past_within_tolerance_accepted(self):
-        near = datetime.now() - timedelta(minutes=2)
+        # 参照与实现同源走 now_local()：CI UTC 宿主上裸 datetime.now() 比北京
+        # 墙钟慢 8 小时，"容忍窗内"会被判成 8 小时前 → CI 实红（2026-09-22）。
+        near = now_local() - timedelta(minutes=2)
         normalized = normalize_trigger_time(near.strftime("%Y-%m-%d %H:%M:%S"))
         assert normalized  # 容忍窗内（"现在马上"）接受
 
