@@ -42,6 +42,12 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-22 · W1 窗 · ⚠️ 全窗行为变更：提交前门禁——staged 与工作树分叉即拒（`718a66a`）
+
+- **机制**：`.git/hooks/pre-commit` 原生链（框架之前）调 `scripts/gate_staged_vs_worktree.py`，凡「`git add` 之后 index 与工作树又出现分叉」（并发 add 污染 / 暂存后续改）即**拒提交并点名文件**（W1 迁移参数换向事故 `a0f0af2` 的机制化根治）。
+- **各窗处置**：看到 `[gate] 拒绝提交` → 确认工作树是对的 → 对点名文件**重新 `git add`** 再 commit；确属故意的部分 hunk 提交 → `AI_GF_ALLOW_DIRTY_STAGE=1 git commit ...` 显式放行（自负责）。
+- **注意**：他人重跑 `pre-commit install` 会覆盖原生钩子——框架钩子 `native-gate-installed` 会自检标记失踪并拒提交，修复命令一条：`python scripts/install_native_gate.py`。安装器幂等，可安全重复跑。
+
 ### 2026-09-22 · 主检出 · 🔴 W1 并发冲突实况登记（本窗接手时发现他窗已在 main 跑同一任务）
 
 - **现象**：本窗按默默「并行推进」接手 W1（刻度标记启动迁移），过程中 `HEAD` 自行从 `eba7ca8` 前移到 `a0f0af2 → 5cc70ee → 48e1868`，均非本窗提交；凭空出现非本窗改动的 `tests/test_reminder_intent_pipeline.py`（后成 `5cc70ee` CI 修复）；根目录堆出 `deploy-r3.bin`/`deploy-r3b.bin` 部署包（W4 地盘）；`origin/main..HEAD` 仅差 1 笔（他窗已近全量 push）
