@@ -42,6 +42,12 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-22 · 主检出 · 🔴 W1 并发冲突实况登记（本窗接手时发现他窗已在 main 跑同一任务）
+
+- **现象**：本窗按默默「并行推进」接手 W1（刻度标记启动迁移），过程中 `HEAD` 自行从 `eba7ca8` 前移到 `a0f0af2 → 5cc70ee → 48e1868`，均非本窗提交；凭空出现非本窗改动的 `tests/test_reminder_intent_pipeline.py`（后成 `5cc70ee` CI 修复）；根目录堆出 `deploy-r3.bin`/`deploy-r3b.bin` 部署包（W4 地盘）；`origin/main..HEAD` 仅差 1 笔（他窗已近全量 push）
+- **P0 险情与自愈**：他窗 `a0f0af2` 把迁移方向写反（`SET=points WHERE=shisi`——会把正确新行反 convert 回旧标记、上线即误换算损坏回放），**其自带测试 3/4 红**（独立 worktree 复现证实）。本窗正要修正时，他窗已以 `48e1868` 自行纠反（`SET=shisi WHERE=points`）。本窗复验：main 尖端 `tests/test_affinity_reason_migration.py` **4/4 绿**，registry 工作树=HEAD。
+- **裁决请求**：W1 已由他窗在 main 闭环，本窗**不再重复提交**（避免覆盖）。若 W2/W3/W4 也已有他窗在跑，请明确各文件唯一 owner，勿两窗同写主检出（AGENTS §9 Owner 唯一制 / 09-15 事故同型）
+
 ### 2026-09-22 · 主检出 · R3 四窗并行开工登记（W1 刻度迁移 / W2 laya 审计 / W3 热点知识链 / W4 部署）
 
 - **W1**（主检出直接做）：v1.38 遗留①收口——setup_shisi 幂等启动迁移 `UPDATE affinity_records SET reason=MIRROR_REASON_SHISI WHERE reason=MIRROR_REASON_POINTS`（值走 enhancer 常量导入，禁硬编码）+ 端到端回放测试 + 突变验红；owner 文件见登记表
