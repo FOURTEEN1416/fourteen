@@ -112,6 +112,43 @@ def test_replay_requires_turn_or_reply(ledger: EventLedger) -> None:
         ledger.replay(session_key="N:alice")
 
 
+def test_default_ledger_is_not_written_to_by_default(tmp_path: Path) -> None:
+    """测试期默认账本必须落沙箱，不得写宿主 `data/agent_plane.db`。
+
+    服务器验收实证（2026-09-22 五域体检）：分块跑 pytest 时
+    `default_ledger()` 仍指向生产库，`memory_write` 等事件直接混进
+    `data/agent_plane.db`（时间戳与 `/tmp/pytest-of-root` 日志同秒），
+    使五域生产实况读数不可信。
+    """
+    from shisi.agent_plane import event_ledger as el
+
+    host = tmp_path / "host" / "agent_plane.db"
+    el.set_default_ledger(EventLedger(host))
+    try:
+        ev = el.default_ledger().append(
+            session_key="N:probe", event_type=EVENT_PROMPT_SLOTS, payload={"probe": True}
+        )
+        assert host.exists()
+        rows = EventLedger(tmp_path / "fresh" / "x.db").query(session_key="N:probe")
+        assert rows == [] or ev.event_id not in {r.event_id for r in rows}
+    finally:
+        el.set_default_ledger(None)
+
+
+def test_conftest_sandbox_redirects_ledger() -> None:
+    """autouse 隔离夹具生效后，`set_default_ledger(None)` 重建也应落沙箱目录。"""
+    from shisi.agent_plane import event_ledger as el
+
+    el.set_default_ledger(None)
+    try:
+        led = el.default_ledger()
+        real_host = Path(el.__file__).resolve().parents[2] / "data" / "agent_plane.db"
+        assert Path(led.db_path).resolve() != real_host.resolve()
+        assert "runtime_state" in str(led.db_path)
+    finally:
+        el.set_default_ledger(None)
+
+
 def test_count_by_session(ledger: EventLedger) -> None:
     ledger.append(session_key="N:alice", event_type=EVENT_MEMORY_WRITE)
     ledger.append(session_key="N:alice", event_type=EVENT_MEMORY_WRITE)

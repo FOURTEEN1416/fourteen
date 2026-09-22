@@ -126,6 +126,10 @@ class EventLedger:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self.ensure_schema()
 
+    @property
+    def db_path(self) -> Path:
+        return self._db_path
+
     @staticmethod
     def default_path(root: Path | str | None = None) -> Path:
         base = Path(root) if root else Path(__file__).resolve().parents[2]

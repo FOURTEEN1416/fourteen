@@ -127,6 +127,26 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # 事件账本（2026-09-22 五域体检实证）：服务器验收期分块 pytest 直写生产
+    # data/agent_plane.db——memory_write 事件与 "/tmp/pytest-of-root" 日志
+    # 1 秒级对齐实锤，污染五域可观测真源。改 default_path 使任何重建都落沙箱。
+    try:
+        from shisi.agent_plane import event_ledger as _el
+
+        _orig_default_path = _el.EventLedger.default_path
+        patched.append((_el.EventLedger, "default_path", staticmethod(_orig_default_path)))
+        monkeypatch.setattr(
+            _el.EventLedger,
+            "default_path",
+            staticmethod(lambda root=None: sandbox / "agent_plane.db"),
+            raising=False,
+        )
+        if _el._default_ledger is not None:
+            patched.append((_el._default_ledger, "_db_path", _el._default_ledger._db_path))
+            _el._default_ledger._db_path = sandbox / "agent_plane.db"
+    except Exception:
+        pass
+
     yield sandbox
 
     for owner, attr, old in patched:
