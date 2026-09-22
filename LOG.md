@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-09-22 W4 部署窗口 — R3-W4：六域根治批 push + 服务器上线（A 档三端闭环）
+
+- **触发**：任务包 R3-W4（执行手册 `docs/HANDOFF_2026-09-22_六域二次根治五块收官.md` §2）；默默对「push」与「服务器 pull」**分别明确点头**后开工（开窗 HEAD=`1766b2e`，领先 origin 12 跳）。
+- **授权范围随并发扩展（如实记）**：开工预检后 HEAD 连移——他窗 docs 注记 `eba7ca8`、W1 迁移批 `a0f0af2`→纠反 `48e1868`、看板 `7578e57`、本窗 CI 修复 `5cc70ee`，最终 **17 提交 `6b5b86a→7578e57`** 一并上线；每一笔在放行前均经本窗核为可 ff、测试绿或纯文档。
+- **push**：`origin/main` `6b5b86a → eba7ca8 → 5cc70ee → 7578e57`（`git ls-remote` 钉端）。
+- **服务器通道**（bundle，禁 archive）：探测 HEAD=`e6e392a` 工作树干净、41 卡在位、为祖先 → `git bundle create … <旧HEAD>..HEAD` ×3 跳 scp → `git fetch /tmp/*.bin HEAD && git merge --ff-only FETCH_HEAD`；`deploy/remote_deploy.sh` 4/4（pip editable + npm ci + dist 重建 941ms + restart），nginx 仅 `-t`+reload **零配置改动（大赛入口冻结铁律遵守）**；追加提交后 `systemctl restart` ×2。
+- **三端最终读数**：本地=origin=服务器=`7578e57`；`systemctl is-active`=active；`/api/health` **200**（`unique-you-api`）+ 入口 `:80` 200；关键文件 `git hash-object` 三端一致 **6/6 SAME**（registry/enhancer/scheduler/character_resolver/conftest/migration 测试；不比 md5）。
+- **新链路真实运行（生产实证）**：① `proactive LLM decision` 部署后 **18:03:10 `should=True`「想你了」/ 18:03:12 `should=False wait=45`** 双决策（块C/D 接地链路线上活跃）；② 启动日志「主动消息 LLM 决策已注入调度器」（18:08:37）；③ 好感度审计回放 7 键恢复 + 点存兜底回填 2 键（17:58:02，v1.38 新码路径）；④ 启动刻度迁移按预期 **no-op**——生产 `user_scheduler_persist` 旧标记 **0 行**（只读探针 reason 分布实证），日志「无存量行，跳过」。
+- **拦截并根治两枚真缺陷**：① CI 首红（UTC 宿主）=`test_near_past_within_tolerance_accepted`/`_future_trigger` 裸 `datetime.now()` 与工具 `now_local()` 参照差 8h——本窗统一走 `now_local()`（`5cc70ee`，本地 54/54 + CI 复验绿）；② **W1 落库版迁移参数被并发 add 换向**（SET=旧/WHERE=新，会把好行改坏）——本窗服务器端手工复现证实（`u2` shisi 行被改成 points、迁移 0 命中），W1 窗随即自行修正（`48e1868`），本窗核对修正方向后方放行上线；生产因 0 存量行而未受害。
+- **全量验证**：服务器分块 **371+1跳过 / 522 / 585 / 385 = 1863 通过 / 0 失败**（分块清单生成于 `eba7ca8`，`a0f0af2` 新增迁移测试 4 例以单跑覆盖，RC=0）→ 合计 **1868 收集 / 1867 通过 / 1 跳过 / 0 失败**；GitHub CI run **35714334710 @ `7578e57` 全量绿**（backend pytest + frontend，watch 退出码 0）。
+- **边界与遗留**：① `config/characters` 41 卡 gitignore 不随 git——服务器侧原地未动；② 生产 affinity 历史数据不迁移（既定裁决）；③ 部署期并发窗（W2 laya 审计/W3 热点知识链/W1 治理件：staged `.pre-commit-config.yaml` + 未跟踪 gate 脚本）本窗未触碰、未代提交；④ 临时 bundle/日志已清理（本地与服务器 `/tmp/deploy-r3*.bin`）。
+- **徽章刷新**：AGENTS §0/§2/§4.3 测试口径→**二十一次刷新 1868/1867/1**，通过数口径徽章 **1847→1965**（1867 Py + 98 FE）。
+
 ## 2026-09-22 W1 窗口 — v1.38 遗留项①收口：好感度刻度标记启动迁移
 
 - **触发**：开窗任务单（遗留①：`df59752~1766b2e` 之间本机以旧标记 `user_scheduler_persist` 写过的 shisi 刻度行，回放会被误 ÷5 一次；推荐方案已在上一条 LOG 给出，照做）。

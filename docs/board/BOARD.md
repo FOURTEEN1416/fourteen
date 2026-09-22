@@ -31,10 +31,10 @@
 | W2 软著 | 无 | `D:\Desktop\ai-girlfriend\大创赛报名以及后期发展\软著申请-唯一的你十四`（非 git） | **包 C** | ✅ 完成 | 2026-09-14 23:13 | 模式 A；60 页代码 + 16 截图 + 5 门禁全真 |
 | W3 代码 | `wt/code` | `..\ai-girlfriend-code` | **包 V** | 待开工 | — | 多模态缺口；**须先过商讨协议五步制** |
 | W4 验证 | `wt/verify` | `..\ai-girlfriend-verify` | **包 T** | 待开工 | — | 只碰 `tests/**`；反对采样验证 |
-| **W1 刻度迁移** | 主检出 `main` | `D:\Desktop\ai-girlfriend`（本窗直接做） | 包 R3-W1 · v1.38 遗留① | 待开工 | 2026-09-22 登记 | owner：`shisi/api/registry.py` + enhancer 常量导入 + 新测试；禁碰 scheduler/session_key |
-| **W2 laya 审计** | `wt/laya-audit` | `..\ai-girlfriend-laya-audit` | 包 R3-W2 · 只读调研 | 待开工 | 2026-09-22 登记 | 只写 `docs/research/2026-09-22_laya真源审计与接线评估.md` + LOG 一行；不改代码不装依赖 |
-| **W3 热点知识链** | `wt/hot-knowledge` | `..\ai-girlfriend-hot-knowledge` | 包 R3-W3 · 采集→入库→供出 | 待开工 | 2026-09-22 登记 | owner：tools/builtin、shisi/knowledge、新热点模块、tests 新增；**禁改 proactive/scheduler.py 与 _init_mixin.py**（scheduler 单写者=主控），需接线点写本看板追加区 |
-| **W4 部署** | 无（主控执行） | 主检出 + swu-prod | 包 R3-W4 · push+服务器 | 待默默点头 | 2026-09-22 登记 | 12 提交 `1766b2e`；bundle 通道、nginx 零操作（大赛入口冻结）、服务器 pull 归默默裁决 |
+| **W1 刻度迁移** | 主检出 `main` | `D:\Desktop\ai-girlfriend`（本窗直接做） | 包 R3-W1 · v1.38 遗留① | ✅ **已由并发窗闭环**（`a0f0af2`→纠反 `48e1868`），本窗复验 4/4 绿 | 2026-09-22 登记 | owner：`shisi/api/registry.py` + enhancer 常量导入 + 新测试；禁碰 scheduler/session_key |
+| **W2 laya 审计** | `wt/laya-audit` | `..\ai-girlfriend-laya-audit` | 包 R3-W2 · 只读调研 | 🟢 进行中（本窗派后台智能体，锁 worktree） | 2026-09-22 登记 | 只写 `docs/research/2026-09-22_laya真源审计与接线评估.md` + LOG 一行；不改代码不装依赖 |
+| **W3 热点知识链** | `wt/hot-knowledge` | `..\ai-girlfriend-hot-knowledge` | 包 R3-W3 · 采集→入库→供出 | 🟢 进行中（本窗派后台智能体，锁 worktree；挂线契约落 `docs/board/W3_HANDOFF_WIRING.md`） | 2026-09-22 登记 | owner：tools/builtin、shisi/knowledge、新热点模块、tests 新增；**禁改 proactive/scheduler.py 与 _init_mixin.py**（scheduler 单写者=主控），需接线点写本看板追加区 |
+| **W4 部署** | 无（主控执行） | 主检出 + swu-prod | 包 R3-W4 · push+服务器 | ✅ **完成**（默默对 push 与服务器 pull 分别明确点头）——三端统一 `7578e57`；服务器 bundle 三跳 ff + remote_deploy 4/4 + health 200；服务器全量 **1868 收集 / 1867 通过 / 1 跳过 / 0 失败** + CI 35714334710 绿；详见 LOG「W4 部署窗口」条目 | 2026-09-22 登记 | nginx 零配置改动（入口冻结铁律遵守）；拦下 W1 迁移参数换向与 CI 墙钟用例两枚缺陷后放行（`5cc70ee`/`48e1868`）；临时 bundle 已清 |
 
 > ⚠️ **2026-09-19 路径收编**：W1/W2 工作区原位于 `D:\Desktop\` 根（仓库外），已收编至 `大创赛报名以及后期发展\` 下；仍为**仓库外非 git 工作区**，受 `.gitignore:130` 全目录排除，故宪法 §3「参赛材料不入库」约束不变。同期收编 `大赛附件包`、`专利-唯一的你十四`。**追加区内历史条目所载旧路径按「历史记录保留原文」准则未作改动**。完整映射见 `大创赛报名以及后期发展\PATH-MIGRATION-2026-09-19.md`。
 
