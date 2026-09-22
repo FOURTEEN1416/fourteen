@@ -49,6 +49,7 @@
 - **W3**（wt/hot-knowledge）：默默裁决方向=**采集→整理入知识库→经 `_knowledge_share_func` 供出主动消息**（不是现场调搜索）；设计先行一页；**proactive/scheduler.py 与 orchestrator/_init_mixin.py 归主控单写**，W3 需接线点写本追加区交收仓时落
 - **W4**（主控执行）：本地 HEAD `1766b2e` 领先 origin 12 跳；bundle 通道部署、**nginx 零操作（大赛期间网站入口冻结，禁 `${DOMAIN}` 模板重生成）**、服务器 pull 触发归默默
 - **收仓口径**：各窗只跑目标+受影响面测试 + ruff 0；四分块全量基线（当前 1864/1863/1）由主控收仓时统一复跑
+- **worktree 环境注记**：`wt/laya-audit`、`wt/hot-knowledge` 已手工 `git worktree add` 建好（基点 `7ed6439`），**未走 `scripts/new_window_worktree.ps1`** → `data/` 与 `frontend/node_modules` 的 Junction 共享可能未建。`config/characters/` 被 gitignore、**worktree 内 0 张卡**（`test_persona_injection` 按卡数参数化，收集数会塌缩，引用测试数必须声明卡数与 junction 现状）；W2 只写 docs 不受影响，W3 需跑卡相关用例或读写 `data/` 时先在窗内自建 junction / 从主检出取卡，否则只跑与卡无关的目标+受影响面
 
 ### 2026-09-21 · 主检出 · selftalk 四项修复移植 main + 分支归档（用户「想办法解决」）
 
