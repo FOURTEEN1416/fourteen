@@ -2992,3 +2992,7 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 **④ 分支归档**：`wt/selftalk-fix` → tag `archive/selftalk-fix`（`1d93ae3`，本地+origin）后删除本地与远端分支；恢复：`git branch wt/selftalk-fix archive/selftalk-fix`；完整收口记录 `git show archive/selftalk-fix:docs/board/BOARD.md`。BOARD 追加区已登记。
 
 **三端终态**：A 档三端一致 @ **`edd3c47`**。
+
+- 2026-09-22 W2 laya 真源审计（wt/laya-audit，零代码变更）：真项目/包干净/Apache-2.0，参数量属实（safetensors 头实测 421.3M/321.9M F16），CPU 延迟 193–464ms 未证实（仓内 sweep 实测 1392.5ms 且自相矛盾），zero-shot 官方自认低于多数类；三接线点（decide_proactive / tool_gate L0 / ASE 紧迫度）全部建议不替代，判定=有条件引入；产物 `docs/research/2026-09-22_laya真源审计与接线评估.md`；待主控核验：服务器 RAM/依赖、试跑授权（文档 §2.5）。
+
+- 2026-09-22 W2 勘误（主控举证修正，对象=上一条；文档实况为准，`2a916c2` 提交信息同误一并勘正）：① CPU 延迟并非「未证实/自相矛盾」——仓库内原始 benchmark 佐证成立（`research/results/cpu_51_language_sweep.json`，device=cpu/torch2.8/threads4）：英文 192ms/问、多语 84ms/问；1392.5ms 为 typed-decisions **每 case（≈4 问）**口径≈348ms/问，与声称区间吻合不矛盾；② 判定并非「三接线点全部不替代」——文档结论=**有条件引入**：候选① `llm_proactive` 前置 gate 给四步落地路径（本项目语料微调→中文域温度校准→影子模式→接线，缺一退回），明确**不建议**的是候选② `tool_gate` L0.5（违 L0 零成本设计、每消息加 84–460ms）与候选③ 直替；③ zero-shot 低于多数类基线（0.36<0.46，官方自曝）与「当前不可直接替代任何判断模块」两条原表述无误。
