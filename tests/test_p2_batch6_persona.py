@@ -222,24 +222,38 @@ def test_scheduler_daily_maintenance_targets_live_engines(monkeypatch):
     assert recorded == [3.0]
 
 
-def test_emotion_decay_baseline_semantics(monkeypatch):
-    """衰减专用基准三契约（2026-09-22 修复锁定）：
-    ① 进程内未衰减过 → 0 小时（首夜不衰减，离线冷却由引擎 restore 承担）；
+def test_emotion_decay_baseline_semantics(monkeypatch, tmp_path):
+    """衰减专用基准三契约（2026-09-22 二次根治后锁定）：
+    ① 🔴 **基准缺失时不得返回 0**（首版以 None 作哨兵 + 返回 0.0 + 赋值在
+       `if hours > 0` 内 = 永久自我锁死，衰减依然从未发生）；
     ② 基准为 24h 前 → 返回 ≈24（每日维护传真实时长，而非距 ASE tick 的 ≈5 分钟）；
-    ③ 维护执行后基准推进；apply 失败不推进（线性衰减下次补足，总量守恒）。"""
+    ③ 维护执行后基准推进**并落盘**；apply 失败不推进（线性衰减下次补足）。"""
     from datetime import datetime, timedelta, timezone
 
     from proactive import scheduler as sched_mod
     from proactive.scheduler import ProactiveScheduler
 
+    # 隔离宿主 data/：配置真源改落 tmp，避免读写仓库真实 scheduler_config.json
+    tmp_cfg = tmp_path / "scheduler_config.json"
+    monkeypatch.setattr(ProactiveScheduler, "_CONFIG_PATH", tmp_cfg)
+
     sched = ProactiveScheduler()
-    # ①
-    assert sched._hours_since_last_emotion_decay() == 0.0
-    # ②
+    # ① 基准缺失 → 回填「昨日维护时刻」（≈24h），**绝不为 0**
+    hours0 = sched._hours_since_last_emotion_decay()
+    assert hours0 > 20.0, (
+        f"基准缺失时返回 {hours0}（应为 ≈24h 的回填值）—— "
+        "返回 0 会使 `if hours > 0` 永假 + 赋值语句在内 = 永久锁死"
+    )
+    assert sched._last_emotion_decay is not None
+    # 回填值已落盘（跨进程/重启一致）
+    assert tmp_cfg.exists()
+    assert "last_emotion_decay" in tmp_cfg.read_text(encoding="utf-8")
+
+    # ② 基准为 24h 前 → ≈24
     sched._last_emotion_decay = datetime.now(tz=timezone.utc) - timedelta(hours=24)
     assert sched._hours_since_last_emotion_decay() == pytest.approx(24.0, abs=0.01)
 
-    # ③-a 成功路径：基准推进
+    # ③-a 成功路径：基准推进且落盘
     recorded: list[float] = []
     fake_mgr = SimpleNamespace(apply_time_decay_all=lambda h: (recorded.append(h), 2)[1])
     import api.deps as deps_mod
@@ -266,6 +280,83 @@ def test_emotion_decay_baseline_semantics(monkeypatch):
     sched._run_daily_maintenance()
     assert recorded == [24.0, 48.0]
     assert sched._last_emotion_decay < before
+
+
+def test_emotion_decay_baseline_survives_restart(monkeypatch, tmp_path):
+    """基准必须**落盘**并在重启（新实例）后复现 —— 否则每进程起步都是
+    「首次」，衰减窗口被无限摊销。"""
+    from datetime import datetime, timedelta, timezone
+
+    from proactive.scheduler import ProactiveScheduler
+
+    tmp_cfg = tmp_path / "scheduler_config.json"
+    monkeypatch.setattr(ProactiveScheduler, "_CONFIG_PATH", tmp_cfg)
+
+    first = ProactiveScheduler()
+    stamp = datetime.now(tz=timezone.utc) - timedelta(hours=5)
+    first._persist_last_emotion_decay(stamp)
+
+    second = ProactiveScheduler()  # 模拟重启
+    assert second._last_emotion_decay is not None
+    hours = second._hours_since_last_emotion_decay()
+    assert hours == pytest.approx(5.0, abs=0.05), (
+        f"重启后基准未复现（得 {hours}h）—— 落盘链路断裂"
+    )
+
+
+def test_emotion_decay_baseline_never_self_locks(monkeypatch, tmp_path):
+    """🔴 核心回归：基准缺失/存在时都必须给出**非零**时长，不得自我锁死。
+
+    首版缺陷形态：`None` 哨兵 → 恒 0.0 → `if hours > 0` 永假 → 赋值不可达
+    → 下一日仍 0.0。本用例断言：
+      · 基准缺失（新实例 + 空配置）→ 回填 ~24h（而非 0）；
+      · 每次维护后基准推进到「此刻」；
+      · 把基准人为拨回 24h 前后再读，仍得 ~24h（即基准真在驱动时长）。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from proactive import scheduler as sched_mod
+    from proactive.scheduler import ProactiveScheduler
+
+    tmp_cfg = tmp_path / "scheduler_config.json"
+    monkeypatch.setattr(ProactiveScheduler, "_CONFIG_PATH", tmp_cfg)
+
+    sched = ProactiveScheduler()
+    recorded: list[float] = []
+    import api.deps as deps_mod
+
+    monkeypatch.setattr(
+        deps_mod.deps,
+        "gf",
+        SimpleNamespace(apply_time_decay_all=lambda h: (recorded.append(h), 1)[1]),
+    )
+    monkeypatch.setattr(deps_mod.deps, "shisi_reg", None)
+    monkeypatch.setattr(sched, "_check_important_dates", lambda: None)
+    monkeypatch.setattr(sched_mod, "run_achievement_maintenance", lambda: 0, raising=False)
+
+    # ① 首次（基准缺失）→ 必须非零
+    first_hours = sched._hours_since_last_emotion_decay()
+    assert first_hours > 20.0, f"基准缺失时应回填 ~24h，实得 {first_hours}"
+
+    # ② 连续三日：每日把基准拨回 24h 前（模拟一天过去），维护应吃到 ~24h
+    seen: list[float] = []
+    for day in range(3):
+        sched._last_emotion_decay = datetime.now(tz=timezone.utc) - timedelta(hours=24)
+        hours = sched._hours_since_last_emotion_decay()
+        seen.append(hours)
+        sched._run_daily_maintenance()
+        assert sched._last_emotion_decay is not None, f"第 {day + 1} 日基准为 None（锁死）"
+        # 维护后基准应贴近此刻，且已落盘
+        drift = abs(
+            (datetime.now(tz=timezone.utc) - sched._last_emotion_decay).total_seconds()
+        )
+        assert drift < 5, f"第 {day + 1} 日维护后基准未推进到此刻（drift={drift}s）"
+
+    assert all(h > 20.0 for h in seen), f"存在 0 时长日 → 自我锁死复发: {seen}"
+    assert len(recorded) == 3
+    # 落盘复现：新实例读到的是最后推进的基准（≈0h），而非回填的 24h
+    reopened = ProactiveScheduler()
+    assert reopened._hours_since_last_emotion_decay() < 5.0, "重启后基准未延续落盘值"
 
 
 # ═══════════════════════════════════════════════════════════

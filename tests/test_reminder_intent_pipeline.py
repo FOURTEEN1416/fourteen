@@ -25,6 +25,7 @@ from tools.builtin.reminder_tool import (
     TriggerTimeError,
     normalize_trigger_time,
 )
+from utils.local_time import now_local
 
 # 昨晚事故原话——必须命中的头号回归用例
 LAST_NIGHT_MSG = "明早六点记得发消息给我，叫我起床，听到没有？"
@@ -546,6 +547,77 @@ class TestTriggerTimeValidation:
         near = datetime.now() - timedelta(minutes=2)
         normalized = normalize_trigger_time(near.strftime("%Y-%m-%d %H:%M:%S"))
         assert normalized  # 容忍窗内（"现在马上"）接受
+
+    # 🔴 2026-09-22 二次根治：参照时刻曾用裸 `datetime.now()`（宿主墙钟），
+    # 而落库串是北京时间 —— 宿主时区 ≠ +8 时「现在/几分钟内」会被误判拒收。
+    # ⚠️ 教训：仅靠「宿主与北京时差」构造用例**在本机 CST(+8) 无区分力**
+    # （datetime.now() 与 now_local() 返回同一读数）→ 必须**属性级钉住调用来源**。
+    def test_reference_clock_comes_from_now_local(self, monkeypatch):
+        """缺省参照必须**确实取用** `now_local`（而非裸 datetime.now()）。
+
+        以陷阱替身替换 `now_local`：若实现调用了它，返回值必定来自替身；
+        若实现退回 `datetime.now()`，替身永不被调用 → 断言失败。
+        """
+        import tools.builtin.reminder_tool as rt
+
+        calls: list[str] = []
+
+        def _spy_now_local():
+            calls.append("now_local")
+            return datetime(2026, 9, 22, 12, 0, 0)
+
+        monkeypatch.setattr(rt, "now_local", _spy_now_local)
+        normalize_trigger_time("2026-09-22 12:30:00")
+        assert calls == ["now_local"], (
+            "缺省参照未走 now_local —— 已退回宿主墙钟（UTC 部署下会误拒「马上提醒」）"
+        )
+
+    def test_host_clock_would_have_rejected_this(self):
+        """反证：证明「走 now_local」具备区分力（旧实现下该实参会红）。
+
+        模拟「宿主时区快于北京」：以更快的宿主读数作参照，「北京此刻 +2 分钟」
+        即落入过去 → 必须抛 `trigger_time_in_past`。
+        """
+        beijing_now = now_local()
+        if beijing_now.tzinfo is not None:
+            beijing_now = beijing_now.replace(tzinfo=None)
+        target = (beijing_now + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
+        faster_host = beijing_now + timedelta(hours=8)
+        with pytest.raises(TriggerTimeError):
+            # 显式传「更快的宿主读数」——即旧实现在东九/东十区宿主的缺省行为
+            normalize_trigger_time(target, now=faster_host)
+
+    def test_reference_is_stable_regardless_of_host_tz(self):
+        """本地口径下的参照不随宿主时区漂移（回归钉）。
+
+        以「北京此刻 +2 分钟」为实参、**不传 now** → 必须接受。
+        """
+        beijing_now = now_local()
+        if beijing_now.tzinfo is not None:
+            beijing_now = beijing_now.replace(tzinfo=None)
+        target = (beijing_now + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
+        assert normalize_trigger_time(target) == target
+
+    def test_local_reference_rejects_real_past(self):
+        """反向钉子：本地口径下真正过去的时刻仍须拒收（防止放宽成照单全收）。"""
+        beijing_now = now_local()
+        if beijing_now.tzinfo is not None:
+            beijing_now = beijing_now.replace(tzinfo=None)
+        old = (beijing_now - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
+        with pytest.raises(TriggerTimeError) as ei:
+            normalize_trigger_time(old)
+        assert "trigger_time_in_past" in str(ei.value)
+
+    def test_minutes_from_now_is_accepted_under_any_host_tz(self):
+        """「几分钟后提醒我」在最常见诉求上必须落库（不因部署时区失效）。"""
+        beijing_now = now_local()
+        if beijing_now.tzinfo is not None:
+            beijing_now = beijing_now.replace(tzinfo=None)
+        for minutes in (1, 5, 30):
+            target = (beijing_now + timedelta(minutes=minutes)).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            assert normalize_trigger_time(target) == target
 
     def test_tool_rejects_without_writing(self, sm):
         tool = ReminderTool(sm)

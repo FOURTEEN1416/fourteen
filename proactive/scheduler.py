@@ -15,7 +15,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 # 消息清洗（拦截 LLM 推理过程泄漏为消息内容）+ 统一本地时钟。
@@ -137,13 +137,21 @@ class ProactiveScheduler:
         self._scheduler: Any = None
         self._active_tasks: dict[str, bool] = {}
 
-        # 情绪时间衰减的独立基准（2026-09-22 修复）。
+        # 情绪时间衰减的独立基准（2026-09-22 修复，同日二次根治）。
         # 旧实现误用「距上次 ASE tick」当衰减时长——ASE 每 5 分钟跑一次并刷新
         # 基准，每日维护时刻 hours≈0.08，`apply_time_decay`（线性按小时）形同
-        # 关闭，用户级引擎情绪永不冷却。现单独记录上次衰减时刻；None 表示
-        # 本进程尚未衰减过（首次维护不衰减：离线冷却已由引擎 restore 按真实
-        # 离线时长承担，避免重启后首夜重复计衰减）。
-        self._last_emotion_decay: datetime | None = None
+        # 关闭，用户级引擎情绪永不冷却。
+        # 🔴 首版修复（同日 9a54fca）以 `None` 作「本进程尚未衰减」哨兵，而
+        # `_hours_since_last_emotion_decay()` 对 None 返回 0.0、`if hours > 0`
+        # 永假、**推进基准的赋值语句又在该 if 内** —— 基准永远停在 None，
+        # 衰减依然从未发生（换了一种死法，生产实证 00:05 日志 hours=0.01）。
+        # 现改为**落盘 + 缺失即回填**：
+        #   · 真源 = `data/scheduler_config.json` 的 `last_emotion_decay`
+        #     （跨进程/重启一致，走 utils.json_state 原子写 + flock）；
+        #   · 文件缺失/损坏 → 回填为「昨日维护时刻」，使下次维护得到 24h
+        #     量级时长（而非 0），衰减立刻生效且不重复计（离线冷却另由引擎
+        #     restore 按真实离线时长承担）。
+        self._last_emotion_decay: datetime | None = self._load_last_emotion_decay()
 
         # 通道注册表（支持多通道投递）
         self._channels: dict[str, Callable[[], Any]] = {}        # name → sender_factory
@@ -1137,7 +1145,8 @@ class ProactiveScheduler:
         # 情感时间衰减 — 审计 item45：打向**每用户存活引擎**（UserManager 真态）。
         # 旧实现打在 orchestrator 模板引擎上，其 state 无任何读者=功能不存在。
         # 2026-09-22：衰减时长改用独立基准 `_hours_since_last_emotion_decay`
-        # （旧实现误用距上次 ASE tick 的 ≈5 分钟，衰减实际从未发生）。
+        # （旧实现误用距上次 ASE tick 的 ≈5 分钟，衰减实际从未发生）；
+        # 同日二次修复：基准落盘 + 缺失回填，见 `_load_last_emotion_decay`。
         try:
             hours = self._hours_since_last_emotion_decay()
             if hours > 0:
@@ -1147,8 +1156,10 @@ class ProactiveScheduler:
                 if user_mgr is not None and hasattr(user_mgr, "apply_time_decay_all"):
                     decayed = user_mgr.apply_time_decay_all(hours)
                     # 衰减线性于 hours，成功后推进基准；失败不推进（下次把
-                    # 未衰减的时长补上，总量守恒）
-                    self._last_emotion_decay = datetime.now(tz=timezone.utc)
+                    # 未衰减的时长补上，总量守恒）。基准落盘，重启后不丢。
+                    new_base = datetime.now(tz=timezone.utc)
+                    self._last_emotion_decay = new_base
+                    self._persist_last_emotion_decay(new_base)
                 logger.info(
                     "情感时间衰减已应用: %.2f 小时，覆盖 %d 个用户引擎", hours, decayed
                 )
@@ -1347,11 +1358,66 @@ class ProactiveScheduler:
 
         2026-09-22：取代误用作衰减时长的 `_hours_since_last_check`（后者是
         「距上次 ASE tick」，≤5 分钟，导致每日衰减形同关闭）。
+
+        🔴 同日二次修复：首版以 `None` 作哨兵并在 None 时返回 `0.0`，使
+        `if hours > 0` 永假 + 赋值语句位于该 if 内 = **永久自我锁死**。
+        现基准**必定非 None**（构造时即由 `_load_last_emotion_decay()` 回填），
+        故此处只需做差；异常回填零时长亦不会退化为锁死（下次仍有真实差值）。
         """
-        if self._last_emotion_decay is None:
+        if self._last_emotion_decay is None:  # 理论不可达，防御性兜底
+            self._last_emotion_decay = self._default_last_emotion_decay()
             return 0.0
-        delta = datetime.now(tz=timezone.utc) - self._last_emotion_decay
+        now_utc = datetime.now(tz=timezone.utc)
+        base = self._last_emotion_decay
+        if base.tzinfo is None:  # 兼容历史 naive 串
+            base = base.replace(tzinfo=timezone.utc)
+        delta = now_utc - base
         return max(0.0, delta.total_seconds() / 3600)
+
+    @staticmethod
+    def _default_last_emotion_decay() -> datetime:
+        """无历史基准时的回填值 —— 「昨日维护时刻」（UTC）。
+
+        为什么不回填 `now`：回填 now 会让本次维护 hours=0 → 衰减不执行 →
+        （若能再次回填）仍是死循环的另一种形态。回填「昨日维护时刻」使本次
+        维护得到 ~24h 的真实时长，衰减立刻生效；且 00:05 每日只跑一次，
+        不会重复计。
+        """
+        now_utc = datetime.now(tz=timezone.utc)
+        yesterday = now_utc - timedelta(days=1)
+        # 锚定到维护时刻（00:05 本地 = 16:05 UTC 前一日）
+        return yesterday.replace(hour=now_utc.hour, minute=now_utc.minute,
+                                 second=0, microsecond=0)
+
+    def _load_last_emotion_decay(self) -> datetime:
+        """从 `data/scheduler_config.json` 读取衰减基准；缺失/损坏即回填并落盘。"""
+        raw = ""
+        try:
+            data = json_state.read_json(self._CONFIG_PATH, default={}) or {}
+            raw = str(data.get("last_emotion_decay") or "")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("读取情绪衰减基准失败，按默认回填: %s", e)
+        if raw:
+            try:
+                parsed = datetime.fromisoformat(raw)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed
+            except ValueError as e:
+                logger.warning("情绪衰减基准格式非法（%s），按默认回填: %s", raw, e)
+        fallback = self._default_last_emotion_decay()
+        self._persist_last_emotion_decay(fallback)
+        return fallback
+
+    def _persist_last_emotion_decay(self, value: datetime) -> None:
+        """把衰减基准原子落盘（跨进程/重启一致），失败仅告警不阻断。"""
+        try:
+            def _mutate(data: dict[str, Any]) -> None:
+                data["last_emotion_decay"] = value.isoformat()
+
+            json_state.update_json(self._CONFIG_PATH, _mutate)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("持久化情绪衰减基准失败: %s", e)
 
     def get_jobs(self) -> list[dict[str, Any]]:
         """获取所有任务状态"""
