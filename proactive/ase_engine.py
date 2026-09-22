@@ -1164,17 +1164,26 @@ class ASEEngine:
     def _try_knowledge_share(self) -> dict[str, Any] | None:
         """候选 C：从角色知识库检索真实内容，LLM 包装成角色口吻的分享。
 
-        知识库内容源 = 爬虫抓取/文档导入（/api/characters/{id}/knowledge/*）。
-        无函数注入/无索引/检索为空/无 LLM → 返回 None 回退模板消息。
+        知识库内容源 = 爬虫抓取/文档导入（/api/characters/{id}/knowledge/*）
+        + 热点池（shisi/knowledge/hot_topics，采集→入库→此处供出，前置优先）。
+        无函数注入/无索引/检索为空/无 LLM 且无热点 → 返回 None 回退模板消息。
         """
         func = self._knowledge_share_func
-        if not func or not self._knowledge_character_id:
-            return None
         try:
-            context = func(self._knowledge_character_id)
-            if not context or len(context) < 20:
+            # 热点前置（池空/全过期/异常 → 空串，静默降级走既有知识/模板）
+            from shisi.knowledge.hot_topics import get_hot_context
+
+            hot = str(get_hot_context(self._knowledge_character_id) or "")
+        except Exception:  # noqa: BLE001
+            hot = ""
+        try:
+            context = ""
+            if func and self._knowledge_character_id:
+                context = str(func(self._knowledge_character_id) or "")
+            combined = "\n\n".join(x for x in (hot, context) if x)
+            if not combined or len(combined) < 20:
                 return None
-            excerpt = context[:300]
+            excerpt = combined[:300]
             if self._llm is not None and hasattr(self._llm, "chat_sync"):
                 prompt = (
                     "你正在和亲密的人聊天。用你自己的口吻，把下面这段你刚'看到'的内容"

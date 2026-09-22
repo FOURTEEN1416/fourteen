@@ -118,6 +118,15 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # 热点池落盘（2026-09-22 W3 热点知识链）：collect 写 data/hot_topics.json，
+    # 无隔离会把测试条目写进宿主真实池（同类事故模式）。
+    try:
+        from shisi.knowledge import hot_topics as _hot
+
+        _redirect(_hot, "_STATE_PATH", "hot_topics.json")
+    except Exception:
+        pass
+
     yield sandbox
 
     for owner, attr, old in patched:
