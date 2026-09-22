@@ -34,13 +34,21 @@
 | **W1 刻度迁移** | 主检出 `main` | `D:\Desktop\ai-girlfriend`（本窗直接做） | 包 R3-W1 · v1.38 遗留① | ✅ **已由并发窗闭环**（`a0f0af2`→纠反 `48e1868`），本窗复验 4/4 绿 | 2026-09-22 登记 | owner：`shisi/api/registry.py` + enhancer 常量导入 + 新测试；禁碰 scheduler/session_key |
 | **W2 laya 审计** | `wt/laya-audit`（分支保留） | ~~`..\ai-girlfriend-laya-audit`~~ 可卸 | 包 R3-W2 · 只读调研 | ✅ **已收编 main·已卸窗**（merge `wt/laya-audit`：审计报告 222 行 + LOG 两条含勘误） | 2026-09-22 登记 | 结论=有条件引入（候选① llm_proactive 前置 gate 四步路径；不建议 tool_gate L0.5/直替）；未证实项与试跑授权见文档 §2.5，归默默裁决 |
 | **W3 热点知识链** | `wt/hot-knowledge`（分支保留） | ~~`..\ai-girlfriend-hot-knowledge`~~ 可卸 | 包 R3-W3 · 采集→入库→供出 | ✅ **已收编 main + 挂线完成·已卸窗**（merge 7 提交；主控补 `hot_topics_collect` 注册 + 2 行为断言，`f2c51ba`） | 2026-09-22 登记 | 契约 §1 硬缺口已闭合：scheduler 60min IntervalTrigger → `collect_if_due()`（自限速/永不抛出，开关真源 `config/hot_topics.yaml`）；conftest 池隔离随批保留 |
-| **W4 部署** | 无（主控执行） | 主检出 + swu-prod | 包 R3-W4 · push+服务器 | ✅ **完成**（默默对 push 与服务器 pull 分别明确点头）——三端统一 `7578e57`；服务器 bundle 三跳 ff + remote_deploy 4/4 + health 200；服务器全量 **1868 收集 / 1867 通过 / 1 跳过 / 0 失败** + CI 35714334710 绿；详见 LOG「W4 部署窗口」条目 | 2026-09-22 登记 | nginx 零配置改动（入口冻结铁律遵守）；拦下 W1 迁移参数换向与 CI 墙钟用例两枚缺陷后放行（`5cc70ee`/`48e1868`）；临时 bundle 已清 |
+| **W4 部署** | 无（主控执行） | 主检出 + swu-prod | 包 R3-W4 · push+服务器 | ✅ **完成**（默默对 push 与服务器 pull 分别明确点头）——三端统一 `7578e57`；服务器 bundle 三跳 ff + remote_deploy 4/4 + health 200；服务器全量 **1868 收集 / 1867 通过 / 1 跳过 / 0 失败** + CI 35714334710 绿；详见 LOG「W4 部署窗口」条目。**终态补记（R3 验收窗）**：二次上线至 `68851a5`，双端全量 **1894/1893/1/0** 绿 | 2026-09-22 登记 | nginx 零配置改动（入口冻结铁律遵守）；拦下 W1 迁移参数换向与 CI 墙钟用例两枚缺陷后放行（`5cc70ee`/`48e1868`）；临时 bundle 已清 |
 
 > ⚠️ **2026-09-19 路径收编**：W1/W2 工作区原位于 `D:\Desktop\` 根（仓库外），已收编至 `大创赛报名以及后期发展\` 下；仍为**仓库外非 git 工作区**，受 `.gitignore:130` 全目录排除，故宪法 §3「参赛材料不入库」约束不变。同期收编 `大赛附件包`、`专利-唯一的你十四`。**追加区内历史条目所载旧路径按「历史记录保留原文」准则未作改动**。完整映射见 `大创赛报名以及后期发展\PATH-MIGRATION-2026-09-19.md`。
 
 ---
 
 ## 追加区（按时间倒序，新的在上）
+
+### 2026-09-22 · 主控 · R3 验收收口 + 二次上线（三端终态 `68851a5`，双端 1894/1893/1/0 全绿）
+
+- **验收**：默默点单「验收各个窗口」→ 四窗逐一以主检出真身复核（blob 哈希/禁碰文件零触碰/测试实跑，不采信自报数）：W1/W2/W3/W4 全过；唯一缺口=服务器落后，经默默「执行」放行上线。
+- **二次上线**：`e869a57`（验收新发现收口——`/api/proactive/state` 空引擎 500，ASEHub 增显式 `health_check`，复现先红后绿 + 生产 200 实证）+ `68851a5`（服务器全量回归抓出——`install_native_gate.py` 兜底写死裸 `python`，服务器 PATH 无 `python` 使装出的钩子提交必败；改绑 `sys.executable`，突变验红命中）。两笔均 ff、`remote_deploy`/restart 随 `e869a57` 完成，`68851a5` 为纯脚本+测试零运行时面（服务器 ff pull + 全量回归，**未重启服务**）。
+- **终态读数**：本地=origin=服务器=`68851a5`；双端干净四分块 **1894 收集 / 1893 通过 / 1 跳过 / 0 失败**（服务器 539/561+1/416/377，本地 435/550+1/439/469；41 卡在位、双端工作树 clean）；`/api/health` 200、`/api/proactive/state` 200（真实引擎态）；关键三文件 blob 三端一致。
+- **热点链上线运行**：服务器日志实证 21:36:09 `Added job "热点知识采集"` ×2（双 worker 注册）；IntervalTrigger 60min 首跑 ≈22:36，首跑「Running job」取证已排 22:40 一次性任务。
+- **教训登记（已入 AGENTS §4.3 二十二注）**：分块清单 awk 用 `NR%4==1..4` 时第四组恒空 → pytest 无参跑全量、口径污染，本窗实踩两次；正确式 `NR%4==0..3`。服务器非交互 ssh 无 `python`（仅 `python3`/`.venv/bin/python`），跑测试必须显式 `.venv/bin/python`。
 
 ### 2026-09-22 · 主控 · R3 收仓：W2/W3 合入 main + 热点挂线落地
 - **W3**：merge `wt/hot-knowledge`（7 提交，`6e3e9a2`）——热点模块/供出/测试/设计/契约/conftest 池隔离全量入 main，与 main 侧零文件冲突；随后主控落契约 §1 挂线（`f2c51ba`）：`start()` 注册 `hot_topics_collect`（IntervalTrigger 60min，仿既有 job 风格 misfire_grace+coalesce），`_run_hot_topics_collect` 只按拍触发 `collect_if_due()`（开关/间隔真源 `config/hot_topics.yaml`，scheduler 侧不造第二配置）。新增 2 行为断言（注册存在 + 回调真触发），**突变验红**：改 job id → 2 例转红，还原复绿 14/14。
