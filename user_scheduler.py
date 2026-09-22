@@ -196,11 +196,16 @@ class UserManager:
                 return
             points = float(getattr(state, "affection_points", 0.0) or 0.0)
             affinity_state.save_points(user_id, character_id, points)
-            # 审计镜像：enhancer 的恢复真源
+            # 审计镜像：enhancer 的恢复真源（`_values` 是 **shisi 0–100**）。
+            # 🔴 刻度根治：旧镜像直接写 affection_points（0–500）到 new_value，
+            # 与 enhancer.update 写入的 shisi 值混在同一列 —— 回放时两种刻度
+            # 互相污染。现镜像写 points_to_shisi(points)，与 enhancer 同一刻度。
             try:
+                from shisi.affinity import scale as affinity_scale
                 from shisi.affinity.enhancer import affinity_key, default_db_path
 
                 key = affinity_key(character_id, user_id)
+                shisi_val = affinity_scale.points_to_shisi(points)
                 with closing(sqlite3.connect(str(default_db_path()))) as conn, conn:
                     conn.execute(
                         "INSERT INTO affinity_records "
@@ -209,7 +214,7 @@ class UserManager:
                         (
                             key,
                             0.0,
-                            points,
+                            shisi_val,
                             0.0,
                             "user_scheduler_persist",
                             "emotion",
@@ -443,8 +448,17 @@ class UserManager:
         return True
 
     def get_user_character(self, user_id: str) -> str:
+        """会话键 → 当前绑定角色 id。
+
+        实例存活时以实例为准；**实例未建**（主动消息/提醒/祝福可能先于
+        首条聊天，或 remove_user 后）必须回落绑定表 `_resolve_character_id`。
+        旧实现实例缺失即 `"default"`，使 character_resolver / 亲密度 / 祝福
+        口吻在「绑定已存在但用户还没聊过」时全部错绑内置角色。
+        """
         instance = self._users.get(user_id)
-        return instance.character_card_id if instance else "default"
+        if instance is not None:
+            return instance.character_card_id
+        return self._resolve_character_id(str(user_id or ""))
 
     # ── 查询接口 ─────────────────────────────────────────
 

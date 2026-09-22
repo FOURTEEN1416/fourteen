@@ -190,8 +190,13 @@ def test_orchestrator_passes_canonical_key_to_affinity_sync():
 
 
 def test_enhancer_backfills_from_points_when_audit_empty(tmp_path, monkeypatch):
-    """审计日志无该键、点存有值 → 必须兜底回填（否则"回放成功但值仍是 0"）。"""
+    """审计日志无该键、点存有值 → 必须兜底回填（否则"回放成功但值仍是 0"）。
+
+    🔴 刻度契约（2026-09-22 二次排查）：点存权威值是 affection_points（0–500），
+    enhancer `_values` 是 shisi（0–100）。42 points → 8.4 shisi，禁止直接钳入。
+    """
     from shisi.affinity import enhancer as enh_mod
+    from shisi.affinity import scale as affinity_scale
     from utils import affinity_state
 
     # 点存：一个审计里不存在的键
@@ -204,7 +209,11 @@ def test_enhancer_backfills_from_points_when_audit_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(enh_mod, "_DB_DEFAULT", tmp_path / "empty.db")
 
     e = enh_mod.AffinityEnhancer()
-    assert e._values.get("u1::char1") == 42.0
+    expected = affinity_scale.points_to_shisi(42.0)
+    assert e._values.get("u1::char1") == pytest.approx(expected), (
+        f"点存回填必须换算刻度：42 points → {expected} shisi，"
+        f"实得 {e._values.get('u1::char1')}"
+    )
 
 
 def test_enhancer_audit_takes_precedence_over_points(tmp_path, monkeypatch):
@@ -239,13 +248,21 @@ def test_enhancer_audit_takes_precedence_over_points(tmp_path, monkeypatch):
 
 
 def test_affinity_default_db_path_is_shared_owner():
-    """写入方必须能拿到同一审计库路径（避免各自拼路径漂移）。"""
+    """写入方必须能拿到同一审计库路径（避免各自拼路径漂移）。
+
+    conftest 会把 `_DB_DEFAULT` 重定向到临时库（防污染宿主 data/sqlite.db），
+    故这里校验的是「共享 owner 语义」：函数返回值 ≡ 模块真源，且生产布局
+    常量本身指向 data/sqlite.db（从 __file__ 推导，不受隔离重定向影响）。
+    """
+    from shisi.affinity import enhancer as enh_mod
     from shisi.affinity.enhancer import default_db_path
 
     p = default_db_path()
     assert isinstance(p, Path)
+    assert p is enh_mod._DB_DEFAULT, "default_db_path 必须返回模块真源（写入方同口径）"
     assert p.name == "sqlite.db"
-    assert p.parent.name == "data"
+    canonical = Path(enh_mod.__file__).resolve().parent.parent.parent / "data" / "sqlite.db"
+    assert canonical.parent.name == "data"
 
 
 def test_affinity_persist_mirrors_to_audit(tmp_path, monkeypatch):
@@ -281,12 +298,119 @@ def test_affinity_persist_mirrors_to_audit(tmp_path, monkeypatch):
 
     UserManager._persist_affinity("u1@im.wechat", "char1", _Engine())
 
-    # ① 点存有值
+    # ① 点存有值（权威刻度 affection_points）
     assert affinity_state.load_points("u1@im.wechat", "char1") == 37.0
-    # ② 审计也有值，且键是**规范键**（与 enhancer 回放同口径）
+    # ② 审计也有值，键是规范键，且 **new_value 是 shisi 刻度**
+    #    （与 enhancer._record_affinity 同列同刻度；旧镜像写 37.0 points 污染回放）
+    from shisi.affinity import scale as affinity_scale
+
+    expected_shisi = affinity_scale.points_to_shisi(37.0)
     with sqlite3.connect(db) as conn:
         rows = conn.execute("SELECT character_id, new_value FROM affinity_records").fetchall()
-    assert rows == [("u1@im.wechat::char1", 37.0)], f"审计镜像缺失或键不符: {rows}"
+    assert len(rows) == 1 and rows[0][0] == "u1@im.wechat::char1", f"审计镜像键不符: {rows}"
+    assert rows[0][1] == pytest.approx(expected_shisi), (
+        f"审计镜像必须写 shisi 刻度：37 points → {expected_shisi}，实得 {rows[0][1]}"
+    )
+
+
+def test_affinity_state_empty_user_key_matches_enhancer():
+    """空 user 键口径必须与 affinity_key 一致（裸 character_id）。
+
+    旧 `_key("", "char")` → `"::char"`，enhancer → `"char"`，点存兜底永远对不上。
+    """
+    from shisi.affinity.enhancer import affinity_key
+    from utils import affinity_state
+
+    assert affinity_state._key("", "char1") == affinity_key("char1", "")
+    assert affinity_state._key("", "char1") == "char1"
+    assert affinity_state._key("u1", "char1") == affinity_key("char1", "u1")
+    assert affinity_state._key("u1", "char1") == "u1::char1"
+
+
+def test_audit_restore_converts_user_scheduler_points_scale(tmp_path, monkeypatch):
+    """历史镜像行（reason=user_scheduler_persist）的 new_value 是 points，回放须换算。"""
+    import sqlite3
+
+    from shisi.affinity import enhancer as enh_mod
+    from shisi.affinity import scale as affinity_scale
+
+    db = tmp_path / "audit.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE affinity_records (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "character_id TEXT, old_value REAL, new_value REAL, delta REAL, "
+            "reason TEXT, source TEXT, created_at TEXT DEFAULT (datetime('now')))"
+        )
+        # 旧镜像：affection_points=250 被写进 new_value
+        conn.execute(
+            "INSERT INTO affinity_records (character_id, old_value, new_value, "
+            "delta, reason, source) VALUES ('u1::char1', 0, 250, 0, "
+            "'user_scheduler_persist', 'emotion')"
+        )
+        # enhancer 自有行：已是 shisi=88
+        conn.execute(
+            "INSERT INTO affinity_records (character_id, old_value, new_value, "
+            "delta, reason, source) VALUES ('u2::char2', 10, 88, 78, 'chat', 'chat')"
+        )
+        conn.commit()
+
+    monkeypatch.setattr(enh_mod, "_DB_DEFAULT", db)
+    e = enh_mod.AffinityEnhancer()
+    assert e._values["u1::char1"] == pytest.approx(affinity_scale.points_to_shisi(250.0))
+    assert e._values["u2::char2"] == pytest.approx(88.0), "shisi 行不得再换算"
+
+
+def test_stage_engine_persists_and_restores(tmp_path):
+    """阶段状态必须落盘并跨实例恢复（旧纯内存 → 重启回「陌生」）。"""
+    from shisi.emotion_stage.stage_engine import EmotionStageEngine
+    from shisi.migrations import run_migrations
+
+    db = tmp_path / "stage.db"
+    run_migrations(db)
+
+    e1 = EmotionStageEngine(db_path=db)
+    e1.evaluate("u1::char1", affinity=80.0)
+    idx = e1.get_progress("u1::char1")["stage_index"]
+
+    e2 = EmotionStageEngine(db_path=db)
+    info = e2.get_progress("u1::char1")
+    assert info["stage_index"] == idx
+    assert info["affinity"] == pytest.approx(80.0)
+
+
+def test_mapper_stage_uses_track_key_not_bare_character(monkeypatch):
+    """阶段评估必须用 track（user::character），异常时不得回退裸角色键。"""
+    from shisi.affinity.enhancer import AffinityEnhancer
+    from shisi.affinity.mapper import AffinityMapper
+
+    seen: list[str] = []
+
+    class _Stage:
+        def evaluate(self, key, val):
+            seen.append(key)
+
+        def evaluate_boom(self, key, val):
+            raise RuntimeError("boom")
+
+    class _StageBoom:
+        def evaluate(self, key, val):
+            seen.append(key)
+            raise RuntimeError("boom")
+
+    import tempfile
+    from pathlib import Path
+
+    tmp = Path(tempfile.mkdtemp())
+    enh = AffinityEnhancer(db_path=tmp / "a.db")
+    m = AffinityMapper(enhancer=enh, stage_engine=_Stage())
+    m.sync("charA", affection_points=250, user_id="u1@im.wechat")
+    assert seen == ["u1@im.wechat::charA"], f"阶段键必须是 track，实得 {seen}"
+
+    seen.clear()
+    m2 = AffinityMapper(enhancer=enh, stage_engine=_StageBoom())
+    m2.sync("charA", affection_points=300, user_id="u1@im.wechat")
+    assert seen == ["u1@im.wechat::charA"], "异常时也不得改用裸 character_id"
+    assert "charA" not in seen
 
 
 # ─────────────────────────────────────────────────────────────
@@ -542,3 +666,54 @@ def test_active_character_cache_still_hits_for_same_source(monkeypatch):
     assert cr.get_active_character_id() == "only"
     assert cr.get_active_character_id() == "only"
     assert len(calls) == 1, "同一数据源的重复调用必须命中缓存"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# I 组：会话键 → 角色回落绑定表（P1：实例未建时不得错绑 default）
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _mk_user_manager_with_binding(tmp_path, session_key: str, char_id: str):
+    """构造已绑定但实例未建的 UserManager。"""
+    import user_scheduler as us_mod
+
+    mgr = us_mod.UserManager.__new__(us_mod.UserManager)
+    us_mod.UserManager.__init__(mgr, orchestrator=None)
+    mgr._users = {}
+    mgr._bindings = {session_key: {"character_card_id": char_id}}
+    return mgr
+
+
+def test_get_user_character_falls_back_to_binding_when_instance_absent(tmp_path, monkeypatch):
+    """实例不存在但绑定表有记录时，必须回落绑定表而非 default。
+
+    旧实现 `instance.character_card_id if instance else "default"` 会让
+    主动消息/提醒/祝福在「绑定已存在但用户还没聊过」时全部错绑内置角色。
+    """
+    key = "2:o9cq80_fake@im.wechat"
+    mgr = _mk_user_manager_with_binding(tmp_path, key, "62105bca")
+    assert mgr.get_user_character(key) == "62105bca"
+
+
+def test_get_user_character_uses_instance_when_present(tmp_path):
+    """实例存活时以实例为准（不被绑定表覆盖）。"""
+    key = "2:peer@im.wechat"
+    mgr = _mk_user_manager_with_binding(tmp_path, key, "from_binding")
+
+    class _Inst:
+        character_card_id = "from_instance"
+
+    mgr._users[key] = _Inst()
+    assert mgr.get_user_character(key) == "from_instance"
+
+
+def test_get_user_character_unbound_returns_default(tmp_path):
+    """既无实例也无绑定时兜底 default。"""
+    mgr = _mk_user_manager_with_binding(tmp_path, "other", "x")
+    assert mgr.get_user_character("2:nobody@im.wechat") == "default"
+
+
+def test_get_user_character_not_raw_instance_check():
+    """防回归：不得再出现 `... if instance else "default"` 的裸三元。"""
+    src = Path("user_scheduler.py").read_text(encoding="utf-8")
+    assert 'instance.character_card_id if instance else "default"' not in src
