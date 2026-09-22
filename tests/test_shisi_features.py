@@ -123,7 +123,11 @@ class TestVitalSignsEngine:
 
 
 class TestEmotionStageEngine:
-    """情感阶段引擎 — 纯内存，无需数据库"""
+    """情感阶段引擎 — 状态落盘 emotion_stage_state（2026-09-22 起）。
+
+    conftest `isolate_runtime_state_files` 已把 `_DB_DEFAULT` 重定向到临时库，
+    默认构造即可；显式 db_path 用例见 test_block_e_hardening。
+    """
 
     @pytest.fixture
     def stage(self):

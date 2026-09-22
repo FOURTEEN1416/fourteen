@@ -105,6 +105,19 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # 阶段/好感度落盘（2026-09-22）：默认库是宿主 data/sqlite.db，
+    # 无隔离会把测试键写进开发机真实库（与 scheduler_config 同类事故）。
+    # 独立 try 块：不得因 ase_hub 导入失败而被连带静默跳过。
+    try:
+        from shisi.affinity import enhancer as _aff_enh
+        from shisi.emotion_stage import stage_engine as _stage_eng
+
+        stage_db = tmp_path_factory.mktemp("shisi_state") / "sqlite.db"
+        monkeypatch.setattr(_aff_enh, "_DB_DEFAULT", stage_db, raising=False)
+        monkeypatch.setattr(_stage_eng, "_DB_DEFAULT", stage_db, raising=False)
+    except Exception:
+        pass
+
     yield sandbox
 
     for owner, attr, old in patched:

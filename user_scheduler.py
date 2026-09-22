@@ -199,10 +199,16 @@ class UserManager:
             # 审计镜像：enhancer 的恢复真源（`_values` 是 **shisi 0–100**）。
             # 🔴 刻度根治：旧镜像直接写 affection_points（0–500）到 new_value，
             # 与 enhancer.update 写入的 shisi 值混在同一列 —— 回放时两种刻度
-            # 互相污染。现镜像写 points_to_shisi(points)，与 enhancer 同一刻度。
+            # 互相污染。现镜像写 points_to_shisi(points)，与 enhancer 同一刻度；
+            # reason 同步换用 MIRROR_REASON_SHISI 标记，使读侧能区分旧 points 行
+            # （判据错位会二次换算 250→50→10）。
             try:
                 from shisi.affinity import scale as affinity_scale
-                from shisi.affinity.enhancer import affinity_key, default_db_path
+                from shisi.affinity.enhancer import (
+                    MIRROR_REASON_SHISI,
+                    affinity_key,
+                    default_db_path,
+                )
 
                 key = affinity_key(character_id, user_id)
                 shisi_val = affinity_scale.points_to_shisi(points)
@@ -216,7 +222,7 @@ class UserManager:
                             0.0,
                             shisi_val,
                             0.0,
-                            "user_scheduler_persist",
+                            MIRROR_REASON_SHISI,
                             "emotion",
                         ),
                     )

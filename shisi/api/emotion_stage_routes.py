@@ -40,5 +40,7 @@ async def get_emotion_stage(character_id: str):
 async def evaluate_stage(character_id: str, affinity: float):
     if _engine is None:
         raise HTTPException(status_code=503, detail="EmotionStageEngine未初始化")
-    stage = _engine.evaluate(character_id, affinity)
+    # 纯查询：本端点无用户维度，走 evaluate 会以裸角色键 UPSERT 进
+    # emotion_stage_state、污染 track 键空间的跨重启回放（2026-09-22 收口）。
+    stage = _engine.resolve_stage(affinity)
     return ApiResponse(data={"stage": stage.name, "features": stage.features})

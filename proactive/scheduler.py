@@ -908,11 +908,16 @@ class ProactiveScheduler:
             rel = ""
         # 人设：会话绑定角色优先。P1-48：旧实现读 eng._character_id——该属性
         # 根本不存在（真实为 _knowledge_character_id），异常被吞后 persona 恒 ""
+        # 🔴 三轮根治：hub 引擎 `_knowledge_character_id` 现由工厂注入；
+        # 若仍空，回落 character_resolver（会话绑定角色）再回落 hub 键 `|char` 形态。
         persona = ""
+        char_id = ""
         try:
             char_id = str(getattr(eng, "_knowledge_character_id", "") or "")
             if not char_id:
-                # hub 键兼容 N:peer|char 形态（纯 N:peer 无角色槽则留空，禁空转 glob）
+                char_id = character_resolver.resolve_character_id(str(user_key)) or ""
+            if not char_id or char_id == character_resolver.BUILTIN_CHARACTER_ID:
+                # hub 键 N:peer|char 形态（好友自选）优先于 default 兜底
                 sk = str(user_key)
                 if "|" in sk:
                     tail = sk.split("|")[-1].strip()
@@ -1210,8 +1215,8 @@ class ProactiveScheduler:
             except Exception as e:  # noqa: BLE001
                 logger.error("Daily maintenance failed: %s", e)
 
-        # 情感时间衰减 — 审计 item45：打向**每用户存活引擎**（UserManager 真态）。
-        # 旧实现打在 orchestrator 模板引擎上，其 state 无任何读者=功能不存在。
+        # 情感时间衰减 — 审计 item45：打向**每用户存活引擎**（UserManager 真态）
+        # + orchestrator 请求级引擎缓存（web 路径主引擎，UserManager 不覆盖）。
         # 2026-09-22：衰减时长改用独立基准 `_hours_since_last_emotion_decay`
         # （旧实现误用距上次 ASE tick 的 ≈5 分钟，衰减实际从未发生）；
         # 同日二次修复：基准落盘 + 缺失回填，见 `_load_last_emotion_decay`。
@@ -1222,14 +1227,22 @@ class ProactiveScheduler:
                 user_mgr = getattr(_deps, "gf", None)
                 decayed = 0
                 if user_mgr is not None and hasattr(user_mgr, "apply_time_decay_all"):
-                    decayed = user_mgr.apply_time_decay_all(hours)
-                    # 衰减线性于 hours，成功后推进基准；失败不推进（下次把
-                    # 未衰减的时长补上，总量守恒）。基准落盘，重启后不丢。
-                    new_base = datetime.now(tz=timezone.utc)
-                    self._last_emotion_decay = new_base
-                    self._persist_last_emotion_decay(new_base)
+                    decayed += user_mgr.apply_time_decay_all(hours)
+                # 🔴 请求级引擎（web 对话路径）此前完全不衰减 —— 只打
+                # UserManager 引擎时，web 用户情绪永不冷却（审计 item45 半修）。
+                try:
+                    orch = getattr(_deps, "orch", None)
+                    if orch is not None and hasattr(orch, "apply_request_emotion_decay"):
+                        decayed += int(orch.apply_request_emotion_decay(hours) or 0)
+                except Exception:  # noqa: BLE001
+                    logger.debug("请求级情绪衰减失败（忽略）", exc_info=True)
+                # 衰减线性于 hours，成功后推进基准；失败不推进（下次把
+                # 未衰减的时长补上，总量守恒）。基准落盘，重启后不丢。
+                new_base = datetime.now(tz=timezone.utc)
+                self._last_emotion_decay = new_base
+                self._persist_last_emotion_decay(new_base)
                 logger.info(
-                    "情感时间衰减已应用: %.2f 小时，覆盖 %d 个用户引擎", hours, decayed
+                    "情感时间衰减已应用: %.2f 小时，覆盖 %d 个引擎", hours, decayed
                 )
         except Exception as e:  # noqa: BLE001
             logger.warning("情感时间衰减任务失败: %s", e)
@@ -1368,6 +1381,14 @@ class ProactiveScheduler:
                 char_id = (gf.get_user_character(user_key) if gf else "") or ""
             except Exception:  # noqa: BLE001
                 char_id = ""
+            # 内置 default 也要读 persona.yaml（load_persona_hint 已支持），
+            # 但 hub 键 N:peer|char 形态优先（好友自选角色）
+            if not char_id or char_id == "default":
+                sk = str(user_key)
+                if "|" in sk:
+                    tail = sk.split("|")[-1].strip()
+                    if tail and not tail.startswith("im.wechat"):
+                        char_id = tail
             if char_id:
                 try:
                     from proactive.llm_proactive import load_persona_hint

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from shisi.affinity import scale as affinity_scale
@@ -15,6 +16,8 @@ from shisi.affinity import scale as affinity_scale
 if TYPE_CHECKING:
     from ..emotion_stage.stage_engine import EmotionStageEngine
     from .enhancer import AffinityEnhancer
+
+logger = logging.getLogger("shisi.affinity.mapper")
 
 # 情感引擎 affection_points 的满级刻度 = AffinityLevel 9 级阶梯的终点
 _EMOTION_AFFECTION_MAX = affinity_scale.POINTS_MAX
@@ -124,8 +127,11 @@ class AffinityMapper:
 
         if self._stage_engine is not None:
             try:
+                # 阶段状态键必须与 track（user::character）一致。
+                # 旧实现异常时回退 `evaluate(character_id, …)` —— 裸角色键
+                # 跨用户共享，A 的阶段会写到 B 的名下。宁缺毋串。
                 self._stage_engine.evaluate(track, new_val)
             except Exception:  # noqa: BLE001
-                self._stage_engine.evaluate(character_id, new_val)
+                logger.debug("阶段评估失败（不回退裸角色键）track=%s", track)
 
         return {"affinity": new_val, "unlocks": unlocks}

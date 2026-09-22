@@ -591,6 +591,27 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         except Exception as e:  # noqa: BLE001
             logger.debug("情感状态恢复跳过: %s", e)
 
+    def apply_request_emotion_decay(self, hours: float) -> int:
+        """对请求级情绪缓存扇出时间衰减（每日维护调用）。
+
+        2026-09-22：审计 item45 只修了 UserManager 引擎（微信路径），
+        web 对话主路径用的是本缓存 —— 不衰减则 web 用户情绪永不冷却。
+        返回实际衰减的引擎数。
+        """
+        if hours <= 0:
+            return 0
+        with self._request_emotion_engines_lock:
+            engines = list(self._request_emotion_engines.values())
+        applied = 0
+        for eng in engines:
+            try:
+                if hasattr(eng, "apply_time_decay"):
+                    eng.apply_time_decay(hours)
+                    applied += 1
+            except Exception as e:  # noqa: BLE001
+                logger.debug("请求级情绪衰减失败: %s", e)
+        return applied
+
     @staticmethod
     def _restore_request_affinity(
         engine: Any, session_id: str, character_id: str

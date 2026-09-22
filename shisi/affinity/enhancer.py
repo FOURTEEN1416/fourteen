@@ -22,9 +22,31 @@ logger = logging.getLogger("shisi.affinity.enhancer")
 
 _DB_DEFAULT = Path(__file__).resolve().parent.parent.parent / "data" / "sqlite.db"
 
+#: `user_scheduler._persist_affinity` 审计镜像的刻度判据唯一真源。
+#: 04229eb 镜像写 affection_points（0–500）→ 旧标记；df59752 起写侧改 shisi
+#: 刻度并换用新标记。写读两侧必须引这里的常量——判据错位即二次换算
+#: （250 points → 镜像 50 → 回放 10）。
+MIRROR_REASON_POINTS = "user_scheduler_persist"
+MIRROR_REASON_SHISI = "user_scheduler_persist_shisi"
+
+
+def _scale_points_to_shisi(pts: float, shisi_min: float, shisi_max: float) -> float:
+    """affection_points（0–500）→ shisi 亲密度（默认 0–100）。刻度真源 scale。"""
+    try:
+        from . import scale as affinity_scale
+
+        return affinity_scale.points_to_shisi(pts, shisi_min, shisi_max)
+    except Exception:  # noqa: BLE001
+        # scale 导入失败时退化为线性（与 POINTS_MAX=500 同构）
+        ratio = max(0.0, min(1.0, float(pts or 0.0) / 500.0))
+        return shisi_min + ratio * (shisi_max - shisi_min)
+
 
 def default_db_path() -> Path:
-    """审计库默认路径（供 `user_scheduler` 等外部写入方对齐，避免各自拼路径）。"""
+    """审计库默认路径（供 `user_scheduler` 等外部写入方对齐，避免各自拼路径）。
+
+    返回**模块真源** `_DB_DEFAULT`（测试可 monkeypatch 重定向到临时库）。
+    """
     return _DB_DEFAULT
 
 
@@ -73,7 +95,7 @@ class AffinityEnhancer:
         try:
             with closing(sqlite3.connect(str(self._db_path))) as conn, conn:
                 rows = conn.execute(
-                    "SELECT ar.character_id, ar.new_value, ar.created_at "
+                    "SELECT ar.character_id, ar.new_value, ar.created_at, ar.reason "
                     "FROM affinity_records ar "
                     "JOIN (SELECT character_id AS cid, MAX(id) AS mid "
                     "      FROM affinity_records GROUP BY character_id) latest "
@@ -81,11 +103,18 @@ class AffinityEnhancer:
                 ).fetchall()
         except Exception as e:  # noqa: BLE001
             logger.warning("好感度审计回放失败（转点存兜底）: %s", e)
-        for key, value, created_at in rows:
+        for key, value, created_at, row_reason in rows:
             k = str(key or "")
             if not k:
                 continue
-            self._values[k] = max(self._min, min(self._max, float(value or 0)))
+            # 刻度唯一真源：`AffinityEnhancer._values` 是 **shisi 0–100**。
+            # 只有**旧标记** `user_scheduler_persist` 的镜像行是 affection_points
+            # （04229eb 时代），回放须换算；新标记 `..._shisi` 与 enhancer 自有行
+            # 本就同刻度，直取。判据常量见模块头 MIRROR_REASON_*。
+            raw_val = float(value or 0)
+            if str(row_reason or "") == MIRROR_REASON_POINTS:
+                raw_val = _scale_points_to_shisi(raw_val, self._min, self._max)
+            self._values[k] = max(self._min, min(self._max, raw_val))
             ts: datetime | None = None
             if created_at:
                 try:
@@ -124,7 +153,10 @@ class AffinityEnhancer:
                 pts = float((val or {}).get("affection_points", 0.0) or 0.0)
             except (TypeError, ValueError, AttributeError):
                 continue
-            self._values[k] = max(self._min, min(self._max, pts))
+            # 点存权威值是 affection_points（0–500），`_values` 是 shisi（0–100）。
+            # 旧实现直接 min/max 钳入 → 250 points 被钳成 100（应为 50），
+            # mapper.current_points 再反转成 500 —— 好感度被系统性放大。
+            self._values[k] = _scale_points_to_shisi(pts, self._min, self._max)
             self._last_interaction[k] = datetime.now(tz=timezone.utc)
             restored += 1
         if restored:

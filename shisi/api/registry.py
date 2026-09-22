@@ -72,7 +72,8 @@ def setup_shisi(
     # 默认 data/sqlite.db，① 测试夹具给了隔离库 enhancer 仍读写宿主真库；
     # ② 审计回放恢复上线后宿主历史值会被带回（集成测试 affinity 两例翻车实锤）。
     reg.affinity_enhancer = AffinityEnhancer(db_path=db_path) if db_path else AffinityEnhancer()
-    reg.stage_engine = EmotionStageEngine()
+    # 阶段状态与好感度同库落盘（emotion_stage_state 表）——否则重启回「陌生」
+    reg.stage_engine = EmotionStageEngine(db_path=db_path) if db_path else EmotionStageEngine()
     reg.affinity_mapper = AffinityMapper(
         enhancer=reg.affinity_enhancer,
         stage_engine=reg.stage_engine,

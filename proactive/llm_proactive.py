@@ -211,7 +211,12 @@ def decide_proactive(llm: Any, context: str) -> dict[str, Any]:
 
 
 def load_persona_hint(character_id: str = "") -> str:
-    """加载角色人设摘要供主动决策使用。"""
+    """加载角色人设摘要供主动决策使用。
+
+    2026-09-22：`default`（内置十四）此前查 `config/characters/default.json`
+    必 miss → 主动决策人设恒空。现 default 走 `config/persona.yaml`，
+    与 `PersonaService._builtin_character_card` 同源。
+    """
     try:
         import json as _json
         from pathlib import Path
@@ -221,6 +226,35 @@ def load_persona_hint(character_id: str = "") -> str:
         cid = (character_id or "").strip()
         if not cid:
             return ""
+
+        # 内置十四：persona.yaml（与 Chat 路径同源）
+        if cid in ("default", "demo"):
+            py = Path(project_path("config", "persona.yaml"))
+            if py.exists():
+                name = "十四"
+                desc_lines: list[str] = []
+                in_desc = False
+                for line in py.read_text(encoding="utf-8").splitlines():
+                    s = line.rstrip()
+                    # YAML 键值切分用 partition —— 不得写 split(":", 1)
+                    # （静态门禁把该形态一律视为会话键 owner 手写拆分）
+                    if not in_desc and s.startswith("name:"):
+                        name = s.partition(":")[2].strip().strip("'\"") or name
+                    elif s.startswith("description:"):
+                        in_desc = True
+                        rest = s.partition(":")[2].strip()
+                        if rest and rest not in ("|", ">"):
+                            desc_lines.append(rest.strip("'\""))
+                    elif in_desc:
+                        if s and not s[0].isspace() and ":" in s and not s.lstrip().startswith("#"):
+                            in_desc = False
+                        else:
+                            desc_lines.append(s)
+                desc = "\n".join(desc_lines).strip()[:400]
+                if desc:
+                    return f"角色：{name}\n{desc}".strip()
+                return f"角色：{name}"
+
         root = Path(project_path("config", "characters"))
         p = root / f"{cid}.json"
         if not p.exists() and root.exists():

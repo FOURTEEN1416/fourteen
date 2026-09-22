@@ -21,7 +21,15 @@ _PATH = project_path("data", "affinity_state.json")
 
 
 def _key(user_id: str, character_id: str) -> str:
-    return f"{user_id}::{character_id}"
+    """隔离键 —— 与 `shisi.affinity.enhancer.affinity_key` **完全同构**。
+
+    旧实现无条件 ``f"{user_id}::{character_id}"``，空 user 时得到 ``"::char"``
+    而 enhancer 的 ``affinity_key(char, "")`` 返回裸 ``"char"`` —— 点存兜底
+    回填永远对不上键。现空 user 退回裸 character_id（与 enhancer 一致）。
+    """
+    uid = str(user_id or "").strip()
+    cid = str(character_id or "").strip()
+    return f"{uid}::{cid}" if uid else cid
 
 
 def load_points(user_id: str, character_id: str) -> float:

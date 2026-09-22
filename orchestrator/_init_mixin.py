@@ -207,10 +207,11 @@ class _InitPhasesMixin:
         def _make_ase_engine(user_key: str = "", state_path: str = ""):
             uk = str(user_key or "")
             affinity_fn = (lambda: _affinity_level_for_user(uk)) if uk else None
+            eng = None
             try:
                 from proactive.ase_engine import ASEEngine as ASEEngineOptimized
 
-                return ASEEngineOptimized(
+                eng = ASEEngineOptimized(
                     llm_gateway=self.components["llm"],
                     max_daily_messages=cfg.proactive.max_daily_messages,
                     min_interval_minutes=cfg.proactive.min_interval_minutes,
@@ -225,7 +226,7 @@ class _InitPhasesMixin:
             except ImportError:
                 from proactive.ase_engine import ASEEngine as ASEEngineV2
 
-                return ASEEngineV2(
+                eng = ASEEngineV2(
                     llm_gateway=self.components["llm"],
                     max_daily_messages=cfg.proactive.max_daily_messages,
                     min_interval_minutes=cfg.proactive.min_interval_minutes,
@@ -234,6 +235,46 @@ class _InitPhasesMixin:
                     affinity_level_func=affinity_fn,
                     state_path=state_path or "",
                 )
+            # 🔴 每引擎注入知识分享 + 角色 id（hub 级 setattr 不会传到引擎实例）
+            if eng is not None:
+                _inject_ase_knowledge(eng, uk)
+            return eng
+
+        def _inject_ase_knowledge(eng: Any, uk: str) -> None:
+            """给单个 ASE 引擎接上知识分享与会话绑定角色。
+
+            旧实现只在 hub/非 hub 分支上 setattr —— hub 上的属性**不会**被
+            引擎实例读到（`self._knowledge_*` 查的是引擎自己的 dict），导致
+            `_try_knowledge_share` 恒 `func is None`、persona 源 `_knowledge_character_id`
+            恒 `""`。工厂创建时按 uk 解析并写入引擎自身。
+            """
+            try:
+                from shisi.knowledge.character_knowledge_service import get_knowledge_service
+                from utils.character_resolver import resolve_character_id
+
+                ksvc = get_knowledge_service()
+
+                def _share(cid: str = "") -> str:
+                    use_cid = str(getattr(eng, "_knowledge_character_id", "") or cid or "")
+                    if not use_cid or use_cid == "dynamic":
+                        try:
+                            from api.deps import deps as _deps
+
+                            cm = getattr(getattr(_deps, "shisi_reg", None), "character_manager", None)
+                            use_cid = (cm.get_active_id() if cm else "") or use_cid
+                        except Exception:  # noqa: BLE001
+                            pass
+                    if not use_cid or use_cid == "dynamic":
+                        return ""
+                    return str(
+                        ksvc.get_knowledge_context(use_cid, "最近话题 兴趣 资讯", top_k=2) or ""
+                    )
+
+                eng._knowledge_share_func = _share
+                resolved = resolve_character_id(uk) if uk else ""
+                eng._knowledge_character_id = str(resolved or "dynamic")
+            except Exception as e:  # noqa: BLE001
+                logger.debug("ASE 知识分享注入失败（忽略）: %s", e)
 
         # 2026-09-21 P1：ASE 按 user_key 隔离（配额/紧迫度/口吻不串用户）
         from proactive.ase_hub import ASEHub
@@ -258,10 +299,10 @@ class _InitPhasesMixin:
 
             ase_inst = self.components.get("ase")
             if isinstance(ase_inst, ASEHub):
-                # 按用户创建引擎时由 factory 注入；此处仅保留动态角色解析能力
-                ase_inst._knowledge_share_func = (
-                    lambda _cid: _ksvc.get_knowledge_context(_active_cid(), "最近话题 兴趣 资讯", top_k=2)
-                )
+                # 每引擎知识已在 `_inject_ase_knowledge` 工厂注入；
+                # hub 级 `_knowledge_share_func` 不会被引擎实例读到（setattr 只挂 hub），
+                # 此处不再写 hub 属性——写了也是死属性，会误导「已接线」判断。
+                pass
             elif ase_inst is not None:
                 ase_inst._knowledge_share_func = (
                     lambda _cid: _ksvc.get_knowledge_context(_active_cid(), "最近话题 兴趣 资讯", top_k=2)
