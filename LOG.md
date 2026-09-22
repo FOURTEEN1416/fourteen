@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-09-23 主控窗 — 两枚 P1 上线收口 + 启动通道同步 P2 根治（`6f80a5c` 三端一致）+ 主动消息日志终结分析
+
+- **触发**：默默批准「服务器 pull `ad828f7`+`d57cb5f` 并重启（A 档规程，nginx 零改动、不触大赛冻结）」；随后下令「**主动消息到此为止**，从未真正成功过一次，最近还是需要你的检查和监督，分析日志。最后一轮收尾任务：更新文档（尤其反映代码现状的一大批）、清除中间产物、清理临时文件」。
+- **部署收口（A 档全链）**：服务器 `/opt/ai-girlfriend` ff pull → 首次 `git pull` 至 `1f8ad07` + `deploy/remote_deploy.sh`（pip -e / npm ci+build / `systemctl restart ai-girlfriend`）→ health **200**。部署后启动日志暴露**第三枚缺陷**（见下）→ 修复 `6f80a5c` 再 pull + 重启 → 三端本地=origin=服务器=`6f80a5c`；`shisi/agent_plane/event_ledger.py`、`tests/conftest.py`、`proactive/frequency.py` 等关键 blob 三端 `git rev-parse HEAD:<file>` 一致；`nginx -t` 通过、配置零改动（入口冻结铁律遵守）。
+- **启动通道同步 P2 根治（`6f80a5c`，部署当场抓现行）**：`scripts/migrate_legacy_wechat_channel.py::sync_disk_sessions_to_db` 是**同步函数内 `asyncio.run()`**，被 FastAPI lifespan（已在运行循环内）调用 → 自 09-21 起每次启动 `RuntimeError: asyncio.run() cannot be called from a running event loop`，生产 app.log 累计 **116 行**同类告警——磁盘微信通道会话→DB 的启动同步**从未成功过一次**（谎言家族asyncio 桥新例）。修复：拆 `_sync_disk_sessions_async` 核，`sync_disk_sessions_to_db()`（async 入口，lifespan 用）与 `_sync_disk_sessions_to_db_sync()`（CLI 入口）共同委托；新增 `tests/test_wechat_channel_startup_sync.py` 行为回归（红测先行：修复前报错与生产日志逐字吻合，修复后绿）。**部署后实证**：启动日志出现「已同步 3 条微信通道会话到数据库」（各 worker），该类告警归零。
+- **服务器沙箱验收（d57cb5f 兜底在生产机实锤）**：服务器上抽 3 个记忆/账本相关文件 98 例全绿，`data/agent_plane.db` 事件计数 **1526 → 1526**（测试零污染）——conftest `EventLedger.default_path` 沙箱重定向在生产环境成立。⚠️ 该 98 例为**隔离专项验收**，非全量回归（全量仍按本窗本地四分块口径）。
+- **主动消息终结分析（账本 + app.log 全量核对，代码零改动，按令止改）**：① 决策链活着——`proactive_send` **28 条**全部归属唯一真人用户会话键（09-22 单日 7 条），`proactive_skip` 451 条中 **396 条 `llm_wait_window`**（模型自判 wait_minutes 的等待窗，每 tick 落一条，属设计行为但占比极高=大量时间在选择沉默）；② 投递侧 `deliver_failed` 14 条走 5m→15m→45m→120m 退避阶梯（微信协议 context_token 失效类），`empty_message_after_sanitize` 2 条；③ **诚实结论：服务端无法证实「送达」**——wechat web 协议 `send_text` 成功判据只是 API 受理（`_api_ok`），**无送达回执**，「从未真正成功」的最后一英里在现有协议下不可证（既有脆弱性 L2）；④ 体感稀薄的可归因部分已根治并上线：minimal 粘滞（上线前该用户被限 1 条/日；上线后引擎状态 `unanswered_count=0`，用户再回复 2 条即自动回 8 条/日档）+ 静默窗前置闸 + 等待窗自判。**遗留①（user_facts 0 行）复观察已具备条件**：账本沙箱已兜底，待生产自然对话积累后重查事实抽取链。
+- **本窗回归口径（收尾轮全量，`6f80a5c` 基线）**：四分块 **428 / 577+1跳过 / 411 / 481 = 1898 收集 / 1897 通过 / 1 跳过 / 0 失败**（124 测试文件；41 卡在位、工作树仅本收尾文档批）+ ruff 0 错。**徽章刷新 1991 → 1995**（1897 Py + 98 FE），§0/§2/§4.3 与 README/CODE_GRAPH 同步。
+- **边界与清理**：服务器 pull/重启均已执行（默默批准范围内）；nginx 与站点入口零触碰；`/tmp/qb*.txt` 分块清单与本地临时产物已清；服务器侧历史 `_tmp_*` 脚本属他窗产物，只登记不代删。
+- **置信度**：高——三端 blob 比对、启动日志前后对照（116 告警→0 + 「已同步 3 条」）、账本 1526→1526、全量分块实跑均为本窗机器证据；「最后一英里不可送达验证」是协议边界事实而非推测。
+
+---
+
 ## 2026-09-23 主控窗 — 五域生产体检 + 两枚 P1 根治（主动消息 minimal 粘滞 / 账本测试污染）
 
 - **触发**：默默裁决路线转向——「不急于融入 laya，先保障目前的功能性能完整可靠，尤其人设/主动消息/记忆/情感系统/拟人化」；并纠正我上一轮的「语料接线」请示：**laya 语料确实不需特意准备**（`append_proactive_event` 每 tick 已记 sent/reason/wait 全量决策，被动积累即训练语料源——代码核实成立，撤回报案）。

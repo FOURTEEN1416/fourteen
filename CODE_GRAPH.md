@@ -1,4 +1,6 @@
-# 代码图谱 — unique-you (唯一的你) v3.8.21（2026-09-22 六域根治：四块分块落地 9a54fca/f6a4637/8d3acf9/11bdc57/1ba015a——遗忘时钟/提醒校验/衰减基准/enhancer 审计回放/重要日期多用户化/检索下推/pending_events 死链整拆/prune 画像豁免+投影取最新/死类死表真删/web 定向收口；测试 1750/1749/1 双端全绿；端点 220/186 不变；跨库表 sqlite.db 五死表 DROP，agent_plane.db prune 画像豁免）；上一版 v3.8.20
+# 代码图谱 — unique-you (唯一的你) v3.8.22（2026-09-23 五域可靠性批次上线收口：三枚缺陷根治部署至生产三端 `6f80a5c`——① `proactive/frequency.py` FrequencyAdapter minimal 粘滞逐级回升（`ad828f7`）；② `tests/conftest.py` 账本测试沙箱隔离（`d57cb5f`，服务器 98 例验收账本 1526→1526 零污染实锤）；③ `scripts/migrate_legacy_wechat_channel.py` 启动通道同步 async 桥拆核（`6f80a5c`，asyncio.run-in-running-loop 自 09-21 起 116 行告警从未成功 → 部署后「已同步 3 条」×worker、告警归零）；健康 200、nginx 零改动；测试 **1898/1897/1** 本地四分块实测（428+577+1+411+481），合计 **1995**；端点 220/186 不变）；上一版 v3.8.21
+
+> 由 维护者 手动维护 | 最后核实: 2026-09-23（**v3.8.22 上线收口**：见上行全貌。主动消息按默默令止改——账本终结分析：proactive_send 28 全为 API 受理成功（web 协议无送达回执，最后一英里不可证）/ skip 451 中 396 为 llm_wait_window 自判等待窗；详见 LOG 2026-09-23 收口条目。）
 
 > 由 维护者 手动维护 | 最后核实: 2026-09-21（**v3.8.19 selftalk 四项修复移植 + 双尾巴根治**：`d8b7046` cherry-pick 入 main（`988cf9d`，送达回写记忆/唯一身份路径/档位静态门禁/追问收口，净增 32 用例）；知识槽身份自源块出口过滤（`743a98e`，收口项11 每轮 RAG 与「锚点只注入一次」的语义冲突）；channel-status 用例 `sessions_root` 隔离（`edd3c47`）；§1.1 刷新 **1750 收集 / 1749 通过 / 1 跳过 / 0 失败（2026-09-22 六域根治分块双端实测，服务器同口径全绿）
 > 由 维护者 手动维护 | 上一核实: 2026-09-21（**v3.8.18 v1.35 收仓口径统一 + shisi.yaml 行数勘误**：§1.1 Python 测试行刷新 **1615→1657 收集 / 1611→1653 通过 / 4 跳过**（分块 **341 + 387+3 + 494+1 + 431**，0 失败；+42 = 并行窗收编 `test_attribution_isolation_state` / `test_code_review_r2_state_and_llm` / `test_session_key_owner`）；测试合计 **1709→1751**（1653 Py + 98 FE）；**勘误** `config/shisi.yaml` 实为 **91 行**（65 有效行），v1.35 头部「41 行」系 voice 段恢复前中间态误记；端点 **220/186** 不变；vitest **98/98** 复跑。同步 AGENTS §0/§2/§4.3、README 徽章/口径/结构树、LOG 勘误两处。）
@@ -30,10 +32,10 @@
 | 前端页面 | **17 个** | Glob `frontend/src/pages/*.tsx`（另有 `StorylinePage` 为 App.tsx 内联包装组件） |
 | 前端 API 模块 | **13 个** | Glob `frontend/src/api/*.ts`（09-18 CI 门禁根治新增 `emotion.ts` / `normalize.ts`，原 11） |
 | 前端 Zustand store | **3 个** | LS `frontend/src/store/`（authStore / characterBuilderStore / errorStore） |
-| Python 测试用例 | **1688 passed + 1 skipped**（收集 **1689** + 本批 5） | 2026-09-22 身份拷问剧本批（`86af331`）+5（`test_identity_interrogation_defense.py`，全绿+突变验红）；**全量基线未刷新**（工作树含并行窗在制品 16 项，收集 1748 含未归因增量，重测留待收口窗）。上一口径：2026-09-21 selftalk 四项移植后·分块实跑（500 + 314 + 485+1 + 389，与 `--collect-only` 吻合；0 失败；净增 32 = selftalk 移植，4 处旧 skip 随用例重写吸收）。**服务器（生产宿主）同步全绿 501 + 336 + 483+1 + 368**。⚠️ **基线随 `config/characters/` 卡数浮动**：该目录被 gitignore（不入公开仓），`test_persona_injection` 的用例数 = **2 × 卡数 + 7**。**引用基线必须同时声明卡数**（本次 41 张在位） |
+| Python 测试用例 | **1897 passed + 1 skipped**（收集 **1898**） | 2026-09-23 收尾轮全量四分块实跑（**428 + 577+1 + 411 + 481** 精确吻合，124 测试文件，0 失败；`6f80a5c` 基线、工作树仅文档批）。本批净增：FrequencyAdapter minimal 回升 +1、账本沙箱契约 +2、启动通道同步 async 桥 +1（均红测先行）。服务器侧另做**隔离专项验收**（98 例全绿、账本 1526→1526 零污染），非全量回归。上一口径 1893/1894（R3 收口双端）。⚠️ **基线随 `config/characters/` 卡数浮动**：该目录被 gitignore（不入公开仓），`test_persona_injection` 的用例数 = **2 × 卡数 + 7**。**引用基线必须同时声明卡数**（本次 41 张在位） |
 | 现役角色卡 | **41 张**（`config/characters/*.json`，2026-09-20 从服务器**逐字节恢复**） | 41/41 文件 `sha256sum` 与服务器 `/opt/ai-girlfriend/config/characters/` **完全一致**；全部 JSON 可解析。目录被 `.gitignore:117` 忽略 → **卡数不随 git 复现**，本行是「本检出当前状态」而非版本事实 |
 | 前端测试用例 | **98 个全部通过 / 16 文件** | 2026-09-21 `npm test -- --run`（vitest）+ `tsc --noEmit` 0 错误 |
-| 测试用例合计 | **1786 个**（1688 Python 通过 + 98 前端通过） | pytest + vitest 实跑 2026-09-21 selftalk 四项移植后（⚠️ Python 侧跳过 1 不计入通过数） |
+| 测试用例合计 | **1995 个**（1897 Python 通过 + 98 前端通过） | 2026-09-23 收尾轮口径（Python 侧跳过 1 不计入通过数；前端 vitest 98/98 未随本批变动） |
 | tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
 
 ### 1.2 知识图谱快照指标（✅ 2026-09-02 重新索引·第二次）
@@ -453,6 +455,11 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 `~/.weixin_cow_credentials.json` 迁入 admin（user_id=1）`data/wechat_sessions/1/slot0/`；
 `api/run_api.py:_autostart_wechat_connector()` 改为按 `channel_paths` 逐 user/slot 恢复
 （旧全局单例 flock 启动方式废止，改每会话目录锁）。
+**双入口契约（2026-09-23 `6f80a5c` 根治）**：`sync_disk_sessions_to_db()` 为 async 入口
+（lifespan 调用），`_sync_disk_sessions_to_db_sync()` 为 CLI 入口，二者共同委托
+`_sync_disk_sessions_async()` 核——旧实现是同步函数内 `asyncio.run()`，在 FastAPI 运行中
+事件循环内调用必抛 `RuntimeError` 且被宽 `except` 吞成告警，**磁盘会话→DB 启动同步自
+09-21 起从未成功过一次**（生产 116 行告警实锤；修复后「已同步 3 条」×worker、告警归零）。
 旧全局端点语义变化：`/api/channels/wechat/*` 与 `/api/wechat/qrcode` 收敛为 **admin 兼容面**；
 普通用户一律走 `/api/wechat/channel*`（仅 JWT，只操作自己的通道）。
 
@@ -727,6 +734,7 @@ tools/
 
 | 日期 | 提交 | 变更摘要 |
 |------|------|---------|
+| v3.8.22 | 2026-09-23 | 五域可靠性批次上线收口（三端 `6f80a5c`）：minimal 粘滞回升 `ad828f7` / 账本测试沙箱 `d57cb5f`（服务器 98 例验收账本 1526→1526）/ 启动通道同步 async 桥双入口 `6f80a5c`（09-21 起 116 告警→0，「已同步 3 条」实锤）；主动消息按令止改+账本终结分析（send 28 全 API 受理、skip 396 llm_wait_window、最后一英里无回执不可证）；测试 **1898/1897/1**（分块 428+577+1+411+481）、合计 **1995**；端点 220/186 不变 |
 | v3.8.21 | 2026-09-22 | 六域根治四块（遗忘时钟/提醒校验/衰减基准/enhancer 回放/重要日期多用户/检索下推/pending_events 拆除/prune 豁免+投影取最新/死表真删/web 定向）；测试 1750/1749/1 双端；端点 220/186 不变 |
 | 2026-09-22 (身份拷问剧本进卡) | 86af331 | **v3.8.20**：persona.yaml（内置十四卡真源）+creator_notes 身份拷问应答剧本（PHI 位注入）+ persona_engine get_creator_notes()/约束层「身份拷问应对」身份中性通用规则 + 内置卡接线 + 知识槽排除源 +creator_notes（IDENTITY_KNOWLEDGE_SOURCES 常量化）；+5 用例，生产探针智谱照抄剧本在戏。全量基线未刷新（并行窗在制品，见 LOG 09-22） |
 | 2026-09-21 (selftalk 移植+双尾巴根治) | edd3c47 | **v3.8.19**：`d8b7046` cherry-pick 入 main（送达回写记忆/唯一身份路径/档位静态门禁/追问收口，净增 32 用例，1689 收集/1688 通过/1 跳过双端全绿）；知识槽身份自源过滤收口项11 语义冲突；channel-status `sessions_root` 隔离；分支 `wt/selftalk-fix` 归档为 tag `archive/selftalk-fix` 后删除 |

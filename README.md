@@ -8,13 +8,13 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-1786-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-1995-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **测试口径**（2026-09-22 R3 验收收口，本地=服务器双端分块实测）：后端 **1893 passed / 1 skipped**（收集 **1894**，0 失败；现役角色卡 **41 张**）；⚠️ 单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> **测试口径**（2026-09-23 收尾轮本地四分块实测，`6f80a5c` 基线）：后端 **1897 passed / 1 skipped**（收集 **1898**，0 失败；现役角色卡 **41 张**；服务器侧本批仅做账本隔离专项验收 98 例，全量未重跑）；⚠️ 单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
 > 前端 `98 passed`（vitest 16 文件）+ `tsc --noEmit` 0 错误。
 > ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 7）。**引用基线必须同时声明卡数**。
 
@@ -188,7 +188,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │       ├── store/        Zustand 3 个（authStore / characterBuilderStore / errorStore）
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
-├── tests/                1893 后端测试通过 + 1 跳过（2026-09-22 R3 验收收口双端分块实测，收集 1894）+ 98 前端测试
+├── tests/                1897 后端测试通过 + 1 跳过（2026-09-23 收尾轮本地四分块实测，收集 1898）+ 98 前端测试
 ├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 41 张）
 └── main.py               入口
 ```
