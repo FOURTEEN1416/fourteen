@@ -7,6 +7,18 @@
 
 ---
 
+## 2026-09-24 — 记忆域 P0 根治：user_facts_fts 虚表残缺自愈 + 事实写入失败可见性闭环（`6896b6c` 三端一致）
+
+- **触发**：默默令「查看最新状态」→ 巡检抓到生产 `app.log` 累计 **46 条** `[semantic_memory] Failed to add fact: vtable constructor failed: user_facts_fts`（最早 **09-21 12:45**）→ 默默令「赶紧修复」。
+- **定性（v1.38 遗留①「user_facts 0 行」的真根因，此前误归因账本污染）**：`user_facts_fts` shadow 表残缺（`_config` 缺失/空）→ 虚表构造失败 → **同步触发器 `facts_fts_insert` 使主表 `user_facts` 的任何 INSERT 整体回滚** → 事实层写入全程静默失败（`remember_facts`/上传分片/`memory_service.add_fact` 三路径全废 → 事实检索恒空）。文件本体 `integrity_check ok`、FTS5 模块可用、本地库健康（仅服务器损坏）。
+- **四环根因**：① `CREATE VIRTUAL TABLE IF NOT EXISTS` 对「定义在、shadow 残缺」不作为 → 损坏 100% 持久；② `add_fact` 宽 except 只 warning + `return False`（3 天潜伏仅 46 条 warning）；③ **`remember_facts` 第二层谎报**——`SemanticMemory.add_fact` 失败返回 `False` 被当 `fid` 塞进 `written` → `ToolResult(True)` 假成功；④ `StructuredMemory` 默认库路径写在 `__init__` 参数签名里，conftest 无挂钩点（第 4 处同类隔离缺口）。破坏时点与 `sqlite.db.bak-20260921-1321` 留痕吻合（09-21 12:45–13:21 有对生产库的直接操作）。
+- **根治（`38852be`+`6896b6c`）**：① `_init_db` 增 `_heal_facts_fts` 自愈——检测虚表在而 `_config` 缺失/空 → 补齐 shadow（标准结构 + `version` 通行证行）→ 正常 DROP → 同事务裸重建虚表。**两个反直觉约束实证在案**：残缺虚表连 `DROP TABLE` 都不可用（SQLite 对涉及虚表的语句先构造实例）；同连接 writable_schema 摘除后 `IF NOT EXISTS` 仍被 schema cache 骗过——补 shadow 恢复可构造是唯一通路。② 默认路径提为模块级 `_DB_DEFAULT` + conftest 接入（第 4 缺口闭合）。③ 失败日志 warning → error。④ 工具 falsy/`-1` 返回计入 `failed`，全失败 `ToolResult(False, fact_write_failed)`，部分失败随 `data.failed` 透出。**竞态补丁（`6896b6c`）**：首版自愈部署后 4 worker 并发交错产出「shadow 齐 + version 在仍构造失败」的混合残局 → `BEGIN IMMEDIATE` 跨 worker 互斥 + 锁内双重检测 + 异常 ROLLBACK + 重建自包含。
+- **生产修复**：备份（`sqlite.db.bak-20260924-fts-heal` + wal）→ 停服 → writable_schema 摘除虚表定义 + shadow 清理 + 重建 → **主表+触发器+FTS 插入链打通**（探针 id=18 接续历史 seq 17、清理后归零）→ 起服。终版 `6896b6c` 重启后 FTS 状态健康（config=1）、插入链终验 OK、health 200。
+- **验证**：红测先行（新增 `tests/test_memory_fts_selfheal.py` 8 例，首跑 **5 failed** 命中全部缺陷）→ 转绿 8/8；受影响面 74+50+39 全绿；**突变验红 3/3**（自愈回退 / fid 校验回退 / error 降级各自转红，还原后复跑 8 passed）；ruff 0 错；ci_gates 4/4。三端本地=origin=服务器=`6896b6c`。
+- **遗留**：① 事实层从 0 重新积累——`remember_facts` 写入链已通，画像生日等需重新告知（存量不可恢复，`user_facts` 损坏期间本就无写入）；② 生产 `agent_plane.db` 既存测试污染条目按审计线索保留；③ FTS `MATCH` 中文命中 behaved 弱（unicode61 分词），观察项不动代码。
+
+---
+
 ## 2026-09-23 主控窗 — 两枚 P1 上线收口 + 启动通道同步 P2 根治（`6f80a5c` 三端一致）+ 主动消息日志终结分析
 
 - **触发**：默默批准「服务器 pull `ad828f7`+`d57cb5f` 并重启（A 档规程，nginx 零改动、不触大赛冻结）」；随后下令「**主动消息到此为止**，从未真正成功过一次，最近还是需要你的检查和监督，分析日志。最后一轮收尾任务：更新文档（尤其反映代码现状的一大批）、清除中间产物、清理临时文件」。
