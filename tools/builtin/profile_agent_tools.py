@@ -187,6 +187,7 @@ class RememberFactsTool(BaseTool):
         from utils.prompt_sanitize import is_injectable_fact
 
         written = []
+        failed = []
         for item in kwargs.get("facts") or []:
             if not isinstance(item, dict):
                 continue
@@ -204,11 +205,22 @@ class RememberFactsTool(BaseTool):
                     user_key=user_key,
                     topics=topics if isinstance(topics, list) else None,
                 )
+                # 2026-09-24：失败可见性——SemanticMemory.add_fact 失败返回
+                # False（bool 契约）、StructuredMemory 空事实返回 -1。旧实现
+                # 把 falsy 返回值当 fid 塞进 written → ToolResult(True) 假成功
+                # （FTS 虚表残缺期间「记住」一直假报成功）。
+                if not fid or fid == -1:
+                    failed.append({"fact": fact, "category": cat})
+                    continue
                 written.append({"id": fid, "fact": fact, "category": cat})
             except Exception as e:  # noqa: BLE001
                 logger.warning("remember_facts write failed: %s", e)
+                failed.append({"fact": fact, "category": cat})
         if not written:
-            return ToolResult(False, error="no_valid_facts")
+            return ToolResult(
+                False,
+                error="fact_write_failed" if failed else "no_valid_facts",
+            )
         import contextlib
 
         with contextlib.suppress(Exception):
@@ -216,7 +228,11 @@ class RememberFactsTool(BaseTool):
                 session_key=user_key, facts=written, action="write"
             )
         logger.info("[profile_agent] remember user=%s n=%d", user_key, len(written))
-        return ToolResult(True, data={"written": written, "user_key": user_key})
+        data: dict = {"written": written, "user_key": user_key}
+        if failed:
+            # 部分失败必须随结果透出，供模型与调用方感知（不许静默吞）
+            data["failed"] = failed
+        return ToolResult(True, data=data)
 
 
 class ForgetFactsTool(BaseTool):

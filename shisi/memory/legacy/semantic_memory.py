@@ -107,7 +107,10 @@ class SemanticMemory:
                 logger.debug("semantic_knowledge store failed: %s", e)
             return True
         except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to add fact: %s", e)
+            # 2026-09-24：失败必须 error 级——warning 曾使「FTS 虚表残缺 →
+            # 事实层写入全程失败」在生产潜伏 3 天仅 46 条 warning 无人察觉
+            # （谎言家族：失败可见性分级）。
+            logger.error("Failed to add fact: %s", e)
             return False
 
     @staticmethod

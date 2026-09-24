@@ -118,6 +118,20 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # 结构化记忆主库（2026-09-24 P0）：StructuredMemory 默认库同为宿主
+    # data/sqlite.db，_DB_DEFAULT 提为模块常量后此处才有挂钩点。无隔离时
+    # 测试实例化即直连宿主库（FTS 虚表残缺自愈批的镜像缺口闭合）。
+    try:
+        from shisi.memory.legacy import structured_memory as _sm_mod
+
+        monkeypatch.setattr(
+            _sm_mod, "_DB_DEFAULT",
+            str(tmp_path_factory.mktemp("sm_state") / "sqlite.db"),
+            raising=False,
+        )
+    except Exception:
+        pass
+
     # 热点池落盘（2026-09-22 W3 热点知识链）：collect 写 data/hot_topics.json，
     # 无隔离会把测试条目写进宿主真实池（同类事故模式）。
     try:

@@ -29,6 +29,12 @@ from typing import Any
 from utils import session_key as session_key_mod
 from utils.local_time import local_day_utc_bounds, now_local
 
+# 默认库路径（2026-09-24 提为模块常量）：供 tests/conftest 的
+# isolate_runtime_state_files monkeypatch——旧实现把默认值写在 __init__
+# 参数签名里，测试隔离无挂钩点，测试实例化即直连宿主 data/sqlite.db
+# （与 scheduler_config / agent_plane.db 同类事故的第三处镜像缺口）。
+_DB_DEFAULT = "./data/sqlite.db"
+
 logger = logging.getLogger("structured_memory")
 
 # 全局注册表，用于跟踪所有 StructuredMemory 实例，确保程序退出时关闭连接
@@ -73,7 +79,9 @@ class StructuredMemory:
     提供各表的 CRUD 操作，线程安全（连接级锁）。
     """
 
-    def __init__(self, db_path: str = "./data/sqlite.db"):
+    def __init__(self, db_path: str | None = None):
+        # 默认走模块常量 _DB_DEFAULT（conftest 可 patch）；显式传参优先（向后兼容）
+        db_path = db_path or _DB_DEFAULT
         self.db_path = os.path.abspath(db_path)
 
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
@@ -139,6 +147,9 @@ class StructuredMemory:
         """初始化数据库和表结构"""
         with self._conn() as conn:
             assert conn is not None
+            # 2026-09-24 P0 自愈：残缺 FTS 虚表先 DROP（见方法 docstring），
+            # 随后的 CREATE VIRTUAL TABLE IF NOT EXISTS 才会真正重建。
+            self._heal_facts_fts(conn)
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS user_facts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -277,6 +288,68 @@ class StructuredMemory:
             ):
                 conn.execute(f"DROP TABLE IF EXISTS {dead}")  # noqa: S608
             conn.commit()
+
+    def _heal_facts_fts(self, conn) -> None:
+        """user_facts_fts 虚表残缺自检 + 自愈（2026-09-24 P0 根治）。
+
+        ``CREATE VIRTUAL TABLE IF NOT EXISTS`` 只看 sqlite_master 是否已有同名
+        虚表，对「定义在、shadow 表残缺」的损坏态**不作为** → 损坏 100% 持久：
+        任何 ``user_facts`` INSERT 都被同步触发器 ``facts_fts_insert`` 连带抛
+        ``vtable constructor failed``，主表写入整体回滚（生产 09-21 12:45 起
+        46 条告警、``user_facts`` 恒 0 行实锤）。FTS5 初始化必向 ``*_config``
+        写版本行，故 ``_config`` 缺失或为空即残缺。
+
+        🔴 残缺虚表**连 ``DROP TABLE`` 都不可用**（SQLite 对涉及虚表的任何
+        语句都先构造实例），且同连接 writable_schema 摘除后 ``IF NOT EXISTS``
+        仍被 schema cache 骗过。唯一可靠路径 = **先把 shadow 表补齐到可构造**
+        （``_config`` 补 version 行；缺失的 shadow 表按 FTS5 标准结构重建），
+        让虚表恢复可构造 → 正常 ``DROP``（连带清 shadow）→ 主建表脚本的
+        ``IF NOT EXISTS`` 随即真正重建。两条损坏形态均经本地实测闭合。
+        """
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_facts_fts'"
+            ).fetchone()
+            if row is None:
+                return  # 虚表本就不存在，交给正常建表
+            broken = False
+            try:
+                n = conn.execute(
+                    "SELECT COUNT(*) FROM user_facts_fts_config"
+                ).fetchone()[0]
+                broken = not n
+            except sqlite3.OperationalError:
+                broken = True  # _config 表缺失，残缺确凿
+            if not broken:
+                return
+            logger.warning(
+                "user_facts_fts 虚表残缺（_config 缺失/空），执行自愈重建: %s",
+                self.db_path,
+            )
+            # 1) 补齐缺失的 shadow 表（结构 = FTS5 标准 shadow，缺哪张补哪张）
+            for shadow_ddl in (
+                "CREATE TABLE IF NOT EXISTS 'user_facts_fts_data'"
+                "(id INTEGER PRIMARY KEY, block BLOB)",
+                "CREATE TABLE IF NOT EXISTS 'user_facts_fts_idx'"
+                "(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID",
+                "CREATE TABLE IF NOT EXISTS 'user_facts_fts_docsize'"
+                "(id INTEGER PRIMARY KEY, sz BLOB)",
+                "CREATE TABLE IF NOT EXISTS 'user_facts_fts_config'"
+                "(k PRIMARY KEY, v) WITHOUT ROWID",
+            ):
+                conn.execute(shadow_ddl)  # noqa: S608
+            # 2) version 行 = 构造通行证（FTS5 初始化本会写入的值）
+            conn.execute(
+                "INSERT OR REPLACE INTO user_facts_fts_config VALUES('version','4')"
+            )
+            conn.commit()
+            # 3) 虚表现已可构造 → 正常 DROP（连带清全部 shadow）
+            conn.execute("DROP TABLE user_facts_fts")
+            conn.commit()
+            logger.warning("user_facts_fts 残缺虚表已摘除，交由建表脚本重建")
+        except Exception as e:  # noqa: BLE001
+            # 自愈失败不阻断初始化（保持库可用性优先）；error 级确保可见
+            logger.error("user_facts_fts 自愈检查失败: %s", e)
 
     def _migrate_chat_history_columns(self, conn) -> None:
         """chat_history 幂等迁移：发言者归属（2026-09-21 重扫）。
