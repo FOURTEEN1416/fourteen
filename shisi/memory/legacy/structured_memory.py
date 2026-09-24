@@ -16,6 +16,7 @@ working_memory/sessions（唯一写入者 DB 版 WorkingMemory 已拆除）四�
 from __future__ import annotations
 
 import atexit
+import contextlib
 import json
 import logging
 import os
@@ -307,46 +308,65 @@ class StructuredMemory:
         ``IF NOT EXISTS`` 随即真正重建。两条损坏形态均经本地实测闭合。
         """
         try:
-            row = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_facts_fts'"
-            ).fetchone()
-            if row is None:
-                return  # 虚表本就不存在，交给正常建表
-            broken = False
+            # 🔴 跨 worker 互斥（2026-09-24 生产实证）：4 worker 同启时并发
+            # 补 shadow/DROP/重建会交错产出混合残局（首版自愈部署后生产库
+            # 即呈现「shadow 齐 + version 在仍构造失败」）。BEGIN IMMEDIATE
+            # 拿写锁；后到 worker 锁内二次检测见健康即跳过。
+            conn.commit()  # 结束 sqlite3 隐式事务，防 BEGIN 嵌套
+            conn.execute("BEGIN IMMEDIATE")
             try:
-                n = conn.execute(
-                    "SELECT COUNT(*) FROM user_facts_fts_config"
-                ).fetchone()[0]
-                broken = not n
-            except sqlite3.OperationalError:
-                broken = True  # _config 表缺失，残缺确凿
-            if not broken:
-                return
-            logger.warning(
-                "user_facts_fts 虚表残缺（_config 缺失/空），执行自愈重建: %s",
-                self.db_path,
-            )
-            # 1) 补齐缺失的 shadow 表（结构 = FTS5 标准 shadow，缺哪张补哪张）
-            for shadow_ddl in (
-                "CREATE TABLE IF NOT EXISTS 'user_facts_fts_data'"
-                "(id INTEGER PRIMARY KEY, block BLOB)",
-                "CREATE TABLE IF NOT EXISTS 'user_facts_fts_idx'"
-                "(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID",
-                "CREATE TABLE IF NOT EXISTS 'user_facts_fts_docsize'"
-                "(id INTEGER PRIMARY KEY, sz BLOB)",
-                "CREATE TABLE IF NOT EXISTS 'user_facts_fts_config'"
-                "(k PRIMARY KEY, v) WITHOUT ROWID",
-            ):
-                conn.execute(shadow_ddl)  # noqa: S608
-            # 2) version 行 = 构造通行证（FTS5 初始化本会写入的值）
-            conn.execute(
-                "INSERT OR REPLACE INTO user_facts_fts_config VALUES('version','4')"
-            )
-            conn.commit()
-            # 3) 虚表现已可构造 → 正常 DROP（连带清全部 shadow）
-            conn.execute("DROP TABLE user_facts_fts")
-            conn.commit()
-            logger.warning("user_facts_fts 残缺虚表已摘除，交由建表脚本重建")
+                row = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_facts_fts'"
+                ).fetchone()
+                if row is None:
+                    conn.execute("ROLLBACK")
+                    return  # 虚表本就不存在，交给正常建表
+                broken = False
+                try:
+                    n = conn.execute(
+                        "SELECT COUNT(*) FROM user_facts_fts_config"
+                    ).fetchone()[0]
+                    broken = not n
+                except sqlite3.OperationalError:
+                    broken = True  # _config 表缺失，残缺确凿
+                if not broken:
+                    conn.execute("ROLLBACK")
+                    return  # 双重检测：别的 worker 已修好
+                logger.warning(
+                    "user_facts_fts 虚表残缺（_config 缺失/空），执行自愈重建: %s",
+                    self.db_path,
+                )
+                # 1) 补齐缺失的 shadow 表（结构 = FTS5 标准 shadow，缺哪张补哪张）
+                for shadow_ddl in (
+                    "CREATE TABLE IF NOT EXISTS 'user_facts_fts_data'"
+                    "(id INTEGER PRIMARY KEY, block BLOB)",
+                    "CREATE TABLE IF NOT EXISTS 'user_facts_fts_idx'"
+                    "(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID",
+                    "CREATE TABLE IF NOT EXISTS 'user_facts_fts_docsize'"
+                    "(id INTEGER PRIMARY KEY, sz BLOB)",
+                    "CREATE TABLE IF NOT EXISTS 'user_facts_fts_config'"
+                    "(k PRIMARY KEY, v) WITHOUT ROWID",
+                ):
+                    conn.execute(shadow_ddl)  # noqa: S608
+                # 2) version 行 = 构造通行证（FTS5 初始化本会写入的值）
+                conn.execute(
+                    "INSERT OR REPLACE INTO user_facts_fts_config VALUES('version','4')"
+                )
+                # 3) 虚表现已可构造 → 正常 DROP（连带清全部 shadow）
+                conn.execute("DROP TABLE user_facts_fts")
+                # 4) 立即裸重建（自包含，不依赖主建表脚本的执行时序；
+                #    正常 DROP 路径无 schema cache 问题）
+                conn.execute(
+                    "CREATE VIRTUAL TABLE user_facts_fts USING fts5("
+                    "fact, content='user_facts', content_rowid='id')"
+                )
+                conn.execute("COMMIT")
+                logger.warning("user_facts_fts 自愈重建完成")
+            except Exception:
+                # 回滚半成品，不留混合残局（ROLLBACK 失败=已无活动事务，可忽略）
+                with contextlib.suppress(sqlite3.OperationalError):
+                    conn.execute("ROLLBACK")
+                raise
         except Exception as e:  # noqa: BLE001
             # 自愈失败不阻断初始化（保持库可用性优先）；error 级确保可见
             logger.error("user_facts_fts 自愈检查失败: %s", e)
