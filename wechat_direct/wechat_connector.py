@@ -1774,6 +1774,14 @@ class WeChatConnector:
             result = {}
 
         reply = result.get("reply", "")
+        # 入口再洗一遍（与 orchestrator 同源）：防「角色翻转/自问自答」
+        # 被 split_reply 拆成多条后像她跟自己说话（2026-09-25 生产截图）
+        try:
+            from utils.prompt_sanitize import sanitize_reply_text
+
+            reply = sanitize_reply_text(reply) or reply
+        except Exception:  # noqa: BLE001
+            pass
         error = result.get("error", "")
         process_time = result.get("process_time")
 

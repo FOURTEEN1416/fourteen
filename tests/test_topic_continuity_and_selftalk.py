@@ -172,3 +172,35 @@ def test_ase_sanitize_rejects_invented_user():
 
     assert sanitize_message("哼，才两小时没说话就想知道月饼啥味？我又不是没尝过。") is None
     assert sanitize_message("中秋快乐呀") == "中秋快乐呀"
+
+
+def test_sanitize_reply_strips_role_flip_self_response():
+    """生产截图（2026-09-25）：自己说「眯了一会儿」又接「那你再眯一会儿」。"""
+    from utils.prompt_sanitize import sanitize_reply_text
+
+    raw = (
+        "也是\n"
+        "大中午的确实睡不着\n"
+        "刚才是太晒了\n"
+        "在窗边靠着眯了一会儿\n"
+        "那你再眯一会儿，别硬撑了"
+    )
+    out = sanitize_reply_text(raw)
+    assert "那你再眯一会儿" not in out
+    assert "在窗边靠着眯了一会儿" in out
+    assert "也是" in out
+
+
+def test_sanitize_reply_keeps_legitimate_advice_to_user():
+    """上文说的是「你」时，劝用户是正常对话，不得误杀。"""
+    from utils.prompt_sanitize import sanitize_reply_text
+
+    raw = "你说你很累？那你再眯一会儿，别硬撑了"
+    assert sanitize_reply_text(raw) == raw
+
+
+def test_sanitize_reply_keeps_monologue_lines():
+    from utils.prompt_sanitize import sanitize_reply_text
+
+    raw = "也是\n大中午的确实睡不着\n刚才是太晒了"
+    assert sanitize_reply_text(raw) == raw

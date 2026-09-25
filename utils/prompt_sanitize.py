@@ -179,6 +179,8 @@ ROLE_CLARITY_RULE = (
     "- 若记忆与用户刚说的话冲突，以用户刚说的为准。\n"
     "- **禁止一人分饰两角**：不得生成用户的台词，不得写「用户：/User:/对方：」剧本体，"
     "不得自己提问再自己回答。只输出**你自己**要说的那一段话。\n"
+    "- **禁止角色翻转**：不要把自己刚说的事当成对方说的去回应"
+    "（例：自己说「我眯了一会儿」之后，不得接「那你再眯一会儿」）。\n"
 )
 
 # ── 当前话题续聊（2026-09-23：像人一样把一个话题聊下去）──
@@ -258,11 +260,16 @@ def extract_current_topics(
 
 
 def sanitize_reply_text(text: str) -> str:
-    """清洗生成回复：剥掉「双人剧本体」，只保留角色自己要说的话。
+    """清洗生成回复：剥掉「双人剧本体 / 角色翻转」，只保留角色自己要说的话。
 
-    生产症状（2026-09-23）：模型偶尔按 mes_example 格式吐出
-    「用户：…\\n角色：…」或自问自答两行；`split_reply_for_wechat` 再按换行
-    拆成多条微信 → 用户看到她「说一句又自己接一句」。
+    生产症状（2026-09-25 截图）：
+    ```
+    在窗边靠着眯了一会儿
+    那你再眯一会儿，别硬撑了
+    ```
+    她先说**自己**眯了一会儿，下一句却对你「那你再眯一会儿」——把
+    自己刚说的当成你说的（角色翻转）。`split_reply_for_wechat` 再按换行
+    拆成多条微信，用户看到的就是「自问自答 / 自己接自己」。
     """
     s = str(text or "").strip()
     if not s:
@@ -290,6 +297,11 @@ def sanitize_reply_text(text: str) -> str:
     if not s:
         return str(text or "").strip()
 
+    # 角色翻转截断：自己说完又「那你/你别…」去说对方 → 从翻转行起丢弃
+    s = _truncate_role_flip(s)
+    if not s:
+        return str(text or "").strip()
+
     # 自问自答结构：「问？答」且答段以应答腔开头 → 只保留问句
     m = re.match(
         r"^(.{2,40}?[？?])[\s\n]*(.{2,80})$",
@@ -306,6 +318,37 @@ def sanitize_reply_text(text: str) -> str:
         ):
             return question
     return s
+
+
+# 「对你开口」的翻转行：那你/你别/你再/你要/你去/你先 + 动作
+_ROLE_FLIP_ADDR = re.compile(
+    r"^(?:那你|你别|你再|你要|你去|你先|你快|你可|记得你|你也|你也该|你可得)"
+)
+# 自述行为（前一行）：有「我」或省略主语的动作
+_SELF_STATEMENT = re.compile(
+    r"(我|咱|本(?:姑娘|小姐|座|大爷))|"
+    r"(靠着|坐着|躺着|睡|眯|歇|吃|喝|忙|累|困|晕|晒).{0,8}(了一会儿|一下|着|了|过)"
+)
+
+
+def _truncate_role_flip(s: str) -> str:
+    """若下一行在「对你开口」且上一行是「自述行为」→ 判定角色翻转，截断。
+
+    生产实证：「在窗边靠着眯了一会儿 / 那你再眯一会儿，别硬撑了」
+    ——上句是她自己眯的，下句却让用户再眯 = 把自己刚说的当成用户说的。
+    """
+    lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
+    if len(lines) < 2:
+        return s
+    out: list[str] = []
+    for i, line in enumerate(lines):
+        if i > 0 and _ROLE_FLIP_ADDR.match(line):
+            prev = lines[i - 1]
+            # 上一行是自述、且未提到「你」→ 这句「那你…」是把自己话当用户话
+            if "你" not in prev and _SELF_STATEMENT.search(prev):
+                break
+        out.append(line)
+    return "\n".join(out).strip()
 
 
 TOPIC_CONTINUITY_RULE = (
