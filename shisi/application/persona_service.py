@@ -115,6 +115,7 @@ class PersonaService:
         #  分不清哪句是用户/哪句是自己）。记忆改为独立标注段，真对话只走 messages。
         from utils.prompt_sanitize import (
             ROLE_CLARITY_RULE,
+            TOPIC_CONTINUITY_RULE,
             sanitize_episodic,
             sanitize_fact_list,
             sanitize_reflections,
@@ -122,6 +123,16 @@ class PersonaService:
 
         mem_ctx = memory_context if isinstance(memory_context, dict) else {}
         mem_parts: list[str] = ["# 记忆上下文（供参考，**不是**本轮对话记录）"]
+
+        # 当前话题续聊钩子（2026-09-23）：像真人一样把一个话题聊下去
+        current_topics = mem_ctx.get("current_topics") or []
+        if isinstance(current_topics, str):
+            current_topics = [t for t in current_topics.split("、") if t.strip()]
+        if current_topics:
+            mem_parts.append(
+                "\n## 当前话题（请沿着聊下去）\n"
+                + "、".join(str(t) for t in current_topics[:3])
+            )
 
         # 用户画像槽（A3 + AX P1）：读 EventLedger 投影；禁止编造画像外信息
         # P0-1：画像键只取结构化 user_key/_user_key——旧实现把整段 memory 字符串
@@ -199,6 +210,8 @@ class PersonaService:
             injection_parts.append(memory_block)
         # 角色归属硬约束：真对话只在 messages；system 记忆不是用户发言
         injection_parts.append(ROLE_CLARITY_RULE.strip())
+        # 话题续聊：像人一样接着聊，不跳题、不自问自答
+        injection_parts.append(TOPIC_CONTINUITY_RULE.strip())
 
         if world_info:
             injection_parts.append(f"# 世界与时间\n{world_info}")

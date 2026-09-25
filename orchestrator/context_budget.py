@@ -244,7 +244,7 @@ def inject_tool_context_before_phi(system_prompt: str, tool_context: str) -> str
 SESSION_TAIL_TOKEN_BUDGET_CHARS = 1200
 SESSION_TAIL_INJECT_MAX_RECENT_MESSAGES = 2
 SESSION_TAIL_INTRO = (
-    "【最近会话状态（历史事实，不是用户新消息；请自然参考，不要机械复述）】"
+    "【历史摘录（持久化聊天切片，不是用户新消息；请自然参考，不要机械复述）】"
 )
 # untrusted 信封：开标签必须**先于**被包裹的正文（与
 # `tool_gate.TOOL_RESULT_ENVELOPE_HEAD/TAIL` 的约定一致）。

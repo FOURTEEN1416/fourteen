@@ -197,7 +197,10 @@ class CharacterAggregate(BaseModel):
         if dialogue_examples:
             parts.extend([
                 "",
-                "# 对话示例（仅示范语气与格式，不要照抄示例内容）",
+                "# 对话示例（仅示范语气与格式）",
+                "⚠️ 只示范说话口吻和长短。**禁止照抄示例内容**，"
+                "**禁止模仿示例的「用户：/角色名：」对话结构**，"
+                "禁止把示例当成真实聊过的话。你只输出你自己要说的那句。",
                 dialogue_examples,
             ])
 

@@ -837,6 +837,18 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         except Exception as e:  # noqa: BLE001
             logger.debug("sanitize_llm_history failed: %s", e)
 
+        # 当前话题续聊钩子（2026-09-23）：从近期对话提取话题，进 memory_context，
+        # 由 persona_service 渲染为「# 当前话题」+ 续聊指令（像人一样把话说下去）。
+        try:
+            from utils.prompt_sanitize import extract_current_topics
+
+            current_topics = extract_current_topics(
+                chat_history, current_user_message=user_msg_clean
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("extract_current_topics failed: %s", e)
+            current_topics = []
+
         # 世界信息动态注入
         world_info = ""
         wip = self.components.get("world_info")
@@ -863,6 +875,16 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         context_lengths = budgeted["lengths"]
 
         # ── B-d 跨会话尾巴：实时窗口尚浅时注入持久化历史切片（untrusted）──
+        # 话题键并入 memory_context（persona_service 渲染续聊钩子）
+        if current_topics:
+            if isinstance(memory_context, dict):
+                memory_context["current_topics"] = current_topics
+            elif isinstance(memory_context, str) and memory_context:
+                memory_context = (
+                    f"{memory_context}\n[当前话题] {'、'.join(current_topics)}"
+                )
+            else:
+                memory_context = {"current_topics": current_topics}
         session_tail = ""
         hist_len = (
             len(chat_history) if isinstance(chat_history, list) else 0
@@ -1366,6 +1388,22 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     reply = get_fallback_line(
                         character_id, "empty_reply", read_reply_mode()
                     )
+
+                # 自问自答清洗（2026-09-23）：剥「用户：/角色：」剧本体，
+                # 丢掉自问自答里自己答自己的那段（否则拆条发出像她跟自己说话）
+                try:
+                    from utils.prompt_sanitize import sanitize_reply_text
+
+                    _cleaned_reply = sanitize_reply_text(reply)
+                    if _cleaned_reply and _cleaned_reply != reply:
+                        logger.debug(
+                            "reply sanitized (dialogue/self-talk) len %d→%d",
+                            len(str(reply or "")),
+                            len(_cleaned_reply),
+                        )
+                        reply = _cleaned_reply
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("sanitize_reply_text failed: %s", e)
 
                 # A3：生成后仅对硬违规做轻量替换（流式已推送不改写）
                 try:

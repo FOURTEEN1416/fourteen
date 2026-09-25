@@ -328,6 +328,13 @@ class _StreamPipelineMixin:
 
                 # 10. 最终全量输出安全校验（兜底）
                 reply = full_reply
+                # 自问自答/剧本体清洗：token 已推给用户，但历史必须干净
+                try:
+                    from utils.prompt_sanitize import sanitize_reply_text
+
+                    reply = sanitize_reply_text(reply) or reply
+                except Exception:  # noqa: BLE001
+                    pass
                 output_result = safety.check_output(reply)
                 if not output_result.is_safe:
                     # 极端情况：流式抽检漏过，最终校验拦截
