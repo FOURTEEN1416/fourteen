@@ -94,8 +94,36 @@ def test_sanitize_llm_history_merges_consecutive_assistant():
     assert [m["role"] for m in out] == ["user", "assistant", "user"]
     assert "主动消息一句" in out[1]["content"]
     assert "追问接话一句" in out[1]["content"]
-    # 合并必须压成单行——换行会让模型把一段话看成对话剧本多轮
-    assert "\n" not in out[1]["content"]
+    # 禁止用「；」压行（会教模型说「？；；」）——保留换行即可
+    assert "；" not in out[1]["content"]
+
+
+def test_sanitize_llm_history_no_semicolon_style():
+    """历史绝不能出现「；」压行——模型会照抄成「？；；」说话。"""
+    from utils.prompt_sanitize import sanitize_llm_history
+
+    hist = [
+        {"role": "user", "content": "在吗"},
+        {"role": "assistant", "content": "也是\n大中午的睡不着\n刚才是太晒了"},
+    ]
+    out = sanitize_llm_history(hist)
+    assert "；" not in out[0]["content"]
+    assert "；" not in out[1]["content"]
+    assert "睡不着" in out[1]["content"]
+
+
+def test_sanitize_reply_strips_semicolon_artifacts():
+    """生产截图（2026-09-25）：回复里出现「？；；」「好梦。；哼」。"""
+    from utils.prompt_sanitize import sanitize_reply_text
+
+    raw = "哼，这么快就晚安？；；好好休息，明天还要继续忙碌呢。"
+    out = sanitize_reply_text(raw)
+    assert "；" not in out
+    assert "晚安？好好休息" in out
+
+    raw2 = "晚安，做个好梦。；哼，早点睡，别再熬夜了。；晚安，明天见。"
+    out2 = sanitize_reply_text(raw2)
+    assert "；" not in out2
 
 
 def test_sanitize_llm_history_still_dedups_current_user():
@@ -110,8 +138,8 @@ def test_sanitize_llm_history_still_dedups_current_user():
     assert out[-1]["role"] == "assistant"
 
 
-def test_sanitize_llm_history_collapses_newlines_in_message():
-    """多行 assistant 会教模型写「对话剧本」——历史注入前压成单行。"""
+def test_sanitize_llm_history_keeps_newlines_but_no_semicolon():
+    """多行保留换行（微信自然）；禁止「；」压行（会被模型照抄成说话风格）。"""
     from utils.prompt_sanitize import sanitize_llm_history
 
     hist = [
@@ -119,7 +147,7 @@ def test_sanitize_llm_history_collapses_newlines_in_message():
         {"role": "assistant", "content": "也是\n大中午的睡不着\n刚才是太晒了"},
     ]
     out = sanitize_llm_history(hist)
-    assert "\n" not in out[1]["content"]
+    assert "；" not in out[1]["content"]
     assert "大中午的睡不着" in out[1]["content"]
 
 

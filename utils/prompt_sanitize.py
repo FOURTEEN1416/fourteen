@@ -155,13 +155,18 @@ def sanitize_llm_history(
             continue
         # 连续同角色合并（主动/追问/回复都可能是连续 assistant）——
         # 多数对话模型默认 user/assistant 交替，连续同角色会让它「脑补」
-        # 对方发言并自问自答。合并时**压成单行**（用「；」连接）：
-        # 换行会让模型把一段话看成「对话剧本」的多轮，继续写双人戏。
+        # 对方发言并自问自答。
+        # ⚠️ 严禁用「；」压行（2026-09-25 回归实证）：历史里的「；」会被模型
+        # 当成自己的说话风格照抄进回复（产出「？；；」「好梦。；哼」），
+        # 而且 split_reply 认换行不认分号 → 整段糊成一条发出。
+        # 保留换行（真人微信就是一条条想）；合并连续条目时用换行连接。
         if cleaned and cleaned[-1]["role"] == role:
-            joined = cleaned[-1]["content"] + "；" + text.replace("\n", "；")
-            cleaned[-1] = {"role": role, "content": joined}
+            cleaned[-1] = {
+                "role": role,
+                "content": cleaned[-1]["content"] + "\n" + text,
+            }
         else:
-            cleaned.append({"role": role, "content": text.replace("\n", "；")})
+            cleaned.append({"role": role, "content": text})
     cur = str(current_user_message or "").strip()
     if cur and cleaned and cleaned[-1]["role"] == "user" and cleaned[-1]["content"] == cur:
         cleaned.pop()
@@ -295,6 +300,14 @@ def sanitize_reply_text(text: str) -> str:
     s = "\n".join(cleaned).strip()
     if not s:
         return str(text or "").strip()
+
+    # 残留「；；」风格清洗（2026-09-25 回归：历史曾用；压行被模型照抄）
+    # 只清「压行残留」：连续分号、句末标点后的分号、行首分号；
+    # 正文里正常的中文分号（分句）保留。
+    s = re.sub(r"[；;]{2,}", "", s)
+    s = re.sub(r"([？?。！!…])[；;]+", r"\1", s)
+    s = re.sub(r"(?m)^[；;]+", "", s)
+    s = re.sub(r"[；;](?=[\s]|$)", "", s)
 
     # 角色翻转截断：自己说完又「那你/你别…」去说对方 → 从翻转行起丢弃
     s = _truncate_role_flip(s)
