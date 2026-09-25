@@ -1277,6 +1277,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 _SESSION_QUEUE_TIMEOUT, session_id,
             )
             return {"reply": "等下，我还没回完上一条", "error": "queue_timeout"}
+        # 注：queue_timeout / not_initialized / internal_error 走统一出口前
+        # 不写历史（用户尚未进入生成链，无 assistant 行可写；user 行由调用方
+        # 在成功路径的 write_chat_history_sync 负责）。
 
         # 用户级 LLM gateway（API Key 隔离）：若提供 user_id + user_llm_config，
         # 本次请求使用用户专属 gateway，否则回退到全局共享 gateway。
@@ -1352,10 +1355,24 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                         logger.warning("LLM 调用超时 (30s), session=%s", session_id)
                         from utils.fallback_lines import get_fallback_line
                         from utils.reply_mode import read_reply_mode
+                        _fb = get_fallback_line(
+                            character_id, "timeout", read_reply_mode()
+                        )
+                        # 超时旁路也必须落历史：否则用户这句话凭空消失，
+                        # 下一轮她「不记得你说过」甚至把旧话当成你刚说的。
+                        try:
+                            memory = self.components.get("memory")
+                            if memory and hasattr(memory, "write_chat_history_sync"):
+                                memory.write_chat_history_sync(
+                                    user_msg=user_msg_clean,
+                                    reply=_fb,
+                                    session_id=session_id,
+                                    character_id=str(character_id or ""),
+                                )
+                        except Exception as e:  # noqa: BLE001
+                            logger.debug("timeout history write failed: %s", e)
                         return {
-                            "reply": get_fallback_line(
-                                character_id, "timeout", read_reply_mode()
-                            ),
+                            "reply": _fb,
                             "error": "timeout",
                         }
 
@@ -1471,7 +1488,19 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
             except Exception:
                 logger.exception("消息处理异常")
-                return {"reply": "（处理消息时出现异常, 请稍后重试）", "error": "internal_error"}
+                _err_fb = "（处理消息时出现异常, 请稍后重试）"
+                try:
+                    memory = self.components.get("memory")
+                    if memory and hasattr(memory, "write_chat_history_sync"):
+                        memory.write_chat_history_sync(
+                            user_msg=user_msg_clean,
+                            reply=_err_fb,
+                            session_id=session_id,
+                            character_id=str(character_id or ""),
+                        )
+                except Exception:  # noqa: BLE001
+                    pass
+                return {"reply": _err_fb, "error": "internal_error"}
 
     def health_check(self) -> dict[str, Any]:
         results = {}

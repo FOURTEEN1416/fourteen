@@ -94,6 +94,8 @@ def test_sanitize_llm_history_merges_consecutive_assistant():
     assert [m["role"] for m in out] == ["user", "assistant", "user"]
     assert "主动消息一句" in out[1]["content"]
     assert "追问接话一句" in out[1]["content"]
+    # 合并必须压成单行——换行会让模型把一段话看成对话剧本多轮
+    assert "\n" not in out[1]["content"]
 
 
 def test_sanitize_llm_history_still_dedups_current_user():
@@ -106,6 +108,19 @@ def test_sanitize_llm_history_still_dedups_current_user():
     ]
     out = sanitize_llm_history(hist, current_user_message="现在七点28分")
     assert out[-1]["role"] == "assistant"
+
+
+def test_sanitize_llm_history_collapses_newlines_in_message():
+    """多行 assistant 会教模型写「对话剧本」——历史注入前压成单行。"""
+    from utils.prompt_sanitize import sanitize_llm_history
+
+    hist = [
+        {"role": "user", "content": "在吗"},
+        {"role": "assistant", "content": "也是\n大中午的睡不着\n刚才是太晒了"},
+    ]
+    out = sanitize_llm_history(hist)
+    assert "\n" not in out[1]["content"]
+    assert "大中午的睡不着" in out[1]["content"]
 
 
 # ══════════════════════════════════════════════════════════

@@ -155,14 +155,13 @@ def sanitize_llm_history(
             continue
         # 连续同角色合并（主动/追问/回复都可能是连续 assistant）——
         # 多数对话模型默认 user/assistant 交替，连续同角色会让它「脑补」
-        # 对方发言并自问自答。合并后仍保留原文语义，用换行分隔。
+        # 对方发言并自问自答。合并时**压成单行**（用「；」连接）：
+        # 换行会让模型把一段话看成「对话剧本」的多轮，继续写双人戏。
         if cleaned and cleaned[-1]["role"] == role:
-            cleaned[-1] = {
-                "role": role,
-                "content": cleaned[-1]["content"] + "\n" + text,
-            }
+            joined = cleaned[-1]["content"] + "；" + text.replace("\n", "；")
+            cleaned[-1] = {"role": role, "content": joined}
         else:
-            cleaned.append({"role": role, "content": text})
+            cleaned.append({"role": role, "content": text.replace("\n", "；")})
     cur = str(current_user_message or "").strip()
     if cur and cleaned and cleaned[-1]["role"] == "user" and cleaned[-1]["content"] == cur:
         cleaned.pop()
