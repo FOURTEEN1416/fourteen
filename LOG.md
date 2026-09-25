@@ -7,6 +7,22 @@
 
 ---
 
+## 2026-09-25 — 话题续聊 + 自问自答根治：像人一样把一个话题聊下去（`9b53072` 三端一致）
+
+- **触发**：用户报「智能体的回复像是在自问自答，分不清哪句是我说的/他说的，甚至自己说一句再回自己那句」+ 核心诉求「**我需要它像人一样真的能够按照一个话题聊下去**」；标注纠正两条：① **追问必须接话**（不是改成无关关心）；② 解法先调研再动手。
+- **调研**：对齐 nana/my-raze/Artemis 的 topics 续聊钩子 + 本仓 `docs/research/2026-09-20_AI伴侣开源对照深研`（P1「回复不跟话题」已有方案草案）；GitHub 检索 SillyTavern memory 扩展 / companion-app / infinite-conversation-architecture 等。**核出真缺口**：`get_memory_context` 里的 topics/relationship_facts **从未进主 prompt**（主链走 `retrieve_context`，persona 只渲染 facts/reflections）；且缺「此刻在聊什么」的活话题（事实里的 topics 滞后）。
+- **根治（`9b53072`，10 文件 +382/−8）**：
+  1. **当前话题续聊钩子**：`extract_current_topics`（近几条用户原话+当前句+实体词表+「聊/说/关于X」）→ orchestrator 并入 `memory_context.current_topics` → persona 注入 `# 当前话题` + `TOPIC_CONTINUITY_RULE`（回应细节→补想法/经历→自然追问；**2~3 轮守题**；禁生成对方台词/自问自答）。
+  2. **追问保持接话**（用户裁决）：`_send_followup` prompt 改「必须接着上面的聊天内容**接话**」——接住对方具体事（细节/情绪/待办）、追问进展或延伸感受；不改成无关关心。
+  3. **自问自答输出清洗**：`sanitize_reply_text` 剥「用户：/人名：」剧本体、丢掉自答段（`split_reply_for_wechat` 拆条后像她跟自己说话的直接成因）；流式路径同步落历史。
+  4. **角色归属硬约束**：`ROLE_CLARITY_RULE` 补「禁止一人分饰两角/禁止生成用户台词」；mes_example 强标注禁照抄对话结构；session_tail 标签改「历史摘录」。
+  5. **历史角色卫生**：`sanitize_llm_history` 合并连续同角色（主动+追问+回复），防模型脑补对方发言。
+  6. **immersive 指令**补「把一个话题聊下去」：层层深入，不每轮抛无关新点。
+- **验证**：新增 `tests/test_topic_continuity_and_selftalk.py` **14/14**；相关回归 81+127+154 绿（prompt/身份/followup/记忆/归属）；ruff 0 错；pre-commit 门禁全过。**三端**：本地=origin=服务器=`9b530722`，关键 blob 3/3 一致（`prompt_sanitize`/`persona_service`/`optimized_orchestrator`）；`remote_deploy.sh` 4/4（pip -e / npm ci / vite build / restart）；health **200**、服务 active、nginx 仅 reload 零配置改动。
+- **边界**：流式 token 已推送用户后才清洗（历史干净，当条展示无法回撤）——prompt 侧禁令为主防线；话题词表为规则提取（不走 LLM），漏提可后续按需扩表。
+
+---
+
 ## 2026-09-24 — 记忆域 P0 根治：user_facts_fts 虚表残缺自愈 + 事实写入失败可见性闭环（`6896b6c` 三端一致）
 
 - **触发**：默默令「查看最新状态」→ 巡检抓到生产 `app.log` 累计 **46 条** `[semantic_memory] Failed to add fact: vtable constructor failed: user_facts_fts`（最早 **09-21 12:45**）→ 默默令「赶紧修复」。
