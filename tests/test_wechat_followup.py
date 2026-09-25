@@ -285,7 +285,8 @@ def test_send_followup_passes_real_history_with_roles(tmp_path, monkeypatch):
     assert call["session_key"] == "u1@im.wechat"
     assert [m["role"] for m in call["history"]] == ["user", "assistant", "user", "assistant"]
     assert call["history"][-1]["content"] == "哦，那你先忙"
-    assert "接着上面的聊天内容" in call["prompt"]
+    assert "延伸你自己" in call["prompt"]
+    assert "禁止虚构对方" in call["prompt"]
     assert "哦，那你先忙" in call["prompt"]      # 明确点出她自己最后那句
 
 

@@ -93,6 +93,13 @@ _REASONING_PHRASES: tuple[str, ...] = (
     "输出：",
 )
 
+# 虚构对方发言/自问自答（2026-09-25 生产「就想知道月饼啥味？」）
+_INVENTED_USER_RE = re.compile(
+    r"(就想知道|你想知道|你就想|你又想|你是想|你是不是想|"
+    r"你刚说|你刚才说|你不是说|你(?:就)?(?:想|问|打算|准备|要)"
+    r"(?:知道|问|尝|吃|试|看|说))"
+)
+
 _EMOJI_RE = re.compile(
     "[\U0001f300-\U0001faff\u2600-\u27bf\ufe0f\u2190-\u21ff\u2b00-\u2bff]+"
 )
@@ -145,6 +152,11 @@ def sanitize_message(text: str) -> str | None:
         cleaned = lines[-1]
     cleaned = cleaned.strip()
     if len(cleaned) < 2 or looks_like_reasoning(cleaned):
+        return None
+    # 自问自答/虚构对方发言（生产实证 2026-09-25：「才两小时没说话就想知道
+    # 月饼啥味？」——对方并未提问，模型把上一条自己埋的点当成用户追问）
+    if _INVENTED_USER_RE.search(cleaned):
+        logger.debug("主动消息命中虚构对方发言，丢弃: %r", cleaned[:60])
         return None
     return cleaned
 
@@ -573,8 +585,10 @@ class MessageGenerator:
 3. **必须与上面「你记得的用户信息 / 用户最后一句」有关联**（自己提起对方
    说过的事，例如问"军训累不累"）；完全没有关联信息时就从时间与情境切入
 4. 不要编造对方没说过的处境
-5. 长度控制在 20 字以内
-6. 直接输出消息内容，不要解释
+5. **禁止虚构对方的发言/提问**（不要写「你想知道…」「你问…」「你就想…」）
+6. 不要自问自答
+7. 长度控制在 20 字以内
+8. 直接输出消息内容，不要解释
 
 消息："""
 

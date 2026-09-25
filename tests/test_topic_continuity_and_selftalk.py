@@ -153,7 +153,22 @@ def test_followup_prompt_keeps_jiehua():
     from wechat_direct import wechat_connector as wc
 
     src = inspect.getsource(wc)
-    assert "接话" in src
-    assert "接着上面的聊天内容" in src
-    # 不得退化成「补充/关心」而丢掉接话
-    assert "必须接着上面的聊天内容接话" in src
+    assert "接话" in src or "延伸你自己" in src
+    # 对方没回时：只延伸自己，禁止虚构对方提问
+    assert "禁止虚构对方" in src or "禁止虚构对方的发言" in src
+    assert "延伸你自己" in src
+
+
+def test_followup_rejects_invented_user_speech():
+    """生产实证（2026-09-25）：「就想知道月饼啥味？」= 虚构对方提问，必须拒发。"""
+    from proactive.ase_engine import _INVENTED_USER_RE
+
+    assert _INVENTED_USER_RE.search("才两小时没说话就想知道月饼啥味？")
+    assert not _INVENTED_USER_RE.search("月饼是我特意留的，你尝尝")
+
+
+def test_ase_sanitize_rejects_invented_user():
+    from proactive.ase_engine import sanitize_message
+
+    assert sanitize_message("哼，才两小时没说话就想知道月饼啥味？我又不是没尝过。") is None
+    assert sanitize_message("中秋快乐呀") == "中秋快乐呀"
