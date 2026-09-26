@@ -201,7 +201,12 @@ async def proactive_state(_auth: bool = Security(verify_api_key_dep)):
     orch = deps.orch
     if orch and orch._ase:
         state = orch._ase.health_check()
-        state["paused"] = getattr(orch._ase, "_paused", False)
+        # 块4：读数与真源同源 —— 引擎内存里那份只反映本 worker，暂停由
+        # 任一 worker 发起时本端必须仍显示真实状态。
+        from proactive.scheduler import ProactiveScheduler
+
+        blk = (ProactiveScheduler._read_config_file() or {}).get("proactive") or {}
+        state["paused"] = bool(blk.get("paused", getattr(orch._ase, "_paused", False)))
         return state
     return {}
 
@@ -418,13 +423,28 @@ async def pause_proactive(
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
-    """暂停/恢复主动消息调度（暂停后 tick 直接跳过，不影响手动发送）。"""
+    """暂停/恢复主动消息调度（暂停后**生成前**即短路，不影响手动发送）。
+
+    块4（缺陷 D）：写 `data/scheduler_config.json` 为跨 worker 真源 —— 旧实现
+    只 `orch._ase.apply_runtime_config(paused=...)`（本 worker 内存），而生产
+    4 worker 中只有 master 跑调度器：POST 落到别的 worker 时暂停完全无效，
+    重启亦归零。
+    """
+    from proactive.scheduler import ProactiveScheduler
+
+    scheduler = _scheduler_or_none()
+    if scheduler is not None and hasattr(scheduler, "set_paused"):
+        paused = bool(scheduler.set_paused(req.paused))
+    else:
+        # 非 master worker：只写文件，master 下个 tick（≤5 分钟）重载生效；
+        # 本 worker 若持有引擎也同步一份，保持 /state 读数一致。
+        ProactiveScheduler.write_config_file(proactive_paused=bool(req.paused))
+        paused = bool(req.paused)
     orch = deps.orch
-    if not orch or not orch._ase:
-        raise HTTPException(503, "Proactive engine not initialized")
-    orch._ase.apply_runtime_config(paused=req.paused)
-    logger.info("Proactive scheduler paused=%s", req.paused)
-    return {"status": "ok", "paused": req.paused}
+    if orch and orch._ase and hasattr(orch._ase, "apply_runtime_config"):
+        orch._ase.apply_runtime_config(paused=paused)
+    logger.info("Proactive scheduler paused=%s", paused)
+    return {"status": "ok", "paused": paused}
 
 
 class ProactiveSendRequest(BaseModel):

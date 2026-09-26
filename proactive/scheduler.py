@@ -173,6 +173,11 @@ class ProactiveScheduler:
         # 提醒到期投递任务（api 装配层注入；每分钟轮询，豁免静默时段）
         self._reminder_task: Callable[[], None] | None = None
         self._quiet_hours = (23, 7)       # 23:00-07:00 免打扰（web 端可调）
+        # 块4（缺陷 D）：**暂停**此前只存在于 `orch._ase._paused`（单 worker 内存），
+        # 生产 4 uvicorn worker 下 POST 落在任一 worker、调度器只在 master ——
+        # 于是「按了暂停，她照发」；重启亦归零。现与 quiet_hours 同级：文件为真源、
+        # master 每 tick 重载、LLM 决策**之前**生效。
+        self._paused = False
         # 重要日期当日幂等记录（每小时任务 + 00:05 维护可能同日命中）
         self._important_dates_sent: set[str] = set()
         # AX P2：夜间记忆 curator
@@ -523,6 +528,7 @@ class ProactiveScheduler:
         vault_interval: int | None = None,
         follow_up: dict[str, Any] | None = None,
         llm_proactive: dict[str, Any] | None = None,
+        proactive_paused: bool | None = None,
     ) -> dict[str, Any]:
         # P1-53 续（2026-09-21）：读-改-写必须**跨进程**互斥。旧实现只持
         # `cls._CONFIG_LOCK`（进程内 threading.Lock），而本文件是 4 个 uvicorn
@@ -548,6 +554,12 @@ class ProactiveScheduler:
             if vault_interval is not None:
                 vault["interval_minutes"] = max(10, int(vault_interval))
             data["vault"] = vault
+            if proactive_paused is not None:
+                blk = data.get("proactive")
+                if not isinstance(blk, dict):
+                    blk = {}
+                blk["paused"] = bool(proactive_paused)
+                data["proactive"] = blk
 
         try:
             return json_state.update_json(cls._CONFIG_PATH, _mutate)
@@ -577,11 +589,38 @@ class ProactiveScheduler:
         # 否则会「生成→扣配额→投递被丢弃」（2026-09-19 生产事故根因）。
         if self.ase is not None and hasattr(self.ase, "set_quiet_hours"):
             self.ase.set_quiet_hours(self._quiet_hours[0], self._quiet_hours[1])
+        # 块4（缺陷 D）：暂停同样以文件为准回填，并按当前值同步引擎侧闸门
+        # （引擎内那份 `_paused` 只是 tick 级闸，LLM 决策链要的是调度器这份）。
+        proactive_blk = data.get("proactive")
+        if isinstance(proactive_blk, dict) and "paused" in proactive_blk:
+            self._paused = bool(proactive_blk["paused"])
+            self._sync_paused_to_engines()
         vault = data.get("vault") or {}
         if "enabled" in vault:
             self._vault_enabled = bool(vault["enabled"])
         if "interval_minutes" in vault:
             self._vault_interval_min = max(10, int(vault["interval_minutes"]))
+
+    # ── 暂停（web 开关；跨 worker / 重启一致的主动消息总闸）──
+
+    def set_paused(self, paused: bool) -> bool:
+        """暂停/恢复主动消息。**只**改暂停开关，绝不借道改写频率参数
+        （DECISION_LEDGER:118 明令禁止用「暂停」恢复硬频率闸）。"""
+        self._paused = bool(paused)
+        self.write_config_file(proactive_paused=self._paused)
+        self._sync_paused_to_engines()
+        logger.info("主动消息暂停开关: paused=%s", self._paused)
+        return self._paused
+
+    def is_paused(self) -> bool:
+        return bool(self._paused)
+
+    def _sync_paused_to_engines(self) -> None:
+        """把暂停态扇出到 ASE 引擎（tick 级闸与调度级闸同一口径）。"""
+        if self.ase is None or not hasattr(self.ase, "apply_runtime_config"):
+            return
+        with contextlib.suppress(Exception):
+            self.ase.apply_runtime_config(paused=self._paused)
 
     def _save_config_file(self) -> None:
         self.write_config_file(
@@ -592,12 +631,17 @@ class ProactiveScheduler:
 
     def reload_config(self) -> None:
         """master worker 周期性从文件重载（其他 worker 的写 ≤5 分钟内生效）。"""
-        before = (self._quiet_hours, self._vault_enabled, self._vault_interval_min)
+        before = (self._quiet_hours, self._vault_enabled, self._vault_interval_min,
+                  self._paused)
         self._load_config_file()
-        after = (self._quiet_hours, self._vault_enabled, self._vault_interval_min)
+        after = (self._quiet_hours, self._vault_enabled, self._vault_interval_min,
+                 self._paused)
         if before != after:
             self._sync_vault_job()
-            logger.info("调度器配置已重载: quiet=%s vault=%s", self._quiet_hours, self.get_vault_config())
+            logger.info(
+                "调度器配置已重载: quiet=%s vault=%s paused=%s",
+                self._quiet_hours, self.get_vault_config(), self._paused,
+            )
 
     def _sync_vault_job(self) -> None:
         """按当前开关状态增删 APScheduler 任务（幂等）。"""
@@ -888,6 +932,15 @@ class ProactiveScheduler:
         )
 
         web_cfg = read_web_proactive_config()
+        if self._paused:
+            # 块4（缺陷 D）：暂停必须在**生成之前**短路。旧实现只把 paused 存在
+            # ASE 引擎里（tick 级），而生产主动消息走的是这条 LLM 决策链 ——
+            # 引擎里的闸从未被本链读到，表现为「控制台按了暂停，她照发」。
+            append_proactive_event(
+                session_key=user_key, sent=False, reason="paused",
+                character_id=self._resolve_character_id(str(user_key)),
+            )
+            return
         if not web_cfg.get("enabled", True):
             # P1-51：关闭态账本事件每用户每日至多一条（旧实现每 tick 写一行，
             # enabled=false 反而让 agent_plane.db 涨得最快）
@@ -1006,6 +1059,10 @@ class ProactiveScheduler:
         wait_m = decision.get("wait_minutes")
         if isinstance(wait_m, int) and wait_m > 0:
             self._llm_proactive_next_ok[str(user_key)] = _now + float(wait_m) * 60.0
+            # 块4（缺陷 J）：模型自判的等待窗必须落盘 —— 旧实现只有投递失败的
+            # 退避侧落盘（块E），成功/skip 侧留内存，重启即归零 → 她会在模型
+            # 明确说「X 分钟后再说」的窗口里提前开口。
+            self._persist_throttle_ledger()
         if not decision.get("should_contact"):
             append_proactive_event(
                 session_key=user_key,
