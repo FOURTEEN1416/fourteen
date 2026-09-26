@@ -123,27 +123,31 @@ def test_hub_get_runtime_config_merges_replay(hub_tmp):
     assert cfg.get("paused") is True
 
 
-# ── P1-19：手动发送落具体引擎、禁 hub 影子属性 ────────────────────
+# ── P1-19：配额落具体引擎、禁 hub 影子属性（+ W3-E 旁路拆除）────────
 
 
-def test_resolve_engine_for_manual_send_hits_concrete_engine(hub_tmp):
+def test_manual_send_returns_quota_on_concrete_engine_not_hub(hub_tmp):
     hub_tmp.get("1:a")
     e2 = hub_tmp.get("2:b")
-    key, eng = hub_tmp.resolve_engine_for_manual_send()
-    assert key == "2:b" and eng is e2
     # 端点配额归还必须赋在**具体引擎**上；经 hub 代理读同属性即见真值
-    eng._daily_message_count = 3
+    e2._daily_message_count = 3
     assert hub_tmp._daily_message_count == 3
     # 危害钉死：赋在 hub 实例上会写进 hub.__dict__、永久遮蔽 __getattr__ 代理
     # （旧端点写法 ase = orch._ase; ase._daily_message_count -= 1 即此模式，
     # 引擎侧配额从未真正归还）
     hub_tmp._daily_message_count = 0
     assert hub_tmp.__dict__["_daily_message_count"] == 0
-    assert eng._daily_message_count == 3
+    assert e2._daily_message_count == 3
 
 
-def test_resolve_engine_empty_hub_returns_none(hub_tmp):
-    assert hub_tmp.resolve_engine_for_manual_send() is None
+def test_recent_engine_bypass_removed(hub_tmp):
+    """「最近一个引擎」旁路随 W3 缺陷 E 拆除：手动发送只按显式会话键取引擎。
+
+    它一旦被重新引入，就等于把「A 的自测消息发给不相关用户」的路径复活 ——
+    路由层因此必须报 400 而不是猜一个目标（见 test_w3_scheduler_state）。
+    """
+    hub_tmp.get("1:a")
+    assert not hasattr(hub_tmp, "resolve_engine_for_manual_send")
 
 
 # ── P1-20/25：adaptive 频控接线 + 配置生效 ────────────────────────

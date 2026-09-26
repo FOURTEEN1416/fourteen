@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import math
 from collections.abc import Callable
@@ -453,6 +454,21 @@ class ProactiveScheduler:
                 coalesce=True,
             )
 
+            # 9. 跨 worker 控制命令消费（每5秒；W3 缺陷 E）
+            #    API worker 里 3/4 没有调度器（run_api 选主把非 master 的
+            #    components['scheduler'] 置 None），手动发送只能落持久命令；
+            #    本进程是 master，执行后回写**真实回执**（受理才算数）。
+            self._scheduler.add_job(
+                self._safe_job_wrapper(self._drain_control_commands, "control_commands"),
+                IntervalTrigger(seconds=5),
+                id="control_commands",
+                name="控制命令消费",
+                replace_existing=True,
+                misfire_grace_time=10,
+                coalesce=True,
+                max_instances=1,
+            )
+
             self._scheduler.start()
             # 知识库定期采集任务按持久化配置恢复
             self._sync_vault_job()
@@ -621,6 +637,139 @@ class ProactiveScheduler:
             return
         with contextlib.suppress(Exception):
             self.ase.apply_runtime_config(paused=self._paused)
+
+    @staticmethod
+    def _plane():
+        """控制面 ``proactive.runtime_plane`` —— fail-soft，不可用时返回 None。
+
+        与 ``api.run_api._plane`` / ``wechat_direct.wechat_connector._plane`` 同口径：
+        缺控制面只意味着「没有跨 worker 命令面」，本机手动发送仍可直投。
+        """
+        try:
+            from proactive import runtime_plane
+
+            return runtime_plane
+        except Exception as e:  # noqa: BLE001
+            logger.debug("控制面不可用，手动发送退回本机直投: %s", e)
+            return None
+
+    def manual_send_now(
+        self, session_key: str, message_type: str | None = None,
+    ) -> dict[str, Any]:
+        """控制台自测：在**指定会话**上生成一条主动消息并走真实 `_deliver` 定向投递。
+
+        🔴 2026-09-27（W3 缺陷 E）三条纪律，旧实现三条都反着做：
+
+        1. **目标显式**：只投 ``session_key`` 这一路会话。旧实现取 hub「最近一个」
+           引擎（``resolve_engine_for_manual_send``）再 ``_send_to_all`` 广播 ——
+           A 的自测消息打给所有绑定用户。
+        2. **复用真实投递**：``_deliver`` 的返回值就是 ``delivered``；静默时段在
+           生成**之前**拒绝（旧实现照样烧一次 LLM，再 ``create_task`` 即报
+           delivered=True，通道拒收/无归属连接也一起算成功）。
+        3. **不预记账**：``sent_history`` 只在受理后写。
+
+        配额仍归还（2026-09-18 生产实证：自测几次耗尽当日 8 条额度使自动消息
+        全天停发），但保留生成时写入的 30 分钟冷却。
+        """
+        key = str(session_key or "").strip()
+        if not key:
+            return {"status": "rejected", "delivered": False, "reason": "no_target"}
+        hub = self.ase
+        getter = getattr(hub, "get", None)
+        if not callable(getter):
+            logger.error("手动发送跳过：ASE 注入非 hub（%s）", type(hub).__name__)
+            return {"status": "rejected", "delivered": False, "reason": "no_engine"}
+        if self._is_quiet_hours():
+            logger.warning(
+                "免打扰时段(%s-%s)：手动发送未生成未投递 session=%s",
+                self._quiet_hours[0], self._quiet_hours[1], key,
+            )
+            return {
+                "status": "rejected", "delivered": False, "reason": "quiet_hours",
+                "session_key": key,
+            }
+
+        eng = getter(key)
+        quota_before = int(getattr(eng, "_daily_message_count", 0) or 0)
+        try:
+            if message_type:
+                from proactive.ase_engine import ProactiveType
+
+                try:
+                    chosen = ProactiveType(str(message_type))
+                except ValueError:
+                    return {
+                        "status": "rejected", "delivered": False,
+                        "reason": f"unknown_message_type:{message_type}",
+                        "session_key": key,
+                    }
+                result = eng._generate_and_return(chosen)
+            else:
+                eng._update_urgency(eng._hours_since_last_chat())
+                scene = eng._check_scene_triggers()
+                if scene and float(getattr(eng.urgency, "total", 0.0)) >= 2.0:
+                    result = eng._record_and_return(scene)
+                else:
+                    result = eng._generate_and_return(eng._select_type_by_urgency())
+            if not result:
+                logger.warning("手动发送生成失败 session=%s", key)
+                return {"status": "failed", "delivered": False, "reason": "generation_failed",
+                        "session_key": key}
+
+            message = str(result.get("message") or "")
+            delivered = bool(
+                self._deliver(message, session_key=key,
+                              character_id=self._resolve_character_id(key))
+            )
+            public = {k: v for k, v in result.items() if not str(k).startswith("_")}
+            if not delivered:
+                logger.warning("手动发送未获投递受理 session=%s", key)
+                return {"status": "not_delivered", "delivered": False,
+                        "reason": "deliver_rejected", "session_key": key, **public}
+            # 受理之后才记账（旧实现发送前就写 sent_history）
+            recorder = getattr(eng, "record_sent_entry", None)
+            if callable(recorder):
+                recorder(result)
+            logger.info("手动发送已定向投递 session=%s [%s]", key, public.get("type"))
+            return {"status": "sent", "delivered": True, "session_key": key, **public}
+        finally:
+            if int(getattr(eng, "_daily_message_count", quota_before)) != quota_before:
+                logger.info("手动发送归还当日配额：%d -> %d",
+                            getattr(eng, "_daily_message_count", 0), quota_before)
+                eng._daily_message_count = quota_before
+
+    def _drain_control_commands(self) -> None:
+        """消费跨 worker 转投的控制命令（APScheduler 任务，只在 master 跑）。
+
+        API worker 里没有调度器（``run_api._ensure_scheduler_singleton`` 把非
+        master 的 components['scheduler'] 置 None），手动发送只能落持久命令，
+        由 master 执行并回写**真实回执**；``CLAIM_TTL`` 过期自动重投。
+        """
+        rp = self._plane()
+        if rp is None:
+            return
+        try:
+            while True:
+                row = rp.claim_next_control("proactive_manual")
+                if not row:
+                    break
+                cid = int(row.get("id") or 0)
+                sk = str(row.get("session_key") or "")
+                try:
+                    payload = json.loads(str(row.get("payload") or "{}"))
+                except Exception:  # noqa: BLE001
+                    payload = {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                result = self.manual_send_now(sk, message_type=payload.get("message_type"))
+                rp.complete_control(
+                    cid,
+                    ok=bool(result.get("delivered")),
+                    result=json.dumps(result, ensure_ascii=False),
+                    reason=str(result.get("reason") or ""),
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("控制命令消费异常（下轮重试）: %s", e)
 
     def _refresh_binding_truth(self) -> None:
         """把角色绑定缓存回灌到 SQLite 真源（块4，缺陷 D）。

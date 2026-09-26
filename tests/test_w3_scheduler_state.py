@@ -20,6 +20,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 
 def _quiet_window_excluding_now() -> tuple[int, int]:
@@ -508,3 +509,328 @@ def test_hub_cache_hit_adopts_fresher_disk_interaction(tmp_path, monkeypatch):
 
     assert hub.get(key) is eng, "缓存实例必须复用（不新建）"
     assert eng._last_user_message == "我明天要体检"
+
+
+
+# ── E：手动发送显式授权目标 + 复用真实 _deliver + 不预记账 ────────────────
+#
+# 旧实现三处各自撒谎：① 目标取 `resolve_engine_for_manual_send()`（hub 里
+# **最近一个**引擎，与控制台想发给谁无关）；② 投递是 `asyncio.create_task(
+# _send_to_all(...))` —— 广播给所有绑定用户，且 task 一建立就 `delivered = True`
+# （静默时段 / 通道拒收 / 无归属连接全都报"已受理"）；③ 发送前就写 sent_history。
+# 行为纪律落在 `ProactiveScheduler.manual_send_now`（唯一 owner，master 执行）；
+# 路由只做目标解析与跨 worker 转投（生产 4 worker 中 3 个 scheduler 为 None）。
+
+
+class _ManualEngine:
+    """ASEEngine 契约桩：只提供手动发送用到的生成与记账方法。"""
+
+    def __init__(self, key: str, message: str = "你好呀"):
+        self.key = key
+        self._message = message
+        self._daily_message_count = 0
+        self.sent_history: list[dict] = []
+        self.generated: list = []
+        self.urgency = type("U", (), {"total": 5.0})()
+
+    def _update_urgency(self, _hours: float) -> None:
+        pass
+
+    def _hours_since_last_chat(self) -> float:
+        return 9.0
+
+    def _check_scene_triggers(self, commit: bool = True):
+        return None
+
+    def _select_type_by_urgency(self):
+        return "morning"
+
+    def _generate_and_return(self, msg_type):
+        # 真引擎内部 _record_proactive_sent：配额 +1、写冷却
+        self._daily_message_count += 1
+        self.generated.append(getattr(msg_type, "value", msg_type))
+        return {
+            "message": self._message,
+            "type": str(getattr(msg_type, "value", msg_type)),
+            "_committed": True,
+        }
+
+    def _record_and_return(self, scene):
+        self._daily_message_count += 1
+        self.generated.append(scene)
+        return {"message": self._message, "type": str(scene)}
+
+    def record_sent_entry(self, entry: dict) -> None:
+        self.sent_history.append(entry)
+
+
+class _ManualHub:
+    def __init__(self, keys: list[str]):
+        self.engines = {k: _ManualEngine(k) for k in keys}
+        self.got: list[str] = []
+
+    def known_user_keys(self) -> list[str]:
+        return list(self.engines)
+
+    def get(self, key: str):
+        self.got.append(key)
+        return self.engines[key]
+
+    def resolve_engine_for_manual_send(self):  # 旧"最近引擎"路径，新实现不得再用
+        last = list(self.engines)[-1]
+        return last, self.engines[last]
+
+
+async def _async_true():
+    return True
+
+
+def _wire_manual_send(sched, hub, monkeypatch, *, deliver_ok=True):
+    calls: list[tuple] = []
+    broadcasts: list[str] = []
+
+    def _deliver(message, session_key=None, character_id=None):
+        calls.append((message, session_key, character_id))
+        return deliver_ok
+
+    monkeypatch.setattr(sched, "_deliver", _deliver)
+    monkeypatch.setattr(
+        sched, "_send_to_all",
+        lambda msg: broadcasts.append(msg) or _async_true(),
+    )
+    monkeypatch.setattr(sched, "_resolve_character_id", lambda sk: "micai")
+    sched.ase = hub
+    return calls, broadcasts
+
+
+def _local_now_hour() -> int:
+    from proactive.ase_engine import _local_now
+
+    return _local_now().hour
+
+
+def test_manual_send_targets_only_the_authorized_session(sched_sandbox, monkeypatch):
+    hub = _ManualHub(["7:wx_a@im.wechat", "8:wx_b@im.wechat"])
+    calls, broadcasts = _wire_manual_send(sched_sandbox, hub, monkeypatch)
+
+    result = sched_sandbox.manual_send_now("7:wx_a@im.wechat")
+
+    assert result["delivered"] is True
+    assert calls == [("你好呀", "7:wx_a@im.wechat", "micai")]
+    assert broadcasts == [], "绝不广播"
+    assert hub.got == ["7:wx_a@im.wechat"], "引擎必须落在该会话键上"
+    assert hub.engines["8:wx_b@im.wechat"].generated == []
+
+
+def test_manual_send_quiet_hours_rejects_without_generating(sched_sandbox, monkeypatch):
+    hub = _ManualHub(["7:wx_a@im.wechat"])
+    calls, _bc = _wire_manual_send(sched_sandbox, hub, monkeypatch)
+    h = _local_now_hour()
+    sched_sandbox._quiet_hours = (h, (h + 1) % 24)  # 当前小时必在窗内
+
+    result = sched_sandbox.manual_send_now("7:wx_a@im.wechat")
+
+    assert result["delivered"] is False
+    assert result["reason"] == "quiet_hours"
+    assert hub.engines["7:wx_a@im.wechat"].generated == [], "静默时段不白烧 LLM"
+    assert calls == []
+
+
+def test_manual_send_does_not_account_before_acceptance(sched_sandbox, monkeypatch):
+    hub = _ManualHub(["7:wx_a@im.wechat"])
+    _wire_manual_send(sched_sandbox, hub, monkeypatch, deliver_ok=False)
+
+    result = sched_sandbox.manual_send_now("7:wx_a@im.wechat")
+
+    assert result["status"] != "sent"
+    assert result["delivered"] is False
+    assert hub.engines["7:wx_a@im.wechat"].sent_history == [], "未受理不得记账"
+
+
+def test_manual_send_records_after_acceptance_and_returns_quota(sched_sandbox, monkeypatch):
+    hub = _ManualHub(["7:wx_a@im.wechat"])
+    _wire_manual_send(sched_sandbox, hub, monkeypatch)
+    eng = hub.engines["7:wx_a@im.wechat"]
+    eng._daily_message_count = 3
+
+    result = sched_sandbox.manual_send_now("7:wx_a@im.wechat")
+
+    assert result["status"] == "sent"
+    assert [e["message"] for e in eng.sent_history] == ["你好呀"]
+    assert eng._daily_message_count == 3, "自测归还额度（生成时 +1 必须还回）"
+    assert "_committed" not in result, "内部记账字段不外露"
+
+
+class _RouteScheduler:
+    def __init__(self, result):
+        self._result = result
+        self.calls: list[tuple] = []
+
+    def manual_send_now(self, session_key, message_type=None):
+        self.calls.append((session_key, message_type))
+        return dict(self._result)
+
+
+def _call_send(monkeypatch, hub, scheduler, **req_kw):
+    import asyncio
+
+    import api.routers.training_routes as tr
+    from api.deps import deps
+
+    monkeypatch.setattr(deps, "orch", _Orch(scheduler, hub), raising=False)
+    req = tr.ProactiveSendRequest(**req_kw) if req_kw else None
+    return asyncio.run(tr.send_proactive_now(req, _auth=True, _admin=(1, None)))
+
+
+def test_route_passes_authorized_session_to_scheduler(monkeypatch):
+    hub = _ManualHub(["7:wx_a@im.wechat", "8:wx_b@im.wechat"])
+    sched = _RouteScheduler({"status": "sent", "delivered": True, "message": "你好呀"})
+
+    result = _call_send(
+        monkeypatch, hub, sched, session_key="7:wx_a@im.wechat", message_type="meal"
+    )
+
+    assert sched.calls == [("7:wx_a@im.wechat", "meal")]
+    assert result["delivered"] is True
+
+
+def test_route_refuses_ambiguous_target(monkeypatch):
+    """未指定目标且有多个会话 → 400（旧实现取 hub 最近引擎，与意图无关）。"""
+    hub = _ManualHub(["7:wx_a@im.wechat", "8:wx_b@im.wechat"])
+    sched = _RouteScheduler({"status": "sent", "delivered": True})
+
+    with pytest.raises(HTTPException) as exc:
+        _call_send(monkeypatch, hub, sched)
+    assert exc.value.status_code == 400
+    assert sched.calls == []
+
+
+def test_route_unique_session_needs_no_explicit_target(monkeypatch):
+    hub = _ManualHub(["7:wx_a@im.wechat"])
+    sched = _RouteScheduler({"status": "sent", "delivered": True})
+
+    _call_send(monkeypatch, hub, sched)
+
+    assert sched.calls == [("7:wx_a@im.wechat", None)]
+
+
+def test_route_relays_to_master_and_reports_real_receipt(monkeypatch):
+    """非 master worker（scheduler 为 None）：转投控制命令给 master，以回执为准。"""
+    import json as _json
+
+    import proactive.runtime_plane as rp
+
+    hub = _ManualHub(["7:wx_a@im.wechat"])
+    enq: list[tuple] = []
+    monkeypatch.setattr(
+        rp, "enqueue_control",
+        lambda kind, session_key="", payload="": enq.append((kind, session_key, payload)) or 77,
+    )
+    monkeypatch.setattr(
+        rp, "wait_for_control",
+        lambda cid, timeout=90.0, poll=0.3: {
+            "id": cid, "status": "accepted",
+            "result": _json.dumps({"status": "sent", "delivered": True, "message": "还没睡？"}),
+            "fail_reason": "",
+        },
+    )
+
+    result = _call_send(monkeypatch, hub, None, session_key="7:wx_a@im.wechat")
+
+    assert enq and enq[0][0] == "proactive_manual" and enq[0][1] == "7:wx_a@im.wechat"
+    assert result["delivered"] is True
+
+
+def test_route_reports_failure_when_master_rejects(monkeypatch):
+    """master 判失败 → 绝不报已受理（旧实现 create_task 即 delivered=True）。"""
+    import proactive.runtime_plane as rp
+
+    hub = _ManualHub(["7:wx_a@im.wechat"])
+    monkeypatch.setattr(rp, "enqueue_control", lambda *a, **k: 78)
+    monkeypatch.setattr(
+        rp, "wait_for_control",
+        lambda cid, timeout=90.0, poll=0.3: {
+            "id": cid, "status": "failed", "result": "",
+            "fail_reason": "deliver_rejected",
+        },
+    )
+
+    result = _call_send(monkeypatch, hub, None, session_key="7:wx_a@im.wechat")
+
+    assert result["delivered"] is False
+    assert result["status"] != "sent"
+
+
+def test_master_drains_control_command_and_completes_receipt(sched_sandbox, monkeypatch):
+    """master 消费持久控制命令：执行 manual_send_now 并回写真实回执。"""
+    import json as _json
+
+    import proactive.runtime_plane as rp
+
+    hub = _ManualHub(["7:wx_a@im.wechat"])
+    _wire_manual_send(sched_sandbox, hub, monkeypatch)
+    rows = [{
+        "id": 5, "session_key": "7:wx_a@im.wechat",
+        "payload": _json.dumps({"message_type": "care_meal"}),
+    }]
+    done: list = []
+    monkeypatch.setattr(rp, "claim_next_control", lambda kind: rows.pop(0) if rows else None)
+    monkeypatch.setattr(rp, "complete_control", lambda cid, **kw: done.append((cid, kw)))
+    monkeypatch.setattr(sched_sandbox, "_plane", lambda: rp)
+
+    sched_sandbox._drain_control_commands()
+
+    assert hub.engines["7:wx_a@im.wechat"].generated == ["care_meal"]
+    assert done and done[0][0] == 5
+    assert done[0][1]["ok"] is True
+    assert _json.loads(done[0][1]["result"])["status"] == "sent"
+
+
+def test_manual_send_rejects_unknown_message_type_without_generating(
+    sched_sandbox, monkeypatch
+):
+    """消息类型校验归调度器（唯一 owner）：畸形串不得白烧一次 LLM。"""
+    hub = _ManualHub(["7:wx_a@im.wechat"])
+    calls, _bc = _wire_manual_send(sched_sandbox, hub, monkeypatch)
+
+    result = sched_sandbox.manual_send_now("7:wx_a@im.wechat", message_type="meal")
+
+    assert result["delivered"] is False
+    assert result["reason"] == "unknown_message_type:meal"
+    assert hub.engines["7:wx_a@im.wechat"].generated == []
+    assert calls == []
+
+
+
+def _call_history(monkeypatch, hub):
+    import asyncio
+
+    import api.routers.training_routes as tr
+    from api.deps import deps
+
+    monkeypatch.setattr(deps, "orch", _Orch(None, hub), raising=False)
+    return asyncio.run(tr.proactive_history(limit=10, _auth=True))
+
+
+def test_proactive_history_reads_outbound_plane(monkeypatch):
+    """统计真源 = 控制面出站事实（自动+手动都落它），不是 hub 代理内存。"""
+    import proactive.runtime_plane as rp
+
+    monkeypatch.setattr(
+        rp, "recent_sends",
+        lambda kind_prefix="", limit=50: [{
+            "id": 9, "kind": "proactive", "channel": "wechat",
+            "session_key": "7:wx_a@im.wechat", "message": "还没睡？",
+            "status": "accepted", "created_at": 1770000000.0, "fail_reason": "",
+        }],
+    )
+    hub = _ManualHub(["7:wx_a@im.wechat"])
+    hub.sent_history = [{"message": "本进程内存的代理历史", "at": "x"}]  # type: ignore[attr-defined]
+
+    data = _call_history(monkeypatch, hub)
+
+    assert data["total"] == 1
+    row = data["history"][0]
+    assert row["message"] == "还没睡？"
+    assert row["session_key"] == "7:wx_a@im.wechat"
+    assert row["status"] == "accepted"

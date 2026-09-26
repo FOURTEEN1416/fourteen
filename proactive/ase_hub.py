@@ -262,24 +262,6 @@ class ASEHub:
         if hasattr(eng, "commit_sent"):
             eng.commit_sent(result)
 
-    def resolve_engine_for_manual_send(self) -> tuple[str, Any] | None:
-        """P1-19：手动发送端点显式取一个具体引擎（最近活跃，退而取索引首键）。
-
-        禁止在 hub 实例上经 ``__getattr__`` 代理读配额再**赋值**——赋值会在 hub 上
-        创建真实属性、永久遮蔽代理，引擎侧配额 +1 从未归还（09-18 修过的
-        「自测吃光配额」在 hub 化后原样回归）。
-        """
-        with self._lock:
-            if self._engines:
-                key = next(reversed(self._engines))
-                return key, self._engines[key]
-        for k in load_user_key_index():
-            try:
-                return k, self.get(k)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("ASEHub 手动发送建引擎失败 user=%s: %s", k, e)
-        return None
-
     # ── 健康检查（端点级显式实现，不走 __getattr__ 代理）────
     def health_check(self) -> dict[str, Any]:
         """`/api/proactive/state` 的 hub 真源实现。

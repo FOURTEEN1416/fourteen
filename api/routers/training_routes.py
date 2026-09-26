@@ -215,6 +215,17 @@ def _scheduler_or_none():
     return deps.orch.components.get("scheduler") if deps.orch else None
 
 
+def _plane():
+    """控制面 ``proactive.runtime_plane``；不可用时 None（退回本进程内存历史）。"""
+    try:
+        from proactive import runtime_plane
+
+        return runtime_plane
+    except Exception as e:  # noqa: BLE001
+        logger.debug("控制面不可用: %s", e)
+        return None
+
+
 def _file_quiet_hours() -> tuple[int, int]:
     """无调度器的 worker（4 worker 部署仅 master 持有）从配置文件读免打扰。"""
     from proactive.scheduler import ProactiveScheduler
@@ -449,6 +460,34 @@ async def pause_proactive(
 
 class ProactiveSendRequest(BaseModel):
     message_type: str | None = None  # 缺省按紧迫度自动选择
+    session_key: str | None = None  # 显式授权目标会话（多会话时必填）
+
+
+# 非 master worker 转投控制命令后等待真实回执的上限（master 消费间隔 5s +
+# 生成/投递耗时；``CLAIM_TTL`` 远大于此值，超时不会把命令吞掉）。
+_MANUAL_SEND_WAIT_SECONDS = 45.0
+
+
+def _resolve_manual_target(hub, explicit: str | None) -> str:
+    """手动发送的目标会话（W3 缺陷 E：绝不再取 hub「最近一个」引擎）。
+
+    旧实现 ``resolve_engine_for_manual_send()`` 返回的是**最后被触碰的**引擎，
+    与控制台想发给谁毫无关系，再叠加 ``_send_to_all`` 广播 —— 给 A 的自测消息
+    会打给所有绑定用户。现规则：显式指定优先；仅一路会话时可省略；多路会话
+    必须显式指定（400），宁可让调用方补参数也不猜。
+    """
+    key = str(explicit or "").strip()
+    if key:
+        return key
+    keys = [str(k) for k in (getattr(hub, "known_user_keys", lambda: [])() or []) if str(k).strip()]
+    if len(keys) == 1:
+        return keys[0]
+    if not keys:
+        raise HTTPException(503, "无可用的主动消息会话（暂无用户绑定）")
+    raise HTTPException(
+        400,
+        f"存在 {len(keys)} 路会话，手动发送必须显式指定 session_key（避免发给他人）",
+    )
 
 
 @router.post("/api/proactive/send")
@@ -457,90 +496,68 @@ async def send_proactive_now(
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
-    """手动立即生成并发送一条主动消息（绕过频率限制；计入统计与历史）。
+    """手动在**指定会话**上生成并投递一条主动消息（自测入口）。
 
-    ⚠️ **不消耗当日自动配额**：原实现直接调 `_generate_and_return` /
-    `_record_and_return`，二者内部都会走 `_record_proactive_sent()` 给
-    `_daily_message_count` +1。结果是用户在控制台自测几次就把当日 8 条配额
-    耗尽，自动主动消息随之全部停发（2026-09-18 生产实证：daily_count=8、
-    last_sent_time 停在手动测试时段）。
-    现改为：**保留**历史记录、recent_messages 与 30 分钟冷却，
-    但**归还**配额计数 —— 测试不应吃掉生产额度。
+    三条纪律（旧实现三条都反着做）：
+
+    1. **目标显式** —— 只投 ``session_key`` 那一路会话，不广播、不挑最近引擎。
+    2. **复用真实投递** —— 生成与投递都在 ``ProactiveScheduler.manual_send_now``
+       里走 ``_deliver``，其返回值才是 ``delivered``；静默时段在生成**前**拒绝，
+       通道拒收不报已受理（旧实现 ``create_task`` 一建立即 ``delivered=True``）。
+    3. **不预记账** —— ``sent_history`` 只在受理后写；当日配额在出口归还
+       （2026-09-18 生产实证：自测几次耗尽当日 8 条额度使自动消息全天停发）。
+
+    生产 4 worker 中 3 个没有调度器（``run_api._ensure_scheduler_singleton`` 选主
+    后把非 master 的 ``components['scheduler']`` 置 None），故本端点不假设本机
+    有通道：无调度器时落**持久控制命令**并等待 master 回写的真实回执。
     """
     orch = deps.orch
     if not orch or not orch._ase:
         raise HTTPException(503, "Proactive engine not initialized")
-    # P1-19：hub 化后必须落在**具体引擎**上——经 __getattr__ 代理读配额、
-    # 再在 hub 实例上赋值归还，会在 hub 上创建真实属性遮蔽代理，
-    # 引擎侧 +1 永不归还（自测吃配额缺陷回归）。
-    _ase_obj = orch._ase
-    if hasattr(_ase_obj, "resolve_engine_for_manual_send"):
-        _resolved = _ase_obj.resolve_engine_for_manual_send()
-        if _resolved is None:
-            raise HTTPException(503, "无可用的主动消息引擎（暂无会话）")
-        ase = _resolved[1]
-    else:
-        ase = _ase_obj
 
-    # 配额保护：记录入口计数，无论成功失败都在出口归还
-    _quota_before = ase._daily_message_count
+    hub = orch._ase
+    target = _resolve_manual_target(hub, req.session_key if req else None)
+    msg_type = req.message_type if req else None
+
+    scheduler = orch.components.get("scheduler") if orch.components else None
+    if scheduler is not None and hasattr(scheduler, "manual_send_now"):
+        result = await asyncio.to_thread(scheduler.manual_send_now, target, msg_type)
+        logger.info(
+            "Proactive manual send(本机): session=%s delivered=%s",
+            target, result.get("delivered"),
+        )
+        return result
+
+    rp = _plane()
+    if rp is None:
+        raise HTTPException(503, "本 worker 无调度器且控制面不可用，无法投递主动消息")
+    cmd_id = rp.enqueue_control(
+        "proactive_manual", target,
+        json.dumps({"message_type": msg_type}, ensure_ascii=False),
+    )
+    receipt = await asyncio.to_thread(
+        rp.wait_for_control, cmd_id, _MANUAL_SEND_WAIT_SECONDS
+    )
+    # SQLite 行内 result/fail_reason 为 NOT NULL DEFAULT ''，但测试桩/旧库可能缺键
+    raw = str((receipt or {}).get("result") or "")
     try:
-        msg_type = (req.message_type if req else None)
-        if msg_type:
-            try:
-                from proactive.ase_engine import ProactiveType
-                chosen = ProactiveType(msg_type)
-            except ValueError:
-                raise HTTPException(400, f"未知消息类型: {msg_type}") from None
-            result = ase._generate_and_return(chosen)
-        else:
-            # 自动选择：更新紧迫度后按阈值/场景选型（生成不计频率门槛）
-            ase._update_urgency(ase._hours_since_last_chat())
-            scene = ase._check_scene_triggers()
-            if scene and ase.urgency.total >= 2.0:
-                result = ase._record_and_return(scene)
-            else:
-                result = ase._generate_and_return(ase._select_type_by_urgency())
-
-        if not result:
-            raise HTTPException(500, "消息生成失败")
-
-        ase.record_sent_entry(result)
-        scheduler = orch.components.get("scheduler") if orch.components else None
-        delivered = False
-        if scheduler is not None:
-            try:
-                # 本端点为 async def，事件循环必然在运行中 —— 旧的
-                # get_event_loop()+is_running()+run_until_complete 分支中，
-                # run_until_complete 永不可达（循环已在跑，调用会抛 RuntimeError），
-                # 属于死分支。改用 create_task 并**保留引用**：
-                # asyncio 文档明确要求持有 task 引用，否则可能在执行途中被 GC 回收
-                # （表现为"偶发不投递"）。orchestrator 的 _background_tasks 正是为此存在。
-                task = asyncio.create_task(
-                    scheduler._send_to_all(result.get("message", ""))
-                )
-                bg = getattr(orch, "_background_tasks", None)
-                if bg is not None:
-                    bg.add(task)
-                    task.add_done_callback(bg.discard)
-                delivered = True
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Proactive 异步投递调度失败，回退同步发送: %s", e)
-                if getattr(scheduler, "_send", None):
-                    scheduler._send(result.get("message", ""))
-                    delivered = True
-        logger.info("Proactive manual send: [%s] delivered=%s", result.get("type"), delivered)
-        # 剔除内部记账字段（_committed / _scene / _scene_date），不对外暴露
-        public = {k: v for k, v in result.items() if not k.startswith("_")}
-        return {"status": "sent", "delivered": delivered, **public}
-    finally:
-        # 归还配额（_last_proactive_time 保留 → 30 分钟冷却仍然生效，
-        # 避免手动发完自动消息紧接着又发一条）
-        if ase._daily_message_count != _quota_before:
-            logger.info(
-                "手动发送归还当日配额：%d -> %d", ase._daily_message_count, _quota_before
-            )
-            ase._daily_message_count = _quota_before
+        payload = json.loads(raw) if raw else {}
+    except Exception:  # noqa: BLE001
+        payload = {}
+    if not isinstance(payload, dict) or not payload:
+        status = str((receipt or {}).get("status") or "no_receipt")
+        payload = {
+            "status": "pending" if status == "pending" else "not_delivered",
+            "delivered": False,
+            "reason": str((receipt or {}).get("fail_reason") or f"master_{status}"),
+        }
+    payload.setdefault("session_key", target)
+    payload.setdefault("delivered", False)
+    logger.info(
+        "Proactive manual send(转投 master): session=%s cmd=%s delivered=%s",
+        target, cmd_id, payload.get("delivered"),
+    )
+    return payload
 
 
 @router.get("/api/proactive/history")
@@ -548,9 +565,32 @@ async def proactive_history(
     limit: int = Query(default=50, le=200),
     _auth: bool = Security(verify_api_key_dep),
 ):
-    """发送历史真数据（sent_history；旧 _sent_messages 属性从未存在过，历史一直返回空）。"""
+    """发送历史真源 = 控制面出站事实（跨 worker / 跨重启）。
+
+    旧实现读 ``orch._ase.sent_history``：那只是**本 worker 内存**里最后 touched
+    引擎的代理列表 —— 4 worker 下各说各话、重启归零，且自动消息与手动消息
+    不同源，统计与真实触达脱钩（W3 缺陷 E「统计走旁路」）。
+    """
+    rp = _plane()
+    if rp is not None:
+        rows = rp.recent_sends("", int(limit))
+        history = [
+            {
+                "id": r.get("id"),
+                "kind": r.get("kind"),
+                "channel": r.get("channel"),
+                "session_key": r.get("session_key"),
+                "message": r.get("message"),
+                "status": r.get("status"),
+                "created_at": r.get("created_at"),
+                "fail_reason": r.get("fail_reason"),
+            }
+            for r in rows
+        ]
+        return {"history": history, "total": len(history)}
     orch = deps.orch
     if orch and orch._ase:
         history = list(getattr(orch._ase, "sent_history", []) or [])
         return {"history": history[-limit:], "total": len(history)}
     return {"history": [], "total": 0}
+
