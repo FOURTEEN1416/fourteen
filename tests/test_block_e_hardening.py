@@ -247,22 +247,17 @@ def test_enhancer_audit_takes_precedence_over_points(tmp_path, monkeypatch):
     assert e._values["u1::char1"] == 88.0, "审计值优先，不得被点存覆盖"
 
 
-def test_affinity_default_db_path_is_shared_owner():
-    """写入方必须能拿到同一审计库路径（避免各自拼路径漂移）。
-
-    conftest 会把 `_DB_DEFAULT` 重定向到临时库（防污染宿主 data/sqlite.db），
-    故这里校验的是「共享 owner 语义」：函数返回值 ≡ 模块真源，且生产布局
-    常量本身指向 data/sqlite.db（从 __file__ 推导，不受隔离重定向影响）。
-    """
+def test_affinity_default_db_path_is_shared_owner(monkeypatch, isolate_runtime_state_files):
+    """写入方读取同一 owner，重定向后也不得自行拼回宿主默认库。"""
     from shisi.affinity import enhancer as enh_mod
     from shisi.affinity.enhancer import default_db_path
 
     p = default_db_path()
     assert isinstance(p, Path)
-    assert p is enh_mod._DB_DEFAULT, "default_db_path 必须返回模块真源（写入方同口径）"
-    assert p.name == "sqlite.db"
-    canonical = Path(enh_mod.__file__).resolve().parent.parent.parent / "data" / "sqlite.db"
-    assert canonical.parent.name == "data"
+    assert p is enh_mod._DB_DEFAULT
+    replacement = isolate_runtime_state_files / "redirected-audit.db"
+    monkeypatch.setattr(enh_mod, "_DB_DEFAULT", replacement)
+    assert default_db_path() is replacement
 
 
 def test_affinity_persist_mirrors_to_audit(tmp_path, monkeypatch):
@@ -498,7 +493,7 @@ def test_time_awareness_current_reports_local_date():
 
 
 # ─────────────────────────────────────────────────────────────
-# F. 反思按会话检索：空归属行必须"取回后排除"，而非查询阶段挡在门外
+# F. 反思按会话检索：过滤先于 LIMIT，未知归属不注入
 # ─────────────────────────────────────────────────────────────
 
 
@@ -509,7 +504,7 @@ class _ReflectSM:
         self._rows = rows
         self.calls: list[dict] = []
 
-    def get_reflections(self, limit: int = 10, session_id: str | None = None):
+    def get_reflections(self, limit: int = 10, session_id: str | None = None, character_id: str = ""):
         self.calls.append({"limit": limit, "session_id": session_id})
         if session_id is not None:
             return [r for r in self._rows if str(r.get("session_id") or "") == str(session_id)][:limit]
@@ -523,9 +518,8 @@ def _mk_engine(sm):
     return ReflectionEngine(vector_memory=None, structured_memory=sm)
 
 
-def test_reflection_query_fetches_without_strict_session_filter():
-    """必须用「只按 limit 取回 → Python 过滤」——旧实现把 session_id 下推 SQL，
-    空归属的历史反思连候选都进不来，按会话检索永远是空的。"""
+def test_reflection_query_filters_session_before_limit():
+    """数据库先过滤本人，避免其他会话占满候选窗口。"""
     rows = [
         {"content": "本会话的洞察", "session_id": "1:r@im.wechat"},
         {"content": "无归属的历史洞察", "session_id": ""},
@@ -534,8 +528,7 @@ def test_reflection_query_fetches_without_strict_session_filter():
     sm = _ReflectSM(rows)
     eng = _mk_engine(sm)
     out = eng.get_insights("x", top_k=5, session_id="1:r@im.wechat")
-    # 取回调用不得带 session_id（否则空归属行被 SQL 挡掉）
-    assert sm.calls and sm.calls[0]["session_id"] is None, f"查询阶段不应下推会话过滤: {sm.calls}"
+    assert sm.calls == [{"limit": 5, "session_id": "1:r@im.wechat"}]
     # 本会话的留下，无归属的与别会话的排除（宁缺毋串）
     assert out == ["本会话的洞察"], out
 

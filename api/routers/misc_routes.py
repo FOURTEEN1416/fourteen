@@ -47,8 +47,8 @@ def _memory_scope_prefix(request: Request) -> str | None:
         if str(payload.get("role") or "") == "admin":
             return None
         uid = int(payload.get("sub") or 0)
-    except Exception:  # noqa: BLE001
-        return None
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="无效的登录凭证") from exc
     return f"{uid}:" if uid else "::__denied__"
 
 
@@ -263,7 +263,7 @@ async def memory_diary(
     prefix = _memory_scope_prefix(request)
     try:
         summaries = ds.get_all_summaries() or {}
-        items = sorted(summaries.items(), reverse=True)
+        items = sorted(summaries.items(), key=lambda kv: str(kv[0]).rsplit("|", 1)[-1], reverse=True)
         if prefix is not None:
             # 日记键形如 user_key|date，user_key 形如 "4:peer" —— 按归属前缀过滤
             items = [kv for kv in items if str(kv[0]).startswith(prefix)]
@@ -286,9 +286,9 @@ async def memory_facts(
         prefix = _memory_scope_prefix(request)
         if prefix is None:
             return {"facts": orch._memory.semantic.get_facts(category, limit=limit)}
-        rows = orch._memory.semantic.get_facts(category, limit=5000) or []
-        mine = [r for r in rows if str(r.get("user_key") or "").startswith(prefix)]
-        return {"facts": mine[:limit]}
+        sm = getattr(orch._memory, "structured_memory", None)
+        rows = sm.get_facts(category, limit=limit, owner_prefix=prefix) if sm else []
+        return {"facts": rows}
     return {"facts": []}
 
 

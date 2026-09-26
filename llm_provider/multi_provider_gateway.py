@@ -289,9 +289,10 @@ class MultiProviderGateway:
         self,
         fallback_chain: list[str] | None = None,
         providers_config: dict[str, dict[str, Any]] | None = None,
+        *, inherit_platform: bool = True,
     ):
-        # 加载配置文件
-        file_config = _load_providers_config()
+        # 用户隔离网关不能读取平台文件或环境凭证。
+        file_config = _load_providers_config() if inherit_platform else {}
         self._chain = fallback_chain or file_config.get("fallback_chain", DEFAULT_FALLBACK_CHAIN)
         provider_configs = providers_config or file_config.get("providers", {})
 
@@ -310,13 +311,16 @@ class MultiProviderGateway:
                 # 的 mock（不含任何错误哨兵），既被 chat() 判成功污染路由指针，
                 # 又让 chat_stream/chat_with_tools（不降级）整段打到罐头句。
                 ds_cfg = provider_configs.get("deepseek") or DEFAULT_PROVIDER_CONFIG.get("deepseek", {})
-                ds_cfg = _resolve_env_override("deepseek", ds_cfg)
-                ds_key = ds_cfg.get("api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
+                if inherit_platform:
+                    ds_cfg = _resolve_env_override("deepseek", ds_cfg)
+                ds_key = ds_cfg.get("api_key") or (os.environ.get("DEEPSEEK_API_KEY", "") if inherit_platform else "")
                 if not ds_key:
                     logger.info("[MultiGateway] deepseek 未配置 API Key，跳过（避免 mock 入链）")
                     continue
                 self._providers[key] = LLMGatewayV2(
                     api_key=ds_key,
+                    api_base=ds_cfg.get("api_base") or DEFAULT_PROVIDER_CONFIG["deepseek"]["api_base"],
+                    model=ds_cfg.get("model") or DEFAULT_PROVIDER_CONFIG["deepseek"]["model"],
                     # P1-3 同规：与 OpenAICompatibleProvider 一样接受 provider 级
                     # 请求超时，避免 deepseek 挂死时按硬编码 60s 烧穿整链预算
                     request_timeout=ds_cfg.get("request_timeout"),
@@ -329,7 +333,8 @@ class MultiProviderGateway:
                 cfg = DEFAULT_PROVIDER_CONFIG.get(key, {})
 
             # 环境变量覆盖
-            cfg = _resolve_env_override(key, cfg)
+            if inherit_platform:
+                cfg = _resolve_env_override(key, cfg)
 
             # 跳过没有 API Key 的 provider
             if not cfg.get("api_key"):

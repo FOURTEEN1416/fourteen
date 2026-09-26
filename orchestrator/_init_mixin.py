@@ -318,6 +318,7 @@ class _InitPhasesMixin:
             scheduler = ProactiveScheduler(
                 ase_engine=self.components["ase"],
                 send_message_func=lambda msg: logger.info("[主动消息] %s", msg),
+                daily_maintenance_func=self.components["memory"].daily_maintenance,
             )
             # 至少注册一个控制台通道作为兜底；后续可通过 register_channel 注入 ws/wechat
             scheduler.register_channel(
@@ -331,6 +332,13 @@ class _InitPhasesMixin:
             # 不回写的后果（生产实证 2026-09-21）：已发主动消息/追问在四张记忆表
             # 全部 0 命中，她下一轮完全不记得自己说过什么 → 自问自答。
             scheduler.set_memory(self.components.get("memory"))
+            from api.byok import session_llm
+            from utils.async_utils import run_on_shared_loop
+
+            def resolver(key):
+                return run_on_shared_loop(session_llm(key, self))
+            scheduler.set_session_llm_resolver(resolver)
+            self.components["memory"]._pipeline._session_llm_resolver = resolver
             if scheduler.start():
                 self.components["scheduler"] = scheduler
                 logger.info("主动消息调度器已启动（ASE 按用户隔离）")

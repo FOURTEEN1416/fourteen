@@ -21,6 +21,15 @@
 
 ---
 
+## 2026-09-26 本地重构覆盖层（尚未部署）
+
+- 对话：认证owner→会话授权→请求级LLM上下文→角色过滤历史与摘要→定稿→传输确认→整轮SQLite事务→后台记忆/画像。
+- 传输：HTTP `_ChatDeliveryResponse`；WS普通reply回调；SSE/WS流式私有确认回调；微信API受理前缀。全部不宣称终端已读。
+- LLM：`select_request_llm`负责显式配置；`request_llm` ContextVar贯通辅助任务；后台`session_llm`查账号策略；auto不继承平台凭证。
+- 记忆：`memory_extraction_progress`固定来源窗口/租约/水位；`fact_deletion_watermarks`防旧输入回灌；反思/事实向量需主库仍有效；日记按本地昨日×session×character。
+- 删除重复 `diary_summarizer.py`；唯一持久化owner `_legacy_diary_summarizer.py`。历史分页新增`before_id`，同秒消息按id稳定排序。
+- 以下旧版本指标为历史已部署口径；当前验证及未完成项见HANDOFF顶栏和LOG 2026-09-26，不与线上混报。
+
 ## 1. 全局指标
 
 ### 1.1 实时核实指标（2026-09-21 create_api_app/Glob/pytest/vitest/tsc 全量复测）

@@ -254,6 +254,7 @@ class UserManager:
     async def process_message(
         self, user_id: str, text: str, message_type: str = "text",
         attachments: list | None = None,
+        reply_sender=None,
     ) -> dict[str, Any]:
         """处理某个用户的消息
 
@@ -264,7 +265,7 @@ class UserManager:
         attachments: 多模态附件（图片 content part 列表），由微信通道传入。
         """
         return await self._process_message_inner(
-            user_id, text, message_type, attachments
+            user_id, text, message_type, attachments, reply_sender
         )
 
     async def _get_user_llm_config(self, wxid: str) -> tuple[int | None, dict | None]:
@@ -277,8 +278,12 @@ class UserManager:
 
         缓存 30s：配置变更罕见，避免每条消息都查库；改完最多 30s 生效。
         """
-        binding = self._bindings.get(wxid) or {}
-        numeric_id = binding.get("user_id")
+        # owner:peer 由通道构造，费用与凭证归通道 owner，不能剥 owner 借用
+        # 同一裸 peer 在另一个账号下的绑定。裸键仅保留显式绑定兼容路径。
+        numeric_id = session_key.owner_of(wxid)
+        if numeric_id is None:
+            binding = self._bindings.get(wxid) or {}
+            numeric_id = binding.get("user_id")
         if not numeric_id:
             return None, None
 
@@ -286,21 +291,15 @@ class UserManager:
         if cache is None:
             cache = self._llm_cfg_cache = {}
         now = time.time()
-        hit = cache.get(wxid)
+        hit = cache.get(int(numeric_id))
         if hit and now - hit[0] < _LLM_CFG_CACHE_TTL:
             return int(numeric_id), hit[1]
 
-        cfg: dict | None = None
-        try:
-            from api.database import User, _async_session
+        from api.byok import load_user_llm_config
+        from api.database import _async_session
 
-            async with _async_session() as db:
-                user = await db.get(User, int(numeric_id))
-                raw = getattr(user, "llm_config", None) if user else None
-                # 只接受非空 dict：空配置应回落全局 gateway
-                cfg = raw if isinstance(raw, dict) and raw else None
-        except Exception as e:  # noqa: BLE001
-            logger.debug("读取用户专属 LLM 配置失败（回落全局）: %s", e)
+        async with _async_session() as db:
+            cfg = await load_user_llm_config(int(numeric_id), getattr(self, "_orch", None), db)
 
         # 变更时打一条日志，便于排查「用户配了 key 却没生效」
         prev = hit[1] if hit else None
@@ -309,17 +308,19 @@ class UserManager:
                 "用户 %s 专属 LLM 配置%s", wxid,
                 "已加载（BYOK 生效）" if cfg else "为空（使用全局 key）",
             )
-        cache[wxid] = (now, cfg)
+        cache[int(numeric_id)] = (now, cfg)
         return int(numeric_id), cfg
 
     async def _process_message_inner(
         self, user_id: str, text: str, message_type: str = "text",
         attachments: list | None = None,
+        reply_sender=None,
     ) -> dict[str, Any]:
         """实际消息处理：委托给 orchestrator，并追加语音合成逻辑"""
         instance = self._get_or_create(user_id)
         session_id = instance.session_id
-        emotion_engine = self._get_character_engine(instance, instance.character_card_id)
+        character_id = instance.character_card_id
+        emotion_engine = self._get_character_engine(instance, character_id)
 
         # BYOK：把用户专属 LLM 配置传下去（此前漏传 → 用户的 key 在微信端不生效）
         numeric_uid, user_llm_cfg = await self._get_user_llm_config(user_id)
@@ -327,22 +328,25 @@ class UserManager:
         # 修复：传入 character_id，否则多用户角色隔离失效
         # 使用关键字参数以兼容 Orchestrator（character_id 为第 5 参）和
         # OptimizedOrchestrator（character_id 为第 4 参）两种签名
+        delivery_kwargs = {"reply_sender": reply_sender} if reply_sender is not None else {}
         result = await self._orch.process_message(
             text,
             session_id,
             message_type,
-            character_id=instance.character_card_id,
+            character_id=character_id,
             emotion_engine=emotion_engine,
             user_llm_config=user_llm_cfg,
             user_id=numeric_uid,
             attachments=attachments,
+            **delivery_kwargs,
         )
+        result["character_id"] = character_id
 
         # 统计
         instance.total_chats += 1
         instance.last_active = time.time()
         # B6：对话后持久化 affection_points（重启不丢）
-        self._persist_affinity(user_id, instance.character_card_id, emotion_engine)
+        self._persist_affinity(user_id, character_id, emotion_engine)
 
         return result
 

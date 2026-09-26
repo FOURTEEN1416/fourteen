@@ -37,6 +37,7 @@ class _RecordingSM:
 
     def add_fact(self, fact, category, confidence, source, **kw):
         self.calls.append((fact, kw.get("user_key", "")))
+        return len(self.calls)
 
 
 class _AsyncVM:

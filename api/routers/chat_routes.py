@@ -17,7 +17,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,11 +27,21 @@ from api.auth_jwt import get_current_user_id, require_role, verify_token
 from api.database import User, get_db
 from api.deps import deps
 from api.main_routes import ChatRequest, ChatResponse, CreateSessionRequest
+from api.session_manager import resolve_owned_session
 
 logger = logging.getLogger("api.routers.chat_routes")
 
 router = APIRouter(tags=["chat"])
 _bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def _owned_session(session_id: str, user_id: int) -> str:
+    try:
+        return resolve_owned_session(session_id, user_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="不能访问其他用户的会话") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="会话标识无效") from exc
 
 
 async def _resolve_character_id(character_id: str) -> str:
@@ -49,6 +59,59 @@ async def _resolve_character_id(character_id: str) -> str:
 # ═══════════════════════════════════════════════════════
 
 
+class _ChatDeliveryResponse(Response):
+    """在真实 ASGI send 边界运行生成；回调返回前不会把草稿写为角色发言。"""
+
+    media_type = "application/json"
+
+    def __init__(self, generate, session_id: str):
+        super().__init__()
+        self._generate = generate
+        self.session_id = session_id
+
+    async def __call__(self, scope, receive, send):
+        started = False
+        attempted = False
+        sent = False
+        failure: Exception | None = None
+
+        async def transport(message):
+            nonlocal started
+            await send(message)
+            if message["type"] == "http.response.start":
+                started = True
+
+        async def publish(result):
+            nonlocal attempted, sent, failure
+            attempted = True
+            content = ChatResponse(
+                reply=result.get("reply", ""), session_id=self.session_id,
+                trace_id=result.get("trace_id", ""), emotion=result.get("emotion"),
+            )
+            try:
+                await JSONResponse(content.model_dump())(scope, receive, transport)
+                sent = True
+                return content.reply
+            except Exception as exc:
+                failure = exc
+                return ""
+
+        try:
+            result = await self._generate(publish)
+            if not attempted:
+                # 只有不接受回执的第三方编排器才走此分支；本项目入口均接回调。
+                await publish(result)
+        except (TimeoutError, ConnectionError) as exc:
+            if started:
+                raise
+            status = 504 if isinstance(exc, TimeoutError) else 502
+            await JSONResponse({"detail": "LLM response unavailable"}, status_code=status)(scope, receive, send)
+        if failure is not None:
+            raise failure
+        if attempted and not sent:
+            logger.warning("HTTP 正文未获传输确认 session=%s", self.session_id)
+
+
 @router.post("/api/chat", response_model=ChatResponse)
 async def chat(
     req: ChatRequest,
@@ -64,52 +127,27 @@ async def chat(
             headers={"X-Error-Code": "FEATURE_UNAVAILABLE"},
         )
 
-    # 读取用户级 LLM 配置（API Key 隔离）
-    user_llm_config = None
-    user = None
-    try:
-        user = await db.get(User, user_id)
-        if user and user.llm_config:
-            user_llm_config = user.llm_config if isinstance(user.llm_config, dict) else None
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to load user %s LLM config, using global: %s", user_id, e)
+    session_id = _owned_session(req.session_id, user_id)
 
-    from api.byok import ensure_user_has_key
+    from api.byok import load_user_llm_config
+
+    user_llm_config = await load_user_llm_config(user_id, orch, db)
+    from llm_provider import select_request_llm
 
     try:
-        llm_cfg = orch.components.get("config").config.llm if orch.components else None
-        ensure_user_has_key(user, llm_cfg)
-    except HTTPException:
-        raise
-    except Exception:
-        pass
+        select_request_llm(orch.components.get("llm"), user_id, user_llm_config)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    try:
-        result = await orch.process_message(
-            req.message,
-            req.session_id,
-            req.message_type,
-            await _resolve_character_id(req.character_id),
-            user_llm_config=user_llm_config,
-            user_id=user_id,
+    character_id = await _resolve_character_id(req.character_id)
+
+    async def generate(publish):
+        return await orch.process_message(
+            req.message, session_id, req.message_type, character_id,
+            user_llm_config=user_llm_config, user_id=user_id, reply_sender=publish,
         )
-    except TimeoutError:
-        raise HTTPException(
-            status_code=504,
-            detail="LLM response timeout",
-            headers={"X-Error-Code": "LLM_TIMEOUT"},
-        ) from None
-    except ConnectionError:
-        raise HTTPException(
-            status_code=502,
-            detail="Upstream connection error",
-            headers={"X-Error-Code": "NETWORK_ERROR"},
-        ) from None
-    return ChatResponse(
-        reply=result.get("reply", ""),
-        trace_id=result.get("trace_id", ""),
-        emotion=result.get("emotion"),
-    )
+
+    return _ChatDeliveryResponse(generate, session_id)
 
 
 @router.post("/api/chat/stream")
@@ -127,33 +165,25 @@ async def chat_stream(
             headers={"X-Error-Code": "FEATURE_UNAVAILABLE"},
         )
 
-    # 读取用户级 LLM 配置（API Key 隔离）— 与 /api/chat 保持一致
-    user_llm_config = None
-    user = None
-    try:
-        user = await db.get(User, user_id)
-        if user and user.llm_config:
-            user_llm_config = user.llm_config if isinstance(user.llm_config, dict) else None
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to load user %s LLM config for stream, using global: %s", user_id, e)
+    session_id = _owned_session(req.session_id, user_id)
 
-    # BYOK 强制（W1）：异常必须在读配置的 try 外抛出，避免被兜底吞掉
-    from api.byok import ensure_user_has_key
+    from api.byok import load_user_llm_config
+
+    user_llm_config = await load_user_llm_config(user_id, orch, db)
+    from llm_provider import select_request_llm
 
     try:
-        llm_cfg = orch.components.get("config").config.llm if orch.components else None
-        ensure_user_has_key(user, llm_cfg)
-    except HTTPException:
-        raise
-    except Exception:
-        pass
+        select_request_llm(orch.components.get("llm"), user_id, user_llm_config)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    character_id = await _resolve_character_id(req.character_id)
 
     async def event_generator():
         stream_gen = orch.process_message_stream(
             req.message,
-            req.session_id,
+            session_id,
             req.message_type,
-            await _resolve_character_id(req.character_id),
+            character_id,
             user_llm_config=user_llm_config,
             user_id=user_id,
         )
@@ -164,8 +194,12 @@ async def chat_stream(
                     event = {"type": "token", "content": event}
                 if event.get("type") == "token":
                     yield f"data: {json.dumps({'token': event.get('content', '')}, ensure_ascii=False)}\n\n"
+                    # 恢复迭代说明 ASGI send 已返回；不是浏览器已读回执。
+                    ack = event.get("_ack")
+                    if callable(ack):
+                        ack()
                 elif event.get("type") == "done":
-                    yield f"data: {json.dumps({'done': True, 'reply': event.get('reply', ''), 'emotion': event.get('emotion'), 'process_time': event.get('process_time')}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'done': True, 'session_id': session_id, 'reply': event.get('reply', ''), 'emotion': event.get('emotion'), 'process_time': event.get('process_time')}, ensure_ascii=False)}\n\n"
                 else:
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
@@ -189,33 +223,33 @@ async def chat_stream(
 
 
 @router.post("/api/session")
-async def create_session(req: CreateSessionRequest, _auth: bool = Security(verify_api_key_dep)):
-    orch = deps.orch
+async def create_session(
+    req: CreateSessionRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+):
+    # 请求体旧 user_id 字段不再决定归属；浏览器只创建 web 会话。
     sessions = deps.sessions
-    if sessions:
-        session_id = sessions.create_session(req.user_id, req.channel)
-        if orch and orch._memory:
-            orch._memory.working.start_session(session_id, req.channel)
-        return {"session_id": session_id}
-    return {"session_id": ""}
+    session_id = sessions.create_session(str(user_id), "web") if sessions else _owned_session("", user_id)
+    return {"session_id": session_id}
 
 
 @router.get("/api/sessions")
-async def list_sessions(_auth: bool = Security(verify_api_key_dep)):
+async def list_sessions(
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+):
     sessions = deps.sessions
-    if sessions:
-        return {
-            "sessions": sessions.get_active_sessions(),
-            "active_count": sessions.active_count,
-        }
-    return {"sessions": [], "active_count": 0}
+    owned = sessions.get_active_sessions(str(user_id)) if sessions else []
+    return {"sessions": owned, "active_count": len(owned)}
 
 
 @router.get("/api/chat/history")
 async def chat_history(
     session_id: str = "",
     limit: int = Query(default=20, ge=1, le=100),
-    before: int = Query(default=0, ge=0, description="Unix 秒时间戳：只取该时刻之前的消息"),
+    before: int = Query(default=0, ge=0, description="旧UTC秒时间过滤；精确分页请用before_id"),
+    before_id: int = Query(default=0, ge=0, description="上一页最小消息ID，严格小于该ID"),
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
@@ -227,16 +261,17 @@ async def chat_history(
         if sm and hasattr(sm, "get_connection"):
             try:
                 messages = await asyncio.to_thread(
-                    _query_history_sync, sm, session_id, limit, before
+                    _query_history_sync, sm, session_id, limit, before, before_id
                 )
-                return {"messages": messages, "session_id": session_id}
+                return {"messages": messages, "session_id": session_id,
+                        "next_before_id": messages[0]["id"] if messages else None}
             except Exception as e:
                 logger.warning("Failed to query chat history by session_id: %s", e)
-    messages = orch._memory.working.get_recent(limit)
-    return {"messages": messages, "session_id": session_id}
+    # 定向查询失败不得回落全局工作记忆（会把其他会话内容冒充本会话）。
+    return {"messages": [], "session_id": session_id, "next_before_id": None}
 
 
-def _query_history_sync(sm, session_id: str, limit: int, before: int) -> list[dict]:
+def _query_history_sync(sm, session_id: str, limit: int, before: int, before_id: int = 0) -> list[dict]:
     """同步 SQLite 查询（由 asyncio.to_thread 调度，避免阻塞事件循环）。
 
     分页条件类型修复（2026-09-17）：
@@ -249,7 +284,10 @@ def _query_history_sync(sm, session_id: str, limit: int, before: int) -> list[di
     with sm.get_connection() as conn:
         conditions = ["session_id = ?"]
         params: list = [session_id]
-        if before > 0:
+        if before_id > 0:
+            conditions.append("id < ?")
+            params.append(before_id)
+        elif before > 0:
             conditions.append("created_at < ?")
             params.append(
                 datetime.fromtimestamp(before, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -257,8 +295,8 @@ def _query_history_sync(sm, session_id: str, limit: int, before: int) -> list[di
         where_clause = " AND ".join(conditions)
         params.append(str(limit))
         rows = conn.execute(
-            f"SELECT role, content, emotion_tag, created_at FROM chat_history "
-            f"WHERE {where_clause} ORDER BY created_at DESC LIMIT ?",
+            f"SELECT id, role, content, emotion_tag, created_at, character_id, turn_id FROM chat_history "
+            f"WHERE {where_clause} ORDER BY id DESC LIMIT ?",
             tuple(params),
         ).fetchall()
         return [dict(r) for r in rows][::-1]

@@ -2,12 +2,9 @@
 
 ## 三条缺陷与修法
 
-**⑧ `dry_run` 死路径使 `generate_with_llm` 整条不可达。**
-`tick(dry_run=True)` 在"频率检查之后、生成之前"就 `return None`，
-于是场景触发与紧迫度生成（`_generate_and_return` → `generate_with_llm`）
-**永远走不到**。唯一调用点 `scheduler._llm_proactive_one_user` 正是要借它
-算 urgency 供 LLM 决策 ⇒ **决策层拿到的 urgency 恒 None**。
-修法：dry_run 闸门下移到"仅屏蔽返回值"，生成链路照跑（commit=False 本就不记账）。
+⑧ dry_run 只更新紧迫度、不生成。2026-09-26 复核发现旧说明把紧迫度更新
+误说成依赖生成；实际 _update_urgency 在生成前已执行。恢复只算信号的契约，
+防止决策前先以全局模型生成弃用草稿，造成越权耗费。
 
 **⑨ 决策层提示词缺用户最后一句与注意力热度。**
 生成层（`ase_engine.generate_with_llm`）早就有 `last_user_message` /
@@ -42,15 +39,11 @@ def _engine(tmp_path, **kw):
 
 
 # ══════════════════════════════════════════════════════════
-#  ⑧ dry_run 不得截断生成链路
+#  ⑧ dry_run 必须算信号而不生成
 # ══════════════════════════════════════════════════════════
 
-def test_dry_run_still_runs_generation_chain(tmp_path, monkeypatch):
-    """🔴 核心：dry_run 必须**跑到生成**（否则 urgency/生成可达性全废）。
-
-    旧实现在频率检查后立即 `return None` ⇒ `_generate_and_return` 的
-    调用计数恒 0。这里钉调用计数，覆盖"只屏蔽返回值"的新语义。
-    """
+def test_dry_run_updates_urgency_without_generating_discarded_draft(tmp_path, monkeypatch):
+    """紧迫度更新在生成之前已完成，干跑不能再次调用全局模型。"""
     eng = _engine(tmp_path)
     calls: list[str] = []
 
@@ -70,7 +63,8 @@ def test_dry_run_still_runs_generation_chain(tmp_path, monkeypatch):
 
     out = eng.tick(hours_since_last_chat=5.0, dry_run=True)
     assert out is None, "dry_run 不得交出候选（调用方不投递）"
-    assert calls, "dry_run 必须跑到生成（旧实现此处恒空 = 生成链路不可达）"
+    assert calls == [], "干跑只取紧迫度，不能先生成一份弃用草稿"
+    assert eng.urgency.total > 0
 
 
 def test_dry_run_returns_none_but_not_before_generation(tmp_path, monkeypatch):

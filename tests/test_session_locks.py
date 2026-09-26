@@ -27,6 +27,59 @@ class TestSessionLockManager:
         assert lock1 is lock2
 
     @pytest.mark.asyncio
+    async def test_another_process_waits_for_same_session(self, tmp_path):
+        import subprocess
+        import sys
+
+        from orchestrator import session_locks as mod
+
+        parent = SessionLockManager().get_lock("real-subprocess")
+        code = (
+            "import asyncio,sys; from pathlib import Path; "
+            "import orchestrator.session_locks as m; m._LOCK_ROOT=Path(sys.argv[1]); "
+            "lock=m.ProcessSessionLock('real-subprocess'); "
+            "\nasync def probe():\n"
+            " try:\n  await asyncio.wait_for(lock.acquire(),0.2)\n"
+            " except TimeoutError:\n  print('blocked')\n"
+            " else:\n  lock.release(); print('acquired')\n"
+            "asyncio.run(probe())"
+        )
+        async with parent:
+            proc = await asyncio.to_thread(subprocess.run, [sys.executable, "-c", code, str(mod._LOCK_ROOT)],
+                                           capture_output=True, text=True, timeout=10)
+            assert proc.returncode == 0, proc.stderr
+            assert proc.stdout.strip() == "blocked"
+        proc = await asyncio.to_thread(subprocess.run, [sys.executable, "-c", code, str(mod._LOCK_ROOT)],
+                                       capture_output=True, text=True, timeout=10)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.strip() == "acquired"
+
+    @pytest.mark.asyncio
+    async def test_two_managers_share_os_lock_and_cancel_releases_waiter(self):
+        manager_a, manager_b = SessionLockManager(), SessionLockManager()
+        first, second = manager_a.get_lock("cross-worker"), manager_b.get_lock("cross-worker")
+        async with first:
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(second.acquire(), timeout=0.15)
+            assert not second.locked()
+            assert first.locked()
+        async with second:
+            assert second.locked()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_never_evicts_active_session(self, monkeypatch):
+        import orchestrator.session_locks as mod
+
+        monkeypatch.setattr(mod, "_MAX_SESSION_LOCKS", 2)
+        manager = SessionLockManager()
+        active = manager.get_lock("active")
+        async with active:
+            manager._session_lock_access_time["active"] = 0
+            manager.get_lock("other")
+            manager.get_lock("third")
+            assert manager.get_lock("active") is active
+
+    @pytest.mark.asyncio
     async def test_different_sessions_get_different_locks(self) -> None:
         manager = SessionLockManager()
         lock_a = manager.get_lock("session_a")

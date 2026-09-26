@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from shisi.core.conversation_turn import HISTORY_RECENT_LIMIT
+
 # 反射/事实里出现这类原文对话痕迹 → 不得当「记忆事实」注入
 _DIALOGUE_MARKERS = re.compile(
     r"(?:^|\n)\s*(?:User|Assistant|用户|助手|AI|我)\s*[:：]",
@@ -127,7 +129,7 @@ def sanitize_llm_history(
     history: Any,
     *,
     current_user_message: str = "",
-    max_messages: int = 20,
+    max_messages: int = HISTORY_RECENT_LIMIT,
 ) -> list[dict[str, str]]:
     """清洗交给 LLM 的 messages 历史，保证角色可归属。
 
@@ -263,104 +265,35 @@ def extract_current_topics(
     return found[:limit]
 
 
-def sanitize_reply_text(text: str) -> str:
-    """清洗生成回复：剥掉「双人剧本体 / 角色翻转」，只保留角色自己要说的话。
+def sanitize_reply_text(text: str, character_name: str = "") -> str:
+    """只清显式发言标签和格式残留，不用人称/问答句式猜测语义归属。
 
-    生产症状（2026-09-25 截图）：
-    ```
-    在窗边靠着眯了一会儿
-    那你再眯一会儿，别硬撑了
-    ```
-    她先说**自己**眯了一会儿，下一句却对你「那你再眯一会儿」——把
-    自己刚说的当成你说的（角色翻转）。`split_reply_for_wechat` 再按换行
-    拆成多条微信，用户看到的就是「自问自答 / 自己接自己」。
+    任意短词加冒号不等于人名；「我吃过了，你也记得吃饭」是正常关心。
+    当前角色名由调用方传入，未知人名保留。拒绝行清空后绝不复活原文。
     """
+    own_labels = ["助手", "Assistant", "AI", "角色", "我"]
+    if character_name:
+        own_labels.append(character_name)
+    own = re.compile(r"^(?:" + "|".join(re.escape(x) for x in own_labels) + r")\s*[:：]\s*", re.IGNORECASE)
+    other = re.compile(r"^(?:用户|User|Human|对方)\s*[:：]", re.IGNORECASE)
     s = str(text or "").strip()
-    if not s:
-        return s
-    # 剥离对话前缀行（用户/User/对方/任意人名：）
-    _speaker = re.compile(
-        r"^(?:用户|User|对方|她|他|我|小明|小红|[一-龥A-Za-z]{1,6})\s*[:：]\s*"
-    )
-    _other_speaker = re.compile(
-        r"^(?:用户|User|对方|她|他|小明|小红)\s*[:：]"
-    )
-    lines = s.splitlines()
-    cleaned: list[str] = []
-    for line in lines:
-        raw = line.strip()
-        if not raw:
-            continue
-        stripped = _speaker.sub("", raw)
-        # 命中「用户/对方」前缀 → 这是对方的台词，整行丢掉
-        if _other_speaker.match(raw):
-            continue
-        # 命中任意「人名：」前缀 → 剥前缀保留正文（角色自己的剧本体行）
-        cleaned.append(stripped)
-    s = "\n".join(cleaned).strip()
-    if not s:
-        return str(text or "").strip()
-
-    # 残留「；；」风格清洗（2026-09-25 回归：历史曾用；压行被模型照抄）
-    # 只清「压行残留」：连续分号、句末标点后的分号、行首分号；
-    # 正文里正常的中文分号（分句）保留。
-    s = re.sub(r"[；;]{2,}", "", s)
-    s = re.sub(r"([？?。！!…])[；;]+", r"\1", s)
-    s = re.sub(r"(?m)^[；;]+", "", s)
-    s = re.sub(r"[；;](?=[\s]|$)", "", s)
-
-    # 角色翻转截断：自己说完又「那你/你别…」去说对方 → 从翻转行起丢弃
-    s = _truncate_role_flip(s)
-    if not s:
-        return str(text or "").strip()
-
-    # 自问自答结构：「问？答」且答段以应答腔开头 → 只保留问句
-    m = re.match(
-        r"^(.{2,40}?[？?])[\s\n]*(.{2,80})$",
-        s,
-        flags=re.DOTALL,
-    )
-    if m:
-        question = m.group(1).strip()
-        answer = str(m.group(2) or "").strip()
-        if re.match(
-            r"^(?:嗯+|哦+|是啊|对啊|对的|是的|好啊|好呀|好哒|当然|"
-            r"我觉得|我也|我也觉得|好像是|大概是|应该|没错|嘿嘿|哈哈)",
-            answer,
-        ):
-            return question
+    previous = None
+    # 每轮只删字符，有限收敛；标签嵌套/格式清洗新露出的标签也一次处理完。
+    while s != previous:
+        previous = s
+        s = re.sub(r"[；;]{2,}", "", s)
+        s = re.sub(r"([？?。！!…])[；;]+", r"\1", s)
+        s = re.sub(r"(?m)^\s*[；;]+", "", s)
+        s = re.sub(r"[；;](?=[\s]|$)", "", s)
+        cleaned = []
+        for line in s.splitlines():
+            raw = line.strip()
+            while own.match(raw):
+                raw = own.sub("", raw, count=1)
+            if raw and not other.match(raw):
+                cleaned.append(raw)
+        s = "\n".join(cleaned).strip()
     return s
-
-
-# 「对你开口」的翻转行：那你/你别/你再/你要/你去/你先 + 动作
-_ROLE_FLIP_ADDR = re.compile(
-    r"^(?:那你|你别|你再|你要|你去|你先|你快|你可|记得你|你也|你也该|你可得)"
-)
-# 自述行为（前一行）：有「我」或省略主语的动作
-_SELF_STATEMENT = re.compile(
-    r"(我|咱|本(?:姑娘|小姐|座|大爷))|"
-    r"(靠着|坐着|躺着|睡|眯|歇|吃|喝|忙|累|困|晕|晒).{0,8}(了一会儿|一下|着|了|过)"
-)
-
-
-def _truncate_role_flip(s: str) -> str:
-    """若下一行在「对你开口」且上一行是「自述行为」→ 判定角色翻转，截断。
-
-    生产实证：「在窗边靠着眯了一会儿 / 那你再眯一会儿，别硬撑了」
-    ——上句是她自己眯的，下句却让用户再眯 = 把自己刚说的当成用户说的。
-    """
-    lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
-    if len(lines) < 2:
-        return s
-    out: list[str] = []
-    for i, line in enumerate(lines):
-        if i > 0 and _ROLE_FLIP_ADDR.match(line):
-            prev = lines[i - 1]
-            # 上一行是自述、且未提到「你」→ 这句「那你…」是把自己话当用户话
-            if "你" not in prev and _SELF_STATEMENT.search(prev):
-                break
-        out.append(line)
-    return "\n".join(out).strip()
 
 
 TOPIC_CONTINUITY_RULE = (

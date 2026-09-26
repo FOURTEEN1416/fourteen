@@ -87,6 +87,26 @@ def test_wechat_path_still_passes_character_id(monkeypatch):
     assert kwargs.get("character_id") == "62105bca"
 
 
+def test_character_is_frozen_before_loading_config(monkeypatch):
+    import asyncio
+
+    orch = _FakeOrch()
+    m = _manager(monkeypatch, orch, (7, None))
+    instance = _FakeInstance()
+    monkeypatch.setattr(m, "_get_or_create", lambda uid: instance)
+    persisted = []
+    monkeypatch.setattr(m, "_persist_affinity", lambda uid, cid, engine: persisted.append(cid))
+
+    async def config(uid):
+        instance.character_card_id = "other"
+        return 7, None
+
+    monkeypatch.setattr(m, "_get_user_llm_config", config)
+    asyncio.run(m._process_message_inner("u1@im.wechat", "你好"))
+    assert orch.calls[0][1]["character_id"] == "62105bca"
+    assert persisted == ["62105bca"]
+
+
 # ── 无绑定时的行为 ─────────────────────────────────────────
 
 def test_no_binding_yields_no_user_config(monkeypatch):

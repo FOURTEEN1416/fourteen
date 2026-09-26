@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import json
 import logging
 import os
 import threading
@@ -185,6 +186,15 @@ class VectorMemory:
                 raise
             logger.error("ChromaDB init failed: %s", e)
 
+    @staticmethod
+    def document_id(kind: str, text: str, metadata: dict | None = None) -> str:
+        """文本相同不等于同一记忆：身份、类型和轮/归档ID参与主键。"""
+        meta = metadata or {}
+        source = [kind, text, *[str(meta.get(k) or "") for k in
+                  ("session_id", "user_key", "character_id", "turn_id", "episode_id", "insight_id", "type")]]
+        digest = hashlib.sha256(json.dumps(source, ensure_ascii=False).encode("utf-8")).hexdigest()
+        return f"{kind}_{digest}"
+
     # ── 聊天历史 ──────────────────────────────────────────
 
     async def store_chat(self, user_msg: str, reply: str, metadata: dict | None = None) -> str | None:
@@ -200,7 +210,7 @@ class VectorMemory:
         }
         if metadata:
             meta.update(metadata)
-        doc_id = f"chat_{hashlib.md5(doc.encode()).hexdigest()[:12]}"
+        doc_id = self.document_id("chat", doc, meta)
         try:
             await asyncio.to_thread(coll.add, documents=[doc], metadatas=[meta], ids=[doc_id])
             return doc_id
@@ -224,7 +234,7 @@ class VectorMemory:
         coll = self._collections.get("user_facts")
         if coll is None:
             return None
-        doc_id = f"fact_{hashlib.md5(fact.encode()).hexdigest()[:12]}"
+        doc_id = self.document_id("fact", fact, {"user_key": user_key})
         meta = {
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "category": category,
@@ -339,7 +349,7 @@ class VectorMemory:
             kwargs: dict[str, Any] = {"query_texts": [query], "n_results": top_k}
             if where:
                 # P1-9：元数据过滤下推给 Chroma，取该集合内的目标子集
-                kwargs["where"] = where
+                kwargs["where"] = {"$and": [{k: v} for k, v in where.items()]} if len(where) > 1 else where
             results = await asyncio.to_thread(coll.query, **kwargs)
             if not results or not results.get("documents"):
                 return []
@@ -360,32 +370,24 @@ class VectorMemory:
     # 反思写入的是 episodic_memory（metadata type=reflection），旧实现映射表
     # 里没有它 → filter 落到"扫全部 6 个集合"分支，每轮 O(6×k) 向量查询。
     _SEARCH_ROUTES = {
-        "episode": ("episodic_memory", None),
+        "episode": ("episodic_memory", {"type": "episode"}),
         "fact": ("user_facts", None),
         "reflection": ("episodic_memory", {"type": "reflection"}),
     }
 
     async def search(self, query: str, top_k: int = 5, filter_dict: dict | None = None) -> list[dict[str, Any]]:
-        if filter_dict and isinstance(filter_dict, dict):
-            route = self._SEARCH_ROUTES.get(filter_dict.get("type", ""))
-            if route:
-                return await self._search(route[0], query, top_k, where=route[1])
+        if top_k <= 0:
+            return []
+        filters = dict(filter_dict or {})
+        route = self._SEARCH_ROUTES.get(filters.get("type", ""))
+        if route:
+            filters.pop("type", None)
+            filters.update(route[1] or {})
+            return await self._search(route[0], query, top_k, where=filters or None)
         all_results: list[dict[str, Any]] = []
-        for coll in self._collections.values():
-            if coll is not None:
-                try:
-                    res = await asyncio.to_thread(coll.query, query_texts=[query], n_results=top_k)
-                    if res and res.get("documents"):
-                        for i, doc in enumerate(res["documents"][0]):
-                            meta = res["metadatas"][0][i] if res.get("metadatas") else {}
-                            all_results.append({
-                                "content": doc,
-                                "metadata": meta,
-                                "distance": res["distances"][0][i] if res.get("distances") else 0,
-                            })
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("向量搜索结果解析失败，跳过该批次: %s", e)
-        return all_results
+        for name in self._collections:
+            all_results.extend(await self._search(name, query, top_k, where=filters or None))
+        return sorted(all_results, key=lambda row: row.get("distance", 0))[:top_k]
 
     def search_sync(self, query: str, top_k: int = 5, filter_dict: dict | None = None) -> list[dict[str, Any]]:
         return _run_async(self.search(query, top_k, filter_dict))  # type: ignore[no-any-return]
@@ -395,9 +397,9 @@ class VectorMemory:
         coll = self._collections.get(collection)
         if coll is None:
             return None
-        doc_id = f"text_{hashlib.md5(text.encode()).hexdigest()[:12]}"
+        doc_id = self.document_id("text", text, metadata)
         try:
-            await asyncio.to_thread(coll.add, documents=[text], metadatas=[metadata or {}], ids=[doc_id])
+            await asyncio.to_thread(coll.upsert, documents=[text], metadatas=[metadata or {}], ids=[doc_id])
             return doc_id
         except Exception as e:  # noqa: BLE001
             logger.warning("store_text failed: %s", e)
@@ -406,6 +408,18 @@ class VectorMemory:
     def store_text_sync(self, text: str, metadata: dict | None = None,
                    collection: str = "episodic_memory") -> str | None:
         return _run_async(self.store_text(text, metadata, collection))  # type: ignore[no-any-return]
+
+    def invalidate_fact_derivatives(self, fact: str, user_key: str) -> None:
+        """主库删除后的派生缓存清理；读侧另行核验主库，清理失败也不复活。"""
+        facts = self._collections.get("user_facts")
+        if facts is not None:
+            facts.delete(ids=[self.document_id("fact", fact, {"user_key": user_key})])
+        semantic = self._collections.get("semantic_knowledge")
+        if semantic is not None:
+            semantic.delete(where={"user_key": user_key})
+        episodic = self._collections.get("episodic_memory")
+        if episodic is not None:
+            episodic.delete(where={"$and": [{"type": "reflection"}, {"session_id": user_key}]})
 
     def health_check(self) -> dict:
         return {

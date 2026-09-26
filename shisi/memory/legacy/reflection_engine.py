@@ -16,7 +16,7 @@ REFLECTION_PROMPT = """你是一位善于观察的陪伴者。请根据以下关
 要求：
 - 每条反思用一句话表达
 - 基于已有事实，不要编造
-- 语气自然，像默默记在心里
+- 使用第三人称，标明用户、角色或被转述者；洞察是推测，不写成用户说过的话
 - 如果信息不足，直接返回空数组
 
 已知事实：
@@ -46,27 +46,30 @@ class ReflectionEngine:
         self._vm = vector_memory
         self._sm = structured_memory
         self._reflection_interval = reflection_interval
-        self._fact_count_since_reflection = 0
+        self._fact_count_since_reflection: dict[tuple[str, str], int] = {}
         self._lock = threading.Lock()
-        self._insights_cache: list[str] = []
-        self._cache_ts = 0.0
+        # 结构化查询已有索引；不缓存检索结果，消除跨用户读写缓存竞态。
 
     def maybe_reflect(
         self,
         facts: list[dict[str, Any]],
         episodes: list[dict[str, Any]] | None = None,
         session_id: str = "",
+        character_id: str = "",
     ) -> list[str]:
-        """根据新增事实数量触发反思。"""
+        """根据当前会话、角色的事实数量触发反思。"""
+        key = (session_id, character_id)
         with self._lock:
-            self._fact_count_since_reflection += len(facts)
-            if self._fact_count_since_reflection < self._reflection_interval:
+            count = self._fact_count_since_reflection.get(key, 0) + len(facts)
+            self._fact_count_since_reflection[key] = count
+            if count < self._reflection_interval:
                 return []
-            self._fact_count_since_reflection = 0
+            self._fact_count_since_reflection.pop(key, None)
 
         insights = self.reflect(facts, episodes)
         if insights:
-            self.store_insights(insights, session_id=session_id)
+            self.store_insights(insights, session_id=session_id, character_id=character_id,
+                                source_fact_ids=[int(f["id"]) for f in facts if f.get("id")])
         return insights
 
     def reflect(
@@ -127,19 +130,19 @@ class ReflectionEngine:
 
         prefs = categories.get("preference", [])
         if prefs:
-            insights.append(f"你似乎对{prefs[-1]}挺上心。")
+            insights.append(f"用户偏好线索（待验证）：{prefs[-1]}")
 
         habits = categories.get("habit", [])
         if habits:
-            insights.append(f"你经常{habits[-1]}，这已经成了你的习惯。")
+            insights.append(f"用户习惯线索（待验证）：{habits[-1]}")
 
         emotions = [f for f in facts if f.get("category") in ("emotion", "mood")]
         if emotions:
-            insights.append("你最近情绪起伏不小，我会多留意。")
+            insights.append("用户近期提及情绪状态；不能仅凭这些事实断定情绪持续起伏。")
 
         events = categories.get("event", [])
         if events:
-            insights.append(f"你提过{events[-1]}，这件事对你来说应该比较重要。")
+            insights.append(f"用户提及事件（重要程度待验证）：{events[-1]}")
 
         return insights[:3]
 
@@ -147,6 +150,8 @@ class ReflectionEngine:
         self,
         insights: list[str],
         session_id: str = "",
+        character_id: str = "",
+        source_fact_ids: list[int] | None = None,
     ) -> None:
         if not insights:
             return
@@ -160,111 +165,63 @@ class ReflectionEngine:
                     "type": "reflection",
                     "insight_id": insight_id,
                     "session_id": session_id,
+                    "character_id": character_id,
                     "timestamp": timestamp,
                 }
                 if self._vm:
                     self._vm.store_text_sync(text, metadata)
                 if self._sm and hasattr(self._sm, "add_reflection"):
-                    self._sm.add_reflection(text, session_id=session_id)
+                    self._sm.add_reflection(text, session_id=session_id, character_id=character_id,
+                                            source_fact_ids=source_fact_ids)
                 logger.info("Reflection stored: %s", text[:40])
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to store reflection: %s", e)
-        self._insights_cache = insights
-        self._cache_ts = timestamp
 
     def get_insights(
         self,
         query: str = "",
         top_k: int = 3,
-        use_cache: bool = True,
         session_id: str | None = None,
+        character_id: str = "",
     ) -> list[str]:
-        """检索反思洞察。session_id 非 None 时按会话隔离（缓存键含 session）。"""
-        cache_key = f"{session_id or ''}|{query[:32]}"
-        if (
-            use_cache
-            and self._insights_cache
-            and time.time() - self._cache_ts < 300
-            and getattr(self, "_insights_cache_key", "") == cache_key
-        ):
-            return self._insights_cache[:top_k]
+        """先按会话/角色过滤，再取 top_k；无共享结果缓存。"""
+        from utils.prompt_sanitize import looks_like_dialogue
 
+        if top_k <= 0:
+            return []
         results: list[str] = []
-        legacy_dropped = 0
+        filters = {"type": "reflection"}
+        if session_id is not None:
+            filters["session_id"] = str(session_id)
+        if character_id:
+            filters["character_id"] = character_id
         if self._vm and query:
             try:
-                vector_results = self._vm.search_sync(
-                    query, top_k=top_k * 3 if session_id else top_k,
-                    filter_dict={"type": "reflection"},
-                )
-                for r in vector_results:
-                    content = (r.get("content") or "").strip()
-                    if not content:
+                rows = self._vm.search_sync(query, top_k=top_k, filter_dict=filters) or []
+                for row in rows:
+                    meta = row.get("metadata") or {}
+                    if session_id is not None and meta.get("session_id") != session_id:
                         continue
-                    from utils.prompt_sanitize import looks_like_dialogue
-
-                    if looks_like_dialogue(content):
+                    if character_id and meta.get("character_id") != character_id:
                         continue
-                    meta = r.get("metadata") or {}
-                    r_sid = str(meta.get("session_id") or r.get("session_id") or "")
-                    if session_id is not None:
-                        # 2026-09-22 块E：空归属行**不属任何会话**，必须排除 ——
-                        # 旧实现 `if r_sid and r_sid == sid: append` 语义其实
-                        # 正确，但由此产生的后果是：所有历史反思（写入时
-                        # session_id 为空串）在按会话检索时**恒被丢弃**，
-                        # 且无任何日志 —— 表现为"反思功能像没生效"。
-                        # 与块C（chat_history 归属）同口径：此处**不回填**
-                        # （反思的归属无法从载体反推，回填等于编造），保持
-                        # 「宁缺毋串」，但把丢弃计数记进日志使现场可见。
-                        if r_sid == str(session_id):
-                            results.append(content)
-                        elif not r_sid:
-                            legacy_dropped += 1
+                    content = str(row.get("content") or "").strip()
+                    checker = getattr(self._sm, "has_reflection", None)
+                    if checker is not None and not checker(content, str(session_id or ""), character_id):
                         continue
-                    results.append(content)
-                if legacy_dropped:
-                    logger.info(
-                        "反思向量检索: %d 条历史反思无会话归属，已按当前会话(%s)排除",
-                        legacy_dropped, session_id,
-                    )
+                    if content and not looks_like_dialogue(content):
+                        results.append(content)
             except Exception as e:  # noqa: BLE001
                 logger.debug("Vector reflection search failed: %s", e)
 
-        if not results and self._sm and hasattr(self._sm, "get_reflections"):
+        if not results and self._sm:
             try:
-                from utils.prompt_sanitize import looks_like_dialogue
-
-                # 2026-09-22 块E：与向量分支同口径 —— 按会话取时，**空归属行
-                # 一并取回再排除**。旧实现直接 `WHERE session_id = ?`，历史反思
-                # （session_id 为空串）连候选都进不来，反思在"按会话"调用下
-                # 永远是空的；这不是数据缺失而是查询口径把存量全部挡在门外。
-                if session_id is not None:
-                    fetched = self._sm.get_reflections(limit=top_k * 3)
-                    legacy_dropped = sum(
-                        1 for r in fetched if not str(r.get("session_id") or "")
-                    )
-                    rows = [
-                        r for r in fetched
-                        if str(r.get("session_id") or "") == str(session_id)
-                    ][:top_k]
-                    if legacy_dropped:
-                        logger.info(
-                            "反思结构化检索: %d 条历史反思无会话归属，已按当前会话(%s)排除",
-                            legacy_dropped, session_id,
-                        )
-                else:
-                    rows = self._sm.get_reflections(limit=top_k)
-                results = [
-                    r.get("content", "").strip()
-                    for r in rows
-                    if r.get("content") and not looks_like_dialogue(str(r.get("content")))
-                ]
+                rows = self._sm.get_reflections(
+                    limit=top_k, session_id=session_id, character_id=character_id,
+                )
+                results = [str(row["content"]).strip() for row in rows
+                           if row.get("content") and not looks_like_dialogue(str(row["content"]))]
             except Exception as e:  # noqa: BLE001
                 logger.debug("Structured reflection search failed: %s", e)
-
-        self._insights_cache = results[:top_k]
-        self._insights_cache_key = cache_key
-        self._cache_ts = time.time()
         return results[:top_k]
 
     @staticmethod

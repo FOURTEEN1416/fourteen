@@ -147,15 +147,16 @@ class TestDecayEngine:
         amount = decay.calculate_decay(80.0, old)
         assert amount > 0.0
 
-    def test_calculate_decay_low_affinity(self, decay):
-        """低好感度衰减更慢"""
+    @pytest.mark.parametrize("days, low, high", [(3, 0.0, 0.0), (10, 3.5, 3.5), (40, 10.0, 18.5)])
+    def test_calculate_decay_fixed_rate_and_affinity_floor(self, days, low, high):
+        """既有规则为每日固定扣减、最多扣到0；不是按好感度比例衰减。"""
         from datetime import datetime, timedelta, timezone
-        old = datetime.now(tz=timezone.utc) - timedelta(days=3)
-        amount = decay.calculate_decay(10.0, old)
-        assert amount >= 0.0
-        # 10 好感度应该衰减得比 80 慢
-        high = decay.calculate_decay(80.0, old)
-        assert high > amount if high > 0 else True
+
+        engine = DecayEngine(decay_rate=0.5, grace_period_days=3)
+        now = datetime(2026, 9, 26, tzinfo=timezone.utc)
+        old = now - timedelta(days=days)
+        assert engine.calculate_decay(10.0, old, now) == low
+        assert engine.calculate_decay(80.0, old, now) == high
 
     def test_calculate_decay_zero_affinity(self, decay):
         """0 好感度不衰减"""

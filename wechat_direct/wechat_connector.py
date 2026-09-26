@@ -627,7 +627,7 @@ def _run_async_coro(coro):
     return asyncio.run(coro)
 
 
-def _call_user_manager(mgr, user_id, text, attachments=None):
+def _call_user_manager(mgr, user_id, text, attachments=None, reply_sender=None):
     """
     调用女友管理器处理消息（多用户路由）。
 
@@ -639,9 +639,17 @@ def _call_user_manager(mgr, user_id, text, attachments=None):
     """
     from utils.async_utils import run_on_shared_loop
 
-    coro = mgr.process_message(user_id, text, attachments=attachments)
+    async def publish(result: dict) -> str:
+        return await asyncio.to_thread(reply_sender, str(result.get("reply") or ""))
+
+    kwargs = {"attachments": attachments}
+    if reply_sender is not None:
+        kwargs["reply_sender"] = publish
+    coro = mgr.process_message(user_id, text, **kwargs)
     try:
-        return run_on_shared_loop(coro, timeout=120)
+        # 带发送回调时必须等待确认结束；桥接层超时后协程仍在运行，提前释放
+        # 好友锁会让下一轮与上一轮的迟到发送交错。生成/网络超时由各自边界负责。
+        return run_on_shared_loop(coro, timeout=None if reply_sender is not None else 120)
     except concurrent.futures.TimeoutError:
         logger.warning("处理消息超时 (user=%s)", user_id)
         return {"reply": "", "error": "timeout"}
@@ -728,6 +736,8 @@ class WeChatConnector:
         # ── 对话内追问状态（见文件头「对话内追问」）──
         self._pending_followups: dict[str, dict[str, Any]] = {}  # {user_id: {step,due,last_reply}}
         self._followup_lock = threading.Lock()
+        self._followup_revisions: dict[str, int] = {}
+        self._peer_locks: dict[str, threading.RLock] = {}
         self._followup_daily: dict[str, int] = {}   # {user_id: 当日已追问条数}
         self._followup_daily_date = ""
         self._last_user_id: str = ""
@@ -795,6 +805,13 @@ class WeChatConnector:
         return to_user or self._last_user_id
 
     def send_text(self, text: str, to_user: str = "") -> bool:
+        target = self._resolve_send_target(to_user, "文本")
+        if not target:
+            return False
+        with self._peer_lock(self._session_key(target)):
+            return self._send_text_unlocked(text, target)
+
+    def _send_text_unlocked(self, text: str, to_user: str) -> bool:
         """主动发送文本消息（供外部调用）
 
         ⚠️ 用户独立通道：禁止依赖 `_last_user_id` 回退到可能属于他人会话的目标。
@@ -1165,6 +1182,9 @@ class WeChatConnector:
                     # 修复 P0-WX2：消息处理放到独立线程，避免阻塞轮询循环
                     # 导致连接状态抖动或心跳超时。
                     # P1-审查 item26：Future 必须挂失败回调，否则线程内异常静默吞掉。
+                    if raw_msg.get("message_type", 0) in (1, 3, 34) and raw_msg.get("from_user_id"):
+                        # 在入站轮询时即取消，不能等线程池排到这条消息才宣布用户已接话。
+                        self._cancel_followup(self._session_key(raw_msg["from_user_id"]))
                     fut = self._msg_executor.submit(self._handle_message, raw_msg)
                     fut.add_done_callback(_log_msg_task_failure)
 
@@ -1255,19 +1275,27 @@ class WeChatConnector:
         comps = getattr(orch, "components", None) if orch else None
         return (comps or {}).get("memory")
 
-    def _session_messages(self, session_key: str, keep: int = 10) -> list[dict[str, str]]:
+    def _peer_lock(self, session_key: str):
+        """同一好友的生成、拆条发送与确认串行；不同好友互不阻塞。"""
+        with self._state_lock:
+            return self._peer_locks.setdefault(session_key, threading.RLock())
+
+    def _session_messages(
+        self, session_key: str, keep: int = 10, *, character_id: str | None = None,
+    ) -> list[dict[str, str]]:
         """按会话读最近若干条**持久化**对话（与主链同一真源）。"""
         getter = getattr(self._memory_service(), "get_chat_context", None)
         if getter is None or not session_key:
             return []
         try:
-            messages, _summary = getter(session_id=session_key, keep_recent=keep)
+            cid = self._resolve_character_id(session_key) if character_id is None else character_id
+            messages, _summary = getter(session_id=session_key, keep_recent=keep, character_id=cid, summarize=False)
         except Exception as e:  # noqa: BLE001
             logger.warning("[wx][step=history_read_failed] session=%s error=%s", session_key, e)
             return []
         return list(messages or [])
 
-    def _record_outbound(self, text: str, session_key: str) -> None:
+    def _record_outbound(self, text: str, session_key: str, *, character_id: str) -> None:
         """她主动说的话回写会话历史（自问自答根治；写入唯一 owner 在记忆层）。
 
         🔴 2026-09-22：必须带 character_id —— 出站 assistant 行此前无归属，
@@ -1281,33 +1309,22 @@ class WeChatConnector:
             recorder(
                 message=text,
                 session_id=session_key,
-                character_id=self._resolve_character_id(session_key),
+                character_id=character_id,
                 channel="wechat",
             )
         except Exception as e:  # noqa: BLE001
             logger.warning("[wx][step=outbound_record_failed] session=%s error=%s", session_key, e)
 
-    @staticmethod
-    def _resolve_character_id(session_key: str) -> str:
-        """会话键 → 角色 id（唯一 owner：utils.character_resolver）。
+    def _resolve_character_id(self, session_key: str) -> str:
+        """复用当前通道的用户管理器，不另取全局身份源。"""
+        from utils import character_resolver
 
-        延迟导入避免与 utils 层形成模块级循环依赖。
-        """
-        try:
-            from utils import character_resolver
+        return character_resolver.resolve_character_id(session_key, self.user_manager)
 
-            try:
-                from api.deps import deps
-
-                gf = getattr(deps, "gf", None)
-            except Exception:  # noqa: BLE001
-                gf = None
-            return character_resolver.resolve_character_id(session_key, gf)
-        except Exception as e:  # noqa: BLE001
-            logger.debug("[wx] 角色解析失败 session=%s: %s", session_key, e)
-            return "default"
-
-    def _schedule_followup(self, user_id: str, bot_reply: str) -> None:
+    def _schedule_followup(
+        self, user_id: str, bot_reply: str, *, revision: int | None = None,
+        character_id: str | None = None,
+    ) -> None:
         """回复成功后登记一次待发追问（参数取自 web 控制端可调的配置）。"""
         if not user_id or not bot_reply:
             return
@@ -1317,16 +1334,27 @@ class WeChatConnector:
         with self._followup_lock:
             if self._in_quiet_hours():
                 return
+            current = self._followup_revisions.get(user_id, 0)
+            if revision is not None and revision != current:
+                return
+            cid = self._resolve_character_id(user_id) if character_id is None else character_id
+            if cid != self._resolve_character_id(user_id):
+                return
             self._pending_followups[user_id] = {
                 "step": 0,
                 "due": time.time() + float(cfg["delay1_seconds"]),
                 "last_reply": bot_reply,
+                "revision": current,
+                "character_id": cid,
             }
 
-    def _cancel_followup(self, user_id: str) -> None:
-        """用户接话 → 取消待发追问。"""
+    def _cancel_followup(self, user_id: str) -> int:
+        """用户接话使已取走/生成中的追问同样失效，返回本次入站版本。"""
         with self._followup_lock:
+            revision = self._followup_revisions.get(user_id, 0) + 1
+            self._followup_revisions[user_id] = revision
             self._pending_followups.pop(user_id, None)
+            return revision
 
     def _in_quiet_hours(self) -> bool:
         """免打扰时段判定（读跨 worker 真源 data/scheduler_config.json）。"""
@@ -1338,14 +1366,18 @@ class WeChatConnector:
                 start, end = int(qh.get("start", 23)), int(qh.get("end", 7))
         except Exception:  # noqa: BLE001
             pass
-        hour = time.localtime().tm_hour
+        from utils.local_time import now_local
+
+        hour = now_local().hour
         if start == end:
             return False
         return (start <= hour < end) if start < end else (hour >= start or hour < end)
 
     def _followup_budget_ok(self, user_id: str) -> bool:
         """单用户每日追问上限（web 可调；独立预算，不吃 ASE 的 8 条）。"""
-        today = time.strftime("%Y-%m-%d")
+        from utils.local_time import now_local
+
+        today = now_local().strftime("%Y-%m-%d")
         if today != self._followup_daily_date:
             self._followup_daily_date = today
             self._followup_daily.clear()
@@ -1377,6 +1409,15 @@ class WeChatConnector:
         if not user_id or not self.token:
             return
 
+        with self._followup_lock:
+            revision = int(st.get("revision", self._followup_revisions.get(user_id, 0)))
+            if revision != self._followup_revisions.get(user_id, 0):
+                return
+            if self._pending_followups.get(user_id) is st:
+                self._pending_followups.pop(user_id)
+        character_id = str(st.get("character_id") or self._resolve_character_id(user_id))
+        if character_id != self._resolve_character_id(user_id):
+            return
         step = int(st.get("step", 0)) + 1
 
         # ⚠️ 2026-09-19 用户反馈：「追问没有和上下文形成逻辑，而是强行地插入一句
@@ -1384,10 +1425,8 @@ class WeChatConnector:
         # 2026-09-21 再根治：上下文不再另起一份进程内 deque（重启即空、与主链
         # 两套真源），直接读持久化 chat_history；同时**发前复查最后一条是谁说的**
         # ——旧取消逻辑靠内存里的 pending 表，线程取走待发后用户接话就取消不掉。
-        history = self._session_messages(user_id, keep=_FOLLOWUP_CONTEXT_TURNS)
+        history = self._session_messages(user_id, keep=_FOLLOWUP_CONTEXT_TURNS, character_id=character_id)
         if history and history[-1].get("role") == "user":
-            with self._followup_lock:
-                self._pending_followups.pop(user_id, None)
             logger.info("[wx][step=followup_skip_replied] user=%s", user_id)
             return
         last_reply = str(st.get("last_reply", "") or (history[-1].get("content") if history else ""))[:80]
@@ -1411,17 +1450,24 @@ class WeChatConnector:
         )
         text = self._generate_followup(
             prompt, last_reply=last_reply, session_key=user_id, history=hist,
+            character_id=character_id,
         )
         if not text:
             return
         # 2026-09-20 修复：user_id 是会话隔离键（`N:wxid`），而发送 API 与
         # context_token 查找要的都是**裸 peer wxid** —— 直接传会 ret=-3。
         peer = self._peer_wxid_from_session(user_id)
-        if not self.send_text(text, to_user=peer):
-            logger.warning("[wx][step=followup_send_failed] user=%s step=%d", user_id, step)
-            return
-        # 自问自答根治：这句追问必须进历史，否则下一轮她不记得自己问过什么
-        self._record_outbound(text, user_id)
+        with self._peer_lock(user_id):
+            with self._followup_lock:
+                if revision != self._followup_revisions.get(user_id, 0):
+                    return
+            if character_id != self._resolve_character_id(user_id):
+                return
+            if not self.send_text(text, to_user=peer):
+                logger.warning("[wx][step=followup_send_failed] user=%s step=%d", user_id, step)
+                return
+            # 请求一旦交给 API 不能撤回；受理后仍用发送前身份回写。
+            self._record_outbound(text, user_id, character_id=character_id)
 
         self._followup_daily[user_id] = self._followup_daily.get(user_id, 0) + 1
         logger.info(
@@ -1431,14 +1477,20 @@ class WeChatConnector:
         # 每日总量由 daily_max 兜底。
         if step < 2:
             with self._followup_lock:
-                if user_id not in self._pending_followups:
+                if (
+                    revision == self._followup_revisions.get(user_id, 0)
+                    and character_id == self._resolve_character_id(user_id)
+                    and user_id not in self._pending_followups
+                ):
                     self._pending_followups[user_id] = {
                         "step": step,
                         "due": time.time() + float(cfg["delay2_seconds"]),
                         "last_reply": text,
+                        "revision": revision,
+                        "character_id": character_id,
                     }
 
-    def _followup_system_prompt(self, session_key: str) -> str:
+    def _followup_system_prompt(self, session_key: str, character_id: str | None = None) -> str:
         """追问用的角色 system —— 与主链**同一身份源**。
 
         2026-09-21 自问自答根治：旧实现 `_generate_followup` 是 `chat_sync(query=...)`
@@ -1450,15 +1502,9 @@ class WeChatConnector:
         builder = getattr(persona, "build_system_prompt", None)
         if builder is None:
             return ""
-        cid = ""
+        cid = self._resolve_character_id(session_key) if character_id is None else character_id
         try:
-            get_char = getattr(self.user_manager, "get_user_character", None)
-            if get_char is not None and session_key:
-                cid = str(get_char(session_key) or "")
-        except Exception as e:  # noqa: BLE001
-            logger.debug("[wx] 追问角色解析失败 session=%s: %s", session_key, e)
-        try:
-            return str(builder(character_id=cid or None) or "")
+            return str(builder(character_id=cid) or "")
         except Exception as e:  # noqa: BLE001
             logger.warning("[wx][step=followup_persona_failed] session=%s error=%s", session_key, e)
             return ""
@@ -1469,16 +1515,24 @@ class WeChatConnector:
         last_reply: str = "",
         session_key: str = "",
         history: list[dict[str, str]] | None = None,
+        character_id: str | None = None,
     ) -> str:
         """用角色口吻 + 真实往来历史生成一句追问；失败/不合规返回空串（宁可不发）。"""
         orch = self.orchestrator
-        llm = (getattr(orch, "components", None) or {}).get("llm") if orch else None
+        try:
+            from api.byok import session_llm
+            from utils.async_utils import run_on_shared_loop
+
+            llm = run_on_shared_loop(session_llm(session_key, orch))
+        except Exception:
+            logger.warning("追问用户模型不可用，取消生成 session=%s", session_key)
+            return ""
         if llm is None or not hasattr(llm, "chat_sync"):
             return ""
         try:
             raw = llm.chat_sync(
                 query=prompt,
-                system_prompt=self._followup_system_prompt(session_key),
+                system_prompt=self._followup_system_prompt(session_key, character_id),
                 history=history or None,
                 max_tokens=60,
                 temperature=0.95,
@@ -1632,6 +1686,29 @@ class WeChatConnector:
             self._send_peer_text(peer_wxid, "角色切换没有成功，稍后再回复「角色」试试")
         return True
 
+    def _send_reply_segments(self, peer: str, reply: str, *, context_token: str = "") -> str:
+        """只返回 API 已明确受理的前缀；失败段及后续草稿不进入历史。"""
+        segments = split_reply_for_wechat(reply)
+        accepted = []
+        for idx, segment in enumerate(segments):
+            try:
+                if idx:
+                    time.sleep(_segment_delay(segments[idx - 1]))
+                response = _send_text(
+                    to=peer, text=segment,
+                    context_token=self._get_context_token(peer) or context_token,
+                    token=self.token, base_url=self.base_url,
+                )
+                ok, error = _api_ok(response)
+                if not ok:
+                    logger.warning("[wx][step=reply_send_failed] peer=%s part=%s error=%s", peer, idx + 1, error)
+                    break
+                accepted.append(segment)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[wx][step=reply_send_failed] peer=%s part=%s error=%s", peer, idx + 1, exc)
+                break
+        return "\n".join(accepted)
+
     def _handle_message(self, raw_msg):
         """处理一条消息（全链路结构化日志：接收 → 路由 → LLM → 回复）"""
         msg_type = raw_msg.get("message_type", 0)
@@ -1661,8 +1738,15 @@ class WeChatConnector:
             # 2026-09-20 修复：待发追问以**会话隔离键**（`N:wxid`）登记，
             # 取消时必须用同一形态 —— 旧实现传裸 wxid 永远匹配不上，
             # 用户接话后追问照样发（追问时序错乱 + 白耗每日预算）。
-            self._cancel_followup(self._session_key(from_user))
+            revision = self._cancel_followup(self._session_key(from_user))
+        else:
+            return
 
+        with self._peer_lock(self._session_key(from_user)):
+            self._handle_message_serial(raw_msg, msg_id, from_user, context_token, revision)
+
+    def _handle_message_serial(self, raw_msg, msg_id, from_user, context_token, revision):
+        """同一好友从入站处理到最后一段受理/落库的完整串行区间。"""
         items = raw_msg.get("item_list", [])
         text = ""
         voice_data = ""
@@ -1726,7 +1810,9 @@ class WeChatConnector:
             else:
                 logger.info("[wx][step=asr_unavailable] msg_id=%s user=%s", msg_id, from_user)
 
-        today = time.strftime("%Y-%m-%d")
+        from utils.local_time import now_local
+
+        today = now_local().strftime("%Y-%m-%d")
         with self._state_lock:
             if today != self._last_day:
                 self._messages_today = 0
@@ -1742,8 +1828,19 @@ class WeChatConnector:
             msg_id, self.owner_user_id, from_user, session_key, text[:80],
         )
 
+        sent_reply: dict[str, Any] = {}
+
+        def publish(reply: str) -> str:
+            if sent_reply:
+                return str(sent_reply["accepted"])
+            accepted = self._send_reply_segments(from_user, reply, context_token=context_token)
+            sent_reply.update(accepted=accepted, complete=bool(accepted) and accepted == "\n".join(split_reply_for_wechat(reply)))
+            return accepted
+
         try:
-            result = _call_user_manager(self.user_manager, session_key, text, attachments)
+            result = _call_user_manager(
+                self.user_manager, session_key, text, attachments, reply_sender=publish,
+            )
             t_elapsed = time.perf_counter() - t_start
         except Exception as e:  # noqa: BLE001
             logger.exception(
@@ -1774,14 +1871,7 @@ class WeChatConnector:
             result = {}
 
         reply = result.get("reply", "")
-        # 入口再洗一遍（与 orchestrator 同源）：防「角色翻转/自问自答」
-        # 被 split_reply 拆成多条后像她跟自己说话（2026-09-25 生产截图）
-        try:
-            from utils.prompt_sanitize import sanitize_reply_text
-
-            reply = sanitize_reply_text(reply) or reply
-        except Exception:  # noqa: BLE001
-            pass
+        # 编排器已经定稿；传输层只拆条，不二次改写正文。
         error = result.get("error", "")
         process_time = result.get("process_time")
 
@@ -1805,41 +1895,18 @@ class WeChatConnector:
                 msg_id, session_key, reply[:80], t_elapsed, process_time,
             )
 
-        try:
-            token = self._get_context_token(from_user) or context_token
-            # 「一句一句发」：整段按换行/句末标点拆成多条短消息，段间加打字停顿
-            segments = split_reply_for_wechat(reply) or [reply]
-            for idx, seg in enumerate(segments):
-                if idx:
-                    time.sleep(_segment_delay(segments[idx - 1]))
-                resp = _send_text(
-                    to=from_user, text=seg,
-                    context_token=token,
-                    token=self.token, base_url=self.base_url,
-                )
-                # 2026-09-19：回复路径同样必须校验业务返回码 —— 旧实现只要不抛异常
-                # 就记 [step=reply_sent]，接口 ret<0（如 prepare failed）时同样会被
-                # 记成"已回复"，与主动消息那条链是同一种谎报。
-                ok, errmsg = _api_ok(resp)
-                if not ok:
-                    logger.warning(
-                        "[wx][step=reply_send_failed] msg_id=%s session=%s part=%d/%d error=%s",
-                        msg_id, session_key, idx + 1, len(segments), errmsg,
-                    )
-                    return
-            logger.info(
-                "[wx][step=reply_sent] msg_id=%s session=%s parts=%d reply=%r",
-                msg_id, session_key, len(segments), reply[:80],
-            )
-            # 回复成功 → 登记对话内追问（以最后一段作为"刚说的话"）
-            # 往来历史不落内存副本 —— 追问侧直接读持久化 chat_history（唯一真源）
-            self._schedule_followup(session_key, segments[-1] if segments else reply)
-        except Exception as e:  # noqa: BLE001
-            logger.exception(
-                "[wx][step=reply_send_failed] msg_id=%s session=%s error=%s",
-                msg_id, session_key, e,
-            )
+        # 早期拒绝（尚未进入模型）可能未调用发送回调；统一出口只发送一次。
+        if not sent_reply:
+            publish(reply)
+        if not sent_reply.get("complete"):
             return
+        reply = str(sent_reply["accepted"])
+        logger.info("[wx][step=reply_accepted] msg_id=%s session=%s", msg_id, session_key)
+        if not error:
+            self._schedule_followup(
+                session_key, reply.splitlines()[-1], revision=revision,
+                character_id=str(result.get("character_id") or self._resolve_character_id(session_key)),
+            )
 
         voice_result = result.get("voice")
         if voice_result:
@@ -1953,7 +2020,9 @@ class WeChatConnector:
     # ── 状态 ──
 
     def get_status(self):
-        today = time.strftime("%Y-%m-%d")
+        from utils.local_time import now_local
+
+        today = now_local().strftime("%Y-%m-%d")
         if today != self._last_day:
             self._messages_today = 0
             self._last_day = today

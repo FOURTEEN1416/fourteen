@@ -125,12 +125,11 @@ class LLMGatewayV2:
         - 对方循环已关闭 → 直接丢弃引用（socket 随循环销毁，等待 GC 回收）。
         """
         for key, (loop, client) in list(self._clients.items()):
-            if loop is current:
+            if loop is current or loop.is_running():
+                # 其他活跃循环可能正服务另一请求，不能因本轮新建client就关闭它。
                 continue
             try:
-                if loop.is_running():
-                    asyncio.run_coroutine_threadsafe(client.aclose(), loop)
-                elif not loop.is_closed():
+                if not loop.is_closed():
                     loop.run_until_complete(client.aclose())
             except Exception as e:  # noqa: BLE001
                 logger.debug("回收旧事件循环上的 LLM client 失败: %s", e)
@@ -189,7 +188,7 @@ class LLMGatewayV2:
             fallback_content = await self._try_fallback_async(built_messages, temperature, max_tokens, tools)
             if fallback_content:
                 return fallback_content
-            return self._handle_error(e)
+            raise RuntimeError("模型请求失败，未生成角色回复") from e
 
     async def chat_with_tools(
         self,

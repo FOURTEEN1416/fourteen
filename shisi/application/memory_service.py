@@ -16,6 +16,7 @@ from typing import Any
 # 根目录 memory/ 已物理删除，所有引用统一指向 shisi 自有位置。
 # StructuredMemory / VectorMemory 改为在 _build_default_memory_backends 内 lazy import，
 # 避免顶级导入未使用触发 ruff F401。
+from shisi.core.conversation_turn import HISTORY_RECENT_LIMIT
 from shisi.memory.favorite_manager import FavoriteManager
 from shisi.memory.forward_manager import ForwardManager
 from shisi.memory.legacy.memory_pipeline import MemoryPipeline  # noqa: E402
@@ -233,30 +234,31 @@ class ShisiMemoryService:
         query: str,
         session_id: str = "",
         top_k: int = 5,
+        character_id: str = "",
     ) -> dict[str, Any]:
         return self._pipeline.retrieve_context(
-            query=query, session_id=session_id, top_k=top_k,
+            query=query, session_id=session_id, top_k=top_k, character_id=character_id,
         )
 
-    def get_recent_context(self, n: int = 3, session_id: str = "") -> str:
-        return self._pipeline.get_recent_context(n=n, session_id=session_id)
+    def get_recent_context(self, n: int = 3, session_id: str = "", character_id: str = "") -> str:
+        return self._pipeline.get_recent_context(n=n, session_id=session_id, character_id=character_id)
 
     def get_chat_context(
         self,
         session_id: str = "",
-        keep_recent: int = 50,
-        summary_trigger: int = 80,
+        keep_recent: int = HISTORY_RECENT_LIMIT,
         character_id: str = "",
+        summarize: bool = True,
     ) -> tuple[list, str]:
         return self._pipeline.get_chat_context(
             session_id=session_id,
             keep_recent=keep_recent,
-            summary_trigger=summary_trigger,
             character_id=character_id,
+            summarize=summarize,
         )
 
-    def get_cross_session_tail(self, session_id: str = "", limit: int = 8) -> list[str]:
-        return self._pipeline.get_cross_session_tail(session_id=session_id, limit=limit)
+    def get_cross_session_tail(self, session_id: str = "", limit: int = 8, character_id: str = "") -> list[str]:
+        return self._pipeline.get_cross_session_tail(session_id=session_id, limit=limit, character_id=character_id)
 
     def get_memory_context(
         self, n_chats: int = 10, session_id: str = "",

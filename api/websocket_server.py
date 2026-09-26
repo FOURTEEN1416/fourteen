@@ -7,6 +7,8 @@ import logging
 import os
 from typing import Any
 
+from fastapi import HTTPException
+
 try:
     import websockets
     from websockets.asyncio.server import serve
@@ -155,13 +157,22 @@ class WebSocketServer:
             return
 
         authed_user_id = identity["user_id"]
+        # 无账号的开发/APIKey连接使用独立命名空间，不能冒充已登录会话。
+        from uuid import uuid4
+
+        from api.session_manager import resolve_owned_session
+
+        anonymous_prefix = f"anonymous:web:{uuid4().hex}:"
+        default_session = ""
 
         async with self._client_lock:
             if len(self._clients) >= MAX_CLIENTS:
                 await websocket.close(code=1013, reason="连接已满")
                 return
             self._clients.add(websocket)
-            self._client_tasks[websocket] = asyncio.current_task()
+            current_task = asyncio.current_task()
+            if current_task is not None:
+                self._client_tasks[websocket] = current_task
             self._client_identity[websocket] = identity
 
         try:
@@ -171,11 +182,25 @@ class WebSocketServer:
                     msg_type = data.get("type", "chat")
                     if msg_type == "chat":
                         user_msg = data.get("message", "")
-                        session_id = data.get("session_id", "")
-                        # P0-5: JWT 身份强制归属——服务端加用户前缀，客户端自报的
-                        # session_id 无法伪装成他人（记忆/工具/LLM 配额按此隔离）。
+                        raw_session = str(data.get("session_id") or "").strip()
                         if authed_user_id is not None:
-                            session_id = f"{authed_user_id}:{session_id}"
+                            session_id = resolve_owned_session(raw_session or default_session, authed_user_id)
+                        else:
+                            session_id = raw_session if raw_session.startswith(anonymous_prefix) else anonymous_prefix + (raw_session or "default")
+                        default_session = session_id
+                        from api.byok import ensure_user_has_key, load_user_llm_config
+                        from api.routers.chat_routes import _resolve_character_id
+
+                        character_id = await _resolve_character_id(str(data.get("character_id") or "default"))
+                        user_llm_config = None
+                        if authed_user_id is not None:
+                            from api.database import _async_session
+
+                            async with _async_session() as db:
+                                user_llm_config = await load_user_llm_config(authed_user_id, self._orch, db)
+                        else:
+                            config_owner = (getattr(self._orch, "components", None) or {}).get("config")
+                            ensure_user_has_key(None, getattr(getattr(config_owner, "config", None), "llm", None))
                         # 登记连接的会话归属（定向投递映射，断开时清理）
                         if session_id:
                             async with self._client_lock:
@@ -191,7 +216,10 @@ class WebSocketServer:
                                 "session_id": session_id,
                                 "message_type": message_type,
                             }))
-                            stream_gen = self._orch.process_message_stream(user_msg, session_id)
+                            stream_gen = self._orch.process_message_stream(
+                                user_msg, session_id, message_type, character_id=character_id,
+                                user_llm_config=user_llm_config, user_id=authed_user_id,
+                            )
                             ended = False
                             try:
                                 async for event in stream_gen:
@@ -204,6 +232,9 @@ class WebSocketServer:
                                             "content": event.get("content", ""),
                                             "message_type": message_type,
                                         }, ensure_ascii=False))
+                                        ack = event.get("_ack")
+                                        if callable(ack):
+                                            ack()
                                     elif event.get("type") == "done":
                                         ended = True
                                         await websocket.send(json.dumps({
@@ -212,6 +243,13 @@ class WebSocketServer:
                                             "message_type": message_type,
                                             "reply": event.get("reply", ""),
                                             "emotion": event.get("emotion"),
+                                        }, ensure_ascii=False))
+                                    elif event.get("type") == "error":
+                                        ended = True
+                                        await websocket.send(json.dumps({
+                                            "type": "error", "session_id": session_id,
+                                            "message": event.get("error", "stream_failed"),
+                                            "reply": event.get("reply", ""),
                                         }, ensure_ascii=False))
                             finally:
                                 with contextlib.suppress(Exception):
@@ -226,19 +264,37 @@ class WebSocketServer:
                                     "message_type": message_type,
                                 }))
                         elif self._orch:
-                            result = await self._orch.process_message(user_msg, session_id)
-                            await websocket.send(json.dumps({
-                                "type": "reply",
-                                "content": result.get("reply", ""),
-                                "emotion": result.get("emotion"),
-                                "trace_id": result.get("trace_id", ""),
-                                "message_type": message_type,
-                                "file_url": file_url,
-                            }, ensure_ascii=False))
+                            send_failure = None
+
+                            async def publish(result, session_id=session_id, message_type=message_type, file_url=file_url):
+                                nonlocal send_failure
+                                try:
+                                    await websocket.send(json.dumps({
+                                        "type": "reply", "session_id": session_id,
+                                        "content": result.get("reply", ""),
+                                        "emotion": result.get("emotion"),
+                                        "trace_id": result.get("trace_id", ""),
+                                        "message_type": message_type, "file_url": file_url,
+                                    }, ensure_ascii=False))
+                                    return str(result.get("reply") or "")
+                                except Exception as exc:
+                                    send_failure = exc
+                                    return ""
+
+                            await self._orch.process_message(
+                                user_msg, session_id, message_type, character_id=character_id,
+                                user_llm_config=user_llm_config, user_id=authed_user_id,
+                                reply_sender=publish,
+                            )
+                            if send_failure is not None:
+                                raise send_failure
                     elif msg_type == "ping":
                         await websocket.send(json.dumps({"type": "pong"}))
                 except json.JSONDecodeError:
                     await websocket.send(json.dumps({"type": "error", "message": "Invalid JSON"}))
+                except (PermissionError, ValueError, HTTPException) as exc:
+                    detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+                    await websocket.send(json.dumps({"type": "error", "message": detail}, ensure_ascii=False))
                 except websockets.exceptions.ConnectionClosed:
                     break
                 except asyncio.CancelledError:

@@ -80,7 +80,7 @@ class TestCrossSessionTailBd:
             assert any("周末去公园" in x for x in lines)
             # 不同 owner（N vs 1）禁止串入
             assert not any("今天好累" in x for x in lines)
-            assert all(x.startswith("- 用户") or x.startswith("- 助手") for x in lines)
+            assert lines == ["- 用户：帮我记着周末去公园", "- 角色（归属未知）：好，周末提醒你"]
             lines_n = sm.get_cross_session_tail("N:wxid_t1", limit=5)
             assert any("今天好累" in x for x in lines_n)
             assert not any("周末去公园" in x for x in lines_n)

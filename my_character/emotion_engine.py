@@ -396,7 +396,9 @@ class LLMEmotionClassifier:
         return f"{msg_hash}:{ctx_hash}"
 
     def classify(self, message: str, context: str = "") -> dict | None:
-        llm = self._get_llm()
+        from utils.llm_bridge import current_llm
+
+        llm = current_llm(self._get_llm())
         if not llm:
             return None
 

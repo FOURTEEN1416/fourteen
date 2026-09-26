@@ -35,6 +35,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+    session_id: str = ""
     trace_id: str = ""
     emotion: dict | None = None
 

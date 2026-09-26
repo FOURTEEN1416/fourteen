@@ -418,10 +418,8 @@ Low视角（偏向各维度低端）: {low_data}
                 # get_running_loop：本方法为 async def，必然处于运行中的事件循环内。
                 # 旧用法 get_event_loop() 自 Python 3.10 起废弃、3.12 起发
                 # DeprecationWarning，且无运行循环时会**新建**一个循环，属于隐性 bug。
-                loop = asyncio.get_running_loop()
-                response = await loop.run_in_executor(
-                    None, lambda: self._llm.chat_sync(                        query=prompt, max_tokens=512, temperature=0.1
-                    )
+                response = await asyncio.to_thread(
+                    self._llm.chat_sync, query=prompt, max_tokens=512, temperature=0.1,
                 )
             else:
                 response = ""

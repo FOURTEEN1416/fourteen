@@ -345,7 +345,7 @@ def test_llm_proactive_web_disabled_event_once_per_day(sched, hub_tmp, monkeypat
     assert events[0]["reason"] == "web_disabled"
 
 
-def test_llm_proactive_persona_uses_knowledge_character_id(sched, hub_tmp, monkeypatch):
+def test_llm_proactive_persona_uses_current_binding_not_cached_engine(sched, hub_tmp, monkeypatch):
     decide = {"should_contact": False, "reason": "test", "wait_minutes": None, "message": ""}
     seen: dict = {}
     events: list = []
@@ -353,9 +353,11 @@ def test_llm_proactive_persona_uses_knowledge_character_id(sched, hub_tmp, monke
     sched._resolve_proactive_llm = lambda eng=None: object()
 
     eng = hub_tmp.get("4:peer@im.wechat")
-    eng._knowledge_character_id = "micai"
+    eng._knowledge_character_id = "old-character"
+    monkeypatch.setattr(sched, "_resolve_character_id", lambda sk: "current-character")
     sched._llm_proactive_one_user(hub_tmp, "4:peer@im.wechat")
-    assert seen.get("cid") == "micai", "P1-48：真实属性是 _knowledge_character_id"
+    assert seen.get("cid") == "current-character"
+    assert events[-1]["character_id"] == "current-character"
 
 
 def test_llm_proactive_deliver_failure_backoff(sched, hub_tmp, monkeypatch):
@@ -365,7 +367,7 @@ def test_llm_proactive_deliver_failure_backoff(sched, hub_tmp, monkeypatch):
     }
     _proactive_sched(monkeypatch, [], decide, {})
     sched._resolve_proactive_llm = lambda eng=None: object()
-    sched._deliver = lambda msg, session_key=None: False
+    sched._deliver = lambda msg, session_key=None, character_id=None: False
     key = "4:peer@im.wechat"
     sched._llm_proactive_one_user(hub_tmp, key)
     assert key in sched._llm_proactive_next_ok, "P1-22：投递失败必须退避，不许 5 分钟后再烧 LLM"
@@ -374,7 +376,7 @@ def test_llm_proactive_deliver_failure_backoff(sched, hub_tmp, monkeypatch):
     assert sched._llm_proactive_next_ok[key] == first
     assert sched._deliver_fail_counts[key] == 1
     # 成功送达 → 计数清零
-    sched._deliver = lambda msg, session_key=None: True
+    sched._deliver = lambda msg, session_key=None, character_id=None: True
     sched._llm_proactive_next_ok.pop(key)
     sched._llm_proactive_one_user(hub_tmp, key)
     assert key not in sched._deliver_fail_counts

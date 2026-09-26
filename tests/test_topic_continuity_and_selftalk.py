@@ -48,7 +48,7 @@ def test_sanitize_reply_strips_user_dialogue_lines():
     from utils.prompt_sanitize import sanitize_reply_text
 
     raw = "用户：今天天气不错\n林挽夏：是啊，挺舒服的"
-    out = sanitize_reply_text(raw)
+    out = sanitize_reply_text(raw, character_name="林挽夏")
     assert "用户：" not in out
     assert "林挽夏：" not in out
     assert "挺舒服的" in out
@@ -61,12 +61,11 @@ def test_sanitize_reply_keeps_normal_single_turn():
     assert sanitize_reply_text(raw) == raw
 
 
-def test_sanitize_reply_drops_self_answer():
+def test_sanitize_reply_keeps_rhetorical_question_and_suggestion():
     from utils.prompt_sanitize import sanitize_reply_text
 
     raw = "今天吃什么？嗯我觉得火锅不错"
-    out = sanitize_reply_text(raw)
-    assert out == "今天吃什么？"
+    assert sanitize_reply_text(raw) == raw
 
 
 def test_sanitize_reply_keeps_question_only():
@@ -217,8 +216,8 @@ def test_ase_sanitize_rejects_invented_user():
     assert sanitize_message("中秋快乐呀") == "中秋快乐呀"
 
 
-def test_sanitize_reply_strips_role_flip_self_response():
-    """生产截图（2026-09-25）：自己说「眯了一会儿」又接「那你再眯一会儿」。"""
+def test_sanitize_reply_does_not_guess_semantic_subject_from_pronouns():
+    """缺少用户上下文时不能仅凭人称判断翻转；归属问题在来源链处理。"""
     from utils.prompt_sanitize import sanitize_reply_text
 
     raw = (
@@ -229,9 +228,7 @@ def test_sanitize_reply_strips_role_flip_self_response():
         "那你再眯一会儿，别硬撑了"
     )
     out = sanitize_reply_text(raw)
-    assert "那你再眯一会儿" not in out
-    assert "在窗边靠着眯了一会儿" in out
-    assert "也是" in out
+    assert out == raw
 
 
 def test_sanitize_reply_keeps_legitimate_advice_to_user():

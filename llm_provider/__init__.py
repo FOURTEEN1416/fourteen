@@ -54,6 +54,7 @@ def _build_backend(
     provider: str,
     config: dict[str, Any],
     models_config: list[dict] | None,
+    *, inherit_platform: bool = True,
 ) -> Any:
     model = config.get("model") or config.get("primary_model")
     api_key = config.get("api_key") or ""
@@ -67,6 +68,7 @@ def _build_backend(
         return MultiProviderGateway(
             fallback_chain=chain,
             providers_config=provider_configs,
+            inherit_platform=inherit_platform,
         )
 
     # 已下线 provider 的最终防御：即使绕过 _resolve_provider，
@@ -86,8 +88,8 @@ def _build_backend(
         defaults = _provider_defaults(provider)
         return LLMGatewayV2(
             api_key=api_key or os.environ.get("DEEPSEEK_API_KEY", ""),
-            api_base=api_base or os.environ.get("DEEPSEEK_API_BASE") or defaults.get("api_base"),
-            model=model or os.environ.get("DEEPSEEK_MODEL") or defaults.get("model"),
+            api_base=api_base or (os.environ.get("DEEPSEEK_API_BASE") if inherit_platform else None) or defaults.get("api_base"),
+            model=model or (os.environ.get("DEEPSEEK_MODEL") if inherit_platform else None) or defaults.get("model"),
             models_config=models_config,
             request_timeout=config.get("request_timeout") or defaults.get("request_timeout"),
         )
@@ -98,8 +100,8 @@ def _build_backend(
         defaults = _provider_defaults(provider)
         env_prefix = provider.upper()
         resolved_key = api_key or os.environ.get(f"{env_prefix}_API_KEY", "")
-        resolved_base = api_base or os.environ.get(f"{env_prefix}_API_BASE", "") or defaults.get("api_base", "")
-        resolved_model = model or os.environ.get(f"{env_prefix}_MODEL", "") or defaults.get("model", "")
+        resolved_base = api_base or (os.environ.get(f"{env_prefix}_API_BASE", "") if inherit_platform else "") or defaults.get("api_base", "")
+        resolved_model = model or (os.environ.get(f"{env_prefix}_MODEL", "") if inherit_platform else "") or defaults.get("model", "")
         auth_mode = "oauth" if provider == "baidu" else "bearer"
         extra_payload = defaults.get("extra_payload")
         return OpenAICompatibleProvider(
@@ -108,7 +110,7 @@ def _build_backend(
             api_base=resolved_base,
             model=resolved_model,
             auth_mode=auth_mode,
-            api_secret=config.get("api_secret") or os.environ.get(f"{env_prefix}_API_SECRET", ""),
+            api_secret=config.get("api_secret") or (os.environ.get(f"{env_prefix}_API_SECRET", "") if inherit_platform else ""),
             models_config=models_config,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -147,6 +149,12 @@ class ReloadableLLMGateway:
             return old
 
     def __getattr__(self, name: str) -> Any:
+        # 共享辅助组件持有平台代理时，沿用本轮已授权的用户网关，不修改共享对象。
+        from utils.llm_bridge import current_llm
+
+        scoped = current_llm()
+        if self is globals().get("_gateway") and scoped is not None and scoped is not self:
+            return getattr(scoped, name)
         return getattr(self.target, name)
 
     async def close(self) -> None:
@@ -235,6 +243,16 @@ async def reconfigure_llm(config: Any) -> ReloadableLLMGateway:
     return gateway
 
 
+def select_request_llm(default: Any, user_id: int | None, user_config: dict | None) -> Any:
+    """已通过账号策略的请求唯一网关选择；显式配置失败绝不换用平台凭证。"""
+    if not user_config:
+        return default
+    if user_id is None:
+        raise ValueError("用户模型配置必须绑定已认证账号")
+    gateway = get_user_llm(user_id, user_config)
+    return gateway.target if isinstance(gateway, ReloadableLLMGateway) else gateway
+
+
 # ── 用户级 LLM gateway 缓存（多用户 API Key 隔离） ──
 
 _user_gateways: dict[int, ReloadableLLMGateway] = {}
@@ -252,7 +270,17 @@ def get_user_llm(user_id: int, user_config: dict | None) -> Any:
     with _user_gateways_lock:
         gw = _user_gateways.get(user_id)
         config_dict = _as_dict(user_config)
-        resolved = _resolve_provider(config_dict.get("provider"))
+        resolved = str(config_dict.get("provider") or "").strip()
+        if not resolved or resolved in _RETIRED_PROVIDERS:
+            raise ValueError("用户必须明确配置有效的模型供应商")
+        if resolved == "auto":
+            providers = config_dict.get("providers") or {}
+            chain = config_dict.get("fallback_chain") or list(providers)
+            if not chain or any(not (providers.get(p) or {}).get("api_key") for p in chain):
+                raise ValueError("用户自动供应商链必须逐项配置自己的凭证")
+            config_dict["fallback_chain"] = chain
+        elif not str(config_dict.get("api_key") or "").strip():
+            raise ValueError("用户供应商缺少API Key，不允许借用平台凭证")
         effective_models = config_dict.get("models_priority")
         fingerprint = _config_fingerprint(resolved, config_dict, effective_models)
 
@@ -261,7 +289,7 @@ def get_user_llm(user_id: int, user_config: dict | None) -> Any:
             _user_gateways[user_id] = gw
 
         if gw.fingerprint != fingerprint or gw._target is None:
-            backend = _build_backend(resolved, config_dict, effective_models)
+            backend = _build_backend(resolved, config_dict, effective_models, inherit_platform=False)
             old = gw.swap(backend, fingerprint)
             if old is not None:
                 close = getattr(old, "close", None)

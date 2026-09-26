@@ -8,6 +8,25 @@ import uuid
 logger = logging.getLogger("session_manager")
 
 
+def resolve_owned_session(session_id: str, user_id: int) -> str:
+    """浏览器会话边界：归属只取认证身份，已有本人的键保持原样。"""
+    from utils.session_key import owner_of
+
+    raw = str(session_id or "").strip()
+    if len(raw) > 128 or any(ord(c) < 32 for c in raw):
+        raise ValueError("Invalid session_id")
+    owner = owner_of(raw)
+    if owner is not None:
+        if owner != user_id:
+            raise PermissionError("Session does not belong to the authenticated user")
+        return raw
+    # 无 owner 的旧客户端标识只作为本人的局部名称，绝不直接查同名历史。
+    result = f"{user_id}:web:{raw or uuid.uuid4().hex[:8]}"
+    if len(result) > 128:
+        raise ValueError("Invalid session_id")
+    return result
+
+
 class SessionManager:
     def __init__(self):
         self._sessions: dict[str, dict] = {}

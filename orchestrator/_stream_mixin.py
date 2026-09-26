@@ -1,8 +1,7 @@
-"""OptimizedOrchestrator 流式处理 — Mixin。
+"""OptimizedOrchestrator 分块响应：上游可流式，完整定稿后按传输确认记账。
 
-将原 ``process_message_stream`` 方法（209 行）从主文件迁出，便于独立阅读
-真流式 / 伪流式两条路径。方法签名、事件协议、内部调用链均与原实现一致；
-不引入新的抽象层或兼容垫片。
+SSE/WS 线协议保持不变；内部 token 事件的 ``_ack`` 回调只供适配器使用。
+支持与不支持上游流式的网关共用上下文、发布、取消及后处理路径。
 """
 
 from __future__ import annotations
@@ -12,6 +11,8 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
+
+from utils.llm_bridge import current_llm, request_scoped_llm
 
 logger = logging.getLogger("orchestrator.optimized")
 
@@ -35,6 +36,7 @@ class _StreamPipelineMixin:
         def _await_session_free(self, session_id: str, timeout: Any = ...) -> Any: ...
         def _prepare_context(self, *args: Any, **kwargs: Any) -> Any: ...
         def _after_process(self, *args: Any, **kwargs: Any) -> Any: ...
+        def _finalize_reply(self, *args: Any, **kwargs: Any) -> str: ...
     # 后台 task 引用集合（避免被 GC 回收，asyncio.create_task 文档要求）。
     # 必须为实例变量，若为类变量会导致多实例共享同一集合引发 race condition。
     # 实际初始化在 OptimizedOrchestrator.__init__ 中完成。
@@ -121,6 +123,7 @@ class _StreamPipelineMixin:
         except Exception as exc:  # noqa: BLE001
             logger.warning("后台一致性检查异常（不影响回复）: %s", exc)
 
+    @request_scoped_llm
     async def process_message_stream(
         self,
         user_msg: str,
@@ -131,13 +134,14 @@ class _StreamPipelineMixin:
         user_llm_config: dict | None = None,
         user_id: int | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
-        """SSE 流式聊天接口 — 真流式接入
+        """SSE 聊天接口 — 上游流式生成，完整校验后分块发布。
 
         实现策略：
-        1. 如果 LLM 网关支持 chat_stream，使用真流式（边生成边 yield）
-        2. 如果不支持，降级为伪流式（跑完 process_message 后按 8 字符切块 yield）
-        3. 安全检查和 PII 脱敏在流式开始前完成
-        4. 最后统一返回一条 done 事件，包含 reply / emotion / process_time 等字段
+        1. 支持 chat_stream 的网关先生成完整草稿，主链定稿后按 8 字符切块。
+        2. 不支持时调用 chat 生成草稿，共用同一发布与落库流程。
+        3. 工具直复跳过模型；done 与历史只包含传输已确认的 token 前缀。
+        4. 完整输出检查先于任何回复片段，因此首段显示晚于未经校验的真流式。
+        5. 中断时只记用户输入与已确认前缀；服务端发送受理不等于终端已读。
 
         Args:
             user_msg: 用户消息
@@ -160,48 +164,17 @@ class _StreamPipelineMixin:
         # 用户级 LLM gateway（API Key 隔离）：若提供 user_id + user_llm_config，
         # 本次流式请求使用用户专属 gateway，否则回退到全局共享 gateway。
         # 与 process_message 保持一致，避免流式响应绕过 API Key 隔离。
-        request_llm = self.components.get("llm")
-        if user_llm_config and user_id is not None:
-            try:
-                from llm_provider import get_user_llm
-                request_llm = get_user_llm(user_id, user_llm_config)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Failed to get user-level LLM gateway for stream, falling back to global: %s", e)
+        request_llm = current_llm(self.components.get("llm"))
 
         # 检测 LLM 网关是否支持真流式
         use_true_stream = request_llm is not None and hasattr(request_llm, "chat_stream")
 
-        if not use_true_stream:
-            # ── 降级：伪流式（跑完整 process_message 后按块 yield） ──
-            try:
-                result = await self.process_message(
-                    user_msg,
-                    session_id,
-                    message_type,
-                    character_id,
-                    emotion_engine=emotion_engine,
-                    user_llm_config=user_llm_config,
-                    user_id=user_id,
-                )
-                reply = result.get("reply", "")
-                emotion = result.get("emotion")
-                process_time = result.get(
-                    "process_time", round(time.perf_counter() - stream_start, 3)
-                )
-            except Exception:
-                logger.exception("流式处理异常")
-                reply = "（处理消息时出现异常, 请稍后重试）"
-                emotion = None
-                process_time = round(time.perf_counter() - stream_start, 3)
+        # 两种上游共用发送、确认及落库流程；不得调用会提前记全文的普通入口。
+        # _ack 只供服务端传输适配器调用，绝不序列化到 SSE/WS 协议中。
+        accepted_end = 0
+        reply = ""
 
-            if reply:
-                chunk_size = 8
-                for i in range(0, len(reply), chunk_size):
-                    yield {"type": "token", "content": reply[i:i + chunk_size]}
-            yield {"type": "done", "reply": reply, "emotion": emotion, "process_time": process_time}
-            return
-
-        # ── 真流式路径 ──
+        # ── 统一发布路径 ──
         try:
             # 1. 输入安全检查（必须在流式开始前完成）
             safety_result = self.components["safety"].check_input(user_msg)
@@ -254,131 +227,86 @@ class _StreamPipelineMixin:
                 # A3：chat_round 由 prepare 透传，禁止 stream 内二次 get_chat_context
                 chat_round = int(ctx.get("chat_round") or 0)
 
-                # 9. 真流式：LLM token 实时推送，输出安全检查改为流式抽检
-                # 输入安全检查已在前面完成；输出安全检查用"流式窗口抽检 +
-                # 最终全量校验"双层保护，不再阻塞 token 推送。
-                full_reply = ""
-                safety = self.components["safety"]
-                unsafe_detected = False
-                # 捕获流式抽检发现的不安全类别，供 safe_alternative 使用
-                unsafe_category: Any = None
-
+                # 上游仍可流式生成，但草稿先留在服务端；完整定稿后再下发。
+                # 否则已发 token 无法撤回，清洗后只改 done/历史会制造三份事实。
                 try:
-                    assert request_llm is not None  # use_true_stream 分支保证非空
-                    async for token in request_llm.chat_stream(
-                        query=user_msg_clean,
-                        system_prompt=system_prompt,
-                        history=chat_history,
-                        temperature=0.85,
-                        max_tokens=2048,
-                    ):
-                        if not token:
-                            continue
-                        full_reply += token
-
-                        # 流式抽检：每 40 字符做一次快速输出安全检查
-                        # 发现不安全内容立即停止推送，避免泄露后续 token
-                        if len(full_reply) % 40 < len(token):
-                            quick_check = safety.check_output(full_reply[-60:])
-                            if not quick_check.is_safe:
-                                unsafe_detected = True
-                                unsafe_category = quick_check.category
-                                logger.warning(
-                                    "流式抽检发现不安全内容，停止推送: category=%s",
-                                    quick_check.category,
-                                )
-                                break
-
-                        yield {"type": "token", "content": token}
-                except Exception as e:
-                    logger.warning("真流式调用失败: %s", e)
+                    full_reply = str(ctx.get("direct_reply") or "")
                     if not full_reply:
-                        reply = "（生成回复时出现异常, 请稍后重试）"
-                        yield {"type": "token", "content": reply}
-                        yield {
-                            "type": "done",
-                            "reply": reply,
-                            "emotion": None,
-                            "process_time": round(time.perf_counter() - stream_start, 3),
-                        }
-                        return
+                        generation_args = dict(
+                            query=user_msg_clean, system_prompt=system_prompt,
+                            history=chat_history, temperature=0.85, max_tokens=2048,
+                        )
+                        upstream = None
+                        try:
+                            async with asyncio.timeout(30):
+                                if use_true_stream:
+                                    upstream = request_llm.chat_stream(**generation_args)
+                                    async for token in upstream:
+                                        if token:
+                                            full_reply += token
+                                else:
+                                    full_reply = str(await request_llm.chat(**generation_args) or "")
+                        except Exception as exc:
+                            logger.warning("上游生成中断: %s", exc)
+                            if not full_reply:
+                                error_reply = "（生成回复时出现异常, 请稍后重试）"
+                                yield {"type": "token", "content": error_reply}
+                                yield {"type": "done", "reply": error_reply, "emotion": None,
+                                       "process_time": round(time.perf_counter() - stream_start, 3)}
+                                return
+                        finally:
+                            if upstream is not None:
+                                await upstream.aclose()
 
-                # 流式抽检发现不安全内容 → 用安全替代语替换
-                if unsafe_detected:
-                    # safe_alternative 需要 SafetyCategory 枚举，不能用字符串
-                    # 之前 bug: safe_alternative("unsafe_output") 永远走 default 分支
-                    reply = safety.safe_alternative(unsafe_category)
-                    yield {"type": "token", "content": reply}
-                    yield {
-                        "type": "done",
-                        "reply": reply,
-                        "emotion": emotion_state.to_dict() if emotion_state else None,
-                        "process_time": round(time.perf_counter() - stream_start, 3),
-                    }
-                    return
+                    reply = self._finalize_reply(full_reply, character_id)
+                    for start in range(0, len(reply), 8):
+                        end = min(start + 8, len(reply))
 
-                if not full_reply:
-                    yield {
-                        "type": "done",
-                        "reply": "",
-                        "emotion": None,
-                        "process_time": round(time.perf_counter() - stream_start, 3),
-                    }
-                    return
+                        def acknowledge(end=end):
+                            nonlocal accepted_end
+                            accepted_end = max(accepted_end, end)
 
-                # 10. 最终全量输出安全校验（兜底）
-                reply = full_reply
-                # 自问自答/剧本体清洗：token 已推给用户，但历史必须干净
-                try:
-                    from utils.prompt_sanitize import sanitize_reply_text
+                        yield {"type": "token", "content": reply[start:end], "_ack": acknowledge}
+                        # 普通生成器消费者继续迭代也表示前段已消费；中断时不走此行。
+                        acknowledge()
 
-                    reply = sanitize_reply_text(reply) or reply
-                except Exception:  # noqa: BLE001
-                    pass
-                output_result = safety.check_output(reply)
-                if not output_result.is_safe:
-                    # 极端情况：流式抽检漏过，最终校验拦截
-                    reply = safety.safe_alternative(output_result.category)
-                    yield {"type": "token", "content": "\n[内容已过滤]"}
-
-                # 11. 一致性检查异步化（B2 优化）
-                # 不阻塞当前回复流；严重违规记录到后台，下一轮自动修正
-                # 避免触发第二次 LLM 调用导致响应时间翻倍
-                # 保留 task 引用避免被 GC 回收（Python 官方文档要求）
-                bg_task = asyncio.create_task(
-                    self._async_consistency_check(
-                        reply=reply,
-                        character_id=character_id,
-                        emotion_state=emotion_state,
-                        session_id=session_id,
-                        chat_round=chat_round,
+                    bg_task = asyncio.create_task(
+                        self._async_consistency_check(
+                            reply=reply, character_id=character_id,
+                            emotion_state=emotion_state, session_id=session_id,
+                            chat_round=chat_round,
+                        )
                     )
-                )
-                self._background_tasks.add(bg_task)
-                bg_task.add_done_callback(self._background_tasks.discard)
-
-                # ── 共享后处理（after_chat → ASE → 好感度同步）──
-                await asyncio.to_thread(
-                    self._after_process,
-                    user_msg_clean,
-                    reply,
-                    emotion_state,
-                    session_id,
-                    character_id,
-                    turn_id=str(ctx.get("ax_turn_id") or ""),
-                    reply_id=str(ctx.get("ax_reply_id") or ""),
-                )
+                    self._background_tasks.add(bg_task)
+                    bg_task.add_done_callback(self._background_tasks.discard)
+                finally:
+                    # aclose/取消也保留用户行及已确认前缀；数据库轻写完成前不释放会话锁。
+                    finish = asyncio.create_task(asyncio.to_thread(
+                        self._after_process, user_msg_clean, reply[:accepted_end],
+                        emotion_state, session_id, character_id,
+                        turn_id=str(ctx.get("ax_turn_id") or ""),
+                        reply_id=str(ctx.get("ax_reply_id") or ""),
+                    ))
+                    try:
+                        await asyncio.shield(finish)
+                    except asyncio.CancelledError:
+                        await finish
+                        raise
 
                 process_time = round(time.perf_counter() - stream_start, 3)
                 yield {
                     "type": "done",
-                    "reply": reply,
+                    "reply": reply[:accepted_end],
                     "emotion": emotion_state.to_dict() if emotion_state else None,
                     "process_time": process_time,
                 }
 
         except Exception:
             logger.exception("流式处理异常")
+            if accepted_end:
+                # 已发内容不可撤回；后处理失败不能再追加一条错误台词并改写 done。
+                yield {"type": "error", "error": "postprocess_failed", "reply": reply[:accepted_end]}
+                return
             reply = "（处理消息时出现异常, 请稍后重试）"
             yield {"type": "token", "content": reply}
             yield {

@@ -88,6 +88,7 @@ class LedgerEvent:
     actor: str
     payload: dict[str, Any]
     created_at: str
+    id: int = 0  # SQLite 写入序，事件重放不能用秒级时间或按类型拼接判序。
 
 
 @dataclass
@@ -180,7 +181,7 @@ class EventLedger:
             created_at=str(created_at or self.now_iso()),
         )
         with closing(self._conn()) as conn, conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 INSERT INTO event_ledger
                 (event_id, session_key, character_id, event_type,
@@ -199,6 +200,7 @@ class EventLedger:
                     ev.created_at,
                 ),
             )
+            ev.id = int(cursor.lastrowid)
         return ev
 
     def append_many(self, events: Iterable[dict[str, Any]]) -> list[LedgerEvent]:
@@ -253,6 +255,7 @@ class EventLedger:
             actor=row["actor"] or "system",
             payload=payload if isinstance(payload, dict) else {"_value": payload},
             created_at=row["created_at"],
+            id=int(row["id"]),
         )
 
     def query(
@@ -266,6 +269,8 @@ class EventLedger:
         until: str | None = None,
         limit: int = 200,
         order: str = "ASC",
+        event_types: Iterable[str] | None = None,
+        after_id: int = 0,
     ) -> list[LedgerEvent]:
         sql = ["SELECT * FROM event_ledger WHERE 1=1"]
         params: list[Any] = []
@@ -275,6 +280,15 @@ class EventLedger:
         if event_type is not None:
             sql.append("AND event_type = ?")
             params.append(str(event_type))
+        if event_types is not None:
+            types = tuple(str(t) for t in event_types)
+            if not types:
+                return []
+            sql.append(f"AND event_type IN ({','.join('?' for _ in types)})")
+            params.extend(types)
+        if after_id:
+            sql.append("AND id > ?")
+            params.append(int(after_id))
         if turn_id is not None:
             sql.append("AND turn_id = ?")
             params.append(str(turn_id))

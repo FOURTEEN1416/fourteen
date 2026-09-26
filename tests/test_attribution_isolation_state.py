@@ -102,7 +102,7 @@ def test_build_turns_pairs_user_and_character():
     assert render_turns(turns) == ["用户: 在吗", "我: 在的", "用户: 忙不忙"]
 
 
-def test_filter_by_character_keeps_legacy_rows():
+def test_filter_by_character_excludes_unknown_rows():
     from shisi.core.conversation_turn import build_turns, filter_by_character
 
     turns = build_turns([
@@ -111,7 +111,7 @@ def test_filter_by_character_keeps_legacy_rows():
         {"id": 3, "role": "user", "content": "我的", "character_id": "me"},
     ])
     kept = [t.user_text for t in filter_by_character(turns, "me")]
-    assert kept == ["旧数据无归属", "我的"], "迁移前无归属行必须保留（升级不失忆）"
+    assert kept == ["我的"], "未知归属仍保存在真源，但不能由当前角色认领"
 
 
 def test_isolation_key_shape_is_shared_owner():

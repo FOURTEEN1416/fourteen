@@ -374,7 +374,7 @@ class TestReminderDelivery:
                               session_key="1:peer@im.wechat", user_id=1)
         task = ReminderDeliveryTask(sm, llm=None, wechat_sender=wechat_send)
         task()
-        assert sent == [(1, "peer@im.wechat", "叫我起床")]  # LLM 缺席 → 原文兜底
+        assert sent == [(1, "peer@im.wechat", "你设定的提醒时间到了：「叫我起床」。")]
         row = [r for r in sm.get_pending_reminders() if r["id"] == rid]
         assert row == []  # triggered=1 后不再出现在 pending 视图
 
@@ -416,7 +416,7 @@ class TestReminderDelivery:
         sm.add_reminder("x", "2020-01-01 06:00", session_key="web-console-s1")
         task = ReminderDeliveryTask(sm, llm=None, ws_sender=ws_send)
         task()
-        assert sent == [("web-console-s1", "x")]
+        assert sent == [("web-console-s1", "你设定的提醒时间到了：「x」。")]
         with sm._conn() as conn:
             row = conn.execute("SELECT status FROM reminders").fetchone()
         assert row["status"] == "delivered"
@@ -497,10 +497,8 @@ class TestLegacyMigration:
 
         memory = StructuredMemory(db_path=str(db))
         try:
-            cols = {
-                r["name"] for r in memory._conn().__enter__()
-                .execute("PRAGMA table_info(reminders)").fetchall()
-            }
+            with memory._conn() as conn:
+                cols = {r["name"] for r in conn.execute("PRAGMA table_info(reminders)").fetchall()}
             assert {"session_key", "user_id", "status", "delivered_at", "fail_count"} <= cols
             # 存量数据无损，且因无 session_key 不会被误投递
             assert memory.get_due_reminders() == []
@@ -663,10 +661,10 @@ def test_character_resolver_drives_prompt_name(sm):
             return "到点啦，喝水去"
 
     def resolver(session_key: str) -> str:
-        return "小凌" if session_key == "s9" else ""
+        return "test-reminder-role" if session_key == "s9" else ""
 
     sm.add_reminder("喝水", "2020-01-01 06:00", session_key="s9")
-    task = ReminderDeliveryTask(sm, llm=_LLM(), character_resolver=resolver)
+    task = ReminderDeliveryTask(sm, llm=_LLM(), character_id_resolver=resolver)
     task()
     assert "喝水" in (captured.get("query") or "")
-    assert "小凌" in (captured.get("system_prompt") or "")
+    assert "test-reminder-role" in (captured.get("system_prompt") or "")

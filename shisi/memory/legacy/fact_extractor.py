@@ -165,10 +165,12 @@ class FactExtractor:
             return []
 
         # 合并消息
-        text = "\n".join(messages[-20:])  # 最多处理最近20条
+        text = json.dumps([{"source_index": i, "speaker": "user", "content": text} for i, text in enumerate(messages)], ensure_ascii=False)
 
         prompt = f"""从以下对话中提取关于用户的事实信息。
 只提取明确提到的、有具体内容的事实。
+发送者不等于事件主体；引用、转述、假设、小说角色的话不得当成用户经历。
+否定不能丢，日期不能混；相对日期无法确定时保留原表述，不推断具体日期。
 对每个事实给出类别、置信度(0~1)和话题标签 topics。
 
 输出 JSON 数组格式：
@@ -189,14 +191,15 @@ JSON:"""
             result = self.llm_func(prompt)
             # 尝试解析 JSON
             facts = self._parse_json_result(result)
-            if facts:
-                for f in facts:
+            if not isinstance(facts, list):
+                raise ValueError("事实抽取没有返回合法数组，保留水位等待重试")
+            for f in facts:
+                if isinstance(f, dict):
                     f["source"] = "llm"
-                return facts
+            return facts
         except Exception as e:  # noqa: BLE001
             logger.warning("LLM fact extraction failed: %s", e)
-
-        return []
+            raise
 
     # ── 规则模式 ─────────────────────────────────────────
 
@@ -233,9 +236,8 @@ JSON:"""
     def _rule_fact_text(msg: str) -> str:
         """整句去噪：首人称→「用户」，截断到合理长度，去掉尾部标点。"""
         s = re.sub(r"\s+", " ", str(msg or "")).strip()
-        s = re.sub(r"^(我们|咱们|我|咱|本人)[，,]?\s*", "用户", s)
-        s = s.rstrip("。.！!？?、,，")
-        return s[:60]
+        # 规则只能确认是谁发了这段话，不能猜句内的主语或丢掉转折/否定。
+        return f"用户曾说：{s}"
 
     @staticmethod
     def _topics_from_text(text: str, category: str) -> list[str]:

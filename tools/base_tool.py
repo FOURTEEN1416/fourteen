@@ -167,7 +167,9 @@ class ToolDispatcher:
         """
         if self.timeout <= 0:
             return fn()
-        fut = self._get_executor().submit(fn)
+        from contextvars import copy_context
+
+        fut = self._get_executor().submit(copy_context().run, fn)
         try:
             return fut.result(timeout=self.timeout)
         except _FutTimeout as e:

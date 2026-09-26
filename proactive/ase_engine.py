@@ -946,6 +946,11 @@ class ASEEngine:
         actual_hours = hours_since_last_chat or self._hours_since_last_chat()
         self._update_urgency(actual_hours)
 
+        if dry_run:
+            # 决策层只需要已计算的紧迫度；生成后丢弃会偷调全局模型并双倍耗费。
+            self._last_skip_reason = "dry_run"
+            return None
+
         # ③ 免打扰时段：只累积紧迫度，**不生成、不计账、不投递**
         #    旧实现把静默判定只放在投递层（_send_to_all），导致引擎照常生成、
         #    照常扣配额，消息却被丢弃 —— 静默时段成了「配额焚化炉」。
@@ -962,27 +967,12 @@ class ASEEngine:
         # ⑤ 场景触发（早安/晚安/三餐）优先于紧迫度阈值
         #    commit=False：场景日期标记由 commit_sent() 在投递成功后才置位，
         #    否则未送达的早安会「标记为已发」，当天再也不补发。
-        #
-        # 🔴 2026-09-22 二次根治：`dry_run` 闸门从"频率检查之后、生成之前"
-        #    下移到**仅屏蔽返回值**。旧实现把 `if dry_run: return None` 放在
-        #    这里，使得 dry_run 调用**永远走不到**场景触发与紧迫度生成
-        #    （第 950/962 行）—— 即 `_generate_and_return` →
-        #    `generate_with_llm` 这条链路在 dry_run 下**整条不可达**。
-        #    而唯一的 dry_run 调用点（`scheduler._llm_proactive_one_user`）
-        #    正是要用它算 urgency 供 LLM 决策 —— 于是 LLM 决策层拿到的
-        #    urgency **恒 None**（异常分支），"紧迫度已累积却不影响决策"。
-        #    现在 dry_run 照常跑完生成链路（内部 commit=False 本就不记账），
-        #    只在返回前丢弃候选 —— 副作用与旧实现一致（不计账、不投递），
-        #    但 urgency / 场景判定 / 生成可达性全部恢复。
         scene_msg = self._check_scene_triggers(commit=False)
         if (
             scene_msg
             and self.urgency.total >= 2.0
             and not self._is_duplicate(scene_msg.get("message", ""))
         ):
-            if dry_run:
-                self._last_skip_reason = "dry_run"
-                return None
             return scene_msg
 
         candidate: dict[str, Any] | None = None
@@ -994,11 +984,6 @@ class ASEEngine:
         else:
             self._last_skip_reason = "below_threshold"
 
-        if dry_run:
-            # 干跑：完成全部判定与生成以刷新 urgency，但**不交出候选**
-            # （调用方只取 urgency / _last_skip_reason，不会投递）
-            self._last_skip_reason = self._last_skip_reason or "dry_run"
-            return None
         return candidate
 
     def reflect(

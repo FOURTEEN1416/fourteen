@@ -170,7 +170,7 @@ class TestSyncHistoryBa:
                 self.items = []
             def add(self, *a, **k):
                 self.items.append(a)
-            def should_archive(self, n=20, session_id=""):
+            def should_archive(self, n=20, session_id="", character_id=""):
                 return False
         class _VM:
             def store_chat_sync(self, *a, **k):
@@ -184,7 +184,7 @@ class TestSyncHistoryBa:
         pipe.vm = _VM()
         pipe._session_id = "N:ba"
         pipe._chat_count_lock = __import__("threading").Lock()
-        pipe._chat_count_since_extract = 0
+        pipe._chat_count_since_extract = {}
         pipe._config = type("C", (), {"fact_extract_interval": 999, "episodic_archive_trigger": 999, "extraction_enabled": False})()
         pipe._executor = __import__("concurrent").futures.ThreadPoolExecutor(max_workers=1)
         pipe.scorer = type("S", (), {"score": staticmethod(lambda *a, **k: 0.5)})()
@@ -211,5 +211,5 @@ class TestSyncHistoryBa:
         from orchestrator.optimized_orchestrator import OptimizedOrchestrator
         src = inspect.getsource(OptimizedOrchestrator._after_process)
         assert "write_chat_history_sync" in src
-        assert src.index("write_chat_history_sync") < src.index("submit(_safe_after_chat")
+        assert src.index("write_chat_history_sync") < src.index("submit(copy_context().run, _safe_after_chat")
         assert "history_already_written" in src

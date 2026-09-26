@@ -105,22 +105,15 @@ def test_run_api_character_resolver_does_not_fall_back_to_global():
     以源码级静态断言锁定：旧写法的 `if not char_id:` + "回落全局"组合一旦
     回归，本用例立即红。
     """
-    import inspect
+    from pathlib import Path
 
-    import api.run_api as run_api
-
-    src = inspect.getsource(run_api)
-    seg_start = src.find("def _character_resolver(")
-    assert seg_start != -1, "装配层解析器必须存在"
-    seg_end = src.find("\n        persona = orchestrator.components.get", seg_start)
-    assert seg_end != -1
+    src = Path("api/run_api.py").read_text(encoding="utf-8")
+    seg_start = src.index("def _character_id_resolver(")
+    seg_end = src.index("\n        _scheduler.register_reminder_task", seg_start)
     body = src[seg_start:seg_end]
-    assert "if not char_id:" not in body, (
-        "禁止用 `if not char_id` 判『未绑定』—— default 是非空真值，该分支永不触发"
-    )
-    assert "_cr.resolve_character_id" in body and "_cr.display_name" in body, (
-        "必须走 utils.character_resolver 唯一 owner"
-    )
+    assert "current_character_name" not in body
+    assert "_cr.resolve_character_id(session_key, user_mgr)" in body
+    assert "character_id_resolver=_character_id_resolver" in body
 
 
 # ══════════════════════════════════════════════════════════
@@ -188,57 +181,39 @@ def test_outbound_rejects_empty_text_and_system_error(tmp_path):
 
 
 # ══════════════════════════════════════════════════════════
-#  3. 读取端：懒回填 + 保守过滤（旧 OR '' 反噬的根治）
+#  3. 读取端：未知归属不认领；读取只读，归属过滤先于 LIMIT
 # ══════════════════════════════════════════════════════════
 
-def test_legacy_empty_rows_visible_to_bound_character_and_backfilled(tmp_path):
-    """存量无归属行 → 对**当前绑定角色**可见，且回填为实体归属（幂等）。"""
+def test_unknown_history_remains_unknown_after_read(tmp_path):
+    """当前绑定不能证明历史说话人；任何角色读取都不能认领旧行。"""
     sm = _sm(tmp_path)
-    sm.add_chat("user", "迁移前的老话", session_id="s1")  # character_id 空
+    sm.add_chat("user", "迁移前的老话", session_id="s1")
     sm.add_chat("assistant", "迁移前的回复", session_id="s1")
-
-    rows = sm.get_chats_by_session_limit("s1", 10, character_id="charA")
-    assert [r["content"] for r in rows] == ["迁移前的老话", "迁移前的回复"]
-    assert all(r["character_id"] == "charA" for r in rows)
-
-    # 二次读取：已回填，走的是"命中归属行"路径（结果一致 = 幂等）
-    with sm._conn() as conn:
-        stored = conn.execute(
-            "SELECT character_id FROM chat_history WHERE session_id='s1'"
-        ).fetchall()
-    assert all(dict(r)["character_id"] == "charA" for r in stored), "回填必须真落库"
-    rows2 = sm.get_chats_by_session_limit("s1", 10, character_id="charA")
-    assert [r["content"] for r in rows2] == ["迁移前的老话", "迁移前的回复"]
+    for cid in ("charA", "charB", "charA"):
+        assert sm.get_chats_by_session_limit("s1", 10, character_id=cid) == []
+    stored = sm.get_chats_by_session("s1")
+    assert [r["content"] for r in stored] == ["迁移前的老话", "迁移前的回复"]
+    assert all(r["character_id"] == "" for r in stored)
     sm.close()
 
 
-def test_legacy_empty_rows_hidden_from_other_character(tmp_path):
-    """🔴 核心：另一角色读**不得**看到尚未归位的存量行（宁缺毋串）。
-
-    旧实现 `OR character_id = ''` 恒真 ⇒ charB 也能读到 —— 这就是
-    「切角色继承他人台词」的复发通道。
-    """
+def test_character_filter_precedes_limit(tmp_path):
     sm = _sm(tmp_path)
-    sm.add_chat("user", "老数据", session_id="s1")
-    # 先由 charA 读走（触发回填）
-    assert len(sm.get_chats_by_session_limit("s1", 10, character_id="charA")) == 1
-    # charB 再读：那行已属 charA，必须看不到
-    rows_b = sm.get_chats_by_session_limit("s1", 10, character_id="charB")
-    assert rows_b == [], "回填后行归属明确，其他角色不得可见"
+    sm.add_chat("assistant", "A的已知发言", session_id="s1", character_id="charA")
+    for i in range(20):
+        sm.add_chat("assistant", f"未知发言{i}", session_id="s1")
+    rows = sm.get_chats_by_session_limit("s1", 1, character_id="charA")
+    assert [r["content"] for r in rows] == ["A的已知发言"]
+    assert sm.get_chats_by_session_limit("s1", 1, character_id="charB") == []
     sm.close()
 
 
-def test_unbound_legacy_rows_excluded_for_second_character(tmp_path):
-    """未回填的存量行对**非首个**读取角色保守排除（不猜测归属）。"""
+def test_unknown_history_is_invisible_even_to_first_reader(tmp_path):
     sm = _sm(tmp_path)
     sm.add_chat("user", "谁都没认领过", session_id="s2")
-    rows_b = sm.get_chats_by_session_limit("s2", 10, character_id="charB")
-    assert [r["content"] for r in rows_b] == ["谁都没认领过"], (
-        "首次读取（无既有归属）时按当前绑定角色认领 = 等价于迁移默认归位"
-    )
-    # 认领后 charC 不可见
-    rows_c = sm.get_chats_by_session_limit("s2", 10, character_id="charC")
-    assert rows_c == []
+    assert sm.get_chats_by_session_limit("s2", 10, character_id="charB") == []
+    assert sm.get_chats_by_session_limit("s2", 10, character_id="charC") == []
+    assert sm.get_chats_by_session("s2")[0]["character_id"] == ""
     sm.close()
 
 
@@ -252,68 +227,44 @@ def test_no_character_filter_returns_everything(tmp_path):
     sm.close()
 
 
-def test_get_session_rows_uses_same_two_stage_policy(tmp_path):
-    """`get_session_rows` 必须与 `get_chats_by_session_limit` 同口径。
-
-    旧实现两处各写一份 `OR ''`，只修一处会造成"半隔离"（比不修更难查）。
-    """
+def test_get_session_rows_uses_same_strict_attribution_policy(tmp_path):
+    """多会话行与主历史共用严格过滤，不能绕过角色边界。"""
     sm = _sm(tmp_path)
     sm.add_chat("user", "残留老话", session_id="k1")
     sm.add_chat("assistant", "A的新话", session_id="k1", character_id="charA")
 
     rows_a = sm.get_session_rows(["k1"], limit=10, character_id="charA")
     contents_a = sorted(r["content"] for r in rows_a)
-    assert contents_a == ["A的新话", "残留老话"], "空归属行对当前绑定角色可见并回填"
+    assert contents_a == ["A的新话"], "空归属不伪装成当前角色"
 
     rows_b = sm.get_session_rows(["k1"], limit=10, character_id="charB")
-    assert rows_b == [], "回填后其他角色不可见"
+    assert rows_b == [], "其他角色和未知归属均不可见"
     sm.close()
 
 
-def test_backfill_is_idempotent_across_repeated_reads(tmp_path):
-    """重复读取不得反复触发 UPDATE（幂等：第二次起 legacy 集为空）。"""
+def test_repeated_reads_execute_no_history_updates(tmp_path):
     sm = _sm(tmp_path)
     sm.add_chat("user", "老话", session_id="s4")
-    calls: list[int] = []
-    orig = sm._backfill_legacy_attribution
-
-    def _spy(rows, character_id):
-        calls.append(sum(1 for r in rows if not str(r.get("character_id") or "")))
-        return orig(rows, character_id)
-
-    sm._backfill_legacy_attribution = _spy  # type: ignore[method-assign]
+    statements = []
+    sm._connection.set_trace_callback(statements.append)
     sm.get_chats_by_session_limit("s4", 10, character_id="charA")
-    sm.get_chats_by_session_limit("s4", 10, character_id="charA")
-    assert calls == [1, 0], f"第二次读取不应再有 legacy 行，实测 {calls}"
+    sm.get_session_rows(["s4"], character_id="charB")
+    assert not any(s.lstrip().upper().startswith("UPDATE") for s in statements)
     sm.close()
 
 
-def test_backfill_also_repairs_user_key(tmp_path):
-    """🔴 存量行的 `user_key` 也须回填（跨会话检索归属键）。
-
-    生产实测 382 行中 324 行 `user_key` 为空 —— 这些行在"跨会话尾巴"注入
-    （`get_cross_session_tail` 按 user_key 取数）中**整体缺席**。
-    """
+def test_history_read_preserves_all_unknown_attribution_fields(tmp_path):
     sm = _sm(tmp_path)
-    sm.add_chat("user", "老话", session_id="5:wx@im.wechat")  # character_id + user_key 均空
-    rows = sm.get_chats_by_session_limit("5:wx@im.wechat", 10, character_id="charA")
-    assert len(rows) == 1
-    assert rows[0]["character_id"] == "charA"
-    assert rows[0]["user_key"] == "5:wx@im.wechat", "user_key 必须一并回填"
-
-    with sm._conn() as conn:
-        raw = dict(
-            conn.execute(
-                "SELECT character_id, user_key FROM chat_history WHERE session_id='5:wx@im.wechat'"
-            ).fetchone()
-        )
-    assert raw["character_id"] == "charA", "回填必须真落库（不只改内存对象）"
-    assert raw["user_key"] == "5:wx@im.wechat", "user_key 回填必须真落库"
+    sm.add_chat("user", "老话", session_id="5:wx@im.wechat")
+    assert sm.get_chats_by_session_limit("5:wx@im.wechat", 10, character_id="charA") == []
+    raw = sm.get_chats_by_session("5:wx@im.wechat")[0]
+    assert raw["character_id"] == ""
+    assert raw["user_key"] == ""
     sm.close()
 
 
-def test_backfill_backed_by_real_sql_not_memory_only(tmp_path):
-    """回填必须**落库**：换一个新连接读同一 DB 仍带归属。"""
+def test_unknown_attribution_stays_unknown_after_reopen(tmp_path):
+    """关闭重开数据库，证明读取没有永久伪造角色归属。"""
     sm = _sm(tmp_path)
     sm.add_chat("assistant", "她说过的话", session_id="6:wx@im.wechat")
     sm.get_chats_by_session_limit("6:wx@im.wechat", 10, character_id="charZ")
@@ -322,7 +273,8 @@ def test_backfill_backed_by_real_sql_not_memory_only(tmp_path):
 
     fresh = StructuredMemory(str(tmp_path / "closure.db"))
     rows = fresh.get_chats_by_session_limit("6:wx@im.wechat", 10, character_id="charZ")
-    assert len(rows) == 1 and rows[0]["character_id"] == "charZ"
+    assert rows == []
+    assert fresh.get_chats_by_session("6:wx@im.wechat")[0]["character_id"] == ""
     fresh.close()
     sm.close()
 
@@ -397,10 +349,9 @@ def test_reminder_delivery_records_channel_and_character():
     task = rd_mod.ReminderDeliveryTask.__new__(rd_mod.ReminderDeliveryTask)
     task._memory = _Mem()
     task._sm = _SM()
-    task._character_name = "兜底名"
-    task._character_resolver = lambda key: "会话角色"
+    task._character_id_resolver = lambda key: "default"
 
-    async def _noop_compose(reminder):
+    async def _noop_compose(reminder, *, character_id):
         return "该吃药了"
 
     async def _ok_send(session_key, text):
@@ -418,20 +369,10 @@ def test_reminder_delivery_records_channel_and_character():
 
 
 def test_reminder_delivery_resolver_prefers_injected():
-    """注入了 resolver 就必须用它；解析结果为空才用装配兜底名。"""
+    """身份只解析一次；未知结果不得借用全局角色。"""
     from proactive import reminder_delivery as rd_mod
 
-    task = rd_mod.ReminderDeliveryTask.__new__(rd_mod.ReminderDeliveryTask)
-    task._character_resolver = lambda key: "会话角色"
-    task._character_name = "装配兜底名"
-    assert task._resolve_character_name("any:key") == "会话角色"
-
-    task._character_resolver = lambda key: ""
-    assert task._resolve_character_name("any:key") == "", (
-        "注入了解析器但解析为空 → 宁缺毋串，留空（不得回落全局单值）"
-    )
-
-    task._character_resolver = None
-    assert task._resolve_character_name("any:key") == "装配兜底名", (
-        "无解析器（单角色部署/夹具）才允许用装配名"
-    )
+    task = rd_mod.ReminderDeliveryTask(None, character_id_resolver=lambda key: "charA")
+    assert task._resolve_character_id("any:key") == "charA"
+    task._character_id_resolver = lambda key: ""
+    assert task._resolve_character_id("any:key") == ""

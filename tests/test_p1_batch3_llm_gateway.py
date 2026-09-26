@@ -253,38 +253,30 @@ def test_emotion_classify_busy_skip_returns_none():
     pending.set_exception(RuntimeError("cleanup"))
 
 
-# ── P1-8 摘要缓存按会话单键 + 步长更新 ───────────────────
+# ── 摘要缓存：实际来源相同才复用，新增消息不可被步长吞掉 ──
 
 
 def _msgs(n: int):
     return [{"role": "user", "content": f"m{i}"} for i in range(n)]
 
 
-def test_summarizer_reuses_within_stride_and_updates_beyond():
+def test_summarizer_reuses_identical_sources_and_updates_changed_sources():
     from shisi.memory.legacy.conversation_summarizer import ConversationSummarizer
 
-    cs = ConversationSummarizer(llm_gateway=None)  # None → _summarize 返回 ""
+    cs = ConversationSummarizer(llm_gateway=None)
     calls: list[int] = []
-    orig = cs._summarize
 
-    def spy(older):
+    def summarize(older):
         calls.append(len(older))
-        return orig(older)
+        return f"摘要{len(older)}"
 
-    cs._summarize = spy  # type: ignore[method-assign]
-    cs._cache["s1"] = "旧摘要"
-    cs._cache_boundary["s1"] = 30
-
-    # 漂移 5 条 < 步长 30 → 复用旧摘要，不再调 LLM
-    _, summary = cs.get_chat_context(_msgs(55), session_id="s1", keep_recent=20)
-    assert summary == "旧摘要"
-    assert calls == []
-
-    # 漂移 30 条 ≥ 步长 → 重摘（gateway None 时返回空并保留旧缓存）
-    cs.get_chat_context(_msgs(80), session_id="s1", keep_recent=20)
-    assert calls == [60]
-    # 缓存键是 session 单键（旧 `{session}:{count}` 键每轮必 miss）
-    assert set(cs._cache) == {"s1"}
+    cs._summarize = summarize
+    assert cs.get_chat_context(_msgs(55), session_id="s1", keep_recent=20)[1] == "摘要35"
+    assert cs.get_chat_context(_msgs(55), session_id="s1", keep_recent=20)[1] == "摘要35"
+    assert calls == [35]
+    assert cs.get_chat_context(_msgs(56), session_id="s1", keep_recent=20)[1] == "摘要36"
+    assert calls == [35, 36]
+    assert len(cs._cache) == 1
 
 
 # ── P1-9 反思检索路由到 episodic+where，不再扫全部集合 ──
@@ -307,7 +299,7 @@ def test_vector_search_reflection_routes_with_where():
 
     seen.clear()
     asyncio.run(vm.search("片段", filter_dict={"type": "episode"}))
-    assert seen == [("episodic_memory", None)]
+    assert seen == [("episodic_memory", {"type": "episode"})]
 
 
 # ── P1-6 画像同步 L0 信号 + 调度器单例 ──────────────────

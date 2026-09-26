@@ -58,7 +58,7 @@ class _DeliverRecorder:
     def __init__(self):
         self.calls: list[tuple[str, str | None]] = []
 
-    def __call__(self, message: str, session_key: str | None = None) -> bool:
+    def __call__(self, message: str, session_key: str | None = None, character_id: str | None = None) -> bool:
         self.calls.append((message, session_key))
         return True
 
@@ -175,7 +175,7 @@ def test_deliver_failure_not_marked_sent(sched, monkeypatch):
     )
     monkeypatch.setattr(dates_mod, "check_today", lambda cid, today: [])
 
-    def _fail(message, session_key=None):
+    def _fail(message, session_key=None, character_id=None):
         return False
 
     monkeypatch.setattr(sched, "_deliver", _fail)

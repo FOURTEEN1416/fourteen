@@ -71,7 +71,7 @@ async def test_orchestrator_passes_request_scoped_persona_and_rag_ids():
 
     emotion = SimpleNamespace(analyze=lambda _message, _recent: SimpleNamespace())
     memory = SimpleNamespace(
-        get_recent_context=lambda _n, session_id="": "",
+        get_recent_context=lambda _n, session_id="", character_id="": "",
         retrieve_context=lambda **_kwargs: {},
         get_chat_context=lambda **_kwargs: ([], ""),
     )

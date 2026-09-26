@@ -36,6 +36,9 @@ from typing import Any
 
 from utils.session_key import is_wechat_key, peer_of
 
+# 历史原文的统一窗口：摘要边界和最终 LLM 预算必须使用同一个值。
+HISTORY_RECENT_LIMIT = 20
+
 
 class Speaker(str, Enum):
     """发言者类别。`NARRATOR` 用于系统/旁白（对标 SillyTavern 的 system_message_types）。"""
@@ -167,12 +170,8 @@ def render_turns(
 
 
 def filter_by_character(turns: list[Turn] | None, character_id: str) -> list[Turn]:
-    """按角色过滤轮（历史行的 character_id 为空时视为通用轮，保留）。
-
-    旧数据无 character_id（迁移前写入）→ 保留，避免升级即失忆；
-    新数据一律带归属，切换角色后不再继承他人台词。
-    """
+    """按已知角色过滤；历史空归属是未知，而不是所有角色的通用轮。"""
     cid = str(character_id or "").strip()
     if not cid:
         return list(turns or [])
-    return [t for t in (turns or []) if not t.character_id or t.character_id == cid]
+    return [t for t in (turns or []) if t.character_id == cid]

@@ -19,6 +19,7 @@ import json
 import logging
 import threading
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from orchestrator.session_locks import SessionLockManager
 from orchestrator.voice_detector import detect_voice_request as _detect_voice_request
 from tools.base_tool import ToolResult
 from utils.health_check import _is_healthy
+from utils.llm_bridge import current_llm, request_scoped_llm
 
 logger = logging.getLogger("orchestrator.optimized")
 project_root = Path(__file__).resolve().parent.parent
@@ -70,8 +72,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         self._session_lock_manager = SessionLockManager()
         self._executor = None  # 延迟初始化的共享线程池
         self._bg_executor = None  # 延迟初始化的后处理串行线程池（见 _get_background_executor）
-        # P1-6：profile_sync_agent 在飞会话集（同会话最多一个并发同步，防连发叠跑）
-        self._profile_sync_inflight: set[str] = set()
+        # 同会话画像更正必须保序执行；在飞不再等于丢弃后续输入。
+        self._profile_sync_tails: dict[str, Any] = {}
+        self._profile_sync_lock = threading.Lock()
         # Web/API 调用未经过 UserManager 时，也必须按“会话 × 角色”隔离情绪状态。
         # 外部显式传入 emotion_engine（如微信 UserManager）时仍优先使用外部实例。
         self._request_emotion_engines: dict[str, EmotionEngine] = {}
@@ -713,10 +716,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         # P1-10（2026-09-21 审查修复）：get_recent_context 自 v1.17 起读 DB——
         # 旧实现直接在事件循环上同步调用（同函数内 retrieve_context 已包 executor，
         # 两种口径）。挪到 executor，与其余并行任务同规。
-        loop = asyncio.get_running_loop()
-        recent = await loop.run_in_executor(
-            None,
-            lambda: self.components["memory"].get_recent_context(3, session_id=session_id),
+        recent = await asyncio.to_thread(
+            self.components["memory"].get_recent_context, 3,
+            session_id=session_id, character_id=character_id,
         )
 
         tasks: dict[str, Any] = {}
@@ -731,14 +733,13 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             character_id,
             explicit_engine=emotion_engine,
         )
-        tasks["emotion"] = loop.run_in_executor(
-            None, active_emotion_engine.analyze,
+        tasks["emotion"] = asyncio.to_thread(
+            active_emotion_engine.analyze,
             user_msg_clean, recent,
         )
-        tasks["memory"] = loop.run_in_executor(
-            None,
+        tasks["memory"] = asyncio.to_thread(
             lambda: self.components["memory"].retrieve_context(
-                query=user_msg_clean, session_id=session_id, top_k=5,
+                query=user_msg_clean, session_id=session_id, top_k=5, character_id=character_id,
             ),
         )
         rag = self.components["rag"]
@@ -763,7 +764,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             else:
                 def rag_call():
                     return rag.retrieve(user_msg_clean)
-            tasks["rag"] = loop.run_in_executor(None, rag_call)
+            tasks["rag"] = asyncio.to_thread(rag_call)
 
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
 
@@ -822,10 +823,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             _hist_kwargs: dict[str, Any] = {"session_id": session_id}
             if "character_id" in _hist_sig.parameters:
                 _hist_kwargs["character_id"] = str(character_id or "")
-            chat_history, chat_summary = await loop.run_in_executor(
-                None,
-                lambda: mem.get_chat_context(**_hist_kwargs),
-            )
+            chat_history, chat_summary = await asyncio.to_thread(mem.get_chat_context, **_hist_kwargs)
         # 2026-09-21：清洗交给 LLM 的历史 — 只保留 user/assistant 角色、去空/系统错误、
         # 防止「当前用户消息」与 history 重复，避免模型分不清该回哪句。
         try:
@@ -893,12 +891,12 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             try:
                 tail_lines: list[str] = []
                 if hasattr(mem, "get_cross_session_tail"):
-                    tail_lines = mem.get_cross_session_tail(session_id, limit=8) or []
+                    tail_lines = mem.get_cross_session_tail(session_id, limit=8, character_id=character_id) or []
                 elif hasattr(mem, "structured_memory") and hasattr(
                     mem.structured_memory, "get_cross_session_tail"
                 ):
                     tail_lines = mem.structured_memory.get_cross_session_tail(
-                        session_id, limit=8
+                        session_id, limit=8, character_id=character_id
                     ) or []
                 from orchestrator.context_budget import (
                     SESSION_TAIL_INJECT_MAX_RECENT_MESSAGES,
@@ -953,7 +951,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
         # 工具调用（三级意图管线；direct_reply 为澄清提问，直接作为本轮回复）
         affinity_level = self._get_affinity_level(emotion_state)
-        llm = self.components.get("llm")
+        llm = current_llm(self.components.get("llm"))
         tool_results, direct_reply = await self._run_tools_if_needed(
             llm,
             user_msg_clean,
@@ -1056,6 +1054,44 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             "ax_reply_id": ax_reply_id,
         }
 
+    def _enqueue_profile_sync(self, session_id, user_msg, reply, llm, *, character_id="", turn_id=""):
+        from tools.builtin.profile_agent_tools import run_profile_sync_agent
+        from utils.async_utils import get_shared_loop
+
+        sm = getattr(self.components.get("memory"), "structured_memory", None)
+        with self._profile_sync_lock:
+            previous = self._profile_sync_tails.get(session_id)
+
+            async def ordered():
+                if previous is not None:
+                    try:
+                        await asyncio.wrap_future(previous)
+                    except Exception:
+                        logger.warning("前轮画像同步失败，继续本轮更正 session=%s", session_id)
+                from orchestrator.session_locks import ProcessSessionLock
+
+                async with ProcessSessionLock(session_id, namespace="profile"):
+                    return await asyncio.wait_for(
+                        run_profile_sync_agent(llm, session_id, user_msg, reply, sm,
+                                               character_id=character_id, turn_id=turn_id),
+                        timeout=45,
+                    )
+
+            future = asyncio.run_coroutine_threadsafe(ordered(), get_shared_loop())
+            self._profile_sync_tails[session_id] = future
+
+        def completed(done):
+            with self._profile_sync_lock:
+                if self._profile_sync_tails.get(session_id) is done:
+                    del self._profile_sync_tails[session_id]
+            if not done.cancelled():
+                error = done.exception()
+                if error:
+                    logger.warning("画像同步失败 session=%s: %s", session_id, type(error).__name__)
+
+        future.add_done_callback(completed)
+        return future
+
     def _after_process(
         self,
         user_msg_clean: str,
@@ -1094,11 +1130,11 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             elif "emotion_tag" in sig.parameters:
                 mem_kwargs["emotion_tag"] = emotion_tag
             if "history_already_written" in sig.parameters:
-                mem_kwargs["history_already_written"] = True
+                mem_kwargs["history_already_written"] = False
             # 包 Q · B-a：chat_history 两行**同步**轻写，返回前下一轮即可读到
             if hasattr(memory, "write_chat_history_sync"):
                 try:
-                    memory.write_chat_history_sync(
+                    history_written = memory.write_chat_history_sync(
                         user_msg=user_msg_clean,
                         reply=reply,
                         emotion_tag=emotion_tag,
@@ -1106,6 +1142,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                         character_id=str(character_id or ""),
                         turn_id=ax_turn_id,
                     )
+                    if "history_already_written" in sig.parameters:
+                        mem_kwargs["history_already_written"] = history_written is True
                 except Exception as e:  # noqa: BLE001
                     logger.warning("sync history write failed: %s", e)
             # 后台线程执行 after_chat 重活（向量/事实/日记），
@@ -1116,7 +1154,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 except Exception as e:  # noqa: BLE001
                     logger.warning("after_chat failed, skipping: %s", e)
             try:
-                self._get_background_executor().submit(_safe_after_chat, **mem_kwargs)
+                from contextvars import copy_context
+
+                self._get_background_executor().submit(copy_context().run, _safe_after_chat, **mem_kwargs)
             except RuntimeError as e:
                 logger.warning("后处理线程池已关闭，改为同步执行: %s", e)
                 _safe_after_chat(**mem_kwargs)
@@ -1154,42 +1194,16 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 )
             except Exception as e:  # noqa: BLE001
                 logger.debug("ledger turn events failed: %s", e)
-            # P1-6（2026-09-21 审查修复）：
-            # ① 旧实现**每条消息无条件**跑一次 profile_sync_agent LLM 工具链——
-            #    现在只在用户原话命中画像/记忆信号（L0 晋级线）时触发；
-            # ② 旧实现占用单 worker 的 after_chat 串行池、lambda 里再
-            #    asyncio.run 新建/销毁循环（与 provider 的按 loop 缓存互相
-            #    乒乓）——现在直接提交到常驻 sync loop，不再挤占后处理队列。
+            # 画像同步交共享循环的会话保序队列；覆盖隐含更正，不用关键词猜要不要记。
+            # 不挤占after_chat单worker池，不在画像任务里切换共享LLM属性。
             try:
-                from orchestrator.tool_gate import has_profile_signal
-
-                if has_profile_signal(user_msg_clean):
-                    llm_for_sync = self.components.get("llm")
-                    sm_for_sync = None
-                    mem = self.components.get("memory")
-                    if mem is not None:
-                        sm_for_sync = getattr(mem, "structured_memory", None)
-                    if session_id not in self._profile_sync_inflight:
-                        from llm_provider.multi_provider_gateway import _get_sync_loop
-                        from tools.builtin.profile_agent_tools import (
-                            run_profile_sync_agent,
-                        )
-
-                        fut = asyncio.run_coroutine_threadsafe(
-                            run_profile_sync_agent(
-                                llm_for_sync, session_id, user_msg_clean,
-                                reply if isinstance(reply, str) else "",
-                                sm_for_sync,
-                            ),
-                            _get_sync_loop(),
-                        )
-                        self._profile_sync_inflight.add(session_id)
-                        fut.add_done_callback(
-                            lambda _f, _s=session_id: (
-                                self._profile_sync_inflight.discard(_s),
-                                _f.exception(),  # 取出异常，避免 "never retrieved" 刷屏
-                            )
-                        )
+                # 不能由关键词排除隐含更正（如“不是，是17号”）；是否写由模型判断。
+                if user_msg_clean.strip():
+                    self._enqueue_profile_sync(
+                        session_id, user_msg_clean, reply,
+                        current_llm(self.components.get("llm")),
+                        character_id=character_id, turn_id=ax_turn_id,
+                    )
             except Exception as e:  # noqa: BLE001
                 logger.debug("profile_sync_agent schedule failed: %s", e)
 
@@ -1254,6 +1268,36 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
         return emotion_tag
 
+    def _finalize_reply(self, reply: str, character_id: str, character_card=None) -> str:
+        """唯一输出定稿：清洗、空回复降级、安全检查均发生在发送和落库之前。"""
+        from utils.prompt_sanitize import sanitize_reply_text
+
+        if character_card is None:
+            loader = getattr(self.components.get("persona"), "_load_character_card", None)
+            if is_external_character_id(character_id) and callable(loader):
+                character_card = loader(character_id)
+        char_name = str(character_card.get("name") or "") if isinstance(character_card, dict) else ""
+        reply = sanitize_reply_text(reply, character_name=char_name)
+        try:
+            from my_character.consistency_checker import (
+                detect_hard_violation,
+                light_sanitize_hard_violation,
+            )
+
+            if detect_hard_violation(reply, char_name):
+                reply = sanitize_reply_text(light_sanitize_hard_violation(reply), character_name=char_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("硬违规检查跳过: %s", exc)
+        if not reply:
+            from utils.fallback_lines import get_fallback_line
+            from utils.reply_mode import read_reply_mode
+
+            reply = get_fallback_line(character_id, "empty_reply", read_reply_mode())
+        safety = self.components["safety"]
+        checked = safety.check_output(reply)
+        return reply if checked.is_safe else safety.safe_alternative(checked.category)
+
+    @request_scoped_llm
     async def process_message(
         self,
         user_msg: str,
@@ -1264,9 +1308,39 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         user_llm_config: dict | None = None,
         user_id: int | None = None,
         attachments: list | None = None,
+        reply_sender: Callable[[dict[str, Any]], Awaitable[str]] | None = None,
     ) -> dict[str, Any]:
+        # 通道回执返回真正被 API 受理的正文；失败/部分发送都不能把全文写成已说。
+        # 回调在会话锁内完成，下一轮生成前历史已与回执一致。
+        published_reply: str | None = None
+
+        async def publish(text: str, **metadata: Any) -> str:
+            nonlocal published_reply
+            if reply_sender is None:
+                return text
+            if published_reply is not None:
+                return published_reply
+            published_reply = ""
+            delivery = asyncio.create_task(reply_sender({"reply": text, "character_id": character_id, **metadata}))
+            try:
+                accepted = await asyncio.shield(delivery)
+                if isinstance(accepted, str):
+                    published_reply = accepted
+            except asyncio.CancelledError:
+                # 网络请求/线程已开始不能凭取消假定没发出，先取得实际回执再释放会话锁。
+                try:
+                    accepted = await delivery
+                    if isinstance(accepted, str):
+                        published_reply = accepted
+                except Exception:
+                    pass
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("回复发送未确认 session=%s: %s", session_id, exc)
+            return published_reply
+
         if not self._initialized:
-            return {"reply": "系统初始化中, 请稍候...", "error": "not_initialized"}
+            return {"reply": await publish("系统初始化中, 请稍候..."), "error": "not_initialized"}
 
         lock = self._get_session_lock(session_id)
         # ── 会话串行：排队等待，而不是丢掉用户这条消息（2026-09-19 修复）──
@@ -1276,29 +1350,26 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 "[session] 排队等待超时（>%.0fs），放弃本条 session=%s",
                 _SESSION_QUEUE_TIMEOUT, session_id,
             )
-            return {"reply": "等下，我还没回完上一条", "error": "queue_timeout"}
+            return {"reply": await publish("等下，我还没回完上一条"), "error": "queue_timeout"}
         # 注：queue_timeout / not_initialized / internal_error 走统一出口前
         # 不写历史（用户尚未进入生成链，无 assistant 行可写；user 行由调用方
         # 在成功路径的 write_chat_history_sync 负责）。
 
         # 用户级 LLM gateway（API Key 隔离）：若提供 user_id + user_llm_config，
         # 本次请求使用用户专属 gateway，否则回退到全局共享 gateway。
-        request_llm = self.components["llm"]
-        if user_llm_config and user_id is not None:
-            try:
-                from llm_provider import get_user_llm
-                request_llm = get_user_llm(user_id, user_llm_config)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Failed to get user-level LLM gateway, falling back to global: %s", e)
+        request_llm = current_llm(self.components.get("llm"))
 
         async with lock:
             start_time = time.perf_counter()
+            user_msg_clean = ""
+            ctx: dict[str, Any] = {}
+            history_finished = False
 
             try:
                 safety_result = self.components["safety"].check_input(user_msg)
                 if not safety_result.is_safe:
                     return {
-                        "reply": self.components["safety"].safe_alternative(safety_result.category),
+                        "reply": await publish(self.components["safety"].safe_alternative(safety_result.category)),
                         "safety_triggered": True,
                     }
 
@@ -1358,6 +1429,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                         _fb = get_fallback_line(
                             character_id, "timeout", read_reply_mode()
                         )
+                        _fb = await publish(_fb)
                         # 超时旁路也必须落历史：否则用户这句话凭空消失，
                         # 下一轮她「不记得你说过」甚至把旧话当成你刚说的。
                         try:
@@ -1368,7 +1440,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                                     reply=_fb,
                                     session_id=session_id,
                                     character_id=str(character_id or ""),
+                                    turn_id=str(ctx.get("ax_turn_id") or ""),
                                 )
+                                history_finished = True
                         except Exception as e:  # noqa: BLE001
                             logger.debug("timeout history write failed: %s", e)
                         return {
@@ -1398,49 +1472,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 )
                 # === 检查结束 ===
 
-                # A2 空回复兜底：角色化，沉浸式无括号
-                if not str(reply or "").strip():
-                    from utils.fallback_lines import get_fallback_line
-                    from utils.reply_mode import read_reply_mode
-                    reply = get_fallback_line(
-                        character_id, "empty_reply", read_reply_mode()
-                    )
-
-                # 自问自答清洗（2026-09-23）：剥「用户：/角色：」剧本体，
-                # 丢掉自问自答里自己答自己的那段（否则拆条发出像她跟自己说话）
-                try:
-                    from utils.prompt_sanitize import sanitize_reply_text
-
-                    _cleaned_reply = sanitize_reply_text(reply)
-                    if _cleaned_reply and _cleaned_reply != reply:
-                        logger.debug(
-                            "reply sanitized (dialogue/self-talk) len %d→%d",
-                            len(str(reply or "")),
-                            len(_cleaned_reply),
-                        )
-                        reply = _cleaned_reply
-                except Exception as e:  # noqa: BLE001
-                    logger.debug("sanitize_reply_text failed: %s", e)
-
-                # A3：生成后仅对硬违规做轻量替换（流式已推送不改写）
-                try:
-                    from my_character.consistency_checker import (
-                        detect_hard_violation,
-                        light_sanitize_hard_violation,
-                    )
-
-                    _char_name = ""
-                    if isinstance(character_card, dict):
-                        _char_name = str(character_card.get("name") or "")
-                    if detect_hard_violation(reply, _char_name):
-                        reply = light_sanitize_hard_violation(reply)
-                        logger.info("A3 硬违规轻量替换 session=%s", session_id)
-                except Exception:  # noqa: BLE001
-                    pass
-
-                output_result = self.components["safety"].check_output(reply)
-                if not output_result.is_safe:
-                    reply = self.components["safety"].safe_alternative(output_result.category)
+                reply = self._finalize_reply(reply, character_id, character_card)
+                reply = await publish(reply, emotion=emotion_state.to_dict() if emotion_state else None)
 
                 # ── 共享后处理（after_chat → ASE → 好感度同步）──
                 emotion_tag = self._after_process(
@@ -1452,6 +1485,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     turn_id=str(ctx.get("ax_turn_id") or ""),
                     reply_id=str(ctx.get("ax_reply_id") or ""),
                 )
+                history_finished = True
 
                 # ── 语音合成（用户明确要求时触发）──
                 voice_audio: bytes | None = None
@@ -1486,17 +1520,30 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     result["voice_duration_ms"] = min(60000, max(1500, len(reply) * 180))
                 return result
 
+            except asyncio.CancelledError:
+                if user_msg_clean and not history_finished:
+                    memory = self.components.get("memory")
+                    writer = getattr(memory, "write_chat_history_sync", None)
+                    if writer is not None:
+                        writer(user_msg=user_msg_clean, reply=published_reply or "",
+                               session_id=session_id, character_id=character_id,
+                               turn_id=str(ctx.get("ax_turn_id") or ""))
+                raise
             except Exception:
                 logger.exception("消息处理异常")
-                _err_fb = "（处理消息时出现异常, 请稍后重试）"
+                from utils.fallback_lines import get_fallback_line
+                from utils.reply_mode import read_reply_mode
+
+                _err_fb = await publish(get_fallback_line(character_id, "exception", read_reply_mode()))
                 try:
                     memory = self.components.get("memory")
-                    if memory and hasattr(memory, "write_chat_history_sync"):
+                    if user_msg_clean and not history_finished and memory and hasattr(memory, "write_chat_history_sync"):
                         memory.write_chat_history_sync(
                             user_msg=user_msg_clean,
                             reply=_err_fb,
                             session_id=session_id,
                             character_id=str(character_id or ""),
+                            turn_id=str(ctx.get("ax_turn_id") or ""),
                         )
                 except Exception:  # noqa: BLE001
                     pass

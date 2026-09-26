@@ -45,15 +45,20 @@ class SemanticMemory:
             # 这里不再「查到相似就 return False」（旧行为导致重复事实永不 reinforce）。
             if self._accepts_user_key(self._sm.add_fact):
                 try:
-                    self._sm.add_fact(
+                    fact_id = self._sm.add_fact(
                         fact, category, confidence, source,
                         user_key=user_key, topics=topics,
+                        source_last_id=kwargs.get("source_last_id"),
                     )
                 except TypeError:
                     # 旧签名无 topics
-                    self._sm.add_fact(fact, category, confidence, source, user_key=user_key)
+                    fact_id = self._sm.add_fact(fact, category, confidence, source, user_key=user_key)
             else:
-                self._sm.add_fact(fact, category, confidence, source)
+                fact_id = self._sm.add_fact(fact, category, confidence, source)
+            if not fact_id or fact_id == -1:
+                return False
+            if fact_id == -2:
+                return True
             self._fact_cache.add(fact_hash)
             try:
                 # P1-12（2026-09-21 审查修复）：旧实现把 **async** 的
@@ -92,7 +97,7 @@ class SemanticMemory:
                 coll = coll() if callable(coll) else coll
                 c = coll.get("semantic_knowledge") if isinstance(coll, dict) else None
                 if c is not None and hasattr(c, "add"):
-                    doc_id = f"sk_{hashlib.md5(fact.encode()).hexdigest()[:12]}"
+                    doc_id = f"sk_{self._hash(fact, user_key)}"
                     c.add(
                         documents=[fact],
                         metadatas=[{
@@ -166,6 +171,9 @@ class SemanticMemory:
                     r for r in raw_vec
                     if self._meta_user_key(r) == str(user_key)
                 ]
+            checker = getattr(self._sm, "has_active_fact", None)
+            if checker is not None and user_key is not None:
+                raw_vec = [r for r in raw_vec if checker(str(r.get("content") or ""), str(user_key))]
             results["vector"] = raw_vec[:top_k]
         except Exception as e:  # noqa: BLE001
             logger.warning("Vector fact search failed: %s", e)

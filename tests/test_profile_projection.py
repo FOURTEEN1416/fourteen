@@ -31,6 +31,13 @@ def test_write_then_project_scalar(ledger: EventLedger) -> None:
     assert project_profile(ledger, sk)["birthday"] == "腊月初一"
 
 
+def test_late_background_result_cannot_overwrite_newer_source(ledger: EventLedger):
+    write_profile_event(ledger, session_key="7:peer", payload={"birthday": "新生日", "_source_chat_id": 12})
+    result = write_profile_event(ledger, session_key="7:peer", payload={"birthday": "旧生日", "location": "昆明", "_source_chat_id": 8})
+    assert result["birthday"] == "新生日"
+    assert result["location"] == "昆明"
+
+
 def test_correction_clears_old_value(ledger: EventLedger) -> None:
     sk = "N:userA"
     write_profile_event(ledger, session_key=sk, payload={"birthday": "11月14"})
@@ -88,6 +95,32 @@ def test_seed_baseline_projects(ledger: EventLedger) -> None:
     assert proj["preferences"] == ["安静"]
     # 不污染他人
     assert project_profile(ledger, "N:user2")["birthday"] == ""
+
+
+def test_interleaved_updates_and_corrections_follow_real_write_order(ledger: EventLedger):
+    first = ledger.append(session_key="s", event_type="profile_update", payload={"birthday": "1月1日"}, created_at="2026-01-01T00:00:00+08:00")
+    ledger.append(session_key="s", event_type="profile_correct", payload={"clear_birthday": True}, created_at=first.created_at)
+    last = ledger.append(session_key="s", event_type="profile_update", payload={"birthday": "2月2日"}, created_at=first.created_at)
+    assert project_profile(ledger, "s")["birthday"] == "2月2日"
+    rows = ledger.query(session_key="s")
+    assert rows[0].id == first.id < rows[1].id < last.id == rows[2].id
+
+
+def test_projection_keeps_old_unchanged_fields_beyond_page_boundary(ledger: EventLedger):
+    ledger.append(session_key="s", event_type="profile_update", payload={"birthday": "1月1日", "occupation": "设计师"})
+    for index in range(9):
+        ledger.append(session_key="s", event_type="profile_update", payload={"nickname": f"称呼{index}"})
+    state = project_profile(ledger, "s", limit=3)
+    assert (state["birthday"], state["occupation"], state["nickname"]) == ("1月1日", "设计师", "称呼8")
+
+
+def test_profile_apply_does_not_mutate_previous_state():
+    from shisi.agent_plane.profile_projection import apply_profile_ops_to_state
+
+    before = {"preferences": ["猫"], "commitments": []}
+    after = apply_profile_ops_to_state(before, {"preferences_add": ["狗"]})
+    assert before["preferences"] == ["猫"]
+    assert after["preferences"] == ["猫", "狗"]
 
 
 def test_projection_window_takes_latest_events(ledger: EventLedger) -> None:

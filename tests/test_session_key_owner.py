@@ -90,15 +90,20 @@ def test_character_suffix_of_extracts_role_and_rejects_date():
     assert sk.character_suffix_of("") == ""
 
 
-def test_scheduler_no_handwritten_pipe_split():
-    """两处角色回落必须走 session_key 唯一 owner，不得回退手写 split("|")。"""
+def test_scheduler_no_handwritten_pipe_split(monkeypatch):
+    """角色解析统一委托，不依赖源码里恰好存在几处重复调用。"""
     from pathlib import Path
 
     import proactive.scheduler
 
     src = Path(proactive.scheduler.__file__).read_text(encoding="utf-8")
     assert 'split("|")' not in src, "hub 角色后缀解析必须走 utils.session_key.character_suffix_of"
-    assert src.count("character_suffix_of") >= 2
+    monkeypatch.setattr(proactive.scheduler.character_resolver, "resolve_character_id", lambda *a: "default")
+    resolver = proactive.scheduler.ProactiveScheduler._resolve_character_id
+    assert resolver("4:peer|charA") == "charA"
+    assert resolver("4:peer|2026-09-22") == "default"
+    monkeypatch.setattr(proactive.scheduler.character_resolver, "resolve_character_id", lambda *a: "charB")
+    assert resolver("4:peer|charA") == "charB"
 
 
 # ── ② scheduler 定向路由 ───────────────────────────────────

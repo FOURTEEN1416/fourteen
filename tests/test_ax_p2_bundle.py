@@ -27,6 +27,18 @@ def test_curator_drops_garbage_and_merges_near_dup():
     assert bigram_overlap("用户生日是腊月初一", "用户生日是腊月初一。") >= 0.75
 
 
+def test_curator_preserves_negation_and_dates():
+    facts = [
+        {"id": 1, "fact": "用户生日是十一月十四"},
+        {"id": 2, "fact": "用户生日是十一月十五"},
+        {"id": 3, "fact": "用户不喜欢吃火锅"},
+        {"id": 4, "fact": "用户喜欢吃火锅"},
+    ]
+    result = curate_facts_rule_based(facts)
+    assert len(result["kept"]) == 4
+    assert result["merged"] == []
+
+
 def test_web_config_injected_into_context():
     ctx = build_proactive_context(
         session_key="N:u",

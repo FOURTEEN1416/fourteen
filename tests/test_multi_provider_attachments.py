@@ -88,6 +88,58 @@ def test_explicit_messages_win():
 
 
 @pytest.mark.asyncio
+async def test_oauth_refresh_updates_loop_owned_client_headers():
+    import asyncio
+    from types import SimpleNamespace
+
+    from llm_provider.openai_compatible_provider import OpenAICompatibleProvider
+
+    provider = OpenAICompatibleProvider(provider_name="custom", api_key="unit-test", api_base="https://example.invalid", model="test")
+    client = SimpleNamespace(headers={})
+    loop = asyncio.get_running_loop()
+    provider._clients[id(loop)] = (loop, client)
+    provider._headers["Authorization"] = "Bearer refreshed-unit-test"
+    provider._refresh_client_headers()
+    assert client.headers["Authorization"] == "Bearer refreshed-unit-test"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider_kind", ["custom", "deepseek"])
+async def test_direct_provider_failure_is_not_character_dialogue(monkeypatch, provider_kind):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    if provider_kind == "custom":
+        from llm_provider.openai_compatible_provider import OpenAICompatibleProvider
+
+        provider = OpenAICompatibleProvider(provider_name="custom", api_key="unit-test", api_base="https://example.invalid", model="test")
+        monkeypatch.setattr(provider, "_try_fallback", AsyncMock(return_value=None))
+    else:
+        from llm_provider.llm_gateway import LLMGatewayV2
+
+        provider = LLMGatewayV2(api_key="unit-test")
+        monkeypatch.setattr(provider, "_try_fallback_async", AsyncMock(return_value=None))
+    loop = asyncio.get_running_loop()
+    provider._clients[id(loop)] = (loop, SimpleNamespace(post=AsyncMock(side_effect=ConnectionError("offline"))))
+    with pytest.raises(RuntimeError, match="未生成角色回复"):
+        await provider.chat(query="你好")
+
+
+@pytest.mark.asyncio
+async def test_direct_user_provider_accepts_attachments(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from llm_provider.openai_compatible_provider import OpenAICompatibleProvider
+
+    provider = OpenAICompatibleProvider(provider_name="custom", api_key="unit-test", api_base="https://example.invalid", model="test")
+    inner = AsyncMock(return_value="ok")
+    monkeypatch.setattr(provider, "_chat", inner)
+    assert await provider.chat(query="看图", attachments=[_IMG]) == "ok"
+    assert inner.call_args.kwargs["messages"][-1]["content"][-1] is _IMG
+
+
+@pytest.mark.asyncio
 async def test_chat_accepts_empty_attachments():
     """故障复现点：attachments=[] 此前直接 TypeError，现在必须正常返回"""
     provider = _FakeProvider("你好呀")

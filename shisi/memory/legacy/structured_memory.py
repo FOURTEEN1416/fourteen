@@ -90,7 +90,7 @@ class StructuredMemory:
         self._connection = sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._connection.execute("PRAGMA journal_mode=WAL")
-        self._write_lock = threading.Lock()
+        self._write_lock = threading.RLock()
         self._degraded = False
         self._closed = False
 
@@ -169,6 +169,22 @@ class StructuredMemory:
                     emotion_tag TEXT DEFAULT '',
                     session_id TEXT DEFAULT '',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS fact_deletion_watermarks (
+                    user_key TEXT NOT NULL,
+                    fact TEXT NOT NULL,
+                    through_chat_id INTEGER NOT NULL,
+                    PRIMARY KEY(user_key, fact)
+                );
+
+                CREATE TABLE IF NOT EXISTS memory_extraction_progress (
+                    session_id TEXT NOT NULL,
+                    character_id TEXT NOT NULL,
+                    last_id INTEGER NOT NULL DEFAULT 0,
+                    claim_token TEXT NOT NULL DEFAULT '',
+                    lease_until TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY(session_id, character_id)
                 );
 
                 CREATE TABLE IF NOT EXISTS reminders (
@@ -275,6 +291,9 @@ class StructuredMemory:
             self._migrate_reminders_columns(conn)
             self._migrate_user_facts_columns(conn)
             self._migrate_chat_history_columns(conn)
+            if "character_id" not in {r["name"] for r in conn.execute("PRAGMA table_info(reflections)")}:
+                conn.execute("ALTER TABLE reflections ADD COLUMN character_id TEXT NOT NULL DEFAULT ''")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_reflection_owner ON reflections(session_id, character_id, id)")
             # 2026-09-22：死表批量清除（详见 docs/DELETION_LOG.md）——
             # pending_events（CrossSessionReasoner 死链）、affinity_log /
             # emotion_trajectory（零写入零读取）、working_memory / sessions
@@ -573,72 +592,38 @@ class StructuredMemory:
 
     @contextmanager
     def _conn(self, write: bool = False):
-        """获取数据库连接
+        """共享连接读写均持锁，禁止其他线程看到未提交的半轮或已关闭连接。
 
-        Args:
-            write: 是否为写操作，写操作会获取写锁
+        write 保留调用语义标记；同一连接不能用 WAL 替代线程间事务隔离。
         """
-        if write:
-            with self._write_lock:
-                yield self._connection
-        else:
+        with self._write_lock:
             yield self._connection
 
     @contextmanager
     def get_connection(self, write: bool = False):
-        """公开的连接获取接口（用于CrossSessionReasoner等外部组件）
-
-        Args:
-            write: 是否为写操作，写操作会获取写锁
-        """
-        if write:
-            with self._write_lock:
-                yield self._connection
-        else:
-            yield self._connection
+        """外部组件同样委托连接级锁，不提供绕过事务隔离的读取旁路。"""
+        with self._conn(write=write) as conn:
+            yield conn
 
     # ── 用户事实 ──────────────────────────────────────────
 
-    @staticmethod
-    def _fact_bigrams(text: str) -> set[str]:
-        t = "".join(str(text or "").lower().split())
-        # 常见同义归一：阿拉伯数字与中文数字、标点
-        trans = str.maketrans({"０": "0", "１": "1", "２": "2", "３": "3", "４": "4",
-                              "５": "5", "６": "6", "７": "7", "８": "8", "９": "9"})
-        t = t.translate(trans)
-        for a, b in (("十二", "12"), ("十一", "11"), ("十", "10"), ("一点", "1点")):
-            t = t.replace(a, b)
-        if len(t) < 2:
-            return {t} if t else set()
-        return {t[i : i + 2] for i in range(len(t) - 1)}
-
     @classmethod
     def facts_near_duplicate(cls, a: str, b: str, threshold: float = 0.72) -> bool:
-        """bigram 相似度 + 子串包含（对齐 my-raze spirit）；视为近重复则 True。"""
+        """仅等价文本可自动合并；词面相似无法证明主体、否定和日期相同。"""
         def _norm(s: str) -> str:
-            t = "".join(str(s or "").lower().split())
+            t = "".join(str(s or "").lower().split()).rstrip("。.!！?？")
             for x, y in (("十二", "12"), ("十一", "11"), ("十", "10")):
                 t = t.replace(x, y)
             return t
         ta, tb = _norm(a), _norm(b)
         if not ta or not tb:
             return False
-        if ta == tb:
-            return True
-        if ta in tb or tb in ta:
-            return True
-        ba, bb = cls._fact_bigrams(a), cls._fact_bigrams(b)
-        if not ba or not bb:
-            return False
-        inter = len(ba & bb)
-        union = len(ba | bb)
-        if union == 0:
-            return False
-        return (inter / union) >= threshold or inter / max(len(ba), len(bb)) >= threshold
+        return ta == tb
 
     def add_fact(self, fact: str, category: str = "general",
                  confidence: float = 0.5, source: str = "",
-                 user_key: str = "", topics: str | list[str] | None = None) -> int:
+                 user_key: str = "", topics: str | list[str] | None = None,
+                 source_last_id: int | None = None) -> int:
         """添加用户事实（按 user_key 隔离）。
 
         包 Q · B-b：同 user_key 下 near-dup → UPDATE（confidence/access/last_seen/topics），
@@ -654,6 +639,8 @@ class StructuredMemory:
             return -1
 
         with self._conn(write=True) as conn:
+            if source_last_id is not None and self.is_deleted_source(fact, user_key, source_last_id):
+                return -2  # 已删除来源的幂等跳过，不写向量，不阻塞水位
             # near-dup 扫描（同 user_key + active）
             rows = conn.execute(
                 "SELECT id, fact, confidence, access_count, category, topics FROM user_facts "
@@ -697,7 +684,7 @@ class StructuredMemory:
                   min_confidence: float = 0.0,
                   limit: int = 50,
                   user_key: str | None = None,
-                  include_legacy: bool = False) -> list[dict[str, Any]]:
+                  include_legacy: bool = False, owner_prefix: str | None = None) -> list[dict[str, Any]]:
         """获取用户事实。
 
         Args:
@@ -714,6 +701,9 @@ class StructuredMemory:
                 else:
                     clauses.append("user_key = ?")
                     params.append(user_key or "")
+            if owner_prefix is not None:
+                clauses.append("substr(user_key, 1, ?) = ?")
+                params.extend((len(owner_prefix), owner_prefix))
             if category:
                 clauses.append("category = ?")
                 params.append(category)
@@ -782,6 +772,26 @@ class StructuredMemory:
             ).fetchall()
             return _filter(rows)
 
+    def is_deleted_source(self, text: str, user_key: str, source_last_id: int) -> bool:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT fact,through_chat_id FROM fact_deletion_watermarks WHERE user_key=?",
+                                (user_key,)).fetchall()
+            return any(source_last_id <= row["through_chat_id"] and self.facts_near_duplicate(text, row["fact"]) for row in rows)
+
+    def has_active_fact(self, text: str, user_key: str) -> bool:
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT 1 FROM user_facts WHERE user_key=? AND fact=? AND status='active' LIMIT 1",
+                (user_key, text),
+            ).fetchone() is not None
+
+    def has_reflection(self, text: str, session_id: str, character_id: str = "") -> bool:
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT 1 FROM reflections WHERE content=? AND session_id=? AND character_id=? LIMIT 1",
+                (text, session_id, character_id),
+            ).fetchone() is not None
+
     def update_fact_confidence(self, fact_id: int, confidence: float) -> None:
         """更新事实置信度"""
         with self._conn(write=True) as conn:
@@ -849,9 +859,27 @@ class StructuredMemory:
                         restore_before,
                     ),
                 )
+            source_last = conn.execute("SELECT COALESCE(MAX(id),0) FROM chat_history WHERE session_id=?",
+                                       (str(data.get("user_key") or ""),)).fetchone()[0]
+            conn.execute("INSERT INTO fact_deletion_watermarks(user_key,fact,through_chat_id) VALUES (?,?,?) "
+                         "ON CONFLICT(user_key,fact) DO UPDATE SET through_chat_id=MAX(through_chat_id,excluded.through_chat_id)",
+                         (str(data.get("user_key") or ""), str(data.get("fact") or ""), source_last))
             conn.execute("DELETE FROM user_facts WHERE id = ?", (fact_id,))
+            # 旧洞察没有来源ID时宁可重新生成，不让被删除事实的推论继续生效。
+            conn.execute(
+                "DELETE FROM reflections WHERE session_id=? AND "
+                "(source_fact_ids='[]' OR EXISTS (SELECT 1 FROM json_each(source_fact_ids) WHERE value=?))",
+                (str(data.get("user_key") or ""), fact_id),
+            )
             conn.commit()
-            return True
+        invalidator = getattr(self, "_derived_memory_invalidator", None)
+        if invalidator is not None:
+            try:
+                invalidator(str(data.get("fact") or ""), str(data.get("user_key") or ""))
+            except Exception as exc:
+                # 读侧仍以主库存在性校验；向量清理失败不能使已删事实复活。
+                logger.warning("派生向量清理失败，主库已删除: %s", exc)
+        return True
 
     def restore_fact_from_recycle(self, recycle_id: int) -> int | None:
         """从回收站恢复事实到 user_facts；返回新 fact_id（失败 None）。"""
@@ -897,7 +925,7 @@ class StructuredMemory:
                         f.get("category", "general"),
                         f.get("confidence", 0.5),
                         f.get("source", ""),
-                        f.get("user_key", user_key or ""),
+                        user_key or "",
                     ),
                 )
                 ids.append(int(cur.lastrowid or 0))
@@ -907,33 +935,33 @@ class StructuredMemory:
     # ── 记忆反思 ──────────────────────────────────────────
 
     def add_reflection(self, content: str, session_id: str = "",
-                       source_fact_ids: list[int] | None = None) -> int:
+                       source_fact_ids: list[int] | None = None, character_id: str = "") -> int:
         """添加反思洞察"""
         import json
         source_ids = json.dumps(source_fact_ids or [])
         with self._conn(write=True) as conn:
             cursor = conn.execute(
-                "INSERT INTO reflections (content, session_id, source_fact_ids) VALUES (?, ?, ?)",
-                (content, session_id, source_ids),
+                "INSERT INTO reflections (content, session_id, source_fact_ids, character_id) VALUES (?, ?, ?, ?)",
+                (content, session_id, source_ids, character_id),
             )
             conn.commit()
             return cursor.lastrowid  # type: ignore[no-any-return]
 
     def get_reflections(self, limit: int = 10,
-                        session_id: str | None = None) -> list[dict[str, Any]]:
-        """获取最近反思洞察（session_id 非 None 时按会话隔离）。"""
+                        session_id: str | None = None, character_id: str = "") -> list[dict[str, Any]]:
+        """按归属过滤后取最近洞察，写入序与聊天历史一致。"""
+        conditions, params = [], []
+        if session_id is not None:
+            conditions.append("session_id = ?")
+            params.append(str(session_id))
+        if character_id:
+            conditions.append("character_id = ?")
+            params.append(character_id)
+        sql = "SELECT * FROM reflections"
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
         with self._conn() as conn:
-            if session_id is not None:
-                rows = conn.execute(
-                    "SELECT * FROM reflections WHERE session_id = ? "
-                    "ORDER BY created_at DESC LIMIT ?",
-                    (str(session_id), limit),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM reflections ORDER BY created_at DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
+            rows = conn.execute(sql + " ORDER BY id DESC LIMIT ?", (*params, limit)).fetchall()
             return [dict(r) for r in rows]
 
     def search_reflections(self, keyword: str, limit: int = 5) -> list[dict[str, Any]]:
@@ -968,6 +996,50 @@ class StructuredMemory:
             conn.commit()
             return cursor.lastrowid  # type: ignore[no-any-return]
 
+    def add_chat_turn(
+        self, user_msg: str, reply: str, *, session_id: str, character_id: str = "",
+        user_key: str = "", turn_id: str = "", importance: float = 0.0,
+        channel: str = "", emotion_tag: str = "",
+    ) -> bool:
+        """一轮一个事务；同一 turn_id 重试不重复写，任一行失败整轮回滚。"""
+        from uuid import uuid4
+
+        turn_id = turn_id or uuid4().hex
+        messages = [(role, text) for role, text in (("user", user_msg), ("assistant", reply)) if text]
+        if not messages:
+            return False
+        with self._conn(write=True) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                for role, content in messages:
+                    existing = conn.execute(
+                        "SELECT content FROM chat_history WHERE session_id = ? AND character_id = ? "
+                        "AND turn_id = ? AND role = ? LIMIT 1",
+                        (session_id, character_id, turn_id, role),
+                    ).fetchone()
+                    if existing:
+                        if existing["content"] != content:
+                            raise ValueError("turn_id already belongs to different message content")
+                        continue
+                    conn.execute(
+                        "INSERT INTO chat_history (role, content, emotion_tag, session_id, character_id, "
+                        "user_key, turn_id, importance, channel) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (role, content, emotion_tag, session_id, character_id, user_key,
+                         turn_id, float(importance or 0.0), channel),
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return True
+
+    def chat_turn_last_id(self, session_id: str, turn_id: str) -> int:
+        if not session_id or not turn_id:
+            return 0
+        with self._conn() as conn:
+            return int(conn.execute("SELECT COALESCE(MAX(id),0) FROM chat_history WHERE session_id=? AND turn_id=?",
+                                    (session_id, turn_id)).fetchone()[0])
+
     def get_recent_chats(self, n: int = 20) -> list[dict[str, Any]]:
         """获取最近 N 条聊天"""
         with self._conn() as conn:
@@ -985,105 +1057,27 @@ class StructuredMemory:
             return [dict(r) for r in rows]
 
     def get_chats_by_session_limit(
-        self, session_id: str, limit: int, character_id: str = ""
+        self, session_id: str, limit: int, character_id: str = "", through_id: int = 0,
     ) -> list[dict[str, Any]]:
-        """获取某会话最近 limit 条聊天（**时间正序**）。
+        """按会话、角色过滤后取最近 limit 行，按 id 返回写入正序。
 
-        ⚠️ 2026-09-21 重扫修复排序口径：`created_at` 是 ``CURRENT_TIMESTAMP``
-        （秒级精度）—— 用户消息与角色回复常落在同一秒，仅按时间排序时相对次序
-        不保证（"谁先说的"取决于扫描方向）。改为按 **`id`**（AUTOINCREMENT，
-        等于写入序）判序，时间仅作展示。
-
-        🔴 2026-09-22 二次根治（角色隔离真复发通道）：
-        旧实现在 ``character_id`` 非空时取 ``character_id = ? OR character_id = ''``
-        —— 兼容**迁移前无归属行**的善意条款，但存量数据**全部**无归属
-        （生产实测 154/154 空串）时该条件恒真 = 角色过滤整体失效：
-        切到角色 B 仍读到角色 A 的台词。且出站 assistant 行（主动消息/提醒/
-        追问）从未写归属，新数据同样落在 ``''`` 上，隔离永无生效之日。
-
-        现改为**两段式**：
-          ① 命中归属行（``character_id = ?``）；
-          ② 无归属行**按该会话当前绑定角色懒回填**后再判 —— 回填使存量行
-             一次性归位，此后不再依赖兼容条款。
-        回填仅在 ``character_id`` 非空且该会话确实绑定了该角色时发生；
-        无法判定归属的行（跨角色迁移、测试残留）保守**排除**而非全放行
-        —— 「宁缺毋串」优于"宁滥勿缺"。
+        空角色表示历史归属未知，不等于当前读取者。读取绝不更新历史归属；
+        只有独立历史证据才能支持显式迁移。未传角色的管理查询仍可查看全部行。
         """
         sql = "SELECT * FROM chat_history WHERE session_id = ?"
         params: list[Any] = [session_id]
         if character_id:
-            sql += " AND (character_id = ? OR character_id IS NULL OR character_id = '')"
+            sql += " AND character_id = ?"
             params.append(character_id)
+        if through_id:
+            sql += " AND id <= ?"
+            params.append(through_id)
         sql += " ORDER BY id DESC LIMIT ?"
         params.append(int(limit))
         with self._conn() as conn:
             rows = conn.execute(sql, tuple(params)).fetchall()
             out = [dict(r) for r in rows][::-1]
-        if character_id:
-            out = self._backfill_legacy_attribution(out, character_id)
         return out
-
-    def _backfill_legacy_attribution(
-        self, rows: list[dict[str, Any]], character_id: str
-    ) -> list[dict[str, Any]]:
-        """把无归属的存量行按当前绑定角色回填（幂等），并**过滤掉不属于该角色**的行。
-
-        判定规则（保守）：无归属行在"该会话当前绑定角色 == 查询角色"时视为
-        该角色的历史并回填；否则视为不可判定，**排除**。
-        由于调用方传的 ``character_id`` 正是该会话当前绑定角色，等价于：
-        空归属行只对"当前绑定角色"可见，对其它角色不可见 —— 这正是隔离的
-        预期语义（旧实现在所有角色下都可见）。
-
-        ⚠️ **不构成跨用户误归属**：本方法只处理**单次查询命中的行**，而查询
-        已按 ``session_id``（或 ``session_id IN (...)``）限定；一个会话键
-        恒属于一个用户。因此"按当前绑定角色回填"不会把 A 的历史归给 B。
-
-        🔴 2026-09-22 二次根治补：同时回填 ``user_key``。生产实测在归属空行
-        中另有 324/382 行 ``user_key`` 也为空 —— 该列是跨会话检索
-        （``get_cross_session_tail`` / ``user_key_from_session``）的归属键，
-        留空会让这部分历史在"跨会话尾巴"注入中**整体缺席**。
-        取值由 ``user_key_from_session(session_id)`` 推导（与写入路径同口径），
-        推导不出时留空而非填 session_id（宁缺毋串）。
-        """
-        legacy_ids: list[int] = []
-        user_key_fixes: list[tuple[str, int]] = []
-        kept: list[dict[str, Any]] = []
-        for row in rows:
-            cid = str(row.get("character_id") or "")
-            if cid:
-                if cid == character_id:
-                    kept.append(row)
-                continue
-            rid = int(row["id"])
-            legacy_ids.append(rid)
-            row["character_id"] = character_id
-            if not str(row.get("user_key") or ""):
-                derived = self.user_key_from_session(str(row.get("session_id") or ""))
-                if derived:
-                    row["user_key"] = derived
-                    user_key_fixes.append((derived, rid))
-            kept.append(row)
-        if legacy_ids:
-            try:
-                with self._conn(write=True) as conn:
-                    conn.executemany(
-                        "UPDATE chat_history SET character_id = ? WHERE id = ?",
-                        [(character_id, rid) for rid in legacy_ids],
-                    )
-                    if user_key_fixes:
-                        conn.executemany(
-                            "UPDATE chat_history SET user_key = ? WHERE id = ?",
-                            user_key_fixes,
-                        )
-                    conn.commit()
-                logger.info(
-                    "存量对话归属回填: session=%s character=%s rows=%d user_key=%d",
-                    rows[0].get("session_id") if rows else "",
-                    character_id, len(legacy_ids), len(user_key_fixes),
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.warning("存量对话归属回填失败（本次结果仍按回填后返回）: %s", e)
-        return kept
 
     def get_session_rows(
         self,
@@ -1091,12 +1085,7 @@ class StructuredMemory:
         limit: int = 8,
         character_id: str = "",
     ) -> list[dict[str, Any]]:
-        """多会话键取最近 limit 行（时间正序、按 id 判序）。
-
-        🔴 2026-09-22：与 `get_chats_by_session_limit` 同口径 —— 无归属存量行
-        按当前绑定角色懒回填后判定，非本角色的空归属行**排除**（旧 `OR ''`
-        条款在存量全空时使角色过滤整体失效）。
-        """
+        """多会话键取最近 limit 行；先按已知角色过滤，再按 id 截取，不认领未知行。"""
         forms = [str(s) for s in (session_ids or []) if str(s or "").strip()]
         if not forms:
             return []
@@ -1104,15 +1093,13 @@ class StructuredMemory:
         sql = f"SELECT * FROM chat_history WHERE session_id IN ({placeholders})"
         params: list[Any] = list(forms)
         if character_id:
-            sql += " AND (character_id = ? OR character_id IS NULL OR character_id = '')"
+            sql += " AND character_id = ?"
             params.append(character_id)
         sql += " ORDER BY id DESC LIMIT ?"
         params.append(int(limit))
         with self._conn() as conn:
             rows = conn.execute(sql, tuple(params)).fetchall()
         out = [dict(r) for r in rows][::-1]
-        if character_id:
-            out = self._backfill_legacy_attribution(out, character_id)
         return out
 
     def get_cross_session_tail(
@@ -1120,6 +1107,7 @@ class StructuredMemory:
         session_id: str,
         limit: int = 8,
         user_key: str | None = None,
+        character_id: str = "",
     ) -> list[str]:
         """跨会话尾巴：按**完整会话隔离键**取最近持久化消息。
 
@@ -1136,24 +1124,10 @@ class StructuredMemory:
                 forms.add(k)
         if not forms:
             return []
-        placeholders = ",".join("?" for _ in forms)
-        # 2026-09-22 块E：排序**一律按 `id`（写入序）** —— 与
-        # `_load_session_history`（2026-09-21 已改）同口径。旧实现
-        # `ORDER BY created_at DESC, id DESC` 以秒级时间戳为主键：同秒写入的
-        # 用户/助手消息取哪几条由 `id` 兜底，但**跨秒边界**时"最近 limit 条"
-        # 可能漏掉刚写入的消息（created_at 是写库时刻而非事件时刻，且 SQLite
-        # `CURRENT_TIMESTAMP` 只有秒精度）。项目铁律：排序与去重禁止再用
-        # 秒级 created_at 判序。
-        sql = (
-            "SELECT role, content FROM chat_history "
-            f"WHERE session_id IN ({placeholders}) "
-            "ORDER BY id DESC LIMIT ?"
-        )
-        with self._conn() as conn:
-            rows = conn.execute(sql, (*forms, limit)).fetchall()
+        rows = self.get_session_rows(sorted(forms), limit=limit, character_id=character_id)
         lines: list[str] = []
-        for r in reversed([dict(x) for x in rows]):
-            role = "用户" if r.get("role") == "user" else "助手"
+        for r in rows:
+            role = "用户" if r.get("role") == "user" else f"角色（{r.get('character_id') or '归属未知'}）"
             content = str(r.get("content") or "").strip()
             if not content:
                 continue
@@ -1164,21 +1138,65 @@ class StructuredMemory:
             lines.append(f"- {role}：{content}")
         return lines[-limit:]
 
+    def claim_extraction(self, session_id: str, character_id: str, limit: int = 40):
+        """数据库租约串行认领未处理来源，固定窗口不随LLM耗时滑动。"""
+        from uuid import uuid4
+
+        token = uuid4().hex
+        with self._conn(write=True) as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("INSERT OR IGNORE INTO memory_extraction_progress(session_id,character_id) VALUES (?,?)",
+                             (session_id, character_id))
+                row = conn.execute("SELECT * FROM memory_extraction_progress WHERE session_id=? AND character_id=?",
+                                   (session_id, character_id)).fetchone()
+                busy = conn.execute("SELECT ? != '' AND ? > datetime('now')", (row["claim_token"], row["lease_until"])).fetchone()[0]
+                if busy:
+                    conn.rollback()
+                    return None
+                rows = conn.execute(
+                    "SELECT * FROM chat_history WHERE session_id=? AND character_id=? AND id>? ORDER BY id LIMIT ?",
+                    (session_id, character_id, row["last_id"], limit),
+                ).fetchall()
+                if not rows:
+                    conn.rollback()
+                    return None
+                conn.execute("UPDATE memory_extraction_progress SET claim_token=?,lease_until=datetime('now','+10 minutes') "
+                             "WHERE session_id=? AND character_id=?", (token, session_id, character_id))
+                conn.commit()
+                return token, [dict(r) for r in rows]
+            except Exception:
+                conn.rollback()
+                raise
+
+    def finish_extraction(self, session_id: str, character_id: str, token: str, last_id: int, success: bool) -> None:
+        with self._conn(write=True) as conn:
+            conn.execute(
+                "UPDATE memory_extraction_progress SET last_id=CASE WHEN ? THEN MAX(last_id,?) ELSE last_id END, "
+                "claim_token='',lease_until='' WHERE session_id=? AND character_id=? AND claim_token=?",
+                (success, last_id, session_id, character_id, token),
+            )
+            conn.commit()
+
     def get_chats_today(self, session_id: str | None = None) -> list[dict[str, Any]]:
-        """获取「今天」（**本地日**）的聊天；session_id 非 None 时按会话隔离。"""
-        start, end = local_day_utc_bounds()
+        """获取本地今日聊天，委托同一日期窗口查询。"""
+        return self.get_chats_for_day(session_id=session_id)
+
+    def get_chats_for_day(self, day=None, session_id: str | None = None) -> list[dict[str, Any]]:
+        """按本地日取全量、仅真实发言行，按写入ID保序。"""
+        start, end = local_day_utc_bounds(day)
         with self._conn() as conn:
             if session_id is not None:
                 rows = conn.execute(
                     "SELECT * FROM chat_history "
                     "WHERE created_at >= ? AND created_at < ? AND session_id = ? "
-                    "ORDER BY created_at ASC",
+                    "AND role IN ('user', 'assistant') ORDER BY id ASC",
                     (start, end, str(session_id)),
                 ).fetchall()
             else:
                 rows = conn.execute(
                     "SELECT * FROM chat_history WHERE created_at >= ? AND created_at < ? "
-                    "ORDER BY created_at ASC",
+                    "AND role IN ('user', 'assistant') ORDER BY id ASC",
                     (start, end),
                 ).fetchall()
             return [dict(r) for r in rows]

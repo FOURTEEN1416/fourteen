@@ -12,12 +12,14 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from shisi.core.conversation_turn import HISTORY_RECENT_LIMIT
+
 
 @dataclass(frozen=True)
 class ContextBudget:
     knowledge_chars_max: int = 4000
     memory_items_max: int = 8
-    history_msgs_max: int = 20
+    history_msgs_max: int = HISTORY_RECENT_LIMIT
     tool_chars_max: int = 6000
     memory_chars_max: int = 2500
     chat_summary_chars_max: int = 800

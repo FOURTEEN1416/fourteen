@@ -1032,7 +1032,7 @@ def test_scheduler_does_not_commit_when_delivery_fails(monkeypatch, tmp_path):
     )
     h = _local_now().hour
     sched._quiet_hours = ((h + 2) % 24, (h + 3) % 24)  # 非静默，放行到投递层
-    sched._deliver = lambda message, session_key=None: False
+    sched._deliver = lambda message, session_key=None, character_id=None: False
 
     sched._check_ase()
 
@@ -1058,7 +1058,7 @@ def test_scheduler_commits_after_successful_delivery(monkeypatch, tmp_path):
     sched._quiet_hours = ((h + 2) % 24, (h + 3) % 24)
     sent: list[str] = []
 
-    def _deliver(message, session_key=None):
+    def _deliver(message, session_key=None, character_id=None):
         sent.append(message)
         return True
 

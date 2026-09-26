@@ -121,6 +121,7 @@ class ProactiveScheduler:
         self._daily_maintenance = daily_maintenance_func
         # LLM 主动决策（用户裁决：时机与内容由模型判断，无策略闸）
         self._llm_provider: Any | None = None
+        self._session_llm_resolver: Callable | None = None
         # 自问自答根治：主动消息送达后回写历史需要记忆服务
         self._memory: Any | None = None
         # AX 审查 B3：执行 LLM 自己给出的 wait_minutes（非硬编码日程表）
@@ -196,6 +197,9 @@ class ProactiveScheduler:
         """注入 LLM，供主动消息决策（P1：LLM 判时机与文案）。"""
         self._llm_provider = llm
 
+    def set_session_llm_resolver(self, resolver: Callable) -> None:
+        self._session_llm_resolver = resolver
+
     def set_memory(self, memory: Any | None) -> None:
         """注入记忆服务，供主动消息**送达后回写对话历史**（自问自答根治）。"""
         self._memory = memory
@@ -214,7 +218,9 @@ class ProactiveScheduler:
             pass
         return None
 
-    def _record_outbound(self, message: str, session_key: str | None) -> None:
+    def _record_outbound(
+        self, message: str, session_key: str | None, character_id: str | None = None,
+    ) -> None:
         """定向投递成功后把这句写进该会话历史（无会话键的广播无法归属，不写）。
 
         🔴 2026-09-22：必须带 **character_id**。出站 assistant 行此前无归属，
@@ -231,7 +237,7 @@ class ProactiveScheduler:
             record(
                 message=message,
                 session_id=str(session_key),
-                character_id=self._resolve_character_id(str(session_key)),
+                character_id=self._resolve_character_id(str(session_key)) if character_id is None else character_id,
                 channel="proactive",
             )
         except Exception as e:  # noqa: BLE001
@@ -249,7 +255,10 @@ class ProactiveScheduler:
             gf = getattr(deps, "gf", None)
         except Exception:  # noqa: BLE001
             gf = None
-        return character_resolver.resolve_character_id(session_key, gf)
+        cid = character_resolver.resolve_character_id(session_key, gf)
+        if character_resolver.is_builtin(cid):
+            return session_key_mod.character_suffix_of(session_key) or cid
+        return cid
 
     def _resolve_proactive_llm(self, eng: Any | None = None) -> Any | None:
         if self._llm_provider is not None:
@@ -938,24 +947,23 @@ class ProactiveScheduler:
                 rel = block.split("\n", 1)[0][:80]
         except Exception:  # noqa: BLE001
             rel = ""
-        # 人设：会话绑定角色优先。P1-48：旧实现读 eng._character_id——该属性
-        # 根本不存在（真实为 _knowledge_character_id），异常被吞后 persona 恒 ""
-        # 🔴 三轮根治：hub 引擎 `_knowledge_character_id` 现由工厂注入；
-        # 若仍空，回落 character_resolver（会话绑定角色）再回落 hub 键 `|char` 形态。
-        persona = ""
-        char_id = ""
-        try:
-            char_id = str(getattr(eng, "_knowledge_character_id", "") or "")
-            if not char_id:
-                char_id = character_resolver.resolve_character_id(str(user_key)) or ""
-            if not char_id or char_id == character_resolver.BUILTIN_CHARACTER_ID:
-                # hub 键 N:peer|char 形态（好友自选）优先于 default 兜底
-                char_id = session_key_mod.character_suffix_of(str(user_key)) or char_id
-            if not char_id:
-                char_id = str(profile.get("character_id") or "")
-            persona = load_persona_hint(char_id) if char_id else ""
-        except Exception:  # noqa: BLE001
-            persona = ""
+        # 身份来自当前会话绑定，不把缓存引擎首次创建时的人设当成当前角色。
+        char_id = self._resolve_character_id(str(user_key))
+        persona = load_persona_hint(char_id) if char_id else ""
+        recent = []
+        memory = self._resolve_memory()
+        getter = getattr(memory, "get_chat_context", None)
+        if getter is not None:
+            try:
+                recent, _ = getter(session_id=user_key, keep_recent=10, character_id=char_id, summarize=False)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("主动上下文读取失败 user=%s: %s", user_key, exc)
+        if recent:
+            last_user_message = next(
+                (str(row.get("content") or "") for row in reversed(recent) if row.get("role") == "user"), "",
+            )
+        elif str(getattr(eng, "_knowledge_character_id", "") or "") != char_id:
+            last_user_message = ""
         now = _local_now()
         quiet = None
         try:
@@ -970,6 +978,7 @@ class ProactiveScheduler:
             relationship_hint=rel,
             urgency_signal=urgency,
             persona_hint=persona,
+            recent_messages=recent,
             web_config=web_cfg,
             quiet_hours=quiet,
             # 🔴 2026-09-22 二次根治（块D 接地贯通）：补用户最后一句 + 注意力热度。
@@ -978,12 +987,15 @@ class ProactiveScheduler:
             last_user_message=last_user_message,
             response_rate=response_rate,
         )
-        llm = self._resolve_proactive_llm(eng)
+        llm = self._session_llm_resolver(user_key) if self._session_llm_resolver else self._resolve_proactive_llm(eng)
         if llm is None:
             logger.info("proactive LLM unavailable user=%s skip", user_key)
-            append_proactive_event(session_key=user_key, sent=False, reason="llm_unavailable")
+            append_proactive_event(session_key=user_key, sent=False, reason="llm_unavailable", character_id=char_id)
             return
         decision = decide_proactive(llm, ctx)
+        if char_id != self._resolve_character_id(str(user_key)):
+            append_proactive_event(session_key=user_key, sent=False, reason="character_changed", character_id=char_id)
+            return
         logger.info(
             "proactive LLM decision user=%s should=%s wait=%s reason=%s",
             user_key,
@@ -1000,6 +1012,7 @@ class ProactiveScheduler:
                 sent=False,
                 reason=str(decision.get("reason") or "llm_false"),
                 wait_minutes=decision.get("wait_minutes"),
+                character_id=char_id,
             )
             return
         message = sanitize_message(str(decision.get("message") or ""))
@@ -1009,9 +1022,10 @@ class ProactiveScheduler:
                 sent=False,
                 reason="empty_message_after_sanitize",
                 wait_minutes=decision.get("wait_minutes"),
+                character_id=char_id,
             )
             return
-        if self._deliver(message, session_key=user_key):
+        if self._deliver(message, session_key=user_key, character_id=char_id):
             if eng is not None and hasattr(eng, "commit_sent"):
                 # 注意：模块顶部已导入 contextlib。此处**禁止**再写函数内局部导入
                 # —— 局部导入会让该名在整个函数作用域被视为局部，任何在它
@@ -1031,6 +1045,7 @@ class ProactiveScheduler:
                 message=message,
                 reason=str(decision.get("reason") or ""),
                 wait_minutes=decision.get("wait_minutes"),
+                character_id=char_id,
             )
             logger.info("proactive LLM delivered user=%s %s", user_key, message[:40])
             if self._deliver_fail_counts.pop(str(user_key), None) is not None:
@@ -1057,6 +1072,7 @@ class ProactiveScheduler:
                 reason=f"deliver_failed_backoff_{backoff_min}m",
                 message=message[:80],
                 wait_minutes=decision.get("wait_minutes"),
+                character_id=char_id,
             )
 
     def set_delivery_loop(self, getter: Callable[[], Any]) -> None:
@@ -1070,7 +1086,7 @@ class ProactiveScheduler:
         self._delivery_loop_getter = getter
 
     def _run_blocking(self, coro_factory: Callable[[], Any]) -> Any:
-        """把协程桥到投递循环执行（无注入循环时退回独立循环）。"""
+        """桥到通道所属循环；无注入时用共享循环。等待确认完成后才允许记账。"""
         loop = None
         if self._delivery_loop_getter is not None:
             with contextlib.suppress(Exception):
@@ -1082,11 +1098,15 @@ class ProactiveScheduler:
                 running = None
             if running is not loop:
                 fut = asyncio.run_coroutine_threadsafe(coro_factory(), loop)
-                return fut.result(timeout=90)
+                return fut.result()
             raise RuntimeError("投递循环与当前运行循环相同，阻塞等待必死锁")
-        return asyncio.run(coro_factory())
+        from utils.async_utils import run_on_shared_loop
 
-    def _deliver(self, message: str, session_key: str | None = None) -> bool:
+        return run_on_shared_loop(coro_factory())
+
+    def _deliver(
+        self, message: str, session_key: str | None = None, character_id: str | None = None,
+    ) -> bool:
         """投递主动消息。session_key 非空时**定向**到该会话，否则广播（旧路径）。
 
         🔴 2026-09-22 二次根治：异常分支曾回落 `self._send(message)`（生产 =
@@ -1098,6 +1118,12 @@ class ProactiveScheduler:
         `_run_blocking` 的异常属基础设施故障，同样不能算送达），
         由调用方走失败退避；记账只由「投递成功」触发。
         """
+        if session_key:
+            current_character = self._resolve_character_id(str(session_key))
+            if character_id is not None and character_id != current_character:
+                logger.info("主动草稿角色已切换，取消投递 session=%s", session_key)
+                return False
+            character_id = current_character
         try:
             delivered = bool(
                 self._run_blocking(lambda: self._send_targeted(message, session_key))
@@ -1106,7 +1132,8 @@ class ProactiveScheduler:
             logger.error("主动消息投递失败（不记账、不扣配额）: %s", e)
             return False
         if delivered:
-            self._record_outbound(message, session_key)
+            # API 受理后只记录发起发送时的身份，不把已发送文字改归新角色。
+            self._record_outbound(message, session_key, character_id=character_id)
         return delivered
 
     @staticmethod
@@ -1210,7 +1237,7 @@ class ProactiveScheduler:
             if sm is None:
                 logger.info("memory curator: structured_memory 不可用，跳过")
                 return
-            result = run_curator_all_known(sm, llm=llm)
+            result = run_curator_all_known(sm, llm=llm, llm_resolver=self._session_llm_resolver)
             logger.info("memory curator done: %s", result.get("sessions"))
         except Exception as e:  # noqa: BLE001
             logger.warning("memory curator failed: %s", e)
@@ -1397,30 +1424,15 @@ class ProactiveScheduler:
         dedup_key = f"{today_key}|{user_key}|{label}"
         if dedup_key in self._important_dates_sent:
             return
+        char_id = self._resolve_character_id(str(user_key))
         wish = "生日快乐" if kind == "birthday" else "纪念日快乐"
         message = f"今天是个特别的日子（{names}）。{wish}呀！"
-        # LLM 按该用户绑定角色的口吻润色（失败用模板）
+        # 生成、发送与记账共用角色快照；不另建一套角色解析规则。
         try:
-            persona_hint = ""
-            try:
-                from api.deps import deps as _deps
+            from proactive.llm_proactive import load_persona_hint
 
-                gf = getattr(_deps, "gf", None)
-                char_id = (gf.get_user_character(user_key) if gf else "") or ""
-            except Exception:  # noqa: BLE001
-                char_id = ""
-            # 内置 default 也要读 persona.yaml（load_persona_hint 已支持），
-            # 但 hub 键 N:peer|char 形态优先（好友自选角色）
-            if not char_id or char_id == "default":
-                char_id = session_key_mod.character_suffix_of(str(user_key)) or char_id
-            if char_id:
-                try:
-                    from proactive.llm_proactive import load_persona_hint
-
-                    persona_hint = load_persona_hint(char_id) or ""
-                except Exception:  # noqa: BLE001
-                    persona_hint = ""
-            llm = self._resolve_proactive_llm()
+            persona_hint = load_persona_hint(char_id) or ""
+            llm = self._session_llm_resolver(user_key) if self._session_llm_resolver else self._resolve_proactive_llm()
             if llm is not None and hasattr(llm, "chat_sync"):
                 polished = llm.chat_sync(
                     query=(
@@ -1436,8 +1448,11 @@ class ProactiveScheduler:
         except Exception as e:  # noqa: BLE001
             logger.debug("[重要日期] LLM 润色失败，用模板: %s", e)
 
+        if char_id != self._resolve_character_id(str(user_key)):
+            logger.info("[重要日期] 生成期间角色切换，取消旧草稿 user=%s", user_key)
+            return
         logger.info("[重要日期] 命中 %s（user=%s），定向发送祝福", names, user_key)
-        if self._deliver(message, session_key=user_key):
+        if self._deliver(message, session_key=user_key, character_id=char_id):
             self._important_dates_sent.add(dedup_key)
             # 块E：当日幂等记录落盘（否则重启当日重复发同一祝福）
             self._persist_throttle_ledger()

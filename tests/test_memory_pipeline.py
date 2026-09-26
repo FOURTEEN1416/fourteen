@@ -43,8 +43,9 @@ class FakeVectorMemory:
     def store_chat_sync(self, user_msg: str, reply: str, metadata: dict | None = None) -> None:
         self.chats.append({"user": user_msg, "reply": reply, "metadata": metadata})
 
-    def store_text_sync(self, text: str, metadata: dict | None = None) -> None:
+    def store_text_sync(self, text: str, metadata: dict | None = None) -> str:
         self.texts.append({"text": text, "metadata": metadata})
+        return f"text-{len(self.texts)}"
 
     def store_emotion_log_sync(self, emotion: str, intensity: float, trigger: str = "") -> None:
         self.emotions.append({"emotion": emotion, "intensity": intensity, "trigger": trigger})
@@ -164,6 +165,12 @@ class FakeStructuredMemory:
     def add_chat(self, role: str, content: str, **kwargs) -> None:
         self.chats.append({"role": role, "content": content, **kwargs})
 
+    def add_chat_turn(self, user_msg, reply, **kwargs):
+        for role, text in (("user", user_msg), ("assistant", reply)):
+            if text:
+                self.add_chat(role, text, **kwargs)
+        return True
+
     def get_recent_chats(self, n: int = 10) -> list[dict]:
         return list(self.chats[-n:])
 
@@ -184,6 +191,9 @@ class FakeStructuredMemory:
         return self.get_chats_by_session_limit(session_id, limit=10_000)
 
     def get_chats_today(self) -> list[dict]:
+        return list(self.chats)
+
+    def get_chats_for_day(self, day=None) -> list[dict]:
         return list(self.chats)
 
     def add_fact(self, fact: str, category: str = "general", confidence: float = 0.5, source: str = "", user_key: str = "", **kwargs) -> int:
@@ -280,7 +290,7 @@ def test_mp_after_chat_does_not_extract_when_interval_not_met():
     mp, vm, sm = _make_pipeline(fact_extract_interval=10)
     result = mp.after_chat("我喜欢猫", "好的记住了")
     assert result["facts_extracted"] == 0
-    assert mp._chat_count_since_extract == 1
+    assert mp._chat_count_since_extract == {(mp.session_id, ""): 1}
 
 
 def test_mp_after_chat_triggers_fact_extraction():
@@ -289,7 +299,7 @@ def test_mp_after_chat_triggers_fact_extraction():
     mp.after_chat("我喜欢吃火锅", "记住了")
     # 第二次达到提取阈值，会启动后台线程；等待其完成
     time.sleep(0.3)
-    assert mp._chat_count_since_extract == 0
+    assert mp._chat_count_since_extract == {(mp.session_id, ""): 0}
     assert len(sm.facts) >= 1
 
 
@@ -320,8 +330,8 @@ def test_mp_retrieve_context_returns_expected_keys():
 def test_mp_retrieve_context_uses_structured_fallback():
     mp, vm, sm = _make_pipeline()
     mp._session_id = "N:wxid_t1"
-    sm.add_fact("用户喜欢猫", "preference", 0.9, user_key="wxid_t1")
-    ctx = mp.retrieve_context("猫")
+    sm.add_fact("用户喜欢猫", "preference", 0.9, user_key="N:wxid_t1")
+    ctx = mp.retrieve_context("猫", session_id="N:wxid_t1")
     assert "用户喜欢猫" in ctx["facts"]
 
 
@@ -492,7 +502,7 @@ def test_diary_summarizer_template_summary():
         {"role": "assistant", "content": "辛苦了"},
     ]
     summary = ds.summarize_day(chats)
-    assert "今日共" in summary
+    assert "当日共" in summary
     assert "工作" in summary
 
 

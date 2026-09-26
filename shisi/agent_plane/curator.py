@@ -44,7 +44,9 @@ def curate_facts_rule_based(facts: list[dict[str, Any]], *, dup_threshold: float
             continue
         hit = None
         for k in kept:
-            if bigram_overlap(text, str(k.get("fact") or k.get("content") or "")) >= dup_threshold:
+            from shisi.memory.legacy.structured_memory import StructuredMemory
+
+            if StructuredMemory.facts_near_duplicate(text, str(k.get("fact") or k.get("content") or "")):
                 hit = k
                 break
         if hit is not None:
@@ -96,21 +98,20 @@ def run_curator_for_session(
                 continue
             try:
                 if sm.delete_fact(int(fid), recycle=True, user_key=uk):
-                    pass
+                    archived += 1
             except Exception:  # noqa: BLE001
                 continue
         # B3/R3：near-dup 保留项在库侧强化（不是只改内存）
         import contextlib
 
+        merged_ids = {m.get("merged_into") for m in result["merged"]}
         for k in result["kept"]:
             kid = k.get("id")
-            if kid is None:
+            if kid is None or kid not in merged_ids:
                 continue
             if hasattr(sm, "update_fact_confidence"):
                 with contextlib.suppress(Exception):
-                    sm.update_fact_confidence(
-                        int(kid), min(1.0, float(k.get("confidence") or 0.7) + 0.05)
-                    )
+                    sm.update_fact_confidence(int(kid), float(k.get("confidence") or 0.7))
     summary = ""
     if llm is not None:
         try:
@@ -151,6 +152,7 @@ def run_curator_all_known(
     sm: Any,
     llm: Any = None,
     session_keys: list[str] | None = None,
+    *, llm_resolver=None,
 ) -> dict[str, Any]:
     keys = list(session_keys or [])
     if not keys and sm is not None:
@@ -171,5 +173,9 @@ def run_curator_all_known(
             logger.warning("curator list keys failed: %s", e)
     done = []
     for uk in keys:
-        done.append(run_curator_for_session(uk, sm=sm, llm=llm, apply=True))
+        try:
+            selected = llm_resolver(uk) if llm_resolver else llm
+        except Exception:
+            selected = None  # 无模型时只做确定性整理，绝不借用其他账号凭证
+        done.append(run_curator_for_session(uk, sm=sm, llm=selected, apply=True))
     return {"sessions": len(done), "results": done}

@@ -5,7 +5,7 @@
 
 - 投递是确定性代码，LLM 不参与 tick 级决策（LLM 判断，代码执行）；
 - 投递文案在投递前一刻由 LLM 按角色口吻生成（scallopbot 实践），
-  生成失败/超时兜底用户原话（用户原话提醒保持确定性）；
+  生成失败/超时明确引用用户设定的任务，不把用户原话冒充角色自述；
 - **豁免静默时段**：叫醒类提醒（如 06:00）恰恰落在 23-7 静默窗内，
   若复用主动消息的静默闸门，用户明确要求的提醒会被丢弃（2026-09-20
   「六点叫起床」事故的构成缺陷之一）；
@@ -40,36 +40,37 @@ class ReminderDeliveryTask:
         llm: Any = None,
         wechat_sender: Callable[[int, str, str], bool] | None = None,
         ws_sender: Callable[[str, str], bool] | None = None,
-        character_name: str = "",
         memory: Any | None = None,
-        character_resolver: Callable[[str], str] | None = None,
+        character_id_resolver: Callable[[str], str] | None = None,
+        llm_resolver: Callable | None = None,
     ):
         """Args:
         structured_memory: StructuredMemory 实例（get_due_reminders 等）。
-        llm: LLM gateway（投递文案生成；None 时直接用原文）。
+        llm: LLM gateway（投递文案生成；None 时引用用户任务）。
         wechat_sender: ``(owner_id, peer_wxid, text) -> bool`` 定向投递，
             由 api 装配层闭包持有 connector registry 注入。
         ws_sender: ``(session_key, text) -> bool`` websocket **定向**投递
             （2026-09-22 起按会话键定向，旧 ``(text)`` 广播签名废弃——
             广播会把 A 的提醒推给所有打开控制台的人）。
-        character_name: 兜底角色名（会话解析失败时用）。
-        memory: MemoryService（送达后回写对话历史；缺省则不回写）。
-        character_resolver: ``(session_key) -> 角色名``——多用户绑不同角色，
-            文案口吻按会话归属解析（旧实现装配时取全局单值，绑错角色口吻）。
+        memory: MemoryService（API 受理后回写历史；缺省则不回写）。
+        character_id_resolver: ``(session_key) -> 角色 id``，生成前只解析一次；
+            展示名从该 id 取得，不再独立解析第二份身份。
         """
         self._sm = structured_memory
         self._llm = llm
+        self._llm_resolver = llm_resolver
         self._wechat_sender = wechat_sender
         self._ws_sender = ws_sender
-        self._character_name = character_name
         self._memory = memory
-        self._character_resolver = character_resolver
+        self._character_id_resolver = character_id_resolver
         # 节流基准锚在「已过一整个间隔」而非 0：Linux 上 time.monotonic() 以**开机**为起点，
         # 新启动的宿主（如 CI runner，开机 <300s）会让首 tick 误判为「刚清理过」而跳过批量 GC。
         self._last_intent_gc = time.monotonic() - _INTENT_GC_INTERVAL_SECONDS
 
     def __call__(self) -> None:
-        asyncio.run(self._run_once())
+        from utils.async_utils import run_on_shared_loop
+
+        run_on_shared_loop(self._run_once())
 
     async def _run_once(self) -> None:
         try:
@@ -91,8 +92,9 @@ class ReminderDeliveryTask:
         await self._maybe_gc_intents()
 
     async def _deliver(self, reminder: dict[str, Any]) -> None:
-        text = await self._compose_text(reminder)
-        session_key = str(reminder.get("session_key") or "")
+        session_key = str(reminder.get("session_key") or "").strip()
+        character_id = self._resolve_character_id(session_key)
+        text = await self._compose_text(reminder, character_id=character_id)
         delivered = await self._send_to_session(session_key, text)
         if delivered:
             # 自问自答根治：她主动说的话必须进历史，否则下一轮她自己不记得提醒过
@@ -104,7 +106,7 @@ class ReminderDeliveryTask:
                         recorder,
                         message=text,
                         session_id=session_key,
-                        character_id=self._resolve_character_id(session_key),
+                        character_id=character_id,
                         channel="reminder",
                     )
                 except Exception as e:  # noqa: BLE001
@@ -160,28 +162,10 @@ class ReminderDeliveryTask:
                 return False
         return False
 
-    def _resolve_character_name(self, session_key: str) -> str:
-        """按会话解析角色名（多用户绑不同角色）。
-
-        🔴 2026-09-22 二次根治：解析失败不再回落 `self._character_name`
-        （装配时取的**全局单值**）—— 多用户绑不同角色时，回落到全局 = 用
-        别人的角色口吻说话。解析不到即返回空串（调用方留空，宁缺毋串）。
-        """
-        if self._character_resolver is not None:
-            try:
-                name = str(self._character_resolver(session_key) or "").strip()
-                if name:
-                    return name
-            except Exception as e:  # noqa: BLE001
-                logger.debug("会话角色名解析失败 session=%s: %s", session_key, e)
-        # 无 resolver 时（单角色部署/测试夹具）才用装配兜底名
-        if self._character_resolver is None:
-            return str(self._character_name or "").strip()
-        return ""
-
-    @staticmethod
-    def _resolve_character_id(session_key: str) -> str:
-        """按会话解析**角色 id**（回写历史归属用；唯一 owner utils.character_resolver）。"""
+    def _resolve_character_id(self, session_key: str) -> str:
+        """生成与落库共享同一角色快照；注入解析失败不冒认其他角色。"""
+        if self._character_id_resolver is not None:
+            return str(self._character_id_resolver(session_key) or "").strip()
         try:
             from api.deps import deps
 
@@ -190,20 +174,24 @@ class ReminderDeliveryTask:
             gf = None
         return character_resolver.resolve_character_id(session_key, gf)
 
-    async def _compose_text(self, reminder: dict[str, Any]) -> str:
-        """投递文案：LLM 按口吻生成一句（投递前一刻生成）；失败兜底用户原话。"""
-        content = str(reminder.get("content") or "").strip() or "提醒时间到了"
-        if self._llm is None:
-            return content
-        # 🔴 2026-09-22 二次根治：条件判据原用 `self._character_name`（装配时
-        # 取的**全局单值**）而非解析结果 —— resolver 存在但解析失败时会注入
-        # 全局角色名（多用户串口吻）。现改为**按解析结果**定夺：解析到角色名
-        # 才注入，解析不到则整段留空（宁缺毋串）。
-        resolved_name = self._resolve_character_name(str(reminder.get("session_key") or ""))
+    async def _compose_text(self, reminder: dict[str, Any], *, character_id: str) -> str:
+        """按固定身份生成；降级时明确引用用户设定的任务，不冒充角色自述。"""
+        content = str(reminder.get("content") or "").strip()
+        fallback = f"你设定的提醒时间到了：「{content}」。" if content else "你设定的提醒时间到了。"
+        llm = self._llm
+        if self._llm_resolver is not None:
+            try:
+                llm = await self._llm_resolver(str(reminder.get("session_key") or ""))
+            except Exception:
+                logger.warning("提醒模型凭证不可用，使用无模型引用文案")
+                return fallback
+        if llm is None:
+            return fallback
+        resolved_name = character_resolver.display_name(character_id) if character_id else ""
         who = f"（你是{resolved_name}）" if resolved_name else ""
         try:
             reply = await asyncio.wait_for(
-                self._llm.chat(
+                llm.chat(
                     query=(
                         f"设定的提醒到时间了。请用一句符合你口吻的中文提醒用户：{content}。"
                         "只输出这一句话本身，不要解释、不要动作神态、不要换行。"
@@ -218,10 +206,10 @@ class ReminderDeliveryTask:
                 timeout=8.0,
             )
         except Exception as e:  # noqa: BLE001
-            logger.warning("[reminder] 文案生成失败，用原文兜底: %s", e)
-            return content
+            logger.warning("[reminder] 文案生成失败，引用用户任务兜底: %s", e)
+            return fallback
         cleaned = sanitize_message(str(reply or "").strip())
-        return cleaned or content
+        return cleaned or fallback
 
     async def _maybe_gc_intents(self) -> None:
         """节流清理过期澄清任务（失败不影响投递主流程）。

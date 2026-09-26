@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from shisi.config import get_config
+from shisi.core.conversation_turn import HISTORY_RECENT_LIMIT
 from utils.local_time import now_local
 
 from ._legacy_diary_summarizer import DiarySummarizer
@@ -229,9 +230,14 @@ class MemoryPipeline:
             structured_memory = StructuredMemory()
         self.vm = vector_memory
         self.sm = structured_memory
+        invalidator = getattr(self.vm, "invalidate_fact_derivatives", None)
+        if invalidator is not None:
+            self.sm._derived_memory_invalidator = invalidator
 
         # LLM 网关
         self._llm = llm_gateway
+        self._session_llm_resolver = None
+        self._archive_lock = threading.Lock()
 
         # 三层记忆
         self.working = WorkingMemory(limit=working_limit)
@@ -294,7 +300,7 @@ class MemoryPipeline:
         # 会话跟踪
         self._session_id: str = ""
         self._last_daily_summary: str | None = ""
-        self._chat_count_since_extract: int = 0
+        self._chat_count_since_extract: dict[tuple[str, str], int] = {}
         self._chat_count_lock = threading.Lock()  # 保护 _chat_count_since_extract 并发读写
 
         # 后台任务线程池：避免每条消息都创建/销毁线程
@@ -393,25 +399,24 @@ class MemoryPipeline:
         assistant 行没有身份，同会话切换角色后新角色会把上一角色的回复当成
         自己说过的（"分不清谁说的"的存储层根因）。
         """
+        from uuid import uuid4
+
         effective_session = session_id or self.session_id
-        user_key = _user_key_from_session(effective_session)
-        store_assistant = not _is_system_error_reply(reply)
-        common = dict(
-            character_id=str(character_id or ""),
-            user_key=user_key,
-            turn_id=str(turn_id or ""),
-            importance=float(importance or 0.0),
-            channel=str(channel or ""),
-        )
+        turn_id = turn_id or uuid4().hex
+        stored_reply = "" if _is_system_error_reply(reply) else reply
         try:
-            self.sm.add_chat("user", user_msg, emotion_tag=emotion_tag,
-                             session_id=effective_session, **common)
-            if store_assistant:
-                self.sm.add_chat("assistant", reply, emotion_tag=emotion_tag,
-                                 session_id=effective_session, **common)
-            self.working.add("user", user_msg, emotion_tag, 0.5, session_id=effective_session)
-            if store_assistant:
-                self.working.add("assistant", reply, emotion_tag, 0.5, session_id=effective_session)
+            stored = self.sm.add_chat_turn(
+                user_msg, stored_reply, session_id=effective_session,
+                emotion_tag=emotion_tag, character_id=character_id,
+                user_key=_user_key_from_session(effective_session), turn_id=turn_id,
+                importance=importance, channel=channel,
+            )
+            if not stored:
+                return False
+            for role, text in (("user", user_msg), ("assistant", stored_reply)):
+                if text:
+                    self.working.add(role, text, emotion_tag, importance, session_id=effective_session,
+                                     character_id=character_id, turn_id=turn_id)
             return True
         except Exception as e:  # noqa: BLE001
             logger.warning("write_chat_history_sync failed: %s", e)
@@ -459,8 +464,8 @@ class MemoryPipeline:
                 session_id=effective_session, **common,
             )
             self.working.add(
-                "assistant", text, emotion_tag, 0.5,
-                session_id=effective_session,
+                "assistant", text, emotion_tag, importance,
+                session_id=effective_session, character_id=character_id, turn_id=turn_id,
             )
             return True
         except Exception as e:  # noqa: BLE001
@@ -510,65 +515,40 @@ class MemoryPipeline:
             logger.debug("Late-night importance boost failed: %s", e)
 
         # 2. 存储到结构化记忆（B-a：若 orchestrator 已同步写过则跳过，防双插）
-        store_assistant = not _is_system_error_reply(reply)
-        if not history_already_written:
-            try:
-                common = dict(
-                    character_id=str(character_id or ""),
-                    user_key=user_key,
-                    turn_id=str(turn_id or ""),
-                    importance=float(importance or 0.0),
-                    channel=str(channel or ""),
-                )
-                self.sm.add_chat("user", user_msg, emotion_tag=emotion_tag,
-                                 session_id=effective_session, **common)
-                if store_assistant:
-                    self.sm.add_chat("assistant", reply, emotion_tag=emotion_tag,
-                                     session_id=effective_session, **common)
-                result["stored_chat"] = True
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Failed to store chat: %s", e)
-
-            # 3. 存储到工作记忆（P0-4-4：按会话分桶，禁止全员混写一桶）
-            self.working.add("user", user_msg, emotion_tag, importance, session_id=effective_session)
-            if store_assistant:
-                self.working.add("assistant", reply, emotion_tag, importance, session_id=effective_session)
-        else:
-            result["stored_chat"] = True
+        store_assistant = bool(reply) and not _is_system_error_reply(reply)
+        result["stored_chat"] = history_already_written or self.write_chat_history_sync(
+            user_msg, reply, emotion_tag=emotion_tag, session_id=effective_session,
+            character_id=character_id, turn_id=turn_id, importance=importance, channel=channel,
+        )
+        if not result["stored_chat"]:
+            return result
 
         # B-a：chat_history 两行已在上方**同步**写入（即使 after_chat 整体被
         # 提交到后台线程，orchestrator 会先调 write_chat_history_sync 保证返回前可见）。
 
-        # 4. 存储到向量库（线程池异步执行，不阻塞主流程）
+        # after_chat 本身已由编排器后台执行；这里等待真实存储回执，不把入队当成功。
         if store_assistant:
-            self._executor.submit(
-                self.vm.store_chat_sync,
-                user_msg,
-                reply,
-                {
-                    "emotion": emotion_tag,
-                    "session_id": effective_session,
-                    "importance": importance,
-                },
-            )
-            result["stored_vector"] = True  # 乐观标记，错误在内部日志
+            try:
+                result["stored_vector"] = bool(self.vm.store_chat_sync(user_msg, reply, {
+                    "emotion": emotion_tag, "session_id": effective_session, "user_key": user_key,
+                    "character_id": character_id, "turn_id": turn_id, "importance": importance,
+                }))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Chat vector write failed: %s", e)
 
         # 5. 事实提取（每 N 条对话触发）
         # 注意：所有对 _chat_count_since_extract 的操作必须在锁保护下完成
         # 包括读取、递增、重置，防止竞态条件导致计数不准确
+        extraction_key = (effective_session, character_id)
         with self._chat_count_lock:
-            self._chat_count_since_extract += 1
-            should_extract = self._chat_count_since_extract >= self._config.fact_extract_interval
-            if should_extract:
-                self._chat_count_since_extract = 0
-                # 事实提取操作也在锁保护下决定是否执行
-                # 释放锁后再执行实际提取，避免长时间持有锁
-                needs_extraction = True
-            else:
-                needs_extraction = False
+            count = self._chat_count_since_extract.get(extraction_key, 0) + 1
+            needs_extraction = count >= self._config.fact_extract_interval
+            self._chat_count_since_extract[extraction_key] = 0 if needs_extraction else count
 
         if needs_extraction:
-            self._executor.submit(self._do_fact_extraction, effective_session)
+            from contextvars import copy_context
+
+            self._executor.submit(copy_context().run, self._do_fact_extraction, effective_session, character_id)
             result["facts_extracted"] = 0  # 后台异步提取中，具体数量由线程日志记录
 
         # 6. 情绪记录
@@ -583,10 +563,9 @@ class MemoryPipeline:
 
         # 8. 归档检查（只归档本会话桶）
         if self.working.should_archive(
-            self._config.episodic_archive_trigger, session_id=effective_session
+            self._config.episodic_archive_trigger, session_id=effective_session, character_id=character_id,
         ):
-            self._archive_working_memory(session_id=effective_session)
-            result["archived"] = True
+            result["archived"] = self._archive_working_memory(session_id=effective_session, character_id=character_id)
 
         return result
 
@@ -595,6 +574,7 @@ class MemoryPipeline:
         query: str,
         session_id: str = "",
         top_k: int = 5,
+        character_id: str = "",
     ) -> dict[str, Any]:
         """
         检索记忆上下文 — 并行检索三层记忆，**全部按会话/user_key 隔离**。
@@ -602,6 +582,7 @@ class MemoryPipeline:
         2026-09-21 生产串台修复：旧实现 working/episodic/semantic/pending/
         reflections 均无用户过滤，多用户并发时会把他人事实/回忆注入当前 prompt。
         """
+        session_id = str(session_id or "").strip()
         uk = _user_key_from_session(session_id) if session_id else ""
         context = {  # type: ignore[var-annotated]
             "working": [],
@@ -610,12 +591,14 @@ class MemoryPipeline:
             "facts": [],
             "reflections": [],
         }
+        # 没有可信会话就没有私人上下文；不得将缺省值转换成全库检索。
+        if not session_id:
+            return context
 
         # 1. 工作记忆：分桶后直接按会话取；桶空回落 DB 会话历史
         try:
             if session_id:
-                bucket = self.working.get_recent(n=10, session_id=session_id)
-                context["working"] = bucket or self._load_session_history(session_id, limit=10)
+                context["working"] = self._load_session_history(session_id, limit=10, character_id=character_id)
             else:
                 context["working"] = []
         except Exception as e:  # noqa: BLE001
@@ -626,7 +609,7 @@ class MemoryPipeline:
         start_episodic = time.perf_counter()
         try:
             episodic_results = self.episodic.search(
-                query, top_k=top_k, session_id=session_id or None
+                query, top_k=top_k, session_id=session_id, character_id=character_id
             )
             context["episodic"] = episodic_results
         except Exception as e:  # noqa: BLE001
@@ -639,7 +622,7 @@ class MemoryPipeline:
             semantic_results = self.semantic.search(
                 query,
                 top_k=top_k,
-                user_key=uk if session_id else None,
+                user_key=uk,
             )
             context["semantic"] = semantic_results.get("structured", [])
             context["facts"] = [
@@ -672,7 +655,7 @@ class MemoryPipeline:
         # 4. 记忆反思洞察 — 按会话过滤
         try:
             context["reflections"] = self.reflection.get_insights(
-                query=query, top_k=3, session_id=session_id or None
+                query=query, top_k=3, session_id=session_id, character_id=character_id
             )
         except Exception as e:  # noqa: BLE001
             logger.debug("Failed to get reflections: %s", e)
@@ -680,10 +663,10 @@ class MemoryPipeline:
 
         return context
 
-    def get_recent_context(self, n: int = 3, session_id: str = "") -> str:
+    def get_recent_context(self, n: int = 3, session_id: str = "", character_id: str = "") -> str:
         """获取最近对话上下文文本（会话隔离，2026-09-20：改读 DB 真源）"""
         sess = session_id or self.working.session_id
-        recent = self._load_session_history(sess, limit=max(n, 6))[-n:] if sess else []
+        recent = self._load_session_history(sess, limit=max(n, 6), character_id=character_id)[-n:] if sess else []
         return "\n".join(
             f"{m.get('role', '?')}: {m.get('content', '')}" for m in recent
         )
@@ -702,22 +685,34 @@ class MemoryPipeline:
             self._apply_forgetting()
 
             # 2. 生成每日摘要 — 按会话分桶，禁止全员混写（2026-09-21 隔离）
-            date_str = now_local().strftime("%Y-%m-%d")
-            today_chats = self.sm.get_chats_today()
-            if not today_chats:
-                logger.info("No chats today, skipping daily maintenance")
-                return None
-            buckets: dict[str, list[dict[str, Any]]] = {}
-            for c in today_chats:
+            from datetime import timedelta
+
+            from utils.llm_bridge import request_llm
+
+            day = now_local() - timedelta(days=1)
+            date_str = day.strftime("%Y-%m-%d")
+            day_chats = self.sm.get_chats_for_day(day)
+            buckets: dict[tuple[str, str], list[dict[str, Any]]] = {}
+            for c in day_chats:
                 sid = str(c.get("session_id") or "")
-                buckets.setdefault(sid, []).append(c)
+                cid = str(c.get("character_id") or "")
+                if sid:
+                    buckets.setdefault((sid, cid), []).append(c)
             last_summary = None
-            for sid, chats in buckets.items():
-                uk = _user_key_from_session(sid) if sid else ""
-                summary = self.ds.summarize_day(chats)
-                diary_key = f"{uk}|{date_str}" if uk else date_str
-                self.ds.save_summary(diary_key, summary)
-                last_summary = summary
+            for (sid, cid), chats in buckets.items():
+                try:
+                    selected = self._session_llm_resolver(sid) if self._session_llm_resolver else self._llm
+                except Exception:
+                    logger.warning("日记账号模型不可用，跳过该账号而不影响其他用户 session=%s", sid)
+                    continue
+                token = request_llm.set(selected)
+                try:
+                    summary = self.ds.summarize_day(chats)
+                    diary_key = f"{sid}|{cid or 'unknown'}|{date_str}"
+                    self.ds.save_summary(diary_key, summary)
+                    last_summary = summary
+                finally:
+                    request_llm.reset(token)
             self._last_daily_summary = last_summary
 
             # 3. 清理低置信度事实
@@ -733,9 +728,9 @@ class MemoryPipeline:
     def get_chat_context(
         self,
         session_id: str = "",
-        keep_recent: int = 50,
-        summary_trigger: int = 80,
+        keep_recent: int = HISTORY_RECENT_LIMIT,
         character_id: str = "",
+        summarize: bool = True,
     ):
         # 2026-09-20 根因修复：对话上下文的唯一真源改为**持久化 chat_history 表**，
         # 不再读全局 RAM deque。旧实现三重缺陷（生产实证 2026-09-20）：
@@ -746,24 +741,26 @@ class MemoryPipeline:
         # ③ 历史裸形态遗留：owner 会话不再并入裸 peer 历史（2026-09-21）。
         # working deque 保留给后台归档/情景记忆任务，不再承担上下文供给。
         sess = session_id or self.working.session_id
-        messages = self._load_session_history(sess, limit=keep_recent + 40, character_id=character_id)
+        messages = self._load_session_history(sess, limit=max(90, keep_recent + 40), character_id=character_id)
         if not messages:
             return [], ""
+        if not summarize:
+            return messages[-keep_recent:], ""
         return self.summarizer.get_chat_context(
             messages,
             session_id=sess,
             keep_recent=keep_recent,
-            summary_trigger=summary_trigger,
+            character_id=character_id,
         )
 
-    def get_cross_session_tail(self, session_id: str = "", limit: int = 8) -> list[str]:
+    def get_cross_session_tail(self, session_id: str = "", limit: int = 8, character_id: str = "") -> list[str]:
         """B-d：跨会话尾巴（delegate structured_memory）。"""
         sess = session_id or self.working.session_id
         sm = self.sm
         if sm is None or not hasattr(sm, "get_cross_session_tail"):
             return []
         try:
-            return sm.get_cross_session_tail(sess, limit=limit) or []
+            return sm.get_cross_session_tail(sess, limit=limit, character_id=character_id) or []
         except Exception as e:  # noqa: BLE001
             logger.debug("get_cross_session_tail failed: %s", e)
             return []
@@ -827,6 +824,7 @@ class MemoryPipeline:
         n_chats: int = 10,
         affinity_level: int = 0,
         session_id: str = "",
+        character_id: str = "",
     ) -> dict[str, Any]:
         """V1兼容：获取当前对话需要的记忆上下文
 
@@ -854,7 +852,7 @@ class MemoryPipeline:
 
         try:
             if sess:
-                context["recent_chats"] = self._load_session_history(sess, limit=n_chats)
+                context["recent_chats"] = self._load_session_history(sess, limit=n_chats, character_id=character_id)
             else:
                 context["recent_chats"] = []
         except Exception as e:  # noqa: BLE001
@@ -910,14 +908,11 @@ class MemoryPipeline:
             uk = _user_key_from_session(sess) if sess else ""
             date_str = now_local().strftime("%Y-%m-%d")
             summaries = self.ds.get_all_summaries()
-            if summaries:
-                diary_key = f"{uk}|{date_str}" if uk else date_str
-                # 同时兼容未加前缀的旧全局键（仅当无会话归属时）
-                context["today_summary"] = summaries.get(diary_key, "") or (
-                    summaries.get(date_str, "") if not uk else ""
-                )
-                trend = self.ds.detect_mood_trend(summaries)
-                context["emotion_trend"] = trend
+            if summaries and uk:
+                prefix = f"{uk}|{character_id or 'unknown'}|"
+                scoped = {k: v for k, v in summaries.items() if k.startswith(prefix)}
+                context["today_summary"] = scoped.get(prefix + date_str, "")
+                context["emotion_trend"] = self.ds.detect_mood_trend(scoped)
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to detect trend: %s", e)
 
@@ -1009,7 +1004,29 @@ class MemoryPipeline:
 
     # ── 内部方法 ──────────────────────────────────────────
 
-    def _do_fact_extraction(self, session_id: str) -> int:
+    def _do_fact_extraction(self, session_id: str, character_id: str = "") -> int:
+        """按数据库水位认领来源；旧适配器才回落_load_session_history。"""
+        if not session_id or not getattr(self._config, "extraction_enabled", True):
+            return 0
+        claim = getattr(self.sm, "claim_extraction", None)
+        if claim is None:
+            return self._extract_fact_snapshot(session_id, character_id)
+        total = 0
+        while claimed := claim(session_id, character_id):
+            token, rows = claimed
+            success = False
+            try:
+                result = self._extract_fact_snapshot(session_id, character_id, rows)
+                success = result >= 0
+                if success:
+                    total += result
+            finally:
+                self.sm.finish_extraction(session_id, character_id, token, rows[-1]["id"], success)
+            if not success:
+                break
+        return total
+
+    def _extract_fact_snapshot(self, session_id: str, character_id: str = "", source_rows=None) -> int:
         """执行事实提取（V1 FactExtractor + V2 ConflictDetector）
 
         集成选择性记忆：通过 should_store_as_fact 过滤敷衍消息，
@@ -1024,7 +1041,7 @@ class MemoryPipeline:
         try:
             # 隔离：只抽取**本会话**消息。旧实现读全局 get_recent_chats(10)，
             # 多用户并发时会把他人消息提取后写进当前 user_key（违反隔离硬约束）。
-            recent = self._load_session_history(session_id, limit=10) if session_id else []
+            recent = source_rows if source_rows is not None else self._load_session_history(session_id, limit=40, character_id=character_id)
             # 选择性记忆：过滤掉敷衍且无情感的消息
             # 2026-09-20 修复：该 now 会被传入 should_store_as_fact → _is_late_night，
             # 属墙钟判定，须用本地时间（原先 UTC 使深夜规则整体错位 8 小时）。
@@ -1041,6 +1058,9 @@ class MemoryPipeline:
             deduped = FactExtractor.deduplicate(facts)
 
             for fact in deduped:
+                deleted = getattr(self.sm, "is_deleted_source", None)
+                if source_rows and deleted and deleted(fact["fact"], _uk, int(source_rows[-1]["id"])):
+                    continue
                 # 选择性记忆：对提取出的事实文本再次校验（防止规则模式误提取敷衍词）
                 if not self.should_store_as_fact(fact.get("fact", ""), now):
                     continue
@@ -1051,12 +1071,8 @@ class MemoryPipeline:
                     user_key=_uk,
                 )
                 if conflict:
-                    existing_fact = conflict.get("existing_fact", "")
-                    logger.debug(
-                        "Fact conflict detected: new=%s vs existing=%s",
-                        fact["fact"][:30], existing_fact[:30],
-                    )
-                    continue
+                    # 近邻只是待核查候选，不是矛盾结论，尤其不能丢弃用户的新更正。
+                    logger.debug("相似事实候选保留，等待明确更正工具处理 user=%s", _uk)
 
                 # B-b：near-dup 由 add_fact 内部 UPDATE 强化，不再「查到就 continue」
                 # （旧逻辑 search_facts 任一命中即跳过 → 重复事实永不 reinforce）。
@@ -1074,68 +1090,59 @@ class MemoryPipeline:
                     fact.get("source", ""),
                     user_key=_uk,
                     topics=topics_list,
+                    source_last_id=int(source_rows[-1]["id"]) if source_rows else None,
                 ):
                     count += 1
+                else:
+                    return -1
 
         except Exception as e:  # noqa: BLE001
             logger.warning("Fact extraction failed: %s", e)
+            return -1
 
         # 记忆反思：事实足够时生成更高层洞察
         if count > 0:
             try:
                 facts = self.semantic.get_facts(limit=20, user_key=_user_key_from_session(session_id))
                 episodes = self.episodic.search(
-                    "", top_k=3, session_id=session_id or None
+                    "", top_k=3, session_id=session_id, character_id=character_id
                 )
                 self.reflection.maybe_reflect(
-                    facts=[{"fact": f.get("fact", ""), "category": f.get("category", "general")} for f in facts],
+                    facts=facts,
                     episodes=episodes,
-                    session_id=session_id,
+                    session_id=session_id, character_id=character_id,
                 )
             except Exception as e:  # noqa: BLE001
                 logger.debug("Reflection trigger failed: %s", e)
 
         return count
 
-    def _archive_working_memory(self, session_id: str = "") -> None:
-        """归档工作记忆到情景记忆（P0-4-4：只取本会话桶，不再全员混档）"""
+    def _archive_working_memory(self, session_id: str = "", character_id: str = "") -> bool:
+        """成功回执后只确认该角色快照，不清掉并发追加的消息。"""
+        with self._archive_lock:
+            return self._archive_snapshot(session_id, character_id)
+
+    def _archive_snapshot(self, session_id: str, character_id: str) -> bool:
         sid = str(session_id or "") or self.working.session_id
-        messages = self.working.get_for_archive(session_id=sid)
+        messages = self.working.get_for_archive(session_id=sid, character_id=character_id)
         if not messages:
-            return
-
-        summary = ""
-        if self._llm and callable(self._llm):
-            try:
-                messages_for_summary = [
-                    {"role": m.get("role", "user"),
-                     "content": m.get("content", "")}
-                    for m in messages
-                ]
-                # 复用后台线程池执行 LLM 摘要，避免阻塞主线程
-                future = self._executor.submit(
-                    self.ds._summarize_with_llm, messages_for_summary
-                )
-                summary = future.result(timeout=30) or ""
-            except Exception as e:  # noqa: BLE001
-                logger.debug("Summary generation failed: %s", e)
-
-        avg_importance = (
-            sum(m.get("importance", 0.5) for m in messages) / len(messages)
-        )
-
+            return False
+        summary = self.summarizer._summarize(messages)
+        avg_importance = sum(m.get("importance", 0.5) for m in messages) / len(messages)
         try:
-            self.episodic.store_episode(
-                messages,
-                summary=summary,
-                importance=avg_importance,
-                session_id=sid,
+            archived = self.episodic.store_episode(
+                messages, summary=summary, importance=avg_importance,
+                session_id=sid, character_id=character_id,
             )
-            # 仅在归档成功后清空工作记忆（防止数据丢失）
-            self.working.clear(session_id=sid)
+            if not archived:
+                logger.warning("归档未获成功回执，保留工作记忆 session=%s", sid)
+                return False
+            self.working.acknowledge_archive(messages, session_id=sid, character_id=character_id)
             logger.info("Working memory archived: %d messages", len(messages))
+            return True
         except Exception as e:  # noqa: BLE001
             logger.error("归档工作记忆失败，保留数据: %s", e)
+            return False
 
     def _cleanup_low_confidence_facts(self) -> None:
         """分批清理低置信度事实（防止大量删除阻塞）"""

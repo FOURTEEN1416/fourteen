@@ -5,9 +5,9 @@
 被 shisi/application/memory_service.py 与 tests/test_memory*.py 深度引用。
 **不要按字面意思当作"待删除"处理。**
 """
+from ._legacy_diary_summarizer import DiarySummarizer
 from ._legacy_working_memory import WorkingMemory
 from .conflict_detector import ConflictDetector
-from .diary_summarizer import DiarySummarizer
 from .episodic_memory import EpisodicMemory
 from .fact_extractor import FactExtractor
 from .forgetting_manager import ForgettingManager

@@ -338,7 +338,7 @@ class MentalHealthScreener:
 ⚠️ 若检测到自伤风险，recommendation必须包含24小时心理援助热线（全国统一12356或北京24h线010-82951332）"""
 
         try:
-            reply = await self._llm.chat(prompt, system="你是心理健康筛查助手，基于DSM-5标准。")
+            reply = await self._llm.chat(prompt, system_prompt="你是心理健康筛查助手，基于DSM-5标准。")
             import json as _json
             result = _json.loads(reply) if isinstance(reply, str) else reply
 

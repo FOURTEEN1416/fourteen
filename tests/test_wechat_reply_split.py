@@ -73,6 +73,86 @@ def test_no_newlines_in_any_segment():
         assert "\n" not in seg
 
 
+def test_partial_reply_records_only_api_accepted_segments(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from wechat_direct import wechat_connector as wc
+
+    monkeypatch.setattr(wc, "CONTEXT_TOKENS_PATH", str(tmp_path / "ctx.json"))
+    c = wc.WeChatConnector(SimpleNamespace())
+    c.token = "test-token"
+    monkeypatch.setattr(c, "_merge_session_state", lambda updates: {})
+    monkeypatch.setattr(c, "_save_context_tokens", lambda: None)
+    monkeypatch.setattr(c, "_schedule_followup", lambda *a, **kw: None)
+    monkeypatch.setattr(wc, "_segment_delay", lambda text: 0)
+    accepted = []
+    transport_calls = []
+
+    def send(**kwargs):
+        transport_calls.append(kwargs["text"])
+        return {"ret": 0 if len(transport_calls) == 1 else -2}
+
+    def manager(mgr, uid, text, attachments=None, reply_sender=None):
+        assert reply_sender is not None
+        reply = reply_sender("第一段\n第二段\n第三段")
+        accepted.append(reply)
+        return {"reply": reply, "character_id": "charA"}
+
+    monkeypatch.setattr(wc, "_send_text", send)
+    monkeypatch.setattr(wc, "_call_user_manager", manager)
+    c._handle_message({
+        "message_type": 1, "message_id": "partial", "from_user_id": "peer",
+        "item_list": [{"type": 1, "text_item": {"text": "你好"}}],
+    })
+    assert transport_calls == ["第一段", "第二段"]
+    assert accepted == ["第一段"]
+
+
+def test_same_peer_holds_turn_lock_through_generation_and_sending(tmp_path, monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from types import SimpleNamespace
+
+    from wechat_direct import wechat_connector as wc
+
+    monkeypatch.setattr(wc, "CONTEXT_TOKENS_PATH", str(tmp_path / "ctx.json"))
+    c = wc.WeChatConnector(SimpleNamespace())
+    c.token = "test-token"
+    monkeypatch.setattr(c, "_merge_session_state", lambda updates: {})
+    monkeypatch.setattr(c, "_schedule_followup", lambda *a, **kw: None)
+    monkeypatch.setattr(wc, "_segment_delay", lambda text: 0)
+    calls = []
+
+    def manager(mgr, uid, text, attachments=None, reply_sender=None):
+        # 同一 RLock 对其他线程必须不可用；不能只验证发送函数的局部锁。
+        def probe():
+            acquired = c._peer_lock(uid).acquire(blocking=False)
+            if acquired:
+                c._peer_lock(uid).release()
+            return acquired
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            assert pool.submit(probe).result(timeout=3) is False
+        return {"reply": reply_sender(text + "\n尾句"), "character_id": "default"}
+
+    monkeypatch.setattr(wc, "_call_user_manager", manager)
+    monkeypatch.setattr(wc, "_send_text", lambda **kw: calls.append(kw["text"]) or {"ret": 0})
+    barrier = threading.Barrier(2)
+
+    def run(i):
+        barrier.wait(timeout=3)
+        c._handle_message({
+            "message_type": 1, "message_id": str(i), "from_user_id": "peer",
+            "item_list": [{"type": 1, "text_item": {"text": str(i)}}],
+        })
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(run, i) for i in (1, 2)]
+        for future in futures:
+            future.result(timeout=5)
+    assert calls in (["1", "尾句", "2", "尾句"], ["2", "尾句", "1", "尾句"])
+
+
 # ── 段间停顿 ──────────────────────────────────────────────
 
 def test_segment_delay_is_bounded():

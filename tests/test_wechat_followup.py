@@ -169,7 +169,7 @@ def test_followup_budget_resets_next_day(tmp_path, monkeypatch):
 def _stub_gen(c, monkeypatch, out="那本书你看完了吗", record=None):
     """打桩生成器（2026-09-21 签名扩展：追问生成必须带 session 与真实历史）。"""
 
-    def _gen(prompt, last_reply="", session_key="", history=None):
+    def _gen(prompt, last_reply="", session_key="", history=None, character_id=None):
         if record is not None:
             record.append(
                 {"prompt": prompt, "last_reply": last_reply,
@@ -182,7 +182,7 @@ def _stub_gen(c, monkeypatch, out="那本书你看完了吗", record=None):
 
 def _stub_history(c, messages):
     """钉住会话历史真源（chat_history 的读入口），避免测试依赖真实 DB。"""
-    c._session_messages = lambda session_key, keep=10: list(messages)
+    c._session_messages = lambda session_key, keep=10, character_id=None: list(messages)
 
 
 def test_send_followup_sends_and_schedules_second_round(tmp_path, monkeypatch):
@@ -194,7 +194,7 @@ def test_send_followup_sends_and_schedules_second_round(tmp_path, monkeypatch):
         c, "send_text", lambda text, to_user="": (sent.append((text, to_user)), True)[1],
     )
     recorded: list[tuple[str, str]] = []
-    monkeypatch.setattr(c, "_record_outbound", lambda text, session_key: recorded.append((text, session_key)))
+    monkeypatch.setattr(c, "_record_outbound", lambda text, session_key, character_id: recorded.append((text, session_key)))
 
     c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "在吗"})
 
@@ -221,7 +221,7 @@ def test_send_followup_skips_when_delivery_fails(tmp_path, monkeypatch):
     _stub_gen(c, monkeypatch, out="雨停了吗")
     monkeypatch.setattr(c, "send_text", lambda text, to_user="": False)
     recorded: list[str] = []
-    monkeypatch.setattr(c, "_record_outbound", lambda text, session_key: recorded.append(text))
+    monkeypatch.setattr(c, "_record_outbound", lambda text, session_key, character_id: recorded.append(text))
 
     c._send_followup("u1@im.wechat", {"step": 0, "due": 0, "last_reply": "x"})
     assert c._pending_followups == {}          # 未送达不算，也不续排
@@ -234,7 +234,9 @@ def test_send_followup_respects_budget(tmp_path, monkeypatch):
 
     c = _connector(tmp_path, monkeypatch)
     c._followup_daily["u1@im.wechat"] = wc.read_follow_up_config()["daily_max"]
-    c._followup_daily_date = time.strftime("%Y-%m-%d")
+    from utils.local_time import now_local
+
+    c._followup_daily_date = now_local().strftime("%Y-%m-%d")
     _stub_gen(c, monkeypatch, out="花浇完了吗")
     monkeypatch.setattr(c, "send_text", lambda text, to_user="": pytest.fail("超预算不应发送"))
 
@@ -350,6 +352,10 @@ def test_generate_followup_injects_role_system_and_history(tmp_path, monkeypatch
     llm = _FakeLLM("那雨停了叫我")
     _with_persona(c, llm, cid_holder=[])
     hist = [{"role": "assistant", "content": "哦，那你先忙"}]
+    from unittest.mock import AsyncMock
+
+    from api import byok
+    monkeypatch.setattr(byok, "session_llm", AsyncMock(return_value=llm))
 
     got = c._generate_followup("p", session_key="4:u1@im.wechat", history=hist)
 
@@ -380,7 +386,7 @@ def test_followup_system_prompt_falls_back_to_builtin_when_unbound(tmp_path, mon
     _with_persona(c, _FakeLLM(""), prompt="你是十四。", cid_holder=captured)
 
     assert c._followup_system_prompt("u1@im.wechat") == "你是十四。"
-    assert captured == [None]                   # 未绑定 → 交回 persona 的默认身份
+    assert captured == ["default"]              # 内置角色同样使用明确 id
 
 
 def test_followup_system_prompt_degrades_to_empty(tmp_path, monkeypatch):
@@ -416,4 +422,85 @@ def test_repeated_last_reply_is_dropped(tmp_path, monkeypatch):
     c = _connector(tmp_path, monkeypatch)
     _with_llm(c, "就这点出息")
     assert c._generate_followup("p", last_reply="就这点出息") == ""
+
+
+def test_followup_cancelled_during_generation_never_sends(tmp_path, monkeypatch):
+    c = _connector(tmp_path, monkeypatch)
+    _stub_history(c, [{"role": "assistant", "content": "那本书挺好"}])
+    c._schedule_followup("u1@im.wechat", "那本书挺好")
+    st = c._pending_followups["u1@im.wechat"]
+
+    def generate(*args, **kwargs):
+        c._cancel_followup("u1@im.wechat")
+        return "结尾也很暖"
+
+    monkeypatch.setattr(c, "_generate_followup", generate)
+    sent = []
+    monkeypatch.setattr(c, "send_text", lambda *a, **kw: sent.append(a) or True)
+    c._send_followup("u1@im.wechat", st)
+    assert sent == []
+    assert c._pending_followups == {}
+    assert c._followup_daily == {}
+
+
+def test_followup_character_switch_during_generation_cancels(tmp_path, monkeypatch):
+    c = _connector(tmp_path, monkeypatch)
+    current = ["charA"]
+    monkeypatch.setattr(c, "_resolve_character_id", lambda sk: current[0])
+    _stub_history(c, [{"role": "assistant", "content": "那本书挺好"}])
+    c._schedule_followup("u1@im.wechat", "那本书挺好")
+    st = c._pending_followups["u1@im.wechat"]
+
+    def generate(*args, **kwargs):
+        current[0] = "charB"
+        return "结尾也很暖"
+
+    monkeypatch.setattr(c, "_generate_followup", generate)
+    sent = []
+    monkeypatch.setattr(c, "send_text", lambda *a, **kw: sent.append(a) or True)
+    c._send_followup("u1@im.wechat", st)
+    assert sent == []
+    assert c._pending_followups == {}
+
+
+def test_followup_cancelled_during_send_does_not_reschedule_or_change_owner(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    c = _connector(tmp_path, monkeypatch)
+    current = ["charA"]
+    monkeypatch.setattr(c, "_resolve_character_id", lambda sk: current[0])
+    _stub_history(c, [{"role": "assistant", "content": "那本书挺好"}])
+    _stub_gen(c, monkeypatch, out="结尾也很暖")
+    recorded = []
+    c.orchestrator = SimpleNamespace(components={
+        "memory": SimpleNamespace(record_outbound_message=lambda **kw: recorded.append(kw)),
+    })
+    c._schedule_followup("u1@im.wechat", "那本书挺好")
+    st = c._pending_followups["u1@im.wechat"]
+
+    def send(*args, **kwargs):
+        c._cancel_followup("u1@im.wechat")
+        current[0] = "charB"
+        return True
+
+    monkeypatch.setattr(c, "send_text", send)
+    c._send_followup("u1@im.wechat", st)
+    assert recorded[0]["character_id"] == "charA"
+    assert c._pending_followups == {}
+
+
+def test_followup_history_filters_character_at_read_source(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    c = _connector(tmp_path, monkeypatch)
+    captured = []
+
+    def history(**kwargs):
+        captured.append(kwargs)
+        return [], ""
+
+    c.orchestrator = SimpleNamespace(components={"memory": SimpleNamespace(get_chat_context=history)})
+    monkeypatch.setattr(c, "_resolve_character_id", lambda sk: "charA")
+    c._session_messages("4:u1@im.wechat")
+    assert captured == [{"session_id": "4:u1@im.wechat", "keep_recent": 10, "character_id": "charA", "summarize": False}]
 

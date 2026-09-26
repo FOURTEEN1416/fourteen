@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import threading
 import time
@@ -25,10 +26,13 @@ class EpisodicMemory:
         self._cache_lock = threading.Lock()
 
     def store_episode(self, messages: list[dict], summary: str = "",
-                      importance: float = 0.5, session_id: str = "") -> str:
+                      importance: float = 0.5, session_id: str = "", character_id: str = "") -> str:
         if not messages:
             return ""
-        episode_id = f"ep_{int(time.time())}_{hashlib.md5(str(messages).encode()).hexdigest()[:8]}"
+        source = [session_id, character_id, [
+            {k: row.get(k) for k in ("id", "turn_id", "role", "content", "timestamp")} for row in messages
+        ]]
+        episode_id = "ep_" + hashlib.sha256(json.dumps(source, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
         if not summary:
             summary = self._generate_summary(messages)
         content = "\n".join(
@@ -38,13 +42,15 @@ class EpisodicMemory:
             "type": "episode",
             "episode_id": episode_id,
             "session_id": session_id,
+            "character_id": character_id,
             "summary": summary,
             "importance": importance,
             "message_count": len(messages),
             "timestamp": time.time(),
         }
         try:
-            self._vm.store_text_sync(content, metadata)
+            if self._vm is None or not self._vm.store_text_sync(content, metadata):
+                return ""
             # 2026-09-21：StructuredMemory 无 add_episode 时跳过结构化旁路，
             # 避免生产日志刷 "Failed to store episode"；向量侧已带 session_id meta。
             if hasattr(self._sm, "add_episode"):
@@ -56,36 +62,23 @@ class EpisodicMemory:
             return ""
 
     def search(self, query: str, top_k: int = 5,
-               session_id: str | None = None) -> list[dict]:
-        """情景检索。session_id 非 None 时按 meta.session_id 过滤（隔离）。
-
-        2026-09-21：禁止把无归属/他人会话的 episode 注入当前用户 prompt。
-        """
+               session_id: str | None = None, character_id: str = "") -> list[dict]:
+        """归属和类型过滤下推到向量查询，在 top_k 截断之前执行。"""
+        filters = {"type": "episode"}
+        if session_id is not None:
+            filters["session_id"] = str(session_id)
+        if character_id:
+            filters["character_id"] = character_id
         try:
-            raw = self._vm.search_sync(
-                query,
-                top_k=top_k * 3 if session_id else top_k,
-                filter_dict={"type": "episode"},
-            ) or []
+            raw = self._vm.search_sync(query, top_k=top_k, filter_dict=filters) or []
         except Exception as e:  # noqa: BLE001
             logger.warning("Episode search failed: %s", e)
             return []
-        if session_id is None:
-            return list(raw)[:top_k]
-        sid = str(session_id)
-        filtered = []
-        for r in raw:
-            meta = r.get("metadata") or {}
-            ep_sid = str(meta.get("session_id") or r.get("session_id") or "")
-            if ep_sid == sid:
-                filtered.append(r)
-        return filtered[:top_k]
+        return [r for r in raw if all((r.get("metadata") or {}).get(k) == v
+                                     for k, v in filters.items())][:top_k]
 
     def _generate_summary(self, messages: list[dict]) -> str:
-        user_msgs = [m["content"] for m in messages if m.get("role") == "user"]
-        if not user_msgs:
-            return ""
-        if len(user_msgs[-1]) > 10:
-            return user_msgs[-1][:100]  # type: ignore[no-any-return]
-        longest = max(user_msgs, key=len, default="")
-        return longest[:100] if longest else ""
+        from .conversation_summarizer import ConversationSummarizer
+
+        rows = ConversationSummarizer._source_rows(messages[-2:], 70)
+        return "；".join(f"{row['speaker']}曾说「{row['content']}」" for row in rows)

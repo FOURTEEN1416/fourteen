@@ -36,9 +36,21 @@ def _empty_profile() -> dict[str, Any]:
 def apply_profile_ops_to_state(state: dict[str, Any], op: dict[str, Any]) -> dict[str, Any]:
     """把单条 profile 事件应用到投影状态（纯函数，便于单测与突变验红）。"""
     out = dict(state)
+    watermarks = dict(out.get("_source_watermarks") or {})
+    source_id = int(op.get("_source_chat_id") or 0)
+    op = dict(op)
+    for field in (*PROFILE_SCALAR_FIELDS, *PROFILE_LIST_FIELDS):
+        operations = (field, f"{field}_add", f"{field}_remove", f"{field}_clear", f"clear_{field}")
+        if not any(key in op for key in operations):
+            continue
+        if source_id and source_id < watermarks.get(field, 0):
+            for key in operations:
+                op.pop(key, None)
+        elif source_id:
+            watermarks[field] = source_id
+    out["_source_watermarks"] = watermarks
     for k in PROFILE_LIST_FIELDS:
-        if k not in out or not isinstance(out[k], list):
-            out[k] = list(out.get(k) or [])
+        out[k] = list(out.get(k) or [])
 
     # 标量：非空覆盖；clear_* / correct 空串可清空
     for field in PROFILE_SCALAR_FIELDS:
@@ -64,7 +76,7 @@ def apply_profile_ops_to_state(state: dict[str, Any], op: dict[str, Any]) -> dic
             and op.get("replace_lists")
         ):
             # correct 时若给全量列表则替换（更正/清空后重写）
-            out[key] = [str(x) for x in op.get(key) if str(x).strip()]
+            out[key] = [str(x) for x in (op.get(key) or []) if str(x).strip()]
         if rms:
             out[key] = [x for x in out[key] if x not in rms]
         for item in adds:
@@ -78,30 +90,26 @@ def apply_profile_ops_to_state(state: dict[str, Any], op: dict[str, Any]) -> dic
 
 
 def project_profile(ledger: EventLedger, session_key: str, limit: int = 500) -> dict[str, Any]:
-    """按 session_key 重放画像事件，得到投影。隔离：永不读其它 session。
-
-    只拉取 profile_* 类型，避免被大量 chat/tool 事件挤出 query 窗口（B2）。
-    2026-09-22：窗口取**最新** limit 条（旧实现 ``ORDER BY id ASC LIMIT`` 取的是
-    最早的——画像事件累计超限后，新更新永远进不了投影，画像卡死旧值）。
-    """
-    sk = str(session_key or "")
-    events: list[Any] = []
-    for et in (EVENT_PROFILE_UPDATE, EVENT_PROFILE_CORRECT):
-        batch = ledger.query(session_key=sk, event_type=et, limit=limit, order="DESC")
-        batch.reverse()  # 反转为时间升序，供逐条 apply
-        events.extend(batch)
-    import contextlib
-
-    with contextlib.suppress(Exception):
-        events.sort(key=lambda e: int(getattr(e, "id", 0) or 0))
+    """按真实写入序重放完整画像事件；limit 是分页大小，不是丢弃旧事件的窗口。"""
+    sk = str(session_key or "").strip()
     state = _empty_profile()
-    for ev in events:
-        if ev.event_type not in (EVENT_PROFILE_UPDATE, EVENT_PROFILE_CORRECT):
-            continue
-        op = dict(ev.payload or {})
-        op["_event"] = ev.event_type
-        state = apply_profile_ops_to_state(state, op)
-    state["user_key"] = str(session_key)
+    state["user_key"] = sk
+    if not sk:
+        return state
+    page_size = max(1, min(int(limit), 2000))
+    after_id = 0
+    while True:
+        events = ledger.query(
+            session_key=sk, event_types=(EVENT_PROFILE_UPDATE, EVENT_PROFILE_CORRECT),
+            limit=page_size, order="ASC", after_id=after_id,
+        )
+        for ev in events:
+            op = dict(ev.payload or {})
+            op["_event"] = ev.event_type
+            state = apply_profile_ops_to_state(state, op)
+        if len(events) < page_size:
+            break
+        after_id = events[-1].id
     return state
 
 

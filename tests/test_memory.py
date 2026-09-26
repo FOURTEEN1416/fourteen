@@ -361,15 +361,14 @@ def test_conversation_summarizer_init_attributes():
     from shisi.memory.legacy.conversation_summarizer import ConversationSummarizer
     cs = ConversationSummarizer(llm_gateway=None)
     assert hasattr(cs, "_cache")
-    assert hasattr(cs, "_cache_boundary")
     assert isinstance(cs._cache, dict)
-    assert isinstance(cs._cache_boundary, dict)
+    assert cs._cache == {}
 
 
 def test_conversation_summarizer_clear_cache_all():
     from shisi.memory.legacy.conversation_summarizer import ConversationSummarizer
     cs = ConversationSummarizer(llm_gateway=None)
-    cs._cache["test:1"] = "summary"
+    cs._cache[("test:1", "a")] = ("source", "summary")
     cs.clear_cache()
     assert len(cs._cache) == 0
 
@@ -377,12 +376,11 @@ def test_conversation_summarizer_clear_cache_all():
 def test_conversation_summarizer_clear_cache_by_session():
     from shisi.memory.legacy.conversation_summarizer import ConversationSummarizer
     cs = ConversationSummarizer(llm_gateway=None)
-    # P1-8：缓存按 session_id 单键（旧 `{session}:{count}` 键每轮必 miss）
-    cs._cache["sess1"] = "a"
-    cs._cache["sess2"] = "b"
+    cs._cache[("sess1", "a")] = ("source-a", "a")
+    cs._cache[("sess1", "b")] = ("source-b", "b")
+    cs._cache[("sess2", "b")] = ("source-c", "c")
     cs.clear_cache(session_id="sess1")
-    assert "sess1" not in cs._cache
-    assert "sess2" in cs._cache
+    assert set(cs._cache) == {("sess2", "b")}
 
 
 # ═══════════════════════════════════════════════════════════════

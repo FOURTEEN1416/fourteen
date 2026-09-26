@@ -133,6 +133,110 @@ def test_scheduler_deliver_records_after_successful_send(tmp_path, monkeypatch):
     assert rec.calls == [("早安呀", SESSION)]
 
 
+def test_scheduler_freezes_character_before_sending(monkeypatch):
+    from types import SimpleNamespace
+
+    s = _scheduler()
+    current = ["charA"]
+    rows = []
+    s.set_memory(SimpleNamespace(record_outbound_message=lambda **kw: rows.append(kw)))
+    monkeypatch.setattr(s, "_resolve_character_id", lambda sk: current[0])
+
+    async def send(*args):
+        current[0] = "charB"
+        return True
+
+    monkeypatch.setattr(s, "_send_targeted", send)
+    assert s._deliver("早安", SESSION)
+    assert rows[0]["character_id"] == "charA"
+
+
+def test_proactive_uses_current_identity_and_history_then_cancels_stale_draft(monkeypatch):
+    from types import SimpleNamespace
+
+    from proactive import llm_proactive as lp
+    from shisi.agent_plane import runtime
+
+    s = _scheduler()
+    current = ["charA"]
+    captured = []
+    decisions = []
+    events = []
+    monkeypatch.setattr(s, "_is_quiet_hours", lambda: False)
+    monkeypatch.setattr(s, "_resolve_character_id", lambda sk: current[0])
+    monkeypatch.setattr(s, "_resolve_proactive_llm", lambda eng=None: object())
+    monkeypatch.setattr(lp, "load_persona_hint", lambda cid: f"persona:{cid}")
+    monkeypatch.setattr(lp, "read_web_proactive_config", lambda: {"enabled": True})
+    monkeypatch.setattr(runtime, "project_profile_for", lambda sk: {})
+    monkeypatch.setattr(runtime, "get_profile_prompt_block", lambda sk: "")
+    monkeypatch.setattr(runtime, "append_proactive_event", lambda **kw: events.append(kw))
+
+    def history(**kwargs):
+        captured.append(kwargs)
+        return [{"role": "user", "content": "我在读书"}, {"role": "assistant", "content": "我在听雨"}], ""
+
+    s.set_memory(SimpleNamespace(get_chat_context=history))
+    eng = SimpleNamespace(_knowledge_character_id="staleB", _last_user_message="旧角色的话")
+    hub = SimpleNamespace(get=lambda sk: eng)
+
+    def decide(llm, ctx):
+        decisions.append(ctx)
+        current[0] = "charC"
+        return {"should_contact": True, "message": "那书看得怎么样了", "reason": "follow", "wait_minutes": None}
+
+    monkeypatch.setattr(lp, "decide_proactive", decide)
+    monkeypatch.setattr(s, "_deliver", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("角色已切换不得发旧草稿")))
+    s._llm_proactive_one_user(hub, SESSION)
+    assert captured[0]["character_id"] == "charA"
+    assert "persona:charA" in decisions[0] and "staleB" not in decisions[0]
+    assert "我在读书" in decisions[0] and "我在听雨" in decisions[0]
+    assert events[-1]["reason"] == "character_changed"
+
+
+def test_proactive_context_preserves_speakers_and_order():
+    import json
+
+    from proactive.llm_proactive import build_proactive_context
+
+    history = [
+        {"role": "user", "content": "我在读书"},
+        {"role": "assistant", "content": "我在听雨"},
+        {"role": "user", "content": "那你听到什么了？"},
+    ]
+    ctx = build_proactive_context(recent_messages=history)
+    assert json.dumps(history, ensure_ascii=False) in ctx
+    assert "最近主动消息" not in ctx
+    assert "assistant 是当前角色" in ctx
+
+
+def test_scheduler_rejects_draft_from_another_character(monkeypatch):
+    s = _scheduler()
+    monkeypatch.setattr(s, "_resolve_character_id", lambda sk: "charB")
+    monkeypatch.setattr(s, "_run_blocking", lambda fn: (_ for _ in ()).throw(AssertionError("不应发送")))
+    assert s._deliver("A 的旧草稿", SESSION, character_id="charA") is False
+
+
+def test_date_wish_cancels_character_change_without_dedup(monkeypatch):
+    from types import SimpleNamespace
+
+    from proactive import llm_proactive as lp
+
+    s = _scheduler()
+    current = ["charA"]
+    monkeypatch.setattr(s, "_resolve_character_id", lambda sk: current[0])
+    monkeypatch.setattr(lp, "load_persona_hint", lambda cid: cid)
+
+    def generate(**kw):
+        assert kw["system_prompt"] == "charA"
+        current[0] = "charB"
+        return "生日快乐呀"
+
+    monkeypatch.setattr(s, "_resolve_proactive_llm", lambda: SimpleNamespace(chat_sync=generate))
+    monkeypatch.setattr(s, "_deliver", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("不应发送")))
+    s._send_date_wish(SESSION, "2026-09-26", label="生日", kind="birthday", names="生日")
+    assert not s._important_dates_sent
+
+
 def test_scheduler_deliver_no_record_when_not_delivered(tmp_path, monkeypatch):
     """未送达不得回写 —— 否则历史里会出现她从没说出口的话（与谎报 reply_sent 同类）。"""
     s = _scheduler()
@@ -281,7 +385,7 @@ def test_reminder_delivery_records_after_wechat_send():
     rec = _Recorder()
     task = _reminder_task(True, rec)
     asyncio.run(task._deliver({"id": 1, "content": "六点了，起来啦", "session_key": SESSION}))
-    assert rec.calls == [("六点了，起来啦", SESSION)]
+    assert rec.calls == [("你设定的提醒时间到了：「六点了，起来啦」。", SESSION)]
 
 
 def test_reminder_delivery_no_record_on_failure():
@@ -294,3 +398,39 @@ def test_reminder_delivery_no_record_on_failure():
 def test_reminder_delivery_tolerates_missing_memory():
     task = _reminder_task(True, None)
     asyncio.run(task._deliver({"id": 3, "content": "六点了", "session_key": SESSION}))  # 不得抛
+
+
+def test_reminder_freezes_character_before_generation_and_send(monkeypatch):
+    from types import SimpleNamespace
+
+    from proactive.reminder_delivery import ReminderDeliveryTask
+
+    current = ["charA"]
+    recorded = []
+    prompts = []
+
+    async def chat(**kwargs):
+        prompts.append(kwargs["system_prompt"])
+        current[0] = "charB"
+        return "到点啦，该起床了"
+
+    def send(*args):
+        current[0] = "charC"
+        return True
+
+    task = ReminderDeliveryTask(
+        _FakeSM(), llm=SimpleNamespace(chat=chat), wechat_sender=send,
+        memory=SimpleNamespace(record_outbound_message=lambda **kw: recorded.append(kw)),
+    )
+    monkeypatch.setattr(task, "_resolve_character_id", lambda sk: current[0])
+    asyncio.run(task._deliver({"id": 4, "content": "叫我起床", "session_key": SESSION}))
+    assert recorded[0]["character_id"] == "charA"
+    assert "charA" in prompts[0]
+    assert "charB" not in prompts[0]
+
+
+def test_reminder_fallback_quotes_user_task_not_role_speech():
+    rec = _Recorder()
+    task = _reminder_task(True, rec)
+    asyncio.run(task._deliver({"id": 5, "content": "叫我起床", "session_key": SESSION}))
+    assert rec.calls == [("你设定的提醒时间到了：「叫我起床」。", SESSION)]

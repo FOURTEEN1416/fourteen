@@ -6,6 +6,8 @@ import inspect
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from shisi.memory.legacy.structured_memory import StructuredMemory
 from shisi.memory.legacy.user_profile import UserProfileStore
 from tools.builtin.profile_agent_tools import (
@@ -69,7 +71,31 @@ def test_remember_facts_writes_isolated(tmp_path):
         sm.close()
 
 
-def test_forget_facts_by_text(tmp_path):
+@pytest.mark.asyncio
+async def test_profile_sync_sees_previous_question_and_only_source_turn(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from tools.builtin import profile_agent_tools as pa
+
+    sm = StructuredMemory(str(tmp_path / "profile-source.db"))
+    try:
+        sm.add_chat_turn("生日16号", "你的生日是16号吗？", session_id="s", character_id="a", turn_id="one")
+        sm.add_chat_turn("不是，是17号", "已更正", session_id="s", character_id="a", turn_id="two")
+        sm.add_chat_turn("未来消息", "未来回复", session_id="s", character_id="a", turn_id="three")
+        monkeypatch.setattr(pa, "_runtime", lambda: SimpleNamespace(project_profile_for=lambda sk: {"birthday": "16号"}))
+        llm = SimpleNamespace(chat_with_tools=AsyncMock(return_value={"tool_calls": []}))
+        await pa.run_profile_sync_agent(llm, "s", "不是，是17号", "已更正", sm, character_id="a", turn_id="two")
+        prompt = llm.chat_with_tools.call_args.kwargs["query"]
+        assert "你的生日是16号吗" in prompt and "不是，是17号" in prompt
+        assert "未来消息" not in prompt
+        assert json.dumps({"birthday": "16号"}, ensure_ascii=False) in prompt
+    finally:
+        sm.close()
+
+
+def test_forget_facts_by_text_requires_exact_claim_not_substring(tmp_path):
     sm = StructuredMemory(str(tmp_path / "m2.db"))
     try:
         sm.add_fact("用户生日是十一月十四", user_key="4:a@im.wechat", category="personal")
@@ -78,7 +104,7 @@ def test_forget_facts_by_text(tmp_path):
         res = tool.execute(
             _meta={"session_key": "4:a@im.wechat"},
             structured_memory=sm,
-            fact_texts=["十一月十四"],
+            fact_texts=["用户生日是十一月十四"],
         )
         assert res.success
         facts = [r["fact"] for r in sm.get_facts(user_key="4:a@im.wechat")]

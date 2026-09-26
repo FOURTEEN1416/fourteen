@@ -62,12 +62,13 @@ def test_duplicate_message_processed_once(tmp_state_root):
     conn = _make_owner_conn(tmp_state_root)
     calls: list[str] = []
 
-    def fake_call(mgr, user_id, text, attachments=None):
+    def fake_call(mgr, user_id, text, attachments=None, reply_sender=None):
         calls.append(text)
-        return {"reply": "ok"}
+        return {"reply": reply_sender("ok")}
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(wc, "_call_user_manager", fake_call)
+        mp.setattr(wc, "_send_text", lambda **kw: {"ret": 0})
         conn._handle_message(_text_msg("dup", text="同一条"))
         conn._handle_message(_text_msg("dup", text="同一条"))
     assert len(calls) == 1
@@ -219,8 +220,8 @@ def test_handle_message_intercepts_character_command(tmp_state_root):
         conn._handle_message(_text_msg("cmd1", text="角色"))
     assert seen == []
 
-    # 举证：拦截钩子在 _handle_message 里确实存在
-    src = inspect.getsource(wc.WeChatConnector._handle_message)
+    # 钩子位于同一好友的串行处理区间；上方行为断言证明未落入主模型。
+    src = inspect.getsource(wc.WeChatConnector._handle_message_serial)
     assert "_try_peer_character_flow" in src
 
 

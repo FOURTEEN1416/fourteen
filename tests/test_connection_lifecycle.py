@@ -88,12 +88,17 @@ def test_sse_chat_stream_closes_generator_on_disconnect():
 
 
 @pytest.mark.asyncio
-async def test_websocket_handler_closes_stream_generator_on_disconnect():
+@pytest.mark.parametrize("accepted_chunks", [0, 1])
+async def test_websocket_handler_closes_stream_generator_on_disconnect(accepted_chunks):
     """WebSocket 流式响应中途连接断开时，生成器必须被 aclose。"""
     if not HAS_WEBSOCKETS:
         pytest.skip("websockets not installed")
 
-    stream_gen = _TrackedAsyncGen(items=[{"type": "token", "content": "tok1"}])
+    acknowledgements = []
+    stream_gen = _TrackedAsyncGen(items=[
+        {"type": "token", "content": "tok1", "_ack": lambda: acknowledgements.append("tok1")},
+        {"type": "token", "content": "tok2", "_ack": lambda: acknowledgements.append("tok2")},
+    ])
     orch = MagicMock()
     orch.process_message_stream = MagicMock(return_value=stream_gen)
 
@@ -117,7 +122,7 @@ async def test_websocket_handler_closes_stream_generator_on_disconnect():
         async def send(self, msg):
             self._send_count += 1
             self.messages.append(msg)
-            if self._send_count >= 2:
+            if self._send_count >= 2 + accepted_chunks:
                 import websockets.exceptions
                 self.closed = True
                 raise websockets.exceptions.ConnectionClosed(
@@ -141,6 +146,67 @@ async def test_websocket_handler_closes_stream_generator_on_disconnect():
 
     assert stream_gen.closed, "websocket stream generator was not closed on disconnect"
     assert ws.closed
+    assert acknowledgements == ["tok1"][:accepted_chunks]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("accepted_chunks", [0, 1])
+async def test_sse_adapter_acknowledges_only_consumed_chunks(monkeypatch, accepted_chunks):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from api.main_routes import ChatRequest
+    from api.routers import chat_routes
+
+    acknowledgements = []
+    gen = _TrackedAsyncGen(items=[
+        {"type": "token", "content": "first", "_ack": lambda: acknowledgements.append("first")},
+        {"type": "token", "content": "second", "_ack": lambda: acknowledgements.append("second")},
+    ])
+    monkeypatch.setattr(chat_routes.deps, "orch", SimpleNamespace(
+        components={}, process_message_stream=lambda *a, **kw: gen,
+    ))
+    monkeypatch.setattr(chat_routes, "_resolve_character_id", AsyncMock(return_value="charA"))
+    db = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(llm_config=None, role="viewer")))
+    response = await chat_routes.chat_stream(ChatRequest(message="hello"), _auth=True, user_id=7, db=db)
+    body = response.body_iterator
+    for _ in range(accepted_chunks + 1):
+        frame = await anext(body)
+        assert "_ack" not in frame
+    await body.aclose()
+    assert gen.closed
+    assert acknowledgements == ["first"][:accepted_chunks]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_body", [True, False])
+async def test_http_json_body_receipt_precedes_history(fail_body):
+    from unittest.mock import AsyncMock
+
+    from api.routers.chat_routes import _ChatDeliveryResponse
+
+    persisted = []
+    frames = []
+
+    async def generate(publish):
+        accepted = await publish({"reply": "角色正文", "emotion": {"mood": "happy"}})
+        persisted.append(accepted)
+        return {"reply": accepted}
+
+    async def send(frame):
+        assert not persisted
+        frames.append(frame)
+        if fail_body and frame["type"] == "http.response.body":
+            raise ConnectionError("disconnected")
+
+    response = _ChatDeliveryResponse(generate, "7:web:test")
+    if fail_body:
+        with pytest.raises(ConnectionError):
+            await response({"type": "http"}, AsyncMock(), send)
+    else:
+        await response({"type": "http"}, AsyncMock(), send)
+    assert persisted == ([""] if fail_body else ["角色正文"])
+    assert len([f for f in frames if f["type"] == "http.response.start"]) == 1
 
 
 @pytest.mark.asyncio

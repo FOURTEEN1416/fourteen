@@ -7,6 +7,8 @@ import sys
 import time
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, ".")
 
 
@@ -48,8 +50,8 @@ def _make_orchestrator(with_chat_stream: bool = True):
 
     # 记忆 mock
     memory = SimpleNamespace(
-        get_recent_context=lambda n, session_id="": "最近上下文",
-        retrieve_context=lambda query, session_id, top_k: {"facts": ["喜欢猫"]},
+        get_recent_context=lambda n, session_id="", character_id="": "最近上下文",
+        retrieve_context=lambda query, session_id, top_k, character_id="": {"facts": ["喜欢猫"]},
         get_chat_context=lambda session_id: ([{"role": "user", "content": "hi"}], ""),
         after_chat=lambda **kwargs: None,
     )
@@ -93,6 +95,70 @@ def _make_orchestrator(with_chat_stream: bool = True):
     return orch
 
 
+def test_transport_confirms_only_accepted_text_before_history(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from my_character import consistency_checker
+
+    orch = _make_orchestrator(False)
+    orch._prepare_context = AsyncMock(return_value={
+        "emotion_state": None, "system_prompt": "sys", "chat_history": [],
+        "direct_reply": "第一段\n第二段", "ax_turn_id": "turn-accepted", "ax_reply_id": "reply-accepted",
+    })
+    monkeypatch.setattr(consistency_checker, "check_and_correct_reply", AsyncMock(return_value="第一段\n第二段"))
+    history = []
+    orch._after_process = lambda *a, **kw: history.append((a, kw)) or ""
+
+    async def sender(result):
+        assert history == [], "尚未获得发送回执却已记录为角色发言"
+        assert result["reply"] == "第一段\n第二段"
+        return "第一段"
+
+    result = asyncio.run(orch.process_message(
+        "你好", "4:peer", character_id="charA", reply_sender=sender,
+    ))
+    assert result["reply"] == "第一段"
+    assert history[0][0][1] == "第一段"
+    assert history[0][0][4] == "charA"
+    assert history[0][1]["turn_id"] == "turn-accepted"
+
+
+def test_transport_failed_reply_keeps_user_but_never_assistant(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from my_character import consistency_checker
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.structured_memory import StructuredMemory
+
+    orch = _make_orchestrator(False)
+    sm = StructuredMemory(str(tmp_path / "accepted.db"))
+    memory = MemoryPipeline(vector_memory=SimpleNamespace(), structured_memory=sm)
+    orch.components["memory"] = memory
+    orch._prepare_context = AsyncMock(return_value={
+        "emotion_state": None, "system_prompt": "sys", "chat_history": [],
+        "direct_reply": "未发出的回复", "ax_turn_id": "turn-failed", "ax_reply_id": "reply-failed",
+    })
+    monkeypatch.setattr(consistency_checker, "check_and_correct_reply", AsyncMock(return_value="未发出的回复"))
+
+    async def sender(reply):
+        assert sm.get_chats_by_session("4:peer") == []
+        return ""
+
+    try:
+        result = asyncio.run(orch.process_message(
+            "实际收到的用户原话", "4:peer", character_id="charA", reply_sender=sender,
+        ))
+        orch._get_background_executor().shutdown(wait=True)
+        assert result["reply"] == ""
+        rows = sm.get_chats_by_session("4:peer")
+        assert [(r["role"], r["content"]) for r in rows] == [("user", "实际收到的用户原话")]
+        assert rows[0]["character_id"] == "charA"
+        assert rows[0]["turn_id"] == "turn-failed"
+    finally:
+        memory._executor.shutdown(wait=True)
+        sm.close()
+
+
 async def _collect_stream(orch, **kwargs):
     events = []
     async for event in orch.process_message_stream(**kwargs):
@@ -124,11 +190,7 @@ def test_stream_true_path_yields_tokens_and_done():
 
 
 def test_stream_true_path_does_not_block_on_consistency_check(monkeypatch):
-    """B1+B2 优化后：流式 token 实时推送，一致性检查异步后台执行不阻塞主回复流。
-
-    旧行为（已废弃）：一致性检查阻塞流式，修正后才推送修正后回复。
-    新行为：token 实时推送原回复，一致性检查在后台异步执行（只记录日志）。
-    """
+    """完整草稿轻量定稿后分块推送，额外一致性诊断仍在后台且不改已发内容。"""
     from my_character import consistency_checker
 
     orch = _make_orchestrator(with_chat_stream=True)
@@ -158,7 +220,7 @@ def test_stream_true_path_does_not_block_on_consistency_check(monkeypatch):
     # 流式路径不应调用 check_and_correct_reply（改为后台异步 _async_consistency_check）
     assert not sync_check_called, "流式路径不应调用同步 check_and_correct_reply"
 
-    # token 实时推送原回复（"你好呀"），不被一致性检查阻塞
+    # 定稿后分块发布回复，不被额外的后台一致性诊断阻塞
     tokens = [event["content"] for event in events if event["type"] == "token"]
     assert "".join(tokens) == "你好呀"
     assert events[-1]["reply"] == "你好呀"
@@ -179,14 +241,10 @@ def test_stream_safety_blocks():
 def test_stream_pseudo_fallback():
     orch = _make_orchestrator(with_chat_stream=False)
 
-    async def fake_process_message(*args, **kwargs):
-        return {
-            "reply": "这是完整回复",
-            "emotion": _emotion_state().to_dict(),
-            "process_time": 0.1,
-        }
+    async def chat(**kwargs):
+        return "这是完整回复"
 
-    orch.process_message = fake_process_message
+    orch.components["llm"] = SimpleNamespace(chat=chat)
     events = asyncio.run(_collect_stream(orch, user_msg="你好"))
     tokens = [e["content"] for e in events if e["type"] == "token"]
     assert "".join(tokens) == "这是完整回复"
@@ -303,13 +361,13 @@ def test_stream_chat_stream_raises_after_partial_tokens():
     assert any(k.get("reply") == "前半" for k in memory_calls)
 
 
-def test_stream_pseudo_fallback_process_message_raises():
+def test_stream_nonstream_gateway_raises():
     orch = _make_orchestrator(with_chat_stream=False)
 
     async def failing_process(*args, **kwargs):
         raise RuntimeError("process fail")
 
-    orch.process_message = failing_process
+    orch.components["llm"] = SimpleNamespace(chat=failing_process)
     events = asyncio.run(_collect_stream(orch, user_msg="你好"))
     assert events[-1]["type"] == "done"
     assert "异常" in events[-1]["reply"]
@@ -329,8 +387,8 @@ def test_stream_after_chat_exception_does_not_break_flow():
         raise RuntimeError("memory fail")
 
     orch.components["memory"] = SimpleNamespace(
-        get_recent_context=lambda n, session_id="": "最近上下文",
-        retrieve_context=lambda query, session_id, top_k: {"facts": ["喜欢猫"]},
+        get_recent_context=lambda n, session_id="", character_id="": "最近上下文",
+        retrieve_context=lambda query, session_id, top_k, character_id="": {"facts": ["喜欢猫"]},
         get_chat_context=lambda session_id: ([{"role": "user", "content": "hi"}], ""),
         after_chat=failing_after_chat,
     )
@@ -342,8 +400,8 @@ def test_stream_after_chat_exception_does_not_break_flow():
 def test_stream_retrieve_context_exception_returns_done():
     orch = _make_orchestrator(with_chat_stream=True)
     orch.components["memory"] = SimpleNamespace(
-        get_recent_context=lambda n, session_id="": "最近上下文",
-        retrieve_context=lambda query, session_id, top_k: (_ for _ in ()).throw(RuntimeError("context fail")),
+        get_recent_context=lambda n, session_id="", character_id="": "最近上下文",
+        retrieve_context=lambda query, session_id, top_k, character_id="": (_ for _ in ()).throw(RuntimeError("context fail")),
         get_chat_context=lambda session_id: ([{"role": "user", "content": "hi"}], ""),
         after_chat=lambda **kwargs: None,
     )
@@ -359,6 +417,225 @@ def test_stream_emotion_none_fallback():
     events = asyncio.run(_collect_stream(orch, user_msg="你好", session_id="s5"))
     assert events[-1]["type"] == "done"
     assert events[-1]["emotion"] is None
+
+
+def test_stream_publishes_only_final_text_and_stores_the_same(monkeypatch):
+    orch = _make_orchestrator()
+    emitted = []
+    committed = []
+
+    async def raw_stream(**kwargs):
+        yield "用户：我先睡了\nAssistant："
+        assert emitted == [], "完整校验前不能向客户端泄露模型草稿"
+        yield "我吃过了\n你也记得吃饭"
+
+    orch.components["llm"] = SimpleNamespace(chat_stream=raw_stream)
+    monkeypatch.setattr(orch, "_after_process", lambda *a, **kw: committed.append(a[1]))
+
+    async def collect():
+        async for event in orch.process_message_stream("你好", "s", character_id="a"):
+            emitted.append(event)
+
+    asyncio.run(collect())
+    text = "".join(e["content"] for e in emitted if e["type"] == "token")
+    assert text == emitted[-1]["reply"] == "我吃过了\n你也记得吃饭"
+    assert committed == [text]
+
+
+def test_stream_direct_reply_skips_main_generation_and_keeps_history(monkeypatch):
+    orch = _make_orchestrator()
+    committed = []
+
+    async def prepare(*args, **kwargs):
+        return {"emotion_state": None, "system_prompt": "", "chat_history": [],
+                "direct_reply": "你说的是明天上午还是下午？", "ax_turn_id": "turn"}
+
+    async def unexpected_stream(**kwargs):
+        raise AssertionError("直复不能再调用主模型")
+        yield ""  # pragma: no cover
+
+    monkeypatch.setattr(orch, "_prepare_context", prepare)
+    monkeypatch.setattr(orch, "_after_process", lambda *a, **kw: committed.append((a[1], kw["turn_id"])))
+    orch.components["llm"] = SimpleNamespace(chat_stream=unexpected_stream)
+    events = asyncio.run(_collect_stream(orch, user_msg="明天提醒我", session_id="s"))
+    text = "".join(e["content"] for e in events if e["type"] == "token")
+    assert text == events[-1]["reply"] == "你说的是明天上午还是下午？"
+    assert committed == [(text, "turn")]
+
+
+@pytest.mark.asyncio
+async def test_user_gateway_reaches_auxiliary_threads_and_resets(monkeypatch):
+    import llm_provider
+    from utils.llm_bridge import current_llm, to_sync_callable
+
+    orch = _make_orchestrator(True)
+    selected = SimpleNamespace(chat_sync=lambda **kw: "user-result")
+    monkeypatch.setattr(llm_provider, "get_user_llm", lambda uid, cfg: selected)
+    observed = []
+
+    async def prepare(*args, **kwargs):
+        observed.append(current_llm())
+        wrapped = to_sync_callable(SimpleNamespace(chat_sync=lambda **kw: "WRONG-platform"))
+        assert await asyncio.to_thread(wrapped, "summary") == "user-result"
+        return {"emotion_state": None, "system_prompt": "", "chat_history": [], "direct_reply": "正确回复"}
+
+    monkeypatch.setattr(orch, "_prepare_context", prepare)
+    monkeypatch.setattr(orch, "_after_process", lambda *a, **kw: observed.append(current_llm()))
+    await _collect_stream(orch, user_msg="你好", session_id="7:web:x", user_id=7, user_llm_config={"provider": "test"})
+    assert observed == [selected, selected]
+    assert current_llm() is None
+
+
+@pytest.mark.asyncio
+async def test_http_response_executes_real_orchestrator_before_persist(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from api.routers.chat_routes import _ChatDeliveryResponse
+    from my_character import consistency_checker
+
+    orch = _make_orchestrator(False)
+    orch._prepare_context = AsyncMock(return_value={
+        "emotion_state": None, "system_prompt": "", "chat_history": [], "direct_reply": "实际正文",
+    })
+    monkeypatch.setattr(consistency_checker, "check_and_correct_reply", AsyncMock(return_value="实际正文"))
+    saved, frames = [], []
+    monkeypatch.setattr(orch, "_after_process", lambda *a, **kw: saved.append(a[1]))
+
+    async def generate(publish):
+        return await orch.process_message("你好", "7:web:asgi", reply_sender=publish)
+
+    async def send(frame):
+        assert saved == []
+        frames.append(frame)
+
+    await _ChatDeliveryResponse(generate, "7:web:asgi")({"type": "http"}, AsyncMock(), send)
+    assert saved == ["实际正文"]
+    assert len(frames) == 2
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_send_keeps_accepted_reply_and_turn(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from my_character import consistency_checker
+
+    orch = _make_orchestrator(False)
+    orch._prepare_context = AsyncMock(return_value={
+        "emotion_state": None, "system_prompt": "", "chat_history": [], "direct_reply": "已发文字",
+        "ax_turn_id": "cancel-accepted",
+    })
+    monkeypatch.setattr(consistency_checker, "check_and_correct_reply", AsyncMock(return_value="已发文字"))
+    stored = []
+    orch.components["memory"].write_chat_history_sync = lambda **kw: stored.append(kw) or True
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def sender(result):
+        started.set()
+        await release.wait()
+        return result["reply"]
+
+    task = asyncio.create_task(orch.process_message("用户话", "7:web:c", reply_sender=sender))
+    await started.wait()
+    task.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert stored[0]["reply"] == "已发文字"
+    assert stored[0]["turn_id"] == "cancel-accepted"
+    assert not orch._get_session_lock("7:web:c").locked()
+
+
+def test_profile_sync_serializes_all_corrections_instead_of_skipping(monkeypatch):
+    import threading
+
+    from tools.builtin import profile_agent_tools as pa
+
+    orch = _make_orchestrator(False)
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    async def sync(llm, sid, text, reply, sm, **kwargs):
+        calls.append((text, llm))
+        if text == "旧生日":
+            entered.set()
+            await asyncio.to_thread(release.wait, 3)
+        return []
+
+    monkeypatch.setattr(pa, "run_profile_sync_agent", sync)
+    first_llm, second_llm = object(), object()
+    first = orch._enqueue_profile_sync("7:web:x", "旧生日", "", first_llm)
+    try:
+        assert entered.wait(3)
+        second = orch._enqueue_profile_sync("7:web:x", "更正生日", "", second_llm)
+        assert calls == [("旧生日", first_llm)]
+    finally:
+        release.set()
+    first.result(timeout=5)
+    second.result(timeout=5)
+    assert calls == [("旧生日", first_llm), ("更正生日", second_llm)]
+
+
+def test_stream_postprocess_failure_does_not_append_new_reply(monkeypatch):
+    orch = _make_orchestrator(True)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("postprocess failed after transport acknowledgement")
+
+    monkeypatch.setattr(orch, "_after_process", fail)
+    events = asyncio.run(_collect_stream(orch, user_msg="你好", session_id="failed-post"))
+    assert "".join(e["content"] for e in events if e["type"] == "token") == "你好呀"
+    assert events[-1]["type"] == "error"
+    assert events[-1]["reply"] == "你好呀"
+
+
+@pytest.mark.parametrize("upstream_stream", [True, False])
+@pytest.mark.parametrize("acknowledged_chunks", [0, 1])
+def test_stream_disconnect_records_only_transport_acknowledged_prefix(monkeypatch, upstream_stream, acknowledged_chunks):
+    from unittest.mock import AsyncMock
+
+    from my_character import consistency_checker
+
+    orch = _make_orchestrator(upstream_stream)
+    draft = "abcdefghABCDEFGHijklmnop"
+    committed = []
+    orch._prepare_context = AsyncMock(return_value={
+        "emotion_state": None, "system_prompt": "sys", "chat_history": [],
+        "direct_reply": "", "ax_turn_id": "cancel-turn", "ax_reply_id": "cancel-reply",
+    })
+    monkeypatch.setattr(consistency_checker, "check_and_correct_reply", AsyncMock(side_effect=lambda **kw: kw["reply"]))
+    monkeypatch.setattr(orch, "_after_process", lambda *a, **kw: committed.append((a, kw)) or "")
+
+    async def stream(**kwargs):
+        yield draft
+
+    orch.components["llm"] = (
+        SimpleNamespace(chat_stream=stream) if upstream_stream
+        else SimpleNamespace(chat=AsyncMock(return_value=draft))
+    )
+
+    async def consume():
+        gen = orch.process_message_stream("用户实际输入", "7:web:test", character_id="charA")
+        try:
+            for _ in range(acknowledged_chunks):
+                token = await anext(gen)
+                assert token["type"] == "token"
+                token["_ack"]()
+            pending = await anext(gen)
+            assert pending["type"] == "token"
+            assert committed == [], "未确认的全文不能提前落库"
+        finally:
+            await gen.aclose()
+        assert not orch._get_session_lock("7:web:test").locked()
+
+    asyncio.run(consume())
+    assert len(committed) == 1
+    args, kw = committed[0]
+    assert args[0] == "用户实际输入"
+    assert args[1] == draft[:8 * acknowledged_chunks]
+    assert args[4] == "charA"
+    assert kw["turn_id"] == "cancel-turn"
 
 
 if __name__ == "__main__":

@@ -148,7 +148,7 @@ class OpenAICompatibleProvider:
 
         P1-3③：此前只改 dict，client 构造时已拷贝快照 → 新 token 永远不生效。
         """
-        for loop, client in list(self._clients.items()):
+        for loop, client in list(self._clients.values()):
             try:
                 if not loop.is_closed():
                     client.headers.update(self._headers)
@@ -180,10 +180,14 @@ class OpenAICompatibleProvider:
         max_tokens: int | None = None,
         tools: list | None = None,
         model: str | None = None,
+        attachments: list | None = None,
     ) -> str:
         """异步聊天（同步包装版）"""
         from typing import cast as _cast
 
+        from .multi_provider_gateway import _merge_attachments
+
+        messages, query = _merge_attachments(query, system_prompt, history, messages, attachments)
         result = await self._chat(
             query=query, system_prompt=system_prompt, history=history,
             messages=messages, temperature=temperature, max_tokens=max_tokens,
@@ -347,7 +351,7 @@ class OpenAICompatibleProvider:
             fallback = await self._try_fallback(built, temp, mt, tools)
             if fallback:
                 return fallback
-            return self._handle_error(e)
+            raise RuntimeError("模型请求失败，未生成角色回复") from e
 
     async def _stream_chat(
         self, payload: dict, model_name: str,

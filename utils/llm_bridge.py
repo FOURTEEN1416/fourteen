@@ -27,9 +27,67 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from contextvars import ContextVar
+from functools import wraps
+from inspect import isasyncgenfunction, signature
 from typing import Any
 
 logger = logging.getLogger("utils.llm_bridge")
+
+# 辅助摘要/抽取等共享组件只持适配器，实际网关随请求上下文，不改共享实例属性。
+request_llm: ContextVar[Any] = ContextVar("request_llm", default=None)
+
+
+def current_llm(default: Any = None) -> Any:
+    selected = request_llm.get()
+    return selected if selected is not None else default
+
+
+def request_scoped_llm(method):
+    """为普通/流式编排入口绑定网关快照，退出必复位；子任务按ContextVar继承。"""
+    params = signature(method)
+
+    def bind(self, args, kwargs):
+        from llm_provider import select_request_llm
+
+        bound = params.bind(self, *args, **kwargs)
+        selected = select_request_llm(
+            self.components.get("llm"), bound.arguments.get("user_id"),
+            bound.arguments.get("user_llm_config"),
+        )
+        return selected
+
+    if isasyncgenfunction(method):
+        @wraps(method)
+        async def stream(self, *args, **kwargs):
+            selected = bind(self, args, kwargs)
+            gen = method(self, *args, **kwargs)
+            try:
+                while True:
+                    token = request_llm.set(selected)
+                    try:
+                        event = await anext(gen)
+                    except StopAsyncIteration:
+                        break
+                    finally:
+                        request_llm.reset(token)
+                    yield event
+            finally:
+                token = request_llm.set(selected)
+                try:
+                    await gen.aclose()
+                finally:
+                    request_llm.reset(token)
+        return stream
+
+    @wraps(method)
+    async def call(self, *args, **kwargs):
+        token = request_llm.set(bind(self, args, kwargs))
+        try:
+            return await method(self, *args, **kwargs)
+        finally:
+            request_llm.reset(token)
+    return call
 
 
 def to_sync_callable(
@@ -51,7 +109,7 @@ def to_sync_callable(
     if hasattr(llm, "chat_sync"):
         def _call_via_gateway(prompt: str) -> str:
             try:
-                result = llm.chat_sync(
+                result = current_llm(llm).chat_sync(
                     query=prompt, max_tokens=max_tokens, temperature=temperature,
                 )
                 return str(result or "")

@@ -144,7 +144,7 @@ def test_llm_proactive_persona_falls_back_to_character_resolver(monkeypatch):
     delivered: list[tuple[str, str | None]] = []
     monkeypatch.setattr(
         s, "_deliver",
-        lambda msg, session_key=None: delivered.append((msg, session_key)) or True,
+        lambda msg, session_key=None, character_id=None: delivered.append((msg, session_key)) or True,
     )
     monkeypatch.setattr(s, "_resolve_proactive_llm", lambda eng=None: object())
 
@@ -357,7 +357,7 @@ def test_send_date_wish_uses_bound_persona(monkeypatch):
     delivered: list[str] = []
     monkeypatch.setattr(
         s, "_deliver",
-        lambda msg, session_key=None: delivered.append(msg) or True,
+        lambda msg, session_key=None, character_id=None: delivered.append(msg) or True,
     )
 
     s._send_date_wish(

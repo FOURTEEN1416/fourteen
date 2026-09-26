@@ -288,6 +288,7 @@ if _scheduler is not None:
     # 2026-09-20：修复「六点叫起床」事故——旧提醒链路只写库不触发（无轮询）、
     # 关键词裁决漏检意图、SQL UTC 与北京时间差 8 小时、投递目标缺失。
     def _install_reminder_delivery() -> None:
+        from api.byok import session_llm
         from proactive.reminder_delivery import ReminderDeliveryTask
 
         sm = getattr(orchestrator.components.get("memory"), "structured_memory", None)
@@ -334,29 +335,18 @@ if _scheduler is not None:
                 logger.warning("提醒 websocket 定向投递失败 session=%s: %s", session_key, e)
                 return False
 
-        def _character_resolver(session_key: str) -> str:
-            # 2026-09-22：多用户各绑不同角色——文案口吻按会话归属解析，
-            # 旧实现装配时取全局单值 current_character_name（绑错角色口吻）。
-            # 2026-09-22 块C 二次根治：旧实现以 `if not char_id` 判断"未绑定"，
-            # 但未绑定用户的 id 恰为内置默认角色 "default"（非空真值）→ 走
-            # get_card("default") 取不到文件卡 → 静默回落全局 current_character_name
-            # （A 的提醒用 B 的角色口吻）。现统一走 utils.character_resolver
-            # 唯一 owner，解析失败由它兜底为内置角色，**不再回落全局单值**。
+        def _character_id_resolver(session_key: str) -> str:
             from utils import character_resolver as _cr
 
-            char_id = _cr.resolve_character_id(session_key, user_mgr)
-            return _cr.display_name(char_id)
-
-        persona = orchestrator.components.get("persona")
-        character_name = getattr(persona, "current_character_name", "") or ""
+            return _cr.resolve_character_id(session_key, user_mgr)
         task = ReminderDeliveryTask(
             sm,
             llm=orchestrator.components.get("llm"),
             wechat_sender=_wechat_send,
             ws_sender=_ws_send,
-            character_name=str(character_name),
             memory=orchestrator.components.get("memory"),
-            character_resolver=_character_resolver,
+            character_id_resolver=_character_id_resolver,
+            llm_resolver=lambda key: session_llm(key, orchestrator),
         )
         _scheduler.register_reminder_task(task)
         logger.info("提醒到期投递任务已装配（每分钟轮询，豁免静默时段）")

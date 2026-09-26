@@ -2,6 +2,7 @@ import contextlib
 import os
 import shutil
 import sys
+from uuid import uuid4
 
 import pytest
 
@@ -63,7 +64,8 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     此处做进程级兜底：所有已知运行时状态文件指向 per-test 临时目录。
     需要真实文件的用例可用 `monkeypatch` 覆盖回原路径。
     """
-    sandbox = tmp_path_factory.mktemp("runtime_state")
+    # 唯一路径无需维护/反复删除 current 链接；也避免测试框架清理宿主旧临时目录。
+    sandbox = tmp_path_factory.mktemp(f"runtime_state_{uuid4().hex}", numbered=False)
     patched: list[tuple[object, str, object]] = []
 
     def _redirect(owner: object, attr: str, filename: str) -> None:
@@ -71,6 +73,10 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
             return
         patched.append((owner, attr, getattr(owner, attr)))
         monkeypatch.setattr(owner, attr, sandbox / filename, raising=False)
+
+    from orchestrator import session_locks
+
+    monkeypatch.setattr(session_locks, "_LOCK_ROOT", sandbox / "session_locks")
 
     # ProactiveScheduler 的跨 worker 配置真源（节流账本 + 衰减基准 + 开关）
     try:
@@ -112,7 +118,7 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
         from shisi.affinity import enhancer as _aff_enh
         from shisi.emotion_stage import stage_engine as _stage_eng
 
-        stage_db = tmp_path_factory.mktemp("shisi_state") / "sqlite.db"
+        stage_db = sandbox / "stage.db"
         monkeypatch.setattr(_aff_enh, "_DB_DEFAULT", stage_db, raising=False)
         monkeypatch.setattr(_stage_eng, "_DB_DEFAULT", stage_db, raising=False)
     except Exception:
@@ -126,7 +132,7 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
 
         monkeypatch.setattr(
             _sm_mod, "_DB_DEFAULT",
-            str(tmp_path_factory.mktemp("sm_state") / "sqlite.db"),
+            str(sandbox / "memory.db"),
             raising=False,
         )
     except Exception:
@@ -140,6 +146,12 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
         _redirect(_hot, "_STATE_PATH", "hot_topics.json")
     except Exception:
         pass
+
+    # 画像缓存同样只能使用合成库，模型同步读取不得碰宿主私人画像。
+    from shisi.memory.legacy import user_profile as _profile
+
+    original_store = _profile.default_store
+    monkeypatch.setattr(_profile, "default_store", lambda db_path=None: original_store(db_path or sandbox / "profile.db"))
 
     # 事件账本（2026-09-22 五域体检实证）：服务器验收期分块 pytest 直写生产
     # data/agent_plane.db——memory_write 事件与 "/tmp/pytest-of-root" 日志

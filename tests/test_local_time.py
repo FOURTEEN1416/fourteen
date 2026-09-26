@@ -136,6 +136,7 @@ def test_no_wall_clock_utc_regression_in_fixed_sites() -> None:
         "shisi/memory/legacy/memory_pipeline.py": 3,
         "shisi/stats/analytics.py": 0,
         "utils/important_dates.py": 0,
+        "shisi/memory/legacy/_legacy_diary_summarizer.py": 0,
         "proactive/frequency.py": 3,  # can_send/record_sent/record_reply 的时间差
     }
     needle = "datetime.now(tz=timezone.utc)"
@@ -266,7 +267,7 @@ def test_memory_fact_extraction_is_session_isolated() -> None:
 
     from shisi.memory.legacy.memory_pipeline import MemoryPipeline
 
-    raw = inspect.getsource(MemoryPipeline._do_fact_extraction)
+    raw = inspect.getsource(MemoryPipeline._extract_fact_snapshot)
     assert "get_recent_chats" not in raw.replace("get_recent_chats(10)", ""), (
         "_do_fact_extraction 不得读全局 chat_history；必须按 session_id 过滤"
     )

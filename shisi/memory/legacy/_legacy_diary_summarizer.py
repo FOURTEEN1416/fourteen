@@ -96,7 +96,6 @@ class DiarySummarizer:
         return {"trend": trend, "avg_mood": avg_mood, "notable_days": notable}
 
     def save_summary(self, date_str: str, summary: str) -> None:
-        self._daily_summaries[date_str] = summary
         if self._structured_memory:
             try:
                 with self._structured_memory.get_connection() as conn:
@@ -107,6 +106,8 @@ class DiarySummarizer:
                     conn.commit()
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to persist diary summary to DB: %s", e)
+                raise
+        self._daily_summaries[date_str] = summary
         logger.info("Diary summary saved for %s", date_str)
 
     def load_summaries_from_db(self) -> None:
@@ -139,10 +140,14 @@ class DiarySummarizer:
         return dict(self._daily_summaries)
 
     def _summarize_with_llm(self, chats: list[dict[str, Any]]) -> str:
-        chat_text = "\n".join(
-            f"{'用户' if c['role'] == 'user' else '十四'}: {c['content']}"
-            for c in chats[-30:]
-        )
+        import json
+
+        from .conversation_summarizer import ConversationSummarizer
+
+        # 分段覆盖全部来源，不能仅保留一天的最后30条。
+        if len(chats) > 30:
+            return "\n".join(self._summarize_with_llm(chats[i:i + 30]) for i in range(0, len(chats), 30))
+        chat_text = json.dumps(ConversationSummarizer._source_rows(chats, 1200), ensure_ascii=False)
         prompt = f"""以下是今天的对话记录，请生成简洁的每日摘要。
 
 要求：
@@ -150,13 +155,15 @@ class DiarySummarizer:
 2. 用户的情绪状态
 3. 有什么新发现或值得记住的事
 4. 关系进展
+5. 区分用户、角色及被转述者；引文中的人称不自动归给发言者。只记来源支持的事实。
 
 对话记录：
 {chat_text}
 
 每日摘要（100字以内）："""
         try:
-            return self.llm_func(prompt)  # type: ignore
+            result = self.llm_func(prompt)  # type: ignore
+            return str(result).strip() if result and str(result).strip() else self._summarize_with_template(chats)
         except Exception as e:  # noqa: BLE001
             logger.warning("LLM summary failed: %s", e)
             return self._summarize_with_template(chats)
@@ -177,7 +184,8 @@ class DiarySummarizer:
         emotions = [c.get("emotion_tag", "") for c in assistant_msgs
                     if c.get("emotion_tag")]
         emotion_summary = ", ".join(set(emotions)) if emotions else "未记录"
-        summary = f"今日共 {total} 条消息（用户 {user_count} 条，十四 {assistant_count} 条）."
+        roles = "、".join(sorted({str(c.get("character_id") or "归属未知") for c in assistant_msgs}))
+        summary = f"当日共 {total} 条消息（用户 {user_count} 条，角色[{roles}] {assistant_count} 条）."
         if mentioned:
             summary += f" 提到话题：{'、'.join(mentioned)}。"
         if emotion_summary != "未记录":
