@@ -1201,20 +1201,18 @@ class ASEEngine:
         知识库内容源 = 爬虫抓取/文档导入（/api/characters/{id}/knowledge/*）
         + 热点池（shisi/knowledge/hot_topics，采集→入库→此处供出，前置优先）。
         无函数注入/无索引/检索为空/无 LLM 且无热点 → 返回 None 回退模板消息。
-        """
-        func = self._knowledge_share_func
-        try:
-            # 热点前置（池空/全过期/异常 → 空串，静默降级走既有知识/模板）
-            from shisi.knowledge.hot_topics import get_hot_context
 
-            hot = str(get_hot_context(self._knowledge_character_id) or "")
-        except Exception:  # noqa: BLE001
-            hot = ""
+        源选择（热点前置 + 知识检索 + 逐侧降级）收口在统一读接口
+        `llm_proactive.load_proactive_knowledge`（缺陷 H：本线曾自己拼一份，
+        而生产决策链另走一路，两边各自漂移）。
+        """
         try:
-            context = ""
-            if func and self._knowledge_character_id:
-                context = str(func(self._knowledge_character_id) or "")
-            combined = "\n\n".join(x for x in (hot, context) if x)
+            from proactive.llm_proactive import load_proactive_knowledge
+
+            combined = load_proactive_knowledge(
+                self._knowledge_character_id,
+                knowledge_reader=self._knowledge_share_func,
+            )
             if not combined or len(combined) < 20:
                 return None
             excerpt = combined[:300]

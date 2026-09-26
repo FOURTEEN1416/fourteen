@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 logger = logging.getLogger("llm_proactive")
@@ -31,6 +32,64 @@ DECISION_SYSTEM = """你是伴侣角色的**主动消息决策器**。
 6. 不编造用户未说过的信息。
 7. should_contact=false 时 message 可为空。
 """
+
+
+PROACTIVE_KNOWLEDGE_QUERY = "最近话题 兴趣 资讯"
+PROACTIVE_KNOWLEDGE_TOP_K = 2
+
+
+def load_proactive_knowledge(
+    character_id: str,
+    *,
+    query: str = PROACTIVE_KNOWLEDGE_QUERY,
+    top_k: int = PROACTIVE_KNOWLEDGE_TOP_K,
+    knowledge_reader: Callable[[str], str] | None = None,
+) -> str:
+    """主动消息的**统一知识读接口**：角色知识库 + 热点池 → 一段可注入上下文。
+
+    旧现状是「知识只活在已旁路的 ASE 生成线」：`ase_engine._try_knowledge_share`
+    自己拼热点（直连 `get_hot_context`）与知识（装配注入的闭包）两份，而生产
+    主动消息走的是 LLM 决策链（`scheduler._llm_proactive_one_user`）——它从不读
+    知识，于是知识库与热点池在真实链路上永不落地（缺陷 H）。本函数是唯一 door：
+    两条线都经它读出，源选择逻辑不再有两份实现。
+
+    - `character_id` **必须由调用方按当轮会话解析后传入**（scheduler 侧即
+      `_resolve_character_id`）。空 id 直接空串：绝不退化成"读某个全局活跃角色"，
+      那等于把别人的角色内容装进她的嘴。
+    - `knowledge_reader` 为装配层已注入的 `character_id→检索` 闭包时复用它
+      （不把它变成死属性），否则直连 `CharacterKnowledgeService`。
+    - 两侧各判一次成功与否：一侧异常不得连带弃掉另一侧（旧实现整段一个 try，
+      热点池读取炸了会把知识一起丢掉）。两侧皆空 → ""（调用方整段不注入）。
+    """
+    cid = str(character_id or "").strip()
+    if not cid:
+        return ""
+    blocks: list[str] = []
+    try:
+        from shisi.knowledge.hot_topics import get_hot_context
+
+        blocks.append(str(get_hot_context(cid) or "").strip())
+    except Exception as e:  # noqa: BLE001
+        logger.debug("热点池读取失败 cid=%s: %s", cid, e)
+    try:
+        if knowledge_reader is not None:
+            text = str(knowledge_reader(cid) or "")
+        else:
+            from shisi.core.services.prompt_builder import IDENTITY_KNOWLEDGE_SOURCES
+            from shisi.knowledge.character_knowledge_service import get_knowledge_service
+
+            # 卡片身份字段（名字/锚点/扮演规则）由人设段以唯一 owner 注入，以
+            # 「可分享的真实内容」名义回声 = 她会把自己的名字当新闻说。
+            text = str(
+                get_knowledge_service().get_knowledge_context(
+                    cid, query, top_k=top_k,
+                    exclude_sources=IDENTITY_KNOWLEDGE_SOURCES,
+                ) or ""
+            )
+        blocks.append(text.strip())
+    except Exception as e:  # noqa: BLE001
+        logger.debug("角色知识库读取失败 cid=%s: %s", cid, e)
+    return "\n\n".join(b for b in blocks if b)
 
 
 def read_web_proactive_config() -> dict[str, Any]:
@@ -71,6 +130,7 @@ def build_proactive_context(
     recent_messages: list[dict[str, Any]] | None = None,
     urgency_signal: float | None = None,
     persona_hint: str = "",
+    knowledge_hint: str = "",
     web_config: dict[str, Any] | None = None,
     quiet_hours: tuple[int, int] | None = None,
     extra: str = "",
@@ -91,6 +151,10 @@ def build_proactive_context(
 
     这两个参数均为**可选**：调用方拿不到时留空/为 None，提示词相应段落
     整段不出现（宁缺毋串，不注入占位假值）。
+
+    `knowledge_hint` 同构：由 `load_proactive_knowledge` 读出的真实材料（角色知识库
+    / 热点池）。决策层拿不到它时只能按时间泛泛开口（「在忙什么呀」），有材料才可
+    以转述一件真实的事。
     """
     prof = profile or {}
     web = {**DEFAULT_WEB_CONFIG, **(web_config or {})}
@@ -139,6 +203,12 @@ def build_proactive_context(
         parts.append("【当前角色最近主动发出的话】" + " ｜ ".join(str(t) for t in proactive_history[-3:]))
     if urgency_signal is not None:
         parts.append(f"紧迫度信号（仅参考）：{urgency_signal:.2f}")
+    if knowledge_hint:
+        parts.append(
+            "【可分享的真实内容（角色知识库 / 近日热点）】\n"
+            + knowledge_hint[:600]
+            + "\n只能当作谈资转述，不得声称你亲历现场，也不要整段照读。"
+        )
     # web 可调参数（动态，非硬编码日程）
     parts.append("【控制台可调参数】")
     if web.get("style_hint"):

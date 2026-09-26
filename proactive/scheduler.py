@@ -1103,6 +1103,7 @@ class ProactiveScheduler:
             build_proactive_context,
             decide_proactive,
             load_persona_hint,
+            load_proactive_knowledge,
             read_web_proactive_config,
         )
         from shisi.agent_plane.runtime import (
@@ -1183,6 +1184,10 @@ class ProactiveScheduler:
         # 身份来自当前会话绑定，不把缓存引擎首次创建时的人设当成当前角色。
         char_id = self._resolve_character_id(str(user_key))
         persona = load_persona_hint(char_id) if char_id else ""
+        # 缺陷 H：真实可分享内容（角色知识库 + 热点池）经统一读接口进**决策链**。
+        # 角色 id 用当轮解析值，不用引擎创建时缓存的 `_knowledge_character_id`
+        # （切角色后那是旧角色 → 把别人的角色内容当谈资）。
+        knowledge = load_proactive_knowledge(char_id) if char_id else ""
         recent = []
         memory = self._resolve_memory()
         getter = getattr(memory, "get_chat_context", None)
@@ -1211,6 +1216,7 @@ class ProactiveScheduler:
             relationship_hint=rel,
             urgency_signal=urgency,
             persona_hint=persona,
+            knowledge_hint=knowledge,
             recent_messages=recent,
             web_config=web_cfg,
             quiet_hours=quiet,
