@@ -15,6 +15,7 @@
 - **上线后验收**：health/ready 全绿；4 worker + supervisor；`NRestarts=0`；新日志 0 Traceback / 0 锁冲突 / 0 缺列缺表；nginx 四文件 sha256 前后一致（大赛入口 `139.199.199.174:80` 零改动）；81 个改动源码 blob 三端 `git hash-object` 一致；服务器独立源码沙箱 118 条契约测试通过。
 - **上线后补漏（`f85408f`）**：CI 首次全红暴露 `sqlalchemy` 缺 `asyncio` extra → 干净环境无 `greenlet`，`sqlalchemy.ext.asyncio` 导入失败（backend / 前端 E2E / FF 子路由三 job 同根因）。本地与生产恰好预装故长期不显。改为 `sqlalchemy[asyncio]>=2.0.0` 后 CI（36247485708）全绿。**跨环境依赖声明必须以干净环境为准。**
 - **中间产物清除**：`outputs/` 129 个顶层条目 / 9,490 文件（含测试沙箱、旧批次日志、参考下载、部署 bundle 与 runner）—— 清除前确认 5,470 个内嵌链接**全部落在 `outputs` 内且不指向任何保留文件**；回收站不可用（`NukeOnDelete=1`）故为永久删除，已向用户明示并二次确认。保留 11 个交付/审计文件（补丁、机器验收摘要、四块最终验收日志、收集口径、上线记录、服务器验收、清理清单）。**服务器侧**同步清除 `/tmp` 测试沙箱 1,080 文件与 3 个传输包，生产备份保留。
+- **⚠️ 清理误删与恢复（本批唯一事故，务必记住）**：清理 `/tmp` 时把 `/tmp/ai-girlfriend-scheduler.lock` 当作本轮残留删除。核对后确认：该 unit **`PrivateTmp=no`**，此文件正是 `api/run_api.py::_ensure_scheduler_singleton()` 的**生产调度器单例锁**（flock）。master worker 仍持 fd，故当时调度未中断；但路径被 unlink 后，**任何新起 worker 会 `O_CREAT` 新建 inode 并再次抢到锁 → 两个调度器并行（主动消息/提醒翻倍）**。处置：冷停（判据 `MainPID=0`+cgroup 空）→ 清除残留路径 → 重启 → 新 inode 上四 worker 重新竞争，实测 **1 master + 3 slave**、health/ready 全绿、新窗日志 0 Traceback。**纪律：`/tmp/ai-girlfriend-*.lock` 是生产运行态互斥文件，不可当残留删除；清理 `/tmp` 前先 `grep -rn "/tmp/ai-girlfriend" ` 反查引用点。**
 - **边界**：本次为工程上线与验收，未做真实模型语义效果评测；生产四 worker 并发与真实更正序列仍待自然流量观察。
 
 ---

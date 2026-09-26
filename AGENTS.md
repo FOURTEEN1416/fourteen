@@ -22,6 +22,7 @@
 - 迁移纪律：冷停 → 冷包 + 三库 `.backup`（逐库 `integrity_check`）→ **真实副本重复初始化演练**（验幂等与行数）→ 生产执行 → 行数比对。本次六表行数前后一致。
 - 依赖声明纪律：`sqlalchemy` 必须带 `asyncio` extra，否则干净环境缺 `greenlet`，`sqlalchemy.ext.asyncio` 导入即失败；**本地预装 ≠ 声明完整**，以干净环境（CI）为准。
 - 线上验证：81 改动源码 blob 三端 `git hash-object` 一致、health/ready 全绿、nginx sha256 零变化、新日志 0 Traceback/0 锁冲突/0 缺列缺表。
+- 🔴 **清理 `/tmp` 的禁区**：本机该 unit `PrivateTmp=no`，`/tmp/ai-girlfriend-scheduler.lock` 是**生产调度器单例 flock**（`api/run_api.py::_ensure_scheduler_singleton`）。删路径不立即中断（master 仍持 fd），但**新 worker 会新建 inode 再抢到锁 → 调度器翻倍**。删前先 `grep -rn "/tmp/ai-girlfriend"` 反查引用；若已误删，冷停 → 删残留路径 → 重启，并核实日志为 **1 master + 3 slave**。
 - 最新验证、遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md` 2026-09-26。
 
 ## 本批重构确立的设计规则（2026-09-26 上线，改前必查）
