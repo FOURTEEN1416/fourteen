@@ -135,53 +135,86 @@ def _get_pe():
 
 @router.get("/api/psych/profile")
 async def psych_profile(
+    character_id: str | None = Query(default=None),
+    session_id: str | None = Query(default=None),
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
+    """画像摘要：按生成侧写入的 scope 取数（`{character_id}:{session_id}`）。
+
+    旧实现固定读 `pe.user_id`（默认 `default`，请求链早已不再切换），与生成侧
+    键空间错位，页面恒报"画像尚未生成"。
+    """
     pe = _get_pe()
     if pe is None:
-        return {"user_id": "default", "status": "unavailable", "snapshots": 0}
-    return pe.get_user_profile_summary()
+        return {
+            "user_id": "default",
+            "scope": "default",
+            "scope_count": 0,
+            "status": "unavailable",
+            "snapshots": 0,
+        }
+    scope, scope_count = pe.resolve_profile_scope(character_id, session_id)
+    return pe.profile_summary(scope, scope_count)
 
 
 @router.get("/api/psych/snapshots")
 async def psych_snapshots(
     limit: int = Query(default=20, ge=1, le=200),
+    character_id: str | None = Query(default=None),
+    session_id: str | None = Query(default=None),
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     pe = _get_pe()
     if pe is None:
         return {"snapshots": []}
-    snaps = pe.bank.get_recent_snapshots(user_id=pe.user_id, limit=limit)
-    return {"snapshots": [s.to_dict() for s in snaps]}
+    scope, _count = pe.resolve_profile_scope(character_id, session_id)
+    snaps = pe.bank.get_recent_snapshots(user_id=scope, limit=limit)
+    return {"scope": scope, "snapshots": [s.to_dict() for s in snaps]}
 
 
 @router.delete("/api/psych/profile")
 async def reset_psych_profile(
+    character_id: str | None = Query(default=None),
+    session_id: str | None = Query(default=None),
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
+    """清除画像：无过滤条件时清除**全部**已学 scope（与页面文案一致）。
+
+    旧实现只清 `pe.user_id` 那一个（通常是空的 `default` 桶），却对用户承诺
+    "清除所有已学习的心理特征数据"；失败时还返回 200 + `{"status":"failed"}`。
+    """
     pe = _get_pe()
     if pe is None:
         raise HTTPException(503, "PersonaExtractor未初始化")
-    ok = pe.bank.clear_user(pe.user_id)
-    return {"status": "reset" if ok else "failed"}
+    res = pe.clear_profiles(character_id, session_id)
+    if res["failed"] > 0:
+        raise HTTPException(
+            500,
+            f"心理画像未全部清除：{res['cleared']}/{len(res['targets'])}，请重试",
+        )
+    return {"status": "reset", "cleared": res["cleared"], "scopes": res["targets"]}
 
 
 @router.get("/api/psych/mental-health")
 async def psych_mental_health(
+    character_id: str | None = Query(default=None),
+    session_id: str | None = Query(default=None),
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     pe = _get_pe()
     if pe is None:
         return {"available": False}
-    persona = pe.bank.get_persona(pe.user_id)
+    scope, _count = pe.resolve_profile_scope(character_id, session_id)
+    persona = pe.bank.get_persona(scope)
     if persona is None:
-        return {"available": True, "data": None}
+        return {"available": True, "scope": scope, "data": None}
     return {
         "available": True,
+        "scope": scope,
         "mental_health": persona.mental_health,
         "cognitive": persona.cognitive,
         "liwc": persona.liwc,
@@ -192,13 +225,16 @@ async def psych_mental_health(
 
 @router.get("/api/psych/liwc")
 async def psych_liwc(
+    character_id: str | None = Query(default=None),
+    session_id: str | None = Query(default=None),
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     pe = _get_pe()
     if pe is None or not pe.liwc:
         return {"available": False}
-    persona = pe.bank.get_persona(pe.user_id)
+    scope, _count = pe.resolve_profile_scope(character_id, session_id)
+    persona = pe.bank.get_persona(scope)
     if persona is None or not persona.liwc:
-        return {"available": True, "data": None}
-    return {"available": True, "data": persona.liwc}
+        return {"available": True, "scope": scope, "data": None}
+    return {"available": True, "scope": scope, "data": persona.liwc}

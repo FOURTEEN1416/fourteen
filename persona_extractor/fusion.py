@@ -26,6 +26,21 @@ from .style_vectorizer import StyleVectorizer
 logger = logging.getLogger("persona_extractor")
 
 
+def profile_scope(character_id: str, session_id: str = "") -> str:
+    """心理画像 scope 键的**唯一构造器**：`{character_id}:{session_id}`。
+
+    画像按「哪个角色眼里的哪个会话」分桶：生成侧（`orchestrator` 的
+    `process_message` 准备段）用它，控制面（`/api/psych/*`）也必须用它解析，
+    否则读写两侧键空间错位（历史缺陷 E：控制面恒读 `default` 空桶）。
+    无会话键时退化为角色键本身。
+    """
+    cid = (character_id or "").strip()
+    sid = (session_id or "").strip()
+    if cid and sid:
+        return f"{cid}:{sid}"
+    return cid or sid
+
+
 class PersonaExtractor:
     """人格提取器 — 融合适配器的顶层接口
 
@@ -276,16 +291,77 @@ class PersonaExtractor:
         )
         return adjusted.to_dict()
 
-    def get_user_profile_summary(self) -> dict:
-        """获取用户画像摘要（给 health_check / 前端）"""
-        persona = self.bank.get_persona(self.user_id)
+    # ── 画像 scope 解析（控制面与生成侧同源）──
+
+    def profile_scopes(
+        self, character_id: str | None = None, session_id: str | None = None,
+    ) -> list[str]:
+        """列出与过滤条件匹配的**已存** scope，新→旧。
+
+        无任何过滤条件时返回全部已存 scope（控制面的「全部」语义）。
+        """
+        stored = self.bank.list_persona_scopes()
+        cid = (character_id or "").strip()
+        sid = (session_id or "").strip()
+        if cid and sid:
+            exact = profile_scope(cid, sid)
+            return [k for k in stored if k == exact]
+        if cid:
+            return [k for k in stored if k == cid or k.startswith(f"{cid}:")]
+        if sid:
+            return [k for k in stored if k == sid or k.endswith(f":{sid}")]
+        return list(stored)
+
+    def resolve_profile_scope(
+        self, character_id: str | None = None, session_id: str | None = None,
+    ) -> tuple[str, int]:
+        """读侧目标 scope：命中则取最近更新的一份，否则回显请求的 scope 与 0 份。"""
+        scopes = self.profile_scopes(character_id, session_id)
+        if scopes:
+            return scopes[0], len(scopes)
+        cid = (character_id or "").strip()
+        sid = (session_id or "").strip()
+        if cid or sid:
+            return profile_scope(cid, sid), 0
+        return self.user_id, 0
+
+    def clear_profiles(
+        self, character_id: str | None = None, session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """清除匹配 scope 的画像与快照；无过滤条件时清除**全部**已学画像。
+
+        目标只取「盘上真有其人」的 scope，`cleared` 因此就是被清掉的画像份数，
+        与页面文案「清除所有已学习的心理特征数据」同口径。
+        """
+        stored = self.bank.list_persona_scopes()
+        targets = self.profile_scopes(character_id, session_id)
+        if not (character_id or session_id) and self.user_id in stored:
+            targets = [*targets, self.user_id]  # 兼容历史 default 桶
+        cleared = self.bank.clear_users(targets)
+        return {
+            "targets": targets,
+            "cleared": cleared,
+            "failed": len(targets) - cleared,
+        }
+
+    def profile_summary(self, scope: str, scope_count: int = 1) -> dict:
+        """指定 scope 的画像摘要（给控制面 / 前端）。"""
+        persona = self.bank.get_persona(scope)
         if persona is None:
-            return {"user_id": self.user_id, "status": "insufficient_data", "snapshots": 0}
+            return {
+                "user_id": scope,
+                "scope": scope,
+                "scope_count": scope_count,
+                "status": "insufficient_data",
+                "snapshots": 0,
+            }
 
         summary = {
-            "user_id": self.user_id,
-            "status": "stable" if self.bank.is_stable(self.user_id) else "learning",
-            "stability": round(self.bank.get_stability_score(self.user_id), 3),
+            "user_id": scope,
+            "scope": scope,
+            "scope_count": scope_count,
+            "status": "stable" if self.bank.is_stable(scope) else "learning",
+            "stability": round(self.bank.get_stability_score(scope), 3),
             "snapshots": persona.snapshot_count,
             "ocean": persona.ocean.to_dict(),
             "pad": persona.pad.to_dict(),

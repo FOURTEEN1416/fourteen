@@ -22,6 +22,7 @@ import json
 import logging
 import sqlite3
 import threading
+from collections.abc import Sequence
 
 from .models import (
     OceanTraits,
@@ -295,23 +296,47 @@ class UserPersonaBank:
             logger.error("Failed to load snapshots: %s", e)
             return []
 
-    def clear_user(self, user_id: str = "default") -> bool:
-        """清除用户数据（用于测试）"""
+    def list_persona_scopes(self) -> list[str]:
+        """已存画像的 scope 键，按 `last_updated` 新→旧。
+
+        scope 由调用方决定（生成侧是 `{character_id}:{session_id}`），bank 只如实
+        列出，不做语义解释。
+        """
         if not self._conn:
-            return False
+            return []
         try:
-            self._conn.execute(
-                "DELETE FROM user_persona WHERE user_id = ?", (user_id,)
-            )
-            self._conn.execute(
-                "DELETE FROM user_persona_snapshots WHERE user_id = ?", (user_id,)
-            )
-            self._conn.commit()
-            self._cache.pop(user_id, None)
-            return True
+            rows = self._conn.execute(
+                "SELECT user_id FROM user_persona ORDER BY last_updated DESC"
+            ).fetchall()
+            return [row[0] for row in rows]
         except Exception as e:  # noqa: BLE001
-            logger.error("Failed to clear user: %s", e)
-            return False
+            logger.error("Failed to list persona scopes: %s", e)
+            return []
+
+    def clear_users(self, user_ids: Sequence[str]) -> int:
+        """批量清除画像与快照，返回**成功清除**的 scope 数。
+
+        逐键提交：某一键失败不影响其余，失败数由调用方与目标数比对后暴露。
+        """
+        if not self._conn:
+            return 0
+        cleared = 0
+        for user_id in user_ids:
+            try:
+                with self._lock:
+                    self._conn.execute(
+                        "DELETE FROM user_persona WHERE user_id = ?", (user_id,)
+                    )
+                    self._conn.execute(
+                        "DELETE FROM user_persona_snapshots WHERE user_id = ?",
+                        (user_id,),
+                    )
+                    self._conn.commit()
+                    self._cache.pop(user_id, None)
+                cleared += 1
+            except Exception as e:  # noqa: BLE001
+                logger.error("Failed to clear scope %s: %s", user_id, e)
+        return cleared
 
     def health_check(self) -> dict:
         return {

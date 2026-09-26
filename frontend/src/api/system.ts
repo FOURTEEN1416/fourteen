@@ -87,12 +87,24 @@ export function wechatConnectionStatus() { return client.get('/wechat/channel') 
 export function wechatQrCode() { return client.get('/wechat/channel/qrcode') }
 
 // ── Psychology Profile ──
+// 画像按 scope 存（生成侧键 = `{character_id}:{session_id}`），控制面必须带
+// character_id 读/清，否则会读到与页面标题「角色 X 对你的理解」不同源的旧数据。
 
-export function psychProfile() { return client.get('/psych/profile') }
-export function psychSnapshots(limit = 20) { return client.get('/psych/snapshots', { params: { limit } }) }
-export function psychReset() { return client.delete('/psych/profile') }
-export function psychMentalHealth() { return client.get('/psych/mental-health') }
-export function psychLiwc() { return client.get('/psych/liwc') }
+export function psychProfile(characterId?: string) {
+  return client.get('/psych/profile', { params: { character_id: characterId } })
+}
+export function psychSnapshots(limit = 20, characterId?: string) {
+  return client.get('/psych/snapshots', { params: { limit, character_id: characterId } })
+}
+export function psychReset(characterId?: string) {
+  return client.delete('/psych/profile', { params: { character_id: characterId } })
+}
+export function psychMentalHealth(characterId?: string) {
+  return client.get('/psych/mental-health', { params: { character_id: characterId } })
+}
+export function psychLiwc(characterId?: string) {
+  return client.get('/psych/liwc', { params: { character_id: characterId } })
+}
 
 // ── Safety Panel ──
 

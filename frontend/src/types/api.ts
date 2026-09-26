@@ -309,6 +309,10 @@ export interface StyleVector {
 
 export interface PsychProfile {
   user_id: string
+  /** 生成侧写入所用的画像键（`{character_id}:{session_id}`），页面据此说明"这是哪一份画像" */
+  scope?: string
+  /** 该过滤条件命中的画像份数（0 = 盘上还没有） */
+  scope_count?: number
   status: 'stable' | 'learning' | 'insufficient_data' | 'unavailable'
   stability: number
   snapshots: number
@@ -322,6 +326,13 @@ export interface PsychProfile {
   mental_health?: MentalHealthSnapshot
   liwc?: LiwcProfile
   cognitive?: CognitiveDistortionResult
+}
+
+export interface PsychResetResult {
+  status: string
+  /** 实际清除的画像份数（与文案「清除了 N 份」同口径） */
+  cleared: number
+  scopes: string[]
 }
 
 export interface HexacoTraits {

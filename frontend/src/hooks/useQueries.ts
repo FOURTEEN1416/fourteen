@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import client, { api } from '../api/client'
 import { useErrorStore } from '../store/errorStore'
-import type { EmotionState, DashboardStats, HealthStatus, WeChatStatus, TrainingProgress, ProactiveEngineState, MemoryFact, PsychProfile, PsychSnapshot, SafetyStats, SafetyLogEntry, RAGStats, VoiceStatus, PluginsList, ToolHistoryEntry, ProactiveHistoryEntry, MentalHealthSummary } from '../types/api'
+import type { EmotionState, DashboardStats, HealthStatus, WeChatStatus, TrainingProgress, ProactiveEngineState, MemoryFact, PsychProfile, PsychResetResult, PsychSnapshot, SafetyStats, SafetyLogEntry, RAGStats, VoiceStatus, PluginsList, ToolHistoryEntry, ProactiveHistoryEntry, MentalHealthSummary } from '../types/api'
 
 export const queryKeys = {
   characters: { all: ['characters'] as const, detail: (id: string) => ['characters', id] as const },
@@ -18,7 +18,12 @@ export const queryKeys = {
   channels: ['channels'] as const,
   logs: { all: (params?: Record<string, unknown>) => ['logs', params] as const },
   clone: { contacts: (kw?: string) => ['clone', 'contacts', kw] as const, datasets: ['clone', 'datasets'] as const, stats: ['clone', 'stats'] as const },
-  psych: { profile: ['psych', 'profile'] as const, snapshots: ['psych', 'snapshots'] as const, mentalHealth: ['psych', 'mentalHealth'] as const },
+  psych: {
+    all: ['psych'] as const,
+    profile: (characterId?: string) => ['psych', 'profile', characterId ?? ''] as const,
+    snapshots: (characterId?: string) => ['psych', 'snapshots', characterId ?? ''] as const,
+    mentalHealth: (characterId?: string) => ['psych', 'mentalHealth', characterId ?? ''] as const,
+  },
   achievements: (characterId: string) => ['achievements', characterId] as const,
   safety: { stats: ['safety', 'stats'] as const, log: ['safety', 'log'] as const },
   rag: { stats: ['rag', 'stats'] as const },
@@ -173,10 +178,10 @@ export function useChannels() {
   })
 }
 
-export function usePsychProfile() {
+export function usePsychProfile(characterId?: string) {
   return useQuery({
-    queryKey: queryKeys.psych.profile,
-    queryFn: () => api.psychProfile().then(r => r.data as PsychProfile),
+    queryKey: queryKeys.psych.profile(characterId),
+    queryFn: () => api.psychProfile(characterId).then(r => r.data as PsychProfile),
     refetchInterval: 30 * 1000,
   })
 }
@@ -194,10 +199,10 @@ export function useAchievements(characterId: string | null | undefined) {
   })
 }
 
-export function usePsychSnapshots(limit = 20) {
+export function usePsychSnapshots(limit = 20, characterId?: string) {
   return useQuery({
-    queryKey: [...queryKeys.psych.snapshots, limit],
-    queryFn: () => api.psychSnapshots(limit).then(r => (r.data as { snapshots: PsychSnapshot[] }).snapshots),
+    queryKey: [...queryKeys.psych.snapshots(characterId), limit],
+    queryFn: () => api.psychSnapshots(limit, characterId).then(r => (r.data as { snapshots: PsychSnapshot[] }).snapshots),
     staleTime: 30 * 1000,
   })
 }
@@ -205,10 +210,11 @@ export function usePsychSnapshots(limit = 20) {
 export function usePsychReset() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: () => api.psychReset().then(r => r.data),
+    // 可选角色维度：只清该角色名下的会话画像；缺省 = 清全部已学画像
+    mutationFn: (characterId?: string) =>
+      api.psychReset(characterId).then(r => r.data as PsychResetResult),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.psych.profile })
-      qc.invalidateQueries({ queryKey: queryKeys.psych.snapshots })
+      qc.invalidateQueries({ queryKey: queryKeys.psych.all })
     },
   })
 }
@@ -281,10 +287,10 @@ export function useProactiveHistory(limit = 50) {
   })
 }
 
-export function useMentalHealth() {
+export function useMentalHealth(characterId?: string) {
   return useQuery({
-    queryKey: queryKeys.psych.mentalHealth,
-    queryFn: () => api.psychMentalHealth().then(r => r.data as MentalHealthSummary),
+    queryKey: queryKeys.psych.mentalHealth(characterId),
+    queryFn: () => api.psychMentalHealth(characterId).then(r => r.data as MentalHealthSummary),
     refetchInterval: 30 * 1000,
   })
 }

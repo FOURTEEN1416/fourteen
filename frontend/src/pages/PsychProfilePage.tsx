@@ -77,19 +77,24 @@ function RiskBadge({ level }: { level: string }) {
 
 export default function PsychProfilePage() {
   const { activeCharacter } = useActiveCharacter()
-  const { data: profile, isLoading } = usePsychProfile()
-  const { data: snapshots } = usePsychSnapshots(10)
+  const characterId = activeCharacter?.id
+  const { data: profile, isLoading } = usePsychProfile(characterId)
+  const { data: snapshots } = usePsychSnapshots(10, characterId)
   const resetMutation = usePsychReset()
   const [confirmReset, setConfirmReset] = useState(false)
   const { addToast } = useErrorStore.getState()
 
   const status = profile?.status ?? 'unavailable'
   const hasData = status === 'stable' || status === 'learning'
+  const scopeCount = profile?.scope_count ?? 0
 
   function handleReset() {
-    resetMutation.mutate(undefined, {
-      onSuccess: () => addToast({ type: 'success', message: '心理画像已重置' }),
-      onError: () => addToast({ type: 'error', message: '重置失败' }),
+    resetMutation.mutate(characterId, {
+      onSuccess: (res) => addToast({
+        type: 'success',
+        message: `已清除 ${res?.cleared ?? 0} 份心理画像，角色会重新从对话中认识你`,
+      }),
+      onError: () => addToast({ type: 'error', message: '重置失败：画像可能仍保留，请重试' }),
     })
     setConfirmReset(false)
   }
@@ -144,7 +149,9 @@ export default function PsychProfilePage() {
                 {status === 'insufficient_data' ? '对话样本还不够' : '画像尚未生成'}
               </p>
               <p className="text-xs text-gray-400 max-w-sm mx-auto leading-relaxed">
-                多和角色聊几轮，系统会从对话文本中逐步学习你的性格特征、情绪模式与语言风格。
+                {activeCharacter
+                  ? `「${activeCharacter.name}」还没有从与你的对话中学到足够特征——多聊几轮即可逐步建立。`
+                  : '多和角色聊几轮，系统会从对话文本中逐步学习你的性格特征、情绪模式与语言风格。'}
               </p>
             </div>
           ) : (
@@ -155,6 +162,15 @@ export default function PsychProfilePage() {
                 <span>稳定度：<span className="font-mono">{Math.round((profile?.stability ?? 0) * 100)}%</span></span>
                 <span>快照数：<span className="font-mono">{profile?.snapshots ?? 0}</span></span>
                 <span>样本窗口：{profile?.snapshots ?? 0} 次检测</span>
+              </div>
+
+              {/* 画像按「角色 × 会话」各存一份：这里显示的是哪一份、共几份 */}
+              <div className="rounded-xl bg-white/40 border border-gray-100 px-4 py-2.5 text-[11px] text-gray-400 leading-relaxed space-y-1">
+                <p>
+                  当前显示：{profile?.scope ?? '—'}
+                  {scopeCount > 1 ? `（该角色共 ${scopeCount} 份会话画像，取最近更新的一份）` : scopeCount === 1 ? '（该角色仅此 1 份会话画像）' : ''}
+                </p>
+                <p>画像按「角色 × 会话」分别学习，换角色或换会话不会共用同一份数据。</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -288,7 +304,11 @@ export default function PsychProfilePage() {
       <ConfirmDialog
         open={confirmReset}
         title="重置心理画像"
-        message="将清除所有已学习的心理特征数据，角色会重新从对话中认识你。此操作不可撤销。"
+        message={
+          activeCharacter
+            ? `将清除角色「${activeCharacter.name}」名下已学习的 ${scopeCount || profile?.snapshots || 0} 份会话心理画像，该角色会重新从对话中认识你。其他角色的画像不受影响。此操作不可撤销。`
+            : '将清除所有已学习的心理特征数据，角色会重新从对话中认识你。此操作不可撤销。'
+        }
         confirmText="确认重置"
         onConfirm={handleReset}
         onCancel={() => setConfirmReset(false)}
