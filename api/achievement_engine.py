@@ -8,7 +8,7 @@
 
 事实源（全部为已存在的生产数据）：
 - 长期记忆事实: data/character_memory/{id}.json（character_routes 同源）
-- 角色日记: daily_summaries（内存态 ds.get_all_summaries）
+- 角色日记: daily_summaries 表（跨进程真源，键 = `会话|角色|日期`，按角色段归属）
 - 角色知识库: CharacterKnowledgeService.get_stats
 - 重要日期: data/important_dates.json（utils.important_dates 同源）
 - 音色绑定: CharacterVoiceManager.get_voice_config
@@ -51,8 +51,8 @@ class AchievementDef:
 # ── 成就注册表（四类，对应 ADR-0014 第一阶段）──
 ACHIEVEMENTS: tuple[AchievementDef, ...] = (
     AchievementDef("companion_first", "初次相识", "沉淀下第一份共同记忆", "companion", "memories", 1),
-    AchievementDef("companion_week", "相伴七日", "积累 7 篇每日摘要", "companion", "diary", 7),
-    AchievementDef("companion_month", "相伴一月", "积累 30 篇每日摘要", "companion", "diary", 30),
+    AchievementDef("companion_week", "相伴七日", "与该角色累计 7 天日记", "companion", "diary", 7),
+    AchievementDef("companion_month", "相伴一月", "与该角色累计 30 天日记", "companion", "diary", 30),
     AchievementDef("memory_10", "记忆初绽", "长期记忆达到 10 条", "memory", "memories", 10),
     AchievementDef("memory_50", "博闻强识", "长期记忆达到 50 条", "memory", "memories", 50),
     AchievementDef("voice_bound", "初声", "为角色绑定专属音色", "interaction", "voice", 1),
@@ -80,17 +80,60 @@ def _count_memory_facts(character_id: str) -> int:
         return 0
 
 
-def _count_diary() -> int:
+def _memory_component() -> Any:
     orch = deps.orch
-    mem = orch.components.get("memory") if orch and orch.components else None
-    ds = getattr(mem, "ds", None)
-    if ds is None:
-        return 0
+    components = getattr(orch, "components", None) or {}
+    return components.get("memory") if orch is not None else None
+
+
+def _diary_keys_from_source(mem: Any) -> list[str] | None:
+    """日记条目键的**跨进程真源**（`daily_summaries` 表）。
+
+    返回 None 表示不可读（表尚未由日记器创建 / 无 SQLite 句柄 / 异常），
+    调用方退回进程视图并记 warning —— 静默退回会让"进度永远不涨"变成
+    无迹可查的哑故障。
+    """
+    sm = getattr(mem, "structured_memory", None)
+    conn_ctx = getattr(sm, "get_connection", None)
+    if not callable(conn_ctx):
+        return None
     try:
-        return len(ds.get_all_summaries() or {})
-    except Exception:  # noqa: BLE001
-        logger.debug("成就引擎读取日记失败", exc_info=True)
+        with conn_ctx() as conn:
+            rows = conn.execute("SELECT date FROM daily_summaries").fetchall()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("成就引擎读取日记真源失败（退回进程视图）: %s", e)
+        return None
+    return [str(r[0]) for r in rows if r and r[0] is not None]
+
+
+def _diary_character(key: str) -> str:
+    """日记键 `session|character|date` 的角色段；无角色段的旧条目为 ''。"""
+    parts = str(key).split("|")
+    return parts[-2] if len(parts) >= 3 else ""
+
+
+def _count_diary(character_id: str) -> int:
+    """**该角色**的日记天数（按日期去重）。
+
+    旧实现是 `len(ds.get_all_summaries())`：既不带角色维度（任何角色读到同一个
+    全库总数，A 的日记替 B 达成「相伴七日」），又只读每进程内存缓存（调度器
+    进程落库的新日记对处理 HTTP 的 worker 不可见，同一指标在 GET 与每日维护之间
+    读成两个数），还按行数计（同一天在 `N:peer` 与裸 `peer` 两种会话键形态下各
+    有一条摘要时，一天算成两天）。
+    """
+    mem = _memory_component()
+    if mem is None:
         return 0
+    keys = _diary_keys_from_source(mem)
+    if keys is None:
+        ds = getattr(mem, "ds", None)
+        try:
+            keys = list((ds.get_all_summaries() or {}).keys()) if ds is not None else []
+        except Exception:  # noqa: BLE001
+            logger.warning("成就引擎读取日记进程视图失败", exc_info=True)
+            keys = []
+    cid = str(character_id or "")
+    return len({str(k).split("|")[-1] for k in keys if _diary_character(k) == cid})
 
 
 def _count_knowledge(character_id: str) -> int:
@@ -138,7 +181,7 @@ def collect_metrics(character_id: str) -> dict[str, int]:
     """从既有事实源收集各指标当前值（全部确定性、可重算）。"""
     return {
         "memories": _count_memory_facts(character_id),
-        "diary": _count_diary(),
+        "diary": _count_diary(character_id),
         "knowledge": _count_knowledge(character_id),
         "dates": _count_dates(character_id),
         "voice": _voice_bound(character_id),
