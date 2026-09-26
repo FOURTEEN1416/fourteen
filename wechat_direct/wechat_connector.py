@@ -64,6 +64,21 @@ def _atomic_write_json(path: Path | str, payload: Any) -> None:
     os.replace(tmp, p)
 
 
+def _plane():
+    """控制面 proactive.runtime_plane —— fail-soft：不可用时返回 None。
+
+    连接器主循环不得因控制面故障而死；None 时所有接线点降级为旧的进程内
+    行为（内存去重 / 无 desired 闸 / 内存追问账）。
+    """
+    try:
+        from proactive import runtime_plane
+
+        return runtime_plane
+    except Exception as e:  # noqa: BLE001
+        logger.debug("控制面不可用（降级进程内行为）: %s", e)
+        return None
+
+
 def load_session_state(user_id: int, slot: int = 0) -> dict:
     """读取 per-user 通道状态；不存在则返回 idle 结构（绝不读全局他人状态）。"""
     from wechat_direct import channel_paths
@@ -1110,6 +1125,31 @@ class WeChatConnector:
         session_errors = 0
 
         while not self._stop:
+            # 块2缺陷B：desired state 是跨进程全局真源 —— 用户从任一 worker 停用
+            # （registry.disconnect 已写 desired=disabled）后，跑在另一进程里的
+            # 宿主在下一次循环自停：停止入站消费、停追问、释放 presence 租约，
+            # 同 owner 的另一 slot 不受影响。控制面读数失败不阻断（保守续跑）。
+            rp = _plane()
+            if rp is not None and self.owner_user_id is not None:
+                try:
+                    if rp.get_desired(self.owner_user_id, self.slot) == "disabled":
+                        logger.info(
+                            "通道已被全局停用，轮询自停 owner=%s slot=%s",
+                            self.owner_user_id, self.slot,
+                        )
+                        self._stop = True
+                        with suppress(Exception):
+                            rp.presence_release(self.owner_user_id, self.slot)
+                        # 回收本进程持有的实例与 flock —— 否则别的 worker 重连
+                        # （start_login）永远抢不到通道锁（恒 429）。
+                        with suppress(Exception):
+                            from wechat_direct.connector_registry import get_registry
+
+                            get_registry().disconnect(self.owner_user_id, self.slot)
+                        break
+                    rp.heartbeat(self.owner_user_id, self.slot)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("控制面 desired/心跳读写失败（本轮忽略）: %s", e)
             try:
                 resp = _get_updates(
                     self._get_updates_buf,
@@ -1374,19 +1414,89 @@ class WeChatConnector:
         return (start <= hour < end) if start < end else (hour >= start or hour < end)
 
     def _followup_budget_ok(self, user_id: str) -> bool:
-        """单用户每日追问上限（web 可调；独立预算，不吃 ASE 的 8 条）。"""
+        """单用户每日追问上限（web 可调；独立预算，不吃 ASE 的 8 条）。
+
+        块10缺陷J：预算账优先走控制面持久账（重启/换宿主不超额），
+        控制面不可用时回退进程内内存账（旧行为）。
+        """
         from utils.local_time import now_local
 
         today = now_local().strftime("%Y-%m-%d")
+        limit = int(read_follow_up_config()["daily_max"])
+        rp = _plane()
+        if rp is not None and self.owner_user_id is not None:
+            try:
+                return rp.followup_used(user_id, today) < limit
+            except Exception as e:  # noqa: BLE001
+                logger.debug("[wx][step=followup_budget_read_failed] %s", e)
         if today != self._followup_daily_date:
             self._followup_daily_date = today
             self._followup_daily.clear()
-        return self._followup_daily.get(user_id, 0) < int(read_follow_up_config()["daily_max"])
+        return self._followup_daily.get(user_id, 0) < limit
+
+    def _followup_spend(self, user_id: str) -> None:
+        """追问成功一条 → 日预算 +1（控制面持久账优先，内存账始终同步）。"""
+        from utils.local_time import now_local
+
+        today = now_local().strftime("%Y-%m-%d")
+        rp = _plane()
+        if rp is not None and self.owner_user_id is not None:
+            try:
+                rp.followup_spend(user_id, today)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("[wx][step=followup_budget_spend_failed] %s", e)
+        self._followup_daily[user_id] = self._followup_daily.get(user_id, 0) + 1
+
+    def _drain_outbox(self) -> None:
+        """消费点名本 (owner, slot) 或未点名 slot 的待投微信命令。
+
+        块1缺陷A/C：投递统一经控制面 outbox，CAS 认领保证一行恰由一个宿主
+        发送（同 owner 双 slot 不再混投）；回执写回后调用方以受理为准。
+        挂在追问守护线程的 5 秒 tick 上 —— 不能挂长轮询主循环
+        （LONG_POLL_TIMEOUT=35 会让回执等待全部超时）。
+        """
+        rp = _plane()
+        if rp is None or self.owner_user_id is None:
+            return
+        for _ in range(8):  # 每 tick 有界消费，防止积压时饿死追问检查
+            try:
+                row = rp.claim_next_send(
+                    channel="wechat",
+                    owner_id=self.owner_user_id,
+                    slot=self.slot,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("[wx][step=outbox_claim_failed] %s", e)
+                return
+            if row is None:
+                return
+            text = str(row.get("message") or "")
+            session_key = str(row.get("session_key") or "")
+            peer = str(row.get("peer") or "") or (
+                self._peer_wxid_from_session(session_key) if session_key else ""
+            )
+            ok, reason = False, ""
+            if not text or not peer:
+                reason = "no_target"
+            elif not self.token:
+                reason = "channel_offline"
+            else:
+                try:
+                    ok = self.send_text(text, to_user=peer)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[wx][step=outbox_send_error] %s", e)
+                if not ok:
+                    reason = "send_api_rejected"
+            try:
+                rp.complete_send(int(row["id"]), ok=ok, reason=reason)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("[wx][step=outbox_complete_failed] %s", e)
 
     def _followup_thread(self) -> None:
         """守护线程：到点且用户仍未接话 → 生成并发送一条追问。"""
         while not self._stop:
             time.sleep(_FOLLOWUP_TICK)
+            self._drain_outbox()
             now = time.time()
             due: list[tuple[str, dict[str, Any]]] = []
             with self._followup_lock:
@@ -1469,7 +1579,7 @@ class WeChatConnector:
             # 请求一旦交给 API 不能撤回；受理后仍用发送前身份回写。
             self._record_outbound(text, user_id, character_id=character_id)
 
-        self._followup_daily[user_id] = self._followup_daily.get(user_id, 0) + 1
+        self._followup_spend(user_id)
         logger.info(
             "[wx][step=followup_sent] user=%s step=%d text=%r", user_id, step, text[:60],
         )
@@ -1716,34 +1826,69 @@ class WeChatConnector:
             return
 
         msg_id = str(raw_msg.get("message_id", raw_msg.get("seq", "")))
-        with self._state_lock:
-            if msg_id in self._received_msgs:
-                return
-            self._received_msgs[msg_id] = True
-            while len(self._received_msgs) > _RECEIVED_MSGS_MAX:
-                self._received_msgs.popitem(last=False)
-        self._cleanup_context_tokens()
-
         from_user = raw_msg.get("from_user_id", "")
         context_token = raw_msg.get("context_token", "")
+        # 块9缺陷I：入站幂等升级为控制面持久账 —— 处理**前**认领、完整处理后
+        # done、异常 release（允许合法重试）。同 message_id 的重放（get_updates
+        # 重发 / 宿主崩溃后新进程接管）不再重复执行工具与 LLM 回合。
+        # 内存 _received_msgs 降级为兜底：仅控制面不可用/无 owner/无 id 时使用。
+        rp = _plane()
+        use_plane = rp is not None and bool(msg_id) and self.owner_user_id is not None
+        plane_claimed = False
+        if use_plane:
+            try:
+                plane_claimed = bool(
+                    rp.inbound_claim(
+                        msg_id,
+                        self._session_key(from_user) if from_user else "",
+                    )
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("[wx][step=inbound_claim_failed] msg_id=%s error=%s", msg_id, e)
+                plane_claimed = True  # 控制面故障不阻断入站（降级旧链路）
+            if not plane_claimed:
+                logger.info(
+                    "[wx][step=inbound_replay_skipped] msg_id=%s owner=%s",
+                    msg_id, self.owner_user_id,
+                )
+                return
+        else:
+            with self._state_lock:
+                if msg_id in self._received_msgs:
+                    return
+                self._received_msgs[msg_id] = True
+                while len(self._received_msgs) > _RECEIVED_MSGS_MAX:
+                    self._received_msgs.popitem(last=False)
+        self._cleanup_context_tokens()
+
         if context_token and from_user:
             with self._state_lock:
                 self._context_tokens[from_user] = {"token": context_token, "ts": time.time()}
             # 落盘：服务重启后仍可在窗口期内主动发送（见 CONTEXT_TOKENS_PATH 注释）
             self._save_context_tokens()
-        if from_user:
-            with self._state_lock:
-                self._last_user_id = from_user
-            # 用户接话了 → 取消该用户的待发追问（追问只在"对方没接话"时才发）。
-            # 2026-09-20 修复：待发追问以**会话隔离键**（`N:wxid`）登记，
-            # 取消时必须用同一形态 —— 旧实现传裸 wxid 永远匹配不上，
-            # 用户接话后追问照样发（追问时序错乱 + 白耗每日预算）。
-            revision = self._cancel_followup(self._session_key(from_user))
-        else:
+        if not from_user:
             return
+        with self._state_lock:
+            self._last_user_id = from_user
 
-        with self._peer_lock(self._session_key(from_user)):
-            self._handle_message_serial(raw_msg, msg_id, from_user, context_token, revision)
+        # 用户接话了 → 取消该用户的待发追问（追问只在"对方没接话"时才发）。
+        # 2026-09-20 修复：待发追问以**会话隔离键**（`N:wxid`）登记，
+        # 取消时必须用同一形态 —— 旧实现传裸 wxid 永远匹配不上，
+        # 用户接话后追问照样发（追问时序错乱 + 白耗每日预算）。
+        revision = self._cancel_followup(self._session_key(from_user))
+        try:
+            with self._peer_lock(self._session_key(from_user)):
+                self._handle_message_serial(raw_msg, msg_id, from_user, context_token, revision)
+        except Exception:
+            if use_plane and plane_claimed:
+                with suppress(Exception):
+                    rp.inbound_release(msg_id)
+            raise
+        if use_plane and plane_claimed:
+            try:
+                rp.inbound_done(msg_id)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("[wx][step=inbound_done_failed] msg_id=%s error=%s", msg_id, e)
 
     def _handle_message_serial(self, raw_msg, msg_id, from_user, context_token, revision):
         """同一好友从入站处理到最后一段受理/落库的完整串行区间。"""

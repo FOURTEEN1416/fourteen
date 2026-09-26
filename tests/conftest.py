@@ -111,16 +111,6 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
-    # W3 控制面 DB（outbox / desired / presence / 幂等账，2026-09-27）：
-    # 未隔离则连接器与调度器用例会把测试键写进开发机真实 data/runtime_plane.db
-    # —— 与 09-22 scheduler_config.json 自伤事故同型。
-    try:
-        from proactive import runtime_plane as _rp
-
-        monkeypatch.setattr(_rp, "_db_path", sandbox / "runtime_plane.db", raising=False)
-    except Exception:
-        pass
-
     # W3 控制面（outbox/desired/presence/幂等账，2026-09-27）：任何测试
     # 触发连接器/scheduler/提醒装配都不许写真实 data/runtime_plane.db
     # （与上方 scheduler_config 自伤事故同型防线）。

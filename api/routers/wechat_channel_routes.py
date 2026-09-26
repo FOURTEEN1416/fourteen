@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -37,6 +38,8 @@ router = APIRouter(prefix="/api/wechat/channel", tags=["wechat-channel"])
 admin_router = APIRouter(prefix="/api/admin/wechat", tags=["admin-wechat"])
 
 QRCODE_EXPIRY_SECONDS = 600
+# 重连让位窗：旧宿主最长一圈长轮询（35s）+ 处理余量（块2缺陷B）
+_PRESENCE_HANDOFF_TIMEOUT = 40.0
 
 
 class ChannelConnectRequest(BaseModel):
@@ -221,14 +224,31 @@ async def reconnect_my_channel(
     user_id: int = Security(get_current_user_id),
     db=Depends(get_db),
 ):
+    """重连 = 全局停用 → 等有活宿主自停收锁 → 重新触发扫码。
+
+    🔴 块2缺陷B：旧实现先 ``path.unlink()`` 删凭证再 disconnect —— 跨进程宿主
+    内存里 token 仍在、轮询照跑，磁盘凭证却已被先删（"不误删活凭证"验收判据）。
+    现不删任何文件：新登录成功自然覆盖凭证；disconnect 已落 desired=disabled，
+    宿主轮询循环下一圈自停并释放 presence 与通道 flock。
+    """
     slot = int(req.slot) if req and req.slot is not None else None
     slots = [slot] if slot is not None else list(range(channel_paths.MAX_CHANNELS_PER_USER))
+    registry = get_registry()
     for s in slots:
-        path = channel_paths.credentials_path(user_id, s)
-        if path.exists():
-            path.unlink()
-        get_registry().disconnect(user_id, s)
+        registry.disconnect(user_id, s)
         await _upsert_session_row(db, user_id, s, status="idle", bot_id="")
+    # 有界等待旧宿主让位（长轮询一圈最长 LONG_POLL_TIMEOUT=35s + 处理余量）。
+    # 超时不让位也继续：start_login 会因 flock 被占如实 429，不会双 poller。
+    deadline = time.time() + _PRESENCE_HANDOFF_TIMEOUT
+    while time.time() < deadline:
+        try:
+            from proactive import runtime_plane
+
+            if not any(runtime_plane.presence_live(user_id, s) for s in slots):
+                break
+        except Exception:  # noqa: BLE001
+            break
+        await asyncio.sleep(0.5)
     connect_req = ChannelConnectRequest(slot=slot)
     return await connect_my_channel(connect_req, user_id, db, user=None)
 

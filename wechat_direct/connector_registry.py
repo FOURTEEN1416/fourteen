@@ -115,17 +115,34 @@ class ConnectorRegistry:
             return conn
 
     def disconnect(self, user_id: int, slot: int = 0) -> bool:
+        """停用 (owner, slot) —— **跨进程全局生效**（W3 缺陷 B 根治）。
+
+        旧实现只操作本进程内存对象：连接器宿主在别的 worker 时返回 False、
+        对方 poller 照跑、追问照发，且重启后 `restore_on_boot` 看凭证照恢复
+        —— 用户"断连"点了个寂寞。现先写持久期望态 ``desired=disabled``
+        （任何 worker 调用都生效；宿主 connector 轮询循环自查期望态自停），
+        再尽力停本地对象。返回 True=停用**命令已落全局**（不代表本地对象
+        存在过）。
+        """
+        uid, s = int(user_id), int(slot)
+        try:
+            from proactive import runtime_plane
+
+            runtime_plane.set_desired(uid, s, "disabled")
+            runtime_plane.presence_release(uid, s)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("写通道期望态失败 user=%s slot=%s: %s", uid, s, e)
         with self._lock:
-            conn = self._connectors.get(self._key(user_id, slot))
+            conn = self._connectors.get(self._key(uid, s))
         if conn is None:
-            return False
+            return True
         try:
             conn.stop()
         except Exception as e:  # noqa: BLE001
-            logger.warning("断开通道异常 user=%s slot=%s: %s", user_id, slot, e)
+            logger.warning("断开通道异常 user=%s slot=%s: %s", uid, s, e)
         with self._lock:
-            self._connectors.pop(self._key(user_id, slot), None)
-        self._release_poll_lock(int(user_id), int(slot))
+            self._connectors.pop(self._key(uid, s), None)
+        self._release_poll_lock(uid, s)
         return True
 
     def remove(self, user_id: int, slot: int = 0) -> None:
@@ -219,6 +236,14 @@ class ConnectorRegistry:
         uid = int(user_id)
         # 多 worker：登录同样抢通道锁，避免双开
         pick = self._pick_slot(uid, slot) if slot is None else int(slot)
+        # 用户主动发起扫码 = 期望态回到 connected（覆盖此前"断连"选择），
+        # 否则 restore_on_boot / 宿主循环会因 desired=disabled 拒启动。
+        try:
+            from proactive import runtime_plane
+
+            runtime_plane.set_desired(uid, pick, "connected")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("写通道期望态失败 user=%s slot=%s: %s", uid, pick, e)
         lock_fd = self._try_acquire_poll_lock(uid, pick)
         if lock_fd is None:
             raise ChannelSlotError(f"用户 {uid} slot={pick} 通道正在被其他进程占用")
@@ -256,6 +281,16 @@ class ConnectorRegistry:
                 continue
             uid = int(user_dir.name)
             for slot in channel_paths.list_user_slots_with_credentials(uid):
+                # 🔴 期望态先闸（缺陷 B）：用户显式停用过 → 有凭证也不恢复。
+                # 旧实现只看 credentials 存在，"断连"后一重启又活。
+                try:
+                    from proactive import runtime_plane
+
+                    if runtime_plane.get_desired(uid, slot) == "disabled":
+                        logger.info("通道期望态=disabled，跳过恢复 user=%s slot=%s", uid, slot)
+                        continue
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("读通道期望态失败 user=%s slot=%s: %s", uid, slot, e)
                 lock_fd = self._try_acquire_poll_lock(uid, slot)
                 if lock_fd is None:
                     logger.info("通道已有其他 worker 持锁，跳过 user=%s slot=%s", uid, slot)
