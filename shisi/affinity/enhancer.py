@@ -67,6 +67,9 @@ class AffinityEnhancer:
         self._audit_enabled = get_config("affinity", "audit_enabled", True)
         self._values: dict[str, float] = {}
         self._last_interaction: dict[str, datetime] = {}
+        # 衰减水位：该键**已扣到**的时刻（区间衰减的窗口起点）。与
+        # `_last_interaction` 是两条独立基准——前者防重复扣减，后者定宽限期。
+        self._last_decay_at: dict[str, datetime] = {}
         # 2026-09-22 重启归零根治：`_values` 原为纯内存 dict，重启后全部键归 0
         # —— mapper.sync 以「目标−已存」差分且钳 ±3，每轮只能爬回 3 分；解锁
         # 在爬坡途中重复触发；get_progress 恒显 ≈0。affinity_records 是本类
@@ -77,6 +80,17 @@ class AffinityEnhancer:
     @property
     def unlock_manager(self) -> UnlockManager:
         return self._unlock
+
+    @staticmethod
+    def _parse_ts(raw: Any) -> datetime | None:
+        """审计串 → aware UTC（SQLite `datetime('now')` 写 naive UTC）。"""
+        if not raw:
+            return None
+        try:
+            ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
 
     def _restore_from_audit(self) -> None:
         """从 affinity_records 审计日志回放每键最新值（进程重启恢复）。
@@ -90,20 +104,31 @@ class AffinityEnhancer:
         兜底。旧实现 `except: return` —— 审计表缺失（全新库 / 迁移未跑）时
         连兜底回填也一并跳过，两条恢复路径同时失效，且日志只说"审计回放失败"，
         完全看不出"点存其实有数据却没用"。恢复路径应当**彼此独立降级**。
+
+        🔴 W8 缺陷I：每键有**三条基准**，旧实现只取「最后一行」同时充当值与
+        交互时刻 —— 衰减行（`reason='decay'`，本类自己逐日写的）会顶掉真实
+        交互时刻，使宽限期从衰减时刻重新起算、并且已扣窗口被再次计入。现按
+        reason 分列取每键「最后一行 / 最后一次非衰减行 / 最后一次衰减行」。
         """
         rows: list = []
         try:
             with closing(sqlite3.connect(str(self._db_path))) as conn, conn:
                 rows = conn.execute(
-                    "SELECT ar.character_id, ar.new_value, ar.created_at, ar.reason "
-                    "FROM affinity_records ar "
-                    "JOIN (SELECT character_id AS cid, MAX(id) AS mid "
-                    "      FROM affinity_records GROUP BY character_id) latest "
-                    "  ON ar.id = latest.mid"
+                    "SELECT cur.character_id, cur.new_value, cur.reason, "
+                    "  (SELECT r2.created_at FROM affinity_records r2 "
+                    "    WHERE r2.id = g.inter_mid), "
+                    "  (SELECT r3.created_at FROM affinity_records r3 "
+                    "    WHERE r3.id = g.decay_mid) "
+                    "FROM (SELECT character_id AS cid, MAX(id) AS cur_mid, "
+                    "        MAX(CASE WHEN reason IS NULL OR reason != 'decay' "
+                    "                  THEN id END) AS inter_mid, "
+                    "        MAX(CASE WHEN reason = 'decay' THEN id END) AS decay_mid "
+                    "      FROM affinity_records GROUP BY character_id) g "
+                    "JOIN affinity_records cur ON cur.id = g.cur_mid"
                 ).fetchall()
         except Exception as e:  # noqa: BLE001
             logger.warning("好感度审计回放失败（转点存兜底）: %s", e)
-        for key, value, created_at, row_reason in rows:
+        for key, value, row_reason, inter_at, decay_at in rows:
             k = str(key or "")
             if not k:
                 continue
@@ -115,15 +140,11 @@ class AffinityEnhancer:
             if str(row_reason or "") == MIRROR_REASON_POINTS:
                 raw_val = _scale_points_to_shisi(raw_val, self._min, self._max)
             self._values[k] = max(self._min, min(self._max, raw_val))
-            ts: datetime | None = None
-            if created_at:
-                try:
-                    ts = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
-                    if ts.tzinfo is None:
-                        ts = ts.replace(tzinfo=timezone.utc)
-                except ValueError:
-                    ts = None
-            self._last_interaction[k] = ts or datetime.now(tz=timezone.utc)
+            now = datetime.now(tz=timezone.utc)
+            self._last_interaction[k] = self._parse_ts(inter_at) or now
+            last_decay = self._parse_ts(decay_at)
+            if last_decay is not None:
+                self._last_decay_at[k] = last_decay
         # 🔴 块E（2026-09-22）：审计日志可能**没有**该键的历史（生产实证审计
         # 与点存两份键空间零交集），但点存里有 —— 此时用点存补齐，避免
         # "回放成功但值仍为 0"。仅补审计缺失的键，不覆盖已有值。
@@ -201,15 +222,27 @@ class AffinityEnhancer:
 
     def apply_decay(self, character_id: str, now: datetime | None = None,
                     user_id: str = "") -> float:
+        """区间衰减：只扣「上次已扣时刻 → now」这一段，并把水位推进到 now。
+
+        窗口起点取宽限期结束与既有水位的较晚者，因此同一天重复调用、
+        或刚落库就重启再调，都不会把已扣窗口再扣一遍（旧实现每次都用
+        「自最后交互起累计量」，逐日相减即平方级多扣）。
+        """
         key = self._key(character_id, user_id)
         if key not in self._values:
             return 0.0
-        last = self._last_interaction.get(key, datetime.now(tz=timezone.utc))
-        decay = self._decay.calculate_decay(self._values[key], last, now)
+        now = now or datetime.now(tz=timezone.utc)
+        last = self._last_interaction.get(key, now)
+        start = self._decay.grace_start(last)
+        applied = self._last_decay_at.get(key)
+        if applied is not None and applied > start:
+            start = applied
+        decay = self._decay.decay_for_interval(self._values[key], start, now)
         if decay > 0:
             old = self._values[key]
             new = max(self._min, old - decay)
             self._values[key] = new
+            self._last_decay_at[key] = now
             self._record_affinity(key, old, new, -decay, "decay", "system")
         return decay
 

@@ -37,7 +37,6 @@ class AffinityMapper:
     ):
         self._enhancer = enhancer
         self._stage_engine = stage_engine
-        self._last_shisi: dict[str, float] = {}
 
     def set_enhancer(self, enhancer: AffinityEnhancer) -> None:
         self._enhancer = enhancer
@@ -109,12 +108,11 @@ class AffinityMapper:
         target = self.to_shisi(affection_points)
         track = self._track_key(character_id, user_id)
 
-        if track not in self._last_shisi:
-            self._last_shisi[track] = self._enhancer.get_value(
-                character_id, user_id=user_id
-            )
-
-        last = self._last_shisi[track]
+        # 🔴 W8 缺陷I：差分基准必须是 enhancer 的**当前真值**。旧实现另存一份
+        # 内存缓存 `_last_shisi`，而缓存只在 sync 时前进——每日衰减把真值扣掉后
+        # 缓存不失效，已扣的量会被当成"待降差分"再扣一次（46.5 真值 / 48 缓存
+        # → 目标 47 时旧实现算出 −1 继续下降，而非 +0.5 爬回目标）。
+        last = self._enhancer.get_value(character_id, user_id=user_id)
         delta = target - last
         if abs(delta) < 0.01:
             return {"affinity": last, "unlocks": []}
@@ -123,7 +121,6 @@ class AffinityMapper:
         new_val, unlocks = self._enhancer.update(
             character_id, delta, reason, source, user_id=user_id
         )
-        self._last_shisi[track] = new_val
 
         if self._stage_engine is not None:
             try:
