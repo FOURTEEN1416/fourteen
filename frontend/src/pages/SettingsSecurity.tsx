@@ -63,8 +63,12 @@ function SafetyPanelSection() {
   const handleToggle = async () => {
     setToggling(true)
     try {
-      await safetyConfig(!enabled)
+      const res = await safetyConfig(!enabled)
       setEnabled(!enabled)
+      // W6：开关已持久化到配置（重启不回退）；仅未持久化时明确提示
+      if (res.data?.persisted === false) {
+        useErrorStore.getState().addToast({ type: 'info', message: '开关仅当前进程生效（未持久化）' })
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '安全开关切换失败，请重试'
       useErrorStore.getState().addToast({ type: 'error', message })

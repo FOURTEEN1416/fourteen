@@ -129,60 +129,34 @@ class WebSummaryTool(BaseTool):
 
     @staticmethod
     def _check_url_ssrf(url: str) -> str | None:
-        """SSRF 闸门：仅 http(s)，且主机不得解析到内网/回环/链路本地等保留地址。"""
-        import ipaddress
-        import socket
-        from urllib.parse import urlparse
+        """SSRF 闸门（委托共享真源 tools/url_guard）。
 
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return "仅允许 http/https URL"
-        host = parsed.hostname or ""
-        if not host:
-            return "URL 缺少主机名"
-        try:
-            infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
-        except socket.gaierror:
-            return "主机名无法解析"
-        for info in infos:
-            try:
-                ip = ipaddress.ip_address(info[4][0])
-            except ValueError:
-                return "地址解析异常"
-            ip = getattr(ip, "ipv4_mapped", None) or ip  # ::ffff:127.0.0.1 这类映射地址不得绕过回环检查
-            if (ip.is_private or ip.is_loopback or ip.is_link_local
-                    or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
-                return "禁止访问内网/保留地址"
-        return None
+        判定语义：仅 http(s)，且主机经 DNS 解析后不得落在内网/回环/链路本地/
+        保留/多播/未指定网段（IPv4-mapped 解包后再判）。错误串是对外契约，
+        与共享守卫保持一致。
+        """
+        from tools.url_guard import assert_public_http_url
+
+        return assert_public_http_url(url)
 
     def execute(self, url: str = "", **kwargs) -> ToolResult:
         if not url:
             return ToolResult(False, error="url is required")
         if not HAS_REQUESTS:
             return ToolResult(False, error="缺少依赖: pip install requests beautifulsoup4")
-        ssrf_err = self._check_url_ssrf(url)
-        if ssrf_err:
-            logger.warning("web_summary 拒绝可疑 URL: %s (%s)", url, ssrf_err)
-            return ToolResult(False, error=f"web_summary_blocked: {ssrf_err}")
+        from tools.url_guard import UrlBlockedError, fetch_guarded
+
         try:
-            # allow_redirects=False：重定向目标同样可能被解析到内网，
-            # 逐跳放行等于绕过上面的闸门
-            resp = requests.get(url, timeout=15, allow_redirects=False, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            })
-            if resp.status_code in (301, 302, 303, 307, 308):
-                location = resp.headers.get("location", "")
-                if not location:
-                    return ToolResult(False, error="web_summary_failed: 重定向缺少 location")
-                from urllib.parse import urljoin
-                target = urljoin(url, location)
-                ssrf_err = self._check_url_ssrf(target)
-                if ssrf_err:
-                    logger.warning("web_summary 拒绝重定向目标: %s (%s)", target, ssrf_err)
-                    return ToolResult(False, error=f"web_summary_blocked: 重定向被拒（{ssrf_err}）")
-                resp = requests.get(target, timeout=15, allow_redirects=False, headers={
+            # fetch_guarded：每跳发请求前一刻重校验（含重定向目标），
+            # 手动逐跳，禁止库层自动跟随
+            resp = fetch_guarded(
+                requests,
+                url,
+                timeout=15,
+                headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                })
+                },
+            )
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "html.parser")
             title = soup.find("title")
@@ -197,6 +171,9 @@ class WebSummaryTool(BaseTool):
                 "title": title_text,
                 "content": content,
             })
+        except UrlBlockedError as e:
+            logger.warning("web_summary 拒绝可疑 URL: %s (%s)", url, e)
+            return ToolResult(False, error=f"web_summary_blocked: {e}")
         except Exception as e:
             logger.exception("网页摘要失败")
             return ToolResult(False, error=f"web_summary_failed: {e}")

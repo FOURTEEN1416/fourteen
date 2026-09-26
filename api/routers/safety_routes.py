@@ -67,11 +67,41 @@ async def safety_config(
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
+    """内容安全总开关（W6 缺陷 B/A 根治）。
+
+    旧实现只改当前进程的 ``sf.enabled``：不落盘（重启即回退）、跨 worker 不
+    生效。现走 ConfigManager 持久化 + live 应用——同时设置输入/输出两个
+    开关保持「总开关」语义，重启不再反转。
+    """
+    cfg = deps.config
+    receipt_summary: dict = {}
+    persisted = False
+    if cfg is not None and hasattr(cfg, "save_with_receipt"):
+        components = getattr(deps.orch, "components", None) if deps.orch else None
+        receipt = cfg.save_with_receipt(
+            {
+                "safety": {
+                    "input_filter_enabled": enabled,
+                    "output_filter_enabled": enabled,
+                }
+            },
+            live_components=components,
+        )
+        persisted = True
+        receipt_summary = {
+            "persisted_version": receipt["persisted_version"],
+            "effective_version": receipt["effective_version"],
+            "in_sync": receipt["in_sync"],
+        }
     sf = deps.get_safety()
-    if sf:
-        sf.enabled = enabled
-        return {"status": "ok", "enabled": enabled}
-    return {"status": "not_available"}
+    if sf is None and not persisted:
+        return {"status": "not_available"}
+    return {
+        "status": "ok",
+        "enabled": enabled,
+        "persisted": persisted,
+        **receipt_summary,
+    }
 
 
 # ═══════════════════════════════════════════════════════

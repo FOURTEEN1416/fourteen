@@ -143,12 +143,34 @@ def _log_safety_event(category: SafetyCategory, text: str, is_input: bool) -> No
 
 
 class ContentSafetyFilter:
-    def __init__(self, llm_gateway=None, enabled: bool = True):
+    def __init__(
+        self,
+        llm_gateway=None,
+        enabled: bool = True,
+        *,
+        input_enabled: bool | None = None,
+        output_enabled: bool | None = None,
+        self_harm_intervention: bool = True,
+    ):
+        """输入/输出独立开关（W6 缺陷 B 根治）。
+
+        旧实现 input/output 共用一个 ``enabled``，``output_filter_enabled`` 与
+        ``self_harm_intervention`` 两个配置字段零消费者。现在：
+        - ``input_enabled`` / ``output_enabled`` 分别闸门 ``check_input`` /
+          ``check_output``；
+        - ``self_harm_intervention`` 闸门自伤分支（暴力/色情闸门不受影响）；
+        - 兼容：只传 ``enabled`` 时同时赋给输入/输出（旧装配
+          ``ContentSafetyFilter(enabled=cfg.safety.input_filter_enabled)``
+          行为不变，装配接线归 W3 收口）。
+        """
         self.llm_gateway = llm_gateway
         self.enabled = enabled
+        self.input_enabled = enabled if input_enabled is None else input_enabled
+        self.output_enabled = enabled if output_enabled is None else output_enabled
+        self.self_harm_intervention = self_harm_intervention
 
     def check_input(self, text: str) -> SafetyResult:
-        if not self.enabled:
+        if not (self.enabled and self.input_enabled):
             return SafetyResult(True, SafetyCategory.NORMAL, 1.0)
         result = self._quick_scan(text)
         if result and result.category != SafetyCategory.NORMAL:
@@ -162,7 +184,7 @@ class ContentSafetyFilter:
         return SafetyResult(True, SafetyCategory.NORMAL, 0.9)
 
     def check_output(self, text: str) -> SafetyResult:
-        if not self.enabled:
+        if not (self.enabled and self.output_enabled):
             return SafetyResult(True, SafetyCategory.NORMAL, 1.0)
         result = self._quick_scan(text)
         if result and result.category != SafetyCategory.NORMAL:
@@ -172,12 +194,15 @@ class ContentSafetyFilter:
         return SafetyResult(True, SafetyCategory.NORMAL, 0.9)
 
     def _quick_scan(self, text: str) -> SafetyResult | None:
-        for pattern in SELF_HARM_PATTERNS:
-            if pattern.search(text):
-                return SafetyResult(
-                    False, SafetyCategory.SELF_HARM, 0.85,
-                    SELF_HARM_HOTLINE,
-                )
+        # 自伤干预独立开关（默认 True）：关闭时跳过自伤分支，暴力/色情照常拦截。
+        # 是否允许用户侧关闭属产品裁决（D 类，W6 只接线不裁决）。
+        if self.self_harm_intervention:
+            for pattern in SELF_HARM_PATTERNS:
+                if pattern.search(text):
+                    return SafetyResult(
+                        False, SafetyCategory.SELF_HARM, 0.85,
+                        SELF_HARM_HOTLINE,
+                    )
         for pattern in VIOLENCE_PATTERNS:
             if pattern.search(text):
                 return SafetyResult(False, SafetyCategory.VIOLENCE, 0.8)

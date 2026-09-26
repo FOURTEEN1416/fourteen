@@ -1,5 +1,15 @@
 # Code Deletion Log
 
+## [2026-09-27] W6 配置生效与可信工具：tracked 运行时开关文件迁出源码树
+
+- 删除 `plugins/plugins.json`（git tracked，内容为空骨架 `{"plugins": {}}`）：
+  它是旧插件开关的「运行时存储」，但全仓唯一读写方是 `/api/plugins/*` 路由——
+  开关无任何运行时消费者（W6 缺陷 F），且生产环境每写一次开关就让服务器
+  工作树变 dirty，阻断后续 `git pull`（remote-pull-verify-landing 同类隐患）。
+  插件与工具的运行时开关统一迁往 `data/runtime_switches.json`
+  （gitignored，唯一 owner `tools/tool_state.py`，dispatch 侧真实消费）。
+  删除前全文已读：仅空骨架，无历史数据需迁移。
+
 ## [2026-09-26] 对话归属重构拆除的错误机制
 
 - 删除 `shisi/memory/legacy/diary_summarizer.py`：除包导出外无消费者，重复实现无持久化、硬编码角色名；包导出统一到现役 `_legacy_diary_summarizer`，不保留墓碑转发。

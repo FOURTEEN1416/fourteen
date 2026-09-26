@@ -45,11 +45,41 @@ class FakeSession:
 
 
 class FakeConfigManager:
+    """路由契约桩：实现 save_config 实际消费的 ConfigManager 表面。
+
+    W6 起 save_config 走 save_with_receipt（版本化回执 + live 应用），
+    响应组装读 get_config_dict，GET 附带 status/capability_declaration。
+    """
+
     def __init__(self, data: dict | None = None):
-        self.config = type("C", (), {"model_dump": lambda self: data or {}})()
+        self._data = data or {}
+        self.config = type("C", (), {"model_dump": lambda self: self._data})()
 
     def save(self, updates: dict):
-        return type("C", (), {"model_dump": lambda self: updates})()
+        self._data.update(updates)
+        return type("C", (), {"model_dump": lambda self: self._data})()
+
+    def save_with_receipt(self, updates: dict, *, live_components=None):
+        self.save(updates)
+        return {
+            "config": self.config,
+            "persisted_version": 1,
+            "effective_version": 1,
+            "in_sync": True,
+            "applied_live": [],
+            "restart_required": [],
+            "unsupported": [],
+            "field_status": {},
+        }
+
+    def get_config_dict(self) -> dict:
+        return self._data
+
+    def status(self) -> dict:
+        return {"persisted_version": 1, "effective_version": 1, "stale": False}
+
+    def capability_declaration(self) -> dict:
+        return {}
 
 
 @pytest.fixture

@@ -98,6 +98,10 @@ class ToolRegistry:
     def disabled_names(self) -> list[str]:
         return list(self._disabled.keys())
 
+    def get_disabled(self, name: str) -> BaseTool | None:
+        """取回被 unregister 暂存的实例（库存路由展示权限位用）。"""
+        return self._disabled.get(name)
+
     def get(self, name: str) -> BaseTool | None:
         return self._tools.get(name)
 
@@ -185,6 +189,14 @@ class ToolDispatcher:
     def dispatch(self, tool_name: str, arguments: dict[str, Any],
                  affinity_level: int = 0, trace_id: str = "",
                  caller_id: str = "") -> ToolResult:
+        # W6 缺陷 F/G：持久化开关门。禁用状态落 data/runtime_switches.json，
+        # 跨 worker / 重启都生效（registry.unregister 只管本进程）。
+        from tools import tool_state
+
+        if tool_state.is_tool_disabled(tool_name):
+            logger.debug("工具 %s 已被运行时开关禁用（dispatch 拒绝）", tool_name)
+            return ToolResult(False, error=f"Tool disabled: {tool_name}")
+
         tool = self.registry.get(tool_name)
         if not tool:
             return ToolResult(False, error=f"Tool not found: {tool_name}")

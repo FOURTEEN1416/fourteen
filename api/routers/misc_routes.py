@@ -387,8 +387,15 @@ async def get_config(
     cfg = deps.config
     if cfg:
         if hasattr(cfg, "get_config_dict"):
-            return _sanitize_config(cfg.get_config_dict())
-        return _sanitize_config(cfg.config.model_dump())
+            resp = _sanitize_config(cfg.get_config_dict())
+        else:
+            resp = _sanitize_config(cfg.config.model_dump())
+        # W6 缺陷 A：版本可说明——磁盘持久版本 vs 本 worker 已应用版本
+        if hasattr(cfg, "status"):
+            resp["config_status"] = cfg.status()
+        if hasattr(cfg, "capability_declaration"):
+            resp["field_status"] = cfg.capability_declaration()
+        return resp
     return {}
 
 
@@ -402,13 +409,30 @@ async def save_config(
     if not cfg:
         raise HTTPException(503, "Config manager not initialized")
     try:
-        updated = cfg.save(req.config)
+        # W6 缺陷 A 根治：保存基于锁内磁盘最新版本（多 worker 不再互相覆盖）；
+        # live 字段保存即应用本进程组件，回执如实区分 persisted/effective。
+        components = getattr(deps.orch, "components", None) if deps.orch else None
+        receipt = cfg.save_with_receipt(req.config, live_components=components)
+        updated = receipt["config"]
         if "llm" in req.config and hasattr(updated, "llm"):
             await reconfigure_llm(updated.llm)
-        if hasattr(cfg, "get_config_dict"):
-            return _sanitize_config(cfg.get_config_dict())
-        return _sanitize_config(updated.model_dump())
+            receipt["applied_live"].append("llm")
+        resp = _sanitize_config(cfg.get_config_dict())
+        resp["save_receipt"] = {
+            key: receipt[key]
+            for key in (
+                "persisted_version",
+                "effective_version",
+                "in_sync",
+                "applied_live",
+                "restart_required",
+                "unsupported",
+                "field_status",
+            )
+        }
+        return resp
     except (ValueError, TypeError, KeyError, AttributeError):
+        # 保存失败：磁盘未写入、本进程未应用——绝不返回「已生效」形态
         logger.exception("Config save failed")
         raise HTTPException(400, "Invalid config") from None
 

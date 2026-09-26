@@ -4,25 +4,56 @@ import time
 
 sys.path.insert(0, ".")
 
+
 import tools.builtin.character_crawler_tool as _cct
 from tools.base_tool import ToolResult
 from tools.builtin.character_crawler_tool import CharacterCrawlerTool
 
 
-def test_validate_url_blocks_localhost():
+def _fake_dns(monkeypatch, host_ip: str = "93.184.216.34"):
+    """合成 DNS：所有主机名解析到给定地址（默认公网）。
+
+    W6 起 _validate_url 委托 tools/url_guard 做 DNS 解析级 SSRF 判定
+    （旧实现只做字面前缀匹配，IPv4-mapped / 十进制 IP / 保留网段全部放行），
+    单测不再依赖真实网络。守卫在调用点取 ``socket.getaddrinfo``，patch 该
+    模块命名空间即可全局生效。
+    """
+    import socket as _socket
+
+    from tools import url_guard as _guard
+
+    def fake(host, port, *a, **kw):
+        return [(2, 1, 6, "", (host_ip, port or 80))]
+
+    monkeypatch.setattr(_socket, "getaddrinfo", fake)
+    monkeypatch.setattr(_guard.socket, "getaddrinfo", fake)
+
+
+def test_validate_url_blocks_localhost(monkeypatch):
+    _fake_dns(monkeypatch, "127.0.0.1")
     tool = CharacterCrawlerTool()
     assert not tool._validate_url("http://localhost/admin")
     assert not tool._validate_url("http://127.0.0.1/admin")
 
 
-def test_validate_url_blocks_private_ip():
+def test_validate_url_blocks_private_ip(monkeypatch):
+    for ip in ("10.0.0.1", "192.168.1.1", "172.16.0.1"):
+        _fake_dns(monkeypatch, ip)
+        tool = CharacterCrawlerTool()
+        assert not tool._validate_url(f"http://{ip}/internal"), ip
+
+
+def test_validate_url_blocks_mapped_and_link_local(monkeypatch):
     tool = CharacterCrawlerTool()
-    assert not tool._validate_url("http://10.0.0.1/internal")
-    assert not tool._validate_url("http://192.168.1.1/router")
-    assert not tool._validate_url("http://172.16.0.1/metadata")
+    # IPv4-mapped 回环 / 云元数据链路本地——旧字面校验放行的形态
+    _fake_dns(monkeypatch, "::ffff:127.0.0.1")
+    assert not tool._validate_url("http://mapped.local/admin")
+    _fake_dns(monkeypatch, "169.254.169.254")
+    assert not tool._validate_url("http://metadata.local/compute")
 
 
-def test_validate_url_allows_public():
+def test_validate_url_allows_public(monkeypatch):
+    _fake_dns(monkeypatch, "93.184.216.34")
     tool = CharacterCrawlerTool()
     assert tool._validate_url("https://zh.wikipedia.org/wiki/Test")
     assert tool._validate_url("https://example.com/page")
@@ -177,8 +208,9 @@ def test_wiki_returns_instantly_when_both_domains_memoized():
         _cct._WIKI_MEMO.clear()
 
 
-def test_fetch_baike_rejects_shell_page():
+def test_fetch_baike_rejects_shell_page(monkeypatch):
     """体积达标但正文为空的壳页不得返回 success。"""
+    _fake_dns(monkeypatch)  # W6：baike 抓取经 url_guard，需合成 DNS
     tool = CharacterCrawlerTool()
     tool._session = _FakeSession(_FakeResp(_SHELL_HTML))
     original = _cct.HAS_CLOUDSCRAPER
@@ -238,7 +270,10 @@ def test_fetch_person_requires_name():
 
 
 if __name__ == "__main__":
+    # 手动执行入口仅支持无参用例；带 fixture 参数的用例请用 pytest 跑。
+    import inspect
+
     for name, fn in list(globals().items()):
-        if name.startswith("test_"):
+        if name.startswith("test_") and not inspect.signature(fn).parameters:
             fn()
     print("All character_crawler tests passed!")

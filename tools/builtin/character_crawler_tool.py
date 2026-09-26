@@ -1,17 +1,22 @@
 """人物信息爬取工具 - 用于人设设计（中国可访问版）"""
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import os
 import random
 import re
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
 from tools.base_tool import BaseTool, ToolResult
+from tools.url_guard import UrlBlockedError, assert_public_http_url, fetch_guarded
 
 logger = logging.getLogger("character_crawler_tool")
 
@@ -66,12 +71,6 @@ def _headers(referer: str = "", mobile: bool = False) -> dict[str, str]:
     }
 
 _MAX_CONTENT_LEN = 5000
-_ALLOWED_SCHEMES = ("https://", "http://")
-_BLOCKED_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "::1")
-_BLOCKED_PREFIXES = ("10.", "172.16.", "172.17.", "172.18.", "172.19.",
-                     "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
-                     "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
-                     "172.30.", "172.31.", "192.168.")
 
 # ── 正文有效性阈值（2026-09-19 新增）──
 # 为什么必须有：百度百科对爬虫返回反爬壳页，HTML 体积很大（实测 95 KB）能通过
@@ -105,9 +104,20 @@ class CharacterCrawlerTool(BaseTool):
     description = "爬取人物信息构建知识库。自动降级：百度百科→维基→百度搜索。"
     permission_level = "friend"
 
-    def __init__(self):
+    # 受控知识存储默认根（类级常量：conftest 可全局重定向进沙箱）
+    _DEFAULT_STORAGE_ROOT = (
+        Path(__file__).resolve().parents[2] / "data" / "character_crawler"
+    )
+
+    def __init__(self, storage_root: str | Path | None = None):
         self._session: requests.Session | None = None
         self._session_lock = threading.Lock()
+        # W6 缺陷 C 根治：抓取结果统一落受控知识存储（固定根目录），
+        # 不再向模型暴露 output_file 任意路径写。
+        if storage_root is not None:
+            self._storage_root = Path(storage_root).resolve()
+        else:
+            self._storage_root = Path(self._DEFAULT_STORAGE_ROOT)
 
     @property
     def session(self) -> requests.Session:
@@ -141,7 +151,6 @@ class CharacterCrawlerTool(BaseTool):
             "name": {"type": "string", "description": "人物名称"},
             "url": {"type": "string", "description": "网页URL"},
             "urls": {"type": "array", "items": {"type": "string"}, "description": "URL列表"},
-            "output_file": {"type": "string", "description": "输出文件路径"},
         },
         "required": ["action"],
     }
@@ -216,6 +225,14 @@ class CharacterCrawlerTool(BaseTool):
     def execute(self, action: str, **kwargs) -> ToolResult:  # type: ignore[override]
         if not HAS_REQUESTS:
             return ToolResult(False, error="请安装: pip install requests beautifulsoup4")
+        # W6 缺陷 C：模型不再拥有任何文件路径控制权。保留参数名是为了给
+        # 仍传该参数的调用方一个明确的拒绝语义，而非静默忽略让其误以为已保存。
+        if kwargs.get("output_file"):
+            return ToolResult(
+                False,
+                error="output_file 参数已移除：结果统一写入受控知识存储"
+                "（data/character_crawler/），路径由服务端固定，不接受模型指定",
+            )
         handlers = {
             "fetch_wiki": lambda: self._fetch_wikipedia(kwargs.get("name")),  # type: ignore[arg-type]
             "fetch_url": lambda: self._fetch_generic(kwargs.get("url")),  # type: ignore[arg-type]
@@ -230,12 +247,48 @@ class CharacterCrawlerTool(BaseTool):
             result = handler()
             if result.success and isinstance(result.data, dict):
                 result.data = self._normalize_profile(result.data)
-            if kwargs.get("output_file") and result.success:
-                self._save(result.data, kwargs["output_file"])
+                saved_name = str(
+                    kwargs.get("name") or result.data.get("name") or action
+                )
+                result.data["saved_to"] = self._save_to_knowledge_store(
+                    result.data, saved_name
+                )
             return result
         except Exception as e:
             logger.exception("人物爬取失败: %s", e)
             return ToolResult(False, error="character_crawl_failed")
+
+    # ── 受控知识存储（W6 缺陷 C 根治）──────────────────────────
+
+    @staticmethod
+    def _slugify(name: str) -> str:
+        """文件名消毒：路径分隔符/盘符/UNC/.. 全部落入下划线，杜绝逃逸。"""
+        slug = re.sub(r"[^\w\u4e00-\u9fff-]+", "_", str(name or ""), flags=re.UNICODE)
+        return (slug.strip("._-") or "profile")[:80]
+
+    def _save_to_knowledge_store(self, data: Any, name: str) -> str:
+        """写入固定根目录；返回落盘绝对路径。任何逃逸直接拒绝。"""
+        root = self._storage_root.resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        dest = root / f"{self._slugify(name)}.json"
+        if dest.parent != root:
+            # 双保险：slug 已消毒，此处仍强制根内（根目录本身被 symlink
+            # 替换时 resolve 已收敛到真实路径，判定依然成立）。
+            raise ValueError(f"受控存储路径逃逸: {dest}")
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=".crawl_", suffix=".tmp", dir=str(root)
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_name, dest)
+        except Exception:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(tmp_name)
+            raise
+        return str(dest)
 
     # ──────────────────────────────
     #  fetch_wiki — 带 Session + UA 轮换
@@ -251,7 +304,7 @@ class CharacterCrawlerTool(BaseTool):
         for domain in pending:
             url = f"{domain}/wiki/{quote(name)}"
             try:
-                resp = self.session.get(url, timeout=_WIKI_TIMEOUT)
+                resp = fetch_guarded(self.session, url, timeout=_WIKI_TIMEOUT)
                 if resp.status_code == 200:
                     soup = BeautifulSoup(resp.text, "html.parser")
                     profile = self._parse_wikipedia(soup)
@@ -262,6 +315,10 @@ class CharacterCrawlerTool(BaseTool):
                     profile["source_url"] = url
                     profile["crawled_at"] = datetime.now(tz=timezone.utc).isoformat()
                     return ToolResult(True, data=profile)
+            except UrlBlockedError:
+                # 固定公网域名被守卫拒绝（异常网络环境）→ 与不可达同样记忆跳过
+                self._mark_wiki_domain_blocked(domain)
+                continue
             except requests.RequestException:
                 self._mark_wiki_domain_blocked(domain)
                 logger.warning("维基域名 %s 不可达（已记忆 %ds），尝试下一个", domain, int(_WIKI_MEMO_TTL))
@@ -384,7 +441,9 @@ class CharacterCrawlerTool(BaseTool):
             return ToolResult(False, error="需要 cloudscraper")
         baike_url = f"https://baike.baidu.com/item/{quote(name)}"
         try:
-            resp = self.session.get(baike_url, timeout=15)
+            resp = fetch_guarded(self.session, baike_url, timeout=15)
+        except UrlBlockedError as e:
+            return ToolResult(False, error=f"SSRF防护拦截: {e}")
         except Exception as e:
             return ToolResult(False, error=f"请求百度百科失败: {e}")
         if resp.status_code != 200:
@@ -438,28 +497,23 @@ class CharacterCrawlerTool(BaseTool):
         return ToolResult(True, data=profile)
 
     # ──────────────────────────────
-    #  URL 校验 & 通用抓取（支持 UA 轮换 + 重定向跟随）
+    #  URL 校验 & 通用抓取（tools/url_guard 统一 SSRF 守卫：DNS 解析级
+    #  判定 + 手动逐跳重定向校验。W6 缺陷 D 根治前这里只做字面前缀匹配）
     # ──────────────────────────────
     def _validate_url(self, url: str) -> bool:
-        if not any(url.startswith(s) for s in _ALLOWED_SCHEMES):
-            return False
-        parsed = urlparse(url)
-        hostname = parsed.hostname or ""
-        if hostname in _BLOCKED_HOSTS:
-            return False
-        return not any(hostname.startswith(p) for p in _BLOCKED_PREFIXES)
+        return assert_public_http_url(url) is None
 
     def _try_fetch(self, url: str, referer: str = "", mobile: bool = False) -> ToolResult:
-        """轻量级抓取（允许重定向，SSRF 防护）"""
-        if not self._validate_url(url):
-            return ToolResult(False, error="SSRF防护拦截")
+        """轻量级抓取（逐跳校验的受控重定向）"""
         try:
-            resp = self.session.get(
+            resp = fetch_guarded(
+                self.session,
                 url,
                 headers=_headers(referer=referer, mobile=mobile),
                 timeout=12,
-                allow_redirects=True,
             )
+        except UrlBlockedError as e:
+            return ToolResult(False, error=f"SSRF防护拦截: {e}")
         except requests.RequestException as e:
             return ToolResult(False, error=f"请求失败: {e}")
         if resp.status_code != 200:
@@ -480,22 +534,15 @@ class CharacterCrawlerTool(BaseTool):
         return ToolResult(True, data=result)
 
     def _fetch_generic(self, url: str) -> ToolResult:
-        """通用网页抓取（SSRF 防护，不跟随重定向）"""
+        """通用网页抓取（DNS 级 SSRF 防护，重定向逐跳校验）"""
         if not url:
             return ToolResult(False, error="请提供URL")
-        if not self._validate_url(url):
-            return ToolResult(False, error="URL不合法或指向内网地址（SSRF防护）")
         try:
-            resp = self.session.get(
-                url,
-                headers=_headers(),
-                timeout=15,
-                allow_redirects=False,
-            )
+            resp = fetch_guarded(self.session, url, headers=_headers(), timeout=15)
+        except UrlBlockedError as e:
+            return ToolResult(False, error=f"URL不合法或指向内网地址（SSRF防护）: {e}")
         except requests.RequestException as e:
             return ToolResult(False, error=f"请求失败: {e}")
-        if resp.status_code in (301, 302, 303, 307, 308):
-            return ToolResult(False, error="重定向被阻止（安全策略）")
         if resp.status_code != 200:
             return ToolResult(False, error=f"请求失败: HTTP {resp.status_code}")
         result: dict[str, Any] = {"url": url, "title": ""}
@@ -523,11 +570,6 @@ class CharacterCrawlerTool(BaseTool):
             except Exception as e:  # noqa: BLE001
                 logger.error("抓取失败 %s: %s", url, e)
         return ToolResult(True, data={"total": len(urls), "success": len(results), "profiles": results})
-
-    @staticmethod
-    def _save(data: Any, filepath: str):
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 class CharacterKnowledgeImporter:
