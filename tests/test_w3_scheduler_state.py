@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -398,3 +399,112 @@ def test_important_dates_job_re_reads_before_early_return(monkeypatch, sched_san
     sched_sandbox._check_important_dates()
     assert gf.refresh_calls == 1
 
+
+
+# ── D 第三面：ASE 交互新鲜度按版本合并（旧全量快照不得覆盖新互动）────────
+#
+# 状态文件是**多 worker 共享**的：聊天所在 worker 的引擎 `on_chat` → 落盘，
+# 而 master 调度器每 10 分钟 `_save_state()` 把**自己那份内存**整表覆写
+# （ase_engine.save_state 是完整快照）。两侧内存来自各自的加载时刻，
+# master 持旧快照 → 刚发生的「用户开口」被抹回几小时前，于是她既看不见
+# 「刚聊完」，注意力（response_rate）也被回退，主动消息紧迫度重新顶格。
+# 口径：交互新鲜度三字段按 `last_user_interaction` 新者胜（磁盘更新则采纳
+# 并回写内存），其余字段仍是写者为准（配额、冷却等是本地推进量）。
+
+
+def _engine(tmp_path, name="ase.json"):
+    from proactive.ase_engine import ASEEngine
+
+    return ASEEngine(state_path=str(tmp_path / name), generation_mode="template")
+
+
+def _disk(path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_stale_snapshot_save_keeps_fresher_interaction(tmp_path):
+    """另一 worker 刚落盘的「用户开口」，不能被本进程的陈旧快照覆盖回去。"""
+    path = tmp_path / "ase.json"
+    a = _engine(tmp_path)
+    a.on_chat("早", "早呀")
+    a.save_state()
+    time.sleep(0.01)
+
+    b = _engine(tmp_path)  # 另一进程：从盘加载后收到新的用户互动
+    b.on_chat("我明天要体检", "别紧张，我在")
+    b.save_state()
+
+    assert a._last_user_message == "早"  # a 的内存确实陈旧
+    a.save_state()  # 10 分钟批量持久化
+
+    assert _disk(path)["last_user_message"] == "我明天要体检"
+    assert a._last_user_message == "我明天要体检", "陈旧写者必须采纳更新的盘，而非继续陈旧"
+
+
+def test_interaction_merge_does_not_freeze_other_fields(tmp_path):
+    """合并只限交互新鲜度；配额等本地推进量仍以写者为准。"""
+    path = tmp_path / "ase.json"
+    a = _engine(tmp_path)
+    a.on_chat("早", "早呀")
+    a.save_state()
+    time.sleep(0.01)
+
+    b = _engine(tmp_path)  # 从盘加载后收到新的用户互动 → 磁盘更新
+    b.on_chat("我明天要体检", "别紧张，我在")
+    b.save_state()
+
+    # a 仍是陈旧交互，但它自己推进了日配额
+    assert a._last_user_message == "早"
+    a._daily_message_count = 9
+    a.save_state()
+
+    saved = _disk(path)
+    assert saved["daily_count"] == 9
+    assert saved["last_user_message"] == "我明天要体检"
+
+
+def test_refresh_interaction_from_disk_adopts_and_throttles(tmp_path):
+    a = _engine(tmp_path)
+    a.on_chat("早", "早呀")
+    a.save_state()
+
+    b = _engine(tmp_path)
+    b.on_chat("我明天要体检", "别紧张，我在")
+    b.save_state()
+
+    a.refresh_interaction_from_disk()  # 首次不受节流
+    assert a._last_user_message == "我明天要体检"
+
+    c = _engine(tmp_path)
+    c.on_chat("结果出来了，一切正常", "太好了")
+    c.save_state()
+
+    a.refresh_interaction_from_disk()  # 30s 节流窗内不重复读盘
+    assert a._last_user_message == "我明天要体检"
+    a.refresh_interaction_from_disk(force=True)
+    assert a._last_user_message == "结果出来了，一切正常"
+
+
+def test_hub_cache_hit_adopts_fresher_disk_interaction(tmp_path, monkeypatch):
+    """hub 缓存命中直接 return（旧）→ master 的引擎永远不看文件版本。"""
+    import proactive.ase_hub as hub_mod
+    from proactive.ase_engine import ASEEngine
+    from proactive.ase_hub import ASEHub
+
+    monkeypatch.setattr(hub_mod, "_STATE_DIR", tmp_path)
+    monkeypatch.setattr(hub_mod, "_INDEX_PATH", tmp_path / "index.json")
+    hub = ASEHub(lambda user_key="", state_path="", **kw: _engine(tmp_path, Path(state_path).name))
+    hub._state_dir = tmp_path
+
+    key = "7:wx_a@im.wechat"
+    eng = hub.get(key)
+    eng.on_chat("早", "早呀")
+    eng.save_state()
+    time.sleep(0.01)
+
+    other = ASEEngine(state_path=str(eng._state_path), generation_mode="template")
+    other.on_chat("我明天要体检", "别紧张，我在")
+    other.save_state()
+
+    assert hub.get(key) is eng, "缓存实例必须复用（不新建）"
+    assert eng._last_user_message == "我明天要体检"

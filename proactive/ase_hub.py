@@ -124,6 +124,14 @@ class ASEHub:
             eng = self._engines.get(key)
             if eng is not None:
                 self._engines.move_to_end(key)
+                # 🔴 2026-09-27（W3 缺陷 D 第三面）：缓存命中不能直接 return。
+                # 状态文件是多 worker 共享的：用户开口由处理该消息的 worker
+                # 推进并落盘，而本进程（master 调度器）持有加载时刻的旧快照，
+                # 不看文件版本就会按「几小时前聊过」的紧迫度开口。
+                refresher = getattr(eng, "refresh_interaction_from_disk", None)
+                if callable(refresher):
+                    with contextlib.suppress(Exception):
+                        refresher()
                 return eng
             self._state_dir.mkdir(parents=True, exist_ok=True)
             state_path = str(self._state_dir / safe_state_name(key))

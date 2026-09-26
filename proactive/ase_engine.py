@@ -655,6 +655,38 @@ _RESPONSE_DECAY_FACTOR = 0.997    # 每 tick 乘性衰减
 _SILENCE_THRESHOLD_SECONDS = 1800  # 沉默 30 分钟后开始缓慢累加
 _ACCUMULATION_RATE = 0.003        # 每 tick 累加量
 
+# ── 状态文件的「交互新鲜度」版本合并 ─────────────────────────────
+#
+# 🔴 2026-09-27（W3 缺陷 D 第三面）：状态文件是**多 worker 共享**的——用户开口
+# 发生在处理这条消息的那个 worker（引擎 on_chat → save_state），而 master 的
+# 调度器每 10 分钟把**自己那份内存**整表覆写回去（旧实现是无条件全量快照）。
+# master 的内存停留在它加载状态的时刻，于是「刚聊完」被抹回几小时前：注意力
+# （response_rate）回退、`_hours_since_last_chat` 又变大、紧迫度重新顶格。
+#
+# 口径：只有这三字段按版本「新者胜」（版本 = `last_user_interaction`，回落
+# `last_chat_time`）；其余字段（日配额、冷却、场景日期、频控账本）是本进程
+# 推进量，仍以写者为准——把合并扩到它们会让配额被陈旧写者长期压低。
+_INTERACTION_STATE_KEYS = ("last_user_message", "last_user_interaction", "response_rate")
+
+
+def _parse_state_time(value: Any) -> datetime | None:
+    """状态时间戳 → aware datetime；缺失或畸形返回 None（宁可不合并）。"""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    with contextlib.suppress(TypeError, ValueError):
+        dt = datetime.fromisoformat(str(value))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return None
+
+
+def _interaction_version(state: dict) -> datetime | None:
+    """交互新鲜度的版本标记（旧状态文件无 `last_user_interaction` 时回落）。"""
+    return _parse_state_time(state.get("last_user_interaction")) or _parse_state_time(
+        state.get("last_chat_time")
+    )
+
 
 class ASEEngine:
     """
@@ -738,6 +770,9 @@ class ASEEngine:
         self._last_user_message: str = ""
         self._last_user_interaction: datetime | None = None
         self.response_rate: float = 0.0
+        # 跨 worker 回灌的节流戳（refresh_interaction_from_disk 读盘代价小，
+        # 但 hub 每次 get 命中都会问，不能每问一次读一次盘）
+        self._last_interaction_refresh: float = 0.0
         self._user_key: str = ""
         self._user_profile_cache: str = ""
         self._user_profile_loaded_at: float = 0.0
@@ -1405,12 +1440,15 @@ class ASEEngine:
     def save_state(self, path: str = "") -> None:
         """把引擎状态原子落盘。
 
-        2026-09-22 块E：改走 `utils.json_state.atomic_write_json`（同目录 tmp +
-        `os.replace`）。旧实现 `open(...,"w")` + `json.dump` 直接覆写目标文件，
-        与 `_load_state` 的读取之间**没有互斥**，且写入中途失败/崩溃会留下
-        截断的 JSON —— 下一次 `_load_state` 解析失败即静默丢弃**全部**引擎状态
-        （日配额、注意力、退避基准一起归零）。跨进程口径见 `utils/json_state`
-        模块 docstring（flock + 进程内锁）。
+        2026-09-22 块E：改走 `utils.json_state`（同目录 tmp + `os.replace`）。
+        旧实现 `open(...,"w")` + `json.dump` 直接覆写目标文件，与 `_load_state`
+        的读取之间**没有互斥**，且写入中途失败/崩溃会留下截断的 JSON —— 下一次
+        `_load_state` 解析失败即静默丢弃**全部**引擎状态（日配额、注意力、退避
+        基准一起归零）。跨进程口径见 `utils/json_state` 模块 docstring。
+
+        🔴 2026-09-27（W3 缺陷 D 第三面）：改「锁内读 → 版本合并 → 写」。旧实现
+        整表无条件覆写，master 每 10 分钟的批量持久化会把**另一 worker 刚写下的
+        用户互动**抹回自己的陈旧快照（口径见 `_INTERACTION_STATE_KEYS`）。
         """
         state_path = Path(path) if path else self._state_path
         try:
@@ -1443,10 +1481,75 @@ class ASEEngine:
                 "response_rate": float(self.response_rate),
                 "saved_at": datetime.now(tz=timezone.utc).isoformat(),
             }
-            json_state.atomic_write_json(state_path, state)
+            adopted: list[dict] = []
+
+            def _merge(disk: dict) -> dict:
+                """锁内比对版本：磁盘的交互更新 → 用它覆盖本次快照的这三字段。"""
+                disk_ver = _interaction_version(disk)
+                self_ver = _interaction_version(state)
+                if disk_ver is None or self_ver is None or disk_ver <= self_ver:
+                    return state
+                merged = dict(state)
+                for key in _INTERACTION_STATE_KEYS:
+                    if key in disk:
+                        merged[key] = disk[key]
+                adopted.append(merged)
+                return merged
+
+            json_state.update_json(state_path, _merge, default=state)
+            if adopted:
+                # 本进程内存同样采纳（否则下一次 tick 还按陈旧值接地，
+                # 且下一轮落盘又要靠合并兜住）
+                self._apply_interaction_from_state(adopted[0])
+                logger.info(
+                    "ASE 落盘时采纳更新盘 user=%s 互动=%s",
+                    self._user_key or "-",
+                    str(adopted[0].get("last_user_interaction"))[:25],
+                )
             logger.debug("State saved to %s", state_path)
         except Exception as e:  # noqa: BLE001
             logger.warning("State save failed: %s", e)
+
+    def _apply_interaction_from_state(self, state: dict) -> None:
+        """把状态文件的交互新鲜度三字段写回内存（加载 / 采纳共用一条口径）。"""
+        self._last_user_message = str(state.get("last_user_message") or "")
+        parsed = _parse_state_time(state.get("last_user_interaction"))
+        if parsed is not None:
+            self._last_user_interaction = parsed
+        with contextlib.suppress(TypeError, ValueError):
+            self.response_rate = float(state.get("response_rate") or 0.0)
+
+    def _memory_interaction_version(self) -> datetime | None:
+        return _parse_state_time(self._last_user_interaction) or _parse_state_time(
+            self._last_chat_time
+        )
+
+    def refresh_interaction_from_disk(
+        self,
+        *,
+        min_interval_seconds: float = 30.0,
+        force: bool = False,
+    ) -> bool:
+        """回灌另一 worker 写下的「用户刚开口」（ASEHub 缓存命中时调用）。
+
+        返回是否发生采纳。读盘容错（缺失/损坏 → 不动内存）；默认 30s 节流，
+        因为 hub 每次 get 命中都会问一次。
+        """
+        now = time.monotonic()
+        if not force and now - self._last_interaction_refresh < min_interval_seconds:
+            return False
+        self._last_interaction_refresh = now
+        state = json_state.read_json(self._state_path, default=None)
+        if not isinstance(state, dict):
+            return False
+        disk_ver = _interaction_version(state)
+        if disk_ver is None:
+            return False
+        mem_ver = self._memory_interaction_version()
+        if mem_ver is not None and mem_ver >= disk_ver:
+            return False
+        self._apply_interaction_from_state(state)
+        return True
 
     def _load_state(self) -> None:
         if not self._state_path.exists():
@@ -1480,14 +1583,7 @@ class ASEEngine:
 
             # 交互新鲜度 / 注意力（2026-09-21 重扫）：重启后仍能判断
             # 「刚聊完」还是「三天没理我」，否则 hours_since_chat 又会退化成 0
-            self._last_user_message = str(state.get("last_user_message") or "")
-            if state.get("last_user_interaction"):
-                with contextlib.suppress(TypeError, ValueError):
-                    self._last_user_interaction = datetime.fromisoformat(
-                        state["last_user_interaction"]
-                    )
-            with contextlib.suppress(TypeError, ValueError):
-                self.response_rate = float(state.get("response_rate") or 0.0)
+            self._apply_interaction_from_state(state)
 
             urgency_data = state.get("urgency", {})
             if urgency_data:
