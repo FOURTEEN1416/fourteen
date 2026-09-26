@@ -251,32 +251,49 @@ class _InitPhasesMixin:
             引擎实例读到（`self._knowledge_*` 查的是引擎自己的 dict），导致
             `_try_knowledge_share` 恒 `func is None`、persona 源 `_knowledge_character_id`
             恒 `""`。工厂创建时按 uk 解析并写入引擎自身。
+
+            角色 id **每次读取重新解析**并带上用户管理器：
+            - 不传 `user_manager` 时 `resolve_character_id` 恒回落内置 `default`
+              （生产实况：所有引擎的知识都来自"没有绑定角色"的兜底）；
+            - 只在创建时快照，切角色后旧引擎继续把**旧角色**的知识当谈资；
+            - 旧实现解析不到时回落「全局活跃角色」= 跨角色串内容，一并废除。
             """
             try:
+                from shisi.core.services.prompt_builder import IDENTITY_KNOWLEDGE_SOURCES
                 from shisi.knowledge.character_knowledge_service import get_knowledge_service
                 from utils.character_resolver import resolve_character_id
 
                 ksvc = get_knowledge_service()
 
-                def _share(cid: str = "") -> str:
-                    use_cid = str(getattr(eng, "_knowledge_character_id", "") or cid or "")
-                    if not use_cid or use_cid == "dynamic":
-                        try:
-                            from api.deps import deps as _deps
+                def _bound_cid() -> str:
+                    if not uk:
+                        return ""
+                    try:
+                        from api.deps import deps as _deps
 
-                            cm = getattr(getattr(_deps, "shisi_reg", None), "character_manager", None)
-                            use_cid = (cm.get_active_id() if cm else "") or use_cid
-                        except Exception:  # noqa: BLE001
-                            pass
-                    if not use_cid or use_cid == "dynamic":
+                        user_mgr = getattr(_deps, "gf", None)
+                    except Exception:  # noqa: BLE001
+                        user_mgr = None
+                    try:
+                        return str(resolve_character_id(uk, user_mgr) or "")
+                    except Exception:  # noqa: BLE001
+                        return str(getattr(eng, "_knowledge_character_id", "") or "")
+
+                def _share(cid: str = "") -> str:
+                    use_cid = _bound_cid() or str(cid or "")
+                    if not use_cid:
                         return ""
                     return str(
-                        ksvc.get_knowledge_context(use_cid, "最近话题 兴趣 资讯", top_k=2) or ""
+                        ksvc.get_knowledge_context(
+                            use_cid,
+                            "最近话题 兴趣 资讯",
+                            top_k=2,
+                            exclude_sources=IDENTITY_KNOWLEDGE_SOURCES,
+                        ) or ""
                     )
 
                 eng._knowledge_share_func = _share
-                resolved = resolve_character_id(uk) if uk else ""
-                eng._knowledge_character_id = str(resolved or "dynamic")
+                eng._knowledge_character_id = _bound_cid()
             except Exception as e:  # noqa: BLE001
                 logger.debug("ASE 知识分享注入失败（忽略）: %s", e)
 
@@ -284,36 +301,6 @@ class _InitPhasesMixin:
         from proactive.ase_hub import ASEHub
 
         self.components["ase"] = ASEHub(_make_ase_engine)
-
-        # ── 候选 C：注入知识分享函数（share 类主动消息优先分享爬虫/文档知识库真实内容） ──
-        try:
-            from shisi.knowledge.character_knowledge_service import get_knowledge_service
-
-            _ksvc = get_knowledge_service()
-
-            def _active_cid() -> str:
-                """动态解析当前活跃角色（shisi CharacterManager 单例）。"""
-                try:
-                    from api.deps import deps as _deps
-
-                    cm = getattr(getattr(_deps, "shisi_reg", None), "character_manager", None)
-                    return (cm.get_active_id() if cm else "") or ""
-                except Exception:  # noqa: BLE001
-                    return ""
-
-            ase_inst = self.components.get("ase")
-            if isinstance(ase_inst, ASEHub):
-                # 每引擎知识已在 `_inject_ase_knowledge` 工厂注入；
-                # hub 级 `_knowledge_share_func` 不会被引擎实例读到（setattr 只挂 hub），
-                # 此处不再写 hub 属性——写了也是死属性，会误导「已接线」判断。
-                pass
-            elif ase_inst is not None:
-                ase_inst._knowledge_share_func = (
-                    lambda _cid: _ksvc.get_knowledge_context(_active_cid(), "最近话题 兴趣 资讯", top_k=2)
-                )
-                ase_inst._knowledge_character_id = "dynamic"
-        except Exception:  # noqa: BLE001
-            pass
 
         # ── 主动消息调度器（ASE / 每日维护 / 每用户情绪时间衰减） ──
         try:

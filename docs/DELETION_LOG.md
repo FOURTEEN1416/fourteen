@@ -1,5 +1,20 @@
 # Code Deletion Log
 
+## [2026-09-27] W3 缺陷 H：ASE 知识装配的死块与跨角色回落
+
+- 删除 `orchestrator/_init_mixin.py::_init_ase_and_scheduler` 内「候选 C：注入知识分享
+  函数」整块（29 行）。`self.components["ase"]` 在上一行恒为 `ASEHub`，块内
+  `if isinstance(ase_inst, ASEHub): pass` / `elif ase_inst is not None:` 的 else 分支
+  不可达（09-22 六域批次把 hub 级 setattr 收成 `pass` 后，本块只剩注释壳）；
+  真实注入唯一 owner 是同函数的工厂 `_inject_ase_knowledge`。
+- 同块连带删除 `_active_cid()`（回落 `shisi_reg.character_manager.get_active_id()`
+  ——全局活跃角色），`_inject_ase_knowledge._share` 里同名回落一并去除：解析不到
+  角色时改为**不读**，不再把别人角色的知识当本会话谈资（多用户串内容）。
+- 验证：`tests/test_w3_knowledge_proactive.py` 新增装配 3 例（resolver 必须带
+  user_manager、切角色按读取时重解析、无绑定不得读全局）；突变验红 4/4 命中
+  （不传 manager / 用创建时快照 / 不排除身份字段 / 回落全局活跃角色各自转红）后
+  逐字节还原；主动域+编排 13 文件 285 通过 / 0 失败。
+
 ## [2026-09-27] W6 配置生效与可信工具：tracked 运行时开关文件迁出源码树
 
 - 删除 `plugins/plugins.json`（git tracked，内容为空骨架 `{"plugins": {}}`）：

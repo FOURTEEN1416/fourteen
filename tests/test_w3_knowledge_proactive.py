@@ -1,6 +1,6 @@
 """W3 缺陷 H 回归 —— 知识/热点经**统一读接口**进入当前 LLM 主动决策链。
 
-红先行钉的三件事（旧现状三处都缺）：
+红先行钉的四件事（旧现状四处都缺）：
 
 1. 唯一 door `proactive.llm_proactive.load_proactive_knowledge`：热点池 + 角色知识
    索引一次读出、热点前置，任一侧缺失/异常静默降级；
@@ -8,7 +8,10 @@
    且角色 id 用**当轮解析出的**绑定（旧实现知识只留在被旁路的 ASE 生成线，
    决策链从不读知识 → 知识库/热点在真实链路上永不落地）；
 3. 旧 ASE 分享线不再自己拼两份源，改调同一 door（否则两条线各自的源选择逻辑
-   会漂移，又变成一个概念两个 owner）。
+   会漂移，又变成一个概念两个 owner）；
+4. 装配层（`orchestrator/_init_mixin`）注入的角色 resolver 必须**带用户管理器、
+   且每次读取重新解析**——不传 manager 时恒解析成内置 `default`（知识永远来自
+   "没绑定角色"的兜底），回落「全局活跃角色」则是跨角色串内容。
 
 数据全部合成（tmp_path 状态目录 + 假检索），不读真实知识库。
 """
@@ -238,3 +241,142 @@ def test_legacy_share_line_goes_through_the_same_door(monkeypatch):
     )
     assert "我刚看到个片子定档了" in str(out["message"])
     assert llm.queries and "合并后的真实内容" in llm.queries[0]
+
+
+# ── 4. 装配层注入的角色 resolver 必须带 user_manager ────────
+
+def _init_ase_hub(tmp_path, monkeypatch):
+    """跑真实装配入口 `_init_ase_and_scheduler`，返回 ASEHub（引擎逐实例注入知识）。"""
+    from types import SimpleNamespace
+
+    from orchestrator._init_mixin import _InitPhasesMixin as Mixin
+    from proactive import ase_hub
+
+    hub_dir = tmp_path / "ase_states"
+    monkeypatch.setattr(ase_hub, "_STATE_DIR", hub_dir)
+    monkeypatch.setattr(ase_hub, "_INDEX_PATH", hub_dir / "index.json")
+    self_ = SimpleNamespace(components={"llm": None})
+    cfg = SimpleNamespace(proactive=SimpleNamespace(
+        max_daily_messages=8,
+        min_interval_minutes=30,
+        cooldown_after_reply_minutes=5,
+        urgency_threshold=5.0,
+    ))
+    Mixin._init_ase_and_scheduler(self_, cfg, {})
+    return self_.components["ase"]
+
+
+def test_engine_factory_passes_user_manager_to_resolver(tmp_path, monkeypatch):
+    """🔴 不传 user_manager 时 resolver 恒回落内置 `default` —— 生产实况：每人引擎的
+    `_knowledge_character_id` 都是 default，知识只可能来自"没有角色"的兜底。
+    """
+    import api.deps as deps_mod
+    import utils.character_resolver as resolver_mod
+
+    class _Mgr:
+        def get_user_character(self, key: str) -> str:
+            return "micai"
+
+    mgr = _Mgr()
+    monkeypatch.setattr(deps_mod.deps, "gf", mgr, raising=False)
+
+    seen: dict = {}
+
+    def _resolve(key, user_manager=None):
+        seen["key"] = key
+        seen["user_manager"] = user_manager
+        return user_manager.get_user_character(key) if user_manager is not None else "default"
+
+    monkeypatch.setattr(resolver_mod, "resolve_character_id", _resolve)
+
+    eng = _init_ase_hub(tmp_path, monkeypatch).get("4:wxid_x@im.wechat")
+    assert seen["user_manager"] is mgr, (
+        "角色 resolver 未收到用户管理器（拿不到绑定表 → 恒解析成 default）"
+    )
+    assert eng._knowledge_character_id == "micai"
+
+
+def test_share_reader_rebinds_to_current_character(tmp_path, monkeypatch):
+    """切角色后旧引擎不得继续供旧角色的内容，也绝不回落「全局活跃角色」。"""
+    import api.deps as deps_mod
+    import shisi.knowledge.character_knowledge_service as cks
+    from shisi.core.services.prompt_builder import IDENTITY_KNOWLEDGE_SOURCES
+
+    class _Mgr:
+        cid = "micai"
+
+        def get_user_character(self, key: str) -> str:
+            return self.cid
+
+    class _Active:
+        def get_active_id(self) -> str:
+            return "someone-elses-card"
+
+    class _Reg:
+        character_manager = _Active()
+
+    mgr = _Mgr()
+    monkeypatch.setattr(deps_mod.deps, "gf", mgr, raising=False)
+    monkeypatch.setattr(deps_mod.deps, "shisi_reg", _Reg(), raising=False)
+
+    calls: list = []
+
+    class _Svc:
+        def get_knowledge_context(self, cid, query, top_k=3, **kw):
+            calls.append({"cid": cid, "exclude_sources": kw.get("exclude_sources")})
+            return f"知识：{cid}" * 12
+
+    monkeypatch.setattr(cks, "get_knowledge_service", lambda: _Svc())
+
+    eng = _init_ase_hub(tmp_path, monkeypatch).get("4:wxid_x@im.wechat")
+    eng._knowledge_share_func("")
+    mgr.cid = "liu-shisan"
+    eng._knowledge_share_func("")
+
+    cids = [c["cid"] for c in calls]
+    assert cids == ["micai", "liu-shisan"], (
+        f"分享线用的是引擎创建时缓存的角色（旧角色内容当谈资）：{cids}"
+    )
+    assert "someone-elses-card" not in cids, "不得回落全局活跃角色（跨角色串内容）"
+    assert all(c["exclude_sources"] == IDENTITY_KNOWLEDGE_SOURCES for c in calls), (
+        "装配注入的检索闭包同样不得回声卡片身份字段"
+    )
+
+
+def test_share_reader_never_falls_back_to_global_character(tmp_path, monkeypatch):
+    """解析不到角色（无绑定 / 解析异常）时宁可不读。
+
+    旧实现在此回落 `CharacterManager.get_active_id()`（全局活跃角色）——
+    把**别人角色**的知识当成本会话的谈资，多用户下必然串。
+    """
+    import api.deps as deps_mod
+    import shisi.knowledge.character_knowledge_service as cks
+    import utils.character_resolver as resolver_mod
+
+    class _Active:
+        def get_active_id(self) -> str:
+            return "someone-elses-card"
+
+    class _Reg:
+        character_manager = _Active()
+
+    monkeypatch.setattr(deps_mod.deps, "shisi_reg", _Reg(), raising=False)
+
+    calls: list = []
+
+    class _Svc:
+        def get_knowledge_context(self, cid, query, top_k=3, **kw):
+            calls.append(cid)
+            return f"知识：{cid}" * 12
+
+    monkeypatch.setattr(cks, "get_knowledge_service", lambda: _Svc())
+
+    def _boom(key, user_manager=None):
+        raise RuntimeError("绑定表不可用")
+
+    monkeypatch.setattr(resolver_mod, "resolve_character_id", _boom)
+
+    eng = _init_ase_hub(tmp_path, monkeypatch).get("4:wxid_x@im.wechat")
+    assert eng._knowledge_share_func("") == ""
+    assert calls == [], f"解析不到角色却去读了全局活跃角色：{calls}"
+
