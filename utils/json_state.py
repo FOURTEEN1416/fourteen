@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -121,12 +122,30 @@ def atomic_write_json(path: str | Path, data: Any) -> None:
         _write_locked(p, payload)
 
 
+def _replace_with_retry(tmp: Path, target: Path, attempts: int = 4) -> None:
+    """``os.replace`` 的瞬时共享冲突重试（Windows 并发读者/写者）。
+
+    Linux 生产是纯 rename，不会有这问题；Windows 开发机上目标文件正被另一
+    线程读/换时会抛 ``PermissionError(13)``（实测 4 线程并发写同一状态文件
+    约 1/3 概率命中）。**只对瞬时占用重试**，最终仍失败则上抛 —— 绝不静默
+    丢状态（旧行为：写失败被调用方的宽 except 吞掉，配置整段不落盘）。
+    """
+    for i in range(attempts):
+        try:
+            os.replace(tmp, target)
+            return
+        except OSError:
+            if i + 1 >= attempts or not tmp.exists():
+                raise
+            time.sleep(0.01 * (i + 1))
+
+
 def _write_locked(p: Path, payload: str) -> None:
     """在已持有该文件全部锁的前提下落盘（唯一 tmp 命名 + replace）。"""
     tmp = p.with_name(f"{p.name}.{os.getpid()}.{threading.get_ident()}.{_tmp_seq()}.tmp")
     try:
         tmp.write_text(payload, encoding="utf-8")
-        os.replace(tmp, p)
+        _replace_with_retry(tmp, p)
     finally:
         with contextlib.suppress(OSError):
             if tmp.exists():

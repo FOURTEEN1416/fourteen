@@ -1475,20 +1475,31 @@ class WeChatConnector:
             peer = str(row.get("peer") or "") or (
                 self._peer_wxid_from_session(session_key) if session_key else ""
             )
-            ok, reason = False, ""
+            cid = int(row["id"])
             if not text or not peer:
-                reason = "no_target"
-            elif not self.token:
-                reason = "channel_offline"
-            else:
                 try:
-                    ok = self.send_text(text, to_user=peer)
+                    rp.complete_send(cid, ok=False, reason="no_target")
                 except Exception as e:  # noqa: BLE001
-                    logger.warning("[wx][step=outbox_send_error] %s", e)
-                if not ok:
-                    reason = "send_api_rejected"
+                    logger.debug("[wx][step=outbox_complete_failed] %s", e)
+                continue
+            if not self.token:
+                # 本机 slot 离线不是这条消息的死刑：另一 worker 的同 owner 在线
+                # slot 可能投得了 → 退回 pending（认领上限防乒乓，块3）。
+                try:
+                    rp.requeue_send(cid, reason="channel_offline")
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("[wx][step=outbox_requeue_failed] %s", e)
+                continue
+            ok = False
             try:
-                rp.complete_send(int(row["id"]), ok=ok, reason=reason)
+                ok = self.send_text(text, to_user=peer)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[wx][step=outbox_send_error] %s", e)
+            try:
+                rp.complete_send(
+                    cid, ok=ok, reason="" if ok else "send_api_rejected",
+                    slot=self.slot,
+                )
             except Exception as e:  # noqa: BLE001
                 logger.debug("[wx][step=outbox_complete_failed] %s", e)
 

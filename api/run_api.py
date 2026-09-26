@@ -16,7 +16,7 @@ import os
 import sys
 import threading
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 # 确保项目根在 sys.path
@@ -84,6 +84,64 @@ user_mgr = UserManager(orchestrator)
 
 # ── 启动 WebSocket 服务器（主动消息 websocket 通道） ──
 _ws_holder: dict[str, object] = {}
+
+# ── 控制面（后台单一运行时）装配 ──
+# 出站不再假定"投递方与通道宿主同进程"：入队保留归属快照，由真正持有资源的
+# 宿主（连接器线程 / WS 持有者）CAS 认领并回写**受理回执**，等待方凭回执判成败。
+_RECEIPT_TIMEOUT_SECONDS = 45.0
+_WS_OUTBOX_INTERVAL_SECONDS = 3.0
+_WS_OUTBOX_BATCH = 4
+
+
+def _plane():
+    """控制面模块，不可用时返回 None（投递退回本地直发，开发环境可跑）。"""
+    try:
+        from proactive import runtime_plane
+
+        return runtime_plane
+    except Exception as e:  # noqa: BLE001
+        logger.debug("控制面不可用，退回本地直发: %s", e)
+        return None
+
+
+def _character_id_for_session(session_key: str) -> str:
+    """出站命令的角色快照（判据唯一 owner：``utils.character_resolver``）。"""
+    try:
+        from utils import character_resolver
+
+        return str(character_resolver.resolve_character_id(session_key, user_mgr) or "")
+    except Exception as e:  # noqa: BLE001
+        logger.debug("出站角色快照解析失败 session=%s: %s", session_key, e)
+        return ""
+
+
+async def _ws_outbox_drain(
+    ws_server: WebSocketServer, *, interval: float = _WS_OUTBOX_INTERVAL_SECONDS,
+) -> None:
+    """websocket 通道消费者：本机持有连接时才认领，投递后回写回执。
+
+    挂在 WS 服务**自身**的事件循环上（谁持连接谁投递）。0 送达（该会话的连接
+    不在本 worker）退回队列，绝不判死；SQLite 读写一律下线程池 —— 同步等待会
+    卡住 WS 服务循环（P1-23 同一教训）。
+    """
+    rp = _plane()
+    if rp is None:
+        return
+    while True:
+        try:
+            if ws_server.client_count() > 0:
+                await rp.drain_once_async(
+                    channel="websocket",
+                    send_async=ws_server.send_proactive_to_session,
+                    batch=_WS_OUTBOX_BATCH,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning("websocket outbox 消费异常（下轮重试）: %s", e)
+        await asyncio.sleep(interval)
+
+
 if HAS_WEBSOCKETS:
     _ws_port = getattr(cfg.api, "websocket_port", 8765)
 
@@ -93,8 +151,18 @@ if HAS_WEBSOCKETS:
         loop = asyncio.new_event_loop()
         holder["loop"] = loop
         asyncio.set_event_loop(loop)
+
+        async def _serve() -> None:
+            drain = asyncio.create_task(_ws_outbox_drain(ws_server))
+            try:
+                await ws_server.start()
+            finally:
+                drain.cancel()
+                with suppress(asyncio.CancelledError):
+                    await drain
+
         try:
-            loop.run_until_complete(ws_server.start())
+            loop.run_until_complete(_serve())
         finally:
             try:
                 loop.run_until_complete(ws_server.stop())
@@ -188,6 +256,23 @@ if _scheduler is not None:
             # 2026-09-22：带 session_key 的调用**定向**（web 会话主动消息），
             # 0 送达抛异常由调度器判失败；无 session_key 的系统级消息保留广播。
             if session_key:
+                rp = _plane()
+                if rp is not None:
+                    # 块3：投递命令交控制面 —— 连接可能挂在**另一个** worker
+                    # 的 WS 服务器上（谁 bind 谁驻留），本 worker 直发必 0 送达，
+                    # 旧实现据此判失败并扣不进配额、白烧一次 LLM。
+                    ok, reason, _cid = await asyncio.to_thread(
+                        rp.enqueue_and_wait,
+                        kind="proactive", channel="websocket",
+                        session_key=session_key, message=msg,
+                        timeout=_RECEIPT_TIMEOUT_SECONDS,
+                    )
+                    if not ok:
+                        raise RuntimeError(
+                            f"websocket 定向投递未获受理（session={session_key}）: {reason}"
+                        )
+                    logger.info("websocket 定向投递已受理 session=%s %s", session_key, reason)
+                    return
                 delivered = await ws_server.send_proactive_to_session(session_key, msg)
                 if delivered == 0:
                     raise RuntimeError(
@@ -252,6 +337,27 @@ if _scheduler is not None:
                 # P0-4-3：给了 session_key 却解析不出 owner:peer → 拒发。
                 # 旧实现让坏键掉进"全员兜底"分支，A 的私信变广播。
                 raise RuntimeError(f"微信投递拒绝：session_key 无法解析为 owner:peer（{sk}）")
+            if targets:
+                rp = _plane()
+                if rp is not None:
+                    # 块3（缺陷 A/C）：连接器宿主可能挂在**别的** worker —— 本
+                    # worker 的 registry 为空或只持有一个 slot。投递命令交控制面，
+                    # 由该 owner 任一在线 slot 的宿主 CAS 认领（一行恰一宿主，
+                    # 天然不混投），回执为受理确认。
+                    owner_id, peer = targets[0]
+                    ok, reason, _cid = await asyncio.to_thread(
+                        rp.enqueue_and_wait,
+                        kind="proactive", channel="wechat", session_key=sk,
+                        owner_id=owner_id, peer=peer,
+                        character_id=_character_id_for_session(sk),
+                        message=msg, timeout=_RECEIPT_TIMEOUT_SECONDS,
+                    )
+                    if not ok:
+                        raise RuntimeError(
+                            f"微信定向投递未获受理 session={sk}: {reason}"
+                        )
+                    logger.info("微信定向投递已受理 session=%s %s", sk, reason)
+                    return
             if not targets:
                 # 兼容旧广播路径（仅 session_key 为空的系统级消息）：
                 # 仍只投递各 owner 自己绑定的 peer，不跨 owner
@@ -269,6 +375,9 @@ if _scheduler is not None:
                     if getattr(conn, "token", "") and conn.send_text(msg, to_user=peer):
                         delivered = True
                         sent_any = True
+                        # 命中一条归属通道即停：旧实现不 break，同 owner 的双 slot
+                        # 各发一次（用户收到两条重复主动消息，缺陷 C）
+                        break
                 if not delivered:
                     failures.append(f"{owner_id}:{peer}")
 
@@ -347,6 +456,9 @@ if _scheduler is not None:
             memory=orchestrator.components.get("memory"),
             character_id_resolver=_character_id_resolver,
             llm_resolver=lambda key: session_llm(key, orchestrator),
+            # 块3：提醒投递走控制面（通道宿主可能在别的 worker；_wechat_send /
+            # _ws_send 仅在控制面不可用时兜底）
+            plane=_plane(),
         )
         _scheduler.register_reminder_task(task)
         logger.info("提醒到期投递任务已装配（每分钟轮询，豁免静默时段）")

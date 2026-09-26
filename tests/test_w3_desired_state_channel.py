@@ -207,17 +207,41 @@ def test_drain_outbox_peer_falls_back_to_session_key(chan, monkeypatch):
     assert ("裸 peer 缺省", "wx_d") in sent
 
 
-def test_drain_outbox_offline_channel_marks_failed_not_hangs(chan, monkeypatch):
-    """宿主 token 缺失 → 明确 failed 回执（调用方不得判成功），不静默挂起。"""
-    conn = _mk_conn(chan)
-    monkeypatch.setattr(conn, "send_text", lambda *_a, **_k: True)
+def test_drain_outbox_offline_channel_requeues_for_other_host(chan, monkeypatch):
+    """本 slot 无 token **不等于**这条该死：退回 pending，让同 owner 的在线 slot 投。
+
+    旧实现把"宿主离线"当投递失败直接判死 —— 多 worker 下离线的那个宿主先认领，
+    在线的那个宿主就永远收不到（提醒 3 次判死的同类误杀）。
+    """
+    conn = _mk_conn(chan, slot=0)
+    conn.token = ""
     cid = rp.enqueue_send(
         kind="proactive", channel="wechat", owner_id=7, peer="wx_b", message="x",
     )
     conn._drain_outbox()
+    assert rp.send_status(cid)["status"] == "pending"
+
+    other = _mk_conn(chan, slot=1)
+    other.token = "tok"
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        other, "send_text",
+        lambda text, to_user="": (sent.append((text, to_user)) or True),
+    )
+    other._drain_outbox()
+    assert ("x", "wx_b") in sent
     st = rp.send_status(cid)
-    assert st["status"] == "failed"
-    assert st["fail_reason"] == "channel_offline"
+    assert st["status"] == "accepted" and st["slot"] == 1
+
+
+def test_drain_outbox_no_target_is_failed(chan):
+    """既无 peer 又解不出会话键 → 明确失败回执（不无限重投、不假成功）。"""
+    conn = _mk_conn(chan)
+    conn.token = "tok"
+    cid = rp.enqueue_send(kind="proactive", channel="wechat", owner_id=7, message="x")
+    conn._drain_outbox()
+    st = rp.send_status(cid)
+    assert st["status"] == "failed" and st["fail_reason"] == "no_target"
 
 
 # ── 缺陷 I：入站 message_id 幂等 ─────────────────────────────

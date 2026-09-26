@@ -30,9 +30,16 @@ logger = logging.getLogger("reminder_delivery")
 # pending_intents 过期清理的节流间隔（秒）——随轮询每分钟触发但不必每分钟全表扫
 _INTENT_GC_INTERVAL_SECONDS = 300.0
 
+# 控制面受理回执等待窗（秒）：连接器 outbox 消费者挂在 5 秒 tick 上，
+# 正常受理 <10s；超时**按未送达处理**（fail_count 继续累计，不假 delivered）。
+PLANE_RECEIPT_TIMEOUT = 30.0
+
 
 class ReminderDeliveryTask:
     """可调用对象：APScheduler 线程每分钟调用一次（同步入口）。"""
+
+    # 类级默认：未注入控制面时走进程内直发。__init__ 里同名覆盖。
+    _plane: Any | None = None
 
     def __init__(
         self,
@@ -43,6 +50,7 @@ class ReminderDeliveryTask:
         memory: Any | None = None,
         character_id_resolver: Callable[[str], str] | None = None,
         llm_resolver: Callable | None = None,
+        plane: Any | None = None,
     ):
         """Args:
         structured_memory: StructuredMemory 实例（get_due_reminders 等）。
@@ -55,6 +63,12 @@ class ReminderDeliveryTask:
         memory: MemoryService（API 受理后回写历史；缺省则不回写）。
         character_id_resolver: ``(session_key) -> 角色 id``，生成前只解析一次；
             展示名从该 id 取得，不再独立解析第二份身份。
+        plane: ``proactive.runtime_plane`` 模块（或同接口对象）。注入后投递走
+            **控制面 outbox**：入队保留 owner/peer/character 快照，由真正持有
+            通道资源的宿主（连接器线程 / WS 持有者）CAS 认领并回写受理回执。
+            旧实现假定"投递与通道宿主同进程"——scheduler 在 worker A、微信
+            连接器在 worker B 时 A 的本地 registry 为空，提醒被误判失败并
+            3 次判死（缺陷 A/C/E）。None 时保留原直发注入（开发/测试）。
         """
         self._sm = structured_memory
         self._llm = llm
@@ -63,6 +77,7 @@ class ReminderDeliveryTask:
         self._ws_sender = ws_sender
         self._memory = memory
         self._character_id_resolver = character_id_resolver
+        self._plane = plane
         # 节流基准锚在「已过一整个间隔」而非 0：Linux 上 time.monotonic() 以**开机**为起点，
         # 新启动的宿主（如 CI runner，开机 <300s）会让首 tick 误判为「刚清理过」而跳过批量 GC。
         self._last_intent_gc = time.monotonic() - _INTENT_GC_INTERVAL_SECONDS
@@ -95,7 +110,12 @@ class ReminderDeliveryTask:
         session_key = str(reminder.get("session_key") or "").strip()
         character_id = self._resolve_character_id(session_key)
         text = await self._compose_text(reminder, character_id=character_id)
-        delivered = await self._send_to_session(session_key, text)
+        if self._plane is not None:
+            # 块3：投递经控制面 outbox —— 通道宿主可能在别的 worker（scheduler
+            # 与连接器/WS 各自选主），本地直发在跨 worker 拓扑下必然误判失败。
+            delivered = await self._send_via_plane(session_key, text, character_id)
+        else:
+            delivered = await self._send_to_session(session_key, text)
         if delivered:
             # 自问自答根治：她主动说的话必须进历史，否则下一轮她自己不记得提醒过
             # 🔴 2026-09-22：必须带 character_id（出站行此前无归属 → 切角色继承台词）
@@ -160,6 +180,51 @@ class ReminderDeliveryTask:
             except Exception as e:  # noqa: BLE001
                 logger.warning("websocket 定向投递异常 session=%s: %s", session_key, e)
                 return False
+        return False
+
+    async def _send_via_plane(
+        self, sk: str, text: str, character_id: str = "",
+        receipt_timeout: float = PLANE_RECEIPT_TIMEOUT,
+    ) -> bool:
+        """经控制面 outbox 投递：入队保留归属快照，等资源宿主的受理回执。
+
+        微信键 → ``channel=wechat`` 且**不点名 slot**：该 owner 任一在线连接器
+        宿主 CAS 认领并真实发送，天然杜绝"遍历本地 registry 逐 slot 直发"；
+        其余键 → ``channel=websocket``，由持有该连接的 WS worker 消费。
+        旧实现只在**同进程** registry 里找通道，scheduler 与连接器分属不同
+        worker 时本地必空 → 提醒被误判失败并 3 次判死（缺陷 A/C/E）。
+        """
+        rp = self._plane
+        parsed = session_key_mod.parse(sk)
+        is_wechat = session_key_mod.is_wechat_key(sk)
+        if is_wechat and (parsed.owner is None or not parsed.peer):
+            logger.warning("[reminder] 微信会话键无法解析为 owner:peer: %s", sk)
+            return False
+        channel = "wechat" if is_wechat else "websocket"
+        try:
+            cid = await asyncio.to_thread(
+                rp.enqueue_send,
+                kind="reminder", channel=channel, session_key=sk,
+                owner_id=parsed.owner, peer=parsed.peer if is_wechat else "",
+                character_id=character_id, message=text,
+            )
+            row = await asyncio.to_thread(rp.wait_for_receipt, cid, receipt_timeout)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[reminder] 控制面投递异常 session=%s: %s", sk, e)
+            return False
+        status = str((row or {}).get("status") or "")
+        reason = str((row or {}).get("fail_reason") or "")
+        if status == "accepted":
+            return True
+        if status == "failed":
+            logger.warning(
+                "[reminder] 宿主回执投递失败 session=%s reason=%s", sk, reason,
+            )
+            return False
+        logger.warning(
+            "[reminder] %ss 内未获受理回执，按**未送达**处理 session=%s",
+            receipt_timeout, sk,
+        )
         return False
 
     def _resolve_character_id(self, session_key: str) -> str:

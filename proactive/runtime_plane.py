@@ -38,6 +38,7 @@ WS 端口（谁先 bind 谁驻留）三者**各自独立选主、互不知情**�
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import os
@@ -350,12 +351,14 @@ def claim_next_send(
             conn.commit()
             return None
         cid = int(row["id"])
+        # 认领**不**回写 slot：点名归属只由真实投递方在 complete_send 里落
+        # （claim 即写 slot 会把"未点名"命令永久绑到首个认领宿主，退回后
+        # 其他宿主再也认领不到 —— 块3 实测踩到）。
         cur = conn.execute(
             "UPDATE outbound_commands SET status='claimed', claimed_by=?, "
-            "claim_expires=?, slot=COALESCE(slot, ?), attempts=attempts+1 "
+            "claim_expires=?, attempts=attempts+1 "
             "WHERE id=? AND status='pending'",
-            (host_id(), _now() + CLAIM_TTL,
-             None if slot is None else int(slot), cid),
+            (host_id(), _now() + CLAIM_TTL, cid),
         )
         conn.commit()
         if cur.rowcount != 1:
@@ -397,6 +400,120 @@ def wait_for_receipt(cmd_id: int, timeout: float = 30.0, poll: float = 0.2) -> d
             return last
         time.sleep(poll)
     return last
+
+
+REQUEUE_MAX_ATTEMPTS = 10   # 退回重投上限（无连接集群里不得无限乒乓）
+RECEIPT_WAIT_DEFAULT = 30.0  # 生产者等受理回执的默认窗（消费者心跳 5s / 3s 量级）
+
+
+def requeue_send(cmd_id: int, *, reason: str = "") -> bool:
+    """消费者发现自己**不是**该消息的归属宿主时退回队列（非投递失败）。
+
+    与 ``complete_send(ok=False)`` 的区分：本机无该会话连接 / 该 slot 不归我，
+    只是"这条此刻不该由我投"，必须退回给真正持有资源的宿主；退回不判死，
+    但 attempts 由 :func:`claim_next_send` 递增，达 :data:`REQUEUE_MAX_ATTEMPTS`
+    即判死，避免全集群无连接时的认领乒乓。
+    """
+    with _conn() as conn:
+        cur = conn.execute(
+            "UPDATE outbound_commands SET status='pending', claimed_by='', "
+            "claim_expires=0, fail_reason=? WHERE id=? AND status='claimed' "
+            "AND attempts < ?",
+            (reason[:300], int(cmd_id), REQUEUE_MAX_ATTEMPTS),
+        )
+        if cur.rowcount == 1:
+            conn.commit()
+            return True
+        conn.execute(
+            "UPDATE outbound_commands SET status='failed', "
+            "fail_reason='requeue_limit' WHERE id=? AND status='claimed'",
+            (int(cmd_id),),
+        )
+        conn.commit()
+        return False
+
+
+def enqueue_and_wait(
+    *,
+    kind: str,
+    channel: str,
+    session_key: str = "",
+    owner_id: int | None = None,
+    slot: int | None = None,
+    peer: str = "",
+    character_id: str = "",
+    turn_id: str = "",
+    message: str = "",
+    timeout: float = RECEIPT_WAIT_DEFAULT,
+) -> tuple[bool, str, int]:
+    """生产者入口：入队（保留归属快照）并**等待资源宿主的受理回执**。
+
+    返回 ``(是否受理, 回执原因, 命令 id)``。超时按**未确认**处理（行仍
+    pending/claimed，可被后续宿主投递），调用方不得记成功——这是"delivered=True
+    却无任何确认"（缺陷 E）的根治点。
+    """
+    cid = enqueue_send(
+        kind=kind, channel=channel, session_key=session_key, owner_id=owner_id,
+        slot=slot, peer=peer, character_id=character_id, turn_id=turn_id,
+        message=message,
+    )
+    row = wait_for_receipt(cid, timeout=timeout)
+    status = str((row or {}).get("status") or "")
+    reason = str((row or {}).get("fail_reason") or "")
+    if status == "accepted":
+        return True, reason or "accepted", cid
+    if status == "failed":
+        return False, reason or "failed", cid
+    return False, f"unconfirmed_timeout(status={status or 'pending'})", cid
+
+
+async def drain_once_async(
+    *,
+    channel: str,
+    send_async,
+    owner_id: int | None = None,
+    slot: int | None = None,
+    batch: int = 4,
+) -> int:
+    """消费者入口：认领并真实投递至多 ``batch`` 条，返回受理数。
+
+    ``send_async(session_key, message) -> 送达数``；0 送达（本机无归属连接）
+    **退回队列**而非判死；抛异常/载荷无效判失败。SQLite 读写一律下线程池，
+    绝不在事件循环里同步等待（否则卡住 WS 服务循环）。
+    """
+    accepted = 0
+    for _ in range(max(1, int(batch))):
+        row = await asyncio.to_thread(
+            claim_next_send, channel=channel, owner_id=owner_id, slot=slot,
+        )
+        if not row:
+            break
+        cid = int(row["id"])
+        sk = str(row.get("session_key") or "")
+        text = str(row.get("message") or "")
+        if not sk or not text:
+            await asyncio.to_thread(
+                complete_send, cid, ok=False, reason="invalid_payload",
+            )
+            continue
+        try:
+            delivered = int(await send_async(sk, text))
+        except Exception as e:  # noqa: BLE001
+            await asyncio.to_thread(
+                complete_send, cid, ok=False,
+                reason=f"send_error:{type(e).__name__}"[:300],
+            )
+            continue
+        if delivered > 0:
+            await asyncio.to_thread(
+                complete_send, cid, ok=True, reason=f"delivered={delivered}",
+            )
+            accepted += 1
+        else:
+            await asyncio.to_thread(
+                requeue_send, cid, reason="no_local_connection",
+            )
+    return accepted
 
 
 def recent_sends(kind_prefix: str = "", limit: int = 50) -> list[dict[str, Any]]:
