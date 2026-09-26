@@ -352,16 +352,23 @@ export interface DarkTriadTraits {
   matched?: string[]
 }
 
-export interface DepressionIndicators {
-  sleep: number; interest: number; guilt: number; energy: number
-  concentration: number; appetite: number; psychomotor: number; suicidal: number
-  total_score: number; level: string; matched?: string[]
+// 关键词命中信号的自报口径（后端 mental_health._signal_meta）：0-1 相对信号，
+// 不是 PHQ-9 / GAD-7 等临床量表得分，UI 不得再按量表满分标注。
+export interface SignalMeta {
+  scale?: string; max_score?: number; method?: string
+  items_hit?: number; items_total?: number; evidence?: number; formula?: string
 }
 
-export interface AnxietyIndicators {
+export interface DepressionIndicators extends SignalMeta {
+  sleep: number; interest: number; guilt: number; energy: number
+  concentration: number; appetite: number; psychomotor: number; suicidal: number
+  total_score: number; peak_score?: number; level: string; matched?: string[]
+}
+
+export interface AnxietyIndicators extends SignalMeta {
   nervousness: number; uncontrollable_worry: number; worry_too_much: number
   trouble_relaxing: number; restlessness: number; irritability: number; fear_awful: number
-  total_score: number; level: string; matched?: string[]
+  total_score: number; peak_score?: number; level: string; matched?: string[]
 }
 
 export interface MentalHealthSnapshot {
@@ -371,6 +378,8 @@ export interface MentalHealthSnapshot {
   trauma_signals: number
   self_harm_risk: number
   overall_risk: 'low' | 'moderate' | 'high' | 'critical'
+  method?: string
+  caveat?: string
 }
 
 export interface CognitiveDistortionResult {
@@ -381,19 +390,33 @@ export interface CognitiveDistortionResult {
   recent?: Array<{ type: string; subtype: string; matched: string }>
 }
 
+// 与后端 persona_extractor.liwc_analyzer.LiwcProfile 逐字段对齐（tests/test_w8_psychometrics_honesty.py
+// 的跨语言契约用例强制两边一致）。全部为「自建词表」词元比例，未经中文效度验证。
 export interface LiwcProfile {
-  emotional_tone?: number
-  analytical_thinking?: number
-  clout?: number
-  authentic?: number
-  total_words?: number
-  i_ratio?: number; we_ratio?: number; you_ratio?: number
+  // 人称
+  pronoun_ratio?: number; i_ratio?: number; we_ratio?: number
+  you_ratio?: number; he_she_ratio?: number; impersonal_ratio?: number
+  // 情绪
   positive_emotion_ratio?: number; negative_emotion_ratio?: number
   anxiety_ratio?: number; anger_ratio?: number; sadness_ratio?: number
-  cognitive_ratio?: number; insight_ratio?: number; tentative_ratio?: number
-  certainty_ratio?: number; past_ratio?: number; present_ratio?: number; future_ratio?: number
-  health_ratio?: number; affiliation_ratio?: number; achievement_ratio?: number
-  swear_ratio?: number; filler_ratio?: number
+  emotional_tone?: number
+  // 社交
+  social_ratio?: number; family_ratio?: number; friend_ratio?: number
+  // 认知
+  cognitive_ratio?: number; insight_ratio?: number; causation_ratio?: number
+  discrepancy_ratio?: number; tentative_ratio?: number; certainty_ratio?: number
+  // 感知
+  see_ratio?: number; hear_ratio?: number; feel_ratio?: number
+  // 生物
+  biological_ratio?: number; body_ratio?: number; health_ratio?: number; sleep_ratio?: number
+  // 主题
+  affiliation_ratio?: number; achievement_ratio?: number; power_ratio?: number
+  // 时间
+  past_ratio?: number; present_ratio?: number; future_ratio?: number
+  // 其他
+  swear_ratio?: number; filler_ratio?: number; negation_ratio?: number; comparison_ratio?: number
+  // 分母与概括指标
+  total_words?: number; analytical_thinking?: number; clout?: number; authentic?: number
 }
 
 export interface MentalHealthSummary {

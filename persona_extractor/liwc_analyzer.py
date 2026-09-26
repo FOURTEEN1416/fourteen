@@ -1,31 +1,30 @@
 """
-LIWC风格心理语言学分析器
+心理语言学词表分析器（自建中文小词表）
 
-参考文献:
+口径说明（与实现严格一致，不得对外越级宣称）:
+  - 本模块是一套 **自建** 的中文小词表（类别见 ``_LIWC_ZH_DICT``），
+    分类思想参考 Pennebaker 一系的 LIWC 功能词/情感词框架，
+    但 **未经中文效度验证，其数值不代表 LIWC2015 / LIWC-22 / CLIWC 的输出**，
+    也不与任何已发表量表对标。
+  - 指标口径 = 类别命中词元数 / 词元总数。词元由 ``segment_tokens`` 用 jieba
+    精确模式切分并去掉标点，即「一个词」计一次（不是字符数、不是连续串数）。
+  - ``analytical_thinking`` / ``clout`` / ``authentic`` 是照抄 LIWC 复合指标
+    **公式形状** 的简化比值，分母只加 1 防零除，未经任何常模校准，
+    只能作为同一用户前后的相对趋势读数。
+
+参考（思想来源，非实现依据）:
   - Pennebaker, J.W. et al. (2015). The development and psychometric
     properties of LIWC2015.
   - Tausczik & Pennebaker (2010). The psychological meaning of words.
-  - Boyd et al. (2022). The development and psychometric properties of LIWC-22.
-
-LIWC 核心类别:
-  1. 功能词 (Function Words): 代词、介词、连词等
-  2. 情感词 (Affect): 正面/负面情绪
-  3. 社会词 (Social): 家人、朋友、人称
-  4. 认知过程 (Cognitive Processes): 洞察、因果、差异
-  5. 感知过程 (Perceptual): 视觉、听觉、感觉
-  6. 生物过程 (Biological): 身体、健康、性
-  7. 驱力 (Drives): 归属、成就、权力
-  8. 时间焦点 (Time): 过去/现在/未来
-  9. 相对性 (Relativity): 运动、空间、时间
-  10. 个人关注 (Personal Concerns): 工作、金钱、宗教、死亡
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 # ═══════════════════════════════════════════════════════════
-# LIWC 中文字典 (精选核心词)
+# 中文小词表（自建，精选核心词）
 # ═══════════════════════════════════════════════════════════
 
 _LIWC_ZH_DICT: dict[str, set[str]] = {
@@ -34,7 +33,7 @@ _LIWC_ZH_DICT: dict[str, set[str]] = {
     "we_words": {"我们", "咱们", "大家", "咱俩", "我俩"},
     "you_words": {"你", "您", "你们", "你俩"},
     "he_she_words": {"他", "她", "他们", "她们", "它", "它们"},
-    " impersonal_pronouns": {"有人", "某人", "任何人", "没有人", "所有人"},
+    "impersonal_pronouns": {"有人", "某人", "任何人", "没有人", "所有人"},
 
     # ── 情感词 (Affect) ──
     "positive_emotion": {
@@ -157,16 +156,142 @@ _LIWC_ZH_DICT: dict[str, set[str]] = {
     },
 }
 
+# ═══════════════════════════════════════════════════════════
+# 类别 → 画像字段（单一真源）
+# ═══════════════════════════════════════════════════════════
+# 旧实现用 ``setattr(profile, f"{category}_ratio", ...)`` 隐式派生字段名，
+# 而 ``to_dict()`` 只遍历 ``__dataclass_fields__`` → 34 类里 32 类被静默丢弃。
+# 现在类别与字段的对应关系必须显式声明，构造时双向校验，加类别漏字段即报错。
+
+CATEGORY_FIELDS: dict[str, str] = {
+    # 代词
+    "i_words": "i_ratio",
+    "we_words": "we_ratio",
+    "you_words": "you_ratio",
+    "he_she_words": "he_she_ratio",
+    "impersonal_pronouns": "impersonal_ratio",
+    # 情感
+    "positive_emotion": "positive_emotion_ratio",
+    "negative_emotion": "negative_emotion_ratio",
+    "anxiety_words": "anxiety_ratio",
+    "anger_words": "anger_ratio",
+    "sadness_words": "sadness_ratio",
+    # 社会
+    "social_words": "social_ratio",
+    "family_words": "family_ratio",
+    "friend_words": "friend_ratio",
+    # 认知过程
+    "insight_words": "insight_ratio",
+    "causation_words": "causation_ratio",
+    "discrepancy_words": "discrepancy_ratio",
+    "tentative_words": "tentative_ratio",
+    "certainty_words": "certainty_ratio",
+    # 感知过程
+    "see_words": "see_ratio",
+    "hear_words": "hear_ratio",
+    "feel_words": "feel_ratio",
+    # 生物过程
+    "body_words": "body_ratio",
+    "health_words": "health_ratio",
+    "sleep_words": "sleep_ratio",
+    # 驱力
+    "affiliation_words": "affiliation_ratio",
+    "achievement_words": "achievement_ratio",
+    "power_words": "power_ratio",
+    # 时间焦点
+    "past_words": "past_ratio",
+    "present_words": "present_ratio",
+    "future_words": "future_ratio",
+    # 语言风格
+    "swear_words": "swear_ratio",
+    "filler_words": "filler_ratio",
+    "negation_words": "negation_ratio",
+    "comparison_words": "comparison_ratio",
+}
+
+# 聚合字段 → 组成类别（按 LIWC 分类树的包含关系求和，可在 to_dict() 里复算）
+DERIVED_FIELDS: dict[str, tuple[str, ...]] = {
+    "pronoun_ratio": (
+        "i_words", "we_words", "you_words", "he_she_words", "impersonal_pronouns",
+    ),
+    "cognitive_ratio": (
+        "insight_words", "causation_words", "discrepancy_words",
+        "tentative_words", "certainty_words",
+    ),
+    "biological_ratio": ("body_words", "health_words", "sleep_words"),
+}
+
+_PUNCT_RE = re.compile(r"^\W+$")
+
+_SEGMENTER = None
+
+
+def _get_segmenter():
+    """词典感知的分词器（首次使用时构建，进程内复用）。
+
+    把词表条目注册进分词器，避免「意识到 / 不舒服 / 不确定 / 感受到」被切成
+    「意 + 识 + 到」后既命中不了词表、又抬高词元分母。
+    """
+    global _SEGMENTER
+    if _SEGMENTER is None:
+        import jieba
+
+        seg = jieba.Tokenizer()  # 精确模式（cut_all=False），独立实例不动全局词典
+        for lexicon in _LIWC_ZH_DICT.values():
+            for word in lexicon:
+                seg.add_word(word)
+        _SEGMENTER = seg
+    return _SEGMENTER
+
+
+def segment_tokens(text: str) -> list[str]:
+    """切分为「词元」：词典感知分词 + 去掉标点/空白。
+
+    词元数即所有比例指标的分母（口径见模块文档，不再与字符数混用）。
+    """
+    return [
+        t for t in (tok.strip() for tok in _get_segmenter().lcut(text.lower()))
+        if t and not _PUNCT_RE.match(t)
+    ]
+
+
+def _validate_field_map() -> None:
+    """类别与字段双向闭合；漏配即抛错，杜绝再次退化成「写了不落地」。"""
+    declared = set(LiwcProfile.__dataclass_fields__)
+    sources = {CATEGORY_FIELDS[c] for c in _LIWC_ZH_DICT if c in CATEGORY_FIELDS}
+    targets = sources | set(DERIVED_FIELDS)
+    problems: list[str] = []
+    for category in _LIWC_ZH_DICT:
+        if category != category.strip():
+            problems.append(f"类别名含首尾空白: {category!r}")
+        elif category not in CATEGORY_FIELDS:
+            problems.append(f"类别无落地字段: {category}")
+        elif CATEGORY_FIELDS[category] not in declared:
+            problems.append(f"类别 {category} 指向未声明字段 {CATEGORY_FIELDS[category]}")
+    for field in declared:
+        if field.endswith("_ratio") and field not in targets:
+            problems.append(f"字段无来源类别: {field}")
+    for field, categories in DERIVED_FIELDS.items():
+        for category in categories:
+            if category not in _LIWC_ZH_DICT:
+                problems.append(f"聚合字段 {field} 引用不存在类别 {category}")
+    orphan = set(_LIWC_ZH_DICT) - set(CATEGORY_FIELDS)
+    if orphan:
+        problems.append(f"映射表多余类别: {sorted(orphan)}")
+    if problems:
+        raise ValueError("LIWC 词表与画像字段不闭合: " + "; ".join(problems))
+
 
 @dataclass
 class LiwcProfile:
-    """LIWC 心理语言学画像"""
-    # 功能词比例
+    """自建中文词表的语言学画像（字段与 ``CATEGORY_FIELDS`` 一一对应）"""
+    # 功能词比例（pronoun_ratio 为代词聚合，见 DERIVED_FIELDS）
     pronoun_ratio: float = 0.0
     i_ratio: float = 0.0
     we_ratio: float = 0.0
     you_ratio: float = 0.0
     he_she_ratio: float = 0.0
+    impersonal_ratio: float = 0.0
 
     # 情感调性
     positive_emotion_ratio: float = 0.0
@@ -189,9 +314,16 @@ class LiwcProfile:
     tentative_ratio: float = 0.0
     certainty_ratio: float = 0.0
 
+    # 感知过程
+    see_ratio: float = 0.0
+    hear_ratio: float = 0.0
+    feel_ratio: float = 0.0
+
     # 其他
-    biological_ratio: float = 0.0
+    biological_ratio: float = 0.0  # = body + health + sleep（见 DERIVED_FIELDS）
+    body_ratio: float = 0.0
     health_ratio: float = 0.0
+    sleep_ratio: float = 0.0
     affiliation_ratio: float = 0.0
     achievement_ratio: float = 0.0
     power_ratio: float = 0.0
@@ -205,15 +337,16 @@ class LiwcProfile:
     swear_ratio: float = 0.0
     filler_ratio: float = 0.0
     negation_ratio: float = 0.0
+    comparison_ratio: float = 0.0
 
     # 分析元数据
-    total_words: int = 0
-    analytical_thinking: float = 0.0  # 分析性思维 (高=更逻辑)
-    clout: float = 0.0  # 影响力/自信 (高=更自信)
-    authentic: float = 0.0  # 真实性
+    total_words: int = 0  # 词元数（segment_tokens 口径），所有 *_ratio 的分母
+    analytical_thinking: float = 0.0  # 简化比值，非常模校准，只作同用户前后趋势
+    clout: float = 0.0  # 简化比值，非常模校准
+    authentic: float = 0.0  # 简化比值，非常模校准
 
     def to_dict(self) -> dict:
-        """转字典（只保留非零字段）"""
+        """转字典（只保留非零字段；字段集与 CATEGORY_FIELDS 闭合）"""
         d = {}
         for field_name in self.__dataclass_fields__:
             val = getattr(self, field_name)
@@ -225,7 +358,7 @@ class LiwcProfile:
 
     def to_prompt_segment(self) -> str:
         """生成 LLM 提示词增强"""
-        lines = ["[心理语言学画像-LIWC]"]
+        lines = ["[心理语言学画像-自建词表，未经中文效度验证]"]
         if self.emotional_tone > 0.3:
             lines.append("- 情绪基调: 偏正面")
         elif self.emotional_tone < -0.3:
@@ -247,38 +380,37 @@ class LiwcProfile:
 
 
 class LiwcAnalyzer:
-    """LIWC 心理语言学分析器
+    """自建中文词表的词频分析器
 
-    基于 LIWC2015/LIWC-22 框架，
-    使用中文字典进行词频分析。
-
-    参考文献:
-      - Pennebaker et al. (2015). LIWC2015.
-      - Huang et al. (2012). Chinese LIWC dictionary (CLIWC).
+    口径: 类别命中词元数 / 词元总数（``segment_tokens``）。
+    分类思想参考 LIWC 一系的功能词/情感词框架，但本实现 **未经中文效度验证**，
+    数值不可与 LIWC2015 / LIWC-22 / CLIWC 的输出对标。
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
+        _validate_field_map()
         self.analysis_count = 0
 
     def analyze(self, text: str) -> LiwcProfile:
-        """分析文本，返回 LIWC 画像"""
-        # 分词 (简单按字符+空格分词)
-        import re as _re
-        words = _re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z]+', text.lower())
+        """分析文本，返回词表画像"""
+        tokens = segment_tokens(text)
 
-        if not words:
+        if not tokens:
             return LiwcProfile()
 
-        total = len(words)
+        total = len(tokens)
         profile = LiwcProfile(total_words=total)
 
-        # 统计各类别命中数
+        # 统计各类别命中数（词元精确匹配；一个词元可同时计入多个类别）
         counts: dict[str, int] = {}
         for category, lexicon in _LIWC_ZH_DICT.items():
-            cnt = sum(1 for w in words if w in lexicon)
+            cnt = sum(1 for t in tokens if t in lexicon)
             counts[category] = cnt
-            ratio = cnt / total if total > 0 else 0
-            setattr(profile, f"{category}_ratio", ratio)
+            setattr(profile, CATEGORY_FIELDS[category], cnt / total)
+
+        # ── 聚合字段：按声明的组成类别求和（可在 to_dict() 里复算）──
+        for field, source_categories in DERIVED_FIELDS.items():
+            setattr(profile, field, sum(counts[c] / total for c in source_categories))
 
         # ── 复合指标 ──
         pos = counts.get("positive_emotion", 0)
@@ -289,21 +421,17 @@ class LiwcAnalyzer:
         else:
             profile.emotional_tone = 0.0
 
-        # 分析性思维 (Analytical Thinking)
-        # 公式: 高分析性 = 多冠词/介词, 低叙事性
-        # 简化版: (因果词 + 认知词) / (叙事词)
+        # 分析性思维：(洞察 + 因果) / (过去 + 我 + 1) —— 简化比值，非常模校准
         cognitive_words = counts.get("insight_words", 0) + counts.get("causation_words", 0)
         story_words = counts.get("past_words", 0) + counts.get("i_words", 0) + 1
         profile.analytical_thinking = min(1.0, cognitive_words / max(1, story_words))
 
-        # 影响力/自信 (Clout)
-        # 公式: 高影响力 = 多用"我们/你"少用"我", 多确定少犹豫
+        # 影响力/自信：(我们 + 你 + 确定) / (我 + 犹豫 + 1) —— 简化比值，非常模校准
         clout_num = counts.get("we_words", 0) + counts.get("you_words", 0) + counts.get("certainty_words", 0)
         clout_den = counts.get("i_words", 0) + counts.get("tentative_words", 0) + 1
         profile.clout = min(1.0, clout_num / clout_den)
 
-        # 真实性 (Authentic)
-        # 公式: 高真实 = 少用"他/她/它", 多用"我"
+        # 真实性：(我 + 现在) / (他/她 + 差异 + 1) —— 简化比值，非常模校准
         auth_num = counts.get("i_words", 0) + counts.get("present_words", 0)
         auth_den = counts.get("he_she_words", 0) + counts.get("discrepancy_words", 0) + 1
         profile.authentic = min(1.0, auth_num / auth_den)
@@ -313,4 +441,5 @@ class LiwcAnalyzer:
 
     def health_check(self) -> dict:
         return {"analysis_count": self.analysis_count,
+                "categories": len(_LIWC_ZH_DICT),
                 "dictionary_size": sum(len(v) for v in _LIWC_ZH_DICT.values())}

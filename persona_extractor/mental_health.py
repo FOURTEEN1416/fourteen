@@ -1,15 +1,18 @@
 """
-心理健康筛查模块 — 基于 DSM-5 标准 + 心理语言学标记
+情绪信号筛查模块 — 关键词命中的相对信号，不是临床量表
 
-参考:
-  - DSM-5-TR (2022) 诊断标准
-  - GAD-7 广泛性焦虑筛查量表
-  - PHQ-9 抑郁症筛查量表
-  - CLPsych 计算语言学与临床心理学共享任务
-  - MentalBERT / PsychBERT 预训练模型思路
+口径（与实现严格一致）:
+  - 单条文本按 ``_DEPRESSION_LEXICON`` / ``_ANXIETY_LEXICON`` 逐维度做子串命中，
+    维度分 = min(1.0, 命中词数 / 4)，``total_score`` = 各维度均值（0-1）。
+  - ``level`` 是按「最强维度命中词数」与「命中维度数」取大的证据档位
+    （1-2=mild, 3-5=moderate, ≥6=severe），用于同一用户前后的趋势比较。
+  - 维度划分参考抑郁/焦虑常见症状群的**概念**，但本模块 **未实现也未验证**
+    PHQ-9、GAD-7 等任何量表：题项、计分方式、时间窗（过去两周）、
+    临界值与中文常模全部不一致，输出不得当作量表得分或筛查结论。
 
 ⚠️ 免责声明: 此模块仅为辅助分析工具，不能替代专业心理诊断。
-   高风险信号会自动提示用户寻求专业帮助。
+   高风险信号会自动提示用户寻求专业帮助；对话热路径的自伤拦截与热线文本
+   由 ``security/content_safety.py`` 承载，与本模块的统计信号相互独立。
 """
 
 from __future__ import annotations
@@ -17,10 +20,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 # ═══════════════════════════════════════════════════════════
-# DSM-5 抑郁发作 (Major Depressive Episode) 标志性词汇
+# 抑郁维度词汇库
 # ═══════════════════════════════════════════════════════════
 
-# SIGECAPS 助记词对应词汇库
+# 维度名沿用 SIGECAPS 助记符（睡眠/兴趣/自责/精力/注意/食欲/精神运动/自伤），
+# 只借其症状群划分概念，不按任何量表题项或临界值计分。
+_DEPRESSION_ITEMS_TOTAL = 8
+_ANXIETY_ITEMS_TOTAL = 7
+# 维度分 = min(1.0, 命中词数 / HITS_FOR_FULL_SIGNAL)
+HITS_FOR_FULL_SIGNAL = 4
+# 证据档位：max(最强维度命中词数, 命中维度数)
+_BAND_THRESHOLDS = ((1, "mild"), (3, "moderate"), (6, "severe"))
 _DEPRESSION_LEXICON: dict[str, list[str]] = {
     "sleep": [
         "失眠", "睡不着", "早醒", "睡太多", "嗜睡", "熬夜", "通宵",
@@ -60,7 +70,7 @@ _DEPRESSION_LEXICON: dict[str, list[str]] = {
     ],
 }
 
-# GAD-7 焦虑对应词汇
+# 焦虑维度词汇库（维度名沿用 GAD-7 条目概念，仅借概念不按量表计分）
 _ANXIETY_LEXICON: dict[str, list[str]] = {
     "nervousness": [
         "紧张", "焦虑", "不安", "心慌", "忐忑", "害怕", "恐惧",
@@ -92,7 +102,7 @@ _ANXIETY_LEXICON: dict[str, list[str]] = {
     ],
 }
 
-# PTSD/创伤相关词汇
+# 创伤相关词汇
 _TRAUMA_LEXICON: dict[str, list[str]] = {
     "intrusion": [
         "闪回", "噩梦", "总是想起", "画面挥之不去",
@@ -113,9 +123,26 @@ _TRAUMA_LEXICON: dict[str, list[str]] = {
 # ═══════════════════════════════════════════════════════════
 
 
+def _signal_meta(items_hit: int, items_total: int, evidence: int) -> dict:
+    """自报量纲与方法：读数者不必猜这个 0-1 是从哪来的。"""
+    return {
+        "scale": "0-1",
+        "max_score": 1.0,
+        "method": "keyword_hit",
+        "items_hit": items_hit,
+        "items_total": items_total,
+        "evidence": evidence,
+        "formula": (
+            f"维度分=min(1, 命中词数/{HITS_FOR_FULL_SIGNAL}); "
+            "total_score=各维度均值; "
+            "evidence=max(最强维度命中词数, 命中维度数); level 按 evidence 分档"
+        ),
+    }
+
+
 @dataclass
 class DepressionIndicators:
-    """抑郁指标 (SIGECAPS)"""
+    """抑郁维度信号（关键词命中，0-1；非量表得分）"""
     sleep: float = 0.0
     interest: float = 0.0
     guilt: float = 0.0
@@ -125,28 +152,28 @@ class DepressionIndicators:
     psychomotor: float = 0.0
     suicidal: float = 0.0
     total_score: float = 0.0
-    level: str = "none"  # none / mild / moderate / severe / critical
+    peak_score: float = 0.0
+    evidence: int = 0
+    items_hit: int = 0
+    level: str = "none"  # none / mild / moderate / severe / critical（信号档，非临床严重度）
     matched_keywords: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return {
-            "sleep": round(self.sleep, 3),
-            "interest": round(self.interest, 3),
-            "guilt": round(self.guilt, 3),
-            "energy": round(self.energy, 3),
-            "concentration": round(self.concentration, 3),
-            "appetite": round(self.appetite, 3),
-            "psychomotor": round(self.psychomotor, 3),
-            "suicidal": round(self.suicidal, 3),
-            "total_score": round(self.total_score, 3),
-            "level": self.level,
-            "matched": self.matched_keywords[:20],
+        d = {
+            name: round(getattr(self, name), 3)
+            for name in ("sleep", "interest", "guilt", "energy",
+                         "concentration", "appetite", "psychomotor", "suicidal",
+                         "total_score", "peak_score")
         }
+        d["level"] = self.level
+        d["matched"] = self.matched_keywords[:20]
+        d.update(_signal_meta(self.items_hit, _DEPRESSION_ITEMS_TOTAL, self.evidence))
+        return d
 
 
 @dataclass
 class AnxietyIndicators:
-    """焦虑指标 (GAD-7 对应)"""
+    """焦虑维度信号（关键词命中，0-1；非量表得分）"""
     nervousness: float = 0.0
     uncontrollable_worry: float = 0.0
     worry_too_much: float = 0.0
@@ -155,33 +182,35 @@ class AnxietyIndicators:
     irritability: float = 0.0
     fear_awful: float = 0.0
     total_score: float = 0.0
+    peak_score: float = 0.0
+    evidence: int = 0
+    items_hit: int = 0
     level: str = "none"
     matched_keywords: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return {
-            "nervousness": round(self.nervousness, 3),
-            "uncontrollable_worry": round(self.uncontrollable_worry, 3),
-            "worry_too_much": round(self.worry_too_much, 3),
-            "trouble_relaxing": round(self.trouble_relaxing, 3),
-            "restlessness": round(self.restlessness, 3),
-            "irritability": round(self.irritability, 3),
-            "fear_awful": round(self.fear_awful, 3),
-            "total_score": round(self.total_score, 3),
-            "level": self.level,
-            "matched": self.matched_keywords[:20],
+        d = {
+            name: round(getattr(self, name), 3)
+            for name in ("nervousness", "uncontrollable_worry", "worry_too_much",
+                         "trouble_relaxing", "restlessness", "irritability",
+                         "fear_awful", "total_score", "peak_score")
         }
+        d["level"] = self.level
+        d["matched"] = self.matched_keywords[:20]
+        d.update(_signal_meta(self.items_hit, _ANXIETY_ITEMS_TOTAL, self.evidence))
+        return d
 
 
 @dataclass
 class MentalHealthSnapshot:
-    """单次心理健康检测快照"""
+    """单次情绪信号快照（关键词命中的相对信号）"""
     timestamp: str = ""
     depression: DepressionIndicators = field(default_factory=DepressionIndicators)
     anxiety: AnxietyIndicators = field(default_factory=AnxietyIndicators)
     trauma_signals: float = 0.0
     self_harm_risk: float = 0.0
     overall_risk: str = "low"  # low / moderate / high / critical
+    method: str = "keyword_hit"  # keyword_hit / keyword_hit+llm_assessment
 
     def to_dict(self) -> dict:
         return {
@@ -191,12 +220,51 @@ class MentalHealthSnapshot:
             "trauma_signals": round(self.trauma_signals, 3),
             "self_harm_risk": round(self.self_harm_risk, 3),
             "overall_risk": self.overall_risk,
+            "method": self.method,
+            "caveat": (
+                "关键词命中的情绪信号强度分档，不是临床量表得分，"
+                "不能作为诊断或筛查结论使用"
+            ),
         }
 
 
 # ═══════════════════════════════════════════════════════════
 # 筛查引擎
 # ═══════════════════════════════════════════════════════════
+
+def _band_level(evidence: int) -> str:
+    """按证据档位（max(最强维度命中词数, 命中维度数)）分档。
+
+    旧实现按「全维度均值」定档：单条文本只命中一个维度时总分别超过 1/n，
+    明显的焦虑表达也被判成 none —— 均值衡量的是词典覆盖广度，不是信号强度。
+    """
+    level = "none"
+    for min_evidence, name in _BAND_THRESHOLDS:
+        if evidence >= min_evidence:
+            level = name
+    return level
+
+
+def _fill_indicators(target: object, lexicon: dict[str, list[str]], text_lower: str) -> None:
+    """把逐维度命中写入指标对象，并同步 total/peak/evidence/items_hit/level。"""
+    matched: list[str] = []
+    best_hits = 0
+    scores: list[float] = []
+    for dimension, keywords in lexicon.items():
+        hits = [kw for kw in keywords if kw in text_lower]
+        score = min(1.0, len(hits) / HITS_FOR_FULL_SIGNAL) if hits else 0.0
+        setattr(target, dimension, score)
+        scores.append(score)
+        if hits:
+            matched.extend(hits)
+            best_hits = max(best_hits, len(hits))
+    target.matched_keywords = matched  # type: ignore[attr-defined]
+    target.total_score = sum(scores) / len(scores)  # type: ignore[attr-defined]
+    target.peak_score = max(scores) if scores else 0.0  # type: ignore[attr-defined]
+    target.items_hit = sum(1 for d in lexicon if getattr(target, d) > 0.0)  # type: ignore[attr-defined]
+    target.evidence = max(best_hits, target.items_hit)  # type: ignore[attr-defined]
+    target.level = _band_level(target.evidence)  # type: ignore[attr-defined]
+
 
 
 class MentalHealthScreener:
@@ -217,65 +285,24 @@ class MentalHealthScreener:
     def quick_screen(self, text: str) -> MentalHealthSnapshot:
         """快速词典筛查 (零成本)
 
-        基于 DSM-5 标志性词汇和 GAD-7 对应词汇进行模式匹配。
+        逐维度统计词表命中，产出 0-1 相对信号与证据档位。
         """
         from datetime import datetime, timezone
 
         text_lower = text.lower()
         snapshot = MentalHealthSnapshot(timestamp=datetime.now(tz=timezone.utc).isoformat())
-        all_matched = []
 
-        # ── 抑郁筛查 ──
+        # ── 抑郁维度信号 ──
         dep = DepressionIndicators()
-        for dimension, keywords in _DEPRESSION_LEXICON.items():
-            hits = [kw for kw in keywords if kw in text_lower]
-            if hits:
-                score = min(1.0, len(hits) * 0.25)
-                setattr(dep, dimension, score)
-                all_matched.extend(hits)
-        dep.matched_keywords = all_matched
-
-        # 计算总分 (SIGECAPS: 5/8 为中度)
-        sigecaps = ["sleep", "interest", "guilt", "energy", "concentration",
-                     "appetite", "psychomotor", "suicidal"]
-        dep.total_score = sum(getattr(dep, d) for d in sigecaps) / len(sigecaps)
-
-        if dep.suicidal >= 0.5:
+        _fill_indicators(dep, _DEPRESSION_LEXICON, text_lower)
+        if dep.suicidal >= 0.5:  # 自伤维度命中 ≥2 词，独立于档位直接判 critical
             dep.level = "critical"
-        elif dep.total_score >= 0.6:
-            dep.level = "severe"
-        elif dep.total_score >= 0.35:
-            dep.level = "moderate"
-        elif dep.total_score >= 0.15:
-            dep.level = "mild"
-        else:
-            dep.level = "none"
-
         snapshot.depression = dep
 
-        # ── 焦虑筛查 ──
+        # ── 焦虑维度信号 ──
         anx = AnxietyIndicators()
-        anx_matched = []
-        for dimension, keywords in _ANXIETY_LEXICON.items():
-            hits = [kw for kw in keywords if kw in text_lower]
-            if hits:
-                score = min(1.0, len(hits) * 0.3)
-                setattr(anx, dimension, score)
-                anx_matched.extend(hits)
-        anx.matched_keywords = anx_matched
-
-        gad7_dims = ["nervousness", "uncontrollable_worry", "worry_too_much",
-                      "trouble_relaxing", "restlessness", "irritability", "fear_awful"]
-        anx.total_score = sum(getattr(anx, d) for d in gad7_dims) / len(gad7_dims)
-
-        if anx.total_score >= 0.5:
-            anx.level = "severe"
-        elif anx.total_score >= 0.3:
-            anx.level = "moderate"
-        elif anx.total_score >= 0.12:
-            anx.level = "mild"
-        else:
-            anx.level = "none"
+        _fill_indicators(anx, _ANXIETY_LEXICON, text_lower)
+        snapshot.anxiety = anx
 
         snapshot.anxiety = anx
 
@@ -308,16 +335,16 @@ class MentalHealthScreener:
         """深度LLM分析 (参考 MentalBERT 思路但用通用LLM)
 
         仅在 quick_screen 检测到中等以上风险时触发。
-        使用结构化 prompt 引导 LLM 按照 DSM-5 框架进行分析。
+        让模型按情绪信号维度描述文本证据；输出仍是信号档位，不是诊断。
         """
         if not self._llm:
             return self.quick_screen(text)
 
-        prompt = f"""你是一位接受过DSM-5培训的临床心理学助手。请分析以下对话内容，仅基于文本证据评估心理健康信号。
+        prompt = f"""你是文本情绪信号分析助手。请仅依据下列文本证据描述情绪信号强度，不要下诊断结论，不要扮演临床角色。
 
 【分析框架】
-1. 抑郁信号(SIGECAPS): 睡眠/兴趣/自责/精力/注意力/食欲/精神运动/自伤
-2. 焦虑信号(GAD-7): 紧张/失控担忧/过度担心/难以放松/坐立不安/易怒/恐惧预感
+1. 抑郁向信号: 睡眠/兴趣/自责/精力/注意力/食欲/精神运动/自伤
+2. 焦虑向信号: 紧张/失控担忧/过度担心/难以放松/坐立不安/易怒/恐惧预感
 3. 认知扭曲: 全或无思维/灾难化/过度概括/情绪推理/贴标签
 4. 自伤风险: 任何自杀意念或自伤意图
 
@@ -338,11 +365,11 @@ class MentalHealthScreener:
 ⚠️ 若检测到自伤风险，recommendation必须包含24小时心理援助热线（全国统一12356或北京24h线010-82951332）"""
 
         try:
-            reply = await self._llm.chat(prompt, system_prompt="你是心理健康筛查助手，基于DSM-5标准。")
+            reply = await self._llm.chat(prompt, system_prompt="你是文本情绪信号分析助手，只描述信号强度与文本证据，不做诊断。")
             import json as _json
             result = _json.loads(reply) if isinstance(reply, str) else reply
 
-            snapshot = MentalHealthSnapshot()
+            snapshot = MentalHealthSnapshot(method="llm_assessment")
             snapshot.depression.level = result.get("depression_level", "none")
             snapshot.anxiety.level = result.get("anxiety_level", "none")
             snapshot.self_harm_risk = float(result.get("self_harm_risk", 0))

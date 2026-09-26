@@ -19,8 +19,8 @@
 | `hexaco.py` | HEXACO六因素模型 | OCEAN+第6维Honesty-Humility(诚实-谦逊)；`from_ocean`从五维推导六维；Ashton & Lee (2007)文献依据 |
 | `dark_triad.py` | 暗黑三人格检测 | 自恋/马基雅维利主义/精神病态三维(SD3量表)；LLM检测+规则降级；亚临床特质声明(非疾病诊断)；prompt增强段生成 |
 | `cognitive_distortions.py` | 认知扭曲检测 | Burns 10种认知扭曲(全或无/过度概括/心理过滤/读心术/应该陈述等)；LLM检测+CognitiveDistortionResult结构化输出；to_prompt_enhancement注入提示词 |
-| `liwc_analyzer.py` | LIWC心理语言学分析 | Pennebaker LIWC 10大类别(功能词/情感/社会/认知/感知/生物/驱力/时间/相对性/个人关注)；纯规则词典分析(0 API成本)；LiwcProfile含to_prompt_segment |
-| `mental_health.py` (16.3KB) | 心理健康筛查 | DSM-5标准+GAD-7焦虑量表+PHQ-9抑郁量表；DepressionIndicators/AnxietyIndicators/MentalHealthSnapshot；⚠️免责声明：辅助工具非诊断，高风险信号提示就医；quick_screen快速筛查+风险汇总 |
+| `liwc_analyzer.py` | 心理语言学词表分析 | **自建中文词表**（借 LIWC 类别框架，未使用 LIWC2015 授权词表，未经中文效度验证）；34 类经 `CATEGORY_FIELDS` 显式映射到 `LiwcProfile` 字段 + 3 个 `DERIVED_FIELDS` 聚合，构造期双向校验闭合；分母=jieba 私有词典分词的词元数；纯规则(0 API成本)；`to_prompt_segment` 段头自带口径声明 |
+| `mental_health.py` (16.3KB) | 情绪信号筛查 | **关键词命中的 0-1 相对信号**（维度分=min(1,命中词数/4)，total=各维度均值，level 按证据档 max(最强维度命中词数,命中维度数) 分档）；维度概念沿用 PHQ-9/GAD-7 条目但**未实现也未验证任何量表**，载荷自报 `scale/method/items_hit/evidence/formula` + snapshot `caveat`；DepressionIndicators/AnxietyIndicators/MentalHealthSnapshot；⚠️免责声明：辅助工具非诊断，高风险信号提示就医（危机拦截在 `security/content_safety.py` 热路径）；quick_screen快速筛查+风险汇总 |
 | `web_enricher.py` (37.9KB) | 网络人设增强引擎 | **4类内容源**：①DirectScraper(requests+BS4正文提取)②AgentReachSource(bili-cli搜B站/Jina Reader抓网页/mcporter调Exa)③FirecrawlSource(需FIRECRAWL_API_KEY)④AgentReachChannels(Python渠道,13平台:bilibili/xiaohongshu/youtube/twitter/github/reddit/v2ex等)；抓取链路fallback:DirectScraper→Jina Reader→Firecrawl；_PERSONA_EXTRACTION_PROMPT五维度LLM提取(核心性格/背景设定/行为模式/说话风格/经典台词)；写入知识库BM25索引(shisi.knowledge.KnowledgeChunk)；AGENT_REACH_PATH环境变量配置,未安装优雅降级 |
 
 ---
@@ -52,8 +52,8 @@ user_msg → [PADODetector] → OCEAN+PAD快照
 - HEXACO：Ashton & Lee (2007)
 - 暗黑三：Paulhus & Williams (2002)/SD3
 - 认知扭曲：Beck (1976)/Burns (1980)
-- LIWC：Pennebaker (2015/2022)
-- 心理健康：DSM-5-TR/GAD-7/PHQ-9
+- LIWC：Pennebaker (2015/2022) —— **仅借类别框架**，词表为自建中文词典，未使用授权词表、未经中文效度验证
+- 心理健康：DSM-5-TR/GAD-7/PHQ-9 —— **仅沿用条目概念命名维度**，未实现也未验证任何量表；对外读数一律是 0-1 关键词命中信号（详见 `mental_health.py` 模块文档与载荷 `formula`/`caveat`）
 
 ### 5. 网络增强多源容错
 - 所有外部源（bili-cli/Firecrawl/Jina/mcporter）均可用性探测+静默降级

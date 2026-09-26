@@ -21,7 +21,11 @@ import type {
   PadState,
   StyleVector,
   MentalHealthSnapshot,
+  DepressionIndicators,
+  AnxietyIndicators,
 } from '../types/api'
+
+type Signal = DepressionIndicators | AnxietyIndicators | null | undefined
 
 const OCEAN_LABELS: Array<[keyof OceanTraits, string]> = [
   ['openness', '开放性'],
@@ -72,6 +76,24 @@ function RiskBadge({ level }: { level: string }) {
     <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${map[level] ?? 'bg-gray-100 text-gray-400'}`}>
       {zh[level] ?? level}
     </span>
+  )
+}
+
+function SignalCard({ title, signal }: { title: string; signal: Signal }) {
+  return (
+    <div className="rounded-xl bg-white/50 p-3">
+      <p className="text-[11px] text-gray-400 mb-1">{title}</p>
+      <p className="text-lg font-bold text-gray-700">
+        {(signal?.total_score ?? 0).toFixed(2)}
+        <span className="text-xs text-gray-400 font-normal"> / 1.0</span>
+      </p>
+      <p className="text-[11px] text-gray-400">
+        档位 {signal?.level ?? '—'} · 命中维度 {signal?.items_hit ?? 0}/{signal?.items_total ?? 0} · 证据强度 {signal?.evidence ?? 0}
+      </p>
+      {(signal?.matched?.length ?? 0) > 0 && (
+        <p className="text-[11px] text-gray-400 mt-1">命中词：{signal!.matched!.join('、')}</p>
+      )}
+    </div>
   )
 }
 
@@ -254,28 +276,23 @@ export default function PsychProfilePage() {
                   </div>
                 )}
 
-                {/* 心理健康筛查 */}
+                {/* 情绪信号（关键词命中口径，非诊断） */}
                 {mh && (
                   <div className="glass-card rounded-2xl p-5 stagger-item md:col-span-2">
                     <div className="flex items-center justify-between mb-4">
                       <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
                         <ShieldAlert className="w-4 h-4 text-macaron-yellow-deep" />
-                        心理状态筛查（非诊断）
+                        情绪信号筛查（非诊断）
                       </h2>
                       <RiskBadge level={mh.overall_risk ?? 'low'} />
                     </div>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <div className="rounded-xl bg-white/50 p-3">
-                        <p className="text-[11px] text-gray-400 mb-1">抑郁指征（PHQ-9 口径）</p>
-                        <p className="text-lg font-bold text-gray-700">{mh.depression?.total_score ?? 0}<span className="text-xs text-gray-400 font-normal"> / 27</span></p>
-                        <p className="text-[11px] text-gray-400">{mh.depression?.level ?? '—'}</p>
-                      </div>
-                      <div className="rounded-xl bg-white/50 p-3">
-                        <p className="text-[11px] text-gray-400 mb-1">焦虑指征（GAD-7 口径）</p>
-                        <p className="text-lg font-bold text-gray-700">{mh.anxiety?.total_score ?? 0}<span className="text-xs text-gray-400 font-normal"> / 21</span></p>
-                        <p className="text-[11px] text-gray-400">{mh.anxiety?.level ?? '—'}</p>
-                      </div>
+                      <SignalCard title="低落信号（关键词命中）" signal={mh.depression} />
+                      <SignalCard title="焦虑信号（关键词命中）" signal={mh.anxiety} />
                     </div>
+                    <p className="text-[11px] text-gray-400 mt-3">
+                      {mh.caveat ?? '关键词命中的情绪信号强度分档，不是临床量表得分，不能作为诊断或筛查结论使用。'}
+                    </p>
                   </div>
                 )}
               </div>
