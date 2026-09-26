@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-09-27 — W4 实施窗 · 记忆域块B/E：统一事实写入口 + 假记忆控制台作废（未 push 未部署）
+
+- **块B（`4d03be4`）**：事实创建/更正/删除收敛到唯一回执链——`StructuredMemory.add_fact_receipt`（SQL 唯一写权威；旧 int/bool 签名保留为纯投影，跨模块零测试扰动）、`SemanticMemory.write_fact`（向量派生唯一入口，仅 inserted/reinforced 派生）、`ShisiMemoryService.record_fact/forget_fact/forget_facts_by_text`（归属 + 来源水位 + EventLedger 一次记账）；`remember_facts/forget_facts` 工具经服务并回传 `fact_id/action/source_last_id`，删不掉的 id 以 `not_found` 可见不假成功；orchestrator `_meta` 注入 `turn_id`。验收：`test_w4_fact_write_entry` 11 例红→绿；「迟到旧来源不复活 / 新一轮重述可重记」以删除水位同钟构造证明；服务层与 SQL 层两枚突变各命中 4 例红；回归 242+87+122 绿、ruff 0。
+- **块E（`ef9cc9b`）**：`data/character_memory` 假记忆面根治——生成侧从不读取该 JSON，旧 POST/DELETE/clear 返回 created/deleted 即谎报（写入永不进 prompt、删除拦不住真库复现）；三条写面 **410 先于任何写动作**（`8b83b4f` 同法），GET 经 misc_routes 归属谓词回读 `user_facts` 唯一真源。红先行 5/5→5/5 绿 + 突变验红（GET 断开真源转红）+ `test_achievements` 8 例不回归。
+- **⚠️ 事故（提交语义）**：`git commit -- <paths>` 提交工作树内容而非预演 index ⇒ 两提交替并行窗提前入库在制（W2 三态/检索预算、W7 语音快照、W5 知识索引改造）。无工作丢失（worktree==HEAD），但 HEAD 的 `character_routes` 调用 `refresh_card_source` 的实现仍待 W5 提交，此前该刷新在 try/except 内 no-op。已在 BOARD 追加区向 W2/W5/W7 与主控申报；本窗流程改为「显式 add → 校验 index → 无 pathspec commit」。
+- **边界登记（未自决）**：`safety_routes` RAG 上传直写 `_sm.add_fact`（白名单外）；achievement 计数仍读旧 JSON 面；W1「跨用户 404」门槛与 410 的先后次序留收编统一。
+- **未验证风险**：多 worker 并发写同一事实的 near-dup 竞态未做真实四 worker 观察（单库事务内 SELECT+INSERT，跨进程无锁）；真实模型重述语义判等效果未评测。
+
 ## 2026-09-26（夜） — 三端同步上线 + 上线后跨环境依赖补漏 + 中间产物清除
 
 - **动作**：本地 `010259e` 正常推送 origin（`f9e27a3..010259e`），服务器用已核实的 bundle 快进通道上线（回避含大二进制提交必现的 `fetch-pack: unexpected disconnect`），三端一致。

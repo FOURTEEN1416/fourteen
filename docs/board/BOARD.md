@@ -42,6 +42,15 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-27 · W4 实施窗（主检出）· 记忆域 块A/B/E 落地 + ⚠️ 提交语义事故申报
+
+- **块A**（`b311b1c`，已另册）事实向量召回并入唯一 `retrieve_context`。
+- **块B `4d03be4`** 统一事实写入口：`add_fact_receipt`（SQL 唯一写权威，int/bool 旧签名保留为投影）、`SemanticMemory.write_fact`（向量派生唯一入口）、`ShisiMemoryService.record_fact/forget_fact/forget_facts_by_text`（归属+来源水位+ledger 一次记账）、`remember_facts/forget_facts` 工具经服务回执（`fact_id/action/source_last_id/not_found` 可见）；orchestrator `_meta` 注入 `turn_id`。测试 `test_w4_fact_write_entry` 11 例红→绿；两层突变验红各 4 例命中；`_meta` 契约断言按扩展更新。
+- **块E `ef9cc9b`** 记忆控制台：`data/character_memory` JSON 假记忆面 POST/DELETE/clear 一律 **410 先于任何写动作**（与 `8b83b4f` 卡写入面同法）；GET 改经 misc_routes 归属谓词回读 `user_facts` 真源。`test_w4_memory_console` 5 例红→绿 + 突变验红；`test_achievements` 不回归。
+- 🔴 **事故申报（提交语义）**：`git commit -- <paths>` 取的是**工作树**内容而非我预演的 index blob ⇒ 两提交**替并行窗提前入库其未提交在制**：`4d03be4` 携 W2 三态契约/检索预算 + W7 语音快照（orchestrator），`ef9cc9b` 携 W5 `_invalidate_knowledge_index` 改造（character_routes）。**无工作丢失**（各文件 worktree==HEAD，后续窗 diff 从新 HEAD 起算）；但 **HEAD 的 `character_routes` 现调用 `svc.refresh_card_source`/`forget`，其实现尚 W5 工作树未提交**——W5 落库前该刷新在 try/except 内静默 no-op。请 W2/W5/W7 与主控知悉并复核各自 hunk；本窗此后改用「显式 add + 校验 index + 无 pathspec commit」流程。
+- **边界登记（不自决）**：`safety_routes` RAG 上传直写 `rag._sm.add_fact`（白名单外，未动）；achievement_engine 仍读旧 JSON 计数（该面 410 后不再增长）；W1 在制「跨用户 404」与本面 410 的先后次序需收编时统一（404 归属门槛应先于 410）。
+- **未 push、未部署**（窗口纪律）。
+
 ### 2026-09-23 · 主控 · 五域可靠性主线启动 + 两枚 P1 根治（`ad828f7`/`d57cb5f` 已 push）
 
 - **裁决转向（默默原话）**：不急融入 laya——laya 语料**零代码被动积累**（`append_proactive_event` 账本即训练源，我上轮「语料接线」请示属过度设计，已撤回）；当前主线=**人设/主动消息/记忆/情感/拟人化五域完整可靠**。
