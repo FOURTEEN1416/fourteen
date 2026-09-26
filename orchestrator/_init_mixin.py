@@ -31,7 +31,11 @@ from tools.base_tool import ToolDispatcher, ToolRegistry
 from tools.builtin.calendar_tool import CalculatorTool, CalendarTool
 from tools.builtin.character_crawler_tool import CharacterCrawlerTool
 from tools.builtin.extra_tools import ImageGenTool, MemoryTool, SchedulerTool, WebSummaryTool
-from tools.builtin.reminder_tool import CalendarQueryTool, ReminderTool
+from tools.builtin.reminder_tool import (
+    CalendarQueryTool,
+    ReminderManageTool,
+    ReminderTool,
+)
 from tools.builtin.search_tool import SearchTool
 from tools.builtin.time_awareness_tool import TimeAwarenessTool
 from tools.builtin.weather_tool import WeatherTool
@@ -380,6 +384,7 @@ class _InitPhasesMixin:
                 memory_tools = {
                     "set_reminder": ReminderTool,
                     "query_reminders": CalendarQueryTool,
+                    "manage_reminder": ReminderManageTool,
                     "memory": MemoryTool,
                     "scheduler": SchedulerTool,
                     # 智能体画像/记忆：LLM 直接编辑，非正则（2026-09-21）

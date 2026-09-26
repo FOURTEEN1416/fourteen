@@ -87,6 +87,7 @@ tools:
     - calculator
     - set_reminder
     - query_reminders
+    - manage_reminder
     - time_awareness
     - character_card
     - update_user_profile

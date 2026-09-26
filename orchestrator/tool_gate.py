@@ -182,6 +182,9 @@ def build_review_messages(
         "  调用 **update_user_profile** 和/或 **remember_facts** 写入画像与记忆；",
         "  用户否认错误信息 → update_user_profile 的 clear_* 或 forget_facts。",
         "- 查询已有提醒 → query_reminders；看日程/日期 → calendar；查画像 → query_profile。",
+        "- 用户要**取消/改期**已设的提醒（「那个提醒算了」「改到八点」）→ manage_reminder"
+        "（action=cancel/reschedule + reminder_id，编号先由 query_reminders 拿到）；"
+        "改期只改这一条，**不要再 set_reminder 新增一条**（同一天被叫两次）。",
         "- 信息不全（典型：缺具体时间）→ 调用 ask_user 问一句，不要猜、不要闲聊、不要空口答应。",
         "- 只是闲聊、没有任何托付 → 一个工具都不调，正常聊天。",
         "- 【硬约束】没有 tool_calls 时，**禁止输出任何承诺句**",

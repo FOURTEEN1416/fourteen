@@ -1347,6 +1347,99 @@ class StructuredMemory:
         """标记提醒已触发（兼容旧签名）"""
         self.mark_reminder_result(reminder_id, delivered=True)
 
+    def get_reminder(self, reminder_id: int) -> dict[str, Any] | None:
+        """按 id 取单条提醒（含终态行：delivered / failed / cancelled）。"""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM reminders WHERE id = ?", (reminder_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def list_reminders(
+        self, session_key: str, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        """按会话列提醒（含终态）。
+
+        ``get_pending_reminders`` 的 WHERE 焊死 ``active = 1 AND triggered = 0``，
+        判死/取消/已发的行**查不到** —— 用户问"我那些提醒呢"只能看见待发的，
+        「说了会叫却没叫」的失败件静默消失。本方法不限 active，
+        并按 ``status`` 过滤（None = 全生命周期）。
+
+        归属谓词必填：多用户共用一张表，空 session_key 会返回全表（越权读）。
+        """
+        if not session_key:
+            raise ValueError("list_reminders 必须带 session_key（归属谓词）")
+        sql = "SELECT * FROM reminders WHERE session_key = ?"
+        params: list[Any] = [session_key]
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        sql += " ORDER BY trigger_time IS NULL, trigger_time ASC, id ASC"
+        with self._conn() as conn:
+            return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+    def cancel_reminder(self, reminder_id: int, session_key: str) -> bool:
+        """本人取消一条提醒（不再投递，行保留可查）。
+
+        以 ``id + session_key`` 双谓词锁定归属：生产 reminders 表全用户共用，
+        只按 id 操作 = 任何人猜到数字就能删别人的叫醒。
+        已送达（delivered）的行不可"取消"——它已经完成了，改写只会抹掉投递史。
+        """
+        if not session_key:
+            return False
+        with self._conn(write=True) as conn:
+            cur = conn.execute(
+                "UPDATE reminders SET active = 0, status = 'cancelled' "
+                "WHERE id = ? AND session_key = ? AND status != 'delivered'",
+                (reminder_id, session_key),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def reschedule_reminder(
+        self, reminder_id: int, session_key: str, trigger_time: str
+    ) -> dict[str, Any] | None:
+        """本人改期：换触发时刻并重新排队（判死/取消件改期即重新待投）。
+
+        旧现实是"改期只能再设一条"，旧的那条仍在 → 同一天被叫两次。
+        改暗含重新排队是用户显式意图，不等于投递层自动重试
+        （DECISION_LEDGER:115 的"3 次判死、不改无限重试"仍然成立）。
+        """
+        if not session_key or not trigger_time:
+            return None
+        with self._conn(write=True) as conn:
+            cur = conn.execute(
+                "UPDATE reminders SET trigger_time = ?, status = 'pending', "
+                "active = 1, fail_count = 0 "
+                "WHERE id = ? AND session_key = ? AND status != 'delivered'",
+                (trigger_time, reminder_id, session_key),
+            )
+            conn.commit()
+            if cur.rowcount <= 0:
+                return None
+            row = conn.execute(
+                "SELECT * FROM reminders WHERE id = ?", (reminder_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def restore_reminder(self, reminder_id: int, session_key: str) -> bool:
+        """显式恢复一条 failed / cancelled 提醒（回 pending、清失败计数）。
+
+        只认这两态：delivered 复活 = 同一件事再叫一次。恢复由用户明说触发，
+        投递侧没有任何自动复活路径。
+        """
+        if not session_key:
+            return False
+        with self._conn(write=True) as conn:
+            cur = conn.execute(
+                "UPDATE reminders SET active = 1, status = 'pending', "
+                "fail_count = 0 WHERE id = ? AND session_key = ? "
+                "AND status IN ('failed', 'cancelled')",
+                (reminder_id, session_key),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
     # ── 澄清任务状态机（pending_intents）──────────────────
 
     _PENDING_INTENT_TTL_MIN = 15

@@ -132,14 +132,23 @@ class CalendarQueryTool(BaseTool):
     wants_call_context = True
     parameters_schema = {
         "type": "object",
-        "properties": {},
+        "properties": {
+            "include_finished": {
+                "type": "boolean",
+                "description": (
+                    "是否一并返回已发/已取消/投递失败的提醒"
+                    "（用户问「我让你提醒我的事都有哪些」以外的追问，如"
+                    "「那条怎么没响」时才置 true）"
+                ),
+            },
+        },
         "required": [],
     }
 
     def __init__(self, structured_memory=None):
         self._sm = structured_memory
 
-    def execute(self, **kwargs) -> ToolResult:
+    def execute(self, include_finished: bool = False, **kwargs) -> ToolResult:
         if not self._sm:
             return ToolResult(False, error="Memory system not available")
         meta = kwargs.pop("_meta", None) if isinstance(kwargs.get("_meta"), dict) else None
@@ -149,8 +158,136 @@ class CalendarQueryTool(BaseTool):
         if not session_key:
             return ToolResult(False, error="missing_session_key")
         try:
-            reminders = self._sm.get_pending_reminders(session_key=session_key)
+            if include_finished:
+                # 待投影视图（active=1）看不见判死/取消件，「说了会叫却没叫」
+                # 在用户眼里就是"提醒凭空消失"。全生命周期只在显式追问时开放。
+                reminders = self._sm.list_reminders(session_key=session_key)
+            else:
+                reminders = self._sm.get_pending_reminders(session_key=session_key)
             return ToolResult(True, data=reminders)
         except Exception:
             logger.exception("查询提醒失败")
             return ToolResult(False, error="reminder_query_failed")
+
+
+class ReminderManageTool(BaseTool):
+    """提醒生命周期：本人取消 / 改期 / 恢复。
+
+    补齐前只有"设"和"查待发"两条路 —— 用户说「那个提醒取消吧」无工具可调，
+    只能等它到点发一条废话；说错了时间只能再设一条，旧的还在（同一天被叫两次）；
+    3 次投递失败判死后既查不到也不能恢复（「还是叫我一声」无路可走）。
+    """
+
+    name = "manage_reminder"
+    description = (
+        "管理已设置的提醒：取消（cancel）、改期（reschedule）、"
+        "恢复一条失败或已取消的提醒（restore）"
+    )
+    # 与 set_reminder 同纪律：用户对自己托付的提醒的处置权不绑亲密度。
+    permission_level = "public"
+    wants_call_context = True
+    _ACTIONS = ("cancel", "reschedule", "restore")
+    parameters_schema = {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["cancel", "reschedule", "restore"],
+                "description": "cancel=取消 / reschedule=改期 / restore=恢复",
+            },
+            "reminder_id": {
+                "type": "integer",
+                "description": "提醒编号（来自 query_reminders 返回的 id）",
+            },
+            "trigger_time": {
+                "type": "string",
+                "description": (
+                    "新的触发时间，北京时间，格式 YYYY-MM-DD HH:MM（24 小时制）。"
+                    "仅 action=reschedule 必填，相对表达须先按当前时间换算"
+                ),
+            },
+        },
+        "required": ["action", "reminder_id"],
+    }
+
+    def __init__(self, structured_memory=None):
+        self._sm = structured_memory
+
+    def execute(self, action: str = "", reminder_id: int | None = None,
+                trigger_time: str | None = None, **kwargs) -> ToolResult:
+        if action not in self._ACTIONS:
+            return ToolResult(
+                False, error=f"unknown_action:{action}（可选 {'/'.join(self._ACTIONS)}）"
+            )
+        if reminder_id is None:
+            return ToolResult(False, error="reminder_id is required")
+        if not self._sm:
+            return ToolResult(False, error="Memory system not available")
+        meta = kwargs.pop("_meta", None) if isinstance(kwargs.get("_meta"), dict) else None
+        session_key = str((meta or {}).get("session_key") or "")
+        # 与 set_reminder/query_reminders 同纪律：归属只能由服务端注入，
+        # 缺失即拒——否则等于允许跨会话按 id 处置他人提醒。
+        if not session_key:
+            return ToolResult(False, error="missing_session_key")
+        try:
+            rid = int(reminder_id)
+        except (TypeError, ValueError):
+            return ToolResult(False, error=f"reminder_id_invalid:{reminder_id}")
+
+        try:
+            if action == "cancel":
+                if not self._sm.cancel_reminder(rid, session_key=session_key):
+                    return self._not_owned(rid)
+                row = self._sm.get_reminder(rid)
+                return ToolResult(True, data={
+                    "reminder_id": rid,
+                    "status": (row or {}).get("status", "cancelled"),
+                    "message": f"已取消提醒 {rid}",
+                })
+
+            if action == "reschedule":
+                if not trigger_time:
+                    return ToolResult(False, error="trigger_time_required")
+                try:
+                    normalized = normalize_trigger_time(trigger_time)
+                except TriggerTimeError as e:
+                    logger.info("[reminder] 改期 trigger_time 校验失败: %s", e)
+                    return ToolResult(False, error=str(e))
+                row = self._sm.reschedule_reminder(
+                    rid, session_key=session_key, trigger_time=normalized
+                )
+                if row is None:
+                    return self._not_owned(rid)
+                return ToolResult(True, data={
+                    "reminder_id": rid,
+                    "status": row.get("status"),
+                    "trigger_time": row.get("trigger_time"),
+                    "message": f"提醒 {rid} 已改到 {normalized}",
+                })
+
+            # restore
+            if not self._sm.restore_reminder(rid, session_key=session_key):
+                row = self._sm.get_reminder(rid)
+                if row and row.get("status") == "delivered":
+                    return ToolResult(
+                        False, error=f"reminder_already_delivered:{rid}"
+                    )
+                return self._not_owned(rid)
+            return ToolResult(True, data={
+                "reminder_id": rid,
+                "status": "pending",
+                "message": f"提醒 {rid} 已重新排队",
+            })
+        except Exception:
+            logger.exception("提醒生命周期操作失败 action=%s id=%s", action, rid)
+            return ToolResult(False, error="reminder_manage_failed")
+
+    @staticmethod
+    def _not_owned(reminder_id: int) -> ToolResult:
+        return ToolResult(
+            False,
+            error=(
+                f"reminder_not_found_or_not_yours:{reminder_id}"
+                "（先用 query_reminders 的 include_finished 确认编号）"
+            ),
+        )
