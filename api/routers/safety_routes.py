@@ -164,12 +164,14 @@ async def voice_synthesize(
     if engine and engine in tts.available_engines:
         await tts.switch_engine(engine)
     audio = await tts.synthesize(text)
-    if audio is None:
+    if audio is None or len(audio) == 0:
         raise HTTPException(500, "语音合成失败")
+    # W7：MIME 按实际格式（云端 mp3 / SAPI 兜底 wav），不再固定 audio/wav
+    ext = "mp3" if audio.fmt == "mp3" else audio.fmt
     return Response(
-        content=audio,
-        media_type="audio/wav",
-        headers={"Content-Disposition": "inline; filename=tts.wav"},
+        content=audio.data,
+        media_type=audio.mime,
+        headers={"Content-Disposition": f"inline; filename=tts.{ext}"},
     )
 
 

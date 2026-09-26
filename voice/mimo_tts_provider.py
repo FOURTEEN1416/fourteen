@@ -22,6 +22,7 @@ from typing import Any
 
 import aiohttp
 
+from .audio_result import SynthesizedAudio, coerce_ratio
 from .tts_provider_base import TTSProviderBase
 
 logger = logging.getLogger("voice.mimo_tts")
@@ -115,42 +116,74 @@ class MiMoTTSProvider(TTSProviderBase):
         """将中文情感映射到MiMo参数"""
         return self.EMOTION_MAPPING.get(emotion, self.EMOTION_MAPPING["平常"]).copy()
 
-    async def synthesize(self, text: str, **kwargs) -> bytes | None:
+    def _resolve_call_params(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """解析一次合成的参数快照（W7 契约）。
+
+        model / voice_id / speed / pitch 均可由调用方按角色契约逐次传入；
+        未传时才回退实例默认。**不写任何实例状态**——并发多角色合成各用各的
+        快照，禁止以 provider 全局态模拟角色（必串音）。
+        """
+        emotion = str(kwargs.get("emotion") or "")
+        emotion_params = self._map_emotion(emotion)
+
+        model = str(kwargs.get("model") or "")
+        if model and model not in self.SUPPORTED_MODELS:
+            logger.warning("未知的 MiMo 模型 %r，回退引擎默认 %s", model, self._model)
+            model = ""
+        model = model or self._model
+
+        voice = str(kwargs.get("voice_id") or "") or self._voice_id or "default"
+
+        speed = coerce_ratio(kwargs.get("speed"))
+        if speed is None:
+            speed = coerce_ratio(emotion_params.get("speed")) or 1.0
+        pitch = coerce_ratio(kwargs.get("pitch"))
+        if pitch is None:
+            pitch = coerce_ratio(emotion_params.get("pitch")) or 1.0
+
+        return {
+            "emotion": emotion,
+            "model": model,
+            "voice": voice,
+            "speed": speed,
+            "pitch": pitch,
+        }
+
+    async def synthesize(self, text: str, **kwargs) -> SynthesizedAudio | None:
         """
         合成语音
 
         Args:
             text: 要合成的文本
             emotion: 情感状态（可选）
-            speed: 语速调整（可选，覆盖情感参数）
-            pitch: 音调调整（可选，覆盖情感参数）
+            model: 本次合成使用的 MiMo 模型（可选，角色契约快照）
+            voice_id: 本次合成使用的音色 ID/预设名（可选，角色契约快照）
+            speed: 语速比例（可选，覆盖情感参数）
+            pitch: 音调比例（可选，覆盖情感参数）
 
         Returns:
-            音频字节数据，失败返回None
+            SynthesizedAudio（云端为 mp3；SAPI 本地兜底为 wav），失败返回 None
         """
         if not text:
             return None
 
-        # 构建请求参数
-        emotion = kwargs.get("emotion", "")
-        emotion_params = self._map_emotion(emotion)
-
-        # 允许kwargs覆盖情感参数
-        speed = kwargs.get("speed", emotion_params.get("speed", 1.0))
-        pitch = kwargs.get("pitch", emotion_params.get("pitch", 1.0))
+        params = self._resolve_call_params(kwargs)
 
         payload: dict[str, Any] = {
-            "model": self._model,
+            "model": params["model"],
             "input": text,
-            "voice": self._voice_id or "default",
-            "speed": speed,
-            "pitch": pitch,
+            "voice": params["voice"],
+            "speed": params["speed"],
+            "pitch": params["pitch"],
             "response_format": "mp3",
         }
 
         # 如果是voiceclone模式，添加voice_id
-        if self._model == "mimo-v2.5-tts-voiceclone" and self._voice_id:
-            payload["voice_id"] = self._voice_id
+        if (
+            params["model"] == "mimo-v2.5-tts-voiceclone"
+            and params["voice"] not in ("", "default")
+        ):
+            payload["voice_id"] = params["voice"]
 
         try:
             async with aiohttp.ClientSession() as session, session.post(
@@ -161,10 +194,14 @@ class MiMoTTSProvider(TTSProviderBase):
             ) as response:
                 if response.status == 200:
                     audio_data = await response.read()
-                    self._available = True
-                    self._last_error = None
-                    logger.debug("MiMo TTS合成成功: %d bytes", len(audio_data))
-                    return audio_data
+                    if not audio_data:
+                        self._last_error = "API 返回空音频"
+                        logger.warning("MiMo TTS API 返回空音频，按失败处理")
+                    else:
+                        self._available = True
+                        self._last_error = None
+                        logger.debug("MiMo TTS合成成功: %d bytes", len(audio_data))
+                        return SynthesizedAudio(data=audio_data, fmt="mp3")
                 else:
                     error_text = await response.text()
                     self._last_error = f"API错误 {response.status}: {error_text}"
@@ -178,8 +215,10 @@ class MiMoTTSProvider(TTSProviderBase):
             logger.warning("MiMo TTS异常: %s", e)
 
         # voiceclone 模型失败时，先降级到 MiMo 基础合成（同 API，仅切换模型）
-        if self._model == "mimo-v2.5-tts-voiceclone":
-            basic_result = await self._synthesize_with_basic_model(text, speed, pitch)
+        if params["model"] == "mimo-v2.5-tts-voiceclone":
+            basic_result = await self._synthesize_with_basic_model(
+                text, params["speed"], params["pitch"],
+            )
             if basic_result is not None:
                 return basic_result
 
@@ -191,7 +230,7 @@ class MiMoTTSProvider(TTSProviderBase):
 
     async def _synthesize_with_basic_model(
         self, text: str, speed: float, pitch: float,
-    ) -> bytes | None:
+    ) -> SynthesizedAudio | None:
         """voiceclone 失败时降级到 mimo-v2.5-tts 基础合成（同 API，不依赖本地引擎）"""
         basic_payload: dict[str, Any] = {
             "model": "mimo-v2.5-tts",
@@ -210,12 +249,15 @@ class MiMoTTSProvider(TTSProviderBase):
             ) as response:
                 if response.status == 200:
                     audio_data = await response.read()
-                    logger.info(
-                        "voiceclone 降级到 mimo-v2.5-tts 基础合成成功: %d bytes", len(audio_data),
-                    )
-                    return audio_data
-                error_text = await response.text()
-                logger.warning("基础模型降级也失败: API %s: %s", response.status, error_text)
+                    if audio_data:
+                        logger.info(
+                            "voiceclone 降级到 mimo-v2.5-tts 基础合成成功: %d bytes",
+                            len(audio_data),
+                        )
+                        return SynthesizedAudio(data=audio_data, fmt="mp3")
+                else:
+                    error_text = await response.text()
+                    logger.warning("基础模型降级也失败: API %s: %s", response.status, error_text)
         except Exception as e:  # noqa: BLE001
             logger.warning("基础模型降级异常: %s", e)
         return None
@@ -227,16 +269,18 @@ class MiMoTTSProvider(TTSProviderBase):
         Args:
             text: 要合成的文本
             chunk_size: 每个chunk的大小（字节）
+            model / voice_id: 角色契约快照（同 synthesize）
 
         Yields:
             音频数据chunks
         """
         chunk_size = kwargs.get("chunk_size", 8192)
+        params = self._resolve_call_params(kwargs)
 
         payload: dict[str, Any] = {
-            "model": self._model,
+            "model": params["model"],
             "input": text,
-            "voice": self._voice_id or "default",
+            "voice": params["voice"],
             "stream": True,
             "response_format": "mp3",
         }
@@ -313,7 +357,9 @@ class MiMoTTSProvider(TTSProviderBase):
             result = await asyncio.to_thread(_sapi_synth)
             if result:
                 logger.info("MiMo TTS 降级到 Windows SAPI 本地合成")
-            return result
+                # SAPI 产出 RIFF WAV——统一对象必须如实标 wav，不得沿用云端 mp3 假设
+                return SynthesizedAudio(data=result, fmt="wav")
+            return None
         except Exception as e:
             logger.warning("本地 SAPI 合成不可用: %s", e)
             return None
@@ -365,7 +411,8 @@ class MiMoTTSProvider(TTSProviderBase):
                 result = await response.json()
                 if response.status == 200:
                     voice_id = result.get("voice_id", "")
-                    self._voice_id = voice_id  # 保存克隆的voice_id
+                    # W7：不再写 self._voice_id——克隆产物由 voice.catalog 持久化，
+                    # provider 全局默认音色只能经显式 set_voice_id 变更
                     logger.info("语音克隆成功: %s -> %s", voice_name, voice_id)
                     return {
                         "voice_id": voice_id,
@@ -434,7 +481,7 @@ class MiMoTTSProvider(TTSProviderBase):
                 result = await response.json()
                 if response.status == 200:
                     voice_id = result.get("voice_id", "")
-                    self._voice_id = voice_id
+                    # W7：同 clone_voice，不写 provider 全局态（catalog 是唯一 owner）
                     logger.info("音色设计成功: %s -> %s", voice_name, voice_id)
                     return {
                         "voice_id": voice_id,

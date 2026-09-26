@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .audio_result import SynthesizedAudio
 from .tts_provider_base import TTSProviderBase
 
 logger = logging.getLogger("voice.tts_manager")
@@ -99,49 +100,58 @@ class TTSManager:
     def available_engines(self) -> list[str]:
         return list(self._providers.keys())
 
-    async def synthesize(self, text: str, emotion: str = "", **kwargs) -> bytes | None:
+    async def synthesize(
+        self, text: str, emotion: str = "", **kwargs,
+    ) -> SynthesizedAudio | None:
         """
         合成语音 - 使用当前引擎（MiMo-only；云 API 失败由 provider 内部 fallback_local 兜底）
 
         Args:
             text: 要合成的文本
-            emotion: 情感状态(如"开心"、"伤心")，由 MiMoTTSProvider 内部映射
-            **kwargs: 传递给引擎的参数
+            emotion: 情感状态(如"开心"、"伤心")，透传给 provider 做速度/音高映射
+            **kwargs: 角色语音契约快照（model/voice_id/speed/pitch/speaker_name），
+                      原样透传引擎，不落任何全局状态
 
         Returns:
-            音频字节数据，全部失败返回None
+            SynthesizedAudio（不可变，含实际 fmt），全部失败返回 None
         """
         if not self._enabled or not text:
             return None
 
-        # 情感映射由 MiMoTTSProvider 内部处理（8 情感→emotion/speed/pitch），
-        # shisi EmotionMapping 注入路径已随多引擎时代结束移除。
-        # 注意: 无全局锁，支持并发合成
-        # _current_engine/_last_error 的竞态只影响统计日志，不影响正确性
-        # 优先使用当前引擎
+        # W7 修复：emotion 此前被本方法签名吞掉、从未转发 provider（情感全程丢失）。
+        # 现显式并入调用 kwargs；调用方同名传参以显式实参为准。
+        call_kwargs = dict(kwargs)
+        if emotion:
+            call_kwargs.setdefault("emotion", emotion)
+
+        # 情感映射由 MiMoTTSProvider 内部处理（8 情感→speed/pitch）。
+        # 注意: 无全局锁，支持并发合成；每次合成用调用方快照，不改引擎全局态
         if self._current_engine and self._current_engine in self._providers:
             provider = self._providers[self._current_engine]
-            result = await provider.synthesize(text, **kwargs)
-            if result is not None:
+            result = await provider.synthesize(text, **call_kwargs)
+            if result is not None and len(result) > 0:
                 self._synthesize_count += 1
                 self._last_error = None
                 return result
-            self._last_error = f"{self._current_engine} 失败"
+            if result is not None:
+                self._last_error = f"{self._current_engine} 返回空音频"
+            else:
+                self._last_error = f"{self._current_engine} 失败"
 
         # 降级: 尝试其他引擎
         for name, provider in self._providers.items():
             if name == self._current_engine:
                 continue
             logger.info("TTS降级: %s → %s", self._current_engine, name)
-            result = await provider.synthesize(text, **kwargs)
-            if result is not None:
+            result = await provider.synthesize(text, **call_kwargs)
+            if result is not None and len(result) > 0:
                 self._current_engine = name  # 自动切换
                 self._synthesize_count += 1
                 self._last_error = None
                 return result
 
         logger.error("所有TTS引擎均失败")
-        self._last_error = "所有引擎不可用"
+        self._last_error = self._last_error or "所有引擎不可用"
         return None
 
     async def switch_engine(self, engine_name: str) -> bool:

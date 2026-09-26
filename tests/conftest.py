@@ -157,6 +157,55 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # W7 语音链（2026-09-27）：音色 catalog 与角色语音绑定都是运行时状态文件；
+    # 未隔离会把测试音色/绑定写进开发机真实 data/（catalog 单例需一并重置，
+    # 否则首测创建的实例把旧路径烤进缓存）。
+    try:
+        import voice.voice_catalog as _vcat
+
+        monkeypatch.setattr(_vcat, "_DEFAULT_PATH", sandbox / "voice_catalog.json", raising=False)
+        monkeypatch.setattr(_vcat, "_singleton", None, raising=False)
+    except Exception:
+        pass
+    try:
+        import api.deps as _api_deps
+        import shisi.voice.character_voice as _cvoice
+
+        monkeypatch.setattr(
+            _cvoice, "_DEFAULT_CONFIG_PATH", sandbox / "character_voices.json", raising=False,
+        )
+        # deps 缓存的实例带着旧路径，重置让下个用例按沙箱默认重建
+        _api_deps.deps._character_voice_mgr = None
+    except Exception:
+        pass
+
+    # W6 工具/插件运行时开关（2026-09-27）：tools.tool_state 的
+    # data/runtime_switches.json 是 dispatch 热路径状态门；既有 toggle 路由
+    # 测试未显式隔离，会把测试开关写进开发机真实 data/（scheduler_config
+    # 同类事故模式）。独立 try 块。
+    try:
+        from tools import tool_state as _tool_state
+
+        monkeypatch.setattr(
+            _tool_state, "_STATE_PATH", sandbox / "runtime_switches.json", raising=False,
+        )
+        monkeypatch.setattr(_tool_state, "_cache", None, raising=False)
+    except Exception:
+        pass
+
+    # W6 爬虫受控知识存储（2026-09-27）：CharacterCrawlerTool 默认把抓取结果
+    # 写 data/character_crawler/；既有用例成功路径会真写宿主 data/，一并沙箱。
+    try:
+        from tools.builtin.character_crawler_tool import (
+            CharacterCrawlerTool as _CCTCls,
+        )
+
+        monkeypatch.setattr(
+            _CCTCls, "_DEFAULT_STORAGE_ROOT", sandbox / "character_crawler", raising=False,
+        )
+    except Exception:
+        pass
+
     # 画像缓存同样只能使用合成库，模型同步读取不得碰宿主私人画像。
     from shisi.memory.legacy import user_profile as _profile
 

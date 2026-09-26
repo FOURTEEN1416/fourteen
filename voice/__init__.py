@@ -18,9 +18,11 @@
     manager = TTSManager()
     await manager.initialize(config)
 
-    audio_bytes = await manager.synthesize("你好呀")
+    audio = await manager.synthesize("你好呀")   # SynthesizedAudio | None
+    # 角色/自定义音色经 kwargs 快照透传（model/voice_id/speed/pitch）
 """
 
+from .audio_result import SynthesizedAudio, coerce_voice_payload, voice_result_payload
 from .mimo_tts_provider import MiMoTTSProvider
 from .tts_manager import TTSManager
 from .tts_provider_base import TTSProviderBase
@@ -29,4 +31,7 @@ __all__ = [
     "TTSManager",
     "TTSProviderBase",
     "MiMoTTSProvider",
+    "SynthesizedAudio",
+    "voice_result_payload",
+    "coerce_voice_payload",
 ]

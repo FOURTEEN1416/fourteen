@@ -4,9 +4,11 @@ import { useQueryClient } from '@tanstack/react-query'
 import client from '../../api/client'
 import { queryKeys, useVoiceStatus, useDeleteCharacter } from '../../hooks/useQueries'
 import { updateCharacter } from '../../api/characters'
+import { playAudioBlob } from '../../api/mimo'
 import { useErrorStore } from '../../store/errorStore'
 import { sanitizeCharacterName } from '../../utils/character'
 import Slider from '../shared/Slider'
+import { Select } from '../shared'
 import TagInput from '../shared/TagInput'
 import Toggle from '../shared/Toggle'
 import ConfirmDialog from '../shared/ConfirmDialog'
@@ -335,12 +337,29 @@ function ExportRow({ characterId, characterName }: { characterId: string; charac
 
 // ═══ Tab: Voice ═══
 
+interface SpeakerOption {
+  name: string
+  display_name?: string
+  kind?: string
+  description?: string
+}
+
 function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
   const qc = useQueryClient()
   const [engine] = useState(character.voice_config?.engine || 'mimo-tts')
-  // voice_config 是 VoiceConfig | 自定义对象 联合类型；mimo_model 是自定义字段，需要运行时安全访问
-  const mimoModelInitial = (character.voice_config as { mimo_model?: string } | null | undefined)?.mimo_model
-  const [mimoModel, setMimoModel] = useState(mimoModelInitial || 'mimo-v2.5-tts')
+  // voice_config 是 VoiceConfig | 自定义对象 联合类型；W7 显式契约字段需运行时安全访问
+  const cfg = (character.voice_config ?? {}) as Record<string, unknown>
+  const mimoModelInitial = (cfg.mimo_model as string | undefined) || 'mimo-v2.5-tts'
+  const [mimoModel, setMimoModel] = useState(mimoModelInitial)
+  // W7：voice_id（克隆/设计音色 ID）显式契约字段；回退旧 speaker_name（预设音色）
+  const voiceIdInitial = (cfg.voice_id as string | undefined) || (cfg.speaker_name as string | undefined) || ''
+  const [voiceId, setVoiceId] = useState(voiceIdInitial)
+  const speedInitial = Number(cfg.speed as number | undefined ?? 1.0)
+  const pitchInitial = Number(cfg.pitch as number | undefined ?? 1.0)
+  const [speed, setSpeed] = useState(speedInitial)
+  const [pitch, setPitch] = useState(pitchInitial)
+  // 音色列表：/voice/speakers = 预设 + catalog 自定义（重启/换 worker 均可找回）
+  const [speakers, setSpeakers] = useState<SpeakerOption[]>([])
   // 状态来自 GET /voice/status 真实探测（曾写死 useState('就绪')）
   const { data: voiceStatus, isLoading: voiceStatusLoading } = useVoiceStatus()
   const status = voiceStatusLoading
@@ -350,11 +369,30 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
       : voiceStatus?.enabled
         ? '就绪'
         : '语音引擎未启用'
-  // 保存接线（GAP-4 修复，2026-09-01）：POST /characters/{id}/voice 落盘
+  // 保存接线（GAP-4 修复，2026-09-01；W7 显式契约字段扩展）
   const [saving, setSaving] = useState(false)
   const [savedTick, setSavedTick] = useState(false)
   const [saveError, setSaveError] = useState('')
-  const dirty = mimoModel !== (mimoModelInitial || 'mimo-v2.5-tts')
+  // 试听（W7：真实播放，失败可见）
+  const [testing, setTesting] = useState(false)
+  const [testError, setTestError] = useState('')
+
+  /* eslint-disable react-hooks/set-state-in-effect -- data fetching */
+  useEffect(() => {
+    let alive = true
+    client.get('/voice/speakers').then((res) => {
+      if (!alive) return
+      setSpeakers((res.data as { speakers?: SpeakerOption[] })?.speakers ?? [])
+    }).catch(() => {
+      if (alive) setSpeakers([])
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  const dirty = mimoModel !== mimoModelInitial || voiceId !== voiceIdInitial || speed !== speedInitial || pitch !== pitchInitial
 
   async function handleSaveVoice() {
     setSaving(true)
@@ -362,8 +400,11 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
     try {
       await client.post(`/characters/${character.id}/voice`, {
         engine: 'mimo-tts',
-        speaker_name: (character.voice_config as { speaker_name?: string } | null)?.speaker_name ?? '',
-        extra_params: { mimo_model: mimoModel },
+        speaker_name: (cfg.speaker_name as string | undefined) ?? '',
+        mimo_model: mimoModel,
+        voice_id: voiceId,
+        speed,
+        pitch,
       })
       setSavedTick(true)
       setTimeout(() => setSavedTick(false), 2000)
@@ -376,20 +417,43 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
     }
   }
 
+  async function handleTestVoice() {
+    setTesting(true)
+    setTestError('')
+    try {
+      // 试听按「已保存」的角色契约合成；响应为音频 Blob，按实际 MIME 播放
+      const res = await client.post(
+        `/characters/${character.id}/voice/test`,
+        { text: '嗨，这是我现在的声音，听得到吗？' },
+        { responseType: 'blob' },
+      )
+      await playAudioBlob(res.data as Blob)
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+      setTestError(detail || '试听失败：请确认语音服务已启用且角色已保存音色设置')
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const speakerOptions = speakers.map(s => ({
+    value: s.name,
+    label: `${s.kind === 'clone' ? '[克隆] ' : s.kind === 'design' ? '[设计] ' : ''}${s.display_name || s.name}`,
+  }))
+
   return (
     <div className="space-y-4">
       {/* Engine Picker */}
       <Section title="语音引擎">
         <div className="grid grid-cols-1 gap-2">
           {ENGINE_OPTIONS.map(opt => (
-            <button
+            <div
               key={opt.value}
-              onClick={() => {}}
               className={`text-left p-3 rounded-xl transition-all glass-yellow ring-1 ring-primary-400/30`}
             >
               <p className="text-sm font-medium text-primary-700">{opt.label}</p>
               <p className="text-[11px] text-gray-400 mt-0.5">{opt.desc}</p>
-            </button>
+            </div>
           ))}
         </div>
       </Section>
@@ -413,20 +477,49 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
               ))}
             </div>
 
+            {/* W7：音色绑定（预设 + 克隆/设计 catalog；保存后真实对话按此合成） */}
+            <div>
+              <label className="mb-1 block text-xs text-gray-500">音色（预设或克隆/设计音色）</label>
+              <Select
+                options={speakerOptions}
+                value={voiceId}
+                onChange={setVoiceId}
+                placeholder={speakers.length ? '选择音色' : '音色列表加载中…'}
+              />
+              <p className="text-[10px] text-gray-400 mt-1">
+                新克隆/设计音色在「系统设置 → 语音工作台」创建后即可在此选择
+              </p>
+            </div>
+
             {(mimoModel === 'mimo-v2.5-tts-voiceclone' || mimoModel === 'mimo-v2.5-tts-voicedesign') && (
               <div className="rounded-xl bg-amber-50/50 border border-amber-100 p-4 text-center">
                 <p className="text-sm text-amber-700">
                   {mimoModel === 'mimo-v2.5-tts-voiceclone' ? '克隆音色' : '设计音色'}的创建在「系统设置 → 语音工作台」
                 </p>
-                <p className="text-xs text-amber-500 mt-1">此处选择要应用于该角色的模型形态</p>
+                <p className="text-xs text-amber-500 mt-1">此处选择要应用于该角色的模型形态与音色</p>
               </div>
             )}
 
+            {/* W7：语速/音高数值契约（随合成请求逐次传递，不影响其他角色） */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Slider label="语速" value={speed} min={0.5} max={2.0} step={0.05} onChange={setSpeed} />
+              <Slider label="音高" value={pitch} min={0.5} max={2.0} step={0.05} onChange={setPitch} />
+            </div>
+
             <div className="text-xs text-gray-400">状态: {status}</div>
+
+            {testError && <p className="text-xs text-red-500">{testError}</p>}
 
             <div className="flex items-center justify-end gap-3">
               {saveError && <span className="text-xs text-red-500">{saveError}</span>}
               {savedTick && <span className="text-xs text-green-600">已保存</span>}
+              <button
+                onClick={handleTestVoice}
+                disabled={testing}
+                className="px-4 py-2 rounded-lg border border-primary-300 text-primary-600 text-xs font-medium hover:bg-primary-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {testing ? '合成中…' : '试听当前设置'}
+              </button>
               <button
                 onClick={handleSaveVoice}
                 disabled={saving || !dirty}
@@ -440,7 +533,7 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
       )}
 
       {!dirty && !savedTick && !saveError && (
-        <p className="text-center text-xs text-gray-400">模型选择实时生效于预览，点击「保存语音设置」落盘</p>
+        <p className="text-center text-xs text-gray-400">试听按「已保存」的设置合成；改动后需点击「保存语音设置」落盘</p>
       )}
     </div>
   )

@@ -472,6 +472,14 @@ class _InitPhasesMixin:
             logger.warning("语音系统初始化失败 (不影响运行): %s", e)
             self.components["voice"] = None
 
+        # W7：角色语音契约 owner——对话合成按角色解析不可变快照（model/voice_id/speed/pitch）
+        try:
+            from shisi.voice.character_voice import CharacterVoiceManager
+            self.components["character_voice"] = CharacterVoiceManager()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("角色音色契约管理器初始化失败 (不影响运行): %s", e)
+            self.components["character_voice"] = None
+
     # ─────────────────────────────────────────────────────────────
     #  阶段 7: 长期记忆增强 (v3.0)
     # ─────────────────────────────────────────────────────────────

@@ -32,6 +32,82 @@ logger = logging.getLogger("api.routers.clone_routes")
 router = APIRouter(tags=["clone"])
 
 
+def normalize_clone_conversations(
+    data: list[Any],
+) -> tuple[list[dict[str, Any]], list[str], list[str], dict[str, int]]:
+    """标准化克隆数据（W7 方向根治）。
+
+    - **带 ``is_self`` 的原生导出**（wechat-decrypt，方向明确）：``is_self=true``
+      （账号主人）→ user 侧；``is_self=false``（被克隆好友）→ reply 侧。
+      该分支**只看本条 text/content**，禁止通用 ``item.get("text")`` 把
+      自己的话同时灌进 reply（旧缺陷：同一文本双向重复统计）。
+    - **简单格式**（无 ``is_self``）：按 user/reply、speaker/content、
+      from/to、talker/content 命名兼容——一行即一组上下文配对。
+    - 需要上下文时按行内 user/reply 配对；原生格式行是单侧消息，
+      下游 StyleAnalyzer 只消费 reply（目标侧）。
+
+    Returns:
+        (conversations, parse_errors, warnings, direction_stats)
+        direction_stats: {"self": 自己侧条数, "target": 目标侧条数}
+    """
+    conversations: list[dict[str, Any]] = []
+    parse_errors: list[str] = []
+    warnings: list[str] = []
+    stats = {"self": 0, "target": 0}
+    saw_native = False
+    saw_simple = False
+
+    for idx, item in enumerate(data):
+        if not isinstance(item, dict):
+            parse_errors.append(f"第 {idx+1} 条：非对象格式")
+            continue
+        # 兼容 wechat-decrypt 的 message_type 字段（1=文本）
+        if "message_type" in item and item.get("message_type") != 1:
+            continue
+        # 兼容时间戳格式
+        ts = item.get("timestamp") or item.get("ts") or item.get("createTime") or ""
+        if isinstance(ts, (int, float)):
+            ts = str(int(ts))
+
+        if "is_self" in item:
+            # 原生导出：方向按 is_self 判定，仅本条文本进入对应一侧
+            saw_native = True
+            text = str(item.get("text") or item.get("content") or "").strip()
+            if not text:
+                continue
+            if item.get("is_self"):
+                conversations.append({"user": text, "reply": "", "timestamp": ts})
+                stats["self"] += 1
+            else:
+                conversations.append({"user": "", "reply": text, "timestamp": ts})
+                stats["target"] += 1
+        else:
+            # 简单格式（方向由字段名表达：user/对外 ↔ reply/被克隆者）
+            saw_simple = True
+            user_msg = (
+                item.get("user") or item.get("speaker")
+                or item.get("from") or item.get("talker") or ""
+            )
+            reply_msg = item.get("reply") or item.get("content") or item.get("to") or ""
+            if user_msg or reply_msg:
+                conversations.append({
+                    "user": str(user_msg),
+                    "reply": str(reply_msg),
+                    "timestamp": ts,
+                })
+                if reply_msg:
+                    stats["target"] += 1
+                if user_msg:
+                    stats["self"] += 1
+
+    if saw_native and saw_simple:
+        warnings.append(
+            "数据混有带 is_self 的原生导出与 user/reply 简单格式：原生条目已按 "
+            "is_self 定向（false=被克隆者），简单条目按 user/reply 处理。"
+        )
+    return conversations, parse_errors, warnings, stats
+
+
 def _build_clone_preview_from_conversations(
     target: str,
     conversations: list[dict[str, Any]],
@@ -120,48 +196,19 @@ async def upload_clone_data(
     if not isinstance(data, list):
         raise HTTPException(status_code=400, detail="数据必须是 JSON 数组格式")
 
-    # 标准化对话格式：兼容 wechat-decrypt 官方导出 + 多种字段命名
-    conversations: list[dict[str, Any]] = []
-    parse_errors: list[str] = []
-    for idx, item in enumerate(data):
-        if not isinstance(item, dict):
-            parse_errors.append(f"第 {idx+1} 条：非对象格式")
-            continue
-        # 兼容多种字段命名：
-        #   user/reply（简单格式）
-        #   speaker/content（会议格式）
-        #   from/to（邮件格式）
-        #   talker/content（微信原生格式）
-        #   is_self/text（wechat-decrypt 导出格式）
-        user_msg = (
-            item.get("user") or item.get("speaker") or item.get("from")
-            or item.get("talker") or (item.get("text") if item.get("is_self") else "")
-            or ""
-        )
-        reply_msg = (
-            item.get("reply") or item.get("text") or item.get("content")
-            or item.get("to") or (item.get("text") if not item.get("is_self") else "")
-            or ""
-        )
-        # 兼容 wechat-decrypt 的 message_type 字段（1=文本）
-        if "message_type" in item and item.get("message_type") != 1:
-            continue
-        # 兼容时间戳格式
-        ts = item.get("timestamp") or item.get("ts") or item.get("createTime") or ""
-        if isinstance(ts, (int, float)):
-            ts = str(int(ts))
-        if user_msg or reply_msg:
-            conversations.append({
-                "user": str(user_msg),
-                "reply": str(reply_msg),
-                "timestamp": ts,
-            })
+    # 标准化对话格式（W7：带 is_self 的原生导出按方向定向，见函数 docstring）
+    conversations, parse_errors, warnings, direction_stats = normalize_clone_conversations(data)
 
     if not conversations:
         hint = f"解析了 {len(data)} 条数据但无有效对话。"
         if parse_errors:
-            hint += f" 错误：{'; '.join(parse_errors[:3])}"
-        hint += " 支持格式：[{user, reply}] 或 wechat-decrypt 导出的 JSON。"
+            hint += f" 错误：{'； '.join(parse_errors[:3])}"
+        if direction_stats["self"] > 0 and direction_stats["target"] == 0:
+            hint += (
+                "检测到全部消息都是 is_self=true（你自己发的），没有任何被克隆者"
+                "（is_self=false）的消息——无法从空目标侧分析说话风格，请检查导出是否选对了联系人。"
+            )
+        hint += " 支持格式：[{user, reply}] 或 wechat-decrypt 导出的 JSON（含 is_self/text）。"
         raise HTTPException(status_code=422, detail=hint)
 
     try:
@@ -170,11 +217,22 @@ async def upload_clone_data(
         )
         # 添加前 5 条对话预览
         result["preview"] = conversations[:5]
+        result["direction_stats"] = direction_stats
+        if warnings:
+            result["warnings"] = warnings
+        # 单侧数据明确提示（目标侧严重偏少时人设质量不可信）
+        if direction_stats["target"] == 0:
+            raise HTTPException(
+                status_code=422,
+                detail="数据中没有任何被克隆者（is_self=false）的消息，无法分析目标说话风格。",
+            )
         logger.info(
-            "克隆数据上传分析成功: target=%s conversations=%d chunks=%d",
-            target, len(conversations), result.get("sample_count", 0),
+            "克隆数据上传分析成功: target=%s conversations=%d chunks=%d direction=%s",
+            target, len(conversations), result.get("sample_count", 0), direction_stats,
         )
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning("克隆数据分析失败: %s", e)
         raise HTTPException(status_code=422, detail=f"分析失败: {e}") from e

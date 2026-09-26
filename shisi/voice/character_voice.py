@@ -1,15 +1,66 @@
-"""角色专属音色管理"""
+"""角色语音契约 — 角色与 TTS 音色绑定的唯一 owner
+
+W7 契约（2026-09-27）：
+- ``CharacterVoiceSpec`` 是每次合成的**不可变参数快照**（model/voice_id/speed/pitch），
+  合成时随调用传递，禁止改写 provider 全局状态来"模拟角色"（并发必串音）。
+- 显式字段为 ``mimo_model`` / ``voice_id`` / ``speed`` / ``pitch``（MiMo 数值契约）；
+  历史 ``extra_params.mimo_model`` 形态在读取侧兼容（VoiceTab 旧版写入）。
+- ``speaker_name`` 承载 MiMo 预设音色名或 SAPI 本地发音人；SAPI 风格字符串
+  ``pitch``（"0Hz"）/``rate``（"+0%"）只作展示存储，不是云端数值比例。
+- 旧 ``setup_character_voice``（切全局引擎"模拟角色绑定"）已删除：那是假接线。
+"""
 from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from utils.project_paths import project_path, resolve_project_path
 
 logger = logging.getLogger("shisi.voice.character_voice")
 
-_DEFAULT_VOICE_DIR = project_path("data", "voice_samples")
+_DEFAULT_CONFIG_PATH = project_path("data", "character_voices.json")
+
+
+def _ratio(value: Any) -> float | None:
+    """把存储值解释为 MiMo 数值比例；非数值（如 SAPI "0Hz"）返回 None。"""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+@dataclass(frozen=True)
+class CharacterVoiceSpec:
+    """角色语音契约快照（一次合成所用的全部音色参数，不可变）。"""
+
+    engine: str = "mimo-tts"
+    mimo_model: str = ""      # MiMo 模型名；空 = 用引擎当前默认
+    voice_id: str = ""        # 克隆/设计音色 ID；空 = 回退 speaker_name
+    speaker_name: str = ""    # MiMo 预设音色名或 SAPI 本地发音人
+    speed: float | None = None
+    pitch: float | None = None
+
+    def synth_kwargs(self) -> dict[str, Any]:
+        """快照 → provider 合成 kwargs（只含非空项，供 TTSManager.synthesize 透传）。"""
+        kwargs: dict[str, Any] = {}
+        if self.mimo_model:
+            kwargs["model"] = self.mimo_model
+        voice = self.voice_id or self.speaker_name
+        if voice:
+            kwargs["voice_id"] = voice
+        if self.speed is not None:
+            kwargs["speed"] = self.speed
+        if self.pitch is not None:
+            kwargs["pitch"] = self.pitch
+        return kwargs
 
 
 class CharacterVoiceManager:
@@ -17,15 +68,16 @@ class CharacterVoiceManager:
     管理角色与TTS音色的绑定关系
 
     功能:
-    - 每个角色可独立配置TTS引擎+speaker+参数
-    - 支持热更新（运行时修改无需重启）
+    - 每个角色可独立配置音色契约（model/voice_id/speaker/speed/pitch）
     - 配置持久化到JSON文件
-    - 自动降级: 角色配置引擎不可用时回退到默认
+    - ``resolve_voice_spec`` 产出不可变合成快照（对话链与试听共用）
     """
 
-    def __init__(self, config_path: str = "data/character_voices.json"):
+    def __init__(self, config_path: str | None = None):
         # 锚定项目根：从非仓库根 CWD 启动时相对路径会读写到错误位置
-        self._config_path = resolve_project_path(config_path)
+        self._config_path = (
+            resolve_project_path(config_path) if config_path else _DEFAULT_CONFIG_PATH
+        )
         self._bindings: dict[str, dict[str, Any]] = {}
         self._load()
 
@@ -45,7 +97,7 @@ class CharacterVoiceManager:
             json.dump(self._bindings, f, ensure_ascii=False, indent=2)
 
     def bind_voice(self, character_id: str, engine: str, speaker_name: str = "", **kwargs: Any) -> None:
-        """绑定角色音色"""
+        """绑定角色音色（显式字段与展平的 extra_params 内容并列落盘）。"""
         self._bindings[character_id] = {
             "engine": engine,
             "speaker_name": speaker_name,
@@ -71,28 +123,27 @@ class CharacterVoiceManager:
         """列出所有角色音色绑定"""
         return self._bindings.copy()
 
-    async def setup_character_voice(self, character_id: str, tts_manager: Any) -> bool:
+    def resolve_voice_spec(self, character_id: str) -> CharacterVoiceSpec | None:
+        """角色 → 不可变合成快照；未绑返回 None（调用方用引擎默认）。
+
+        显式字段优先，历史 ``extra_params`` 嵌套形态兜底读取；
+        SAPI 风格字符串 pitch/rate 不进云端数值契约。
         """
-        运行时设置角色音色到TTSManager
+        cfg = self.get_voice_config(character_id)
+        if not cfg:
+            return None
+        extra = cfg.get("extra_params")
+        extra = extra if isinstance(extra, dict) else {}
 
-        Args:
-            character_id: 角色ID
-            tts_manager: TTSManager实例
+        def _pick(key: str) -> Any:
+            value = cfg.get(key)
+            return extra.get(key) if value is None else value
 
-        Returns:
-            True if successful
-        """
-        config = self.get_voice_config(character_id)
-        if not config:
-            logger.debug("角色 %s 无专属音色配置，使用默认", character_id)
-            return False
-
-        engine = config.get("engine", "mimo-tts")
-        if engine not in (tts_manager.available_engines or []):
-            logger.warning("角色 %s 配置引擎 %s 不可用，回退默认", character_id, engine)
-            return False
-
-        success = await tts_manager.switch_engine(engine)
-        if success:
-            logger.info("角色 %s 音色已切换到 %s", character_id, engine)
-        return bool(success)
+        return CharacterVoiceSpec(
+            engine=str(cfg.get("engine") or "mimo-tts"),
+            mimo_model=str(_pick("mimo_model") or ""),
+            voice_id=str(_pick("voice_id") or ""),
+            speaker_name=str(cfg.get("speaker_name") or ""),
+            speed=_ratio(_pick("speed")),
+            pitch=_ratio(_pick("pitch")),
+        )

@@ -11,6 +11,10 @@ export interface ClonePersonaPreview {
   sample_count: number
   style_report: Record<string, unknown>
   preview?: Array<{ user: string; reply: string }>
+  /** W7：方向统计（self=自己侧 / target=被克隆者侧） */
+  direction_stats?: { self: number; target: number }
+  /** W7：单侧/混排数据的明确提示 */
+  warnings?: string[]
 }
 
 /** POST /api/clone/upload — 上传本地提取的聊天数据，服务器分析生成人设预览 */

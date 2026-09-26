@@ -16,10 +16,31 @@ from api.auth import verify_api_key_dep
 from api.deps import get_tts_manager
 from voice.mimo_tts_provider import MiMoTTSProvider
 from voice.tts_manager import TTSManager
+from voice.voice_catalog import get_voice_catalog
 
 logger = logging.getLogger("api.mimo_voice")
 
 router = APIRouter(prefix="/api/mimo", tags=["mimo-tts"])
+
+
+def _register_catalog(result: dict[str, Any], *, name: str, kind: str, model: str,
+                      description: str = "", **extra: str) -> bool:
+    """克隆/设计产物登记进音色 catalog（持久化 owner）。
+
+    云端资源已创建、本地登记失败时如实返回 False（不谎报已持久化）。
+    """
+    voice_id = result.get("voice_id", "")
+    if not voice_id:
+        return False
+    try:
+        get_voice_catalog().register(
+            voice_id=voice_id, name=name, kind=kind, model=model,
+            description=description, **extra,
+        )
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.error("音色 %s 登记catalog失败: %s", voice_id, e)
+        return False
 
 
 @router.post("/clone")
@@ -72,7 +93,15 @@ async def clone_voice(
         if result["status"] == "error":
             raise HTTPException(status_code=500, detail=result["message"])
 
-        logger.info("语音克隆成功: %s -> %s", voice_name, result.get("voice_id"))
+        catalog_saved = _register_catalog(
+            result, name=voice_name, kind="clone",
+            model="mimo-v2.5-tts-voiceclone",
+            description=description or f"克隆音色: {voice_name}",
+        )
+        result["catalog_saved"] = catalog_saved
+
+        logger.info("语音克隆成功: %s -> %s (catalog_saved=%s)",
+                    voice_name, result.get("voice_id"), catalog_saved)
         return result
 
     except HTTPException:
@@ -137,7 +166,15 @@ async def design_voice(
         if result["status"] == "error":
             raise HTTPException(status_code=500, detail=result["message"])
 
-        logger.info("音色设计成功: %s -> %s", voice_name, result.get("voice_id"))
+        catalog_saved = _register_catalog(
+            result, name=voice_name, kind="design",
+            model="mimo-v2.5-tts-voicedesign",
+            description=description, **kwargs,
+        )
+        result["catalog_saved"] = catalog_saved
+
+        logger.info("音色设计成功: %s -> %s (catalog_saved=%s)",
+                    voice_name, result.get("voice_id"), catalog_saved)
         return result
 
     except HTTPException:
@@ -167,6 +204,12 @@ async def switch_voice(
     provider = tts_manager.get_engine("mimo-tts")
     if not isinstance(provider, MiMoTTSProvider):
         raise HTTPException(status_code=400, detail="MiMo TTS未配置")
+
+    if not get_voice_catalog().is_known(voice_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f"未知音色 voice_id: {voice_id}——请先克隆/设计音色或使用预设音色名",
+        )
 
     try:
         provider.set_voice_id(voice_id)
@@ -273,21 +316,42 @@ async def set_mimo_engine(
 @router.post("/synthesize")
 async def synthesize(
     text: str = Form(..., description="合成文本"),
+    voice_id: str = Form("", description="音色ID/预设名（可选，试听指定音色）"),
+    model: str = Form("", description="MiMo 模型名（可选，须在白名单内）"),
+    emotion: str = Form("", description="情感（可选，如 开心/伤心）"),
     tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
-    _auth: bool = Depends(verify_api_key_dep),  # noqa: B008
+    _auth: bool = Depends(verify_api_key_dep),
 ):
-    """MiMo TTS 直接合成（无需角色绑定）"""
+    """MiMo TTS 直接合成（无需角色绑定；MIME 按实际格式返回）"""
     if tts_manager is None:
         raise HTTPException(status_code=400, detail="TTS管理器未初始化")
     provider = tts_manager.get_engine("mimo-tts")
     if not isinstance(provider, MiMoTTSProvider):
         raise HTTPException(status_code=400, detail="MiMo TTS未配置")
 
+    if model and model not in MiMoTTSProvider.SUPPORTED_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的模型: {model}，支持的模型: {MiMoTTSProvider.SUPPORTED_MODELS}",
+        )
+    if voice_id and not get_voice_catalog().is_known(voice_id):
+        raise HTTPException(
+            status_code=400,
+            detail=f"未知音色 voice_id: {voice_id}——请先克隆/设计音色或使用预设音色名",
+        )
+
+    synth_kwargs: dict[str, Any] = {}
+    if model:
+        synth_kwargs["model"] = model
+    if voice_id:
+        synth_kwargs["voice_id"] = voice_id
+
     try:
-        audio_data = await provider.synthesize(text)
-        if audio_data is None:
-            raise HTTPException(status_code=500, detail="语音合成失败")
-        return Response(content=audio_data, media_type="audio/wav")
+        audio = await provider.synthesize(text, emotion=emotion, **synth_kwargs)
+        if audio is None or len(audio) == 0:
+            detail = getattr(provider, "_last_error", None) or "语音合成失败"
+            raise HTTPException(status_code=502, detail=detail)
+        return Response(content=audio.data, media_type=audio.mime)
     except HTTPException:
         raise
     except Exception as e:

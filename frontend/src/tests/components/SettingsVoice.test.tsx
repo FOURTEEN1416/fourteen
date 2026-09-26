@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import SettingsVoice from '../../pages/SettingsVoice'
 
 // ── hoisted mock fns ──
-const { mockMimoClone, mockMimoDesign, mockMimoSynthesize, mockMimoSetEngine, mockMimoSwitchVoice, mockMimoStatus } = vi.hoisted(
+const { mockMimoClone, mockMimoDesign, mockMimoSynthesize, mockMimoSetEngine, mockMimoSwitchVoice, mockMimoStatus, mockPlayAudioBlob } = vi.hoisted(
   () => ({
     mockMimoClone: vi.fn(),
     mockMimoDesign: vi.fn(),
@@ -11,6 +11,7 @@ const { mockMimoClone, mockMimoDesign, mockMimoSynthesize, mockMimoSetEngine, mo
     mockMimoSetEngine: vi.fn(),
     mockMimoSwitchVoice: vi.fn(),
     mockMimoStatus: vi.fn(),
+    mockPlayAudioBlob: vi.fn(),
   }),
 )
 
@@ -25,6 +26,7 @@ vi.mock('../../api/mimo', () => ({
   mimoSetEngine: (...args: unknown[]) => mockMimoSetEngine(...args),
   mimoSwitchVoice: (...args: unknown[]) => mockMimoSwitchVoice(...args),
   mimoStatus: (...args: unknown[]) => mockMimoStatus(...args),
+  playAudioBlob: (...args: unknown[]) => mockPlayAudioBlob(...args),
 }))
 
 vi.mock('../../api/system', () => ({
@@ -33,14 +35,17 @@ vi.mock('../../api/system', () => ({
 
 // ── fixtures ──
 
+// W7：/voice/speakers 合并返回 预设 + catalog 自定义音色（克隆产物刷新可找回）
 const FAKE_VOICES = {
   data: {
-    voices: [
-      { name: 'xiaoyu', gender: 'female', style: 'gentle', language: 'zh', sample_url: 'http://example.com/sample.mp3' },
-      { name: 'haoxue', gender: 'female', style: 'lively', language: 'zh', sample_url: '' },
+    speakers: [
+      { name: 'female-tianmei', display_name: '甜美女声', kind: 'preset' },
+      { name: 'vc_cloned_1', display_name: '我的克隆音色', kind: 'clone', description: '克隆音色: 测试' },
     ],
   },
 }
+
+const FAKE_AUDIO_BLOB = new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/mpeg' })
 
 describe('SettingsVoice', () => {
   beforeEach(() => {
@@ -48,11 +53,14 @@ describe('SettingsVoice', () => {
     // Default: resolve voice calls so component can load
     mockGetSpeakers.mockResolvedValue(FAKE_VOICES)
     mockMimoStatus.mockResolvedValue({ data: { enabled: true } })
-    mockMimoClone.mockResolvedValue({ data: { status: 'ok' } })
-    mockMimoDesign.mockResolvedValue({ data: { status: 'ok' } })
-    mockMimoSynthesize.mockResolvedValue({ data: { status: 'ok' } })
+    // W7：克隆/设计返回 voice_id 且登记 catalog
+    mockMimoClone.mockResolvedValue({ data: { status: 'ok', voice_id: 'vc_cloned_1', catalog_saved: true } })
+    mockMimoDesign.mockResolvedValue({ data: { status: 'ok', voice_id: 'vc_designed_1', catalog_saved: true } })
+    // W7：合成返回音频 Blob
+    mockMimoSynthesize.mockResolvedValue({ data: FAKE_AUDIO_BLOB })
     mockMimoSetEngine.mockResolvedValue({ data: { status: 'ok' } })
     mockMimoSwitchVoice.mockResolvedValue({ data: { status: 'ok' } })
+    mockPlayAudioBlob.mockResolvedValue(undefined)
   })
 
   // ── Test 1: Engine section ──
@@ -67,13 +75,11 @@ describe('SettingsVoice', () => {
 
     // Engine section heading
     expect(screen.getByText('语音引擎')).toBeDefined()
-    // The engine switcher shows the default engine button
-    expect(screen.getByRole('button', { name: 'MiMo Cloud' })).toBeDefined()
+    // The engine switcher shows the default engine (MiMo-only 展示卡片，不再调 set-engine)
+    expect(screen.getByText('MiMo Cloud')).toBeDefined()
   })
 
-  // ── Test 2: Engine options ──
-  // 当前 ENGINE_OPTIONS 仅保留 MiMo Cloud(Edge-TTS/GPT-SoVITS/Bert-VITS2 已从 UI 移除,
-  // 后端多引擎 fallback 仍由 llm_provider 处理,见 AGENTS.md L6)
+  // ── Test 2: Engine options（W7：MiMo-only，引擎卡片为展示项不触发 API）──
 
   it('renders MiMo Cloud engine option', async () => {
     render(<SettingsVoice />)
@@ -82,7 +88,7 @@ describe('SettingsVoice', () => {
       expect(mockGetSpeakers).toHaveBeenCalled()
     })
 
-    expect(screen.getByRole('button', { name: 'MiMo Cloud' })).toBeDefined()
+    expect(screen.getByText('MiMo Cloud')).toBeDefined()
   })
 
   // ── Test 3: Clone section shows file upload ──
@@ -129,13 +135,20 @@ describe('SettingsVoice', () => {
     expect(screen.getByText('应用设计')).toBeDefined()
   })
 
-  // ── Test 5: Select engine calls mimoSetEngine ──
-  // 已删除:ENGINE_OPTIONS 仅保留 MiMo Cloud,无其他引擎可切换。
-  // 后端多引擎 fallback 由 llm_provider 自动处理,前端 UI 不再暴露引擎切换。
+  // ── Test 5: W7 — catalog 克隆音色出现在列表并可选中 ──
 
-  // ── Test 6: Click 试听 calls mimoSynthesize ──
+  it('lists catalog clone voices from merged speakers', async () => {
+    render(<SettingsVoice />)
 
-  it('click 试听 button calls mimoSynthesize', async () => {
+    await waitFor(() => {
+      expect(screen.getByText('我的克隆音色')).toBeDefined()
+    })
+    expect(screen.getByText('甜美女声')).toBeDefined()
+  })
+
+  // ── Test 6: Click 试听 calls mimoSynthesize and plays returned blob ──
+
+  it('click 试听 calls mimoSynthesize then plays audio blob', async () => {
     render(<SettingsVoice />)
 
     // Wait for initial load
@@ -156,7 +169,12 @@ describe('SettingsVoice', () => {
     fireEvent.click(playBtn)
 
     await waitFor(() => {
-      expect(mockMimoSynthesize).toHaveBeenCalledWith('你好世界')
+      // W7：当前选中音色（首个 = 预设 female-tianmei）随请求传递
+      expect(mockMimoSynthesize).toHaveBeenCalledWith('你好世界', { voiceId: 'female-tianmei' })
+    })
+    await waitFor(() => {
+      // 返回的 Blob 真正进入播放器
+      expect(mockPlayAudioBlob).toHaveBeenCalledWith(FAKE_AUDIO_BLOB)
     })
   })
 
@@ -171,5 +189,19 @@ describe('SettingsVoice', () => {
 
     // Voice list should show loading indicator
     expect(screen.getByText('加载中...')).toBeDefined()
+  })
+
+  // ── Test 8: W7 — engine 卡片点击不再发送 engine 名给 set-engine ──
+
+  it('does not call mimoSetEngine with engine name', async () => {
+    render(<SettingsVoice />)
+
+    await waitFor(() => {
+      expect(mockGetSpeakers).toHaveBeenCalled()
+    })
+
+    fireEvent.click(screen.getByText('MiMo Cloud'))
+    // 类型分明：engine 名（mimo-tts）不进模型白名单端点
+    expect(mockMimoSetEngine).not.toHaveBeenCalled()
   })
 })

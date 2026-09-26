@@ -193,6 +193,8 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
   const [targetName, setTargetName] = useState('')
   const [error, setError] = useState('')
   const [sampleCount, setSampleCount] = useState(0)
+  // W7：单侧/混排数据的明确提示（方向统计见后端 direction_stats）
+  const [directionWarnings, setDirectionWarnings] = useState<string[]>([])
   const [preview, setPreview] = useState<Array<{ user: string; reply: string }>>([])
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [guideCopied, setGuideCopied] = useState(false)
@@ -228,6 +230,7 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
       onPersonaUpdate(toPersonaState(data.persona))
       setSampleCount(data.sample_count)
       setPreview(data.preview || [])
+      setDirectionWarnings(data.warnings || [])
       setPhase('done')
     } catch (err) {
       setError(err instanceof Error ? err.message : '上传分析失败，请检查文件格式')
@@ -241,12 +244,14 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
     setPhase('idle')
     setError('')
     setPreview([])
+    setDirectionWarnings([])
   }
 
   function resetAll() {
     setPhase('idle')
     setError('')
     setPreview([])
+    setDirectionWarnings([])
     setSelectedFile(null)
     setSampleCount(0)
   }
@@ -378,6 +383,13 @@ function WeChatCloneTab({ onPersonaUpdate }: { onPersonaUpdate: (p: Partial<Pers
                 <Check className="w-4 h-4 text-macaron-mint-deep" />
                 <span className="text-xs text-macaron-mint-deep font-medium">已分析 {sampleCount} 轮对话，人设预览已更新</span>
               </div>
+              {directionWarnings.length > 0 && (
+                <div className="rounded-xl bg-amber-50/60 border border-amber-200 px-4 py-3 space-y-1">
+                  {directionWarnings.map((w, i) => (
+                    <p key={i} className="text-[11px] text-amber-700">⚠️ {w}</p>
+                  ))}
+                </div>
+              )}
               {preview.length > 0 && (
                 <div className="rounded-xl border border-gray-200 bg-white/60 p-3 space-y-1.5">
                   <p className="text-[10px] font-medium text-gray-500">对话预览（前 {Math.min(preview.length, 5)} 条）：</p>

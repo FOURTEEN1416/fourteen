@@ -1,12 +1,16 @@
 """角色音色绑定 API — 管理角色与 TTS 音色的绑定关系
 
-2026-08-28 MiMo-only 收敛：引擎维度删除（唯一引擎 mimo-tts），音色维度保留
-speaker_name 等参数（MiMo voice_id/预设音色名）。"""
+2026-08-28 MiMo-only 收敛：引擎维度删除（唯一引擎 mimo-tts）。
+2026-09-27 W7 契约：``mimo_model`` / ``voice_id`` / ``speed`` / ``pitch``(数值)
+成为显式角色语音契约字段（校验白名单与 catalog）；试听按角色契约快照合成并
+按实际格式返回 MIME；``/voice/speakers`` 合并静态预设与音色 catalog。
+既有 POST 展平契约保留（extra_params 内容仍展开落盘）。"""
 
 
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Security
 from fastapi.responses import Response
@@ -14,6 +18,8 @@ from pydantic import BaseModel
 
 from api.auth import verify_api_key_dep
 from api.deps import deps
+from voice.mimo_tts_provider import MiMoTTSProvider
+from voice.voice_catalog import get_voice_catalog, presets
 
 logger = logging.getLogger("api.voice_routes")
 
@@ -21,13 +27,19 @@ router = APIRouter(prefix="/api", tags=["voice"])
 
 # ── 请求/响应模型 ──
 
+# pitch 双形态：数值 = MiMo 音调比例（云端契约）；字符串 = SAPI 风格（仅展示存储）
+PitchField = str | float
+
 
 class VoiceBindRequest(BaseModel):
     engine: str = "mimo-tts"
     speaker_name: str = ""
     rate: str = "+0%"
-    pitch: str = "0Hz"
+    pitch: PitchField = "0Hz"
     volume: str = "+0%"
+    mimo_model: str | None = None
+    voice_id: str | None = None
+    speed: float | None = None
     extra_params: dict = {}
 
 
@@ -35,8 +47,11 @@ class VoiceUpdateRequest(BaseModel):
     engine: str | None = None
     speaker_name: str | None = None
     rate: str | None = None
-    pitch: str | None = None
+    pitch: PitchField | None = None
     volume: str | None = None
+    mimo_model: str | None = None
+    voice_id: str | None = None
+    speed: float | None = None
     extra_params: dict | None = None
 
 
@@ -44,12 +59,55 @@ class VoiceTestRequest(BaseModel):
     text: str = "你好，我是你的专属语音助手"
 
 
-# ── MiMo 预设音色（唯一引擎；克隆/设计音色见 /api/mimo/*）──
+# ── 契约校验（C：引擎名/模型名/voice_id 三者类型分明）──
+
+
+def _validate_contract(
+    engine: str,
+    mimo_model: str | None,
+    voice_id: str | None,
+) -> None:
+    if engine != "mimo-tts":
+        raise HTTPException(
+            status_code=400,
+            detail=f"未知引擎 {engine!r}：唯一引擎为 mimo-tts；mimo_model 才是模型名字段"
+            f"（可选值 {MiMoTTSProvider.SUPPORTED_MODELS}）",
+        )
+    if mimo_model and mimo_model not in MiMoTTSProvider.SUPPORTED_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的 MiMo 模型: {mimo_model}，支持的模型: {MiMoTTSProvider.SUPPORTED_MODELS}",
+        )
+    if voice_id and not get_voice_catalog().is_known(voice_id):
+        raise HTTPException(
+            status_code=400,
+            detail=f"未知音色 voice_id: {voice_id}——请先在语音工作台克隆/设计音色，"
+                "或使用预设音色名（见 /api/voice/speakers）",
+        )
+
+
+def _bind_fields(req: VoiceBindRequest) -> dict[str, Any]:
+    """请求 → bind kwargs（显式契约字段 + 展平的 extra_params 并列落盘）。"""
+    fields: dict[str, Any] = {
+        "rate": req.rate,
+        "volume": req.volume,
+        **req.extra_params,
+    }
+    # pitch：数值按 MiMo 比例落盘；字符串按 SAPI 风格原样落盘
+    fields["pitch"] = float(req.pitch) if isinstance(req.pitch, (int, float)) else req.pitch
+    if req.mimo_model is not None:
+        fields["mimo_model"] = req.mimo_model
+    if req.voice_id is not None:
+        fields["voice_id"] = req.voice_id
+    if req.speed is not None:
+        fields["speed"] = req.speed
+    return fields
+
+
+# ── MiMo 预设音色（唯一引擎；克隆/设计音色见 /api/mimo/* 与 catalog）──
 
 _MIMO_VOICES = [
-    {"name": "female-tianmei", "description": "甜美女声"},
-    {"name": "female-qingxin", "description": "清新女声"},
-    {"name": "male-chenwen", "description": "沉稳男声"},
+    {**preset, "kind": "preset"} for preset in presets()
 ]
 
 
@@ -76,6 +134,7 @@ async def bind_character_voice(
     _auth: bool = Security(verify_api_key_dep),
 ):
     """绑定角色音色"""
+    _validate_contract(req.engine, req.mimo_model, req.voice_id)
     voice_mgr = deps.get_character_voice_manager()
 
     try:
@@ -83,12 +142,12 @@ async def bind_character_voice(
             character_id=character_id,
             engine=req.engine,
             speaker_name=req.speaker_name,
-            rate=req.rate,
-            pitch=req.pitch,
-            volume=req.volume,
-            **req.extra_params,
+            **_bind_fields(req),
         )
-        logger.info("角色 %s 绑定音色: %s / %s", character_id, req.engine, req.speaker_name)
+        logger.info(
+            "角色 %s 绑定音色: model=%s voice_id=%s speaker=%s",
+            character_id, req.mimo_model, req.voice_id, req.speaker_name,
+        )
         return {"status": "bound", "character_id": character_id, "engine": req.engine}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -101,6 +160,9 @@ async def update_character_voice(
     _auth: bool = Security(verify_api_key_dep),
 ):
     """更新角色音色配置（部分更新）"""
+    _validate_contract(
+        req.engine or "mimo-tts", req.mimo_model, req.voice_id,
+    )
     voice_mgr = deps.get_character_voice_manager()
 
     current = voice_mgr.get_voice_config(character_id)
@@ -115,9 +177,15 @@ async def update_character_voice(
     if req.rate is not None:
         updated["rate"] = req.rate
     if req.pitch is not None:
-        updated["pitch"] = req.pitch
+        updated["pitch"] = float(req.pitch) if isinstance(req.pitch, (int, float)) else req.pitch
     if req.volume is not None:
         updated["volume"] = req.volume
+    if req.mimo_model is not None:
+        updated["mimo_model"] = req.mimo_model
+    if req.voice_id is not None:
+        updated["voice_id"] = req.voice_id
+    if req.speed is not None:
+        updated["speed"] = req.speed
     if req.extra_params is not None:
         extra = updated.get("extra_params", {})
         extra.update(req.extra_params)
@@ -150,11 +218,23 @@ async def unbind_character_voice(
 async def list_speakers(
     _auth: bool = Security(verify_api_key_dep),
 ):
-    """获取 MiMo 预设音色列表（唯一引擎；克隆/设计音色走 /api/mimo/*）"""
+    """MiMo 音色列表：静态预设 + 音色 catalog（克隆/设计产物，重启可找回）"""
+    custom = [
+        {
+            "name": entry["voice_id"],
+            "display_name": entry.get("name") or entry["voice_id"],
+            "description": entry.get("description", ""),
+            "kind": entry.get("kind", "custom"),
+            "model": entry.get("model", ""),
+            "voice_id": entry["voice_id"],
+        }
+        for entry in get_voice_catalog().list()
+    ]
+    speakers = [dict(v) for v in _MIMO_VOICES] + custom
     return {
         "engine": "mimo-tts",
-        "speakers": _MIMO_VOICES,
-        "total": len(_MIMO_VOICES),
+        "speakers": speakers,
+        "total": len(speakers),
     }
 
 
@@ -164,7 +244,7 @@ async def test_character_voice(
     req: VoiceTestRequest,
     _auth: bool = Security(verify_api_key_dep),
 ):
-    """测试角色音色合成"""
+    """按角色音色契约试听（不可变快照合成；MIME 按实际格式返回）"""
     voice_mgr = deps.get_character_voice_manager()
     tts_mgr = deps.get_tts()
     if tts_mgr is None:
@@ -174,21 +254,19 @@ async def test_character_voice(
     if voice_config is None:
         raise HTTPException(status_code=400, detail="角色未配置音色，请先绑定")
 
-    # 切换到角色配置的引擎
-    # MiMo-only：不再切换引擎，直接用全局 TTSManager 合成
+    # W7：按角色契约快照合成（不再需要也不允许切全局引擎/音色"模拟角色"）
+    spec = voice_mgr.resolve_voice_spec(character_id)
+    synth_kwargs = spec.synth_kwargs() if spec else {}
 
-    # 提取合成参数
-    tts_kwargs = {
-        "speaker_name": voice_config.get("speaker_name", ""),
-        "rate": voice_config.get("rate", "+0%"),
-        "pitch": voice_config.get("pitch", "0Hz"),
-        "volume": voice_config.get("volume", "+0%"),
-    }
-    # 过滤掉空值
-    tts_kwargs = {k: v for k, v in tts_kwargs.items() if v}
+    audio = await tts_mgr.synthesize(req.text, **synth_kwargs)
+    if audio is None or len(audio) == 0:
+        last_error = getattr(tts_mgr, "_last_error", None) or "未知原因"
+        raise HTTPException(
+            status_code=502, detail=f"语音合成失败: {last_error}",
+        )
 
-    audio_data = await tts_mgr.synthesize(req.text, **tts_kwargs)
-    if audio_data is None:
-        raise HTTPException(status_code=500, detail="语音合成失败")
-
-    return Response(content=audio_data, media_type="audio/wav")
+    logger.info(
+        "角色 %s 试听成功: %d bytes fmt=%s kwargs=%s",
+        character_id, len(audio), audio.fmt, synth_kwargs,
+    )
+    return Response(content=audio.data, media_type=audio.mime)

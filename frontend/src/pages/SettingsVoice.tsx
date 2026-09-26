@@ -9,14 +9,20 @@ import {
   mimoSetEngine,
   mimoSwitchVoice,
   mimoStatus,
+  playAudioBlob,
 } from '../api/mimo'
 import { getSpeakers } from '../api/system'
 
 // ── Constants ──
 
+// W7：engine（mimo-tts）与 model（MiMo 模型名）类型分明——
+// 引擎卡片仅展示（MiMo-only，无可切换项），克隆/设计前按需切换模型。
 const ENGINE_OPTIONS = [
   { value: 'mimo-tts', label: 'MiMo Cloud' },
 ]
+
+const MODEL_VOICECLONE = 'mimo-v2.5-tts-voiceclone'
+const MODEL_VOICEDESIGN = 'mimo-v2.5-tts-voicedesign'
 
 const GENDER_OPTIONS = [
   { value: 'female', label: '女声' },
@@ -35,27 +41,25 @@ const STYLE_OPTIONS = [
 
 function EngineSwitcher({
   engine,
-  onChange,
 }: {
   engine: string
-  onChange: (v: string) => void
 }) {
   return (
     <section>
       <h3 className="mb-3 text-sm font-semibold text-gray-700">语音引擎</h3>
       <div className="grid grid-cols-1 gap-2">
         {ENGINE_OPTIONS.map((opt) => (
-          <button
+          <div
             key={opt.value}
-            onClick={() => onChange(opt.value)}
             className={`text-left p-3 rounded-xl transition-all ${
               engine === opt.value
                 ? 'glass-yellow ring-1 ring-primary-400/30'
-                : 'glass-card border border-gray-200 hover:border-gray-300'
+                : 'glass-card border border-gray-200'
             }`}
           >
             <p className={`text-sm font-medium ${engine === opt.value ? 'text-primary-700' : 'text-gray-700'}`}>{opt.label}</p>
-          </button>
+            <p className="text-[10px] text-gray-400 mt-0.5">克隆/设计音色时将自动切换对应 MiMo 模型</p>
+          </div>
         ))}
       </div>
     </section>
@@ -106,9 +110,8 @@ function VoiceList({
               <div className="flex-1">
                 <p className="text-sm font-medium">{v.displayName || v.name}</p>
                 <p className="text-[10px] text-gray-400">
-                  {v.gender === 'female' ? '女声' : v.gender === 'male' ? '男声' : '中性'}
-                  {' · '}
-                  {ENGINE_OPTIONS.find((e) => e.value === v.engine)?.label || v.engine}
+                  {v.kind === 'clone' ? '克隆音色' : v.kind === 'design' ? '设计音色' : '预设'}
+                  {v.description ? ` · ${v.description}` : ''}
                 </p>
               </div>
               {activeVoice === v.name && (
@@ -118,16 +121,18 @@ function VoiceList({
           ))}
         </div>
       )}
-    </div>
+      </div>
     </section>
   )
 }
 
-function VoiceCloneSection() {
+function VoiceCloneSection({ onCreated }: { onCreated: (voiceId: string) => void }) {
   const [file, setFile] = useState<File | null>(null)
   const [voiceName, setVoiceName] = useState('')
   const [cloning, setCloning] = useState(false)
   const [done, setDone] = useState(false)
+  const [error, setError] = useState('')
+  const [createdId, setCreatedId] = useState('')
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -140,18 +145,27 @@ function VoiceCloneSection() {
   const handleClone = useCallback(async () => {
     if (!file || !voiceName.trim()) return
     setCloning(true)
+    setError('')
     try {
+      // W7：克隆能力在 voiceclone 模型上——先切模型（传模型名，非引擎名）
+      await mimoSetEngine(MODEL_VOICECLONE)
       const fd = new FormData()
       fd.append('audio', file)
       fd.append('voice_name', voiceName)
-      await mimoClone(fd)
+      const res = await mimoClone(fd)
+      const voiceId = (res.data as { voice_id?: string })?.voice_id || ''
+      const saved = (res.data as { catalog_saved?: boolean })?.catalog_saved
+      setCreatedId(voiceId)
       setDone(true)
-    } catch {
-      // error handled by global interceptor
+      onCreated(voiceId)
+      if (saved === false) setError('克隆成功，但本地音色目录登记失败——刷新后可能无法找回该音色')
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+      setError(detail || '克隆失败，请稍后重试')
     } finally {
       setCloning(false)
     }
-  }, [file, voiceName])
+  }, [file, voiceName, onCreated])
 
   return (
     <section>
@@ -164,6 +178,7 @@ function VoiceCloneSection() {
             onChange={(e) => {
               setVoiceName(e.target.value)
               setDone(false)
+              setCreatedId('')
             }}
             placeholder="自定义语音名称"
             className="w-full rounded-lg border border-gray-200 bg-white/60 px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-400/20"
@@ -206,13 +221,20 @@ function VoiceCloneSection() {
               '开始克隆'
             )}
           </button>
+
+          {done && createdId && (
+            <p className="text-xs text-green-600">
+              音色 ID：{createdId}（已入库，可在上方「可用语音」与角色语音设置中选择）
+            </p>
+          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
         </div>
       </div>
     </section>
   )
 }
 
-function VoiceDesignSection() {
+function VoiceDesignSection({ onCreated }: { onCreated: (voiceId: string) => void }) {
   const [design, setDesign] = useState<VoiceDesignRequest>({
     gender: 'female',
     age: 25,
@@ -221,22 +243,31 @@ function VoiceDesignSection() {
     speed: 1.0,
   })
   const [designing, setDesigning] = useState(false)
+  const [error, setError] = useState('')
+  const [createdId, setCreatedId] = useState('')
 
   const handleDesign = useCallback(async () => {
     setDesigning(true)
+    setError('')
     try {
-      await mimoDesign({
+      // W7：设计能力在 voicedesign 模型上——先切模型（传模型名，非引擎名）
+      await mimoSetEngine(MODEL_VOICEDESIGN)
+      const res = await mimoDesign({
         voice_name: `design_${Date.now()}`,
         description: `${design.gender} voice, ${design.style} style`,
         gender: design.gender,
         age_group: design.age < 30 ? 'young' : design.age < 55 ? 'middle' : 'elder',
       })
-    } catch {
-      // error handled by global interceptor
+      const voiceId = (res.data as { voice_id?: string })?.voice_id || ''
+      setCreatedId(voiceId)
+      onCreated(voiceId)
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+      setError(detail || '设计失败，请稍后重试')
     } finally {
       setDesigning(false)
     }
-  }, [design])
+  }, [design, onCreated])
 
   return (
     <section>
@@ -320,6 +351,13 @@ function VoiceDesignSection() {
           </div>
         </div>
 
+        {error && <p className="mt-3 text-xs text-red-500">{error}</p>}
+        {createdId && (
+          <p className="mt-3 text-xs text-green-600">
+            音色 ID：{createdId}（已入库，可在上方「可用语音」中选择）
+          </p>
+        )}
+
         <div className="mt-4 flex justify-end">
           <button
             onClick={handleDesign}
@@ -341,21 +379,26 @@ function VoiceDesignSection() {
   )
 }
 
-function SynthesizeTest() {
+function SynthesizeTest({ voiceId }: { voiceId: string }) {
   const [text, setText] = useState('')
   const [playing, setPlaying] = useState(false)
+  const [error, setError] = useState('')
 
   const handlePlay = useCallback(async () => {
     if (!text.trim()) return
     setPlaying(true)
+    setError('')
     try {
-      await mimoSynthesize(text)
-    } catch {
-      // error handled by global interceptor
+      // W7：响应是音频 Blob——创建 ObjectURL 播放并回收，失败可见
+      const res = await mimoSynthesize(text, voiceId ? { voiceId } : undefined)
+      await playAudioBlob(res.data as Blob)
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+      setError(detail || (err instanceof Error ? err.message : '合成失败，请稍后重试'))
     } finally {
       setPlaying(false)
     }
-  }, [text])
+  }, [text, voiceId])
 
   return (
     <section>
@@ -368,6 +411,7 @@ function SynthesizeTest() {
           rows={3}
           className="w-full resize-none rounded-lg border border-gray-200 bg-white/60 px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-400/20"
         />
+        {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
         <div className="mt-3 flex justify-end">
           <button
             onClick={handlePlay}
@@ -390,12 +434,13 @@ function SynthesizeTest() {
 // ── Main Component ──
 
 export default function SettingsVoice() {
-  const [engine, setEngine] = useState('mimo-tts')
+  const [engine] = useState('mimo-tts')
   const [activeVoice, setActiveVoice] = useState('')
   const [voices, setVoices] = useState<MiMoVoice[]>([])
   const [voicesLoading, setVoicesLoading] = useState(true)
+  const [reloadTick, setReloadTick] = useState(0)
 
-  // Fetch voices on mount & engine change
+  // Fetch voices on mount & after clone/design（catalog 是持久化 owner，刷新可找回）
   const doFetchVoices = useCallback(async () => {
     setVoicesLoading(true)
     try {
@@ -405,7 +450,7 @@ export default function SettingsVoice() {
       ])
       const list: MiMoVoice[] = []
 
-      // Try voice/speakers first
+      // /voice/speakers：预设 + catalog 自定义音色（W7 起合并返回）
       if (speakersRes.status === 'fulfilled') {
         const data = speakersRes.value.data ?? {}
         const raw: Record<string, unknown>[] = data.speakers ?? data.voices ?? []
@@ -415,6 +460,8 @@ export default function SettingsVoice() {
             displayName: (r.display_name as string) || (r.name as string),
             gender: (r.gender as MiMoVoice['gender']) || undefined,
             engine: (r.engine as string) || engine,
+            kind: (r.kind as MiMoVoice['kind']) || 'preset',
+            description: (r.description as string) || undefined,
           })
         }
       }
@@ -439,7 +486,8 @@ export default function SettingsVoice() {
     } finally {
       setVoicesLoading(false)
     }
-  }, [engine, activeVoice])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- activeVoice 仅用于首选项回填，不触发重拉
+  }, [engine, reloadTick])
 
   // 挂载时拉数据
   /* eslint-disable react-hooks/set-state-in-effect -- data fetching on mount */
@@ -448,17 +496,10 @@ export default function SettingsVoice() {
   }, [doFetchVoices])
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  const handleEngineChange = useCallback(
-    async (v: string) => {
-      setEngine(v)
-      try {
-        await mimoSetEngine(v)
-      } catch {
-        // error handled by global interceptor
-      }
-    },
-    []
-  )
+  // 克隆/设计成功 → 刷新列表（新音色立即可选、可绑定）
+  const handleVoiceCreated = useCallback((_voiceId: string) => {
+    setReloadTick((t) => t + 1)
+  }, [])
 
   const handleActivate = useCallback(
     async (name: string) => {
@@ -481,16 +522,16 @@ export default function SettingsVoice() {
         </p>
       </div>
 
-      <EngineSwitcher engine={engine} onChange={handleEngineChange} />
+      <EngineSwitcher engine={engine} />
       <VoiceList
         voices={voices}
         activeVoice={activeVoice}
         onActivate={handleActivate}
         loading={voicesLoading}
       />
-      <VoiceCloneSection />
-      <VoiceDesignSection />
-      <SynthesizeTest />
+      <VoiceCloneSection onCreated={handleVoiceCreated} />
+      <VoiceDesignSection onCreated={handleVoiceCreated} />
+      <SynthesizeTest voiceId={activeVoice} />
     </div>
   )
 }

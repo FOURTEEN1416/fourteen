@@ -2067,13 +2067,17 @@ class WeChatConnector:
         voice_result = result.get("voice")
         if voice_result:
             try:
+                # W7：统一音频对象携带实际格式（云端 mp3 / SAPI 兜底 wav），
+                # 转码按真实格式驱动，不再硬编 mp3
                 from voice.audio_converter import AudioFormatConverter
+                from voice.audio_result import coerce_voice_payload
+                voice_data, voice_fmt = coerce_voice_payload(voice_result)
                 converter = AudioFormatConverter()
                 fmt = "silk"
-                silk_audio = converter.to_silk(voice_result, "mp3")
+                silk_audio = converter.to_silk(voice_data, voice_fmt)
                 if silk_audio is None:
                     fmt = "amr"
-                    silk_audio = converter.to_amr(voice_result, "mp3")
+                    silk_audio = converter.to_amr(voice_data, voice_fmt)
                 if silk_audio:
                     duration_ms = result.get("voice_duration_ms", 3000)
                     self.send_voice(silk_audio, to_user=from_user,

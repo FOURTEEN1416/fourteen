@@ -188,7 +188,8 @@ def test_synthesize_all_engines_fail():
     mgr._enabled = True
     result = asyncio.run(mgr.synthesize("测试"))
     assert result is None
-    assert mgr._last_error == "所有引擎不可用"
+    # W7 起 last_error 保留首个引擎的具体失败原因（比泛化文案更可诊断）
+    assert mgr._last_error == "p1 失败"
 
 
 def test_synthesize_disabled_returns_none():
