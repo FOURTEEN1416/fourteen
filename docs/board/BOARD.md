@@ -571,3 +571,43 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **服务器沙箱验收**：账本隔离专项 98 例全绿、`data/agent_plane.db` 计数 **1526→1526 零污染**（`d57cb5f` conftest 兜底在生产机实锤；非全量回归）。
 - **主动消息（默默令「到此为止」，代码零改动）**：账本终结分析入 LOG——proactive_send **28 条全为 API 受理成功**（web 协议无送达回执，最后一英里不可证）；skip 451 中 **396 llm_wait_window**（模型自判等待窗）；minimal 粘滞（1 条/日封顶）已随 `ad828f7` 上线根治，引擎现 `unanswered_count=0`，用户回复 2 条自动回 8 条/日档。
 - **收尾轮口径**：全量四分块 **428 / 577+1跳过 / 411 / 481 = 1898 收集 / 1897 通过 / 1 跳过 / 0 失败**（124 文件；41 卡在位、工作树仅文档批）+ ruff 0 错；**徽章 1991 → 1995**。文档同步：AGENTS **v1.38.2** / CODE_GRAPH **v3.8.22** / README / LOG 收尾条目；`/tmp/qb*.txt` 等临时清单已清。
+
+### 2026-09-27 · W8 窗口 · D 类只盘点不自决：F 敏感心理扩展留存 / H 关系阈值解锁 / K 表情 ZIP 导入 / L 生理指标
+
+- **本窗身份**：W8 = 角色表达 / 关系指标 / 心理画像域实施窗。下列四项按「D 类未裁决只记录不自决」处理：**零代码改动**，只给事实（带 `file:line`）、推荐方案与影响面。所有结论均为 **2026-09-27 05:4x 本窗现场重读源码核实**，未沿用历史文档口径（历史登记中两条已过期，见末尾「已复核为不再成立」）。
+- 🔴 **F（D11 敏感心理维度是否长期保存）— 事实：落库的是"用户原话"，不落库的是"心理画像"**
+  1. 五个敏感维度字段（`hexaco` / `dark_triad` / `mental_health` / `liwc` / `cognitive`）在 `persona_extractor/fusion.py:242-258` 逐条写入 `UserPersona` 对象，随后 `:261` 调 `save_persona(persona)` 且**返回值恒 True**。
+  2. 但 `persona_extractor/persona_bank.py:38-48` 的 `user_persona` 表**只有** ocean/pad/style/snapshot_count/first_seen/last_updated 六类列，`save_persona:124-141` 的 INSERT 同样只写这些 → **五个敏感维度从未落库**；`_load_from_db:239-247` 也不回填。属"写侧静默丢弃 + 谎报成功"家族（同 `models.py:487-508` `to_dict` 却会带上这五个字段，进一步坐实"看起来已保存"）。
+  3. 后果（可观察）：敏感维度**只在计算它的那一个进程内存活**（部署为 4 worker）→ 读侧 `profile_summary`(`fusion.py:347-377`) 是否显示 `dark_triad`/`mental_health` 取决于哪个 worker 服务该请求，且重启即丢。页面「画像稳定/学习中的快照数」来自 DB，而心理维度来自内存，两者口径不同源。
+  4. **真正长期保存的是原话片段**：`user_persona_snapshots.trigger_message` = 用户消息前 200 字（`pado_detector.py:308,394,527` → `persona_bank.py:167`）。留存规则：按 scope 计数上限 `history_limit=200` 裁剪（`:172-181`），**仅在有新快照写入时触发**，**无时间 TTL** → 停止聊天的会话其 ≤200 条原话片段无限期保留。
+  5. 与删号链的关系：`api/routers/admin_routes.py:230-235` 删除用户只清 users.db 的 `WechatBinding` / `WechatChannelSession`，**不触达 `data/sqlite.db` 的 `user_persona` / `user_persona_snapshots`**（不同库、不同键空间 `{character_id}:{session_id}`）→ **删号后心理画像与原话片段仍在**。唯一清除入口是心理画像页的显式 clear（`fusion.py:328-345`）。
+  - **推荐（待默默裁决，本窗不自决）**：① 先定意图——「敏感维度不落库」若是设计意图（刻意降低留存），则 `save_persona` 应在画像含敏感字段时显式告警/拒写而非恒 True，并在 `profile_summary` 标注"仅本进程、重启即失"；② 若意图是持久化，需要加列迁移 + 与「不扩大敏感数据采集与留存」边界对齐；③ 无论①②，建议把 `trigger_message` 改为**不存原文**（存长度/哈希）或加 TTL，并把两张 persona 表纳入删用户级联。**影响面**：`persona_bank` 写读两侧 + 1 个迁移 + `admin_routes.delete_user` + 心理画像页文案；不涉及对话主链。
+- **H（D10 关系阈值解锁无可观察效果）— 事实：阈值存在、事件存在、生效路径不存在**
+  1. `config/shisi.yaml` 的 `affinity.unlocks` 5 条：25 个人话题 / 50 亲密话题 / 50 专属表情包 / 75 专属语音 / 90 特殊互动。
+  2. `shisi/affinity/unlock_manager.py`：`check_unlocks` 只做 `logger.info` + 通知 listener + 返回列表；**`subscribe()` 在 affinity 域内无任何调用者**（即 listener 列表恒空）。`affinity_unlocks` 表**零 INSERT**。
+  3. 解锁结果只到达 HTTP 响应（`shisi/api/affinity_routes.py:42-43`、`:54-60`，以及 `enhancer.get_status` / `mapper.sync` 返回值）→ 前端"解锁了 X"是**展示层事实**。
+  4. 最接近"生效"的一条也断在读取端：`character_stickers.unlock_threshold` 由 `shisi/sticker/sticker_manager.py::bind_to_character` 写入，但 `recommend` / `_get_character_sticker_ids` **从不读该列** → 「50 分解锁专属表情包」在推荐路径不生效。
+  - **推荐（三选一，需裁决）**：a) 接线——把最小可观察效果接上（表情包按阈值过滤、语音/话题按域 owner 各自接线），需 `shisi/sticker`（本窗）+ `voice`（W7）+ persona 注入（W2）三 owner 协同；b) 降级口径——把 unlocks 明确定位为"关系里程碑提示"，UI 文案从「已解锁专属表情包」改为「已达里程碑」；c) 撤除入口。**影响面**：a 会改变用户可见行为（属功能新增）；b 仅文案与既有测试断言；本窗按裁决不动。
+- **K（D12 表情包 ZIP 导入未入库）— 事实：导入=解包，展示=读库，两者永不相交**
+  1. `shisi/sticker/importer.py::import_zip` 只把文件写到 `data/stickers/<category>/`，**从不调 `add_sticker`、从不写 `stickers` 表**。
+  2. 全部读侧（`sticker_manager.py::list_by_category` / `get_sticker` / `recommend`）**只读 `stickers` 表** → 导入成功的文件永远不出现在推荐或展示里。既有登记路径示例见 `shisi/sticker/default_provider.py:46`（导入器跳过的正是这一步）。
+  3. 唯一调用方 `shisi/api/sticker_routes.py:64`，返回 `(success, failed)` 计数被前端当"导入 N 张"展示 → **计数与可用性不符**。
+  4. `shisi/sticker/safety_check.py::check_sticker_safety` **全仓零调用**，而 `importer.py` 模块 docstring 自称「表情包ZIP批量导入 + 安全检测」→ 未登记文件名的敏感词从未被检查（该函数只查文件名，且 `_PATTERNS` 仅 1 条）。
+  - **推荐**：导入器在解包成功后按 `sticker_id`/`file_path` 落 `stickers` 表（`emotion_tags` 无人工输入时留空即不进推荐，避免造标签），并把 `check_sticker_safety` 接在解包前做文件名门禁；**或**在 API 与前端明示"仅解包未入库、需逐张标注后才可用"。**影响面**：`shisi/sticker/*`（本窗白名单）+ `sticker_routes`；属功能行为变更，且涉"新增可展示素材"，按 D 类不自决。
+- **L（D12 生理指标=常量伪装成读数）— 事实：引擎无人驱动，表无人写**
+  1. `shisi/vital_signs/vital_engine.py::get_current` 在无状态时返回 `_default_state`（心率 72.0 / 体温 36.5 / 呼吸 16.0 / "平静"）。
+  2. 驱动函数 `update_on_emotion` 与 `tick` **生产零调用者**；唯一消费者是 `shisi/api/vital_signs_routes.py` 的 `GET /api/shisi/vital-signs/{character_id}` → 该端点在任何真实对话后都返回**同一组默认值**。
+  3. `vital_signs_state` 表（`shisi/infrastructure/persistence/migrations` 内建表，DEFAULT 同值）**无写入者也无读取者**；微信命令侧无「生理/心率」处理器（全仓 `生理|心率` 仅命中引擎自身文案）。
+  4. `format_wechat_message` 输出「❤️ 心率：72.0bpm | 🌡️ 体温：36.5℃ | 💨 呼吸：16.0次/分」**无任何"模拟/示意"标注**。
+  - **推荐（三选一，需裁决）**：a) 接线——由 ASE/情感事件驱动 `update_on_emotion`，并按 tick 落 `vital_signs_state`（引擎代码已就绪，改动量小、owner 在本窗白名单内）；b) 保留引擎但**读数标注"模拟示意，非真实生理信号"**（与 §1.3「LLM 透明」、不新增医疗诊断功能的边界一致）；c) 撤除端点与展示（配合"没能力做好就留白"的既有偏好）。**影响面**：a 需新增事件接线点并触及 `proactive/ase_engine`（跨 owner）；b 仅文案 + 断言；c 需同步 `shisi/api` 路由与前端展示位。
+- **同批随带登记（跨 owner 观察项，本窗未改）**：
+  1. `shisi/api/affinity_routes.py:47-50` 手动衰减端点以**裸 `character_id`** 为键，而对话/调度路径（本窗 `8221f78` 起）用 `user_key::character_id` 复合键 → 手工调用落在另一套键空间。owner：`shisi/api/affinity_routes.py`（本窗只读）。
+  2. `orchestrator/optimized_orchestrator.py:757` 自行拼 `f"{character_id}:{session_id}"`，未复用本窗确立的唯一构造器 `persona_extractor.fusion.profile_scope`（W2 交接项，owner 在编排域）。
+  3. `shisi/api/character_routes.py:111-118` `DELETE /api/shisi/characters/{id}` 只删 `CharacterStore` 的 SQLite 运行态副本（`shisi/character/store.py:109`），响应却只说「删除成功」不声明作用域；同文件 `PUT` 已因完全相同的理由 410 作废（`:100-107`）→ **两侧语义不对称**。
+  4. `frontend/src/components/storyline/StorylineIndicator.tsx` **零 importer**（死组件，本窗按裁决只登记不删）。
+  5. `tests/conftest.py` 的 `isolate_runtime_state_files` 沙箱了 `hot_topics`（`:151-154`）等，但**未沙箱 `shisi/knowledge` 的 `data/knowledge`**（`character_knowledge_service.py:37`、`source_store.py:40`）→ 触达知识服务的用例会写开发机真实 `data/knowledge/`（gitignored，不被 git 发现）。owner：知识域 / W4。
+  6. LIWC 分词器首次构建需 import jieba 并注册全词表（`persona_extractor/liwc_analyzer.py:227-244`，实测一次性 ~0.6 s），**已在 `_run_mental_health_pipeline` 的每消息路径上被触发**（进程内复用，非每消息重复；仅首条消息慢一次）。
+  7. 前端本窗验收时 **10 例 vitest 失败 + 2 处 tsc 错误全部归属其他窗口在制品**（`queryCache` / `useAuth` / `SettingsSecurity` 未跟踪新测试、`RoleSettings.test.tsx` 缺 `api/system` 的 `health` 导出 mock），非 W8 改动引入。
+  8. `DECISION_LEDGER.md` 缺 **D10 / D11 / D12** 条目（本窗三项即挂在这三个未入账裁决下）→ 建议裁决时一并补行。
+- **已复核为"不再成立"（避免重复登记）**：① 「W5 在制品 `shisi/knowledge/*` 导致 `test_prompt_builder_retrieves_knowledge_for_query` 失败」—— 05:4x 现场 `pytest -k` 实测 **1 passed**，相关文件 `git status` 干净，已不复现；② 「心理画像页只取最新一份 / 前端清除按角色而端点清全部」—— 已由本窗 **E 批 `398dd3d`** 根治（`fusion.py:296-345` 的 `profile_scopes` / `resolve_profile_scope` / `clear_profiles` 同源并回显 `scope_count`），现行"按角色读取时取最近更新的 scope 并披露份数"是**已声明的设计选择**。
+- **本窗验收口径（W8 提交集）**：`5a87e5b`（A/C 归一化无损 + 0值/维度/基准）→ `8b83b4f`（B 旧副本 PUT 410）→ `398dd3d`（E 画像 scope 同源）→ `e624243`（G 情绪信号不冒充临床量表 + LIWC 字段双向闭合）→ `8221f78`（I 好感衰减区间水位）→ `97de685`（J 成就日记按角色归属 + 跨进程真源）→ `5abe12b`（D 剧情线入口诚实化「仅存档」）。全部**本地显式路径提交，未 push、未部署**；41 张角色卡本窗仅做结构统计，未读正文。
