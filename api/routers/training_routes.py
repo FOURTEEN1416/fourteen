@@ -199,6 +199,7 @@ async def apply_clone(
 @router.get("/api/proactive/state")
 async def proactive_state(_auth: bool = Security(verify_api_key_dep)):
     orch = deps.orch
+    state: dict = {}
     if orch and orch._ase:
         state = orch._ase.health_check()
         # 块4：读数与真源同源 —— 引擎内存里那份只反映本 worker，暂停由
@@ -207,8 +208,14 @@ async def proactive_state(_auth: bool = Security(verify_api_key_dep)):
 
         blk = (ProactiveScheduler._read_config_file() or {}).get("proactive") or {}
         state["paused"] = bool(blk.get("paused", getattr(orch._ase, "_paused", False)))
-        return state
-    return {}
+    # 缺陷 A 收口：驻留运行时的真相在控制面心跳（跑过 job 才续拍），不在本进程
+    # 的 components 里 —— 四 worker 部署中三个没有调度器，它们也必须能答
+    # 「后台运行时活没活、宿主是谁、多久没跳」，否则"主动消息与叫醒一起消失而
+    # 服务全绿"依旧不可见。
+    rp = _plane()
+    if rp is not None:
+        state["runtime"] = rp.runtime_status("scheduler")
+    return state
 
 
 def _scheduler_or_none():

@@ -324,11 +324,25 @@ class ProactiveScheduler:
 
     def _safe_job_wrapper(self, job_fn: Callable, job_name: str) -> Callable:
         def wrapper(*args, **kwargs):
+            # 缺陷 A 收口：这里是全部后台任务的唯一咽喉 —— 谁真的跑过 job，谁
+            # 才证明"驻留运行时活着"。四 worker 部署里只有 master 会走到这里，
+            # 于是别的过程第一次能跨进程读出「调度主在跑 / 多久没跳 / 宿主是谁」。
+            self._beat_resident_runtime()
             try:
                 return job_fn(*args, **kwargs)
             except Exception as e:
                 logger.error("Scheduled job '%s' failed: %s", job_name, e, exc_info=True)
         return wrapper
+
+    def _beat_resident_runtime(self) -> None:
+        """向控制面续驻留心跳；控制面缺席（单进程开发）时静默跳过。"""
+        rp = self._plane()
+        if rp is None:
+            return
+        try:
+            rp.runtime_beat("scheduler")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("驻留运行时心跳失败: %s", e)
 
     def start(self) -> bool:
         """
@@ -470,6 +484,9 @@ class ProactiveScheduler:
             )
 
             self._scheduler.start()
+            # 装配完成当场打一拍：最快的心跳 job 也要等 5 分钟才首跑，新 master
+            # 若等首拍才有心跳，这段窗口会被读成「驻留运行时死了」。
+            self._beat_resident_runtime()
             # 知识库定期采集任务按持久化配置恢复
             self._sync_vault_job()
             logger.info("Scheduler started with %d jobs", len(self._scheduler.get_jobs()))
@@ -1909,9 +1926,23 @@ class ProactiveScheduler:
                         logger.debug("通道重连失败: %s - %s", name, e)
 
     def health_check(self) -> dict:
-        """健康检查"""
-        return {
+        """健康检查
+
+        ⚠️ 缺陷 A：``running`` 只证明**本进程**的 APScheduler 对象还活着；
+        驻留运行时的真实判据是控制面心跳（谁跑过 job 谁续拍，跨进程可读）。
+        两者并报，僵尸运行时（进程在、job 不再触发）才看得见。
+        """
+        result = {
             "running": self._scheduler is not None and self._scheduler.running,
             "apscheduler_available": HAS_APSCHEDULER,
             "jobs": len(self.get_jobs()) if self._scheduler else 0,
         }
+        rp = self._plane()
+        beat: dict = {"holder": "", "age_seconds": None, "alive": False}
+        if rp is not None:
+            with contextlib.suppress(Exception):
+                beat = rp.runtime_status("scheduler")
+        result["beat_alive"] = bool(beat.get("alive"))
+        result["beat_holder"] = str(beat.get("holder") or "")
+        result["beat_age_seconds"] = beat.get("age_seconds")
+        return result

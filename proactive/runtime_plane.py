@@ -30,6 +30,9 @@ WS 端口（谁先 bind 谁驻留）三者**各自独立选主、互不知情**�
   ├ followup_budget          追问日预算（跨重启，缺陷 J）
   ├ effect_dedup             工具副作用幂等（set_reminder 按 message_id 去重，
   │                          缺陷 I）
+  ├ runtime_beat             **驻留后台运行时心跳**（缺陷 A）：持有调度器的
+  │                          worker 每个后台任务续一拍，任意进程可读——
+  │                          「进程活着」与「job 还在跑」从此是两个可分辨的事实
 
 并发口径：所有写路径都是**单语句 CAS**（``UPDATE ... WHERE status='pending'``
 判 ``rowcount``），SQLite ``timeout=30`` + busy 重试兜底；WAL 让多进程读写
@@ -121,6 +124,11 @@ CREATE TABLE IF NOT EXISTS effect_dedup (
     dedup_key    TEXT PRIMARY KEY,
     result       TEXT NOT NULL DEFAULT '',
     ts           REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS runtime_beat (
+    name         TEXT PRIMARY KEY,
+    holder       TEXT NOT NULL,
+    renewed_at   REAL NOT NULL
 );
 """
 
@@ -266,6 +274,62 @@ def live_slots(owner_id: int, ttl: float = PRESENCE_TTL) -> list[int]:
             (int(owner_id), _now() - ttl),
         ).fetchall()
     return [int(r["slot"]) for r in rows]
+
+
+# ── 驻留后台运行时心跳（缺陷 A 收口） ────────────────────────
+
+RUNTIME_BEAT_TTL = 900.0  # 调度器最快的心跳是每 5 分钟的 ase_check，留 3 倍余量
+
+
+def runtime_beat(name: str, holder: str = "") -> None:
+    """续一拍驻留运行时心跳（幂等 UPSERT，后写覆盖前写）。
+
+    写方 = 真正跑后台任务的那个进程（flock 选出的 master worker / console 单
+    进程）。心跳只由 `ProactiveScheduler` 的任务咽喉与 ``start()`` 打点，因此
+    「有新鲜心跳」= job 真的在跑，而不是「进程还在」。
+    """
+    key = str(name or "").strip()
+    if not key:
+        raise ValueError("runtime_beat name is required")
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO runtime_beat (name, holder, renewed_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET holder=excluded.holder, "
+            "renewed_at=excluded.renewed_at",
+            (key, holder or host_id(), _now()),
+        )
+        conn.commit()
+
+
+def _beat_view(row: Any, ttl: float) -> dict[str, Any]:
+    age = _now() - float(row["renewed_at"])
+    return {
+        "name": str(row["name"]),
+        "holder": str(row["holder"]),
+        "age_seconds": age,
+        "alive": age < ttl,
+    }
+
+
+def runtime_status(name: str = "scheduler", ttl: float = RUNTIME_BEAT_TTL) -> dict[str, Any]:
+    """读驻留运行时租约：从未心跳 → ``alive=False`` 且 ``age_seconds=None``。"""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT name, holder, renewed_at FROM runtime_beat WHERE name=?",
+            (str(name or "").strip(),),
+        ).fetchone()
+    if row is None:
+        return {"name": str(name or ""), "holder": "", "age_seconds": None, "alive": False}
+    return _beat_view(row, ttl)
+
+
+def runtime_beats(ttl: float = RUNTIME_BEAT_TTL) -> list[dict[str, Any]]:
+    """全部心跳（含过期项，供运维看"多久没跳、谁最后一次跳"）。"""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT name, holder, renewed_at FROM runtime_beat ORDER BY name"
+        ).fetchall()
+    return [_beat_view(r, ttl) for r in rows]
 
 
 # ── outbound commands（投递命令 + 受理回执） ──────────────────
