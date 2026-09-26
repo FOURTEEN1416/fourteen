@@ -181,14 +181,22 @@ class BM25Retriever(KeywordRetriever):
         self._b = b
         self._avg_doc_len: float = 0.0
         self._idf_cache: dict[str, float] = {}
+        # 本索引派生自的源存储版本（W5）；from_file 会覆盖
+        self.sources_version: int = 0
 
-    def save(self, path: str | Path) -> None:
-        """将 BM25 索引序列化为 JSON 文件。"""
+    def save(self, path: str | Path, sources_version: int = 0) -> None:
+        """将 BM25 索引序列化为 JSON 文件（原子替换 + 源存储版本戳）。
+
+        ``sources_version``：本索引派生自的源存储版本（W5）。加载方据此判定
+        新鲜度 —— 版本不一致即视为过期，从源存储派生重建。tmp + os.replace
+        保证并发读者不会读到半写文件。
+        """
         data = {
             "k1": self._k1,
             "b": self._b,
             "avg_doc_len": self._avg_doc_len,
             "idf_cache": self._idf_cache,
+            "sources_version": int(sources_version),
             "chunks": [
                 {"content": c.content, "source": c.source, "source_id": c.source_id, "score": c.score}
                 for c in self._chunks
@@ -196,14 +204,18 @@ class BM25Retriever(KeywordRetriever):
             "token_counts": [dict(ct) for ct in self._chunk_token_counts],
             "total_chunks": self._total_chunks,
         }
+        import os
+
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "w", encoding="utf-8") as f:
+        tmp = p.with_name(p.name + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, p)
 
     @classmethod
     def from_file(cls, path: str | Path) -> BM25Retriever:
-        """从 JSON 文件加载 BM25 索引。"""
+        """从 JSON 文件加载 BM25 索引（含源存储版本戳）。"""
         p = Path(path)
         with open(p, encoding="utf-8") as f:
             data = json.load(f)
@@ -211,6 +223,7 @@ class BM25Retriever(KeywordRetriever):
         retriever._avg_doc_len = data.get("avg_doc_len", 0.0)
         retriever._idf_cache = data.get("idf_cache", {})
         retriever._total_chunks = data.get("total_chunks", 0)
+        retriever.sources_version = int(data.get("sources_version", 0))
         retriever._chunks = [
             KnowledgeChunk(content=c["content"], source=c.get("source", ""),
                            source_id=c.get("source_id", ""), score=c.get("score", 0.0))

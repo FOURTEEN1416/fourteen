@@ -22,6 +22,7 @@ from shisi.knowledge.character_knowledge_service import (
     get_knowledge_service,
 )
 from shisi.knowledge.retriever import KnowledgeChunk
+from shisi.knowledge.source_store import chunk_fingerprint
 
 from ._persona_adapter import PersonaAdapter
 
@@ -45,44 +46,34 @@ class VaultCollector:
     # ── 核心收集方法 ──
 
     def collect_card(self, character_id: str, card: CharaCardV2) -> int:
-        """收集单个角色的知识并索引。返回索引块数。"""
+        """收集单个角色的知识并索引（幂等）。返回该来源真实块数。
+
+        W5：按 (character_id, source_id=``vault``) **整源替换式 upsert** —
+        同卡重复采集不增块；卡内容变化整体替换旧 vault 块（不按词面相似
+        合并不同事实）；上传/抓取等外部来源不受影响。计数取块列表真实长度。
+        """
         # 1. 提取 PersonaFeatures
         features = PersonaAdapter.extract(card)
 
         # 2. 特征转 KnowledgeChunk
         chunks = self._features_to_chunks(character_id, features, card)
-
-        # 3. 索引到 service
-        if chunks:
-            retriever = self._service._retrievers.get(character_id)
-            if retriever is None:
-                # 还没有检索器，先加载或建新的
-                if not self._service.load_index(character_id):
-                    from shisi.knowledge.retriever import BM25Retriever
-                    retriever = BM25Retriever()
-                    retriever.index(chunks)
-                    self._service._retrievers[character_id] = retriever
-                else:
-                    # 已有磁盘索引，追加
-                    self._service._retrievers[character_id].add_chunks(chunks)
-            else:
-                retriever.add_chunks(chunks)
-
-            if character_id in self._service._chunk_counts:
-                self._service._chunk_counts[character_id] += len(chunks)
-            else:
-                self._service._chunk_counts[character_id] = len(chunks)
-
-            # 保存到磁盘
-            self._service.save_index(character_id)
-            logger.info(
-                "知识宝库收集完成: %s → %d 知识块（特征）",
-                character_id, len(chunks),
-            )
-        else:
+        if not chunks:
             logger.warning("知识宝库收集无内容: %s", character_id)
+            return 0
 
-        return len(chunks)
+        # 3. 幂等 upsert（服务层锁内完成替换 + 派生重建 + 落盘）
+        count, changed = self._service.upsert_source(
+            character_id,
+            key="vault",
+            kind="vault",
+            version=chunk_fingerprint(chunks),
+            chunks=chunks,
+        )
+        logger.info(
+            "知识宝库收集完成: %s → %d 知识块（特征, changed=%s）",
+            character_id, count, changed,
+        )
+        return count
 
     def collect_batch(
         self, cards: dict[str, CharaCardV2]

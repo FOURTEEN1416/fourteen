@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib.util
 import json
 import logging
@@ -866,19 +867,41 @@ class WebPersonaEnricher:
             result.duration_seconds = time.time() - start
             return result
 
-        # 2. 处理为知识块
-        chunks = self._process_docs(docs, character_name)
-        result.chunks_generated = len(chunks)
+        # 2. 处理为知识块（按文档分组，供按文档粒度幂等落库）
+        doc_chunks = self._process_docs(docs, character_name)
+        chunks_generated = sum(len(cks) for _, cks in doc_chunks)
+        result.chunks_generated = chunks_generated
+        result.documents_processed = len(doc_chunks)
 
-        # 3. 写入知识库
-        if self.knowledge_service and chunks:
-            self.knowledge_service.add_knowledge_chunks(character_id, chunks)
-            self.knowledge_service.save_index(character_id)
-            result.chunks_added = len(chunks)
-            result.sources_used = list(set(d.source for d in docs if d.source))
-            if interactive:
-                stats = self.knowledge_service.get_stats(character_id)
-                print(f"  ✅ 已写入知识库 (+{len(chunks)} 块, 共 {stats.get('total_chunks', 0)} 块)")
+        # 3. 写入知识库（W5：统一知识服务，写入前先 ensure 已有索引；
+        #    逐文档幂等 upsert —— 同文档重跑替换不重复；保存失败如实上报）
+        if self.knowledge_service and chunks_generated:
+            try:
+                self.knowledge_service.ensure_index(character_id)
+                total_added = 0
+                used_sources: set[str] = set()
+                for doc, doc_ck in doc_chunks:
+                    if not doc_ck:
+                        continue
+                    identity = doc.url or f"{character_name}:{doc.title or doc.content[:80]}"
+                    key = f"web_enrich:{hashlib.sha1(identity.encode('utf-8')).hexdigest()[:12]}"
+                    version = hashlib.sha1(doc.content.encode("utf-8")).hexdigest()[:16]
+                    count, changed = self.knowledge_service.upsert_source(
+                        character_id, key=key, kind="web_enrich",
+                        version=version, chunks=doc_ck)
+                    total_added += count if changed else 0
+                    if doc.source:
+                        used_sources.add(doc.source)
+                result.chunks_added = total_added
+                result.sources_used = sorted(used_sources)
+                if interactive:
+                    stats = self.knowledge_service.get_stats(character_id)
+                    print(f"  ✅ 已写入知识库 (+{total_added} 块, 共 {stats.get('total_chunks', 0)} 块)")
+            except Exception as e:  # noqa: BLE001
+                result.chunks_added = 0
+                result.errors.append(f"知识库写入失败: {e}")
+                if interactive:
+                    print(f"  ⚠ 知识库写入失败: {e}")
 
         result.duration_seconds = time.time() - start
         return result
@@ -946,9 +969,10 @@ class WebPersonaEnricher:
         self,
         docs: list[RawDocument],
         character_name: str,
-    ) -> list[Any]:
+    ) -> list[tuple[RawDocument, list[Any]]]:
+        """处理文档为知识块，按文档分组返回（供逐文档幂等落库，W5）。"""
         from shisi.knowledge.retriever import KnowledgeChunk
-        chunks: list[KnowledgeChunk] = []
+        grouped: list[tuple[RawDocument, list[KnowledgeChunk]]] = []
         src_counter: dict[str, int] = {}
 
         for doc in docs:
@@ -956,11 +980,12 @@ class WebPersonaEnricher:
                 continue
             src_counter[doc.source] = src_counter.get(doc.source, 0) + 1
             sid = f"web_{doc.source}_{int(time.time())}_{src_counter[doc.source]}"
+            doc_chunks: list[KnowledgeChunk] = []
 
             # 尝试 LLM 提取
             extracted = self._llm_extract(doc.content, character_name, doc.url)
             if extracted and len(extracted) > 10:
-                chunks.append(KnowledgeChunk(
+                doc_chunks.append(KnowledgeChunk(
                     content=extracted, source=f"web_enricher.{doc.source}", source_id=sid))
             else:
                 # 后备：按段落分块
@@ -968,17 +993,19 @@ class WebPersonaEnricher:
                 for para in cleaned.split("\n\n"):
                     para = para.strip()
                     if para and 30 < len(para) < 2000:
-                        chunks.append(KnowledgeChunk(
+                        doc_chunks.append(KnowledgeChunk(
                             content=para, source=f"web_enricher.{doc.source}", source_id=sid))
 
             if doc.url:
-                chunks.append(KnowledgeChunk(
+                doc_chunks.append(KnowledgeChunk(
                     content=f"信息来源：{doc.url}",
                     source=f"web_enricher.{doc.source}",
                     source_id=f"{sid}_url",
                 ))
 
-        return chunks
+            grouped.append((doc, doc_chunks))
+
+        return grouped
 
     def _llm_extract(self, content: str, character_name: str, url: str) -> str:
         if not self.llm:

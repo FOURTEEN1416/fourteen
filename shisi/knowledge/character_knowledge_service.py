@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,12 @@ from .retriever import (
     KeywordRetriever,
     KnowledgeChunk,
     RetrievalResult,
+)
+from .source_store import (
+    SourceStore,
+    chunk_fingerprint,
+    chunks_to_dicts,
+    dicts_to_chunks,
 )
 
 logger = logging.getLogger("shisi.knowledge.character_knowledge_service")
@@ -71,17 +78,49 @@ def _expand_query(query: str) -> str:
     return " ".join(dict.fromkeys(" ".join(extras).split()))
 
 
-class CharacterKnowledgeService:
-    """角色知识服务 — 知识提取 + 检索 + 上下文注入。"""
+def build_character_aggregate(raw: dict[str, Any]) -> CharacterAggregate:
+    """从角色卡权威真源（卡 dict）构建 CharacterAggregate。
 
-    def __init__(self, use_bm25: bool = True, index_dir: str | Path | None = None):
+    路由（knowledge_routes）/失效点（character_routes）/重建脚本共用，
+    保证同一张卡在任何入口抽取出的知识块集合一致（含 core_anchors 与
+    source_data 透传的 mes_example 等）。
+    """
+    from shisi.core.models.persona_profile import PersonaProfile
+
+    return CharacterAggregate(
+        id=str(raw.get("id") or "").strip() or "default",
+        name=(raw.get("name") or "未命名").strip() or "未命名",
+        description=raw.get("description", "") or "",
+        personality_text=raw.get("personality_text", "") or "",
+        scenario=raw.get("scenario", "") or "",
+        creator_notes=raw.get("creator_notes", "") or "",
+        persona=PersonaProfile(core_anchors=raw.get("core_anchors", []) or []),
+        source_data=raw,
+    )
+
+
+class CharacterKnowledgeService:
+    """角色知识服务 — 知识提取 + 检索 + 上下文注入。
+
+    2026-09-27（W5）源材料与派生索引分离：
+    - 上传文档 / 抓取与增强内容 / Vault 采集是**不可丢源材料**，唯一存储在
+      SourceStore（``data/knowledge/sources/{cid}.json``，锁 + 单调版本）；
+    - BM25 索引是**纯派生物**，由来源集合整体重建，落盘打 ``sources_version``
+      戳；冷 worker 按版本判定新鲜度，过期即从源存储派生重建（无需卡在手）。
+    """
+
+    def __init__(self, use_bm25: bool = True, index_dir: str | Path | None = None,
+                 source_store: SourceStore | None = None):
         self._use_bm25 = use_bm25
         self._retrievers: dict[str, KeywordRetriever | BM25Retriever] = {}
         self._chunk_counts: dict[str, int] = {}
         # 内存缓存条目对应的磁盘索引 mtime_ns（P0-7：改卡/重建脚本后必须核对，
         # 否则进程内命中缓存即永久用旧索引）
         self._index_mtimes: dict[str, int] = {}
+        # 内存索引派生自的源存储版本（W5：版本判定，非 mtime 无锁覆盖）
+        self._index_versions: dict[str, int] = {}
         self._index_dir = Path(index_dir) if index_dir else _DEFAULT_INDEX_DIR
+        self._source_store = source_store or SourceStore(self._index_dir / "sources")
 
     # ── 索引持久化 ──
 
@@ -96,17 +135,19 @@ class CharacterKnowledgeService:
             return 0
 
     def save_index(self, character_id: str) -> None:
-        """将角色 BM25 索引保存到磁盘。"""
+        """将角色 BM25 索引保存到磁盘（打上所派生自的源存储版本戳）。"""
         retriever = self._retrievers.get(character_id)
         if not retriever or not isinstance(retriever, BM25Retriever):
             return
         path = self._index_path(character_id)
-        retriever.save(path)
+        retriever.save(path, sources_version=self._index_versions.get(character_id, 0))
         try:
             self._index_mtimes[character_id] = path.stat().st_mtime_ns
         except OSError:
             self._index_mtimes.pop(character_id, None)
-        logger.info("BM25 索引已保存: %s (%d 块)", path, self._chunk_counts.get(character_id, 0))
+        logger.info("BM25 索引已保存: %s (%d 块, sources_version=%s)",
+                    path, self._chunk_counts.get(character_id, 0),
+                    self._index_versions.get(character_id, 0))
 
     def load_index(self, character_id: str) -> bool:
         """从磁盘加载角色 BM25 索引。成功返回 True。"""
@@ -117,6 +158,7 @@ class CharacterKnowledgeService:
             retriever = BM25Retriever.from_file(path)
             self._retrievers[character_id] = retriever
             self._chunk_counts[character_id] = len(retriever._chunks)  # type: ignore[attr-defined]
+            self._index_versions[character_id] = int(getattr(retriever, "sources_version", 0))
             self._index_mtimes[character_id] = path.stat().st_mtime_ns
             logger.info("BM25 索引已加载: %s (%d 块)", path, self._chunk_counts[character_id])
             return True
@@ -124,60 +166,215 @@ class CharacterKnowledgeService:
             logger.warning("BM25 索引加载失败，将重新构建: %s — %s", path, e)
             return False
 
+    def _try_load_fresh(self, character_id: str, sources_version: int) -> bool:
+        """磁盘索引存在且版本戳与源存储一致时加载并安装；否则不改动状态。"""
+        path = self._index_path(character_id)
+        if not path.exists():
+            return False
+        try:
+            retriever = BM25Retriever.from_file(path)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("BM25 索引加载失败，将派生重建: %s — %s", path, e)
+            return False
+        if int(getattr(retriever, "sources_version", 0)) != int(sources_version):
+            return False
+        self._retrievers[character_id] = retriever
+        self._chunk_counts[character_id] = len(retriever._chunks)  # type: ignore[attr-defined]
+        self._index_versions[character_id] = int(sources_version)
+        with contextlib.suppress(OSError):
+            self._index_mtimes[character_id] = path.stat().st_mtime_ns
+        return True
+
+    def _drop_memory(self, character_id: str) -> None:
+        self._retrievers.pop(character_id, None)
+        self._chunk_counts.pop(character_id, None)
+        self._index_mtimes.pop(character_id, None)
+        self._index_versions.pop(character_id, None)
+
+    @staticmethod
+    def _bump(store_data: dict[str, Any]) -> None:
+        """来源发生变更后在重建前显式递增版本（transaction 兜底防遗漏）。"""
+        store_data["version"] = int(store_data.get("version", 0)) + 1
+
+    def _rebuild_from_store_locked(self, character_id: str, store_data: dict[str, Any]) -> None:
+        """从源存储整体派生重建索引。必须在 SourceStore.transaction（锁内）调用。"""
+        sources: dict[str, Any] = store_data.get("sources", {})
+        chunks: list[KnowledgeChunk] = []
+        card = sources.get("card")
+        if card:
+            chunks.extend(dicts_to_chunks(card.get("chunks", [])))
+        for key in sorted(k for k in sources if k != "card"):
+            chunks.extend(dicts_to_chunks(sources[key].get("chunks", [])))
+        retriever = BM25Retriever() if self._use_bm25 else KeywordRetriever()
+        retriever.index(chunks)
+        self._retrievers[character_id] = retriever
+        self._chunk_counts[character_id] = len(chunks)
+        self._index_versions[character_id] = int(store_data.get("version", 0))
+        self.save_index(character_id)
+        logger.info("知识索引已从源存储派生重建: %s → %d 块 (sources_version=%s)",
+                    character_id, len(chunks), store_data.get("version", 0))
+
+    def _ensure_fresh_locked(self, character_id: str, store_data: dict[str, Any]) -> None:
+        """锁内确保内存索引与 store_data 版本一致（不一致则加载或重建）。"""
+        version = int(store_data.get("version", 0))
+        if character_id in self._retrievers and self._index_versions.get(character_id) == version:
+            return
+        if self._try_load_fresh(character_id, version):
+            return
+        self._rebuild_from_store_locked(character_id, store_data)
+
     def ensure_index(self, character_id: str, card: CharaCardV2 | None = None,
                      character: CharacterAggregate | None = None) -> bool:
-        """确保角色索引就绪。
-        - 先尝试磁盘加载
-        - 失败则从 card/character 建索引
-        - 建索引后自动保存到磁盘
-        返回是否索引可用。
+        """确保角色索引就绪（W5 版本化闭环）。
 
-        P0-7：进程内命中缓存前先核对磁盘 mtime——改卡或跑过
-        rebuild_knowledge_index.py 之后，旧缓存必须失效而不是永久使用。
+        流程：
+        1. 内存索引且版本与源存储一致（且磁盘索引未被服务层之外的写入改动）→ 直接用；
+        2. 否则尝试磁盘加载（版本戳一致才算新鲜）；
+        3. 仍不可用 → 锁内从源存储派生重建；卡在手时先刷新 card 来源。
+
+        store 与卡都不存在时返回 False（不凭空创建）。
         """
+        if not character_id:
+            return False
+        store = self._source_store
+        store_exists = store.exists(character_id)
+        sv = store.version(character_id) if store_exists else 0
+
         if character_id in self._retrievers:
             disk_mtime = self._disk_mtime(character_id)
-            if disk_mtime and disk_mtime != self._index_mtimes.get(character_id):
-                logger.info("磁盘索引已更新，丢弃内存缓存: %s", character_id)
-                del self._retrievers[character_id]
-                self._chunk_counts.pop(character_id, None)
-                self._index_mtimes.pop(character_id, None)
-            else:
+            version_fresh = self._index_versions.get(character_id, 0) == sv
+            mtime_fresh = not (disk_mtime and disk_mtime != self._index_mtimes.get(character_id))
+            if version_fresh and mtime_fresh:
                 return True
-        # 尝试从磁盘加载
-        if self.load_index(character_id):
+            logger.info("索引落后于源存储或磁盘被外部更新，丢弃内存缓存: %s", character_id)
+            self._drop_memory(character_id)
+
+        if self._try_load_fresh(character_id, sv):
             return True
-        # 从 card 建索引
-        if card is not None:
-            self.index_from_card(character_id, card)
-            self.save_index(character_id)
-            return True
-        # 从 character 建索引
-        if character is not None:
-            self.index_character(character_id, character)
-            self.save_index(character_id)
-            return True
-        return False
+
+        if not store_exists and card is None and character is None:
+            return False
+
+        with store.transaction(character_id, create=True) as data:
+            if self._try_load_fresh(character_id, int(data.get("version", 0))):
+                return True
+            if character is not None or card is not None:
+                chunks = (
+                    self._extract_from_character(character) if character is not None
+                    else self._extract_from_card(card)
+                )
+                fp = chunk_fingerprint(chunks)
+                sources: dict[str, Any] = data.setdefault("sources", {})
+                cur = sources.get("card")
+                if cur is None or cur.get("version") != fp:
+                    sources["card"] = {"kind": "card", "version": fp, "chunks": chunks_to_dicts(chunks)}
+                    self._bump(data)
+            self._rebuild_from_store_locked(character_id, data)
+        return True
 
     # ── 索引构建 ──
 
     def index_character(self, character_id: str, character: CharacterAggregate) -> None:
-        """为角色建知识索引。"""
+        """以角色聚合根刷新 card 来源并派生重建索引（外部来源保留）。
+
+        W5 语义变更：旧实现创建全新检索器**替换整库**（上传/抓取知识即丢）；
+        现在只替换 ``card`` 来源，其余来源（doc:/vault/external/web_enrich:）
+        原样保留并参与派生。
+        """
         chunks = self._extract_from_character(character)
-        retriever = BM25Retriever() if self._use_bm25 else KeywordRetriever()
-        retriever.index(chunks)
-        self._retrievers[character_id] = retriever
-        self._chunk_counts[character_id] = len(chunks)
-        logger.info("角色知识索引完成: %s → %d 知识块", character_id, len(chunks))
+        with self._source_store.transaction(character_id, create=True) as data:
+            sources: dict[str, Any] = data.setdefault("sources", {})
+            sources["card"] = {
+                "kind": "card",
+                "version": chunk_fingerprint(chunks),
+                "chunks": chunks_to_dicts(chunks),
+            }
+            self._bump(data)
+            self._rebuild_from_store_locked(character_id, data)
+        logger.info("角色知识索引完成: %s → %d 知识块", character_id,
+                    self._chunk_counts.get(character_id, 0))
 
     def index_from_card(self, character_id: str, card: CharaCardV2) -> None:
-        """从 CharaCardV2 建索引。"""
+        """从 CharaCardV2 刷新 card 来源并派生重建索引（外部来源保留）。"""
         chunks = self._extract_from_card(card)
-        retriever = BM25Retriever() if self._use_bm25 else KeywordRetriever()
-        retriever.index(chunks)
-        self._retrievers[character_id] = retriever
-        self._chunk_counts[character_id] = len(chunks)
-        logger.info("角色知识索引完成(卡): %s → %d 知识块", character_id, len(chunks))
+        with self._source_store.transaction(character_id, create=True) as data:
+            sources: dict[str, Any] = data.setdefault("sources", {})
+            sources["card"] = {
+                "kind": "card",
+                "version": chunk_fingerprint(chunks),
+                "chunks": chunks_to_dicts(chunks),
+            }
+            self._bump(data)
+            self._rebuild_from_store_locked(character_id, data)
+        logger.info("角色知识索引完成(卡): %s → %d 知识块", character_id,
+                    self._chunk_counts.get(character_id, 0))
+
+    def refresh_card_source(self, character_id: str, raw: dict[str, Any] | None = None,
+                            character: CharacterAggregate | None = None) -> tuple[int, bool]:
+        """角色卡变更（改名/激活/编辑）后的失效入口：只替换 card 来源。
+
+        返回 (card 来源块数, 是否发生变更)。外部来源不受影响；索引在锁内
+        派生重建并落盘，其他 worker 下次 ensure 按版本自动跟进。
+        """
+        if character is None:
+            if raw is None:
+                raise ValueError("refresh_card_source 需要 raw 或 character 之一")
+            character = build_character_aggregate(raw)
+        chunks = self._extract_from_character(character)
+        items = chunks_to_dicts(chunks)
+        fp = chunk_fingerprint(chunks)
+        with self._source_store.transaction(character_id, create=True) as data:
+            sources: dict[str, Any] = data.setdefault("sources", {})
+            cur = sources.get("card")
+            if cur and cur.get("version") == fp and cur.get("chunks") == items:
+                self._ensure_fresh_locked(character_id, data)
+                return len(items), False
+            sources["card"] = {"kind": "card", "version": fp, "chunks": items}
+            self._bump(data)
+            self._rebuild_from_store_locked(character_id, data)
+            return len(items), True
+
+    def upsert_source(self, character_id: str, key: str, kind: str, version: str,
+                      chunks: list[KnowledgeChunk]) -> tuple[int, bool]:
+        """整源替换式写入一个外部来源并派生重建（幂等，锁内）。
+
+        返回 (该源真实块数, 是否发生变更)。同 key 同 version 同内容时
+        不重建索引，只确保索引就绪 —— Vault 定期采集据此幂等。
+        """
+        items = chunks_to_dicts(chunks)
+        with self._source_store.transaction(character_id, create=True) as data:
+            sources: dict[str, Any] = data.setdefault("sources", {})
+            cur = sources.get(key)
+            if cur and cur.get("version") == version and cur.get("chunks") == items:
+                self._ensure_fresh_locked(character_id, data)
+                return len(items), False
+            sources[key] = {"kind": kind, "version": version, "chunks": items}
+            self._bump(data)
+            self._rebuild_from_store_locked(character_id, data)
+            return len(items), True
+
+    def remove_source(self, character_id: str, key: str) -> int:
+        """按来源粒度删除（如 ``doc:{doc_id}``）。返回移除块数。"""
+        if not self._source_store.exists(character_id):
+            return 0
+        with self._source_store.transaction(character_id) as data:
+            sources: dict[str, Any] = data.get("sources", {})
+            src = sources.pop(key, None)
+            if not src:
+                return 0
+            self._bump(data)
+            self._rebuild_from_store_locked(character_id, data)
+            return len(src.get("chunks", []))
+
+    def forget(self, character_id: str) -> None:
+        """角色删除：清内存索引、删磁盘索引与源存储（不可逆，仅删除角色时用）。"""
+        self._drop_memory(character_id)
+        try:
+            self._index_path(character_id).unlink(missing_ok=True)
+        except OSError as e:  # noqa: BLE001
+            logger.warning("删除索引文件失败 %s: %s", character_id, e)
+        self._source_store.delete(character_id)
+        logger.info("角色知识索引与源存储已清除: %s", character_id)
 
     def search(self, character_id: str, query: str, top_k: int = 3) -> RetrievalResult:
         """检索角色知识（带查询扩展）。
@@ -232,7 +429,14 @@ class CharacterKnowledgeService:
         ``character_name`` / ``personality.core_anchors`` / ``description``——
         这些内容恒由角色设定/人设段以唯一 owner 注入，再以「知识」名义
         回声即成同文本双份；批6b 项11 激活每轮 RAG 后由 prompt_builder 传入）。
+
+        W5：先 ensure_index 自愈（版本化冷加载/派生重建），任何只读路径
+        （prompt 知识槽、ASE 知识分享）都不再依赖「同进程先有人建过索引」。
         """
+        try:
+            self.ensure_index(character_id)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("ensure_index 失败（非阻塞）: %s — %s", character_id, e)
         result = self.search(character_id, query, top_k=top_k)
         if exclude_sources:
             result.chunks = [c for c in result.chunks if c.source not in exclude_sources]
@@ -251,24 +455,41 @@ class CharacterKnowledgeService:
 
     def clear(self, character_id: str | None = None) -> None:
         if character_id:
-            self._retrievers.pop(character_id, None)
-            self._chunk_counts.pop(character_id, None)
-            self._index_mtimes.pop(character_id, None)
+            self._drop_memory(character_id)
         else:
             self._retrievers.clear()
             self._chunk_counts.clear()
             self._index_mtimes.clear()
+            self._index_versions.clear()
 
-    def add_knowledge_chunks(self, character_id: str, chunks: list[KnowledgeChunk]) -> None:
-        """向指定角色追加知识块；若索引不存在则自动创建。"""
-        if character_id not in self._retrievers:
-            retriever = BM25Retriever() if self._use_bm25 else KeywordRetriever()
-            self._retrievers[character_id] = retriever
-            self._chunk_counts[character_id] = 0
-        retriever = self._retrievers[character_id]
-        retriever.add_chunks(chunks)
-        self._chunk_counts[character_id] = len(retriever._chunks)  # type: ignore[attr-defined]
-        logger.info("角色 %s 追加知识块: +%d → %d 块", character_id, len(chunks), self._chunk_counts[character_id])
+    def add_knowledge_chunks(self, character_id: str, chunks: list[KnowledgeChunk]) -> int:
+        """向指定角色追加外部知识块（幂等：按 source_id 去重，缺省补内容哈希）。
+
+        W5 语义变更：块先落入源存储（``external`` 来源），再锁内派生重建索引。
+        旧实现冷 service 上凭空新建空检索器再整体覆盖落盘 —— 磁盘既有知识
+        （卡片/既有上传）即丢；现在先确保索引就绪再追加。
+        返回实际新增块数（重复 source_id 不重复计入）。
+        """
+        if not chunks:
+            return 0
+        import hashlib
+
+        prepared: list[KnowledgeChunk] = []
+        for c in chunks:
+            sid = c.source_id or f"ext_{hashlib.sha1(c.content.encode('utf-8')).hexdigest()[:12]}"
+            prepared.append(KnowledgeChunk(content=c.content, source=c.source, source_id=sid))
+        with self._source_store.transaction(character_id, create=True) as data:
+            sources: dict[str, Any] = data.setdefault("sources", {})
+            src = sources.setdefault("external", {"kind": "external", "version": "1", "chunks": []})
+            existing = {item.get("source_id") for item in src.get("chunks", []) if isinstance(item, dict)}
+            new_items = [chunks_to_dicts([c])[0] for c in prepared if c.source_id not in existing]
+            if not new_items:
+                self._ensure_fresh_locked(character_id, data)
+                return 0
+            src["chunks"] = list(src.get("chunks", [])) + new_items
+            self._bump(data)
+            self._rebuild_from_store_locked(character_id, data)
+            return len(new_items)
 
     # ── 知识提取 ──
 

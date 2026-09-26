@@ -76,13 +76,32 @@ class TestVaultCollector:
         collector = VaultCollector(knowledge_service=service)
         assert collector._service is service
 
-    def test_collect_card_minimal(self):
-        """collect_card 不抛出异常（空索引场景）"""
-        collector = VaultCollector()
+    def test_collect_card_minimal(self, tmp_path):
+        """collect_card 不抛出异常（空索引场景）；用 tmp 服务隔离真实 data/knowledge"""
+        from shisi.knowledge.character_knowledge_service import CharacterKnowledgeService
+
+        service = CharacterKnowledgeService(
+            use_bm25=True, index_dir=tmp_path / "knowledge")
+        collector = VaultCollector(knowledge_service=service)
         card = _minimal_card()
         count = collector.collect_card("char_vault_1", card)
         assert count >= 0
         assert isinstance(count, int)
+
+    def test_collect_card_idempotent_same_card(self, tmp_path):
+        """W5：同卡重复采集不得增块（整源替换式 upsert）"""
+        from shisi.knowledge.character_knowledge_service import CharacterKnowledgeService
+
+        service = CharacterKnowledgeService(
+            use_bm25=True, index_dir=tmp_path / "knowledge")
+        collector = VaultCollector(knowledge_service=service)
+        card = _minimal_card()
+        n1 = collector.collect_card("char_vault_idem", card)
+        total1 = service.get_stats("char_vault_idem")["total_chunks"]
+        n2 = collector.collect_card("char_vault_idem", card)
+        total2 = service.get_stats("char_vault_idem")["total_chunks"]
+        assert n1 > 0 and n2 == n1
+        assert total2 == total1, "同卡重复采集不得增块"
 
 
 class TestKnowledgeChunkInVault:

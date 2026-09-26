@@ -15,7 +15,10 @@ from api.auth import verify_api_key_dep
 from api.path_security import sanitize_id
 from shisi.character.character_card_v2 import CharaCardV2Parser
 from shisi.character.models import CharaCardV2
-from shisi.knowledge.character_knowledge_service import get_knowledge_service
+from shisi.knowledge.character_knowledge_service import (
+    build_character_aggregate,
+    get_knowledge_service,
+)
 from shisi.knowledge.crawler_adapter import get_crawler_adapter
 from utils.project_paths import project_path
 
@@ -57,31 +60,21 @@ def _load_character_card(character_id: str) -> CharaCardV2 | None:
 
 
 def _ensure_full_index(character_id: str, raw: dict[str, Any]) -> None:
-    """确保角色索引存在 —— 从权威真源（卡 dict）走 CharacterAggregate 全量构建。
+    """确保角色索引就绪 —— 从权威真源（卡 dict）走 CharacterAggregate 全量构建。
 
     2026-09-20 修复：此前端点缺索引时走 `index_from_card(CharaCardV2)`，该路径
     不携带 core_anchors（V2 schema 丢弃顶层扩展字段）→ 首次访问即以降级索引
     **覆盖**重建脚本的全量索引（实测米彩 18 块被覆盖成 7 块、锚点全丢）。
     现与运行时（persona_service）/重建脚本（rebuild_knowledge_index.py）统一。
+
+    2026-09-27（W5）修复：旧实现在 ``has_index()``（仅内存判定）为假时直接
+    ``index_character + save_index``，从不先 load 磁盘 —— 冷 worker 首开知识
+    统计即以「仅卡片」的新索引**覆盖**磁盘上含上传/抓取内容的索引（外部知识
+    唯一存储被销毁）。现统一走服务层 ``ensure_index`` 闭环：版本化磁盘优先、
+    卡片来源刷新、外部来源保留、锁内派生重建。
     """
     service = get_knowledge_service()
-    if service.has_index(character_id):
-        return
-    from shisi.core.models.character_aggregate import CharacterAggregate
-    from shisi.core.models.persona_profile import PersonaProfile
-
-    character = CharacterAggregate(
-        id=character_id,
-        name=(raw.get("name") or "未命名").strip() or "未命名",
-        description=raw.get("description", "") or "",
-        personality_text=raw.get("personality_text", "") or "",
-        scenario=raw.get("scenario", "") or "",
-        creator_notes=raw.get("creator_notes", "") or "",
-        persona=PersonaProfile(core_anchors=raw.get("core_anchors", []) or []),
-        source_data=raw,
-    )
-    service.index_character(character_id, character)
-    service.save_index(character_id)
+    service.ensure_index(character_id, character=build_character_aggregate(raw))
 
 
 # ── API 端点 ──
@@ -180,11 +173,12 @@ async def upload_knowledge_document(
         text = content.decode("gbk", errors="replace")
 
     service = get_knowledge_service()
-    if not service.has_index(character_id):
-        try:
-            _ensure_full_index(character_id, raw)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail="索引知识失败") from e
+    try:
+        # W5：无条件走 ensure 闭环（内存/磁盘版本判定），冷 worker 不再以
+        # 「仅卡片」新索引覆盖含上传内容的既有索引
+        service.ensure_index(character_id, character=build_character_aggregate(raw))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="索引知识失败") from e
 
     chunk_size = 1000
     chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)] if len(text) > chunk_size else [text]
@@ -199,28 +193,23 @@ async def upload_knowledge_document(
             source_id=f"{doc_id}_{idx}",
         ))
 
-    retriever = service._retrievers.get(character_id)
-    if retriever is not None and hasattr(retriever, "add_chunks"):
-        # P0-3：index() 是替换语义——旧实现在此调用会把该角色既有索引块
-        # （锚点/示例对话）整体覆盖销毁并落盘。追加必须走 add_chunks。
-        retriever.add_chunks(knowledge_chunks)
-    elif retriever is not None and hasattr(retriever, "index"):
-        retriever.index(list(retriever._chunks) + knowledge_chunks)  # type: ignore[attr-defined]
+    # W5：文档是不可丢源材料 —— 唯一存储在源存储（doc:{doc_id} 来源，替换式），
+    # 索引由服务层锁内派生重建并落盘。旧实现直摸检索器 add_chunks 后落盘，
+    # 任何整库重建/失效都会把文档销毁。
+    stored_count, _changed = service.upsert_source(
+        character_id,
+        key=f"doc:{doc_id}",
+        kind="upload",
+        version=doc_id,
+        chunks=knowledge_chunks,
+    )
 
-    # 计数以检索器实际块数为准，不再累加假数字
-    if retriever is not None:
-        service._chunk_counts[character_id] = len(retriever._chunks)  # type: ignore[attr-defined]
-    else:
-        service._chunk_counts[character_id] = len(knowledge_chunks)
-
-    service.save_index(character_id)
-
-    logger.info("文档已上传到角色知识库: %s → %s (%d 块)", file.filename, character_id, len(knowledge_chunks))
+    logger.info("文档已上传到角色知识库: %s → %s (%d 块)", file.filename, character_id, stored_count)
     return {
         "status": "indexed",
         "filename": file.filename,
         "size": len(content),
-        "chunks": len(knowledge_chunks),
+        "chunks": stored_count,
         "document_id": doc_id,
     }
 
@@ -231,27 +220,11 @@ async def delete_knowledge_document(
     doc_id: str,
     _auth: bool = Security(verify_api_key_dep),
 ):
-    """删除角色知识库中的文档"""
+    """删除角色知识库中的文档（W5：按来源粒度 ``doc:{doc_id}`` 从源存储移除）"""
     service = get_knowledge_service()
-    if not service.has_index(character_id):
-        raise HTTPException(status_code=404, detail=f"角色知识库不存在: {character_id}")
-    retriever = service._retrievers.get(character_id)
-    if retriever is None:
-        raise HTTPException(status_code=404, detail="检索器未初始化")
-
-    # 修复：按 doc_id 删除单个文档，而非 clear() 清空整个角色知识库
-    # 上传时 source_id 格式为 f"{doc_id}_{idx}"，按前缀过滤保留其余文档
-    existing_chunks = list(retriever._chunks)  # type: ignore[attr-defined]
-    remaining_chunks = [
-        c for c in existing_chunks
-        if not c.source_id.startswith(f"{doc_id}_")
-    ]
-    removed_count = len(existing_chunks) - len(remaining_chunks)
+    removed_count = service.remove_source(character_id, f"doc:{doc_id}")
     if removed_count == 0:
         raise HTTPException(status_code=404, detail=f"文档不存在: {doc_id}")
-    retriever.index(remaining_chunks)
-    service._chunk_counts[character_id] = len(remaining_chunks)
-    service.save_index(character_id)
     logger.info("文档已从角色知识库删除: %s (移除 %d 块)", doc_id, removed_count)
     return {"status": "deleted", "document_id": doc_id, "removed_chunks": removed_count}
 
@@ -398,7 +371,14 @@ async def enrich_character_persona(
 
     try:
         from persona_extractor.web_enricher import WebPersonaEnricher
-        enricher = WebPersonaEnricher()
+
+        service = get_knowledge_service()
+        # W5（缺陷 B 根治）：写入前先 ensure 已有索引（磁盘优先、版本化派生），
+        # 并把统一知识服务注入 enricher —— 旧实现构造 WebPersonaEnricher() 漏传
+        # knowledge_service，enrich 内部写库分支恒不成立，抓取结果从不落库。
+        raw = _load_character_data(character_id) or {}
+        service.ensure_index(character_id, character=build_character_aggregate(raw))
+        enricher = WebPersonaEnricher(knowledge_service=service)
         result = await asyncio.to_thread(
             enricher.enrich,
             character_id=character_id,
@@ -417,6 +397,8 @@ async def enrich_character_persona(
             "duration_seconds": round(result.duration_seconds, 2),
             "errors": result.errors,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("人设增强失败: %s", character_id)
         raise HTTPException(status_code=500, detail=f"人设增强失败: {e}") from e

@@ -157,7 +157,7 @@ def test_character_card_cache_invalidation() -> None:
     assert hasattr(OptimizedOrchestrator, "invalidate_character_persona_cache")
 
 
-def test_knowledge_base_indexes_character_card() -> None:
+def test_knowledge_base_indexes_character_card(tmp_path) -> None:
     """角色卡数据应能被 CrawlerAdapter 索引为知识库，并支持检索。"""
     from shisi.knowledge.character_knowledge_service import CharacterKnowledgeService
     from shisi.knowledge.crawler_adapter import CharacterCrawlerAdapter
@@ -171,7 +171,8 @@ def test_knowledge_base_indexes_character_card() -> None:
     character_id = card["id"]
 
     adapter = CharacterCrawlerAdapter()
-    service = CharacterKnowledgeService(use_bm25=True)
+    # tmp 隔离（09-22 教训）：默认构造指向真实 data/knowledge，测试不得写真库
+    service = CharacterKnowledgeService(use_bm25=True, index_dir=tmp_path / "knowledge")
     adapter._index_card(service, character_id, card)
 
     stats = service.get_stats(character_id)
@@ -183,11 +184,11 @@ def test_knowledge_base_indexes_character_card() -> None:
     assert card["name"] in context or "林挽夏" in context
 
 
-def test_prompt_builder_retrieves_knowledge_for_query() -> None:
+def test_prompt_builder_retrieves_knowledge_for_query(tmp_path, monkeypatch) -> None:
     """prompt_builder 自身的检索能力：带 user_message 时必须注入知识块。"""
     from shisi.application.persona_service import PersonaService
     from shisi.core.services import prompt_builder
-    from shisi.knowledge.character_knowledge_service import get_knowledge_service
+    from shisi.knowledge.character_knowledge_service import CharacterKnowledgeService
 
     path = _card_path_by_name("林挽夏")
     if path is None:
@@ -201,10 +202,10 @@ def test_prompt_builder_retrieves_knowledge_for_query() -> None:
     character = ps._build_character_from_card(character_id, ps._map_emotional_state(None))
     assert character is not None
 
-    # 确保知识索引存在
-    svc = get_knowledge_service()
-    if not svc.has_index(character_id):
-        svc.index_character(character_id, character)
+    # tmp 隔离 + 注入 prompt_builder（真实单例指向 data/knowledge，测试禁写真库）
+    svc = CharacterKnowledgeService(use_bm25=True, index_dir=tmp_path / "knowledge")
+    monkeypatch.setattr(prompt_builder, "get_knowledge_service", lambda: svc)
+    svc.index_character(character_id, character)
 
     prompt = prompt_builder.build(character, user_message="她叫什么名字", chat_history="")
     assert character.name in prompt
