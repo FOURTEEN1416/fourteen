@@ -100,3 +100,26 @@ def run_on_shared_loop(coro, timeout: float | None = None) -> Any:
     fut = asyncio.run_coroutine_threadsafe(coro, loop)
     return fut.result(timeout=timeout)
 
+
+def call_coro_blocking(coro) -> Any:
+    """同步上下文调用协程的推荐入口（W2，2026-09-27）。
+
+    与 :func:`run_async` 的差别在「无运行中循环」分支：本函数**仍投递共享
+    常驻循环**，而不是 ``asyncio.run`` 每次新建循环 —— async-only provider 的
+    httpx 连接池按 loop 缓存，一次性循环会让每次记忆/摘要调用都重做 TLS 握手。
+
+    - 调用线程无循环（记忆后台线程 / APScheduler / 脚本）→ 共享循环；
+    - 在其他循环线程上（如 uvicorn 主循环误用同步入口）→ 共享循环并阻塞本线程；
+    - 已在共享循环内部 → 一次性循环兜底（向自身投递必死锁；调用方本应 await）。
+    """
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is not None and running is get_shared_loop():
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
+    return run_on_shared_loop(coro)
+

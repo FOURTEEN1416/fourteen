@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
@@ -213,23 +214,29 @@ class _StreamPipelineMixin:
 
             lock = self._get_session_lock(session_id)
             async with lock:
-                # ── 共享预处理（并行任务、prompt 组装、工具调用） ──
-                ctx = await self._prepare_context(
-                    user_msg_clean,
-                    session_id,
-                    character_id,
-                    emotion_engine=emotion_engine,
-                    user_id=user_id,  # P1-15：工具 _meta 调用归属（缺它 web 流式下 user_id=None）
-                )
-                emotion_state = ctx["emotion_state"]
-                system_prompt = ctx["system_prompt"]
-                chat_history = ctx["chat_history"]
-                # A3：chat_round 由 prepare 透传，禁止 stream 内二次 get_chat_context
-                chat_round = int(ctx.get("chat_round") or 0)
-
-                # 上游仍可流式生成，但草稿先留在服务端；完整定稿后再下发。
-                # 否则已发 token 无法撤回，清洗后只改 done/历史会制造三份事实。
+                # W2（2026-09-27）：锁后即建立 turn 上下文——准备阶段取消/异常的
+                # 统一收尾也要有稳定 turn id，不得依赖 prepare 的产物。
+                pre_turn_id = uuid.uuid4().hex[:12]
+                ctx: dict[str, Any] = {}
+                emotion_state = None
                 try:
+                    # ── 共享预处理（并行任务、prompt 组装、工具调用） ──
+                    ctx = await self._prepare_context(
+                        user_msg_clean,
+                        session_id,
+                        character_id,
+                        emotion_engine=emotion_engine,
+                        user_id=user_id,  # P1-15：工具 _meta 调用归属（缺它 web 流式下 user_id=None）
+                        turn_id=pre_turn_id,
+                    )
+                    emotion_state = ctx["emotion_state"]
+                    system_prompt = ctx["system_prompt"]
+                    chat_history = ctx["chat_history"]
+                    # A3：chat_round 由 prepare 透传，禁止 stream 内二次 get_chat_context
+                    chat_round = int(ctx.get("chat_round") or 0)
+
+                    # 上游仍可流式生成，但草稿先留在服务端；完整定稿后再下发。
+                    # 否则已发 token 无法撤回，清洗后只改 done/历史会制造三份事实。
                     full_reply = str(ctx.get("direct_reply") or "")
                     if not full_reply:
                         generation_args = dict(
@@ -280,18 +287,44 @@ class _StreamPipelineMixin:
                     self._background_tasks.add(bg_task)
                     bg_task.add_done_callback(self._background_tasks.discard)
                 finally:
+                    # 统一收尾：覆盖准备、生成、发布全程（W2，2026-09-27）。
                     # aclose/取消也保留用户行及已确认前缀；数据库轻写完成前不释放会话锁。
-                    finish = asyncio.create_task(asyncio.to_thread(
-                        self._after_process, user_msg_clean, reply[:accepted_end],
-                        emotion_state, session_id, character_id,
-                        turn_id=str(ctx.get("ax_turn_id") or ""),
-                        reply_id=str(ctx.get("ax_reply_id") or ""),
-                    ))
-                    try:
-                        await asyncio.shield(finish)
-                    except asyncio.CancelledError:
-                        await finish
-                        raise
+                    if ctx:
+                        # 准备已完成（含生成中断/发布中断）：全量 after_process 落
+                        # 用户行 + 真正被传输确认的前缀，行为与重构前一致。
+                        finish = asyncio.create_task(asyncio.to_thread(
+                            self._after_process, user_msg_clean, reply[:accepted_end],
+                            emotion_state, session_id, character_id,
+                            turn_id=str(ctx.get("ax_turn_id") or ""),
+                            reply_id=str(ctx.get("ax_reply_id") or ""),
+                        ))
+                        try:
+                            await asyncio.shield(finish)
+                        except asyncio.CancelledError:
+                            await finish
+                            raise
+                    elif user_msg_clean:
+                        # 准备阶段取消/异常（ctx 未产出）：这一轮已过安全清洗，
+                        # 用户行必须留下，否则用户的话凭空消失、下一轮「不记得说过」。
+                        # 不跑全量 after_process——记忆管线不该消化一个没有回复的半轮。
+                        memory = self.components.get("memory")
+                        writer = (
+                            getattr(memory, "write_chat_history_sync", None)
+                            if memory is not None else None
+                        )
+                        if writer is not None:
+                            try:
+                                writer(
+                                    user_msg=user_msg_clean,
+                                    reply=reply[:accepted_end],
+                                    session_id=session_id,
+                                    character_id=str(character_id or ""),
+                                    turn_id=pre_turn_id,
+                                )
+                            except Exception as e:  # noqa: BLE001
+                                logger.warning(
+                                    "准备阶段收尾轻写失败 session=%s: %s", session_id, e,
+                                )
 
                 process_time = round(time.perf_counter() - stream_start, 3)
                 yield {

@@ -8,6 +8,7 @@ import os
 import threading
 from typing import Any
 
+from .llm_gateway import ProviderError as ProviderError
 from .multi_provider_gateway import DEFAULT_PROVIDER_CONFIG, MultiProviderGateway
 
 logger = logging.getLogger("llm_provider")

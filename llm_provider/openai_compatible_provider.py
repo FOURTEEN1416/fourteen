@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from .llm_gateway import ModelRegistry
+from .llm_gateway import ModelRegistry, ProviderError
 
 try:
     from observability.metrics import record_chat_duration, record_error, record_token_usage
@@ -259,7 +259,10 @@ class OpenAICompatibleProvider:
         except Exception as e:  # noqa: BLE001
             if HAS_METRICS:
                 record_error("llm", type(e).__name__)
-            return {"content": self._handle_error(e), "tool_calls": None}
+            # W2 三态契约（2026-09-27）：失败必须 raise ProviderFailure——
+            # 旧实现把异常吞成错误文案字典，编排层把错误文案当「模型判无需工具」，
+            # 把用户正在补齐提醒信息的 pending 意图取消掉。
+            raise ProviderError(self._handle_error(e)) from e
 
     def switch_model(self, model_name: str) -> bool:
         """切换模型"""

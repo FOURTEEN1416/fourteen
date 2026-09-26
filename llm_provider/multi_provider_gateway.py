@@ -25,7 +25,7 @@ from collections.abc import AsyncIterator
 from contextlib import suppress
 from typing import Any
 
-from .llm_gateway import LLMGatewayV2
+from .llm_gateway import LLMGatewayV2, ProviderError
 from .openai_compatible_provider import OpenAICompatibleProvider
 
 # ═══════════════════════════════════════════════════════════════
@@ -609,20 +609,59 @@ class MultiProviderGateway:
         tools: list | None = None,
         attachments: list | None = None,
     ) -> dict[str, Any]:
-        provider = self.current_provider
-        if not provider:
-            return {"content": "（没有可用的 LLM 提供商）", "tool_calls": None}
+        """带工具的聊天 — W2（2026-09-27）：与 chat()/chat_stream() 同规走 fallback 链。
 
+        旧实现只打 current_provider，且 provider 把异常吞成错误文案字典：
+        编排层把错误文案当「模型判无需工具」，把用户正在补齐提醒信息的
+        pending 意图取消。语义（三态契约）：
+        - provider 失败（``ProviderError``）→ 记熔断、降级链上下一家
+          （链按账号策略构建，用户网关只含用户自己的 provider，不借平台凭证）；
+        - 模型正常应答 → 返回字典（``tool_calls`` 空与不空由调用方区分 NoTool/ToolCalls）；
+        - 全链失败 → raise ``ProviderError``，编排层保留 pending，不产生假成功。
+        """
         messages, query = _merge_attachments(
             query, system_prompt, history, messages, attachments
         )
 
-        return await provider.chat_with_tools(
-            query=query, system_prompt=system_prompt,
-            history=history, messages=messages,
-            temperature=temperature, max_tokens=max_tokens,
-            tools=tools,
-        )
+        last_error = ""
+        for key in self._chain_keys(self.current_provider_key):
+            provider = self._providers[key]
+            try:
+                result = await provider.chat_with_tools(
+                    query=query, system_prompt=system_prompt,
+                    history=history, messages=messages,
+                    temperature=temperature, max_tokens=max_tokens,
+                    tools=tools,
+                )
+            except Exception as e:  # noqa: BLE001
+                last_error = str(e)
+                self._mark_provider_result(key, False)
+                _record_fallback(key, "error")
+                logger.warning("[MultiGateway] %s 工具调用失败，降级下一个: %s", key, e)
+                continue
+            if isinstance(result, dict) and result.get("tool_calls"):
+                self._mark_provider_result(key, True)
+                _record_fallback(key, "success")
+                self._publish_current(key)
+                return result
+            # 无工具调用的应答：哨兵错误文案（200 状态但内容是错误提示）按失败
+            # 降级下一家；真闲聊应答原样返回给调用方区分 NoTool。
+            if isinstance(result, dict) and _is_error_reply(str(result.get("content") or "")):
+                last_error = f"{key} 返回错误文案: {str(result.get('content'))[:120]}"
+                self._mark_provider_result(key, False)
+                _record_fallback(key, "fallback")
+                logger.warning("[MultiGateway] %s %s", key, last_error)
+                continue
+            if isinstance(result, dict):
+                self._mark_provider_result(key, True)
+                _record_fallback(key, "success")
+                self._publish_current(key)
+                return result
+            last_error = f"{key} 返回非字典工具结果: {type(result).__name__}"
+            self._mark_provider_result(key, False)
+            logger.warning("[MultiGateway] %s %s", key, last_error)
+
+        raise ProviderError(f"所有 LLM 提供商工具调用均不可用: {last_error}")
 
     def switch_provider(self, provider_key: str) -> bool:
         """手动切换到指定提供商"""

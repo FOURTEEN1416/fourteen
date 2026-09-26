@@ -29,7 +29,7 @@ import logging
 from collections.abc import Callable
 from contextvars import ContextVar
 from functools import wraps
-from inspect import isasyncgenfunction, signature
+from inspect import isasyncgenfunction, iscoroutinefunction, signature
 from typing import Any
 
 logger = logging.getLogger("utils.llm_bridge")
@@ -99,6 +99,11 @@ def to_sync_callable(
     """把网关适配成 ``prompt -> str`` 的同步函数；无法适配时返回 None。
 
     - 网关带 ``chat_sync``（本项目所有网关都有）→ 包装它；
+    - 只有 async ``chat``（W2，2026-09-27：独立配置的 agnes/zhipu/xunfei/baidu/
+      custom 直连是 ``OpenAICompatibleProvider``，无 chat_sync 也不可调用，
+      旧判据在此直接返回 None → 记忆三件套静默退化）→ 经
+      ``utils.async_utils.call_coro_blocking``（同步→异步唯一 owner，常驻共享
+      循环，连接池跨调用复用）补齐同步调用，请求账号选择经 ``current_llm`` 保留；
     - 本身就是可调用对象 → 直接用；
     - 调用失败返回空串（调用方按"无结果"处理），**不抛异常** ——
       这些调用点在后台记忆线程里，异常会打断整批记忆处理。
@@ -117,6 +122,24 @@ def to_sync_callable(
                 logger.warning("LLM 同步调用失败（按空结果处理）: %s", e)
                 return ""
         return _call_via_gateway
+
+    chat_method = getattr(llm, "chat", None)
+    if callable(chat_method) and iscoroutinefunction(chat_method):
+
+        def _call_via_async_bridge(prompt: str) -> str:
+            from utils.async_utils import call_coro_blocking
+
+            target = current_llm(llm)
+            try:
+                result = call_coro_blocking(
+                    target.chat(query=prompt, max_tokens=max_tokens, temperature=temperature),
+                )
+                return str(result or "")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("LLM 异步桥调用失败（按空结果处理）: %s", e)
+                return ""
+
+        return _call_via_async_bridge
 
     if callable(llm):
         def _call_direct(prompt: str) -> str:

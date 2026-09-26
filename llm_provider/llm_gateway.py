@@ -18,6 +18,17 @@ logger = get_logger("llm_gateway")
 DEFAULT_API_BASE = "https://api.deepseek.com/v1"
 
 
+class ProviderError(RuntimeError):
+    """provider 侧请求失败（网络 / HTTP / 无效响应 / 未配置凭证）。
+
+    W2（2026-09-27）三态契约的一态：调用方必须把本异常当作 **ProviderError**
+    处理（链内降级 / 整链放弃时保留现场），绝不可与「模型正常应答但不带工具
+    调用（NoTool）」混同——旧实现把异常吞成错误文案字典，编排层把错误文案当
+    闲聊回复，把用户正在补齐提醒信息的 pending 意图取消掉。第三态 ToolCalls
+    即返回字典里带非空 ``tool_calls``。
+    """
+
+
 @dataclass
 class ModelEntry:
     name: str
@@ -201,7 +212,9 @@ class LLMGatewayV2:
         tools: list | None = None,
     ) -> dict[str, Any]:
         if not self.api_key:
-            return {"content": self._mock_reply(query), "tool_calls": None}
+            # 未配置凭证是 provider 侧失败，不是「模型判无需工具」——
+            # mock 台词伪装成应答会让编排层取消用户待澄清意图（W2 三态契约）。
+            raise ProviderError(self._mock_reply(query))
 
         built_messages = self._build_messages(query, system_prompt, history, messages)
         payload = {
@@ -226,7 +239,7 @@ class LLMGatewayV2:
             }
         except Exception as e:  # noqa: BLE001
             record_error("llm", type(e).__name__)
-            return {"content": self._handle_error(e), "tool_calls": None}
+            raise ProviderError(self._handle_error(e)) from e
 
     def chat_sync(
         self,
