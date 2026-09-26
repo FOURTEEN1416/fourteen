@@ -78,17 +78,8 @@ info "Step 1/7 complete."
 
 info "=== Step 2/7: Setting up application directory ==="
 
-if [ ! -d "${APP_DIR}" ]; then
-    mkdir -p "${APP_DIR}"
-    info "Created ${APP_DIR}"
-else
-    info "${APP_DIR} already exists."
-fi
-
-# Create data subdirectories
-mkdir -p "${APP_DIR}/data" "${APP_DIR}/cache" "${APP_DIR}/logs"
-
-# Clone repo if empty
+# W10 修复：必须先判空 clone、再建 data 子目录——旧实现先 mkdir data/cache/logs
+# 使 APP_DIR 非空，fresh host 永远跳过 git clone，随后 pip install -e 必败。
 if [ -z "$(ls -A "${APP_DIR}" 2>/dev/null)" ]; then
     info "Cloning repository..."
     git clone https://github.com/FOURTEEN1416/fourteen.git "${APP_DIR}"
@@ -96,11 +87,16 @@ else
     info "App directory not empty, assuming repository already cloned."
 fi
 
+# Create data subdirectories (after clone)
+mkdir -p "${APP_DIR}/data" "${APP_DIR}/cache" "${APP_DIR}/logs"
+
 info "Setting permissions for ${APP_USER}..."
 chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
 # 安全加固：目录 750（仅属主可读写执行，属组可读执行），文件 640（仅属主可读写，属组可读）
-find "${APP_DIR}" -type d -exec chmod 750 {} \;
-find "${APP_DIR}" -type f -exec chmod 640 {} \;
+# W10 修复：.venv 必须排除在外的全树 chmod——640 会去掉 venv 脚本执行位
+# （python/pip 失去 +x，激活即 Permission denied）；且 chmod 先于 Step 3 venv 创建执行。
+find "${APP_DIR}" -path "${APP_DIR}/.venv" -prune -o -type d -exec chmod 750 {} \;
+find "${APP_DIR}" -path "${APP_DIR}/.venv" -prune -o -type f -exec chmod 640 {} \;
 chmod 600 "${APP_DIR}/.env" 2>/dev/null || true
 info "Step 2/7 complete."
 

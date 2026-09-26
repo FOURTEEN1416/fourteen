@@ -228,20 +228,35 @@ async def serve_file(
 # Cache Statistics API
 # ═══════════════════════════════════════════════════════
 
+# W10（2026-09-27）：LLMCache 目前**未接入对话链路**——全仓生产代码没有任何
+# cache.get / cache.set 调用方（唯一引用就是本文件的两个端点）。旧实现每个
+# 请求 new 一个 LLMCache，统计恒为零，面板却显得"缓存开着、正在省 token"。
+# 若未来真正把 LLMCache 接入 llm_provider 网关，必须同步把此常量改为 True
+# 并补 hits/misses 与真实调用数对齐的契约测试。
+CACHE_INTEGRATED = False
+
 
 @router.get("/api/cache/stats")
 async def cache_stats(_auth: bool = Security(verify_api_key_dep)):
+    if not CACHE_INTEGRATED:
+        return {
+            "available": False,
+            "integrated": False,
+            "status": "not_integrated",
+            "detail": "LLM 缓存未接入对话链路：llm.cache 配置与以下统计当前不生效，不代表真实省 token",
+        }
     try:
         from cache.llm_cache import LLMCache
         cache = LLMCache()
         return {
             "available": cache.enabled,
+            "integrated": True,
             "stats": cache.get_stats(),
             "health": cache.health_check(),
         }
     except Exception:
         logger.exception("Cache stats query failed")
-        return {"available": False, "error": "internal_error"}
+        return {"available": False, "integrated": CACHE_INTEGRATED, "error": "internal_error"}
 
 
 @router.post("/api/cache/invalidate")
@@ -250,6 +265,8 @@ async def cache_invalidate(
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
+    if not CACHE_INTEGRATED:
+        raise HTTPException(503, "Cache not_integrated: LLM 缓存未接入对话链路，无键可失效")
     try:
         from cache.llm_cache import LLMCache
         cache = LLMCache()

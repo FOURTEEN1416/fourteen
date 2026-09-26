@@ -219,6 +219,21 @@ describe('SettingsLLM', () => {
     })
   })
 
+  it('cache panel shows not_integrated notice (W10)', async () => {
+    mockFetchConfig.mockResolvedValue(DEFAULT_CONFIG)
+    render(
+      <MemoryRouter>
+        <SettingsLLM />
+      </MemoryRouter>,
+    )
+
+    // 缓存未接入对话链路：面板必须明示 not_integrated，不宣称省 token
+    await waitFor(() => {
+      expect(screen.getByTestId('cache-not-integrated')).toBeDefined()
+    })
+    expect(screen.getByTestId('cache-not-integrated').textContent).toContain('not_integrated')
+  })
+
   it('cache toggle works (llm_cache.enabled)', async () => {
     mockFetchConfig.mockResolvedValue(DEFAULT_CONFIG)
     mockSaveConfig.mockResolvedValue({})

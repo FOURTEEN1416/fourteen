@@ -8,23 +8,26 @@
 #   3. 保存退出
 #
 # 说明:
-#   - 每天凌晨 3:00 执行数据库备份
-#   - 日志会自动写入 BACKUP_DIR/backup.log
-#   - 备份文件保留 30 天，自动清理旧文件
+#   - 每天凌晨 3:00 执行应用数据一致备份（users 库 + 记忆库 + 事件账本 +
+#     向量源 + 角色卡 + 知识索引 + 运行时状态 + 机密配置），产出 manifest.json
+#   - SQLite 走备份 API 在线一致快照（WAL 已提交内容必然包含），无需 sqlite3 CLI
+#   - 主库路径按 APP_DATABASE_URL > DATABASE_URL 优先级解析，默认 data/users.db
+#   - 退出码：0=complete / 2=partial（缺项或降级，明确不完整，需人工核查）/
+#     1=failed；cron 侧按非 0 告警
+#   - 备份保留 30 天，自动清理旧目录
 #   - 可通过环境变量自定义:
 #       DB_BACKUP_DIR: 备份目录（默认 /opt/ai-girlfriend/backups）
 #       DB_RETENTION_DAYS: 保留天数（默认 30）
 #
-# 前置条件:
-#   - pg_dump 已安装（postgresql-client）
-#   - DATABASE_URL 已设置（环境变量或项目 .env 文件）
+# 前置条件（PostgreSQL 主库时才需要）:
+#   - pg_dump 已安装（postgresql-client）；SQLite 默认链零外部依赖
 #   - 备份目录有写入权限
 #
 # 测试命令:
 #   /opt/ai-girlfriend/deploy/backup.sh --test
 #
-# 手动执行一次备份:
-#   /opt/ai-girlfriend/deploy/backup.sh
+# 恢复（绝不原地覆盖生产，先独立目录校验）:
+#   /opt/ai-girlfriend/deploy/restore.sh <backup-dir> --target /srv/restore-verify
 #
 # =============================================================================
 

@@ -79,6 +79,24 @@ if not health.get("healthy", False):
                 failing[k] = {kk: False for kk in false_keys}
     logger.warning("部分组件健康检查未通过（不影响启动）: %s", failing or health)
 
+# ── W10：装配组件级健康检查（/api/ready 经 HealthChecker 消费） ──
+# 有 health_check 方法的组件逐个注册；生产此前从未注册（register_defaults
+# 零调用），readiness 的组件级检查一直空转。
+def _register_component_health() -> None:
+    for _name, _comp in (
+        ("emotion_engine", orchestrator.components.get("emotion")),
+        ("tone_mimic", orchestrator.components.get("tone")),
+        ("vector_memory", orchestrator.components.get("vector_memory")),
+        ("structured_memory", orchestrator.components.get("structured_memory")),
+        ("llm_gateway", orchestrator.components.get("llm")),
+        ("ase_engine", orchestrator.components.get("ase")),
+        ("scheduler", orchestrator.components.get("scheduler")),
+    ):
+        if _comp is not None and callable(getattr(_comp, "health_check", None)):
+            health_checker.register(_name, _comp.health_check)
+
+_register_component_health()
+
 # ── 创建女友管理器 ──
 user_mgr = UserManager(orchestrator)
 
@@ -578,8 +596,26 @@ async def _migrate_retired_providers():
 @asynccontextmanager
 async def _app_lifespan(_app) -> AsyncGenerator[None, None]:
     """FastAPI lifespan：启动时初始化数据库 + 预加载绑定，关闭时清理"""
+    # W10：计量在正式 lifespan 装配（此前只在 main.py 控制台模式装配，
+    # 生产 uvicorn 入口从未开启计量）。多 worker 经共享 multiproc 目录聚合，
+    # 不争固定端口；/api/metrics 端点按需汇总读取。
+    if cfg.observability.metrics_enabled:
+        try:
+            from observability.metrics import cleanup_multiproc_dir, setup_metrics_for_api
+
+            cleanup_multiproc_dir()  # 清理上次运行残留的 worker 计数文件（首个抢到锁的 worker 执行）
+            setup_metrics_for_api()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Prometheus 计量装配失败（不影响启动）: %s", e)
     await _init_and_preload()
     yield
+    if cfg.observability.metrics_enabled:
+        try:
+            from prometheus_client import multiprocess as _mp_multiprocess
+
+            _mp_multiprocess.mark_process_dead(os.getpid())
+        except Exception as e:  # noqa: BLE001
+            logger.debug("multiprocess 退出记账失败（忽略）: %s", e)
     logger.info("🛑 API 应用关闭")
 
 

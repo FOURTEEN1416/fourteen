@@ -21,8 +21,14 @@ import sys
 import time
 from pathlib import Path
 
-from shisi.character.character_card_v2 import CharaCardV2Parser
-from shisi.knowledge.character_knowledge_service import (
+# 确保项目根在 sys.path（必须在 shisi 导入之前——脚本从任意 cwd 运行时
+# 否则 ModuleNotFoundError）
+_project_root = Path(__file__).parent.parent.absolute()
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from shisi.character.character_card_v2 import CharaCardV2Parser  # noqa: E402 — 须在 sys.path 注入之后
+from shisi.knowledge.character_knowledge_service import (  # noqa: E402 — 同上
     _DEFAULT_INDEX_DIR,
     get_knowledge_service,
 )
@@ -32,12 +38,6 @@ logger = logging.getLogger("seed")
 
 # 抑制第三方库日志
 logging.getLogger("shisi").setLevel(logging.WARNING)
-
-
-# 确保项目根在 sys.path
-_project_root = Path(__file__).parent.parent.absolute()
-if str(_project_root) not in sys.path:
-    sys.path.insert(0, str(_project_root))
 
 
 CHARS_DIR = Path("config/characters")
@@ -82,8 +82,10 @@ def build_knowledge_indexes(rebuild=False):
 
     json_files = sorted(CHARS_DIR.glob("*.json"))
     if not json_files:
-        logger.warning("  ⚠ config/characters/ 下没有角色文件，跳过知识索引")
-        return []
+        # W10 修复：空卡目录必须返回与正常路径一致的 (results, elapsed) 二元组——
+        # 旧 return [] 会让调用方 `results, elapsed = ...` 解包崩溃。
+        logger.warning("  ⚠ config/characters/ 下没有角色文件（缺卡会阻断部署，见 main）")
+        return [], 0.0
 
     service = get_knowledge_service()
     results = []
@@ -134,7 +136,8 @@ def build_knowledge_indexes(rebuild=False):
 def print_report(results, elapsed=None):
     """打印索引报告。"""
     if not results:
-        return
+        # W10 修复：空结果返回空二元组——旧 return None 会让调用方解包崩溃。
+        return [], []
 
     print(f"\n{'角色名':<24} {'ID':<40} {'知识块':>6}  状态")
     print("-" * 80)
@@ -211,6 +214,15 @@ def main():
         logger.warning("  ⚠ sync_character_files 不可用，跳过")
     except Exception as e:
         logger.warning("  ⚠ 同步异常: %s", e)
+
+    # W10 发布门禁：config/characters 被 gitignore、内容不随 git 复现，
+    # 角色卡是部署前置硬条件——缺卡必须阻断（退出非 0），不得带病宣布完成。
+    CHARS_DIR.mkdir(parents=True, exist_ok=True)
+    if not sorted(CHARS_DIR.glob("*.json")):
+        logger.error("  ❌ 角色卡目录为空: %s", CHARS_DIR.resolve())
+        logger.error("     角色卡不入 git（gitignore），需从备份/私有包单独投递后再运行 seed。")
+        logger.error("     恢复途径：deploy/restore.sh <backup-dir> --target <独立目录>")
+        sys.exit(1)
 
     # Step 2: 重建预设索引
     print("\n[2/3] 重建预设索引...")

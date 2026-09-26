@@ -4,6 +4,13 @@
 # ═══════════════════════════════════════════════════════════
 # Usage: sudo bash deploy/start.sh
 # Run from: /opt/ai-girlfriend
+#
+# W10 失败门禁（2026-09-27）：
+#   - DB 检查用真实引擎（api.database._engine）执行 SELECT 1，失败退出非 0——
+#     旧脚本导入不存在的会话工厂符号，异常后 exit(0)，检查形同虚设；
+#   - 迁移失败（alembic / init_db）直接中止，不再吞错；
+#   - 启动探针打 /api/ready（旧脚本探测不存在的 /health，失败也只 warning
+#     仍以 0 退出）——发布成功判据 = ready 200。
 # ═══════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -25,7 +32,7 @@ if [ ! -d "${VENV}" ]; then
 fi
 
 if [ ! -f "${ENV_FILE}" ]; then
-    log "WARNING: .env file not found at ${ENV_FILE}"
+    log "ERROR: .env file not found at ${ENV_FILE}"
     log "Copy deploy/.env.production to ${ENV_FILE} and fill in values."
     exit 1
 fi
@@ -43,21 +50,26 @@ set +a
 log "=== Starting 唯一的你 (Production) ==="
 
 # ── Step 1: Verify database connection ──
+# 真实连接检查：经生产同款异步引擎执行 SELECT 1；失败退出非 0。
 log "[1/5] Checking database connection..."
 source "${VENV}/bin/activate"
-if python -c "
+if ! python -c "
 import asyncio
-try:
-    from api.database import AsyncSessionLocal
-    print('Database module loaded successfully')
-except Exception as e:
-    print(f'Database not configured: {e}')
-    exit(0)  # non-fatal, DB might be optional in dev mode
-" 2>&1; then
-    log "[1/5] Database check complete."
-else
-    log "[1/5] Database check skipped (non-fatal)."
+from sqlalchemy import text
+from api.database import _engine
+
+async def _probe():
+    async with _engine.connect() as conn:
+        await conn.execute(text('SELECT 1'))
+
+asyncio.run(_probe())
+print('Database connection OK')
+"; then
+    log "ERROR: Database connection check failed (engine: \${APP_DATABASE_URL:-DATABASE_URL:-default sqlite})"
+    log "Fix DATABASE_URL / APP_DATABASE_URL in ${ENV_FILE} before starting."
+    exit 1
 fi
+log "[1/5] Database check complete."
 
 # ── Step 2: Run migrations ──
 log "[2/5] Running database migrations..."
@@ -65,12 +77,14 @@ if python -c "import alembic" 2>/dev/null; then
     alembic upgrade head
     log "[2/5] Migrations applied."
 else
-    log "[2/5] Alembic not installed; attempting init_db..."
+    log "[2/5] Alembic not installed; running init_db (table sync)..."
+    # 迁移失败必须阻断启动（旧实现吞错误后照常起服务）
     python -c "
 import asyncio
 from api.database import init_db
 asyncio.run(init_db())
-" 2>/dev/null && log "[2/5] Tables synced." || log "[2/5] DB init skipped."
+"
+    log "[2/5] Tables synced."
 fi
 
 # ── Step 3: Ensure Nginx serve directory exists ──
@@ -99,31 +113,36 @@ UVICORN_PID=$!
 echo $UVICORN_PID > "${APP_DIR}/logs/uvicorn.pid"
 log "Backend started (PID: ${UVICORN_PID})"
 
-# ── Step 5: Health check loop ──
-log "[5/5] Running health checks..."
-HEALTHY=false
-for i in $(seq 1 12); do
+# ── Step 5: Readiness gate ──
+# 发布成功判据 = /api/ready 200（含真实 DB/记忆/模型配置探测与关键路由组存在性）。
+# 失败退出非 0——绝不带病宣布启动成功。
+log "[5/5] Waiting for /api/ready..."
+READY=false
+for i in $(seq 1 30); do
     sleep 2
-    if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/health 2>/dev/null | grep -q "200"; then
-        HEALTHY=true
-        log "Backend health check passed (attempt ${i})"
+    code="$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/ready 2>/dev/null || true)"
+    if [ "${code}" = "200" ]; then
+        READY=true
+        log "Backend ready (attempt ${i})"
         break
     fi
-    log "Waiting for backend... (attempt ${i}/12)"
+    log "Waiting for backend /api/ready... (attempt ${i}/30, last code=${code})"
 done
 
-if [ "${HEALTHY}" = true ]; then
+if [ "${READY}" = true ]; then
     log "=========================================="
     log "唯一的你 is running!"
-    log "  API:  http://127.0.0.1:8000"
-    log "  Docs: http://127.0.0.1:8000/docs"
-    log "  PID:  ${UVICORN_PID}"
+    log "  API:   http://127.0.0.1:8000"
+    log "  Ready: http://127.0.0.1:8000/api/ready"
+    log "  Docs:  http://127.0.0.1:8000/docs"
+    log "  PID:   ${UVICORN_PID}"
     log "=========================================="
     log ""
     log "To check logs:  tail -f ${APP_DIR}/logs/uvicorn.log"
     log "To stop:        kill \$(cat ${APP_DIR}/logs/uvicorn.pid)"
 else
-    log "WARNING: Backend health check failed after 12 attempts"
+    log "ERROR: /api/ready did not return 200 within the wait window."
     log "Check logs: tail -f ${APP_DIR}/logs/uvicorn.log"
     log "Check config: ${ENV_FILE}"
+    exit 1
 fi

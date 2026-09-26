@@ -3,9 +3,50 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from enum import Enum
 from typing import Any
 
 logger = logging.getLogger("health")
+
+
+class HealthStatus(str, Enum):
+    """共享健康枚举 — /api/ready 与所有健康检查器的唯一状态口径。
+
+    W10 修复：/api/ready 旧判据 `status != 'error'` 会把 degraded/unhealthy
+    全部放行；现改为各方共用本枚举（healthy / degraded / unhealthy）。
+    """
+
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNHEALTHY = "unhealthy"
+
+
+_STATUS_RANK = {HealthStatus.HEALTHY.value: 0, HealthStatus.DEGRADED.value: 1, HealthStatus.UNHEALTHY.value: 2}
+
+
+def normalize_status(value: Any) -> str:
+    """任意健康状态值 → 共享枚举值；未知值按 unhealthy（fail-closed）。"""
+    text = str(value or "").strip().lower()
+    return text if text in _STATUS_RANK else HealthStatus.UNHEALTHY.value
+
+
+def worst_status(a: str, b: str) -> str:
+    a_n, b_n = normalize_status(a), normalize_status(b)
+    return a_n if _STATUS_RANK[a_n] >= _STATUS_RANK[b_n] else b_n
+
+
+def evaluate_result(result: dict[str, Any]) -> str:
+    """单条检查结果 → 共享枚举。
+
+    - connected/available 为 False → degraded（组件在但失联）
+    - 显式 degraded 标记 → degraded
+    - 其余 → healthy（异常由调用方判 unhealthy）
+    """
+    if not result.get("connected", result.get("available", True)):
+        return HealthStatus.DEGRADED.value
+    if result.get("degraded"):
+        return HealthStatus.DEGRADED.value
+    return HealthStatus.HEALTHY.value
 
 
 class HealthChecker:
@@ -24,17 +65,16 @@ class HealthChecker:
     def check(self) -> dict[str, Any]:
         """同步健康检查（基于缓存/属性）"""
         results = {}
-        overall = "healthy"
+        overall = HealthStatus.HEALTHY.value
         for name, fn in self._checks.items():
             try:
                 result = fn()
                 results[name] = result
-                if not result.get("connected", result.get("available", True)):
-                    overall = "degraded" if overall == "healthy" else overall
+                overall = worst_status(overall, evaluate_result(result))
             except Exception:
                 logger.exception("健康检查异常: %s", name)
                 results[name] = {"connected": False, "error": "health_check_failed"}
-                overall = "unhealthy"
+                overall = worst_status(overall, HealthStatus.UNHEALTHY.value)
         return {
             "status": overall,
             "checks": results,
@@ -43,19 +83,18 @@ class HealthChecker:
     async def async_check(self) -> dict[str, Any]:
         """异步健康检查（真实探测后端，超时保护）"""
         results = {}
-        overall = "healthy"
+        overall = HealthStatus.HEALTHY.value
 
         # 同步检查
         for name, fn in self._checks.items():
             try:
                 result = fn()
                 results[name] = result
-                if not result.get("connected", result.get("available", True)):
-                    overall = "degraded" if overall == "healthy" else overall
+                overall = worst_status(overall, evaluate_result(result))
             except Exception:
                 logger.exception("同步健康检查异常: %s", name)
                 results[name] = {"connected": False, "error": "health_check_failed"}
-                overall = "unhealthy"
+                overall = worst_status(overall, HealthStatus.UNHEALTHY.value)
 
         # 异步检查（带超时，全部并行）
         if self._async_checks:
@@ -75,8 +114,7 @@ class HealthChecker:
             )
             for name, result in async_results:
                 results[name] = result
-                if not result.get("connected", result.get("available", True)):
-                    overall = "degraded" if overall == "healthy" else overall
+                overall = worst_status(overall, evaluate_result(result))
 
         return {
             "status": overall,

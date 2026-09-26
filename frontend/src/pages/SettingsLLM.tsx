@@ -352,10 +352,17 @@ function SettingsLLM() {
       <section>
         <h3 className="text-sm font-semibold text-gray-700 mb-3">LLM 缓存</h3>
         <div className="glass-card rounded-xl p-4 space-y-4">
+          {/* W10 诚实化：LLM 缓存尚未接入对话链路（/api/cache/stats 返回
+              not_integrated），此开关与统计当前不生效，不得宣称省 token */}
+          <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+            <p className="text-xs text-amber-700" data-testid="cache-not-integrated">
+              未接线（not_integrated）：LLM 缓存尚未接入对话链路，此配置当前不生效，也不会节省 token。
+            </p>
+          </div>
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-700">启用缓存</p>
-              <p className="text-xs text-gray-400">缓存 LLM 响应以减少重复请求</p>
+              <p className="text-xs text-gray-400">缓存 LLM 响应以减少重复请求（当前未接线，不生效）</p>
             </div>
             <Toggle
               checked={llmCache}
