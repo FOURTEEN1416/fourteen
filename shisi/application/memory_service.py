@@ -301,6 +301,156 @@ class ShisiMemoryService:
             user_key=user_key,
         )
 
+    # ── W4 统一事实写入口（2026-09-27）────────────────────
+    # 归属、来源水位、向量派生、EventLedger 记账一次完成；返回真实回执。
+    # 工具/API/后台维护的事实增删一律经本入口，不再各自直写 StructuredMemory
+    # （缺陷 B：旧 remember_facts 直写 sm.add_fact，既不派生向量也不带
+    # source_last_id → 迟到的旧来源写入可复活已删事实）。
+
+    def record_fact(
+        self,
+        fact: str,
+        *,
+        session_key: str,
+        category: str = "general",
+        confidence: float = 0.85,
+        source: str = "agent",
+        importance: float = 0.5,
+        topics: list[str] | None = None,
+        turn_id: str = "",
+    ) -> dict[str, Any]:
+        """写入/强化用户事实，返回 `{fact_id, action, source_last_id, turn_id, user_key, vector_stored, ok}`。
+
+        来源水位取本轮已落库历史的最后 id（无 turn_id 时退本会话最新 id）——
+        与 `delete_fact` 写入的 `fact_deletion_watermarks` 同钟，故「迟到旧
+        来源被跳过、用户新一轮重述可重新记住」由同一 id 序自动成立。
+        """
+        from shisi.memory.legacy.structured_memory import StructuredMemory
+
+        sm = self._pipeline.sm
+        user_key = StructuredMemory.user_key_from_session(session_key)
+        source_last_id = self._source_last_id(sm, session_key or user_key, turn_id)
+        receipt = self._pipeline.semantic.write_fact(
+            fact=fact,
+            category=category,
+            confidence=confidence,
+            source=source,
+            importance=importance,
+            user_key=user_key,
+            topics=topics,
+            source_last_id=source_last_id,
+        )
+        receipt = dict(receipt)
+        action = str(receipt.get("action") or "")
+        receipt.update({
+            "user_key": user_key,
+            "turn_id": str(turn_id or ""),
+            "source_last_id": int(receipt.get("source_last_id") or 0),
+            "fact_id": int(receipt.get("fact_id") or -1),
+            "ok": action in ("inserted", "reinforced", "skipped_deleted_source"),
+        })
+        if action in ("inserted", "reinforced", "skipped_deleted_source"):
+            self._append_memory_event(
+                session_key=user_key,
+                facts=[{
+                    "fact": fact,
+                    "category": category,
+                    "fact_id": receipt["fact_id"],
+                    "action": action,
+                    "source_last_id": receipt["source_last_id"],
+                    "turn_id": receipt["turn_id"],
+                }],
+                action="reinforce" if action == "reinforced" else "write",
+            )
+        return receipt
+
+    def forget_fact(
+        self,
+        fact_id: int,
+        *,
+        session_key: str,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """删除事实（进回收站 + 写删除水位 + 失效派生召回），返回真实回执。"""
+        from shisi.memory.legacy.structured_memory import StructuredMemory
+
+        sm = self._pipeline.sm
+        user_key = StructuredMemory.user_key_from_session(session_key)
+        removed = False
+        try:
+            removed = bool(sm.delete_fact(int(fact_id), recycle=True, user_key=user_key))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("forget_fact 删除失败 id=%s: %s", fact_id, e)
+        receipt: dict[str, Any] = {
+            "fact_id": int(fact_id),
+            "user_key": user_key,
+            "turn_id": "",
+            "action": "deleted" if removed else "not_found",
+            "ok": removed,
+        }
+        if removed:
+            self._append_memory_event(
+                session_key=user_key,
+                facts=[{
+                    "fact_id": receipt["fact_id"], "action": "deleted", "reason": reason,
+                }],
+                action="forget",
+            )
+        return receipt
+
+    def forget_facts_by_text(self, texts: list[str], *, session_key: str) -> list[int]:
+        """按原文删除（仅精确同文，绝不做子串匹配——否则一句话能删光他人事实）。"""
+        from shisi.memory.legacy.structured_memory import StructuredMemory
+
+        sm = self._pipeline.sm
+        user_key = StructuredMemory.user_key_from_session(session_key)
+        wanted = {str(t or "").strip() for t in texts or [] if str(t or "").strip()}
+        if not wanted:
+            return []
+        removed: list[int] = []
+        try:
+            rows = sm.get_facts(user_key=user_key, min_confidence=0.0, limit=-1)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("forget_facts_by_text 读取失败: %s", e)
+            return []
+        for row in rows:
+            if str(row.get("fact") or "") in wanted:
+                fid = int(row.get("id") or 0)
+                if fid and self.forget_fact(fid, session_key=session_key)["ok"]:
+                    removed.append(fid)
+        return removed
+
+    @staticmethod
+    def _source_last_id(sm: Any, session_key: str, turn_id: str) -> int | None:
+        """本轮来源水位：优先 turn_id 精确匹配，退化为会话最新历史 id。"""
+        sid = 0
+        try:
+            fn = getattr(sm, "chat_turn_last_id", None)
+            if callable(fn) and turn_id:
+                sid = int(fn(session_key, turn_id) or 0)
+            if not sid:
+                fn2 = getattr(sm, "chat_last_id", None)
+                if callable(fn2):
+                    sid = int(fn2(session_key) or 0)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("来源水位解析失败，按无水位写入: %s", e)
+            return None
+        return sid or None
+
+    @staticmethod
+    def _append_memory_event(*, session_key: str, facts: list[dict], action: str) -> None:
+        """EventLedger 是记忆写入的审计真源；记账失败绝不反噬已落库的写入。"""
+        if not session_key or not facts:
+            return
+        try:
+            from shisi.agent_plane import runtime as apruntime
+
+            apruntime.append_memory_write_event(
+                session_key=session_key, facts=facts, action=action
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("memory ledger event failed: %s", e)
+
     def reset_session(self) -> None:
         self._pipeline.reset_session()
 

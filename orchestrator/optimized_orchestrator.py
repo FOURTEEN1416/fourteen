@@ -48,6 +48,15 @@ project_root = Path(__file__).resolve().parent.parent
 _SESSION_QUEUE_TIMEOUT = 60.0
 _SESSION_QUEUE_POLL = 0.2
 
+# ── 准备阶段检索预算（W2 缺陷 D，2026-09-27）──
+# 旧实现记忆检索 to_thread+gather 无界，检索挂死会烧穿整轮生成预算（30s），
+# 而唯一可见性是 memory_pipeline 检索**完成之后**的 slow 事后日志。现在在
+# 消费侧设界：超时即放弃本轮记忆（降级空记忆继续生成），并即时记一条
+# WARNING。线程不可杀——被超时的 to_thread 会在默认执行器（有界 worker）
+# 里自然跑完，不会堆积无限线程；连续超时应优先排查检索后端而非加预算。
+MEMORY_RETRIEVE_TIMEOUT_SECONDS = 10.0
+RAG_RETRIEVE_TIMEOUT_SECONDS = 10.0
+
 
 class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
     """
@@ -250,6 +259,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         affinity_level: int = 0,
         session_key: str = "",
         user_id: int | None = None,
+        turn_id: str = "",
     ) -> tuple[str, str]:
         """三级意图管线：L0 零成本晋级线 → L1 LLM 终审（function calling）
         → 工具执行。
@@ -301,8 +311,17 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             pending_ask_count=pending_ask_count,
         )
 
-        async def _review_call(extra_rule: str = "") -> dict[str, Any] | None:
-            """L1 终审调用（独立低温度；失败降级主链，不阻塞聊天）"""
+        async def _review_call(extra_rule: str = "") -> tuple[bool, dict[str, Any] | None]:
+            """L1 终审调用（独立低温度）。
+
+            返回 ``(provider_ok, resp)`` 三态契约（W2，2026-09-27）：
+            - ``(False, None)`` = ProviderFailure：网关/网络层失败。调用方必须
+              原样放弃本轮终审（降级主链），**不得**当「模型判无需工具」，
+              更不得动 pending；
+            - ``(True, resp)`` 且 ``resp["tool_calls"]`` 非空 = ToolCalls；
+            - ``(True, resp)`` 且 ``resp["tool_calls"]`` 空 = NoTool（模型在
+              provider 正常应答下明确判纯闲聊）。
+            """
             try:
                 resp = llm.chat_with_tools(
                     query=review_query,
@@ -319,27 +338,42 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 )
                 if inspect.isawaitable(resp):
                     resp = await asyncio.wait_for(resp, timeout=15.0)
-                return resp if isinstance(resp, dict) else None
             except Exception as e:  # noqa: BLE001
-                logger.debug("工具终审失败，降级主链: %s", e)
-                return None
+                logger.warning("工具终审 provider 失败（保留现场，降级主链）: %s", e)
+                return False, None
+            if not isinstance(resp, dict):
+                return False, None
+            if not (resp.get("tool_calls") or []):
+                # 纵深防御（W2）：旧 provider 曾把异常吞成错误文案字典，源头上已改
+                # 为 raise，但第三方/历史网关仍可能返回哨兵文案——同样按
+                # ProviderFailure 处理，绝不当「模型判无需工具」取消 pending。
+                try:
+                    from llm_provider.multi_provider_gateway import _is_error_reply
 
-        resp = await _review_call()
-        if resp is None:
+                    if _is_error_reply(str(resp.get("content") or "")):
+                        return False, None
+                except ImportError:
+                    pass
+            return True, resp
+
+        provider_ok, resp = await _review_call()
+        if not provider_ok:
+            # ProviderFailure：故障不是「无需工具」。pending 保持 active，
+            # 用户下一轮补齐信息后可继续澄清；失败判定先于任何执行副作用。
             return "", ""
         tool_calls = resp.get("tool_calls") or []
 
         # 防假承诺：声称会做却没调任何工具（生产实证「听到啦」）→ 强制复核一次
         if not tool_calls and tool_gate.contains_promise(resp.get("content") or ""):
             logger.info("[tool_gate] 拦截空口承诺，强制复核一次")
-            resp = await _review_call(
+            provider_ok, resp = await _review_call(
                 extra_rule=(
                     "\n【系统复核】你上一轮答应了用户却没有调用任何工具。"
                     "重新判断：信息齐全必须真的调用工具；不全就调 ask_user 提问；"
                     "做不到承诺就不要承诺。"
                 )
             )
-            if resp is None:
+            if not provider_ok:
                 return "", ""
             tool_calls = resp.get("tool_calls") or []
 
@@ -357,7 +391,11 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 if hasattr(tools.registry, "get") else None
             )
             if tool_inst is not None and getattr(tool_inst, "wants_call_context", False):
-                args["_meta"] = {"session_key": session_key, "user_id": user_id}
+                # turn_id：事实/画像写入口的来源水位与回执归属（W4 缺陷 B）
+                args["_meta"] = {
+                    "session_key": session_key, "user_id": user_id,
+                    "turn_id": str(turn_id or ""),
+                }
             try:
                 result = await asyncio.to_thread(
                     tools.dispatch, name, args,
@@ -487,7 +525,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             )
             return wrapped, ""
 
-        # 分支三：模型判纯闲聊（无承诺、无工具）——pending 存在说明用户转移话题
+        # 分支三：模型判纯闲聊（NoTool：provider 正常应答且无工具调用）——
+        # pending 存在说明用户转移话题。ProviderFailure 已在上方提前返回，
+        # 走到这里必然是模型的明确判断，取消 pending 才安全（W2 三态契约）。
         if pending and sm is not None:
             sm.resolve_pending_intent(session_key, "cancelled")
         return "", ""
@@ -692,8 +732,13 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         character_id: str,
         emotion_engine: Any | None = None,
         user_id: int | None = None,
+        turn_id: str = "",
     ) -> dict[str, Any]:
         """共享预处理逻辑。
+
+        Args:
+            turn_id: 调用方预生成的轮次 id（W2 流式生命周期：锁后即建立 turn
+                上下文，准备阶段取消/异常的收尾也要有稳定归属）。空串时内部生成。
 
         执行：PersonaExtractor 设置 → 并行任务（人格/情感/记忆/RAG）
         → 对话历史 → 世界信息 → system prompt 组装 → 角色卡注入
@@ -737,10 +782,13 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             active_emotion_engine.analyze,
             user_msg_clean, recent,
         )
-        tasks["memory"] = asyncio.to_thread(
-            lambda: self.components["memory"].retrieve_context(
-                query=user_msg_clean, session_id=session_id, top_k=5, character_id=character_id,
+        tasks["memory"] = asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: self.components["memory"].retrieve_context(
+                    query=user_msg_clean, session_id=session_id, top_k=5, character_id=character_id,
+                ),
             ),
+            timeout=MEMORY_RETRIEVE_TIMEOUT_SECONDS,
         )
         rag = self.components["rag"]
         # 优先使用 retrieve_async（带超时保护）；回退到 run_in_executor + 同步 retrieve
@@ -756,7 +804,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 return await rag.retrieve_async(user_msg_clean)
             tasks["rag"] = _rag_async()
         else:
-            # 兼容无 retrieve_async 的旧实现
+            # 兼容无 retrieve_async 的旧实现（同样有界，与 retrieve_async 的
+            # wait_for 同规——知识检索挂死不再烧穿整轮预算）
             retrieve_params = inspect.signature(rag.retrieve).parameters
             if "character_id" in retrieve_params:
                 def rag_call():
@@ -764,7 +813,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             else:
                 def rag_call():
                     return rag.retrieve(user_msg_clean)
-            tasks["rag"] = asyncio.to_thread(rag_call)
+            tasks["rag"] = asyncio.wait_for(
+                asyncio.to_thread(rag_call),
+                timeout=RAG_RETRIEVE_TIMEOUT_SECONDS,
+            )
 
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
 
@@ -775,7 +827,17 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
         for name, task_result in zip(tasks.keys(), results, strict=False):
             if isinstance(task_result, Exception):
-                logger.debug("并行任务 %s 异常: %s", name, task_result)
+                if name in ("memory", "rag") and isinstance(task_result, asyncio.TimeoutError):
+                    # 即时告警（区别于 memory_pipeline 检索完成后的 slow 事后日志）：
+                    # 本轮已按空记忆/空知识降级继续生成。
+                    logger.warning(
+                        "并行任务 %s 检索超时（预算 %.1fs），本轮降级继续生成",
+                        name,
+                        MEMORY_RETRIEVE_TIMEOUT_SECONDS if name == "memory"
+                        else RAG_RETRIEVE_TIMEOUT_SECONDS,
+                    )
+                else:
+                    logger.debug("并行任务 %s 异常: %s", name, task_result)
                 continue
             if name == "persona":
                 persona_enhancement = task_result or ""  # type: ignore[assignment]
@@ -928,7 +990,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         # （PersonaService）→ 角色片段 → 工具结果(历史后/PHI前) → reply_mode
         import uuid as _uuid
 
-        ax_turn_id = _uuid.uuid4().hex[:12]
+        ax_turn_id = str(turn_id or _uuid.uuid4().hex[:12])
         ax_reply_id = _uuid.uuid4().hex[:12]
         system_prompt = self.components["persona"].build_system_prompt(
             emotion_state=emotion_state,
@@ -960,6 +1022,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             affinity_level=affinity_level,
             session_key=session_id,
             user_id=user_id,
+            turn_id=ax_turn_id,
         )
         if tool_results:
             # C 正式位次：工具结果插入「对话历史之后 / 扮演规则之前」
@@ -1487,8 +1550,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 )
                 history_finished = True
 
-                # ── 语音合成（用户明确要求时触发）──
-                voice_audio: bytes | None = None
+                # ── 语音合成（用户明确要求时触发；W7：按角色语音契约快照）──
+                voice_audio = None
                 want_voice = _detect_voice_request(user_msg)
                 if want_voice and len(reply) >= 8:
                     voice_mgr = self.components.get("voice")
@@ -1496,12 +1559,22 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                         try:
                             # 截取合适长度（微信语音建议 ≤60 字）
                             voice_text = reply[:200]
+                            # 角色契约：不可变快照（model/voice_id/speed/pitch），
+                            # 未绑定的会话 kwargs 为空 → 引擎默认
+                            spec = None
+                            cv_mgr = self.components.get("character_voice")
+                            if cv_mgr is not None:
+                                spec = cv_mgr.resolve_voice_spec(character_id)
+                            voice_kwargs = spec.synth_kwargs() if spec else {}
                             voice_audio = await voice_mgr.synthesize(
-                                voice_text, emotion=emotion_tag,
+                                voice_text, emotion=emotion_tag, **voice_kwargs,
                             )
                             if voice_audio:
-                                logger.info("语音合成成功: %d bytes, engine=%s, emotion=%s",
-                                            len(voice_audio), voice_mgr.current_engine, emotion_tag)
+                                logger.info(
+                                    "语音合成成功: %d bytes fmt=%s engine=%s emotion=%s spec=%s",
+                                    len(voice_audio), voice_audio.fmt,
+                                    voice_mgr.current_engine, emotion_tag, voice_kwargs,
+                                )
                             else:
                                 logger.warning("语音合成返回空, engine=%s", voice_mgr.current_engine)
                         except Exception as e:
@@ -1515,7 +1588,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     "process_time": round(process_time, 3),
                 }
                 if voice_audio:
-                    result["voice"] = voice_audio
+                    # W7：统一音频对象（data/format/mime），格式由实际来源决定
+                    from voice.audio_result import voice_result_payload
+                    result["voice"] = voice_result_payload(voice_audio)
                     # 微信 silk: ~2.4KB/s, 按字数估算时长
                     result["voice_duration_ms"] = min(60000, max(1500, len(reply) * 180))
                 return result

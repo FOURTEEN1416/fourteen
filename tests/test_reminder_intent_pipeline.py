@@ -153,8 +153,11 @@ class TestFinalReview:
         ))
         # 工具真被调用且归属由服务端注入
         assert tools.calls and tools.calls[0][0] == "set_reminder"
+        # W4 缺陷 B 契约扩展：_meta 增 turn_id —— 画像/事实写入口的来源水位
+        # （chat_turn_last_id(session, turn_id)）据此判定「迟到旧来源不复活」。
         assert tools.calls[0][1]["_meta"] == {
             "session_key": "1:peer@im.wechat", "user_id": 7,
+            "turn_id": "",
         }
         # 提醒确实落库且带投递目标
         due = sm.get_due_reminders("2099-01-01 00:00:00")

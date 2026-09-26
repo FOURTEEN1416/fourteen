@@ -39,84 +39,133 @@ class SemanticMemory:
                  importance: float = 0.5, user_key: str = "",
                  topics: str | list[str] | None = None,
                  **kwargs) -> bool:
-        fact_hash = self._hash(fact, user_key)
-        try:
-            # 包 Q · B-b：near-dup 交由 StructuredMemory.add_fact 做 UPDATE 强化，
-            # 这里不再「查到相似就 return False」（旧行为导致重复事实永不 reinforce）。
-            if self._accepts_user_key(self._sm.add_fact):
-                try:
-                    fact_id = self._sm.add_fact(
-                        fact, category, confidence, source,
-                        user_key=user_key, topics=topics,
-                        source_last_id=kwargs.get("source_last_id"),
-                    )
-                except TypeError:
-                    # 旧签名无 topics
-                    fact_id = self._sm.add_fact(fact, category, confidence, source, user_key=user_key)
-            else:
-                fact_id = self._sm.add_fact(fact, category, confidence, source)
-            if not fact_id or fact_id == -1:
-                return False
-            if fact_id == -2:
-                return True
-            self._fact_cache.add(fact_hash)
-            try:
-                # P1-12（2026-09-21 审查修复）：旧实现把 **async** 的
-                # vector_memory.store_fact 当同步函数调——返回协程被直接丢弃、
-                # 不抛 TypeError，兜底分支永不命中 → user_facts 向量通道整体
-                # 空转，向量召回恒空只剩 SQLite。现显式识别协程并经公共桥执行，
-                # 且写入必须带 user_key（读侧按 meta.user_key 隔离）。
-                store = getattr(self._vm, "store_fact", None)
-                stored = False
-                if callable(store):
-                    import inspect
+        """bool 投影（既有契约）：写入/强化/幂等跳过→True，失败/空→False。
 
-                    if inspect.iscoroutinefunction(store):
-                        from utils.async_utils import run_async
-                        if self._accepts_user_key(store):
-                            run_async(store(fact, category, confidence,
-                                            user_key=user_key))
-                        else:
-                            run_async(store(fact, category, confidence))
-                        stored = True
-                    else:
-                        try:
-                            store(fact, category, confidence, user_key=user_key)
-                        except TypeError:
-                            store(fact, category, confidence)
-                        stored = True
-                if not stored and callable(getattr(self._vm, "store_text_sync", None)):
-                    self._vm.store_text_sync(fact, {
-                        "type": "fact", "category": category,
-                        "confidence": confidence, "user_key": user_key or "",
-                    })
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Failed to store fact vector: %s", e)
-            try:
-                coll = getattr(self._vm, "_collections", None)
-                coll = coll() if callable(coll) else coll
-                c = coll.get("semantic_knowledge") if isinstance(coll, dict) else None
-                if c is not None and hasattr(c, "add"):
-                    doc_id = f"sk_{self._hash(fact, user_key)}"
-                    c.add(
-                        documents=[fact],
-                        metadatas=[{
-                            "category": category,
-                            "confidence": confidence,
-                            "importance": importance,
-                            "user_key": user_key or "",
-                        }],
-                        ids=[doc_id],
-                    )
-            except Exception as e:  # noqa: BLE001
-                logger.debug("semantic_knowledge store failed: %s", e)
-            return True
+        写权威与回执见 `write_fact`。
+        """
+        receipt = self.write_fact(
+            fact, category=category, confidence=confidence, source=source,
+            importance=importance, user_key=user_key, topics=topics, **kwargs,
+        )
+        return receipt.get("action") in (
+            "inserted", "reinforced", "skipped_deleted_source",
+        )
+
+    def write_fact(self, fact: str, category: str = "general",
+                   confidence: float = 0.5, source: str = "",
+                   importance: float = 0.5, user_key: str = "",
+                   topics: str | list[str] | None = None,
+                   **kwargs) -> dict:
+        """事实写入唯一派生入口（W4，2026-09-27）。
+
+        回执 `{fact_id, action, user_key, source_last_id, vector_stored}`：
+        结构化行经 `StructuredMemory.add_fact_receipt`（SQL 唯一写入口），
+        有效写入（fact_id>0）再做向量派生——被删除水位跳过的一律不派生。
+        """
+        receipt: dict = {
+            "fact_id": -1, "action": "invalid", "user_key": user_key or "",
+            "source_last_id": kwargs.get("source_last_id"), "vector_stored": False,
+        }
+        try:
+            receipt.update(self._structured_write_receipt(fact, category, confidence, source, user_key, topics, kwargs))
+            if int(receipt.get("fact_id") or -1) > 0:
+                self._fact_cache.add(self._hash(fact, user_key))
+                receipt["vector_stored"] = self._derive_fact_vector(
+                    fact, category, confidence, importance, user_key,
+                )
+            return receipt
         except Exception as e:  # noqa: BLE001
             # 2026-09-24：失败必须 error 级——warning 曾使「FTS 虚表残缺 →
             # 事实层写入全程失败」在生产潜伏 3 天仅 46 条 warning 无人察觉
             # （谎言家族：失败可见性分级）。
             logger.error("Failed to add fact: %s", e)
-            return False
+            receipt["action"] = "failed"
+            return receipt
+
+    def _structured_write_receipt(self, fact, category, confidence, source,
+                                  user_key, topics, kwargs) -> dict:
+        """结构化层写入：真源走 add_fact_receipt；替身兼容旧 int 契约。"""
+        # 包 Q · B-b：near-dup 交由结构化层做 UPDATE 强化，这里不再
+        # 「查到相似就 return False」（旧行为导致重复事实永不 reinforce）。
+        producer = getattr(self._sm, "add_fact_receipt", None)
+        if callable(producer):
+            return dict(producer(
+                fact, category=category, confidence=confidence, source=source,
+                user_key=user_key, topics=topics,
+                source_last_id=kwargs.get("source_last_id"),
+            ))
+        if self._accepts_user_key(self._sm.add_fact):
+            try:
+                fact_id = self._sm.add_fact(
+                    fact, category, confidence, source,
+                    user_key=user_key, topics=topics,
+                    source_last_id=kwargs.get("source_last_id"),
+                )
+            except TypeError:
+                # 旧签名无 topics
+                fact_id = self._sm.add_fact(fact, category, confidence, source, user_key=user_key)
+        else:
+            fact_id = self._sm.add_fact(fact, category, confidence, source)
+        fact_id = int(fact_id or -1)
+        action = ("invalid" if fact_id == -1
+                  else "skipped_deleted_source" if fact_id == -2
+                  else "inserted")
+        return {"fact_id": fact_id, "action": action}
+
+    def _derive_fact_vector(self, fact, category, confidence, importance, user_key) -> bool:
+        """把 active 事实派生进向量通道（user_facts + semantic_knowledge 双集合）。"""
+        stored = False
+        try:
+            # P1-12（2026-09-21 审查修复）：旧实现把 **async** 的
+            # vector_memory.store_fact 当同步函数调——返回协程被直接丢弃、
+            # 不抛 TypeError，兜底分支永不命中 → user_facts 向量通道整体
+            # 空转，向量召回恒空只剩 SQLite。现显式识别协程并经公共桥执行，
+            # 且写入必须带 user_key（读侧按 meta.user_key 隔离）。
+            store = getattr(self._vm, "store_fact", None)
+            if callable(store):
+                import inspect
+
+                if inspect.iscoroutinefunction(store):
+                    from utils.async_utils import run_async
+                    if self._accepts_user_key(store):
+                        run_async(store(fact, category, confidence,
+                                        user_key=user_key))
+                    else:
+                        run_async(store(fact, category, confidence))
+                    stored = True
+                else:
+                    try:
+                        store(fact, category, confidence, user_key=user_key)
+                    except TypeError:
+                        store(fact, category, confidence)
+                    stored = True
+            if not stored and callable(getattr(self._vm, "store_text_sync", None)):
+                self._vm.store_text_sync(fact, {
+                    "type": "fact", "category": category,
+                    "confidence": confidence, "user_key": user_key or "",
+                })
+                stored = True
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to store fact vector: %s", e)
+        try:
+            coll = getattr(self._vm, "_collections", None)
+            coll = coll() if callable(coll) else coll
+            c = coll.get("semantic_knowledge") if isinstance(coll, dict) else None
+            if c is not None and hasattr(c, "add"):
+                doc_id = f"sk_{self._hash(fact, user_key)}"
+                c.add(
+                    documents=[fact],
+                    metadatas=[{
+                        "category": category,
+                        "confidence": confidence,
+                        "importance": importance,
+                        "user_key": user_key or "",
+                    }],
+                    ids=[doc_id],
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("semantic_knowledge store failed: %s", e)
+        return stored
 
     @staticmethod
     def _meta_user_key(row: dict) -> str:

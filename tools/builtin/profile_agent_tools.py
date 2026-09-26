@@ -29,6 +29,9 @@ def _sm_from_kwargs(kwargs: dict) -> Any:
     sm = kwargs.get("structured_memory")
     if sm is not None:
         return sm
+    m = _memory_service_from_kwargs(kwargs)
+    if m is not None:
+        return getattr(m, "structured_memory", None) or getattr(m, "_sm", None)
     try:
         from api.deps import deps
 
@@ -37,6 +40,35 @@ def _sm_from_kwargs(kwargs: dict) -> Any:
         if isinstance(mem, dict):
             m = mem.get("memory")
             return getattr(m, "structured_memory", None) or getattr(m, "_sm", None)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _looks_like_memory_service(obj: Any) -> bool:
+    return obj is not None and all(
+        callable(getattr(obj, n, None)) for n in ("record_fact", "forget_fact")
+    )
+
+
+def _memory_service_from_kwargs(kwargs: dict) -> Any:
+    """事实写统一入口解析（W4 缺陷 B）。
+
+    只接受服务端注入/进程内真源；LLM 参数只能给出字符串，鸭子类型校验
+    （record_fact/forget_fact 可调用）挡住之，归属不可由模型指定。
+    """
+    svc = kwargs.get("memory_service")
+    if _looks_like_memory_service(svc):
+        return svc
+    try:
+        from api.deps import deps
+
+        orch = getattr(deps, "orch", None)
+        mem = getattr(orch, "components", None)
+        if isinstance(mem, dict):
+            m = mem.get("memory")
+            if _looks_like_memory_service(m):
+                return m
     except Exception:  # noqa: BLE001
         pass
     return None
@@ -183,8 +215,10 @@ class RememberFactsTool(BaseTool):
         session_key = str((meta or {}).get("session_key") or "")
         if not session_key:
             return ToolResult(False, error="missing_session_key")
-        sm = _sm_from_kwargs(kwargs)
-        if sm is None:
+        turn_id = str((meta or {}).get("turn_id") or "")
+        svc = _memory_service_from_kwargs(kwargs)
+        sm = None if svc is not None else _sm_from_kwargs(kwargs)
+        if sm is None and svc is None:
             return ToolResult(False, error="memory_unavailable")
         from shisi.memory.legacy.structured_memory import StructuredMemory
 
@@ -192,6 +226,7 @@ class RememberFactsTool(BaseTool):
         from utils.prompt_sanitize import is_injectable_fact
 
         written = []
+        skipped = []
         failed = []
         for item in kwargs.get("facts") or []:
             if not isinstance(item, dict):
@@ -202,6 +237,37 @@ class RememberFactsTool(BaseTool):
             cat = str(item.get("category") or "general")
             topics = item.get("topics") or []
             try:
+                if svc is not None:
+                    # W4 统一写入口：结构化行 + 向量派生 + 来源水位 + ledger 一次完成
+                    receipt = svc.record_fact(
+                        fact,
+                        session_key=session_key,
+                        category=cat,
+                        confidence=0.85,
+                        source="agent",
+                        topics=topics if isinstance(topics, list) else None,
+                        turn_id=turn_id,
+                    )
+                    action = str(receipt.get("action") or "")
+                    entry = {
+                        "id": int(receipt.get("fact_id") or -1),
+                        "fact": fact,
+                        "category": cat,
+                        "action": action,
+                        "source_last_id": int(receipt.get("source_last_id") or 0),
+                    }
+                    if action in ("inserted", "reinforced"):
+                        written.append(entry)
+                    elif action == "skipped_deleted_source":
+                        # 迟到旧来源被删除水位挡住——不是失败也不是写入
+                        skipped.append({
+                            "fact": fact, "category": cat,
+                            "reason": "deleted_source",
+                            "source_last_id": entry["source_last_id"],
+                        })
+                    else:
+                        failed.append({"fact": fact, "category": cat, "action": action})
+                    continue
                 fid = sm.add_fact(
                     fact,
                     category=cat,
@@ -209,11 +275,17 @@ class RememberFactsTool(BaseTool):
                     source="agent",
                     user_key=user_key,
                     topics=topics if isinstance(topics, list) else None,
+                    **_fallback_source_kw(sm, session_key, turn_id),
                 )
                 # 2026-09-24：失败可见性——SemanticMemory.add_fact 失败返回
                 # False（bool 契约）、StructuredMemory 空事实返回 -1。旧实现
                 # 把 falsy 返回值当 fid 塞进 written → ToolResult(True) 假成功
                 # （FTS 虚表残缺期间「记住」一直假报成功）。
+                if fid == -2:
+                    skipped.append({
+                        "fact": fact, "category": cat, "reason": "deleted_source",
+                    })
+                    continue
                 if not fid or fid == -1:
                     failed.append({"fact": fact, "category": cat})
                     continue
@@ -222,22 +294,48 @@ class RememberFactsTool(BaseTool):
                 logger.warning("remember_facts write failed: %s", e)
                 failed.append({"fact": fact, "category": cat})
         if not written:
+            if skipped and not failed:
+                # 全部被水位跳过：没有写入，但也不是写失败——如实返回
+                return ToolResult(True, data={
+                    "written": [], "skipped": skipped, "user_key": user_key,
+                })
             return ToolResult(
                 False,
                 error="fact_write_failed" if failed else "no_valid_facts",
             )
-        import contextlib
-
-        with contextlib.suppress(Exception):
-            _runtime().append_memory_write_event(
-                session_key=user_key, facts=written, action="write"
-            )
-        logger.info("[profile_agent] remember user=%s n=%d", user_key, len(written))
         data: dict = {"written": written, "user_key": user_key}
+        if skipped:
+            data["skipped"] = skipped
         if failed:
             # 部分失败必须随结果透出，供模型与调用方感知（不许静默吞）
             data["failed"] = failed
+        if svc is None:
+            # 回退路径（无服务注入的维护/测试形态）：ledger 仍由本工具补记；
+            # 走服务时已在 record_fact 内记账，不得双计。
+            import contextlib
+
+            with contextlib.suppress(Exception):
+                _runtime().append_memory_write_event(
+                    session_key=user_key, facts=written, action="write"
+                )
+        logger.info("[profile_agent] remember user=%s n=%d", user_key, len(written))
         return ToolResult(True, data=data)
+
+
+def _fallback_source_kw(sm: Any, session_key: str, turn_id: str) -> dict:
+    """回退直写路径的来源水位参数：迟到重放同样不得复活已删事实（缺陷 B）。"""
+    sid = 0
+    try:
+        fn = getattr(sm, "chat_turn_last_id", None)
+        if callable(fn) and turn_id:
+            sid = int(fn(session_key, turn_id) or 0)
+        if not sid:
+            fn2 = getattr(sm, "chat_last_id", None)
+            if callable(fn2):
+                sid = int(fn2(session_key) or 0)
+    except Exception:  # noqa: BLE001
+        return {}
+    return {"source_last_id": sid} if sid else {}
 
 
 class ForgetFactsTool(BaseTool):
@@ -264,31 +362,51 @@ class ForgetFactsTool(BaseTool):
         # session_key 只信服务端注入的 _meta；kwargs["session_key"] 是 LLM 可自填
         # 的参数，回落过去等于让模型指定"写谁的画像"（跨用户注入向量）→ 拒绝执行
         session_key = str((meta or {}).get("session_key") or "")
+        svc = _memory_service_from_kwargs(kwargs)
         sm = _sm_from_kwargs(kwargs)
-        if sm is None or not session_key:
+        if (sm is None and svc is None) or not session_key:
             return ToolResult(False, error="memory_unavailable")
         from shisi.memory.legacy.structured_memory import StructuredMemory
 
         user_key = StructuredMemory.user_key_from_session(session_key)
-        removed = []
+        removed: list[int] = []
+        not_found: list[int] = []
         for fid in kwargs.get("fact_ids") or []:
             try:
-                if sm.delete_fact(int(fid), recycle=True, user_key=user_key):
+                if svc is not None:
+                    receipt = svc.forget_fact(
+                        int(fid), session_key=session_key,
+                        reason=str(kwargs.get("reason") or ""),
+                    )
+                    (removed if receipt.get("ok") else not_found).append(int(fid))
+                elif sm.delete_fact(int(fid), recycle=True, user_key=user_key):
                     removed.append(int(fid))
-            except Exception:  # noqa: BLE001
-                continue
+                else:
+                    not_found.append(int(fid))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("forget_facts 删除失败 id=%s: %s", fid, e)
+                not_found.append(int(fid))
         texts = [str(t or "").strip() for t in kwargs.get("fact_texts") or []]
         if texts:
-            try:
-                for row in sm.get_facts(user_key=user_key, min_confidence=0.0, limit=-1):
-                    fact = str(row.get("fact") or "")
-                    if any(t and t == fact for t in texts):
-                        fid = int(row.get("id"))
-                        if sm.delete_fact(fid, recycle=True, user_key=user_key):
-                            removed.append(fid)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("forget by text failed: %s", e)
-        return ToolResult(True, data={"removed": removed, "user_key": user_key})
+            if svc is not None:
+                # 仅精确同文可删（子串匹配会被一句话删光本人全部事实）；
+                # 判据唯一 owner = forget_facts_by_text
+                removed.extend(svc.forget_facts_by_text(texts, session_key=session_key))
+            else:
+                try:
+                    for row in sm.get_facts(user_key=user_key, min_confidence=0.0, limit=-1):
+                        fact = str(row.get("fact") or "")
+                        if any(t and t == fact for t in texts):
+                            fid = int(row.get("id"))
+                            if sm.delete_fact(fid, recycle=True, user_key=user_key):
+                                removed.append(fid)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("forget by text failed: %s", e)
+        data: dict = {"removed": removed, "user_key": user_key}
+        if not_found:
+            # 删不掉的 id 必须可见（模型幻觉 fact_id / 跨用户越权被拒），不得静默成功
+            data["not_found"] = not_found
+        return ToolResult(True, data=data)
 
 
 class QueryProfileTool(BaseTool):

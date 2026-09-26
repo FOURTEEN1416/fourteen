@@ -624,10 +624,31 @@ class StructuredMemory:
                  confidence: float = 0.5, source: str = "",
                  user_key: str = "", topics: str | list[str] | None = None,
                  source_last_id: int | None = None) -> int:
-        """添加用户事实（按 user_key 隔离）。
+        """int 投影（既有契约）：inserted/reinforced→fact_id，invalid→-1，
+        skipped_deleted_source→-2。写权威见 `add_fact_receipt`。"""
+        receipt = self.add_fact_receipt(
+            fact, category=category, confidence=confidence, source=source,
+            user_key=user_key, topics=topics, source_last_id=source_last_id,
+        )
+        action = receipt.get("action")
+        if action == "skipped_deleted_source":
+            return -2
+        if action == "invalid":
+            return -1
+        return int(receipt.get("fact_id") or -1)
 
-        包 Q · B-b：同 user_key 下 near-dup → UPDATE（confidence/access/last_seen/topics），
-        **不双插**。
+    def add_fact_receipt(self, fact: str, category: str = "general",
+                         confidence: float = 0.5, source: str = "",
+                         user_key: str = "", topics: str | list[str] | None = None,
+                         source_last_id: int | None = None) -> dict[str, Any]:
+        """事实 SQL 唯一写入口（W4 统一写路径，2026-09-27）。
+
+        返回回执 `{fact_id, action, user_key, source_last_id}`；
+        action ∈ inserted / reinforced / skipped_deleted_source / invalid。
+        `add_fact` 是其 int 投影，向量派生归 `SemanticMemory.write_fact`。
+
+        包 Q · B-b：同 user_key 下 near-dup → UPDATE（confidence/access/
+        last_seen/topics），**不双插**。
         """
         topics_text = (
             ",".join(str(t).strip() for t in topics if str(t).strip())
@@ -635,12 +656,17 @@ class StructuredMemory:
             else str(topics or "")
         )
         fact = str(fact or "").strip()
+        base = {
+            "user_key": user_key or "",
+            "source_last_id": source_last_id,
+        }
         if not fact:
-            return -1
+            return {**base, "fact_id": -1, "action": "invalid"}
 
         with self._conn(write=True) as conn:
             if source_last_id is not None and self.is_deleted_source(fact, user_key, source_last_id):
-                return -2  # 已删除来源的幂等跳过，不写向量，不阻塞水位
+                # 已删除来源的幂等跳过，不写向量，不阻塞水位
+                return {**base, "fact_id": -2, "action": "skipped_deleted_source"}
             # near-dup 扫描（同 user_key + active）
             rows = conn.execute(
                 "SELECT id, fact, confidence, access_count, category, topics FROM user_facts "
@@ -669,7 +695,7 @@ class StructuredMemory:
                         (new_conf, new_cat, merged_topics, existing["id"]),
                     )
                     conn.commit()
-                    return int(existing["id"])
+                    return {**base, "fact_id": int(existing["id"]), "action": "reinforced"}
 
             cursor = conn.execute(
                 "INSERT INTO user_facts "
@@ -678,7 +704,7 @@ class StructuredMemory:
                 (fact, category, confidence, source, user_key or "", topics_text),
             )
             conn.commit()
-            return cursor.lastrowid  # type: ignore[no-any-return]
+            return {**base, "fact_id": int(cursor.lastrowid), "action": "inserted"}
 
     def get_facts(self, category: str | None = None,
                   min_confidence: float = 0.0,
@@ -1049,6 +1075,20 @@ class StructuredMemory:
         with self._conn() as conn:
             return int(conn.execute("SELECT COALESCE(MAX(id),0) FROM chat_history WHERE session_id=? AND turn_id=?",
                                     (session_id, turn_id)).fetchone()[0])
+
+    def chat_last_id(self, session_id: str) -> int:
+        """本会话已落库的最新历史 id —— 与删除水位同钟。
+
+        轮内工具（用户行尚未写入）取不到 turn_id 对应行时的来源水位口径：
+        任何后续新轮都会使该读数变大，故「迟到重放 ≤ 水位 < 新一轮」成立。
+        """
+        if not session_id:
+            return 0
+        with self._conn() as conn:
+            return int(conn.execute(
+                "SELECT COALESCE(MAX(id),0) FROM chat_history WHERE session_id=?",
+                (session_id,),
+            ).fetchone()[0])
 
     def get_recent_chats(self, n: int = 20) -> list[dict[str, Any]]:
         """获取最近 N 条聊天"""
