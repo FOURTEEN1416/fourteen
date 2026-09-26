@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from my_character.persona_engine import (
@@ -24,6 +25,7 @@ from shisi.core.models.emotion_type import EmotionType
 from shisi.core.models.emotional_state import EmotionalState
 from shisi.core.models.persona_profile import PersonaProfile as ShisiPersonaProfile
 from shisi.core.services import prompt_builder
+from utils.project_paths import project_path
 
 logger = logging.getLogger("shisi.application.persona_service")
 
@@ -231,7 +233,8 @@ class PersonaService:
             injection_parts.append(emotion_layer)
 
         emotion_style = self._safe_engine_layer(
-            "emotion_style", self._engine.build_emotion_style_segment, effective_emotion
+            "emotion_style", self._engine.build_emotion_style_segment,
+            effective_emotion, self._coupler_base_style(character.persona),
         )
         if emotion_style:
             injection_parts.append(emotion_style)
@@ -393,12 +396,9 @@ class PersonaService:
         避免每条消息的磁盘 I/O + JSON 解析（含未命中文件名时的整目录 glob）。
         文件被外部改写（mtime 变化）时自动失效，无需显式清缓存。
         """
-        from pathlib import Path
-
         from utils.character_helpers import normalize_character_card
 
-        # 基于项目根目录构建绝对路径，避免依赖工作目录
-        chars_dir = Path(__file__).resolve().parent.parent.parent / "config" / "characters"
+        chars_dir = project_path("config", "characters")
         if not chars_dir.exists():
             return None
 
@@ -478,12 +478,22 @@ class PersonaService:
         style = style if isinstance(style, dict) else {}
 
         def _num(source: dict[str, Any], keys: tuple[str, ...], fallback: float) -> float:
+            """区分「显式取值」与「缺失」：显式 0 / 0.0 是有效设定，不得回落默认值。
+
+            旧实现 `float(source[key] or fallback)` 使 warmth=0 变 0.7、
+            emoji_freq=0 变 0.6 —— 滑块拉到最左端等于没拉。
+            仅当键存在且值可转 float 时采用；None / 空串 / 非数值才走 fallback。
+            """
             for key in keys:
-                if key in source:
-                    try:
-                        return float(source[key] or fallback)
-                    except (TypeError, ValueError):
-                        return fallback
+                if key not in source:
+                    continue
+                value = source[key]
+                if value is None or value == "":
+                    continue
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return fallback
             return fallback
 
         return ShisiPersonaProfile(
@@ -499,6 +509,23 @@ class PersonaService:
             humor=_num(style, ("humor",), 0.5),
             core_anchors=[str(a) for a in (anchors or [])],
         )
+
+    def _coupler_base_style(self, persona: ShisiPersonaProfile) -> dict[str, Any]:
+        """卡设人设数值 → 情绪-风格耦合器的 base_style。
+
+        唯一映射处：耦合器基准只从已收敛的 `ShisiPersonaProfile` 取，不再从原始卡
+        字段二次解析（否则会与静态人设段分叉）。句长档位复用 `PersonaProfile` 的
+        唯一 owner，保证「# 人设数值段」与「[当前风格指导]」说的是同一件事。
+
+        优先级：**卡设为基准，情绪/好感度为增量覆盖**（耦合器内 _apply_* 负责叠加）。
+        """
+        return {
+            "warmth": persona.warmth,
+            "playfulness": persona.playfulness,
+            "formality": persona.formality,
+            "emoji_freq": persona.emoji_frequency,
+            "sentence_length": persona.sentence_length_bucket(),
+        }
 
     def _map_emotional_state(self, emotion_state: Any) -> EmotionalState:
         """将 PersonaEngine/外部 emotion_state 映射为 shisi EmotionalState。"""

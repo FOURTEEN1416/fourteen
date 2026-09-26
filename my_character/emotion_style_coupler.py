@@ -201,8 +201,13 @@ class EmotionStyleCoupler:
         style.sarcasm = max(0.0, min(1.0, style.sarcasm + adj.get("sarcasm_delta", 0.0)))
         style.intimacy = max(0.0, min(1.0, style.intimacy + adj.get("intimacy_delta", 0.0)))
         style.emoji_freq = max(0.0, min(1.0, style.emoji_freq * adj.get("emoji_multiplier", 1.0)))
-        if adj.get("sentence_length"):
-            style.sentence_length = adj["sentence_length"]
+        # 情绪矩阵里的 sentence_length 是**相对卡设基线的偏移信号**：`medium` 表示
+        # 该情绪不推拉句长（矩阵 10 项里有 5 项是 medium）。旧实现无条件覆盖，
+        # 使卡上的句长滑杆在一切 medium 情绪下被抹平成 medium —— 现在只有显式
+        # short/long 才当轮覆盖基线。
+        adj_len = adj.get("sentence_length")
+        if adj_len in ("short", "long"):
+            style.sentence_length = adj_len
         if adj.get("rhetorical_devices"):
             style.rhetorical_devices = adj["rhetorical_devices"]
         if adj.get("particles"):
@@ -259,6 +264,8 @@ class EmotionStyleCoupler:
 
         if style.sentence_length == "short":
             parts.append("回复简短有力")
+        elif style.sentence_length == "long":
+            parts.append("可以把一句话说完整，不必刻意压短")
         elif style.sentence_length == "medium":
             parts.append("回复适中")
 

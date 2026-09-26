@@ -298,19 +298,29 @@ class PersonaEngine:
 
     # ── 提示词注入层构件 ──────────────────────────────────────
 
-    def _build_emotion_style_segment(self, emotion_state: EmotionalState | None) -> str:
+    def _build_emotion_style_segment(
+        self,
+        emotion_state: EmotionalState | None,
+        base_style: dict[str, Any] | None = None,
+    ) -> str:
         """构建情感-风格耦合指导段
 
         6b 项9②：形态归一收敛到 consistency_checker.normalize_emotion_for_coupler
         （唯一 owner），与一致性检测的风格接线共用同一份 dict 契约；
         item43 的枚举/双 dict 形态兼容语义不变。
+
+        W8：`base_style` 为调用方（PersonaService）解析到的**卡设基准**，
+        缺省 None 时耦合器回退内置基准 —— 不传不会崩，但卡上的温暖度/正式度/
+        表情频率/句长档位对当轮指导零影响（旧行为）。
         """
         if not emotion_state or not self._emotion_style_coupler:
             return ""
         try:
             from my_character.consistency_checker import couple_style_for
 
-            coupled_style = couple_style_for(emotion_state, self._emotion_style_coupler)
+            coupled_style = couple_style_for(
+                emotion_state, self._emotion_style_coupler, base_style
+            )
             if coupled_style is not None:
                 segment = self._emotion_style_coupler.get_style_prompt_segment(coupled_style)
                 if segment:
@@ -318,6 +328,29 @@ class PersonaEngine:
         except Exception as e:  # noqa: BLE001
             logger.debug("Emotion-style segment generation failed: %s", e)
         return ""
+
+    @staticmethod
+    def _affinity_level(raw: Any) -> int:
+        """好感档位读数：dict 形态取 `level`，数值形态直接用。
+
+        `persona_service._map_emotional_state` 明确支持两种形态，而旧实现在此处
+        只认 dict（`.get("affinity", {}).get("level")`）——传 int 档位即抛
+        AttributeError，被 `_safe_engine_layer` 吞掉后**整层「# 当前状态」当轮消失**
+        （关系指标对表达的通路被静默切断）。
+        """
+        if isinstance(raw, dict):
+            raw = raw.get("level", 0)
+        try:
+            return max(0, min(8, int(raw or 0)))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _as_float(raw: Any, fallback: float) -> float:
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return fallback
 
     def _build_emotion_layer(self, emotion_state: EmotionalState | None) -> str:
         if emotion_state is None:
@@ -327,23 +360,26 @@ class PersonaEngine:
             emotion_type = emotion_state.get("primary", {}).get("type", "平常")
             intensity = emotion_state.get("primary", {}).get("intensity", 0.5)
             energy = emotion_state.get("energy", 1.0)
-            affinity_level = emotion_state.get("affinity", {}).get("level", 0)
+            affinity_level = self._affinity_level(emotion_state.get("affinity"))
         elif hasattr(emotion_state, "to_dict"):
             state_dict = emotion_state.to_dict()
             emotion_type = state_dict.get("primary", {}).get("type", "平常")
             intensity = state_dict.get("primary", {}).get("intensity", 0.5)
             energy = state_dict.get("energy", 1.0)
-            affinity_level = state_dict.get("affinity", {}).get("level", 0)
+            affinity_level = self._affinity_level(state_dict.get("affinity"))
         elif hasattr(emotion_state, "emotion"):
             emotion_type = emotion_state.emotion.value if hasattr(emotion_state.emotion, "value") else str(emotion_state.emotion)
             intensity = getattr(emotion_state, "intensity", 0.5)
             energy = getattr(emotion_state, "energy", 1.0)
-            affinity_level = getattr(emotion_state, "affinity", 0)
+            affinity_level = self._affinity_level(getattr(emotion_state, "affinity", 0))
         else:
             emotion_type = "平常"
             intensity = 0.5
             energy = 1.0
             affinity_level = 0
+
+        intensity = self._as_float(intensity, 0.5)
+        energy = self._as_float(energy, 1.0)
 
         self.EMOTION_STYLE_MAP.get(emotion_type, self.EMOTION_STYLE_MAP["平常"])
 
@@ -501,9 +537,13 @@ class PersonaEngine:
         """构建情感层 prompt（公开接口）。"""
         return self._build_emotion_layer(emotion_state)
 
-    def build_emotion_style_segment(self, emotion_state: EmotionalState | None) -> str:
-        """构建情感风格片段（公开接口）。"""
-        return self._build_emotion_style_segment(emotion_state)
+    def build_emotion_style_segment(
+        self,
+        emotion_state: EmotionalState | None,
+        base_style: dict[str, Any] | None = None,
+    ) -> str:
+        """构建情感风格片段（公开接口；base_style = 卡设基准）。"""
+        return self._build_emotion_style_segment(emotion_state, base_style)
 
     def build_style_layer(
         self,

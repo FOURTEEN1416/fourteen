@@ -134,9 +134,16 @@ def normalize_emotion_for_coupler(emotion_state: Any) -> dict[str, Any] | None:
 
 
 def couple_style_for(
-    emotion_state: Any, coupler: EmotionStyleCoupler | None = None,
+    emotion_state: Any,
+    coupler: EmotionStyleCoupler | None = None,
+    base_style: dict[str, Any] | None = None,
 ) -> CoupledStyle | None:
-    """由 emotion_state 生成 CoupledStyle；任何失败返回 None（风格维度走缺省）。"""
+    """由 emotion_state 生成 CoupledStyle；任何失败返回 None（风格维度走缺省）。
+
+    `base_style` 是**卡设基准**（角色卡的 warmth/formality/emoji_freq/句长档位）。
+    传了它，情绪与好感度就是在"这个角色本来怎么说话"的基础上做增量；
+    不传则退回耦合器内置缺省基准（无卡上下文的调用方，如一致性检测兜底路径）。
+    """
     emotion_dict = normalize_emotion_for_coupler(emotion_state)
     if emotion_dict is None:
         return None
@@ -158,7 +165,7 @@ def couple_style_for(
                     ),
                 )
             c = _DEFAULT_COUPLER
-        return c.couple(emotion_dict)
+        return c.couple(emotion_dict, base_style=base_style)
     except Exception as e:  # noqa: BLE001
         logger.debug("couple_style_for failed: %s", e)
         return None
