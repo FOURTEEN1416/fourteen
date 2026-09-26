@@ -35,6 +35,22 @@ _INTENT_GC_INTERVAL_SECONDS = 300.0
 PLANE_RECEIPT_TIMEOUT = 30.0
 
 
+class ChannelNotReadyError(Exception):
+    """通道实例缺席 / 账号未登录 —— 「现在没法发」不等于「发送失败」。
+
+    计入 fail_count 会让提醒在三次轮询（约 3 分钟）后被判死：用户只是重启后
+    慢了几分钟扫码、或跑 `--no-api` 没有 websocket 服务，之后就永远收不到
+    叫醒（v1.30「说了会叫却没叫」同族）。此类轮次**跳过记账**、下分钟再试；
+    真实发送失败（连接器返回 False）仍然照计——3 次判死的裁决不变。
+
+    ⚠️ 口径只覆盖**本机直发**（`plane=None`，main 单进程入口）。控制面路径的
+    「30s 内无宿主受理」仍按未送达计一次失败（`test_reminder_unconfirmed_receipt
+    _is_not_success` 钉住）：那是 DECISION_LEDGER:115 的判死语义，且未受理的行仍
+    留在 outbox 可被后到的宿主投递，改成跳过会让提醒永活并每分钟堆一行——
+    两条拓扑对「通道一直缺席」的容忍度不一致，属未裁决项，不自决。
+    """
+
+
 class ReminderDeliveryTask:
     """可调用对象：APScheduler 线程每分钟调用一次（同步入口）。"""
 
@@ -110,12 +126,20 @@ class ReminderDeliveryTask:
         session_key = str(reminder.get("session_key") or "").strip()
         character_id = self._resolve_character_id(session_key)
         text = await self._compose_text(reminder, character_id=character_id)
-        if self._plane is not None:
-            # 块3：投递经控制面 outbox —— 通道宿主可能在别的 worker（scheduler
-            # 与连接器/WS 各自选主），本地直发在跨 worker 拓扑下必然误判失败。
-            delivered = await self._send_via_plane(session_key, text, character_id)
-        else:
-            delivered = await self._send_to_session(session_key, text)
+        try:
+            if self._plane is not None:
+                # 块3：投递经控制面 outbox —— 通道宿主可能在别的 worker（scheduler
+                # 与连接器/WS 各自选主），本地直发在跨 worker 拓扑下必然误判失败。
+                delivered = await self._send_via_plane(session_key, text, character_id)
+            else:
+                delivered = await self._send_to_session(session_key, text)
+        except ChannelNotReadyError as e:
+            # 「通道没就绪」跳过本轮：不记 delivered、也不吃失败配额。
+            logger.warning(
+                "[reminder] 通道未就绪，本轮不投递也不计失败 id=%s session=%s: %s",
+                reminder.get("id"), session_key, e,
+            )
+            return
         if delivered:
             # 自问自答根治：她主动说的话必须进历史，否则下一轮她自己不记得提醒过
             # 🔴 2026-09-22：必须带 character_id（出站行此前无归属 → 切角色继承台词）
@@ -168,6 +192,8 @@ class ReminderDeliveryTask:
                 return bool(await asyncio.to_thread(
                     self._wechat_sender, parsed.owner, parsed.peer, text,
                 ))
+            except ChannelNotReadyError:
+                raise
             except Exception as e:  # noqa: BLE001
                 logger.warning("[reminder] 微信投递异常 session=%s: %s", sk, e)
                 return False
@@ -177,6 +203,8 @@ class ReminderDeliveryTask:
                 if inspect.isawaitable(result):
                     result = await result
                 return bool(result)
+            except ChannelNotReadyError:
+                raise
             except Exception as e:  # noqa: BLE001
                 logger.warning("websocket 定向投递异常 session=%s: %s", session_key, e)
                 return False

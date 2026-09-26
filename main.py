@@ -77,6 +77,11 @@ from api.websocket_server import WebSocketServer  # noqa: E402
 from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
 from observability.health import health_checker  # noqa: E402
 from observability.logging_setup import setup_logging  # noqa: E402
+from proactive.runtime_assembly import (  # noqa: E402
+    install_llm_decision,
+    install_reminder_delivery,
+    make_ws_sender,
+)
 from user_scheduler import UserManager  # noqa: E402
 from utils import session_key as session_key_mod  # noqa: E402
 
@@ -249,34 +254,134 @@ def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None, user_manager=N
     return ws_server
 
 
-def _create_proactive_sender(ws_server_holder: dict, wechat_connector_holder: dict):
-    """创建主动消息发送器 — 多通道统一出口（通过holder dict实现延迟注入）"""
-    def send_proactive(msg: str):
-        logger.info("[主动消息] %s", msg)
-        print(f"\n💕 [十四主动] {msg}")
+def _wire_proactive_runtime(
+    scheduler: Any,
+    *,
+    orchestrator: Any,
+    user_mgr: Any,
+    ws_holder: dict[str, Any],
+    wechat_holder: dict[str, Any],
+) -> None:
+    """主动消息后台装配（唯一 owner：`proactive.runtime_assembly`）。
 
-        ws_server = ws_server_holder.get("ws")
-        if ws_server:
-            try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    if loop.is_running():
-                        asyncio.ensure_future(ws_server.broadcast_proactive(msg))
-                    else:
-                        loop.run_until_complete(ws_server.broadcast_proactive(msg))
-                except RuntimeError:
-                    asyncio.run(ws_server.broadcast_proactive(msg))
-            except Exception as e:  # noqa: BLE001
-                logger.warning("[主动消息] WebSocket推送失败: %s", e)
+    与 `api/run_api.py` 共用同一份构造，差异只在**拓扑**：本入口是单进程，
+    调度器、websocket 服务、微信连接器同域，因此 `plane=None` 直发；run_api 多
+    worker 下通道可能挂在别的 worker，必须走控制面 outbox。
 
-        wechat_connector = wechat_connector_holder.get("connector")
-        if wechat_connector:
-            try:
-                wechat_connector.send_text(msg)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("[主动消息] 微信发送失败: %s", e)
+    🔴 不再覆盖 `scheduler._send`：旧实现把它换成「ws 广播 + 微信全员 send_text」
+    ——一次不被记账、不扣配额、无归属的跨用户广播旁路（P1-21 已判禁止）。
+    `_init_mixin` 给的 `_send` 是仅留痕兜底，真实投递只有通道与提醒两条路径。
+    """
 
-    return send_proactive
+    def _ws_getter() -> WebSocketServer | None:
+        ws_server = ws_holder.get("ws")
+        return ws_server if isinstance(ws_server, WebSocketServer) else None
+
+    def _wechat_send(owner_id: int, peer: str, text: str) -> bool:
+        from proactive.reminder_delivery import ChannelNotReadyError
+
+        connector = wechat_holder.get("connector")
+        if connector is None:
+            # 还没扫码（或 --console 形态根本没有连接器）：跳过本轮，不记失败
+            raise ChannelNotReadyError(
+                f"微信连接器未注入（owner={owner_id} peer={peer}）"
+            )
+        if not getattr(connector, "token", ""):
+            raise ChannelNotReadyError(f"微信未登录（owner={owner_id} peer={peer}）")
+        if not peer:
+            logger.warning("[reminder] 微信投递拒绝：peer 为空 owner=%s", owner_id)
+            return False
+        try:
+            return bool(connector.send_text(text, to_user=peer))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[reminder] 微信定向投递异常 peer=%s: %s", peer, e)
+            return False
+
+    install_llm_decision(scheduler, orchestrator)
+    install_reminder_delivery(
+        scheduler,
+        orchestrator=orchestrator,
+        user_mgr=user_mgr,
+        wechat_sender=_wechat_send,
+        ws_sender=make_ws_sender(
+            _ws_getter, lambda: _WS_LOOP_HOLDER.get("loop"),
+        ),
+        plane=None,
+    )
+
+    # ── 注册 ws / console / wechat 通道（console 覆盖 _init_mixin 的默认注册） ──
+    # 🔴 2026-09-22 二次根治：旧实现把 websocket 通道注册成
+    # `lambda: ws_server.broadcast_proactive` —— 该函数只收 1 个参数，
+    # 而 `_send_targeted` 对非微信会话键执行
+    # `sender(message, session_key=session_key)` → TypeError → 按 P1-21
+    # 「定向消息拒绝降级为广播」直接判失败 ⇒ **本入口下 web 提醒/主动
+    # 消息恒判失败**（3 次后提醒判死）。现与 `api/run_api.py` 同构：
+    # 带 session_key 走 `send_proactive_to_session`（0 送达即抛，判失败），
+    # 无 session_key 的系统级消息保留广播。
+    if isinstance(ws_holder.get("ws"), WebSocketServer):
+
+        def _websocket_sender_factory(_holder=ws_holder):
+            _ws = _holder.get("ws")
+            if _ws is None:
+                return None
+
+            async def _send(msg: str, session_key: str | None = None) -> None:
+                if session_key:
+                    delivered = await _ws.send_proactive_to_session(session_key, msg)
+                    if delivered == 0:
+                        raise RuntimeError(
+                            "websocket 定向投递未送达任何归属连接"
+                            f"（session={session_key}）"
+                        )
+                    return
+                await _ws.broadcast_proactive(msg)
+
+            return _send
+
+        scheduler.register_channel("websocket", _websocket_sender_factory)
+    scheduler.register_channel(
+        "console", lambda: lambda msg: logger.info("[主动消息] %s", msg)
+    )
+
+    # P1-23：调度线程的投递桥到 ws 所属循环（微信 _send 内部是同步
+    # send_text，任一圈执行均可，与 ws 共用一条最简）
+    if hasattr(scheduler, "set_delivery_loop"):
+        scheduler.set_delivery_loop(lambda: _WS_LOOP_HOLDER.get("loop"))
+
+    def _wechat_sender_factory(_holder=wechat_holder, _mgr=user_mgr):
+        connector = _holder.get("connector")
+        if connector is None:
+            return None
+
+        async def _send(msg: str, session_key: str | None = None) -> None:
+            # P1-21：必须收 session_key —— 旧签名不收，调度器 async 分支
+            # `await sender(message, session_key=...)` 抛 TypeError 被吞，
+            # wechat 通道被反复置 None → main.py 形态主动消息零送达。
+            # 2026-09-21 重扫：取对端标识改由唯一真源 `utils.session_key` 提供。
+            # ⚠️ 旧 `_clean` 会把 `@im.wechat` 后缀**剥掉**，而该后缀是 wxid
+            # 自身的一部分（生产 `chat_history.session_id`
+            # = `2:o9cq80-_y...@im.wechat`；`connector._context_tokens` 的键、
+            # `send_text(to_user=)` 的测试夹具均为带后缀形态）→ 发送目标错误。
+            def _clean(target: str) -> str:
+                return session_key_mod.peer_of(str(target or ""))
+
+            if session_key:
+                peer = _clean(session_key)
+                if not peer:
+                    raise RuntimeError(f"微信投递拒绝：session_key 解析不出 peer（{session_key}）")
+                if not connector.send_text(msg, to_user=peer):
+                    raise RuntimeError(f"微信定向投递失败 peer={peer}")
+                return
+            # 无定向目标：发给全部已绑定用户（旧广播行为，仅限系统级消息）
+            wxids = _mgr.get_bound_wxids() if _mgr else []
+            if wxids:
+                for wxid in wxids:
+                    connector.send_text(msg, to_user=_clean(wxid))
+            else:
+                connector.send_text(msg)
+        return _send
+    scheduler.register_channel("wechat", _wechat_sender_factory)
+    logger.info("主动消息调度器通道已注册（ws/console/wechat）")
 
 
 def main() -> None:
@@ -376,8 +481,9 @@ def _run_orchestrator(args: argparse.Namespace, use_console: bool,
     else:
         logger.info("API服务已禁用 (--no-api)")
 
-    # ── 6. 主动消息调度器通道注册 ──
-    # 调度器由 _init_mixin._init_ase_and_scheduler 统一创建并启动，本节仅注册通道。
+    # ── 6. 主动消息后台运行时 ──
+    # 调度器由 _init_mixin._init_ase_and_scheduler 统一创建并启动；本节只做两件事：
+    # 按用户开关停用，或把本机通道/提醒投递/LLM 决策装配进去。
     scheduler = orchestrator.components.get("scheduler")
     if args.no_scheduler:
         # 用户明确禁用 → 停止 _init_mixin 已启动的调度器
@@ -388,97 +494,17 @@ def _run_orchestrator(args: argparse.Namespace, use_console: bool,
             orchestrator.components["scheduler"] = None
         logger.info("主动消息系统已禁用 (--no-scheduler)，已设置 DISABLE_SCHEDULER=1 供子进程继承")
     elif scheduler is not None:
-        # 增强为多通道发送（_init_mixin 默认 send 仅日志输出）
-        scheduler._send = _create_proactive_sender(
-            ws_server_holder=_ws_holder,
-            wechat_connector_holder=_wechat_holder,
+        # 本机后台运行时：通道注册 + 提醒到期投递 + LLM 主动决策。
+        # 旧实现在 _run_orchestrator 内手抄：覆盖 `_send` 成跨用户广播、覆盖
+        # `_daily_maintenance`（_init_mixin 已是该字段唯一 owner），却**漏装配
+        # 提醒轮询任务** ⇒ 本入口下 set_reminder 落库后没有任何读者。
+        _wire_proactive_runtime(
+            scheduler,
+            orchestrator=orchestrator,
+            user_mgr=user_mgr,
+            ws_holder=_ws_holder,
+            wechat_holder=_wechat_holder,
         )
-
-        def _daily_maintenance():
-            mem = orchestrator.components.get("memory")
-            if mem and hasattr(mem, "daily_maintenance"):
-                try:
-                    summary = mem.daily_maintenance()
-                    if summary:
-                        logger.info("每日摘要: %s", summary)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("每日维护异常: %s", e)
-        scheduler._daily_maintenance = _daily_maintenance
-
-        # 注册 ws / console / wechat 通道（console 覆盖 _init_mixin 的默认注册）
-        # 🔴 2026-09-22 二次根治：旧实现把 websocket 通道注册成
-        # `lambda: ws_server.broadcast_proactive` —— 该函数只收 1 个参数，
-        # 而 `_send_targeted` 对非微信会话键执行
-        # `sender(message, session_key=session_key)` → TypeError → 按 P1-21
-        # 「定向消息拒绝降级为广播」直接判失败 ⇒ **本入口下 web 提醒/主动
-        # 消息恒判失败**（3 次后提醒判死）。现与 `api/run_api.py` 同构：
-        # 带 session_key 走 `send_proactive_to_session`（0 送达即抛，判失败），
-        # 无 session_key 的系统级消息保留广播。
-        ws_server = _ws_holder.get("ws")
-        if ws_server is not None:
-
-            def _websocket_sender_factory(_holder=_ws_holder):
-                _ws = _holder.get("ws")
-                if _ws is None:
-                    return None
-
-                async def _send(msg: str, session_key: str | None = None) -> None:
-                    if session_key:
-                        delivered = await _ws.send_proactive_to_session(session_key, msg)
-                        if delivered == 0:
-                            raise RuntimeError(
-                                "websocket 定向投递未送达任何归属连接"
-                                f"（session={session_key}）"
-                            )
-                        return
-                    await _ws.broadcast_proactive(msg)
-
-                return _send
-
-            scheduler.register_channel("websocket", _websocket_sender_factory)
-        scheduler.register_channel(
-            "console", lambda: lambda msg: logger.info("[主动消息] %s", msg)
-        )
-
-        # P1-23：调度线程的投递桥到 ws 所属循环（微信 _send 内部是同步
-        # send_text，任一圈执行均可，与 ws 共用一条最简）
-        if hasattr(scheduler, "set_delivery_loop"):
-            scheduler.set_delivery_loop(lambda: _WS_LOOP_HOLDER.get("loop"))
-
-        def _wechat_sender_factory(_holder=_wechat_holder, _mgr=user_mgr):
-            connector = _holder.get("connector")
-            if connector is None:
-                return None
-
-            async def _send(msg: str, session_key: str | None = None) -> None:
-                # P1-21：必须收 session_key —— 旧签名不收，调度器 async 分支
-                # `await sender(message, session_key=...)` 抛 TypeError 被吞，
-                # wechat 通道被反复置 None → main.py 形态主动消息零送达。
-                # 2026-09-21 重扫：取对端标识改由唯一真源 `utils.session_key` 提供。
-                # ⚠️ 旧 `_clean` 会把 `@im.wechat` 后缀**剥掉**，而该后缀是 wxid
-                # 自身的一部分（生产 `chat_history.session_id`
-                # = `2:o9cq80-_y...@im.wechat`；`connector._context_tokens` 的键、
-                # `send_text(to_user=)` 的测试夹具均为带后缀形态）→ 发送目标错误。
-                def _clean(target: str) -> str:
-                    return session_key_mod.peer_of(str(target or ""))
-
-                if session_key:
-                    peer = _clean(session_key)
-                    if not peer:
-                        raise RuntimeError(f"微信投递拒绝：session_key 解析不出 peer（{session_key}）")
-                    if not connector.send_text(msg, to_user=peer):
-                        raise RuntimeError(f"微信定向投递失败 peer={peer}")
-                    return
-                # 无定向目标：发给全部已绑定用户（旧广播行为，仅限系统级消息）
-                wxids = _mgr.get_bound_wxids() if _mgr else []
-                if wxids:
-                    for wxid in wxids:
-                        connector.send_text(msg, to_user=_clean(wxid))
-                else:
-                    connector.send_text(msg)
-            return _send
-        scheduler.register_channel("wechat", _wechat_sender_factory)
-        logger.info("主动消息调度器通道已注册（ws/console/wechat）")
     else:
         logger.warning("主动消息调度器未初始化（_init_mixin 启动失败），跳过通道注册")
 

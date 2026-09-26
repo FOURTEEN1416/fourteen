@@ -243,4 +243,9 @@ def test_ws_server_hosts_outbox_consumer():
 def test_reminder_delivery_is_assembled_with_plane():
     src = _func_source("_install_reminder_delivery")
     assert "plane=" in src, "提醒投递未注入控制面（仍走本地 registry 直发）"
-    assert "character_id" in src
+    # 角色归属快照随公共装配下沉到 proactive/runtime_assembly.py（W3 缺陷 G）：
+    # 断言跟着真源走，仍然钉住"投递必须带 character 快照"。
+    assembly = (PROJECT_ROOT / "proactive" / "runtime_assembly.py").read_text(
+        encoding="utf-8"
+    )
+    assert "character_id_resolver" in assembly

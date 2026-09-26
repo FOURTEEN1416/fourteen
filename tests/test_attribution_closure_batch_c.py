@@ -99,20 +99,25 @@ def test_display_name_maps_builtin_and_file_card(tmp_path, monkeypatch):
     assert cr.display_name("card-x") == "测试角色"
 
 
-def test_run_api_character_resolver_does_not_fall_back_to_global():
+def test_assembly_character_resolver_does_not_fall_back_to_global():
     """🔴 块C 直击：装配层解析器**不得**回落全局 `current_character_name`。
 
     以源码级静态断言锁定：旧写法的 `if not char_id:` + "回落全局"组合一旦
     回归，本用例立即红。
+
+    2026-09-27（W3 缺陷 G）：解析器随「两入口公共装配」从 `api/run_api.py`
+    下沉到唯一 owner `proactive/runtime_assembly.py`，断言原样跟着真源走
+    ——**不是放宽**：仍要求按会话键解析、仍禁止全局回落、仍必须把
+    `character_id_resolver=` 传给提醒任务。
     """
     from pathlib import Path
 
-    src = Path("api/run_api.py").read_text(encoding="utf-8")
-    seg_start = src.index("def _character_id_resolver(")
-    seg_end = src.index("\n        _scheduler.register_reminder_task", seg_start)
-    body = src[seg_start:seg_end]
-    assert "current_character_name" not in body
-    assert "_cr.resolve_character_id(session_key, user_mgr)" in body
+    body = Path("proactive/runtime_assembly.py").read_text(encoding="utf-8")
+    seg_start = body.index("def _character_id_resolver(")
+    seg_end = body.index("register(ReminderDeliveryTask(", seg_start)
+    resolver_seg = body[seg_start:seg_end]
+    assert "current_character_name" not in resolver_seg
+    assert "resolve_character_id(session_key, user_mgr)" in resolver_seg
     assert "character_id_resolver=_character_id_resolver" in body
 
 

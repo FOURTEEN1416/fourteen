@@ -415,16 +415,13 @@ if _scheduler is not None:
     # 2026-09-20：修复「六点叫起床」事故——旧提醒链路只写库不触发（无轮询）、
     # 关键词裁决漏检意图、SQL UTC 与北京时间差 8 小时、投递目标缺失。
     def _install_reminder_delivery() -> None:
-        from api.byok import session_llm
-        from proactive.reminder_delivery import ReminderDeliveryTask
+        """任务的构造与依赖注入在 `proactive.runtime_assembly`（两入口唯一真源）。"""
+        from proactive.runtime_assembly import install_reminder_delivery, make_ws_sender
 
-        sm = getattr(orchestrator.components.get("memory"), "structured_memory", None)
-        if sm is None:
-            logger.warning("提醒投递未装配：structured_memory 不可用")
-            return
         registry_holder: dict[str, object] = {}
 
         def _wechat_send(owner_id: int, peer: str, text: str) -> bool:
+            from proactive.reminder_delivery import ChannelNotReadyError
             from wechat_direct.connector_registry import get_registry
 
             registry = registry_holder.get("r") or get_registry()
@@ -445,41 +442,32 @@ if _scheduler is not None:
                 "[reminder] 微信定向投递未命中可用通道 owner=%s registry=%s",
                 owner_id, snapshot,
             )
-            return False
+            # 本机没有该 owner 的已登录连接器 = 通道未就绪（连接器宿主可能在别的
+            # worker），不能记成「发送失败」吃满 3 次配额
+            raise ChannelNotReadyError(
+                f"本 worker 无 owner={owner_id} 的已登录微信通道 registry={snapshot}"
+            )
 
-        async def _ws_send(session_key: str, text: str) -> bool:
+        def _ws_getter():
             ws_server = _ws_holder.get("ws")
-            if not isinstance(ws_server, WebSocketServer):
-                return False
-            try:
-                # P0-6: 必须 await——旧实现同步调用只创建协程对象即 return True
-                #（协程从未执行），使 web 提醒假送达。
-                # 2026-09-22: 从 broadcast 收口为**定向**（按会话键），广播会把
-                # A 的提醒推给所有打开控制台的连接。
-                delivered = await ws_server.send_proactive_to_session(session_key, text)
-                return delivered > 0
-            except Exception as e:  # noqa: BLE001
-                logger.warning("提醒 websocket 定向投递失败 session=%s: %s", session_key, e)
-                return False
+            return ws_server if isinstance(ws_server, WebSocketServer) else None
 
-        def _character_id_resolver(session_key: str) -> str:
-            from utils import character_resolver as _cr
+        # P0-6: 必须 await——旧实现同步调用只创建协程对象即 return True（协程从未
+        # 执行），使 web 提醒假送达。2026-09-22: 从 broadcast 收口为**定向**。
+        # 2026-09-27: 发送器下沉公共 owner，并补跨循环桥接——连接属于 _run_ws_server
+        # 线程自建循环，提醒任务跑在共享循环上，直接 await 属跨循环未定义行为。
+        _ws_send = make_ws_sender(_ws_getter, lambda: _ws_holder.get("loop"))
 
-            return _cr.resolve_character_id(session_key, user_mgr)
-        task = ReminderDeliveryTask(
-            sm,
-            llm=orchestrator.components.get("llm"),
+        install_reminder_delivery(
+            _scheduler,
+            orchestrator=orchestrator,
+            user_mgr=user_mgr,
             wechat_sender=_wechat_send,
             ws_sender=_ws_send,
-            memory=orchestrator.components.get("memory"),
-            character_id_resolver=_character_id_resolver,
-            llm_resolver=lambda key: session_llm(key, orchestrator),
             # 块3：提醒投递走控制面（通道宿主可能在别的 worker；_wechat_send /
             # _ws_send 仅在控制面不可用时兜底）
             plane=_plane(),
         )
-        _scheduler.register_reminder_task(task)
-        logger.info("提醒到期投递任务已装配（每分钟轮询，豁免静默时段）")
 
     try:
         _install_reminder_delivery()
