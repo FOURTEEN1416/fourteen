@@ -89,6 +89,9 @@ htmlcov/
 audit_output.json
 ACA(3)*/
 
+# ── 会话验收/审计产物（补丁、测试日志、上线记录；只留本地不入库） ──
+outputs/
+
 # ── 部署打包产物（一次性 scp payload，不应进入版本控制） ──
 deploy_payload.tar.gz
 *_payload.tar.gz

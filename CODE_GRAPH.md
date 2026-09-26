@@ -1,4 +1,4 @@
-# 代码图谱 — unique-you (唯一的你) v3.8.22（2026-09-23 五域可靠性批次上线收口：三枚缺陷根治部署至生产三端 `6f80a5c`——① `proactive/frequency.py` FrequencyAdapter minimal 粘滞逐级回升（`ad828f7`）；② `tests/conftest.py` 账本测试沙箱隔离（`d57cb5f`，服务器 98 例验收账本 1526→1526 零污染实锤）；③ `scripts/migrate_legacy_wechat_channel.py` 启动通道同步 async 桥拆核（`6f80a5c`，asyncio.run-in-running-loop 自 09-21 起 116 行告警从未成功 → 部署后「已同步 3 条」×worker、告警归零）；健康 200、nginx 零改动；测试 **1898/1897/1** 本地四分块实测（428+577+1+411+481），合计 **1995**；端点 220/186 不变）；上一版 v3.8.21
+# 代码图谱 — unique-you (唯一的你) v3.8.23（2026-09-26 归属重构三端上线 `f85408f`：见下文「归属重构覆盖层」段——传输确认后记账、请求/后台凭证隔离、画像保序与来源水位、事实删除派生失效、抽取租约水位、昨日角色日记、id 分页、跨 worker OS 锁；上线后补 `sqlalchemy[asyncio]` 依赖声明。上一版 v3.8.22：2026-09-23 五域可靠性批次上线收口：三枚缺陷根治部署至生产三端 `6f80a5c`——① `proactive/frequency.py` FrequencyAdapter minimal 粘滞逐级回升（`ad828f7`）；② `tests/conftest.py` 账本测试沙箱隔离（`d57cb5f`，服务器 98 例验收账本 1526→1526 零污染实锤）；③ `scripts/migrate_legacy_wechat_channel.py` 启动通道同步 async 桥拆核（`6f80a5c`，asyncio.run-in-running-loop 自 09-21 起 116 行告警从未成功 → 部署后「已同步 3 条」×worker、告警归零）；健康 200、nginx 零改动；测试 **1898/1897/1** 本地四分块实测（428+577+1+411+481），合计 **1995**；端点 220/186 不变）；上一版 v3.8.21
 
 > 由 维护者 手动维护 | 最后核实: 2026-09-23（**v3.8.22 上线收口**：见上行全貌。主动消息按默默令止改——账本终结分析：proactive_send 28 全为 API 受理成功（web 协议无送达回执，最后一英里不可证）/ skip 451 中 396 为 llm_wait_window 自判等待窗；详见 LOG 2026-09-23 收口条目。）
 
@@ -21,14 +21,14 @@
 
 ---
 
-## 2026-09-26 本地重构覆盖层（尚未部署）
+## 2026-09-26 归属重构覆盖层（已上线三端 `f85408f`）
 
 - 对话：认证owner→会话授权→请求级LLM上下文→角色过滤历史与摘要→定稿→传输确认→整轮SQLite事务→后台记忆/画像。
 - 传输：HTTP `_ChatDeliveryResponse`；WS普通reply回调；SSE/WS流式私有确认回调；微信API受理前缀。全部不宣称终端已读。
 - LLM：`select_request_llm`负责显式配置；`request_llm` ContextVar贯通辅助任务；后台`session_llm`查账号策略；auto不继承平台凭证。
 - 记忆：`memory_extraction_progress`固定来源窗口/租约/水位；`fact_deletion_watermarks`防旧输入回灌；反思/事实向量需主库仍有效；日记按本地昨日×session×character。
 - 删除重复 `diary_summarizer.py`；唯一持久化owner `_legacy_diary_summarizer.py`。历史分页新增`before_id`，同秒消息按id稳定排序。
-- 以下旧版本指标为历史已部署口径；当前验证及未完成项见HANDOFF顶栏和LOG 2026-09-26，不与线上混报。
+- 以下旧版本指标为历史已部署口径；当前验证与上线结果见 HANDOFF 顶栏、LOG 2026-09-26。上线后新增一处跨环境修复：`sqlalchemy[asyncio]>=2.0.0`（干净环境缺 `greenlet` 会导致 `sqlalchemy.ext.asyncio` 导入失败）。
 
 ## 1. 全局指标
 

@@ -1,6 +1,7 @@
 # AGENTS.md — 唯一的你（ai-girlfriend）项目 Agent 宪法
 
 > **项目**：unique-you — 唯一的你·十四 — 基于 LLM 的智能情感陪伴系统
+> **版本**：v1.38.3（2026-09-26 **对话归属与记忆生命周期重构 · 三端上线**）——用户授权激进重构全链「谁说了什么」。**① 归属与传输**：统一原文窗口与摘要来源指纹，未知角色历史不再被查询者认领；HTTP（ASGI 正文确认）/ 非流式 WS（回调）/ SSE 与流式 WS（确认前缀）/ 微信（API 受理前缀）全部改为**传输确认后记账**，取消时保留已确认前缀与原轮次身份；提醒 / 主动 / 追问固定角色并支持生成中取消；同好友完整回合串行。**② 凭证与画像**：请求模型经 `utils.llm_bridge.request_llm` ContextVar 贯通工具 / 情感 / 摘要 / 抽取 / 画像，线程池必须传播上下文；后台按会话归属取配置（`api/byok.session_llm`），**显式配置错误禁止回落平台凭证**；画像更正改保序队列（不再“同步中就跳过新更正”），并按来源消息 id 逐字段拒绝迟到覆盖。**③ 记忆生命周期**：事实仅等价文本可合并（词面相似不再误并主体 / 否定 / 日期）；删除精确化并失效派生向量与反思，召回以主库存在性兜底；新增 `memory_extraction_progress`（SQLite 租约 + 固定来源窗口 + 持久化 id 水位）与 `fact_deletion_watermarks`；日记按**本地昨日 × 会话 × 角色**分桶并接回真实调度，重复的无持久化模块删除。**④ 其他根治**：历史分页按写入 `id` 游标（`before_id` / `next_before_id`）；同会话跨 worker 加 `ProcessSessionLock` OS 锁且活跃锁不被 TTL 淘汰；多模态附件契约补齐到直连 provider；OAuth 客户端按事件循环记账，不再误关其他循环的活跃连接池；夜间 curator 统一严格判据且按用户凭证取模型；主动 `dry_run` 恢复「只算紧迫度、不生成弃用草稿」。**⑤ 上线**：本地 `010259e` 推送 + 服务器 bundle 快进；冷停 → 冷包（129,784,015 B）+ 三库 `.backup` → **真实副本重复初始化演练** → 生产迁移，六张业务表行数前后一致；停机判据改用 `MainPID=0` + `cgroup.procs` 为空（既有 `TimeoutStopSec=5s` 会让超时停机显示 failed，而进程已被清空）；health / ready 全绿、4 worker、`NRestarts=0`、新日志 0 Traceback / 0 锁冲突 / 0 缺列缺表、nginx 四文件 sha256 零变化；81 个改动源码 blob 三端 `git hash-object` 一致。**⑥ 上线后补漏**（`f85408f`）：CI 全红暴露 `sqlalchemy` 缺 `asyncio` extra → 干净环境无 `greenlet`，`sqlalchemy.ext.asyncio` 导入即失败（backend / 前端 E2E / FF 子路由同根因；本地与生产恰好预装故长期不显），改 `sqlalchemy[asyncio]>=2.0.0` 后 CI 全绿。**验证**：本地冻结源码 **2020 收集 / 2019 通过 / 1 跳过 / 0 失败**（127 文件 / 41 卡，运行前后源码哈希变化 0）+ 前端 98/98 + tsc + ruff 全仓 + 六核心模块 mypy（含无注解函数体）+ ci_gates 4/4；服务器独立源码沙箱并发 / 发送契约 **118 通过**。**未做**：真实模型语义效果评测、生产四 worker 真实并发与真实更正序列观察。
 > **版本**：v1.38.2（2026-09-23 **上线收口 + 启动通道同步 P2 根治 + 主动消息终结分析（收尾轮）**）——默默批准 A 档上线后完成三件事。**① 部署收口**：服务器 pull → `remote_deploy.sh` → 重启，启动日志当场暴露**第三枚缺陷**（见②）→ 修复后再上线，终态三端本地=origin=服务器=**`6f80a5c`**；health 200、关键 blob 三端 `git rev-parse` 一致、nginx 零改动（大赛入口冻结遵守）；服务器账本隔离专项验收 98 例全绿、`agent_plane.db` **1526→1526 零污染**（`d57cb5f` conftest 沙箱在生产机实锤）。**② 启动通道同步 P2 根治**（`6f80a5c`）：`scripts/migrate_legacy_wechat_channel.py::sync_disk_sessions_to_db` 同步函数内 `asyncio.run()` 被 FastAPI lifespan（运行中循环）调用 → `RuntimeError` 被宽 except 吞，**磁盘微信会话→DB 启动同步自 09-21 起从未成功**（app.log 116 行告警实锤，谎言家族 asyncio 桥新例）；拆 `_sync_disk_sessions_async` 核 + async/CLI 双入口委托，+1 行为回归（红测前报错与生产日志逐字吻合）；部署后日志「已同步 3 条微信通道会话到数据库」×worker、告警归零。**③ 主动消息终结分析**（默默令「到此为止，只需检查监督+分析日志」，代码零改动）：账本 proactive_send **28 条全为 API 受理成功**（wechat web 协议**无送达回执**，最后一英里不可证=脆弱性 L2）；skip 451 中 **396 llm_wait_window**（模型自判等待窗，设计行为但占比高=大量时间选择沉默）+ deliver_failed 14（退避阶梯）；体感稀薄的可归因部分（minimal 粘滞 1 条/日）已随 `ad828f7` 上线根治。**验证**：收尾轮全量四分块 **428 / 577+1跳过 / 411 / 481 = 1898 收集 / 1897 通过 / 1 跳过 / 0 失败**（124 文件；41 卡在位、工作树仅文档批）+ ruff 0 错。**徽章刷新 1991 → 1995**（1897 Py + 98 FE），§0/§2/§4.3 同步。遗留①（`user_facts` 0 行）复观察条件已具备（干净账本+已上线），待生产自然积累重查。
 > **版本**：v1.38.1（2026-09-23 **五域可靠性批次：两枚 P1 根治（主动消息 minimal 粘滞 / 账本测试隔离）**）——用户裁决主线切换：「不着急融入 laya，先保障人设/主动消息/记忆/情感/拟人化五域完整可靠」；laya 语料判断核实为**无需接线**（`append_proactive_event` 已逐决策落账，积累即可训练，先前「语料接线」请示撤回）。五域生产体检后两枚 P1 入册。**P1-1 节流等级粘滞**（`ad828f7`）：`FrequencyAdapter.on_reply_received` 只认 low→normal 升档，落入 minimal 后**永久粘滞**——生产实证唯一真实微信用户持续回复仍被限 1 条/日（`afc52b3a0d8311f8.json` level=minimal, count=1）；改 count 归零时逐级回升 minimal→low→normal，+1 回归用例（5 失联→minimal，6 回复回 normal）。**P1-2 账本测试污染**（`d57cb5f`）：服务器分块 pytest 直写生产 `data/agent_plane.db`（memory_write 事件与 `/tmp/pytest-of-root` 日志 1 秒级对齐实锤）——五域可观测真源被测试脏账污染；conftest `isolate_runtime_state_files` 扩展：monkeypatch `EventLedger.default_path` → 沙箱 + 既有单例 `_db_path` 换指，任何重建都落临时目录；+2 契约用例（默认不写宿主 / 沙箱重定向），受污染历史条目按追加式纪律保留为审计线索。**情感衰减「覆盖 0 个引擎」裁定为非缺陷**（00:05 生产实测 + 恢复路径离线衰减代码阅读；基准重复应用会线性双计）。**验证**：四分块 **435 / 550+1跳过 / 439 / 472 = 1897 收集 / 1896 通过 / 1 跳过 / 0 失败**（41 卡在位、工作树仅本批文件）+ ruff 全仓 0 错 + ci_gates 4/4；两修复均红先行（复现→修复→转绿）。**遗留①**：生产 `user_facts` 0 行 + 画像生日缺失——因账本被测试污染证据降级为中置信，待部署后干净账本重观察事实抽取链。**上线**：`ad828f7`+`d57cb5f` 已 push，服务器 pull 归用户裁决；徽章暂留 1991，随部署批刷新。
 > **版本**：v1.38（2026-09-22 **六域三次排查根治：好感度刻度判据 / 阶段键空间与落盘 / 主动人设假接线**）——用户指令「继续全面排查六域」→ 情感域 **1 P0 + 1 P1 + 1 P2** + 主动/人设域 4 处假接线；收窗评审又抓出**读侧二次换算新变体**并入本批根治。**P0 刻度混用**：`_restore_missing_from_points` 点存裸钳（250→100 应 50）与 `_restore_from_audit` 不辨来源修复（df59752 写侧已改 shisi，本批修读侧）；评审实证在制品「凡 reason=user_scheduler_persist 即换算」把新行 250→50→10 **二次换算**（block_e 写读分钉、无 round-trip → 全绿漏检）→ 判据常量化 `MIRROR_REASON_POINTS/_SHISI`（enhancer 真源，写侧导入），读侧仅旧标记换算 + 死分支消除 + round-trip 用例。**P1 EmotionStage**：`mapper.sync` 只用 track 不回退裸键；`emotion_stage_state` 由零读写 → evaluate UPSERT + 构造回放（registry 先建表、传 db_path）；`/emotion-stage/{cid}/evaluate` 端点无用户维度 → 收口为纯映射 `resolve_stage` 不再以裸键写被回放的表。**P1 假接线**：ASEHub 工厂逐引擎注入知识三源（hub 级 setattr 假接线）；请求级情绪缓存接入每日衰减；`load_persona_hint("default")` 读 persona.yaml（旧查不存在的卡必 miss）；scheduler persona 回落 character_resolver/BUILTIN + 祝福支持 default。**P2**：`affinity_state._key("",c)` 与 `affinity_key` 同构。conftest 隔离扩展 `_DB_DEFAULT` 且**独立 try 块**（防 ase_hub 失败连带静默跳过）。**验证**：四分块 **467+1跳过 / 430 / 563 / 400 = 1861 收集 / 1860 通过 / 1 跳过 / 0 失败**（收窗复测，41 卡在位）+ ruff 全仓 0 错 + ci_gates 4/4 + **突变验红 3/3**（写侧退旧标记/读侧双换算/路由回 evaluate 各自转红，还原复跑全绿）。**遗留**：无 reason 裸 points 行不可辨（宁不换算）；hub 日记键 `split("|")` 两处未收口；round3 部分用例为文本断言（已补 3 行为例）。**并发登记**：本批即在制品收口（含评审窗核出的 P0 修正与文档归属补正）。
@@ -14,14 +15,23 @@
 
 ---
 
-## 当前本地实现补充（2026-09-26，未部署）
+## 当前实现补充（2026-09-26，已上线三端 `f85408f`）
 
-- 本连续会话正在进行归属/记忆生命周期重构；下方已部署历史基线不代表当前工作树。
-- 流式入口先完整定稿再分块，SSE/WS适配器确认后记已发前缀；普通HTTP使用ASGI发送回调，微信拆条仅记API受理正文。
-- 请求模型通过 `utils/llm_bridge.request_llm` 贯通子任务，线程池必须传播上下文；后台任务走 `api/byok.session_llm`。显式用户配置错误禁止回落平台。
-- 事实不能因词面相似就认作同一命题；删除必须失效派生召回。抽取来源水位和删除水位由SQLite持久化。
-- 日记只用 `_legacy_diary_summarizer`，午夜任务总结本地昨日并按会话/角色分桶。主动dry_run只计算紧迫度不生成草稿（此前生成依赖说明错误）。
-- 最新验证、未完成边界与提交状态以 `docs/HANDOFF_REPORT.md` 顶栏为准。测试清单必须递归覆盖 `tests/core/`，分块总数核对全量收集数。
+- 本批归属/记忆生命周期重构已于 2026-09-26 22:04 上线；下方已部署历史基线（v1.38.2 / `6f80a5c`）为上一版口径。
+- 部署通道：本地 `git push` + 服务器 bundle 快进（含大二进制提交的 `git pull` 必现 `fetch-pack: unexpected disconnect`）。**停机判据用 `MainPID=0` + `cgroup.procs` 为空**，不要用 `is-active`（`TimeoutStopSec=5s` 会让超时停机显示 `failed` 而进程已清空）。
+- 迁移纪律：冷停 → 冷包 + 三库 `.backup`（逐库 `integrity_check`）→ **真实副本重复初始化演练**（验幂等与行数）→ 生产执行 → 行数比对。本次六表行数前后一致。
+- 依赖声明纪律：`sqlalchemy` 必须带 `asyncio` extra，否则干净环境缺 `greenlet`，`sqlalchemy.ext.asyncio` 导入即失败；**本地预装 ≠ 声明完整**，以干净环境（CI）为准。
+- 线上验证：81 改动源码 blob 三端 `git hash-object` 一致、health/ready 全绿、nginx sha256 零变化、新日志 0 Traceback/0 锁冲突/0 缺列缺表。
+- 最新验证、遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md` 2026-09-26。
+
+## 本批重构确立的设计规则（2026-09-26 上线，改前必查）
+
+- 流式入口**先完整定稿再分块**，SSE/WS 适配器确认后记已发前缀；普通 HTTP 使用 ASGI 发送回调，微信拆条仅记 API 受理正文（受理 ≠ 已读）。
+- 请求模型经 `utils.llm_bridge.request_llm` 贯通子任务，进入线程池必须传播上下文；后台任务走 `api/byok.session_llm`。**显式用户配置错误禁止回落平台凭证**。
+- 事实不能因词面相似就认作同一命题；删除必须失效派生召回。抽取来源水位与删除水位由 SQLite 持久化。
+- 日记只用 `_legacy_diary_summarizer`，午夜任务总结**本地昨日**并按会话/角色分桶。主动 `dry_run` 只计算紧迫度、不生成草稿。
+- 历史排序与分页一律按写入 `id`；同会话跨 worker 互斥用 `ProcessSessionLock`（OS 锁）。
+- 测试清单必须递归覆盖 `tests/`，分块总数核对全量收集数；引用基线须同时声明**角色卡数**与**工作树状态**。
 
 ## 0. 项目身份
 

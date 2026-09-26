@@ -2,12 +2,14 @@
 
 ## 当前实施快照（优先于下方历史批注）
 
-- 范围：全链“谁说了什么”修复，用户授权激进重构。本地基点 `f9e27a3`，累计工作树由本连续会话修改，未push、未部署，线上未获得本批修复。
+- 范围：全链“谁说了什么”修复，用户授权激进重构。本地基点 `f9e27a3`；**已于 2026-09-26 22:04 上线生产**，三端一致到 `f85408f`（含上线后跨环境依赖补漏），线上已获得本批修复。
 - 已落实：统一来源窗口/身份过滤/整轮事务；出站固定角色+取消版本；HTTP、WS、微信的传输确认后记账；请求级模型ContextVar及后台owner凭证；画像保序更正与逐字段来源水位、隐含指代上下文；抽取来源id水位+租约；事实严格等价去重及删除派生失效；日记昨日×会话×角色与调度接线；id历史分页、活跃锁保护。
 - 现行owner：身份 `utils/character_resolver`，会话键 `utils/session_key`，请求模型 `utils/llm_bridge`+`llm_provider.select_request_llm`，后台模型 `api/byok.session_llm`，真实对话 `StructuredMemory.add_chat_turn`，日记 `_legacy_diary_summarizer`（重复模块已删）。
-- SQLite新增 `memory_extraction_progress`、`fact_deletion_watermarks`；仅新建本地合成库验证，不对生产执行迁移。上线前必须独立备份/迁移验证。
+- SQLite新增 `memory_extraction_progress`、`fact_deletion_watermarks`；**生产已串行迁移**：冷停服务 → 整库备份 → 真实副本重复初始化演练 → 生产执行，六张业务表行数前后一致（chat_history 1148 / user_facts 32 / reflections 30 / reminders 0 / user_profile 2 / recycle_bin 0）；未改动生产既有数据。
 - 最终本地回归：127个测试文件、41张角色卡、累计本会话工作树，递归四块 **502 + (450通过/1跳过) + 570 + 497 = 2020收集 / 2019通过 / 1跳过 / 0失败**，与全量collect-only吻合；运行前后源码哈希变化0。前端98/98、TypeScript通过；ruff全仓通过；六个核心文件mypy（含无注解函数体）通过；ci_gates 4/4（历史ADR文件名告警非阻断）。最终日志在outputs/stable-acceptance-*，不把重叠专项累加。角色卡gitignore，不能靠git恢复。
-- 必须保留边界：发送API/传输栈受理不是用户已读；硬崩溃时网络发送与本地记账不具备分布式原子性；同主机跨worker回合锁已接OS锁并通过独立子进程阻塞/释放验证；画像写入按来源消息id逐字段防迟到覆盖，生产四worker仍需部署验收；模型对引用、否定、相对日期的理解不能以mock测试证明百分之百。
+- 上线验收（2026-09-26）：三端 HEAD `f85408f`；本地与服务器 **81 个改动源码 blob 逐一 `git hash-object` 一致**；生产 health/ready 全绿、4 worker + supervisor 共 5 进程、`NRestarts=0`；新日志窗口 0 Traceback / 0 `database is locked` / 0 `no such column|table`；nginx 四项配置 sha256 前后一致（入口 `139.199.199.174:80` 未动）；备份 `/opt/ai-girlfriend/backups/release-20260926-220406-010259e`（约 124 MiB，含 3 库 `.backup` 与 data/config 冷包，sha256 已记录）；服务器独立源码沙箱 118 条并发/发送契约测试全通过。GitHub CI（run 36247485708）全绿。
+- 仍须保留边界：发送 API/传输栈受理不是用户已读；硬崩溃时网络发送与本地记账不具备分布式原子性；同主机跨 worker 回合锁已接 OS 锁并通过独立子进程阻塞/释放验证，生产四 worker 的真实并发仍待自然流量观察；画像写入按来源消息 id 逐字段防迟到覆盖已上线但未经历真实更正序列；模型对引用、否定、相对日期的理解不能以 mock 测试证明百分之百。
+- 本批还暴露并修复了一处**跨环境依赖声明遗漏**：`sqlalchemy` 未带 `asyncio` extra → 干净环境（CI）缺 `greenlet`，`sqlalchemy.ext.asyncio` 导入即失败（backend/前端 E2E/子路由三个 job 同根因）。本地与生产恰好预装该包故长期不显；已改为 `sqlalchemy[asyncio]>=2.0.0`（`f85408f`）。**教训：本地绿的依赖不等于声明完整。**
 - 对照源码、机制变更详见 `LOG.md` 2026-09-26；删除记录见 `docs/DELETION_LOG.md`。继续工作先看diff，禁止回滚累计成果或把outputs整目录纳入提交。
 
 
