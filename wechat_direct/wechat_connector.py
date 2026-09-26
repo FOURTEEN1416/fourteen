@@ -642,7 +642,9 @@ def _run_async_coro(coro):
     return asyncio.run(coro)
 
 
-def _call_user_manager(mgr, user_id, text, attachments=None, reply_sender=None):
+def _call_user_manager(
+    mgr, user_id, text, attachments=None, reply_sender=None, message_id: str = "",
+):
     """
     调用女友管理器处理消息（多用户路由）。
 
@@ -651,6 +653,8 @@ def _call_user_manager(mgr, user_id, text, attachments=None, reply_sender=None):
     缓存 asyncio.Lock 跨线程复用 → 同用户连发第二条时锁挂在新循环上，
     唤醒永远丢失（P1-审查 item27）。现统一委托进程常驻共享循环。
     attachments: 多模态附件（图片 content part 列表），可为 None。
+    message_id: 入站消息 id（缺陷 I）—— 桥到共享循环时 ContextVar **不**随之
+        传播，只能作为实参送进去，由 `UserManager.process_message` 在回合起点绑定。
     """
     from utils.async_utils import run_on_shared_loop
 
@@ -660,6 +664,8 @@ def _call_user_manager(mgr, user_id, text, attachments=None, reply_sender=None):
     kwargs = {"attachments": attachments}
     if reply_sender is not None:
         kwargs["reply_sender"] = publish
+    if message_id:
+        kwargs["message_id"] = str(message_id)
     coro = mgr.process_message(user_id, text, **kwargs)
     try:
         # 带发送回调时必须等待确认结束；桥接层超时后协程仍在运行，提前释放
@@ -1996,6 +2002,7 @@ class WeChatConnector:
         try:
             result = _call_user_manager(
                 self.user_manager, session_key, text, attachments, reply_sender=publish,
+                message_id=msg_id,
             )
             t_elapsed = time.perf_counter() - t_start
         except Exception as e:  # noqa: BLE001

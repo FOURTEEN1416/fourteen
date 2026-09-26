@@ -32,6 +32,7 @@ from orchestrator.session_locks import SessionLockManager
 from orchestrator.voice_detector import detect_voice_request as _detect_voice_request
 from tools.base_tool import ToolResult
 from utils.health_check import _is_healthy
+from utils.inbound_context import current_message_id
 from utils.llm_bridge import current_llm, request_scoped_llm
 
 logger = logging.getLogger("orchestrator.optimized")
@@ -392,9 +393,12 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             )
             if tool_inst is not None and getattr(tool_inst, "wants_call_context", False):
                 # turn_id：事实/画像写入口的来源水位与回执归属（W4 缺陷 B）
+                # message_id：入站消息身份（缺陷 I）——副作用幂等的去重键成分，
+                # 服务端注入，LLM 不可决定。
                 args["_meta"] = {
                     "session_key": session_key, "user_id": user_id,
                     "turn_id": str(turn_id or ""),
+                    "message_id": current_message_id(),
                 }
             try:
                 result = await asyncio.to_thread(

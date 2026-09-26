@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timedelta
 
@@ -102,22 +103,46 @@ class ReminderTool(BaseTool):
         meta = kwargs.pop("_meta", None) if isinstance(kwargs.get("_meta"), dict) else None
         session_key = str((meta or {}).get("session_key") or "")
         user_id = (meta or {}).get("user_id")
+        # 入站消息 id 随归属由编排器注入（_meta），LLM 参数不可决定
+        message_id = str((meta or {}).get("message_id") or "")
         try:
             normalized = normalize_trigger_time(trigger_time)
         except TriggerTimeError as e:
             # 失败信息回给终审模型：格式错→重试换算；过去时刻→重新换算或 ask_user
             logger.info("[reminder] trigger_time 校验失败: %s", e)
             return ToolResult(False, error=str(e))
-        try:
-            reminder_id = self._sm.add_reminder(
+        from proactive.runtime_plane import effect_once
+
+        # 幂等键含参数指纹：同一条消息托付两件事（六点和七点）各建一条，
+        # 只有"同一条消息 + 同一件事"的重放才被吞掉。无 message_id（web/控制台）
+        # 时键为空 → 不去重（宁可不 dedup，也不拿别的消息的键误吞本轮提醒）。
+        args_hash = hashlib.sha1(
+            f"{content}\n{normalized}".encode()
+        ).hexdigest()[:16]
+        dedup_key = (
+            f"set_reminder:{session_key}:{message_id}:{args_hash}" if message_id else ""
+        )
+
+        def _create() -> int:
+            return int(self._sm.add_reminder(
                 content, normalized, session_key=session_key, user_id=user_id,
-            )
+            ))
+
+        try:
+            first_executed, reminder_id = effect_once(dedup_key, _create)
+            if not first_executed:
+                logger.info(
+                    "[reminder] 入站消息 %s 重放，复用已建提醒 %s", message_id, reminder_id,
+                )
+                if isinstance(reminder_id, str) and reminder_id.isdigit():
+                    reminder_id = int(reminder_id)
             return ToolResult(True, data={
                 "reminder_id": reminder_id,
                 "content": content,
                 "trigger_time": normalized,
                 "deliver_to": session_key or "(无投递目标)",
                 "message": f"已设置提醒：{content}，时间 {normalized}",
+                **({"deduplicated": True} if not first_executed else {}),
             })
         except Exception:
             logger.exception("设置提醒失败")

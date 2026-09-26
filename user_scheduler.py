@@ -24,6 +24,7 @@ from typing import Any
 from my_character.emotion_engine import AffinityLevel, EmotionEngine
 from shisi.affinity import scale as affinity_scale
 from utils import affinity_state, session_key
+from utils.inbound_context import bind_message_id
 from utils.project_paths import resolve_project_path
 
 logger = logging.getLogger("user_scheduler")
@@ -266,6 +267,7 @@ class UserManager:
         self, user_id: str, text: str, message_type: str = "text",
         attachments: list | None = None,
         reply_sender=None,
+        message_id: str = "",
     ) -> dict[str, Any]:
         """处理某个用户的消息
 
@@ -274,10 +276,14 @@ class UserManager:
         不同用户可并行处理，同一用户消息串行处理，避免情感引擎状态串扰。
 
         attachments: 多模态附件（图片 content part 列表），由微信通道传入。
+        message_id: 入站消息 id（微信通道传入）。缺陷 I：跨线程/共享循环这一跳
+            ContextVar 不随之传播，故必须显式收下，再在**回合起点**绑定，使编排
+            器与工具副作用（set_reminder）能按同一 id 幂等。
         """
-        return await self._process_message_inner(
-            user_id, text, message_type, attachments, reply_sender
-        )
+        with bind_message_id(message_id):
+            return await self._process_message_inner(
+                user_id, text, message_type, attachments, reply_sender
+            )
 
     async def _get_user_llm_config(self, wxid: str) -> tuple[int | None, dict | None]:
         """取该 wxid 对应用户的**专属 LLM 配置**（BYOK）。
