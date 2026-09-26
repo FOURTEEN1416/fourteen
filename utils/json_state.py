@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import contextlib
+import itertools
 import json
 import logging
 import os
@@ -35,16 +36,21 @@ from typing import Any
 
 logger = logging.getLogger("utils.json_state")
 
-_process_locks: dict[str, threading.Lock] = {}
+_process_locks: dict[str, threading.RLock] = {}
 _process_locks_guard = threading.Lock()
+_tmp_counter = itertools.count(1)
 
 
-def _process_lock(path: Path) -> threading.Lock:
+def _tmp_seq() -> int:
+    return next(_tmp_counter)
+
+
+def _process_lock(path: Path) -> threading.RLock:
     key = str(path)
     with _process_locks_guard:
         lock = _process_locks.get(key)
         if lock is None:
-            lock = threading.Lock()
+            lock = threading.RLock()
             _process_locks[key] = lock
         return lock
 
@@ -96,16 +102,35 @@ def read_json(path: str | Path, default: Any = None) -> Any:
 
 
 def atomic_write_json(path: str | Path, data: Any) -> None:
-    """原子写：同目录 ``.tmp`` + ``os.replace``。
+    """原子写：锁内序列化 → 同目录**唯一命名**临时文件 → ``os.replace``。
 
     写失败时抛异常（由调用方决定是「吞掉降级」还是「上抛」）。同目录是硬要求 ——
     跨文件系统 ``replace`` 退化为拷贝，原子性即丢失。
+
+    🔴 2026-09-27（W3 缺陷 D 收口）：旧实现不持锁且临时名固定为
+    ``<file>.tmp`` —— 两个写者并发时**同名 tmp 互相覆写**，随后各自的
+    ``os.replace`` 会把「别人的半截内容」原子地换成正式文件（原子性只保
+    「读者不见半写」，保不了「写者互踩」）。现与 :func:`update_json` 共用
+    同一把「进程内锁 + POSIX flock」，临时名再补 pid + 线程 + 序号后缀，
+    即使锁退化平台（Windows）也不会两个写者写同一个 tmp。
     """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, p)
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+    with _process_lock(p), _file_lock(p):
+        _write_locked(p, payload)
+
+
+def _write_locked(p: Path, payload: str) -> None:
+    """在已持有该文件全部锁的前提下落盘（唯一 tmp 命名 + replace）。"""
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.{threading.get_ident()}.{_tmp_seq()}.tmp")
+    try:
+        tmp.write_text(payload, encoding="utf-8")
+        os.replace(tmp, p)
+    finally:
+        with contextlib.suppress(OSError):
+            if tmp.exists():
+                tmp.unlink()
 
 
 def update_json(
@@ -127,5 +152,7 @@ def update_json(
         result = mutate(data)
         if result is not None:
             data = result
-        atomic_write_json(p, data)
+        # 锁内直写：不得回调 atomic_write_json（同进程对同一 lock 文件二次
+        # flock 在 Linux 上会自锁死）
+        _write_locked(p, json.dumps(data, ensure_ascii=False, indent=2))
         return data
