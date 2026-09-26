@@ -108,7 +108,9 @@ def test_memory_pipeline_retrieve_context_keys():
     from shisi.memory.legacy.memory_pipeline import MemoryPipeline
     mp = MemoryPipeline()
     ctx = mp.retrieve_context("你好")
-    expected_keys = {"working", "episodic", "semantic", "facts", "reflections"}
+    # fact_provenance = W4 批次扩展的出处账（每条事实标 recall=keyword/vector/
+    # both/recent_fallback 与主库 fact_id），供上下文预算与因果回放消费。
+    expected_keys = {"working", "episodic", "semantic", "facts", "reflections", "fact_provenance"}
     assert set(ctx.keys()) == expected_keys
 
 

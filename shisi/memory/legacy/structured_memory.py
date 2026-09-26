@@ -779,11 +779,21 @@ class StructuredMemory:
             return any(source_last_id <= row["through_chat_id"] and self.facts_near_duplicate(text, row["fact"]) for row in rows)
 
     def has_active_fact(self, text: str, user_key: str) -> bool:
+        return self.find_active_fact_id(text, user_key) is not None
+
+    def find_active_fact_id(self, text: str, user_key: str) -> int | None:
+        """按原文取当前 active 事实的主库 id；不存在返回 None。
+
+        向量召回只带文本不带主键，合并进 prompt 前必须以此复核「主库里还在」
+        （删除后向量残留不得复活），并同时取回 id 供出处记账。
+        """
         with self._conn() as conn:
-            return conn.execute(
-                "SELECT 1 FROM user_facts WHERE user_key=? AND fact=? AND status='active' LIMIT 1",
+            row = conn.execute(
+                "SELECT id FROM user_facts WHERE user_key=? AND fact=? AND status='active' "
+                "ORDER BY id DESC LIMIT 1",
                 (user_key, text),
-            ).fetchone() is not None
+            ).fetchone()
+            return None if row is None else int(row["id"])
 
     def has_reflection(self, text: str, session_id: str, character_id: str = "") -> bool:
         with self._conn() as conn:

@@ -569,6 +569,90 @@ class MemoryPipeline:
 
         return result
 
+    @staticmethod
+    def _norm_fact_key(text: str) -> str:
+        """事实去重键：折叠空白 + 小写，去尾部句读。
+
+        与 `StructuredMemory.facts_near_duplicate` 的归一口径同构（仅等价文本），
+        但这里只做**同一条事实被两路各召回一次**的去重，不做词面相似合并
+        （词面相似不能证明主体/否定/日期相同，2026-09-26 归属重构已确立）。
+        """
+        return "".join(str(text or "").lower().split()).rstrip("。.!！?？")
+
+    def _merge_fact_recalls(
+        self,
+        *,
+        structured: list[Any],
+        vector: list[Any],
+        user_key: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """把关键词路与向量路召回合并为一份事实列表 + 出处账。
+
+        顺序：关键词/FTS 命中在前（精确匹配优先），语义近邻补后。
+        去重：按主库 `fact_id` 与规范文本双重判据。
+        复核：向量命中只带文本不带主键，必须回主库确认仍是本人的 active 事实，
+        否则丢弃——已删除事实不得靠向量残留复活。
+        """
+        merged: list[dict[str, Any]] = []
+        provenance: list[dict[str, Any]] = []
+        index_by_id: dict[int, int] = {}
+        index_by_key: dict[str, int] = {}
+
+        def _remember(text: str, fact_id: int | None, path: str, base: dict | None = None) -> None:
+            key = self._norm_fact_key(text)
+            if not key:
+                return
+            hit_id = int(fact_id) if fact_id is not None else None
+            pos = index_by_id.get(hit_id) if hit_id is not None else index_by_key.get(key)
+            if pos is None:
+                row: dict[str, Any] = dict(base or {})
+                row.update({"fact": text, "id": hit_id if hit_id is not None else 0})
+                pos = len(merged)
+                merged.append(row)
+                provenance.append({"fact": text, "fact_id": hit_id, "recall": path})
+                index_by_key[key] = pos
+                if hit_id is not None:
+                    index_by_id[hit_id] = pos
+                return
+            existing = provenance[pos]
+            if existing["recall"] != path:
+                existing["recall"] = "both"
+            if existing.get("fact_id") is None and hit_id is not None:
+                existing["fact_id"] = hit_id
+                index_by_id[hit_id] = pos
+                merged[pos]["id"] = hit_id
+
+        for row in structured or []:
+            if not isinstance(row, dict):
+                continue
+            text = str(row.get("fact") or row.get("content") or "").strip()
+            if not text:
+                continue
+            raw_id = row.get("id")
+            _remember(
+                text,
+                int(raw_id) if raw_id is not None else None,
+                "keyword",
+                base=row,
+            )
+
+        for item in vector or []:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("content") or item.get("fact") or "").strip()
+            if not text:
+                continue
+            try:
+                fact_id = self.sm.find_active_fact_id(text, user_key)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("向量召回主库复核失败，按不可信丢弃: %s", e)
+                continue
+            if fact_id is None:
+                continue
+            _remember(text, fact_id, "vector")
+
+        return merged, provenance
+
     def retrieve_context(
         self,
         query: str,
@@ -590,6 +674,7 @@ class MemoryPipeline:
             "semantic": [],
             "facts": [],
             "reflections": [],
+            "fact_provenance": [],
         }
         # 没有可信会话就没有私人上下文；不得将缺省值转换成全库检索。
         if not session_id:
@@ -617,6 +702,11 @@ class MemoryPipeline:
         elapsed_episodic = time.perf_counter() - start_episodic
 
         # 3. 语义检索 — 强制 user_key（有会话时禁止全库 search_facts）
+        #    这里是事实召回的**唯一合并点**：`semantic.search` 分别返回
+        #    `structured`（FTS/关键词）与 `vector`（语义近邻）两路。旧实现只取
+        #    structured，向量一路在管线入口被整段丢弃——关键词查不到的旧事实即便
+        #    语义命中也进不了 prompt（且写入侧 P1-12/块E 已把向量通道修通，
+        #    等于「写进去了、永远读不出」）。
         start_semantic = time.perf_counter()
         try:
             semantic_results = self.semantic.search(
@@ -624,11 +714,14 @@ class MemoryPipeline:
                 top_k=top_k,
                 user_key=uk,
             )
-            context["semantic"] = semantic_results.get("structured", [])
-            context["facts"] = [
-                s.get("fact", "") for s in context["semantic"]
-                if isinstance(s, dict)
-            ]
+            merged_facts, provenance = self._merge_fact_recalls(
+                structured=semantic_results.get("structured", []),
+                vector=semantic_results.get("vector", []),
+                user_key=uk,
+            )
+            context["semantic"] = merged_facts
+            context["facts"] = [f.get("fact", "") for f in merged_facts if f.get("fact")]
+            context["fact_provenance"] = provenance
         except Exception as e:  # noqa: BLE001
             logger.warning("Semantic retrieval failed, degraded: %s", e)
         elapsed_semantic = time.perf_counter() - start_semantic
@@ -645,10 +738,19 @@ class MemoryPipeline:
             )
 
         # 3b. 结构化事实补充（降级回退）— 只认当前会话 user_key
+        #     口径标注：这一路是「最近事实」，**不是**语义召回，出处记为
+        #     recent_fallback，供预算与回放区分「靠语义找回」与「只是最近写过」。
         if not context["facts"] and session_id:
             try:
                 facts = self.sm.get_facts(min_confidence=0.3, user_key=uk, limit=top_k)
+                context["semantic"] = [
+                    {"fact": f["fact"], "id": f.get("id", 0)} for f in facts[:top_k]
+                ]
                 context["facts"] = [f["fact"] for f in facts[:top_k]]
+                context["fact_provenance"] = [
+                    {"fact": f["fact"], "fact_id": f.get("id"), "recall": "recent_fallback"}
+                    for f in facts[:top_k]
+                ]
             except Exception as e:  # noqa: BLE001
                 logger.debug("Structured fact fallback failed: %s", e)
 
