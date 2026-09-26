@@ -10,7 +10,6 @@ from pydantic import BaseModel
 
 from ..character.character_card_v2 import to_persona_config
 from ..character.manager import CharacterManager
-from ..character.models import CharaCardV2
 from .common import ApiResponse
 
 logger = logging.getLogger("shisi.api.persona_routes")
@@ -41,17 +40,21 @@ async def get_persona(character_id: str):
 
 @router.put("/characters/{character_id}", response_model=ApiResponse)
 async def update_persona(character_id: str, req: PersonaUpdateRequest):
-    if _manager is None:
-        raise HTTPException(status_code=503, detail="CharacterManager未初始化")
-    try:
-        card = CharaCardV2.model_validate(req.card)
-    except Exception:
-        logger.exception("角色卡数据校验失败: %s", character_id)
-        raise HTTPException(status_code=400, detail="角色卡数据无效") from None
-    ok = _manager.update_character(character_id, card)
-    if not ok:
-        raise HTTPException(status_code=404, detail="角色不存在")
-    return ApiResponse(data={"character_id": character_id, "message": "人设已更新，对话中立即生效"})
+    """已作废：此路径只 UPDATE SQLite 运行态副本，不写 `config/characters` 权威真源。
+
+    旧实现在副本写入成功后返回「人设已更新，对话中立即生效」，而生成侧
+    （`PersonaService._load_character_card`）读的是真源文件 —— 该承诺不成立，
+    且下次从真源重载会静默回滚用户改动。410 在任何写动作之前抛出，
+    不留「副本改了、真源没改」的半写态。
+    """
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "该端点已作废：只写运行态副本、不写权威真源，改动不会在对话中生效。"
+            f"完整角色卡请用 PUT /api/characters/{character_id}/persona-card，"
+            f"数值/风格人设请用 PUT /api/characters/{character_id}/persona"
+        ),
+    )
 
 
 @router.get("/characters/{character_id}/preview", response_model=ApiResponse)

@@ -10,8 +10,6 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from ..character.manager import CharacterManager
-from ..character.models import CharaCardV2
-from ..character.validator import ValidationError
 from .common import ApiResponse
 
 logger = logging.getLogger("shisi.api.character_routes")
@@ -94,20 +92,20 @@ async def export_character(character_id: str):
 
 @router.put("/{character_id}", response_model=ApiResponse)
 async def update_character(character_id: str, req: UpdateRequest):
-    mgr = _get_manager()
-    try:
-        card = CharaCardV2.model_validate(req.card)
-    except Exception:
-        logger.exception("角色卡数据校验失败: %s", character_id)
-        raise HTTPException(status_code=400, detail="角色卡数据无效") from None
-    try:
-        ok = mgr.update_character(character_id, card)
-    except ValidationError:
-        logger.exception("角色更新校验失败: %s", character_id)
-        raise HTTPException(status_code=400, detail="角色数据更新失败") from None
-    if not ok:
-        raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
-    return ApiResponse(data={"character_id": character_id, "message": "更新成功"})
+    """已作废：与 `/api/shisi/persona/characters/{id}` 同一类缺陷。
+
+    `manager.update_character` 只 UPDATE SQLite 运行态副本，`config/characters`
+    权威真源不变（v1.9 裁决），旧响应却返回「更新成功」。410 先于任何写动作，
+    避免副本被单独改动的半写态。
+    """
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "该端点已作废：只写运行态副本、不写权威真源，改动不会在对话中生效。"
+            f"完整角色卡请用 PUT /api/characters/{character_id}/persona-card，"
+            f"数值/风格人设请用 PUT /api/characters/{character_id}/persona"
+        ),
+    )
 
 
 @router.delete("/{character_id}", response_model=ApiResponse)
