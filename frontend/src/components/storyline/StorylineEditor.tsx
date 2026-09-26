@@ -96,6 +96,11 @@ export default function StorylineEditor({ characterId, standalone = false }: Sto
   const [editingStageIdx, setEditingStageIdx] = useState<number | null>(null)
   const [editMemorialInput, setEditMemorialInput] = useState('')
 
+  // 后端声明：剧情线配置当前是否影响对话回复。缺省按 false（仅存档）渲染，
+  // 不猜、不假设"保存即生效"（生产 prompt 路径未接线，见 C 端 CHAT_AFFECTING）。
+  const affectsChat = configData?.affects_chat ?? false
+  const enabledBadge = affectsChat ? <Badge variant="info">已启用</Badge> : <Badge variant="warning">仅存档（未接入对话）</Badge>
+
   // 加载远程配置 — 同步 props/config 到 form state（标准模式）
   /* eslint-disable react-hooks/set-state-in-effect -- props-to-form-state sync */
   useEffect(() => {
@@ -222,6 +227,24 @@ export default function StorylineEditor({ characterId, standalone = false }: Sto
     setEnding({ ...ending, memorial_items: ending.memorial_items.filter((_, i) => i !== idx) })
   }
 
+  // ── 生效范围声明（后端 affects_chat=false 时显示）──
+
+  function renderScopeBanner() {
+    if (affectsChat) return null
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-1">
+        <p className="text-xs font-medium text-amber-700">当前仅存档：配置不会改变她的回复</p>
+        <p className="text-[10px] text-amber-600">
+          生产提示词链路未接入剧情线（`use_storyline=False`），保存只写入角色卡；
+          进度也只在服务进程内存在，重启或多进程下不共享。
+        </p>
+        <p className="text-[10px] text-amber-500">
+          是否接入或撤除本入口待产品裁决；在此之前请勿按"剧情会推进"来使用。
+        </p>
+      </div>
+    )
+  }
+
   // ── 开启检测结果提示 ──
 
   function renderDetectBanner() {
@@ -269,13 +292,14 @@ export default function StorylineEditor({ characterId, standalone = false }: Sto
       >
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-gray-500 uppercase tracking-wider">剧情线</span>
-          {enabled && <Badge variant="info">已启用</Badge>}
+          {enabled && enabledBadge}
         </div>
         <span className="text-xs text-gray-400">{expanded ? '▲' : '▼'}</span>
       </button>
 
       {expanded && (
         <div className="mt-3 space-y-4">
+          {renderScopeBanner()}
           {renderDetectBanner()}
 
           {/* 启用开关 */}
@@ -285,8 +309,8 @@ export default function StorylineEditor({ characterId, standalone = false }: Sto
               onChange={e => setEnabled(e.target.checked)}
               className="w-3.5 h-3.5 accent-gray-800"
             />
-            <span className="text-xs text-black">启用剧情线</span>
-            <span className="text-[10px] text-gray-400">（默认关闭，角色级可选）</span>
+            <span className="text-xs text-black">标记为启用</span>
+            <span className="text-[10px] text-gray-400">（仅存档，暂不改变回复）</span>
           </label>
 
           {/* 自动检测按钮 */}

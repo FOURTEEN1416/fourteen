@@ -721,6 +721,8 @@ export interface StorylineConfigResponse {
   enabled: boolean
   configured: boolean
   config?: StorylineConfig
+  /** 后端自我声明：该配置当前是否影响对话回复。缺省按 false（仅存档）渲染。 */
+  affects_chat?: boolean
 }
 
 export interface StorylineState {

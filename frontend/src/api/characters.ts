@@ -198,7 +198,7 @@ export function getStorylineConfig(id: string): Promise<StorylineConfigResponse>
   return client.get(`/characters/${id}/storyline`).then(r => r.data as StorylineConfigResponse)
 }
 
-export function updateStorylineConfig(id: string, config: StorylineConfigRequest): Promise<{ status: string; character_id: string }> {
+export function updateStorylineConfig(id: string, config: StorylineConfigRequest): Promise<{ status: string; character_id: string; affects_chat?: boolean }> {
   return client.put(`/characters/${id}/storyline`, config).then(r => r.data as { status: string; character_id: string })
 }
 

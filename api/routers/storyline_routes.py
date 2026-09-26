@@ -1,4 +1,8 @@
-"""剧情线 API — 角色剧情线配置和进度查询。"""
+"""剧情线 API — 角色剧情线配置的**存储面**与进度查询。
+
+响应的 `affects_chat` 字段声明配置当前是否影响对话（见 `CHAT_AFFECTING`）；
+生产 prompt 路径未接线，故为 False。
+"""
 
 from __future__ import annotations
 
@@ -24,6 +28,17 @@ router = APIRouter(prefix="/api/characters", tags=["storyline"])
 
 
 CHARACTERS_DIR = project_path("config", "characters")
+
+# 剧情线是否影响对话回复 —— **由 prompt 闸的实际状态决定的自我声明**（W8 缺陷 D）。
+#
+# 事实：唯一生产 prompt 路径 `shisi/application/persona_service.py` 传
+# `use_storyline=False`，`prompt_builder._get_storyline_context` 在闸门关闭时
+# 恒返回空串，因此卡里的 `storyline_config`（含 `enabled=true`）写入后**不会
+# 改变角色说的话**；本路由只是配置的存储面。
+# 测试钉：`tests/test_w8_storyline_honesty.py` 同时静态钉住那个实参 —— 一旦
+# 接线（改 True）该钉即红，强制同批改此常量与前端横幅，禁止"悄悄生效"。
+# 接线 vs 撤除入口属产品裁决（D 类），本模块不自决。
+CHAT_AFFECTING = False
 
 
 def _character_path(character_id: str) -> Path:
@@ -83,7 +98,7 @@ async def get_storyline_config(
 
     config_data = data.get("storyline_config")
     if not config_data:
-        return {"enabled": False, "configured": False}
+        return {"enabled": False, "configured": False, "affects_chat": CHAT_AFFECTING}
 
     # 恢复持久化的状态到引擎
     state_data = data.get("storyline_state")
@@ -91,7 +106,12 @@ async def get_storyline_config(
         engine = get_storyline_engine()
         engine.set_state_from_dict(character_id, state_data)
 
-    return {"enabled": config_data.get("enabled", False), "configured": True, "config": config_data}
+    return {
+        "enabled": config_data.get("enabled", False),
+        "configured": True,
+        "config": config_data,
+        "affects_chat": CHAT_AFFECTING,
+    }
 
 
 @router.put("/{character_id}/storyline")
@@ -100,7 +120,7 @@ async def update_storyline_config(
     req: StorylineConfigRequest,
     _auth: bool = Security(verify_api_key_dep),
 ):
-    """更新角色剧情线配置。"""
+    """更新角色剧情线配置（落盘 + 同步引擎；是否影响对话见 `CHAT_AFFECTING`）。"""
     data = _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
@@ -163,7 +183,11 @@ async def update_storyline_config(
     elif existing_state:
         engine.set_state_from_dict(character_id, existing_state)
 
-    return {"status": "updated", "character_id": character_id}
+    return {
+        "status": "updated",
+        "character_id": character_id,
+        "affects_chat": CHAT_AFFECTING,
+    }
 
 
 @router.delete("/{character_id}/storyline")
