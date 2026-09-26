@@ -25,6 +25,7 @@ from api.database import WechatBinding, get_db
 from api.deps import deps
 from api.path_security import sanitize_id
 from my_character.persona_card import PersonaCardV3
+from shisi.knowledge.character_knowledge_service import get_knowledge_service
 from shisi.knowledge.crawler_adapter import get_crawler_adapter
 from shisi.voice.character_voice import CharacterVoiceManager
 from utils.character_helpers import normalize_character_card, sanitize_character_name
@@ -368,23 +369,30 @@ async def get_character(
 
 
 def _invalidate_knowledge_index(character_id: str) -> None:
-    """角色内容变化后清知识索引（内存+磁盘），下次对话由 prompt_builder 从最新卡重建。
+    """角色内容变化后刷新知识的 card 来源并派生重建（外部来源保留）。
 
     旧索引一旦落盘，ensure_index 优先磁盘加载且永不重建——卡更新/换绑后
     知识库停留在旧内容（2026-09-17 排查发现绑定卡索引仅含建卡初期琐碎块，
-    卡内丰富的描述/锚点从未进入检索）。磁盘路径与
-    shisi.knowledge.character_knowledge_service._DEFAULT_INDEX_DIR 保持一致。
+    卡内丰富的描述/锚点从未进入检索）。
+
+    W5 语义变更：旧实现 ``svc.clear + unlink 整份索引`` —— 上传文档与
+    抓取/增强内容只存在于索引中，任何改卡/激活都会把它们一并销毁。现改为
+    ``refresh_card_source``：card 来源整体替换，上传与抓取来源原样保留，
+    索引在源存储锁内派生重建；其他 worker 下次 ensure 按版本自动跟进。
+    卡文件已不存在（角色删除中）则连源存储一并清理。
     """
     try:
-        from shisi.knowledge.character_knowledge_service import get_knowledge_service
-
         svc = get_knowledge_service()
-        svc.clear(character_id)
-        # 与 shisi.knowledge.character_knowledge_service._DEFAULT_INDEX_DIR 同为项目根锚定路径
-        (project_path("data", "knowledge") / f"{sanitize_id(character_id)}.json").unlink(missing_ok=True)
-        logger.info("知识索引已失效，待下次对话重建: %s", character_id)
+        raw = _load_character(character_id)
+        if raw is None:
+            svc.forget(character_id)
+            logger.info("角色卡已不存在，知识索引与源存储已清理: %s", character_id)
+            return
+        count, changed = svc.refresh_card_source(character_id, raw=raw)
+        logger.info("知识 card 来源已刷新（%d 块, changed=%s），外部来源保留: %s",
+                    count, changed, character_id)
     except Exception as e:  # noqa: BLE001
-        logger.warning("知识索引失效失败（非阻塞）: %s", e)
+        logger.warning("知识索引刷新失败（非阻塞）: %s", e)
 
 
 @router.put("/characters/{character_id}")
@@ -445,6 +453,9 @@ async def delete_character(
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
     if not _delete_character_file(character_id):
         raise HTTPException(status_code=500, detail="删除角色失败")
+
+    # W5：知识索引与源存储随角色一并清理（旧实现遗留孤儿索引文件）
+    _invalidate_knowledge_index(character_id)
 
     # 清除人设缓存
     if deps.orch and hasattr(deps.orch, "invalidate_character_persona_cache"):
@@ -861,15 +872,42 @@ def _save_facts(character_id: str, facts: list[dict]) -> bool:
 
 @router.get("/characters/{character_id}/memory/facts")
 async def list_memory_facts(
+    request: Request,
     character_id: str,
     category: str | None = Query(default=None),
+    limit: int = Query(default=500, le=500),
     _auth: bool = Security(verify_api_key_dep),
 ):
-    """获取角色记忆事实，可按分类过滤"""
-    facts = _load_facts(character_id)
-    if category:
-        facts = [f for f in facts if f.get("category") == category]
-    return {"facts": facts, "total": len(facts)}
+    """回读唯一真源 `user_facts`（W4 缺陷 E，2026-09-27）。
+
+    旧实现读 `data/character_memory/{cid}.json`——生成侧从不读取该文件，
+    控制台显示条数与下一轮 prompt 真正使用的记忆脱钩。现按 misc_routes
+    的归属谓词（`/api/memory/facts` 同一 owner）限定本人范围；角色维度
+    不成立（事实按用户会话归属），故本端点回显的是「当前登录用户」的
+    真实事实集。旧 JSON 面只作遗留数据留存，不再冒充记忆。
+    """
+    from api.routers import misc_routes  # 归属谓词唯一 owner，惰性 import 防环
+
+    orch = deps.orch
+    mem = getattr(orch, "_memory", None) if orch is not None else None
+    if mem is None:
+        return {"facts": [], "total": 0}
+    prefix = misc_routes._memory_scope_prefix(request)
+    if prefix is None:
+        rows = mem.semantic.get_facts(category, limit=limit)
+    else:
+        sm = getattr(mem, "structured_memory", None)
+        rows = sm.get_facts(category, limit=limit, owner_prefix=prefix) if sm else []
+    return {"facts": rows, "total": len(rows)}
+
+
+_FACT_SURFACE_GONE = (
+    "角色维度的事实读写面已作废：旧实现只写 data/character_memory 的 JSON，"
+    "生成侧从不读取它——返回「created/deleted」即谎报，写入的事实下一轮"
+    "对话不会出现，删除也拦不住真记忆的复现。事实唯一写权威：会话内 "
+    "remember_facts / forget_facts → ShisiMemoryService 统一入口"
+    "（fact_id/action/来源水位真实回执，迟到重放不复活、新一轮重述可重记）。"
+)
 
 
 @router.post("/characters/{character_id}/memory/facts", status_code=201)
@@ -878,22 +916,8 @@ async def add_memory_fact(
     req: MemoryFactCreate,
     _auth: bool = Security(verify_api_key_dep),
 ):
-    """添加角色记忆事实"""
-    if not req.content.strip():
-        raise HTTPException(status_code=400, detail="事实内容不能为空")
-    facts = _load_facts(character_id)
-    fact = {
-        "id": str(uuid.uuid4())[:8],
-        "content": req.content,
-        "category": req.category,
-        "tags": req.tags,
-        "character_id": character_id,
-        "created_at": datetime.now(tz=timezone.utc).isoformat(),
-    }
-    facts.append(fact)
-    if not _save_facts(character_id, facts):
-        raise HTTPException(status_code=500, detail="保存事实失败")
-    return {"status": "created", "fact": fact}
+    """410：见 `_FACT_SURFACE_GONE`。410 先于任何写动作，不留半写态。"""
+    raise HTTPException(status_code=410, detail=_FACT_SURFACE_GONE)
 
 
 @router.delete("/characters/{character_id}/memory/facts/{fact_id}")
@@ -902,14 +926,8 @@ async def delete_memory_fact(
     fact_id: str,
     _auth: bool = Security(verify_api_key_dep),
 ):
-    """删除角色记忆事实"""
-    facts = _load_facts(character_id)
-    new_facts = [f for f in facts if f.get("id") != fact_id]
-    if len(new_facts) == len(facts):
-        raise HTTPException(status_code=404, detail=f"事实不存在: {fact_id}")
-    if not _save_facts(character_id, new_facts):
-        raise HTTPException(status_code=500, detail="删除事实失败")
-    return {"status": "deleted", "fact_id": fact_id}
+    """410：旧「删除」只动 JSON，真库 user_facts 与其向量派生原样复现。"""
+    raise HTTPException(status_code=410, detail=_FACT_SURFACE_GONE)
 
 
 @router.delete("/characters/{character_id}/memory")
@@ -917,11 +935,8 @@ async def clear_memory(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
 ):
-    """清空角色所有记忆事实"""
-    path = _facts_path(character_id)
-    if path.exists():
-        path.unlink()
-    return {"status": "cleared", "character_id": character_id}
+    """410：作废端点不得顺手销毁遗留文件；真记忆的遗忘走 forget_facts。"""
+    raise HTTPException(status_code=410, detail=_FACT_SURFACE_GONE)
 
 
 # ── AI 角色生成 ─────────────────────────────────────────
