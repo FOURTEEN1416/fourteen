@@ -311,7 +311,7 @@ class ProactiveScheduler:
         self._reminder_task = task
         if self._scheduler is not None and getattr(self._scheduler, "running", False):
             self._scheduler.add_job(
-                self._safe_job_wrapper(task, "reminder_check"),
+                self._safe_job_wrapper(self._run_reminder_check, "reminder_check"),
                 IntervalTrigger(minutes=1),
                 id="reminder_check",
                 name="提醒到期投递检查",
@@ -431,7 +431,7 @@ class ProactiveScheduler:
             #    task 由 api 装配层注入（register_reminder_task）；未注入则不挂。
             if self._reminder_task is not None:
                 self._scheduler.add_job(
-                    self._safe_job_wrapper(self._reminder_task, "reminder_check"),
+                    self._safe_job_wrapper(self._run_reminder_check, "reminder_check"),
                     IntervalTrigger(minutes=1),
                     id="reminder_check",
                     name="提醒到期投递检查",
@@ -621,6 +621,35 @@ class ProactiveScheduler:
             return
         with contextlib.suppress(Exception):
             self.ase.apply_runtime_config(paused=self._paused)
+
+    def _refresh_binding_truth(self) -> None:
+        """把角色绑定缓存回灌到 SQLite 真源（块4，缺陷 D）。
+
+        本进程是调度器 master，而「切角色 / 好友自选 / 新绑定」的写路径落在
+        处理该 HTTP 请求的那个 worker（只热更本进程缓存 + DB）。不回灌则
+        master 永远按启动快照解析角色：主动消息、祝福、提醒文案都按旧角色口吻
+        开口。UserManager 内部按 30s 节流，非 SQLite 部署自行跳过。
+        """
+        try:
+            from api.deps import deps as _deps
+
+            gf = getattr(_deps, "gf", None)
+            fn = getattr(gf, "refresh_bindings_from_db", None)
+            if callable(fn):
+                fn()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("绑定真源回灌跳过: %s", e)
+
+    def _run_reminder_check(self) -> None:
+        """提醒到期任务的外壳：先回灌跨 worker 真源，再执行注入的 task。
+
+        提醒文案里的角色名按会话解析（`utils/character_resolver`），缓存陈旧
+        就会用旧角色名提醒。task 本身仍由 api 装配层注入，此处只加前置步。
+        """
+        self._refresh_binding_truth()
+        task = self._reminder_task
+        if task is not None:
+            task()
 
     def _save_config_file(self) -> None:
         self.write_config_file(
@@ -876,6 +905,8 @@ class ProactiveScheduler:
         2026-09-21 P1：ASEHub 按 user_key 分引擎 tick，消息**定向投递**到
         该会话，不再一条内容广播给所有人。
         """
+        # 块4（缺陷 D）：本进程是 master，绑定/换卡写在别的 worker —— 先回灌真源
+        self._refresh_binding_truth()
         if not self.ase:
             logger.warning("ASE 引擎未注入（components['ase'] 为空），主动消息检查跳过")
             return
@@ -1413,6 +1444,8 @@ class ProactiveScheduler:
           形态；农历表述宁缺毋错不发）；② 角色级全局日期（保留既有配置语义），
           但投递逐会话定向、dedup 键带 user_key。
         """
+        # 块4（缺陷 D）：祝福口吻的角色名同样要按当前真源解析
+        self._refresh_binding_truth()
         if self._is_quiet_hours():
             logger.info(
                 "[重要日期] 处于免打扰时段(%02d-%02d)，等待静默结束后补发",

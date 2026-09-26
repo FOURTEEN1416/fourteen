@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -228,3 +229,172 @@ def test_pause_route_prefers_master_scheduler_and_syncs_engine(monkeypatch, sche
     assert sched_sandbox.is_paused() is True
     assert hub.applied.get("paused") is True
     assert type(sched_sandbox)._read_config_file()["proactive"]["paused"] is True
+
+
+# ── D 的第二面：角色绑定必须跨 worker 同源（缺陷 D：仅启动预载）──────
+#
+# 生产 4 worker 只有 master 跑调度器。用户换角色（PUT /peers/{wxid}/character
+# 或控制台切卡）落在任一 API worker：它写 DB + 只热更**本进程**缓存与实例。
+# master 的 `_bindings` 是启动快照 → 主动消息/祝福继续按**旧角色**口吻开口，
+# 且新绑定用户的 wxid 在 master 里根本不存在（她永不去搭话，直到重启）。
+
+
+def _make_users_db(path):
+    """最小真源：wechat_bindings + wechat_peer_preferences 两张表。"""
+    import sqlite3
+
+    con = sqlite3.connect(str(path))
+    con.executescript(
+        """
+        CREATE TABLE wechat_bindings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            wxid TEXT NOT NULL UNIQUE,
+            nickname TEXT DEFAULT '',
+            avatar TEXT DEFAULT '',
+            character_card_id TEXT DEFAULT 'default',
+            bound_at TEXT
+        );
+        CREATE TABLE wechat_peer_preferences (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_user_id INTEGER NOT NULL,
+            peer_wxid TEXT NOT NULL,
+            character_card_id TEXT NOT NULL,
+            chosen_at TEXT
+        );
+        """
+    )
+    con.commit()
+    con.close()
+
+
+def _write_pref(path, owner: int, peer: str, card: str) -> None:
+    import sqlite3
+
+    con = sqlite3.connect(str(path))
+    con.execute(
+        "INSERT OR REPLACE INTO wechat_peer_preferences "
+        "(owner_user_id, peer_wxid, character_card_id, chosen_at) VALUES (?,?,?,?)",
+        (owner, peer, card, "2026-09-27 00:00:00"),
+    )
+    con.commit()
+    con.close()
+
+
+def _mgr(bindings: list[dict]):
+    import asyncio
+
+    from user_scheduler import UserManager
+
+    m = UserManager(SimpleNamespace(components={}))
+    asyncio.run(m.load_bindings(bindings))
+    return m
+
+
+def test_peer_character_change_by_other_worker_reaches_master_cache(tmp_path):
+    db = tmp_path / "users.db"
+    _make_users_db(db)
+    _write_pref(db, 7, "wx_b@im.wechat", "micai")
+
+    from utils import session_key
+
+    sk = session_key.build(7, "wx_b@im.wechat")
+    mgr = _mgr([])
+    # 回灌前：master 什么都不知道 → 回落内置角色
+    assert mgr._resolve_character_id(sk) == "default"
+
+    changed = mgr.refresh_bindings_from_db(db_path=db)
+    assert changed >= 1
+    assert mgr._resolve_character_id(sk) == "micai"
+
+    # 另一 worker 再次改卡 → 再回灌即跟上（不重启、不等 master 自身被写）
+    _write_pref(db, 7, "wx_b@im.wechat", "jiangtian")
+    mgr.refresh_bindings_from_db(db_path=db, force=True)
+    assert mgr._resolve_character_id(sk) == "jiangtian"
+
+
+def test_refresh_propagates_to_live_instance_and_new_bind_target(tmp_path):
+    """实例已存在时 `get_user_character` 优先信实例（缺陷 D 的 :460-471），
+    回灌必须把变更同步到活实例；真源新增的偏好键必须同样进入缓存。"""
+    db = tmp_path / "users.db"
+    _make_users_db(db)
+    import sqlite3
+
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "INSERT INTO wechat_bindings (user_id, wxid, nickname, character_card_id) "
+        "VALUES (7,'wx_b@im.wechat','默默','linwanxia')"
+    )
+    con.commit()
+    con.close()
+
+    mgr = _mgr([{"wxid": "wx_b@im.wechat", "user_id": 7,
+                 "nickname": "默默", "character_card_id": "linwanxia"}])
+    inst = mgr._get_or_create("7:wx_b@im.wechat")
+    assert inst.character_card_id == "linwanxia"
+
+    # 另一 worker 上用户切卡（写 DB，本进程实例不知道）
+    con = sqlite3.connect(str(db))
+    con.execute("UPDATE wechat_bindings SET character_card_id='micai' WHERE wxid=?",
+                ("wx_b@im.wechat",))
+    con.execute("INSERT INTO wechat_peer_preferences (owner_user_id, peer_wxid, "
+                "character_card_id, chosen_at) VALUES (8,'wx_new@im.wechat','chengshuang','')")
+    con.commit()
+    con.close()
+
+    mgr.refresh_bindings_from_db(db_path=db, force=True)
+    assert mgr.get_user_character("7:wx_b@im.wechat") == "micai"
+    assert inst.character_card_id == "micai", "活实例仍是旧卡 → 本轮对话/情感继续错角色"
+    # 新偏好按真源键形态进缓存（与 lifespan 启动预载同构：pref:{owner}:{peer}）
+    assert "pref:8:wx_new@im.wechat" in mgr.get_bound_wxids()
+    assert mgr._resolve_character_id("8:wx_new@im.wechat") == "chengshuang"
+
+
+# ── D 的接线面：master 的后台任务必须**先**回灌真源再决策 ────────────
+
+
+class _StubGf:
+    def __init__(self) -> None:
+        self.refresh_calls = 0
+
+    def refresh_bindings_from_db(self, **_kw) -> int:
+        self.refresh_calls += 1
+        return 0
+
+
+def _stub_gf(monkeypatch) -> _StubGf:
+    from api.deps import deps
+
+    gf = _StubGf()
+    monkeypatch.setattr(deps, "gf", gf, raising=False)
+    return gf
+
+
+def test_proactive_tick_re_reads_binding_truth_first(monkeypatch, sched_sandbox):
+    """调度器只在 master 跑，换角色的写路径落在别的 worker：
+    每个 tick 开头不回灌真源，她就按启动快照的旧角色开口。"""
+    gf = _stub_gf(monkeypatch)
+    sched_sandbox.ase = None  # 引擎缺失时 _check_ase 立即返回，隔离被测点
+    sched_sandbox._check_ase()
+    assert gf.refresh_calls == 1
+
+
+def test_reminder_job_re_reads_then_runs_task(monkeypatch, sched_sandbox):
+    gf = _stub_gf(monkeypatch)
+    ran: list[int] = []
+    sched_sandbox._reminder_task = lambda: ran.append(1)
+    sched_sandbox._run_reminder_check()
+    assert ran == [1], "提醒任务仍须被执行（回灌不是替代）"
+    assert gf.refresh_calls == 1
+
+
+def test_important_dates_job_re_reads_before_early_return(monkeypatch, sched_sandbox):
+    """祝福任务即使在免打扰早退，也应先完成真源回灌（回灌是任务第一步）。"""
+    from proactive.ase_engine import _local_now
+
+    gf = _stub_gf(monkeypatch)
+    h = _local_now().hour
+    sched_sandbox._quiet_hours = (h, (h + 1) % 24)  # 当前小时必在窗内 → 立即早退
+    sched_sandbox._check_important_dates()
+    assert gf.refresh_calls == 1
+

@@ -12,22 +12,28 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sqlite3
 import threading
 import time
 from contextlib import closing
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from my_character.emotion_engine import AffinityLevel, EmotionEngine
 from shisi.affinity import scale as affinity_scale
 from utils import affinity_state, session_key
+from utils.project_paths import resolve_project_path
 
 logger = logging.getLogger("user_scheduler")
 
 # 用户专属 LLM 配置（BYOK）缓存 TTL：配置变更罕见，避免每条微信消息都查库；
 # 改完最多 30s 生效。
 _LLM_CFG_CACHE_TTL = 30.0
+
+# 绑定缓存向 SQLite 真源回灌的节流窗（缺陷 D：跨 worker 换角色/新绑定）。
+_BINDING_REFRESH_SECONDS = 30.0
 
 
 @dataclass
@@ -100,6 +106,11 @@ class UserManager:
         # ────────────────────────────────────────────────────────────
         self._users_lock = threading.Lock()
         self._bindings_lock = asyncio.Lock()
+        # 跨 worker 真源回灌的节流簿（缺陷 D）。用独立 threading.Lock：
+        # 回灌由 APScheduler 工作线程发起，_bindings_lock 是 asyncio.Lock，
+        # 在别的线程 await 它没有意义。
+        self._binding_refresh_lock = threading.Lock()
+        self._last_binding_refresh = 0.0
 
         # 从 orchestrator 的共享情感引擎提取配置
         self._engine_template = None
@@ -560,6 +571,160 @@ class UserManager:
         """解除绑定时清理缓存"""
         async with self._bindings_lock:
             self._bindings.pop(wxid, None)
+
+    # ── 跨 worker 真源回灌（块4，缺陷 D）─────────────────────────
+    #
+    # 缓存是 SQLite 的**内存镜像**，但写路径只热更本进程：
+    # `wechat_channel_routes.py` 换角色、`wechat_routes.py` 绑定、连接器自选
+    # 都发生在处理该 HTTP 请求的那个 worker，而生产 4 uvicorn worker 里只有
+    # master 跑调度器（`api/run_api.py` 的 flock 选主）。旧实现除此之外仅在
+    # lifespan 启动时预载一次 → master 的视图永远停在启动快照：
+    #   · 换角色后主动消息/祝福/提醒文案仍按**旧角色**口吻开口
+    #     （`get_user_character` 又优先信活实例，实例值同样陈旧，切角永不生效）；
+    #   · 新绑定/新自选偏好在 master 不可见 → 该会话的角色解析回落旧卡或内置十四。
+    #
+    # 用**同步 sqlite3 只读**回灌，而不是复用异步 session：调用方是 APScheduler
+    # 工作线程，那里没有可用事件循环，`asyncio.run` / `run_coroutine_threadsafe
+    # ().result()` 属本项目「谎言家族 asyncio 桥」的死法（见 utils/async_utils）。
+    # 只读连接（mode=ro）不写库、不参与 ORM 会话，读的是已提交行。
+
+    @staticmethod
+    def _resolve_users_db_path(db_path: str | Path | None = None) -> Path | None:
+        """users.db 的文件路径；非 SQLite 部署返回 None（不猜测、不误读）。"""
+        if db_path is not None:
+            return resolve_project_path(str(db_path))
+        url = (
+            os.environ.get("APP_DATABASE_URL", "").strip()
+            or os.environ.get("DATABASE_URL", "").strip()
+        )
+        if not url:
+            # 与 api.runtime_config.get_database_url() 的默认口径一致，
+            # 但锚定项目根（相对路径按 CWD 解析会静默读到另一个库）。
+            return resolve_project_path("data/users.db")
+        for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
+            if url.startswith(prefix):
+                raw = url[len(prefix):].split("?")[0]
+                if not raw or raw.startswith(":memory:"):
+                    return None
+                return resolve_project_path(raw)
+        return None
+
+    @staticmethod
+    def _read_binding_rows(path: Path) -> tuple[dict[str, dict], bool]:
+        """(绑定行, 偏好表是否可读)。偏好表缺失/旧库无表 → 第二项 False。"""
+        rows: dict[str, dict] = {}
+        prefs_ok = True
+        with closing(sqlite3.connect(
+            f"file:{path.as_posix()}?mode=ro", uri=True, timeout=2.0
+        )) as conn:
+            conn.execute("PRAGMA busy_timeout=2000")
+            try:
+                for wxid, uid, nickname, card in conn.execute(
+                    "SELECT wxid, user_id, nickname, character_card_id "
+                    "FROM wechat_bindings"
+                ):
+                    key = str(wxid or "").strip()
+                    if not key:
+                        continue
+                    rows[key] = {
+                        "wxid": key,
+                        "user_id": uid,
+                        "nickname": str(nickname or ""),
+                        "character_card_id": str(card or "default"),
+                    }
+            except sqlite3.Error as e:  # noqa: BLE001
+                logger.debug("绑定表回读失败: %s", e)
+            try:
+                for owner, peer, card in conn.execute(
+                    "SELECT owner_user_id, peer_wxid, character_card_id "
+                    "FROM wechat_peer_preferences"
+                ):
+                    if not owner or not peer:
+                        continue
+                    rows[f"pref:{int(owner)}:{peer}"] = {
+                        "wxid": str(peer),
+                        "user_id": int(owner),
+                        "character_card_id": str(card or "default"),
+                    }
+            except sqlite3.Error as e:  # noqa: BLE001
+                prefs_ok = False
+                logger.debug("好友角色偏好回读失败: %s", e)
+        return rows, prefs_ok
+
+    def refresh_bindings_from_db(
+        self,
+        *,
+        db_path: str | Path | None = None,
+        force: bool = False,
+        min_interval_seconds: float = _BINDING_REFRESH_SECONDS,
+    ) -> int:
+        """把绑定缓存回灌到 SQLite 真源（节流默认 30s）。返回角色变更的键数。
+
+        语义与启动预载一致：**DB 为准**。但整体替换只在两张表都读成功时生效，
+        单表读失败则保留该表的本地键，避免旧库/迁移中把偏好清空。
+        """
+        with self._binding_refresh_lock:
+            now = time.monotonic()
+            if not force and now - self._last_binding_refresh < min_interval_seconds:
+                return 0
+            self._last_binding_refresh = now
+
+        path = self._resolve_users_db_path(db_path)
+        if path is None or not path.exists():
+            return 0
+        try:
+            rows, prefs_ok = self._read_binding_rows(path)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("绑定真源回灌失败（保留本进程缓存）: %s", e)
+            return 0
+        if not rows and not prefs_ok:
+            return 0
+
+        with self._users_lock:
+            old = self._bindings
+            if not prefs_ok:
+                for k, v in old.items():
+                    rows.setdefault(k, v)
+            touched = {
+                k for k, v in rows.items()
+                if str((old.get(k) or {}).get("character_card_id") or "")
+                != str(v.get("character_card_id") or "")
+            }
+            self._bindings = rows
+
+        # 活实例同步：`get_user_character` 在实例存活时**优先信实例**，
+        # 不同步则换卡永不生效。按会话键重新解析（而不是把变更键直接当实例键）——
+        # 裸 wxid 的变更要落到 `owner:peer` 形态的实例上，且当该 (owner,peer)
+        # 有好友自选偏好时偏好优先，不能把偏好覆盖成绑定卡。
+        for uid, inst in self._affected_instances(touched):
+            resolved = self._resolve_character_id(uid)
+            if resolved and resolved != inst.character_card_id:
+                # set_user_character 自身持锁、建角色引擎并打日志
+                self.set_user_character(uid, resolved)
+                logger.info("跨 worker 换卡生效: %s → %s", uid, resolved)
+        return len(touched)
+
+    def _affected_instances(self, touched_keys: set[str]) -> list[tuple[str, Any]]:
+        """缓存变更后可能受影响的活实例快照（键 + 实例）。"""
+        if not touched_keys:
+            return []
+        with self._users_lock:
+            return [
+                (uid, inst) for uid, inst in self._users.items()
+                if self._binding_keys_for_session(uid) & touched_keys
+            ]
+
+    @staticmethod
+    def _binding_keys_for_session(uid: str) -> set[str]:
+        """该会话键在 `_resolve_character_id` 里会读到的全部缓存键。"""
+        keys = {uid, f"pref:{uid}"}
+        owner, peer = session_key.split_owner(uid)
+        if peer:
+            keys.add(peer)
+            keys.add(f"pref:{owner}:{peer}")
+        if owner:
+            keys.add(owner)
+        return keys
 
     def health_check(self) -> dict[str, Any]:
         return {
