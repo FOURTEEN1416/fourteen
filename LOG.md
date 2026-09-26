@@ -7,6 +7,24 @@
 
 ---
 
+## 2026-09-27 — W3 实施窗 · 后台单一运行时与可恢复触达：A–J 十缺陷根治（未 push 未部署）
+
+- **本窗范围**：任务书已确认缺陷 **A–J 全部**按白名单文件先红测后根治；全程未 push、未部署、未 SSH、未读真实 `.env`/凭证/聊天，提交只用显式路径。基线 `985beeb` → 终态 `b59eb8b`（14 笔）。
+- **公共底座（缺陷 A/B/C/E/G 同根）**：4 uvicorn worker 下调度主 / 微信连接器宿主 / WS 持有者**各自独立选主、互不知情**——A 的本地 registry 恒空 ⇒ 主动消息与提醒判「通道不可用」再 3 次判死。新 `proactive/runtime_plane.py`（`data/runtime_plane.db`，WAL + 单语句 CAS）把「谁活着 / 通道期望态 / 出站命令+受理回执 / 控制命令 / 入站幂等 / 追问预算 / 副作用幂等」变成跨进程可见的持久事实，**不引入消息栈**；控制面不可用即明确失败，不降级为广播、不假成功。
+- **A 收口 `1387e27`**：新增 `runtime_beat` 心跳租约——调度器在**唯一 job 咽喉** `_safe_job_wrapper` 与 `start()` 各续租，TTL 900s（最快心跳 5min × 3 倍余量），经 `/api/proactive/state` 与 `scheduler.health_check` 暴露 `beat_alive/holder/age`。判据取舍：**只做可观测、不做自动接管**（接管=双调度器并存风险），也**不 503 闸 `/api/ready`**（会把会话 worker 摘出 LB，且首拍窗误判）。
+- **B `ecf07c9`**：断连/停用先写 `channel_desired_state` + 释放 presence 租约 ⇒ 任一 worker 调用全局生效；连接器每圈自查期望态（disabled → 自停 + 回收本进程实例与通道 flock，否则他 worker 重连恒 429）；`restore_on_boot` **先看期望态再看凭证**（显式停用不再被重启复活）；`/reconnect` 不再先 unlink 活凭证。
+- **C `1395421`**：出站一律入队 `outbound_commands`（保留 owner/slot/peer/character/turn 快照）并**等受理回执**才判成功；run_api 对同 owner 全 slot 逐一发送且不 break 的旧循环废除 ⇒ 一行恰一宿主，双 slot 天然不混投。
+- **D**：暂停跨 worker 持久化并**在生成前短路**（`abb16d3`）；角色换卡/新绑定回灌 SQLite 真源、调度边界先回灌后执行（`82607d0`）；`ASEEngine.save_state` 由整表覆写改**按版本合并**、hub 缓存命中先回灌更新的盘（`42f8540`）；`utils/json_state.atomic_write_json` 无锁 + 固定 `.tmp` 名并发互踩收口为持锁 + pid/线程/序号唯一 tmp。
+- **E `508df44`**：手动发送三条纪律改正（目标显式、多路会话未点名即 **400 拒猜**；复用 `scheduler._deliver` 真实投递；**不预记账**——`sent_history` 只在受理后写、当日配额出口归还）。旧实现取 hub「最近一个」引擎 + `_send_to_all` 广播 + `create_task` 即 `delivered=True`，生产 09-18 实锤自测几次耗尽 8 条额度使全天停发。统计真源改控制面出站事实。
+- **F `a98b7cf`**：`reminders` 表此前只有「设」和「查待发」两条路——取消/改期/failed 查询/恢复**全无**（判死后 `active=0` 被 pending 视图 WHERE 挡掉，用户眼里提醒凭空消失）。补 `get_reminder/list_reminders(status)/cancel/reschedule/restore`，**一律 id + session_key 双谓词**锁归属（共用一张表，只按 id 操作=任何人猜到数字就能处置他人叫醒），新增 `manage_reminder` 工具 + 终审路由；**判死策略不动**（`DECISION_LEDGER:115`）。
+- **G `01907d4`**：新 `proactive/runtime_assembly.py` 收为两入口唯一装配 owner——`main.py` 旧抄漏 `register_reminder_task`（该形态下提醒**永远不到点**：落库、回「已设置」、无读者）与 `set_llm_provider`，并把 `_send` 覆盖成不记账无归属的跨用户广播。`ChannelNotReadyError` 三态（未注入/未登录/无 ws）=「现在没法发」**跳过记账**，不再 3 分钟判死。
+- **H `5e0a02b`+`56b6a48`**：知识/热点收为唯一 door `proactive.llm_proactive.load_proactive_knowledge`，接入**当前生产决策链**（旧实现只留在被旁路的 ASE 生成线，决策链从不读 ⇒ 知识库与热点在真实链路永不落地）；装配层 resolver 补 `user_manager` 且**按读取时刻重解析**（红测实证旧行为 `cids=['default','default']`：知识永远来自「没绑定角色」的兜底，切角色后旧实例仍把旧角色知识当谈资）。
+- **I `215b226`**：入站 `message_id` 四段链贯通至工具副作用——连接器**显式实参**传递（ContextVar 不随 `run_coroutine_threadsafe` 传播）→ `UserManager.process_message` 回合起点绑定 → 编排器 `_meta["message_id"]` → `set_reminder` 经 `effect_once` 去重（键含参数指纹，**校验先于去重键**使畸形 `trigger_time` 不烧掉消息 id）。消息级幂等只挡整回合重放，release 后重放/终审补跑/双 worker 重复投递时回合内部副作用仍各写一行=用户被叫两次。
+- **J `abb16d3`+`ecf07c9`**：LLM 自判 `wait_minutes` 与追问日预算落盘（旧只进内存，重启归零 ⇒ 在她明确说「X 分钟后再说」的窗内提前开口；块E 只修了失败侧、成功侧漏修）。
+- **验证（全量，非采样）**：本窗自有 9 文件 **160 例全绿**；**全库四分块 2494 收集 = 597 / 704 / 693+1跳过 / 479+20失败**，与 `--collect-only` 精确吻合，41 卡在位。20 失败**全部他窗在制品**且逐条实跑归因：19 例在未跟踪 `tests/test_w1_identity_authorization.py`（W1 在制，含其自身 `NameError: bob_auth`），1 例 `test_llm_config_verification.py::test_6_4_admin_can_write_global_config`（W6 `4046aa5` 把保存路径改走 `save_with_receipt`，`receipt["config"]` 在 `MagicMock` 上 `hasattr(...,"llm")` 恒真使 `await reconfigure_llm` 分支可达 → `TypeError` 被 `except` 转 400；W8 已同件登记，`tests/**` owner 为 W4，本窗未越界修）。本窗自身引入过的回归仅 2 例（微信测试替身窄签名被新 `message_id` 实参打穿、又被 `route_error` 宽 except 吞成兜底话术=假通过风险），`b59eb8b` 签名对齐并加断言，块0 由 595+2 转 **597 全绿**。突变验红按批留痕（E 6/6、F/G 11/11、H 9/9 与补漏 4/4、ASE 合并 2 组、I 3/3、A 心跳 5/5，均字节级还原，临时脚本已删）。ruff 对 tracked 全量 0 错、`scripts/ci_gates.py` **4/4**。禁碰件核验：本窗对 `deploy/`·`nginx*`·`*.conf` 零触碰（该范围内 `deploy/` 改动全属 W10 `5d0a141`）。
+- **未验证与边界**（详见 `docs/verification/W3-2026-09-27-后台单一运行时与可恢复触达-验证报告.md`）：**真实 Linux 四进程拓扑未实测**——跨进程唯一性以「共享 SQLite 平面 + `threading.Barrier` 真实抢 CAS」证明，非四进程；master 进程活着但调度线程死掉时**只可见、不接管**；网页/控制台回合无入站 id ⇒ 按设计不去重；直发路径 `ChannelNotReadyError` 不计数 ⇒ 通道长期缺席时提醒永活并每分钟堆一行（候选上界=微信 24h，**D 类未裁决**）；恢复已过期提醒会立即补发（语义待裁）；知识 door 每用户每拍读成本未测；前端两处缺口未修（`frontend/src/api/system.ts:39` 的 `proactiveSend()` 不送 `session_key` ⇒ 多会话必 400；`manage_reminder` 在 `frontend/src` 零命中，控制台看不到新工具）；`observability/config_models.py:88` 默认 `builtin_tools` 仍缺 `manage_reminder`。真实模型语义效果未评测。
+- **提交（全部显式路径，未 push、未部署）**：`0cb4b9b`（控制面底座）· `ecf07c9`（通道期望态 B）· `1395421`（出站 outbox）· `abb16d3`（暂停+等待窗 D/J）· `82607d0`（绑定真源 D）· `42f8540`（ASE 版本合并 D）· `508df44`（手动发送 E）· `a98b7cf`（提醒生命周期 F）· `01907d4`（公共装配 G）· `5e0a02b`（知识进决策链 H）· `56b6a48`（H 补漏 resolver）· `215b226`（入站幂等 I）· `1387e27`（存活心跳 A 收口）· `b59eb8b`（I 连带测试替身）。
+
 ## 2026-09-27 — W8 实施窗 · 角色表达 / 关系指标 / 心理画像域：缺陷 A–L 根治与 D 类登记（未 push 未部署）
 
 - **本窗范围**：A–L 已确认缺陷中属"角色表达 / 关系指标 / 心理画像"三域者按白名单文件**先红测后根治**（A/C、B、E、G、I、J 六批）；涉产品裁决的 D、F、H、K、L **只盘点事实 + 给推荐方案与影响面，不自决**。全程未读真实 `.env` / 凭证 / 聊天 / 角色卡正文（**41 张卡仅结构统计**，实测 `storyline_config` 出现 0 次）。
