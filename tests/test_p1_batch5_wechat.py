@@ -62,7 +62,7 @@ def test_duplicate_message_processed_once(tmp_state_root):
     conn = _make_owner_conn(tmp_state_root)
     calls: list[str] = []
 
-    def fake_call(mgr, user_id, text, attachments=None, reply_sender=None):
+    def fake_call(mgr, user_id, text, attachments=None, reply_sender=None, message_id=""):
         calls.append(text)
         return {"reply": reply_sender("ok")}
 

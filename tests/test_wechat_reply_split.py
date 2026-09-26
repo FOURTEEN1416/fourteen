@@ -92,8 +92,9 @@ def test_partial_reply_records_only_api_accepted_segments(tmp_path, monkeypatch)
         transport_calls.append(kwargs["text"])
         return {"ret": 0 if len(transport_calls) == 1 else -2}
 
-    def manager(mgr, uid, text, attachments=None, reply_sender=None):
+    def manager(mgr, uid, text, attachments=None, reply_sender=None, message_id=""):
         assert reply_sender is not None
+        assert message_id == "partial"
         reply = reply_sender("第一段\n第二段\n第三段")
         accepted.append(reply)
         return {"reply": reply, "character_id": "charA"}
@@ -123,7 +124,7 @@ def test_same_peer_holds_turn_lock_through_generation_and_sending(tmp_path, monk
     monkeypatch.setattr(wc, "_segment_delay", lambda text: 0)
     calls = []
 
-    def manager(mgr, uid, text, attachments=None, reply_sender=None):
+    def manager(mgr, uid, text, attachments=None, reply_sender=None, message_id=""):
         # 同一 RLock 对其他线程必须不可用；不能只验证发送函数的局部锁。
         def probe():
             acquired = c._peer_lock(uid).acquire(blocking=False)
