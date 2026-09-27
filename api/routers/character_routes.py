@@ -573,26 +573,26 @@ async def delete_character(
     )
 
     receipt: dict[str, int] = {}
-    receipt["achievements"] = int(await db.execute(
+    receipt["achievements"] = int((await db.execute(
         _delete(CharacterAchievement).where(
             CharacterAchievement.character_id == character_id
         )
-    ).rowcount or 0)
-    receipt["active_rows_reset"] = int(await db.execute(
+    )).rowcount or 0)
+    receipt["active_rows_reset"] = int((await db.execute(
         _update(UserActiveCharacter)
         .where(UserActiveCharacter.character_id == character_id)
         .values(character_id="default")
-    ).rowcount or 0)
-    receipt["binding_refs_reset"] = int(await db.execute(
+    )).rowcount or 0)
+    receipt["binding_refs_reset"] = int((await db.execute(
         _update(WechatBinding)
         .where(WechatBinding.character_card_id == character_id)
         .values(character_card_id="default")
-    ).rowcount or 0)
-    receipt["peer_pref_refs_reset"] = int(await db.execute(
+    )).rowcount or 0)
+    receipt["peer_pref_refs_reset"] = int((await db.execute(
         _update(WechatPeerPreference)
         .where(WechatPeerPreference.character_card_id == character_id)
         .values(character_card_id="default")
-    ).rowcount or 0)
+    )).rowcount or 0)
     await db.commit()
 
     try:
