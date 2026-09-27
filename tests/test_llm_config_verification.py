@@ -14,7 +14,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -167,12 +168,26 @@ def test_6_4_admin_can_write_global_config():
     client, state = _build_app(users)
 
     state["uid"] = 1
+    # W6 `4046aa5` 后 /api/config 改走 `save_with_receipt(...)` 并对回执逐字段序列化，
+    # 且 `await reconfigure_llm(...)`——旧桩打 `cfg.save` + MagicMock 不可 await，
+    # TypeError 被 except 吞成 400。桩须对齐新契约：真回执 dict + AsyncMock。
+    receipt = {
+        "config": SimpleNamespace(llm=None),  # hasattr(.llm) 真→reconfigure 走 AsyncMock 桩
+        "persisted_version": 2,
+        "effective_version": 1,
+        "in_sync": False,
+        "applied_live": [],
+        "restart_required": [],
+        "unsupported": [],
+        "field_status": {},
+    }
     with patch("api.routers.misc_routes.deps") as mock_deps, \
-         patch("api.routers.misc_routes.reconfigure_llm", new=MagicMock()):
+         patch("api.routers.misc_routes.reconfigure_llm", new=AsyncMock()):
         mock_cfg = MagicMock()
-        mock_cfg.save.return_value = MagicMock(spec=[])  # 走 get_config_dict 分支
+        mock_cfg.save_with_receipt.return_value = receipt
         mock_cfg.get_config_dict.return_value = {"llm": {"provider": "auto"}}
         mock_deps.config = mock_cfg
+        mock_deps.orch = None
         resp = client.post("/api/config", json={"config": {"llm": {"provider": "auto"}}})
     assert resp.status_code == 200, resp.text
 
