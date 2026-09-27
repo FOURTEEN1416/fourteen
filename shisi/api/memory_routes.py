@@ -74,10 +74,19 @@ async def list_favorites(character_id: str):
 
 @router.post("/forward", response_model=ApiResponse)
 async def forward_memory(req: ForwardRequest):
-    if _fwd_mgr is None:
-        raise HTTPException(status_code=503, detail="ForwardManager未初始化")
-    ok = _fwd_mgr.forward(req.from_character, req.to_character, req.memory_id, req.content)
-    return ApiResponse(data={"success": ok})
+    """占位端点——跨角色转发**未生效**。
+
+    缺陷 F（2026-09-27，W4）：旧实现只 `INSERT memory_forwards` 并回
+    `success:true`，但目标角色从未有任何读取路径——无 GET forwards 端点、
+    对话/检索链（`get_memory_context` / `retrieve_context`）零消费者，
+    「转发给另一角色」落库即永不被使用 = 假接线。与删除面 501 同法，
+    **501 先于任何写动作**。恢复条件：先按授权生成可追溯的目标侧派生记录
+    （接入唯一检索/上下文链）再放开本端点。
+    """
+    raise HTTPException(
+        status_code=501,
+        detail="跨角色转发尚未生效：memory_forwards 只写不读，目标侧无消费链（先接派生记录再放开）",
+    )
 
 
 @router.delete("/{memory_id}", response_model=ApiResponse)

@@ -124,7 +124,8 @@ class TestMemoryAPIEndpoints:
     def test_forward(self, app_and_reg):
         _, _, client = app_and_reg
         resp = client.post("/api/shisi/memory/forward", json={"from_character": "c1", "to_character": "c2", "memory_id": "m1"})
-        assert resp.status_code == 200
+        # W4 缺陷 F（2026-09-27）：目标侧无消费链，501 先于任何写动作（旧 200=谎报）
+        assert resp.status_code == 501
 
     def test_delete_requires_confirm(self, app_and_reg):
         _, _, client = app_and_reg

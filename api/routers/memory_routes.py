@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Security
+from fastapi import APIRouter, Depends, HTTPException, Security
 from pydantic import BaseModel
 
 from api.auth import verify_api_key_dep
 from api.deps import deps
+from api.routers.character_routes import require_character_access
 
 logger = logging.getLogger("api.memory_routes")
 
@@ -28,6 +29,9 @@ class ForwardRequest(BaseModel):
 async def list_favorites(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """获取角色收藏列表"""
     fav_mgr = getattr(deps.shisi_reg, "favorite_manager", None)
@@ -46,6 +50,9 @@ async def add_favorite(
     character_id: str,
     memory_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """添加收藏"""
     fav_mgr = getattr(deps.shisi_reg, "favorite_manager", None)
@@ -62,6 +69,9 @@ async def remove_favorite(
     character_id: str,
     memory_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """取消收藏"""
     fav_mgr = getattr(deps.shisi_reg, "favorite_manager", None)
@@ -78,12 +88,20 @@ async def forward_favorite(
     character_id: str,
     req: ForwardRequest,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
-    """转发收藏到其他角色"""
-    fwd_mgr = getattr(deps.shisi_reg, "forward_manager", None)
-    if fwd_mgr is None:
-        raise HTTPException(status_code=503, detail="转发管理器未初始化")
-    ok = fwd_mgr.forward(character_id, req.to_character, req.memory_id, req.content)
-    if not ok:
-        raise HTTPException(status_code=400, detail="转发失败")
-    return {"status": "forwarded", "from": character_id, "to": req.to_character}
+    """跨角色转发**未生效**（缺陷 F，2026-09-27 W4：501 先于任何写动作）。
+
+    `memory_forwards` 落行后目标角色无任何消费者——无 GET forwards 端点、
+    对话/检索链不读该表，旧响应 `forwarded` 属谎报成功（删除面 501 同法）。
+    恢复条件：目标侧先接入授权派生记录（可追溯、进检索/上下文）再放开本面。
+    """
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "跨角色转发尚未生效：memory_forwards 落库后目标侧无消费链"
+            "（无读取端点、不进对话上下文），请先接入目标侧派生记录再放开"
+        ),
+    )

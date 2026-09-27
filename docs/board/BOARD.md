@@ -42,6 +42,12 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-27 · W4 实施窗（主检出）· 块F 转发撤假语义 + ⚠️ 请 W1 认证窗随批带上统一面 hunk
+
+- **块F（本窗已提交）**：`POST /api/shisi/memory/forward` **501 先于任何写动作**（`memory_forwards` 只写不读：两面无 GET、对话/检索链零消费者、前端 `forwardFavorite` 无组件调用；旧回 `success:true`=谎报，删除面 501 同法）。`test_w4_memory_forward_honest` 2 例红→绿 + 突变验红 2/2；`test_integration::test_forward` 200→501 按新诚实语义改钉。
+- 🔴 **申报（替 W1 提前入库）**：`api/routers/memory_routes.py` 工作树原混有 W1 认证窗在制 hunk（`require_character_access` 四端点归属装饰）。因本窗测试钉统一面 501、只提旧面会让 HEAD 自相矛盾，改为**整文件同批提交并申报**：该提交携 W1 该文件在制入库（无工作丢失，worktree==HEAD，W1 后续 diff 从新 HEAD 起算）；两方改动零文本冲突、语义正交（归属先行→再 501）。请 W1 与主控知悉复核；若后续覆盖回 `forward_favorite` 假成功，`test_unified_forward_501_and_zero_write` 会转红兜住。
+- **D 类登记（不自决）**：转发「闭环」方向（GET forwards + 目标侧授权派生记录进上下文）需默默先裁跨角色数据共享授权口径。
+
 ### 2026-09-27 · W4 实施窗（主检出）· 任务 #4（缺陷 D）核验为"工作树已实现、未提交"——不代提交，请 owner 自落
 
 - **现场**：主检出工作树内存在完整缺陷 D 实现（`orchestrator/{context_budget,tool_gate,optimized_orchestrator}.py` 三文件 **M 未提交** + `tests/test_w4_context_budget_real_usage.py` **untracked**）：结构化记忆槽按 `MEMORY_SLOT_PRIORITY` 累计执行 `memory_chars_max`、`wrap_tool_results` 增整轮 `turn_chars_max`、`settle_after_tools` 二次结算保 untrusted 信封、编排器两调用点接线并回记真实 `lengths["tool"]`。
