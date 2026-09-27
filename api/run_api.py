@@ -146,7 +146,9 @@ async def _ws_outbox_drain(
         return
     while True:
         try:
-            if ws_server.client_count() > 0:
+            # client_count 是 @property（返回 int）——当方法调用会抛
+            # 'int' object is not callable，websocket 出站通道将永不消费（生产日志实锤）。
+            if ws_server.client_count > 0:
                 await rp.drain_once_async(
                     channel="websocket",
                     send_async=ws_server.send_proactive_to_session,

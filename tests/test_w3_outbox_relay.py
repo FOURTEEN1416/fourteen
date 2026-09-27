@@ -249,3 +249,34 @@ def test_reminder_delivery_is_assembled_with_plane():
         encoding="utf-8"
     )
     assert "character_id_resolver" in assembly
+
+
+# ── 回归：websocket outbox 消费循环的 client_count 契约 ─────────────
+# 生产日志实锤（2026-09-28 服务器 app.log）：`websocket outbox 消费异常:
+# 'int' object is not callable` 每 3s 一条——run_api 消费循环把
+# WebSocketServer.client_count（@property，返回 int）当方法调用，
+# 异常在 drain 之前抛出 → websocket 出站通道从未真正消费过。
+
+
+def test_client_count_is_property_not_method():
+    import api.websocket_server as wss
+
+    assert isinstance(wss.WebSocketServer.client_count, property), (
+        "client_count 若改回普通方法，须同步恢复 run_api 的调用形态；"
+        "本契约与 AST 守卫（下条）成对"
+    )
+
+
+def test_run_api_never_calls_client_count_as_function():
+    tree = ast.parse(RUN_API.read_text(encoding="utf-8"))
+    offenders = [
+        ast.get_source_segment(RUN_API.read_text(encoding="utf-8"), node) or ""
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "client_count"
+    ]
+    assert not offenders, (
+        "run_api 把 property client_count 当方法调用 → 'int' object is not callable，"
+        f"websocket outbox 消费循环每 3s 异常且永不投递；违规调用：{offenders}"
+    )
