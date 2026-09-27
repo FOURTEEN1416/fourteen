@@ -297,6 +297,8 @@ class _StreamPipelineMixin:
                             emotion_state, session_id, character_id,
                             turn_id=str(ctx.get("ax_turn_id") or ""),
                             reply_id=str(ctx.get("ax_reply_id") or ""),
+                            memory_fact_sources=ctx.get("memory_fact_sources"),
+                            knowledge_snippets=ctx.get("knowledge_snippets"),
                         ))
                         try:
                             await asyncio.shield(finish)

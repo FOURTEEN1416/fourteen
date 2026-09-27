@@ -68,8 +68,14 @@ def run_curator_for_session(
     llm: Any = None,
     *,
     apply: bool = True,
+    llm_resolver=None,
 ) -> dict[str, Any]:
-    """整理单会话 user_facts：规则为主；可选 LLM 摘要（失败忽略）。"""
+    """整理单会话 user_facts：规则为主；可选 LLM 摘要（失败忽略）。
+
+    缺陷 J：`llm_resolver(session_key)` 优先（与后台 curator 同口径的
+    账号模型策略）；无 resolver 且 `llm` 为平台代理时**不静默借用**——
+    只做确定性规则整理，LLM 摘要留空。
+    """
     from shisi.agent_plane.runtime import get_ledger
     from shisi.memory.legacy.structured_memory import StructuredMemory
 
@@ -113,12 +119,21 @@ def run_curator_for_session(
                 with contextlib.suppress(Exception):
                     sm.update_fact_confidence(int(kid), float(k.get("confidence") or 0.7))
     summary = ""
-    if llm is not None:
+    selected_llm = None
+    if llm_resolver is not None:
+        try:
+            selected_llm = llm_resolver(session_key)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("curator llm_resolver failed: %s", e)
+            selected_llm = None
+    elif llm is not None:
+        selected_llm = llm
+    if selected_llm is not None:
         try:
             texts = [str(k.get("fact") or "") for k in result["kept"][:20]]
             prompt = "用一句话总结用户稳定信息（不超过60字），只输出总结：\n" + "\n".join(texts)
-            if hasattr(llm, "chat_sync"):
-                summary = str(llm.chat_sync(prompt, system_prompt="你是记忆压缩器。", temperature=0.2) or "")[:200]
+            if hasattr(selected_llm, "chat_sync"):
+                summary = str(selected_llm.chat_sync(prompt, system_prompt="你是记忆压缩器。", temperature=0.2) or "")[:200]
         except Exception as e:  # noqa: BLE001
             logger.debug("curator llm summary failed: %s", e)
     import contextlib

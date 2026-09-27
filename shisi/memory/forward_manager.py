@@ -39,14 +39,35 @@ class ForwardManager:
         to_character: str,
         memory_id: str,
         memory_content: str = "",
-    ) -> bool:
+    ) -> int:
+        """转发并生成可追溯目标侧派生记录（缺陷 F）。
+
+        Returns:
+            forward_id（>0 成功）；失败返回 0。旧 bool 契约由 int 真值投影
+            保持（`if not ok` / `assert mgr.forward(...)` 语义不变）。
+            完整回执见 :meth:`forward_receipt`。
+        """
+        receipt = self.forward_receipt(
+            from_character, to_character, memory_id, memory_content
+        )
+        return int(receipt.get("forward_id") or 0) if receipt.get("ok") else 0
+
+    def forward_receipt(
+        self,
+        from_character: str,
+        to_character: str,
+        memory_id: str,
+        memory_content: str = "",
+    ) -> dict[str, Any]:
+        """转发完整回执 `{ok, forward_id, from, to, memory_id, content}`。"""
         conn = self._conn()
         try:
-            conn.execute(
+            cur = conn.execute(
                 "INSERT INTO memory_forwards (from_character, to_character, memory_id, content)"
                 " VALUES (?,?,?,?)",
                 (from_character, to_character, memory_id, memory_content),
             )
+            forward_id = int(cur.lastrowid or 0)
             conn.execute(
                 "DELETE FROM memory_forwards WHERE id NOT IN"
                 " (SELECT id FROM memory_forwards ORDER BY id DESC LIMIT ?)",
@@ -55,11 +76,21 @@ class ForwardManager:
             conn.commit()
         except Exception as e:  # noqa: BLE001
             logger.warning("记忆转发落库失败: %s", e)
-            return False
+            return {"ok": False, "error": str(e), "forward_id": 0}
         finally:
             conn.close()
-        logger.info("记忆转发: %s → %s, memory_id=%s", from_character, to_character, memory_id)
-        return True
+        logger.info(
+            "记忆转发: %s → %s, memory_id=%s forward_id=%s",
+            from_character, to_character, memory_id, forward_id,
+        )
+        return {
+            "ok": True,
+            "forward_id": forward_id,
+            "from": from_character,
+            "to": to_character,
+            "memory_id": memory_id,
+            "content": memory_content,
+        }
 
     def get_forwards(self, character_id: str) -> list[dict[str, Any]]:
         conn = self._conn()

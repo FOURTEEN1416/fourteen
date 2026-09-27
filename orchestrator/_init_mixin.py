@@ -476,30 +476,15 @@ class _InitPhasesMixin:
     #  阶段 7: 长期记忆增强 (v3.0)
     # ─────────────────────────────────────────────────────────────
     def _init_memory_ext(self, cfg: Any, fusion_cfg: dict) -> None:
-        mem_ext_fusion = fusion_cfg.get("memory_ext", {})
-        mem_ext_enabled = mem_ext_fusion.get("enabled", cfg.memory_ext.enabled)
+        """W4 缺陷 G：不再装配第二套 RAG 记忆真源。
 
-        if not mem_ext_enabled:
-            self.components["memory_ext"] = None
-            logger.info("长期记忆增强已禁用")
-            return
-
-        try:
-            from memory_ext import MemoryEnhancer
-            coll_name = mem_ext_fusion.get(
-                "collection_name", cfg.memory_ext.collection_name
-            ) or "long_term_memories"
-            self.components["memory_ext"] = MemoryEnhancer(
-                chroma_path=str(_project_root / "data" / "chroma_db"),
-                collection_name=coll_name,
-                llm_gateway=self.components["llm"],
-                enabled=True,
-            )
-            self._run_async(self.components["memory_ext"].initialize())
-            logger.info("长期记忆增强已初始化: collection=%s", coll_name)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("长期记忆增强初始化失败 (不影响运行): %s", e)
-            self.components["memory_ext"] = None
+        memory_ext（mem0 兼容 Chroma）全仓无生产 CRUD 消费者，却与
+        shisi/memory 主记忆并行写同一类长期事实 —— 违反「不新增第二记忆
+        真源」。配置默认已禁用；此处强制不初始化，避免有人打开开关就静默
+        接上第二套库。待迁移到主记忆或删除后再恢复装配。
+        """
+        self.components["memory_ext"] = None
+        logger.info("memory_ext 未装配（W4-G：第二套记忆真源停用，主记忆=shisi/memory）")
 
     # ─────────────────────────────────────────────────────────────
     #  阶段 8: PersonaExtractor 人格克隆 (v3.1)

@@ -325,13 +325,21 @@ def limit_tool_calls(
 def wrap_tool_results(
     results: list[dict[str, Any]] | None,
     chars_max: int | None = None,
+    turn_chars_max: int | None = None,
 ) -> str:
-    """工具结果 untrusted 信封；失败明确「不得声称已执行」。"""
+    """工具结果 untrusted 信封；失败明确「不得声称已执行」。
+
+    `chars_max` 为**单条**结果上限；`turn_chars_max` 为**整轮合计**上限
+    （缺陷 D：旧实现只逐条截断，多工具合计可数倍超预算）。缺省整轮上限
+    取 `chars_max`，与「工具段预算」同一刻度。
+    """
     if not results:
         return ""
     chars_max = DEFAULT_TOOL_RESULT_CHARS_MAX if chars_max is None else int(chars_max)
+    turn_chars_max = chars_max if turn_chars_max is None else int(turn_chars_max)
     lines: list[str] = []
     any_failure = False
+    used = 0
     for r in results:
         name = str(r.get("name") or "tool")
         payload = r.get("result")
@@ -340,6 +348,13 @@ def wrap_tool_results(
         )
         if len(body) > chars_max:
             body = body[:chars_max] + "…"
+        # 整轮合计：给后续条目留出标记开销，超限即截断并停止继续塞入
+        line_prefix = f"[{name}] "
+        room = max(0, turn_chars_max - used - len(line_prefix))
+        if room <= 0:
+            break
+        if len(body) > room:
+            body = body[:room] + "…"
         # 失败识别
         success = True
         if isinstance(payload, dict):
@@ -348,7 +363,9 @@ def wrap_tool_results(
                 success = False
         if not success:
             any_failure = True
-        lines.append(f"[{name}] {body}")
+        line = f"{line_prefix}{body}"
+        lines.append(line)
+        used += len(line)
     if not lines:
         return ""
     body_text = "\n".join(lines)

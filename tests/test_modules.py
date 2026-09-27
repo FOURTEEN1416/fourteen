@@ -215,7 +215,7 @@ class TestFavoriteManager:
 class TestForwardManager:
     def test_forward(self, tmp_db):
         mgr = ForwardManager(tmp_db)
-        assert mgr.forward("c1", "c2", "mem1", "内容") is True
+        assert mgr.forward("c1", "c2", "mem1", "内容") > 0
         forwards = mgr.get_forwards("c2")
         assert len(forwards) == 1
         assert forwards[0]["from"] == "c1"

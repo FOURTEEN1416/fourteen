@@ -254,7 +254,11 @@ def append_memory_write_event(
     session_key: str,
     facts: list[dict[str, Any]],
     action: str = "write",
+    turn_id: str = "",
+    reply_id: str = "",
+    character_id: str = "",
 ) -> None:
+    """记忆写入审计；缺陷 I：带关联轮/角色，回放可回答「本轮用了哪些事实版本」。"""
     from shisi.agent_plane.event_ledger import (
         EVENT_MEMORY_REINFORCE,
         EVENT_MEMORY_WRITE,
@@ -267,8 +271,51 @@ def append_memory_write_event(
         get_ledger().append(
             session_key=sk,
             event_type=EVENT_MEMORY_REINFORCE if action == "reinforce" else EVENT_MEMORY_WRITE,
+            character_id=str(character_id or ""),
             actor="agent",
+            turn_id=str(turn_id or ""),
+            reply_id=str(reply_id or ""),
             payload={"facts": list(facts)[:20], "action": action},
         )
     except Exception as e:  # noqa: BLE001
         logger.debug("ledger memory event failed: %s", e)
+
+
+def append_tool_call_event(
+    *,
+    session_key: str,
+    tool_name: str,
+    call_id: str = "",
+    provider: str = "",
+    success: bool = True,
+    error: str = "",
+    turn_id: str = "",
+    reply_id: str = "",
+    character_id: str = "",
+    args_preview: str = "",
+) -> None:
+    """工具调用入账（缺陷 I）：生产 dispatch 原先只记合并结果，无逐调用 call_id。"""
+    from shisi.agent_plane.event_ledger import EVENT_TOOL_CALL
+
+    sk = str(session_key or "").strip()
+    if not sk or not tool_name:
+        return
+    try:
+        get_ledger().append(
+            session_key=sk,
+            event_type=EVENT_TOOL_CALL,
+            character_id=str(character_id or ""),
+            actor="tool_dispatch",
+            turn_id=str(turn_id or ""),
+            reply_id=str(reply_id or ""),
+            payload={
+                "tool": str(tool_name),
+                "call_id": str(call_id or ""),
+                "provider": str(provider or ""),
+                "success": bool(success),
+                "error": str(error or ""),
+                "args_preview": str(args_preview or "")[:200],
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug("ledger tool call event failed: %s", e)

@@ -261,6 +261,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         session_key: str = "",
         user_id: int | None = None,
         turn_id: str = "",
+        character_id: str = "",
     ) -> tuple[str, str]:
         """三级意图管线：L0 零成本晋级线 → L1 LLM 终审（function calling）
         → 工具执行。
@@ -379,9 +380,12 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             tool_calls = resp.get("tool_calls") or []
 
         async def _dispatch(tc: dict[str, Any]) -> dict[str, Any]:
+            import uuid as _uuid
+
             fn = tc.get("function", {}) if isinstance(tc, dict) else {}
             name = fn.get("name", "") if isinstance(fn, dict) else ""
             args_raw = fn.get("arguments", "{}") if isinstance(fn, dict) else "{}"
+            call_id = str(tc.get("id") or _uuid.uuid4().hex[:12])
             try:
                 args = json.loads(args_raw) if isinstance(args_raw, str) else dict(args_raw)
             except (TypeError, ValueError, json.JSONDecodeError):
@@ -399,17 +403,42 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     "session_key": session_key, "user_id": user_id,
                     "turn_id": str(turn_id or ""),
                     "message_id": current_message_id(),
+                    "call_id": call_id,
                 }
+            success = False
+            error = ""
             try:
                 result = await asyncio.to_thread(
                     tools.dispatch, name, args,
                     affinity_level=affinity_level,
                     caller_id=str(user_id or session_key or ""),
                 )
+                rd = result.to_dict()
+                success = bool(rd.get("success", True)) and not rd.get("error")
+                error = str(rd.get("error") or "")
             except Exception as e:  # noqa: BLE001
                 logger.debug("工具 %s 执行异常: %s", name, e)
                 result = ToolResult(False, error="tool_execution_failed")
-            return {"name": name, "result": result.to_dict()}
+                rd = result.to_dict()
+                error = "tool_execution_failed"
+            # 缺陷 I：逐调用入账（call_id/结果状态/关联轮），回放可定位失败调用
+            try:
+                from shisi.agent_plane.runtime import append_tool_call_event
+
+                append_tool_call_event(
+                    session_key=str(session_key or ""),
+                    tool_name=name,
+                    call_id=call_id,
+                    provider="builtin",
+                    success=success,
+                    error=error,
+                    turn_id=str(turn_id or ""),
+                    character_id=str(character_id or ""),
+                    args_preview=str(args_raw)[:200],
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("tool call ledger failed: %s", e)
+            return {"name": name, "result": rd, "call_id": call_id, "success": success}
 
         # 分支一：ask_user 澄清（只有 ask_user、无真工具时才走这里）
         ask = tool_gate.extract_ask_user(tool_calls)
@@ -509,7 +538,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                                 "[tool_gate] 已强制补跑 set_reminder session=%s trigger=%s",
                                 session_key, trigger,
                             )
-            # C1：untrusted 信封 + 失败禁称成功 + C2 结果截断
+            # C1：untrusted 信封 + 失败禁称成功 + C2 结果截断（整轮合计）
             try:
                 _cfg = getattr(self, "components", {}).get("config") or {}
                 _tools_cfg = (
@@ -520,9 +549,15 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 )
             except Exception:  # noqa: BLE001
                 limits = tool_gate.load_tool_limits(None)
+            # 缺陷 D：单条上限 + 整轮合计上限（多工具不得各自吃满 6000）
+            from orchestrator.context_budget import DEFAULT_BUDGET, settle_after_tools
+
             wrapped = tool_gate.wrap_tool_results(
-                results, chars_max=limits["tool_result_chars_max"]
+                results,
+                chars_max=limits["tool_result_chars_max"],
+                turn_chars_max=DEFAULT_BUDGET.tool_chars_max,
             )
+            wrapped = settle_after_tools(wrapped, budget=DEFAULT_BUDGET)
             logger.info(
                 "[tool_gate] 终审调度工具 session=%s tools=%s any_ok=%s",
                 session_key, tool_names, any_ok,
@@ -828,6 +863,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         emotion_state = None
         memory_context = ""
         rag_context = ""
+        memory_fact_sources: list[dict[str, Any]] = []
+        knowledge_snippets: list[str] = []
 
         for name, task_result in zip(tasks.keys(), results, strict=False):
             if isinstance(task_result, Exception):
@@ -868,6 +905,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                         raw_mem["episodic"] = sanitize_episodic(raw_mem.get("episodic"))
                         raw_mem.pop("working", None)  # 工作记忆走 messages，不进 system
                         raw_mem["_user_key"] = session_id or ""
+                        # 缺陷 I：事实出处进回放槽（不新建全文影子库）
+                        if raw_mem.get("fact_provenance"):
+                            memory_fact_sources = list(raw_mem.get("fact_provenance") or [])[:12]
                 except Exception as e:  # noqa: BLE001
                     logger.debug("sanitize memory_context failed: %s", e)
                 memory_context = raw_mem or ""  # type: ignore[assignment]
@@ -876,6 +916,16 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 from orchestrator.context_budget import rag_payload_to_text
 
                 rag_context = rag_payload_to_text(task_result)
+                # 缺陷 I：知识片段摘要进回放槽（不入库全文）
+                try:
+                    if isinstance(task_result, dict):
+                        for r in (task_result.get("results") or task_result.get("chunks") or [])[:8]:
+                            if isinstance(r, dict):
+                                snippet = str(r.get("content") or r.get("text") or "")[:80]
+                                if snippet:
+                                    knowledge_snippets.append(snippet)
+                except Exception:  # noqa: BLE001
+                    pass
 
         # 对话历史 + 摘要
         # P1-10：get_chat_context 内含 DB 读 + 可能触发摘要 LLM 调用
@@ -1027,12 +1077,17 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             session_key=session_id,
             user_id=user_id,
             turn_id=ax_turn_id,
+            character_id=str(character_id or ""),
         )
         if tool_results:
             # C 正式位次：工具结果插入「对话历史之后 / 扮演规则之前」
-            from orchestrator.context_budget import inject_tool_context_before_phi
+            from orchestrator.context_budget import inject_tool_context_before_phi, settle_after_tools
 
+            # 缺陷 D：工具生成后二次结算（保留 untrusted 信封），并记真实用量
+            tool_results = settle_after_tools(tool_results, budget=DEFAULT_BUDGET)
             system_prompt = inject_tool_context_before_phi(system_prompt, tool_results)
+            context_lengths = dict(context_lengths or {})
+            context_lengths["tool"] = len(str(tool_results))
             # AX P2：工具结果入因果账本（可回放「这句是否因工具而变」）
             if session_id:
                 try:
@@ -1119,6 +1174,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             "context_lengths": context_lengths,
             "ax_turn_id": ax_turn_id,
             "ax_reply_id": ax_reply_id,
+            # 缺陷 I：回放可答「本轮用了哪些事实版本与知识片段」
+            "memory_fact_sources": memory_fact_sources,
+            "knowledge_snippets": knowledge_snippets,
         }
 
     def _enqueue_profile_sync(self, session_id, user_msg, reply, llm, *, character_id="", turn_id=""):
@@ -1168,6 +1226,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         character_id: str,
         turn_id: str = "",
         reply_id: str = "",
+        memory_fact_sources: list | None = None,
+        knowledge_snippets: list | None = None,
     ) -> str:
         """共享后处理：after_chat → ASE on_chat → 好感度同步。
 
@@ -1257,6 +1317,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     slots={
                         "emotion_tag": str(emotion_tag or ""),
                         "turn_id": ax_turn_id,
+                        # 缺陷 I：本轮事实版本与知识片段摘要（回放可溯源）
+                        "memory_fact_sources": list(memory_fact_sources or [])[:12],
+                        "knowledge_snippets": list(knowledge_snippets or [])[:8],
                     },
                 )
             except Exception as e:  # noqa: BLE001
@@ -1551,6 +1614,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     character_id,
                     turn_id=str(ctx.get("ax_turn_id") or ""),
                     reply_id=str(ctx.get("ax_reply_id") or ""),
+                    memory_fact_sources=ctx.get("memory_fact_sources"),
+                    knowledge_snippets=ctx.get("knowledge_snippets"),
                 )
                 history_finished = True
 

@@ -157,8 +157,11 @@ character_card:
   enabled: true                         # 是否启用角色卡兼容
 
 # ── 长期记忆增强配置 ──
+# W4 缺陷 G（2026-09-27）：memory_ext 默认禁用。它与 shisi/memory 主记忆
+# 构成第二套 RAG 真源，却全仓无生产 CRUD 消费者（仅装配 + health 探测）。
+# 按「不新增第二记忆真源」口径：迁移/删除前不得两套并行接线。
 memory_ext:
-  enabled: true                         # 是否启用记忆增强
+  enabled: false                        # 未接消费者前不得默认启用
   collection_name: "long_term_memories"  # ChromaDB集合名
 
 fusion:

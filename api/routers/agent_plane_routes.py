@@ -115,27 +115,50 @@ async def agent_plane_curate(
     session_key: str = "",
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
-    """记忆 curator：规则整理垃圾/near-dup；可选全会话。"""
+    """记忆 curator：规则整理垃圾/near-dup；可选全会话。
+
+    缺陷 J：不再直接借 `components["llm"]` 平台代理，也不在事件循环里跑
+    同步 curator —— 按目标 session 走 `byok.session_llm` 账号模型策略，
+    整理工作 `to_thread` 后台执行。
+    """
     from shisi.agent_plane.curator import run_curator_all_known, run_curator_for_session
 
     orch = deps.orch
     sm = None
-    llm = None
     if orch is not None:
         comps = getattr(orch, "components", None) or {}
         mem = comps.get("memory")
         sm = getattr(mem, "structured_memory", None) or getattr(mem, "_sm", None)
-        llm = comps.get("llm")
     if sm is None:
         raise HTTPException(503, "memory_unavailable")
+
+    def _resolver(key: str):
+        """账号模型策略：无 owner/无配置时不回落平台凭证。"""
+        try:
+            from api.byok import session_llm
+            from utils.async_utils import run_on_shared_loop
+
+            return run_on_shared_loop(session_llm(str(key or ""), orch))
+        except Exception:  # noqa: BLE001
+            return None
+
     if session_key:
-        return run_curator_for_session(session_key, sm=sm, llm=llm, apply=True)
+        return await asyncio.to_thread(
+            run_curator_for_session,
+            session_key,
+            sm=sm,
+            llm=None,
+            apply=True,
+            llm_resolver=_resolver,
+        )
     keys: list[str] = []
     try:
         keys = await asyncio.to_thread(_distinct_user_keys)
     except Exception:  # noqa: BLE001
         keys = []
-    return run_curator_all_known(sm, llm=llm, session_keys=keys)
+    return await asyncio.to_thread(
+        run_curator_all_known, sm, llm=None, session_keys=keys, llm_resolver=_resolver
+    )
 
 
 @router.get("/api/agent-plane/probes")

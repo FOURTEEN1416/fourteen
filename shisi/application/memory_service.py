@@ -236,9 +236,37 @@ class ShisiMemoryService:
         top_k: int = 5,
         character_id: str = "",
     ) -> dict[str, Any]:
-        return self._pipeline.retrieve_context(
+        context = self._pipeline.retrieve_context(
             query=query, session_id=session_id, top_k=top_k, character_id=character_id,
         )
+        # 缺陷 F：目标侧派生记录进入唯一检索合并点——
+        # 跨角色转发不再「只写不读」，目标角色上下文可带转发便签（untrusted 语义由上层渲染）。
+        try:
+            notes = self._forward_notes_for(character_id)
+            if notes and isinstance(context, dict):
+                context["forwarded_notes"] = notes
+        except Exception as e:  # noqa: BLE001
+            logger.debug("forward notes inject failed: %s", e)
+        return context
+
+    def _forward_notes_for(self, character_id: str, limit: int = 5) -> list[dict[str, Any]]:
+        """取目标角色最近转发便签（含 forward_id/from 可追溯字段）。"""
+        cid = str(character_id or "").strip()
+        if not cid:
+            return []
+        rows = self._forward_manager.get_forwards(cid)[:limit]
+        notes = []
+        for r in rows:
+            content = str(r.get("content") or "").strip()
+            if not content:
+                continue
+            notes.append({
+                "forward_id": r.get("id"),
+                "from": r.get("from"),
+                "memory_id": r.get("memory_id"),
+                "note": content[:300],
+            })
+        return notes
 
     def get_recent_context(self, n: int = 3, session_id: str = "", character_id: str = "") -> str:
         return self._pipeline.get_recent_context(n=n, session_id=session_id, character_id=character_id)
@@ -361,6 +389,7 @@ class ShisiMemoryService:
                     "turn_id": receipt["turn_id"],
                 }],
                 action="reinforce" if action == "reinforced" else "write",
+                turn_id=str(turn_id or ""),
             )
         return receipt
 
@@ -395,6 +424,7 @@ class ShisiMemoryService:
                     "fact_id": receipt["fact_id"], "action": "deleted", "reason": reason,
                 }],
                 action="forget",
+                turn_id=str(receipt.get("turn_id") or ""),
             )
         return receipt
 
@@ -438,7 +468,15 @@ class ShisiMemoryService:
         return sid or None
 
     @staticmethod
-    def _append_memory_event(*, session_key: str, facts: list[dict], action: str) -> None:
+    def _append_memory_event(
+        *,
+        session_key: str,
+        facts: list[dict],
+        action: str,
+        turn_id: str = "",
+        reply_id: str = "",
+        character_id: str = "",
+    ) -> None:
         """EventLedger 是记忆写入的审计真源；记账失败绝不反噬已落库的写入。"""
         if not session_key or not facts:
             return
@@ -446,7 +484,12 @@ class ShisiMemoryService:
             from shisi.agent_plane import runtime as apruntime
 
             apruntime.append_memory_write_event(
-                session_key=session_key, facts=facts, action=action
+                session_key=session_key,
+                facts=facts,
+                action=action,
+                turn_id=turn_id,
+                reply_id=reply_id,
+                character_id=character_id,
             )
         except Exception as e:  # noqa: BLE001
             logger.debug("memory ledger event failed: %s", e)
@@ -487,8 +530,24 @@ class ShisiMemoryService:
         to_character: str,
         memory_id: str,
         memory_content: str = "",
-    ) -> bool:
+    ) -> int:
+        """转发；返回 forward_id（0=失败）。完整回执见 :meth:`forward_receipt`。"""
         return self._forward_manager.forward(
+            from_character=from_character,
+            to_character=to_character,
+            memory_id=memory_id,
+            memory_content=memory_content,
+        )
+
+    def forward_receipt(
+        self,
+        from_character: str,
+        to_character: str,
+        memory_id: str,
+        memory_content: str = "",
+    ) -> dict[str, Any]:
+        """目标侧派生记录回执（缺陷 F）：含 forward_id，可供 get_forwards 消费。"""
+        return self._forward_manager.forward_receipt(
             from_character=from_character,
             to_character=to_character,
             memory_id=memory_id,

@@ -95,10 +95,20 @@ class DiarySummarizer:
         notable = [d for d, s in mood_scores.items() if abs(s) >= 2]
         return {"trend": trend, "avg_mood": avg_mood, "notable_days": notable}
 
+    def _ensure_table(self, conn) -> None:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS daily_summaries (
+                date TEXT PRIMARY KEY,
+                summary TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
     def save_summary(self, date_str: str, summary: str) -> None:
         if self._structured_memory:
             try:
                 with self._structured_memory.get_connection() as conn:
+                    self._ensure_table(conn)
                     conn.execute(
                         "INSERT OR REPLACE INTO daily_summaries (date, summary) VALUES (?, ?)",
                         (date_str, summary),
@@ -115,28 +125,49 @@ class DiarySummarizer:
             return
         try:
             with self._structured_memory.get_connection() as conn:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS daily_summaries (
-                        date TEXT PRIMARY KEY,
-                        summary TEXT NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
+                self._ensure_table(conn)
                 conn.commit()
                 rows = conn.execute(
                     "SELECT date, summary FROM daily_summaries ORDER BY date"
                 ).fetchall()
                 for row in rows:
-                    self._daily_summaries[row[0]] = row[1]
+                    key = row[0] if not isinstance(row, dict) else row["date"]
+                    val = row[1] if not isinstance(row, dict) else row["summary"]
+                    self._daily_summaries[key] = val
                 if rows:
                     logger.info("Loaded %d diary summaries from DB", len(rows))
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to load diary summaries from DB: %s", e)
 
     def get_summary(self, date_str: str) -> str | None:
-        return self._daily_summaries.get(date_str)
+        # 缺陷 H：跨 worker 读 SQLite 真源；进程缓存仅作无库回落
+        all_s = self.get_all_summaries()
+        return all_s.get(date_str)
 
     def get_all_summaries(self) -> dict[str, str]:
+        """优先读 `daily_summaries` 表（跨 worker 一致），不是只读本实例启动缓存。
+
+        旧实现只 `return dict(self._daily_summaries)` —— 缓存仅在
+        `load_summaries_from_db()`（唯一生产调用=MemoryPipeline 构造）时灌一次，
+        另一 worker `save_summary` 落库后本进程 API 仍读旧视图（缺陷 H）。
+        """
+        if self._structured_memory:
+            try:
+                with self._structured_memory.get_connection() as conn:
+                    self._ensure_table(conn)
+                    rows = conn.execute(
+                        "SELECT date, summary FROM daily_summaries"
+                    ).fetchall()
+                    out: dict[str, str] = {}
+                    for row in rows:
+                        if isinstance(row, dict):
+                            out[str(row.get("date"))] = str(row.get("summary"))
+                        else:
+                            out[str(row[0])] = str(row[1])
+                    self._daily_summaries.update(out)
+                    return out
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Read diary summaries from DB failed: %s", e)
         return dict(self._daily_summaries)
 
     def _summarize_with_llm(self, chats: list[dict[str, Any]]) -> str:

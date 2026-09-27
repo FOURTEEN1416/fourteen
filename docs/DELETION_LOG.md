@@ -1,5 +1,16 @@
 # Code Deletion Log
 
+## [2026-09-27] W4 缺陷 G：memory_ext 第二套记忆真源停用
+
+- `config/system.yaml` `memory_ext.enabled: true → false`。该模块（mem0 兼容
+  Chroma `long_term_memories`）宣称自动 LLM 提取，实际 `add` 原样写向量；
+  全仓仅装配与 health 探测，**无生产 CRUD 消费者**，却与 `shisi/memory`
+  主记忆并行构成第二套 RAG 真源。
+- `orchestrator/_init_mixin.py::_init_memory_ext` 改为恒 `components["memory_ext"]=None`，
+  不再 `MemoryEnhancer(...).initialize()`。打开配置开关也不会静默接上第二套库。
+- **未整包删除 `memory_ext/`**：保留源码供后续「迁移到主记忆或删除」裁决；
+  在此之前禁止两套并行接线。恢复装配的前提=迁移完成或用户明确批准删除。
+
 ## [2026-09-27] W3 缺陷 H：ASE 知识装配的死块与跨角色回落
 
 - 删除 `orchestrator/_init_mixin.py::_init_ase_and_scheduler` 内「候选 C：注入知识分享

@@ -89,19 +89,41 @@ async def forward_favorite(
     req: ForwardRequest,
     _auth: bool = Security(verify_api_key_dep),
     # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
-    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
     _owned: dict = Depends(require_character_access),
 ):
-    """跨角色转发**未生效**（缺陷 F，2026-09-27 W4：501 先于任何写动作）。
+    """跨角色转发：生成可追溯目标侧派生记录（缺陷 F 恢复）。
 
-    `memory_forwards` 落行后目标角色无任何消费者——无 GET forwards 端点、
-    对话/检索链不读该表，旧响应 `forwarded` 属谎报成功（删除面 501 同法）。
-    恢复条件：目标侧先接入授权派生记录（可追溯、进检索/上下文）再放开本面。
+    目标侧消费链已接入：`retrieve_context` 会注入 `forwarded_notes`
+    （含 forward_id/from 可追溯字段）。返回真实回执。
     """
-    raise HTTPException(
-        status_code=501,
-        detail=(
-            "跨角色转发尚未生效：memory_forwards 落库后目标侧无消费链"
-            "（无读取端点、不进对话上下文），请先接入目标侧派生记录再放开"
-        ),
+    fwd_mgr = getattr(deps.shisi_reg, "forward_manager", None)
+    if fwd_mgr is None:
+        raise HTTPException(status_code=503, detail="转发管理器未初始化")
+    receipt = fwd_mgr.forward_receipt(
+        character_id, req.to_character, req.memory_id, req.content
     )
+    if not receipt.get("ok"):
+        raise HTTPException(status_code=400, detail=f"转发失败: {receipt.get('error')}")
+    return {
+        "status": "forwarded",
+        "from": character_id,
+        "to": req.to_character,
+        "forward_id": receipt.get("forward_id"),
+        "memory_id": req.memory_id,
+        "target_side": "derived_note",
+    }
+
+
+@router.get("/{character_id}/forwards")
+async def list_forwards(
+    character_id: str,
+    limit: int = 20,
+    _auth: bool = Security(verify_api_key_dep),
+    _owned: dict = Depends(require_character_access),
+):
+    """目标角色收到的转发派生记录（缺陷 F 消费面）。"""
+    fwd_mgr = getattr(deps.shisi_reg, "forward_manager", None)
+    if fwd_mgr is None:
+        raise HTTPException(status_code=503, detail="转发管理器未初始化")
+    items = fwd_mgr.get_forwards(character_id)[: max(1, min(int(limit), 100))]
+    return {"forwards": items, "total": len(items)}
