@@ -99,6 +99,12 @@
 - **本窗证据**：工作树直跑 `test_w4_context_budget_real_usage` + `test_abc_context_budget` **16/16 绿**；相邻工具/编排域 7 文件 **170 passed**（3 失败均系 `api/auth_jwt.py` 在制品 `_bearer_scheme` NameError，认证域他窗，与缺陷 D 无关）。
 - **归属**：全转录扫描证明本窗（含压缩前）对这四文件零写操作（本窗对 `optimized_orchestrator.py` 唯一编辑为块 B turn_id 接线，已入 `4d03be4`）；BOARD 无缺陷 D 开工登记 → 来源不明，按在制品处理。**决策：不代其 commit**（避免反向复演 `4d03be4` 提交语义事故），已在 BOARD 追加区请 owner 自落。任务 #4 对本窗关闭为「他窗已实现、本窗已验证」。
 
+## 2026-09-27 — W4 实施窗 · 任务 #7（缺陷 H 日记读 SQLite 真源）核验 + 跨窗移交修桩（`e3bea4f`）
+
+- **任务 #7（只读核验轮，零改动）**：主检出工作树已存在完整缺陷 H 根治——`_legacy_diary_summarizer.py`（M）`get_all_summaries()` 优先读 `daily_summaries` 表、进程缓存仅无库回落，`tests/test_w4_diary_sqlite_source.py`（untracked，3 例），`misc_routes.py`（M）日记 GET 走真源 + `memory_scope` 前缀过滤、seed 单次落库（该文件同混 W1 认证 hunk，混合 owner 不可代提）。**验收口径「写入与读取 worker 日记一致」成立**（写 `save_summary` DB 失败即 raise、读表同 `daily_summaries`，成就面 `97de685` 已同表）。实跑：专项 10/10 绿 + 邻域（memory_pipeline/local_time/abc_memory_stability/归属契约日记例）**97/97 绿**。转录取证证明本窗对日记两文件零写入（仅 Read）→ 按缺陷 D 先例**不代提交**，BOARD 追加区请 owner 自落（summarizer+test 可独立成提交，misc_routes 随 W1 批同落）。
+- **跨窗移交修桩（本窗提交，tests/** owner）**：`test_llm_config_verification::test_6_4_admin_can_write_global_config`（W8/W3 均登记为红、移交 W4）——W6 `4046aa5` 后端点已改走 `save_with_receipt` 并 `await reconfigure_llm`，旧桩仍打 `cfg.save`+`MagicMock` → `TypeError` 被 `except` 吞成 400。桩对齐新契约（真回执 dict + `AsyncMock`），红例修前复现、修后文件内 **10/10 绿**，`e3bea4f`（单文件显式路径，pre-commit ruff/native-gate/ci_gates 全过）。
+- **边界**：#7 关闭为「他窗已实现、本窗已验证、HEAD 仍旧实现候落库」；`/api/config` 面本窗只动测试桩、未动 `misc_routes` 实现（其 M 态归 W1/W6）。
+
 ## 2026-09-26（夜） — 三端同步上线 + 上线后跨环境依赖补漏 + 中间产物清除
 
 - **动作**：本地 `010259e` 正常推送 origin（`f9e27a3..010259e`），服务器用已核实的 bundle 快进通道上线（回避含大二进制提交必现的 `fetch-pack: unexpected disconnect`），三端一致。

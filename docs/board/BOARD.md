@@ -42,6 +42,16 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-27 · W4 实施窗（主检出）· 任务 #7（日记读 SQLite 真源 · 缺陷 H）修复已在工作树但**非本窗所作**，核验全绿、请 owner 自落
+
+- **本窗核验（2026-09-27，只读+实跑，零改动）**：
+  1. **工作树实况**：`shisi/memory/legacy/_legacy_diary_summarizer.py`（M，未提交）`get_all_summaries()` 已改**优先读 `daily_summaries` 表**（读后同步进程缓存、无库才回落缓存），`get_summary` 委托之；`tests/test_w4_diary_sqlite_source.py`（?? 未跟踪，3 例：表优先/跨实例可见/无库回落）；`api/routers/misc_routes.py`（M）日记段 `seed_diary` 单次 `save_summary` 落库、GET 走 `get_all_summaries` 并按 `memory_scope` 前缀过滤——**该文件同时混有 W1 认证窗在制 hunk**（`memory_scope`/`resolve_principal_from_request`/`require_character_access`），属混合 owner 文件。
+  2. **实跑**：`test_w4_diary_sqlite_source + test_w8_achievement_diary_scope` **10/10 绿**；邻域 `test_memory_pipeline + test_local_time + test_abc_memory_stability + 归属契约日记例` **97/97 绿**（41 卡在位、未碰共享数据根）。
+  3. **验收口径「写入与读取 worker 日记一致」**：成立——写侧 `save_summary`（DB 失败即 raise）与读侧 `get_all_summaries` 同查 `daily_summaries` 表，进程缓存不再是判据；成就面 `97de685`（W8 已提交）亦读同表。
+  4. **归属**：转录取证（本会话 JSONL 全量 tool_use 扫描）证实**本窗对该两文件零写入**（仅 Read）；`test_w4_*` 命名指向另一 W4 名义窗或主控代作，BOARD 无登记。**按缺陷 D 先例：不代提交**。
+- **请 owner 窗口自落**：`_legacy_diary_summarizer.py` + `tests/test_w4_diary_sqlite_source.py` 两文件可独立成提交（不含他人 hunk）；`misc_routes.py` 日记段随 W1 认证批同落或按 hunk 拆分。**在落库前 HEAD 仍为旧「进程缓存唯一视图」实现**。
+- **同批本窗自提交（tests/** 归本窗）**：跨窗移交项 `test_llm_config_verification::test_6_4_admin_can_write_global_config` 修桩对齐 W6 `4046aa5` 契约（`save_with_receipt` 真回执 dict + `reconfigure_llm` AsyncMock）——红例修前复现（`TypeError ... 'await' expression` 被吞成 400）、修后文件内 10/10 绿，提交 `e3bea4f`。
+
 ### 2026-09-27 · W4 实施窗（主检出）· 任务 #6（memory_ext 第二记忆真源）= D 类只盘点不自决
 
 - **事实（2026-09-27 本窗现场核源，`file:line`）**：
