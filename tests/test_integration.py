@@ -110,16 +110,40 @@ class TestStatsAPIEndpoints:
 
 
 class TestMemoryAPIEndpoints:
-    def test_favorite(self, app_and_reg):
+    def test_favorite(self, app_and_reg, tmp_path, monkeypatch):
+        """fixture 未传 fav 时 registry 无参构造 FavoriteManager 指向宿主
+        data/sqlite.db —— 用例内钉到 tmp_path 隔离库，避免集成测试写真库（仿 test_forward）。
+        隔离库经正典 run_migrations 建 memory_favorites 表（FavoriteManager 自身不建表，
+        空库 INSERT 报错会被吞成 success=False）。"""
+        from shisi.api import memory_routes
+        from shisi.memory.favorite_manager import FavoriteManager
+        from shisi.migrations import run_migrations
+
+        run_migrations(tmp_path / "fav.db")
         _, _, client = app_and_reg
+        monkeypatch.setattr(
+            memory_routes, "_fav_mgr", FavoriteManager(db_path=tmp_path / "fav.db")
+        )
         resp = client.post("/api/shisi/memory/favorite", json={"character_id": "c1", "memory_id": "m1"})
         assert resp.status_code == 200
+        assert resp.json()["data"]["success"] is True
 
-    def test_list_favorites(self, app_and_reg):
+    def test_list_favorites(self, app_and_reg, tmp_path, monkeypatch):
+        """同 test_favorite：隔离到 tmp_path，并断言写读一致（收藏可见）。"""
+        from shisi.api import memory_routes
+        from shisi.memory.favorite_manager import FavoriteManager
+        from shisi.migrations import run_migrations
+
+        run_migrations(tmp_path / "fav.db")
         _, _, client = app_and_reg
+        monkeypatch.setattr(
+            memory_routes, "_fav_mgr", FavoriteManager(db_path=tmp_path / "fav.db")
+        )
         client.post("/api/shisi/memory/favorite", json={"character_id": "c1", "memory_id": "m1"})
         resp = client.get("/api/shisi/memory/favorites?character_id=c1")
         assert resp.status_code == 200
+        favs = resp.json()["data"]
+        assert isinstance(favs, list) and len(favs) == 1
 
     def test_forward(self, app_and_reg, tmp_path, monkeypatch):
         """W4 缺陷 F 恢复后契约（1773970）：转发落目标侧派生记录并返回真实回执。
