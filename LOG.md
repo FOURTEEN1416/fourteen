@@ -7,6 +7,17 @@
 
 ---
 
+## 2026-09-27 — W4 实施窗 · 记忆域 D/H/I/J/F/G 根治落库（`1773970`，未 push 未部署）
+
+- **背景**：A/B/C/E 已在树；本窗收口剩余六缺陷。基线 `985beeb` 为祖先，工作基点=当时 HEAD。纪律：显式 add、索引单独判读、无 pathspec commit、不碰他窗 W9/W1 在制。
+- **D 预算真实用量**：`budget_memory_context` 按槽优先级累计 `memory_chars_max`（旧 `kept[:items_max]` 不裁字符）；`wrap_tool_results` 整轮合计；`settle_after_tools` 二次结算保 untrusted 信封；最终 lengths 记真实段用量。
+- **H 日记跨 worker**：`get_all_summaries` 优先读 `daily_summaries`（旧只读本实例启动缓存 → 他 worker 新日记对 API 不可见）。
+- **I 来源链**：工具逐调用 `EVENT_TOOL_CALL`（call_id/状态/关联轮）；memory_write 带 turn/reply/character；prompt_slots 带事实版本+知识片段摘要。
+- **J curator**：`session_llm` 账号模型 + `to_thread`，无模型只做规则整理（不借平台凭证）。严格「异步作业状态机」未做（登记）。
+- **F 转发派生**：`forward_receipt` + `retrieve_context.forwarded_notes`（含 forward_id）+ GET `/forwards`；原 501 契约升级为可消费派生。读侧授权门禁未加（登记候裁）。
+- **G memory_ext**：默认禁用 + 装配恒 None（第二 RAG 真源停用）；模块未整删，入 DELETION_LOG。
+- **验证**：本批 26 红→绿；邻域 205 绿；突变 D/H/F 3/3；ruff 0；pre-commit 三门禁过。websocket 归属 2 红=W1 consent 在制。
+
 ## 2026-09-27 — W11 实施窗 · 前端用户任务与声明统一：五缺陷根治（未 push 未部署）
 
 - **本窗范围**：已确认缺陷 D1–D5 按白名单（`frontend/src` + 对齐契约所需最小 API 适配）先红测后根治；`RoleSettingsTabs` 最后集成。全程未 push、未部署、未 SSH、未读真实 `.env`/凭证/聊天，提交只用显式路径。**基线核对**：任务书基线 `985beeb` 实为当前 `HEAD ac5eace` 的祖先（差 33 笔，W1–W10 已合并）→ 以 `ac5eace` 为工作基点，未回退未 rebase。本窗对 `*.py` **零改动**。

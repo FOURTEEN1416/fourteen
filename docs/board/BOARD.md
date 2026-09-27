@@ -42,6 +42,13 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-27 · W4 实施窗（主检出）· D/H/I/J/F/G 落库 `1773970`（未 push 未部署）
+
+- **落库**：工作树中候 owner 的缺陷 D/H/I/J/F/G 实现 + 六份 `test_w4_*` 已显式 add 后提交 **`1773970`**（22 文件，索引单独判读，未卷入他窗 W9/W1 在制）。A/B/C/E 早前已在 `b311b1c`/`4d03be4`/`ee44d08`/`ef9cc9b`。
+- **F 授权口径登记（不自决）**：`forwarded_notes` 现按 **character 目标侧**注入，读侧无额外授权过滤；POST 面有 `require_character_access`（源卡归属）。是否需要「共享授权」门禁候主控/用户裁。
+- **验证**：本批 26 红→绿 + W4 既有 32 + 邻域 205 绿；突变 D/H/F 3/3；ruff 0。websocket 归属 2 红属 W1 `consent.py` 在制，非本批。
+- **未 push、未部署**。
+
 ### 2026-09-27 10:29 · W4 实施窗（主检出）· 🔴 索引地雷复演实锤：W11 整批被卷入 `e1a1198`（内容零损失，归属混淆）
 
 - **经过**：本窗提交 LOG/BOARD 留痕时，pre-commit 分叉门禁先拦下一次（LOG.md 被 W11 于 add 后追加了他们的条目）——门禁**工作正常**。本窗按门禁给出的逃生口 `AI_GF_ALLOW_DIRTY_STAGE=1` 提交暂存版，但**在 add 与 commit 的间隙，W11 已把其整批 19 个文件 git add 进共享索引**（`git diff --cached --name-only` 在 commit 命令链内打印时已含其文件，但同一条命令内已无法摘除）→ `e1a1198` 以 W4 消息卷入了 **W11 的全部前端改动 + 其验证报告 + 其 LOG.md 条目**。
@@ -677,3 +684,9 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
   9. 🔴 **移交 W6/W4：他窗回归一例（本窗未修，owner 不在白名单）** —— 全量分块中 `tests/test_llm_config_verification.py::test_6_4_admin_can_write_global_config`**当前为红**：`api/routers/misc_routes.py:418` 在 W6 `4046aa5` 改为 `await reconfigure_llm(...)`，而用例仍以 `MagicMock` 打桩（`tests/test_llm_config_verification.py:171`）→ `TypeError: object MagicMock can't be used in 'await' expression` 被 `except` 转成 HTTP 400「Invalid config」。修法二选一：桩改 `AsyncMock`（tests/ 归 W4）**或**在 misc_routes 侧对非协程实现显式报错而非吞成 400（api/ 归 W6）。本窗仅登记不动手。
 - **已复核为"不再成立"（避免重复登记）**：① 「W5 在制品 `shisi/knowledge/*` 导致 `test_prompt_builder_retrieves_knowledge_for_query` 失败」—— 05:4x 现场 `pytest -k` 实测 **1 passed**，相关文件 `git status` 干净，已不复现；② 「心理画像页只取最新一份 / 前端清除按角色而端点清全部」—— 已由本窗 **E 批 `398dd3d`** 根治（`fusion.py:296-345` 的 `profile_scopes` / `resolve_profile_scope` / `clear_profiles` 同源并回显 `scope_count`），现行"按角色读取时取最近更新的 scope 并披露份数"是**已声明的设计选择**。
 - **本窗验收口径（W8 提交集）**：`5a87e5b`（A/C 归一化无损 + 0值/维度/基准）→ `8b83b4f`（B 旧副本 PUT 410）→ `398dd3d`（E 画像 scope 同源）→ `e624243`（G 情绪信号不冒充临床量表 + LIWC 字段双向闭合）→ `8221f78`（I 好感衰减区间水位）→ `97de685`（J 成就日记按角色归属 + 跨进程真源）→ `5abe12b`（D 剧情线入口诚实化「仅存档」）。全部**本地显式路径提交，未 push、未部署**；41 张角色卡本窗仅做结构统计，未读正文。
+
+### 2026-09-27 · W9 窗口（账号/角色删除与数据遗忘）· 文件归属登记（追加区）
+
+- **W9 独占写入**（收编前勿动）：`api/lifecycle.py`（新）、`utils/deletion_guard.py`（新）、`api/consent.py`、`api/routers/chat_routes.py`（仅门禁行）、`api/websocket_server.py`（仅 chat 分支门禁）、`user_scheduler.py`（仅入站门禁）、`proactive/scheduler.py`（仅 _deliver 门禁 + purge_throttle_for）、`proactive/reminder_delivery.py`（仅 _deliver 门禁）、`shisi/memory/legacy/structured_memory.py`（purge/count/verify/守卫）、`shisi/memory/legacy/vector_memory.py`（purge/count_owner_data）、`shisi/agent_plane/event_ledger.py`（purge/count_owner_sessions）、`proactive/ase_hub.py`（forget/purge_user_states + `_forget_index` 返回值 bug 修复）、`utils/affinity_state.py`（purge_owner/count_owner）、`wechat_direct/channel_paths.py`（remove_user_sessions）、`wechat_direct/connector_registry.py`（purge_user）、`scripts/ax_clean_profiles.py`、`deploy/seed.py`、`tests/test_w9_*.py`（三件）。
+- **与 W1 在制品叠加**（不回退、在其版本之上）：`api/database.py`（FK pragma + users.id AUTOINCREMENT 迁移）、`api/routers/admin_routes.py`（delete 接 lifecycle）、`api/routers/auth_routes.py`（撤回/注销/导出端点）、`api/routers/character_routes.py`（delete 接 owner 粒度清理）。
+- 🔴 已发现并行窗覆盖事故一例：`utils/affinity_state.py` 的 W9 补丁曾被在制品写回覆盖（owner_uid 关键字消失），已重放；**各窗写文件前请先读当前盘上版本**。
