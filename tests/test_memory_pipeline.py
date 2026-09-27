@@ -190,6 +190,14 @@ class FakeStructuredMemory:
     def get_chats_by_session(self, session_id: str) -> list[dict]:
         return self.get_chats_by_session_limit(session_id, limit=10_000)
 
+    def extraction_pending_turns(self, session_id: str, character_id: str = "") -> int:
+        """W4 缺陷 C 回落判据替身：本会话积压用户轮数（替身无水位，恒为全量）。"""
+        return sum(1 for c in self.get_chats_by_session(session_id) if c.get("role") == "user")
+
+    def extraction_backlog(self, limit: int = 200) -> list[dict]:
+        """W4 缺陷 C sweep 盘点替身：替身不落 `memory_extraction_progress`，无积压。"""
+        return []
+
     def get_chats_today(self) -> list[dict]:
         return list(self.chats)
 

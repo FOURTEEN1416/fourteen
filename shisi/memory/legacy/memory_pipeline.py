@@ -545,6 +545,16 @@ class MemoryPipeline:
             needs_extraction = count >= self._config.fact_extract_interval
             self._chat_count_since_extract[extraction_key] = 0 if needs_extraction else count
 
+        if not needs_extraction:
+            # 缺陷 C（2026-09-27）：进程内计数重启归零——达阈值前重启、一次失败后
+            # 水位未推进而无足够新轮时，积压历史永不续抽。回落持久化水位判据：
+            # 与 claim_extraction 同表同键同钟，本会话积压轮数达阈值即刻续跑。
+            pending_turns = self.sm.extraction_pending_turns(effective_session, character_id)
+            needs_extraction = pending_turns >= self._config.fact_extract_interval
+            if needs_extraction:
+                with self._chat_count_lock:
+                    self._chat_count_since_extract[extraction_key] = 0
+
         if needs_extraction:
             from contextvars import copy_context
 
@@ -819,6 +829,12 @@ class MemoryPipeline:
 
             # 3. 清理低置信度事实
             self._cleanup_low_confidence_facts()
+
+            # 4. 抽取积压续跑（缺陷 C）：以持久化水位全量扫描，
+            #    兜住"长期低频 / 重启前未达阈值 / 失败后无新轮"三类停摆会话
+            swept = self.sweep_extraction_backlog()
+            if swept:
+                logger.info("Daily maintenance resumed extraction backlog for %d pair(s)", swept)
 
             logger.info("Daily maintenance complete: %s", date_str)
             return last_summary
@@ -1127,6 +1143,27 @@ class MemoryPipeline:
             if not success:
                 break
         return total
+
+    def sweep_extraction_backlog(self, limit: int = 200) -> int:
+        """以持久化水位盘点积压并派发续跑（缺陷 C，2026-09-27）；返回派发对数。
+
+        进程内计数只惠及"正在收消息"的会话；长期低频会话与失败后无新轮的
+        积压靠本 sweep 兜底。`_do_fact_extraction` 自身按租约逐窗认领、直到
+        水位追平已写入来源；多 worker 并发 sweep 由 claim 租约互斥天然幂等。
+        """
+        if not getattr(self._config, "extraction_enabled", True):
+            return 0
+        from contextvars import copy_context
+
+        dispatched = 0
+        for row in self.sm.extraction_backlog(limit=limit):
+            sid = str(row.get("session_id") or "")
+            cid = str(row.get("character_id") or "")
+            self._executor.submit(copy_context().run, self._do_fact_extraction, sid, cid)
+            dispatched += 1
+        if dispatched:
+            logger.info("Extraction backlog: dispatched %d session/character pair(s)", dispatched)
+        return dispatched
 
     def _extract_fact_snapshot(self, session_id: str, character_id: str = "", source_rows=None) -> int:
         """执行事实提取（V1 FactExtractor + V2 ConflictDetector）

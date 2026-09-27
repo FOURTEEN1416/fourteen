@@ -1228,6 +1228,44 @@ class StructuredMemory:
             )
             conn.commit()
 
+    def extraction_backlog(self, limit: int = 200) -> list[dict[str, Any]]:
+        """超出持久化水位的积压 会话×角色 盘点（缺陷 C，2026-09-27）。
+
+        口径与 :meth:`claim_extraction` 严格一致：同表（chat_history）、同键
+        （session_id + character_id 等值）、同水位（`last_id`，无 progress 行按 0）。
+        失败结案不推水位的对会留在积压里等待续跑。
+        """
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT ch.session_id AS session_id, ch.character_id AS character_id, "
+                "COUNT(*) AS pending, MIN(ch.id) AS oldest_id "
+                "FROM chat_history ch "
+                "LEFT JOIN memory_extraction_progress p "
+                "ON p.session_id = ch.session_id AND p.character_id = ch.character_id "
+                "WHERE ch.id > COALESCE(p.last_id, 0) "
+                "GROUP BY ch.session_id, ch.character_id "
+                "ORDER BY oldest_id ASC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def extraction_pending_turns(self, session_id: str, character_id: str) -> int:
+        """本 会话×角色 水位之上积压的**用户轮数**（缺陷 C 触发回落判据）。
+
+        行窗口与 :meth:`claim_extraction` 同钟（id > last_id），但只数
+        role='user' —— `fact_extract_interval` 的语义是"每 N 条对话"，
+        一轮写 user+assistant 两行，数全部行会把阈值折半。
+        """
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM chat_history ch "
+                "WHERE ch.session_id=? AND ch.character_id=? AND ch.role='user' "
+                "AND ch.id > COALESCE((SELECT last_id FROM memory_extraction_progress "
+                "WHERE session_id=? AND character_id=?), 0)",
+                (session_id, character_id, session_id, character_id),
+            ).fetchone()
+        return int(row["n"]) if row else 0
+
     def get_chats_today(self, session_id: str | None = None) -> list[dict[str, Any]]:
         """获取本地今日聊天，委托同一日期窗口查询。"""
         return self.get_chats_for_day(session_id=session_id)
