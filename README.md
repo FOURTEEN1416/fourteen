@@ -8,16 +8,16 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-1995-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-2688-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **2026-09-26 本地实现更新（已上线）**：消息归属、发送确认后记忆、请求/后台模型凭证隔离、画像更正保序、事实删除派生失效、抽取水位与昨日角色日记已重构并部署（三端一致 `f85408f`）；流式先完整定稿后分块，首段显示相应延后。本地冻结工作树验收 **2019通过/1跳过**（2020收集、41卡、127文件），前端98通过；上线验收、迁移口径与遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md` 2026-09-26。下方徽章仍为上一已部署口径。
+> **2026-09-26 本地实现更新（已上线）**：消息归属、发送确认后记忆、请求/后台模型凭证隔离、画像更正保序、事实删除派生失效、抽取水位与昨日角色日记已重构并部署（三端一致 `f85408f`）；流式先完整定稿后分块，首段显示相应延后。本地冻结工作树验收 **2019通过/1跳过**（2020收集、41卡、127文件），前端98通过；上线验收、迁移口径与遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md` 2026-09-26。下方徽章为 **2026-09-27 多窗收口窗本地实测口径（未 push 未部署）**。
 
-> **测试口径**（2026-09-23 收尾轮本地四分块实测，`6f80a5c` 基线）：后端 **1897 passed / 1 skipped**（收集 **1898**，0 失败；现役角色卡 **41 张**；服务器侧本批仅做账本隔离专项验收 98 例，全量未重跑）；⚠️ 单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
-> 前端 `98 passed`（vitest 16 文件）+ `tsc --noEmit` 0 错误。
+> **测试口径**（2026-09-27 收口窗本地**全量五分块**实测，HEAD `31a03d4`）：后端 **2553 passed / 1 skipped**（收集 **2560**，**另有 6 failed / 0 errors**；现役角色卡 **41 张**；168 测试文件）。⚠️ **口径勘误**：`tests/test_[a-f]*.py` 等四段 glob **漏子目录 `tests/core/`（27 例）**，四段合计 2533 ≠ 全量收集 2560；本窗已补跑 `tests/core/`（27 passed）。⚠️ 6 失败**全部**为本机 SQLite WAL 并发 flakiness（`test_runtime_plane.py` 2 + `test_w3_outbox_relay.py` 4，报 `attempt to write a readonly database`）——已用**纯 stdlib** 复现（WAL + 3 线程短连接写 ≈0.5% 失败率；DELETE 模式 0 失败；开/不开沙箱均复现）⇒ **非本仓代码缺陷、非沙箱产物**，归 W3 域观察，**上线前需在 Linux / 生产复跑**。⚠️ 单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> 前端 `135 passed`（vitest 23 文件）+ `tsc --noEmit` 0 错误；ruff 0.16.8 全仓 0 错（`All checks passed!`）。
 > ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 7）。**引用基线必须同时声明卡数**。
 
 ---

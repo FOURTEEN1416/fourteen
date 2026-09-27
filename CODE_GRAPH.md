@@ -30,6 +30,51 @@
 - 删除重复 `diary_summarizer.py`；唯一持久化owner `_legacy_diary_summarizer.py`。历史分页新增`before_id`，同秒消息按id稳定排序。
 - 以下旧版本指标为历史已部署口径；当前验证与上线结果见 HANDOFF 顶栏、LOG 2026-09-26。上线后新增一处跨环境修复：`sqlalchemy[asyncio]>=2.0.0`（干净环境缺 `greenlet` 会导致 `sqlalchemy.ext.asyncio` 导入失败）。
 
+## 2026-09-27 W1–W12 批次覆盖层（本地，未 push 未部署）
+
+> **本节为增量追加**：登记 2026-09-27 多窗口协同（W1–W12）落库的新模块与端点增量。§1.1 / §4.2 保留 2026-09-21 基线读数，**以本节与 §13 新行为准**。
+
+**新增模块**（均在 main 工作树；行数 = `wc -l` 实测，提交 = `git log -1 --format=%h <file>` 实查）：
+
+| 模块 | 行数 | 落库提交 | 归属窗 | 职责 |
+|------|------|---------|--------|------|
+| `tools/url_guard.py` | 124 | `4046aa5` | W6 | **SSRF 统一守卫共享真源**——getaddrinfo + ipaddress，拒绝 private/loopback/link-local/reserved/multicast/unspecified + IPv4-mapped 解包；十进制/十六进制 IP 字面量解析归一判定；重定向禁自动跟随、逐跳发请求前一刻重校验。character_card 三处抓取入口 + web_summary 全部接入 |
+| `tools/tool_state.py` | 196 | `4046aa5` | W6 | **工具/插件开关统一库存**——`data/runtime_switches.json` 唯一 owner（mtime 缓存 + OS 锁 + 原子写）；dispatch 首查状态门，跨 worker 即时生效、重启不恢复旧状态；`GET /api/tools` 返回 enabled/disabled/unavailable + 原因 |
+| `proactive/runtime_plane.py` | 804 | `1387e27` | W3 | **跨进程运行时平面**（`data/runtime_plane.db`，WAL + 单语句 CAS）：心跳租约 / 通道期望态 / 出站命令+受理回执 / 控制命令 / 入站幂等 / 追问预算 / 副作用幂等；控制面不可用即明确失败，不降级为广播、不假成功 |
+| `proactive/runtime_assembly.py` | 140 | `01907d4` | W3 | 提醒 / 主动运行时**两入口唯一装配 owner**——补回 `main.py` 旧抄漏的 `register_reminder_task` 与 `set_llm_provider`；`ChannelNotReadyError` 三态跳过记账 |
+| `utils/inbound_context.py` | 40 | `215b226` | W3 | 入站 `message_id` 贯通到 `set_reminder` 副作用幂等（ContextVar） |
+| `api/lifecycle.py` | 1090 | `abcde64` | W9 | **账号/角色删除与数据遗忘统一生命周期**五阶段作业（preview 归属 → 冻结撤销 → 逐 owner purge → 验证 → 审计回执）；owner 步骤失败 / 验证残留即标 failed **不宣称 deleted**；作业账持久化 `data/lifecycle_jobs/` 可查询续跑；坟场 `graveyard.json` 支持备份恢复复活再清除 |
+| `utils/deletion_guard.py` | 88 | `abcde64` | W9 | **迟到写入防护**——TTL 缓存跨进程坟场；`add_chat_turn` 丢弃已删账号会话写入 |
+| `api/consent.py` | 227（`abcde64` +181 扩展） | `abcde64` | W9 | **同意状态机**（granted / missing / withdrawn / outdated，`WITHDRAWN` 哨兵档）+ **分层强制**：消费面拦 granted 之外全部，外发面仅拦 withdrawn/outdated（missing 放行 = 协议 §0「使用即同意」） |
+| `api/routers/character_template_routes.py` | 160 | `b6501e4` | W12 | **角色模板面阶段 1**——`GET /api/character-templates`（无 Bearer→401；仅列**无主且过策展**的卡摘要）+ `POST /api/character-templates/{id}/clone`（201；克隆 = 新 id + 新 user_id 独立副本，模板文件零改动）；策展清单 `config/character_templates.yaml`（visible/hidden/总开关）；复用 `character_routes` 的 `_load_character`/`_save_character`/`_list_all_characters`/`card_owner_key`。阶段 2（注册钩子 + 前端）挂起 |
+
+**端点增量**（2026-09-27 `create_api_app()` 内省实跑，`AI_GF_ENV=dev`；权威口径 = `len([r for r in app.routes if isinstance(r, APIRoute)])`）：
+
+| 维度 | 2026-09-21 基线 | **2026-09-27 实测（HEAD `b6501e4`）** | 增量归因 |
+|------|----------------|--------------------|---------|
+| `APIRoute` 业务端点 | 220 | **224** | +1 `memory`（W4 `GET /api/characters/{character_id}/forwards`，`1773970`）+1 `health`（W10 `GET /api/metrics`，`5d0a141`）+2 `character-templates`（W12 `b6501e4`） |
+| 唯一路径 | 186 | **190** | 同上（四条新增各占一条唯一路径） |
+| `len(app.routes)` | 224 | **228** | 含 4 条框架路由（`/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`），非业务端点 |
+| 方法分布 | 105 GET / 79 POST / 16 PUT / 20 DELETE | **108 GET / 80 POST / 16 PUT / 20 DELETE** | +3 GET / +1 POST |
+| `include_router` 处数 | 19 | **19** | 不变 |
+
+> ⚠️ **W9 未落库项（文档与代码不一致，已登记，本窗不改代码）**：`LOG.md` 2026-09-27 W9 条与 BOARD W9 追加区称新增 HTTP 端点 `/api/auth/consent/withdraw|status`、`/api/auth/account/delete`、`/api/auth/account/export(+ /account/export/chats)`——**main 上不存在**：`abcde64` 文件清单不含 `api/routers/auth_routes.py`，内省 `/api/auth/*` 仅 9 条（register/login/refresh/logout/me/consent/change-password/admin-reset-password/register-invite），无 consent/withdraw 与 account/*。W9 的 `test_w9_consent_gate_export.py`（6 例）实为**库级直调**（`consent.withdraw_consent` / `lifecycle.delete_account_everywhere` / export manifest），故无回归暴露。**owner = `api/routers/auth_routes.py`（W1/W9 叠加区）**。
+
+**同批落库但非新模块**（跨窗声明，见 `docs/board/BOARD.md` W9 追加区）：`api/database.py`（FK pragma + `users.id` AUTOINCREMENT 表重建迁移）、`api/routers/admin_routes.py`（delete 接 lifecycle）、`api/routers/character_routes.py`（delete 接 owner 粒度清理）。
+
+**其他批次新增模块**（供索引完整性，非本窗白名单但已落 main）：
+
+| 模块 | 行数 | 提交 | 归属窗 |
+|------|------|------|--------|
+| `shisi/knowledge/source_store.py` | 309 | `ea68077` | W5（不可丢源材料唯一 owner；BM25 索引改纯派生物） |
+| `voice/voice_catalog.py` | 136 | `596c428` | W7（音色 catalog 持久化 `data/voice_catalog.json`） |
+| `deploy/backup_manager.py` | 563 | `5d0a141` | W10（manifest 化备份 + SQLite 备份 API 在线快照） |
+| `deploy/restore_manager.py` | 329 | `5d0a141` | W10（隔离目录恢复 + 逐项校验） |
+
+**W12 落库轨迹（收口窗中途并入 main）**：`0762b13`（分支 `wt/w12`，`character_template_routes.py` 130 行）→ 本收口窗内 W12 窗口将其并入 main 为 **`b6501e4`**（文件扩到 160 行 + `config/character_templates.yaml` + `tests/test_w12_character_templates.py` 351 行，`app_factory` 加挂载块 8 行）。**`git merge-base --is-ancestor 0762b13 HEAD` = 否、`b6501e4` = 是** → 工作树已含该 2 端点，上表 224/190 计数**已含**；阶段 2（注册钩子 + 前端）挂起。
+
+**同批测试契约收口**（`bbd9bed`，本收口窗期间落库）：`tests/test_integration.py`（forward 新契约对齐，32 行）、`proactive/scheduler.py`（调度器管道拆分回归唯一 owner，10 行）、`tests/test_w10_metrics_multiproc.py`（multiproc normcase）；另 `da63fcb`（W9 收尾）接管并补全 `tests/test_w9_character_delete.py`（+176 行，转为 tracked）、`6558064` 根治 `delete_character` 回执计数 await 优先级缺陷（`rowcount` 取在未 await 协程上 → DELETE 角色自 `abcde64` 起必然 500）。
+
 ## 1. 全局指标
 
 ### 1.1 实时核实指标（2026-09-21 create_api_app/Glob/pytest/vitest/tsc 全量复测）
@@ -743,6 +788,7 @@ tools/
 
 | 日期 | 提交 | 变更摘要 |
 |------|------|---------|
+| 2026-09-27 (W1–W12 批次，本地未 push 未部署) | 多窗在制品（HEAD `b6501e4`） | 多窗口协同收口（W1 统一身份与资源授权 `94ed63d` / W2 模型契约与对话生命周期 `f2e29a3` / W3 后台单一运行时十缺陷 `b59eb8b` 止 / W4 记忆域统一事实写入口六批 `1773970` 止 / W5 知识源保存与索引派生重建 `ea68077` / W6 配置生效与可信工具 `4046aa5` / W7 语音契约与克隆方向 `596c428` / W8 角色表达·关系·心理画像六批 `5abe12b`·`a6f54d2` / W9 删除与遗忘生命周期+同意门禁 `abcde64`+`9076447`（收尾 `6558064`·`da63fcb`） / W10 备份恢复与发布门禁 `5d0a141` / W11 前端声明统一 `e1a1198`+`c13d439` 申报 / W12 角色模板面阶段 1 `b6501e4`（原 `wt/w12` `0762b13`，本收口窗期间并入 main） / 测试契约收口 `bbd9bed`）。**新增模块 9 个**（`tools/url_guard.py`·`tools/tool_state.py`·`proactive/runtime_plane.py`·`proactive/runtime_assembly.py`·`utils/inbound_context.py`·`api/lifecycle.py`·`utils/deletion_guard.py`·`api/consent.py` 扩展·`api/routers/character_template_routes.py`）**+ 端点增量 +4**（`APIRoute` **220 → 224**、唯一路径 **186 → 190**、`len(app.routes)` **224 → 228**、方法 **105/79/16/20 → 108/80/16/20**、`include_router` 19 不变）。详见本文件「2026-09-27 W1–W12 批次覆盖层」段。**版本头 `v3.8.23` 未改（遵本窗「只追加」约束）** |
 | v3.8.22 | 2026-09-23 | 五域可靠性批次上线收口（三端 `6f80a5c`）：minimal 粘滞回升 `ad828f7` / 账本测试沙箱 `d57cb5f`（服务器 98 例验收账本 1526→1526）/ 启动通道同步 async 桥双入口 `6f80a5c`（09-21 起 116 告警→0，「已同步 3 条」实锤）；主动消息按令止改+账本终结分析（send 28 全 API 受理、skip 396 llm_wait_window、最后一英里无回执不可证）；测试 **1898/1897/1**（分块 428+577+1+411+481）、合计 **1995**；端点 220/186 不变 |
 | v3.8.21 | 2026-09-22 | 六域根治四块（遗忘时钟/提醒校验/衰减基准/enhancer 回放/重要日期多用户/检索下推/pending_events 拆除/prune 豁免+投影取最新/死表真删/web 定向）；测试 1750/1749/1 双端；端点 220/186 不变 |
 | 2026-09-22 (身份拷问剧本进卡) | 86af331 | **v3.8.20**：persona.yaml（内置十四卡真源）+creator_notes 身份拷问应答剧本（PHI 位注入）+ persona_engine get_creator_notes()/约束层「身份拷问应对」身份中性通用规则 + 内置卡接线 + 知识槽排除源 +creator_notes（IDENTITY_KNOWLEDGE_SOURCES 常量化）；+5 用例，生产探针智谱照抄剧本在戏。全量基线未刷新（并行窗在制品，见 LOG 09-22） |
