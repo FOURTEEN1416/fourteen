@@ -42,7 +42,18 @@
 
 ## 追加区（按时间倒序，新的在上）
 
-### 2026-09-27 · W4 实施窗（主检出）· 块F 转发撤假语义 + ⚠️ 请 W1 认证窗随批带上统一面 hunk
+### 2026-09-27 · W4 实施窗（主检出）· 任务 #6（memory_ext 第二记忆真源）= D 类只盘点不自决
+
+- **事实（2026-09-27 本窗现场核源，`file:line`）**：
+  1. `memory_ext/`（`__init__.py` + `mem0_backend.py::MemoryEnhancer`）**全仓生产消费者为零**：唯一构造点 `orchestrator/_init_mixin.py:478-502`（建实例 + `initialize()` 后登记 `components["memory_ext"]`），该组件键**无任何下游读者**；`add/search/get_all` 无调用者；测试目录 grep `memory_ext` 命中全为 `memory_extraction_progress`/`extract_facts` 等无关词形（逐条核过）。
+  2. **谎报家族**：`memory_ext/__init__.py` docstring 与 `mem0_backend.py:4-9` 宣称「自动提取记忆」，`add()`（`:87-133`）实为原文直写 Chroma `long_term_memories` 集合，零提取零评分。
+  3. **启动空转**：`config/system.yaml` `fusion:` 段（:164-172）**无 `memory_ext` 子段** → `_init_mixin:480` 回落顶层 `memory_ext.enabled=true` → 每 worker 启动都 `PersistentClient` 打开共享 Chroma 并 get/create 集合——该集合与 `shisi/memory/legacy/semantic_memory`（唯一生产向量真源）并立=**第二记忆真源**，违反「不引入第二真源」宪法条款。
+  4. **悬空 env 映射**：`shisi/config.py:33` 把 `*_MEMORY_RECYCLE_DAYS` 映到 `("memory_ext","recycle_bin_days")`，而 `memory_ext` 段实况只有 `enabled`/`collection_name` 两键——该映射写入的键从未被任何读者消费。
+  5. **「D6/D12 口径」无出处**：任务书 7)「memory_ext 按 D6/D12 口径迁移或删除」——盘上检索：`docs/research/2026-09-20_*` 两份对照文档无 memory_ext 处置建议；BOARD W-D 设计条目 D6=「心光数值门控」（非本域）；`DECISION_LEDGER.md` 缺 D10/D11/D12 行（W8 窗 09-27 已登记）。**迁移目标语义不可得**。
+- **推荐（交默默裁决，本窗不自决）**：**拆除**——整删 `memory_ext/` + `_init_mixin._init_memory_ext` 段与 `:81` 调用 + `system.yaml memory_ext` 段 + `observability/config_models.MemoryExtConfig` 与 `observability/__init__` re-export + `shisi/config.py:33` 悬空映射，`memory_ext/` 入 DELETION_LOG。理由：迁移=第二真源接主链（违宪），拆除面全在白名单外（`orchestrator/_init_mixin.py`、`observability/`、`config/`）且口径出处缺失，任一都不满足本窗「白名单内红测根治」的实施边界。若裁决拆除，建议归 W3 串行收口窗（其已收 `orchestrator/_init_mixin` 装配域）。
+- **零代码改动**；本任务对 W4 窗关闭为「盘点+推荐已呈，候裁决」。
+
+### 2026-09-27 · W4 实施窗（主检出）· 块F 转发撤假语义（`dd63bb4`）+ 🔴 申报：统一面整文件入库携 W1 归属校验 hunk
 
 - **块F（本窗已提交）**：`POST /api/shisi/memory/forward` **501 先于任何写动作**（`memory_forwards` 只写不读：两面无 GET、对话/检索链零消费者、前端 `forwardFavorite` 无组件调用；旧回 `success:true`=谎报，删除面 501 同法）。`test_w4_memory_forward_honest` 2 例红→绿 + 突变验红 2/2；`test_integration::test_forward` 200→501 按新诚实语义改钉。
 - 🔴 **申报（替 W1 提前入库）**：`api/routers/memory_routes.py` 工作树原混有 W1 认证窗在制 hunk（`require_character_access` 四端点归属装饰）。因本窗测试钉统一面 501、只提旧面会让 HEAD 自相矛盾，改为**整文件同批提交并申报**：该提交携 W1 该文件在制入库（无工作丢失，worktree==HEAD，W1 后续 diff 从新 HEAD 起算）；两方改动零文本冲突、语义正交（归属先行→再 501）。请 W1 与主控知悉复核；若后续覆盖回 `forward_favorite` 假成功，`test_unified_forward_501_and_zero_write` 会转红兜住。

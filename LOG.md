@@ -77,7 +77,7 @@
 - **未做 / 风险**：① sweep **未挂进程启动钩子**——`orchestrator/_init_mixin.py` 不在本窗白名单，故停摆会话的恢复上限是「下一个 00:05 每日维护」或「该会话下一条消息」，而非开机即补；② 持续失败的来源窗口（如 FTS 虚表残缺）会每日重试但不推进水位，无告警升级；③ 真实模型语义下抽取质量未评测（本批只证驱动链通）。
 - **迁移 / 回滚**：无 schema 变更（`memory_extraction_progress` 09-26 已生产迁移完成），故无需迁移；回滚 = revert `ee44d08`，行为退回「仅进程内计数」，已推进的水位不影响正确性（claim 仍以水位为准）。**未 push、未部署。**
 
-## 2026-09-27 — W4 实施窗 · 记忆域块F：跨角色转发撤去假语义（501 先于写；统一面 hunk 待 W1 串行）（未 push 未部署）
+## 2026-09-27 — W4 实施窗 · 记忆域块F：跨角色转发撤去假语义（`dd63bb4`，两面 501 先于写；统一面整文件同批入库并申报）（未 push 未部署）
 
 - **根因（缺陷 F）**：`POST /api/shisi/memory/forward` 与 `POST /api/characters/{cid}/favorites/forward` 均回 `success:true` / `forwarded`，但写侧只 `INSERT memory_forwards` 一行——**目标角色从未有任何读取路径**：两个 API 面都没有 GET forwards 端点（`ForwardManager.get_forwards` 全仓生产消费者为零，仅测试）、对话/检索链不读该表、前端 `forwardFavorite` 绑定无任何组件调用。转发落库即永不被使用 = 假接线；且「把 A 角色的记忆分享给 B 角色」涉多用户/跨角色数据授权，属 D 类未裁决语义。
 - **改动（任务书 6「否则撤去未支持语义」，与删除面 501 同法）**：两 POST 面一律 **501 先于任何写动作**，detail 指明真缺口与恢复条件（目标侧先接授权派生记录再放开）；端点路径与请求模型不变（路由契约不塌）；`tests/test_integration.py::test_forward` 既有 200 断言按新诚实语义改 501（非为变绿删断言——主张本身从谎报改诚实）。
@@ -86,6 +86,12 @@
 - **⚠️ 跨窗串行申报（已改为同批入库）**：`api/routers/memory_routes.py` 工作树原本混有 **W1 认证窗在制 hunk**（`require_character_access` 四端点归属装饰 + 头注释）。因本窗新测试钉统一面 501、只提旧面会让 HEAD 态自相矛盾（提交测试即红），裁决改为**整文件同批提交并显式申报**：本提交替 W1 提前入库其该文件在制（无工作丢失，worktree==HEAD，W1 后续 diff 从新 HEAD 起算）；该 hunk 与本窗 501 零文本冲突、语义正交（归属校验先行→再 501）。已在 BOARD 向 W1 与主控申报。
 - **未做 / 风险**：① 闭环方向（GET forwards + 注入目标角色上下文）未实施——需默默先裁决跨角色数据共享授权口径（D 类不自决）；② `memory_forwards` 存量行保留在 DB 无消费者即无害（DELETION_LOG 09-21 既有口径）；③ `ShisiMemoryService.forward/get_forwards` 服务壳保留未动（两 API 面已不消费）。
 - **迁移 / 回滚**：零 schema 变更；回滚本窗语义 = revert 本提交中两面 forward 段（**注意**：整文件 revert 会连带撤销已随批入库的 W1 归属校验 hunk，须按 hunk 回退或用 `test_unified_forward_501_and_zero_write` 红作为守卫）。**未 push、未部署。**
+
+## 2026-09-27 — W4 实施窗 · 任务 #6（memory_ext 第二记忆真源）盘点：零消费者+谎报+启动空转，按 D 类只登记不自决（零代码改动）
+
+- **事实核源**：`memory_ext/`（`MemoryEnhancer`）全仓生产消费者为零——唯一构造点 `orchestrator/_init_mixin.py:478-502`，`components["memory_ext"]` 无下游读者，`add/search/get_all` 无调用者，测试面命中全为无关词形；docstring 宣称「自动提取记忆」而 `add()` 原文直写 Chroma `long_term_memories`（谎报家族）；`fusion:` 段无 `memory_ext` 子段 → 每 worker 启动回落顶层 `enabled=true` 空转打开共享 Chroma（与 semantic_memory 并立的第二真源）；`shisi/config.py:33` 的 `*_MEMORY_RECYCLE_DAYS → memory_ext.recycle_bin_days` 映射目标键无任何读者。
+- **「D6/D12 口径」盘上无出处**：两份 09-20 对照研究无 memory_ext 处置建议；W-D 设计 D6=心光数值门控（非本域）；`DECISION_LEDGER` 缺 D10/D11/D12 行（W8 已登记）→ 迁移目标语义不可得。
+- **推荐（候默默裁决）**：拆除整链（模块 + `_init_mixin` 段 + `system.yaml memory_ext` 段 + `observability` 模型与 re-export + 悬空映射），入 DELETION_LOG；拆除面全在本窗白名单外（`orchestrator/_init_mixin.py`/`observability/`/`config/`），建议归 W3 串行收口窗执行。**本窗零代码改动**。
 
 ## 2026-09-27 — W4 实施窗 · 任务 #4（缺陷 D 上下文预算）核验：修复已在工作树、未提交，本窗不代提交（只读轮）
 
