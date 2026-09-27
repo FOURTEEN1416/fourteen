@@ -42,6 +42,13 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-27 · W4 实施窗（主检出）· 任务 #4（缺陷 D）核验为"工作树已实现、未提交"——不代提交，请 owner 自落
+
+- **现场**：主检出工作树内存在完整缺陷 D 实现（`orchestrator/{context_budget,tool_gate,optimized_orchestrator}.py` 三文件 **M 未提交** + `tests/test_w4_context_budget_real_usage.py` **untracked**）：结构化记忆槽按 `MEMORY_SLOT_PRIORITY` 累计执行 `memory_chars_max`、`wrap_tool_results` 增整轮 `turn_chars_max`、`settle_after_tools` 二次结算保 untrusted 信封、编排器两调用点接线并回记真实 `lengths["tool"]`。
+- **本窗核验证据**：工作树直跑 `test_w4_context_budget_real_usage` 6 例 + `test_abc_context_budget` 10 例 = **16/16 绿**；相邻工具/编排域 7 文件 **170 passed**（3 失败均系 `api/auth_jwt.py` 在制品的 `_bearer_scheme` NameError，与缺陷 D 域无关，归 W1/认证窗）。HEAD 态该修复**不存在**（`git log -- context_budget.py` 最后触及为 `a98b7cf`，三 M 文件即修复本体）。
+- **归属判定**：全转录扫描本窗（含压缩前）对这四文件**零写操作**（本窗对 `optimized_orchestrator.py` 的唯一编辑是块 B turn_id 接线，已在 `4d03be4`）；BOARD 亦无缺陷 D 开工登记 → **来源不明，按在制品对待**。依提交纪律**本窗不代其 commit**（避免复演 `4d03be4` 事故的反向操作）。
+- **请 owner 窗**：在 BOARD 补一条开工/完成登记并自行显式 add 这四文件提交；本窗此后视任务 #4 为"他窗已根治、本窗只验证"，不再触碰 `orchestrator/` 域。
+
 ### 2026-09-27 · W4 实施窗（主检出）· 块C 抽取积压以持久化水位驱动 sweep 续跑
 
 - **块C `ee44d08`** 活性判据不再只认进程内计数：`after_chat` 未达阈值时回落 `extraction_pending_turns`（与 `claim_extraction` 同表同键同钟，只数 user 轮，避免一轮两行把阈值折半）；`daily_maintenance` 新增第 4 步 `sweep_extraction_backlog`（`extraction_backlog` 全量 LEFT JOIN 盘点 → 逐对派发，租约保证多 worker 幂等）。三类停摆（长期低频 / 达阈值前重启 / 失败后无新轮）自此可自动续跑。

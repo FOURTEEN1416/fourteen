@@ -77,6 +77,12 @@
 - **未做 / 风险**：① sweep **未挂进程启动钩子**——`orchestrator/_init_mixin.py` 不在本窗白名单，故停摆会话的恢复上限是「下一个 00:05 每日维护」或「该会话下一条消息」，而非开机即补；② 持续失败的来源窗口（如 FTS 虚表残缺）会每日重试但不推进水位，无告警升级；③ 真实模型语义下抽取质量未评测（本批只证驱动链通）。
 - **迁移 / 回滚**：无 schema 变更（`memory_extraction_progress` 09-26 已生产迁移完成），故无需迁移；回滚 = revert `ee44d08`，行为退回「仅进程内计数」，已推进的水位不影响正确性（claim 仍以水位为准）。**未 push、未部署。**
 
+## 2026-09-27 — W4 实施窗 · 任务 #4（缺陷 D 上下文预算）核验：修复已在工作树、未提交，本窗不代提交（只读轮）
+
+- **现场**：主检出工作树已存在完整缺陷 D 实现——`orchestrator/context_budget.py`（`MEMORY_SLOT_PRIORITY` 按槽累计执行 `memory_chars_max` + `settle_after_tools` 保信封二次结算）、`orchestrator/tool_gate.py`（`wrap_tool_results` 增整轮 `turn_chars_max`）、`orchestrator/optimized_orchestrator.py`（两调用点接线 + 回记真实 `lengths["tool"]`）三文件 M 未提交，`tests/test_w4_context_budget_real_usage.py` untracked。HEAD 态无此修复（该文件最后提交 `a98b7cf`）。
+- **本窗证据**：工作树直跑 `test_w4_context_budget_real_usage` + `test_abc_context_budget` **16/16 绿**；相邻工具/编排域 7 文件 **170 passed**（3 失败均系 `api/auth_jwt.py` 在制品 `_bearer_scheme` NameError，认证域他窗，与缺陷 D 无关）。
+- **归属**：全转录扫描证明本窗（含压缩前）对这四文件零写操作（本窗对 `optimized_orchestrator.py` 唯一编辑为块 B turn_id 接线，已入 `4d03be4`）；BOARD 无缺陷 D 开工登记 → 来源不明，按在制品处理。**决策：不代其 commit**（避免反向复演 `4d03be4` 提交语义事故），已在 BOARD 追加区请 owner 自落。任务 #4 对本窗关闭为「他窗已实现、本窗已验证」。
+
 ## 2026-09-26（夜） — 三端同步上线 + 上线后跨环境依赖补漏 + 中间产物清除
 
 - **动作**：本地 `010259e` 正常推送 origin（`f9e27a3..010259e`），服务器用已核实的 bundle 快进通道上线（回避含大二进制提交必现的 `fetch-pack: unexpected disconnect`），三端一致。
