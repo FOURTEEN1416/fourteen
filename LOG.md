@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-09-27 — 测试契约收口窗 · 三处跨窗测试债一次清完（未 push 未部署）
+
+- **任务**：全量分块审计定位的 3 处确定性失败逐一收口，白名单三实现/测试文件 + LOG/BOARD。
+- **① test_forward 旧断言对齐 W4 新契约**（`tests/test_integration.py::TestMemoryAPIEndpoints::test_forward`）：W4 `1773970` 已把 `/api/shisi/memory/forward` 从「501 撤假语义」升级为真实派生（`forward_receipt` 落 `memory_forwards` + `retrieve_context.forwarded_notes` + GET `/forwards`），旧断言仍钉 501 必红。对齐：200 + 回执字段逐项断言（`ok`/`forward_id>0`/`from`/`to`/`memory_id`）+ 读回断言（`get_forwards("c2")` 与回执 forward_id/from/content 同源可追溯）。**隔离加固**：fixture 未传 memory_service 时 registry 无参构造 ForwardManager 指向宿主 `data/sqlite.db`，用例内 monkeypatch `_fwd_mgr` 钉 tmp_path，集成测试不再写真库（既有 test_favorite 的同类存量债不在本窗白名单，登记不修）。
+- **② multiproc 目录比较 normcase**（`tests/test_w10_metrics_multiproc.py::…test_import_time_pins_multiproc_env_before_library_import`）：`metrics._DEFAULT_MULTIPROC_DIR` 派生自未 resolve 的 `__file__`，测试期望侧 `.resolve()`——模块以小写盘符形态加载时（Git Bash cwd 等）两侧仅盘符大小写不同，normpath 不消盘符大小写必红。修：两侧套 `os.path.normcase()`（Windows 大小写不敏感文件系统的标准比较口径）。本机 Git Bash `cd` 会规范化盘符为大写无法直接复现，用小写路径 spec 加载模拟实证：旧比较 False / 新比较 True。
+- **③ scheduler 手写管道拆分回归唯一 owner**（`proactive/scheduler.py::purge_throttle_for`，W9 `abcde64` 引入）：`important_dates_sent` 清理段手写 `split("|")` 撞 `test_scheduler_no_handwritten_pipe_split` 静态钉（全文件级）。修：`_owned` 归属判据从手写 `partition(":")+isdigit` 改为 `session_key_mod.owner_of(key) == uid`（读真源后择出的正确归属函数；逐 case 论证与旧实现等价：裸键/无冒号/`04:` 前导零/web 三段键行为一致）；幂等条目 `"{date}|{user_key}|{label}"` 第二段提取改 `partition` 组合（语义与 `split("|")[1]` 严格等价、多 `|` 尾段健壮）。语义保持「仅清被删用户条目」，W9 行为钉（A 清 B 留）7/7 复验通过。
+- **验证**：三用例单跑转绿（4/6/14 passed）；三文件全绿（integration+multiproc 29 passed、session_key_owner 14 passed）+ W9 生命周期 7 passed；ruff 白名单文件 0 错（全仓 4 错均在并行窗在制品 `tests/test_w9_character_delete.py`，非本窗地盘）；collect-only 总收集 **2560**，用例数中性（test_integration 19 / test_w10 10 与 HEAD 逐一相等，test_session_key_owner 未改 14 例）。
+- **未验证/边界**：test_favorite 的无参 FavoriteManager 真库写为既有存量债（白名单外登记）；`_dedup_user_key` 为 scheduler 自有账本条目格式的结构性提取（复合键非会话键方言，归属判定已真源化）。
+
 ## 2026-09-27 — W9 实施窗 · 账号/角色删除与数据遗忘 + 同意门禁四通道 + 旧能力删除（未 push 未部署）
 
 - **任务**：缺陷 A（账号删除不兑现跨存储遗忘 P1）/ B（角色删除范围不足 P1）/ C（维护脚本 dry-run 写副作用 P2）/ D13（同意门禁未落服务端）根治 + D12 旧能力清理。

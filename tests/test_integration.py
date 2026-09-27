@@ -121,11 +121,35 @@ class TestMemoryAPIEndpoints:
         resp = client.get("/api/shisi/memory/favorites?character_id=c1")
         assert resp.status_code == 200
 
-    def test_forward(self, app_and_reg):
+    def test_forward(self, app_and_reg, tmp_path, monkeypatch):
+        """W4 缺陷 F 恢复后契约（1773970）：转发落目标侧派生记录并返回真实回执。
+
+        fixture 未传 memory_service 时 registry 无参构造 ForwardManager 指向宿主
+        data/sqlite.db —— 用例内钉到 tmp_path 隔离库，避免集成测试写真库。
+        """
+        from shisi.api import memory_routes
+        from shisi.memory.forward_manager import ForwardManager
+
         _, _, client = app_and_reg
-        resp = client.post("/api/shisi/memory/forward", json={"from_character": "c1", "to_character": "c2", "memory_id": "m1"})
-        # W4 缺陷 F（2026-09-27）：目标侧无消费链，501 先于任何写动作（旧 200=谎报）
-        assert resp.status_code == 501
+        fwd = ForwardManager(db_path=tmp_path / "fwd.db")
+        monkeypatch.setattr(memory_routes, "_fwd_mgr", fwd)
+        resp = client.post(
+            "/api/shisi/memory/forward",
+            json={"from_character": "c1", "to_character": "c2", "memory_id": "m1",
+                  "content": "她喜欢手冲咖啡"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert data["ok"] is True
+        assert int(data["forward_id"]) > 0
+        assert data["from"] == "c1"
+        assert data["to"] == "c2"
+        assert data["memory_id"] == "m1"
+        # 读回（GET /forwards 真源）：派生记录与回执同源可追溯
+        rows = fwd.get_forwards("c2")
+        assert rows and rows[0]["id"] == data["forward_id"]
+        assert rows[0]["from"] == "c1"
+        assert rows[0]["content"] == "她喜欢手冲咖啡"
 
     def test_delete_requires_confirm(self, app_and_reg):
         _, _, client = app_and_reg

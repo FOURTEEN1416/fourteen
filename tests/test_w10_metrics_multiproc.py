@@ -66,7 +66,10 @@ class TestMultiprocessSetup:
         _load_metrics_fresh()
         got = os.environ.get("PROMETHEUS_MULTIPROC_DIR", "")
         expected = (_PROJECT_ROOT / "data" / "cache" / "prom_multiproc").resolve()
-        assert os.path.normpath(got) == os.path.normpath(str(expected)), \
+        # 端侧目录未 resolve（metrics._DEFAULT_MULTIPROC_DIR 派生自 __file__），
+        # 模块以小写盘符形态加载时（Git Bash cwd 等）与 resolve 后的期望仅盘符
+        # 大小写不同 —— Windows 大小写不敏感文件系统，比较必须 normcase。
+        assert os.path.normcase(os.path.normpath(got)) == os.path.normcase(os.path.normpath(str(expected))), \
             f"模块 import 未落定聚合目录: {got}"
         # 恢复模块钉住的目录（见 autouse 夹具说明）
         # monkeypatch teardown 会还原 delenv，之后 env 为空 → 重新指向默认目录也可接受，

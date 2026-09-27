@@ -42,6 +42,14 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-27 · 测试契约收口窗 · 三处跨窗测试债清完（主检出，未 push 未部署）
+
+- **范围**：全量分块审计定位的 3 处确定性失败收口；白名单 `tests/test_integration.py`、`tests/test_w10_metrics_multiproc.py`、`proactive/scheduler.py`（仅 purge 段）+ LOG/BOARD。**未动** W12/W9 在制品与窗③文档地盘（开工前 git status 核对，白名单文件零占用）。
+- **①** `test_forward` 旧 501 断言对齐 W4 `1773970` 新契约（200 + 回执字段 + `get_forwards` 读回），并 monkeypatch `_fwd_mgr` 钉 tmp_path——**消除 integration fixture 无参 ForwardManager 写宿主 `data/sqlite.db` 的新增污染**。⚠️ 同类存量债：`test_favorite`/`test_list_favorites` 的无参 FavoriteManager 仍写真库（白名单外，候下批收口，可仿本批 monkeypatch 模式）。
+- **②** multiproc 目录比较两侧加 `os.path.normcase()`（根因：端侧未 resolve `__file__` vs 期望侧 resolve，小写盘符加载形态必裂）。
+- **③** `purge_throttle_for` 归属判据改 `session_key_mod.owner_of(key) == uid`，`split("|")` 手写拆分根除（HEAD 2 处 → 0）；W9 行为钉 A 清 B 留 7/7 保持。幂等条目第二段提取为 scheduler 自有账本格式（`"{date}|{user_key}|{label}"`），非会话键方言——若后续要收进 `utils/session_key.py` 需扩该 owner，本窗白名单禁碰故未扩。
+- **验证**：三用例单跑绿（4/6/14）；三文件 29+14 全绿 + W9 生命周期 7 绿；ruff 白名单 0 错（全仓 4 错全在 `tests/test_w9_character_delete.py` 并行窗在制品）；collect-only **2560** 用例数中性。
+
 ### 2026-09-27 · 主控 · 任务包 W12 出具：角色模板面（B+C）——平台无主卡的只读暴露与显式克隆
 
 - **背景**：W1 提交 `94ed63d` 收口角色卡归属后，41 张 `user_id=default` 无主卡对普通用户不可见 → 新用户冷启动「角色列表为空」（产品真空）。用户 2026-09-27 裁决「**采纳 B+C**」。

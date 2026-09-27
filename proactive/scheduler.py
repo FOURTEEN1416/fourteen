@@ -1916,8 +1916,12 @@ class ProactiveScheduler:
         def _owned(key: str) -> bool:
             if key in explicit:
                 return True
-            left, sep, _rest = key.partition(":")
-            return bool(sep) and left.isdigit() and int(left) == uid
+            return session_key_mod.owner_of(key) == uid
+
+        def _dedup_user_key(entry: str) -> str:
+            # "{date}|{user_key}|{label}" 幂等条目 → 第二段 user_key（会话键），
+            # 归属判定随后统一走 utils.session_key 唯一真源
+            return entry.partition("|")[2].partition("|")[0]
 
         removed = 0
         for ledger in (
@@ -1931,7 +1935,7 @@ class ProactiveScheduler:
                 removed += 1
         date_victims = [
             x for x in list(self._important_dates_sent)
-            if len(str(x).split("|")) >= 2 and _owned(str(x).split("|")[1])
+            if _owned(_dedup_user_key(str(x)))
         ]
         for x in date_victims:
             self._important_dates_sent.discard(x)
