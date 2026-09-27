@@ -42,6 +42,13 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-27 · W4 实施窗（主检出）· 块C 抽取积压以持久化水位驱动 sweep 续跑
+
+- **块C `ee44d08`** 活性判据不再只认进程内计数：`after_chat` 未达阈值时回落 `extraction_pending_turns`（与 `claim_extraction` 同表同键同钟，只数 user 轮，避免一轮两行把阈值折半）；`daily_maintenance` 新增第 4 步 `sweep_extraction_backlog`（`extraction_backlog` 全量 LEFT JOIN 盘点 → 逐对派发，租约保证多 worker 幂等）。三类停摆（长期低频 / 达阈值前重启 / 失败后无新轮）自此可自动续跑。
+- **测试**：`tests/test_w4_extraction_backlog_sweep.py` 8 例红先行（首跑 8/8 红，原因均为新契约缺席）→ 绿；突变验红 **3/3 命中**（回落判据短路→1 红；每日 sweep 摘除→2 红；LEFT JOIN 退 INNER JOIN→4 红），还原后残留 0、69 例复绿。连带 `FakeStructuredMemory` 补两契约替身（`extraction_pending_turns` / `extraction_backlog`）。
+- **回归**：记忆面 12 文件 **291 passed**；相邻面（提醒/画像工具/控制台/成就/round3/入口装配）**90+70 passed**；ruff 全绿，pre-commit 三门禁全过。**未 push、未部署**（窗口纪律）。
+- **已知限制**：sweep 未挂进程启动钩子（`orchestrator/_init_mixin` 白名单外）→ 停摆会话恢复上限为「下一个 00:05 或下一条消息」；持续失败窗口（如 FTS 残缺）每日重试但不推进水位。
+
 ### 2026-09-27 · W4 实施窗（主检出）· 记忆域 块A/B/E 落地 + ⚠️ 提交语义事故申报
 
 - **块A**（`b311b1c`，已另册）事实向量召回并入唯一 `retrieve_context`。

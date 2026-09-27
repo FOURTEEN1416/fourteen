@@ -62,6 +62,21 @@
 - **边界登记（未自决）**：`safety_routes` RAG 上传直写 `_sm.add_fact`（白名单外）；achievement 计数仍读旧 JSON 面；W1「跨用户 404」门槛与 410 的先后次序留收编统一。
 - **未验证风险**：多 worker 并发写同一事实的 near-dup 竞态未做真实四 worker 观察（单库事务内 SELECT+INSERT，跨进程无锁）；真实模型重述语义判等效果未评测。
 
+## 2026-09-27 — W4 实施窗 · 记忆域块C：抽取积压以持久化水位驱动 sweep 续跑（未 push 未部署）
+
+- **根因（缺陷 C）**：事实抽取的活性只认 `MemoryPipeline._chat_count_since_extract` 这一进程内字典（重启归零）。09-26 重构已把「租约 + 固定来源窗口 + 持久化 id 水位」落到 `memory_extraction_progress`，但**没有任何读者去按水位盘点积压**：`daily_maintenance` 不扫、失败结案只释放租约不推进来源 ⇒ 长期低频会话、达阈值前重启、一次失败后无足够新轮这三种情形下，`chat_history` 中超出 `last_id` 的历史永不续抽。
+- **改动（`ee44d08`，全部落在 `shisi/memory/*` 唯一 owner 内）**：
+  1. `StructuredMemory.extraction_backlog(limit)` — 与 `claim_extraction` **同表同键同钟**的全量积压盘点（`LEFT JOIN` 未落进度行按水位 0，按最老来源升序）；失败结案不推水位 ⇒ 同一窗口留在积压中可重试。
+  2. `StructuredMemory.extraction_pending_turns(session_id, character_id)` — 单会话回落判据，**只数 `role='user'`**（`fact_extract_interval` 语义是「每 N 条对话」，一轮写 user+assistant 两行，数全部行会把阈值折半）。
+  3. `MemoryPipeline.after_chat` — 进程计数未达阈值时不再直接放弃，改为查持久化水位：本会话积压轮数达阈值即刻派发续抽。
+  4. `MemoryPipeline.sweep_extraction_backlog()` + `daily_maintenance` 第 4 步 — 每日全量盘点并逐对派发；`_do_fact_extraction` 自身按租约逐窗认领至水位追平，多 worker 并发 sweep 由 claim 租约天然幂等。
+- **红→绿**：`tests/test_w4_extraction_backlog_sweep.py` 8 例首跑 **8/8 红**（原因均为新契约缺席：`AttributeError: no attribute 'extraction_backlog' / 'sweep_extraction_backlog'`、水位仍为 0、事实未入库）→ 实现后 **8/8 绿**。连带 `tests/test_memory_pipeline.py::FakeStructuredMemory` 补两枚契约替身（非删断言：旧计数断言 `== {(sid,""):1}` 原样保留并仍绿）。
+- **多 worker / 重启验收**：重启等价 = 新构造 pipeline（计数为空）+ 库内已有超水位来源 → 用例 4 实测下一条消息即续跑且水位推进到 `_max_chat_id`；多 worker = 既有 `claim_extraction` 的 `BEGIN IMMEDIATE` + `claim_token`/`lease_until` 互斥（`test_attribution_context_contract` 已钉），sweep 只新增派发者，不新增第二真源。
+- **反证（突变验红 3/3 命中，还原后残留 0）**：① `after_chat` 回落判据短路（`if False`）→ 仅用例 4 变红；② 摘除 `daily_maintenance` 的 sweep → 2 枚接线/端到端用例变红；③ `extraction_backlog` 的 `LEFT JOIN` 退化为 `INNER JOIN`（未落进度行的全新会话被漏掉）→ 4 枚盘点/sweep 用例变红。还原复跑 69 例绿。
+- **回归口径**：记忆面 12 文件 **291 通过 / 0 失败**；相邻面（提醒意图链、画像智能体工具、记忆控制台、成就、round3、入口装配）**160 通过**；ruff 全仓改动文件 0 错，pre-commit 三门禁（ruff / native-gate / ci_gates 4/4）全过。基线口径随本批未刷新（等待收窗全量分块）。
+- **未做 / 风险**：① sweep **未挂进程启动钩子**——`orchestrator/_init_mixin.py` 不在本窗白名单，故停摆会话的恢复上限是「下一个 00:05 每日维护」或「该会话下一条消息」，而非开机即补；② 持续失败的来源窗口（如 FTS 虚表残缺）会每日重试但不推进水位，无告警升级；③ 真实模型语义下抽取质量未评测（本批只证驱动链通）。
+- **迁移 / 回滚**：无 schema 变更（`memory_extraction_progress` 09-26 已生产迁移完成），故无需迁移；回滚 = revert `ee44d08`，行为退回「仅进程内计数」，已推进的水位不影响正确性（claim 仍以水位为准）。**未 push、未部署。**
+
 ## 2026-09-26（夜） — 三端同步上线 + 上线后跨环境依赖补漏 + 中间产物清除
 
 - **动作**：本地 `010259e` 正常推送 origin（`f9e27a3..010259e`），服务器用已核实的 bundle 快进通道上线（回避含大二进制提交必现的 `fetch-pack: unexpected disconnect`），三端一致。
