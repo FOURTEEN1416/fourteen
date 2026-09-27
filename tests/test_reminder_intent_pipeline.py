@@ -157,7 +157,13 @@ class TestFinalReview:
         # （chat_turn_last_id(session, turn_id)）据此判定「迟到旧来源不复活」。
         # W3 缺陷 I 契约扩展：增 message_id —— 入站消息身份，副作用幂等键成分；
         # 本用例未绑定入站上下文，故为空串（空 = 不去重）。
-        assert tools.calls[0][1]["_meta"] == {
+        # W4 缺陷 I 契约扩展（1773970）：_meta 增 call_id —— 账本 EVENT_TOOL_CALL
+        # 逐调用关联键（optimized_orchestrator.py:388/406）。本用例的工具调用未带
+        # LLM 侧 id，服务端生成 12 位 hex；已知四键保持精确相等，call_id 钉在位。
+        meta = dict(tools.calls[0][1]["_meta"])
+        call_id = meta.pop("call_id", "")
+        assert call_id and len(call_id) == 12
+        assert meta == {
             "session_key": "1:peer@im.wechat", "user_id": 7,
             "turn_id": "", "message_id": "",
         }

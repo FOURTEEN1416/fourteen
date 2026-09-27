@@ -7,6 +7,12 @@
 
 ---
 
+## 2026-09-27 — 主控收口 · reminder_intent 管线 _meta 断言对齐 call_id 注入（未 push 未部署）
+
+- **来源**：W12 全量回归移交的红例 `tests/test_reminder_intent_pipeline.py::TestFinalReview::test_call_branch_dispatches_and_injects_meta`（单跑稳定复现）。W12 疑归因 bbd9bed，主控 A/B 甄别修正归因：真因是 W4 `1773970`（缺陷 I 账本来源链）在 `optimized_orchestrator.py:388/406` 给 `_meta` 注入 `call_id`（LLM 工具调用 id，缺席时服务端生成 12 位 hex），漏改本用例的精确相等断言；该红在主控两轮全量分块中同样存在，被 [n-s] 块「外部 safe-delete 守卫硬停进程 → 汇总行丢失」连续掩盖。
+- **修法**：断言改为「pop call_id 钉非空 12 位 + 已知四键精确相等」，契约语义零放松；`tests/test_p1_batch3_llm_gateway.py:238` 同型比对经核实为 Dispatcher 层用例自造 meta、不经编排器注入，无需改。
+- **验证**：单文件 **54/54 绿**；ruff 改动文件 0 错。**未 push、未部署。**
+
 ## 2026-09-27 — W12 阶段1 · 角色模板面——无主卡只读暴露与服务端克隆（未 push 未部署）
 
 - **任务**：`docs/board/TASK_PACKAGE_W12_角色模板面.md` B 阶段1（纯后端）：W1 收口归属后 41 张卡全部无主、普通用户不可见 → 新用户冷启动角色列表为空；本批把无主卡以只读模板面暴露给已登录用户，用户「使用」时服务端克隆为私有副本。
