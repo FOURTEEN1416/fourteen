@@ -290,7 +290,10 @@ def test_all_shipped_cards_are_lossless_and_idempotent() -> None:
     if not chars_dir.exists():
         pytest.skip("角色卡目录不在位（config/characters 被 gitignore，需单独投递）")
     paths = sorted(chars_dir.glob("*.json"))
-    assert paths, "角色卡目录存在但无卡文件"
+    if not paths:
+        # 公开 clone / CI checkout 后目录存在但无卡（gitignore 不投递内容）——缺件即 skip，
+        # 不进断言（曾致 GitHub CI backend 岗红，run 36308183821）。
+        pytest.skip("角色卡目录存在但无卡文件（CI/公开 clone 不投递 gitignored 卡）")
 
     text_kept = 0
     for path in paths:

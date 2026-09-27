@@ -57,15 +57,24 @@ async function apiToken(request: APIRequestContext, cred: { login: string; passw
  * 角色 id 用 **admin** token 发现：`GET /api/characters` 是「按绑定用户」过滤的，
  * 隔离库里 viewer 尚未绑定任何角色（列表为空），而角色 id 本身是全局标识。
  * 这仍是真实 API 调用，只是不借用被测账号的会话。
+ *
+ * 公开 clone / CI 不投递 gitignored 角色卡（角色库可能为空，曾致 run 36308183821 红）：
+ * 库空时以 admin **真实创建**一张临时卡兜底——行为等价、不放宽断言；
+ * 调用方必须在结束时 await cleanup() 删除临时卡，避免污染权威角色库。
  */
-async function anyRoleId(request: APIRequestContext) {
+async function anyRoleId(
+  request: APIRequestContext,
+): Promise<{ id: string; cleanup: (() => Promise<void>) | null }> {
   const token = await apiToken(request, ADMIN)
   const res = await request.get(`${API}/api/characters`, { headers: { Authorization: `Bearer ${token}` } })
   expect(res.ok(), 'GET /api/characters 应成功').toBeTruthy()
   const body = await res.json()
   const list = Array.isArray(body) ? body : (body.characters ?? [])
-  expect(list.length, '角色库应非空（config/characters）').toBeGreaterThan(0)
-  return list[0].id as string
+  if (list.length > 0) {
+    return { id: list[0].id as string, cleanup: null }
+  }
+  const created = await createRoleAs(request, ADMIN, `W11-E2E-temp-${Date.now()}`)
+  return { id: created.id, cleanup: () => deleteRoleAs(request, created.token, created.id) }
 }
 
 /**
@@ -157,30 +166,38 @@ test.describe.serial('W11 · 安全面板（D1）', () => {
 test.describe.serial('W11 · 角色设置深链（D2）', () => {
   test('深链 /settings/voice 刷新后仍在语音 tab；非法 tab 回退基础', async ({ page, request }) => {
     await uiLogin(page, ADMIN)
-    const roleId = await anyRoleId(request)
+    const role = await anyRoleId(request)
+    const roleId = role.id
     const base = `/roles/${encodeURIComponent(roleId)}/settings`
+    try {
+      await page.goto(`${base}/voice`)
+      await expect(page.getByText('MiMo Cloud TTS')).toBeVisible()
 
-    await page.goto(`${base}/voice`)
-    await expect(page.getByText('MiMo Cloud TTS')).toBeVisible()
+      // 刷新保留（旧实现 useState('basic') ⇒ 刷新必落基础）
+      await page.reload()
+      await expect(page.getByText('MiMo Cloud TTS')).toBeVisible()
 
-    // 刷新保留（旧实现 useState('basic') ⇒ 刷新必落基础）
-    await page.reload()
-    await expect(page.getByText('MiMo Cloud TTS')).toBeVisible()
-
-    // 非法 tab → basic
-    await page.goto(`${base}/hacker`)
-    await expect(page.getByText('性格特质')).toBeVisible()
+      // 非法 tab → basic
+      await page.goto(`${base}/hacker`)
+      await expect(page.getByText('性格特质')).toBeVisible()
+    } finally {
+      await role.cleanup?.()
+    }
   })
 
   test('点击 tab 写入 URL（深链可分享）', async ({ page, request }) => {
     await uiLogin(page, ADMIN)
-    const roleId = await anyRoleId(request)
+    const role = await anyRoleId(request)
+    const roleId = role.id
     const base = `/roles/${encodeURIComponent(roleId)}/settings`
-
-    await page.goto(base)
-    await expect(page.getByText('性格特质')).toBeVisible()
-    await page.getByRole('button', { name: '时间线' }).click()
-    await expect(page).toHaveURL((url) => url.pathname === `${base}/timeline`)
+    try {
+      await page.goto(base)
+      await expect(page.getByText('性格特质')).toBeVisible()
+      await page.getByRole('button', { name: '时间线' }).click()
+      await expect(page).toHaveURL((url) => url.pathname === `${base}/timeline`)
+    } finally {
+      await role.cleanup?.()
+    }
   })
 })
 
@@ -205,30 +222,38 @@ test.describe.serial('W11 · 主动面板作用域（D4）', () => {
 
   test('admin：全局作用域横幅 + 表单可见，但无全局广播发送按钮', async ({ page, request }) => {
     await uiLogin(page, ADMIN)
-    const roleId = await anyRoleId(request)
+    const role = await anyRoleId(request)
+    const roleId = role.id
+    try {
+      await page.goto(`/roles/${encodeURIComponent(roleId)}/settings/message`)
 
-    await page.goto(`/roles/${encodeURIComponent(roleId)}/settings/message`)
-
-    await expect(page.getByText('LLM 主动决策（人设·画像·控制台）')).toBeVisible()
-    await expect(page.getByText('保存频率配置')).toBeVisible()
-    // 作用域声明：参数是全局的，不是本角色专属
-    await expect(page.getByText(/全局配置：以下参数作用于全部角色的主动消息调度/)).toBeVisible()
-    // 角色页禁止全局广播
-    await expect(page.getByText('立即发送一条主动消息')).toHaveCount(0)
+      await expect(page.getByText('LLM 主动决策（人设·画像·控制台）')).toBeVisible()
+      await expect(page.getByText('保存频率配置')).toBeVisible()
+      // 作用域声明：参数是全局的，不是本角色专属
+      await expect(page.getByText(/全局配置：以下参数作用于全部角色的主动消息调度/)).toBeVisible()
+      // 角色页禁止全局广播
+      await expect(page.getByText('立即发送一条主动消息')).toHaveCount(0)
+    } finally {
+      await role.cleanup?.()
+    }
   })
 
   test('admin：主动引擎不可用（503）时显式报错 + 重试，不渲染默认假表单', async ({ page, request }) => {
     await uiLogin(page, ADMIN)
-    const roleId = await anyRoleId(request)
+    const role = await anyRoleId(request)
+    const roleId = role.id
+    try {
+      await page.route('**/api/proactive/config*', (route) =>
+        route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'unavailable' }) }),
+      )
+      await page.goto(`/roles/${encodeURIComponent(roleId)}/settings/message`)
 
-    await page.route('**/api/proactive/config*', (route) =>
-      route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'unavailable' }) }),
-    )
-    await page.goto(`/roles/${encodeURIComponent(roleId)}/settings/message`)
-
-    await expect(page.getByText(/主动消息引擎未初始化/)).toBeVisible()
-    await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
-    await expect(page.getByText('保存频率配置')).toHaveCount(0)
+      await expect(page.getByText(/主动消息引擎未初始化/)).toBeVisible()
+      await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
+      await expect(page.getByText('保存频率配置')).toHaveCount(0)
+    } finally {
+      await role.cleanup?.()
+    }
   })
 })
 
