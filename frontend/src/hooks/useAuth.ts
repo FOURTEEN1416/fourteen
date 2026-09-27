@@ -12,6 +12,7 @@
  * 此处不再暴露 init/refresh，避免双份初始化路径。
  */
 import * as authApi from '../api/auth'
+import { clearAccountScopedCache } from '../api/queryClient'
 import { AGREEMENT_VERSION } from '../constants/agreement'
 import { useAuthStore } from '../store/authStore'
 
@@ -20,8 +21,17 @@ import { useAuthStore } from '../store/authStore'
 export function useAuth() {
   const { user, isAuthenticated, needsConsent } = useAuthStore()
 
-  /** 登录/注册响应落地：写认证态 + 同意标志（后端对未同意用户返回 needs_consent=true） */
+  /**
+   * 登录/注册响应落地：写认证态 + 同意标志（后端对未同意用户返回 needs_consent=true）。
+   *
+   * W11-D3：私人 queryKey 不带账号维度，缓存是进程级共享的 —— 账号身份变化
+   * （A → B）时必须先清空，否则 B 的首帧会渲染 A 的旧缓存。同账号重复登录
+   * 不清（避免无谓闪烁）。
+   */
   const applyTokenResponse = (res: authApi.TokenResponse) => {
+    const prevUserId = useAuthStore.getState().user?.id ?? null
+    const nextUserId = res.user?.id ?? null
+    if (prevUserId !== nextUserId) clearAccountScopedCache()
     useAuthStore.getState().setAuth(res.user, res.access_token)
     useAuthStore.getState().setNeedsConsent(res.needs_consent ?? false)
   }
@@ -66,6 +76,8 @@ export function useAuth() {
       // 即使登出 API 失败也清除本地状态
     }
     useAuthStore.getState().clearAuth()
+    // W11-D3：登出必须清空账号级查询缓存，否则旧账号数据会跨账号存活
+    clearAccountScopedCache()
   }
 
   return {

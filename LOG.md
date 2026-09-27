@@ -7,6 +7,22 @@
 
 ---
 
+## 2026-09-27 — W11 实施窗 · 前端用户任务与声明统一：五缺陷根治（未 push 未部署）
+
+- **本窗范围**：已确认缺陷 D1–D5 按白名单（`frontend/src` + 对齐契约所需最小 API 适配）先红测后根治；`RoleSettingsTabs` 最后集成。全程未 push、未部署、未 SSH、未读真实 `.env`/凭证/聊天，提交只用显式路径。**基线核对**：任务书基线 `985beeb` 实为当前 `HEAD ac5eace` 的祖先（差 33 笔，W1–W10 已合并）→ 以 `ac5eace` 为工作基点，未回退未 rebase。本窗对 `*.py` **零改动**。
+- **D1 安全面板恒空 + 越权开关**：三处契约错位——① 读 `data.logs`（真实键 `log`）⇒ 面板恒空；② 读 `total_detections/today_blocked/block_rate`（`SafetyLogManager.get_stats` 从不提供）⇒ 恒 0/—；③ 条目渲染取 `content_snippet`（不存在）⇒ **渲染期抛错**；④ admin-only 开关对普通用户也渲染（后端 `require_role("admin")` 才拦）⇒ 点了必 403。`types/api.ts` 的 `SafetyLogEntry` 由陈旧的 `{timestamp:string, category, message, confidence}` 改为真实契约 `{timestamp:Unix秒, category, direction, text_length, text_hash, user_id?}`（唯一 owner，页面不再重复声明）；`SettingsSecurity.tsx` 读真实键与字段、类别/方向中文化、Unix 秒时间格式化、**按角色隐藏开关**、空态 `暂无安全事件`、错误态 + 重试、开关以 `status==="ok"` 判业务成功。
+- **D2 角色设置深链失效**：`RoleSettings.tsx` 原为 `useState('basic')` 且**完全不消费**路由 `:tab` ⇒ 刷新/深链必落基础。改以 URL 为唯一真源（非法/缺省回退 basic），点击 tab `useNavigate` 写回 URL（基于当前 pathname，兼容 `/roles/:id/settings` 与 `/users/:u/roles/:id/settings`）。**路由 `:tab` 早已存在（`App.tsx:144`），未改路由。**
+- **D3 退出不清缓存**：`queryClient.ts` 新增 `clearAccountScopedCache()`（幂等）；`useAuth.ts` 的 `logout()` 与「账号 id 变化」的 `applyTokenResponse()` 均调用（**同账号重复登录不清**，避免无谓闪烁）；`client.ts` 的 401 刷新失败（被动登出）路径同样清。**并发分工**：queryKey 的账号前缀维度由并行窗 **W1** 在 `useQueries.ts` 实施（本窗未触碰该文件，其注释引用本窗 `clearAccountScopedCache` 作兜底）——「键维度主防线 + 清缓存兜底」互补。
+- **D4 主动面板作用域错误**：角色页 `MessageTab` 原直接请求**全局**主动接口并渲染**全局广播**按钮（可跨角色/跨会话误投）。改：非 admin 只渲染「全局引擎统一调度」说明且**不发请求**（旧实现普通用户打开角色页即打 admin-only 接口、403 被静默吞掉后渲染默认假表单）；admin 增**全局作用域横幅**、503 走**显式错误态 + 重试**；**移除全局广播发送按钮**（保留只读最近记录）。顺带按权限隐藏另两处 admin-only 动作：重要日期（`PUT .../important-dates`）与知识库定期采集开关（`POST /api/knowledge/collect-config`）。`system.ts` 的 `proactiveSend()` 补 `sessionKey` 形参（对齐后端「多路会话必须显式指定，否则 400 拒猜」）。
+- **D5 成功判定统一（成功必须是业务成功）**：`PsychProfilePage` 重置按 `status==="reset"`（旧 HTTP 200 即报「已清除 N 份」）；`SettingsLLM` 解析 `save_receipt` 并显式提示 `restart_required/unsupported/in_sync=false`（旧只看 200 报「设置已保存」）；`RoleSettingsTabs` 六处（基础设置 `updated` / 重要日期 `saved` / 音色 `bound` / 采集开关 `ok` / 删除 `deleted` / 主动配置与暂停 `ok`）全部按回执判；`RolesPage` 切换活跃角色按 `activated` 判且**不再静默吞异常**；`CreateRole` 按 `created`/`imported` 且校验 `id` 才跳转。`no_new_chunks`（人设增强）经核对已正确，未改。
+- **红 → 绿**：5 个 W11 红测文件首跑 **10 failed / 2 passed**（并暴露 2 份 suite 连 collect 都失败）→ 修复后全绿。红测自身三处**装配缺陷**（非删断言）已修：① `RoleSettings.test.tsx`/`PsychProfilePage.test.tsx` 的 `vi.mock('../../api/system')` 工厂缺 `importOriginal` ⇒ `api/client.ts` 具名导入解析失败 ⇒ 整份 suite 无法 collect；② `PsychProfilePage.test.tsx` 缺 `QueryClientProvider` ⇒ 真实 `usePsychReset` 内 `useQueryClient()` 抛错；③ 未使用的 `waitFor` 导入（tsc TS6133）。
+- **验证**：前端 **vitest 23 文件 / 135 例全绿**（含并行窗 W1 的 `queryKeys.test.ts`）+ `tsc --noEmit` **0 错**；**Playwright 真实浏览器 + 真实 API 11/11 通过**（隔离库 `data/e2e_users.db`，`DISABLE_SCHEDULER=1`，未向 store/localStorage 塞认证态）——覆盖 viewer 安全面板真实统计与空态/无 admin 开关、viewer 直调 admin-only 端点 **403**、admin 开关可见 + `not_available` 不翻转、500 错误态、深链 `/settings/voice` **刷新保留** + 非法 tab 回退、点击 tab 写 URL、viewer 消息 tab 仅全局说明、admin 消息 tab 作用域横幅且无广播按钮、503 显式错误态、**真实登出代码路径（协议门「不同意并退出登录」）→ 换号登录**、admin/viewer 视图互不串。E2E 新建的临时角色测后 `DELETE` 清理（`config/characters` 仍 41 张，零 `W11-E2E` 残留）。**后端 pytest 分块结果不可用作本窗基线**：四块 **92 failed / 2067 passed / 1 skipped / 18 errors**，另有 **20 文件无法 collect**（`api/auth_jwt.py` 的 `_bearer_scheme` 未定义 = 他窗在制编辑，mtime 09:47，本窗从未触碰该文件）——失败集全部落在他窗在制的后端重构面（auth/orchestrator/shisi 记忆/database/`w9_*`/`test_attribution_*`）。
+- **未验证风险（详见 `docs/verification/W11-2026-09-27-前端用户任务与声明统一-验证报告.md`）**：① 任务书验收列的「编辑人设 → 上传知识 → **对话消费** → 音色试听与发送 → 建改取消提醒 → 暂停恢复 → 删除查看结果」**未逐步驱动**（对话消费需真实模型凭证，本窗禁读真实凭证；音色/提醒依赖外部服务）⇒ **本窗未取得「两账号全旅程逐步通过」的证据**；② **控制台无登出入口**（唯一登出路径是协议门的「不同意并退出登录」）⇒ 真实用户路径上「A 登出→B 登录」不可达，**D 类登记不自决**，本窗未新增入口；③ 安全开关**真实写入**未在浏览器执行（会改写仓库 `config/system.yaml`），浏览器层只用故障注入验判定逻辑；④ 账号切换的键维度由 W1 实施，合并树 `tsc` 0 错 + vitest 全绿，但未做浏览器级竞态复现；⑤ E2E 用本机系统 Chrome（`ms-playwright` 仅装 `chromium-1223`，与 Playwright 1.61.1 要求的 `chromium-1228` 不匹配，未下载新浏览器）。
+- **并发与污染登记**：工作树含多窗在制品；本窗只写 `frontend/`（13 个源码/测试文件 + 1 个新增 E2E `frontend/e2e/w11_journey.spec.ts`，**超出 `frontend/src` 白名单，属验收产物，请裁决保留与否**）；`config/system.yaml` 的改动属 **W4**（`memory_ext.enabled: false`），非本窗；`tests/test_w1_*.py`、`tests/test_w4_*.py`、`docs/board/BOARD.md` 均为他窗在制，本窗未触碰。
+- **提交（全部显式路径）**：见下一笔 commit。
+
+---
+
 ## 2026-09-27 — W3 实施窗 · 后台单一运行时与可恢复触达：A–J 十缺陷根治（未 push 未部署）
 
 - **本窗范围**：任务书已确认缺陷 **A–J 全部**按白名单文件先红测后根治；全程未 push、未部署、未 SSH、未读真实 `.env`/凭证/聊天，提交只用显式路径。基线 `985beeb` → 终态 `b59eb8b`（14 笔）。
@@ -104,6 +120,19 @@
 - **任务 #7（只读核验轮，零改动）**：主检出工作树已存在完整缺陷 H 根治——`_legacy_diary_summarizer.py`（M）`get_all_summaries()` 优先读 `daily_summaries` 表、进程缓存仅无库回落，`tests/test_w4_diary_sqlite_source.py`（untracked，3 例），`misc_routes.py`（M）日记 GET 走真源 + `memory_scope` 前缀过滤、seed 单次落库（该文件同混 W1 认证 hunk，混合 owner 不可代提）。**验收口径「写入与读取 worker 日记一致」成立**（写 `save_summary` DB 失败即 raise、读表同 `daily_summaries`，成就面 `97de685` 已同表）。实跑：专项 10/10 绿 + 邻域（memory_pipeline/local_time/abc_memory_stability/归属契约日记例）**97/97 绿**。转录取证证明本窗对日记两文件零写入（仅 Read）→ 按缺陷 D 先例**不代提交**，BOARD 追加区请 owner 自落（summarizer+test 可独立成提交，misc_routes 随 W1 批同落）。
 - **跨窗移交修桩（本窗提交，tests/** owner）**：`test_llm_config_verification::test_6_4_admin_can_write_global_config`（W8/W3 均登记为红、移交 W4）——W6 `4046aa5` 后端点已改走 `save_with_receipt` 并 `await reconfigure_llm`，旧桩仍打 `cfg.save`+`MagicMock` → `TypeError` 被 `except` 吞成 400。桩对齐新契约（真回执 dict + `AsyncMock`），红例修前复现、修后文件内 **10/10 绿**，`e3bea4f`（单文件显式路径，pre-commit ruff/native-gate/ci_gates 全过）。
 - **边界**：#7 关闭为「他窗已实现、本窗已验证、HEAD 仍旧实现候落库」；`/api/config` 面本窗只动测试桩、未动 `misc_routes` 实现（其 M 态归 W1/W6）。
+
+## 2026-09-27 — W4 实施窗 · 任务 #8 核验（缺陷 I 候落库）+ 坟场沙箱根治（`135402b`）+ 🔴 索引地雷拦下二次 `4d03be4`
+
+- **任务 #8（只读核验）**：缺陷 I「账本最小来源关联」完整实现存在于工作树未提交——`runtime.py::append_tool_call_event`（call_id/provider/成功状态/关联轮）+ dispatch 逐调用接线（`optimized_orchestrator.py:426-444`）+ 事实/知识出处进回放槽（:905-926，不建全文影子库）+ 记忆事件 turn/reply/character 贯通（`memory_service.py`）；`tests/test_w4_ledger_provenance.py` 5/5 绿、账本契约面 `test_event_ledger_contract + test_agent_plane_p1_wiring` 同跑 32 passed（除下述 W9 归因 3 红）。转录取证证明非本窗所作；三面与缺陷 D hunk 混于 `optimized_orchestrator.py`，按在制品候 owner 同批自落。
+- **连带发现（D 类更新）**：`memory_service.py` M diff 同时实现了块 F 的**闭环另一分支**（`retrieve_context` 合并 `forwarded_notes`，forward_id/from 可追溯）——但读侧无「按授权」过滤，且 HEAD 写面仍 501，现状休眠；放开端点与授权门禁必须同批，候默默裁跨角色共享口径。
+- **坟场沙箱根治（本窗提交）**：本窗块 B `test_w4_fact_write_entry` 三连红的真因**不是块 B 代码**——W9 在制用例把测试 uid 写进开发机真实 `data/lifecycle_jobs/graveyard.json`（mtime 10:15 实锤），`add_chat_turn` 迟到守卫把测试会话整体丢弃、水位 setup 断链。因果钉死（移开文件 11/11 绿 → 恢复即复现 → conftest 沙箱后真实文件 mtime 不动且 16/16 绿）。`tests/conftest.py::isolate_runtime_state_files` 增补 deletion_guard 重定向（`graveyard_path` + 三个进程缓存位），与 09-22 scheduler_config 自伤事故同型防线。
+- 🔴 **索引地雷（拦下）**：本窗 commit 前 `git diff --cached --name-only` 发现索引混有**他窗预存文件**（`queryKeys.test.ts`/`test_w1_identity_authorization.py`）——若直接提交即复演 `4d03be4`。已 `restore --staged` 摘除后仅落 conftest；首次失败尝试中 pre-commit ruff 钩子对该 W1 测试文件执行过 autofix（未入库，已在 BOARD 报 owner 复核）。**W9 的 3 例红归因其自身在制**（purge 漏 ase 文件 / `user_profile` 表缺失 / preview 计数），非本窗夹具引入。
+
+## 2026-09-27 — W4 实施窗 · 任务 #9/#6 核验收口（缺陷 J 与 memory_ext 停用均在工作树候落库）——W4 任务包 #1–#9 全部关闭
+
+- **任务 #9（缺陷 J，只读核验）**：`curator.py`+`agent_plane_routes.py`（均 M，非本窗所作）已实现——手动 curator 弃借 `components["llm"]` 平台代理，改 `llm_resolver` 走 `api/byok.session_llm` 账号模型策略，resolver 异常回 None 时**只做确定性规则整理、不回落平台凭证**；整理 `asyncio.to_thread` 出事件循环。`test_w4_curator_session_llm` 3 例 + 邻域合跑 **22/22 绿**、ruff 0 错。**口径注记**：任务书「改异步作业」严格语义（受理→job id→轮询）未实现，现为人手等待但线程执行；两条硬判据（不借凭证/不阻塞循环）已满足。
+- **任务 #6 补记**：工作树另含 memory_ext「停用」处置（`system.yaml enabled=false` + `_init_memory_ext` 不再构造、`components["memory_ext"]=None`，均 M 非本窗所作），`test_w4_memory_ext_disposition` 3/3 绿；整删（模块+`observability` 模型+悬空映射+DELETION_LOG）仍为候裁后续项，与本窗此前盘点推荐一致。
+- **收口边界（如实声明）**：#4/#6/#7/#8/#9 关闭形态均为「**验证过的他窗在制品**」——HEAD 尚无这些修复，落库归 owner 窗/主控收仓；本窗自有提交 = 块 B/E/C、块 F（`dd63bb4`）、修桩（`e3bea4f`）、坟场沙箱（`135402b`）与本批文档。**全量四分块未跑**：主检出工作树被 ≥3 个并行窗持续改写（index.lock 当场被占实锤），聚合态基线不可归因亦不可复现——按口径纪律留待并行窗收口后由主控统一重测。全程未 push、未部署。
 
 ## 2026-09-26（夜） — 三端同步上线 + 上线后跨环境依赖补漏 + 中间产物清除
 

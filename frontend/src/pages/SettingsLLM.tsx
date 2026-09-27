@@ -6,11 +6,39 @@ import ProviderGuideModal from '../components/llm/ProviderGuideModal'
 import { useAuthStore } from '../store/authStore'
 import { BookOpen, Loader2 } from 'lucide-react'
 
+/** POST /api/config 的 save_receipt 契约（observability/config_manager.py） */
+interface SaveReceipt {
+  persisted_version?: number
+  effective_version?: number
+  in_sync?: boolean
+  applied_live?: string[]
+  restart_required?: string[]
+  unsupported?: string[]
+}
+
+/** 把回执翻译成「还需要用户知道的事」；全部生效则返回 null（不制造噪音） */
+function describeReceipt(receipt: SaveReceipt | undefined): string | null {
+  if (!receipt) return null
+  const parts: string[] = []
+  if (receipt.restart_required?.length) {
+    parts.push(`需重启服务后生效：${receipt.restart_required.join('、')}`)
+  }
+  if (receipt.unsupported?.length) {
+    parts.push(`当前不支持、开启也无效果：${receipt.unsupported.join('、')}`)
+  }
+  if (receipt.in_sync === false) {
+    parts.push('本进程尚未应用该配置（保存已落盘，其他 worker 以磁盘版本为准）')
+  }
+  return parts.length ? parts.join('；') : null
+}
+
 function SettingsLLM() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  /** W11-D5：保存回执里的「未完全生效」事实（restart_required / unsupported / in_sync=false） */
+  const [saveNotice, setSaveNotice] = useState<string | null>(null)
   const [configSource, setConfigSource] = useState<'user' | 'global'>('global')
 
   // 供应商清单（从后端拉取，不再硬编码）
@@ -106,6 +134,7 @@ function SettingsLLM() {
     setSaving(true)
     setError(null)
     setSuccess(false)
+    setSaveNotice(null)
 
     try {
       const llmConfig: Record<string, unknown> = {
@@ -124,7 +153,11 @@ function SettingsLLM() {
       if (apiKey && apiKey !== '****') llmConfig.api_key = apiKey
 
       const saveFn = isAdmin ? saveConfig : saveUserLlmConfig
-      await saveFn({ llm: llmConfig })
+      const res = await saveFn({ llm: llmConfig })
+      // W11-D5：保存成功 ≠ 全部生效。后端 save_receipt 明示哪些字段要重启、
+      // 哪些不支持、本进程是否已同步；旧实现只看 HTTP 200 就给绿色「已保存」。
+      const receipt = (res?.data as { save_receipt?: SaveReceipt } | undefined)?.save_receipt
+      setSaveNotice(describeReceipt(receipt))
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
     } catch (err: unknown) {
@@ -176,6 +209,12 @@ function SettingsLLM() {
       {success && (
         <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm">
           设置已保存
+        </div>
+      )}
+      {saveNotice && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-4 py-3 text-sm">
+          {saveNotice}
+          <button onClick={() => setSaveNotice(null)} className="float-right font-semibold">&times;</button>
         </div>
       )}
 

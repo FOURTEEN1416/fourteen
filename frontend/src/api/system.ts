@@ -36,8 +36,14 @@ export function toolHistory(limit = 50) { return client.get('/tools/history', { 
 export function proactiveState() { return client.get('/proactive/state') }
 export function proactiveHistory(limit = 50) { return client.get('/proactive/history', { params: { limit } }) }
 export function proactiveGetConfig() { return client.get('/proactive/config') }
-export function proactiveSend(messageType?: string) {
-  return client.post('/proactive/send', messageType ? { message_type: messageType } : {})
+export function proactiveSend(messageType?: string, sessionKey?: string) {
+  // W11-D4/契约对齐：POST /api/proactive/send 的后端规则是「目标显式优先；
+  // 仅一路会话时可省略；多路会话必须显式指定 session_key（否则 400 拒猜）」。
+  // 旧实现永不发送 session_key ⇒ 多会话部署下必然 400，且失败形态像"发送成功"。
+  const body: { message_type?: string; session_key?: string } = {}
+  if (messageType) body.message_type = messageType
+  if (sessionKey) body.session_key = sessionKey
+  return client.post('/proactive/send', body)
 }
 export function proactivePause(paused: boolean) { return client.post('/proactive/pause', { paused }) }
 export function updateProactiveConfig(cfg: { threshold?: number; max_daily?: number; min_interval_minutes?: number; cooldown_after_reply_minutes?: number; quiet_hours_start?: number; quiet_hours_end?: number; follow_up_enabled?: boolean; follow_up_delay1_seconds?: number; follow_up_delay2_seconds?: number; follow_up_daily_max?: number; reply_mode?: 'immersive' | 'novel'; llm_proactive_enabled?: boolean; llm_proactive_style_hint?: string; llm_proactive_intensity?: 'low' | 'normal' | 'high'; llm_proactive_respect_quiet?: boolean; llm_proactive_character_hint?: string }) {

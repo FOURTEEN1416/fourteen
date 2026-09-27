@@ -6,6 +6,7 @@ import { useUnifiedCharacters } from '../hooks/useQueries'
 import { activateCharacter } from '../api/characters'
 import { useQueryClient } from '@tanstack/react-query'
 import { anchorTone, deriveCardSummary, sanitizeCharacterName } from '../utils/character'
+import { useErrorStore } from '../store/errorStore'
 import type { UnifiedCharacter } from '../types/api'
 
 function RoleCard({
@@ -90,10 +91,16 @@ export default function RolesPage() {
   const handleActivate = async (id: string) => {
     setActivatingId(id)
     try {
-      await activateCharacter(id)
+      const res = await activateCharacter(id)
+      // W11-D5：契约 {"status":"activated"}；非 activated 视为失败，不静默吞掉
+      if (res?.status !== 'activated') {
+        useErrorStore.getState().addToast({ type: 'warning', message: '切换角色未生效（后端未确认），请重试' })
+        return
+      }
       await queryClient.invalidateQueries({ queryKey: ['characters'] })
-    } catch {
-      // 失败静默，实际项目可接入 toast
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '切换角色失败，请重试'
+      useErrorStore.getState().addToast({ type: 'error', message })
     } finally {
       setActivatingId(null)
     }

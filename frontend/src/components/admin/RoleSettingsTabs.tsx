@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import client from '../../api/client'
@@ -18,7 +18,8 @@ import type { UnifiedCharacterUpdate } from '../../types/api'
 import { Save, Trash2, Copy } from 'lucide-react'
 import { ENGINE_OPTIONS, MIMO_MODELS } from './RoleSettingsConstants'
 import { PERSONALITY_LABELS, SPEAKING_STYLE_LABELS, normalizePersonality, normalizeSpeakingStyle } from '../../constants/persona'
-import { enrichCharacter, proactiveGetConfig, proactiveHistory, proactiveSend, proactivePause, updateProactiveConfig, knowledgeCollectConfig, updateKnowledgeCollectConfig } from '../../api/system'
+import { enrichCharacter, proactiveGetConfig, proactiveHistory, proactivePause, updateProactiveConfig, knowledgeCollectConfig, updateKnowledgeCollectConfig } from '../../api/system'
+import { useAuthStore } from '../../store/authStore'
 import Section from './RoleSettingsSection'
 import KnowledgePreview from '../storyline/KnowledgePreview'
 
@@ -26,6 +27,7 @@ import KnowledgePreview from '../storyline/KnowledgePreview'
 
 function BasicTab({ character }: { character: RoleSettingsCharacter }) {
   const qc = useQueryClient()
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const [name, setName] = useState(character.name)
   const [description, setDescription] = useState(character.description ?? '')
   const [personality, setPersonality] = useState<Record<string, number>>(() => normalizePersonality(character.personality))
@@ -61,7 +63,12 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
         core_anchors: anchors,
         catchphrases,
       }
-      await updateCharacter(character.id, payload)
+      const res = await updateCharacter(character.id, payload)
+      // W11-D5：以回执判业务成功（契约 {"status":"updated"}），HTTP 200 不足为凭
+      if (res?.status !== 'updated') {
+        useErrorStore.getState().addToast({ type: 'warning', message: '保存未生效（后端未确认），请重试' })
+        return
+      }
       await qc.invalidateQueries({ queryKey: queryKeys.characters.all })
       await qc.invalidateQueries({ queryKey: queryKeys.characters.detail(character.id) })
       useErrorStore.getState().addToast({ type: 'success', message: '角色基础设置已保存' })
@@ -174,7 +181,10 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
         {saving ? '保存中…' : '保存设置'}
       </button>
 
-      <ImportantDatesSection characterId={character.id} />
+      {/* W11-D2：重要日期写入端点 PUT /characters/{id}/important-dates 是
+          admin-only（misc_routes require_role("admin")）——普通用户不渲染入口，
+          避免点了必 403 的假按钮。 */}
+      {isAdmin && <ImportantDatesSection characterId={character.id} />}
     </div>
   )
 }
@@ -204,7 +214,13 @@ function ImportantDatesSection({ characterId }: { characterId: string }) {
   async function handleSave() {
     setSaving(true)
     try {
-      await client.put(`/characters/${characterId}/important-dates`, { dates })
+      const res = await client.put(`/characters/${characterId}/important-dates`, { dates })
+      // W11-D5：契约 {"status":"saved","count":N} —— 非 saved 不谎报成功
+      const receipt = res.data as { status?: string } | undefined
+      if (receipt?.status !== 'saved') {
+        useErrorStore.getState().addToast({ type: 'warning', message: '重要日期未保存（后端未确认）' })
+        return
+      }
       setDirty(false)
       useErrorStore.getState().addToast({ type: 'success', message: '重要日期已保存' })
     } catch {
@@ -398,7 +414,7 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
     setSaving(true)
     setSaveError('')
     try {
-      await client.post(`/characters/${character.id}/voice`, {
+      const res = await client.post(`/characters/${character.id}/voice`, {
         engine: 'mimo-tts',
         speaker_name: (cfg.speaker_name as string | undefined) ?? '',
         mimo_model: mimoModel,
@@ -406,6 +422,12 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
         speed,
         pitch,
       })
+      // W11-D5：契约 {"status":"bound"}；非 bound 不显示「已保存」
+      const receipt = res.data as { status?: string } | undefined
+      if (receipt?.status !== 'bound') {
+        setSaveError('音色未生效（后端未确认），请重试')
+        return
+      }
       setSavedTick(true)
       setTimeout(() => setSavedTick(false), 2000)
       qc.invalidateQueries({ queryKey: queryKeys.characters.detail(character.id) })
@@ -540,8 +562,39 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
 }
 
 // ═══ Tab: Message ═══
+//
+// W11-D4：作用域纪律 —— 主动消息的配置面是**全局**的（后端 /api/proactive/* 一律
+// require_role("admin")，且参数作用于全部会话），而本 tab 挂在**单个角色**页下。
+// 因此：
+//   ① 非 admin 不渲染表单、不请求全局接口（旧实现普通用户打开角色页就会打
+//      admin-only 接口，并在 403 后静默吞掉、渲染默认假表单）；
+//   ② admin 也必须先看到「全局配置」作用域横幅，不得误以为是本角色专属设置；
+//   ③ **移除全局广播发送按钮** —— 手动发送必须显式 session/target（W3 缺陷 E：
+//      未点名即 400），角色页无权替用户决定发给哪一路会话。
+// W11-D5：保存/暂停一律以回执 status==="ok" 判成功，业务失败不得给绿色回执。
+
+/** GET /api/proactive/config 真实回执形状（api/routers/training_routes.py） */
+interface ProactiveConfigPayload {
+  threshold?: number
+  max_daily_messages?: number
+  min_interval_minutes?: number
+  cooldown_after_reply_minutes?: number
+  quiet_hours_start?: number
+  quiet_hours_end?: number
+  follow_up?: { enabled?: boolean; delay1_seconds?: number; delay2_seconds?: number; daily_max?: number }
+  reply_mode?: 'immersive' | 'novel'
+  paused?: boolean
+  llm_proactive?: {
+    enabled?: boolean
+    style_hint?: string
+    intensity?: 'low' | 'normal' | 'high'
+    respect_quiet_hours?: boolean
+    character_hint?: string
+  }
+}
 
 function MessageTab({ character }: { character: RoleSettingsCharacter }) {
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const [threshold, setThreshold] = useState(2.0)
   const [dailyLimit, setDailyLimit] = useState(8)
   const [minInterval, setMinInterval] = useState(30)
@@ -568,50 +621,62 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
   const [paused, setPaused] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState('')
-  const [sending, setSending] = useState(false)
-  const [sendResult, setSendResult] = useState<string | null>(null)
   const [history, setHistory] = useState<Array<{ type: string; message: string; at: string }>>([])
-  const qc = useQueryClient()
+  const [cfgStatus, setCfgStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [cfgError, setCfgError] = useState('')
+
+  const loadConfig = useCallback(async () => {
+    setCfgStatus('loading')
+    setCfgError('')
+    try {
+      const [cfgRes, histRes] = await Promise.all([
+        proactiveGetConfig(),
+        proactiveHistory(10).catch(() => null),
+      ])
+      const cfg = cfgRes?.data as ProactiveConfigPayload | undefined
+      if (!cfg || typeof cfg !== 'object') throw new Error('empty proactive config')
+      setThreshold(cfg.threshold ?? 2.0)
+      setDailyLimit(cfg.max_daily_messages ?? 8)
+      setMinInterval(cfg.min_interval_minutes ?? 30)
+      setCooldown(cfg.cooldown_after_reply_minutes ?? 15)
+      setQuietStart(cfg.quiet_hours_start ?? 23)
+      setQuietEnd(cfg.quiet_hours_end ?? 7)
+      setFuEnabled(cfg.follow_up?.enabled ?? true)
+      setFuDelay1(cfg.follow_up?.delay1_seconds ?? 45)
+      setFuDelay2(cfg.follow_up?.delay2_seconds ?? 150)
+      setFuDailyMax(cfg.follow_up?.daily_max ?? 12)
+      setReplyMode(cfg.reply_mode ?? 'immersive')
+      setPaused(!!cfg.paused)
+      const lp = cfg.llm_proactive ?? {}
+      setLlmEnabled(lp.enabled !== false)
+      setLlmStyle(lp.style_hint || '')
+      setLlmIntensity(lp.intensity || 'normal')
+      setLlmRespectQuiet(lp.respect_quiet_hours !== false)
+      setLlmCharHint(lp.character_hint || '')
+      const hist = histRes?.data as { history?: Array<{ type: string; message: string; at: string }> } | undefined
+      if (hist?.history) setHistory(hist.history)
+      setCfgStatus('ready')
+    } catch (e) {
+      const status = (e as { response?: { status?: number } })?.response?.status
+      setCfgError(
+        status === 503
+          ? '主动消息引擎未初始化（当前 worker 无调度器），配置不可读'
+          : '主动消息配置加载失败，请重试',
+      )
+      setCfgStatus('error')
+    }
+  }, [])
 
   useEffect(() => {
-    let alive = true
-    ;(async () => {
-      try {
-        const [cfgRes, histRes] = await Promise.all([
-          proactiveGetConfig().catch(() => null),
-          proactiveHistory(10).catch(() => null),
-        ])
-        if (!alive) return
-        if (cfgRes?.data) {
-          setThreshold(cfgRes.data.threshold ?? 2.0)
-          setDailyLimit(cfgRes.data.max_daily_messages ?? 8)
-          setMinInterval(cfgRes.data.min_interval_minutes ?? 30)
-          setCooldown(cfgRes.data.cooldown_after_reply_minutes ?? 15)
-          setQuietStart(cfgRes.data.quiet_hours_start ?? 23)
-          setQuietEnd(cfgRes.data.quiet_hours_end ?? 7)
-          setFuEnabled(cfgRes.data.follow_up?.enabled ?? true)
-          setFuDelay1(cfgRes.data.follow_up?.delay1_seconds ?? 45)
-          setFuDelay2(cfgRes.data.follow_up?.delay2_seconds ?? 150)
-          setFuDailyMax(cfgRes.data.follow_up?.daily_max ?? 12)
-          setReplyMode(cfgRes.data.reply_mode ?? 'immersive')
-          setPaused(!!cfgRes.data.paused)
-          const lp = cfgRes.data.llm_proactive || {}
-          setLlmEnabled(lp.enabled !== false)
-          setLlmStyle(lp.style_hint || '')
-          setLlmIntensity((lp.intensity as 'low' | 'normal' | 'high') || 'normal')
-          setLlmRespectQuiet(lp.respect_quiet_hours !== false)
-          setLlmCharHint(lp.character_hint || '')
-        }
-        if (histRes?.data?.history) setHistory(histRes.data.history)
-      } catch { /* 静默：未初始化引擎时展示占位 */ }
-    })()
-    return () => { alive = false }
-  }, [])
+    // W11-D4：非 admin 一律不请求全局主动接口
+    if (!isAdmin) return
+    void loadConfig()
+  }, [isAdmin, loadConfig])
 
   async function handleSave() {
     setSaving(true)
     try {
-      await updateProactiveConfig({
+      const res = await updateProactiveConfig({
         threshold, max_daily: dailyLimit,
         min_interval_minutes: minInterval, cooldown_after_reply_minutes: cooldown,
         quiet_hours_start: quietStart, quiet_hours_end: quietEnd,
@@ -626,6 +691,12 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
         llm_proactive_respect_quiet: llmRespectQuiet,
         llm_proactive_character_hint: llmCharHint,
       })
+      // W11-D5：HTTP 200 不代表生效，必须回执 status==="ok"
+      const receipt = res.data as { status?: string } | undefined
+      if (receipt?.status !== 'ok') {
+        useErrorStore.getState().addToast({ type: 'warning', message: '配置未生效（后端未确认），请重试' })
+        return
+      }
       setSavedAt(new Date().toLocaleTimeString('zh-CN'))
     } catch (e) {
       useErrorStore.getState().addToast({ type: 'error', message: e instanceof Error ? e.message : '保存失败' })
@@ -636,27 +707,15 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
 
   async function handlePause(next: boolean) {
     try {
-      await proactivePause(next)
-      setPaused(next)
+      const res = await proactivePause(next)
+      const receipt = res.data as { status?: string; paused?: boolean } | undefined
+      if (receipt?.status !== 'ok') {
+        useErrorStore.getState().addToast({ type: 'warning', message: '暂停操作未生效（后端未确认）' })
+        return
+      }
+      setPaused(receipt.paused !== undefined ? Boolean(receipt.paused) : next)
     } catch (e) {
       useErrorStore.getState().addToast({ type: 'error', message: e instanceof Error ? e.message : '操作失败' })
-    }
-  }
-
-  async function handleSendNow() {
-    setSending(true)
-    setSendResult(null)
-    try {
-      const res = await proactiveSend()
-      const msg = res.data?.message ?? ''
-      setSendResult(msg)
-      const histRes = await proactiveHistory(10).catch(() => null)
-      if (histRes?.data?.history) setHistory(histRes.data.history)
-      qc.invalidateQueries({ queryKey: queryKeys.proactive.state })
-    } catch (e) {
-      useErrorStore.getState().addToast({ type: 'error', message: e instanceof Error ? e.message : '发送失败（引擎未初始化？）' })
-    } finally {
-      setSending(false)
     }
   }
 
@@ -683,8 +742,57 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
     }
   }
 
+  // ── 作用域闸门（W11-D4）────────────────────────────────
+  // 非 admin：不渲染 admin-only 表单，也不请求全局接口；明确告知调度是全局的。
+  if (!isAdmin) {
+    return (
+      <Section title="主动消息">
+        <p className="text-xs text-gray-500 leading-relaxed">
+          主动消息由全局引擎统一调度（按会话与绑定角色投递），角色页不提供全局广播操作。
+        </p>
+        <p className="mt-2 text-[11px] text-gray-400">
+          需要调整主动消息频率、免打扰时段或暂停调度，请用管理员账号进入本页「消息」标签操作。
+        </p>
+      </Section>
+    )
+  }
+
+  if (cfgStatus === 'loading') {
+    return (
+      <Section title="主动消息">
+        <div className="flex items-center justify-center py-8">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+        </div>
+      </Section>
+    )
+  }
+
+  // admin 且配置读取失败：显式错误态 + 重试，绝不渲染默认假表单
+  if (cfgStatus === 'error') {
+    return (
+      <Section title="主动消息">
+        <div className="rounded-xl border border-red-200/40 bg-red-50/40 p-5 text-center space-y-3">
+          <p className="text-sm text-red-600">{cfgError}</p>
+          <button
+            onClick={() => { void loadConfig() }}
+            className="rounded-lg border border-red-200 bg-white/80 px-4 py-1.5 text-xs text-red-600 hover:bg-white transition-colors"
+          >
+            重试
+          </button>
+        </div>
+      </Section>
+    )
+  }
+
   return (
     <div className="space-y-4">
+      {/* 作用域横幅（W11-D4）：本 tab 的参数是全局的，不是本角色专属 */}
+      <div className="rounded-xl border border-amber-100 bg-amber-50/50 px-3 py-2">
+        <p className="text-[11px] text-amber-700 leading-relaxed">
+          全局配置：以下参数作用于全部角色的主动消息调度，并非本角色专属设置。
+        </p>
+      </div>
+
       {/* LLM 主动决策 web 可调 */}
       <Section title="LLM 主动决策（人设·画像·控制台）">
         <p className="text-xs text-gray-500 mb-2">时机与文案由 LLM 综合判断；此处参数注入决策提示词，可动态调整。</p>
@@ -838,25 +946,15 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
         </div>
       </Section>
 
-      {/* Manual send（08-28 新增：手动控制） */}
-      <Section title="手动控制">
-        <div className="flex justify-end">
-          <button
-            onClick={handleSendNow}
-            disabled={sending}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-primary-500 hover:bg-primary-400 rounded-lg transition-colors shadow-sm disabled:opacity-50"
-          >
-            {sending ? '生成发送中…' : '立即发送一条主动消息'}
-          </button>
-        </div>
-        {sendResult && (
-          <div className="mt-2 rounded-xl bg-white/70 border border-macaron-blue/30 px-3 py-2">
-            <p className="text-[10px] text-gray-400 mb-0.5">已发送</p>
-            <p className="text-xs text-gray-700">{sendResult}</p>
-          </div>
-        )}
-        {history.length > 0 && (
-          <div className="mt-3 space-y-1.5 max-h-40 overflow-y-auto">
+      {/* W11-D4：手动发送已从角色页**移除**。
+          旧实现「立即发送一条主动消息」调用不带 session_key 的全局接口 ——
+          生产 4 worker 下会广播/误投到他人会话（W3 缺陷 E 实证：自测几次耗尽
+          当日配额使全天停发）。后端已收敛为「必须显式 session_key，多会话时
+          400 拒猜」，角色页无权替用户选择目标会话，故此处只保留**只读**记录。
+          需要手动自测请走管理员控制面并显式指定会话。 */}
+      {history.length > 0 && (
+        <Section title="最近主动消息（只读）">
+          <div className="space-y-1.5 max-h-40 overflow-y-auto">
             {history.slice(0, 5).map((h, i) => (
               <div key={i} className="rounded-lg bg-gray-50 px-3 py-1.5 flex items-start justify-between gap-2">
                 <span className="text-[10px] text-gray-400 shrink-0">{h.type}</span>
@@ -865,8 +963,8 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
               </div>
             ))}
           </div>
-        )}
-      </Section>
+        </Section>
+      )}
     </div>
   )
 }
@@ -875,6 +973,7 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
 
 function DataTab({ character }: { character: RoleSettingsCharacter }) {
   const navigate = useNavigate()
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const deleteMutation = useDeleteCharacter()
   const [showDelete, setShowDelete] = useState(false)
   const [enriching, setEnriching] = useState(false)
@@ -908,7 +1007,13 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
     setCollectSaving(true)
     try {
       const res = await updateKnowledgeCollectConfig({ enabled: next, interval_minutes: collectInterval })
-      setCollectEnabled(res.data?.config?.enabled ?? next)
+      // W11-D5：契约 {"status":"ok","config":{…}} —— 非 ok 不谎报开关已生效
+      const receipt = res.data as { status?: string; config?: { enabled?: boolean } } | undefined
+      if (receipt?.status !== 'ok') {
+        useErrorStore.getState().addToast({ type: 'warning', message: '采集开关未生效（后端未确认）' })
+        return
+      }
+      setCollectEnabled(receipt.config?.enabled ?? next)
       useErrorStore.getState().addToast({ type: 'success', message: next ? '知识库定期采集已开启' : '知识库定期采集已关闭' })
     } catch (e) {
       useErrorStore.getState().addToast({ type: 'error', message: e instanceof Error ? e.message : '操作失败' })
@@ -920,7 +1025,12 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
   const handleCollectIntervalSave = async () => {
     setCollectSaving(true)
     try {
-      await updateKnowledgeCollectConfig({ enabled: collectEnabled, interval_minutes: collectInterval })
+      const res = await updateKnowledgeCollectConfig({ enabled: collectEnabled, interval_minutes: collectInterval })
+      const receipt = res.data as { status?: string } | undefined
+      if (receipt?.status !== 'ok') {
+        useErrorStore.getState().addToast({ type: 'warning', message: '采集间隔未生效（后端未确认）' })
+        return
+      }
       useErrorStore.getState().addToast({ type: 'success', message: `采集间隔已保存：${collectInterval} 分钟` })
     } catch (e) {
       useErrorStore.getState().addToast({ type: 'error', message: e instanceof Error ? e.message : '保存失败' })
@@ -1034,7 +1144,7 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
           对话时按相关度检索角色知识库（BM25）；来源含角色卡字段、文档导入、vault 与网络爬取。
         </p>
         <KnowledgePreview characterId={character.id} />
-        {collectAvailable && (
+        {collectAvailable && isAdmin && (
           <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-white/40 bg-white/30 px-3 py-2">
             <div className="min-w-0">
               <p className="text-xs font-medium text-gray-700">定期采集（Vault）</p>
@@ -1089,7 +1199,13 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
         variant="danger"
         onConfirm={() => {
           deleteMutation.mutate(character.id, {
-            onSuccess: () => {
+            onSuccess: (res: { status?: string } | undefined) => {
+              // W11-D5：契约 {"status":"deleted"}；非 deleted 不得谎报「已删除」
+              if (res?.status !== 'deleted') {
+                setShowDelete(false)
+                useErrorStore.getState().addToast({ type: 'warning', message: '删除未生效（后端未确认），请重试' })
+                return
+              }
               useErrorStore.getState().addToast({ type: 'success', message: `角色「${sanitizeCharacterName(character.name)}」已删除` })
               navigate('/roles', { replace: true })
             },

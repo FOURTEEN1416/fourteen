@@ -449,10 +449,18 @@ export interface SafetyStats {
 }
 
 export interface SafetyLogEntry {
-  timestamp: string
+  /** Unix 秒级时间戳（后端 `time.time()`，非毫秒、非 ISO 串） */
+  timestamp: number
+  /** 命中类别（如 self_harm / violence，后端 category.value） */
   category: string
-  message: string
-  confidence: number
+  /** 命中方向：用户输入 / 角色输出 */
+  direction: 'input' | 'output'
+  /** 原文长度（后端刻意不记录原文，仅长度 + 哈希） */
+  text_length: number
+  /** 原文 sha256 前 16 位 */
+  text_hash: string
+  /** 归属用户（后端按账号过滤时附带） */
+  user_id?: number | null
 }
 
 // ── RAG ──

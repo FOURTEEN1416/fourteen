@@ -112,10 +112,16 @@ export default function PsychProfilePage() {
 
   function handleReset() {
     resetMutation.mutate(characterId, {
-      onSuccess: (res) => addToast({
-        type: 'success',
-        message: `已清除 ${res?.cleared ?? 0} 份心理画像，角色会重新从对话中认识你`,
-      }),
+      onSuccess: (res) => {
+        // W11-D5：成功必须是**业务成功**。后端以 HTTP 200 返回
+        // {"status":"reset"|"failed"}（api/routers/personality_routes.py），
+        // 旧实现 HTTP 200 即报「已清除 N 份」——业务 failed 也谎报成功。
+        if (res?.status !== 'reset') {
+          addToast({ type: 'error', message: '重置失败：画像可能仍保留，请重试' })
+          return
+        }
+        addToast({ type: 'success', message: '心理画像已重置' })
+      },
       onError: () => addToast({ type: 'error', message: '重置失败：画像可能仍保留，请重试' }),
     })
     setConfirmReset(false)

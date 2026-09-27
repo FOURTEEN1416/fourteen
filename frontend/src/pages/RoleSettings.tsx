@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useUnifiedCharacter } from '../hooks/useQueries'
 import { sanitizeCharacterName } from '../utils/character'
 import type { RoleSettingsTab } from '../types/framework'
@@ -7,11 +6,33 @@ import type { RoleSettingsCharacter } from '../types/framework'
 import { SUB_TABS } from '../components/admin/RoleSettingsConstants'
 import RoleSettingsTabs from '../components/admin/RoleSettingsTabs'
 
+const TAB_KEYS = SUB_TABS.map(t => t.key)
+
+/** URL 段 → 合法 tab；非法/缺省回退 basic（W11-D2） */
+function resolveTab(raw: string | undefined): RoleSettingsTab {
+  return TAB_KEYS.includes(raw as RoleSettingsTab) ? (raw as RoleSettingsTab) : 'basic'
+}
+
 export default function RoleSettings() {
-  const { roleId } = useParams<{ roleId: string }>()
-  const [activeTab, setActiveTab] = useState<RoleSettingsTab>('basic')
+  const { roleId, tab } = useParams<{ roleId: string; tab?: string }>()
+  const navigate = useNavigate()
+  const location = useLocation()
+  // W11-D2：tab 以 URL 为唯一真源 —— 深链可分享、刷新保留、前进后退一致。
+  // 旧实现只 useState('basic') 且不消费路由 tab，任何刷新都落回基础页。
+  const activeTab = resolveTab(tab)
 
   const characterId = roleId ? decodeURIComponent(roleId) : ''
+
+  /** 点击 tab 写回 URL（基于当前路径，兼容 /roles/:id/settings 与 /users/:u/roles/:id/settings 两种前缀） */
+  const handleTabChange = (key: RoleSettingsTab) => {
+    const segments = location.pathname.split('/').filter(Boolean)
+    const last = segments[segments.length - 1]
+    const base = TAB_KEYS.includes(last as RoleSettingsTab)
+      ? location.pathname.replace(/\/[^/]+$/, '')
+      : location.pathname
+    navigate(`${base}/${key}`)
+  }
+
   const { data: character, isLoading, error } = useUnifiedCharacter(characterId)
 
   if (isLoading) {
@@ -64,7 +85,7 @@ export default function RoleSettings() {
           {SUB_TABS.map(t => (
             <button
               key={t.key}
-              onClick={() => setActiveTab(t.key)}
+              onClick={() => handleTabChange(t.key)}
               className={`flex-1 min-w-[72px] shrink-0 flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/50 ${
                 activeTab === t.key
                   ? 'tab-active'

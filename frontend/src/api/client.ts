@@ -15,6 +15,7 @@ import axios from 'axios'
 import { useErrorStore } from '../store/errorStore'
 import { getAccessToken, setAccessToken, useAuthStore } from '../store/authStore'
 import { refreshToken as refreshTokenApi } from './auth'
+import { clearAccountScopedCache } from './queryClient'
 
 // ── Domain API imports (for re-export and api namespace) ──
 import {
@@ -176,6 +177,8 @@ client.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError, null)
         useAuthStore.getState().clearAuth()
+        // W11-D3：刷新失败 = 会话已失效（被动登出），同样要清账号级缓存
+        clearAccountScopedCache()
         window.location.href = '/login'
         return Promise.reject(refreshError)
       } finally {

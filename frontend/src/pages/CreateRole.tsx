@@ -593,6 +593,12 @@ function CreateButton() {
       const result = importFile
         ? await importCharacter(importFile)
         : await createMutation.mutateAsync({ name: persona.name || '未命名角色', description: persona.description || '', core_anchors: persona.anchors, personality: persona.personality, speaking_style: persona.speakingStyle })
+      // W11-D5：以回执判业务成功（创建 {"status":"created"} / 导入 {"status":"imported"}），
+      // HTTP 201/200 不足为凭，且没有 id 就没有可跳转的目标
+      if (!result?.id || (result.status !== 'created' && result.status !== 'imported')) {
+        toast({ type: 'warning', message: '创建未生效（后端未确认），请重试' })
+        return
+      }
       toast({ type: 'success', message: '角色创建成功！' })
       navigate(`/roles/${result.id}/settings`)
     } catch { toast({ type: 'error', message: '创建失败，请重试' }) }
