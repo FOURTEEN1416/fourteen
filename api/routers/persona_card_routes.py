@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Security
+from fastapi import APIRouter, Depends, HTTPException, Security
 from pydantic import BaseModel
 
 from api.auth import verify_api_key_dep
 from api.deps import deps
+from api.routers.character_routes import require_character_access
 
 logger = logging.getLogger("api.persona_card_routes")
 
@@ -43,6 +44,9 @@ def _chara_card_to_persona_data(card) -> dict[str, Any]:
 async def get_persona_card(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """获取角色完整角色卡 (CharaCardV2 格式)"""
     char_mgr = getattr(deps.shisi_reg, "character_manager", None)
@@ -59,6 +63,9 @@ async def update_persona_card(
     character_id: str,
     req: PersonaCardUpdateRequest,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """更新角色完整角色卡 (CharaCardV2 格式)
 
@@ -112,6 +119,9 @@ async def update_persona_card(
 async def preview_persona_card(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """预览角色卡 — 转为 PersonaEngine 配置"""
     char_mgr = getattr(deps.shisi_reg, "character_manager", None)

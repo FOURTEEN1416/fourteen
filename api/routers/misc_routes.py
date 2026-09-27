@@ -20,10 +20,19 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import get_current_user, get_current_user_id, require_role
+from api.auth_jwt import (
+    get_current_user,
+    get_current_user_id,
+    require_role,
+    resolve_principal_from_request,
+)
 from api.database import User, get_db
 from api.deps import deps
 from api.main_routes import ConfigUpdateRequest, _sanitize_config
+
+# 角色资源归属唯一 owner 在 character_routes（角色域）；此处只挂同一依赖，
+# 不实现其业务（W1 任务 3：其他域路由仅添加同一授权依赖）。
+from api.routers.character_routes import require_character_access
 from llm_provider import reconfigure_llm
 from observability.logging_setup import ring_buffer
 
@@ -33,23 +42,36 @@ router = APIRouter(tags=["misc"])
 
 
 def _memory_scope_prefix(request: Request) -> str | None:
-    """P0-4：普通 JWT 用户的数据面归属前缀（user_key 以 "user_id:" 开头）。
+    """普通 JWT 用户的数据面归属前缀（user_key 以 "user_id:" 开头）。
 
-    返回 None = 不限制：管理员 JWT，或机器侧纯 API Key（无 Bearer）。
+    返回 None = 不限制：管理员主体，或机器侧纯 API Key（无 Bearer）。
+
+    角色判定只认 `request.state.auth_principal`（由 `memory_scope` /
+    `get_optional_principal` 一次校验写入的**库内**主体）；**不再**独立解码
+    token 取 role 声明——降权后 token 里的 role 只是陈旧副本，据此放行等于
+    降权无效（W1 缺陷 A）。有 Bearer 却没有主体 = 依赖未接线，fail-closed。
     """
     auth = str(request.headers.get("Authorization") or "")
     if not auth.startswith("Bearer "):
         return None
-    try:
-        from api.auth_jwt import verify_token
+    principal = getattr(request.state, "auth_principal", None)
+    if principal is None:
+        raise HTTPException(status_code=401, detail="无效的登录凭证")
+    if principal.role == "admin":
+        return None
+    return f"{principal.user_id}:"
 
-        payload = verify_token(auth[len("Bearer ") :], "access")
-        if str(payload.get("role") or "") == "admin":
-            return None
-        uid = int(payload.get("sub") or 0)
-    except Exception as exc:
-        raise HTTPException(status_code=401, detail="无效的登录凭证") from exc
-    return f"{uid}:" if uid else "::__denied__"
+
+async def memory_scope(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> str | None:
+    """数据面归属前缀依赖（唯一 owner）：一次校验主体后由 `_memory_scope_prefix` 投影。
+
+    停用 / 删除 / 改密后的旧 token 在这里直接 401（不进入业务读域）。
+    """
+    request.state.auth_principal = await resolve_principal_from_request(request, db)
+    return _memory_scope_prefix(request)
 
 
 # ═══════════════════════════════════════════════════════
@@ -218,6 +240,7 @@ async def seed_diary(
 async def get_important_dates(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    _owned: dict | None = Depends(require_character_access),
 ):
     """重要日期（生日/纪念日/自定义；候选 D）。"""
     from utils.important_dates import load_dates
@@ -240,6 +263,7 @@ async def update_important_dates(
     character_id: str,
     req: ImportantDatesUpdate,
     _auth: bool = Security(verify_api_key_dep),
+    _owned: dict | None = Depends(require_character_access),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     from utils.important_dates import save_dates
@@ -250,9 +274,9 @@ async def update_important_dates(
 
 @router.get("/api/memory/diary")
 async def memory_diary(
-    request: Request,
     limit: int = Query(default=10, le=60),
     _auth: bool = Security(verify_api_key_dep),
+    prefix: str | None = Depends(memory_scope),
 ):
     """角色日记（每日摘要，daily_summaries 表；候选 B）。"""
     orch = deps.orch
@@ -260,7 +284,6 @@ async def memory_diary(
     ds = getattr(mem, "ds", None)
     if ds is None:
         return {"entries": []}
-    prefix = _memory_scope_prefix(request)
     try:
         summaries = ds.get_all_summaries() or {}
         items = sorted(summaries.items(), key=lambda kv: str(kv[0]).rsplit("|", 1)[-1], reverse=True)
@@ -276,14 +299,13 @@ async def memory_diary(
 
 @router.get("/api/memory/facts")
 async def memory_facts(
-    request: Request,
     category: str | None = None,
     limit: int = Query(default=50, le=500),
     _auth: bool = Security(verify_api_key_dep),
+    prefix: str | None = Depends(memory_scope),
 ):
     orch = deps.orch
     if orch and orch._memory:
-        prefix = _memory_scope_prefix(request)
         if prefix is None:
             return {"facts": orch._memory.semantic.get_facts(category, limit=limit)}
         sm = getattr(orch._memory, "structured_memory", None)

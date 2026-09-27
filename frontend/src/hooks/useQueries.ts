@@ -1,37 +1,130 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import client, { api } from '../api/client'
+import { useAuthStore } from '../store/authStore'
 import { useErrorStore } from '../store/errorStore'
 import type { EmotionState, DashboardStats, HealthStatus, WeChatStatus, TrainingProgress, ProactiveEngineState, MemoryFact, PsychProfile, PsychResetResult, PsychSnapshot, SafetyStats, SafetyLogEntry, RAGStats, VoiceStatus, PluginsList, ToolHistoryEntry, ProactiveHistoryEntry, MentalHealthSummary } from '../types/api'
 
+/**
+ * 账号维度（W1）：私人查询键必须携带**稳定的账号标识**（`users.id`）。
+ *
+ * 为什么不能用 token：token 会随 refresh 轮换、随登出消失，把凭证当缓存键会让
+ * 同一账号的缓存被反复丢弃（无谓重取），且账号切换时**无法区分**归属。
+ *
+ * 为什么键里要带账号：清缓存（登出 / 切换账号时 `clearAccountScopedCache`）是
+ * 兜底，键维度是主防线——**迟到的旧账号响应只会写进旧账号的键**，
+ * 不可能复写到新账号正在读的键上。
+ *
+ * 取值为 getter：读取时刻才求值，账号切换后同一个 `queryKeys.x` 自动指向新账号，
+ * 既不需要改任何调用点，也不会把「模块加载时的账号」固化进键。
+ */
+function accountScope(): string {
+  const uid = useAuthStore.getState().user?.id
+  return uid === undefined || uid === null ? 'anon' : String(uid)
+}
+
+/**
+ * 账号维度的私有键（与 `queryKeys` 同源）：散落硬编码的私有键同样必须带账号，
+ * 否则 A 的迟到响应会写进 B 正在读的键。
+ */
+function privateKey(...parts: Array<string | number | undefined>): readonly unknown[] {
+  return ['acct', accountScope(), ...parts]
+}
+
 export const queryKeys = {
-  characters: { all: ['characters'] as const, detail: (id: string) => ['characters', id] as const },
-
-  dashboard: ['dashboard'] as const,
-  health: ['health'] as const,
-  emotion: { state: ['emotion', 'state'] as const, trend: (days: number) => ['emotion', 'trend', days] as const, distribution: (days: number) => ['emotion', 'distribution', days] as const },
-  persona: { profile: ['persona', 'profile'] as const, evolution: ['persona', 'evolution'] as const },
-  memory: { facts: (category?: string) => ['memory', 'facts', category] as const },
-  config: ['config'] as const,
-
-  training: { status: ['training', 'status'] as const, progress: ['training', 'progress'] as const },
-  wechat: { status: ['wechat', 'status'] as const, connection: ['wechat', 'connection'] as const, qrcode: ['wechat', 'qrcode'] as const },
-  channels: ['channels'] as const,
-  logs: { all: (params?: Record<string, unknown>) => ['logs', params] as const },
-  clone: { contacts: (kw?: string) => ['clone', 'contacts', kw] as const, datasets: ['clone', 'datasets'] as const, stats: ['clone', 'stats'] as const },
-  psych: {
-    all: ['psych'] as const,
-    profile: (characterId?: string) => ['psych', 'profile', characterId ?? ''] as const,
-    snapshots: (characterId?: string) => ['psych', 'snapshots', characterId ?? ''] as const,
-    mentalHealth: (characterId?: string) => ['psych', 'mentalHealth', characterId ?? ''] as const,
+  get characters() {
+    const scope = ['acct', accountScope(), 'characters'] as const
+    return {
+      all: scope,
+      detail: (id: string) => [...scope, id] as const,
+    }
   },
-  achievements: (characterId: string) => ['achievements', characterId] as const,
-  safety: { stats: ['safety', 'stats'] as const, log: ['safety', 'log'] as const },
-  rag: { stats: ['rag', 'stats'] as const },
-  voice: { status: ['voice', 'status'] as const },
-  plugins: { all: ['plugins'] as const },
-  toolHistory: ['tools', 'history'] as const,
-  proactiveHistory: ['proactive', 'history'] as const,
-  proactive: { state: ['proactive', 'state'] as const },
+
+  get dashboard() { return ['acct', accountScope(), 'dashboard'] as const },
+  get health() { return ['acct', accountScope(), 'health'] as const },
+  get emotion() {
+    const scope = ['acct', accountScope(), 'emotion'] as const
+    return {
+      state: [...scope, 'state'] as const,
+      trend: (days: number) => [...scope, 'trend', days] as const,
+      distribution: (days: number) => [...scope, 'distribution', days] as const,
+    }
+  },
+  get persona() {
+    const scope = ['acct', accountScope(), 'persona'] as const
+    return {
+      profile: [...scope, 'profile'] as const,
+      evolution: [...scope, 'evolution'] as const,
+    }
+  },
+  get memory() {
+    const scope = ['acct', accountScope(), 'memory'] as const
+    return { facts: (category?: string) => [...scope, 'facts', category] as const }
+  },
+  get config() { return ['acct', accountScope(), 'config'] as const },
+
+  get training() {
+    const scope = ['acct', accountScope(), 'training'] as const
+    return {
+      status: [...scope, 'status'] as const,
+      progress: [...scope, 'progress'] as const,
+    }
+  },
+  get wechat() {
+    const scope = ['acct', accountScope(), 'wechat'] as const
+    return {
+      status: [...scope, 'status'] as const,
+      connection: [...scope, 'connection'] as const,
+      qrcode: [...scope, 'qrcode'] as const,
+    }
+  },
+  get channels() { return ['acct', accountScope(), 'channels'] as const },
+  get logs() {
+    const scope = ['acct', accountScope(), 'logs'] as const
+    return { all: (params?: Record<string, unknown>) => [...scope, params] as const }
+  },
+  get clone() {
+    const scope = ['acct', accountScope(), 'clone'] as const
+    return {
+      contacts: (kw?: string) => [...scope, 'contacts', kw] as const,
+      datasets: [...scope, 'datasets'] as const,
+      stats: [...scope, 'stats'] as const,
+    }
+  },
+  get psych() {
+    const scope = ['acct', accountScope(), 'psych'] as const
+    return {
+      all: scope,
+      profile: (characterId?: string) => [...scope, 'profile', characterId ?? ''] as const,
+      snapshots: (characterId?: string) => [...scope, 'snapshots', characterId ?? ''] as const,
+      mentalHealth: (characterId?: string) => [...scope, 'mentalHealth', characterId ?? ''] as const,
+    }
+  },
+  achievements: (characterId: string) => ['acct', accountScope(), 'achievements', characterId] as const,
+  get safety() {
+    const scope = ['acct', accountScope(), 'safety'] as const
+    return {
+      stats: [...scope, 'stats'] as const,
+      log: [...scope, 'log'] as const,
+    }
+  },
+  get rag() {
+    const scope = ['acct', accountScope(), 'rag'] as const
+    return { stats: [...scope, 'stats'] as const }
+  },
+  get voice() {
+    const scope = ['acct', accountScope(), 'voice'] as const
+    return { status: [...scope, 'status'] as const }
+  },
+  get plugins() {
+    const scope = ['acct', accountScope(), 'plugins'] as const
+    return { all: scope }
+  },
+  get toolHistory() { return ['acct', accountScope(), 'tools', 'history'] as const },
+  get proactiveHistory() { return ['acct', accountScope(), 'proactive', 'history'] as const },
+  get proactive() {
+    const scope = ['acct', accountScope(), 'proactive'] as const
+    return { state: [...scope, 'state'] as const }
+  },
 }
 
 export function useCharacters() {
@@ -354,7 +447,7 @@ export function useActivateCharacter() {
 
 export function useCharacterVoice(characterId: string | undefined) {
   return useQuery({
-    queryKey: ['character', characterId, 'voice'],
+    queryKey: privateKey('character', characterId, 'voice'),
     queryFn: () => api.getVoiceConfig(characterId!),
     enabled: !!characterId,
   })
@@ -365,7 +458,7 @@ export function useBindCharacterVoice() {
   return useMutation({
     mutationFn: ({ characterId, data }: { characterId: string; data: import('../types/api').VoiceBindRequest }) => api.bindVoice(characterId, data),
     onSuccess: (_data, variables) => {
-      qc.invalidateQueries({ queryKey: ['character', variables.characterId, 'voice'] })
+      qc.invalidateQueries({ queryKey: privateKey('character', variables.characterId, 'voice') })
     },
   })
 }
@@ -375,7 +468,7 @@ export function useUpdateCharacterVoice() {
   return useMutation({
     mutationFn: ({ characterId, data }: { characterId: string; data: import('../types/api').VoiceUpdateRequest }) => api.updateVoice(characterId, data),
     onSuccess: (_data, variables) => {
-      qc.invalidateQueries({ queryKey: ['character', variables.characterId, 'voice'] })
+      qc.invalidateQueries({ queryKey: privateKey('character', variables.characterId, 'voice') })
     },
   })
 }
@@ -385,7 +478,7 @@ export function useUnbindCharacterVoice() {
   return useMutation({
     mutationFn: (characterId: string) => api.unbindVoice(characterId),
     onSuccess: (_data, characterId) => {
-      qc.invalidateQueries({ queryKey: ['character', characterId, 'voice'] })
+      qc.invalidateQueries({ queryKey: privateKey('character', characterId, 'voice') })
     },
   })
 }
@@ -408,7 +501,7 @@ export function useVoiceSpeakers(engine: string = 'mimo-tts') {
 
 export function useStorylineConfig(characterId: string | undefined) {
   return useQuery({
-    queryKey: ['storyline', characterId, 'config'],
+    queryKey: privateKey('storyline', characterId, 'config'),
     queryFn: () => api.getStorylineConfig(characterId!),
     enabled: !!characterId,
     staleTime: 30 * 1000,
@@ -417,7 +510,7 @@ export function useStorylineConfig(characterId: string | undefined) {
 
 export function useStorylineProgress(characterId: string | undefined) {
   return useQuery({
-    queryKey: ['storyline', characterId, 'progress'],
+    queryKey: privateKey('storyline', characterId, 'progress'),
     queryFn: () => api.getStorylineProgress(characterId!),
     enabled: !!characterId,
     refetchInterval: 60 * 1000,
@@ -429,8 +522,8 @@ export function useUpdateStorylineConfig() {
   return useMutation({
     mutationFn: ({ characterId, config }: { characterId: string; config: import('../types/api').StorylineConfigRequest }) => api.updateStorylineConfig(characterId, config),
     onSuccess: (_data, variables) => {
-      qc.invalidateQueries({ queryKey: ['storyline', variables.characterId, 'config'] })
-      qc.invalidateQueries({ queryKey: ['storyline', variables.characterId, 'progress'] })
+      qc.invalidateQueries({ queryKey: privateKey('storyline', variables.characterId, 'config') })
+      qc.invalidateQueries({ queryKey: privateKey('storyline', variables.characterId, 'progress') })
       qc.invalidateQueries({ queryKey: queryKeys.characters.all })
     },
   })
@@ -441,8 +534,8 @@ export function useDeleteStorylineConfig() {
   return useMutation({
     mutationFn: (characterId: string) => api.deleteStorylineConfig(characterId),
     onSuccess: (_data, characterId) => {
-      qc.invalidateQueries({ queryKey: ['storyline', characterId, 'config'] })
-      qc.invalidateQueries({ queryKey: ['storyline', characterId, 'progress'] })
+      qc.invalidateQueries({ queryKey: privateKey('storyline', characterId, 'config') })
+      qc.invalidateQueries({ queryKey: privateKey('storyline', characterId, 'progress') })
       qc.invalidateQueries({ queryKey: queryKeys.characters.all })
     },
     onError: (err: unknown) => {
@@ -463,7 +556,7 @@ export function useResetStoryline() {
   return useMutation({
     mutationFn: (characterId: string) => api.resetStoryline(characterId),
     onSuccess: (_data, characterId) => {
-      qc.invalidateQueries({ queryKey: ['storyline', characterId, 'progress'] })
+      qc.invalidateQueries({ queryKey: privateKey('storyline', characterId, 'progress') })
     },
   })
 }

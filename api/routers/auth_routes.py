@@ -16,12 +16,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth_jwt import (
+    REFRESH_TOKEN_EXPIRE_DAYS,
+    bump_token_version,
     create_access_token,
     create_refresh_token,
     get_current_user_id,
     hash_password,
     hash_refresh_token,
     require_role,
+    token_claims,
     verify_password,
     verify_token,
 )
@@ -37,6 +40,23 @@ from api.password_policy import PasswordStr, ensure_password_strength
 logger = logging.getLogger("auth_routes")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+# ═══════════════════════════════════════════════════════
+# 凭证撤销语义（W1 唯一口径，改前必读）
+# ═══════════════════════════════════════════════════════
+#
+# | 事件 | 旧 access token | 旧 refresh token |
+# |------|-----------------|------------------|
+# | 本人改密 | 立即失效（撤销版本自增） | 立即失效（撤销版本自增 + 全部会话行吊销） |
+# | 管理员重置密码 | 立即失效（同上） | 立即失效（同上） |
+# | 账号停用 | 立即失效（撤销版本自增；且每请求校验 is_active） | 立即失效（同上；重新启用后旧 refresh 亦不可用） |
+# | 账号删除 | 立即失效（主体查不到） | 立即失效（主体查不到 + 会话行级联） |
+# | 降权 / 升权 | **不失效**：角色每请求取库内现值，权限当场收窄/放开 | 不失效（refresh 换发时按新角色签） |
+# | logout | 到期自然失效（不撤销版本：同账号其他设备不被误登出） | 当前这一枚立即吊销 |
+#
+# access 默认 30 分钟（JWT_ACCESS_EXPIRE_MINUTES），refresh 默认 7 天
+# （JWT_REFRESH_EXPIRE_DAYS）——库内会话期限与后者**同源**，不得各写各的。
 
 
 # ═══════════════════════════════════════════════════════
@@ -105,7 +125,8 @@ def _set_refresh_cookie(response: Response, refresh_token: str, request: Request
         httponly=True,
         secure=secure,
         samesite="lax",
-        max_age=7 * 24 * 60 * 60,  # 7 天（与 refresh token 有效期一致）
+        # 与 JWT_REFRESH_EXPIRE_DAYS 同源（旧实现硬编码 7 天，配置一改就对不上）
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
         path="/api/auth",
     )
 
@@ -163,7 +184,7 @@ async def register(
     await db.refresh(user)
 
     # 生成令牌
-    token_data = {"sub": str(user.id), "email": user.email, "role": user.role}
+    token_data = token_claims(user)
     access_token = create_access_token(token_data)
     refresh_token = create_refresh_token(token_data)
 
@@ -208,7 +229,7 @@ async def login(
         raise HTTPException(status_code=403, detail="Account is disabled")
 
     # 生成令牌
-    token_data = {"sub": str(user.id), "email": user.email, "role": user.role}
+    token_data = token_claims(user)
     access_token = create_access_token(token_data)
     refresh_token = create_refresh_token(token_data)
 
@@ -278,8 +299,13 @@ async def refresh(
         await db.commit()
         raise HTTPException(status_code=401, detail="User not found or disabled")
 
+    # 撤销版本比对：改密 / 管理员重置 / 停用后，此前签发的 refresh 一律作废
+    if int(payload.get("tv", 0) or 0) != int(refresh_user.token_version or 0):
+        await db.commit()
+        raise HTTPException(status_code=401, detail="Refresh token has been revoked")
+
     # 生成新令牌
-    token_data = {"sub": str(refresh_user.id), "email": refresh_user.email, "role": refresh_user.role}
+    token_data = token_claims(refresh_user)
     new_access_token = create_access_token(token_data)
     new_refresh_token = create_refresh_token(token_data)
 
@@ -303,7 +329,11 @@ async def logout(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    """登出 — 吊销 refresh token + 清除 httpOnly cookie"""
+    """登出 — 吊销 refresh token + 清除 httpOnly cookie
+
+    语义（W1）：只吊销**当前这一枚** refresh 会话，**不**自增撤销版本——
+    同一账号在其他设备上的会话不受影响；access token 到期自然失效。
+    """
     raw_refresh = _get_refresh_token(request, req.refresh_token)
     if raw_refresh:
         token_hash = hash_refresh_token(raw_refresh)
@@ -406,9 +436,13 @@ async def change_password(
 
     # 更新密码
     user.hashed_password = await asyncio.to_thread(hash_password, req.new_password)
+
+    # 改密即撤销：撤销版本自增（旧 access 立即失效）+ 全部 refresh 会话吊销
+    bump_token_version(user)
+    revoked = await _revoke_all_sessions(db, int(user.id))
     await db.commit()
 
-    logger.info("用户 %s 修改了密码", user.email)
+    logger.info("用户 %s 修改了密码，已撤销 %d 个会话", user.email, revoked)
     return {"detail": "Password changed successfully"}
 
 
@@ -431,17 +465,13 @@ async def admin_reset_password(
     # 更新密码为管理员指定的新密码
     user.hashed_password = await asyncio.to_thread(hash_password, req.new_password)
 
-    # 吊销该用户所有 refresh token（强制重新登录）
-    result = await db.execute(
-        select(UserSession).where(UserSession.user_id == target_user_id)
-    )
-    sessions = result.scalars().all()
-    for session in sessions:
-        await db.delete(session)
-
+    # 撤销该用户全部凭证（强制重新登录）：撤销版本自增 + 会话行吊销。
+    # 只有会话行吊销时，重新启用/旧 access 仍可能存活，故两者必须同时做。
+    bump_token_version(user)
+    revoked = await _revoke_all_sessions(db, target_user_id)
     await db.commit()
 
-    logger.info("管理员重置了用户 %s 的密码并吊销了其会话", user.email)
+    logger.info("管理员重置了用户 %s 的密码并撤销了 %d 个会话", user.email, revoked)
     return {"detail": f"Password reset for user {target_user_id} successful. All sessions revoked."}
 
 
@@ -455,6 +485,15 @@ def _save_refresh_token(db: AsyncSession, user_id: int, refresh_token: str) -> N
     session = UserSession(
         user_id=user_id,
         refresh_token_hash=hash_refresh_token(refresh_token),
-        expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
     )
     db.add(session)
+
+
+async def _revoke_all_sessions(db: AsyncSession, user_id: int) -> int:
+    """吊销该用户全部 refresh 会话（改密 / 管理员重置 / 停用 / 删除用）。"""
+    result = await db.execute(select(UserSession).where(UserSession.user_id == user_id))
+    sessions = result.scalars().all()
+    for session in sessions:
+        await db.delete(session)
+    return len(sessions)

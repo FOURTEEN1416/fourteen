@@ -20,8 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import verify_token
-from api.database import WechatBinding, get_db
+from api.auth_jwt import AuthPrincipal, get_optional_principal, verify_token
+from api.database import UserActiveCharacter, WechatBinding, get_db
 from api.deps import deps
 from api.path_security import sanitize_id
 from my_character.persona_card import PersonaCardV3
@@ -38,6 +38,83 @@ logger = logging.getLogger("api.character_routes")
 router = APIRouter(prefix="/api", tags=["character"])
 
 CHARACTERS_DIR = project_path("config", "characters")
+
+
+# ── 资源归属（W1 唯一 owner）─────────────────────────────
+#
+# 角色卡（`config/characters/*.json`）同时承担两种语义，必须分清：
+# 1. **私人实例**：`user_id` 是某个注册用户 id → 只有本人与管理员可见/可改/可删。
+# 2. **公共模板 / 无法判归属的存量卡**：`user_id` 为空、`default`、`system` 或任何
+#    不是注册用户 id 的值 → 归平台（管理员）管理；**不得**在首次访问时被自动
+#    认领给访问者（旧实现把全局 `is_active` 当个人选择，首个访问者即「继承」）。
+#
+# 机器侧纯 API Key（无 Bearer，部署脚本 / E2E / 测试）是独立的服务面契约：
+# 不做归属收窄，行为与改造前一致——归属校验只在存在 Bearer 主体时生效。
+
+_UNOWNED_MARKERS = {"", "default", "system"}
+
+
+def card_owner_key(card: dict[str, Any]) -> str:
+    """卡片的归属键；无主（公共模板 / 存量卡）返回空串。"""
+    owner = str(card.get("user_id") or "").strip()
+    return "" if owner in _UNOWNED_MARKERS else owner
+
+
+def card_access_allowed(card: dict[str, Any], principal: AuthPrincipal | None) -> bool:
+    """主体是否有权读写该卡片。principal 为 None = 机器面（不限制）。"""
+    if principal is None:
+        return True
+    if principal.role == "admin":
+        return True
+    owner = card_owner_key(card)
+    return bool(owner) and owner == str(principal.user_id)
+
+
+async def require_character_access(
+    character_id: str,
+    principal: AuthPrincipal | None = Security(get_optional_principal),
+) -> dict[str, Any]:
+    """FastAPI 依赖：角色资源归属校验（所有角色子资源路由共用）。
+
+    - 机器面（无 Bearer）：不干预，交由各路由维持既有行为。
+    - 有主体但无权：一律 404（不区分「不存在」与「无权限」，防状态码枚举他人卡）。
+    """
+    if principal is None:
+        return {}
+    data = _load_character(character_id)
+    if data is None or not card_access_allowed(data, principal):
+        raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
+    return data
+
+
+def _owner_for_write(principal: AuthPrincipal | None, declared: str | None) -> str:
+    """写侧归属：普通用户的卡片归属**只能**由认证主体导出，客户端自封无效。"""
+    if principal is not None and principal.role != "admin":
+        return str(principal.user_id)
+    declared = str(declared or "").strip()
+    return declared or "default"
+
+
+async def _personal_active_character_id(db: AsyncSession, user_id: int) -> str | None:
+    """该用户当前激活的角色卡 id（D2：个人选择按用户持有）。"""
+    result = await db.execute(
+        select(UserActiveCharacter).where(UserActiveCharacter.user_id == user_id)
+    )
+    row = result.scalar_one_or_none()
+    return row.character_id if row else None
+
+
+def _overlay_personal_activation(
+    characters: list[dict[str, Any]], active_id: str | None
+) -> list[dict[str, Any]]:
+    """把「个人激活态」叠加到卡片视角上（不写回卡文件）。
+
+    卡文件里的 `is_active` 不是某人的选择，故对真实用户一律以本表为准：
+    没有个人记录就是「都没有激活」，由前端按首张卡兜底，避免多张卡同时点亮。
+    """
+    for card in characters:
+        card["is_active"] = bool(active_id) and str(card.get("id")) == active_id
+    return characters
 
 
 # ── 请求/响应模型 ────────────────────────────────────────
@@ -294,9 +371,16 @@ async def list_characters(
     user_id: str | None = Query(default=None),
     search: str | None = Query(default=None),
     _auth: bool = Security(verify_api_key_dep),
+    principal: AuthPrincipal | None = Security(get_optional_principal),
+    db: AsyncSession = Depends(get_db),
 ):
-    """列出所有角色，支持 user_id 过滤和 search 搜索"""
-    characters = _list_all_characters()
+    """列出角色：私人卡只对本人（与管理员）可见，无主存量卡只对平台面可见。
+
+    客户端传 `user_id` 只能**收窄**已授权的范围，不能借此越权读取他人卡片。
+    """
+    characters = [
+        c for c in _list_all_characters() if card_access_allowed(c, principal)
+    ]
     if user_id:
         characters = [c for c in characters if c.get("user_id") == user_id]
     if search:
@@ -307,6 +391,9 @@ async def list_characters(
             if search_lower in c.get("name", "").lower()
             or search_lower in c.get("description", "").lower()
         ]
+    if principal is not None:
+        active_id = await _personal_active_character_id(db, principal.user_id)
+        characters = _overlay_personal_activation(characters, active_id)
     return {"characters": characters, "total": len(characters)}
 
 
@@ -314,8 +401,9 @@ async def list_characters(
 async def create_character(
     req: UnifiedCharacterCreate,
     _auth: bool = Security(verify_api_key_dep),
+    principal: AuthPrincipal | None = Security(get_optional_principal),
 ):
-    """创建新角色"""
+    """创建新角色（归属由认证主体导出，客户端 user_id 不能自封）"""
     if not req.name.strip():
         raise HTTPException(status_code=400, detail="角色名称不能为空")
 
@@ -326,12 +414,12 @@ async def create_character(
         speaking_style=req.speaking_style,
         catchphrases=req.catchphrases,
         core_anchors=req.core_anchors,
-        user_id=req.user_id,
+        user_id=_owner_for_write(principal, req.user_id),
     )
     if not _save_character(data["id"], data):
         raise HTTPException(status_code=500, detail="保存角色失败")
     _schedule_character_crawl(data["id"], data["name"], data)
-    logger.info("角色已创建: %s (%s)", data["name"], data["id"])
+    logger.info("角色已创建: %s (%s) owner=%s", data["name"], data["id"], data["user_id"])
     return {"id": data["id"], "name": data["name"], "status": "created"}
 
 
@@ -339,9 +427,12 @@ async def create_character(
 async def get_character(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    principal: AuthPrincipal | None = Security(get_optional_principal),
+    _owned: dict[str, Any] = Depends(require_character_access),
+    db: AsyncSession = Depends(get_db),
 ):
     """获取角色详情（含音色配置）"""
-    data = _load_character(character_id)
+    data = _owned or _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 
@@ -355,6 +446,11 @@ async def get_character(
         if "core_anchors" not in data:
             data["core_anchors"] = []
         _save_character(character_id, data)
+
+    # 个人激活态（不读卡文件的全局 is_active）
+    if principal is not None:
+        active_id = await _personal_active_character_id(db, principal.user_id)
+        _overlay_personal_activation([data], active_id)
 
     # 附加音色配置（如果存在）
     try:
@@ -400,9 +496,10 @@ async def update_character(
     character_id: str,
     req: UnifiedCharacterUpdate,
     _auth: bool = Security(verify_api_key_dep),
+    _owned: dict[str, Any] = Depends(require_character_access),
 ):
     """更新角色（合并更新，只传要改的字段）"""
-    data = _load_character(character_id)
+    data = _owned or _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 
@@ -446,9 +543,10 @@ async def update_character(
 async def delete_character(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    _owned: dict[str, Any] = Depends(require_character_access),
 ):
     """删除角色"""
-    data = _load_character(character_id)
+    data = _owned or _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
     if not _delete_character_file(character_id):
@@ -486,32 +584,63 @@ async def activate_character(
     character_id: str,
     request: Request,
     _auth: bool = Security(verify_api_key_dep),
+    principal: AuthPrincipal | None = Security(get_optional_principal),
+    _owned: dict[str, Any] = Depends(require_character_access),
     db: AsyncSession = Depends(get_db),
 ):
-    """激活角色（设为当前使用的角色）"""
-    data = _load_character(character_id)
+    """激活角色（设为**当前用户**的当前角色）。
+
+    D2：激活是**个人选择**——写入 `user_active_characters`，不改卡片文件里的全局
+    `is_active`。旧实现把个人选择写进共享卡文件：A 激活会把 B 的选择清掉（两用户
+    互相覆盖），而卡文件同时还要承担「公共模板」语义，两套语义互相污染。
+
+    机器面（无 Bearer，部署脚本 / 测试 / 无登录控制台）没有用户身份可挂靠，
+    沿用卡片级系统默认标记。
+    """
+    data = _owned or _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 
-    # 将所有其他角色设为非激活
-    # ⚠️ P1-审查 item37：必须用 normalize=False 的**原始卡**做写回——
-    # _list_all_characters() 默认逐张跑 normalize_character_card（含文本清洗），
-    # 把派生结果存回磁盘会用有损版本覆盖真源（历次英文卡「by 子串被抠」事故根因）。
-    for c in _list_all_characters(normalize=False):
-        if c.get("id") != character_id and c.get("is_active"):
-            c["is_active"] = False
-            _save_character(c["id"], c)
+    if principal is not None:
+        result = await db.execute(
+            select(UserActiveCharacter).where(
+                UserActiveCharacter.user_id == principal.user_id
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            db.add(
+                UserActiveCharacter(
+                    user_id=principal.user_id, character_id=character_id
+                )
+            )
+        else:
+            row.character_id = character_id
+        await db.commit()
+        active_owner_id = str(principal.user_id)
+        logger.info(
+            "用户 %s 激活角色 %s（个人选择，未改动卡片全局 is_active）",
+            principal.user_id, character_id,
+        )
+    else:
+        # ⚠️ P1-审查 item37：必须用 normalize=False 的**原始卡**做写回——
+        # _list_all_characters() 默认逐张跑 normalize_character_card（含文本清洗），
+        # 把派生结果存回磁盘会用有损版本覆盖真源（历次英文卡「by 子串被抠」事故根因）。
+        for c in _list_all_characters(normalize=False):
+            if c.get("id") != character_id and c.get("is_active"):
+                c["is_active"] = False
+                _save_character(c["id"], c)
 
-    data["is_active"] = True
-    data["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
-    if not _save_character(character_id, data):
-        raise HTTPException(status_code=500, detail="激活角色失败")
+        data["is_active"] = True
+        data["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
+        if not _save_character(character_id, data):
+            raise HTTPException(status_code=500, detail="激活角色失败")
+        active_owner_id = str(data.get("user_id") or "default")
 
     # 同步到女友管理器
     if deps.gf and hasattr(deps.gf, "set_user_character"):
-        user_id = data.get("user_id", "default")
-        deps.gf.set_user_character(user_id, character_id)
-        logger.info("角色激活已同步到女友管理器: %s → %s", user_id, character_id)
+        deps.gf.set_user_character(active_owner_id, character_id)
+        logger.info("角色激活已同步到女友管理器: %s → %s", active_owner_id, character_id)
 
     # 换绑后知识索引失效重建（旧索引可能停留在该卡早期版本的贫乏内容）
     _invalidate_knowledge_index(character_id)
@@ -520,7 +649,8 @@ async def activate_character(
     # 微信回复人设的真源是 wechat_bindings.character_card_id（UserManager 读取），
     # 旧实现只改卡文件 is_active，与微信链路断裂。此处带 JWT 时同步绑定并
     # 通过 upsert_binding 刷新运行中进程的内存缓存（无需重启）。
-    web_user_id = await _optional_user_id(request)
+    # W1：用户身份只从认证主体取（不再独立解 token）；机器面保持原有容忍语义。
+    web_user_id = principal.user_id if principal is not None else await _optional_user_id(request)
     if web_user_id is not None:
         result = await db.execute(
             select(WechatBinding).where(WechatBinding.user_id == web_user_id)
@@ -549,9 +679,10 @@ async def activate_character(
 async def get_character_persona(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    _owned: dict[str, Any] = Depends(require_character_access),
 ):
     """获取角色的人设详情"""
-    data = _load_character(character_id)
+    data = _owned or _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 
@@ -580,9 +711,10 @@ async def update_character_persona(
     character_id: str,
     req: PersonaUpdate,
     _auth: bool = Security(verify_api_key_dep),
+    _owned: dict[str, Any] = Depends(require_character_access),
 ):
     """更新角色人设（部分更新 personality / speaking_style / catchphrases / core_anchors）"""
-    data = _load_character(character_id)
+    data = _owned or _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 
@@ -618,6 +750,7 @@ async def update_character_persona(
 async def import_character(
     file: UploadFile = File(...),  # noqa: B008
     _auth: bool = Security(verify_api_key_dep),
+    principal: AuthPrincipal | None = Security(get_optional_principal),
 ):
     """导入角色卡（JSON 文件 或 SillyTavern PNG 角色卡）
 
@@ -674,7 +807,7 @@ async def import_character(
         "personality": normalized.get("personality", {}),
         "speaking_style": normalized.get("speaking_style", {}),
         "core_anchors": normalized.get("core_anchors", []),
-        "user_id": normalized.get("user_id", "default"),
+        "user_id": _owner_for_write(principal, normalized.get("user_id")),
         "is_active": False,
         "created_at": now,
         "updated_at": now,
@@ -694,6 +827,7 @@ async def export_character(
     character_id: str,
     format: str = Query("json", pattern="^(json|png)$", description="导出格式: json 或 png"),
     _auth: bool = Security(verify_api_key_dep),
+    _owned: dict[str, Any] = Depends(require_character_access),
 ):
     """导出角色卡
 
@@ -701,7 +835,7 @@ async def export_character(
       - json (默认): chara_card_v2 JSON 文件
       - png: SillyTavern 标准 PNG 角色卡（chara tEXt chunk，base64 编码 JSON）
     """
-    data = _load_character(character_id)
+    data = _owned or _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 
@@ -877,6 +1011,7 @@ async def list_memory_facts(
     category: str | None = Query(default=None),
     limit: int = Query(default=500, le=500),
     _auth: bool = Security(verify_api_key_dep),
+    _owned: dict[str, Any] = Depends(require_character_access),
 ):
     """回读唯一真源 `user_facts`（W4 缺陷 E，2026-09-27）。
 
@@ -915,6 +1050,7 @@ async def add_memory_fact(
     character_id: str,
     req: MemoryFactCreate,
     _auth: bool = Security(verify_api_key_dep),
+    _owned: dict[str, Any] = Depends(require_character_access),
 ):
     """410：见 `_FACT_SURFACE_GONE`。410 先于任何写动作，不留半写态。"""
     raise HTTPException(status_code=410, detail=_FACT_SURFACE_GONE)
@@ -925,6 +1061,7 @@ async def delete_memory_fact(
     character_id: str,
     fact_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    _owned: dict[str, Any] = Depends(require_character_access),
 ):
     """410：旧「删除」只动 JSON，真库 user_facts 与其向量派生原样复现。"""
     raise HTTPException(status_code=410, detail=_FACT_SURFACE_GONE)
@@ -934,6 +1071,7 @@ async def delete_memory_fact(
 async def clear_memory(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    _owned: dict[str, Any] = Depends(require_character_access),
 ):
     """410：作废端点不得顺手销毁遗留文件；真记忆的遗忘走 forget_facts。"""
     raise HTTPException(status_code=410, detail=_FACT_SURFACE_GONE)
@@ -1013,6 +1151,7 @@ async def preview_character_from_description(
 async def generate_character_from_description(
     req: CharacterGenerateRequest,
     _auth: bool = Security(verify_api_key_dep),
+    principal: AuthPrincipal | None = Security(get_optional_principal),
 ):
     """从文本描述用 AI 生成角色人设卡并自动创建"""
     persona_data = await _generate_persona_preview(req)
@@ -1025,7 +1164,7 @@ async def generate_character_from_description(
         speaking_style=persona_data.get("speaking_style", {}),
         catchphrases=catchphrases,
         core_anchors=persona_data.get("core_anchors", []),
-        user_id=req.user_id,
+        user_id=_owner_for_write(principal, req.user_id),
     )
     if not _save_character(data["id"], data):
         raise HTTPException(status_code=500, detail="保存角色失败")
@@ -1049,9 +1188,10 @@ async def export_chat(
     format: str = Query(default="json", pattern=r"^(json|csv)$"),
     limit: int = Query(default=200, ge=1, le=1000),
     _auth: bool = Security(verify_api_key_dep),
+    _owned: dict[str, Any] = Depends(require_character_access),
 ):
     """导出角色对话记录（JSON 或 CSV）"""
-    data = _load_character(character_id)
+    data = _owned or _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 
@@ -1104,6 +1244,7 @@ async def list_achievements(
     character_id: str,
     db: AsyncSession = Depends(get_db),
     _auth: bool = Security(verify_api_key_dep),
+    _owned: dict[str, Any] = Depends(require_character_access),
 ):
     """角色成就清单（读取时幂等重算，解锁时间保持首次达标）。"""
     from api.achievement_engine import recalculate_achievements
@@ -1118,6 +1259,7 @@ async def recalculate_achievements_endpoint(
     character_id: str,
     db: AsyncSession = Depends(get_db),
     _auth: bool = Security(verify_api_key_dep),
+    _owned: dict[str, Any] = Depends(require_character_access),
 ):
     """显式触发成就重算（幂等；与 GET 同语义，供维护任务/前端手动刷新）。"""
     from api.achievement_engine import recalculate_achievements

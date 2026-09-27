@@ -15,8 +15,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.auth_jwt import hash_password, require_role
-from api.database import User, WechatBinding, WechatChannelSession, get_db
+from api.auth_jwt import bump_token_version, hash_password, require_role
+from api.database import (
+    User,
+    UserActiveCharacter,
+    WechatBinding,
+    WechatChannelSession,
+    get_db,
+)
 from api.password_policy import PasswordStr, ensure_password_strength
 
 logger = logging.getLogger("admin_routes")
@@ -196,14 +202,22 @@ async def update_user(
     if req.display_name is not None:
         user.display_name = req.display_name
     if req.role is not None:
+        # 降权 / 升权：**不**撤销版本——角色每请求取库内现值，权限当场收窄/放开，
+        # 用户无需重新登录（撤销版本只留给改密 / 重置 / 停用 / 删除）。
         user.role = req.role
     if req.is_active is not None:
+        was_active = bool(user.is_active)
         user.is_active = req.is_active
+        if was_active and not req.is_active:
+            # 停用即撤销：撤销版本自增 → 旧 access/refresh 立即失效，
+            # 重新启用后旧 token 也不会「复活」。
+            bump_token_version(user)
 
     await db.commit()
     await db.refresh(user)
 
-    logger.info("管理员更新用户: %s (id=%d)", user.email, user.id)
+    logger.info("管理员更新用户: %s (id=%d, role=%s, active=%s)",
+                user.email, user.id, user.role, user.is_active)
     return user.to_dict()
 
 
@@ -231,6 +245,10 @@ async def delete_user(
     email = user.email
     await db.execute(delete(WechatBinding).where(WechatBinding.user_id == user_id))
     await db.execute(delete(WechatChannelSession).where(WechatChannelSession.user_id == user_id))
+    # 个人激活角色选择同样随用户出库（FK ondelete 在 SQLite 默认不生效，显式清）
+    await db.execute(
+        delete(UserActiveCharacter).where(UserActiveCharacter.user_id == user_id)
+    )
     await db.delete(user)
     await db.commit()
 

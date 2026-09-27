@@ -14,11 +14,12 @@ import hashlib
 import logging
 import os
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import bcrypt as _bcrypt
-from fastapi import Depends, HTTPException, Security
+from fastapi import Depends, HTTPException, Request, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import ExpiredSignatureError, JWTError, jwt
 from sqlalchemy import select
@@ -161,12 +162,147 @@ def hash_refresh_token(token: str) -> str:
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
+# ═══════════════════════════════════════════════════════
+# 唯一认证主体（W1，2026-09-27）
+# ═══════════════════════════════════════════════════════
+#
+# 旧实现把「token 能验签」当成「账号可用」：任何一处只调 verify_token 的入口都会
+# 放行**已停用 / 已改密 / 已删除**账号的旧 token，且 scope 直接读 token 里的 role
+# 声明（降权后仍按旧 role 全量读）。此处收口为单一主体：
+#
+#   存在性 + is_active + 当前 role（DB 现值）+ 撤销版本（token `tv` ↔ users.token_version）
+#
+# 一次校验后交给路由；路由**不得**再独立解码 token 取 role。
+
+_TV_CLAIM = "tv"
+
+
+def token_claims(user: User) -> dict[str, Any]:
+    """签发 token 的声明唯一 owner（不含 role：角色一律以库内现值为准）。"""
+    return {
+        "sub": str(user.id),
+        "email": user.email,
+        _TV_CLAIM: int(user.token_version or 0),
+    }
+
+
+def bump_token_version(user: User) -> int:
+    """撤销该用户**已签发**的全部 access/refresh（自增撤销版本）。
+
+    调用方负责 commit。语义（W1 明确）：
+    - 改密 / 管理员重置 / 停用 / 删除 → 自增（旧 token 立即失效）
+    - 降权 / 升权 → **不**自增（角色每请求读库内现值，即时收窄，无需重登）
+    """
+    user.token_version = int(user.token_version or 0) + 1
+    return user.token_version
+
+
+def _assert_token_version(payload: dict[str, Any], user: User) -> None:
+    if int(payload.get(_TV_CLAIM, 0) or 0) != int(user.token_version or 0):
+        raise HTTPException(
+            status_code=401,
+            detail="Token has been revoked (credentials changed after it was issued)",
+        )
+
+
+async def _load_enabled_user(db: AsyncSession, user_id: int) -> User:
+    """账号可用性校验：不存在 → 404，已停用 → 401。
+
+    `is_active` 条件写在 SQL 里（而非取回对象后再判），停用账号直接查不出行。
+    """
+    result = await db.execute(
+        select(User).where(User.id == user_id, User.is_active.is_(True))
+    )
+    user = result.scalar_one_or_none()
+    if user is not None:
+        return user
+    exists = await db.execute(select(User.id).where(User.id == user_id))
+    if exists.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    raise HTTPException(status_code=401, detail="Account is disabled")
+
+
+@dataclass(frozen=True)
+class AuthPrincipal:
+    """唯一认证主体 — 路由只从这里取身份与角色。"""
+
+    user_id: int
+    role: str
+    token_version: int
+    user: User
+
+
+async def _resolve_principal(
+    credentials: HTTPAuthorizationCredentials | None,
+    db: AsyncSession,
+) -> AuthPrincipal | None:
+    if credentials is None:
+        return None
+    payload = verify_token(credentials.credentials, expected_type="access")
+    sub = payload.get("sub")
+    if sub is None:
+        raise HTTPException(status_code=401, detail="Token missing 'sub' claim")
+    user_id = int(sub)
+    user = await _load_enabled_user(db, user_id)
+    _assert_token_version(payload, user)
+    return AuthPrincipal(
+        user_id=user_id,
+        role=user.role,
+        token_version=int(user.token_version or 0),
+        user=user,
+    )
+
+
+async def resolve_principal_from_request(
+    request: Request,
+    db: AsyncSession,
+) -> AuthPrincipal | None:
+    """从原始请求解析唯一主体（供共享依赖在非 DI 上下文复用，单一提取路径）。
+
+    无 Bearer → None（机器 / 匿名面）；有 Bearer 则必须合法（否则 401）。
+    """
+    auth = str(request.headers.get("Authorization") or "")
+    credentials: HTTPAuthorizationCredentials | None = None
+    if auth.startswith("Bearer "):
+        token = auth[len("Bearer "):].strip()
+        if token:
+            credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    return await _resolve_principal(credentials, db)
+
+
+async def get_auth_principal(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> AuthPrincipal:
+    """必备主体：无 Bearer / token 无效 / 账号停用 / 版本过期 → 401。"""
+    principal = await resolve_principal_from_request(request, db)
+    if principal is None:
+        raise HTTPException(status_code=401, detail="Missing Authorization header (Bearer token)")
+    request.state.auth_principal = principal
+    return principal
+
+
+async def get_optional_principal(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> AuthPrincipal | None:
+    """可选主体：无 Bearer → None（机器 / 匿名面，保持既有契约）。
+
+    有 Bearer 则**必须**是合法主体（无效 / 停用 / 版本过期一律 401）——不允许
+    无效 token 借「可选」通道退化成机器全权限。
+    """
+    principal = await resolve_principal_from_request(request, db)
+    request.state.auth_principal = principal
+    return principal
+
 
 async def get_current_user_id(
     credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
+    db: AsyncSession = Depends(get_db),
 ) -> int:
-    """FastAPI Security 依赖：从 access token 中提取当前用户 ID
+    """FastAPI Security 依赖：从 access token 中提取当前用户 ID。
 
+    统一校验：存在性（404）+ is_active（401）+ 撤销版本（401）。
     用法：
         @router.get("/me")
         async def me(user_id: int = Security(get_current_user_id)):
@@ -175,26 +311,33 @@ async def get_current_user_id(
     if credentials is None:
         raise HTTPException(status_code=401, detail="Missing Authorization header (Bearer token)")
     payload = verify_token(credentials.credentials, expected_type="access")
-    user_id = payload.get("sub")
-    if user_id is None:
+    sub = payload.get("sub")
+    if sub is None:
         raise HTTPException(status_code=401, detail="Token missing 'sub' claim")
-    return int(user_id)
+    user_id = int(sub)
+    _assert_token_version(payload, await _load_enabled_user(db, user_id))
+    return user_id
 
 
 async def get_current_user(
     user_id: int = Security(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """FastAPI Security 依赖：返回当前登录用户对象（含 role 等元数据）。"""
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
+    """FastAPI Security 依赖：返回当前登录用户对象（含 role 等元数据）。
+
+    身份与撤销版本已在 `get_current_user_id` 一次校验（它是本依赖的 uid 来源）；
+    此处只按 uid 取行并确认账号仍可用。角色以**库内现值**为准（token 内不再
+    携带 role 声明，旧 token 里的 role 是陈旧副本）。
+    """
+    return await _load_enabled_user(db, user_id)
 
 
 def require_role(required_role: str):
     """Factory: 返回一个 FastAPI 依赖，校验当前用户是否拥有指定角色。
+
+    角色取自数据库当前值——降权后旧 token 立即失去管理端权限（无需等 token 过期）。
+    uid 来源仍是 `get_current_user_id`（其内部完成存在性 / is_active / 撤销版本
+    校验），因此本依赖**不**再独立解码 token。
 
     用法:
         @router.get("/admin/users")
@@ -208,10 +351,7 @@ def require_role(required_role: str):
         user_id: int = Security(get_current_user_id),
         db: AsyncSession = Depends(get_db),
     ) -> tuple[int, User]:
-        result = await db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+        user = await _load_enabled_user(db, user_id)
         if user.role != required_role:
             raise HTTPException(
                 status_code=403,

@@ -12,11 +12,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Security
+from fastapi import APIRouter, Depends, HTTPException, Security
 from pydantic import BaseModel
 
 from api.auth import verify_api_key_dep
 from api.path_security import sanitize_id
+from api.routers.character_routes import require_character_access
 from shisi.storyline.config import StorylineConfig
 from shisi.storyline.detector import StorylineDetector
 from shisi.storyline.engine import get_storyline_engine
@@ -90,6 +91,9 @@ class StorylineConfigRequest(BaseModel):
 async def get_storyline_config(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """获取角色剧情线配置。"""
     data = _load_character(character_id)
@@ -119,6 +123,9 @@ async def update_storyline_config(
     character_id: str,
     req: StorylineConfigRequest,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """更新角色剧情线配置（落盘 + 同步引擎；是否影响对话见 `CHAT_AFFECTING`）。"""
     data = _load_character(character_id)
@@ -194,6 +201,9 @@ async def update_storyline_config(
 async def delete_storyline_config(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """删除角色剧情线配置。"""
     data = _load_character(character_id)
@@ -215,6 +225,9 @@ async def delete_storyline_config(
 async def get_storyline_progress(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """获取角色剧情线进度。"""
     engine = get_storyline_engine()
@@ -226,6 +239,9 @@ async def get_storyline_progress(
 async def detect_storyline(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """自动检测角色人设是否适合开启剧情线。"""
     data = _load_character(character_id)
@@ -253,6 +269,9 @@ async def detect_storyline(
 async def reset_storyline(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """重置角色剧情线进度（从头开始）。"""
     engine = get_storyline_engine()

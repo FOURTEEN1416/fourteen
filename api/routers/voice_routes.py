@@ -12,12 +12,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Security
+from fastapi import APIRouter, Depends, HTTPException, Security
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 from api.auth import verify_api_key_dep
 from api.deps import deps
+from api.routers.character_routes import require_character_access
 from voice.mimo_tts_provider import MiMoTTSProvider
 from voice.voice_catalog import get_voice_catalog, presets
 
@@ -118,6 +119,9 @@ _MIMO_VOICES = [
 async def get_character_voice(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """获取角色音色配置"""
     voice_mgr = deps.get_character_voice_manager()
@@ -132,6 +136,9 @@ async def bind_character_voice(
     character_id: str,
     req: VoiceBindRequest,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """绑定角色音色"""
     _validate_contract(req.engine, req.mimo_model, req.voice_id)
@@ -158,6 +165,9 @@ async def update_character_voice(
     character_id: str,
     req: VoiceUpdateRequest,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """更新角色音色配置（部分更新）"""
     _validate_contract(
@@ -204,6 +214,9 @@ async def update_character_voice(
 async def unbind_character_voice(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """解绑角色音色"""
     voice_mgr = deps.get_character_voice_manager()
@@ -243,6 +256,9 @@ async def test_character_voice(
     character_id: str,
     req: VoiceTestRequest,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """按角色音色契约试听（不可变快照合成；MIME 按实际格式返回）"""
     voice_mgr = deps.get_character_voice_manager()

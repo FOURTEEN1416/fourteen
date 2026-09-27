@@ -8,11 +8,12 @@ import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, Security, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Security, UploadFile
 from pydantic import BaseModel, Field
 
 from api.auth import verify_api_key_dep
 from api.path_security import sanitize_id
+from api.routers.character_routes import require_character_access
 from shisi.character.character_card_v2 import CharaCardV2Parser
 from shisi.character.models import CharaCardV2
 from shisi.knowledge.character_knowledge_service import (
@@ -84,6 +85,9 @@ def _ensure_full_index(character_id: str, raw: dict[str, Any]) -> None:
 async def get_knowledge_stats(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """获取角色知识库统计。"""
     raw = _load_character_data(character_id)
@@ -122,6 +126,9 @@ async def search_knowledge(
     character_id: str,
     req: KnowledgeSearchRequest,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """搜索角色知识库。"""
     raw = _load_character_data(character_id)
@@ -156,6 +163,9 @@ async def upload_knowledge_document(
     character_id: str,
     file: UploadFile = File(...),  # noqa: B008
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """上传文档到角色知识库（文本文件，自动分块索引）"""
     raw = _load_character_data(character_id)
@@ -219,6 +229,9 @@ async def delete_knowledge_document(
     character_id: str,
     doc_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """删除角色知识库中的文档（W5：按来源粒度 ``doc:{doc_id}`` 从源存储移除）"""
     service = get_knowledge_service()
@@ -242,6 +255,9 @@ async def collect_knowledge_vault(
     character_id: str,
     req: VaultCollectRequest = VaultCollectRequest(),  # noqa: B008
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """触发知识宝库收集：从角色卡提取 PersonaFeatures → 知识块 → BM25 索引。"""
     card = _load_character_card(character_id)
@@ -273,6 +289,9 @@ async def collect_knowledge_vault(
 async def get_vault_features(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """查看角色 PersonaFeatures 提取结果（调试用）。"""
     card = _load_character_card(character_id)
@@ -309,6 +328,9 @@ async def crawl_persona_knowledge(
     character_id: str,
     req: CrawlPersonaRequest,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """从网络抓取人物资料并写入角色知识索引。"""
     card = _load_character_card(character_id)
@@ -359,6 +381,9 @@ async def enrich_character_persona(
     character_id: str,
     req: EnrichRequest,
     _auth: bool = Security(verify_api_key_dep),
+    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
+    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
+    _owned: dict = Depends(require_character_access),
 ):
     """火爬虫 + AgentReach 人设增强：抓取多源网络素材 → 处理为知识块 → 写入角色知识库。
 
