@@ -144,7 +144,11 @@ multimodal:
                                         #   direct:   只走多模态直传（失败则退占位文案）
                                         #   describe: 只走描述注入（复用 VisionHandler）
                                         #   off:      关闭（最快回滚，无需改代码）
-    vision_model: ""                    # 视觉模型名；留空时 auto 自动降级为 describe
+    vision_model: "agnes-3.0-flash"     # 视觉模型名；留空时 auto 自动降级为 describe
+                                        # 2026-09-27 默默确认 Agnes 具备视觉能力：填链首
+                                        # agnes-3.0-flash（即直传的实际服务模型），auto 模式
+                                        # 升级为多模态直传；agnes 超时/熔断时附件随链降级到
+                                        # zhipu（glm-4.5-flash 对图片件支持未验，最坏回占位文案）
     max_bytes: 5242880                  # 超过该大小（默认 5MB）直接降级
     timeout: 20.0                       # 视觉调用超时（秒）
 
