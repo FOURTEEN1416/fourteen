@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-09-27 — W9 收尾窗 · 角色删除在制测试接管补全 + delete_character 回执计数 await 优先级缺陷根治（未 push 未部署）
+
+- **任务**：接管 W9 实施窗遗留的未跟踪在制 `tests/test_w9_character_delete.py`（原状：4 处 ruff 错——`:67` F821 未定义名 `tmp`、`:10/:11/:97` F401 tempfile/Path/nullcontext——外加 `if False` 死块与未用 `_DBProxy` 脚手架；用户确认原窗已停止后接管）。
+- **补全（保持原测试意图，不为变绿删断言）**：修 4 处 ruff 错、清死脚手架、保留全部真实断言；按文件 docstring 钉住的意图补齐断言面——`receipt["vector_docs"]`（沙箱 chroma 预置 1 条 character_id 向量）、`count_owner_data` 残留清零、知识源 `svc.forget` 调用、人设缓存失效、第二例补真实 delete 调用 + binding/peer_pref/active 三表正向断言 `== "default"` + `get_active_character_id()` 回落 default（不残留死卡名）。全部外部面沙箱化：chroma 实例化到 tmp_path 并换绑 `VectorMemory` 类入口（其默认 `./data/chroma_db` 相对 CWD 会碰真实 data/）、知识服务替身、音色路径收紧 per-test（原文件 patch 的 `_CONFIG_PATH` 是不存在的属性名 = 无效 no-op，改 `_DEFAULT_CONFIG_PATH`）。
+- **红测实锤（W9 域缺陷，先红后修）**：`api/routers/character_routes.py:576/581/586/591` 四行回执计数写法 `int(await db.execute(...).rowcount or 0)` —— Python 语法属性访问先于 `await` 求值，`.rowcount` 取在**未 await 的协程对象**上 → `AttributeError: 'coroutine' object has no attribute 'rowcount'`（独立最小复现实证同型必抛；两用例红于 `:580`）。即 abcde64 以来 `DELETE /api/characters/{id}` 必然 500——唯一覆盖该链路的正是这份没写完的测试。修：四行包括号 `(await db.execute(...)).rowcount`。同模式全仓扫描 0 第二处（其余 `await db.execute(...)` 均为 `result = await` 正确形态）。
+- **验证**：本文件 2 passed（红→绿）；ruff 0.16.8 全仓 All checks passed；W9 三件套（account_lifecycle + consent_gate_export + maintenance_scripts）19 passed 零回归；collect-only **2560 / 0 收集错误**。
+- **提交/并行**：`da63fcb`（测试）+ `6558064`（修复），显式路径 add、索引单独判读、无 pathspec。会话中途他窗向 main 插入 `bbd9bed`（测试契约收口，白名单零交集，线性叠加无冲突）；工作树另有 W12 在制 6 文件未卷入。**未 push 未部署**。
+
 ## 2026-09-27 — 测试契约收口窗 · 三处跨窗测试债一次清完（未 push 未部署）
 
 - **任务**：全量分块审计定位的 3 处确定性失败逐一收口，白名单三实现/测试文件 + LOG/BOARD。

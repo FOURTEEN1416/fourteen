@@ -709,3 +709,10 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **W9 独占写入**（收编前勿动）：`api/lifecycle.py`（新）、`utils/deletion_guard.py`（新）、`api/consent.py`、`api/routers/chat_routes.py`（仅门禁行）、`api/websocket_server.py`（仅 chat 分支门禁）、`user_scheduler.py`（仅入站门禁）、`proactive/scheduler.py`（仅 _deliver 门禁 + purge_throttle_for）、`proactive/reminder_delivery.py`（仅 _deliver 门禁）、`shisi/memory/legacy/structured_memory.py`（purge/count/verify/守卫）、`shisi/memory/legacy/vector_memory.py`（purge/count_owner_data）、`shisi/agent_plane/event_ledger.py`（purge/count_owner_sessions）、`proactive/ase_hub.py`（forget/purge_user_states + `_forget_index` 返回值 bug 修复）、`utils/affinity_state.py`（purge_owner/count_owner）、`wechat_direct/channel_paths.py`（remove_user_sessions）、`wechat_direct/connector_registry.py`（purge_user）、`scripts/ax_clean_profiles.py`、`deploy/seed.py`、`tests/test_w9_*.py`（三件）。
 - **与 W1 在制品叠加**（不回退、在其版本之上）：`api/database.py`（FK pragma + users.id AUTOINCREMENT 迁移）、`api/routers/admin_routes.py`（delete 接 lifecycle）、`api/routers/auth_routes.py`（撤回/注销/导出端点）、`api/routers/character_routes.py`（delete 接 owner 粒度清理）。
 - 🔴 已发现并行窗覆盖事故一例：`utils/affinity_state.py` 的 W9 补丁曾被在制品写回覆盖（owner_uid 关键字消失），已重放；**各窗写文件前请先读当前盘上版本**。
+
+### 2026-09-27 · W9 收尾窗 · 在制测试接管收尾 + delete_character 缺陷根治（追加区）
+
+- **接管**：`tests/test_w9_character_delete.py`（原 W9 窗未跟踪在制，4 处 ruff 错 + 死脚手架；用户确认原窗停止后接管补全），归属 W9 叠加区同域。提交 `da63fcb`（测试）+ `6558064`（实现修复）。
+- **🔴 缺陷根治（W9 域，红测先行）**：`api/routers/character_routes.py:576-595` 四行回执计数 `int(await db.execute(...).rowcount or 0)` —— Python 属性访问先于 `await` 求值，`.rowcount` 取在**未 await 协程**上 → `AttributeError`，DELETE `/api/characters/{id}` 自 `abcde64` 必然 500（唯一覆盖它的正是这份没写完的测试）。四行包括号修复；同模式全仓扫描 0 第二处。
+- **验证**：新测试 2 passed（红 `character_routes.py:580` → 绿）；ruff 0.16.8 全仓 All checks passed；W9 三件套 19 passed 零回归；collect-only 2560 / 0 收集错误。**未 push 未部署**。
+- **并行登记**：本窗会话期间他窗向 main 插入 `bbd9bed`（测试契约收口，白名单零交集，线性叠加无冲突）；工作树现存 **W12 在制 6 文件**（`CODE_GRAPH.md`/`docs/DECISION_LEDGER.md`/`api/app_factory.py` 修改 + `api/routers/character_template_routes.py`/`config/character_templates.yaml`/`tests/test_w12_character_templates.py` 未跟踪），本窗未触碰、未卷入提交。
