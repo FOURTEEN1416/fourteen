@@ -42,6 +42,17 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-27 · 主控 · 任务包 W12 出具：角色模板面（B+C）——平台无主卡的只读暴露与显式克隆
+
+- **背景**：W1 提交 `94ed63d` 收口角色卡归属后，41 张 `user_id=default` 无主卡对普通用户不可见 → 新用户冷启动「角色列表为空」（产品真空）。用户 2026-09-27 裁决「**采纳 B+C**」。
+- **产物**：`docs/board/TASK_PACKAGE_W12_角色模板面.md`（含端点契约、策展清单格式、验收断言、零撞车白名单）。
+- **主控现场核验补充事实（勿沿用历史口径）**：① 41 张卡为**历史遗留真实角色**（凌白/孙颖莎/李信/米彩/椎名真昼…，含「猪头」等随意命名），**非策展模板**，`is_active=True` 仅 1 张；② `data/presets/` **不存在**（0 预设）→ `GET /api/presets` 为空壳，**不可复用**为模板面；③ 生产库 `data/users.db` 的 `token_version` 列与 `user_active_characters` 表**已存在**（迁移已发生；副本演练复验补齐+幂等通过，真实库 mtime 零变化）。
+- **阶段 1（可立即开工·零冲突·纯后端）**：新增 `api/routers/character_template_routes.py` + `config/character_templates.yaml` + `tests/test_w12_character_templates.py`；`api/app_factory.py` 仅加挂载块（约 6 行）。
+- **阶段 2（挂起）**：注册分发钩子（`auth_routes.py` 属 W9 叠加区）+ 前端接入（`pages/*` 属 W11 在制）→ 两者收编后再排。
+- **零撞车声明**：本包**不修改** `api/routers/character_routes.py`（W9 已声明将改其 delete 归属清理）、W9 独占清单 20 项、W11 在制前端文件。**路由前缀必须独立为 `/api/character-templates`**——写成 `/api/characters/templates` 会被 `/api/characters/{character_id}` 抢先匹配。
+- **待裁决**：`visible_ids` 策展白名单填实（当前留空 = 开发期放行全部无主卡；**生产前必须填实**）。
+- **建窗**：`pwsh scripts/new_window_worktree.ps1 -Name w12`（分支 `wt/w12`）。
+
 ### 2026-09-27 · W4 实施窗（主检出）· D/H/I/J/F/G 落库 `1773970`（未 push 未部署）
 
 - **落库**：工作树中候 owner 的缺陷 D/H/I/J/F/G 实现 + 六份 `test_w4_*` 已显式 add 后提交 **`1773970`**（22 文件，索引单独判读，未卷入他窗 W9/W1 在制）。A/B/C/E 早前已在 `b311b1c`/`4d03be4`/`ee44d08`/`ef9cc9b`。
