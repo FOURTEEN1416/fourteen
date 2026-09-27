@@ -1,13 +1,13 @@
 # 唯一的你·十四 — 新窗口交接（2026-09-26 本地归属重构）
 
-## 当前实施快照（2026-09-27 全仓历遍刷新——优先于下方 09-26 快照）
+## 当前实施快照（2026-09-28 历遍修复批刷新——优先于下方历史快照）
 
-- **三端**：本地 = origin/main（`13cce50`：W1–W12 十一窗批次 + W9 自服务端点接线 + D10–D12 裁决落账 + vision 接线均已 push GitHub）；**服务器仍停 `f85408f`（09-26 上线），落后 62 提交，部署归默默裁决**。
-- **终验口径（09-27）**：后端收集 2565 / 2564 通过 / 1 跳过 / 0 失败（41 卡）+ 前端 vitest 135 / tsc 0 错 + ruff 全仓 0 错；端点 229 APIRoute / 195 唯一路径；徽章 2699。
-- **🔴 GitHub CI 红（push 后未修复，接手先看）**：backend 1 failed = `tests/test_w8_character_expression.py::test_all_shipped_cards_are_lossless_and_idempotent`（卡目录守卫只 skip「目录不存在」，CI 无 gitignored 角色卡 → 目录存在但空 → `assert paths` 红）；frontend E2E 4 failed = `e2e/w11_journey.spec.ts`（CI 种子无 viewer `w11-b@test.local`、角色库 0）。修复归 W8/W11/tests owner，候默默裁决。其余门禁（tsc / vitest 135 / build / adr / ff-*）全绿。
+- **三端一致 @ `ffa6d68`**（2026-09-28）：本地 = GitHub = 服务器 `/opt/ai-girlfriend`；服务器经 bundle 快进 + `remote_deploy` 重启（health/ready 200、NRestarts=0、重启后新日志 0 异常 / 0 Traceback、nginx 零改动、改动 blob 三端 6/6 一致）。
+- **本批修复**（默默令「先完成一二三，然后继续全仓历遍…修复优化」）：① GitHub CI 两红根治 `dceb331`（W8 卡目录守卫缺件即 skip；`e2e_setup.py` 补种 viewer；`anyRoleId` 空库临时卡兜底）→ **三轮 CI 全绿**（`36333194107`/`36333947881`/`36334364744`）；② 生产 P1 `444730a`——`run_api` 把 `client_count`（@property）当方法调用，websocket 出站通道从未消费（app.log 9154 条告警），已修+AST 红测钉死；③ 路由遮蔽 `ffa6d68`——`memory_routes` 通配 `/{character_id}` 抢在静态 `/favorites` 前，收藏列表端点曾不可达；收藏测试写真库收口（历史垃圾行已清）。
+- **终验口径（09-28）**：全量五分块 **2567 收集 / 2566 通过 / 1 跳过 / 0 失败**（487+1 / 421 / 827 / 804 / 27，41 卡）+ 前端 vitest 135 / tsc 0 错 + ruff 0 错；端点 229 APIRoute / 195 唯一路径；徽章 **2701**。**WAL 观察项闭环**：服务器 Linux 复跑 W3 域两文件 54/54（6 例本机 flaky 零复现）。
 - **已裁决待实施**：D10 关系阈值解锁接线 / D11 敏感维度落库+删号级联 / D12 表情包 ZIP 落库 + 生理指标接小说模式（`2e72227`，语境=大赛未晋级转产品完善）。
-- **开放项**：W12 阶段 2（注册钩子+前端）、自服务端点前端接入、`config/character_templates.yaml` `visible_ids` 生产前必须填实、W9 前端面与 D13 存量重新同意策略、W3 域 6 例 WAL flaky 的 Linux/生产复跑。
-- 下方 09-26 快照描述已上线的归属重构批次，仍然有效；其后批次逐条见 `LOG.md` 2026-09-27 各条与 `AGENTS.md` v1.39.x 版本头。
+- **开放项**：W12 阶段 2（注册钩子+前端）、自服务端点前端接入、`config/character_templates.yaml` `visible_ids` 生产前必须填实、W9 前端面与 D13 存量重新同意策略。
+- 下方 09-26/09-27 快照描述已上线的历史批次，仍作背景参考；其后批次逐条见 `LOG.md` 2026-09-27/28 各条与 `AGENTS.md` v1.39.x 版本头。
 
 ## 当前实施快照（优先于下方历史批注）
 

@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-09-28 — 主控 · 历遍修复批：三点裁决执行 + CI 两红根治 + 生产 P1/路由遮蔽两缺陷根治（三端一致 `ffa6d68`）
+
+- **指令链**：默默令「先完成一二三这三个点，然后继续进行全仓历遍，治理文档，更新数据，发现问题，修复优化」。
+- **点① CI 两红根治**（`dceb331`）：W8 卡目录守卫改「`*.json` 为空即 skip」；`scripts/e2e_setup.py` 补种 viewer（w11_journey 契约「由调用方提供」此前无调用方兑现——CI 全新库 viewer 登录必超时的真根因）；`anyRoleId` 空库时 admin 真实建临时卡+cleanup。**本地双场景实跑**：41 卡全量 11/11、空库 4/4（目录换入换出带保底还原，41 卡在位复核）。push 后 **CI 全绿**（run `36333194107`）。
+- **点③ 卸残留 worktree**：`ai-girlfriend-w12` junction（data/、frontend/node_modules）先用 `os.rmdir` 摘除（目标内容零触达、复核完好）→ `git worktree remove`，目录移除、`wt/w12` 分支保留。
+- **🔴 点② 部署前置发现生产新 P1**（全仓历遍的「发现问题」）：服务器 app.log `'int' object is not callable` **每 3s 一条、累计 9154 条**——`run_api.py:149` 把 `WebSocketServer.client_count`（`api/websocket_server.py:460` **@property**，返回 `len(_clients)`）当方法调用，TypeError 被 except 吞成 WARNING → **websocket 出站通道从未消费过**（W3 批 `b59eb8b` 上线即带病，17:05 服务器拉到 13cce50 后开始刷屏）。红测先行（AST 守卫 + property 契约成对，`test_w3_outbox_relay` 14/14）→ `444730a` 修复转绿 → CI 绿。
+- **继续历遍再修两处**（`ffa6d68`）：① `shisi/api/memory_routes.py` **路由遮蔽**——通配 `GET /{character_id}` 声明在静态 `GET /favorites` 之前，收藏列表端点 API 层不可达（被 character_id="favorites" 抢先匹配；33 路由文件全仓扫描**仅此一例**），通配移至静态后（端点 229 不变）；② `test_favorite`/`test_list_favorites` 写真库收口——`registry.py:126` 无参 FavoriteManager 指向宿主 `data/sqlite.db`（`memory_favorites` 历史垃圾行 (c1,m1) 实存已清），用例钉 tmp_path 隔离库 + 正典 `run_migrations` 建表，断言升级业务回执。
+- **部署（点②）**：GitHub CI 三轮全绿后，服务器 bundle 快进 `13cce50 → ffa6d68`（4 笔，18 文件）+ `remote_deploy.sh`。**上线验证**：服务 active / NRestarts=0 / health 200 / ready ok / 重启后新日志 **0 异常 0 Traceback**（修复前每 3s 一条）/ nginx 零改动 / 改动 blob 三端 **6/6** 一致 / 临时 bundle 已清。
+- **WAL 观察项闭环**：服务器 Linux 复跑 W3 域两文件 **54/54 全绿**（`test_runtime_plane` 40 + `test_w3_outbox_relay` 14，含 6 例本机 flaky 观察项）——「本机 OS/SQLite WAL 行为」归因闭环，生产环境可靠。
+- **验证**：全量五分块 **2567 收集 / 2566 通过 / 1 跳过 / 0 失败**（487+1 / 421 / 827 / 804 / 27 精确吻合；41 卡在位）+ ruff 全仓 0 错。**徽章 2699 → 2701**（2566 Py + 135 FE）。AGENTS v1.39.3 / CODE_GRAPH v3.8.25 / README 口径 / HANDOFF 置顶快照 / INDEX / P1_BACKLOG 同步。
+
+---
+
 ## 2026-09-27 — 主控 · 全仓历遍（真源文档对齐 + GitHub CI 红取证；本条补记 `13cce50` 视觉接线）
 
 - **触发**：默默指令「全仓历遍」。零业务代码、零 `tests/**` 改动；只读扫描 + 真源文档对齐。
