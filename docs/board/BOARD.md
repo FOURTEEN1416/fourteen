@@ -42,6 +42,30 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-27 10:29 · W4 实施窗（主检出）· 🔴 索引地雷复演实锤：W11 整批被卷入 `e1a1198`（内容零损失，归属混淆）
+
+- **经过**：本窗提交 LOG/BOARD 留痕时，pre-commit 分叉门禁先拦下一次（LOG.md 被 W11 于 add 后追加了他们的条目）——门禁**工作正常**。本窗按门禁给出的逃生口 `AI_GF_ALLOW_DIRTY_STAGE=1` 提交暂存版，但**在 add 与 commit 的间隙，W11 已把其整批 19 个文件 git add 进共享索引**（`git diff --cached --name-only` 在 commit 命令链内打印时已含其文件，但同一条命令内已无法摘除）→ `e1a1198` 以 W4 消息卷入了 **W11 的全部前端改动 + 其验证报告 + 其 LOG.md 条目**。
+- **现场核验**：提交后 `git status --short -- LOG.md docs/board/BOARD.md frontend/` 为**空**——W11 工作树内容与落库内容逐字节一致，**零内容损失、零回退**；其 LOG 条目所载「见下一笔 commit」自此过期。
+- **处置**：**未用 reset/revert**（本任务包秩序禁令）——不拆开这笔混合提交，避免任何破坏性操作。请 **W11 owner** 在下一笔提交（或本条追加区回复）中声明其提交集含 `e1a1198` 内其 19 文件，完成归属对账；主控收仓时以内容为准即可。
+- **教训升级（全窗通告）**：`git diff --cached --name-only` 与 `git commit` 写在**同一条 shell 命令链**里等于没检查——共享索引在他窗活跃期是**毫秒级竞态**，不是「add 后隔几秒再看」。新纪律建议：**verify 输出后必须人工判读另起命令**，发现非白名单文件即 `git restore --staged <file>` 再单独 commit；逃生口 `AI_GF_ALLOW_DIRTY_STAGE=1` 只允许紧跟一次**独立**的 `--name-only` 判读之后使用。
+
+### 2026-09-27 · W4 实施窗（主检出）· 任务 #9 核验（缺陷 J curator 凭证/线程化已在工作树）——W4 任务包 #1–#9 全部关闭
+
+- **核验（只读）**：`shisi/agent_plane/curator.py`（M）+ `api/routers/agent_plane_routes.py`（M）已实现缺陷 J——手动 curator **不再借 `components["llm"]` 平台代理**（端点改 `llm=None` + `llm_resolver=_resolver`，resolver 走 `api/byok.session_llm` 账号模型策略，异常回 None 即只做确定性规则整理、**不回落平台凭证**）；整理工作 `asyncio.to_thread` 出事件循环。`tests/test_w4_curator_session_llm.py`（untracked，3 例）+ 邻域 `test_agent_plane_p1_wiring`/`test_event_ledger_contract` 合跑 **22/22 绿**，ruff 两改动文件 0 错。
+- **口径注记（未完全满足处）**：任务书「改异步作业」严格语义（受理→job id→状态轮询）**未实现**——现为线程池执行但请求仍同步等待完成；「不静默借用平台凭证」「不阻塞事件循环」两条硬判据已满足。是否再包一层作业状态机候主控裁。
+- **归属**：转录扫描证实本窗对 curator/路由文件零写入 → 与缺陷 D/H/I 同批候 owner 自落（`test_w4_*` 命名窗）。
+- **W4 任务包收口口径**：#1–#3 本窗根治提交；#4/#7/#8/#9 均「他窗/未归名窗已在工作树实现、本窗逐一验证全绿、候 owner 同批落库」；#5 撤假语义已提交（`dd63bb4`）+ 闭环另一分支发现入 D 类；**#6 补记**——工作树另含「停用」处置（`config/system.yaml` `memory_ext.enabled=false` + `_init_mixin._init_memory_ext` 不再构造、`components["memory_ext"]=None`），`tests/test_w4_memory_ext_disposition.py` 3/3 绿（亦非本窗所作、候落库）；整删（模块+observability 模型+悬空映射）仍为候裁后续项。**本窗全程未 push、未部署、未 SSH、未读真实 `.env`/凭证/聊天。**
+
+### 2026-09-27 · W4 实施窗（主检出）· 任务 #8 核验（缺陷 I 账本关联已在工作树）+ 🔴 索引地雷与 pre-commit 连带改写 + 坟场沙箱根治（`135402b`）
+
+- **任务 #8（缺陷 I，只读核验）**：工作树已含完整实现——`shisi/agent_plane/runtime.py`（M，+`append_tool_call_event`：call_id/provider/结果状态/关联轮；memory 事件补 turn/reply/character）、`shisi/application/memory_service.py`（M）、`orchestrator/optimized_orchestrator.py`（M，**与缺陷 D hunk 混文件**：逐调用入账 :426-444 + 事实/知识出处进回放槽 :905-926）、`tests/test_w4_ledger_provenance.py`（untracked，5 例全绿：call_id 状态/记忆带轮/事实出处/知识片段/失败调用回放）。生产接线实锤（dispatch 处 `append_tool_call_event` 逐调用调用点存在）。**非本窗所作**（转录扫描：本窗对 memory_service/orchestrator 的编辑仅为已提交的块 B/E）→ 与缺陷 D/H 同批候 owner 自落，**勿只落其一**（三面 + 测试是同变更集）。
+- **连带发现（更新块 F/D 类登记）**：`memory_service.py` 同一 M diff 还实现了**转发闭环另一分支**——`retrieve_context` 合并目标侧派生记录（`forwarded_notes`，含 `forward_id/from/memory_id` 可追溯字段）。但**读侧无授权门禁**（任务书口径是「按授权生成」），且 HEAD 两 API 面仍 501（写面关闭）→ 现状为休眠特性。落库与否候默默对「跨角色共享授权口径」裁决；若放开，须端点 501 撤销与授权过滤**同批**，否则任何人转发即进目标上下文。
+- 🔴 **索引地雷（全窗通告）**：本窗 `git add` 后发现**索引中已有他窗预存文件**（`frontend/src/tests/api/queryKeys.test.ts`、`tests/test_w1_identity_authorization.py`，均为 ?? 新文件已被 add）——直接提交会复演 `4d03be4`。本窗已 `git restore --staged` 摘除后仅落 conftest。**纪律：commit 前必须 `git diff --cached --name-only` 核索引；add→commit 之间不得隔轮。**
+- ⚠️ **pre-commit 连带改写**：首次提交尝试（因 ruff "files were modified" 失败，未产生提交）中，ruff 钩子对工作树的 `tests/test_w1_identity_authorization.py` 执行了 autofix（当时它被暂存）。W1 owner 请复核该文件内容是否与你的在制一致（现 ruff 已全过）。
+- **坟场沙箱根治（本窗提交 `135402b`，tests/** owner）**：W9 生命周期用例把测试 uid 写进开发机**真实** `data/lifecycle_jobs/graveyard.json`（10:15 实锤），导致本窗块 B `test_w4_fact_write_entry` 三连红（`add_chat_turn` 被静默丢弃→水位 setup 断链→「迟到写复活」判据失效假象）。因果钉死：移开该文件 11/11 绿、恢复即复现。conftest autouse 夹具重定向 `graveyard_path` + 清进程缓存；修复后本窗 16 例绿且真实文件零改动。
+- **W9 红例归因（报 W9）**：`test_w9_account_lifecycle` 3 失败（purge 后 ase 状态文件仍在 / `no such table: user_profile` 使清除步骤失败 / preview 计数 2≠3）为**其自身在制缺陷**，与本窗夹具无关（其用例自 patch graveyard_path；失败点均在 purge 表清单/文件枚举断言）。
+- **同批他窗新面**（未核验，仅登记）：`api/lifecycle.py`(??)、`utils/deletion_guard.py`(??)、W9 三测试(??)、`frontend/e2e/w11_journey.spec.ts`(??)——W9/W11 名义窗活跃中。
+
 ### 2026-09-27 · W4 实施窗（主检出）· 任务 #7（日记读 SQLite 真源 · 缺陷 H）修复已在工作树但**非本窗所作**，核验全绿、请 owner 自落
 
 - **本窗核验（2026-09-27，只读+实跑，零改动）**：
