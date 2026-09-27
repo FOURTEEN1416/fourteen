@@ -193,6 +193,24 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # W9 删除守卫坟场（2026-09-27 跨窗互踩实证）：utils/deletion_guard 的
+    # graveyard.json 未沙箱时，W9 生命周期用例把测试 uid 写进**开发机真实**
+    # 坟场，同机其它窗 add_chat_turn 被静默丢弃（本窗 test_w4_fact_write_entry
+    # 三连红即此因；移开该文件即全绿）。路径函数 + 进程缓存须一并重定向/清空。
+    try:
+        from utils import deletion_guard as _dguard
+
+        monkeypatch.setattr(
+            _dguard, "graveyard_path",
+            lambda: sandbox / "graveyard.json",
+            raising=False,
+        )
+        monkeypatch.setattr(_dguard, "_local_blocked", set(), raising=False)
+        monkeypatch.setattr(_dguard, "_blocked_uids", frozenset(), raising=False)
+        monkeypatch.setattr(_dguard, "_cache_at", 0.0, raising=False)
+    except Exception:
+        pass
+
     # W6 爬虫受控知识存储（2026-09-27）：CharacterCrawlerTool 默认把抓取结果
     # 写 data/character_crawler/；既有用例成功路径会真写宿主 data/，一并沙箱。
     try:
