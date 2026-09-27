@@ -35,8 +35,18 @@ def _remember_index(user_key: str, state_path: str) -> None:
 
 
 def _forget_index(user_key: str) -> None:
-    """状态文件已删除时同步移除索引项（旧实现只记不删，索引只增不减）。"""
-    _update_index(lambda data: data.pop(str(user_key), None))
+    """状态文件已删除时同步移除索引项（旧实现只记不删，索引只增不减）。
+
+    ⚠️ mutate 必须返回 None：`json_state.update_json` 会把非 None 返回值当作
+    **整份新文件内容**写回——旧写法 `data.pop(key, None)` 返回被删的路径串，
+    索引文件被整个替换成该字符串，其余用户的索引项全部丢失（W9 生命周期
+    purge 实测暴露）。
+    """
+
+    def _mutate(data: dict[str, Any]) -> None:
+        data.pop(str(user_key), None)
+
+    _update_index(_mutate)
 
 
 def _read_index_raw() -> dict[str, str]:
@@ -58,6 +68,36 @@ def _update_index(mutate: Callable[[dict[str, Any]], Any]) -> None:
         json_state.update_json(_INDEX_PATH, lambda data: mutate(data))
     except Exception as e:  # noqa: BLE001
         logger.debug("ASE index write failed: %s", e)
+
+
+def _forget_user_state_files(user_keys: list[str]) -> int:
+    """删除 user_key 的 ASE 状态文件并清索引项（不触碰进程内引擎）。"""
+    removed = 0
+    for key in user_keys:
+        try:
+            path_str = _read_index_raw().get(str(key), "")
+            if path_str:
+                Path(path_str).unlink(missing_ok=True)
+                removed += 1
+        except OSError as e:  # noqa: PERF203
+            logger.warning("ASE 状态文件删除失败 key=%s: %s", key, e)
+        _forget_index(str(key))
+    return removed
+
+
+def purge_user_states(user_keys: list[str]) -> int:
+    """账号生命周期（W9）：清除 user_key 的持久化 ASE 状态与索引项。
+
+    进程内引擎缓存由调用方经 ``ASEHub.forget`` 逐 hub 丢弃；本函数只负责
+    磁盘真源（状态文件 + index.json）。返回删除的状态文件数。
+    """
+    _STATE_DIR.mkdir(parents=True, exist_ok=True)
+    return _forget_user_state_files([str(k) for k in user_keys if str(k)])
+
+
+def count_user_states(user_keys: list[str]) -> int:
+    raw = _read_index_raw()
+    return sum(1 for k in user_keys if str(k) in raw)
 
 
 def load_user_key_index() -> list[str]:
@@ -87,6 +127,11 @@ class ASEHub:
         if rc and hasattr(eng, "apply_runtime_config"):
             with contextlib.suppress(Exception):
                 eng.apply_runtime_config(**rc)
+
+    def forget(self, user_key: str) -> None:
+        """公开别名（W9 账号生命周期调用）：丢弃引擎并移除状态文件与索引。"""
+        self._forget(user_key)
+        _forget_user_state_files([user_key])
 
     def _forget(self, user_key: str) -> None:
         """丢弃一个引擎（先落盘其状态）。状态文件损坏/重建时用。"""

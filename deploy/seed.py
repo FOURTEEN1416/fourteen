@@ -194,21 +194,44 @@ def verify_search(results):
     print(f"  ✅ {ok} 通过, ❌ {fail} 失败")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="预置角色知识库初始化")
-    parser.add_argument("--rebuild", action="store_true", help="强制重建所有索引")
-    parser.add_argument("--audit-only", action="store_true", help="仅审计不构建")
-    parser.add_argument("--verify", action="store_true", help="构建后验证搜索")
-    args = parser.parse_args()
+def main_with_args(audit_only: bool, rebuild: bool, verify: bool) -> int:
+    """纯计划对象入口（测试直调）：audit-only 全程只读，缺资源只报不建。
 
+    W9（缺陷 C 根治）：旧实现 audit-only 也会同步角色文件、mkdir presets、
+    重建 _index.json——审计路径带写副作用。现在一切写动作（同步/建目录/
+    写索引）都归非 audit 路径；audit-only 只枚举与报告。
+    """
     print("=" * 60)
     print("  预置角色知识库初始化")
     print("=" * 60)
 
-    # Step 1: 同步角色文件
+    if audit_only:
+        print("\n[--audit-only] 只读审计：不同步、不建目录、不写索引")
+        found = sorted(CHARS_DIR.glob("*.json")) if CHARS_DIR.exists() else []
+        print(f"  角色卡目录: {CHARS_DIR}（{len(found)} 张卡）")
+        # W10 门禁兼容：缺卡是部署前置缺失，审计结论必须非 0（检查本身零写入）；
+        # 旧实现门禁放在审计路径的写步骤之后，现前移为纯只读判定。
+        if not found:
+            logger.error("  ❌ 角色卡目录为空: %s（--audit-only 结论：不通过）",
+                         CHARS_DIR.resolve())
+            sys.exit(1)
+        if PRESETS_DIR.exists():
+            presets = sorted(
+                f.name for f in PRESETS_DIR.glob("*.json")
+                if not f.name.startswith("_")
+            )
+            idx = PRESETS_DIR / "_index.json"
+            print(f"  预设目录: {PRESETS_DIR}（{len(presets)} 个预设，索引存在={idx.exists()}）")
+        else:
+            print(f"  预设目录: {PRESETS_DIR}（不存在——构建路径将创建）")
+        print("\n✅ 审计完成（零写入）")
+        return 0
+
+    # Step 1: 同步角色文件（写路径）
     print("\n[1/3] 同步角色文件...")
     try:
         from scripts.sync_character_files import main as sync_main
+
         sync_main()
     except ImportError:
         logger.warning("  ⚠ sync_character_files 不可用，跳过")
@@ -224,29 +247,38 @@ def main():
         logger.error("     恢复途径：deploy/restore.sh <backup-dir> --target <独立目录>")
         sys.exit(1)
 
-    # Step 2: 重建预设索引
+    # Step 2: 重建预设索引（写路径）
     print("\n[2/3] 重建预设索引...")
     presets = build_preset_index()
 
-    # Step 3: 构建知识索引
+    # Step 3: 构建知识索引（写路径）
     print("\n[3/3] 构建知识索引...")
-    if args.audit_only:
-        print("  --audit-only 模式，跳过构建")
-    else:
-        results, elapsed = build_knowledge_indexes(rebuild=args.rebuild)
-        low, errors = print_report(results, elapsed)
+    results, elapsed = build_knowledge_indexes(rebuild=rebuild)
+    low, errors = print_report(results, elapsed)
 
-        if args.verify:
-            verify_search(results)
+    if verify:
+        verify_search(results)
 
-        if errors:
-            print("\n⚠ 部分角色索引失败，请检查日志")
-            sys.exit(1)
+    if errors:
+        print("\n⚠ 部分角色索引失败，请检查日志")
+        sys.exit(1)
 
     print("\n✅ 种子数据初始化完成")
     print(f"  预设角色: {len(presets)}")
     print("  现在可以启动服务了!")
+    return 0
 
+
+def main():
+    parser = argparse.ArgumentParser(description="预置角色知识库初始化")
+    parser.add_argument("--rebuild", action="store_true", help="强制重建所有索引")
+    parser.add_argument("--audit-only", action="store_true", help="仅审计不构建（纯只读）")
+    parser.add_argument("--verify", action="store_true", help="构建后验证搜索")
+    args = parser.parse_args()
+    sys.exit(main_with_args(
+        audit_only=bool(args.audit_only), rebuild=bool(args.rebuild),
+        verify=bool(args.verify),
+    ))
 
 if __name__ == "__main__":
     main()

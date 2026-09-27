@@ -71,6 +71,21 @@ def list_user_slots_with_credentials(user_id: int) -> list[int]:
     return slots
 
 
+def remove_user_sessions(user_id: int) -> bool:
+    """账号生命周期（W9）：删除该账号全部 slot 的磁盘通道目录（凭证/状态/二维码）。
+
+    调用前必须先经 connector_registry.purge_user 停掉在跑连接器，
+    否则进程内对象可能按旧路径重建文件。
+    """
+    import shutil
+
+    user_root = sessions_root() / str(int(user_id))
+    if not user_root.exists():
+        return False
+    shutil.rmtree(user_root, ignore_errors=True)
+    return True
+
+
 def count_sessions_with_credentials() -> int:
     root = sessions_root()
     if not root.exists():

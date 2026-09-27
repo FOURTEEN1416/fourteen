@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from typing import Any
@@ -144,6 +145,25 @@ class ConnectorRegistry:
             self._connectors.pop(self._key(uid, s), None)
         self._release_poll_lock(uid, s)
         return True
+
+    def purge_user(self, user_id: int) -> int:
+        """账号生命周期（W9）：该账号全部 slot 断连 + 移除本地连接器对象。
+
+        断连走 ``disconnect``（期望态落全局，其他 worker 的宿主连接器同样
+        自停）；随后从本进程注册表移除，防止残留轮询对象继续外发。
+        返回移除的本地连接器数。
+        """
+        uid = int(user_id)
+        slots = [s for (u, s) in self.all() if u == uid]
+        for s in slots:
+            with contextlib.suppress(Exception):
+                self.disconnect(uid, s)
+        removed = 0
+        with self._lock:
+            for s in slots or (0, 1):
+                if self._connectors.pop(self._key(uid, s), None) is not None:
+                    removed += 1
+        return removed
 
     def remove(self, user_id: int, slot: int = 0) -> None:
         with self._lock:

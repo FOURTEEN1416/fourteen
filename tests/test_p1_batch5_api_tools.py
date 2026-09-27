@@ -181,12 +181,13 @@ def test_dashboard_reads_real_sources_not_bypassed_route() -> None:
 
 
 def test_admin_delete_user_removes_dependent_rows() -> None:
+    """W9：admin 删除改走统一生命周期作业——依赖行清除由各 owner purge
+    承担（比旧的手抄 delete(WechatBinding) 覆盖面更全），钉住接线不被拿掉。"""
     from api.routers.admin_routes import delete_user
 
     src = inspect.getsource(delete_user)
-    assert "WechatBinding" in src
-    assert "WechatChannelSession" in src
-    assert "delete(" in src
+    assert "delete_account_everywhere" in src
+    assert "lifecycle" in src
 
 
 def test_persona_put_invalidates_persona_and_knowledge_caches() -> None:

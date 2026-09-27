@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-09-27 — W9 实施窗 · 账号/角色删除与数据遗忘 + 同意门禁四通道 + 旧能力删除（未 push 未部署）
+
+- **任务**：缺陷 A（账号删除不兑现跨存储遗忘 P1）/ B（角色删除范围不足 P1）/ C（维护脚本 dry-run 写副作用 P2）/ D13（同意门禁未落服务端）根治 + D12 旧能力清理。
+- **根因与根治**：
+  - **A/生命周期作业**：新 `api/lifecycle.py` 五阶段统一作业（preview 归属 → 冻结撤销 → 逐 owner purge → 验证 → 审计回执）；owner 步骤失败/验证残留即标 failed **不宣称 deleted**，作业账持久化 `data/lifecycle_jobs/` 可查询续跑；坟场 `graveyard.json` 治理备份恢复复活（`reconcile_graveyard` 再清除）。新增 owner purge 接口：`structured_memory.purge_owner_data`（10 表 + 裸 peer 遗留键，键解析在 owner 内）、`vector_memory.purge_owner_data/count_owner_data`（五集合元数据删除）、`event_ledger.purge_owner_sessions/count`、`ase_hub.purge_user_states/forget`、`affinity_state.purge_owner/count_owner`（uid 前缀兜底）、`channel_paths.remove_user_sessions`、`connector_registry.purge_user`、`scheduler.purge_throttle_for`（四账本 + 文件直清）。迟到写入防护：新 `utils/deletion_guard`（TTL 缓存跨进程坟场），`add_chat_turn` 丢弃已删账号会话写入。**admin delete_user 接 lifecycle**（完成才报 deleted，未完成 500+job）。SQLite 修正：引擎级 `PRAGMA foreign_keys=ON`（ORM ondelete 真实生效）+ `users.id AUTOINCREMENT` 表重建迁移（防删最高 id 后 UID 复用继承 owner 前缀存储）。
+  - **B/角色删除**：`delete_character` 收口为 owner 粒度全清（卡/知识索引源存储/成就/绑定+偏好+个人激活引用重置/向量 character_id 派生/音色解绑/人设缓存），回执含计数。
+  - **C/维护脚本**：`ax_clean_profiles.py` 重构为纯计划对象——dry-run 走 `mode=ro` 只读连接（缺库/缺表只报不建、不 seed、不写报告），显式 `--apply` 才允许写连接/建 schema/seed/写报告；`deploy/seed.py` `--audit-only` 纯只读（零 mkdir/零同步/零索引），缺卡审计结论非 0（W10 门禁兼容），`main_with_args` 测试入口，补回丢失的 `__main__` 入口块。
+  - **D13/同意门禁**：`api/consent.py` 状态机（granted/missing/withdrawn/outdated，`WITHDRAWN` 哨兵档）；**分层强制**——消费面（HTTP `/api/chat|stream|session` 挂 `require_current_consent` 403 + WS chat 分支同源拒）拦 granted 之外全部；外发面（微信入站 `user_scheduler`、调度器 `_deliver`、提醒 `_deliver` 统一 `outbound_allowed_for_session`）仅拦 withdrawn/outdated，**missing 放行**（协议 §0「使用即同意」，拦 missing 会把存量微信用户外发全部静默）。新增端点：`/api/auth/consent/withdraw|status`、`/api/auth/account/delete`（202 冻结+后台清除，未完成不报 deleted）、`/api/auth/account/export`（storage manifest）+ `/account/export/chats`（id 游标分页，仅本人会话）。协议 §2.5 补撤回/注销条款（版本 1.0.0 不变，不触发全量重同意）。
+  - **D12/旧能力删除**：ToneMimic 编排侧控制链（`_init_mixin` 装配/import/rag 实参/extractor 注入 + run_api 健康注册）——生产聊天链零读取，唯一消费者 training_routes 有按需回退；入 `DELETION_LOG`。memory_ext 维持 W4 停用处置不推翻。顺手根治 `_forget_index` 返回值 bug（`update_json` 把 pop 返回值当整份文件写回，删一键灭全索引——W9 purge 实测暴露）。
+- **连带收编（owner 声明）**：W1 撤销版本在制品四文件（`api/auth_jwt.py`/`api/database.py` token_version+UserActiveCharacter/`admin_routes`/`auth_routes`）随本批入库——W9 删除冻结依赖 `bump_token_version`；收编前 `test_w1_identity_authorization.py` 32 例验证自洽。**未收编**：前端在制品（frontend/* 与其测试）、`tests/test_w9_character_delete.py`（并行窗半成品，F821 未定义名）、`tests/test_w4_*` 两件。
+- **验证**：W9 三件 25 例（生命周期 7/7：删 A 不动 B 全存储断言/幂等/故障续跑不复活不丢 B/UID 不复用/坟场再清/迟到写入丢弃/preview 计数；consent+export 6；脚本 6）红→绿；受影响域（connection/ops/attribution/admin/consent/auth/byok/w1w4 在制品/提醒/调度/ase/affinity）全绿；ruff 全仓 0 错（并行窗半成品除外）；最终四分块口径见下方补记。突变性对照：外发门禁 missing 分层修正前 wechat_byok 4 例红 → 修正后绿（证明门禁语义与「使用即同意」对齐）。
+- **遗留/边界**：`wechat_context_tokens.json`（裸 wxid 键无法判 owner，TTL 短、token 失配自然失效）与 `runtime_plane` 期望态（disconnect 已置 disabled）登记为清除边界；消费门禁拦 missing 与外发放行 missing 的分层属 W0「D13 存量重新同意」待裁决项的执行面落地，版本策略调整需用户裁决；生产 `data/users.db` 的 AUTOINCREMENT 迁移在下次 `init_db()` 自动幂等执行。**未 push 未部署**。
+
 ## 2026-09-27 — W4 实施窗 · 记忆域 D/H/I/J/F/G 根治落库（`1773970`，未 push 未部署）
 
 - **背景**：A/B/C/E 已在树；本窗收口剩余六缺陷。基线 `985beeb` 为祖先，工作基点=当时 HEAD。纪律：显式 add、索引单独判读、无 pathspec commit、不碰他窗 W9/W1 在制。

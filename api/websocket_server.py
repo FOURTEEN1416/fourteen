@@ -197,6 +197,20 @@ class WebSocketServer:
                             from api.database import _async_session
 
                             async with _async_session() as db:
+                                # D13 同意门禁（与 HTTP/微信/后台同源）：未同意、
+                                # 同意旧版本、已撤回的账号不得再经 WS 消费服务。
+                                from api.consent import consumption_allowed
+
+                                if not await consumption_allowed(db, authed_user_id):
+                                    try:
+                                        await websocket.send(json.dumps({
+                                            "type": "error",
+                                            "error": "CONSENT_REQUIRED",
+                                            "needs_consent": True,
+                                        }, ensure_ascii=False))
+                                    except Exception as send_err:  # noqa: BLE001
+                                        logger.debug("consent frame send failed: %s", send_err)
+                                    continue
                                 user_llm_config = await load_user_llm_config(authed_user_id, self._orch, db)
                         else:
                             config_owner = (getattr(self._orch, "components", None) or {}).get("config")

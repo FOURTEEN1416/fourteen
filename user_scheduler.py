@@ -342,6 +342,26 @@ class UserManager:
         # BYOK：把用户专属 LLM 配置传下去（此前漏传 → 用户的 key 在微信端不生效）
         numeric_uid, user_llm_cfg = await self._get_user_llm_config(user_id)
 
+        # D13 同意门禁（外发分层语义）：微信入站回复属「触达/外发」面——
+        # 仅 withdrawn（明确撤回）/ outdated（同意旧版本）停发；missing（从未
+        # 记录）放行——「使用即同意」（协议 §0），拦 missing 会把存量微信用户
+        # 全部静默。读库失败 fail-closed 停发。消费语义（granted 才放行）只
+        # 用于 HTTP/WS 聊天门禁。
+        if numeric_uid is not None:
+            from api.consent import consent_state_of
+            from api.database import _async_session as _mk
+
+            async with _mk() as _db:
+                try:
+                    _state = await consent_state_of(_db, int(numeric_uid))
+                except Exception:  # noqa: BLE001
+                    _state = "withdrawn"
+            if _state in ("withdrawn", "outdated"):
+                logger.info("账号同意状态=%s，微信入站已停发 uid=%s key=%s",
+                            _state, numeric_uid, user_id)
+                return {"reply": "", "consent_required": True,
+                        "error": "CONSENT_REQUIRED"}
+
         # 修复：传入 character_id，否则多用户角色隔离失效
         # 使用关键字参数以兼容 Orchestrator（character_id 为第 5 参）和
         # OptimizedOrchestrator（character_id 为第 4 参）两种签名

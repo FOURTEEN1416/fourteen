@@ -492,6 +492,9 @@ async def test_websocket_keeps_owned_session_and_passes_request_identity(monkeyp
             return SimpleNamespace(llm_config={"provider": "owner-7"}, role="viewer")
 
     monkeypatch.setattr(database, "_async_session", DB)
+    # W9 D13 消费门禁：本契约测的是会话归属与身份贯通，替身视为已同意
+    monkeypatch.setattr("api.consent.consumption_allowed",
+                        AsyncMock(return_value=True))
 
     class Socket:
         request = SimpleNamespace(path="/")

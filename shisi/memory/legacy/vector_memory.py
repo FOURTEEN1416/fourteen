@@ -421,6 +421,67 @@ class VectorMemory:
         if episodic is not None:
             episodic.delete(where={"$and": [{"type": "reflection"}, {"session_id": user_key}]})
 
+    def purge_owner_data(
+        self, user_keys: list[str], session_ids: list[str],
+        character_ids: list[str] | None = None,
+    ) -> dict[str, int]:
+        """账号生命周期：按归属元数据清除全部集合中的派生向量（W9）。
+
+        键形态由本 owner 解析：每个集合统一按 ``user_key ∈ 显式键`` 或
+        ``session_id ∈ 显式键``（或 ``character_id ∈``）的 where 语义删除，
+        不做字符串前缀匹配。返回各集合删除计数。
+        """
+        conds: list[dict[str, Any]] = []
+        if user_keys:
+            conds.append({"user_key": {"$in": list(user_keys)}})
+        if session_ids:
+            conds.append({"session_id": {"$in": list(session_ids)}})
+        if character_ids:
+            conds.append({"character_id": {"$in": list(character_ids)}})
+        if not conds:
+            return {}
+        where = conds[0] if len(conds) == 1 else {"$or": conds}
+        receipt: dict[str, int] = {}
+        for name in self.COLLECTIONS:
+            coll = self._collections.get(name)
+            if coll is None:
+                continue
+            try:
+                before = coll.count()
+                coll.delete(where=where)
+                receipt[name] = max(0, int(before) - int(coll.count()))
+            except Exception as e:
+                # 单集合失败必须上抛：作业账标记该 owner 失败，禁止静默半清
+                raise RuntimeError(f"向量集合 {name} 清除失败: {e}") from e
+        return receipt
+
+    def count_owner_data(
+        self, user_keys: list[str], session_ids: list[str],
+        character_ids: list[str] | None = None,
+    ) -> dict[str, int]:
+        """verify 用：按归属元数据统计各集合残留文档数（只读）。"""
+        conds: list[dict[str, Any]] = []
+        if user_keys:
+            conds.append({"user_key": {"$in": list(user_keys)}})
+        if session_ids:
+            conds.append({"session_id": {"$in": list(session_ids)}})
+        if character_ids:
+            conds.append({"character_id": {"$in": list(character_ids)}})
+        if not conds:
+            return {}
+        where = conds[0] if len(conds) == 1 else {"$or": conds}
+        counts: dict[str, int] = {}
+        for name in self.COLLECTIONS:
+            coll = self._collections.get(name)
+            if coll is None:
+                continue
+            try:
+                got = coll.get(where=where, include=[])
+                counts[name] = len(got.get("ids") or [])
+            except Exception as e:  # noqa: BLE001
+                raise RuntimeError(f"向量集合 {name} 残留查询失败: {e}") from e
+        return counts
+
     def health_check(self) -> dict:
         return {
             "chromadb_available": HAS_CHROMADB,

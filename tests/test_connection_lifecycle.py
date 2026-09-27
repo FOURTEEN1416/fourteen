@@ -52,8 +52,12 @@ def _make_app_with_mock_orch(gen):
     app.dependency_overrides[auth.verify_api_key_dep] = lambda: True
     # chat_stream 端点依赖 get_current_user_id + get_db（API Key 隔离），
     # 测试中必须 override，否则请求会 401，根本不触发生成器。
+    # W9 D13：端点另挂 require_current_consent（同意门禁），测试替身视为已同意。
     from api.auth_jwt import get_current_user_id
+    from api.consent import require_current_consent
     from api.database import get_db
+
+    app.dependency_overrides[require_current_consent] = lambda: 1
 
     async def _fake_db():
         class _FakeUser:

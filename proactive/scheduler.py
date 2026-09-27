@@ -1369,6 +1369,9 @@ class ProactiveScheduler:
     ) -> bool:
         """投递主动消息。session_key 非空时**定向**到该会话，否则广播（旧路径）。
 
+        D13 同意门禁：定向会话的归属账号未同意/已撤回/旧版本时停发
+        （返回 False，调用方按 skip 处理，不扣配额、不写送达）。
+
         🔴 2026-09-22 二次根治：异常分支曾回落 `self._send(message)`（生产 =
         `logger.info` 包装的纯日志通道，见 `_LOG_ONLY_CHANNELS` 的告诫），
         随后 `_record_outbound` + `return True` —— **从未发出的消息被记成
@@ -1378,6 +1381,12 @@ class ProactiveScheduler:
         `_run_blocking` 的异常属基础设施故障，同样不能算送达），
         由调用方走失败退避；记账只由「投递成功」触发。
         """
+        if session_key:
+            from api.consent import outbound_allowed_for_session_sync
+
+            if not outbound_allowed_for_session_sync(str(session_key)):
+                logger.info("[主动消息] 账号未同意协议，停发 session=%s", session_key)
+                return False
         if session_key:
             current_character = self._resolve_character_id(str(session_key))
             if character_id is not None and character_id != current_character:
@@ -1890,6 +1899,46 @@ class ProactiveScheduler:
             json_state.update_json(self._CONFIG_PATH, _mutate)
         except Exception as e:  # noqa: BLE001
             logger.warning("持久化节流账本失败（内存态仍生效）: %s", e)
+
+    def purge_throttle_for(self, owner_id: int, session_keys: list[str] | None = None) -> int:
+        """账号生命周期（W9）：清除该账号在节流账本（四个账本）中的条目。
+
+        键形态在本 owner 内解析：``llm_proactive_next_ok`` /
+        ``deliver_fail_counts`` / ``disabled_event_day`` 以会话键（或裸 uid
+        历史键）为键，按 owner 段精确判定；``important_dates_sent`` 的条目是
+        ``"{date}|{user_key}|{label}"``，按中段 user_key 匹配。内存账本与
+        跨 worker 配置文件同步清理，防止下次 _persist 把已删账号的条目复活。
+        返回移除的条目总数。
+        """
+        uid = int(owner_id)
+        explicit = {str(k) for k in (session_keys or []) if str(k)}
+
+        def _owned(key: str) -> bool:
+            if key in explicit:
+                return True
+            left, sep, _rest = key.partition(":")
+            return bool(sep) and left.isdigit() and int(left) == uid
+
+        removed = 0
+        for ledger in (
+            self._llm_proactive_next_ok,
+            self._deliver_fail_counts,
+            self._disabled_event_day,
+        ):
+            victims = [k for k in list(ledger) if _owned(str(k))]
+            for k in victims:
+                ledger.pop(k, None)
+                removed += 1
+        date_victims = [
+            x for x in list(self._important_dates_sent)
+            if len(str(x).split("|")) >= 2 and _owned(str(x).split("|")[1])
+        ]
+        for x in date_victims:
+            self._important_dates_sent.discard(x)
+            removed += 1
+        if removed:
+            self._persist_throttle_ledger()
+        return removed
 
     def get_jobs(self) -> list[dict[str, Any]]:
         """获取所有任务状态"""

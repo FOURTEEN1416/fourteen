@@ -124,6 +124,16 @@ class ReminderDeliveryTask:
 
     async def _deliver(self, reminder: dict[str, Any]) -> None:
         session_key = str(reminder.get("session_key") or "").strip()
+        # D13 同意门禁（四通道同源）：账号未同意/已撤回时提醒不再外发。
+        if session_key:
+            from api.consent import outbound_allowed_for_session
+
+            if not await outbound_allowed_for_session(session_key):
+                logger.info(
+                    "[reminder] 账号未同意协议，停发提醒 id=%s session=%s",
+                    reminder.get("id"), session_key,
+                )
+                return
         character_id = self._resolve_character_id(session_key)
         text = await self._compose_text(reminder, character_id=character_id)
         try:

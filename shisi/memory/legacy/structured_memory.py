@@ -36,6 +36,16 @@ from utils.local_time import local_day_utc_bounds, now_local
 # （与 scheduler_config / agent_plane.db 同类事故的第三处镜像缺口）。
 _DB_DEFAULT = "./data/sqlite.db"
 
+
+def default_db_path():
+    """默认库的绝对路径真源（W9 生命周期与脚本共用；相对锚定仓库根）。"""
+    from pathlib import Path as _Path
+
+    from utils.project_paths import PROJECT_ROOT
+
+    p = _Path(_DB_DEFAULT)
+    return p if p.is_absolute() else PROJECT_ROOT / p
+
 logger = logging.getLogger("structured_memory")
 
 # 全局注册表，用于跟踪所有 StructuredMemory 实例，确保程序退出时关闭连接
@@ -1040,6 +1050,14 @@ class StructuredMemory:
         """一轮一个事务；同一 turn_id 重试不重复写，任一行失败整轮回滚。"""
         from uuid import uuid4
 
+        # W9 删除竞争防护：归属账号已被生命周期作业清除的会话，迟到写入一律丢弃
+        # （在途生成在 purge 之后才走到写侧的场景）。无主会话恒放行。
+        from utils.deletion_guard import is_session_blocked
+
+        if is_session_blocked(session_id):
+            logger.warning("已删除账号的迟到写入被丢弃 session=%s", session_id)
+            return False
+
         turn_id = turn_id or uuid4().hex
         messages = [(role, text) for role, text in (("user", user_msg), ("assistant", reply)) if text]
         if not messages:
@@ -1577,6 +1595,211 @@ class StructuredMemory:
             )
             conn.commit()
             return cursor.rowcount  # type: ignore[no-any-return]
+    def purge_owner_data(
+        self, owner_id: int, session_keys: list[str] | None = None,
+        bare_peers: list[str] | None = None,
+    ) -> dict[str, int]:
+        """账号生命周期：清除该账号在本库的全部记忆数据（W9）。
+
+        键形态在本 owner 内解析，不依赖调用方拼字符串：
+        - 会话键空间按 ``"{owner_id}:"`` 前缀 + 调用方提供的显式键（含 WS 四段等）
+          定位，并枚举库内 ``DISTINCT session_id`` 兜底（覆盖未知 web hex 键）；
+        - 裸 peer 遗留键（v1.28 之前的 ``wxid@im.wechat`` 一段式）按绑定 wxid 精确匹配；
+        - reminders / pending_intents 同时带数字 ``user_id`` 列，按 uid 精确删；
+        - 回收站行（``character_id='user_fact:{uk}'``）同样属被遗忘数据，物理清除。
+        返回各表删除计数（回执只含计数，不含内容）。
+        """
+        uid_prefix = f"{int(owner_id)}:"
+        explicit = [k for k in (session_keys or []) if k]
+        peers = [p for p in (bare_peers or []) if p]
+        with self._conn(write=True) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                known = {
+                    r["session_id"]
+                    for r in conn.execute("SELECT DISTINCT session_id FROM chat_history")
+                    if r["session_id"]
+                }
+                # 显式键全收（目标表无行时 DELETE 是无害的），库内枚举按 owner
+                # 前缀并入，覆盖未知 web hex 键；裸 peer（绑定 wxid 的一段式
+                # 遗留键）并入键集——与 count/verify 同一解析，防止口径分叉。
+                keys = sorted(
+                    set(explicit)
+                    | {k for k in known if k.startswith(uid_prefix)}
+                    | set(peers)
+                )
+                counts: dict[str, int] = {}
+
+                def _run(table: str, where: str, params: tuple) -> None:
+                    cur = conn.execute(f"DELETE FROM {table} WHERE {where}", params)
+                    counts[table] = int(cur.rowcount or 0)
+
+                if keys:
+                    ph = ",".join("?" for _ in keys)
+                    _run("chat_history",
+                         f"session_id IN ({ph})", tuple(keys))
+                    _run("reflections", f"session_id IN ({ph})", tuple(keys))
+                    _run("reminders", f"session_key IN ({ph})", tuple(keys))
+                    _run("pending_intents", f"session_key IN ({ph})", tuple(keys))
+                    _run("memory_extraction_progress", f"session_id IN ({ph})", tuple(keys))
+                    _run("user_facts", f"user_key IN ({ph})", tuple(keys))
+                    _run("fact_deletion_watermarks", f"user_key IN ({ph})", tuple(keys))
+                    if self._has_table(conn, "user_profile"):
+                        _run("user_profile", f"user_key IN ({ph})", tuple(keys))
+                    if self._has_table(conn, "daily_summaries"):
+                        like_ph = " OR ".join("date LIKE ?" for _ in keys)
+                        _run("daily_summaries",
+                             like_ph, tuple(f"{k}|%" for k in keys))
+                    if self._has_table(conn, "memory_recycle_bin"):
+                        recycle_like = " OR ".join(
+                            "character_id LIKE ?" for _ in keys
+                        )
+                        _run("memory_recycle_bin",
+                             recycle_like, tuple(f"user_fact:{k}%" for k in keys))
+                # 裸 peer 遗留键：按绑定 wxid 精确匹配（不经 owner 前缀）
+                if peers:
+                    ph = ",".join("?" for _ in peers)
+                    cur = conn.execute(
+                        f"DELETE FROM chat_history WHERE session_id IN ({ph}) "
+                        f"AND session_id NOT LIKE ?",
+                        tuple(peers) + (uid_prefix,),
+                    )
+                    counts["chat_history_bare"] = int(cur.rowcount or 0)
+                # 数字 uid 直列（reminders/pending_intents 的 user_id）
+                for table in ("reminders", "pending_intents"):
+                    cur = conn.execute(
+                        f"DELETE FROM {table} WHERE user_id = ?", (int(owner_id),)
+                    )
+                    counts[f"{table}_by_uid"] = int(cur.rowcount or 0)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return counts
+
+    def export_owner_chats_page(
+        self, session_key: str, before_id: int = 0, limit: int = 500,
+    ) -> dict:
+        """账号全量导出：单会话键的聊天分页（id 游标，倒序取、正序回）。"""
+        cap = max(1, min(int(limit), 1000))
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, role, content, emotion_tag, created_at, character_id, turn_id, "
+                "session_id, user_key "
+                "FROM chat_history WHERE (session_id = ? OR user_key = ?) AND id < ? "
+                "ORDER BY id DESC LIMIT ?",
+                (session_key, session_key, int(before_id) if before_id else 2**63 - 1, cap),
+            ).fetchall()
+        messages = [dict(r) for r in rows][::-1]
+        next_before = messages[0]["id"] if len(messages) == cap and messages else None
+        return {"messages": messages, "next_before_id": next_before}
+
+    @staticmethod
+    def _has_table(conn, name: str) -> bool:
+        return conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone() is not None
+
+    def _owner_resolution(
+        self, owner_id: int, session_keys: list[str] | None,
+        bare_peers: list[str] | None,
+    ) -> tuple[str, list[str], list[str], bool]:
+        """owner 键解析（本库内）：uid 前缀 + 显式键 + 库内枚举 + 裸 peer。"""
+        uid_prefix = f"{int(owner_id)}:"
+        explicit = [k for k in (session_keys or []) if k]
+        peers = [p for p in (bare_peers or []) if p]
+        has_daily = False
+        with self._conn() as conn:
+            known = {
+                r["session_id"]
+                for r in conn.execute("SELECT DISTINCT session_id FROM chat_history")
+                if r["session_id"]
+            }
+            has_daily = self._has_table(conn, "daily_summaries")
+        # 裸 peer（本账号绑定 wxid 的一段式遗留键）并入键集：wxid 绑定唯一，
+        # 其无主遗留行归本账号所有。
+        keys = sorted(
+            set(explicit) | {k for k in known if k.startswith(uid_prefix)} | set(peers)
+        )
+        return uid_prefix, keys, peers, has_daily
+
+    def count_owner_rows(
+        self, owner_id: int, session_keys: list[str] | None = None,
+        bare_peers: list[str] | None = None,
+    ) -> dict[str, int]:
+        """preview 用：统计该账号在本库的归属行数（只读，owner 在本库解析）。"""
+        uid_prefix, keys, peers, has_daily = self._owner_resolution(
+            owner_id, session_keys, bare_peers
+        )
+        out: dict[str, int] = {}
+        if not keys and not peers:
+            return out
+        with self._conn() as conn:
+            def _cnt(table: str, col: str) -> int:
+                conds = [f"{col} LIKE ?"]
+                params: list = [uid_prefix + "%"]
+                if keys:
+                    conds.append(f"{col} IN ({','.join('?' * len(keys))})")
+                    params.extend(keys)
+                return int(conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE ({' OR '.join(conds)})",
+                    tuple(params),
+                ).fetchone()[0])
+
+            # 裸 peer 已并入 keys（_owner_resolution），IN 子句已覆盖，
+            # 不得再加算（否则裸键行被双计）。
+            out["chat_history"] = _cnt("chat_history", "session_id")
+            out["user_facts"] = _cnt("user_facts", "user_key")
+            out["reflections"] = _cnt("reflections", "session_id")
+            out["reminders"] = _cnt("reminders", "session_key") + int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM reminders WHERE user_id = ?",
+                    (int(owner_id),),
+                ).fetchone()[0]
+            )
+            out["pending_intents"] = _cnt("pending_intents", "session_key") + int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM pending_intents WHERE user_id = ?",
+                    (int(owner_id),),
+                ).fetchone()[0]
+            )
+            if self._has_table(conn, "user_profile"):
+                out["user_profile"] = _cnt("user_profile", "user_key")
+            out["fact_deletion_watermarks"] = _cnt("fact_deletion_watermarks", "user_key")
+            if has_daily and keys:
+                like_ph = " OR ".join("date LIKE ?" for _ in keys)
+                out["daily_summaries"] = int(conn.execute(
+                    f"SELECT COUNT(*) FROM daily_summaries WHERE {like_ph}",
+                    tuple(f"{k}|%" for k in keys),
+                ).fetchone()[0])
+        return out
+
+    def verify_owner_purged(
+        self, owner_id: int, session_keys: list[str] | None = None,
+        bare_peers: list[str] | None = None,
+    ) -> dict[str, int]:
+        """清除后的残留验证：任何计数非零即该 owner 未清干净。"""
+        uid_prefix, keys, peers, has_daily = self._owner_resolution(
+            owner_id, session_keys, bare_peers
+        )
+        counts = self.count_owner_rows(owner_id, session_keys, bare_peers)
+        counts.setdefault("chat_history", 0)
+        with self._conn() as conn:
+            if self._has_table(conn, "memory_recycle_bin"):
+                counts["memory_recycle_bin"] = int(conn.execute(
+                    "SELECT COUNT(*) FROM memory_recycle_bin WHERE character_id LIKE ?",
+                    (f"user_fact:{uid_prefix}%",),
+                ).fetchone()[0])
+            if peers and self._has_table(conn, "chat_history"):
+                ph = ",".join("?" for _ in peers)
+                counts["chat_history_bare"] = int(conn.execute(
+                    f"SELECT COUNT(*) FROM chat_history WHERE session_id IN ({ph})",
+                    tuple(peers),
+                ).fetchone()[0])
+        if not has_daily:
+            counts.pop("daily_summaries", None)
+        return counts
+
     def health_check(self) -> dict:
         """健康检查"""
         try:

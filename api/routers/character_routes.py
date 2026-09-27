@@ -544,8 +544,14 @@ async def delete_character(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
     _owned: dict[str, Any] = Depends(require_character_access),
+    db: AsyncSession = Depends(get_db),
 ):
-    """删除角色"""
+    """删除角色 —— 承诺「删除即全清」，删除范围按 owner 粒度收口（W9 缺陷 B）。
+
+    清除面：卡文件、知识索引与源存储（W5）、人设缓存、成就行、
+    绑定/好友偏好/个人激活的引用重置（不孤儿悬挂）、向量集合中
+    character_id 派生、音色绑定解绑。
+    """
     data = _owned or _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
@@ -555,12 +561,61 @@ async def delete_character(
     # W5：知识索引与源存储随角色一并清理（旧实现遗留孤儿索引文件）
     _invalidate_knowledge_index(character_id)
 
+    # W9：引用与派生面全清——成就、绑定/偏好/个人激活引用、向量派生、音色绑定
+    from sqlalchemy import delete as _delete
+    from sqlalchemy import update as _update
+
+    from api.database import (
+        CharacterAchievement,
+        UserActiveCharacter,
+        WechatBinding,
+        WechatPeerPreference,
+    )
+
+    receipt: dict[str, int] = {}
+    receipt["achievements"] = int(await db.execute(
+        _delete(CharacterAchievement).where(
+            CharacterAchievement.character_id == character_id
+        )
+    ).rowcount or 0)
+    receipt["active_rows_reset"] = int(await db.execute(
+        _update(UserActiveCharacter)
+        .where(UserActiveCharacter.character_id == character_id)
+        .values(character_id="default")
+    ).rowcount or 0)
+    receipt["binding_refs_reset"] = int(await db.execute(
+        _update(WechatBinding)
+        .where(WechatBinding.character_card_id == character_id)
+        .values(character_card_id="default")
+    ).rowcount or 0)
+    receipt["peer_pref_refs_reset"] = int(await db.execute(
+        _update(WechatPeerPreference)
+        .where(WechatPeerPreference.character_card_id == character_id)
+        .values(character_card_id="default")
+    ).rowcount or 0)
+    await db.commit()
+
+    try:
+        from shisi.memory.legacy.vector_memory import VectorMemory
+
+        vm = VectorMemory()
+        removed = vm.purge_owner_data([], [], character_ids=[character_id])
+        receipt["vector_docs"] = int(sum(removed.values()))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("向量 character_id 派生清理失败（非阻塞）: %s", e)
+
+    try:
+        if CharacterVoiceManager().unbind_voice(character_id):
+            receipt["voice_unbound"] = 1
+    except Exception as e:  # noqa: BLE001
+        logger.warning("音色绑定解绑失败（非阻塞）: %s", e)
+
     # 清除人设缓存
     if deps.orch and hasattr(deps.orch, "invalidate_character_persona_cache"):
         deps.orch.invalidate_character_persona_cache(character_id)
 
-    logger.info("角色已删除: %s (%s)", data.get("name", ""), character_id)
-    return {"status": "deleted", "character_id": character_id}
+    logger.info("角色已删除: %s (%s) receipt=%s", data.get("name", ""), character_id, receipt)
+    return {"status": "deleted", "character_id": character_id, "receipt": receipt}
 
 
 async def _optional_user_id(request: Request) -> int | None:

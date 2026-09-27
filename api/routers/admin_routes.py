@@ -11,16 +11,14 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth_jwt import bump_token_version, hash_password, require_role
 from api.database import (
     User,
-    UserActiveCharacter,
-    WechatBinding,
-    WechatChannelSession,
     get_db,
 )
 from api.password_policy import PasswordStr, ensure_password_strength
@@ -238,19 +236,23 @@ async def delete_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # P1-审查 item33：SQLite 连接未开 PRAGMA foreign_keys（默认 OFF），
-    # ON DELETE CASCADE 不生效——删用户后 wechat_bindings 遗留孤儿行，
-    # wxid 唯一键仍被占 → 同一微信再绑新号恒 409「已被其他账号绑定」。
-    # 删除前显式清依赖行（通道会话同理，防脏状态复活）。
+    # W9：管理员删除 = 统一生命周期作业（协议 §2.5「删除即真正删除」）。
+    # 冻结（停用+撤销版本+吊销会话+坟场+迟到写入封禁）→ 逐 owner 跨存储清除
+    # （users.db 行 / sqlite.db 记忆 / chroma 派生 / agent_plane 账本 / ASE 状态 /
+    #  好感度点存 / 微信通道磁盘与连接器 / 节流账本 / 私有角色实例）→ 验证。
+    # 完成（且仅完成）才报 deleted；部分失败返回 failed + job_id 供查询续跑。
     email = user.email
-    await db.execute(delete(WechatBinding).where(WechatBinding.user_id == user_id))
-    await db.execute(delete(WechatChannelSession).where(WechatChannelSession.user_id == user_id))
-    # 个人激活角色选择同样随用户出库（FK ondelete 在 SQLite 默认不生效，显式清）
-    await db.execute(
-        delete(UserActiveCharacter).where(UserActiveCharacter.user_id == user_id)
-    )
-    await db.delete(user)
-    await db.commit()
+    from api import lifecycle
 
-    logger.info("管理员删除用户: %s (id=%d)", email, user_id)
-    return {"detail": f"User {email} deleted"}
+    job = await lifecycle.delete_account_everywhere(user_id)
+    if job.get("completed"):
+        logger.info("管理员删除用户（跨存储清除完成）: %s (id=%d)", email, user_id)
+        return {"detail": f"User {email} deleted", "job": job}
+    logger.error("管理员删除用户未完成跨存储清除: %s (id=%d) job=%s", email, user_id, job.get("job_id"))
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"User {email} deletion incomplete; retry to resume",
+            "job": job,
+        },
+    )

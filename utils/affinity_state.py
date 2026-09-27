@@ -54,6 +54,48 @@ def save_points(user_id: str, character_id: str, points: float) -> None:
         logger.warning("写入 affinity_state 失败: %s", e)
 
 
+def purge_owner(owner_keys: list[str], owner_uid: int | None = None) -> int:
+    """账号生命周期（W9）：移除归属该账号的全部点存键。
+
+    键形态由本 owner 解析：点存键 = ``"{user_key}::{character_id}"``（user_key
+    为完整会话键；历史裸 uid 键经前缀同构匹配），这里按「键以任一
+    ``{owner_key}::`` 开头或恰为 owner_key」判定归属。返回移除的键数。
+    """
+    prefixes = tuple(f"{str(k)}::" for k in owner_keys if str(k))
+    if owner_uid is not None:
+        prefixes = prefixes + (f"{int(owner_uid)}:",)
+    exact = {str(k) for k in owner_keys if str(k)}
+
+    removed = 0
+
+    # update_json 的 mutate 原地修改且不得返回非 None（返回值会被当作整份
+    # 新文件内容写回）；删除计数走闭包。
+    def _mutate(data: dict) -> None:
+        nonlocal removed
+        victims = [
+            key for key in data
+            if key in exact or key.startswith(prefixes)
+        ]
+        for key in victims:
+            data.pop(key, None)
+        removed = len(victims)
+
+    try:
+        json_state.update_json(_PATH, _mutate)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("purge affinity_state 失败: %s", e)
+    return int(removed)
+
+
+def count_owner(owner_keys: list[str], owner_uid: int | None = None) -> int:
+    prefixes = tuple(f"{str(k)}::" for k in owner_keys if str(k))
+    if owner_uid is not None:
+        prefixes = prefixes + (f"{int(owner_uid)}:",)
+    exact = {str(k) for k in owner_keys if str(k)}
+    data = json_state.read_json(_PATH, default={})
+    return sum(1 for key in data if key in exact or key.startswith(prefixes))
+
+
 def clear(user_id: str, character_id: str) -> None:
     def _mutate(data: dict) -> None:
         data.pop(_key(user_id, character_id), None)

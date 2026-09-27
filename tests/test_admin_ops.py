@@ -118,12 +118,29 @@ async def _db_get_user(engine, user_id: int):
 
 
 @pytest.fixture
-def admin_app(tmp_path):
+def admin_app(tmp_path, monkeypatch):
     """返回 (client, engine, app) — 默认以 admin 身份请求"""
     db_path = str(tmp_path / "test_admin.db")
     app, engine, _ = _build_app_with_users(db_path)
 
     app.dependency_overrides[get_current_user_id] = lambda: _ADMIN_USER_ID
+
+    # W9：admin 删除已改走统一生命周期作业，作业缺省 db_factory 指向
+    # api.database._async_session（真实引擎）；测试必须把它重定向到本用例
+    # 的沙箱引擎，否则清除/验证读写的是宿主真库。
+    from api.database import async_sessionmaker as _maker
+
+    test_session = _maker(engine, expire_on_commit=False)
+    monkeypatch.setattr(
+        "api.lifecycle._default_db_factory", staticmethod(lambda: test_session)
+    )
+    monkeypatch.setattr(
+        "api.lifecycle.job_root", lambda: tmp_path / "lifecycle_jobs"
+    )
+    monkeypatch.setattr(
+        "utils.deletion_guard.graveyard_path",
+        lambda: tmp_path / "lifecycle_jobs" / "graveyard.json",
+    )
 
     client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
     yield client, engine, app

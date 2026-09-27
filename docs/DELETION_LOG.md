@@ -1,5 +1,25 @@
 # Code Deletion Log
 
+## [2026-09-27] W9（D6/D12）：ToneMimic 编排侧控制链删除
+
+- **删除**：`orchestrator/_init_mixin.py` 三处——`from my_character.tone_mimic
+  import ToneMimic`、`self.components["tone"] = ToneMimic(chroma_path=...)`
+  （启动期 Chroma/ONNX 装载）、`ShisiKnowledgeAdapter(tone_mimic=...)` 实参与
+  `persona_extractor.set_tone_mimic(...)` 注入；`api/run_api.py` 组件健康注册
+  的 `("tone_mimic", ...)` 行。
+- **依据**：生产聊天链对 `components["tone"]` **零读取**——检索产物里的
+  `style_examples` 已于审计 item47 判死（context_budget 与 persona 风格层均
+  不消费该键），`PersonaEngine.tone` 仅自用 health_check；唯一活跃消费者
+  `api/routers/training_routes.py`（/api/training/test|apply 克隆摄入）自带
+  **按需构造回退**（`_live_tone_mimic` 无编排实例时自建），删除装配后功能
+  完整。适配器形参 `tone_mimic=None` 保留（W2 测试钉住兼容 kwargs）。
+- **不删**：`my_character/tone_mimic.py` 模块本体（training 摄入仍在用）、
+  `memory_ext/` 包（W4 缺陷 G 已裁决「停用+防复活」，整包删除待迁移裁决，
+  本窗不推翻既有处置）。
+- 验证：`tests/test_p2_batch6_persona.py::test_tone_mimic_add_conversation_still_alive`
+  继续绿（add_conversation 经 training 链仍存活）；受影响面
+  test_connection_lifecycle / test_ops_lifecycle 31 通过。
+
 ## [2026-09-27] W4 缺陷 G：memory_ext 第二套记忆真源停用
 
 - `config/system.yaml` `memory_ext.enabled: true → false`。该模块（mem0 兼容

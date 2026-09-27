@@ -1,8 +1,13 @@
 """生产画像/事实全面清洗 + seed 进 EventLedger（用户裁决 2026-09-21）。
 
-用法（生产/本地）：
-  PYTHONPATH= python scripts/ax_clean_profiles.py --apply
-  PYTHONPATH= python scripts/ax_clean_profiles.py --dry-run
+W9 纯计划对象化（缺陷 C 根治）：**显式 --apply 才允许一切写副作用**——
+写连接（UPDATE/COMMIT）、缺表时建 schema、seed 账本、写报告文件。
+默认/--dry-run 全程只读（SQLite ``mode=ro`` 连接），缺库/缺表**只报不建**；
+seed 与报告仅属 --apply 路径。
+
+用法：
+  PYTHONPATH= python scripts/ax_clean_profiles.py --apply   # 真实清洗+seed+报告
+  PYTHONPATH= python scripts/ax_clean_profiles.py --dry-run # 纯只读预览
 """
 
 from __future__ import annotations
@@ -18,6 +23,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+# 报告落点：与被清洗库同目录（沙箱友好；不再无条件写仓库 data/）
+REPORT_PATH = ROOT / "data" / "ax_profile_clean_report.json"
 
 # 规则垃圾 / 过短无信息量事实（与宪法 v1.32 归档策略同向）
 _GARBAGE_FACT_EXACT = {
@@ -40,6 +48,13 @@ def _is_garbage_fact(text: str) -> bool:
     if t in _GARBAGE_FACT_EXACT:
         return True
     return any(p.search(t) for p in _GARBAGE_FACT_RE)
+
+
+def _connect(db_path: Path, *, write: bool) -> sqlite3.Connection:
+    """只读模式（dry-run）下文件不存在会直接抛错——缺资源只报不建。"""
+    if write:
+        return sqlite3.connect(str(db_path))
+    return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
 
 
 def _clean_profile_row(row: dict) -> tuple[dict, list[str]]:
@@ -70,67 +85,101 @@ def _clean_profile_row(row: dict) -> tuple[dict, list[str]]:
     return out, notes
 
 
-def clean_user_profile_table(db_path: Path, apply: bool) -> list[dict]:
+def _profile_plan(conn: sqlite3.Connection) -> list[dict]:
+    """只读：产出清洗计划（每行 before/notes，不含任何写操作）。"""
     results = []
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("SELECT * FROM user_profile").fetchall()
+    for r in rows:
+        row = dict(r)
+        for k in ("preferences", "commitments"):
+            try:
+                row[k] = json.loads(row.get(k) or "[]")
+            except Exception:  # noqa: BLE001
+                row[k] = []
+        cleaned, notes = _clean_profile_row(row)
+        results.append({
+            "user_key": row.get("user_key"),
+            "changed": bool(notes),
+            "notes": notes,
+            "before_birthday": row.get("birthday"),
+            "after_birthday": cleaned.get("birthday"),
+        })
+    return results
+
+
+def _profile_apply(conn: sqlite3.Connection) -> list[dict]:
+    """--apply：清洗计划 + 写回。缺表时建 schema（写副作用，仅 apply 允许）。"""
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("SELECT 1 FROM user_profile LIMIT 1").fetchone()
+    except sqlite3.OperationalError:
+        from shisi.memory.legacy.user_profile import UserProfileStore
+
+        UserProfileStore(Path(conn.execute(
+            "SELECT file FROM pragma_database_list WHERE seq=0"
+        ).fetchone()[0]))
+    results = []
+    rows = conn.execute("SELECT * FROM user_profile").fetchall()
+    for r in rows:
+        row = dict(r)
+        for k in ("preferences", "commitments"):
+            try:
+                row[k] = json.loads(row.get(k) or "[]")
+            except Exception:  # noqa: BLE001
+                row[k] = []
+        cleaned, notes = _clean_profile_row(row)
+        entry = {
+            "user_key": row.get("user_key"),
+            "changed": bool(notes),
+            "notes": notes,
+            "before_birthday": row.get("birthday"),
+            "after_birthday": cleaned.get("birthday"),
+        }
+        results.append(entry)
+        if notes:
+            conn.execute(
+                """
+                UPDATE user_profile SET
+                  birthday=?, occupation=?, nickname=?,
+                  preferences=?, commitments=?, updated_at=?
+                WHERE user_key=?
+                """,
+                (
+                    cleaned.get("birthday") or "",
+                    cleaned.get("occupation") or "",
+                    cleaned.get("nickname") or "",
+                    json.dumps(cleaned.get("preferences") or [], ensure_ascii=False),
+                    json.dumps(cleaned.get("commitments") or [], ensure_ascii=False),
+                    __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+                    row.get("user_key"),
+                ),
+            )
+    conn.commit()
+    return results
+
+
+def clean_user_profile_table(db_path: Path, apply: bool) -> list[dict]:
+    """--apply 为写路径（可建 schema、UPDATE、COMMIT）；否则纯只读计划。"""
+    results: list[dict] = []
     if not db_path.exists():
         return [{"error": f"missing {db_path}"}]
-    with closing(sqlite3.connect(str(db_path))) as conn:
-        conn.row_factory = sqlite3.Row
+    with closing(_connect(db_path, write=apply)) as conn:
         try:
-            rows = conn.execute("SELECT * FROM user_profile").fetchall()
-        except sqlite3.OperationalError:
-            # 表尚未创建：触发 schema 后再读
-            try:
-                from shisi.memory.legacy.user_profile import UserProfileStore
-
-                UserProfileStore(db_path)
-                rows = conn.execute("SELECT * FROM user_profile").fetchall()
-            except Exception as e:  # noqa: BLE001
-                return [{"error": f"user_profile table: {e}"}]
-        for r in rows:
-            row = dict(r)
-            for k in ("preferences", "commitments"):
-                try:
-                    row[k] = json.loads(row.get(k) or "[]")
-                except Exception:  # noqa: BLE001
-                    row[k] = []
-            cleaned, notes = _clean_profile_row(row)
-            entry = {
-                "user_key": row.get("user_key"),
-                "changed": bool(notes),
-                "notes": notes,
-                "before_birthday": row.get("birthday"),
-                "after_birthday": cleaned.get("birthday"),
-            }
-            results.append(entry)
-            if apply and notes:
-                conn.execute(
-                    """
-                    UPDATE user_profile SET
-                      birthday=?, occupation=?, nickname=?,
-                      preferences=?, commitments=?, updated_at=?
-                    WHERE user_key=?
-                    """,
-                    (
-                        cleaned.get("birthday") or "",
-                        cleaned.get("occupation") or "",
-                        cleaned.get("nickname") or "",
-                        json.dumps(cleaned.get("preferences") or [], ensure_ascii=False),
-                        json.dumps(cleaned.get("commitments") or [], ensure_ascii=False),
-                        __import__("datetime").datetime.now().isoformat(timespec="seconds"),
-                        row.get("user_key"),
-                    ),
-                )
-        if apply:
-            conn.commit()
-    return results
+            if apply:
+                return _profile_apply(conn)
+            return _profile_plan(conn)
+        except sqlite3.OperationalError as e:
+            # 缺表：dry-run 只报不建（旧实现在 dry 下也会初始化 schema）
+            results.append({"error": f"user_profile table: {e}"})
+            return results
 
 
 def clean_user_facts(sm_db: Path, apply: bool) -> list[dict]:
     results = []
     if not sm_db.exists():
         return [{"error": f"missing {sm_db}"}]
-    with closing(sqlite3.connect(str(sm_db))) as conn:
+    with closing(_connect(sm_db, write=apply)) as conn:
         conn.row_factory = sqlite3.Row
         try:
             rows = conn.execute(
@@ -164,7 +213,7 @@ def seed_profiles_to_ledger(db_users: Path, ledger_path: Path) -> dict:
     ledger = EventLedger(ledger_path)
     seeded = 0
     keys = []
-    with closing(sqlite3.connect(str(db_users))) as conn:
+    with closing(_connect(db_users, write=False)) as conn:
         conn.row_factory = sqlite3.Row
         try:
             keys = [r["user_key"] for r in conn.execute("SELECT user_key FROM user_profile")]
@@ -183,16 +232,15 @@ def seed_profiles_to_ledger(db_users: Path, ledger_path: Path) -> dict:
     return {"seeded": seeded, "keys": len(keys), "ledger": str(ledger_path)}
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--apply", action="store_true")
-    ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--users-db", default=str(ROOT / "data" / "sqlite.db"))
-    ap.add_argument("--agent-db", default=str(ROOT / "data" / "agent_plane.db"))
-    args = ap.parse_args()
-    apply = bool(args.apply) and not args.dry_run
-    users_db = Path(args.users_db)
-    agent_db = Path(args.agent_db)
+def main_with_args(
+    users_db: Path | str, agent_db: Path | str, apply: bool, dry_run: bool,
+    report_path: Path | None = None,
+) -> int:
+    """纯计划对象入口（测试直接调用；CLI 经 main()）。"""
+    apply = bool(apply) and not dry_run
+    users_db = Path(users_db)
+    agent_db = Path(agent_db)
+    out = Path(report_path) if report_path else REPORT_PATH
     print("=== user_profile clean ===")
     prof = clean_user_profile_table(users_db, apply)
     changed = [x for x in prof if x.get("changed")]
@@ -205,22 +253,39 @@ def main() -> int:
     print(f"garbage_facts={len(garb)} apply={apply}")
     for x in garb[:30]:
         print(" ", x)
-    print("=== seed ledger ===")
-    seed_info = seed_profiles_to_ledger(users_db, agent_db)
-    print(seed_info)
+    seed_info: dict = {}
+    if apply:
+        # seed 是写副作用（建账本库 + 落事件）：仅 --apply 允许
+        print("=== seed ledger ===")
+        seed_info = seed_profiles_to_ledger(users_db, agent_db)
+        print(seed_info)
     report = {
         "profile": prof,
         "facts": facts,
         "seed": seed_info,
         "apply": apply,
     }
-    out = ROOT / "data" / "ax_profile_clean_report.json"
-    try:
-        out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-        print("report:", out)
-    except Exception as e:  # noqa: BLE001
-        print("report write fail", e)
+    if apply:
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+            print("report:", out)
+        except Exception as e:  # noqa: BLE001
+            print("report write fail", e)
     return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--users-db", default=str(ROOT / "data" / "sqlite.db"))
+    ap.add_argument("--agent-db", default=str(ROOT / "data" / "agent_plane.db"))
+    args = ap.parse_args()
+    return main_with_args(
+        users_db=Path(args.users_db), agent_db=Path(args.agent_db),
+        apply=bool(args.apply), dry_run=bool(args.dry_run),
+    )
 
 
 if __name__ == "__main__":

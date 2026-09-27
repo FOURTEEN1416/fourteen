@@ -239,6 +239,42 @@ class EventLedger:
             cur = conn.execute(sql, params)
             return cur.rowcount
 
+    def purge_owner_sessions(
+        self, owner_id: int, session_keys: list[str] | None = None,
+    ) -> int:
+        """账号生命周期：清除该账号在账本中的全部事件行（W9）。
+
+        账本键 = 完整会话键；owner 解析在本 owner 内完成——先按
+        ``"{owner_id}:"`` 前缀定位，再并入调用方提供的显式键（如 WS 四段）。
+        返回删除计数。画像事件（profile_update/profile_correct）同样属于被
+        遗忘账号的数据，一并清除（prune 的豁免只针对留存账号的画像写权威）。
+        """
+        uid_prefix = f"{int(owner_id)}:"
+        explicit = [k for k in (session_keys or []) if k]
+        clauses = ["session_key LIKE ?"]
+        params: list[Any] = [uid_prefix + "%"]
+        if explicit:
+            clauses.append(f"session_key IN ({','.join('?' * len(explicit))})")
+            params.extend(explicit)
+        sql = f"DELETE FROM event_ledger WHERE ({' OR '.join(clauses)})"
+        with closing(self._conn()) as conn, conn:
+            cur = conn.execute(sql, params)
+            return int(cur.rowcount or 0)
+
+    def count_owner_sessions(
+        self, owner_id: int, session_keys: list[str] | None = None,
+    ) -> int:
+        uid_prefix = f"{int(owner_id)}:"
+        explicit = [k for k in (session_keys or []) if k]
+        clauses = ["session_key LIKE ?"]
+        params: list[Any] = [uid_prefix + "%"]
+        if explicit:
+            clauses.append(f"session_key IN ({','.join('?' * len(explicit))})")
+            params.extend(explicit)
+        sql = f"SELECT COUNT(*) FROM event_ledger WHERE ({' OR '.join(clauses)})"
+        with closing(self._conn()) as conn:
+            return int(conn.execute(sql, params).fetchone()[0])
+
     @staticmethod
     def _row_to_event(row: sqlite3.Row) -> LedgerEvent:
         try:

@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
 from api.auth_jwt import get_current_user_id, require_role, verify_token
+from api.consent import require_current_consent
 from api.database import User, get_db
 from api.deps import deps
 from api.main_routes import ChatRequest, ChatResponse, CreateSessionRequest
@@ -116,7 +117,8 @@ class _ChatDeliveryResponse(Response):
 async def chat(
     req: ChatRequest,
     _auth: bool = Security(verify_api_key_dep),
-    user_id: int = Security(get_current_user_id),
+    # D13 同意门禁：未同意/旧版本/撤回 → 403 CONSENT_REQUIRED（四通道同源）
+    user_id: int = Security(require_current_consent),
     db: AsyncSession = Depends(get_db),
 ):
     orch = deps.orch
@@ -154,7 +156,8 @@ async def chat(
 async def chat_stream(
     req: ChatRequest,
     _auth: bool = Security(verify_api_key_dep),
-    user_id: int = Security(get_current_user_id),
+    # D13 同意门禁（同 /api/chat）
+    user_id: int = Security(require_current_consent),
     db: AsyncSession = Depends(get_db),
 ):
     orch = deps.orch
@@ -226,7 +229,8 @@ async def chat_stream(
 async def create_session(
     req: CreateSessionRequest,
     _auth: bool = Security(verify_api_key_dep),
-    user_id: int = Security(get_current_user_id),
+    # D13 同意门禁（同 /api/chat）
+    user_id: int = Security(require_current_consent),
 ):
     # 请求体旧 user_id 字段不再决定归属；浏览器只创建 web 会话。
     sessions = deps.sessions

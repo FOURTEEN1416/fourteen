@@ -85,7 +85,6 @@ if not health.get("healthy", False):
 def _register_component_health() -> None:
     for _name, _comp in (
         ("emotion_engine", orchestrator.components.get("emotion")),
-        ("tone_mimic", orchestrator.components.get("tone")),
         ("vector_memory", orchestrator.components.get("vector_memory")),
         ("structured_memory", orchestrator.components.get("structured_memory")),
         ("llm_gateway", orchestrator.components.get("llm")),
