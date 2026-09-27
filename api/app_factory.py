@@ -366,6 +366,14 @@ def create_api_app(
         deps.route_mounts["characters"] = False
         logger.warning("统一角色管理API挂载失败: %s", e)
 
+    # ── 角色模板面（W12 阶段1：无主卡只读暴露 + 服务端克隆）──
+    try:
+        from api.routers.character_template_routes import router as character_template_router
+        _mount_required_router("character_templates", character_template_router)
+    except Exception as e:
+        deps.route_mounts["character_templates"] = False
+        logger.warning("角色模板面API挂载失败: %s", e)
+
     # ── 角色音色绑定 API ──
     try:
         from api.routers.voice_routes import router as voice_router

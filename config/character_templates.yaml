@@ -1,0 +1,13 @@
+# 角色模板面策展清单（W12 阶段1 · 2026-09-27）
+# 语义（api/routers/character_template_routes.py::_load_template_config）：
+#   enabled          总开关；false 时 GET 返回空表、clone 一律 404。
+#                    文件缺失/损坏按 fail-closed 处理（等同 false）。
+#   visible_ids      显式白名单（按卡内 id 字段）；为空 = 开发期放行全部无主卡。
+#                    🔴 生产上线前必须填实——41 张卡为历史遗留存量（含随意命名），
+#                    不得全量暴露给注册用户（任务包 §1.1 红线 2）。
+#   hidden_ids       显式排除，优先级高于白名单（历史测试遗留卡写这里）。
+#   seed_on_register 阶段2（注册分发）使用，本阶段不生效，留空。
+enabled: true
+visible_ids: []
+hidden_ids: []
+seed_on_register: []

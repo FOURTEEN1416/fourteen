@@ -716,3 +716,11 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **🔴 缺陷根治（W9 域，红测先行）**：`api/routers/character_routes.py:576-595` 四行回执计数 `int(await db.execute(...).rowcount or 0)` —— Python 属性访问先于 `await` 求值，`.rowcount` 取在**未 await 协程**上 → `AttributeError`，DELETE `/api/characters/{id}` 自 `abcde64` 必然 500（唯一覆盖它的正是这份没写完的测试）。四行包括号修复；同模式全仓扫描 0 第二处。
 - **验证**：新测试 2 passed（红 `character_routes.py:580` → 绿）；ruff 0.16.8 全仓 All checks passed；W9 三件套 19 passed 零回归；collect-only 2560 / 0 收集错误。**未 push 未部署**。
 - **并行登记**：本窗会话期间他窗向 main 插入 `bbd9bed`（测试契约收口，白名单零交集，线性叠加无冲突）；工作树现存 **W12 在制 6 文件**（`CODE_GRAPH.md`/`docs/DECISION_LEDGER.md`/`api/app_factory.py` 修改 + `api/routers/character_template_routes.py`/`config/character_templates.yaml`/`tests/test_w12_character_templates.py` 未跟踪），本窗未触碰、未卷入提交。
+
+### 2026-09-27 · W12 窗口（角色模板面 阶段1）· 文件归属登记（追加区）
+
+- **W12 独占写入（本批已提交）**：`api/routers/character_template_routes.py`（新）、`config/character_templates.yaml`（新）、`tests/test_w12_character_templates.py`（新）、`api/app_factory.py`（仅挂载块 +8 行）+ LOG/BOARD 本登记。
+- **验收口径**：任务包 7 条全过——无 Bearer 401 / 策展白黑名单 / 克隆 201 归属调用者 A 可见 B 不可见 / 41 卡 sha256 零字节变动 / 模板卡 PUT·DELETE 仍 404 / 机器面不变 / 四分块 2560 精确吻合（唯一失败 A/B 归属他窗）+ ruff 全仓 0 错。
+- 🔴 **待办（生产闸门）**：`config/character_templates.yaml` 的 `visible_ids` 当前为空 = 开发期放行全部无主卡，**生产上线前必须填实策展清单**（41 张为历史遗留存量，任务包红线 2 禁全量暴露）；`seed_on_register` 留空，阶段 2（注册分发钩子+前端接入）另行开窗。
+- **跨窗移交（他窗回归一例，本窗未修，owner 不在白名单）**：`tests/test_reminder_intent_pipeline.py::TestFinalReview::test_call_branch_dispatches_and_injects_meta` 当前为红——单跑即红、还原本窗全部改动后依然红（A/B 实证），首现于 `bbd9bed`「forward 新契约对齐」之后；建议测试契约收口窗认领（疑似 forward/meta 派生契约与其对齐范围有遗漏）。
+- **归属勘误**：上条 W9 收尾登记把 `CODE_GRAPH.md`/`docs/DECISION_LEDGER.md` 记为「W12 在制」——非本窗文件（本窗白名单从未含它们，两文件在本窗开工时即已是 `M` 态，来源应为另一文档窗）；本窗未触碰，仍未认领，请对应 owner 收口。

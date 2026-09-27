@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-09-27 — W12 阶段1 · 角色模板面——无主卡只读暴露与服务端克隆（未 push 未部署）
+
+- **任务**：`docs/board/TASK_PACKAGE_W12_角色模板面.md` B 阶段1（纯后端）：W1 收口归属后 41 张卡全部无主、普通用户不可见 → 新用户冷启动角色列表为空；本批把无主卡以只读模板面暴露给已登录用户，用户「使用」时服务端克隆为私有副本。
+- **交付**：① 新 `api/routers/character_template_routes.py`——`GET /api/character-templates`（Bearer 主体自持契约，无主体 401；仅列无主 `card_owner_key==""` 且过策展的卡摘要，不含 persona 正文；描述截断口径与 `/api/presets` 一致）+ `POST /api/character-templates/{template_id}/clone`（201；不存在/非无主/未过策展/总开关关→统一 404 防枚举；克隆=整卡保真带走+换身份三件事：新 uuid、`user_id=调用者`、`is_active=False`；不调度爬虫/知识索引——W5 ensure_index 冷加载自建）。复用 character_routes 的 `_load_character/_save_character/_list_all_characters/card_owner_key`，零复制。② 新 `config/character_templates.yaml`——enabled/visible_ids/hidden_ids/seed_on_register 四键；**文件缺失/损坏按 fail-closed**（等同 enabled=false），YAML 结构异常同样 fail-closed。③ `api/app_factory.py` 照 `_mount_required_router` 模式挂载（+8 行，route_mounts 新键 `character_templates`）。④ 新 `tests/test_w12_character_templates.py` 11 例（红先：模块不存在全 error → 实现 → 11/11 绿）。
+- **路由前缀陷阱规避**：前缀独立为 `/api/character-templates`，不挂 `/api/characters` 下（会被 `/api/characters/{character_id}` 抢匹配把 `templates` 当 character_id）；内省实证两条路由独立在位、`/api/characters` 48 路由无干扰。
+- **验证**：本窗 11/11（三账号真实登录流，目录/清单沙箱，不触真实 `config/characters/`）；直接邻域（w9_delete/api_routes/w1_identity）40 通过；41 张真实卡 sha256 聚合 **克隆行为全套运行前后完全一致**（`304ffbec…3501`，零字节变动实证）；全量四分块 **2560 收集 = 2558 通过 + 1 跳过 + 1 失败精确吻合**，唯一失败 `test_reminder_intent_pipeline.py::TestFinalReview::test_call_branch_dispatches_and_injects_meta` 经 **A/B 判定归属并行窗**（还原本窗全部改动后依然红；首现于 `bbd9bed` forward 契约收口之后）；ruff 0.16.8 全仓 0 错。
+- **跨窗登记**：本窗会话期间他窗连续落 `bbd9bed`/`da63fcb`/`6558064`/`70082f9` 四提交（测试契约收口 + W9 收尾接管），回归分块跑在移动树上、失败归属均已逐一甄别（W9 文件中途被改写致一次 3 失败假象，改写后复跑即消）；工作树另存他窗文档在制 `CODE_GRAPH.md`/`docs/DECISION_LEDGER.md`（非本窗白名单，未卷入提交）。
+- **遗留/待办**：🔴 `visible_ids` 当前为空=开发期放行全部无主卡，**生产上线前必须填实**（任务包红线 2：41 张为历史遗留存量，不得全量暴露）；阶段 2（注册分发钩子+前端接入）另行开窗，`seed_on_register` 留空待用；`GET` 对 41 卡逐张 `normalize` 的性能（与 `/api/characters` 同构，未额外优化）。**未 push 未部署**。
+
 ## 2026-09-27 — W9 收尾窗 · 角色删除在制测试接管补全 + delete_character 回执计数 await 优先级缺陷根治（未 push 未部署）
 
 - **任务**：接管 W9 实施窗遗留的未跟踪在制 `tests/test_w9_character_delete.py`（原状：4 处 ruff 错——`:67` F821 未定义名 `tmp`、`:10/:11/:97` F401 tempfile/Path/nullcontext——外加 `if False` 死块与未用 `_DBProxy` 脚手架；用户确认原窗已停止后接管）。
