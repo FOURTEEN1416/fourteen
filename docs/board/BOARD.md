@@ -42,6 +42,14 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-27 · 主控 · 全仓历遍（真源文档对齐 + CI 红取证，主检出，未 push 未部署）
+
+- **触发**：默默指令「全仓历遍」。零业务代码 / 零 `tests/**` 改动；实测基线全部吻合 v1.39.1（收集 **2565** / 端点 **229/195** / ruff 0 / 41 卡 / `include_router` 19 / `.py` 总量 477）。
+- **🔴 CI 红取证**：GitHub CI 自 W 批 push 起连红（run `36308183821` @ `13cce50`）——backend **1 failed**：`test_w8_character_expression` 卡目录守卫（CI 无 gitignored 卡，守卫只 skip「目录不存在」不够，`assert paths` 红）；E2E **4 failed**：`w11_journey.spec.ts`（CI 种子无 viewer `w11-b@test.local`、角色库 0）。tsc / vitest 135 / build / adr / ff-* 全绿。修复归 W8/W11/tests owner + 默默裁决，本窗只登记不修。
+- **三端**：本地 = origin（W 批已 push）；服务器停 `f85408f` 落后 **62 提交**（部署归默默裁决）；`13cce50`（`vision_model=agnes-3.0-flash`）无 LOG 条目已补记。
+- **文档对齐**：AGENTS **v1.39.2** + §2/§4.3 基线刷新（2564/135/2565）+ 二十五次注记；CODE_GRAPH **v3.8.24**；MODULES / DATABASE / INDEX / ARCHITECTURE 增量；HANDOFF_REPORT 置顶 09-27 快照；FUNCTION_INVENTORY / P1_BACKLOG 注记；LOG 落账。
+- **登记**：残留 worktree `../ai-girlfriend-w12`（`0762b13`，工作已并入 main）待卸窗（归默默裁决）；D10–D12 已裁决（`2e72227`）候实施窗口。
+
 ### 2026-09-27 · 测试契约收口窗 · 三处跨窗测试债清完（主检出，未 push 未部署）
 
 - **范围**：全量分块审计定位的 3 处确定性失败收口；白名单 `tests/test_integration.py`、`tests/test_w10_metrics_multiproc.py`、`proactive/scheduler.py`（仅 purge 段）+ LOG/BOARD。**未动** W12/W9 在制品与窗③文档地盘（开工前 git status 核对，白名单文件零占用）。

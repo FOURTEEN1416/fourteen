@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-09-27 — 主控 · 全仓历遍（真源文档对齐 + GitHub CI 红取证；本条补记 `13cce50` 视觉接线）
+
+- **触发**：默默指令「全仓历遍」。零业务代码、零 `tests/**` 改动；只读扫描 + 真源文档对齐。
+- **🔴 CI 红取证（最高优先发现）**：GitHub CI 自 W1–W12 批次 push 起 main 连续红（run `36308183821` @ `13cce50`；`2e72227` 同红；最后绿 = 09-26 docs）。backend + frontend 两 job 失败，根因各一：
+  - **backend 1 failed**：`tests/test_w8_character_expression.py::test_all_shipped_cards_are_lossless_and_idempotent` 断言 `assert paths, "角色卡目录存在但无卡文件"`（`:293`）。守卫只对「目录不存在」skip（`:290-291`），而 CI checkout 后 `config/characters/` 目录存在但无卡（该目录被 gitignore、git 不投递内容；CI 上目录由更早流程创建）→ 落入断言。本地 41 卡故全绿。属「依赖 gitignored 资产的机检必须缺件即 skip」既有纪律的漏网（W8 新测试首次上 CI）。修法：守卫改「`*.json` 为空即 skip」。
+  - **frontend E2E 4 failed** 全在 W11 自带 `e2e/w11_journey.spec.ts`：① D1 `:101` / D4 `:190` / 账号维度 `:238` 在 `uiLogin` 等待跳转超时——viewer 账号 `w11-b@test.local` 只在该文件 `:242` 的测试内自注册，CI 种子（`scripts/e2e_setup.py` + `E2E_ADMIN`）不建 viewer，登录必然失败（本地窗内已有该账号）；② D2 `:158` 断言「角色库应非空（config/characters）」收到 0——同一 gitignore 陷阱在 E2E 面显形。修法：spec 侧加「CI 无卡/无 viewer」显式 skip 守卫，或 CI 种子补 viewer + 投递最小卡集；**未自决，归 W8/W11/tests owner + 默默裁决**。其余门禁全绿（tsc / vitest 135 / build / adr-integrity / ff-* 五件）。
+- **三端状态实测**：本地 = origin/main（`0/0`，W 批已于 09-27 push——`2e72227` 那笔 run 实际携带整批）；服务器仍停 `f85408f`（09-26 上线），**落后 62 提交**（`git rev-list f85408f..HEAD`），部署归默默裁决。**`13cce50` 补记**：视觉接线仅动 `config/system.yaml`（multimodal 段 `vision_model` 填 `agnes-3.0-flash`）——auto 模式由 VisionHandler 描述注入升级为多模态直传，闸门值与链首实际服务模型一致（默默确认 Agnes 具备视觉）；该提交当时无 LOG 条目，于此补记。
+- **定量基线实测（与 v1.39.1 口径全吻合）**：收集 **2565**；`create_api_app` 内省 **229 APIRoute / 195 唯一路径**（len=233；111 GET / 82 POST / 16 PUT / 20 DELETE；`include_router` 19；W9 五端点与 W12 两端点逐条在位实查）；ruff 全仓 0 错；41 卡在位；测试文件 169（+1 = `test_w9_selfservice_endpoints.py`）；`.py` 总量 **477**（模块 283 + 根级 2 + `scripts/` 18 + `tests/` 171 + `deploy/` 3，find 实测）。
+- **文档对齐（本条改动面）**：AGENTS **v1.39.2** 版本条目 + §2 QA 行 / §4.3 基线自 09-23 旧口径（1897/98）刷新至 **2564/135/2565** + 二十五次注记；CODE_GRAPH **v3.8.24**（版本头推进 + 最后核实 09-27 + CI 红登记 + 修订历史行）；MODULES / DATABASE / INDEX / ARCHITECTURE 四地图 09-20/21 陈旧口径增量刷新（DATABASE 补 `user_active_characters`（users.db 第 9 表）/ `memory_extraction_progress` + `fact_deletion_watermarks`（legacy 记忆库）/ 新库 `runtime_plane.db` / `lifecycle_jobs` 等文件账）；HANDOFF_REPORT 置顶 09-27 快照；FUNCTION_INVENTORY 注记 W 批 API 面（角色模板端点阶段 2 前端挂起）；P1_BACKLOG 开放项核对注记（六项均不受 W 批影响）；BOARD 追加区本条。**本地提交，未 push。**
+- **其他登记**：残留 worktree `../ai-girlfriend-w12`（`0762b13`，其工作已并入 main `b6501e4`）待卸窗（删除归默默裁决）；`test_favorite`/`test_list_favorites` 无参 FavoriteManager 写真库（BOARD 09-27 已登记的存量债，不重复处置）；D10–D12 已由默默裁决（`2e72227` 落账：D10 接线完善 / D11 b+c / D12 K 修复 + L 小说模式接线）——AGENTS v1.39 条「🅿️ 待裁决」表述由此条取代，实施候窗口。
+
+---
+
 ## 2026-09-27 — 主控 · W9 自服务生命周期端点接线 + 全量终验（未 push 未部署）
 
 - **来源**：窗③ `76317ff` 的「文档与代码不一致」登记——BOARD W9 条声称的四个自服务端点在 main 上不存在（库层三函数自 `abcde64` 起为无 HTTP 面的孤岛，6 例库级测试全走直调故从未暴露）。用户指令「后续优化本窗一次性完成」→ 主控直收。

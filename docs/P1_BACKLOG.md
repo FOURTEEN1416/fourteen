@@ -1,7 +1,8 @@
 # P1 Backlog - 唯一的你
 
 **Created**: 2026-06-03
-**Last Updated**: 2026-09-20（全面升级根治批次：MEM-USER-1 user_facts 完整隔离、B3 配置接线、B4 回忆强化、B5 回收站、B6 刻度真源+持久化 **均已落地**；既有未决项 FF-0007/P1-9~11/OBS-2/OBS-3/FE-ENV-1 不受影响）
+**Last Updated**: 2026-09-27（全仓历遍核对：开放项 FF-0007/P1-9~11/P1-13/OBS-2/OBS-3/FE-ENV-1 均不受 W1–W12 批次影响，无新增未决项；⚠️ P1-10 的 CI 观察对象当前为**红**——backend 1 failed（W8 卡目录守卫 vs gitignore 陷阱）+ E2E 4 failed（w11_journey viewer 种子/无卡），根因与修法见 CODE_GRAPH v3.8.24 与 LOG 2026-09-27 历遍条）
+**Previous**: 2026-09-20（全面升级根治批次：MEM-USER-1 user_facts 完整隔离、B3 配置接线、B4 回忆强化、B5 回收站、B6 刻度真源+持久化 **均已落地**；既有未决项 FF-0007/P1-9~11/OBS-2/OBS-3/FE-ENV-1 不受影响）
 **Previous**: 2026-09-20（全仓扫描·在制品收口批次：错误占位污染 chat_history 结案；FrequencyController/analytics/important_dates 墙钟收口；**仍开放** user_facts 无用户维度 + W-D §八 B3-B6 待裁决 + 既有未决项）
 **Previous**: 2026-09-19（前端审美升级+移动端优化批次收口：FE-0001 结案——StatusCenter 双列栅格+统一壳，宽屏留白实证收敛；其余未决项 FF-0007/P1-9~11/OBS-2/OBS-3/FE-ENV-1 不受影响）
 **Previous**: 2026-09-19（前端修复批次收口：六十九号诊断五项建议已于七十号全落地 [3728a87]；新增遗留项 FE-0001 状态中心宽屏留白；其余未决项 FF-0007/P1-9~11/OBS-2/OBS-3 不受影响）

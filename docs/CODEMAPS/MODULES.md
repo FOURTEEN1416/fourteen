@@ -1,11 +1,12 @@
 # 后端业务模块地图
 
+> **✅ 2026-09-27 全仓历遍增量刷新**：W1–W12 批次后全量 find 实测——`api` 45→**48**（+`lifecycle.py`、`consent.py` 扩展、`routers/auth_routes.py`、`routers/character_template_routes.py` 等）、**routers 22→25**、`utils` 16→**19**（+`url_guard`/`tool_state`/`inbound_context`/`deletion_guard`）、`tools` 10→**13**（+`url_guard.py`/`tool_state.py`）、`voice` 6→**8**（+`voice_catalog.py` 等）、`proactive` 6→**10**（+`runtime_plane.py`/`runtime_assembly.py`；递归 find 口径）、`shisi` **116** 不变（+`knowledge/source_store.py` 增量在内）、`llm_provider` 5→**4**（实测）；`.py` 总量 389→**477**（模块 283 + 根级 2 + `scripts/` 18 + `tests/` 171 + `deploy/` 3；旧行「总文件 406」与分项 389 自相矛盾，一并勘误）；端点 **229/195**。权威口径以 `CODE_GRAPH.md` **v3.8.24** 为准。
 > **✅ 2026-09-20 全仓历遍刷新**：`orchestrator` 7→**9** 文件（+`tool_gate.py` / `context_budget.py`，09-20 新模块，此前两版刷新均漏登）、`proactive` 5→**6**（+`reminder_delivery.py`，09-20）、`shisi` 115→**116**、新增 **`utils/`** 行（此前整节缺失）；`optimized_orchestrator.py` 1050→**1270 行**。权威口径以 `CODE_GRAPH.md` **v3.8.16** 为准。
 > **✅ 2026-09-20 增量刷新**：在 09-19 全量刷新基线上补齐 09-19 晚通道隔离批次（wechat_direct 2→5 文件、api 44→45、routers 21→22）。
 > **⚠️ 09-17 死代码清洗留痕**：`shisi/wechat/command_handler.py`/`command_parser.py`（微信指令系统）已删除，正文已同步。
 
-**最近更新:** 2026-09-21
-**Python 版本:** ≥3.10 | **总文件:** **406** 个 .py（find 实测：模块 283 + 根级 2 + `scripts/` 11 + `tests/` 92 + `deploy/` 1；**不含** `frontend/` 与工作区内嵌的 `大创赛报名以及后期发展/` 目录）
+**最近更新:** 2026-09-27
+**Python 版本:** ≥3.10 | **总文件:** **477** 个 .py（2026-09-27 find 实测：模块 283 + 根级 2 + `scripts/` 18 + `tests/` 171 + `deploy/` 3；**不含** `frontend/` 与工作区内嵌的 `大创赛报名以及后期发展/` 目录）
 
 ---
 
@@ -14,18 +15,18 @@
 | 模块 | 文件数 | 路径 | 职责 | 状态 |
 |------|--------|------|------|------|
 | **shisi** | 116 | `shisi/` | DDD 核心域（角色/情感/记忆/故事线/知识库等，v2 死模块删除后口径） | ✅ 活跃 |
-| **api** | 45 | `api/` | FastAPI 路由层（22 routers + app_factory/achievement_engine/state 等） | ✅ 活跃 |
+| **api** | 48 | `api/` | FastAPI 路由层（25 routers + app_factory/achievement_engine/state 等） | ✅ 活跃 |
 | **my_character** | 12 | `my_character/` | 情感引擎 + 角色引擎（批6b 项10 + v1.35 死码清除：21→12，删 enhanced_prompt_engine/emotion_memory/persona_evaluator/style_enhancer_v2/style_enhancer/anchor_protection/constraint_validator/contextual_behavior/evolution_engine 8 模块） | ✅ 活跃 |
 | **persona_extractor** | 13 | `persona_extractor/` | 人格提取与注入（+web_enricher 网络画像增强） | ✅ 活跃 |
-| **utils** | 16 | `utils/` | 公共工具：`local_time`（墙钟真源）/`fallback_lines`/`affinity_state`/`reply_mode`/`async_utils`/`important_dates`/`health_check`/`project_paths`/`bootstrap`/`character_helpers`/`prompt_sanitize`/`session_key`（会话键唯一解析，脊柱重构）/`llm_bridge`（LLM→同步桥）/`emotion_state`（按 user_key::character_id 情感状态）/`json_state`（data/*.json 原子写+flock） | ✅ 活跃 |
+| **utils** | 19 | `utils/` | 公共工具：`local_time`（墙钟真源）/`fallback_lines`/`affinity_state`/`reply_mode`/`async_utils`/`important_dates`/`health_check`/`project_paths`/`bootstrap`/`character_helpers`/`prompt_sanitize`/`session_key`（会话键唯一解析，脊柱重构）/`llm_bridge`（LLM→同步桥）/`emotion_state`（按 user_key::character_id 情感状态）/`json_state`（data/*.json 原子写+flock）/`url_guard`（SSRF 守卫，W6）/`tool_state`（工具开关库存，W6）/`inbound_context`（入站幂等，W3）/`deletion_guard`（迟到写入丢弃，W9） | ✅ 活跃 |
 | **observability** | 8 | `observability/` | 可观测性（日志/指标/健康检查/sentry/优雅停机；tracing 于 v1.35 删——span/start_trace 全仓零调用） | ✅ 活跃 |
-| **tools** | 10 | `tools/` | 工具系统（12 个内置工具） | ✅ 活跃 |
+| **tools** | 13 | `tools/` | 工具系统（12 个内置工具 + `url_guard`/`tool_state` 基础设施，W6） | ✅ 活跃 |
 | **orchestrator** | 9 | `orchestrator/` | 编排器（主类/init/stream mixin/会话锁/语音检测/console_chat/**tool_gate**/**context_budget**） | ✅ 活跃 |
 | ~~character_card~~ | 0 | ~~`character_card/`~~ | 角色卡解析/验证/构建/集成 —— **整包 6 文件已于批6b 项10 删除**（`CharacterCardAdapter` 零读者挂线，角色卡运行真源为 `persona_service._load_character_card` 直读 + `shisi/character/` PNG 子系统） | ❌ 已删 |
-| **voice** | 6 | `voice/` | 语音合成（MiMo 唯一引擎，08-28 收敛） | ✅ 活跃 |
-| **llm_provider** | 5 | `llm_provider/` | LLM 多供应商网关 | ✅ 活跃 |
+| **voice** | 8 | `voice/` | 语音合成（MiMo 唯一引擎，08-28 收敛；+`voice_catalog.py` 音色持久化，W7） | ✅ 活跃 |
+| **llm_provider** | 4 | `llm_provider/` | LLM 多供应商网关（09-27 实测 4 文件） | ✅ 活跃 |
 | **security** | 5 | `security/` | 安全过滤与加密 | ✅ 活跃 |
-| **proactive** | 6 | `proactive/` | 主动消息推送（ase_engine/scheduler/frequency/reflection/**reminder_delivery**） | ✅ 活跃 |
+| **proactive** | 10 | `proactive/` | 主动消息推送（ase_engine/scheduler/frequency/reflection/reminder_delivery/**runtime_plane**/**runtime_assembly**，W3 后台单一运行时） | ✅ 活跃 |
 | **clone_training** | 4 | `clone_training/` | 克隆训练（数据清洗/数据提取/风格分析） | ✅ 活跃 |
 | **multimodal** | 3 | `multimodal/` | 多模态处理（image_attachment/multimodal_processor） | ✅ 活跃 |
 | **wechat_direct** | 5 | `wechat_direct/` | 微信直连（**每人独立通道**：connector_registry/channel_paths/peer_character/wechat_connector） | ✅ 活跃 |

@@ -1,7 +1,9 @@
 # 数据库地图
 
-**最近更新:** 2026-09-20
+**最近更新:** 2026-09-27
 **数据库:** SQLite (主, aiosqlite) + ChromaDB (向量) + 文件系统 (角色卡/知识库)
+
+> **✅ 2026-09-27 全仓历遍增量**：① `data/users.db`（api/database.py 模型 8→**9 表**）+`user_active_characters`（W1 `94ed63d`：激活归属唯一 owner；`users.id` AUTOINCREMENT 表重建 + 引擎级 `PRAGMA foreign_keys=ON`，W9）；② `data/sqlite.db`（legacy 记忆库）+`memory_extraction_progress`（抽取租约+来源 id 水位）+`fact_deletion_watermarks`（删除水位，09-26 批）；③ **新库** `data/runtime_plane.db`（W3：运行平面跨进程 CAS 账，WAL）；④ 文件账：`data/lifecycle_jobs/`（W9 五阶段作业账+坟场）、`data/runtime_switches.json`（W6 工具开关）、`data/voice_catalog.json`（W7 音色）、`config/character_templates.yaml`（W12 策展清单）。下文旧「8 表」口径为 09-20 实测。
 
 ---
 

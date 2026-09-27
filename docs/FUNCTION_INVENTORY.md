@@ -4,6 +4,7 @@
 > **基准声明（08-28 用户裁决）**：功能对齐的意图基准 = `docs/history/` 历史设计文档（05-19 立项核心特性、05-24 多用户设计——记录了产品所有者的原始想法）；实况基准 = 本清单所引代码。实拍截图不作对齐依据。
 > **编号规则**：`<页面KEY>-<序号>`，如 `ROLES-2`。对话时直接报编号 + 期望。
 > **维护纪律**：页面功能变更时同步本清单对应条目；新页面入册必须带代码证据（文件:行）。
+> **时效注记（2026-09-27 全仓历遍）**：本清单最后全量刷新为 09-20 前口径；2026-09-27 W1–W12 批次改动大量功能面——角色模板 API 面（`GET /api/character-templates` + `POST /api/character-templates/{id}/clone`，阶段 2 前端挂起故暂无页面条目）、自服务端点（`consent/withdraw|status`、`account/delete`、`account/export(+ /chats)`）、安全面板/角色设置 tab/主动面板前端契约统一、备份恢复/`/api/ready`/`/api/metrics`、跨角色转发派生（`GET /api/characters/{id}/forwards`）等。**引用本清单定位功能前，先对 `CODE_GRAPH.md` v3.8.24 与端点实况**；页面级入册待阶段 2 落地后补。
 
 ---
 

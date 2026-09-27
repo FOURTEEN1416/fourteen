@@ -1,8 +1,8 @@
 # 架构地图
 
-**最近更新:** 2026-09-20
+**最近更新:** 2026-09-27
 **演进阶段:** Phase 14 (投产准备) → Phase 15 (品牌清洗) → Phase 16 (P0 全面修复 + CI 加固) → Phase 17 (全仓性能/正确性扫描) → Phase 18 (每人独立微信通道)
-**数据口径:** 端点与模块数均为 2026-09-21 实测（`create_api_app()` 内省 + 文件扫描），非文档估算值。**批6b 项10 死码清除**：顶层 `character_card/` 包（6 文件，零读者）已删除——角色卡运行真源为 `persona_service._load_character_card` 直读 + `shisi/character/` PNG 子系统；下节「工具层」中的 `character_card` 是 **CharacterCrawlerTool**（builtin 工具标签），与被删的同名包无关，仍存活
+**数据口径:** 端点与模块数均为 2026-09-21 实测（`create_api_app()` 内省 + 文件扫描），非文档估算值。**批6b 项10 死码清除**：顶层 `character_card/` 包（6 文件，零读者）已删除——角色卡运行真源为 `persona_service._load_character_card` 直读 + `shisi/character/` PNG 子系统；下节「工具层」中的 `character_card` 是 **CharacterCrawlerTool**（builtin 工具标签），与被删的同名包无关，仍存活。**✅ 2026-09-27 历遍增量**：端点 **229 APIRoute / 195 唯一路径**（W1–W12 批次 + W9 自服务端点 +5：`consent/withdraw|status`、`account/delete|export(+ /chats)`）；api 48 文件 / 25 routers、proactive 10（+runtime_plane/runtime_assembly）、utils 19、tools 13、voice 8（+voice_catalog）、`shisi/knowledge/source_store.py` 源材料唯一 owner；详见 CODE_GRAPH **v3.8.24**
 
 ---
 

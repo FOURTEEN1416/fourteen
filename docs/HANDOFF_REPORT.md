@@ -1,5 +1,14 @@
 # 唯一的你·十四 — 新窗口交接（2026-09-26 本地归属重构）
 
+## 当前实施快照（2026-09-27 全仓历遍刷新——优先于下方 09-26 快照）
+
+- **三端**：本地 = origin/main（`13cce50`：W1–W12 十一窗批次 + W9 自服务端点接线 + D10–D12 裁决落账 + vision 接线均已 push GitHub）；**服务器仍停 `f85408f`（09-26 上线），落后 62 提交，部署归默默裁决**。
+- **终验口径（09-27）**：后端收集 2565 / 2564 通过 / 1 跳过 / 0 失败（41 卡）+ 前端 vitest 135 / tsc 0 错 + ruff 全仓 0 错；端点 229 APIRoute / 195 唯一路径；徽章 2699。
+- **🔴 GitHub CI 红（push 后未修复，接手先看）**：backend 1 failed = `tests/test_w8_character_expression.py::test_all_shipped_cards_are_lossless_and_idempotent`（卡目录守卫只 skip「目录不存在」，CI 无 gitignored 角色卡 → 目录存在但空 → `assert paths` 红）；frontend E2E 4 failed = `e2e/w11_journey.spec.ts`（CI 种子无 viewer `w11-b@test.local`、角色库 0）。修复归 W8/W11/tests owner，候默默裁决。其余门禁（tsc / vitest 135 / build / adr / ff-*）全绿。
+- **已裁决待实施**：D10 关系阈值解锁接线 / D11 敏感维度落库+删号级联 / D12 表情包 ZIP 落库 + 生理指标接小说模式（`2e72227`，语境=大赛未晋级转产品完善）。
+- **开放项**：W12 阶段 2（注册钩子+前端）、自服务端点前端接入、`config/character_templates.yaml` `visible_ids` 生产前必须填实、W9 前端面与 D13 存量重新同意策略、W3 域 6 例 WAL flaky 的 Linux/生产复跑。
+- 下方 09-26 快照描述已上线的归属重构批次，仍然有效；其后批次逐条见 `LOG.md` 2026-09-27 各条与 `AGENTS.md` v1.39.x 版本头。
+
 ## 当前实施快照（优先于下方历史批注）
 
 - 范围：全链“谁说了什么”修复，用户授权激进重构。本地基点 `f9e27a3`；**已于 2026-09-26 22:04 上线生产**，三端一致到 `f85408f`（含上线后跨环境依赖补漏），线上已获得本批修复。
