@@ -17,7 +17,6 @@ from typing import Any
 from context.world_info_provider import WorldInfoProvider
 from llm_provider import get_llm
 from my_character.emotion_engine import EmotionEngine
-from my_character.tone_mimic import ToneMimic
 from observability.config_manager import ConfigManager
 from observability.health import health_checker
 from security.content_safety import ContentSafetyFilter
@@ -158,9 +157,9 @@ class _InitPhasesMixin:
             emotion_engine=self.components["emotion"],
             anchor_verification_enabled=anchor_verification,
         )
-        self.components["tone"] = ToneMimic(
-            chroma_path=str(_project_root / "data" / "chroma_db")
-        )
+        # W9（D6/D12）：编排侧 ToneMimic 控制链删除——生产聊天链对
+        # components["tone"] 零读取（检索/人设风格层均不消费），唯一在用消费者
+        # training_routes 自带按需构造回退；启动期 Chroma/ONNX 装载纯属浪费。
 
     # ─────────────────────────────────────────────────────────────
     #  阶段 3: Memory / ASE / Scheduler / Tools / RAG
@@ -419,7 +418,6 @@ class _InitPhasesMixin:
             vector_memory=rag_vm,
             structured_memory=rag_sm,
             semantic_memory=rag_sem,
-            tone_mimic=self.components["tone"],
         )
         logger.info("使用 shisi knowledge 适配层 (ShisiKnowledgeAdapter)")
 
@@ -514,11 +512,6 @@ class _InitPhasesMixin:
                 inject_persona=pe_inject,
                 enable_mental_health=pe_mh,
             )
-            # 注入 ToneMimic 引用
-            if "tone" in self.components:
-                self.components["persona_extractor"].set_tone_mimic(
-                    self.components["tone"]
-                )
             # 异步初始化
             self._run_async(
                 self.components["persona_extractor"].initialize()
