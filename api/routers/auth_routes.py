@@ -30,9 +30,11 @@ from api.auth_jwt import (
 )
 from api.consent import (
     CURRENT_AGREEMENT_VERSION,
+    consent_state_of,
     has_consented,
     latest_consent,
     record_consent,
+    withdraw_consent,
 )
 from api.database import User, UserSession, get_db
 from api.password_policy import PasswordStr, ensure_password_strength
@@ -497,3 +499,80 @@ async def _revoke_all_sessions(db: AsyncSession, user_id: int) -> int:
     for session in sessions:
         await db.delete(session)
     return len(sessions)
+
+
+# ═══════════════════════════════════════════════════════
+# W9 自服务生命周期端点（D13）：撤回 / 状态 / 注销 / 导出
+# 库层唯一真源：api/consent.py + api/lifecycle.py（本文件只做 HTTP 接线，
+# 不复制任何判定逻辑；BOARD W9 条目声称的四端点自此真实在位）
+# ═══════════════════════════════════════════════════════
+
+
+@router.post("/consent/withdraw")
+async def post_consent_withdraw(
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """撤回同意（D13）：落 WITHDRAWN 哨兵档，四通道外发即刻停发（fail-closed）。"""
+    await withdraw_consent(db, user_id)
+    state = await consent_state_of(db, user_id)
+    return {"status": state}
+
+
+@router.get("/consent/status")
+async def get_consent_status(
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """当前同意状态：granted / missing / withdrawn / outdated。"""
+    state = await consent_state_of(db, user_id)
+    return {"status": state, "agreement_version": CURRENT_AGREEMENT_VERSION}
+
+
+@router.post("/account/delete")
+async def post_account_delete(
+    user_id: int = Security(get_current_user_id),
+):
+    """自助注销（D13）：立即冻结（停用 + 撤会话 + 坟场 + 写入封禁），清除异步进行。
+
+    响应只含作业受理（queued/purging），**不含任何「已删除」宣称**（W9 纪律）。
+    """
+    from api import lifecycle as _lifecycle
+
+    return await _lifecycle.self_service_delete(int(user_id), background=True)
+
+
+@router.get("/account/export")
+async def get_account_export(
+    user_id: int = Security(get_current_user_id),
+):
+    """账号全量导出清单（D13 §2.1）：类别计数 + 本人会话键清单。"""
+    from api import lifecycle as _lifecycle
+
+    return await _lifecycle.export_account_manifest(int(user_id))
+
+
+@router.get("/account/export/chats")
+async def get_account_export_chats(
+    session_key: str,
+    before_id: int = 0,
+    limit: int = 500,
+    user_id: int = Security(get_current_user_id),
+):
+    """分页导出本人某会话的聊天原文。
+
+    归属门禁：session_key 必须属于本人（owner 前缀 / user_key 判据），
+    他人会话一律 404（不泄露存在性，防越权枚举）。
+    """
+    from api import lifecycle as _lifecycle
+
+    limit = max(1, min(1000, int(limit)))
+    sm = _lifecycle._export_sm(None, None)
+    owned = await asyncio.to_thread(
+        _lifecycle._owned_session_keys_sync, sm, int(user_id)
+    )
+    if session_key not in set(owned):
+        raise HTTPException(status_code=404, detail="session not found")
+    return await asyncio.to_thread(
+        _lifecycle.export_chats_page, sm, session_key, int(before_id), limit
+    )

@@ -58,7 +58,11 @@
 | 方法分布 | 105 GET / 79 POST / 16 PUT / 20 DELETE | **108 GET / 80 POST / 16 PUT / 20 DELETE** | +3 GET / +1 POST |
 | `include_router` 处数 | 19 | **19** | 不变 |
 
+> **同日补记（主控·W9 自服务端点接线）**：上表为 `b6501e4` 口径；接线后实测 **APIRoute 229 / 唯一路径 195 / `len(app.routes)`=233**，方法分布 **111 GET / 82 POST / 16 PUT / 20 DELETE**（+5：POST `consent/withdraw`、GET `consent/status`、POST `account/delete`、GET `account/export`、GET `account/export/chats`——纯 HTTP 接线，判定零复制，库层唯一真源 `api/consent.py` / `api/lifecycle.py`）。
+
 > ⚠️ **W9 未落库项（文档与代码不一致，已登记，本窗不改代码）**：`LOG.md` 2026-09-27 W9 条与 BOARD W9 追加区称新增 HTTP 端点 `/api/auth/consent/withdraw|status`、`/api/auth/account/delete`、`/api/auth/account/export(+ /account/export/chats)`——**main 上不存在**：`abcde64` 文件清单不含 `api/routers/auth_routes.py`，内省 `/api/auth/*` 仅 9 条（register/login/refresh/logout/me/consent/change-password/admin-reset-password/register-invite），无 consent/withdraw 与 account/*。W9 的 `test_w9_consent_gate_export.py`（6 例）实为**库级直调**（`consent.withdraw_consent` / `lifecycle.delete_account_everywhere` / export manifest），故无回归暴露。**owner = `api/routers/auth_routes.py`（W1/W9 叠加区）**。
+>
+> **✅ 上项已关闭（同日主控接线）**：五端点已入 `auth_routes.py`（红测先行 `tests/test_w9_selfservice_endpoints.py` 5 例：无主体 401 自持契约 / 撤回-重同意状态机 / 冻结不宣称 deleted / 导出清单只含本人 / `export/chats` 越权 session_key 404；邻域 68/68 绿）——「文档与代码不一致」自此消除，LOG/BOARD W9 条所述端点自此**真实在位**。
 
 **同批落库但非新模块**（跨窗声明，见 `docs/board/BOARD.md` W9 追加区）：`api/database.py`（FK pragma + `users.id` AUTOINCREMENT 表重建迁移）、`api/routers/admin_routes.py`（delete 接 lifecycle）、`api/routers/character_routes.py`（delete 接 owner 粒度清理）。
 

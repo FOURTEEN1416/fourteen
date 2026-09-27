@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-09-27 — 主控 · W9 自服务生命周期端点接线 + 全量终验（未 push 未部署）
+
+- **来源**：窗③ `76317ff` 的「文档与代码不一致」登记——BOARD W9 条声称的四个自服务端点在 main 上不存在（库层三函数自 `abcde64` 起为无 HTTP 面的孤岛，6 例库级测试全走直调故从未暴露）。用户指令「后续优化本窗一次性完成」→ 主控直收。
+- **红→绿**：`tests/test_w9_selfservice_endpoints.py` 首跑 **5/5 全 404**（路由整体缺失）→ `auth_routes.py` 接线 **+5 端点**（POST consent/withdraw、GET consent/status、POST account/delete、GET account/export、GET account/export/chats）→ **5/5 绿**。判定零复制（库层唯一真源）；`export/chats` 带会话归属门禁（他人 session_key 404 防越权枚举）。过程自纠：夹具漏挂 `get_db` override 曾触碰真实 dev 库——核查 **零污染**（uid7 无残留行）后修复留痕。
+- **验证**：单文件 5/5；邻域 **68/68**（W9 五件 + auth 三件 + W12）；全量五分块终验 **2565 收集 / 2564 通过 / 1 跳过 / 0 失败**（488/421/827/802/27 精确吻合；上轮 6 例 WAL flaky 本轮未复现）。🔴 **外部守卫现象升格**：本轮 **5/5 块全部**被 `[safe-delete] BULK_CONFIRM` 在 [100%] 后硬停（temp 清理过阈值 50）→ 汇总行丢失 + exit=1——与用例成败完全无关；**判读纪律以「[100%] 进度 + 无 F/E 标记 + collected 数」三证据为准**（本轮已逐块核验）。内省 **229/195**（+5 路由在位）；ruff 改动文件 0 错。
+- **文档同步**：CODE_GRAPH 端点增量表补记（229/195/233）+ W9「未落库项」登记加 ✅ 关闭标记；README 徽章 2688→2699 + 口径块刷新；AGENTS §0 刷新 + v1.39.1 版本条目。**未 push、未部署。**
+
 ## 2026-09-27 — 文档收口窗 · W1–W12 多窗落库收口（AGENTS v1.39 / README 徽章 / DECISION_LEDGER D10–D12 / CODE_GRAPH 增量 / 全量五分块）（未 push 未部署）
 
 - **任务**：为 2026-09-27 单日多窗协同（W1–W12）出具文档收口——AGENTS v1.39 版本条目 + §0 口径刷新、README 徽章与测试口径刷新、`DECISION_LEDGER` 补 D10/D11/D12（W8 登记的 D 类三项，**只补行不代裁**）、`CODE_GRAPH` 追加 W 批次新模块与端点增量、全量分块回归作徽章唯一来源、LOG + BOARD 收口条目。**零业务代码改动、零 `tests/**` 改动**；白名单 = `AGENTS.md`/`README.md`/`docs/DECISION_LEDGER.md`/`CODE_GRAPH.md`/`LOG.md`/`docs/board/BOARD.md`。**全程未 push、未部署、未 SSH、未读真实 `.env`/凭证**。
