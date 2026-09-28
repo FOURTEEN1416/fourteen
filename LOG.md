@@ -16,6 +16,7 @@
 - **验证**：全量五分块 **2652 收集 / 2651 通过 / 1 跳过 / 0 失败**（534+1 / 556 / 565 / 485 / 511，较 W18 基线净增 3=本批用例；**41 卡零净增**、注册流沙箱守卫在位）+ ruff 0（B023 闭包晚绑定已修）+ pre-commit 四门禁全过；服务器二次快进 `9141afa→2ebfc61`（blob `095ecb2` 三端一致）+ 重启复验：**17:14:59 恰为 4 worker 并发首迁场景复跑——挂载 4/4、时间戳扫描 ERROR/duplicate/locked 0、调度器 1 master + 3 slave**、health/ready 200、shisi 面 16/16 全 200。GitHub CI run `36402213711` @ `2ebfc61` **全绿**（backend+frontend+六 ff 闸+adr-integrity 全 success，run 完结复核 conclusion=success）。
 - **过程并行事实**：本批执行期间默默另窗落 `1543294`（B 档四文档、四 gitignored 残留目录 `.browser_profile//outputs//.workbuddy*` 全删≈258M）——纯文档零代码，与服务器代码面正交；「保留待裁」三项据此闭合。
 - **文档**：AGENTS **v1.39.6**（三端一致 2ebfc61 / 徽章 2828 / QA 行 CI 口径）+ HANDOFF 开放项「服务器部署」闭合 + BOARD 追加区落账。纯文档批不入服务器（默默重申铁律，服务器 HEAD 停 `2ebfc61` 代码一致点）。
+- **磁盘巡检与「确定无用即删」执行（同日默默令）**：服务器 40G 盘用 61%（余 16G、inode 2%）健康无告警；大头 `.venv` 5.8G（运行时必留）、containerd 5.7G、alumni 项目 2.2G。**已删 12 件散备份**（`data/` 下 09-15/19/21/24 系 `.bak*` 全部早于或被 09-26 manifest 全量备份取代，删前逐件时间戳取证）+ **journal 压缩 183M→53.7M**；**保留** `backups/release-20260926-220406-010259e`（129M，manifest 全量=唯一完整回滚点）与 `*.backup-20260927` 两件（现库与 manifest 之间唯一中间点）；docker 无 dangling，449.9MB「可回收」属他项目 tag 回滚候选——不满足「确定无用」判据，未动。删后核验：服务 active、health ok、`PRAGMA integrity_check` ok。
 
 ## 2026-09-28 — 主控 · 卸窗收编批：w13–w17 五窗卸载 + 分支清册 + 垃圾清除 + 功能面实核
 
