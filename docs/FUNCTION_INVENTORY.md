@@ -4,7 +4,9 @@
 > **基准声明（08-28 用户裁决）**：功能对齐的意图基准 = `docs/history/` 历史设计文档（05-19 立项核心特性、05-24 多用户设计——记录了产品所有者的原始想法）；实况基准 = 本清单所引代码。实拍截图不作对齐依据。
 > **编号规则**：`<页面KEY>-<序号>`，如 `ROLES-2`。对话时直接报编号 + 期望。
 > **维护纪律**：页面功能变更时同步本清单对应条目；新页面入册必须带代码证据（文件:行）。
-> **时效注记（2026-09-27 全仓历遍）**：本清单最后全量刷新为 09-20 前口径；2026-09-27 W1–W12 批次改动大量功能面——角色模板 API 面（`GET /api/character-templates` + `POST /api/character-templates/{id}/clone`，阶段 2 前端挂起故暂无页面条目）、自服务端点（`consent/withdraw|status`、`account/delete`、`account/export(+ /chats)`）、安全面板/角色设置 tab/主动面板前端契约统一、备份恢复/`/api/ready`/`/api/metrics`、跨角色转发派生（`GET /api/characters/{id}/forwards`）等。**引用本清单定位功能前，先对 `CODE_GRAPH.md` v3.8.24 与端点实况**；页面级入册待阶段 2 落地后补。
+> **时效注记（2026-09-28 历遍批刷新）**：W12 阶段 2 + W16/W17 已落地，前次注记所称「暂无页面条目」缺口闭合——新增 **TPL（角色模板页 `/templates`）** 与 **ACCT（账号与数据 `/settings/account`）** 两节；自服务端点（consent/export/delete）前端已接入；注册分发钩子（register-invite 初始卡）已接通；W17 遗留①（RolesPage 激活后缓存失效键缺账号维度）已根治并锁测试；App.tsx `/templates` 重复路由声明已去重（`AppRoutes.test.ts` 静态守卫防再犯）。仍留注：本清单其余页面行数为 09-20 前口径，逐页行数刷新归 CODE_GRAPH。**引用本清单定位功能前，先对 `CODE_GRAPH.md` 与端点实况**。
+>
+> ~~**时效注记（2026-09-27 全仓历遍）**：本清单最后全量刷新为 09-20 前口径；2026-09-27 W1–W12 批次改动大量功能面——角色模板 API 面（`GET /api/character-templates` + `POST /api/character-templates/{id}/clone`，阶段 2 前端挂起故暂无页面条目）、自服务端点（`consent/withdraw|status`、`account/delete`、`account/export(+ /chats)`）、安全面板/角色设置 tab/主动面板前端契约统一、备份恢复/`/api/ready`/`/api/metrics`、跨角色转发派生（`GET /api/characters/{id}/forwards`）等。**引用本清单定位功能前，先对 `CODE_GRAPH.md` v3.8.24 与端点实况**；页面级入册待阶段 2 落地后补。~~
 
 ---
 
@@ -58,7 +60,13 @@
 | ROLES-3 | 创建角色入口（网格尾虚线卡 + 空态 CTA）；骨架屏加载态 |
 | ROLES-4 | 搜索框（>6 卡显示，匹配名称/描述/标签）+ 无结果空态 |
 | ROLES-5 | 入场动效（stagger CSS 级联 ≤12×60ms，prefers-reduced-motion 降级） |
-| ⚠️ | SP-5 在册：prompt 原文直出（`[姓名:x]`/「你是」类 description 未摘要化，卡库实扫 7+10 张）；41 卡无搜索无分组 |
+| ROLES-6 | **09-28 W17 遗留①收口**：激活成功后按 `queryKeys.characters.all`（含账号维度）失效缓存；`RolesPage.test.tsx` 锁真实键并反钉裸 `['characters']` 不得再用。SP-5 摘要化已实现（deriveCardSummary/anchorTone 在位），旧 ⚠️ 行撤销 |
+
+### TPL — 角色模板 `/templates`（TemplatesPage.tsx, 166 行；W12 阶段 2 API + W17 前端，09-28 入册）
+| 编号 | 功能点 |
+|------|--------|
+| TPL-1 | 浏览策展模板（`GET /api/character-templates`，无 Bearer→401；清单真源 `config/character_templates.yaml`） |
+| TPL-2 | 一键克隆为本人私有副本（`POST /api/character-templates/{id}/clone`，201；新 id + 新 user_id 独立副本）；**只认业务回执**（`isCloneAccepted`：status 非 created 判失败弹 warning，W11 纪律）；成功后失效 `queryKeys.characters.all` 并跳 `/roles` |
 
 ### CREATE — 创建角色 `/roles/create`（CreateRole.tsx, 729 行）
 | 编号 | 功能点 |
@@ -163,6 +171,13 @@
 | 编号 | 功能点 |
 |------|--------|
 | LOGS-1 | 级别过滤/关键词搜索/5s 轮询（可暂停）/清屏/TXT 导出（system.logs） |
+
+### ACCT — 账号与数据 `/settings/account`（SettingsAccount.tsx, 370 行；W17 自服务三面，09-28 入册）
+| 编号 | 功能点 |
+|------|--------|
+| ACCT-1 | 同意状态机面板：`GET /api/auth/consent/status` 展示 granted/missing/withdrawn/outdated；同意（`consent(AGREEMENT_VERSION)`）与撤回（`POST consent/withdraw`）后重载状态 |
+| ACCT-2 | 数据导出：`GET /api/auth/account/export` 全量清单 manifest + `GET /api/auth/account/export/chats` 全部聊天记录（下载落盘；越权会话后端 404） |
+| ACCT-3 | 账号注销：`POST /api/auth/account/delete` 走 W9 lifecycle 五阶段作业，按业务回执呈现（冻结/失败不宣称 deleted），成功后前端 logout |
 
 ## E. 管理后台（admin 角色，RoleGuard）
 

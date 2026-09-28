@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-09-28 — 主控 · 历遍完善批 W18：memory_ext/scene_narrator 整删 + 测试污染真卡目录根治 + 功能点收口核对（未 push 未部署）
+
+- **指令链**：goal「全仓历遍，扫描死代码/临时文件/脚本/垃圾，更新文档，检查所有功能点升级是否完成、是否大量不完整，修复完善」。承接同日凌晨 `ffa6d68` 历遍修复批。全程主检出直做（无 subagent）、代码冻结后终验、**未 push、未部署、未 SSH**。
+- **🔴 真卡目录污染根治（本轮最重发现）**：全仓历遍期间逐文件「前后卡数」法定位——`tests/test_invite_codes.py` 注册流（W12 阶段2/W16 分发钩子 `clone_template_for_user`→`_save_character`）每轮回归向 `config/characters/` **净增 2 张克隆卡**（41→43→45→47→49 漂移的实锤链；gitignored、git 不可见、persona_injection 收集数随之浮动）。修复：补 autouse `_sandbox_characters_dir` 夹具（patch `character_routes.CHARACTERS_DIR`，调用时解析故全覆盖）；8 张污染卡先做**三库零引用取证**（users/sqlite/runtime_plane 逐列 `IN (8 ids)` hits=0）再移 `_quarantine/w18_testclone_2026-09-28/`（不删、留审计）。卡数回 **41** 并**全量五分块跑程复测 41 不增**（本轮终验的决定性证据）。防再犯：`test_w18_traversal_fixes.py` 新增机械守卫（凡打 app 且触 `register-invite` 的测试必须含 CHARACTERS_DIR 沙箱）。
+- **死代码整删（W18，接 DELETION_LOG 同日节）**：① `memory_ext/` 整包出库（mem0 第二 RAG 真源，W4-G 停用后全仓零生产消费者；含 `orchestrator/_init_mixin` 装配口同删）；② `shisi/ase/scene_narrator.py`（零调用死模块）；③ 配置层残尾——`config/system.yaml` `character_card`/`memory_ext` 两段、`observability/config_models.py` 两模型类 + SystemConfig 两字段 + `__init__` 导出、`shisi/config.py` **4 枚悬空 env 映射**（`AIYU_MEMORY_RECYCLE_DAYS`/`CHARACTER_MAX_ACTIVE`/`CHARACTER_DEFAULT`/`WECHAT_RATE_LIMIT`，实扫 `get_config` 零读者；保留项均有读者）。W4 防复活契约由「禁用+置 None」升级为「**不存在即不得复活**」（`test_w4_memory_ext_disposition.py` 3 例重写，含注释行豁免）。
+- **前端路由重复死码**：`App.tsx` 合并批次遗留**逐字重复**的 `/templates` Route（React Router 首匹配生效，第二行为死码且掩盖冲突信号）→ 删一行；新增 `AppRoutes.test.ts` 双守卫（重复 path 检测 + navGroups 导航可达性含嵌套路由 parent/leaf 两段匹配 + 解析数>0 防守卫空转）。读源走 Vite `?raw`（本仓无 @types/node，首版 fs 写法被 tsc 打回 4 错后归零，**未新增任何依赖**）。突变验红 2/2：重植重复行→例1红；唯一 `/templates` 改 ghost→例2红；还原后 diff 净形 = HEAD 删一行。
+- **功能点完成度核对**：`FUNCTION_INVENTORY` 时效注记刷新至 09-28；ROLES 节过期 ⚠️ 撤销（deriveCardSummary 实测在位）+ ROLES-6 登记；**新增 TPL 节**（模板面 TPL-1/2：列表 401 门 / clone 201+回执判定+跳角色页）与 **ACCT 节**（自服务三面 ACCT-1/2/3：同意状态机/导出/注销 W9 诚实回执）——W17 收编后前端面首次入册，「自服务端点前端接入未做」遗留项就此闭合。
+- **文档随批**：DELETION_LOG 2026-09-28 W18 节（含污染事件全记录）；DECISION_LEDGER W17 三条随带观察项标注 ✅ 根治 + **D10–D12 执行效力收口注记**（接线与测试均已入库，待裁项转「已实施」口径）；CODEMAPS MODULES/INDEX memory_ext 出库（L3 历史快照 file-inventory 按其自身声明不动）；AGENTS §2 Owner Map 记忆行去 memory_ext 与 `memory-config.json`（磁盘实测从未存在）化石引用。
+- **验证**：全量五分块 **2649 收集 / 2648 通过 / 1 跳过 / 0 失败**（**534+1 / 553 / 565 / 485 / 511** 精确吻合；**174 测试文件**；41 卡在位且跑程零净增；工作树 = 本批 26 项改动）+ ruff 全仓 0 错 + 前端 vitest **177/177（30 文件）** + `tsc --noEmit` 0 错。**徽章 2701 → 2825**（2648 Py + 177 FE）。
+- **遗留**：本批未 push 未部署（归默默裁决）；`_quarantine/` 隔离件待默默复核后可清；`visible_ids` 生产前填实与 W12 阶段 2 前端已闭合后的策展口径不变；worktree `wt/w13..w17` 五窗目录仍在（分支已并入 main，卸窗归用户裁决）。
+
+---
+
 ## 2026-09-28 — 主控 · 历遍修复批：三点裁决执行 + CI 两红根治 + 生产 P1/路由遮蔽两缺陷根治（三端一致 `ffa6d68`）
 
 - **指令链**：默默令「先完成一二三这三个点，然后继续进行全仓历遍，治理文档，更新数据，发现问题，修复优化」。

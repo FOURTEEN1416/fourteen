@@ -55,7 +55,7 @@ unique-you/
 ├── character_card/         # 已删除（批6b 项10，零读者死码包，见 docs/DELETION_LOG.md）
 ├── clone_training/         # 克隆训练 (4 文件：清洗/提取/风格分析)
 ├── context/                # 上下文 (世界书)
-├── memory_ext/             # 记忆扩展 (mem0 后端)
+├── memory_ext/             # 已删除（2026-09-28 历遍批 W18 整包出库，第二套 RAG 记忆真源，见 docs/DELETION_LOG.md）
 ├── proactive/              # 主动消息 (6 文件：ase_engine/scheduler/frequency/reflection/
 │                           #   reminder_delivery/ase_hub)
 ├── multimodal/             # 多模态 (image_attachment + multimodal_processor)

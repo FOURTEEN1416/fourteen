@@ -33,7 +33,7 @@
 | **plugins** | 2 | `plugins/` | 插件系统 | ✅ 活跃 |
 | **cache** | 3 | `cache/` | LLM 缓存 + Redis 客户端 | ✅ 活跃 |
 | **context** | 2 | `context/` | 上下文（世界书提供器） | ✅ 活跃 |
-| **memory_ext** | 2 | `memory_ext/` | 记忆扩展（mem0 后端） | ✅ 活跃 |
+| **memory_ext** | 0 | `memory_ext/` | **已删除**（2026-09-28 历遍批 W18 整包出库：第二套 RAG 记忆真源，W4 停用后零生产消费者；防复活契约 `tests/test_w4_memory_ext_disposition.py`） | 🗑 已删 |
 
 > 文件数含 `__init__.py`（Glob/find 实测 2026-09-21）；`weclone_adapter/` 已于 08-28 删除（克隆收敛为本地提取+JSON 上传）。**批6b 项10 persona 域死码整批清除**：`character_card/` 包（6 文件）+ `my_character/` 8 模块 + `shisi/application/character_service.py` 删除，共约 −2600+ 行（见 `docs/DELETION_LOG.md`）。
 > ⚠️ **`utils/` 与 `orchestrator/` 的新模块此前长期漏登**：`orchestrator/tool_gate.py`、`orchestrator/context_budget.py`、`proactive/reminder_delivery.py`、`utils/local_time.py`、`utils/fallback_lines.py`、`utils/affinity_state.py`、`shisi/affinity/scale.py` 均已在 CODE_GRAPH 落账但本表未同步 —— 本次补齐。
@@ -123,8 +123,8 @@
 
 ---
 
-> **注:** 记忆系统已整合到 `shisi/memory/legacy/` 子模块中（见 shisi/ 总览），
-> 扩展记忆后端见下方 `memory_ext/` 模块。
+> **注:** 记忆系统已整合到 `shisi/memory/legacy/` 子模块中（见 shisi/ 总览）。
+> 第二套扩展记忆后端 `memory_ext/`（mem0）已于 2026-09-28 历遍批整包删除（W4 停用 → 整删终极防复活，见 `docs/DELETION_LOG.md`）。
 
 ---
 
@@ -284,18 +284,6 @@
 
 ---
 
-## memory_ext/ — 记忆扩展 (2 文件，含 __init__)
-
-**职责:** 基于 mem0 的扩展记忆后端
-
-**关键文件:**
-- `mem0_backend.py` — mem0 记忆后端
-
-**依赖:** mem0 (外部)
-**被依赖:** shisi/memory
-
----
-
 ## 模块依赖图
 
 ```
@@ -303,7 +291,7 @@ api/ ←── orchestrator/ ←── shisi/ ←── llm_provider/ ←── 
   │           │              │            │
   │           │              │            └── cache/ ←── redis
   │           │              │
-  │           │              ├── shisi/memory/legacy/ ←── memory_ext/ (mem0)
+  │           │              ├── shisi/memory/legacy/
   │           │              │      │
   │           │              │      └── ChromaDB (向量存储)
   │           │              │

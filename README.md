@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-2701-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-2825-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
@@ -16,8 +16,8 @@
 
 > **2026-09-26 本地实现更新（已上线）**：消息归属、发送确认后记忆、请求/后台模型凭证隔离、画像更正保序、事实删除派生失效、抽取水位与昨日角色日记已重构并部署（三端一致 `f85408f`）；流式先完整定稿后分块，首段显示相应延后。本地冻结工作树验收 **2019通过/1跳过**（2020收集、41卡、127文件），前端98通过；上线验收、迁移口径与遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md` 2026-09-26。**2026-09-28 起三端一致 `ffa6d68`（历遍修复批），下方徽章为该口径实测。**
 
-> **测试口径**（2026-09-28 历遍修复批终验，本地**全量五分块**实测）：后端 **2566 passed / 1 skipped / 0 failed**（收集 **2567** = 487+1 + 421 + 827 + 804 + 27 精确吻合；现役角色卡 **41 张**；较上批 +2 = client_count 契约回归对）。⚠️ **口径勘误**：`tests/test_[a-f]*.py` 等四段 glob **漏子目录 `tests/core/`（27 例）**，**全量口径必须补跑它**。✅ **WAL 观察项闭环**：6 例本机 SQLite WAL flaky（`test_runtime_plane.py` 2 + `test_w3_outbox_relay.py` 4）已在**服务器 Linux 复跑 54/54 零复现**——本机 OS/SQLite 行为归因成立，生产环境可靠。✅ GitHub CI 三轮全绿（run `36333194107`/`36333947881`/`36334364744`）。⚠️ 单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
-> 前端 `135 passed`（vitest 23 文件）+ `tsc --noEmit` 0 错误；ruff 0.16.8 全仓 0 错（`All checks passed!`）。
+> **测试口径**（2026-09-28 W18 历遍完善批终验，本地**全量五分块**实测）：后端 **2648 passed / 1 skipped / 0 failed**（收集 **2649** = 534+1 + 553 + 565 + 485 + 511 精确吻合；**174 测试文件**；现役角色卡 **41 张**且全量跑程**零净增**——`test_invite_codes` 注册流钩子曾每轮向 gitignored `config/characters/` 净增 2 张克隆卡，本批补沙箱夹具 + `test_w18_traversal_fixes` 机检守卫）。⚠️ **口径勘误**：`tests/test_[a-f]*.py` 等四段 glob **漏子目录 `tests/core/`**，**全量口径必须补跑它**。✅ GitHub CI 上批三轮全绿（`36333194107`/`36333947881`/`36334364744`）；**W18 批未 push 未部署（归用户裁决）**。⚠️ 单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> 前端 `177 passed`（vitest 30 文件）+ `tsc --noEmit` 0 错误；ruff 0.16.8 全仓 0 错（`All checks passed!`）。
 > ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 7）。**引用基线必须同时声明卡数**。
 
 ---
