@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { useMemo, useState } from 'react'
 import { Plus, Search, Sparkles } from 'lucide-react'
 import AnimatedPage from '../components/shared/AnimatedPage'
-import { useUnifiedCharacters } from '../hooks/useQueries'
+import { useUnifiedCharacters, queryKeys } from '../hooks/useQueries'
 import { activateCharacter } from '../api/characters'
 import { useQueryClient } from '@tanstack/react-query'
 import { anchorTone, deriveCardSummary, sanitizeCharacterName } from '../utils/character'
@@ -97,7 +97,8 @@ export default function RolesPage() {
         useErrorStore.getState().addToast({ type: 'warning', message: '切换角色未生效（后端未确认），请重试' })
         return
       }
-      await queryClient.invalidateQueries({ queryKey: ['characters'] })
+      // W17 遗留①收口：真实缓存键带账号维度（queryKeys.characters.all），裸 ['characters'] 前缀不匹配
+      await queryClient.invalidateQueries({ queryKey: queryKeys.characters.all })
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '切换角色失败，请重试'
       useErrorStore.getState().addToast({ type: 'error', message })

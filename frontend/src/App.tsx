@@ -143,7 +143,6 @@ export default function App() {
           {/* 角色 */}
           <Route path="/roles" element={<AnimatedSuspense><RolesPage /></AnimatedSuspense>} />
           <Route path="/templates" element={<AnimatedSuspense><TemplatesPage /></AnimatedSuspense>} />
-          <Route path="/templates" element={<AnimatedSuspense><TemplatesPage /></AnimatedSuspense>} />
           <Route path="/roles/create" element={<AnimatedSuspense><CreateRole /></AnimatedSuspense>} />
           <Route path="/roles/:roleId/settings" element={<AnimatedSuspense><RoleSettings /></AnimatedSuspense>} />
           <Route path="/roles/:roleId/settings/:tab" element={<AnimatedSuspense><RoleSettings /></AnimatedSuspense>} />
