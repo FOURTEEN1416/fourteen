@@ -38,6 +38,7 @@ from api.consent import (
 )
 from api.database import User, UserSession, get_db
 from api.password_policy import PasswordStr, ensure_password_strength
+from api.routers.character_template_routes import provision_initial_character
 
 logger = logging.getLogger("auth_routes")
 
@@ -86,6 +87,9 @@ class TokenResponse(BaseModel):
     # 使用即同意（W2-CONSENT）：True 表示该用户尚未同意当前版本协议，前端需弹全屏同意窗
     needs_consent: bool = False
     agreement_version: str = CURRENT_AGREEMENT_VERSION
+    # W12 阶段2（注册分发）：新用户冷启动拿到的初始角色；未分发/分发失败为 null。
+    # 仅注册端点填值（登录/刷新恒为 null）——additive 字段，既有契约零改动。
+    initial_character: dict | None = None
 
 
 class RefreshRequest(BaseModel):
@@ -194,6 +198,10 @@ async def register(
     _save_refresh_token(db, int(user.id), refresh_token)
     await db.commit()
 
+    # W12 阶段2：注册分发初始角色（种子模板克隆 + 个人激活绑定）。
+    # 在用户行已提交之后执行——分发环节任何失败都只降级为 initial_character=null。
+    initial_character = await provision_initial_character(db, int(user.id))
+
     logger.info("新用户注册: %s (%s)", user.email, user.username)
     _set_refresh_cookie(response, refresh_token, request)
     return TokenResponse(
@@ -201,6 +209,7 @@ async def register(
         refresh_token=refresh_token,
         user=user.to_dict(),
         needs_consent=True,  # 新用户必然未同意过协议
+        initial_character=initial_character,
     )
 
 

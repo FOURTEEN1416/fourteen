@@ -37,6 +37,8 @@
 | **W4 部署** | 无（主控执行） | 主检出 + swu-prod | 包 R3-W4 · push+服务器 | ✅ **完成**（默默对 push 与服务器 pull 分别明确点头）——三端统一 `7578e57`；服务器 bundle 三跳 ff + remote_deploy 4/4 + health 200；服务器全量 **1868 收集 / 1867 通过 / 1 跳过 / 0 失败** + CI 35714334710 绿；详见 LOG「W4 部署窗口」条目。**终态补记（R3 验收窗）**：二次上线至 `68851a5`，双端全量 **1894/1893/1/0** 绿 | 2026-09-22 登记 | nginx 零配置改动（入口冻结铁律遵守）；拦下 W1 迁移参数换向与 CI 墙钟用例两枚缺陷后放行（`5cc70ee`/`48e1868`）；临时 bundle 已清 |
 | **W14 阈值解锁+表情包导入** | `wt/w14` | `..\ai-girlfriend-w14` | **D10 阈值解锁真接线 + D12-K 表情包导入落库** | 进行中 | 2026-09-28 | 红测先行；禁碰 proactive/**、orchestrator/**、shisi/migrations.py、tests/conftest.py；白名单实扫申报见追加区同日条 |
 | **W15 生理指标接小说模式** | `wt/w15` | `..\ai-girlfriend-w15` | **D12-L 生理指标从假读数变真演算** | 进行中 | 2026-09-28 | 红测先行；禁碰 shisi/sticker/**、shisi/migrations.py、tests/conftest.py；注入面/事件接线越白名单文件（orchestrator、scheduler 段、routes、registry）实扫申报见追加区同日条 |
+| **W16 注册分发** | `wt/w16` | `..\ai-girlfriend-w16` | W12 阶段2 · 注册分发钩子（后端） | 🟡 **窗内完工·候收编**（未 push 未部署） | 2026-09-28 | 白名单三件：`api/routers/auth_routes.py`、`api/routers/character_template_routes.py`、`tests/test_w16_register_seed.py`（+11 例）。⚠️ **两项归主控**：① 邀请码注册 `/api/auth/register-invite`（`invite_routes.py`，白名单外）未接钩子；② 收编回归会在主检出 `config/characters/` 生成测试克隆卡（`test_consent.py` 夹具未沙箱卡目录，实证见追加区）。细节见追加区 09-28 W16 条 |
+
 > ⚠️ **2026-09-19 路径收编**：W1/W2 工作区原位于 `D:\Desktop\` 根（仓库外），已收编至 `大创赛报名以及后期发展\` 下；仍为**仓库外非 git 工作区**，受 `.gitignore:130` 全目录排除，故宪法 §3「参赛材料不入库」约束不变。同期收编 `大赛附件包`、`专利-唯一的你十四`。**追加区内历史条目所载旧路径按「历史记录保留原文」准则未作改动**。完整映射见 `大创赛报名以及后期发展\PATH-MIGRATION-2026-09-19.md`。
 
 ---
@@ -61,6 +63,41 @@
 - **实扫定位**（任务书判据全部核实）：① `AffinityEnhancer.update`（chat 路径 orchestrator→`mapper.sync`→enhancer）已逐轮调 `check_unlocks`，但 `UnlockManager.subscribe()` 全仓零调用、`affinity_unlocks` 表零 INSERT——解锁确为展示层事实；② `character_stickers.unlock_threshold` 只有 `bind_to_character` 写入，`recommend/_get_character_sticker_ids` 读侧从不读——确证；③ 语音 owner = `shisi/voice/character_voice.py::resolve_voice_spec`（chat 链 orchestrator:1636 与试听 voice_routes:274 均按角色快照合成，无任何阈值概念）；④ 话题注入面 = `shisi/application/persona_service.py`（memory_context 各槽渲染处，`user_key` 已在 mem_ctx 中）；⑤ `StickerImporter.import_zip` 只落文件不写 `stickers` 表、`check_sticker_safety` 全仓零调用、路由回执键 `success` 前端无消费（types/api.ts 无该端点引用）——改名 `accepted` 无前端破坏。
 - **白名单实扫申报（任务书基础上新增，全部为接线最小面）**：`shisi/affinity/enhancer.py`（1 行：构造 UnlockManager 时传 db_path，解锁落表必经）、`shisi/voice/character_voice.py`（把 `voice/**` 理解为含 shisi/voice/——音色解析唯一 owner 在此）、`shisi/application/persona_service.py`（话题注入面，任务书授权实扫申报）、`shisi/api/affinity_routes.py`（A5「HTTP 展示」落表解锁行）、`shisi/api/sticker_routes.py`（任务书 B 项点名）+ `tests/test_w14_*.py`。**禁碰清单遵守**：proactive/**、orchestrator/**、shisi/migrations.py、tests/conftest.py 零改动。
 - **关键口径**：亲和真源 = `AffinityEnhancer.get_value`（shisi 刻度，键 `user::character`，user 为 `user_key_from_session` 全量会话键）；`affinity_unlocks.character_id` 列沿 `affinity_records` 先例存**完整隔离键**（UNIQUE(character_id,threshold,unlock_type) 即 user×character×档位 首次语义）；无用户上下文的读取面（管理/绑定）不启用门禁（fail-open 仅限无 user 场景，有 user 即按阈值硬过滤）。
+
+### 2026-09-28 · W16 实施窗 · W12 阶段2 注册分发钩子完工（worktree `wt/w16`，未 push 未部署）
+
+- **实现（克隆语义单一 owner）**：`character_template_routes.py` 把阶段1 端点内联的克隆逻辑抽为
+  `clone_template_for_user(template_id, user_id)`（域异常 `TemplateNotAvailableError` / `TemplateSaveError`），
+  clone 端点改为委托（**响应形状与状态码 201/404/500 零改动**）；新增 `bind_active_character`
+  （`user_active_characters` upsert，与 `activate_character` 真人分支同形：**只写表、不改卡文件全局 `is_active`**）
+  与 `provision_initial_character`（候选顺序 = `seed_on_register` 逐项 → 策展面 `visible_ids` **声明序**；
+  不可用即顺延；总开关关闭 / 无可用模板 → None）。`auth_routes.py`：`TokenResponse` **additive** 新增
+  `initial_character: dict | None = None`，`/api/auth/register` 在用户行与 refresh 会话**均已提交之后**调用分发，
+  失败仅降级为 `null` + WARNING（绝不 500）；登录/刷新恒为 `null`（默认值），`needs_consent` 流程零改动。
+- **绑定失败的补偿语义**（本窗自决并留测）：卡已写盘而激活绑定抛错 → 回收该克隆卡，不在盘上留用户从未索取的孤儿副本；
+  回收也失败则再落一条 WARNING 明示孤儿留存（不静默）。
+- **验证**：新增 `tests/test_w16_register_seed.py` **11 例全绿**（主路径含「新用户名下恰 1 张卡 + 绑定行 +
+  列表接口 `is_active` 读回」、双用户各自独立副本、seed 空回落 visible 首张、种子缺卡顺延、有主/隐藏候选跳过、
+  全不可用返回 null 且零写盘、`enabled=false` 不写盘、写卡失败仍 200+告警+无绑定、绑定失败仍 200+无孤儿卡、additive 契约 + 登录侧「带键但恒 null、不二次克隆」契约）；
+  沙箱纪律＝卡目录与策展清单均重定向 tmp_path，**测试零写真实 `config/characters/`**。
+  邻域全绿：`test_w12_character_templates` 11 + `test_consent` 11 + `test_invite_codes` 18 + `test_password_policy` 11 +
+  `test_auth_jwt_or_apikey` 4 + `test_w1_identity_authorization` 23 + W9 四件/`test_character`/`test_w8_character_expression`
+  （**61 passed / 1 跳过**）。**突变验红 4/4**：去激活绑定 / 写卡失败静默吞掉 / 去策展面回落 / 绑定失败不回收——各自转红，还原后复跑绿。
+  ruff 改动文件与**全仓 0 错**；端点内省 **229 APIRoute / 195 唯一路径 / len=233**（零端点变更）。
+- **⚠️ 归主控 ①（白名单外缺口）**：`/api/auth/register-invite`（`api/routers/invite_routes.py`，自带另一份
+  `TokenResponse`）**未接分发钩子**——前端 `LoginPage` 填了邀请码即走这条（`registerWithInvite` 优先于 `register`），
+  故当前只覆盖无邀请码注册。接通成本＝1 行调用 + 1 个响应字段（白名单加 `invite_routes.py` 即可由本窗或下窗补）。
+- **⚠️ 归主控 ②（收编回归会写脏主检出卡目录，已实证非推测）**：在**有种子卡的检出**里跑 `tests/test_consent.py`
+  （其夹具未沙箱 `CHARACTERS_DIR`）→ `config/characters/` 当场多出 1 张克隆卡（实测：`before=1 → after=2`，
+  新文件 `dea417f9.json`，本窗随后已清理、主检出 41 卡零变化）。因此**主检出全量回归每跑一次就多一批测试卡**
+  （gitignored、git 看不见，却改变 `test_persona_injection` 的收集数与「41 卡在位」口径）。
+  推荐处置（择一，本窗无权改 `tests/**` 其余与 `conftest.py`）：(a) 给 `test_consent` 的夹具照搬 W12/W16 的
+  `monkeypatch.setattr(character_routes, "CHARACTERS_DIR", tmp_path/"characters")` 两行；(b) 收编批把回归跑在
+  无卡检出（CI/worktree），主检出只跑单文件验收。
+- **口径勘误（供收编门禁引用）**：主控 09-28 批次条所称「worktree 无卡 → 收集数少 **82** 例」实测为 **少 80 例**——
+  `test_persona_injection` 两参数化用例在 41 卡时为 82 条、0 卡时各留 1 条兜底（−82+2）。逐用例差集核对：
+  主检出 `3f9a87d` 收集 **2567** ↔ worktree 同提交 **2487**（不含本窗）↔ 本窗 **+11 = 2498**。
+  引用「worktree 基线」请写 2487（或 2498 含 W16），勿写 2567−82。
 
 ### 2026-09-28 · 主控 · 批次 W13–W17 出具：产品完善收官（D10–D12 实施 + W12 阶段2 + 自服务前端），visible_ids 已填实
 
