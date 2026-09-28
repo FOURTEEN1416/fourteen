@@ -1,6 +1,7 @@
 """十四模块数据库迁移 — 建表SQL与迁移执行器。"""
 
 import sqlite3
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -190,33 +191,55 @@ def get_table_names() -> list[str]:
     ]
 
 
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """PRAGMA journal_mode=WAL 遇其他连接持锁会立即返回 busy（不走 busy
+    handler、且禁在事务内执行），并发首启时有限重试。"""
+    last_error: Exception | None = None
+    for _ in range(60):
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            return
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) and "busy" not in str(e):
+                raise
+            last_error = e
+            time.sleep(0.1)
+    raise last_error  # pragma: no cover - 6s 持续占用属外部故障
+
+
 def run_migrations(db_path: Path | str | None = None) -> Sequence[str]:
     path = Path(db_path) if db_path else _DB_DEFAULT
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), timeout=30.0, isolation_level=None)
     try:
-        conn.execute("PRAGMA journal_mode=WAL")
+        _enable_wal(conn)
         conn.execute("PRAGMA foreign_keys=ON")
-        cursor = conn.cursor()
+        # 整段迁移包单一写事务：多 worker 并发启动时后到者排队（busy 30s），
+        # 且事务内 PRAGMA 读到一致 schema——根治 2026-09-28 生产实锤的
+        # duplicate column / database is locked 竞态。
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            applied: list[str] = []
+            for i, migration in enumerate(_MIGRATIONS):
+                if callable(migration):
+                    migration(conn)
+                else:
+                    conn.execute(migration)
+                applied.append(f"migration_{i:03d}")
 
-        applied: list[str] = []
-        for i, migration in enumerate(_MIGRATIONS):
-            if callable(migration):
-                migration(conn)
-            else:
-                conn.execute(migration)
-            applied.append(f"migration_{i:03d}")
-
-        cursor.execute(
-            "INSERT OR REPLACE INTO shisi_schema_version VALUES (?, ?)",
-            ("version", "1.0"),
-        )
-        cursor.execute(
-            "INSERT OR REPLACE INTO shisi_schema_version VALUES (?, ?)",
-            ("migrations_applied", str(len(_MIGRATIONS))),
-        )
-        conn.commit()
+            conn.execute(
+                "INSERT OR REPLACE INTO shisi_schema_version VALUES (?, ?)",
+                ("version", "1.0"),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO shisi_schema_version VALUES (?, ?)",
+                ("migrations_applied", str(len(_MIGRATIONS))),
+            )
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
         return applied
     finally:
         conn.close()

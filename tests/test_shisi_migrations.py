@@ -119,3 +119,122 @@ class TestVerifyTables:
         result = verify_tables(tmp_db)
         assert result["characters"] is True
         assert result["affinity_records"] is False
+
+
+class TestConcurrentRunMigrations:
+    """多 worker 并发启动下 run_migrations 必须安全。
+
+    生产实锤（2026-09-28 部署 ffa6d68→9141afa）：uvicorn 4 worker 同时经
+    `setup_shisi(run_migrate=True)` 调 run_migrations，两个 worker 在
+    `_migrate_user_persona_dimensions` 的 PRAGMA 读列与 ALTER 之间被并发
+    worker 插队提交 → `sqlite3.OperationalError: duplicate column name:
+    hexaco_json`；宽 except 吞掉后该 worker 的 /api/shisi/* 整组缺失。
+    同族失败还有 `database is locked`（写锁互踩）。
+    旧 schema = user_persona 无五维度列（W13 生产存量库真实形状）。
+    """
+
+    OLD_USER_PERSONA_DDL = """
+        CREATE TABLE user_persona (
+            user_id TEXT PRIMARY KEY,
+            ocean_json TEXT NOT NULL,
+            pad_json TEXT NOT NULL,
+            style_json TEXT NOT NULL,
+            snapshot_count INTEGER NOT NULL DEFAULT 0,
+            first_seen TEXT NOT NULL,
+            last_updated TEXT NOT NULL
+        )
+    """
+
+    def _seed_old_schema_db(self, path: str) -> None:
+        import sqlite3
+
+        conn = sqlite3.connect(path)
+        conn.execute(self.OLD_USER_PERSONA_DDL)
+        conn.commit()
+        conn.close()
+
+    def test_concurrent_workers_all_succeed(self, tmp_path):
+        """旧 schema 库上 4 路并发 run_migrations：零异常，终态列全。"""
+        import sqlite3
+        import threading
+
+        from persona_extractor.persona_bank import PERSONA_DIMENSION_COLUMNS
+
+        for round_no in range(3):
+            db = str(tmp_path / f"race_{round_no}.db")
+            self._seed_old_schema_db(db)
+            errors: list[str] = []
+            barrier = threading.Barrier(4)
+
+            def worker(
+                _barrier: threading.Barrier = barrier,
+                _db: str = db,
+                _errors: list[str] = errors,
+            ) -> None:
+                try:
+                    _barrier.wait()
+                    run_migrations(_db)
+                except Exception as e:  # noqa: BLE001
+                    _errors.append(f"{type(e).__name__}: {e}")
+
+            threads = [threading.Thread(target=worker) for _ in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            assert not errors, f"round {round_no}: 并发迁移失败 {errors}"
+            conn = sqlite3.connect(db)
+            try:
+                cols = {row[1] for row in conn.execute("PRAGMA table_info(user_persona)")}
+                assert set(PERSONA_DIMENSION_COLUMNS) <= cols, (
+                    f"round {round_no}: 五维度列未补齐: {PERSONA_DIMENSION_COLUMNS}"
+                )
+                assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            finally:
+                conn.close()
+
+    def test_already_migrated_db_concurrent_rerun(self, tmp_path):
+        """全列库并发重跑（重启场景）：幂等且零异常。"""
+        import threading
+
+        db = str(tmp_path / "rerun.db")
+        run_migrations(db)
+        errors: list[str] = []
+        barrier = threading.Barrier(4)
+
+        def worker() -> None:
+            try:
+                barrier.wait()
+                run_migrations(db)
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{type(e).__name__}: {e}")
+
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert not errors, f"全列库并发重跑失败 {errors}"
+
+    def test_run_migrations_serialization_guard(self):
+        """结构守卫：run_migrations 必须整段包单一写事务（BEGIN IMMEDIATE +
+        COMMIT/ROLLBACK），连接须 isolation_level=None 且带 busy 超时——
+        失去串行化即重现 2026-09-28 生产 duplicate column 竞态。"""
+        import ast
+        from pathlib import Path
+
+        src = (Path(__file__).resolve().parent.parent / "shisi" / "migrations.py").read_text(
+            encoding="utf-8"
+        )
+        tree = ast.parse(src)
+        fn = next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "run_migrations"
+        )
+        body = ast.get_source_segment(src, fn)
+        assert body is not None
+        assert '"BEGIN IMMEDIATE"' in body, "迁移必须整段包 BEGIN IMMEDIATE 写事务"
+        assert '"COMMIT"' in body and '"ROLLBACK"' in body, "提交/回滚必须成对"
+        assert "isolation_level=None" in body, "手工事务须关闭隐式隔离"
+        assert "timeout=" in body, "连接须带 busy 等待超时"
