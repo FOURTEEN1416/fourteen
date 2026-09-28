@@ -28,6 +28,7 @@ function useBreadcrumbs(): Crumb[] {
       llm: 'LLM 配置',
       voice: '语音引擎',
       security: '安全',
+      account: '账号与数据',
       extensions: '扩展管理',
       tools: '工具仪表盘',
       logs: '日志',
@@ -54,6 +55,9 @@ function useBreadcrumbs(): Crumb[] {
 
   // /roles
   if (pathname === '/roles') return [{ label: '角色' }]
+
+  // /templates
+  if (pathname === '/templates') return [{ label: '角色' }]
 
   // /psych
   if (pathname === '/psych') return [{ label: '角色' }]

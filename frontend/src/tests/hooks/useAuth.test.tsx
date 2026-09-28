@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useAuth } from '../../hooks/useAuth'
 import { useAuthStore, type UserInfo } from '../../store/authStore'
+import { useErrorStore } from '../../store/errorStore'
 import { queryClient } from '../../api/queryClient'
 
 // ════════════════════════════════════════════════════════════════
@@ -10,16 +11,18 @@ import { queryClient } from '../../api/queryClient'
 //  仪表盘/情绪等旧缓存数据（多用户隔离硬约束的客户端面）。
 // ════════════════════════════════════════════════════════════════
 
-const { mockLogin, mockLogout } = vi.hoisted(() => ({
+const { mockLogin, mockLogout, mockRegister, mockRegisterWithInvite } = vi.hoisted(() => ({
   mockLogin: vi.fn(),
   mockLogout: vi.fn(),
+  mockRegister: vi.fn(),
+  mockRegisterWithInvite: vi.fn(),
 }))
 
 vi.mock('../../api/auth', () => ({
   login: (...args: unknown[]) => mockLogin(...args),
   logout: (...args: unknown[]) => mockLogout(...args),
-  register: vi.fn(),
-  registerWithInvite: vi.fn(),
+  register: (...args: unknown[]) => mockRegister(...args),
+  registerWithInvite: (...args: unknown[]) => mockRegisterWithInvite(...args),
   consent: vi.fn(),
   refreshToken: vi.fn(),
 }))
@@ -125,5 +128,95 @@ describe('useAuth 账号切换与查询缓存', () => {
       expect(useAuthStore.getState().user?.id).toBe(USER_A.id)
     })
     expect(queryClient.getQueryData(['dashboard'])).toEqual({ messages: 999 })
+  })
+})
+
+// ════════════════════════════════════════════════════════════════
+//  W17：注册成功后的「初始角色」提示。
+//  字段由并行窗 W16 在注册响应中新增（initial_character），本窗按
+//  **「字段存在才提示」**容错接入：W16 未接线/未返回时必须零提示、零报错，
+//  绝不拿默认角色名编造。登录路径不提示（不是"刚为你准备"的语义现场）。
+// ════════════════════════════════════════════════════════════════
+
+function toasts() {
+  return useErrorStore.getState().toasts.map((t) => `${t.type}:${t.message}`)
+}
+
+describe('W17 注册初始角色提示', () => {
+  beforeEach(() => {
+    useErrorStore.setState({ toasts: [], lastError: null })
+  })
+
+  it('注册响应含 initial_character.name → 成功提示「已为你准备初始角色：X」', async () => {
+    mockRegister.mockResolvedValue({
+      ...tokenResponse(USER_B),
+      initial_character: { id: 'c-1', name: '林挽夏' },
+    })
+
+    const { result } = renderHook(() => useAuth())
+    await act(async () => {
+      await result.current.register({ email: 'bob@test.local', username: 'bob', password: 'pw' })
+    })
+
+    expect(toasts().some((t) => t === `success:已为你准备初始角色：林挽夏`)).toBe(true)
+  })
+
+  it('注册响应无该字段（W16 未接线）→ 零提示、注册照常落地', async () => {
+    mockRegister.mockResolvedValue(tokenResponse(USER_B))
+
+    const { result } = renderHook(() => useAuth())
+    await act(async () => {
+      await result.current.register({ email: 'bob@test.local', username: 'bob', password: 'pw' })
+    })
+
+    expect(toasts()).toHaveLength(0)
+    expect(useAuthStore.getState().user?.id).toBe(USER_B.id)
+  })
+
+  it('邀请码注册同样提示（两条注册路径同构）', async () => {
+    mockRegisterWithInvite.mockResolvedValue({
+      ...tokenResponse(USER_B),
+      initial_character: { id: 'c-2', name: '米彩' },
+    })
+
+    const { result } = renderHook(() => useAuth())
+    await act(async () => {
+      await result.current.registerWithInvite({
+        invite_code: 'ABCDEFGH',
+        email: 'bob@test.local',
+        username: 'bob',
+        password: 'pw',
+      })
+    })
+
+    expect(toasts().some((t) => t.includes('已为你准备初始角色：米彩'))).toBe(true)
+  })
+
+  it('登录响应即使带该字段也不提示（只在注册现场说"已为你准备"）', async () => {
+    mockLogin.mockResolvedValue({
+      ...tokenResponse(USER_B),
+      initial_character: { id: 'c-1', name: '林挽夏' },
+    })
+
+    const { result } = renderHook(() => useAuth())
+    await act(async () => {
+      await result.current.login('bob@test.local', 'pw')
+    })
+
+    expect(toasts()).toHaveLength(0)
+  })
+
+  it('字段存在但无可用名称（空串/缺 name）→ 不编造提示', async () => {
+    mockRegister.mockResolvedValue({
+      ...tokenResponse(USER_B),
+      initial_character: { id: 'c-1', name: '' },
+    })
+
+    const { result } = renderHook(() => useAuth())
+    await act(async () => {
+      await result.current.register({ email: 'bob@test.local', username: 'bob', password: 'pw' })
+    })
+
+    expect(toasts()).toHaveLength(0)
   })
 })
