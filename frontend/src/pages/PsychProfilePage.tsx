@@ -159,7 +159,9 @@ export default function PsychProfilePage() {
           <div className="mb-5 flex items-start gap-2 rounded-xl bg-macaron-yellow-light/60 border border-macaron-yellow/30 px-4 py-3">
             <Info className="w-4 h-4 text-macaron-yellow-deep shrink-0 mt-0.5" />
             <p className="text-xs text-gray-500 leading-relaxed">
-              以下内容基于对话文本的统计分析，<span className="font-medium text-gray-700">仅供自我参考与陪伴体验，不构成任何医疗诊断或建议</span>。
+              以下内容基于对话文本的统计分析，结果会保存在数据库中并随对话持续更新，
+              <span className="font-medium text-gray-700">仅供自我参考与陪伴体验，不构成任何医疗诊断或建议</span>。
+              你可在本页随时清除；注销账号时这些数据将一并删除。
               如有心理困扰请联系专业机构；全国心理援助热线 400-161-9995（24 小时）。
             </p>
           </div>
@@ -199,6 +201,9 @@ export default function PsychProfilePage() {
                   {scopeCount > 1 ? `（该角色共 ${scopeCount} 份会话画像，取最近更新的一份）` : scopeCount === 1 ? '（该角色仅此 1 份会话画像）' : ''}
                 </p>
                 <p>画像按「角色 × 会话」分别学习，换角色或换会话不会共用同一份数据。</p>
+                <p>
+                  分析结果（含大五、HEXACO、情绪信号等各维度）会真实保存在服务器数据库中，跨登录、跨设备保留，而非仅临时计算；可在本页一键清除。
+                </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

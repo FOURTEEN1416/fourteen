@@ -35,12 +35,28 @@
 | **W2 laya 审计** | `wt/laya-audit`（分支保留） | ~~`..\ai-girlfriend-laya-audit`~~ 可卸 | 包 R3-W2 · 只读调研 | ✅ **已收编 main·已卸窗**（merge `wt/laya-audit`：审计报告 222 行 + LOG 两条含勘误） | 2026-09-22 登记 | 结论=有条件引入（候选① llm_proactive 前置 gate 四步路径；不建议 tool_gate L0.5/直替）；未证实项 §5 #1/#2 **已由主控窗 22:50 ssh 实测关闭**（生产机 available 1.8Gi < laya 常驻推算 2.0–2.5GB；HF 域不可直连需私有投递）→ 第 2–4 步触发条件追加**内存升档/独立宿主**硬项，第 1 步语料积累不受阻可先行 |
 | **W3 热点知识链** | `wt/hot-knowledge`（分支保留） | ~~`..\ai-girlfriend-hot-knowledge`~~ 可卸 | 包 R3-W3 · 采集→入库→供出 | ✅ **已收编 main + 挂线完成·已卸窗**（merge 7 提交；主控补 `hot_topics_collect` 注册 + 2 行为断言，`f2c51ba`） | 2026-09-22 登记 | 契约 §1 硬缺口已闭合：scheduler 60min IntervalTrigger → `collect_if_due()`（自限速/永不抛出，开关真源 `config/hot_topics.yaml`）；conftest 池隔离随批保留 |
 | **W4 部署** | 无（主控执行） | 主检出 + swu-prod | 包 R3-W4 · push+服务器 | ✅ **完成**（默默对 push 与服务器 pull 分别明确点头）——三端统一 `7578e57`；服务器 bundle 三跳 ff + remote_deploy 4/4 + health 200；服务器全量 **1868 收集 / 1867 通过 / 1 跳过 / 0 失败** + CI 35714334710 绿；详见 LOG「W4 部署窗口」条目。**终态补记（R3 验收窗）**：二次上线至 `68851a5`，双端全量 **1894/1893/1/0** 绿 | 2026-09-22 登记 | nginx 零配置改动（入口冻结铁律遵守）；拦下 W1 迁移参数换向与 CI 墙钟用例两枚缺陷后放行（`5cc70ee`/`48e1868`）；临时 bundle 已清 |
+| **W13 D11 心理画像落库** | `wt/w13` | `..\ai-girlfriend-w13` | **D11（已裁决 b+c）· 五维度真落库 + trigger_message 哈希化 + 删号级联** | 进行中 | 2026-09-28 | 基线 `3f9a87d4`；红测先行；差异申报见追加区同日条（admin_routes→lifecycle 落点变更，已申报）；禁 push/部署/SSH |
 
 > ⚠️ **2026-09-19 路径收编**：W1/W2 工作区原位于 `D:\Desktop\` 根（仓库外），已收编至 `大创赛报名以及后期发展\` 下；仍为**仓库外非 git 工作区**，受 `.gitignore:130` 全目录排除，故宪法 §3「参赛材料不入库」约束不变。同期收编 `大赛附件包`、`专利-唯一的你十四`。**追加区内历史条目所载旧路径按「历史记录保留原文」准则未作改动**。完整映射见 `大创赛报名以及后期发展\PATH-MIGRATION-2026-09-19.md`。
 
 ---
 
 ## 追加区（按时间倒序，新的在上）
+
+### 2026-09-28 · W13 实施窗 · D11 完工：五维度真落库 + trigger_message 隐私化 + 删号级联（`wt/w13`，未 push 未合并）
+
+- **落库**（红测先行：新测试 8 红 → 全绿）：① `persona_bank`：`user_persona` 增五维度列（`hexaco/dark_triad/mental_health/liwc/cognitive_json`，列名真源 `PERSONA_DIMENSION_COLUMNS`），`save_persona` 真写 JSON（失败 False+日志不假成功）、`_load_from_db` 显式列名回填（弃 `SELECT *` 位置索引，防存量库列序漂移）、`to_dict` 经回填自然带出；`_init_db` 对存量旧结构幂等补列（组件自治自愈）。② `shisi/migrations.py`：`_MIGRATIONS` 扩展支持 `Callable[[sqlite3.Connection], None]` 条目（条件 ALTER 无法用单条幂等 SQL 表达），新增两 callable——补列迁移（DDL/列名复用 persona_bank 常量防同构漂移）+ 存量 `trigger_message` 清空（只清非 `sha256:` 格式行）；`get_table_names()` 纳管两表。③ 隐私化：新 `privatize_trigger_message()` = `sha256:<前16hex>|len:<存档窗口长度>`，`add_snapshot` 不再存原话（含超 200 字窗口口径测试）。④ 删号级联：`persona_bank` 新增 `purge_owner_scopes` / `count_owner_scopes`（判定 `scope_owner_uid` = scope 剥 character 前缀后 `utils/session_key.owner_of(session_id) == uid`，即任务书原判据；他人与无主 scope 保留）；`api/lifecycle.py` 注册 `persona_profile` owner step（memory_sqlite 后同库清理，verify residual 即行数断言）——**admin_routes.py 零改动**（差异申报成立：delete_user 自 v1.39.1 走 lifecycle 作业链，级联对管理员删除与自服务注销同时生效）。⑤ 前端 `PsychProfilePage.tsx` 真实来源声明（免责条补「结果保存在数据库中并随对话持续更新…注销账号时一并删除」+ scope 块补「真实保存、跨登录跨设备保留、可一键清除」；医疗免责与热线原文保留）。
+- **验证**：`tests/test_w13_persona_dimensions.py` **11/11**（红测先行 8 红起步）；邻域 **52/52**（W8 psych 两文件 + W9 lifecycle + W9 selfservice + W13）；`test_shisi_migrations` **10/10**；**突变验红 2/2**（突变A 摘 `persona_profile` step → 级联测试红；突变B `_load_from_db` 恒 None → 回填测试红；各自还原后 21/21 绿，残留 0）；ruff 改动文件 **0 错**；vitest 心理画像三文件 **10/10** + `tsc --noEmit` **0 错**；worktree collect **2498**（无 41 卡基线，参数化少 82 属正常）。
+- **白名单实际清单**：`persona_extractor/persona_bank.py`、`shisi/migrations.py`、`api/lifecycle.py`、`frontend/src/pages/PsychProfilePage.tsx`、`tests/test_w13_persona_dimensions.py`（新）、`tests/test_shisi_migrations.py`（**必要连带申报**：其 `EXPECTED_TABLES` 硬编码精确匹配 `get_table_names()`，新增受管表后同步两表名+docstring 13→15 张，不改则收编门禁必红）、`docs/board/BOARD.md`。
+- **未做/归主控**：分支 `wt/w13` 留本地，**不合并不 push**（收编归主控）；生产库实际迁移随收编排期；AGENTS/CODE_GRAPH/README/LOG 未动（归主控）；fusion.py 零改动（`_run_mental_health_pipeline` 的 `save_persona` 落库自动生效）；快照表不加五维度列（apply_snapshot 不融合五维度，任务书只要求主表）。
+
+### 2026-09-28 · W13 实施窗 · 开工申报：D11 落点差异（admin_routes→lifecycle）+ 前端文件清单（基线 `3f9a87d4`）
+
+- **🔴 差异申报（任务书目标 4 vs 代码实况，按窗纪律先申报再动手）**：任务书「`admin_routes.delete_user` 增删 user_persona / user_persona_snapshots」——实况是该端点自 W9 收尾（v1.39.1）起**不再直接删行**，已委托 `api/lifecycle.delete_account_everywhere` 五阶段作业（preview→冻结→purge→验证→回执），`admin_routes.py` 只有 HTTP 入口。直接在路由层补 DELETE 会绕过冻结/验证/作业账/回执链，违背 W9 确立的「删除=统一生命周期作业，存储副作用在各 owner 的 purge 接口」架构。
+- **落点变更（判定语义不变）**：`persona_bank` 新增 `purge_owner_scopes(uid)` / `count_owner_scopes(uid)`（归属判定 = scope 剥 character 前缀后 `utils/session_key.owner_of(...) == uid`，即任务书原判据「session_id 的 owner 段等于目标 uid」；他人 scope 与无主 scope 保留）；`api/lifecycle.py` 注册 `persona_profile` owner step（purge+verify，插在 `memory_sqlite` 后，同库同链）——**admin_routes.py 预期零改动**。回执带计数（purge receipt 计数 + verify residual 机制天然提供「目标 owner 删光、他人保留」行数断言）。自服务注销（`/api/auth/account/delete`）同走作业链，级联自动覆盖。
+- **迁移设计注记**：`_MIGRATIONS` 现为纯 SQL 列表、逐条 `conn.execute` 无容错——`ALTER TABLE ADD COLUMN` 非天然幂等，故扩展 `_MIGRATIONS` 元素支持 `Callable[[sqlite3.Connection], None]` 条目（缺列才 ALTER；`UPDATE` 清空只匹配非 `sha256:` 格式行，两连跑 no-op）。建表 DDL 真源复用 `persona_bank.CREATE_USER_PERSONA_TABLE`（migrations 函数内导入，单一真源防同构漂移；persona_bank 自治建表是既有现状）。
+- **前端文件申报（任务书要求先申报）**：`frontend/src/pages/PsychProfilePage.tsx`（唯一页面文件，改免责条与 scope 说明块为「真实来源声明」：分析结果落库保存、可本页清除、随删号删除；**保留**「不构成任何医疗诊断或建议」与热线 400-161-9995 原文）。预判零测试波及（`PsychProfileSignalHonesty.test.tsx` 断言的是 caveat 兜底句，不在改动面）；若波及再补申报 `frontend/src/tests/components/PsychProfile*.test.tsx`。
+- **白名单实际清单**：`persona_extractor/persona_bank.py`、`shisi/migrations.py`（本批唯一 owner）、`api/lifecycle.py`、`frontend/src/pages/PsychProfilePage.tsx`、`tests/test_w13_persona_dimensions.py`（新）、`docs/board/BOARD.md`（本条 + 完工条）。**不碰**：conftest.py、shisi/sticker/**、frontend 其余、AGENTS/CODE_GRAPH/README/LOG。
 
 ### 2026-09-28 · 主控 · 批次 W13–W17 出具：产品完善收官（D10–D12 实施 + W12 阶段2 + 自服务前端），visible_ids 已填实
 

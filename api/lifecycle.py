@@ -453,6 +453,43 @@ def _owned_keys_of(scope: AccountScope, keys: list[str]) -> list[str]:
     return out
 
 
+def _persona_profile_purge(scope: AccountScope) -> dict:
+    """W13 · D11：user_persona / user_persona_snapshots 归属清除。
+
+    归属判定在 owner（persona_bank.scope_owner_uid）内完成：scope 剥
+    character 前缀后 ``owner_of(session_id) == uid``；他人与无主 scope 保留。
+    """
+    bank = _persona_profile_bank(scope)
+    try:
+        return bank.purge_owner_scopes(scope.user_id)
+    finally:
+        _close_persona_bank(bank)
+
+
+def _persona_profile_verify(scope: AccountScope) -> dict:
+    bank = _persona_profile_bank(scope)
+    try:
+        return bank.count_owner_scopes(scope.user_id)
+    finally:
+        _close_persona_bank(bank)
+
+
+def _persona_profile_bank(scope: AccountScope):
+    from persona_extractor.persona_bank import UserPersonaBank
+
+    _chars, _kn, sqlite_db, _agent, _chroma = _default_paths(
+        scope.characters_dir, scope.knowledge_dir, scope.sqlite_db,
+        scope.agent_db, scope.chroma_dir,
+    )
+    return UserPersonaBank(str(sqlite_db))
+
+
+def _close_persona_bank(bank: Any) -> None:
+    conn = bank.get_connection()
+    if conn is not None:
+        conn.close()
+
+
 def _memory_vectors_purge(scope: AccountScope) -> dict:
     from shisi.memory.legacy.vector_memory import VectorMemory
 
@@ -689,6 +726,10 @@ _OWNER_STEPS: dict[str, OwnerStep] = {
          _character_instances_verify),
         ("memory_sqlite", _memory_sqlite_preview, _memory_sqlite_purge,
          _memory_sqlite_verify),
+        # W13 · D11：心理画像（user_persona/user_persona_snapshots，同
+        # sqlite.db）——插在 memory_sqlite 之后同库清理；verify residual
+        # 机制提供「目标 owner 删光、他人保留」的行数断言。
+        ("persona_profile", None, _persona_profile_purge, _persona_profile_verify),
         ("memory_vectors", None, _memory_vectors_purge, _memory_vectors_verify),
         ("event_ledger", None, _event_ledger_purge, _event_ledger_verify),
         ("ase_states", None, _ase_states_purge, _ase_states_verify),
@@ -703,9 +744,9 @@ _OWNER_STEPS: dict[str, OwnerStep] = {
 
 # 冻结步骤必须先于一切清除；users_db 行删除必须最后。
 _STEP_ORDER = [
-    "freeze_revoke", "character_instances", "memory_sqlite", "memory_vectors",
-    "event_ledger", "ase_states", "affinity_points", "wechat_channels",
-    "scheduler_throttle", "process_caches", "users_db",
+    "freeze_revoke", "character_instances", "memory_sqlite", "persona_profile",
+    "memory_vectors", "event_ledger", "ase_states", "affinity_points",
+    "wechat_channels", "scheduler_throttle", "process_caches", "users_db",
 ]
 
 

@@ -1,12 +1,48 @@
 """十四模块数据库迁移 — 建表SQL与迁移执行器。"""
 
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 _DB_DEFAULT = Path(__file__).resolve().parent.parent / "data" / "sqlite.db"
 
-_MIGRATIONS: list[str] = [
+# 迁移条目：纯 SQL 字符串（须自身幂等，如 CREATE ... IF NOT EXISTS），或
+# 接收连接的 callable（用于无法用单条 SQL 幂等表达的变更——如条件 ALTER、
+# 数据清理；callable 内部自行保证幂等）。
+Migration = str | Callable[[sqlite3.Connection], None]
+
+
+def _migrate_user_persona_dimensions(conn: sqlite3.Connection) -> None:
+    from persona_extractor.persona_bank import (
+        CREATE_USER_PERSONA_TABLE,
+        CREATE_USER_SNAPSHOT_TABLE,
+        PERSONA_DIMENSION_COLUMNS,
+    )
+
+    conn.execute(CREATE_USER_PERSONA_TABLE)
+    conn.execute(CREATE_USER_SNAPSHOT_TABLE)
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(user_persona)")}
+    for col in PERSONA_DIMENSION_COLUMNS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE user_persona ADD COLUMN {col} TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_snapshots_user_time "
+        "ON user_persona_snapshots (user_id, timestamp DESC)"
+    )
+
+
+def _privatize_persona_trigger_messages(conn: sqlite3.Connection) -> None:
+    from persona_extractor.persona_bank import CREATE_USER_SNAPSHOT_TABLE
+
+    conn.execute(CREATE_USER_SNAPSHOT_TABLE)
+    conn.execute(
+        "UPDATE user_persona_snapshots SET trigger_message = '' "
+        "WHERE trigger_message != '' "
+        "AND trigger_message NOT LIKE 'sha256:%'"
+    )
+
+
+_MIGRATIONS: list[Migration] = [
     """CREATE TABLE IF NOT EXISTS characters (
         character_id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -134,6 +170,13 @@ _MIGRATIONS: list[str] = [
     """CREATE INDEX IF NOT EXISTS idx_chars_v2_active ON characters_v2(is_active)""",
     """CREATE INDEX IF NOT EXISTS idx_chars_v2_updated ON characters_v2(updated_at DESC)""",
     """CREATE INDEX IF NOT EXISTS idx_chars_v2_name ON characters_v2(name)""",
+    # W13 · D11：user_persona 五维度列（hexaco/dark_triad/mental_health/liwc/
+    # cognitive）。persona_bank 的自治建表对新库直接建全列；本迁移负责存量旧
+    # 结构库的幂等补列。DDL 与列名真源复用 persona_bank 常量防同构漂移。
+    _migrate_user_persona_dimensions,
+    # W13 · D11：清空快照表存量原话（trigger_message 曾存用户原话前 200 字、
+    # 无 TTL）。只清非 sha256: 格式行 ⇒ 幂等，且不伤隐私化后的新写入。
+    _privatize_persona_trigger_messages,
 ]
 
 
@@ -143,6 +186,7 @@ def get_table_names() -> list[str]:
         "emotion_stage_state", "stickers", "character_stickers",
         "vital_signs_state", "memory_favorites", "memory_forwards", "memory_recycle_bin",
         "shisi_schema_version", "characters_v2",
+        "user_persona", "user_persona_snapshots",
     ]
 
 
@@ -157,8 +201,11 @@ def run_migrations(db_path: Path | str | None = None) -> Sequence[str]:
         cursor = conn.cursor()
 
         applied: list[str] = []
-        for i, sql in enumerate(_MIGRATIONS):
-            conn.execute(sql)
+        for i, migration in enumerate(_MIGRATIONS):
+            if callable(migration):
+                migration(conn)
+            else:
+                conn.execute(migration)
             applied.append(f"migration_{i:03d}")
 
         cursor.execute(
