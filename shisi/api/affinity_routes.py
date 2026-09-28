@@ -29,26 +29,32 @@ class UpdateRequest(BaseModel):
 
 
 @router.get("/{character_id}", response_model=ApiResponse)
-async def get_affinity(character_id: str):
+async def get_affinity(character_id: str, user_id: str | None = None):
+    """带 ``user_id`` 时按隔离键 ``user::character`` 读（与对话路径同源）；
+    不带时保持旧口径（裸角色键，管理/测试兼容）。"""
     if _enhancer is None:
         raise HTTPException(status_code=503, detail="AffinityEnhancer未初始化")
-    return ApiResponse(data=_enhancer.get_progress(character_id))
+    return ApiResponse(data=_enhancer.get_progress(character_id, user_id=user_id or ""))
 
 
 @router.post("/{character_id}/update", response_model=ApiResponse)
-async def update_affinity(character_id: str, req: UpdateRequest):
+async def update_affinity(character_id: str, req: UpdateRequest, user_id: str | None = None):
     if _enhancer is None:
         raise HTTPException(status_code=503, detail="AffinityEnhancer未初始化")
-    new_val, unlocks = _enhancer.update(character_id, req.delta, req.reason, req.source)
+    new_val, unlocks = _enhancer.update(
+        character_id, req.delta, req.reason, req.source, user_id=user_id or ""
+    )
     return ApiResponse(data={"affinity": new_val, "unlocks": [u.__dict__ for u in unlocks]})
 
 
 @router.post("/{character_id}/decay", response_model=ApiResponse)
-async def apply_decay(character_id: str):
+async def apply_decay(character_id: str, user_id: str | None = None):
     if _enhancer is None:
         raise HTTPException(status_code=503, detail="AffinityEnhancer未初始化")
-    decay = _enhancer.apply_decay(character_id)
-    return ApiResponse(data={"decay": decay, "affinity": _enhancer.get_value(character_id)})
+    decay = _enhancer.apply_decay(character_id, user_id=user_id or "")
+    return ApiResponse(
+        data={"decay": decay, "affinity": _enhancer.get_value(character_id, user_id=user_id or "")}
+    )
 
 
 @router.get("/{character_id}/unlocks", response_model=ApiResponse)

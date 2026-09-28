@@ -114,4 +114,13 @@ async def delete_character(character_id: str):
     ok = mgr.delete_character(character_id)
     if not ok:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
-    return ApiResponse(data={"character_id": character_id, "message": "删除成功"})
+    return ApiResponse(
+        data={
+            "character_id": character_id,
+            "message": (
+                "已从运行态管理器移除该角色副本；权威角色卡真源在 config/characters，"
+                "不受本端点影响。完整删除（含记忆/索引级联）请用认证面 "
+                f"DELETE /api/characters/{character_id}（W9 lifecycle 作业）。"
+            ),
+        }
+    )

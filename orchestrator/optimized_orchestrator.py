@@ -791,10 +791,11 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             ``affinity_level``、``user_msg_clean`` 的字典。
         """
         # 请求级画像 ID（多用户/多角色隔离）。禁止再切换共享组件的全局 user_id。
+        # 2026-09-28 历遍批：委托唯一构造器 profile_scope，不再手拼键（控制面/生成侧同源）。
         pe = self.components.get("persona_extractor")
-        effective_user_id = (
-            f"{character_id}:{session_id}" if session_id else f"{character_id}"
-        )
+        from persona_extractor.fusion import profile_scope
+
+        effective_user_id = profile_scope(character_id, session_id)
 
         # 并行执行独立任务（recent 传 session_id：会话隔离，防跨用户串扰）
         # P1-10（2026-09-21 审查修复）：get_recent_context 自 v1.17 起读 DB——
