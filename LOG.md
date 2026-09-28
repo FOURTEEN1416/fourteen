@@ -15,7 +15,7 @@
 - **根治（`2ebfc61`）**：`run_migrations` 整段包 `BEGIN IMMEDIATE` 单写事务（COMMIT/ROLLBACK 成对、`isolation_level=None`、connect `timeout=30s`——并发启动排队执行、事务内 PRAGMA 读一致 schema，duplicate column 按构造不可能）+ `_enable_wal` 有限重试（60×100ms，仅容忍 locked/busy，其余照抛）。**红测先行**：`TestConcurrentRunMigrations` 3 例（旧 schema 库 3 轮×4 线程并发——修复前红 `database is locked`；全列库并发重跑；AST 静态守卫钉「BEGIN IMMEDIATE+COMMIT/ROLLBACK+isolation_level=None+timeout=」四要素）。**突变验红 3/3**（撤 connect 参数→守卫红；撤 BEGIN IMMEDIATE→守卫红；撤 WAL 重试→守卫红）；**还原教训复用**：`git checkout --` 曾连修复一并回退、快照 cp 存于突变态致还原带残——按 `git diff HEAD` 净形核对后重套。
 - **验证**：全量五分块 **2652 收集 / 2651 通过 / 1 跳过 / 0 失败**（534+1 / 556 / 565 / 485 / 511，较 W18 基线净增 3=本批用例；**41 卡零净增**、注册流沙箱守卫在位）+ ruff 0（B023 闭包晚绑定已修）+ pre-commit 四门禁全过；服务器二次快进 `9141afa→2ebfc61`（blob `095ecb2` 三端一致）+ 重启复验：**17:14:59 恰为 4 worker 并发首迁场景复跑——挂载 4/4、时间戳扫描 ERROR/duplicate/locked 0、调度器 1 master + 3 slave**、health/ready 200、shisi 面 16/16 全 200。GitHub CI run `36402213711` @ `2ebfc61` **全绿**（backend+frontend+六 ff 闸+adr-integrity 全 success，run 完结复核 conclusion=success）。
 - **过程并行事实**：本批执行期间默默另窗落 `1543294`（B 档四文档、四 gitignored 残留目录 `.browser_profile//outputs//.workbuddy*` 全删≈258M）——纯文档零代码，与服务器代码面正交；「保留待裁」三项据此闭合。
-- **文档**：AGENTS **v1.39.6**（三端一致 2ebfc61 / 徽章 2828 / QA 行 CI 口径）+ HANDOFF 开放项「服务器部署」闭合 + BOARD 追加区落账。
+- **文档**：AGENTS **v1.39.6**（三端一致 2ebfc61 / 徽章 2828 / QA 行 CI 口径）+ HANDOFF 开放项「服务器部署」闭合 + BOARD 追加区落账。纯文档批不入服务器（默默重申铁律，服务器 HEAD 停 `2ebfc61` 代码一致点）。
 
 ## 2026-09-28 — 主控 · 卸窗收编批：w13–w17 五窗卸载 + 分支清册 + 垃圾清除 + 功能面实核
 
