@@ -18,11 +18,14 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import logging
 import sqlite3
 import threading
 from collections.abc import Sequence
+
+from utils.session_key import owner_of
 
 from .models import (
     OceanTraits,
@@ -34,7 +37,29 @@ from .models import (
 
 logger = logging.getLogger("persona_bank")
 
-# 建表SQL
+# 五维度列名单一真源（migrations 的存量库补列迁移复用本常量）。
+# 对应 UserPersona 属性：hexaco / dark_triad / mental_health / liwc / cognitive，
+# 落库为 JSON 文本（D11：fusion 算出的五维度此前从未落库，重启全丢）。
+PERSONA_DIMENSION_COLUMNS: tuple[str, ...] = (
+    "hexaco_json",
+    "dark_triad_json",
+    "mental_health_json",
+    "liwc_json",
+    "cognitive_json",
+)
+
+_PERSONA_DIMENSION_FIELDS: dict[str, str] = {
+    "hexaco_json": "hexaco",
+    "dark_triad_json": "dark_triad",
+    "mental_health_json": "mental_health",
+    "liwc_json": "liwc",
+    "cognitive_json": "cognitive",
+}
+
+_TRIGGER_HASH_PREFIX = "sha256:"
+
+# 建表SQL（migrations.run_migrations 复用本常量保证同构；本表由本组件自治
+# 建表，_init_db 另对存量旧结构做幂等补列）
 CREATE_USER_PERSONA_TABLE = """
 CREATE TABLE IF NOT EXISTS user_persona (
     user_id TEXT PRIMARY KEY,
@@ -43,7 +68,12 @@ CREATE TABLE IF NOT EXISTS user_persona (
     style_json TEXT NOT NULL,
     snapshot_count INTEGER NOT NULL DEFAULT 0,
     first_seen TEXT NOT NULL,
-    last_updated TEXT NOT NULL
+    last_updated TEXT NOT NULL,
+    hexaco_json TEXT,
+    dark_triad_json TEXT,
+    mental_health_json TEXT,
+    liwc_json TEXT,
+    cognitive_json TEXT
 )
 """
 
@@ -60,6 +90,34 @@ CREATE TABLE IF NOT EXISTS user_persona_snapshots (
     trigger_message TEXT DEFAULT ''
 )
 """
+
+
+def privatize_trigger_message(text: str | None) -> str:
+    """把触发检测的原话隐私化为 ``sha256:<前16hex>|len:<长度>``。
+
+    只保留指纹与存档窗口长度，不留任何原文；空串保持空串。哈希与长度
+    基于实际存档窗口（前 200 字，与旧 ``[:200]`` 截断口径一致）。
+    """
+    raw = (text or "").strip()[:200]
+    if not raw:
+        return ""
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return f"{_TRIGGER_HASH_PREFIX}{digest}|len:{len(raw)}"
+
+
+def scope_owner_uid(scope: str) -> int | None:
+    """从 persona scope 键解析归属 uid；无归属返回 None。
+
+    scope 构造点（orchestrator.process_message）：``{character_id}:{session_id}``，
+    其中 session_id 是会话键家族（``N:peer@im.wechat`` / ``N:web:hex``）。
+    剥掉 character 段后用 utils.session_key.owner_of 取 owner——即「session_id
+    的 owner 段」。无 character 前缀的裸键（历史 default 桶）与 owner 段非
+    数字的键都判无归属，删除作业不得误伤。
+    """
+    _char, sep, session = str(scope or "").partition(":")
+    if not sep:
+        return None
+    return owner_of(session)
 
 
 class UserPersonaBank:
@@ -93,6 +151,7 @@ class UserPersonaBank:
             self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
             self._conn.execute(CREATE_USER_PERSONA_TABLE)
             self._conn.execute(CREATE_USER_SNAPSHOT_TABLE)
+            self._ensure_dimension_columns()
             with contextlib.suppress(Exception):  # noqa: BLE001
                 self._conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_snapshots_user_time "
@@ -101,6 +160,22 @@ class UserPersonaBank:
             self._conn.commit()
         except Exception as e:  # noqa: BLE001
             logger.error("PersonaBank DB init error: %s", e)
+
+    def _ensure_dimension_columns(self) -> None:
+        """存量旧结构表幂等补列（新表由 CREATE 的全列 DDL 直接建齐）。
+
+        与 shisi/migrations 的补列迁移同源：列名真源都是
+        PERSONA_DIMENSION_COLUMNS，判定用 PRAGMA table_info，缺列才 ALTER。
+        """
+        if self._conn is None:
+            return
+        existing = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(user_persona)")
+        }
+        for col in PERSONA_DIMENSION_COLUMNS:
+            if col not in existing:
+                self._conn.execute(f"ALTER TABLE user_persona ADD COLUMN {col} TEXT")
 
     def get_connection(self) -> sqlite3.Connection | None:
         """获取数据库连接（给外部复用）"""
@@ -115,17 +190,22 @@ class UserPersonaBank:
         return self._load_from_db(user_id)
 
     def save_persona(self, persona: UserPersona) -> bool:
-        """保存或更新用户人格画像"""
+        """保存或更新用户人格画像（含五维度 JSON 列，D11 真落库）。"""
         if not self._conn:
             return False
+
+        def _dim_json(value: dict | None) -> str | None:
+            return json.dumps(value, ensure_ascii=False) if value else None
 
         with self._lock:
             try:
                 self._conn.execute(
                     """INSERT OR REPLACE INTO user_persona
                        (user_id, ocean_json, pad_json, style_json,
-                        snapshot_count, first_seen, last_updated)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        snapshot_count, first_seen, last_updated,
+                        hexaco_json, dark_triad_json, mental_health_json,
+                        liwc_json, cognitive_json)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         persona.user_id,
                         json.dumps(persona.ocean.to_dict(), ensure_ascii=False),
@@ -134,6 +214,11 @@ class UserPersonaBank:
                         persona.snapshot_count,
                         persona.first_seen,
                         persona.last_updated,
+                        _dim_json(persona.hexaco),
+                        _dim_json(persona.dark_triad),
+                        _dim_json(persona.mental_health),
+                        _dim_json(persona.liwc),
+                        _dim_json(persona.cognitive),
                     ),
                 )
                 self._conn.commit()
@@ -164,7 +249,7 @@ class UserPersonaBank:
                         json.dumps(snapshot.style.to_dict(), ensure_ascii=False),
                         snapshot.confidence,
                         snapshot.source,
-                        snapshot.trigger_message[:200],
+                        privatize_trigger_message(snapshot.trigger_message),
                     ),
                 )
 
@@ -230,20 +315,45 @@ class UserPersonaBank:
         if not self._conn:
             return None
         try:
+            # 显式列名（不用 SELECT * 位置索引）：五维度列是后补的，存量库
+            # 列序可能与新库不一致，位置索引会把错列读进字段。
+            cols = [
+                "user_id", "ocean_json", "pad_json", "style_json",
+                "snapshot_count", "first_seen", "last_updated",
+                *PERSONA_DIMENSION_COLUMNS,
+            ]
             row = self._conn.execute(
-                "SELECT * FROM user_persona WHERE user_id = ?",
+                f"SELECT {', '.join(cols)} FROM user_persona WHERE user_id = ?",
                 (user_id,),
             ).fetchone()
             if row is None:
                 return None
+            by_name = dict(zip(cols, row, strict=True))
+
+            def _dim(col: str) -> dict | None:
+                raw = by_name.get(col)
+                if not raw:
+                    return None
+                try:
+                    loaded = json.loads(raw)
+                except (TypeError, ValueError):
+                    logger.warning("persona %s 列 %s 不是合法 JSON，按缺失处理",
+                                   user_id, col)
+                    return None
+                return loaded if isinstance(loaded, dict) else None
+
             persona = UserPersona(
-                user_id=row[0],
-                ocean=OceanTraits.from_dict(json.loads(row[1])),
-                pad=PadState.from_dict(json.loads(row[2])),
-                style=StyleVector.from_dict(json.loads(row[3])),
-                snapshot_count=row[4],
-                first_seen=row[5],
-                last_updated=row[6],
+                user_id=by_name["user_id"],
+                ocean=OceanTraits.from_dict(json.loads(by_name["ocean_json"])),
+                pad=PadState.from_dict(json.loads(by_name["pad_json"])),
+                style=StyleVector.from_dict(json.loads(by_name["style_json"])),
+                snapshot_count=by_name["snapshot_count"],
+                first_seen=by_name["first_seen"],
+                last_updated=by_name["last_updated"],
+                **{
+                    _PERSONA_DIMENSION_FIELDS[col]: _dim(col)
+                    for col in PERSONA_DIMENSION_COLUMNS
+                },
             )
             self._cache[user_id] = persona
             return persona
@@ -337,6 +447,65 @@ class UserPersonaBank:
             except Exception as e:  # noqa: BLE001
                 logger.error("Failed to clear scope %s: %s", user_id, e)
         return cleared
+
+    # ── 账号生命周期（W13 · D11 删号级联）──
+
+    def _owner_scope_rows(self, user_id: int) -> dict[str, list[str]]:
+        """两表中归属 uid 的 scope 键（逐表 distinct 后按 owner 判定筛选）。"""
+        out: dict[str, list[str]] = {}
+        for table in ("user_persona", "user_persona_snapshots"):
+            rows = self._conn.execute(
+                f"SELECT DISTINCT user_id FROM {table}"  # noqa: S608
+            ).fetchall()
+            out[table] = [
+                r[0] for r in rows if scope_owner_uid(r[0]) == user_id
+            ]
+        return out
+
+    def purge_owner_scopes(self, user_id: int) -> dict[str, int]:
+        """删除归属 uid 的全部画像与快照，回执按表带删除行数。
+
+        归属判定 = scope 剥 character 前缀后 ``owner_of(session_id) == uid``
+        （见 :func:`scope_owner_uid`）；他人 scope 与无主 scope（裸 default、
+        owner 段非数字）一律保留。幂等：重跑对已清空库返回全 0。
+        """
+        if not self._conn:
+            return {"user_persona": 0, "user_persona_snapshots": 0}
+        uid = int(user_id)
+        deleted = {"user_persona": 0, "user_persona_snapshots": 0}
+        with self._lock:
+            try:
+                for table, victims in self._owner_scope_rows(uid).items():
+                    for scope in victims:
+                        cur = self._conn.execute(
+                            f"DELETE FROM {table} WHERE user_id = ?",  # noqa: S608
+                            (scope,),
+                        )
+                        deleted[table] += max(cur.rowcount, 0)
+                        self._cache.pop(scope, None)
+                self._conn.commit()
+            except Exception as e:  # noqa: BLE001
+                logger.error("Failed to purge persona scopes for uid %s: %s",
+                             uid, e)
+                raise
+        return deleted
+
+    def count_owner_scopes(self, user_id: int) -> dict[str, int]:
+        """归属 uid 的残留行数（生命周期 verify 真源；应清零后为全 0）。"""
+        if not self._conn:
+            return {"user_persona": 0, "user_persona_snapshots": 0}
+        uid = int(user_id)
+        counts = {"user_persona": 0, "user_persona_snapshots": 0}
+        for table, victims in self._owner_scope_rows(uid).items():
+            if not victims:
+                continue
+            placeholders = ",".join("?" for _ in victims)
+            row = self._conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE user_id IN ({placeholders})",  # noqa: S608
+                victims,
+            ).fetchone()
+            counts[table] = int(row[0])
+        return counts
 
     def health_check(self) -> dict:
         return {

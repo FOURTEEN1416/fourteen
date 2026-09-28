@@ -1,4 +1,4 @@
-"""shisi 数据库迁移测试 — 13张表创建 + 幂等性验证"""
+"""shisi 数据库迁移测试 — 15张表创建 + 幂等性验证（W13 起纳管 user_persona 两表）"""
 
 from pathlib import Path
 
@@ -17,6 +17,7 @@ class TestTableNames:
         "emotion_stage_state", "stickers", "character_stickers",
         "vital_signs_state", "memory_favorites", "memory_forwards", "memory_recycle_bin",
         "shisi_schema_version", "characters_v2",
+        "user_persona", "user_persona_snapshots",
     }
 
     def test_returns_all_tables(self):
