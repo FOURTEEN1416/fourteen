@@ -43,6 +43,13 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-28 · 主控 · W16 报告三项裁决（invite 直收批准 / test_consent 污染选 (a) / 口径勘误）+ 代提交 W14/W15 申报
+
+- **① invite_routes 钩子缺口——批准接通**：`/api/auth/register-invite`（`api/routers/invite_routes.py`，W16 白名单外）扩入白名单；收编 W16 后由**主控直收**（复用 `provision_initial_character`，additive 契约与 `/register` 完全一致：失败降级 null 不阻断、`needs_consent` 零改动），红测先行补用例。
+- **② test_consent 收编污染——处置选 (a)**（夹具 `monkeypatch.setattr(character_routes, "CHARACTERS_DIR", tmp_path)` 沙箱）：(b)「回归跑无卡检出」把正确性押在操作纪律上，违背「长期有效、预防复发」；(a) 两行根治后主检出回归同样安全。`tests/**` 属主控域，收编后红测复现（跑前后数卡实证）→ 修 → 复跑零新增。
+- **③ 口径勘误（采信 W16 实测）**：本批出具条所称「worktree 少 82 例」实为 **少 80 例**（`test_persona_injection` 41 卡 82 条 → 0 卡各留 1 条兜底，−82+2）。**引用基线**：主检出 2567 ↔ worktree 无卡 2487 ↔ 含 W16 2498。
+- **代提交说明**：本条提交同时包含 **W14 / W15 实施窗**的开工申报（直写主检出 BOARD 未提交部分），主控代为提交留痕，归属各窗。
+
 ### 2026-09-28 · W15 实施窗 · 开工申报：D12-L 生理指标接小说模式（`wt/w15` @ `3f9a87d`）
 
 - **实扫定位**（任务书判据全部核实）：① `VitalSignsEngine.get_current` 无状态恒返 `_default_state`（72/36.5/16/平静），`update_on_emotion`/`tick` 生产零调用（仅 tests 与 `test_integration` 直调 reg 实例）；② `vital_signs_state` 表（`shisi/migrations.py:73`）全仓零 INSERT 零 SELECT；③ 唯一消费 = `shisi/api/vital_signs_routes.py` GET 端点；④ 小说模式 = `utils/reply_mode.py`（novel/immersive，真源 `data/scheduler_config.json`），生成路径注入点 = `orchestrator/optimized_orchestrator.py:1115-1129`（回复模式块，system 末尾最高显著位）；⑤ 情绪真源：请求侧 `emotion_state`（对象 `primary_emotion.value` ∈ 中文键 开心/伤心/生气/撒娇/平常…，`my_character/emotion_engine.py:35`；dict 形态 `{"primary":{"type":…}}`，`to_dict()`/consistency_checker 产出），快照侧 `utils/emotion_state.load_emotion_state(session_id, character_id)` 每轮由 orchestrator:1382-1387 写入、键 `primary_emotion` = `shisi EmotionType.name`（NEUTRAL/HAPPY/…）；⑥ 键形状唯一 owner = `shisi/core/conversation_turn.isolation_key`（`user_key::character`，注释明示 ASEHub/画像/主动消息共用）；⑦ 角色解析 = `utils/character_resolver.resolve_character_id(uk, api.deps.gf)`（scheduler:1139/1202 与 `_init_mixin._inject_ase_knowledge` 同路）。
