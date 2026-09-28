@@ -3,11 +3,9 @@
 from observability.config_manager import ConfigManager
 from observability.config_models import (
     APIConfig,
-    CharacterCardConfig,
     EmotionConfig,
     LLMConfig,
     MemoryConfig,
-    MemoryExtConfig,
     ObservabilityConfig,
     ProactiveConfig,
     SafetyConfig,
@@ -66,8 +64,6 @@ __all__ = [
     "APIConfig",
     "ObservabilityConfig",
     "VoiceConfig",
-    "CharacterCardConfig",
-    "MemoryExtConfig",
     # Config manager
     "ConfigManager",
     # Metrics

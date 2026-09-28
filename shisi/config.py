@@ -22,15 +22,17 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 def _apply_env_overrides(config: dict, prefix: str = "AIYU") -> dict:
     env_mappings = {
-        f"{prefix}_CHARACTER_MAX_ACTIVE": ("character", "max_active", int),
-        f"{prefix}_CHARACTER_DEFAULT": ("character", "default_character_id", str),
+        # CHARACTER_MAX_ACTIVE / CHARACTER_DEFAULT / WECHAT_RATE_LIMIT 三条映射已删
+        # （2026-09-28 历遍批）：对应键全仓零读者（get_config 实扫无消费），悬空同
+        # MEMORY_RECYCLE_DAYS（BOARD 登记）。保留项均有 get_config 读者：affinity 五键、
+        # sticker.max_file_size_mb。
         f"{prefix}_AFFINITY_DECAY_RATE": ("affinity", "decay_rate", float),
         f"{prefix}_AFFINITY_GRACE_DAYS": ("affinity", "grace_period_days", int),
         f"{prefix}_AFFINITY_MAX": ("affinity", "max_value", int),
         f"{prefix}_AFFINITY_MIN": ("affinity", "min_value", int),
-        f"{prefix}_WECHAT_RATE_LIMIT": ("wechat", "rate_limit_per_minute", int),
         f"{prefix}_STICKER_MAX_SIZE_MB": ("sticker", "max_file_size_mb", int),
-        f"{prefix}_MEMORY_RECYCLE_DAYS": ("memory_ext", "recycle_bin_days", int),
+        # AIYU_MEMORY_RECYCLE_DAYS → ("memory_ext","recycle_bin_days") 映射已删
+        # （2026-09-28 历遍批）：memory_ext 整包删除后该键零读者，悬空登记见 BOARD。
     }
     for env_key, (section, key, cast) in env_mappings.items():
         val = os.environ.get(env_key)

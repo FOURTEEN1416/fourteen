@@ -1,5 +1,37 @@
 # Code Deletion Log
 
+## [2026-09-28] 历遍批（W18）：memory_ext 整包 + scene_narrator + 死配置层整删
+
+- **删除（模块/文件）**：
+  - `memory_ext/`（`__init__.py` + `mem0_backend.py`）——mem0 兼容第二 RAG 记忆真源；
+    W4 缺陷 G（09-27）裁决「停用+防复活」后全仓零消费者，本批按用户历遍令整删。
+    配套删除 `orchestrator/_init_mixin.py` 装配桩 `_init_memory_ext`（含调用点）。
+  - `shisi/ase/scene_narrator.py`——AST 死码扫描命中：顶层与惰性 import 双口径全仓
+    零引用，无字符串动态装载点。
+- **删除（配置层）**：
+  - `config/system.yaml` `memory_ext` 段与 `character_card` 段（后者对应包已于批6b
+    项10 整删，段成化石）；
+  - `observability/config_models.py` `MemoryExtConfig` / `CharacterCardConfig` 两模型
+    及 `SystemConfig` 对应字段（字段零读者；`config_manager` 按 model_fields 合并，
+    段出库后无行为差），`observability/__init__.py` 同步去导出；
+  - `shisi/config.py` `_apply_env_overrides` 三枚悬空 env 映射——
+    `AIYU_MEMORY_RECYCLE_DAYS`（映向已删的 memory_ext 段；BOARD 09-28 登记项）、
+    `AIYU_CHARACTER_MAX_ACTIVE`、`AIYU_CHARACTER_DEFAULT`、`AIYU_WECHAT_RATE_LIMIT`
+    （`get_config` 实扫全仓无读者；affinity 五键与 sticker.max_file_size_mb 有读者
+    保留）。
+- **契约升级**：`tests/test_w4_memory_ext_disposition.py` 由「禁用+置 None」三例改写
+  为「不存在即不得复活」三例（包目录/配置段/装配桩各钉一枚）。
+- **依据与验证**：AST 机械扫描 + 逐条人工取证（含 `character_card_id` DB 列与
+  `normalize_character_card` 等同名词根排除）；`test_w4_memory_ext_disposition` +
+  配置邻域 `test_config_manager`/`test_config_permissions`/`test_w6_config_effectiveness`
+  21/21 绿；全量五分块见 LOG 当日条目。
+- **测试污染根治（同批）**：`tests/test_invite_codes.py` 注册流未沙箱卡目录，每轮
+  回归向真实 `config/characters/` 净增 2 张模板克隆卡（gitignored 不可见；本窗实测
+  41→43→49 累积）。按 `test_consent.py`（cc64a92）同纪律补 autouse 沙箱夹具，
+  8 张污染卡隔离至 `_quarantine/w18_testclone_2026-09-28/`（开发库三查零引用），
+  卡数回 41；`test_w18_traversal_fixes.py` 增机械守卫（凡真实起 app 打
+  register-invite 的测试必须声明 `CHARACTERS_DIR` 沙箱），突变验红命中。
+
 ## [2026-09-27] W9（D6/D12）：ToneMimic 编排侧控制链删除
 
 - **删除**：`orchestrator/_init_mixin.py` 三处——`from my_character.tone_mimic

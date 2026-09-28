@@ -77,7 +77,8 @@ class _InitPhasesMixin:
             # （卡片真源是 persona_service._load_character_card 直接读
             # config/characters），详见 docs/DELETION_LOG.md
             self._init_voice(cfg, fusion_cfg)
-            self._init_memory_ext(cfg, fusion_cfg)
+            # memory_ext 整包删除（2026-09-28 历遍批）：W4-G 停用后全仓零消费者，
+            # mem0 兼容 Chroma 第二记忆真源已整删，详见 docs/DELETION_LOG.md
             self._init_persona_extractor(fusion_cfg)
             self._init_vault(fusion_cfg)
             self._init_multimodal(cfg, fusion_cfg)
@@ -469,20 +470,6 @@ class _InitPhasesMixin:
         except Exception as e:  # noqa: BLE001
             logger.warning("角色音色契约管理器初始化失败 (不影响运行): %s", e)
             self.components["character_voice"] = None
-
-    # ─────────────────────────────────────────────────────────────
-    #  阶段 7: 长期记忆增强 (v3.0)
-    # ─────────────────────────────────────────────────────────────
-    def _init_memory_ext(self, cfg: Any, fusion_cfg: dict) -> None:
-        """W4 缺陷 G：不再装配第二套 RAG 记忆真源。
-
-        memory_ext（mem0 兼容 Chroma）全仓无生产 CRUD 消费者，却与
-        shisi/memory 主记忆并行写同一类长期事实 —— 违反「不新增第二记忆
-        真源」。配置默认已禁用；此处强制不初始化，避免有人打开开关就静默
-        接上第二套库。待迁移到主记忆或删除后再恢复装配。
-        """
-        self.components["memory_ext"] = None
-        logger.info("memory_ext 未装配（W4-G：第二套记忆真源停用，主记忆=shisi/memory）")
 
     # ─────────────────────────────────────────────────────────────
     #  阶段 8: PersonaExtractor 人格克隆 (v3.1)

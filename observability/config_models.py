@@ -119,19 +119,6 @@ class VoiceConfig(BaseModel):
     mimo_tts: dict[str, Any] = Field(default_factory=dict, alias="mimo-tts")
 
 
-class CharacterCardConfig(BaseModel):
-    """角色卡配置 - 与character_card/模块对接"""
-    enabled: bool = True
-    default_card: str = ""
-    card_dir: str = "config/characters"
-
-
-class MemoryExtConfig(BaseModel):
-    """长期记忆增强配置 - 与memory_ext/模块对接"""
-    enabled: bool = False
-    collection_name: str = "long_term_memories"
-
-
 class SystemConfig(BaseModel):
     env: str = Field(default="dev", pattern=r"^(dev|prod|test)$")
     debug: bool = False
@@ -143,6 +130,4 @@ class SystemConfig(BaseModel):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     api: APIConfig = Field(default_factory=APIConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
-    character_card: CharacterCardConfig = Field(default_factory=CharacterCardConfig)
-    memory_ext: MemoryExtConfig = Field(default_factory=MemoryExtConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
