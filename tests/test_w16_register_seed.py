@@ -321,6 +321,24 @@ async def test_register_contract_is_additive_only(w16_app):
     }
 
 
+async def test_login_carries_the_key_but_never_provisions(w16_app):
+    """分发只属于注册：登录响应必须带 `initial_character` 键（Pydantic 模型共用）但恒为 null，
+    且不得二次克隆（若有人把钩子挪到登录路径，本例转红）。"""
+    ns = w16_app
+    await _register(ns.client, "kate")
+    baseline = set(p.name for p in ns.chars_dir.glob("*.json"))
+
+    resp = await ns.client.post(
+        "/api/auth/login", json={"login": "kate@w16.test", "password": _PASSWORD}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "initial_character" in body, "共用模型的 additive 键不得缺席"
+    assert body["initial_character"] is None
+    assert body["needs_consent"] is True
+    assert set(p.name for p in ns.chars_dir.glob("*.json")) == baseline, "登录不得新增克隆卡"
+
+
 # ═══════════════════════════════════════════════════════════
 # 4. 开关与失败面
 # ═══════════════════════════════════════════════════════════

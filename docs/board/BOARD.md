@@ -35,7 +35,7 @@
 | **W2 laya 审计** | `wt/laya-audit`（分支保留） | ~~`..\ai-girlfriend-laya-audit`~~ 可卸 | 包 R3-W2 · 只读调研 | ✅ **已收编 main·已卸窗**（merge `wt/laya-audit`：审计报告 222 行 + LOG 两条含勘误） | 2026-09-22 登记 | 结论=有条件引入（候选① llm_proactive 前置 gate 四步路径；不建议 tool_gate L0.5/直替）；未证实项 §5 #1/#2 **已由主控窗 22:50 ssh 实测关闭**（生产机 available 1.8Gi < laya 常驻推算 2.0–2.5GB；HF 域不可直连需私有投递）→ 第 2–4 步触发条件追加**内存升档/独立宿主**硬项，第 1 步语料积累不受阻可先行 |
 | **W3 热点知识链** | `wt/hot-knowledge`（分支保留） | ~~`..\ai-girlfriend-hot-knowledge`~~ 可卸 | 包 R3-W3 · 采集→入库→供出 | ✅ **已收编 main + 挂线完成·已卸窗**（merge 7 提交；主控补 `hot_topics_collect` 注册 + 2 行为断言，`f2c51ba`） | 2026-09-22 登记 | 契约 §1 硬缺口已闭合：scheduler 60min IntervalTrigger → `collect_if_due()`（自限速/永不抛出，开关真源 `config/hot_topics.yaml`）；conftest 池隔离随批保留 |
 | **W4 部署** | 无（主控执行） | 主检出 + swu-prod | 包 R3-W4 · push+服务器 | ✅ **完成**（默默对 push 与服务器 pull 分别明确点头）——三端统一 `7578e57`；服务器 bundle 三跳 ff + remote_deploy 4/4 + health 200；服务器全量 **1868 收集 / 1867 通过 / 1 跳过 / 0 失败** + CI 35714334710 绿；详见 LOG「W4 部署窗口」条目。**终态补记（R3 验收窗）**：二次上线至 `68851a5`，双端全量 **1894/1893/1/0** 绿 | 2026-09-22 登记 | nginx 零配置改动（入口冻结铁律遵守）；拦下 W1 迁移参数换向与 CI 墙钟用例两枚缺陷后放行（`5cc70ee`/`48e1868`）；临时 bundle 已清 |
-| **W16 注册分发** | `wt/w16` | `..\ai-girlfriend-w16` | W12 阶段2 · 注册分发钩子（后端） | 🟡 **窗内完工·候收编**（未 push 未部署） | 2026-09-28 | 白名单三件：`api/routers/auth_routes.py`、`api/routers/character_template_routes.py`、`tests/test_w16_register_seed.py`（+10 例）。⚠️ **两项归主控**：① 邀请码注册 `/api/auth/register-invite`（`invite_routes.py`，白名单外）未接钩子；② 收编回归会在主检出 `config/characters/` 生成测试克隆卡（`test_consent.py` 夹具未沙箱卡目录，实证见追加区）。细节见追加区 09-28 W16 条 |
+| **W16 注册分发** | `wt/w16` | `..\ai-girlfriend-w16` | W12 阶段2 · 注册分发钩子（后端） | 🟡 **窗内完工·候收编**（未 push 未部署） | 2026-09-28 | 白名单三件：`api/routers/auth_routes.py`、`api/routers/character_template_routes.py`、`tests/test_w16_register_seed.py`（+11 例）。⚠️ **两项归主控**：① 邀请码注册 `/api/auth/register-invite`（`invite_routes.py`，白名单外）未接钩子；② 收编回归会在主检出 `config/characters/` 生成测试克隆卡（`test_consent.py` 夹具未沙箱卡目录，实证见追加区）。细节见追加区 09-28 W16 条 |
 
 > ⚠️ **2026-09-19 路径收编**：W1/W2 工作区原位于 `D:\Desktop\` 根（仓库外），已收编至 `大创赛报名以及后期发展\` 下；仍为**仓库外非 git 工作区**，受 `.gitignore:130` 全目录排除，故宪法 §3「参赛材料不入库」约束不变。同期收编 `大赛附件包`、`专利-唯一的你十四`。**追加区内历史条目所载旧路径按「历史记录保留原文」准则未作改动**。完整映射见 `大创赛报名以及后期发展\PATH-MIGRATION-2026-09-19.md`。
 
@@ -55,9 +55,9 @@
   失败仅降级为 `null` + WARNING（绝不 500）；登录/刷新恒为 `null`（默认值），`needs_consent` 流程零改动。
 - **绑定失败的补偿语义**（本窗自决并留测）：卡已写盘而激活绑定抛错 → 回收该克隆卡，不在盘上留用户从未索取的孤儿副本；
   回收也失败则再落一条 WARNING 明示孤儿留存（不静默）。
-- **验证**：新增 `tests/test_w16_register_seed.py` **10 例全绿**（主路径含「新用户名下恰 1 张卡 + 绑定行 +
+- **验证**：新增 `tests/test_w16_register_seed.py` **11 例全绿**（主路径含「新用户名下恰 1 张卡 + 绑定行 +
   列表接口 `is_active` 读回」、双用户各自独立副本、seed 空回落 visible 首张、种子缺卡顺延、有主/隐藏候选跳过、
-  全不可用返回 null 且零写盘、`enabled=false` 不写盘、写卡失败仍 200+告警+无绑定、绑定失败仍 200+无孤儿卡、additive 契约）；
+  全不可用返回 null 且零写盘、`enabled=false` 不写盘、写卡失败仍 200+告警+无绑定、绑定失败仍 200+无孤儿卡、additive 契约 + 登录侧「带键但恒 null、不二次克隆」契约）；
   沙箱纪律＝卡目录与策展清单均重定向 tmp_path，**测试零写真实 `config/characters/`**。
   邻域全绿：`test_w12_character_templates` 11 + `test_consent` 11 + `test_invite_codes` 18 + `test_password_policy` 11 +
   `test_auth_jwt_or_apikey` 4 + `test_w1_identity_authorization` 23 + W9 四件/`test_character`/`test_w8_character_expression`
@@ -75,8 +75,8 @@
   无卡检出（CI/worktree），主检出只跑单文件验收。
 - **口径勘误（供收编门禁引用）**：主控 09-28 批次条所称「worktree 无卡 → 收集数少 **82** 例」实测为 **少 80 例**——
   `test_persona_injection` 两参数化用例在 41 卡时为 82 条、0 卡时各留 1 条兜底（−82+2）。逐用例差集核对：
-  主检出 `3f9a87d` 收集 **2567** ↔ worktree 同提交 **2487**（不含本窗）↔ 本窗 **+10 = 2497**。
-  引用「worktree 基线」请写 2487（或 2497 含 W16），勿写 2567−82。
+  主检出 `3f9a87d` 收集 **2567** ↔ worktree 同提交 **2487**（不含本窗）↔ 本窗 **+11 = 2498**。
+  引用「worktree 基线」请写 2487（或 2498 含 W16），勿写 2567−82。
 
 ### 2026-09-28 · 主控 · 批次 W13–W17 出具：产品完善收官（D10–D12 实施 + W12 阶段2 + 自服务前端），visible_ids 已填实
 
