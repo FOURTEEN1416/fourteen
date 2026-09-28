@@ -30,6 +30,7 @@ from api.auth_jwt import (
 )
 from api.database import InviteCode, User, UserSession, get_db
 from api.password_policy import PasswordStr, ensure_password_strength
+from api.routers.character_template_routes import provision_initial_character
 
 logger = logging.getLogger("invite_routes")
 
@@ -65,6 +66,9 @@ class TokenResponse(BaseModel):
     user: dict
     # 使用即同意（W2-CONSENT）：邀请码注册的新用户必然未同意协议
     needs_consent: bool = False
+    # W12 阶段2（与 auth_routes.TokenResponse 同契约）：注册分发的初始角色（克隆新 id），
+    # 无可用模板/分发失败时为 null——additive，不影响既有字段与协议门流程。
+    initial_character: dict | None = None
 
 
 class CreateInvitesRequest(BaseModel):
@@ -205,11 +209,15 @@ async def register_with_invite(
     await db.refresh(user)
 
     logger.info("邀请码注册成功: %s (%s) | code=%s", user.email, user.username, code_norm)
+    # W12 阶段2：与 /register 同一注册分发契约（用户行已提交之后执行；
+    # 分发内部失败自降级为 None——绝不阻断注册、绝不 500）。
+    initial_character = await provision_initial_character(db, int(user.id))
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
         user=user.to_dict(),
         needs_consent=True,
+        initial_character=initial_character,
     )
 
 

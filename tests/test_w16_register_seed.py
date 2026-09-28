@@ -396,3 +396,62 @@ async def test_binding_failure_leaves_no_orphan_card(w16_app, monkeypatch):
     user_id = int(body["user"]["id"])
     assert ns.owned_cards(user_id) == {}, "绑定失败后不得在盘上留下无绑定的孤儿卡"
     assert await _active_row(ns.session_factory, user_id) is None
+
+
+# ── 邀请码注册路径（主控直收 2026-09-28）：同一分发契约覆盖 /register-invite ──
+# 前端 LoginPage 填邀请码走 /api/auth/register-invite（registerWithInvite 优先于 register），
+# 该路径此前未接分发钩子——新用户经邀请码注册拿不到初始角色。
+
+
+async def _seed_valid_invite(session_factory) -> str:
+    from datetime import datetime, timedelta, timezone
+
+    from api.database import InviteCode
+
+    async def _make():
+        async with session_factory() as session:
+            session.add(
+                InviteCode(
+                    code="invitec16",
+                    created_by=1,
+                    created_at=datetime.now(timezone.utc),
+                    expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                )
+            )
+            await session.commit()
+
+    await _make()
+    return "invitec16"
+
+
+async def test_register_with_invite_provisions_seed_card_and_binding(w16_app):
+    ns = w16_app
+    code = await _seed_valid_invite(ns.session_factory)
+
+    resp = await ns.client.post(
+        "/api/auth/register-invite",
+        json={
+            "invite_code": code,
+            "email": "invited@w16.test",
+            "username": "invited",
+            "password": _PASSWORD,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    initial = body.get("initial_character")
+    assert isinstance(initial, dict), f"邀请码注册也应分发初始角色，实得 {initial!r}"
+    assert initial["name"] == "种子角色"
+    new_id = initial["id"]
+    assert new_id and new_id != _SEED, "分发必须用克隆新 id，不得认领模板本体"
+
+    user_id = int(body["user"]["id"])
+    mine = ns.owned_cards(user_id)
+    assert len(mine) == 1, f"新用户名下应恰 1 张卡，实得 {len(mine)} 张"
+    card = next(iter(mine.values()))
+    assert card["id"] == new_id and card["is_active"] is False
+
+    row = await _active_row(ns.session_factory, user_id)
+    assert row is not None and row.character_id == new_id
+    assert body["needs_consent"] is True, "邀请码注册的协议门流程不得被钩子改动"

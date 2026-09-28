@@ -60,6 +60,23 @@ def module_app(module_engine, module_session_factory):
     return app
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _sandbox_characters_dir(tmp_path_factory):
+    """注册分发钩子（W12 阶段2）会把初始角色卡写进 CHARACTERS_DIR——钉到模块级临时目录。
+
+    未沙箱时在主检出（41 卡）跑本文件会向真实 config/characters/ 产出克隆卡
+    （实测 41→42，随每次回归累积且 git 不可见）。克隆写盘经 character_routes
+    的 `_save_character`（调用时读模块全局），patch 该常量即全覆盖。
+    """
+    from api.routers import character_routes
+
+    sandbox = tmp_path_factory.mktemp("consent-characters")
+    original = character_routes.CHARACTERS_DIR
+    character_routes.CHARACTERS_DIR = sandbox
+    yield
+    character_routes.CHARACTERS_DIR = original
+
+
 @pytest.fixture(autouse=True)
 async def _reset_db(module_engine):
     """每个测试前重置表"""
