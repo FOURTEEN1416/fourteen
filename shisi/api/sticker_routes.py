@@ -54,6 +54,10 @@ async def recommend_stickers(req: RecommendRequest):
 
 @router.post("/import", response_model=ApiResponse)
 async def import_stickers(file: UploadFile = File(...), category: str = "default"):  # noqa: B008
+    """ZIP 导入回执（W14 · D12-K 语义对齐）：
+    ``accepted`` = 真实入库张数（文件落盘 + stickers 表写入都成功），
+    ``failed`` = 安全门禁拦截 / 格式不支持 / 大小超限 / 解压或写库失败数。
+    """
     mgr = _get_manager()
     import tempfile
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
@@ -61,8 +65,8 @@ async def import_stickers(file: UploadFile = File(...), category: str = "default
         tmp.write(content)
         tmp_path = tmp.name
     try:
-        success, failed = mgr.import_zip(tmp_path, category)
-        return ApiResponse(data={"success": success, "failed": failed})
+        accepted, failed = mgr.import_zip(tmp_path, category)
+        return ApiResponse(data={"accepted": accepted, "failed": failed})
     finally:
         from pathlib import Path
         Path(tmp_path).unlink(missing_ok=True)
