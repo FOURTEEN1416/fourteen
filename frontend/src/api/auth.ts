@@ -32,6 +32,16 @@ export interface TokenResponse {
   needs_consent?: boolean
   /** 服务端当前协议版本 */
   agreement_version?: string
+  /**
+   * 注册即播种的初始角色摘要（W16 在注册响应中新增；登录响应可能不带）。
+   * **可选**：W16 未接线时字段缺席，消费侧必须按「存在才用」容错。
+   */
+  initial_character?: InitialCharacter | null
+}
+
+export interface InitialCharacter {
+  id: string
+  name: string
 }
 
 export interface LoginRequest {

@@ -1,7 +1,7 @@
 import {
   MessageCircle, Sparkles, Mic, Shield, FileText,
-  Settings, Activity, Library, Brain,
-  User, Wrench, BarChart3, Server,
+  Settings, Activity, Library, Brain, Wand2,
+  User, Wrench, BarChart3, Server, Database,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -28,6 +28,7 @@ export function buildGlobalNavGroups(isAdmin: boolean, activeRoleId?: string): N
       label: '角色',
       items: [
         { to: '/roles', icon: Library, label: '角色配置' },
+        { to: '/templates', icon: Wand2, label: '角色模板' },
         ...(activeRoleId
           ? [
               { to: `/roles/${activeRoleId}/settings`, icon: Settings, label: '角色设置' },
@@ -41,6 +42,7 @@ export function buildGlobalNavGroups(isAdmin: boolean, activeRoleId?: string): N
     {
       label: '系统设置',
       items: [
+        { to: '/settings/account', icon: Database, label: '账号与数据' },
         { to: '/settings/llm', icon: Sparkles, label: 'LLM 配置' },
         { to: '/settings/voice', icon: Mic, label: '语音引擎' },
         { to: '/settings/tools', icon: Wrench, label: '工具仪表盘' },

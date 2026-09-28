@@ -15,6 +15,7 @@ import * as authApi from '../api/auth'
 import { clearAccountScopedCache } from '../api/queryClient'
 import { AGREEMENT_VERSION } from '../constants/agreement'
 import { useAuthStore } from '../store/authStore'
+import { useErrorStore } from '../store/errorStore'
 
 // ── Hook ────────────────────────────────────────────
 
@@ -41,6 +42,22 @@ export function useAuth() {
     applyTokenResponse(res)
   }
 
+  /**
+   * W17：注册成功后提示「已为你准备初始角色：X」。
+   *
+   * 该字段由并行窗 W16 在注册响应中新增，本窗按**存在且有可用名称才提示**容错：
+   * W16 未接线时字段缺席 → 零提示零报错（静默是正确行为，拿默认角色名编造不是）。
+   * 只在两条注册路径调用——登录不是「刚为你准备」的语义现场。
+   */
+  const notifyInitialCharacter = (res: authApi.TokenResponse) => {
+    const name = res.initial_character?.name?.trim()
+    if (!name) return
+    useErrorStore.getState().addToast({
+      type: 'success',
+      message: `已为你准备初始角色：${name}`,
+    })
+  }
+
   const register = async (data: {
     email: string
     username: string
@@ -49,6 +66,7 @@ export function useAuth() {
   }) => {
     const res = await authApi.register(data)
     applyTokenResponse(res)
+    notifyInitialCharacter(res)
   }
 
   const registerWithInvite = async (data: {
@@ -60,6 +78,7 @@ export function useAuth() {
   }) => {
     const res = await authApi.registerWithInvite(data)
     applyTokenResponse(res)
+    notifyInitialCharacter(res)
   }
 
   /** 同意《用户协议与隐私声明》当前版本 */

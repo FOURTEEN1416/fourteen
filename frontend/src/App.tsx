@@ -26,9 +26,11 @@ const AdminProvidersPage = lazy(() => import('./pages/AdminProvidersPage'))
 const SettingsLLM = lazy(() => import('./pages/SettingsLLM'))
 const SettingsVoice = lazy(() => import('./pages/SettingsVoice'))
 const SettingsSecurity = lazy(() => import('./pages/SettingsSecurity'))
+const SettingsAccount = lazy(() => import('./pages/SettingsAccount'))
 const ToolsDashboard = lazy(() => import('./pages/ToolsDashboard'))
 const SettingsLogs = lazy(() => import('./pages/SettingsLogs'))
 const RolesPage = lazy(() => import('./pages/RolesPage'))
+const TemplatesPage = lazy(() => import('./pages/TemplatesPage'))
 
 // ScrollProgress 是 eager 图里唯一拉 framer-motion 的组件；改 lazy 后 motion chunk
 // （≈45KB gz）退出首屏 modulepreload 关键路径（公开页 /intro 不再为其付费）。
@@ -113,7 +115,6 @@ function ProtectedLayout() {
           <Breadcrumb />
           <Outlet />
         </main>
-        <ToastContainer />
         <CustomCursor />
       </div>
     </AuthGuard>
@@ -126,6 +127,8 @@ export default function App() {
     <ErrorBoundary>
     <AuthInit>
       <ConsentGate />
+      {/* 全局挂载：跨路由跳转后仍需可见（如注销受理后跳回登录页的成功提示） */}
+      <ToastContainer />
       <Routes>
         {/* ─── 公开路由：产品介绍 + 登录页 + 根路径分流 ─── */}
         <Route path="/intro" element={<Suspense fallback={<PageLoadingSkeleton />}><IntroPage /></Suspense>} />
@@ -139,6 +142,8 @@ export default function App() {
 
           {/* 角色 */}
           <Route path="/roles" element={<AnimatedSuspense><RolesPage /></AnimatedSuspense>} />
+          <Route path="/templates" element={<AnimatedSuspense><TemplatesPage /></AnimatedSuspense>} />
+          <Route path="/templates" element={<AnimatedSuspense><TemplatesPage /></AnimatedSuspense>} />
           <Route path="/roles/create" element={<AnimatedSuspense><CreateRole /></AnimatedSuspense>} />
           <Route path="/roles/:roleId/settings" element={<AnimatedSuspense><RoleSettings /></AnimatedSuspense>} />
           <Route path="/roles/:roleId/settings/:tab" element={<AnimatedSuspense><RoleSettings /></AnimatedSuspense>} />
@@ -155,6 +160,7 @@ export default function App() {
             <Route path="voice" element={<AnimatedSuspense><SettingsVoice /></AnimatedSuspense>} />
             <Route path="tools" element={<AnimatedSuspense><ToolsDashboard /></AnimatedSuspense>} />
             <Route path="security" element={<AnimatedSuspense><SettingsSecurity /></AnimatedSuspense>} />
+            <Route path="account" element={<AnimatedSuspense><SettingsAccount /></AnimatedSuspense>} />
             <Route path="logs" element={<AnimatedSuspense><SettingsLogs /></AnimatedSuspense>} />
           </Route>
 
