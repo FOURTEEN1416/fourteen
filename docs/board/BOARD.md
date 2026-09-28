@@ -42,6 +42,20 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-28 · 主控 · 批次 W13–W17 出具：产品完善收官（D10–D12 实施 + W12 阶段2 + 自服务前端），visible_ids 已填实
+
+- **visible_ids 直收**（默默令「全面完成所有」）：`config/character_templates.yaml` 白名单填 **37 张**（判据：①命名得体 ②人设段完整 ③重名去重——排除 073af3e8 猪头 / 7271a42f 椎名真昼 / ACA3 ACAね / f0860ed2 林挽夏重复，4 张入 hidden_ids 双保险）；`seed_on_register=["62105bca"]`（林挽夏，生产已验证人设）供 W16 注册种子。test_w12 11/11 绿。逐卡可增删，改 yaml 即生效（每请求加载无缓存）。
+- **窗口矩阵**（worktree 开工，分支 wt/<名>；全部红测先行、白名单提交、完工 BOARD 登记、禁 push/部署/SSH——收编归主控）：
+  | 窗口 | 任务 | 白名单要点 | 明确禁碰 |
+  |---|---|---|---|
+  | W13 | D11 五维度真落库 + trigger_message 哈希化 + 删号级联 | `persona_extractor/persona_bank.py`、`shisi/migrations.py`（本批唯一）、`api/routers/admin_routes.py`、心理画像页前端文件 | `frontend/**` 其余、`conftest.py`、`shisi/sticker/**` |
+  | W14 | D10 阈值解锁真接线 + D12-K 表情包导入落库 | `shisi/sticker/**`、`shisi/affinity/unlock_manager.py`、`voice/**`、话题注入面（实扫后申报） | `proactive/**`（W15）、`orchestrator/**`、90 档不改主动决策 |
+  | W15 | D12-L 生理指标接小说模式 | `shisi/vital_signs/**`、`proactive/ase_engine.py`、`proactive/scheduler.py`（仅 vital tick 段）、小说模式注入面（实扫后申报） | `shisi/sticker/**`、`shisi/migrations.py` |
+  | W16 | W12 阶段2 注册分发钩子（后端） | `api/routers/auth_routes.py`、`api/routers/character_template_routes.py`、`tests/test_w16_*` | `config/character_templates.yaml`（主控所有，只读）；additive-only 契约见任务书 |
+  | W17 | 前端总窗：自服务三面 + 模板浏览/使用页 | `frontend/src/**`（除心理画像页=W13）、`frontend/e2e/w17_*` | 后端一切文件 |
+- **共享纪律**：`tests/conftest.py` 属主控收编域（窗口需全局隔离夹具先 BOARD 申报）；worktree 无角色卡（gitignore 不随 git）→ 收集数少 82 例属正常、缺卡 skip 守卫已在位；提交语义纪律（索引竞态三步判读）全文见 BOARD 09-27 条。
+- **收编门禁**：窗口自检绿 → 主控 merge --no-ff → 主检出全量五分块回归 + vitest/tsc + ruff → 收编批统一部署。
+
 ### 2026-09-28 · 主控 · 历遍修复批收口（三点裁决执行 + 两生产缺陷根治，三端一致 `ffa6d68`）
 
 - **执行**：① CI 两红根治 `dceb331`（W8 守卫缺件即 skip / e2e viewer 种子补齐 / `anyRoleId` 空库临时卡兜底；本地双场景实跑 11/11+4/4）→ **三轮 CI 全绿**；② 服务器 bundle 快进 + remote_deploy @ `ffa6d68`（health/ready 200、重启后 0 异常、blob 6/6）；③ worktree `ai-girlfriend-w12` 已卸（junction 先摘、分支保留）。

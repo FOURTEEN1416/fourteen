@@ -1,13 +1,58 @@
-# 角色模板面策展清单（W12 阶段1 · 2026-09-27）
+# 角色模板面策展清单（W12 · 2026-09-28 主控填实）
 # 语义（api/routers/character_template_routes.py::_load_template_config）：
 #   enabled          总开关；false 时 GET 返回空表、clone 一律 404。
 #                    文件缺失/损坏按 fail-closed 处理（等同 false）。
-#   visible_ids      显式白名单（按卡内 id 字段）；为空 = 开发期放行全部无主卡。
-#                    🔴 生产上线前必须填实——41 张卡为历史遗留存量（含随意命名），
-#                    不得全量暴露给注册用户（任务包 §1.1 红线 2）。
-#   hidden_ids       显式排除，优先级高于白名单（历史测试遗留卡写这里）。
-#   seed_on_register 阶段2（注册分发）使用，本阶段不生效，留空。
+#   visible_ids      显式白名单（按卡内 id 字段）；为空 = 放行全部无主卡。
+#                    ✅ 2026-09-28 已填实（37 张）。策展判据（客观、可复核，逐卡可增删）：
+#                      ① 命名得体（排除「猪头」073af3e8 等随意命名）；
+#                      ② 人设段完整（排除 personality 段近乎空的 7271a42f 椎名真昼 / ACA3 ACAね）；
+#                      ③ 重名去重（林挽夏双卡保留 62105bca，f0860ed2 入 hidden_ids）。
+#   hidden_ids       显式排除，优先级高于白名单（双保险：上列 4 张也写在这里）。
+#   seed_on_register W12 阶段2（注册分发）种子卡：新用户注册自动克隆绑定的初始角色。
+#                    选 62105bca 林挽夏（生产已验证的人设）。空则 W16 回落 visible_ids 首张。
 enabled: true
-visible_ids: []
-hidden_ids: []
-seed_on_register: []
+visible_ids:
+  - "06479d4c"
+  - "0f2cbe83"
+  - "1195674f"
+  - "140bc585"
+  - "17b8b72a"
+  - "1d869eff"
+  - "2490cec6"
+  - "2a99b4ef"
+  - "309d2519"
+  - "32ad707b"
+  - "42a32783"
+  - "44892417"
+  - "57826d98"
+  - "5be0e663"
+  - "62105bca"
+  - "62159b40"
+  - "6761b5f3"
+  - "6c2e7a2c"
+  - "7dcd93f6"
+  - "87d46831"
+  - "9b69b90c"
+  - "9ba4284e"
+  - "9f037e9e"
+  - "a286027a"
+  - "a3b1e39f"
+  - "a6144d38"
+  - "bcc798b0"
+  - "c907dc57"
+  - "d0332cd5"
+  - "d6998fcb"
+  - "dd602dee"
+  - "dee6bbe2"
+  - "dfdac34b"
+  - "eb3ae605"
+  - "f9b609a4"
+  - "ffa0e43a"
+  - "ffad6fe3"
+hidden_ids:
+  - "073af3e8"   # 猪头（随意命名）
+  - "7271a42f"   # 椎名真昼（人设段空）
+  - "ACA3"       # ACAね（人设段空）
+  - "f0860ed2"   # 林挽夏（与 62105bca 重复，保留更完整者）
+seed_on_register:
+  - "62105bca"   # 林挽夏
