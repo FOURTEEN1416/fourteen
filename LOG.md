@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-09-28 — 主控 · 服务器同步批：三端一致 2ebfc61 + 迁移并发竞态 P1 根治（部署当场抓出）
+
+- **指令**：默默裁决「准备同步」（原选中文本「服务器部署（三端一致点仍停 ffa6d68，落后 origin 十余提交）」）——启动生产部署收口遗留裁决项。
+- **同步**：服务器实际停 `3f9a87d`（ffa6d68 文档批后又一代码提交）；本批 25 提交全文本、零 `pyproject`/`package.json`/`deploy/` 变更 → 直走正典 `git fetch + merge --ff-only`（无 bundle 必要），HEAD `9141afa`；四库（sqlite/users/runtime_plane/agent_plane）经 SQLite 备份 API 各落 `.pre-sync-20260928-1649` + integrity ok；真实副本双轮 `run_migrations` 演练幂等（25 项、行数与生产零差异、trigger_message 隐私化在生产为 no-op）。`remote_deploy.sh` 全流程（pip editable / npm ci+build 905ms / restart / nginx reload）。
+- **🔴 P1 竞态（部署当场抓出）**：重启日志 16:51:05 两 worker `sqlite3.OperationalError: duplicate column name: hexaco_json` → app_factory 宽 except → **该 2 worker `/api/shisi/*` 整组缺失**（4 worker 中 2 个降级）。根因：`_migrate_user_persona_dimensions`（W13 新 callable）「PRAGMA 读列→ALTER」非原子，4 worker 并发 `run_migrations` 互踩；本机并发探针复现同族 `database is locked` 29/29（WAL 模式 `PRAGMA journal_mode=WAL` 遇他连接持锁**立即 busy、不走 busy handler**，为第二触发面）。临时恢复：即刻重启（列已在位、幂等跳过）→ 挂载 4/4、探活 16/16 全 200。
+- **根治（`2ebfc61`）**：`run_migrations` 整段包 `BEGIN IMMEDIATE` 单写事务（COMMIT/ROLLBACK 成对、`isolation_level=None`、connect `timeout=30s`——并发启动排队执行、事务内 PRAGMA 读一致 schema，duplicate column 按构造不可能）+ `_enable_wal` 有限重试（60×100ms，仅容忍 locked/busy，其余照抛）。**红测先行**：`TestConcurrentRunMigrations` 3 例（旧 schema 库 3 轮×4 线程并发——修复前红 `database is locked`；全列库并发重跑；AST 静态守卫钉「BEGIN IMMEDIATE+COMMIT/ROLLBACK+isolation_level=None+timeout=」四要素）。**突变验红 3/3**（撤 connect 参数→守卫红；撤 BEGIN IMMEDIATE→守卫红；撤 WAL 重试→守卫红）；**还原教训复用**：`git checkout --` 曾连修复一并回退、快照 cp 存于突变态致还原带残——按 `git diff HEAD` 净形核对后重套。
+- **验证**：全量五分块 **2652 收集 / 2651 通过 / 1 跳过 / 0 失败**（534+1 / 556 / 565 / 485 / 511，较 W18 基线净增 3=本批用例；**41 卡零净增**、注册流沙箱守卫在位）+ ruff 0（B023 闭包晚绑定已修）+ pre-commit 四门禁全过；服务器二次快进 `9141afa→2ebfc61`（blob `095ecb2` 三端一致）+ 重启复验：**17:14:59 恰为 4 worker 并发首迁场景复跑——挂载 4/4、时间戳扫描 ERROR/duplicate/locked 0、调度器 1 master + 3 slave**、health/ready 200、shisi 面 16/16 全 200。GitHub CI run `36402213711` @ `2ebfc61` **全绿**（backend+frontend+六 ff 闸+adr-integrity 全 success，run 完结复核 conclusion=success）。
+- **过程并行事实**：本批执行期间默默另窗落 `1543294`（B 档四文档、四 gitignored 残留目录 `.browser_profile//outputs//.workbuddy*` 全删≈258M）——纯文档零代码，与服务器代码面正交；「保留待裁」三项据此闭合。
+- **文档**：AGENTS **v1.39.6**（三端一致 2ebfc61 / 徽章 2828 / QA 行 CI 口径）+ HANDOFF 开放项「服务器部署」闭合 + BOARD 追加区落账。
+
 ## 2026-09-28 — 主控 · 卸窗收编批：w13–w17 五窗卸载 + 分支清册 + 垃圾清除 + 功能面实核
 
 - **指令**：默默令「卸窗，收编（五窗目录）；整理仓库，同步文档，清除垃圾、临时文件；不要纠结于数字上能对上，而是真正的功能实现」。
@@ -19,7 +29,7 @@
 
 ---
 
-## 2026-09-28 — 主控 · 历遍完善批 W18：memory_ext/scene_narrator 整删 + 测试污染真卡目录根治 + 功能点收口核对（已 push，CI 全绿；服务器未部署）
+## 2026-09-28 — 主控 · 历遍完善批 W18：memory_ext/scene_narrator 整删 + 测试污染真卡目录根治 + 功能点收口核对（已 push，CI 全绿；09-28 服务器同步批已部署 @ `2ebfc61`）
 
 - **指令链**：goal「全仓历遍，扫描死代码/临时文件/脚本/垃圾，更新文档，检查所有功能点升级是否完成、是否大量不完整，修复完善」。承接同日凌晨 `ffa6d68` 历遍修复批。全程主检出直做（无 subagent）、代码冻结后终验。**收口后已 push origin（`9389e34..79e6909`，W13–W17 收编批同推）；服务器部署与 SSH 未做（归默默裁决）**。
 - **🔴 真卡目录污染根治（本轮最重发现）**：全仓历遍期间逐文件「前后卡数」法定位——`tests/test_invite_codes.py` 注册流（W12 阶段2/W16 分发钩子 `clone_template_for_user`→`_save_character`）每轮回归向 `config/characters/` **净增 2 张克隆卡**（41→43→45→47→49 漂移的实锤链；gitignored、git 不可见、persona_injection 收集数随之浮动）。修复：补 autouse `_sandbox_characters_dir` 夹具（patch `character_routes.CHARACTERS_DIR`，调用时解析故全覆盖）；8 张污染卡先做**三库零引用取证**（users/sqlite/runtime_plane 逐列 `IN (8 ids)` hits=0）再移 `_quarantine/w18_testclone_2026-09-28/`（不删、留审计）。卡数回 **41** 并**全量五分块跑程复测 41 不增**（本轮终验的决定性证据）。防再犯：`test_w18_traversal_fixes.py` 新增机械守卫（凡打 app 且触 `register-invite` 的测试必须含 CHARACTERS_DIR 沙箱）。

@@ -898,3 +898,14 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **CI 终态（收口后补记）**：push（止勘误 `bb9d55a`）后 GitHub CI run `36393353167` **全绿**（backend + frontend + 六 ff 闸 + adr-integrity 全 success）；文档中「W18 批未 push/上批三轮全绿」旧口径已按实况更正。服务器部署仍归默默裁决。
 - **终验（代码冻结后）**：全量五分块 **2649 收集 / 2648 通过 / 1 跳过 / 0 失败**（534+1 / 553 / 565 / 485 / 511 精确吻合；174 测试文件；**41 卡跑程零净增**）+ ruff 全仓 0 错 + vitest **177/177（30 文件）** + tsc 0 错。徽章 **2701 → 2825**。AGENTS v1.39.4 / CODE_GRAPH v3.8.26 / README / HANDOFF / LOG 同日条目齐。
 - **收口后**：5 笔分组提交 + 勘误笔已 push origin（`9389e34..79e6909`+）；**未做（归默默裁决）**：服务器部署与 SSH、`wt/w13..w17` 五 worktree 卸窗、`_quarantine/` 清理（已入 .gitignore）。
+
+---
+
+### 2026-09-28 · 主控窗 · 服务器同步批：三端一致 `2ebfc61` + 迁移并发竞态 P1 根治（追加区）
+
+- **指令**：默默裁决「准备同步」→「提交修复、推 origin、服务器二次快进重启复验」。服务器实停 `3f9a87d`（非文档所述 ffa6d68）；25 提交全文本零依赖 → 正典 `fetch + merge --ff-only`（免 bundle）。
+- **迁移纪律**：四库备份 API `.pre-sync-20260928-1649-*`（逐库 integrity_check ok）→ 真实副本双轮 `run_migrations` 演练（幂等、行数零差异、隐私化 no-op）→ `remote_deploy.sh`。
+- **🔴 P1 竞态（部署当场抓出）**：16:51:05 重启日志 `duplicate column name: hexaco_json` ×2 → 该 2 worker `/api/shisi/*` 整组缺失（app_factory 宽 except 吞）。根因 `_migrate_user_persona_dimensions` PRAGMA→ALTER TOCTOU + `PRAGMA journal_mode=WAL` 遇锁立即 busy 不走 handler。本机探针 40 轮×4 线程复现 35 轮报错（29 例 locked）。
+- **根治 `2ebfc61`**：`run_migrations` 整段包 `BEGIN IMMEDIATE` 单写事务（`isolation_level=None` + timeout 30s）+ `_enable_wal` 有限重试（60×100ms 仅容忍 locked/busy）；红测先行 3 例（`TestConcurrentRunMigrations` + AST 串行化守卫）+ 突变验红 3/3。
+- **复验**：服务器二次快进（blob `095ecb2` 三端一致）+ 17:14:59 重启恰为并发首迁复跑——挂载 4/4、时间戳锚定扫描 ERROR/duplicate/locked 0、1 master+3 slave、health/ready 200、shisi 面 16/16 全 200。GitHub CI run `36402213711` @ `2ebfc61` **全绿**。
+- **终验**：全量五分块 **2652 收集 / 2651 通过 / 1 跳过 / 0 失败**（534+1 / 556 / 565 / 485 / 511；174 测试文件；41 卡零净增、注册流沙箱在位）+ ruff 0 + vitest 177/177；徽章 2825→**2828**。文档：AGENTS v1.39.6 / LOG 新条 / HANDOFF 新快照（开放项「服务器部署」闭合）。
