@@ -32,20 +32,27 @@
 | W3 代码 | `wt/code` | `..\ai-girlfriend-code` | **包 V** | 待开工 | — | 多模态缺口；**须先过商讨协议五步制** |
 | W4 验证 | `wt/verify` | `..\ai-girlfriend-verify` | **包 T** | 待开工 | — | 只碰 `tests/**`；反对采样验证 |
 | **W1 刻度迁移** | 主检出 `main` | `D:\Desktop\ai-girlfriend`（本窗直接做） | 包 R3-W1 · v1.38 遗留① | ✅ **已由并发窗闭环**（`a0f0af2`→纠反 `48e1868`），本窗复验 4/4 绿 | 2026-09-22 登记 | owner：`shisi/api/registry.py` + enhancer 常量导入 + 新测试；禁碰 scheduler/session_key |
-| **W2 laya 审计** | `wt/laya-audit`（分支保留） | ~~`..\ai-girlfriend-laya-audit`~~ 可卸 | 包 R3-W2 · 只读调研 | ✅ **已收编 main·已卸窗**（merge `wt/laya-audit`：审计报告 222 行 + LOG 两条含勘误） | 2026-09-22 登记 | 结论=有条件引入（候选① llm_proactive 前置 gate 四步路径；不建议 tool_gate L0.5/直替）；未证实项 §5 #1/#2 **已由主控窗 22:50 ssh 实测关闭**（生产机 available 1.8Gi < laya 常驻推算 2.0–2.5GB；HF 域不可直连需私有投递）→ 第 2–4 步触发条件追加**内存升档/独立宿主**硬项，第 1 步语料积累不受阻可先行 |
-| **W3 热点知识链** | `wt/hot-knowledge`（分支保留） | ~~`..\ai-girlfriend-hot-knowledge`~~ 可卸 | 包 R3-W3 · 采集→入库→供出 | ✅ **已收编 main + 挂线完成·已卸窗**（merge 7 提交；主控补 `hot_topics_collect` 注册 + 2 行为断言，`f2c51ba`） | 2026-09-22 登记 | 契约 §1 硬缺口已闭合：scheduler 60min IntervalTrigger → `collect_if_due()`（自限速/永不抛出，开关真源 `config/hot_topics.yaml`）；conftest 池隔离随批保留 |
+| **W2 laya 审计** | `wt/laya-audit`（0-unique，09-28 卸窗批删） | ~~`..\ai-girlfriend-laya-audit`~~ 可卸 | 包 R3-W2 · 只读调研 | ✅ **已收编 main·已卸窗**（merge `wt/laya-audit`：审计报告 222 行 + LOG 两条含勘误） | 2026-09-22 登记 | 结论=有条件引入（候选① llm_proactive 前置 gate 四步路径；不建议 tool_gate L0.5/直替）；未证实项 §5 #1/#2 **已由主控窗 22:50 ssh 实测关闭**（生产机 available 1.8Gi < laya 常驻推算 2.0–2.5GB；HF 域不可直连需私有投递）→ 第 2–4 步触发条件追加**内存升档/独立宿主**硬项，第 1 步语料积累不受阻可先行 |
+| **W3 热点知识链** | `wt/hot-knowledge`（0-unique，09-28 卸窗批删） | ~~`..\ai-girlfriend-hot-knowledge`~~ 可卸 | 包 R3-W3 · 采集→入库→供出 | ✅ **已收编 main + 挂线完成·已卸窗**（merge 7 提交；主控补 `hot_topics_collect` 注册 + 2 行为断言，`f2c51ba`） | 2026-09-22 登记 | 契约 §1 硬缺口已闭合：scheduler 60min IntervalTrigger → `collect_if_due()`（自限速/永不抛出，开关真源 `config/hot_topics.yaml`）；conftest 池隔离随批保留 |
 | **W4 部署** | 无（主控执行） | 主检出 + swu-prod | 包 R3-W4 · push+服务器 | ✅ **完成**（默默对 push 与服务器 pull 分别明确点头）——三端统一 `7578e57`；服务器 bundle 三跳 ff + remote_deploy 4/4 + health 200；服务器全量 **1868 收集 / 1867 通过 / 1 跳过 / 0 失败** + CI 35714334710 绿；详见 LOG「W4 部署窗口」条目。**终态补记（R3 验收窗）**：二次上线至 `68851a5`，双端全量 **1894/1893/1/0** 绿 | 2026-09-22 登记 | nginx 零配置改动（入口冻结铁律遵守）；拦下 W1 迁移参数换向与 CI 墙钟用例两枚缺陷后放行（`5cc70ee`/`48e1868`）；临时 bundle 已清 |
-| **W14 阈值解锁+表情包导入** | `wt/w14` | `..\ai-girlfriend-w14` | **D10 阈值解锁真接线 + D12-K 表情包导入落库** | 进行中 | 2026-09-28 | 红测先行；禁碰 proactive/**、orchestrator/**、shisi/migrations.py、tests/conftest.py；白名单实扫申报见追加区同日条 |
-| **W15 生理指标接小说模式** | `wt/w15` | `..\ai-girlfriend-w15` | **D12-L 生理指标从假读数变真演算** | 进行中 | 2026-09-28 | 红测先行；禁碰 shisi/sticker/**、shisi/migrations.py、tests/conftest.py；注入面/事件接线越白名单文件（orchestrator、scheduler 段、routes、registry）实扫申报见追加区同日条 |
-| **W16 注册分发** | `wt/w16` | `..\ai-girlfriend-w16` | W12 阶段2 · 注册分发钩子（后端） | 🟡 **窗内完工·候收编**（未 push 未部署） | 2026-09-28 | 白名单三件：`api/routers/auth_routes.py`、`api/routers/character_template_routes.py`、`tests/test_w16_register_seed.py`（+11 例）。⚠️ **两项归主控**：① 邀请码注册 `/api/auth/register-invite`（`invite_routes.py`，白名单外）未接钩子；② 收编回归会在主检出 `config/characters/` 生成测试克隆卡（`test_consent.py` 夹具未沙箱卡目录，实证见追加区）。细节见追加区 09-28 W16 条 |
+| **W14 阈值解锁+表情包导入** | ~~`wt/w14`~~ 已清 | ~~目录~~ 已卸 | **D10 阈值解锁真接线 + D12-K 表情包导入落库** | ✅ 已收编 main（merge `9389e34`）· 窗已卸 09-28 | 2026-09-28 | 红测先行；禁碰 proactive/**、orchestrator/**、shisi/migrations.py、tests/conftest.py；白名单实扫申报见追加区同日条 |
+| **W15 生理指标接小说模式** | ~~`wt/w15`~~ 已清 | ~~目录~~ 已卸 | **D12-L 生理指标从假读数变真演算** | ✅ 已收编 main（`8c42990` 登记于 `98c4892`）· 窗已卸 09-28 | 2026-09-28 | 红测先行；禁碰 shisi/sticker/**、shisi/migrations.py、tests/conftest.py；注入面/事件接线越白名单文件（orchestrator、scheduler 段、routes、registry）实扫申报见追加区同日条 |
+| **W16 注册分发** | ~~`wt/w16`~~ 已清 | ~~目录~~ 已卸 | W12 阶段2 · 注册分发钩子（后端） | ✅ 已收编 main（merge `80f9ea3`）· 窗已卸 09-28 | 2026-09-28 | 白名单三件：`api/routers/auth_routes.py`、`api/routers/character_template_routes.py`、`tests/test_w16_register_seed.py`（+11 例）。⚠️ **两项归主控**：① 邀请码注册 `/api/auth/register-invite`（`invite_routes.py`，白名单外）未接钩子；② 收编回归会在主检出 `config/characters/` 生成测试克隆卡（`test_consent.py` 夹具未沙箱卡目录，实证见追加区）。细节见追加区 09-28 W16 条 |
 
-| **W13 D11 心理画像落库** | `wt/w13` | `..\ai-girlfriend-w13` | **D11（已裁决 b+c）· 五维度真落库 + trigger_message 哈希化 + 删号级联** | 进行中 | 2026-09-28 | 基线 `3f9a87d4`；红测先行；差异申报见追加区同日条（admin_routes→lifecycle 落点变更，已申报）；禁 push/部署/SSH |
+| **W13 D11 心理画像落库** | ~~`wt/w13`~~ 已清 | ~~目录~~ 已卸 | **D11（已裁决 b+c）· 五维度真落库 + trigger_message 哈希化 + 删号级联** | ✅ 已收编 main（merge `6df56c3`）· 窗已卸 09-28 | 2026-09-28 | 基线 `3f9a87d4`；红测先行；差异申报见追加区同日条（admin_routes→lifecycle 落点变更，已申报）；禁 push/部署/SSH |
 
 > ⚠️ **2026-09-19 路径收编**：W1/W2 工作区原位于 `D:\Desktop\` 根（仓库外），已收编至 `大创赛报名以及后期发展\` 下；仍为**仓库外非 git 工作区**，受 `.gitignore:130` 全目录排除，故宪法 §3「参赛材料不入库」约束不变。同期收编 `大赛附件包`、`专利-唯一的你十四`。**追加区内历史条目所载旧路径按「历史记录保留原文」准则未作改动**。完整映射见 `大创赛报名以及后期发展\PATH-MIGRATION-2026-09-19.md`。
 
 ---
 
 ## 追加区（按时间倒序，新的在上）
+
+### 2026-09-28 · 主控 · 卸窗收编批：w13–w17 五窗卸载 + 分支清册 + 垃圾清除 + 功能面实核（追加区）
+
+- **卸窗**：`new_window_worktree.ps1 -Remove` 先摘 `data/`、`frontend/node_modules` Junction 再删树，五窗目录全卸；卸前五窗工作树干净且分支 `--merged main` 全并入，卸后主仓无损（data 33 项 / node_modules 277 项 / 41 卡 / `worktree list` 仅剩主检出）。登记表五行状态已由主控同步（✅ 已收编·窗已卸）。
+- **分支清册**：`wt/w13..w17`（已并入）删；`w3-code`/`wt/hot-knowledge`/`wt/laya-audit` 零独有删；`wt/w12`（tip `0762b13`，内容经 `b6501e4` 文件级收编并被 W16/W17/W18 三度演进）删、tip 留 LOG 可查；`wt/agent-x`（`0fa400c`）/`wt/ax-review`（`6ef1dc4`）本地删——**origin 同 SHA 逐字一致，远程备份保留**。远程分支一律未动。本地仅剩 `main`。
+- **垃圾清除**：`_quarantine/`（8 张测试克隆卡，W18 批三库零引用取证在前）+ 再生缓存（`frontend/dist`/`playwright-report`/`test-results`/`.ruff_cache`）删除。**保留待裁**：`.browser_profile/`（257M Chrome 档案，代码零引用但可能含登录态）、`outputs/`（验收证据 7 件）、`.workbuddy*`（外部工具状态）。
+- **功能实核（默默令「不纠结数字、看真实功能」）**：模板/注册种子/自服务三面/W18 守卫/consent 五文件 **45/45 绿**；跑后 41 卡零净增（隔离件删除后沙箱守卫仍成立）；前端 vitest **177/177**。
 
 ### 2026-09-28 · W15 实施窗 · 收口登记：D12-L 生理指标从假读数变真演算（`wt/w15` @ `8c42990`，未 push 未部署）
 
@@ -862,7 +869,7 @@ HEAD `e9a063b` ｜ 分支 `main` ｜ remote `https://github.com/FOURTEEN1416/fou
 - **遗留与待裁决**：① D10/D11/D12 三条 D 类待裁决（只登记不代裁）；② W9 文档所称四个 HTTP 端点（`/api/auth/consent/withdraw|status`、`/api/auth/account/delete`、`/api/auth/account/export(+ /chats)`）**main 上不存在**（`abcde64` 未含 `api/routers/auth_routes.py`，内省 `/api/auth/*` 仅 9 条），owner = `api/routers/auth_routes.py`；③ W12 阶段 2（`character_templates.yaml` `visible_ids` 生产上线前必须填实 + 注册钩子 + 前端）挂起；④ 本机 WAL flakiness 待 Linux / 生产复跑。**未 push 未部署**。
 ### 2026-09-28 · W17 实施窗 · 开工登记（追加区）
 
-- **身份**：worktree `D:\Desktopi-girlfriend-w17`，分支 `wt/w17`，fork 基点 `3f9a87d`。任务 = 批次 W13–W17 之 W17「前端总接入」。全程不 push、不部署、不 SSH、不改 AGENTS/CODE_GRAPH/README/LOG、不碰后端一切文件与 `tests/conftest.py`、不碰心理画像页（W13 所有）。
+- **身份**：worktree `D:\Desktop\ai-girlfriend-w17`，分支 `wt/w17`，fork 基点 `3f9a87d`。任务 = 批次 W13–W17 之 W17「前端总接入」。全程不 push、不部署、不 SSH、不改 AGENTS/CODE_GRAPH/README/LOG、不碰后端一切文件与 `tests/conftest.py`、不碰心理画像页（W13 所有）。
 - **写入清单（白名单，本窗独占）**：新增 `frontend/src/api/selfservice.ts`、`frontend/src/api/templates.ts`、`frontend/src/utils/download.ts`、`frontend/src/pages/SettingsAccount.tsx`、`frontend/src/pages/TemplatesPage.tsx`、测试 `frontend/src/tests/{api/selfservice.test.ts,api/templates.test.ts,utils/download.test.ts,components/SettingsAccount.test.tsx,components/TemplatesPage.test.tsx,components/RegisterInitialCharacter.test.tsx}`、`frontend/e2e/w17_selfservice.spec.ts`；改动仅 `frontend/src/App.tsx`（两条路由）、`frontend/src/components/layout/navGroups.tsx`（两个入口）、`frontend/src/api/auth.ts`（类型 additive）、`frontend/src/hooks/useAuth.ts`（initial_character 控制台提示）、`docs/board/BOARD.md`（本登记 + 完工登记）。零后端、零 `tests/**`。
 - **实扫定文件与三条假设（先申报后动手，与实况冲突请主控指正）**：
   1. **自服务面落位** = 新建 `SettingsAccount.tsx` + 路由 `/settings/account`（侧栏「系统设置」组「账号与数据」）。理由：`SettingsSecurity.tsx` 实扫为 admin 向**内容安全面板**（safety stats/log/开关），账号数据自服务与它不同域；且该页 W11 契约注释与 e2e 断言密集，塞进去会把 viewer 面混进 admin 面。

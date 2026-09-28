@@ -7,6 +7,17 @@
 
 ---
 
+## 2026-09-28 — 主控 · 卸窗收编批：w13–w17 五窗卸载 + 分支清册 + 垃圾清除 + 功能面实核
+
+- **指令**：默默令「卸窗，收编（五窗目录）；整理仓库，同步文档，清除垃圾、临时文件；不要纠结于数字上能对上，而是真正的功能实现」。
+- **卸窗**：正典脚本 `scripts/new_window_worktree.ps1 -Remove` 逐窗卸主检出同级五目录 `ai-girlfriend-w13 / -w14 / -w15 / -w16 / -w17`（D:/Desktop/ 下；先 `rmdir` 摘 `data/` 与 `frontend/node_modules` Junction，禁裸 `git worktree remove` 防跟随误删主仓）。卸前五窗工作树全干净、五分支 `git branch --merged main` 全并入；卸后主仓核验无损（data 33 项 / node_modules 277 项 / 41 卡 / `git worktree list` 仅剩主检出）。
+- **分支清册**：零独有提交删 `w3-code`/`wt/hot-knowledge`/`wt/laya-audit`（-d）；已并入删 `wt/w13..w17`（脚本 -Remove 自动）；`wt/w12` 内容已经 `b6501e4` 文件级收编且被 W16/W17/W18 三度演进覆盖 → 删（tip `0762b13` 留此可查）；`wt/agent-x`（tip `0fa400c`）/`wt/ax-review`（tip `6ef1dc4`）本地删——**origin 同 SHA 逐字核对一致，远程备份保留未动**。远程分支（`arch/client-split-4A`/`server-snapshot-20260902`/`wt/agent-x`/`wt/ax-review`/`wt/wx-channel`）一律未动（共享状态操作归默默）。本地分支仅剩 `main`。
+- **垃圾清除**：`_quarantine/w18_testclone_2026-09-28/`（8 张测试克隆卡，W18 批已做 users/sqlite/runtime_plane 三库零引用取证）删除；再生缓存 `frontend/dist`、`playwright-report/`、`frontend/test-results/`、`.ruff_cache/` 删除。**保留待裁**：`.browser_profile/`（257M Chrome 档案，全仓 .py 零引用，但可能存浏览器登录态，删留归默默）、`outputs/`（656K 部署验收证据 7 件）、`.workbuddy/`/`.workbuddy-ai/`（外部工具状态，非本仓产物）。
+- **功能面实核（非数字对齐）**：`test_w12_character_templates`+`test_w16_register_seed`+`test_w9_selfservice_endpoints`+`test_w18_traversal_fixes`+`test_consent` 五文件 **45/45 通过**（模板浏览/克隆 → 注册分发种子 → 同意门禁 → 自服务三面 → 沙箱守卫，即本收编链全部功能面）；跑后 `config/characters/` **41 张零净增**（隔离件删除后守卫仍成立）；前端 vitest **177/177** 复跑绿。
+- **文档同步**：AGENTS v1.39.5 版本头；BOARD 登记表 W13–W17 行 + W2/W3 分支注 + 追加区本批条；HANDOFF W18 快照状态/开放项刷新（HEAD `0397dfd`、卸窗与隔离清理闭合）。
+
+---
+
 ## 2026-09-28 — 主控 · 历遍完善批 W18：memory_ext/scene_narrator 整删 + 测试污染真卡目录根治 + 功能点收口核对（已 push，CI 全绿；服务器未部署）
 
 - **指令链**：goal「全仓历遍，扫描死代码/临时文件/脚本/垃圾，更新文档，检查所有功能点升级是否完成、是否大量不完整，修复完善」。承接同日凌晨 `ffa6d68` 历遍修复批。全程主检出直做（无 subagent）、代码冻结后终验。**收口后已 push origin（`9389e34..79e6909`，W13–W17 收编批同推）；服务器部署与 SSH 未做（归默默裁决）**。
