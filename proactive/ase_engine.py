@@ -688,6 +688,52 @@ def _interaction_version(state: dict) -> datetime | None:
     )
 
 
+def _normalize_emotion_state(raw: Any) -> dict:
+    """情绪快照 → 引擎内部 dict（保证 ``primary.type`` 可读）。
+
+    为什么必须归一：编排器喂进来的是 `my_character` 的**引擎对象**（`primary_emotion`
+    为中文枚举，`.value` 才是「生气」），它自己的 `to_dict()/snapshot()` 又用
+    `primary_emotion` 键；而本引擎下游（`_update_urgency`、生成层）只认
+    `primary.type`。旧实现直接 `self._emotion_state = emotion_state or {}`，
+    于是任何非 dict 调用方一进来就把形状搞乱（读侧 `.get` 直接抛，被上层吞成
+    「情绪加成恒 0」）。这里收口成入口一处归一，调用方可直接丢真实快照。
+
+    只做**加法**（补 `primary` 键），原 dict 的其余字段原样保留 —— 生成层还
+    要用 `energy` / `affinity` 等。
+    """
+    if raw is None:
+        return {}
+
+    data: Any = raw
+    if not isinstance(data, dict):
+        for attr in ("to_dict", "snapshot"):
+            fn = getattr(data, attr, None)
+            if callable(fn):
+                try:
+                    data = fn()
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("情绪快照 %s() 失败: %s", attr, e)
+                    data = raw
+                break
+
+    if isinstance(data, dict):
+        if isinstance(data.get("primary"), dict):
+            return data
+        label = data.get("primary_emotion") or data.get("emotion") or ""
+        if isinstance(label, dict):
+            label = label.get("type") or label.get("value") or ""
+        if not label:
+            return data
+        return {**data, "primary": {"type": str(label)}}
+
+    # 无 to_dict 的对象：只认 primary_emotion（枚举取 .value，字符串直接用）
+    label = getattr(data, "primary_emotion", "")
+    value = getattr(label, "value", label)
+    if not str(value or "").strip():
+        return {}
+    return {"primary": {"type": str(value)}}
+
+
 class ASEEngine:
     """
     ASE 主动发言引擎 — 融合版 v2
@@ -831,7 +877,9 @@ class ASEEngine:
 
         self._last_chat_time = now
         self._last_proactive_time = now
-        self._emotion_state = emotion_state or {}
+        self._emotion_state = _normalize_emotion_state(emotion_state)
+        # D12-L：情绪事件 → 生理读数（此前这张表全仓零写入者，接口只能返常数）
+        self._emit_vital_event()
         # 交互新鲜度 + 注意力（对标 nana：用户互动即置高并刷新基准）
         self._last_user_message = str(user_message or "")
         self._last_user_interaction = now
@@ -865,6 +913,28 @@ class ASEEngine:
         return monologue
 
     # ── 交互新鲜度 / 注意力 / 画像接地（2026-09-21 重扫）──────────
+
+    def _emit_vital_event(self) -> None:
+        """情绪事件 → 生理读数（D12-L 的事件驱动面）。
+
+        键由 `vital_state_key(会话键)` 解析（角色走唯一 owner
+        `utils.character_resolver`，与 scheduler 同拍写的键同构）。
+        无会话键（控制台/全局引擎）时**不写** —— 那没有"谁"的维度，
+        写进去就是把某个用户的读数挂到匿名键上。
+        异常一律吞成 debug：生理读数断了不能拖垮主动消息主链。
+        """
+        try:
+            emotion = str(self._emotion_state.get("primary", {}).get("type") or "").strip()
+            if not emotion or not str(self._user_key or "").strip():
+                return
+            from shisi.vital_signs.vital_engine import get_vital_engine, vital_state_key
+
+            key = vital_state_key(str(self._user_key))
+            if not key:
+                return
+            get_vital_engine().update_on_emotion(key, emotion)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("生理读数事件写入失败 user=%s: %s", self._user_key, e)
 
     def note_user_interaction(self) -> None:
         """记录"用户刚开口"（由编排器在每轮结束后调用）。
@@ -959,7 +1029,7 @@ class ASEEngine:
             self._last_skip_reason = "paused"
             return None
         if emotion_state:
-            self._emotion_state = emotion_state
+            self._emotion_state = _normalize_emotion_state(emotion_state)
 
         # ① 跨日惰性重置（必须先于所有判定）
         #    原实现只依赖 scheduler 的 CronTrigger(00:00) 重置任务，
