@@ -52,9 +52,26 @@ async def apply_decay(character_id: str):
 
 
 @router.get("/{character_id}/unlocks", response_model=ApiResponse)
-async def get_unlocks(character_id: str):
+async def get_unlocks(character_id: str, user_id: str | None = None):
+    """解锁展示：``unlocks``=按当前好感算得的应解锁档位（旧形态）；
+    ``recorded``=affinity_unlocks 落表行（W14 D10，user×character 首次解锁记录）。
+
+    带 ``user_id`` 时按完整隔离键读该用户的值与落表行；不带时保持旧口径
+    （裸角色键、recorded 恒空）。
+    """
     if _enhancer is None:
         raise HTTPException(status_code=503, detail="AffinityEnhancer未初始化")
-    value = _enhancer.get_value(character_id)
+    if user_id:
+        from ..affinity.enhancer import affinity_key
+
+        value = _enhancer.get_value(character_id, user_id=user_id)
+        recorded = _enhancer.unlock_manager.recorded_unlocks(
+            affinity_key(character_id, user_id)
+        )
+    else:
+        value = _enhancer.get_value(character_id)
+        recorded = []
     unlocks = _enhancer.unlock_manager.get_unlocks_at(value)
-    return ApiResponse(data={"affinity": value, "unlocks": [u.__dict__ for u in unlocks]})
+    return ApiResponse(
+        data={"affinity": value, "unlocks": [u.__dict__ for u in unlocks], "recorded": recorded}
+    )

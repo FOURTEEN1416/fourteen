@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -73,12 +74,19 @@ class CharacterVoiceManager:
     - ``resolve_voice_spec`` 产出不可变合成快照（对话链与试听共用）
     """
 
-    def __init__(self, config_path: str | None = None):
+    def __init__(
+        self,
+        config_path: str | None = None,
+        affinity_provider: Callable[[str, str], float | None] | None = None,
+    ):
         # 锚定项目根：从非仓库根 CWD 启动时相对路径会读写到错误位置
         self._config_path = (
             resolve_project_path(config_path) if config_path else _DEFAULT_CONFIG_PATH
         )
         self._bindings: dict[str, dict[str, Any]] = {}
+        # W14（D10）：专属语音门禁的亲和来源 (character_id, user_id) -> shisi 亲和
+        # | None（None = 装配缺失，跳过门禁）。缺省走 unlock_manager 生产读取。
+        self._affinity_provider = affinity_provider
         self._load()
 
     def _load(self) -> None:
@@ -123,14 +131,26 @@ class CharacterVoiceManager:
         """列出所有角色音色绑定"""
         return self._bindings.copy()
 
-    def resolve_voice_spec(self, character_id: str) -> CharacterVoiceSpec | None:
+    def resolve_voice_spec(
+        self, character_id: str, user_id: str = ""
+    ) -> CharacterVoiceSpec | None:
         """角色 → 不可变合成快照；未绑返回 None（调用方用引擎默认）。
 
         显式字段优先，历史 ``extra_params`` 嵌套形态兜底读取；
         SAPI 风格字符串 pitch/rate 不进云端数值契约。
+
+        W14（D10）：带 ``user_id`` 时校验专属语音档（config affinity.unlocks
+        type=voice，阈值 75）——用户对该角色好感未达标返回 None，调用方
+        回落引擎默认音色；亲和无法评估（None）不误杀；无 user 不启用门禁。
         """
         cfg = self.get_voice_config(character_id)
         if not cfg:
+            return None
+        if user_id and not self._voice_unlocked_for(character_id, user_id):
+            logger.info(
+                "角色 %s 专属语音未解锁（好感未达阈值），用户 %s 回落默认音色",
+                character_id, user_id,
+            )
             return None
         extra = cfg.get("extra_params")
         extra = extra if isinstance(extra, dict) else {}
@@ -147,3 +167,25 @@ class CharacterVoiceManager:
             speed=_ratio(_pick("speed")),
             pitch=_ratio(_pick("pitch")),
         )
+
+    def _voice_unlocked_for(self, character_id: str, user_id: str) -> bool:
+        """专属语音档校验。门禁只挡"有角色专属音色 + 亲和可评估 + 未达标"。"""
+        from shisi.affinity.unlock_manager import voice_unlock_threshold
+
+        threshold = voice_unlock_threshold()
+        if threshold is None:
+            return True  # config 未配置 voice 档 → 不设门禁
+        affinity: float | None
+        if self._affinity_provider is not None:
+            try:
+                affinity = self._affinity_provider(character_id, user_id)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("专属语音亲和读取失败（门禁跳过）: %s", e)
+                return True
+        else:
+            from shisi.affinity.unlock_manager import read_user_affinity
+
+            affinity = read_user_affinity(character_id, user_id)
+        if affinity is None:
+            return True  # 无法评估不误杀
+        return float(affinity) >= threshold

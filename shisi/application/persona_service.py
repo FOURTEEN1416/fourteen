@@ -159,6 +159,13 @@ class PersonaService:
             except Exception as e:  # noqa: BLE001
                 logger.warning("画像槽注入失败（agent-plane 与 legacy 双路均断）: %s", e)
 
+        # 话题解锁槽（W14 · D10）：好感档位解锁的话题（25 个人话题 / 50 亲密话题）
+        # 进 prompt；未列出的更高档位要求角色保持克制。无 user_key / 亲和不可
+        # 评估 / 首档未达时不注入（不占预算）。
+        topic_block = self._topic_unlock_block(profile_key, character_id)
+        if topic_block:
+            mem_parts.append("\n" + topic_block)
+
         if chat_summary:
             mem_parts.append("\n## 早期对话摘要（历史压缩，非用户新消息）")
             mem_parts.append(str(chat_summary)[:800])
@@ -255,6 +262,29 @@ class PersonaService:
             return base_prompt
 
         return f"{base_prompt}\n\n" + "\n\n".join(p for p in injection_parts if p)
+
+    @staticmethod
+    def _topic_unlock_block(user_key: str, character_id: str | None) -> str:
+        """话题解锁槽（W14 · D10）：按 shisi 刻度 user×character 亲和渲染。
+
+        档位真源 config/shisi.yaml affinity.unlocks（unlock_manager）。
+        无 user_key / 无 character_id / 亲和不可评估 / 首档未达 → 空串不注入。
+        """
+        if not user_key or not character_id:
+            return ""
+        from shisi.affinity.unlock_manager import read_user_affinity, unlocked_topic_names
+
+        affinity = read_user_affinity(character_id, user_key)
+        if affinity is None:
+            return ""
+        topics = unlocked_topic_names(affinity)
+        if not topics:
+            return ""
+        return (
+            "## 话题解锁（按当前好感档位）\n"
+            f"已解锁：{'、'.join(topics)}\n"
+            "未列出的更高档位话题保持克制，不要主动开启。"
+        )
 
     @property
     def engine(self) -> PersonaEngine:

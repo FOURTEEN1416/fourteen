@@ -61,7 +61,9 @@ class AffinityEnhancer:
     def __init__(self, db_path: Path | str | None = None):
         self._db_path = Path(db_path) if db_path else _DB_DEFAULT
         self._decay = DecayEngine()
-        self._unlock = UnlockManager()
+        # W14（D10）：解锁管理器与本类同库——check_unlocks 的首次解锁结果
+        # 由此 INSERT 进 affinity_unlocks（旧库缺表只告警不阻断）。
+        self._unlock = UnlockManager(db_path=self._db_path)
         self._min = get_config("affinity", "min_value", 0)
         self._max = get_config("affinity", "max_value", 100)
         self._audit_enabled = get_config("affinity", "audit_enabled", True)
