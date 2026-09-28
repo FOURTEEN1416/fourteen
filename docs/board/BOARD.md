@@ -51,7 +51,7 @@
 
 - **卸窗**：`new_window_worktree.ps1 -Remove` 先摘 `data/`、`frontend/node_modules` Junction 再删树，五窗目录全卸；卸前五窗工作树干净且分支 `--merged main` 全并入，卸后主仓无损（data 33 项 / node_modules 277 项 / 41 卡 / `worktree list` 仅剩主检出）。登记表五行状态已由主控同步（✅ 已收编·窗已卸）。
 - **分支清册**：`wt/w13..w17`（已并入）删；`w3-code`/`wt/hot-knowledge`/`wt/laya-audit` 零独有删；`wt/w12`（tip `0762b13`，内容经 `b6501e4` 文件级收编并被 W16/W17/W18 三度演进）删、tip 留 LOG 可查；`wt/agent-x`（`0fa400c`）/`wt/ax-review`（`6ef1dc4`）本地删——**origin 同 SHA 逐字一致，远程备份保留**。远程分支一律未动。本地仅剩 `main`。
-- **垃圾清除**：`_quarantine/`（8 张测试克隆卡，W18 批三库零引用取证在前）+ 再生缓存（`frontend/dist`/`playwright-report`/`test-results`/`.ruff_cache`）删除。**保留待裁**：`.browser_profile/`（257M Chrome 档案，代码零引用但可能含登录态）、`outputs/`（验收证据 7 件）、`.workbuddy*`（外部工具状态）。
+- **垃圾清除**：`_quarantine/`（8 张测试克隆卡，W18 批三库零引用取证在前）+ 再生缓存（`frontend/dist`/`playwright-report`/`test-results`/`.ruff_cache`）删除。**保留待裁**：`.browser_profile/`（257M Chrome 档案，代码零引用但可能含登录态）、`outputs/`（验收证据 7 件）、`.workbuddy*`（外部工具状态）。**09-28 续**：默默令「删除！」，四目录已全删（≈258M 释放，均 gitignored、git 树无损）。
 - **功能实核（默默令「不纠结数字、看真实功能」）**：模板/注册种子/自服务三面/W18 守卫/consent 五文件 **45/45 绿**；跑后 41 卡零净增（隔离件删除后沙箱守卫仍成立）；前端 vitest **177/177**。
 
 ### 2026-09-28 · W15 实施窗 · 收口登记：D12-L 生理指标从假读数变真演算（`wt/w15` @ `8c42990`，未 push 未部署）
