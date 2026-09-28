@@ -45,6 +45,19 @@
 
 ## 追加区（按时间倒序，新的在上）
 
+### 2026-09-28 · W14 实施窗 · 收口登记：D10 阈值解锁真接线 + D12-K 表情包导入真入库（`wt/w14` @ `c955853`，未 push 未部署）
+
+- **范围与产物**（9 文件 +807/−43，提交 `c955853` 留本地分支 `wt/w14`，工作树 clean）：
+  - **A1 解锁落表**：`shisi/affinity/unlock_manager.py`——UnlockManager 挂可选 db_path，check_unlocks 首次解锁 `INSERT OR IGNORE` 进 `affinity_unlocks`（character_id 列存**完整隔离键** `user::character`，沿 affinity_records 先例；UNIQUE(character_id,threshold,unlock_type) 即 user×character×档位首次语义；缺表/写失败只告警不阻断）+ `recorded_unlocks()` 读表；`shisi/affinity/enhancer.py` 构造 UnlockManager 传同库路径（1 行接线）。
+  - **A2 表情包阈值过滤**：`shisi/sticker/sticker_manager.py`——recommend 增 `user_id`，绑定卡按 `unlock_threshold` vs shisi 亲和（真源=`read_user_affinity`：deps.shisi_reg.affinity_enhancer，评估不了返回 None 门禁跳过）硬过滤；**兜底池排除全部绑定卡**（防锁定卡经 general 池又可见）；无用户上下文（管理/绑定面）不启用门禁（fail-open 仅限无 user 场景）。round-trip 实证：好感 30 不可见 / 60 可见。
+  - **A3 语音 75**：`shisi/voice/character_voice.py`——`resolve_voice_spec(character_id, user_id="")`，专属音色未达 voice 档阈值（config 真源，现 75）返回 None → 调用方回落引擎默认；亲和不可评估不误杀；无 user 不启用。
+  - **A4 话题 25/50**：`shisi/application/persona_service.py`——「话题解锁」prompt 注入槽（user_key + character_id + 亲和达首档三条件，缺一不注入不占预算），档位名来自 config affinity.unlocks。
+  - **A5 90 档 HTTP 展示**：`shisi/api/affinity_routes.py`——`GET /unlocks?user_id=` 增 `recorded` 落表行；不带 user_id 保持旧形态。**主动决策零改动**（禁碰 proactive/** 兑现）。
+  - **B 导入真入库**：`shisi/sticker/importer.py`——解包成功逐张写 stickers 表（sticker_id=sha1(文件名+内容)[:16] 稳定 id，重复导入幂等；emotion_tags 留空=不进推荐）；`check_sticker_safety`（原全仓零调用）接为落盘前文件名门禁（不合规不落盘不入库计 failed）；**导入不存在无库模式**（缺省即 canonical 库）；`shisi/api/sticker_routes.py` 回执 `success`→`accepted`（真实入库数；前端零消费该端点，无破坏）。
+- **验证**：`tests/test_w14_unlock_and_sticker_import.py` **31/31 绿**（红测先行：起步 20 failed + 9 errors，含 HTTP TestClient 断言）；邻域四轮 **346 通过**（sticker/affinity/voice/persona/migrations/integration/identity；persona 注入 6 skip = worktree 无角色卡正常）；**突变验红 4/4 命中**（不落表 5 红 / 门禁失效 2 红 / 语音失效 1 红 / 安全旁路 1 红），还原后残留 0、31/31 复绿；ruff 全仓 0 错。
+- **白名单实际清单**：`shisi/affinity/{unlock_manager,enhancer}.py`、`shisi/sticker/{sticker_manager,importer}.py`、`shisi/voice/character_voice.py`、`shisi/application/persona_service.py`、`shisi/api/{affinity_routes,sticker_routes}.py`、`tests/test_w14_unlock_and_sticker_import.py`。禁碰清单（proactive/**、orchestrator/**、shisi/migrations.py、tests/conftest.py）零改动；工作树无角色卡，收集口径按主控勘误 = 无卡 2487 基。
+- **未做项（候后续窗/主控）**：① chat 链语音门禁接线——orchestrator:1636 调 `resolve_voice_spec(character_id)` 未传 user（orchestrator/** 本窗禁碰），门禁已就绪待 wiring 窗传会话 user_key；同理 `shisi/wechat/sticker_adapter.py:31` 的 recommend 调用面（非白名单）未传 user。② 导入的 stickers 无 emotion_tags，进不了情感推荐——打标（LLM/人工）候后续批。③ `shisi/wechat/sticker_adapter.py:51` 引用不存在的 `SafetyChecker` 类（ImportError 静默吞，死代码路径）——非白名单文件，只登记不修。
+
 ### 2026-09-28 · 主控 · W16 报告三项裁决（invite 直收批准 / test_consent 污染选 (a) / 口径勘误）+ 代提交 W14/W15 申报
 
 - **① invite_routes 钩子缺口——批准接通**：`/api/auth/register-invite`（`api/routers/invite_routes.py`，W16 白名单外）扩入白名单；收编 W16 后由**主控直收**（复用 `provision_initial_character`，additive 契约与 `/register` 完全一致：失败降级 null 不阻断、`needs_consent` 零改动），红测先行补用例。
