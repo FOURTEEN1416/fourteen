@@ -24,7 +24,7 @@ from ..memory.forward_manager import ForwardManager
 from ..migrations import run_migrations
 from ..stats.analytics import AnalyticsService
 from ..sticker.sticker_manager import StickerManager
-from ..vital_signs.vital_engine import VitalSignsEngine
+from ..vital_signs.vital_engine import VitalSignsEngine, get_vital_engine
 from ..voice.emotion_tts import VoiceEnhancer
 from . import (
     affinity_routes,
@@ -125,7 +125,9 @@ def setup_shisi(
     else:
         reg.favorite_manager = FavoriteManager()
         reg.forward_manager = ForwardManager()
-    reg.vital_engine = VitalSignsEngine()
+    # D12-L：必须走共享实例工厂 —— 路由读的要正是 ASE/scheduler 写的那个。
+    # 各造各的会让「写进表、读不到」重演（db_path 缺省时回落 shisi 状态库真源）。
+    reg.vital_engine = get_vital_engine(db_path)
     reg.voice_enhancer = VoiceEnhancer()
     reg.analytics_service = AnalyticsService()
 

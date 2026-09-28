@@ -1114,6 +1114,23 @@ class ProactiveScheduler:
             except Exception as e:  # noqa: BLE001
                 logger.warning("proactive LLM tick failed user=%s: %s", user_key, e)
 
+    def _vital_tick_for_user(self, user_key: str, character_id: str = "") -> None:
+        """D12-L：把生理读数接进既有 per-user 拍（不新建第二条调度器）。
+
+        有事件才有状态：`VitalSignsEngine.tick` 在无状态时返回基准且**不落库**，
+        于是读侧继续按「示意值，非真实生理信号」自证，而不是把没演算过的
+        基准当事实写进表。异常一律吞成 debug —— 生理读数断了不能拖垮主动消息链。
+        """
+        try:
+            from shisi.vital_signs.vital_engine import get_vital_engine, vital_state_key
+
+            key = vital_state_key(str(user_key or ""), str(character_id or ""))
+            if not key:
+                return
+            get_vital_engine().tick(key)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("生理读数同拍 tick 失败 user=%s: %s", user_key, e)
+
     def _llm_proactive_one_user(self, hub: Any, user_key: str) -> None:
         from proactive.ase_engine import _local_now, sanitize_message
         from proactive.llm_proactive import (
@@ -1130,6 +1147,10 @@ class ProactiveScheduler:
         )
 
         web_cfg = read_web_proactive_config()
+        # D12-L：同拍演算生理读数。放在所有决策闸**之前** —— 暂停/等待窗只是
+        # 「此刻不开口」，不是心跳停了；放在闸后会让她在 LLM 自判的长等待窗里
+        # 读数整段冻结（tick 是唯一的回稳与噪声来源）。
+        self._vital_tick_for_user(str(user_key))
         if self._paused:
             # 块4（缺陷 D）：暂停必须在**生成之前**短路。旧实现只把 paused 存在
             # ASE 引擎里（tick 级），而生产主动消息走的是这条 LLM 决策链 ——

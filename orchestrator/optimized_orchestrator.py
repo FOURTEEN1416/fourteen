@@ -1125,6 +1125,14 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 "# 输出格式（本节优先于角色卡中任何与之冲突的格式要求）\n"
                 f"{reply_mode_instruction()}"
             )
+            # D12-L：生理读数只喂**小说式**（函数内自判模式，沉浸式返回空串）。
+            # 沉浸式明令「严禁描写自己的表情、声音、心跳」，此处注入会与它打架；
+            # 小说式要写动作神态，没有这组数就只能凭空编一个心跳。
+            from shisi.vital_signs.vital_prompt import novel_vital_prompt_section
+
+            vital_section = novel_vital_prompt_section(session_id, str(character_id or ""))
+            if vital_section:
+                system_prompt = f"{system_prompt}\n\n{vital_section}"
         except Exception as e:  # noqa: BLE001
             logger.debug("附加回复模式指令失败（忽略）: %s", e)
 
@@ -1295,9 +1303,12 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 from proactive.ase_hub import ASEHub
 
                 if isinstance(ase, ASEHub):
-                    ase.on_chat(session_id, user_msg_clean, reply)
+                    # D12-L：情绪快照随聊天事件送入 —— ASE 引擎据此驱动生理读数
+                    # （`update_on_emotion` → 落库）。此前这里不传，引擎的
+                    # `_emotion_state` 恒空，紧迫度情绪加成与读数演算一起成孤岛。
+                    ase.on_chat(session_id, user_msg_clean, reply, emotion_state=emotion_state)
                 elif hasattr(ase, "on_chat"):
-                    ase.on_chat(user_msg_clean, reply)
+                    ase.on_chat(user_msg_clean, reply, emotion_state=emotion_state)
             except Exception as e:  # noqa: BLE001
                 logger.debug("ASE on_chat skipped: %s", e)
 
