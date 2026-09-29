@@ -1,9 +1,9 @@
 # 数据库地图
 
-**最近更新:** 2026-09-27
+**最近更新:** 2026-09-29
 **数据库:** SQLite (主, aiosqlite) + ChromaDB (向量) + 文件系统 (角色卡/知识库)
 
-> **✅ 2026-09-27 全仓历遍增量**：① `data/users.db`（api/database.py 模型 8→**9 表**）+`user_active_characters`（W1 `94ed63d`：激活归属唯一 owner；`users.id` AUTOINCREMENT 表重建 + 引擎级 `PRAGMA foreign_keys=ON`，W9）；② `data/sqlite.db`（legacy 记忆库）+`memory_extraction_progress`（抽取租约+来源 id 水位）+`fact_deletion_watermarks`（删除水位，09-26 批）；③ **新库** `data/runtime_plane.db`（W3：运行平面跨进程 CAS 账，WAL）；④ 文件账：`data/lifecycle_jobs/`（W9 五阶段作业账+坟场）、`data/runtime_switches.json`（W6 工具开关）、`data/voice_catalog.json`（W7 音色）、`config/character_templates.yaml`（W12 策展清单）。下文旧「8 表」口径为 09-20 实测。
+> **✅ 2026-09-29 全仓历遍复核（三库实测）**：`data/users.db` **9 表**（api/database.py 模型；+`user_active_characters` W1 `94ed63d` 激活归属唯一 owner；`users.id` AUTOINCREMENT 表重建 + 引擎级 `PRAGMA foreign_keys=ON`，W9）；`data/sqlite.db` **27 张**（不含 FTS 影子表；较 09-20 口径 +`memory_extraction_progress`/`fact_deletion_watermarks`/`memory_forwards`/`user_persona`/`user_persona_snapshots`/`user_profile`，旧清单中 `sessions`/`working_memory`/`emotion_trajectory`/`pending_events`/`affinity_log` 五死表已不存在）；`data/runtime_plane.db` **8 表**（W3 运行平面跨进程 CAS 账，WAL）。文件账：`data/lifecycle_jobs/`（W9 五阶段作业账+坟场）、`data/runtime_switches.json`（W6 工具开关）、`data/voice_catalog.json`（W7 音色）、`config/character_templates.yaml`（W12 策展清单）。
 
 ---
 
@@ -17,7 +17,7 @@
 │  ┌────────────────────┐   ┌──────────────────────┐      │
 │  │ 用户 & 会话 (主库)  │   │ RAG 嵌入向量存储      │      │
 │  │ data/users.db      │   │ data/chroma_db/      │      │
-│  │ 8 表 (见下)         │   │ - 文档嵌入            │      │
+│  │ 9 表 (见下)         │   │ - 文档嵌入            │      │
 │  │                    │   │ - 情景记忆 (单 collection， │
 │  │                    │   │   隔离缺口见 FUNCTION_      │
 │  │                    │   │   INVENTORY 差距表)        │
@@ -42,7 +42,7 @@
 
 ---
 
-## SQLite 模型 (api/database.py，8 表)
+## SQLite 模型 (api/database.py，9 表)
 
 > 数据库连接由 `api/runtime_config.py:get_database_url()` 解析，默认 `sqlite+aiosqlite:///data/users.db`。
 > 若设置 `DATABASE_URL` / `APP_DATABASE_URL` 环境变量，可切换为 PostgreSQL/MySQL（同步驱动自动转异步）。
@@ -71,7 +71,7 @@
 | is_active | Boolean, default=True | 是否有效 |
 | expires_at / created_at / last_used_at | DateTime | 时间戳 |
 
-### 其余 6 表
+### 其余 7 表
 
 | 模型 | 表名 | 说明 |
 |------|------|------|
@@ -81,35 +81,29 @@
 | **WechatChannelSession** | wechat_channel_sessions | **每人独立微信通道会话**（09-19）：(user_id, slot 0/1) 一人多条；status=idle/waiting_qr/scanned/connected/error；bot_id/nickname/messages_today/last_error（凭证本体在文件系统，不落库） |
 | **WechatPeerPreference** | wechat_peer_preferences | **通道内好友自选角色**（09-19）：(owner_user_id, peer_wxid) → character_card_id；与 wechat_bindings 区分——binding 表达「wxid↔注册用户」身份，本表表达「在 U 的通道里 F 选了哪张卡」 |
 | CharacterAchievement | character_achievements | 角色成就（ADR-0014，10 成就×4 类，幂等重算） |
+| **UserActiveCharacter** | user_active_characters | **激活角色归属唯一 owner**（W1 `94ed63d`）：每用户当前激活卡，替代散落的激活状态字段 |
 
 ### shisi 业务表 (shisi/migrations.py，12 张)
 
 `characters` / `characters_v2` / `affinity_records` / `affinity_unlocks` / `affinity_audit` / `emotion_stage_state` / `stickers` / `character_stickers` / `vital_signs_state` / `memory_favorites` / `memory_recycle_bin` / `shisi_schema_version`
 
 > **注意:** `shisi/` 子系统使用独立 SQLite 异步访问（DDD 分层: affinity/emotion_stage/persona/stats/vital_signs）。
-> `api/database.py` 中的 **8 表**是用户认证与控制面模型（`users` / `user_sessions` / `invite_codes` /
-> `consent_records` / `wechat_bindings` / `wechat_channel_sessions` / `wechat_peer_preferences` / `character_achievements`）。
->
-> ⚠️ **口径自纠（2026-09-20 全仓历遍）**：本节此前写「`api/database.py` 中的 **6 表**」，与本文首段
-> 「SQLite 模型 (api/database.py，**8 表**)」自相矛盾。以实测 `data/users.db` 的 8 张表为准。
+> `api/database.py` 中的 **9 表**是用户认证与控制面模型（`users` / `user_sessions` / `invite_codes` /
+> `consent_records` / `wechat_bindings` / `wechat_channel_sessions` / `wechat_peer_preferences` / `character_achievements` / `user_active_characters`）。
 
-### `data/sqlite.db` 全量表清单（26 张，2026-09-20 实测）
+### `data/sqlite.db` 全量表清单（27 张，2026-09-29 实测，不含 FTS 影子表）
 
-`shisi/migrations.py` 只建 12 张（上表）。同库另由 `structured_memory.py` / `working_memory.py` /
-`_legacy_diary_summarizer.py` 等建表，**合计 26 张**（不含 `sqlite_sequence` 与 `user_facts_fts*` FTS 影子表）：
+`shisi/migrations.py` 建 12 张（上表）。同库另由 `structured_memory.py` /
+`_legacy_diary_summarizer.py` 等建表，**合计 27 张**（不含 `sqlite_sequence` 与 `user_facts_fts*` FTS 影子表）：
 
 | 来源 | 表 |
 |------|-----|
 | `shisi/migrations.py`（12） | `characters` / `characters_v2` / `affinity_records` / `affinity_unlocks` / `affinity_audit` / `emotion_stage_state` / `stickers` / `character_stickers` / `vital_signs_state` / `memory_favorites` / `memory_recycle_bin` / `shisi_schema_version` |
-| `structured_memory.py` 等（14） | `chat_history`（**对话上下文真源，09-20 起按 session 隔离读取**） / `user_facts`（+`user_facts_fts` 全文索引） / `sessions` / `working_memory` / `daily_summaries` / `emotion_trajectory` / `reflections` / `tool_call_log` / `trace_log` / `persona_evolution_log` / `pending_events` / **`pending_intents`**（09-20 澄清状态机：槽位合并 / 两轮上限 / 15min TTL） / **`reminders`**（09-20 迁移 +session_key/user_id/status/delivered_at/fail_count） / `affinity_log` |
+| `structured_memory.py` 等（15） | `chat_history`（**对话上下文真源，按 session 隔离读取**） / `user_facts`（+`user_facts_fts` 全文索引） / `daily_summaries` / `reflections` / `tool_call_log` / `trace_log` / `persona_evolution_log` / `pending_intents`（澄清状态机：槽位合并 / 两轮上限 / 15min TTL） / `reminders`（+session_key/user_id/status/delivered_at/fail_count） / `memory_extraction_progress`（抽取租约 + 来源 id 水位） / `fact_deletion_watermarks`（删除水位，派生召回失效） / `memory_forwards`（转发） / `user_persona` / `user_persona_snapshots`（画像保序快照） / `user_profile`（用户画像） |
 
 ---
 
 ## 文件型存储
-
-### ~~人设卡模块 (character_card/)~~ — 已删除（批6b 项10）
-
-> 原 6 文件包（`__init__/integration/models/parser/prompt_builder/validator`）为**零读者死码**，已随批6b 项10 删除（见 `docs/DELETION_LOG.md`）。角色卡的真源为下方的 `config/characters/*.json` + `shisi/character/`（SillyTavern V2/V3 + PNG tEXt）子系统。
 
 ### 角色配置 (config/characters/)
 

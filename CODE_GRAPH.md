@@ -1,6 +1,6 @@
-# 代码图谱 — unique-you (唯一的你) v3.8.26（2026-09-28 **W18 历遍完善批**：① 测试污染真卡目录根治——`test_invite_codes` 注册流钩子每轮向 gitignored `config/characters/` 净增 2 克隆卡（41→49 漂移），补 `CHARACTERS_DIR` 沙箱夹具 + `test_w18_traversal_fixes` 机检守卫，8 张三库零引用取证后移 `_quarantine/`，全量跑程 41 卡零净增；② `memory_ext/` 整包删除（W4-G 停用后零消费者）+ 装配口 + system.yaml 两段死配置 + observability 两模型/字段/导出 + shisi/config 4 枚悬空 env 映射 + `shisi/ase/scene_narrator.py`；W4 契约升级「不存在即不得复活」；③ `App.tsx` 重复 `/templates` Route 死码删除 + `AppRoutes.test.ts` 双守卫（Vite ?raw 零依赖，突变验红 2/2）；④ FUNCTION_INVENTORY 新增 TPL/ACCT 节（W17 前端面入册，自服务前端接入遗留闭合）。验证：五分块 **2649/2648/1/0**（534+1/553/565/485/511，174 文件，41 卡零净增）+ vitest **177/30 文件** + tsc 0 + ruff 0；**徽章 2825**；端点 229/195 不变；**已 push origin `79e6909`，服务器部署归用户裁决**。上一版 v3.8.25（2026-09-28 **历遍修复批·三端一致 `ffa6d68`**：① CI 两红根治 `dceb331`（W8 卡目录守卫缺件即 skip + e2e viewer 种子 + `anyRoleId` 空库临时卡兜底；run `36333194107` 全绿）② 生产 P1 `444730a`——`run_api.py` 把 `WebSocketServer.client_count`（@property）当方法调用 → websocket 出站通道从未消费（服务器 app.log 9154 条告警实锤），改属性访问+AST 红测先行 ③ 路由遮蔽 `ffa6d68`——`shisi/api/memory_routes.py` 通配 `GET /{character_id}` 抢在静态 `GET /favorites` 前致收藏列表端点不可达（33 路由文件扫描仅此一例）+ 收藏测试写真库收口。服务器 bundle 快进+remote_deploy：health/ready 200、重启后 0 异常、W3 域两文件 Linux 54/54（6 例本机 WAL flaky 零复现）、blob 6/6 一致；全量五分块 **2567/2566/1/0**、徽章 **2701**、端点 229/195 不变。上一版 v3.8.24：2026-09-27 **全仓历遍·真源文档对齐 + CI 红取证**：GitHub CI 自 W1–W12 批次 push 起 main 连红——backend 1 failed（`test_w8_character_expression::test_all_shipped_cards_are_lossless_and_idempotent`，卡目录守卫 vs gitignore 陷阱：CI checkout 后 `config/characters/` 目录存在但无卡）+ frontend E2E 4 failed（`e2e/w11_journey.spec.ts`：CI 种子无 viewer `w11-b@test.local`、角色库 0）；其余门禁（tsc / vitest 135 / build / adr / ff-*）全绿；修复归 W8/W11/tests owner 候裁决。三端：本地=origin（W 批已 push）、服务器停 `f85408f` 落后 62 提交（部署归用户裁决）。实测收集 **2565** / 端点 **229 APIRoute / 195 唯一路径**（`len(app.routes)`=233，111 GET / 82 POST / 16 PUT / 20 DELETE）/ ruff 0 / `.py` 总量 **477**；`13cce50` 补记：`config/system.yaml` `multimodal.vision_model=agnes-3.0-flash`（auto 模式升级多模态直传）。上一版 v3.8.23：2026-09-26 归属重构三端上线 `f85408f`：见下文「归属重构覆盖层」段——传输确认后记账、请求/后台凭证隔离、画像保序与来源水位、事实删除派生失效、抽取租约水位、昨日角色日记、id 分页、跨 worker OS 锁；上线后补 `sqlalchemy[asyncio]` 依赖声明。上一版 v3.8.22：2026-09-23 五域可靠性批次上线收口：三枚缺陷根治部署至生产三端 `6f80a5c`——① `proactive/frequency.py` FrequencyAdapter minimal 粘滞逐级回升（`ad828f7`）；② `tests/conftest.py` 账本测试沙箱隔离（`d57cb5f`，服务器 98 例验收账本 1526→1526 零污染实锤）；③ `scripts/migrate_legacy_wechat_channel.py` 启动通道同步 async 桥拆核（`6f80a5c`，asyncio.run-in-running-loop 自 09-21 起 116 行告警从未成功 → 部署后「已同步 3 条」×worker、告警归零）；健康 200、nginx 零改动；测试 **1898/1897/1** 本地四分块实测（428+577+1+411+481），合计 **1995**；端点 220/186 不变）；上一版 v3.8.21
+# 代码图谱 — unique-you (唯一的你) v3.8.27（2026-09-29 **全仓历遍·文档对齐 + 注释勘误批**，纯口径刷新零逻辑变更：① 全部真源文档对齐 09-28 服务器同步批后的代码实况——端点 229/195、测试 2652 收集（174 文件、41 卡零净增）、徽章 2828、三端一致 `2ebfc61`；② 注释与代码不对齐修复 4 文件——`api/app_factory.py` docstring 端点数（220/186→229/195）、`orchestrator/_init_mixin.py`「9 个 _init_*」→11、`orchestrator/optimized_orchestrator.py`「直接调用 10 个/共 13 个」→8/11、`tests/test_memory_pipeline.py`/`test_memory.py` 陈旧「TODO: shisi 后等效迁移」符号迁移表化石删除（实际早已全部 import `shisi.memory.legacy`，两文件 109/109 绿）；③ 前端页面 17→19（+TemplatesPage/SettingsAccount）、前端 API 模块 13→15（+selfservice/templates）、§4.9 vitest 口径 98/16→177/30、main.py 438→534 行、optimized_orchestrator 1270→1760 行、_init_mixin 438→565 行；§4.3 注记堆叠清理。验证：ruff 0 + 受影响测试绿 + 全量五分块 2652 收集吻合 + vitest 177。上一版 v3.8.26 见下方版本表与 `LOG.md`。）
 
-> 由 维护者 手动维护 | 最后核实: 2026-09-28（**v3.8.26 W18 历遍完善批**：污染根治+死码整删+前端路由守卫，见版本头。）| 上一核实: 2026-09-28（**v3.8.25 历遍修复批**：CI 两红根治 + 生产 P1 client_count 误调 + 路由遮蔽，三端一致 `ffa6d68`，见版本头。）| 上一核实: 2026-09-27（**v3.8.24 全仓历遍**：真源文档全量对齐 + CI 红根因取证（backend 1 / E2E 4），见版本头；端点与收集数实测复核与 v1.39.1 吻合。）| 上一核实: 2026-09-23（**v3.8.22 上线收口**：见上行全貌。主动消息按默默令止改——账本终结分析：proactive_send 28 全为 API 受理成功（web 协议无送达回执，最后一英里不可证）/ skip 451 中 396 为 llm_wait_window 自判等待窗；详见 LOG 2026-09-23 收口条目。）
+> 由 维护者 手动维护 | 最后核实: 2026-09-29（**v3.8.27 全仓历遍·文档对齐 + 注释勘误批**，见版本头。）| 更早核实记录见下方版本表与 `LOG.md`。
 
 > 由 维护者 手动维护 | 最后核实: 2026-09-21（**v3.8.19 selftalk 四项修复移植 + 双尾巴根治**：`d8b7046` cherry-pick 入 main（`988cf9d`，送达回写记忆/唯一身份路径/档位静态门禁/追问收口，净增 32 用例）；知识槽身份自源块出口过滤（`743a98e`，收口项11 每轮 RAG 与「锚点只注入一次」的语义冲突）；channel-status 用例 `sessions_root` 隔离（`edd3c47`）；§1.1 刷新 **1750 收集 / 1749 通过 / 1 跳过 / 0 失败（2026-09-22 六域根治分块双端实测，服务器同口径全绿）
 > 由 维护者 手动维护 | 上一核实: 2026-09-21（**v3.8.18 v1.35 收仓口径统一 + shisi.yaml 行数勘误**：§1.1 Python 测试行刷新 **1615→1657 收集 / 1611→1653 通过 / 4 跳过**（分块 **341 + 387+3 + 494+1 + 431**，0 失败；+42 = 并行窗收编 `test_attribution_isolation_state` / `test_code_review_r2_state_and_llm` / `test_session_key_owner`）；测试合计 **1709→1751**（1653 Py + 98 FE）；**勘误** `config/shisi.yaml` 实为 **91 行**（65 有效行），v1.35 头部「41 行」系 voice 段恢复前中间态误记；端点 **220/186** 不变；vitest **98/98** 复跑。同步 AGENTS §0/§2/§4.3、README 徽章/口径/结构树、LOG 勘误两处。）
@@ -85,16 +85,16 @@
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| API 业务端点（`APIRoute` 实扫） | **220 端点 / 186 条唯一路径**（105 GET / 79 POST / 16 PUT / 20 DELETE） / **19 处 include_router + setup_shisi**（2026-09-21 复测；较 09-20 口径 215/181 +5 = agent-plane 路由组） | 2026-09-21 内省 `create_api_app()`：`len([r for r in app.routes if isinstance(r, APIRoute)])`。⚠️ 旧口径"208 端点"实为 `len(app.routes)`，含 4 条框架路由（`/openapi.json`、`/docs`、`/docs/oauth2-redirect`、`/redoc`），非业务端点；本轮 `len(app.routes)=224`。⚠️ **测量方法注记（09-21 服务器实测补）**：`create_api_app()` 裸调用走惰性挂载（路由为 `_IncludedRouter` 待展开对象，裸内省仅 39 条），端点口径以运行期展开后为准——生产实例 `openapi.json` 实测 186 唯一路径与口径吻合 |
-| main.py 体量 | **约 17.4 KB / 438 行** | 2026-09-20 实测（08-28 两轮瘦身基线后随通道批次 ± 微调） |
-| 前端页面 | **17 个** | Glob `frontend/src/pages/*.tsx`（另有 `StorylinePage` 为 App.tsx 内联包装组件） |
-| 前端 API 模块 | **13 个** | Glob `frontend/src/api/*.ts`（09-18 CI 门禁根治新增 `emotion.ts` / `normalize.ts`，原 11） |
+| API 业务端点（`APIRoute` 实扫） | **229 端点 / 195 条唯一路径**（111 GET / 82 POST / 16 PUT / 20 DELETE） / **19 处 include_router + setup_shisi**（2026-09-29 内省复测；`len(app.routes)=233` 含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`） | 内省 `create_api_app()`：`len([r for r in app.routes if isinstance(r, APIRoute)])`。⚠️ **测量方法注记**：`create_api_app()` 裸调用走惰性挂载（路由为待展开对象，裸内省仅 39 条），端点口径以运行期展开后为准——生产实例 `openapi.json` 实测唯一路径与口径吻合 |
+| main.py 体量 | **约 24 KB / 534 行** | 2026-09-29 实测（通道批次与 09-26 归属重构后持续增长） |
+| 前端页面 | **19 个** | Glob `frontend/src/pages/*.tsx`（09-28 新增 TemplatesPage / SettingsAccount；另有 `StorylinePage` 为 App.tsx 内联包装组件） |
+| 前端 API 模块 | **15 个** | Glob `frontend/src/api/*.ts`（09-27/28 新增 `selfservice.ts`（W9）与 `templates.ts`（W12），原 13） |
 | 前端 Zustand store | **3 个** | LS `frontend/src/store/`（authStore / characterBuilderStore / errorStore） |
-| Python 测试用例 | **1897 passed + 1 skipped**（收集 **1898**） | 2026-09-23 收尾轮全量四分块实跑（**428 + 577+1 + 411 + 481** 精确吻合，124 测试文件，0 失败；`6f80a5c` 基线、工作树仅文档批）。本批净增：FrequencyAdapter minimal 回升 +1、账本沙箱契约 +2、启动通道同步 async 桥 +1（均红测先行）。服务器侧另做**隔离专项验收**（98 例全绿、账本 1526→1526 零污染），非全量回归。上一口径 1893/1894（R3 收口双端）。⚠️ **基线随 `config/characters/` 卡数浮动**：该目录被 gitignore（不入公开仓），`test_persona_injection` 的用例数 = **2 × 卡数 + 7**。**引用基线必须同时声明卡数**（本次 41 张在位） |
+| Python 测试用例 | **2651 passed + 1 skipped**（收集 **2652**） | 2026-09-28 服务器同步批全量五分块实跑（**534+1 + 556 + 565 + 485 + 511** 精确吻合，174 测试文件，0 失败；`2ebfc61` 基线、41 卡零净增）。本批净增 3 例 = `tests/test_shisi_migrations.py::TestConcurrentRunMigrations`（迁移并发竞态 P1 根治批，红测先行）。⚠️ **基线随 `config/characters/` 卡数浮动**：该目录被 gitignore（不入公开仓），`test_persona_injection` 的用例数 = **2 × 卡数 + 7**。**引用基线必须同时声明卡数**（本次 41 张在位） |
 | 现役角色卡 | **41 张**（`config/characters/*.json`，2026-09-20 从服务器**逐字节恢复**） | 41/41 文件 `sha256sum` 与服务器 `/opt/ai-girlfriend/config/characters/` **完全一致**；全部 JSON 可解析。目录被 `.gitignore:117` 忽略 → **卡数不随 git 复现**，本行是「本检出当前状态」而非版本事实 |
-| 前端测试用例 | **98 个全部通过 / 16 文件** | 2026-09-21 `npm test -- --run`（vitest）+ `tsc --noEmit` 0 错误 |
-| 测试用例合计 | **1995 个**（1897 Python 通过 + 98 前端通过） | 2026-09-23 收尾轮口径（Python 侧跳过 1 不计入通过数；前端 vitest 98/98 未随本批变动） |
-| tools/builtin 工具文件 | 8 个（含 __init__.py） | Glob |
+| 前端测试用例 | **177 个全部通过 / 30 文件** | 2026-09-28 `npm test -- --run`（vitest）+ `tsc --noEmit` 0 错误 |
+| 测试用例合计 | **2828 个**（2651 Python 通过 + 177 前端通过） | 2026-09-28 服务器同步批口径（Python 侧跳过 1 不计入通过数） |
+| tools/builtin 工具文件 | 9 个（含 __init__.py） | Glob（2026-09-29 实测） |
 
 ### 1.2 知识图谱快照指标（✅ 2026-09-02 重新索引·第二次）
 
@@ -175,9 +175,9 @@ graph TD
 `OptimizedOrchestrator.process_message`（`orchestrator/optimized_orchestrator.py`）处理每一条用户消息，是全系统最关键调用链。
 
 > **架构变更 (2026-07-26)**: `OptimizedOrchestrator` 现在继承 `_InitPhasesMixin` + `_StreamPipelineMixin`：
-> - `orchestrator/optimized_orchestrator.py` (**1270 行**): 主类 `__init__` / 会话锁 / `_prepare_context` / `process_message` / `health_check`
-> - `orchestrator/_init_mixin.py` (438行): `initialize` 拆分为 9 个 `_init_*` 阶段
-> - `orchestrator/_stream_mixin.py` (238行): `process_message_stream` SSE 真流式/伪流式降级
+> - `orchestrator/optimized_orchestrator.py` (**1760 行**): 主类 `__init__` / 会话锁 / `_prepare_context` / `process_message` / `health_check`
+> - `orchestrator/_init_mixin.py` (565行): `initialize` 拆分为 11 个 `_init_*` 阶段
+> - `orchestrator/_stream_mixin.py` (352行): `process_message_stream` SSE 真流式/伪流式降级
 >
 > **最新更新 (2026-07-01)**: PersonaService.build_system_prompt 已重构为**两阶段构造**，第一阶段由 shisi PromptBuilder 生成角色 + RAG 知识 + 情感 + 对话历史，第二阶段注入 PersonaEngine 的 5 层对齐层（世界/时间信息 → RAG 上下文 → 情感 → 风格 → 约束）。
 
@@ -255,14 +255,14 @@ sequenceDiagram
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
-| `main.py` | main.py（**~17.4 KB / 438 行**，2026-09-20 实测） | 入口 + `_run_orchestrator` 统一启动 + 控制台/微信模式 |
-| `orchestrator/` | orchestrator/ (**9 文件包**) | `optimized_orchestrator.py` 主类（**1270 行**） + `_init_mixin.py` **10 阶段初始化**（唯一真相源） + `_stream_mixin.py` SSE 流式 + `session_locks.py` + `voice_detector.py` + `console_chat.py`（2026-08-28 自 main.py 迁入，命令处理函数拆分） + **`tool_gate.py`**（三级工具意图管线，09-20 新） + **`context_budget.py`**（上下文预算/去重/信封，09-20 新） |
+| `main.py` | main.py（**~24 KB / 534 行**，2026-09-29 实测） | 入口 + `_run_orchestrator` 统一启动 + 控制台/微信模式 |
+| `orchestrator/` | orchestrator/ (**9 文件包**) | `optimized_orchestrator.py` 主类（**1760 行**） + `_init_mixin.py` **11 阶段初始化**（唯一真相源） + `_stream_mixin.py` SSE 流式 + `session_locks.py` + `voice_detector.py` + `console_chat.py`（2026-08-28 自 main.py 迁入，命令处理函数拆分） + **`tool_gate.py`**（三级工具意图管线，09-20 新） + **`context_budget.py`**（上下文预算/去重/信封，09-20 新） |
 | `api/run_api.py` | api/run_api.py | API-Only 启动入口（uvicorn 直接挂载），含 `_autostart_wechat_connector()` flock 文件锁自动恢复微信连接 |
 | `user_scheduler.py` | user_scheduler.py | 多用户调度，每个微信用户独立情感状态 |
 
 **架构演进 (2026-07-28 双模式合并)**：
 - 原 `_run_fast_mode` + `_run_full_mode` 双路径合并为 `_run_orchestrator` 单入口（-297 行）
-- `_init_mixin.initialize()` 是唯一初始化真相源（10 阶段），`_run_full_mode` 的 300 行手工组件注入已删除
+- `_init_mixin.initialize()` 是唯一初始化真相源（11 阶段），`_run_full_mode` 的 300 行手工组件注入已删除
 - 修复双调度器 bug：原 `_init_mixin` 与 `_run_*_mode` 各创建一个 `ProactiveScheduler` 并行运行，现统一复用
 - `_init_mixin` 新增第 10 阶段 `_init_multimodal`，并补齐 `EncryptionManager` / `classifier_mode` / `prompt_mode` 参数
 
@@ -272,7 +272,7 @@ sequenceDiagram
 - `run_console_chat` — 控制台交互
 - `run_wechat_mode` — 微信模式
 
-### 4.2 API 层（**220 业务端点 / 186 唯一路径** — 2026-09-21 内省实扫）
+### 4.2 API 层（**229 业务端点 / 195 唯一路径** — 2026-09-29 内省实扫）
 
 两个路由来源：
 
@@ -345,11 +345,10 @@ agent_plane_router     → /api/agent-plane/*（5 端点：replay/profile/events
 + shisi setup          → /api/shisi/* 域路由（31 端点已挂载）
 ```
 
-> **上表端点数为 2026-09-20 按 tag 内省实测**（09-17 基线 204 之上，
-> 09-19 晚通道批次 +11：wechat-channel 9 + admin-wechat 2）。
-> 注意 `api/routers/` 内 181 个装饰器 + health 2 + qrcode 1 + shisi 31 = 215。
+> 端点分布实时口径见 §1.1（2026-09-29 内省 **229 APIRoute / 195 唯一路径**，
+> `len(app.routes)`=233 含 4 条框架路由）；按模块分布见 `docs/CODEMAPS/BACKEND.md`。
 
-**`api/app_factory.py:91 create_api_app()`** 是 FastAPI 应用唯一构造入口，被 `api/run_api.py:411`（`import` 于 `:45`）和 `main.py` 调用。FastAPI 实例 `version="3.1.0"`。
+**`api/app_factory.py:93 create_api_app()`** 是 FastAPI 应用唯一构造入口，被 `api/run_api.py:613`（`import` 于 `:45`）和 `main.py` 调用。FastAPI 实例 `version="3.1.0"`。
 
 ### 4.3 shisi/ — Clean Architecture 重构（核心域）
 
@@ -535,20 +534,19 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 
 ### 4.9 前端（React 19 管理控制台）
 
-- **17 个页面文件**（全部挂载路由；幽灵层三页与 DemoPage 已于 08 月删除；2026-09-01 新增 PsychProfilePage（T2，见 §13 T1-T5 批次）；IntroPage=SP-11 产品介绍页（f4aa51c，公开静态门面接替已删 Demo，根路径未登录重定向 `/intro`））：
-  - 公开：IntroPage（`/intro`）, LoginPage, PsychProfilePage（`/psych`，**09-18 起包 AuthGuard 需登录**，修未登录 3×401）
+- **19 个页面文件**（全部挂载路由；2026-09-28 新增 TemplatesPage（`/templates`，W12 API + W17 前端）与 SettingsAccount（`/settings/account`，W17 自服务三面）；IntroPage=SP-11 产品介绍页（f4aa51c，公开静态门面，根路径未登录重定向 `/intro`））：
+  - 公开：IntroPage（`/intro`）, LoginPage, PsychProfilePage（`/psych`，**需登录**）
   - 用户/认证：AdminUsersPage
-  - 角色管理：RolesPage, CreateRole, RoleSettings
-  - 设置：SettingsLLM, SettingsSecurity, SettingsLogs, SettingsVoice
-  - 工具/状态：ToolsDashboard, StatusCenter
-  - 微信集成：WeChatPage
+  - 角色管理：RolesPage, CreateRole, RoleSettings；**TemplatesPage**（`/templates` 角色模板克隆）
+  - 设置：SettingsLLM, SettingsVoice, ToolsDashboard, SettingsSecurity, **SettingsAccount**（同意状态/导出/注销自服务）, SettingsLogs
+  - 状态/微信：StatusCenter, WeChatPage
   - LLM 供应商管理：AdminProvidersPage（admin 角色）
-  - 其他：NotFoundPage, SystemSettingsLayout（设置域布局）
-- **13 个 API 模块**（demo.ts、users.ts、chat.ts 已删除；09-18 CI 门禁根治新增 `emotion.ts` / `normalize.ts`）：
-  - admin, auth, characters, client, clone, emotion, llmProviders, mimo, normalize, queryClient, system, training, wechat
-- 3 个 Zustand store（authStore, errorStore, characterBuilderStore；chatStore 已于 09-17 死代码清洗删除）
-- React Query hooks
-- 98 个 Vitest 测试用例（across 16 files，全部通过 2026-09-20）
+  - 其他：NotFoundPage, SystemSettingsLayout（设置域布局）；StorylinePage（App.tsx 内联，`/roles/:roleId/storyline`）
+- **15 个 API 模块**（demo.ts、users.ts、chat.ts 已删除；09-27/28 新增 `selfservice.ts`（W9 自服务）与 `templates.ts`（W12 模板））：
+  - admin, auth, characters, client, clone, emotion, llmProviders, mimo, normalize, queryClient, selfservice, system, templates, training, wechat
+- 3 个 Zustand store（authStore, errorStore, characterBuilderStore）
+- React Query hooks（5 文件）
+- 177 个 Vitest 测试用例（30 文件，全部通过 2026-09-28）
 - Playwright E2E 测试配置
 
 **页面说明**：
@@ -755,7 +753,7 @@ tools/
 | OptimizedOrchestrator to main 循环依赖 | 中 | main.py | 检查 4 次回调是否可消除 |
 | process_message 全链 CRITICAL | 中 | orchestrator/optimized_orchestrator.py | 每个 hop=1 节点都需要降级路径 |
 | **多用户 LLM 缓存失效边界** | 低 | llm_provider/__init__.py:259 `invalidate_user_llm` | 用户改 LLM 配置 → 缓存失效 → 下次对话按新配置重建。验证：worker 进程间缓存一致性 |
-| **微信 flock 文件锁仅在 Linux 生效** | 低 | api/run_api.py:165 `fcntl.flock` | Windows 开发环境会 fallback 到 `ImportError`，开发模式下无锁竞争（单 worker） |
+| **微信 flock 文件锁仅在 Linux 生效** | 低 | api/run_api.py:246 `fcntl.flock` | Windows 开发环境会 fallback 到 `ImportError`，开发模式下无锁竞争（单 worker） |
 | **工具系统引入热路径新节点** | 低 | tools/base_tool.py | ToolRegistry/ToolDispatcher 成为 LLM 回复前必经路径，需确保可用性 |
 | ~~测试基线漂移~~ | ~~中~~ | ~~tests/~~ | ✅ **已修复** (2026-07-30)：实测 1025 Python 测试 + 79 前端测试 = 1104 全部通过；前端 6 个过时测试已修正(WeChatPage 绑定功能迁移到 UsersPage、SettingsVoice ENGINE_OPTIONS 精简为 MiMo Cloud、SettingsLLM mock 补全 useAuthStore/listProviders) |
 
@@ -792,7 +790,8 @@ tools/
 
 | 日期 | 提交 | 变更摘要 |
 |------|------|---------|
-| v3.8.26 | 2026-09-28 | **W18 历遍完善批**（goal「全仓历遍…修复完善」）：真卡目录测试污染根治（沙箱夹具+机检守卫+8 卡隔离取证）；memory_ext 整包/scene_narrator/死配置层（system.yaml 两段 + observability 两模型 + 4 枚悬空 env 映射）整删，W4 契约转「不存在即不得复活」；App.tsx 重复 Route 死码 + ?raw 双守卫突变验红；FUNCTION_INVENTORY TPL/ACCT 节入册闭合 W17 前端接入遗留；DECISION_LEDGER D10–D12 执行效力收口注记。五分块 **2649/2648/1/0**（174 文件、41 卡零净增）+ vitest 177 + tsc/ruff 0；徽章 **2825**；端点 229/195 不变；未 push 未部署 |
+| v3.8.27 | 2026-09-29 | **全仓历遍·文档对齐 + 注释勘误批**（goal「全仓历遍，更新代码描述文档…注释和代码不对齐…备注式删除」；纯口径刷新零逻辑变更）：① 真源文档对齐 09-28 服务器同步批实况——§1.1 全表（端点 229/195、2651+1/2652、徽章 2828、main.py 534 行、页面 19、前端 API 15、vitest 177/30、tools/builtin 9）+ §4.1/§4.2（optimized_orchestrator 1760 行、_init_mixin 565 行/11 阶段、app_factory `:93`/run_api `:613` 指针、flock `:246`）+ §4.9（页面 19 + TemplatesPage/SettingsAccount、API 模块 15 + selfservice/templates、vitest 177/30）+ README/AGENTS/VISION/FUNCTION_INVENTORY/CODEMAPS 六件（MODULES/INDEX/ARCHITECTURE/DATABASE users.db 9 表+sqlite.db 27 表（非 FTS 口径）/BACKEND 模块级重排/FRONTEND）/HANDOFF；② 注释与代码不对齐修复 4 文件 5 处——app_factory docstring 220/186→229/195、_init_mixin「9 个阶段」→11、optimized_orchestrator「直接调用 10 个/共 13 个」→8/11、test_memory_pipeline+test_memory「TODO: shisi 后等效迁移」符号迁移表化石清除（实际早已 import `shisi.memory.legacy`）；③ AGENTS §4.3 过期口径注记堆叠（一次~二十七次 13 条）清除，只留二十八次+指针。验证：ruff 0 + 受影响测试（test_memory* 109/109、test_api_routes 等）+ 全量五分块 2652 收集吻合 + vitest 177；端点 229/195 复测吻合 |
+| v3.8.26 | 2026-09-28 | **W18 历遍完善批**（goal「全仓历遍…修复完善」）：真卡目录测试污染根治（沙箱夹具+机检守卫+8 卡隔离取证）；memory_ext 整包/scene_narrator/死配置层（system.yaml 两段 + observability 两模型 + 4 枚悬空 env 映射）整删，W4 契约转「不存在即不得复活」；App.tsx 重复 Route 死码 + ?raw 双守卫突变验红；FUNCTION_INVENTORY TPL/ACCT 节入册闭合 W17 前端接入遗留；DECISION_LEDGER D10–D12 执行效力收口注记。五分块 **2649/2648/1/0**（174 文件、41 卡零净增）+ vitest 177 + tsc/ruff 0；徽章 **2825**；端点 229/195 不变；未 push 未部署（后随 09-28 服务器同步批 `2ebfc61` 一并上线） |
 | v3.8.25 | 2026-09-28 | **历遍修复批**（默默令「先完成一二三，然后继续全仓历遍…修复优化」）：① `dceb331` CI 两红根治（W8 守卫缺件即 skip / e2e viewer 种子 / `anyRoleId` 空库临时卡兜底，本地 41 卡 11/11+空库 4/4）② `444730a` 生产 P1——`client_count` property 被当方法调用，websocket 出站通道从未消费（app.log 9154 条告警），AST 红测先行 ③ `ffa6d68` 路由遮蔽——memory favorites 端点不可达（通配 `/{character_id}` 抢匹配）+ 收藏测试写真库收口。三端一致 `ffa6d68`；CI run `36333194107`/`36333947881`/`36334364744` 全绿；服务器 Linux W3 域 54/54；端点 229/195 不变；全量 **2567/2566/1/0**、徽章 **2701** |
 | v3.8.24 | 2026-09-27 | **全仓历遍**（`13cce50` 后零代码历遍）：真源文档全量对齐（AGENTS v1.39.2 / MODULES / DATABASE / INDEX / ARCHITECTURE / HANDOFF / FUNCTION_INVENTORY / P1_BACKLOG / LOG / BOARD）+ **GitHub CI 红取证**（backend 1 = W8 卡目录守卫 vs gitignore 陷阱；E2E 4 = `w11_journey` viewer 种子缺失/角色库 0）+ `13cce50` `vision_model=agnes-3.0-flash` 补记 + 实测 2565 收集 / 229/195 端点 / `.py` 总量 477；本地=origin 同步、服务器停 `f85408f` 落后 62 提交 |
 | 2026-09-27 (W1–W12 批次，本地未 push 未部署) | 多窗在制品（HEAD `b6501e4`） | 多窗口协同收口（W1 统一身份与资源授权 `94ed63d` / W2 模型契约与对话生命周期 `f2e29a3` / W3 后台单一运行时十缺陷 `b59eb8b` 止 / W4 记忆域统一事实写入口六批 `1773970` 止 / W5 知识源保存与索引派生重建 `ea68077` / W6 配置生效与可信工具 `4046aa5` / W7 语音契约与克隆方向 `596c428` / W8 角色表达·关系·心理画像六批 `5abe12b`·`a6f54d2` / W9 删除与遗忘生命周期+同意门禁 `abcde64`+`9076447`（收尾 `6558064`·`da63fcb`） / W10 备份恢复与发布门禁 `5d0a141` / W11 前端声明统一 `e1a1198`+`c13d439` 申报 / W12 角色模板面阶段 1 `b6501e4`（原 `wt/w12` `0762b13`，本收口窗期间并入 main） / 测试契约收口 `bbd9bed`）。**新增模块 9 个**（`tools/url_guard.py`·`tools/tool_state.py`·`proactive/runtime_plane.py`·`proactive/runtime_assembly.py`·`utils/inbound_context.py`·`api/lifecycle.py`·`utils/deletion_guard.py`·`api/consent.py` 扩展·`api/routers/character_template_routes.py`）**+ 端点增量 +4**（`APIRoute` **220 → 224**、唯一路径 **186 → 190**、`len(app.routes)` **224 → 228**、方法 **105/79/16/20 → 108/80/16/20**、`include_router` 19 不变）。详见本文件「2026-09-27 W1–W12 批次覆盖层」段。**版本头 `v3.8.23` 未改（遵本窗「只追加」约束）** |

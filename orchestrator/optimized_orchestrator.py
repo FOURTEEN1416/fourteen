@@ -4,8 +4,8 @@
 - 本文件：``OptimizedOrchestrator`` 主类，负责 ``__init__`` / 会话锁 / 上下文准备 /
   ``process_message`` / 健康检查等核心流程。
 - ``orchestrator._init_mixin._InitPhasesMixin``：``initialize`` 阶段化拆分
-  （``initialize`` 直接调用 10 个 ``_init_*``，``_init_memory_and_rag`` 再级联
-  ``_init_ase_and_scheduler`` / ``_init_tools`` / ``_init_rag``，共 13 个阶段方法）。
+  （``initialize`` 直接调用 8 个 ``_init_*``，``_init_memory_and_rag`` 再级联
+  ``_init_ase_and_scheduler`` / ``_init_tools`` / ``_init_rag``，共 11 个阶段方法）。
 - ``orchestrator._stream_mixin._StreamPipelineMixin``：``process_message_stream`` SSE 流式。
 
 Mixin 通过 ``self.components`` 与主类共享状态，公共 API 100% 兼容。

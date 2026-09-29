@@ -1,20 +1,8 @@
-# TODO: shisi 后等效迁移
-#
-# 符号迁移表（shisi 暂无与原根 memory/ 模块 API 兼容的等价实现，保留原 import）：
-#   - memory.memory_pipeline.MemoryPipeline    → shisi.application.memory_service.ShisiMemoryService（仅包装，内部仍依赖根 memory/，且未透传 _config/_forgetting_model/_chat_count_since_extract 等内部属性）
-#   - memory.memory_pipeline.EpisodicMemory     → shisi 无等价类
-#   - memory.memory_pipeline.SemanticMemory    → shisi 无等价类
-#   - memory.memory_pipeline.ConflictDetector  → shisi 无等价类
-#   - memory.memory_pipeline.CrossSessionReasoner → shisi 无等价类
-#   - memory.memory_pipeline.FactExtractor     → shisi 无等价类
-#   - memory.memory_pipeline.DiarySummarizer   → shisi 无等价类
-#   - memory.memory_pipeline.WorkingMemory     → shisi 无等价类
-#   - memory.memory_pipeline.ImportanceScorer  → shisi 无等价类
-#   - memory.memory_pipeline.ForgettingManager → shisi 无等价类
-# 原因：shisi/memory/ 当前仅含 FavoriteManager / ForwardManager（收藏/转发），
-#       核心记忆管线（工作/情景/语义/遗忘/评分/事实抽取/日记摘要）尚未在 shisi 中实现等价类。
-#       等待后续迁移提供兼容 API 后再切换 import。
-"""记忆管线核心路径测试 — 使用 mock 后端隔离向量/结构化存储。"""
+"""记忆管线核心路径测试 — 使用 mock 后端隔离向量/结构化存储。
+
+测试目标：根目录 ``memory/`` 已迁移至 ``shisi.memory.legacy``（根包已物理删除），
+全部被测符号在用例内 ``from shisi.memory.legacy...`` 直接导入。
+"""
 
 from __future__ import annotations
 

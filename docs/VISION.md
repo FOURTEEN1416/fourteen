@@ -63,9 +63,9 @@
 - **emoji 收口**（09-17）：默认每条最多一个、仅情绪强烈时用，角色卡频率可调
 - **人设注入完整且经行业对齐**（09-18/19 注入三字段 → 09-20 提示词批次重排）：角色卡 `personality_text`/`creator_notes`/`mes_example` 进 prompt，扮演规则置于对话历史之后（post-history 位），41 卡 scenario 字段全量移除（根因级修复开场锚定），知识注入去重
 - 图片理解双路（09-15 收编）：附件直传（配 vision_model）/ 描述注入（VisionHandler 降级），config `multimodal.image` 驱动，off 即回滚；图片全程内存不落盘
-- 管理控制台 **17 页**（邀请码注册 + 角色管理 + LLM 配置 + 数据看板等；SP-9 幽灵层三页与 DemoPage 已删；公开门面为 `/intro` 产品介绍页）
+- 管理控制台 **19 页**（邀请码注册 + 角色管理 + 角色模板 + LLM 配置 + 账号自服务 + 数据看板等；SP-9 幽灵层三页与 DemoPage 已删；公开门面为 `/intro` 产品介绍页）
 - 角色系统：SillyTavern V2/V3 PNG 卡兼容 + 自有角色卡体系（config/characters **41 张现役卡**唯一真源——25 既有 + 16 文学导入《我的26岁女房客》《从你的全世界路过》《云边有个小卖部》《某某》《天堂旅行团》，每卡配全量字段与可检索知识语料，💊熟悉度/心跳值/手写板等玩法均支持）
-- **220 个 API 业务端点 / 186 条唯一路径 / 19 include_router + setup_shisi**（2026-09-21 内省实测；见 CODE_GRAPH §4.2）
+- **229 个 API 业务端点 / 195 条唯一路径 / 19 include_router + setup_shisi**（2026-09-29 内省实测；见 CODE_GRAPH §1.1/§4.2）
 - **认证：JWT 优先**（09-19 裁决：用户侧 API 仅 JWT，前端不含 API Key 明文；X-API-Key 留给机器/脚本/E2E）
 
 **能力栈**

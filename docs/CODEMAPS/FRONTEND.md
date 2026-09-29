@@ -1,6 +1,6 @@
 # 前端地图
 
-> **✅ 2026-09-20 增量刷新**：在 09-19 全量刷新基线上补齐通道隔离 UI、材质体系、五 tab 收敛与 constants/ 目录。权威数字以 `CODE_GRAPH.md` v3.8.6 为准。
+> **✅ 2026-09-29 全仓历遍刷新**：页面 17→**19**（+TemplatesPage `/templates`、SettingsAccount `/settings/account`）、API 模块 13→**15**（+selfservice/templates）、vitest 98/16→**177/30**。权威数字以 `CODE_GRAPH.md` **v3.8.27** 为准。更早增量（09-19/09-20 通道隔离 UI、材质体系、五 tab 收敛）见 git 历史。
 > 功能级清单（页-功能点编号）见 `docs/FUNCTION_INVENTORY.md`。
 
 **最近更新:** 2026-09-20
@@ -38,7 +38,7 @@ frontend/src/
 │                                SPEAKING_STYLE_LABELS/EMOTION_COLORS/AFFINITY_STAGES，
 │                                09-19「前端写死数据审计」批次新建）
 │
-├── pages/                ← 页面组件 (17 个 .tsx)
+├── pages/                ← 页面组件 (19 个 .tsx)
 │   ├── IntroPage.tsx          ← 产品介绍页 /intro（SP-11，公开静态门面）
 │   ├── LoginPage.tsx          ← 登录页
 │   ├── PsychProfilePage.tsx   ← 心理画像 /psych（09-18 起包 AuthGuard 需登录）
@@ -116,14 +116,14 @@ frontend/src/
 │   ├── api.ts                  ← API 类型
 │   └── framework.ts            ← 框架类型
 │
-└── tests/                ← 前端测试（vitest 98 用例 / 16 文件，2026-09-20 实测全绿）
+└── tests/                ← 前端测试（vitest 177 用例 / 30 文件，2026-09-28 实测全绿）
     ├── components/
     └── hooks/
 ```
 
 ---
 
-## 页面路由表（App.tsx 实测，2026-09-19）
+## 页面路由表（App.tsx 实测，2026-09-29）
 
 | 页面 | 路径 | 认证 | API 源 |
 |------|------|------|--------|
@@ -133,6 +133,7 @@ frontend/src/
 | RootRedirect | / | 无 | 登录→/wechat，未登录→/intro |
 | WeChatPage | /wechat | 需要 | wechat/status |
 | RolesPage | /roles | 需要 | characters |
+| **TemplatesPage** | /templates | 需要 | templates（角色模板浏览/克隆，W12+W17） |
 | CreateRole | /roles/create | 需要 | clone + characterBuilderStore |
 | RoleSettings | /roles/:roleId/settings[/:tab] | 需要 | useUnifiedCharacter |
 | StatusCenter | /roles/:roleId/status | 需要 | dashboardStats |
@@ -142,6 +143,7 @@ frontend/src/
 | SettingsVoice | /settings/voice | 需要 | mimo/* |
 | ToolsDashboard | /settings/tools | 需要 | 工具 API |
 | SettingsSecurity | /settings/security | 需要 | safety/* |
+| **SettingsAccount** | /settings/account | 需要 | selfservice（同意状态/数据导出/注销，W17） |
 | SettingsLogs | /settings/logs | 需要 | logs |
 | AdminUsersPage | /admin/users | Admin | admin API |
 | AdminProvidersPage | /admin/providers | Admin | llmProviders API |
@@ -237,7 +239,7 @@ components/
 axios.create(baseURL: '/api')
   → 请求拦截器: 添加 X-API-Key + JWT Bearer Token
   → 响应拦截器: 错误统一处理 + token 刷新逻辑
-  → 模块 API: 13 个 API 模块 (auth/admin/characters/clone/emotion/normalize 等)
+  → 模块 API: 15 个 API 模块 (auth/admin/characters/clone/emotion/normalize/selfservice/templates 等)
 ```
 
 **重要约束:**

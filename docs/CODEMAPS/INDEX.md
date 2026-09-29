@@ -1,10 +1,10 @@
 # 代码地图索引
 
-> **✅ 2026-09-28 历遍修复批刷新**：三端一致 **`ffa6d68`**；GitHub CI 三轮全绿（`36333194107`/`36333947881`/`36334364744`）；测试口径 **2567 收集 / 2566 通过 / 1 跳过 / 0 失败**（41 卡；全量口径必含 `tests/core/`）+ 前端 **135**（徽章 **2701**）；端点 **229 APIRoute / 195 唯一路径 / 19 include_router**（`len(app.routes)`=233）；活跃 ADR **12** 不变；.py 总量 **477**；服务器 Linux 复跑 W3 域 54/54（本机 WAL flaky 归因闭环）。权威数字以 `CODE_GRAPH.md` **v3.8.25** 为准。09-27 刷新留档：⚠️ 当时 CI 红（backend 1 + E2E 4，已由 `dceb331` 根治）；测试口径 2565/2564/1/0 + 前端 135（徽章 2699）。更早刷新留档（09-20/21 全仓历遍与战役终局、ADR 11→12 补 ADR-0015）见 git 历史与 `docs/history/INDEX.md`。
+> **✅ 2026-09-29 全仓历遍刷新**：三端一致 **`2ebfc61`**（2026-09-28 服务器同步批，GitHub CI run `36402213711` 全绿）；测试口径 **2652 收集 / 2651 通过 / 1 跳过 / 0 失败**（41 卡零净增；全量口径必含 `tests/core/`）+ 前端 **177**（30 文件，徽章 **2828**）；端点 **229 APIRoute / 195 唯一路径 / 19 include_router**（`len(app.routes)`=233）；活跃 ADR **12** 不变；.py 总量 **483**。权威数字以 `CODE_GRAPH.md` **v3.8.27** 为准。更早刷新（09-27/09-28）见 git 历史与 `docs/history/INDEX.md`。
 
-**最近更新:** 2026-09-28
+**最近更新:** 2026-09-29
 **项目版本:** 3.1.0
-**项目规模:** **477** 个 Python 文件（模块 283 + 根级 2 + `scripts/` 18 + `tests/` 171 + `deploy/` 3；**2026-09-27 find 实测**；**不含** `frontend/` 与内嵌 `大创赛报名以及后期发展/`） + **~108** TS/TSX 文件 | 当前分支: `main`
+**项目规模:** **483** 个 Python 文件（模块 284 + 根级 2 + `scripts/` 18 + `tests/` 176 + `deploy/` 3；**2026-09-29 find 实测**；**不含** `frontend/` 与内嵌 `大创赛报名以及后期发展/`） + **124** TS/TSX 文件（frontend/src） | 当前分支: `main`
 **架构框架:** FastAPI (后端) + React/Vite (前端) + SQLite/ChromaDB (数据)
 
 ---
@@ -40,7 +40,7 @@ unique-you/
 #                           #   health_routes/main_routes/qrcode_store/websocket_server/state/...)
 ├── shisi/                  # DDD 核心域 (116 py 文件，v2 死模块删除后口径)
 ├── my_character/           # 情感引擎 (21 py 文件)
-├── frontend/               # React 前端 SPA (17 pages / 13 api 模块 / 3 store)
+├── frontend/               # React 前端 SPA (19 pages / 15 api 模块 / 3 store)
 ├── orchestrator/           # 编排包 (9 文件：主类+init/stream mixin+session_locks+voice_detector
 │                           #   +console_chat+tool_gate+context_budget)
 ├── persona_extractor/      # 人格提取 (13 文件)
@@ -62,7 +62,7 @@ unique-you/
 ├── wechat_direct/          # 微信直连 (5 文件：每人独立通道 registry/paths/peer + connector)
 ├── plugins/                # 插件系统 (2 文件)
 ├── config/                 # YAML/JSON 配置 + config/characters/ 角色卡库（gitignore；现役 41 张）
-├── tests/                  # 测试 (1611 Python 通过 + 4 跳过 / 98 前端)
+├── tests/                  # 测试 (2651 Python 通过 + 1 跳过 / 177 前端)
 └── docs/                   # 文档
     ├── CODEMAPS/           # ← 本目录
     ├── adr/                # 架构决策记录 (12 篇)
@@ -73,13 +73,13 @@ unique-you/
 
 > `weclone_adapter/` 已于 08-28 删除（克隆收敛为本地提取+JSON 上传，DECISION_LEDGER 08-28 行）。
 
-### 关键指标（2026-09-21 实测，批6b 项10 死码清除后）
+### 关键指标（2026-09-29 实测）
 
 | 指标 | 值 |
 |------|-----|
-| API 端点 | **220 业务端点 / 186 唯一路径**（19 include_router + setup_shisi，`create_api_app` 内省实扫；⚠️ `len(app.routes)=224` 含 4 条框架路由；较 09-20 口径 +5 = agent-plane 路由组） |
-| 前端页面 | 17 页面文件（全部挂载；幽灵层三页+DemoPage 已删） |
-| 测试用例 | **1709 = 1611 Python 通过（4 跳过）+ 98 前端通过**（2026-09-21 全量审查修复战役终局实跑全绿，收集 1615；⚠️ 随 `config/characters/` 卡数浮动 = 2 × 卡数 + 7，现役 41 张） |
+| API 端点 | **229 业务端点 / 195 唯一路径**（111 GET / 82 POST / 16 PUT / 20 DELETE；19 include_router + setup_shisi，`create_api_app` 内省实扫；⚠️ `len(app.routes)=233` 含 4 条框架路由） |
+| 前端页面 | 19 页面文件（全部挂载；2026-09-28 新增 TemplatesPage / SettingsAccount） |
+| 测试用例 | **2828 = 2651 Python 通过（1 跳过）+ 177 前端通过**（2026-09-28 服务器同步批全量五分块实跑全绿，收集 2652；⚠️ 随 `config/characters/` 卡数浮动 = 2 × 卡数 + 7，现役 41 张） |
 | 活跃 ADR | **12**（0001–0007 + 0011–**0015**；0008–0010 空缺未使用） |
 | Fitness Functions | 17 (12 CI + 5 手动) |
 | 总线因子 | 1 (唯一开发者: 默默) |

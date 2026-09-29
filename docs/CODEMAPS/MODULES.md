@@ -1,12 +1,9 @@
 # 后端业务模块地图
 
-> **✅ 2026-09-27 全仓历遍增量刷新**：W1–W12 批次后全量 find 实测——`api` 45→**48**（+`lifecycle.py`、`consent.py` 扩展、`routers/auth_routes.py`、`routers/character_template_routes.py` 等）、**routers 22→25**、`utils` 16→**19**（+`url_guard`/`tool_state`/`inbound_context`/`deletion_guard`）、`tools` 10→**13**（+`url_guard.py`/`tool_state.py`）、`voice` 6→**8**（+`voice_catalog.py` 等）、`proactive` 6→**10**（+`runtime_plane.py`/`runtime_assembly.py`；递归 find 口径）、`shisi` **116** 不变（+`knowledge/source_store.py` 增量在内）、`llm_provider` 5→**4**（实测）；`.py` 总量 389→**477**（模块 283 + 根级 2 + `scripts/` 18 + `tests/` 171 + `deploy/` 3；旧行「总文件 406」与分项 389 自相矛盾，一并勘误）；端点 **229/195**。权威口径以 `CODE_GRAPH.md` **v3.8.24** 为准。
-> **✅ 2026-09-20 全仓历遍刷新**：`orchestrator` 7→**9** 文件（+`tool_gate.py` / `context_budget.py`，09-20 新模块，此前两版刷新均漏登）、`proactive` 5→**6**（+`reminder_delivery.py`，09-20）、`shisi` 115→**116**、新增 **`utils/`** 行（此前整节缺失）；`optimized_orchestrator.py` 1050→**1270 行**。权威口径以 `CODE_GRAPH.md` **v3.8.16** 为准。
-> **✅ 2026-09-20 增量刷新**：在 09-19 全量刷新基线上补齐 09-19 晚通道隔离批次（wechat_direct 2→5 文件、api 44→45、routers 21→22）。
-> **⚠️ 09-17 死代码清洗留痕**：`shisi/wechat/command_handler.py`/`command_parser.py`（微信指令系统）已删除，正文已同步。
+> **✅ 2026-09-29 全仓历遍刷新**：全量 find 实测——`.py` 总量 477→**483**（模块 284 + 根级 2 + `scripts/` 18 + `tests/` 176 + `deploy/` 3）；各包计数无变动（api 48 / routers 25 / utils 19 / tools 13 / voice 8 / proactive 10 / shisi 116 / llm_provider 4 / orchestrator 9）；`optimized_orchestrator.py` 1270→**1760 行**、`_init_mixin.py` **11 阶段**。端点 **229/195**（2026-09-29 内省复测）。权威口径以 `CODE_GRAPH.md` **v3.8.27** 为准。更早增量（09-27/09-20）见 git 历史。
 
-**最近更新:** 2026-09-27
-**Python 版本:** ≥3.10 | **总文件:** **477** 个 .py（2026-09-27 find 实测：模块 283 + 根级 2 + `scripts/` 18 + `tests/` 171 + `deploy/` 3；**不含** `frontend/` 与工作区内嵌的 `大创赛报名以及后期发展/` 目录）
+**最近更新:** 2026-09-29
+**Python 版本:** ≥3.10 | **总文件:** **483** 个 .py（2026-09-29 find 实测：模块 284 + 根级 2 + `scripts/` 18 + `tests/` 176 + `deploy/` 3；**不含** `frontend/` 与工作区内嵌的 `大创赛报名以及后期发展/` 目录）
 
 ---
 
@@ -22,7 +19,6 @@
 | **observability** | 8 | `observability/` | 可观测性（日志/指标/健康检查/sentry/优雅停机；tracing 于 v1.35 删——span/start_trace 全仓零调用） | ✅ 活跃 |
 | **tools** | 13 | `tools/` | 工具系统（12 个内置工具 + `url_guard`/`tool_state` 基础设施，W6） | ✅ 活跃 |
 | **orchestrator** | 9 | `orchestrator/` | 编排器（主类/init/stream mixin/会话锁/语音检测/console_chat/**tool_gate**/**context_budget**） | ✅ 活跃 |
-| ~~character_card~~ | 0 | ~~`character_card/`~~ | 角色卡解析/验证/构建/集成 —— **整包 6 文件已于批6b 项10 删除**（`CharacterCardAdapter` 零读者挂线，角色卡运行真源为 `persona_service._load_character_card` 直读 + `shisi/character/` PNG 子系统） | ❌ 已删 |
 | **voice** | 8 | `voice/` | 语音合成（MiMo 唯一引擎，08-28 收敛；+`voice_catalog.py` 音色持久化，W7） | ✅ 活跃 |
 | **llm_provider** | 4 | `llm_provider/` | LLM 多供应商网关（09-27 实测 4 文件） | ✅ 活跃 |
 | **security** | 5 | `security/` | 安全过滤与加密 | ✅ 活跃 |
@@ -85,7 +81,7 @@
 - `routers/` 22 个路由模块: `admin_routes`, `auth_routes`, `character_routes`, `chat_routes`, `clone_routes`, `emotion_routes`, `invite_routes`, `knowledge_routes`, `llm_providers_routes`, `memory_routes`, `mimo_voice_routes`, `misc_routes`, `persona_card_routes`, `personality_routes`, `safety_routes`, `storyline_routes`, `tools_routes`, `training_routes`, `users_routes`, `voice_routes`, `wechat_channel_routes`（每人独立通道，09-19）, `wechat_routes`
 - `state/` 3 个状态模块: `safety_log`, `tool_history`, `training_state`
 
-**实际挂载:** 19 个 `include_router` 调用 + `setup_shisi(app)` 装配，共 **220 业务端点 / 186 唯一路径**（2026-09-21 `create_api_app` 内省实扫；`len(app.routes)=224` 含 4 条框架路由；较 09-20 口径 +5 = agent-plane 路由组）
+**实际挂载:** 19 个 `include_router` 调用 + `setup_shisi(app)` 装配，共 **229 业务端点 / 195 唯一路径**（2026-09-29 `create_api_app` 内省实扫；`len(app.routes)=233` 含 4 条框架路由）
 **依赖:** shisi, security, llm_provider, database
 
 ---
@@ -205,8 +201,8 @@
 **职责:** 聊天流水线编排，组件初始化阶段化，SSE 流式输出，会话锁管理，语音检测，工具意图分级与上下文预算
 
 **关键文件:**
-- `optimized_orchestrator.py` — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / 上下文准备 / `process_message` / 健康检查（**1270 行**）
-- `_init_mixin.py` — `_InitPhasesMixin`：`initialize` 拆分为 10 个 `_init_*` 阶段
+- `optimized_orchestrator.py` — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / 上下文准备 / `process_message` / 健康检查（**1760 行**）
+- `_init_mixin.py` — `_InitPhasesMixin`：`initialize` 拆分为 11 个 `_init_*` 阶段
 - `_stream_mixin.py` — `_StreamPipelineMixin`：`process_message_stream` SSE 真流式/伪流式降级
 - `session_locks.py` — 会话锁管理（`SessionLockManager`）
 - `voice_detector.py` — 语音活动检测
@@ -247,12 +243,6 @@
 
 **依赖:** redis (外部)
 **被依赖:** llm_provider, orchestrator
-
----
-
-## ~~character_card/~~ — 已删除（批6b 项10）
-
-> 原 6 文件包（`__init__/integration/models/parser/prompt_builder/validator`）经复核证为**零读者死码**：`CharacterCardAdapter` 除 `orchestrator/_init_mixin.py` 挂线自身写入 `components["character_card"]/["card_mode"]` 外全仓无消费点；角色卡运行真源是 `persona_service._load_character_card` 直接读 + `shisi/character/`（SillyTavern V2/V3 + PNG tEXt）子系统。整包已随批6b 项10 删除，详见 `docs/DELETION_LOG.md`。防复活钉：`tests/test_p2_batch6_persona.py::test_character_card_package_removed`。
 
 ---
 

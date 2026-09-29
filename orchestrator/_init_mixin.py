@@ -1,6 +1,6 @@
 """OptimizedOrchestrator 初始化阶段 — Mixin。
 
-将原 ``initialize`` 方法（327 行）按自然注释块边界拆分为 9 个 _init_* 阶段，
+将原 ``initialize`` 方法（327 行）按自然注释块边界拆分为 11 个 _init_* 阶段，
 便于阅读、定位与局部失败排查。所有阶段通过 ``self.components`` 共享状态，
 与原实现语义完全一致；不引入新的抽象层或兼容垫片。
 

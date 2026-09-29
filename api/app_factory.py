@@ -2,11 +2,11 @@
 REST API 应用工厂
 
 仅负责创建 FastAPI 实例、配置中间件、挂载子路由。
-业务路由按域拆分挂载（2026-09-21 内省实测：**220 个 APIRoute / 186 条唯一路径**，
-其中 105 GET / 79 POST / 16 PUT / 20 DELETE；`len(app.routes)=224` 另含 4 条框架路由
+业务路由按域拆分挂载（2026-09-29 内省实测：**229 个 APIRoute / 195 条唯一路径**，
+其中 111 GET / 82 POST / 16 PUT / 20 DELETE；`len(app.routes)=233` 另含 4 条框架路由
 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`）。详细端点分布见 CODE_GRAPH.md §4.2。
 
-⚠️ 上述为 **2026-09-21 复测值**（09-20 口径为 215 / 181，其后 agent-plane 路由组 +5 端点）。改路由后请同步本节与 CODE_GRAPH.md §4.2。
+改路由后请同步本节与 CODE_GRAPH.md §4.2。
 """
 
 from __future__ import annotations

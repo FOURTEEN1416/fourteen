@@ -221,4 +221,4 @@
 |---|------|---------|---------|
 | — | **三层记忆的「情景层」在生产中是全局未隔离的**（本轮审计新发现） | 架构审计 | ⚠️ `shisi/memory/legacy/episodic_memory.py` 只写单一 ChromaDB collection（`episodic_memory`），`store_episode` 的 meta **不含 character_id / user_id**，`get_recent_episodes()` 亦无过滤；`VectorMemory` 是按路径缓存的**单例**。故本轮可视化**刻意不新暴露该层数据**（改用已隔离的 `daily_summaries` 端点替代），避免引入 L3 串扰。**该项需专项评估后再动** |
 
-> 本清单由代码读出（App.tsx 路由 × 17 页面组件 × api/*.ts 消费；2026-09-20 全仓遍历核对），历史意图对照 `docs/history/`。条目变更随代码同步。
+> 本清单由代码读出（App.tsx 路由 × 19 页面组件 × api/*.ts 15 模块消费；2026-09-29 全仓历遍核对），历史意图对照 `docs/history/`。条目变更随代码同步。
