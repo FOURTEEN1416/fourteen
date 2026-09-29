@@ -7,6 +7,17 @@
 
 ---
 
+## 2026-09-29（跨午夜至 09-30 服务器时段） — 主控 · 全仓历遍批：真源文档对齐代码实况 + 注释勘误 + 备注式化石清除（默默 /goal 指令）
+
+- **指令链**：默默 /goal「全仓历遍，更新代码描述文档，更新相关记忆文档，将文档描述对齐代码现状，全仓所有代码进行扫描，发现问题可以直接修，顺便检查那种代码注释和代码不对齐的情况也需要进行修改，还有备注式删除也需要进行修改」——实况扫描、直接修、注释勘误、备注式删除四项全部授权。
+- **实况扫描（内省/find/glob 实测，41 卡在位）**：端点 **229 APIRoute / 195 唯一路径**（`len(app.routes)`=233，111 GET / 82 POST / 16 PUT / 20 DELETE）与 09-28 口径一致；测试收集 **2652**（174 文件）；前端页面 **19**（09-28 新增 TemplatesPage/SettingsAccount，文档仍写 17）、前端 API 模块 **15**（+selfservice/templates，文档写 13）；`main.py` 534 行（文档写 438）、`optimized_orchestrator.py` 1760 行（写 1270）、`_init_mixin.py` 565 行 **11 个 `_init_*`**（写 438/9）；`tools/builtin` 9 文件（写 8）；`data/users.db` 9 表、`data/sqlite.db` **27 张**（非 FTS 口径；文档写 26 且列有五张已不存在的死表）、`data/runtime_plane.db` 8 表；ruff 0。
+- **注释与代码不对齐修复（4 文件 5 处，零逻辑变更）**：① `api/app_factory.py` docstring 端点数 220/186（09-21）→ **229/195/233**（09-29 实测）；② `orchestrator/_init_mixin.py` docstring「拆分为 9 个 _init_* 阶段」→ **11 个**；③ `orchestrator/optimized_orchestrator.py` docstring「initialize 直接调用 10 个/共 13 个阶段方法」→ **8 个/共 11 个**（实测 8 直接 + `_init_memory_and_rag` 级联 3）；④⑤ `tests/test_memory_pipeline.py`/`test_memory.py` 头部「TODO: shisi 后等效迁移」符号迁移表化石（声称「保留原 import 等待迁移」，实际正文早已全部 `from shisi.memory.legacy...` 直导、109/109 绿）→ 重写为与代码一致的说明。另全量核对代码内 11 处「已删除/已迁移」声称——全部属实，零化石；生产代码零注释掉死代码块；`app_factory` 挂载块「8 子路由 83 端点」逐项计数复核仍精确（16/11/10/7/13/6/12/8）。
+- **备注式删除清除（文档侧）**：`docs/CODEMAPS/DATABASE.md` `~~人设卡模块~~` 整删除线段删除（记录在 DELETION_LOG）；`MODULES.md` 模块清单表 `~~character_card~~` 行与 `## ~~character_card/~~` 整节删除；活跃文档删除线自此仅剩 CODE_GRAPH 已解决风险表/删除裁决表两处历史留痕表。
+- **文档对齐（14 件）**：README（徽章 2825→**2828**、口径段三端一致 `ffa6d68`→**`2ebfc61`**、树 api 15/页面 19/tests 2651+177、api 229 端点行）；AGENTS（§0 19 页面、**§4.3 十三条过期口径注记堆叠（二次~二十七次）清除**只留二十八次+指针、分块跑法示例数字刷新 2652、版本头 **v1.39.7**）；CODE_GRAPH **v3.8.27**（版本头历史链堆叠修剪为当前行、§1.1 全表重写、§4.1/§4.2 行数与指针 `:93`/`:613`/`:246`、§4.9 页面 19+API 15+vitest 177/30、版本表新增 v3.8.27 行并闭合 v3.8.26 部署状态）；CODEMAPS 六件（MODULES 483 文件/1760 行/11 阶段、INDEX 483/124 TS/2828/229 端点、ARCHITECTURE 19 pages/15 modules/orchestrator 行数五处、DATABASE 9 表+27 张全清单重写+五死表注记、BACKEND **模块级端点表按 handler 归属全重排**（35 模块合计 229 精确）+routers 树 22→24、FRONTEND 19 页/15 模块/177 vitest+路由表补 Templates/Account 两行）；VISION（19 页/229 端点）；FUNCTION_INVENTORY（头注 19 页面组件×15 模块）；docs/README（CODE_GRAPH 指针 v3.8.17→v3.8.27）。
+- **验证**：ruff 全仓 0；受影响面 `test_memory*`+`test_api_routes`+`test_w18_traversal_fixes` **130/130** 绿；**全量五分块 2652 收集 / 2651 通过 / 1 跳过 / 0 失败**（534+1 / 556 / 565 / 485 / 511 与 09-28 逐块精确吻合，41 卡零净增）；vitest **177/177**（30 文件）。
+- **部署（A 档正典）**：`7891534` push origin → 服务器 `git fetch + merge --ff-only`（检出 `2ebfc61d`→`78915340`，唯一未跟踪项 `?? backups/` 不挡）→ `deploy/remote_deploy.sh`（pip -e + npm ci/build 1.0s + systemctl restart + nginx reload）→ 核验：health ok / ready 200、unit active、`--workers 4`、新日志 0 Traceback/0 ERROR、改动五文件 `git hash-object` **5/5 三端一致**。
+- **提交**：`7891534`（代码注释 5 文件 + 文档 12 件，白名单精确 add，预提交门禁 ruff/守卫/CI 闸全过）；本条 LOG + HANDOFF 快照刷新随后续文档提交入库。
+
 ## 2026-09-29 — 主控 · 文档对齐勘误 + 过期文档彻底清除批（纯文档，默默三段指令）
 
 - **指令链**：默默先指出「查到的待办信息已过期，查真实状态并更新文档」；见首轮仍用删除线+注记保留后，令「不要备注式的清除，过期的文档该删除就删除，污染源该清除就清除」；见仍有备注式残留后再裁决定规——**「唯一能允许反复记录的只追加不覆盖的只有 LOG.md，其余该清除的清除、该改的改」**。

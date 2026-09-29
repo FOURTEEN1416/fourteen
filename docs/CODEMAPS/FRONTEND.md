@@ -116,7 +116,7 @@ frontend/src/
 │   ├── api.ts                  ← API 类型
 │   └── framework.ts            ← 框架类型
 │
-└── tests/                ← 前端测试（vitest 177 用例 / 30 文件，2026-09-28 实测全绿）
+└── tests/                ← 前端测试（vitest 177 用例 / 30 文件，2026-09-29 实测全绿）
     ├── components/
     └── hooks/
 ```

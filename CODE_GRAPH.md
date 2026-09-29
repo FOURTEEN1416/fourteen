@@ -90,9 +90,9 @@
 | 前端页面 | **19 个** | Glob `frontend/src/pages/*.tsx`（09-28 新增 TemplatesPage / SettingsAccount；另有 `StorylinePage` 为 App.tsx 内联包装组件） |
 | 前端 API 模块 | **15 个** | Glob `frontend/src/api/*.ts`（09-27/28 新增 `selfservice.ts`（W9）与 `templates.ts`（W12），原 13） |
 | 前端 Zustand store | **3 个** | LS `frontend/src/store/`（authStore / characterBuilderStore / errorStore） |
-| Python 测试用例 | **2651 passed + 1 skipped**（收集 **2652**） | 2026-09-28 服务器同步批全量五分块实跑（**534+1 + 556 + 565 + 485 + 511** 精确吻合，174 测试文件，0 失败；`2ebfc61` 基线、41 卡零净增）。本批净增 3 例 = `tests/test_shisi_migrations.py::TestConcurrentRunMigrations`（迁移并发竞态 P1 根治批，红测先行）。⚠️ **基线随 `config/characters/` 卡数浮动**：该目录被 gitignore（不入公开仓），`test_persona_injection` 的用例数 = **2 × 卡数 + 7**。**引用基线必须同时声明卡数**（本次 41 张在位） |
+| Python 测试用例 | **2651 passed + 1 skipped**（收集 **2652**） | 2026-09-29 全仓历遍批全量五分块实跑复验（**534+1 + 556 + 565 + 485 + 511** 精确吻合，174 测试文件，0 失败；09-28 服务器同步批 `2ebfc61` 基线逐块重现、41 卡零净增）。净增 3 例 = `tests/test_shisi_migrations.py::TestConcurrentRunMigrations`（迁移并发竞态 P1 根治批，红测先行）。⚠️ **基线随 `config/characters/` 卡数浮动**：该目录被 gitignore（不入公开仓），`test_persona_injection` 的用例数 = **2 × 卡数 + 7**。**引用基线必须同时声明卡数**（本次 41 张在位） |
 | 现役角色卡 | **41 张**（`config/characters/*.json`，2026-09-20 从服务器**逐字节恢复**） | 41/41 文件 `sha256sum` 与服务器 `/opt/ai-girlfriend/config/characters/` **完全一致**；全部 JSON 可解析。目录被 `.gitignore:117` 忽略 → **卡数不随 git 复现**，本行是「本检出当前状态」而非版本事实 |
-| 前端测试用例 | **177 个全部通过 / 30 文件** | 2026-09-28 `npm test -- --run`（vitest）+ `tsc --noEmit` 0 错误 |
+| 前端测试用例 | **177 个全部通过 / 30 文件** | 2026-09-29 `npm test -- --run`（vitest）复验 + `tsc --noEmit` 0 错误 |
 | 测试用例合计 | **2828 个**（2651 Python 通过 + 177 前端通过） | 2026-09-28 服务器同步批口径（Python 侧跳过 1 不计入通过数） |
 | tools/builtin 工具文件 | 9 个（含 __init__.py） | Glob（2026-09-29 实测） |
 
@@ -546,7 +546,7 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
   - admin, auth, characters, client, clone, emotion, llmProviders, mimo, normalize, queryClient, selfservice, system, templates, training, wechat
 - 3 个 Zustand store（authStore, errorStore, characterBuilderStore）
 - React Query hooks（5 文件）
-- 177 个 Vitest 测试用例（30 文件，全部通过 2026-09-28）
+- 177 个 Vitest 测试用例（30 文件，全部通过 2026-09-29 复验）
 - Playwright E2E 测试配置
 
 **页面说明**：
