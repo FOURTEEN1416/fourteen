@@ -1,5 +1,33 @@
 # Code Deletion Log
 
+## [2026-09-29] 文档治理批二（默默裁决「只追加不覆盖的特权仅归 LOG.md，其余该删就删、该改就改」）：备注式化石全面清除
+
+- **裁决背景**：批一的删除线+注记保留方式被默默否决——除 `LOG.md` 外任何文档不得堆叠历史注记/删除线/多层快照。
+- **P1_BACKLOG 重写（59→22 行）**：删 10 行 `Previous` 历史链、删「已解决（2026-08-24 实测验证）」13 行表格、删 OBS-1/P1-10/FE-0001/MEM-USER-1/W-D-B3~B6 五条删除线已解决条目；只留 9 条真实未决项（含从已删任务包文件抢救的 V3 表情 / V4 声学情绪真空缺事实）。
+- **HANDOFF_REPORT 重写（283→33 行）**：删五层「当前实施快照」堆叠（09-28×3 / 09-26）、09-20/09-19 两条接手批注、旧窗口 §0–§9 交接正文（埋点观察/前端窗口分工/线上 dist 落后等 09-19 时点内容）；只留单层当前快照 + 现行纪律 7 条 + 指路。
+- **BOARD 追加区清空（895→46 行）**：09-14~09-28 全部历史条目（约 560 行，含 W13–W17 收口登记、R3 四窗、W5abc/audit/ci-fix、09-15 收编总账、09-14 立项等）删除；头部规则改写（「不要手工重排历史条目」→「本板只载当前状态，批次历史唯一留痕处=LOG.md」）；阻塞表已关闭的 B1/B2/B3 行删。
+- **AGENTS.md 版本头压缩（18 层→1 行）**：第 5–21 行历史版本堆叠（v1.39.5~v1.11，每行数百字含「上一批次」连环嵌套）删除；v1.39.6 长行精简为单行摘要 + 指向 LOG.md。
+- **FUNCTION_INVENTORY**：删 09-27 旧时效注记删除线整段；「已知差距汇总」表 GAP-1~5 五行已结案条目删除（只留情景层未隔离观察项）。
+- **留痕说明**：以上全部内容在 git 历史（本文件提交前的 BOARD.md=182KB 等）永久可查；批次历史的现行有效载体 = `LOG.md`。
+- **验证**：活跃文档（docs/** + 根 *.md）`~~` 删除线扫描清零；「 Previous 」链、「当前实施快照（…优先于下方」堆叠模式清零。
+
+## [2026-09-29] 文档对齐勘误批：过期状态文档删除 + 历史交接书归档（默默令「过期的文档该删除就删除，污染源该清除就清除」）
+
+- **背景**：`BOARD.md` 登记表与任务包文件停留在 09-14 切分状态，而 W1/W2/W3/W4 四窗口 09-15 已全部闭环、D10–D12 已 09-28 实施完毕——过期状态文档被证实误导待办判断（本窗即因其误报「论文线待开工」）。用户令不留备注式删除线，物理清除。
+- **删除（5 件，状态类过期文档）**：
+  - `docs/board/TASK_PACKAGES.md`——09-14 四窗口切分（P/C/V/T），09-15 全部执行并收编闭环（终态见 BOARD 追加区 09-15 收编总账）；
+  - `docs/board/TASK_PACKAGE_Q_包ABC全面改造.md`——状态栏仍写「待开工」，实际包 Q 已 09-20 收编 main（BOARD 追加区同日条）；
+  - `docs/board/TASK_PACKAGE_W12_角色模板面.md`——阶段1（W12 窗）+ 阶段2（W16 窗）均已收编（`visible_ids` 亦已 09-28 填实生效）；
+  - `docs/board/W3_HANDOFF_WIRING.md`——热点知识链接线契约，其唯一硬缺口（scheduler 注册 `hot_topics_collect`）已 09-22 落地 `f2c51ba`（BOARD 登记条「挂线完成」）；
+  - `docs/stages/SPRINT_2026-09.md`——`plan 待确认` 化石：阶段（复赛冲刺 09-16 截止）早已执行完；§7 写「ASR/表情识别缺」而 ASR/图片通道实已接线（N-ASR-1/N-IMG-1）；§12 Q1–Q6 全部已解决/撤回（Q5 已定个人、Q6 已撤回）；§13「下一步」所列事项全部完成。`docs/stages/` 随之清空移除。
+- **归档（6 件，git mv → `docs/history/`，退出活跃文档区）**：
+  - `HANDOFF_2026-09-15.md`、`HANDOFF_2026-09-20_包ABC全面改造.md`、`HANDOFF_2026-09-21_AX独立评审窗.md`、`HANDOFF_2026-09-21_智能体转型深研与架构.md`、`HANDOFF_2026-09-22_六域二次根治五块收官.md`、`NEW_WINDOW_PROMPT_2026-09-22.md`——均为已执行完毕的交接书/开窗提示词，当前状态单一真源为 `docs/HANDOFF_REPORT.md`。
+- **随批清理（污染引用）**：
+  - `BOARD.md` 当前窗口登记表：15 行已完成/已卸窗历史行移除（AX/AX-R/selftalk/W5-abc/audit/ci-fix/R3-W1~W4/W13–W17/W2软著/W3多模态/W4验证），只留主检出 + W1 论文/CS 实证线两行活跃窗口；头部「再读 TASK_PACKAGES.md」改指 `docs/HANDOFF_REPORT.md`；阻塞登记表 SPRINT §12 行清理（六项已全解决）；
+  - `docs/README.md`：删 stages/ 与 board/TASK_PACKAGES.md 两行入口，history/ 描述补新归档件；
+  - `tests/test_w12_character_templates.py` docstring、`tests/test_hot_topics.py` 注释：两处死链改指清理批说明（纯注释，非运行时依赖）。
+- **验证**：全仓 grep `TASK_PACKAGES|TASK_PACKAGE_Q|TASK_PACKAGE_W12|W3_HANDOFF_WIRING|SPRINT_2026-09|HANDOFF_2026-09|NEW_WINDOW_PROMPT` 残留仅存于 history/ 归档件与 DECISION_LEDGER/BOARD 追加区历史原文（按「历史记录保留原文」纪律不动）；删除件均可经 git 历史追回。
+
 ## [2026-09-28] 历遍批（W18）：memory_ext 整包 + scene_narrator + 死配置层整删
 
 - **删除（模块/文件）**：

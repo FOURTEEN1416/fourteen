@@ -4,9 +4,7 @@
 > **基准声明（08-28 用户裁决）**：功能对齐的意图基准 = `docs/history/` 历史设计文档（05-19 立项核心特性、05-24 多用户设计——记录了产品所有者的原始想法）；实况基准 = 本清单所引代码。实拍截图不作对齐依据。
 > **编号规则**：`<页面KEY>-<序号>`，如 `ROLES-2`。对话时直接报编号 + 期望。
 > **维护纪律**：页面功能变更时同步本清单对应条目；新页面入册必须带代码证据（文件:行）。
-> **时效注记（2026-09-28 历遍批刷新）**：W12 阶段 2 + W16/W17 已落地，前次注记所称「暂无页面条目」缺口闭合——新增 **TPL（角色模板页 `/templates`）** 与 **ACCT（账号与数据 `/settings/account`）** 两节；自服务端点（consent/export/delete）前端已接入；注册分发钩子（register-invite 初始卡）已接通；W17 遗留①（RolesPage 激活后缓存失效键缺账号维度）已根治并锁测试；App.tsx `/templates` 重复路由声明已去重（`AppRoutes.test.ts` 静态守卫防再犯）。仍留注：本清单其余页面行数为 09-20 前口径，逐页行数刷新归 CODE_GRAPH。**引用本清单定位功能前，先对 `CODE_GRAPH.md` 与端点实况**。
->
-> ~~**时效注记（2026-09-27 全仓历遍）**：本清单最后全量刷新为 09-20 前口径；2026-09-27 W1–W12 批次改动大量功能面——角色模板 API 面（`GET /api/character-templates` + `POST /api/character-templates/{id}/clone`，阶段 2 前端挂起故暂无页面条目）、自服务端点（`consent/withdraw|status`、`account/delete`、`account/export(+ /chats)`）、安全面板/角色设置 tab/主动面板前端契约统一、备份恢复/`/api/ready`/`/api/metrics`、跨角色转发派生（`GET /api/characters/{id}/forwards`）等。**引用本清单定位功能前，先对 `CODE_GRAPH.md` v3.8.24 与端点实况**；页面级入册待阶段 2 落地后补。~~
+> **时效注记（2026-09-28 历遍批刷新）**：W12 阶段 2 + W16/W17 已落地——新增 **TPL（角色模板页 `/templates`）** 与 **ACCT（账号与数据 `/settings/account`）** 两节；自服务端点（consent/export/delete）前端已接入；注册分发钩子（register-invite 初始卡）已接通；W17 遗留①（RolesPage 激活后缓存失效键缺账号维度）已根治并锁测试；App.tsx `/templates` 重复路由声明已去重（`AppRoutes.test.ts` 静态守卫防再犯）。仍留注：本清单其余页面行数为 09-20 前口径，逐页行数刷新归 CODE_GRAPH。**引用本清单定位功能前，先对 `CODE_GRAPH.md` 与端点实况**。
 
 ---
 
@@ -221,11 +219,6 @@
 
 | # | 差距 | 历史出处 | 处置建议 |
 |---|------|---------|---------|
-| ~~GAP-1~~ | ~~企业微信通道未实现~~ | 05-19 §1.2 | **❌ 08-28 用户裁决：只做个人微信，其他通道不需要**（Non-Goal） |
-| GAP-2 | ~~记忆三层仅"条目数+最近事实"入 UI，工作记忆/情景时间线无呈现~~ **✅ 结案（2026-09-18）** | 05-19 §1.2 记忆系统 | 已实现：`StatusCenter.MemorySystemCard` 重构为「**记忆体系 · 三层管线**」——① 工作记忆（会话上下文）／② 情景归档（`daily_summaries`，可展开时间线）／③ 长期记忆（向量库事实 + 珍藏）逐层显式呈现，每层标注「是什么/存什么/有多少」。原独立的「角色日记」卡已并入第②层（日记本就是情景记忆的产品化呈现）。**数据全用既有端点，未新增后端接口** |
-| GAP-3 | ~~MESSAGE-1 统计卡「今日触发/最后发送」为占位 `—`（数据未接）~~ **✅ 结案（2026-09-18 核实）——本条系过时记录** | 主动消息可观测 | **无需改动**：`components/admin/RoleSettingsTabs.tsx` MessageTab 本就从 `/api/proactive/history` **真实统计**（`todayCount` 按当日过滤、`lastAt` 取最新一条），`—` 仅在**该角色从未发过主动消息**时作为空态兜底显示，**非占位符** |
 | — | **三层记忆的「情景层」在生产中是全局未隔离的**（本轮审计新发现） | 架构审计 | ⚠️ `shisi/memory/legacy/episodic_memory.py` 只写单一 ChromaDB collection（`episodic_memory`），`store_episode` 的 meta **不含 character_id / user_id**，`get_recent_episodes()` 亦无过滤；`VectorMemory` 是按路径缓存的**单例**。故本轮可视化**刻意不新暴露该层数据**（改用已隔离的 `daily_summaries` 端点替代），避免引入 L3 串扰。**该项需专项评估后再动** |
-| ~~GAP-4~~ | ✅ 结案（09-01）：语音保存接线 + 知识库真实管理区（G-06/G-07 消案） | 09-01 批次 | 已实现 |
-| ~~GAP-5~~ | ✅ 全结案（09-01 晚）：成就落地 + GET /api/emotion/distribution 新端点 + 趋势修复（旧实现读不存在属性恒空，EmotionEngine 补环形历史） | 05-29 差距分析 + 09-01 批次 | 已实现 |
 
 > 本清单由代码读出（App.tsx 路由 × 17 页面组件 × api/*.ts 消费；2026-09-20 全仓遍历核对），历史意图对照 `docs/history/`。条目变更随代码同步。

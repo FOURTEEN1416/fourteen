@@ -23,9 +23,7 @@
 | [HANDOFF_REPORT.md](HANDOFF_REPORT.md) | 接手必读：上一窗口交接了什么、未完成什么（含 08-28 接管批注） | truth（每次接管刷新） |
 | [DELETION_LOG.md](DELETION_LOG.md) | 删除类变更逐条留痕（文件/原因/验证），与 git 历史互补 | truth（追加式） |
 | 根目录 [LOG.md](../LOG.md) | L2 操作日志：每会话一行块（日期/动作/原因/结果），会话收尾必追加 | **truth（追加式，禁删改旧条目）** |
-| [stages/](stages/) | **阶段真源**（每阶段一份，当前 `SPRINT_2026-09.md`）：路由/深度/子阶段/验收/开放问题；`plan→execute→closeout` 门禁 | truth（阶段内唯一） |
-| [board/BOARD.md](board/BOARD.md) | **跨窗口看板**（宪法 §8 载体）：窗口登记 / 追加区 / 阻塞 / 漂移告警 | truth（追加式） |
-| [board/TASK_PACKAGES.md](board/TASK_PACKAGES.md) | **窗口级任务包切分**：各包目标/白名单/验证/并行安全矩阵 | truth（阶段内唯一） |
+| [board/BOARD.md](board/BOARD.md) | **跨窗口看板**（宪法 §8 载体）：当前窗口登记 / 追加区 / 阻塞 / 漂移告警；已完成窗口的登记行已于 09-29 清理批移除，终态见追加区各日条目 | truth（追加式） |
 
 ## 二、分层地图（reference，代码视角分册）
 
@@ -45,7 +43,7 @@
 
 | 位置 | 内容 |
 |------|------|
-| [history/](history/) | 4+ 份历史设计文档（05-19 立项、05-24 多用户设计等）+ INDEX.md 演进索引 |
+| [history/](history/) | 历史设计文档（05-19 立项、05-24 多用户设计等）+ **已执行完毕的历史交接书**（HANDOFF_REPORT-2026-08-28 / -2026-09-14、HANDOFF_2026-09-15 / -09-20 包ABC / -09-21 AX×2 / -09-22 六域、NEW_WINDOW_PROMPT-09-22；09-29 归档批移入）+ INDEX.md 演进索引 |
 
 ## 五、一次性报告（derived，仅供追溯，不再维护）
 
@@ -55,8 +53,7 @@
 | [reports/](reports/) **2026-09-19 三件** | [经历因果升级机制研究](reports/2026-09-19_经历因果升级机制研究.md)（小凌架构→本项目升级机制，P0-P4 路线图）/ [情感真源收敛审查](reports/2026-09-19_情感真源收敛审查.md)（P0 前置审计：情感状态族无持久化闭环 + 幽灵 vital_signs，R1-R6/S1-S6）/ [WrenWen 伴侣架构精读](reports/2026-09-19_WrenWen伴侣架构精读.md)（W1-W28 机制条目+踩坑映射） | derived（零代码改动纯研究；方案均为提案未获批） |
 | [reports/](reports/) **2026-09-20 交接** | [经历因果研究交接与深研任务包](reports/2026-09-20_经历因果研究交接与深研任务包.md)——交接给后续窗口的深化研究任务包：已耕区域勿重复清单 + W-A~W-G 七个可并行工作包（小凌一手素材深掘/公式学术对照/GitHub 补深/P0-P4 方案细化/评测体系/竞品/作者动态追踪）+ 并行安全矩阵与产出规范 | derived（任务包；新窗口认领走 BOARD 追加区） |
 | [reports/](reports/) **2026-09-20 W-A 产出** | [小凌一手素材深掘](reports/2026-09-20_小凌一手素材深掘.md)——W-A 工作包产出（21 作品全量一手素材深掘）：**找到「出生前参数表」实屏**（initial/min/max/plasticity + 「出生前参数设计说明 V0.3」出生前/出生后分工契约）/ **`forget.py` 代码级曝光**（λ_d=0.36·λ_e=0.034·λ_f=0.29 + sigmoid 检索权重，且自陈为**反解拟合非数据标定**）/ **激活值公式 3 种表述**（手稿 5 项 vs 口播 6/7 项）/ 完整发帖时间线与承诺-交付对照（1 条承诺未兑现）/ 素材实况勘误 4 条 / 术语表与 10 条对标增补 / 6 条待裁决建议 | derived（零代码改动纯研究；建议均提案未获批） |
-| [P1_BACKLOG.md](P1_BACKLOG.md) | P1 待办（07 月重写版） | 部分 SP-* 与 DECISION_LEDGER 挂起池重叠，以 DECISION_LEDGER 为准 |
-| ~~FEATURE_MAP.md~~ | 已删除（08-28 用户裁决：严重错误） | 由 FUNCTION_INVENTORY.md 替代 |
+| [P1_BACKLOG.md](P1_BACKLOG.md) | P1 待办（只载真实未决项） | 部分 SP-* 与 DECISION_LEDGER 挂起池重叠，以 DECISION_LEDGER 为准 |
 | READING_REPORT_*.md（14 份，docs 根） | **模块深度档案**：08-26 全库 200+ 文件穷举阅读的结构化记录（端点全景/机制细节/设计模式），含 CODE_GRAPH 未收录的深度内容 | derived·长期有效（08-28 全文复读改判保留；voice/clone 两份含已删模块，作历史档案）。⚠️ 09-15 注记：wechat_clone/voice/memory_context_multimodal 三份的守卫/silk/图片接线细节已被 W3 收编更新，现行口径以 CODE_GRAPH v3.6.0 + FUNCTION_INVENTORY N-IMG-1 为准（三份文件头部已加注记）。⚠️ 09-17 注记：本轮代码变更波及 8 份（my_character/orchestrator/proactive_plugins/api/shisi/llm_provider/wechat_clone/tests_root），各头部已加 09-17 时效注记并指向 CODE_GRAPH **v3.7.0**；未波及 6 份（character_card/memory_context_multimodal/persona_extractor/security_observability/tools_utils_scripts_cache/voice） |
 | [inventory/file-inventory.md](inventory/file-inventory.md) | 05-31 文件清单历史快照（自带 08-26 状态卡：已失效判断已标注） | archive |
 | [inventory/file-inventory.md](inventory/file-inventory.md) | 文件清单快照 | 口径见其头部声明 |

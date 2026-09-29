@@ -887,8 +887,8 @@ class ProactiveScheduler:
     def _run_hot_topics_collect(self) -> None:
         """热点知识采集（同步、自限速、吞异常返回 dict，永不抛出）。
 
-        唯一注册契约见 docs/board/W3_HANDOFF_WIRING.md §1：开关/间隔真源在
-        config/hot_topics.yaml，本方法只负责按拍触发。
+        开关/间隔真源在 config/hot_topics.yaml，本方法只负责按拍触发
+        （原接线契约文档已随 2026-09-29 文档清理批删除，契约已落地为本注册）。
         """
         from shisi.knowledge.hot_topics import collect_if_due
 

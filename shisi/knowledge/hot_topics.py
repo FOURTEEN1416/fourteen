@@ -14,7 +14,7 @@
    ``get_hot_context(character_id)`` 把新鲜热点前置拼入 excerpt——收口在既有
    知识供出口，不另造通道、不写角色 BM25 索引文件（41 卡索引结构零变更）。
 4. **触发**：``collect_if_due()`` 同步幂等自限速，任意轮询频率下重复调用安全；
-   scheduler 侧注册归主控（接线契约见 ``docs/board/W3_HANDOFF_WIRING.md``，
+   scheduler 侧注册归主控（接线已落地，原契约文档已随 2026-09-29 清理批删除，
    手动一轮走 ``scripts/run_hot_topics_collect.py``）。
 
 失败降级：搜索全挂 → 只记 warning 返回 ``{ok: False}``，池保留旧未过期条目；

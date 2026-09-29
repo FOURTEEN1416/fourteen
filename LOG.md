@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-09-29 — 主控 · 文档对齐勘误 + 过期文档彻底清除批（纯文档，默默三段指令）
+
+- **指令链**：默默先指出「查到的待办信息已过期，查真实状态并更新文档」；见首轮仍用删除线+注记保留后，令「不要备注式的清除，过期的文档该删除就删除，污染源该清除就清除」；见仍有备注式残留后再裁决定规——**「唯一能允许反复记录的只追加不覆盖的只有 LOG.md，其余该清除的清除、该改的改」**。
+- **核实（git 实况）**：本地/origin HEAD = `2132ade`；`BOARD.md`「当前窗口登记表」与任务包文件停留在 09-14 切分状态，而 W1/W2/W3/W4 四窗口早在 09-15 已全部闭环——W1 论文投稿《心理学进展》（稿件 1136831，审稿中）+ 09-25 起转 CS 实证线（`cs_experiment/` 亲密情绪分类，1200 探针 + rule/gold/llm 三臂 + RoBERTa 微调基建实跑，待跑项见 STATUS §2）/ W2 软著完成 / W3 多模态收编部署 `91f2042`（989/0 fail）/ W4 验证闭环；D10–D12 四条裁决已 09-28 全部实施完成（非挂起）。
+- **删除（5 件状态类过期文档）**：`board/TASK_PACKAGES.md`（四窗口已闭环）、`board/TASK_PACKAGE_Q_包ABC全面改造.md`（状态「待开工」但包 Q 已 09-20 收编）、`board/TASK_PACKAGE_W12_角色模板面.md`（阶段1/2 均收编、visible_ids 已填实）、`board/W3_HANDOFF_WIRING.md`（接线已落 `f2c51ba`）、`stages/SPRINT_2026-09.md`（plan 化石：§7 多模态现状过时、§12 Q1–Q6 全解决、阶段已执行完；stages/ 随之清空）。
+- **归档（6 件 git mv → `docs/history/`）**：HANDOFF_2026-09-15 / -09-20 包ABC / -09-21 AX×2 / -09-22 六域 + NEW_WINDOW_PROMPT-09-22——已执行完毕的交接书退出活跃区。
+- **备注式化石清除（批二，按第三段裁决）**：① `P1_BACKLOG` 重写 59→22 行（Previous 链/已解决表/删除线条目全删，只留 9 条真实未决）；② `HANDOFF_REPORT` 重写 283→33 行（五层快照堆叠 + 09-19 旧窗 §0–§9 正文全删，只留单层快照 + 现行纪律 7 条）；③ `BOARD` 追加区清空 895→46 行（09-14~09-28 历史条目约 560 行删除，头部规则改为「本板只载当前状态，批次历史唯一留痕处=LOG.md」）；④ `AGENTS.md` 版本头 18 层堆叠压缩为单行当前版本（v1.39.6 摘要 + 指向 LOG）；⑤ `FUNCTION_INVENTORY` 删 09-27 旧注记删除线段 + GAP-1~5 已结案五行。
+- **随批死链修复**：AGENTS §8 两处（跨窗看板规则 / Owner 唯一制改指 HANDOFF_REPORT）、`proactive/scheduler.py` + `shisi/knowledge/hot_topics.py` + `api/routers/character_template_routes.py` 三处 docstring、热点链设计文档两处、tests 两处注释、`docs/README.md` 入口（删 stages/TASK_PACKAGES 行、history 描述补归档件、BOARD 行更新）。
+- **验证**：活跃 git 树死链 0 残留（剩余引用均为 history/ 归档件与 LOG/DECISION_LEDGER 历史原文）；活跃文档 `~~` 删除线清零；ruff 0 错；`test_w12_character_templates` + `test_hot_topics` 25/25 绿。
+- **纯文档批**：业务代码仅 3 个文件的 docstring/注释改动，零逻辑变更；未 push、未上服务器。
+
+---
+
 ## 2026-09-28 — 主控 · 服务器同步批：三端一致 2ebfc61 + 迁移并发竞态 P1 根治（部署当场抓出）
 
 - **指令**：默默裁决「准备同步」（原选中文本「服务器部署（三端一致点仍停 ffa6d68，落后 origin 十余提交）」）——启动生产部署收口遗留裁决项。
