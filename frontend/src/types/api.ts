@@ -156,14 +156,6 @@ export interface Channel {
 
 export type UrgencyLevel = '非常想找你' | '有点想你' | '想找人说话' | '还好'
 
-export interface UrgencyBreakdown {
-  total: number
-  base: number
-  miss_bonus: number
-  event_bonus: number
-  scene_bonus: number
-}
-
 export interface ProactiveConfig {
   threshold: number
   max_daily: number

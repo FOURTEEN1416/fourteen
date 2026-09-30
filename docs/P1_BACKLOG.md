@@ -19,3 +19,5 @@
 7. **[P1-9] Proxy**：`http://127.0.0.1:7897` 在 `git push` 时偶发 connection reset（本地网络环境，非代码）。
 8. **[P1-13] AGENTS.md PAT 认证**：与 opencode 内置认证可能冗余。
 9. **[FE-ENV-1] Lighthouse 本机不可用**：headless Chrome 无法提交帧（NO_FCP），环境约束；性能验证固定改用 CDP `Performance.getMetrics` + 真机网络清单口径。
+10. **[PY-DEAD-1] `ASEEngine.get_state()` 死码候选**（2026-09-30 历遍补课批发现）：breakdown dict 产出（missing_bonus/emotion_bonus/context_bonus）全仓零调用方（端点走 `health_check()`）；删除需连带核 `useProactiveState` 零消费 hook 链。
+11. **[FE-TYPE-1] `ProactiveEngineState` 字段核实**（同批发现）：前端类型含 `last_proactive_at`/`config`，后端 `health_check()` 无此顶层键（实际为 `max_daily/quiet_hours/last_skip_reason/modes` 等）；因 `useProactiveState` hook 零组件消费暂无运行时影响，消费接线时须先对齐。

@@ -7,6 +7,26 @@
 
 ---
 
+## 2026-09-30 — 论文状态同步窗（ZCode 毕设会话跨窗，默默直接授权）· AP 1136831 拒稿终态落账 + BOARD/HANDOFF 刷新
+
+- **指令链**：默默在毕设工作区会话出示《心理学进展》拒稿通知（稿件 1136831，编务按「该文章为个案研究，超出了期刊收稿范围」退稿；附两条审稿意见：①缺 Replika 等业界对照、外部效度受限；②软件模块→AGIL 映射标准需表格化、「失衡」需理论化界定），授权本窗跨仓改写过期状态文档（原「审稿中」口径失效）。
+- **改动（3 文件，仅状态口径）**：`BOARD.md` W1 登记行备注刷为拒稿终态+重构线指向、追加区新增跨窗登记一条；`HANDOFF_REPORT.md`「活跃工作」行同步。零其他内容变更。
+- **边界**：论文工作区（`大创赛报名以及后期发展/`，非 git）稿件内容未动——main-v2 定稿验收与再优化由本窗同日另行执行、单独落账（回执见 `recon/33` 号件）；三个文档属 B 档，本窗未 commit，提交留默默/主控裁量。
+
+## 2026-09-30 — 主控 · 全仓历遍补课批：两条登记遗留收口（默默质疑「有两个待办事件你没有发现」驱动）
+
+- **指令链**：默默质疑上一历遍批完成声明「有两个待办事件你没有发现」。复盘证实——**上一批宣称完成时未对照 MEMORY.md 与文档里的登记遗留清单**，漏两件：① v1.34（09-21）遗留「前端 event_bonus 字段清理归并行窗」；② W14（09-28）记忆明文「chat 链语音门禁待传 user（orchestrator:1636）」。
+- **补课扫描**：全仓 TODO/FIXME 无形态限制复扫（上批 regex 只匹配 `#` 行注释，漏 docstring 形态）——**零命中**；P1_BACKLOG/DECISION_LEDGER 挂起池/BOARD 待跑项/FUNCTION_INVENTORY 差距表逐一通读核对（差距表仅 1 行情景层未隔离，登记在案）。
+- **修复 1（W14 遗留）chat 链语音门禁接线**：`orchestrator/optimized_orchestrator.py` 语音合成分支 `resolve_voice_spec(character_id)` 漏传 user → 未解锁用户在对话主链照用锁定专属音色（门禁只在试听端点语义域外生效，fail-open 契约被架空）。改传 `user_id=str(user_id) if user_id else ""`（无用户上下文不启用门禁，契约不变）。**红测先行**：`TestChatChainVoiceGateWiring` AST 守卫（orchestrator 内全部 `resolve_voice_spec` 调用必须带 `user_id=` 关键字实参）——修复前跑红（`'user_id' in []`）实证，修复后绿。
+- **修复 2（v1.34 遗留）UrgencyBreakdown 死接口删除**：`frontend/src/types/api.ts` 的 `UrgencyBreakdown`（含 event_bonus 化石）全前端零引用、字段族与后端任何产出路径不对应（`/api/proactive/state` 走 `health_check()`＝urgency **标量**；breakdown dict 只在 `get_state()` 且键为 missing_bonus/emotion_bonus/context_bonus）。整接口删除，入 `DELETION_LOG`。
+- **连带发现（登记不扩批）**：`ASEEngine.get_state()` 全仓零调用方（死码候选，PY-DEAD-1）；`ProactiveEngineState.last_proactive_at/config` 后端 health_check 无此键（FE-TYPE-1，`useProactiveState` hook 零组件消费故无运行时影响）——两观察项入 P1_BACKLOG 10/11。试听端点 `voice_routes.py:274` 不传 user 系 W14 当批审过的语义（试听=配置探索），维持。
+- **验证**：test_w14 全文件 **32/32**（+1 守卫）；语音邻域 `test_voice_manager`+`test_w7_voice_chain`+`test_w18_traversal_fixes` **86/86**；ruff 0 + tsc 0 + vitest **177/177**；全量五分块回归见部署前终验（本批净增 1 例 → 收集 2653）。
+- **踩坑**：本批两次踩 Bash cwd 持久陷阱（`cd frontend` 后滞留致 `find tests` 报不存在、邻域测试假性 no tests ran），绝对路径重跑解决——与 09-17/09-19 同族，教训已在册。
+
+
+
+---
+
 ## 2026-09-29（跨午夜至 09-30 服务器时段） — 主控 · 全仓历遍批：真源文档对齐代码实况 + 注释勘误 + 备注式化石清除（默默 /goal 指令）
 
 - **指令链**：默默 /goal「全仓历遍，更新代码描述文档，更新相关记忆文档，将文档描述对齐代码现状，全仓所有代码进行扫描，发现问题可以直接修，顺便检查那种代码注释和代码不对齐的情况也需要进行修改，还有备注式删除也需要进行修改」——实况扫描、直接修、注释勘误、备注式删除四项全部授权。

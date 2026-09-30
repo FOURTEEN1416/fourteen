@@ -458,3 +458,33 @@ class TestStickerImportRouteReceipt:
         assert resp.status_code == 200
         data = resp.json()["data"]
         assert data == {"accepted": 1, "failed": 1}, "回执语义：accepted=真实入库数"
+
+
+# ---------------------------------------------------------------------------
+# A3b：chat 主链门禁接线守卫（W14 遗留收口，2026-09-30）
+# ---------------------------------------------------------------------------
+
+class TestChatChainVoiceGateWiring:
+    """chat 链 ``resolve_voice_spec`` 必须传 user_id，否则专属语音门禁
+    （TestVoiceUnlockGate 锁定的行为）在对话主链整体失效。"""
+
+    def test_chat_chain_resolves_voice_spec_with_user(self) -> None:
+        import ast
+        from pathlib import Path
+
+        src_path = Path(__file__).resolve().parents[1] / "orchestrator" / "optimized_orchestrator.py"
+        tree = ast.parse(src_path.read_text(encoding="utf-8"))
+
+        calls = [
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "resolve_voice_spec"
+        ]
+        assert calls, "orchestrator 应调用 resolve_voice_spec（语音合成分支）"
+        for call in calls:
+            kw_names = [kw.arg for kw in call.keywords if kw.arg]
+            assert "user_id" in kw_names, (
+                "chat 链 resolve_voice_spec 调用必须传 user_id=W14 专属语音门禁，"
+                "漏传则未解锁用户在对话中照用锁定音色（fail-open 仅限无用户上下文）"
+            )

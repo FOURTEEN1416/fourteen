@@ -967,3 +967,18 @@ equire() in MessageList.tsx even though MessageList is unused
 - 块4相关 6 测试文件 212 passed / 0 failed；ruff 改动域 0 错
 - 新增钉子：ws 定向三态（命中/无归属 0 送达/断线清理）、scheduler web 分支
   定向与拒降级、query 无 meta 拒绝、死表 DROP、resolver 口吻
+
+---
+
+## 2026-09-30 · 全仓历遍补课批：UrgencyBreakdown 死接口删除（v1.34 遗留收口）
+
+### 删除对象
+- `frontend/src/types/api.ts` 的 `export interface UrgencyBreakdown`（7 行）。
+  零引用死接口（全前端唯一命中是自身定义行）；其字段族与后端**任何**产出路径
+  均不对应——`/api/proactive/state` 走 `ASEEngine.health_check()`（urgency 为
+  **标量** + 顶层 urgency_level），breakdown dict 形态只在 `ASEEngine.get_state()`
+  中产出且键为 `missing_bonus/emotion_bonus/context_bonus`（非 miss_bonus/event_bonus）。
+  其中 `event_bonus` 后端全仓零产出（v1.34 遗留「前端 event_bonus 清理归并行窗」自此收口）。
+
+### 验证
+- `tsc --noEmit` 0 错 + vitest 177/177（删除零消费导出，无运行时影响）

@@ -1645,7 +1645,13 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                             spec = None
                             cv_mgr = self.components.get("character_voice")
                             if cv_mgr is not None:
-                                spec = cv_mgr.resolve_voice_spec(character_id)
+                                # W14 专属语音门禁：带 user 校验亲和阈值（未解锁
+                                # 回落引擎默认）；无用户上下文不启用门禁（fail-open
+                                # 仅限此场景，契约见 resolve_voice_spec docstring）
+                                spec = cv_mgr.resolve_voice_spec(
+                                    character_id,
+                                    user_id=str(user_id) if user_id else "",
+                                )
                             voice_kwargs = spec.synth_kwargs() if spec else {}
                             voice_audio = await voice_mgr.synthesize(
                                 voice_text, emotion=emotion_tag, **voice_kwargs,
