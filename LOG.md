@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-09-30 — 主控 · 遗留待办批：P1_BACKLOG 10/11 双端死链整删（默默 userselect 点名「处理遗漏待办」）
+
+- **指令链**：默默 userselect 选中补课批总结两段（W14+v1.34 遗留及其「连带发现」），令「处理遗漏待办」。W14/v1.34 两项已随 `0945704` 闭环（`git log`+代码在位复核）；本批执行其连带登记的 **P1_BACKLOG 10/11**（上批「登记不扩批」，本批销账）。
+- **PY-DEAD-1 后端**：`ASEEngine.get_state()`（32 行）全仓含 tests 零调用方实锤（命中均为 FrequencyController/storyline 异类同名）→ 整删；防复活钉 `test_ase_engine_get_state_removed`（属性断言）。响应面唯一真源=`health_check()`。
+- **FE-TYPE-1 前端死链**：`useProactiveState()` hook（零组件消费）→ `queryKeys.proactive` getter → `system.ts proactiveState()` → `client.ts` ×3 re-export → `ProactiveEngineState`/`UrgencyLevel`/`ProactiveConfig` 三类型（删链后全零引用）——逐环取证后六文件整删。**不误伤**：`/api/proactive/state` 端点与 `proactiveHistory/GetConfig/Pause/updateProactiveConfig`（RoleSettingsTabs 消费中）。
+- **验证**：`test_proactive.py` **87/87**（+1 钉）+ ruff 0 + tsc 0 + vitest **177/177**。
+- **销账**：P1_BACKLOG 10/11 移除（留指针行指本条与 DELETION_LOG）；DELETION_LOG 追加同日节。
+- **随批代提交（毕设窗 B 档，其 LOG 条注明「提交留默默/主控裁量」）**：`BOARD.md`/`HANDOFF_REPORT.md`/`LOG.md` 三件的论文拒稿状态同步与上一补课批共用工作树，本次主控一并 commit+push（B 档不上服务器）。
+
 ## 2026-09-30 — 论文状态同步窗（ZCode 毕设会话跨窗，默默直接授权）· AP 1136831 拒稿终态落账 + BOARD/HANDOFF 刷新
 
 - **指令链**：默默在毕设工作区会话出示《心理学进展》拒稿通知（稿件 1136831，编务按「该文章为个案研究，超出了期刊收稿范围」退稿；附两条审稿意见：①缺 Replika 等业界对照、外部效度受限；②软件模块→AGIL 映射标准需表格化、「失衡」需理论化界定），授权本窗跨仓改写过期状态文档（原「审稿中」口径失效）。

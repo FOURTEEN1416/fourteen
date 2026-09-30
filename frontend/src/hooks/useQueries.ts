@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import client, { api } from '../api/client'
 import { useAuthStore } from '../store/authStore'
 import { useErrorStore } from '../store/errorStore'
-import type { EmotionState, DashboardStats, HealthStatus, WeChatStatus, TrainingProgress, ProactiveEngineState, MemoryFact, PsychProfile, PsychResetResult, PsychSnapshot, SafetyStats, SafetyLogEntry, RAGStats, VoiceStatus, PluginsList, ToolHistoryEntry, ProactiveHistoryEntry, MentalHealthSummary } from '../types/api'
+import type { EmotionState, DashboardStats, HealthStatus, WeChatStatus, TrainingProgress, MemoryFact, PsychProfile, PsychResetResult, PsychSnapshot, SafetyStats, SafetyLogEntry, RAGStats, VoiceStatus, PluginsList, ToolHistoryEntry, ProactiveHistoryEntry, MentalHealthSummary } from '../types/api'
 
 /**
  * 账号维度（W1）：私人查询键必须携带**稳定的账号标识**（`users.id`）。
@@ -121,10 +121,6 @@ export const queryKeys = {
   },
   get toolHistory() { return ['acct', accountScope(), 'tools', 'history'] as const },
   get proactiveHistory() { return ['acct', accountScope(), 'proactive', 'history'] as const },
-  get proactive() {
-    const scope = ['acct', accountScope(), 'proactive'] as const
-    return { state: [...scope, 'state'] as const }
-  },
 }
 
 export function useCharacters() {
@@ -229,14 +225,6 @@ export function useTrainingProgress() {
       if (status && ['extracting', 'cleaning', 'training'].includes(status)) return 5000
       return 30000
     },
-  })
-}
-
-export function useProactiveState() {
-  return useQuery({
-    queryKey: queryKeys.proactive.state,
-    queryFn: () => api.proactiveState().then(r => r.data as ProactiveEngineState),
-    refetchInterval: 30 * 1000,
   })
 }
 

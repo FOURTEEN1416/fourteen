@@ -29,7 +29,7 @@ import {
 import {
   health, stats, dashboardStats, config, saveConfig,
   personaProfile, personaEvolutionLog, memoryFacts,
-  tools, toolsHealth, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,
+  tools, toolsHealth, toggleTool, toolHistory, proactiveHistory, updateProactiveConfig,
   logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
   wechatConnectionStatus, wechatQrCode,
   safetyStats, safetyLog, safetyConfig,
@@ -255,7 +255,7 @@ export {
 export {
   health, stats, dashboardStats, config, saveConfig,
   personaProfile, personaEvolutionLog, memoryFacts,
-  tools, toolsHealth, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,
+  tools, toolsHealth, toggleTool, toolHistory, proactiveHistory, updateProactiveConfig,
   logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
   wechatConnectionStatus, wechatQrCode,
   psychProfile, psychSnapshots, psychReset, psychMentalHealth, psychLiwc,
@@ -271,7 +271,7 @@ export const api = {
   emotionState, emotionTrend,
   health, stats, dashboardStats, config, saveConfig,
   personaProfile, personaEvolutionLog, memoryFacts,
-  tools, toolsHealth, toggleTool, toolHistory, proactiveState, proactiveHistory, updateProactiveConfig,
+  tools, toolsHealth, toggleTool, toolHistory, proactiveHistory, updateProactiveConfig,
   logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
   wechatConnectionStatus, wechatQrCode,
   trainingStatus, trainingProgress, trainingClean,

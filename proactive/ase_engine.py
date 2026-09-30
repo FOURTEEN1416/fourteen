@@ -1737,39 +1737,6 @@ class ASEEngine:
         if self._freq_adapter:
             self._freq_adapter.on_reply_received()
 
-    def get_state(self) -> dict[str, Any]:
-        freq_state: dict[str, Any] = {}
-        if self._freq_adapter:
-            freq_state = {
-                "mode": "adaptive",
-                "level": self._freq_adapter.level,
-                "max_daily": self._freq_adapter.get_max_daily(),
-            }
-        elif self._freq_controller:
-            freq_state = {
-                "mode": "fixed",
-                **self._freq_controller.get_state(),
-            }
-
-        return {
-            "urgency": {
-                "total": round(self.urgency.total, 2),
-                "level": self.urgency.level,
-                "base": round(self.urgency.base, 2),
-                "missing_bonus": round(self.urgency.missing_bonus, 2),
-                "scene_bonus": round(self.urgency.scene_bonus, 2),
-                "emotion_bonus": round(self.urgency.emotion_bonus, 2),
-                "context_bonus": round(self.urgency.context_bonus, 2),
-            },
-            "frequency": freq_state,
-            "daily_count": self._daily_message_count,
-            "last_chat": (
-                self._last_chat_time.isoformat()
-                if self._last_chat_time else None
-            ),
-            "last_sent_type": self._last_sent_type,
-        }
-
     def health_check(self) -> dict[str, Any]:
         freq_info: dict[str, Any] = {}
         if self._freq_adapter:

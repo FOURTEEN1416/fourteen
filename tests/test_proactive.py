@@ -1084,3 +1084,15 @@ def test_scheduler_send_to_all_returns_false_in_quiet_hours():
     sched._quiet_hours = (h, (h + 1) % 24)
 
     assert _asyncio.run(sched._send_to_all("测试消息")) is False
+
+
+def test_ase_engine_get_state_removed():
+    """PY-DEAD-1（2026-09-30）：ASEEngine.get_state 全仓零调用方已删。
+
+    响应面唯一真源是 health_check()（/api/proactive/state 消费，urgency 为
+    标量）；breakdown dict 形态自此不得复活（历史键 missing_bonus 等，
+    见 docs/DELETION_LOG.md）。
+    """
+    from proactive.ase_engine import ASEEngine
+
+    assert not hasattr(ASEEngine, "get_state")

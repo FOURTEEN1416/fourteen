@@ -982,3 +982,30 @@ equire() in MessageList.tsx even though MessageList is unused
 
 ### 验证
 - `tsc --noEmit` 0 错 + vitest 177/177（删除零消费导出，无运行时影响）
+
+---
+
+## 2026-09-30 · 遗留待办批：proactive state 双端死链整删（P1_BACKLOG 10/11 销账）
+
+### 后端
+- `proactive/ase_engine.py` `ASEEngine.get_state()`（32 行）：全仓（含 tests）零调用方——
+  `/api/proactive/state` 走 `health_check()`（urgency 标量），breakdown dict 形态
+  （missing_bonus/emotion_bonus/context_bonus）无任何消费面。防复活钉：
+  `tests/test_proactive.py::test_ase_engine_get_state_removed`。
+
+### 前端（零消费死链，逐环取证后整删）
+- `hooks/useQueries.ts`：`useProactiveState()` hook（零组件消费）+ `queryKeys.proactive` getter
+  （唯一消费方即该 hook）+ import 列表 `ProactiveEngineState`
+- `api/system.ts`：`proactiveState()`（唯一消费方即该 hook）
+- `api/client.ts`：三处 re-export 列表去 `proactiveState`
+- `types/api.ts`：`ProactiveEngineState` / `UrgencyLevel` / `ProactiveConfig` 三类型
+  （删链后全零引用；`ProactiveConfig` 的另一些命中全是 `updateProactiveConfig` 函数名，
+  RoleSettingsTabs 用自建 `ProactiveConfigPayload`）
+
+### 不动项（有消费，不误伤）
+- 后端端点 `GET /api/proactive/state` 与 `health_check()`（生产探针面）；
+  `proactiveHistory` / `proactiveGetConfig` / `proactivePause` / `updateProactiveConfig`
+  （RoleSettingsTabs 消费中）
+
+### 验证
+- `tests/test_proactive.py` 87/87（+1 防复活钉）+ ruff 全仓 0 + tsc 0 错 + vitest 177/177
