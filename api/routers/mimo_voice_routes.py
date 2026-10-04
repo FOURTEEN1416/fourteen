@@ -7,27 +7,84 @@ MiMo TTS API路由扩展
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from api.auth import verify_api_key_dep
+from api.auth_jwt import AuthPrincipal, get_optional_principal, require_role
+from api.database import User
 from api.deps import get_tts_manager
 from voice.mimo_tts_provider import MiMoTTSProvider
 from voice.tts_manager import TTSManager
 from voice.voice_catalog import get_voice_catalog
 
-logger = logging.getLogger("api.mimo_voice")
+logger = logging.getLogger("api.mimo")
 
 router = APIRouter(prefix="/api/mimo", tags=["mimo-tts"])
 
+# P0 安全批 F1：合成文本上限（字符数）——云端 TTS 按字符计费，超长文本既是滥用面也是慢请求
+_MAX_SYNTH_TEXT_LEN = 600
+
+
+class _RateLimiter:
+    """每主体滑动窗口限速（内存计数；进程级，多 worker 各自独立——本批按任务书不做跨进程）。
+
+    仅本文件使用，勿抽公共模块（P0 安全批并行窗口纪律）。
+    """
+
+    def __init__(self, max_events: int, window_seconds: float = 60.0):
+        self._max = max_events
+        self._window = window_seconds
+        self._hits: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def check(self, key: str) -> bool:
+        """窗口内还有配额则记账并放行，否则拒绝（含失败请求，防绕过试错）。"""
+        now = time.monotonic()
+        with self._lock:
+            hits = [t for t in self._hits.get(key, ()) if now - t < self._window]
+            if len(hits) >= self._max:
+                self._hits[key] = hits
+                return False
+            hits.append(now)
+            self._hits[key] = hits
+            return True
+
+    def reset(self) -> None:
+        """清空记账（测试隔离用）。"""
+        with self._lock:
+            self._hits.clear()
+
+
+# synthesize 6 次/分钟；clone 与 design 各 2 次/分钟（按端点独立计桶）
+_SYNTH_LIMITER = _RateLimiter(6)
+_CLONE_LIMITER = _RateLimiter(2)
+_DESIGN_LIMITER = _RateLimiter(2)
+
+
+def _as_principal(candidate: Any) -> AuthPrincipal | None:
+    """归一主体：直呼 handler（既有测试/脚本只传 _auth=True）会拿到 Depends 哨兵而非
+    真实主体——统一按「无主体（机器面）」解释；HTTP 层由 FastAPI 注入真实 AuthPrincipal。
+    """
+    return candidate if isinstance(candidate, AuthPrincipal) else None
+
+
+def _limit_or_429(limiter: _RateLimiter, principal: AuthPrincipal | None) -> None:
+    key = f"user:{principal.user_id}" if principal is not None else "machine"
+    if not limiter.check(key):
+        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
+
 
 def _register_catalog(result: dict[str, Any], *, name: str, kind: str, model: str,
-                      description: str = "", **extra: str) -> bool:
+                      description: str = "", owner: str = "", **extra: str) -> bool:
     """克隆/设计产物登记进音色 catalog（持久化 owner）。
 
     云端资源已创建、本地登记失败时如实返回 False（不谎报已持久化）。
+    ``owner`` 为调用者主体（user_id 字符串），空串 = 平台共享。
     """
     voice_id = result.get("voice_id", "")
     if not voice_id:
@@ -35,7 +92,7 @@ def _register_catalog(result: dict[str, Any], *, name: str, kind: str, model: st
     try:
         get_voice_catalog().register(
             voice_id=voice_id, name=name, kind=kind, model=model,
-            description=description, **extra,
+            description=description, owner=owner, **extra,
         )
         return True
     except Exception as e:  # noqa: BLE001
@@ -50,11 +107,13 @@ async def clone_voice(
     audio: UploadFile = File(..., description="参考音频文件(10-30秒)"),  # noqa: B008
     tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
     _auth: bool = Depends(verify_api_key_dep),  # noqa: B008
+    _principal: Any = Depends(get_optional_principal),  # noqa: B008
 ) -> dict[str, Any]:
     """
     克隆音色
 
-    上传10-30秒的参考音频，创建自定义音色
+    上传10-30秒的参考音频，创建自定义音色（P0：每用户限速 2 次/分钟；
+    产物归属登记给调用者主体）
 
     Args:
         voice_name: 音色名称（用于标识）
@@ -64,6 +123,9 @@ async def clone_voice(
     Returns:
         {"voice_id": str, "status": str, "message": str}
     """
+    principal = _as_principal(_principal)
+    _limit_or_429(_CLONE_LIMITER, principal)
+
     # 获取MiMo TTS提供者
     if tts_manager is None:
         raise HTTPException(status_code=400, detail="TTS管理器未初始化")
@@ -97,6 +159,7 @@ async def clone_voice(
             result, name=voice_name, kind="clone",
             model="mimo-v2.5-tts-voiceclone",
             description=description or f"克隆音色: {voice_name}",
+            owner=str(principal.user_id) if principal is not None else "",
         )
         result["catalog_saved"] = catalog_saved
 
@@ -119,11 +182,13 @@ async def design_voice(
     age_group: str | None = Form(None, description="年龄段（young/adult/elder）"),
     tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
     _auth: bool = Depends(verify_api_key_dep),  # noqa: B008
+    _principal: Any = Depends(get_optional_principal),  # noqa: B008
 ) -> dict[str, Any]:
     """
     设计音色
 
-    通过描述性文本设计新音色，无需参考音频
+    通过描述性文本设计新音色，无需参考音频（P0：每用户限速 2 次/分钟；
+    产物归属登记给调用者主体）
 
     Args:
         voice_name: 音色名称
@@ -134,6 +199,9 @@ async def design_voice(
     Returns:
         {"voice_id": str, "status": str, "message": str}
     """
+    principal = _as_principal(_principal)
+    _limit_or_429(_DESIGN_LIMITER, principal)
+
     # 获取MiMo TTS提供者
     if tts_manager is None:
         raise HTTPException(status_code=400, detail="TTS管理器未初始化")
@@ -169,7 +237,8 @@ async def design_voice(
         catalog_saved = _register_catalog(
             result, name=voice_name, kind="design",
             model="mimo-v2.5-tts-voicedesign",
-            description=description, **kwargs,
+            description=description, owner=str(principal.user_id) if principal is not None else "",
+            **kwargs,
         )
         result["catalog_saved"] = catalog_saved
 
@@ -189,9 +258,10 @@ async def switch_voice(
     voice_id: str = Form(..., description="音色ID"),
     tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
     _auth: bool = Depends(verify_api_key_dep),  # noqa: B008
+    _admin: tuple[int, User] = Depends(require_role("admin")),  # noqa: B008
 ) -> dict[str, Any]:
     """
-    切换当前使用的音色
+    切换当前使用的音色（P0：改全局 TTS 单例，仅 admin）
 
     Args:
         voice_id: 要切换到的音色ID
@@ -260,9 +330,10 @@ async def set_mimo_engine(
     model: str = Form(..., description="模型名称"),
     tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
     _auth: bool = Depends(verify_api_key_dep),  # noqa: B008
+    _admin: tuple[int, User] = Depends(require_role("admin")),  # noqa: B008
 ) -> dict[str, Any]:
     """
-    切换MiMo TTS引擎模型
+    切换MiMo TTS引擎模型（P0：改全局 TTS 单例，仅 admin）
 
     Args:
         model: 模型名称（mimo-v2.5-tts / mimo-v2.5-tts-voiceclone / mimo-v2.5-tts-voicedesign / mimo-v2-tts）
@@ -321,8 +392,30 @@ async def synthesize(
     emotion: str = Form("", description="情感（可选，如 开心/伤心）"),
     tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
     _auth: bool = Depends(verify_api_key_dep),
+    _principal: Any = Depends(get_optional_principal),
 ):
-    """MiMo TTS 直接合成（无需角色绑定；MIME 按实际格式返回）"""
+    """MiMo TTS 直接合成（无需角色绑定；MIME 按实际格式返回）
+
+    P0 安全批：text>600 字 400；每用户限速 6 次/分钟；voice_id 归属校验
+    （他人克隆音色 403，admin 例外，平台共享/预设不受限）。
+    """
+    principal = _as_principal(_principal)
+
+    if len(text) > _MAX_SYNTH_TEXT_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"合成文本过长（{len(text)} 字 > 上限 {_MAX_SYNTH_TEXT_LEN} 字）",
+        )
+    _limit_or_429(_SYNTH_LIMITER, principal)
+
+    # P0 F2 归属校验先于一切服务状态暴露：catalog 内他人克隆音色 403
+    # （admin 例外；无主平台音色/预设不受限；未知 voice_id 交给下方 is_known 400）
+    if voice_id and principal is not None and principal.role != "admin":
+        entry = get_voice_catalog().get(voice_id)
+        owner = str(entry.get("owner") or "") if entry else ""
+        if owner and owner != str(principal.user_id):
+            raise HTTPException(status_code=403, detail="无权使用他人克隆音色")
+
     if tts_manager is None:
         raise HTTPException(status_code=400, detail="TTS管理器未初始化")
     provider = tts_manager.get_engine("mimo-tts")

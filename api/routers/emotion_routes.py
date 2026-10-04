@@ -5,10 +5,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Security
+from fastapi import APIRouter, Depends, HTTPException, Security
 from pydantic import BaseModel, Field
 
 from api.auth import verify_api_key_dep
+from api.auth_jwt import require_role
+from api.database import User
 from api.deps import deps
 
 logger = logging.getLogger("api.emotion_routes")
@@ -32,7 +34,11 @@ def _get_emotion_engine() -> Any | None:
 
 
 @router.get("/params")
-def get_emotion_params(_auth: bool = Security(verify_api_key_dep)):
+def get_emotion_params(
+    _auth: bool = Security(verify_api_key_dep),
+    # SEC-P0 读面加门：全局情绪引擎配置（基线/波动/恢复力/能耗参数）非用户数据面
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     engine = _get_emotion_engine()
     if not engine:
         raise HTTPException(status_code=503, detail="情感引擎未初始化")
@@ -53,7 +59,12 @@ def get_emotion_params(_auth: bool = Security(verify_api_key_dep)):
 
 
 @router.put("/params")
-def update_emotion_params(req: EmotionConfig, _auth: bool = Security(verify_api_key_dep)):
+def update_emotion_params(
+    req: EmotionConfig,
+    _auth: bool = Security(verify_api_key_dep),
+    # SEC-P0 读面加门：PUT 直写**全局**引擎 _config，普通用户越权写面必须收口
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     engine = _get_emotion_engine()
     if not engine:
         raise HTTPException(status_code=503, detail="情感引擎未初始化")

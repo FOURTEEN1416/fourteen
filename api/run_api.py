@@ -597,6 +597,16 @@ async def _app_lifespan(_app) -> AsyncGenerator[None, None]:
         except Exception as e:  # noqa: BLE001
             logger.warning("Prometheus 计量装配失败（不影响启动）: %s", e)
     await _init_and_preload()
+    # 注销坟场对账兜底（经主控授权本批跨域接线）：备份恢复把已删账号行带回时，
+    # 启动即再次清除；对账失败仅告警，不阻断启动。
+    try:
+        from api import lifecycle as _lifecycle
+
+        repurged = await _lifecycle.reconcile_graveyard()
+        if repurged:
+            logger.warning("坟场对账：重新清除已删账号 uid=%s（疑似备份恢复）", repurged)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("注销坟场对账失败（不影响启动）: %s", e)
     yield
     if cfg.observability.metrics_enabled:
         try:

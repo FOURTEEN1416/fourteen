@@ -15,6 +15,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.auth import (
+    auth_assert_account_unlocked,
+    auth_rate_limit_ip,
+    auth_record_failure,
+    auth_record_success,
+)
 from api.auth_jwt import (
     REFRESH_TOKEN_EXPIRE_DAYS,
     bump_token_version,
@@ -221,6 +227,10 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ):
     """使用邮箱或用户名 + 密码登录，返回令牌"""
+    # ── 防爆破（P0 修复批 F3）：IP 失败滑窗（5 失败/分/IP）+ 账号锁定检查 ──
+    auth_rate_limit_ip(request)
+    auth_assert_account_unlocked(req.login)
+
     # 查找用户（支持邮箱或用户名）
     result = await db.execute(
         select(User).where(
@@ -229,15 +239,20 @@ async def login(
     )
     user = result.scalar_one_or_none()
     if not user:
+        auth_record_failure(request, req.login)
         raise HTTPException(status_code=401, detail="Invalid login credentials")
 
     # 验证密码
     if not await asyncio.to_thread(verify_password, req.password, user.hashed_password):
+        auth_record_failure(request, req.login)
         raise HTTPException(status_code=401, detail="Invalid login credentials")
 
-    # 检查账号是否激活
+    # 检查账号是否激活（密码正确不计失败；403 不动失败账）
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account is disabled")
+
+    # 密码验证通过：连续失败计数归零
+    auth_record_success(req.login)
 
     # 生成令牌
     token_data = token_claims(user)

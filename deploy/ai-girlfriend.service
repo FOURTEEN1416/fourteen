@@ -4,15 +4,21 @@ After=network.target
 
 [Service]
 Type=simple
+# ⚠️ 生产漂移注记（2026-10-04 P0 修复批，仅如实记录、不改本模板行为）：
+# 生产 unit 实际以 User=root 运行，与本模板的 www-data 不一致；若按本模板降权投递，
+# 须先复核数据目录（/opt/ai-girlfriend/data 等）属主与 systemd 沙箱项的兼容性。
 User=www-data
 Group=www-data
 WorkingDirectory=/opt/ai-girlfriend
 EnvironmentFile=/opt/ai-girlfriend/.env
-# --workers 1（P0-7，2026-09-21）：微信通道 registry、scheduler/主动任务、LLM 网关、
-# 知识索引均为**进程内单例**，4 worker 各自一份互不可见——消息在 A 进程登录、
-# B 进程 poll 不到；定时任务在 4 个进程里重复注册。产品并发是 LLM I/O 等待型，
-# asyncio 单进程足够；多 worker 需先引入跨进程投递队列（当前不存在该架构）。
-ExecStart=/opt/ai-girlfriend/.venv/bin/python -m uvicorn api.run_api:app --host 127.0.0.1 --port 8000 --workers 1 --timeout-keep-alive 30
+# --workers 4（2026-10-04 P0 修复批，对齐生产实况）：生产 unit 实际以 4 worker 运行
+# （2026-09-28 服务器同步批实证「4 worker 并发首迁」「挂载 4/4」）。
+# 历史脉络：旧模板曾按 P0-7（2026-09-21）取单 worker，理由是微信通道 registry、
+# scheduler、LLM 网关、知识索引均为进程内单例；现与生产实况对齐为 4 worker 后，
+# 跨进程一致性依赖既有防线——调度器 flock 单例（/tmp/ai-girlfriend-scheduler.lock，
+# 见 api/run_api.py::_ensure_scheduler_singleton）与迁移 BEGIN IMMEDIATE 单写事务
+# （2026-09-28 并发竞态根治批）。多 worker 行为差异详见 AGENTS「当前实现补充」。
+ExecStart=/opt/ai-girlfriend/.venv/bin/python -m uvicorn api.run_api:app --host 127.0.0.1 --port 8000 --workers 4 --timeout-keep-alive 30
 Restart=always
 RestartSec=5
 StandardOutput=append:/var/log/ai-girlfriend.log

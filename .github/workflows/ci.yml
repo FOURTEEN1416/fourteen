@@ -73,6 +73,11 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
+      - name: Dependency audit gate (P0 批：high 及以上漏洞即失败)
+        # 只读 package-lock.json 做离线审计（无需 node_modules）；
+        # npm audit 对 --audit-level=high 以上的发现自动非零退出 → GitHub Actions 直接 fail。
+        run: npm audit --package-lock-only --audit-level=high
+
       - name: TypeScript type check (Hardened)
         run: bunx tsc --noEmit
         # continue-on-error: true  <-- Removed: FF-022 now requires strict pass

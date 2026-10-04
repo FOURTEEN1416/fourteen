@@ -117,25 +117,62 @@ class TestNoStateLabeling:
         assert LABEL not in eng.format_wechat_message(STATE_KEY)
 
     def test_api_payload_syncs_label(self, tmp_path):
+        """P0 收口后新契约：vital-signs 读面走 admin 通道（裸角色键他人数据面）——
+        种 users 沙箱库 + get_db 覆盖 + admin Bearer；标注同步语义不变。"""
+        import asyncio
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from api.auth_jwt import create_access_token
+        from api.database import Base, User, get_db
+
         db = _db(tmp_path)
         eng = VitalSignsEngine(db_path=db)
+
+        engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'users.db'}")
+        session_maker = async_sessionmaker(engine, expire_on_commit=False)
+
+        async def _init():
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            async with session_maker() as s:
+                s.add(User(id=1, email="a@test", username="a",
+                           hashed_password="x", role="admin",
+                           is_active=True, is_verified=True))
+                await s.commit()
+
+        asyncio.run(_init())
+
+        async def _get_db():
+            async with session_maker() as s:
+                yield s
+
         app = FastAPI()
         app.include_router(vital_signs_routes.router)
         vital_signs_routes.set_engine(eng)
+        app.dependency_overrides[get_db] = _get_db
+        admin_bearer = {
+            "Authorization": f"Bearer {create_access_token({'sub': '1', 'tv': 0})}"
+        }
         try:
             client = TestClient(app)
-            body = client.get(f"/api/shisi/vital-signs/{STATE_KEY}").json()["data"]
+            body = client.get(
+                f"/api/shisi/vital-signs/{STATE_KEY}", headers=admin_bearer
+            ).json()["data"]
             assert body["is_default"] is True
             assert LABEL in body["note"]
             assert LABEL in body["wechat_format"]
 
             eng.update_on_emotion(STATE_KEY, "生气")
-            body = client.get(f"/api/shisi/vital-signs/{STATE_KEY}").json()["data"]
+            body = client.get(
+                f"/api/shisi/vital-signs/{STATE_KEY}", headers=admin_bearer
+            ).json()["data"]
             assert body["is_default"] is False
             assert LABEL not in body["note"]
             assert body["heart_rate"] > 90
         finally:
             vital_signs_routes.set_engine(None)
+            asyncio.run(engine.dispose())
 
 
 # ── 3. ASE 事件面：情绪事件驱动生理读数 ───────────────────────

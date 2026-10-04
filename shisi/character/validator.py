@@ -59,7 +59,10 @@ def validate_card(card: CharaCardV2) -> list[str]:
 
     for pat in _UNSAFE_CONTENT_PATTERNS:
         if pat.search(all_text):
+            # P0 修复批（2026-10-04）：自残类模式从仅 warning 升级为计入 errors——
+            # 只记日志时 validate_card 照样返回空列表，写路径据此放行，闸形同虚设。
             logger.warning("人设含潜在敏感内容: %s", pat.pattern[:20])
+            errors.append(f"检测到不安全内容模式: {pat.pattern[:30]}")
 
     if len(card.data.description) > 50000:
         errors.append(f"描述过长({len(card.data.description)} > 50000)")

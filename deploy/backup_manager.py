@@ -373,6 +373,8 @@ def run_backup(
     while run_dir.exists():
         run_dir = output_dir / f"{RUN_PREFIX}{run_id}-{os.getpid()}"
     run_dir.mkdir(parents=True)
+    # P0 权限收紧：备份目录只留属主访问（Linux 生效；Windows 尽力而为）
+    _best_effort_chmod(run_dir, 0o700)
 
     components: dict[str, dict[str, Any]] = {}
 
@@ -459,6 +461,12 @@ def run_backup(
     }
     (run_dir / MANIFEST_NAME).write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # P0 权限收紧：全部产物（users.db/sqlite.db/agent_plane.db/*.tar.gz/manifest.json
+    # 等）逐个 0600 —— _best_effort_600 由机密 tar 一项推广到所有产物
+    for artifact in run_dir.iterdir():
+        if artifact.is_file():
+            _best_effort_chmod(artifact, 0o600)
+
     # 清理超期备份目录（按目录 mtime）
     _cleanup_old_runs(output_dir, retention_days)
 
@@ -472,9 +480,15 @@ def run_backup(
     return EXIT_OK, manifest
 
 
-def _best_effort_600(path: Path) -> None:
+def _best_effort_chmod(path: Path, mode: int) -> None:
+    """best-effort 权限收紧：Windows 上 chmod 仅只读位语义、目录模式位不可表达，
+    失败不阻断备份；Linux 上按 mode 生效（P0：备份产物含聊天记录与机密配置）。"""
     with contextlib.suppress(OSError):
-        os.chmod(path, 0o600)
+        os.chmod(path, mode)
+
+
+def _best_effort_600(path: Path) -> None:
+    _best_effort_chmod(path, 0o600)
 
 
 def _cleanup_old_runs(output_dir: Path, retention_days: int) -> int:

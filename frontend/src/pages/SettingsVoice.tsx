@@ -12,6 +12,7 @@ import {
   playAudioBlob,
 } from '../api/mimo'
 import { getSpeakers } from '../api/system'
+import { useAuthStore } from '../store/authStore'
 
 // ── Constants ──
 
@@ -41,8 +42,10 @@ const STYLE_OPTIONS = [
 
 function EngineSwitcher({
   engine,
+  isAdmin,
 }: {
   engine: string
+  isAdmin: boolean
 }) {
   return (
     <section>
@@ -58,7 +61,10 @@ function EngineSwitcher({
             }`}
           >
             <p className={`text-sm font-medium ${engine === opt.value ? 'text-primary-700' : 'text-gray-700'}`}>{opt.label}</p>
-            <p className="text-[10px] text-gray-400 mt-0.5">克隆/设计音色时将自动切换对应 MiMo 模型</p>
+            {/* P0 收尾：模型切换已是 admin 门能力，普通用户侧措辞如实 */}
+            <p className="text-[10px] text-gray-400 mt-0.5">
+              {isAdmin ? '克隆/设计音色时将自动切换对应 MiMo 模型' : '克隆/设计依赖对应 MiMo 模型，由管理员切换'}
+            </p>
           </div>
         ))}
       </div>
@@ -133,6 +139,8 @@ function VoiceCloneSection({ onCreated }: { onCreated: (voiceId: string) => void
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
   const [createdId, setCreatedId] = useState('')
+  // P0 收尾：set-engine 降级提示（琥珀色建议级，区别于 error 的失败红）
+  const [engineNotice, setEngineNotice] = useState('')
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -146,9 +154,18 @@ function VoiceCloneSection({ onCreated }: { onCreated: (voiceId: string) => void
     if (!file || !voiceName.trim()) return
     setCloning(true)
     setError('')
+    setEngineNotice('')
     try {
-      // W7：克隆能力在 voiceclone 模型上——先切模型（传模型名，非引擎名）
-      await mimoSetEngine(MODEL_VOICECLONE)
+      // W7：克隆能力在 voiceclone 模型上——先切模型（传模型名，非引擎名）。
+      // P0 收尾：set-engine 已是 admin 门端点，且是克隆的技术前置（后端按全局
+      // provider 模型校验，见 mimo_voice_routes.clone 的 health.model 检查）。
+      // 普通用户 403 时降级不阻断——平台模型恰为 voiceclone 时克隆仍可成功；
+      // 不恰时由克隆自身的 catch 呈现后端 400 明细，两个信息叠加即完整因果。
+      try {
+        await mimoSetEngine(MODEL_VOICECLONE)
+      } catch {
+        setEngineNotice('音色模型切换为管理员能力；将以平台当前模型尝试克隆，若失败请联系管理员切换模型')
+      }
       const fd = new FormData()
       fd.append('audio', file)
       fd.append('voice_name', voiceName)
@@ -228,6 +245,8 @@ function VoiceCloneSection({ onCreated }: { onCreated: (voiceId: string) => void
             </p>
           )}
           {error && <p className="text-xs text-red-500">{error}</p>}
+          {/* P0 收尾：模型切换降级的建议级提示（非失败，不掩盖克隆结果） */}
+          {engineNotice && <p className="text-xs text-amber-600">{engineNotice}</p>}
         </div>
       </div>
     </section>
@@ -245,13 +264,22 @@ function VoiceDesignSection({ onCreated }: { onCreated: (voiceId: string) => voi
   const [designing, setDesigning] = useState(false)
   const [error, setError] = useState('')
   const [createdId, setCreatedId] = useState('')
+  // P0 收尾：set-engine 降级提示（同克隆流）
+  const [engineNotice, setEngineNotice] = useState('')
 
   const handleDesign = useCallback(async () => {
     setDesigning(true)
     setError('')
+    setEngineNotice('')
     try {
-      // W7：设计能力在 voicedesign 模型上——先切模型（传模型名，非引擎名）
-      await mimoSetEngine(MODEL_VOICEDESIGN)
+      // W7：设计能力在 voicedesign 模型上——先切模型（传模型名，非引擎名）。
+      // P0 收尾：set-engine 是设计的技术前置（后端按全局 provider 模型校验），
+      // 非 admin 403 时降级不阻断，理由同克隆流。
+      try {
+        await mimoSetEngine(MODEL_VOICEDESIGN)
+      } catch {
+        setEngineNotice('音色模型切换为管理员能力；将以平台当前模型尝试设计，若失败请联系管理员切换模型')
+      }
       const res = await mimoDesign({
         voice_name: `design_${Date.now()}`,
         description: `${design.gender} voice, ${design.style} style`,
@@ -357,6 +385,8 @@ function VoiceDesignSection({ onCreated }: { onCreated: (voiceId: string) => voi
             音色 ID：{createdId}（已入库，可在上方「可用语音」中选择）
           </p>
         )}
+        {/* P0 收尾：模型切换降级的建议级提示（非失败，不掩盖设计结果） */}
+        {engineNotice && <p className="mt-3 text-xs text-amber-600">{engineNotice}</p>}
 
         <div className="mt-4 flex justify-end">
           <button
@@ -434,6 +464,11 @@ function SynthesizeTest({ voiceId }: { voiceId: string }) {
 // ── Main Component ──
 
 export default function SettingsVoice() {
+  // P0 收尾：set-engine / switch-voice 已是 admin 门端点（改全局 TTS 单例，见
+  // api/routers/mimo_voice_routes.py 的 require_role("admin")），普通用户调用必 403。
+  // 角色真源 = authStore.user.role（与 SettingsLLM 同源读取；useAuth 只是该 store 的薄封装）。
+  const user = useAuthStore((s) => s.user)
+  const isAdmin = user?.role === 'admin'
   const [engine] = useState('mimo-tts')
   const [activeVoice, setActiveVoice] = useState('')
   const [voices, setVoices] = useState<MiMoVoice[]>([])
@@ -503,14 +538,18 @@ export default function SettingsVoice() {
 
   const handleActivate = useCallback(
     async (name: string) => {
+      // 本地选中始终生效——它驱动下方「语音合成测试」的试听音色
       setActiveVoice(name)
+      // P0 收尾：全局切换改全局 TTS 单例（admin 门端点），普通用户不发必 403 的请求；
+      // 此处选择仅用于试听，个人音色绑定走角色设置
+      if (!isAdmin) return
       try {
         await mimoSwitchVoice(name)
       } catch {
         // error handled by global interceptor
       }
     },
-    []
+    [isAdmin]
   )
 
   return (
@@ -522,13 +561,19 @@ export default function SettingsVoice() {
         </p>
       </div>
 
-      <EngineSwitcher engine={engine} />
+      <EngineSwitcher engine={engine} isAdmin={isAdmin} />
       <VoiceList
         voices={voices}
         activeVoice={activeVoice}
         onActivate={handleActivate}
         loading={voicesLoading}
       />
+      {/* P0 收尾：switch-voice 为 admin 门端点，普通用户侧如实告知边界与替代路径 */}
+      {!isAdmin && (
+        <p className="text-xs text-gray-400">
+          音色全局切换为管理员能力，普通用户可在角色设置中绑定个人音色；此处选择仅用于试听。
+        </p>
+      )}
       <VoiceCloneSection onCreated={handleVoiceCreated} />
       <VoiceDesignSection onCreated={handleVoiceCreated} />
       <SynthesizeTest voiceId={activeVoice} />

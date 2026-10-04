@@ -7,6 +7,46 @@
 
 ---
 
+## 2026-10-05 — 安全升级批（默默指令「全仓历遍式扫描寻找攻击面升级；主控指挥+GLM-5.3-Flash 子智能体执行；真审计实事求是」）· 两轮对抗审计 + 生产实况取证 + P0 修复八域
+
+- **执行架构**：主控（GLM-5.3）指挥 + GLM-5.3-Flash 子智能体执行，三个 workflow（全仓攻击面扫描 6 分区→真审计补全 6 任务→P0 修复 7 域+收尾 2 任务+槽位补修 1 任务），每条 high/medium 发现由独立「防御方复核员」以证伪为目标对抗验证（adversarial-acceptance：验收人不是证明人）；主控对高危结论/推翻结论亲读源码抽验，生产服务器只读取证由主控亲自 SSH（root 生产机命令不假手子智能体）。
+- **D13 裁决落账**（`b0a0eff`）：① 开放注册 `/api/auth/register` 保留（LOGIN-2 口径更正：开放注册主链路+邀请码并存）；② 生产维持裸 IP HTTP（不上 TLS，已知悉接受）；③ **端点级收口为安全基线**。
+- **审计产出**：第一轮 34 条（高 5→去重 4 独立/中 16/低 13）+ 第二轮 47 条（高 2/中 15/低 30）+ 98 条弱守卫端点逐条分类清单。攻击链主轴：开放注册→任意人得 viewer token→`verify_api_key_dep` 验签即放行（`api/auth.py:57-62`）→ 仅挂此依赖的全局控制面端点全部裸露（proactive/history 全表读所有用户消息正文+wxid 等）。多项沙箱实测复现（sticker category 路径逃逸 HTTP 200、files 他人 JWT 读文件 200、负 slot 四通道创建、starlette 表单 85 倍放大）；3 条被复核推翻如实保留（CORS SameSite 阻断/chunked 被 nginx 1m 挡/PNG 懒加载）。
+- **生产实况真审计**（SSH 只读 16 项）：`API_KEY_ENABLED=true`+prod（H1 可达性落地）、CORS 白名单非通配（残留未触发）、nginx 仅 listen 80 无安全头、`/api/` 无 X-Forwarded-Proto、uvicorn 0.51.0（XFF 伪造不可绕）、starlette 生产 1.3.1（本地 1.2.1 的 CVE 生产已含修复）、`SAFETY_LLM_CLASSIFY` 未设（语义层确认关）、**systemd `User=root`+无 PrivateTmp+workers 4 与模板（www-data+true+1）三重漂移**、备份实存 700/600（代码无保证）、wechat credentials.json 644、app.log.2 存 37 条消息原文、三端一致 `d9fd7e0`、41 卡、8 用户（2 admin/6 viewer）、同机另两服务全 root（其一共享本项目 venv）。
+- **P0 修复八域**（全部红测先行+突变验红+对抗验收，41 文件 +1691/−437 + 9 个新测试文件）：
+  ① **认证收口**：`verify_api_key_dep` JWT 分支接 W1 三段主体校验（停用/删除/改密 token 不再借验签放行，语义不变量=有效启用用户放行）；query `?api_key=` 通道整删（消费面 grep 零引用）；登录/register-invite 专属限速（失败计数 5/60s/IP）+账号锁定（5 败锁 15min）+登录文案归一；邀请码四态 oracle 统一「邀请码无效」（含 CAS 落败文案）；invite 签发改 `token_claims`；chat_routes `_try_user_id` 旁路整删（三端点统一 `get_optional_principal`）。
+  ② **读面加门**：proactive/history、state、config、knowledge/collect-config、training/progress、emotion params GET/PUT → `require_role(admin)`；stats/dashboard/config 按消费面**主体收缩**（StatusCenter/SettingsLLM 普通页不破坏：viewer 只留本人相关字段，`{"scope":"user"}`）；user llm-config 掩码递归化；channels 会话列表本人过滤。
+  ③ **语音文件归属**：mimo switch-voice/set-engine→admin、synthesize/clone/design 限速+600 字上限；voice catalog 加 owner（向后兼容无主=平台共享）、speakers/synthesize 归属过滤（他人克隆音色 403）；rag/documents→admin（前端零消费者）；files 上传 `<uid>/` 子目录+随机段+serve 属主校验（存量根目录文件仅 admin）。
+  ④ **角色卡接线**：`validate_card` 接入 create/update/import 主链（ValidationError→400 不落全局 500），validator 自残类 warning 升 errors；preview/generate-from-description 接 BYOK 前置（与 chat 链同语义）；crawl/enrich 每用户限速；CSV 导出公式前缀转义；persona_card PUT 的 ValidationError→400（收尾批补）。
+  ⑤ **shisi 面收口**：affinity 四端点 user_id 归属主体化（键=JWT 主体导出 `uid::cid`，非 admin 的 query user_id 被主体覆盖，admin 显式通道保留；键空间与对话路径会话键互不相通已在 docstring 如实标注+装配级用例钉三段契约）；character switch/import/export/delete、sticker import/bind/delete、memory favorite/forward 族、stats→admin；sticker category 消毒（`[A-Za-z0-9_-]` 白名单+resolve 包含断言，先于 zip 早退）；emotion-stage/vital-signs 按 person 端点收口（/stages+/evaluate+persona GET 保持开放有契约钉）。
+  ⑥ **隐私数据**：微信链 7 处原文日志改元数据（AST 防复活钉）；自助注销真实派发（`asyncio.create_task` 执行 `delete_account_everywhere`+失败落账+坟场对账 `reconcile_graveyard` 接 lifespan，主控 escalation 授权跨域改 run_api.py ~10 行）；backup_manager 全产物 0600+目录 0700（跨平台契约测试）。
+  ⑦ **依赖部署卫生**：axios 1.16.1→1.20.0（21 advisory 清零）、vite 8.3.2、react-router 7.18.4、@sentry/vite-plugin ^3→^5.4.0（dependencies→devDependencies，CI 审计门 5 high 清零 exit 0）；CI 前端 job 增 npm audit --audit-level=high 门；client.ts VITE_API_KEY 三行整删+frontend/.gitignore 补 .env.development/.env.test；pyproject 显式 `starlette>=1.3.1`+本地对齐 1.7.0；nginx 双模板 /ws/ access_log off+三安全头（XFO/nosniff/Referrer-Policy）+/api/ 补 X-Forwarded-Proto；service 模板 workers 1→4 对齐生产+User=root 漂移注记；SettingsVoice 非 admin 适配（switch-voice 本地选中+说明文案、set-engine catch 降级，admin 流零变化）。
+  ⑧ **槽位补修**（终验发现的域缝隙漏项）：ChannelConnectRequest.slot 加 `ge=0, le=MAX_CHANNELS_PER_USER`（真源常量）；`_pick_slot` 负向 raise ChannelSlotError；start_login int(slot) 直通统一过校验（15 用例+双层突变验红）。
+- **测试清偿**：20 例编码漏洞本体的旧测试改写为新契约（test_auth_jwt_or_apikey 1+shisi 邻域 18+config_permissions 1——「无 JWT 可调/任意 user_id/合成 token 放行」的测试固化随修复拆除，用例数守恒）；补 shisi 生产装配级用例 1 条（router 级+端点级依赖叠加三段契约）。
+- **验证**：全量五分块（find 递归含 tests/core，182 文件）**2807 收集 / 2806 通过 / 1 跳过 / 0 失败**（580+1 / 653 / 553 / 451 / 570；基线 2654+1 → 净增 153=9 个 test_sec_p0 新文件-改写守恒）；vitest **182/182**（177+5）；tsc 0；ruff 全仓 0（workflow 门禁两轮+主控复跑）；ci_gates 4/4；各域突变验红合计 14 项全中零残留。⚠️ 引用口径：41 张角色卡在位、工作树含毕设窗 B 档两件（LOG 本条上方论文条目+BOARD 论文状态行，随批代提交——其 BOARD 条明示默默授权、同授权链）。
+- **遗留登记**：`docs/P1_BACKLOG.md` §安全升级遗留 11 项（SEC-1 记忆/RAG untrusted 信封、SEC-2 url_guard DNS rebinding、SEC-3 亲和键空间对齐、SEC-4 历史日志原文、SEC-5 EncryptionManager 接线、SEC-6 favorite/forward owner 列、SEC-7 公开仓 IP 泄露清理【涉 git 历史与凭据轮换待裁决】、SEC-8 WS query 通道、SEC-9 LLM 语义分类异步旁路、SEC-10 Python lockfile、SEC-11 低危卫生包）+OBS-2 改「已裁决接受」+OBS-3 补漂移细节+OBS-4 备份权限代码保证。生产存量 slot-1/-2 孤儿目录数据清理留主控裁量（磁盘数据面）。
+
+---
+
+---
+
+---
+
+## 2026-09-30 — 论文线三窗（ZCode 毕设会话跨窗，同一授权链）· AI 味复核 + 投稿前微调（默默指令「再次复核/降AI/用学术工作流skills优化」）
+
+- **技能**：`anti-ai-detection`/`anti-defensive-writing`/`paper-submission-audit`/`quality-check`（学术工作流真源，加载留痕见 `recon/33` 号件 §七）。
+- **检测结论**：main-v2-submit 双检测器交叉 **18.8% 低风险**（维度层 8.8%）；AI 八股词≈0；模板词 21 处命中经逐处举证 **20 处为术语误伤**（闭环=Q4 概念词、生态=环境耦合术语），仅「与此同时」1 处真痕迹；长句 44.9% 系理论文体 vs 数模基线不匹配，审慎不拆（仅摘要断句 1 处）。**判读：无需系统性去 AI 改写，重构稿散文本就干净**。
+- **实际修改（main-v2 主稿 7 处，数字/引用零触碰）**：与此同时→同一时期；摘要断句（v3 脚本同步）；补挂附 E8×3 + 附 E13 指引（E1–E13 锚全文闭环）；「合稿附录」行话清除；**嵌套双括号 bug×4 清零**（晨批方括号替换套入既有括号所致，§1.2/§7.2×2/§7.4）。
+- **门禁**：语义/句法/新痕迹三项 ✓；文体保护 ✗ 系三项子串误报（反正=反诘引语、哈=哈希/米哈游、emo=emotional），逐条举证豁免。
+- **终态**：v3 重新装配 18/18 PASS（2.15MB）；投稿包对照 14-手册 §1B.1 官方要求逐项复核**符合**，维持可发；上传仍归默默实名执行。
+
+## 2026-09-30 — 论文线续窗（ZCode 毕设会话跨窗，同一授权链）· main-v2 定稿验收优化 + 三项裁决执行 + 科技论文在线投稿包装配
+
+- **指令链**：承同日拒稿状态同步窗，默默追加授权「main-v2 定稿验收+再次优化」；交付三项裁决后默默复裁「按照推荐进行」（篇幅不压/题目转正/投稿，三项全采）。
+- **验收优化**：main-v2 对照 25 号设计书标尺全项通过；修 P0×2（20 处 `[2X §]` 方括号指针与参考文献编号撞号→转「附 E1-E13」证据附录；§5.8 表 3 错排且与 §4.9 AGIL 退场承诺自相矛盾→删表回指、§8.2 升格表 3 补挂簇标签）+ P1×3（60 余处内部行话清零、图 2 复制入位、9 条新引文献 OpenAlex 著录补全含 [31] 题名勘正）+ 散文修病；81 组确定性替换错一即不落盘，备份 `recon/_tmp/main-v2.bak-20260930.md`，关键数字零改动。回执 `recon/33-定稿验收与二稿优化回执.md`。
+- **裁决执行**：题目定稿《运转悖论的功能分析：一个 AI 情感陪伴系统的承担者谱系与失衡判据》已落 main-v2；投稿包装配完成——派生稿 `paper/main-v2-submit.md`（确定性生成器 `_tmp/make_submit_md.py`：剥元信息/日志/40 条文献尾注/反引号、单图重排图 1）+ `_tools/fill_paperedu_template_v3.py`（v2 lxml 管线+markdown→w:tbl 表格装配+新元数据，宏工程 vbaProject.bin 原封）→ 产物 `paper/科技论文在线投稿版-v3.doc`（2.1MB）。**自检 18/18 PASS**；独立复验 5 表结构（12×5/8×3/10×4/8×3/14×3）与 K1-K11/Q1-Q7/E1-E13 逐一对账、CSO 六样式全在模板。
+- **边界**：论文工作区非 git 零 commit；**未上传**——paper.edu.cn 实名上传归默默（步骤清单在 33 号件 §六）；v1 投稿档与 v2 脚本未动留档对照。
+
 ## 2026-09-30 — 主控 · 遗留待办批：P1_BACKLOG 10/11 双端死链整删（默默 userselect 点名「处理遗漏待办」）
 
 - **指令链**：默默 userselect 选中补课批总结两段（W14+v1.34 遗留及其「连带发现」），令「处理遗漏待办」。W14/v1.34 两项已随 `0945704` 闭环（`git log`+代码在位复核）；本批执行其连带登记的 **P1_BACKLOG 10/11**（上批「登记不扩批」，本批销账）。

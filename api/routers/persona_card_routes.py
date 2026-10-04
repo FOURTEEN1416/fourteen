@@ -81,7 +81,19 @@ async def update_persona_card(
         card = CharaCardV2.model_validate(req.card)
     except Exception as e:
         raise HTTPException(status_code=400, detail="角色卡数据无效") from e
-    ok = char_mgr.update_character(character_id, card)
+    # P0 收尾批 F5（2026-10-05）：manager 内 validate_card 不过会抛 shisi
+    # ValidationError——裸调会逃逸到全局 500 handler。与
+    # character_routes._validate_card_or_400 同语义族：写路径安全校验失败
+    # 统一 400 出口（拦截发生在落盘之前，不半写真源）。
+    from shisi.character.validator import ValidationError as ShisiValidationError
+
+    try:
+        ok = char_mgr.update_character(character_id, card)
+    except ShisiValidationError as e:
+        raise HTTPException(
+            status_code=400,
+            detail="角色卡未通过安全校验: " + "；".join(e.errors),
+        ) from e
     if not ok:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 

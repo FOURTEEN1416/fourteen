@@ -82,7 +82,13 @@ class VoiceCatalog:
         description: str = "",
         gender: str = "",
         age_group: str = "",
+        owner: str = "",
     ) -> dict[str, Any]:
+        """登记音色。
+
+        ``owner`` 为调用者主体（user_id 字符串）；空串 = 平台共享（P0 安全批 F2）。
+        存量 JSON 条目无 owner 键时同样按平台共享解释，向后兼容。
+        """
         if not voice_id:
             raise ValueError("voice_id 不能为空")
         entry: dict[str, Any] = {
@@ -96,6 +102,8 @@ class VoiceCatalog:
             entry["gender"] = gender
         if age_group:
             entry["age_group"] = age_group
+        if owner:
+            entry["owner"] = owner
         with self._lock:
             self._entries[voice_id] = entry
             self._save()

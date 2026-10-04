@@ -14,13 +14,16 @@ import asyncio
 import logging
 import os
 import re
+import threading
 import time
+import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Security, UploadFile
 from fastapi.responses import FileResponse, Response
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import get_current_user, require_role
+from api.auth_jwt import AuthPrincipal, get_current_user, get_optional_principal, require_role
 from api.database import User
 from api.deps import deps
 from api.main_routes import MAX_RAG_UPLOAD_SIZE, MAX_UPLOAD_SIZE, UPLOAD_DIR
@@ -28,6 +31,53 @@ from api.main_routes import MAX_RAG_UPLOAD_SIZE, MAX_UPLOAD_SIZE, UPLOAD_DIR
 logger = logging.getLogger("api.routers.safety_routes")
 
 router = APIRouter(tags=["safety-infra"])
+
+# P0 安全批 F5：合成文本上限（与 mimo_voice_routes 同一产品口径）
+_MAX_SYNTH_TEXT_LEN = 600
+
+
+class _RateLimiter:
+    """每主体滑动窗口限速（内存计数；进程级）。
+
+    仅本文件使用，勿抽公共模块（P0 安全批并行窗口纪律，与 mimo_voice_routes 各自内置）。
+    """
+
+    def __init__(self, max_events: int, window_seconds: float = 60.0):
+        self._max = max_events
+        self._window = window_seconds
+        self._hits: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def check(self, key: str) -> bool:
+        """窗口内还有配额则记账并放行，否则拒绝（含失败请求，防绕过试错）。"""
+        now = time.monotonic()
+        with self._lock:
+            hits = [t for t in self._hits.get(key, ()) if now - t < self._window]
+            if len(hits) >= self._max:
+                self._hits[key] = hits
+                return False
+            hits.append(now)
+            self._hits[key] = hits
+            return True
+
+    def reset(self) -> None:
+        """清空记账（测试隔离用）。"""
+        with self._lock:
+            self._hits.clear()
+
+
+_VOICE_SYNTH_LIMITER = _RateLimiter(6)  # 6 次/分钟/用户
+
+
+def _as_principal(candidate: Any) -> AuthPrincipal | None:
+    """归一主体：直呼 handler（既有测试/脚本）会拿到 Depends 哨兵——按「无主体」解释。"""
+    return candidate if isinstance(candidate, AuthPrincipal) else None
+
+
+def _limit_or_429(limiter: _RateLimiter, principal: AuthPrincipal | None) -> None:
+    key = f"user:{principal.user_id}" if principal is not None else "machine"
+    if not limiter.check(key):
+        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
 
 
 # ═══════════════════════════════════════════════════════
@@ -139,6 +189,8 @@ async def rag_search(
 async def rag_upload_document(
     file: UploadFile = File(...),  # noqa: B008
     _auth: bool = Security(verify_api_key_dep),
+    # P0 F3：共享知识库无归属写入（写进即全用户可检索注入），收 admin 控制面
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     rag = deps.get_rag()
     if not rag:
@@ -187,7 +239,16 @@ async def voice_synthesize(
     text: str = Form(...),
     engine: str = Form(""),
     _auth: bool = Security(verify_api_key_dep),
+    _principal: AuthPrincipal | None = Depends(get_optional_principal),
 ):
+    """P0 F5：text>600 字 400 + 每用户限速 6 次/分钟（TTS 成本与滥用面收口）。"""
+    principal = _as_principal(_principal)
+    if len(text) > _MAX_SYNTH_TEXT_LEN:
+        raise HTTPException(
+            400, f"合成文本过长（{len(text)} 字 > 上限 {_MAX_SYNTH_TEXT_LEN} 字）"
+        )
+    _limit_or_429(_VOICE_SYNTH_LIMITER, principal)
+
     tts = deps.get_tts()
     if not tts or not tts.enabled:
         raise HTTPException(503, "TTS未启用")
@@ -214,44 +275,80 @@ async def voice_synthesize(
 async def upload_file(
     file: UploadFile = File(...),  # noqa: B008
     _auth: bool = Security(verify_api_key_dep),
+    _principal: AuthPrincipal | None = Depends(get_optional_principal),
 ):
+    """P0 F4 归属化上传：落 ``data/uploads/<user_id>/`` 子目录（已存在则复用），
+    文件名加 uuid4 随机段（防猜测/防碰撞）；无登录主体一律 401——不可归属的
+    写入不再收（存量根目录文件从此仅 admin 可读）。"""
+    principal = _as_principal(_principal)
+    if principal is None:
+        raise HTTPException(401, "需要登录主体（Bearer token）才能上传文件")
     content = await file.read()
     if len(content) > MAX_UPLOAD_SIZE:
         raise HTTPException(413, f"文件大小超过限制 ({MAX_UPLOAD_SIZE // 1024 // 1024}MB)")
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     safe_name = re.sub(r'[^\w.\-]', '_', file.filename)
-    dest = UPLOAD_DIR / f"{int(time.time())}_{safe_name}"
+    user_dir = UPLOAD_DIR / str(principal.user_id)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    dest = user_dir / f"{int(time.time())}_{uuid.uuid4().hex[:8]}_{safe_name}"
     with open(dest, "wb") as f:
         f.write(content)
     mime = file.content_type or "application/octet-stream"
     msg_type = "image" if mime.startswith("image/") else "voice" if mime.startswith("audio/") else "file"
     return {
         "status": "ok",
-        "filename": safe_name,
+        "filename": dest.name,
         "size": len(content),
         "mime_type": mime,
         "message_type": msg_type,
-        "url": f"/api/files/{dest.name}",
+        "url": f"/api/files/{principal.user_id}/{dest.name}",
     }
 
 
-@router.get("/api/files/{filename}")
+@router.get("/api/files/{filename:path}")
 async def serve_file(
     filename: str,
     _auth: bool = Security(verify_api_key_dep),
+    _principal: AuthPrincipal | None = Depends(get_optional_principal),
 ):
-    safe_name = os.path.basename(filename)
-    file_path = (UPLOAD_DIR / safe_name).resolve()
-    upload_dir_resolved = UPLOAD_DIR.resolve()
-    if not str(file_path).startswith(str(upload_dir_resolved)):
+    """P0 F4 按主体校验归属后回源：
+
+    - ``<user_id>/`` 子目录内文件：仅本人与 admin 可读；
+    - 存量根目录文件（无归属）：仅 admin 可读；
+    - 路径穿越防护保留并加强：拒绝 ``..`` 段 / 反斜杠 / 盘符形态，
+      resolve 后仍须落在 uploads 目录内。
+    """
+    principal = _as_principal(_principal)
+    is_admin = principal is not None and principal.role == "admin"
+
+    parts = [p for p in filename.replace("\\", "/").split("/") if p not in ("", ".")]
+    if not parts or ".." in parts or ":" in "".join(parts):
         raise HTTPException(403, "Access denied")
-    if not file_path.exists():
+    upload_dir_resolved = UPLOAD_DIR.resolve()
+    file_path = UPLOAD_DIR
+    for part in parts:
+        file_path = file_path / part
+    file_path_resolved = file_path.resolve()
+    if file_path_resolved != upload_dir_resolved and not str(file_path_resolved).startswith(
+        str(upload_dir_resolved) + os.sep
+    ):
+        raise HTTPException(403, "Access denied")
+    if not file_path_resolved.exists():
         raise HTTPException(404, "文件不存在")
-    if not file_path.is_file():
+    if not file_path_resolved.is_file():
         raise HTTPException(400, "Not a file")
-    return FileResponse(file_path)
+
+    rel_parts = file_path_resolved.relative_to(upload_dir_resolved).parts
+    if len(rel_parts) == 1:
+        # 存量根目录文件：无归属，仅 admin
+        if not is_admin:
+            raise HTTPException(403, "Access denied")
+    else:
+        owner_dir = rel_parts[0]
+        if not is_admin and (principal is None or owner_dir != str(principal.user_id)):
+            raise HTTPException(403, "Access denied")
+    return FileResponse(file_path_resolved)
 
 
 # ═══════════════════════════════════════════════════════

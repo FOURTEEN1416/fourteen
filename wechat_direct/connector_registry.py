@@ -61,11 +61,13 @@ class ConnectorRegistry:
         with self._lock:
             owned = {s for (u, s) in self._connectors if u == uid}
             if prefer is not None:
-                if prefer in owned:
-                    return prefer
-                if prefer >= channel_paths.MAX_CHANNELS_PER_USER:
+                # 槽位合法性双向校验：负数 slot（如 -1）旧版直通返回（-1>=上限为假），
+                # 绕开「一人最多 2 条」硬限制并落盘 slot-1/slot-2 孤儿目录
+                # （审计 medium，2026-10-05 收口）。
+                if prefer < 0 or prefer >= channel_paths.MAX_CHANNELS_PER_USER:
                     raise ChannelSlotError(
-                        f"用户 {uid} 通道槽位非法 slot={prefer}（上限 {channel_paths.MAX_CHANNELS_PER_USER}）"
+                        f"用户 {uid} 通道槽位非法 slot={prefer}"
+                        f"（合法范围 0~{channel_paths.MAX_CHANNELS_PER_USER - 1}）"
                     )
                 return prefer
             for s in range(channel_paths.MAX_CHANNELS_PER_USER):
@@ -254,8 +256,9 @@ class ConnectorRegistry:
     def start_login(self, user_id: int, slot: int | None = None, user_manager=None) -> dict[str, Any]:
         """为指定用户启动扫码登录（异步线程），返回初始状态。"""
         uid = int(user_id)
-        # 多 worker：登录同样抢通道锁，避免双开
-        pick = self._pick_slot(uid, slot) if slot is None else int(slot)
+        # slot 非 None 也必须过 _pick_slot：旧 int(slot) 直通同时绕开负向与上界
+        # 两向校验（审计 medium，2026-10-05 收口）；slot=None 时行为不变（自动分配）。
+        pick = self._pick_slot(uid, slot)
         # 用户主动发起扫码 = 期望态回到 connected（覆盖此前"断连"选择），
         # 否则 restore_on_boot / 宿主循环会因 desired=disabled 拒启动。
         try:

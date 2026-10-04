@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import sqlite3
 import zipfile
 from collections.abc import Iterator
@@ -28,6 +29,30 @@ _MAX_SIZE_MB = get_config("sticker", "max_file_size_mb", 5)
 # 与 StickerManager 同源：导入必须落到真实 stickers 库——不存在"只落文件
 # 不入库"的模式（那正是 D12-K 根治掉的不可见导入）。
 _DB_DEFAULT = Path(__file__).resolve().parent.parent.parent / "data" / "sqlite.db"
+
+# ── category 白名单消毒（2026-10 P0）─────────────────────────────
+# category 直接拼目录路径（_data_dir / category），旧实现未做任何校验：
+# `../evil` 即可在数据目录外落盘（路径穿越）。现收口为 [A-Za-z0-9_-]
+# 白名单 + resolve 后包含性断言（纵深防御），非法一律 ValueError，
+# 由路由层转 400。
+_CATEGORY_ALLOWED = re.compile(r"[A-Za-z0-9_-]")
+_CATEGORY_MAX_LEN = 64
+
+
+def sanitize_category(category: str) -> str:
+    """category 白名单消毒：仅允许 ``[A-Za-z0-9_-]``，长度 ≤ 64。
+
+    与 ``api/path_security.sanitize_id`` 的字符面一致，但语义取「拒绝」
+    而非「静默清洗」——含任何白名单外字符（含 ``/`` ``\\`` ``.``）即
+    ValueError，不给穿越串变形落盘的机会。
+    """
+    raw = str(category or "")
+    cleaned = "".join(_CATEGORY_ALLOWED.findall(raw))[:_CATEGORY_MAX_LEN]
+    if not cleaned or cleaned != raw:
+        raise ValueError(
+            f"非法 category: {raw!r}（仅允许 [A-Za-z0-9_-]，长度≤{_CATEGORY_MAX_LEN}）"
+        )
+    return cleaned
 
 
 def _stable_sticker_id(filename: str, content: bytes) -> str:
@@ -57,13 +82,30 @@ class StickerImporter:
             return False
 
     def import_zip(self, zip_path: Path | str, category: str = "default") -> tuple[int, int]:
-        """返回 (accepted, failed)：accepted = 真实入库张数（文件+表都成功）。"""
+        """返回 (accepted, failed)：accepted = 真实入库张数（文件+表都成功）。
+
+        P0：``category`` 先经白名单消毒，再做 resolve 后包含性断言——
+        ``category_dir`` 必须落在 ``self._data_dir`` 内，否则 ValueError
+        （路由层转 400）。消毒先于 zip 存在性早退：非法 category 无论
+        包体在否一律拒绝，不给试探性探测留口。
+        """
+        category = sanitize_category(category)
+        data_root = self._data_dir.resolve()
+        category_dir = (data_root / category).resolve()
+        try:
+            category_dir.relative_to(data_root)
+        except ValueError as e:
+            raise ValueError(
+                f"category 目录越界: {category_dir} 不在 {data_root} 内"
+            ) from e
+        if category_dir == data_root:
+            raise ValueError(f"category 不得指向数据根目录本身: {category!r}")
+
         p = Path(zip_path)
         if not p.exists():
             return 0, 0
 
         accepted, failed = 0, 0
-        category_dir = self._data_dir / category
         category_dir.mkdir(parents=True, exist_ok=True)
 
         try:

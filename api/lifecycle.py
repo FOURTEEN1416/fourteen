@@ -993,6 +993,43 @@ async def reconcile_graveyard(
     return repurged
 
 
+# 后台注销任务的强引用集（防 Task 被 GC 半途丢弃）
+_BG_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _dispatch_background_delete(user_id: int, **kwargs: Any) -> None:
+    """把 queued 注销作业真实派发到当前事件循环的后台任务。
+
+    P0 根治：旧实现只写 ``status=queued`` 作业账后 return，无任何消费者，
+    自助注销实际永不执行。``delete_account_everywhere`` 自带幂等/续跑/
+    逐步骤失败落账（status=failed + 步骤原因）；本包装只兜其外的顶层
+    异常（scope 解析等），保证作业账同样落 ``failed`` + 原因——按回执
+    纪律只记异常类型名，不落异常文本（防私密路径外泄）。
+    """
+
+    async def _run() -> None:
+        try:
+            await delete_account_everywhere(int(user_id), **kwargs)
+        except Exception as e:  # noqa: BLE001
+            logger.error("后台注销作业失败 uid=%s: %s", user_id, e)
+            try:
+                job = _load_job(int(user_id)) or {
+                    "job_id": f"acct-{int(user_id)}",
+                    "user_id": int(user_id),
+                    "steps": {},
+                }
+                job["status"] = "failed"
+                job["completed"] = False
+                job["error"] = f"{type(e).__name__}"
+                _save_job(job)
+            except Exception:  # noqa: BLE001
+                logger.exception("后台注销作业失败原因落账失败 uid=%s", user_id)
+
+    task = asyncio.create_task(_run())
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+
+
 async def self_service_delete(
     user_id: int,
     *,
@@ -1006,7 +1043,9 @@ async def self_service_delete(
 ) -> dict:
     """自助注销：立即冻结（停用 + 撤销会话 + 坟场 + 写入封禁），清除异步进行。
 
-    返回作业状态；**清除完成前响应不含任何「已删除」宣称**。
+    background=True 时冻结仍同步完成，随后经 ``_dispatch_background_delete``
+    真实派发后台清除（queued 不再悬挂）；返回作业受理状态，
+    **清除完成前响应不含任何「已删除」宣称**。
     """
     scope = await _resolve_scope(
         int(user_id), db_factory or _default_db_factory(),
@@ -1023,6 +1062,14 @@ async def self_service_delete(
             "steps": {},
         }
         _save_job(job)
+        # P0：queued 不再悬挂 —— 真实派发后台清除（幂等语义在
+        # delete_account_everywhere 内保证，失败同样落作业账）
+        _dispatch_background_delete(
+            int(user_id),
+            db_factory=db_factory or _default_db_factory(),
+            characters_dir=characters_dir, knowledge_dir=knowledge_dir,
+            sqlite_db=sqlite_db, agent_db=agent_db, chroma_dir=chroma_dir,
+        )
         return _public_job(job)
     return await delete_account_everywhere(
         int(user_id),

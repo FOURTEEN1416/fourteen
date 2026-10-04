@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from api.auth_jwt import User, require_role
 
 from ..stats.analytics import AnalyticsService
 from .common import ApiResponse
@@ -22,7 +24,9 @@ def set_service(s: AnalyticsService) -> None:
 
 
 @router.get("", response_model=ApiResponse)
-async def get_stats():
+async def get_stats(_admin: tuple[int, User] = Depends(require_role("admin"))):
+    """P0 越权收口：全局统计（消息量/角色使用/情感分布）是跨用户诊断面，
+    仅 admin 可读。"""
     if _service is None:
         raise HTTPException(status_code=503, detail="AnalyticsService未初始化")
     return ApiResponse(data=_service.get_stats())

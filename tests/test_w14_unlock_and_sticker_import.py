@@ -308,40 +308,86 @@ class TestTopicUnlockPromptSlot:
 # A5：落表解锁 HTTP 展示（90 档不改主动决策，只读面）
 # ---------------------------------------------------------------------------
 
+def _principal_client(tmp_path: Path, *routers, role: str):
+    """挂给定 router 的 app：users 表真库（admin+viewer）+ get_current_user_id
+    覆盖（P0 收口后 affinity/sticker 端点均要求登录主体；
+    模式沿 tests/test_sec_p0_shisi_surface.py::make_principal_client）。
+    返回 TestClient；引擎在本函数内建拆（Windows 文件锁即时释放）。"""
+    import asyncio
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from api.auth_jwt import get_current_user_id
+    from api.database import Base, User, get_db
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'users.db'}")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def _init():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_maker() as s:
+            s.add(User(id=1, email="a@test", username="a",
+                       hashed_password="x", role="admin",
+                       is_active=True, is_verified=True))
+            s.add(User(id=2, email="v@test", username="v",
+                       hashed_password="x", role="viewer",
+                       is_active=True, is_verified=True))
+            await s.commit()
+
+    try:
+        asyncio.run(_init())
+
+        async def _get_db():
+            async with session_maker() as s:
+                yield s
+
+        app = FastAPI()
+        for r in routers:
+            app.include_router(r)
+        app.dependency_overrides[get_db] = _get_db
+        app.dependency_overrides[get_current_user_id] = lambda: (1 if role == "admin" else 2)
+        return TestClient(app)
+    finally:
+        asyncio.run(engine.dispose())
+
 
 class TestUnlockHttpDisplay:
-    def test_unlocks_route_shows_recorded_rows(self, unlock_db: Path) -> None:
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-
+    def test_unlocks_route_shows_recorded_rows(self, unlock_db: Path, tmp_path: Path) -> None:
+        """P0 收口后新契约：键归属由 JWT 主体导出——viewer 登录态下，
+        query user_id 被主体覆盖，recorded 只能来自主体键 2::c1。"""
         from shisi.affinity.enhancer import AffinityEnhancer
         from shisi.api import affinity_routes
 
         enhancer = AffinityEnhancer(db_path=unlock_db)
-        enhancer.update("c1", 95.0, reason="test", user_id="u1")  # 连跨 25/50/75/90
+        enhancer.update("c1", 95.0, reason="test", user_id="2")  # 主体键连跨 25/50/75/90
+        # 干扰键：若无主体覆盖，query user_id=victim 会读到该键（旧漏洞口径）
+        enhancer.update("c1", 10.0, reason="seed-victim", user_id="victim")
         affinity_routes.set_enhancer(enhancer)
-        app = FastAPI()
-        app.include_router(affinity_routes.router)
-        client = TestClient(app)
 
-        resp = client.get("/api/shisi/affinity/c1/unlocks", params={"user_id": "u1"})
+        client = _principal_client(tmp_path, affinity_routes.router, role="viewer")
+        resp = client.get("/api/shisi/affinity/c1/unlocks", params={"user_id": "victim"})
         assert resp.status_code == 200
         data = resp.json()["data"]
         names = {r["unlock_name"] for r in data["recorded"]}
-        assert "特殊互动" in names, "90 档落表后 HTTP 可查"
+        assert "特殊互动" in names, "90 档落表后 HTTP 可查（主体键 2::c1）"
         assert "个人话题" in names
+        assert data["affinity"] == pytest.approx(
+            enhancer.get_value("c1", user_id="2")
+        ), "读数必须来自主体键（query user_id=victim 被覆盖）"
 
-    def test_unlocks_route_without_user_keeps_old_shape(self, unlock_db: Path) -> None:
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-
+    def test_unlocks_route_without_user_keeps_old_shape(
+        self, unlock_db: Path, tmp_path: Path
+    ) -> None:
+        """边界钉：不带 user_id 的响应 shape 不变（unlocks/recorded 字段族）；
+        P0 收口后「不带」读主体键——空库下 recorded 仍为空列表。"""
         from shisi.affinity.enhancer import AffinityEnhancer
         from shisi.api import affinity_routes
 
         affinity_routes.set_enhancer(AffinityEnhancer(db_path=unlock_db))
-        app = FastAPI()
-        app.include_router(affinity_routes.router)
-        client = TestClient(app)
+        client = _principal_client(tmp_path, affinity_routes.router, role="viewer")
         resp = client.get("/api/shisi/affinity/c1/unlocks")
         assert resp.status_code == 200
         data = resp.json()["data"]
@@ -434,9 +480,8 @@ class TestStickerImportPersistence:
 
 class TestStickerImportRouteReceipt:
     def test_route_returns_accepted_failed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-
+        """P0 收口后新契约：sticker import 走 admin 门禁——admin 通道 200
+        且回执语义不变（accepted=真实入库数）。"""
         from shisi.api import sticker_routes
         from shisi.sticker.sticker_manager import StickerManager
 
@@ -444,9 +489,7 @@ class TestStickerImportRouteReceipt:
         mgr = StickerManager(db_path=db, data_dir=tmp_path / "d")
         monkeypatch.setattr(sticker_routes, "_manager", mgr)
 
-        app = FastAPI()
-        app.include_router(sticker_routes.router)
-        client = TestClient(app)
+        client = _principal_client(tmp_path, sticker_routes.router, role="admin")
 
         z = _make_zip(tmp_path / "z.zip", [("a.png", b"\x89PNG-a"), ("色情.png", b"\x89PNG-b")])
         with open(z, "rb") as f:

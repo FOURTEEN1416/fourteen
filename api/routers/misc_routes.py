@@ -81,7 +81,10 @@ async def memory_scope(
 
 
 @router.get("/api/stats")
-async def stats(_auth: bool = Security(verify_api_key_dep)):
+async def stats(
+    _auth: bool = Security(verify_api_key_dep),
+    scope: str | None = Depends(memory_scope),
+):
     orch = deps.orch
     sessions = deps.sessions
     stats_data: dict[str, Any] = {"status": "ok"}
@@ -93,11 +96,22 @@ async def stats(_auth: bool = Security(verify_api_key_dep)):
             stats_data["working_count"] = orch._memory.working.count()
         if sessions:
             stats_data["active_sessions"] = sessions.active_count
+    if scope is not None:
+        # SEC-P0 读面收缩：普通用户只保留无害全局计数 —— 前端 StatusCenter
+        # （MemorySystemCard 直连 /stats）仅消费 working_count；引擎健康详情
+        # （emotion）与全局活跃会话数不外泄。admin / 机器 key 走全量（scope=None）。
+        shrunk: dict[str, Any] = {"status": "ok"}
+        if "working_count" in stats_data:
+            shrunk["working_count"] = stats_data["working_count"]
+        return shrunk
     return stats_data
 
 
 @router.get("/api/stats/dashboard")
-async def get_dashboard_stats(_auth: bool = Security(verify_api_key_dep)):
+async def get_dashboard_stats(
+    _auth: bool = Security(verify_api_key_dep),
+    scope: str | None = Depends(memory_scope),
+):
     orch = deps.orch
     emotion_current = "-"
     affinity = 0
@@ -179,6 +193,18 @@ async def get_dashboard_stats(_auth: bool = Security(verify_api_key_dep)):
         except Exception as e:
             logger.debug("Failed to get health check for dashboard: %s", e)
 
+    if scope is not None:
+        # SEC-P0 读面收缩：普通用户只保留陪伴态计数（StatusCenter 消费
+        # current_emotion/affinity/recent_memories）；wechat 块（bot_id/消息量/
+        # 重连计数/在线通道）、训练管线与系统运行面（status/uptime）不外泄。
+        # admin / 机器 key 走全量（scope=None）。
+        return {
+            "today_chats": chats_today,
+            "recent_memories": facts_count,
+            "affinity": affinity,
+            "energy": energy,
+            "current_emotion": emotion_current,
+        }
     return {
         "today_chats": chats_today,
         "recent_memories": facts_count,
@@ -405,7 +431,14 @@ async def stream_logs(
 async def get_config(
     _auth: bool = Security(verify_api_key_dep),
     _user: int = Security(get_current_user_id),
+    scope: str | None = Depends(memory_scope),
 ):
+    if scope is not None:
+        # SEC-P0 读面收缩：全局配置是 admin 面 —— 前端普通用户页走
+        # /api/user/llm-config（SettingsLLM 按 isAdmin 分流拉取）。不 403 而是
+        # 200 收缩：W1 契约把 viewer 的 200 钉为停用账号检测依赖面，一刀切
+        # 403 会打断该检测链。机器 key（无 Bearer）仍被 get_current_user_id 401。
+        return {"scope": "user"}
     cfg = deps.config
     if cfg:
         if hasattr(cfg, "get_config_dict"):
@@ -465,13 +498,15 @@ async def save_config(
 
 
 def _sanitize_llm_config(cfg: dict | None) -> dict | None:
-    """脱敏用户级 LLM 配置：API Key 用 **** 替换。"""
+    """脱敏用户级 LLM 配置。
+
+    SEC-P0：旧实现只掩顶层 ``api_key``，``providers.<name>.api_key`` 等任意
+    层级敏感键会明文回显。改复用 main_routes 的递归掩码真源 ``_sanitize_config``
+    （SENSITIVE_FIELDS/SENSITIVE_SUFFIXES 全层级生效），非敏感字段不受波及。
+    """
     if not cfg:
         return None
-    sanitized = dict(cfg)
-    if sanitized.get("api_key"):
-        sanitized["api_key"] = "****"
-    return sanitized
+    return _sanitize_config(cfg)
 
 
 @router.get("/api/user/llm-config")
@@ -544,9 +579,16 @@ async def save_user_llm_config(
 @router.get("/api/channels")
 async def list_channels(
     _auth: bool = Security(verify_api_key_dep),
-    user_id: int = Security(get_current_user_id),
+    current_user: User = Security(get_current_user),
 ):
-    """通道列表：微信项只反映**当前登录用户**自己的通道，不再广播全局 bot。"""
+    """通道列表：微信项只反映**当前登录用户**自己的通道，不再广播全局 bot。
+
+    SEC-P0：活跃会话列表同样按本人过滤（旧 ``get_active_sessions()`` 无
+    user_id 条件，非静态通道类型的他人会话 id 前缀会进响应）；admin 全量
+    （既有管理面契约）。角色取库内现值，不受 token 声明影响。
+    """
+    user_id = current_user.id
+    is_admin = current_user.role == "admin"
     sessions = deps.sessions
     channels = [
         {"id": "web", "name": "Web 控制台", "type": "web", "status": "connected", "desc": "当前浏览器 WebSocket", "meta": "在线"},
@@ -575,7 +617,8 @@ async def list_channels(
             "status": "disconnected", "desc": "尚未连接你的微信", "meta": "",
         })
     if sessions:
-        active = sessions.get_active_sessions()
+        # 本人过滤：admin 不过滤（chat_routes 既有 str(user_id) 先例同型）
+        active = sessions.get_active_sessions("" if is_admin else str(user_id))
         for ses_id in active:
             ses_data = sessions.get_session(ses_id)
             if not ses_data:

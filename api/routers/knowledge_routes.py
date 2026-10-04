@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -12,6 +13,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Security, UploadFil
 from pydantic import BaseModel, Field
 
 from api.auth import verify_api_key_dep
+from api.auth_jwt import AuthPrincipal, get_optional_principal
 from api.path_security import sanitize_id
 from api.routers.character_routes import require_character_access
 from shisi.character.character_card_v2 import CharaCardV2Parser
@@ -79,6 +81,40 @@ def _ensure_full_index(character_id: str, raw: dict[str, Any]) -> None:
 
 
 # ── API 端点 ──
+
+
+# ── 每用户限速（P0 修复批 2026-10-04，F3）────────────────
+# crawl / enrich 是多源网络长链（实测单次 30s+）且会写知识库，此前对普通
+# 注册用户完全不限速。进程内固定窗口计数：每用户每端点每分钟 2 次。
+# 机器面（无 Bearer）不在「每用户」语义内，不在此限——其准入由 API Key 面
+# 把守（与 W1 机器面契约同边界：归属类校验只在存在 Bearer 主体时生效）。
+
+_RATE_WINDOW_SECONDS = 60.0
+_RATE_LIMIT_PER_WINDOW = 2
+_RATE_BUCKETS: dict[str, list[float]] = {}
+
+
+def _enforce_user_rate_limit(scope: str, principal: AuthPrincipal | None) -> None:
+    """固定窗口内存限速：每用户（Bearer 主体）每 scope 每分钟 _RATE_LIMIT_PER_WINDOW 次。
+
+    isinstance 收窄：经 FastAPI 注入时 principal 必为 AuthPrincipal | None；
+    直调路由函数（既有单测的直调形态）拿到的是未解析的 Security 哨兵，
+    按机器面处理（无身份可限，亦不因此崩）。
+    """
+    if not isinstance(principal, AuthPrincipal):
+        return
+    key = f"{scope}:user:{principal.user_id}"
+    now = time.monotonic()
+    hits = [t for t in _RATE_BUCKETS.get(key, ()) if now - t < _RATE_WINDOW_SECONDS]
+    if len(hits) >= _RATE_LIMIT_PER_WINDOW:
+        retry_after = max(1, int(_RATE_WINDOW_SECONDS - (now - hits[0])) + 1)
+        raise HTTPException(
+            status_code=429,
+            detail="操作过于频繁：该功能每用户每分钟最多 2 次，请稍后再试",
+            headers={"Retry-After": str(retry_after), "X-Error-Code": "RATE_LIMIT"},
+        )
+    hits.append(now)
+    _RATE_BUCKETS[key] = hits
 
 
 @router.get("/{character_id}/knowledge/stats")
@@ -328,11 +364,13 @@ async def crawl_persona_knowledge(
     character_id: str,
     req: CrawlPersonaRequest,
     _auth: bool = Security(verify_api_key_dep),
+    principal: AuthPrincipal | None = Security(get_optional_principal),
     # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
     # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
     _owned: dict = Depends(require_character_access),
 ):
     """从网络抓取人物资料并写入角色知识索引。"""
+    _enforce_user_rate_limit("crawl", principal)  # F3：每用户限速前置（配额不因 404/502 泄漏）
     card = _load_character_card(character_id)
     # 允许角色卡不存在，此时仅建立爬虫来源的索引
     adapter = get_crawler_adapter()
@@ -381,6 +419,7 @@ async def enrich_character_persona(
     character_id: str,
     req: EnrichRequest,
     _auth: bool = Security(verify_api_key_dep),
+    principal: AuthPrincipal | None = Security(get_optional_principal),
     # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
     # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
     _owned: dict = Depends(require_character_access),
@@ -390,6 +429,7 @@ async def enrich_character_persona(
     数据源：B站、小红书、Firecrawl、Jina Reader、Exa 等多源搜索。
     与对话内 search 工具不同，本端点将结果持久化到角色知识库供后续 RAG 检索。
     """
+    _enforce_user_rate_limit("enrich", principal)  # F3：每用户限速前置
     card = _load_character_card(character_id)
     if card is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")

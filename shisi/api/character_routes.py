@@ -6,8 +6,10 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
+
+from api.auth_jwt import User, require_role
 
 from ..character.manager import CharacterManager
 from .common import ApiResponse
@@ -55,7 +57,12 @@ async def get_character(character_id: str):
 
 
 @router.post("/switch", response_model=ApiResponse)
-async def switch_character(req: SwitchRequest):
+async def switch_character(
+    req: SwitchRequest,
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """P0 越权收口：角色切换是全局控制面动作（影响运行态激活角色），
+    仅 admin 可调——旧实现任意注册用户（role=viewer）即可切换。"""
     mgr = _get_manager()
     ok, msg = mgr.switch_character(req.character_id)
     if not ok:
@@ -64,7 +71,11 @@ async def switch_character(req: SwitchRequest):
 
 
 @router.post("/import", response_model=ApiResponse)
-async def import_characters(file: UploadFile = File(...)):  # noqa: B008
+async def import_characters(
+    file: UploadFile = File(...),  # noqa: B008
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """P0 越权收口：批量导入会写入全局角色池，仅 admin。"""
     mgr = _get_manager()
     import tempfile
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False, encoding="utf-8") as tmp:
@@ -82,7 +93,11 @@ async def import_characters(file: UploadFile = File(...)):  # noqa: B008
 
 
 @router.post("/export/{character_id}", response_model=ApiResponse)
-async def export_character(character_id: str):
+async def export_character(
+    character_id: str,
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """P0 越权收口：整卡导出（含完整人设字段）落盘为可分发文件，仅 admin。"""
     mgr = _get_manager()
     path = mgr.export_character(character_id)
     if path is None:
@@ -109,7 +124,11 @@ async def update_character(character_id: str, req: UpdateRequest):
 
 
 @router.delete("/{character_id}", response_model=ApiResponse)
-async def delete_character(character_id: str):
+async def delete_character(
+    character_id: str,
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """P0 越权收口：删除运行态角色副本属全局控制面写动作，仅 admin。"""
     mgr = _get_manager()
     ok = mgr.delete_character(character_id)
     if not ok:

@@ -67,11 +67,8 @@ const client = axios.create({
   withCredentials: true, // 确保跨域时发送 httpOnly cookie
 })
 
-const apiKey = import.meta.env.VITE_API_KEY || ''
-if (apiKey) {
-  client.defaults.headers.common['X-API-Key'] = apiKey
-}
-
+// （09-19 裁决）前端一律 JWT：不得从环境变量读取 API Key 注入请求头——
+// 防止构建时把密钥烧进静态 bundle；API Key 仅保留给机器/脚本/E2E。
 // ── JWT Bearer token interceptor ──
 // Attach access token from memory (not localStorage) to every request
 client.interceptors.request.use((config) => {

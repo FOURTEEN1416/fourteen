@@ -13,7 +13,7 @@ import logging
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Security
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from api.auth_jwt import get_current_user, get_current_user_id, require_role
@@ -43,7 +43,14 @@ _PRESENCE_HANDOFF_TIMEOUT = 40.0
 
 
 class ChannelConnectRequest(BaseModel):
-    slot: int | None = None
+    # slot 合法域 [0, MAX_CHANNELS_PER_USER]，上界取 channel_paths 真源常量（勿硬编码）。
+    # 旧版无约束：负数 slot（如 -1）直通创建孤儿负槽位通道，绕开「一人最多 2 条」
+    # 硬限制（审计 medium，2026-10-05 收口）。
+    slot: int | None = Field(
+        default=None,
+        ge=0,
+        le=channel_paths.MAX_CHANNELS_PER_USER,
+    )
 
 
 class PeerPreferenceRequest(BaseModel):

@@ -18,12 +18,10 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import get_current_user_id, require_role, verify_token
+from api.auth_jwt import AuthPrincipal, get_current_user_id, get_optional_principal, require_role
 from api.consent import require_current_consent
 from api.database import User, get_db
 from api.deps import deps
@@ -33,7 +31,6 @@ from api.session_manager import resolve_owned_session
 logger = logging.getLogger("api.routers.chat_routes")
 
 router = APIRouter(tags=["chat"])
-_bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def _owned_session(session_id: str, user_id: int) -> str:
@@ -348,15 +345,17 @@ async def manual_disconnect_wechat(
 @router.get("/api/channels/wechat/connection-status")
 async def get_wechat_connection_status(
     _auth: bool = Security(verify_api_key_dep),
-    credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
+    principal: AuthPrincipal | None = Depends(get_optional_principal),
 ):
     """状态：带 JWT 且为普通用户时返回**自己的**通道；admin 无参兼容返回遗留全局。
 
     禁止再向未登录/普通用户广播全局 bot 在线状态。
+    P0 修复批 F6：主体解析改走 get_optional_principal（W1 单一主体，
+    含 is_active + 撤销版本校验），旧 _try_user_id 只验签的旁路已删。
     """
     from wechat_direct.wechat_connector import get_wechat_state
 
-    uid = _try_user_id(credentials)
+    uid = principal.user_id if principal is not None else None
     if uid is not None:
         state = get_wechat_state(user_id=uid)
         return {
@@ -374,11 +373,11 @@ async def get_wechat_connection_status(
 @router.get("/api/channels/wechat/status")
 async def get_wechat_status(
     _auth: bool = Security(verify_api_key_dep),
-    credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
+    principal: AuthPrincipal | None = Depends(get_optional_principal),
 ):
     from wechat_direct.wechat_connector import get_wechat_state
 
-    uid = _try_user_id(credentials)
+    uid = principal.user_id if principal is not None else None
     if uid is None:
         raise HTTPException(status_code=401, detail="需要登录后查看你的微信通道状态")
     state = get_wechat_state(user_id=uid)
@@ -394,28 +393,21 @@ async def get_wechat_status(
     }
 
 
-def _try_user_id(credentials) -> int | None:
-    if credentials is None:
-        return None
-    try:
-        payload = verify_token(credentials.credentials, expected_type="access")
-        sub = payload.get("sub")
-        return int(sub) if sub is not None else None
-    except (JWTError, HTTPException, TypeError, ValueError):
-        return None
-
-
 @router.get("/api/channels/wechat/status-stream")
 async def wechat_status_stream(
     _auth: bool = Security(verify_api_key_dep),
-    credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
+    principal: AuthPrincipal | None = Depends(get_optional_principal),
 ):
-    """SSE 实时推送**当前登录用户**的微信连接状态。"""
+    """SSE 实时推送**当前登录用户**的微信连接状态。
+
+    P0 修复批 F6：主体解析改走 get_optional_principal（含 is_active + 撤销
+    版本校验）；无有效主体直接 401，EventSource 无法带 Authorization 头
+    即无法订阅（既有契约）。
+    """
     from wechat_direct.wechat_connector import get_wechat_state
 
-    uid = _try_user_id(credentials)
+    uid = principal.user_id if principal is not None else None
     if uid is None:
-        # EventSource 可能走 query api_key；再试 query 中的 JWT 不可行，直接拒绝
         raise HTTPException(status_code=401, detail="需要登录后订阅微信状态")
 
     async def _event_generator():

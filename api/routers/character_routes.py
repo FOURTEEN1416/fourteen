@@ -363,6 +363,86 @@ def _build_character_data(
     }
 
 
+# ── 角色卡安全校验（P0 修复批 2026-10-04，F1）────────────
+#
+# validate_card（shisi/character/validator.py）此前没有任何 API 写路径调用它：
+# 三个主链写端点（create / update / import）不校验即落盘，注入/XSS 与不安全
+# 内容直进角色卡真源。此处收口为写路径唯一 owner，统一 400 出口，不让
+# ValidationError 落全局 500 handler。
+# （PUT /{id}/persona-card 经 char_mgr.update_character 已有同款校验：
+# persona_card_routes 调 manager.update_character → manager 内 validate_card。）
+
+
+def _to_validatable_card(char_data: dict[str, Any]) -> Any:
+    """把统一扁平卡（或含 V2/V3 嵌套块的导入卡）转成 validator 可消费的 CharaCardV2。
+
+    - 顶层扁平字段优先，缺失回退嵌套 data 块（V2/V3 导入卡才携带 system_prompt 等）；
+    - personality 数值维度 dict 摊平为文本（不走 CharaCardV2Parser，避免
+      _from_standard 把同步进嵌套块的 dict personality 硬塞进 str 字段误报 400）；
+    - 空 name 以占位符过 CharacterData 非空校验：空名在 create/import 已有前置
+      400，更新路径不得因存量空名卡被本闸误伤。
+    """
+    from shisi.character.models import CharaCardV2, CharacterData
+
+    nested = char_data.get("data") if isinstance(char_data.get("data"), dict) else {}
+
+    def _field(key: str) -> str:
+        value = char_data.get(key)
+        if value in (None, "", {}, []):
+            value = nested.get(key)
+        if isinstance(value, dict):
+            return "，".join(f"{k}：{v}" for k, v in value.items() if str(v).strip())
+        return str(value or "")
+
+    return CharaCardV2(
+        spec="chara_card_v2",
+        data=CharacterData(
+            name=_field("name") or "未命名",
+            description=_field("description"),
+            personality=_field("personality"),
+            scenario=_field("scenario"),
+            first_mes=_field("first_mes"),
+            mes_example=_field("mes_example"),
+            system_prompt=_field("system_prompt"),
+            creator_notes=_field("creator_notes"),
+        ),
+    )
+
+
+def _validate_card_or_400(char_data: dict[str, Any]) -> None:
+    """F1 写路径唯一安全校验 owner：validate_card 不过 → 400（捕获 ValidationError）。"""
+    from shisi.character.validator import ValidationError, validate_card_strict
+
+    try:
+        validate_card_strict(_to_validatable_card(char_data))
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=400,
+            detail="角色卡未通过安全校验: " + "；".join(e.errors),
+        ) from e
+
+
+def _enforce_byok_for_generation(principal: AuthPrincipal | None) -> None:
+    """F2（P0 修复批 2026-10-04）：AI 生成角色卡消费 LLM 前的 BYOK 闸门。
+
+    与 chat 链同语义（api/byok.ensure_user_has_key）：byok_required=true 时，
+    无自带 key 的非 admin 用户 403（BYOK_REQUIRED）；false 或平台未装配配置
+    组件时放行。机器面（无 Bearer）没有可挂靠的用户 key，同样受闸——平台
+    不补贴匿名生成。
+    """
+    from api.byok import ensure_user_has_key
+
+    orch = deps.orch
+    component = (
+        (getattr(orch, "components", None) or {}).get("config") if orch is not None else None
+    )
+    llm_cfg = getattr(getattr(component, "config", None), "llm", None)
+    # isinstance 收窄：FastAPI 注入为 AuthPrincipal | None；直调路由函数（既有
+    # 单测形态）拿到的是未解析的 Security 哨兵，按机器面（无用户 key）处理。
+    user = principal.user if isinstance(principal, AuthPrincipal) else None
+    ensure_user_has_key(user, llm_cfg)
+
+
 # ── API 端点 ────────────────────────────────────────────
 
 
@@ -416,6 +496,7 @@ async def create_character(
         core_anchors=req.core_anchors,
         user_id=_owner_for_write(principal, req.user_id),
     )
+    _validate_card_or_400(data)  # F1：写路径唯一安全校验 owner（失败 400，不落盘）
     if not _save_character(data["id"], data):
         raise HTTPException(status_code=500, detail="保存角色失败")
     _schedule_character_crawl(data["id"], data["name"], data)
@@ -525,6 +606,8 @@ async def update_character(
 
     data["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
     data["version"] = data.get("version", 1) + 1
+
+    _validate_card_or_400(data)  # F1：合并结果同样过闸（失败 400，不半写真源）
 
     if not _save_character(character_id, data):
         raise HTTPException(status_code=500, detail="保存角色失败")
@@ -869,6 +952,8 @@ async def import_character(
         "version": 1,
     }
 
+    _validate_card_or_400(char_data)  # F1：导入落盘前过闸（失败 400，不留半写文件）
+
     if not _save_character(character_id, char_data):
         raise HTTPException(status_code=500, detail="保存角色失败")
 
@@ -1191,8 +1276,10 @@ async def _generate_persona_preview(req: CharacterGenerateRequest) -> dict[str, 
 async def preview_character_from_description(
     req: CharacterGenerateRequest,
     _auth: bool = Security(verify_api_key_dep),
+    principal: AuthPrincipal | None = Security(get_optional_principal),
 ):
     """根据描述生成人设预览，不写入角色库。"""
+    _enforce_byok_for_generation(principal)  # F2：BYOK 前置（与 chat 链同语义）
     persona_data = await _generate_persona_preview(req)
     name = sanitize_character_name(str(persona_data.get("name") or "新角色"))
     persona_data["name"] = name
@@ -1209,6 +1296,7 @@ async def generate_character_from_description(
     principal: AuthPrincipal | None = Security(get_optional_principal),
 ):
     """从文本描述用 AI 生成角色人设卡并自动创建"""
+    _enforce_byok_for_generation(principal)  # F2：BYOK 前置（失败 403，不烧平台 key）
     persona_data = await _generate_persona_preview(req)
 
     catchphrases = persona_data.pop("catchphrases", [])
@@ -1235,6 +1323,21 @@ async def generate_character_from_description(
 
 
 # ── 对话导出 ────────────────────────────────────────────
+
+
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t")
+
+
+def _csv_safe_cell(value: Any) -> str:
+    """F4（P0 修复批 2026-10-04）：CSV 公式注入防护。
+
+    单元格以 = + - @ 或制表符开头时前缀半角单引号，防止 Excel/WPS 打开导出
+    文件时把单元格当公式执行（CSV Injection，聊天内容为用户可控输入）。
+    """
+    text = str(value)
+    if text.startswith(_CSV_FORMULA_PREFIXES):
+        return "'" + text
+    return text
 
 
 @router.get("/characters/{character_id}/chat/export")
@@ -1273,8 +1376,14 @@ async def export_chat(
         writer = csv.writer(output)
         writer.writerow(["role", "content", "emotion", "created_at"])
         for m in messages:
-            writer.writerow([m.get("role", ""), m.get("content", ""),
-                           m.get("emotion_tag", ""), m.get("created_at", "")])
+            # F4：四个单元格统一过公式转义（role/created_at 为服务端生成值，
+            # 顺带覆盖；content/emotion_tag 为用户与模型可控输入，主防护对象）
+            writer.writerow([
+                _csv_safe_cell(m.get("role", "")),
+                _csv_safe_cell(m.get("content", "")),
+                _csv_safe_cell(m.get("emotion_tag", "")),
+                _csv_safe_cell(m.get("created_at", "")),
+            ])
         output.seek(0)
         return StreamingResponse(
             iter([output.getvalue()]),

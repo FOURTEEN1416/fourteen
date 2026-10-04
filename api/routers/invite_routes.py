@@ -16,17 +16,24 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.auth import (
+    auth_assert_account_unlocked,
+    auth_rate_limit_ip,
+    auth_record_failure,
+    auth_record_success,
+)
 from api.auth_jwt import (
     create_access_token,
     create_refresh_token,
     hash_password,
     hash_refresh_token,
     require_role,
+    token_claims,
 )
 from api.database import InviteCode, User, UserSession, get_db
 from api.password_policy import PasswordStr, ensure_password_strength
@@ -112,9 +119,16 @@ class InviteListResponse(BaseModel):
 @router.post("/api/auth/register-invite", response_model=TokenResponse)
 async def register_with_invite(
     req: RegisterInviteRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """使用邀请码注册新用户"""
+    # ── 防爆破（P0 修复批 F3）：IP 失败滑窗（5 失败/分/IP）+ 账号锁定检查 ──
+    auth_rate_limit_ip(request)
+    auth_assert_account_unlocked(
+        req.email, req.username, detail="注册请求暂时无法处理，请稍后再试"
+    )
+
     # ── 密码强度（策略唯一真源：api/password_policy.py）──
     # 置于邀请码校验之前：输入不合规即刻失败，不必先查库
     ensure_password_strength(req.password)
@@ -125,26 +139,18 @@ async def register_with_invite(
         select(InviteCode).where(InviteCode.code == code_norm)
     )
     invite = result.scalar_one_or_none()
-    if not invite:
+    # P0 修复批 F4：存在性 oracle 消除——不存在/已撤销/已使用/已过期
+    # 一律同一文案「邀请码无效」，不向持码者泄露码的具体失效原因。
+    if invite is None or not invite.is_valid():
+        auth_record_failure(request, req.email, req.username)
         raise HTTPException(
             status_code=400,
             detail="邀请码无效",
             headers={"X-Error-Code": "INVITE_INVALID"},
         )
-    if not invite.is_valid():
-        if invite.is_revoked:
-            msg = "邀请码已被撤销"
-        elif invite.used_by is not None:
-            msg = "邀请码已被使用"
-        else:
-            msg = "邀请码已过期"
-        raise HTTPException(
-            status_code=400,
-            detail=msg,
-            headers={"X-Error-Code": "INVITE_INVALID"},
-        )
 
     # ── 检查邮箱 ──
+    # 409 资源冲突不是凭证类失败，不计入防爆破窗口（P0 修复批 F3 计数口径）
     result = await db.execute(select(User).where(User.email == req.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="该邮箱已注册")
@@ -186,14 +192,17 @@ async def register_with_invite(
     )
     if claim.rowcount != 1:
         await db.rollback()
+        auth_record_failure(request, req.email, req.username)
         raise HTTPException(
             status_code=400,
-            detail="邀请码已被使用",
+            detail="邀请码无效",
             headers={"X-Error-Code": "INVITE_INVALID"},
         )
 
     # ── 生成令牌 ──
-    token_data = {"sub": str(user.id), "email": user.email, "role": user.role}
+    # P0 修复批 F5：手工 token dict 改 token_claims(user) 唯一 owner——
+    # 旧 dict 带 role 陈旧声明、缺 tv 撤销版本，refresh 换发链与 W1 口径脱节。
+    token_data = token_claims(user)
     access_token = create_access_token(token_data)
     refresh_token = create_refresh_token(token_data)
 
@@ -207,6 +216,9 @@ async def register_with_invite(
 
     await db.commit()
     await db.refresh(user)
+
+    # 注册成功：清空该 email/username 的连续失败账（P0 修复批 F3）
+    auth_record_success(req.email, req.username)
 
     logger.info("邀请码注册成功: %s (%s) | code=%s", user.email, user.username, code_norm)
     # W12 阶段2：与 /register 同一注册分发契约（用户行已提交之后执行；

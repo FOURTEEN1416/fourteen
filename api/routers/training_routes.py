@@ -57,7 +57,11 @@ async def training_status(_auth: bool = Security(verify_api_key_dep)):
 
 
 @router.get("/api/training/progress")
-async def get_training_progress(_auth: bool = Security(verify_api_key_dep)):
+async def get_training_progress(
+    _auth: bool = Security(verify_api_key_dep),
+    # SEC-P0 读面加门：训练管线状态是控制面，viewer 的 JWT 不得读
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     return deps.training_mgr.get_state()
 
 
@@ -197,7 +201,11 @@ async def apply_clone(
 
 
 @router.get("/api/proactive/state")
-async def proactive_state(_auth: bool = Security(verify_api_key_dep)):
+async def proactive_state(
+    _auth: bool = Security(verify_api_key_dep),
+    # SEC-P0 读面加门：主动引擎全局健康/暂停态是控制面
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     orch = deps.orch
     state: dict = {}
     if orch and orch._ase:
@@ -255,7 +263,11 @@ def _file_vault_config() -> dict:
 
 
 @router.get("/api/proactive/config")
-async def get_proactive_config(_auth: bool = Security(verify_api_key_dep)):
+async def get_proactive_config(
+    _auth: bool = Security(verify_api_key_dep),
+    # SEC-P0 读面加门：主动消息运行时全量参数是控制面
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     """运行时参数真值（阈值/频率控制器对象，非展示字典）。"""
     orch = deps.orch
     if not orch or not orch._ase:
@@ -386,7 +398,9 @@ async def update_proactive_config(
         "Proactive config updated: threshold=%s max_daily=%s",
         ase._urgency_threshold, ase.get_runtime_config()["max_daily_messages"],
     )
-    return {"status": "ok", "config": await get_proactive_config(_auth=True)}
+    # 内部直调：_admin 已由本端点的 require_role 依赖解析（admin 必然在位），
+    # 原样透传以绕开 DI 重复解析（直调时 Depends 缺省不会生效）
+    return {"status": "ok", "config": await get_proactive_config(_auth=True, _admin=_admin)}
 
 
 class KnowledgeCollectConfigRequest(BaseModel):
@@ -395,7 +409,11 @@ class KnowledgeCollectConfigRequest(BaseModel):
 
 
 @router.get("/api/knowledge/collect-config")
-async def get_knowledge_collect_config(_auth: bool = Security(verify_api_key_dep)):
+async def get_knowledge_collect_config(
+    _auth: bool = Security(verify_api_key_dep),
+    # SEC-P0 读面加门：采集开关状态是控制面
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     """知识库定期采集（Vault collect）开关状态（live 优先，文件兜底）。"""
     scheduler = _scheduler_or_none()
     if scheduler is not None and hasattr(scheduler, "get_vault_config"):
@@ -571,6 +589,9 @@ async def send_proactive_now(
 async def proactive_history(
     limit: int = Query(default=50, le=200),
     _auth: bool = Security(verify_api_key_dep),
+    # SEC-P0 读面加门（本域最高危）：全表读**所有用户**的消息正文 + wxid，
+    # 普通注册用户的 JWT 此前仅验签即放行 —— 必须 admin。
+    _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     """发送历史真源 = 控制面出站事实（跨 worker / 跨重启）。
 

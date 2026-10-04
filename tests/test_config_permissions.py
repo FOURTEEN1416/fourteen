@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api import app_factory, auth
-from api.auth_jwt import get_current_user_id
+from api.auth_jwt import create_access_token, get_current_user_id, token_claims
 from api.database import User, get_db
 
 
@@ -107,13 +107,27 @@ def _override_user(app, user: User | None):
 
 
 def test_get_config_allowed_for_non_admin(client, app):
-    """非管理员也能查看 LLM 配置（只读）。"""
+    """非管理员可访问 /api/config（P0 读面收口后为收缩面，不再泄漏全局配置块）。"""
+    user = User(
+        id=42,
+        username="user",
+        email="user@test.local",
+        role="user",
+        hashed_password="",
+        is_active=True,
+        token_version=0,
+    )
     app.dependency_overrides[get_current_user_id] = lambda: 42
-    _override_user(app, User(id=42, username="user", role="user", hashed_password=""))
+    _override_user(app, user)
 
-    response = client.get("/api/config", headers={"Authorization": "Bearer fake-token"})
+    # P0 修复批 F1 后 verify_api_key_dep 走 W1 主体校验真验签——
+    # 旧「Bearer fake-token」形态即漏洞本体（任意可验签 JWT 放行）的测试固化，改真签发。
+    token = create_access_token(token_claims(user))
+    response = client.get("/api/config", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200, response.text
-    assert response.json()["llm"]["provider"] == "zhipu"
+    # 收缩契约：viewer 面只有 scope 标记，不含全局配置块（admin/机器面全量另见
+    # tests/test_sec_p0_read_gates.py 的收缩断言族）
+    assert response.json().get("scope") == "user"
 
 
 def test_get_config_rejects_anonymous(client):

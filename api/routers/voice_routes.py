@@ -17,6 +17,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from api.auth import verify_api_key_dep
+from api.auth_jwt import AuthPrincipal, get_optional_principal
 from api.deps import deps
 from api.routers.character_routes import require_character_access
 from voice.mimo_tts_provider import MiMoTTSProvider
@@ -230,8 +231,17 @@ async def unbind_character_voice(
 @router.get("/voice/speakers")
 async def list_speakers(
     _auth: bool = Security(verify_api_key_dep),
+    _principal: AuthPrincipal | None = Depends(get_optional_principal),
 ):
-    """MiMo 音色列表：静态预设 + 音色 catalog（克隆/设计产物，重启可找回）"""
+    """MiMo 音色列表：静态预设 + 音色 catalog（克隆/设计产物，重启可找回）
+
+    P0 F2 按主体过滤：普通用户只见平台音色（静态预设+无主存量克隆）与自己
+    的克隆音色；admin 全量。机器面（无 Bearer）契约不收窄（W1 先例：机器面
+    不干预），仍全量——直呼 handler 传入的 Depends 哨兵按机器面解释。
+    """
+    principal = _principal if isinstance(_principal, AuthPrincipal) else None
+    is_admin = principal is None or principal.role == "admin"
+    my_key = str(principal.user_id) if principal is not None else ""
     custom = [
         {
             "name": entry["voice_id"],
@@ -242,6 +252,8 @@ async def list_speakers(
             "voice_id": entry["voice_id"],
         }
         for entry in get_voice_catalog().list()
+        # owner 为空 = 平台共享（存量旧 JSON 无 owner 键同此解释）
+        if is_admin or not entry.get("owner") or entry.get("owner") == my_key
     ]
     speakers = [dict(v) for v in _MIMO_VOICES] + custom
     return {

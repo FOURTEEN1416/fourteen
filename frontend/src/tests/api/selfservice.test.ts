@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { AxiosRequestConfig } from 'axios'
 import client from '../../api/client'
 import {
   getConsentStatus,
@@ -105,9 +106,10 @@ describe('导出面', () => {
   })
 
   it('exportAllChats 按清单逐会话键翻页取全（id 游标走到 null）', async () => {
-    get.mockImplementation(async (url: string, config?: { params?: Record<string, unknown> }) => {
+    // axios 1.20 起 AxiosRequestConfig.params 收紧为 unknown，mock 签名直接对齐 axios 自身类型
+    get.mockImplementation(async (url: string, config?: AxiosRequestConfig) => {
       if (url === '/auth/account/export') return { data: MANIFEST } as never
-      const params = config?.params ?? {}
+      const params = (config?.params ?? {}) as Record<string, unknown>
       const key = params.session_key as string
       const beforeId = params.before_id as number
       if (key === '7:peerA' && beforeId === 0) {

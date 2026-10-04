@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from api.auth_jwt import User, require_role
 
 from ..vital_signs.vital_engine import DEFAULT_READING_NOTE, VitalSignsEngine
 from .common import ApiResponse
@@ -22,7 +24,13 @@ def set_engine(e: VitalSignsEngine) -> None:
 
 
 @router.get("/{character_id}", response_model=ApiResponse)
-async def get_vital_signs(character_id: str):
+async def get_vital_signs(
+    character_id: str,
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """P0 越权收口：按 character 读生理指标演算——键空间是裸角色键
+    （无 user 维度，主体过滤不可行），读数由会话情绪派生，属他人数据面
+    → 收 admin。微信侧消费走进程内 ``format_wechat_message``，不经本端点。"""
     if _engine is None:
         raise HTTPException(status_code=503, detail="VitalSignsEngine未初始化")
     state = _engine.get_current(character_id)

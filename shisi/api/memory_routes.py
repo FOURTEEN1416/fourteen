@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
+from api.auth_jwt import User, require_role
 
 from ..memory.favorite_manager import FavoriteManager
 from ..memory.forward_manager import ForwardManager
@@ -38,7 +40,12 @@ class ForwardRequest(BaseModel):
 
 
 @router.post("/favorite", response_model=ApiResponse)
-async def favorite_memory(req: FavoriteRequest):
+async def favorite_memory(
+    req: FavoriteRequest,
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """P0 越权收口（过渡期）：favorite 表无 owner 列、按 character 全局读写，
+    主体过滤需等 owner 列模型迁移（另行批次），先收 admin 门禁。"""
     if _fav_mgr is None:
         raise HTTPException(status_code=503, detail="FavoriteManager未初始化")
     ok = _fav_mgr.favorite(req.character_id, req.memory_id)
@@ -46,12 +53,17 @@ async def favorite_memory(req: FavoriteRequest):
 
 
 @router.delete("/favorite/{fav_id}", response_model=ApiResponse)
-async def unfavorite_memory(fav_id: int):
+async def unfavorite_memory(
+    fav_id: int,
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
     """按收藏主键取消收藏。
 
     2026-09-18 前签名 `(fav_id, character_id="", memory_id="")` 中 `fav_id` **完全未被使用**，
     实际删除条件是 character_id + memory_id（两者均有空默认值，可被无参省略调用，
     行为未定义）。现改为 `fav_id` 唯一判据，与路径参数语义一致。
+
+    P0 越权收口（过渡期）：无 owner 列，先收 admin 门禁。
     """
     if _fav_mgr is None:
         raise HTTPException(status_code=503, detail="FavoriteManager未初始化")
@@ -60,7 +72,12 @@ async def unfavorite_memory(fav_id: int):
 
 
 @router.get("/favorites", response_model=ApiResponse)
-async def list_favorites(character_id: str):
+async def list_favorites(
+    character_id: str,
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """P0 越权收口（过渡期）：按 character 全局列出收藏（跨用户数据面），
+    owner 列模型迁移前仅 admin。"""
     if _fav_mgr is None:
         raise HTTPException(status_code=503, detail="FavoriteManager未初始化")
     favs = _fav_mgr.list_favorites(character_id)
@@ -76,8 +93,15 @@ async def get_memories(character_id: str):
 
 
 @router.post("/forward", response_model=ApiResponse)
-async def forward_memory(req: ForwardRequest):
-    """跨角色转发：目标侧派生记录 + 真实回执（缺陷 F 恢复）。"""
+async def forward_memory(
+    req: ForwardRequest,
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """跨角色转发：目标侧派生记录 + 真实回执（缺陷 F 恢复）。
+
+    P0 越权收口（过渡期）：forward 表无 owner 列、按 character 全局读写，
+    先收 admin 门禁。
+    """
     if _fwd_mgr is None:
         raise HTTPException(status_code=503, detail="ForwardManager未初始化")
     receipt = _fwd_mgr.forward_receipt(

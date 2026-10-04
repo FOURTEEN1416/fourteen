@@ -851,14 +851,16 @@ class WeChatConnector:
             )
             ok, errmsg = _api_ok(resp)
             if not ok:
+                # P0 隐私：日志只留元数据（错误码/target/长度），不落消息原文
                 logger.warning(
-                    "微信主动发送失败: %s | target=%s context_token=%s text=%.30s",
+                    "微信主动发送失败: %s | target=%s context_token=%s text_len=%d",
                     errmsg, target,
                     "有" if context_token else "空（用户需先给机器人发一条消息）",
-                    text,
+                    len(text),
                 )
                 return False
-            logger.info("微信主动发送成功: %s", text[:30])
+            # P0 隐私：原文（含截断前缀）不落日志，只记 target 与长度
+            logger.info("微信主动发送成功: target=%s text_len=%d", target, len(text))
             return True
         except Exception as e:  # noqa: BLE001
             logger.warning("微信主动发送失败: %s", e)
@@ -1597,8 +1599,10 @@ class WeChatConnector:
             self._record_outbound(text, user_id, character_id=character_id)
 
         self._followup_spend(user_id)
+        # P0 隐私：追问文案原文不落日志，只记会话与长度
         logger.info(
-            "[wx][step=followup_sent] user=%s step=%d text=%r", user_id, step, text[:60],
+            "[wx][step=followup_sent] user=%s step=%d text_len=%d",
+            user_id, step, len(text),
         )
         # 第二轮（delay2）之后不再追 —— 追问上限固定为 2 次，避免无限骚扰；
         # 每日总量由 daily_max 兜底。
@@ -1687,7 +1691,8 @@ class WeChatConnector:
             r"你就想|你又想|你是想|你是不是想|你刚说|你刚才说|你不是说)",
             text,
         ):
-            logger.info("[wx][step=followup_skip_invented_user] text=%r", text[:60])
+            # P0 隐私：只记长度，不落替用户虚构的原文
+            logger.info("[wx][step=followup_skip_invented_user] text_len=%d", len(text))
             return ""
         return text
 
@@ -1968,7 +1973,9 @@ class WeChatConnector:
             asr_text = self._transcribe_voice(voice_data)
             if asr_text:
                 text = asr_text
-                logger.info("[wx][step=asr] msg_id=%s user=%s text=%r", msg_id, from_user, text[:60])
+                # P0 隐私：转写原文不落日志，只记 msg_id 与长度
+                logger.info("[wx][step=asr] msg_id=%s user=%s text_len=%d",
+                            msg_id, from_user, len(text))
             else:
                 logger.info("[wx][step=asr_unavailable] msg_id=%s user=%s", msg_id, from_user)
 
@@ -1985,9 +1992,10 @@ class WeChatConnector:
 
         t_start = time.perf_counter()
         session_key = self._session_key(from_user)
+        # P0 隐私：入站消息原文不落日志，只记 msg_id/session_key/长度
         logger.info(
-            "[wx][step=receive] msg_id=%s owner=%s peer=%s session=%s text=%r",
-            msg_id, self.owner_user_id, from_user, session_key, text[:80],
+            "[wx][step=receive] msg_id=%s owner=%s peer=%s session=%s text_len=%d",
+            msg_id, self.owner_user_id, from_user, session_key, len(text),
         )
 
         sent_reply: dict[str, Any] = {}
@@ -2053,9 +2061,10 @@ class WeChatConnector:
             except Exception:  # noqa: BLE001
                 reply = "刚才没接上，你再说一句？"
         else:
+            # P0 隐私：回复原文不落日志，只记 msg_id/session_key/长度/耗时
             logger.info(
-                "[wx][step=llm_done] msg_id=%s session=%s reply=%r elapsed=%.2fs llm_time=%s",
-                msg_id, session_key, reply[:80], t_elapsed, process_time,
+                "[wx][step=llm_done] msg_id=%s session=%s reply_len=%d elapsed=%.2fs llm_time=%s",
+                msg_id, session_key, len(reply), t_elapsed, process_time,
             )
 
         # 早期拒绝（尚未进入模型）可能未调用发送回调；统一出口只发送一次。
