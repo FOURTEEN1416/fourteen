@@ -20,7 +20,7 @@
 | 风格克隆（从微信聊天记录克隆说话风格） | ✅ CREATE-CLONE-1~4（智能体任务书 + JSON 上传分析，08-28 收敛）；历史设想的"服务端直接解密"路径已按合规裁决删除 | 对齐（方式变更已裁决） |
 | 多通道接入（微信个人号/**企业微信**/控制台/WebSocket API） | ⚠️ 微信个人号 + 控制台 + REST/WS 在产；**企业微信通道无代码**（仅历史文档提及；wxwork 解密在 wechat-decrypt 工具侧） | 差距（企微未实现） |
 | 安全机制（内容过滤/PII 脱敏/提示注入检测） | ✅ SECURITY-1~3（统计/日志/开关）+ 后端四件套在产 | 对齐 |
-| 多用户隔离（05-24 设计） | ✅ user_id 全链路隔离；LOGIN-2 邀请码注册；ADMIN-USERS 全套；用户级 LLM Key 隔离 LLM-2 | 对齐 |
+| 多用户隔离（05-24 设计） | ✅ user_id 全链路隔离；LOGIN-2 开放注册主链路+邀请码并存；ADMIN-USERS 全套；用户级 LLM Key 隔离 LLM-2 | 对齐 |
 
 ---
 
@@ -36,7 +36,7 @@
 | 编号 | 功能点（代码证据） |
 |------|------------------|
 | LOGIN-1 | 账号密码登录（useAuth → `/api/auth/login`），登录后跳 `/wechat` |
-| LOGIN-2 | 邀请码注册（`/api/auth/register-invite` 链路，注册/登录双 tab） |
+| LOGIN-2 | 开放注册主链路（`/api/auth/register`，2026-10-04 用户裁决：所有人可注册）+ 邀请码注册并存（`/api/auth/register-invite` 链路，注册/登录双 tab） |
 
 ## B. 微信连接域
 
