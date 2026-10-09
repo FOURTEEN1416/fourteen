@@ -95,6 +95,10 @@ class WebSocketServer:
 
         优先 JWT（web 用户，身份从 token 解出，客户端不可自报）；
         其次 API Key（机器/E2E）。未启用认证（显式 dev）时放行匿名。
+
+        ⚠️ JWT 分支只做验签级的**初步**身份解出；存在性 + is_active + 撤销
+        版本的三段主体校验在 ``_verify_jwt_subject``（handler 在拿到身份后
+        立即 await）——与 HTTP 侧 verify_api_key_dep 同源，见 EXT-2。
         """
         if jwt_token:
             try:
@@ -119,6 +123,39 @@ class WebSocketServer:
             return {"user_id": None, "method": "apikey"}
         return None
 
+    async def _verify_jwt_subject(
+        self, identity: dict[str, Any], jwt_token: str
+    ) -> dict[str, Any] | None:
+        """JWT 通道三段主体校验（EXT-2 收口，2026-10-09）。
+
+        ``_authenticate`` 的 JWT 分支只验签——已改密（token_version 已 bump）、
+        已停用、已删除账号的旧 token 验签仍通过，HTTP 全站 401 而 WS 可用至
+        自然过期，admin reset-password「All sessions revoked」的承诺在 WS 面失效。
+        此处经公共入口 ``authenticate_access_token`` 补齐与 HTTP 同源的主体校验
+        （存在性 + is_active + 撤销版本，库内现值 role），并把 AuthPrincipal 一并
+        放入 identity（PRIV-1 的卡归属校验依赖它）。
+
+        - 校验失败 / 读库失败 → None（fail-closed，调用方按认证失败 1008 关闭）；
+        - ``jwt_token`` 为空：身份并非来自本进程真实验签的 token（仅测试替身
+          会构造此形态），无从校验，原样放行——生产路径 JWT 分支必有 token。
+        """
+        if not jwt_token:
+            return identity
+        from api.auth_jwt import authenticate_access_token
+        from api.database import _async_session
+
+        try:
+            async with _async_session() as db:
+                principal = await authenticate_access_token(db, jwt_token)
+        except Exception:  # noqa: BLE001  HTTPException(401/404) 与读库失败一律拒
+            return None
+        return {
+            "user_id": principal.user_id,
+            "method": "jwt",
+            "role": principal.role,
+            "principal": principal,
+        }
+
     async def _handler(self, websocket):
         # P0-5: 凭证从 URL query（token=APIKey / jwt=Bearer）或首帧取，身份从 token 解出
         api_token = ""
@@ -134,6 +171,10 @@ class WebSocketServer:
             logger.debug("token parse failed, falling back: %s", e)
 
         identity = self._authenticate(api_token, jwt_token)
+        # EXT-2：JWT 身份必须过三段主体校验（存在 + is_active + 撤销版本），
+        # 被撤销/停用账号的旧 token 在 WS 面与 HTTP 同刻失效（失败 → 1008）。
+        if identity is not None and identity.get("method") == "jwt":
+            identity = await self._verify_jwt_subject(identity, jwt_token)
         # URL 无凭证且需要认证时，等待首帧认证
         if identity is None and self._auth_required and not jwt_token and not api_token:
             try:
@@ -150,6 +191,8 @@ class WebSocketServer:
             api_token = str(auth_data.get("token", "") or "")
             jwt_token = str(auth_data.get("jwt", "") or auth_data.get("access_token", "") or "")
             identity = self._authenticate(api_token, jwt_token)
+            if identity is not None and identity.get("method") == "jwt":
+                identity = await self._verify_jwt_subject(identity, jwt_token)
 
         if identity is None:
             logger.warning("WebSocket 认证失败：缺少有效 JWT/API Key")
@@ -181,6 +224,20 @@ class WebSocketServer:
                     data = json.loads(message)
                     msg_type = data.get("type", "chat")
                     if msg_type == "chat":
+                        # ABUSE-4：每用户入站频控（与 HTTP /api/chat·/stream 共桶）。
+                        # 只对 JWT 实名用户计数；机器面（apikey）与匿名 dev 连接不干预。
+                        if authed_user_id is not None:
+                            from api.routers.chat_routes import _chat_rate_guard
+
+                            try:
+                                _chat_rate_guard(authed_user_id)
+                            except HTTPException as exc:
+                                await websocket.send(json.dumps({
+                                    "type": "error", "error": "RATE_LIMITED",
+                                    "message": str(exc.detail),
+                                }, ensure_ascii=False))
+                                await websocket.close(code=1013, reason="Rate limit exceeded")
+                                break
                         user_msg = data.get("message", "")
                         raw_session = str(data.get("session_id") or "").strip()
                         if authed_user_id is not None:
@@ -191,7 +248,11 @@ class WebSocketServer:
                         from api.byok import ensure_user_has_key, load_user_llm_config
                         from api.routers.chat_routes import _resolve_character_id
 
-                        character_id = await _resolve_character_id(str(data.get("character_id") or "default"))
+                        # PRIV-1：卡归属校验随主体贯通（机器面 principal=None 不干预）
+                        character_id = await _resolve_character_id(
+                            str(data.get("character_id") or "default"),
+                            identity.get("principal"),
+                        )
                         user_llm_config = None
                         if authed_user_id is not None:
                             from api.database import _async_session

@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Security
@@ -26,6 +28,50 @@ from voice.voice_catalog import get_voice_catalog, presets
 logger = logging.getLogger("api.voice_routes")
 
 router = APIRouter(prefix="/api", tags=["voice"])
+
+# 全仓历遍安全批 ABUSE-3：角色试听与 /api/voice/synthesize、/api/mimo/synthesize
+# 是同成本路径（MiMo 云按字符计费），同族收口——600 字上限 + 6 次/分/用户限速。
+_MAX_SYNTH_TEXT_LEN = 600
+
+
+class _RateLimiter:
+    """每主体滑动窗口限速（内存计数；进程级，多 worker 各自独立）。
+
+    仅本文件使用，勿抽公共模块（P0 安全批并行窗口纪律，与 safety_routes /
+    mimo_voice_routes 各自内置）。
+    """
+
+    def __init__(self, max_events: int, window_seconds: float = 60.0):
+        self._max = max_events
+        self._window = window_seconds
+        self._hits: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def check(self, key: str) -> bool:
+        """窗口内还有配额则记账并放行，否则拒绝（含失败请求，防绕过试错）。"""
+        now = time.monotonic()
+        with self._lock:
+            hits = [t for t in self._hits.get(key, ()) if now - t < self._window]
+            if len(hits) >= self._max:
+                self._hits[key] = hits
+                return False
+            hits.append(now)
+            self._hits[key] = hits
+            return True
+
+    def reset(self) -> None:
+        """清空记账（测试隔离用）。"""
+        with self._lock:
+            self._hits.clear()
+
+
+_VOICE_TEST_LIMITER = _RateLimiter(6)  # 6 次/分钟/用户
+
+
+def _limit_or_429(limiter: _RateLimiter, principal: AuthPrincipal | None) -> None:
+    key = f"user:{principal.user_id}" if principal is not None else "machine"
+    if not limiter.check(key):
+        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
 
 # ── 请求/响应模型 ──
 
@@ -268,11 +314,26 @@ async def test_character_voice(
     character_id: str,
     req: VoiceTestRequest,
     _auth: bool = Security(verify_api_key_dep),
+    _principal: Any = Depends(get_optional_principal),
     # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
     # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
     _owned: dict = Depends(require_character_access),
 ):
-    """按角色音色契约试听（不可变快照合成；MIME 按实际格式返回）"""
+    """按角色音色契约试听（不可变快照合成；MIME 按实际格式返回）
+
+    ABUSE-3 同族收口：text>600 字 400 + 每用户限速 6 次/分钟（MiMo 云按字符
+    计费，与 /api/voice/synthesize、/api/mimo/synthesize 同成本路径）。
+    """
+    # 直呼 handler（既有测试/脚本只传位置参数）会拿到 Depends 哨兵——按机器面解释
+    principal = _principal if isinstance(_principal, AuthPrincipal) else None
+
+    if len(req.text) > _MAX_SYNTH_TEXT_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"合成文本过长（{len(req.text)} 字 > 上限 {_MAX_SYNTH_TEXT_LEN} 字）",
+        )
+    _limit_or_429(_VOICE_TEST_LIMITER, principal)
+
     voice_mgr = deps.get_character_voice_manager()
     tts_mgr = deps.get_tts()
     if tts_mgr is None:

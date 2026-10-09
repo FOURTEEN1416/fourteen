@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.auth import (
     auth_assert_account_unlocked,
     auth_rate_limit_ip,
+    auth_rate_limit_register,
     auth_record_failure,
     auth_record_success,
 )
@@ -123,8 +124,9 @@ async def register_with_invite(
     db: AsyncSession = Depends(get_db),
 ):
     """使用邀请码注册新用户"""
-    # ── 防爆破（P0 修复批 F3）：IP 失败滑窗（5 失败/分/IP）+ 账号锁定检查 ──
+    # ── 防爆破（P0 修复批 F3 + EXT-3 修复）：IP 失败滑窗 + 账号锁定 + 注册面尝试桶 ──
     auth_rate_limit_ip(request)
+    auth_rate_limit_register(request)
     auth_assert_account_unlocked(
         req.email, req.username, detail="注册请求暂时无法处理，请稍后再试"
     )
@@ -149,16 +151,22 @@ async def register_with_invite(
             headers={"X-Error-Code": "INVITE_INVALID"},
         )
 
-    # ── 检查邮箱 ──
-    # 409 资源冲突不是凭证类失败，不计入防爆破窗口（P0 修复批 F3 计数口径）
+    # ── 检查邮箱/用户名（EXT-3 oracle 消除，2026-10-09）──
+    # 409 资源冲突不是凭证类失败，不计入防爆破窗口（P0 修复批 F3 计数口径；
+    # 注册面尝试桶 auth_rate_limit_register 已在入口按请求计数兜住枚举探测）。
+    # 邮箱/用户名命中一律同一文案 + 同一机器码，不泄露命中字段
+    # （与 /register 的 REGISTRATION_CONFLICT 同契约）。
+    _conflict = {
+        "detail": "邮箱或用户名已被使用",
+        "headers": {"X-Error-Code": "REGISTRATION_CONFLICT"},
+    }
     result = await db.execute(select(User).where(User.email == req.email))
     if result.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="该邮箱已注册")
+        raise HTTPException(status_code=409, **_conflict)
 
-    # ── 检查用户名 ──
     result = await db.execute(select(User).where(User.username == req.username))
     if result.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="该用户名已被使用")
+        raise HTTPException(status_code=409, **_conflict)
 
     # ── 创建用户 ──
     user = User(

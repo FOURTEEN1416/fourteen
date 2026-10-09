@@ -105,13 +105,17 @@ async def verify_api_key_dep(
 
 
 # ═══════════════════════════════════════════════════════
-# 登录/注册防爆破（P0 修复批 F3，2026-10-04）
+# 登录/注册防爆破（P0 修复批 F3，2026-10-04；auth-bruteforce 修复批 2026-10-09）
 # ═══════════════════════════════════════════════════════
-# 两个机制：
+# 三个机制：
 #   1) IP 失败滑窗：同一 IP 60s 内累计 5 次**认证失败** → 429；
 #   2) 账号锁定：同一 email/username 连续失败 5 次 → 锁 15 分钟，
-#      锁定窗口内 401 通用文案（不泄露「账号存在且被锁」）。
-# 状态存进程内存（多 worker 各自生效可接受，与 app_factory 回退限流器同口径）。
+#      锁定窗口内 401 通用文案（不泄露「账号存在且被锁」）；
+#   3) 注册面尝试桶：注册端点按**请求**计数（60s 窗 15 次/IP，成功也占额），
+#      压制邮箱/用户名枚举探测与账号农场（409 冲突不计入机制 1/2 的失败账，
+#      若无本桶则枚举探测完全不受限）。
+# 机制 1/2 状态存进程内存（多 worker 各自生效可接受，与 app_factory 回退限流器
+# 同口径）；机制 3 挂 request.app.state（随 app 实例存活，隔离口径相同）。
 # 计数口径为「失败」而非「全部请求」：成功认证不占 IP 额度并清空该账号失败账，
 # 否则办公 NAT 等同 IP 高频成功登录会被误伤（爆破面——连续失败——不受影响）。
 
@@ -139,15 +143,20 @@ def _bf_account_key(account: str) -> str:
 
 
 def _bf_client_ip(request: Request) -> str:
-    """客户端 IP：优先 X-Forwarded-For 首跳（nginx 反代真源），再 X-Real-IP，
-    最后直连地址。只取 request.client.host 时反代后所有用户同 IP，
-    限速会退化成全站 5 次/分钟。"""
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    real_ip = request.headers.get("x-real-ip", "")
-    if real_ip:
-        return real_ip.strip()
+    """客户端 IP：只取 ASGI 直连地址（request.client.host），不信任何请求头。
+
+    EXT-1/ABUSE-1 修复（2026-10-09）：旧实现取 X-Forwarded-For 首跳，而 nginx
+    的 $proxy_add_x_forwarded_for 是**追加**语义——客户端自带的伪造头保留在最前，
+    攻击者每请求换一个伪造 IP 即绕过 IP 失败滑窗（限速键被请求头单方面决定）。
+    改为只信直连地址后：uvicorn 绑定 127.0.0.1（deploy/ai-girlfriend.service），
+    唯一上游是本机 nginx（默认 proxy_headers=True + forwarded_allow_ips=127.0.0.1），
+    配合 nginx 侧覆盖写 `X-Forwarded-For $remote_addr`（丢弃客户端伪造链），
+    uvicorn 解析出的恒为真实客户端 IP——且 uvicorn 0.27.0 起 ProxyHeadersMiddleware
+    即为「从右向前取第一个非信任 IP」（本批验收以 0.27.0 源码核实），伪造首跳
+    被忽略，故即便 nginx 覆盖写尚未部署，本修复也在应用侧独立生效。
+    旧注释「反代后全站同 IP」的顾虑不再成立——nginx 为每个客户端
+    传递其各自的 remote_addr，不同用户仍是不同键。
+    """
     return request.client.host if request.client else "unknown"
 
 
@@ -239,9 +248,62 @@ def auth_record_success(*accounts: str) -> None:
             _bf_account_fails.pop(_bf_account_key(account), None)
 
 
+# ── 注册面尝试桶（EXT-3 修复，2026-10-09）──────────────
+# 409 资源冲突不计入失败滑窗/账号锁定（非凭证失败，见 auth_record_failure 口径
+# 注释）——若无独立桶，注册端的邮箱/用户名枚举探测（反复 409）完全不受限。
+# 本桶按**请求**计数（check+record 一体）：正常用户注册只发一两次请求，绝不误伤；
+# 成功注册也占额（每号克隆初始角色卡+会话行，账号农场同样被压制）。
+# 挂 request.app.state：随 app 实例存活——多 worker 各自生效可接受（与机制 1/2
+# 同口径），测试里每个 create_api_app() 天然隔离、不跨用例污染。
+
+_REG_ATT_WINDOW_SECONDS = 60.0   # 注册面尝试桶窗口
+_REG_ATT_MAX = 15                # 15 次/分/IP（正常用户余量 >7 倍，探测被压 ~96%+）
+
+
+def _register_bucket(request: Request) -> dict[str, list[float]]:
+    """取（惰性初始化）挂在 app.state 上的注册尝试桶。"""
+    bucket = getattr(request.app.state, "bf_register_attempts", None)
+    if bucket is None:
+        bucket = {}
+        request.app.state.bf_register_attempts = bucket
+    return bucket
+
+
+def _register_prune(bucket: dict[str, list[float]], now: float) -> None:
+    """注册桶过期清理（调用方须已持有 _bf_lock；防高基数 key 撑爆内存）。"""
+    if len(bucket) <= _BF_MAX_KEYS:
+        return
+    for ip, hits in list(bucket.items()):
+        if not hits or now - hits[-1] >= _REG_ATT_WINDOW_SECONDS:
+            bucket.pop(ip, None)
+
+
+def auth_rate_limit_register(request: Request) -> None:
+    """注册面 IP 尝试桶（调用点：/register 与 /register-invite 入口）。超限 429。
+
+    与 auth_rate_limit_ip（只查不记）不同，本桶 check+record 一体——注册面
+    正常流量极低，按请求计数无误伤风险；成功注册占额是特性（压农场）不是缺陷。
+    """
+    bucket = _register_bucket(request)
+    ip = _bf_client_ip(request)
+    now = _bf_now()
+    with _bf_lock:
+        _register_prune(bucket, now)
+        hits = [t for t in bucket.get(ip, []) if now - t < _REG_ATT_WINDOW_SECONDS]
+        if len(hits) >= _REG_ATT_MAX:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many requests",
+                headers={"X-Error-Code": "RATE_LIMIT"},
+            )
+        hits.append(now)
+        bucket[ip] = hits
+
+
 __all__ = [
     "auth_assert_account_unlocked",
     "auth_rate_limit_ip",
+    "auth_rate_limit_register",
     "auth_record_failure",
     "auth_record_success",
     "configure_auth",

@@ -12,6 +12,8 @@
 
 ## 安全升级遗留（2026-10-04 P0 批后登记，来源=两轮攻击面审计 81 条发现中未入 P0 批的 confirmed 项）
 
+> **2026-10-09 攻击面扫描批现状刷新**：六路对抗扫描对 SEC-1~11 逐项实地验证（见 `docs/verification/2026-10-09-attack-sweep.md`）——全部**未恶化**；SEC-6 补充证据（认证面 `/api/characters/{id}/favorites` 族 5 端点未与 shisi 面同规，其越权写面已由本批 PRIV-2 收口）、SEC-11 双锁漂移已实质发生（framer-motion/@tanstack/react-query 两生产依赖两锁版本分叉，FE-2 证据）；本批新确认暂缓项登记为 SEC-12~18。
+
 6. **[SEC-1] 记忆/RAG/画像 untrusted 信封**（medium verified）：`persona_service.py:172-234` 记忆事实/画像块/RAG 知识以可信身份直入 system prompt，复核实测两个 payload 绕过全部正则并经 remember_facts 持久化。修法=套用 tool_gate 同款 `<context trust="untrusted">` 信封+入库前注入特征检测；prompt 行为变更需单独观察批次。
 7. **[SEC-2] url_guard DNS rebinding TOCTOU**（medium verified，代码自登记遗留）：`tools/url_guard.py:55-86` check-then-connect 两次解析窗口。修法=transport 级固定解析 IP（自定义 adapter 按 IP 直连+Host/SNI 处理）。
 8. **[SEC-3] 亲和 HTTP 面与对话键空间对齐**：P0 批收口后 HTTP 管理面键=`uid::cid`、对话路径键=`user_key::cid` 两套互不相通（前端零消费无现行破坏，docstring 已如实标注）；控制台要读对话积累的好感需会话键映射设计，另立批次。
@@ -23,6 +25,16 @@
 14. **[SEC-9] LLM 语义内容分类异步旁路**（low）：`SAFETY_LLM_CLASSIFY`/`PROMPT_INJECTION_LLM` 生产默认关（SSH 实证未设），规则层可绕过面在案；异步旁路方案（不阻塞主链）待做。
 15. **[SEC-10] Python 依赖 lockfile**（medium verified）：无任何 lockfile，46 项开放下界约束，本地实测漂移三例（websockets 16.1.1<17.0、structlog/cloudscraper 未装）；引入 uv lock 或 pip-tools 哈希锁使三端可证可复现。CI 审计门（前端）已上线。
 16. **[SEC-11] 低危卫生包**：chromadb 1.5.9 Critical 无补丁（嵌入式模式不可达，跟踪升级+禁 server 暴露规范）、pillow/cryptography/aiohttp/sentence-transformers 升级（devDependencies 域已清，Python 侧随常规周期）、memory 层零消费者全表接口收口或整删、UserContext WS 通道 user_id 注入、e2e 测试口令生产注册黑名单、bun.lock 与 package-lock 双锁维护纪律（每次依赖变更双写）。
+
+## 安全升级遗留·二（2026-10-09 攻击面扫描批登记，来源=六路对抗扫描 30 发现中 confirmed 但暂缓的 P2 项；报告 `docs/verification/2026-10-09-attack-sweep.md`）
+
+17. **[SEC-12] 账号锁定武器化（EXT-4）**：5 败锁 15 分钟无任何解锁通道（无邮箱验证/CAPTCHA/admin 解锁端点），攻击者经枚举 oracle 可对任意已知账号周期性续锁无限期拒绝其登录（锁定检查先于密码验证，正确密码也被 401 短挡）。修法需行为设计（解锁链路），与 EXT-3 oracle 已收口配套评估。
+18. **[SEC-13] WS 未认证连接资源耗尽（EXT-6）**：`websocket_server.py` MAX_CLIENTS=1000 仅认证后检查，未认证连接每条挂 10s 协程/FD；nginx /ws/ 无 limit_conn/limit_req、systemd 无 LimitNOFILE。低门槛可用性攻击（非数据面）。修法=nginx /ws/ 连接限制 + 认证超时收紧。
+19. **[SEC-14] web_enricher 抓取链零接入 url_guard（INJ-4）**：url_guard 自称唯一校验 owner 但 `persona_extractor/web_enricher.py` DirectScraper/Jina/Crawl4AI 全链裸 requests（自动跟随重定向、无内网校验）——潜伏 SSRF+守卫覆盖断链；现行利用需 SEO 操纵搜索结果，触发器=任何新调用方传入用户可控 URL。修法=三引擎统一收口 fetch_guarded 或前置 assert_public_http_url+禁自动重定向逐跳校验。
+20. **[SEC-15] CI 前端依赖审计门即将红（FE-1）**：`ci.yml:79` npm audit --audit-level=high 与 dev 链新 advisory（tinypool 2 critical 原型污染→RCE、source-map-js 1 high，均 devDependencies 不进生产 bundle）冲突，下次 push CI 必 fail 阻塞部署管线；唯一修复路径=vitest 3→5 breaking 升级。需主动排期。
+21. **[SEC-16] Content-Security-Policy 全缺（FE-3）**：nginx 模板与 index.html 双侧均无 CSP；当前 XSS sink 面窄（无 dangerouslySetInnerHTML）故为纵深防御缺口非现行漏洞，SPA 与 API 同源下 `default-src 'self'` 类策略零兼容成本。
+22. **[SEC-17] crawl/enrich 长任务无超时无全局并发闸（ABUSE-5）**：`knowledge_routes.py` 裸 `asyncio.to_thread`（自证单次 33.2s）无 wait_for、限速为进程内计数（4 worker 实况放大 4 倍）；多账号可饱和默认线程池饿死全进程 to_thread 依赖（含提醒轮询）。修法=超时+专用有界 executor/信号量。
+23. **[SEC-18] set_reminder 无每会话数量上限（ABUSE-7）**：攻击者可在自己会话内无界堆积 pending 提醒行，到期集中触发 LLM 文案生成+外发脉冲（对照 proactive 出站 8 条/天硬配额，提醒通道零配额）。修法=每会话 active 上限（如 50）+超限回提示。
 
 ## 环境 / 运维
 

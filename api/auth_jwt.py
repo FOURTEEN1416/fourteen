@@ -232,13 +232,21 @@ class AuthPrincipal:
     user: User
 
 
-async def _resolve_principal(
-    credentials: HTTPAuthorizationCredentials | None,
-    db: AsyncSession,
-) -> AuthPrincipal | None:
-    if credentials is None:
-        return None
-    payload = verify_token(credentials.credentials, expected_type="access")
+async def authenticate_access_token(db: AsyncSession, token: str) -> AuthPrincipal:
+    """access token → 唯一认证主体（chat-chain 扫荡批 EXT-2 收口）。
+
+    WS 通道此前只调 ``verify_token``（验签+exp+type）即认身份——不查库、
+    不比对撤销版本、不看 is_active，被改密/停用账号的旧 token 在 WS 面
+    可用至自然过期，与 HTTP 三段主体校验（verify_api_key_dep）语义分裂。
+    本入口与 ``_resolve_principal`` 同源三段校验：
+
+        验签（verify_token）→ 存在性 + is_active（_load_enabled_user）
+        → 撤销版本（_assert_token_version，token `tv` ↔ users.token_version）
+
+    任何持有原始 token 的消费面（HTTP / WS）都必须经此取得主体，
+    不得再独立解码 token 认人。
+    """
+    payload = verify_token(token, expected_type="access")
     sub = payload.get("sub")
     if sub is None:
         raise HTTPException(status_code=401, detail="Token missing 'sub' claim")
@@ -251,6 +259,16 @@ async def _resolve_principal(
         token_version=int(user.token_version or 0),
         user=user,
     )
+
+
+async def _resolve_principal(
+    credentials: HTTPAuthorizationCredentials | None,
+    db: AsyncSession,
+) -> AuthPrincipal | None:
+    if credentials is None:
+        return None
+    # EXT-2：与 WS 侧同源——单一提取路径，主体校验只此一份。
+    return await authenticate_access_token(db, credentials.credentials)
 
 
 async def resolve_principal_from_request(

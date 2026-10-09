@@ -497,5 +497,11 @@ class TestBackupShellWrapper:
             path = _PROJECT_ROOT / "deploy" / name
             if not path.exists():
                 continue
-            proc = subprocess.run(["bash", "-n", str(path)], capture_output=True, text=True, timeout=30)
+            # 仓库相对路径 + cwd 锚定：绝对反斜杠路径在 WSL bash 启动器（WindowsApps
+            # \bash.exe）下会被吞反斜杠（D:\... → D:Desktop...）报 127；相对路径对
+            # Git Bash / WSL / Linux CI 通吃。
+            proc = subprocess.run(
+                ["bash", "-n", f"deploy/{name}"],
+                capture_output=True, text=True, timeout=30, cwd=str(_PROJECT_ROOT),
+            )
             assert proc.returncode == 0, f"{name} 语法错误: {proc.stderr}"

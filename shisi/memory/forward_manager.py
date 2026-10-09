@@ -60,6 +60,10 @@ class ForwardManager:
         memory_content: str = "",
     ) -> dict[str, Any]:
         """转发完整回执 `{ok, forward_id, from, to, memory_id, content}`。"""
+        # 纵深（PRIV-2）：空目标行按 to_character 过滤永不可读，禁止落死行。
+        # 纯存储层只做非空完整性校验；归属校验唯一 owner 在 API 层（不引入认证依赖）。
+        if not str(to_character or "").strip():
+            return {"ok": False, "error": "to_character 不能为空", "forward_id": 0}
         conn = self._conn()
         try:
             cur = conn.execute(

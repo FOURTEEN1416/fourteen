@@ -181,8 +181,16 @@ def _full_app(factory):
     return app
 
 
-def _client(app) -> AsyncClient:
-    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test", timeout=15.0)
+def _client(app, client_addr: tuple[str, int] | None = None) -> AsyncClient:
+    """ASGI 客户端；client_addr 经 ASGITransport 官方参数注入 scope["client"]。
+
+    2026-10-09 手法迁移（auth-bruteforce 修复批，EXT-1）：防爆破限速键修复后
+    只信 ASGI 直连地址——旧以 X-Forwarded-For 请求头模拟多攻击者 IP 的手法
+    随之失效（该头正是被修复的伪造通道），改由 scope client 注入来源地址，
+    被测防爆破语义不变。无参调用与旧行为完全一致（默认 127.0.0.1）。
+    """
+    transport = ASGITransport(app=app, client=client_addr or ("127.0.0.1", 123))
+    return AsyncClient(transport=transport, base_url="http://test", timeout=15.0)
 
 
 # ═══════════════════════════════════════════════════════
@@ -329,16 +337,17 @@ async def test_f2_header_api_key_channel_kept(db_pair, auth_on):
 # ═══════════════════════════════════════════════════════
 
 
-async def _login(client, login: str, password: str, ip: str):
-    return await client.post(
-        "/api/auth/login",
-        json={"login": login, "password": password},
-        headers={"X-Forwarded-For": ip},
-    )
+async def _login(app, login: str, password: str, ip: str):
+    """ip 经 scope client 注入（auth-bruteforce 修复批后 XFF 头不再是限速键）。"""
+    async with _client(app, (ip, 123)) as c:
+        return await c.post(
+            "/api/auth/login",
+            json={"login": login, "password": password},
+        )
 
 
 async def _register_invite(
-    client,
+    app,
     *,
     code: str,
     email: str,
@@ -346,16 +355,16 @@ async def _register_invite(
     ip: str,
     password: str = "Str0ngPass!2026",
 ):
-    return await client.post(
-        "/api/auth/register-invite",
-        json={
-            "invite_code": code,
-            "email": email,
-            "username": username,
-            "password": password,
-        },
-        headers={"X-Forwarded-For": ip},
-    )
+    async with _client(app, (ip, 123)) as c:
+        return await c.post(
+            "/api/auth/register-invite",
+            json={
+                "invite_code": code,
+                "email": email,
+                "username": username,
+                "password": password,
+            },
+        )
 
 
 @pytest.mark.asyncio
@@ -364,14 +373,14 @@ async def test_f3_login_ip_rate_limit_5_failures_per_min(seeded_db, auth_on):
     factory = seeded_db
     app = _full_app(factory)
     bad_ip = "203.0.113.10"
-    async with _client(app) as c:
+    async with _client(app):
         for i in range(5):
-            r = await _login(c, "alice", "definitely-wrong", bad_ip)
+            r = await _login(app, "alice", "definitely-wrong", bad_ip)
             assert r.status_code == 401, f"前 5 次应为普通失败，第 {i + 1} 次实得 {r.status_code}"
-        sixth = await _login(c, "alice", "definitely-wrong", bad_ip)
+        sixth = await _login(app, "alice", "definitely-wrong", bad_ip)
         assert sixth.status_code == 429, f"同 IP 第 6 次失败应 429，实得 {sixth.status_code}"
         # 其他 IP 不受该 IP 窗口影响
-        other = await _login(c, "alice", "definitely-wrong", "203.0.113.99")
+        other = await _login(app, "alice", "definitely-wrong", "203.0.113.99")
         assert other.status_code == 401, f"其他 IP 应仍为普通 401，实得 {other.status_code}"
 
 
@@ -380,12 +389,12 @@ async def test_f3_login_account_lockout_after_5_consecutive_failures(seeded_db, 
     """5 个不同 IP 各失败一次后账号锁定：正确密码也 401 通用文案（修复前 200，红）。"""
     factory = seeded_db
     app = _full_app(factory)
-    async with _client(app) as c:
+    async with _client(app):
         for i in range(5):
-            r = await _login(c, "alice", "definitely-wrong", f"198.51.100.{i}")
+            r = await _login(app, "alice", "definitely-wrong", f"198.51.100.{i}")
             assert r.status_code == 401, r.text
         # 换全新 IP + 正确密码：账号锁优先 → 401
-        locked = await _login(c, "alice", _PASSWORD, "198.51.100.200")
+        locked = await _login(app, "alice", _PASSWORD, "198.51.100.200")
         assert locked.status_code == 401, f"锁定窗口内正确密码应 401，实得 {locked.status_code}"
         assert locked.json()["detail"] == _LOGIN_GENERIC, (
             "锁定文案必须与普通失败完全一致（不泄露锁定状态）"
@@ -397,12 +406,12 @@ async def test_f3_login_success_resets_failure_counter(seeded_db, auth_on):
     """成功登录清空失败账：4 败 1 成交错出现永不锁定。"""
     factory = seeded_db
     app = _full_app(factory)
-    async with _client(app) as c:
+    async with _client(app):
         for round_no in range(2):
             for _ in range(4):
-                r = await _login(c, "alice", "definitely-wrong", f"198.51.101.{round_no}")
+                r = await _login(app, "alice", "definitely-wrong", f"198.51.101.{round_no}")
                 assert r.status_code == 401, r.text
-            ok = await _login(c, "alice", _PASSWORD, f"198.51.101.{round_no}")
+            ok = await _login(app, "alice", _PASSWORD, f"198.51.101.{round_no}")
             assert ok.status_code == 200, f"第 {round_no + 1} 轮正确登录被误拒: {ok.text}"
 
 
@@ -413,15 +422,15 @@ async def test_f3_lockout_expires_after_15_minutes(seeded_db, auth_on, monkeypat
 
     factory = seeded_db
     app = _full_app(factory)
-    async with _client(app) as c:
+    async with _client(app):
         for i in range(5):
-            await _login(c, "alice", "definitely-wrong", f"198.51.102.{i}")
-        locked = await _login(c, "alice", _PASSWORD, "198.51.102.200")
+            await _login(app, "alice", "definitely-wrong", f"198.51.102.{i}")
+        locked = await _login(app, "alice", _PASSWORD, "198.51.102.200")
         assert locked.status_code == 401, "锁定应先生效（前置条件）"
 
         real_now = auth_mod._bf_now
         monkeypatch.setattr(auth_mod, "_bf_now", lambda: real_now() + 901.0)
-        released = await _login(c, "alice", _PASSWORD, "198.51.102.201")
+        released = await _login(app, "alice", _PASSWORD, "198.51.102.201")
         assert released.status_code == 200, f"锁定到期后应恢复登录，实得 {released.status_code}"
 
 
@@ -433,10 +442,10 @@ async def test_f3_register_invite_ip_rate_limit(db_pair, auth_on):
 
     app = _full_app(factory)
     bad_ip = "203.0.113.50"
-    async with _client(app) as c:
+    async with _client(app):
         for i in range(5):
             r = await _register_invite(
-                c,
+                app,
                 code=f"badcode{i}",
                 email=f"probe{i}@sec.test",
                 username=f"probe{i}",
@@ -444,7 +453,7 @@ async def test_f3_register_invite_ip_rate_limit(db_pair, auth_on):
             )
             assert r.status_code == 400, f"第 {i + 1} 次应为普通 400，实得 {r.status_code}"
         sixth = await _register_invite(
-            c,
+            app,
             code="badcode5",
             email="probe5@sec.test",
             username="probe5",
@@ -462,10 +471,10 @@ async def test_f3_register_invite_account_lockout(db_pair, auth_on):
 
     app = _full_app(factory)
     victim_email = "victim@sec.test"
-    async with _client(app) as c:
+    async with _client(app):
         for i in range(5):
             r = await _register_invite(
-                c,
+                app,
                 code=f"badcode{i}",
                 email=victim_email,
                 username=f"victim{i}",
@@ -474,7 +483,7 @@ async def test_f3_register_invite_account_lockout(db_pair, auth_on):
             assert r.status_code == 400, r.text
         # 有效邀请码 + 被锁邮箱 + 全新 IP → 401（且不消耗邀请码）
         locked = await _register_invite(
-            c,
+            app,
             code="goodcode1",
             email=victim_email,
             username="victim5",
@@ -506,11 +515,11 @@ async def test_f4_invite_state_oracle_unified(db_pair, auth_on):
     await _seed_invite(factory, "expiredone", expires_at=now - timedelta(days=1))
 
     app = _full_app(factory)
-    async with _client(app) as c:
+    async with _client(app):
         details: dict[str, str] = {}
         for code in ("nonexist1", "usedone", "revokedone", "expiredone"):
             r = await _register_invite(
-                c,
+                app,
                 code=code,
                 email=f"{code}@sec.test",
                 username=f"u_{code}",
@@ -539,7 +548,7 @@ async def test_f5_invite_registration_token_uses_token_claims(db_pair, auth_on):
     app = _full_app(factory)
     async with _client(app) as c:
         r = await _register_invite(
-            c,
+            app,
             code="claimscode1",
             email="claims@sec.test",
             username="claimsuser",

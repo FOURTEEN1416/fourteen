@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.auth import (
     auth_assert_account_unlocked,
     auth_rate_limit_ip,
+    auth_rate_limit_register,
     auth_record_failure,
     auth_record_success,
 )
@@ -166,18 +167,39 @@ async def register(
     db: AsyncSession = Depends(get_db),
 ):
     """注册新用户（邮箱、用户名、密码），完成后直接返回令牌"""
+    # ── 防爆破（EXT-3 修复，2026-10-09）：与 login/register-invite 对齐 ──
+    # auth_rate_limit_ip：既有 IP 失败滑窗检查（拦已积累失败的源）；
+    # auth_rate_limit_register：注册面尝试桶（按请求计数）——409 资源冲突
+    # 不计入失败滑窗（非凭证失败），若无本桶，邮箱/用户名枚举探测完全不受限。
+    auth_rate_limit_ip(request)
+    auth_rate_limit_register(request)
+
+    # ── 密码强度（策略唯一真源：api/password_policy.py）──
+    # 必须先于 409 存在性检查（第 1 轮验收 fail 主据）：若强度检查在查库之后，
+    # 攻击者固定「过长度不过强度」的弱密码载荷即可按状态码二分枚举——
+    # 弱密码+已注册 → 409，弱密码+未注册 → 422，oracle 经状态码通道复活。
+    # 前置后两分支一律先 422 同文案同机器码，固定载荷失去区分能力
+    # （先例：invite_routes 同批「置于邀请码校验之前」同一理由）。
+    ensure_password_strength(req.password)
+
+    # ── 409 资源冲突（EXT-3 oracle 消除）：邮箱/用户名命中一律同一文案 + 同一
+    # 机器码，不向未认证探测者泄露命中字段（先例：invite_routes 邀请码四态统一
+    # 「邀请码无效」）。前端机器判断走 error_code（REGISTRATION_CONFLICT），
+    # 不再依赖区分字段的 detail。冲突不记失败账（非凭证失败，既有计数口径）。──
+    _conflict = {
+        "detail": "Email or username already in use",
+        "headers": {"X-Error-Code": "REGISTRATION_CONFLICT"},
+    }
+
     # 检查邮箱是否已注册
     result = await db.execute(select(User).where(User.email == req.email))
     if result.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Email already registered")
+        raise HTTPException(status_code=409, **_conflict)
 
     # 检查用户名是否已注册
     result = await db.execute(select(User).where(User.username == req.username))
     if result.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Username already taken")
-
-    # 验证密码强度（策略唯一真源：api/password_policy.py）
-    ensure_password_strength(req.password)
+        raise HTTPException(status_code=409, **_conflict)
 
     # 创建用户
     # P1-10（2026-09-21 审查修复）：bcrypt ~0.2-0.5s 纯 CPU，旧实现直接在

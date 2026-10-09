@@ -11,8 +11,9 @@ import threading
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
+from starlette.datastructures import UploadFile as _StarletteUploadFile
 
 from api.auth import verify_api_key_dep
 from api.auth_jwt import AuthPrincipal, get_optional_principal, require_role
@@ -28,6 +29,16 @@ router = APIRouter(prefix="/api/mimo", tags=["mimo-tts"])
 
 # P0 安全批 F1：合成文本上限（字符数）——云端 TTS 按字符计费，超长文本既是滥用面也是慢请求
 _MAX_SYNTH_TEXT_LEN = 600
+
+# 全仓历遍安全批 ABUSE-2：clone 上传体上限（对齐 clone_routes.py 的 50MB 口径）。
+# 旧实现 ``await audio.read()`` 把整个 spool 文件一次性读进 worker 内存——app_factory
+# 的 request_size_limiter 只看 Content-Length 头，chunked 上传（无此头）绕过后直达
+# 本端点，数 GB body 即内存耗尽。
+_MAX_AUDIO_UPLOAD_BYTES = 50 * 1024 * 1024
+_READ_CHUNK_SIZE = 1024 * 1024
+# 读前快速通道：multipart 整包 Content-Length 含表单字段与 boundary 开销，
+# 故在音频上限上放宽 5MB 余量；CL 可缺失（chunked）/伪造，真正判据是分块累计。
+_CLONE_BODY_FAST_LIMIT = _MAX_AUDIO_UPLOAD_BYTES + 5 * 1024 * 1024
 
 
 class _RateLimiter:
@@ -79,6 +90,47 @@ def _limit_or_429(limiter: _RateLimiter, principal: AuthPrincipal | None) -> Non
         raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
 
 
+async def _read_upload_capped(audio: UploadFile) -> bytes:
+    """分块读取上传音频并强制大小上限（ABUSE-2：超限即刻 413 并停止读取）。
+
+    starlette UploadFile.read(size) 支持分块累计；直呼 handler 的伪造上传
+    （既有测试/脚本契约，仅实现无参 ``read()``）一次性读入——进程内调用
+    没有传输体积攻击面。
+
+    注意：FastAPI 注入的运行时实例是 starlette 的 UploadFile（fastapi.UploadFile
+    是其子类），isinstance 必须按父类判定，按子类判定会恒 False 落入直呼分支。
+    """
+    if not isinstance(audio, _StarletteUploadFile):
+        return await audio.read()
+    buf = bytearray()
+    while True:
+        chunk = await audio.read(_READ_CHUNK_SIZE)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > _MAX_AUDIO_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"参考音频过大（上限 {_MAX_AUDIO_UPLOAD_BYTES // (1024 * 1024)}MB）",
+            )
+    return bytes(buf)
+
+
+def _reject_oversized_clone_body(request: Request) -> None:
+    """ABUSE-2 读前快速通道（依赖实现）：整包 Content-Length 超阈值直接 413。
+
+    multipart 整包 CL 含表单字段与 boundary 开销，故阈值在音频上限上放宽余量；
+    chunked 上传无此头、CL 也可伪造，仅作快速通道，真正判据是分块累计。
+    直呼 handler（既有测试/脚本契约，依赖为哨兵不执行）自然跳过本通道。
+    """
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > _CLONE_BODY_FAST_LIMIT:
+        raise HTTPException(
+            status_code=413,
+            detail=f"参考音频过大（整包超过 {_CLONE_BODY_FAST_LIMIT // (1024 * 1024)}MB 上限）",
+        )
+
+
 def _register_catalog(result: dict[str, Any], *, name: str, kind: str, model: str,
                       description: str = "", owner: str = "", **extra: str) -> bool:
     """克隆/设计产物登记进音色 catalog（持久化 owner）。
@@ -108,12 +160,14 @@ async def clone_voice(
     tts_manager: TTSManager | None = Depends(get_tts_manager),  # noqa: B008
     _auth: bool = Depends(verify_api_key_dep),  # noqa: B008
     _principal: Any = Depends(get_optional_principal),  # noqa: B008
+    _body_guard: Any = Depends(_reject_oversized_clone_body),  # noqa: B008
 ) -> dict[str, Any]:
     """
     克隆音色
 
     上传10-30秒的参考音频，创建自定义音色（P0：每用户限速 2 次/分钟；
-    产物归属登记给调用者主体）
+    全仓历遍安全批 ABUSE-2：上传体 50MB 上限，读前 Content-Length 快速通道
+    + 分块读累计，超限 413 并停止读取；产物归属登记给调用者主体）
 
     Args:
         voice_name: 音色名称（用于标识）
@@ -142,8 +196,8 @@ async def clone_voice(
         )
 
     try:
-        # 读取音频数据
-        audio_data = await audio.read()
+        # 读取音频数据（分块读带上限，超限 413 并停止读取）
+        audio_data = await _read_upload_capped(audio)
 
         # 调用克隆接口
         result = await provider.clone_voice(

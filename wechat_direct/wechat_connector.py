@@ -21,6 +21,8 @@ from typing import Any
 
 import requests
 
+from utils.local_time import now_local
+
 logger = logging.getLogger("wechat_direct")
 
 # ── 微信 API 地址 ──
@@ -41,6 +43,10 @@ BACKOFF_DELAY = 60
 _RECEIVED_MSGS_MAX = 10000       # _received_msgs 最大条目数
 _CONTEXT_TOKENS_TTL = 86400      # _context_tokens 条目 TTL（秒），默认24小时
 _PEER_CHOICE_TTL = 600.0         # 好友「角色」菜单的选择待确认有效期（秒）
+# ABUSE-4（2026-10-09）：per-owner 入站日配额——开放注册下自建通道高频发消息
+# 每条都走完整 orchestrator 主链（多段 LLM）。量级取「真人远达不到、脚本必触发」：
+# HTTP/WS 侧同批收口为 500 msg/天（chat_routes._CHAT_MSGS_PER_DAY）。
+_INBOUND_DAILY_LIMIT = 500
 
 # ── 连接状态持久化（解决前端状态时连时断问题） ──
 # ⚠️ 2026-09-19：全局单例路径仅保留给「无 owner 的遗留 admin 通道」兼容读取；
@@ -774,6 +780,10 @@ class WeChatConnector:
         self._last_day = time.strftime("%Y-%m-%d")
         self._last_activity = 0
         self._reconnect_attempts = 0
+        # ABUSE-4：入站日配额记账（per-owner，本地日界滚动；进程内计数）
+        self._inbound_daily_limit = _INBOUND_DAILY_LIMIT
+        self._inbound_daily_date = ""
+        self._inbound_daily_count = 0
 
     def _session_key(self, peer_wxid: str) -> str:
         """会话隔离键：owner 通道下 peer 好友。遗留全局通道保持 peer_wxid 原样。"""
@@ -1841,10 +1851,37 @@ class WeChatConnector:
                 break
         return "\n".join(accepted)
 
+    def _inbound_quota_allow(self) -> bool:
+        """per-owner 入站日配额记账（ABUSE-4，2026-10-09）。
+
+        - 放在幂等认领（inbound_claim）**之前**：超限消息不认领、不落幂等账，
+          重放/幂等语义零触碰；也在 ``_peer_lock`` 之外（不加重串行等待）。
+        - 本地日界滚动（now_local），进程内计数；配额含失败消息（防绕过试错）。
+        - 遗留全局通道（owner_user_id=None）无法归属账号 → 调用方跳过（既有行为）。
+        """
+        today = now_local().date().isoformat()
+        with self._state_lock:
+            if self._inbound_daily_date != today:
+                self._inbound_daily_date = today
+                self._inbound_daily_count = 0
+            if self._inbound_daily_count >= self._inbound_daily_limit:
+                return False
+            self._inbound_daily_count += 1
+            return True
+
     def _handle_message(self, raw_msg):
         """处理一条消息（全链路结构化日志：接收 → 路由 → LLM → 回复）"""
         msg_type = raw_msg.get("message_type", 0)
         if msg_type not in (1, 3, 34):  # 放行用户文本(1)/图片(3)/语音(34)，其余（系统通知、自发回显等）仍丢弃
+            return
+
+        # ABUSE-4：入站日配额快速失败（per-owner）。只对真实用户消息计数，
+        # 超限在幂等认领与串行处理之前直接丢弃（不回复、不落账）。
+        if self.owner_user_id is not None and not self._inbound_quota_allow():
+            logger.warning(
+                "[wx][step=inbound_quota_exceeded] owner=%s msg_type=%s peer=%s",
+                self.owner_user_id, msg_type, raw_msg.get("from_user_id", ""),
+            )
             return
 
         msg_id = str(raw_msg.get("message_id", raw_msg.get("seq", "")))

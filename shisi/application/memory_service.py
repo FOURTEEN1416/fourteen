@@ -240,7 +240,9 @@ class ShisiMemoryService:
             query=query, session_id=session_id, top_k=top_k, character_id=character_id,
         )
         # 缺陷 F：目标侧派生记录进入唯一检索合并点——
-        # 跨角色转发不再「只写不读」，目标角色上下文可带转发便签（untrusted 语义由上层渲染）。
+        # context 已挂载 forwarded_notes（含 forward_id/from 可追溯字段）；
+        # ⚠️ prompt 渲染层尚未消费（PRIV-2：写入面已在 API 层按目标卡归属收口），
+        # 接线消费前不得按「已进 prompt」的假设直接渲染该字段。
         try:
             notes = self._forward_notes_for(character_id)
             if notes and isinstance(context, dict):

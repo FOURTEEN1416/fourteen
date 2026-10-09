@@ -96,7 +96,13 @@ class TestStartScript:
         assert "exit 1" in tail, "健康检查失败必须 exit 1，不得只 warning"
 
     def test_syntax_ok(self):
-        proc = subprocess.run(["bash", "-n", str(DEPLOY / "start.sh")], capture_output=True, text=True)
+        # 仓库相对路径 + cwd 锚定：绝对反斜杠路径在 WSL bash 启动器（WindowsApps
+        # \bash.exe）下会被吞反斜杠（D:\... → D:Desktop...）报 127；相对路径对
+        # Git Bash / WSL / Linux CI 通吃。
+        proc = subprocess.run(
+            ["bash", "-n", "deploy/start.sh"],
+            capture_output=True, text=True, cwd=str(_PROJECT_ROOT),
+        )
         assert proc.returncode == 0, proc.stderr
 
 
@@ -126,7 +132,11 @@ class TestDeployScript:
         assert "deploy_ai_girlfriend.ps1" not in src, "引用 2026-08-28 已删除的脚本"
 
     def test_syntax_ok(self):
-        proc = subprocess.run(["bash", "-n", str(DEPLOY / "deploy.sh")], capture_output=True, text=True)
+        # 同上：相对路径 + cwd 锚定，规避 WSL bash 启动器吞反斜杠的环境脆弱性。
+        proc = subprocess.run(
+            ["bash", "-n", "deploy/deploy.sh"],
+            capture_output=True, text=True, cwd=str(_PROJECT_ROOT),
+        )
         assert proc.returncode == 0, proc.stderr
 
 

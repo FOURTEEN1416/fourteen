@@ -14,7 +14,11 @@ import asyncio
 import contextlib
 import json
 import logging
+import threading
+import time
+from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -27,6 +31,7 @@ from api.database import User, get_db
 from api.deps import deps
 from api.main_routes import ChatRequest, ChatResponse, CreateSessionRequest
 from api.session_manager import resolve_owned_session
+from utils.local_time import now_local
 
 logger = logging.getLogger("api.routers.chat_routes")
 
@@ -42,14 +47,150 @@ def _owned_session(session_id: str, user_id: int) -> str:
         raise HTTPException(status_code=400, detail="会话标识无效") from exc
 
 
-async def _resolve_character_id(character_id: str) -> str:
+def _as_principal(candidate: Any) -> AuthPrincipal | None:
+    """归一主体：FastAPI 注入为 AuthPrincipal | None；直呼 handler（既有单测形态）
+    拿到的是未解析的 Depends 哨兵 → 按「无主体（机器面）」解释
+    （与 mimo_voice_routes._as_principal / character_routes isinstance 收窄同口径）。
+    """
+    return candidate if isinstance(candidate, AuthPrincipal) else None
+
+
+async def _resolve_character_id(character_id: str, principal: AuthPrincipal | None = None) -> str:
+    """解析对话目标角色 id，并在存在认证主体时做**卡归属校验**（PRIV-1 收口）。
+
+    - HTTP（/api/chat·/stream）与 WS 的共同汇聚点——归属校验唯一收口在此，
+      编排层 process_message 不重复校验（避免双 owner）。
+    - 机器面（principal=None，API Key/部署脚本/E2E）不干预（既有契约）。
+    - 公共模板卡（owner 为空）照常放行——41 张公共卡是全站对话基座。
+    - 私人卡只允许本人与管理员；失败与 require_character_access 同文案 404
+      （不区分「不存在」与「无权限」，防枚举他人卡 id）。
+    """
     if character_id and character_id != "default":
+        _assert_character_visible(character_id, principal)
         return character_id
     # P1-10：目录扫描是磁盘 IO（现已带指纹缓存，见 character_routes），
     # 仍不在事件循环上直接跑。
     from api.routers.character_routes import get_active_character_id
 
     return await asyncio.to_thread(get_active_character_id)
+
+
+def _assert_character_visible(character_id: str, principal: AuthPrincipal | None) -> None:
+    """对话链卡归属校验（PRIV-1）：归属真源复用 character_routes，不另立标准。"""
+    if principal is None:
+        return  # 机器面不干预
+    from api.routers.character_routes import (
+        _load_character,
+        card_access_allowed,
+        card_owner_key,
+    )
+
+    data = _load_character(character_id)
+    if data is None:
+        # 卡不存在：与 require_character_access 同文案 404（防状态码枚举），
+        # 不再静默透传给编排层（否则 404 与放行两种面语义分裂）。
+        raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
+    if not card_owner_key(data):
+        return  # 公共模板卡：全站对话基座，照常放行
+    if card_access_allowed(data, principal):
+        return  # 本人 / 管理员
+    raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
+
+
+# ═══════════════════════════════════════════════════════
+# 主聊天链入站频控（ABUSE-4）
+# ═══════════════════════════════════════════════════════
+
+#: 每用户滑动窗口上限（条/分钟）与每日配额（条/本地日）——测试钉住在
+#: tests/test_sweep_chat_chain.py，调整量级须同步过该用例。
+_CHAT_MSGS_PER_MINUTE = 20
+_CHAT_MSGS_PER_DAY = 500
+
+
+class _SlidingWindowLimiter:
+    """每主体滑动窗口限速（内存计数；进程级，多 worker 各自独立）。
+
+    形态与 mimo_voice_routes._RateLimiter 同款（代码库惯例：限速桶按文件就地
+    持有，不抽公共模块）；时钟可注入供测试钉窗口行为。含被拒请求的记账由
+    调用方顺序保证（先 check 后处理，拒绝路径同样消耗窗口额度）。
+    """
+
+    def __init__(self, max_events: int, window_seconds: float,
+                 clock: Callable[[], float] | None = None):
+        self._max = max_events
+        self._window = window_seconds
+        self._clock = clock or time.monotonic
+        self._hits: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def check(self, key: str) -> bool:
+        """窗口内还有配额则记账并放行，否则拒绝。"""
+        now = self._clock()
+        with self._lock:
+            hits = [t for t in self._hits.get(key, ()) if now - t < self._window]
+            if len(hits) >= self._max:
+                self._hits[key] = hits
+                return False
+            hits.append(now)
+            self._hits[key] = hits
+            return True
+
+    def reset(self) -> None:
+        """清空记账（测试隔离用）。"""
+        with self._lock:
+            self._hits.clear()
+
+
+class _DailyQuotaLimiter:
+    """每主体固定窗口日配额（本地日界滚动；进程内计数）。
+
+    日界经 ``day_provider`` 注入（生产 = 本地墙钟日期），测试可钉死日期验证
+    跨日重置；计数器按 (主体, 日) 存放，换日自动失效，超量主体过多时整表
+    重算（防御无界增长）。
+    """
+
+    def __init__(self, max_events: int, day_provider: Callable[[], str] | None = None):
+        self._max = max_events
+        self._day = day_provider or (lambda: now_local().date().isoformat())
+        self._counters: dict[str, tuple[str, int]] = {}
+        self._lock = threading.Lock()
+
+    def check(self, key: str) -> bool:
+        today = self._day()
+        with self._lock:
+            if len(self._counters) > 4096:
+                self._counters.clear()
+            day, count = self._counters.get(key, ("", 0))
+            if day != today:
+                day, count = today, 0
+            self._counters[key] = (day, count + 1)
+            return count < self._max
+
+    def reset(self) -> None:
+        with self._lock:
+            self._counters.clear()
+
+
+_chat_minute_limiter = _SlidingWindowLimiter(_CHAT_MSGS_PER_MINUTE, 60.0)
+_chat_daily_limiter = _DailyQuotaLimiter(_CHAT_MSGS_PER_DAY)
+
+
+def _chat_rate_guard(user_id: int) -> None:
+    """主聊天链每用户入站频控（ABUSE-4）：HTTP 两端点与 WS 共用同一配额桶。
+
+    量级取「真人远达不到、脚本直烧平台 LLM 凭证必触发」的中间档：
+    20 msg/min 挡突发刷屏，500 msg/天挡全天化消耗。超限 429（含失败请求，
+    防绕过试错）。
+    """
+    key = f"user:{user_id}"
+    if not _chat_minute_limiter.check(key) or not _chat_daily_limiter.check(key):
+        raise HTTPException(status_code=429, detail="发送太频繁，请稍后再试")
+
+
+def _reset_chat_rate_limits() -> None:
+    """清空两桶记账（测试隔离用）。"""
+    _chat_minute_limiter.reset()
+    _chat_daily_limiter.reset()
 
 
 # ═══════════════════════════════════════════════════════
@@ -117,6 +258,8 @@ async def chat(
     # D13 同意门禁：未同意/旧版本/撤回 → 403 CONSENT_REQUIRED（四通道同源）
     user_id: int = Security(require_current_consent),
     db: AsyncSession = Depends(get_db),
+    # PRIV-1：卡归属校验需要主体（role）；机器面（无 Bearer）→ None 不干预
+    principal: AuthPrincipal | None = Depends(get_optional_principal),
 ):
     orch = deps.orch
     if not orch:
@@ -125,6 +268,9 @@ async def chat(
             detail="Orchestrator not initialized",
             headers={"X-Error-Code": "FEATURE_UNAVAILABLE"},
         )
+
+    # ABUSE-4：每用户入站频控（与 WS 共桶）
+    _chat_rate_guard(user_id)
 
     session_id = _owned_session(req.session_id, user_id)
 
@@ -138,7 +284,7 @@ async def chat(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    character_id = await _resolve_character_id(req.character_id)
+    character_id = await _resolve_character_id(req.character_id, _as_principal(principal))
 
     async def generate(publish):
         return await orch.process_message(
@@ -156,6 +302,8 @@ async def chat_stream(
     # D13 同意门禁（同 /api/chat）
     user_id: int = Security(require_current_consent),
     db: AsyncSession = Depends(get_db),
+    # PRIV-1：同 /api/chat，卡归属校验需要主体
+    principal: AuthPrincipal | None = Depends(get_optional_principal),
 ):
     orch = deps.orch
     if not orch or not hasattr(orch, "process_message_stream"):
@@ -164,6 +312,9 @@ async def chat_stream(
             detail="Stream not available",
             headers={"X-Error-Code": "FEATURE_UNAVAILABLE"},
         )
+
+    # ABUSE-4：每用户入站频控（与 /api/chat、WS 共桶）
+    _chat_rate_guard(user_id)
 
     session_id = _owned_session(req.session_id, user_id)
 
@@ -176,7 +327,7 @@ async def chat_stream(
         select_request_llm(orch.components.get("llm"), user_id, user_llm_config)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    character_id = await _resolve_character_id(req.character_id)
+    character_id = await _resolve_character_id(req.character_id, _as_principal(principal))
 
     async def event_generator():
         stream_gen = orch.process_message_stream(
