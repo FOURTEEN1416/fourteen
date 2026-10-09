@@ -3460,3 +3460,14 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **W2 收编**（merge `35f5afe`）：`docs/research/2026-09-22_laya真源审计与接线评估.md`（222 行，判定=**有条件引入**：候选① llm_proactive 前置 gate 四步路径，不建议 tool_gate L0.5 与直替）+ LOG 两条（含 `842a1e4` 勘误——审计摘要两处与文档实况不符，以文档为准）。LOG 尾两侧各有追加（main +34 / 分支 +4）由 ort 自动合入，落位逐行核验无丢失。
 - **验证**：主检出四分块全量 **1891 收集 / 1890 通过 / 1 跳过 / 0 失败**（分块 **434 + 548+1 + 439 + 469** 精确吻合收集数；41 卡在位、工作树 clean）+ ruff 全仓 0 错 + `scripts/ci_gates.py` 4/4；热点 14 例单跑全绿。**未跑**真网采集冒烟复测（W3 窗内 `--force` 实测 ok=true added=15，同码不重造宿主池文件）。
 - **登记**：两 worktree（laya-audit / hot-knowledge）标记**可卸**、分支全部保留即回滚路径；BOARD 登记表与追加区已刷新（`374b2ba`）。**遗留**：laya 试跑授权与服务器 RAM/依赖核验归默默（审计文档 §2.5）；本批 push 后即三端中两端一致，**服务器 pull 上线归默默裁决**（A 档含 `hot_topics.py`/scheduler/ase_engine 代码变更）。
+
+## 2026-10-09 攻击面扫描升级批（全仓六路对抗扫描 + 四域修复，commit `e949107`）
+
+- **方法**：动态工作流（run `dwfrun-8ef8d809`，GLM-5.3-Flash 子智能体 ~30+ 会话，主控 GLM-5.3 编排不写码）：侦察（SEC-1~11+上批已修面 10 条）→ 六路攻击者视角并行扫描（无凭证外部/横向越权/注入穿越/前端供应链/运维配置/业务滥用，各领 SEC 项验现状）→ 独立对抗复核（发现者不自证，换路径复现）→ 分诊（文件域不相交 TS 校验）→ 4 修复域并行（红测先行+对抗验收五步+回炉）→ 全量回归门 → 报告 `docs/verification/2026-10-09-attack-sweep.md`（98KB）。
+- **数字**：原始发现 30 / 复核确认 16（P0 0 / P1 9 / P2 7 暂缓）/ 误报 2 / 已知登记 12（SEC-1~11 现状全部实地验证**未恶化**；SEC-6 补认证面盲区证据、SEC-11 双锁漂移实锤 FE-2）；修复验收通过 9 条。
+- **修复**（9 finding）：①EXT-1/ABUSE-1 XFF 防爆破键收口（`_bf_client_ip` 只信 ASGI 直连地址 + nginx 双模板全部反代段 XFF 覆盖写 `$remote_addr`）；②EXT-2 WS 三段主体校验（`authenticate_access_token` HTTP/WS 同源唯一真源，被改密/停用旧 token WS 面同刻失效）；③EXT-3 注册 oracle 消除（IP 滑窗+注册桶 15 req/min/IP；409 统一文案+机器码；密码强度前置防状态码二分——第 1 轮验收 fail 回炉产物）；④PRIV-1 chat 链卡归属（`_resolve_character_id` HTTP+WS 唯一收口，防枚举同文案 404）；⑤PRIV-2 forward 目标卡归属+存储层非空纵深+memory_service 文档勘误；⑥ABUSE-2 clone 上传 50MB（CL 快速通道+分块读累计双判据）；⑦ABUSE-3 voice/test 600 字+6/分/用户；⑧ABUSE-4 chat/WS/微信入站频控（20/分+500/日共桶；微信 per-owner 日配额置于幂等认领之前零触碰幂等语义）。
+- **escalation 两起（主控裁决）**：①`tests/test_sec_p0_auth.py` 5 用例手法迁移（XFF 头→ASGITransport `client=`，断言语义不变——旧手法前提正是漏洞本体）；②`tests/test_w10_*.py` bash 路径形态修复（绝对反斜杠→相对+cwd 锚定，WSL 启动器/Git Bash/CI 三态兼容；既有环境脆弱测试被回归门 spawn PATH 形态暴露，非本批引入）。
+- **登记**：P1_BACKLOG 新增 **SEC-12~18**（账号锁定武器化/WS 未认证连接耗尽/web_enricher 无 url_guard/CI 审计门将红 vitest3→5/CSP 全缺/crawl-enrich 线程池饱和/提醒无上限）+ SEC 区段现状刷新注记。
+- **验证**：ruff 0 + pytest 五分块 **2874 收集 / 2873 通过 / 1 跳过 / 0 失败**（38+38+37+37+37 文件=674+607+449+559+585+1 精确吻合；41 卡在位）+ vitest 182/182；新测试 4 文件 1815 行（红测先行实证+突变验红；基线 2807→2874 净增 67）。
+- **部署与生产复验（三端一致 @ `e949107`）**：服务器 fetch+ff-only 快进核对落点 → `remote_deploy.sh`（bundle 重建+服务重启+nginx reload）→ **nginx 线上精确 patch**（备份 `ai-girlfriend.conf.bak-attacksweep-20261009` 后 5 处 XFF 行替换 `$proxy_add_x_forwarded_for`→`$remote_addr`，`nginx -t` 通过后 reload；不触碰校友项目/fastrun 配置）→ 复验：health/ready 双 200、master `--workers 4` 在位、调度器心跳正常、重启窗口日志 0 ERROR、blob 四文件三端 `git hash-object` 一致、**XFF 防爆破行为级实证**（外部连打 21 次每次不同伪造 XFF 头 → 15×429+6×401，限速键按真实 IP 记账、伪造头失效；旧漏洞形态应为 21×401）。
+- **遗留**：SEC-7 凭据轮换与 git 历史清理归默默裁决；SEC-1 prompt 行为变更需单独观察批；FE-1 vitest 3→5 升级排期（下次 CI 可能红，见 SEC-15）。
