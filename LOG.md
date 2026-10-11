@@ -3471,3 +3471,12 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **验证**：ruff 0 + pytest 五分块 **2874 收集 / 2873 通过 / 1 跳过 / 0 失败**（38+38+37+37+37 文件=674+607+449+559+585+1 精确吻合；41 卡在位）+ vitest 182/182；新测试 4 文件 1815 行（红测先行实证+突变验红；基线 2807→2874 净增 67）。
 - **部署与生产复验（三端一致 @ `e949107`）**：服务器 fetch+ff-only 快进核对落点 → `remote_deploy.sh`（bundle 重建+服务重启+nginx reload）→ **nginx 线上精确 patch**（备份 `ai-girlfriend.conf.bak-attacksweep-20261009` 后 5 处 XFF 行替换 `$proxy_add_x_forwarded_for`→`$remote_addr`，`nginx -t` 通过后 reload；不触碰校友项目/fastrun 配置）→ 复验：health/ready 双 200、master `--workers 4` 在位、调度器心跳正常、重启窗口日志 0 ERROR、blob 四文件三端 `git hash-object` 一致、**XFF 防爆破行为级实证**（外部连打 21 次每次不同伪造 XFF 头 → 15×429+6×401，限速键按真实 IP 记账、伪造头失效；旧漏洞形态应为 21×401）。
 - **遗留**：SEC-7 凭据轮换与 git 历史清理归默默裁决；SEC-1 prompt 行为变更需单独观察批；FE-1 vitest 3→5 升级排期（下次 CI 可能红，见 SEC-15）。
+
+## 2026-10-11 SEC-15 根治批（vitest 3→5 + 双锁收敛，commit `aea3cd0`）
+
+- **根因**：vitest@3.2.6 dev 链的 tinypool≤2.1.1 两 critical（GHSA-5gmw-xhrv-c9v3/GHSA-85c8-ppgw-ccpr，原型污染→RCE）+ @vitest/mocker moderate + source-map-js high（GHSA-68fv-2mgg-jv7q）在新 advisory 收录后触发 `ci.yml:79` 审计门——攻击面扫描批两次 push 的 CI 红（run 37930815297/37930372679，frontend job 18s 挂在 audit 步骤，与本批代码无关）。
+- **根治**（主控亲自，用户裁决「直接进行根治」）：vitest ^3.0.0→^5.0.3 + @vitest/coverage-v8 同步（vitest 4 起 pool 架构重写**移除 tinypool 依赖**，根因链出树实证——npm 树中 tinypool 不存在）；`npm audit fix` 带 source-map-js 至范围修复版；`setup.ts` 改 `@testing-library/jest-dom/vitest` 入口（vitest 5 断言类型双参数化不再读全局 jest.Matchers，20 处 TS2339 归零）。迁移依据=vitest 官方 v4/v5 迁移指南逐条对照（Node ≥22.12 与 vite ≥6.4 本仓 v24.18/v8.3.2 均满足；clearMocks 默认 true 等行为变化经 182 测试实跑零影响——项目 mock 本就顶层规范）。
+- **双锁收敛（FE-2 销账）**：bun.lock 与 package-lock.json 的 framer-motion（12.40.0/12.42.0 分叉）与 @tanstack/react-query（5.100.13/5.101.2 分叉）统一至 12.43.0/5.104.1——审计树（npm audit 读 package-lock）与构建树（CI bun install 读 bun.lock）同源。
+- **验证（CI 同构 bun 树全链）**：`npm audit --package-lock-only --audit-level=high` → **0 vulnerabilities exit 0**；`bunx tsc --noEmit` 0 错；`bun run build` 通过；vitest **182/182**（30 文件）；两锁关键包版本逐项核对一致；**GitHub CI 全绿（run 38109894676，9/9 job 含 frontend 审计门）**。
+- **部署与复验（三端一致 @ `aea3cd0`）**：服务器 ff-only 快进 → remote_deploy（bundle 重建+重启+nginx reload）→ health/ready 200/200、无凭证 401、重启窗口日志 0 ERROR、blob（package.json/setup.ts）三端 `git hash-object` 一致。
+- **销账**：P1_BACKLOG SEC-15 已根治标注；FE-2 双锁漂移随批收敛。SEC-11 其余项（chromadb 等）与 SEC-12~14/16~18 维持登记。
