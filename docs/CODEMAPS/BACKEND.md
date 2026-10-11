@@ -1,8 +1,8 @@
 # 后端地图
 
-> **✅ 2026-09-29 全仓历遍重排**：端点统计按 `create_api_app()` 内省**按 handler 所属模块**重排（**229 业务端点 / 195 唯一路径**；111 GET / 82 POST / 16 PUT / 20 DELETE；`len(app.routes)=233` 含 4 条框架路由）。较 09-21 口径 220/186 净增 9 = W9 自服务 +5（consent/withdraw、consent/status、account/delete、account/export(+chats)）+ W12 模板 +2 + /api/metrics +1 + api memory 转发面 +1（W4）；wechat_routes 旧表计 9、本批内省两次均为 8（旧表计数偏差，该文件近期无变更）。权威口径以 `CODE_GRAPH.md` **v3.8.27** §1.1 为准。更早增量（09-20/21）见 git 历史。
+> **✅ 2026-09-29 全仓历遍重排**：端点统计按 `create_api_app()` 内省**按 handler 所属模块**重排（**229 业务端点 / 195 唯一路径**；111 GET / 82 POST / 16 PUT / 20 DELETE；`len(app.routes)=233` 含 4 条框架路由）。较 09-21 口径 220/186 净增 9 = W9 自服务 +5（consent/withdraw、consent/status、account/delete、account/export(+chats)）+ W12 模板 +2 + /api/metrics +1 + api memory 转发面 +1（W4）；wechat_routes 旧表计 9、本批内省两次均为 8（旧表计数偏差，该文件近期无变更）。**2026-10-11 内省复测 229/195/233 不变**（10 月三批未增删路由）。权威口径以 `CODE_GRAPH.md` **v3.8.28** §1.1 为准。更早增量（09-20/21）见 git 历史。
 
-**最近更新:** 2026-09-29
+**最近更新:** 2026-10-11
 **版本:** 3.1.0
 **入口文件:** `api/run_api.py`, `api/app_factory.py`, `main.py`, `orchestrator/`
 
@@ -11,7 +11,7 @@
 ## 架构分层
 
 ```
-api/ (45 py 文件)            ← FastAPI 路由层
+api/ (48 py 文件)            ← FastAPI 路由层
 ├── run_api.py              ← 启动入口 (uvicorn + flock 调度器单例/微信连接自动恢复)
 ├── app_factory.py          ← APP 工厂 (create_api_app) — 唯一构造入口
 ├── auth.py                 ← X-API-Key 认证依赖
@@ -66,7 +66,7 @@ api/ (45 py 文件)            ← FastAPI 路由层
 
 ---
 
-## API 端点清单（模块级，2026-09-29 内省实测，按 handler 所属文件）
+## API 端点清单（模块级，2026-09-29 内省实测、2026-10-11 复测不变，按 handler 所属文件）
 
 | 模块文件 | 端点数 | 路径 |
 |------|------|------|

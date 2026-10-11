@@ -1,9 +1,9 @@
 # 后端业务模块地图
 
-> **✅ 2026-09-29 全仓历遍刷新**：全量 find 实测——`.py` 总量 477→**483**（模块 284 + 根级 2 + `scripts/` 18 + `tests/` 176 + `deploy/` 3）；各包计数无变动（api 48 / routers 25 / utils 19 / tools 13 / voice 8 / proactive 10 / shisi 116 / llm_provider 4 / orchestrator 9）；`optimized_orchestrator.py` 1270→**1760 行**、`_init_mixin.py` **11 阶段**。端点 **229/195**（2026-09-29 内省复测）。权威口径以 `CODE_GRAPH.md` **v3.8.27** 为准。更早增量（09-27/09-20）见 git 历史。
+> **✅ 2026-10-11 口径对齐刷新**：全量 find 复测——`.py` 总量 483→**495**（模块 284 不变 + 根级 2 + `scripts/` 17 + `tests/` 189 + `deploy/` 3；增量全部来自 `tests/` 176→189，`scripts/` 18→17 系并行清理批暂存删除 `scripts/clean_local_affinity_test_rows.py`）；各包计数复测无变动（api 48 / routers 25 / utils 19 / tools 13 / voice 8 / proactive 10 / shisi 116 / llm_provider 4 / orchestrator 9）。端点 **229/195**（2026-10-11 内省复测不变）。权威口径以 `CODE_GRAPH.md` **v3.8.28** 为准。更早增量（09-27/09-20/09-29）见 git 历史。
 
-**最近更新:** 2026-09-29
-**Python 版本:** ≥3.10 | **总文件:** **483** 个 .py（2026-09-29 find 实测：模块 284 + 根级 2 + `scripts/` 18 + `tests/` 176 + `deploy/` 3；**不含** `frontend/` 与工作区内嵌的 `大创赛报名以及后期发展/` 目录）
+**最近更新:** 2026-10-11
+**Python 版本:** ≥3.10 | **总文件:** **495** 个 .py（2026-10-11 find 实测：模块 284 + 根级 2 + `scripts/` 17 + `tests/` 189 + `deploy/` 3；**不含** `frontend/` 与工作区内嵌的 `大创赛报名以及后期发展/` 目录）
 
 ---
 
@@ -36,7 +36,7 @@
 
 ---
 
-## shisi/ — DDD 核心域 (118 文件，2026-09-21 实测；含 agent-plane 子平面，`character_service.py`/`api/v2/`/knowledge legacy `RAGEngineV2` 包已删)
+## shisi/ — DDD 核心域 (116 文件，2026-09-21 实测、2026-10-11 find 复测一致；含 agent-plane 子平面，`character_service.py`/`api/v2/`/knowledge legacy `RAGEngineV2` 包已删)
 
 **入口:** `shisi/api/registry.py`（由 `api/app_factory.py` 调用 `setup_shisi` 装配）
 **配置:** `shisi/config.py` / `shisi/migrations.py`
@@ -72,16 +72,16 @@
 
 ---
 
-## api/ — FastAPI 路由层 (45 文件)
+## api/ — FastAPI 路由层 (48 文件，2026-10-11 find 复测一致)
 
 **入口:** `api/run_api.py` → `api/app_factory.py:create_api_app()`
 
 **结构:**
 - 根目录: `app_factory.py`（应用工厂）, `run_api.py`（启动入口）, `main_routes.py`（模型/常量/Helper）, `health_routes.py`（健康检查）, `auth.py`/`auth_jwt.py`（认证，09-19 起 **JWT 优先**）, `database.py`（SQLAlchemy **8 表**）, `achievement_engine.py`（成就引擎，ADR-0014）, `byok.py`（W1 用户自带 Key 强制策略）, `consent.py`（W2 使用即同意协议）, `password_policy.py`（密码策略唯一真源 ≥8 含字母数字）, `deps.py`（依赖注入）, `session_manager.py`, `websocket_server.py`, `qrcode_store.py`, `path_security.py`, `runtime_config.py`
-- `routers/` 22 个路由模块: `admin_routes`, `auth_routes`, `character_routes`, `chat_routes`, `clone_routes`, `emotion_routes`, `invite_routes`, `knowledge_routes`, `llm_providers_routes`, `memory_routes`, `mimo_voice_routes`, `misc_routes`, `persona_card_routes`, `personality_routes`, `safety_routes`, `storyline_routes`, `tools_routes`, `training_routes`, `users_routes`, `voice_routes`, `wechat_channel_routes`（每人独立通道，09-19）, `wechat_routes`
+- `routers/` 24 个路由模块: `admin_routes`, `agent_plane_routes`, `auth_routes`, `character_routes`, `character_template_routes`, `chat_routes`, `clone_routes`, `emotion_routes`, `invite_routes`, `knowledge_routes`, `llm_providers_routes`, `memory_routes`, `mimo_voice_routes`, `misc_routes`, `persona_card_routes`, `personality_routes`, `safety_routes`, `storyline_routes`, `tools_routes`, `training_routes`, `users_routes`, `voice_routes`, `wechat_channel_routes`（每人独立通道，09-19）, `wechat_routes`
 - `state/` 3 个状态模块: `safety_log`, `tool_history`, `training_state`
 
-**实际挂载:** 19 个 `include_router` 调用 + `setup_shisi(app)` 装配，共 **229 业务端点 / 195 唯一路径**（2026-09-29 `create_api_app` 内省实扫；`len(app.routes)=233` 含 4 条框架路由）
+**实际挂载:** 19 个 `include_router` 调用 + `setup_shisi(app)` 装配，共 **229 业务端点 / 195 唯一路径**（2026-09-29 `create_api_app` 内省实扫，2026-10-11 复测一致；`len(app.routes)=233` 含 4 条框架路由）
 **依赖:** shisi, security, llm_provider, database
 
 ---
@@ -103,7 +103,7 @@
 
 ---
 
-## voice/ — 语音合成 (5 模块 + __init__)
+## voice/ — 语音合成 (7 模块 + __init__，2026-10-11 find 复测)
 
 **职责:** 文本转语音。**MiMo 唯一引擎**（08-28 裁决 A：Edge-TTS/SoVITS/CosyVoice/Bert-VITS2 四 provider 与 voice_training.py 已删除）
 
@@ -112,6 +112,8 @@
 - `tts_manager.py` — 单引擎管理
 - `tts_provider_base.py` — Provider 抽象基类
 - `audio_converter.py` — 音频格式转换（silk 编解码，pilk 可选依赖）
+- `audio_result.py` — 合成结果模型
+- `voice_catalog.py` — 音色目录持久化（W7）
 - `clone_data_manager.py` — 聊天克隆数据管理（克隆域，与 TTS 无关）
 
 **依赖:** config (system.yaml voice 段)
@@ -124,7 +126,7 @@
 
 ---
 
-## tools/ — 工具系统 (10 文件, 12 个内置工具)
+## tools/ — 工具系统 (13 文件，2026-10-11 find 复测；12 个内置工具)
 
 **职责:** 工具定义、调度、执行
 
@@ -144,23 +146,24 @@
 
 ---
 
-## observability/ — 可观测性 (9 文件)
+## observability/ — 可观测性 (8 文件，2026-10-11 find 复测)
 
-**职责:** 日志、指标、链路追踪、健康检查
+**职责:** 日志、指标、健康检查、sentry、优雅停机（tracing 已于 v1.35 删——span/start_trace 全仓零调用）
 
 **关键文件:**
 - `logging_setup.py` — 结构化日志
 - `metrics.py` — Prometheus 指标
-- `tracing.py` — OpenTelemetry 追踪
-- `config_manager.py` — 配置管理
+- `config_manager.py` / `config_models.py` — 配置管理与模型
 - `health.py` — 健康检查
+- `sentry.py` — Sentry 接入
+- `graceful_shutdown.py` — 优雅停机
 
-**依赖:** 无外部（标准库 + OpenTelemetry）
+**依赖:** 标准库 + sentry-sdk（OpenTelemetry 全仓 .py 零导入者，pyproject 声明残留）
 **被依赖:** 全局
 
 ---
 
-## llm_provider/ — LLM 供应商 (5 文件)
+## llm_provider/ — LLM 供应商 (4 文件，2026-10-11 find 复测)
 
 **职责:** 多 LLM 供应商统一接入
 

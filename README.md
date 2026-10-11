@@ -8,17 +8,17 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-2828-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-3055-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **当前状态（2026-09-28 服务器同步批，三端一致 `2ebfc61`）**：消息归属、发送确认后记忆、请求/后台模型凭证隔离、画像更正保序、事实删除派生失效、抽取水位与昨日角色日记的重构与**迁移并发竞态 P1 根治**（`run_migrations` 包 `BEGIN IMMEDIATE` 单写事务）均已部署上线；health/ready 200、4 worker。上线验收与遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md` 2026-09-28。
+> **当前状态（2026-10-11 SEC-15 根治批，三端一致 `aea3cd0`）**：10 月三批均已部署上线——**安全升级批**（两轮对抗审计 34+47 发现 + 生产 SSH 取证 + P0 修复八域，`2c3b888`）、**攻击面扫描批**（六路对抗扫描 30 发现/16 确认/9 修复 + nginx XFF 精确替换，`e949107`）、**SEC-15 根治**（vitest 3→5 + 双锁收敛，`aea3cd0`）；health/ready 200、4 worker、CI 全绿 run `38109894676`（9/9 job 含前端审计门）。上线验收与遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md` 2026-10-11。
 
-> **测试口径**（2026-09-28 服务器同步批终验，本地**全量五分块**实测）：后端 **2651 passed / 1 skipped / 0 failed**（收集 **2652** = 534+1 + 556 + 565 + 485 + 511 精确吻合；**174 测试文件**；现役角色卡 **41 张**且全量跑程**零净增**——注册流测试已沙箱 `CHARACTERS_DIR` + `test_w18_traversal_fixes` 机检守卫）。✅ GitHub CI 全绿（run `36402213711` @ `2ebfc61`，backend+frontend+六 ff 闸+adr-integrity 全 success），三端 blob 一致。⚠️ **口径勘误**：`tests/test_[a-f]*.py` 等四段 glob **漏子目录 `tests/core/`**，**全量口径必须补跑它**；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
-> 前端 `177 passed`（vitest 30 文件）+ `tsc --noEmit` 0 错误；ruff 0.16.8 全仓 0 错（`All checks passed!`）。
-> ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 7）。**引用基线必须同时声明卡数**。
+> **测试口径**（后端 = 2026-10-09 攻击面扫描批终验，本地**全量五分块**实测；2026-10-11 对齐批未重跑全量）：后端 **2873 passed / 1 skipped / 0 failed**（收集 **2874** = 674+607+449+559+585+1 精确吻合；**187 测试文件**；现役角色卡 **42 张**且全量跑程**零净增**——注册流测试已沙箱 `CHARACTERS_DIR` + `test_w18_traversal_fixes` 机检守卫；⚠️ 第 42 张 `99c89c39.json` 系 10-09 落盘未入 LOG，与 LOG「41 卡在位」差 1 待复核）。✅ GitHub CI 全绿（run `38109894676` @ `aea3cd0`，backend+frontend+六 ff 闸+adr-integrity 9/9 success），三端 blob 一致。⚠️ **口径勘误**：`tests/test_[a-f]*.py` 等四段 glob **漏子目录 `tests/core/`**，**全量口径必须补跑它**；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> 前端 `182 passed`（vitest 5.0.3，30 文件；3→5 升级系 SEC-15 根治，tinypool 双 critical 出树）+ `tsc --noEmit` 0 错误；ruff 0.16.8 全仓 0 错（`All checks passed!`）。
+> ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 13）。**引用基线必须同时声明卡数**。
 
 ---
 
@@ -77,7 +77,7 @@ python main.py
 | **记忆系统** | 会记住你说过的事（三层记忆：短期+情景+长期） |
 | **工具** | 天气、搜索、日历、计算器、提醒、时间感知等 12 个内置工具 |
 | **剧情线** | 和角色的关系可以按"剧情"推进，有支线和进度追踪 |
-| **邀请码注册** | 内测期间通过邀请码注册，管理员在控制台生成 |
+| **注册准入** | 开放注册为主链路（所有人可注册），邀请码注册并存可选（2026-10-04 D13 裁决），管理员在控制台生成邀请码 |
 | **管理控制台** | React 前端，19 个页面，角色管理/语音设置/系统配置一站式 |
 
 > **语音引擎现状**：2026-08-28 起收敛为 **MiMo Cloud 单一引擎**，
@@ -158,7 +158,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 ## 项目结构
 
 ```
-├── api/                  FastAPI 后端（229 端点 / 195 条路径，2026-09-29 内省实测）
+├── api/                  FastAPI 后端（229 端点 / 195 条路径，2026-10-11 内省复测）
 │   ├── app_factory.py    create_api_app() —— 唯一 app 工厂
 │   ├── routers/          22 个域路由模块（character/chat/misc/personality/users/
 │   │                     training/tools/safety/clone/auth/admin/invite/voice/
@@ -190,8 +190,8 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │       ├── store/        Zustand 3 个（authStore / characterBuilderStore / errorStore）
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
-├── tests/                2651 后端测试通过 + 1 跳过（2026-09-28 服务器同步批五分块实测，收集 2652）+ 177 前端测试
-├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 41 张）
+├── tests/                2873 后端测试通过 + 1 跳过（2026-10-09 攻击面扫描批五分块实测，收集 2874；187 个测试文件）+ 182 前端测试
+├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 42 张——第 42 张 10-09 落盘未入 LOG，与「41 卡」口径差异待复核）
 └── main.py               入口
 ```
 

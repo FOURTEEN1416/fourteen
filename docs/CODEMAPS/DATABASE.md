@@ -1,6 +1,6 @@
 # 数据库地图
 
-**最近更新:** 2026-09-29
+**最近更新:** 2026-10-11（三库表数 9/27/8 经只读实测与下文一致，无 schema 变更；角色卡目录刷新为本地实测 42 张，见下方注记）
 **数据库:** SQLite (主, aiosqlite) + ChromaDB (向量) + 文件系统 (角色卡/知识库)
 
 > **✅ 2026-09-29 全仓历遍复核（三库实测）**：`data/users.db` **9 表**（api/database.py 模型；+`user_active_characters` W1 `94ed63d` 激活归属唯一 owner；`users.id` AUTOINCREMENT 表重建 + 引擎级 `PRAGMA foreign_keys=ON`，W9）；`data/sqlite.db` **27 张**（不含 FTS 影子表；较 09-20 口径 +`memory_extraction_progress`/`fact_deletion_watermarks`/`memory_forwards`/`user_persona`/`user_persona_snapshots`/`user_profile`，旧清单中 `sessions`/`working_memory`/`emotion_trajectory`/`pending_events`/`affinity_log` 五死表已不存在）；`data/runtime_plane.db` **8 表**（W3 运行平面跨进程 CAS 账，WAL）。文件账：`data/lifecycle_jobs/`（W9 五阶段作业账+坟场）、`data/runtime_switches.json`（W6 工具开关）、`data/voice_catalog.json`（W7 音色）、`config/character_templates.yaml`（W12 策展清单）。
@@ -27,9 +27,9 @@
 │  ┌────────────────────┐   ┌──────────────────────┐      │
 │  │ 角色卡              │   │ 知识库数据            │      │
 │  │ config/characters/ │   │ data/knowledge/      │      │
-│  │ (gitignore；现役     │   │ BM25 索引 (42 文件，   │      │
-│  │  41 张，2026-09-20  │   │ 约 1750 块)           │      │
-│  │  自服务器逐字节恢复) │   │                      │      │
+│  │ (gitignore；本地     │   │ BM25 索引 (42 文件，   │      │
+│  │  实测 42 张=41 默认  │   │ 约 1750 块)           │      │
+│  │  +1 运行时克隆副本) │   │                      │      │
 │  └────────────────────┘   └──────────────────────┘      │
 │  ┌────────────────────┐                                 │
 │  │ 微信通道凭证         │                                 │
@@ -114,11 +114,15 @@ config/characters/
 ```
 
 > ⚠️ **该目录被 `.gitignore:117` 忽略**，内容由本地/部署私有投递，**卡数不可跨检出复现**。
-> 2026-09-20 状态：**现役 41 张**（本批途中曾为空 → 已按用户指令从服务器
-> `/opt/ai-girlfriend/config/characters/` **逐字节恢复**，逐文件 `sha256sum` **41/41 一致**、
-> JSON 全可解析，含 v1.14 的 16 张文学导入卡）。
-> **测试基线随之浮动**：`tests/test_persona_injection.py` 用例数 = **2 × 卡数 + 7**
-> ——0 卡时参数化整体塌缩（本批途中实测收集数从 1436 掉到 1356）。
+> 2026-10-11 状态：**本地实测 42 张** = 41 张 default 策展卡 + **1 张运行时克隆副本**
+> （`99c89c39.json`：林挽夏按 user_id=1 从 `62105bca` 派生，`created_at`
+> 2026-10-09T11:36Z；三张林挽夏 md5 互异、非重复文件）——**与 `LOG.md`
+> 10-05/10-09「41 卡在位」差 1 即源于此**（LOG 口径未计运行时克隆），
+> 服务器端实数待下次部署核对。（历史：2026-09-20 曾为空 → 从服务器逐字节
+> 恢复 41 张，`sha256sum` 41/41 一致，含 v1.14 的 16 张文学导入卡。）
+> **测试基线随之浮动**：`tests/test_persona_injection.py` 用例数 = **2 × 卡数 + 13**
+> （2026-10-11 实测 42 卡 → 97 用例；旧口径 +7 已失效）
+> ——0 卡时参数化整体塌缩（2026-09-20 途中实测收集数从 1436 掉到 1356）。
 > **引用测试基线必须同时声明卡数**（见 `AGENTS.md` §4.3）。
 
 ### 知识库 (data/knowledge/)

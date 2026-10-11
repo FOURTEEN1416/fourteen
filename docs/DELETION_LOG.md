@@ -1,5 +1,21 @@
 # Code Deletion Log
 
+## [2026-10-11] 临时脚本清理批：本机 dev 库镜像残留清理脚本删除（使命已完成）
+
+### 删除对象与证据
+- `scripts/clean_local_affinity_test_rows.py`（66 行，`git rm`）——一次性本机 dev 库清理脚本，清理 conftest `isolate_runtime_state_files` 夹具（2026-09-22 块E）落地之前旧夹具写进宿主 `data/sqlite.db` 的调度器镜像污染行。
+  - **使命已完成**：docstring 自述「一次性清理（仅本机 dev 库）」；`LOG.md:493` 登记其实跑（候选恰为实证 21 行 `alice::default`、值全 0.0，备份 `data/sqlite.db.bak-20260922-180027`，删除后镜像残留=0、总行数 1179→1158）；
+  - **污染源已根治**：`isolate_runtime_state_files` autouse 夹具上线后不再产生新污染，脚本使命终结；
+  - **零引用**：全仓 grep `clean_local_affinity_test_rows`（py/md/yml/yaml/toml/json/ps1，排除 .git/node_modules 与 docs/history 归档）仅命中自身 docstring 与 `LOG.md:493` 登记，无任何代码/测试/CI 引用；
+  - **git 历史**：`git log --follow` 仅一个提交 `a0f0af2`（p1遗留①收口批随产物），无后续演化。
+- **删除前全文已读**（66 行）：argparse CLI、默认 dry-run、`--apply` 先备份整库再删，不含不可再生数据；本批复跑 dry-run 实测 `[scan] … 调度器镜像残留行: 0` / `[ok] 无残留`。
+
+### 验证
+- `git rm` 后 `git status --porcelain` 仅此一项 `D`，无并行在制品；
+- 留痕：本条目 + `LOG.md:493` 历史登记 + git 历史（`a0f0af2`）三处可追回。
+
+**Reversible**: `git revert`/`git checkout a0f0af2 -- scripts/clean_local_affinity_test_rows.py` 即恢复；无数据迁移。
+
 ## [2026-09-29] 文档治理批二（默默裁决「只追加不覆盖的特权仅归 LOG.md，其余该删就删、该改就改」）：备注式化石全面清除
 
 - **裁决背景**：批一的删除线+注记保留方式被默默否决——除 `LOG.md` 外任何文档不得堆叠历史注记/删除线/多层快照。

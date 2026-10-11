@@ -1,19 +1,18 @@
 # AGENTS.md — 唯一的你（ai-girlfriend）项目 Agent 宪法
 
 > **项目**：unique-you — 唯一的你·十四 — 基于 LLM 的智能情感陪伴系统
-> **版本**：v1.39.7（2026-09-29 全仓历遍批：真源文档全量对齐代码实况——端点 229/195、页面 19、前端 API 15、收集 2652、徽章 2828——+ 注释勘误 4 文件零逻辑变更）。批次详情与全部历史版本记录见 `LOG.md`（唯一只追加不覆盖文件）；当前状态见 `docs/HANDOFF_REPORT.md`。（2026-09-29 默默裁决：版本头历史堆叠移除，只留当前版本行。）
+> **版本**：v1.40（2026-10-11 全仓真源对齐批：四件真源文档对齐 10 月三批代码实况——测试 2874 收集（187 文件、42 卡）、徽章 3055、端点 229/195 内省复测、CI 全绿 `38109894676` @ `aea3cd0`——零代码变更）。批次详情与全部历史版本记录见 `LOG.md`（唯一只追加不覆盖文件）；当前状态见 `docs/HANDOFF_REPORT.md`。（2026-09-29 默默裁决：版本头历史堆叠移除，只留当前版本行。）
 
 ---
 
-## 当前实现补充（2026-09-28，三端一致 `2ebfc61`）
+## 当前实现补充（2026-10-11，三端一致 `aea3cd0`）
 
-- **三端一致 @ `2ebfc61`**（2026-09-28 服务器同步批）：服务器 `git fetch + merge --ff-only`（本批全文本零依赖、免 bundle）+ `remote_deploy.sh`；部署当场抓出并根治**迁移并发竞态 P1**（4 worker 并发首迁 duplicate column → 2 worker shisi 路由缺失；`run_migrations` 整段 `BEGIN IMMEDIATE` 单写事务 + WAL busy 重试，红测先行+突变 3/3）；复验重启=并发首迁场景复跑，挂载 4/4、竞态零复现、health/ready 200、blob 三端一致。下方 bundle/停机判据/依赖声明纪律继续有效。
+- **三端一致 @ `aea3cd0`**（2026-10-11 SEC-15 根治批；10 月三批均已部署）：10-05 安全升级批 `2c3b888`（两轮对抗审计 34+47 发现 + 生产 SSH 取证 + P0 修复八域，nginx 线上精确 patch：备份后插安全头/X-Forwarded-Proto/ws 日志关闭）→ 10-09 攻击面扫描批 `e949107`（六路对抗扫描 30 发现/16 确认/9 修复，nginx XFF 行替换 `$proxy_add_x_forwarded_for`→`$remote_addr`，行为级实证 21 打 15×429+6×401）→ 10-11 SEC-15 根治 `aea3cd0`（vitest 3→5 根治 tinypool 双 critical、`npm audit` 0 vulnerabilities、bun.lock/package-lock 双锁收敛销账 FE-2）。复验：health/ready 200、重启窗口 0 ERROR、blob 三端 `git hash-object` 一致、CI 全绿 run `38109894676`（9/9 job 含前端审计门）。下方 bundle/停机判据/依赖声明纪律继续有效。
 - 部署通道：本地 `git push` + 服务器 bundle 快进（含大二进制提交的 `git pull` 必现 `fetch-pack: unexpected disconnect`）。**停机判据用 `MainPID=0` + `cgroup.procs` 为空**，不要用 `is-active`（`TimeoutStopSec=5s` 会让超时停机显示 `failed` 而进程已清空）。
-- 迁移纪律：冷停 → 冷包 + 三库 `.backup`（逐库 `integrity_check`）→ **真实副本重复初始化演练**（验幂等与行数）→ 生产执行 → 行数比对。本次六表行数前后一致。
+- 迁移纪律：冷停 → 冷包 + 三库 `.backup`（逐库 `integrity_check`）→ **真实副本重复初始化演练**（验幂等与行数）→ 生产执行 → 行数比对。10 月三批零 schema 变更，本纪律留待下一次 schema 批启用。
 - 依赖声明纪律：`sqlalchemy` 必须带 `asyncio` extra，否则干净环境缺 `greenlet`，`sqlalchemy.ext.asyncio` 导入即失败；**本地预装 ≠ 声明完整**，以干净环境（CI）为准。
-- 线上验证：81 改动源码 blob 三端 `git hash-object` 一致、health/ready 全绿、nginx sha256 零变化、新日志 0 Traceback/0 锁冲突/0 缺列缺表。
 - 🔴 **清理 `/tmp` 的禁区**：本机该 unit `PrivateTmp=no`，`/tmp/ai-girlfriend-scheduler.lock` 是**生产调度器单例 flock**（`api/run_api.py::_ensure_scheduler_singleton`）。删路径不立即中断（master 仍持 fd），但**新 worker 会新建 inode 再抢到锁 → 调度器翻倍**。删前先 `grep -rn "/tmp/ai-girlfriend"` 反查引用；若已误删，冷停 → 删残留路径 → 重启，并核实日志为 **1 master + 3 slave**。
-- 最新验证、遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md` 2026-09-26。
+- 最新验证、遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md` 2026-10-11。
 
 ## 本批重构确立的设计规则（2026-09-26 上线，改前必查）
 
@@ -27,7 +26,7 @@
 ## 0. 项目身份
 
 - **产品形态**：微信扫码即用的 LLM 智能情感陪伴系统，扫码登录后控制台调角色与语音
-- **技术栈**：Python 3.10+ / React 19 / Vite 8 / TypeScript 6 / Tailwind 4 / Zustand 5 / 测试 **2828**（**2651** Py 通过 + 1 跳过，**177** FE 通过；2026-09-28 服务器同步批终验**全量五分块**实测收集 **2652**（534+1 / 556 / 565 / 485 / 511 精确吻合，174 测试文件），**0 失败 / 0 错误**；⚠️ 四段 glob 会漏 `tests/core/`，**全量口径必须补跑它**；角色卡 **41 张**且全量跑程**零净增**（注册流测试沙箱纪律，`test_w18_traversal_fixes` 机检）)/ MIT
+- **技术栈**：Python 3.10+ / React 19 / Vite 8 / TypeScript 6 / Tailwind 4 / Zustand 5 / 测试 **3055**（**2873** Py 通过 + 1 跳过，**182** FE 通过（vitest 5，30 文件）；2026-10-09 攻击面扫描批终验**全量五分块**实测收集 **2874**（674+607+449+559+585+1 精确吻合，187 测试文件），**0 失败 / 0 错误**；⚠️ 四段 glob 会漏 `tests/core/`，**全量口径必须补跑它**；角色卡 **42 张**（第 42 张 10-09 落盘未入 LOG，见 §4.3 口径注记）且全量跑程**零净增**（注册流测试沙箱纪律，`test_w18_traversal_fixes` 机检）)/ MIT
 - **核心能力**（见 `README.md`）：
   - 微信聊天（扫码登录，文字/语音，多用户独立；09-19 起每人独立微信通道——一人最多 2 条、好友可回复「角色」自选扮演角色）
   - 角色系统（每用户绑角色卡，性格/风格/口头禅可调）
@@ -37,7 +36,7 @@
   - 记忆系统（三层：短期 + 情景 + 长期）
   - 工具（天气、日历、提醒、搜索）
   - 剧情线（支线、进度追踪）
-  - 邀请码注册 + 管理控制台（19 个页面）
+  - 开放注册主链路 + 邀请码并存（D13 裁决，LOGIN-2 口径更正）+ 管理控制台（19 个页面）
 - **启动方式**（08-28 起 .cmd/.bat/.ps1 启动部署脚本已删除）:
   - 后端：`python main.py`（控制台/微信模式）或 `python -m uvicorn api.run_api:app --host 0.0.0.0 --port 8000`
   - 前端：`cd frontend && npm run dev`
@@ -118,7 +117,7 @@
 | 部署 | 部署开发 | `deploy/`（bat/ps1 双版本部署脚本已于 08-28 删除） |
 | 可观测性 | 运维开发 | `observability/` |
 | 安全 | 安全开发 | `security/` |
-| 测试 | QA | `tests/`（**2651** Python 通过 + 1 跳过；前端 **177**；2026-09-28 服务器同步批终验全量五分块实测收集 **2652** / 0 失败、174 测试文件；现役角色卡 41 张零净增；GitHub CI **全绿 `36402213711` @ `2ebfc61`**（修复批，含 backend+frontend+六 ff 闸+adr-integrity）） |
+| 测试 | QA | `tests/`（**2873** Python 通过 + 1 跳过；前端 **182**；2026-10-09 攻击面扫描批终验全量五分块实测收集 **2874** / 0 失败、187 测试文件；现役角色卡 42 张零净增（第 42 张 10-09 落盘未入 LOG，见 §4.3 口径注记）；GitHub CI **全绿 `38109894676` @ `aea3cd0`**（SEC-15 根治批，9/9 job 含前端审计门）） |
 | 工具与脚本 | 工具开发 | `tools/` / `scripts/` / `utils/` |
 
 ---
@@ -135,7 +134,7 @@
 - **微信合规**：不得使用违反微信 ToS 的自动化手段，不得造成账号封禁
 - **数据隐私**：用户聊天记录、角色卡、记忆数据属敏感信息，不得外泄，`.env` 必须在 `.gitignore`；参赛报名/个人资料类目录不得进入公开仓库
 - **多用户隔离**：不同微信用户的数据（角色、记忆、剧情）必须严格隔离，不得串扰
-- **质量门槛**：626+ 测试必须保持通过，新功能必须附测试
+- **质量门槛**：全量测试基线必须保持通过（当前口径 **2873 通过 + 1 跳过**，见 §4.3），新功能必须附测试
 - **Windows 优先**：目标用户环境
 - **真实情感优先**：角色互动必须自然真实，不得使用生硬模板回复
 - **LLM 透明**：不得伪装模型身份（反对模型别名映射伪装实际模型）
@@ -159,10 +158,10 @@
 
 ### 4.3 测试约定
 
-- 626+ 测试已建立，新功能必须附测试（实测基线：**2651** Python 通过 + 1 跳过 / **177** 前端；2026-09-28 服务器同步批终验全量五分块实测收集 **2652**，0 失败；现役角色卡 **41 张**、全量跑程零净增；⚠️ 全量口径必须含 `tests/core/`）
+- 全量测试基线（2026-10-09 攻击面扫描批终验，五分块实测）：**2873** Python 通过 + 1 跳过 / 收集 **2874**（0 失败）+ **182** 前端；新功能必须附测试；现役角色卡 **42 张**（第 42 张 10-09 落盘未入 LOG，差异待复核）、全量跑程零净增；⚠️ 全量口径必须含 `tests/core/`
 - 用户明确反对采样验证，要求完整验证
-- **测试口径注记（2026-09-28 二十八次刷新）**：服务器同步批（三端一致 `2ebfc61`）——迁移并发竞态 P1 根治批终验：全量五分块 **2652 收集 / 2651 通过 / 1 跳过 / 0 失败**（534+1 / 556 / 565 / 485 / 511 精确吻合；**174 测试文件**（`test_shisi_migrations.py` 为既有文件，新用例未增文件数）；41 卡零净增、注册流沙箱在位）。净增 3 例 = `tests/test_shisi_migrations.py::TestConcurrentRunMigrations`（并发 3 轮×4 线程旧 schema 库全成功 / 已迁移库并发复跑 / `run_migrations` 串行化 AST 守卫钉 BEGIN IMMEDIATE+COMMIT+ROLLBACK+isolation_level=None+timeout 五要素）；红测先行（修复前生产实锤 duplicate column name: hexaco_json ×2 worker + 本地探针 40 轮复现 35 轮报错）+ 突变验红 3/3。部署侧复验：服务器 17:14:59 重启窗口时间戳锚定扫描 0 ERROR / 0 duplicate / 0 locked、shisi 挂载 4/4、面 16/16 探活 200。前端 vitest **177/177** 不变 + ruff 0。**徽章 2825 → 2828**（2651 Py + 177 FE）。（更早 27 条口径注记已于 09-29 历遍批清除，历史口径见 `LOG.md` 各批条目。）
-  ⚠️ **基线口径纪律（2026-09-20 实测并已处置）**：**角色卡数也是基线的隐藏变量**。`config/characters/` 被 `.gitignore:117` 忽略、**内容不随 git 复现**；`tests/test_persona_injection.py` 按 `Path("config/characters").glob("*.json")` 参数化 → **用例数 = 2 × 卡数 + 7**。本批途中该目录**曾为空（0 张卡）**，收集数当场塌缩到 **1356**；**已按用户指令从服务器逐字节恢复 41 张**（逐文件 `sha256sum` 校验 41/41 一致、JSON 全可解析）→ 基线回到 **1436/1432/4**。
+- **测试口径注记（2026-10-11 二十九次刷新）**：现行基线 = 10-09 攻击面扫描批终验（`LOG.md` 2026-10-09「验证」条；2026-10-11 对齐批按禁令未重跑全量 pytest）——全量五分块 **2874 收集 / 2873 通过 / 1 跳过 / 0 失败**（674+607+449+559+585+1 精确吻合；**187 测试文件**（38+38+37+37+37）；基线 2807→2874 净增 67）。净增构成 = 10-05 安全升级批 `tests/test_sec_p0_*` **9 文件**（P0 八域）+ 10-09 批 4 新测试文件 1815 行（红测先行+突变验红）。前端 vitest **182/182**（30 文件；vitest ^5.0.3 = SEC-15 根治批由 3 升 5：tinypool 双 critical 根治、`npm audit` 0 vulnerabilities）+ ruff 0.16.8 全仓 0 错。**徽章 3055**（2873 Py + 182 FE）；三端一致 `aea3cd0`、CI 全绿 `38109894676`（9/9 job，gh 实证）。（二十八次及更早口径注记已于本批清除，历史口径见 `LOG.md` 各批条目。）
+  ⚠️ **基线口径纪律（2026-10-11 实测并处置中）**：**角色卡数也是基线的隐藏变量**。`config/characters/` 被 `.gitignore:117` 忽略、**内容不随 git 复现**；`tests/test_persona_injection.py` 按 `Path("config/characters").glob("*.json")` 参数化 → **用例数 = 2 × 卡数 + 13**（2026-10-11 实测 42 张 → 收集 97）。本批实测该目录 **42 张**，较 `LOG.md` 10-05/10-09 批条目「41 卡在位」**多 1 张且无加卡记录**：第 42 张 `99c89c39.json`（林挽夏第三变体，md5 与另两张林挽夏互异）mtime=**2026-10-09 19:36** 落盘 → 引用基线按 **42 张**声明并注差异待复核（历史：09-20 该目录曾为空（0 张卡）致收集塌缩 1356，后按用户指令从服务器逐字节恢复 41 张）。
   🔑 **引用任何基线都必须同时声明两件事**：① **角色卡是否在位 / 卡数**；② **工作树是否含并行窗口在制品**（与"passed ≠ collected"同类）。缺一则数字不可比。
   ⚠️ **已知环境问题：单进程整跑 `pytest -q` 会在 30%~97% 之间的**随机位置**停住**（三次实测分别停在 `test_integration.py` / `test_web_enricher.py` / `test_llm_providers_routes.py`），且这三个文件**单独跑全部通过** —— 属聚合态资源问题（疑似前序用例泄漏线程/事件循环），**不是某个用例失败**。分块跑可稳定复现完整基线，推荐工作流：
   ```bash
@@ -170,9 +169,8 @@
   for i in 0 1 2 3; do echo "$files" | awk -v i=$i 'NR%4==i' | tr '\n' ' ' > /tmp/c$i.txt; done
   for i in 0 1 2 3; do timeout 200 env PYTHONPATH= python -m pytest $(cat /tmp/c$i.txt) -q -p no:cacheprovider; done
   ```
-  四块结果相加应等于 `--collect-only` 的收集数（当前检出 **2652** = 服务器同步批五分块 **534+1 + 556 + 565 + 485 + 511** 精确吻合，2026-09-28 实跑；收集数随 `config/characters/` 卡数浮动 = 2 × 卡数 + 7，**现役 41 张**；⚠️ 分块清单须 `find` 递归生成，`tests/test_*.py` 四段 glob 会漏 `tests/core/`）。
-- 验证报告：归档到 `docs/`
-- 测试基线：`pytest_true_baseline.log` / `pytest_wip_baseline.log` / `pytest_post_commit.log`
+  四块结果相加应等于 `--collect-only` 的收集数（当前检出 **2874** = 攻击面扫描批五分块 **674+607+449+559+585+1** 精确吻合，2026-10-09 实跑；收集数随 `config/characters/` 卡数浮动 = 2 × 卡数 + 13，**现役 42 张**；⚠️ 分块清单须 `find` 递归生成，`tests/test_*.py` 四段 glob 会漏 `tests/core/`）。
+- 验证报告：归档到 `docs/`；测试基线历史口径以 `LOG.md` 各批条目为准（原根目录 `pytest_*_baseline.log` 三件已不存在，死引用于 2026-10-11 对齐批删除）
 
 ### 4.4 Git 约定
 
@@ -222,7 +220,7 @@
 | L4 | LLM 输出 JSON 必须 Schema 校验 — 使用 Pydantic 双重校验，避免 JSON 解析失败导致角色/工具调用中断 |
 | L5 | 角色卡一致性 — `config/characters/` 卡文件与 `my_character/` 运行时人格必须保持同步，避免角色人格漂移（旧顶层 `character_card/` 包已删，见批6b 项10） |
 | L6 | 语音合成优先级 — **MiMo Cloud TTS 为唯一引擎**（2026-08-28 起；Edge-TTS / 本地模型已删除）。不可假设单一源永久可用，故障时走可观测告告警而非静默切换到已删除引擎 |
-| L7 | 626+ 测试必须保持通过 — 任何改动前先跑基线测试，改动后比对 `pytest_true_baseline.log`，回归即阻塞 |
+| L7 | 全量测试基线必须保持通过 — 任何改动前先跑基线（当前口径 **2873 通过 + 1 跳过 / 收集 2874**，42 卡，分块跑法见 §4.3），改动后比对 `LOG.md` 最近批次口径，回归即阻塞 |
 | L8 | 临时脚本必须清理 — 完成任务后清理一次性脚本与 `deploy_payload.tar.gz` 等构建产物，避免代码库膨胀 |
 
 ---
@@ -291,11 +289,12 @@
 ## 9. 修订历史
 
 | 版本 | 日期 | 变更 |
+|------|------|------|
+| **v1.40** | **2026-10-11** | **全仓真源对齐批**（AGENTS/README/CODE_GRAPH/HANDOFF 四件真源对齐 10 月三批代码实况，零代码变更）：测试口径 2652 收集/2651 通过/174 文件/vitest 177 → **2874 收集（674+607+449+559+585+1）/2873 通过/1 跳过/187 文件/vitest 182**（vitest 5），徽章 2828→**3055**；角色卡 41→**42 张**（第 42 张 `99c89c39.json` 林挽夏变体 10-09 19:36 落盘未入 LOG，各引用处注差异待复核）；基线公式 2×卡数+7→**+13**（本批实测 persona_injection 97=2×42+13）；端点 229/195/233 内省复测吻合（本批实跑 `create_api_app`）；CI 全绿 `38109894676` @ `aea3cd0`（gh 实证 9/9）；§0 核心能力改「开放注册主链路+邀请码并存（D13，LOGIN-2 口径更正）」；删 §4.3/L7 死引用基线日志三件（仓库根已不存在）；修订历史表补 v1.39 系并修复表头分隔行错位 |
+| **v1.39 系（补记）** | **2026-09-29 ~ 10-09** | 版本头曾达 v1.39.7 而修订历史表漏记，本行补记：**v1.39.7（09-29 全仓历遍批）** 真源文档全量对齐 09-28 服务器同步批实况（端点 229/195、页面 19、前端 API 15、收集 2652、徽章 2828）+ 注释勘误 4 文件零逻辑变更；**10-05 安全升级批**（`2c3b888`）两轮对抗审计 34+47 发现 + 生产 SSH 取证 + P0 修复八域 + SEC-1~11 登记 + nginx 线上精确 patch（备份后插安全头/XFP/ws 日志关闭）；**10-09 攻击面扫描批**（`e949107`）六路对抗扫描 30 发现/16 确认/9 修复 + SEC-12~18 登记 + XFF 行为级实证（21 打 15×429+6×401）——三批全程只落 `LOG.md` 未回扫本表；**10-11 SEC-15 根治批**（`aea3cd0`）vitest 3→5 + 双锁收敛销账 FE-2，CI 审计门复绿 |
 | **v1.38** | **2026-09-22** | **六域三次排查根治**（好感度刻度混用 P0 + EmotionStage 键空间/落盘 P1 + 键口径 P2）：点存/审计镜像/回放统一 shisi 刻度（读侧按 reason 标记区分双刻度，round-trip 用例 + 突变验红 3/3 锁死）；阶段只用 track 键 + emotion_stage_state 真落盘 + evaluate 路由改纯查询；affinity_state 空 user 键同构；conftest 隔离拆独立 try（防 ase_hub 导入失败静默跳过库重定向）。收口实测 **1861 收集 / 1860 通过 / 1 跳过 / 0 失败**（四分块 467+1 / 430 / 563 / 400 精确吻合，41 卡在位）+ ruff 全仓 0 错 + ci_gates 4/4 |
 | **v1.37** | **2026-09-22** | **六域二次全面排查根治（五块分块验收）**——用户指令「昨日进行了重大更新多次，需要你继续全面排查…」→ 第二轮排查 6 P0 / 9 P1 / 10 P2 → 裁决「按推荐全面进行」。**块A/P0**（`04c7ed2`）：情绪衰减基准落盘+缺失回填（首版以 `None` 作哨兵，而 `if hours > 0` 永假且推进赋在 if 内 → 基准永停 None，衰减换种死法仍未发生）；提醒时刻校验改本地墙钟。**块B/P0**（`3ec093f`）：投递异常不再被日志通道掩盖；`main.py` 入口 websocket 改定向。**块C/P0**（`af5c41e`）：出站消息归属全链贯通（assistant 行无 character_id → 切角色继承他人台词）+ 存量空归属懒回填（旧 `OR character_id=''` 在存量全空时恒真=过滤整体失效，生产 88% 空归属）+ `run_api._character_resolver` 的 `"default"` truthy 缺陷。**块D/P1**（`c37d355`）：`dry_run` 死路径根治（闸门前置使 `generate_with_llm` 整条不可达）；决策层接地补 `last_user_message`/`response_rate`；`note_user_interaction` 就近落盘。**块E/P1+P2**（`04229eb`，14 文件 456+/67-）：⑩节流账本落盘（4 账本，逐字段容错+NaN/inf 钳除+上限 200；旧纯内存重启归零 → 退避永停第 1 档、等待窗作废、每日去重失效、祝福重发）；⑪`ase_engine.save_state` 走 `json_state.atomic_write_json`；⑫**好感度双真源根治**（`mapper.sync` 收会话键 vs `_persist_affinity` 收裸 user_id，两套键空间按构造零交集，生产实证 129 行 5 键 vs 3 键无一重合，enhancer 重启回放拿不到数据；统一 `user_key_from_session`+双写+点存兜底+`default_db_path()` 共享 owner）；⑬**`semantic_memory` 向量召回读侧协程缺陷**（`async def _search` 被同步直调 → coroutine 恒真使 `or []` 不触发 → 向量召回恒空，谎言家族新例；改 `inspect.isawaitable`+`run_async`）；⑭反思按会话检索空归属死结（下推 WHERE 使空归属历史连候选都进不来 → 改取回后 Python 过滤+丢弃计数）；⑮`get_cross_session_tail` 排序改 `id DESC`；⑯`time_awareness_tool` 默认日期改 `now_local().date()`；⑰删死参 `character_overrides`；⑱激活角色缓存键补 `id(_list_all_characters)`。**🔴 自伤事故与根治**：块E 落盘后未隔离夹具把测试键写进开发机真实 `data/scheduler_config.json`（gitignored → 不被 git 发现却反向改变用例行为）→ conftest 增 autouse 夹具 `isolate_runtime_state_files`。**验证**：分块 **1839 收集/1838 通过/1 跳过/0 失败** + ruff 0 + ci_gates 4/4；**基线对照 21 失败 → 0**；突变验红 **5/5** 命中、还原残留 0；新增 `tests/test_block_e_hardening.py` 27 例。**遗留**：生产 affinity 双键空间历史数据不迁移、审计表测试遗留键未清、本批未部署（归用户裁决）|
-|------|------|------|
 | **v1.36** | **2026-09-22** | **六域全面排查根治**（用户裁决：按推荐全面修复+分块验收+真删除）：①遗忘模型 days_old 恒 30（naive/aware 相减 TypeError 被吞）→`_fact_age_days` 按龄遗忘复活；②set_reminder trigger_time 三关校验（畸形串永不到期残留通道根治）；③情绪衰减基准独立记账（旧传 ≈0.08h 名存实亡）；④AffinityEnhancer 审计回放恢复（重启归零 ±3 爬坡/解锁重复根治）+setup_shisi db_path 接线；⑤重要日期按画像生日+逐用户定向（旧全局广播+dedup 无用户维度）；⑥事实检索过滤下推 SQL/Chroma；⑦pending_events 死链整拆（CrossSessionReasoner 删文件+4 接线+DROP 表）；⑧ledger prune 画像豁免+投影取最新；⑨DB 版 WorkingMemory+四死表+affinity_log CRUD+get_stats 真删；⑩web 投递按会话定向收口+提醒角色名按会话解析+query_reminders 无 meta 拒绝。测试 **1750/1749/1** 双端全绿+vitest 98+ruff 0；端点 220/186 不变；突变验红 8/8；DELETION_LOG 2026-09-22 节 |
-|------|------|------|
 | **v1.34** | **2026-09-21** | **全量代码审查修复战役收口**（工作单 `docs/verification/2026-09-21-full-code-audit.md`；P0×10 + P1 1–53 + persona 42–47 + 批6b 项1–11 全修，含 GitHub CI 修复）：知识槽检索与 system 回显解耦（每轮 RAG 真正发生）+ persona 域死码整批清除（−3566 行，`character_card/` 包/三版并存化石/强化回路/CharacterService 全链/prompt_mode 管线）+ 锚点校验去同义反复 + 一致性 checker 缓存复用 + ASEHub 真扇出 + LLM 网关熔断/流式真 fallback + 隔离/SSRF/CAS 收口。终局验证分块 **1615 收集/1611 通过/4 跳过/0 失败**（410 + 380+1 + 406 + 415+3，41 卡）+ vitest 98 + tsc 0 + ruff 全仓 0 + ci_gates；端点重测 APIRoute **220**/唯一路径 **186**（`len(app.routes)=224`）。遗留：evolution-log 恒空（DELETION_LOG 在案）/前端 event_bonus 归并行窗/服务器 pull 上线归用户裁决（本批未部署）|
 | **v1.33** | **2026-09-21** | **智能体化：LLM 编辑画像/同步记忆**——`tools/builtin/profile_agent_tools.py`（`update_user_profile`/`remember_facts`/`forget_facts`/`query_profile`）；对话后 `run_profile_sync_agent`（仅用户原话可写、否认则 clear/forget）；正则 `apply_user_utterance` 降为弱兜底。`3f5a4c6` 已部署 |
 | **v1.29** | **2026-09-21** | **P1 隔离收口**：ASEHub 分用户 + 定向投递；affinity `user::character`；情景层空 meta 不注入 + store 修复。测试 **1455/1451/4** |

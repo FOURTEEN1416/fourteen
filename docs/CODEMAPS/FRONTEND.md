@@ -1,9 +1,9 @@
 # 前端地图
 
-> **✅ 2026-09-29 全仓历遍刷新**：页面 17→**19**（+TemplatesPage `/templates`、SettingsAccount `/settings/account`）、API 模块 13→**15**（+selfservice/templates）、vitest 98/16→**177/30**。权威数字以 `CODE_GRAPH.md` **v3.8.27** 为准。更早增量（09-19/09-20 通道隔离 UI、材质体系、五 tab 收敛）见 git 历史。
+> **✅ 2026-10-11 口径对齐刷新**：vitest **182 用例 / 30 文件**（2026-10-11 SEC-15 根治批复验全绿，vitest ^5.0.3，`LOG.md` 10-11 条）；页面 19 / API 模块 15 本批 find 实测不变。权威数字以 `CODE_GRAPH.md` **v3.8.28** 为准。上轮刷新（09-29：页面 17→19 +TemplatesPage/SettingsAccount、API 模块 13→15 +selfservice/templates、vitest 98/16→177/30）见 git 历史。
 > 功能级清单（页-功能点编号）见 `docs/FUNCTION_INVENTORY.md`。
 
-**最近更新:** 2026-09-20
+**最近更新:** 2026-10-11
 **技术栈:** React ^19.0.0 + Vite ^8.0.12 + TypeScript ~6.0.2 + Tailwind CSS ^4.1.0 + Zustand ^5.0.0
 **入口:** `frontend/index.html` → `frontend/src/main.tsx`
 
@@ -17,7 +17,7 @@ frontend/src/
 ├── App.tsx               ← 路由定义 + 布局
 ├── vite-env.d.ts
 │
-├── api/                  ← API 客户端模块 (13 文件)
+├── api/                  ← API 客户端模块 (15 文件)
 │   ├── client.ts         ← axios 实例 + 拦截器（normalize.ts/emotion.ts 抽离后为纯 re-export 门面）
 │   ├── normalize.ts      ← 响应归一化（09-18 自 client.ts 抽离，FF-0006）
 │   ├── emotion.ts        ← 情绪趋势/分布工具（09-18 自 client.ts 抽离，FF-0006）
@@ -29,6 +29,8 @@ frontend/src/
 │   ├── llmProviders.ts   ← LLM 供应商管理 API
 │   ├── mimo.ts           ← MiMo 语音 API
 │   ├── system.ts         ← 系统 API（含 /api/user/llm-config）
+│   ├── selfservice.ts    ← 自服务 API（同意状态/数据导出/注销，W17）
+│   ├── templates.ts      ← 角色模板 API（W12）
 │   ├── training.ts       ← 训练 API（training/* + proactive/*）
 │   └── wechat.ts         ← 微信 API
 │
@@ -44,6 +46,7 @@ frontend/src/
 │   ├── PsychProfilePage.tsx   ← 心理画像 /psych（09-18 起包 AuthGuard 需登录）
 │   ├── WeChatPage.tsx         ← 微信控制台
 │   ├── RolesPage.tsx          ← 角色列表
+│   ├── TemplatesPage.tsx      ← 角色模板 /templates（W12+W17，09-28 入册）
 │   ├── CreateRole.tsx         ← 创建角色
 │   ├── RoleSettings.tsx       ← 角色设置
 │   ├── StatusCenter.tsx       ← 状态中心（09-18 记忆体系「三层管线」重构）
@@ -51,6 +54,7 @@ frontend/src/
 │   ├── SettingsLLM.tsx        ← LLM 设置
 │   ├── SettingsVoice.tsx      ← 语音设置
 │   ├── SettingsSecurity.tsx   ← 安全设置
+│   ├── SettingsAccount.tsx    ← 账号与数据 /settings/account（W17 自服务，09-28 入册）
 │   ├── SettingsLogs.tsx       ← 日志设置
 │   ├── ToolsDashboard.tsx     ← 工具仪表盘
 │   ├── AdminUsersPage.tsx     ← 用户管理
@@ -116,7 +120,7 @@ frontend/src/
 │   ├── api.ts                  ← API 类型
 │   └── framework.ts            ← 框架类型
 │
-└── tests/                ← 前端测试（vitest 177 用例 / 30 文件，2026-09-29 实测全绿）
+└── tests/                ← 前端测试（vitest 182 用例 / 30 文件，2026-10-11 复验全绿，vitest ^5.0.3）
     ├── components/
     └── hooks/
 ```

@@ -149,7 +149,7 @@
 ### VOICE — 语音工作台 `/settings/voice`（SettingsVoice.tsx, 496 行）
 | 编号 | 功能点 |
 |------|--------|
-| SVOICE-1 | 引擎卡（mimoStatus/mimoSetEngine，MiMo 唯一引擎 08-28 收敛）+ 可用音色列表（mimoSwitchVoice） |
+| SVOICE-1 | 引擎卡（mimoStatus/mimoSetEngine，MiMo 唯一引擎 08-28 收敛）+ 可用音色列表（mimoSwitchVoice）。**10-05 起 `mimoSetEngine`/`mimoSwitchVoice` 为 admin 权限**（`mimo_voice_routes.py:315/:387` `require_role("admin")`——二者改全局 TTS 单例），非 admin 前端本地选中 + 降级文案不阻断（SettingsVoice 适配，见 `LOG.md` 2026-10-05 批③⑦） |
 | SVOICE-2 | 语音克隆：上传参考音频 → mimoClone（voiceclone 模型） |
 | SVOICE-3 | 语音设计：性别/风格/年龄/音调/语速 → mimoDesign（voicedesign 模型） |
 | SVOICE-4 | 合成试听（mimoSynthesize） |

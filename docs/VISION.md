@@ -64,7 +64,7 @@
 - **人设注入完整且经行业对齐**（09-18/19 注入三字段 → 09-20 提示词批次重排）：角色卡 `personality_text`/`creator_notes`/`mes_example` 进 prompt，扮演规则置于对话历史之后（post-history 位），41 卡 scenario 字段全量移除（根因级修复开场锚定），知识注入去重
 - 图片理解双路（09-15 收编）：附件直传（配 vision_model）/ 描述注入（VisionHandler 降级），config `multimodal.image` 驱动，off 即回滚；图片全程内存不落盘
 - 管理控制台 **19 页**（邀请码注册 + 角色管理 + 角色模板 + LLM 配置 + 账号自服务 + 数据看板等；SP-9 幽灵层三页与 DemoPage 已删；公开门面为 `/intro` 产品介绍页）
-- 角色系统：SillyTavern V2/V3 PNG 卡兼容 + 自有角色卡体系（config/characters **41 张现役卡**唯一真源——25 既有 + 16 文学导入《我的26岁女房客》《从你的全世界路过》《云边有个小卖部》《某某》《天堂旅行团》，每卡配全量字段与可检索知识语料，💊熟悉度/心跳值/手写板等玩法均支持）
+- 角色系统：SillyTavern V2/V3 PNG 卡兼容 + 自有角色卡体系（config/characters **41 张现役卡**唯一真源——25 既有 + 16 文学导入《我的26岁女房客》《从你的全世界路过》《云边有个小卖部》《某某》《天堂旅行团》，每卡配全量字段与可检索知识语料，💊熟悉度/心跳值/手写板等玩法均支持；2026-10-11 本地实测另含 1 张 user_id=1 的运行时克隆副本，口径注记见 `CODEMAPS/DATABASE.md`）
 - **229 个 API 业务端点 / 195 条唯一路径 / 19 include_router + setup_shisi**（2026-09-29 内省实测；见 CODE_GRAPH §1.1/§4.2）
 - **认证：JWT 优先**（09-19 裁决：用户侧 API 仅 JWT，前端不含 API Key 明文；X-API-Key 留给机器/脚本/E2E）
 
@@ -83,8 +83,8 @@
 
 **部署形态**
 - Windows 开发机：python main.py / uvicorn + npm run dev（bat/ps1 打包脚本已删）
-- Linux 生产：Nginx(:443) → uvicorn×4(127.0.0.1:8000) → SQLite/PostgreSQL；服务器 = **GitHub git 克隆（实测可连外网**，「服务器不联外网」旧述已作废），A 档 git pull 部署 + `deploy/remote_deploy.sh` 构建重启；B 档纯文档走 sparse-checkout 不入服务器（2026-09-03 三端分档修订）
-- OBS-1 已修复（后端仅绑 127.0.0.1）；OBS-2 HTTPS 待域名；OBS-3 服务 root 运行待降权
+- Linux 生产：Nginx(:80 裸 IP HTTP，**D13 裁决 2026-10-04** 不上 TLS、明文风险已知悉接受；nginx 模板保留 certbot 升级路径) → uvicorn×4(127.0.0.1:8000) → SQLite/PostgreSQL；服务器 = **GitHub git 克隆（实测可连外网**，「服务器不联外网」旧述已作废），A 档 git pull 部署 + `deploy/remote_deploy.sh` 构建重启；B 档纯文档走 sparse-checkout 不入服务器（2026-09-03 三端分档修订）
+- OBS-1 已修复（后端仅绑 127.0.0.1）；OBS-2 明文 HTTP 已按 D13 裁决接受（不上 TLS，见 `P1_BACKLOG.md` OBS-2 行）；OBS-3 服务 root 运行待降权
 
 ### 🅿️ B. 候选池（方案成熟但未获批准，冻结中）
 
