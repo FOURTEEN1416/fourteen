@@ -3480,3 +3480,13 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **验证（CI 同构 bun 树全链）**：`npm audit --package-lock-only --audit-level=high` → **0 vulnerabilities exit 0**；`bunx tsc --noEmit` 0 错；`bun run build` 通过；vitest **182/182**（30 文件）；两锁关键包版本逐项核对一致；**GitHub CI 全绿（run 38109894676，9/9 job 含 frontend 审计门）**。
 - **部署与复验（三端一致 @ `aea3cd0`）**：服务器 ff-only 快进 → remote_deploy（bundle 重建+重启+nginx reload）→ health/ready 200/200、无凭证 401、重启窗口日志 0 ERROR、blob（package.json/setup.ts）三端 `git hash-object` 一致。
 - **销账**：P1_BACKLOG SEC-15 已根治标注；FE-2 双锁漂移随批收敛。SEC-11 其余项（chromadb 等）与 SEC-12~14/16~18 维持登记。
+
+## 2026-10-11 全仓真源对齐批（文档对齐 10 月三批实况 + 临时脚本清理，commit `8b5b13f`）
+
+- **触发与方法**：用户指令「做主控，系统性更新项目文档+整理文件（该删的删），子智能体执行（GLM-5.3-Flash）」→ 动态工作流（run `dwfrun-039f49f8`）：盘点员（只读核定口径）→ 主控分流（删除禁区硬规则：tests/config/data/deploy/归档/产品源码目录禁删、源码零引用只登记；高置信+非禁区才入删除清单）→ 3 执行员并行（核心真源四件与次级文档两域不相交 + 清理执行员先读后删）→ 对抗验收（脚本确定性检查：git status 域核对+删除文件全仓 grep 引用残留+pytest 收集冒烟；验收员独立抽查约 20 处；失败按文件域路由修复≤2 轮——实际零回炉一次通过）→ 独立通读者终审。子智能体全程禁 commit/push，主控收尾统一。
+- **文档 13 件对齐**：徽章 2828→**3055**（2873 Py + 182 FE）、五分块 **2874 收集 / 187 测试文件**、vitest **^5.0.3**（30 文件）、CI 全绿 `38109894676` @ `aea3cd0`（验收员 gh 实测 conclusion=success）、端点 **229/195/233** 内省复测（验收员 AI_GF_ENV=dev + TestClient 展开 openapi.json 独立复跑，tag 级抽样一致）、D13 开放注册主链路口径（LOGIN-2 更正）、AGENTS v1.40 版本头与修订历史行、HANDOFF 顶栏三端锚点刷新至 aea3cd0。
+- **第 42 张角色卡差异登记**：`config/characters/` 实测 **42 张**（`99c89c39.json` 林挽夏第三变体，mtime 2026-10-09 19:36:35+0800，与另两张林挽夏 md5 互异），较 10-05/10-09 批条目「41 卡在位」**多 1 张且无加卡记录**——persona 参数化公式实测为 **2×卡数+13**（42 卡→97 收集）；基线按 42 张声明并注「差异待复核」（待默默裁决：保留或清理该卡）。
+- **删除 1 件**：`scripts/clean_local_affinity_test_rows.py`（66 行一次性脚本：使命完成——清理 09-22 块E 前旧夹具写进宿主库的调度器镜像污染行、污染源已由 `isolate_runtime_state_files` autouse 夹具根治、全仓零引用、删除前 dry-run 复跑实测残留=0；`docs/DELETION_LOG.md` 2026-10-11 条目落账，`git checkout a0f0af2 --` 可恢复）。**存疑保留 0、疑义未删 0**。根目录 `pytest_*_baseline.log` 三件死引用同步清除（文件早已不存在，AGENTS §4.3 改指 LOG）。
+- **验证**：ruff 全仓 0 错；pytest 收集冒烟 **2875**（42 卡在位，主控本机复跑 5.75s）——较文档基准 2874 差 +1，归因 42 卡浮动 + LOG 10-09 条目分块合计自身悬空 +1（674+607+449+559+585+1=2875 而原文声称 2874，观察项）；git status 域核对 15 项=申报域精确相等、零预期外变更；删除文件全仓 grep 零活引用（5 处命中均为 LOG/DELETION_LOG/MODULES 计数归因的记载性提及，验收员逐条判读）。**全量 pytest 五分块与 vitest 未跑**（纯文档批+零引用删除，按对齐批禁令不重跑全量；执行级验证由 push 后 CI 全量门把关）。
+- **部署（三端一致 @ `8b5b13f`）**：服务器 `git fetch + merge --ff-only` 快进（`aea3cd0c→8b5b13f8`，删除落地 `ls` 证实 No such file；工作树仅 untracked `backups/` 运维产物不阻挡）+ health/ready 双 200；本批无代码运行面变更，免 remote_deploy 不重启。B 档文档照例不上服务器。
+- **遗留**：产品源码目录零引用文件仅登记未删（盘点员观察项，见 workflow 报告第五节）；42 卡差异待默默复核；2874/2875 收集数悬空待下批全量终验顺带钉死。
