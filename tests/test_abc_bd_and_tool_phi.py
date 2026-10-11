@@ -80,7 +80,13 @@ class TestCrossSessionTailBd:
             assert any("周末去公园" in x for x in lines)
             # 不同 owner（N vs 1）禁止串入
             assert not any("今天好累" in x for x in lines)
-            assert lines == ["- 用户：帮我记着周末去公园", "- 角色（归属未知）：好，周末提醒你"]
+            # 2026-10-11 时间感知批：尾巴行带本地时间前缀（（MM-DD HH:MM）），
+            # 精确等值断言改为结构断言（角色标注 + 顺序 + 时间前缀存在）
+            import re
+
+            assert len(lines) == 2
+            assert re.match(r"^- 用户（\d{2}-\d{2} \d{2}:\d{2}）：帮我记着周末去公园$", lines[0])
+            assert re.match(r"^- 角色（归属未知）（\d{2}-\d{2} \d{2}:\d{2}）：好，周末提醒你$", lines[1])
             lines_n = sm.get_cross_session_tail("N:wxid_t1", limit=5)
             assert any("今天好累" in x for x in lines_n)
             assert not any("周末去公园" in x for x in lines_n)

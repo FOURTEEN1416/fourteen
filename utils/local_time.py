@@ -96,3 +96,95 @@ def local_day_utc_bounds(now: datetime | None = None) -> tuple[str, str]:
         (start + timedelta(days=1) - offset).strftime(_SQLITE_TS_FMT),
     )
 
+
+
+# ── 时间锚点（2026-10-11 时间感知批）────────────────────────
+#
+# 生产背景：主链 system prompt 无任何时间注入，历史/尾巴也不带时间戳 ——
+# 用户中秋发消息、国庆再发，模型把半个月前当"刚刚"。
+#
+# 格式参照（调研留痕 LOG 2026-10-11）：
+# - hermes-agent issue #62369 的 `[time anchor]` 单行惯例（当前本地时间+星期+
+#   距上条消息时长，~30 token，fail-open）；
+# - SillyTavern 官方宏 {{isodate}}/{{weekday}}/{{idleDuration}} 的信号组合语义
+#   （AGPL-3.0 项目，仅语义对齐，未抄代码）。
+
+_WEEKDAY_CN = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+_BEIJING = timezone(timedelta(hours=8))
+
+
+def parse_db_timestamp(value: object) -> datetime | None:
+    """解析落库时间戳（chat_history.created_at 等）为 **aware UTC** datetime。
+
+    写入口径：``DEFAULT CURRENT_TIMESTAMP`` 的 naive UTC 串
+    （``YYYY-MM-DD HH:MM:SS``）；兼容 isoformat（可能带 ``+00:00`` 或微秒）。
+    **naive 一律按 UTC 解释**（created_at 的唯一写入口径）。
+    畸形/缺失返回 None —— fail-open，调用方跳过时间信号而不是崩。
+    """
+    s = str(value or "").strip()
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        try:
+            dt = datetime.strptime(s, _SQLITE_TS_FMT)
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def beijing_wall(value: object) -> datetime | None:
+    """落库时间戳 → 北京墙钟（naive）。失败返回 None（fail-open）。"""
+    dt = parse_db_timestamp(value)
+    if dt is None:
+        return None
+    return dt.astimezone(_BEIJING).replace(tzinfo=None)
+
+
+def _wall_clock(now: datetime | None) -> datetime:
+    """统一 now 为北京 naive 墙钟（now_local 两形态归一）。"""
+    local = now if now is not None else now_local()
+    if local.tzinfo is not None:
+        return local.astimezone(_BEIJING).replace(tzinfo=None)
+    # naive：now_local 正常分支已是宿主北京墙钟，直接用
+    return local
+
+
+def humanize_gap_cn(seconds: float) -> str:
+    """秒数 → 中文人性化时长（SillyTavern {{idleDuration}} 语义）。"""
+    secs = max(0.0, float(seconds))
+    if secs < 60:
+        return "不到 1 分钟"
+    if secs < 3600:
+        return f"{int(secs // 60)} 分钟"
+    if secs < 48 * 3600:
+        half_hours = round(secs / 1800.0) / 2.0
+        text = f"{half_hours:.1f}".rstrip("0").rstrip(".")
+        return f"{text} 小时"
+    return f"{int(secs // 86400)} 天"
+
+
+def time_anchor_line(last_message_at: object = None, now: datetime | None = None) -> str:
+    """单行时间锚点：当前日期+星期+时刻+距上一条消息时长（hermes-agent 惯例）。
+
+    Args:
+        last_message_at: 上一条消息的落库时间戳（UTC 口径，naive 串按 UTC）。
+            None / 畸形 → 跳过间隔段（fail-open，不虚构"多久前"）。
+        now: 指定"现在"（测试用）；缺省取 :func:`now_local`。
+
+    生产注入点：主链 system prompt（persona_service 渲染 time_anchor 槽）。
+    """
+    wall = _wall_clock(now)
+    head = (
+        f"[时间锚点] {wall:%Y-%m-%d} {_WEEKDAY_CN[wall.weekday()]} {wall:%H:%M}（北京时间）"
+    )
+    last = beijing_wall(last_message_at)
+    if last is None:
+        return f"{head} | 本会话暂无历史消息"
+    gap = (wall - last).total_seconds()
+    if gap <= 0:
+        return f"{head} | 上一条消息就在刚才"
+    return f"{head} | 上一条消息：{humanize_gap_cn(gap)}前（{last:%m-%d %H:%M}）"

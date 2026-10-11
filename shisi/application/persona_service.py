@@ -126,6 +126,13 @@ class PersonaService:
         mem_ctx = memory_context if isinstance(memory_context, dict) else {}
         mem_parts: list[str] = ["# 记忆上下文（供参考，**不是**本轮对话记录）"]
 
+        # 时间锚点（2026-10-11 时间感知批）：当前日期/星期/时刻 + 距上一条
+        # 消息的真实间隔 —— 模型据此分得清"刚聊过"和"隔了六天"。
+        # 锚点由 orchestrator 按 hermes-agent #62369 单行惯例构造。
+        anchor = str(mem_ctx.get("time_anchor") or "").strip()
+        if anchor:
+            mem_parts.append(anchor)
+
         # 当前话题续聊钩子（2026-09-23）：像真人一样把一个话题聊下去
         current_topics = mem_ctx.get("current_topics") or []
         if isinstance(current_topics, str):

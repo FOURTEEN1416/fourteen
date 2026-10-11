@@ -1131,13 +1131,37 @@ class ProactiveScheduler:
         except Exception as e:  # noqa: BLE001
             logger.debug("生理读数同拍 tick 失败 user=%s: %s", user_key, e)
 
+    def _proactive_sent_today(self, eng: Any, now: Any) -> bool:
+        """该用户引擎状态里，今天（本地日）是否已成功主动发过消息。
+
+        读 ``eng._last_proactive_time``（UTC aware，``commit_sent`` 投递成功
+        才更新）；无引擎/无记录 → False（宁可不触发下限，也不误判已发）。
+        """
+        if eng is None:
+            return False
+        try:
+            last_sent = getattr(eng, "_last_proactive_time", None)
+            if last_sent is None:
+                return False
+            from datetime import timedelta as _td
+            from datetime import timezone
+
+            beijing = timezone(_td(hours=8))
+            sent_local = last_sent.astimezone(beijing).date()
+            now_local = now.astimezone(beijing).date() if now.tzinfo else now.date()
+            return sent_local == now_local
+        except Exception:  # noqa: BLE001
+            return False
+
     def _llm_proactive_one_user(self, hub: Any, user_key: str) -> None:
         from proactive.ase_engine import _local_now, sanitize_message
         from proactive.llm_proactive import (
             build_proactive_context,
+            clamp_wait_minutes,
             decide_proactive,
             load_persona_hint,
             load_proactive_knowledge,
+            proactive_floor_extra,
             read_web_proactive_config,
         )
         from shisi.agent_plane.runtime import (
@@ -1246,6 +1270,13 @@ class ProactiveScheduler:
             quiet = self.get_quiet_hours() if hasattr(self, "get_quiet_hours") else None
         except Exception:  # noqa: BLE001
             quiet = None
+        # 关怀下限（2026-10-11 批，arXiv 2510.23853 依据）：失联超 48h 且今日
+        # 零主动 → 给决策器一句显式提示，破"低热度→永远别打扰"死循环
+        # （2026-10-08 起账本实证：连续 4 天 15-25 次决策全部 should=False）。
+        sent_today = self._proactive_sent_today(eng, now)
+        floor_extra = proactive_floor_extra(
+            hours_since_last_chat=float(hours or 0.0), sent_today=sent_today,
+        )
         ctx = build_proactive_context(
             session_key=str(user_key),
             hours_since_last_chat=float(hours or 0.0),
@@ -1263,6 +1294,7 @@ class ProactiveScheduler:
             # 缺了它模型只能按时间泛泛开口，接不住用户上一轮提到的具体事。
             last_user_message=last_user_message,
             response_rate=response_rate,
+            extra=floor_extra,
         )
         llm = self._session_llm_resolver(user_key) if self._session_llm_resolver else self._resolve_proactive_llm(eng)
         if llm is None:
@@ -1280,7 +1312,7 @@ class ProactiveScheduler:
             decision.get("wait_minutes"),
             (decision.get("reason") or "")[:80],
         )
-        wait_m = decision.get("wait_minutes")
+        wait_m = clamp_wait_minutes(decision.get("wait_minutes"))
         if isinstance(wait_m, int) and wait_m > 0:
             self._llm_proactive_next_ok[str(user_key)] = _now + float(wait_m) * 60.0
             # 块4（缺陷 J）：模型自判的等待窗必须落盘 —— 旧实现只有投递失败的

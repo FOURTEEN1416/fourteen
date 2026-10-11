@@ -279,6 +279,12 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         """
         tools = self.components.get("tools")
         if not tools or not tools.registry or llm is None:
+            # 2026-10-11 可观测批：终审停摆必须留痕 —— 旧实现静默 return，
+            # 生产"提醒 0 落库 + 日志查无对证"的直接教训
+            logger.warning(
+                "[tool_gate] 组件缺失，工具终审停摆 session=%s tools=%s llm=%s",
+                session_key, tools is not None, llm is not None,
+            )
             return "", ""
 
         sm = getattr(self.components.get("memory"), "structured_memory", None)
@@ -292,6 +298,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         # L0：零成本晋级线——未命中直接走主聊天链路（普通闲聊零影响）
         if not tool_gate.should_escalate(query, has_pending_intent=pending is not None):
             return "", ""
+        # 2026-10-11 可观测批：L0 命中即留痕（不落用户原文，P0 隐私红线）。
+        # 此前 L0/L1 全程零日志，生产排查"提醒为何没落库"查无对证。
+        logger.info("[tool_gate] L0 晋级 session=%s pending=%s", session_key, pending is not None)
 
         pending_slots: dict | None = None
         pending_ask_count = 0
@@ -362,8 +371,19 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         if not provider_ok:
             # ProviderFailure：故障不是「无需工具」。pending 保持 active，
             # 用户下一轮补齐信息后可继续澄清；失败判定先于任何执行副作用。
+            logger.info("[tool_gate] L1 判决 session=%s verdict=provider_fail", session_key)
             return "", ""
         tool_calls = resp.get("tool_calls") or []
+        if not tool_calls:
+            logger.info(
+                "[tool_gate] L1 判决 session=%s verdict=no_tool", session_key,
+            )
+        else:
+            logger.info(
+                "[tool_gate] L1 判决 session=%s verdict=tool_calls tools=%s",
+                session_key,
+                [str(tc.get("function", {}).get("name") or "") for tc in tool_calls],
+            )
 
         # 防假承诺：声称会做却没调任何工具（生产实证「听到啦」）→ 强制复核一次
         if not tool_calls and tool_gate.contains_promise(resp.get("content") or ""):
@@ -951,6 +971,38 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             )
         except Exception as e:  # noqa: BLE001
             logger.debug("sanitize_llm_history failed: %s", e)
+
+        # ── 时间感知（2026-10-11 批，参照 SillyTavern {{idleDuration}} 语义 +
+        #    hermes-agent #62369 [time anchor] 单行锚点惯例；AGPL 项目仅语义对齐）──
+        # 历史按真实间隔加时间前缀；锚点（当前时间+距上条消息时长）进
+        # memory_context["time_anchor"]，由 persona_service 渲染。缺时间戳时
+        # fail-open：不标注、不注锚，行为同旧版。
+        try:
+            from orchestrator.context_budget import annotate_history_time_gaps
+
+            chat_history = annotate_history_time_gaps(chat_history)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("annotate_history_time_gaps failed: %s", e)
+        try:
+            from utils.local_time import time_anchor_line
+
+            last_ts = next(
+                (
+                    row.get("timestamp")
+                    for row in reversed(chat_history or [])
+                    if isinstance(row, dict) and row.get("timestamp")
+                ),
+                None,
+            )
+            anchor = time_anchor_line(last_message_at=last_ts)
+            if isinstance(memory_context, dict):
+                memory_context["time_anchor"] = anchor
+            elif memory_context:
+                memory_context = f"{memory_context}\n\n{anchor}"
+            else:
+                memory_context = anchor
+        except Exception as e:  # noqa: BLE001
+            logger.debug("time anchor injection failed: %s", e)
 
         # 当前话题续聊钩子（2026-09-23）：从近期对话提取话题，进 memory_context，
         # 由 persona_service 渲染为「# 当前话题」+ 续聊指令（像人一样把话说下去）。

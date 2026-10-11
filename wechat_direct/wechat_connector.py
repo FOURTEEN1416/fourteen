@@ -274,11 +274,14 @@ CONTEXT_TOKENS_PATH = str(
 # 追问延迟序列的**默认值**（web 控制端可改；写入 data/scheduler_config.json 的
 # follow_up 块，与免打扰时段同一份跨 worker 真源）。
 # 值域守卫见 read_follow_up_config()，避免控制端写入非法值把行为搞坏。
+# 2026-10-11 主动关怀批：delay2 150→600、daily_max 12→6 —— 生产实证
+# （2026-10-11 21:59-22:00）step1→step2 仅 ~79 秒连追两条，用户每回一句就
+# 被一分钟内轰炸两次；第二条追问至少隔 10 分钟才像真人。
 FOLLOW_UP_DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "delay1_seconds": 45,
-    "delay2_seconds": 150,
-    "daily_max": 12,
+    "delay2_seconds": 600,
+    "daily_max": 6,
 }
 # 扫描间隔（秒）
 _FOLLOWUP_TICK = 5.0

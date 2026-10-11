@@ -1203,7 +1203,18 @@ class StructuredMemory:
                 continue
             if len(content) > 200:
                 content = content[:200] + "…"
-            lines.append(f"- {role}：{content}")
+            # 2026-10-11 时间感知批：尾巴行带本地时间（created_at 是 UTC），
+            # 否则跨天/跨月的尾巴与"刚刚"无从区分（中秋→国庆问题的尾巴侧解药）
+            ts_local = ""
+            try:
+                from utils.local_time import beijing_wall
+
+                wall = beijing_wall(r.get("created_at"))
+                if wall is not None:
+                    ts_local = f"（{wall:%m-%d %H:%M}）"
+            except Exception:  # noqa: BLE001
+                pass
+            lines.append(f"- {role}{ts_local}：{content}")
         return lines[-limit:]
 
     def claim_extraction(self, session_id: str, character_id: str, limit: int = 40):

@@ -44,6 +44,18 @@ def _local_now() -> datetime:
     return now_local()
 
 
+def _proactive_now_str() -> str:
+    """主动生成线的时间串：日期+星期+时刻（2026-10-11 时间感知批）。
+
+    旧实现只有 ``HH:MM`` —— 模型无从知道"距上次互动多久"，长间隔失联
+    被当作刚刚聊过（SillyTavern {{isodate}}/{{weekday}} 语义对齐）。
+    """
+    from utils.local_time import _WEEKDAY_CN
+
+    now = now_local()
+    return f"{now:%Y-%m-%d} {_WEEKDAY_CN[now.weekday()]} {now:%H:%M}"
+
+
 # ═══════════════════════════════════════════════════════════════
 #  消息清洗与去重（2026-09-19）
 #
@@ -546,7 +558,9 @@ class MessageGenerator:
 
         if self._proactive_prompt:
             # 2026-09-20：墙钟串统一走公共真源（原裸 datetime.now() 依赖主机时区，无回退）
-            now_str = now_local().strftime("%H:%M")
+            # 2026-10-11 时间感知批：升为日期+星期+时刻 —— 只有 HH:MM 时模型
+            # 无从知道"隔了多久"，长间隔失联会被当作刚刚聊过
+            now_str = _proactive_now_str()
             prompt = self._proactive_prompt.format(
                 # proactive.yaml 模板需要的变量
                 user_name="你",
@@ -568,7 +582,7 @@ class MessageGenerator:
             if avoid_block:
                 prompt = f"{prompt}\n{avoid_block}"
         else:
-            now_time = now_local().strftime("%H:%M")
+            now_time = _proactive_now_str()
             prompt = f"""作为"十四"，你想主动给用户发一条消息。
 
 当前情境：
