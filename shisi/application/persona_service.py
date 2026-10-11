@@ -214,6 +214,9 @@ class PersonaService:
             # 不发生，角色知识只剩 orchestrator rag_context 兜底段（rag 任务失败即
             # 当轮整体消失）。本轮原话只作检索命中，不回显进 system。
             knowledge_query=user_message,
+            # 剧情线状态键的用户维度（user_key::character_id，防同卡多用户串扰）；
+            # use_storyline=False 时仅接线预留，profile_key 缺失走旧行为兜底。
+            user_key=profile_key,
         )
 
         # 身份唯一 Owner（2026-09-21 收口）：身份只来自 `_build_character` 解析到的

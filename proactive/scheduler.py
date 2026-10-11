@@ -1156,9 +1156,11 @@ class ProactiveScheduler:
     def _llm_proactive_one_user(self, hub: Any, user_key: str) -> None:
         from proactive.ase_engine import _local_now, sanitize_message
         from proactive.llm_proactive import (
+            PROACTIVE_DEDUP_WINDOW,
             build_proactive_context,
             clamp_wait_minutes,
             decide_proactive,
+            is_duplicate_proactive,
             load_persona_hint,
             load_proactive_knowledge,
             proactive_floor_extra,
@@ -1337,6 +1339,31 @@ class ProactiveScheduler:
                 wait_minutes=decision.get("wait_minutes"),
                 character_id=char_id,
             )
+            return
+        # 出站去重硬闸（scallopbot 同族：投递前确定性判重）。生产实证同一用户
+        # 连收三条「哼，你终于想起我了？」变体 —— ase_engine 生成线的
+        # avoid_block 管不到决策线。比对对象取 eng._recent_messages 尾部
+        # （决策线/生成线两线投递成功都经 commit_sent 汇合于此，跨重启亦恢复）。
+        eng_recent: list[str] = []
+        if eng is not None:
+            with contextlib.suppress(Exception):
+                eng_recent = [
+                    str(m)
+                    for m in list(getattr(eng, "_recent_messages", []) or [])[-PROACTIVE_DEDUP_WINDOW:]
+                ]
+        if is_duplicate_proactive(message, eng_recent):
+            append_proactive_event(
+                session_key=user_key,
+                sent=False,
+                reason="duplicate_suppressed",
+                message=message[:80],
+                character_id=char_id,
+            )
+            # 拦截即退避 5 分钟：同义变体不会因为立刻重试而变得不同
+            self._llm_proactive_next_ok[str(user_key)] = _time.time() + 5 * 60.0
+            # 等待窗随写随落盘（与块4/块E 纪律一致，重启不重置）
+            self._persist_throttle_ledger()
+            logger.info("proactive LLM duplicate_suppressed user=%s msg=%s", user_key, message[:40])
             return
         if self._deliver(message, session_key=user_key, character_id=char_id):
             if eng is not None and hasattr(eng, "commit_sent"):

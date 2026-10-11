@@ -4,7 +4,7 @@
 高频失败时用户连续收到同一句 → 机器人感。
 
 契约：
-- 输入：character_id, kind(empty_reply|timeout|exception|rebuttal), reply_mode, count
+- 输入：character_id, kind(empty_reply|timeout|exception|rebuttal|image_unsupported), reply_mode, count
 - 输出：1 句符合沉浸式约束（**无括号动作**）的口语
 - 当日同 (character_id, kind) 去重，池子用尽后回退允许重复
 - 外部角色优先从卡 catchphrases / mes_example 风格变体取词
@@ -23,7 +23,7 @@ from utils.reply_mode import REPLY_MODE_NOVEL
 
 logger = logging.getLogger("fallback_lines")
 
-KINDS = ("empty_reply", "timeout", "exception", "rebuttal")
+KINDS = ("empty_reply", "timeout", "exception", "rebuttal", "image_unsupported")
 
 # 默认池：全部无括号动作，沉浸式安全
 _POOLS: dict[str, list[str]] = {
@@ -50,6 +50,10 @@ _POOLS: dict[str, list[str]] = {
         "你又说没事，这是第{count}次了，跟我说实话好不好",
         "第{count}次了哦，我不信你真的没事",
         "都说了{count}次没事…要不换一句说说？",
+    ],
+    # 媒体收到但不可用（2026-10-12 iLink 图片降级批）：图片下载失败/mode=off 且无文本时
+    "image_unsupported": [
+        "图片我收到了，不过我这边暂时还看不了图，你打字跟我说说好不好",
     ],
 }
 

@@ -1,7 +1,8 @@
 """StorylineEngine — 剧情线运行时引擎。
 
 职责：
-1. 管理每个角色的时间线进度
+1. 管理每个用户×角色（user_key::character_id）的时间线进度；
+   配置（_configs）保持角色级共享，进度状态按用户隔离
 2. 阶段检测和自动演进
 3. 行为规则注入 system prompt
 4. 结局检测和触发
@@ -19,8 +20,16 @@ from .config import StageDefinition, StorylineConfig
 
 logger = logging.getLogger("shisi.storyline.engine")
 
-# 持久化回调类型：接收 (character_id, state_dict) → 无返回
+# 持久化回调类型：接收 (state_key, state_dict) → 无返回。
+# state_key 为状态主键：user_key 非空时形如 "{user_key}::{character_id}"，
+# 空时为裸 character_id（旧行为兜底），落盘侧按它建键。
 PersistStateCallback = Callable[[str, dict[str, Any]], None]
+
+
+def _state_key(user_key: str, character_id: str) -> str:
+    """状态键：user_key 非空 → 用户隔离键；空 → 裸 character_id（旧行为兜底，
+    兼容拿不到用户维度的调用方与旧持久化数据，不迁移）。"""
+    return f"{user_key}::{character_id}" if user_key else character_id
 
 
 @dataclass
@@ -92,12 +101,15 @@ class StorylineEngine:
 
     # ── 配置管理 ──
 
-    def set_config(self, character_id: str, config: StorylineConfig) -> None:
-        """设置/更新角色的剧情线配置。"""
+    def set_config(
+        self, character_id: str, config: StorylineConfig, user_key: str = ""
+    ) -> None:
+        """设置/更新角色的剧情线配置（配置角色级共享；初始状态键按用户隔离）。"""
         self._configs[character_id] = config
         # 如果还没状态，初始化一个
-        if character_id not in self._states:
-            self._states[character_id] = StorylineState(character_id=character_id)
+        key = _state_key(user_key, character_id)
+        if key not in self._states:
+            self._states[key] = StorylineState(character_id=character_id)
         logger.info("剧情线配置已设置: %s (enabled=%s)", character_id, config.enabled)
 
     def get_config(self, character_id: str) -> StorylineConfig | None:
@@ -106,31 +118,48 @@ class StorylineEngine:
     def has_config(self, character_id: str) -> bool:
         return character_id in self._configs
 
-    def remove_config(self, character_id: str) -> None:
+    def remove_config(self, character_id: str, user_key: str = "") -> None:
+        """删除配置与状态。
+
+        user_key 非空 → 只删该用户键；空 → 角色级清理（裸键 + 所有所属用户键，
+        与配置删除的角色级语义一致，防止残留其他用户的孤儿状态）。
+        """
         self._configs.pop(character_id, None)
+        if user_key:
+            self._states.pop(_state_key(user_key, character_id), None)
+            return
         self._states.pop(character_id, None)
+        suffix = f"::{character_id}"
+        for key in [k for k in self._states if k.endswith(suffix)]:
+            del self._states[key]
 
     # ── 状态管理 ──
 
-    def get_state(self, character_id: str) -> StorylineState | None:
-        return self._states.get(character_id)
+    def get_state(self, character_id: str, user_key: str = "") -> StorylineState | None:
+        return self._states.get(_state_key(user_key, character_id))
 
-    def get_or_init_state(self, character_id: str) -> StorylineState:
-        if character_id not in self._states:
-            self._states[character_id] = StorylineState(character_id=character_id)
-        return self._states[character_id]
+    def get_or_init_state(self, character_id: str, user_key: str = "") -> StorylineState:
+        key = _state_key(user_key, character_id)
+        if key not in self._states:
+            self._states[key] = StorylineState(character_id=character_id)
+        return self._states[key]
 
-    def reset_state(self, character_id: str) -> None:
-        """重置角色的剧情进度。"""
+    def reset_state(self, character_id: str, user_key: str = "") -> None:
+        """重置剧情进度（按用户隔离）。"""
         config = self._configs.get(character_id)
         if config:
-            self._states[character_id] = StorylineState(character_id=character_id)
-            self._trigger_persist(character_id)
-            logger.info("剧情线状态已重置: %s", character_id)
+            self._states[_state_key(user_key, character_id)] = StorylineState(
+                character_id=character_id
+            )
+            self._trigger_persist(character_id, user_key)
+            logger.info("剧情线状态已重置: %s (user_key=%s)", character_id, user_key or "<legacy>")
 
-    def set_state_from_dict(self, character_id: str, data: dict) -> None:
-        """从字典恢复状态（如从数据库加载）。"""
-        self._states[character_id] = StorylineState(
+    def set_state_from_dict(self, character_id: str, data: dict, user_key: str = "") -> None:
+        """从字典恢复状态（如从数据库加载）。
+
+        user_key 空 → 写入裸 character_id 键（旧持久化格式按旧数据读入，不迁移）。
+        """
+        self._states[_state_key(user_key, character_id)] = StorylineState(
             character_id=character_id,
             story_time_minutes=data.get("story_time_minutes", 0),
             story_day=data.get("story_day", 1),
@@ -144,16 +173,16 @@ class StorylineEngine:
 
     # ── 核心逻辑 ──
 
-    def tick(self, character_id: str) -> StorylineState:
+    def tick(self, character_id: str, user_key: str = "") -> StorylineState:
         """推进一次时间（每句话调用一次）。
 
         返回当前状态，触发阶段变更回调（如果发生）。
         """
         config = self._configs.get(character_id)
         if not config or not config.enabled:
-            return self.get_or_init_state(character_id)
+            return self.get_or_init_state(character_id, user_key)
 
-        state = self.get_or_init_state(character_id)
+        state = self.get_or_init_state(character_id, user_key)
 
         # 如果已结束，不再推进
         if state.is_ended:
@@ -217,14 +246,14 @@ class StorylineEngine:
                 logger.info("剧情线结局触发: %s (时间:%s)", character_id, state.display_time)
 
         # 触发持久化
-        self._trigger_persist(character_id)
+        self._trigger_persist(character_id, user_key)
 
         return state
 
-    def get_current_stage(self, character_id: str) -> StageDefinition | None:
+    def get_current_stage(self, character_id: str, user_key: str = "") -> StageDefinition | None:
         """获取当前阶段定义。"""
         config = self._configs.get(character_id)
-        state = self._states.get(character_id)
+        state = self._states.get(_state_key(user_key, character_id))
         if not config or not state or not config.stages:
             return None
         idx = state.current_stage_index
@@ -232,40 +261,40 @@ class StorylineEngine:
             return config.stages[idx]
         return None
 
-    def get_behavior_rules(self, character_id: str) -> list[str]:
+    def get_behavior_rules(self, character_id: str, user_key: str = "") -> list[str]:
         """获取当前阶段的行为规则（用于 prompt 注入）。"""
-        stage = self.get_current_stage(character_id)
+        stage = self.get_current_stage(character_id, user_key)
         if not stage:
             return []
         return [r.rule for r in stage.behavior_rules if r.enforce]
 
-    def get_style_rules(self, character_id: str) -> list[str]:
+    def get_style_rules(self, character_id: str, user_key: str = "") -> list[str]:
         """获取当前阶段的对话风格规则。"""
-        stage = self.get_current_stage(character_id)
+        stage = self.get_current_stage(character_id, user_key)
         if not stage:
             return []
         return [r.style for r in stage.style_rules if r.inject_prompt]
 
-    def get_storyline_context(self, character_id: str) -> str:
+    def get_storyline_context(self, character_id: str, user_key: str = "") -> str:
         """获取剧情线上下文文本（注入 system prompt 用）。"""
         config = self._configs.get(character_id)
-        state = self._states.get(character_id)
+        state = self._states.get(_state_key(user_key, character_id))
         if not config or not state or not config.enabled:
             return ""
 
         parts = [f"# 剧情时间\n当前时间：{state.display_time}"]
 
-        stage = self.get_current_stage(character_id)
+        stage = self.get_current_stage(character_id, user_key)
         if stage:
             if stage.dialogue_notes:
                 parts.append(f"当前阶段：{stage.display_name or stage.name}")
                 parts.append(f"对话基调：{stage.dialogue_notes}")
 
-            style_rules = self.get_style_rules(character_id)
+            style_rules = self.get_style_rules(character_id, user_key)
             if style_rules:
                 parts.append("对话风格：" + "；".join(style_rules))
 
-            behavior_rules = self.get_behavior_rules(character_id)
+            behavior_rules = self.get_behavior_rules(character_id, user_key)
             if behavior_rules:
                 parts.append("行为规则：" + "；".join(behavior_rules))
 
@@ -278,10 +307,10 @@ class StorylineEngine:
 
         return "\n".join(parts)
 
-    def get_progress(self, character_id: str) -> dict[str, Any]:
+    def get_progress(self, character_id: str, user_key: str = "") -> dict[str, Any]:
         """获取剧情进度（用于前端展示）。"""
         config = self._configs.get(character_id)
-        state = self._states.get(character_id)
+        state = self._states.get(_state_key(user_key, character_id))
         if not config:
             return {"enabled": False}
 
@@ -292,7 +321,7 @@ class StorylineEngine:
                 "active": False,
             }
 
-        stage = self.get_current_stage(character_id)
+        stage = self.get_current_stage(character_id, user_key)
         progress_pct = 0.0
         if config.max_duration_minutes > 0:
             progress_pct = min(100.0, state.story_time_minutes / config.max_duration_minutes * 100)
@@ -303,8 +332,8 @@ class StorylineEngine:
             "current_stage": {
                 "name": stage.name if stage else "",
                 "display_name": stage.display_name if stage else "",
-                "style_rules": self.get_style_rules(character_id),
-                "behavior_rules": self.get_behavior_rules(character_id),
+                "style_rules": self.get_style_rules(character_id, user_key),
+                "behavior_rules": self.get_behavior_rules(character_id, user_key),
                 "dialogue_notes": stage.dialogue_notes if stage else "",
                 "transition_message": stage.transition_message if stage else "",
             } if stage else None,
@@ -350,15 +379,16 @@ class StorylineEngine:
             return False
         return state.story_time_minutes >= config.max_duration_minutes
 
-    def _trigger_persist(self, character_id: str) -> None:
-        """触发持久化回调。"""
-        state = self._states.get(character_id)
+    def _trigger_persist(self, character_id: str, user_key: str = "") -> None:
+        """触发持久化回调（第一参为完整状态键，落盘侧按它建键）。"""
+        key = _state_key(user_key, character_id)
+        state = self._states.get(key)
         if state is None:
             return
         state_dict = state.to_dict()
         for hook in self._persist_hooks:
             try:
-                hook(character_id, state_dict)
+                hook(key, state_dict)
             except Exception as e:
                 logger.debug("持久化回调异常: %s", e)
 

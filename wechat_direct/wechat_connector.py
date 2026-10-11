@@ -6,6 +6,7 @@
 
 import asyncio
 import base64
+import binascii
 import concurrent.futures
 import json
 import logging
@@ -16,8 +17,10 @@ import time
 import uuid
 from collections import OrderedDict
 from contextlib import suppress
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import requests
 
@@ -27,6 +30,11 @@ logger = logging.getLogger("wechat_direct")
 
 # ── 微信 API 地址 ──
 DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
+
+# ── iLink CDN 媒体（2026-10-12 多模态协议适配批）──
+# photon-hq/wechat-ilink-client 逆向默认基址；服务端 media 里下发 full_url 时优先用之
+DEFAULT_CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c"
+MEDIA_DOWNLOAD_TIMEOUT_S = 15.0   # 媒体下载超时（规格钉死 15s，失败降级不炸主流程）
 
 # ── 登录相关 ──
 QR_LOGIN_TIMEOUT_S = 480
@@ -83,6 +91,159 @@ def _plane():
     except Exception as e:  # noqa: BLE001
         logger.debug("控制面不可用（降级进程内行为）: %s", e)
         return None
+
+
+# ═══════════════════════════════════════════════
+# iLink 媒体 item 解析（2026-10-12 多模态协议适配批）
+#
+# 生产 iLink 协议 item 枚举：1=文本 text_item.text；2=图片 image_item{media, aeskey,...}；
+# 3=语音 voice_item{media, encode_type, text,...}（text=微信服务端 ASR，'if available'）。
+# 依据：zongrongjin/weixin-ilink types.py:12-42 + photon-hq/wechat-ilink-client
+# types.ts:64-142 双源一致。旧微信协议（34 语音 / 3 图片，base64 内联）兼容保留。
+# ═══════════════════════════════════════════════
+
+
+@dataclass
+class MediaRef:
+    """iLink 媒体引用（CDNMedia 归一化，只留下载所需三要素）。"""
+
+    encrypt_query_param: str = ""
+    full_url: str = ""            # 服务端下发完整 URL 时优先于 CDN 基址拼串
+    aes_key: bytes | None = None  # 归一化 16 字节 AES key；None=无 key 走明文下载兜底
+
+
+@dataclass
+class ParsedMedia:
+    """item_list 解析结果（纯数据，脱离 self 可直测）。"""
+
+    text: str = ""                  # type=1 文本
+    voice_text: str = ""            # type=3 voice_item.text（微信服务端 ASR，可缺省）
+    image_payload: MediaRef | None = None  # type=2 图片 CDN 引用
+    voice_media: MediaRef | None = None    # type=3 语音 CDN 引用
+    legacy_voice_data: str = ""     # type=34 旧协议内联 base64（兼容保留，防其他部署形态）
+    legacy_image_data: str = ""     # 旧协议 type=3 image_data 内联 base64（同上）
+    unknown_types: list = field(default_factory=list)  # 未识别 item type（可观测）
+
+
+def _parse_aes_key(raw) -> bytes | None:
+    """归一化 iLink 媒体 AES key，兼容三种形态（weixin-ilink cdn.py parse_aes_key 同构）：
+
+    - 32 字符裸 hex（image_item.aeskey：16 字节 raw key 的 hex 串，入站图片优先）；
+    - base64 解出 16 raw bytes（入站图片 media.aes_key）；
+    - base64 解出 32 字符 hex ASCII（语音/文件/视频：base64(hex_string) 形态）。
+    解析失败返回 None → 调用方按明文引用兜底。
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    if re.fullmatch(r"[0-9a-fA-F]{32}", s):
+        return bytes.fromhex(s)
+    try:
+        decoded = base64.b64decode(s, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    if len(decoded) == 16:
+        return decoded
+    if len(decoded) == 32:
+        try:
+            return bytes.fromhex(decoded.decode("ascii"))
+        except (ValueError, UnicodeDecodeError):
+            return None
+    return None
+
+
+def _aes_ecb_decrypt(data: bytes, key: bytes) -> bytes:
+    """AES-128-ECB + PKCS7 unpad（iLink CDN 媒体解密，weixin-ilink cdn.py 同构）。"""
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+    if len(key) != 16:
+        raise ValueError(f"AES key 必须 16 字节，得到 {len(key)}")
+    if not data or len(data) % 16 != 0:
+        raise ValueError("密文长度必须为 16 的倍数")
+    decryptor = Cipher(algorithms.AES(key), modes.ECB()).decryptor()
+    padded = decryptor.update(data) + decryptor.finalize()
+    pad = padded[-1]
+    if not 1 <= pad <= 16 or padded[-pad:] != bytes([pad]) * pad:
+        raise ValueError("PKCS7 填充非法（key 错误或密文损坏）")
+    return padded[:-pad]
+
+
+def parse_ilink_items(items) -> ParsedMedia:
+    """解析 getupdates 消息的 item_list → ParsedMedia（纯函数：无网络、无 self）。
+
+    旧协议同 type 双语义分叉：type=3 下有 voice_item 走新协议语音，
+    有 image_item.image_data 走旧协议内联图片（防其他部署形态，不删）。
+    """
+    parsed = ParsedMedia()
+    if not isinstance(items, (list, tuple)):
+        return parsed
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type", 0)
+        if item_type == 1:
+            text_item = item.get("text_item") or {}
+            parsed.text = str(text_item.get("text", "") or "")
+        elif item_type == 2:
+            image_item = item.get("image_item") or {}
+            media = image_item.get("media") or {}
+            # 入站图片 key 优先 item 级 aeskey（raw hex），回落 media.aes_key（base64）
+            parsed.image_payload = MediaRef(
+                encrypt_query_param=str(media.get("encrypt_query_param", "") or ""),
+                full_url=str(media.get("full_url", "") or ""),
+                aes_key=_parse_aes_key(image_item.get("aeskey")) or _parse_aes_key(media.get("aes_key")),
+            )
+        elif item_type == 3:
+            voice_item = item.get("voice_item")
+            if isinstance(voice_item, dict) and voice_item:
+                if "voice_data" in voice_item:
+                    parsed.legacy_voice_data = str(voice_item.get("voice_data", "") or "")
+                else:
+                    parsed.voice_text = str(voice_item.get("text", "") or "")
+                    media = voice_item.get("media") or {}
+                    # 语音无 item 级 aeskey，只有 media.aes_key（base64(hex32) 形态）
+                    parsed.voice_media = MediaRef(
+                        encrypt_query_param=str(media.get("encrypt_query_param", "") or ""),
+                        full_url=str(media.get("full_url", "") or ""),
+                        aes_key=_parse_aes_key(media.get("aes_key")),
+                    )
+            else:
+                image_item = item.get("image_item")
+                if isinstance(image_item, dict) and image_item.get("image_data"):
+                    parsed.legacy_image_data = str(image_item.get("image_data", "") or "")
+                else:
+                    parsed.unknown_types.append(item_type)
+        elif item_type == 34:
+            voice_item = item.get("voice_item") or {}
+            parsed.legacy_voice_data = str(voice_item.get("voice_data", "") or "")
+        else:
+            parsed.unknown_types.append(item_type)
+    return parsed
+
+
+def _read_voice_asr_config() -> dict:
+    """读取 config/system.yaml → voice.asr（${ENV} 占位展开为环境变量值）。
+
+    读取失败返回空 dict（= ASR 未启用语义）。_transcribe_voice 与
+    _voice_asr_available 共用此真源，避免配置读法分叉。
+    """
+    try:
+        import yaml
+
+        cfg_path = Path(__file__).parent.parent / "config" / "system.yaml"
+        if not cfg_path.exists():
+            return {}
+        with open(cfg_path, encoding="utf-8") as f:
+            full = yaml.safe_load(f) or {}
+        ac = ((full.get("voice") or {}).get("asr")) or {}
+        for k, v in list(ac.items()):
+            if isinstance(v, str) and v.startswith("${") and v.endswith("}"):
+                ac[k] = os.environ.get(v[2:-1], "")
+        return dict(ac)
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def load_session_state(user_id: int, slot: int = 0) -> dict:
@@ -1876,6 +2037,12 @@ class WeChatConnector:
         """处理一条消息（全链路结构化日志：接收 → 路由 → LLM → 回复）"""
         msg_type = raw_msg.get("message_type", 0)
         if msg_type not in (1, 3, 34):  # 放行用户文本(1)/图片(3)/语音(34)，其余（系统通知、自发回显等）仍丢弃
+            # 可观测（2026-10-12）：iLink 下用户消息 message_type 恒为 1（媒体语义在 item 层），
+            # 落到这里的多为 bot 自发回显(2)/系统通知——静默丢弃改为 INFO 记账
+            logger.info(
+                "[wx][step=msg_type_skipped] msg_type=%s from=%s",
+                msg_type, raw_msg.get("from_user_id", ""),
+            )
             return
 
         # ABUSE-4：入站日配额快速失败（per-owner）。只对真实用户消息计数，
@@ -1954,21 +2121,51 @@ class WeChatConnector:
 
     def _handle_message_serial(self, raw_msg, msg_id, from_user, context_token, revision):
         """同一好友从入站处理到最后一段受理/落库的完整串行区间。"""
-        items = raw_msg.get("item_list", [])
-        text = ""
-        voice_data = ""
-        image_data = ""
-        for item in items:
-            item_type = item.get("type", 0)
-            if item_type == 1:
-                text_item = item.get("text_item", {})
-                text = text_item.get("text", "")
-            elif item_type == 34:
-                voice_item = item.get("voice_item", {})
-                voice_data = voice_item.get("voice_data", "")
-            elif item_type == 3:
-                image_item = item.get("image_item", {})
-                image_data = image_item.get("image_data", "")
+        # iLink item 解析（1=文本/2=图片/3=语音；旧协议 34 语音、3 图片内联 base64 兼容保留）
+        parsed = parse_ilink_items(raw_msg.get("item_list", []))
+        text = parsed.text
+        voice_data = parsed.legacy_voice_data
+        image_data = parsed.legacy_image_data
+        if parsed.unknown_types:
+            # 未识别 item（47 表情等）：INFO 记账后按无内容处理
+            logger.info(
+                "[wx][step=media_unknown_type] msg_id=%s user=%s item_types=%s",
+                msg_id, from_user, parsed.unknown_types,
+            )
+
+        # ── iLink 语音（item type=3）：voice_item.text 为微信服务端 ASR（'if available'，
+        #    不保证存在）——非空直接作正文；缺省走媒体下载+本地 ASR，仍不可得则跳过 ──
+        if not text and parsed.voice_text:
+            text = parsed.voice_text
+            # P0 隐私：转写原文不落日志，只记 msg_id 与长度
+            logger.info("[wx][step=voice_text] msg_id=%s user=%s text_len=%d",
+                        msg_id, from_user, len(text))
+        elif not text and parsed.voice_media is not None:
+            text = self._voice_media_to_text(parsed.voice_media, msg_id, from_user)
+            if not text:
+                # 转写不可得：不拿空文本进 LLM 主链（voice_unavailable 已在方法内落账）
+                return
+
+        # ── iLink 图片（item type=2）：CDN 引用下载 → base64 → 复用既有 image_data 附件链 ──
+        if parsed.image_payload is not None:
+            mode, _vision_model, _max_bytes = self._image_mode()
+            if mode == "off":
+                logger.info("[wx][step=image_unsupported] msg_id=%s user=%s reason=mode_off",
+                            msg_id, from_user)
+            else:
+                raw = self._download_media(parsed.image_payload, msg_id=msg_id,
+                                           user=from_user, kind="image")
+                if raw:
+                    image_data = base64.b64encode(raw).decode("ascii")
+                else:
+                    logger.info("[wx][step=image_download_failed] msg_id=%s user=%s",
+                                msg_id, from_user)
+            if not image_data and not text:
+                # 图片收到但不可用且无文本 → 受控降级固定话术（池在 fallback_lines），不静默丢
+                logger.info("[wx][step=image_unsupported] msg_id=%s user=%s reason=no_usable_image",
+                            msg_id, from_user)
+                self._send_media_unsupported_notice(from_user, context_token)
+                return
 
         if not text and not voice_data and not image_data:
             logger.debug("消息无文本/语音/图片内容 msg_id=%s user=%s", msg_id, from_user)
@@ -2155,6 +2352,79 @@ class WeChatConnector:
                 logger.warning("[wx][step=sticker_failed] msg_id=%s user=%s error=%s",
                                msg_id, from_user, e)
 
+    def _download_media(self, ref: MediaRef, timeout: float = MEDIA_DOWNLOAD_TIMEOUT_S,
+                        msg_id: str = "", user: str = "", kind: str = "media") -> bytes | None:
+        """iLink CDN 媒体引用 → 原始字节（AES-128-ECB/PKCS7 解密；无 key 走明文兜底）。
+
+        优先服务端下发的 full_url，缺省拼 {CDN 基址}/download?encrypted_query_param=...
+        （基址为 photon-hq 逆向默认值，线上变更时以服务端下发为准）。任何失败返回
+        None（INFO 记账，不炸主流程）。
+        """
+        if ref is None or (not ref.full_url and not ref.encrypt_query_param):
+            logger.info("[wx][step=media_download_failed] msg_id=%s user=%s kind=%s reason=empty_ref",
+                        msg_id, user, kind)
+            return None
+        url = ref.full_url or (
+            f"{DEFAULT_CDN_BASE_URL}/download?encrypted_query_param={quote(ref.encrypt_query_param, safe='')}"
+        )
+        try:
+            resp = requests.get(url, timeout=timeout)
+            resp.raise_for_status()
+            data = resp.content
+            if ref.aes_key:
+                data = _aes_ecb_decrypt(data, ref.aes_key)
+            # P0 隐私：媒体内容不落日志，只记字节数与是否解密
+            logger.info(
+                "[wx][step=media_downloaded] msg_id=%s user=%s kind=%s bytes=%d encrypted=%s",
+                msg_id, user, kind, len(data), ref.aes_key is not None,
+            )
+            return data or None
+        except Exception as e:  # noqa: BLE001
+            logger.info("[wx][step=media_download_failed] msg_id=%s user=%s kind=%s error=%s",
+                        msg_id, user, kind, e)
+            return None
+
+    def _voice_asr_available(self) -> bool:
+        """本地 ASR 是否可用（voice.asr.enabled 且 api_base 非空；与 _transcribe_voice 同源配置）。"""
+        cfg = _read_voice_asr_config()
+        return bool(cfg.get("enabled", False)) and bool(cfg.get("api_base"))
+
+    def _voice_media_to_text(self, ref: MediaRef, msg_id: str, from_user: str) -> str:
+        """iLink 语音媒体引用 → 文本：CDN 下载 SILK → 本地 ASR（配置驱动）。
+
+        返回空串表示不可得（ASR 未启用/下载失败/转写为空），调用方跳过该消息；
+        失败原因落 [wx][step=voice_unavailable] 的 reason 字段。
+        """
+        if not self._voice_asr_available():
+            logger.info("[wx][step=voice_unavailable] msg_id=%s user=%s reason=asr_disabled",
+                        msg_id, from_user)
+            return ""
+        silk = self._download_media(ref, msg_id=msg_id, user=from_user, kind="voice")
+        if not silk:
+            logger.info("[wx][step=voice_unavailable] msg_id=%s user=%s reason=download_failed",
+                        msg_id, from_user)
+            return ""
+        asr_text = self._transcribe_voice(base64.b64encode(silk).decode("ascii"))
+        if not asr_text:
+            logger.info("[wx][step=voice_unavailable] msg_id=%s user=%s reason=asr_empty",
+                        msg_id, from_user)
+        return asr_text
+
+    def _send_media_unsupported_notice(self, peer: str, context_token: str = "") -> None:
+        """媒体收到但不可用且无文本时的受控降级话术（池在 utils/fallback_lines，不硬编码）。"""
+        try:
+            from utils.fallback_lines import get_fallback_line
+            from utils.reply_mode import read_reply_mode
+
+            line = get_fallback_line(None, "image_unsupported", read_reply_mode())
+        except Exception:  # noqa: BLE001
+            logger.debug("[wx][step=fallback_line_failed] 降级话术获取失败，跳过媒体占位回复")
+            return
+        try:
+            self._send_reply_segments(peer, line, context_token=context_token)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[wx][step=reply_send_failed] peer=%s error=%s", peer, e)
+
     def _image_mode(self) -> tuple:
         """读 config/system.yaml → multimodal.image；返回 (mode, vision_model, max_bytes)。
 
@@ -2206,23 +2476,7 @@ class WeChatConnector:
             from multimodal.multimodal_processor import ASRHandler
 
             if getattr(self, "_asr_handler", None) is None:
-                cfg: dict[str, object] = {}
-                try:
-                    import yaml
-                    cfg_path = Path(__file__).parent.parent / "config" / "system.yaml"
-                    if cfg_path.exists():
-                        with open(cfg_path, encoding="utf-8") as f:
-                            full = yaml.safe_load(f) or {}
-                        import os
-                        vc = full.get("voice") or {}
-                        ac = vc.get("asr") or {}
-                        for k, v in ac.items():
-                            if isinstance(v, str) and v.startswith("${") and v.endswith("}"):
-                                ac[k] = os.environ.get(v[2:-1], "")
-                        cfg = ac
-                except Exception:
-                    cfg = {}
-                self._asr_handler = ASRHandler(cfg)
+                self._asr_handler = ASRHandler(_read_voice_asr_config())
             handler: ASRHandler = self._asr_handler
             result = _run_async_coro(handler.process(voice_data_b64, source_format="silk"))
             text = (result or {}).get("text", "")

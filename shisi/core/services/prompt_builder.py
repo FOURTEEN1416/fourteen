@@ -31,6 +31,7 @@ def build(
     use_storyline: bool = True,
     tool_context: str = "",
     knowledge_query: str = "",
+    user_key: str = "",
 ) -> str:
     """构建系统提示词。
 
@@ -45,8 +46,11 @@ def build(
     ``knowledge_query``（批6b 项11）：RAG 检索查询与 system 回显解耦——
     调用方把当前用户消息放这里仅作检索命中用，system prompt 中不回显
     （回显会与 messages 末条重复）。缺省回落到 ``user_message``。
+
+    ``user_key``：剧情线状态键的用户维度（状态键 ``user_key::character_id``），
+    空时引擎回落裸 character_id（旧行为兜底）。
     """
-    storyline_context = _get_storyline_context(character, use_storyline)
+    storyline_context = _get_storyline_context(character, use_storyline, user_key)
     knowledge_context = _get_knowledge_context(
         character, knowledge_query or user_message, use_knowledge
     )
@@ -67,8 +71,12 @@ def merge_with_persona_prompt(base_prompt: str, character: CharacterAggregate) -
     return f"{base_prompt}\n\n{persona_segment}"
 
 
-def _get_storyline_context(character: CharacterAggregate, enabled: bool) -> str:
-    """获取剧情线上下文，同时推进时间。"""
+def _get_storyline_context(character: CharacterAggregate, enabled: bool, user_key: str = "") -> str:
+    """获取剧情线上下文，同时推进时间。
+
+    ``user_key`` 为剧情线状态键的用户维度（``user_key::character_id``），
+    空时引擎回落裸 character_id（旧行为兜底）。
+    """
     if not enabled or not character.storyline_config:
         return ""
 
@@ -84,21 +92,21 @@ def _get_storyline_context(character: CharacterAggregate, enabled: bool) -> str:
 
         # 确保引擎有配置
         if not engine.has_config(character.id):
-            engine.set_config(character.id, config)
-            engine.get_or_init_state(character.id)
+            engine.set_config(character.id, config, user_key)
+            engine.get_or_init_state(character.id, user_key)
 
         # 检查是否结束
-        state = engine.get_state(character.id)
+        state = engine.get_state(character.id, user_key)
         if state and state.is_ended:
             # 已结束 → 返回结局旁白 + 空回复指令
-            ctx = engine.get_storyline_context(character.id)
+            ctx = engine.get_storyline_context(character.id, user_key)
             return ctx
 
         # 推进时间
-        engine.tick(character.id)
+        engine.tick(character.id, user_key)
 
         # 获取上下文
-        ctx = engine.get_storyline_context(character.id)
+        ctx = engine.get_storyline_context(character.id, user_key)
         return ctx
     except Exception:
         logger.warning("剧情线处理失败（非阻塞）", exc_info=True)
