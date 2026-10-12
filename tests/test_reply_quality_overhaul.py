@@ -117,10 +117,11 @@ class TestCommitmentFactExtraction:
 
 
 # ══════════════════════════════════════════════════════════
-#  D. 微信追问链键错位修复
+#  D. 会话键 ↔ 裸 peer wxid 还原（原「追问链键错位修复」；
+#     追问链已于 2026-10-12 退役，键还原本体保留——outbox 定向投递仍依赖）
 # ══════════════════════════════════════════════════════════
 
-class TestFollowupKeyFix:
+class TestPeerWxidKeyFix:
     def test_peer_wxid_from_session(self):
         from wechat_direct.wechat_connector import WeChatConnector
         assert WeChatConnector._peer_wxid_from_session("1:wxid_abc@im.wechat") == "wxid_abc@im.wechat"
@@ -130,7 +131,7 @@ class TestFollowupKeyFix:
         assert WeChatConnector._peer_wxid_from_session("") == ""
 
     def test_context_token_lookup_uses_peer_not_session_key(self):
-        """追问发送目标必须是裸 wxid（与 _context_tokens 键一致）。"""
+        """定向发送目标必须是裸 wxid（与 _context_tokens 键一致）。"""
         from wechat_direct.wechat_connector import WeChatConnector
         conn = object.__new__(WeChatConnector)
         conn._context_tokens = {"wxid_abc": {"token": "T", "ts": 1e18}}

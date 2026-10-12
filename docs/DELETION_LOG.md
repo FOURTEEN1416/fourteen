@@ -1,5 +1,38 @@
 # Code Deletion Log
 
+## [2026-10-12] 追问链整体退役 + 拆条上限收敛批（用户裁决：「下一轮对话何时进行由 LLM 决策，不是数秒之内的多次回复，要像真人一样隔一段时间再回，类似主动关怀的主动消息」）
+
+### 裁决依据与替代 Owner
+- 机制 A（机械追问链）：`wechat_direct/wechat_connector.py` 的 `FOLLOW_UP_DEFAULTS`（45s/600s 两轮定时追问）与 `_schedule_followup`/`_cancel_followup`——用户回复后固定 45 秒、10 分钟机械再发，违背「由 LLM 决策」裁决。**接话时机唯一合法 Owner = proactive 决策链**（`proactive/llm_proactive.py::decide_proactive` + `scheduler` 节奏双闸 `should_skip_proactive_decision`，含回复后 15 分钟冷却）；两者均未改动、守卫用例钉死在位。
+- 机制 B（拆条轰炸）：`split_reply_for_wechat` 上限 4 条 → **最多 2 条**（超上限内容按原始分隔符并入第 2 条，行间换行保留，内容逐字无损；拼回不变式 `"\n".join(segs)==多行原文` / `"".join(segs)==单行原文`）。
+
+### 删除清单（代码，删除前全文已读）
+- `wechat_direct/wechat_connector.py`：`FOLLOW_UP_DEFAULTS`、`_FOLLOWUP_TICK`、`_FOLLOWUP_MAX_CHARS`、`_FOLLOWUP_CONTEXT_TURNS`、`_SCHEDULER_CONFIG_PATH`、`read_follow_up_config()`（配置读取，含值域守卫）、实例状态 `_pending_followups`/`_followup_lock`/`_followup_revisions`/`_followup_daily`/`_followup_daily_date`、守护线程 `_followup_thread`（`wx-followup`）及启动旗标、`_schedule_followup`/`_cancel_followup`/`_in_quiet_hours`/`_followup_budget_ok`/`_followup_spend`/`_send_followup`（含 `step=followup_sent` 等全部 followup_* 日志分支）/`_followup_system_prompt`/`_generate_followup`，以及仅剩追问链消费者的辅助方法 `_memory_service`/`_session_messages`/`_record_outbound`/`_resolve_character_id`；`_handle_message`/`_handle_message_serial` 的 `revision` 串联参数、回复出口的登记调用一并移除。outbox 消费（`_drain_outbox`，原挂追问线程 5 秒 tick）改为独立守护线程 `_outbox_thread`（`wx-outbox`，`_OUTBOX_TICK=5.0`），投递语义零变化。
+- `api/main_routes.py`：`ProactiveConfigRequest` 的 `follow_up_enabled`/`follow_up_delay1_seconds`/`follow_up_delay2_seconds`/`follow_up_daily_max` 四字段（端点保留，计数不变）。
+- `api/routers/training_routes.py`：GET/POST `/api/proactive/config` 的 `read_follow_up_config` lazy import 与读写分支（端点保留；越域批复：主控 2026-10-12，删配置读取的必要条件）。
+- `frontend/src/api/system.ts` + `frontend/src/components/admin/RoleSettingsTabs.tsx` + `frontend/src/tests/components/RoleSettings.test.tsx`：追问设置 UI 块、`follow_up_*` 类型字段、状态与提交字段、mock 行（越域批复；vitest 10/10 + `tsc --noEmit` 0 错实测）。
+- `utils/reply_mode.py` / `docs/CODEMAPS/BACKEND.md`：文档串中的 follow_up 共存表述同步。
+
+### 删除清单（测试，改写为退役语义或删除）
+- **删除** `tests/test_wechat_followup.py`（整文件 33 例：登记/取消/静默/预算/配置读取/发送续排/生成守卫/身份源——全部为已退役机制的行为断言）；
+- **删除** `tests/test_w3_desired_state_channel.py::test_followup_budget_persists_across_restart`（预算账随机制退役）；同文件 `_handle_message_serial` 三处 5 参 lambda 改 4 参（`revision` 参数已退役）；
+- **删除** `tests/test_time_anchor_proactive_floor.py::TestFollowUpDefaults`（默认值已不存在）；**删除** `tests/test_topic_continuity_and_selftalk.py::test_followup_prompt_keeps_jiehua`（追问 prompt 已不存在）；同文件 `test_followup_rejects_invented_user_speech` 更名 `test_ase_rejects_invented_user_speech`（实守 proactive.ase_engine 同源清洗，非追问链）；
+- **改写** `tests/test_wechat_reply_split.py`（上限 2 条新语义：`test_overflow_merges_into_second_segment_preserving_newlines` 替代 `test_no_newlines_in_any_segment`；partial/锁两例去掉 `_schedule_followup` monkeypatch，拆条断言更新）；
+- **新增** `tests/test_followup_retired.py`（8 例：静态守卫/Owner 在位/拆条 2 条上限+拼回无损/主路径零定时任务）。
+- （`tests/test_runtime_plane.py` 对 `proactive/runtime_plane.py::followup_used/followup_spend` 的用例**保留**——该文件属禁改的 proactive/**，见下。）
+
+### 有意保留（禁改域，待主控后续批次清理）
+- `proactive/runtime_plane.py` 的 `followup_budget` 表与 `followup_used`/`followup_spend`（`proactive/**` 禁改边界）：消费者已随本批退役，表与函数暂留原地成孤儿——**登记为遗留，待主控后续批次清理**；
+- `proactive/scheduler.py::write_config_file` 的 `follow_up` 关键字参数（同上，proactive/** 禁改；无人再传参，无行为影响）；
+- 生产 `data/scheduler_config.json` 的 `follow_up` 残留块：**主控稍后 SSH 清理**（用户裁决口径）；代码侧全部读取方（scheduler/quiet_hours/reply_mode）均按键 `.get()` 取用，残留键不报错（键容错已确认）。
+
+### 验证
+- 红测先行：`tests/test_followup_retired.py` 在退役前实测 6 failed（静态守卫/条数守卫/主路径守卫全红），退役后 8 passed；
+- 突变自检 2/2 命中：恢复 `FOLLOW_UP_DEFAULTS` 一处定义 → 静态守卫红；`_SPLIT_MAX_SEGMENTS` 恢复 4 → 条数守卫红；均二进制安全恢复（sha256 前后一致）；
+- 定向回归见 `LOG.md` 2026-10-12 条目（connector 邻域 + API 读门 + 拆条/守卫 + w3/sweep/p1 邻域）。
+
+**Reversible**: `git checkout <本批前提交> -- wechat_direct/wechat_connector.py api/main_routes.py api/routers/training_routes.py frontend/src tests/test_wechat_followup.py` 即整体恢复；无数据迁移（`followup_budget` 表保留未删）。
+
 ## [2026-10-11] 临时脚本清理批：本机 dev 库镜像残留清理脚本删除（使命已完成）
 
 ### 删除对象与证据

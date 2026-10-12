@@ -157,7 +157,6 @@ const PROACTIVE_CONFIG = {
   cooldown_after_reply_minutes: 15,
   quiet_hours_start: 23,
   quiet_hours_end: 7,
-  follow_up: { enabled: true, delay1_seconds: 45, delay2_seconds: 150, daily_max: 12 },
   reply_mode: 'immersive',
   paused: false,
   llm_proactive: { enabled: true, style_hint: '', intensity: 'normal', respect_quiet_hours: true, character_hint: '' },

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -116,6 +117,77 @@ class MemoryConfig:
 def _user_key_from_session(session_id: str) -> str:
     """session_id → user_facts 归属键（**完整会话键** `N:peer`，2026-09-21 隔离修复）。"""
     return StructuredMemory.user_key_from_session(session_id)
+
+
+# ── 恒常事实召回保证（2026-10-12 生产事故修复）─────────────────────
+# 事故：用户前夜明说「我们这边没有空调，没有暖气」，15 秒后抽取落库；
+# 次日话题切到早操/早八后，词面与语义召回都带不出它（召回命中了别的事实，
+# recent_fallback 仅在召回整体为空时触发），角色上午仍在问「空调开没开」。
+# 恒常事实 = 描述居住环境/长期属性的陈述，任何时候都成立，不该依赖当轮
+# 查询词面命中——检索后一律补锚保证注入（与 recent_fallback 互补）。
+
+DURABLE_ANCHOR_LIMIT = 3
+
+_DURABLE_ENV_NOUNS = (
+    # 家电 / 设施
+    "空调", "暖气", "地暖", "壁挂炉", "电热毯", "风扇", "加湿器", "除湿机",
+    "冰箱", "洗衣机", "烘干机", "热水器", "微波炉", "电磁炉", "路由器",
+    "宽带", "wifi", "网络",
+    "电梯", "楼梯", "热水",
+    # 居住 / 场所
+    "宿舍", "寝室", "教室", "图书馆", "出租屋", "出租房", "合租", "公寓",
+    "小区", "宿舍楼", "学校", "校园", "校区", "教学楼",
+    "室友", "舍友",
+    "家里", "家中", "我家", "家在", "老家", "房间", "卧室", "厨房", "阳台",
+    "院子",
+    # 房型（「人间」只随「住N人间」断言式放行，见 _DURABLE_ASSERTION_RE）
+    "人间",
+    # 地域
+    "云南", "昆明", "东北", "北方", "南方", "江南", "高原", "海边", "山区",
+    "城市",
+)
+
+# 恒常性陈述：否定/缺失 | 居住位置 | 存在性（命中任一组即可）。
+# 2026-10-12 对抗验收补两类高频说法：
+# - 单「没」+名词（「宿舍没电梯」「楼里没热水」）——与名词表共现兜底；
+# - 「名词+在+数字楼层」（「宿舍在六楼」「教室在一楼」）与「住+数字楼层/房型」
+#   （「我家住五楼」「我住六人间」）——中文「X在Y」语序，旧式只认「在+场所」。
+_DURABLE_ASSERTION_RE = re.compile(
+    r"没有|没装|没配|没得|不配|不允许|停了|坏了|没[一-龥]"
+    r"|住在|家在|来自|位于|在[一-龥]{0,4}(?:学校|宿舍|寝室|教室|家)"
+    r"|在[一二三四五六七八九十0-9]{1,3}(?:楼|层|栋|号|单元)"
+    r"|住[一二三四五六七八九十0-9]{1,3}(?:楼|层|人间|人房)"
+    r"|家里有|宿舍有|寝室有|房间有|楼里有|我们有|装了|买了"
+)
+# 瞬时时间词：带这类词的陈述按瞬时处理，不锚（宁漏锚不错锚）。
+# 过去日事件词（昨天/昨晚等）排除「昨晚没回宿舍」类一次性事件；
+# 「去年/上周装了空调」类购置完成态是恒常属性，故不列入。
+_DURABLE_TRANSIENT_RE = re.compile(
+    r"今天|今晚|现在|刚才|刚刚|这会儿|这会|马上|待会|等下|这周|这星期|这个月|这月"
+    r"|昨天|昨晚|昨夜|前天"
+)
+# 疑问式：是对话不是事实，不锚
+_DURABLE_QUESTION_RE = re.compile(r"[？?]|开没开|有没有|是不是|好不好|要不要|吗\s*$")
+
+
+def is_durable_env_fact(text: str) -> bool:
+    """是否「恒常事实」：描述居住环境/长期属性、任何时候都成立的陈述。
+
+    判据（保守）：环境/居住名词 ×（否定 | 居住位置 | 存在性）陈述，
+    且不含瞬时时间词与疑问式。供召回补锚（`_anchor_durable_facts`）与
+    「# 关于用户」注入窗口保位（`get_memory_context._prio`）共用。
+    """
+    s = str(text or "").strip()
+    if not s:
+        return False
+    low = s.lower()
+    if not any(noun in low for noun in _DURABLE_ENV_NOUNS):
+        return False
+    if not _DURABLE_ASSERTION_RE.search(s):
+        return False
+    if _DURABLE_TRANSIENT_RE.search(s):
+        return False
+    return not _DURABLE_QUESTION_RE.search(s)
 
 
 def _fact_age_days(updated_at: Any, now: datetime | None = None) -> float:
@@ -589,6 +661,48 @@ class MemoryPipeline:
         """
         return "".join(str(text or "").lower().split()).rstrip("。.!！?？")
 
+    def _anchor_durable_facts(self, context: dict[str, Any], uk: str) -> None:
+        """恒常事实补锚：把本用户尚未进召回结果的恒常事实补进注入面。
+
+        2026-10-12 生产事故（fact_status=extracted_not_recalled）：用户前夜明说
+        「我们这边没有空调，没有暖气」，15 秒后抽取落库；次日话题切到早操/早八
+        后，词面（整句 FTS/LIKE）与语义近邻都带不出它——召回命中了**别的事实**，
+        recent_fallback 又只在召回整体为空时触发，恒常事实整轮缺席，角色仍在问
+        「空调开没开」。恒常事实（居住环境等长期属性）任何时候都成立，不该依赖
+        当轮查询词面命中——检索后一律补锚，出处记 durable_anchor 供回放区分。
+        只认当前 user_key（隔离硬约束）；删除后的事实经主库 active 过滤自然消失。
+        """
+        try:
+            rows = self.sm.get_facts(min_confidence=0.3, user_key=uk, limit=200)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Durable fact anchor load failed: %s", e)
+            return
+        if not rows:
+            return
+        injected_keys = {
+            self._norm_fact_key(str(f)) for f in context["facts"] if f
+        }
+        picked: list[dict[str, Any]] = []
+        for r in rows:
+            text = str(r.get("fact") or "").strip()
+            if not text or not is_durable_env_fact(text):
+                continue
+            if self._norm_fact_key(text) in injected_keys:
+                continue
+            picked.append(r)
+        if not picked:
+            return
+        # 先按新近、再稳定按置信度（两段稳定排序：confidence DESC, updated_at DESC）
+        picked.sort(key=lambda r: str(r.get("updated_at") or ""), reverse=True)
+        picked.sort(key=lambda r: -(float(r.get("confidence") or 0.0)))
+        for r in picked[:DURABLE_ANCHOR_LIMIT]:
+            text = str(r.get("fact") or "").strip()
+            context["semantic"].append(dict(r))
+            context["facts"].append(text)
+            context["fact_provenance"].append(
+                {"fact": text, "fact_id": r.get("id"), "recall": "durable_anchor"}
+            )
+
     def _merge_fact_recalls(
         self,
         *,
@@ -763,6 +877,12 @@ class MemoryPipeline:
                 ]
             except Exception as e:  # noqa: BLE001
                 logger.debug("Structured fact fallback failed: %s", e)
+
+        # 3c. 恒常事实补锚 — 话题切换轮也保证居住环境等长期属性在注入面
+        #     （2026-10-12 生产事故：召回命中了别的事实 → recent_fallback 不触发，
+        #     恒常事实整轮缺席；出处记 durable_anchor 供回放区分）。
+        if uk:
+            self._anchor_durable_facts(context, uk)
 
         # 4. 记忆反思洞察 — 按会话过滤
         try:
@@ -981,7 +1101,11 @@ class MemoryPipeline:
             uk = _user_key_from_session(sess)
             facts = self.sm.get_facts(min_confidence=0.3, user_key=uk, limit=50)
 
-            def _prio(row: dict) -> int:
+            def _prio(row: dict) -> float:
+                # 恒常事实（居住环境等长期属性）仅次于关系/承诺：低亲和度
+                # 小窗口也不得把它挤出注入面（2026-10-12 生产事故）。
+                if is_durable_env_fact(str(row.get("fact") or "")):
+                    return 0.5
                 cat = str(row.get("category") or "")
                 if cat in ("relationship", "commitment"):
                     return 0

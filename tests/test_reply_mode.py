@@ -35,7 +35,7 @@ def test_roundtrip(monkeypatch, tmp_path):
 
 
 def test_write_preserves_other_keys(monkeypatch, tmp_path):
-    """reply_mode 与 quiet_hours / follow_up 共用一份跨 worker 配置文件。"""
+    """reply_mode 与 quiet_hours 共用一份跨 worker 配置文件。"""
     import json
 
     rm = _use_tmp(monkeypatch, tmp_path)

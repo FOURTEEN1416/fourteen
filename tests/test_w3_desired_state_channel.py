@@ -256,7 +256,7 @@ def test_inbound_replay_processed_once(chan, monkeypatch):
     calls: list[str] = []
     monkeypatch.setattr(
         conn, "_handle_message_serial",
-        lambda raw, mid, fu, ct, rev: calls.append(mid),
+        lambda raw, mid, fu, ct: calls.append(mid),
     )
     conn._handle_message(_raw("m-1"))
     conn._handle_message(_raw("m-1"))  # get_updates 重发 / 新宿主接管重放
@@ -278,7 +278,7 @@ def test_inbound_failure_releases_claim_for_retry(chan, monkeypatch):
     done: list[str] = []
     monkeypatch.setattr(
         conn, "_handle_message_serial",
-        lambda raw, mid, fu, ct, rev: done.append(mid),
+        lambda raw, mid, fu, ct: done.append(mid),
     )
     conn._handle_message(_raw("m-2"))  # 处理失败不该吞掉这条消息
     assert done == ["m-2"]
@@ -290,30 +290,9 @@ def test_inbound_memory_fallback_without_plane(chan, monkeypatch):
     calls: list[str] = []
     monkeypatch.setattr(
         conn, "_handle_message_serial",
-        lambda raw, mid, fu, ct, rev: calls.append(mid),
+        lambda raw, mid, fu, ct: calls.append(mid),
     )
     monkeypatch.setattr(wc, "_plane", lambda: None)
     conn._handle_message(_raw("m-3"))
     conn._handle_message(_raw("m-3"))
     assert calls == ["m-3"]
-
-
-# ── 缺陷 J：追问日预算跨重启 ─────────────────────────────────
-
-
-def test_followup_budget_persists_across_restart(chan, monkeypatch):
-    monkeypatch.setattr(
-        wc, "read_follow_up_config",
-        lambda: {"enabled": True, "daily_max": 2,
-                 "delay1_seconds": 60, "delay2_seconds": 60},
-    )
-    conn = _mk_conn(chan)
-    assert conn._followup_budget_ok("7:wx_b")
-    conn._followup_spend("7:wx_b")
-    conn._followup_spend("7:wx_b")
-    assert not conn._followup_budget_ok("7:wx_b")
-    # 模拟重启 / 换宿主：新实例读同一持久账
-    conn2 = _mk_conn(chan)
-    assert not conn2._followup_budget_ok("7:wx_b")
-    # 另一会话不受影响
-    assert conn2._followup_budget_ok("7:wx_other")

@@ -189,20 +189,10 @@ def test_orchestrator_extracts_topics_and_sanitizes_reply():
     assert "sanitize_reply_text" in src
 
 
-def test_followup_prompt_keeps_jiehua():
-    import inspect
+def test_ase_rejects_invented_user_speech():
+    """生产实证（2026-09-25）：「就想知道月饼啥味？」= 虚构对方提问，必须拒发。
 
-    from wechat_direct import wechat_connector as wc
-
-    src = inspect.getsource(wc)
-    assert "接话" in src or "延伸你自己" in src
-    # 对方没回时：只延伸自己，禁止虚构对方提问
-    assert "禁止虚构对方" in src or "禁止虚构对方的发言" in src
-    assert "延伸你自己" in src
-
-
-def test_followup_rejects_invented_user_speech():
-    """生产实证（2026-09-25）：「就想知道月饼啥味？」= 虚构对方提问，必须拒发。"""
+    守卫本体在 proactive.ase_engine（追问链退役后主动线同源清洗的唯一残存点）。"""
     from proactive.ase_engine import _INVENTED_USER_RE
 
     assert _INVENTED_USER_RE.search("才两小时没说话就想知道月饼啥味？")

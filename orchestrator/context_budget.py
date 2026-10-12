@@ -383,13 +383,17 @@ def format_session_tail(lines: list[str] | None, budget: ContextBudget | None = 
     return "\n".join(body)
 
 
-# ── 历史消息时间标注（2026-10-11 时间感知批）────────────────
+# ── 历史消息时间标注（2026-10-11 时间感知批；2026-10-12 语义升级）──
 #
-# SillyTavern 语义对齐（AGPL 项目，仅语义对齐未抄代码）：消息间隔超过阈值时
-# 给消息加时间前缀，让模型分得清"十分钟前的连续聊天"和"隔了六天的重新出现"。
+# SillyTavern 语义对齐（AGPL 项目，仅语义对齐未抄代码）：给消息加时间前缀，
+# 让模型分得清"十分钟前的连续聊天"和"隔了六天的重新出现"。
 # 生产背景：中秋的消息和国庆的回复在模型眼里都是"刚刚说的"。
+# 2026-10-12 语义升级（生产实证 08:13 叙述"六点出操"被当正在发生）：间隔>30min
+# 才标注的旧口径使连续聊天整段裸奔 —— 模型看不到每条消息的发送时刻，无从把
+# 用户叙述的钟点与发送时刻对齐。现口径：**每行都加前缀**。
 
-# 相邻消息间隔超过该值（分钟）才标注 —— 短时连续聊天不掺时间噪声
+# 相邻消息间隔超过该值（分钟）→ 行内追加「距上一条 X」人类可读后缀。
+# 2026-10-12 起只控制后缀；时间前缀每行都加，不再受此阈值豁免。
 HISTORY_GAP_ANNOTATE_MINUTES = 30.0
 
 
@@ -398,21 +402,25 @@ def annotate_history_time_gaps(
     now: Any | None = None,
     gap_minutes: float = HISTORY_GAP_ANNOTATE_MINUTES,
 ) -> list:
-    """给历史消息按**真实间隔**加时间前缀（纯函数，不改入参）。
+    """给历史消息**逐行**加时间前缀（纯函数，不改入参）。
 
-    行带 ``timestamp``（UTC 落库口径）才可标注：
-    - 首条距 now 超过 24 小时 → 首条标注（否则整段历史被当作刚刚发生）；
-    - 相邻两条间隔超过 ``gap_minutes`` → 后一条标注。
+    2026-10-12 语义升级：连续短间隔对话不再豁免（生产实证：连续聊天形态下
+    模型把用户叙述的钟点当正在发生）。现口径 —— 行带 ``timestamp``（UTC 落库
+    口径）即标注：
 
-    前缀格式 ``[MM-DD HH:mm]``（北京时间，与时间锚点同口径）。
-    无 timestamp 的行原样透传（旧形态/合成行不炸，fail-open）。
+    - **每一条**都加 ``[MM-DD HH:MM]`` 前缀（北京时间，与时间锚点同口径）；
+    - 相邻两条间隔超过 ``gap_minutes`` → 追加「距上一条 X」人类可读后缀
+      （``humanize_gap_cn`` 风格，保留「隔了六天重新出现」的直觉信号）；
+      首条无上一条，不掺后缀。
+
+    无 timestamp / 畸形时间戳的行原样透传（旧形态/合成行不炸，fail-open）。
+    ``now`` 参数保留兼容（逐行标注后不再需要 now 基准），不参与判定。
     """
     rows = list(history or [])
     if not rows:
         return rows
-    from utils.local_time import _wall_clock, beijing_wall
+    from utils.local_time import beijing_wall, humanize_gap_cn
 
-    wall = _wall_clock(now)
     threshold = float(gap_minutes) * 60.0
     out: list = []
     prev_wall: Any | None = None
@@ -424,18 +432,17 @@ def annotate_history_time_gaps(
         if ts is None:
             out.append(row)
             continue
-        need = False
-        if prev_wall is None:
-            # 首条：距 now 超过 24h 就标（模型需要知道整段历史有多旧）
-            need = (wall - ts).total_seconds() > 24 * 3600
+        gap = None if prev_wall is None else (ts - prev_wall).total_seconds()
+        content = str(row.get("content") or "")
+        if gap is not None and gap > threshold:
+            content = (
+                f"[{ts:%m-%d %H:%M}] {content}（距上一条 {humanize_gap_cn(gap)}）".rstrip()
+            )
         else:
-            need = (ts - prev_wall).total_seconds() > threshold
-        if need:
-            stamped = dict(row)
-            stamped["content"] = f"[{ts:%m-%d %H:%M}] {row.get('content') or ''}".rstrip()
-            out.append(stamped)
-        else:
-            out.append(row)
+            content = f"[{ts:%m-%d %H:%M}] {content}".rstrip()
+        stamped = dict(row)
+        stamped["content"] = content
+        out.append(stamped)
         prev_wall = ts
     return out
 

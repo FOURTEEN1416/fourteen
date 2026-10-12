@@ -30,7 +30,7 @@ api/ (48 py 文件)            ← FastAPI 路由层
 │
 └── routers/                ← 路由模块 (24 个，不含 __init__.py)
     ├── character_routes.py   (21 endpoints，tag=character)
-    ├── misc_routes.py        (16，含 /api/user/llm-config GET/POST、日记种子、follow_up/reply_mode 配置)
+    ├── misc_routes.py        (16，含 /api/user/llm-config GET/POST、日记种子、reply_mode 配置)
     ├── training_routes.py    (13，training/* + proactive/*)
     ├── auth_routes.py        (13，register/login/refresh/logout/me/change-password/admin reset + consent 状态机 + W9 自服务 consent/status|withdraw、account/delete|export(+chats))
     ├── safety_routes.py      (12，safety/rag/voice/files/cache)
@@ -72,7 +72,7 @@ api/ (48 py 文件)            ← FastAPI 路由层
 |------|------|------|
 | character_routes | 21 | /api/characters/*, /api/presets/*（含 .png 导入/导出） |
 | misc_routes | 16 | /api/stats, /api/dashboard, /api/memory/facts, /api/logs*, /api/config, /api/user/llm-config, /api/channels, /api/routes, /api/memory/diary* |
-| training_routes | 13 | /api/training/*, /api/proactive/*（config 含 follow_up/reply_mode、send/pause/history） |
+| training_routes | 13 | /api/training/*, /api/proactive/*（config 含 reply_mode、send/pause/history；follow_up 已于 2026-10-12 退役） |
 | auth_routes | 13 | /api/auth/*：register/login/refresh/logout/me/change-password/admin reset + consent(AGREEMENT_VERSION) + W9 自服务 consent/status、consent/withdraw、account/delete、account/export、account/export/chats |
 | safety_routes | 12 | /api/safety/*, /api/rag/*, /api/voice/*, /api/files/*, /api/cache/* |
 | chat_routes | 11 | /api/chat/*, /api/session/*, /api/wechat/status |

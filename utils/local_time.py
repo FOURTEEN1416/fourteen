@@ -167,8 +167,25 @@ def humanize_gap_cn(seconds: float) -> str:
     return f"{int(secs // 86400)} 天"
 
 
+# 推理指引（2026-10-12 时间线推理批，≤3 行）：只给"现在几点"不够 ——
+# 生产实证：用户 08:13 叙述清晨六点的事件，角色 08:14 仍按"正在发生"回应。
+# 三条铁则随锚点一起注入 system prompt（persona_service 原样渲染 time_anchor 槽）。
+TIME_REASONING_GUIDE = (
+    "- 历史里用户提到的钟点/日期是用户叙述的事件（过去发生或计划），"
+    "必须结合该条消息的发送时刻（行内 [MM-DD HH:MM] 前缀）与当前时间推理先后，"
+    "不得当作正在发生；\n"
+    "- 对用户当前所处位置/状态不确定时直接问，"
+    "不要替用户假设（在宿舍/在操场/在教室这类）；\n"
+    "- 不要虚构自己所处的环境、天气或状态当事实。"
+)
+
+
 def time_anchor_line(last_message_at: object = None, now: datetime | None = None) -> str:
-    """单行时间锚点：当前日期+星期+时刻+距上一条消息时长（hermes-agent 惯例）。
+    """时间锚点：当前日期+星期+时刻+距上一条消息时长 + ≤3 行推理指引。
+
+    首行为 hermes-agent #62369 惯例的单行锚点；2026-10-12 起其后追加
+    :data:`TIME_REASONING_GUIDE`（≤3 行）——生产实证只有锚点没有指引时，
+    模型把用户叙述的钟点当正在发生。
 
     Args:
         last_message_at: 上一条消息的落库时间戳（UTC 口径，naive 串按 UTC）。
@@ -183,8 +200,11 @@ def time_anchor_line(last_message_at: object = None, now: datetime | None = None
     )
     last = beijing_wall(last_message_at)
     if last is None:
-        return f"{head} | 本会话暂无历史消息"
-    gap = (wall - last).total_seconds()
-    if gap <= 0:
-        return f"{head} | 上一条消息就在刚才"
-    return f"{head} | 上一条消息：{humanize_gap_cn(gap)}前（{last:%m-%d %H:%M}）"
+        head += " | 本会话暂无历史消息"
+    else:
+        gap = (wall - last).total_seconds()
+        if gap <= 0:
+            head += " | 上一条消息就在刚才"
+        else:
+            head += f" | 上一条消息：{humanize_gap_cn(gap)}前（{last:%m-%d %H:%M}）"
+    return f"{head}\n{TIME_REASONING_GUIDE}"

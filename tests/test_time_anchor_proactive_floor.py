@@ -93,8 +93,10 @@ class TestHistoryAnnotation:
         third = out[2]["content"]
         assert third.startswith("[10-07 09:30]")
         assert "我国庆回来了" in third
-        # 20 秒间隔的短消息不加前缀
-        assert out[1]["content"] == "早呀"
+        # 2026-10-12 语义升级：短间隔行不再豁免，同样必须带前缀
+        # （生产实证 08:13 叙述钟点被当正在发生，就是连续聊天的形态）
+        assert out[1]["content"].startswith("[10-01 08:00]")
+        assert "早呀" in out[1]["content"]
 
     def test_first_message_far_from_now_annotated(self):
         annotate = self._import()
@@ -103,12 +105,15 @@ class TestHistoryAnnotation:
         # 首条距 now 远超 24h：也带时间前缀（否则模型把 10 天前当刚刚）
         assert out[0]["content"].startswith("[10-01 08:00]")
 
-    def test_recent_continuous_chat_untouched(self):
+    def test_recent_continuous_chat_also_stamped(self):
+        """2026-10-12 语义升级改写（旧名 test_recent_continuous_chat_untouched）：
+        短时连续聊天不再豁免 —— 尾部消息同样带时间前缀，模型才能把用户叙述的
+        钟点与该条消息的发送时刻对齐推理。"""
         annotate = self._import()
         now = datetime(2026, 10, 7, 9, 31, 0)  # 距尾条（北京 09:30:15）45 秒
         out = annotate(self._rows(), now=now)
-        # 尾部消息不加前缀（短时聊天不掺时间噪声）
-        assert out[3]["content"] == "可算等到你"
+        assert out[3]["content"].startswith("[10-07 09:30]")
+        assert "可算等到你" in out[3]["content"]
 
     def test_rows_without_timestamp_passed_through(self):
         annotate = self._import()
@@ -185,19 +190,6 @@ class TestProactiveFloor:
             local_time="2026-10-11 22:00 周日", recent_messages=recent,
         )
         assert "09-25 11:00" in ctx, "主动决策上下文必须带消息时间，否则模型把半月前当刚刚"
-
-
-# ── 5. 追问链默认值（轰炸治理）────────────────────────────
-
-
-class TestFollowUpDefaults:
-    def test_defaults_are_gentle(self):
-        from wechat_direct.wechat_connector import FOLLOW_UP_DEFAULTS
-
-        # 生产实证（2026-10-11 21:59-22:00）：step1→step2 仅 ~79 秒，
-        # 用户每回一句就被一分钟内连追两条。默认节奏必须拉宽。
-        assert FOLLOW_UP_DEFAULTS["delay2_seconds"] >= 600
-        assert FOLLOW_UP_DEFAULTS["daily_max"] <= 6
 
 
 # ── 6. 工具终审可观测（生产 0 落库 + 0 日志查无对证的解药）────

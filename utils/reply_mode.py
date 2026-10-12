@@ -20,8 +20,8 @@
 ① 非共处约束（只能说话、不能做动作）② 把实际踩到的句子直接写成反例
 ③ 明确「场景设定 / 开场情境只是背景，不代表此刻在一起」。
 
-真源：`data/scheduler_config.json` 的 `reply_mode` 键。与 `quiet_hours` /
-`follow_up` 同一份**跨 worker 运行时配置文件**（uvicorn 4 worker 共读，
+真源：`data/scheduler_config.json` 的 `reply_mode` 键。与 `quiet_hours`
+同一份**跨 worker 运行时配置文件**（uvicorn 4 worker 共读，
 web 控制端写入即对所有 worker 生效，无需重启）。
 """
 
