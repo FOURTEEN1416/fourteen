@@ -177,7 +177,7 @@ export default function IntroPage() {
               { title: '注册账户', desc: '用邀请码在登录页注册，邮箱 + 密码即可。' },
               { title: '配置你的 API Key', desc: '设置 → LLM 配置，填入你自己的 Key（下方有免费获取引导）。对话调用量走你的账户，成本自己可控。', strong: true },
               { title: '创建或选择角色', desc: '角色页创建专属角色（AI 对话提取 / 导入 SillyTavern 角色卡 / 克隆好友），或直接选用预设。' },
-              { title: '连接微信', desc: '微信页扫码登录你的微信小号，连接成功后好友即可与角色对话。' },
+              { title: '连接微信', desc: '微信页扫码绑定你的微信，角色即出现在你的微信里，一对一对话。' },
               { title: '开始陪伴', desc: '文字 / 语音随时聊；角色会记住你说过的事，也会在合适的时机主动找你。' },
             ].map((s, i) => (
               <li key={s.title} className="flex gap-3">

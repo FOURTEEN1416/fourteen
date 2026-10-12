@@ -116,8 +116,8 @@ function LiveStatusBanner() {
           <QrCode className="mx-auto h-10 w-10 text-macaron-blue/60" />
           <p className="mt-3 text-sm font-medium text-gray-700">你尚未连接自己的微信</p>
           <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-gray-400">
-            点击下方按钮，用**你自己的**微信扫码登录（与他人通道隔离）；
-            连接成功后，你的好友即可与你的角色对话。
+            点击下方按钮，用你自己的微信扫码绑定（与他人通道隔离）；
+            连接成功后，你即可在微信里与角色一对一对话。
           </p>
           <button
             onClick={() => setShowQrModal(true)}
@@ -391,8 +391,8 @@ export default function WeChatPage() {
               <ol className="mt-3 space-y-3">
                 {[
                   ['扫码登录', '点击右上「扫码连接」，用微信扫码确认登录'],
-                  ['好友发消息', '你的微信好友直接给这个微信号发消息即可'],
-                  ['角色回应', '「唯一的你」按当前绑定的角色人设自动回复，支持文字与语音'],
+                  ['发消息', '直接用你扫码的微信给角色发消息即可'],
+                  ['角色回应', '按你在控制台选择的角色人设自动回复，支持文字与语音'],
                 ].map(([title, desc], i) => (
                   <li key={title} className="flex items-start gap-3">
                     <span className="shrink-0 w-5 h-5 rounded-full bg-macaron-blue-light text-macaron-blue-deep text-[10px] font-bold flex items-center justify-center mt-0.5">
@@ -414,7 +414,7 @@ export default function WeChatPage() {
               <ul className="mt-3 space-y-3">
                 {[
                   ['断线自动重连', '登录态失效或网络波动时系统自动尝试恢复，无需手动操作'],
-                  ['多用户独立', '每个给你发消息的微信好友拥有独立的角色、记忆与亲密度，互不串扰'],
+                  ['账号隔离', '每位注册用户的数据严格隔离；你的记忆与亲密度只属于你自己'],
                   ['状态实时同步', '本页通过实时推送展示桥接状态；「最后活动」为最近一次收发消息的时间'],
                 ].map(([title, desc]) => (
                   <li key={title} className="flex items-start gap-3">

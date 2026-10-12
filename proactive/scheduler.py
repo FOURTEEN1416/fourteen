@@ -791,7 +791,7 @@ class ProactiveScheduler:
     def _refresh_binding_truth(self) -> None:
         """把角色绑定缓存回灌到 SQLite 真源（块4，缺陷 D）。
 
-        本进程是调度器 master，而「切角色 / 好友自选 / 新绑定」的写路径落在
+        本进程是调度器 master，而「切角色 / 新绑定」的写路径落在
         处理该 HTTP 请求的那个 worker（只热更本进程缓存 + DB）。不回灌则
         master 永远按启动快照解析角色：主动消息、祝福、提醒文案都按旧角色口吻
         开口。UserManager 内部按 30s 节流，非 SQLite 部署自行跳过。

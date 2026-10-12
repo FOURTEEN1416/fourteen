@@ -702,8 +702,8 @@ class UserManager:
 
         # 活实例同步：`get_user_character` 在实例存活时**优先信实例**，
         # 不同步则换卡永不生效。按会话键重新解析（而不是把变更键直接当实例键）——
-        # 裸 wxid 的变更要落到 `owner:peer` 形态的实例上，且当该 (owner,peer)
-        # 有好友自选偏好时偏好优先，不能把偏好覆盖成绑定卡。
+        # 裸 wxid（扫码人绑定）的变更要落到 `owner:peer` 形态的实例上
+        # （D16 后解析链 = peer 绑定 > owner 兜底，自选偏好层已退役）。
         for uid, inst in self._affected_instances(touched):
             resolved = self._resolve_character_id(uid)
             if resolved and resolved != inst.character_card_id:
