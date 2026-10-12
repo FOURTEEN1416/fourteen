@@ -71,6 +71,27 @@ def list_user_slots_with_credentials(user_id: int) -> list[int]:
     return slots
 
 
+def scanner_ids_for_user(user_id: int) -> list[str]:
+    """该用户各通道的扫码人微信 id（凭证 ilink_user_id / user_id 字段）。
+
+    D16（2026-10-12）：谁扫码谁聊——扫码人即该注册账号在微信侧的唯一化身。
+    网页激活角色时据此把角色同步到扫码人绑定（wechat_bindings + 内存缓存），
+    使「控制台选角色 → 微信聊天生效」不再依赖用户手动建立旧式绑定。
+    """
+    import json
+
+    ids: list[str] = []
+    for slot in list_user_slots_with_credentials(int(user_id)):
+        try:
+            data = json.loads(credentials_path(int(user_id), slot).read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        uid = str(data.get("user_id") or "").strip()
+        if uid and uid not in ids:
+            ids.append(uid)
+    return ids
+
+
 def remove_user_sessions(user_id: int) -> bool:
     """账号生命周期（W9）：删除该账号全部 slot 的磁盘通道目录（凭证/状态/二维码）。
 

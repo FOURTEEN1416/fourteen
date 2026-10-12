@@ -522,23 +522,8 @@ async def _init_and_preload():
             for b in bindings
         ]
         await user_mgr.load_bindings(binding_dicts)
-        # 好友自选角色偏好 → 缓存键 pref:owner:peer
-        try:
-            from api.database import WechatPeerPreference
-
-            pref_result = await session.execute(select(WechatPeerPreference))
-            for p in pref_result.scalars().all():
-                key = f"pref:{p.owner_user_id}:{p.peer_wxid}"
-                await user_mgr.upsert_binding(
-                    key,
-                    {
-                        "wxid": p.peer_wxid,
-                        "user_id": p.owner_user_id,
-                        "character_card_id": p.character_card_id,
-                    },
-                )
-        except Exception as e:  # noqa: BLE001
-            logger.warning("加载微信好友角色偏好失败（忽略）: %s", e)
+        # （D16 退役，2026-10-12）旧「好友自选角色偏好 → pref:owner:peer」加载段
+        # 已随 peer 机制整体拆除；角色绑定唯一来源 = wechat_bindings（activate 同步）。
         # 磁盘通道会话 → DB（复核修复：凭证在磁盘但表空）
         try:
             from scripts.migrate_legacy_wechat_channel import sync_disk_sessions_to_db

@@ -14,13 +14,12 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from wechat_direct import channel_paths, peer_character
+from wechat_direct import channel_paths
 from wechat_direct import wechat_connector as wc
 
 
@@ -154,83 +153,46 @@ def test_run_on_shared_loop_rejects_same_loop_blocking():
     asyncio.run_coroutine_threadsafe(_self_block(), loop).result(timeout=5)
 
 
-# ── item 28 ──────────────────────────────────────────────
+# ── item 28（D16 退役改写，2026-10-12）──────────────────
+# 好友「角色」自选整链已随 D16 裁决（谁扫码谁聊）整体拆除：
+# peer_character 模块删除、connector 指令链删除、API 三端点删除。
+# 旧用例（菜单/序号选择/PUT 热更）由退役守卫取代。
 
 
-def test_numeric_choice_requires_pending_menu():
-    cards = [{"id": "a", "name": "阿哈"}, {"id": "b", "name": "十四"}]
-    assert peer_character.try_handle_character_choice("1", 7, "p", cards, {}) is None
-    act = peer_character.try_handle_character_choice(
-        "1", 7, "p", cards, {"p": (time.time() + 60, cards)}
+def test_peer_character_mechanism_retired():
+    import importlib.util
+
+    assert importlib.util.find_spec("wechat_direct.peer_character") is None, (
+        "peer_character 模块应已删除（D16：好友自选角色机制退役）"
     )
-    assert act and act["action"] == "selected" and act["character_id"] == "a"
-    assert peer_character.is_character_command("角色")
-    assert not peer_character.is_character_command("这个角色不错")
+    src = inspect.getsource(wc.WeChatConnector)
+    for sym in ("_try_peer_character_flow", "_apply_peer_character",
+                "_send_peer_text", "_peer_choice_pending"):
+        assert sym not in src, f"connector 残留已退役符号: {sym}"
 
 
-def test_peer_flow_menu_then_select(tmp_state_root):
+def test_peer_preference_endpoints_retired():
+    import api.routers.wechat_channel_routes as routes
+
+    src = inspect.getsource(routes)
+    assert "PeerPreferenceRequest" not in src
+    assert "get_peer_preference" not in src and "set_peer_preference" not in src
+    paths = {getattr(r, "path", "") for r in routes.router.routes}
+    assert not any("peers" in p for p in paths), paths
+
+
+def test_character_command_no_longer_intercepted(tmp_state_root):
+    """「角色」二字回归普通对话：进主链，不再被任何指令流消费。"""
     conn = _make_owner_conn(tmp_state_root)
-    sent: list[str] = []
-    applied: list[tuple[str, str]] = []
-    conn._send_peer_text = lambda to, text: sent.append((to, text)) or True
-    conn._apply_peer_character = lambda peer, cid: applied.append((peer, cid)) or True
-    cards = [{"id": "a", "name": "阿哈"}, {"id": "b", "name": "十四"}]
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(peer_character, "list_owner_characters", lambda uid: cards)
-
-        # 普通消息不被劫持
-        assert conn._try_peer_character_flow("p1", "今天好累") is False
-        # 「角色」→ 菜单 + 待确认
-        assert conn._try_peer_character_flow("p1", "角色") is True
-        assert any("1. 阿哈" in t for _, t in sent)
-        assert "p1" in conn._peer_choice_pending
-        # 序号 → 切换 + 消费 + 清待确认
-        assert conn._try_peer_character_flow("p1", "2") is True
-        assert applied == [("p1", "b")]
-        assert "p1" not in conn._peer_choice_pending
-    # 之后裸数字恢复普通对话
-    assert conn._try_peer_character_flow("p1", "2") is False
-
-
-def test_peer_flow_expired_or_out_of_range_releases_message(tmp_state_root):
-    conn = _make_owner_conn(tmp_state_root)
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(
-            peer_character, "list_owner_characters",
-            lambda uid: [{"id": "a", "name": "阿哈"}],
-        )
-        conn._peer_choice_pending["p1"] = (time.time() - 1, [])
-        assert conn._try_peer_character_flow("p1", "1") is False
-        assert "p1" not in conn._peer_choice_pending
-
-        conn._peer_choice_pending["p1"] = (time.time() + 600, [{"id": "a", "name": "阿哈"}])
-        assert conn._try_peer_character_flow("p1", "99") is False
-        assert "p1" not in conn._peer_choice_pending
-
-
-def test_handle_message_intercepts_character_command(tmp_state_root):
-    conn = _make_owner_conn(tmp_state_root)
+    conn.scanner_wxid = "p1"  # 扫码人本人发「角色」
     seen: list[str] = []
-    conn._try_peer_character_flow = lambda peer, text: True
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
             wc, "_call_user_manager",
-            lambda *a, **k: seen.append(a[1]) or {"reply": "不该到这"},
+            lambda *a, **k: seen.append(a[1]) or {"reply": "ok"},
         )
-        conn._handle_message(_text_msg("cmd1", text="角色"))
-    assert seen == []
-
-    # 钩子位于同一好友的串行处理区间；上方行为断言证明未落入主模型。
-    src = inspect.getsource(wc.WeChatConnector._handle_message_serial)
-    assert "_try_peer_character_flow" in src
-
-
-def test_put_peer_character_hot_syncs_runtime():
-    from api.routers.wechat_channel_routes import put_peer_character
-
-    src = inspect.getsource(put_peer_character)
-    assert "upsert_binding" in src
-    assert "set_user_character" in src
+        conn._handle_message(_text_msg("cmd1", from_user="p1", text="角色"))
+    assert seen == ["7:p1"], "「角色」必须作为普通消息进入主链"
 
 
 # ── item 29 ──────────────────────────────────────────────

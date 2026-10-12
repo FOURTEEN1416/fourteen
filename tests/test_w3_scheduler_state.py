@@ -270,14 +270,15 @@ def _make_users_db(path):
     con.close()
 
 
-def _write_pref(path, owner: int, peer: str, card: str) -> None:
+def _write_binding(path, owner: int, peer: str, card: str) -> None:
+    """D16（2026-10-12）：跨 worker 换卡正路 = wechat_bindings（activate 同步扫码人）。"""
     import sqlite3
 
     con = sqlite3.connect(str(path))
     con.execute(
-        "INSERT OR REPLACE INTO wechat_peer_preferences "
-        "(owner_user_id, peer_wxid, character_card_id, chosen_at) VALUES (?,?,?,?)",
-        (owner, peer, card, "2026-09-27 00:00:00"),
+        "INSERT OR REPLACE INTO wechat_bindings "
+        "(user_id, wxid, nickname, character_card_id) VALUES (?,?,?,?)",
+        (owner, peer, "", card),
     )
     con.commit()
     con.close()
@@ -296,7 +297,7 @@ def _mgr(bindings: list[dict]):
 def test_peer_character_change_by_other_worker_reaches_master_cache(tmp_path):
     db = tmp_path / "users.db"
     _make_users_db(db)
-    _write_pref(db, 7, "wx_b@im.wechat", "micai")
+    _write_binding(db, 7, "wx_b@im.wechat", "micai")
 
     from utils import session_key
 
@@ -310,7 +311,7 @@ def test_peer_character_change_by_other_worker_reaches_master_cache(tmp_path):
     assert mgr._resolve_character_id(sk) == "micai"
 
     # 另一 worker 再次改卡 → 再回灌即跟上（不重启、不等 master 自身被写）
-    _write_pref(db, 7, "wx_b@im.wechat", "jiangtian")
+    _write_binding(db, 7, "wx_b@im.wechat", "jiangtian")
     mgr.refresh_bindings_from_db(db_path=db, force=True)
     assert mgr._resolve_character_id(sk) == "jiangtian"
 
@@ -339,16 +340,17 @@ def test_refresh_propagates_to_live_instance_and_new_bind_target(tmp_path):
     con = sqlite3.connect(str(db))
     con.execute("UPDATE wechat_bindings SET character_card_id='micai' WHERE wxid=?",
                 ("wx_b@im.wechat",))
-    con.execute("INSERT INTO wechat_peer_preferences (owner_user_id, peer_wxid, "
-                "character_card_id, chosen_at) VALUES (8,'wx_new@im.wechat','chengshuang','')")
+    # D16：另一 worker 给账号 8 新建扫码人绑定（activate 同步产物）
+    con.execute("INSERT INTO wechat_bindings (user_id, wxid, nickname, character_card_id) "
+                "VALUES (8,'wx_new@im.wechat','','chengshuang')")
     con.commit()
     con.close()
 
     mgr.refresh_bindings_from_db(db_path=db, force=True)
     assert mgr.get_user_character("7:wx_b@im.wechat") == "micai"
     assert inst.character_card_id == "micai", "活实例仍是旧卡 → 本轮对话/情感继续错角色"
-    # 新偏好按真源键形态进缓存（与 lifespan 启动预载同构：pref:{owner}:{peer}）
-    assert "pref:8:wx_new@im.wechat" in mgr.get_bound_wxids()
+    # 新扫码人绑定按真源键形态进缓存（与 lifespan 启动预载同构：裸 wxid 键）
+    assert "wx_new@im.wechat" in mgr.get_bound_wxids()
     assert mgr._resolve_character_id("8:wx_new@im.wechat") == "chengshuang"
 
 

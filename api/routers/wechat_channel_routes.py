@@ -1,9 +1,10 @@
 """每人独立微信通道 API — JWT 鉴权，只操作当前登录用户自己的通道。
 
-用户裁决 2026-09-19：
-- 一人最多 2 条微信通道
-- 全局并发上限 WECHAT_MAX_CHANNELS（默认 100）
-- 旧全局 /api/channels/wechat/* 用户侧废弃（改 admin-only）
+用户裁决 2026-09-19：一人最多 2 条微信通道、全局并发上限 WECHAT_MAX_CHANNELS（默认 100）、
+旧全局 /api/channels/wechat/* 用户侧废弃（改 admin-only）。
+D16 裁决（2026-10-12）：谁扫码谁聊——通道 = 扫码人（用户本人）与角色的一对一
+聊天窗；旧「好友自选角色」端点（/peers/*/character、/characters）已随 peer
+机制整体退役，角色选择唯一入口 = /api/characters/{id}/activate。
 """
 
 from __future__ import annotations
@@ -25,12 +26,6 @@ from wechat_direct.connector_registry import (
     ChannelSlotError,
     get_registry,
 )
-from wechat_direct.peer_character import (
-    build_character_menu,
-    get_peer_preference,
-    list_owner_characters,
-    set_peer_preference,
-)
 
 logger = logging.getLogger("api.wechat_channel")
 
@@ -51,10 +46,6 @@ class ChannelConnectRequest(BaseModel):
         ge=0,
         le=channel_paths.MAX_CHANNELS_PER_USER,
     )
-
-
-class PeerPreferenceRequest(BaseModel):
-    character_card_id: str
 
 
 async def _upsert_session_row(db, user_id: int, slot: int, **fields) -> None:
@@ -260,53 +251,11 @@ async def reconnect_my_channel(
     return await connect_my_channel(connect_req, user_id, db, user=None)
 
 
-@router.get("/peers/{peer_wxid}/character")
-async def get_peer_character(
-    peer_wxid: str,
-    user_id: int = Security(get_current_user_id),
-    db=Depends(get_db),
-):
-    pref = await get_peer_preference(db, user_id, peer_wxid)
-    return {"owner_user_id": user_id, "peer_wxid": peer_wxid, "character_card_id": pref}
-
-
-@router.put("/peers/{peer_wxid}/character")
-async def put_peer_character(
-    peer_wxid: str,
-    req: PeerPreferenceRequest,
-    user_id: int = Security(get_current_user_id),
-    db=Depends(get_db),
-):
-    await set_peer_preference(db, user_id, peer_wxid, req.character_card_id)
-    await db.commit()
-    # P1-审查 item28：旧实现只写 DB，运行中进程的绑定缓存与用户实例从不刷新
-    # （_resolve_character_id 仅在实例首建时读缓存）→ 控制台换角色不重启永不生效。
-    gf = deps.gf
-    if gf is not None:
-        try:
-            await gf.upsert_binding(
-                f"pref:{int(user_id)}:{peer_wxid}",
-                {
-                    "wxid": peer_wxid,
-                    "user_id": int(user_id),
-                    "character_card_id": req.character_card_id,
-                },
-            )
-            gf.set_user_character(f"{int(user_id)}:{peer_wxid}", req.character_card_id)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("好友角色热更失败 owner=%s peer=%s: %s", user_id, peer_wxid, e)
-    return {
-        "status": "ok",
-        "owner_user_id": user_id,
-        "peer_wxid": peer_wxid,
-        "character_card_id": req.character_card_id,
-    }
-
-
-@router.get("/characters")
-async def my_characters_for_peers(user_id: int = Security(get_current_user_id)):
-    cards = list_owner_characters(user_id)
-    return {"characters": cards, "menu_preview": build_character_menu(cards)}
+# （D16 退役，2026-10-12）以下三个端点已随「好友自选角色」机制整体拆除：
+#   GET  /api/wechat/channel/peers/{peer_wxid}/character
+#   PUT  /api/wechat/channel/peers/{peer_wxid}/character
+#   GET  /api/wechat/channel/characters
+# 角色选择唯一入口 = /api/characters/{id}/activate（网页控制台）。
 
 
 # ═══════════════════════════════════════════════

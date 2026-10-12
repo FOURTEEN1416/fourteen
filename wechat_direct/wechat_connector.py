@@ -50,7 +50,6 @@ BACKOFF_DELAY = 60
 # ── 内存泄漏防护 ──
 _RECEIVED_MSGS_MAX = 10000       # _received_msgs 最大条目数
 _CONTEXT_TOKENS_TTL = 86400      # _context_tokens 条目 TTL（秒），默认24小时
-_PEER_CHOICE_TTL = 600.0         # 好友「角色」菜单的选择待确认有效期（秒）
 # ABUSE-4（2026-10-09）：per-owner 入站日配额——开放注册下自建通道高频发消息
 # 每条都走完整 orchestrator 主链（多段 LLM）。量级取「真人远达不到、脚本必触发」：
 # HTTP/WS 侧同批收口为 500 msg/天（chat_routes._CHAT_MSGS_PER_DAY）。
@@ -892,8 +891,10 @@ class WeChatConnector:
 
         self._peer_locks: dict[str, threading.RLock] = {}
         self._last_user_id: str = ""
-        # 好友自选角色（P1-审查 item28 接线）：peer_wxid → (菜单过期时刻, 发菜单时的卡列表快照)
-        self._peer_choice_pending: dict[str, tuple[float, list[dict]]] = {}
+        # D16（2026-10-12 裁决）：谁扫码谁聊——本通道扫码人的微信 id
+        # （凭证里的 ilink_user_id / user_id 字段）。聊天侧用它识别本人，
+        # 非扫码人消息按异常拒绝。旧「好友自选角色」机制随本裁决整体退役。
+        self.scanner_wxid: str = ""
         # 每条消息在独立线程中处理，避免阻塞轮询循环
         self._msg_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=2 if owner_user_id is not None else 4,
@@ -1086,6 +1087,13 @@ class WeChatConnector:
 
     def login(self):
         """登微信 — 先放二维码，再试保存的凭证（per-user 路径）"""
+        # D16：扫码人身份预载——凭证里有 ilink_user_id 就先装上（token 快速
+        # 重连路径不触碰凭证字段，但新建实例必须能识别本人）
+        try:
+            _pre = _load_credentials(self._credentials_path)
+            self.scanner_wxid = str(_pre.get("user_id") or "")
+        except Exception:  # noqa: BLE001
+            pass
         # 0. 快速重连：如果当前已有 token（从 _poll_loop 调用的重连），先试一次
         if self.token:
             logger.info("尝试用现有 token 快速重连...")
@@ -1124,6 +1132,7 @@ class WeChatConnector:
             self.token = creds["token"]
             self.base_url = creds.get("base_url", self.base_url)
             self.bot_id = creds.get("bot_id", "")
+            self.scanner_wxid = str(creds.get("user_id") or "")
             try:
                 test = _get_updates("", self.token, self.base_url, timeout=3)
                 if test.get("ret") != -14 and test.get("errcode") != -14:
@@ -1205,6 +1214,7 @@ class WeChatConnector:
                 self.token = bot_token
                 self.base_url = result_base_url
                 self.bot_id = bot_id
+                self.scanner_wxid = str(status_resp.get("ilink_user_id") or "")
                 self._reconnect_attempts = 0
                 self._merge_session_state({
                     "connected": True,
@@ -1519,127 +1529,9 @@ class WeChatConnector:
             time.sleep(_OUTBOX_TICK)
             self._drain_outbox()
 
-    # ── 好友「角色」自选指令链（P1-审查 item28：整链接线）────────
-    # AGENTS v1.16 记载的「回复『角色』弹菜单、回序号切换」此前只有纯函数
-    # （peer_character.py）而无任何调用者 —— 功能实际不存在。此处接线：
-    # _handle_message 在进主 LLM 前拦截显式指令/待确认序号，切换后
-    # 落库（wechat_peer_preferences）+ 热更绑定缓存与运行中实例。
-
-    def _send_peer_text(self, to: str, text: str) -> bool:
-        """角色指令链的底层直发（不走主 LLM 链）。"""
-        try:
-            resp = _send_text(
-                to=to, text=text,
-                context_token=self._get_context_token(to),
-                token=self.token, base_url=self.base_url,
-            )
-            ok, errmsg = _api_ok(resp)
-            if not ok:
-                logger.warning("[wx][step=peer_cmd_send_failed] to=%s errmsg=%s", to, errmsg)
-            return ok
-        except Exception as e:  # noqa: BLE001
-            logger.warning("[wx][step=peer_cmd_send_error] to=%s error=%s", to, e)
-            return False
-
-    def _apply_peer_character(self, peer_wxid: str, card_id: str) -> bool:
-        """把好友选择的角色持久化并热更到运行中实例（同步线程 → 共享循环桥接）。"""
-        from utils.async_utils import run_on_shared_loop
-
-        owner = self.owner_user_id
-        if owner is None or not card_id:
-            return False
-
-        async def _persist() -> None:
-            from api.database import _async_session
-            from wechat_direct.peer_character import set_peer_preference
-
-            async with _async_session() as db:
-                await set_peer_preference(db, int(owner), peer_wxid, card_id)
-                await db.commit()
-
-        try:
-            run_on_shared_loop(_persist(), timeout=10)
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "[wx][step=peer_char_persist_failed] owner=%s peer=%s card=%s error=%s",
-                owner, peer_wxid, card_id, e,
-            )
-            return False
-
-        mgr = self.user_manager
-        if mgr is not None:
-            pref_key = f"pref:{int(owner)}:{peer_wxid}"
-            pref_data = {
-                "wxid": peer_wxid,
-                "user_id": int(owner),
-                "character_card_id": card_id,
-            }
-
-            async def _sync_cache() -> None:
-                await mgr.upsert_binding(pref_key, pref_data)
-
-            try:
-                run_on_shared_loop(_sync_cache(), timeout=5)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("[wx][step=peer_char_cache_sync_failed] %s: %s", pref_key, e)
-            try:
-                # 会话实例热切（首条消息后实例已存在；不存在时返回 False，
-                # 新实例首建会经绑定缓存拿到正确角色）
-                mgr.set_user_character(f"{int(owner)}:{peer_wxid}", card_id)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("[wx][step=peer_char_instance_sync_failed] %s: %s", peer_wxid, e)
-        logger.info(
-            "[wx][step=peer_char_applied] owner=%s peer=%s card=%s", owner, peer_wxid, card_id,
-        )
-        return True
-
-    def _try_peer_character_flow(self, peer_wxid: str, text: str) -> bool:
-        """处理好友角色指令；返回 True = 该消息已被角色流消费，不再进主 LLM。"""
-        from wechat_direct.peer_character import (
-            build_character_menu,
-            is_character_command,
-            list_owner_characters,
-            try_handle_character_choice,
-        )
-
-        owner = self.owner_user_id
-        if owner is None or not peer_wxid:
-            return False
-        raw = (text or "").strip()
-        if not raw:
-            return False
-
-        now = time.time()
-        entry = self._peer_choice_pending.get(peer_wxid)
-        if entry is not None and entry[0] < now:
-            self._peer_choice_pending.pop(peer_wxid, None)
-            entry = None
-
-        if not is_character_command(raw) and entry is None:
-            return False
-
-        pending_view = {peer_wxid: entry} if entry is not None else {}
-        # 序号映射到**发菜单时的卡列表快照**（菜单期间卡列表变化也不错位）
-        cards = entry[1] if entry is not None else list_owner_characters(int(owner))
-        act = try_handle_character_choice(raw, int(owner), peer_wxid, cards, pending_view)
-        if act is None:
-            # 越界/无卡片的裸数字 → 作废待确认，放行回普通对话（不困住用户）
-            self._peer_choice_pending.pop(peer_wxid, None)
-            return False
-
-        if act["action"] == "show_menu":
-            # 菜单永远展示最新卡列表（cards 无 pending 时已是最新）
-            fresh = cards if entry is None else list_owner_characters(int(owner))
-            self._peer_choice_pending[peer_wxid] = (now + _PEER_CHOICE_TTL, fresh)
-            self._send_peer_text(peer_wxid, build_character_menu(fresh))
-            return True
-
-        self._peer_choice_pending.pop(peer_wxid, None)
-        if self._apply_peer_character(peer_wxid, str(act.get("character_id") or "")):
-            self._send_peer_text(peer_wxid, str(act.get("message", "已切换角色。")))
-        else:
-            self._send_peer_text(peer_wxid, "角色切换没有成功，稍后再回复「角色」试试")
-        return True
+    # （D16 退役，2026-10-12）好友「角色」自选指令链已整体拆除：peer_character
+    # 模块删除，角色选择唯一入口 = 网页控制台 /characters/{id}/activate，
+    # 聊天侧由 activate 同步的扫码人绑定（wechat_bindings）决定角色。
 
     def _send_reply_segments(self, peer: str, reply: str, *, context_token: str = "") -> str:
         """只返回 API 已明确受理的前缀；失败段及后续草稿不进入历史。"""
@@ -1764,7 +1656,24 @@ class WeChatConnector:
                 logger.debug("[wx][step=inbound_done_failed] msg_id=%s error=%s", msg_id, e)
 
     def _handle_message_serial(self, raw_msg, msg_id, from_user, context_token):
-        """同一好友从入站处理到最后一段受理/落库的完整串行区间。"""
+        """扫码人从入站处理到最后一段受理/落库的完整串行区间。"""
+        # D16 通道语义守卫（2026-10-12 裁决）：谁扫码谁聊，一对一。非扫码人
+        # 发来的消息在产品语义中不存在（生产取证：活跃通道第三方消息 0 条），
+        # 拒绝处理（不解析、不进 LLM、不落任何记忆）。遗留全局通道（无 owner）
+        # 不适用；凭证缺扫码人 id 属登录链异常，fail-open 放行但必须告警。
+        if self.owner_user_id is not None:
+            if self.scanner_wxid:
+                if str(from_user) != self.scanner_wxid:
+                    logger.warning(
+                        "[wx][step=non_scanner_rejected] msg_id=%s from=%s owner=%s",
+                        msg_id, from_user, self.owner_user_id,
+                    )
+                    return
+            else:
+                logger.error(
+                    "[wx][step=scanner_id_missing] owner=%s 凭证缺扫码人 id，"
+                    "fail-open 放行（登录链需修复）", self.owner_user_id,
+                )
         # iLink item 解析（1=文本/2=图片/3=语音；旧协议 34 语音、3 图片内联 base64 兼容保留）
         parsed = parse_ilink_items(raw_msg.get("item_list", []))
         text = parsed.text
@@ -1815,15 +1724,8 @@ class WeChatConnector:
             logger.debug("消息无文本/语音/图片内容 msg_id=%s user=%s", msg_id, from_user)
             return
 
-        # ── 好友「角色」自选指令拦截（P1-审查 item28 接线）：仅纯文本消息参与 ──
-        if (
-            self.owner_user_id is not None
-            and text.strip()
-            and not voice_data
-            and not image_data
-            and self._try_peer_character_flow(from_user, text)
-        ):
-            return
+        # （D16 退役）好友「角色」自选指令拦截已于 2026-10-12 随 peer 机制整体
+        # 拆除：角色选择唯一入口 = 网页控制台 /characters/{id}/activate。
 
         # ── 图片（V2）：image_data → 附件直传（B）或描述注入（A 降级）──
         attachments: list = []

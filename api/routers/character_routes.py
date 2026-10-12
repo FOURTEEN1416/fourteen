@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import csv
 import io
 import json
@@ -808,6 +809,51 @@ async def activate_character(
             logger.info(
                 "角色激活已同步 %d 条微信绑定（user=%s → 角色 %s）",
                 len(bindings), web_user_id, character_id,
+            )
+
+        # ── D16（2026-10-12「谁扫码谁聊」）：同步通道扫码人绑定 ──
+        # 通道架构下 wechat_bindings 未必有该用户的行（旧绑定入口已死，生产
+        # 仅 1 行），网页激活必须直接落到**扫码人 wxid**，否则「控制台选
+        # 角色 → 微信生效」断裂。扫码人 = 各通道凭证里的 ilink_user_id。
+        try:
+            from wechat_direct.channel_paths import scanner_ids_for_user
+
+            scanner_ids = scanner_ids_for_user(int(web_user_id))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("读取通道扫码人失败（忽略）user=%s: %s", web_user_id, e)
+            scanner_ids = []
+        for wxid in scanner_ids:
+            srow = await db.execute(
+                select(WechatBinding).where(
+                    WechatBinding.user_id == web_user_id,
+                    WechatBinding.wxid == wxid,
+                )
+            )
+            sb = srow.scalar_one_or_none()
+            if sb is None:
+                db.add(
+                    WechatBinding(
+                        user_id=web_user_id, wxid=wxid,
+                        character_card_id=character_id,
+                    )
+                )
+            else:
+                sb.character_card_id = character_id
+        if scanner_ids:
+            await db.commit()
+            gf2 = deps.gf
+            if gf2:
+                for wxid in scanner_ids:
+                    await gf2.upsert_binding(wxid, {
+                        "wxid": wxid,
+                        "character_card_id": character_id,
+                    })
+                    # 会话实例热切（存活则切，未建则由绑定缓存兜底）
+                    with contextlib.suppress(Exception):
+                        gf2.set_user_character(f"{int(web_user_id)}:{wxid}", character_id)
+            logger.info(
+                "角色激活已同步 %d 个通道扫码人绑定（user=%s → 角色 %s）",
+                len(scanner_ids), web_user_id, character_id,
             )
 
     return {"status": "activated", "character_id": character_id}

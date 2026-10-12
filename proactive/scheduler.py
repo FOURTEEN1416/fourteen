@@ -1157,6 +1157,7 @@ class ProactiveScheduler:
         from proactive.ase_engine import _local_now, sanitize_message
         from proactive.llm_proactive import (
             PROACTIVE_DEDUP_WINDOW,
+            account_pacing_state,
             build_proactive_context,
             clamp_wait_minutes,
             decide_proactive,
@@ -1217,22 +1218,18 @@ class ProactiveScheduler:
             return
 
         eng = hub.get(user_key) if hasattr(hub, "get") else None
-        # 引擎缺 `_hours_since_last_chat`（桩/降级引擎）时取 99.0——对齐真引擎
-        # 「无记录=很久没聊」语义（2026-10-12 修正：旧默认 0.0 会把"拿不到事实"
-        # 当成"用户刚说话"，触发冷却闸误拦 + 误导决策上下文）
-        hours = (
-            eng._hours_since_last_chat()
-            if eng is not None and hasattr(eng, "_hours_since_last_chat")
-            else 99.0
-        )
+        # D16（2026-10-12「谁扫码谁聊」）：节奏按**账号**聚合（`account_pacing_state`
+        # 单一真源）——同 owner 前缀的多条通道取「最近一次投递」与「最近一次
+        # 聊天」，消除同账号双通道各记各账、几分钟内连发（生产实证残留根因）。
+        hours, last_proactive_at = account_pacing_state(hub, str(user_key), eng)
         # 节奏双闸（2026-10-12 因果连贯批，生产实证驱动）：①距上次主动投递不足
         # 60min（08:05→08:10 连发实证，模型自述「仅5分钟…还是发」）②用户最后
         # 一条消息后不足 15min（用户刚表达不满 2min 即"缓和气氛"式主动）。
         # 确定性跳过——不烧 LLM 调用；eng 缺席时不拦（闸依赖引擎状态）。
         if eng is not None:
             skip, gate_reason = should_skip_proactive_decision(
-                hours_since_last_chat=float(hours or 0.0),
-                last_proactive_at=getattr(eng, "_last_proactive_time", None),
+                hours_since_last_chat=hours,
+                last_proactive_at=last_proactive_at,
             )
             if skip:
                 append_proactive_event(

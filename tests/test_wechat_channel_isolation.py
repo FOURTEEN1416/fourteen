@@ -236,20 +236,8 @@ def test_poll_lock_fds_linux_fd_positive(tmp_path, monkeypatch):
     reg._release_poll_lock(1, 0)
 
 
-def test_peer_character_menu_and_choice():
-    from wechat_direct.peer_character import (
-        build_character_menu,
-        try_handle_character_choice,
-    )
+def test_peer_character_menu_retired():
+    """D16（2026-10-12）：好友自选角色机制退役，模块不得复活。"""
+    import importlib.util
 
-    cards = [{"id": "a", "name": "阿哈"}, {"id": "b", "name": "林初夏"}]
-    menu = build_character_menu(cards)
-    assert "1. 阿哈" in menu and "2. 林初夏" in menu
-    act = try_handle_character_choice("角色", 1, "wx_f", cards, {})
-    assert act and act["action"] == "show_menu"
-    # P1-审查 item28：数字必须跟在待确认菜单后（pending 非空）才生效
-    pending = {"wx_f": (9_999_999_999.0, cards)}
-    act2 = try_handle_character_choice("2", 1, "wx_f", cards, pending)
-    assert act2 and act2["action"] == "selected" and act2["character_id"] == "b"
-    assert try_handle_character_choice("2", 1, "wx_f", cards, {}) is None
-    assert try_handle_character_choice("你好", 1, "wx_f", cards, pending) is None
+    assert importlib.util.find_spec("wechat_direct.peer_character") is None

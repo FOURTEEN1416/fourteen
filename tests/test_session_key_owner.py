@@ -64,10 +64,8 @@ def test_parse_never_raises_on_garbage():
         sk.parse(bad)  # 不抛即为通过（解析器在热路径上）
 
 
-def test_peer_character_session_key_delegates_to_owner():
-    from wechat_direct.peer_character import session_key
-
-    assert session_key(4, "wxid@im.wechat") == "4:wxid@im.wechat"
+def test_session_key_build_owner_and_peer():
+    assert sk.build(4, "wxid@im.wechat") == "4:wxid@im.wechat"
 
 
 def test_bare_peer_from_session_keeps_suffix():

@@ -392,10 +392,11 @@ class UserManager:
     def _get_or_create(self, user_id: str) -> UserInstance:
         """获取或创建用户实例（线程安全）
 
-        2026-09-19：微信通道会话键为 `owner:peer`；角色解析优先级：
-        1) peer 偏好（wechat_peer_preferences，好友自选）
-        2) wechat_bindings 中该 peer 的绑定
-        3) 通道 owner 的默认角色 / default
+        D16（2026-10-12）：微信通道会话键为 `owner:扫码人wxid`，扫码人即用户
+        本人（谁扫码谁聊）。角色解析优先级：
+        1) 该会话键自身的显式绑定（wechat_bindings，activate 同步扫码人）
+        2) 通道 owner 的默认角色 / default
+        （旧「peer 自选偏好 pref:owner:peer」层已随好友自选机制退役。）
         """
         with self._users_lock:
             if user_id not in self._users:
@@ -432,10 +433,8 @@ class UserManager:
         # 2026-09-22 收口：拆 owner 走唯一 owner（禁手写 split）
         owner, peer = session_key.split_owner(user_id)
         if owner:
-            # peer 偏好缓存键：owner:peer 已在 bindings 中则上面已命中
-            pref = self._bindings.get(f"pref:{user_id}")
-            if pref and pref.get("character_card_id"):
-                return str(pref["character_card_id"])
+            # D16：peer_bind 层的正主 = activate 同步的**扫码人绑定**
+            # （网页控制台激活角色 → 通道扫码人 wxid 的 wechat_bindings 行）
             peer_bind = self._bindings.get(peer)
             if peer_bind and peer_bind.get("character_card_id"):
                 return str(peer_bind["character_card_id"])
@@ -637,9 +636,8 @@ class UserManager:
 
     @staticmethod
     def _read_binding_rows(path: Path) -> tuple[dict[str, dict], bool]:
-        """(绑定行, 偏好表是否可读)。偏好表缺失/旧库无表 → 第二项 False。"""
+        """(绑定行, 布尔占位恒 True)。D16 后仅回读 wechat_bindings 单表。"""
         rows: dict[str, dict] = {}
-        prefs_ok = True
         with closing(sqlite3.connect(
             f"file:{path.as_posix()}?mode=ro", uri=True, timeout=2.0
         )) as conn:
@@ -660,22 +658,9 @@ class UserManager:
                     }
             except sqlite3.Error as e:  # noqa: BLE001
                 logger.debug("绑定表回读失败: %s", e)
-            try:
-                for owner, peer, card in conn.execute(
-                    "SELECT owner_user_id, peer_wxid, character_card_id "
-                    "FROM wechat_peer_preferences"
-                ):
-                    if not owner or not peer:
-                        continue
-                    rows[f"pref:{int(owner)}:{peer}"] = {
-                        "wxid": str(peer),
-                        "user_id": int(owner),
-                        "character_card_id": str(card or "default"),
-                    }
-            except sqlite3.Error as e:  # noqa: BLE001
-                prefs_ok = False
-                logger.debug("好友角色偏好回读失败: %s", e)
-        return rows, prefs_ok
+            # （D16 退役，2026-10-12）旧「wechat_peer_preferences → pref:owner:peer」
+            # 回读段已删除：表无运行时写入者，角色绑定唯一来源 = wechat_bindings。
+        return rows, True
 
     def refresh_bindings_from_db(
         self,
@@ -699,18 +684,15 @@ class UserManager:
         if path is None or not path.exists():
             return 0
         try:
-            rows, prefs_ok = self._read_binding_rows(path)
+            rows, _ok = self._read_binding_rows(path)
         except Exception as e:  # noqa: BLE001
             logger.warning("绑定真源回灌失败（保留本进程缓存）: %s", e)
             return 0
-        if not rows and not prefs_ok:
+        if not rows:
             return 0
 
         with self._users_lock:
             old = self._bindings
-            if not prefs_ok:
-                for k, v in old.items():
-                    rows.setdefault(k, v)
             touched = {
                 k for k, v in rows.items()
                 if str((old.get(k) or {}).get("character_card_id") or "")
@@ -742,12 +724,14 @@ class UserManager:
 
     @staticmethod
     def _binding_keys_for_session(uid: str) -> set[str]:
-        """该会话键在 `_resolve_character_id` 里会读到的全部缓存键。"""
-        keys = {uid, f"pref:{uid}"}
+        """该会话键在 `_resolve_character_id` 里会读到的全部缓存键。
+
+        （D16：pref: 层已退役，只剩会话键自身 / peer（扫码人绑定）/ owner。）
+        """
+        keys = {uid}
         owner, peer = session_key.split_owner(uid)
         if peer:
             keys.add(peer)
-            keys.add(f"pref:{owner}:{peer}")
         if owner:
             keys.add(owner)
         return keys

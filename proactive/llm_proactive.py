@@ -8,6 +8,8 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from utils.session_key import split_owner
+
 logger = logging.getLogger("llm_proactive")
 
 DEFAULT_WEB_CONFIG: dict[str, Any] = {
@@ -104,6 +106,45 @@ def should_skip_proactive_decision(
     if hours * 60.0 < PROACTIVE_COOLDOWN_AFTER_REPLY_MINUTES:
         return True, "cooldown_after_reply"
     return False, ""
+
+
+def account_pacing_state(hub, user_key: str, eng) -> tuple[float, object]:
+    """D16（2026-10-12「谁扫码谁聊」）：按**账号**聚合主动节奏状态。
+
+    同一注册账号（user_key 的 owner 前缀）下可能有多条通道（多 bot），旧实现
+    各引擎各记各账 → 双通道可相隔几分钟各发一条（生产实证 08:14/08:19 连发）。
+    聚合口径：hours_since_last_chat 取组内最小（任一通道聊过都算聊过）、
+    last_proactive_at 取组内最大（任一通道刚投递即全员进入间隔闸）。
+    hub 缺 known_user_keys / 单键账号 → 行为与旧口径逐字节等价。
+    """
+    hours = (
+        eng._hours_since_last_chat()  # noqa: SLF001
+        if eng is not None and hasattr(eng, "_hours_since_last_chat")
+        else 99.0
+    )
+    last_proactive_at = getattr(eng, "_last_proactive_time", None)
+    try:
+        owner_prefix = split_owner(str(user_key))[0]
+        if owner_prefix and hasattr(hub, "known_user_keys"):
+            for k in hub.known_user_keys():
+                if k == user_key or split_owner(str(k))[0] != owner_prefix:
+                    continue
+                other = hub.get(k)
+                if other is None:
+                    continue
+                t = getattr(other, "_last_proactive_time", None)
+                if t is not None and (last_proactive_at is None or t > last_proactive_at):
+                    last_proactive_at = t
+                if hasattr(other, "_hours_since_last_chat"):
+                    try:
+                        h2 = float(other._hours_since_last_chat() or 0.0)  # noqa: SLF001
+                        if h2 < float(hours or 0.0):
+                            hours = h2
+                    except Exception:  # noqa: BLE001
+                        pass
+    except Exception:  # noqa: BLE001
+        pass
+    return float(hours or 0.0), last_proactive_at
 
 # ── 决策线出站去重硬闸（2026-10-12 批）────────────────────────
 #
