@@ -36,8 +36,9 @@ def test_session_paths_isolated(tmp_path, monkeypatch):
     assert channel_paths.credentials_path(2, 0).parent == d2
 
 
-def test_max_channels_per_user_is_two():
-    assert channel_paths.MAX_CHANNELS_PER_USER == 2
+def test_max_channels_per_user_is_one():
+    """D16 补裁（2026-10-12「每一个用户只有一个BOT」）：一人一 bot 一条通道。"""
+    assert channel_paths.MAX_CHANNELS_PER_USER == 1
 
 
 def test_default_global_cap_is_100():
@@ -86,8 +87,10 @@ def test_registry_slot_limit_two(monkeypatch):
     )
     monkeypatch.setattr(channel_paths, "ensure_session_dir", lambda u, s=0: Path(f"/tmp/wx/{u}/{s}"))
     c0 = reg.ensure(9, slot=0)
-    c1 = reg.ensure(9, slot=1)
-    assert c0.slot == 0 and c1.slot == 1
+    assert c0.slot == 0
+    # D16 补裁后一人一 bot：slot=1 即越界
+    with pytest.raises(ChannelSlotError):
+        reg.ensure(9, slot=1)
     with pytest.raises(ChannelSlotError):
         reg.ensure(9, slot=2)
 

@@ -7,9 +7,10 @@ from pathlib import Path
 
 from utils.project_paths import PROJECT_ROOT
 
-# 用户裁决 2026-09-19：通道并发上限默认 100
 DEFAULT_MAX_CHANNELS = 100
-MAX_CHANNELS_PER_USER = 2  # 用户裁决：一人两条
+# 2026-10-12 D16 补裁（用户原话「每一个用户只有一个BOT」）：一人一 bot 一条
+# 通道，控制台自由切换当前聊天角色。取代 09-19 旧裁决「一人两条」。
+MAX_CHANNELS_PER_USER = 1
 
 
 def sessions_root() -> Path:

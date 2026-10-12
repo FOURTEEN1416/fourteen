@@ -165,13 +165,17 @@ def test_pick_slot_rejects_above_upper(sandbox_registry):
 
 
 def test_pick_slot_valid_explicit_and_auto(sandbox_registry):
-    """绿钉：显式合法槽位与缺省自动分配不受影响。"""
+    """绿钉：显式合法槽位与缺省自动分配不受影响（D16 后一人一 bot）。"""
+    from wechat_direct.connector_registry import ChannelSlotError
+
     reg, _root = sandbox_registry
     assert reg._pick_slot(511) == 0  # 缺省自动分配
     assert reg._pick_slot(511, None) == 0
     assert reg._pick_slot(512, 0) == 0  # 显式合法
     reg.ensure(513, slot=0)
-    assert reg._pick_slot(513, None) == 1  # 已占 0 → 自动分配 1
+    # D16 补裁后一人一 bot：占满唯一槽位后自动分配越界
+    with pytest.raises(ChannelSlotError):
+        reg._pick_slot(513, None)
 
 
 def test_ensure_rejects_negative_slot_and_no_orphan_dir(sandbox_registry):
@@ -199,8 +203,7 @@ def test_quota_cap_survives_slot_hardening(sandbox_registry):
     from wechat_direct.connector_registry import ChannelSlotError
 
     reg, _root = sandbox_registry
-    reg.ensure(516, slot=0)
-    reg.ensure(516, slot=1)
+    reg.ensure(516, slot=0)  # D16 后一人一 bot：唯一槽位
     with pytest.raises(ChannelSlotError):
         reg._pick_slot(516, None)
 
@@ -226,16 +229,16 @@ def test_api_connect_default_slot_unaffected(api_client):
     assert r.json()["slot"] == 0
 
 
-def test_api_connect_valid_slots_0_and_1_unaffected(api_client):
-    """绿钉：正常 slot 0/1 不受影响；占满后缺省自动分配 429（上限语义保留）。"""
+def test_api_connect_valid_slots_fill_then_quota(api_client):
+    """绿钉（D16 后自适应）：合法 slot 0…MAX-1 逐一建成；占满后缺省自动分配 429。"""
+    from wechat_direct import channel_paths
+
     _client, auth, _root = api_client
     client: TestClient = _client
-    r0 = client.post("/api/wechat/channel/connect", json={"slot": 0}, headers=auth)
-    assert r0.status_code == 200
-    assert r0.json()["slot"] == 0
-    r1 = client.post("/api/wechat/channel/connect", json={"slot": 1}, headers=auth)
-    assert r1.status_code == 200
-    assert r1.json()["slot"] == 1
+    for ok in range(channel_paths.MAX_CHANNELS_PER_USER):
+        r = client.post("/api/wechat/channel/connect", json={"slot": ok}, headers=auth)
+        assert r.status_code == 200
+        assert r.json()["slot"] == ok
     r_full = client.post("/api/wechat/channel/connect", json={}, headers=auth)
     assert r_full.status_code == 429
 
@@ -244,5 +247,10 @@ def test_api_connect_slot_at_upper_bound_goes_429(api_client):
     """slot=MAX 过 pydantic（le=MAX）后由 registry 层拦为 429（既有分层语义）。"""
     _client, auth, _root = api_client
     client: TestClient = _client
-    r = client.post("/api/wechat/channel/connect", json={"slot": 2}, headers=auth)
+    from wechat_direct import channel_paths
+
+    r = client.post(
+        "/api/wechat/channel/connect",
+        json={"slot": channel_paths.MAX_CHANNELS_PER_USER}, headers=auth,
+    )
     assert r.status_code == 429

@@ -222,7 +222,7 @@
 
 ## wechat_direct/ — 微信直连 (4 文件)
 
-**职责:** 每人独立微信通道（2026-09-19 起多租户化：一人最多 2 条、全局上限 100；**D16（2026-10-12）谁扫码谁聊**——扫码人即用户本人，非扫码人消息拒绝，好友自选角色机制已退役）
+**职责:** 每人独立微信通道（2026-09-19 起多租户化；2026-10-12 D16 补裁：一人一 bot、全局上限 100；**D16（2026-10-12）谁扫码谁聊**——扫码人即用户本人，非扫码人消息拒绝，好友自选角色机制已退役）
 
 **关键文件:**
 - `connector_registry.py` — `ConnectorRegistry`：(owner_user_id, slot) 键控注册表，ensure/disconnect/status/start_login/restore_on_boot，每会话 poll.lock 去重多 worker

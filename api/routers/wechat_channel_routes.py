@@ -1,7 +1,8 @@
 """每人独立微信通道 API — JWT 鉴权，只操作当前登录用户自己的通道。
 
-用户裁决 2026-09-19：一人最多 2 条微信通道、全局并发上限 WECHAT_MAX_CHANNELS（默认 100）、
-旧全局 /api/channels/wechat/* 用户侧废弃（改 admin-only）。
+用户裁决 2026-09-19（多租户化）+ 2026-10-12 D16 补裁：一人一 bot 一条通道
+（`MAX_CHANNELS_PER_USER=1`，取代旧「一人两条」）、全局并发上限 WECHAT_MAX_CHANNELS
+（默认 100）、旧全局 /api/channels/wechat/* 用户侧废弃（改 admin-only）。
 D16 裁决（2026-10-12）：谁扫码谁聊——通道 = 扫码人（用户本人）与角色的一对一
 聊天窗；旧「好友自选角色」端点（/peers/*/character、/characters）已随 peer
 机制整体退役，角色选择唯一入口 = /api/characters/{id}/activate。

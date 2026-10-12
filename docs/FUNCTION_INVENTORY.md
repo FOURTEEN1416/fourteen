@@ -46,7 +46,7 @@
 | WECHAT-1 | 实时连接状态横幅：「**我的微信**」连接状态/运行时长/今日消息数/重连次数（`useWechatStatus` 轮询，指向 `/api/wechat/channel` 仅本人通道；隔离后不再订阅全局 SSE） |
 | WECHAT-2 | 扫码连接弹窗：**触发自己的通道扫码**（POST `/api/wechat/channel/connect`）→ 本人二维码（GET `/api/wechat/channel/qrcode`，600s 有效期/过期提示）→ 完成确认；断开/重连均只作用于本人 slot |
 | WECHAT-3 | 断开态引导卡（「用**你自己的**微信扫码登录（与他人通道隔离）」+「立即扫码连接」按钮，stagger 入场）；状态字段语义化（未运行/今日暂无消息替代裸值）；最后活动时间戳秒/毫秒自愈解析（09-19 诊断 P2 修复） |
-| WECHAT-4 | **每人独立通道语义**（09-19 裁决落地）：一人最多 2 条（slot 0/1）、全局并发上限 100；本人通道后端落库 `wechat_channel_sessions`，前端不再调 admin 的 wechatCreateConnection |
+| WECHAT-4 | **每人独立通道语义**（09-19 裁决落地 + D16 补裁）：一人一 bot 一条通道（`MAX_CHANNELS_PER_USER=1`，取代旧「一人两条」）、全局并发上限 100；本人通道后端落库 `wechat_channel_sessions`，前端不再调 admin 的 wechatCreateConnection |
 
 ## C. 角色域
 
@@ -129,7 +129,7 @@
 
 | 编号 | 能力 | 关键行为 |
 |------|------|---------|
-| N-CHANNEL-1 | **每人独立微信通道·D16 谁扫码谁聊**（09-19 多租户化 + 2026-10-12 D16 语义收口）：`(owner_user_id, slot)` 键控 `ConnectorRegistry`、凭证落 `data/wechat_sessions/<uid>/slotN/`、一人两条/全局上限 100（`WECHAT_MAX_CHANNELS`）；**扫码人=用户本人**（凭证 `ilink_user_id` 识别，非扫码人消息拒绝+告警）；**角色选择唯一入口=控制台 activate**（同步扫码人绑定，微信聊天即时跟随）；~~好友自选角色~~（微信内回「角色」弹菜单）已随 D16 退役（`/peers/*` 三端点拆除）；旧全局端点收敛 admin 兼容面；遗留全局凭证一次性迁 admin |
+| N-CHANNEL-1 | **每人独立微信通道·D16 谁扫码谁聊**（09-19 多租户化 + 2026-10-12 D16 语义收口）：`(owner_user_id, slot)` 键控 `ConnectorRegistry`、凭证落 `data/wechat_sessions/<uid>/slotN/`、一人一 bot（D16 补裁）/全局上限 100（`WECHAT_MAX_CHANNELS`）；**扫码人=用户本人**（凭证 `ilink_user_id` 识别，非扫码人消息拒绝+告警）；**角色选择唯一入口=控制台 activate**（同步扫码人绑定，微信聊天即时跟随）；~~好友自选角色~~（微信内回「角色」弹菜单）已随 D16 退役（`/peers/*` 三端点拆除）；旧全局端点收敛 admin 兼容面；遗留全局凭证一次性迁 admin |
 | N-ASR-1 | **语音转文字**（候选 A）：微信语音（type34 silk）→ WAV → OpenAI 兼容 /audio/transcriptions → 文字进对话管线；config voice.asr 配置驱动（默认关）；未配置保持占位提示。09-15 增补：silk 解码改 pilk（voice-silk 可选依赖；实测 ffmpeg 8.1 无 silk decoder），入站按 rate=16000 重采样 |
 | N-IMG-1 | **图片理解**（09-15 W3 收编）：微信图片（type3）→ 入口守卫白名单放行（1/3/34）→ config `multimodal.image` 驱动四模式（auto/direct/describe/off）：配 vision_model 走多模态附件直传（llm_gateway attachments 并入末条 user message，防 system_prompt/history 丢失），否则降级 VisionHandler 描述注入；image_attachment.py 归一化（magic bytes 判型），全程内存不落盘 |
 | N-DIARY-1 | **角色日记**（候选 B）：daily_summaries 每日摘要 → GET /api/memory/diary → StatusCenter 折叠卡片 |

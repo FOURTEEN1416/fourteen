@@ -500,8 +500,8 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 ### 4.7.1 wechat_direct/ — 每人独立微信通道（2026-09-19 新架构；D16 后 4 文件——peer_character.py 已退役删除）
 
 > 用户裁决 2026-09-19（报障「他人注册后未扫自己的微信却显示已连接，且连的是管理员通道」）：
-> 通道层由**全局单例**改为 **per-user × slot 多租户**；一人最多 2 条通道
-> （`MAX_CHANNELS_PER_USER=2`），全局并发上限 `WECHAT_MAX_CHANNELS`（默认 100）。
+> 通道层由**全局单例**改为 **per-user × slot 多租户**；2026-10-12 D16 补裁后
+> **一人一 bot**（`MAX_CHANNELS_PER_USER=1`，取代旧「一人两条」），全局并发上限 `WECHAT_MAX_CHANNELS`（默认 100）。
 > 方案文档：`docs/plans/2026-09-19-每人独立微信通道方案.md`。
 
 | 文件 | 职责 |
