@@ -3572,3 +3572,10 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **合法保留**：CreateRole「克隆好友」（产品功能名）、IntroPage:83「评委/访客」（未注册浏览者）、plans 方案稿/verification 审计快照（历史档案）、修订历史表历史记载。
 - **验证**：tsc 0 错 + vitest 182/182 + ruff 0 + 终极全词复扫（md/py/ts/tsx × 好友/代聊/号主/选角/访客/peer_character）零残留；`364007c` 三端部署（remote_deploy 前端 dist 重建+重启，health 200）。
 - **教训（ reflux 记忆库）**：「清理干净」的判据必须覆盖**全部载体**——文档 md/代码注释/前端 UI 文案/测试描述四层，首轮只扫两层即宣称完成属乐观完成。
+
+## 2026-10-12 D16 补裁批（一人一 bot + 切换角色语义钉死，commit `7ac7418`）
+
+- **裁决**：用户补裁原话「每一个用户只有一个BOT，能够在控制台，自由切换当下可以哪一个角色聊天」——09-19「一人两条」被 D16 补裁取代；切换记忆语义按现状三层分家确认（用户台词/个人事实跟人走、旧角色台词按 character_id 隔离、亲密度各角色各算）。
+- **落地**：`MAX_CHANNELS_PER_USER` 2→1（channel_paths 真源，下游 le=/max_per_user/reconnect 遍历自动跟随）；测试四用例随新语义改写（isolation 两钉 1、sec_p0 两用例自适应化+唯一槽位断言）；文档八处口径同步（AGENTS/README/CODE_GRAPH/FI×2/MODULES/VISION/migrate docstring）+ DECISION_LEDGER（09-19 行结局列补「一人两条亦被取代」、D16 行效力补一人一 bot+切换记忆语义）。
+- **验证**：相关面 79 passed（sec_p0/isolation/owner_semantics/runtime_plane）+ ruff 0；`7ac7418` 三端部署 health 200。
+- **触发背景**：用户批评「不了解整个项目」——主控随后完成项目全貌勘查（结构/主链/数据流/库表/前端路由），报告以代码为准；本批为勘查中发现的在途收口。
