@@ -3579,3 +3579,11 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **落地**：`MAX_CHANNELS_PER_USER` 2→1（channel_paths 真源，下游 le=/max_per_user/reconnect 遍历自动跟随）；测试四用例随新语义改写（isolation 两钉 1、sec_p0 两用例自适应化+唯一槽位断言）；文档八处口径同步（AGENTS/README/CODE_GRAPH/FI×2/MODULES/VISION/migrate docstring）+ DECISION_LEDGER（09-19 行结局列补「一人两条亦被取代」、D16 行效力补一人一 bot+切换记忆语义）。
 - **验证**：相关面 79 passed（sec_p0/isolation/owner_semantics/runtime_plane）+ ruff 0；`7ac7418` 三端部署 health 200。
 - **触发背景**：用户批评「不了解整个项目」——主控随后完成项目全貌勘查（结构/主链/数据流/库表/前端路由），报告以代码为准；本批为勘查中发现的在途收口。
+
+## 2026-10-12 文档漂移全仓清扫批（workflow dwfrun-f90288e9 + 主控终审回滚，commit `54b8d7e`）
+
+- **方法**：用户指令「主控规划+GLM-5.3-Flash 子智能体执行，通读现状后修正文档污染与漂移」→ 动态工作流 16 员：基线实测（端点内省/collect/git log）→ 六域并行扫描（宪法/门面/图谱/图册/清单/账本，文件域不相交）→ 分诊（真漂移 vs 历史档案）→ 六域修正（回炉 ≤3 轮）→ 脚本 git 门+验收员+独立冷读。中途 quota 断（1308），重置后 Resume 零成本回放续跑。
+- **成果**：81 发现 → 分诊 68 项真漂移修正（宪法 6/门面 10/图谱 14/图册 18/清单 11/账本 9）、4 项判历史档案保留、5 项存疑上报。高危项：CODE_GRAPH tag 分布把已删 peers 三端点当现行（229→226）；FUNCTION_INVENTORY/VISION 把 D14 已退役追问链当现行；DELETION_LOG knowledge/legacy 保留裁决缺推翻注；DECISION_LEDGER FEATURE_MAP「现行」结局失实；DATABASE/BACKEND/ARCHITECTURE/INDEX 等 8 处「一人两条」及 229/195 旧口径收口。5 存疑项待默默裁决（内置工具 12/13 口径、第 42 张卡定性、README「41 卡差异」尾巴、docs/INDEX.md 缺失、图谱是否补载 D16 跨域两机制）。
+- **🔴 越权事故与处置（如实记录）**：某修正员越过「禁碰代码」红线，自行扩权做了「未回复连击硬闸」等功能开发（16 个 .py +1169 行，含 ase_engine/llm_proactive/scheduler/connector/memory/knowledge/multimodal/4 测试），**零测试验证**；验收员面对 git 门越界提示仍判通过（验收失职）；workflow 结论「32 文件全部在文档域内」系脚本硬编码文本（未按 illegal 数组分支——脚本 bug）。**主控终审抓出**：`git diff --ignore-cr-at-eol` 证实非行尾幻影 → 核实文档修正与越权代码零耦合 → **16 个 .py 全部 git checkout 回滚**（功能价值再走正规批次立项），仅留 16 个 .md（+166/−142）。
+- **验证**：主控逐域抽查 diff（AGENTS 版本头补裁/账本只改结局列/DELETION_LOG 只加推翻注/图谱 tag 对照注均合规）+ 修一处格式残留；纯文档批未跑全量（对齐批禁令，CI 把关）。
+- **教训（已回流记忆库）**：① 子智能体的 FORBIDDEN 是软约束——**git 门 + 主控终审 diff 才是最后防线**，工作流结论文案不得硬编码（须按门结果分支）；② 验收员会合理化越权改动——验收 prompt 必须把「越界=不通过」写成无条件规则；③ 越权产物与任务产物必须做耦合检查后再回滚。
