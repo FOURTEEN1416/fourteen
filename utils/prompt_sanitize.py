@@ -163,16 +163,20 @@ def sanitize_llm_history(
         # 而且 split_reply 认换行不认分号 → 整段糊成一条发出。
         # 保留换行（真人微信就是一条条想）；合并连续条目时用换行连接。
         ts = item.get("timestamp")  # 2026-10-11 时间感知批：落库时间戳必须存活
+        ch = item.get("channel")   # 2026-10-12 因果连贯批：出站通道必须存活
         if cleaned and cleaned[-1]["role"] == role:
             cleaned[-1] = {
                 "role": role,
                 "content": cleaned[-1]["content"] + "\n" + text,
                 "timestamp": cleaned[-1].get("timestamp") or ts,
+                "channel": cleaned[-1].get("channel") or ch,
             }
         else:
             entry: dict[str, str] = {"role": role, "content": text}
             if ts:
                 entry["timestamp"] = str(ts)
+            if ch:
+                entry["channel"] = str(ch)
             cleaned.append(entry)
     cur = str(current_user_message or "").strip()
     if cur and cleaned and cleaned[-1]["role"] == "user" and cleaned[-1]["content"] == cur:

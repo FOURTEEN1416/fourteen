@@ -438,3 +438,40 @@ def annotate_history_time_gaps(
             out.append(row)
         prev_wall = ts
     return out
+
+
+# ── 出站消息因果标记（2026-10-12 因果连贯批）────────────────
+#
+# 生产实证（2026-10-12 08:05-08:06，用户报障截图）：角色主动发的「记得吃早饭」
+# （channel=proactive，已落库）在历史注入时与普通回复无差别 —— 模型分不清
+# 「我定时主动发的」vs「我回应用户说的」，把关怀的触发原因错误归因成
+# 「我是看你刚发消息 随口一问」。给非回应类出站行加语义标记，让因果方向
+# 对模型可见。
+
+OUTBOUND_CHANNEL_MARKERS = {
+    "proactive": "[主动]",      # 定时主动关怀（scheduler LLM 决策链投递）
+    "reminder": "[定时提醒]",   # 到期提醒投递（reminder_delivery）
+}
+
+
+def annotate_outbound_markers(history: list | None) -> list:
+    """给出站类 assistant 行加因果标记前缀（纯函数，不改入参）。
+
+    仅标记 ``role=assistant`` 且 ``channel`` 命中 OUTBOUND_CHANNEL_MARKERS 的行
+    （这些消息不是对用户消息的回应）；user 行与普通 assistant 行原样保留。
+    与 :func:`annotate_history_time_gaps` 可叠加：时间前缀在前、标记紧随其后。
+    """
+    out: list = []
+    for row in list(history or []):
+        if (
+            isinstance(row, dict)
+            and row.get("role") == "assistant"
+            and str(row.get("channel") or "") in OUTBOUND_CHANNEL_MARKERS
+        ):
+            marker = OUTBOUND_CHANNEL_MARKERS[str(row.get("channel"))]
+            stamped = dict(row)
+            stamped["content"] = f"{marker} {row.get('content') or ''}".rstrip()
+            out.append(stamped)
+        else:
+            out.append(row)
+    return out

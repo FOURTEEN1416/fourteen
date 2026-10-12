@@ -983,6 +983,15 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             chat_history = annotate_history_time_gaps(chat_history)
         except Exception as e:  # noqa: BLE001
             logger.debug("annotate_history_time_gaps failed: %s", e)
+        # 出站因果标记（2026-10-12 因果连贯批）：channel=proactive/reminder 的
+        # assistant 行加 [主动]/[定时提醒] 前缀 —— 模型据此分清「我定时主动发
+        # 的」vs「我回应用户说的」（生产实证：主动关怀被归因成「看你刚发消息」）
+        try:
+            from orchestrator.context_budget import annotate_outbound_markers
+
+            chat_history = annotate_outbound_markers(chat_history)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("annotate_outbound_markers failed: %s", e)
         try:
             from utils.local_time import time_anchor_line
 

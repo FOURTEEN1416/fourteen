@@ -1165,6 +1165,7 @@ class ProactiveScheduler:
             load_proactive_knowledge,
             proactive_floor_extra,
             read_web_proactive_config,
+            should_skip_proactive_decision,
         )
         from shisi.agent_plane.runtime import (
             append_proactive_event,
@@ -1216,7 +1217,31 @@ class ProactiveScheduler:
             return
 
         eng = hub.get(user_key) if hasattr(hub, "get") else None
-        hours = eng._hours_since_last_chat() if eng is not None and hasattr(eng, "_hours_since_last_chat") else 0.0
+        # 引擎缺 `_hours_since_last_chat`（桩/降级引擎）时取 99.0——对齐真引擎
+        # 「无记录=很久没聊」语义（2026-10-12 修正：旧默认 0.0 会把"拿不到事实"
+        # 当成"用户刚说话"，触发冷却闸误拦 + 误导决策上下文）
+        hours = (
+            eng._hours_since_last_chat()
+            if eng is not None and hasattr(eng, "_hours_since_last_chat")
+            else 99.0
+        )
+        # 节奏双闸（2026-10-12 因果连贯批，生产实证驱动）：①距上次主动投递不足
+        # 60min（08:05→08:10 连发实证，模型自述「仅5分钟…还是发」）②用户最后
+        # 一条消息后不足 15min（用户刚表达不满 2min 即"缓和气氛"式主动）。
+        # 确定性跳过——不烧 LLM 调用；eng 缺席时不拦（闸依赖引擎状态）。
+        if eng is not None:
+            skip, gate_reason = should_skip_proactive_decision(
+                hours_since_last_chat=float(hours or 0.0),
+                last_proactive_at=getattr(eng, "_last_proactive_time", None),
+            )
+            if skip:
+                append_proactive_event(
+                    session_key=user_key,
+                    sent=False,
+                    reason=gate_reason,
+                    character_id=self._resolve_character_id(str(user_key)),
+                )
+                return
         urgency = None
         if eng is not None:
             try:
