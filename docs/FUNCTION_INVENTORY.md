@@ -54,7 +54,7 @@
 | 编号 | 功能点 |
 |------|--------|
 | ROLES-1 | 角色卡网格：名称/**摘要化描述**（deriveCardSummary：方括号字段提取/「你是」转第三人称/≤60 字）/**语义色锚点**（anchorTone：关系=黄 设定=蓝 风格=青）/激活态徽章 |
-| ROLES-2 | 设为活跃（activateCharacter + queryClient 失效）；活跃卡置顶排序。**09-17 增强：activate 后端同步当前登录用户全部微信绑定（wechat_bindings + upsert_binding 内存缓存实时刷新），web 切角色 → 微信回复人设即时生效，无需重启** |
+| ROLES-2 | 设为活跃（activateCharacter + queryClient 失效）；活跃卡置顶排序。**09-17 增强：activate 后端同步当前登录用户全部微信绑定（wechat_bindings + upsert_binding 内存缓存实时刷新），web 切角色 → 微信回复人设即时生效，无需重启**；**v1.46 起增强为 `scanner_ids_for_user` 直连扫码人绑定（落 wechat_bindings + 通道实例热切，修「控制台选角色→微信生效」断裂），09-17 的 upsert_binding 缓存刷新保留为配套** |
 | ROLES-3 | 创建角色入口（网格尾虚线卡 + 空态 CTA）；骨架屏加载态 |
 | ROLES-4 | 搜索框（>6 卡显示，匹配名称/描述/标签）+ 无结果空态 |
 | ROLES-5 | 入场动效（stagger CSS 级联 ≤12×60ms，prefers-reduced-motion 降级） |
@@ -88,7 +88,7 @@
 | MESSAGE-2 | 主动消息开关：暂停/恢复调度（POST /proactive/pause，暂停仅停自动触发不影响手动） |
 | MESSAGE-3 | 手动控制：立即发送一条主动消息（POST /proactive/send 绕过频率、计入统计）+ 最近 5 条发送记录。**09-17：投递链修复——调度器线程内 asyncio.run 直投（旧 get_event_loop 必炸致 64 触发 0 送达）+ 发送目标改绑定 wxid 定向 + MultiProviderGateway 补 chat_sync（LLM 生成此前静默回落模板）** **09-19：响应体剔除内部记账字段（`_committed`/`_scene`/`_scene_date`）；本端点仍以 commit=True 生成（吃配额后 finally 归还），语义不变** |
 | MESSAGE-4 | 统计卡真数据：今日主动/最后发送（08-28 修复：旧 history 读不存在的 `_sent_messages` 属性，一直返回空） |
-| MESSAGE-5 | **对话内追问参数**（09-19 新增，滑条+开关）：没等到接话自动再补一句——开关/第一次延迟/第二次延迟/单用户每日上限（`follow_up_*` → `/api/proactive/config`，真源 `data/scheduler_config.json` 跨 worker 即时生效） |
+| MESSAGE-5 | ~~对话内追问参数~~ **已退役**（2026-10-12 D14，`a2a597b`：下一轮对话时机由 LLM 决策链决定，不再提供滑条/开关与 `follow_up_*` 配置；前端 UI 与 API 四字段已同拆） |
 | MESSAGE-6 | **回复模式分段控件**（09-19 新增）：沉浸式真人聊天（不写动作神态）/ 小说式（带动作神态）二选一（`reply_mode: immersive\|novel`，真源 `data/scheduler_config.json`，编排器每次组装提示词时读取） |
 | MESSAGE-7 | **提醒意图管线与到点叫醒**（09-20 新增，AGENTS v1.18）：自然语言托付（如「明早六点叫我起床」）经三级管线处理——L0 零成本晋级线（时间/托付动词/查询信号，未命中零影响）→ L1 LLM function calling 终审（信息齐全直接调度 set_reminder；不全则角色口吻自然澄清提问，最多两轮，第二轮为猜测+复述确认；15min 未答作废）→ L2 确定性到期投递（每分钟轮询，session_key 定向发回原微信会话，豁免静默时段 23-7，文案按角色口吻生成、失败用原文兜底，失败 3 次判死可查）。防假承诺守卫：无工具回执不得空口答应 |
 | DATA-1 | 数据 tab：概览统计（消息/记忆条数）+ 网络人设增强按钮（/api/characters/{id}/enrich）+ **知识库真实管理区**（SP-4 结案 09-01：KnowledgePreview 挂载——真实 stats + 检索测试，替换假 RAG 三卡与占位横幅；**09-19 检索增强：BM25 查询扩展双路互补 + 注入 top_k 3→8 + 索引由 scripts/rebuild_knowledge_index.py 从权威真源重建**）+ **定期采集开关（09-17 新增：Toggle+间隔输入，+/api/knowledge/collect-config GET/POST；scheduler vault_collect 周期任务对 shisi 角色库全量重建知识索引；默认关）** + **危险区删除角色真接线**（09-19：ConfirmDialog 确认 → useDeleteCharacter → toast + 跳回 /roles） |
@@ -130,8 +130,8 @@
 | 编号 | 能力 | 关键行为 |
 |------|------|---------|
 | N-CHANNEL-1 | **每人独立微信通道·D16 谁扫码谁聊**（09-19 多租户化 + 2026-10-12 D16 语义收口）：`(owner_user_id, slot)` 键控 `ConnectorRegistry`、凭证落 `data/wechat_sessions/<uid>/slotN/`、一人一 bot（D16 补裁）/全局上限 100（`WECHAT_MAX_CHANNELS`）；**扫码人=用户本人**（凭证 `ilink_user_id` 识别，非扫码人消息拒绝+告警）；**角色选择唯一入口=控制台 activate**（同步扫码人绑定，微信聊天即时跟随）；~~好友自选角色~~（微信内回「角色」弹菜单）已随 D16 退役（`/peers/*` 三端点拆除）；旧全局端点收敛 admin 兼容面；遗留全局凭证一次性迁 admin |
-| N-ASR-1 | **语音转文字**（候选 A）：微信语音（type34 silk）→ WAV → OpenAI 兼容 /audio/transcriptions → 文字进对话管线；config voice.asr 配置驱动（默认关）；未配置保持占位提示。09-15 增补：silk 解码改 pilk（voice-silk 可选依赖；实测 ffmpeg 8.1 无 silk decoder），入站按 rate=16000 重采样 |
-| N-IMG-1 | **图片理解**（09-15 W3 收编）：微信图片（type3）→ 入口守卫白名单放行（1/3/34）→ config `multimodal.image` 驱动四模式（auto/direct/describe/off）：配 vision_model 走多模态附件直传（llm_gateway attachments 并入末条 user message，防 system_prompt/history 丢失），否则降级 VisionHandler 描述注入；image_attachment.py 归一化（magic bytes 判型），全程内存不落盘 |
+| N-ASR-1 | **语音转文字**（候选 A）：微信语音（type34 silk）→ WAV → OpenAI 兼容 /audio/transcriptions → 文字进对话管线；config voice.asr 配置驱动（默认关）；未配置保持占位提示。09-15 增补：silk 解码改 pilk（voice-silk 可选依赖；实测 ffmpeg 8.1 无 silk decoder），入站按 rate=16000 重采样。**iLink 主路径（v1.42 起）**：入站语音=item 3，`voice_item.text` 直用微信服务端 ASR 转写进对话管线（`parse_ilink_items`）；silk(type34)→WAV→OpenAI /audio/transcriptions 为旧协议兼容分支，config voice.asr 仅作用于该分支 |
+| N-IMG-1 | **图片理解**（09-15 W3 收编）：微信图片（type3）→ 入口守卫白名单放行（1/3/34）→ config `multimodal.image` 驱动四模式（auto/direct/describe/off）：配 vision_model 走多模态附件直传（llm_gateway attachments 并入末条 user message，防 system_prompt/history 丢失），否则降级 VisionHandler 描述注入；image_attachment.py 归一化（magic bytes 判型），全程内存不落盘。**iLink 主路径（v1.42 起）**：入站图片=item 2（CDN 下载 + AES-128-ECB 解密）后复用既有附件链，multimodal.image 四模式下游不变；旧 type3 白名单分支兼容保留 |
 | N-DIARY-1 | **角色日记**（候选 B）：daily_summaries 每日摘要 → GET /api/memory/diary → StatusCenter 折叠卡片 |
 | N-DIARY-2 | **日记种子端点**（T3，09-01）：POST /api/memory/diary/seed（E2E/演示可注入，misc_routes 15→16 端点） |
 | N-KSHARE-1 | **知识分享主动消息**（候选 C）：share 类消息优先从角色知识库（爬虫/文档来源）检索真实内容，LLM 包装角色口吻；无索引/无 LLM 回退模板 |

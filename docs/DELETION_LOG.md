@@ -767,6 +767,7 @@ _build_chat_history、CharacterService 全链、character_card 包、add_convers
   - ⚠️ **2026-09-18 更新：本保留裁决已被推翻** —— `shisi/api/v2/` 全 6 文件按用户裁决删除（见本文件首条）。"避免破坏 import 链"的顾虑经全仓 grep 证伪：**零代码 import，仅存在文档引用**。
 - `shisi/memory/legacy/` — Despite the "legacy" name, these modules are actively imported by `shisi/application/memory_service.py` and covered by `tests/test_memory.py` + `tests/test_memory_pipeline.py`. Not dead code.
 - `shisi/knowledge/legacy/` — Despite the "legacy" name, `rag_engine.py` is actively imported by `shisi/knowledge/legacy/__init__.py` and tested by `tests/test_rag_engine.py`. Not dead code.
+  - ⚠️ **2026-09-21 更新：本保留裁决已被推翻** —— `shisi/knowledge/legacy/` 全部文件与 `tests/test_rag_engine.py` 已随批6b 整删（见上文同日节）。
 
 ### Impact
 - Lines removed: ~15 (dead code + dead imports)

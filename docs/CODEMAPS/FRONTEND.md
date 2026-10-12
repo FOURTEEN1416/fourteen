@@ -1,6 +1,6 @@
 # 前端地图
 
-> **✅ 2026-10-11 口径对齐刷新**：vitest **182 用例 / 30 文件**（2026-10-11 SEC-15 根治批复验全绿，vitest ^5.0.3，`LOG.md` 10-11 条）；页面 19 / API 模块 15 本批 find 实测不变。权威数字以 `CODE_GRAPH.md` **v3.8.28** 为准。上轮刷新（09-29：页面 17→19 +TemplatesPage/SettingsAccount、API 模块 13→15 +selfservice/templates、vitest 98/16→177/30）见 git 历史。
+> **✅ 2026-10-11 口径对齐刷新**：vitest **182 用例 / 30 文件**（2026-10-11 SEC-15 根治批复验全绿，vitest ^5.0.3，`LOG.md` 10-11 条）；页面 19 / API 模块 15 本批 find 实测不变。权威数字以 `CODE_GRAPH.md` **v3.8.29** 为准。上轮刷新（09-29：页面 17→19 +TemplatesPage/SettingsAccount、API 模块 13→15 +selfservice/templates、vitest 98/16→177/30）见 git 历史。
 > 功能级清单（页-功能点编号）见 `docs/FUNCTION_INVENTORY.md`。
 
 **最近更新:** 2026-10-11

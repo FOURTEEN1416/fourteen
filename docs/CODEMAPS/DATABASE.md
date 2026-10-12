@@ -1,6 +1,6 @@
 # 数据库地图
 
-**最近更新:** 2026-10-11（三库表数 9/27/8 经只读实测与下文一致，无 schema 变更；角色卡目录刷新为本地实测 42 张，见下方注记）
+**最近更新:** 2026-10-12（`data/sqlite.db` 全量表清单刷新：schema 合计 28 张 = 本地只读实测 27 张 + v1.45 惰性建表 `user_identity_map` 本地未实例化，见下方清单注记；`api/database.py` 9 模型同日复核一致）
 **数据库:** SQLite (主, aiosqlite) + ChromaDB (向量) + 文件系统 (角色卡/知识库)
 
 > **✅ 2026-09-29 全仓历遍复核（三库实测）**：`data/users.db` **9 表**（api/database.py 模型；+`user_active_characters` W1 `94ed63d` 激活归属唯一 owner；`users.id` AUTOINCREMENT 表重建 + 引擎级 `PRAGMA foreign_keys=ON`，W9）；`data/sqlite.db` **27 张**（不含 FTS 影子表；较 09-20 口径 +`memory_extraction_progress`/`fact_deletion_watermarks`/`memory_forwards`/`user_persona`/`user_persona_snapshots`/`user_profile`，旧清单中 `sessions`/`working_memory`/`emotion_trajectory`/`pending_events`/`affinity_log` 五死表已不存在）；`data/runtime_plane.db` **8 表**（W3 运行平面跨进程 CAS 账，WAL）。文件账：`data/lifecycle_jobs/`（W9 五阶段作业账+坟场）、`data/runtime_switches.json`（W6 工具开关）、`data/voice_catalog.json`（W7 音色）、`config/character_templates.yaml`（W12 策展清单）。
@@ -78,7 +78,7 @@
 | InviteCode | invite_codes | 邀请码注册（内测准入） |
 | ConsentRecord | consent_records | 用户同意记录（W2-consent） |
 | WechatBinding | wechat_bindings | 微信 wxid ↔ 角色绑定（**微信人设真源**，09-17 起 web"设为活跃"实时同步） |
-| **WechatChannelSession** | wechat_channel_sessions | **每人独立微信通道会话**（09-19）：(user_id, slot 0/1) 一人多条；status=idle/waiting_qr/scanned/connected/error；bot_id/nickname/messages_today/last_error（凭证本体在文件系统，不落库） |
+| **WechatChannelSession** | wechat_channel_sessions | **每人独立微信通道会话**（09-19）：(user_id, slot) 键保留，上限已收紧为每人 1 条（D16 补裁「一人一 bot」，`MAX_CHANNELS_PER_USER=1`，`7ac7418` 取代 09-19「一人两条」）；status=idle/waiting_qr/scanned/connected/error；bot_id/nickname/messages_today/last_error（凭证本体在文件系统，不落库） |
 | **WechatPeerPreference** | wechat_peer_preferences | **已退役（D16，2026-10-12）**：原 09-19「通道内好友自选角色」(owner_user_id, peer_wxid) → character_card_id；读写消费者已清零，表保留历史数据（lifecycle/删卡级联仍引用防孤儿），物理处置归 schema 批 |
 | CharacterAchievement | character_achievements | 角色成就（ADR-0014，10 成就×4 类，幂等重算） |
 | **UserActiveCharacter** | user_active_characters | **激活角色归属唯一 owner**（W1 `94ed63d`）：每用户当前激活卡，替代散落的激活状态字段 |
@@ -91,15 +91,15 @@
 > `api/database.py` 中的 **9 表**是用户认证与控制面模型（`users` / `user_sessions` / `invite_codes` /
 > `consent_records` / `wechat_bindings` / `wechat_channel_sessions` / `wechat_peer_preferences` / `character_achievements` / `user_active_characters`）。
 
-### `data/sqlite.db` 全量表清单（27 张，2026-09-29 实测，不含 FTS 影子表）
+### `data/sqlite.db` 全量表清单（schema 合计 28 张；本地库只读实测 27 张，2026-10-12，不含 FTS 影子表）
 
 `shisi/migrations.py` 建 12 张（上表）。同库另由 `structured_memory.py` /
-`_legacy_diary_summarizer.py` 等建表，**合计 27 张**（不含 `sqlite_sequence` 与 `user_facts_fts*` FTS 影子表）：
+`_legacy_diary_summarizer.py` 等建表，**schema 合计 28 张**（不含 `sqlite_sequence` 与 `user_facts_fts*` FTS 影子表）。本地 `data/sqlite.db` 2026-10-12 只读实测 **27 张**——`user_identity_map` 系 v1.45 惰性 `CREATE TABLE IF NOT EXISTS`（`structured_memory.py:201`），本地 dev 库尚未触发实例化故不在实测数内；生产库已实例化（2026-10-12 unlink 后 0 行，机制保留）：
 
 | 来源 | 表 |
 |------|-----|
 | `shisi/migrations.py`（12） | `characters` / `characters_v2` / `affinity_records` / `affinity_unlocks` / `affinity_audit` / `emotion_stage_state` / `stickers` / `character_stickers` / `vital_signs_state` / `memory_favorites` / `memory_recycle_bin` / `shisi_schema_version` |
-| `structured_memory.py` 等（15） | `chat_history`（**对话上下文真源，按 session 隔离读取**） / `user_facts`（+`user_facts_fts` 全文索引） / `daily_summaries` / `reflections` / `tool_call_log` / `trace_log` / `persona_evolution_log` / `pending_intents`（澄清状态机：槽位合并 / 两轮上限 / 15min TTL） / `reminders`（+session_key/user_id/status/delivered_at/fail_count） / `memory_extraction_progress`（抽取租约 + 来源 id 水位） / `fact_deletion_watermarks`（删除水位，派生召回失效） / `memory_forwards`（转发） / `user_persona` / `user_persona_snapshots`（画像保序快照） / `user_profile`（用户画像） |
+| `structured_memory.py` 等（16） | `chat_history`（**对话上下文真源，按 session 隔离读取**） / `user_facts`（+`user_facts_fts` 全文索引） / `daily_summaries` / `reflections` / `tool_call_log` / `trace_log` / `persona_evolution_log` / `pending_intents`（澄清状态机：槽位合并 / 两轮上限 / 15min TTL） / `reminders`（+session_key/user_id/status/delivered_at/fail_count） / `memory_extraction_progress`（抽取租约 + 来源 id 水位） / `fact_deletion_watermarks`（删除水位，派生召回失效） / `memory_forwards`（转发） / `user_persona` / `user_persona_snapshots`（画像保序快照） / `user_profile`（用户画像） / `user_identity_map`（D15 显式身份组，v1.45 @c0244b2；2026-10-12 生产 unlink 后 0 行、机制保留） |
 
 ---
 

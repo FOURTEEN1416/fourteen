@@ -6,10 +6,10 @@
 
 ## 当前状态快照（2026-10-12 通道语义对齐批刷新）
 
-- **三端**：本地 = origin = 服务器 `/opt/ai-girlfriend` **`173b2b3`**（2026-10-12 通道语义对齐批：D16 谁扫码谁聊；部署复验 health/ready 双 200、重启窗口 0 ERROR、通道恢复 count=4、blob 四文件三端 hash 一致）。10-12 代码一致链：`26df08b`→`926c2fd`→`e0eb5cd`→`a2a597b`→`c0244b2`→`173b2b3`。
+- **三端**：本地 = origin = `c760dc1`（A 档代码顶 `7ac7418` D16 补裁一人一 bot，`c760dc1` 系其 LOG 落账）；10-12 代码一致链：`26df08b`→`926c2fd`→`e0eb5cd`→`a2a597b`→`c0244b2`→`173b2b3`→`364007c`→`7ac7418`。（服务器 blob 一致性待复验后补注）
 - **终验口径（Python/前端 = 2026-10-12 通道语义对齐批终验 `LOG.md`）**：串行四分块 **3027 收集 / 3026 通过 / 1 跳过 / 0 失败**（**196 测试文件**、**42 卡**在位）+ ruff 0 + vitest **182/182**（30 文件）+ 突变验红 3/3；徽章 **3208**；端点 **226/193/230**。
 - **对话节奏现行纪律（D14）**：下一轮对话何时开口唯一 Owner = proactive 决策链（LLM 决策 + 双闸：主动间隔≥60min / 回复后冷却≥15min）；**任何定时追问机制不得再加回**；拆条上限 2 条。遗留：`proactive/runtime_plane.py` followup_budget 表待后续批清（DELETION_LOG 在案）；agnes-3.0-flash 抖动观察项。
-- **通道产品语义现行纪律（D16，2026-10-12）**：**谁扫码谁聊**——一个注册账号=一个用户，扫码人微信 id（凭证 `ilink_user_id`）即用户本人化身；非扫码人消息=异常拒绝；**角色选择唯一入口=控制台 activate**（同步扫码人绑定），任何「好友/代聊/访客」类概念不得再引入；主动节奏按账号聚合（`account_pacing_state`）。
+- **通道产品语义现行纪律（D16，2026-10-12）**：**谁扫码谁聊**——一个注册账号=一个用户，扫码人微信 id（凭证 `ilink_user_id`）即用户本人化身；非扫码人消息=异常拒绝；**角色选择唯一入口=控制台 activate**（同步扫码人绑定），任何「好友/代聊/访客」类概念不得再引入；主动节奏按账号聚合（`account_pacing_state`）；**一人一 bot 一条通道**（`MAX_CHANNELS_PER_USER=1`，2026-10-12 补裁 `7ac7418` 取代 09-19「一人两条」）。
 - **跨通道身份组（D15 机制保留、在用关联已拆）**：`user_identity_map` 显式声明机制仍在（`scripts/link_identities.py`）；2026-10-12 D16 取证后账号 2↔4 关联已 unlink（两账号=两不同扫码人，此前合并属越权；备份 `sqlite.db.bak-unlink-20261012-1850`，现 `user_identity_map` 0 行）。chat_history 原始历史与情景层不跨通道合并（边界在 D15 在案）。
 - **生产**：health/ready 200、4 worker、迁移并发竞态 P1 已根治（`run_migrations` 包 `BEGIN IMMEDIATE` 单写事务 + WAL 有限重试）、websocket 出站通道已修复（`client_count` @property 误调用）。
 - **10 月安全线**：SEC-15 已销账（vitest tinypool 双 critical 根治 + FE-2 双锁收敛，run `38109894676` 审计门复绿）；SEC-12~14/16~18 维持登记（P2 暂缓）；SEC-1~11 遗留（凭据轮换 / prompt 行为观察 / git 历史清理等）待裁决——见 `docs/P1_BACKLOG.md` 安全区段。

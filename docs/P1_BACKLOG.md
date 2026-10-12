@@ -38,13 +38,13 @@
 
 ## 环境 / 运维
 
-17. **[OBS-3] systemd 服务以 root 运行**（真审计实证漂移）：生产 unit 实况 `User=root`+无 PrivateTmp+`--workers 4`；仓库模板基线 `User=www-data`+`PrivateTmp=true`（workers 已对齐 4 并加漂移注记）。降权涉及 data/ 属主迁移与停机窗口，归默默裁决；同机另两服务亦 root（其一共享本项目 venv）。
-18. **[OBS-4] 备份产物权限代码保证**：P0 批 backup_manager 已全产物 0600+目录 0700（跨平台契约测试钉）；当前生产实存备份已收紧（09-26 手工），cron 后续产物由代码保证。
+24. **[OBS-3] systemd 服务以 root 运行**（真审计实证漂移）：生产 unit 实况 `User=root`+无 PrivateTmp+`--workers 4`；仓库模板基线 `User=www-data`+`PrivateTmp=true`（workers 已对齐 4 并加漂移注记）。降权涉及 data/ 属主迁移与停机窗口，归默默裁决；同机另两服务亦 root（其一共享本项目 venv）。
+25. **[OBS-4] 备份产物权限代码保证**：P0 批 backup_manager 已全产物 0600+目录 0700（跨平台契约测试钉）；当前生产实存备份已收紧（09-26 手工），cron 后续产物由代码保证。
 
 ## 低优先级
 
-19. **[P1-9] Proxy**：`http://127.0.0.1:7897` 在 `git push` 时偶发 connection reset（本地网络环境，非代码）。
-20. **[P1-13] AGENTS.md PAT 认证**：与 opencode 内置认证可能冗余。
-21. **[FE-ENV-1] Lighthouse 本机不可用**：headless Chrome 无法提交帧（NO_FCP），环境约束；性能验证固定改用 CDP `Performance.getMetrics` + 真机网络清单口径。
+26. **[P1-9] Proxy**：`http://127.0.0.1:7897` 在 `git push` 时偶发 connection reset（本地网络环境，非代码）。
+27. **[P1-13] AGENTS.md PAT 认证**：与 opencode 内置认证可能冗余。
+28. **[FE-ENV-1] Lighthouse 本机不可用**：headless Chrome 无法提交帧（NO_FCP），环境约束；性能验证固定改用 CDP `Performance.getMetrics` + 真机网络清单口径。
 
 > 10/11 两项（[PY-DEAD-1] `ASEEngine.get_state()` 死码 / [FE-TYPE-1] `ProactiveEngineState` 前端死链）已于 2026-09-30 遗留待办批执行整删销账，见 `DELETION_LOG.md` 同日节。

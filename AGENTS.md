@@ -1,18 +1,18 @@
 # AGENTS.md — 唯一的你（ai-girlfriend）项目 Agent 宪法
 
 > **项目**：unique-you — 唯一的你·十四 — 基于 LLM 的智能情感陪伴系统
-> **版本**：v1.46（2026-10-12 通道语义对齐批：D16 裁决「谁扫码谁聊」——扫码人守卫（凭证 `ilink_user_id` 三路径装载+非扫码人拒绝）、好友自选角色机制整拆（`peer_character.py` 删除+三端点退役+pref 层清零）、activate 直连扫码人绑定（修「控制台选角色→微信生效」断裂）、主动节奏按账号聚合（消同账号多 bot 连发）；D15 在用关联经取证拆除（两账号=两扫码微信，备份在案）——测试 **3027 收集（196 文件）**、徽章 **3208**、`173b2b3` 三端部署）。批次详情与全部历史版本记录见 `LOG.md`（唯一只追加不覆盖文件）；当前状态见 `docs/HANDOFF_REPORT.md`。（2026-09-29 默默裁决：版本头历史堆叠移除，只留当前版本行。）
+> **版本**：v1.46（2026-10-12 通道语义对齐批：D16 裁决「谁扫码谁聊」——扫码人守卫（凭证 `ilink_user_id` 三路径装载+非扫码人拒绝）、好友自选角色机制整拆（`peer_character.py` 删除+三端点退役+pref 层清零）、activate 直连扫码人绑定（修「控制台选角色→微信生效」断裂）、主动节奏按账号聚合（消同账号多 bot 连发）；D15 在用关联经取证拆除（两账号=两扫码微信，备份在案）——测试 **3027 收集（196 文件）**、徽章 **3208**、`173b2b3` 三端部署；同日 D16 补裁批 `7ac7418` 三端部署（一人一 bot：`MAX_CHANNELS_PER_USER` 2→1，取代 09-19「一人两条」；切换角色=控制台自由切+记忆三层分家）。批次详情与全部历史版本记录见 `LOG.md`（唯一只追加不覆盖文件）；当前状态见 `docs/HANDOFF_REPORT.md`。（2026-09-29 默默裁决：版本头历史堆叠移除，只留当前版本行。）
 
 ---
 
-## 当前实现补充（2026-10-11，三端一致 `aea3cd0`）
+## 实现补充快照（2026-10-11，三端一致 `aea3cd0`；当前状态以版本头 v1.46 为准）
 
 - **三端一致 @ `aea3cd0`**（2026-10-11 SEC-15 根治批；10 月三批均已部署）：10-05 安全升级批 `2c3b888`（两轮对抗审计 34+47 发现 + 生产 SSH 取证 + P0 修复八域，nginx 线上精确 patch：备份后插安全头/X-Forwarded-Proto/ws 日志关闭）→ 10-09 攻击面扫描批 `e949107`（六路对抗扫描 30 发现/16 确认/9 修复，nginx XFF 行替换 `$proxy_add_x_forwarded_for`→`$remote_addr`，行为级实证 21 打 15×429+6×401）→ 10-11 SEC-15 根治 `aea3cd0`（vitest 3→5 根治 tinypool 双 critical、`npm audit` 0 vulnerabilities、bun.lock/package-lock 双锁收敛销账 FE-2）。复验：health/ready 200、重启窗口 0 ERROR、blob 三端 `git hash-object` 一致、CI 全绿 run `38109894676`（9/9 job 含前端审计门）。下方 bundle/停机判据/依赖声明纪律继续有效。
 - 部署通道：本地 `git push` + 服务器 bundle 快进（含大二进制提交的 `git pull` 必现 `fetch-pack: unexpected disconnect`）。**停机判据用 `MainPID=0` + `cgroup.procs` 为空**，不要用 `is-active`（`TimeoutStopSec=5s` 会让超时停机显示 `failed` 而进程已清空）。
 - 迁移纪律：冷停 → 冷包 + 三库 `.backup`（逐库 `integrity_check`）→ **真实副本重复初始化演练**（验幂等与行数）→ 生产执行 → 行数比对。10 月三批零 schema 变更，本纪律留待下一次 schema 批启用。
 - 依赖声明纪律：`sqlalchemy` 必须带 `asyncio` extra，否则干净环境缺 `greenlet`，`sqlalchemy.ext.asyncio` 导入即失败；**本地预装 ≠ 声明完整**，以干净环境（CI）为准。
 - 🔴 **清理 `/tmp` 的禁区**：本机该 unit `PrivateTmp=no`，`/tmp/ai-girlfriend-scheduler.lock` 是**生产调度器单例 flock**（`api/run_api.py::_ensure_scheduler_singleton`）。删路径不立即中断（master 仍持 fd），但**新 worker 会新建 inode 再抢到锁 → 调度器翻倍**。删前先 `grep -rn "/tmp/ai-girlfriend"` 反查引用；若已误删，冷停 → 删残留路径 → 重启，并核实日志为 **1 master + 3 slave**。
-- 最新验证、遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md` 2026-10-11。
+- 最新验证、遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md` 最新条目（2026-10-12 通道语义对齐批 `173b2b3` 及 D16 补裁 `7ac7418`）。
 
 ## 本批重构确立的设计规则（2026-09-26 上线，改前必查）
 
@@ -106,7 +106,7 @@
 | 角色系统 | 角色开发 | `config/characters/`（卡真源） / `my_character/` / `persona_extractor/` / `shisi/character/`（PNG tEXt chunk 编解码 + SillyTavern V2/V3 角色卡子系统；旧顶层 `character_card/` 死码包已于批6b 项10 删除） |
 | LLM 提供商 | LLM 开发 | `llm_provider/` |
 | 记忆系统 | 记忆开发 | `context/` / `shisi/memory/legacy/`（WorkingMemory/EpisodicMemory/MemoryPipeline 等生产路径,`legacy` 仅表历史迁移非待删除)。**`memory_ext/` 已于 2026-09-28 历遍批整删**（W4-G 停用后全仓零消费者的第二 RAG 真源，防复活契约见 `tests/test_w4_memory_ext_disposition.py`）；`memory-config.json` 系文档化石（磁盘从未有此文件，已更正）|
-| 知识检索 | 知识开发 | `shisi/knowledge/` / `shisi/knowledge/legacy/`（RAGEngineV2/Retriever/CharacterKnowledgeService/CrawlerAdapter) |
+| 知识检索 | 知识开发 | `shisi/knowledge/`（Retriever/CharacterKnowledgeService/CrawlerAdapter；RAGEngineV2 所在的 `shisi/knowledge/legacy/` 已于 2026-09-21 批6b 整删） |
 | 多模态 | 多模态开发 | `multimodal/` |
 | 主动搭话 | 主动开发 | `proactive/` |
 | 语音 | 语音开发 | `voice/` |
@@ -160,7 +160,7 @@
 
 - 全量测试基线（2026-10-12 通道语义对齐批终验，串行四分块实测）：**3026** Python 通过 + 1 跳过 / 收集 **3027**（0 失败）+ **182** 前端；新功能必须附测试；现役角色卡 **42 张**；⚠️ 全量口径必须含 `tests/core/`，且 `git ls-files` 分块清单不含未提交新文件须单独补跑
 - 用户明确反对采样验证，要求完整验证
-- **测试口径注记（2026-10-12 三十四次刷新）**：现行基线 = 10-12 跨通道事实共享批终验（`LOG.md` 2026-10-12 条目）——四分块存量 **2998+1 零回归** + 新文件 17 例 = **3016 收集 / 3015 通过 / 1 跳过 / 0 失败**（**195 测试文件**，本批新增 `test_identity_shared_facts` 17 例；基线 2999+17 吻合；⚠️ `git ls-files` 分块不含未提交新文件，须单独补跑）。前端 vitest **182/182**（30 文件）+ ruff 0 错。**徽章 3197**（3015 Py + 182 FE）；三端一致 `c0244b2`。（三十三次及更早口径注记已于本批清除，历史口径见 `LOG.md` 各批条目。）
+- **测试口径注记（2026-10-12 三十五次刷新）**：现行基线 = 10-12 通道语义对齐批终验（`LOG.md` 2026-10-12 条目）——串行四分块 **3027 收集（196 测试文件）/ 3026 通过 + 1 跳过 / 0 失败**（+13=`test_channel_owner_semantics`、−2=peer 用例随 D16 退役改写；基线 3016+11 吻合；⚠️ `git ls-files` 分块不含未提交新文件须单独补跑）。前端 vitest **182/182**（30 文件）+ ruff 0 错。**徽章 3208**（3026 Py + 182 FE）；三端一致 `173b2b3`。（三十四次及更早口径注记已清除，历史口径见 `LOG.md` 各批条目。）
   ⚠️ **基线口径纪律（2026-10-11 实测并处置中）**：**角色卡数也是基线的隐藏变量**。`config/characters/` 被 `.gitignore:117` 忽略、**内容不随 git 复现**；`tests/test_persona_injection.py` 按 `Path("config/characters").glob("*.json")` 参数化 → **用例数 = 2 × 卡数 + 13**（2026-10-11 实测 42 张 → 收集 97）。本批实测该目录 **42 张**，较 `LOG.md` 10-05/10-09 批条目「41 卡在位」**多 1 张且无加卡记录**：第 42 张 `99c89c39.json`（林挽夏第三变体，md5 与另两张林挽夏互异）mtime=**2026-10-09 19:36** 落盘 → 引用基线按 **42 张**声明并注差异待复核（历史：09-20 该目录曾为空（0 张卡）致收集塌缩 1356，后按用户指令从服务器逐字节恢复 41 张）。
   🔑 **引用任何基线都必须同时声明两件事**：① **角色卡是否在位 / 卡数**；② **工作树是否含并行窗口在制品**（与"passed ≠ collected"同类）。缺一则数字不可比。
   ⚠️ **已知环境问题：单进程整跑 `pytest -q` 会在 30%~97% 之间的**随机位置**停住**（三次实测分别停在 `test_integration.py` / `test_web_enricher.py` / `test_llm_providers_routes.py`），且这三个文件**单独跑全部通过** —— 属聚合态资源问题（疑似前序用例泄漏线程/事件循环），**不是某个用例失败**。分块跑可稳定复现完整基线，推荐工作流：
@@ -215,8 +215,8 @@
 | # | 教训 | 详情 |
 |---|------|------|
 | L1 | 调研搜索强制 GitHub-First（零容忍硬规则 2026-07-28）— 完全禁止 WebSearch 用于技术调研，必须走 github-search-strategy + browser-automation 流程。详见 §1.3 |
-| L2 | 微信接口易变 — `wechat_direct/` 依赖的微信 web 协议会不定期失效，必须有版本追踪与失效快速响应机制，参考 `shisi/` 上游更新 |
-| L3 | 多用户记忆必须严格隔离 — `memory_ext/` 三层记忆（短期+情景+长期）必须按 user_id 隔离，任何串扰都属严重 bug |
+| L2 | 微信接口易变 — `wechat_direct/` 依赖的微信 iLink 机器人平台接口会不定期变更/失效（原「微信 web 协议」系 iLink 化前旧口径），必须有版本追踪与失效快速响应机制，参考 `shisi/` 上游更新 |
+| L3 | 多用户记忆必须严格隔离 — 三层记忆（`context/` 与 `shisi/memory/legacy/` 生产路径；原 `memory_ext/` 已于 2026-09-28 整删，原则沿用）必须按 user_id/身份组（D15）隔离，任何串扰都属严重 bug |
 | L4 | LLM 输出 JSON 必须 Schema 校验 — 使用 Pydantic 双重校验，避免 JSON 解析失败导致角色/工具调用中断 |
 | L5 | 角色卡一致性 — `config/characters/` 卡文件与 `my_character/` 运行时人格必须保持同步，避免角色人格漂移（旧顶层 `character_card/` 包已删，见批6b 项10） |
 | L6 | 语音合成优先级 — **MiMo Cloud TTS 为唯一引擎**（2026-08-28 起；Edge-TTS / 本地模型已删除）。不可假设单一源永久可用，故障时走可观测告告警而非静默切换到已删除引擎 |
@@ -234,6 +234,14 @@
 5. **跨窗看板**：一切跨窗信息写 `docs/board/BOARD.md`（工具 `scripts/window_board.ps1 -Append/-Tail`）；开窗先读看板再读 `docs/HANDOFF_REPORT.md`（当前状态单一真源；原 `TASK_PACKAGES.md` 四窗口 09-15 全闭环后已随 09-29 清理批删除）
 6. **记忆库双写**：重大裁决写 BOARD 同时 memory MCP（agent_id=shared）入库
 7. **收编门禁**：窗口完成自检（窗口内 pytest+vitest 绿）→ 协调者 merge --no-ff → 主检出回归门 → 卸窗脚本
+8. **🔴 Owner 唯一制（2026-09-15 事故驱动，血泪条款）**：
+   2026-09-15 凌晨，主检出（`D:\Desktop\ai-girlfriend`）工作树被两个窗口同时改写，导致主控写入的 `docs/board/BOARD.md` 被回滚 **3 次**、`docs/verification/` 被整个删除、`tests/test_wechat_connector.py` 的 232 行版本被打回 138 行。**根因不是某个命令，而是没有任何文件有唯一 owner。**
+   - **任何文件在同一时刻只能有一个 owner 窗口**；owner 写在 `docs/board/BOARD.md` 的窗口登记表里，改之前先查表
+   - **`docs/board/BOARD.md` 的 owner 恒为「主控」**（原 `TASK_PACKAGES.md` 已随 09-29 清理批删除）；其它窗口如需追加，**一律追加到追加区**，且**不得改动登记表与他人的历史条目**（保留审计线索）
+   - **`tests/**` 的 owner 恒为「W4 验证窗口」**；W3 只改实现代码，**实现改完由 W4 复核收编**
+   - **主检出（`D:\Desktop\ai-girlfriend`）工作树不是共享草稿区**：窗口一律在 `..\ai-girlfriend-<窗口名>` 内读写；确需改主检出，须先在 BOARD 声明并取得主控同意
+   - **主控写入即提交**：主控对主检出的任何写入，**必须在同一帧内 `git add` + `commit`**（必要时 push）—— 写而不提交 = 等着被回滚
+   - **恢复类操作（clone/checkout/reset）前必须先看 `git status`**：若工作树存在未提交的后置成果，**先把它们拷出或提交**，再执行恢复
 
 ---
 
@@ -277,16 +285,8 @@
 2. 生产启动检查清单：`AI_GF_ENV=prod`、`JWT_SECRET`（≥32）、强随机 `API_KEY`、`API_KEY_ENABLED=true`、`debug: false`。
 3. 禁止把真实供应商 key 提交进 `config/llm_providers.json`；CI/人工 review 见 `api_key` 非空即拒绝。
 4. 历史 commit 曾含 `.env` 占位符（`4d67ca2`）；若当时写过真实 key，必须轮换。
-8. **🔴 Owner 唯一制（2026-09-15 事故驱动，血泪条款）**：
-   2026-09-15 凌晨，主检出（`D:\Desktop\ai-girlfriend`）工作树被两个窗口同时改写，导致主控写入的 `docs/board/BOARD.md` 被回滚 **3 次**、`docs/verification/` 被整个删除、`tests/test_wechat_connector.py` 的 232 行版本被打回 138 行。**根因不是某个命令，而是没有任何文件有唯一 owner。**
-   - **任何文件在同一时刻只能有一个 owner 窗口**；owner 写在 `docs/board/BOARD.md` 的窗口登记表里，改之前先查表
-   - **`docs/board/BOARD.md` 的 owner 恒为「主控」**（原 `TASK_PACKAGES.md` 已随 09-29 清理批删除）；其它窗口如需追加，**一律追加到追加区**，且**不得改动登记表与他人的历史条目**（保留审计线索）
-   - **`tests/**` 的 owner 恒为「W4 验证窗口」**；W3 只改实现代码，**实现改完由 W4 复核收编**
-   - **主检出（`D:\Desktop\ai-girlfriend`）工作树不是共享草稿区**：窗口一律在 `..\ai-girlfriend-<窗口名>` 内读写；确需改主检出，须先在 BOARD 声明并取得主控同意
-   - **主控写入即提交**：主控对主检出的任何写入，**必须在同一帧内 `git add` + `commit`**（必要时 push）—— 写而不提交 = 等着被回滚
-   - **恢复类操作（clone/checkout/reset）前必须先看 `git status`**：若工作树存在未提交的后置成果，**先把它们拷出或提交**，再执行恢复
 
-## 9. 修订历史
+## 10. 修订历史
 
 | 版本 | 日期 | 变更 |
 |------|------|------|

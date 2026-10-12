@@ -1,6 +1,6 @@
 # 代码图谱 — unique-you (唯一的你) v3.8.29（2026-10-12 **通道语义对齐批同步**（D16 谁扫码谁聊，代码 @ `173b2b3`）：① **旧语义污染清除**——§4.7.1 删 `peer_character.py` 条目（文件已删，好友自选机制随 D16 整拆）、wechat_channel_router 端点 9→6（`/peers/{wxid}/character` GET+PUT 与 `/characters` 退役）、wechat_connector 条目清除 **D14 已退役追问引擎的现行描述**（`_schedule_followup` 系列已于 `a2a597b` 删除，v3.8.28 漏扫）；② §1.1 口径刷新——端点 **229/195/233→226/193/230**（方法 109 GET/82 POST/15 PUT/20 DELETE）、Python 测试 **3027 收集（196 文件）/ 3026 通过 + 1 跳过**（串行四分块 729+852+639+806）、合计徽章 **3208**（3026+182）、§4.7.1 标题 5→4 文件；③ 生产 D15 关联已拆（账号 2↔4 非同一扫码人，`user_identity_map` 0 行）。验证：本批内省实跑 226/193/230 + CI `173b2b3`/`2999abf` 双绿。上一版 v3.8.28 见下方版本表与 `LOG.md`。（前版说明：① 全部真源文档对齐 10 月三批代码实况——10-05 安全升级 P0 八域 `2c3b888`（两轮对抗审计 34+47 发现 + 生产 SSH 取证 + `tests/test_sec_p0_*` 9 文件）→ 10-09 攻击面扫描批 `e949107`（六路对抗扫描 30 发现/16 确认/9 修复 + 4 新测试文件 + XFF 行为级实证）→ 10-11 SEC-15 根治 `aea3cd0`（vitest 3→5 根治 tinypool 双 critical + `npm audit` 0 vulnerabilities + 双锁收敛销账 FE-2）、三端一致 `aea3cd0`；② §1.1 全表刷新——Python 测试 2652→**2874 收集（187 文件）/ 2873 通过 + 1 跳过**、FE 177→**182**（vitest ^5.0.3）、合计 2828→**3055**、角色卡 41→**42 张**（第 42 张 `99c89c39.json` 10-09 19:36 落盘未入 LOG，差异待复核）、端点 229/195/233 本批内省复测吻合；③ §4.2 tag 分布 220→**229**（本批内省实测，+auth 5/+memory 1/+health 1/+character-templates 2）与口径纠错注读数刷新；§4.6 补安全测试线（test_sec_p0_* 9 文件）；§4.9 vitest 口径 177/30→**182/30**。验证：create_api_app 内省实跑 229/195/233 + 方法 111/82/16/20 + persona_injection 收集 97（=2×42+13）+ CI `38109894676` success（gh 实证）；全量 pytest/vitest 未重跑（对齐批禁令），口径引 `LOG.md` 2026-10-09/10-11。上一版 v3.8.27 见下方版本表与 `LOG.md`。）
 
-> 由 维护者 手动维护 | 最后核实: 2026-10-11（**v3.8.28 真源文档对齐批**，见版本头。）| 更早核实记录见下方版本表与 `LOG.md`。
+> 由 维护者 手动维护 | 最后核实: 2026-10-12（**v3.8.29 通道语义对齐批**，见版本头。）| 更早核实记录见下方版本表与 `LOG.md`。
 
 > 由 维护者 手动维护 | 最后核实: 2026-09-21（**v3.8.19 selftalk 四项修复移植 + 双尾巴根治**：`d8b7046` cherry-pick 入 main（`988cf9d`，送达回写记忆/唯一身份路径/档位静态门禁/追问收口，净增 32 用例）；知识槽身份自源块出口过滤（`743a98e`，收口项11 每轮 RAG 与「锚点只注入一次」的语义冲突）；channel-status 用例 `sessions_root` 隔离（`edd3c47`）；§1.1 刷新 **1750 收集 / 1749 通过 / 1 跳过 / 0 失败（2026-09-22 六域根治分块双端实测，服务器同口径全绿）
 > 由 维护者 手动维护 | 上一核实: 2026-09-21（**v3.8.18 v1.35 收仓口径统一 + shisi.yaml 行数勘误**：§1.1 Python 测试行刷新 **1615→1657 收集 / 1611→1653 通过 / 4 跳过**（分块 **341 + 387+3 + 494+1 + 431**，0 失败；+42 = 并行窗收编 `test_attribution_isolation_state` / `test_code_review_r2_state_and_llm` / `test_session_key_owner`）；测试合计 **1709→1751**（1653 Py + 98 FE）；**勘误** `config/shisi.yaml` 实为 **91 行**（65 有效行），v1.35 头部「41 行」系 voice 段恢复前中间态误记；端点 **220/186** 不变；vitest **98/98** 复跑。同步 AGENTS §0/§2/§4.3、README 徽章/口径/结构树、LOG 勘误两处。）
@@ -139,7 +139,7 @@ graph TD
         OA["OptimizedOrchestrator (orchestrator/)"]
     end
     subgraph API["接口层 api"]
-        AR["api/ 215 路由"]
+        AR["api/ 226 路由"]
         SA["shisi/api/"]
     end
     subgraph CORE["核心层 core (高 fan-in)"]
@@ -175,7 +175,7 @@ graph TD
 `OptimizedOrchestrator.process_message`（`orchestrator/optimized_orchestrator.py`）处理每一条用户消息，是全系统最关键调用链。
 
 > **架构变更 (2026-07-26)**: `OptimizedOrchestrator` 现在继承 `_InitPhasesMixin` + `_StreamPipelineMixin`：
-> - `orchestrator/optimized_orchestrator.py` (**1760 行**): 主类 `__init__` / 会话锁 / `_prepare_context` / `process_message` / `health_check`
+> - `orchestrator/optimized_orchestrator.py` (**1827 行**): 主类 `__init__` / 会话锁 / `_prepare_context` / `process_message` / `health_check`
 > - `orchestrator/_init_mixin.py` (565行): `initialize` 拆分为 11 个 `_init_*` 阶段
 > - `orchestrator/_stream_mixin.py` (352行): `process_message_stream` SSE 真流式/伪流式降级
 >
@@ -256,7 +256,7 @@ sequenceDiagram
 | 模块 | 文件 | 职责 |
 |------|------|------|
 | `main.py` | main.py（**~24 KB / 534 行**，2026-09-29 实测） | 入口 + `_run_orchestrator` 统一启动 + 控制台/微信模式 |
-| `orchestrator/` | orchestrator/ (**9 文件包**) | `optimized_orchestrator.py` 主类（**1760 行**） + `_init_mixin.py` **11 阶段初始化**（唯一真相源） + `_stream_mixin.py` SSE 流式 + `session_locks.py` + `voice_detector.py` + `console_chat.py`（2026-08-28 自 main.py 迁入，命令处理函数拆分） + **`tool_gate.py`**（三级工具意图管线，09-20 新） + **`context_budget.py`**（上下文预算/去重/信封，09-20 新） |
+| `orchestrator/` | orchestrator/ (**9 文件包**) | `optimized_orchestrator.py` 主类（**1827 行**） + `_init_mixin.py` **11 阶段初始化**（唯一真相源） + `_stream_mixin.py` SSE 流式 + `session_locks.py` + `voice_detector.py` + `console_chat.py`（2026-08-28 自 main.py 迁入，命令处理函数拆分） + **`tool_gate.py`**（三级工具意图管线，09-20 新） + **`context_budget.py`**（上下文预算/去重/信封，09-20 新） |
 | `api/run_api.py` | api/run_api.py | API-Only 启动入口（uvicorn 直接挂载），含 `_autostart_wechat_connector()` flock 文件锁自动恢复微信连接 |
 | `user_scheduler.py` | user_scheduler.py | 多用户调度，每个微信用户独立情感状态 |
 
@@ -278,37 +278,39 @@ sequenceDiagram
 
 | 来源 | 路径 | 端点数 | 文件数 | 说明 |
 |------|------|--------|------|------|
-| `api/routers/` | 22 个域路由模块（不含 `__init__.py`） | 181 | 23 | character/auth/admin/invite/voice/mimo_voice/storyline/wechat/wechat_channel/emotion/memory/knowledge/persona_card/chat/clone/misc/personality/safety/tools/training/users/llm_providers |
-| `api/`（非 routers） | `health_routes.py` / `qrcode_store.py` | 3 | 2 | health(2) + wechat/qrcode(1，admin 兼容面) |
-| `shisi/api/` | v1（`v2/` 死模块已于 2026-09-18 删除，见 DELETION_LOG） | 31 已挂载 | 11 | affinity/character/emotion_stage/memory/persona/stats/sticker/vital_signs |
-| **合计（`APIRoute` 内省）** | | **215** | | 101 GET / 78 POST / 16 PUT / 20 DELETE |
+| `api/routers/` | 24 个域路由模块（不含 `__init__.py`） | 191 | 25 | character/auth/admin/invite/voice/mimo_voice/storyline/wechat/wechat_channel/emotion/memory/knowledge/persona_card/chat/clone/misc/personality/safety/tools/training/users/llm_providers/agent_plane/character_template |
+| `api/`（非 routers） | `health_routes.py` / `qrcode_store.py` / `app_factory.py` 内联 | 5 | 3 | health(3，含 W10 `/api/metrics`) + wechat/qrcode(1，admin 兼容面) + app_factory 内联 `/api/shisi/status`(1，untagged) |
+| `shisi/api/` | v1（`v2/` 死模块已于 2026-09-18 删除，见 DELETION_LOG） | 30 已挂载 | 11 | affinity/character/emotion_stage/memory/persona/stats/sticker/vital_signs（+app_factory 内联 `/api/shisi/status` = 31 域面） |
+| **合计（`APIRoute` 内省）** | | **226** | | 109 GET / 82 POST / 15 PUT / 20 DELETE |
 
 > ⚠️ **口径纠错（2026-09-17 首记，2026-09-20 更新读数）**：旧口径"206 / 208 端点"取自 `len(app.routes)`，
 > 其中固定含 **4 条 FastAPI 框架自带路由**（`/openapi.json`、`/docs`、
 > `/docs/oauth2-redirect`、`/redoc`），故系统性偏高 4。
-> **业务端点数应取 `APIRoute` 实例数**。**当前读数（2026-10-11 复测）**：
-> `len(app.routes)=233`，`APIRoute=229`，唯一路径 195。（上一读数 2026-09-21 为 `APIRoute=220` / 唯一路径 186，
-> 其后 W4 forwards +1、W10 metrics +1、W12 character-templates +2、W9 自服务 +5 → 现读数如上。）
+> **业务端点数应取 `APIRoute` 实例数**。**当前读数（2026-10-12 复测）**：
+> `len(app.routes)`=230，`APIRoute`=226，唯一路径 193。（上一读数 2026-10-11 为 233/229/195；
+> 再上 2026-09-21 为 `APIRoute=220` / 唯一路径 186，
+> 其后 W4 forwards +1、W10 metrics +1、W12 character-templates +2、W9 自服务 +5 → 229，D16 退役 peers 三端点 −3 → 现读数。）
 
-**按 tag 的端点分布**（内省实测，权威口径）：
+**按 tag 的端点分布**（内省实测，权威口径，2026-10-12 复测）：
 
 ```
 character 21 │ misc 16 │ training 13 │ auth 13 │ safety-infra 12 │ chat 11
-memory 11 │ personality 10 │ wechat 9 │ wechat-channel 9 │ clone 8 │ knowledge 8
+memory 11 │ personality 10 │ wechat 9 │ wechat-channel 6 │ clone 8 │ knowledge 8
 users 7 │ characters 7 │ tools 6 │ voice 6 │ mimo-tts 6 │ storyline 6
 llm-providers 6 │ agent-plane 5 │ stickers 5 │ admin 5 │ affinity 4 │ invite 4
 health 3 │ emotion-stage 3 │ persona 3 │ persona-card 3 │ admin-wechat 2 │ character-templates 2
 emotion 2 │ vital-signs 1 │ stats 1 │ (untagged) 1
-                                          ────────── 合计 229
+                                          ────────── 合计 226
 ```
 
-> 注（2026-10-11 内省实测）：`character`(21) 为 `api/routers/character_routes.py`；`characters`(7) 为
+> 注（2026-10-12 内省实测）：`character`(21) 为 `api/routers/character_routes.py`；`characters`(7) 为
 > `shisi/api/character_routes.py`。`memory`(11) = api `memory_routes`(5，含 W4 forwards) +
 > shisi `memory_routes`(6)。`auth`(13) = 原 8 + W9 自服务 5（`consent/withdraw|status`、
 > `account/delete|export|export/chats`）。`health`(3) 含 W10 `/api/metrics`。
 > `character-templates`(2) 为 W12 角色模板面阶段 1。`persona`(3) 为 shisi；`persona-card`(3) 为 api。
-> `wechat-channel`(9)+`admin-wechat`(2) 为 09-19 新增的每人独立微信通道域
-> `api/routers/wechat_channel_routes.py`（一个文件双 router）。
+> `wechat-channel`(6)+`admin-wechat`(2) 为 09-19 新增的每人独立微信通道域
+> `api/routers/wechat_channel_routes.py`（一个文件双 router；`wechat-channel` 原为 9，
+> `/peers/{wxid}/character` GET+PUT 与 `/characters` 三端点已随 D16 退役 → 现 6）。
 
 **app_factory.py 实际挂载策略**（核实于源码）：
 
@@ -325,13 +327,13 @@ training_router        → /api/training/*, /api/proactive/*（13 端点）
 tools_router           → /api/system/tools, /api/system/tools/health, /api/plugins/*（6 端点）
 safety_router          → /api/safety/*, /api/rag/*, /api/voice/*, /api/files/*, /api/cache/*（12 端点）
 clone_router           → /api/clone/*（8 端点）
-auth_router            → /api/auth/*（8 端点）
+auth_router            → /api/auth/*（13 端点 = 原 8 + W9 自服务 5：consent/withdraw|status、account/delete|export|export/chats）
 admin_router           → /api/admin/*（5 端点）
 invite_router          → /api/auth/register-invite, /api/admin/invites（4 端点）
 character_router       → /api/characters/*, /api/presets/*（21 端点，含 .png 导入/导出）
 voice_router           → /api/character/voice/*（6 端点）
 mimo_voice_router      → /api/mimo/*（6 端点）
-memory_bridge_router   → /api/memory/*（4 端点，桥接 shisi FavoriteManager/ForwardManager）
+memory_bridge_router   → /api/memory/*（5 端点，含 W4 GET forwards，桥接 shisi FavoriteManager/ForwardManager）
 persona_card_router    → /api/persona-card/*（3 端点）
 storyline_router       → /api/storyline/*（6 端点）
 knowledge_router       → /api/characters/{id}/knowledge/*, /api/characters/{id}/enrich（8 端点）
@@ -347,10 +349,10 @@ agent_plane_router     → /api/agent-plane/*（5 端点：replay/profile/events
 + shisi setup          → /api/shisi/* 域路由（31 端点已挂载）
 ```
 
-> 端点分布实时口径见 §1.1（2026-10-11 内省 **229 APIRoute / 195 唯一路径**，
-> `len(app.routes)`=233 含 4 条框架路由）；按模块分布见 `docs/CODEMAPS/BACKEND.md`。
+> 端点分布实时口径见 §1.1（2026-10-12 内省 **226 APIRoute / 193 唯一路径**，
+> `len(app.routes)`=230 含 4 条框架路由）；按模块分布见 `docs/CODEMAPS/BACKEND.md`。
 
-**`api/app_factory.py:93 create_api_app()`** 是 FastAPI 应用唯一构造入口，被 `api/run_api.py:613`（`import` 于 `:45`）和 `main.py` 调用。FastAPI 实例 `version="3.1.0"`。
+**`api/app_factory.py:93 create_api_app()`** 是 FastAPI 应用唯一构造入口，被 `api/run_api.py:608`（`import` 于 `:45`）和 `main.py` 调用。FastAPI 实例 `version="3.1.0"`。
 
 ### 4.3 shisi/ — Clean Architecture 重构（核心域）
 
@@ -390,7 +392,7 @@ DDD 分层架构，是项目最重要的重构成果：
 | `validator.py` | 校验 | 角色卡 schema 合法性 |
 | `models.py` | Pydantic 模型 | 角色卡数据模型 |
 
-PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extract_card_from_png()`，`api/routers/character_routes.py:593` 调用 `embed_card_to_png()`。前端 `frontend/src/api/characters.ts` 调用 `POST /api/characters/import` 与 `GET /api/characters/{id}/export?format=png`。
+PNG tEXt chunk 集成路径：`api/routers/character_routes.py:959-963` import 并调用 `extract_card_from_png()`，`api/routers/character_routes.py:1031-1035` import 并调用 `embed_card_to_png()`。前端 `frontend/src/api/characters.ts` 调用 `POST /api/characters/import` 与 `GET /api/characters/{id}/export?format=png`。
 
 **shisi/knowledge/ 关键更新 (2026-07-01)**：
 
@@ -436,6 +438,8 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 | `cognitive_distortions.py` | 认知偏差检测 |
 | `emotion_coupler.py` | 情感耦合器（chameleon filter） |
 | `persona_bank.py` | 用户人格库 |
+| `models.py` | Pydantic 模型 |
+| `web_enricher.py` | 网络人设增强（火爬虫，降级 Crawl4AI） |
 
 ### 4.6 security/ — 安全模块
 
@@ -490,10 +494,10 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 
 | 组件 | 位置 | 职责 |
 |------|------|------|
-| `User.llm_config` JSON 字段 | `api/database.py:71` | 每用户独立 LLM 配置（provider/api_key/model 等） |
-| `/api/user/llm-config` GET | `api/routers/misc_routes.py:288` | 普通用户读取自己的 LLM 配置（脱敏 api_key 为 `****`），未配置时回退到全局 admin 配置 |
-| `/api/user/llm-config` POST | `api/routers/misc_routes.py:314` | 普通用户保存自己的 LLM 配置（不再 403），自动调用 `invalidate_user_llm()` 清缓存 |
-| `invalidate_user_llm(user_id)` | `llm_provider/__init__.py:259` | 失效用户级 gateway 缓存，下次对话按新配置重建 LLM 实例 |
+| `User.llm_config` JSON 字段 | `api/database.py:85` | 每用户独立 LLM 配置（provider/api_key/model 等） |
+| `/api/user/llm-config` GET | `api/routers/misc_routes.py:512` | 普通用户读取自己的 LLM 配置（脱敏 api_key 为 `****`），未配置时回退到全局 admin 配置 |
+| `/api/user/llm-config` POST | `api/routers/misc_routes.py:538` | 普通用户保存自己的 LLM 配置（不再 403），自动调用 `invalidate_user_llm()` 清缓存 |
+| `invalidate_user_llm(user_id)` | `llm_provider/__init__.py:310` | 失效用户级 gateway 缓存，下次对话按新配置重建 LLM 实例 |
 
 **调用链**：前端 `SettingsLLM.tsx` → `frontend/src/api/system.ts` → `POST /api/user/llm-config` → 写入 `users.llm_config` → `invalidate_user_llm(user_id)` → 下次 `OptimizedOrchestrator.process_message` 时按 `user_id` 取用户专属 LLM。
 
@@ -508,7 +512,7 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 |------|------|
 | `channel_paths.py` | 磁盘路径唯一真源：`data/wechat_sessions/<user_id>/slotN/`（credentials/state/qrcode/context_tokens/poll.lock）；全局上限解析 `max_channels()`；`list_user_slots_with_credentials()` |
 | `connector_registry.py` | `ConnectorRegistry`（`get_registry()` 单例）：`(owner_user_id, slot)` 键控连接器注册表；`ensure/disconnect/status_for_user/primary_status/start_login/restore_on_boot`；`ChannelQuotaError`/`ChannelSlotError`；**每会话目录 poll.lock 文件锁**去重多 worker 轮询；`get_connector_for_user()` |
-| `wechat_connector.py`（2062 行） | 连接器本体按 owner/slot 隔离：`load_session_state/qrcode(user_id, slot)`、`get_wechat_state(user_id)`、**`split_reply_for_wechat()` 回复拆分**（修连发罐头语）、**D16 扫码人守卫**（`scanner_wxid` 三路径装载+非扫码人拒绝）、图片/语音/emoji 发送、收包入口守卫（1/3/34）；（对话内追问引擎已随 D14 退役于 `a2a597b`，接话时机唯一 Owner=proactive 决策链） |
+| `wechat_connector.py`（2133 行） | 连接器本体按 owner/slot 隔离：`load_session_state/qrcode(user_id, slot)`、`get_wechat_state(user_id)`、**`split_reply_for_wechat()` 回复拆分**（修连发罐头语）、**D16 扫码人守卫**（`scanner_wxid` 三路径装载+非扫码人拒绝）、图片/语音/emoji 发送、收包入口守卫（1/3/34）；（对话内追问引擎已随 D14 退役于 `a2a597b`，接话时机唯一 Owner=proactive 决策链） |
 | `__init__.py` | 导出 |
 
 **遗留通道迁移**：`scripts/migrate_legacy_wechat_channel.py` 启动时一次性把旧全局
@@ -534,6 +538,8 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 | `tts_provider_base.py` | Provider 抽象基类 |
 | `audio_converter.py` | 音频格式转换（silk） |
 | `clone_data_manager.py` | 聊天克隆数据管理（克隆域，与 TTS 无关） |
+| `voice_catalog.py` | 音色 catalog（持久化 data/voice_catalog.json） |
+| `audio_result.py` | 合成结果封装 |
 
 ### 4.9 前端（React 19 管理控制台）
 
@@ -574,18 +580,21 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 tools/
 ├── __init__.py          # 导出 BaseTool, ToolResult, ToolRegistry, ToolDispatcher
 ├── base_tool.py         # 核心框架（4 个类）
-└── builtin/             # 具体工具实现（12 个工具）
+├── tool_state.py        # 工具/插件开关统一库存（W6：data/runtime_switches.json 唯一 owner，dispatch 首查状态门）
+├── url_guard.py         # SSRF 统一守卫共享真源（W6：getaddrinfo + ipaddress）
+└── builtin/             # 具体工具实现（9 文件）
     ├── __init__.py      # 重新导出全部内置工具
     ├── calendar_tool.py          # CalendarTool + CalculatorTool
     ├── character_crawler_tool.py # CharacterCrawlerTool (角色资料爬虫)
-    ├── extra_tools.py            # MemoryTool, WebSummaryTool, ImageGenTool (新增), SchedulerTool
-    ├── reminder_tool.py          # ReminderTool + CalendarQueryTool
+    ├── extra_tools.py            # MemoryTool, WebSummaryTool, ImageGenTool, SchedulerTool
+    ├── profile_agent_tools.py    # UpdateUserProfileTool + RememberFactsTool + ForgetFactsTool + QueryProfileTool（画像智能体四工具，2026-09-21）
+    ├── reminder_tool.py          # ReminderTool + CalendarQueryTool + ReminderManageTool
     ├── search_tool.py            # SearchTool (DuckDuckGo + Bing 回退)
     ├── time_awareness_tool.py    # TimeAwarenessTool (农历/节假日)
     └── weather_tool.py           # WeatherTool (插件 → wttr.in 回退)
 ```
 
-**12 个已注册工具**：
+**已实现工具 17 个；默认注册 13 个**（= `config/system.yaml` `tools.builtin_tools` 13 键，2026-10-12 核对 `orchestrator/_init_mixin.py:_init_tools`；`memory`/`scheduler`/`web_summary`/`image_gen` 已实现未列默认 config，列入即注册；画像智能体四工具经 `_init_mixin` 条件接线，受同开关控制；标注 ⚑ 者不在默认 13 键内）：
 
 | 工具名 | 类 | 权限 | 说明 |
 |--------|-----|------|------|
@@ -593,14 +602,19 @@ tools/
 | `search` | SearchTool | public | 联网搜索（DDGS → Bing HTML 回退） |
 | `calendar` | CalendarTool | public | 当前日期时间 |
 | `calculator` | CalculatorTool | public | 安全表达式计算（AST 解析） |
-| `set_reminder` | ReminderTool | friend | 设置提醒（trigger_time 必填北京时间 YYYY-MM-DD HH:MM；`_meta` 服务端注入 session_key/user_id 归属；到点由 reminder_check 定向投递，豁免静默时段） |
-| `query_reminders` | CalendarQueryTool | friend | 查询待处理提醒（按会话过滤） |
-| `memory` | MemoryTool | public | 长期记忆事实查询 |
-| `scheduler` | SchedulerTool | friend | 一次性日程安排 |
+| `set_reminder` | ReminderTool | public | 设置提醒（trigger_time 必填北京时间 YYYY-MM-DD HH:MM；`_meta` 服务端注入 session_key/user_id 归属；到点由 reminder_check 定向投递，豁免静默时段；旧 friend 级已放开——新用户 level 0 调用被拒，见 reminder_tool.py:68-70） |
+| `query_reminders` | CalendarQueryTool | public | 查询待处理提醒（按会话过滤） |
+| `manage_reminder` | ReminderManageTool | public | 提醒生命周期管理：取消（cancel）/改期（reschedule）/恢复失败或已取消提醒（restore） |
+| `memory` ⚑ | MemoryTool | public | 长期记忆事实查询 |
+| `scheduler` ⚑ | SchedulerTool | public | 一次性日程安排 |
 | `time_awareness` | TimeAwarenessTool | public | 农历/节假日/工作日查询 |
 | `character_card` | CharacterCrawlerTool | friend | Web 爬取角色资料（baike → wiki → baidu 回退） |
-| `web_summary` | WebSummaryTool | public | URL 内容摘要 |
-| `image_gen` | ImageGenTool | public | **AI 图片生成**（Agnes-AI apihub 端点，新增 2026-07-01，已修复 API 端点） |
+| `web_summary` ⚑ | WebSummaryTool | public | URL 内容摘要 |
+| `image_gen` ⚑ | ImageGenTool | public | **AI 图片生成**（Agnes-AI apihub 端点，新增 2026-07-01，已修复 API 端点） |
+| `update_user_profile` | UpdateUserProfileTool | public | 画像智能体：LLM 直接编辑用户画像（profile_agent_tools.py:77，2026-09-21） |
+| `remember_facts` | RememberFactsTool | public | 画像智能体：LLM 记忆事实（profile_agent_tools.py:171） |
+| `forget_facts` | ForgetFactsTool | public | 画像智能体：LLM 遗忘事实（profile_agent_tools.py:341） |
+| `query_profile` | QueryProfileTool | public | 画像智能体：LLM 查询画像（profile_agent_tools.py:412） |
 
 **核心类架构**：
 
@@ -622,6 +636,8 @@ tools/
 ---
 
 ## 5. 社区聚类（Leiden 算法）
+
+> 图谱历史快照（Leiden 聚类为删前计算结果，仅供对照；`character_card/` 已于批6b、`weclone_adapter` 已于 08-28 删除，见 §7 与 DELETION_LOG）
 
 知识图谱通过 Leiden 社区检测识别出 12 个自然模块：
 
@@ -710,6 +726,8 @@ tools/
 
 ## 9. main to shisi 跨模块调用
 
+> 2026-07-09 图谱快照，仅供对照（07-28 重构后 `_run_full_mode` 已删、`run_console_chat`/`_detect_voice_request` 迁 `orchestrator/console_chat.py` 与 `voice_detector.py`）
+
 | main 调用方 | shisi 被调方 | 目标文件 |
 |------------|-------------|---------|
 | `_detect_voice_request` | `KeywordRetriever.search` | shisi/knowledge/retriever.py |
@@ -719,7 +737,7 @@ tools/
 | `_run_full_mode` | `ShisiMemoryService` | shisi/application/memory_service.py |
 | `_run_full_mode` | `ShisiKnowledgeAdapter` | shisi/application/knowledge_service.py |
 
-`_run_full_mode` 是 main.py 与 shisi/ Clean Architecture 的主要集成点。
+（快照期）`_run_full_mode` 曾是 main.py 与 shisi/ Clean Architecture 的主要集成点；现行集成走 `_run_orchestrator`/`_init_mixin` 初始化链（见 §4.1）。
 
 **新增热点 (2026-07-01)**：`OptimizedOrchestrator` 中增加的 `_execute_tool_calls()` 将 main.py 与 `tools/` 包联结，`ToolRegistry.get_tools_by_permission()` 和 `ToolDispatcher.dispatch()` 成为热路径上的新节点。
 
@@ -755,8 +773,8 @@ tools/
 | ConfigLoader.get 423 fan-in | 中 | my_character/character_config.py | 加缓存、加降级，避免单点故障 |
 | OptimizedOrchestrator to main 循环依赖 | 中 | main.py | 检查 4 次回调是否可消除 |
 | process_message 全链 CRITICAL | 中 | orchestrator/optimized_orchestrator.py | 每个 hop=1 节点都需要降级路径 |
-| **多用户 LLM 缓存失效边界** | 低 | llm_provider/__init__.py:259 `invalidate_user_llm` | 用户改 LLM 配置 → 缓存失效 → 下次对话按新配置重建。验证：worker 进程间缓存一致性 |
-| **微信 flock 文件锁仅在 Linux 生效** | 低 | api/run_api.py:246 `fcntl.flock` | Windows 开发环境会 fallback 到 `ImportError`，开发模式下无锁竞争（单 worker） |
+| **多用户 LLM 缓存失效边界** | 低 | llm_provider/__init__.py:310 `invalidate_user_llm` | 用户改 LLM 配置 → 缓存失效 → 下次对话按新配置重建。验证：worker 进程间缓存一致性 |
+| **调度器单例 flock 仅 POSIX 生效** | 低 | api/run_api.py:246 `fcntl.flock`（`_ensure_scheduler_singleton`，`/tmp/ai-girlfriend-scheduler.lock`） | Windows 开发环境 fallback 无锁（单 worker）；微信连接侧已改每会话目录 poll.lock（§4.7.1），无全局微信 flock |
 | **工具系统引入热路径新节点** | 低 | tools/base_tool.py | ToolRegistry/ToolDispatcher 成为 LLM 回复前必经路径，需确保可用性 |
 | ~~测试基线漂移~~ | ~~中~~ | ~~tests/~~ | ✅ **已修复** (2026-07-30)：实测 1025 Python 测试 + 79 前端测试 = 1104 全部通过；前端 6 个过时测试已修正(WeChatPage 绑定功能迁移到 UsersPage、SettingsVoice ENGINE_OPTIONS 精简为 MiMo Cloud、SettingsLLM mock 补全 useAuthStore/listProviders) |
 

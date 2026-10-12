@@ -1,9 +1,9 @@
 # 后端业务模块地图
 
-> **✅ 2026-10-11 口径对齐刷新**：全量 find 复测——`.py` 总量 483→**495**（模块 284 不变 + 根级 2 + `scripts/` 17 + `tests/` 189 + `deploy/` 3；增量全部来自 `tests/` 176→189，`scripts/` 18→17 系并行清理批暂存删除 `scripts/clean_local_affinity_test_rows.py`）；各包计数复测无变动（api 48 / routers 25 / utils 19 / tools 13 / voice 8 / proactive 10 / shisi 116 / llm_provider 4 / orchestrator 9）。端点 **229/195**（2026-10-11 内省复测不变）。权威口径以 `CODE_GRAPH.md` **v3.8.28** 为准。更早增量（09-27/09-20/09-29）见 git 历史。
+> **✅ 2026-10-11 口径对齐刷新**：全量 find 复测——`.py` 总量 483→**495**（模块 284 不变 + 根级 2 + `scripts/` 17 + `tests/` 189 + `deploy/` 3；增量全部来自 `tests/` 176→189，`scripts/` 18→17 系并行清理批暂存删除 `scripts/clean_local_affinity_test_rows.py`）；各包计数复测无变动（api 48 / routers 25 / utils 19 / tools 13 / voice 8 / proactive 10 / shisi 116 / llm_provider 4 / orchestrator 9）。端点 **226/193**（2026-10-12 内省，v1.46 退役 peers 三端点后；10-11 复测 229/195 见 git 历史）。权威口径以 `CODE_GRAPH.md` **v3.8.29** 为准。更早增量（10-11/09-27/09-20/09-29）见 git 历史。
 
-**最近更新:** 2026-10-11
-**Python 版本:** ≥3.10 | **总文件:** **495** 个 .py（2026-10-11 find 实测：模块 284 + 根级 2 + `scripts/` 17 + `tests/` 189 + `deploy/` 3；**不含** `frontend/` 与工作区内嵌的 `大创赛报名以及后期发展/` 目录）
+**最近更新:** 2026-10-12
+**Python 版本:** ≥3.10 | **总文件:** **515** 个 .py（2026-10-12 find 实测：模块 283 + 根级 2 + `scripts/` 18 + `tests/` 209 + `deploy/` 3；`tests/` tracked test_*.py 196 与 AGENTS 口径一致，工作树含 11 个未提交新测试 .py；**不含** `frontend/` 与工作区内嵌的 `大创赛报名以及后期发展/` 目录）
 
 ---
 
@@ -17,7 +17,7 @@
 | **persona_extractor** | 13 | `persona_extractor/` | 人格提取与注入（+web_enricher 网络画像增强） | ✅ 活跃 |
 | **utils** | 19 | `utils/` | 公共工具：`local_time`（墙钟真源）/`fallback_lines`/`affinity_state`/`reply_mode`/`async_utils`/`important_dates`/`health_check`/`project_paths`/`bootstrap`/`character_helpers`/`prompt_sanitize`/`session_key`（会话键唯一解析，脊柱重构）/`llm_bridge`（LLM→同步桥）/`emotion_state`（按 user_key::character_id 情感状态）/`json_state`（data/*.json 原子写+flock）/`url_guard`（SSRF 守卫，W6）/`tool_state`（工具开关库存，W6）/`inbound_context`（入站幂等，W3）/`deletion_guard`（迟到写入丢弃，W9） | ✅ 活跃 |
 | **observability** | 8 | `observability/` | 可观测性（日志/指标/健康检查/sentry/优雅停机；tracing 于 v1.35 删——span/start_trace 全仓零调用） | ✅ 活跃 |
-| **tools** | 13 | `tools/` | 工具系统（12 个内置工具 + `url_guard`/`tool_state` 基础设施，W6） | ✅ 活跃 |
+| **tools** | 13 | `tools/` | 工具系统（17 个内置工具、默认注册 13 + `url_guard`/`tool_state` 基础设施，W6） | ✅ 活跃 |
 | **orchestrator** | 9 | `orchestrator/` | 编排器（主类/init/stream mixin/会话锁/语音检测/console_chat/**tool_gate**/**context_budget**） | ✅ 活跃 |
 | **voice** | 8 | `voice/` | 语音合成（MiMo 唯一引擎，08-28 收敛；+`voice_catalog.py` 音色持久化，W7） | ✅ 活跃 |
 | **llm_provider** | 4 | `llm_provider/` | LLM 多供应商网关（09-27 实测 4 文件） | ✅ 活跃 |
@@ -77,11 +77,11 @@
 **入口:** `api/run_api.py` → `api/app_factory.py:create_api_app()`
 
 **结构:**
-- 根目录: `app_factory.py`（应用工厂）, `run_api.py`（启动入口）, `main_routes.py`（模型/常量/Helper）, `health_routes.py`（健康检查）, `auth.py`/`auth_jwt.py`（认证，09-19 起 **JWT 优先**）, `database.py`（SQLAlchemy **8 表**）, `achievement_engine.py`（成就引擎，ADR-0014）, `byok.py`（W1 用户自带 Key 强制策略）, `consent.py`（W2 使用即同意协议）, `password_policy.py`（密码策略唯一真源 ≥8 含字母数字）, `deps.py`（依赖注入）, `session_manager.py`, `websocket_server.py`, `qrcode_store.py`, `path_security.py`, `runtime_config.py`
+- 根目录: `app_factory.py`（应用工厂）, `run_api.py`（启动入口）, `main_routes.py`（模型/常量/Helper）, `health_routes.py`（健康检查）, `auth.py`/`auth_jwt.py`（认证，09-19 起 **JWT 优先**）, `database.py`（SQLAlchemy **9 表**）, `achievement_engine.py`（成就引擎，ADR-0014）, `byok.py`（W1 用户自带 Key 强制策略）, `consent.py`（W2 使用即同意协议）, `password_policy.py`（密码策略唯一真源 ≥8 含字母数字）, `deps.py`（依赖注入）, `session_manager.py`, `websocket_server.py`, `qrcode_store.py`, `path_security.py`, `runtime_config.py`
 - `routers/` 24 个路由模块: `admin_routes`, `agent_plane_routes`, `auth_routes`, `character_routes`, `character_template_routes`, `chat_routes`, `clone_routes`, `emotion_routes`, `invite_routes`, `knowledge_routes`, `llm_providers_routes`, `memory_routes`, `mimo_voice_routes`, `misc_routes`, `persona_card_routes`, `personality_routes`, `safety_routes`, `storyline_routes`, `tools_routes`, `training_routes`, `users_routes`, `voice_routes`, `wechat_channel_routes`（每人独立通道，09-19）, `wechat_routes`
 - `state/` 3 个状态模块: `safety_log`, `tool_history`, `training_state`
 
-**实际挂载:** 19 个 `include_router` 调用 + `setup_shisi(app)` 装配，共 **229 业务端点 / 195 唯一路径**（2026-09-29 `create_api_app` 内省实扫，2026-10-11 复测一致；`len(app.routes)=233` 含 4 条框架路由）
+**实际挂载:** 19 个 `include_router` 调用 + `setup_shisi(app)` 装配，共 **226 业务端点 / 193 唯一路径**（2026-10-12 `create_api_app` 内省，v1.46 peers 三端点退役后；`len(app.routes)`=230 含 4 条框架路由）
 **依赖:** shisi, security, llm_provider, database
 
 ---
@@ -126,13 +126,13 @@
 
 ---
 
-## tools/ — 工具系统 (13 文件，2026-10-11 find 复测；12 个内置工具)
+## tools/ — 工具系统 (13 文件，2026-10-11 find 复测；17 个内置工具，默认注册 13)
 
 **职责:** 工具定义、调度、执行
 
 **关键文件:**
 - `base_tool.py` — 工具基类
-- `builtin/` — 内置工具目录 (12 个内置工具)
+- `builtin/` — 内置工具目录 (9 文件实现 17 个内置工具，默认注册 13)
   - `search_tool.py` — 搜索
   - `weather_tool.py` — 天气
   - `calendar_tool.py` — 日历
@@ -140,6 +140,7 @@
   - `time_awareness_tool.py` — 时间感知
   - `character_crawler_tool.py` — 角色爬取
   - `extra_tools.py` — 扩展工具
+  - `profile_agent_tools.py` — 画像智能体四工具（update_user_profile/remember_facts/forget_facts/query_profile，2026-09-21）
 
 **依赖:** shisi
 **被依赖:** Orchestrator
@@ -194,8 +195,7 @@
 
 ---
 
-> **注:** RAG 检索引擎已整合到 `shisi/knowledge/` 子模块中（见 shisi/ 总览），
-> 包含 `retriever.py`（检索器）和 `shisi/knowledge/legacy/rag_engine.py`（RAGEngineV2）。
+> **注:** RAG 检索引擎已整合到 `shisi/knowledge/` 子模块中（见 shisi/ 总览），含 `retriever.py`（检索器）等 6 文件；`shisi/knowledge/legacy/rag_engine.py`（RAGEngineV2）已于 2026-09-21 批6b 整删。
 
 ---
 
@@ -204,7 +204,7 @@
 **职责:** 聊天流水线编排，组件初始化阶段化，SSE 流式输出，会话锁管理，语音检测，工具意图分级与上下文预算
 
 **关键文件:**
-- `optimized_orchestrator.py` — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / 上下文准备 / `process_message` / 健康检查（**1760 行**）
+- `optimized_orchestrator.py` — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / 上下文准备 / `process_message` / 健康检查（**1827 行**）
 - `_init_mixin.py` — `_InitPhasesMixin`：`initialize` 拆分为 11 个 `_init_*` 阶段
 - `_stream_mixin.py` — `_StreamPipelineMixin`：`process_message_stream` SSE 真流式/伪流式降级
 - `session_locks.py` — 会话锁管理（`SessionLockManager`）
@@ -227,7 +227,7 @@
 **关键文件:**
 - `connector_registry.py` — `ConnectorRegistry`：(owner_user_id, slot) 键控注册表，ensure/disconnect/status/start_login/restore_on_boot，每会话 poll.lock 去重多 worker
 - `channel_paths.py` — 磁盘路径唯一真源 `data/wechat_sessions/<uid>/slotN/`（+D16 `scanner_ids_for_user` 扫码人枚举）
-- `wechat_connector.py` — 连接器本体（1659 行）：回复拆分/追问引擎/图片语音 emoji/收包守卫
+- `wechat_connector.py` — 连接器本体（2133 行）：回复拆分/D16 扫码人守卫/图片语音 emoji/收包守卫（对话内追问引擎已随 D14 于 2026-10-12 退役，接话时机唯一 Owner=proactive 决策链）
 - `__init__.py`
 
 **依赖:** api/database（通道会话表）, utils/project_paths
@@ -299,9 +299,7 @@ api/ ←── orchestrator/ ←── shisi/ ←── llm_provider/ ←── 
   │           │
   │           ├── security/ ←── 无依赖 (独立)
   │           │
-  │           ├── context/ (世界书)
-  │           │
-  │           └── character_card/
+  │           └── context/ (世界书)
   │
   ├── observability/ ←── 无依赖 (独立)
   │

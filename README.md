@@ -14,7 +14,7 @@
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **当前状态（2026-10-11 SEC-15 根治批，三端一致 `aea3cd0`）**：10 月三批均已部署上线——**安全升级批**（两轮对抗审计 34+47 发现 + 生产 SSH 取证 + P0 修复八域，`2c3b888`）、**攻击面扫描批**（六路对抗扫描 30 发现/16 确认/9 修复 + nginx XFF 精确替换，`e949107`）、**SEC-15 根治**（vitest 3→5 + 双锁收敛，`aea3cd0`）；health/ready 200、4 worker、CI 全绿 run `38109894676`（9/9 job 含前端审计门）。上线验收与遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md` 2026-10-11。
+> **当前状态（2026-10-12 通道语义对齐批 + D16 补裁，三端一致 `173b2b3`/`7ac7418`）**：D16「谁扫码谁聊」——注册用户扫码绑定 bot 一对一聊、角色控制台自由切换、非扫码人消息拒绝、好友自选角色机制退役（`173b2b3`）；补裁一人一 bot（`MAX_CHANNELS_PER_USER=1`，`7ac7418`）。10 月此前批次（安全升级 `2c3b888`/攻击面 `e949107`/SEC-15 `aea3cd0`）均已在线。上线验收与遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md`。
 
 > **测试口径**（后端 = 2026-10-12 通道语义对齐批终验，串行四分块实测）：后端 **3026 passed / 1 skipped / 0 failed**（收集 **3027**；**196 测试文件**，本批新增 `test_channel_owner_semantics` 13 例、peer 用例随 D16 退役净减 2；现役角色卡 **42 张**；基线 3016+11 吻合）。✅ GitHub CI（run 见 `LOG.md` 2026-10-12 条目；backend+frontend+六 ff 闸+adr-integrity）。⚠️ **口径勘误**：`tests/test_[a-f]*.py` 等四段 glob **漏子目录 `tests/core/`**，**全量口径必须补跑它**；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
 > 前端 `182 passed`（vitest 5.0.3，30 文件；3→5 升级系 SEC-15 根治，tinypool 双 critical 出树）+ `tsc --noEmit` 0 错误；ruff 0.16.8 全仓 0 错（`All checks passed!`）。
@@ -73,15 +73,16 @@ python main.py
 | **角色系统** | 每个微信用户绑一个角色卡，性格、说话风格、口头禅都能调 |
 | **情感引擎** | 聊得越久越了解你，有亲密度和情感阶段变化 |
 | **主动搭话** | 不全是等你发消息，系统也会主动找话题 |
-| **语音合成** | 文字回复能自动转语音发到微信。MiMo Cloud TTS（基础合成 / 语音克隆 / 音色设计） |
+| **语音合成** | 文字回复能自动转语音发到微信。MiMo Cloud TTS（基础合成 / 语音克隆 / 音色设计），云端失败可降级 Windows SAPI 本地兜底 |
 | **记忆系统** | 会记住你说过的事（三层记忆：短期+情景+长期） |
-| **工具** | 天气、搜索、日历、计算器、提醒、时间感知等 12 个内置工具 |
+| **工具** | 天气、搜索、日历、计算器、提醒、时间感知等 17 个内置工具（默认注册 13 个） |
 | **剧情线** | 和角色的关系可以按"剧情"推进，有支线和进度追踪 |
 | **注册准入** | 开放注册为主链路（所有人可注册），邀请码注册并存可选（2026-10-04 D13 裁决），管理员在控制台生成邀请码 |
 | **管理控制台** | React 前端，19 个页面，角色管理/语音设置/系统配置一站式 |
 
 > **语音引擎现状**：2026-08-28 起收敛为 **MiMo Cloud 单一引擎**，
 > Edge-TTS / GPT-SoVITS / CosyVoice / Bert-VITS2 已从代码库删除。
+> 云端失败可降级 Windows SAPI 本地兜底（`voice.fallback_local`）。
 
 ---
 
@@ -96,7 +97,7 @@ llm:
   temperature: 0.85
 
 voice:
-  engine: "mimo-tts"      # 唯一引擎（2026-08-28 MiMo-only 收敛）
+  engine: "mimo-tts"      # 唯一引擎（2026-08-28 MiMo-only 收敛；失败时降级 Windows SAPI 本地兜底）
   mimo-tts:
     enabled: true
     api_key: "${MIMO_API_KEY}"
@@ -158,20 +159,22 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 ## 项目结构
 
 ```
-├── api/                  FastAPI 后端（229 端点 / 195 条路径，2026-10-11 内省复测）
+├── api/                  FastAPI 后端（226 端点 / 193 条路径，2026-10-12 内省复测；len(app.routes)=230 含 4 条框架路由）
 │   ├── app_factory.py    create_api_app() —— 唯一 app 工厂
-│   ├── routers/          22 个域路由模块（character/chat/misc/personality/users/
+│   ├── routers/          24 个域路由模块（character/chat/misc/personality/users/
 │   │                     training/tools/safety/clone/auth/admin/invite/voice/
 │   │                     mimo_voice/storyline/wechat/wechat_channel/emotion/memory/
-│   │                     knowledge/persona_card/llm_providers）
+│   │                     knowledge/persona_card/llm_providers/agent_plane/
+│   │                     character_template）
 │   └── achievement_engine.py / database.py / auth_jwt.py / deps.py ...
 ├── orchestrator/         编排器（9 文件）：主类 + _InitPhasesMixin + _StreamPipelineMixin
 │                         + session_locks + voice_detector + console_chat
 │                         + tool_gate（工具意图分级）+ context_budget（上下文预算/信封）
 ├── shisi/                DDD 领域层（116 文件）：application / core / infrastructure /
 │                         character / knowledge / memory / affinity / voice / vault ...
-├── utils/                公共工具（11 文件）：local_time（墙钟真源）/ fallback_lines /
-│                         affinity_state / reply_mode / async_utils / important_dates ...
+├── utils/                公共工具（19 文件）：local_time（墙钟真源）/ llm_bridge /
+│                         session_key / json_state / fallback_lines / affinity_state /
+│                         reply_mode / async_utils / important_dates ...
 ├── voice/                MiMo Cloud TTS + 音频转码（silk）
 ├── wechat_direct/        微信直连（每人独立通道·D16 谁扫码谁聊：connector_registry
 │                         + channel_paths + wechat_connector）
@@ -182,7 +185,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 ├── persona_extractor/    人格提取 / PAD 检测 / 网络画像增强
 ├── security/             4 安全模块（content_safety / encryption /
 │                         pii_anonymizer / prompt_injection）
-├── tools/                内置工具（12 个）
+├── tools/                内置工具（已实现 17 个，默认注册 13 个）
 ├── frontend/             React 管理控制台
 │   └── src/
 │       ├── api/          15 个 API 模块（按域拆分）
@@ -196,7 +199,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 ```
 
 > **注：** 早期文档中的 `rag_engine/` 目录已不存在，检索能力现位于
-> `shisi/knowledge/`（RAGEngineV2 / Retriever / CharacterKnowledgeService）。
+> `shisi/knowledge/`（Retriever / CharacterKnowledgeService / CrawlerAdapter；RAGEngineV2 已于 2026-09-21 批6b 整删）。
 > `start_all.cmd` / `deploy_ai_girlfriend.bat` 等一键脚本已于 2026-08-28 删除，部署统一走 `deploy/`。
 
 ---
@@ -222,7 +225,7 @@ cd frontend && npm test           # Vitest 前端单元测试
 cd frontend && npm run test:e2e   # Playwright E2E
 ```
 
-CI 会自动跑 lint / type / test / build。具体规则见 `docs/architecture/fitness-functions.md`。
+CI 会自动跑 lint / type / test / build（规则见 `.github/workflows/ci.yml`；原 `docs/architecture/fitness-functions.md` 已不存在）。
 
 ---
 

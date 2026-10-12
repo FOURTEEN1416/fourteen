@@ -1,8 +1,8 @@
 # 架构地图
 
-**最近更新:** 2026-09-27
-**演进阶段:** Phase 14 (投产准备) → Phase 15 (品牌清洗) → Phase 16 (P0 全面修复 + CI 加固) → Phase 17 (全仓性能/正确性扫描) → Phase 18 (每人独立微信通道)
-**数据口径:** 端点与模块数均为 2026-09-21 实测（`create_api_app()` 内省 + 文件扫描），非文档估算值。**批6b 项10 死码清除**：顶层 `character_card/` 包（6 文件，零读者）已删除——角色卡运行真源为 `persona_service._load_character_card` 直读 + `shisi/character/` PNG 子系统；下节「工具层」中的 `character_card` 是 **CharacterCrawlerTool**（builtin 工具标签），与被删的同名包无关，仍存活。**✅ 2026-09-27 历遍增量**：端点 **229 APIRoute / 195 唯一路径**（W1–W12 批次 + W9 自服务端点 +5：`consent/withdraw|status`、`account/delete|export(+ /chats)`）；api 48 文件 / 25 routers、proactive 10（+runtime_plane/runtime_assembly）、utils 19、tools 13、voice 8（+voice_catalog）、`shisi/knowledge/source_store.py` 源材料唯一 owner；详见 CODE_GRAPH **v3.8.24**
+**最近更新:** 2026-10-12
+**演进阶段:** Phase 14 (投产准备) → Phase 15 (品牌清洗) → Phase 16 (P0 全面修复 + CI 加固) → Phase 17 (全仓性能/正确性扫描) → Phase 18 (每人独立微信通道) → Phase 19 (D16 通道语义对齐：谁扫码谁聊、一人一 bot `MAX_CHANNELS_PER_USER=1`、扫码人守卫、好友自选角色退役)
+**数据口径:** 端点与模块数均为 2026-09-21 实测（`create_api_app()` 内省 + 文件扫描），非文档估算值。**批6b 项10 死码清除**：顶层 `character_card/` 包（6 文件，零读者）已删除——角色卡运行真源为 `persona_service._load_character_card` 直读 + `shisi/character/` PNG 子系统；下节「工具层」中的 `character_card` 是 **CharacterCrawlerTool**（builtin 工具标签），与被删的同名包无关，仍存活。**✅ 2026-10-12 增量**：端点 **226 APIRoute / 193 唯一路径**（`create_api_app` 内省；D16 退役 peers 三端点）；api 48 文件 / 24 routers 模块（25 .py 含 `__init__`）、proactive 10（+runtime_plane/runtime_assembly）、utils 19、tools 13、voice 8（+voice_catalog）、`shisi/knowledge/source_store.py` 源材料唯一 owner；详见 CODE_GRAPH **v3.8.29**（09-27 增量 229/195 与更早口径见 git 历史）
 
 ---
 
@@ -26,7 +26,7 @@
 │                    FastAPI 路由层 (:8000)                        │
 │                                                                  │
 │  ┌──────────────┐  ┌────────────────┐  ┌────────────────────┐  │
-│  │ 23 路由模块  │  │ 220 endpoints  │  │ 认证层             │  │
+│  │ 24 路由模块  │  │ 226 endpoints  │  │ 认证层             │  │
 │  │ (api/routers)│  │ (create_api_app│  │ JWT 优先 + X-API-Key│  │
 │  │ + shisi/api  │  │ │  实扫)       │  │ （JWT=用户，Key=机器）│  │
 │  └──────┬───────┘  └───────┬────────┘  └────────────────────┘  │
@@ -56,12 +56,14 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+> **D16 通道语义（2026-10-12）**：微信通道「谁扫码谁聊、一人一 bot」——注册用户扫码绑定 bot，bot 即其本人微信内的一对一角色化身；**非扫码人消息拒绝**，角色在网页控制台自由切换（`MAX_CHANNELS_PER_USER=1`）。
+
 ---
 
 ## 编排器架构
 
 > **注:** 编排逻辑位于 `orchestrator/` 包，包含 **9 个文件**（含 `__init__.py`）：
-> - `optimized_orchestrator.py` (**1760 行**) — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / `_prepare_context` / `process_message` / `_after_process` / `health_check`
+> - `optimized_orchestrator.py` (**1827 行**) — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / `_prepare_context` / `process_message` / `_after_process` / `health_check`
 > - `_init_mixin.py` (565行) — `_InitPhasesMixin`：`initialize` 直接调用 8 个 `_init_*` 阶段；其中 `_init_memory_and_rag` 再级联 `_init_ase_and_scheduler` / `_init_tools` / `_init_rag`，共 11 个阶段方法
 > - `_stream_mixin.py` (352行) — `_StreamPipelineMixin`：`process_message_stream` SSE 真流式/伪流式降级
 > - `session_locks.py` (175行) — 会话锁管理（`SessionLockManager`）
@@ -72,9 +74,10 @@
 >
 > `OptimizedOrchestrator` 继承 `_InitPhasesMixin` + `_StreamPipelineMixin`，通过 `self.components` 共享状态。公共 API 100% 兼容。
 >
-> `tools/` 模块提供 12 个内置工具（weather / search / calendar / calculator /
-> time_awareness / character_card / web_summary / image_gen +
-> set_reminder / query_reminders / memory / scheduler），
+> `tools/` 模块提供 17 个内置工具，默认注册 13 个（weather / search / calendar /
+> calculator / set_reminder / query_reminders / manage_reminder / time_awareness /
+> character_card / update_user_profile / remember_facts / forget_facts /
+> query_profile；memory / scheduler / web_summary / image_gen 已实现未默认注册），
 > 由编排器在流水线中调度执行。
 >
 > `cache/` 模块（`llm_cache.py` + `redis_client.py`）提供 LLM 响应缓存层。
@@ -87,7 +90,7 @@
 
 ```
 微信用户消息
-  → wechat_direct/wechat_connector.py（扫码登录 + 收发，指数退避重连）
+  → wechat_direct/wechat_connector.py（扫码登录 + 收发，指数退避重连；D16 谁扫码谁聊——扫码人即用户本人，非扫码人消息拒绝，角色控制台自由切换）
     → orchestrator (optimized_orchestrator.py, process_message 流水线)
         1. 安全过滤器 (ContentSafety)
         2. PII 匿名化 (PIIAnonymizer)

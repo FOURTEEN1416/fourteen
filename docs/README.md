@@ -13,14 +13,14 @@
 | [VISION.md](VISION.md) | 终态宣言：产品本质/既成事实基线/候选池/Non-Goals/成功判据 | explanation | **truth** |
 | [FUNCTION_INVENTORY.md](FUNCTION_INVENTORY.md) | 功能清单（页-功能点编号，商讨协议定位基准；08-28 重制自代码实况×历史意图） | reference | **truth** |
 | [DECISION_LEDGER.md](DECISION_LEDGER.md) | 决策生死账（真决策清单 + 挂起池 SP-*） | reference（决策记录） | **truth** |
-| 根目录 [CODE_GRAPH.md](../CODE_GRAPH.md) | 代码实况：端点/模块/热路径/指标（当前 **v3.8.28**，2026-10-11 口径对齐批；**229 端点 / 195 路径 / 19 include_router**、2873+1 测试、徽章 3055；图谱库快照仍为 2026-09-02 二次重索引 7997/33187 @ef328a2，待下次重索引） | reference | **truth** |
+| 根目录 [CODE_GRAPH.md](../CODE_GRAPH.md) | 代码实况：端点/模块/热路径/指标（当前 **v3.8.29**，2026-10-12 通道语义对齐批；**226 端点 / 193 路径 / 19 include_router**、3026+1 测试（收集 3027 / 196 文件）、徽章 3208；图谱库快照仍为 2026-09-02 二次重索引 7997/33187 @ef328a2，待下次重索引） | reference | **truth** |
 | [history/INDEX.md](history/INDEX.md) | 漂移登记簿 + 历史文档演进索引 | reference | **truth** |
 
 配套操作文档（how-to）：
 
 | 文档 | 用途 | 生命周期 |
 |------|------|---------|
-| [HANDOFF_REPORT.md](HANDOFF_REPORT.md) | 接手必读：上一窗口交接了什么、未完成什么（含 08-28 接管批注） | truth（每次接管刷新） |
+| [HANDOFF_REPORT.md](HANDOFF_REPORT.md) | 接手必读：上一窗口交接了什么、未完成什么（当前状态单一真源） | truth（每次接管刷新） |
 | [DELETION_LOG.md](DELETION_LOG.md) | 删除类变更逐条留痕（文件/原因/验证），与 git 历史互补 | truth（追加式） |
 | 根目录 [LOG.md](../LOG.md) | L2 操作日志：每会话一行块（日期/动作/原因/结果），会话收尾必追加 | **truth（追加式，禁删改旧条目）** |
 | [board/BOARD.md](board/BOARD.md) | **跨窗口看板**（宪法 §8 载体）：当前窗口登记 / 追加区 / 阻塞 / 漂移告警；已完成窗口的登记行已于 09-29 清理批移除，终态见追加区各日条目 | truth（追加式） |
@@ -56,9 +56,8 @@
 | [P1_BACKLOG.md](P1_BACKLOG.md) | P1 待办（只载真实未决项） | 部分 SP-* 与 DECISION_LEDGER 挂起池重叠，以 DECISION_LEDGER 为准 |
 | READING_REPORT_*.md（14 份，docs 根） | **模块深度档案**：08-26 全库 200+ 文件穷举阅读的结构化记录（端点全景/机制细节/设计模式），含 CODE_GRAPH 未收录的深度内容 | derived·长期有效（08-28 全文复读改判保留；voice/clone 两份含已删模块，作历史档案）。⚠️ 09-15 注记：wechat_clone/voice/memory_context_multimodal 三份的守卫/silk/图片接线细节已被 W3 收编更新，现行口径以 CODE_GRAPH v3.6.0 + FUNCTION_INVENTORY N-IMG-1 为准（三份文件头部已加注记）。⚠️ 09-17 注记：本轮代码变更波及 8 份（my_character/orchestrator/proactive_plugins/api/shisi/llm_provider/wechat_clone/tests_root），各头部已加 09-17 时效注记并指向 CODE_GRAPH **v3.7.0**；未波及 6 份（character_card/memory_context_multimodal/persona_extractor/security_observability/tools_utils_scripts_cache/voice） |
 | [inventory/file-inventory.md](inventory/file-inventory.md) | 05-31 文件清单历史快照（自带 08-26 状态卡：已失效判断已标注） | archive |
-| [inventory/file-inventory.md](inventory/file-inventory.md) | 文件清单快照 | 口径见其头部声明 |
 | [superpowers/](superpowers/) | 4 份设计/计划工作产物（glass 视觉 spec=现行视觉源头、framework-v1=SP-1 方案输入、create-role 方案A=SP-2 决策链、frontend-rewrite=已执行历史计划） | derived（被 DECISION_LEDGER 引用） |
-| [visual-map/](visual-map/) | 前端页面实拍图册（index.html 本地打开） | 重拍：`frontend/visual-tour.mjs` |
+| ~~visual-map/~~ | 前端页面实拍图册（目录已删；可用 `frontend/visual-tour.mjs` 重建） | — |
 
 ## 六、新文档准入规则
 

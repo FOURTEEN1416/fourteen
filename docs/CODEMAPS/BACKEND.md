@@ -1,8 +1,8 @@
 # 后端地图
 
-> **✅ 2026-09-29 全仓历遍重排**：端点统计按 `create_api_app()` 内省**按 handler 所属模块**重排（**229 业务端点 / 195 唯一路径**；111 GET / 82 POST / 16 PUT / 20 DELETE；`len(app.routes)=233` 含 4 条框架路由）。较 09-21 口径 220/186 净增 9 = W9 自服务 +5（consent/withdraw、consent/status、account/delete、account/export(+chats)）+ W12 模板 +2 + /api/metrics +1 + api memory 转发面 +1（W4）；wechat_routes 旧表计 9、本批内省两次均为 8（旧表计数偏差，该文件近期无变更）。**2026-10-11 内省复测 229/195/233 不变**（10 月三批未增删路由）。权威口径以 `CODE_GRAPH.md` **v3.8.28** §1.1 为准。更早增量（09-20/21）见 git 历史。
+> **✅ 2026-09-29 全仓历遍重排**：端点统计按 `create_api_app()` 内省**按 handler 所属模块**重排（**229 业务端点 / 195 唯一路径**；111 GET / 82 POST / 16 PUT / 20 DELETE；`len(app.routes)=233` 含 4 条框架路由）。较 09-21 口径 220/186 净增 9 = W9 自服务 +5（consent/withdraw、consent/status、account/delete、account/export(+chats)）+ W12 模板 +2 + /api/metrics +1 + api memory 转发面 +1（W4）；wechat_routes 旧表计 9、本批内省两次均为 8（旧表计数偏差，该文件近期无变更）。**2026-10-11 内省复测 229/195/233 不变**（10 月三批未增删路由）；**2026-10-12 D16：229/195/233→226/193/230（peers 三端点退役）**。权威口径以 `CODE_GRAPH.md` **v3.8.29** §1.1 为准。更早增量（09-20/21）见 git 历史。
 
-**最近更新:** 2026-10-11
+**最近更新:** 2026-10-12
 **版本:** 3.1.0
 **入口文件:** `api/run_api.py`, `api/app_factory.py`, `main.py`, `orchestrator/`
 
@@ -16,8 +16,10 @@ api/ (48 py 文件)            ← FastAPI 路由层
 ├── app_factory.py          ← APP 工厂 (create_api_app) — 唯一构造入口
 ├── auth.py                 ← X-API-Key 认证依赖
 ├── auth_jwt.py             ← JWT 认证 (bcrypt + python-jose)
-├── database.py             ← SQLAlchemy 模型 (User/InviteCode/UserSession/
-│                             ConsentRecord/WechatBinding/CharacterAchievement)
+├── database.py             ← SQLAlchemy 模型 9 个 (User/InviteCode/UserSession/
+│                             UserActiveCharacter/ConsentRecord/WechatBinding/
+│                             WechatChannelSession/WechatPeerPreference/
+│                             CharacterAchievement，详见 CODEMAPS/DATABASE.md)
 ├── achievement_engine.py   ← 成就引擎 (ADR-0014，10 成就×4 类幂等重算)
 ├── deps.py                 ← 依赖注入
 ├── health_routes.py        ← 健康检查路由 (/api/health, /api/ready) + /api/metrics（W10 多 worker 聚合）— 前两者无需认证
@@ -35,7 +37,7 @@ api/ (48 py 文件)            ← FastAPI 路由层
     ├── auth_routes.py        (13，register/login/refresh/logout/me/change-password/admin reset + consent 状态机 + W9 自服务 consent/status|withdraw、account/delete|export(+chats))
     ├── safety_routes.py      (12，safety/rag/voice/files/cache)
     ├── chat_routes.py        (11，chat/session + wechat channels；旧全局微信端点已收敛 admin 兼容面)
-    ├── wechat_channel_routes.py (11，本人通道 9 + admin-wechat 2；双 router 同文件，JWT)
+    ├── wechat_channel_routes.py (8，本人通道 6 + admin-wechat 2；peers 三端点已随 D16 退役；双 router 同文件，JWT)
     ├── personality_routes.py (10，emotion/persona/psych)
     ├── wechat_routes.py      (8，wechat/*；另有 qrcode_store 1 端点独立挂载)
     ├── clone_routes.py       (8)
@@ -66,7 +68,7 @@ api/ (48 py 文件)            ← FastAPI 路由层
 
 ---
 
-## API 端点清单（模块级，2026-09-29 内省实测、2026-10-11 复测不变，按 handler 所属文件）
+## API 端点清单（模块级，2026-09-29 内省实测、2026-10-12 D16 复测 226——peers 三端点退役，按 handler 所属文件）
 
 | 模块文件 | 端点数 | 路径 |
 |------|------|------|
@@ -105,7 +107,7 @@ api/ (48 py 文件)            ← FastAPI 路由层
 | shisi/api/stats_routes | 1 | /api/shisi/stats |
 | app_factory（直挂） | 1 | /api/shisi/status（shisi 域合计 31 = 30 路由 + 本端点） |
 | qrcode_store | 1 | /api/wechat/qrcode |
-| **合计** | **229** | 111 GET / 82 POST / 16 PUT / 20 DELETE |
+| **合计** | **226** | 109 GET / 82 POST / 15 PUT / 20 DELETE（193 唯一路径，2026-10-12 内省） |
 
 ---
 
