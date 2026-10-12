@@ -173,8 +173,8 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 ├── utils/                公共工具（11 文件）：local_time（墙钟真源）/ fallback_lines /
 │                         affinity_state / reply_mode / async_utils / important_dates ...
 ├── voice/                MiMo Cloud TTS + 音频转码（silk）
-├── wechat_direct/        微信直连（每人独立通道：connector_registry + channel_paths
-│                         + peer_character + wechat_connector）
+├── wechat_direct/        微信直连（每人独立通道·D16 谁扫码谁聊：connector_registry
+│                         + channel_paths + wechat_connector）
 ├── user_scheduler.py     多用户调度（每个微信用户独立情感状态）
 ├── my_character/         情感引擎 + 角色卡
 ├── llm_provider/         LLM 接入层（多供应商 fallback）

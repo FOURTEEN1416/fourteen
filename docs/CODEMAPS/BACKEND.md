@@ -60,8 +60,8 @@ api/ (48 py 文件)            ← FastAPI 路由层
 ```
 
 > demo_routes 已于 2026-08-28 删除（D1 裁决）；`shisi/api/v2/` 死模块已于 2026-09-18 删除。
-> **每人独立微信通道（2026-09-19）**：`/api/wechat/channel/*` 仅 JWT 本人
-> （状态/list/connect/qrcode/disconnect/reconnect/好友选角 peers+characters）；
+> **每人独立微信通道（2026-09-19；D16 语义收口 2026-10-12）**：`/api/wechat/channel/*` 仅 JWT 本人
+> （状态/list/connect/qrcode/disconnect/reconnect；peers 好友选角三端点已随 D16 退役）；
 > `/api/admin/wechat/*` 为 admin 运维面（全局通道摘要/强制下线）。
 
 ---
@@ -76,7 +76,7 @@ api/ (48 py 文件)            ← FastAPI 路由层
 | auth_routes | 13 | /api/auth/*：register/login/refresh/logout/me/change-password/admin reset + consent(AGREEMENT_VERSION) + W9 自服务 consent/status、consent/withdraw、account/delete、account/export、account/export/chats |
 | safety_routes | 12 | /api/safety/*, /api/rag/*, /api/voice/*, /api/files/*, /api/cache/* |
 | chat_routes | 11 | /api/chat/*, /api/session/*, /api/wechat/status |
-| wechat_channel_routes | 11 | /api/wechat/channel/*（本人 9：status/list/connect/qrcode/disconnect/reconnect/peers/characters 等）+ /api/admin/wechat/*（admin 2：摘要/强制下线；双 router 同文件） |
+| wechat_channel_routes | 8 | /api/wechat/channel/*（本人 6：status/list/connect/qrcode/disconnect/reconnect；peers 三端点已随 D16 退役）+ /api/admin/wechat/*（admin 2：摘要/强制下线；双 router 同文件） |
 | personality_routes | 10 | /api/emotion/*, /api/persona/*, /api/psych/* |
 | clone_routes | 8 | /api/clone/*（含 /api/clone/upload） |
 | knowledge_routes | 8 | /api/characters/{id}/knowledge/*, /api/characters/{id}/enrich |

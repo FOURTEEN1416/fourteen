@@ -25,7 +25,7 @@
 | **proactive** | 10 | `proactive/` | 主动消息推送（ase_engine/scheduler/frequency/reflection/reminder_delivery/**runtime_plane**/**runtime_assembly**，W3 后台单一运行时） | ✅ 活跃 |
 | **clone_training** | 4 | `clone_training/` | 克隆训练（数据清洗/数据提取/风格分析） | ✅ 活跃 |
 | **multimodal** | 3 | `multimodal/` | 多模态处理（image_attachment/multimodal_processor） | ✅ 活跃 |
-| **wechat_direct** | 5 | `wechat_direct/` | 微信直连（**每人独立通道**：connector_registry/channel_paths/peer_character/wechat_connector） | ✅ 活跃 |
+| **wechat_direct** | 4 | `wechat_direct/` | 微信直连（**每人独立通道·D16 谁扫码谁聊**：connector_registry/channel_paths/wechat_connector） | ✅ 活跃 |
 | **plugins** | 2 | `plugins/` | 插件系统 | ✅ 活跃 |
 | **cache** | 3 | `cache/` | LLM 缓存 + Redis 客户端 | ✅ 活跃 |
 | **context** | 2 | `context/` | 上下文（世界书提供器） | ✅ 活跃 |
@@ -220,14 +220,13 @@
 
 ---
 
-## wechat_direct/ — 微信直连 (5 文件)
+## wechat_direct/ — 微信直连 (4 文件)
 
-**职责:** 每人独立微信通道（2026-09-19 起多租户化：一人最多 2 条、全局上限 100、好友自选角色）
+**职责:** 每人独立微信通道（2026-09-19 起多租户化：一人最多 2 条、全局上限 100；**D16（2026-10-12）谁扫码谁聊**——扫码人即用户本人，非扫码人消息拒绝，好友自选角色机制已退役）
 
 **关键文件:**
 - `connector_registry.py` — `ConnectorRegistry`：(owner_user_id, slot) 键控注册表，ensure/disconnect/status/start_login/restore_on_boot，每会话 poll.lock 去重多 worker
-- `channel_paths.py` — 磁盘路径唯一真源 `data/wechat_sessions/<uid>/slotN/`
-- `peer_character.py` — 好友自选角色（(owner, peer)→card 落库 + 微信内「角色」指令菜单）
+- `channel_paths.py` — 磁盘路径唯一真源 `data/wechat_sessions/<uid>/slotN/`（+D16 `scanner_ids_for_user` 扫码人枚举）
 - `wechat_connector.py` — 连接器本体（1659 行）：回复拆分/追问引擎/图片语音 emoji/收包守卫
 - `__init__.py`
 

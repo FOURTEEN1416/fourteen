@@ -3557,3 +3557,10 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **验证**：突变验红 **3/3**（守卫短路/聚合退化/pref 层复活均命中）；定向 52+27+48 绿；**串行四分块 3027 收集 / 3026 通过 / 1 跳过 / 0 失败（196 文件，729+852+639+806）**——基线 3016+11 吻合（+13 新守卫−2 peer 退役净减）；🔴 期间实证**并行 pytest 互相污染**（后台分块与前台测试并发致 chunk 假红，复现 W7 教训）+ pytest 无 `--timeout` 参数（插件不存在）+ subprocess `env` 必须继承 `SystemRoot`（否则 WinError 10106）；vitest **182/182**（30 文件）+ ruff 0；端点内省 **226/193/230**（旧 229/195/233，−3/−2/−3：peers 三端点、同路径双方法计一）。徽章 **3208**。
 - **部署与复验（三端一致 @ `173b2b3`）**：push → 服务器 ff-only 快进（`c0244b2a→173b2b30`，peer_character.py 删除落地）→ `remote_deploy.sh`（bundle 重建+重启+nginx reload）→ health/ready 双 200、journalctl 2 分钟 0 错误、app.log 尾部 0 ERROR、blob 四文件三端 `git hash-object` 一致（connector/llm_proactive/user_scheduler/character_routes）、通道恢复 count=4（首 worker 恢复全部通道，余 worker 抢锁让位）、`user_identity_map` 保持 0 行。
 - **遗留**：`wechat_peer_preferences` 表物理处置归 schema 批（消费者已清零，lifecycle/删卡级联仍引用防孤儿）；`_llm_proactive_next_ok` LLM 自判等待窗暂 per-会话（P1_BACKLOG 登记）；测试口径注记刷新至三十五次。
+
+## 2026-10-12 权威文档污染清理（D16 旧语义残留扫除，B 档纯文档）
+
+- **触发**：用户指令「请检查权威文档中的类似污染」——D16 批只改了 AGENTS/README/HANDOFF 主口径，其余真源文档仍散落旧设计观的现行描述。
+- **清污染 9 文件 16 处**：CODE_GRAPH **v3.8.29**（§4.7.1 删 `peer_character.py` 条目、wechat_channel_router 9→6 端点、wechat_connector 条目**顺带清除 D14 已退役追问引擎的现行描述**（v3.8.28 漏扫）+ 补 D16 扫码人守卫、§1.1/§4.2 端点 226/193/230（方法 109/82/15/20）+ 测试 3027/3026（196 文件）+ 合计 3208）；README 结构树去 peer_character；CODEMAPS 四件（MODULES 3 处 5→4 文件+职责、DATABASE 表条目加退役注、INDEX 目录树、BACKEND 端点计数 11→8+引文块）；FUNCTION_INVENTORY N-CHANNEL-1 改写为 D16 语义（好友自选标删除线）；DECISION_LEDGER 09-19 行结局列补「好友自选分支已被 D16 取代」（维护规则：只改结局列）。
+- **不动项**：LOG/DELETION_LOG 各批条目、修订历史表（AGENTS v1.16/CODE_GRAPH v3.8.6 行等——当时事实的历史记载）、DATABASE.md 表清单列举（`wechat_peer_preferences` 表物理还在）、「克隆好友」（产品功能名非 peer 机制）。
+- **验证**：全量 grep 复扫（合法历史记载外零残留）+ ruff 全仓 0 错（本批纯 .md 零代码）。

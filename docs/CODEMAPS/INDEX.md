@@ -59,7 +59,7 @@ unique-you/
 ├── proactive/              # 主动消息 (10 文件：ase_engine/ase_hub/scheduler/frequency/reflection/
 │                           #   reminder_delivery/llm_proactive/runtime_plane/runtime_assembly)
 ├── multimodal/             # 多模态 (image_attachment + multimodal_processor)
-├── wechat_direct/          # 微信直连 (5 文件：每人独立通道 registry/paths/peer + connector)
+├── wechat_direct/          # 微信直连 (4 文件：每人独立通道·D16 谁扫码谁聊 registry/paths + connector)
 ├── plugins/                # 插件系统 (2 文件)
 ├── config/                 # YAML/JSON 配置 + config/characters/ 角色卡库（gitignore；本地实测 42 张
 │                           #   = 41 default 策展卡 + 1 张 user_id=1 林挽夏运行时克隆副本 99c89c39，

@@ -1,4 +1,4 @@
-# 代码图谱 — unique-you (唯一的你) v3.8.28（2026-10-11 **真源文档对齐批**，纯口径刷新零逻辑变更：① 全部真源文档对齐 10 月三批代码实况——10-05 安全升级 P0 八域 `2c3b888`（两轮对抗审计 34+47 发现 + 生产 SSH 取证 + `tests/test_sec_p0_*` 9 文件）→ 10-09 攻击面扫描批 `e949107`（六路对抗扫描 30 发现/16 确认/9 修复 + 4 新测试文件 + XFF 行为级实证）→ 10-11 SEC-15 根治 `aea3cd0`（vitest 3→5 根治 tinypool 双 critical + `npm audit` 0 vulnerabilities + 双锁收敛销账 FE-2）、三端一致 `aea3cd0`；② §1.1 全表刷新——Python 测试 2652→**2874 收集（187 文件）/ 2873 通过 + 1 跳过**、FE 177→**182**（vitest ^5.0.3）、合计 2828→**3055**、角色卡 41→**42 张**（第 42 张 `99c89c39.json` 10-09 19:36 落盘未入 LOG，差异待复核）、端点 229/195/233 本批内省复测吻合；③ §4.2 tag 分布 220→**229**（本批内省实测，+auth 5/+memory 1/+health 1/+character-templates 2）与口径纠错注读数刷新；§4.6 补安全测试线（test_sec_p0_* 9 文件）；§4.9 vitest 口径 177/30→**182/30**。验证：create_api_app 内省实跑 229/195/233 + 方法 111/82/16/20 + persona_injection 收集 97（=2×42+13）+ CI `38109894676` success（gh 实证）；全量 pytest/vitest 未重跑（对齐批禁令），口径引 `LOG.md` 2026-10-09/10-11。上一版 v3.8.27 见下方版本表与 `LOG.md`。）
+# 代码图谱 — unique-you (唯一的你) v3.8.29（2026-10-12 **通道语义对齐批同步**（D16 谁扫码谁聊，代码 @ `173b2b3`）：① **旧语义污染清除**——§4.7.1 删 `peer_character.py` 条目（文件已删，好友自选机制随 D16 整拆）、wechat_channel_router 端点 9→6（`/peers/{wxid}/character` GET+PUT 与 `/characters` 退役）、wechat_connector 条目清除 **D14 已退役追问引擎的现行描述**（`_schedule_followup` 系列已于 `a2a597b` 删除，v3.8.28 漏扫）；② §1.1 口径刷新——端点 **229/195/233→226/193/230**（方法 109 GET/82 POST/15 PUT/20 DELETE）、Python 测试 **3027 收集（196 文件）/ 3026 通过 + 1 跳过**（串行四分块 729+852+639+806）、合计徽章 **3208**（3026+182）、§4.7.1 标题 5→4 文件；③ 生产 D15 关联已拆（账号 2↔4 非同一扫码人，`user_identity_map` 0 行）。验证：本批内省实跑 226/193/230 + CI `173b2b3`/`2999abf` 双绿。上一版 v3.8.28 见下方版本表与 `LOG.md`。（前版说明：① 全部真源文档对齐 10 月三批代码实况——10-05 安全升级 P0 八域 `2c3b888`（两轮对抗审计 34+47 发现 + 生产 SSH 取证 + `tests/test_sec_p0_*` 9 文件）→ 10-09 攻击面扫描批 `e949107`（六路对抗扫描 30 发现/16 确认/9 修复 + 4 新测试文件 + XFF 行为级实证）→ 10-11 SEC-15 根治 `aea3cd0`（vitest 3→5 根治 tinypool 双 critical + `npm audit` 0 vulnerabilities + 双锁收敛销账 FE-2）、三端一致 `aea3cd0`；② §1.1 全表刷新——Python 测试 2652→**2874 收集（187 文件）/ 2873 通过 + 1 跳过**、FE 177→**182**（vitest ^5.0.3）、合计 2828→**3055**、角色卡 41→**42 张**（第 42 张 `99c89c39.json` 10-09 19:36 落盘未入 LOG，差异待复核）、端点 229/195/233 本批内省复测吻合；③ §4.2 tag 分布 220→**229**（本批内省实测，+auth 5/+memory 1/+health 1/+character-templates 2）与口径纠错注读数刷新；§4.6 补安全测试线（test_sec_p0_* 9 文件）；§4.9 vitest 口径 177/30→**182/30**。验证：create_api_app 内省实跑 229/195/233 + 方法 111/82/16/20 + persona_injection 收集 97（=2×42+13）+ CI `38109894676` success（gh 实证）；全量 pytest/vitest 未重跑（对齐批禁令），口径引 `LOG.md` 2026-10-09/10-11。上一版 v3.8.27 见下方版本表与 `LOG.md`。）
 
 > 由 维护者 手动维护 | 最后核实: 2026-10-11（**v3.8.28 真源文档对齐批**，见版本头。）| 更早核实记录见下方版本表与 `LOG.md`。
 
@@ -85,15 +85,15 @@
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| API 业务端点（`APIRoute` 实扫） | **229 端点 / 195 条唯一路径**（111 GET / 82 POST / 16 PUT / 20 DELETE） / **19 处 include_router + setup_shisi**（2026-10-11 内省复测；`len(app.routes)=233` 含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`） | 内省 `create_api_app()`：`len([r for r in app.routes if isinstance(r, APIRoute)])`。⚠️ **测量方法注记**：`create_api_app()` 裸调用走惰性挂载（路由为待展开对象，裸内省仅 39 条），端点口径以运行期展开后为准——生产实例 `openapi.json` 实测唯一路径与口径吻合 |
+| API 业务端点（`APIRoute` 实扫） | **226 端点 / 193 条唯一路径**（109 GET / 82 POST / 15 PUT / 20 DELETE） / **19 处 include_router + setup_shisi**（2026-10-12 通道语义对齐批内省复测：`/peers/{wxid}/character` GET+PUT 与 `/characters` 随 D16 退役 −3；`len(app.routes)=230` 含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`） | 内省 `create_api_app()`：`len([r for r in app.routes if isinstance(r, APIRoute)])`。⚠️ **测量方法注记**：`create_api_app()` 裸调用走惰性挂载（路由为待展开对象，裸内省仅 39 条），端点口径以运行期展开后为准——生产实例 `openapi.json` 实测唯一路径与口径吻合 |
 | main.py 体量 | **约 24 KB / 534 行** | 2026-09-29 实测（通道批次与 09-26 归属重构后持续增长） |
 | 前端页面 | **19 个** | Glob `frontend/src/pages/*.tsx`（09-28 新增 TemplatesPage / SettingsAccount；另有 `StorylinePage` 为 App.tsx 内联包装组件） |
 | 前端 API 模块 | **15 个** | Glob `frontend/src/api/*.ts`（09-27/28 新增 `selfservice.ts`（W9）与 `templates.ts`（W12），原 13） |
 | 前端 Zustand store | **3 个** | LS `frontend/src/store/`（authStore / characterBuilderStore / errorStore） |
-| Python 测试用例 | **2873 passed + 1 skipped**（收集 **2874**） | 2026-10-09 攻击面扫描批全量五分块实跑终验（**674+607+449+559+585+1** 精确吻合，**187 测试文件**（38+38+37+37+37），0 失败；`LOG.md` 2026-10-09「验证」条；2026-10-11 对齐批按禁令未重跑）。净增轨迹 = 10-05 安全升级批 +`tests/test_sec_p0_*` 9 文件 → 10-09 批 4 新测试文件（基线 2807→2874 净增 67）。⚠️ **基线随 `config/characters/` 卡数浮动**：该目录被 gitignore（不入公开仓），`test_persona_injection` 的用例数 = **2 × 卡数 + 13**（2026-10-11 实测 42 张 → 收集 97）。**引用基线必须同时声明卡数**（本次 42 张在位，较 LOG 10-05/10-09「41 卡」差 1 待复核） |
+| Python 测试用例 | **3026 passed + 1 skipped**（收集 **3027**） | 2026-10-12 通道语义对齐批终验串行四分块实跑（**729+852+639+806** 精确吻合，**196 测试文件**，0 失败；`LOG.md` 2026-10-12「通道语义对齐批」条）。净增轨迹 = 10-12 跨通道批 3016 → D16 批 +13（`test_channel_owner_semantics` 守卫）−2（peer 用例随机制退役）= 3027。🔴 分块必须**串行**跑（并行 pytest 互相污染，本批实证）。⚠️ **基线随 `config/characters/` 卡数浮动**：该目录被 gitignore（不入公开仓），`test_persona_injection` 的用例数 = **2 × 卡数 + 13**（2026-10-11 实测 42 张 → 收集 97）。**引用基线必须同时声明卡数**（本次 42 张在位，较 LOG 10-05/10-09「41 卡」差 1 待复核） |
 | 现役角色卡 | **42 张**（`config/characters/*.json`，2026-10-11 glob 实测） | 41 张系 2026-09-20 从服务器**逐字节恢复**（`sha256sum` 41/41 一致、全部 JSON 可解析）；第 42 张 `99c89c39.json`（林挽夏第三变体，md5 与另两张林挽夏互异）mtime=**2026-10-09 19:36** 落盘、`LOG.md` 无加卡记录 → **较 10-05/10-09 批「41 卡在位」多 1，差异待复核**。目录被 `.gitignore:117` 忽略 → **卡数不随 git 复现**，本行是「本检出当前状态」而非版本事实 |
 | 前端测试用例 | **182 个全部通过 / 30 文件**（vitest ^5.0.3，SEC-15 根治批由 3 升 5） | 2026-10-11 SEC-15 根治批复验（`LOG.md` 2026-10-11；本对齐批未重跑） |
-| 测试用例合计 | **3055 个**（2873 Python 通过 + 182 前端通过） | Python = 2026-10-09 批口径、前端 = 2026-10-11 批口径（Python 侧跳过 1 不计入通过数） |
+| 测试用例合计 | **3208 个**（3026 Python 通过 + 182 前端通过） | Python = 2026-10-12 通道语义对齐批口径、前端 = vitest 5（Python 侧跳过 1 不计入通过数） |
 | tools/builtin 工具文件 | 9 个（含 __init__.py） | Glob（2026-09-29 实测） |
 
 ### 1.2 知识图谱快照指标（✅ 2026-09-02 重新索引·第二次）
@@ -272,7 +272,7 @@ sequenceDiagram
 - `run_console_chat` — 控制台交互
 - `run_wechat_mode` — 微信模式
 
-### 4.2 API 层（**229 业务端点 / 195 唯一路径** — 2026-10-11 内省实扫）
+### 4.2 API 层（**226 业务端点 / 193 唯一路径** — 2026-10-12 内省实扫，D16 退役 peers 三端点）
 
 两个路由来源：
 
@@ -339,8 +339,8 @@ wechat_router          → /api/wechat/*（8 端点）
 emotion_params_router  → /api/emotion/params/*（2 端点）
 llm_providers_router   → /api/llm-providers/*（6 端点，admin）
 qrcode_router          → /api/wechat/qrcode（1 端点，admin 兼容面）
-wechat_channel_router  → /api/wechat/channel/*（9 端点，JWT 本人：状态/list/connect/
-                         qrcode/disconnect/reconnect/peers/{wxid}/character GET+PUT/characters）
+wechat_channel_router  → /api/wechat/channel/*（6 端点，JWT 本人：状态/list/connect/
+                         qrcode/disconnect/reconnect；peers 三端点已随 D16 退役）
 wechat_admin_router    → /api/admin/wechat/*（2 端点，admin：通道摘要/强制下线）
 agent_plane_router     → /api/agent-plane/*（5 端点：replay/profile/events/curate/probes，
                          admin 门槛，P0-10 收口）
@@ -497,7 +497,7 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 
 **调用链**：前端 `SettingsLLM.tsx` → `frontend/src/api/system.ts` → `POST /api/user/llm-config` → 写入 `users.llm_config` → `invalidate_user_llm(user_id)` → 下次 `OptimizedOrchestrator.process_message` 时按 `user_id` 取用户专属 LLM。
 
-### 4.7.1 wechat_direct/ — 每人独立微信通道（2026-09-19 新架构，5 文件 2191 行）
+### 4.7.1 wechat_direct/ — 每人独立微信通道（2026-09-19 新架构；D16 后 4 文件——peer_character.py 已退役删除）
 
 > 用户裁决 2026-09-19（报障「他人注册后未扫自己的微信却显示已连接，且连的是管理员通道」）：
 > 通道层由**全局单例**改为 **per-user × slot 多租户**；一人最多 2 条通道
@@ -508,8 +508,7 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:520` 调用 `extr
 |------|------|
 | `channel_paths.py` | 磁盘路径唯一真源：`data/wechat_sessions/<user_id>/slotN/`（credentials/state/qrcode/context_tokens/poll.lock）；全局上限解析 `max_channels()`；`list_user_slots_with_credentials()` |
 | `connector_registry.py` | `ConnectorRegistry`（`get_registry()` 单例）：`(owner_user_id, slot)` 键控连接器注册表；`ensure/disconnect/status_for_user/primary_status/start_login/restore_on_boot`；`ChannelQuotaError`/`ChannelSlotError`；**每会话目录 poll.lock 文件锁**去重多 worker 轮询；`get_connector_for_user()` |
-| `peer_character.py` | **好友自选角色**（用户裁决「让他们自己选」）：`(owner_user_id, peer_wxid) → character_card_id`（DB 表 `wechat_peer_preferences`）；微信内回复「角色」弹菜单、回复序号切换（`try_handle_character_choice`）；会话键 `owner:peer` |
-| `wechat_connector.py`（1659 行） | 连接器本体按 owner/slot 隔离：`load_session_state/qrcode(user_id, slot)`、`get_wechat_state(user_id)`、**`split_reply_for_wechat()` 回复拆分**（修连发罐头语）、**对话内追问引擎**（`_schedule_followup/_followup_thread/_send_followup`，没等到接话自动补一句，参数 `data/scheduler_config.json` follow_up 块 web 可调）、图片/语音/emoji 发送、收包入口守卫（1/3/34） |
+| `wechat_connector.py`（2062 行） | 连接器本体按 owner/slot 隔离：`load_session_state/qrcode(user_id, slot)`、`get_wechat_state(user_id)`、**`split_reply_for_wechat()` 回复拆分**（修连发罐头语）、**D16 扫码人守卫**（`scanner_wxid` 三路径装载+非扫码人拒绝）、图片/语音/emoji 发送、收包入口守卫（1/3/34）；（对话内追问引擎已随 D14 退役于 `a2a597b`，接话时机唯一 Owner=proactive 决策链） |
 | `__init__.py` | 导出 |
 
 **遗留通道迁移**：`scripts/migrate_legacy_wechat_channel.py` 启动时一次性把旧全局
@@ -794,6 +793,7 @@ tools/
 
 | 日期 | 提交 | 变更摘要 |
 |------|------|---------|
+| v3.8.29 | 2026-10-12 | **通道语义对齐批同步**（D16 谁扫码谁聊，代码 @ `173b2b3`）：旧语义污染清除——§4.7.1 删 `peer_character.py` 条目（文件已删）、wechat_channel_router 9→6 端点（peers 三端点退役）、wechat_connector 条目清 D14 追问引擎残留描述（v3.8.28 漏扫）+ 补 D16 扫码人守卫；§1.1 端点 229/195/233→**226/193/230**（109/82/15/20）、Python 测试→**3027 收集/3026+1（196 文件，串行四分块）**、合计→**3208**；§4.2 标题行同步；D15 生产关联已拆（账号 2↔4 非同一扫码人，`user_identity_map` 0 行）。验证：内省实跑 226/193/230 + CI `173b2b3`/`2999abf` 双绿 |
 | v3.8.28 | 2026-10-11 | **真源文档对齐批**（纯口径刷新零逻辑变更）：真源四件（AGENTS v1.40 / README / 本文件 / HANDOFF）对齐 10 月三批代码实况——§1.1 全表（Python 2874 收集/2873+1（187 文件）、FE 182/30（vitest ^5.0.3）、合计 **3055**、卡数 **42 张**注差异（第 42 张 `99c89c39.json` 10-09 落盘未入 LOG）、端点 229/195 本批内省复测）+ §4.2 tag 分布 **220→229**（本批内省实测：+auth 5 W9 自服务 / +memory 1 W4 forwards / +health 1 W10 metrics / +character-templates 2 W12）与口径纠错注读数 224→233 + §4.6 补安全测试线（`test_sec_p0_*` 9 文件）+ §4.9 vitest **182**；10-05 安全升级批（`2c3b888`）、10-09 攻击面扫描批（`e949107`）、10-11 SEC-15 根治批（`aea3cd0`，vitest 3→5+双锁收敛）变更带核对入册。验证：create_api_app 内省实跑 229/195/233 + 方法 111/82/16/20 + persona_injection 收集 97=2×42+13 + CI `38109894676` success（gh 实证）；全量 pytest/vitest 未重跑（对齐批禁令，口径引 `LOG.md` 2026-10-09/10-11） |
 | v3.8.27 | 2026-09-29 | **全仓历遍·文档对齐 + 注释勘误批**（goal「全仓历遍，更新代码描述文档…注释和代码不对齐…备注式删除」；纯口径刷新零逻辑变更）：① 真源文档对齐 09-28 服务器同步批实况——§1.1 全表（端点 229/195、2651+1/2652、徽章 2828、main.py 534 行、页面 19、前端 API 15、vitest 177/30、tools/builtin 9）+ §4.1/§4.2（optimized_orchestrator 1760 行、_init_mixin 565 行/11 阶段、app_factory `:93`/run_api `:613` 指针、flock `:246`）+ §4.9（页面 19 + TemplatesPage/SettingsAccount、API 模块 15 + selfservice/templates、vitest 177/30）+ README/AGENTS/VISION/FUNCTION_INVENTORY/CODEMAPS 六件（MODULES/INDEX/ARCHITECTURE/DATABASE users.db 9 表+sqlite.db 27 表（非 FTS 口径）/BACKEND 模块级重排/FRONTEND）/HANDOFF；② 注释与代码不对齐修复 4 文件 5 处——app_factory docstring 220/186→229/195、_init_mixin「9 个阶段」→11、optimized_orchestrator「直接调用 10 个/共 13 个」→8/11、test_memory_pipeline+test_memory「TODO: shisi 后等效迁移」符号迁移表化石清除（实际早已 import `shisi.memory.legacy`）；③ AGENTS §4.3 过期口径注记堆叠（一次~二十七次 13 条）清除，只留二十八次+指针。验证：ruff 0 + 受影响测试（test_memory* 109/109、test_api_routes 等）+ 全量五分块 2652 收集吻合 + vitest 177；端点 229/195 复测吻合 |
 | v3.8.26 | 2026-09-28 | **W18 历遍完善批**（goal「全仓历遍…修复完善」）：真卡目录测试污染根治（沙箱夹具+机检守卫+8 卡隔离取证）；memory_ext 整包/scene_narrator/死配置层（system.yaml 两段 + observability 两模型 + 4 枚悬空 env 映射）整删，W4 契约转「不存在即不得复活」；App.tsx 重复 Route 死码 + ?raw 双守卫突变验红；FUNCTION_INVENTORY TPL/ACCT 节入册闭合 W17 前端接入遗留；DECISION_LEDGER D10–D12 执行效力收口注记。五分块 **2649/2648/1/0**（174 文件、41 卡零净增）+ vitest 177 + tsc/ruff 0；徽章 **2825**；端点 229/195 不变；未 push 未部署（后随 09-28 服务器同步批 `2ebfc61` 一并上线） |

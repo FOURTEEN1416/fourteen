@@ -79,7 +79,7 @@
 | ConsentRecord | consent_records | 用户同意记录（W2-consent） |
 | WechatBinding | wechat_bindings | 微信 wxid ↔ 角色绑定（**微信人设真源**，09-17 起 web"设为活跃"实时同步） |
 | **WechatChannelSession** | wechat_channel_sessions | **每人独立微信通道会话**（09-19）：(user_id, slot 0/1) 一人多条；status=idle/waiting_qr/scanned/connected/error；bot_id/nickname/messages_today/last_error（凭证本体在文件系统，不落库） |
-| **WechatPeerPreference** | wechat_peer_preferences | **通道内好友自选角色**（09-19）：(owner_user_id, peer_wxid) → character_card_id；与 wechat_bindings 区分——binding 表达「wxid↔注册用户」身份，本表表达「在 U 的通道里 F 选了哪张卡」 |
+| **WechatPeerPreference** | wechat_peer_preferences | **已退役（D16，2026-10-12）**：原 09-19「通道内好友自选角色」(owner_user_id, peer_wxid) → character_card_id；读写消费者已清零，表保留历史数据（lifecycle/删卡级联仍引用防孤儿），物理处置归 schema 批 |
 | CharacterAchievement | character_achievements | 角色成就（ADR-0014，10 成就×4 类，幂等重算） |
 | **UserActiveCharacter** | user_active_characters | **激活角色归属唯一 owner**（W1 `94ed63d`）：每用户当前激活卡，替代散落的激活状态字段 |
 
