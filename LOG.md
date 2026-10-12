@@ -3564,3 +3564,11 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **清污染 9 文件 16 处**：CODE_GRAPH **v3.8.29**（§4.7.1 删 `peer_character.py` 条目、wechat_channel_router 9→6 端点、wechat_connector 条目**顺带清除 D14 已退役追问引擎的现行描述**（v3.8.28 漏扫）+ 补 D16 扫码人守卫、§1.1/§4.2 端点 226/193/230（方法 109/82/15/20）+ 测试 3027/3026（196 文件）+ 合计 3208）；README 结构树去 peer_character；CODEMAPS 四件（MODULES 3 处 5→4 文件+职责、DATABASE 表条目加退役注、INDEX 目录树、BACKEND 端点计数 11→8+引文块）；FUNCTION_INVENTORY N-CHANNEL-1 改写为 D16 语义（好友自选标删除线）；DECISION_LEDGER 09-19 行结局列补「好友自选分支已被 D16 取代」（维护规则：只改结局列）。
 - **不动项**：LOG/DELETION_LOG 各批条目、修订历史表（AGENTS v1.16/CODE_GRAPH v3.8.6 行等——当时事实的历史记载）、DATABASE.md 表清单列举（`wechat_peer_preferences` 表物理还在）、「克隆好友」（产品功能名非 peer 机制）。
 - **验证**：全量 grep 复扫（合法历史记载外零残留）+ ruff 全仓 0 错（本批纯 .md 零代码）。
+
+## 2026-10-12 污染清理二批（用户追问驱动：前端 UI 文案+VISION+代码注释，commit `364007c`）
+
+- **触发**：用户对首批清理质疑「你确定清理干净了吗？」——复扫证伪：**首批漏了前端 UI 文案层**（首轮 grep 只扫 .md 与 py，未扫 tsx）。
+- **补清 6 处**：①`IntroPage.tsx` 产品介绍步骤卡「扫码登录你的微信小号，连接成功后**好友即可与角色对话**」→ 改 D16 语义（扫码绑定、一对一）；②③④`WeChatPage.tsx` 三处（未连接引导句/三步卡「好友发消息」/连接机制「多用户独立=每个好友独立角色记忆」——peer 设计观原话在 UI 上教用户不存在的产品用法）→ 改扫码人语义+账号隔离表述；⑤`VISION.md` 产品形态行「好友可在微信内回复『角色』自选」→ D16 口径；⑥代码注释两处（`user_scheduler.py` 回灌注释的「好友自选偏好优先」、`proactive/scheduler.py` 写路径列举删「好友自选」）。
+- **合法保留**：CreateRole「克隆好友」（产品功能名）、IntroPage:83「评委/访客」（未注册浏览者）、plans 方案稿/verification 审计快照（历史档案）、修订历史表历史记载。
+- **验证**：tsc 0 错 + vitest 182/182 + ruff 0 + 终极全词复扫（md/py/ts/tsx × 好友/代聊/号主/选角/访客/peer_character）零残留；`364007c` 三端部署（remote_deploy 前端 dist 重建+重启，health 200）。
+- **教训（ reflux 记忆库）**：「清理干净」的判据必须覆盖**全部载体**——文档 md/代码注释/前端 UI 文案/测试描述四层，首轮只扫两层即宣称完成属乐观完成。
