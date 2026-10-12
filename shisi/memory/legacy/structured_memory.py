@@ -188,6 +188,14 @@ class StructuredMemory:
                     PRIMARY KEY(user_key, fact)
                 );
 
+                CREATE TABLE IF NOT EXISTS user_identity_map (
+                    user_key TEXT PRIMARY KEY,
+                    identity_id TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_user_identity_map_group
+                    ON user_identity_map(identity_id);
+
                 CREATE TABLE IF NOT EXISTS memory_extraction_progress (
                     session_id TEXT NOT NULL,
                     character_id TEXT NOT NULL,
@@ -495,6 +503,119 @@ class StructuredMemory:
 
         return peer_of(str(session_id or "")) or str(session_id or "")
 
+    # ── 跨通道身份组（2026-10-12 用户裁决「真正的库共享」）────────────
+    #
+    # 背景（生产取证，LOG 2026-10-12）：同一真人两条微信通道在库里是两个互不
+    # 相交的 user_key（owner 前缀不同 + peer wxid 不同），事实库零交集——A 通道
+    # 说过的恒常事实 B 通道不知道。库里不存在任何可推导的「同一真人」信号
+    # （owner 前缀/peer wxid 都不能猜——隔离域 (owner, peer) 正是防好友代聊
+    # 串台的硬约束），因此身份关联**必须显式声明**（link_identities /
+    # scripts/link_identities.py），同 identity_id = 同一真人。
+    # 读侧按组合并、删除按组同步水位与等价副本；未声明的键行为 100% 不变。
+
+    def identity_keys(self, user_key: str) -> list[str]:
+        """user_key → 身份组全部键（含自身）；无映射/表缺失 → [自身]（行为不变）。
+
+        组解析是跨通道共享的**单一真源**：get_facts / search_facts /
+        find_active_fact_id / is_deleted_source / add_fact_receipt 的 near-dup
+        扫描与 semantic 向量读侧复核均经此扩展；无关联键得到单元素组，
+        与旧口径逐字节等价（隔离红线）。
+        """
+        key = str(user_key or "")
+        if not key:
+            return [""]
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    "SELECT identity_id FROM user_identity_map WHERE user_key = ?",
+                    (key,),
+                ).fetchone()
+                if row is None:
+                    return [key]
+                gid = str(row["identity_id"] or "")
+                if not gid:
+                    return [key]
+                members = conn.execute(
+                    "SELECT user_key FROM user_identity_map WHERE identity_id = ?",
+                    (gid,),
+                ).fetchall()
+                return sorted({str(r["user_key"]) for r in members if r["user_key"]} | {key})
+        except Exception as e:  # noqa: BLE001
+            logger.debug("identity_keys 解析失败，按未关联处理: %s", e)
+            return [key]
+
+    def link_identities(self, user_key_a: str, user_key_b: str) -> list[str]:
+        """显式声明两个 user_key 属同一真人（幂等；可经 scripts/link_identities.py）。
+
+        任一方已有组 → 并入（两方各属不同组 → 合并两组）；返回合并后组键。
+        这是唯一写入 user_identity_map 的运行时入口。
+        """
+        a, b = str(user_key_a or "").strip(), str(user_key_b or "").strip()
+        if not a or not b:
+            raise ValueError("link_identities 需要两个非空 user_key")
+        if a == b:
+            return self.identity_keys(a)
+        with self._conn(write=True) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                ga = conn.execute(
+                    "SELECT identity_id FROM user_identity_map WHERE user_key=?", (a,)
+                ).fetchone()
+                gb = conn.execute(
+                    "SELECT identity_id FROM user_identity_map WHERE user_key=?", (b,)
+                ).fetchone()
+                ida = str(ga["identity_id"]) if ga else ""
+                idb = str(gb["identity_id"]) if gb else ""
+                if not (ida and idb and ida == idb):
+                    if ida:
+                        if idb:
+                            conn.execute(
+                                "UPDATE user_identity_map SET identity_id=? WHERE identity_id=?",
+                                (ida, idb),
+                            )
+                        conn.execute(
+                            "INSERT OR REPLACE INTO user_identity_map(user_key, identity_id) VALUES(?,?)",
+                            (b, ida),
+                        )
+                    elif idb:
+                        conn.execute(
+                            "INSERT OR REPLACE INTO user_identity_map(user_key, identity_id) VALUES(?,?)",
+                            (a, idb),
+                        )
+                    else:
+                        gid = f"igrp_{os.urandom(8).hex()}"
+                        conn.executemany(
+                            "INSERT OR REPLACE INTO user_identity_map(user_key, identity_id) VALUES(?,?)",
+                            [(a, gid), (b, gid)],
+                        )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return self.identity_keys(a)
+
+    def unlink_identity(self, user_key: str) -> bool:
+        """解除一个键的身份组归属（组内其余成员保持关联；组 ≤1 人时清空组）。"""
+        key = str(user_key or "").strip()
+        if not key:
+            return False
+        with self._conn(write=True) as conn:
+            row = conn.execute(
+                "SELECT identity_id FROM user_identity_map WHERE user_key=?", (key,)
+            ).fetchone()
+            if row is None:
+                return False
+            gid = str(row["identity_id"] or "")
+            conn.execute("DELETE FROM user_identity_map WHERE user_key=?", (key,))
+            rest = conn.execute(
+                "SELECT COUNT(*) FROM user_identity_map WHERE identity_id=?", (gid,)
+            ).fetchone()[0]
+            if int(rest or 0) <= 1:
+                # 单元素组无意义（identity_keys 无行 = 自身，语义等价），清空保持表干净
+                conn.execute("DELETE FROM user_identity_map WHERE identity_id=?", (gid,))
+            conn.commit()
+        return True
+
     def migrate_legacy_isolation_keys(self) -> dict[str, int]:
         """一次性迁移：把「剥 owner 的裸 peer」事实/历史迁到唯一 owner 的完整会话键。
 
@@ -617,18 +738,49 @@ class StructuredMemory:
 
     # ── 用户事实 ──────────────────────────────────────────
 
+    @staticmethod
+    def _normalize_fact_text(text: str) -> str:
+        """事实归一化（单一真源）：等价判定 = 归一化后同文。
+
+        供 facts_near_duplicate（写侧 near-dup）与身份组读侧等价收敛共用，
+        两处口径必须一致，否则写侧合并了读侧又重复（或反之）。
+        """
+        t = "".join(str(text or "").lower().split()).rstrip("。.!！?？")
+        for x, y in (("十二", "12"), ("十一", "11"), ("十", "10")):
+            t = t.replace(x, y)
+        return t
+
     @classmethod
     def facts_near_duplicate(cls, a: str, b: str, threshold: float = 0.72) -> bool:
         """仅等价文本可自动合并；词面相似无法证明主体、否定和日期相同。"""
-        def _norm(s: str) -> str:
-            t = "".join(str(s or "").lower().split()).rstrip("。.!！?？")
-            for x, y in (("十二", "12"), ("十一", "11"), ("十", "10")):
-                t = t.replace(x, y)
-            return t
-        ta, tb = _norm(a), _norm(b)
+        ta, tb = cls._normalize_fact_text(a), cls._normalize_fact_text(b)
         if not ta or not tb:
             return False
         return ta == tb
+
+    @classmethod
+    def _dedup_identity_equivalents(cls, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """身份组读侧等价收敛：归一化同文的多行只留一条。
+
+        入参须已按展示序排好（get_facts 按 updated_at DESC）；等价组内保留
+        置信度最高者（并列保留先出现者）。未关联键组内只有自身，天然无收敛。
+        """
+        if len(rows) < 2:
+            return rows
+        out: list[dict[str, Any]] = []
+        idx_of_norm: dict[str, int] = {}
+        for r in rows:
+            norm = cls._normalize_fact_text(str(r.get("fact") or ""))
+            if not norm:
+                out.append(r)
+                continue
+            i = idx_of_norm.get(norm)
+            if i is None:
+                idx_of_norm[norm] = len(out)
+                out.append(r)
+            elif float(r.get("confidence") or 0.0) > float(out[i].get("confidence") or 0.0):
+                out[i] = r
+        return out
 
     def add_fact(self, fact: str, category: str = "general",
                  confidence: float = 0.5, source: str = "",
@@ -677,11 +829,14 @@ class StructuredMemory:
             if source_last_id is not None and self.is_deleted_source(fact, user_key, source_last_id):
                 # 已删除来源的幂等跳过，不写向量，不阻塞水位
                 return {**base, "fact_id": -2, "action": "skipped_deleted_source"}
-            # near-dup 扫描（同 user_key + active）
+            # near-dup 扫描（身份组 + active；2026-10-12 跨通道共享：B 通道抽到
+            # 与 A 键等价的事实时 reinforce 原行而非双插——单行单真源）
+            group_keys = self.identity_keys(str(user_key or ""))
+            ph = ",".join("?" for _ in group_keys)
             rows = conn.execute(
-                "SELECT id, fact, confidence, access_count, category, topics FROM user_facts "
-                "WHERE user_key = ? AND status = 'active'",
-                (user_key or "",),
+                f"SELECT id, fact, confidence, access_count, category, topics, user_key FROM user_facts "  # noqa: S608
+                f"WHERE user_key IN ({ph}) AND status = 'active'",
+                tuple(group_keys),
             ).fetchall()
             for row in rows:
                 existing = dict(row)
@@ -725,18 +880,23 @@ class StructuredMemory:
 
         Args:
             user_key: 指定归属；`None` 表示**不按用户过滤**（仅管理/内部维护路径）。
+                非 None 时按**身份组**扩展（2026-10-12 跨通道共享：同 identity_id
+                的组内事实一并可见并做等价收敛；无映射键 = 仅自身，行为不变）。
             include_legacy: 是否附带 user_key='' 的历史孤儿事实（完整隔离默认 False）。
         """
         with self._conn() as conn:
             clauses = ["status = 'active'", "confidence >= ?"]
             params: list[Any] = [min_confidence]
             if user_key is not None:
+                keys = self.identity_keys(str(user_key))
                 if include_legacy:
-                    clauses.append("(user_key = ? OR user_key = '')")
-                    params.append(user_key or "")
-                else:
+                    keys = list(dict.fromkeys([*keys, ""]))
+                if len(keys) == 1:
                     clauses.append("user_key = ?")
-                    params.append(user_key or "")
+                    params.append(keys[0])
+                else:
+                    clauses.append(f"user_key IN ({','.join('?' for _ in keys)})")
+                    params.extend(keys)
             if owner_prefix is not None:
                 clauses.append("substr(user_key, 1, ?) = ?")
                 params.extend((len(owner_prefix), owner_prefix))
@@ -749,7 +909,7 @@ class StructuredMemory:
             )
             params.append(limit)
             rows = conn.execute(sql, params).fetchall()
-            return [dict(r) for r in rows]
+            return self._dedup_identity_equivalents([dict(r) for r in rows])
 
     def search_facts(self, keyword: str, user_key: str | None = None,
                      include_legacy: bool = False) -> list[dict[str, Any]]:
@@ -758,25 +918,33 @@ class StructuredMemory:
         2026-09-22 修复：旧实现先全库 ``LIMIT 20`` 再在 Python 侧按 user_key
         过滤——多用户下若命中窗口被他人事实占满，本人明明有匹配事实也被挤成
         空（静默漏检）。现在过滤条件下推，LIMIT 在过滤后生效。
+        2026-10-12 跨通道共享：user_key 非 None 时过滤段按身份组扩展
+        （与 get_facts 同口径），结果做等价收敛。
         """
         with self._conn() as conn:
-            # 归属过滤段（与 get_facts 同口径）
+            # 归属过滤段（与 get_facts 同口径，按身份组）
+            group_keys = (
+                self.identity_keys(str(user_key)) if user_key is not None else None
+            )
             key_sql = ""
             key_params: list[Any] = []
-            if user_key is not None:
-                if include_legacy:
-                    key_sql = " AND user_key IN (?, ?)"
-                    key_params = [user_key or "", ""]
-                else:
+            if group_keys is not None:
+                keys = list(
+                    dict.fromkeys([*group_keys, ""]) if include_legacy else group_keys
+                )
+                if len(keys) == 1:
                     key_sql = " AND user_key = ?"
-                    key_params = [user_key or ""]
+                    key_params = [keys[0]]
+                else:
+                    key_sql = f" AND user_key IN ({','.join('?' for _ in keys)})"
+                    key_params = list(keys)
 
             def _filter(rows: list) -> list[dict[str, Any]]:
                 # SQL 已带归属+active 过滤；此处仅兜底替身（假库不走 SQL 过滤）
                 out = [dict(r) for r in rows]
                 if user_key is None:
                     return [r for r in out if r.get("status", "active") == "active"]
-                allowed = {user_key or ""}
+                allowed = set(group_keys or [])
                 if include_legacy:
                     allowed.add("")
                 return [
@@ -795,7 +963,7 @@ class StructuredMemory:
                        LIMIT 20""",
                     (keyword, *key_params),
                 ).fetchall()
-                filtered = _filter(rows)
+                filtered = self._dedup_identity_equivalents(_filter(rows))
                 if filtered:
                     return filtered
             except Exception as e:  # noqa: BLE001
@@ -806,12 +974,18 @@ class StructuredMemory:
                 + " ORDER BY confidence DESC LIMIT 20",
                 (f"%{keyword}%", *key_params),
             ).fetchall()
-            return _filter(rows)
+            return self._dedup_identity_equivalents(_filter(rows))
 
     def is_deleted_source(self, text: str, user_key: str, source_last_id: int) -> bool:
+        # 2026-10-12 跨通道共享：水位复核按身份组读——任一组内键的删除水位
+        # 都对本键生效（否认是「这个真人」否认，不是某个通道否认）。
+        keys = self.identity_keys(str(user_key or ""))
         with self._conn() as conn:
-            rows = conn.execute("SELECT fact,through_chat_id FROM fact_deletion_watermarks WHERE user_key=?",
-                                (user_key,)).fetchall()
+            ph = ",".join("?" for _ in keys)
+            rows = conn.execute(
+                f"SELECT fact,through_chat_id FROM fact_deletion_watermarks WHERE user_key IN ({ph})",  # noqa: S608
+                tuple(keys),
+            ).fetchall()
             return any(source_last_id <= row["through_chat_id"] and self.facts_near_duplicate(text, row["fact"]) for row in rows)
 
     def has_active_fact(self, text: str, user_key: str) -> bool:
@@ -822,12 +996,16 @@ class StructuredMemory:
 
         向量召回只带文本不带主键，合并进 prompt 前必须以此复核「主库里还在」
         （删除后向量残留不得复活），并同时取回 id 供出处记账。
+        2026-10-12 跨通道共享：复核按身份组——组内任一键仍有 active 等价事实
+        即视为在库（组读侧的镜像判据，防「A 删了 B 还在」的半死状态）。
         """
+        keys = self.identity_keys(str(user_key or ""))
         with self._conn() as conn:
+            ph = ",".join("?" for _ in keys)
             row = conn.execute(
-                "SELECT id FROM user_facts WHERE user_key=? AND fact=? AND status='active' "
+                f"SELECT id FROM user_facts WHERE user_key IN ({ph}) AND fact=? AND status='active' "  # noqa: S608
                 "ORDER BY id DESC LIMIT 1",
-                (user_key, text),
+                (*keys, text),
             ).fetchone()
             return None if row is None else int(row["id"])
 
@@ -867,7 +1045,20 @@ class StructuredMemory:
 
         B5 裁决「进回收站表」：默认先写入 `memory_recycle_bin` 再删主表行，
         数据可恢复、只增不减。`recycle=False` 时物理删除（维护路径）。
+
+        2026-10-12 跨通道共享语义（用户裁决「真正的库共享」）：
+        - 越权校验按身份组：调用键与行键同组即放行（同真人可删自己的
+          事实），无关联键依旧严格拒删（P0-4 防线不变）；
+        - 等价副本清剿：组内归一化同文的 active 行一并删除——否认一条 =
+          否认组内全部等价事实，不留「A 删了 B 还在」的半死影子；
+        - 水位组内全键落账（各键按各自会话 MAX(id)）：任一通道后续重抽
+          历史来源都被幂等跳过；新发言再提到则正常重抽（水位语义不变）。
         """
+        import json
+        from datetime import datetime as _dt
+        from datetime import timedelta as _td
+
+        victims: list[dict[str, Any]] = []
         with self._conn(write=True) as conn:
             row = conn.execute(
                 "SELECT * FROM user_facts WHERE id = ?", (fact_id,)
@@ -875,56 +1066,76 @@ class StructuredMemory:
             if row is None:
                 return False
             data = dict(row)
-            # P0-4 写侧越权封堵：调用方声明了归属（user_key 非空）而该行不属于
-            # 该归属 → 拒删（模型幻觉/恶意构造他人 fact_id 的防线）。
-            if user_key and str(data.get("user_key") or "") != str(user_key):
+            row_key = str(data.get("user_key") or "")
+            group_keys = self.identity_keys(row_key)
+            # P0-4 写侧越权封堵（组化口径）：调用方声明了归属（user_key 非空）
+            # 而该行既非该归属、也与该归属不同身份组 → 拒删（模型幻觉/恶意
+            # 构造他人 fact_id 的防线；组内放行 = 同真人删自己的事实）。
+            if user_key and row_key != str(user_key) and str(user_key) not in group_keys:
                 logger.warning(
                     "delete_fact 拒绝跨用户删除: id=%s 归属=%r 调用键=%r",
                     fact_id,
-                    data.get("user_key"),
+                    row_key,
                     user_key,
                 )
                 return False
-            if recycle:
-                import json
-                from datetime import datetime as _dt
-                from datetime import timedelta as _td
-                content = json.dumps(data, ensure_ascii=False, default=str)
-                uk = user_key or data.get("user_key", "") or "legacy"
-                deleted_at = _dt.now()
-                restore_before = (deleted_at + _td(days=retain_days)).strftime("%Y-%m-%d %H:%M:%S")
+            target_fact = str(data.get("fact") or "")
+            # 等价副本清剿：组内 active 且与目标等价（归一化同文）的行全部纳入
+            ph = ",".join("?" for _ in group_keys)
+            equiv = conn.execute(
+                f"SELECT * FROM user_facts WHERE user_key IN ({ph}) AND status = 'active'",  # noqa: S608
+                tuple(group_keys),
+            ).fetchall()
+            victims = [data] + [
+                dict(r) for r in equiv
+                if int(r["id"]) != int(fact_id)
+                and self.facts_near_duplicate(str(r["fact"] or ""), target_fact)
+            ]
+            deleted_at = _dt.now()
+            for v in victims:
+                v_key = str(v.get("user_key") or "")
+                if recycle:
+                    content = json.dumps(v, ensure_ascii=False, default=str)
+                    uk = v_key or "legacy"
+                    restore_before = (deleted_at + _td(days=retain_days)).strftime("%Y-%m-%d %H:%M:%S")
+                    conn.execute(
+                        "INSERT INTO memory_recycle_bin "
+                        "(character_id, memory_id, memory_content, deleted_at, restore_before, restored) "
+                        "VALUES (?, ?, ?, ?, ?, 0)",
+                        (
+                            f"user_fact:{uk}",
+                            str(v["id"]),
+                            content,
+                            deleted_at.strftime("%Y-%m-%d %H:%M:%S"),
+                            restore_before,
+                        ),
+                    )
+                conn.execute("DELETE FROM user_facts WHERE id = ?", (int(v["id"]),))
+                # 旧洞察没有来源ID时宁可重新生成，不让被删除事实的推论继续生效。
                 conn.execute(
-                    "INSERT INTO memory_recycle_bin "
-                    "(character_id, memory_id, memory_content, deleted_at, restore_before, restored) "
-                    "VALUES (?, ?, ?, ?, ?, 0)",
-                    (
-                        f"user_fact:{uk}",
-                        str(fact_id),
-                        content,
-                        deleted_at.strftime("%Y-%m-%d %H:%M:%S"),
-                        restore_before,
-                    ),
+                    "DELETE FROM reflections WHERE session_id=? AND "
+                    "(source_fact_ids='[]' OR EXISTS (SELECT 1 FROM json_each(source_fact_ids) WHERE value=?))",
+                    (v_key, int(v["id"])),
                 )
-            source_last = conn.execute("SELECT COALESCE(MAX(id),0) FROM chat_history WHERE session_id=?",
-                                       (str(data.get("user_key") or ""),)).fetchone()[0]
-            conn.execute("INSERT INTO fact_deletion_watermarks(user_key,fact,through_chat_id) VALUES (?,?,?) "
-                         "ON CONFLICT(user_key,fact) DO UPDATE SET through_chat_id=MAX(through_chat_id,excluded.through_chat_id)",
-                         (str(data.get("user_key") or ""), str(data.get("fact") or ""), source_last))
-            conn.execute("DELETE FROM user_facts WHERE id = ?", (fact_id,))
-            # 旧洞察没有来源ID时宁可重新生成，不让被删除事实的推论继续生效。
-            conn.execute(
-                "DELETE FROM reflections WHERE session_id=? AND "
-                "(source_fact_ids='[]' OR EXISTS (SELECT 1 FROM json_each(source_fact_ids) WHERE value=?))",
-                (str(data.get("user_key") or ""), fact_id),
-            )
+            # 水位：组内全键（各键按各自会话进度取 MAX(id)，空会话为 0）
+            for gk in group_keys:
+                source_last = conn.execute(
+                    "SELECT COALESCE(MAX(id),0) FROM chat_history WHERE session_id=?", (gk,)
+                ).fetchone()[0]
+                conn.execute(
+                    "INSERT INTO fact_deletion_watermarks(user_key,fact,through_chat_id) VALUES (?,?,?) "
+                    "ON CONFLICT(user_key,fact) DO UPDATE SET through_chat_id=MAX(through_chat_id,excluded.through_chat_id)",
+                    (gk, target_fact, source_last),
+                )
             conn.commit()
         invalidator = getattr(self, "_derived_memory_invalidator", None)
         if invalidator is not None:
-            try:
-                invalidator(str(data.get("fact") or ""), str(data.get("user_key") or ""))
-            except Exception as exc:
-                # 读侧仍以主库存在性校验；向量清理失败不能使已删事实复活。
-                logger.warning("派生向量清理失败，主库已删除: %s", exc)
+            for v in victims:
+                try:
+                    invalidator(str(v.get("fact") or ""), str(v.get("user_key") or ""))
+                except Exception as exc:
+                    # 读侧仍以主库存在性校验；向量清理失败不能使已删事实复活。
+                    logger.warning("派生向量清理失败，主库已删除: %s", exc)
         return True
 
     def restore_fact_from_recycle(self, recycle_id: int) -> int | None:
@@ -1655,6 +1866,8 @@ class StructuredMemory:
                     _run("memory_extraction_progress", f"session_id IN ({ph})", tuple(keys))
                     _run("user_facts", f"user_key IN ({ph})", tuple(keys))
                     _run("fact_deletion_watermarks", f"user_key IN ({ph})", tuple(keys))
+                    if self._has_table(conn, "user_identity_map"):
+                        _run("user_identity_map", f"user_key IN ({ph})", tuple(keys))
                     if self._has_table(conn, "user_profile"):
                         _run("user_profile", f"user_key IN ({ph})", tuple(keys))
                     if self._has_table(conn, "daily_summaries"):

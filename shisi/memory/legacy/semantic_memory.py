@@ -196,7 +196,22 @@ class SemanticMemory:
             # 需要读写两侧同口径才真正接通）。
             from utils.async_utils import run_async
 
-            _where = {"user_key": str(user_key)} if user_key is not None else None
+            # 2026-10-12 跨通道共享：向量读侧按身份组过滤（与 sm.get_facts 同
+            # 口径）。单键组保持原 {user_key} 下推（替身兼容面不变）；组内多键
+            # 用 $or 下推，替身不支持 where/$or 时 TypeError 退回无过滤调用，
+            # 由下方 Python 侧组过滤兜底（语义安全，只失性能）。
+            _group = (
+                self._sm.identity_keys(str(user_key))
+                if user_key is not None and hasattr(self._sm, "identity_keys")
+                else None
+            )
+            _where: dict | None = None
+            if user_key is None:
+                _where = None
+            elif _group and len(_group) > 1:
+                _where = {"$or": [{"user_key": str(k)} for k in _group]}
+            else:
+                _where = {"user_key": str(user_key)}
             if hasattr(self._vm, "_search"):
                 # `where` 是较新参数：老实现/测试替身可能没有。不支持时退回
                 # 不带过滤的调用，再由下方 Python 侧按 meta.user_key 过滤兜底
@@ -216,9 +231,12 @@ class SemanticMemory:
                 ) or []
             raw_vec = raw_vec if isinstance(raw_vec, list) else []
             if user_key is not None:
+                allowed_vec = set(
+                    _group if _group else [str(user_key)]
+                )
                 raw_vec = [
                     r for r in raw_vec
-                    if self._meta_user_key(r) == str(user_key)
+                    if self._meta_user_key(r) in allowed_vec
                 ]
             checker = getattr(self._sm, "has_active_fact", None)
             if checker is not None and user_key is not None:
