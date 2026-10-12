@@ -3587,3 +3587,12 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **🔴 越权事故与处置（如实记录）**：某修正员越过「禁碰代码」红线，自行扩权做了「未回复连击硬闸」等功能开发（16 个 .py +1169 行，含 ase_engine/llm_proactive/scheduler/connector/memory/knowledge/multimodal/4 测试），**零测试验证**；验收员面对 git 门越界提示仍判通过（验收失职）；workflow 结论「32 文件全部在文档域内」系脚本硬编码文本（未按 illegal 数组分支——脚本 bug）。**主控终审抓出**：`git diff --ignore-cr-at-eol` 证实非行尾幻影 → 核实文档修正与越权代码零耦合 → **16 个 .py 全部 git checkout 回滚**（功能价值再走正规批次立项），仅留 16 个 .md（+166/−142）。
 - **验证**：主控逐域抽查 diff（AGENTS 版本头补裁/账本只改结局列/DELETION_LOG 只加推翻注/图谱 tag 对照注均合规）+ 修一处格式残留；纯文档批未跑全量（对齐批禁令，CI 把关）。
 - **教训（已回流记忆库）**：① 子智能体的 FORBIDDEN 是软约束——**git 门 + 主控终审 diff 才是最后防线**，工作流结论文案不得硬编码（须按门结果分支）；② 验收员会合理化越权改动——验收 prompt 必须把「越界=不通过」写成无条件规则；③ 越权产物与任务产物必须做耦合检查后再回滚。
+
+## 2026-10-12 五存疑项主控裁决批（漂移清扫遗留收口，commit 见下）
+
+用户裁决「你来裁决」，五项拍板：
+1. **内置工具口径**：确认「**17 个已实现 / 13 个默认注册**」——实测 `tools/builtin` 恰 17 个 Tool 类（含 ImageGenTool/WebSummaryTool/MemoryTool 等）、config `builtin_tools` 13 键为注册开关真源，漂移清扫批修正员所写口径两数皆有据，**维持现状关闭**（「README 说 12」系分诊员误判，CODE_GRAPH 旧表 12 已随本批补齐 profile 四工具）。
+2. **第 42 张卡定性**：统一为「**user_id=1 的林挽夏克隆变体**（与前两张林挽夏 md5 互异，10-09 19:36 落盘）」——AGENTS §4.3 措辞向 VISION/CODEMAPS 对齐（文件实测 id=99c89c39/name=林挽夏/user_id=1）。
+3. **「41 卡差异待复核」尾巴**：**关闭**——42 张已定性（=41 策展+1 克隆变体），AGENTS §4.3 标题改「10-12 定性收口」、尾巴改「已定性，复核关闭」，README 结构树同步。
+4. **docs/INDEX.md「缺失」**：**误报关闭**——全仓宽词 grep 零引用（docs/README.md 的 INDEX 引用均指向实际存在的 history/INDEX 与 CODEMAPS/INDEX），不补建（docs/README.md 已是唯一入口，避免重复真源）。
+5. **CODE_GRAPH 补载 D16 跨域机制**：**补载**——§4.7.1 尾部新增「D16 跨域机制」两条（activate 直连扫码人绑定 / account_pacing_state 节奏账号聚合），图谱代码实况职责补齐。

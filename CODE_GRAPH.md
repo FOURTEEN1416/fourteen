@@ -515,6 +515,8 @@ PNG tEXt chunk 集成路径：`api/routers/character_routes.py:959-963` import �
 | `wechat_connector.py`（2133 行） | 连接器本体按 owner/slot 隔离：`load_session_state/qrcode(user_id, slot)`、`get_wechat_state(user_id)`、**`split_reply_for_wechat()` 回复拆分**（修连发罐头语）、**D16 扫码人守卫**（`scanner_wxid` 三路径装载+非扫码人拒绝）、图片/语音/emoji 发送、收包入口守卫（1/3/34）；（对话内追问引擎已随 D14 退役于 `a2a597b`，接话时机唯一 Owner=proactive 决策链） |
 | `__init__.py` | 导出 |
 
+**D16 跨域机制（2026-10-12，`173b2b3`）**：① **activate 直连扫码人绑定**——`api/routers/character_routes.py` 激活角色时经 `channel_paths.scanner_ids_for_user()` 枚举该账号各通道凭证扫码人（`ilink_user_id`），落 `wechat_bindings` 行 + `upsert_binding` 内存缓存 + 活实例热切（修「控制台选角色→微信生效」断裂；旧 wechat_bindings 全量同步保留为配套）；② **主动节奏按账号聚合**——`proactive/llm_proactive.py::account_pacing_state()` 单一真源（同 owner 前缀取 hours=min / last_proactive=max），`scheduler._llm_proactive_one_user` 双闸经它取值（消同账号多 bot 连发）。
+
 **遗留通道迁移**：`scripts/migrate_legacy_wechat_channel.py` 启动时一次性把旧全局
 `~/.weixin_cow_credentials.json` 迁入 admin（user_id=1）`data/wechat_sessions/1/slot0/`；
 `api/run_api.py:_autostart_wechat_connector()` 改为按 `channel_paths` 逐 user/slot 恢复

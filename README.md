@@ -194,7 +194,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
 ├── tests/                3026 后端测试通过 + 1 跳过（2026-10-12 通道语义对齐批实测，收集 3027；196 个测试文件）+ 182 前端测试
-├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 42 张——第 42 张 10-09 落盘未入 LOG，与「41 卡」口径差异待复核）
+├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 42 张 = 41 策展 + 1 张 user_id=1 林挽夏克隆变体，已定性 2026-10-12）
 └── main.py               入口
 ```
 
