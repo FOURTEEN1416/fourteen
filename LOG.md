@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-10-12 — 跨通道事实共享批（默默裁决「需要解决」+「好好研究研究，注意用户隔离和真正的库共享」）· 显式身份组真共享 · `c0244b2`
+
+- **研究先行（四链路全读透）**：① 身份判据不可推导——两通道分属两个注册账号（owner 2/4）+peer wxid 不同，库里无任何「同一真人」信号，且隔离域 (owner,peer) 正是防好友代聊串台硬约束，**绝不猜测合并**；② 读路径四面（get_facts／search_facts FTS+LIKE 下推／find_active_fact_id 向量复活复核／is_deleted_source 水位复核）；③ 写路径 add_fact_receipt 唯一写口+near-dup 等价判定（归一化同文）；④ 删路径 delete_fact 越权拒删+回收站+水位+reflections 派生清理——**共享后否认必须组内全线失效**（否则 A 否认 B 又注入回来）。
+- **实现（D15 裁决，5 文件 +615/−70）**：新表 `user_identity_map(user_key, identity_id)`（同 id=同一真人，唯一运行时写口 `link_identities()`/`scripts/link_identities.py`，幂等可审计可逆）；`identity_keys()` 单一真源组解析（无映射=[自身]，**未声明键行为 100% 不变**）；读侧四面+语义向量层（Chroma `$or` 下推+Python 组过滤+替身 TypeError 兜底）全部组化；写侧 near-dup 组化（B 抽到 A 等价事实 reinforce 原行不双插）；读侧等价收敛（`_normalize_fact_text` 提为单一真源）；删除=等价副本全歼+**全键各按各自会话进度写水位**（unlink 后仍各自生效，突变 M3 抓出的盲区补 unlink 用例）；越权拒删组化口径（同组放行）；purge 级联清 identity_map。
+- **验证**：`tests/test_identity_shared_facts.py` 17 例（共享/隔离红线/越权拒删/水位存续 unlink/等价收敛/reinforce/limit/owner_prefix）；事实相关 27 文件 501 例全绿（含 user_isolation_chain/w1_identity_authorization/sec_p0_read_gates 隔离红线）；四分块存量 2998+1 零回归+新 17 例=**3016 收集/3015 通过/1 跳过/0 失败**（195 文件）；突变验红 3/3（读侧组化回退/等价清剿关闭/水位只写行键——第三个先假绿暴露测试盲区，补 unlink 用例后命中）；ruff+mypy（改动文件）0 错（mypy 9 错全在既有债务文件）。
+- **部署+生产关联**：`c0244b2` push→服务器 pull→remote_deploy（13:24:49 重启，health 200、重启窗口 0 ERROR）→主控 SSH 建默默两通道关联（组 igrp_bfc87dd2321a69a3）→行为级复验：合并可见池 **217**（193+24）、空调/暖气/早操事实两键互见。
+- **边界声明**：chat_history 原始历史不跨通道合并（防串台核心设计+通道语境/因果标记语义）；情景层（diary/reflections）本批不动，如需扩展按同一 identity 组机制（D15 在案）。
+
 ## 2026-10-12 — 逻辑谬误根治与追问链 LLM 化批（默默三张截图报障「脑子有问题的对答」+ 裁决「下一轮对话时机由 LLM 决策，非数秒多次回复」+ 质疑三端同步）· 时间线推理 + 恒常事实召回 + 追问链退役 · `a2a597b`
 
 - **形态**：dynamic workflow 主控（GLM-5.3 规划+终审）+ GLM-5.3-Flash 子智能体 10 员（2 取证/3 修复/3 对抗验收/快检返工/全量回归）；两起 escalation（追问链越域授权 API+前端六文件、快检清单过滤已删测试文件→脚本 Amend 换轨 `dwfrun-d65ad34f`）。
