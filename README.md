@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-3158-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-3180-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
@@ -16,7 +16,7 @@
 
 > **当前状态（2026-10-11 SEC-15 根治批，三端一致 `aea3cd0`）**：10 月三批均已部署上线——**安全升级批**（两轮对抗审计 34+47 发现 + 生产 SSH 取证 + P0 修复八域，`2c3b888`）、**攻击面扫描批**（六路对抗扫描 30 发现/16 确认/9 修复 + nginx XFF 精确替换，`e949107`）、**SEC-15 根治**（vitest 3→5 + 双锁收敛，`aea3cd0`）；health/ready 200、4 worker、CI 全绿 run `38109894676`（9/9 job 含前端审计门）。上线验收与遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md` 2026-10-11。
 
-> **测试口径**（后端 = 2026-10-12 主动因果连贯批终验，本地**全量四分块**实测）：后端 **2976 passed / 1 skipped / 0 failed**（收集 **2977**=727+779+723+747+1 skip；**192 测试文件**，本批新增 `test_proactive_causality_batch` 18 例；现役角色卡 **42 张**；基线 2959+18 吻合）。✅ GitHub CI（run 见 `LOG.md` 2026-10-12 条目；backend+frontend+六 ff 闸+adr-integrity）。⚠️ **口径勘误**：`tests/test_[a-f]*.py` 等四段 glob **漏子目录 `tests/core/`**，**全量口径必须补跑它**；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> **测试口径**（后端 = 2026-10-12 逻辑谬误根治批终验，本地**全量四分块**实测）：后端 **2998 passed / 1 skipped / 0 failed**（收集 **2999**，四块之和与收集数吻合；**194 测试文件**，本批新增 `test_history_row_timestamps`/`test_memory_recall_env_facts`/`test_followup_retired` 三文件并删除旧 `test_wechat_followup`，净增 +22；现役角色卡 **42 张**；基线 2977+22 吻合）。✅ GitHub CI（run 见 `LOG.md` 2026-10-12 条目；backend+frontend+六 ff 闸+adr-integrity）。⚠️ **口径勘误**：`tests/test_[a-f]*.py` 等四段 glob **漏子目录 `tests/core/`**，**全量口径必须补跑它**；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
 > 前端 `182 passed`（vitest 5.0.3，30 文件；3→5 升级系 SEC-15 根治，tinypool 双 critical 出树）+ `tsc --noEmit` 0 错误；ruff 0.16.8 全仓 0 错（`All checks passed!`）。
 > ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 13）。**引用基线必须同时声明卡数**。
 
@@ -190,7 +190,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │       ├── store/        Zustand 3 个（authStore / characterBuilderStore / errorStore）
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
-├── tests/                2976 后端测试通过 + 1 跳过（2026-10-12 主动因果连贯批四分块实测，收集 2977；192 个测试文件）+ 182 前端测试
+├── tests/                2998 后端测试通过 + 1 跳过（2026-10-12 逻辑谬误根治批四分块实测，收集 2999；194 个测试文件）+ 182 前端测试
 ├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 42 张——第 42 张 10-09 落盘未入 LOG，与「41 卡」口径差异待复核）
 └── main.py               入口
 ```

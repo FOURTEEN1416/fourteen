@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-10-12 — 逻辑谬误根治与追问链 LLM 化批（默默三张截图报障「脑子有问题的对答」+ 裁决「下一轮对话时机由 LLM 决策，非数秒多次回复」+ 质疑三端同步）· 时间线推理 + 恒常事实召回 + 追问链退役 · `a2a597b`
+
+- **形态**：dynamic workflow 主控（GLM-5.3 规划+终审）+ GLM-5.3-Flash 子智能体 10 员（2 取证/3 修复/3 对抗验收/快检返工/全量回归）；两起 escalation（追问链越域授权 API+前端六文件、快检清单过滤已删测试文件→脚本 Amend 换轨 `dwfrun-d65ad34f`）。
+- **截图取证（08:07–08:41 全部发生在 08:58 因果批部署前）**：①因果倒置=存量已修；②「你在宿舍躺着」=决策层引用昨晚语境（08:05:32 reason 含昨晚+宿舍+电器）；③「六点出早操被当成八点正在进行」=历史行无逐条时间标注（旧口径仅>30min 间隔标注，连续聊天裸奔）；④「空调开没开」=**fact_status=extracted_not_recalled**（决定性证据 event_ledger prompt_slots 回放：事实 271 昨晚 22:03:57 落库、08:07 轮在注入面、08:13/08:36/08:37 三轮话题切换后掉出；recent_fallback 仅在召回整体为空时触发）；⑤08:14:25→08:24:31 恰隔 600s=追问链 delay2 实锤；⑥5 分钟双通道连发实证（B 通道决策自述「距上次仅5分钟」仍照发——v1.43 双闸 08:58 上线前行为）。
+- **修复（22 文件 +942/−1148）**：F1 `context_budget.annotate_history_time_gaps` 语义升级——**每行**加 `[MM-DD HH:MM]` 前缀（>30min 保留「距上一条 X」后缀）+ `local_time.TIME_REASONING_GUIDE` 三行推理指引（钟点是叙述事件/不替用户假设位置/不虚构自身环境）随锚点注入；F2 `memory_pipeline.is_durable_env_fact` 保守判据（环境名词×恒常陈述式，排除瞬时/疑问）+ `_anchor_durable_facts` 检索后补锚（上限 3、provenance=durable_anchor）+ 注入窗口保位（优先级 0.5 仅次于关系/承诺）；F3 **追问链整体退役**（用户裁决）：`FOLLOW_UP_DEFAULTS`+45s/600s 调度线程+cancel/revision 机制删净（wechat_connector −548 行），接话唯一 Owner=proactive 决策链（15min 冷却+双闸）；API follow_up 四字段/前端设置 UI/`system.ts` 类型三层同拆；拆条上限 4→**2**（超长行行内按句末标点再切，内容无损）；`tests/test_wechat_followup.py` 删除，继任守卫 `test_followup_retired.py`（静态+行为）。
+- **三端同步核查结论（用户质疑的正面回答）**：**同步**——A 档三端一致（26df08b..e1fe43f 仅 926c2fd/e0eb5cd 两个 A 档提交，服务器 HEAD=e0eb5cd、两关键文件 blob 哈希与本地逐字节一致）；运行进程 08:58:25 启动=已加载最新；B 档 e1fe43f 纯文档按纪律只到 GitHub；服务器唯一「落后」正是纪律要求的形态。截图乱象实为修复上线前的存量行为。
+- **验证**：三域对抗验收通过（突变验红+恢复核对，轮次 1/2/1）；快检 9 文件绿；全量四分块 **2999 收集 / 2998 通过 / 1 跳过 / 0 失败**（192→194 测试文件，42 卡在位）+ vitest 182/182 + ruff 0 错。
+- **部署**：`a2a597b` push→服务器 pull→remote_deploy（前端重建+12:17:22 重启）→生产复验 health/ready 200、重启窗口 0 ERROR、`wx-followup` 线程零注册、`FOLLOW_UP_DEFAULTS/_schedule_followup` 服务器 0 残留、四关键文件 blob 三端一致；生产 `data/scheduler_config.json` follow_up 块备份（`.bak-20261012-followup-retire`）后删除。
+- **遗留登记**：`proactive/runtime_plane.py` followup_budget 表/followup_used/spend 消费者已退役待后续批清（DELETION_LOG 在案）；同用户双通道事实库割裂（A 通道 18 条 vs B 通道 192 条零交集，跨通道共享是否需要待裁决）；agnes-3.0-flash 供应商抖动三次进冷却（观察项）。
+
 ## 2026-10-12 — 主动因果连贯批（默默报障「主动发出来的消息没有一并转发给 LLM，且这句话不符合常理——全链路检查」+截图）· 出站因果标记 + 决策链节奏双闸 · `e0eb5cd`
 
 - **全链路取证（截图+chat_history+决策日志三方对齐）**：角色 08:05:37 主动发「早上刚醒…记得吃早饭」（**channel=proactive 已落库 id=2517，回写链路正常**——主控初步怀疑"未落库"被数据推翻）；用户 08:06:52 回复后角色答「我是看你刚发消息 随口一问」——**历史注入对 proactive 行与普通回复无差别，模型分不清「我定时主动发的」vs「我回应用户说的」，把关怀触发原因反向归因**（用户观察"没转发给 LLM"实为"转发了但无因果标记"）；附带实证两条节奏缺陷：08:10:31 决策 reason 自述「距离上次主动发消息仅5分钟…还是发」（无最短间隔闸）、08:10:36「用户刚纠正…需迅速缓和气氛」（用户 2 分钟前刚聊完即再主动，引擎 cooldown_after_reply_minutes=15 从未被 LLM 决策链读到）。
