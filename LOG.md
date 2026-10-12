@@ -7,6 +7,20 @@
 
 ---
 
+## 2026-10-12 — 四域修复批（默默指令「发现的所有问题都需要解决，参考成熟项目，主控规划+GLM-5.3-Flash 子智能体执行」）· 多模态 iLink 协议适配 + 剧情线用户维度 + 主动去重硬闸 · `926c2fd`
+
+- **执行架构**：workflow `dwfrun-293ea88a`——1 调研员（iLink 协议六源调研）+3 并行修复员（多模态依赖调研结论串行、剧情线/去重同步开工，文件域不相交）+3 对抗验收员（逐域突变验红）+1 全量回归员；主控终审三域 diff、统一提交部署、生产运维亲自。
+- **调研留痕（GitHub-First 六源）**：zongrongjin/**weixin-ilink**（PyPI 0.3.5，MIT——types.py item 枚举/cdn.py AES-128-ECB+PKCS7 与双编码 key/media.py 构造器/client.py download_media_item+VOICE ASR/voice.py SILK 处理/examples 端到端）；photon-hq/**wechat-ilink-client**（TS 逆向：ImageItem/VoiceItem 全字段、CDN 基址 novac2c.cdn.weixin.qq.com、VoiceItem.text="Speech-to-text content (if available)"）；qufei1993/cc-weixin（154★，同构 AES/CDN）；x1h/wechat-ilink-demo（7 CGI 端点表+35s 长轮询+SILK 24kHz）；openilink.com 官方文档（消息类型 1-5 表、媒体存腾讯 CDN+AES-128-ECB、getuploadurl、24h context_token）。**关键结论：入站图片=item 2（image_item{media,aeskey}）、语音=item 3（voice_item 自带微信服务端 ASR 转写 text）**。
+- **修复三域（+1493/−88，10 文件，红测先行 66 新例）**：
+  ① **多模态 iLink 入站适配（high 断链根治）**：`parse_ilink_items` 纯函数（1=文本/2=图片/3=语音；旧协议 34/3 内联分支兼容保留）；语音直用 `voice_item.text`（微信已转写）→ 缺省走 CDN 下载 SILK+本地 ASR（配置驱动）→ 再不可得跳过不进主链；图片 CDN 下载（full_url 优先/novac2c 拼串兜底）+ AES-128-ECB/PKCS7 解密（key 三形态归一化：32 裸 hex 优先/base64(raw16)/base64(hex32)）→ 复用既有 image_data 附件链→多模态直传；全媒体路径 INFO 级 step 日志（不落原文/媒体字节）；图片不可用且无文本回固定降级话术（fallback_lines 池，无括号口语版——含括号会被非小说模式过滤器吞）；`msg_type` 丢弃路径补日志。**出站媒体未动**（六源实证 iLink 静默丢弃 bot 方向 VOICE，登记遗留）。
+  ② **剧情线用户维度（潜伏串扰根治）**：状态键 `user_key::character_id`（`_state_key`），13 个读写方法加 `user_key=""` 向后兼容参数；配置角色级共享+进度用户隔离（与亲和面键同构）；`remove_config` 角色级清理含 `::{cid}` 后缀全部用户键（防孤儿）；prompt_builder/persona_service 调用链贯通（profile_key 注入）；**门禁未动**（use_storyline=False/CHAT_AFFECTING=False/42 卡 0 配置原样——纯防将来接线爆炸）。
+  ③ **主动消息同义重复治理**：`is_duplicate_proactive` 硬闸（归一化复用 `ase_engine.normalize_message` 单一真源；完全相同 或 前 6 字相同+长度差≤3+均≤20 字的短句变体 → 拒发+`duplicate_suppressed` 账本+next_ok=now+5min 随写随落盘）；决策上下文软引导（禁同义换皮文案）。数据源 `eng._recent_messages`（commit_sent 汇合两线+load_state 恢复）跨重启去重成立。**能力边界如实登记**：开头全换的变体（"终于想起我了"vs"终于肯说话了"）硬闸拦不住，靠软引导+退避降频。
+- **验证**：三域对抗验收全过（突变验红 5 次：类型映射 2→22 七例红/解密链禁用一例红/状态键退裸键十例红/高相似阈值 99 两例红/接线禁用三例红——全中后二进制还原 hash 复验）；全量四分块 **2959 收集 / 2958 通过 / 0 失败 / 1 跳过**（基线 2893+66 新例）+ ruff 全仓 0 错；多模态域 mypy 0 错。
+- **三端部署与运维（`926c2fd`）**：push → 服务器 pull → `remote_deploy.sh`（02:00 重启）→ health/ready 200、重启窗口 0 ERROR。**生产运维两件**：event_ledger 裸键孤儿 **294 行删除**（剩 13182 全完整键，与审计精确吻合）；`data/voice_samples` 7 月遗留死数据归档至 `data/archive/voice_samples-20261012`。**评估不改码两项定案**：低置信清理=全局维护语义非串扰；wechat_context_tokens 裸 wxid=通道级凭证非用户内容。
+- **遗留登记**：① 出站媒体（bot 发语音/图片）未修——iLink 服务端静默丢弃 bot 方向 VOICE（六源实证），修复需 CDN 上传链路（getuploadurl+AES 加密），待产品裁决是否值得做；② **真实冒烟待用户配合**：微信发一张图片+一条语音，验证 `[wx][step=voice_text]`/`[step=image_downloaded]` 日志与角色读图/听语音反应——纯函数与 mock 级测试无法替代真机协议验证；③ 主动消息开头全换变体仍可能漏（能力边界）；④ 生产 ASR 未配置（voice.asr.enabled=false）——语音链路依赖微信服务端转写 text 字段，若微信不回填 text 且本地 ASR 未启用则语音跳过（有日志可查）。
+
+---
+
 ## 2026-10-11 — 时间感知+主动关怀批（默默报障「定时提醒/主动关怀/没有时间观念——参考成熟项目不要自造」）· 全链时间注入 + 低热度死循环根治 + 终审可观测 · `26df08b`
 
 - **生产取证（SSH 只读，root 亲操）**：① 提醒链路活着——`reminders` 表 0 行但「提醒到期投递检查」job 615 次正常轮询、生产真实 key 实测 `chat_with_tools`（agnes 读超时→降级 zhipu）**正确返回 set_reminder 调用且时间换算无误**、chat_history 全库无一条提醒托付话术、全部 6 份日志 `tool_gate` 零痕迹（中秋/国庆日志已轮转丢失，历史失败不可考）——定性：链路通、零可观测（L0/L1 全静默）+ 近期用户话术未触发；② 主动关怀真画像（agent_plane 账本）——10-05~07 正常发送 1/4/8 条，**10-08 起连续 4 天零发送但每天仍决策 15-25 次全部 should=False**（等待窗均 0-45min 滚动短窗非锁死）：「热度低→别打扰」指令引导成死循环，user2 10-07 抱怨「光说不做」后角色沉默 4 天；当晚 21:59-22:08 的 5 条「微信主动发送成功」经日志逐条核验全为 `[wx][step=followup_sent]` 追问链（45s+clamp 60s 双连发），**非主动消息**（主控首报误判，用户纠正，已如实更正）；③ 时间观念——`prompt_builder` 全文零时间注入（生产 [prompt] 埋点无 time 段），主链历史/跨会话尾巴/主动线 recent_messages/ASE 生成线（仅 %H:%M）全部无时间戳渲染，`sanitize_llm_history` 重建 dict 还会丢 timestamp 字段；`chat_history.created_at` 为 UTC（INSERT 全走 DEFAULT CURRENT_TIMESTAMP）。
