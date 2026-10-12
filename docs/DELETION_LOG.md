@@ -1058,3 +1058,29 @@ equire() in MessageList.tsx even though MessageList is unused
 
 ### 验证
 - `tests/test_proactive.py` 87/87（+1 防复活钉）+ ruff 全仓 0 + tsc 0 错 + vitest 177/177
+
+## 2026-10-12 · D16 通道语义批：好友自选角色机制整拆（peer_character 退役）
+
+**裁决依据**：D16（DECISION_LEDGER，用户原话「谁扫码绑定了bot就是谁自己的微信上和这个bot聊天啊」）——通道产品语义为扫码者独占一对一，「好友=独立终端用户」场景不存在（生产取证：4 条活跃会话键 peer 100%=扫码人本人，第三方消息 0 条）。09-19 裁决「让他们自己选」被 D16 取代。
+
+### 删除
+- `wechat_direct/peer_character.py` 整文件（152 行）：好友「角色」指令解析/菜单/偏好落库
+  （get/set_peer_preference、list_owner_characters、build_character_menu、
+  try_handle_character_choice、is_character_command、session_key 委托）
+- `wechat_direct/wechat_connector.py`：`_try_peer_character_flow` / `_apply_peer_character` /
+  `_send_peer_text` 三方法 + `_peer_choice_pending` 状态 + `_PEER_CHOICE_TTL` 常量 +
+  入站拦截调用块（约 -160 行）
+- `api/routers/wechat_channel_routes.py`：`GET/PUT /api/wechat/channel/peers/{wxid}/character`
+  + `GET /api/wechat/channel/characters` 三端点 + `PeerPreferenceRequest` 模型
+- `api/run_api.py`：启动时「WechatPeerPreference → pref:owner:peer 绑定缓存」加载段
+- `user_scheduler.py` `_resolve_character_id`：`pref:{owner}:{peer}` 解析层
+
+### 保留（不误伤）
+- `api/database.py` `WechatPeerPreference` 模型与 `wechat_peer_preferences` 表：历史数据 +
+  `api/lifecycle.py` 删号级联（4 处）+ `character_routes` 删卡级联仍在引用；
+  表的物理处置（DROP）归后续 schema 批（D16 边界在案）
+- `user_scheduler.py` 解析链的 `peer_bind` 层：D16 后正主 = activate 同步的**扫码人绑定**
+
+### 防复活钉
+- 新增 `tests/test_channel_owner_semantics.py`：非扫码人消息拒绝 / peer 流源码级退役守卫 /
+  角色经扫码人绑定解析 / 主动双闸按账号聚合
