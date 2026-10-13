@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-10-13 — BYOK 红队加固批（用户裁决「我要的不是报告和研判，是对抗和优化」）· 三实洞根治 · `0b4431e`
+
+- **红队 7 探针实打**（内存构造级，非纸面研判）：🔴命中三——H1 SSRF（custom api_base 无校验：169.254.169.254 云元数据/127.0.0.1:8000/10.x/192.168.x/[::1] 内网探测全构造成功）；H2 幽灵链（auto 链引用不存在供应商构造期放行运行期逐轮试坏）；H3 巨量配置（save 端点任意 JSON 全收 5120KB 落 SQLite 行+max_tokens 10^9 直透）。✅未破三（护栏钉死）：读侧递归脱敏（子层 key 全掩码）、用户网关 inherit_platform=False 平台 env 物理隔离、ReloadableLLMGateway 委托链不借平台网关。
+- **修法**：H1=用户路径 api_base 统一走 `tools/url_guard.assert_public_http_url`（DNS 解析级 SSRF 真源复用，平台自建配置不受限）；H2=get_user_llm 构造期校验 chain 逐项存在于 providers；H3=`_validate_llm_config_payload`（≤64KB/嵌套≤8 层，违规 400）+max_tokens 钳制 ≤32768。
+- **验证**：`tests/test_byok_hardening.py` 14 例（红测先行 8 红→绿，护栏 5+专断 1）；四突变验红全红（SSRF 旁路/幽灵链清空/大小钳制旁路/max_tokens 钳制旁路——M2 首轮假绿因无直接断言，补专断后命中）+恢复核对；BYOK 全域 33 例；四分块 **3152 收集/3151 通过/1 跳过/0 失败**+ruff 0 错；`0b4431e` 三端部署（15:09 重启，health/ready 200）。
+- **评估报告修订**：`docs/verification/2026-10-13-byok-reliability-assessment.md` 补记红队战果——「机制本体可靠可用」结论维持，但三洞修复前用户提交面存在 SSRF/DoS 面；BYOK 强制开关仍留产品决策。
+
 ## 2026-10-13 — 响应提速+图片拟人化+BYOK 评估批（用户三项裁决「1和2和3都做」+「BYOK 机制是否可靠可用需要评估」）· `cb9e823`
 
 - **① fallback 链提速**（用户体感实证：生产近 20 轮回复中位 16.9s/P90 27.5s/均值 17.6s，agnes 当日白等降级 13 次——20s 超时常等满+熔断 2 次/60s 攒不起来每轮硬试）：agnes `request_timeout` 20→**8s**；熔断阈值 2→**1**（单次失败立即让路）+冷却 60→**300s**（半开重探保留）；旧口径两测试改写+参数钉死守卫（`test_breaker_params_dedup_speedup`）。
