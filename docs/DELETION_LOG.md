@@ -1085,3 +1085,9 @@ equire() in MessageList.tsx even though MessageList is unused
 ### 防复活钉
 - 新增 `tests/test_channel_owner_semantics.py`：非扫码人消息拒绝 / peer 流源码级退役守卫 /
   角色经扫码人绑定解析 / 主动双闸按账号聚合
+
+## 2026-10-13 — 并行窗口在制品处置（主控清理，非删除性裁决）
+
+- **背景**：BYOK 红队加固批收尾时工作树出现非本批改动（`memory_pipeline.py` +15、`test_time_prefix_leak_guard.py` +47、`_accept_tmp/` 临时目录）——归属另一窗口的「对抗验收·存储层纵深」在制品（LOG 2026-10-13 对抗验收轮同族），实现写了一半且测试用了 pytest 9 已移除的 `pytest.ensuretemp`（红）。
+- **处置**（按 Owner 唯一制不代收编、不代改）：完整备份到 `data/archive/abandoned-wip-20261013/`（memory_pipeline.py.wip + test 文件 + _accept_tmp/test_boundary.py）→ `git checkout` 还原两文件 → 删 `_accept_tmp/` → 复跑 `test_time_prefix_leak_guard` 11/11 绿。
+- **留痕**：该窗口如需继续「存储层剥前缀兜底」，从备份恢复即可；设计意图（assistant 正文落库前 strip_time_prefixes 兜底）已在备份中完整保留。
