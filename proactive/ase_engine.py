@@ -147,10 +147,15 @@ def sanitize_message(text: str) -> str | None:
     """清洗 LLM 输出；返回 None 表示该输出不可用（调用方应回退模板）。
 
     成功时返回可直接投递的单行消息。
+    2026-10-13 对抗验收补：剥行首 ``[MM-DD HH:MM]`` 时间前缀（与主链
+    ``sanitize_reply_text`` 共用 :func:`utils.prompt_sanitize.strip_time_prefixes`
+    真源）——LLM 输出内容原则上不可信，主动链同等风险面。
     """
     if not text:
         return None
-    cleaned = text.strip().strip('"').strip("'").strip("“”‘’")
+    from utils.prompt_sanitize import strip_time_prefixes
+
+    cleaned = strip_time_prefixes(text.strip().strip('"').strip("'").strip("“”‘’"))
     # 多行 = 典型的「思考 + 正文」结构，取最后一段作为候选；但整段总长
     # 仍受限 —— 推理 dump 往往极长，不能靠「取末行」把它抢救成合法消息。
     # 阈值取 2 倍上限：prompt 要求 ≤20 字，任何超过 2 倍上限的多行输出

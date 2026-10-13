@@ -75,3 +75,27 @@ def test_guide_forbids_writing_prefix():
     from utils.local_time import time_anchor_line
     lines = [ln for ln in time_anchor_line().splitlines() if ln.strip()]
     assert len(lines) <= 4, f"指引不得超过 3 行，实际 {len(lines)-1} 行"
+
+
+# ── 4. 主动链清洗同真源（2026-10-13 对抗验收补）────────────────
+
+
+def test_ase_sanitize_message_strips_prefix():
+    """主动链 sanitize_message 与主链共用剥离真源（LLM 输出不可信同等风险面）。"""
+    from proactive.ase_engine import sanitize_message
+
+    assert sanitize_message("[10-13 13:07] 吃早饭了吗") == "吃早饭了吗"
+    # 叠加前缀
+    assert sanitize_message("[10-13 13:07] [10-13 13:07] 想你啦") == "想你啦"
+    # 合法内容不误伤
+    assert sanitize_message("[流泪] 想你了") == "[流泪] 想你了"
+
+
+def test_both_sanitizers_share_source():
+    """两条清洗链必须走同一剥离真源（防再次分叉）。"""
+    import inspect
+
+    from proactive import ase_engine
+
+    src = inspect.getsource(ase_engine.sanitize_message)
+    assert "strip_time_prefixes" in src
