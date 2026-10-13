@@ -535,6 +535,32 @@ async def get_user_llm_config(
     return {"source": "none", "llm": {}}
 
 
+def _validate_llm_config_payload(llm_cfg: dict) -> None:
+    """用户 LLM 配置写入钳制（2026-10-13 BYOK 红队 H3）。
+
+    探针实证：save_user_llm_config 此前对 req.config 任意 JSON 全收——
+    5120KB junk 可直落 users.llm_config 行（SQLite 行放大 + 读侧脱敏开销）。
+    钳制：总序列化 ≤64KB、嵌套 ≤8 层。违规 raise ValueError（端点转 400）。
+    """
+    import json as _json
+
+    blob = _json.dumps(llm_cfg, ensure_ascii=False)
+    if len(blob.encode("utf-8")) > 64 * 1024:
+        raise ValueError("llm 配置过大（>64KB）")
+
+    def _depth(o: Any, d: int = 0) -> int:
+        if d > 8:
+            return d
+        if isinstance(o, dict):
+            return max(( _depth(v, d + 1) for v in o.values()), default=d)
+        if isinstance(o, list):
+            return max((_depth(v, d + 1) for v in o), default=d)
+        return d
+
+    if _depth(llm_cfg) > 8:
+        raise ValueError("llm 配置嵌套过深（>8 层）")
+
+
 @router.post("/api/user/llm-config")
 async def save_user_llm_config(
     req: ConfigUpdateRequest,
@@ -551,6 +577,12 @@ async def save_user_llm_config(
     llm_cfg = req.config.get("llm") if isinstance(req.config, dict) else None
     if not llm_cfg or not isinstance(llm_cfg, dict):
         raise HTTPException(400, "Missing 'llm' in config")
+
+    # BYOK 红队 H3：写入前钳制（大小/嵌套），违规 400
+    try:
+        _validate_llm_config_payload(llm_cfg)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     # 合并：若新配置未提供 api_key（空字符串），保留原配置中的 api_key
     existing = user.llm_config or {}

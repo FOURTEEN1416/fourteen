@@ -63,6 +63,21 @@ def _build_backend(
     temperature = config.get("temperature", 0.85)
     max_tokens = config.get("max_tokens", 2048)
 
+    # BYOK 加固（2026-10-13 红队 H1）：用户提交面（inherit_platform=False）
+    # 的 api_base 必须指向公网——复用统一 SSRF 真源 tools/url_guard（DNS
+    # 解析级判定，十进制/十六进制 IP 字面量同拦）。平台自建配置不受限
+    # （运维可能合法指向内网网关）。探针实证：169.254.169.254（云元数据）、
+    # 127.0.0.1/10.x/192.168.x（内网探测）此前全部构造成功。
+    if not inherit_platform and api_base:
+        from tools.url_guard import assert_public_http_url
+
+        reason = assert_public_http_url(str(api_base))
+        if reason:
+            raise ValueError(f"api_base 校验失败（{reason}）：用户供应商端点必须指向公网地址")
+
+    # BYOK 加固（红队 3b）：用户可提交 10^9 级 max_tokens 直透供应商。
+    max_tokens = max(1, min(int(max_tokens or 2048), 32768))
+
     if provider == "auto":
         chain = config.get("fallback_chain") or None
         provider_configs = config.get("providers") or None
@@ -277,6 +292,13 @@ def get_user_llm(user_id: int, user_config: dict | None) -> Any:
         if resolved == "auto":
             providers = config_dict.get("providers") or {}
             chain = config_dict.get("fallback_chain") or list(providers)
+            # BYOK 加固（2026-10-13 红队 H2）：链上供应商必须真实存在于
+            # providers（幽灵键此前构造期放行、运行期逐轮试坏）。
+            ghosts = [p for p in chain if p not in providers]
+            if ghosts:
+                raise ValueError(
+                    f"用户自动供应商链含未配置项: {','.join(ghosts)}（fallback_chain 逐项必须在 providers 中）"
+                )
             if not chain or any(not (providers.get(p) or {}).get("api_key") for p in chain):
                 raise ValueError("用户自动供应商链必须逐项配置自己的凭证")
             config_dict["fallback_chain"] = chain
