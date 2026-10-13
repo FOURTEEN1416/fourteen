@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-10-13 — 身份锚强化+遗留通道根治批（用户报障截图「又分不清谁是谁」+ 裁决「全面修复」）· 被否认称呼禁令 + 全局通道 fail-closed · `ec49c01`
+
+- **架构污染源审计（用户质疑 DECISION_LEDGER 存在非独立用户残留）**：对抗定性 5 项——🔴真污染源 1：`main.py:187` 控制台模式 `WeChatConnector(user_manager)` 不传 owner → 写全局单例槽（`_connector`），绕过 Registry/配额/扫码人守卫（09-19「别人连管理员通道」的架构残根，D16 后无合法语义）；🟡admin 面残留 2：`get_wechat_state()` 无参形态 + `/api/admin/wechat` 兼容窗口；🟢合法多用户 2：平台 LLM 补贴（D17 已裁保留）+ per-user×slot 表（生产 6 通道各归各账号）。本批根治真污染源，admin 面随单例消亡自然空转（登记后续批清）。
+- **「夏夏」链取证（截图驱动，全库扫描定性）**：卡名林挽夏、42 卡 0 处「夏夏」、画像 nickname 空、事实层/反思/快照 0 命中——**夏夏不是注入的，是模型自造昵称安在用户头上**（13991 用户昨日质问「谁是夏夏」）。身份锚（`0008bd1`）部署后 15:28 复犯：决策 reason 明知「用户指出角色混淆身份…避免错误称呼」，输出 message 仍叫「夏夏」——**历史注意力惯性压过单次硬规则**（用户引用错误称呼质问时，「夏夏」作为历史 token 被当既有语境）。
+- **修 ①被否认称呼禁令**：`detect_denied_nicknames` 纯函数（用户消息显式否认句式「谁是X/我不是X/别叫我X」，剥「什么/一个」前缀归一，宁漏勿错，上限 5 词）→ `build_proactive_context` 注入【被否认称呼】禁令段（任何场景含道歉/复盘/引用都不得再用）→ DECISION_SYSTEM 硬规则 9（用户引用≠用户接受）。🔴 突变事故：重构时删了扫描游标推进行 → 死循环挂死两轮 pytest（进程残留又污染后续测试）——补无条件推进+注释钉死。
+- **修 ②遗留全局通道 fail-closed**：`WeChatConnector.__init__` 对 `owner_user_id=None` 直接 raise（红测先行）；30 个测试构造点批量补 `owner_user_id=42`；3 个废除语义测试改写（裸 peer 会话键→owner 键、last_user 回退→显式 to_user+拒绝双向钉死、legacy 不适用守卫→构造拒绝确认）。
+- **验证**：主动域+connector 域 18 文件 263 例绿；双突变验红（fail-closed 拆除/否认检测禁用）+恢复核对；四分块 **3159 收集/3158 通过/1 跳过/0 失败**（+14）+ruff 0 错；`ec49c01` 三端部署（16:55 重启，health/ready 200、重启窗口 0 ERROR）。
+- **下批登记**：`get_wechat_state()` 无参形态与 `/api/admin/wechat` 兼容窗口随全局单例消亡可清（admin 运维面语义）；若用户再报类似混淆，优先查【被否认称呼】段是否命中（event_ledger prompt_slots）。
+
 ## 2026-10-13 — BYOK 强制开关裁决（默默：「不需要强制」）· 产品决策落账 · 零代码变更
 
 - **裁决**：`llm.byok_required` **保持关闭**——BYOK 永远可选：用户填了自己的 key 即走自己的（`select_request_llm` 优先用户配置、`get_user_llm` fail-closed 隔离），未填 key 的用户继续使用平台 key。评估报告与 DECISION_LEDGER 中的「留产品决策」项就此闭环。
