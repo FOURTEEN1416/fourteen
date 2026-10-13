@@ -17,6 +17,7 @@ import logging
 import re
 import threading
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -127,6 +128,12 @@ def _user_key_from_session(session_id: str) -> str:
 # 查询词面命中——检索后一律补锚保证注入（与 recent_fallback 互补）。
 
 DURABLE_ANCHOR_LIMIT = 3
+
+# ── 衰减写回（2026-10-12 记忆域批 item1-c：confidence 只升不降根治）──
+# 下限高于检索过滤线 0.3 与清理线（不把行推入检索不可见区）；单轮限速防
+# 大库单次维护写放大。
+DECAY_WRITEBACK_FLOOR = 0.35
+DECAY_WRITEBACK_MAX_ROWS = 500
 
 _DURABLE_ENV_NOUNS = (
     # 家电 / 设施
@@ -703,6 +710,21 @@ class MemoryPipeline:
                 {"fact": text, "fact_id": r.get("id"), "recall": "durable_anchor"}
             )
 
+    def _row_decay_weight(self, row: Any) -> float:
+        """行的遗忘模型检索权重（Generative Agents recency 语义，arXiv:2304.03442）。
+
+        2026-10-12 召回重排消费面：confidence / access_count / updated_at 三因子
+        此前在召回排序零消费者——「越回忆越牢、久未强化者沉底」只在删除路径生效。
+        """
+        try:
+            return self.forgetting.retrieval_weight(
+                float(row.get("confidence") or 0.0),
+                _fact_age_days(row.get("updated_at")),
+                int(row.get("access_count") or 0),
+            )
+        except Exception:  # noqa: BLE001
+            return 0.0
+
     def _merge_fact_recalls(
         self,
         *,
@@ -712,7 +734,9 @@ class MemoryPipeline:
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """把关键词路与向量路召回合并为一份事实列表 + 出处账。
 
-        顺序：关键词/FTS 命中在前（精确匹配优先），语义近邻补后。
+        顺序：关键词/FTS 命中在前（精确匹配优先，2026-09-26 契约不动），
+        语义近邻补后；**层内**按遗忘模型衰减权重降序稳定重排（2026-10-12：
+        conf/access/updated 三因子进排序，久未强化者沉底，等权重保持喂入序）。
         去重：按主库 `fact_id` 与规范文本双重判据。
         复核：向量命中只带文本不带主键，必须回主库确认仍是本人的 active 事实，
         否则丢弃——已删除事实不得靠向量残留复活。
@@ -746,12 +770,18 @@ class MemoryPipeline:
                 index_by_id[hit_id] = pos
                 merged[pos]["id"] = hit_id
 
+        # keyword 路：先整路校验收集，再层内按衰减权重稳定降序（2026-10-12）。
+        kw_rows: list[dict[str, Any]] = []
         for row in structured or []:
             if not isinstance(row, dict):
                 continue
             text = str(row.get("fact") or row.get("content") or "").strip()
             if not text:
                 continue
+            kw_rows.append(row)
+        kw_rows.sort(key=self._row_decay_weight, reverse=True)  # 稳定：等权重保持喂入序
+        for row in kw_rows:
+            text = str(row.get("fact") or row.get("content") or "").strip()
             raw_id = row.get("id")
             _remember(
                 text,
@@ -760,6 +790,8 @@ class MemoryPipeline:
                 base=row,
             )
 
+        # vector 路：复核收集 (text, fact_id)，经组感知回读取权重后层内降序。
+        vec_hits: list[tuple[str, int]] = []
         for item in vector or []:
             if not isinstance(item, dict):
                 continue
@@ -773,9 +805,31 @@ class MemoryPipeline:
                 continue
             if fact_id is None:
                 continue
+            vec_hits.append((text, fact_id))
+        vec_hits = self._reorder_vec_hits_by_decay_weight(vec_hits, user_key)
+        for text, fact_id in vec_hits:
             _remember(text, fact_id, "vector")
 
         return merged, provenance
+
+    def _reorder_vec_hits_by_decay_weight(
+        self, vec_hits: list[tuple[str, int]], user_key: str
+    ) -> list[tuple[str, int]]:
+        """向量路层内按衰减权重稳定降序；缺组感知回读面（旧替身）保持喂入序。"""
+        fetch = getattr(self.sm, "get_facts_by_ids", None)
+        if not vec_hits or fetch is None:
+            return vec_hits
+        try:
+            rows = fetch([fid for _, fid in vec_hits], user_key=user_key)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("向量路权重回读失败，保持喂入序: %s", e)
+            return vec_hits
+        weight_by_id = {int(r["id"]): self._row_decay_weight(r) for r in rows}
+        return sorted(
+            vec_hits,
+            key=lambda h: weight_by_id.get(int(h[1]), 0.0),
+            reverse=True,
+        )
 
     def retrieve_context(
         self,
@@ -915,6 +969,10 @@ class MemoryPipeline:
         try:
             # 1. 遗忘
             self._apply_forgetting()
+
+            # 1.5 衰减写回（2026-10-12）：confidence-only（不刷 updated_at 衰减
+            # 时钟）；恒常事实豁免；下限 DECAY_WRITEBACK_FLOOR；单轮 ≤500 行。
+            self._decay_writeback()
 
             # 2. 生成每日摘要 — 按会话分桶，禁止全员混写（2026-09-21 隔离）
             from datetime import timedelta
@@ -1203,41 +1261,55 @@ class MemoryPipeline:
     # ── 遗忘模型路由 ─────────────────────────────────────
 
     def _apply_forgetting(self) -> int:
-        """根据遗忘模型路由应用遗忘"""
+        """根据遗忘模型路由应用遗忘。
+
+        2026-10-12 遗忘链根治：旧实现经 get_facts(``updated_at DESC LIMIT 1000``)
+        只评估**最新窗**——存量超窗后最老事实永生。现走
+        ``iter_active_facts_oldest_first`` id 升序游标全覆盖（删除与游标前向
+        推进安全共存）；缺游标面的旧替身/旧库回退旧 get_facts 路径（兼容面，
+        test_memory_pipeline 系替身仍工作）。
+        """
+        iter_fn = getattr(self.sm, "iter_active_facts_oldest_first", None)
+        if iter_fn is not None:
+            batches: Iterable[list[dict[str, Any]]] = iter_fn(batch_size=200)
+        else:
+            try:
+                batches = [self.sm.get_facts(min_confidence=0.0, limit=1000, user_key=None)]
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to load facts for forgetting: %s", e)
+                return 0
         forgotten = 0
         try:
-            facts = self.sm.get_facts(min_confidence=0.0, limit=1000, user_key=None)
+            for batch in batches:
+                for fact in batch:
+                    # 2026-09-22 修复：时间输入统一经 _fact_age_days —— 旧实现 naive/aware
+                    # 相减恒抛 TypeError 被 except 吞成 30.0，按龄遗忘整体失效（见其 docstring）。
+                    days_old = _fact_age_days(fact.get("updated_at"))
+
+                    importance = fact.get("confidence", 0.5)
+                    access_count = fact.get("access_count", 0)
+
+                    should_remove = False
+                    if self._forgetting_model == "exponential":
+                        # B4：access_count 进入权重（越回忆越牢）
+                        should_remove = self.forgetting.should_delete(
+                            importance, days_old, access_count=access_count
+                        )
+                    elif self._forgetting_model == "threshold":
+                        should_remove = not self.scorer.should_retain(
+                            importance, days_old, access_count
+                        )
+
+                    if should_remove:
+                        try:
+                            # B5：进回收站再删主表行（数据只增不减，可 restore）
+                            uk = fact.get("user_key", "") or ""
+                            self.sm.delete_fact(fact["id"], recycle=True, user_key=uk)
+                            forgotten += 1
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning("Failed to delete fact (id=%s): %s", fact.get("id"), e)
         except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to load facts for forgetting: %s", e)
-            return 0
-
-        for fact in facts:
-            # 2026-09-22 修复：时间输入统一经 _fact_age_days —— 旧实现 naive/aware
-            # 相减恒抛 TypeError 被 except 吞成 30.0，按龄遗忘整体失效（见其 docstring）。
-            days_old = _fact_age_days(fact.get("updated_at"))
-
-            importance = fact.get("confidence", 0.5)
-            access_count = fact.get("access_count", 0)
-
-            should_remove = False
-            if self._forgetting_model == "exponential":
-                # B4：access_count 进入权重（越回忆越牢）
-                should_remove = self.forgetting.should_delete(
-                    importance, days_old, access_count=access_count
-                )
-            elif self._forgetting_model == "threshold":
-                should_remove = not self.scorer.should_retain(
-                    importance, days_old, access_count
-                )
-
-            if should_remove:
-                try:
-                    # B5：进回收站再删主表行（数据只增不减，可 restore）
-                    uk = fact.get("user_key", "") or ""
-                    self.sm.delete_fact(fact["id"], recycle=True, user_key=uk)
-                    forgotten += 1
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("Failed to delete fact (id=%s): %s", fact.get("id"), e)
+            logger.warning("Failed forgetting scan: %s", e)
 
         if forgotten:
             logger.info("Forgotten %d facts (model=%s)", forgotten,
@@ -1407,27 +1479,116 @@ class MemoryPipeline:
             logger.error("归档工作记忆失败，保留数据: %s", e)
             return False
 
-    def _cleanup_low_confidence_facts(self) -> None:
-        """分批清理低置信度事实（防止大量删除阻塞）"""
+    def _decay_writeback(self) -> int:
+        """衰减权重写回 confidence（遗忘模型的「软」半边，与判死互补）。
+
+        2026-10-12 记忆域批 item1-c：confidence 此前全部变更路径都是抬升
+        （near-dup max / curator），``ForgettingManager.retrieval_weight`` 零写回者
+        ——「久未强化者沉底」只在删除路径生效。本方法按衰减权重把**未判死**的
+        行置信度写回下降：
+        - confidence-only UPDATE（不刷 updated_at——衰减时钟自刷新=永生）；
+        - 恒常事实（``is_durable_env_fact``）豁免：居住环境等长期属性不衰减；
+        - 下限 ``DECAY_WRITEBACK_FLOOR``：不把行推入检索过滤线以下（已在底线
+          及以下的行不抬升不写回，判死仍由遗忘链 ``should_delete`` 承担）；
+        - 单轮限速 ``DECAY_WRITEBACK_MAX_ROWS`` 行（id 升序，最老先写）；
+        - 缺游标/回写面的旧替身：hasattr 静默跳过（不得进异常兜底产告警噪声）。
+        """
+        iter_fn = getattr(self.sm, "iter_active_facts_oldest_first", None)
+        if iter_fn is None or not hasattr(self.sm, "get_connection"):
+            return 0
+        written = 0
         try:
-            batch_size = 50
-            max_batches = 20  # 安全上限，防止无限循环
+            for batch in iter_fn(batch_size=200):
+                updates: list[tuple[float, int]] = []
+                budget = DECAY_WRITEBACK_MAX_ROWS - written
+                for row in batch:
+                    if len(updates) >= budget:
+                        break
+                    if is_durable_env_fact(str(row.get("fact") or "")):
+                        continue
+                    try:
+                        conf = float(row.get("confidence") or 0.0)
+                    except (TypeError, ValueError):
+                        continue
+                    if conf <= DECAY_WRITEBACK_FLOOR:
+                        continue
+                    days = _fact_age_days(row.get("updated_at"))
+                    weight = self.forgetting.retrieval_weight(
+                        conf, days, int(row.get("access_count") or 0)
+                    )
+                    if weight >= conf:
+                        continue
+                    new_conf = max(weight, DECAY_WRITEBACK_FLOOR)
+                    if new_conf >= conf:
+                        continue
+                    updates.append((round(new_conf, 6), int(row["id"])))
+                if updates:
+                    with self.sm.get_connection(write=True) as conn:
+                        conn.executemany(
+                            "UPDATE user_facts SET confidence = ? WHERE id = ?",
+                            updates,
+                        )
+                        conn.commit()
+                    written += len(updates)
+                if written >= DECAY_WRITEBACK_MAX_ROWS:
+                    break
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Decay writeback failed: %s", e)
+            return written
+        if written:
+            logger.info("Decay writeback: %d facts (floor=%.2f)", written, DECAY_WRITEBACK_FLOOR)
+        return written
+
+    def _cleanup_low_confidence_facts(self) -> None:
+        """清理低置信度事实（游标全覆盖；缺面回退旧最新窗路径兼容替身）。
+
+        2026-10-12 遗忘链根治：旧实现固定取**最新 50 条**、首窗无低置信即
+        break 早退——老页低置信行永生。游标面可用时扫全部 active 行；旧替身
+        （test_memory_pipeline 系）回退旧窗口算法保持兼容。
+        """
+        iter_fn = getattr(self.sm, "iter_active_facts_oldest_first", None)
+        if iter_fn is None:
+            # 兼容路径：旧最新窗算法原样保留（替身依赖）
+            try:
+                batch_size = 50
+                max_batches = 20  # 安全上限，防止无限循环
+                total_deleted = 0
+                for _ in range(max_batches):
+                    facts = self.sm.get_facts(min_confidence=0.0, limit=batch_size)
+                    if not facts:
+                        break
+                    ids_to_delete = [
+                        f["id"] for f in facts
+                        if f.get("confidence", 0) < self._config.fact_min_confidence
+                    ]
+                    if not ids_to_delete:
+                        break
+                    for fid in ids_to_delete:
+                        self.sm.delete_fact(fid)
+                    total_deleted += len(ids_to_delete)
+                    if len(facts) < batch_size:
+                        break
+                if total_deleted:
+                    logger.info("Cleaned up %d low confidence facts", total_deleted)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Cleanup failed: %s", e)
+            return
+        try:
+            threshold = float(self._config.fact_min_confidence)
             total_deleted = 0
-            for _ in range(max_batches):
-                facts = self.sm.get_facts(min_confidence=0.0, limit=batch_size)
-                if not facts:
-                    break
-                ids_to_delete = [
-                    f["id"] for f in facts
-                    if f.get("confidence", 0) < self._config.fact_min_confidence
-                ]
-                if not ids_to_delete:
-                    break
-                for fid in ids_to_delete:
-                    self.sm.delete_fact(fid)
-                total_deleted += len(ids_to_delete)
-                if len(facts) < batch_size:
-                    break
+            for batch in iter_fn(batch_size=200):
+                for f in batch:
+                    try:
+                        conf = float(f.get("confidence") or 0.0)
+                    except (TypeError, ValueError):
+                        continue
+                    if conf >= threshold:
+                        continue
+                    try:
+                        self.sm.delete_fact(int(f["id"]))
+                        total_deleted += 1
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("Failed to delete low-confidence fact (id=%s): %s", f.get("id"), e)
             if total_deleted:
                 logger.info("Cleaned up %d low confidence facts", total_deleted)
         except Exception as e:  # noqa: BLE001

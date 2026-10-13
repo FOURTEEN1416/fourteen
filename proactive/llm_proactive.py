@@ -71,6 +71,14 @@ MIN_PROACTIVE_INTERVAL_MINUTES = 60.0
 # 用户最后一条消息后多久内不主动开口（分钟；对齐引擎 cooldown 语义）
 PROACTIVE_COOLDOWN_AFTER_REPLY_MINUTES = 15.0
 
+# ── 未回复连击硬闸（2026-10-12 批，对标 astrbot max_unanswered_times=4，
+#    只取语义不抄代码）──
+# 用户连续 N 条主动消息零回应 → 决策链确定性停发。方向为**更克制**（停发闸），
+# 非 D14 已退役的「定时再补一句」追问机制；组内任一通道被回复即清零
+# （account_unanswered_streak 取最小，见下）。此前未回复维只有 response_rate
+# 软提示词，48h 关怀下限与无限容忍组合下「用户永久沉默仍每日关怀」无止损。
+MAX_UNANSWERED_PROACTIVE = 4
+
 
 def _to_utc(dt):
     """aware → UTC；naive → 按北京墙钟解释后转 UTC（now_local 常态分支是 naive）。"""
@@ -87,14 +95,18 @@ def should_skip_proactive_decision(
     hours_since_last_chat: float,
     last_proactive_at,
     now=None,
+    unanswered_streak: int = 0,
 ) -> tuple[bool, str]:
     """决策前确定性节奏闸：返回 (是否跳过, 账本 reason)。
 
     - min_interval：距上次**主动投递**不足 60 分钟 → 跳过（骚扰硬闸，优先）；
     - cooldown_after_reply：距用户最后一条消息不足 15 分钟 → 跳过（对话刚
       结束就让用户喘口气，追问/缓和式主动都属变相轰炸）；
+    - unanswered_limit：连续 ``MAX_UNANSWERED_PROACTIVE`` 条主动零回应 → 跳过
+      （未回复维唯一硬闸；用户在任一同 owner 通道开口即由 on_chat 清零）；
     - ``last_proactive_at`` 为引擎 UTC aware 时间（``commit_sent`` 投递成功
-      才更新）；None → 只查冷却。两闸都未命中 → (False, "")。
+      才更新）；None → 只查冷却。闸都未命中 → (False, "")。
+    ``unanswered_streak`` 默认 0：不含该参的既有调用方行为不变。
     """
     try:
         hours = float(hours_since_last_chat or 0.0)
@@ -110,6 +122,12 @@ def should_skip_proactive_decision(
             return True, "min_interval"
     if hours * 60.0 < PROACTIVE_COOLDOWN_AFTER_REPLY_MINUTES:
         return True, "cooldown_after_reply"
+    try:
+        streak = max(0, int(unanswered_streak or 0))
+    except (TypeError, ValueError):
+        streak = 0
+    if streak >= MAX_UNANSWERED_PROACTIVE:
+        return True, "unanswered_limit"
     return False, ""
 
 
@@ -121,13 +139,19 @@ def account_pacing_state(hub, user_key: str, eng) -> tuple[float, object]:
     聚合口径：hours_since_last_chat 取组内最小（任一通道聊过都算聊过）、
     last_proactive_at 取组内最大（任一通道刚投递即全员进入间隔闸）。
     hub 缺 known_user_keys / 单键账号 → 行为与旧口径逐字节等价。
+
+    🔴 基准字段纠偏（2026-10-12）：last_proactive_at 读**投递基准**
+    ``_last_delivery_time``（仅 commit_sent 投递成功才推进）。``_last_proactive_time``
+    会被 on_chat（用户每说一句话）拨到当前时刻，读它等于把 min_interval 闸
+    退化成「用户刚说过话就别主动」，与 cooldown_after_reply 重合（生产实证
+    min_interval 拦 87 条 vs cooldown 仅 2 条）。
     """
     hours = (
         eng._hours_since_last_chat()  # noqa: SLF001
         if eng is not None and hasattr(eng, "_hours_since_last_chat")
         else 99.0
     )
-    last_proactive_at = getattr(eng, "_last_proactive_time", None)
+    last_proactive_at = getattr(eng, "_last_delivery_time", None)
     try:
         owner_prefix = split_owner(str(user_key))[0]
         if owner_prefix and hasattr(hub, "known_user_keys"):
@@ -137,7 +161,7 @@ def account_pacing_state(hub, user_key: str, eng) -> tuple[float, object]:
                 other = hub.get(k)
                 if other is None:
                     continue
-                t = getattr(other, "_last_proactive_time", None)
+                t = getattr(other, "_last_delivery_time", None)
                 if t is not None and (last_proactive_at is None or t > last_proactive_at):
                     last_proactive_at = t
                 if hasattr(other, "_hours_since_last_chat"):
@@ -150,6 +174,37 @@ def account_pacing_state(hub, user_key: str, eng) -> tuple[float, object]:
     except Exception:  # noqa: BLE001
         pass
     return float(hours or 0.0), last_proactive_at
+
+
+def account_unanswered_streak(hub, user_key: str, eng) -> int:
+    """未回复连击按同 owner 组聚合：取组内**最小**（2026-10-12）。
+
+    口径与 account_pacing_state 同族但方向相反：连击是「没人理」信号，组内
+    任一通道被回复（on_chat 清零）即视为已回复，避免 D16 多通道场景把
+    「另一通道聊过」误判成本通道持续零回应。缺失字段/异常 → 0（不拦，宁宽
+    勿误）；hub 缺 known_user_keys / 单键账号 → 本引擎值。
+    """
+
+    def _of(e) -> int:
+        try:
+            return max(0, int(getattr(e, "_unanswered_streak", 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    streak = _of(eng) if eng is not None else 0
+    try:
+        owner_prefix = split_owner(str(user_key))[0]
+        if owner_prefix and hasattr(hub, "known_user_keys"):
+            for k in hub.known_user_keys():
+                if k == user_key or split_owner(str(k))[0] != owner_prefix:
+                    continue
+                other = hub.get(k)
+                if other is None:
+                    continue
+                streak = min(streak, _of(other))
+    except Exception:  # noqa: BLE001
+        pass
+    return streak
 
 # ── 决策线出站去重硬闸（2026-10-12 批）────────────────────────
 #
@@ -202,6 +257,46 @@ def is_duplicate_proactive(
         ):
             return True
     return False
+
+
+def recent_messages_for_dedup(hub, user_key: str, eng) -> list[str]:
+    """决策线去重比对集按同 owner 组聚合（2026-10-12）。
+
+    单引擎取样面只看本通道 ``_recent_messages`` —— 同账号兄弟通道刚发过的
+    同义换皮对内容闸不可见。聚合口径：本引擎尾 ``PROACTIVE_DEDUP_WINDOW`` +
+    同 owner 其他引擎各尾同窗合并（单引擎仍截尾窗，合并集 ≤ 窗口×通道数）。
+    hub 缺 known_user_keys / 单键账号 → 返回集与旧单引擎口径逐字节等价。
+
+    🔴 接线纪律：调用方必须以 ``window=max(PROACTIVE_DEDUP_WINDOW, len(merged))``
+    调 ``is_duplicate_proactive`` —— 固定 window 会把合并集前半段（通常是本
+    引擎消息）整段挤出，恰在目标场景退化为单引擎现状。
+    """
+
+    def _tail(e) -> list[str]:
+        try:
+            return [
+                str(m)
+                for m in list(getattr(e, "_recent_messages", []) or [])[-PROACTIVE_DEDUP_WINDOW:]
+            ]
+        except Exception:  # noqa: BLE001
+            return []
+
+    merged: list[str] = []
+    if eng is not None:
+        merged.extend(_tail(eng))
+    try:
+        owner_prefix = split_owner(str(user_key))[0]
+        if owner_prefix and hasattr(hub, "known_user_keys"):
+            for k in hub.known_user_keys():
+                if k == user_key or split_owner(str(k))[0] != owner_prefix:
+                    continue
+                other = hub.get(k)
+                if other is None:
+                    continue
+                merged.extend(_tail(other))
+    except Exception:  # noqa: BLE001
+        pass
+    return merged
 
 
 def clamp_wait_minutes(wait: Any) -> int | None:

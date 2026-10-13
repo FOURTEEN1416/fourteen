@@ -237,3 +237,186 @@ class TestSoftGuidance:
             local_time="2026-10-12 10:00 Monday",
         )
         assert "同义换皮" not in ctx
+
+
+# ══════════════════════════════════════════════════════════
+#  ④ 去重取样面扩同 owner 组（2026-10-12 聚合根因批）
+#
+#  比对集此前只取本引擎 _recent_messages —— 同账号 B 通道在 A 通道发过同义
+#  换皮后内容闸不可见（生产 duplicate_suppressed 30 天=0 的取样盲区成分）。
+#  🔴 挤出陷阱（对抗评审修订）：is_duplicate_proactive 的 [-window:] 切片在
+#  固定 window 下会把合并集较早条目整段挤出 —— 恰在目标场景（活跃通道+即将
+#  发言的兄弟通道）退化为现状。接线必须 window=max(PROACTIVE_DEDUP_WINDOW,
+#  len(merged))；TestSqueezeTrap 锁死。
+# ══════════════════════════════════════════════════════════
+
+DUP_MSG = "早安呀今天也要加油"
+NIGHT_MSG = "晚安，梦里见"
+
+
+def _varied(prefix: str, n: int) -> list[str]:
+    """n 条互异文案（去重闸的「背景板」，互不同前缀）。"""
+    return [f"{prefix}{i}号风好大记得多穿衣服呀" for i in range(n)]
+
+
+class _GroupHub:
+    def __init__(self, engines: dict):
+        self._engines = engines
+
+    def get(self, key):
+        return self._engines.get(key)
+
+    def known_user_keys(self):
+        return list(self._engines)
+
+
+def _run_hub(sched, hub, key):
+    sched._llm_proactive_one_user(hub, key)
+
+
+class TestDedupSampleHelper:
+    def test_same_owner_messages_merged(self):
+        """① 同 owner 兄弟通道的消息进比对集（现状无此函数 → 红）。"""
+        from proactive.llm_proactive import recent_messages_for_dedup
+
+        eng_b = _FakeEngine(recent=["我自己刚说过的话"])
+        eng_a = _FakeEngine(recent=[DUP_MSG])
+        hub = _GroupHub({
+            "7:wx_b@im.wechat": eng_b,
+            "7:wx_a@im.wechat": eng_a,
+        })
+        merged = recent_messages_for_dedup(hub, "7:wx_b@im.wechat", eng_b)
+        assert DUP_MSG in merged, "同 owner 兄弟通道消息必须进比对集"
+
+    def test_other_owner_not_included(self):
+        """② 不同 owner 引擎的消息不进比对集（隔离不串扰）。"""
+        from proactive.llm_proactive import recent_messages_for_dedup
+
+        eng_b = _FakeEngine(recent=["本通道消息"])
+        eng_other = _FakeEngine(recent=[DUP_MSG])
+        hub = _GroupHub({
+            "7:wx_b@im.wechat": eng_b,
+            "9:wx_other@im.wechat": eng_other,
+        })
+        merged = recent_messages_for_dedup(hub, "7:wx_b@im.wechat", eng_b)
+        assert DUP_MSG not in merged, "其他账号的消息不得混入比对集"
+
+    def test_hub_without_known_keys_equivalent_to_legacy(self):
+        """③a 无 known_user_keys 的 hub → 返回集与旧单引擎口径逐字节等价。"""
+        from proactive.llm_proactive import (
+            PROACTIVE_DEDUP_WINDOW,
+            recent_messages_for_dedup,
+        )
+
+        eng = _FakeEngine(recent=[f"消息{i}" for i in range(12)])
+        hub = SimpleNamespace(get=lambda k: eng)  # 无 known_user_keys
+        merged = recent_messages_for_dedup(hub, "7:wx_b@im.wechat", eng)
+        assert merged == [
+            str(m) for m in list(eng._recent_messages)[-PROACTIVE_DEDUP_WINDOW:]
+        ]
+
+    def test_single_key_equivalent_to_legacy(self):
+        """③b 单键账号 → 与旧口径逐字节等价。"""
+        from proactive.llm_proactive import (
+            PROACTIVE_DEDUP_WINDOW,
+            recent_messages_for_dedup,
+        )
+
+        eng = _FakeEngine(recent=[f"消息{i}" for i in range(12)])
+        hub = _GroupHub({"7:wx_b@im.wechat": eng})
+        merged = recent_messages_for_dedup(hub, "7:wx_b@im.wechat", eng)
+        assert merged == [
+            str(m) for m in list(eng._recent_messages)[-PROACTIVE_DEDUP_WINDOW:]
+        ]
+
+    def test_each_engine_capped_at_window(self):
+        """单引擎取样仍截尾窗（合并集有界：≤窗口×通道数）。"""
+        from proactive.llm_proactive import (
+            PROACTIVE_DEDUP_WINDOW,
+            recent_messages_for_dedup,
+        )
+
+        eng_b = _FakeEngine(recent=[f"b{i}" for i in range(30)])
+        eng_a = _FakeEngine(recent=[f"a{i}" for i in range(30)])
+        hub = _GroupHub({
+            "7:wx_b@im.wechat": eng_b,
+            "7:wx_a@im.wechat": eng_a,
+        })
+        merged = recent_messages_for_dedup(hub, "7:wx_b@im.wechat", eng_b)
+        assert len(merged) == PROACTIVE_DEDUP_WINDOW * 2
+
+
+class TestSchedulerCrossChannelDedup:
+    def test_sibling_channel_message_suppresses(self, monkeypatch):
+        """①(决策线) 兄弟通道发过该文案、本通道生成同文案 → duplicate_suppressed
+        不投递（现状只查自身 → 投递 → 红）。"""
+        eng_b = _FakeEngine(recent=["本通道别的消息"])
+        eng_a = _FakeEngine(recent=[DUP_MSG])
+        hub = _GroupHub({
+            "7:wx_b@im.wechat": eng_b,
+            "7:wx_a@im.wechat": eng_a,
+        })
+        sched, delivered, ledger, _ = _make_scheduler(
+            monkeypatch, engine=eng_b, decision_message=DUP_MSG,
+        )
+        _run_hub(sched, hub, "7:wx_b@im.wechat")
+        assert any(e.get("reason") == "duplicate_suppressed" for e in ledger), (
+            "同 owner 兄弟通道已发过的文案必须被内容闸拦下"
+        )
+        assert delivered == []
+
+    def test_sibling_full_window_oldest_dup_still_seen(self, monkeypatch):
+        """兄弟 deque 满 8 条且重复文案在其最旧位 → 仍拦（跨组满窗版）。"""
+        eng_b = _FakeEngine(recent=_varied("本通道", 8))
+        sibling = _varied("兄弟通道", 8)
+        sibling[0] = DUP_MSG
+        eng_a = _FakeEngine(recent=sibling)
+        hub = _GroupHub({
+            "7:wx_b@im.wechat": eng_b,
+            "7:wx_a@im.wechat": eng_a,
+        })
+        sched, delivered, ledger, _ = _make_scheduler(
+            monkeypatch, engine=eng_b, decision_message=DUP_MSG,
+        )
+        _run_hub(sched, hub, "7:wx_b@im.wechat")
+        assert any(e.get("reason") == "duplicate_suppressed" for e in ledger)
+        assert delivered == []
+
+    def test_other_owner_duplicate_not_suppressed(self, monkeypatch):
+        """②(决策线) 其他账号通道的同文案不拦本通道（隔离）。"""
+        eng_b = _FakeEngine(recent=["本通道别的消息"])
+        eng_other = _FakeEngine(recent=[DUP_MSG])
+        hub = _GroupHub({
+            "7:wx_b@im.wechat": eng_b,
+            "9:wx_other@im.wechat": eng_other,
+        })
+        sched, delivered, ledger, _ = _make_scheduler(
+            monkeypatch, engine=eng_b, decision_message=DUP_MSG,
+        )
+        _run_hub(sched, hub, "7:wx_b@im.wechat")
+        assert delivered == [DUP_MSG], "其他账号的消息不得成为本通道判重依据"
+
+
+class TestSqueezeTrap:
+    """挤出陷阱锁死例（突变目标：window 接线改回固定 8 → 本组红）。"""
+
+    def test_merged_front_half_dup_not_squeezed_out(self, monkeypatch):
+        """④ 本引擎 deque 恰 8 条且重复文案在其最旧位、兄弟另有 8 条 →
+        合并集 16 条下该重复项位于合并集**前半段**；若接线偷懒用固定
+        window=8，[-8:] 只剩后半段 → 重复项被挤出 → False → 红。"""
+        own = _varied("本通道", 8)
+        own[0] = NIGHT_MSG
+        eng_b = _FakeEngine(recent=own)
+        eng_a = _FakeEngine(recent=_varied("兄弟通道", 8))
+        hub = _GroupHub({
+            "7:wx_b@im.wechat": eng_b,
+            "7:wx_a@im.wechat": eng_a,
+        })
+        sched, delivered, ledger, _ = _make_scheduler(
+            monkeypatch, engine=eng_b, decision_message=NIGHT_MSG,
+        )
+        _run_hub(sched, hub, "7:wx_b@im.wechat")
+        assert any(e.get("reason") == "duplicate_suppressed" for e in ledger), (
+            "合并集前半段的重复项不得被固定窗口挤出（window 必须 ≥ len(merged)）"
+        )
+        assert delivered == []

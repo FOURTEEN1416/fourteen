@@ -147,6 +147,11 @@ class ProactiveScheduler:
         # P1-51：web_disabled 账本事件每用户每日至多一条（旧实现每 tick 写一行，
         # 关闭态反而涨得最快）
         self._disabled_event_day: dict[str, str] = {}
+        # skip 账本治理（2026-10-12）：llm_wait_window（96% 账本噪声）与静默闸
+        # （现状只 debug 不落账）套用同款每用户每日至多一条口径。与上面三个
+        # 账本同走 init/load/persist/purge 四处同步纪律。
+        self._wait_window_event_day: dict[str, str] = {}
+        self._quiet_event_day: dict[str, str] = {}
 
         self._scheduler: Any = None
         self._active_tasks: dict[str, bool] = {}
@@ -1134,13 +1139,15 @@ class ProactiveScheduler:
     def _proactive_sent_today(self, eng: Any, now: Any) -> bool:
         """该用户引擎状态里，今天（本地日）是否已成功主动发过消息。
 
-        读 ``eng._last_proactive_time``（UTC aware，``commit_sent`` 投递成功
-        才更新）；无引擎/无记录 → False（宁可不触发下限，也不误判已发）。
+        读 ``eng._last_delivery_time``（UTC aware，仅 ``commit_sent`` 投递成功
+        才推进；``_last_proactive_time`` 会被 on_chat 拨到用户说话时刻，不能
+        兼任「今天是否已投递」判据）；无引擎/无记录 → False（宁可不触发下限，
+        也不误判已发）。
         """
         if eng is None:
             return False
         try:
-            last_sent = getattr(eng, "_last_proactive_time", None)
+            last_sent = getattr(eng, "_last_delivery_time", None)
             if last_sent is None:
                 return False
             from datetime import timedelta as _td
@@ -1158,6 +1165,7 @@ class ProactiveScheduler:
         from proactive.llm_proactive import (
             PROACTIVE_DEDUP_WINDOW,
             account_pacing_state,
+            account_unanswered_streak,
             build_proactive_context,
             clamp_wait_minutes,
             decide_proactive,
@@ -1166,6 +1174,7 @@ class ProactiveScheduler:
             load_proactive_knowledge,
             proactive_floor_extra,
             read_web_proactive_config,
+            recent_messages_for_dedup,
             should_skip_proactive_decision,
         )
         from shisi.agent_plane.runtime import (
@@ -1201,6 +1210,13 @@ class ProactiveScheduler:
         # P1-49：静默时段在 LLM 决策**之前**前置闸。旧实现静默只挡投递层，
         # 23:00-07:00 每 5 分钟照调一次远端 LLM（消息不发、token 恒流失）。
         if self._is_quiet_hours():
+            # skip 账本治理（2026-10-12）：静默闸此前只 debug 不落账，决策
+            # 链整夜不可观测；补每用户每日一条（与 llm_wait_window 同口径）。
+            today_q = _local_now().date().isoformat()
+            if self._quiet_event_day.get(str(user_key)) != today_q:
+                self._quiet_event_day[str(user_key)] = today_q
+                append_proactive_event(session_key=user_key, sent=False, reason="quiet_hours")
+                self._persist_throttle_ledger()
             logger.debug("proactive LLM 前置静默闸命中 user=%s，跳过决策", user_key)
             return
         # 执行 LLM 上次决策的 wait_minutes（模型自判时机，非策略闸）
@@ -1209,12 +1225,19 @@ class ProactiveScheduler:
         _now = _time.time()
         _next_ok = self._llm_proactive_next_ok.get(str(user_key))
         if _next_ok and _now < _next_ok:
-            append_proactive_event(
-                session_key=user_key,
-                sent=False,
-                reason="llm_wait_window",
-                wait_minutes=int(max(0, (_next_ok - _now) // 60)),
-            )
+            # P1-51 同款每用户每日至多一条（2026-10-12 账本治理）：等待窗内
+            # 每 5 分钟 tick 写一行曾是 96% 的账本噪声（生产 4165/4348 行）。
+            today_w = _local_now().date().isoformat()
+            if self._wait_window_event_day.get(str(user_key)) != today_w:
+                self._wait_window_event_day[str(user_key)] = today_w
+                append_proactive_event(
+                    session_key=user_key,
+                    sent=False,
+                    reason="llm_wait_window",
+                    wait_minutes=int(max(0, (_next_ok - _now) // 60)),
+                )
+                # 块E：账本变更即落盘（否则重启当日再写一行）
+                self._persist_throttle_ledger()
             return
 
         eng = hub.get(user_key) if hasattr(hub, "get") else None
@@ -1226,10 +1249,13 @@ class ProactiveScheduler:
         # 60min（08:05→08:10 连发实证，模型自述「仅5分钟…还是发」）②用户最后
         # 一条消息后不足 15min（用户刚表达不满 2min 即"缓和气氛"式主动）。
         # 确定性跳过——不烧 LLM 调用；eng 缺席时不拦（闸依赖引擎状态）。
+        # ③unanswered_limit（2026-10-12 未回复连击批）：连 MAX_UNANSWERED_PROACTIVE
+        # 条零回应 → 停发（组内取最小，任一通道被回复即解除）。
         if eng is not None:
             skip, gate_reason = should_skip_proactive_decision(
                 hours_since_last_chat=hours,
                 last_proactive_at=last_proactive_at,
+                unanswered_streak=account_unanswered_streak(hub, str(user_key), eng),
             )
             if skip:
                 append_proactive_event(
@@ -1364,16 +1390,19 @@ class ProactiveScheduler:
             return
         # 出站去重硬闸（scallopbot 同族：投递前确定性判重）。生产实证同一用户
         # 连收三条「哼，你终于想起我了？」变体 —— ase_engine 生成线的
-        # avoid_block 管不到决策线。比对对象取 eng._recent_messages 尾部
-        # （决策线/生成线两线投递成功都经 commit_sent 汇合于此，跨重启亦恢复）。
+        # avoid_block 管不到决策线。比对集取**同 owner 组**合并（2026-10-12：
+        # 单引擎取样面下，兄弟通道刚发过的同义换皮对内容闸不可见）；两线投递
+        # 成功都经 commit_sent 汇合于 eng._recent_messages，跨重启亦恢复。
+        # 🔴 window 必须覆盖整个合并集：固定 window 会把前半段（本引擎消息）
+        # 整段挤出，恰在目标场景退化为单引擎现状（TestSqueezeTrap 锁死）。
         eng_recent: list[str] = []
         if eng is not None:
             with contextlib.suppress(Exception):
-                eng_recent = [
-                    str(m)
-                    for m in list(getattr(eng, "_recent_messages", []) or [])[-PROACTIVE_DEDUP_WINDOW:]
-                ]
-        if is_duplicate_proactive(message, eng_recent):
+                eng_recent = recent_messages_for_dedup(hub, str(user_key), eng)
+        if is_duplicate_proactive(
+            message, eng_recent,
+            window=max(PROACTIVE_DEDUP_WINDOW, len(eng_recent)),
+        ):
             append_proactive_event(
                 session_key=user_key,
                 sent=False,
@@ -1974,6 +2003,18 @@ class ProactiveScheduler:
                 str(k): str(v) for k, v in disabled.items() if str(v or "")
             }
 
+        wait_day = raw.get("wait_window_event_day")
+        if isinstance(wait_day, dict):
+            self._wait_window_event_day = {
+                str(k): str(v) for k, v in wait_day.items() if str(v or "")
+            }
+
+        quiet_day = raw.get("quiet_event_day")
+        if isinstance(quiet_day, dict):
+            self._quiet_event_day = {
+                str(k): str(v) for k, v in quiet_day.items() if str(v or "")
+            }
+
         sent = raw.get("important_dates_sent")
         if isinstance(sent, list):
             self._important_dates_sent = {str(x) for x in sent if str(x or "")}
@@ -1994,6 +2035,9 @@ class ProactiveScheduler:
                         k: int(v) for k, v in self._deliver_fail_counts.items()
                     },
                     "disabled_event_day": dict(self._disabled_event_day),
+                    # skip 账本治理（2026-10-12）：等待窗/静默闸的每日去重键
+                    "wait_window_event_day": dict(self._wait_window_event_day),
+                    "quiet_event_day": dict(self._quiet_event_day),
                     # 只保留最近 7 天（防无界增长；口径与 dedup_key 的日期前缀一致）
                     "important_dates_sent": sorted(self._important_dates_sent)[-200:],
                 }
@@ -2003,14 +2047,14 @@ class ProactiveScheduler:
             logger.warning("持久化节流账本失败（内存态仍生效）: %s", e)
 
     def purge_throttle_for(self, owner_id: int, session_keys: list[str] | None = None) -> int:
-        """账号生命周期（W9）：清除该账号在节流账本（四个账本）中的条目。
+        """账号生命周期（W9）：清除该账号在节流账本（五个字典账本+日期集）中的条目。
 
         键形态在本 owner 内解析：``llm_proactive_next_ok`` /
-        ``deliver_fail_counts`` / ``disabled_event_day`` 以会话键（或裸 uid
-        历史键）为键，按 owner 段精确判定；``important_dates_sent`` 的条目是
-        ``"{date}|{user_key}|{label}"``，按中段 user_key 匹配。内存账本与
-        跨 worker 配置文件同步清理，防止下次 _persist 把已删账号的条目复活。
-        返回移除的条目总数。
+        ``deliver_fail_counts`` / ``disabled_event_day`` / ``wait_window_event_day``
+        / ``quiet_event_day`` 以会话键（或裸 uid 历史键）为键，按 owner 段精确
+        判定；``important_dates_sent`` 的条目是 ``"{date}|{user_key}|{label}"``，
+        按中段 user_key 匹配。内存账本与跨 worker 配置文件同步清理，防止下次
+        _persist 把已删账号的条目复活。返回移除的条目总数。
         """
         uid = int(owner_id)
         explicit = {str(k) for k in (session_keys or []) if str(k)}
@@ -2030,6 +2074,10 @@ class ProactiveScheduler:
             self._llm_proactive_next_ok,
             self._deliver_fail_counts,
             self._disabled_event_day,
+            # skip 账本治理（2026-10-12）新增的每日去重账本：漏这里会让已删
+            # 账号条目残留并随 _persist 复活（与上方 docstring 的自设纪律一致）
+            self._wait_window_event_day,
+            self._quiet_event_day,
         ):
             victims = [k for k in list(ledger) if _owned(str(k))]
             for k in victims:

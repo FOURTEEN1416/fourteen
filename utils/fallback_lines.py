@@ -23,7 +23,7 @@ from utils.reply_mode import REPLY_MODE_NOVEL
 
 logger = logging.getLogger("fallback_lines")
 
-KINDS = ("empty_reply", "timeout", "exception", "rebuttal", "image_unsupported")
+KINDS = ("empty_reply", "timeout", "exception", "rebuttal", "image_unsupported", "voice_unsupported")
 
 # 默认池：全部无括号动作，沉浸式安全
 _POOLS: dict[str, list[str]] = {
@@ -54,6 +54,11 @@ _POOLS: dict[str, list[str]] = {
     # 媒体收到但不可用（2026-10-12 iLink 图片降级批）：图片下载失败/mode=off 且无文本时
     "image_unsupported": [
         "图片我收到了，不过我这边暂时还看不了图，你打字跟我说说好不好",
+    ],
+    # 语音收到但内容不可得（2026-10-12 多模态域批）：服务端 ASR 缺省且本地 ASR 不可用/失败
+    "voice_unsupported": [
+        "语音我收到了，不过这边没听清，你打字跟我说说好不好",
+        "刚才那条语音没听清，你再打字说一遍？",
     ],
 }
 

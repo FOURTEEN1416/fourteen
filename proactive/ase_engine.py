@@ -817,6 +817,10 @@ class ASEEngine:
         self._last_delivery_time: datetime | None = None
         # P1-20：上一条主动消息之后用户是否回复过（驱动 FrequencyAdapter.on_no_reply）
         self._replied_since_proactive = True
+        # 未回复连击硬闸计数（2026-10-12，对标 astrbot max_unanswered_times 语义）：
+        # 连续 N 条主动零回应 → 决策链停发（llm_proactive.MAX_UNANSWERED_PROACTIVE）。
+        # 防重启绕闸必须随 save_state/_load_state 持久化。
+        self._unanswered_streak = 0
         self._daily_message_count = 0
         self._last_sent_type: str | None = None
         self._emotion_state: dict = {}
@@ -909,6 +913,8 @@ class ASEEngine:
             self._freq_controller.record_reply()
         # P1-20：用户回复解除「上一条未应答」状态
         self._replied_since_proactive = True
+        # 未回复连击硬闸：用户开口即清零（闸的唯一解除路径）
+        self._unanswered_streak = 0
 
         self.urgency.base = 0
         self.urgency.missing_bonus = 0
@@ -1433,6 +1439,12 @@ class ASEEngine:
         # 自适应降档在生产真正生效；旧实现 on_no_reply 全仓零调用，adaptive 名存实亡）
         if self._frequency_mode == "adaptive" and self._freq_adapter and not self._replied_since_proactive:
             self._freq_adapter.on_no_reply()
+        # 未回复连击硬闸计数（2026-10-12）：两条之间被回复过 → 从 1 重新计
+        # （本条尚未被回应）；仍无人应答 → +1。到上限由决策链停发。
+        if self._replied_since_proactive:
+            self._unanswered_streak = 1
+        else:
+            self._unanswered_streak += 1
         self._replied_since_proactive = False
 
     def record_sent_entry(self, entry: dict[str, Any]) -> None:
@@ -1539,6 +1551,8 @@ class ASEEngine:
                 "last_sent_time": self._last_proactive_time.isoformat() if self._last_proactive_time else None,
                 "last_delivery_time": self._last_delivery_time.isoformat() if self._last_delivery_time else None,
                 "replied_since_proactive": self._replied_since_proactive,
+                # 未回复连击硬闸（2026-10-12）：不落盘则重启即绕闸
+                "unanswered_streak": max(0, int(self._unanswered_streak)),
                 "last_chat_time": self._last_chat_time.isoformat() if self._last_chat_time else None,
                 "last_sent_type": self._last_sent_type,
                 "affinity_level": self._affinity_level,
@@ -1654,6 +1668,9 @@ class ASEEngine:
                 # 旧状态文件无此字段：退回最近记账时刻，冷却不失真
                 self._last_delivery_time = self._last_proactive_time
             self._replied_since_proactive = bool(state.get("replied_since_proactive", True))
+            # 未回复连击硬闸（2026-10-12）：旧状态文件无此键 → 从 0 起（不误拦）
+            with contextlib.suppress(TypeError, ValueError):
+                self._unanswered_streak = max(0, int(state.get("unanswered_streak", 0) or 0))
             if "min_interval_minutes" in state:
                 with contextlib.suppress(TypeError, ValueError):
                     self._min_interval_minutes = max(0, int(state["min_interval_minutes"]))

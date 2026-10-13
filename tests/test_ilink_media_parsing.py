@@ -7,7 +7,8 @@
 
 - 语音（item type=3）：``voice_item.text``（微信服务端 ASR，'if available'）非空
   → 直接作正文 + ``[wx][step=voice_text]``；为空 → 媒体引用下载 + 本地 ASR
-  （配置驱动），仍不可得 → ``[wx][step=voice_unavailable]`` 后跳过（不拿空文本进 LLM）；
+  （配置驱动），仍不可得 → ``[wx][step=voice_unavailable]`` 后回 voice_unsupported
+  受控话术（不拿空文本进 LLM，也不静默丢消息）；
 - 图片（item type=2）：``image_item{media, aeskey}`` → CDN 下载 + AES-128-ECB/PKCS7
   解密（超时 15s）→ base64 → 复用既有 image_data 附件链；失败 → INFO 日志 +
   无文本时回 fallback_lines 固定话术；
@@ -303,8 +304,9 @@ class TestVoiceMessageNewProtocol:
 
     @patch("wechat_direct.wechat_connector._send_text")
     @patch("wechat_direct.wechat_connector._call_user_manager")
-    def test_voice_no_text_asr_disabled_skipped(self, mock_call, mock_send, caplog):
-        """② type=3 + text 空 + 本地 ASR 未启用 → voice_unavailable 日志后跳过，不进主链。"""
+    def test_voice_no_text_asr_disabled_notice(self, mock_call, mock_send, caplog):
+        """② type=3 + text 空 + 本地 ASR 未启用 → voice_unavailable 日志 +
+        受控话术告知（不再静默丢），不进主链。"""
         conn = _make_conn()
         conn._voice_asr_available = MagicMock(return_value=False)
         raw_msg = {
@@ -319,6 +321,12 @@ class TestVoiceMessageNewProtocol:
 
         assert "step=voice_unavailable" in caplog.text
         assert mock_call.call_count == 0, "转写不可得时不得拿空文本进 LLM 主链"
+        assert mock_send.call_count == 1, "语音不可得必须回受控话术，不能静默丢消息"
+        args = mock_send.call_args
+        text = args.kwargs.get("text", "") or args[0][1]
+        from utils.fallback_lines import is_system_fallback_line
+
+        assert is_system_fallback_line(text), "话术必须来自 fallback_lines 池"
 
     @patch("wechat_direct.wechat_connector._send_text")
     @patch("wechat_direct.wechat_connector._call_user_manager")
@@ -465,6 +473,145 @@ class TestImageMessageNewProtocol:
         assert "step=image_download_failed" in caplog.text
         assert "step=image_unsupported" not in caplog.text, \
             "有文本可用时不进入图片不可用降级分支（mock_call 未消费 reply_sender 时 publish 仍会发一次回复，故不断言 send_count）"
+
+
+# ═══════════════════════════════════════════════
+# 五·补：图片回合终局守卫（附件/正文双空不得进 LLM 主链）
+# ═══════════════════════════════════════════════
+_PNG_6MB = b"\x89PNG\r\n\x1a\n" + b"A" * (6 * 1024 * 1024)            # b64≈8MB，原始字节也超 5MB 上限
+_PNG_4_5MB = b"\x89PNG\r\n\x1a\n" + b"A" * (4 * 1024 * 1024 + 512 * 1024)  # 原始 4.5MB 不超限，b64≈6MB 超限
+
+
+class TestImageTurnFinalGuard:
+    """图片回合终局守卫（2026-10-12 多模态域批）。
+
+    旧码三处漏：① 超限判定用 base64 串长（4/3 原始大小）→ 4.5MB 图被误判超限丢附件；
+    ② 超限/损坏图 + 有配文时 mode=auto 仍白烧一次 describe LLM 调用；
+    ③ A/B 尝试后（损坏 base64/describe 失败残留）attachments 与 text 双空仍放行
+    空正文进 LLM 主链。
+    """
+
+    @patch("wechat_direct.wechat_connector._send_text")
+    @patch("wechat_direct.wechat_connector._call_user_manager")
+    def test_oversized_raw_bytes_no_caption_notice(self, mock_call, mock_send):
+        """① mode=direct + 下载成功但原始字节超限 + 无配文 → 回降级话术，不进主链。"""
+        conn = _make_conn()
+        conn._image_mode = MagicMock(return_value=("direct", "vm-test", 5 * 1024 * 1024))
+        conn._download_media = MagicMock(return_value=_PNG_6MB)
+        raw_msg = {
+            "message_type": 1,
+            "message_id": "img_guard_1",
+            "from_user_id": "wx_user_1",
+            "context_token": "ctx",
+            "item_list": [_image_item()],
+        }
+        conn._handle_message(raw_msg)
+
+        assert mock_call.call_count == 0, "超限图 + 无配文不得进 LLM 主链"
+        assert mock_send.call_count == 1, "必须回受控降级话术"
+        args = mock_send.call_args
+        text = args.kwargs.get("text", "") or args[0][1]
+        from utils.fallback_lines import is_system_fallback_line
+
+        assert is_system_fallback_line(text), "话术必须来自 fallback_lines 池"
+
+    @patch("wechat_direct.wechat_connector._send_text")
+    @patch("wechat_direct.wechat_connector._call_user_manager")
+    def test_within_limit_judged_by_raw_bytes_not_b64_len(self, mock_call, mock_send):
+        """② 4.5MB 原始图（b64≈6MB>5MB）→ 按原始字节判定不超限，直传附件
+        非空且 data URL 解码回原字节；旧码按 b64 串长误判超限丢附件。"""
+        mock_call.return_value = {"reply": "好"}
+        conn = _make_conn()
+        conn._image_mode = MagicMock(return_value=("direct", "vm-test", 5 * 1024 * 1024))
+        conn._download_media = MagicMock(return_value=_PNG_4_5MB)
+        raw_msg = {
+            "message_type": 1,
+            "message_id": "img_guard_2",
+            "from_user_id": "wx_user_1",
+            "context_token": "ctx",
+            "item_list": [_image_item()],
+        }
+        conn._handle_message(raw_msg)
+
+        assert mock_call.call_count == 1
+        attachments = mock_call.call_args[0][3]
+        assert attachments, "4.5MB 原始图未超 5MB 上限，必须直传"
+        url = attachments[0]["image_url"]["url"]
+        assert base64.b64decode(url.split(",", 1)[1]) == _PNG_4_5MB
+
+    @patch("wechat_direct.wechat_connector._send_text")
+    @patch("wechat_direct.wechat_connector._call_user_manager")
+    def test_oversized_with_caption_skips_describe(self, mock_call, mock_send):
+        """③ mode=auto + 超限图 + 有配文 → 不白烧 describe LLM 调用，配文照常进主链。"""
+        mock_call.return_value = {"reply": "好"}
+        conn = _make_conn()
+        conn._image_mode = MagicMock(return_value=("auto", "vm-test", 5 * 1024 * 1024))
+        conn._download_media = MagicMock(return_value=_PNG_6MB)
+        conn._describe_image = MagicMock(return_value="图中描述")
+        raw_msg = {
+            "message_type": 1,
+            "message_id": "img_guard_3",
+            "from_user_id": "wx_user_1",
+            "context_token": "ctx",
+            "item_list": [_image_item(), {"type": 1, "text_item": {"text": _TEXT_SAMPLE}}],
+        }
+        conn._handle_message(raw_msg)
+
+        assert conn._describe_image.call_count == 0, "超限图不值得一次 describe LLM 调用"
+        assert mock_call.call_count == 1
+        assert mock_call.call_args[0][2] == _TEXT_SAMPLE, "配文照常进主链"
+
+    @patch("wechat_direct.wechat_connector._send_text")
+    @patch("wechat_direct.wechat_connector._call_user_manager")
+    def test_corrupt_b64_no_caption_notice(self, mock_call, mock_send):
+        """④（终局守卫）损坏 base64 + 无配文 → 旧码空正文进主链；新码回降级话术。"""
+        conn = _make_conn()
+        conn._image_mode = MagicMock(return_value=("direct", "vm-test", 5 * 1024 * 1024))
+        raw_msg = {
+            "message_type": 3,
+            "message_id": "img_guard_4",
+            "from_user_id": "wx_user_1",
+            "context_token": "ctx",
+            "item_list": [{"type": 3, "image_item": {"image_data": "!!!corrupt!!!"}}],
+        }
+        conn._handle_message(raw_msg)
+
+        assert mock_call.call_count == 0, "损坏图 + 无配文不得拿空正文进 LLM 主链"
+        assert mock_send.call_count == 1, "必须回受控降级话术"
+
+
+# ═══════════════════════════════════════════════
+# 五·补：媒体不可用受控话术池（voice_unsupported）
+# ═══════════════════════════════════════════════
+class TestMediaUnsupportedPools:
+    """voice_unsupported 池：无括号动作（沉浸式硬约束）+ 当日同 kind 去重。
+
+    断言模式复用 tests/test_abc_fallback_lines.py。
+    """
+
+    def test_voice_unsupported_pool_immersive_and_dedup(self):
+        from utils.fallback_lines import get_fallback_line, reset_daily_dedup
+        from utils.reply_mode import REPLY_MODE_IMMERSIVE
+
+        reset_daily_dedup()
+        lines = [
+            get_fallback_line(None, "voice_unsupported", REPLY_MODE_IMMERSIVE)
+            for _ in range(2)
+        ]
+        for line in lines:
+            assert line, "voice_unsupported 池不可为空"
+            assert ("语音" in line) or ("没听清" in line), \
+                "必须来自 voice_unsupported 专属池（kind 未注册会误落 empty_reply 池）"
+            assert "（" not in line and "(" not in line, "沉浸式约束：不得带括号动作"
+        assert lines[0] != lines[1], "当日同 kind 必须去重（池至少 2 条）"
+
+    def test_voice_unsupported_recognized_as_system_line(self):
+        from utils.fallback_lines import get_fallback_line, is_system_fallback_line
+
+        line = get_fallback_line(None, "voice_unsupported", "immersive")
+        assert ("语音" in line) or ("没听清" in line), \
+            "必须来自 voice_unsupported 专属池"
+        assert is_system_fallback_line(line), "池话术必须可被记忆管线识别为系统占位"
 
 
 # ═══════════════════════════════════════════════

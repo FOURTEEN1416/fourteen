@@ -513,6 +513,64 @@ class StructuredMemory:
     # scripts/link_identities.py），同 identity_id = 同一真人。
     # 读侧按组合并、删除按组同步水位与等价副本；未声明的键行为 100% 不变。
 
+    def iter_active_facts_oldest_first(self, batch_size: int = 50):
+        """按 id 升序游标分页产出全部 active 事实行（生成器，每批 list[dict]）。
+
+        2026-10-12 遗忘链根治：get_facts 固定 ``updated_at DESC LIMIT ?`` 的
+        「最新窗」方向对维护扫描是错的——存量超窗后最老事实永生（生产 215/216
+        条 conf≥0.7 挤满首窗）。id 游标前向推进与删除安全共存（已删 id 落在
+        游标之后不会重复访问）；批大小即每页行数。
+        """
+        size = max(1, int(batch_size or 50))
+        cursor = 0
+        while True:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM user_facts WHERE status = 'active' AND id > ? "
+                    "ORDER BY id ASC LIMIT ?",
+                    (cursor, size),
+                ).fetchall()
+            if not rows:
+                return
+            batch = [dict(r) for r in rows]
+            cursor = int(batch[-1]["id"])
+            yield batch
+
+    def get_facts_by_ids(self, fact_ids: list[int], user_key: str | None = None) -> list[dict[str, Any]]:
+        """按主键批量回读 active 事实；user_key 非 None 时按身份组过滤。
+
+        2026-10-12 召回重排回读面：跨身份组借 id 取行必须被拒（隔离硬约束
+        属性断言，test_recall_weight_order M6）；user_key=None 为管理/维护
+        路径不过滤（与 get_facts 口径一致）。
+        """
+        ids = [int(i) for i in fact_ids or [] if i is not None]
+        if not ids:
+            return []
+        ph = ",".join("?" for _ in ids)
+        clauses = [f"id IN ({ph})", "status = 'active'"]
+        params: list[Any] = list(ids)
+        if user_key is not None:
+            keys = self.identity_keys(str(user_key))
+            if len(keys) == 1:
+                clauses.append("user_key = ?")
+                params.append(keys[0])
+            else:
+                clauses.append(f"user_key IN ({','.join('?' for _ in keys)})")
+                params.extend(keys)
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM user_facts WHERE " + " AND ".join(clauses)
+                + " ORDER BY id ASC",
+                params,
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    @staticmethod
+    def _key_fingerprint(user_key: str) -> str:
+        """审计键指纹：长度+尾4位（完整 user_key 内含 wxid，隐私红线不得入日志）。"""
+        k = str(user_key or "")
+        return f"{len(k)}:*{k[-4:]}" if k else "*"
+
     def identity_keys(self, user_key: str) -> list[str]:
         """user_key → 身份组全部键（含自身）；无映射/表缺失 → [自身]（行为不变）。
 
@@ -566,32 +624,47 @@ class StructuredMemory:
                 ).fetchone()
                 ida = str(ga["identity_id"]) if ga else ""
                 idb = str(gb["identity_id"]) if gb else ""
-                if not (ida and idb and ida == idb):
-                    if ida:
-                        if idb:
-                            conn.execute(
-                                "UPDATE user_identity_map SET identity_id=? WHERE identity_id=?",
-                                (ida, idb),
-                            )
+                if ida and idb and ida == idb:
+                    gid = ida
+                    action = "already_linked"
+                elif ida:
+                    action = "join_group"
+                    gid = ida
+                    if idb:
                         conn.execute(
-                            "INSERT OR REPLACE INTO user_identity_map(user_key, identity_id) VALUES(?,?)",
-                            (b, ida),
+                            "UPDATE user_identity_map SET identity_id=? WHERE identity_id=?",
+                            (ida, idb),
                         )
-                    elif idb:
-                        conn.execute(
-                            "INSERT OR REPLACE INTO user_identity_map(user_key, identity_id) VALUES(?,?)",
-                            (a, idb),
-                        )
-                    else:
-                        gid = f"igrp_{os.urandom(8).hex()}"
-                        conn.executemany(
-                            "INSERT OR REPLACE INTO user_identity_map(user_key, identity_id) VALUES(?,?)",
-                            [(a, gid), (b, gid)],
-                        )
+                        action = "merge_groups"
+                    conn.execute(
+                        "INSERT OR REPLACE INTO user_identity_map(user_key, identity_id) VALUES(?,?)",
+                        (b, ida),
+                    )
+                elif idb:
+                    gid = idb
+                    action = "join_group"
+                    conn.execute(
+                        "INSERT OR REPLACE INTO user_identity_map(user_key, identity_id) VALUES(?,?)",
+                        (a, idb),
+                    )
+                else:
+                    gid = f"igrp_{os.urandom(8).hex()}"
+                    action = "new_group"
+                    conn.executemany(
+                        "INSERT OR REPLACE INTO user_identity_map(user_key, identity_id) VALUES(?,?)",
+                        [(a, gid), (b, gid)],
+                    )
                 conn.commit()
             except Exception:
                 conn.rollback()
                 raise
+        # 审计留痕（2026-10-12 记忆域批 item2）：组 id 与库内行逐字对账 +
+        # 两键指纹（隐私红线：完整 user_key 内含 wxid，不得入日志）。
+        logger.info(
+            "identity_link action=%s group=%s members=[%s, %s]",
+            action, gid,
+            self._key_fingerprint(a), self._key_fingerprint(b),
+        )
         return self.identity_keys(a)
 
     def unlink_identity(self, user_key: str) -> bool:
@@ -610,10 +683,19 @@ class StructuredMemory:
             rest = conn.execute(
                 "SELECT COUNT(*) FROM user_identity_map WHERE identity_id=?", (gid,)
             ).fetchone()[0]
-            if int(rest or 0) <= 1:
+            remaining = int(rest or 0)
+            cleared = 0
+            if remaining <= 1:
                 # 单元素组无意义（identity_keys 无行 = 自身，语义等价），清空保持表干净
                 conn.execute("DELETE FROM user_identity_map WHERE identity_id=?", (gid,))
+                cleared = 1
             conn.commit()
+        # 审计留痕（2026-10-12）：解绑键指纹 + 原组 id + 清组前牵连成员数 +
+        # 是否清组（remaining/cleared 两结局可区分）。
+        logger.info(
+            "identity_unlink key=%s group=%s remaining=%d cleared=%d",
+            self._key_fingerprint(key), gid, remaining, cleared,
+        )
         return True
 
     def migrate_legacy_isolation_keys(self) -> dict[str, int]:
@@ -1899,6 +1981,11 @@ class StructuredMemory:
             except Exception:
                 conn.rollback()
                 raise
+        # 审计留痕（2026-10-12 记忆域批 item2）：删号级属不可逆重操作，
+        # WARNING 级落 owner 前缀 + 逐表影响计数（身份组运维零留痕根治）。
+        logger.warning(
+            "identity_purge owner=%s: %s", f"{int(owner_id)}:", counts,
+        )
         return counts
 
     def export_owner_chats_page(

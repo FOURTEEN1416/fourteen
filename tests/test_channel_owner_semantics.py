@@ -212,9 +212,11 @@ def test_scanner_ids_for_user_reads_credentials(tmp_state_root):
 
 
 class _FakeEng:
-    def __init__(self, hours: float, last_proactive: datetime | None):
+    def __init__(self, hours: float, last_delivery: datetime | None):
         self._hours = hours
-        self._last_proactive_time = last_proactive
+        # 基准纠偏（2026-10-12）：账号聚合读投递基准 _last_delivery_time
+        # （仅 commit_sent 推进），非被 on_chat 拨动的 _last_proactive_time
+        self._last_delivery_time = last_delivery
 
     def _hours_since_last_chat(self) -> float:
         return self._hours
@@ -245,8 +247,9 @@ def test_account_pacing_aggregates_same_owner():
         "2:wx_b@im.wechat": _FakeEng(10.0, None),
         "9:wx_other@im.wechat": _FakeEng(1.0, now - timedelta(minutes=5)),
     })
-    eng_b = hub.get("2:wx_b@im.wechat")
-    hours, last = account_pacing_state(hub, "2:wx_b@im.wechat", eng_b)
+    hours, last = account_pacing_state(
+        hub, "2:wx_b@im.wechat", hub.get("2:wx_b@im.wechat"),
+    )
     # hours 取组内最小（10 < 30，但另一账号的 1.0 不得混入）
     assert hours == 10.0
     # last_proactive 取组内最大 → A 通道 30min 前的投递对 B 通道生效

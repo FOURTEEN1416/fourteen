@@ -1,45 +1,71 @@
-"""重建全部角色知识索引 + 清理孤立索引。
+"""重建全部角色知识索引 + 孤儿索引/孤儿源审计与清理。
 
 背景：`enrich_persona_web.py --all-sources` 是**覆盖式**写入 —— 实测把
 "上杉绘梨衣"的 148 块卡字段知识冲成 4 块 B 站 UP 主简介（含 QQ 群号），
 属数据损坏。本脚本从权威真源（config/characters/*.json）重建干净索引。
 
-另清理孤立索引：data/knowledge/ 下存在与现役 25 张卡无关的旧索引文件
-（如 上杉绘梨衣.json、重度病娇.json —— 对应已删除的旧卡）。
+孤儿对象分两类裁决（源材料与派生物语义不同）：
+  - 孤儿索引：data/knowledge/ 顶层 stem 不在现役卡 id 集合的 BM25 索引
+    （W5 语义下是可随时重建的纯派生物），执行模式照旧清理；
+  - 孤儿源：data/knowledge/sources/ 同规则的源存储文件 —— W5 口径
+    「源材料不可丢」，默认只审计不删，须显式 --prune-orphan-sources 授权。
 
 用法：
-  python scripts/rebuild_knowledge_index.py --dry-run   # 只审计
-  python scripts/rebuild_knowledge_index.py             # 执行重建
+  python scripts/rebuild_knowledge_index.py --dry-run   # 只审计（孤儿索引+孤儿源分列，不删）
+  python scripts/rebuild_knowledge_index.py             # 执行重建 + 清孤儿索引
+  python scripts/rebuild_knowledge_index.py --root <dir> --dry-run  # 指定项目根（测试用 tmp 根）
+  python scripts/rebuild_knowledge_index.py --prune-orphan-sources  # 显式才删孤儿源
 """
 from __future__ import annotations
 
 import argparse
 import json
 import pathlib
-import shutil
 import sys
 
 sys.path.insert(0, ".")
 
 from shisi.core.models.character_aggregate import CharacterAggregate  # noqa: E402
 from shisi.core.models.persona_profile import PersonaProfile  # noqa: E402
-from shisi.knowledge.character_knowledge_service import get_knowledge_service  # noqa: E402
+from shisi.knowledge.character_knowledge_service import (  # noqa: E402
+    CharacterKnowledgeService,
+    get_knowledge_service,
+)
 
-ROOT = pathlib.Path(".")
-CHARS = ROOT / "config" / "characters"
-KNOW = ROOT / "data" / "knowledge"
+
+def audit_orphans(know: pathlib.Path,
+                  active_ids: set[str]) -> tuple[list[pathlib.Path], list[pathlib.Path]]:
+    """孤儿分列审计：孤儿索引（顶层 stem 不在现役 id）与孤儿源（sources/ 同规则）。"""
+    orphan_idx = [f for f in sorted(know.glob("*.json")) if f.stem not in active_ids]
+    src_dir = know / "sources"
+    orphan_src: list[pathlib.Path] = []
+    if src_dir.is_dir():
+        orphan_src = [f for f in sorted(src_dir.glob("*.json"))
+                      if f.stem not in active_ids]
+    return orphan_idx, orphan_src
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
-    args = ap.parse_args()
+    ap.add_argument("--root", default=".",
+                    help="项目根（默认当前目录；测试传 tmp 根）")
+    ap.add_argument("--prune-orphan-sources", action="store_true",
+                    help="删除孤儿源文件（源材料不可丢，删除须显式授权）")
+    args = ap.parse_args(argv)
 
-    svc = get_knowledge_service()
+    root = pathlib.Path(args.root)
+    chars = root / "config" / "characters"
+    know = root / "data" / "knowledge"
+    # --root 缺省走单例（含 AI_GF_KNOWLEDGE_INDEX_DIR env 口径，行为不变）；
+    # 显式 --root 时按该根构造独立服务（测试 tmp 根）。
+    svc = (get_knowledge_service() if str(args.root) == "."
+           else CharacterKnowledgeService(use_bm25=True, index_dir=know))
+
     active_ids: set[str] = set()
 
     print("=== 重建现役角色索引 ===")
-    for f in sorted(CHARS.glob("*.json")):
+    for f in sorted(chars.glob("*.json")):
         try:
             card = json.loads(f.read_text(encoding="utf-8"))
         except Exception as e:
@@ -69,6 +95,15 @@ def main() -> None:
         svc.save_index(cid)
         print(f"  ✓ {name[:10]:<12} → {svc._chunk_counts.get(cid, 0)} 块")
 
+    # ── 孤儿分列审计（索引=可重建派生物；源=不可丢源材料，删除须显式授权）──
+    orphan_idx, orphan_src = audit_orphans(know, active_ids)
+    print(f"\n=== 孤儿索引审计（{len(orphan_idx)} 个，可重建派生物）===")
+    for f in orphan_idx:
+        print(f"  {f.name}")
+    print(f"\n=== 孤儿源审计（{len(orphan_src)} 个，源材料·须显式 --prune-orphan-sources 才删）===")
+    for f in orphan_src:
+        print(f"  sources/{f.name}")
+
     if args.dry_run:
         print("\n(dry-run，未写入)")
         return
@@ -81,17 +116,27 @@ def main() -> None:
     # 故 stem 不在现役 id 集合内的文件一律为孤立，精确匹配删除。
     print("\n=== 清理孤立索引 ===")
     removed = 0
-    for f in sorted(KNOW.glob("*.json")):
-        if f.stem in active_ids:
-            continue
+    for f in orphan_idx:
         f.unlink()
         removed += 1
         print(f"  删除孤立索引: {f.name}")
     print(f"  共删除 {removed} 个")
 
+    # ── 清理孤儿源（仅显式授权；连 .lock 一并清理）──
+    if args.prune_orphan_sources:
+        print("\n=== 清理孤儿源 ===")
+        removed_src = 0
+        for f in orphan_src:
+            f.unlink(missing_ok=True)
+            lock = f.with_name(f.name + ".lock")
+            lock.unlink(missing_ok=True)
+            removed_src += 1
+            print(f"  删除孤儿源: sources/{f.name}")
+        print(f"  共删除 {removed_src} 个")
+
     # ── 校验 ──
     print("\n=== 校验 ===")
-    for f in sorted(KNOW.glob("*.json")):
+    for f in sorted(know.glob("*.json")):
         if f.stem not in active_ids:
             continue
         d = json.loads(f.read_text(encoding="utf-8"))

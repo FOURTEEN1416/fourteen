@@ -1687,16 +1687,20 @@ class WeChatConnector:
             )
 
         # ── iLink 语音（item type=3）：voice_item.text 为微信服务端 ASR（'if available'，
-        #    不保证存在）——非空直接作正文；缺省走媒体下载+本地 ASR，仍不可得则跳过 ──
+        #    不保证存在）——非空直接作正文；缺省走媒体下载+本地 ASR，仍不可得回受控话术 ──
         if not text and parsed.voice_text:
             text = parsed.voice_text
             # P0 隐私：转写原文不落日志，只记 msg_id 与长度
             logger.info("[wx][step=voice_text] msg_id=%s user=%s text_len=%d",
                         msg_id, from_user, len(text))
+            self._record_media_step(from_user, "voice_text", msg_id=msg_id,
+                                    text_len=len(text))
         elif not text and parsed.voice_media is not None:
             text = self._voice_media_to_text(parsed.voice_media, msg_id, from_user)
             if not text:
-                # 转写不可得：不拿空文本进 LLM 主链（voice_unavailable 已在方法内落账）
+                # 转写不可得：不拿空文本进 LLM 主链，受控话术告知（不静默丢）
+                self._send_media_unsupported_notice(from_user, context_token,
+                                                    kind="voice_unsupported")
                 return
 
         # ── iLink 图片（item type=2）：CDN 引用下载 → base64 → 复用既有 image_data 附件链 ──
@@ -1705,18 +1709,35 @@ class WeChatConnector:
             if mode == "off":
                 logger.info("[wx][step=image_unsupported] msg_id=%s user=%s reason=mode_off",
                             msg_id, from_user)
+                self._record_media_step(from_user, "image_unsupported",
+                                        msg_id=msg_id, reason="mode_off")
             else:
                 raw = self._download_media(parsed.image_payload, msg_id=msg_id,
                                            user=from_user, kind="image")
                 if raw:
-                    image_data = base64.b64encode(raw).decode("ascii")
+                    # 上限按原始字节在下载点判定：base64 串长 ≈ 4/3 原始大小，
+                    # 4.5MB 图 b64 后 6MB 会被误判超限（有效上限变 3.75MB）。
+                    # 超限置空 image_data，由下方守卫接住（有配文走文本）。
+                    if len(raw) > _max_bytes:
+                        logger.info("[wx][step=image_unsupported] msg_id=%s user=%s "
+                                    "reason=oversized bytes=%d",
+                                    msg_id, from_user, len(raw))
+                        self._record_media_step(from_user, "image_unsupported",
+                                                msg_id=msg_id, reason="oversized",
+                                                bytes=len(raw))
+                    else:
+                        image_data = base64.b64encode(raw).decode("ascii")
                 else:
                     logger.info("[wx][step=image_download_failed] msg_id=%s user=%s",
                                 msg_id, from_user)
+                    self._record_media_step(from_user, "image_download_failed",
+                                            msg_id=msg_id)
             if not image_data and not text:
                 # 图片收到但不可用且无文本 → 受控降级固定话术（池在 fallback_lines），不静默丢
                 logger.info("[wx][step=image_unsupported] msg_id=%s user=%s reason=no_usable_image",
                             msg_id, from_user)
+                self._record_media_step(from_user, "image_unsupported",
+                                        msg_id=msg_id, reason="no_usable_image")
                 self._send_media_unsupported_notice(from_user, context_token)
                 return
 
@@ -1735,17 +1756,24 @@ class WeChatConnector:
                 from multimodal.image_attachment import build_attachments
 
                 parts = build_attachments([image_data])
-                oversized = len(image_data or "") > max_bytes
-                if parts and not oversized and (mode == "direct" or vision_model):
+                # 上限按原始字节判定（base64 串长 ≈ 4/3 原始大小；旧协议内联图
+                # 不经下载点检查，此处兜底保持同一口径）
+                raw_len = len(base64.b64decode(image_data)) if parts else 0
+                oversized = not parts or raw_len > max_bytes
+                if not oversized and (mode == "direct" or vision_model):
                     attachments = parts  # B：多模态直传
                     logger.info(
                         "[wx][step=image_direct] msg_id=%s user=%s parts=%d",
                         msg_id, from_user, len(parts),
                     )
+                    self._record_media_step(from_user, "image_direct",
+                                            msg_id=msg_id, parts=len(parts),
+                                            bytes=raw_len)
                 elif mode in ("auto", "describe"):
                     desc = self._describe_image(image_data)  # A：降级为描述注入
                     if desc:
-                        text = text or desc
+                        # 图文并存：配文在前、描述作图片上下文行（`or` 短路会整体丢图片语义）
+                        text = f"{text}\n[图片：{desc}]" if text else desc
                         logger.info(
                             "[wx][step=image_describe] msg_id=%s user=%s len=%d",
                             msg_id, from_user, len(desc),
@@ -1761,6 +1789,16 @@ class WeChatConnector:
                             msg_id, from_user, len(text))
             else:
                 logger.info("[wx][step=asr_unavailable] msg_id=%s user=%s", msg_id, from_user)
+
+        # 终局守卫（2026-10-12）：图片在但 A/B 均未产出可用形态且无任何文本——
+        # 损坏 base64 / describe 失败残留不得拿空正文进 LLM 主链。
+        if image_data and not attachments and not text:
+            logger.info("[wx][step=image_unsupported] msg_id=%s user=%s reason=no_usable_image",
+                        msg_id, from_user)
+            self._record_media_step(from_user, "image_unsupported",
+                                    msg_id=msg_id, reason="no_usable_image")
+            self._send_media_unsupported_notice(from_user, context_token)
+            return
 
         from utils.local_time import now_local
 
@@ -1940,25 +1978,37 @@ class WeChatConnector:
         if not self._voice_asr_available():
             logger.info("[wx][step=voice_unavailable] msg_id=%s user=%s reason=asr_disabled",
                         msg_id, from_user)
+            self._record_media_step(from_user, "voice_unavailable",
+                                    msg_id=msg_id, reason="asr_disabled")
             return ""
         silk = self._download_media(ref, msg_id=msg_id, user=from_user, kind="voice")
         if not silk:
             logger.info("[wx][step=voice_unavailable] msg_id=%s user=%s reason=download_failed",
                         msg_id, from_user)
+            self._record_media_step(from_user, "voice_unavailable",
+                                    msg_id=msg_id, reason="download_failed")
             return ""
         asr_text = self._transcribe_voice(base64.b64encode(silk).decode("ascii"))
         if not asr_text:
             logger.info("[wx][step=voice_unavailable] msg_id=%s user=%s reason=asr_empty",
                         msg_id, from_user)
+            self._record_media_step(from_user, "voice_unavailable",
+                                    msg_id=msg_id, reason="asr_empty")
         return asr_text
 
-    def _send_media_unsupported_notice(self, peer: str, context_token: str = "") -> None:
-        """媒体收到但不可用且无文本时的受控降级话术（池在 utils/fallback_lines，不硬编码）。"""
+    def _send_media_unsupported_notice(
+        self, peer: str, context_token: str = "", kind: str = "image_unsupported",
+    ) -> None:
+        """媒体收到但不可用且无文本时的受控降级话术（池在 utils/fallback_lines，不硬编码）。
+
+        kind 对应 fallback_lines 池名（image_unsupported / voice_unsupported）。
+        注意：这是当轮即时告知，不是「定时再补一句」——接话时机 Owner 仍是 proactive。
+        """
         try:
             from utils.fallback_lines import get_fallback_line
             from utils.reply_mode import read_reply_mode
 
-            line = get_fallback_line(None, "image_unsupported", read_reply_mode())
+            line = get_fallback_line(None, kind, read_reply_mode())
         except Exception:  # noqa: BLE001
             logger.debug("[wx][step=fallback_line_failed] 降级话术获取失败，跳过媒体占位回复")
             return
@@ -1967,10 +2017,31 @@ class WeChatConnector:
         except Exception as e:  # noqa: BLE001
             logger.warning("[wx][step=reply_send_failed] peer=%s error=%s", peer, e)
 
+    def _record_media_step(self, from_user: str, step: str, **meta: Any) -> None:
+        """媒体处理 step 落账 event_ledger（event_type=media_step）。
+
+        动机：媒体量/成功率统计——app.log 10MB 轮转只存约 3 天，账本 prune 30 天
+        正好匹配统计窗。payload 只含 step/reason/bytes/text_len/msg_id 等元数据
+        （P0：无消息原文）；try/except 全包 fail-soft，落账故障不炸消息主流程。
+        """
+        try:
+            from shisi.agent_plane.event_ledger import default_ledger
+
+            default_ledger().append(
+                session_key=self._session_key(from_user),
+                event_type="media_step",
+                actor="wechat_connector",
+                payload={"step": step, **meta},
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[wx][step=media_step_ledger_failed] error=%s", e)
+
     def _image_mode(self) -> tuple:
         """读 config/system.yaml → multimodal.image；返回 (mode, vision_model, max_bytes)。
 
         未配置或读取失败时按 auto/无视觉模型处理（即自动降级为描述注入）。
+        max_bytes 是「图片原始字节」上限（2026-10-12 起下载点按 len(raw) 判定；
+        base64 串长 ≈ 4/3 原始大小，不作判定依据）。
         """
         cfg = getattr(self, "_image_cfg", None)
         if cfg is None:

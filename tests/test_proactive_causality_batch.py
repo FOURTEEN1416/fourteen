@@ -184,13 +184,22 @@ class _FakeLLM:
 
 
 class _FakeEngine:
-    def __init__(self, recent: list[str], last_proactive_at=None, hours: float = 5.0):
+    def __init__(
+        self,
+        recent: list[str],
+        last_proactive_at=None,
+        hours: float = 5.0,
+        last_delivery_at=None,
+    ):
         self.urgency = SimpleNamespace(total=0.0)
         self._last_user_message = ""
         self.response_rate = None
         self._knowledge_character_id = ""
         self._recent_messages = deque(recent)
         self._last_proactive_time = last_proactive_at
+        # 双闸基准纠偏（2026-10-12）：min_interval 读投递基准（仅 commit_sent
+        # 推进）；_last_proactive_time 会被 on_chat 拨动，不再参与节奏闸。
+        self._last_delivery_time = last_delivery_at
         self._hours = hours
         self.commits: list[dict] = []
 
@@ -214,6 +223,9 @@ def _make_scheduler(monkeypatch, *, engine: _FakeEngine, decision_message: str):
     sched._llm_proactive_next_ok = {}
     sched._disabled_event_day = {}
     sched._deliver_fail_counts = {}
+    # skip 账本治理（2026-10-12）：新增的两个每日去重账本须与实现同步
+    sched._wait_window_event_day = {}
+    sched._quiet_event_day = {}
     sched._is_quiet_hours = lambda: False
     sched.get_quiet_hours = lambda: None
     sched._vital_tick_for_user = lambda *a, **k: None
@@ -248,10 +260,10 @@ def _run(sched, engine):
 
 class TestSchedulerDoubleGates:
     def test_min_interval_skips_llm_and_delivery(self, monkeypatch):
-        """5 分钟前刚主动过 → 不调 LLM、不投递、账本留 min_interval。"""
+        """5 分钟前刚投递过 → 不调 LLM、不投递、账本留 min_interval。"""
         eng = _FakeEngine(
             recent=[],
-            last_proactive_at=datetime.now(_UTC) - timedelta(minutes=5),
+            last_delivery_at=datetime.now(_UTC) - timedelta(minutes=5),
             hours=10.0,
         )
         sched, delivered, ledger, llm = _make_scheduler(
@@ -263,10 +275,14 @@ class TestSchedulerDoubleGates:
         assert any(e.get("reason") == "min_interval" for e in ledger)
 
     def test_cooldown_after_reply_skips(self, monkeypatch):
-        """用户 2 分钟前刚说话 → 冷却拦截（生产实证 08:10:36 场景）。"""
+        """用户 2 分钟前刚说话 → 冷却拦截（生产实证 08:10:36 场景）。
+
+        投递基准在 3h 前（min_interval 不命中）——hours=2min 独立命中冷却闸，
+        恰是「冷却闸独立语义」的活演示（纠偏前被 60min 污染遮蔽成近似死码）。
+        """
         eng = _FakeEngine(
             recent=[],
-            last_proactive_at=datetime.now(_UTC) - timedelta(hours=3),
+            last_delivery_at=datetime.now(_UTC) - timedelta(hours=3),
             hours=2.0 / 60.0,
         )
         sched, delivered, ledger, llm = _make_scheduler(
@@ -278,10 +294,10 @@ class TestSchedulerDoubleGates:
         assert any(e.get("reason") == "cooldown_after_reply" for e in ledger)
 
     def test_normal_flow_unaffected(self, monkeypatch):
-        """双闸未命中（上次主动 3 小时前+用户 5 小时未回）→ 正常决策投递。"""
+        """双闸未命中（上次投递 3 小时前+用户 5 小时未回）→ 正常决策投递。"""
         eng = _FakeEngine(
             recent=[],
-            last_proactive_at=datetime.now(_UTC) - timedelta(hours=3),
+            last_delivery_at=datetime.now(_UTC) - timedelta(hours=3),
             hours=5.0,
         )
         sched, delivered, ledger, llm = _make_scheduler(

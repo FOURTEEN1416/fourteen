@@ -192,7 +192,12 @@ class TestCharacterKnowledgeService:
         assert service._index_mtimes["char_stale"] != 1
 
     def test_ensure_index_keeps_cache_when_disk_unchanged(self, tmp_path: Path):
-        """磁盘未变时 ensure_index 仍走内存缓存（不重复读盘）。"""
+        """磁盘未变时 ensure_index 仍走内存缓存（不重复读盘）。
+
+        2026-10-12 新鲜度协议批：手动注入内存索引 + 无源存储属 W5 前存量
+        形态 —— 首次 ensure 触发自举迁移（创建 store 并重打版本戳，磁盘
+        变更一次，内存缓存被重载替换）；此后稳态磁盘未变 → 缓存保留。
+        """
         index_dir = tmp_path / "knowledge_index"
         service = CharacterKnowledgeService(use_bm25=True, index_dir=index_dir)
 
@@ -201,8 +206,14 @@ class TestCharacterKnowledgeService:
         service._retrievers["char_fresh"] = retriever
         service.save_index("char_fresh")
 
+        # 首次 ensure：自举迁移（无 store → 从派生索引恢复源材料 + 重打版本戳）
         assert service.ensure_index("char_fresh") is True
-        assert service._retrievers["char_fresh"] is retriever
+        assert (index_dir / "sources" / "char_fresh.json").exists()
+
+        # 稳态：磁盘未变 → 内存缓存保留（不重复读盘/重建）
+        steady = service._retrievers["char_fresh"]
+        assert service.ensure_index("char_fresh") is True
+        assert service._retrievers["char_fresh"] is steady
 
     def test_has_index_and_clear(self):
         """has_index / clear 接口"""

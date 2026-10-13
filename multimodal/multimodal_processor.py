@@ -5,6 +5,17 @@ from typing import Any
 
 logger = logging.getLogger("multimodal")
 
+# 图片描述 prompt（A 档 describe 链）：陪伴场景需要场景/人物/情绪粒度，
+# 20 字以内承载不了图片语义——上限 150 字，供角色理解图片并自然接话。
+IMAGE_DESCRIBE_PROMPT = (
+    "请描述这张图片：画面场景、出现的人物或物品、整体情绪氛围，"
+    "用不超过150字的中文口语描述；不要推测用户意图，只输出描述本身。"
+)
+
+# 图片无法归一化（损坏 base64 等）时的占位文本。必须保持「[收到一张图片」
+# 前缀——connector._describe_image 按该前缀过滤为空串。
+_IMAGE_UNAVAILABLE_PLACEHOLDER = "[收到一张图片，无法解析]"
+
 
 class MultimodalProcessor:
     def __init__(self, llm_gateway=None, asr_config: dict[str, Any] | None = None):
@@ -34,12 +45,22 @@ class VisionHandler:
     async def process(self, image_data: Any) -> dict[str, Any]:
         if self._llm and hasattr(self._llm, 'chat'):
             try:
-                # 修复：原代码构建了消息列表但从未传给 LLM，直接返回假回复
-                # 现在实际调用 LLM 网关进行视觉理解
+                # 归一化单一真源：裸 base64/data URL/公网 URL → data URL，与直传链
+                # build_attachments 同源（multimodal.image_attachment.to_data_url）。
+                # 旧实现把裸 base64 直塞 image_url.url，视觉模型换链即必失败。
+                from multimodal.image_attachment import to_data_url
+
+                url = to_data_url(image_data) if isinstance(image_data, str) else None
+                if not url:
+                    return {
+                        "text": _IMAGE_UNAVAILABLE_PLACEHOLDER,
+                        "modality": "image",
+                        "original": None,
+                    }
                 messages = [
                     {"role": "user", "content": [
-                        {"type": "text", "text": "请描述这张图片的内容，简洁20字以内。"},
-                        {"type": "image_url", "image_url": {"url": image_data} if isinstance(image_data, str) else {}},
+                        {"type": "text", "text": IMAGE_DESCRIBE_PROMPT},
+                        {"type": "image_url", "image_url": {"url": url}},
                     ]},
                 ]
                 description = await self._llm.chat(messages=messages)
