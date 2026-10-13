@@ -60,7 +60,7 @@ def _voice_item(text="", media_aes_key=_B64_HEX_KEY, param="voice-query-token"):
 def _make_conn():
     from wechat_direct.wechat_connector import WeChatConnector
 
-    conn = WeChatConnector(MagicMock())
+    conn = WeChatConnector(MagicMock(), owner_user_id=42)
     conn.token = "test_token"
     conn._last_user_id = "wx_user_1"
     conn._context_tokens = {"wx_user_1": {"token": "ctx", "ts": 0}}
@@ -234,7 +234,7 @@ class TestDownloadMedia:
         from wechat_direct.wechat_connector import WeChatConnector
 
         cipher = _ecb_encrypt(_PNG_BYTES, _RAW_KEY)
-        conn = WeChatConnector(MagicMock())
+        conn = WeChatConnector(MagicMock(), owner_user_id=42)
         with patch("wechat_direct.wechat_connector.requests.get") as mock_get:
             mock_get.return_value = MagicMock(content=cipher, raise_for_status=lambda: None)
             raw = conn._download_media(self._ref())
@@ -245,7 +245,7 @@ class TestDownloadMedia:
     def test_full_url_priority(self):
         from wechat_direct.wechat_connector import WeChatConnector
 
-        conn = WeChatConnector(MagicMock())
+        conn = WeChatConnector(MagicMock(), owner_user_id=42)
         with patch("wechat_direct.wechat_connector.requests.get") as mock_get:
             mock_get.return_value = MagicMock(content=_PNG_BYTES, raise_for_status=lambda: None)
             conn._download_media(self._ref(full_url="https://cdn.example.com/dl?x=1", aes_key=None))
@@ -254,7 +254,7 @@ class TestDownloadMedia:
     def test_plain_download_without_key(self):
         from wechat_direct.wechat_connector import WeChatConnector
 
-        conn = WeChatConnector(MagicMock())
+        conn = WeChatConnector(MagicMock(), owner_user_id=42)
         with patch("wechat_direct.wechat_connector.requests.get") as mock_get:
             mock_get.return_value = MagicMock(content=_PNG_BYTES, raise_for_status=lambda: None)
             raw = conn._download_media(self._ref(aes_key=None))
@@ -265,7 +265,7 @@ class TestDownloadMedia:
 
         from wechat_direct.wechat_connector import WeChatConnector
 
-        conn = WeChatConnector(MagicMock())
+        conn = WeChatConnector(MagicMock(), owner_user_id=42)
         with patch("wechat_direct.wechat_connector.requests.get",
                    side_effect=requests_mod.exceptions.Timeout()):
             assert conn._download_media(self._ref()) is None
@@ -273,7 +273,7 @@ class TestDownloadMedia:
     def test_empty_ref_returns_none(self):
         from wechat_direct.wechat_connector import WeChatConnector
 
-        conn = WeChatConnector(MagicMock())
+        conn = WeChatConnector(MagicMock(), owner_user_id=42)
         assert conn._download_media(self._ref(encrypt_query_param="", full_url="")) is None
 
 

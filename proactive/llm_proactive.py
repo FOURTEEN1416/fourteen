@@ -20,6 +20,81 @@ DEFAULT_WEB_CONFIG: dict[str, Any] = {
     "character_hint": "",
 }
 
+
+# ── 被否认称呼检测（2026-10-13 15:28 复犯事故）────────────────
+#
+# 模式：用户消息中出现「(谁是|我不是|别叫我|不要叫我|不叫)(X)」即把 X 记为
+# 被否认称呼。宁漏勿错：正则只认显式否认句式；命中词需 1-6 字（中文昵称
+# 常见长度），过滤代词/量词误命中。
+_DENY_PATTERNS = (
+    "谁是",
+    "我不是",
+    "别叫我",
+    "不要叫我",
+    "不叫我",
+    "谁叫",
+)
+
+_DENY_STOPWORDS = {"谁", "我", "你", "他", "她", "它", "什么", "哪", "哪段", "谁呢"}
+
+
+def _normalize_deny_name(name: str, seen: set[str]) -> str:
+    """归一化候选词：剥「什么/一个」前缀（「什么夏夏」→「夏夏」）；若归一后
+    与已收词重复则返回空串（保首现原词，不收变体噪音）。"""
+    for prefix in ("什么", "一个", "那个"):
+        if name.startswith(prefix) and len(name) > len(prefix):
+            trimmed = name[len(prefix):]
+            if trimmed and trimmed not in seen:
+                return trimmed
+    return name
+
+
+def detect_denied_nicknames(recent_messages: list[dict[str, Any]] | None) -> list[str]:
+    """从最近历史里提取「用户否认过的称呼」词表（纯函数，宁漏勿错）。
+
+    生产实证（15:28 复犯）：模型自造昵称「夏夏」被用户质问「谁是夏夏」后，
+    决策器 reason 明知要避免错误称呼、message 仍复用——历史引用惯性压过
+    单次硬规则。本函数只认**用户 role 消息**里的显式否认句式，命中词进
+    【被否认称呼】禁令段；顺序保持历史首现序，去重。
+    """
+    denied: list[str] = []
+    seen: set[str] = set()
+    for row in recent_messages or []:
+        if not isinstance(row, dict) or row.get("role") != "user":
+            continue
+        text = str(row.get("content") or "")
+        if not text:
+            continue
+        for pat in _DENY_PATTERNS:
+            start = 0
+            while True:
+                i = text.find(pat, start)
+                if i < 0:
+                    break
+                rest = text[i + len(pat):]
+                # 抓取紧随其后的候选词：连续中文字符，1-6 字
+                name = ""
+                for ch in rest:
+                    if "\u4e00" <= ch <= "\u9fff":
+                        name += ch
+                        if len(name) >= 6:
+                            break
+                    else:
+                        break
+                # 🔴 扫描游标必须无条件推进（2026-10-13 死循环事故：归一化
+                # 重构时删了推进行，name 为空/停用词分支 continue 后 find
+                # 永远从同一处重启）。推进量至少跨过本次模式命中。
+                start = i + len(pat) + max(1, len(name))
+                name = name.rstrip("呢吗啊？?。！!，, ")
+                if not name or name in _DENY_STOPWORDS:
+                    continue
+                name = _normalize_deny_name(name, seen)
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                denied.append(name)
+    return denied[:5]
+
 DECISION_SYSTEM = """你是伴侣角色的**主动消息决策器**。
 结合：角色人设、用户画像、控制台可调参数、当前语境，判断是否主动开口、说什么。
 
@@ -38,6 +113,11 @@ DECISION_SYSTEM = """你是伴侣角色的**主动消息决策器**。
    的称呼只能用【用户身份】段给出的昵称，没有就只用「你」；不得编造用户的经历
    或「我们共同的过去」；不得假设与用户共处同一物理空间（生产实证：模型按角色
    名给用户起昵称「夏夏」、编造「你以前总爱看齿轮」的共同记忆）。
+9. 【被否认称呼，2026-10-13 15:28 复犯事故】历史中出现过的称呼若已被用户否认
+   （「谁是X」「我不是X」「别叫我X」），**即使用户后来引用过这个词**（质问/
+   复述），也不得再用它称呼用户——用户引用≠用户接受；上下文有
+   【被否认称呼】段时以它为准（生产实证：决策 reason 已自知「避免错误称呼」，
+   输出仍叫「夏夏」——历史惯性压过单次硬规则，必须显式禁令行对抗）。
 """
 
 
@@ -462,6 +542,17 @@ def build_proactive_context(
         )
         + "不得编造用户的经历或「我们共同的过去」，不得假设与用户共处同一物理空间。"
     )
+    # 【被否认称呼】禁令（2026-10-13 15:28 复犯事故）：历史里用户否认过的称呼
+    # （模型自造昵称被质问「谁是夏夏」），即使用户在后续消息中引用该词，模型
+    # 也因历史注意力惯性复用——显式禁令行对抗（与身份锚同族，宁缺毋串）。
+    denied = detect_denied_nicknames(recent_messages or [])
+    if denied:
+        parts.append(
+            "【被否认称呼】以下名字已被用户明确否认（用户说过「谁是X/我不是X/别叫我X」）："
+            + "、".join(f"「{d}」" for d in denied)
+            + "。任何场景下都不得再用这些名字称呼用户——包括道歉、复盘、引用历史时；"
+            "对用户只能称「你」。"
+        )
     if persona_hint:
         parts.append(
             "【角色人设】（以下是角色卡文本；卡文中对「你」的设定只是角色记忆里"

@@ -7,7 +7,7 @@ class TestWeChatConnectorSendMethods:
     def _make_connector(self):
         from wechat_direct.wechat_connector import WeChatConnector
         mgr = MagicMock()
-        conn = WeChatConnector(mgr)
+        conn = WeChatConnector(mgr, owner_user_id=42)
         conn.token = "test_token"
         conn._last_user_id = "test_user"
         conn._context_tokens = {"test_user": "test_ctx"}
@@ -17,7 +17,7 @@ class TestWeChatConnectorSendMethods:
     def test_send_voice_success(self, mock_send):
         mock_send.return_value = {"ret": 0}
         conn = self._make_connector()
-        result = conn.send_voice(b"fake_silk_audio", duration_ms=3000)
+        result = conn.send_voice(b"fake_silk_audio", duration_ms=3000, to_user="test_user")
         assert result is True
         call_args = mock_send.call_args
         assert call_args.kwargs.get("fmt") == "silk" or call_args[1].get("fmt") == "silk"
@@ -26,7 +26,7 @@ class TestWeChatConnectorSendMethods:
     def test_send_image_success(self, mock_send):
         mock_send.return_value = {"ret": 0}
         conn = self._make_connector()
-        result = conn.send_image(b"fake_image_data")
+        result = conn.send_image(b"fake_image_data", to_user="test_user")
         assert result is True
         call_args = mock_send.call_args
         image_b64 = call_args.kwargs.get("image_data_b64") or call_args[1].get("image_data_b64")
@@ -36,7 +36,7 @@ class TestWeChatConnectorSendMethods:
     def test_send_emoji_success(self, mock_send):
         mock_send.return_value = {"ret": 0}
         conn = self._make_connector()
-        result = conn.send_emoji("abc123md5")
+        result = conn.send_emoji("abc123md5", to_user="test_user")
         assert result is True
 
     def test_send_voice_no_token(self):
@@ -95,7 +95,7 @@ class TestHandleMessage:
     def test_sends_fallback_when_reply_empty(self, mock_call, mock_send):
         from wechat_direct.wechat_connector import WeChatConnector
         mock_call.return_value = {"reply": ""}
-        conn = WeChatConnector(MagicMock())
+        conn = WeChatConnector(MagicMock(), owner_user_id=42)
         conn.token = "test_token"
         conn._last_user_id = "wx_user_1"
         conn._context_tokens = {"wx_user_1": {"token": "ctx", "ts": 0}}
@@ -125,7 +125,7 @@ class TestHandleMessage:
     def test_sends_normal_reply(self, mock_call, mock_send):
         from wechat_direct.wechat_connector import WeChatConnector
         mock_call.return_value = {"reply": "你好呀"}
-        conn = WeChatConnector(MagicMock())
+        conn = WeChatConnector(MagicMock(), owner_user_id=42)
         conn.token = "test_token"
         conn._last_user_id = "wx_user_1"
         conn._context_tokens = {"wx_user_1": {"token": "ctx", "ts": 0}}
@@ -165,7 +165,7 @@ class TestHandleMessage:
         """type:3 图片消息不得在入口被丢弃，必须进入处理链路并产生回复。"""
         from wechat_direct.wechat_connector import WeChatConnector
         mock_call.return_value = {"reply": "这张图我看到了"}
-        conn = WeChatConnector(MagicMock())
+        conn = WeChatConnector(MagicMock(), owner_user_id=42)
         conn.token = "test_token"
         conn._last_user_id = "wx_user_1"
         conn._context_tokens = {"wx_user_1": {"token": "ctx", "ts": 0}}
@@ -191,7 +191,7 @@ class TestHandleMessage:
         """type:34 语音消息不得在入口被丢弃，应先 ASR 转写、再以转写文本路由。"""
         from wechat_direct.wechat_connector import WeChatConnector
         mock_call.return_value = {"reply": "收到你的语音"}
-        conn = WeChatConnector(MagicMock())
+        conn = WeChatConnector(MagicMock(), owner_user_id=42)
         conn.token = "test_token"
         conn._last_user_id = "wx_user_1"
         conn._context_tokens = {"wx_user_1": {"token": "ctx", "ts": 0}}
@@ -219,7 +219,7 @@ class TestHandleMessage:
         """ASR 未启用（返回空串）时，语音消息仍须进入链路，不得被入口守卫丢弃。"""
         from wechat_direct.wechat_connector import WeChatConnector
         mock_call.return_value = {"reply": "（我暂时不知道该怎么回复，可以再说一次吗？）"}
-        conn = WeChatConnector(MagicMock())
+        conn = WeChatConnector(MagicMock(), owner_user_id=42)
         conn.token = "test_token"
         conn._last_user_id = "wx_user_1"
         conn._context_tokens = {"wx_user_1": {"token": "ctx", "ts": 0}}

@@ -629,7 +629,7 @@ async def test_abuse4_wechat_legacy_ownerless_channel_not_blocked(tmp_path):
         state_path=str(tmp_path / "s.json"),
         qrcode_path=str(tmp_path / "q.json"),
         context_tokens_path=str(tmp_path / "ct.json"),
-    )
+        owner_user_id=42,)
     serial = Mock()
     conn._handle_message_serial = serial
     conn._handle_message({

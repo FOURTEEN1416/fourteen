@@ -243,8 +243,10 @@ def test_owner_channel_voice_image_emoji_require_explicit_target(tmp_state_root)
         assert calls, "显式 to_user 必须放行"
 
 
-def test_legacy_channel_keeps_last_user_fallback(tmp_path):
-    conn = wc.WeChatConnector(MagicMock())
+def test_owner_channel_requires_explicit_target(tmp_path):
+    """D16（2026-10-13 fail-closed 连带）：owner 通道禁 last_user 回退——
+    显式 to_user 成功；不传被拒（防串台老语义钉死为拒绝）。"""
+    conn = wc.WeChatConnector(MagicMock(), owner_user_id=42)
     conn.token = "t"
     conn._last_user_id = "last@im.wechat"
     with pytest.MonkeyPatch.context() as mp:
@@ -255,8 +257,11 @@ def test_legacy_channel_keeps_last_user_fallback(tmp_path):
             return {"ret": 0}
 
         mp.setattr(wc, "_send_emoji_message", fake)
-        assert conn.send_emoji("md5") is True
-        assert captured["to"] == "last@im.wechat"
+        assert conn.send_emoji("md5", to_user="explicit@im.wechat") is True
+        assert captured["to"] == "explicit@im.wechat"
+        # 隐式回退已废除：不传 to_user 必须拒绝（不得用 _last_user_id）
+        assert conn.send_emoji("md5") is False
+        assert captured["to"] == "explicit@im.wechat"  # 拒绝发送，captured 不变
 
 
 # ── item 31 ──────────────────────────────────────────────

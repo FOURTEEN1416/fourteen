@@ -105,23 +105,12 @@ def test_missing_scanner_id_fails_open_with_error(tmp_state_root, caplog):
     assert "scanner_id_missing" in caplog.text
 
 
-def test_legacy_global_channel_not_gated(tmp_state_root):
-    """遗留全局通道（admin 兼容面，无 owner）不适用扫码人守卫。"""
-    session_dir = Path(tmp_state_root) / "legacy"
-    session_dir.mkdir(parents=True, exist_ok=True)
-    conn = wc.WeChatConnector(MagicMock(), session_dir=session_dir)
-    assert conn.owner_user_id is None
-    seen: list[str] = []
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(
-            wc, "_call_user_manager",
-            lambda *a, **k: seen.append(a[1]) or {"reply": "ok"},
-        )
-        conn._handle_message(_text_msg("m1", from_user="anyone", text="hi"))
-    assert seen == ["anyone"]
-
-
-# ── 2. scanner_wxid 装载路径 ─────────────────────────────
+def test_legacy_global_channel_not_gated():
+    """D16 后无「遗留全局通道」（fail-closed 构造拒绝，2026-10-13）。
+    旧断言（owner=None 不适用守卫）测的是被废除语义，改为确认拒绝。"""
+    import pytest as _pytest
+    with _pytest.raises(ValueError, match="owner_user_id"):
+        wc.WeChatConnector(MagicMock())
 
 
 def test_login_confirm_loads_scanner(tmp_state_root):
@@ -287,3 +276,24 @@ def test_scheduler_uses_account_pacing_source():
 
     src = inspect.getsource(sched.ProactiveScheduler._llm_proactive_one_user)
     assert "account_pacing_state" in src
+
+
+# ── 遗留全局通道 fail-closed（2026-10-13 D16 污染源根治）────────
+
+
+def test_connector_rejects_legacy_global_form():
+    """D16 后 owner_user_id=None 的「遗留全局通道」没有任何合法产品语义
+    （非独立用户、绕过 Registry 与 MAX_CHANNELS_PER_USER、绕过扫码人守卫）。
+    构造必须直接 raise——堵死 main.py 控制台模式残留入口。"""
+    from wechat_direct.wechat_connector import WeChatConnector
+
+    with pytest.raises(ValueError, match="owner_user_id"):
+        WeChatConnector(None)
+
+
+def test_connector_requires_owner():
+    """合法形态：必须带 owner_user_id（Registry 通道）。"""
+    from wechat_direct.wechat_connector import WeChatConnector
+
+    c = WeChatConnector(None, owner_user_id=42)
+    assert c.owner_user_id == 42

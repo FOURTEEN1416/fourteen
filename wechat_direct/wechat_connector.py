@@ -855,6 +855,15 @@ class WeChatConnector:
         qrcode_path: str | None = None,
         context_tokens_path: str | None = None,
     ):
+        # 🔴 D16 污染源根治（2026-10-13）：owner_user_id=None 的「遗留全局
+        # 通道」没有任何合法产品语义——非独立用户、绕过 Registry 与
+        # MAX_CHANNELS_PER_USER 配额、绕过扫码人守卫（09-19 报障「别人连的
+        # 是管理员通道」的架构残根）。fail-closed：构造即拒绝。
+        if owner_user_id is None:
+            raise ValueError(
+                "WeChatConnector 必须绑定 owner_user_id（D16：谁扫码谁聊，"
+                "一人一 bot 一条通道）；遗留全局通道形态已废除"
+            )
         self.user_manager = user_manager
         self.orchestrator = getattr(user_manager, "_orch", None)
         self.base_url = base_url

@@ -110,9 +110,10 @@ def test_connector_session_key_and_send_requires_target():
     assert c.send_text("hi", to_user="") is False
 
 
-def test_legacy_connector_session_key_unchanged():
-    c = WeChatConnector(None)
-    assert c._session_key("friend_a") == "friend_a"
+def test_connector_session_key_uses_owner():
+    """D16：会话键恒为 owner:peer（遗留裸 peer 形态已废除，2026-10-13 fail-closed）。"""
+    c = WeChatConnector(None, owner_user_id=42)
+    assert c._session_key("friend_a") == "42:friend_a"
 
 
 def test_get_wechat_state_requires_user_for_isolation(tmp_path, monkeypatch):

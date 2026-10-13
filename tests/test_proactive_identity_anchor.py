@@ -65,3 +65,55 @@ def test_persona_hint_carries_disclaimer():
     ctx = _ctx(persona_hint="你是她从小一起长大的青梅竹马")
     assert "不是真实用户" in ctx
     assert "真实用户身份以上方【用户身份】段为准" in ctx
+
+
+# ── 4. 被否认称呼禁令（2026-10-13 15:28 复犯事故）──────────────
+#
+# 事故：身份锚 12:52 部署后，15:28 决策器 reason 明知「用户指出角色混淆了
+# 身份（夏夏）…避免错误称呼」，输出 message 却仍叫「夏夏，最近怎么样」。
+# 根因：历史里用户引用该错误称呼（「谁是夏夏」「你叫我夏夏的时候」），
+# 锚的「没有昵称只称你」被历史注意力惯性压过。修法：历史出现「用户否认
+# 称呼」事件时，显式注入禁令行——该名字已被用户否认，引用亦不得使用。
+
+
+def _denied_ctx():
+    return _ctx(
+        recent_messages=[
+            {"role": "assistant", "content": "夏夏，你吃了吗"},
+            {"role": "user", "content": "谁是夏夏？我不是什么夏夏"},
+            {"role": "assistant", "content": "哦哦我记错了"},
+            {"role": "user", "content": "你叫我夏夏的时候我都没有回过话"},
+        ],
+        profile={"nickname": ""},
+    )
+
+
+def test_denied_nickname_ban_injected():
+    """历史含否认称呼 → 上下文必须出现【被否认称呼】禁令段并列出该词。"""
+    ctx = _denied_ctx()
+    assert "被否认称呼" in ctx
+    assert "夏夏" in ctx.split("【被否认称呼】")[1][:200]
+
+
+def test_denied_nickname_ban_forbids_usage():
+    """禁令段必须明说：该称呼已被用户否认，任何场景（含引用/道歉复述）不得再用。"""
+    ctx = _denied_ctx()
+    seg = ctx.split("【被否认称呼】")[1][:400]
+    assert "否认" in seg and ("不得" in seg or "禁止" in seg)
+
+
+def test_no_denial_no_ban_block():
+    """历史无否认事件 → 不注入禁令段（宁缺毋串）。"""
+    ctx = _ctx(
+        recent_messages=[
+            {"role": "user", "content": "今天好累"},
+            {"role": "assistant", "content": "早点休息"},
+        ],
+        profile={"nickname": ""},
+    )
+    assert "【被否认称呼】" not in ctx
+
+
+def test_decision_system_has_denied_name_rule():
+    """硬规则 8 追加：历史中被用户否认过的称呼（含用户引用的）一律不得再用。"""
+    assert "否认" in DECISION_SYSTEM and "不得再用" in DECISION_SYSTEM

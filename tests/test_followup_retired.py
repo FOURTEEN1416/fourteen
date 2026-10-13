@@ -94,7 +94,7 @@ def test_message_main_path_registers_no_timers(tmp_path, monkeypatch):
     from wechat_direct import wechat_connector as wc
 
     monkeypatch.setattr(wc, "CONTEXT_TOKENS_PATH", str(tmp_path / "ctx.json"))
-    c = wc.WeChatConnector(SimpleNamespace())
+    c = wc.WeChatConnector(SimpleNamespace(), owner_user_id=42)
     c.token = "test-token"
     monkeypatch.setattr(c, "_merge_session_state", lambda updates: {})
     monkeypatch.setattr(wc, "_segment_delay", lambda text: 0)

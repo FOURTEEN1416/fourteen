@@ -92,7 +92,7 @@ def _connector(tmp_path, monkeypatch, token="tok"):
     from wechat_direct import wechat_connector as wc
 
     monkeypatch.setattr(wc, "CONTEXT_TOKENS_PATH", str(tmp_path / "ctx.json"))
-    c = wc.WeChatConnector(_FakeUserMgr())
+    c = wc.WeChatConnector(_FakeUserMgr(), owner_user_id=42)
     c.token = token
     c._context_tokens = {"u1@im.wechat": {"token": "ctx-tok", "ts": time.time()}}
     return c
@@ -146,7 +146,7 @@ def test_context_tokens_roundtrip(tmp_path, monkeypatch):
     path = str(tmp_path / "ctx.json")
     monkeypatch.setattr(wc, "CONTEXT_TOKENS_PATH", path)
 
-    c = wc.WeChatConnector(_FakeUserMgr())
+    c = wc.WeChatConnector(_FakeUserMgr(), owner_user_id=42)
     c._context_tokens = {"u1@im.wechat": {"token": "ctx-tok", "ts": time.time()}}
     c._save_context_tokens()
 
@@ -154,7 +154,7 @@ def test_context_tokens_roundtrip(tmp_path, monkeypatch):
         saved = json.load(fh)
     assert saved["u1@im.wechat"]["token"] == "ctx-tok"
 
-    c2 = wc.WeChatConnector(_FakeUserMgr())
+    c2 = wc.WeChatConnector(_FakeUserMgr(), owner_user_id=42)
     assert c2._get_context_token("u1@im.wechat") == "ctx-tok"
 
 
@@ -172,7 +172,7 @@ def test_context_tokens_expired_skipped_on_load(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(wc, "CONTEXT_TOKENS_PATH", str(path))
 
-    c = wc.WeChatConnector(_FakeUserMgr())
+    c = wc.WeChatConnector(_FakeUserMgr(), owner_user_id=42)
     assert c._get_context_token("fresh@im.wechat") == "new"
     assert c._get_context_token("stale@im.wechat") == ""
 
@@ -191,7 +191,7 @@ def test_context_tokens_missing_file_is_silent(tmp_path, monkeypatch):
     from wechat_direct import wechat_connector as wc
 
     monkeypatch.setattr(wc, "CONTEXT_TOKENS_PATH", str(tmp_path / "nope.json"))
-    c = wc.WeChatConnector(_FakeUserMgr())
+    c = wc.WeChatConnector(_FakeUserMgr(), owner_user_id=42)
     assert c._context_tokens == {}
 
 

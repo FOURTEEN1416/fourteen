@@ -29,7 +29,7 @@ class _FakeGateway:
 def _make_conn():
     from wechat_direct.wechat_connector import WeChatConnector
 
-    conn = WeChatConnector(MagicMock())
+    conn = WeChatConnector(MagicMock(), owner_user_id=42)
     conn.token = "test_token"
     conn._last_user_id = "wx_user_1"
     conn._context_tokens = {"wx_user_1": {"token": "ctx", "ts": 0}}
