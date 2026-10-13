@@ -92,6 +92,10 @@ def test_caption_and_desc_both_enter_main_chain():
     text = mock_call.call_args[0][2]
     assert "你看我拍的猫" in text, "配文必须保留"
     assert "图中是一只白猫趴在窗台上" in text, "描述必须作为图片上下文并入（不得 or 短路丢弃）"
+    # 2026-10-13 拟人化：标记从「[图片：…]」改「[你亲眼看到：…]」（亲历腔，
+    # 配合 reply_mode 图片铁则让角色以第一人称消化、不复述报告）。
+    assert "[你亲眼看到：图中是一只白猫趴在窗台上]" in text, "必须用亲历腔标记注入"
+    assert "[图片：" not in text, "旧「[图片：…]」报告腔标记不得残留"
 
 
 def test_describe_prompt_relaxed():
@@ -106,3 +110,23 @@ def test_describe_prompt_relaxed():
     assert int(m.group(1)) >= 100, "上限须放宽到 ≥100 字"
     for kw in ("场景", "人物", "情绪"):
         assert kw in IMAGE_DESCRIBE_PROMPT, f"prompt 须覆盖粒度维度：{kw}"
+
+
+def test_describe_prompt_is_materialized_facts():
+    """2026-10-13 拟人化：describe prompt 必须素材化（禁总结/解说/意图推测），
+    供角色以第一人称消化——旧「请描述这张图片…只输出描述本身」的解说腔已废。"""
+    from multimodal.multimodal_processor import IMAGE_DESCRIBE_PROMPT
+
+    assert "事实要素" in IMAGE_DESCRIBE_PROMPT
+    assert "不要总结" in IMAGE_DESCRIBE_PROMPT and "不要解说" in IMAGE_DESCRIBE_PROMPT
+    assert "只输出描述本身" not in IMAGE_DESCRIBE_PROMPT
+
+
+def test_reply_mode_contains_image_witness_rule():
+    """沉浸式指令必须含图片亲历铁则：[你亲眼看到：…] 是你的亲身经历，
+    禁止复述罗列文本、禁止「图片显示」转述腔（A→A+ 拟人化的 prompt 侧）。"""
+    from utils.reply_mode import _INSTRUCTION_IMMERSIVE
+
+    assert "[你亲眼看到" in _INSTRUCTION_IMMERSIVE
+    assert "禁止复述" in _INSTRUCTION_IMMERSIVE
+    assert "图片显示" in _INSTRUCTION_IMMERSIVE  # 转述腔反例词在案

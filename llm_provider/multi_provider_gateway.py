@@ -281,9 +281,14 @@ class MultiProviderGateway:
     如果用户配置了 DeepSeek，自动插入到最前面。
     """
 
-    # P1-2：provider 级熔断参数
-    _BREAKER_THRESHOLD = 2      # 连续失败次数达到即开闸
-    _BREAKER_COOLDOWN = 60.0    # 开闸后跳过该 provider 的秒数（到期半开重探）
+    # P1-2：provider 级熔断参数。
+    # 2026-10-13 降级提速批（用户体感「fallback 让整个系统响应变慢」实证：
+    # 生产近 20 轮回复中位 16.9s / P90 27.5s / 均值 17.6s，agnes 当日白等
+    # 降级 13 次——20s 超时常等满 + 熔断 2 次/60s 太温和攒不起来，每轮都
+    # 重新硬试坏供应商）：阈值 2→1（一次失败立即让路）、冷却 60→300s
+    # （坏供应商 5 分钟不再打扰；半开重探机制保留）。
+    _BREAKER_THRESHOLD = 1      # 连续失败次数达到即开闸
+    _BREAKER_COOLDOWN = 300.0   # 开闸后跳过该 provider 的秒数（到期半开重探）
 
     def __init__(
         self,

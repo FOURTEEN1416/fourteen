@@ -1772,8 +1772,13 @@ class WeChatConnector:
                 elif mode in ("auto", "describe"):
                     desc = self._describe_image(image_data)  # A：降级为描述注入
                     if desc:
-                        # 图文并存：配文在前、描述作图片上下文行（`or` 短路会整体丢图片语义）
-                        text = f"{text}\n[图片：{desc}]" if text else desc
+                        # 图文并存：配文在前、所见作图片上下文行（`or` 短路会整体丢图片语义）。
+                        # 2026-10-13 拟人化：标记从「[图片：…]」（第三方报告腔）改
+                        # 「[你亲眼看到：…]」（亲历腔）——角色按 persona 侧铁则以
+                        # 「我刚看到」的口吻自然说起，不复述描述文本。
+                        text = (
+                            f"{text}\n[你亲眼看到：{desc}]" if text else f"[你亲眼看到：{desc}]"
+                        )
                         logger.info(
                             "[wx][step=image_describe] msg_id=%s user=%s len=%d",
                             msg_id, from_user, len(desc),

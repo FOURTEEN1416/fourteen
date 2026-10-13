@@ -5,8 +5,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from concurrent.futures import Future
+from pathlib import Path
 
 import pytest
 
@@ -69,6 +71,7 @@ def _make_gw(**providers) -> MultiProviderGateway:
 
 
 def test_breaker_opens_after_consecutive_failures_and_skips():
+    """2026-10-13 降级提速批改写：阈值 1 → 首轮失败即开闸（旧口径 2 次已废）。"""
     bad, good = _FailProv(), _OkProv()
     gw = _make_gw(a=bad, b=good)
 
@@ -78,8 +81,8 @@ def test_breaker_opens_after_consecutive_failures_and_skips():
             assert r == "好的"
 
     asyncio.run(_three())
-    # 第 3 次调用时 a 已开闸（连续 2 次失败），不应再被打扰
-    assert bad.calls == 2
+    # 第 2 次调用时 a 已开闸（单次失败即让路），后续全部直落 good
+    assert bad.calls == 1
     assert good.calls == 3
 
 
@@ -92,11 +95,11 @@ def test_breaker_half_open_after_cooldown_reprobes():
         await gw.chat(query="hi")
 
     asyncio.run(_two())
-    assert bad.calls == 2
+    assert bad.calls == 1
     # 冷却期手动置为已过期 → 半开，允许重新探测
     gw._breaker_open_until["a"] = time.time() - 1
     asyncio.run(gw.chat(query="hi"))
-    assert bad.calls == 3
+    assert bad.calls == 2
 
 
 def test_breaker_success_resets_failures():
@@ -320,3 +323,41 @@ def test_profile_sync_dispatcher_is_singleton():
     d1 = _profile_sync_dispatcher()
     d2 = _profile_sync_dispatcher()
     assert d1 is d2  # 旧实现每次调用新建 dispatcher → 限速状态即抛
+
+
+# ── 降级提速批（2026-10-13，用户体感「fallback 让系统变慢」实证驱动）──
+
+
+def test_breaker_params_dedup_speedup():
+    """参数钉死：阈值 1（一次失败立即让路）+ 冷却 300s（坏供应商 5 分钟不再打扰）。
+
+    生产实证（2026-10-13）：agnes 20s 超时常等满 + 旧参数（2 次/60s）攒不起
+    熔断 → 每轮重新硬试，链均 17.6s。回退旧参数即红。
+    """
+    assert MultiProviderGateway._BREAKER_THRESHOLD == 1
+    assert MultiProviderGateway._BREAKER_COOLDOWN == 300.0
+
+
+def test_breaker_opens_after_single_failure():
+    """单次失败即开闸：第 2 轮调用直接跳过坏供应商（旧参数下 bad.calls==2）。"""
+    bad, good = _FailProv(), _OkProv()
+    gw = _make_gw(a=bad, b=good)
+
+    async def _two():
+        for _ in range(2):
+            r = await gw.chat(query="hi")
+            assert r == "好的"
+
+    asyncio.run(_two())
+    assert bad.calls == 1, "一次失败后必须开闸（第 2 轮不得再打扰坏供应商）"
+    assert good.calls == 2
+
+
+def test_agnes_request_timeout_eight_seconds():
+    """agnes 配置超时 20→8s（等满白等是降级慢的直接根因）。"""
+    cfg = json.loads(
+        (Path(__file__).resolve().parents[1] / "config" / "llm_providers.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert cfg["providers"]["agnes"]["request_timeout"] == 8
