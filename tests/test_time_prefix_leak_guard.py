@@ -71,3 +71,7 @@ def test_sanitize_reply_combined_with_labels():
 
 def test_guide_forbids_writing_prefix():
     assert "绝对不要写出任何这类前缀" in TIME_REASONING_GUIDE
+    # 指引仍守 ≤3 行预算（tests/test_history_row_timestamps 同钉）
+    from utils.local_time import time_anchor_line
+    lines = [ln for ln in time_anchor_line().splitlines() if ln.strip()]
+    assert len(lines) <= 4, f"指引不得超过 3 行，实际 {len(lines)-1} 行"
