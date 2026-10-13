@@ -483,6 +483,13 @@ class MemoryPipeline:
         effective_session = session_id or self.session_id
         turn_id = turn_id or uuid4().hex
         stored_reply = "" if _is_system_error_reply(reply) else reply
+        # 存储层纵深（2026-10-13 对抗验收）：assistant 正文落库前剥时间前缀
+        # 元数据——上游 _finalize_reply 已清洗，本层兜底防新出口绕过（主链
+        # 有 5 处 write_chat_history_sync 调用点，逐个追上游不可持续）。
+        if stored_reply:
+            from utils.prompt_sanitize import strip_time_prefixes
+
+            stored_reply = strip_time_prefixes(stored_reply)
         try:
             stored = self.sm.add_chat_turn(
                 user_msg, stored_reply, session_id=effective_session,
@@ -529,6 +536,14 @@ class MemoryPipeline:
         text = str(message or "").strip()
         effective_session = session_id or self.session_id
         if not text or not effective_session or _is_system_error_reply(text):
+            return False
+        # 存储层纵深（2026-10-13 对抗验收）：出站正文落库前剥时间前缀元数据——
+        # 上游两条链（scheduler/reminder）已各自清洗，本层兜底防新调用方绕过
+        # （同族事故：时间前缀学舌回库滚雪球，见 utils.prompt_sanitize）。
+        from utils.prompt_sanitize import strip_time_prefixes
+
+        text = strip_time_prefixes(text)
+        if not text:
             return False
         common = dict(
             character_id=str(character_id or ""),
