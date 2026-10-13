@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-10-13 — 四模块深度研究批（用户指令「记忆/角色/主动消息/多模态是真正决定产品的模块，深度研究和完善，参考和对标」+ 追问 peer 隔离定性）· workflow `dwfrun-c122a415` 25 员 + 主控收尾 · `893c28c`
+
+- **形态**：主控规划 + GLM-5.3-Flash 子智能体 25 员（8 研究/4 方案/4 评审/4 实施/验收+回归）；三遇配额墙（1308 五小时窗 ×2 + **1310 周配额**），前 16 步（研究/方案/评审）由子智能体完成，周配额见底后**主控亲自收尾**（记忆域补实现 + 多模态验收 + 全量回归）。Resume 回放非确定性事故（inputHash mismatch）→ Amend 换轨根治（🔑 教训：中断恢复优先 Amend，Resume 重算输入遇工作树已写必炸）。
+- **peer 隔离定性（用户质疑「漂移产物」，三证俱全非漂移）**：AGENTS:31 好友自选角色功能 + wechat_peer_preferences 表 + peer_character.py 模块 + 09-21 生产串台事故修复（裸 wxid 剥 owner 致 user1/user4 共库）→ 隔离域 (owner,peer) 是硬约束；「好友代聊」系主控概括失真，引用机制用仓库原词。
+- **主动域**（workflow 实施，验收已过）：① min_interval 闸基准纠偏——`account_pacing_state` 改读 `_last_delivery_time`（旧读 `_last_proactive_time` 会被 on_chat 拨到用户说话时刻 → 闸退化成 cooldown 重复品，生产实证拦截比 87:2）；② **未回复连击硬闸** `MAX_UNANSWERED_PROACTIVE=4`（对标 astrbot max_unanswered_times 只取语义；持久化 + 同 owner 组内取最小 + 任一通道回复清零）；③ 双通道去重集合并 + window 全覆盖（TestSqueezeTrap 锁死退化突变）；④ skip 账本治理（llm_wait_window 曾占 96% 账本行、quiet_hours 整夜不可观测 → 均改每用户每日一条）。
+- **多模态域**（workflow 实施 + 主控验收）：图片理解 A 档 describe 链贯通——`VisionHandler` 真调 LLM（旧码构建消息**从不传参**=假实现）+ `to_data_url` 归一化 + 损坏 base64 占位（connector 前缀过滤契约保持）；图文并存配文+`[图片：描述]`双进主链（旧 `or` 短路丢图片语义）；下载点按原始字节判上限（base64 膨胀致有效上限 4.5MB→3.75MB 修复）；media step 账本；语音 ASR 不可得受控话术 `voice_unsupported`（无括号）。vision 模型接入 B 档（新 provider）留待裁决。
+- **角色域**（workflow 实施，验收已过）：知识库 card 源双比对幂等（version==fp 且 chunks==items，防指纹碰撞巧合重建）、`_maybe_bootstrap` 冷启动自举（索引先行 source_store 缺位场景）、lorebook `world_info_constant` 常驻注入桶、`audit_orphans` 卫生审计、索引重建脚本幂等化。
+- **记忆域**（🔴 子智能体红测写完实现被配额截断，主控按红测规格补实现，六突变验红全红）：① 遗忘链「永不老去」根治——`iter_active_facts_oldest_first` id 游标升序全覆盖（旧 `updated_at DESC LIMIT 1000` 最新窗：生产 215/216 条 conf≥0.7 挤满首窗、最老事实永生；cleanup 首窗无低置信 break 早退同根治；旧替身回退兼容路径）② 置信度衰减写回（confidence-only 不刷 updated_at 时钟、恒常事实豁免、下限 0.35、单轮限速 500 行；此前 confidence 全路径只升不降）③ 召回层内衰减权重重排（keyword/vector 两路层内按 forgetting 权重稳定降序、跨层「精确匹配优先」契约不动、provenance 平行账同步、`get_facts_by_ids` 身份组隔离回读面）④ 身份组运维审计（link/unlink/purge 落日志、键指纹 `len:*尾4` 隐私红线、igrp_ 与库内行逐字对账、remaining/cleared 精确断言防假绿）。
+- **验证**：四分块 **3122 收集 / 3121 通过 / 1 跳过 / 0 失败**（+106 新例、含未跟踪新文件补跑）+ vitest 182/182 + ruff 全仓 0 错；突变验红 = 记忆 6（游标/时钟/双向重排/组过滤/审计）+ 多模态 2（图文并存/占位前缀）+ 主动/角色域由对抗验收员完成； 🔴 事故两起：中断突变进程残留致 pytest 挂死（游标突变=无限循环，taskkill 后复绿）、CRLF 双形态锚点（binary 读保留 
+，突变锚点须双形态试）。
+- **部署**：`893c28c` push→服务器 pull→remote_deploy（13:27:45 重启）→复验 health/ready 200、重启窗口 0 ERROR、三域新代码在位（grep 实证）。
+- **遗留登记**：vision B 档（新增 vision provider）与虚拟消息库方向待裁决；用户身份锚批（`0008bd1`，另一窗口）已先行部署——本批 min_interval 基准纠偏与其决策器改动已并行共存验证。
+
 ## 2026-10-12 — 跨通道事实共享批（默默裁决「需要解决」+「好好研究研究，注意用户隔离和真正的库共享」）· 显式身份组真共享 · `c0244b2`
 
 - **研究先行（四链路全读透）**：① 身份判据不可推导——两通道分属两个注册账号（owner 2/4）+peer wxid 不同，库里无任何「同一真人」信号，且隔离域 (owner,peer) 正是防好友代聊串台硬约束，**绝不猜测合并**；② 读路径四面（get_facts／search_facts FTS+LIKE 下推／find_active_fact_id 向量复活复核／is_deleted_source 水位复核）；③ 写路径 add_fact_receipt 唯一写口+near-dup 等价判定（归一化同文）；④ 删路径 delete_fact 越权拒删+回收站+水位+reflections 派生清理——**共享后否认必须组内全线失效**（否则 A 否认 B 又注入回来）。
