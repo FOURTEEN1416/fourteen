@@ -99,3 +99,42 @@ def test_both_sanitizers_share_source():
 
     src = inspect.getsource(ase_engine.sanitize_message)
     assert "strip_time_prefixes" in src
+
+
+# ── 5. 存储层纵深（2026-10-13 对抗验收补）──────────────────
+
+
+def test_storage_layer_strips_before_persist(tmp_path):
+    """两个落库入口**行为**验证：带前缀输入落库后前缀被剥。
+
+    防新出口绕过上游清洗的兜底层（对抗验收执行位矩阵补）。
+    """
+    import sqlite3
+
+    from shisi.memory.legacy.memory_pipeline import MemoryPipeline
+    from shisi.memory.legacy.structured_memory import StructuredMemory
+
+    db_path = str(tmp_path / "t.db")
+    sm = StructuredMemory(db_path)
+    mp = MemoryPipeline(structured_memory=sm)
+    sess = "9:wx@im.wechat"
+    ok = mp.write_chat_history_sync(
+        user_msg="你好", reply="[10-13 13:07] [10-13 13:07] 带前缀的回复",
+        session_id=sess, character_id="c1",
+    )
+    assert ok, "write_chat_history_sync 应成功"
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        "SELECT content FROM chat_history WHERE role='assistant'"
+    ).fetchall()
+    assert rows and not (rows[0][0] or "").startswith("[10-"), f"主链落库未剥前缀: {rows}"
+    ok2 = mp.record_outbound_message(
+        message="[10-13 13:07] 主动消息带前缀", session_id=sess,
+        character_id="c1", channel="proactive",
+    )
+    assert ok2, "record_outbound_message 应成功"
+    rows2 = conn.execute(
+        "SELECT content FROM chat_history WHERE channel='proactive'"
+    ).fetchall()
+    assert rows2 and not (rows2[0][0] or "").startswith("[10-"), f"出站落库未剥前缀: {rows2}"
+    conn.close()
