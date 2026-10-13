@@ -3596,3 +3596,10 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 3. **「41 卡差异待复核」尾巴**：**关闭**——42 张已定性（=41 策展+1 克隆变体），AGENTS §4.3 标题改「10-12 定性收口」、尾巴改「已定性，复核关闭」，README 结构树同步。
 4. **docs/INDEX.md「缺失」**：**误报关闭**——全仓宽词 grep 零引用（docs/README.md 的 INDEX 引用均指向实际存在的 history/INDEX 与 CODEMAPS/INDEX），不补建（docs/README.md 已是唯一入口，避免重复真源）。
 5. **CODE_GRAPH 补载 D16 跨域机制**：**补载**——§4.7.1 尾部新增「D16 跨域机制」两条（activate 直连扫码人绑定 / account_pacing_state 节奏账号聚合），图谱代码实况职责补齐。
+
+## 2026-10-12 CI 红修复批（`7ac7418` 漏网测试收口，commit `bade9cc`）
+
+- **根因**：一人一 bot 批（`7ac7418`）改 `MAX_CHANNELS_PER_USER` 2→1 时只跑了通道邻域 79 用例，漏网 `tests/test_w3_desired_state_channel.py::test_restore_on_boot_skips_disabled_slot`——该用例以「slot0 disabled + slot1 恢复」双槽位形态验证 disabled 跳过，MAX=1 后 slot1 非法 → `assert 0 == 1`，`e5001cd` 起 CI 两连红（含 nightly schedule）。
+- **修法**：改写为**双账号表达同一测试意图**（账号 7 slot0 disabled、账号 8 slot0 正常 → 断言只恢复 (8,0)），既保「disabled 跳过」语义又符合一人一 bot。
+- **验证**：该文件 14/14 + 邻域（w3_scheduler/wechat_connector/sec_p0_channel_slot）55 绿 + ruff 0；白名单单文件提交（工作树含四模块深研批在制品，未触碰）。
+- **教训**：改通道类全局常量必须 `grep` 全部消费者**含测试前提**（不只运行时代码）；批次 push 后必须确认 CI 结论（本批红了两批未察觉）。
