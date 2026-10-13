@@ -274,11 +274,33 @@ def extract_current_topics(
     return found[:limit]
 
 
+_TIME_PREFIX_RE = re.compile(r"^\s*\[\d{2}-\d{2} \d{2}:\d{2}\]\s*")
+
+
+def strip_time_prefixes(text: str) -> str:
+    """剥掉行首的 ``[MM-DD HH:MM]`` 时间前缀（可叠加多个，循环剥净）。
+
+    2026-10-13 生产事故根治：历史注入给每行加的 ``[MM-DD HH:MM]`` 前缀被
+    模型**学舌**写进回复原文（生产实证 chat_history 2633/2635/2670-2702 等
+    14 行，前缀从 1 个滚到 12 个——落库的带前缀正文下一轮又被叠新前缀）。
+    前缀是注入侧的元数据，不是角色说的话，出站定稿前必须剥净。
+    """
+    s = str(text or "")
+    while True:
+        stripped = _TIME_PREFIX_RE.sub("", s)
+        if stripped == s:
+            break
+        s = stripped
+    return s
+
+
 def sanitize_reply_text(text: str, character_name: str = "") -> str:
     """只清显式发言标签和格式残留，不用人称/问答句式猜测语义归属。
 
     任意短词加冒号不等于人名；「我吃过了，你也记得吃饭」是正常关心。
     当前角色名由调用方传入，未知人名保留。拒绝行清空后绝不复活原文。
+    2026-10-13：行首 ``[MM-DD HH:MM]`` 时间前缀在此剥除（模型学舌回库
+    的死循环根治，见 strip_time_prefixes）。
     """
     own_labels = ["助手", "Assistant", "AI", "角色", "我"]
     if character_name:
@@ -290,6 +312,7 @@ def sanitize_reply_text(text: str, character_name: str = "") -> str:
     # 每轮只删字符，有限收敛；标签嵌套/格式清洗新露出的标签也一次处理完。
     while s != previous:
         previous = s
+        s = strip_time_prefixes(s)
         s = re.sub(r"[；;]{2,}", "", s)
         s = re.sub(r"([？?。！!…])[；;]+", r"\1", s)
         s = re.sub(r"(?m)^\s*[；;]+", "", s)
@@ -297,6 +320,7 @@ def sanitize_reply_text(text: str, character_name: str = "") -> str:
         cleaned = []
         for line in s.splitlines():
             raw = line.strip()
+            raw = strip_time_prefixes(raw)
             while own.match(raw):
                 raw = own.sub("", raw, count=1)
             if raw and not other.match(raw):
