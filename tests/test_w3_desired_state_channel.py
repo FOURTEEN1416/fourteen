@@ -81,6 +81,7 @@ def test_disconnect_stops_local_connector():
 
 
 def test_restore_on_boot_skips_disabled_slot(chan, monkeypatch):
+    """disabled 通道跳过恢复（D16 后一人一 bot：以双账号表达，原双槽位形态已失效）。"""
     started: list[tuple[int, int]] = []
 
     class Dummy:
@@ -94,19 +95,20 @@ def test_restore_on_boot_skips_disabled_slot(chan, monkeypatch):
         wc, "WeChatConnector",
         lambda um=None, **kw: Dummy(kw["owner_user_id"], kw.get("slot", 0)),
     )
-    monkeypatch.setattr(channel_paths, "list_user_slots_with_credentials", lambda uid: [0, 1])
-    # restore_on_boot 以 sessions_root 下存在的数字用户目录为枚举起点
-    (chan / "data" / "wechat_sessions" / "7").mkdir(parents=True, exist_ok=True)
+    # 两账号各一条通道（slot0）：账号 7 disabled、账号 8 正常
+    monkeypatch.setattr(channel_paths, "list_user_slots_with_credentials", lambda uid: [0])
+    for uid in (7, 8):
+        (chan / "data" / "wechat_sessions" / str(uid)).mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(ConnectorRegistry, "_try_acquire_poll_lock", staticmethod(lambda u, s: 0))
     rp.set_desired(7, 0, "disabled")
 
     reg = ConnectorRegistry()
     n = reg.restore_on_boot()
-    assert n == 1  # 只有 slot1 恢复
+    assert n == 1  # 只有账号 8 恢复
     deadline = time.time() + 2.0
     while not started and time.time() < deadline:
         time.sleep(0.05)
-    assert (7, 1) in started
+    assert (8, 0) in started
     assert (7, 0) not in started
 
 
