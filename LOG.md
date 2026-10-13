@@ -7,6 +7,11 @@
 
 ---
 
+## 2026-10-13 — BYOK 强制开关裁决（默默：「不需要强制」）· 产品决策落账 · 零代码变更
+
+- **裁决**：`llm.byok_required` **保持关闭**——BYOK 永远可选：用户填了自己的 key 即走自己的（`select_request_llm` 优先用户配置、`get_user_llm` fail-closed 隔离），未填 key 的用户继续使用平台 key。评估报告与 DECISION_LEDGER 中的「留产品决策」项就此闭环。
+- **效力**：平台继续补贴 token 的现行运营模式不变；用户自带 key 的能力面（含视觉直传、双链覆盖、红队加固后的提交面校验）完整保留，随时可自助启用。若未来运营策略变化要开强制，改 `config/system.yaml llm.byok_required=true` 即可（未填 key 用户 403），无代码工作。
+
 ## 2026-10-13 — BYOK 红队加固批（用户裁决「我要的不是报告和研判，是对抗和优化」）· 三实洞根治 · `0b4431e`
 
 - **红队 7 探针实打**（内存构造级，非纸面研判）：🔴命中三——H1 SSRF（custom api_base 无校验：169.254.169.254 云元数据/127.0.0.1:8000/10.x/192.168.x/[::1] 内网探测全构造成功）；H2 幽灵链（auto 链引用不存在供应商构造期放行运行期逐轮试坏）；H3 巨量配置（save 端点任意 JSON 全收 5120KB 落 SQLite 行+max_tokens 10^9 直透）。✅未破三（护栏钉死）：读侧递归脱敏（子层 key 全掩码）、用户网关 inherit_platform=False 平台 env 物理隔离、ReloadableLLMGateway 委托链不借平台网关。
