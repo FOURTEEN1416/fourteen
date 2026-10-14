@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-3303-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-3386-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
@@ -16,7 +16,7 @@
 
 > **当前状态（2026-10-12 通道语义对齐批 + D16 补裁，三端一致 `173b2b3`/`7ac7418`）**：D16「谁扫码谁聊」——注册用户扫码绑定 bot 一对一聊、角色控制台自由切换、非扫码人消息拒绝、好友自选角色机制退役（`173b2b3`）；补裁一人一 bot（`MAX_CHANNELS_PER_USER=1`，`7ac7418`）。10 月此前批次（安全升级 `2c3b888`/攻击面 `e949107`/SEC-15 `aea3cd0`）均已在线。上线验收与遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md`。
 
-> **测试口径**（后端 = 2026-10-13 四模块深度研究批终验，四分块含未跟踪新文件实测）：后端 **3121 passed / 1 skipped / 0 failed**（收集 **3122**；**207 测试文件**，本批 +106=四域新测试；现役角色卡 **42 张**；基线 3027+106 吻合）。✅ GitHub CI（run 见 `LOG.md` 2026-10-13 条目；backend+frontend+六 ff 闸+adr-integrity）。⚠️ **口径勘误**：`tests/test_[a-f]*.py` 等四段 glob **漏子目录 `tests/core/`**，**全量口径必须补跑它**；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> **测试口径**（后端 = 2026-10-14 异常回复守卫+对抗验收批终验，四分块实测）：后端 **3204 passed / 1 skipped / 0 failed**（收集 **3205**；**212 测试文件**，本批 +83=守卫/否决门/重复注入根治新测试；现役角色卡 **42 张**；基线 3122+83 吻合）。✅ GitHub CI（run 见 `LOG.md` 2026-10-14 条目；backend+frontend+六 ff 闸+adr-integrity）。⚠️ **口径勘误**：`tests/test_[a-f]*.py` 等四段 glob **漏子目录 `tests/core/`**，**全量口径必须补跑它**；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
 > 前端 `182 passed`（vitest 5.0.3，30 文件；3→5 升级系 SEC-15 根治，tinypool 双 critical 出树）+ `tsc --noEmit` 0 错误；ruff 0.16.8 全仓 0 错（`All checks passed!`）。
 > ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 13）。**引用基线必须同时声明卡数**。
 
@@ -193,7 +193,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │       ├── store/        Zustand 3 个（authStore / characterBuilderStore / errorStore）
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
-├── tests/                3121 后端测试通过 + 1 跳过（2026-10-13 四模块深度研究批实测，收集 3122；207 个测试文件）+ 182 前端测试
+├── tests/                3204 后端测试通过 + 1 跳过（2026-10-14 异常回复守卫+对抗验收批实测，收集 3205；212 个测试文件）+ 182 前端测试
 ├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 42 张 = 41 策展 + 1 张 user_id=1 林挽夏克隆变体，已定性 2026-10-12）
 └── main.py               入口
 ```
