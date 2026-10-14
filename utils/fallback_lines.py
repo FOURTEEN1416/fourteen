@@ -233,7 +233,25 @@ def all_pool_lines(count_values: range | list[int] | None = None) -> set[str]:
 # 预展开集合（模块加载一次）
 FALLBACK_POOL_LINES: frozenset[str] = frozenset(all_pool_lines())
 
-_SYSTEM_MARKERS = (
+
+def _gateway_sentinels() -> tuple[str, ...]:
+    """网关哨兵集合（单一真源 = multi_provider_gateway._ERROR_SENTINELS）。
+
+    2026-10-14 对抗验收口径漂移根治：存库层此前自维一份哨兵清单（7 项），
+    与网关哨兵（9 项）不同步——任何哨兵文案都会穿透存库落进 chat_history
+    （生产实证 id 2641/2676）。改为同源读取，加哨兵只改网关一处。
+    惰性求值防模块加载期循环 import（fallback_lines 被 memory_pipeline 等在
+    初始化早期 import）。
+    """
+    try:
+        from llm_provider.multi_provider_gateway import _ERROR_SENTINELS
+
+        return tuple(_ERROR_SENTINELS)
+    except Exception:  # noqa: BLE001
+        return ("所有 LLM 提供商均不可用", "未生成角色回复", "模型请求失败")
+
+
+_SYSTEM_MARKERS_CORE = (
     "处理超时",
     "消息处理异常",
     "处理消息时出现异常",
@@ -245,6 +263,16 @@ _SYSTEM_MARKERS = (
     "未生成角色回复",
     "模型请求失败",
 )
+
+_GATEWAY_SENTINELS_CACHE: tuple[str, ...] | None = None
+
+
+def _system_markers() -> tuple[str, ...]:
+    """存库哨兵全集 = 本模块核心哨兵 + 网关哨兵（惰性同源，缓存一次）。"""
+    global _GATEWAY_SENTINELS_CACHE
+    if _GATEWAY_SENTINELS_CACHE is None:
+        _GATEWAY_SENTINELS_CACHE = _gateway_sentinels()
+    return _SYSTEM_MARKERS_CORE + _GATEWAY_SENTINELS_CACHE
 
 # 短系统旁路特征（空回复/超时/异常兜底；不含反诘角色句）
 _SYSTEMISH = (
@@ -267,16 +295,21 @@ _SYSTEMISH = (
 )
 
 
+# 兼容别名（旧代码/测试按原名 grep）：核心哨兵集，完整集见 _system_markers()
+_SYSTEM_MARKERS = _SYSTEM_MARKERS_CORE
+
+
 def is_system_fallback_line(reply: str | None) -> bool:
     """是否为系统旁路占位（空/超时/异常兜底），不得写成 assistant 发言。
 
     注：rebuttal 池经 system 注入由模型转述，正常不会作为系统占位直接回给 after_chat；
     这里刻意不把含「没事」的反诘句当系统错误，避免误伤真实角色台词。
+    2026-10-14 哨兵口径同源：核心哨兵 + 网关哨兵（_system_markers）全覆盖。
     """
     text = (reply or "").strip()
     if not text:
         return True
-    if any(m in text for m in _SYSTEM_MARKERS):
+    if any(m in text for m in _system_markers()):
         return True
     if text in FALLBACK_POOL_LINES:
         return True

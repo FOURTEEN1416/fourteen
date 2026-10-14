@@ -1388,6 +1388,23 @@ class ProactiveScheduler:
                 character_id=char_id,
             )
             return
+        # 终审守卫（2026-10-14 对抗验收执行位矩阵抓到的缺口）：主动链投递前
+        # 此前只有 sanitize_message（剥时间前缀），错误哨兵/表情复读/退化回复
+        # 会绕过终审直达用户。与主链共用同一真源 terminal_reply_guard。
+        # 主动链无当轮用户消息（独白场景），user_msg 传空串——表情复读剥除
+        # 在无用户消息时不触发（is_pure_emoji_message 空串=False），只拦哨兵/退化。
+        from utils.prompt_sanitize import terminal_reply_guard
+
+        message = terminal_reply_guard(message, user_msg="", character_name="")
+        if not message:
+            append_proactive_event(
+                session_key=user_key,
+                sent=False,
+                reason="terminal_guard_rejected",
+                wait_minutes=decision.get("wait_minutes"),
+                character_id=char_id,
+            )
+            return
         # 出站去重硬闸（scallopbot 同族：投递前确定性判重）。生产实证同一用户
         # 连收三条「哼，你终于想起我了？」变体 —— ase_engine 生成线的
         # avoid_block 管不到决策线。比对集取**同 owner 组**合并（2026-10-12：
@@ -1511,7 +1528,18 @@ class ProactiveScheduler:
         现异常一律返回 False（`_send_targeted` 自身已用返回值表达失败，
         `_run_blocking` 的异常属基础设施故障，同样不能算送达），
         由调用方走失败退避；记账只由「投递成功」触发。
+
+        2026-10-14 对抗验收执行位矩阵：三条 LLM 生成→投递路径（决策线 :1381 已
+        在调用方接守卫、手动发送线、重要日期祝福线）统一由本入口兜底终审——
+        决策线在上游已守卫（去重闸需要守卫后内容），手动/祝福线在此被覆盖。
         """
+        from utils.prompt_sanitize import terminal_reply_guard
+
+        guarded = terminal_reply_guard(message, user_msg="", character_name="")
+        if not guarded:
+            logger.warning("[主动消息] 终审守卫拦截（哨兵/退化回复），不投递")
+            return False
+        message = guarded
         if session_key:
             from api.consent import outbound_allowed_for_session_sync
 

@@ -117,3 +117,17 @@ class TestSystemFallbackRecognition:
         # 正常角色台词不误伤（含「模型」二字的闲聊）
         assert not is_system_fallback_line("你说什么模型呢，我又不是卖手办的")
         assert not _is_system_error_reply("哼，又好的好的。")
+
+    def test_storage_markers_cover_all_gateway_sentinels(self):
+        """2026-10-14 对抗验收口径漂移根治：存库哨兵必须同源覆盖网关哨兵全集。
+
+        首版存库自维 7 项 vs 网关 9 项——6 个网关哨兵形态可穿透落库。
+        根治=同源复用（_system_markers = 核心 + 网关），加哨兵只改网关一处。
+        """
+        from llm_provider.multi_provider_gateway import _ERROR_SENTINELS
+        from utils.fallback_lines import _system_markers, is_system_fallback_line
+
+        full = _system_markers()
+        for s in _ERROR_SENTINELS:
+            assert s in full, f"存库哨兵缺失网关特征: {s}"
+            assert is_system_fallback_line(f"（{s}）"), f"落库拦截缺失: {s}"
