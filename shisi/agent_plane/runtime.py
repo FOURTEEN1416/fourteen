@@ -77,6 +77,86 @@ def materialize_profile_cache(session_key: str, projection: dict[str, Any]) -> N
         logger.debug("profile cache materialize failed: %s", e)
 
 
+def _detected_denied_names(session_key: str) -> list[str]:
+    """源①：扫账本全量用户消息，检测「用户否认过的称呼」（首现序）。
+
+    生产实证：用户 09-21 说「我叫十七」→ profile 写入；此后十几轮否认
+    （「我不是十七」「谁是十七」）→ LLM 工具曾三次清空（10-03/10-07）又三次
+    从旧历史里"纠正"写回（10-03 15:47/10-06/10-12）——写路径只认「历史自称」，
+    不认「后来的否认」，否认没有记忆性。检测函数单一 owner =
+    proactive.llm_proactive.detect_denied_nicknames。
+
+    注意：用户消息会被 prune（30 天保留），所以检测结果必须经
+    `_persist_denials` 落进永久保留的 profile_correct 事件。
+    """
+    try:
+        from proactive.llm_proactive import detect_denied_nicknames
+        from shisi.agent_plane.event_ledger import EVENT_USER_MESSAGE
+
+        ledger = get_ledger()
+        messages: list[dict[str, str]] = []
+        cursor = 0
+        for _ in range(20):  # 上限 20 页 × 500 = 10000 条，防病态账户
+            page = ledger.query(
+                session_key=str(session_key or ""),
+                event_type=EVENT_USER_MESSAGE,
+                after_id=cursor,
+                limit=500,
+                order="ASC",
+            )
+            if not page:
+                break
+            for ev in page:
+                payload = getattr(ev, "payload", None)
+                text = str(payload.get("text") or "") if isinstance(payload, dict) else ""
+                if text:
+                    messages.append({"role": "user", "content": text})
+            cursor = int(getattr(page[-1], "id", 0) or 0)
+            if len(page) < 500:
+                break
+        return detect_denied_nicknames(messages)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("denied nickname scan failed: %s", e)
+        return []
+
+
+def _persisted_denied_names(session_key: str) -> list[str]:
+    """源②：读永久保留的否决记录（profile_correct.denied_name，actor=denial_gate）。
+
+    这是「否认记忆性」的落点：用户消息 prune 后源①失效，此源仍生效。
+    """
+    try:
+        from shisi.agent_plane.event_ledger import EVENT_PROFILE_CORRECT
+
+        out: list[str] = []
+        rows = get_ledger().query(
+            session_key=str(session_key or ""),
+            event_type=EVENT_PROFILE_CORRECT,
+            limit=200,
+            order="DESC",
+        )
+        for ev in rows:
+            payload = getattr(ev, "payload", None)
+            if not isinstance(payload, dict):
+                continue
+            token = str(payload.get("denied_name") or "").strip()
+            if token and token not in out:
+                out.append(token)
+        return out
+    except Exception as e:  # noqa: BLE001
+        logger.debug("persisted denied scan failed: %s", e)
+        return []
+
+
+def _denied_names(session_key: str) -> list[str]:
+    """合并双源：检测（源①）+ 持久否决（源②）。"""
+    merged = _detected_denied_names(session_key)
+    for token in _persisted_denied_names(session_key):
+        if token not in merged:
+            merged.append(token)
+    return merged[:10]
+
+
 def write_profile_from_tool(
     session_key: str,
     payload: dict[str, Any],
@@ -86,7 +166,13 @@ def write_profile_from_tool(
     actor: str = "agent",
     reason: str = "",
 ) -> dict[str, Any]:
-    """工具写权威入口：seed → ledger append → 投影 → 物化缓存。"""
+    """工具写权威入口：seed → ledger append → 投影 → 物化缓存。
+
+    2026-10-14「十七」根治：写侧否决门——被用户明确否认过的名字（检测 owner =
+    proactive.llm_proactive.detect_denied_nicknames）拒绝写回 nickname。生产实证
+    profile agent 三次清空又三次从旧历史"纠正"写回，最终用户每轮被叫「十七」。
+    否决不阻塞其余字段（birthday/commitments 等照常写）。
+    """
     from shisi.agent_plane.profile_projection import write_profile_event
 
     sk = str(session_key or "").strip()
@@ -94,6 +180,53 @@ def write_profile_from_tool(
         return {}
     ensure_profile_seeded(sk)
     body = dict(payload or {})
+    # 否决门判据 = 检测（源①）+ 持久否决记录（源②）
+    detected = _detected_denied_names(sk)
+    persisted = _persisted_denied_names(sk)
+    denied = detected + [t for t in persisted if t not in detected]
+    # 检测到的新否认立刻持久化（profile_correct 永久保留；用户消息 30 天会被
+    # prune，不落盘的话窗口一过就失忆——2026-10-14 自纠的真缺陷）。
+    for token in detected:
+        if token not in persisted:
+            logger.warning("[profile_gate] 记录被否认称呼 '%s'（session=%s）", token, sk)
+            write_profile_event(
+                get_ledger(),
+                session_key=sk,
+                payload={
+                    "denied_name": token,
+                    "reason": f"auto: 用户明确否认过该称呼「{token}」（2026-10-14 否决门）",
+                },
+                correct=True,
+                turn_id=turn_id,
+                actor="denial_gate",
+            )
+    nick = str(body.get("nickname") or "").strip()
+    if nick and nick in denied:
+        logger.warning(
+            "[profile_gate] 拒绝写回被用户否认的称呼 '%s'（session=%s）", nick, sk
+        )
+        body.pop("nickname", None)
+    # 存量自愈：投影里若仍存着被否认的称呼，自动追加清空更正。
+    proj_existing = project_profile_for(sk)
+    denied_nick = str(proj_existing.get("nickname") or "").strip()
+    if denied_nick and denied_nick in denied:
+        logger.warning(
+            "[profile_gate] 自动清空被否认的存量称呼 '%s'（session=%s）", denied_nick, sk
+        )
+        write_profile_event(
+            get_ledger(),
+            session_key=sk,
+            payload={
+                "nickname": "",
+                # denied_name 是持久否决记录：账本 prune/窗口滑出后，_denied_names
+                # 的源②仍能读回该名（否认记忆性的落点，勿删）。
+                "denied_name": denied_nick,
+                "reason": "auto: 该称呼已被用户明确否认，不得保留（2026-10-14 否决门）",
+            },
+            correct=True,
+            turn_id=turn_id,
+            actor="denial_gate",
+        )
     if reason:
         body["reason"] = reason
     if body.get("clear_birthday") or body.get("commitments_clear"):
@@ -120,16 +253,24 @@ def project_profile_for(session_key: str) -> dict[str, Any]:
     return project_profile(get_ledger(), sk)
 
 
-def format_profile_prompt_block(projection: dict[str, Any]) -> str:
-    """渲染「# 用户画像」段（与 UserProfileStore.to_prompt_block 同文案契约）。"""
+def format_profile_prompt_block(
+    projection: dict[str, Any], denied_names: list[str] | None = None
+) -> str:
+    """渲染「# 用户画像」段（与 UserProfileStore.to_prompt_block 同文案契约）。
+
+    denied_names（2026-10-14 读侧纵深）：用户明确否认过的称呼，即使脏数据仍在
+    投影里也不注入 prompt（写侧否决门防新增，读侧守卫防存量继续带偏）。
+    """
     p = projection or {}
     if not any(p.get(k) for k in ("nickname", "birthday", "occupation", "location", "notes")) and not (
         p.get("preferences") or p.get("commitments")
     ):
         return ""
+    denied = {str(x) for x in (denied_names or []) if str(x or "").strip()}
     lines: list[str] = ["# 用户画像（稳定事实，以本段为准；段外信息禁止编造）"]
-    if p.get("nickname"):
-        lines.append(f"- 称呼：{p['nickname']}")
+    nick = str(p.get("nickname") or "").strip()
+    if nick and nick not in denied:
+        lines.append(f"- 称呼：{nick}")
     if p.get("birthday"):
         lines.append(f"- 生日：{p['birthday']}")
     if p.get("occupation"):
@@ -155,9 +296,12 @@ def format_profile_prompt_block(projection: dict[str, Any]) -> str:
 
 
 def get_profile_prompt_block(session_key: str) -> str:
-    """prompt 画像槽唯一读入口（投影优先）。"""
+    """prompt 画像槽唯一读入口（投影优先；读侧否决：否认称呼不注入）。"""
     try:
-        return format_profile_prompt_block(project_profile_for(session_key))
+        sk = str(session_key or "").strip()
+        return format_profile_prompt_block(
+            project_profile_for(sk), denied_names=_denied_names(sk)
+        )
     except Exception as e:  # noqa: BLE001
         logger.debug("profile prompt block failed: %s", e)
         return ""

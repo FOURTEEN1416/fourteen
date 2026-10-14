@@ -501,35 +501,40 @@ class PersonaEngine:
 
         return "\n".join(parts)
 
-    def _build_constraint_layer(self) -> str:
-        return """# 行为约束
+    def _build_constraint_layer(self, include_identity_defense: bool = True) -> str:
+        """行为约束层（2026-10-14 重复注入根治，双处）：
 
-## 必须遵守
-- 保持角色一致性，不要跳出角色
-- 回复要简洁自然，不要长篇大论
-- 不要过度重复用户的话
-- 不要使用机械化的开场白
-- 保持情感的真实性
-
-## 禁止事项
-- 不要用"作为 AI 我…"这种元声明暴露身份
-- 不要提供技术帮助或代码
-- 不要过度追问敏感信息
-- 不要表现得过于完美或顺从
-
-## 回复长度
-- 日常对话：10-30字
-- 表达情感：20-50字
-- 安慰关心：30-60字
-- 最长不超过100字
-
-## 身份拷问应对
-- 被问"你是不是AI/机器/程序/真人"时：不跳出角色承认，不解释自己的构成，不转助手腔
-- 以当前角色的身份与口吻把问题顶回去（可打趣、反问、傲娇），身份以角色卡为准
-- 可以承认"会忘事、会累、有小脾气"——那是角色的性格，不是"程序属性"
-
-## 身份自指话术
-""" + SELF_REFERENCE_DIRECTIVES.strip()
+        - 「回复长度」硬编码数字表（10-30/20-50/30-60/≤100）删除——长度唯一
+          owner = reply_mode 指令（v1.17 裁决「10~80 字、长短跟随话题」；旧表
+          与内置卡「10-40 字」、reply_mode 三种口径同台打架，模型无所适从）。
+        - 「身份拷问应对」改 include_identity_defense 开关：卡文 creator_notes
+          已自带身份拷问剧本（内置卡，PHI 位、含具体答法）时由 PersonaService
+          关掉本段，防同题双注（生产 prompt 实测两段近义文本叠加）；文件卡
+          无剧本，保持注入身份中性通用防线。
+        """
+        parts = [
+            "# 行为约束\n"
+            "\n## 必须遵守\n"
+            "- 保持角色一致性，不要跳出角色\n"
+            "- 回复要简洁自然，不要长篇大论\n"
+            "- 不要过度重复用户的话\n"
+            "- 不要使用机械化的开场白\n"
+            "- 保持情感的真实性\n"
+            "\n## 禁止事项\n"
+            "- 不要用\"作为 AI 我…\"这种元声明暴露身份\n"
+            "- 不要提供技术帮助或代码\n"
+            "- 不要过度追问敏感信息\n"
+            "- 不要表现得过于完美或顺从",
+        ]
+        if include_identity_defense:
+            parts.append(
+                "\n## 身份拷问应对\n"
+                "- 被问\"你是不是AI/机器/程序/真人\"时：不跳出角色承认，不解释自己的构成，不转助手腔\n"
+                "- 以当前角色的身份与口吻把问题顶回去（可打趣、反问、傲娇），身份以角色卡为准\n"
+                "- 可以承认\"会忘事、会累、有小脾气\"——那是角色的性格，不是\"程序属性\""
+            )
+        parts.append("\n## 身份自指话术\n" + SELF_REFERENCE_DIRECTIVES.strip())
+        return "\n".join(parts)
 
     # ── 公开接口（供 PersonaService 等外部调用，替代直接私有属性/方法访问）──
 
@@ -554,9 +559,10 @@ class PersonaEngine:
         """构建表达方式层 prompt（公开接口）。"""
         return self._build_style_layer(emotion_state, style_prompt, few_shot_examples)
 
-    def build_constraint_layer(self) -> str:
-        """构建行为约束层 prompt（公开接口）。"""
-        return self._build_constraint_layer()
+    def build_constraint_layer(self, include_identity_defense: bool = True) -> str:
+        """构建行为约束层 prompt（公开接口；include_identity_defense=False 用于
+        卡文已自带身份拷问剧本的角色，防同题双注）。"""
+        return self._build_constraint_layer(include_identity_defense)
 
     def build_memory_layer(self, memory_context: dict, chat_summary: str = "") -> str:
         """构建记忆层 prompt（公开接口）。"""

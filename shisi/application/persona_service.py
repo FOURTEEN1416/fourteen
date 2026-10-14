@@ -116,8 +116,10 @@ class PersonaService:
         # （该槽会被 CharacterAggregate 标成「# 对话历史」，模型会把记忆当成聊天记录，
         #  分不清哪句是用户/哪句是自己）。记忆改为独立标注段，真对话只走 messages。
         from utils.prompt_sanitize import (
+            EMOJI_USE_RULE,
             ROLE_CLARITY_RULE,
             TOPIC_CONTINUITY_RULE,
+            USER_IDENTITY_RULE,
             sanitize_episodic,
             sanitize_fact_list,
             sanitize_reflections,
@@ -227,10 +229,26 @@ class PersonaService:
 
         if memory_block:
             injection_parts.append(memory_block)
+        # 身份铁则必须排在角色人设相关规则之前（2026-10-13 身份锚批教训：
+        # 历史注意力惯性会压过后置规则；主聊链此前完全无身份锚——「夏夏/十七」
+        # 起名、编共同记忆、「门没锁灯给你留了」在场幻觉均系此空缺）。
+        injection_parts.append(USER_IDENTITY_RULE.strip())
+        denied_nicknames = [
+            str(x) for x in (mem_ctx.get("denied_nicknames") or []) if str(x or "").strip()
+        ][:5] if isinstance(mem_ctx, dict) else []
+        if denied_nicknames:
+            injection_parts.append(
+                "【被否认称呼】以下名字已被用户明确否认（用户说过「谁是X/X是谁/我不是X/别叫我X」）："
+                + "、".join(f"「{d}」" for d in denied_nicknames)
+                + "。任何场景下都不得再用这些名字称呼用户——包括道歉、复盘、引用历史时；"
+                "对用户只能称「你」。"
+            )
         # 角色归属硬约束：真对话只在 messages；system 记忆不是用户发言
         injection_parts.append(ROLE_CLARITY_RULE.strip())
         # 话题续聊：像人一样接着聊，不跳题、不自问自答
         injection_parts.append(TOPIC_CONTINUITY_RULE.strip())
+        # 微信表情守则（2026-10-14 表情镜像事故：能力保留，禁复读、要恰到好处）
+        injection_parts.append(EMOJI_USE_RULE.strip())
 
         if world_info:
             injection_parts.append(f"# 世界与时间\n{world_info}")
@@ -262,8 +280,14 @@ class PersonaService:
         if style_layer:
             injection_parts.append(style_layer)
 
+        # 约束层身份拷问段去重（2026-10-14 重复注入根治）：卡文 creator_notes
+        # 已自带身份拷问剧本（内置卡）时关掉引擎通用段，防同题双注；文件卡
+        # 无剧本 → 保持注入（身份中性防线，见 test_identity_interrogation_defense）。
+        card_creator_notes = str(getattr(character, "creator_notes", "") or "")
         constraint_layer = self._safe_engine_layer(
-            "constraint", self._engine.build_constraint_layer
+            "constraint",
+            self._engine.build_constraint_layer,
+            include_identity_defense="身份拷问" not in card_creator_notes,
         )
         if constraint_layer:
             injection_parts.append(constraint_layer)

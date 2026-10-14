@@ -619,7 +619,8 @@ async def test_cancel_mid_publish_keeps_only_acked_prefix(monkeypatch):
 
     monkeypatch.setattr(orch, "_prepare_context", prepare)
     orch.components["llm"] = SimpleNamespace(chat_stream=stream)
-    monkeypatch.setattr(orch, "_finalize_reply", lambda reply, cid: reply)
+    # 2026-10-14：流式入口终审守卫接线后签名扩大（user_msg=），fake 需同步
+    monkeypatch.setattr(orch, "_finalize_reply", lambda reply, cid, **kw: reply)
     after_calls: list = []
     monkeypatch.setattr(orch, "_after_process", lambda *a, **kw: after_calls.append((a, kw)))
 

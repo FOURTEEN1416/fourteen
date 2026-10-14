@@ -238,6 +238,12 @@ _SYSTEM_MARKERS = (
     "消息处理异常",
     "处理消息时出现异常",
     "请稍后重试",
+    # 2026-10-14 生产实证：网关全链失败串（multi_provider_gateway.chat 末尾
+    # return）穿透了存库层 _is_system_error_reply 防线，作为 assistant 回复
+    # 落进 chat_history（id 2641/2676 至今在库）——同族哨兵特征统一收口。
+    "所有 LLM 提供商均不可用",
+    "未生成角色回复",
+    "模型请求失败",
 )
 
 # 短系统旁路特征（空回复/超时/异常兜底；不含反诘角色句）

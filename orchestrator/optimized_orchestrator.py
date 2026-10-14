@@ -1108,6 +1108,19 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
         ax_turn_id = str(turn_id or _uuid.uuid4().hex[:12])
         ax_reply_id = _uuid.uuid4().hex[:12]
+        # 被否认称呼接线（2026-10-14「十七」复用事故）：检测 owner 在
+        # proactive.llm_proactive（纯函数），主链从最近历史提取后经
+        # memory_context 传入，persona_service 渲染【被否认称呼】禁令段。
+        # 仅 dict 契约形态接线（P0-1 保型下传；str 防御形态下跳过不注入）。
+        try:
+            from proactive.llm_proactive import detect_denied_nicknames
+
+            _recent = chat_history if isinstance(chat_history, list) else []
+            _denied = detect_denied_nicknames(_recent[-40:])
+            if _denied and isinstance(memory_context, dict):
+                memory_context["denied_nicknames"] = _denied
+        except Exception as _exc:  # noqa: BLE001
+            logger.debug("被否认称呼检测失败（忽略）: %s", _exc)
         system_prompt = self.components["persona"].build_system_prompt(
             emotion_state=emotion_state,
             memory_context=memory_context,
@@ -1471,15 +1484,21 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
         return emotion_tag
 
-    def _finalize_reply(self, reply: str, character_id: str, character_card=None) -> str:
-        """唯一输出定稿：清洗、空回复降级、安全检查均发生在发送和落库之前。"""
-        from utils.prompt_sanitize import sanitize_reply_text
+    def _finalize_reply(self, reply: str, character_id: str, character_card=None, user_msg: str = "") -> str:
+        """唯一输出定稿：清洗、空回复降级、安全检查均发生在发送和落库之前。
+
+        2026-10-14 事故批：terminal_reply_guard 前置——错误哨兵文案（全链失败
+        时网关 return 的「（所有 LLM 提供商均不可用…）」曾直接发给用户）、表情
+        机械复读开头、只剩角色名的退化回复，统一在此拦截后走 empty_reply 兜底。
+        """
+        from utils.prompt_sanitize import sanitize_reply_text, terminal_reply_guard
 
         if character_card is None:
             loader = getattr(self.components.get("persona"), "_load_character_card", None)
             if is_external_character_id(character_id) and callable(loader):
                 character_card = loader(character_id)
         char_name = str(character_card.get("name") or "") if isinstance(character_card, dict) else ""
+        reply = terminal_reply_guard(reply, user_msg=user_msg, character_name=char_name)
         reply = sanitize_reply_text(reply, character_name=char_name)
         try:
             from my_character.consistency_checker import (
@@ -1675,7 +1694,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 )
                 # === 检查结束 ===
 
-                reply = self._finalize_reply(reply, character_id, character_card)
+                reply = self._finalize_reply(reply, character_id, character_card, user_msg=user_msg_clean)
                 reply = await publish(reply, emotion=emotion_state.to_dict() if emotion_state else None)
 
                 # ── 共享后处理（after_chat → ASE → 好感度同步）──

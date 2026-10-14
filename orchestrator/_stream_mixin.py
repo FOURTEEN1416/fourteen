@@ -265,7 +265,7 @@ class _StreamPipelineMixin:
                             if upstream is not None:
                                 await upstream.aclose()
 
-                    reply = self._finalize_reply(full_reply, character_id)
+                    reply = self._finalize_reply(full_reply, character_id, user_msg=user_msg_clean)
                     for start in range(0, len(reply), 8):
                         end = min(start + 8, len(reply))
 

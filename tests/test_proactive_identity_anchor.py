@@ -26,14 +26,16 @@ def _ctx(**kw):
 
 
 def test_decision_system_has_identity_anchor():
-    """硬规则 8：用户身份锚三禁（起名/编造经历/假设共处）。"""
+    """硬规则 8：用户身份锚三禁（起名/编造经历/假设共处）+ 亲密呼语豁免。"""
     for phrase in (
         "不是角色卡世界观里的人物",
-        "不得给用户起名",
+        "不得给用户起名字",
         "不得编造用户的经历",
         "不得假设与用户共处同一物理空间",
     ):
         assert phrase in DECISION_SYSTEM, f"决策器缺身份锚条款: {phrase}"
+    # 2026-10-14 拟人化修正：禁令对象是名字，不是亲密呼语（防拟人化弱化）
+    assert "「笨蛋」「傻瓜」" in DECISION_SYSTEM, "必须显式豁免亲密呼语"
 
 
 # ── 2. 上下文【用户身份】段 ──────────────────────────────────
@@ -42,12 +44,14 @@ def test_decision_system_has_identity_anchor():
 def test_identity_block_no_nickname():
     ctx = _ctx(profile={"nickname": "", "occupation": "上学"})
     assert "【用户身份】真实用户（注册账号本人）" in ctx
-    assert "无已知昵称——对用户只能称「你」，不得另起名字" in ctx
+    assert "无已知昵称——对用户称「你」，不得另起名字" in ctx
+    # 拟人化豁免（2026-10-14）：呼语不受昵称禁令限制
+    assert "「笨蛋」「傻瓜」这类表达亲密的呼语不受此限" in ctx
 
 
 def test_identity_block_with_nickname():
     ctx = _ctx(profile={"nickname": "十四"})
-    assert "用户昵称：十四——对用户的称呼只能用这个昵称" in ctx
+    assert "用户昵称：十四——对用户的称呼用这个昵称" in ctx
     assert "不得另起名字" not in ctx
 
 

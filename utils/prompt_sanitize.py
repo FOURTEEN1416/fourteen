@@ -313,6 +313,9 @@ def sanitize_reply_text(text: str, character_name: str = "") -> str:
     while s != previous:
         previous = s
         s = strip_time_prefixes(s)
+        # markdown 粗体残留剥除（2026-10-14 生产实证：智谱降级轮把
+        # 「1. **冰敷**：…」markdown 列表直接发进微信——**是格式噪声不是人话）。
+        s = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", s)
         s = re.sub(r"[；;]{2,}", "", s)
         s = re.sub(r"([？?。！!…])[；;]+", r"\1", s)
         s = re.sub(r"(?m)^\s*[；;]+", "", s)
@@ -337,3 +340,136 @@ TOPIC_CONTINUITY_RULE = (
     "连续追问/补充比抛新话题更像真人。\n"
     "- 只输出你自己要说的话；不要生成对方台词，不要自问自答。\n"
 )
+
+# ── 微信表情使用守则（2026-10-14 表情镜像事故）──────────────────
+# 生产实证（智谱 glm-4.5-flash 降级窗口 21/25 镜像）：用户发 [流泪] 模型回
+# 「[流泪]\n别难过了…」逐条复读。用户裁决：表情能力保留（是优点），但必须
+# 用得恰到好处——引导「回应情绪」而非「复读符号」，硬拦截见 strip_emoji_echo。
+
+EMOJI_USE_RULE = (
+    "\n# 微信表情使用守则\n"
+    "- 表情的具体风格、用多用少**以角色卡设定为准**（角色卡怎么定就怎么用）。\n"
+    "- **禁止复读用户刚发的同一条表情来回应**：对方发 [流泪]，你不能也回 [流泪]——"
+    "要回应的是情绪本身（安慰/调侃/陪伴），要么不用表情，要么换一个符合你反应的。\n"
+    "- 表情后面必须接你要说的话；只有一条光秃秃的表情等于没说话。\n"
+)
+
+# ── 用户身份铁则（2026-10-13/14 「夏夏」「十七」事故；与主动链
+# proactive/llm_proactive.py 硬规则 8/9 同源同义，主聊链此前为空缺）──
+
+USER_IDENTITY_RULE = (
+    "\n# 用户身份铁则（最高优先级）\n"
+    "- 用户是真实存在的人（注册账号本人），**不是**角色卡世界观里的人物。\n"
+    "- 不得给用户起名字（如自造一个名字当昵称）；对用户的称呼优先用「用户画像」"
+    "里的昵称，没有就用「你」。**但「笨蛋」「傻瓜」这类表达亲密的呼语不受此限**"
+    "——那是你的语气，不是他的名字，按你的性格和关系亲密度正常使用。\n"
+    "- 用户消息里出现过的名字（如某个昵称），除非用户明确自称，不得当作用户的称呼。\n"
+    "- 不得编造用户没说过的经历或「我们共同的过去」；**真实记得的事要自然地用**"
+    "（那是你的记忆）；不得假设你与用户共处同一物理空间（不能说「门没锁灯给你"
+    "留了」「我去给你买」这类在场动作）。\n"
+)
+
+
+_SYSTEM_BRACKET_MARKERS = (
+    "已消毒",
+    "已过滤",
+    "blocked",
+    "收到一张图片",
+    "你亲眼看到",
+    "图片",
+    "语音",
+    "视频",
+    "文件",
+    "链接",
+    "转发",
+)
+# 方括号里出现这些字符即视为系统/工具标记而非微信表情（如 [blocked:political]）。
+# 注意：数字**不排除**——[666] 是真实微信表情（2026-10-14 生产原文）。
+_SYSTEM_BRACKET_CHARS = set(":：/\\<>=%abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+
+def _is_emoji_token(token: str) -> bool:
+    """判断 [xx] token 是否为微信表情（而非系统占位/工具标记）。
+
+    2026-10-14 误伤修复（test_main_stream 抓出）：首版把一切 [xx] 当表情，
+    安全层消毒结果「[已消毒]」被当复读 token 误剥。判据=内容为纯中文/数字/emoji
+    且不在系统占位词表、不含路径/冒号/字母等标记特征。数字放行：[666] 是真实
+    微信表情（生产实证文本）。
+    """
+    inner = token[1:-1].strip()
+    if not inner or len(inner) > 12:
+        return False
+    if any(mark in inner for mark in _SYSTEM_BRACKET_MARKERS):
+        return False
+    return not any(ch in _SYSTEM_BRACKET_CHARS for ch in inner)
+
+
+def _emoji_tokens_of(line: str) -> list[str]:
+    """把一行拆成 [表情] token 序列；行内混有其它文字则返回空表（非纯表情行）。
+
+    仅统计**微信表情**形态的 token（见 _is_emoji_token）；系统占位 [已消毒]
+    这类既不计入纯表情判定，也不会被后续剥离。
+    """
+    tokens: list[str] = []
+    rest = str(line or "").strip()
+    while rest:
+        m = re.match(r"^(\[[^\[\]\n]{1,20}\])\s*", rest)
+        if not m:
+            return []
+        token = m.group(1)
+        if not _is_emoji_token(token):
+            return []
+        tokens.append(token)
+        rest = rest[m.end():]
+    return tokens
+
+
+def is_pure_emoji_message(user_msg: Any) -> bool:
+    """用户消息是否为纯表情（1~3 个 [表情] token，无其它文字）。"""
+    tokens = _emoji_tokens_of(str(user_msg or ""))
+    return 1 <= len(tokens) <= 3
+
+
+def strip_emoji_echo(reply: str, user_msg: Any) -> str:
+    """剥掉回复开头对用户刚发表情的机械复读（2026-10-14 降级模型镜像根治）。
+
+    仅当用户消息是纯表情时生效：回复行首若原样出现用户发过的同一条表情，
+    剥掉该 token（保留模型自己另配的表情与正文）。剥空则返回空串，交由
+    上层 empty_reply 兜底。纯表情用户消息以外的场景零改动。
+    """
+    if not is_pure_emoji_message(user_msg):
+        return str(reply or "")
+    echoed = set(_emoji_tokens_of(str(user_msg or "")))
+    s = str(reply or "").lstrip()
+    while True:
+        m = re.match(r"^(\[[^\[\]\n]{1,12}\])\s*", s)
+        if not m or m.group(1) not in echoed:
+            break
+        s = s[m.end():]
+    return s.strip()
+
+
+def terminal_reply_guard(
+    reply: Any,
+    *,
+    user_msg: Any = "",
+    character_name: str = "",
+) -> str:
+    """出站终审守卫（发送与落库之前的最后一道门，2026-10-14 生产事故批）。
+
+    三类拦截（拦截后返回空串，由调用方走 empty_reply 角色化兜底）：
+    1. 供应商链错误哨兵文案（全链失败时网关会把「（所有 LLM 提供商均不可用…）」
+       当正常回复 return——生产实证 10-13 13:03 直接发给了情绪低谷中的用户）。
+    2. 表情机械复读开头（见 strip_emoji_echo；剥离而非整条丢弃，正文保留）。
+    3. 退化回复只剩角色名本身（生产实证 10-13 回复仅「十四」两个字）。
+    """
+    from llm_provider.multi_provider_gateway import _is_error_reply
+
+    s = str(reply or "").strip()
+    if not s or _is_error_reply(s):
+        return ""
+    s = strip_emoji_echo(s, user_msg)
+    name = str(character_name or "").strip()
+    if name and s in {name, name + "。", name + "！", name + "!"}:
+        return ""
+    return s

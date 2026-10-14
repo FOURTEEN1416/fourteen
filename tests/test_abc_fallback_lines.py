@@ -101,3 +101,19 @@ class TestSystemFallbackRecognition:
         assert _is_system_error_reply("等我一下，刚才有点卡")
         assert _is_system_error_reply("刚才没接上，你再说一句？")
         assert not _is_system_error_reply("记得带伞哦")
+
+    def test_gateway_sentinel_is_system_error(self):
+        """2026-10-14 生产实证：网关全链失败串曾落库为 assistant 行（id 2641/2676）。"""
+        from shisi.memory.legacy.memory_pipeline import _is_system_error_reply
+        from utils.fallback_lines import is_system_fallback_line
+
+        sentinel = "（所有 LLM 提供商均不可用，请检查配置。最后错误: 模型请求失败，未生成角色回复）"
+        assert is_system_fallback_line(sentinel)
+        assert _is_system_error_reply(sentinel)
+        # 终审守卫同口径（单源哨兵识别）
+        from utils.prompt_sanitize import terminal_reply_guard
+
+        assert terminal_reply_guard(sentinel) == ""
+        # 正常角色台词不误伤（含「模型」二字的闲聊）
+        assert not is_system_fallback_line("你说什么模型呢，我又不是卖手办的")
+        assert not _is_system_error_reply("哼，又好的好的。")
