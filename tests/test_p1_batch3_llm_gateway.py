@@ -353,11 +353,16 @@ def test_breaker_opens_after_single_failure():
     assert good.calls == 2
 
 
-def test_agnes_request_timeout_eight_seconds():
-    """agnes 配置超时 20→8s（等满白等是降级慢的直接根因）。"""
+def test_agnes_request_timeout_fifteen_seconds():
+    """agnes 配置超时 8→15s（2026-10-15 质量回调批）。
+
+    历史：10-13 提速批 20→8s；生产实证 8s 低于健康响应分布 3.8~19.8s 的
+    中位 → 大量健康请求被误杀熔断 → 82% 流量降级免费档智谱（客服腔事故）。
+    现锚定 15s：守住「超时按配置生效」意图，同时防再次被压到误杀区间。
+    """
     cfg = json.loads(
         (Path(__file__).resolve().parents[1] / "config" / "llm_providers.json").read_text(
             encoding="utf-8"
         )
     )
-    assert cfg["providers"]["agnes"]["request_timeout"] == 8
+    assert cfg["providers"]["agnes"]["request_timeout"] == 15

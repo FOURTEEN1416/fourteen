@@ -1,7 +1,13 @@
-"""LLM 主动消息决策 — 人设 + 用户画像 + web 可调参数注入（非硬编码日程表）。"""
+"""LLM 主动消息决策 — 人设 + 用户画像 + web 可调参数注入（非硬编码日程表）。
+
+人设/画像/否决/模式约束统一真源见 proactive/proactive_context.py（2026-10-15
+质量回调批）：本模块专注决策编排，人设完整版、画像读入口、双源否决、沉浸式
+约束不再各拼一份。
+"""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -141,6 +147,11 @@ DECISION_SYSTEM = """你是伴侣角色的**主动消息决策器**。
    复述），也不得再用它称呼用户——用户引用≠用户接受；上下文有
    【被否认称呼】段时以它为准（生产实证：决策 reason 已自知「避免错误称呼」，
    输出仍叫「夏夏」——历史惯性压过单次硬规则，必须显式禁令行对抗）。
+10. message 是微信里真的会发的那一句话：禁止客服腔（连续疑问句轰炸、「有什么
+   心事可以和我说哦」式模板安慰、「需要我陪你聊聊天吗」式服务话术）；禁止
+   假设与用户共处（「我去占位置等你」「咖啡馆见」类）；话题必须与【当前角色
+   最近对话原文】或画像真实近况衔接，不得凭空开新话头，不得复读很久前的话题
+   当「刚刚」。
 """
 
 
@@ -544,6 +555,10 @@ def build_proactive_context(
     `knowledge_hint` 同构：由 `load_proactive_knowledge` 读出的真实材料（角色知识库
     / 热点池）。决策层拿不到它时只能按时间泛泛开口（「在忙什么呀」），有材料才可
     以转述一件真实的事。
+
+    2026-10-15 统一真源批：带 session_key 时画像经主链同款
+    `get_profile_prompt_block` 注入（含 preferences），否认称呼走
+    `denied_names_for` 双源否决；`persona_hint` 截断上限 1200（完整版人设）。
     """
     prof = profile or {}
     web = {**DEFAULT_WEB_CONFIG, **(web_config or {})}
@@ -573,7 +588,17 @@ def build_proactive_context(
     # 【被否认称呼】禁令（2026-10-13 15:28 复犯事故）：历史里用户否认过的称呼
     # （模型自造昵称被质问「谁是夏夏」），即使用户在后续消息中引用该词，模型
     # 也因历史注意力惯性复用——显式禁令行对抗（与身份锚同族，宁缺毋串）。
-    denied = detect_denied_nicknames(recent_messages or [])
+    # 2026-10-15 双源否决：优先走主链同款 runtime.denied_names_for（窗口检测 +
+    # ledger 持久否决合并——用户 7 次否认「十七」但窗口滑出后照叫的事故根因）；
+    # runtime 不可用/无会话键时回退本文件的单源窗口检测。
+    denied: list[str] = []
+    if session_key:
+        with contextlib.suppress(Exception):
+            from shisi.agent_plane.runtime import denied_names_for
+
+            denied = denied_names_for(session_key)
+    if not denied:
+        denied = detect_denied_nicknames(recent_messages or [])
     if denied:
         parts.append(
             "【被否认称呼】以下名字已被用户明确否认（用户说过「谁是X/我不是X/别叫我X」）："
@@ -582,21 +607,27 @@ def build_proactive_context(
             "对用户只能称「你」。"
         )
     if persona_hint:
+        # 2026-10-15 统一真源批：人设段上限 800→1200（proactive_context
+        # 完整版含【回复示例】【通用禁令】，800 会把禁令段整段截掉）
         parts.append(
             "【角色人设】（以下是角色卡文本；卡文中对「你」的设定只是角色记忆里"
             "的背景人物，**不是真实用户**——真实用户身份以上方【用户身份】段为准）\n"
-            + persona_hint[:800]
+            + persona_hint[:1200]
         )
     if relationship_hint:
         parts.append(f"关系：{relationship_hint}")
-    bits = []
-    for k in ("nickname", "birthday", "occupation", "location"):
-        if prof.get(k):
-            bits.append(f"{k}={prof[k]}")
-    if prof.get("commitments"):
-        bits.append("约定=" + "；".join(str(x) for x in prof["commitments"][:3]))
-    if bits:
-        parts.append("【用户画像投影】" + "；".join(bits))
+    # 画像统一读入口（2026-10-15）：主链同款 get_profile_prompt_block——
+    # 含 preferences（旧 bits 投影漏掉的「不喜欢被一直催」类偏好）与硬约束
+    # 声明，返回带「# 用户画像」标题的完整段；读不到（无会话键/异常）整段
+    # 不注入，宁缺毋串。
+    profile_block = ""
+    if session_key:
+        with contextlib.suppress(Exception):
+            from shisi.agent_plane.runtime import get_profile_prompt_block
+
+            profile_block = get_profile_prompt_block(session_key)
+    if profile_block:
+        parts.append(profile_block)
     if last_user_message.strip():
         parts.append("【用户最后一句】" + last_user_message.strip()[:200])
     if response_rate is not None:
@@ -745,6 +776,11 @@ def load_persona_hint(character_id: str = "") -> str:
     2026-09-22：`default`（内置十四）此前查 `config/characters/default.json`
     必 miss → 主动决策人设恒空。现 default 走 `config/persona.yaml`，
     与 `PersonaService._builtin_character_card` 同源。
+
+    ⚠️ 2026-10-15：本函数是 400+200 裁剪版（旧口径），**新代码应走
+    `proactive/proactive_context.py::load_full_persona_hint`**（完整版，
+    含【回复示例】【通用禁令】）。保留本函数是因 scheduler 与既有测试仍在
+    消费，两包合流后由主控终审统一切换。
     """
     try:
         import json as _json

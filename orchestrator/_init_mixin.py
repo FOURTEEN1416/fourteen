@@ -208,9 +208,31 @@ class _InitPhasesMixin:
             except Exception:  # noqa: BLE001
                 return 0
 
+        def _char_id_for_user(uk_local: str = ""):
+            """生成线角色化的 resolver 工厂（2026-10-15 质量回调批）。
+
+            返回绑定本 user_key 的零参闭包（ASEEngine 在每次生成时动态调用，
+            切角色即时生效）；解析失败/无绑定回退内置 default。模式参考上方
+            `_affinity_level_for_user` 的 gf.get_user_character 用法。
+            """
+
+            def _resolve() -> str:
+                try:
+                    from api.deps import deps as _deps
+
+                    gf = getattr(_deps, "gf", None)
+                    if gf is not None and uk_local:
+                        return str(gf.get_user_character(uk_local) or "default")
+                except Exception:  # noqa: BLE001
+                    pass
+                return "default"
+
+            return _resolve
+
         def _make_ase_engine(user_key: str = "", state_path: str = ""):
             uk = str(user_key or "")
             affinity_fn = (lambda: _affinity_level_for_user(uk)) if uk else None
+            char_resolver = _char_id_for_user(uk)
             eng = None
             try:
                 from proactive.ase_engine import ASEEngine as ASEEngineOptimized
@@ -226,6 +248,7 @@ class _InitPhasesMixin:
                     reflection_mode=ase_fusion.get("reflection_mode", "rule"),
                     affinity_level_func=affinity_fn,
                     state_path=state_path or "",
+                    character_id_resolver=char_resolver,
                 )
             except ImportError:
                 from proactive.ase_engine import ASEEngine as ASEEngineV2
@@ -238,6 +261,7 @@ class _InitPhasesMixin:
                     urgency_threshold=cfg.proactive.urgency_threshold,
                     affinity_level_func=affinity_fn,
                     state_path=state_path or "",
+                    character_id_resolver=char_resolver,
                 )
             # 🔴 每引擎注入知识分享 + 角色 id（hub 级 setattr 不会传到引擎实例）
             if eng is not None:

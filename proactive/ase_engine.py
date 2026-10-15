@@ -503,6 +503,7 @@ class MessageGenerator:
         user_profile: str = "",
         last_user_message: str = "",
         response_rate: float | None = None,
+        character_id: str = "",
     ) -> str | None:
         if not self._llm:
             return None
@@ -561,10 +562,40 @@ class MessageGenerator:
                 + "\n"
             )
 
-        if self._proactive_prompt:
+        # ── 2026-10-15 质量回调批：生成线角色化主路径（人设统一真源
+        # proactive/proactive_context）——旧主路径是 proactive.yaml 写死的
+        # 「十四傲娇」模板 + 按时段剧本，42 张角色卡的用户收到的主动消息全是
+        # 十四口吻且与话题脱钩。三分支：角色驱动主路径 > 旧模板（proactive.yaml
+        # 已降级为可选风格覆盖位，留空即不启用）> 中性兜底（不冒充任何角色）。
+        # lazy import（函数内）：与 llm_proactive 互为函数内引用是既有安全方向。
+        try:
+            from proactive.proactive_context import (
+                immersive_proactive_constraints,
+                load_full_persona_hint,
+            )
+
+            persona = load_full_persona_hint(character_id)
+            mode_constraints = immersive_proactive_constraints()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("proactive_context 装载失败（回退中性兜底分支）: %s", e)
+            persona = ""
+            mode_constraints = ""
+
+        if persona:
+            # 角色驱动主路径：完整人设 + 情境 + 接地/去重 + 模式约束
+            now_time = _proactive_now_str()
+            prompt = (
+                f"{persona}\n\n"
+                f"当前情境：\n- 时间：{now_time}\n- 你的情感状态：{emotion}\n"
+                f"- 关系等级：{affinity_name}\n- 想表达的类型：{type_label}\n"
+                f"{grounded_block}\n{avoid_block}\n\n"
+                f"{mode_constraints}\n\n"
+                "直接输出这条主动消息的内容（一条，像微信里真会发的那句），不要解释。消息："
+            )
+        elif self._proactive_prompt:
             # 2026-09-20：墙钟串统一走公共真源（原裸 datetime.now() 依赖主机时区，无回退）
             # 2026-10-11 时间感知批：升为日期+星期+时刻 —— 只有 HH:MM 时模型
-            # 无从知道"隔了多久"，长间隔失联会被当作刚刚聊过
+            # 无从知道"隔了多久"，长间隔失联被当作刚刚聊过
             now_str = _proactive_now_str()
             prompt = self._proactive_prompt.format(
                 # proactive.yaml 模板需要的变量
@@ -586,9 +617,11 @@ class MessageGenerator:
                 prompt = f"{prompt}\n\n【当前真实状态（必须据此生成，不得编造）】\n{grounded_block}"
             if avoid_block:
                 prompt = f"{prompt}\n{avoid_block}"
+            if mode_constraints:
+                prompt = f"{prompt}\n\n{mode_constraints}"
         else:
             now_time = _proactive_now_str()
-            prompt = f"""作为"十四"，你想主动给用户发一条消息。
+            prompt = f"""你想主动给用户发一条消息。
 
 当前情境：
 - 时间：{now_time}
@@ -602,12 +635,14 @@ class MessageGenerator:
 1. 语气要符合你们的关系等级（{affinity_name}）
 2. 要自然、有情感温度，不要太正式
 3. **必须与上面「你记得的用户信息 / 用户最后一句」有关联**（自己提起对方
-   说过的事，例如问"军训累不累"）；完全没有关联信息时就从时间与情境切入
+   说过的处境，例如问"军训累不累"）；完全没有关联信息时就从时间与情境切入
 4. 不要编造对方没说过的处境
 5. **禁止虚构对方的发言/提问**（不要写「你想知道…」「你问…」「你就想…」）
 6. 不要自问自答
 7. 长度控制在 20 字以内
 8. 直接输出消息内容，不要解释
+
+{mode_constraints}
 
 消息："""
 
@@ -639,6 +674,7 @@ class MessageGenerator:
         user_profile: str = "",
         last_user_message: str = "",
         response_rate: float | None = None,
+        character_id: str = "",
     ) -> tuple[str, str]:
         content = None
         generated_by = "template"
@@ -651,6 +687,7 @@ class MessageGenerator:
                 user_profile=user_profile,
                 last_user_message=last_user_message,
                 response_rate=response_rate,
+                character_id=character_id,
             )
             if content:
                 generated_by = "llm"
@@ -777,6 +814,7 @@ class ASEEngine:
         generation_mode: str = "llm",
         reflection_mode: str = "rule",
         state_path: str = "",
+        character_id_resolver: Callable[[], str] | None = None,
     ):
         self._get_affinity = affinity_level_func or (lambda: 0)
         self._llm = llm_gateway
@@ -784,6 +822,9 @@ class ASEEngine:
         self._frequency_mode = frequency_mode
         self._generation_mode = generation_mode
         self._state_path = Path(state_path) if state_path else _STATE_PATH
+        # 当前角色动态解析器（2026-10-15 生成线角色化）：resolver 闭包绑定本
+        # user_key（隔离天然成立）；None 时回退空角色（兼容旧构造点）。
+        self._character_id_resolver = character_id_resolver
 
         self.urgency = UrgencyState()
 
@@ -1007,6 +1048,14 @@ class ASEEngine:
             self._user_key = uk
             self._user_profile_cache = ""
             self._user_profile_loaded_at = 0.0
+
+    def _current_character_id(self) -> str:
+        """动态解析当前角色（resolver 闭包绑定本 user_key，隔离天然成立）；
+        无 resolver 时回退构造期静态值（兼容旧构造点）。"""
+        if self._character_id_resolver is not None:
+            with contextlib.suppress(Exception):
+                return str(self._character_id_resolver() or "")
+        return ""
 
     def _user_profile_snippet(self, ttl_seconds: float = 600.0) -> str:
         """取本会话用户的画像文本（带 TTL 缓存；失败返回空，不阻塞生成）。
@@ -1357,6 +1406,9 @@ class ASEEngine:
                 user_profile=self._user_profile_snippet(),
                 last_user_message=self._last_user_message,
                 response_rate=self.response_rate,
+                # 2026-10-15 生成线角色化：按当前会话绑定角色动态解析（闭包绑定
+                # 本 user_key），生成走角色卡口吻而非写死的十四模板
+                character_id=self._current_character_id(),
             )
         else:
             content = self._message_generator.generate_from_template(

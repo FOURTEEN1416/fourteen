@@ -152,6 +152,10 @@ class ProactiveScheduler:
         # 账本同走 init/load/persist/purge 四处同步纪律。
         self._wait_window_event_day: dict[str, str] = {}
         self._quiet_event_day: dict[str, str] = {}
+        # 模型闸（2026-10-15 质量回调批）：model_degraded 账本事件每用户每日
+        # 至多一条（与 quiet_hours 同口径噪声治理）。与上面各账本同走
+        # init/load/persist/purge 四处同步纪律。
+        self._model_degraded_event_day: dict[str, str] = {}
 
         self._scheduler: Any = None
         self._active_tasks: dict[str, bool] = {}
@@ -288,6 +292,32 @@ class ProactiveScheduler:
         except Exception:  # noqa: BLE001
             pass
         return None
+
+    def _primary_model_ok(self) -> bool:
+        """首选供应商（链首位）是否可用：熔断开闸期间主动消息不生成。
+
+        2026-10-15 质量回调批：生产实证 agnes 熔断窗内全量流量降级免费档
+        智谱，主动消息出客服腔——宁可不发也不让降级模型代写（用户裁决）。
+        网关无该方法（旧对象/stub）→ True（不拦，向后兼容）。
+        ⚠️ getattr 防御：既有测试以 __new__ 构造 stub 不设 _llm_provider，
+        真实实例 __init__ 必然有该属性。
+        """
+        llm = getattr(self, "_llm_provider", None)
+        if llm is None:
+            with contextlib.suppress(Exception):
+                from api.deps import deps
+                comps = getattr(getattr(deps, "orch", None), "components", None)
+                if isinstance(comps, dict):
+                    llm = comps.get("llm")
+        if llm is None:
+            return True
+        try:
+            status = getattr(llm, "primary_provider_status", None)
+            if not callable(status):
+                return True
+            return bool(status()[1])
+        except Exception:  # noqa: BLE001
+            return True
 
     def register_channel(self, name: str, sender_factory: Callable[[], Any]) -> None:
         """
@@ -1170,7 +1200,6 @@ class ProactiveScheduler:
             clamp_wait_minutes,
             decide_proactive,
             is_duplicate_proactive,
-            load_persona_hint,
             load_proactive_knowledge,
             proactive_floor_extra,
             read_web_proactive_config,
@@ -1218,6 +1247,26 @@ class ProactiveScheduler:
                 append_proactive_event(session_key=user_key, sent=False, reason="quiet_hours")
                 self._persist_throttle_ledger()
             logger.debug("proactive LLM 前置静默闸命中 user=%s，跳过决策", user_key)
+            return
+        # 模型闸（2026-10-15 质量回调批）：首选供应商熔断开闸期间跳过主动消息
+        # 决策——降级模型（免费档）写出来的主动消息是客服腔（生产实证），宁缺毋滥。
+        # 每用户每日至多一条账本事件（与 quiet_hours 同口径噪声治理）。
+        # getattr 防御：__new__ stub 只补部分账本属性（真实实例 __init__ 必有）。
+        if not self._primary_model_ok():
+            today_m = _local_now().date().isoformat()
+            degraded_day = getattr(self, "_model_degraded_event_day", None)
+            if degraded_day is None:
+                degraded_day = self._model_degraded_event_day = {}
+            if degraded_day.get(str(user_key)) != today_m:
+                degraded_day[str(user_key)] = today_m
+                append_proactive_event(
+                    session_key=user_key,
+                    sent=False,
+                    reason="model_degraded",
+                    character_id=self._resolve_character_id(str(user_key)),
+                )
+                self._persist_throttle_ledger()
+            logger.debug("proactive 模型闸命中（首选供应商熔断中），跳过 user=%s", user_key)
             return
         # 执行 LLM 上次决策的 wait_minutes（模型自判时机，非策略闸）
         import time as _time
@@ -1294,8 +1343,11 @@ class ProactiveScheduler:
         except Exception:  # noqa: BLE001
             rel = ""
         # 身份来自当前会话绑定，不把缓存引擎首次创建时的人设当成当前角色。
+        # 2026-10-15 统一真源：完整版人设（含【回复示例】【通用禁令】），
+        # 与生成线/祝福润色同走 proactive_context 单一 owner。
         char_id = self._resolve_character_id(str(user_key))
-        persona = load_persona_hint(char_id) if char_id else ""
+        from proactive.proactive_context import load_full_persona_hint
+        persona = load_full_persona_hint(char_id) if char_id else ""
         # 缺陷 H：真实可分享内容（角色知识库 + 热点池）经统一读接口进**决策链**。
         # 角色 id 用当轮解析值，不用引擎创建时缓存的 `_knowledge_character_id`
         # （切角色后那是旧角色 → 把别人的角色内容当谈资）。
@@ -1858,10 +1910,12 @@ class ProactiveScheduler:
         wish = "生日快乐" if kind == "birthday" else "纪念日快乐"
         message = f"今天是个特别的日子（{names}）。{wish}呀！"
         # 生成、发送与记账共用角色快照；不另建一套角色解析规则。
+        # 2026-10-15 统一真源：祝福润色与决策线同走完整版人设（旧裁剪版缺
+        # 【回复示例】【通用禁令】，祝福口吻曾与角色卡脱钩）。
         try:
-            from proactive.llm_proactive import load_persona_hint
+            from proactive.proactive_context import load_full_persona_hint
 
-            persona_hint = load_persona_hint(char_id) or ""
+            persona_hint = load_full_persona_hint(char_id) or ""
             llm = self._session_llm_resolver(user_key) if self._session_llm_resolver else self._resolve_proactive_llm()
             if llm is not None and hasattr(llm, "chat_sync"):
                 polished = llm.chat_sync(
@@ -2043,6 +2097,12 @@ class ProactiveScheduler:
                 str(k): str(v) for k, v in quiet_day.items() if str(v or "")
             }
 
+        degraded_day = raw.get("model_degraded_event_day")
+        if isinstance(degraded_day, dict):
+            self._model_degraded_event_day = {
+                str(k): str(v) for k, v in degraded_day.items() if str(v or "")
+            }
+
         sent = raw.get("important_dates_sent")
         if isinstance(sent, list):
             self._important_dates_sent = {str(x) for x in sent if str(x or "")}
@@ -2066,6 +2126,9 @@ class ProactiveScheduler:
                     # skip 账本治理（2026-10-12）：等待窗/静默闸的每日去重键
                     "wait_window_event_day": dict(self._wait_window_event_day),
                     "quiet_event_day": dict(self._quiet_event_day),
+                    # 模型闸（2026-10-15）：getattr 防御——既有测试以 __new__ 构造
+                    # stub 且只补部分账本属性，真实实例 __init__ 必然有该键。
+                    "model_degraded_event_day": dict(getattr(self, "_model_degraded_event_day", {})),
                     # 只保留最近 7 天（防无界增长；口径与 dedup_key 的日期前缀一致）
                     "important_dates_sent": sorted(self._important_dates_sent)[-200:],
                 }
@@ -2079,7 +2142,8 @@ class ProactiveScheduler:
 
         键形态在本 owner 内解析：``llm_proactive_next_ok`` /
         ``deliver_fail_counts`` / ``disabled_event_day`` / ``wait_window_event_day``
-        / ``quiet_event_day`` 以会话键（或裸 uid 历史键）为键，按 owner 段精确
+        / ``quiet_event_day`` / ``model_degraded_event_day``（2026-10-15 模型闸）
+        以会话键（或裸 uid 历史键）为键，按 owner 段精确
         判定；``important_dates_sent`` 的条目是 ``"{date}|{user_key}|{label}"``，
         按中段 user_key 匹配。内存账本与跨 worker 配置文件同步清理，防止下次
         _persist 把已删账号的条目复活。返回移除的条目总数。
@@ -2106,6 +2170,9 @@ class ProactiveScheduler:
             # 账号条目残留并随 _persist 复活（与上方 docstring 的自设纪律一致）
             self._wait_window_event_day,
             self._quiet_event_day,
+            # 模型闸（2026-10-15）新增每日去重账本：漏这里会让已删账号条目
+            # 残留并随 _persist 复活；getattr 防御见 _persist_throttle_ledger 注。
+            getattr(self, "_model_degraded_event_day", {}),
         ):
             victims = [k for k in list(ledger) if _owned(str(k))]
             for k in victims:

@@ -157,6 +157,12 @@ def _denied_names(session_key: str) -> list[str]:
     return merged[:10]
 
 
+def denied_names_for(session_key: str) -> list[str]:
+    """公共入口（2026-10-15）：主动消息链复用双源否决（窗口检测 + ledger
+    持久否决）。主链画像槽经 get_profile_prompt_block 内部消费同一真源。"""
+    return _denied_names(session_key)
+
+
 def write_profile_from_tool(
     session_key: str,
     payload: dict[str, Any],

@@ -129,11 +129,14 @@ def test_llm_proactive_persona_falls_back_to_character_resolver(monkeypatch):
     """引擎无 `_knowledge_character_id` 时，决策层必须真实走 resolver→load_persona_hint。
 
     行为断言（不再读源码文本）：跑一次 `_llm_proactive_one_user`，
-    钉 load_persona_hint 收到的是 resolver 返回的卡 id，且消息按决策送达。
+    钉人设加载（统一真源 load_full_persona_hint，2026-10-15 起 scheduler 走
+    proactive_context；旧 load_persona_hint 为 ImportError 回退）收到的是
+    resolver 返回的卡 id，且消息按决策送达。
     """
     import types
 
     import proactive.llm_proactive as lp_mod
+    import proactive.proactive_context as pctx_mod
     import proactive.scheduler as sched_mod
     import shisi.agent_plane.runtime as apr
     import utils.character_resolver as resolver_mod
@@ -149,10 +152,15 @@ def test_llm_proactive_persona_falls_back_to_character_resolver(monkeypatch):
     monkeypatch.setattr(s, "_resolve_proactive_llm", lambda eng=None: object())
 
     hints: list[str] = []
-    monkeypatch.setattr(
-        lp_mod, "load_persona_hint",
-        lambda cid="": (hints.append(cid), "persona文本")[1],
-    )
+
+    def _capture_hint(cid: str = "") -> str:
+        hints.append(cid)
+        return "persona文本"
+
+    # 2026-10-15 统一真源批：拦截点迁移到 proactive_context（scheduler 主路）；
+    # 旧函数同步打补丁钉住回退分支，防其读真实卡目录。
+    monkeypatch.setattr(pctx_mod, "load_full_persona_hint", _capture_hint)
+    monkeypatch.setattr(lp_mod, "load_persona_hint", _capture_hint)
     monkeypatch.setattr(
         lp_mod, "decide_proactive",
         lambda llm, ctx: {"should_contact": True, "message": "在忙什么呢", "reason": "test", "wait_minutes": None},
@@ -333,7 +341,7 @@ def test_send_date_wish_uses_bound_persona(monkeypatch):
     from types import SimpleNamespace
 
     import api.deps as deps_mod
-    import proactive.llm_proactive as lp_mod
+    import proactive.proactive_context as pctx_mod
     import proactive.scheduler as sched_mod
 
     s = _bare_scheduler()
@@ -341,8 +349,9 @@ def test_send_date_wish_uses_bound_persona(monkeypatch):
         gf=SimpleNamespace(get_user_character=lambda uk: "default")
     ))
     hints: list[str] = []
+    # 2026-10-15 统一真源：祝福润色已切 proactive_context 完整版人设
     monkeypatch.setattr(
-        lp_mod, "load_persona_hint",
+        pctx_mod, "load_full_persona_hint",
         lambda cid="": (hints.append(str(cid)), "昭阳人设")[1],
     )
     seen: dict[str, str] = {}

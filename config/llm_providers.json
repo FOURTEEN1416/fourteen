@@ -10,8 +10,8 @@
       "max_tokens": 8192,
       "temperature": 0.85,
       "stream_enabled": true,
-      "request_timeout": 8,
-      "description": "Agnes agnes-3.0-flash（OpenAI 兼容端点），首选供应商；2026-10-13 降级提速批：超时 20→8s（生产实证 20s 常等满拖垮降级轮，链均 17.6s），配熔断 1 次/300s",
+      "request_timeout": 15,
+      "description": "Agnes agnes-3.0-flash（OpenAI 兼容端点），首选供应商；2026-10-15 质量回调批：超时 8→15s——8s 低于健康响应分布 3.8~19.8s 的中位，大量健康请求被超时误杀 → 1 次失败熔断 300s → 期间全量流量降级免费档（生产实证 82% 流量走智谱、出客服腔），质量优先回 15s；熔断维持 1 次/300s（熔断期主动消息跳过不降级，见 scheduler 模型闸）",
       "enabled": true,
       "sort_order": 1,
       "guide": {

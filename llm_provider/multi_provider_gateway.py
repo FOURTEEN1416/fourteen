@@ -429,6 +429,21 @@ class MultiProviderGateway:
         available = [k for k in keys if not self._breaker_open(k)]
         return available or keys
 
+    def primary_provider_status(self) -> tuple[str, bool]:
+        """链首位（首选）供应商的 ``(key, 是否可用)``；可用 = 未处于熔断开闸期。
+
+        2026-10-15 质量回调批：主动消息链的模型闸信号源。生产实证 agnes
+        超时误杀 → 熔断 300s → 期间全量流量降级免费档智谱，主动消息出
+        客服腔——熔断期主动消息宁可跳过也不让降级模型代写。全开闸时
+        ``_chain_keys`` 退回完整链（首位仍是首选 key），开闸判定保持正确
+        表达「首选不可用」。只读 dict（键读写原子），不加锁。
+        """
+        keys = list(self._providers.keys())
+        if not keys:
+            return ("", False)
+        first = keys[0]
+        return (first, not self._breaker_open(first))
+
     # ─── 公共接口 ────────────────────────────────
 
     async def chat(

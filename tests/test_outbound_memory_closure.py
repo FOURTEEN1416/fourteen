@@ -155,6 +155,7 @@ def test_proactive_uses_current_identity_and_history_then_cancels_stale_draft(mo
     from types import SimpleNamespace
 
     from proactive import llm_proactive as lp
+    from proactive import proactive_context as pctx
     from shisi.agent_plane import runtime
 
     s = _scheduler()
@@ -165,6 +166,9 @@ def test_proactive_uses_current_identity_and_history_then_cancels_stale_draft(mo
     monkeypatch.setattr(s, "_is_quiet_hours", lambda: False)
     monkeypatch.setattr(s, "_resolve_character_id", lambda sk: current[0])
     monkeypatch.setattr(s, "_resolve_proactive_llm", lambda eng=None: object())
+    # 2026-10-15 统一真源批：scheduler 人设主路改走 proactive_context
+    # （旧 load_persona_hint 留作 ImportError 回退），两处同补丁保持断言语义。
+    monkeypatch.setattr(pctx, "load_full_persona_hint", lambda cid: f"persona:{cid}")
     monkeypatch.setattr(lp, "load_persona_hint", lambda cid: f"persona:{cid}")
     monkeypatch.setattr(lp, "read_web_proactive_config", lambda: {"enabled": True})
     monkeypatch.setattr(runtime, "project_profile_for", lambda sk: {})
@@ -219,12 +223,13 @@ def test_scheduler_rejects_draft_from_another_character(monkeypatch):
 def test_date_wish_cancels_character_change_without_dedup(monkeypatch):
     from types import SimpleNamespace
 
-    from proactive import llm_proactive as lp
+    from proactive import proactive_context as pctx
 
     s = _scheduler()
     current = ["charA"]
     monkeypatch.setattr(s, "_resolve_character_id", lambda sk: current[0])
-    monkeypatch.setattr(lp, "load_persona_hint", lambda cid: cid)
+    # 2026-10-15 统一真源：祝福润色已切 proactive_context 完整版人设
+    monkeypatch.setattr(pctx, "load_full_persona_hint", lambda cid: cid)
 
     def generate(**kw):
         assert kw["system_prompt"] == "charA"

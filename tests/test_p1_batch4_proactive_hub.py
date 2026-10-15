@@ -307,6 +307,7 @@ def test_deliver_bridges_to_injected_loop(sched):
 
 def _proactive_sched(monkeypatch, events: list, decide_ret: dict, persona_seen: dict):
     import proactive.llm_proactive as lp
+    import proactive.proactive_context as pctx
     import shisi.agent_plane.runtime as rt
 
     monkeypatch.setattr(lp, "read_web_proactive_config", lambda: {"enabled": True})
@@ -315,6 +316,10 @@ def _proactive_sched(monkeypatch, events: list, decide_ret: dict, persona_seen: 
         persona_seen["cid"] = cid
         return "P:" + str(cid)
 
+    # 2026-10-15 统一真源批：scheduler 决策线人设改走 proactive_context
+    # .load_full_persona_hint（旧 load_persona_hint 留作 ImportError 回退），
+    # 拦截点同步迁移；旧函数仍打补丁防回退分支读到真实卡目录。
+    monkeypatch.setattr(pctx, "load_full_persona_hint", _load_hint)
     monkeypatch.setattr(lp, "load_persona_hint", _load_hint)
     monkeypatch.setattr(lp, "decide_proactive", lambda llm, ctx: decide_ret)
     monkeypatch.setattr(rt, "project_profile_for", lambda uk: {})
