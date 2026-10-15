@@ -233,16 +233,20 @@ class PersonaService:
         # 历史注意力惯性会压过后置规则；主聊链此前完全无身份锚——「夏夏/十七」
         # 起名、编共同记忆、「门没锁灯给你留了」在场幻觉均系此空缺）。
         injection_parts.append(USER_IDENTITY_RULE.strip())
-        denied_nicknames = [
-            str(x) for x in (mem_ctx.get("denied_nicknames") or []) if str(x or "").strip()
-        ][:5] if isinstance(mem_ctx, dict) else []
-        if denied_nicknames:
-            injection_parts.append(
-                "【被否认称呼】以下名字已被用户明确否认（用户说过「谁是X/X是谁/我不是X/别叫我X」）："
-                + "、".join(f"「{d}」" for d in denied_nicknames)
-                + "。任何场景下都不得再用这些名字称呼用户——包括道歉、复盘、引用历史时；"
-                "对用户只能称「你」。"
+        # 2026-10-15 称呼根治批：白名单唯一真源（正面指定合法称呼 + 角色名自动禁用），
+        # 替代旧【被否认称呼】黑名单段（依赖用户发现+窗口不滑出+模型听话，三处结构性失效）。
+        # 会话键只取结构化 user_key/_user_key（与画像槽同源，P0-1：禁止 repr 兜底）。
+        try:
+            from utils.address_terms import address_prompt_block
+
+            _addr_block = address_prompt_block(
+                str(mem_ctx.get("user_key") or mem_ctx.get("_user_key") or ""),
+                str(character_id or ""),
             )
+            if _addr_block:
+                injection_parts.append(_addr_block)
+        except Exception as _addr_exc:  # noqa: BLE001
+            logger.debug("称呼段注入失败: %s", _addr_exc)
         # 角色归属硬约束：真对话只在 messages；system 记忆不是用户发言
         injection_parts.append(ROLE_CLARITY_RULE.strip())
         # 话题续聊：像人一样接着聊，不跳题、不自问自答

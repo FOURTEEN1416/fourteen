@@ -6,7 +6,8 @@
 3. 退化回复只剩角色名（10-13 回复仅「十四」）→ terminal_reply_guard 拦截；
 4. markdown 粗体进微信（智谱轮「1. **冰敷**：…」）→ sanitize_reply_text 剥除；
 5. 主链身份锚空缺（「夏夏/十七」起名、编共同记忆、「门没锁灯给你留了」）
-   → USER_IDENTITY_RULE + 【被否认称呼】段进主链 system prompt；
+   → USER_IDENTITY_RULE + 【用户称呼】白名单段进主链 system prompt
+   （2026-10-15 称呼根治批：黑名单式【被否认称呼】独立段退役，改白名单唯一真源段）；
 6. 「X是谁」语序漏检（「十七是谁」不被「谁是X」命中 → 次日仍叫「十七」）
    → detect_denied_nicknames 补名字前置语序。
 """
@@ -197,7 +198,7 @@ def test_detect_combines_orders_and_dedupes():
 
 
 # ═══════════════════════════════════════════════════════════
-# 5. 主链 prompt 注入：身份铁则 / 表情守则 / 被否认称呼段
+# 5. 主链 prompt 注入：身份铁则 / 表情守则 / 用户称呼白名单段
 # ═══════════════════════════════════════════════════════════
 
 
@@ -231,16 +232,46 @@ def test_main_chain_prompt_contains_emoji_rule():
     assert "禁止复读用户刚发的同一条表情" in prompt
 
 
-def test_main_chain_prompt_renders_denied_nicknames_segment():
-    prompt = _build_prompt({"denied_nicknames": ["十七", "夏夏"]})
-    assert "【被否认称呼】" in prompt
+def test_main_chain_prompt_renders_address_whitelist_segment(monkeypatch):
+    """2026-10-15 称呼根治批：主链渲染【用户称呼】白名单段（替代黑名单独立段）。
+
+    测试意图不变且更强：被否认的名字不得进 prompt —— 新段以「正面指定唯一合法
+    称呼 + 否认清单补充行」满足（旧段只有禁令清单，无正面指定）。
+    """
+    import utils.address_terms as at
+    import utils.character_resolver as cr
+
+    monkeypatch.setattr(at, "_profile_nickname", lambda sk: "")
+    monkeypatch.setattr(at, "_denied_names", lambda sk: {"十七", "夏夏"})
+    monkeypatch.setattr(cr, "display_name", lambda cid: "十四")
+
+    prompt = _build_prompt({"user_key": "N:guard-batch"})
+    assert "# 用户称呼" in prompt, "白名单段必须进主链（正面指定合法称呼）"
     seg = prompt.split("【被否认称呼】")[1][:200]
     assert "「十七」" in seg and "「夏夏」" in seg
     assert "不得再用这些名字称呼用户" in seg
+    # 白名单段只渲染一次（双段 = 两个 owner 漂移）
+    assert prompt.count("# 用户称呼") == 1
 
 
-def test_main_chain_prompt_no_denied_segment_when_absent():
-    prompt = _build_prompt({})
+def test_main_chain_prompt_no_address_segment_without_user_key():
+    """无会话键 → 整段不注入（宁缺毋串；旧 denied_nicknames 渲染已退役）。"""
+    prompt = _build_prompt({"denied_nicknames": ["十七"]})
+    assert "# 用户称呼" not in prompt
+    assert "【被否认称呼】" not in prompt
+
+
+def test_main_chain_prompt_no_denied_line_without_denials(monkeypatch):
+    """有会话键但无否认记录 → 白名单段在位、否认清单行缺席。"""
+    import utils.address_terms as at
+    import utils.character_resolver as cr
+
+    monkeypatch.setattr(at, "_profile_nickname", lambda sk: "")
+    monkeypatch.setattr(at, "_denied_names", lambda sk: set())
+    monkeypatch.setattr(cr, "display_name", lambda cid: "十四")
+
+    prompt = _build_prompt({"user_key": "N:guard-clean"})
+    assert "# 用户称呼" in prompt
     assert "【被否认称呼】" not in prompt
 
 

@@ -972,6 +972,32 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         except Exception as e:  # noqa: BLE001
             logger.debug("sanitize_llm_history failed: %s", e)
 
+        # 2026-10-15 称呼根治批：历史行里的非法称呼（角色名派生/被否认称呼）注入前剥除，
+        # 防模型从历史里"看见什么学什么"（「夏夏」自我强化回灌的链路切断）。
+        # 整行 content 变空则丢弃该行（防空行进历史）；非 list 形态原样透传不炸。
+        try:
+            from utils.address_terms import resolve_address, strip_forbidden_vocatives
+
+            _legal, _forbidden = resolve_address(str(session_id or ""), str(character_id or ""))
+            if _forbidden and isinstance(chat_history, list):
+                _scrubbed: list[Any] = []
+                for _row in chat_history:
+                    if not isinstance(_row, dict):
+                        _scrubbed.append(_row)
+                        continue
+                    _content = str(_row.get("content") or "")
+                    _clean = (
+                        strip_forbidden_vocatives(_content, _legal, _forbidden)
+                        if _content
+                        else _content
+                    )
+                    if not _clean.strip():
+                        continue
+                    _scrubbed.append({**_row, "content": _clean})
+                chat_history = _scrubbed
+        except Exception as e:  # noqa: BLE001
+            logger.debug("历史称呼净化失败: %s", e)
+
         # ── 时间感知（2026-10-11 批，参照 SillyTavern {{idleDuration}} 语义 +
         #    hermes-agent #62369 [time anchor] 单行锚点惯例；AGPL 项目仅语义对齐）──
         # 历史按真实间隔加时间前缀；锚点（当前时间+距上条消息时长）进
@@ -1108,19 +1134,13 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
         ax_turn_id = str(turn_id or _uuid.uuid4().hex[:12])
         ax_reply_id = _uuid.uuid4().hex[:12]
-        # 被否认称呼接线（2026-10-14「十七」复用事故）：检测 owner 在
-        # proactive.llm_proactive（纯函数），主链从最近历史提取后经
-        # memory_context 传入，persona_service 渲染【被否认称呼】禁令段。
-        # 仅 dict 契约形态接线（P0-1 保型下传；str 防御形态下跳过不注入）。
-        try:
-            from proactive.llm_proactive import detect_denied_nicknames
-
-            _recent = chat_history if isinstance(chat_history, list) else []
-            _denied = detect_denied_nicknames(_recent[-40:])
-            if _denied and isinstance(memory_context, dict):
-                memory_context["denied_nicknames"] = _denied
-        except Exception as _exc:  # noqa: BLE001
-            logger.debug("被否认称呼检测失败（忽略）: %s", _exc)
+        # 称呼段接线（2026-10-15 称呼根治批）：旧【被否认称呼】黑名单段退役 ——
+        # 原实现在此把 `detect_denied_nicknames(最近历史)` 写入
+        # `memory_context["denied_nicknames"]` 供 persona_service 渲染。新渲染
+        # （persona_service 的【用户称呼】白名单段）由 `utils.address_terms`
+        # 自读**同一双源**（runtime.denied_names_for = 窗口检测 + ledger 持久否决，
+        # 且窗口检测扫**全量**账本消息而非尾部 40 条），故该写入已零消费者
+        # （全仓 grep 实证）——删除，不留死接线（§1.2 不引入重复 owner）。
         system_prompt = self.components["persona"].build_system_prompt(
             emotion_state=emotion_state,
             memory_context=memory_context,
@@ -1484,12 +1504,24 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
         return emotion_tag
 
-    def _finalize_reply(self, reply: str, character_id: str, character_card=None, user_msg: str = "") -> str:
+    def _finalize_reply(
+        self,
+        reply: str,
+        character_id: str,
+        character_card=None,
+        user_msg: str = "",
+        session_id: str = "",
+    ) -> str:
         """唯一输出定稿：清洗、空回复降级、安全检查均发生在发送和落库之前。
 
         2026-10-14 事故批：terminal_reply_guard 前置——错误哨兵文案（全链失败
         时网关 return 的「（所有 LLM 提供商均不可用…）」曾直接发给用户）、表情
         机械复读开头、只剩角色名的退化回复，统一在此拦截后走 empty_reply 兜底。
+
+        2026-10-15 称呼根治批：守卫之后追加**称呼剥除**（守卫负责哨兵/表情，
+        剥称呼是独立动作）——非法称呼（角色名派生词/被用户否认的称呼）在
+        `utils.address_terms` 单一真源里确定性剥除，不依赖模型配合。
+        `session_id` 默认空串：缺省时仍按角色名派生词剥除（读不到画像昵称）。
         """
         from utils.prompt_sanitize import sanitize_reply_text, terminal_reply_guard
 
@@ -1499,6 +1531,14 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 character_card = loader(character_id)
         char_name = str(character_card.get("name") or "") if isinstance(character_card, dict) else ""
         reply = terminal_reply_guard(reply, user_msg=user_msg, character_name=char_name)
+        try:
+            from utils.address_terms import resolve_address, strip_forbidden_vocatives
+
+            _legal, _forbidden = resolve_address(str(session_id or ""), str(character_id or ""))
+            if _forbidden:
+                reply = strip_forbidden_vocatives(reply, _legal, _forbidden)
+        except Exception as _addr_exc:  # noqa: BLE001
+            logger.debug("出站称呼剥除失败（忽略）: %s", _addr_exc)
         reply = sanitize_reply_text(reply, character_name=char_name)
         try:
             from my_character.consistency_checker import (
@@ -1694,7 +1734,13 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 )
                 # === 检查结束 ===
 
-                reply = self._finalize_reply(reply, character_id, character_card, user_msg=user_msg_clean)
+                reply = self._finalize_reply(
+                    reply,
+                    character_id,
+                    character_card,
+                    user_msg=user_msg_clean,
+                    session_id=session_id,
+                )
                 reply = await publish(reply, emotion=emotion_state.to_dict() if emotion_state else None)
 
                 # ── 共享后处理（after_chat → ASE → 好感度同步）──

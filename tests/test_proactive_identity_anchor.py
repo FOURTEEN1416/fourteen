@@ -71,44 +71,100 @@ def test_persona_hint_carries_disclaimer():
     assert "真实用户身份以上方【用户身份】段为准" in ctx
 
 
-# ── 4. 被否认称呼禁令（2026-10-13 15:28 复犯事故）──────────────
+# ── 4. 用户称呼白名单段（2026-10-13 15:28 复犯事故 → 2026-10-15 称呼根治批）──
 #
 # 事故：身份锚 12:52 部署后，15:28 决策器 reason 明知「用户指出角色混淆了
 # 身份（夏夏）…避免错误称呼」，输出 message 却仍叫「夏夏，最近怎么样」。
 # 根因：历史里用户引用该错误称呼（「谁是夏夏」「你叫我夏夏的时候」），
-# 锚的「没有昵称只称你」被历史注意力惯性压过。修法：历史出现「用户否认
-# 称呼」事件时，显式注入禁令行——该名字已被用户否认，引用亦不得使用。
+# 锚的「没有昵称只称你」被历史注意力惯性压过。旧修法是黑名单式
+# 【被否认称呼】禁令段——三重结构性失效：依赖用户先发现 / 窗口不滑出 /
+# 模型听话。本批翻转为**白名单唯一真源**（utils.address_terms.
+# address_prompt_block）：正面指定唯一合法称呼 + 角色名派生词自动禁用
+# （林挽夏 → 夏夏，无需用户发现即兜住根因）+ 否认清单补充行。
 
 
-def _denied_ctx():
-    return _ctx(
-        recent_messages=[
+def _denied_ctx(**kw):
+    """带会话键 + 历史含否认事件（决策线正常形态：scheduler 恒带 session_key）。"""
+    kw.setdefault("session_key", "N:anchor")
+    kw.setdefault(
+        "recent_messages",
+        [
             {"role": "assistant", "content": "夏夏，你吃了吗"},
             {"role": "user", "content": "谁是夏夏？我不是什么夏夏"},
             {"role": "assistant", "content": "哦哦我记错了"},
             {"role": "user", "content": "你叫我夏夏的时候我都没有回过话"},
         ],
-        profile={"nickname": ""},
     )
+    kw.setdefault("profile", {"nickname": ""})
+    return _ctx(**kw)
 
 
-def test_denied_nickname_ban_injected():
-    """历史含否认称呼 → 上下文必须出现【被否认称呼】禁令段并列出该词。"""
+def test_address_whitelist_block_injected(monkeypatch):
+    """带会话键 → 【用户称呼】白名单段在位，且正面指定唯一合法称呼。"""
+    import utils.address_terms as at
+    import utils.character_resolver as cr
+
+    monkeypatch.setattr(at, "_profile_nickname", lambda sk: "")
+    monkeypatch.setattr(at, "_denied_names", lambda sk: {"夏夏"})
+    monkeypatch.setattr(cr, "display_name", lambda cid: "十四")
+
     ctx = _denied_ctx()
-    assert "被否认称呼" in ctx
-    assert "夏夏" in ctx.split("【被否认称呼】")[1][:200]
+    assert "# 用户称呼" in ctx
+    assert "只能" in ctx, "必须是正面指定（白名单），不是禁令清单"
+    assert "「你」" in ctx, "无昵称时唯一合法称呼 = 「你」"
 
 
-def test_denied_nickname_ban_forbids_usage():
-    """禁令段必须明说：该称呼已被用户否认，任何场景（含引用/道歉复述）不得再用。"""
+def test_denied_names_still_listed_inside_whitelist_block(monkeypatch):
+    """否认记录仍在（作为白名单段的补充行），措辞含禁令。"""
+    import utils.address_terms as at
+    import utils.character_resolver as cr
+
+    monkeypatch.setattr(at, "_profile_nickname", lambda sk: "")
+    monkeypatch.setattr(at, "_denied_names", lambda sk: {"夏夏"})
+    monkeypatch.setattr(cr, "display_name", lambda cid: "十四")
+
     ctx = _denied_ctx()
     seg = ctx.split("【被否认称呼】")[1][:400]
+    assert "夏夏" in seg
     assert "否认" in seg and ("不得" in seg or "禁止" in seg)
 
 
-def test_no_denial_no_ban_block():
-    """历史无否认事件 → 不注入禁令段（宁缺毋串）。"""
+def test_character_name_derivatives_cover_accident_root_cause(monkeypatch):
+    """🔴 根因回归：「夏夏」= 林挽夏叠字 → 无需用户发现即自动禁用（结构性修复）。"""
+    import utils.address_terms as at
+    import utils.character_resolver as cr
+
+    monkeypatch.setattr(at, "_profile_nickname", lambda sk: "")
+    monkeypatch.setattr(at, "_denied_names", lambda sk: set())  # 无任何用户否认记录
+    monkeypatch.setattr(cr, "display_name", lambda cid: "林挽夏")
+
+    ctx = _denied_ctx(character_id="62105bca", recent_messages=[])
+    assert "你自己的名字" in ctx, "角色名/变体只能指自己必须显式在案（无否认也生效）"
+
+
+def test_no_session_key_keeps_legacy_ban_line():
+    """无会话键（画不出合法称呼）→ 降级保留旧禁令行（不放过窗口内否认词）。"""
     ctx = _ctx(
+        recent_messages=[
+            {"role": "user", "content": "我不是十七，别这么叫我"},
+        ],
+        profile={"nickname": ""},
+    )
+    assert "【被否认称呼】" in ctx
+    assert "十七" in ctx.split("【被否认称呼】")[1][:200]
+
+
+def test_no_denial_no_ban_line(monkeypatch):
+    """历史无否认事件 → 无否认清单行（宁缺毋串）。"""
+    import utils.address_terms as at
+    import utils.character_resolver as cr
+
+    monkeypatch.setattr(at, "_profile_nickname", lambda sk: "")
+    monkeypatch.setattr(at, "_denied_names", lambda sk: set())
+    monkeypatch.setattr(cr, "display_name", lambda cid: "十四")
+
+    ctx = _ctx(
+        session_key="N:anchor-clean",
         recent_messages=[
             {"role": "user", "content": "今天好累"},
             {"role": "assistant", "content": "早点休息"},

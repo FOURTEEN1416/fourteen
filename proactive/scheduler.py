@@ -1397,6 +1397,9 @@ class ProactiveScheduler:
             last_user_message=last_user_message,
             response_rate=response_rate,
             extra=floor_extra,
+            # 2026-10-15 称呼根治批：角色 id 传入（称呼白名单段按角色名派生
+            # 自动禁用——「夏夏」= 林挽夏叠字，无需用户发现即兜住）。
+            character_id=char_id,
         )
         llm = self._session_llm_resolver(user_key) if self._session_llm_resolver else self._resolve_proactive_llm(eng)
         if llm is None:
@@ -1587,7 +1590,16 @@ class ProactiveScheduler:
         """
         from utils.prompt_sanitize import terminal_reply_guard
 
-        guarded = terminal_reply_guard(message, user_msg="", character_name="")
+        # 2026-10-15 称呼根治批：守卫扩面第三类（非法称呼呼语剥除）需会话上下文
+        # ——decision/手动/祝福三条主动线全经本入口，此处统一传参即全覆盖
+        # （session_key/character_id 均可能为 None，按守卫契约归一为空串）。
+        guarded = terminal_reply_guard(
+            message,
+            user_msg="",
+            character_name="",
+            session_key=str(session_key or ""),
+            character_id=str(character_id or ""),
+        )
         if not guarded:
             logger.warning("[主动消息] 终审守卫拦截（哨兵/退化回复），不投递")
             return False

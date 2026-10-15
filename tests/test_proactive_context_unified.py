@@ -182,11 +182,16 @@ def test_build_context_profile_runtime_unavailable_fallback(monkeypatch):
     assert "# 用户画像" not in ctx
 
 
-# ── 5. 决策线上下文：否认称呼双源否决 ────────────────────────
+# ── 5. 决策线上下文：称呼段（2026-10-15 称呼根治批：白名单唯一真源）────
 
 
 def test_build_context_denied_dual_source(monkeypatch):
-    """带 session_key → runtime.denied_names_for 双源否决（窗口检测 + ledger 持久否决）。"""
+    """带 session_key → 白名单段含持久否决源（滑出窗口后不得复犯）。
+
+    2026-10-15 称呼根治批：渲染从黑名单式【被否认称呼】独立段换为
+    `utils.address_terms.address_prompt_block`（正面指定 + 角色名派生自动禁用
+    + 否认清单补充行）。测试意图不变：**持久否决源的名字必须被拦住**。
+    """
     from shisi.agent_plane import runtime as apruntime
 
     monkeypatch.setattr(apruntime, "denied_names_for", lambda sk: ["十七"])
@@ -196,13 +201,13 @@ def test_build_context_denied_dual_source(monkeypatch):
         local_time="2026-10-15 12:00 Thursday",
         recent_messages=[],  # 窗口内无否认——命中的只能是持久否决源
     )
-    assert "【被否认称呼】" in ctx
+    assert "# 用户称呼" in ctx, "白名单段必须在位（正面指定唯一合法称呼）"
     seg = ctx.split("【被否认称呼】")[1][:300]
-    assert "十七" in seg, "持久否决源的名字必须进禁令段（滑出窗口后不得复犯）"
+    assert "十七" in seg, "持久否决源的名字必须进否认清单行（滑出窗口后不得复犯）"
 
 
 def test_build_context_denied_fallback_single_source():
-    """无 session_key（runtime 双源不可达）→ 旧单源窗口检测仍工作。"""
+    """无 session_key（白名单段画不出合法称呼）→ 降级保留旧单源窗口检测禁令行。"""
     ctx = build_proactive_context(
         local_time="2026-10-15 12:00 Thursday",
         recent_messages=[
@@ -212,3 +217,18 @@ def test_build_context_denied_fallback_single_source():
     )
     assert "【被否认称呼】" in ctx
     assert "十七" in ctx.split("【被否认称呼】")[1][:300]
+
+
+def test_build_context_whitelist_block_positive_directive(monkeypatch):
+    """带会话键的正常形态：正面指定唯一合法称呼（不是只有禁令清单）。"""
+    from shisi.agent_plane import runtime as apruntime
+
+    monkeypatch.setattr(apruntime, "denied_names_for", lambda sk: [])
+    ctx = build_proactive_context(
+        session_key="N:iso-whitelist",
+        local_time="2026-10-15 12:00 Thursday",
+        character_id="default",
+    )
+    assert "# 用户称呼" in ctx
+    assert "只能" in ctx
+    assert "你自己的名字" in ctx

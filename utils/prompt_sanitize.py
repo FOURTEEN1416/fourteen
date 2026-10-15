@@ -454,6 +454,8 @@ def terminal_reply_guard(
     *,
     user_msg: Any = "",
     character_name: str = "",
+    session_key: str = "",
+    character_id: str = "",
 ) -> str:
     """出站终审守卫（发送与落库之前的最后一道门，2026-10-14 生产事故批）。
 
@@ -462,6 +464,12 @@ def terminal_reply_guard(
        当正常回复 return——生产实证 10-13 13:03 直接发给了情绪低谷中的用户）。
     2. 表情机械复读开头（见 strip_emoji_echo；剥离而非整条丢弃，正文保留）。
     3. 退化回复只剩角色名本身（生产实证 10-13 回复仅「十四」两个字）。
+
+    2026-10-15 称呼根治批（第三类·补充动作）：**非法称呼呼语剥除**——session_key
+    非空时经 ``utils.address_terms`` 单一真源解析（合法称呼 ∪ 非法称呼集），
+    确定性剥掉行首非法称呼（「夏夏，最近…」→「最近…」）；剥空返回空串，
+    同样由调用方走 empty_reply 兜底。**缺省不传 session_key 时行为与旧版完全一致**
+    （无身份可挂 → 不剥，防误伤无调用上下文的场景）。
     """
     from llm_provider.multi_provider_gateway import _is_error_reply
 
@@ -472,4 +480,16 @@ def terminal_reply_guard(
     name = str(character_name or "").strip()
     if name and s in {name, name + "。", name + "！", name + "!"}:
         return ""
+    if session_key and s:
+        try:
+            from utils.address_terms import resolve_address, strip_forbidden_vocatives
+
+            _legal, _forbidden = resolve_address(str(session_key), str(character_id or ""))
+            if _forbidden:
+                _stripped = strip_forbidden_vocatives(s, _legal, _forbidden)
+                if not _stripped:
+                    return ""   # 剥空 → 调用方走 empty_reply 兜底
+                s = _stripped
+        except Exception:  # noqa: BLE001
+            pass
     return s

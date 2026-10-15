@@ -536,6 +536,7 @@ def build_proactive_context(
     extra: str = "",
     last_user_message: str = "",
     response_rate: float | None = None,
+    character_id: str = "",
 ) -> str:
     """组装主动决策提示词上下文。
 
@@ -585,12 +586,25 @@ def build_proactive_context(
         + "不得编造用户的经历或「我们共同的过去」；真实记得的事要自然地用。"
         "不得假设与用户共处同一物理空间。"
     )
-    # 【被否认称呼】禁令（2026-10-13 15:28 复犯事故）：历史里用户否认过的称呼
-    # （模型自造昵称被质问「谁是夏夏」），即使用户在后续消息中引用该词，模型
-    # 也因历史注意力惯性复用——显式禁令行对抗（与身份锚同族，宁缺毋串）。
-    # 2026-10-15 双源否决：优先走主链同款 runtime.denied_names_for（窗口检测 +
-    # ledger 持久否决合并——用户 7 次否认「十七」但窗口滑出后照叫的事故根因）；
-    # runtime 不可用/无会话键时回退本文件的单源窗口检测。
+    # 【用户称呼】唯一合法段（2026-10-13 15:28 复犯事故 → 2026-10-15 称呼根治批）。
+    #
+    # 事故：历史里用户否认过的称呼（模型自造昵称被质问「谁是夏夏」），即使用户
+    # 在后续消息中引用该词，模型也因历史注意力惯性复用。旧防线是黑名单式
+    # 【被否认称呼】禁令段——三重结构性失效：①依赖用户**先发现**并否认；
+    # ②依赖检测窗口**不滑出**；③依赖模型**听话**（负面禁令执行力弱）。
+    #
+    # 本批翻转为**白名单唯一真源**：渲染改走 `utils.address_terms.address_prompt_block`
+    # ——正面指定唯一合法称呼（画像昵称或「你」）+ **角色名派生词自动禁用**
+    # （林挽夏 → 夏夏/挽挽/小夏…，无需用户发现即兜住「夏夏」根因）+ 否认清单。
+    # 检测 owner（`detect_denied_nicknames`）不变，仍由
+    # `shisi.agent_plane.runtime._detected_denied_names`（源①窗口检测）消费，
+    # 与源②ledger 持久否决合并后即 address_prompt_block 内部所读的同一双源
+    # （且源①扫**全量**账本消息，覆盖面无损）。
+    #
+    # 无 session_key 时 address_prompt_block 返回空串 → 白名单段不注入（无会话键
+    # 即无身份可挂），此时保留旧显式禁令行兜住窗口内已现的否认词（见下方降级分支）。
+    # 生产唯一调用点（`scheduler._llm_proactive_one_user`）恒带会话键，正常链路
+    # 不走降级分支。
     denied: list[str] = []
     if session_key:
         with contextlib.suppress(Exception):
@@ -599,7 +613,19 @@ def build_proactive_context(
             denied = denied_names_for(session_key)
     if not denied:
         denied = detect_denied_nicknames(recent_messages or [])
-    if denied:
+    _addr_block = ""
+    try:
+        from utils.address_terms import address_prompt_block
+
+        _addr_block = address_prompt_block(session_key, str(character_id or ""))
+        if _addr_block:
+            parts.append(_addr_block)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("称呼段组装失败（忽略）: %s", e)
+    if not _addr_block and denied:
+        # 降级路径（仅无会话键时可达——address_prompt_block 无会话键即无法给出
+        # 「唯一合法称呼」，返回空串）：保留旧显式禁令行，不放过窗口里已现的
+        # 否认词。生产唯一调用点（scheduler）恒带会话键，正常链路不走此分支。
         parts.append(
             "【被否认称呼】以下名字已被用户明确否认（用户说过「谁是X/我不是X/别叫我X」）："
             + "、".join(f"「{d}」" for d in denied)

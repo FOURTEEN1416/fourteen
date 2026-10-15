@@ -163,6 +163,45 @@ def denied_names_for(session_key: str) -> list[str]:
     return _denied_names(session_key)
 
 
+def persist_detected_denials(session_key: str, *, turn_id: str = "") -> list[str]:
+    """检测到的否认称呼落盘为永久 event（缺口1 根治：不再依赖 profile 写路径触发）。
+
+    2026-10-15「夏夏」复犯根因：落盘钩子挂在 write_profile_from_tool 内联，
+    而该函数仅在 profile agent 更新画像时被调用——用户否认后若从无画像写入，
+    否认永不落盘，窗口滑出即失忆。本函数供每轮对话回调主动调用（见
+    append_chat_events 内挂载），检测（源①）与已持久（源②）diff 后落新词。
+    返回本次新落盘的词表（调用方仅日志用）。失败一律静默（转写不阻塞对话）。
+    """
+    sk = str(session_key or "").strip()
+    if not sk:
+        return []
+    newly: list[str] = []
+    try:
+        from shisi.agent_plane.profile_projection import write_profile_event
+
+        detected = _detected_denied_names(sk)
+        persisted = set(_persisted_denied_names(sk))
+        for token in detected:
+            if token in persisted:
+                continue
+            logger.warning("[profile_gate] 记录被否认称呼 '%s'（session=%s）", token, sk)
+            write_profile_event(
+                get_ledger(),
+                session_key=sk,
+                payload={
+                    "denied_name": token,
+                    "reason": f"auto: 用户明确否认过该称呼「{token}」（2026-10-15 主动闭环）",
+                },
+                correct=True,
+                turn_id=turn_id,
+                actor="denial_gate",
+            )
+            newly.append(token)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("persist detected denials failed: %s", e)
+    return newly
+
+
 def write_profile_from_tool(
     session_key: str,
     payload: dict[str, Any],
@@ -192,20 +231,9 @@ def write_profile_from_tool(
     denied = detected + [t for t in persisted if t not in detected]
     # 检测到的新否认立刻持久化（profile_correct 永久保留；用户消息 30 天会被
     # prune，不落盘的话窗口一过就失忆——2026-10-14 自纠的真缺陷）。
-    for token in detected:
-        if token not in persisted:
-            logger.warning("[profile_gate] 记录被否认称呼 '%s'（session=%s）", token, sk)
-            write_profile_event(
-                get_ledger(),
-                session_key=sk,
-                payload={
-                    "denied_name": token,
-                    "reason": f"auto: 用户明确否认过该称呼「{token}」（2026-10-14 否决门）",
-                },
-                correct=True,
-                turn_id=turn_id,
-                actor="denial_gate",
-            )
+    # 2026-10-15 单一 owner 重构：落盘逻辑收敛进 persist_detected_denials，
+    # 并由 append_chat_events 每轮主动调用（不再依赖本函数被触发）。
+    persist_detected_denials(sk, turn_id=turn_id)
     nick = str(body.get("nickname") or "").strip()
     if nick and nick in denied:
         logger.warning(
@@ -367,6 +395,12 @@ def append_chat_events(
             )
     except Exception as e:  # noqa: BLE001
         logger.debug("ledger chat events failed: %s", e)
+    # 缺口1 根治（2026-10-15「夏夏」复犯）：否认持久化从此挂**每轮对话回调**
+    # ——user_msg 非空即检测并落盘（此前钩子内联在 write_profile_from_tool，
+    # 用户否认后无画像写入 = 永不落盘，窗口滑出即失忆）。persist_detected_denials
+    # 自身全程静默，异常不会反噬本轮记账。
+    if user_msg:
+        persist_detected_denials(sk, turn_id=str(turn_id or ""))
 
 
 def append_proactive_event(
