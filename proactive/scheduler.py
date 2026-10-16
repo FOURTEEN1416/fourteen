@@ -676,6 +676,43 @@ class ProactiveScheduler:
             "quiet_hours_end": qe,
         }
 
+    # ── 迟到容忍窗（爱语 ILinkService.j():710-740 [目标, 目标+窗] 语义对齐）──
+
+    #: ``humanize.proactive_window_minutes`` 缺省 10 分钟（爱语键位）。
+    _PROACTIVE_WINDOW_DEFAULT_MINUTES = 10
+    #: 窗口时长的读侧闭区间；越界/类型不符 → 回落默认
+    #: （与 ``utils/humanize_config`` 逐字段容错同口径，不让一个手改坏的
+    #: 真源文件把决策链炸掉）。
+    _PROACTIVE_WINDOW_MIN_MINUTES = 1
+    _PROACTIVE_WINDOW_MAX_MINUTES = 24 * 60
+
+    def _proactive_window_config(self) -> tuple[bool, int]:
+        """热读 ``data/scheduler_config.json`` 的 ``humanize.proactive_window_*``。
+
+        返回 ``(是否启用, 窗口分钟数)``；默认 ``(False, 10)`` = **窗口关闭**，
+        保持「到点即触发」现状（零行为变更，见 :meth:`_llm_proactive_one_user`
+        的窗判定注释）。读侧**每次热读、无进程缓存**（照
+        ``utils/humanize_config.read_humanize`` 的 4-worker 口径：任一进程
+        原子写改键后，其他进程下一次决策立即看到）。
+        """
+        try:
+            data = self._read_config_file() or {}
+        except Exception:  # noqa: BLE001
+            return False, self._PROACTIVE_WINDOW_DEFAULT_MINUTES
+        block = data.get("humanize")
+        if not isinstance(block, dict):
+            return False, self._PROACTIVE_WINDOW_DEFAULT_MINUTES
+        enable = block.get("proactive_window_enable")
+        enabled = enable if isinstance(enable, bool) else False
+        minutes = block.get("proactive_window_minutes")
+        if (
+            isinstance(minutes, bool)
+            or not isinstance(minutes, int)
+            or not (self._PROACTIVE_WINDOW_MIN_MINUTES <= minutes <= self._PROACTIVE_WINDOW_MAX_MINUTES)
+        ):
+            minutes = self._PROACTIVE_WINDOW_DEFAULT_MINUTES
+        return enabled, minutes
+
     def _load_config_file(self) -> None:
         data = self._read_config_file()
         qh = data.get("quiet_hours") or {}
@@ -1303,6 +1340,34 @@ class ProactiveScheduler:
                 # 块E：账本变更即落盘（否则重启当日再写一行）
                 self._persist_throttle_ledger()
             return
+        # 迟到容忍窗（2026-10-16，对齐爱语 ILinkService.j():710-740）：
+        # LLM 自判的目标时刻 `_next_ok` 只在 [目标, 目标+窗口] 内有效——
+        # 窗口内到点即触发；迟到 >窗口（机器休眠/重启错过 tick）→ 放弃本条
+        # （过期不补）：记 window_expired 账本事件、出账，不投递、不烧决策调用。
+        # 默认 humanize.proactive_window_enable=false = 零行为变更（保持
+        # 「到点即触发」现状，仅当 pending 目标存在时才热读一次窗口配置）。
+        if _next_ok:
+            _win_on, _win_min = self._proactive_window_config()
+            if _win_on and (_now - _next_ok) > _win_min * 60.0:
+                _late_min = int((_now - _next_ok) // 60)
+                # 出账使本条 pending 不再复活：下一拍走全新 LLM 决策（过期不补 ≠
+                # 永久静音）。账本变更即落盘（块E 纪律：重启不重置出账状态）。
+                self._llm_proactive_next_ok.pop(str(user_key), None)
+                append_proactive_event(
+                    session_key=user_key,
+                    sent=False,
+                    reason="window_expired",
+                    # 事件 schema 的 wait_minutes 字段此处记录**迟到分钟数**
+                    # （已过目标时刻的时长），账本自描述「放弃时晚了多久」。
+                    wait_minutes=_late_min,
+                    character_id=self._resolve_character_id(str(user_key)),
+                )
+                self._persist_throttle_ledger()
+                logger.info(
+                    "proactive 窗口过期放弃 user=%s 迟到 %d 分钟（窗口 %d 分钟）",
+                    user_key, _late_min, _win_min,
+                )
+                return
 
         eng = hub.get(user_key) if hasattr(hub, "get") else None
         # D16（2026-10-12「谁扫码谁聊」）：节奏按**账号**聚合（`account_pacing_state`

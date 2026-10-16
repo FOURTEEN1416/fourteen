@@ -254,6 +254,30 @@ def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None, user_manager=N
     return ws_server
 
 
+# ── 主动消息「拆条 + 段间节奏」链（拟人度） ────────────────────────────
+# 实现唯一 owner = `utils.humanize_delivery`（两个投递点共用：本入口的 wechat
+# 通道发送器 + 生产多 worker 下连接器宿主的 `WeChatConnector._drain_outbox`）。
+# 此前本链只在本文件内实现，`_drain_outbox` 够不着 ⇒ 生产（uvicorn 4 worker）
+# 定向主动投递绕过拆条链。此处只**转出**既有公共名，消费面（`api/run_api.py`
+# 与本批测试）不变。
+# 配置真源 = `data/scheduler_config.json` 的 `humanize` 段（跨 worker 热读，
+# 无进程内缓存；读侧归 `utils.humanize_config`）。默认 `proactive_split=False`
+# ⇒ 主动投递逐字保持「整段直发」现状（零行为变更）。
+
+# `direct_send_proactive` 是「本机直发一条主动微信消息」的唯一真源：本入口
+# 的 wechat 通道发送器（`_wechat_sender_factory`）与 `api/run_api.py`、生产
+# 连接器宿主的 `_drain_outbox` 均调用它，受理判据单一源、不再各持一份。
+# 同时按契约**显式 re-export**：`api/run_api.py` 与
+# `tests/test_proactive_segmented_delivery.py` 经 `from main import ...` 消费
+# （消费面不变是本批的硬约束）。`segment_sender` 供定向分支区分失败族（见下）。
+from utils.humanize_delivery import (  # noqa: E402, F401
+    direct_send_proactive,
+    humanize_proactive_split_enabled,
+    segment_sender,
+    send_proactive_segmented,
+)
+
+
 def _wire_proactive_runtime(
     scheduler: Any,
     *,
@@ -369,9 +393,24 @@ def _wire_proactive_runtime(
                 peer = _clean(session_key)
                 if not peer:
                     raise RuntimeError(f"微信投递拒绝：session_key 解析不出 peer（{session_key}）")
-                if not connector.send_text(msg, to_user=peer):
-                    raise RuntimeError(f"微信定向投递失败 peer={peer}")
-                return
+                # 唯一真源 `utils.humanize_delivery.direct_send_proactive`（本模块
+                # re-export）：默认（配置机关/不可读）⇒ 整段直发，与旧行为逐字
+                # 一致；拟人度开启 ⇒ 走「拆条 + 段间节奏」。受理判据与主链同源，
+                # 不在本处另造分叉（此前内联复刻 ⇒ 与 run_api / 连接器宿主各持
+                # 一份，漂移风险）。
+                if direct_send_proactive(connector, peer, msg):
+                    return
+                # 失败按族区分错误语义（零行为变更）：拆条链「未完整受理」（只
+                # 收下前缀，尾句用户没看到）vs 整段直发被拒。两者都 ⇒
+                # RuntimeError ⇒ 调度器把 wechat 通道置 None、不
+                # `_record_outbound` 不扣配额（与 send_text 返回 False 路径同构）；
+                # 驳回不重试、不回退整段直发（避免重复投递）。
+                if (
+                    humanize_proactive_split_enabled()
+                    and segment_sender(connector) is not None
+                ):
+                    raise RuntimeError(f"微信定向投递未完整受理 peer={peer}")
+                raise RuntimeError(f"微信定向投递失败 peer={peer}")
             # 无定向目标：发给全部已绑定用户（旧广播行为，仅限系统级消息）
             wxids = _mgr.get_bound_wxids() if _mgr else []
             if wxids:

@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import RoleSettings from '../../pages/RoleSettings'
 import { useAuthStore } from '../../store/authStore'
+import { DEFAULT_HUMANIZE_CONFIG, useHumanizeStore } from '../../store/humanizeStore'
 
 // ════════════════════════════════════════════════════════════════
 //  vi.hoisted() — 所有 mock fn 和常量必须在 vi.mock 工厂之前定义
@@ -57,6 +58,7 @@ const {
   mockProactivePause, mockUpdateProactiveConfig,
   mockEnrichCharacter, mockKnowledgeCollectConfig, mockUpdateKnowledgeCollectConfig,
   mockAgentPlaneReplay, mockAgentPlaneCurate,
+  mockHumanizeGetConfig, mockHumanizeUpdate,
 } = vi.hoisted(() => ({
   mockProactiveGetConfig: vi.fn(),
   mockProactiveHistory: vi.fn(),
@@ -68,6 +70,10 @@ const {
   mockUpdateKnowledgeCollectConfig: vi.fn(),
   mockAgentPlaneReplay: vi.fn(),
   mockAgentPlaneCurate: vi.fn(),
+  // 拟人度区块（2026-10-16 新增）已挂进 MessageTab：不 mock 会让真实 axios 客户端
+  // 在 jsdom 里发请求（测试不再 hermetic）。
+  mockHumanizeGetConfig: vi.fn(),
+  mockHumanizeUpdate: vi.fn(),
 }))
 
 // ════════════════════════════════════════════════════════════════
@@ -101,6 +107,8 @@ vi.mock('../../api/system', async (importOriginal) => {
     updateKnowledgeCollectConfig: (...args: unknown[]) => mockUpdateKnowledgeCollectConfig(...args),
     agentPlaneReplay: (...args: unknown[]) => mockAgentPlaneReplay(...args),
     agentPlaneCurate: (...args: unknown[]) => mockAgentPlaneCurate(...args),
+    humanizeGetConfig: (...args: unknown[]) => mockHumanizeGetConfig(...args),
+    updateHumanizeConfig: (...args: unknown[]) => mockHumanizeUpdate(...args),
   }
 })
 
@@ -175,6 +183,21 @@ describe('RoleSettings', () => {
     mockProactiveGetConfig.mockResolvedValue({ data: PROACTIVE_CONFIG })
     mockProactiveHistory.mockResolvedValue({ data: { history: [] } })
     mockKnowledgeCollectConfig.mockResolvedValue({ data: { enabled: false, interval_minutes: 60, available: true } })
+    // 拟人度区块：稳定回执 + 复位 store（store 是模块级单例，跨用例会残留 dirty 态）
+    mockHumanizeGetConfig.mockResolvedValue({
+      data: { status: 'ok', config: { ...DEFAULT_HUMANIZE_CONFIG, delay_mode_label: '逐字(按字数)' } },
+    })
+    mockHumanizeUpdate.mockResolvedValue({
+      data: { status: 'ok', config: { ...DEFAULT_HUMANIZE_CONFIG, delay_mode_label: '逐字(按字数)' } },
+    })
+    useHumanizeStore.setState({
+      config: { ...DEFAULT_HUMANIZE_CONFIG },
+      snapshot: JSON.stringify(DEFAULT_HUMANIZE_CONFIG),
+      status: 'ready',
+      error: '',
+      saving: false,
+      savedAt: '',
+    })
   })
 
   // ────────────────────────────────────────────────
@@ -251,6 +274,9 @@ describe('RoleSettings', () => {
     // 不可见任何 admin-only 表单
     expect(screen.queryByText('LLM 主动决策（人设·画像·控制台）')).toBeNull()
     expect(mockProactiveGetConfig).not.toHaveBeenCalled()
+    // 拟人度区块同为 admin-only：非 admin 既不渲染也不打接口
+    expect(screen.queryByText('拟人度')).toBeNull()
+    expect(mockHumanizeGetConfig).not.toHaveBeenCalled()
 
     // 点击「数据」tab
     fireEvent.click(screen.getByText('数据'))
@@ -355,6 +381,11 @@ describe('RoleSettings', () => {
 
     // 作用域横幅：全局配置明示（非角色级）
     expect(screen.getByText(/全局/)).toBeDefined()
+
+    // 拟人度区块（2026-10-16 新增）：挂在消息 tab 内、回复模式段之后，走独立端点
+    expect(await screen.findByText('拟人度')).toBeDefined()
+    expect(mockHumanizeGetConfig).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('humanize-max-segments').textContent).toBe('2 条（固定，用户裁决）')
   })
 
   // ────────────────────────────────────────────────

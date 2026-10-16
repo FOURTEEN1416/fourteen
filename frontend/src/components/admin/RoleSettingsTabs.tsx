@@ -21,6 +21,7 @@ import { PERSONALITY_LABELS, SPEAKING_STYLE_LABELS, normalizePersonality, normal
 import { enrichCharacter, proactiveGetConfig, proactiveHistory, proactivePause, updateProactiveConfig, knowledgeCollectConfig, updateKnowledgeCollectConfig } from '../../api/system'
 import { useAuthStore } from '../../store/authStore'
 import Section from './RoleSettingsSection'
+import HumanizeSection from './HumanizeSection'
 import KnowledgePreview from '../storyline/KnowledgePreview'
 
 // ═══ Tab: Basic ═══
@@ -911,6 +912,12 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
           </div>
         </div>
       </Section>
+
+      {/* 拟人度（2026-10-16 新增，设计契约 ui_spec）：段间延时档位 / 括号段延时 /
+          主动拆条 / 只读拆条上限。真源 data/scheduler_config.json 的 humanize 块
+          （与 reply_mode 同一份跨 worker 配置），写入 POST /api/humanize/config。
+          admin 门禁在 HumanizeSection 内自带（与 MessageTab 同口径）。 */}
+      <HumanizeSection />
 
       {/* W11-D4：手动发送已从角色页**移除**。
           旧实现「立即发送一条主动消息」调用不带 session_key 的全局接口 ——

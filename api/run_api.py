@@ -46,7 +46,11 @@ from api.app_factory import create_api_app  # noqa: E402
 from api.database import User, WechatBinding, _async_session, init_db  # noqa: E402
 from api.session_manager import SessionManager  # noqa: E402
 from api.websocket_server import HAS_WEBSOCKETS, WebSocketServer  # noqa: E402
-from main import OptimizedOrchestrator, UserManager  # noqa: E402
+from main import (  # noqa: E402
+    OptimizedOrchestrator,
+    UserManager,
+    direct_send_proactive,
+)
 from observability.graceful_shutdown import graceful_shutdown  # noqa: E402
 from observability.health import health_checker  # noqa: E402
 from observability.logging_setup import setup_logging  # noqa: E402
@@ -363,6 +367,13 @@ if _scheduler is not None:
                     # worker 的 registry 为空或只持有一个 slot。投递命令交控制面，
                     # 由该 owner 任一在线 slot 的宿主 CAS 认领（一行恰一宿主，
                     # 天然不混投），回执为受理确认。
+                    #
+                    # 「拆条 + 段间节奏」链由**连接器宿主**的 outbox 消费点
+                    # （`WeChatConnector._drain_outbox`）按同一真源
+                    # `utils.humanize_delivery.direct_send_proactive` 应用 ——
+                    # 本 worker 只入队并等受理回执，**不在此重复拆条**（本机无
+                    # 归属连接时直发 0 送达、且会与宿主投递双发）。故此处入队后
+                    # return 是有意的：拆条在生产投递点（宿主）生效，而非本分支。
                     owner_id, peer = targets[0]
                     ok, reason, _cid = await asyncio.to_thread(
                         rp.enqueue_and_wait,
@@ -391,7 +402,14 @@ if _scheduler is not None:
                 for uid, _slot, conn in registry.all():
                     if int(uid) != int(owner_id):
                         continue
-                    if getattr(conn, "token", "") and conn.send_text(msg, to_user=peer):
+                    if not getattr(conn, "token", ""):
+                        continue
+                    # 本机直发：默认 `send_text` 整段直发（零行为变更）；拟人度
+                    # 开启（`humanize.proactive_split`）且连接器支持拆条时走
+                    # 「拆条 + 段间节奏」链（唯一真源 `main.direct_send_proactive`）。
+                    # 未完整受理 ⇒ 返回 False ⇒ 走既有 failures/sent_any 语义，
+                    # 不新增异常路径、不跨 owner 回退广播。
+                    if direct_send_proactive(conn, peer, msg):
                         delivered = True
                         sent_any = True
                         # 命中一条归属通道即停：旧实现不 break，同 owner 的双 slot

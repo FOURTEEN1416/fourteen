@@ -24,13 +24,14 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from api.auth import verify_api_key_dep
 from api.auth_jwt import require_role
 from api.database import User
 from api.deps import deps
 from api.main_routes import ProactiveConfigRequest
+from utils.humanize_config import DELAY_MODE_PATTERN
 
 logger = logging.getLogger("api.routers.training_routes")
 
@@ -375,6 +376,121 @@ async def update_proactive_config(
     # 内部直调：_admin 已由本端点的 require_role 依赖解析（admin 必然在位），
     # 原样透传以绕开 DI 重复解析（直调时 Depends 缺省不会生效）
     return {"status": "ok", "config": await get_proactive_config(_auth=True, _admin=_admin)}
+
+
+# ═══════════════════════════════════════════════════════
+# Humanize（拟人度：段间延时 / 主动拆条）
+# ═══════════════════════════════════════════════════════
+
+
+class HumanizeConfigRequest(BaseModel):
+    """拟人度配置的 partial merge 入参（只改传入键，未传保持原值）。
+
+    约束与爱语 2.8.8 反编译 ``SettingsActivity.java:157-192`` 的键位一一对应
+    （见设计契约 ``humanize_schema``）；跨字段约束（min≤max / floor≤ceil）
+    用 ``model_validator`` 校验，与服务端合并后的二次校验互补。
+    """
+
+    delay_mode: str | None = Field(
+        default=None,
+        # 词表由 `utils.humanize_config.DELAY_MODES` **派生**（不硬编码字面量）：
+        # 连接器 `_resolve_delay_tier` 另支持 fast/normal/slow 打字速度预设，但
+        # 那些经 ``mode=`` 参数可达、**不可落盘** —— 故此处 pattern 用可落盘档位
+        # 真源，新增档位只改一处（2026-10-16 复审 P2「词表分裂」收口）。
+        pattern=DELAY_MODE_PATTERN,
+        description="段间延时模式：dynamic=逐字按字数 / fixed=固定 / random=区间随机 / off=不延时",
+    )
+    per_char_ms: int | None = Field(default=None, ge=5, le=200, description="dynamic 每字毫秒（默认 45）")
+    fixed_ms: int | None = Field(default=None, ge=0, le=5000, description="fixed 固定延时（默认 600）")
+    random_min_ms: int | None = Field(default=None, ge=0, le=10000, description="random 下界（默认 400）")
+    random_max_ms: int | None = Field(default=None, ge=0, le=10000, description="random 上界（默认 1600）")
+    delay_floor_ms: int | None = Field(default=None, ge=0, le=10000, description="延时下钳（默认 400）")
+    delay_ceil_ms: int | None = Field(default=None, ge=0, le=60000, description="延时上钳（默认 1600）")
+    bracket_delay_ms: int | None = Field(
+        default=None, ge=0, le=5000, description="括号段 (...) 覆盖延时；0=不启用（默认 0）",
+    )
+    max_segments: int | None = Field(
+        default=None, description="只读，恒为 2（用户裁决）；传其它值 400",
+    )
+    proactive_split: bool | None = Field(
+        default=None, description="主动消息是否也拆条发送（默认 false=整段直发）",
+    )
+
+    @model_validator(mode="after")
+    def _check_cross_field(self) -> HumanizeConfigRequest:
+        if (
+            self.random_min_ms is not None
+            and self.random_max_ms is not None
+            and self.random_min_ms > self.random_max_ms
+        ):
+            raise ValueError("random_min_ms 不得大于 random_max_ms")
+        if (
+            self.delay_floor_ms is not None
+            and self.delay_ceil_ms is not None
+            and self.delay_floor_ms > self.delay_ceil_ms
+        ):
+            raise ValueError("delay_floor_ms 不得大于 delay_ceil_ms")
+        return self
+
+
+class HumanizeConfigResponse(BaseModel):
+    status: str
+    config: dict
+
+
+def _humanize_payload() -> dict:
+    """响应体 ``config`` —— 真源**热读** + 展示标签（标签不落真源文件）。"""
+    from utils.humanize_config import delay_mode_label, read_humanize
+
+    cfg = read_humanize()
+    return {**cfg.as_dict(), "delay_mode_label": delay_mode_label(cfg.delay_mode)}
+
+
+@router.get("/api/humanize/config", response_model=HumanizeConfigResponse)
+async def get_humanize_config(
+    _auth: bool = Security(verify_api_key_dep),
+    # SEC-P0 同门：拟人度是控制面，与 /api/proactive/config 同级
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """读取拟人度配置（**纯文件热读**，不依赖 ``orch._ase``，故无 503）。
+
+    4 worker 中只有 master 持有主动引擎，其余 worker 仍必须能答「当前拟人度
+    是什么」—— 与 ``/api/proactive/config`` 的 503 语义刻意不同。
+    """
+    return {"status": "ok", "config": _humanize_payload()}
+
+
+@router.post("/api/humanize/config", response_model=HumanizeConfigResponse)
+@router.put("/api/humanize/config", response_model=HumanizeConfigResponse)
+async def update_humanize_config(
+    req: HumanizeConfigRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """写入拟人度配置（partial merge；POST / PUT 同一实现，前端按 POST 消费）。
+
+    写入走 ``utils.humanize_config.write_humanize`` →
+    ``utils.json_state.update_json``（跨进程 flock + ``os.replace``），
+    锁内读改写且只触碰 ``humanize`` 块，故与 ``/api/proactive/config``
+    并发保存同一文件不会互相覆盖。
+
+    错误语义：字段非法/越界 → 422（Pydantic 先行）；
+    ``max_segments`` 存在且 ≠2 → 400；合并后跨字段冲突 → 400。
+    """
+    from utils.humanize_config import MAX_SEGMENTS, write_humanize
+
+    if req.max_segments is not None and int(req.max_segments) != MAX_SEGMENTS:
+        raise HTTPException(400, f"max_segments 固定为 {MAX_SEGMENTS}（用户裁决），不可修改")
+
+    payload = req.model_dump(exclude_none=True)
+    payload.pop("max_segments", None)  # 只读字段不落盘
+    if payload:
+        try:
+            write_humanize(**payload)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        logger.info("拟人度配置已更新: %s", payload)
+    return {"status": "ok", "config": _humanize_payload()}
 
 
 class KnowledgeCollectConfigRequest(BaseModel):

@@ -49,6 +49,23 @@ export function updateProactiveConfig(cfg: { threshold?: number; max_daily?: num
   return client.post('/proactive/config', cfg)
 }
 
+// ── Humanize（拟人度：段间延时 / 主动拆条） ──
+// 真源 = data/scheduler_config.json 的 `humanize` 块（与 reply_mode / quiet_hours /
+// llm_proactive 同一份跨 worker 运行时配置）。后端 api/routers/training_routes.py
+// 的 GET/POST|PUT /api/humanize/config：admin 门 + 纯文件热读（**无** 503，
+// 与 /api/proactive/config 刻意不同：4 worker 里只有 master 持有调度器）。
+//
+// 边界纪律：humanize **不塞进** /api/proactive/config 响应（避免一个配置文件两个
+// owner 的前端投影互相覆盖），前端分别拉取（见 HumanizeSection / humanizeStore）。
+
+/** 段间延时档位（唯一真源在 store/humanizeStore.ts；FF-0007：store 禁止 import API，故反向） */
+export type { HumanizeDelayMode, HumanizeConfigPayload } from '../store/humanizeStore'
+import type { HumanizeConfigPayload } from '../store/humanizeStore'
+
+export function humanizeGetConfig() { return client.get('/humanize/config') }
+/** partial merge：只传要改的键（后端在 json_state 锁内 merge，未传键保持原值） */
+export function updateHumanizeConfig(cfg: HumanizeConfigPayload) { return client.post('/humanize/config', cfg) }
+
 export function agentPlaneReplay(sessionKey: string, turnId?: string, replyId?: string) {
   return client.get('/agent-plane/replay', { params: { session_key: sessionKey, turn_id: turnId || '', reply_id: replyId || '' } })
 }

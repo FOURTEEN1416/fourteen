@@ -86,6 +86,18 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # 拟人度（humanize）读写真源 —— 与上方 `ProactiveScheduler._CONFIG_PATH`
+    # 是**同一个物理文件** `data/scheduler_config.json`（`.gitignore` 忽略，
+    # git 不可见）。重定向到同一沙箱文件名以复现「同一真源」语义，否则
+    # `test_humanize_*_tiers` / `_segment_delay` 这类用例一旦漏掉自带 fixture
+    # 就会直写开发机真实文件（与上方 2026-09-22 块E 自伤事故同型防线）。
+    try:
+        from utils import humanize_config
+
+        _redirect(humanize_config, "_CONFIG_PATH", "scheduler_config.json")
+    except Exception:
+        pass
+
     # 好感度点存
     try:
         from utils import affinity_state

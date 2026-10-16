@@ -11,6 +11,7 @@ import concurrent.futures
 import json
 import logging
 import os
+import random
 import re
 import threading
 import time
@@ -24,6 +25,8 @@ from urllib.parse import quote
 
 import requests
 
+from utils.humanize_config import DELAY_MODES
+from utils.humanize_config import MAX_SEGMENTS as _SPLIT_MAX_SEGMENTS
 from utils.local_time import now_local
 
 logger = logging.getLogger("wechat_direct")
@@ -431,8 +434,9 @@ CONTEXT_TOKENS_PATH = str(
 #  决策链（proactive/llm_proactive.decide_proactive + scheduler 节奏双闸）。
 # ═══════════════════════════════════════════════════════════════
 
-# 拆条上限：最多 2 条（超出部分并入第 2 条，行间换行保留，内容无损）
-_SPLIT_MAX_SEGMENTS = 2
+# 拆条上限：最多 2 条（超出部分并入第 2 条，行间换行保留，内容无损）。
+# 🔴 单一真源 = `utils.humanize_config.MAX_SEGMENTS`（用户裁决锁 2），见文件头
+# import 处的 `_SPLIT_MAX_SEGMENTS` 别名 —— 本处不另立字面量。
 # 单条长度上限（超长行在行内按句末标点再切）
 _SPLIT_MAX_CHARS = 45
 # 控制面 outbox 消费 tick（秒）。原挂在追问守护线程的 tick 上；追问链退役后
@@ -528,9 +532,115 @@ def split_reply_for_wechat(
     return [s for s in segments if s] or [text]
 
 
-def _segment_delay(prev: str) -> float:
-    """两段之间的「打字停顿」：按上一段长度估算，0.4~1.6s（别让人等太久）。"""
-    return max(0.4, min(1.6, len(prev) * 0.045))
+# ── 段间停顿档位（拟人度 humanize）────────────────────────────────
+# 用户可调「打字快慢」档位；默认档位对**有正文的普通段**逐位复现旧式：
+#   auto / dynamic —— 按上一段字数逐字估算（走配置 per_char_ms，默认 45ms/字）
+#   fast / normal / slow —— 打字速度预设（25 / 45 / 90 ms/字）
+#   fixed —— 固定延时（配置 fixed_ms）
+#   random —— 区间随机（配置 random_min_ms..random_max_ms）
+#   off —— 不延时（段间连发）
+# 上下钳（delay_floor_ms / delay_ceil_ms，默认 400/1600ms）对以上各档统一生效。
+# ⚠️ 零变更的关键：ms→s 的换算必须落在**参数层**（``45/1000.0 == 0.045``、
+# ``400/1000.0 == 0.4``、``1600/1000.0 == 1.6`` 均为同一 double），否则
+# ``len*45/1000.0`` 与 ``len*0.045`` 在部分长度上差 1 ULP（n=9→0.40499999999999997
+# ≠0.405；n=20→0.8999999999999999≠0.9）。参数层换算下 auto 档逐位等于旧式。
+#
+# ⚠️ 已知**且有意**的一处非零变更（2026-10-16 复审 P2 澄清口径，非缺陷）：
+# **纯指令段**（只含注入侧标记、无可读正文，如 ``[主动]``）段间由旧式
+# ``max(0.4, min(1.6, len*0.045)) = 0.4s`` 收敛为 **0.0s**（见下方
+# ``is_pure_instruction`` 短路）——「无正文可停」语义，且仅影响这类段，
+# 普通段（``'在呢'`` 等）仍是 0.4s。该行为由
+# ``tests/test_humanize_delay_tiers.py::test_pure_instruction_detected_and_zero_delay``
+# 钉死；对外表述不得再说「默认档位下全链逐字零变更」。
+_TIER_PRESET_PER_CHAR_MS = {"fast": 25, "normal": 45, "slow": 90}
+_TIER_ALIASES = {"auto": "dynamic"}          # 用户档位名 auto ≡ 契约名 dynamic
+_DYNAMIC_TIERS = frozenset({"dynamic", "fast", "normal", "slow"})
+# 可落盘档位（dynamic/fixed/random/off）由 `utils.humanize_config.DELAY_MODES`
+# **单一真源**派生 —— 读侧 `read_humanize` 只放行这些；API 的
+# `DELAY_MODE_PATTERN` 同源。连接器额外认 `fast/normal/slow` 三个**仅 mode=
+# 参数可达**的打字速度预设（不落盘）。2026-10-16 复审 P2「词表分裂」收口。
+_KNOWN_TIERS = _DYNAMIC_TIERS | frozenset(DELAY_MODES)
+
+
+def _resolve_delay_tier(mode: str | None) -> str:
+    """把档位名归一为 dynamic/fast/normal/slow/fixed/random/off；未知回落 dynamic。"""
+    m = str(mode or "").strip().lower()
+    m = _TIER_ALIASES.get(m, m)
+    return m if m in _KNOWN_TIERS else "dynamic"
+
+
+def _is_bracket_segment(text: str) -> bool:
+    """整段被括号包裹（爱语把括号旁白段单列、延时另给）。
+
+    默认 ``bracket_delay_ms=0`` ⇒ 该分支惰性（不改变现行为）。
+    """
+    s = str(text or "").strip()
+    return len(s) >= 2 and s[0] in "[（(" and s[-1] in "]）)"
+
+
+def is_pure_instruction(text: str) -> bool:
+    """纯指令/系统标记段判定：只含注入侧元数据（无可读正文）时为 True。
+
+    复用既有**单一真源** ``utils.prompt_sanitize._strip_system_markers`` —— 其行首
+    标记正则由 ``orchestrator.context_budget.OUTBOUND_CHANNEL_MARKERS`` 生成
+    （``[主动]``/``[定时提醒]``），另含 ``[MM-DD HH:MM]`` 时间前缀与行尾
+    ``（距上一条 X）``间隔注记。**不新开标记清单**：真源加通道标记时本判定自动跟随。
+    剥完为空 ⇒ 该段无正文（如 ``[主动]``），段间无需「打字停顿」，零延时。
+
+    空串/纯空白**不算**指令（避免误伤 ``_segment_delay`` 的 0.4s 下限断言与
+    「无内容可停」的语义）；普通表情 ``[微笑]`` 不匹配标记正则，保持非零延时。
+    """
+    s = str(text or "")
+    if not s.strip():
+        return False
+    try:
+        from utils.prompt_sanitize import _strip_system_markers
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        return _strip_system_markers(s) == ""
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _segment_delay(prev: str, *, mode: str | None = None) -> float:
+    """两段之间的「打字停顿」（秒）。
+
+    档位见上方 ``_TIER_PRESET_PER_CHAR_MS`` 说明；``mode=None`` 时取配置
+    ``humanize.delay_mode``（默认 dynamic＝现行为）。纯指令段零延时。
+
+    配置经 ``utils.humanize_config.read_humanize`` **热读**（跨 worker 即时生效，
+    无进程内缓存）；**读取失败一律回落旧式公式** —— 段循环对异常是 ``break``
+    （未受理前缀即停），配置不可读绝不能把整条回复截断，故此处必须 fail-soft。
+
+    ⚠️ 位置签名恒为单参 ``prev``：既有契约测试以 ``lambda text: 0``
+    monkeypatch 本函数（tests/test_wechat_reply_split.py:89,125、
+    tests/test_followup_retired.py:100），``mode`` 只能作 keyword-only 追加。
+    """
+    if is_pure_instruction(prev):
+        return 0.0
+    try:
+        from utils import humanize_config
+
+        cfg = humanize_config.read_humanize()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[wx][step=humanize_cfg_unreadable] %s", exc)
+        # 旧式公式 = 拟人度引入前的现行为，作为配置不可读时的安全底线。
+        return max(0.4, min(1.6, len(prev) * 0.045))
+
+    tier = _resolve_delay_tier(cfg.delay_mode if mode is None else mode)
+    if tier == "off":
+        return 0.0
+    if tier == "fixed":
+        base = cfg.fixed_ms / 1000.0
+    elif tier == "random":
+        base = random.randint(cfg.random_min_ms, cfg.random_max_ms) / 1000.0
+    else:
+        per_char_ms = _TIER_PRESET_PER_CHAR_MS.get(tier, cfg.per_char_ms)
+        base = len(prev) * (per_char_ms / 1000.0)
+    if cfg.bracket_delay_ms > 0 and _is_bracket_segment(prev):
+        base = cfg.bracket_delay_ms / 1000.0
+    return max(cfg.delay_floor_ms / 1000.0, min(cfg.delay_ceil_ms / 1000.0, base))
 
 
 def _load_credentials(path=None):
@@ -1483,6 +1593,15 @@ class WeChatConnector:
         由独立守护线程按 5 秒 tick 消费（原挂在追问守护线程上；追问链已
         退役，见 docs/DELETION_LOG.md 2026-10-12）—— 不能挂长轮询主循环
         （LONG_POLL_TIMEOUT=35 会让回执等待全部超时）。
+
+        2026-10-16 拆条链可达性：kind=``proactive`` 的行改经**两个投递点共用
+        的唯一真源** ``utils.humanize_delivery.direct_send_proactive`` —— 生产
+        为 uvicorn 4 worker，run_api 的定向分支只入队并等回执，**真实发送点
+        就在本方法**；此前本方法直调 ``send_text``，`humanize.proactive_split`
+        开启后定向主动投递仍整段直发（功能开了不生效）。``reminder`` 等其它
+        kind 不属「主动消息拆条」语义，路径不动。
+        默认（``proactive_split=False``/配置不可读）逐字回落 ``send_text``，
+        本行行为不变。
         """
         rp = _plane()
         if rp is None or self.owner_user_id is None:
@@ -1519,9 +1638,21 @@ class WeChatConnector:
                 except Exception as e:  # noqa: BLE001
                     logger.debug("[wx][step=outbox_requeue_failed] %s", e)
                 continue
+            kind = str(row.get("kind") or "")
             ok = False
             try:
-                ok = self.send_text(text, to_user=peer)
+                # 拆条链可达性（补全，见上方 docstring）：kind=proactive 经
+                # 两个投递点共用的唯一真源 `utils.humanize_delivery.direct_send_proactive`
+                # —— 默认（proactive_split=False / 配置不可读）逐字回落
+                # `send_text`（零行为变更）；开启且连接器支持拆条时才走
+                # 「拆条 + 段间节奏」。reminder 等其它 kind 不属主动拆条语义，
+                # 路径不动（即便开关开启）。
+                if kind == "proactive":
+                    from utils.humanize_delivery import direct_send_proactive
+
+                    ok = direct_send_proactive(self, peer, text)
+                else:
+                    ok = self.send_text(text, to_user=peer)
             except Exception as e:  # noqa: BLE001
                 logger.warning("[wx][step=outbox_send_error] %s", e)
             try:
@@ -1542,8 +1673,17 @@ class WeChatConnector:
     # 模块删除，角色选择唯一入口 = 网页控制台 /characters/{id}/activate，
     # 聊天侧由 activate 同步的扫码人绑定（wechat_bindings）决定角色。
 
-    def _send_reply_segments(self, peer: str, reply: str, *, context_token: str = "") -> str:
-        """只返回 API 已明确受理的前缀；失败段及后续草稿不进入历史。"""
+    def send_reply_segments(self, peer: str, reply: str, *, context_token: str = "") -> str:
+        """拆条投递一条回复，**只返回 API 已明确受理的前缀**；失败段及后续不进入历史。
+
+        设计契约第 1 步：由私有 ``_send_reply_segments`` 公有化（主链 publish 与
+        主动线 wiring 共用同一实现），**不留私有别名 shim**。
+
+        锁契约（单一口径）：本方法**不自持** ``_peer_lock`` —— 调用方负责持锁。
+        主链由 ``_handle_message_serial`` 外层 ``with self._peer_lock(...)`` 覆盖
+        生成与发送全程；主动线由 ``main.send_proactive_segmented`` 在外部补同一把
+        可重入 RLock（RLock，重复获取不自死锁）。**不得在本方法内再持一半**。
+        """
         segments = split_reply_for_wechat(reply)
         accepted = []
         for idx, segment in enumerate(segments):
@@ -1838,7 +1978,7 @@ class WeChatConnector:
         def publish(reply: str) -> str:
             if sent_reply:
                 return str(sent_reply["accepted"])
-            accepted = self._send_reply_segments(from_user, reply, context_token=context_token)
+            accepted = self.send_reply_segments(from_user, reply, context_token=context_token)
             sent_reply.update(accepted=accepted, complete=bool(accepted) and accepted == "\n".join(split_reply_for_wechat(reply)))
             return accepted
 
@@ -2027,7 +2167,7 @@ class WeChatConnector:
             logger.debug("[wx][step=fallback_line_failed] 降级话术获取失败，跳过媒体占位回复")
             return
         try:
-            self._send_reply_segments(peer, line, context_token=context_token)
+            self.send_reply_segments(peer, line, context_token=context_token)
         except Exception as e:  # noqa: BLE001
             logger.warning("[wx][step=reply_send_failed] peer=%s error=%s", peer, e)
 

@@ -637,6 +637,64 @@ def _intensity_phrase(intensity: str) -> str:
     return "控制台力度=中等：自然主动，不过分粘人也不冷淡。"
 
 
+# ── 当前记忆库内容注入（2026-10-16 上下文复用批）──────────────
+#
+# 对齐爱语 ILinkService.e() 的记忆注入：主动决策 system prompt 带
+# 「【当前记忆库内容】」段。决策器此前只知画像/历史，不知"我记得用户什么
+# 事实"（喜欢什么/在准备什么）——开口只能按时间泛泛问候，接不住自己
+# 记得的事。数据源 get_memory_context（shisi/memory/legacy/
+# memory_pipeline.py:1133）的 user_facts —— 注入窗口已含优先级排序
+# （relationship/commitment > preference > 普通 fact）、恒常事实保位与
+# is_injectable_fact 消毒。只读既有数据，零行为变更：空则整段不出现
+# （宁缺毋串，同画像段纪律）。
+
+# 注入条数硬顶：与 memory_pipeline 注入窗口 k 的上限（10）一致。
+_MEMORY_FACTS_MAX = 10
+
+
+def _resolve_memory_service() -> Any | None:
+    """决策链读记忆库唯一入口：api.deps 注入的 memory 组件（ShisiMemoryService）。
+
+    与 proactive.scheduler._resolve_memory 同路径（deps.orch.components["memory"]）；
+    解析失败返回 None —— 调用方按"无记忆"降级，宁缺毋串。
+    """
+    try:
+        from api.deps import deps
+
+        orch = getattr(deps, "orch", None)
+        comps = getattr(orch, "components", None)
+        if isinstance(comps, dict):
+            return comps.get("memory")
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _proactive_memory_facts(session_key: str) -> list[str]:
+    """读当前会话的用户事实（get_memory_context 的 user_facts，只读）。
+
+    事实按 user_key 会话隔离（存储层 _user_key_from_session 收口）；
+    条数硬顶 _MEMORY_FACTS_MAX；空/异常一律返回 []，由调用方整段不注入。
+    """
+    mem = _resolve_memory_service()
+    if mem is None:
+        return []
+    getter = getattr(mem, "get_memory_context", None)
+    if getter is None:
+        return []
+    try:
+        ctx = getter(session_id=str(session_key)) or {}
+    except Exception:  # noqa: BLE001
+        return []
+    facts = ctx.get("user_facts") or []
+    out: list[str] = []
+    for f in facts:
+        s = str(f or "").strip()
+        if s:
+            out.append(s)
+    return out[:_MEMORY_FACTS_MAX]
+
+
 def build_proactive_context(
     *,
     session_key: str = "",
@@ -777,6 +835,19 @@ def build_proactive_context(
             profile_block = get_profile_prompt_block(session_key)
     if profile_block:
         parts.append(profile_block)
+    # 【当前记忆库内容】（2026-10-16 上下文复用批，对齐爱语 ILinkService.e()）：
+    # 决策器此前只知画像/历史，不知"我记得用户什么事实"。数据源
+    # get_memory_context.user_facts（只读，会话隔离）；空则整段不出现
+    # （宁缺毋串）；条数硬顶见 _MEMORY_FACTS_MAX（与注入窗口 k 上限一致）。
+    if session_key:
+        with contextlib.suppress(Exception):
+            _mem_facts = _proactive_memory_facts(str(session_key))
+            if _mem_facts:
+                parts.append(
+                    "【当前记忆库内容】（你记得的关于用户的事实，非本轮对话内容；"
+                    "自然使用，不要逐条念出）\n"
+                    + "\n".join(f"- {f}" for f in _mem_facts)
+                )
     if last_user_message.strip():
         parts.append("【用户最后一句】" + last_user_message.strip()[:200])
     if response_rate is not None:
