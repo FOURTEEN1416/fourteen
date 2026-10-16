@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -457,8 +458,20 @@ class MultiProviderGateway:
         tools: list | None = None,
         model: str | None = None,
         attachments: list | None = None,
+        allow_fallback: bool = True,
+        timeout: float | None = None,
     ) -> str:
-        """按 fallback 链尝试各个 provider"""
+        """按 fallback 链尝试各个 provider
+
+        allow_fallback（2026-10-16 三连同义批 A）：False = 只打链首（首选），
+        失败即抛 ``ProviderError`` 由调用方决定放弃——主动决策线用此禁止
+        「同调用内降级」（事前熔断闸 `_primary_model_ok` 覆盖不到
+        「tick 时未熔断、调用当场超时、链内静默降级智谱」的路径；用户裁决
+        「宁可不发也不让降级模型代写」）。熔断记账照常（不影响后续闸）。
+
+        timeout（同批 D）：按调用覆盖读超时（主动决策线放宽到 25s 让强模型
+        写完）；仅 truthy 时透传（None 在 httpx per-request 语义=禁用超时）。
+        """
         last_error = ""
 
         # 多模态附件先并入 messages 再进入 fallback 链（见 _merge_attachments 注释）
@@ -472,14 +485,23 @@ class MultiProviderGateway:
         # B 请求的流式/工具调用就会打到**错误的 provider**（甚至空 provider）。
         # 现在只记录本次调用"实际成功"的 provider，且仅在成功后才发布，
         # 使失败探测不再污染全局当前指针。
-        for key in self._chain_keys():
+        keys = self._chain_keys()
+        if not allow_fallback:
+            # 只打链首：keys 顺序即 fallback_chain 顺序，首位恒为首选。
+            keys = keys[:1]
+        for key in keys:
             provider = self._providers[key]
             try:
+                provider_kwargs: dict[str, Any] = {}
+                if timeout is not None and "timeout" in inspect.signature(
+                    provider.chat
+                ).parameters:
+                    provider_kwargs["timeout"] = timeout
                 result = await provider.chat(
                     query=query, system_prompt=system_prompt,
                     history=history, messages=messages,
                     temperature=temperature, max_tokens=max_tokens,
-                    tools=tools, model=model,
+                    tools=tools, model=model, **provider_kwargs,
                 )
                 if result and not _is_error_reply(result):
                     _record_fallback(key, "success")
@@ -496,6 +518,11 @@ class MultiProviderGateway:
                 self._mark_provider_result(key, False)
                 logger.warning("[MultiGateway] %s failed: %s", key, e)
 
+        if not allow_fallback:
+            head = keys[0] if keys else "chain-head"
+            raise ProviderError(
+                f"[MultiGateway] primary_only: provider {head} failed: {last_error}"
+            )
         logger.error("[MultiGateway] All providers failed, last_error=%s", last_error)
         return f"（所有 LLM 提供商均不可用，请检查配置。最后错误: {last_error}）"
 
@@ -518,6 +545,8 @@ class MultiProviderGateway:
         max_tokens: int = 2048,
         tools: list | None = None,
         model: str | None = None,
+        allow_fallback: bool = True,
+        timeout: float | None = None,
     ) -> str:
         """同步入口 — 供 APScheduler 线程/脚本侧调用方使用。
 
@@ -536,6 +565,7 @@ class MultiProviderGateway:
                     query=query, system_prompt=system_prompt, history=history,
                     messages=messages, temperature=temperature,
                     max_tokens=max_tokens, tools=tools, model=model,
+                    allow_fallback=allow_fallback, timeout=timeout,
                 ),
                 _get_sync_loop(),
             ).result()

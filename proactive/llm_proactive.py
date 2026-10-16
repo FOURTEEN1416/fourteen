@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 import json
 import logging
 import re
@@ -128,7 +129,9 @@ DECISION_SYSTEM = """你是伴侣角色的**主动消息决策器**。
 
 硬规则：
 1. 只输出一个 JSON 对象。
-2. 字段：should_contact（bool）、wait_minutes（int|null）、message（str）、reason（str）。
+2. 字段：should_contact（bool）、wait_minutes（int|null）、message（str）、
+   reason（str）、candidates（可选：string 数组，最多 2 条备选开场，每条
+   用不同的由头角度——多候选竞争，最优者放 message）。
 3. **时机由你综合判断**：上次互动、时间、关系、画像、人设、控制台参数；不要机械套固定小时数。
 4. 控制台参数是**行为倾向**（风格/力度/请尊重免打扰），不是你必须遵守的死表；
    但 respect_quiet_hours=true 且当前落在免打扰时段时，**原则上不要 should_contact=true**
@@ -160,6 +163,13 @@ DECISION_SYSTEM = """你是伴侣角色的**主动消息决策器**。
 12. 决定暂不发消息（should_contact=false）时，wait_minutes 必须给出具体分钟数
    （建议至少 30）；只写「稍后再观察」却不填 wait 字段的决策无效——等待语义
    必须落到 wait_minutes 上，否则下次 tick 会立刻反悔重判。
+13.【必须有由头，2026-10-16 三连同义生产实证驱动】开口必须有「由头」：
+   若上下文有【现在真正值得你接话的事】，message 必须围绕其中**具体一条**
+   展开（TA 说过的事/没答的问题/将到的事/你掌握的相关知识），reason 必须
+   写明你用了哪条由头；若该节为空，才允许从画像或近况切入，reason 同样必须
+   写出具体依据（TA 的什么事）。**禁止**把「已经过去了一段时间/现在是 X 午/
+   距离上次约 X 小时/可以再次关心」这类纯时间描述当作 reason 或开场——时间
+   只是背景，不是话题。写 candidates 时每条候选用不同由头角度。
 """
 
 
@@ -347,6 +357,25 @@ DEDUP_SHORT_MESSAGE_CHARS = 20
 # 高相似规则：归一化后前 6 字相同且长度差 ≤3
 DEDUP_SIMILAR_PREFIX_CHARS = 6
 DEDUP_SIMILAR_LEN_TOLERANCE = 3
+# 长句盲区补面（2026-10-16 三连同义批 C）——生产实证：16:04 逐字复读被拦，
+# 但 16:14「去掉早上好、前缀重排」的同义变体（10/31/25 字）全部放行——
+# 既有规则只覆盖 ≤20 字短句。新增两条确定性规则（仍不做模糊阈值判据——
+# 2026-09-19 已实证 difflib 阈值不可靠：正常变体 0.25 vs 病态 0.37 不可分）：
+# ① 包含：较短句 ≥10 字且为较长句子串 → 整句复读/续写（m1⊂m2 型，归一化
+#    11 字「早上好你今天感觉怎么样」被 31 字 m2 完整包含）。下限取 10 而非
+#    更短：≥10 字 verbatim 复读=完整分句/问题被重播；<10 字多为自然共享开场
+#    （「终于想起我了」6 字加长版=正常延续，既有测试钉死放行）；
+# ② 重叠：最长公共子串 ≥12 字 → 重排复读（m2~m3 型，LCS=18）。
+# 误伤保护基线见 tests/test_dedup_gate_expansion.py（对照组 0 误伤）。
+DEDUP_CONTAIN_CHARS = 10
+DEDUP_OVERLAP_CHARS = 12
+
+
+def _longest_common_substring_len(a: str, b: str) -> int:
+    """最长公共子串长度（SequenceMatcher.find_longest_match 块）。"""
+    import difflib
+
+    return difflib.SequenceMatcher(None, a, b).find_longest_match().size
 
 
 def is_duplicate_proactive(
@@ -354,12 +383,14 @@ def is_duplicate_proactive(
     recent_messages: list[str] | None,
     window: int = PROACTIVE_DEDUP_WINDOW,
 ) -> bool:
-    """决策线出站硬闸：与最近已发内容比对，完全相同或短句高相似 → True。
+    """决策线出站硬闸：与最近已发内容比对，完全相同或高相似 → True。
 
     - 归一化沿用生成线单一真源 ``ase_engine.normalize_message``（去空白/标点/
       emoji、lower），不再造第二份归一化实现。
     - 「高相似」＝归一化后前 6 字相同且长度差 ≤3 且都 ≤20 字：拦「终于想起
       我了/终于想起我了呀」这类同义换皮；长句不启用，避免误杀正常话题延续。
+    - 长句判据（2026-10-16 C）：较短句 ≥6 字且被较长句完整包含（前缀续写型），
+      或最长公共子串 ≥12 字（重排复读型）——均为确定性结构判据，无模糊阈值。
     - 空消息不在此拦（上游 sanitize 闸已兜）；无历史 → False。
     """
     from proactive.ase_engine import normalize_message
@@ -378,6 +409,15 @@ def is_duplicate_proactive(
             and len(norm) <= DEDUP_SHORT_MESSAGE_CHARS
             and abs(len(target) - len(norm)) <= DEDUP_SIMILAR_LEN_TOLERANCE
             and target[:DEDUP_SIMILAR_PREFIX_CHARS] == norm[:DEDUP_SIMILAR_PREFIX_CHARS]
+        ):
+            return True
+        # 长句盲区判据（顺序无关：取较短者做包含判定）
+        shorter, longer = (target, norm) if len(target) <= len(norm) else (norm, target)
+        if len(shorter) >= DEDUP_CONTAIN_CHARS and shorter in longer:
+            return True
+        if (
+            min(len(target), len(norm)) >= DEDUP_OVERLAP_CHARS
+            and _longest_common_substring_len(target, norm) >= DEDUP_OVERLAP_CHARS
         ):
             return True
     return False
@@ -616,6 +656,7 @@ def build_proactive_context(
     last_user_message: str = "",
     response_rate: float | None = None,
     character_id: str = "",
+    hooks_text: str = "",
 ) -> str:
     """组装主动决策提示词上下文。
 
@@ -639,6 +680,9 @@ def build_proactive_context(
     2026-10-15 统一真源批：带 session_key 时画像经主链同款
     `get_profile_prompt_block` 注入（含 preferences），否认称呼走
     `denied_names_for` 双源否决；`persona_hint` 截断上限 1200（完整版人设）。
+
+    2026-10-16 上下文复用批：补【当前记忆库内容】段（用户事实列表，
+    数据源 `get_memory_context.user_facts`，只读、空则整段不出现）。
     """
     prof = profile or {}
     web = {**DEFAULT_WEB_CONFIG, **(web_config or {})}
@@ -780,6 +824,12 @@ def build_proactive_context(
             )
     elif proactive_history:
         parts.append("【当前角色最近主动发出的话】" + " ｜ ".join(str(t) for t in proactive_history[-3:]))
+    if hooks_text:
+        # 活材料钩子（2026-10-16 三连同义批 B）：爱语逆向对照——其主动消息=
+        # 人设四段+【当前记忆库内容】+近 20 轮对话一次续写，话题感全部来自活
+        # 材料注入（本模块 proactive_hooks 构造，宁缺毋滥）。放在历史之后：
+        # 历史是「聊完了什么」，钩子是「现在值得接什么」。
+        parts.append(str(hooks_text))
     if urgency_signal is not None:
         parts.append(f"紧迫度信号（仅参考）：{urgency_signal:.2f}")
     if knowledge_hint:
@@ -836,20 +886,117 @@ def parse_decision(raw: str) -> dict[str, Any]:
     if not should and (wait_i is None or wait_i <= 0):
         wait_i = _wait_minutes_from_reason(reason_full)
     reason = reason_full[:300]
+    # 多候选竞争（2026-10-16 三连同义批 B）：模型可附最多 2 条备选开场，
+    # 与 message 一起进入确定性择优（_pick_best_candidate）；缺省为空数组，
+    # 行为与旧版完全一致（向后兼容）。
+    candidates: list[str] = []
+    raw_candidates = data.get("candidates")
+    if isinstance(raw_candidates, list):
+        for c in raw_candidates[:2]:
+            s = str(c or "").strip()
+            if s:
+                candidates.append(s)
     return {
         "should_contact": should,
         "message": msg,
         "reason": reason,
         "wait_minutes": wait_i,
+        "candidates": candidates,
     }
 
 
-def _llm_chat_sync(llm: Any, system: str, user: str) -> str:
+# 主动决策首选超时（2026-10-16 三连同义批 D）：agnes 健康响应分布 3.8~19.8s，
+# 主链 15s 会误杀慢尾（每次误杀=一次降级代写）；决策线无人等待，放宽到 25s
+# 让强模型写完。配合 allow_fallback=False（同批 A）：仍失败即跳过不降级。
+PROACTIVE_DECISION_TIMEOUT = 25.0
+
+# 泛问候开场正则（多候选择优罚分项）：整条消息就是一个零信息问候模板。
+_GENERIC_OPENER_RE = re.compile(
+    r"^(在吗|在干嘛|干嘛呢|忙吗|早上好|晚上好|早安|晚安|睡了吗|吃了吗|饿不饿|"
+    r"想我了吗|有没有想我|你今天感觉怎么样|今天感觉怎么样|最近怎么样|"
+    r"最近过得怎么样|今天过得怎么样|今天忙不忙)[？?！!，,。.\s~～]*$"
+)
+
+
+def _candidate_score(text: str, hook_keywords: list[str] | None) -> float:
+    """候选开场确定性打分（多候选竞争择优依据，纯函数）：
+
+    - 命中活材料关键词（≥4 字）每条 +2（封顶 +4）——由头是核心信号；
+    - 长度落在 8~80 字带 +1（主动消息体量带）；
+    - 整条消息是泛问候模板（_GENERIC_OPENER_RE）-3 ——直接压掉「你今天感觉
+      怎么样」式零信息开场（今日三条同义病灶的原文形态）。
+    """
+    t = str(text or "").strip()
+    if not t:
+        return -99.0
+    score = 0.0
+    if 8 <= len(t) <= 80:
+        score += 1.0
+    hits = 0
+    for kw in hook_keywords or []:
+        kw = str(kw).strip()
+        if len(kw) >= 4 and kw in t:
+            hits += 1
+    score += min(hits, 2) * 2.0
+    if _GENERIC_OPENER_RE.match(t):
+        score -= 3.0
+    return score
+
+
+def _pick_best_candidate(
+    decision: dict[str, Any],
+    hook_keywords: list[str] | None,
+) -> dict[str, Any]:
+    """多候选竞争择优（2026-10-16 三连同义批 B）：message + candidates 一起
+    打分取最高；同分取先（message 优先）。无候选时原样返回。"""
+    message = str(decision.get("message") or "").strip()
+    cands = [c for c in (decision.get("candidates") or []) if str(c or "").strip()]
+    if not cands:
+        return decision
+    pool: list[tuple[float, int, str]] = []
+    for idx, text in enumerate([message, *cands]):
+        s = _candidate_score(text, hook_keywords)
+        pool.append((s, -idx, str(text).strip()))
+    pool.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    best = pool[0][2]
+    if best and best != message:
+        decision = dict(decision)
+        decision["message"] = best
+    return decision
+
+
+def _llm_chat_sync(
+    llm: Any,
+    system: str,
+    user: str,
+    *,
+    strict: bool = False,
+    allow_fallback: bool = True,
+    timeout: float | None = None,
+) -> str:
+    """决策线统一 LLM 同步调用。
+
+    strict（2026-10-16 三连同义批 A）：True 时调用失败**向上抛**（scheduler
+    捕获后按 model_degraded 跳过本轮）——旧行为是吞异常返回空串，把「首选
+    失败」伪装成「模型决策不发」，降级代写与主动沉默无法区分。默认 False
+    保持旧行为（其余调用方不受影响）。
+    allow_fallback / timeout：仅当 llm.chat_sync 签名支持时透传（探测式），
+    旧 stub/自定义网关不支持则按默认行为——向后兼容。
+    """
     if llm is None:
         return ""
     if hasattr(llm, "chat_sync"):
+        extra: dict[str, Any] = {}
         try:
-            return str(llm.chat_sync(user, system_prompt=system, temperature=0.4) or "")
+            params = inspect.signature(llm.chat_sync).parameters
+            if "allow_fallback" in params:
+                extra["allow_fallback"] = allow_fallback
+            if "timeout" in params:
+                extra["timeout"] = timeout
+        except (TypeError, ValueError):
+            pass
+        try:
+            return str(llm.chat_sync(user, system_prompt=system, temperature=0.4, **extra) or "")
         except TypeError:
             try:
                 return str(
@@ -859,9 +1006,13 @@ def _llm_chat_sync(llm: Any, system: str, user: str) -> str:
                     or ""
                 )
             except Exception:  # noqa: BLE001
+                if strict:
+                    raise
                 return ""
         except Exception as e:  # noqa: BLE001
             logger.debug("llm.chat_sync failed: %s", e)
+            if strict:
+                raise
             return ""
     if hasattr(llm, "chat"):
         try:
@@ -874,15 +1025,39 @@ def _llm_chat_sync(llm: Any, system: str, user: str) -> str:
             return str(resp or "")
         except Exception as e:  # noqa: BLE001
             logger.debug("llm.chat failed: %s", e)
+            if strict:
+                raise
             return ""
     return ""
 
 
-def decide_proactive(llm: Any, context: str) -> dict[str, Any]:
+def decide_proactive(
+    llm: Any,
+    context: str,
+    *,
+    strict: bool = False,
+    allow_fallback: bool = True,
+    timeout: float | None = None,
+    hook_keywords: list[str] | None = None,
+) -> dict[str, Any]:
+    """主动消息决策（单 LLM 调用产出 should/message/reason[/candidates]）。
+
+    2026-10-16 三连同义批扩展（全部 keyword-only，旧调用兼容）：
+    - strict + allow_fallback=False：禁 in-call 降级，首选失败抛 ProviderError
+      由 scheduler 记 model_degraded 跳过（承接「宁可不发也不让降级模型代写」）；
+    - timeout：决策调用放宽超时（25s），让强模型写完慢尾；
+    - hook_keywords：多候选竞争择优的活材料关键词（无候选时无副作用）。
+    """
     if not context:
-        return {"should_contact": False, "message": "", "reason": "no_context", "wait_minutes": None}
-    raw = _llm_chat_sync(llm, DECISION_SYSTEM, context)
-    return parse_decision(raw)
+        return {"should_contact": False, "message": "", "reason": "no_context", "wait_minutes": None, "candidates": []}
+    raw = _llm_chat_sync(
+        llm, DECISION_SYSTEM, context,
+        strict=strict, allow_fallback=allow_fallback, timeout=timeout,
+    )
+    decision = parse_decision(raw)
+    if hook_keywords and decision.get("candidates"):
+        decision = _pick_best_candidate(decision, hook_keywords)
+    return decision
 
 
 def load_persona_hint(character_id: str = "") -> str:

@@ -319,6 +319,35 @@ class ProactiveScheduler:
         except Exception:  # noqa: BLE001
             return True
 
+    def _record_model_degraded(self, user_key: str, character_id: str = "") -> None:
+        """model_degraded 账本落账（每用户每日至多一条，与 quiet_hours 同口径）。
+
+        两处共用（2026-10-16 三连同义批 A）：① 事前闸 `_primary_model_ok` 命中；
+        ② 决策调用 allow_fallback=False 抛 ProviderError（in-call 降级被禁）——
+        事前闸只覆盖「tick 时已熔断」，覆盖不到「调用当场超时、链内静默降级」。
+        getattr 防御：__new__ stub 只补部分账本属性（真实实例 __init__ 必有）。
+        时钟用函数内局部导入（与 `_llm_proactive_one_user` 同规）——测试对
+        `ase_engine._local_now` 的 monkeypatch 才能生效。
+        """
+        from proactive.ase_engine import _local_now
+
+        today_m = _local_now().date().isoformat()
+        degraded_day = getattr(self, "_model_degraded_event_day", None)
+        if degraded_day is None:
+            degraded_day = self._model_degraded_event_day = {}
+        if degraded_day.get(str(user_key)) != today_m:
+            degraded_day[str(user_key)] = today_m
+            from shisi.agent_plane.runtime import append_proactive_event
+
+            append_proactive_event(
+                session_key=user_key,
+                sent=False,
+                reason="model_degraded",
+                character_id=character_id or self._resolve_character_id(str(user_key)),
+            )
+            self._persist_throttle_ledger()
+        logger.debug("proactive 首选模型不可用（禁降级跳过）user=%s", user_key)
+
     def register_channel(self, name: str, sender_factory: Callable[[], Any]) -> None:
         """
         注册并初始化消息通道
@@ -1206,6 +1235,7 @@ class ProactiveScheduler:
             recent_messages_for_dedup,
             should_skip_proactive_decision,
         )
+        from proactive.proactive_hooks import load_live_hooks
         from shisi.agent_plane.runtime import (
             append_proactive_event,
             get_profile_prompt_block,
@@ -1250,23 +1280,8 @@ class ProactiveScheduler:
             return
         # 模型闸（2026-10-15 质量回调批）：首选供应商熔断开闸期间跳过主动消息
         # 决策——降级模型（免费档）写出来的主动消息是客服腔（生产实证），宁缺毋滥。
-        # 每用户每日至多一条账本事件（与 quiet_hours 同口径噪声治理）。
-        # getattr 防御：__new__ stub 只补部分账本属性（真实实例 __init__ 必有）。
         if not self._primary_model_ok():
-            today_m = _local_now().date().isoformat()
-            degraded_day = getattr(self, "_model_degraded_event_day", None)
-            if degraded_day is None:
-                degraded_day = self._model_degraded_event_day = {}
-            if degraded_day.get(str(user_key)) != today_m:
-                degraded_day[str(user_key)] = today_m
-                append_proactive_event(
-                    session_key=user_key,
-                    sent=False,
-                    reason="model_degraded",
-                    character_id=self._resolve_character_id(str(user_key)),
-                )
-                self._persist_throttle_ledger()
-            logger.debug("proactive 模型闸命中（首选供应商熔断中），跳过 user=%s", user_key)
+            self._record_model_degraded(str(user_key))
             return
         # 执行 LLM 上次决策的 wait_minutes（模型自判时机，非策略闸）
         import time as _time
@@ -1366,6 +1381,9 @@ class ProactiveScheduler:
             )
         elif str(getattr(eng, "_knowledge_character_id", "") or "") != char_id:
             last_user_message = ""
+        # 活材料钩子（2026-10-16 三连同义批 B）：爱语逆向对照——话题感来自活
+        # 材料注入（未答澄清/将到提醒/未闭环承诺/近日热点），非模型自觉。
+        hooks = load_live_hooks(str(user_key), memory)
         now = _local_now()
         quiet = None
         try:
@@ -1400,13 +1418,41 @@ class ProactiveScheduler:
             # 2026-10-15 称呼根治批：角色 id 传入（称呼白名单段按角色名派生
             # 自动禁用——「夏夏」= 林挽夏叠字，无需用户发现即兜住）。
             character_id=char_id,
+            # 2026-10-16 三连同义批 B：活材料钩子节（有活材料才有话题意识）。
+            hooks_text=hooks.section,
         )
         llm = self._session_llm_resolver(user_key) if self._session_llm_resolver else self._resolve_proactive_llm(eng)
         if llm is None:
             logger.info("proactive LLM unavailable user=%s skip", user_key)
             append_proactive_event(session_key=user_key, sent=False, reason="llm_unavailable", character_id=char_id)
             return
-        decision = decide_proactive(llm, ctx)
+        # A（同批）：禁 in-call 降级——allow_fallback=False，首选失败抛
+        # ProviderError → 记 model_degraded 跳过本轮（宁可不发也不让降级模型
+        # 代写）。D（同批）：timeout=25s 放宽决策线超时，让强模型写完慢尾。
+        # hook_keywords：多候选竞争择优（B）。三参均按 decide_proactive 签名
+        # 过滤后传入——被 monkeypatch 的 2 参替身不受影响。
+        from llm_provider.llm_gateway import ProviderError
+        from proactive.llm_proactive import PROACTIVE_DECISION_TIMEOUT
+
+        _decide_kwargs: dict[str, Any] = {
+            "strict": True,
+            "allow_fallback": False,
+            "timeout": PROACTIVE_DECISION_TIMEOUT,
+            "hook_keywords": hooks.keywords,
+        }
+        try:
+            import inspect as _inspect
+
+            _sig = _inspect.signature(decide_proactive)
+            _decide_kwargs = {k: v for k, v in _decide_kwargs.items() if k in _sig.parameters}
+        except (TypeError, ValueError):
+            _decide_kwargs = {}
+        try:
+            decision = decide_proactive(llm, ctx, **_decide_kwargs)
+        except ProviderError as e:
+            logger.info("proactive 首选模型失败（禁降级跳过）user=%s err=%s", user_key, e)
+            self._record_model_degraded(str(user_key), char_id)
+            return
         if char_id != self._resolve_character_id(str(user_key)):
             append_proactive_event(session_key=user_key, sent=False, reason="character_changed", character_id=char_id)
             return

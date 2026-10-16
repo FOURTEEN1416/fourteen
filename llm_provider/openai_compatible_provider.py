@@ -181,8 +181,14 @@ class OpenAICompatibleProvider:
         tools: list | None = None,
         model: str | None = None,
         attachments: list | None = None,
+        timeout: float | None = None,
     ) -> str:
-        """异步聊天（同步包装版）"""
+        """异步聊天（同步包装版）
+
+        timeout（2026-10-16 三连同义批 D）：按调用覆盖读超时（如主动决策线
+        放宽到 25s）。⚠️ 只传 truthy 值——httpx 语义里 per-request
+        ``timeout=None`` 是「禁用超时」而非「用客户端默认」，不能无条件传。
+        """
         from typing import cast as _cast
 
         from .multi_provider_gateway import _merge_attachments
@@ -191,7 +197,7 @@ class OpenAICompatibleProvider:
         result = await self._chat(
             query=query, system_prompt=system_prompt, history=history,
             messages=messages, temperature=temperature, max_tokens=max_tokens,
-            tools=tools, model=model, stream=False,
+            tools=tools, model=model, stream=False, timeout=timeout,
         )
         return _cast(str, result)
 
@@ -299,6 +305,7 @@ class OpenAICompatibleProvider:
         tools: list | None = None,
         model: str | None = None,
         stream: bool = False,
+        timeout: float | None = None,
     ) -> str | AsyncIterator[str]:
         if not self.api_key:
             return self._mock_reply(query)
@@ -329,7 +336,11 @@ class OpenAICompatibleProvider:
 
         start = time.perf_counter()
         try:
-            resp = await self._async_client.post(self._chat_url, json=payload)
+            # timeout 仅 truthy 时覆盖（None 在 httpx per-request 语义=禁用超时）。
+            post_kwargs: dict[str, Any] = {}
+            if timeout:
+                post_kwargs["timeout"] = httpx.Timeout(float(timeout), connect=10.0)
+            resp = await self._async_client.post(self._chat_url, json=payload, **post_kwargs)
             resp.raise_for_status()
             data = resp.json()
             content = data["choices"][0]["message"]["content"]

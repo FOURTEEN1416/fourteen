@@ -158,6 +158,7 @@ class LLMGatewayV2:
         tools: list | None = None,
         model: str | None = None,
         attachments: list | None = None,
+        timeout: float | None = None,
     ) -> str:
         if not self.api_key:
             return self._mock_reply(query)
@@ -178,7 +179,11 @@ class LLMGatewayV2:
 
         start = time.perf_counter()
         try:
-            resp = await self._async_client.post(self._chat_url, json=payload)
+            # timeout 仅 truthy 时覆盖（None 在 httpx per-request 语义=禁用超时）。
+            post_kwargs: dict = {}
+            if timeout:
+                post_kwargs["timeout"] = httpx.Timeout(float(timeout), connect=10.0)
+            resp = await self._async_client.post(self._chat_url, json=payload, **post_kwargs)
             resp.raise_for_status()
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
