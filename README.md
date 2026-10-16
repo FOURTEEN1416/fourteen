@@ -8,15 +8,15 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-3513-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-3519-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **当前状态（2026-10-16 主动消噪批，三端一致 `ac4c145`）**：禁打卡式嘱咐 + 决策反悔稳定闸（wait 缺失/≤0 从 reason 提取）+ 系统标记剥除（`terminal_reply_guard` 剥行首 `[主动]`/`[定时提醒]`/`[MM-DD HH:MM]`）+ 自然时间观（时间感是底色不是台词）+ 对抗验收 7 处修复。10 月此前批次（称呼根治 `9639ff1`、质量回调 `1df4921`、D16 通道语义 `173b2b3`/`7ac7418`、安全升级 `2c3b888`/攻击面 `e949107`/SEC-15 `aea3cd0`、异常回复守卫 `ba39b31`/对抗验收 `5576e9d`）均已在线。上线验收与遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md`。
+> **当前状态（2026-10-16 主动消噪批，三端一致 `eaeee65`）**：禁打卡式嘱咐 + 决策反悔稳定闸（wait 缺失/≤0 从 reason 提取）+ 系统标记剥除（`terminal_reply_guard` 剥行首 `[主动]`/`[定时提醒]`/`[MM-DD HH:MM]` + 行尾「（距上一条 X）」间隔注记）+ 自然时间观（时间感是底色不是台词）+ 对抗验收两轮 8 处修复。10 月此前批次（称呼根治 `9639ff1`、质量回调 `1df4921`、D16 通道语义 `173b2b3`/`7ac7418`、安全升级 `2c3b888`/攻击面 `e949107`/SEC-15 `aea3cd0`、异常回复守卫 `ba39b31`/对抗验收 `5576e9d`）均已在线。上线验收与遗留边界见 `docs/HANDOFF_REPORT.md` 顶栏与 `LOG.md`。
 
-> **测试口径**（后端 = 2026-10-16 主动消噪批终验，四分块实测）：后端 **3331 passed / 1 skipped / 0 failed**（收集 **3332**；**219 测试文件**，本批 +48=禁打卡嘱咐 25/系统标记剥除 23；现役角色卡 **42 张**；基线 3284+48 吻合）。✅ GitHub CI（run 见 `LOG.md` 2026-10-16 条目；backend+frontend+六 ff 闸+adr-integrity）。⚠️ **口径勘误**：`tests/test_[a-f]*.py` 等四段 glob **漏子目录 `tests/core/`**，**全量口径必须补跑它**；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> **测试口径**（后端 = 2026-10-16 主动消噪批终验，四分块实测）：后端 **3337 passed / 1 skipped / 0 failed**（收集 **3338**；**219 测试文件**，本批 +54=禁打卡嘱咐 25/系统标记剥除 29；现役角色卡 **42 张**；基线 3284+54 吻合）。✅ GitHub CI（run 见 `LOG.md` 2026-10-16 条目；backend+frontend+六 ff 闸+adr-integrity）。⚠️ **口径勘误**：`tests/test_[a-f]*.py` 等四段 glob **漏子目录 `tests/core/`**，**全量口径必须补跑它**；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
 > 前端 `182 passed`（vitest 5.0.3，30 文件；3→5 升级系 SEC-15 根治，tinypool 双 critical 出树）+ `tsc --noEmit` 0 错误；ruff 0.16.8 全仓 0 错（`All checks passed!`）。
 > ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 13）。**引用基线必须同时声明卡数**。
 
@@ -193,7 +193,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │       ├── store/        Zustand 3 个（authStore / characterBuilderStore / errorStore）
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
-├── tests/                3331 后端测试通过 + 1 跳过（2026-10-16 主动消噪批实测，收集 3332；219 个测试文件）+ 182 前端测试
+├── tests/                3337 后端测试通过 + 1 跳过（2026-10-16 主动消噪批实测，收集 3338；219 个测试文件）+ 182 前端测试
 ├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 42 张 = 41 策展 + 1 张 user_id=1 林挽夏克隆变体，已定性 2026-10-12）
 └── main.py               入口
 ```
