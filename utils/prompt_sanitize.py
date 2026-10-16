@@ -475,19 +475,46 @@ _SYSTEM_MARKERS_RE_FALLBACK = re.compile(
     re.MULTILINE,
 )
 
+# 行尾「（距上一条 X）」间隔注记（annotate_history_time_gaps 追加）的真源前缀回退。
+_HISTORY_GAP_NOTE_RE_FALLBACK = re.compile(
+    r"[ \t]*（距上一条 [^）]*）(?=[ \t]*(?:\n|$))", re.MULTILINE
+)
+
+
+def _history_gap_note_re() -> re.Pattern[str]:
+    """行尾「（距上一条 X）」间隔注记正则（由 ``context_budget`` 单一真源构建）。
+
+    该注记由 :func:`orchestrator.context_budget.annotate_history_time_gaps` 追加在
+    历史行末尾，与行首标记同属注入侧元数据、同样会被模型回显；前缀取自真源
+    ``HISTORY_GAP_NOTE_PREFIX``（lazy import 防循环依赖）。**仅在行尾匹配**——
+    正文中部的同形文字（用户转述等）不误伤（2026-10-16 对抗验收抓出：旧剥除只
+    覆盖行首，尾随间隔注记漏网）。
+    """
+    try:
+        from orchestrator.context_budget import HISTORY_GAP_NOTE_PREFIX
+
+        prefix = re.escape(str(HISTORY_GAP_NOTE_PREFIX))
+        if prefix:
+            return re.compile(rf"[ \t]*{prefix}[^）]*）(?=[ \t]*(?:\n|$))", re.MULTILINE)
+    except Exception:  # noqa: BLE001
+        pass
+    return _HISTORY_GAP_NOTE_RE_FALLBACK
+
 
 def _strip_system_markers(text: str) -> str:
-    """剥掉行首的系统标记（``[主动]``/``[定时提醒]``/``[MM-DD HH:MM]``）。
+    """剥掉注入侧元数据：**行首**标记与**行尾**间隔注记。
 
-    两组标记可交替连出现（生产原文「[主动] [10-15 18:27] 七点吃饭啊」），
-    循环剥到无可剥为止；剥空（只剩标记）返回空串，由调用方走 empty_reply
-    兜底。仅在行首剥：正文中部出现的同样字样（「他说[主动]找我了」）与普通
-    方括号表情（``[666]``/``[微笑]``，不属以上两种形态）原样保留。
+    行首：``[主动]``/``[定时提醒]``/``[MM-DD HH:MM]``（两组可交替连出现，生产
+    原文「[主动] [10-15 18:27] 七点吃饭啊」）；行尾：``（距上一条 X）``（时间间隔
+    注记）。循环剥到无可剥为止；剥空（只剩元数据）返回空串，由调用方走 empty_reply
+    兜底。仅在行首/行尾剥：正文中部的同样字样（「他说[主动]找我了」）与普通方括号
+    表情（``[666]``/``[微笑]``，不属以上形态）原样保留。
     """
     s = str(text or "")
-    pattern = _system_markers_re()
+    lead = _system_markers_re()
+    tail = _history_gap_note_re()
     while True:
-        stripped = pattern.sub("", s)
+        stripped = tail.sub("", lead.sub("", s))
         if stripped == s:
             break
         s = stripped

@@ -395,6 +395,9 @@ def format_session_tail(lines: list[str] | None, budget: ContextBudget | None = 
 # 相邻消息间隔超过该值（分钟）→ 行内追加「距上一条 X」人类可读后缀。
 # 2026-10-12 起只控制后缀；时间前缀每行都加，不再受此阈值豁免。
 HISTORY_GAP_ANNOTATE_MINUTES = 30.0
+# 「距上一条 X」后缀的固定前缀（单一真源）——出站守卫按它确定性剥除模型回显的
+# 间隔注记（2026-10-16 对抗验收抓出：前缀剥除遗漏了该尾随注记）。改格式只改这里。
+HISTORY_GAP_NOTE_PREFIX = "（距上一条 "
 
 
 def annotate_history_time_gaps(
@@ -436,7 +439,7 @@ def annotate_history_time_gaps(
         content = str(row.get("content") or "")
         if gap is not None and gap > threshold:
             content = (
-                f"[{ts:%m-%d %H:%M}] {content}（距上一条 {humanize_gap_cn(gap)}）".rstrip()
+                f"[{ts:%m-%d %H:%M}] {content}{HISTORY_GAP_NOTE_PREFIX}{humanize_gap_cn(gap)}）".rstrip()
             )
         else:
             content = f"[{ts:%m-%d %H:%M}] {content}".rstrip()

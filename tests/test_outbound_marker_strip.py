@@ -186,3 +186,55 @@ def test_reminder_compose_marker_only_falls_back():
     """剥空（只剩标记）→ 走固定兜底文案（不把纯标记发出去）。"""
     out = _compose_with_llm("[主动]")
     assert out and "[主动]" not in out
+
+
+# ── 5. 行尾「（距上一条 X）」间隔注记（2026-10-16 对抗验收抓出的漏网） ──
+#
+# 生产原文「[主动] [10-15 18:27] 七点吃饭啊」证明模型会把注入侧元数据当格式回显；
+# ``annotate_history_time_gaps`` 追加的**行尾**间隔注记（「（距上一条 X）」）同属
+# 注入元数据、同样可被回显，而旧 ``_strip_system_markers`` 只剥行首 → 漏网。
+
+
+def test_strip_trailing_gap_note():
+    assert _strip_system_markers("早啊（距上一条 3 小时）") == "早啊"
+
+
+def test_strip_marker_plus_gap_note():
+    """行首标记 + 行尾间隔注记同时出现（真实历史行形态）。"""
+    assert _strip_system_markers("[10-15 18:27] 早啊（距上一条 3 小时）") == "早啊"
+
+
+def test_strip_gap_note_multiline():
+    src = "[主动] 在忙吗（距上一条 2 小时）\n[定时提醒] 吃药（距上一条 1 天）"
+    assert _strip_system_markers(src) == "在忙吗\n吃药"
+
+
+def test_gap_note_mid_line_not_stripped():
+    """正文中部同形文字不误伤（仅行尾匹配）。"""
+    assert (
+        _strip_system_markers("他说（距上一条 3 小时）不算")
+        == "他说（距上一条 3 小时）不算"
+    )
+
+
+def test_gap_note_only_falls_back_to_empty():
+    """整条只剩间隔注记 → 返回空串（调用方走 empty_reply 兜底）。"""
+    assert terminal_reply_guard("（距上一条 3 小时）") == ""
+
+
+def test_gap_note_prefix_matches_truth_source():
+    """真源对账：剥除前缀取自 ``context_budget``，注记形态与真源产出逐字一致。"""
+    from orchestrator.context_budget import (
+        HISTORY_GAP_NOTE_PREFIX,
+        annotate_history_time_gaps,
+    )
+
+    rows = annotate_history_time_gaps(
+        [
+            {"role": "assistant", "content": "早啊", "timestamp": "2026-10-15T10:00:00+00:00"},
+            {"role": "user", "content": "在吗", "timestamp": "2026-10-15T13:00:00+00:00"},
+        ]
+    )
+    annotated = rows[1]["content"]
+    assert HISTORY_GAP_NOTE_PREFIX in annotated  # 真源确实追加了该前缀
+    assert _strip_system_markers(annotated) == "在吗"  # 剥除可吃掉真源产出
