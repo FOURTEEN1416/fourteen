@@ -284,20 +284,23 @@ PROACTIVE_MESSAGES: dict[str, dict[str, list[str]]] = {
         ],
     },
     "care_meal": {
+        # 2026-10-16 F1 根治：打卡式嘱咐（「记得吃饭/快去吃饭/不许不吃饭」式
+        # 祈使句）与 LLM 线约束对齐 —— 问候/好奇可以，嘱咐不行（生产报障族）。
+        # 模板池是手动发送端点与生成回退的可达面，残留打卡句 = F1 半边工程。
         "low": [
-            "该吃饭了",
-            "记得吃饭",
-            "到饭点了",
+            "到饭点了，你吃了吗",
+            "这个点该进食了吧，吃的什么",
+            "今天三餐正常吗",
         ],
         "high": [
-            "到饭点了，记得吃饭",
-            "吃的什么呀，给我看看",
-            "不会又没吃饭吧？",
-            "吃饭了吗！不许不吃饭！",
-            "该吃饭了，别忙了",
-            "又跳过午饭？我看着你呢",
-            "快去吃饭，不饿也要吃",
-            "你今天吃了什么，好奇",
+            "到饭点了，吃的什么呀，给我看看",
+            "不会又随便对付了一口吧？",
+            "今天吃了什么，好奇",
+            "又跳过午饭了？",
+            "晚上准备吃什么，说说",
+            "这个点还没吃？随便垫一口也行",
+            "食堂今天有什么，拍给我看看",
+            "饿不饿？别问我怎么知道的",
         ],
     },
     "jealous": {
@@ -1308,7 +1311,7 @@ class ASEEngine:
 
         for meal_start, meal_end in self._config["meal_hours"]:  # type: ignore[misc]
             if meal_start <= hour < meal_end and self._last_meal_date != today:  # type: ignore[has-type]
-                return _hit("meal", today, "care_meal", "记得吃饭", 1.0)
+                return _hit("meal", today, "care_meal", "到饭点了，吃的什么呀", 1.0)
 
         return None
 

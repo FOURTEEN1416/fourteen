@@ -449,6 +449,51 @@ def strip_emoji_echo(reply: str, user_msg: Any) -> str:
     return s.strip()
 
 
+# ── 系统标记回显剥除（2026-10-16 生产泄漏根治）──────────────────
+# 生产实证（2026-10-16 07:12 会话4）：模型把历史注入的行首标记当格式抄进
+# 回复原文——「[主动] [10-15 18:27] 七点吃饭啊」直接发给了用户。标记来源：
+# orchestrator.context_budget.OUTBOUND_CHANNEL_MARKERS（[主动]/[定时提醒]）
+# 与时间注入的 [MM-DD HH:MM] 前缀——都是注入侧元数据，不是角色说的话。
+# ⚠️ 标记词表必须由真源生成（lazy import 防循环依赖；真源加新通道标记时本
+# 剥除自动跟随）——2026-10-16 独立复核抓出硬编码字面量与真源无交叉约束。
+def _system_markers_re() -> re.Pattern[str]:
+    """按 ``orchestrator.context_budget.OUTBOUND_CHANNEL_MARKERS`` 单一真源构建
+    行首标记正则；真源不可用时回落到既有两个字面量（兼容旧测试形态）。"""
+    try:
+        from orchestrator.context_budget import OUTBOUND_CHANNEL_MARKERS
+
+        markers = "|".join(re.escape(str(v)) for v in OUTBOUND_CHANNEL_MARKERS.values() if str(v))
+        if markers:
+            return re.compile(rf"^[ \t]*(?:{markers}|\[\d{{2}}-\d{{2}} \d{{2}}:\d{{2}}\])[ \t]*", re.MULTILINE)
+    except Exception:  # noqa: BLE001
+        pass
+    return _SYSTEM_MARKERS_RE_FALLBACK
+
+
+_SYSTEM_MARKERS_RE_FALLBACK = re.compile(
+    r"^[ \t]*(?:\[主动\]|\[定时提醒\]|\[\d{2}-\d{2} \d{2}:\d{2}\])[ \t]*",
+    re.MULTILINE,
+)
+
+
+def _strip_system_markers(text: str) -> str:
+    """剥掉行首的系统标记（``[主动]``/``[定时提醒]``/``[MM-DD HH:MM]``）。
+
+    两组标记可交替连出现（生产原文「[主动] [10-15 18:27] 七点吃饭啊」），
+    循环剥到无可剥为止；剥空（只剩标记）返回空串，由调用方走 empty_reply
+    兜底。仅在行首剥：正文中部出现的同样字样（「他说[主动]找我了」）与普通
+    方括号表情（``[666]``/``[微笑]``，不属以上两种形态）原样保留。
+    """
+    s = str(text or "")
+    pattern = _system_markers_re()
+    while True:
+        stripped = pattern.sub("", s)
+        if stripped == s:
+            break
+        s = stripped
+    return s.strip()
+
+
 def terminal_reply_guard(
     reply: Any,
     *,
@@ -465,7 +510,15 @@ def terminal_reply_guard(
     2. 表情机械复读开头（见 strip_emoji_echo；剥离而非整条丢弃，正文保留）。
     3. 退化回复只剩角色名本身（生产实证 10-13 回复仅「十四」两个字）。
 
-    2026-10-15 称呼根治批（第三类·补充动作）：**非法称呼呼语剥除**——session_key
+    2026-10-16 系统标记回显批（**最前**，错误哨兵判定之后立即执行）：**行首系统
+    标记剥除**——模型把历史注入的行首标记当格式抄进回复原文（生产实证 07:12
+    「[主动] [10-15 18:27] 七点吃饭啊」直接发给用户），见
+    :func:`_strip_system_markers`。必须排在表情复读/名称退化检查**之前**：
+    剥除会改变首行文本（「[主动] 十四」→「十四」），后置会让退化/复读检查
+    对着未剥文本判定、漏拦剥后形态（2026-10-16 独立复核实测序洞）。剥空返回
+    空串，由调用方走 empty_reply 兜底。
+
+    2026-10-15 称呼根治批（标记剥除之后）：**非法称呼呼语剥除**——session_key
     非空时经 ``utils.address_terms`` 单一真源解析（合法称呼 ∪ 非法称呼集），
     确定性剥掉行首非法称呼（「夏夏，最近…」→「最近…」）；剥空返回空串，
     同样由调用方走 empty_reply 兜底。**缺省不传 session_key 时行为与旧版完全一致**
@@ -476,6 +529,9 @@ def terminal_reply_guard(
     s = str(reply or "").strip()
     if not s or _is_error_reply(s):
         return ""
+    s = _strip_system_markers(s)
+    if not s:
+        return ""   # 只剩标记 → 调用方走 empty_reply 兜底
     s = strip_emoji_echo(s, user_msg)
     name = str(character_name or "").strip()
     if name and s in {name, name + "。", name + "！", name + "!"}:

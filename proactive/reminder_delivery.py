@@ -312,7 +312,20 @@ class ReminderDeliveryTask:
             logger.warning("[reminder] 文案生成失败，引用用户任务兜底: %s", e)
             return fallback
         cleaned = sanitize_message(str(reply or "").strip())
-        return cleaned or fallback
+        # 2026-10-16 出站终审补齐：提醒线与主链/主动链共用 terminal_reply_guard
+        # （错误哨兵/表情复读/退化回复/系统标记回显/非法称呼全类）——此前提醒
+        # 只过 sanitize_message（剥时间前缀/推理残留），是守卫矩阵唯一缺口
+        # （独立复核 #5 条：提醒文案抄了 [定时提醒] 行首标记不剥）。
+        from utils.prompt_sanitize import terminal_reply_guard
+
+        guarded = terminal_reply_guard(
+            cleaned,
+            user_msg="",
+            character_name=str(resolved_name or ""),
+            session_key=str(reminder.get("session_key") or ""),
+            character_id=str(character_id or ""),
+        )
+        return guarded or fallback
 
     async def _maybe_gc_intents(self) -> None:
         """节流清理过期澄清任务（失败不影响投递主流程）。

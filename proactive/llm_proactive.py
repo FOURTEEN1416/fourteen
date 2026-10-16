@@ -152,6 +152,14 @@ DECISION_SYSTEM = """你是伴侣角色的**主动消息决策器**。
    假设与用户共处（「我去占位置等你」「咖啡馆见」类）；话题必须与【当前角色
    最近对话原文】或画像真实近况衔接，不得凭空开新话头，不得复读很久前的话题
    当「刚刚」。
+11. 【禁打卡式嘱咐，2026-10-16 生产实证驱动】不得发送「记得吃早饭/按时吃饭/
+   早点休息/早点睡/多喝热水」这类无信息量的例行关心——真人不会定时打卡发这个
+   （生产实证：07:01 决策不发，07:06 反悔发出「起了 早上记得吃口热饭」，用户
+   反馈「像闹钟不像人」）。问候可以，但别配套吃饭睡觉的嘱咐，除非画像或对话
+   明确说对方此刻正饿着/累着。
+12. 决定暂不发消息（should_contact=false）时，wait_minutes 必须给出具体分钟数
+   （建议至少 30）；只写「稍后再观察」却不填 wait 字段的决策无效——等待语义
+   必须落到 wait_minutes 上，否则下次 tick 会立刻反悔重判。
 """
 
 
@@ -169,6 +177,8 @@ PROACTIVE_KNOWLEDGE_TOP_K = 2
 # wait_minutes 上限（分钟）：模型自判的等待窗最长只认 4 小时，
 # 防止无限续期造成"多天零主动"
 MAX_WAIT_MINUTES = 240
+# wait_minutes 缺失但 reason 含等待语义时的兜底等待窗（分钟，2026-10-16 批）
+WAIT_MINUTES_FALLBACK = 30
 # 距上次用户互动超过该小时数且当日零主动 → 注入下限提示
 PROACTIVE_FLOOR_IDLE_HOURS = 48.0
 
@@ -418,6 +428,75 @@ def clamp_wait_minutes(wait: Any) -> int | None:
     if not isinstance(wait, int) or wait <= 0:
         return wait
     return min(wait, MAX_WAIT_MINUTES)
+
+
+# ── 决策稳定闸（2026-10-16 批，生产实证驱动）────────────────
+#
+# 生产实证（10-16 会话4）：07:01 决策 should=False，reason 明写「保持沉默、等待
+# 1 小时至 08:01 再观察」，但 wait_minutes=None —— 等待语义没有落到字段上，等待
+# 窗（scheduler `_llm_proactive_next_ok`）根本没被设置；07:06 下一 tick 模型反悔
+# should=True 发出「起了 早上记得吃口热饭」。根治：wait 缺失时从 reason 提取等待
+# 语义兜底（N 小时 → N×60 / N 分钟 → N / 只有等待语义 → WAIT_MINUTES_FALLBACK），
+# 只在 parse_decision 层补 —— 等待窗执行机制（scheduler）既有，不重复造闸。
+_WAIT_KEYWORDS = ("等待", "稍后", "再观察", "再考虑")
+_CN_NUM = {
+    "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+    "六": 6, "七": 7, "八": 8, "九": 9,
+}
+# 「等待/等/再等/稍后/再观察/再考虑」+ 数字 + 小时/分钟（数字支持阿拉伯与常见中文数字，半=0.5）
+_WAIT_DURATION_RE = re.compile(
+    r"(?:等待|再等|等|稍后|再观察|再考虑)\s*([0-9]+|[半一二两三四五六七八九十]+)\s*(?:个)?\s*(小时|分钟)"
+)
+# 无等待动词的时长+「后再」形态（「一小时后再说」「等45分钟后再看」类，动词可能在时长之后）
+_WAIT_DURATION_AFTER_RE = re.compile(
+    r"([0-9]+|[半一二两三四五六七八九十]+)\s*(?:个)?\s*(小时|分钟)后再"
+)
+# 短时模糊语（「晚点再说」「等一会儿」）→ 直接兜底时长
+_SOON_RE = re.compile(r"晚点再(说|看|观察|考虑)|等一会儿|过会儿再(说|看)")
+
+
+def _cn_num_value(raw: str) -> float:
+    """中文数字 → 数值（覆盖 一~九十九 的常见写法）。
+
+    旧实现取首字（`raw[0]`）——「三十」→3、「四十五」→4、「二十」→2，
+    导致 wait 算出 3/4/2 分钟，等待窗在下一次 5 分钟 tick 前即过期 = 闸失效
+    （2026-10-16 独立复核实测抓出）。现按「十」分段解析：X十Y=X*10+Y、
+    十Y=10+Y、X十=X*10；无法解析回落 0（调用方转兜底）。
+    """
+    if raw == "半":
+        return 0.5
+    if raw.isdigit():
+        return float(raw)
+    if "十" in raw:
+        left, _, right = raw.partition("十")
+        tens = _CN_NUM.get(left, 1) if left else 1
+        ones = _CN_NUM.get(right, 0) if right else 0
+        return float(tens * 10 + ones)
+    return float(_CN_NUM.get(raw, 0))
+
+
+def _wait_minutes_from_reason(reason: Any) -> int | None:
+    """从 reason 文本提取等待语义 → 分钟数；无等待语义返回 None（2026-10-16 批）。
+
+    纯函数，宁缺勿滥：只有等待语义在场才兜底 —— 无等待语义时返回 None，保持
+    旧口径（reason 描述过去/陈述状态时不得凭空造出等待窗）。错误方向为**更克制**
+    （等待窗只会让下一 tick 静默，不会导致多发）。
+    """
+    text = str(reason or "")
+    if not text:
+        return None
+    m = _WAIT_DURATION_RE.search(text) or _WAIT_DURATION_AFTER_RE.search(text)
+    if m:
+        raw, unit = m.group(1), m.group(2)
+        value = _cn_num_value(raw)
+        if value <= 0:
+            return WAIT_MINUTES_FALLBACK
+        return int(value * 60) if unit == "小时" else int(value)
+    if _SOON_RE.search(text):
+        return WAIT_MINUTES_FALLBACK
+    if any(k in text for k in _WAIT_KEYWORDS):
+        return WAIT_MINUTES_FALLBACK
+    return None
 
 
 def proactive_floor_extra(
@@ -747,10 +826,20 @@ def parse_decision(raw: str) -> dict[str, Any]:
         wait_i = int(wait) if wait is not None and str(wait).strip() != "" else None
     except (TypeError, ValueError):
         wait_i = None
+    # 决策稳定闸（2026-10-16 批）：should=False 且 wait 缺失/无效（≤0，scheduler
+    # `wait_m>0` 不会设窗，等于没填）时，从完整 reason 提取等待语义兜底 ——
+    # 生产实证等待语义只写在 reason 里，等待窗没被设置，下一 tick（5 分钟后）
+    # 立即反悔重判。只兜 should=False 侧；should=True 时 wait 语义不同，不动。
+    # 提取用**完整** reason（截断只作用于落库展示，先截断会把写在 300 字
+    # 之后的等待语义丢掉 —— 2026-10-16 独立复核实测）。
+    reason_full = str(data.get("reason") or "")
+    if not should and (wait_i is None or wait_i <= 0):
+        wait_i = _wait_minutes_from_reason(reason_full)
+    reason = reason_full[:300]
     return {
         "should_contact": should,
         "message": msg,
-        "reason": str(data.get("reason") or "")[:300],
+        "reason": reason,
         "wait_minutes": wait_i,
     }
 
