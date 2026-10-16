@@ -132,16 +132,30 @@ class TestTimeoutPassthrough:
         assert record and record[0]["timeout"] == 25.0
 
     def test_none_timeout_not_forwarded(self):
-        """httpx 陷阱：timeout=None 时网关不得注入覆盖（provider 收默认 None）。"""
-        record: list[dict] = []
-        head = _StubProvider(result="ok", record=record)
+        """httpx 陷阱（M3 假阴性自纠）：timeout=None 时网关不得注入覆盖。
+
+        用哨兵默认值区分「显式传 None」vs「省略」：正确实现（网关仅在
+        timeout 非 None 时注入）→ provider 收到哨兵；退化为无条件透传 →
+        provider 收到 None（红）。"""
+        seen: list = []
+
+        class _SentinelProvider:
+            async def chat(self, query="", system_prompt="", history=None, messages=None,
+                           temperature=0.85, max_tokens=2048, tools=None, model=None,
+                           timeout="__UNSET__"):
+                seen.append(timeout)
+                return "ok"
+
+        head = _SentinelProvider()
         tail = _StubProvider(result="x")
         gw = _make_gateway(head, tail)
 
         import asyncio
 
-        asyncio.run(gw.chat(query="q", system_prompt="s"))
-        assert record and record[0]["timeout"] is None, "None timeout 不得作为覆盖注入"
+        asyncio.run(gw.chat(query="q", system_prompt="s"))  # 不传 timeout
+        assert seen and seen[0] == "__UNSET__", (
+            f"网关向 provider 显式注入了 None timeout（httpx 禁用超时陷阱）: {seen}"
+        )
 
     def test_chat_sync_threads_params(self):
         """chat_sync 同步入口同参透传。"""
