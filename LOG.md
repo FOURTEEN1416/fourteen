@@ -3791,3 +3791,11 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **验证**：新 `tests/test_proactive_window_tone_batch.py` 39 例全绿 + 受影响面 481/481 + **突变验红 4/4**（契约门/keywords门/dead闸/降噪各抓回退）+ 连带改写 3 处钉旧契约测试（keywords 门/hooks 缺席/泛问候假 payload）；四分块+tests/api 补块 **3554 收集（232 文件，42 卡）/ 3553 通过 + 1 跳过 / 0 失败** = collect-only 精确吻合（🔑 分块清单漏 `tests/api/` 子目录会少 32 例——AGENTS「find 递归」警告再实证）；vitest **217/217（33 文件）**（拟人化批新增前端测试入径，取代旧 182 口径）；ruff 全仓 0 错。徽章 **3771**（3553+217+1）。
 - **部署**：`be8e886` 三端一致（blob 比对 1bf29e5/69de5d5/4191d47）、health/ready 200、通道恢复。**生产 venv 行为冒烟**：探针实测 owner=2 dead(71.4h)/owner=6 dead(557.9h)/**owner=4 fresh(1.3h——用户当天已开口，闸自然解除)**；生产客服腔原句判零信息=True、傲娇具体句=False；契约三连（泛问候翻转/空消息翻转/无 keywords 候选回填）；分类器映射正确。
 - **遗留**：① 结构性死结（沉默>24h 机制性触达不到）属平台约束，唯一解法=用户先发一条（本次用户开口后 owner=4 已自然恢复）；② 零信息词表是生产病灶驱动枚举，新型寒暄形态需按账本 `generic_opener_contract` 事件回流扩表；③ token_window_dead 的运维动线（告警→提醒用户发消息）暂靠人工读账本，未接通知通道。
+
+### 2026-10-17 CI 红根治（窗口死寂批后续，commit `f8d3752`）
+
+- **现象**：`be8e886` 与更早的 `5c1c42e`（拟人化批）CI backend 同红一处——`test_live_hooks.py::TestLoadLiveHooks::test_all_sources_assembled`（断言「明早六点叫我起床」在 hooks section，实际只有澄清一条）。
+- **根因（潜伏可移植性缺陷，10-16 三连同义批引入）**：`now_local()` 在非 UTC+8 主机（CI Ubuntu UTC）走回退分支返回 **aware** datetime（其 docstring 明令「只读墙钟字段，不得与历史时间戳做跨时区算术」），而 `proactive_hooks._parse_dt` 产出 **naive**——②提醒源 `(dt - now)` 相减、③承诺源 `updated < cutoff` 比较均抛 TypeError，被两支 try 各自吞掉 → 两源在 CI 静默全灭（①澄清源无时间运算独存；生产/本地 UTC+8 主机走 naive 分支不受影响）。
+- **修复**：`load_live_hooks` 内 `now = now_local().replace(tzinfo=None)` 钉 naive 北京墙钟（墙钟值不变、比较同型；生产行为逐字节不变）。
+- **验证**：`test_live_hooks.py` 12 绿（新增 `test_aware_now_local_does_not_lose_sources` 模拟 CI aware 环境回归锚）+ 受影响面 204 绿 + **突变验红命中**（摘 naive 钉即红）+ ruff 0；CI run `39020082516` **9/9 job 全绿**（backend/frontend/六 ff 闸/adr-integrity）。`f8d3752` 三端部署（health/ready 200、blob `73652dcd` 一致）。
+- **教训**：时钟源返回值是**环境相关双形态**（naive/aware），消费方必须钉形态（`.replace(tzinfo=None)` 墙钟派 / `_to_utc` 转换派），不能裸做算术；CI 与生产/本地的时区差异是这类潜伏缺陷的唯一显影剂——**push 后必查 CI**（拟人化批的红挂了 17 小时才被发现）。
