@@ -431,6 +431,98 @@ def _make_chain_scheduler(monkeypatch, *, window_state: dict):
     return sched, delivered, ledger, llm
 
 
+class TestContractRejectBackoff:
+    """契约拒收退避（2026-10-17 对抗验收发现#1 红测）：泛问候/空消息被输出契约
+    翻转后，模型未自填 wait 时 scheduler 必须设确定性退避——否则下一 tick 零
+    约束重试、同上下文同倾向必然重犯，每 5 分钟白烧一次决策 LLM。"""
+
+    KEY = "7:wx_a@im.wechat"
+    _GENERIC_RAW = json.dumps(
+        {"should_contact": True,
+         "message": "早上好，你今天感觉怎么样？有没有什么特别的事情想要和我分享的呢？",
+         "reason": "距离上次8小时该关心", "wait_minutes": None},
+        ensure_ascii=False,
+    )
+
+    def _drive(self, monkeypatch, raw: str):
+        import proactive.llm_proactive as lp_mod
+        import proactive.proactive_hooks as hooks_mod
+        import shisi.agent_plane.runtime as runtime_mod
+        import wechat_direct.wechat_connector as wc_mod
+        from proactive.llm_proactive import DEFAULT_WEB_CONFIG
+        from proactive.scheduler import ProactiveScheduler
+
+        sched = ProactiveScheduler.__new__(ProactiveScheduler)
+        sched._paused = False
+        sched._llm_proactive_next_ok = {}
+        sched._disabled_event_day = {}
+        sched._deliver_fail_counts = {}
+        sched._wait_window_event_day = {}
+        sched._quiet_event_day = {}
+        sched._gate_skip_event_day = {}
+        sched._last_deliver_error = ""
+        sched._is_quiet_hours = lambda: False
+        sched.get_quiet_hours = lambda: None
+        sched._vital_tick_for_user = lambda *a, **k: None
+        sched._resolve_character_id = lambda k: "测试角色"
+        sched._resolve_memory = lambda: None
+        sched._session_llm_resolver = None
+        sched._primary_model_ok = lambda: True
+        llm = _RawLLM(raw)
+        sched._resolve_proactive_llm = lambda eng: llm
+        sched._deliver = lambda message, session_key, character_id="": True
+        persists: list[bool] = []
+        sched._persist_throttle_ledger = lambda: persists.append(True)
+        ledger: list[dict] = []
+        monkeypatch.setattr(runtime_mod, "append_proactive_event", lambda **kw: ledger.append(kw))
+        monkeypatch.setattr(runtime_mod, "project_profile_for", lambda user_key: {})
+        monkeypatch.setattr(runtime_mod, "get_profile_prompt_block", lambda user_key: "")
+        monkeypatch.setattr(lp_mod, "read_web_proactive_config", lambda: dict(DEFAULT_WEB_CONFIG))
+        monkeypatch.setattr(lp_mod, "load_persona_hint", lambda character_id="": "")
+        monkeypatch.setattr(lp_mod, "load_proactive_knowledge", lambda character_id, **kw: "")
+        monkeypatch.setattr(hooks_mod, "load_live_hooks", lambda *a, **k: hooks_mod.LiveHooks())
+        monkeypatch.setattr(
+            wc_mod, "token_window_state",
+            lambda owner, slot=0: {"state": "fresh", "age_hours": 1.0, "ttl_hours": 24.0},
+        )
+        sched._llm_proactive_one_user(_Hub({self.KEY: _FakeEngine()}), self.KEY)
+        return sched, ledger, persists
+
+    def test_generic_opener_rejection_sets_backoff(self, monkeypatch):
+        sched, ledger, persists = self._drive(monkeypatch, self._GENERIC_RAW)
+        nxt = sched._llm_proactive_next_ok.get(self.KEY)
+        assert nxt is not None, "契约拒收必须设退避窗（防每 5 分钟白烧重试）"
+        import time as _t
+
+        remaining_min = (nxt - _t.time()) / 60.0
+        assert 25 <= remaining_min <= 30, f"退避应为 30 分钟级，实际 {remaining_min:.1f} 分"
+        assert persists, "退避窗写入必须落盘（块E 纪律）"
+        assert any(str(e.get("reason", "")).startswith("generic_opener_contract") for e in ledger)
+
+    def test_empty_message_rejection_sets_backoff(self, monkeypatch):
+        raw = json.dumps(
+            {"should_contact": True, "message": "",
+             "reason": "有由头但忘写", "wait_minutes": None},
+            ensure_ascii=False,
+        )
+        sched, ledger, _ = self._drive(monkeypatch, raw)
+        assert sched._llm_proactive_next_ok.get(self.KEY) is not None, "空消息契约拒收同样必须退避"
+        assert any(str(e.get("reason", "")) == "empty_message_contract" for e in ledger)
+
+    def test_model_wait_not_overwritten_by_contract_backoff(self, monkeypatch):
+        """模型自填了有效 wait 时，契约拒收不得覆盖模型自判窗（wait 语义优先）。"""
+        raw = json.dumps(
+            {"should_contact": True, "message": "",
+             "reason": "r", "wait_minutes": 45},
+            ensure_ascii=False,
+        )
+        sched, _, _ = self._drive(monkeypatch, raw)
+        import time as _t
+
+        remaining_min = (sched._llm_proactive_next_ok[self.KEY] - _t.time()) / 60.0
+        assert 44 <= remaining_min <= 45, f"应保留模型自判 45 分钟窗，实际 {remaining_min:.1f} 分"
+
+
 class TestTokenWindowGate:
     KEY = "7:wx_a@im.wechat"
 

@@ -1117,6 +1117,23 @@ def _pick_best_candidate(
     return decision
 
 
+# 契约拒收退避（2026-10-17 对抗验收发现）：generic_opener/empty_message 契约
+# 拒收是「烧了决策 LLM 之后才发现输出不合格」——scheduler 的 should=False
+# 分支不设任何等待窗（wait 只认模型自填的 wait_minutes），下一 tick（5 分钟后）
+# 零约束重试：同上下文同倾向，泛问候必然重犯 → 每 5 分钟白烧一次决策调用
+# （duplicate_suppressed 同款先例：同义变体不会因为立刻重试而变得不同，
+# 故拒后设 5min 退避；契约拒收同机理，退避 30min——材料真空场景 5min 内
+# 无自愈可能，30min 把白烧从 288 次/天收敛到 ≤48 次/天）。
+CONTRACT_REJECT_BACKOFF_MINUTES = 30
+_CONTRACT_REJECT_PREFIXES = ("generic_opener_contract", "empty_message_contract")
+
+
+def is_contract_rejection(reason: Any) -> bool:
+    """reason 是否为输出契约拒收（scheduler 退避判定的单一真源，防双模块
+    手写前缀漂移）。"""
+    return str(reason or "").startswith(_CONTRACT_REJECT_PREFIXES)
+
+
 def _enforce_message_contract(
     decision: dict[str, Any],
     hook_keywords: list[str] | None,

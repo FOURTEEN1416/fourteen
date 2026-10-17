@@ -1641,10 +1641,28 @@ class ProactiveScheduler:
             # 明确说「X 分钟后再说」的窗口里提前开口。
             self._persist_throttle_ledger()
         if not decision.get("should_contact"):
+            _false_reason = str(decision.get("reason") or "")
+            # 契约拒收退避（2026-10-17 对抗验收发现→当场修复）：空 message /
+            # 零信息问候被输出契约翻转后，若模型未自填有效 wait，此处不设窗
+            # 会导致下一 tick 零约束重试、同上下文必然重犯 → 每 5 分钟白烧
+            # 一次决策 LLM。与 duplicate_suppressed 同款退避语义（真源=
+            # llm_proactive.is_contract_rejection / CONTRACT_REJECT_BACKOFF_MINUTES）。
+            from proactive.llm_proactive import (
+                CONTRACT_REJECT_BACKOFF_MINUTES,
+                is_contract_rejection,
+            )
+
+            if is_contract_rejection(_false_reason) and not (
+                isinstance(wait_m, int) and wait_m > 0
+            ):
+                self._llm_proactive_next_ok[str(user_key)] = (
+                    _now + float(CONTRACT_REJECT_BACKOFF_MINUTES) * 60.0
+                )
+                self._persist_throttle_ledger()
             append_proactive_event(
                 session_key=user_key,
                 sent=False,
-                reason=str(decision.get("reason") or "llm_false"),
+                reason=_false_reason or "llm_false",
                 wait_minutes=decision.get("wait_minutes"),
                 character_id=char_id,
             )
