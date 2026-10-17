@@ -170,6 +170,15 @@ DECISION_SYSTEM = """你是伴侣角色的**主动消息决策器**。
    写出具体依据（TA 的什么事）。**禁止**把「已经过去了一段时间/现在是 X 午/
    距离上次约 X 小时/可以再次关心」这类纯时间描述当作 reason 或开场——时间
    只是背景，不是话题。写 candidates 时每条候选用不同由头角度。
+14.【零由头时「不发」优于空洞问候，2026-10-17 生产实证驱动】规则 11 堵住
+   打卡式嘱咐后，模型转战零信息问候（生产原句：「早上好，你今天感觉怎么样？
+   有没有什么特别的事情想要和我分享的呢？」「今天感觉怎么样？有没有什么
+   特别的事情想要和我分享的呢？」）——整条消息每个分句都是问候/寒暄/
+   服务邀请，零信息零由头，比不发更伤人设（用户连收 4 条后零回应）。
+   **写不出有由头的话时，should_contact=false 是唯一正确答案**；空洞问候、
+   寒暄堆叠、「有什么想和我分享的吗」式服务话术一律视为决策失败。这条不是
+   软建议：输出层会把整条皆零信息分句的消息判为契约违反直接丢弃（见规则
+   13 的由头定义——消息里有由头关键词的自然豁免）。
 """
 
 
@@ -901,6 +910,17 @@ def build_proactive_context(
         # 材料注入（本模块 proactive_hooks 构造，宁缺毋滥）。放在历史之后：
         # 历史是「聊完了什么」，钩子是「现在值得接什么」。
         parts.append(str(hooks_text))
+    else:
+        # 由头空仓显式标注（2026-10-17 批）：零由头是客服腔的生成源——生产实证
+        # 模型在材料真空里被「主动开口」的任务压力逼着硬挤，产出「早上好，你
+        # 今天感觉怎么样」式零信息问候。把「没有由头」显式写出来（而不是让模型
+        # 从段落缺席里猜），规则 13/14 的触发条件对它才机器可见。
+        parts.append(
+            "【现在真正值得你接话的事】（空——本轮没有任何具体由头：无未答问题、"
+            "无将到提醒、无未闭环承诺、无热点谈资）\n"
+            "没有由头的主动开口只会是空洞问候。按规则 13/14：写不出有由头的话"
+            "就 should_contact=false，宁可不发，不写零信息问候。"
+        )
     if urgency_signal is not None:
         parts.append(f"紧迫度信号（仅参考）：{urgency_signal:.2f}")
     if knowledge_hint:
@@ -988,14 +1008,75 @@ _GENERIC_OPENER_RE = re.compile(
     r"最近过得怎么样|今天过得怎么样|今天忙不忙)[？?！!，,。.\s~～]*$"
 )
 
+# ── 零信息问候检测面（2026-10-17 批，生成契约拒收与择优罚分共用真源）──────
+#
+# 生产实证（消噪批 F1 上线当天）：硬规则 11 堵住「记得吃早饭」式打卡嘱咐后，
+# 决策模型转战零信息问候——10-16 16:14「今天感觉怎么样？有没有什么特别的事情
+# 想要和我分享的呢？」、17:19「早上好，你今天感觉怎么样？有没有什么特别的事情
+# 想要和我分享的呢？」（用户连收 4 条同类后零回应）。旧 _GENERIC_OPENER_RE 只
+# 匹配**整句一条**裸问候，这种「问候+寒暄+服务邀请」多分句堆叠的形态整条漏网。
+#
+# 判据：**整条消息的每个分句都落在零信息词表内**（问候/寒暄/服务邀请族），
+# 且不含任何活材料关键词（有由头豁免）。逐分句判定是为了不放过堆叠形态，
+# 也不误杀「早，昨晚你说的腿还疼吗」这类含具体事的开场。
+_ZERO_INFO_CLAUSE_RES = tuple(
+    re.compile(p)
+    for p in (
+        # 打招呼族：早/早上好/晚安/嗨/你好…（允许语气词尾巴）
+        r"^(早|早上|早安|早呀|早上好|上午好|中午好|下午好|晚上好|晚安|嗨|哈喽|你好|喂|在)[啊呀呢啦嘛哦哈]*$",
+        # 寒暄问句族：在吗/干嘛呢/忙吗/睡了吗/起了吗/吃了吗/想我了吗…
+        r"^(在吗|在干嘛|在忙吗|干嘛呢|忙什么呢|忙吗|忙不忙|睡了吗|起了吗|醒了吗|"
+        r"吃了吗|吃饭了吗|饿不饿|想我了吗|有没有想我|想我了没)[啊呀呢啦嘛哦哈]*$",
+        # 近况空问族：（你）今天/最近（感觉/过得/心情/状态）怎么样、还好吗…
+        r"^(你)?(今天|最近|这几天|今儿|这两天)?(感觉|过得|心情|状态)?怎么样[啊呀呢啦嘛哦哈]*$",
+        r"^(还好吗|过得好吗|心情好吗|状态好吗)[啊呀呢啦嘛哦哈]*$",
+        # 服务邀请族：「有什么…想和我分享/说说/聊聊」「需要我陪…吗」「有心事可以和我说」
+        r"^(有没有|有什么).*(分享|聊聊|聊一聊|说说|告诉|谈谈).*$",
+        r"^(需要|要不要|想不想|可以).*(陪|聊|说说话|谈谈心|倾听).*$",
+        r"^.*(心事|烦恼|开心的事|新鲜事).*(可以|想)?(告诉|和|跟)?我?(说|聊|分享)哦?$",
+    )
+)
+
+
+def _is_zero_content_clause(clause: str) -> bool:
+    """单个分句是否落在零信息词表（纯函数）。"""
+    c = str(clause or "").strip().strip("！!？?。，,、~～")
+    if not c:
+        return True  # 空分句（连续标点）不携带信息，按零信息计
+    return any(rx.match(c) for rx in _ZERO_INFO_CLAUSE_RES)
+
+
+def _is_zero_content_greeting(text: str, hook_keywords: list[str] | None = None) -> bool:
+    """整条消息是否「零信息问候」（生成契约拒收判据 + 择优罚分真源）。
+
+    - 含任一活材料关键词（≥4 字）→ 有由头，豁免（契约拒收的对象是
+      「零由头」而非「问候语气」——「你之前问的辩论赛准备得怎么样了」
+      天然豁免）；
+    - 否则逐分句判定：**每个分句皆零信息**才算零信息问候。任一具体分句
+      （叙事/追问具体事/情绪表达带具体对象）即放行——宁宽勿误，拒收面
+      只对准生产病灶形态（纯寒暄堆叠）。
+    """
+    t = str(text or "").strip()
+    if not t:
+        return False
+    for kw in hook_keywords or []:
+        kw = str(kw).strip()
+        if len(kw) >= 4 and kw in t:
+            return False
+    clauses = [c for c in re.split(r"[，。？！?!,．.、;；~～\n]+", t) if c.strip()]
+    if not clauses:
+        return False
+    return all(_is_zero_content_clause(c) for c in clauses)
+
 
 def _candidate_score(text: str, hook_keywords: list[str] | None) -> float:
     """候选开场确定性打分（多候选竞争择优依据，纯函数）：
 
     - 命中活材料关键词（≥4 字）每条 +2（封顶 +4）——由头是核心信号；
     - 长度落在 8~80 字带 +1（主动消息体量带）；
-    - 整条消息是泛问候模板（_GENERIC_OPENER_RE）-3 ——直接压掉「你今天感觉
-      怎么样」式零信息开场（今日三条同义病灶的原文形态）。
+    - 整条消息是零信息问候 -3 ——直接压掉「你今天感觉怎么样」式零信息开场。
+      2026-10-17 起判据从单句正则升级为 `_is_zero_content_greeting` 全分句
+      检测面（多分句寒暄堆叠同样罚，含由头关键词豁免）。
     """
     t = str(text or "").strip()
     if not t:
@@ -1009,7 +1090,7 @@ def _candidate_score(text: str, hook_keywords: list[str] | None) -> float:
         if len(kw) >= 4 and kw in t:
             hits += 1
     score += min(hits, 2) * 2.0
-    if _GENERIC_OPENER_RE.match(t):
+    if _GENERIC_OPENER_RE.match(t) or _is_zero_content_greeting(t, hook_keywords):
         score -= 3.0
     return score
 
@@ -1033,6 +1114,43 @@ def _pick_best_candidate(
     if best and best != message:
         decision = dict(decision)
         decision["message"] = best
+    return decision
+
+
+def _enforce_message_contract(
+    decision: dict[str, Any],
+    hook_keywords: list[str] | None,
+) -> dict[str, Any]:
+    """输出契约终审（2026-10-17 批，生成侧判死——不是投递侧内容拦截）。
+
+    should=True 的两类不合格输出与 ``no_json`` 同级（输出不符合契约），
+    在决策边界翻转为 should=False，原句写进 reason 供账本取证：
+
+    ① message 为空 → ``empty_message_contract``（生产实证 10-17 14:21：
+    决策 should=True、reason 完整、message 空字段——旧路径一路走到
+    sanitize 才以 ``empty_message_after_sanitize`` 留账，根因面模糊）；
+    ② 整条消息是零信息问候 → ``generic_opener_contract``（生产实证 10-16
+    消噪批 F1 上线后模型转战泛问候连发 4 条——硬规则 11/13 是 prompt 软
+    约束，模型不听话时没有确定性闸门，本条就是闸门）。
+
+    与规则 14 的「写不出由头就 should=false」配套：prompt 教它别写
+    （软约束），契约拒收让它写了也不算（确定性）。
+    """
+    if not decision.get("should_contact"):
+        return decision
+    msg = str(decision.get("message") or "").strip()
+    if not msg:
+        decision = dict(decision)
+        decision["should_contact"] = False
+        decision["message"] = ""
+        decision["reason"] = "empty_message_contract"
+        return decision
+    if _is_zero_content_greeting(msg, hook_keywords):
+        decision = dict(decision)
+        decision["should_contact"] = False
+        decision["message"] = ""
+        decision["reason"] = f"generic_opener_contract: {msg[:40]}"
+        return decision
     return decision
 
 
@@ -1118,6 +1236,15 @@ def decide_proactive(
       由 scheduler 记 model_degraded 跳过（承接「宁可不发也不让降级模型代写」）；
     - timeout：决策调用放宽超时（25s），让强模型写完慢尾；
     - hook_keywords：多候选竞争择优的活材料关键词（无候选时无副作用）。
+
+    2026-10-17 批两处接线修正（生产实证驱动）：
+    - 候选竞争不再被 ``hook_keywords`` 门卡死——旧实现 `if hook_keywords
+      and decision.get("candidates")`：活材料空仓时 keywords 为空 → 有候选
+      也不择优，泛问候 message 直通（10-16 对 user=4 连发 4 条零信息问候
+      的链路口径缺口）。keywords 只影响打分加成，无 keywords 时泛问候罚分
+      与长度分照常生效，候选竞争天然成立。
+    - 输出契约终审（``_enforce_message_contract``）：空 message 与零信息
+      问候在生成侧判死翻转（详见该函数 docstring）。
     """
     if not context:
         return {"should_contact": False, "message": "", "reason": "no_context", "wait_minutes": None, "candidates": []}
@@ -1126,8 +1253,9 @@ def decide_proactive(
         strict=strict, allow_fallback=allow_fallback, timeout=timeout,
     )
     decision = parse_decision(raw)
-    if hook_keywords and decision.get("candidates"):
+    if decision.get("candidates"):
         decision = _pick_best_candidate(decision, hook_keywords)
+    decision = _enforce_message_contract(decision, hook_keywords)
     return decision
 
 

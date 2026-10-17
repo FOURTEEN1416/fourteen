@@ -106,6 +106,36 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # 微信 context_token 落盘真源（2026-10-17 补洞）：`wechat_connector` 模块级
+    # `CONTEXT_TOKENS_PATH` 锚定仓库根 `data/wechat_context_tokens.json`。
+    # `tests/test_ilink_media_parsing.py::_make_conn` 以 owner_user_id=42、
+    # 无 session_dir 构造连接器 → 实例 `_context_tokens_path` 回落到该模块级
+    # 真源；测试里一句 `conn._context_tokens = {"wx_user_1": ...}` + 任意触发
+    # `_save_context_tokens()` 的路径（入站消息/过期清理）就会把测试键写进
+    # **真实** data/ —— 生产服务器上的同名文件（57 字节、唯一条目 wx_user_1、
+    # 09-22 冻结）正是此族污染（与上方 2026-09-22 块E scheduler_config 自伤
+    # 事故同型）。重定向到沙箱，构造期读取的实例随模块常量一起改道。
+    try:
+        from wechat_direct import wechat_connector
+
+        _redirect(wechat_connector, "CONTEXT_TOKENS_PATH", "wechat_context_tokens.json")
+    except Exception:
+        pass
+
+    # 微信 per-channel 会话根目录（2026-10-17 同批）：`channel_paths.sessions_root()`
+    # 锚定真实 `data/wechat_sessions/`——token 窗口探针（`token_window_state`）
+    # 与通道注册表都按它读盘。测试环境必须确定性「无文件」：开发机/CI 上真实
+    # 目录的存在性不同（本机 1/42 在位、CI 空），token 烧前闸对确证 dead 的
+    # 跳过语义会让同一用例在两处分叉。重定向到沙箱（空目录=missing=放行）。
+    try:
+        from wechat_direct import channel_paths
+
+        monkeypatch.setattr(
+            channel_paths, "sessions_root", lambda: sandbox / "wechat_sessions"
+        )
+    except Exception:
+        pass
+
     # 重要日期
     try:
         from utils import important_dates

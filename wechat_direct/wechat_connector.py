@@ -421,6 +421,73 @@ CONTEXT_TOKENS_PATH = str(
     Path(__file__).resolve().parent.parent / "data" / "wechat_context_tokens.json"
 )
 
+# 窗口临期阈值（小时）：最新 token 年龄超过此值但仍在 TTL 内 → "dying"。
+# 给主动决策链一个「窗口将死」的提前量（生产实证：窗口死后决策链每 2h 白烧
+# 一次 LLM，连续 11 次 prepare failed 才被发现——静默死是最大敌人）。
+_TOKEN_DYING_AGE_HOURS = 20.0
+
+
+def token_window_state(owner_user_id: int | str, slot: int = 0) -> dict:
+    """探测某账号微信通道的「会话窗口」活性（纯读磁盘，不触内存实例）。
+
+    微信平台约束（L2 既有脆弱性）：主动发送必须带未过期的 context_token，
+    而 token 只在**用户给 bot 发消息**时刷新，TTL = ``_CONTEXT_TOKENS_TTL``
+    （24h）。窗口一死，一切主动发送都被平台以 ``prepare failed`` 拒收
+    （2026-10-17 生产实证：主通道 token 死后连续 11 次失败、白烧 11 次
+    决策 LLM）。本函数是给决策链的**烧前确定性探针**——窗口已死的会话
+    不该再烧决策调用。
+
+    返回 ``{"state": ..., "age_hours": float|None, "ttl_hours": 24.0}``：
+    - ``"fresh"``：窗口活（年龄 < 临期阈值）；
+    - ``"dying"``：窗口将死（临期阈值 ≤ 年龄 < TTL）——仍可发，但值得告警；
+    - ``"dead"``：窗口已死（年龄 ≥ TTL）；
+    - ``"empty"``：凭证文件存在但无任何（有效）条目——用户从未在窗口期
+      内说过话，发送同样必败，按死处理；
+    - ``"missing"``：凭证文件不存在（通道从未产生 token）——按死处理；
+    - ``"error"``：读盘/解析失败——**调用方应按「未知」放行**（探针故障
+      不能阻塞决策链，宁宽勿误）。
+    """
+    result: dict[str, Any] = {
+        "state": "error",
+        "age_hours": None,
+        "ttl_hours": _CONTEXT_TOKENS_TTL / 3600.0,
+    }
+    try:
+        from wechat_direct import channel_paths
+
+        path = channel_paths.context_tokens_path(int(owner_user_id), slot)
+        if not path.exists():
+            result["state"] = "missing"
+            return result
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not data:
+            result["state"] = "empty"
+            return result
+        best_ts = 0.0
+        for entry in data.values():
+            if isinstance(entry, dict):
+                try:
+                    best_ts = max(best_ts, float(entry.get("ts", 0) or 0))
+                except (TypeError, ValueError):
+                    continue
+            else:
+                # 旧格式（裸字符串 token，无时间戳）——无法判断活性，跳过
+                continue
+        if best_ts <= 0:
+            result["state"] = "empty"
+            return result
+        age_h = (time.time() - best_ts) / 3600.0
+        result["age_hours"] = round(age_h, 2)
+        if age_h >= _CONTEXT_TOKENS_TTL / 3600.0:
+            result["state"] = "dead"
+        elif age_h >= _TOKEN_DYING_AGE_HOURS:
+            result["state"] = "dying"
+        else:
+            result["state"] = "fresh"
+        return result
+    except Exception:  # noqa: BLE001
+        return result
+
 # ═══════════════════════════════════════════════════════════════
 #  「一句一句发」拆条（上限 2 条，2026-10-12 用户裁决收敛）
 #

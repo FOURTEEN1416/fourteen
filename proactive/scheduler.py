@@ -49,6 +49,25 @@ def _accepts_key(fn: Callable | None) -> bool:
         for name, p in params.items()
     ) or any(p.kind == p.VAR_KEYWORD for p in params.values())
 
+
+def _classify_deliver_error(err: str) -> str:
+    """投递失败原因分类（2026-10-17 批，纯函数）。
+
+    窗口拒收/通道掉线/静默时段/其他异常是几种不同的病——生产实证连续 11
+    次失败全是「平台窗口拒收」，旧账本只有 backoff 阶梯看不出病型。返回
+    账本 reason 后缀（空串=无分类）。
+    """
+    e = str(err or "")
+    if not e:
+        return ""
+    if "send_api_rejected" in e or "prepare failed" in e:
+        return "|window_rejected"
+    if "channel_unavailable" in e or "通道不可用" in e:
+        return "|channel_down"
+    if "quiet_hours" in e:
+        return "|quiet_hours"
+    return "|send_error"
+
 # 成就兜底重算的角色库目录。锚定项目根而非 CWD（从非仓库根启动时
 # CWD 相对路径会扫到空目录，导致成就兜底静默失效）；
 # 同时保留为模块级常量，便于测试注入临时目录。
@@ -156,6 +175,14 @@ class ProactiveScheduler:
         # 至多一条（与 quiet_hours 同口径噪声治理）。与上面各账本同走
         # init/load/persist/purge 四处同步纪律。
         self._model_degraded_event_day: dict[str, str] = {}
+        # 确定性节奏闸账本治理（2026-10-17 批）：min_interval /
+        # cooldown_after_reply / unanswered_limit / token_window_dead /
+        # token_window_dying 这类**确定性** skip 按 「user|reason」每日至多
+        # 一条（生产实证：unanswered_limit 每 5 分钟一行刷屏，P1-51 的每日
+        # 治理当时只覆盖了 wait_window/quiet/disabled 三个 reason）。
+        self._gate_skip_event_day: dict[str, str] = {}
+        # 投递失败最近一次底层原因（供账本分类入账；_send_targeted 写入）。
+        self._last_deliver_error: str = ""
 
         self._scheduler: Any = None
         self._active_tasks: dict[str, bool] = {}
@@ -347,6 +374,47 @@ class ProactiveScheduler:
             )
             self._persist_throttle_ledger()
         logger.debug("proactive 首选模型不可用（禁降级跳过）user=%s", user_key)
+
+    def _emit_skip_event_daily(
+        self,
+        user_key: str,
+        reason: str,
+        *,
+        character_id: str = "",
+        wait_minutes: int | None = None,
+        message: str = "",
+    ) -> bool:
+        """确定性 skip 账本落账（**每 user|reason 每日至多一条**，2026-10-17 批）。
+
+        生产实证：unanswered_limit 硬闸命中期间每 5 分钟 tick 写一条完全相同的
+        skip 事件（一天 288 行零信息量），把账本里真正有信号的事件（决策结果/
+        投递失败）淹掉——与 P1-51 治理 llm_wait_window 前的 96% 噪声同型。
+        口径与 `_record_model_degraded` 一致：首日首条落账，当日后续命中只
+        留 debug；账本变更即落盘。返回是否真落了账（测试钉降噪语义用）。
+        """
+        from proactive.ase_engine import _local_now
+
+        today_s = _local_now().date().isoformat()
+        dedup_key = f"{user_key}|{reason}"
+        day_map = getattr(self, "_gate_skip_event_day", None)
+        if day_map is None:
+            day_map = self._gate_skip_event_day = {}
+        if day_map.get(dedup_key) == today_s:
+            logger.debug("proactive 确定性闸命中（当日已落账，降噪跳过）user=%s reason=%s", user_key, reason)
+            return False
+        day_map[dedup_key] = today_s
+        from shisi.agent_plane.runtime import append_proactive_event
+
+        append_proactive_event(
+            session_key=user_key,
+            sent=False,
+            reason=reason,
+            wait_minutes=wait_minutes,
+            message=message,
+            character_id=character_id or self._resolve_character_id(str(user_key)),
+        )
+        self._persist_throttle_ledger()
+        return True
 
     def register_channel(self, name: str, sender_factory: Callable[[], Any]) -> None:
         """
@@ -1320,6 +1388,41 @@ class ProactiveScheduler:
         if not self._primary_model_ok():
             self._record_model_degraded(str(user_key))
             return
+        # token 窗口烧前闸（2026-10-17 批，生产实证驱动）：微信平台会话窗口
+        # 24h TTL——窗口已死的会话，「决策→生成→投递」注定被平台 prepare failed
+        # 拒收（10-16 08:11 起主通道连续 11 次白烧决策调用的实证）。决策前确定
+        # 性跳过：省 LLM 调用，并把「静默死」变成每日一条可见账本事件
+        # （token_window_dead）；dying（临期 4h 内）放行但落 token_window_dying
+        # 告警事件 + WARNING 日志——窗口死不死不该再靠用户发现。
+        # 口径纪律：**只拦确证 dead**（凭证文件在、条目在、年龄超 TTL——三者
+        # 俱全才是铁证）；missing/empty/error 一律放行（文件缺席可能是新用户
+        # 从未说话，也可能是探针视野外——宁宽勿误，其投递失败会经
+        # deliver_failed 的 |window_rejected 分类入账，可观测性不丢）。
+        if session_key_mod.is_wechat_key(str(user_key)):
+            _tw: dict | None = None
+            try:
+                from wechat_direct.wechat_connector import token_window_state
+
+                _owner_prefix = session_key_mod.split_owner(str(user_key))[0]
+                _tw = token_window_state(_owner_prefix)
+            except Exception:  # noqa: BLE001
+                _tw = None
+            if _tw is not None:
+                _tw_state = str(_tw.get("state") or "error")
+                if _tw_state == "dead":
+                    self._emit_skip_event_daily(str(user_key), "token_window_dead")
+                    logger.info(
+                        "proactive 会话窗口已死，烧前跳过 user=%s age=%sh（TTL %sh）",
+                        user_key, _tw.get("age_hours"), _tw.get("ttl_hours"),
+                    )
+                    return
+                if _tw_state == "dying":
+                    self._emit_skip_event_daily(str(user_key), "token_window_dying")
+                    logger.warning(
+                        "proactive 会话窗口临期 user=%s token 年龄 %sh（TTL %sh）"
+                        "——用户再不发消息，主动消息将被平台拒收",
+                        user_key, _tw.get("age_hours"), _tw.get("ttl_hours"),
+                    )
         # 执行 LLM 上次决策的 wait_minutes（模型自判时机，非策略闸）
         import time as _time
 
@@ -1387,10 +1490,12 @@ class ProactiveScheduler:
                 unanswered_streak=account_unanswered_streak(hub, str(user_key), eng),
             )
             if skip:
-                append_proactive_event(
-                    session_key=user_key,
-                    sent=False,
-                    reason=gate_reason,
+                # 账本降噪（2026-10-17 批）：确定性闸的命中事件从「每 tick 一条」
+                # 收敛为「每 user|reason 每日一条」——生产实证 unanswered_limit
+                # 曾每 5 分钟写一行刷屏（信号被噪声淹没）。闸本身行为不变。
+                self._emit_skip_event_daily(
+                    str(user_key),
+                    gate_reason,
                     character_id=self._resolve_character_id(str(user_key)),
                 )
                 return
@@ -1640,10 +1745,17 @@ class ProactiveScheduler:
                 "proactive 投递失败 user=%s 连续第%d次 → 退避 %d 分钟",
                 user_key, fails, backoff_min,
             )
+            # 失败分类入账（2026-10-17 批）：窗口拒收/通道掉线/其他异常是三
+            # 种病——生产实证连续 11 次失败全是「平台窗口拒收」，账本此前
+            # 只写 backoff 看不出病型（_last_deliver_error 由 _send_targeted
+            # 失败分支写入；分类真源=_classify_deliver_error）。
+            _err_class = _classify_deliver_error(
+                str(getattr(self, "_last_deliver_error", "") or "")
+            )
             append_proactive_event(
                 session_key=user_key,
                 sent=False,
-                reason=f"deliver_failed_backoff_{backoff_min}m",
+                reason=f"deliver_failed_backoff_{backoff_min}m{_err_class}",
                 message=message[:80],
                 wait_minutes=decision.get("wait_minutes"),
                 character_id=char_id,
@@ -1751,7 +1863,12 @@ class ProactiveScheduler:
         return session_key_mod.is_wechat_key(session_key)
 
     async def _send_targeted(self, message: str, session_key: str | None = None) -> bool:
+        # 投递失败分类（2026-10-17 批）：每次尝试先清零，失败分支各自落短因，
+        # 供调用方账本分类（deliver_failed_backoff_XXm|<class>）——旧实现失败
+        # 只有 warning 日志，账本看不出「窗口拒收」与「通道掉线」是两种病。
+        self._last_deliver_error = ""
         if self._is_quiet_hours():
+            self._last_deliver_error = "quiet_hours"
             logger.warning(
                 "免打扰时段(%s-%s)：消息未投递（无紧急旁路），内容不计数不扣配额",
                 self._quiet_hours[0], self._quiet_hours[1],
@@ -1801,17 +1918,21 @@ class ProactiveScheduler:
                     # P1-21：通道不收 session_key（旧签名）——定向消息**绝不**
                     # 静默转广播（A 的私信发给全员 = 跨用户泄漏），直接判失败。
                     # 旧实现此处回退 sender(message) 广播并记「定向投递成功」。
+                    self._last_deliver_error = f"session_key_unsupported: {e}"
                     logger.warning(
                         "wechat 通道不接受 session_key，定向消息拒绝降级为广播: session=%s %s",
                         session_key, e,
                     )
                     return False
                 except Exception as e:  # noqa: BLE001
+                    self._last_deliver_error = str(e)[:200]
                     logger.warning("定向投递失败 session=%s: %s", session_key, e)
                     self._channel_instances["wechat"] = None
             # P1-21：微信会话键在 wechat 通道缺失/失败时直接返回 False。
             # 旧实现落到 _send_to_all —— instance=None 时整段跳过（微信形态
             # 零送达却继续白烧 LLM），有实例时变跨用户广播 + 记「定向成功」。
+            if not self._last_deliver_error:
+                self._last_deliver_error = "channel_unavailable"
             logger.warning("微信定向投递未成功（通道不可用），不回退广播: session=%s", session_key)
             return False
 
@@ -2226,6 +2347,12 @@ class ProactiveScheduler:
                 str(k): str(v) for k, v in degraded_day.items() if str(v or "")
             }
 
+        gate_skip_day = raw.get("gate_skip_event_day")
+        if isinstance(gate_skip_day, dict):
+            self._gate_skip_event_day = {
+                str(k): str(v) for k, v in gate_skip_day.items() if str(v or "")
+            }
+
         sent = raw.get("important_dates_sent")
         if isinstance(sent, list):
             self._important_dates_sent = {str(x) for x in sent if str(x or "")}
@@ -2252,6 +2379,9 @@ class ProactiveScheduler:
                     # 模型闸（2026-10-15）：getattr 防御——既有测试以 __new__ 构造
                     # stub 且只补部分账本属性，真实实例 __init__ 必然有该键。
                     "model_degraded_event_day": dict(getattr(self, "_model_degraded_event_day", {})),
+                    # 确定性节奏闸每日降噪账本（2026-10-17）：键为 "user|reason"，
+                    # 与模型闸同 getattr 防御。
+                    "gate_skip_event_day": dict(getattr(self, "_gate_skip_event_day", {})),
                     # 只保留最近 7 天（防无界增长；口径与 dedup_key 的日期前缀一致）
                     "important_dates_sent": sorted(self._important_dates_sent)[-200:],
                 }
@@ -2300,6 +2430,18 @@ class ProactiveScheduler:
             victims = [k for k in list(ledger) if _owned(str(k))]
             for k in victims:
                 ledger.pop(k, None)
+                removed += 1
+        # 确定性闸每日降噪账本（2026-10-17）：键形为 "{user_key}|{reason}"，
+        # 归属判定须先剥 reason 尾段再走 _owned（直接整键过 owner_of 会把
+        # "|unanswered_limit" 当成键的一部分误判）。
+        gate_skip_map = getattr(self, "_gate_skip_event_day", None)
+        if isinstance(gate_skip_map, dict):
+            victims = [
+                k for k in list(gate_skip_map)
+                if _owned(str(k).rpartition("|")[0])
+            ]
+            for k in victims:
+                gate_skip_map.pop(k, None)
                 removed += 1
         date_victims = [
             x for x in list(self._important_dates_sent)

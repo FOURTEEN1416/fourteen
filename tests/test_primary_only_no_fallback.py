@@ -285,11 +285,14 @@ class TestCandidateCompetition:
         d = decide_proactive(llm, "ctx", hook_keywords=["辩论赛准备"])
         assert d["message"] == "你之前问的辩论赛准备得怎么样了"
 
-    def test_decide_proactive_no_pick_without_keywords(self):
+    def test_decide_proactive_picks_even_without_keywords(self):
+        """2026-10-17 批契约升级：候选竞争不再被 hook_keywords 门卡死——
+        生产实证活材料空仓时（keywords 空）泛问候 message 直通连发 4 条。
+        无 keywords 时泛问候罚分与长度分照常生效，具体候选照样压掉泛问候。"""
         raw = (
             '{"should_contact": true, "message": "在干嘛", "reason": "r", '
             '"candidates": ["你之前问的辩论赛准备得怎么样了"]}'
         )
         llm = _KwargsLLM(result=raw)
-        d = decide_proactive(llm, "ctx")  # 无 keywords → 择优不触发（兼容）
-        assert d["message"] == "在干嘛"
+        d = decide_proactive(llm, "ctx")  # 无 keywords → 择优仍触发（新契约）
+        assert d["message"] == "你之前问的辩论赛准备得怎么样了"

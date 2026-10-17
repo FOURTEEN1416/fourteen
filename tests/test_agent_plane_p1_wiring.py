@@ -212,7 +212,10 @@ def test_scheduler_llm_proactive_delivers_and_records(monkeypatch, tmp_path):
     monkeypatch.setattr(apruntime, "get_ledger", lambda: led)
 
     llm = _FakeLLM(
-        '{"should_contact": true, "wait_minutes": 30, "message": "在干嘛呀", "reason": "想找你"}'
+        # 2026-10-17 契约升级：假 payload 换成具体由头句——「在干嘛呀」属零信息
+        # 泛问候，会被 generic_opener_contract 生成契约拒收（本测试验账本接线，
+        # 不验问候语义）。
+        '{"should_contact": true, "wait_minutes": 30, "message": "你之前说的考试准备好了吗", "reason": "想找你"}'
     )
     ctx = apruntime  # noqa: F841 — keep import used
     from proactive.llm_proactive import build_proactive_context
@@ -226,7 +229,7 @@ def test_scheduler_llm_proactive_delivers_and_records(monkeypatch, tmp_path):
         session_key="N:u1", sent=True, message=decision["message"], reason=decision["reason"]
     )
     events = led.query(session_key="N:u1", event_type="proactive_send")
-    assert events and events[0].payload.get("message") == "在干嘛呀"
+    assert events and events[0].payload.get("message") == "你之前说的考试准备好了吗"
 
 
 def test_orchestrator_source_uses_ledger_and_llm_profile():

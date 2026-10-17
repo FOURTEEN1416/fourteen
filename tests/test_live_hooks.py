@@ -142,13 +142,17 @@ class TestContextAndRules:
         assert HOOKS_SECTION_TITLE in ctx
 
     def test_hooks_section_absent_when_empty(self):
+        """2026-10-17 批契约升级：空 hooks 从「整段缺席」改为「空仓显式标注」——
+        生产实证零由头是客服腔的生成源（模型在材料真空里硬挤泛问候），
+        「没有由头」必须显式写出来，规则 13/14 的触发条件才机器可见。"""
         ctx = build_proactive_context(
             session_key="4:wx@im.wechat",
             hours_since_last_chat=3.0,
             local_time="2026-10-16 16:00 Friday",
             hooks_text="",
         )
-        assert HOOKS_SECTION_TITLE not in ctx
+        assert HOOKS_SECTION_TITLE in ctx  # 标题以「（空——…）」形态在场
+        assert "本轮没有任何具体由头" in ctx
 
     def test_rule13_present(self):
         assert "必须有由头" in DECISION_SYSTEM
