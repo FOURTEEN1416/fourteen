@@ -116,6 +116,15 @@ class TestZeroContentGreeting:
         for t in ("在吗", "你今天感觉怎么样？", "早上好", "吃了吗", "最近怎么样", "睡了吗"):
             assert _is_zero_content_greeting(t), t
 
+    def test_intimacy_openers_not_rejected(self):
+        """发现#2 红测：亲密问句（有明确关系指向）不得被判零信息拒收——
+        它们是伴侣产品的正当人设开场（F1 模板池同款认可），不是客服腔。
+        梯度：`_GENERIC_OPENER_RE` 择优罚分仍可压它们输给具体候选。"""
+        from proactive.llm_proactive import _is_zero_content_greeting
+
+        for t in ("想我了吗", "有没有想我？", "想我了没", "想我了吗？", "你今天感觉怎么样？有没有想我？"):
+            assert not _is_zero_content_greeting(t), t
+
     def test_concrete_messages_pass(self):
         """含具体事/由头的消息必须放行（宁宽勿误）。"""
         from proactive.llm_proactive import _is_zero_content_greeting
