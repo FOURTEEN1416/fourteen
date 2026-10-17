@@ -114,7 +114,13 @@ def load_live_hooks(session_key: str, memory: Any = None) -> LiveHooks:
     lines: list[str] = []
     keywords: list[str] = []
     sm = _structured(memory)
-    now = now_local()
+    # 🔴 2026-10-17 CI 红根治：`now_local()` 在非 UTC+8 主机（CI Ubuntu UTC）
+    # 返回 **aware** datetime（其 docstring 明令「只读墙钟字段，不得与历史
+    # 时间戳做跨时区算术」），而 `_parse_dt` 产出 **naive** —— naive/aware
+    # 相减/比较抛 TypeError 被两支 try 各自吞掉 → 提醒/承诺两源在 CI 静默
+    # 全灭（澄清源无时间运算独存，生产 UTC+8 主机 naive 不受影响 = 潜伏
+    # 可移植性缺陷）。统一钉 naive 北京墙钟：墙钟值不变、双源比较同型。
+    now = now_local().replace(tzinfo=None)
 
     if sm is not None and session_key:
         # ① 未答澄清

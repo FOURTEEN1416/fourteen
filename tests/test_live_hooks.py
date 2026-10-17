@@ -71,6 +71,28 @@ class TestLoadLiveHooks:
         assert bool(hooks) is False
         assert hooks.section == "" and hooks.keywords == []
 
+    def test_aware_now_local_does_not_lose_sources(self, monkeypatch):
+        """2026-10-17 CI 红回归锚：非 UTC+8 主机（CI Ubuntu UTC）上
+        `now_local()` 返回 **aware** datetime——旧实现直接拿它与 `_parse_dt`
+        的 naive 做相减/比较 → TypeError 被 try 吞掉 → 提醒/承诺两源静默全灭
+        （澄清源无时间运算独存，本地 UTC+8 naive 路径永远测不到）。
+        本用例模拟 CI 环境：now_local 强制 aware，两源必须仍在。"""
+        from datetime import datetime, timedelta, timezone
+
+        from utils import local_time
+
+        aware_now = datetime.now(tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
+        monkeypatch.setattr(local_time, "now_local", lambda: aware_now)
+        future = (aware_now.replace(tzinfo=None) + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
+        sm = _FakeSM(
+            intent={"last_question": "周末要不要一起去爬山？", "intent": "set_reminder"},
+            reminders=[{"content": "明早六点叫我起床", "trigger_time": future}],
+            facts=[{"fact": "这周答辩很紧张", "updated_at": "2099-01-01 08:00:00"}],
+        )
+        hooks = load_live_hooks("4:wx@im.wechat", _FakeMemory(sm))
+        assert "明早六点叫我起床" in hooks.section, "aware now_local 下提醒源不得丢失"
+        assert "这周答辩很紧张" in hooks.section, "aware now_local 下承诺源不得丢失"
+
     def test_none_memory_falsy(self):
         assert bool(load_live_hooks("4:wx@im.wechat", None)) is False
 
