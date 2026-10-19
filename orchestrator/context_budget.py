@@ -399,13 +399,29 @@ HISTORY_GAP_ANNOTATE_MINUTES = 30.0
 # 间隔注记（2026-10-16 对抗验收抓出：前缀剥除遗漏了该尾随注记）。改格式只改这里。
 HISTORY_GAP_NOTE_PREFIX = "（距上一条 "
 
+# ── 会话分段渲染（2026-10-19 时间感知 3.0 批）────────────────
+#
+# 生产病灶：周六对话澄清闭环 → 51 小时后周一重新开场，模型说「你刚说的那个咳」。
+# 行尾「距上一条 X」注记 + system prompt 软指引三重信号全在仍失效（注意力竞争/
+# 指令稀释）——微信 UI 用时间分隔条把长间隔视觉分组，prompt 里无等效结构。
+# 阈值：相邻行（或首行/末行与 now）间隔超过该小时数 → 插入 [时段分隔] 伪行。
+SESSION_SEGMENT_GAP_HOURS = 6.0
+# 分隔行行首标记（单一真源）——出站守卫按它剥除模型回显的分隔行文本。
+SEGMENT_DIVIDER_MARKER = "[时段分隔]"
+
+
+def _segment_divider_row(content: str) -> dict:
+    """构造 [时段分隔] 伪行：role=system、无 timestamp（annotate 重入原样透传）。"""
+    return {"role": "system", "content": content, "timestamp": ""}
+
 
 def annotate_history_time_gaps(
     history: list | None,
     now: Any | None = None,
     gap_minutes: float = HISTORY_GAP_ANNOTATE_MINUTES,
+    segment_gap_hours: float = SESSION_SEGMENT_GAP_HOURS,
 ) -> list:
-    """给历史消息**逐行**加时间前缀（纯函数，不改入参）。
+    """给历史消息**逐行**加时间前缀 + 长间隔时段分段（纯函数，不改入参）。
 
     2026-10-12 语义升级：连续短间隔对话不再豁免（生产实证：连续聊天形态下
     模型把用户叙述的钟点当正在发生）。现口径 —— 行带 ``timestamp``（UTC 落库
@@ -416,24 +432,76 @@ def annotate_history_time_gaps(
       （``humanize_gap_cn`` 风格，保留「隔了六天重新出现」的直觉信号）；
       首条无上一条，不掺后缀。
 
+    2026-10-19 会话分段：相邻行间隔超过 ``segment_gap_hours``（默认 6h）→
+    在该段首行前插 [时段分隔] 头注（「以下是约 X 前 … 的对话，已结束」）；
+    历史最后一行距今也超阈值 → 末尾补 [时段分隔] 尾注（旧话题已翻篇、以
+    新开场为准）。对齐微信时间分隔条的视觉语义——结构信号不依赖模型悟性。
+    分隔行无 timestamp，annotate 重入原样透传（幂等）。
+
     无 timestamp / 畸形时间戳的行原样透传（旧形态/合成行不炸，fail-open）。
-    ``now`` 参数保留兼容（逐行标注后不再需要 now 基准），不参与判定。
+    ``now`` 缺省取 :func:`utils.local_time.now_local`（分段判定需要 now 基准）。
     """
     rows = list(history or [])
     if not rows:
         return rows
-    from utils.local_time import beijing_wall, humanize_gap_cn
+    from utils.local_time import (
+        beijing_wall,
+        humanize_gap_cn,
+        now_local,
+        weekday_cn,
+    )
+
+    # 幂等守卫：输入已含 [时段分隔] 行（重入/上层已渲染）→ 不再插分隔行，
+    # 只保留第一遍的逐行时间标注结果。
+    if any(
+        isinstance(r, dict) and str(r.get("content") or "").startswith(SEGMENT_DIVIDER_MARKER)
+        for r in rows
+    ):
+        prev_wall: Any | None = None
+        restamped: list = []
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("timestamp"):
+                restamped.append(row)
+                continue
+            ts = beijing_wall(row.get("timestamp"))
+            if ts is None:
+                restamped.append(row)
+                continue
+            gap = None if prev_wall is None else (ts - prev_wall).total_seconds()
+            content = str(row.get("content") or "")
+            if gap is not None and gap > float(gap_minutes) * 60.0:
+                content = (
+                    f"[{ts:%m-%d %H:%M}] {content}{HISTORY_GAP_NOTE_PREFIX}"
+                    f"{humanize_gap_cn(gap)}）".rstrip()
+                )
+            else:
+                content = f"[{ts:%m-%d %H:%M}] {content}".rstrip()
+            stamped = dict(row)
+            stamped["content"] = content
+            restamped.append(stamped)
+            prev_wall = ts
+        return restamped
+
+    wall_now = now if now is not None else now_local()
+    if getattr(wall_now, "tzinfo", None) is not None:
+        wall_now = wall_now.replace(tzinfo=None)  # 归一北京 naive 墙钟
 
     threshold = float(gap_minutes) * 60.0
-    out: list = []
+    seg_threshold = float(segment_gap_hours) * 3600.0
+
+    # 第一遍：逐行打时间前缀（既有语义），同时收集各行的北京墙钟。
+    stamped_rows: list = []
+    walls: list = []
     prev_wall: Any | None = None
     for row in rows:
         if not isinstance(row, dict) or not row.get("timestamp"):
-            out.append(row)
+            stamped_rows.append(row)
+            walls.append(None)
             continue
         ts = beijing_wall(row.get("timestamp"))
         if ts is None:
-            out.append(row)
+            stamped_rows.append(row)
+            walls.append(None)
             continue
         gap = None if prev_wall is None else (ts - prev_wall).total_seconds()
         content = str(row.get("content") or "")
@@ -445,8 +513,44 @@ def annotate_history_time_gaps(
             content = f"[{ts:%m-%d %H:%M}] {content}".rstrip()
         stamped = dict(row)
         stamped["content"] = content
-        out.append(stamped)
+        stamped_rows.append(stamped)
+        walls.append(ts)
         prev_wall = ts
+
+    # 第二遍：插 [时段分隔] 行。
+    def _head_divider(ts: Any) -> dict:
+        age = (wall_now - ts).total_seconds()
+        return _segment_divider_row(
+            f"{SEGMENT_DIVIDER_MARKER} 以下是约 {humanize_gap_cn(max(age, 0))} 前"
+            f"（{ts:%m-%d} {weekday_cn(ts)} {ts:%H:%M} 起）的对话，已结束"
+        )
+
+    out: list = []
+    first_ts_idx = next((i for i, w in enumerate(walls) if w is not None), None)
+    # 首段距今超阈值（整段历史都旧的病例形态）→ 首行前插头注。
+    if first_ts_idx is not None and (
+        wall_now - walls[first_ts_idx]
+    ).total_seconds() >= seg_threshold:
+        out.append(_head_divider(walls[first_ts_idx]))
+    for idx, (row, ts) in enumerate(zip(stamped_rows, walls, strict=True)):
+        if ts is not None and idx != first_ts_idx:
+            # 段间边界：与上一有 ts 行间隔超阈值（无 ts 行不阻断判定）。
+            prev_ts = next((w for w in reversed(walls[:idx]) if w is not None), None)
+            if prev_ts is not None and (ts - prev_ts).total_seconds() >= seg_threshold:
+                out.append(_head_divider(ts))
+        out.append(row)
+    # 末行距今超阈值 → 末尾补「翻篇」尾注（上一回合已隔夜，用户此刻重新开场）。
+    last_ts = next((w for w in reversed(walls) if w is not None), None)
+    if last_ts is not None:
+        age_end = (wall_now - last_ts).total_seconds()
+        if age_end >= seg_threshold:
+            out.append(
+                _segment_divider_row(
+                    f"{SEGMENT_DIVIDER_MARKER} 以上对话已是约 {humanize_gap_cn(age_end)} 前的事，"
+                    f"那些旧话题视作翻篇；用户现在重新出现，以最新消息为准，"
+                    f"不要主动翻起已结束的话题"
+                )
+            )
     return out
 
 

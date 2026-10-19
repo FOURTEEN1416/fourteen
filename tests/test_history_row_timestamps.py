@@ -34,9 +34,15 @@ class TestEveryRowTimestamped:
     """annotate_history_time_gaps 语义升级：逐行前缀，短间隔不再豁免。"""
 
     def _import(self):
+        """本文件只测逐行前缀语义（2026-10-19 起 annotate 兼管时段分段渲染，
+        见 test_session_segment_render.py）；此处关闭分段保持索引断言稳定。"""
         from orchestrator.context_budget import annotate_history_time_gaps
 
-        return annotate_history_time_gaps
+        def _annotate(rows, **kw):
+            kw.setdefault("segment_gap_hours", float("inf"))
+            return annotate_history_time_gaps(rows, **kw)
+
+        return _annotate
 
     def test_continuous_short_interval_rows_all_get_prefix(self):
         """连续短间隔对话的每一行都必须有 [MM-DD HH:MM] 前缀（事故直接解药）。"""

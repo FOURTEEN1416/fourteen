@@ -221,18 +221,42 @@ def extract_current_topics(
     *,
     current_user_message: str = "",
     limit: int = 3,
+    max_age_hours: float = 24.0,
+    now: Any | None = None,
 ) -> list[str]:
     """从最近对话提取**当前话题**关键词（轻量规则，不走 LLM）。
 
     取材：近几条用户原话 + 当前用户消息 + 常见实体词表 + 「聊/说/关于 X」捕获。
     用途：注入 prompt 的「# 当前话题」续聊钩子 —— 让模型像人一样沿着一个
     话题说下去（补充想法/经历/自然追问），而不是每轮换一个无关点或自问自答。
+
+    时间窗（2026-10-19 时间感知 3.0 批）：只从距今 ``max_age_hours``（默认 24h）
+    内的消息取材 —— 旧时段话题不再被「请沿着聊下去」教唆（生产实证：10-16
+    「吃饭」在 10-19 被注入当前话题）。无 timestamp 行不受窗限制（fail-open，
+    兼容旧形态/合成行）；当前用户消息始终参与。
     """
     texts: list[str] = []
+    wall_now = None
+    if now is not None:
+        wall_now = now.replace(tzinfo=None) if getattr(now, "tzinfo", None) is not None else now
     for item in messages or []:
         if isinstance(item, dict):
-            if str(item.get("role") or "").lower() == "user":
-                texts.append(str(item.get("content") or ""))
+            if str(item.get("role") or "").lower() != "user":
+                continue
+            ts = item.get("timestamp")
+            if ts and wall_now is not None:
+                try:
+                    from utils.local_time import beijing_wall
+
+                    w = beijing_wall(ts)
+                    if w is None:
+                        continue
+                    age = (wall_now - w).total_seconds()
+                    if age > float(max_age_hours) * 3600.0:
+                        continue
+                except Exception:  # noqa: BLE001
+                    pass  # 解析失败按无时间窗行处理（fail-open）
+            texts.append(str(item.get("content") or ""))
         else:
             texts.append(str(item or ""))
     if current_user_message:
@@ -460,18 +484,25 @@ def _system_markers_re() -> re.Pattern[str]:
     """按 ``orchestrator.context_budget.OUTBOUND_CHANNEL_MARKERS`` 单一真源构建
     行首标记正则；真源不可用时回落到既有两个字面量（兼容旧测试形态）。"""
     try:
-        from orchestrator.context_budget import OUTBOUND_CHANNEL_MARKERS
+        from orchestrator.context_budget import (
+            OUTBOUND_CHANNEL_MARKERS,
+            SEGMENT_DIVIDER_MARKER,
+        )
 
         markers = "|".join(re.escape(str(v)) for v in OUTBOUND_CHANNEL_MARKERS.values() if str(v))
+        seg = re.escape(str(SEGMENT_DIVIDER_MARKER))
         if markers:
-            return re.compile(rf"^[ \t]*(?:{markers}|\[\d{{2}}-\d{{2}} \d{{2}}:\d{{2}}\])[ \t]*", re.MULTILINE)
+            return re.compile(
+                rf"^[ \t]*(?:{markers}|{seg}|\[\d{{2}}-\d{{2}} \d{{2}}:\d{{2}}\])[ \t]*",
+                re.MULTILINE,
+            )
     except Exception:  # noqa: BLE001
         pass
     return _SYSTEM_MARKERS_RE_FALLBACK
 
 
 _SYSTEM_MARKERS_RE_FALLBACK = re.compile(
-    r"^[ \t]*(?:\[主动\]|\[定时提醒\]|\[\d{2}-\d{2} \d{2}:\d{2}\])[ \t]*",
+    r"^[ \t]*(?:\[主动\]|\[定时提醒\]|\[时段分隔\]|\[\d{2}-\d{2} \d{2}:\d{2}\])[ \t]*",
     re.MULTILINE,
 )
 
@@ -501,6 +532,31 @@ def _history_gap_note_re() -> re.Pattern[str]:
     return _HISTORY_GAP_NOTE_RE_FALLBACK
 
 
+# ── 出站相对时间词改写（2026-10-19 时间感知 3.0 批 · P3）────────────────
+#
+# 生产实证：距上一回合 51 小时，「（距上一条 2 天）」注记+时间锚点+推理指引
+# 三重信号全在，agnes 仍输出「你刚说的那个咳」——软约束对相对时间词彻底失效。
+# 闸门哲学（呼应 v1.52 生成侧判死）：>45min 时「刚才/刚刚/刚X(动词)」确定性
+# 降为「之前」；「刚好/刚巧/刚强」等非时间义形态负向断言保护。
+
+_TIME_WORD_AGE_THRESHOLD_SECONDS = 45 * 60.0
+_GANG_VERB_RE = re.compile(r"(?<![好巧强毅])刚(?=(?:说|讲|提|问|聊|发|告诉))")
+_JUST_NOW_RE = re.compile(r"刚才|刚刚")
+
+
+def _recalibrate_time_words(text: str) -> str:
+    """相对时间词确定性降级：刚才/刚刚 → 之前；单字刚+动词 → 之前。
+
+    仅改写时间义形态；「刚好/刚巧/刚强/才刚」等受负向断言保护原样保留。
+    """
+    s = str(text or "")
+    if not s:
+        return s
+    s = _JUST_NOW_RE.sub("之前", s)
+    s = _GANG_VERB_RE.sub("之前", s)
+    return s
+
+
 def _strip_system_markers(text: str) -> str:
     """剥掉注入侧元数据：**行首**标记与**行尾**间隔注记。
 
@@ -528,6 +584,7 @@ def terminal_reply_guard(
     character_name: str = "",
     session_key: str = "",
     character_id: str = "",
+    last_turn_age_seconds: float | None = None,
 ) -> str:
     """出站终审守卫（发送与落库之前的最后一道门，2026-10-14 生产事故批）。
 
@@ -559,6 +616,13 @@ def terminal_reply_guard(
     s = _strip_system_markers(s)
     if not s:
         return ""   # 只剩标记 → 调用方走 empty_reply 兜底
+    # 2026-10-19 时间感知 3.0：距上一回合 >45min 时相对时间词确定性降级
+    # （刚才/刚刚/刚X → 之前）。None（主动链/提醒链无会话间隔语境）不动。
+    if (
+        last_turn_age_seconds is not None
+        and float(last_turn_age_seconds) > _TIME_WORD_AGE_THRESHOLD_SECONDS
+    ):
+        s = _recalibrate_time_words(s)
     s = strip_emoji_echo(s, user_msg)
     name = str(character_name or "").strip()
     if name and s in {name, name + "。", name + "！", name + "!"}:

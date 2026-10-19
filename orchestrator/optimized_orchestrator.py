@@ -1018,8 +1018,11 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             chat_history = annotate_outbound_markers(chat_history)
         except Exception as e:  # noqa: BLE001
             logger.debug("annotate_outbound_markers failed: %s", e)
+        # 距上一回合的真实间隔（2026-10-19 时间感知 3.0 批）：既喂锚点也喂
+        # 出站时间词改写闸（terminal_reply_guard 的 last_turn_age_seconds）。
+        last_turn_age_seconds: float | None = None
         try:
-            from utils.local_time import time_anchor_line
+            from utils.local_time import beijing_wall, now_local, time_anchor_line
 
             last_ts = next(
                 (
@@ -1030,6 +1033,13 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 None,
             )
             anchor = time_anchor_line(last_message_at=last_ts)
+            if last_ts:
+                _lw = beijing_wall(last_ts)
+                if _lw is not None:
+                    _wn = now_local()
+                    if getattr(_wn, "tzinfo", None) is not None:
+                        _wn = _wn.replace(tzinfo=None)
+                    last_turn_age_seconds = max(0.0, (_wn - _lw).total_seconds())
             if isinstance(memory_context, dict):
                 memory_context["time_anchor"] = anchor
             elif memory_context:
@@ -1041,11 +1051,17 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
         # 当前话题续聊钩子（2026-09-23）：从近期对话提取话题，进 memory_context，
         # 由 persona_service 渲染为「# 当前话题」+ 续聊指令（像人一样把话说下去）。
+        # 2026-10-19 时间窗：只取最近 24h 内的消息 —— 旧时段话题不得被「请沿着
+        # 聊下去」教唆（生产实证：10-16「吃饭」在 10-19 被注入当前话题钩子）。
         try:
+            from utils.local_time import now_local as _now_local
             from utils.prompt_sanitize import extract_current_topics
 
+            _wn = _now_local()
             current_topics = extract_current_topics(
-                chat_history, current_user_message=user_msg_clean
+                chat_history,
+                current_user_message=user_msg_clean,
+                now=_wn.replace(tzinfo=None) if getattr(_wn, "tzinfo", None) is not None else _wn,
             )
         except Exception as e:  # noqa: BLE001
             logger.debug("extract_current_topics failed: %s", e)
@@ -1280,6 +1296,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             # 缺陷 I：回放可答「本轮用了哪些事实版本与知识片段」
             "memory_fact_sources": memory_fact_sources,
             "knowledge_snippets": knowledge_snippets,
+            # 2026-10-19 时间感知 3.0：距上一回合秒数（出站时间词改写闸输入）
+            "last_turn_age_seconds": last_turn_age_seconds,
         }
 
     def _enqueue_profile_sync(self, session_id, user_msg, reply, llm, *, character_id="", turn_id=""):
@@ -1511,6 +1529,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         character_card=None,
         user_msg: str = "",
         session_id: str = "",
+        last_turn_age_seconds: float | None = None,
     ) -> str:
         """唯一输出定稿：清洗、空回复降级、安全检查均发生在发送和落库之前。
 
@@ -1530,7 +1549,12 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             if is_external_character_id(character_id) and callable(loader):
                 character_card = loader(character_id)
         char_name = str(character_card.get("name") or "") if isinstance(character_card, dict) else ""
-        reply = terminal_reply_guard(reply, user_msg=user_msg, character_name=char_name)
+        reply = terminal_reply_guard(
+            reply,
+            user_msg=user_msg,
+            character_name=char_name,
+            last_turn_age_seconds=last_turn_age_seconds,
+        )
         try:
             from utils.address_terms import resolve_address, strip_forbidden_vocatives
 
@@ -1740,6 +1764,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     character_card,
                     user_msg=user_msg_clean,
                     session_id=session_id,
+                    last_turn_age_seconds=ctx.get("last_turn_age_seconds"),
                 )
                 reply = await publish(reply, emotion=emotion_state.to_dict() if emotion_state else None)
 

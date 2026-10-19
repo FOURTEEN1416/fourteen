@@ -72,9 +72,15 @@ class TestTimeAnchor:
 
 class TestHistoryAnnotation:
     def _import(self):
+        """只测逐行前缀语义（时段分段渲染见 test_session_segment_render.py，
+        2026-10-19 起由 annotate 兼管）——此处关闭分段保持索引断言稳定。"""
         from orchestrator.context_budget import annotate_history_time_gaps
 
-        return annotate_history_time_gaps
+        def _annotate(rows, **kw):
+            kw.setdefault("segment_gap_hours", float("inf"))
+            return annotate_history_time_gaps(rows, **kw)
+
+        return _annotate
 
     def _rows(self):
         # timestamp = UTC 串；标注输出本地（北京）时间

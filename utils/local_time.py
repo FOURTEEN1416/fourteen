@@ -113,6 +113,11 @@ _WEEKDAY_CN = ("周一", "周二", "周三", "周四", "周五", "周六", "周�
 _BEIJING = timezone(timedelta(hours=8))
 
 
+def weekday_cn(wall: datetime) -> str:
+    """北京墙钟 datetime → 中文星期（会话分段渲染等注入侧共用）。"""
+    return _WEEKDAY_CN[wall.weekday()]
+
+
 def parse_db_timestamp(value: object) -> datetime | None:
     """解析落库时间戳（chat_history.created_at 等）为 **aware UTC** datetime。
 

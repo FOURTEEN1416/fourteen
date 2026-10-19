@@ -224,16 +224,22 @@ def test_gap_note_only_falls_back_to_empty():
 
 def test_gap_note_prefix_matches_truth_source():
     """真源对账：剥除前缀取自 ``context_budget``，注记形态与真源产出逐字一致。"""
+    from datetime import datetime
+
     from orchestrator.context_budget import (
         HISTORY_GAP_NOTE_PREFIX,
         annotate_history_time_gaps,
     )
 
+    # now 钉在当天 14:00：两行距今均 <6h（不触发时段分段）、行间隔 3h<6h
+    # （无段间头注）——本用例只测「间隔后缀真源对账」，分段渲染由
+    # test_session_segment_render.py 专测。
     rows = annotate_history_time_gaps(
         [
             {"role": "assistant", "content": "早啊", "timestamp": "2026-10-15T10:00:00+00:00"},
             {"role": "user", "content": "在吗", "timestamp": "2026-10-15T13:00:00+00:00"},
-        ]
+        ],
+        now=datetime(2026, 10, 15, 22, 0, 0),
     )
     annotated = rows[1]["content"]
     assert HISTORY_GAP_NOTE_PREFIX in annotated  # 真源确实追加了该前缀
