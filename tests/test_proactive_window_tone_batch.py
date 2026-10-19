@@ -557,6 +557,27 @@ class TestTokenWindowGate:
         dead_events = [e for e in ledger if e.get("reason") == "token_window_dead"]
         assert len(dead_events) == 1, "同一 user|reason 每日至多一条"
 
+    def test_dead_window_log_daily_only(self, monkeypatch, caplog):
+        """死窗跳过 INFO 日志每日至多一条（生产 3 死窗用户 × 288 tick 曾日产 864 行）。
+
+        日志跟随账本首次发射：当日后续 tick 只剩 _emit_skip_event_daily
+        内部的 debug，不再刷屏。
+        """
+        import logging
+
+        eng = _FakeEngine()
+        sched, delivered, ledger, llm = _make_chain_scheduler(
+            monkeypatch, window_state={"state": "dead", "age_hours": 70.0, "ttl_hours": 24.0},
+        )
+        hub = _Hub({self.KEY: eng})
+        with caplog.at_level(logging.INFO, logger="scheduler"):
+            sched._llm_proactive_one_user(hub, self.KEY)
+            sched._llm_proactive_one_user(hub, self.KEY)
+            sched._llm_proactive_one_user(hub, self.KEY)
+        dead_logs = [r for r in caplog.records
+                     if "会话窗口已死" in r.getMessage() and r.levelno == logging.INFO]
+        assert len(dead_logs) == 1, f"同一日死窗 INFO 日志至多一条，实际 {len(dead_logs)} 条"
+
     def test_dying_window_warns_but_proceeds(self, monkeypatch):
         eng = _FakeEngine()
         sched, delivered, ledger, llm = _make_chain_scheduler(
@@ -565,6 +586,22 @@ class TestTokenWindowGate:
         sched._llm_proactive_one_user(_Hub({self.KEY: eng}), self.KEY)
         assert any(e.get("reason") == "token_window_dying" for e in ledger)
         assert llm.calls == 1 and delivered, "临期不拦——窗口还开着"
+
+    def test_dying_window_log_daily_only(self, monkeypatch, caplog):
+        """临期 WARNING 同样每日至多一条（同型降噪）。"""
+        import logging
+
+        eng = _FakeEngine()
+        sched, delivered, ledger, llm = _make_chain_scheduler(
+            monkeypatch, window_state={"state": "dying", "age_hours": 21.0, "ttl_hours": 24.0},
+        )
+        hub = _Hub({self.KEY: eng})
+        with caplog.at_level(logging.WARNING, logger="scheduler"):
+            sched._llm_proactive_one_user(hub, self.KEY)
+            sched._llm_proactive_one_user(hub, self.KEY)
+        dying_logs = [r for r in caplog.records
+                      if "会话窗口临期" in r.getMessage() and r.levelno == logging.WARNING]
+        assert len(dying_logs) == 1, f"同一日临期 WARNING 至多一条，实际 {len(dying_logs)} 条"
 
     def test_missing_window_fails_open(self, monkeypatch):
         """missing/empty/error=未知放行（宁宽勿误），不落 token 事件。"""

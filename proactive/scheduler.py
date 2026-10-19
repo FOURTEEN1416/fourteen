@@ -1410,14 +1410,18 @@ class ProactiveScheduler:
             if _tw is not None:
                 _tw_state = str(_tw.get("state") or "error")
                 if _tw_state == "dead":
-                    self._emit_skip_event_daily(str(user_key), "token_window_dead")
-                    logger.info(
-                        "proactive 会话窗口已死，烧前跳过 user=%s age=%sh（TTL %sh）",
-                        user_key, _tw.get("age_hours"), _tw.get("ttl_hours"),
-                    )
+                    # 日志跟随账本首次（每日一条）：生产 3 死窗用户 × 288 tick
+                    # 曾日产 864 行同款 INFO，把真信号淹掉。降噪后同日后续
+                    # tick 只剩 _emit_skip_event_daily 内部的 debug。
+                    if self._emit_skip_event_daily(str(user_key), "token_window_dead"):
+                        logger.info(
+                            "proactive 会话窗口已死，烧前跳过 user=%s age=%sh（TTL %sh）",
+                            user_key, _tw.get("age_hours"), _tw.get("ttl_hours"),
+                        )
                     return
-                if _tw_state == "dying":
-                    self._emit_skip_event_daily(str(user_key), "token_window_dying")
+                if _tw_state == "dying" and self._emit_skip_event_daily(
+                    str(user_key), "token_window_dying"
+                ):
                     logger.warning(
                         "proactive 会话窗口临期 user=%s token 年龄 %sh（TTL %sh）"
                         "——用户再不发消息，主动消息将被平台拒收",
