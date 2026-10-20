@@ -149,3 +149,7 @@ data.空库备份*/
 
 # W18 历遍批隔离区（测试污染克隆卡取证留档，不入库）
 _quarantine/
+
+# AOCI agent host integration (machine-bound; do not commit)
+.mcp.json
+.mcp.json.backup.*
