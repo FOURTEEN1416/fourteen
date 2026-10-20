@@ -5,9 +5,10 @@ glm-4-flash 出客服腔 → 需要 agnes 回链首；但 agnes 会挂死（read
 链首挂死 + 编排层整链预算 = 再次吐出超时兜底句。
 因此链首必须带**按供应商收紧的超时**，使「挂死 → 降级」留在整链预算内。
 
-2026-10-20 质量悬崖批：整链预算 30→45s。生产实测 agnes 健康响应上界 21.1s
-（15s 阈值会误杀），而外层 30s 会在「agnes 拖到 25s 自身超时 + 智谱接住」这条
-最坏健康路径走完前切断，把用户打到 timeout 旁路句。45s = 25s 链首 + 20s 降级。
+2026-10-20 质量悬崖批：整链预算 30→60s。实测 agnes 延迟分布 1.1~51.7s
+（8 次采样：1.1/2.4/3.4/10.5/10.9/24.6/37.4/51.7），15s 与 25s 阈值都在
+误杀健康响应；外层 30s/45s 更会在「agnes 拖到自身超时 + 智谱接住」这条最坏
+健康路径走完前切断。60s = 40s 链首 + 20s 降级窗口。
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from llm_provider.openai_compatible_provider import OpenAICompatibleProvider
 
 ROOT = Path(__file__).resolve().parent.parent
 # 编排层整链预算（optimized_orchestrator 的 asyncio.wait_for）
-CHAIN_BUDGET = 45.0
+CHAIN_BUDGET = 60.0
 
 
 def _read_timeout(seconds: float | None) -> float:

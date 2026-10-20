@@ -1742,11 +1742,12 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     except Exception as e:  # noqa: BLE001
                         logger.debug("计数反诘检查异常: %s", e)
 
-                    # ── 主 LLM 对话（带 45s 超时保护，使用用户级或全局 gateway） ──
-                    # 2026-10-20 质量悬崖批：30→45s。网关内 agnes 单 provider 读超时
-                    # 25s + 降级到智谱约 15s = 40s，30s 外层会在**降级链还没走完**
-                    # 时就切断，把用户打到 timeout 旁路句（等于白丢一轮对话）。
-                    # 45s 覆盖「agnes 拖到自身超时 + 智谱接住」的最坏健康路径。
+                    # ── 主 LLM 对话（带 60s 超时保护，使用用户级或全局 gateway） ──
+                    # 2026-10-20 质量悬崖批：30→60s。网关内 agnes 读超时 40s
+                    #（实测延迟分布 1.1~51.7s，P90 需 40s）+ 降级到智谱约 15s，
+                    # 30s/45s 外层都可能在**降级链还没走完**时切断，把用户打到
+                    # timeout 旁路句（等于白丢一轮对话）。60s 覆盖最坏健康路径；
+                    # 用户体感由 typing 指示承担，宁可慢也不要错模型代写。
                     try:
                         reply = await asyncio.wait_for(
                             request_llm.chat(
@@ -1757,10 +1758,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                                 max_tokens=2048,
                                 attachments=attachments,
                             ),
-                            timeout=45.0,
+                            timeout=60.0,
                         )
                     except asyncio.TimeoutError:
-                        logger.warning("LLM 调用超时 (45s), session=%s", session_id)
+                        logger.warning("LLM 调用超时 (60s), session=%s", session_id)
                         from utils.fallback_lines import get_fallback_line
                         from utils.reply_mode import read_reply_mode
                         _fb = get_fallback_line(

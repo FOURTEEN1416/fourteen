@@ -519,6 +519,17 @@ class MultiProviderGateway:
                     _record_fallback(key, "success")
                     self._mark_provider_result(key, True)
                     self._publish_current(key)
+                    if key != keys[0]:
+                        # 2026-10-20 质量悬崖批：降级**必须可见**。
+                        # 生产实证 10-20：agnes 一次抖动就熔断 300s，报障对话
+                        # （2873/2875）全部由 glm-4.5-flash 写出客服腔，而日志里
+                        # 只有「进入熔断」没有「这一轮谁在说话」——排障时无法把
+                        # 质量塌方与具体回复对上。此行为结构化证据（不含原文）。
+                        logger.warning(
+                            "[MultiGateway] quality_degraded: 本轮由降级供应商 %s 生成"
+                            "（链首 %s 不可用），回复质量可能低于角色基线",
+                            key, keys[0],
+                        )
                     return result
                 last_error = result
                 _record_fallback(key, "fallback")

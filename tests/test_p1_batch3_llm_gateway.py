@@ -369,18 +369,18 @@ def test_breaker_opens_after_threshold_failures():
     assert good.calls == threshold + 1
 
 
-def test_agnes_request_timeout_twenty_five_seconds():
-    """agnes 配置超时 15→25s（2026-10-20 质量悬崖批）。
+def test_agnes_request_timeout_covers_measured_p90():
+    """agnes 配置超时必须覆盖实测 P90（2026-10-20 质量悬崖批）。
 
     历史：10-13 提速批 20→8s（误杀）→ 10-15 调回 15s → 10-20 再调 25s。
-    10-20 实测生产形态 prompt（system ~5.9k 字 + 19 条历史 + max_tokens 2048）
-    下 agnes 响应 3.8/8.9/12.4/12.8/14.5/18.3/21.1s，8 次采样 1 次 40s 超时：
-    15s 会把 18.3s 与 21.1s 这两次**健康响应**判死，实测当日 24 次调用 15 次
-    失败/10 次熔断。锚定 25s 的下界语义：不得再压回误杀区间。
+    10-20 两轮实测生产形态 prompt（system ~5.9k 字 + 19 条历史）下 agnes 延迟
+    分布 1.1/2.4/3.4/10.5/10.9/24.6/37.4/51.7s：15s 误杀 5 次、25s 误杀 2 次
+    **健康响应**，当日 24 次调用 15 次失败/10 次熔断，报障对话全部由降级模型
+    生成。下界语义：不得低于实测 P90（40s），否则回到误杀→熔断→客服腔循环。
     """
     cfg = json.loads(
         (Path(__file__).resolve().parents[1] / "config" / "llm_providers.json").read_text(
             encoding="utf-8"
         )
     )
-    assert cfg["providers"]["agnes"]["request_timeout"] == 25
+    assert cfg["providers"]["agnes"]["request_timeout"] >= 40
