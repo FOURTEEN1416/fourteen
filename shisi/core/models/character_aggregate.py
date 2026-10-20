@@ -201,7 +201,15 @@ class CharacterAggregate(BaseModel):
                 ])
 
         if knowledge_context:
-            parts.extend(["", "# 角色知识库", knowledge_context])
+            # 模式边界（2026-10-20 二轮，生产实证）：知识库检索结果里也可能带
+            # 卡文原文的括号动作——`mes_example` 同时被索引进知识库（source=
+            # mes_example），生产 prompt_slots 的 knowledge_snippets[0] 实测为
+            # 「……（想了想）周五我来给你做饭」，17:51 那轮正因此把小说格式重新
+            # few-shot 进沉浸式。首轮只剥了对话示例段，漏了这条并行通道。
+            if _immersive:
+                knowledge_context = strip_stage_directions(knowledge_context)
+            if knowledge_context:
+                parts.extend(["", "# 角色知识库", knowledge_context])
 
         if storyline_context:
             parts.extend(["", "# 剧情线", storyline_context])

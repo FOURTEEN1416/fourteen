@@ -71,42 +71,47 @@ def _make_gw(**providers) -> MultiProviderGateway:
 
 
 def test_breaker_opens_after_consecutive_failures_and_skips():
-    """2026-10-13 降级提速批改写：阈值 1 → 首轮失败即开闸（旧口径 2 次已废）。"""
+    """连续失败达阈值后跳过坏供应商（2026-10-20：阈值 2）。
+
+    旧口径「首轮失败即开闸」在 10-20 生产里把一次抖动放大成 5 分钟全量降级，
+    已回调为 2 次；到阈值后行为不变 —— 后续轮次直落 good。
+    """
     bad, good = _FailProv(), _OkProv()
     gw = _make_gw(a=bad, b=good)
+    threshold = gw._BREAKER_THRESHOLD
 
-    async def _three():
-        for _ in range(3):
+    async def _rounds():
+        for _ in range(threshold + 2):
             r = await gw.chat(query="hi")
             assert r == "好的"
 
-    asyncio.run(_three())
-    # 第 2 次调用时 a 已开闸（单次失败即让路），后续全部直落 good
-    assert bad.calls == 1
-    assert good.calls == 3
+    asyncio.run(_rounds())
+    assert bad.calls == threshold
+    assert good.calls == threshold + 2
 
 
 def test_breaker_half_open_after_cooldown_reprobes():
     bad, good = _FailProv(), _OkProv()
     gw = _make_gw(a=bad, b=good)
+    threshold = gw._BREAKER_THRESHOLD
 
-    async def _two():
-        await gw.chat(query="hi")
-        await gw.chat(query="hi")
+    async def _rounds():
+        for _ in range(threshold):
+            await gw.chat(query="hi")
 
-    asyncio.run(_two())
-    assert bad.calls == 1
+    asyncio.run(_rounds())
+    assert bad.calls == threshold
     # 冷却期手动置为已过期 → 半开，允许重新探测
     gw._breaker_open_until["a"] = time.time() - 1
     asyncio.run(gw.chat(query="hi"))
-    assert bad.calls == 2
+    assert bad.calls == threshold + 1
 
 
 def test_breaker_success_resets_failures():
     flaky = _FailProv()
     gw = _make_gw(a=flaky, b=_OkProv())
     asyncio.run(gw.chat(query="hi"))
-    assert gw._breaker_failures["a"] == 1
+    assert gw._breaker_failures["a"] == 1  # 首轮失败计数（未达阈值不熔断）
     gw._mark_provider_result("a", True)
     assert "a" not in gw._breaker_failures
 
@@ -328,41 +333,54 @@ def test_profile_sync_dispatcher_is_singleton():
 # ── 降级提速批（2026-10-13，用户体感「fallback 让系统变慢」实证驱动）──
 
 
-def test_breaker_params_dedup_speedup():
-    """参数钉死：阈值 1（一次失败立即让路）+ 冷却 300s（坏供应商 5 分钟不再打扰）。
+def test_breaker_params_bound_to_quality_floor():
+    """参数守护：阈值与冷却必须停在「不误杀、不长期降级」的区间。
 
-    生产实证（2026-10-13）：agnes 20s 超时常等满 + 旧参数（2 次/60s）攒不起
-    熔断 → 每轮重新硬试，链均 17.6s。回退旧参数即红。
+    两批相反方向的实证都在这里锁住：
+    - 2026-10-13 提速批：旧参数（2 次/60s）攒不起熔断 → 每轮重新硬试坏供应商，
+      链均 17.6s。故阈值必须小、冷却必须够长。
+    - 2026-10-20 质量悬崖批：阈值 1/300s 走向另一极端 —— agnes 一次抖动就退场
+      5 分钟，当日 24 次调用 15 次失败/10 次熔断，报障对话全部由降级模型生成。
+    现行 2 次/120s：吸收瞬时抖动，持续坏供应商仍快速熔断，恢复也够快。
     """
-    assert MultiProviderGateway._BREAKER_THRESHOLD == 1
-    assert MultiProviderGateway._BREAKER_COOLDOWN == 300.0
+    assert 1 <= MultiProviderGateway._BREAKER_THRESHOLD <= 2
+    assert 60.0 <= MultiProviderGateway._BREAKER_COOLDOWN <= 300.0
 
 
-def test_breaker_opens_after_single_failure():
-    """单次失败即开闸：第 2 轮调用直接跳过坏供应商（旧参数下 bad.calls==2）。"""
+def test_breaker_opens_after_threshold_failures():
+    """连续失败达阈值即开闸：之后调用直接跳过坏供应商。
+
+    2026-10-20 质量悬崖批：阈值 1→2、冷却 300→120s。10-20 生产实证 agnes
+    24 次调用 15 次失败/10 次熔断，一次性抖动就让首选模型退场 5 分钟，报障
+    对话（2873/2875）全部由降级模型 glm-4.5-flash 生成。阈值 2 只吸收瞬时
+    抖动，持续坏供应商仍会在第 2 次失败后被熔断。
+    """
     bad, good = _FailProv(), _OkProv()
     gw = _make_gw(a=bad, b=good)
+    threshold = gw._BREAKER_THRESHOLD
 
-    async def _two():
-        for _ in range(2):
+    async def _rounds():
+        for _ in range(threshold + 1):
             r = await gw.chat(query="hi")
             assert r == "好的"
 
-    asyncio.run(_two())
-    assert bad.calls == 1, "一次失败后必须开闸（第 2 轮不得再打扰坏供应商）"
-    assert good.calls == 2
+    asyncio.run(_rounds())
+    assert bad.calls == threshold, "达到阈值后必须开闸（后续轮次不得再打扰坏供应商）"
+    assert good.calls == threshold + 1
 
 
-def test_agnes_request_timeout_fifteen_seconds():
-    """agnes 配置超时 8→15s（2026-10-15 质量回调批）。
+def test_agnes_request_timeout_twenty_five_seconds():
+    """agnes 配置超时 15→25s（2026-10-20 质量悬崖批）。
 
-    历史：10-13 提速批 20→8s；生产实证 8s 低于健康响应分布 3.8~19.8s 的
-    中位 → 大量健康请求被误杀熔断 → 82% 流量降级免费档智谱（客服腔事故）。
-    现锚定 15s：守住「超时按配置生效」意图，同时防再次被压到误杀区间。
+    历史：10-13 提速批 20→8s（误杀）→ 10-15 调回 15s → 10-20 再调 25s。
+    10-20 实测生产形态 prompt（system ~5.9k 字 + 19 条历史 + max_tokens 2048）
+    下 agnes 响应 3.8/8.9/12.4/12.8/14.5/18.3/21.1s，8 次采样 1 次 40s 超时：
+    15s 会把 18.3s 与 21.1s 这两次**健康响应**判死，实测当日 24 次调用 15 次
+    失败/10 次熔断。锚定 25s 的下界语义：不得再压回误杀区间。
     """
     cfg = json.loads(
         (Path(__file__).resolve().parents[1] / "config" / "llm_providers.json").read_text(
             encoding="utf-8"
         )
     )
-    assert cfg["providers"]["agnes"]["request_timeout"] == 15
+    assert cfg["providers"]["agnes"]["request_timeout"] == 25

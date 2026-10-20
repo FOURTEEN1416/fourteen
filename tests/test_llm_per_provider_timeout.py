@@ -1,9 +1,13 @@
 """按供应商超时闸门 + 链首口径回归（2026-09-21「人机味」批次）。
 
 背景：agnes 降出链首后用户报「回复人机味重」。同 prompt 形状下 agnes 出角色腔、
-glm-4-flash 出客服腔 → 需要 agnes 回链首；但 agnes 会挂死（read 超时 25s），
-链首挂死 + 编排层整链预算 30s = 再次吐出超时兜底句。
-因此链首必须带**按供应商收紧的超时**，使「挂死 → 降级」留在 30s 预算内。
+glm-4-flash 出客服腔 → 需要 agnes 回链首；但 agnes 会挂死（read 超时），
+链首挂死 + 编排层整链预算 = 再次吐出超时兜底句。
+因此链首必须带**按供应商收紧的超时**，使「挂死 → 降级」留在整链预算内。
+
+2026-10-20 质量悬崖批：整链预算 30→45s。生产实测 agnes 健康响应上界 21.1s
+（15s 阈值会误杀），而外层 30s 会在「agnes 拖到 25s 自身超时 + 智谱接住」这条
+最坏健康路径走完前切断，把用户打到 timeout 旁路句。45s = 25s 链首 + 20s 降级。
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ from llm_provider.openai_compatible_provider import OpenAICompatibleProvider
 
 ROOT = Path(__file__).resolve().parent.parent
 # 编排层整链预算（optimized_orchestrator 的 asyncio.wait_for）
-CHAIN_BUDGET = 30.0
+CHAIN_BUDGET = 45.0
 
 
 def _read_timeout(seconds: float | None) -> float:

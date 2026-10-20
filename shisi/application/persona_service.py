@@ -135,17 +135,19 @@ class PersonaService:
         if anchor:
             mem_parts.append(anchor)
 
-        # 当前话题续聊钩子（2026-09-23；2026-10-20 八问题批改口径）：
-        # 关键词只用来指认「对方最近在说什么」，不再写成「请沿着聊下去」——
-        # 旧文案不区分说话人（复述/归属翻转的来源之一），且把任意词都当续聊任务。
+        # 话题锚点（2026-09-23 起；2026-10-20 二轮换真源）：注入的是**用户原话
+        # 短句**，不是关键词袋 —— 关键词袋生产实测给 `['的话','哈喽']`，既不是
+        # 话题也没有说话人，模型只能另起炉灶（用户反复报「没有话题意识」）。
+        # 措辞保持「对方最近在说」而不是「请沿着聊下去」：话题指认 ≠ 续聊任务。
         current_topics = mem_ctx.get("current_topics") or []
         if isinstance(current_topics, str):
             current_topics = [t for t in current_topics.split("、") if t.strip()]
         if current_topics:
             mem_parts.append(
-                "\n## 对方最近在说（先接住这些具体内容，别另起炉灶）\n"
-                + "、".join(str(t) for t in current_topics[:3])
-                + "\n只有对方话里有可指认的未完成点时才追问；不要为了续话题新造问题。"
+                "\n## 对方最近在说（这些是**对方**的原话，不是你说的；先接住具体内容）\n"
+                + "\n".join(f"- {t}" for t in current_topics[:3])
+                + "\n只有对方话里有可指认的未完成点时才追问；不要为了续话题新造问题，"
+                "也不要把对方说过的话当成自己说过的。"
             )
 
         # 用户画像槽（A3 + AX P1）：读 EventLedger 投影；禁止编造画像外信息
@@ -266,7 +268,19 @@ class PersonaService:
             # user_message 非空，而这里传 ""（当前消息只走 messages，避免 system 重复），
             # 故 base_prompt 恒不含知识块，此分支即唯一注入处；守卫保留给
             # 直接带 user_message 的调用方，防止同一知识出现两份。
-            injection_parts.append(f"# 角色知识库\n{rag_context}")
+            # 模式边界（2026-10-20 二轮）：知识检索结果含卡文原文括号动作时，沉浸式
+            # 必须剥离——这是与 character_aggregate 并行的第二条泄漏通道（生产实证
+            # knowledge_snippets[0] 为 mes_example 原文「（想了想）周五我来给你做饭」）。
+            _rag_block = str(rag_context)
+            try:
+                from utils.reply_mode import REPLY_MODE_IMMERSIVE, read_reply_mode, strip_stage_directions
+
+                if read_reply_mode() == REPLY_MODE_IMMERSIVE:
+                    _rag_block = strip_stage_directions(_rag_block)
+            except Exception as _rag_exc:  # noqa: BLE001
+                logger.debug("知识库模式剥离失败（保留原文）: %s", _rag_exc)
+            if _rag_block.strip():
+                injection_parts.append(f"# 角色知识库\n{_rag_block}")
 
         emotion_layer = self._safe_engine_layer(
             "emotion", self._engine.build_emotion_layer, effective_emotion

@@ -1,1 +1,753 @@
 #AOCI-CODE-VOLUME: 1
+
+===D:/Desktop/ai-girlfriend/===
+.env.example[FC6T]: F:环境变量模板：LLM 供应商模式、各供应商凭据与模型档位示例 | R:code:config/llm_providers.json | A:复制为 .env 后按需修改；LLM_PROVIDER=auto 走 MultiProviderGateway 自动 fallback | S:智谱档位经 2026-09-21 逐模型实调，勿凭空改档：免费 key 仅 glm-4.5-flash 可用，且必须保留 config/llm_providers.json 的 thinking=disabled，否则小 max_tokens 下 content 为空或半句
+.gitattributes[FV4T]: F:统一行尾与文本属性：sh/conf/service 强制 LF，py/ts/tsx/md 走 text=auto | R:- | A:- | S:LF 强制项服务于 Linux 部署件（systemd/nginx 脚本），不要在 Windows 上把这些文件改回 CRLF
+.gitignore[FV6S]: F:版本控制忽略清单：Python 缓存与构建产物、本地日志/临时文件、含真实用户数据的视觉图册 | R:- | A:- | S:docs/visual-map/ 含真实用户数据截图故不入版本控制；config/characters/ 被忽略，角色卡不随 git 复现，测试基线随卡数浮动（用例数=2×卡数+13）
+.pre-commit-config.yaml[XQ6T]: F:本地 pre-commit 门禁：ruff-check 与原生并发 index 门禁两层 | R:code:pyproject.toml,code:scripts/install_native_gate.py | A:pre-commit install 后生效；手动全量 run --all-files；单次可 --no-verify 跳过 | S:ruff-pre-commit 的 rev 必须与 pyproject 的 ruff 约束同源（当前 0.16.8），改一处必须同步另一处；未 install 时本文件完全无作用
+AGENTS.md[SG9L]: F:项目 Agent 宪法：版本头与测试口径、部署三端纪律、Owner Map、硬约束、验证命令与修订历史 | R:code:LOG.md,code:README.md,code:CODE_GRAPH.md,code:docs/HANDOFF_REPORT.md | A:所有项目会话开工必读；版本头只保留当前版本行，历史见 LOG.md | S:引用测试基线必须同时声明角色卡数与工作树状态；B 档文档不上服务器但必须 push；服务器 pull/部署归用户裁决
+CODE_GRAPH.md[SG8L]: F:人工维护的代码图谱：模块规模、端点读数、分层结构与版本核实记录 | R:code:AGENTS.md,code:LOG.md,code:aoci.txt | A:改路由后需同步 §4.2 与 api/app_factory.py docstring | S:2026-10-20 起结构真源迁移至 AOCI；本文件正文快照滞后（v3.8.32 @ 2026-10-17），不得把正文读数当作当前真值
+LICENSE[SG3T]: F:MIT 许可证全文（Copyright 2026 FOURTEEN1416） | R:- | A:- | S:-
+LOG.md[SG8L]: F:L2 操作日志：按会话追加批次原因、生产取证、修复与验证口径 | R:code:docs/DECISION_LEDGER.md,code:docs/HANDOFF_REPORT.md | A:粗粒度按任务计，不写流水账 | S:只追加、禁删改旧条目；每个工作会话收尾必须追加一条（无日志=会话未闭环）；禁写入密钥/隐私
+README.md[SG7M]: F:项目门面：产品定位、技术栈徽章、当前批次状态与测试口径 | R:code:AGENTS.md | A:- | S:徽章 Tests 与正文口径必须随最新批次同步；引用基线必须同时声明角色卡数（config/characters 被 gitignore，基线随卡数浮动）
+main.py[EW8L]: F:融合版主入口：初始化、控制台/微信通道、API/WS 与调度器装配 | R:code:api/run_api.py | A:python main.py 启动 | S:.env 必须先于 import api.* 加载；微信与 API 可独立启停
+pyproject.toml[FV6S]: F: 包元数据、运行与可选依赖、extras 及工具链配置。 | R: - | A: pip install -e .；按 extras 安装语音/测试依赖 | S: starlette>=1.3.1 修 CVE-2026-54283；sqlalchemy 须带 asyncio extra；cryptography 显式声明。
+pyrightconfig.json[FV4T]: F: pyright 类型检查范围与排除目录配置。 | R: - | A: pyright | S: include 含已删除路径，配置滞后代码实况。
+user_scheduler.py[DB9L]: F: 多微信用户调度：按用户隔离的情感引擎、用户×角色 LRU 与好感度回放/持久化。 | R: code:shisi/core/conversation_turn.py, code:utils/affinity_state.py, code:shisi/affinity/scale.py | A: UserManager；UserInstance；_get_character_engine；_restore_affinity；_persist_affinity | S: 引擎按用户×角色隔离并 LRU 淘汰且不淘汰活跃角色；点存为既有真源，审计写失败只告警。
+
+===D:/Desktop/ai-girlfriend/.github/workflows/===
+ci.yml[OV7M]: F:GitHub Actions 工作流：push main/arch*、PR 与每周一 cron，跑后端测试、前端测试/类型检查与仓库门禁 | R:code:pyproject.toml,code:frontend/package.json,code:.pre-commit-config.yaml | A:含 backend/frontend 及 ff-route-guard、ff-sub-router-mount、adr-integrity 等门禁 job | S:CI 是唯一权威门禁（pre-commit 可用 --no-verify 跳过）；依赖声明缺口只在干净环境暴露（sqlalchemy 必须带 asyncio extra）
+
+===D:/Desktop/ai-girlfriend/.qoder-credits/===
+A goal has been set. The__2a88e727.canvas.tsx[XZ2L]: F:Qoder 会话额度报告画布组件：额度、上下文占比、分类与工具/文件分布图表 | R:code:.qoder-credits/report.json | A:由 qoder/canvas 组件渲染，数据契约由 scripts/lib/breakdown.mjs 产出并注入 | S:本目录是 Qoder 工具生成的本地产物，未纳入版本控制，不参与产品构建
+A goal has been set. The__a56e6dbd.canvas.tsx[XZ2L]: F:Qoder 会话额度报告画布组件（另一次会话的同构副本） | R:code:.qoder-credits/report.json | A:由 qoder/canvas 组件渲染，数据契约由 scripts/lib/breakdown.mjs 产出并注入 | S:本目录是 Qoder 工具生成的本地产物，未纳入版本控制，不参与产品构建
+report.json[XZ2L]: F:Qoder 会话额度报告数据（schemaVersion 3.2）：用量、轮次、上下文占比、分类与工具/文件分布 | R:code:.qoder-credits/A goal has been set. The__2a88e727.canvas.tsx | A:字段带 availability 标记（measured/derived/unavailable），部分指标不可用 | S:本目录是 Qoder 工具生成的本地产物，未纳入版本控制，不参与产品构建
+
+===D:/Desktop/ai-girlfriend/api/===
+__init__.py[CG5T]: F:API 包公共导出：create_api_app、聊天/配置/会话请求响应模型、SessionManager、WebSocketServer、CloneDataManager | R:code:api/app_factory.py,code:api/main_routes.py,code:api/qrcode_store.py,code:api/session_manager.py,code:api/websocket_server.py,code:voice/clone_data_manager.py | A:- | S:-
+achievement_engine.py[DB5M]: F:角色成就引擎：按确定性规则从既有事实源重算成就，按 character_id 隔离 | R:code:utils/important_dates.py | A:重算幂等，重复触发不重复解锁，unlocked_at 保持首次达标时间 | S:只展示统计结果，不读聊天原文，不得用于提示词/亲密度/推荐决策；达成条件不经 LLM 判断
+app_factory.py[AN8L]: F:FastAPI 应用工厂：创建实例、配置中间件、按域挂载子路由并注入共享依赖 | R:code:api/auth.py,code:api/deps.py,code:api/health_routes.py,code:CODE_GRAPH.md | A:2026-09-29 内省 229 APIRoute/195 唯一路径，len(app.routes)=233 含 4 条框架路由 | S:认证路由装配必须 fail-fast 不得 try 静默吞（消失=登录全挂）；公开仓 .env.example 占位符不得在非 dev 启用认证时静默生效；改路由须同步本文件 docstring 与 CODE_GRAPH §4.2
+auth.py[DI8M]: F:共享 API Key 认证：verify_api_key_dep 统一校验 X-API-Key/JWT 并做请求级限速 | R:code:api/auth_jwt.py,code:api/database.py,code:api/runtime_config.py | A:有效 Bearer JWT 优先放行，API Key 留给机器/脚本/E2E | S:所有路由必须从此模块导入 verify_api_key_dep，禁止自行定义；限速桶按请求计数（check+record 一体），正常用户注册仅一两次请求不会误伤
+auth_jwt.py[DI9M]: F:JWT 认证与密码哈希：access/refresh token 签发校验、唯一认证主体、bcrypt | R:code:api/database.py,code:api/auth.py | A:require_role 与唯一主体从库内现值取角色；token_version 支持失效 | S:非显式 dev 必须注入 ≥32 字符 JWT_SECRET 否则拒绝启动（公开仓兜底密钥绝不可用于真实环境）；路由不得独立解码 token 取 role
+byok.py[DC7T]: F:BYOK 强制策略：按 llm.byok_required 开关要求非 admin 用户消费 LLM 前自备 api_key | R:- | A:未开启时行为完全不变 | S:仅认真实 bool True（Mock/任意对象默认关闭）；admin 的 key 视为平台运营 key 不受限
+consent.py[DS8M]: F:使用即同意协议：版本管理、同意/撤回落档与四通道（HTTP/WS/微信/后台外发）同源强制 | R:code:docs/legal/USER_AGREEMENT.md | A:判定入口唯一 require_current_consent（HTTP 依赖）与 outbound_allowed_for_session（后台/微信/WS 共源） | S:CURRENT_AGREEMENT_VERSION 必须与 USER_AGREEMENT.md 头部版本同步；读库异常一律 fail-closed（不允许消费/外发）
+database.py[PD9L]: F:数据库引擎与 User/Role 模型：SQLAlchemy async + aiosqlite，数据存 data/users.db | R:- | A:异步 session 经 get_db 提供；实例属性用 Mapped[] 注解 | S:改模型必须同步改 _USERS_DDL 表重建清单（与上方模型一一对应）；sqlalchemy 依赖必须带 asyncio extra，否则干净环境缺 greenlet 导致 sqlalchemy.ext.asyncio 导入即失败
+deps.py[AG6S]: F:全局依赖容器：持有 orchestrator/health/config/sessions 等共享状态，避免路由定义在闭包内 | R:code:api/app_factory.py | A:由 app_factory 在启动时注入 | S:不要在路由内重新构造这些管理器，否则与已启动实例脱钩
+health_routes.py[OO8M]: F:健康检查路由：/api/health 轻量存活、/api/ready 就绪、/api/metrics Prometheus | R:code:observability/health.py | A:ready 做有限超时的真实 DB/记忆库/模型配置探测与关键路由组存在性检查 | S:/api/health 与 /api/ready 刻意免认证供探针使用；必需组件失联 fail-closed 返回 503，仅可降级清单组件允许 200+degraded，不得装全绿
+lifecycle.py[DD8L]: F:账号删除五阶段作业：preview 归属→冻结→逐 owner purge→验证→审计回执，作业账持久化 | R:code:api/database.py,code:utils/deletion_guard.py | A:本模块只做编排，各存储副作用由 owner 模块按自身键形态完成 | S:冻结步骤必须先于一切清除，users_db 行删除必须最后；验证不过不得宣称 deleted；回执只含计数不含 wxid/正文/邮箱；备份恢复回带已删账号须经 reconcile_graveyard 重清
+main_routes.py[CG7T]: F:共享常量与请求/响应模型：SENSITIVE_FIELDS、上传目录与大小上限、ChatRequest 等 | R:code:api/app_factory.py | A:- | S:上传上限受环境变量控制且硬顶 100MB（默认 50MB）；SENSITIVE_FIELDS/SENSITIVE_SUFFIXES 是配置脱敏判据，新增密钥字段须同步
+password_policy.py[DI7T]: F:全站密码策略唯一真源：长度 8–128、必须同时含字母与数字 | R:code:api/auth_jwt.py,code:api/routers/admin_routes.py | A:请求体密码字段统一用 PasswordStr（违反返回 422） | S:任何设置或修改密码的入口都必须引用本模块，禁止再自行写死长度或强度（历史散落四处致 422 白屏与邀请码路径绕过）
+path_security.py[CS6T]: F:路径安全工具 sanitize_id：只保留 [A-Za-z0-9_-]，长度上限 128 | R:- | A:- | S:非法字符被静默去除而非报错，清洗结果可能为空串或与原值不同；用作文件/对象标识前调用方必须判空，不得把空串当合法 id
+qrcode_store.py[DU5T]: F:微信登录二维码存取与 /api/wechat 路由：保存、读取与过期判定 | R:code:api/auth.py,code:api/auth_jwt.py | A:二维码落盘 data/wechat_qrcode.json | S:-
+run_api.py[ER9L]: F:API-Only 启动入口：装配依赖与组件级健康检查，托管调度器单例 flock | R:code:api/app_factory.py,code:proactive/runtime_assembly.py | A:uvicorn api.run_api:app；.env 在导入后优先由系统环境变量覆盖 | S:调度器 flock 落在 /tmp/ai-girlfriend-scheduler.lock，删除路径会让新 worker 抢到新 inode 导致调度器翻倍；出站角色快照判据唯一 owner=utils.character_resolver；session_key 解析唯一真源=utils.session_key，解析不出 owner:peer 必须拒发
+runtime_config.py[CC9S]: F:运行时环境判定：is_production/is_explicit_dev/resolve_api_key_enabled/get_database_url | R:code:api/auth.py,code:api/app_factory.py | A:环境优先级 AI_GF_ENV > APP_ENV > ENV；prod/production 为生产标记 | S:认证开关与不安全密钥清单是全仓唯一真源；变量缺失/test/staging/未知值一律非 dev（fail-closed，不落 dev 兜底）
+session_manager.py[CD7T]: F:会话键归属与 SessionManager：把浏览器会话绑定到认证用户 | R:code:utils/session_key.py | A:resolve_owned_session 对已有 owner 的键校验归属，无 owner 的旧标识改写为 {user_id}:web:{name} | S:无 owner 的旧客户端标识只作本人局部名称，绝不直接查同名历史；跨用户同名会话必须隔离
+websocket_server.py[EN9L]: F:WebSocket 服务端：JWT/APIKey/开放连接认证、流式聊天推送、按会话定向主动投递与事件广播 | R:code:api/runtime_config.py,code:api/consent.py,code:api/auth_jwt.py | A:认证开关取 resolve_api_key_enabled 唯一真源；JWT 过存在+is_active+撤销版本三段校验；D13 同意门禁与 HTTP/WS 同源 | S:定向投递只认登记过 session_key 的连接，找不到归属返回 0 由调用方判失败，不得退回全局广播（跨用户可见）；无账号连接用独立命名空间防冒充；入站频控与 HTTP 共桶；正常完成只发一帧 stream_end，勿补第二帧
+
+===D:/Desktop/ai-girlfriend/api/routers/===
+__init__.py[CN3T]: F:路由包入口：重导出 character、persona_card、voice 三个 router | R:code:api/routers/character_routes.py,code:api/routers/persona_card_routes.py,code:api/routers/voice_routes.py | A:- | S:-
+admin_routes.py[EI8M]: F:管理员用户管理 API：创建/查询/编辑/删除用户，挂载 /api/admin | R:code:api/auth_jwt.py,code:api/password_policy.py,code:api/database.py | A:仅管理员角色可访问 | S:所有端点 require_role(admin)；禁止删除自己；仅在确实改密码时校验强度（策略引用 password_policy，不另写规则）
+agent_plane_routes.py[EO7S]: F:Agent Plane 控制面 API：因果回放、事件、画像投影、curator 与探针 | R:code:shisi/agent_plane/event_ledger.py,code:api/deps.py | A:后端数据经 deps 取共享账本与编排器 | S:P0-10 起全部端点 require_role(admin)，与 admin_routes 同规——旧实现仅 verify_api_key_dep，任一登录用户可读他人账本回放/画像投影，curate 空键 apply=True 会全库改写
+auth_routes.py[EI9L]: F:用户认证 API：注册/登录/刷新令牌/登出与同意记录，挂载 /api/auth | R:code:api/auth.py,code:api/auth_jwt.py,code:api/database.py,code:api/password_policy.py,code:api/consent.py | A:注册含 IP 失败滑窗防爆破与账号锁定；注册成功分发初始角色 | S:密码强度必须先于 409 存在性检查；凭证撤销以库内 token_version 为准，refresh 期限常量与 JWT 配置同源不得各写各的；409 不计入防爆破窗口
+character_routes.py[DB9L]: F:统一角色管理 API：角色卡读写/克隆/激活/删除，桥接新旧两套角色体系 | R:code:api/auth.py,code:api/database.py,code:api/path_security.py,code:shisi/knowledge/character_knowledge_service.py | A:资源归属判定唯一 owner：无主平台卡与用户私有卡分流；require_character_access 供各子资源路由复用 | S:角色卡写路径唯一安全 owner：validate_card 不过统一 400；无主卡不得因首次访问被自动认领；删除按 owner 粒度全清（知识索引/成就/绑定/向量/音色）
+character_template_routes.py[EB7M]: F:角色模板面：无主平台卡只读暴露、服务端克隆与注册分发钩子，前缀 /api/character-templates | R:code:api/routers/character_routes.py,code:api/database.py | A:provision_initial_character 与克隆端点共用 clone_template_for_user 核心 | S:前缀不得挂 /api/characters 下（/{character_id} 会抢匹配）；克隆=新 id 独立副本且模板零改动；不存在/非无主/未过策展/总开关关闭统一 404；策展缺失 fail-closed；分发失败不阻断注册
+chat_routes.py[EN9L]: F:聊天与会话路由：/api/chat 与 /stream、会话 CRUD、微信通道兼容面 | R:code:api/deps.py,code:api/main_routes.py,code:api/consent.py | A:HTTP 与 WS 的共同汇聚点，归属校验唯一收口在此 | S:D13 同意门禁四通道同源（未同意/旧版本/撤回→403）；定向查询失败不得回落全局工作记忆；无 JWT 时不泄露全局通道状态
+clone_routes.py[EB6M]: F:好友克隆数据管理：contacts/datasets/conversations CRUD 与标准化，挂载 /api/clone | R:code:api/deps.py | A:wechat-decrypt 只在用户 Windows 本机运行，服务器仅接收上传 JSON | S:对话标准化必须按 is_self 定向（W7），不得把双方消息方向混同
+emotion_routes.py[EB6T]: F:情绪参数编辑 API：情绪基线/波动/恢复力读写，挂载 /api/emotion | R:code:api/deps.py | A:经 deps.orch 取 emotion 组件 | S:SEC-P0 起读面与 PUT 写面均为 admin 门（全局引擎配置非用户数据面，普通用户不得越权写）
+invite_routes.py[EI7M]: F:邀请码 API：公开凭码注册与 admin 创建/列出/撤销，挂载 /api/auth 与 /api/admin/invites | R:code:api/auth.py,code:api/password_policy.py,code:api/database.py | A:与 /register 同一注册分发契约（用户行提交后执行） | S:不存在/已撤销/已使用/已过期统一响应以消除存在性 oracle；409 不计入防爆破窗口；token 构造必须用 token_claims 唯一 owner（勿手写带 role 的 dict）
+knowledge_routes.py[ED7L]: F:角色知识库 API：文档上传/删除/检索与知识块统计，挂载 /api/characters/{id} 子资源 | R:code:api/routers/character_routes.py,code:api/path_security.py,code:shisi/knowledge/character_knowledge_service.py | A:文档唯一存储在源存储（doc:{doc_id} 替换式），检索与写入走 ensure 闭环 | S:角色子资源归属统一由 character_routes.require_character_access 校验；共享知识库无归属写入收 admin 控制面；每用户写入限速
+llm_providers_routes.py[EC8M]: F:LLM 供应商管理：清单/教程/启用禁用/增删改，暴露 /api/llm-providers | R:code:config/llm_providers.json,code:utils/project_paths.py | A:普通用户只读启用项，全部管理端点 require_role(admin) | S:元数据写 git-tracked config/llm_providers.json 且 api_key 恒为空；运行时密钥只落 config/llm_providers.local.json 或环境变量，admin 写路径禁止明文 api_key 入 tracked 文件；预设供应商只能 toggle 不可删
+memory_routes.py[ED6S]: F:统一记忆 API：角色收藏与记忆转发，桥接 shisi FavoriteManager/ForwardManager | R:code:api/routers/character_routes.py,code:api/deps.py | A:- | S:角色子资源归属统一由 require_character_access 校验（唯一 owner 在 character_routes）
+mimo_voice_routes.py[EU6L]: F:MiMo TTS 扩展 API：语音克隆、音色设计与合成，挂载 /api/mimo | R:code:voice/mimo_tts_provider.py,code:voice/tts_manager.py,code:voice/voice_catalog.py | A:经 deps.get_tts_manager 取引擎 | S:P0 安全批：合成文本有字符上限（云端按字符计费）；归属校验先于一切服务状态暴露，catalog 内他人克隆音色 403（admin 例外）
+misc_routes.py[EG7L]: F:杂项路由：系统查询、管理看板、日志与配置读取、通道列表 | R:code:api/deps.py,code:api/main_routes.py | A:配置读对所有已认证用户开放，写仅 admin | S:SEC-P0 读面收缩：普通用户只见无害全局计数与陪伴态计数，情绪全局状态与全局活跃会话数不外泄；admin/机器 key 走全量
+persona_card_routes.py[EB6S]: F:统一角色卡 API：按 CharaCardV2 完整格式读写角色卡 | R:code:api/routers/character_routes.py,code:api/deps.py | A:桥接 shisi CharacterManager | S:角色子资源归属统一由 require_character_access 校验；manager 内 validate_card 不过会抛校验错误，需映射为 400 而非 500
+personality_routes.py[EA7M]: F:人格画像路由：emotion/persona/psych 查询与人格抽取 | R:code:api/deps.py,code:api/main_routes.py | A:经 deps.orch 取 emotion/persona/persona_extractor | S:-
+safety_routes.py[ES8L]: F:安全/RAG/语音/文件/缓存路由：内容安全开关、知识上传、TTS、上传文件读取与缓存 | R:code:api/main_routes.py,code:api/deps.py | A:上传落 data/uploads/<user_id>/ 子目录；文件读取按主体校验归属 | S:共享知识库无归属写入收 admin 控制面；TTS text>600 字 400 且每用户限速；归属化上传后根目录存量文件仅 admin 可读
+storyline_routes.py[EB6M]: F:剧情线 API：角色剧情线配置存储面与进度查询 | R:code:api/routers/character_routes.py,code:shisi/storyline/engine.py | A:配置存 shisi.storyline.config，检测由 StorylineDetector 完成 | S:affects_chat 是 prompt 闸实际状态的自我声明（当前生产 prompt 路径未接线→False）；若接线改 True 必须同批改常量与前端横幅，禁止悄悄生效
+tools_routes.py[EE7M]: F:工具与插件管理路由：/api/tools 与 /api/plugins 的库存、启停与历史 | R:code:tools/tool_state.py,code:api/deps.py | A:库存含 enabled/disabled/unavailable 与原因 | S:启停必须写穿 tools.tool_state（data/runtime_switches.json）而非只改本进程 registry，否则跨 worker 不生效、重启即恢复；插件开关统一走 tool_state
+training_routes.py[EW7L]: F:训练管线与主动搭话路由：/api/training 数据清洗/测试/应用 + /api/proactive 配置与状态 | R:code:clone_training/data_cleaner.py,code:api/deps.py | A:接话时机唯一 Owner 是 proactive 决策链；调度器只在部分 worker 的 components 中，状态查询须能跨 worker 回答 | S:SEC-P0：训练管线与主动引擎状态/参数/拟人度均为控制面，viewer 的 JWT 不得读；阻塞型构造/检索必须下 worker 线程，不得卡事件循环
+users_routes.py[EU6S]: F:多用户管理路由：用户列表/详情/角色设置/重置与移除 | R:code:api/deps.py | A:经 deps.gf 调 get_user_info/set_user_character/reset_user/remove_user | S:管理面端点 require_role(admin)，用户数据按登录主体隔离
+voice_routes.py[EU7M]: F:角色音色绑定 API：绑定/查询/试听，管理角色与 MiMo 音色关系 | R:code:api/routers/character_routes.py,code:voice/voice_catalog.py | A:MiMo-only（2026-08-28 收敛），mimo_model/voice_id/speed/pitch 为显式角色语音契约字段 | S:试听必须按角色契约快照合成并返回实际 MIME，不得切全局引擎/音色模拟角色；角色子资源归属由 require_character_access 校验
+wechat_channel_routes.py[EN8M]: F:每人独立微信通道 API：JWT 鉴权，只操作当前用户自己的通道 | R:code:wechat_direct/connector_registry.py,code:api/database.py | A:D16：一人一 bot 一条通道（MAX_CHANNELS_PER_USER=1），全局并发上限 WECHAT_MAX_CHANNELS | S:谁扫码谁聊——通道=扫码人与角色的一对一；好友自选角色端点已随 peer 机制整体退役，角色选择唯一入口是 /api/characters/{id}/activate
+wechat_routes.py[EN6M]: F:微信连接持久化 API：保存/管理已连微信账号与绑定关系，挂载 /api/wechat | R:code:api/database.py,code:api/deps.py | A:连接记录落 data/wechat_connections.json，绑定落 WechatBinding | S:管理端点 require_role(admin)
+
+===D:/Desktop/ai-girlfriend/api/state/===
+__init__.py[CG4T]: F:API 状态管理器包入口：导出 SafetyLogManager、ToolHistoryManager、TrainingStateManager | R:code:api/state/safety_log.py,code:api/state/tool_history.py,code:api/state/training_state.py | A:- | S:-
+safety_log.py[DO5T]: F:安全日志环形缓冲：带锁追加、按 user_id 过滤的最近记录与统计 | R:- | A:内存 deque 上限 2000 | S:进程内存储，多 worker 各持一份，不能当跨进程审计真源
+tool_history.py[DD4T]: F:工具调用历史环形缓冲：追加、取最近 N 条与清空 | R:- | A:内存 deque 上限 1000 | S:无锁且进程内，非持久化审计源
+training_state.py[DW5T]: F:训练作业状态机：状态/进度/loss/ETA 的线程安全读写与任务执行器 | R:- | A:RLock + ThreadPoolExecutor 管理当前 future | S:状态只在进程内，多 worker 部署下需由发起 worker 回答，不能假定全局一致
+
+===D:/Desktop/ai-girlfriend/clone_training/===
+__init__.py[LA6T]: F:克隆数据包入口：导出 DataCleaner/DataExtractor/StyleAnalyzer/StyleProfile；LoRA 训练已移除，克隆收敛为提示词注入 | R:code:clone_training/data_cleaner.py,code:clone_training/data_extractor.py,code:clone_training/style_analyzer.py | A:管道=提取→LLM Judge 清洗→12 维风格分析 | S:本包不含训练路径——风格克隆唯一落地是 ToneMimic 提示词注入，不要再加 LoRA/本地微调入口
+data_cleaner.py[DA6M]: F:克隆数据清洗器：对 QA 对做 1-5 分质量评分，LLM Judge 优先、失败走启发式与规则回退 | R:code:clone_training/data_extractor.py | A:默认 accept_score=2；空/过短/纯标点/纯 emoji/自动回复由启发式直接判低 | S:评分为 1-5、默认接受阈值 2；无 LLM 时必须走确定性规则而非抛错，保证清洗可离线运行
+data_extractor.py[DA6M]: F:聊天记录提取器：仅从用户上传的 txt/csv/json 解析对话，输出 user/reply/timestamp/is_self 列表 | R:code:clone_training/data_cleaner.py | A:同一人连续多条在默认 2 分钟窗内合并 | S:所有本机微信解密路径（WeChatFerry/WeChatMsg/wechat-decrypt）已删除，服务器只收上传文件；方向判定依赖 is_self，清洗阶段不得丢失该字段
+style_analyzer.py[DA6M]: F:12 维说话风格分析器：句长/标点/语气词/表情/口头禅/延迟/情绪/人称/句式/网络用语/独特性，产出 StyleProfile | R:code:my_character/tone_mimic.py | A:分析与报告落 JSON，to_style_prompt 生成注入用风格段 | S:风格画像只应描述可统计特征，不得凭单一维度判定人格；独特性分数是相对普通聊天的偏离度，不能当质量分
+
+===D:/Desktop/ai-girlfriend/config/===
+character_templates.yaml[FC7T]: F:角色模板策展清单：总开关、visible/hidden 白名单与注册种子卡，供 /api/character-templates 读取 | R:code:api/routers/character_template_routes.py | A:空 visible_ids=放行全部无主卡；hidden 优先于白名单 | S:文件缺失/损坏等同 enabled:false（fail-closed）；hidden_ids 必须与白名单双保险同步，防止被剔除卡回填
+emotion.yaml[FB7T]: F:情绪引擎参数：强度/能量衰减与好感增减（仅 decay 与 affection 两段被读取） | R:code:my_character/emotion_engine.py | A:EmotionEngine 提升为平铺参数表后逐键读取 | S:好感度阶梯阈值不在本文件——权威真源是 config/shisi.yaml 的 affinity.unlocks；其余历史段已删，勿再添无人读取的键
+emotion_style_matrix.yaml[FB6S]: F:情感-风格映射矩阵：各情绪对应温度/俏皮/表情倍率/句长/修辞与语气词，另含好感度风格与评估权重段 | R:code:my_character/persona_engine.py,code:my_character/consistency_checker.py | A:persona_engine 注入风格，consistency_checker 做一致性校验 | S:情绪键名必须与情绪分类器输出（开心/生气/撒娇/傲娇等）一致，改名会让映射静默落空
+hot_topics.yaml[FA6T]: F:热点知识链配置：公共热点查询表、采集间隔/TTL/池上限与注入条数 | R:code:shisi/knowledge/hot_topics.py,code:scripts/run_hot_topics_collect.py | A:查询→data/hot_topics.json 全局池→主动消息知识供出口 | S:顶层键必须与 load_config 一一对应，勿再包一层 section（会成死配置）；只搜公开资讯，禁用户隐私作为查询入参
+llm_providers.json[FC9M]: F:LLM 供应商控制台配置：链首、模型/端点/超时/熔断与接入教程，providers 元数据的 tracked 真源 | R:code:llm_provider/multi_provider_gateway.py,code:api/routers/llm_providers_routes.py | A:网关按 default_provider 与链装配；tracked 文件 api_key 恒为空 | S:真实密钥只落 config/llm_providers.local.json（gitignored）或环境变量并由其 overlay 覆盖；**agnes 超时 25s**（2026-10-20 实测生产形态 prompt 健康响应 3.8~21.1s，15s 会误杀 18.3/21.1s 两次健康响应 → 当日 24 调用 15 失败/10 熔断 → 报障对话全部由降级模型 glm-4.5-flash 生成）；改超时必须同批核对 orchestrator 外层 asyncio.wait_for 预算（现 45s）与 tests/test_llm_per_provider_timeout.py 的 CHAIN_BUDGET；zhipu 必须 thinking=disabled
+persona.yaml[FB9T]: F:内置十四人格真源：name/描述/锚点/数值与 creator_notes（身份拷问应答剧本） | R:code:my_character/character_config.py,code:proactive/proactive_context.py,code:utils/character_resolver.py | A:default/demo/空角色走内置卡，与文件卡同构注入 | S:人格描述必须留在本文件——曾只有 name+数值导致模型退回助手腔；creator_notes 走 PHI 位（历史之后）约束最强；回复长度唯一 owner 是 reply_mode 指令，勿在卡内再写死字数
+shisi.yaml[FB8T]: F:shisi 域核心配置：记忆五键、亲密度衰减/上下限与解锁档位、语音情感参数 | R:code:shisi/config.py,code:shisi/memory/legacy/memory_pipeline.py,code:shisi/affinity/unlock_manager.py | A:get_config 只读下列键；历史段已删 | S:好感度阶梯阈值唯一真源在本文件 affinity.unlocks（emotion.yaml 不是）；只保留被读取键，新增段前先确认存在消费者
+system.yaml[FC9S]: F:主配置：环境/LLM 链与超时/emotion/memory/proactive/safety/tools/api/observability/voice/multimodal/sticker/fusion | R:code:llm_provider/multi_provider_gateway.py,code:wechat_direct/wechat_connector.py,code:observability/config_manager.py | A:运行时由 config_manager 热管理与持久化；fallback 链须与 llm_providers.json 保持一致 | S:tracked 默认 env:dev/debug:true 仅本地，生产必须 env 覆盖；fallback 链是两处真源之一，改链必须与 config/llm_providers.json 同批对齐；voice.engine 唯一 MiMo
+
+===D:/Desktop/ai-girlfriend/config/prompts/===
+emotion_classifier.yaml[FA3T]: F:情感分类提示词模板（历史文件，当前全仓无代码读取） | R:code:my_character/emotion_engine.py | A:- | S:当前全仓无代码读取，改它不影响运行；勿当作生效真源
+fact_extractor.yaml[FA3T]: F:用户事实抽取提示词模板（历史文件，当前全仓无代码读取） | R:code:shisi/memory/legacy/fact_extractor.py | A:- | S:当前无代码读取；抽取实走 shisi/memory/legacy/fact_extractor.py
+proactive.yaml[FW6T]: F:主动消息生成提示词：已降级为可选风格覆盖位，generation_prompt 留空 | R:code:proactive/ase_engine.py,code:proactive/proactive_context.py | A:主路径人设由角色卡经 proactive_context 构造；本文件仅旧模板分支兜底 | S:保持留空——写死十四口吻会让所有角色用户收到模板关怀；主路径不得依赖本文件
+system.yaml[FC3T]: F:旧系统提示词模板（占位符版，当前全仓无代码读取） | R:code:orchestrator/optimized_orchestrator.py | A:- | S:当前全仓无代码读取；实际 system prompt 由 prompt_builder 组装
+tone_mimic.yaml[FA3T]: F:语气模仿风格参考提示词模板（历史文件，当前全仓无代码读取） | R:code:my_character/tone_mimic.py | A:- | S:当前无读取方；实际风格段由 tone_mimic.get_style_prompt 代码生成
+
+===D:/Desktop/ai-girlfriend/context/===
+__init__.py[LG4T]: F:上下文组装包入口：导出 WorldInfoProvider | R:code:context/world_info_provider.py | A:- | S:-
+world_info_provider.py[DG5S]: F:动态世界信息注入：按本地时间算时段氛围/季节/节日并渲染为 prompt 文本 | R:code:orchestrator/_init_mixin.py | A:离线计算不依赖外部 API；timezone_offset 默认 8 | S:时间基准是固定 UTC+8 偏移而非宿主时区，部署到其他时区会错时段；render 是程式化氛围提示，不能替代真实时间锚点
+
+===D:/Desktop/ai-girlfriend/deploy/===
+README.deploy.md[SO6M]: F:生产部署指南：环境要求、五步部署、验证/运维/更新与常见问题 | R:code:deploy/deploy.sh,code:deploy/ai-girlfriend.service,code:deploy/nginx-ai-girlfriend.conf,code:deploy/backup.sh | A:setup.sh 已存在，部署路径固定 /opt/ai-girlfriend | S:文档称 PostgreSQL 15+ 为生产必需，与代码双支持 SQLite（默认 data/users.db）不一致，引用前以 runtime_config/backup_manager 为准；公开仓不得写入真实 IP
+ai-girlfriend.service[OR8T]: F:systemd 单元模板：uvicorn 4 worker、EnvironmentFile、日志与沙箱加固 | R:code:api/run_api.py | A:ExecStart 绑 127.0.0.1:8000，由 nginx 反代 | S:模板 User=www-data/PrivateTmp=true 与生产实况（root、PrivateTmp=no）不一致；4 worker 的跨进程一致性靠 scheduler flock 与 BEGIN IMMEDIATE，勿单改 worker 数；/tmp 调度器锁路径不可删
+backup.sh[OR7T]: F:备份入口 shell 薄委托层：解析项目 venv python 后 exec backup_manager.py | R:code:deploy/backup_manager.py | A:默认 PROJECT_ROOT=/opt/ai-girlfriend、保留 30 天 | S:备份逻辑唯一 owner 是 backup_manager.py，勿在 shell 重新实现；退出码 0/2/1 必须原样透传（2=partial 不等于成功）
+backup_manager.py[OR8L]: F:应用数据一致备份管理器：SQLite 在线备份、目录/运行时状态/机密打包、manifest 与保留清理 | R:code:api/runtime_config.py,code:deploy/backup.sh | A:缺 required（users_db/memory_db/character_cards）即 failed；缺项或降级为 partial | S:SQLite 一律走备份 API（WAL 已提交必含），禁裸 cp 主文件；主库优先级 APP_DATABASE_URL > DATABASE_URL 且与 runtime_config 平价；退出码 0=complete/2=partial/1=failed；产物逐个 0600；恢复必须到独立目录，绝不原地覆盖
+crontab.example[OR6T]: F:备份 crontab 示例：每日 3:00 调 deploy/backup.sh，含环境变量与告警写法 | R:code:deploy/backup.sh | A:仅示例，不自动安装 | S:cron 侧必须按非 0 告警：2=partial 也需人工核查
+deploy.sh[OV8S]: F:服务器部署脚本：git 拉取、装依赖、构建前端、迁移、重启与就绪门禁 | R:code:deploy/ai-girlfriend.service,code:deploy/nginx-ai-girlfriend.conf,code:api/health_routes.py | A:固定 /opt/ai-girlfriend，须 root 运行 | S:迁移失败必须阻断发布；重启后 /api/ready 非 200 即非 0 退出，不得无验证打印成功；服务器本地修改须先回仓库再 pull
+nginx-ai-girlfriend.conf[ON8M]: F:线上 nginx 主配置：HTTP 反代 API/WS、静态强缓存、gzip、安全头与 fastrun/家书前缀路由 | R:code:api/auth.py,code:deploy/nginx/ai-girlfriend.conf | A:${DOMAIN} 由 envsubst 注入，已与线上对齐 | S:所有反代段 X-Forwarded-For 必须覆盖写 $remote_addr——追加会保留伪造链使防爆破限速键失效；与 TLS 无关的 gzip/缓存/安全头必须在 HTTP 块生效；HSTS 禁在纯 HTTP 开启；WS 访问日志关闭
+remote_deploy.sh[OV5T]: F:服务器端构建重启脚本：pip install -e、npm ci、前端 build、systemctl 重启与 nginx reload | R:code:deploy/setup.sh,code:deploy/ai-girlfriend.service | A:在 /opt/ai-girlfriend 激活 .venv 后四步构建；nginx -t 失败只告警跳过 | S:依赖服务器已 git 同步；公开仓禁写真实主机，目标用 DEPLOY_HOST/DEPLOY_USER 注入
+restore.sh[OR5T]: F:隔离恢复入口壳：参数校验后 exec restore_manager.py，恢复与校验逻辑不在本脚本 | R:code:deploy/restore_manager.py | A:--target/--force/--verify-only/--skip-secrets 原样透传 | S:必须显式给 --target；绝不原地覆盖生产，切换永远人工
+restore_manager.py[OR8M]: F:备份隔离恢复与校验器：防 zip-slip 解包、sha256 校验、逐库 integrity_check/行数与归属核验 | R:code:deploy/backup_manager.py | A:只落独立目标目录；拒绝含 main.py/pyproject.toml/.git 的 live root；失败退出非 0 | S:结尾只打印人工切换步骤，绝不自动切换；产物 sha256 与 manifest 不符即拒
+seed.py[OV6M]: F:部署前预置：为全部角色卡建 BM25 知识索引并重建前端预设 _index.json | R:code:shisi/knowledge/character_knowledge_service.py,code:shisi/character/character_card_v2.py | A:已存在索引默认跳过，--rebuild 强建，--audit-only/--verify 审计与冒烟 | S:空卡目录返回 (results, elapsed) 二元组；MIN_CHUNKS=3 为覆盖度达标线
+setup.sh[OV6M]: F:全新 Ubuntu 初始化七步：系统包、应用目录、venv、PostgreSQL、Nginx、systemd、UFW | R:code:deploy/ai-girlfriend.service,code:deploy/nginx-ai-girlfriend.conf,code:deploy/start.sh | A:幂等可重跑；envsubst 只替换 ${DOMAIN}，保留 nginx 原生变量 | S:先判空 clone 再建 data；全树 chmod 必须排除 .venv；公开仓禁写真实域名/IP
+start.sh[OV6S]: F:生产启动门禁：真实引擎 SELECT 1、迁移失败即停、uvicorn 起服后等 /api/ready 200 | R:code:api/database.py,code:deploy/remote_deploy.sh | A:五步：DB 探活→迁移→静态检查→起 uvicorn→ready 30 次×2s 轮询 | S:ready 200 才算成功，超时非 0；旧 /health 探活且吞错已修，不得退回
+start_backend.sh[OV3T]: F:手动重启后端的临时脚本：pkill uvicorn、nohup 单 worker 启动并 tail 日志 | R:code:deploy/start.sh | A:只用 --workers 1，适合单机调试 | S:探活仍打旧 /health 且无 ready 门禁；生产勿用本脚本
+
+===D:/Desktop/ai-girlfriend/deploy/nginx/===
+ai-girlfriend.conf[ON7S]: F:公开仓 nginx 模板：占位 IP、安全头、API/WS 反代与 fastrun 路径重写 | R:code:deploy/nginx-ai-girlfriend.conf | A:线上配置同源的精简版，部署时替换 YOUR_SERVER_IP | S:XFF 同样覆盖写不得改回追加；模板不含真实 IP/域名；与 deploy/nginx-ai-girlfriend.conf 改动需同批同步
+alumni-platform.conf[ON4T]: F:校友平台独立入口：:8080 反代 127.0.0.1:18082（非本项目） | R:code:deploy/nginx/ai-girlfriend.conf | A:与本项目同机但独立服务 | S:属校友平台（非本项目），勿套用主项目 XFF 覆盖规则
+
+===D:/Desktop/ai-girlfriend/docs/CODEMAPS/===
+ARCHITECTURE.md[SG6M]: F:架构地图：编排器 12 级流水线、数据流、认证与安全分层、前后端分离 | R:code:docs/CODEMAPS/INDEX.md,code:docs/CODEMAPS/BACKEND.md,code:CODE_GRAPH.md | A:按用户请求流/管理后台流/认证流三条链路讲分层 | S:端点 226/193、routers 24 为 2026-10-12 口径，引用前按 CODE_GRAPH 复核
+BACKEND.md[SB6M]: F:后端地图：按 handler 所属模块列 API 端点、认证体系、Orchestrator 流水线与配置体系 | R:code:api/app_factory.py,code:api/run_api.py,code:docs/CODEMAPS/ARCHITECTURE.md | A:端点清单按模块级归集，入口文件四件套 | S:226/193/230 为 2026-10-12 D16 内省；后续批次未复测
+DATABASE.md[SD6M]: F:数据库地图：users.db 9 表、sqlite.db 28 张 schema、runtime_plane.db 8 表与文件/向量存储 | R:code:api/database.py,code:shisi/migrations.py | A:分 SQLite 模型、shisi 业务表、文件型、ChromaDB、缓存五层 | S:sqlite.db 本地 27 张 vs schema 28（惰性表）；FTS 影子表不计
+FRONTEND.md[SU6M]: F:前端地图：页面路由表、状态管理、组件层级、材质动效与 API 客户端 | R:code:frontend/src/App.tsx,code:frontend/src/api/client.ts | A:React 19 + Vite 8 + TS 6 + Tailwind 4 + Zustand 5 | S:vitest 182/30、19 页为 2026-10-11 口径，现行以 CODE_GRAPH 为准
+INDEX.md[SG6S]: F:代码地图索引：地图导航、快速参考、技术栈、关键指标与演化阶段 | R:code:docs/CODEMAPS/ARCHITECTURE.md,code:docs/CODEMAPS/MODULES.md | A:汇总六张地图并给出前后端启动命令 | S:515 .py/226 端点/3027 测试为 2026-10-12 快照，已落后
+MODULES.md[SG6L]: F:后端业务模块地图：14 个包的文件数、职责、状态与依赖图 | R:code:docs/CODEMAPS/ARCHITECTURE.md,code:AGENTS.md | A:按 shisi/api/persona_extractor/voice/tools 等包分节 | S:495 文件为 2026-10-11 口径；引用前 find 复测
+
+===D:/Desktop/ai-girlfriend/docs/===
+DECISION_LEDGER.md[SG7M]: F:决策账本：决策时间轴、四项冲突裁决、挂起池与真决策筛选 | R:code:docs/VISION.md,code:docs/history/INDEX.md,code:LOG.md | A:每条决策保留演变链，标注生效/演进/推翻/搁浅 | S:现行真值 L1；挂起池未批准禁实施；重大决策须同步入账
+DELETION_LOG.md[SG6L]: F:删除日志：逐批记录删除对象、裁决依据、替代 owner、防复活钉与验证 | R:code:LOG.md,code:tests/test_w4_memory_ext_disposition.py | A:按日期倒序分节，代码/测试/有意保留三清单 | S:唯一用途防复活；删前读全文+grep 调用面，禁只删不记账
+FUNCTION_INVENTORY.md[SG7M]: F:功能清单：按页面编号（ROLES-2 式）列代码实况与历史意图基准 | R:code:frontend/src/App.tsx,code:docs/history/INDEX.md,code:CODE_GRAPH.md | A:页-功能点两级编号，是商讨协议第 1 步定位坐标系 | S:部分页面行数为 09-20 前口径；定位前先对 CODE_GRAPH
+HANDOFF_REPORT.md[SG8S]: F:新窗口交接单一真源：三端提交、终验口径、当前批次要点与接手必守纪律 | R:code:LOG.md,code:docs/DECISION_LEDGER.md,code:docs/DELETION_LOG.md | A:只载当前状态不留历史快照，历史过程归 LOG | S:引用测试口径必带角色卡数与工作树状态；服务器部署归用户裁决；禁堆叠历史快照
+P1_BACKLOG.md[SG6T]: F:未决项账本：产品决策、安全升级遗留、环境运维与低优先级清单 | R:code:docs/DECISION_LEDGER.md,code:docs/verification/ | A:只载真实未决项，已销账项移除 | S:销账须附提交/验证证据；已决裁决留案防重复讨论
+READING_REPORT_api.md[SB4S]: F:API 层穷举阅读报告（41 文件）：基础设施、WebSocket、路由全景与设计模式 | R:code:api/,code:CODE_GRAPH.md | A:2026-08-26 全量通读快照 | S:端点 204 等数字已过时；现行以 CODE_GRAPH 为准
+READING_REPORT_character_card.md[SB3S]: F:character_card 包阅读报告：SillyTavern 兼容、PNG tEXt 解析与提示词构建 | R:code:shisi/character/,code:docs/DELETION_LOG.md | A:2026-08-26 六文件通读快照 | S:所报包已删除，仅历史参考，勿按图索骥
+READING_REPORT_llm_provider.md[SA4S]: F:LLM Provider 阅读报告：多供应商 fallback 链、配置加载、流式与用户级网关 | R:code:llm_provider/,code:CODE_GRAPH.md | A:2026-08-26 五文件通读快照 | S:sensenova 已移除、agnes 首选；旧链作废
+READING_REPORT_memory_context_multimodal.md[SD4S]: F:记忆增强/上下文/多模态三包阅读报告：兼容层、离线世界信息与能力降级 | R:code:context/,code:multimodal/,code:docs/DELETION_LOG.md | A:2026-08-26 六文件通读快照 | S:memory_ext 已整删；多模态入口已变，以现码为准
+READING_REPORT_my_character.md[SB4S]: F:my_character 阅读报告：双模式提示词、锚点保护、人格演化与情感风格耦合 | R:code:my_character/,code:CODE_GRAPH.md | A:2026-08-26 二十一文件通读快照 | S:emoji 与语气段已调整；现行以 CODE_GRAPH 为准
+READING_REPORT_orchestrator.md[SA4S]: F:Orchestrator 阅读报告：Mixin 架构、会话锁、工具意图筛选与安全注入检测 | R:code:orchestrator/,code:CODE_GRAPH.md | A:2026-08-26 六文件通读快照 | S:锚点超长已改截断 60 字；字段以现码为准
+READING_REPORT_persona_extractor.md[SA4S]: F:人格提取阅读报告：Agethos+PADO+运行时三方融合、检测成本分级与 Chameleon 隔离 | R:code:persona_extractor/ | A:2026-08-26 十三文件通读快照 | S:08-26 快照无时效注记，引用前核现行代码
+READING_REPORT_proactive_plugins.md[SW4S]: F:主动消息与剧情线插件阅读报告：六维紧迫度、三层生成降级与场景限次 | R:code:proactive/,code:plugins/,code:CODE_GRAPH.md | A:2026-08-26 七文件通读快照 | S:免打扰前置、记账解耦、追问链退役；以此为准
+READING_REPORT_security_observability.md[SS4S]: F:安全与可观测性阅读报告：四层纵深防御、PII 脱敏、注入检测与日志追踪指标 | R:code:security/,code:observability/ | A:2026-08-26 十四文件通读快照 | S:extract_intent 已删、VoiceConfig 已改 mimo
+READING_REPORT_shisi.md[SB5M]: F:shisi DDD 核心域阅读报告：四层架构、12 业务子域、双 API 世代与数据库表全景 | R:code:shisi/,code:shisi/migrations.py | A:2026-08-26 一百二十四文件通读快照 | S:CharacterAggregate 已扩三字段；wechat 指令系统已删；引用前核现行代码
+READING_REPORT_tests_root.md[SQ4S]: F:测试与根入口阅读报告：测试分类全景、main.py 融合入口与 user_scheduler 调度器 | R:code:tests/,code:main.py,code:api/user_scheduler.py | A:2026-08-26 六十七文件通读快照 | S:测试数已被多批刷新；现行口径见 AGENTS §4.3 与 LOG
+READING_REPORT_tools_utils_scripts_cache.md[SQ4S]: F:工具/通用函数/运维脚本/部署种子/缓存层阅读报告：BaseTool 工具注册制、AST 安全求值与缓存键 | R:code:tools/,code:utils/,code:scripts/,code:cache/ | A:2026-08-26 二十六文件通读快照 | S:sync_character_files.py 已删；现行见CODE_GRAPH
+READING_REPORT_voice.md[SB4S]: F:Voice TTS 阅读报告：多引擎架构、配置驱动初始化、情感参数映射与路径防护 | R:code:voice/,code:CODE_GRAPH.md | A:2026-08-26 十一文件通读快照 | S:MiMo-only 已使四引擎主体作废；仅历史档案
+READING_REPORT_wechat_clone.md[SB4S]: F:微信直连与克隆训练阅读报告：四源提取、三层评分降级与双路消息解码 | R:code:wechat_direct/,code:clone_training/ | A:2026-08-26 十文件通读快照 | S:weclone_adapter 已删；克隆仅本地提取+JSON 上传
+README.md[SG7S]: F:docs 文档体系唯一入口：真源四件套、分层地图、决策/历史分区与新文档准入规则 | R:code:docs/VISION.md,code:docs/FUNCTION_INVENTORY.md,code:AGENTS.md | A:Diátaxis 四象限+生命周期三态登记；进入 docs 先看本文 | S:新文档必须先在此登记，否则不入；真值优先级=代码>现行文档>历史
+VISION.md[SG8M]: F:终极状态宣言：产品本质、既成事实基线、候选池、Non-Goals 与成功判据 | R:code:docs/DECISION_LEDGER.md,code:docs/FUNCTION_INVENTORY.md,code:CODE_GRAPH.md | A:只写已验证事实与宪法级约束；未批方案进候选池 | S:未批准方案不得冒充终态；战略口径=基座免费开源+增值层商业化
+
+===D:/Desktop/ai-girlfriend/docs/adr/===
+ADR-0001-采用架构决策记录的决定.md[SG5T]: F:ADR 制度：影响项目结构的决策必须写入 docs/adr，采用 MADR 格式 | R:code:docs/adr/,code:docs/DECISION_LEDGER.md | A:文件名 ADR-{编号}-{标题}.md；状态流五态 | S:影响结构的决策必须写 ADR；状态流 Proposed→Accepted→Deprecated→Superseded
+ADR-0002-统一API全集.md[SG4T]: F:统一 API 全集决策：不砍并存体系，对外只暴露一套统一路由，内部各取所需 | R:code:api/,code:docs/architecture/design-principles.md | A:三套并行（shisi v1/v2/unified）收敛为全集 | S:API 全集原则；新增功能只改一个对外入口，禁再开并行体系
+ADR-0003-纯Tailwind样式体系.md[SG4T]: F:纯 Tailwind 样式决策：删除全部 maze-* 自定义 CSS，全项目只用 Tailwind | R:code:frontend/ | A:Tailwind 无法表达时用内联 style 或 @apply | S:全项目只用 Tailwind；禁再引入自定义 maze-* 类
+ADR-0004-LightOnly主题.md[SG3T]: F:仅 Light 主题决策：移除无效 dark 选项与切换逻辑 | R:code:frontend/src/store/ | A:减少约 50 行无效代码 | S:仅 Light 主题；暗色需新 ADR 重新引入
+ADR-0005-客户端按域拆分.md[SG4T]: F:前端 API 客户端按业务域拆分：领域文件+薄编排层，替代原 God file | R:code:frontend/src/api/client.ts,code:CODE_GRAPH.md | A:chat.ts 已删；client.ts 现为纯 re-export 门面，13 个 API 模块 | S:client.ts 为薄 re-export 门面；新增域必须新建模块文件
+ADR-0006-状态管理边界约定.md[SG4T]: F:UI 状态与 Server 数据状态边界：Zustand 管 UI，React Query 管服务端数据 | R:code:frontend/src/api/client.ts,code:docs/architecture/design-principles.md | A:约定以注释形式写在 client.ts 顶部 | S:UI 状态归 Zustand，服务端数据归 React Query，禁混用
+ADR-0007-用户认证与权限体系.md[SG7S]: F:JWT 认证与权限体系：认证方案、路由鉴权分层、前端流程与 X-API-Key 关系 | R:code:api/auth_jwt.py,code:api/auth.py | A:原编号 ADR-0014 因重号回填 0007；0008–0010 空缺 | S:非显式 dev 必须 JWT_SECRET≥32 否则拒启动；路由鉴权分层不可绕
+ADR-0011-unified-design-framework.md[SG3T]: F:统一设计框架（侧边栏+工作区）历史 ADR，已废止 | R:code:docs/DECISION_LEDGER.md | A:三重证据推翻：未实施/架构扁平化/用户裁决不要三级侧边栏 | S:Superseded（裁决 C1）；三级侧边栏作废；ADR-0013 连坐失效
+ADR-0012-design-drafts-cleanup.md[SG3T]: F:前端设计稿清除决策：删除早期设计稿，代码即标准 | R:code:frontend/ | A:回应旧「禁止删除」策略导致的设计债 | S:设计稿已删，代码即标准；不再保留早期设计稿
+ADR-0013-character-builder-shared-state.md[SG3T]: F:Character Builder 共享状态历史 ADR，随三级侧边栏废止 | R:code:docs/adr/ADR-0011-unified-design-framework.md,code:docs/DECISION_LEDGER.md | A:现行创建角色规划以挂起池 SP-2 方案 A 为准（未批） | S:已 Superseded；依赖 ADR-0011 连坐失效；方案 A 仍挂起未批
+ADR-0014-achievement-system.md[SB6S]: F:角色成就体系：角色维度轻量里程碑、数据接口草案、触发策略与隐私边界 | R:code:api/achievement_engine.py,code:docs/FUNCTION_INVENTORY.md | A:第一阶段 09-01 实现；第二阶段每日维护兜底 | S:成就属绑定角色不属全局用户；无排行榜/付费/社交比较
+ADR-0015-系统提示词分层与按需注入.md[SA7M]: F:系统提示词分层与按需注入：静态在前动态在后、历史后指令权重与角色卡字段注入 | R:code:orchestrator/optimized_orchestrator.py,code:utils/reply_mode.py,code:proactive/ase_engine.py | A:第 1、2 项已落地，其余分阶段；含行业调研（Anthropic/SillyTavern） | S:静态在前动态在后；更新信息走 messages 不改 system；未落地项按分阶段
+
+===D:/Desktop/ai-girlfriend/docs/architecture/===
+design-principles.md[SG6T]: F:七条设计原则：API 全集、状态边界、单一配置源、单向依赖、核心测试、决策记录、CI 门禁 | R:code:docs/adr/,code:ci.yml | A:原则是不应期，违反需新 ADR 授权 | S:违反原则需新 ADR 授权；七条底线不可临时绕过
+knowledge-graph.md[SG3M]: F:项目知识图（2026-05-31 快照）：前端路由树、后端模块依赖与数据流 | R:code:CODE_GRAPH.md | A:Mermaid 图承载；L51 状态中心规划为 SP-1 输入 | S:L3 历史快照；路由树与依赖已过时，以 CODE_GRAPH 为准
+
+===D:/Desktop/ai-girlfriend/docs/board/===
+BOARD.md[SG7T]: F:跨窗口看板：窗口登记、追加区、阻塞与漂移告警 | R:code:docs/HANDOFF_REPORT.md,code:LOG.md,code:scripts/window_board.ps1 | A:开窗先读本板再读 HANDOFF；本板只载当前状态 | S:跨窗唯一信息通道；历史归 LOG；主控 owner，他窗只能追加
+
+===D:/Desktop/ai-girlfriend/docs/design/===
+2026-09-22_热点入知识库主动消息链设计.md[SW5S]: F:热点入知识库主动消息链设计：周期采集→全局池→读侧人设过滤→既有供出通道 | R:code:shisi/knowledge/hot_topics.py,code:proactive/ase_engine.py,code:config/hot_topics.yaml | A:不造第二条调度与第二通道；失败全链无半成品 | S:热点先入库再整理再供主动消息，不在发送现场调搜索
+
+===D:/Desktop/ai-girlfriend/docs/designs/===
+MiMo_TTS_集成方案.md[SA4M]: F:MiMo TTS 集成方案：模型、架构、配置、克隆/音色设计与情感参数映射 | R:code:voice/mimo_tts_provider.py,code:docs/DECISION_LEDGER.md | A:状态卡：L2 决策档案，部分生效后被收敛 | S:四级降级链已删（MiMo-only）；情感参数映射仍生效
+
+===D:/Desktop/ai-girlfriend/docs/guides/===
+微信克隆-智能体任务书.md[SB4S]: F:微信聊天记录导出任务书：本机自检、解密、定位好友、导出与上传的逐步判据 | R:code:clone_training/data_extractor.py | A:面向任意编码智能体执行；工具细节以工具仓库为准 | S:本机导出、≤50MB、仅目标好友；工具参数以仓库文档为准
+
+===D:/Desktop/ai-girlfriend/docs/history/===
+2026-05-19-PROJECT_OVERVIEW.md[SG2L]: F:项目早期全面文档：定位、架构、角色/情感/记忆/主动/克隆模块详解 | R:code:docs/history/INDEX.md,code:docs/VISION.md | A:2026-05-19 版本快照，50/50 模块自述通过 | S:L3 历史快照；模块与架构描述已被后续重构覆盖
+2026-05-24-multi-user-design.md[SG3T]: F:多微信用户模式设计方案：GirlfriendManager 调度层、共享/独立组件与前后端改造 | R:code:docs/history/INDEX.md | A:从单用户管理端改为单实例多用户的设计草案 | S:历史设计；GirlfriendManager 方案已被现架构取代
+2026-05-29-design-vs-current-gap.md[SG2S]: F:设计稿与当前前端布局差距分析：导航层级与七个核心页面对比 | R:code:docs/history/INDEX.md | A:只比布局与功能位置，色调保持当前 | S:历史布局差距分析；v10 设计稿已删，仅追溯用
+2026-06-04-HANDOFF.md[SG3M]: F:2026-06 历史交接：全库更名、lint/type 零债清理、shisi 历史债与前端 ESLint 记录 | R:code:docs/history/INDEX.md,code:LOG.md | A:记录多批 commit 与新增 FF 约束 | S:L3 历史交接；命名与零债记录仅供追溯
+2026-06-29-create-role-brainstorm.html[SU3T]: F:创建角色页重构头脑风暴稿：横标签+右侧预览等三方向 HTML 交互选型页 | R:- | A:2026-06-29 方案讨论快照 | S:方案A（右侧常驻预览卡）为 SP-2 挂起池来源，未获批
+HANDOFF_2026-09-15.md[SW4S]: F:2026-09-15 主控交接书：四窗口成果、官方硬要求、并发回滚事故与 Owner 唯一制来源 | R:- | A:§4 待办已全部执行，W3 已收编部署 | S:「写入即提交+Owner唯一」源于本文；现行见HANDOFF_REPORT.md
+HANDOFF_2026-09-20_包ABC全面改造.md[SW4M]: F:包 A/B/C 一次性改造交接：身份唯一/记忆稳定/工具可信三包范围、白名单与验收清单 | R:code:AGENTS.md | A:2026-09-20 worktree wt/abc 实施，主控只交接 | S:范围以 §0 为准；负面边界：不抄 nana、不引入 AGPL、不动角色卡语义
+HANDOFF_2026-09-21_AX独立评审窗.md[SQ4M]: F:AX 独立评审窗任务书：空白窗只评不施，R1–R6 分阶段评审与证据要求 | R:- | A:2026-09-21 与实施窗 agent-x 并行隔离 | S:只评不施：禁止改功能代码，结论须带 file:line 证据
+HANDOFF_2026-09-21_智能体转型深研与架构.md[SW4M]: F:智能体转型深研交接：调研→逐行学实现→架构选型三阶段 AX 任务与失败模式清单 | R:code:docs/plans/2026-09-21_智能体架构转型方案.md | A:2026-09-21 用户裁决重大决策转型 | S:负面边界：禁把研究改写当成果、禁只读函数名，禁无迁移路径改热路径
+HANDOFF_2026-09-22_六域二次根治五块收官.md[SW4S]: F:2026-09-22 六域二次根治五块收官交接：6 P0/9 P1/10 P2 修复与接手铁律 | R:code:utils/local_time.py | A:五块 A–E 分块验收，本地全绿未 push | S:墙钟用 now_local，时间差用 UTC；禁 git add -A
+HANDOFF_REPORT-2026-08-28.md[SW3M]: F:2026-08-27 交接报告 v1.1：项目概览、SP 任务、技术债务与文档导航 | R:- | A:08-28 接管批注：Demo 全删、克隆收敛本地提取+JSON 上传 | S:文中 1025/1033/1035 等测试数字为历史快照，勿引用
+HANDOFF_REPORT-2026-09-14.md[SW4M]: F:2026-09-14 新窗口交接：生产体验三连修、web 两开关、角色卡恢复与验证证据 | R:- | A:09-17 增量刷新（activate 实时生效/emoji 收口/主动消息打通） | S:测试口径 1014/1010/4 为 09-17 快照；参赛文档三不入本文重申
+INDEX.md[SG5S]: F:产品意图演进索引：五阶段时间线、真值裁决优先级与真值漂移登记簿 | R:code:docs/VISION.md,code:docs/DECISION_LEDGER.md | A:2026-08-24 创建，随重大决策更新 | S:冲突裁决顺序：代码实况 > 现行文档 > 历史文档；本目录文档仅追溯意图
+NEW_WINDOW_PROMPT_2026-09-22.md[SW3T]: F:新窗口开窗提示词模板：读交接→强制自检→铁律→先问用户 | R:- | A:2026-09-22 复制区可整块发给新窗口 | S:1841 passed/41 卡与 nginx 模板已坏均为当时事实，勿照抄
+
+===D:/Desktop/ai-girlfriend/docs/inventory/===
+file-inventory.md[SG3L]: F:2026-05-31 全项目文件按域分类清单（前端/后端/模块与端点归属） | R:code:CODE_GRAPH.md | A:L3 历史快照，不随代码演进 | S:shisi 废弃结论被 CODE_GRAPH §14 推翻；多实体已消失
+
+===D:/Desktop/ai-girlfriend/docs/legal/===
+USER_AGREEMENT.md[SS6S]: F:用户协议与隐私声明 v1.0.0：使用即同意、数据范围、心理陪伴边界与微信免责 | R:code:api/consent.py,code:frontend/src/constants/agreement.ts | A:2026-08-30 生效 | S:版本号三方同步：api/consent.py CURRENT_AGREEMENT_VERSION、前端 agreement.ts 必须一致；不同意即不能使用
+
+===D:/Desktop/ai-girlfriend/docs/plans/===
+2026-09-19-每人独立微信通道方案.md[SI4L]: F:每人独立微信通道改造方案：凭证/状态/连接器按 user_id 隔离，含迁移与完整测试计划 | R:code:wechat_direct/wechat_connector.py,code:api/routers/wechat_routes.py | A:2026-09-19 设计，后续 D16 收敛为一人一 bot | S:根因是通道层全局单例被 UI 当作个人通道；ilink 登录是 token 维度
+2026-09-20_小凌架构收敛与双向映射设计.md[SD4M]: F:小凌转写架构双向收敛设计：参数四元域、遗忘三分离与 8 条真实缺陷勘察 | R:code:shisi/memory/legacy/memory_pipeline.py | A:2026-09-20 纯设计零代码，D5 时间真源已实施 | S:「12 工具全量暴露」是误读，实为意图门+权限门双重门
+2026-09-21_AX_EventLedger迁移说明.md[SD4T]: F:EventLedger 与 affinity_records 迁移说明：写账本/读投影语义与 P0–P2 批次 | R:code:shisi/migrations.py,code:shisi/affinity/enhancer.py | A:AX 阶段 C 骨架配套 | S:affinity_records 只写不读、无 user 维度，无法按用户回放
+2026-09-21_AX_prompt槽位契约.md[SB5T]: F:Prompt 槽位契约：九槽位顺序、信任级与缺省策略，单测钉死段落顺序与禁入项 | R:code:orchestrator/context_budget.py,code:shisi/core/services/prompt_builder.py | A:AX 阶段 C 契约文档 | S:记忆与工具结果不得标为「对话历史」；槽位顺序即契约；动态状态每轮重算禁缓存
+2026-09-21_AX_画像记忆工具Schema.md[SB5T]: F:画像与记忆工具 Schema/合并规则：写全走 EventLedger，user_profile 表仅投影 | R:code:tools/builtin/profile_agent_tools.py | A:2026-09-21 用户裁决 P0 契约 | S:只写用户明确说过的信息；否认→correct 事件清空；缺 session_key 拒绝执行；失败不 append
+2026-09-21_智能体架构转型方案.md[SB5M]: F:AX 阶段 B 转型方案：以 EventLedger 状态平面为唯一新增主轴的 P0–P3 迁移与验收 | R:code:shisi/migrations.py | A:2026-09-21 重大决策转型可评审方案 | S:禁止再报告堆叠；schema/API/探针须可运行；状态真源碎片化是「说不清为何这样答」的根因
+极致拟人化升级方案_最终落地方案.md[SG4L]: F:拟人化升级 v1 原方案：认知聚焦/一致性检查/记忆加权等 P0 模块与验收标准 | R:- | A:L2 决策档案，6 实施/1 半实施/3 挂起 SP-6~8；v2 口径见评审优化报告 | S:rag_engine 路径已迁 shisi/knowledge/legacy
+
+===D:/Desktop/ai-girlfriend/docs/reports/===
+2026-08-28_SP12全面测试收官报告.md[SQ4T]: F:SP-12 测试收官：pytest/vitest/E2E/对齐四项全绿与 E2E 独立数据库基建 | R:code:scripts/e2e_setup.py,code:frontend/e2e/smoke.spec.ts | A:2026-08-28 确立四项回归门 | S:此后批次合并前四项必须全绿，任一红即阻塞；E2E 暂未入 CI
+2026-08-28_SP5塑料感代码级诊断.md[SU3T]: F:塑料感代码级诊断：角色卡原始 prompt 字段直出 UI 是主因，动效缺失排末 | R:code:frontend/src/pages/RolesPage.tsx | A:2026-08-28 基于 53 张卡库实扫 | S:恢复三动画组件不是解药；标签色按 i%3 轮转无语义是第二根因
+2026-08-28_前后端对齐验证.md[SQ3M]: F:前后端对齐验证：198 端点 × 前端 118 调用点，缺失 0 与零消费清单 | R:code:frontend/src/api/ | A:08-28 快照，09-19 注记消费面已变 | S:本报告数字不再作为现行依据；模板串 ${} 归一为 {var} 后比对
+2026-08-28_文档与代码图谱治理方法论调研.md[SG5S]: F:文档与代码图谱治理方法论调研：Diátaxis/arc42/MADR/C4 等来源与 P0–P3 治理方案 | R:code:docs/README.md,code:CODE_GRAPH.md | A:2026-08-28 GitHub-First 调研，结论待批复 | S:CODE_GRAPH 禁止从零重建，须以现有代码现状文档为基线增量刷新
+2026-09-19_WrenWen伴侣架构精读.md[SA4T]: F:WrenWen 伴侣架构精读：记忆/欲望/唤醒三闭环 W1–W24 机制要点与映射表 | R:- | A:2026-09-19 纯文档仓库精读，无代码可搬 | S:许可为不开源文档，只吸收机制思想；对 ASE 改造有红线级警示
+2026-09-19_情感真源收敛审查.md[SD5S]: F:情感真源收敛审查：EmotionEngine 为主源、shisi 派生、vital_signs 幽灵，全族无持久化 | R:code:my_character/emotion_engine.py | A:2026-09-19 只读审计零改动 | S:「四套真源并存」应精确为 1 主 3 仆+孤儿副本；当时全族重启归零
+2026-09-19_经历因果升级机制研究.md[SG4M]: F:小凌架构对标研究：识海/心光/经历因果蓝图提取、逐模块对标、GitHub 七域调研与 P0–P4 路线图 | R:code:docs/reports/2026-09-19_情感真源收敛审查.md,code:docs/reports/2026-09-19_WrenWen伴侣架构精读.md | A:纯研究零代码；P0–P4 为设计建议 | S:纯研究零改动；P0-P4仅为建议，落地看代码实况
+2026-09-20_小凌一手素材深掘.md[SG4L]: F:小凌一手素材深掘：21 条作品时间线、手稿十格批注勘误、参数表与 ASR 转写复核 | R:code:docs/reports/2026-09-19_经历因果升级机制研究.md | A:纯研究零代码，素材目录只读；产出走 B 档 | S:素材只读取证；勘误拆解文档，结论置信度高
+2026-09-20_经历因果研究交接与深研任务包.md[SW4S]: F:经历因果深化研究交接书：已耕区域清单、W-A~W-G 七工作包与并行认领边界 | R:code:docs/reports/2026-09-19_经历因果升级机制研究.md | A:仅研究不动代码；后续窗口按 §3 认领 | S:研究任务包；W-A~W-G可并行，勿重复已耕区
+AI拟人化技术研究报告.md[SG4M]: F:2026-05-24 拟人化技术综述：RP-LLM、长期记忆、人格塑造、情感计算与多模态 | R:code:docs/reports/AI极致拟人化技术深度研究报告.md | A:L3 理论研究档案；§六 技术栈与 §八 合规建议已被取代 | S:L3档案；推荐栈已过时，§八已入宪法
+AI极致拟人化技术深度研究报告.md[SG4L]: F:极致拟人化理论深研：心智理论、角色一致性、记忆与情感技术体系及产品对标 | R:code:docs/reports/极致拟人化升级方案_评审优化报告.md | A:L3 理论研究档案，不随代码演进；工程落点见 plans | S:L3理论研究；工程落点以plans与代码为准
+极致拟人化升级方案_评审优化报告.md[SG4L]: F:极致拟人化 v1→v2 方案代码级评审：8→10 模块、~8→~5 人天、取消项与排除项裁决 | R:code:docs/plans/极致拟人化升级方案_最终落地方案.md | A:取消项/排除项有效并已并入 VISION 非目标区 | S:§七取消项与§八排除项为有效裁决，已并入VISION
+
+===D:/Desktop/ai-girlfriend/docs/research/===
+2026-09-20_AI伴侣开源对照深研与本项目困境解法.md[SG4M]: F:开源伴侣代码级对照：nana/Artemis/SillyTavern 等对六大困境的解法与本仓改造点 | R:code:docs/research/2026-09-20_全模块对标通读-上下文提示词工具知识记忆.md | A:研究结论部分已落地（包 A/B/C） | S:对照仓仅只读；结论为设计输入，落地以代码为准
+2026-09-20_全模块对标通读-上下文提示词工具知识记忆.md[SG4L]: F:六对标项目源码级通读：上下文、提示词、工具、知识库、记忆、情感、主动消息差异表 | R:code:orchestrator/context_budget.py,code:shisi/core/services/prompt_builder.py | A:先研究的差异表；部分已由包 A/B/C 落地 | S:源码级通读差异表；可改点待拍板，部分已落地
+2026-09-20_第三轮深挖-隐性系统问题与说不清的质量病.md[SG4M]: F:第三轮隐性机制病诊断：双管线分叉、双情感真源、异步后处理、旁路机器腔、Prompt 多 Owner | R:code:docs/research/2026-09-20_全模块对标通读-上下文提示词工具知识记忆.md | A:八类隐病清单作为后续改造输入 | S:隐病清单：双管线/双真源/异步记忆/多Owner叠加
+2026-09-21_AX_peer-projects克隆记录.md[SG3T]: F:AX 阶段 A 对照仓克隆台账：仓库、许可证、Stars、分支与 HEAD | R:code:docs/research/2026-09-21_AX_实现级学习笔记.md | A:peer-projects 不入本仓 git、不上服务器；只读学习 | S:对照仓只读；不入git不上服务器
+2026-09-21_AX_实现级学习笔记.md[SG4L]: F:AX 实现级学习笔记：nana 记忆归档/画像回写、回复状态闭环的调用链与迁移点 | R:code:tools/builtin/profile_agent_tools.py | A:按强制格式记录机制与落点 | S:机制级学习：写库/拼prompt/状态分支，禁只读函数名
+2026-09-21_AX_验收探针设计.md[SQ4T]: F:AX 验收探针设计：因果回放、双用户串台、画像更正、工具真执行四类探针 | R:code:scripts/ax_acceptance_probes.py | A:生产接线后探针读真库/ledger/reminders | S:四类探针；接线后须读真库，禁止只测mock
+2026-09-22_laya真源审计与接线评估.md[SG4M]: F:laya 轻量决策框架审计：真实性/许可证/pip 同源/依赖冲突与三候选接线点评估 | R:code:pyproject.toml | A:零生产改动零依赖安装；结论为评估 | S:只评估未接线；Apache-2.0可商用，依赖低冲突
+W3-V2变更方案-多模态直传.md[SI3S]: F:多模态图片通道 V2 方案：B 多模态直传为主 + A 描述注入降级，含改动清单与回滚 | R:code:multimodal/,code:docs/research/W3-多模态缺口调研-2026-09-15.md | A:方案待确认；现行实现以 multimodal 为准 | S:方案态；直传为主描述注入降级，实施以代码为准
+W3-多模态缺口调研-2026-09-15.md[SG3S]: F:多模态缺口调研：图片通道三方案对照、人脸表情云端 API 选型与合规红线 | R:code:docs/research/W3-V2变更方案-多模态直传.md | A:V1 ASR 选 MiMo；V3/V4 需显式同意且不落盘 | S:生物特征红线：显式同意+不落盘原文
+
+===D:/Desktop/ai-girlfriend/docs/superpowers/plans/===
+2026-05-27-frontend-rewrite.md[SU3S]: F:前端全量翻新计划：Phase 0–3 骨架/主题/页面迁移已消化，Phase 4 动效搁浅 | R:code:frontend/src/App.tsx | A:执行中止于 Phase 3；重启需用户批准 SP-5 | S:Phase4动效搁浅并入SP-5；重启需用户批准
+
+===D:/Desktop/ai-girlfriend/docs/superpowers/specs/===
+2026-05-27-immersive-glass-design.md[SU3L]: F:沉浸式玻璃态视觉设计 v1.0：配色、毛玻璃、排版与布局的现行视觉基线 | R:code:frontend/src/index.css | A:结构层生效；动效层五任务零执行并入 SP-5 | S:结构层为现行视觉基线；动效层挂SP-5
+2026-06-29-create-role-redesign-design.md[SU3S]: F:CreateRole 页重设计方案 A：横向分段标签 + 右侧实时预览两栏工作台 | R:code:frontend/src/pages/CreateRole.tsx | A:定稿未实施，挂起 SP-2；启动需重新批准 | S:定稿未实施；挂SP-2，重启需重新批准
+frontend-design-framework-v1.md[SU3L]: F:前端设计框架 v1.0：导航架构、路由结构、页面职责与信息层级 | R:code:frontend/src/App.tsx | A:部分生效；三级侧边栏随 ADR-0011 废止 | S:部分生效；三级侧边栏已废止；TTS选型已过时
+
+===D:/Desktop/ai-girlfriend/docs/verification/===
+2026-09-17-三连修复验证报告.md[SQ4T]: F:09-17 三连修复验证：人设/emoji/主动消息修复前后日志取证、回归与远端实测 | R:code:docs/verification/2026-09-17-全仓扫描验证报告.md | A:结论有效；测试口径 1014 为当时快照 | S:口径1014为当时快照；证据链以本报告为准
+2026-09-17-全仓扫描验证报告.md[SQ4M]: F:全仓性能与正确性扫描：CWD 路径、并发异步、缓存热路径与移动端 8 类缺陷 | R:code:utils/project_paths.py | A:8 类缺陷已修；测试口径 1011 为当时快照 | S:8类已修；口径1011为当时快照
+2026-09-18-CI门禁治理与本地拦截加固验证报告.md[SQ4M]: F:CI 十四连红根治：ruff patch 级锁定、CI 与 pre-commit 共调单一门禁脚本 | R:code:scripts/ci_gates.py,code:.pre-commit-config.yaml | A:门禁已单一真源化；本报告为治理依据 | S:门禁单一真源；CI与pre-commit共调同一脚本
+2026-09-21-full-code-audit.md[SQ5M]: F:09-21 全量代码审查：六路分域审计 P0/P1 finding 逐条对码复核与排除清单 | R:code:orchestrator/optimized_orchestrator.py | A:只读审查零改动；P0/P1 后续由 v1.34 收口 | S:六路审计finding逐条对码；P0/P1已由v1.34收口
+2026-09-21-全仓审计复核与修复现状.md[SQ4T]: F:09-21 下午全仓审计复核：旧报告 10 项 P0 修复对账、P1 抽查与新发现 | R:code:docs/verification/2026-09-21-full-code-audit.md | A:基线 0bdb91e + 工作树在制品；只读复核 | S:旧P0对账与新发现；以当日下午工作树为基线
+2026-09-21_AX代码审查报告.md[SQ4T]: F:AX 自审：agent-plane/P1/P2 改动的 3 个阻断缺陷与设计风险 | R:code:orchestrator/optimized_orchestrator.py | A:阻断项当窗修复；中低问题登记 | S:三阻断：turn_id未写/投影截断/wait_minutes被忽略
+2026-10-09-attack-sweep.md[SS5L]: F:10-09 全仓攻击面扫描：六路 30 发现/16 确认/9 修复，含 EXT/PRIV/INJ/FE/OPS/ABUSE | R:code:scripts/ci_gates.py | A:数字取自工作流记录；SEC-12~18 登记 | S:30发现16确认9修复；报告未重跑测试
+2026-10-13-byok-reliability-assessment.md[SS4T]: F:BYOK 可靠性评估：配置入口/存储/取用/网关/附件五环取证与红队加固 | R:code:api/routers/misc_routes.py | A:五环可靠；两项打折点登记；裁决后加固 | S:五环取证；显式配置失败绝不回落平台key
+2026-10-20-chat-quality-fullchain-diagnosis.md[SQ5M]: F:10-20 聊天质量八问题全链路诊断：生产证据、R1–R5 根因、已落地改动与验证边界 | R:code:utils/prompt_sanitize.py,code:orchestrator/context_budget.py | A:诊断+执行记录；R1–R5 已修复提交未部署 | S:八症状=模式边界+过度指令+缺语义终审+静默降级
+INCIDENT-2026-09-14-主仓工作树与git元数据损毁.md[SO4S]: F:09-14 事故记录：主仓工作树与 .git 元数据被清空，四通道取证、时间线与恢复选项 | R:code:docs/verification/W4-2026-09-14-验证报告.md | A:根因未确定；恢复策略归用户裁决 | S:主仓工作树与git元数据损毁；根因未确定
+W11-2026-09-27-前端用户任务与声明统一-验证报告.md[SQ4S]: F:W11 验证：前端用户任务与声明统一，D1–D5 根因改动与红转绿 | R:code:frontend/src/ | A:未 push/未部署；基线核对与任务书不一致已记录 | S:未push未部署；D1-D5红转绿，基线以实测为准
+W3-2026-09-27-后台单一运行时与可恢复触达-验证报告.md[SQ4S]: F:W3 验证：后台单一运行时与可恢复触达，四 worker 拓扑与落点验收 | R:code:api/run_api.py | A:未 push/未部署；41 卡在位、工作树含在制品 | S:未push未部署；单一运行时选主与触达恢复已验
+W4-2026-09-14-验证报告.md[SQ4S]: F:W4 验证（09-14）：包 T 阶段一全量 pytest 986/992 与图片/语音收包测试 | R:code:tests/test_wechat_connector.py | A:阶段一完成；口径差 992 vs 文档 1048 已分析 | S:阶段一986/992；口径差已登记；图片语音收包预期红
+
+===D:/Desktop/ai-girlfriend/docs/verification/2026-09-19-前端审美与移动端优化/===
+README.md[SQ3T]: F:09-19 前端审美与移动端优化走查证据索引：16 路由 × 3 视口 before/after 截图 | R:code:docs/verification/2026-09-19-前端审美与移动端优化/ | A:证据目录；审计账号已事后删除 | S:仅走查证据索引；截图目录为before/after
+
+===D:/Desktop/ai-girlfriend/docs/verification/2026-09-19-前端审美第二轮/===
+README.md[SQ3T]: F:09-19 前端审美第二轮增量走查：7 项问题清单、修复文件与 Playwright 真机截图举证 | R:code:frontend/src/pages/StorylinePage.tsx | A:第一轮 11 项未覆盖页面增量；走查账号已删 | S:第二轮增量走查7项；截图与修复证据以本报告为准
+
+===D:/Desktop/ai-girlfriend/frontend/===
+.env.example[FC3T]: F:前端环境变量样例：安全配置、API 基址与开发端口占位，注释提示 HTTPS 与强随机 Key | R:code:frontend/.gitignore | A:仅样例；真实 .env 不入版本控制 | S:仅样例；真实.env不入库，生产须HTTPS+强Key
+.gitignore[FC2T]: F:前端忽略规则：日志、环境变量与编辑器产物；node_modules 与 dist 由模板覆盖 | R:- | A:现行忽略基线 | S:忽略日志/env/编辑器产物；.env含敏感信息禁提交
+bun.lock[FV2L]: F:Bun 锁文件 v1：前端依赖精确版本与 workspaces 结构 | R:code:frontend/package.json | A:与 package-lock 双锁并存（SEC-15 批收敛审计门） | S:Bun锁与package-lock双锁；依赖升级须同步双锁
+eslint.config.js[XQ3T]: F:ESLint 扁平配置：JS/TS 推荐规则 + React Hooks 与 Refresh 插件 | R:code:frontend/package.json | A:前端 lint 基线；忽略 dist 与 node_modules | S:扁平配置；启用hooks/refresh规则，忽略dist
+index.html[EU3T]: F:前端 HTML 入口：zh-CN、viewport fit=cover、favicon 与刻意不加载网络字体 | R:code:frontend/src/main.tsx | A:现行入口；外链字体已移除避免阻塞 | S:不加载网络字体；viewport含fit=cover适配刘海屏
+package-lock.json[FV2L]: F:npm 锁文件 v3：前端依赖树精确版本，CI 审计与 npm audit 门禁的读取面 | R:code:frontend/package.json | A:与 bun.lock 双锁并存；vitest 5 已锁 | S:npm锁v3；与bun.lock双锁并存，audit门读取面
+package.json[FV4T]: F:前端包清单：React 19/Vite 8/TS 6 依赖与 dev/build/test/lint 脚本 | R:code:frontend/bun.lock,code:frontend/package-lock.json | A:唯一依赖声明真源；锁文件须同步 | S:依赖声明唯一真源；改依赖须同步两锁并跑audit
+playwright.config.ts[TQ3T]: F:Playwright 配置：e2e 目录、串行 worker、30s 超时与 CI 禁 only | R:code:frontend/e2e/smoke.spec.ts | A:E2E 基线；workers=1 保证共享后端状态稳定 | S:e2e串行workers=1；CI禁only，超时30s
+tsconfig.app.json[FV3T]: F:应用侧 TS 配置：继承根配置并限定 src | R:code:frontend/tsconfig.json | A:npm run build 类型检查 | S:-
+tsconfig.json[FV5T]: F:前端 TS 编译配置：strict、noEmit、bundler 解析与未用符号检查 | R:- | A:tsc 与 vite 构建 | S:开启 noUnusedLocals/noUnusedParameters，未用符号即失败
+visual-tour.mjs[XQ4S]: F:视觉图册截图脚本：登录 API、确保演示角色、遍历路由实拍 | R:code:docs/FEATURE_MAP.md | A:docs/visual-map/shots 生成 | S:后端 8000/前端 5199 须先就绪；产物为 F-xx.png
+vite.config.ts[FV6T]: F:Vite 配置：React/Tailwind 插件、@ 别名与 vitest jsdom 环境 | R:code:frontend/src/tests/setup.ts | A:dev/build/test 唯一构建配置 | S:vitest 仅收 src 下 test/spec，排除 e2e/dist
+
+===D:/Desktop/ai-girlfriend/frontend/public/===
+favicon.svg[RU1T]: F:站点图标：100×100 viewBox 内嵌 💕 文本的 SVG | R:code:frontend/index.html | A:静态资源 | S:纯内联SVG图标，无外部依赖
+
+===D:/Desktop/ai-girlfriend/frontend/scripts/===
+start-vite.cmd[XO2T]: F:开发启动脚本：定位前端目录、设 5199 端口与本地 API 基址、拉起 bun dev | R:code:frontend/package.json | A:本地开发辅助，非生产入口 | S:仅本地开发；端口5199，API指向localhost:8000
+
+===D:/Desktop/ai-girlfriend/frontend/src/===
+App.tsx[EU6S]: F:前端根路由：懒加载 19 页、登录守卫、侧边栏/面包屑/Toast/ErrorBoundary 编排 | R:code:frontend/src/components/layout/Sidebar.tsx | A:路由与页面编排唯一入口 | S:页面全部懒加载；ErrorBoundary+登录守卫包裹路由
+index.css[CU8L]: F:全站设计系统：暖黄/海盐蓝/薄荷青令牌、材质三档、按钮与滚动条基础样式 | R:- | A:main.tsx 全局引入 | S:浅色固定环境色场；mat-recess/glass-card/mat-floating 三档材质；灰字对比度已按 AA 修正
+main.tsx[EV7T]: F:前端启动入口：StrictMode+BrowserRouter 挂载 App，生产按需初始化 Sentry | R:code:frontend/src/App.tsx,code:frontend/src/sentry.ts | A:HTML root 唯一入口 | S:Sentry 仅 PROD 且配 VITE_SENTRY_DSN 时动态加载；初始化失败静默不影响渲染
+sentry.ts[AO3T]: F:前端 Sentry 初始化：DSN 有值才启用，可配环境与采样率 | R:code:frontend/src/main.tsx | A:main.tsx 生产环境动态加载 | S:仅在 VITE_SENTRY_DSN 有值时启用
+vite-env.d.ts[FV2T]: F:Vite 客户端类型引用声明 | R:- | A:TS 编译类型面 | S:-
+
+===D:/Desktop/ai-girlfriend/frontend/src/api/===
+admin.ts[IG4S]: F:管理 API 客户端：/api/admin/* 用户管理类型与调用（仅 admin 角色） | R:code:frontend/src/api/client.ts | A:管理台消费面 | S:仅admin可用；用户管理分页与角色枚举
+auth.ts[II5S]: F:认证 API 客户端：注册/登录/刷新/登出/个人信息；refreshToken 走 httpOnly cookie | R:code:frontend/src/api/client.ts | A:Option A：前端不手传 refreshToken，保留参数兼容脚本 | S:refreshToken走httpOnly cookie；前端不手传
+characters.ts[IG5M]: F:角色 API 客户端：CRUD、人设、角色卡、收藏/转发、剧情线、音色绑定的类型与调用 | R:code:frontend/src/api/client.ts | A:统一 /api/characters/* 消费面 | S:统一角色API消费面；人设/卡/剧情/音色全覆盖
+client.ts[IG7M]: F:API 总线：axios 实例、JWT 注入与刷新队列、错误码映射、领域函数统一出口 | R:code:frontend/src/api/auth.ts | A:Decision 5：服务端数据走 React Query，UI 状态走 Zustand | S:服务端数据ReactQuery/UI状态Zustand；刷新队列单飞
+clone.ts[IG3T]: F:克隆/训练 API：人设预览、数据集上传与联系人/数据集查询 | R:code:frontend/src/api/client.ts | A:克隆收割消费面 | S:克隆≠认领；预览与上传均走后端真源
+emotion.ts[IG3T]: F:emotion 领域 API：情绪状态与趋势查询，自 client.ts 迁入（FF-0006） | R:code:frontend/src/api/client.ts | A:经 client 的 api 命名空间消费 | S:已自client迁移；消费经client的api命名空间
+llmProviders.ts[IG4S]: F:LLM 供应商 API：用户读启用清单与教程，admin 增删改启停 | R:code:frontend/src/api/client.ts | A:普通用户只读；管理动作限 admin | S:admin才能改；普通用户只读启用清单
+mimo.ts[IG4S]: F:MiMo 语音 API：语音克隆、语音设计与语音合成（Cloud 唯一引擎） | R:code:voice/ | A:与 system.ts 语音函数互补 | S:MiMo为唯一云引擎；与system.ts语音函数互补
+normalize.ts[IG3T]: F:后端错误 detail 归一化纯函数：FastAPI 校验数组与字符串统一为可读文案 | R:code:frontend/src/api/client.ts | A:自 client.ts 抽出（FF-0006） | S:纯函数无client依赖；禁止再放回client.ts
+queryClient.ts[IG5T]: F:React Query 全局客户端：30s staleTime、5min gcTime 与账号级缓存清理 | R:code:frontend/src/App.tsx | A:服务端数据缓存唯一配置点 | S:账号切换须清个人缓存；staleTime30s
+selfservice.ts[II5S]: F:账号自服务 API：同意状态机、注销作业、导出清单与聊天分页（W17） | R:code:api/routers/auth_routes.py | A:只做传输层，不复制判定语义 | S:传输层不做判定；状态与回执以服务端为准
+system.ts[IG4S]: F:系统 API：health/stats/config、用户 LLM 配置与全局微信通道 | R:code:api/routers/misc_routes.py | A:系统与全局通道消费面 | S:含全局微信单通道；多连接见wechat.ts
+templates.ts[IG4T]: F:角色模板消费层：只读无主策展卡摘要与克隆为新 id 独立副本 | R:code:api/routers/character_template_routes.py | A:W12 阶段1 端点消费层 | S:只读摘要不含persona正文；总开关关闭返回空
+training.ts[IG3T]: F:训练 API：状态/进度/清洗/测试/应用 | R:code:frontend/src/api/client.ts | A:训练管线状态消费面 | S:clone训练管线状态消费面
+wechat.ts[IG4T]: F:微信多连接 CRUD API；全局通道仍归 system.ts | R:code:frontend/src/api/system.ts | A:多账号连接管理消费面 | S:多连接CRUD；全局通道归system.ts
+
+===D:/Desktop/ai-girlfriend/frontend/src/components/admin/===
+HumanizeSection.tsx[AA5M]: F:拟人度配置面板：延迟模式与数值项，partial merge 写 /api/humanize/config | R:code:frontend/src/store/humanizeStore.ts | A:挂在角色设置消息 tab，管理员可改 | S:partial merge锁内合并；跨4 worker即时一致
+RoleSettingsConstants.tsx[AA3T]: F:角色设置子标签与引擎/模型选项常量 | R:code:frontend/src/types/framework.ts | A:选项单一真源 | S:子标签图标与引擎/模型可选值单一真源
+RoleSettingsSection.tsx[AA2T]: F:角色设置统一玻璃卡外壳 Section | R:- | A:展示型组件，无状态 | S:统一玻璃卡外壳，供各tab复用
+RoleSettingsTabs.tsx[AA6L]: F:角色设置五 tab 容器：基础/语音/消息/知识/主动，含删除与导航 | R:code:frontend/src/components/admin/HumanizeSection.tsx | A:角色设置页主编排 | S:五tab容器；删除角色与导航集中在此
+UserBadges.tsx[AI3T]: F:用户角色与启用状态徽章、角色枚举与标签 | R:code:frontend/src/api/admin.ts | A:角色展示基线 | S:角色枚举与标签唯一来源
+UserForm.tsx[AI4S]: F:管理员用户表单与邮箱/用户名/密码校验 | R:code:frontend/src/utils/passwordPolicy.ts | A:校验函数导出供复用 | S:校验函数导出供复用；成功判定=业务成功
+UserModal.tsx[AA3T]: F:用户新建/编辑弹窗，复用 UserForm | R:code:frontend/src/components/admin/UserForm.tsx | A:创建/编辑双模式 | S:复用UserForm；创建/编辑双模式
+UserTable.tsx[AA4M]: F:用户表格：排序、分页、角色/状态徽章与行操作 | R:code:frontend/src/api/admin.ts | A:管理台用户列表 | S:排序分页在前端；角色徽章复用UserBadges
+
+===D:/Desktop/ai-girlfriend/frontend/src/components/auth/===
+AuthGuard.tsx[AI5T]: F:路由认证守卫：未认证跳登录并记来源，初始化显示加载 | R:code:frontend/src/store/authStore.ts | A:认证路由包裹基线 | S:未认证跳login并记来源路径
+AuthInit.tsx[AI5T]: F:启动认证初始化：刷新会话一次，账号切换清缓存 | R:code:frontend/src/store/authStore.ts | A:App 启动执行一次 | S:启动刷新一次；账号切换清账户缓存
+ConsentGate.tsx[AI5T]: F:协议同意门：needs_consent 全屏拦截，同意后落库放行 | R:code:frontend/src/api/selfservice.ts | A:版本升级触发重新同意 | S:版本升级需重新同意；不同意即登出
+RoleGuard.tsx[AI4T]: F:角色守卫：按 roles 白名单渲染或回退 | R:code:frontend/src/store/authStore.ts | A:配合 AuthGuard 使用 | S:未认证不渲染，跳转由AuthGuard负责
+index.ts[AI2T]: F:认证组件统一出口 | R:- | A:出口文件 | S:四组件统一出口
+
+===D:/Desktop/ai-girlfriend/frontend/src/components/common/===
+Badge.tsx[AA2T]: F:通用徽章：五种语义变体 | R:- | A:设计系统基础组件 | S:五种语义变体；无状态
+Button.tsx[AA3T]: F:通用按钮：四种变体、三档尺寸与 loading | R:- | A:设计系统基础组件 | S:四变体三尺寸；loading禁用点击
+CustomCursor.tsx[AA3M]: F:遮罩式鼠标动效：光晕+内核+16 粒子拖尾，品牌海盐蓝 | R:code:frontend/src/index.css | A:2026-09-18 重构为三层结构 | S:品牌海盐蓝#7DD3FC；仅在桌面启用
+ErrorBoundary.tsx[AR6T]: F:React 错误边界：捕获子树渲染异常并显示兜底或自定义 fallback | R:code:frontend/src/components/common/Button.tsx | A:App/页面外层包裹 | S:仅捕获子树渲染错误；点重试只清 state 重挂子树；事件/异步错误不捕获
+ParticleCanvas.tsx[AP3S]: F:全屏 Canvas 粒子背景：漂浮粒子与近邻连线 | R:- | A:视觉背景层 | S:尊重减少动效；DPR上限2；30fps；切后台暂停
+Toast.tsx[AU5T]: F:全局 Toast 容器：消费 errorStore 渲染四类提示并可手动关闭 | R:code:frontend/src/store/errorStore.ts | A:App 根挂载 | S:无 toast 时返回 null；自动消失由 errorStore 定时器负责，容器不自建状态
+index.ts[AU2T]: F:common 组件桶导出：Button 与 Badge | R:code:frontend/src/components/common/Button.tsx,code:frontend/src/components/common/Badge.tsx | A:桶导出 | S:仅导出 Button/Badge；其余 common 组件仍需直接引路径
+
+===D:/Desktop/ai-girlfriend/frontend/src/components/layout/===
+Breadcrumb.tsx[AU5S]: F:顶栏面包屑与移动端菜单入口：按路径生成层级，角色页解析角色名 | R:code:frontend/src/components/layout/MobileDrawer.tsx,code:frontend/src/hooks/useQueries.ts | A:Layout 顶栏 | S:单段路径只显分组名避免与页内h1重复；角色 id 或名均可匹配；未知页兜底
+MobileDrawer.tsx[AU6S]: F:移动端全量导航抽屉：与桌面 Sidebar 共用 navGroups 入口 | R:code:frontend/src/components/layout/navGroups.tsx,code:frontend/src/store/authStore.ts | A:Breadcrumb 汉堡按钮唤起 | S:打开锁 body 滚动且关闭还原原值；Esc 关闭；桌面侧栏负责同一入口
+Sidebar.tsx[AU6T]: F:桌面侧栏：品牌入口、分组导航与收起/展开 | R:code:frontend/src/components/layout/navGroups.tsx | A:桌面 Layout 左侧 | S:收起状态仅本地 state 不落盘；md 以下隐藏并由 MobileDrawer 接管
+navGroups.tsx[AU7T]: F:全站导航分组唯一真源：连接/角色/系统设置/管理后台 | R:code:frontend/src/components/layout/Sidebar.tsx,code:frontend/src/components/layout/MobileDrawer.tsx | A:桌面与移动导航共用 | S:管理组仅 admin 可见；空分组必须过滤防只剩标题；角色子页依赖 activeRoleId
+
+===D:/Desktop/ai-girlfriend/frontend/src/components/llm/===
+ProviderEditModal.tsx[AU6L]: F:LLM 供应商新建/编辑弹窗：基础信息、连接参数与申请教程编辑 | R:code:frontend/src/api/llmProviders.ts,code:frontend/src/components/shared/Modal.tsx | A:管理员供应商页 | S:edit 模式 key 留空保留原值；special 供应商禁改启用/认证/连接参数；创建 key 限小写字母数字下划线
+ProviderGuideModal.tsx[AU4S]: F:供应商申请教程弹窗：免费额度、步骤、提示、警告与复制申请链接 | R:code:frontend/src/api/llmProviders.ts,code:frontend/src/components/shared/Modal.tsx | A:供应商列表/编辑入口 | S:provider 或 guide 缺失直接不渲染；复制成功态 2 秒复位
+
+===D:/Desktop/ai-girlfriend/frontend/src/components/shared/===
+AnimatedPage.tsx[AP3T]: F:页面过渡容器：CSS opacity/translateY/scale 入场动画 | R:- | A:页面级包裹 | S:不用framer-motion以免拉入主chunk；下一帧触发防闪烁
+ConfirmDialog.tsx[AU4T]: F:确认对话框：可配危险样式与确认/取消文案 | R:code:frontend/src/components/shared/Modal.tsx | A:删除等破坏性操作确认 | S:danger 变体仅改确认按钮配色；取消只回调 onCancel
+EmptyState.tsx[AU3T]: F:空状态占位：图标、标题、描述与操作槽 | R:- | A:列表/详情空态 | S:未传图标时用 Inbox；描述与操作均可选
+FileUpload.tsx[AU4T]: F:文件选择/拖放控件：大小过滤、多选与移除 | R:- | A:需要选取本地文件的表单 | S:maxSize单位MB默认30，超限剔除；仅回传File[]不上传
+Modal.tsx[AU5T]: F:通用模态框：标题、尺寸档、Esc 与遮罩关闭 | R:- | A:各弹窗基础壳 | S:Esc 与遮罩点击均关闭；不锁 body 滚动；尺寸 sm/md/lg
+ScrollProgress.tsx[AU2T]: F:页面顶部滚动进度条：useSpring 平滑 scaleX | R:- | A:全局阅读进度 | S:依赖 framer-motion；仅 0.5px 顶部渐变线
+Select.tsx[AU4T]: F:轻量下拉选择：按钮触发、外点关闭 | R:- | A:表单选择项 | S:仅处理鼠标外点关闭，无键盘方向键导航
+Skeleton.tsx[AU2T]: F:骨架屏占位：按 count 重复渲染灰块 | R:- | A:加载态占位 | S:className 默认 h-4；仅视觉占位
+Slider.tsx[AU4T]: F:滑杆输入：标签、数值、提示与外显开关 | R:- | A:参数调节表单 | S:数值做 Number 转换防 API 字符串；标签/数值可各自隐藏
+SubTabBar.tsx[AU3T]: F:子标签切换条：受控 activeKey 与样式扩展 | R:- | A:页内子视图切换 | S:纯受控组件，不自持选中态
+TagInput.tsx[AU4T]: F:标签输入：回车添加、去重、退格删末项 | R:- | A:兴趣/关键词类表单 | S:空值与非去重值不入列；输入为空时退格删最后一个标签
+Toggle.tsx[AU4T]: F:开关：受控 checked，framer-motion 滑块动画 | R:- | A:布尔设置项 | S:role=switch且aria-checked同步；disabled阻断点击
+index.ts[AU4T]: F:shared 组件桶导出：Slider/TagInput/Toggle/Select/FileUpload/Modal 等 | R:- | A:桶导出 | S:新增共享组件必须同步此出口，否则页面无法按桶导入
+
+===D:/Desktop/ai-girlfriend/frontend/src/components/storyline/===
+KnowledgePreview.tsx[AU4S]: F:角色知识库预览：来源统计与 top5 检索测试 | R:code:frontend/src/api/client.ts,code:frontend/src/components/common/Badge.tsx | A:角色设置知识 tab | S:展开才请求统计；检索失败清空结果而非保留旧值
+StorylineEditor.tsx[AU6L]: F:剧情线编辑器：开关、每轮时长、阶段/结局模板与自动检测 | R:code:frontend/src/hooks/useQueries.ts,code:frontend/src/types/api.ts | A:角色设置剧情 tab/独立页 | S:affects_chat 缺省 false 显示「仅存档」；检测失败清空结果；保存只改本页状态
+StorylineIndicator.tsx[AU4T]: F:剧情线状态条：阶段、剧情日/时与进度 | R:code:frontend/src/hooks/useQueries.ts,code:frontend/src/components/common/Badge.tsx | A:角色状态展示位 | S:未配置或未启用时不渲染；天数按 story_day+1 显示
+
+===D:/Desktop/ai-girlfriend/frontend/src/constants/===
+agreement.ts[FC6S]: F:用户协议与隐私声明前端常量：版本号、标题与全文 | R:code:api/consent.py | A:ConsentGate 与账号设置页消费 | S:版本须与 api/consent.py 的 CURRENT_AGREEMENT_VERSION 同步；bump 后下次登录重新弹同意
+cloneAgentGuide.ts[FC4S]: F:微信克隆智能体任务书：一键复制给任意 AI 智能体执行导出 | R:- | A:CreateRole 微信克隆 tab | S:权威副本在 docs/guides 任务书；改须两处同步；上传≤50MB
+persona.ts[CB7S]: F:人设维度与情绪配色前端唯一真源： Personality/说话风格/十态情绪/默认值/亲密阶段 | R:code:my_character/persona_card.py,code:my_character/emotion_engine.py | A:角色设置/创建角色/状态中心共用 | S:改维度或情绪集只改本文件；normalize 剔除后端不认识的旧键；阶段值仅请求失败兜底
+
+===D:/Desktop/ai-girlfriend/frontend/src/hooks/===
+index.ts[CG2T]: F:hooks 桶导出：useMousePosition/useInView/useAuth/useQueries | R:code:frontend/src/hooks/useAuth.ts,code:frontend/src/hooks/useQueries.ts | A:hooks 统一入口 | S:useAuth/useQueries 须显式导出；后者用 export *
+useAuth.ts[DI6S]: F:认证 Hook：登录/注册/邀请注册/登出并落地 authStore 与同意态 | R:code:frontend/src/store/authStore.ts,code:frontend/src/api/queryClient.ts,code:frontend/src/constants/agreement.ts | A:LoginPage 与账号设置页消费 | S:认证初始化已移至 AuthInit，本 hook 不暴露 init/refresh；账号切换先清私人缓存；同账号重登不清
+useInView.ts[CG3T]: F:IntersectionObserver 入场检测：首次可见即置真 | R:- | A:滚动入场动画 | S:options 序列化防 observer 重建；首次可见即 unobserve
+useMousePosition.ts[CG2T]: F:鼠标坐标 Hook：rAF 节流并被动监听 | R:- | A:光标跟随/视觉动效 | S:rAF 节流且 passive 监听；卸载时取消未执行帧
+useQueries.ts[DD8L]: F:全站 React Query 查询/变更钩子：角色、情绪、记忆、心理、安全、语音、剧情线等 | R:code:frontend/src/api/client.ts,code:frontend/src/store/authStore.ts | A:页面数据访问唯一入口 | S:私人查询键必须带 users.id 账号维度；迟到旧账号响应写不进新账号键；清缓存只是兜底
+
+===D:/Desktop/ai-girlfriend/frontend/src/pages/===
+AdminProvidersPage.tsx[AU6M]: F:供应商管理页：全量列表、启停、编辑教程、新建与删除自定义供应商 | R:code:frontend/src/api/llmProviders.ts,code:frontend/src/components/llm/ProviderEditModal.tsx | A:/admin/providers，仅 admin | S:预设供应商不可删；非 admin 不拉数据；操作以业务回执判定
+AdminUsersPage.tsx[AU6M]: F:用户管理页：搜索防抖、分页、排序、创建/编辑/删除 | R:code:frontend/src/api/admin.ts,code:frontend/src/components/admin/UserTable.tsx | A:/admin/users，仅 admin | S:非 admin 不发请求避免 403/404；排序只作用于当前页已加载行（后端无 sort）
+CreateRole.tsx[AU7L]: F:创建角色页：AI 对话、微信克隆、文件导入三种方式与实时人设预览 | R:code:frontend/src/api/client.ts,code:frontend/src/constants/persona.ts,code:frontend/src/constants/cloneAgentGuide.ts | A:/roles/create | S:成功须 status=created/imported 且带 id；HTTP 2xx 不足为凭；W16 初始角色字段缺席时静默
+IntroPage.tsx[AU4M]: F:公开产品介绍页：定位、能力卡、邀请码注册入口与开源标识 | R:- | A:/ 公开门面 | S:禁占位文案，取材 VISION/FUNCTION_INVENTORY；零新依赖
+LoginPage.tsx[AI6M]: F:登录/注册页：密码登录、开放注册与邀请码注册切换 | R:code:frontend/src/hooks/useAuth.ts,code:frontend/src/utils/passwordPolicy.ts | A:/login | S:已登录用 Navigate 跳来源页或 /wechat；本地先拦必 422 输入；注册分邀请码与开放两条路径
+NotFoundPage.tsx[AU2T]: F:404 兜底页：提示页面不存在并返回首页 | R:- | A:兜底路由 | S:固定返回 /，无数据依赖
+PsychProfilePage.tsx[AU5M]: F:心理画像页：OCEAN/PAD/风格向量、情绪信号与快照历史 | R:code:frontend/src/hooks/useQueries.ts | A:/psych | S:非医疗诊断常驻免责；重置成功须 status=reset，HTTP200 不够；热线 400-161-9995
+RoleSettings.tsx[AU5S]: F:角色设置页外壳：URL tab 解析与 RoleSettingsTabs 编排 | R:code:frontend/src/components/admin/RoleSettingsConstants.tsx | A:/roles/:id/settings 及用户角色前缀 | S:tab 以 URL 为唯一真源，非法/缺省回退 basic；兼容两种路径前缀
+RolesPage.tsx[AU6S]: F:角色列表页：角色卡、搜索、启用与新角色入口 | R:code:frontend/src/api/characters.ts,code:frontend/src/hooks/useQueries.ts | A:/roles | S:激活成功须 status=activated；成功后失效带账号维度的 characters 键；活跃角色置顶
+SettingsAccount.tsx[AI7M]: F:账号与数据页：同意状态、撤回、导出清单/聊天与注销受理 | R:code:frontend/src/api/selfservice.ts,code:frontend/src/constants/agreement.ts | A:/settings/account | S:注销文案止于已受理；撤回同意须同时给重新同意入口；判定一律业务回执
+SettingsLLM.tsx[AC6L]: F:LLM 配置页：全局/用户级配置、供应商选择与申请教程 | R:code:frontend/src/api/system.ts,code:frontend/src/api/llmProviders.ts | A:/settings/llm | S:保存回执区分 restart_required/unsupported/in_sync；key 显示 ****，空输入保留原 key
+SettingsLogs.tsx[AO5M]: F:系统日志页：按级别过滤、搜索、暂停轮询与排序 | R:code:frontend/src/api/system.ts,code:frontend/src/types/api.ts | A:/settings/logs | S:5s 轮询可暂停；WARN 归一为 WARNING；字段固定 time/level/module/msg
+SettingsSecurity.tsx[AS6M]: F:安全页：内容安全统计、拦截日志与管理员开关 | R:code:frontend/src/api/system.ts,code:frontend/src/types/api.ts | A:/settings/security | S:日志真实键是 log 不是 logs；config 返回 not_available 不得翻转开关；普通用户不渲染 admin 开关
+SettingsVoice.tsx[AU6L]: F:语音页：MiMo 音色目录、克隆、设计与试听 | R:code:frontend/src/api/mimo.ts,code:frontend/src/api/system.ts | A:/settings/voice | S:MiMo 唯一引擎；克隆/设计前先切对应模型；set-engine 为 admin 门，403 降级不阻断
+StatusCenter.tsx[AU7L]: F:状态中心：情绪/亲密度趋势、成就与三层记忆管线 | R:code:frontend/src/hooks/useQueries.ts,code:frontend/src/constants/persona.ts | A:/roles/:id/status | S:三层记忆用既有端点不新增接口；情绪分布为会话内存态重启清零；阶段请求失败回落常量
+SystemSettingsLayout.tsx[AU2T]: F:系统设置外壳：统一滚动容器与最大宽度，子页 Outlet | R:- | A:/settings/* | S:标题由面包屑承担，子页不再重复 h1
+TemplatesPage.tsx[AU5S]: F:角色模板页：策展模板清单与克隆为我的角色 | R:code:frontend/src/api/templates.ts,code:frontend/src/hooks/useQueries.ts | A:/templates | S:克隆=新 id 独立副本；status 非 created 不算成功；成功后失效 characters.all
+ToolsDashboard.tsx[AC6M]: F:工具仪表盘：工具库存、健康状态与启停 | R:code:frontend/src/api/system.ts | A:/settings/tools | S:库存含 enabled/disabled/unavailable；兼容旧后端仅启用列表；成功后才更新开关
+WeChatPage.tsx[AU6L]: F:微信连接页：本人 bot 扫码绑定、通道状态横幅与连接管理 | R:code:frontend/src/api/system.ts | A:/wechat 主界面 | S:状态由 useWechatStatus 轮询驱动；隔离后不订阅全局 SSE
+
+===D:/Desktop/ai-girlfriend/frontend/src/store/===
+authStore.ts[CI6S]: F:认证状态 store：user/isAuthenticated 持久化，accessToken 仅存内存闭包 | R:code:frontend/src/api/auth.ts | A:全站认证态读取唯一来源 | S:accessToken 不持久化；FF-0007 禁 store 内 import API
+characterBuilderStore.ts[CD3T]: F:角色创建编辑态：人设/锚点/数值与导入文件供侧栏实时预览 | R:code:frontend/src/constants/persona.ts | A:CreateRole 与侧栏预览 | S:缺失维度用 persona 默认值补齐；reset 恢复 EMPTY
+errorStore.ts[CU3T]: F:全局 Toast 与最近错误状态：add/remove/clear | R:code:frontend/src/components/common/Toast.tsx | A:全站错误提示 | S:toast 默认 4000ms 自动移除
+humanizeStore.ts[CC7M]: F:拟人度配置编辑态：局部合并、dirty 比对与一次 POST | R:code:frontend/src/api/system.ts | A:角色设置消息 tab | S:回执 status=ok 才算保存；失败不改 snapshot；max_segments 只读恒 2
+
+===D:/Desktop/ai-girlfriend/frontend/src/types/===
+api.ts[CG8L]: F:后端 API 响应类型镜像：情绪/记忆/通道/训练/心理等全领域契约 | R:code:frontend/src/api/client.ts | A:全站 API 类型唯一来源 | S:原文只记长度与 sha256 前 16 位；缺字段按 false/0 渲染
+framework.ts[CU5S]: F:前端框架类型：通道连接态、工作区/设置/角色设置 tab 与列表项 | R:code:frontend/src/components/admin/RoleSettingsConstants.tsx | A:页面与路由 tab 契约 | S:RoleSettingsTab 五值须与 SUB_TABS 一致
+
+===D:/Desktop/ai-girlfriend/frontend/src/utils/===
+character.ts[CU5S]: F:角色名清洗与卡片摘要推导：与后端清洗语义一致的前端兜底 | R:code:utils/character_helpers.py | A:RoleSettings/CreateRole 展示 | S:空名回退「未命名角色」；清洗语义须与后端同步
+download.ts[CU3T]: F:浏览器下载出口：本地日期文件名与 JSON Blob 下载 | R:- | A:账号与数据导出页 | S:文件名用本地日期；toISOString 在 +0800 会算成次日
+passwordPolicy.ts[CI4T]: F:前端密码策略：最少 8 位且须含字母与数字 | R:code:api/password_policy.py | A:注册页与管理端建用户 | S:改规则须同步 api/password_policy.py；提示文案两处共用
+
+===D:/Desktop/ai-girlfriend/llm_provider/===
+__init__.py[IE7M]: F:LLM 包出口：ReloadableLLMGateway 热切换与 get_llm/reconfigure 工厂 | R:code:llm_provider/multi_provider_gateway.py | A:全站 LLM 获取入口 | S:用户端点须公网校验；显式用户配置失败不回落平台凭证
+llm_gateway.py[IE8L]: F:LLM 网关 V2：模型注册表、链式调用与同步转异步桥 | R:code:utils/async_utils.py | A:多供应商网关底层调用 | S:ProviderError 不得当空应答；常驻循环为唯一同步转异步桥
+multi_provider_gateway.py[IE8L]: F:多供应商链式降级网关：熔断、Fallback 链与附件合并 | R:code:llm_provider/openai_compatible_provider.py | A:全站 LLM 调用主入口 | S:附件在网关层合并；agnes 首选、智谱次位；全链失败才报错；熔断阈值 2/冷却 120s（2026-10-20 质量悬崖批：阈值 1/300s 会把一次抖动放大成 5 分钟全量降级，是「改了很多次还是客服腔」的放大器）；primary_only 链（主动决策线）失败一次即开闸——该链没有降级位可退
+openai_compatible_provider.py[IE8L]: F:OpenAI 兼容通用 Provider：chat/stream/tools、模型切换与 OAuth 刷新 | R:code:llm_provider/llm_gateway.py | A:agnes/智谱/讯飞/百度/DeepSeek | S:timeout=None 是禁用超时；HTTP200 空 content 须判死
+
+===D:/Desktop/ai-girlfriend/multimodal/===
+__init__.py[IM2T]: F:多模态包出口：Processor/Vision/ASR/Emoji 四类 | R:code:multimodal/multimodal_processor.py | A:模态能力统一导入 | S:-
+image_attachment.py[IM4T]: F:入站图片归一化：magic bytes 判类型、data URL 与 content part | R:code:multimodal/multimodal_processor.py | A:微信图片通道 | S:不落盘/不上传/不调 LLM；解析失败返回 None 交上层降级
+multimodal_processor.py[IM5S]: F:多模态处理器：视觉描述、ASR 转写与表情回复策略 | R:code:multimodal/image_attachment.py | A:消息链多模态消费 | S:图片描述≤150字只写事实；[你亲眼看到] 标记第一人称亲历
+
+===D:/Desktop/ai-girlfriend/my_character/===
+__init__.py[DB2T]: F:角色包出口：情绪引擎、人设引擎、音色模仿与配置加载 | R:code:my_character/persona_engine.py | A:角色能力统一导入 | S:-
+character_config.py[DC4S]: F:YAML 配置加载器：persona/emotion 热重载与兜底默认值 | R:code:config/persona.yaml | A:角色与情绪配置读取 | S:PyYAML 缺失用内置兜底；兜底键集须与 yaml 严格一致
+consistency_checker.py[DB7L]: F:人设一致性检测：锚点/情感/风格/违背四维校验与修正建议 | R:code:my_character/persona_engine.py | A:回复后置校验 | S:仅处理硬违规，软性风格靠 prompt；检测器按角色缓存
+counter_rebuttal.py[DB4T]: F:计数反诘：统计连续敷衍词次数供 system 注入 | R:code:orchestrator/optimized_orchestrator.py | A:对话编排 | S:仅整句敷衍才计数；非敷衍即清零；按 session 线程安全
+dynamic_anchor.py[DB6M]: F:动态锚点系统：优先级、条件激活与情感相关权重 | R:code:my_character/persona_engine.py | A:人设锚点上下文构建 | S:周期性强化回路已删；仅保留评估与上下文构建
+emotion_engine.py[DB9L]: F:情感引擎：10 情绪、复合情感态、9 级好感阶梯、LLM/规则分类与连续性守卫 | R:code:my_character/emotion_style_coupler.py | A:情感状态主引擎 | S:LLM 分类器弱引用+LRU 缓存，网关失效自动降级规则
+emotion_style_coupler.py[DB6M]: F:情感-风格耦合：10 情绪乘 9 好感矩阵，次情感加权融合 | R:code:config/emotion_style_matrix.yaml | A:说话风格动态调整 | S:缺省配置回退内置基准，不传不崩
+persona_card.py[DB7L]: F:人设卡 V3 模型：身份/性格/说话风格/节奏/情感画像与提示词渲染 | R:code:my_character/persona_schema.py | A:角色卡数据模型 | S:禁「作为AI语言模型」等元声明；偶尔用～但别太多
+persona_engine.py[DB8L]: F:人格引擎：五维画像、分层 prompt 构件、锚点冻结与一致性接线 | R:code:my_character/consistency_checker.py | A:人设注入唯一 owner | S:演化写路径已删日志恒空；锚点 SHA256 冻结防漂移
+persona_schema.py[DB5M]: F:统一人设模型：统一 Profile/CharaCard/persona.yaml 三来源与校验 | R:code:my_character/persona_card.py | A:人设运行时验证 | S:三来源统一校验，避免字段口径漂移
+persona_utils.py[DB3T]: F:人设公共工具：情感属性提取、锚点上下文与上下文变量 | R:code:my_character/dynamic_anchor.py | A:跨模块复用 | S:情感缺省 (0,平常,1.0)
+tone_mimic.py[DB6M]: F:语气模仿：历史对话向量化、相似 few-shot 检索与风格画像 | R:code:my_character/emotion_engine.py | A:风格 few-shot 注入 | S:chromadb 缺失自动降级；onnxruntime stderr 须重定向 fd1+2
+
+===D:/Desktop/ai-girlfriend/observability/===
+__init__.py[EO3T]: F:可观测包出口：配置、健康、日志、指标与优雅关闭 | R:code:observability/config_manager.py | A:运维部件统一导入 | S:-
+config_manager.py[EC8L]: F:系统配置管理：YAML 读盘、env 解析、敏感脱敏与跨进程锁写 | R:code:observability/config_models.py | A:全站配置读写唯一入口 | S:锁内重读磁盘再 merge 防覆盖；敏感键返回 ****
+config_models.py[EC6S]: F:Pydantic 配置模型：LLM/情绪/记忆/主动/安全/API/观察/语音 | R:code:config/system.yaml | A:系统配置类型契约 | S:byok_required 非 admin 强制自带 key
+graceful_shutdown.py[ER4T]: F:优雅关闭：信号处理、活跃请求计数与超时等待 | R:code:main.py | A:进程退出清理 | S:默认超时 30s
+health.py[EO5S]: F:健康检查注册与聚合：同步/异步探测与三态归一 | R:code:api/routers/misc_routes.py | A:/api/ready 与健康面板 | S:ready 须按枚举判 healthy，degraded 不放行
+logging_setup.py[EO6S]: F:结构化日志：trace/session/user 上下文、环形缓冲与轮转文件 | R:code:observability/metrics.py | A:全站日志入口 | S:user_id 经 filter 注入记录；环形缓冲容量 200
+metrics.py[EO6M]: F:Prometheus 指标：多进程聚合目录、聊天/令牌/工具/回退埋点 | R:code:observability/logging_setup.py | A:/api/metrics 聚合 | S:须在 import prometheus_client 前设 multiproc 目录；不可写则进程内计数
+sentry.py[EO3T]: F:后端 Sentry 初始化与敏感数据清洗 | R:code:main.py | A:生产错误追踪 | S:SENTRY_DSN 缺省自动禁用
+
+===D:/Desktop/ai-girlfriend/orchestrator/===
+__init__.py[AW3T]: F:编排包出口：OptimizedOrchestrator、会话锁与语音检测 | R:code:orchestrator/optimized_orchestrator.py | A:编排统一导入 | S:Orchestrator 为兼容别名
+_init_mixin.py[AW7L]: F:编排器初始化阶段拆分：11 个 _init_* 由 initialize 编排 | R:code:orchestrator/optimized_orchestrator.py | A:initialize 入口 | S:外部不得直调 _init_*；共享 self.components
+_stream_mixin.py[AW7M]: F:流式管线：上游可流式、完整定稿后按传输确认记账 | R:code:orchestrator/optimized_orchestrator.py | A:SSE/WS 流式回复 | S:已推送文本不静默改写；chat_round 禁止二次查库
+console_chat.py[AW4S]: F:控制台聊天：命令处理与消息循环，full/fast 差异内聚 | R:code:main.py | A:--console 模式 | S:从 main.py 迁出；复杂度拆分
+context_budget.py[AW8L]: F:上下文预算与去重：注入序列、字符裁剪与知识/记忆去重 | R:code:shisi/core/conversation_turn.py | A:prompt 组装前置 | S:禁止 rag JSON dump 进 prompt；工具结果包 untrusted 信封
+optimized_orchestrator.py[AW9L]: F:对话编排主类：会话锁、上下文准备、消息处理与健康检查 | R:code:orchestrator/_stream_mixin.py | A:全站对话主链 | S:每条消息禁在主循环线程做 async 转 sync 桥；shutdown 必调；主 LLM 外层预算 45s（须 ≥ 链首 25s + 降级位窗口，30s 会在降级链走完前切断）；历史注入前必须做回灌净化（括号动作/元记忆解释/归属翻转就地剥除，只改内存副本不动库），否则上一轮的坏回复会被当「我自己说过的话」自我强化；话题锚点走 _extract_user_anchor_sentences（用户原话短句），不得退回关键词袋
+session_locks.py[AR6S]: F:会话锁：per-session 异步锁与 OS 文件锁跨 worker 互斥 | R:code:orchestrator/optimized_orchestrator.py | A:同会话串行化 | S:锁缓存上限 1000，TTL 1h；跨 worker 超时抛错
+tool_gate.py[AW7M]: F:工具意图闸门：L0 晋级线、L1 LLM 终审与防假承诺 | R:code:orchestrator/optimized_orchestrator.py | A:工具调用前置 | S:L0 只晋级不裁决；无工具回执不得声称成功
+voice_detector.py[AM4S]: F:语音触发检测：命令词与欲望模式，含否定与短疑问判定 | R:code:orchestrator/optimized_orchestrator.py | A:语音回复路由 | S:仅短疑问触发；长句陈述不触发
+
+===D:/Desktop/ai-girlfriend/persona_extractor/===
+README.md[SA3S]: F:网络人设增强架构说明：内容收集、BM25 写入与 CLI | R:code:persona_extractor/__init__.py | A:模块文档 | S:-
+__init__.py[DA4T]: F:人设抽取包出口：OCEAN/PAD、风格向量与人格库 | R:code:persona_extractor/cognitive_distortions.py | A:人格克隆增强 | S:依赖 persona_bank SQLite 与可选 LLM
+cognitive_distortions.py[DA5S]: F:认知扭曲检测：10 类规则/LLM 命中与 prompt 增强 | R:code:persona_extractor/__init__.py | A:心理画像增强 | S:非医疗诊断；规则命中须可解释
+dark_triad.py[DA5S]: F: 暗黑三人格（自恋/马基雅维利/精神病态）规则与 LLM 检测，输出特质分与提示增强段。 | R: code:persona_extractor/models.py, code:persona_extractor/fusion.py | A: detect(text)->DarkTriadTraits；to_prompt_enhancement(traits)->str | S: 亚临床特质不等于精神疾病诊断，仅作对话风格参考。
+emotion_coupler.py[DA5S]: F: Emotion↔PAD↔OCEAN 双向映射与 Chameleon 感染隔离，供人格检测与情感引擎互操作。 | R: code:persona_extractor/models.py, code:my_character/emotion_engine.py | A: emotion_to_pad；pad_to_emotion（最近邻）；chameleon_filter；get_ocean_adjusted_pad | S: 短消息/高情绪消息降低 PAD 权重以免把被感染情绪当人格。
+fusion.py[DA7M]: F: PersonaExtractor 融合桥梁：检测→画像库→风格向量→情感适配→提示增强的统一入口。 | R: code:persona_extractor/pado_detector.py, code:persona_extractor/persona_bank.py, code:persona_extractor/style_vectorizer.py, code:persona_extractor/emotion_coupler.py, code:persona_extractor/mental_health.py | A: process_message；profile_scope(character_id,session_id)；_get_enhancement；adapt_to_emotion_engine | S: profile_scope 是 scope 键唯一构造器，控制面 /api/psych/* 必须同用它解析；LLM 深度分析仅高风险异步触发不阻塞主流程。
+hexaco.py[DA4S]: F: HEXACO 六因素模型数据类，支持由 OCEAN 换算与提示段渲染。 | R: code:persona_extractor/models.py | A: from_ocean；to_dict；to_prompt_segment | S: 第六维 H 为诚实-谦逊，E 近似反向神经质。
+liwc_analyzer.py[DA6L]: F: 自建中文小词表心理语言学分析（类别命中词元/词元总数）及复合指标简化比值。 | R: code:persona_extractor/fusion.py | A: segment_tokens（jieba 精确模式去标点）；analyze(text)->LiwcProfile；health_check | S: 未经中文效度验证，数值不代表 LIWC2015/22 输出，只能作同一用户前后趋势读数。
+mental_health.py[DA6L]: F: 抑郁/焦虑词典命中的相对信号筛查：维度分=min(1,命中/4)，档位 mild/moderate/severe。 | R: code:persona_extractor/fusion.py, code:security/content_safety.py | A: quick_screen；LLM 深度分析（仅中高风险异步触发）；to_dict | S: 未实现未验证 PHQ-9/GAD-7，输出不得当量表分或筛查结论；对话热路径自伤拦截由 security/content_safety.py 独立承载。
+models.py[DA6L]: F: PersonaExtractor 数据模型：OceanTraits/PadState/UserPersona/StyleVector 及序列化、混合、相似度。 | R: code:persona_extractor/persona_bank.py, code:persona_extractor/pado_detector.py | A: to_dict/from_dict；blend；similarity；to_prompt_segment | S: Ocean 取 0.0-1.0、PAD 取 -1.0~1.0 连续值，越界由 __post_init__ 钳制。
+pado_detector.py[DA7L]: F: PADO 多视角 OCEAN 检测三档：full 11 次调用/lite 1 次/rule 0 次，含历史平滑与低置信回退。 | R: code:persona_extractor/models.py, code:llm_provider/__init__.py | A: detect(message,mode)；_full_detect；_lite_detect；_rule_detect；_build_snapshot | S: full 模式约 11s+ 仅高精度场景；Chameleon 效应可致结果反映对话情绪而非真实人格。
+persona_bank.py[DP7L]: F: 用户人格画像 SQLite 持久化与演化快照：多用户隔离、时间序列追踪、稳定性评估，复用 sqlite.db。 | R: code:persona_extractor/models.py, code:utils/json_state.py | A: get_persona；save_persona；add_snapshot；update_persona_with_snapshot；load_all | S: 触发消息只留指纹与长度不留原文；旧表幂等补列；owner 段非数字的键一律保留不迁移。
+style_vectorizer.py[DA5S]: F: 从聊天记录提取 5 维风格向量（正式度/表达度/幽默/直接度/情感倾向），供 ToneMimic 增强。 | R: code:my_character/tone_mimic.py, code:persona_extractor/models.py | A: analyze(messages)；update(new_message,current)；to_tone_mimic_profile | S: 纯正则统计非 LLM，随消息增量平滑更新。
+web_enricher.py[DI7L]: F: 网络人设增强引擎：DirectScraper/Agent-Reach/Firecrawl/管道四源抓取并聚合为角色知识。 | R: code:scripts/enrich_persona_web.py, code:utils/async_utils.py | A: DirectScraper.scrape；AgentReachSource.search；FirecrawlSource.search/scrape；enrich | S: 异步桥统一委托 utils.async_utils.run_async（唯一真源）；单 URL 抓取含多引擎 fallback。
+
+===D:/Desktop/ai-girlfriend/plugins/===
+__init__.py[LE2T]: F: 插件包出口，仅导出天气插件。 | R: code:plugins/weather.py | A: __all__=WeatherPlugin | S: 当前无插件注册表，扩展需直接 import。
+weather.py[DI5M]: F: OpenWeatherMap 天气查询与场景触发（雨/雪/高温），按城市分键缓存。 | R: code:proactive/scheduler.py | A: get_weather(city)；check_trigger；health_check | S: 失败返回 None 不造假；仅 allow_simulation=True 才模拟且结果不写缓存；旧单槽缓存已按城市分键。
+
+===D:/Desktop/ai-girlfriend/proactive/===
+PROACTIVE_IMPROVEMENT_PLAN.md[SA3L]: F: 主动消息模块历史完善方案与现状分析，结局为分级混合。 | R: code:docs/DECISION_LEDGER.md, code:CODE_GRAPH.md | A: 文档状态卡标注已实施与待核验阶段 | S: 勿直接按本文开工；文中发送层 print 与记录缺陷均属重构前实况。
+__init__.py[AW2T]: F: 主动域包出口：ASEEngine/ProactiveScheduler/ProactiveType/UrgencyState。 | R: code:proactive/ase_engine.py, code:proactive/scheduler.py | A: ASEEngineV2/ASEEngineOptimized 为 ASEEngine 别名 | S: 别名仅为兼容旧导入，实现只有一份。
+ase_engine.py[AW8L]: F: ASE 主动发言引擎：六维紧迫度、模板池与 LLM 生成、频率自适应、场景触发、状态持久化。 | R: code:proactive/frequency.py, code:proactive/reflection.py, code:proactive/proactive_context.py | A: tick(dry_run) 返回未记账候选；commit_sent 记账；sanitize_message；normalize_message | S: tick 本身不扣配额，投递成功才 commit_sent（静默期弃发不计数）；LLM 输出必须过 sanitize_message 防推理泄漏；_local_now 委托 utils.local_time.now_local。
+ase_hub.py[AW7M]: F: 按完整 user_key 懒创建隔离 ASE 引擎，状态分文件落盘并维护索引账本。 | R: code:proactive/ase_engine.py, code:utils/json_state.py | A: get/forget；purge_user_states；count_user_states；load_user_key_index | S: 索引读改写必须持跨进程锁；mutate 必须返回 None，否则 json_state.update_json 会把它当替换值。
+frequency.py[AW6S]: F: 频率自适应（normal→low→minimal）与三重发送检查（日限/最小间隔/冷却）。 | R: code:proactive/ase_engine.py | A: can_send->(bool,reason)；record_sent；record_reply；get_state | S: 日界按 now_local 本地墙钟，禁用 UTC 切日。
+llm_proactive.py[AW8L]: F: LLM 主动决策：时机/内容/等待时长，叠加节奏双闸、未回复连击硬闸、双通道去重与输出契约终审。 | R: code:proactive/proactive_context.py, code:proactive/proactive_hooks.py, code:proactive/ase_hub.py | A: should_skip_proactive_decision；decide_proactive；parse_decision；clamp_wait_minutes；is_duplicate_proactive | S: 决策线不硬编码日程表；人设/画像/否决统一从 proactive_context 取；should=False 且 wait 缺失时先从完整 reason 提取等待语义（须先于 300 字展示截断）。
+proactive_context.py[AW7S]: F: 主动线上下文唯一真源：完整人设加载（上限 1200 字）与沉浸式约束渲染，决策线与生成线共用。 | R: code:config/characters, code:shisi/agent_plane/runtime.py | A: load_full_persona_hint；immersive_proactive_constraints | S: 每次动态读盘禁模块级缓存（角色切换即时生效+用户隔离）；旧 400+200 截断丢回复示例与禁令是口吻漂移根因。
+proactive_hooks.py[AW6M]: F: 为决策线构造活材料：未答澄清/将到提醒/未闭环承诺/近日热点，输出注入文本与择优关键词。 | R: code:data/hot_topics.json, code:shisi/memory/legacy/structured_memory.py | A: load_live_hooks(session_key,memory)->LiveHooks | S: 任一来源失败或为空即跳过，不注入假材料；热点池多用户共享属设计非泄漏。
+reflection.py[AW4S]: F: 规则/LLM 双模式反省引擎与内心独白队列（保留 200 条）。 | R: code:proactive/ase_engine.py | A: reflect；get_latest_monologue；_type_to_urgency | S: 独白消费方只取最后一条，队列上限即为内存边界。
+reminder_delivery.py[AW7M]: F: 到期提醒每分钟轮询并定向投递到发起会话（L2 确定性执行），投递前一刻 LLM 生成角色口吻文案。 | R: code:proactive/scheduler.py, code:proactive/runtime_plane.py | A: ReminderDeliveryTask._run_once；_deliver；_compose_text；_maybe_gc_intents | S: 豁免静默时段（叫醒提醒）；ChannelNotReadyError 不计 fail_count，真实发送失败才计并 3 次判 failed。
+runtime_assembly.py[AW6S]: F: main.py 与 run_api.py 共用的后台运行时装配唯一 owner：提醒任务构造与 LLM 主动决策注入。 | R: code:proactive/reminder_delivery.py, code:proactive/scheduler.py | A: make_ws_sender；install_reminder_delivery；install_llm_decision | S: import 期不拉 api.byok（console 形态无 FastAPI 生命周期）；两入口只保留各自拓扑的发送器。
+runtime_plane.py[AR8L]: F: 跨 worker 最小可信控制面（SQLite）：通道期望态、连接器宿主租约心跳、入站消息幂等账、工具副作用去重。 | R: code:proactive/scheduler.py, code:wechat_direct/connector_registry.py | A: set_desired/get_desired；heartbeat/presence_live/live_slots；入站 claim；effect 去重 | S: 多 worker 各自选主互不知情，跨进程事实统一落此库；PRESENCE_TTL=90s 过期即判宿主失联；restore_on_boot 必须先查期望态。
+scheduler.py[AW9L]: F: APScheduler 定时编排：ASE 每 5 分钟、每日维护/重置、提醒每分钟、重要日期每小时；并负责投递记账与模型闸。 | R: code:proactive/ase_hub.py, code:proactive/reminder_delivery.py, code:proactive/runtime_assembly.py, code:proactive/runtime_plane.py, code:proactive/llm_proactive.py | A: _check_ase；_deliver；register_reminder_task；_check_important_dates；_classify_deliver_error | S: 静默时段前置到生成层（tick 前短路只 dry_run），投递成功才记账；出站行必须带 character_id；首选供应商熔断期主动消息跳过不降级；祝福静默跳过+当日幂等键。
+
+===D:/Desktop/ai-girlfriend/scripts/===
+ax_acceptance_probes.py[XQ4S]: F: AX 验收骨架探针：因果回放、串台隔离、画像更正、工具真执行四类自检。 | R: code:shisi/agent_plane/event_ledger.py | A: probe_* 四探针；run_self_test；--self-test | S: 骨架可跑、基于临时沙箱账本，非生产回归门。
+ax_clean_profiles.py[XO5M]: F: 生产画像与事实清洗并 seed 进 EventLedger，默认 dry-run 只读，--apply 才允许写副作用。 | R: code:shisi/agent_plane/event_ledger.py | A: --apply/--dry-run；clean_user_profile_table；clean_user_facts；seed_profiles_to_ledger | S: 默认 mode=ro 只读，缺库缺表只报不建；建表/写回/seed/报告仅 --apply 路径。
+bootstrap_admin.py[XO5S]: F: 创建首个 admin 用户（API 注册默认 viewer，无法自建管理员）。 | R: code:api/database.py | A: --password 或 ADMIN_EMAIL/ADMIN_PASSWORD；仅当库中无 admin 时创建 | S: 直调 bcrypt 绕过 passlib 兼容问题；已有 admin 则跳过。
+ci_gates.py[XQ6S]: F: CI 门禁单一真源：FF-0003/FF-0006/FF-0007 与 ADR 引用完整性，本地钩子与 CI 调用同一脚本。 | R: code:.github/workflows/ci.yml, code:docs/adr | A: gate_ff0003/0006/0007；gate_adr；退出码 0 通过/1 违规 | S: 仅标准库；禁止本地另写复刻版，口径必须与 CI 逐字一致。
+e2e_setup.py[XQ4T]: F: 生成独立 e2e 数据库与种子 admin/viewer 账号，零污染本地与生产数据。 | R: code:frontend/e2e | A: python scripts/e2e_setup.py -> data/e2e_users.db | S: viewer 账号供 w11 用例使用，此前无人创建致 CI 超时。
+enrich_knowledge.py[XO4S]: F: 角色知识审计与低覆盖（<3 块）角色富文本注入。 | R: code:shisi/knowledge/character_knowledge_service.py, code:config/characters | A: --audit-only；audit_character_json；inject_runtime_enrichment | S: 兼容 JSON 持久富化与运行时临时注入两种方案。
+enrich_persona_web.py[XO5M]: F: 网络人设增强 CLI：URL/Agent-Reach/Crawl4AI/管道四源抓取并写入角色知识库。 | R: code:persona_extractor/web_enricher.py, code:shisi/knowledge/character_knowledge_service.py | A: --urls/--all-sources/--interactive/--pipe/--search-only | S: --all-sources 为覆盖式写入，需用 rebuild_knowledge_index.py 重建修复。
+expand_short_descriptions.py[XO4S]: F: 用 LLM 将 description+personality_text+scenario 融合扩写过短描述。 | R: code:config/characters, code:llm_provider | A: --dry-run/--limit；备份原卡可回滚 | S: 严禁编造新事实、不使用 creator_notes，宁可写短。
+gate_native_hook_installed.py[XQ4T]: F: 自检原生 pre-commit 门禁标记仍在位，失踪即拒提交并给出重装命令。 | R: code:scripts/install_native_gate.py | A: 由 pre-commit 框架钩子调用，返回非零拒提交 | S: 防 pre-commit install 覆写钩子后防护静默失踪。
+gate_staged_vs_worktree.py[XQ5T]: F: 并发 index 门禁：staged 与工作树逐文件比对，交集非空拒绝提交。 | R: code:scripts/install_native_gate.py | A: 原生 pre-commit 调用；AI_GF_ALLOW_DIRTY_STAGE=1 显式放行 | S: 不接 pre-commit 框架钩子（autostash 拉平工作树会使分叉失明）。
+index_all_characters.py[XO3T]: F: 遍历 config/characters 为全部角色建知识索引并报告覆盖。 | R: code:shisi/character/character_card_v2.py, code:shisi/knowledge/character_knowledge_service.py | A: 直接运行，无参数 | S: docstring 仍写 29 characters，与现役卡数不符。
+install_native_gate.py[XQ5S]: F: 幂等把 staged-vs-worktree 门禁块插入原生 pre-commit 钩子。 | R: code:scripts/gate_staged_vs_worktree.py | A: python scripts/install_native_gate.py；重复执行只替换标记块 | S: 尊重 core.hooksPath；被 pre-commit install 覆盖后由自检钩子拒提交指路。
+link_identities.py[XO6T]: F: 跨通道身份组显式关联/解除管理（--list/--link/--unlink），幂等。 | R: code:shisi/memory/legacy/structured_memory.py | A: --list/--link/--unlink；--db 覆盖默认 data/sqlite.db | S: 身份关联必须显式声明绝不猜测；unlink 只解除该键，组内其余保持。
+migrate_legacy_wechat_channel.py[XO6M]: F: 遗留全局微信通道迁到 admin 用户通道（凭证/状态/二维码/会话），幂等且先备份。 | R: code:wechat_direct/channel_paths.py, code:utils/project_paths.py | A: migrate_legacy_if_needed；sync_disk_sessions_to_db | S: 迁移后全局文件改 .bak-pre-channel；只迁磁盘件不动业务库语义。
+new_window_worktree.ps1[XQ5T]: F: 多窗口建窗：worktree+分支、data 与 node_modules Junction 回主仓、打印启动提示。 | R: code:docs/board/BOARD.md | A: -Name 建窗；-Remove 卸窗（先摘 Junction） | S: 禁止裸 git worktree remove，Junction 会跟随误删主仓内容。
+preflight_check.py[XO6S]: F: 重构前系统健康与安全配置预检（JWT/API_KEY/依赖/数据库）。 | R: code:api/runtime_config.py | A: preflight_check；打印安全配置告警 | S: 安全口径必须复用 runtime_config 真源，禁本地另判。
+purge_address_contamination.py[XO7L]: F: 生产称呼污染一次性清洗：chat_history/daily_summaries/user_facts/ASE 状态，默认 dry-run。 | R: code:utils/address_terms.py | A: --apply；_plan_chat_history；_plan_daily_summaries；_classify_fact | S: 剥除复用 address_terms 词边界逻辑（本脚本不写正则）；user 行与 outbound_commands 保留；剥空改占位不删行；不自动重启服务。
+rebuild_knowledge_index.py[XO6S]: F: 从 config/characters 权威真源重建全部知识索引，并审计孤儿索引与孤儿源。 | R: code:shisi/knowledge/character_knowledge_service.py | A: --dry-run；--prune-orphan-sources 显式删孤儿源 | S: 孤儿索引可清、孤儿源默认只审计不删；覆盖式富化曾把 148 块冲成 4 块。
+remote_check.py[XO4M]: F: 服务器侧健康检查：LLM 连通、API 端点、角色加载、工具端点。 | R: code:api/run_api.py | A: check_endpoints/check_characters/check_llm_via_demo_chat/check_tools_endpoint | S: 纯标准库 urllib，固定 localhost:8000。
+run_hot_topics_collect.py[XO3T]: F: 手动跑一轮热点池采集：yaml 查询表→SearchTool→data/hot_topics.json。 | R: code:shisi/knowledge/hot_topics.py, code:config/hot_topics.yaml | A: --force 无视限速 | S: 自限速，间隔未到即 skip，可安全重复跑。
+window_board.ps1[XQ3T]: F: 跨窗看板追加与尾部读取工具。 | R: code:docs/board/BOARD.md | A: -Append -Window -Kind -Text；-Tail N | S: BOARD.md owner 恒为主控，他窗只能追加不得改登记表。
+
+===D:/Desktop/ai-girlfriend/security/===
+__init__.py[MS2T]: F: 安全包出口：内容过滤、加密、PII 匿名化、提示注入检测。 | R: code:security/content_safety.py, code:security/encryption.py, code:security/pii_anonymizer.py, code:security/prompt_injection.py | A: __all__ 导出四类能力 | S: 统一入口，四模块各自独立可降级。
+content_safety.py[MS8M]: F: 输入/输出内容安全过滤：规则快速扫描 + 可选 LLM 分类，命中写带 user_id 的安全日志。 | R: code:security/prompt_injection.py, code:llm_provider/__init__.py | A: check_input/check_output；_quick_scan；_llm_classify | S: LLM 分类默认关闭（实测 3s 超时几乎必超），规则才是实际闸门；热路径自伤拦截在此不在 mental_health。
+encryption.py[MS6T]: F: AES-GCM 字段加解密（密钥取环境变量）与可用性判定。 | R: code:security/pii_anonymizer.py | A: encrypt/decrypt/is_available | S: 无 cryptography 时 HAS_CRYPTO=False，需显式 enabled 才启用。
+pii_anonymizer.py[MS7S]: F: 识别手机/身份证/银行卡/邮箱/地址并替换为令牌，支持同实例反脱敏。 | R: code:security/encryption.py | A: anonymize->(text,entities)；deanonymize；pii_list_to_map | S: 新实体绝不写原文，反脱敏仅同实例；400 热线白名单免脱敏。
+prompt_injection.py[MS7S]: F: Prompt 注入规则检测与净化，可选 LLM 复核。 | R: code:security/content_safety.py | A: detect->(bool,score,reason)；sanitize | S: LLM 检测默认关闭（实测每消息两次共 6s 白烧），INJECTION_PATTERNS 是实际闸门。
+
+===D:/Desktop/ai-girlfriend/shisi/===
+__init__.py[DB2T]: F: 十四功能融合包声明与版本号 0.1.0。 | R: - | A: __version__ | S: 仅声明，无导出。
+config.py[FC5T]: F: shisi 配置加载：config/shisi.yaml + AIYU 前缀环境变量深度覆盖。 | R: code:shisi/emotion_stage/stage_config.py | A: load_config；get_config；reset_config；_deep_merge；_apply_env_overrides | S: 进程级缓存 _CONFIG，force_reload 才重读；env 前缀 AIYU。
+migrations.py[DP7S]: F: 十四模块数据库迁移执行器：SQL/callable 条目幂等执行、WAL 开启与表存在校验。 | R: code:shisi/memory/legacy/structured_memory.py | A: run_migrations；verify_tables；get_table_names；_enable_wal | S: 每条迁移须自身幂等；WAL 遇他连接持锁立即 busy，不可据此判迁移失败。
+
+===D:/Desktop/ai-girlfriend/shisi/affinity/===
+__init__.py[DB1T]: F: 好感度子包说明（衰减/解锁/增强）。 | R: code:shisi/affinity/decay_engine.py, code:shisi/affinity/enhancer.py | A: 无导出 | S: 无代码逻辑。
+decay_engine.py[DB6T]: F: 好感度区间衰减：宽限期后按给定窗口计算应扣量。 | R: code:shisi/affinity/enhancer.py, code:shisi/config.py | A: grace_start；decay_for_interval；calculate_decay（一次性结算） | S: 调用方必须自带已扣水位，逐次用累计量会重复扣减且累计按平方增长。
+enhancer.py[DB8M]: F: 好感度更新/衰减/解锁/审计回放，运行时按 user::character 隔离。 | R: code:shisi/affinity/decay_engine.py, code:shisi/affinity/unlock_manager.py, code:shisi/config.py | A: update；get_value；split_key；_restore_from_audit；default_db_path | S: 运行时聊天路径必须传 session_id；有 user_id 时绝不回退全局角色键；回放失败只告警不抛。
+mapper.py[DB7S]: F: 情感引擎 affection_points 与 shisi 亲密度双向映射与同步，刻度换算统一走 scale。 | R: code:shisi/affinity/scale.py, code:shisi/affinity/enhancer.py, code:shisi/emotion_stage/stage_engine.py | A: to_shisi/to_emotion；points_to_level；current_points；sync；_track_key | S: 阶段评估失败不回退裸角色键；禁止各写 magic number。
+scale.py[DB7T]: F: 亲密度刻度唯一真源：points∈[0,500] 与等级/shisi/解锁阈值/工具权限档换算。 | R: code:shisi/core/models | A: clamp_points；points_to_level；points_to_shisi；shisi_to_points；unlock_threshold_to_points | S: 解锁阈值 25/50/75/90 对应 points 125/250/375/450；各处一律经本模块换算。
+unlock_manager.py[DB6S]: F: 好感阈值到解锁动作的映射与首次解锁落库（affinity_unlocks）。 | R: code:shisi/affinity/scale.py, code:shisi/migrations.py | A: check_unlocks；_persist_unlocks；recorded_unlocks；subscribe | S: character_id 存完整隔离键，UNIQUE 即 user×character×档位首次语义；落库失败只告警不阻断。
+
+===D:/Desktop/ai-girlfriend/shisi/agent_plane/===
+__init__.py[DB3T]: F: 智能体状态平面包出口：账本、投影与运行时契约。 | R: code:shisi/agent_plane/event_ledger.py, code:shisi/agent_plane/profile_projection.py, code:shisi/agent_plane/runtime.py | A: 导出 EventLedger/ReplayBundle/project_profile/append_chat_events | S: P0 只提供账本与契约。
+curator.py[DB6S]: F: 夜间/定时记忆整理：垃圾过滤、near-dup 合并、可选 LLM 摘要合并并写回账本。 | R: code:shisi/memory/legacy/structured_memory.py, code:shisi/agent_plane/event_ledger.py | A: bigram_overlap；curate_facts_rule_based；run_curator_for_session；run_curator_all_known | S: LLM 合并失败降级纯规则；垃圾正则覆盖「叫我/在吗」等零信息句。
+event_ledger.py[DB8L]: F: append-only 因果事件账本（会话/工具/画像/关系），供回放探针与投影读模型。 | R: code:data/sqlite.db | A: append；replay；ensure_schema；串台探针（仅按 session 过滤） | S: 完整 session_key 为主键部分禁剥 owner；只追加不改写；事件序用 id 不用秒级时间；画像事件为唯一写权威不可套短 TTL。
+profile_projection.py[DB7S]: F: 画像投影：写走 EventLedger，profile 表仅投影缓存，按 session 重放得画像。 | R: code:shisi/agent_plane/event_ledger.py | A: apply_profile_ops_to_state；project_profile；write_profile_event；seed_profile_baseline | S: write_profile_event 是唯一写权威，禁止第二写路径。
+runtime.py[DB8L]: F: agent_plane 生产运行时：账本访问、画像写投影、称呼否认检测落盘、prompt 画像槽。 | R: code:shisi/agent_plane/event_ledger.py, code:shisi/agent_plane/profile_projection.py, code:utils/address_terms.py | A: ensure_profile_seeded；materialize_profile_cache；denied_names_for；persist_detected_denials；get_profile_prompt_block | S: user_profile 表只是缓存禁止当写权威；用户消息 30 天 prune，否认须每轮落盘否则窗口滑出即失忆；翻页上限 20×500。
+
+===D:/Desktop/ai-girlfriend/shisi/api/===
+__init__.py[AU1T]: F: 十四模块 REST API 路由包说明。 | R: - | A: 无导出 | S: 无逻辑。
+affinity_routes.py[AU7S]: F: 好感度 API 四端点：读取、更新、衰减、解锁记录。 | R: code:shisi/affinity/enhancer.py, code:api/auth_jwt.py | A: get_affinity/update_affinity/apply_decay/get_unlocks | S: 隔离键一律由 JWT 主体导出，HTTP 管理面独立键空间 uid::cid；解锁区分应得与已落表。
+character_routes.py[AU7S]: F: 角色管理七端点：列表/详情/切换/导入/导出/更新/删除。 | R: code:shisi/character/manager.py, code:api/auth_jwt.py | A: list/get/switch/import/export/update/delete | S: 切换/导入/导出/删除仅 admin，旧任意 viewer 可切的越权已收口。
+common.py[AU2T]: F: 十四 API 统一响应模型（data/error/trace_id）。 | R: - | A: ApiResponse | S: 无逻辑。
+emotion_stage_routes.py[AU5T]: F: 情感阶段 API 三端点：档位列表、当前阶段、评估。 | R: code:shisi/emotion_stage/stage_engine.py | A: list_stages/get_emotion_stage/evaluate_stage | S: 引擎经 set_engine 注入。
+memory_routes.py[AU6S]: F: 记忆增强 API 六端点：收藏、取消收藏、列表、读取、转发、删除。 | R: code:shisi/memory/favorite_manager.py, code:shisi/memory/forward_manager.py | A: favorite/unfavorite/list_favorites/get_memories/forward/delete | S: unfavorite 以 fav_id 为唯一判据；删除需 confirm 且受 owner 列迁移限制。
+persona_routes.py[AU5T]: F: 人设编辑器 API 三端点：读取、更新、预览。 | R: code:shisi/character/character_card_v2.py, code:shisi/character/manager.py | A: get_persona/update_persona/preview_persona | S: 写路径统一走 CharacterManager。
+registry.py[AW8S]: F: 十四模块统一注册：初始化各引擎、执行启动迁移并挂载全部 API 路由。 | R: code:shisi/affinity/enhancer.py, code:shisi/affinity/mapper.py, code:shisi/api/affinity_routes.py | A: AiyuRegistry；setup_shisi；_mount_routes；migrate_affinity_mirror_reason | S: 启动迁移幂等（旧刻度标记转 shisi 标记）；表不可用只告警降级不阻塞启动。
+stats_routes.py[AU4T]: F: 统计诊断 API 端点。 | R: code:shisi/stats/analytics.py | A: get_stats | S: 仅 admin 可读。
+sticker_routes.py[AU6S]: F: 表情包 API 五端点：列表、推荐、导入、绑定、删除。 | R: code:shisi/sticker/sticker_manager.py | A: list/recommend/import/bind/delete | S: 导入/绑定/删除仅 admin；failed 计数区分安全拦截/格式/超限/写库失败。
+vital_signs_routes.py[AU4T]: F: 生理指标 API 端点与微信查询适配。 | R: code:shisi/vital_signs/vital_engine.py | A: get_vital_signs | S: 响应附 DEFAULT_READING_NOTE 口径注记。
+
+===D:/Desktop/ai-girlfriend/shisi/application/===
+__init__.py[AG2T]: F: 应用服务层出口：迁移、提示词、知识、记忆四服务。 | R: code:shisi/application/migration_service.py, code:shisi/application/prompt_service.py, code:shisi/application/memory_service.py | A: __all__ 四服务 | S: PersonaService 未列入 __all__。
+knowledge_service.py[DA6S]: F: 知识服务适配层：按显式 character_id 做 BM25 检索并返回兼容字典。 | R: code:shisi/knowledge/character_knowledge_service.py, code:shisi/knowledge/retriever.py | A: retrieve/retrieve_async；ensure_character_index；mark_dirty | S: 角色 ID 每次显式传入，set_character_id 仅为旧调用保留；查询超时 5s。
+memory_service.py[DB8L]: F: 记忆服务适配层：兼容 MemoryPipeline 接口，向编排器统一暴露三层记忆与收藏/转发。 | R: code:shisi/memory/legacy/structured_memory.py, code:shisi/memory/legacy/vector_memory.py, code:shisi/memory/favorite_manager.py | A: after_chat；get_chat_context；retrieve_context；append_outbound；delete_by_text | S: 根目录 memory/ 已删除，引用统一指向 shisi；角色主动消息回写历史唯一 owner 在此；按原文删除仅精确同文严禁子串。
+migration_service.py[DA5T]: F: 迁移应用服务：执行迁移、回滚、查询迁移状态。 | R: code:shisi/infrastructure/migration/migration_runner.py, code:utils/project_paths.py | A: execute/rollback/status | S: 默认库 data/sqlite.db、卡目录 config/characters。
+persona_service.py[DB8L]: F: 人格应用服务：由 CharacterAggregate+prompt_builder 生成基础 prompt，再叠加 PersonaEngine 五层注入。 | R: code:my_character/persona_engine.py, code:shisi/core/models/character_aggregate.py, code:shisi/core/services/prompt_builder.py | A: build_system_prompt；_topic_unlock_block；check_consistency；get_evolution_log；engine | S: 只有可指认的未完成点才追问，不新造问题；记忆段注明非对话原文；话题解锁槽按 user×character 亲和渲染；话题块注入**用户原话短句**并显式标注「这些是对方的原话，不是你说的」（关键词袋会给 ["的话","哈喽"] 这类噪声且无说话人，是复述/归属翻转的教唆源）；rag_context 注入前沉浸式须 strip_stage_directions——知识库是卡文括号动作的第二条泄漏通道（与 character_aggregate 并行，首轮曾漏修）。
+prompt_service.py[DA3T]: F: 提示词应用服务：按角色 id 组装基础 prompt。 | R: code:shisi/core/ports/character_repository.py, code:shisi/core/services/prompt_builder.py | A: build_prompt | S: 角色不存在抛 ValueError。
+
+===D:/Desktop/ai-girlfriend/shisi/ase/===
+__init__.py[DA2T]: F: ASE 增强主动场景引擎包说明。 | R: - | A: 无导出 | S: 旧多类型触发器已删除。
+
+===D:/Desktop/ai-girlfriend/shisi/character/===
+__init__.py[DB1T]: F: 角色管理模块包说明。 | R: - | A: 无导出 | S: 无逻辑。
+character_card_v2.py[DB8M]: F: 角色卡解析器：标准 V2/V3、十四 prompts 格式、SillyTavern 统一解析为 CharaCardV2。 | R: code:shisi/character/models.py, code:my_character/persona_schema.py | A: parse/parse_file；_from_standard/_from_v1；AiyuPromptsParser.parse_all；to_persona_config | S: world_info 与 extensions 完整保留；personality 非字符串走安全兜底。
+exporter.py[DB6T]: F: 角色卡导出为 V2 JSON 或 SillyTavern PNG，可重新导入。 | R: code:shisi/character/models.py | A: export_card；export_json_string；export_card_png | S: 默认落 config/characters；PNG 走 shisi.character.png 编解码。
+importer.py[DB6S]: F: 角色卡批量导入管道：逐文件解析→校验→安全检测→存储→统计。 | R: code:shisi/character/character_card_v2.py, code:shisi/character/validator.py, code:shisi/character/models.py | A: import_file；import_files；import_directory；_import_png；_save_card；_make_character_id | S: 输出目录默认 config/characters；PNG 卡先经 png_codec 提取。
+manager.py[DB7S]: F: 角色生命周期管理：加载/切换/列表/缓存，切换可触发状态迁移。 | R: code:shisi/character/store.py, code:shisi/character/character_card_v2.py, code:shisi/character/importer.py | A: initialize；load_character；switch_character；get_active；get_active_persona_config；list_characters；set_state_migrator；set_on_switch_callback | S: switch_character 支持 migrate_strategy=soft 的跨角色状态迁移。
+models.py[DB5S]: F: 角色卡数据模型（Pydantic V2）：V2/V3/十四 prompts 三格式与导入结果。 | R: code:shisi/character/character_card_v2.py | A: CardFormat；WorldInfoEntry/Book；CharacterExtensions；CharacterData；CharaCardV2；CharacterState；ImportResult | S: 模块自标弃用，新代码用 core.models.character_aggregate 聚合根。
+png_codec.py[DB6S]: F: PNG tEXt chara 块编解码，对齐 SillyTavern V2/V3 生态（base64 JSON）。 | R: code:shisi/character/importer.py, code:shisi/character/exporter.py | A: is_png；extract_card_from_png；embed_card_to_png；has_chara_chunk | S: 依赖 Pillow；导出无原图时生成占位图（宽高与颜色可指定）。
+store.py[DB6S]: F: 角色元数据 SQLite 持久化 CRUD，含活跃角色标记。 | R: code:shisi/character/manager.py | A: save_character；get_character；list_characters；set_active；get_active_id；delete_character；update_character | S: 默认库路径 data/sqlite.db，可由构造参数覆盖。
+validator.py[DM5T]: F: 人设安全校验：必填 schema + XSS/注入模式扫描 + 文本净化。 | R: code:shisi/character/models.py | A: validate_card；validate_card_strict；sanitize_text；ValidationError | S: 命中 script/eval/exec/os.system、${} 等模式即记为不安全项。
+
+===D:/Desktop/ai-girlfriend/shisi/core/===
+__init__.py[DG1T]: F: 核心领域层出口：聚合根与五个值对象统一导出。 | R: code:shisi/core/models/__init__.py | A: __all__ 六导出 | S: 导出集合必须与 models/__init__ 保持一致。
+conversation_turn.py[DB8S]: F: 对话轮与发言者归属唯一真源：row→Turn（成对+归属）→带发言者渲染。 | R: code:orchestrator/context_budget.py, code:shisi/core/models/character_aggregate.py | A: Speaker；Turn；isolation_key；build_turns；render_turns；filter_by_character | S: 历史行必须自带发言者；isolation_key=f"user_key::character_id" 是按人状态唯一拼接口，禁止各自拼串；chat_history 无 character_id，切换角色后归属需由本模块重建。
+
+===D:/Desktop/ai-girlfriend/shisi/core/models/===
+__init__.py[DG1T]: F: 核心领域模型出口（六模型）。 | R: code:shisi/core/models/affinity_level.py, code:shisi/core/models/character_aggregate.py | A: __all__ 六导出 | S: 导出集合与 core/__init__ 必须一致。
+affinity_level.py[DB6T]: F: 好感度九档枚举与显示名、档位阈值。 | R: code:shisi/affinity/scale.py | A: AffinityLevel；display_name；threshold；get_name | S: 阈值换算一律走 affinity.scale；禁止业务代码再写一份阈值。
+character_aggregate.py[DB9M]: F: 角色聚合根：统一身份/人设/情感/元数据，唯一 system prompt 构建者。 | R: code:shisi/core/models/persona_profile.py, code:shisi/core/models/emotional_state.py, code:utils/reply_mode.py, code:shisi/core/services/prompt_builder.py | A: build_system_prompt；update_emotion；_detect_emotion；_format_dialogue_examples；from_legacy_card；to_dict | S: 注入序=设定→人设→知识→示例→历史→工具→creator_notes(PHI)；沉浸式先 strip_stage_directions 再注入 **mes_example/first_mes/knowledge_context 三处**（knowledge_context 是第二轮补的：mes_example 同时被索引进知识库，生产 prompt_slots 的 knowledge_snippets 实测带「（想了想）」，只剥示例段会漏这条并行通道），creator_notes 追加格式优先级声明；状态块唯一 owner 在 PersonaEngine，此处不注入。
+character_id.py[DB2T]: F: 角色 ID 值对象：非空校验 + uuid 前缀生成。 | R: code:shisi/core/models/character_aggregate.py | A: CharacterId；generate；from_string | S: 空串构造即报错。
+emotion_type.py[DB2T]: F: 十种情绪类型 IntEnum。 | R: code:shisi/core/models/emotional_state.py | A: EmotionType | S: 取值用 auto()，增删枚举会改变持久化映射序号。
+emotional_state.py[DB6T]: F: 情感状态值对象：主情绪/强度/能量/等级/好感点。 | R: code:shisi/core/models/affinity_level.py, code:shisi/core/models/emotion_type.py | A: EmotionalState；__post_init__；to_dict | S: 默认陌生人档 0 点；affection_points 满级刻度见 affinity.scale。
+persona_profile.py[DB7S]: F: 人格画像值对象：九维性格+五维风格+核心锚点，输出 prompt 段。 | R: code:shisi/core/models/character_aggregate.py, code:shisi/core/models/emotional_state.py | A: to_prompt_segment；sentence_length_bucket；from_dict；from_emotion_style_map；to_dict | S: 句长阈值唯一 owner 在此，静态人设段与情绪-风格耦合段必须同档。
+
+===D:/Desktop/ai-girlfriend/shisi/core/ports/===
+__init__.py[DG1T]: F: 端口导出。 | R: code:shisi/core/ports/character_repository.py | A: CharacterRepository | S: 仅导出单一仓储端口。
+character_repository.py[DA4T]: F: 角色仓储 Protocol 端口：取/列/存/设活跃/删。 | R: code:shisi/core/models/character_aggregate.py | A: get_by_id；get_active；list_all；save；set_active；delete | S: 实现类在 persistence，领域层不得依赖 SQLite。
+
+===D:/Desktop/ai-girlfriend/shisi/core/services/===
+__init__.py[DG1T]: F: 领域服务出口。 | R: code:shisi/core/services/prompt_builder.py | A: build；merge_with_persona_prompt | S: 仅两函数出口。
+prompt_builder.py[DB7S]: F: 提示词构建领域服务：角色聚合根 + RAG 知识 + 剧情线上下文。 | R: code:shisi/core/models/character_aggregate.py, code:shisi/knowledge/character_knowledge_service.py | A: build；merge_with_persona_prompt；_get_storyline_context；_get_knowledge_context | S: 身份字段知识块恒由人设段注入，检索按来源排除防自我回声；用户消息只作检索、不回显。
+
+===D:/Desktop/ai-girlfriend/shisi/emotion_stage/===
+__init__.py[DB1T]: F: 情感阶段子系统包声明。 | R: code:shisi/emotion_stage/stage_engine.py | A: 无导出 | S: 仅 docstring。
+event_dispatcher.py[DM5T]: F: 阶段变更事件分发器：同步/异步观察者。 | R: code:shisi/emotion_stage/stage_engine.py | A: StageChangeEvent；EventDispatcher；subscribe；unsubscribe；dispatch；dispatch_sync | S: dispatch 为 async、dispatch_sync 为同步版，按调用上下文二选一。
+stage_config.py[DC5T]: F: 情感阶段配置：从 shisi.yaml 载入阶段定义，缺省回落内置。 | R: code:shisi/config.py, code:shisi/emotion_stage/stage_engine.py | A: StageDefinition；EmotionStageConfig；from_yaml；default | S: 阶段按好感度区间 [min,max] 定义，区间须覆盖全刻度。
+stage_engine.py[DB8S]: F: 好感度驱动的情感阶段评估引擎：映射/变更/落盘/事件。 | R: code:shisi/affinity/mapper.py, code:shisi/emotion_stage/stage_config.py, code:shisi/emotion_stage/event_dispatcher.py | A: resolve_stage；evaluate；get_current_stage；get_progress；subscribe；_restore_from_db；_persist | S: 状态键与 affinity track 同构（user::character / 裸 character），禁止异常回退裸键防跨用户覆盖；emotion_stage_state UPSERT 且构造回放，阶段回退被拒。
+
+===D:/Desktop/ai-girlfriend/shisi/infrastructure/===
+__init__.py[DG1T]: F: 基础设施层出口，导出 SQLiteCharacterRepository。 | R: code:shisi/infrastructure/persistence/sqlite_repository.py | A: SQLiteCharacterRepository | S: 其余实现不经此出口。
+
+===D:/Desktop/ai-girlfriend/shisi/infrastructure/migration/===
+__init__.py[DG1T]: F: 迁移基础设施出口：迁移/回滚运行器与结果类型。 | R: code:shisi/infrastructure/migration/migration_runner.py, code:shisi/infrastructure/migration/rollback_runner.py | A: MigrationResult；RollbackResult；run_migration；run_rollback | S: 两模块的 run 分别以别名导出。
+migration_runner.py[DP6S]: F: 一步到位迁移：卡文件→SQLite 聚合根，迁移前备份原库。 | R: code:shisi/infrastructure/persistence/sqlite_repository.py, code:shisi/core/models/character_aggregate.py, code:utils/project_paths.py | A: MigrationResult；run | S: 默认库 data/sqlite.db、卡目录 config/characters；先 shutil 备份原库。
+rollback_runner.py[DP4T]: F: 回滚运行器：用备份库还原默认 sqlite.db。 | R: code:shisi/infrastructure/migration/migration_runner.py, code:utils/project_paths.py | A: RollbackResult；run | S: 默认库 data/sqlite.db；无备份即失败返回。
+
+===D:/Desktop/ai-girlfriend/shisi/infrastructure/persistence/===
+__init__.py[DA1T]: F: 持久化层出口，导出 SQLiteCharacterRepository。 | R: code:shisi/infrastructure/persistence/sqlite_repository.py | A: SQLiteCharacterRepository | S: 仅单一实现出口。
+schema.py[DA4T]: F: characters_v2 表 DDL 与索引常量。 | R: code:shisi/infrastructure/persistence/sqlite_repository.py | A: CHARACTERS_V2_DDL；CHARACTERS_V2_INDEXES | S: 索引常量与 DDL 同文件，改表须同步仓储读写。
+sqlite_repository.py[DA7S]: F: SQLite 角色仓储实现：characters_v2 表 CRUD 与活跃角色单一标记。 | R: code:shisi/core/models/character_aggregate.py, code:shisi/infrastructure/persistence/schema.py | A: get_by_id；get_active；list_all；save；set_active；delete；_row_to_aggregate | S: 默认库 data/sqlite.db；角色 JSON 拆 persona/emotional_state/source_data 三列存储。
+
+===D:/Desktop/ai-girlfriend/shisi/knowledge/===
+__init__.py[DA1T]: F: 知识库 RAG 子系统包声明。 | R: code:shisi/knowledge/character_knowledge_service.py | A: 无导出 | S: 仅 docstring。
+character_knowledge_service.py[DA9L]: F: 角色知识服务：卡片抽取→BM25 分块索引→双路检索→注入上下文，索引可持久化。 | R: code:shisi/knowledge/source_store.py, code:shisi/knowledge/retriever.py, code:shisi/core/models/character_aggregate.py | A: build_character_aggregate；ensure_character_index；mark_dirty；save_index；load_index；search；get_knowledge_service | S: 源材料唯一存 SourceStore（data/knowledge/sources/{cid}.json），索引由其派生；索引写全程持角色锁；双路检索须真互补，查询扩展不得压掉原路高 idf 块。
+crawler_adapter.py[DA7M]: F: 角色爬虫适配：导入后建索引、补全网络公开信息并写入知识服务单例。 | R: code:shisi/knowledge/character_knowledge_service.py, code:shisi/knowledge/retriever.py | A: crawl_and_index；_index_card；_profile_to_chunks；get_crawler_adapter | S: 爬虫失败仅降级记 fallback_chain，不阻断角色导入与对话。
+hot_topics.py[DA7M]: F: 热点知识链：配置查询→SearchTool 采集→全局池→经主动消息知识供出口推荐。 | R: code:tools/builtin/search_tool.py, code:proactive/ase_engine.py, code:utils/json_state.py | A: collect_once；collect_if_due；get_hot_context；read_pool；load_config；_persona_tokens | S: 池落 data/hot_topics.json，用 epoch 绝对时刻；去重键=归一化标题或 href；采集零用户隐私入参；供出异常返回空串，永不炸主动消息。
+retriever.py[DA6M]: F: 轻量知识检索器：关键词频次+短语加权评分，零外部依赖。 | R: code:shisi/knowledge/character_knowledge_service.py | A: KnowledgeChunk；RetrievalResult；KeywordRetriever；index；search；_tokenize | S: 为关键词/TF 打分而非 BM25；分块为检索最小单元。
+source_store.py[DA8M]: F: 知识源存储：源材料唯一持久化 owner，版本单调递增 + 角色级锁。 | R: code:shisi/knowledge/character_knowledge_service.py, code:utils/json_state.py | A: SourceStore；read/write/transaction；chunk_fingerprint；safe_cid；_file_lock | S: 源材料（card/doc/vault/external）存 data/knowledge/sources/{cid}.json，派生索引可重建；写路径持同一把锁；safe_cid 保留中文拒穿越，不可用 sanitize_id。
+
+===D:/Desktop/ai-girlfriend/shisi/memory/===
+__init__.py[DA1T]: F: 记忆增强包声明（收藏/转发/回收站）。 | R: code:shisi/memory/favorite_manager.py | A: 无导出 | S: 仅 docstring。
+favorite_manager.py[DA5T]: F: 收藏管理器：记忆收藏/取消/列表/判重，落 sqlite.db。 | R: code:shisi/api/memory_routes.py | A: favorite；unfavorite；unfavorite_by_id；list_favorites；is_favorite | S: 取消收藏以 fav_id 为唯一判据。
+forward_manager.py[DA6S]: F: 转发管理器：跨角色转发记忆落库并带回执。 | R: code:shisi/api/memory_routes.py | A: forward；forward_receipt；get_forwards | S: 落库保留上限 1000 裁最旧；to_character 为空即拒。
+
+===D:/Desktop/ai-girlfriend/shisi/memory/legacy/===
+__init__.py[DA2T]: F: 记忆管线核心包出口：工作/情景/语义/结构化/向量记忆与管线。 | R: code:shisi/memory/legacy/memory_pipeline.py, code:shisi/application/memory_service.py | A: 多模块再导出 | S: legacy 是历史命名，模块仍在产用，禁止当待删除处理。
+_legacy_diary_summarizer.py[DA6M]: F: 日记摘要器：按日/周总结对话并分析情绪趋势，落 daily_summaries。 | R: code:shisi/memory/legacy/memory_pipeline.py | A: summarize_day；summarize_week；detect_mood_trend；save_summary；get_summary；health_check | S: get_summary 优先读 daily_summaries 表而非实例缓存，跨 worker 一致。
+_legacy_episodic_memory.py[DA4T]: F: 情景记忆内联版：对话片段向量归档+摘要。 | R: code:shisi/memory/legacy/episodic_memory.py | A: EpisodicMemory；store_episode；search；_generate_summary | S: 与 legacy/episodic_memory.py 并存的旧内联版。
+_legacy_importance_scorer.py[DA4T]: F: 重要性评分内联旧版：关键词+情感+信息密度+时间衰减。 | R: code:shisi/memory/legacy/importance_scorer.py | A: ImportanceScorer；score；should_retain | S: 与 importance_scorer.py 并存，权重口径不同。
+_legacy_semantic_memory.py[DA2T]: F: 兼容入口：转出新 semantic_memory.SemanticMemory（含 user_key 隔离）。 | R: code:shisi/memory/legacy/semantic_memory.py | A: SemanticMemory 别名 | S: 本文件无实现，仅转出。
+_legacy_working_memory.py[DA4T]: F: 有界工作记忆：按会话+角色分桶 deque，完整历史真源是 chat_history。 | R: code:shisi/memory/legacy/memory_pipeline.py | A: WorkingMemory；start_session；add；get_recent；get_for_archive；should_archive；acknowledge_archive | S: 内存态有界，重启即空；不得当历史真源。
+conflict_detector.py[DA4T]: F: 事实冲突检测：向量相似度比对新事实与已有事实。 | R: code:shisi/memory/legacy/_legacy_semantic_memory.py | A: ConflictDetector；check_conflict | S: 依赖语义记忆向量层，无向量时跳过。
+conversation_summarizer.py[DA6S]: F: 历史对话摘要器：超窗部分压缩≤200 字并保留主体归属。 | R: code:shisi/core/conversation_turn.py, code:shisi/memory/legacy/memory_pipeline.py | A: ConversationSummarizer；get_chat_context；_summarize；_fallback_excerpt；clear_cache | S: 摘要须区分用户与角色各说了什么，转述/引号中的「我」不得归给发送者；失败走摘录兜底。
+episodic_memory.py[DA4T]: F: 情景记忆：对话片段归档，向量+结构化双写。 | R: code:shisi/memory/legacy/_legacy_episodic_memory.py | A: EpisodicMemory；store_episode；search；get_recent_episodes | S: 空消息直接返回 None；片段按内容摘要标识。
+fact_extractor.py[DA8M]: F: 事实提取器：LLM/规则从用户原话提取偏好/习惯/事件/承诺类事实。 | R: code:shisi/memory/legacy/memory_pipeline.py | A: FactExtractor；extract_facts；extract_from_chat；deduplicate；normalize_commitment_text；_parse_json_result | S: 只从用户原话提取；否定与日期不得丢；相对日期不确定时保留原表述，不推断具体日期。
+forgetting_manager.py[DA5T]: F: 遗忘管理器：重要性分层指数衰减 + 回忆强化。 | R: code:shisi/memory/legacy/memory_pipeline.py | A: effective_importance；retrieval_weight；should_delete | S: access_count 越高等效重要性越高；衰减率按重要性分档。
+importance_scorer.py[DA4T]: F: 事实重要性评分：按事实类型权重打分。 | R: code:shisi/memory/legacy/memory_pipeline.py | A: ImportanceScorer；score；FACT_TYPE_WEIGHTS | S: health 权重最高 1.0，general 最低 0.3。
+memory_pipeline.py[DA9L]: F: 记忆管线编排：三层记忆+Facts/日记/遗忘/冲突/反思，按会话隔离。 | R: code:shisi/memory/legacy/fact_extractor.py, code:shisi/memory/legacy/forgetting_manager.py, code:shisi/memory/legacy/conversation_summarizer.py, code:shisi/memory/legacy/reflection_engine.py | A: MemoryPipeline；after_chat；daily_maintenance；retrieve_context；get_formatted_context；should_store_as_fact；is_durable_env_fact；_fact_age_days | S: 系统错误占位回复不入库；事实抽取与删除水位持久化，删除须失效派生召回；相对日期不推断；按 user_key 隔离。
+reflection_engine.py[DA6M]: F: 反思引擎：从既有事实生成高层洞察，LLM 优先、规则兜底。 | R: code:shisi/memory/legacy/memory_pipeline.py | A: ReflectionEngine；maybe_reflect；reflect；store_insights；get_insights | S: 洞察须标主体、写推测不写成用户原话；先按会话过滤再取 top_k，无共享缓存。
+semantic_memory.py[DB8M]: F: 语义记忆：事实写入/强化/去重/冲突检测与向量派生，按 user_key 强制隔离。 | R: code:shisi/memory/legacy/structured_memory.py, code:shisi/memory/legacy/vector_memory.py | A: SemanticMemory；add_fact；write_fact；search；delete_fact | S: search 的 user_key 非空时禁止回退全库；add_fact 返回 bool；结构化层是事实真源。
+structured_memory.py[DB9L]: F: SQLite 结构化记忆唯一写入口：user_facts/chat_history/reminders/pending_intents 等表 CRUD、身份组与抽取水位。 | R: code:shisi/memory/legacy/semantic_memory.py, code:utils/local_time.py, code:shisi/core/conversation_turn.py | A: add_fact_receipt；search_facts；add_chat_turn；identity_keys；purge_owner_data | S: add_fact_receipt 是事实 SQL 唯一写口；聊天排序按 id；跨用户读须带 user_key；死表初始化时幂等 DROP。
+user_profile.py[DB8M]: F: 结构化用户画像存储：按会话隔离键维护生日/职业/称呼/偏好，生成 prompt 块并禁止编造。 | R: code:shisi/memory/legacy/structured_memory.py, code:utils/address_terms.py | A: UserProfileStore；upsert；apply_user_utterance；to_prompt_block | S: apply_user_utterance 已废弃，聊天热路径唯一写入是 LLM 工具 update_user_profile；画像外信息禁止编造。
+vector_memory.py[DP8M]: F: ChromaDB 向量记忆：聊天/事实/情绪三类集合的存取与语义检索，同步异步双入口。 | R: code:utils/async_utils.py, code:shisi/memory/legacy/semantic_memory.py | A: VectorMemory；store_chat；search_chats；_run_async | S: 同路径实例进程级单例；_run_async 委托 utils.async_utils.run_async，禁止同线程阻塞等待自身循环。
+
+===D:/Desktop/ai-girlfriend/shisi/stats/===
+__init__.py[DB1T]: F: 统计诊断子系统包声明。 | R: code:shisi/stats/analytics.py | A: 无导出 | S: 仅 docstring。
+analytics.py[DA3T]: F: 进程内对话统计：消息数、日计数、角色使用与情绪分布聚合。 | R: code:utils/local_time.py | A: AnalyticsService；record_message；get_stats | S: 日键用 now_local；纯内存，重启归零。
+
+===D:/Desktop/ai-girlfriend/shisi/sticker/===
+__init__.py[DB1T]: F: 表情包子系统出口，导出管理器/推荐器/导入器/安全检测。 | R: code:shisi/sticker/sticker_manager.py, code:shisi/sticker/importer.py | A: StickerManager；EmotionRecommender；StickerImporter；check_sticker_safety | S: 仅聚合导出。
+default_provider.py[DB4T]: F: 预置表情包初始化：按内置清单把默认贴纸登记入库。 | R: code:shisi/sticker/sticker_manager.py | A: DefaultStickerProvider；initialize | S: 幂等初始化，已存在不重复。
+emotion_recommender.py[DA4T]: F: 情感标签 Jaccard 相似度推荐贴纸并限条数。 | R: code:shisi/sticker/sticker_manager.py | A: EmotionRecommender；recommend；_jaccard | S: 无标签或无候选返回空。
+importer.py[DB6S]: F: 表情包 ZIP 批量导入：安全门禁→解包落盘→逐张写 stickers 表。 | R: code:shisi/sticker/safety_check.py, code:shisi/sticker/sticker_manager.py | A: StickerImporter；import_zip；sanitize_category；_stable_sticker_id | S: 只落文件不写表的旧缺陷已根治；sticker_id 由文件名+内容派生，重复导入幂等；category 仅 [A-Za-z0-9_-]≤64。
+safety_check.py[DS4T]: F: 表情包文件名敏感词安全检测。 | R: code:shisi/sticker/importer.py | A: check_sticker_safety | S: 仅查文件名，不解析图片内容。
+sticker_manager.py[DB6S]: F: 表情包管理：分类查询、情感推荐、角色绑定与好感阈值解锁、CRUD。 | R: code:shisi/sticker/emotion_recommender.py, code:shisi/affinity/scale.py | A: StickerManager；list_by_category；recommend；bind_to_character；add_sticker | S: 好感阈值未达时回落默认表情；推荐依赖已绑定集合。
+
+===D:/Desktop/ai-girlfriend/shisi/storyline/===
+__init__.py[DB1T]: F: 剧情线引擎包声明。 | R: code:shisi/storyline/engine.py | A: 无导出 | S: 仅 docstring 说明可选模块。
+config.py[DC5T]: F: 剧情线配置数据模型：阶段时序/行为与风格规则/结局及 default_7day 模板。 | R: code:shisi/storyline/engine.py | A: StorylineConfig；StageDefinition；StageBehaviorRule；default_7day | S: 配置角色级共享；to_dict/from_dict 为持久化口径。
+detector.py[DA5T]: F: 从角色卡文本正则检测剧情线线索并给出配置建议与置信度。 | R: code:shisi/storyline/config.py, code:shisi/character/models.py | A: StorylineDetector；detect_from_card；detect_from_text | S: 仅建议不自动开启；关键词命中不等于语义判定。
+engine.py[DB7S]: F: 剧情线运行时：按 user_key::character_id 维护进度、阶段演进、规则注入与结局触发。 | R: code:shisi/storyline/config.py, code:shisi/core/conversation_turn.py | A: StorylineEngine；set_config；advance；get_prompt_segment；reset | S: 配置角色级共享、进度按用户隔离；空 user_key 回退裸角色键不迁移；结局后回复须为空。
+
+===D:/Desktop/ai-girlfriend/shisi/vault/===
+__init__.py[DB1T]: F: 知识宝库出口：persona 特征提取与采集循环。 | R: code:shisi/vault/collect_loop.py, code:shisi/vault/_persona_adapter.py | A: PersonaAdapter；CollectLoop；VaultCollector | S: 知识最终写入 CharacterKnowledgeService。
+_persona_adapter.py[DB6M]: F: 从角色卡提取标准化 persona 特征：锚点/说话风格/背景/关系/行为规则。 | R: code:shisi/character/models.py, code:shisi/vault/collect_loop.py | A: PersonaAdapter；PersonaFeatures；extract | S: 特征仅供知识分块，非 prompt 身份 owner。
+collect_loop.py[DW6S]: F: 知识采集：把角色卡特征转 KnowledgeChunk 并幂等索引，另有异步队列循环。 | R: code:shisi/knowledge/character_knowledge_service.py, code:shisi/vault/_persona_adapter.py | A: VaultCollector；collect_card；CollectLoop；enqueue | S: collect_card 幂等且返回真实来源块数；不覆盖其他来源。
+
+===D:/Desktop/ai-girlfriend/shisi/vital_signs/===
+__init__.py[DB1T]: F: 生理指标子系统包声明。 | R: code:shisi/vital_signs/vital_engine.py | A: 无导出 | S: 仅 docstring。
+emotion_mapping.py[DB2T]: F: 情感到心率/体温/呼吸增量的映射表。 | R: code:shisi/vital_signs/vital_engine.py | A: EMOTION_VITAL_MAP | S: 纯常量，未知情绪按零增量。
+vital_engine.py[DB8S]: F: 生理指标演算引擎：情绪事件驱动、按拍回稳、隔离键落库并降级纯内存。 | R: code:shisi/core/conversation_turn.py, code:shisi/vital_signs/emotion_mapping.py | A: VitalSignsEngine；update_on_emotion；tick；get_current；vital_state_key | S: 状态键与 ASEHub/好感度同构；库不可用绝不抛异常；无读数时读侧为标注示意值。
+vital_prompt.py[DA5T]: F: 小说模式专用：把真实演算的生理读数渲染进提示词并标注非医疗信号。 | R: code:shisi/vital_signs/vital_engine.py, code:utils/reply_mode.py | A: novel_vital_prompt_section | S: 仅小说式注入；无演算结果不注入；沉浸式禁用防与禁止描写冲突。
+
+===D:/Desktop/ai-girlfriend/shisi/voice/===
+__init__.py[DB1T]: F: 语音增强出口：角色音色管理与情感参数。 | R: code:shisi/voice/character_voice.py, code:shisi/voice/emotion_tts.py | A: VoiceEnhancer；CharacterVoiceManager | S: 仅聚合导出。
+character_voice.py[DB7S]: F: 角色音色契约唯一 owner：不可变合成参数快照、绑定/解绑与好感解锁。 | R: code:shisi/affinity/scale.py, code:utils/project_paths.py | A: CharacterVoiceSpec；CharacterVoiceManager；bind_voice；get_voice_config | S: 合成参数随调用传递，禁止改 provider 全局态；未解锁回落默认音色。
+emotion_tts.py[DB4T]: F: 角色 TTS 配置与情感参数读取，情感映射交由 MiMo provider 内部处理。 | R: code:shisi/voice/character_voice.py, code:shisi/config.py | A: VoiceEnhancer；get_tts_config；bind_character_tts | S: MiMo-only，Edge-TTS 映射器已删除。
+
+===D:/Desktop/ai-girlfriend/shisi/wechat/===
+__init__.py[DB1T]: F: 微信交互适配包声明。 | R: code:shisi/wechat/sticker_adapter.py | A: 无导出 | S: 指令系统已删除，角色切换走控制台 activate。
+sticker_adapter.py[DB3T]: F: 微信表情包适配：按情绪选贴纸、格式化消息并经连接器发送。 | R: code:shisi/sticker/sticker_manager.py, code:shisi/sticker/safety_check.py | A: WeChatStickerAdapter；get_sticker_for_reply；format_sticker_message；send_sticker_via_wechat | S: 发送前复检安全；无管理器直接返回空。
+
+===D:/Desktop/ai-girlfriend/tools/===
+__init__.py[DB2T]: F: 工具系统出口：导出基础工具类、注册中心与调度器。 | R: code:tools/base_tool.py | A: BaseTool；ToolResult；ToolRegistry；ToolDispatcher | S: 仅聚合导出。
+base_tool.py[DB8M]: F: 工具基类/注册中心/调度器：统一结果、OpenAI FC schema、超时线程池与重试。 | R: code:tools/tool_state.py | A: BaseTool；ToolResult；ToolRegistry；ToolDispatcher；ToolTimeoutError | S: 超时抛 ToolTimeoutError，底层线程不可强杀；timeout≤0 内联执行。
+tool_state.py[DC7S]: F: 工具/插件运行时开关唯一 owner：跨 worker 状态文件、mtime 缓存与原子读写。 | R: code:utils/json_state.py, code:tools/base_tool.py | A: is_tool_disabled；set_tool_disabled；is_plugin_enabled；set_plugin_enabled | S: 状态文件 gitignored；读侧带 mtime 缓存；写侧进程锁+OS 锁+原子替换。
+url_guard.py[DS8S]: F: 对外抓取 SSRF 守卫唯一 owner：协议/主机名校验、DNS 解析内网拒绝与逐跳重定向校验。 | R: code:tools/builtin/character_crawler_tool.py, code:tools/builtin/extra_tools.py | A: assert_public_http_url；fetch_guarded；UrlBlockedError | S: 禁自动重定向，每跳先校验；DNS rebinding TOCTOU 为已登记残余风险。
+
+===D:/Desktop/ai-girlfriend/tools/builtin/===
+__init__.py[DB2T]: F: 内置工具聚合出口。 | R: code:tools/builtin/weather_tool.py, code:tools/builtin/search_tool.py | A: WeatherTool；SearchTool；CalendarTool；ReminderTool；TimeAwarenessTool；CharacterCrawlerTool | S: 仅聚合导出。
+calendar_tool.py[DB4S]: F: 日历时间查询与计算器：AST 白名单安全求值，禁用 eval。 | R: code:tools/base_tool.py, code:utils/local_time.py | A: CalendarTool；CalculatorTool；_safe_eval_expr | S: 数学表达式仅白名单运算符，禁止 eval/exec。
+character_crawler_tool.py[DB8L]: F: 人物信息爬取：百度百科→维基→搜索三级降级，结果落知识库。 | R: code:tools/url_guard.py, code:shisi/knowledge/character_knowledge_service.py | A: CharacterCrawlerTool；CharacterKnowledgeImporter；execute；_fetch_wikipedia | S: 全部抓取走 url_guard；维基不可达记忆 1800s；反爬关键词判定；无隐私入参。
+extra_tools.py[DB5S]: F: 补充工具：记忆检索、网页摘要（SSRF 守卫）与 AI 图片生成。 | R: code:tools/base_tool.py, code:tools/url_guard.py | A: MemoryTool；WebSummaryTool；ImageGenTool | S: 网页摘要仅 http(s) 且 DNS 解析后禁内网；图片工具需外部配置。
+profile_agent_tools.py[DB8L]: F: 智能体画像/记忆工具：更新画像、记住事实、遗忘事实与查询画像。 | R: code:shisi/memory/legacy/user_profile.py, code:shisi/memory/legacy/structured_memory.py | A: UpdateUserProfileTool；RememberFactsTool；ForgetFactsTool；QueryProfileTool | S: 权威写入走 ledger，profile 表仅投影；只可写用户原话，禁止编造；遗忘须失效派生召回。
+reminder_tool.py[DB8S]: F: 提醒工具：北京时间校验与归一、创建/查询/取消/改期/恢复。 | R: code:shisi/memory/legacy/structured_memory.py, code:utils/local_time.py | A: ReminderTool；CalendarQueryTool；ReminderManageTool；normalize_trigger_time | S: trigger_time 必为北京时间且与到期轮询格式同构；过去超 5 分钟拒收；相对时间须先换算。
+search_tool.py[DB8M]: F: 网页搜索：Bing 直抓主路径 + DDG 副后端熔断，结果结构化清洗。 | R: code:tools/base_tool.py | A: SearchTool；_bing_search；_ddg_search | S: 不得把 ddgs 9.x 装回主后端（大陆不可达串行超时）；DDG 超时熔断 300s。
+time_awareness_tool.py[DB5S]: F: 时间感知工具：当前时刻、工作日/节假日判定与农历换算。 | R: code:utils/local_time.py | A: TimeAwarenessTool；_check_holiday；_check_workday；_convert_lunar | S: 依赖可选库，缺失时优雅降级；日期来源用 now_local。
+weather_tool.py[DB4T]: F: 天气查询：插件优先，失败降级 wttr.in 公开接口。 | R: code:tools/tool_state.py, code:plugins/weather.py | A: WeatherTool；execute；_fetch_wttr | S: health 不做网络 IO；插件不可用仍可降级。
+
+===D:/Desktop/ai-girlfriend/utils/===
+__init__.py[DB2T]: F: 通用工具包出口：启动横幅/日志与健康检查聚合。 | R: code:utils/bootstrap.py, code:utils/health_check.py | A: print_banner；setup_logging；health_check_all | S: 仅聚合导出。
+address_terms.py[DB9M]: F: 用户称呼白名单唯一解析 owner：合法称呼、角色名派生禁用集、出站呼语剥离。 | R: code:shisi/memory/legacy/user_profile.py, code:shisi/memory/legacy/structured_memory.py, code:shisi/character/manager.py | A: resolve_address；address_prompt_block；strip_forbidden_vocatives；character_name_derivatives | S: 只允许画像昵称/「你」；角色名派生词自动禁用；禁止另造第二份解析；出站确定性剥除。
+affinity_state.py[DP6S]: F: 好感度持久化：按 user_id::character_id 存 affection_points，原子写与跨进程锁。 | R: code:shisi/affinity/scale.py, code:utils/json_state.py | A: load_points；save_points；purge_owner；count_owner | S: 键与 affinity_key 同构；档位换算只走 shisi.affinity.scale。
+async_utils.py[DR7S]: F: 公共异步桥：有/无事件循环下安全运行协程、共享常驻循环与阻塞调用。 | R: code:shisi/memory/legacy/vector_memory.py | A: run_async；get_shared_loop；run_on_shared_loop；call_coro_blocking | S: 循环内须直接 await；禁止在共享循环内部同步阻塞等待自身。
+bootstrap.py[DB2T]: F: 启动横幅与日志初始化。 | R: code:main.py | A: print_banner；setup_logging | S: 无状态，仅入口调用。
+character_helpers.py[DB7M]: F: 角色卡清洗与规范：名称去噪、字段展平为无损幂等 DTO。 | R: code:shisi/character/importer.py, code:shisi/character/manager.py | A: sanitize_character_name；sanitize_character_text；normalize_character_card | S: 顶层扁平值优先于嵌套块；归一化必须幂等且不丢散文/显式文本。
+character_resolver.py[DB7S]: F: 会话键→角色 id 解析唯一真源，含内置「十四」判定与展示名解析。 | R: code:shisi/core/conversation_turn.py, code:utils/project_paths.py | A: resolve_character_id；is_builtin；display_name | S: 返回值恒非空，「default」是合法内置 id；判真实角色用 is_builtin 而非判空。
+deletion_guard.py[DS8S]: F: 已删账号迟到写入守卫：坟场文件跨 worker 标记，写侧/外发侧前置查询。 | R: code:utils/project_paths.py | A: block_owner；is_owner_blocked；is_session_blocked；write_graveyard | S: 查询按 mtime 缓存 3s；跨进程窗口以 TTL 为上限；不得反向依赖 api。
+emotion_state.py[DP7S]: F: 情感状态持久化唯一真源：按 user_key::character_id 存情绪快照。 | R: code:utils/json_state.py | A: load_emotion_state；save_emotion_state；clear_emotion_state | S: 与好感度分开落盘；原子写+跨进程锁；不写死表 emotion_trajectory。
+fallback_lines.py[DB8L]: F: 系统旁路句角色化：空回复/超时/异常/驳回等按角色口吻取句并当日去重。 | R: code:utils/reply_mode.py, code:shisi/character/models.py | A: get_fallback_line；is_system_fallback_line；all_pool_lines；reset_daily_dedup | S: 沉浸式输出无括号动作；同角色同类当日去重；池尽才允许重复。
+health_check.py[DO4T]: F: 组件健康检查聚合：统一 bool/dict 结果并容忍懒加载字段。 | R: code:utils/__init__.py | A: health_check_all；_is_healthy | S: 懒加载字段为 False 不算失败。
+humanize_config.py[DC7M]: F: 拟人度配置唯一真源：段间延时与主动拆条参数，跨 worker 热读、锁内写。 | R: code:utils/json_state.py | A: HumanizeConfig；read_humanize；write_humanize；validate_payload | S: 读侧无进程缓存；写只经 json_state.update_json；默认值须零行为变更。
+humanize_delivery.py[DM7S]: F: 主动消息拆条与段间节奏投递链，单进程与多 worker 连接器宿主共用。 | R: code:utils/humanize_config.py, code:wechat_direct/wechat_connector.py | A: humanize_proactive_split_enabled；send_proactive_segmented；direct_send_proactive | S: 配置默认关闭即整段直发；两个投递点共用实现，禁止反向 import main。
+important_dates.py[DB6S]: F: 重要日期存储：生日/纪念日/自定义，公历与农历匹配及提示词解析。 | R: code:utils/json_state.py, code:utils/local_time.py | A: load_dates；save_dates；check_today；lunar_birthday_matches；parse_birthday_hint | S: 数据键按角色；农历库缺失时公历通道照常；日期用 now_local。
+inbound_context.py[DM6T]: F: 入站消息 id 请求级上下文唯一 owner：ContextVar 绑定与复位，供回合内副作用去重。 | R: code:utils/llm_bridge.py, code:proactive/runtime_plane.py | A: current_message_id；bind_message_id | S: 跨线程桥不传播，须显式传参后重绑；无 id 时空串且不去重。
+json_state.py[DP9S]: F: JSON 状态文件持久化唯一真源：容错读、原子写与跨进程锁内读改写。 | R: code:utils/affinity_state.py, code:utils/reply_mode.py, code:proactive/scheduler.py | A: read_json；atomic_write_json；update_json | S: 新增 data/*.json 一律走这里；临时文件须同目录唯一命名；Windows 退化为进程内锁。
+llm_bridge.py[DB9M]: F: LLM 网关→同步单串函数唯一适配器：请求级网关绑定与异步桥接。 | R: code:utils/async_utils.py, code:shisi/memory/legacy/memory_pipeline.py | A: current_llm；request_scoped_llm；to_sync_callable | S: 禁止再写 callable(llm) 判据；同步→异步只走 call_coro_blocking。
+local_time.py[DB9M]: F: 本地墙钟单一真源：北京时间换算、本地日 UTC 区间、时间锚点与间隔人话。 | R: code:proactive/scheduler.py, code:shisi/memory/legacy/memory_pipeline.py | A: now_local；local_day_utc_bounds；beijing_wall；time_anchor_line；humanize_gap_cn | S: 只读墙钟字段，禁止与历史 UTC 时间戳做算术；宿主为 UTC 时回退 UTC+8。
+project_paths.py[DP9T]: F: 项目根路径锚定：资源路径一律以仓库根为基准，消除 CWD 依赖。 | R: code:proactive/scheduler.py | A: PROJECT_ROOT；project_path；resolve_project_path | S: 新增代码禁止用相对路径当模块级常量。
+prompt_sanitize.py[DB9L]: F: Prompt 侧清洗：发言者归属、历史时间戳/通道保留、记忆质量过滤、话题锚点与出站语义终审。 | R: code:shisi/core/conversation_turn.py, code:utils/reply_mode.py | A: sanitize_llm_history；sanitize_fact_list；extract_current_topics；_extract_user_anchor_sentences；terminal_reply_guard；sanitize_reply_text；strip_time_prefixes | S: 历史注入须保留 timestamp/channel；系统错误占位不入库；24h 时间窗外的旧话题不教唆；话题锚点只取 user 行完整短句（extract_current_topics 关键词袋仅兼容保留，主链已换）；terminal_reply_guard 六道语义守卫顺序=系统标记→沉浸式括号→时间词→复述→元记忆→归属翻转→无由头反问→emoji/称呼；裸「你呢」整行形态需 re.MULTILINE 才匹配（首版漏）；「你呢，别太累了」是陈述句不得误删。
+reply_mode.py[DC9S]: F: 回复模式唯一 owner：沉浸式/小说式读写、模式指令与括号动作剥离。 | R: code:utils/json_state.py, code:shisi/core/models/character_aggregate.py | A: read_reply_mode；write_reply_mode；reply_mode_instruction；strip_stage_directions | S: 沉浸式禁括号动作与共处动作；无由头不提问；角色卡示例、first_mes 与知识库检索结果三处都须先剥离再注入（只剥一处会漏通道）；strip_stage_directions 只剥**非空**括号段——数值标注「温暖度: 0.7 (温和)」与标题「# 对话示例（…）」不受影响，属预期；模式开关仍是全局单例（多用户/多角色共用，二期改角色级）。
+session_key.py[DB9M]: F: 会话键格式唯一真源：owner:peer 构造/解析、微信判定与角色后缀。 | R: code:wechat_direct/wechat_connector.py, code:shisi/memory/legacy/structured_memory.py | A: SessionKey；build；parse；is_wechat_key；owner_of；peer_of | S: @im.wechat 是对端 wxid 后缀不可剥；禁止手写第二份解析；空 owner 形态只兼容读取。
+
+===D:/Desktop/ai-girlfriend/voice/===
+__init__.py[DB2T]: F: 语音模块包声明：MiMo TTS 唯一引擎与异步设计约束。 | R: code:voice/tts_manager.py | A: 无导出 | S: 历史引擎已删除，仅 MiMo。
+audio_converter.py[DB5S]: F: 音频格式转换：MP3/WAV 与 SILK/AMR 互转，依赖 ffmpeg 与 silk 编码器。 | R: code:voice/mimo_tts_provider.py | A: AudioFormatConverter；to_silk；to_wav；to_amr；health_check | S: 外部二进制缺失时返回 None 降级；转换有超时。
+audio_result.py[DB7T]: F: 音频合成契约：参数归一、不可变结果载体与跨进程 payload 编解码。 | R: code:voice/tts_provider_base.py, code:shisi/voice/character_voice.py | A: SynthesizedAudio；coerce_ratio；voice_result_payload；coerce_voice_payload | S: 格式按实际来源标注，禁止假设 MP3/WAV；非数值 SAPI 风格不进云端 payload。
+clone_data_manager.py[DP5M]: F: 克隆聊天数据管理：联系人/数据集列表、分页明细、单条与批量删除。 | R: code:utils/project_paths.py | A: CloneDataManager；get_contacts；list_datasets；get_dataset_detail；delete_dataset | S: person_id 路径消毒；联系人仅从已有克隆数据提取。
+mimo_tts_provider.py[DN8L]: F: MiMo 云 TTS Provider：基础/克隆/设计三模型、参数映射与本地引擎兜底。 | R: code:voice/tts_provider_base.py, code:voice/audio_result.py | A: MiMoTTSProvider；synthesize；synthesize_stream；_fallback_to_local | S: 云失败由 provider 内部本地兜底；返回结果须标注真实格式；密钥不得落盘日志。
+tts_manager.py[DB7S]: F: TTS 管理器：引擎初始化、运行时切换、合成入口与健康检查。 | R: code:voice/mimo_tts_provider.py, code:voice/tts_provider_base.py | A: TTSManager；initialize；synthesize；switch_engine；health_check | S: MiMo-only；原样透传引擎参数，不落全局状态；失败自动降级。
+tts_provider_base.py[DB6T]: F: TTS 引擎抽象基类：合成/流式/健康/名称/流式能力接口。 | R: code:voice/audio_result.py | A: TTSProviderBase | S: synthesize 一律返回 SynthesizedAudio，禁止裸 bytes。
+voice_catalog.py[DP7S]: F: 音色 catalog：克隆/设计 voice_id 的持久化登记、绑定查询与删除。 | R: code:voice/mimo_tts_provider.py, code:utils/project_paths.py | A: VoiceCatalog；register；get；remove；list；get_voice_catalog | S: voice_id 唯一持久化 owner；owner 空串=平台共享；进程级单例整文件落盘。
+
+===D:/Desktop/ai-girlfriend/wechat_direct/===
+__init__.py[DB2T]: F: 微信直连包出口：连接器与状态读取器。 | R: code:wechat_direct/wechat_connector.py | A: WeChatConnector；get_connector；get_wechat_state | S: 仅聚合导出。
+channel_paths.py[DP8S]: F: 每用户独立微信通道磁盘路径：会话目录/凭证/状态/二维码/上下文 token/锁与扫码人反查。 | R: code:utils/project_paths.py, code:wechat_direct/connector_registry.py | A: session_dir；credentials_path；scanner_ids_for_user；max_channels；remove_user_sessions | S: MAX_CHANNELS_PER_USER=1（D16 一人一 bot）；禁止全局单例路径作通道真源。
+connector_registry.py[DB8S]: F: 按 (user_id, slot) 管理连接器实例，取代全局单例并施加用户与全局配额。 | R: code:wechat_direct/channel_paths.py, code:wechat_direct/wechat_connector.py | A: ConnectorRegistry；ensure；disconnect；all；online_count | S: 一人一条通道；全局上限 100；断连须释放通道锁 fd 防 429。
+wechat_connector.py[DN9L]: F: 微信 iLink 直连连接器：扫码登录、轮询收消息、媒体解析下载、回复分条发送与通道锁。 | R: code:wechat_direct/channel_paths.py, code:utils/session_key.py, code:utils/humanize_delivery.py | A: WeChatConnector；parse_ilink_items；load_session_state；_drain_outbox | S: 媒体下载 15s 超时降级不炸主链；一人一 token 窗口；控制面故障降级旧行为；消息按扫码人守卫。

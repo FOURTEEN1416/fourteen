@@ -288,8 +288,13 @@ class MultiProviderGateway:
     # 降级 13 次——20s 超时常等满 + 熔断 2 次/60s 太温和攒不起来，每轮都
     # 重新硬试坏供应商）：阈值 2→1（一次失败立即让路）、冷却 60→300s
     # （坏供应商 5 分钟不再打扰；半开重探机制保留）。
-    _BREAKER_THRESHOLD = 1      # 连续失败次数达到即开闸
-    _BREAKER_COOLDOWN = 300.0   # 开闸后跳过该 provider 的秒数（到期半开重探）
+    # 2026-10-20 质量悬崖批回调：阈值 1→2、冷却 300→120s。10-20 生产实证
+    # agnes 24 次调用 15 次失败、10 次熔断，报障对话（2873/2875）里回复全部由
+    # 降级模型 glm-4.5-flash 生成——一次抖动就让首选模型退场 5 分钟，代价是
+    # 整段对话质量塌到另一个档。阈值 2 让瞬时抖动不致立刻熔断；冷却 120s 让
+    # 恢复更快（agnes 实测延迟 3.8~21s 波动，非持续故障）。
+    _BREAKER_THRESHOLD = 2      # 连续失败次数达到即开闸
+    _BREAKER_COOLDOWN = 120.0   # 开闸后跳过该 provider 的秒数（到期半开重探）
 
     def __init__(
         self,
@@ -405,14 +410,21 @@ class MultiProviderGateway:
             return False
         return True
 
-    def _mark_provider_result(self, key: str, ok: bool) -> None:
+    def _mark_provider_result(self, key: str, ok: bool, *, immediate: bool = False) -> None:
+        """记账 provider 成败。
+
+        ``immediate``（2026-10-20 质量悬崖批）：primary_only 链（主动决策线
+        「宁可不发也不让降级模型代写」）里，一次失败就该立刻开闸——那条链
+        没有降级位可退，等第二次失败再熔断只会多烧一次决策 LLM。主聊链仍按
+        ``_BREAKER_THRESHOLD`` 计数，吸收瞬时抖动。
+        """
         if ok:
             self._breaker_failures.pop(key, None)
             self._breaker_open_until.pop(key, None)
             return
         n = self._breaker_failures.get(key, 0) + 1
         self._breaker_failures[key] = n
-        if n >= self._BREAKER_THRESHOLD:
+        if n >= 1 and (immediate or n >= self._BREAKER_THRESHOLD):
             self._breaker_open_until[key] = time.time() + self._BREAKER_COOLDOWN
             logger.warning(
                 "[MultiGateway] provider %s 连续失败 %d 次，熔断 %.0fs",
@@ -510,12 +522,12 @@ class MultiProviderGateway:
                     return result
                 last_error = result
                 _record_fallback(key, "fallback")
-                self._mark_provider_result(key, False)
+                self._mark_provider_result(key, False, immediate=not allow_fallback)
                 logger.warning("[MultiGateway] %s returned: %s", key, result)
             except Exception as e:  # noqa: BLE001
                 last_error = str(e)
                 _record_fallback(key, "error")
-                self._mark_provider_result(key, False)
+                self._mark_provider_result(key, False, immediate=not allow_fallback)
                 logger.warning("[MultiGateway] %s failed: %s", key, e)
 
         if not allow_fallback:

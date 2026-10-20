@@ -202,7 +202,10 @@ def test_orchestrator_extracts_topics_and_sanitizes_reply():
     from orchestrator import optimized_orchestrator as oo
 
     src = inspect.getsource(oo)
-    assert "extract_current_topics" in src
+    # 2026-10-20 二轮换真源：话题锚点改取**用户原话短句**（关键词袋生产实测
+    # 只给 `['的话','哈喽']`，没有话题也没有说话人）。旧函数保留供兼容，
+    # 但主链必须走锚点真源。
+    assert "_extract_user_anchor_sentences" in src
     assert "sanitize_reply_text" in src
 
 

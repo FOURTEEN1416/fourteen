@@ -307,12 +307,16 @@ class TestModelDegradedLedgerSync:
 
 
 class TestAgnesTimeoutConfig:
-    def test_agnes_request_timeout_is_15(self):
-        """⑦ agnes request_timeout == 15（超时误杀熔断的前置收紧）。"""
+    def test_agnes_request_timeout_is_25(self):
+        """⑦ agnes request_timeout == 25（2026-10-20 质量悬崖批）。
+
+        15s 低于生产形态 prompt 的实测健康响应上界（21.1s），会把健康请求
+        判死 → 一次熔断 300s → 全量降级弱模型。25s 只切真超时长尾。
+        """
         cfg = json.loads(
             project_path("config", "llm_providers.json").read_text(encoding="utf-8"),
         )
         providers = cfg.get("providers") or {}
-        assert providers.get("agnes", {}).get("request_timeout") == 15, (
-            "agnes request_timeout 应为 15s（2026-10-15 质量回调批前置改动）"
+        assert providers.get("agnes", {}).get("request_timeout") == 25, (
+            "agnes request_timeout 应为 25s（2026-10-20 质量悬崖批）"
         )

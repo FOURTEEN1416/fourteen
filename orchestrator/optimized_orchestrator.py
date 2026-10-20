@@ -998,6 +998,49 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         except Exception as e:  # noqa: BLE001
             logger.debug("历史称呼净化失败: %s", e)
 
+        # 2026-10-20 质量悬崖批·历史回灌净化：已落库的坏回复不能原样再喂回去。
+        # 出站守卫只保护**本次**发送；上一轮被判死的形态（逐字复述 / 元记忆解释 /
+        # 归属翻转 / 沉浸式括号动作）此刻已经作为 assistant 行存在 DB 里，下一轮
+        # 又被当「我自己说过的话」few-shot 给模型 —— 这就是用户看到的「改了还犯」
+        # 的自我强化回路。这里在注入前就地净化（只改内存副本，不动库），
+        # 沉浸式下括号动作一并剥离（与出站同一真源 strip_stage_directions）。
+        try:
+            from utils.prompt_sanitize import (
+                _strip_attribution_flip,
+                _strip_meta_memory_talk,
+            )
+            from utils.reply_mode import REPLY_MODE_IMMERSIVE, read_reply_mode, strip_stage_directions
+
+            _immersive_hist = read_reply_mode() == REPLY_MODE_IMMERSIVE
+            if isinstance(chat_history, list):
+                _scrubbed_hist: list[Any] = []
+                _dropped = 0
+                for _row in chat_history:
+                    if not isinstance(_row, dict):
+                        _scrubbed_hist.append(_row)
+                        continue
+                    _content = str(_row.get("content") or "")
+                    if not _content:
+                        _scrubbed_hist.append(_row)
+                        continue
+                    if _immersive_hist:
+                        _content = strip_stage_directions(_content)
+                    if str(_row.get("role") or "").lower() == "assistant":
+                        _content = _strip_meta_memory_talk(_content)
+                        _content = _strip_attribution_flip(_content)
+                    if not _content.strip():
+                        _dropped += 1
+                        continue
+                    _scrubbed_hist.append({**_row, "content": _content})
+                chat_history = _scrubbed_hist
+                if _dropped:
+                    logger.info(
+                        "历史回灌净化：丢弃 %d 条退化 assistant 行（出站守卫同源规则）",
+                        _dropped,
+                    )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("历史回灌净化失败: %s", e)
+
         # ── 时间感知（2026-10-11 批，参照 SillyTavern {{idleDuration}} 语义 +
         #    hermes-agent #62369 [time anchor] 单行锚点惯例；AGPL 项目仅语义对齐）──
         # 历史按真实间隔加时间前缀；锚点（当前时间+距上条消息时长）进
@@ -1049,22 +1092,24 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         except Exception as e:  # noqa: BLE001
             logger.debug("time anchor injection failed: %s", e)
 
-        # 当前话题续聊钩子（2026-09-23）：从近期对话提取话题，进 memory_context，
-        # 由 persona_service 渲染为「# 当前话题」+ 续聊指令（像人一样把话说下去）。
-        # 2026-10-19 时间窗：只取最近 24h 内的消息 —— 旧时段话题不得被「请沿着
-        # 聊下去」教唆（生产实证：10-16「吃饭」在 10-19 被注入当前话题钩子）。
+        # 当前话题续聊钩子（2026-09-23；2026-10-19 时间窗；2026-10-20 二轮换真源）
+        # 旧实现是**关键词袋**：从整段 blob 随机切 2~6 字 token，生产实测给出
+        # `['的话','哈喽']` —— 既不是话题，也没有说话人（assistant 行也参与取材），
+        # 模型拿到的只是噪声，于是每轮另起炉灶 → 用户反复报「没有话题意识」。
+        # 现改为**用户原话锚点**：只取 user 行的完整短句，带具体动作/状态，
+        # 过滤纯寒暄；这既是真话题来源，也天然带确定说话人。
         try:
             from utils.local_time import now_local as _now_local
-            from utils.prompt_sanitize import extract_current_topics
+            from utils.prompt_sanitize import _extract_user_anchor_sentences
 
             _wn = _now_local()
-            current_topics = extract_current_topics(
+            current_topics = _extract_user_anchor_sentences(
                 chat_history,
                 current_user_message=user_msg_clean,
                 now=_wn.replace(tzinfo=None) if getattr(_wn, "tzinfo", None) is not None else _wn,
             )
         except Exception as e:  # noqa: BLE001
-            logger.debug("extract_current_topics failed: %s", e)
+            logger.debug("_extract_user_anchor_sentences failed: %s", e)
             current_topics = []
 
         # 世界信息动态注入
@@ -1697,7 +1742,11 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     except Exception as e:  # noqa: BLE001
                         logger.debug("计数反诘检查异常: %s", e)
 
-                    # ── 主 LLM 对话（带 30s 超时保护，使用用户级或全局 gateway） ──
+                    # ── 主 LLM 对话（带 45s 超时保护，使用用户级或全局 gateway） ──
+                    # 2026-10-20 质量悬崖批：30→45s。网关内 agnes 单 provider 读超时
+                    # 25s + 降级到智谱约 15s = 40s，30s 外层会在**降级链还没走完**
+                    # 时就切断，把用户打到 timeout 旁路句（等于白丢一轮对话）。
+                    # 45s 覆盖「agnes 拖到自身超时 + 智谱接住」的最坏健康路径。
                     try:
                         reply = await asyncio.wait_for(
                             request_llm.chat(
@@ -1708,10 +1757,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                                 max_tokens=2048,
                                 attachments=attachments,
                             ),
-                            timeout=30.0,
+                            timeout=45.0,
                         )
                     except asyncio.TimeoutError:
-                        logger.warning("LLM 调用超时 (30s), session=%s", session_id)
+                        logger.warning("LLM 调用超时 (45s), session=%s", session_id)
                         from utils.fallback_lines import get_fallback_line
                         from utils.reply_mode import read_reply_mode
                         _fb = get_fallback_line(

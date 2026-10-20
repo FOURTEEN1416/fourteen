@@ -199,6 +199,15 @@ ROLE_CLARITY_RULE = (
     "不得自己提问再自己回答。只输出**你自己**要说的那一段话。\n"
     "- **禁止角色翻转**：不要把自己刚说的事当成对方说的去回应"
     "（例：自己说「我眯了一会儿」之后，不得接「那你再眯一会儿」）。\n"
+    # 2026-10-20 二轮（生产原句 2875）：「你是说刚刚我说的『点完名就吃』吗？」——
+    # 那句其实是**用户**说的。上一行只禁了「把自己说的当对方说的」，反向
+    # （把对方说的当自己说的）没禁，模型于是把用户台词记到自己名下 = 编造
+    # 共同经历。两个方向都要写死，否则模型只防一边。
+    "- **禁止反向归属**：不要把**对方**说过的话说成「我刚说的/我说过的」；"
+    "引用对方的原话时必须写明是对方说的（「你刚说…」）。\n"
+    "- **禁止逐字复述对方上一句当回应**：回应要带新信息（看法/经历/具体接话）。\n"
+    "- **禁止解释自己的记忆机制**（「我想确认一下你是不是真的记得」"
+    "「有时候我会忘记自己说过的话」）：你只是在聊天，不是在测试对方。\n"
 )
 
 # ── 当前话题续聊（2026-09-23：像人一样把一个话题聊下去）──
@@ -244,6 +253,106 @@ def _is_topic_noise(word: str) -> bool:
     if w[-1] in _TOPIC_NOISE_SUFFIX:
         return True
     return bool(_TOPIC_NOISE_PREFIX_RE.match(w))
+
+
+# 话题锚点取材（2026-10-20 八问题批二轮）：只从**用户自己**最近说过的话里取
+# 完整短句，而不是全句随机切词。生产实测旧关键词袋给出 `['的话','哈喽']`
+# —— 既不是话题，也没有说话人；模型拿到的只是噪声，于是每轮另起炉灶。
+_TOPIC_SENTENCE_SPLIT_RE = re.compile(r"[。！？!?…\n，,；;]+")
+# 纯寒暄/应答整句：不构成话题，进锚点只会教唆空转（「哈喽」「嗯」「好的」）。
+# 2026-10-20 二轮补充「暂时没有／不知道／随便」这类**空应答**：它们带否定词，
+# 但不是可接住的具体内容；单纯靠 `_TOPIC_ANCHOR_HINTS` 的「没」会被误放行。
+_GREETING_ONLY_RE = re.compile(
+    r"^(?:哈喽|哈啰|你好|您好|在吗|在不在|早安|早上好|晚安|晚上好|"
+    r"嗯+|哦+|噢+|啊+|好+|行+|对+|是+|收到|知道了|谢谢|没事|随便|"
+    r"哈哈+|呵呵+|嘿+|诶+|欸+)[呀啊吧呢哦嘛哈啦了的\s]*$"
+)
+_EMPTY_ANSWER_RE = re.compile(
+    r"^(?:暂时|现在|还)?(?:没有|没|不知道|不清楚|不确定|不记得|忘了|忘了了|"
+    r"好像没有|好像没|没想好|随你|都行|都行吧|看情况|不一定)"
+    r"[呀啊吧呢哦嘛哈啦了的\s]*$"
+)
+# 自我介绍/状态短句里的**指称对象**：这些词出现在用户原话里时，说明该句在说
+# 一件具体的事（谁/在哪/在做什么），值得作为锚点。
+_TOPIC_ANCHOR_HINTS = (
+    "在", "没", "有", "去", "来", "吃", "喝", "睡", "课", "班", "考", "试",
+    "买", "做", "想", "要", "喜欢", "讨厌", "累", "病", "疼", "冷", "热",
+    "忙", "闲", "回", "到", "等", "见", "说", "问", "答应", "提醒",
+)
+
+
+def _extract_user_anchor_sentences(
+    messages: Any,
+    *,
+    current_user_message: str = "",
+    max_age_hours: float = 24.0,
+    now: Any | None = None,
+    limit: int = 3,
+) -> list[str]:
+    """取出用户最近说过的、**带具体信息**的原话短句（话题锚点真源）。
+
+    与 `extract_current_topics` 的区别（这是本函数存在的理由）：
+    - 只取 **user 行**，绝不取 assistant 行 —— 说话人是确定的（生产实证：
+      旧关键词袋把角色自己的台词也当话题，模型因此分不清哪句是谁说的）；
+    - 返回**完整短句**而不是切词 —— 「你先接住对方最近在说什么」需要的是
+      原话，不是「的话」「哈喽」这种碎片；
+    - 过滤纯寒暄/应答整句（`_GREETING_ONLY_RE`），但保留含具体动作/状态/
+      未完成事项的句子（`_TOPIC_ANCHOR_HINTS` 或长度足够）。
+
+    Args:
+        messages: 历史行（dict 需含 role/content，可选 timestamp）。
+        current_user_message: 本轮用户原话（总是参与，不受时间窗限制）。
+        max_age_hours: 只取该窗口内的话（旧话题不教唆，沿用 v1.53 语义）。
+        now: 当前墙钟（naive 北京时间）；None 时不做时间窗过滤。
+        limit: 最多返回几条（越新越靠后，调用方通常取尾部）。
+
+    Returns:
+        按时间正序的短句列表（不含重复）。
+    """
+    candidates: list[str] = []
+    wall_now = None
+    if now is not None:
+        wall_now = now.replace(tzinfo=None) if getattr(now, "tzinfo", None) is not None else now
+    for item in messages or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("role") or "").lower() != "user":
+            continue
+        ts = item.get("timestamp")
+        if ts and wall_now is not None:
+            try:
+                from utils.local_time import beijing_wall
+
+                w = beijing_wall(ts)
+                if w is None:
+                    continue
+                if (wall_now - w).total_seconds() > float(max_age_hours) * 3600.0:
+                    continue
+            except Exception:  # noqa: BLE001
+                pass  # 解析失败按无时间窗行处理（fail-open，兼容旧数据）
+        candidates.append(str(item.get("content") or ""))
+    if current_user_message:
+        candidates.append(str(current_user_message))
+
+    anchors: list[str] = []
+    seen: set[str] = set()
+    for blob in candidates:
+        for raw in _TOPIC_SENTENCE_SPLIT_RE.split(str(blob or "")):
+            sentence = raw.strip(" \t，,。.！!？?、；;：:~～…·\"'“”‘’")
+            if len(sentence) < 2 or len(sentence) > 40:
+                continue
+            if _GREETING_ONLY_RE.match(sentence):
+                continue
+            if _EMPTY_ANSWER_RE.match(sentence):
+                continue
+            if sentence in seen:
+                continue
+            # 只保留「在说一件具体的事」的句子：含动作/状态词，或本身足够长。
+            if len(sentence) < 4 and not any(h in sentence for h in _TOPIC_ANCHOR_HINTS):
+                continue
+            seen.add(sentence)
+            anchors.append(sentence)
+    return anchors[-limit:] if limit > 0 else anchors
 
 
 def extract_current_topics(
@@ -637,10 +746,28 @@ _SURVEY_QUESTION_RE = re.compile(
 )
 # 反向虚构提问：「你呢，…？」。仅当用户本轮未提问时判无由头 —— 用户先问了
 # 「你吃什么」，回复「你呢」才是对等回应。
+# 2026-10-20 二轮：生产原句 2871「刚吃完饭／你呢／没课的时候别又错过吃饭时间了」
+# 是**裸「你呢」独占一行、不带问号**，旧式必带 `？` 的匹配漏网（实测该形态漏 1/1）。
+# 只加「整行仅你呢」这一精确形态：后接逗号的「你呢，别太累了」是陈述句而非提问，
+# 匹配进去会误删（首版即被既有用例 test_non_question_ni_ne_kept 抓住）。
 _RECIPROCAL_QUESTION_RE = re.compile(
     r"(?:那|可是|不过)?你呢\s*[，,]?[^。！？!?\n]{0,40}[？?]"
+    r"|^[ \t]*(?:那|可是|不过)?你呢[ \t]*$",
+    re.MULTILINE,
 )
 _USER_QUESTION_RE = re.compile(r"[？?]|(?:吗|呢|么|什么|怎么|为什么|为啥|哪|谁|多少|几时|几点)\s*[。！!]?\s*$")
+
+# 归属翻转（2026-10-20 生产实证 2875）：「哦，你是说刚刚**我说的**『点完名就吃，
+# 别饿着自己』吗？」—— 被复述的那句其实是**用户**上一轮说的。模型把用户的台词
+# 记到自己名下，等同于编造共同经历；比单纯复述更糟，因为它同时篡改了归属。
+# 只匹配「（你）是说 + 我刚才说的/我说过的 + 引号引文」形态，不碰正常的
+# 「你是说…吗？」确认问句（那是对用户刚说的内容做澄清，无需归属断言）。
+_ATTRIBUTION_FLIP_RE = re.compile(
+    r"你(?:是|的意思)?说(?:刚刚|刚才|之前|先前)?"
+    r"我(?:说|讲过|说过|提到)的"
+    r"|(?:刚刚|刚才|之前|先前)我(?:说|讲过|说过)的"
+    r"[「“\"'][^」”\"']{0,60}[」”\"']"
+)
 
 
 def _normalize_for_echo(text: str) -> str:
@@ -689,6 +816,31 @@ def _strip_meta_memory_talk(text: str) -> str:
     return "".join(kept).strip().lstrip("，,。.；;、 ")
 
 
+def _strip_attribution_flip(text: str) -> str:
+    """删除把用户台词记到角色名下的句子（生产原句 2875，2026-10-20 二轮）。
+
+    2875:「哦，你是说刚刚我说的"点完名就吃，别饿着自己"吗？」—— 那句其实
+    是**用户**上一轮说的。首轮守卫只拦了复述与元解释，这一句残留并被发送，
+    等于是「我复述你的话 + 说成是我说的」双重错误。归到角色名下等于编造
+    共同经历，比单纯复述更严重，按句删除。
+    """
+    s = str(text or "")
+    if not s or not _ATTRIBUTION_FLIP_RE.search(s):
+        return s
+    kept: list[str] = []
+    removed = False
+    for sentence in _SENTENCE_SPLIT_RE.split(s):
+        if not sentence.strip():
+            continue
+        if _ATTRIBUTION_FLIP_RE.search(sentence):
+            removed = True
+            continue
+        kept.append(sentence)
+    if not removed:
+        return s
+    return "".join(kept).strip().lstrip("，,。.；;、 ")
+
+
 def _strip_ungrounded_reciprocal(text: str, user_msg: Any) -> str:
     """用户本轮未提问时，截掉回复里「你呢，…？」这类反向虚构提问及其后文。
 
@@ -702,6 +854,15 @@ def _strip_ungrounded_reciprocal(text: str, user_msg: Any) -> str:
     m = _RECIPROCAL_QUESTION_RE.search(s)
     if not m:
         return s
+    # 裸「你呢」占整行时只删该行（后面可能还有正常内容）；带问号的形态连其后文
+    # 一起截断 —— 那之后的句子属于同一个甩锅式反问。
+    if s[m.start():m.end()].strip() in {"你呢", "那呢", "可是你呢", "不过你呢"}:
+        kept = [
+            line
+            for line in s.splitlines()
+            if _RECIPROCAL_QUESTION_RE.fullmatch(line.strip() or "x") is None
+        ]
+        return "\n".join(kept).strip()
     head = s[: m.start()].rstrip(" \t，,；;、")
     return head.strip()
 
@@ -793,6 +954,11 @@ def terminal_reply_guard(
     _before = s
     s = _strip_meta_memory_talk(s)
     _guard_log("meta_memory_talk", _before, s)
+    if not s:
+        return ""
+    _before = s
+    s = _strip_attribution_flip(s)
+    _guard_log("attribution_flip", _before, s)
     if not s:
         return ""
     _before = s

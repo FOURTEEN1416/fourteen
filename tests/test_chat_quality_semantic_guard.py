@@ -75,6 +75,140 @@ class TestUngroundedReciprocal:
         raw = "我这边下雨了，你呢，带伞没？"
         assert terminal_reply_guard(raw, user_msg="") == raw
 
+    def test_bare_ni_ne_own_line_removed(self):
+        """2026-10-20 二轮生产原句 2871：裸「你呢」独占一行、不带问号。
+
+        旧式必带 `？` 的匹配对这条完全漏网（实测 1/1 漏），残留后被发送。
+        """
+        raw = "刚吃完饭\n你呢\n没课的时候别又错过吃饭时间了"
+        out = terminal_reply_guard(raw, user_msg="今天下午没课，我在宿舍待着")
+        assert "你呢" not in out
+        assert "刚吃完饭" in out
+        assert "别又错过吃饭时间" in out
+
+
+class TestAttributionFlip:
+    """2026-10-20 二轮：把**用户**的台词说成「我刚说的」（生产原句 2875）。
+
+    比单纯复述更严重 —— 它同时篡改了归属，等于编造共同经历。
+    """
+
+    def test_production_attribution_flip_removed(self):
+        raw = "哦，你是说刚刚我说的“点完名就吃，别饿着自己”吗？"
+        out = terminal_reply_guard(raw, user_msg="怎么要复述我说的话？")
+        assert out == ""
+
+    def test_flip_sentence_dropped_others_kept(self):
+        raw = "嗯，我记着呢。\n你是说刚才我说的“记得吃饭”吗？\n那你去吧。"
+        out = terminal_reply_guard(raw, user_msg="我等下要去吃饭")
+        assert "我说的" not in out
+        assert "我记着呢" in out
+
+    def test_normal_clarification_kept(self):
+        """正常澄清问句（不主张归属）不得误伤。"""
+        raw = "你是说等点名结束了再去吃吗？"
+        assert terminal_reply_guard(raw, user_msg="等下点完名再去吃") == raw
+
+    def test_own_statement_not_flagged(self):
+        raw = "我刚说的就是真的，别不信。"
+        assert terminal_reply_guard(raw, user_msg="真的假的") == raw
+
+
+class TestKnowledgeModeBoundary:
+    """沉浸式泄漏第二通道：知识库检索结果里的卡文括号动作。
+
+    生产实证（prompt_slots 2026-10-20 17:51）：knowledge_snippets[0] 是
+    mes_example 原文「……（想了想）周五我来给你做饭」，首轮只剥了对话示例段，
+    漏了知识库这条并行通道 —— 括号动作因此照样 few-shot 进沉浸式。
+    """
+
+    @staticmethod
+    def _aggregate():
+        from shisi.core.models.character_aggregate import CharacterAggregate
+
+        return CharacterAggregate(
+            id="kg01",
+            name="测试角色",
+            description="她是测试角色。",
+            mes_example="用户：加班到这么晚\n测试角色：又是这个时候",
+        )
+
+    def test_knowledge_bracket_stripped_in_immersive(self):
+        from utils.reply_mode import REPLY_MODE_IMMERSIVE, write_reply_mode
+
+        write_reply_mode(REPLY_MODE_IMMERSIVE)
+        agg = self._aggregate()
+        prompt = agg.build_system_prompt(
+            knowledge_context="用户：今天加班\n测试角色：（想了想）周五我来给你做饭"
+        )
+        assert "（想了想）" not in prompt
+        assert "周五我来给你做饭" in prompt
+
+    def test_knowledge_bracket_kept_in_novel(self):
+        from utils.reply_mode import REPLY_MODE_IMMERSIVE, REPLY_MODE_NOVEL, write_reply_mode
+
+        write_reply_mode(REPLY_MODE_NOVEL)
+        try:
+            agg = self._aggregate()
+            prompt = agg.build_system_prompt(
+                knowledge_context="用户：今天加班\n测试角色：（想了想）周五我来给你做饭"
+            )
+            assert "（想了想）" in prompt
+        finally:
+            write_reply_mode(REPLY_MODE_IMMERSIVE)
+
+
+class TestUserAnchorTopics:
+    """话题意识真源：用户原话锚点（2026-10-20 二轮）。
+
+    旧关键词袋生产实测给出 `['的话','哈喽']` —— 不是话题、没有说话人，
+    模型只能每轮另起炉灶（用户反复报「没有话题意识」）。
+    """
+
+    def test_returns_user_sentences_not_tokens(self):
+        from utils.prompt_sanitize import _extract_user_anchor_sentences
+
+        hist = [
+            {"role": "user", "content": "哈喽"},
+            {"role": "assistant", "content": "今天想聊点什么"},
+            {"role": "user", "content": "今天下午没课，我在宿舍待着"},
+        ]
+        anchors = _extract_user_anchor_sentences(hist)
+        joined = "\n".join(anchors)
+        assert "我在宿舍待着" in joined
+        # 助手台词绝不进锚点（说话人必须确定）
+        assert "想聊点什么" not in joined
+        # 碎片噪声不再出现
+        assert "的话" not in anchors
+        assert "哈喽" not in anchors
+
+    def test_empty_answer_not_anchor(self):
+        from utils.prompt_sanitize import _extract_user_anchor_sentences
+
+        anchors = _extract_user_anchor_sentences(
+            [{"role": "user", "content": "暂时没有"}],
+        )
+        assert anchors == []
+
+    def test_current_user_message_always_included(self):
+        from utils.prompt_sanitize import _extract_user_anchor_sentences
+
+        anchors = _extract_user_anchor_sentences([], current_user_message="等下点完名再去吃吧")
+        assert anchors == ["等下点完名再去吃吧"]
+
+    def test_old_topics_excluded_by_time_window(self):
+        from datetime import datetime
+
+        from utils.prompt_sanitize import _extract_user_anchor_sentences
+
+        old = (datetime(2026, 10, 16, 9, 0)).isoformat()
+        now = datetime(2026, 10, 20, 17, 0)
+        anchors = _extract_user_anchor_sentences(
+            [{"role": "user", "content": "我想吃火锅", "timestamp": old}],
+            now=now,
+        )
+        assert anchors == []
+
 
 class TestImmersiveStageDirection:
     def test_immersive_strips_stage_direction(self):
