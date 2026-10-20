@@ -135,14 +135,17 @@ class PersonaService:
         if anchor:
             mem_parts.append(anchor)
 
-        # 当前话题续聊钩子（2026-09-23）：像真人一样把一个话题聊下去
+        # 当前话题续聊钩子（2026-09-23；2026-10-20 八问题批改口径）：
+        # 关键词只用来指认「对方最近在说什么」，不再写成「请沿着聊下去」——
+        # 旧文案不区分说话人（复述/归属翻转的来源之一），且把任意词都当续聊任务。
         current_topics = mem_ctx.get("current_topics") or []
         if isinstance(current_topics, str):
             current_topics = [t for t in current_topics.split("、") if t.strip()]
         if current_topics:
             mem_parts.append(
-                "\n## 当前话题（请沿着聊下去）\n"
+                "\n## 对方最近在说（先接住这些具体内容，别另起炉灶）\n"
                 + "、".join(str(t) for t in current_topics[:3])
+                + "\n只有对方话里有可指认的未完成点时才追问；不要为了续话题新造问题。"
             )
 
         # 用户画像槽（A3 + AX P1）：读 EventLedger 投影；禁止编造画像外信息

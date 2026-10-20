@@ -335,6 +335,7 @@ class OpenAICompatibleProvider:
             return self._stream_chat(payload, model_name)
 
         start = time.perf_counter()
+        resp = None
         try:
             # timeout 仅 truthy 时覆盖（None 在 httpx per-request 语义=禁用超时）。
             post_kwargs: dict[str, Any] = {}
@@ -343,7 +344,19 @@ class OpenAICompatibleProvider:
             resp = await self._async_client.post(self._chat_url, json=payload, **post_kwargs)
             resp.raise_for_status()
             data = resp.json()
-            content = data["choices"][0]["message"]["content"]
+            message = ((data.get("choices") or [{}])[0] or {}).get("message") or {}
+            content = message.get("content")
+            # 2026-10-20 空内容响应根治：HTTP 200 但 content=None/空（推理模型
+            # 只回 reasoning_content、上游截断、限流软失败）旧实现先 mark_success
+            # 再 content.strip() → AttributeError 被 except 吞掉走 fallback，健康
+            # 统计被污染且日志无痕。现在在 mark_success **之前**判空并抛错。
+            if not isinstance(content, str) or not content.strip():
+                raise RuntimeError(
+                    f"[{self.provider_name}/{model_name}] 空内容响应: "
+                    f"choices={len(data.get('choices') or [])} "
+                    f"reasoning_only={bool(message.get('reasoning_content'))} "
+                    f"message_keys={sorted(message)}"
+                )
             usage = data.get("usage", {})
 
             if HAS_METRICS:
@@ -362,6 +375,16 @@ class OpenAICompatibleProvider:
             entry = self.registry.get_by_name(model_name)
             if entry:
                 entry.mark_failed()
+            body_prefix = ""
+            try:
+                if resp is not None:
+                    body_prefix = str(resp.text)[:300]
+            except Exception:  # noqa: BLE001
+                pass
+            logger.warning(
+                "[%s/%s] 请求失败: %s: %s | body=%s",
+                self.provider_name, model_name, type(e).__name__, e, body_prefix,
+            )
             fallback = await self._try_fallback(built, temp, mt, tools)
             if fallback:
                 return fallback
@@ -450,12 +473,22 @@ class OpenAICompatibleProvider:
                 resp = await self._async_client.post(self._chat_url, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
-                content = data["choices"][0]["message"]["content"]
+                message = ((data.get("choices") or [{}])[0] or {}).get("message") or {}
+                content = message.get("content")
+                if not isinstance(content, str) or not content.strip():
+                    raise RuntimeError(
+                        f"空内容响应: choices={len(data.get('choices') or [])} "
+                        f"message_keys={sorted(message)}"
+                    )
                 entry.mark_success()
                 logger.info("[%s] Fallback: %s → %s succeeded", self.provider_name, self.model, entry.name)
                 return content.strip()
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
                 entry.mark_failed()
+                logger.warning(
+                    "[%s] Fallback %s → %s failed: %s: %s",
+                    self.provider_name, self.model, entry.name, type(e).__name__, e,
+                )
         return None
 
     async def _refresh_oauth_if_needed(self) -> None:

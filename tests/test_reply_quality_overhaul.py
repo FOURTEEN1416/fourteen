@@ -150,7 +150,10 @@ class TestImmersiveInstructionRelaxed:
         from utils.reply_mode import _INSTRUCTION_IMMERSIVE
         assert "10~80 字" in _INSTRUCTION_IMMERSIVE
         assert "长短跟随话题" in _INSTRUCTION_IMMERSIVE
-        assert "把话题往前推" in _INSTRUCTION_IMMERSIVE
+        # 2026-10-20 八问题批：「需要时反问一句把话题往前推」是虚构反问的
+        # 指令级根因，已删除并改为「没有可指认的由头就不提问」。
+        assert "没有可指认的由头就不提问" in _INSTRUCTION_IMMERSIVE
+        assert "把话题往前推" not in _INSTRUCTION_IMMERSIVE
 
     def test_old_hard_limits_removed(self):
         from utils.reply_mode import _INSTRUCTION_IMMERSIVE

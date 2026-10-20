@@ -179,6 +179,23 @@ def test_persona_service_renders_current_topics():
     assert "TOPIC_CONTINUITY_RULE" in src
 
 
+def test_persona_prompt_topic_block_attributes_speaker():
+    """话题块必须指认说话人（「对方最近在说」），不再写成「请沿着聊下去」的任务。"""
+    from shisi.application.persona_service import PersonaService
+
+    ps = PersonaService(config_loader=None, llm_gateway=None)
+    prompt = ps.build_system_prompt(
+        emotion_state=None,
+        memory_context={"current_topics": ["军训", "考试"]},
+        character_id=None,
+        user_message="在吗",
+    )
+    assert "## 对方最近在说" in prompt
+    assert "军训" in prompt
+    assert "请沿着聊下去" not in prompt
+    assert "不要为了续话题新造问题" in prompt
+
+
 def test_orchestrator_extracts_topics_and_sanitizes_reply():
     import inspect
 

@@ -141,6 +141,17 @@ class CharacterAggregate(BaseModel):
         # 「历史之后的指令权重远高于历史之前」是 SillyTavern 文档与
         # chara-card-spec-v2（post_history_instructions 条目）共同明确的结论；
         # creator_notes 承载硬性扮演规则，因此放到历史之后以获得最高约束力。
+        #
+        # 模式边界（2026-10-20）：mes_example/first_mes 里的括号动作是小说式的
+        # 合法写法，但沉浸式明令禁止。之前无条件注入等于用 few-shot 教模型违反
+        # 同一份 system prompt 的禁令；沉浸式下必须先剥离动作段再注入。
+        from utils.reply_mode import (
+            REPLY_MODE_IMMERSIVE,
+            read_reply_mode,
+            strip_stage_directions,
+        )
+
+        _immersive = read_reply_mode() == REPLY_MODE_IMMERSIVE
         parts = [
             f"# 角色设定\n\n你是{self.name}。",
             self.description,
@@ -179,11 +190,15 @@ class CharacterAggregate(BaseModel):
             ])
 
         if self.first_mes:
-            parts.extend([
-                "",
-                "# 开场白（我们第一次说话时我说的，只作语气参考，不要每轮重复）",
-                str(self.first_mes)[:300],
-            ])
+            _first_mes = str(self.first_mes)[:300]
+            if _immersive:
+                _first_mes = strip_stage_directions(_first_mes)
+            if _first_mes:
+                parts.extend([
+                    "",
+                    "# 开场白（我们第一次说话时我说的，只作语气参考，不要每轮重复）",
+                    _first_mes,
+                ])
 
         if knowledge_context:
             parts.extend(["", "# 角色知识库", knowledge_context])
@@ -192,12 +207,14 @@ class CharacterAggregate(BaseModel):
             parts.extend(["", "# 剧情线", storyline_context])
 
         # 对话示例（SillyTavern dialogueExamples 位：历史之前做 few-shot，
-        # 示范语气与格式；来自卡的 mes_example 字段）
+        # 只示范说话口吻，格式一律以【回复模式】为准；来自卡的 mes_example 字段）
         dialogue_examples = self._format_dialogue_examples()
+        if dialogue_examples and _immersive:
+            dialogue_examples = strip_stage_directions(dialogue_examples)
         if dialogue_examples:
             parts.extend([
                 "",
-                "# 对话示例（仅示范语气与格式）",
+                "# 对话示例（仅示范说话口吻；格式以【回复模式】为准）",
                 "⚠️ 只示范说话口吻和长短。**禁止照抄示例内容**，"
                 "**禁止模仿示例的「用户：/角色名：」对话结构**，"
                 "禁止把示例当成真实聊过的话。你只输出你自己要说的那句。",
@@ -213,8 +230,17 @@ class CharacterAggregate(BaseModel):
 
         # 扮演规则（creator_notes）放在**对话历史之后**——行业惯例的
         # post-history instructions 位置，对生成的约束力最强。
+        # 12/42 张卡的 creator_notes 自带括号动作/神态/心跳等输出格式要求，
+        # 沉浸式下与【回复模式】直接冲突；不整段丢弃（会连带丢人设规则），
+        # 而是在同一位置声明格式优先级，人设/关系规则照常生效。
         if self.creator_notes:
             parts.extend(["", "# 扮演规则（必须严格遵守）", self.creator_notes])
+            if _immersive:
+                parts.append(
+                    "⚠️ 以上规则中与【回复模式】冲突的**输出格式要求**（括号动作、"
+                    "神态/心理/环境/旁白描写、星号叙述、心跳等字段标签）一律不执行；"
+                    "人设、性格与关系规则照常遵守，输出格式严格以【回复模式】为准。"
+                )
 
         if user_message:
             parts.extend(["", f"用户: {user_message}", f"{self.name}:"])

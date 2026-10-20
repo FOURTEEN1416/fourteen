@@ -250,7 +250,7 @@ def test_import_edit_save_restart_roundtrip(tmp_path, monkeypatch) -> None:
     assert MARK_NESTED in before
     assert "# 对话示例" in before
     assert "用户：你好" in before
-    assert "仅示范语气与格式" in before
+    assert "仅示范说话口吻" in before
 
     # 编辑（PUT /characters/{id}/persona 语义：合并顶层扁平字段）后落盘
     path = tmp_path / "config" / "characters" / "w8n.json"

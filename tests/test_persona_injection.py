@@ -291,7 +291,7 @@ class TestSystemPromptStructure:
         )
         assert "# 对话示例" in prompt
         assert prompt.index("# 对话示例") < prompt.index("# 对话历史")
-        assert "仅示范语气与格式" in prompt
+        assert "仅示范说话口吻" in prompt
         assert "用户：你好" in prompt
 
     def test_scenario_guarded_when_present(self):

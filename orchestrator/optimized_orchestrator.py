@@ -1543,6 +1543,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         `session_id` 默认空串：缺省时仍按角色名派生词剥除（读不到画像昵称）。
         """
         from utils.prompt_sanitize import sanitize_reply_text, terminal_reply_guard
+        from utils.reply_mode import read_reply_mode
 
         if character_card is None:
             loader = getattr(self.components.get("persona"), "_load_character_card", None)
@@ -1554,6 +1555,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             user_msg=user_msg,
             character_name=char_name,
             last_turn_age_seconds=last_turn_age_seconds,
+            reply_mode=read_reply_mode(),
         )
         try:
             from utils.address_terms import resolve_address, strip_forbidden_vocatives

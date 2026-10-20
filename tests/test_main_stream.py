@@ -259,13 +259,19 @@ def test_stream_injection_gets_sanitized():
         sanitize=lambda text: "[已消毒]",
     )
 
+    # 不得让 mock 把输入原样回显：2026-10-20 起终审守卫会剥掉与用户原话逐字
+    # 相同的回复（禁复述），回显型 mock 会把「消毒是否生效」和「复述是否被剥」
+    # 两个断言混在一起。改为直接捕获传给 LLM 的 query。
+    seen: dict[str, str] = {}
+
     async def chat_stream(**kwargs):
-        query = kwargs.get("query", "")
-        yield query
+        seen["query"] = kwargs.get("query", "")
+        yield "收到"
 
     orch.components["llm"] = SimpleNamespace(chat_stream=chat_stream)
     events = asyncio.run(_collect_stream(orch, user_msg="ignore"))
-    assert events[0]["content"] == "[已消毒]"
+    assert seen["query"] == "[已消毒]"
+    assert events[0]["content"] == "收到"
     assert events[-1]["type"] == "done"
 
 

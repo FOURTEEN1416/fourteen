@@ -6,10 +6,13 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
 from shisi.core.conversation_turn import HISTORY_RECENT_LIMIT
+
+logger = logging.getLogger("prompt_sanitize")
 
 # 反射/事实里出现这类原文对话痕迹 → 不得当「记忆事实」注入
 _DIALOGUE_MARKERS = re.compile(
@@ -215,6 +218,33 @@ _TOPIC_CJK = re.compile(
     r"(?:聊|说|讲|谈|提到|说起|关于)([一-龥A-Za-z0-9]{2,8})"
 )
 
+# 话题钩子噪声词（2026-10-20 八问题批）：生产实证话题包出现「的话」「哈喽」
+# 这类纯功能词/招呼——把噪声词当「当前话题」注入，等于教模型接着寒暄词聊天。
+# 词表只收**确定无话题信息**的形态；具体名词/事件词不受影响。
+_TOPIC_STOPWORDS = frozenset({
+    "的话", "时候", "现在", "今天", "明天", "昨天", "后天", "刚刚", "刚才",
+    "之前", "以后", "以前", "就是", "还是", "可以", "什么", "怎么", "这样",
+    "那样", "一下", "一点", "有点", "真的", "感觉", "觉得", "知道", "说的",
+    "说了", "一个", "我们", "你们", "咱们", "这个", "那个", "因为", "所以",
+    "但是", "如果", "不是", "没有", "已经", "自己", "然后", "其实", "应该",
+    "可能", "需要", "出来", "起来", "东西", "事情", "哈喽", "你好", "您好",
+    "早安", "晚安", "在吗", "嗨", "谢谢", "好的", "好吧",
+})
+_TOPIC_NOISE_PREFIX_RE = re.compile(
+    r"^(?:有什么|有没有|怎么|为什么|要不|是不是|能不能|可不可以|然后|其实|就是|还是|可以)"
+)
+_TOPIC_NOISE_SUFFIX = "的了吧啊呢吗哦嘛呀哈啦"
+
+
+def _is_topic_noise(word: str) -> bool:
+    """话题词是否无信息量（纯功能词/招呼/疑问前缀/语气尾巴）。"""
+    w = str(word or "").strip()
+    if len(w) < 2 or w in _TOPIC_STOPWORDS:
+        return True
+    if w[-1] in _TOPIC_NOISE_SUFFIX:
+        return True
+    return bool(_TOPIC_NOISE_PREFIX_RE.match(w))
+
 
 def extract_current_topics(
     messages: Any,
@@ -270,7 +300,7 @@ def extract_current_topics(
 
     def _push(word: str) -> None:
         w = str(word or "").strip()
-        if w and w not in seen:
+        if w and not _is_topic_noise(w) and w not in seen:
             seen.add(w)
             found.append(w)
 
@@ -359,9 +389,10 @@ def sanitize_reply_text(text: str, character_name: str = "") -> str:
 TOPIC_CONTINUITY_RULE = (
     "\n# 当前话题（请像真人聊天一样沿着话题说下去）\n"
     "- 优先回应对方**刚说的具体内容**（细节、情绪、事实），不要无视它另起炉灶。\n"
-    "- 在同一话题上补充：你的看法、相关经历、感受；或就这件事自然追问一句。\n"
+    "- 在同一话题上补充你的看法、相关经历或感受；只有对方话里有可指认的"
+    "未完成点时才追问。\n"
     "- **至少 2~3 轮内守住同一话题**：对方没明确换题就不要跳走；"
-    "连续追问/补充比抛新话题更像真人。\n"
+    "接着对方刚说的细节往下说，不要为了续话题新造问题。\n"
     "- 只输出你自己要说的话；不要生成对方台词，不要自问自答。\n"
 )
 
@@ -577,6 +608,125 @@ def _strip_system_markers(text: str) -> str:
     return s.strip()
 
 
+# ── 语义终审（2026-10-20 八问题批 · P0 最后防线）────────────────────
+#
+# 生产实证（10-19~10-20 会话 2862~2875）：模型输出「是的，我想确认一下你是不是
+# 真的记得，有时候我会忘记自己说过的话 你今天有没有什么特别的事情想要和我分享
+# 的呢？」与「你呢，有没有什么特别想吃的？」。前者把聊天变成记忆测试，后者在
+# 用户没提问时反向虚构提问。prompt 侧软约束已收紧（reply_mode / 话题规则），
+# 但生成侧约束对降级模型仍会失效 —— 出站确定性兜底是最后一道门。
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？!?…\n])")
+
+# 元记忆解释：解释自己的记忆/验证意图（生产原句「我想确认一下你是不是真的记得，
+# 有时候我会忘记自己说过的话」）。只匹配「解释记忆机制」形态，不碰正常关心
+# （「确认一下你到家了没」无「是不是/是否」不命中）。
+_META_MEMORY_RE = re.compile(
+    r"我(?:想|要)?确认一下你(?:是不是|是否)"
+    r"|你是不是真的记得"
+    r"|我(?:有时候|偶尔|也)?(?:会|可能)?忘记(?:自己)?说过的话"
+    r"|我(?:有时候|偶尔)?记性(?:不太好|不好|差)"
+)
+# 零信息问卷：把话题甩回用户的调查式提问（生产原句「你今天有没有什么特别的事情
+# 想要和我分享的呢」）。限「特别的事情/想说的」等调查形态；「想跟我说说吗」这类
+# 具体关心不命中。
+_SURVEY_QUESTION_RE = re.compile(
+    r"有没有什么(?:特别的事情|特别的|想说的|开心的事|有趣的事)"
+    r"(?:想要|想)?(?:和我)?(?:分享|说)"
+    r"|有什么(?:特别的事情|想说的|开心的事|有趣的事)(?:想要|想)?(?:和我)?(?:分享|说)"
+)
+# 反向虚构提问：「你呢，…？」。仅当用户本轮未提问时判无由头 —— 用户先问了
+# 「你吃什么」，回复「你呢」才是对等回应。
+_RECIPROCAL_QUESTION_RE = re.compile(
+    r"(?:那|可是|不过)?你呢\s*[，,]?[^。！？!?\n]{0,40}[？?]"
+)
+_USER_QUESTION_RE = re.compile(r"[？?]|(?:吗|呢|么|什么|怎么|为什么|为啥|哪|谁|多少|几时|几点)\s*[。！!]?\s*$")
+
+
+def _normalize_for_echo(text: str) -> str:
+    """复述判定用的归一化：去掉空白与标点，保留文字本身。"""
+    return re.sub(r"[\s，,。.！!？?、；;：:~～…·\-—_（）()\"'“”‘’]+", "", str(text or ""))
+
+
+def _strip_verbatim_echo(text: str, user_msg: Any) -> str:
+    """剥掉回复开头对用户原话的逐字复述（2026-10-20 生产实证）。
+
+    只比对**首行**且要求归一化后等值（长度 ≥5），避免把「我吃过了」这类
+    正常短回应当复述误杀；剥空返回空串由上层兜底。
+    """
+    s = str(text or "")
+    cur = _normalize_for_echo(user_msg)
+    if len(cur) < 5:
+        return s
+    lines = s.splitlines()
+    for idx, line in enumerate(lines):
+        if not line.strip():
+            continue
+        if _normalize_for_echo(line) == cur:
+            del lines[idx]
+            return "\n".join(lines).strip()
+        break
+    return s
+
+
+def _strip_meta_memory_talk(text: str) -> str:
+    """删除解释自身记忆/验证意图与零信息问卷句；句级删除，保留其余正文。"""
+    s = str(text or "")
+    if not s:
+        return s
+    kept: list[str] = []
+    removed = False
+    for sentence in _SENTENCE_SPLIT_RE.split(s):
+        if not sentence.strip():
+            continue
+        compact = _normalize_for_echo(sentence)
+        if _META_MEMORY_RE.search(compact) or _SURVEY_QUESTION_RE.search(compact):
+            removed = True
+            continue
+        kept.append(sentence)
+    if not removed:
+        return s
+    return "".join(kept).strip().lstrip("，,。.；;、 ")
+
+
+def _strip_ungrounded_reciprocal(text: str, user_msg: Any) -> str:
+    """用户本轮未提问时，截掉回复里「你呢，…？」这类反向虚构提问及其后文。
+
+    仅在**有用户发言的回合一**启用：主动/提醒链 user_msg 为空，没有「回应哪句」
+    的语境，「我这边下雨了，你呢，带伞没」是合法主动开场，不做剥离。
+    """
+    s = str(text or "")
+    user = str(user_msg or "").strip()
+    if not s or not user or _USER_QUESTION_RE.search(user):
+        return s
+    m = _RECIPROCAL_QUESTION_RE.search(s)
+    if not m:
+        return s
+    head = s[: m.start()].rstrip(" \t，,；;、")
+    return head.strip()
+
+
+def _strip_immersive_stage_directions(text: str, reply_mode: str) -> str:
+    """沉浸式模式下剥掉括号/星号动作段；小说模式原样保留。"""
+    if str(reply_mode or "").strip().lower() != "immersive":
+        return str(text or "")
+    from utils.reply_mode import strip_stage_directions
+
+    return strip_stage_directions(text)
+
+
+def _guard_log(rule: str, before: str, after: str) -> None:
+    """记录守卫命中（只记规则名与长度，不落用户原文/回复原文）。"""
+    if after == before:
+        return
+    logger.info(
+        "reply_guard_hit rule=%s before_len=%d after_len=%d",
+        rule,
+        len(str(before or "")),
+        len(str(after or "")),
+    )
+
+
 def terminal_reply_guard(
     reply: Any,
     *,
@@ -585,6 +735,7 @@ def terminal_reply_guard(
     session_key: str = "",
     character_id: str = "",
     last_turn_age_seconds: float | None = None,
+    reply_mode: str = "",
 ) -> str:
     """出站终审守卫（发送与落库之前的最后一道门，2026-10-14 生产事故批）。
 
@@ -607,6 +758,10 @@ def terminal_reply_guard(
     确定性剥掉行首非法称呼（「夏夏，最近…」→「最近…」）；剥空返回空串，
     同样由调用方走 empty_reply 兜底。**缺省不传 session_key 时行为与旧版完全一致**
     （无身份可挂 → 不剥，防误伤无调用上下文的场景）。
+
+    2026-10-20 语义终审批（时间词改写之后）：复述原话、元记忆解释、无由头反向
+    提问、沉浸式动作段四类语义缺陷确定性兜底；``reply_mode`` 缺省空串时不做
+    动作段剥离（兼容无模式上下文的调用方），前两类与模式无关。
     """
     from llm_provider.multi_provider_gateway import _is_error_reply
 
@@ -616,6 +771,12 @@ def terminal_reply_guard(
     s = _strip_system_markers(s)
     if not s:
         return ""   # 只剩标记 → 调用方走 empty_reply 兜底
+    # 沉浸式模式：括号/星号动作段是小说模式专属格式，出站剥离（小说模式不动）。
+    _before = s
+    s = _strip_immersive_stage_directions(s, reply_mode)
+    _guard_log("immersive_stage_direction", _before, s)
+    if not s:
+        return ""
     # 2026-10-19 时间感知 3.0：距上一回合 >45min 时相对时间词确定性降级
     # （刚才/刚刚/刚X → 之前）。None（主动链/提醒链无会话间隔语境）不动。
     if (
@@ -623,6 +784,22 @@ def terminal_reply_guard(
         and float(last_turn_age_seconds) > _TIME_WORD_AGE_THRESHOLD_SECONDS
     ):
         s = _recalibrate_time_words(s)
+    # 2026-10-20 语义终审：逐字复述用户原话 / 元记忆解释 / 无由头反问。
+    _before = s
+    s = _strip_verbatim_echo(s, user_msg)
+    _guard_log("verbatim_echo", _before, s)
+    if not s:
+        return ""
+    _before = s
+    s = _strip_meta_memory_talk(s)
+    _guard_log("meta_memory_talk", _before, s)
+    if not s:
+        return ""
+    _before = s
+    s = _strip_ungrounded_reciprocal(s, user_msg)
+    _guard_log("ungrounded_reciprocal", _before, s)
+    if not s:
+        return ""
     s = strip_emoji_echo(s, user_msg)
     name = str(character_name or "").strip()
     if name and s in {name, name + "。", name + "！", name + "!"}:
