@@ -3887,3 +3887,57 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - 三端 blob 六文件 `git hash-object` 逐一一致；生产 health/ready 200、4 worker；AOCI 条目同步本批不变量（六条 S 字段）。
 
 **遗留（诚实清单）**：① agnes 供应商侧延迟抖动仍在（1.1~51.7s），40s 仍会有长尾走到降级；② 降级质量差距是产品级问题（端到端实证降级轮直接出「好的，注意保暖哦」）——可选方向（降级切同档位模型/降级轮走保守短回复/降低降级轮 prompt 复杂度）**未做，待裁决**；③ 话题仍是「近期原话锚点」而非对话状态机（无未完成事项跟踪、无话题栈），长对话指代消解仍弱；④ 模式开关仍是全局单例；⑤ 黄金集未建（本轮全部为确定性单元 + 生产原句重放，缺真实模型 A/B 量化）。
+
+## 2026-10-21 八项裁决执行批（v1.56，**未提交 / 未部署**；R1–R8 八项裁决）
+
+**起因**：聊天质量二轮（v1.55 `8eb4abe`）上线后，用户就后续给出**八项裁决**；本轮按「七路取证设计 → 三路设计复核 → 代码实施 → 独立复验 → 认知层补全（AOCI/图谱）→ 全量校验 → 收口」七阶段执行。**代码全程留在工作树，未提交、未部署。**
+
+**八项裁决与处置**：
+
+- **R1 降级三方向讲解**——把「降级后落弱模型出客服腔」的三个可选方向讲清楚：**A 降级切同档位模型** / **B 降级轮走保守短回复** / **C 降低降级轮 prompt 复杂度**。**仅讲解，用户尚未拍板**，本轮零代码改动。
+- **R2 暂不上生产**——用户裁决**本轮不部署**；服务器仍停 `8eb4abe`。待部署清单随代码在工作树。
+- **R3 主链工具与记忆相结合**（5 文件）——保留既有架构（L0/L1 工具闸 + 系统自动注入记忆），新增两部分：① **能力声明段按真实可用性渲染**——`optimized_orchestrator._memory_recall_available`（`orchestrator/optimized_orchestrator.py:117`）判定 registry 里是否真有 `memory` 工具，`build_system_prompt(capability_flags={"memory_recall": …})` 只在真有该工具时才声明「系统可能先替你检索一次长期记忆」（避免声明了却没有的能力）；② **启用 `memory` 工具打通 L0→L1 检索**——`orchestrator/tool_gate.py:188-189` 新增「用户问『你还记得…/我说过…吗』或明显需要回忆过去说过的事 → 调用 memory 工具」的 L1 判据；③ **内部标识出站剥离**（工具/记忆内部标记不落到用户）。**L1 仍管副作用**（不改副作用归属）。
+- **R4 主链改真流式**（7 文件）——把「攒稿 → 定稿 → 8 字符切块」改为**按句边生成边下发**：`config/system.yaml:63` `chat.stream_mode: true`（默认）+ 新增 `utils/stream_guard.py::IncrementalReplyGuard`（`:207`）作增量出站守卫状态机。语义：逐 token 喂守卫，**完整句**过守卫后立即作为 token 事件下发；**不完整尾巴永不下发**；上游结束/中断后未发余量交 `orchestrator/_stream_mixin._finalize_reply` 做**唯一全文终裁**；**已发前缀永不回滚**（`accepted_end` 前缀记账语义不变）。**守卫取舍**：需全文位置的规则（仅剩角色名/错误哨兵/发言标签/时间前缀/安全闸）延迟到终裁、**不再复核已发前缀**；**截断类规则**（无由头反问）实现为**终止上游 + 丢弃全部未发**。`chat.stream_mode: buffered` 为旧路径回滚开关（与供应商层 `llm.stream_enabled` 正交，不得复用）。供应商层 `llm_provider/openai_compatible_provider.py` 的 `stream_enabled`（`config/system.yaml:38`）从**死配置**改为真生效（缺省 False 显式 opt-in）。
+- **R5 AOCI 与代码图谱补全**——`aoci.code.txt` 条目去重/修补；`CODE_GRAPH.md` 按实测读数**整本重建为 v3.8.33（2026-10-21 重建批）**（§1.1 实时核实指标、端点 229 业务端点 / 194 唯一路径、§4.11 其余模块包骨架补全、§11 风险按现状重写；历史版本表压缩为归档指针，历史由 `LOG.md` 承载）。**未补全的缺口为遗留 backlog**。
+- **R6 黄金集立项**（12 文件）——新建 `tests/golden/`：**8 个用例文件 / 45 条用例**（`cases/` 下 `echo_attribution` 6 / `meta_memory` 4 / `mode_boundary` 7 / `ungrounded_reciprocal` 5 / `topic_awareness` 5 / `degradation_quality` 4 / `guard_regression` 8 / `aiyu_contrast` 6，共 45）+ `runner.py` + `judges.py` + `test_golden_set.py`（pytest 入口）+ README。纪律：**确定性优先、判定全部委托被测真源、LLM 判定不计基线**（`GOLDEN_LIVE=1` 才跑 live 判定，且 judge fail 只 `xfail` 留痕）。跑法：`python -m pytest tests/golden/test_golden_set.py -q`。
+- **R7 模式显式切换（按用户隔离）**（23 文件）——全局 `reply_mode` 降为**默认**，新增 per-user 覆盖表 `user_reply_mode`（`utils/reply_mode.py:55`，`read_reply_mode(user_key)` `:125` / `write_reply_mode` `:151` / `clear_reply_mode_override` `:183`）+ 一轮**单次解析透传**（旧实现 `persona_service` 内部再热读一次）+ admin 作用域 `reply_mode_scope=global|user`（`api/routers/training_routes.py`）+ 用户自助端点 `GET/POST /api/user/reply-mode`（`:519`/`:541`）。
+- **R8 部分闭环为何卡住**（解释项）——③话题状态机、⑤爱语架构差距、Q6 串行跳数、Q7 主链工具披露之所以此前停住，**非技术阻塞**，而是被归类为**需用户裁决的架构/产品决定**；本轮 R3/R4 已把其中两项推进（工具披露 + 真流式），其余仍未决。
+
+**独立复验与复修**（复验用独立手段、非作者自证）：
+
+- 复验首轮 4 项中 **3 项打回**：**R4=fail / R3=pass / R6=fail / R7=fail**。
+- 复修后全绿：**R4**（真流式）绿；**R6** 修复独立复验 **P1 —— live 通道完全不可用** 绿；**R7** 修复独立复验 **P0 —— admin「指定用户」写入键形态与运行时读取键不一致（功能无效却回执成功）** 绿。
+
+**全量校验门**（本轮亲跑）：
+
+- `PYTHONPATH= python -m pytest --collect-only -q` → **3900 tests collected**（250 测试文件）。
+- 单跑两处跳过源确认：`pytest tests/test_cache.py tests/golden/test_golden_set.py -rs` → `87 passed, 2 skipped`，`SKIPPED [1] test_cache.py:297: Redis not available` + `SKIPPED [1] tests/golden/test_golden_set.py:48: live_llm 用例默认不跑`。
+- 前端 `cd frontend && npm test` → **217 passed / 33 文件**（vitest）。
+- 本轮终验口径：**3900 收集（250 文件，42 卡）/ 3898 通过 + 2 跳过 / 0 失败**；徽章 **4116**（3898 Py + 217 FE + 1 标记）；ruff 全仓 0。
+
+**文档收口**（本条目同批）：`AGENTS.md` 版本头 v1.55→**v1.56** + §0/§2/§3/§4.3/§7 测试口径刷新 + §10 修订历史补 v1.56 行 + §4.3 `.gitignore:117`→**`.gitignore:120`**（行号漂移订正）+「流式入口先完整定稿再分块」设计规则改写为**真流式新规则**；`README.md` 徽章 3833→**4116** + 正文口径刷新（原停 v1.54）；`docs/HANDOFF_REPORT.md` 顶栏改为本轮事实（未部署/测试数字/遗留）。
+
+**遗漏与遗留**：① **R1 三方向用户未拍板**（本轮仅讲解）；② **agnes 供应商侧抖动仍在**（40s 超时后仍有长尾走到降级），未换供应商；③ **黄金集初建**，45 条用例的实际覆盖效果需后续运行验证（live 判定默认不跑）；④ **架构级差距**（话题状态机、爱语式完全自主）仍未决；⑤ **AOCI 剩余 backlog**（本次只去重/修补，未补完）；⑥ 本批**代码未提交、未部署**（R2 用户裁决）。
+
+
+## 2026-10-21 八问任务执行批（补记；代码与八项裁决批同批提交）
+
+**起因**：用户八问（AOCI 为何没建全/图谱为何没更/为何没外部调研/为何未授权改代码/改动能否彻底解决/agnes 为何延迟这么高/LLM 是否知道工具与记忆/降级三选项暂不拍板）背后的欠账任务实际执行（dynamic workflow dwfrun-cbfe2958）。
+
+**交付（12 项机制修复，逐项红绿+突变验红+独立复验 12/12）**：
+① LLM 预算阶梯具名化 PROVIDER_READ 40s ≤ TOOL_GATE 40s ≤ MAIN_CHAIN 60s ≤ TOTAL_TURN 100s（orchestrator/optimized_orchestrator.py，不变量测试钉死）；
+② stream_enabled 死配置接线：chat() 消费该开关走流式聚合 _chat_aggregated（llm_provider/，缺省 False 显式 opt-in，生产 5 供应商显式 true）；
+③ provider 单次耗时结构化埋点 [provider_call]（成功/失败/空内容/流式 partial+ttft，openai_compatible_provider.py）；
+④ 轮次 LLM 预算总账 remaining_turn_llm_budget 递降传递（工具闸/主链/流式三跳同一账，杜绝"提了单跳阈值整轮更慢"）；
+⑤ RAG 知识槽渲染侧去重 dedup_rag_snippets（生产实测 60%~80% 纯重复；context_budget.py + persona_service 两个注入点同真源）；
+⑥ 历史回灌净化抽单一真源 scrub_history_rows（主链历史+跨会话尾巴+主动决策线三处共用；尾巴此前完全未净化，冷启动自我强化回路切断）；
+⑦ 记忆使用守则 MEMORY_USAGE_RULE 注入主链（persona_service，治"声明在回忆/念条目/说记忆库显示"）；
+⑧ L1 工具闸补 memory 检索规则（tool_gate.py，回忆意图晋级后不再空窗）；
+⑨ 提醒/主动/手动三条出站链补 reply_mode 实参（reminder_delivery.py、scheduler.py；守卫矩阵缺口闭合）；
+⑩ 主动上下文 mes_example/creator_notes 沉浸式剥离（proactive_context.py，与主链 R1 同机理）；
+⑪ 流式 finalize 补传 session_id/last_turn_age_seconds（_stream_mixin.py；称呼剥除与时间词降级在流式下恢复生效）；
+⑫ _stream_chat 透传调用方 timeout（流式不再静默吃掉主动决策线 25s 预算）。
+
+**验证**：复验 12/12 通过、每任务 ≥1 突变验红（md5 恢复校验）；本批初跑四分块基线 2 块超时（已知随机挂起环境病），**最终由八项裁决批全量门确证合并树**：3900 收集/3898 通过+2 跳过/0 失败、ruff 全仓 0。
+
+**遗留**（并入八项裁决批 R8 统筹）：降级三选项待用户拍板；agnes 供应商侧抖动仍在；架构级差距（话题状态机/爱语式完全自主）未决。
