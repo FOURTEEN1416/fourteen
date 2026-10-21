@@ -58,6 +58,132 @@ _SESSION_QUEUE_POLL = 0.2
 MEMORY_RETRIEVE_TIMEOUT_SECONDS = 10.0
 RAG_RETRIEVE_TIMEOUT_SECONDS = 10.0
 
+# ── LLM 预算阶梯（2026-10-21 FIX-1）──
+#
+# 🔴 不变量：``PROVIDER_READ_TIMEOUT_SECONDS ≤ TOOL_GATE_LLM_TIMEOUT_SECONDS
+# ≤ MAIN_CHAIN_LLM_TIMEOUT_SECONDS``（由 ``tests/test_tool_gate_llm_budget.py::
+# test_timeout_ladder_invariant`` 钉死）。
+#
+# 缺口的由来：agnes 读超时提到 40s（质量悬崖批）、主链外层提到 60s，但工具终审
+# 那一跳仍是写死的 15s —— 慢 agnes 在工具闸白烧 15s 被杀（且失败不重试），随后
+# 同一轮又进主链等第二次，单轮多出一段**纯浪费的串行时间**（生产 17:46:13
+# `[tool_gate] L1 判决` 与该轮 `[prompt] total=7976` 同秒落盘，证明 L1 在关键
+# 路径上）。三档改成具名常量后，规则可被断言、可被单点调整。
+#
+# 供应商读超时镜像 ``config/llm_providers.json`` → 首选供应商（agnes）
+# ``request_timeout``；配置改了必须同步此常量（同文件用例会验一致性）。
+PROVIDER_READ_TIMEOUT_SECONDS = 40.0
+# 工具闸消费**完整**的供应商读预算：健康但慢的响应（agnes 实测 P90 ~40s）应当
+# 在闸内拿到结果，而不是被 15s 砍掉后到主链再等一次。
+TOOL_GATE_LLM_TIMEOUT_SECONDS = 40.0
+# 主链外层 = 供应商读预算 + 降级位窗口（agnes 40s 用尽后切智谱仍需时间）。
+MAIN_CHAIN_LLM_TIMEOUT_SECONDS = 60.0
+
+# ── 轮次级 LLM 预算总账（2026-10-21 FIX-3）──
+#
+# 背景：单轮至少三跳串行 LLM（并行段情绪引擎 self-regen、工具闸 L1、主链），
+# 但「一轮回复最多能花多少 LLM 时间」此前**没有单一 owner** —— 各跳各自写死
+# 自己的额度（工具闸/主链/流式/画像同步/记忆检索各一套）。后果就是「提了一个
+# 单跳阈值，整轮耗时反而更长」，且排障时无法回答「这轮为什么这么慢」。
+#
+# 🔴 不变量：``TOOL_GATE_LLM_TIMEOUT_SECONDS + MAIN_CHAIN_LLM_TIMEOUT_SECONDS
+# ≤ TOTAL_TURN_LLM_BUDGET``（由 ``tests/test_turn_llm_budget.py::
+# test_turn_budget_covers_all_hops`` 钉死）。各跳取
+# ``min(单跳额度, remaining_turn_llm_budget(deadline))`` —— deadline 在**拿到
+# 会话锁之后**建立（会话排队等的是并发，不是 LLM 时间，不应计入 LLM 预算）。
+#
+# 取值 100s = 工具闸 40s + 主链 60s：覆盖「晋级工具闸被慢 agnes 拖满 + 主链再
+# 走一次降级链」的最坏健康路径。再往上就顶到上层 120s 共享循环桥接超时了
+# （见 `_SESSION_QUEUE_TIMEOUT` 注释里的 wechat_connector 桥接口径）。
+TOTAL_TURN_LLM_BUDGET = 100.0
+
+
+def remaining_turn_llm_budget(deadline: float | None) -> float:
+    """本轮 LLM 预算的剩余秒数（deadline 递降传递的取数入口）。
+
+    ``None``（后台任务 / 老调用方 / 单测直接调私有方法）→ 返回整额，
+    保持原行为不变。过期 → 0.0（调用方按 0 收紧，落到各自的失败兜底：
+    工具闸降级主链、主链走 timeout 旁路句）。
+
+    ⚠️ 刻意不设地板值：预算耗尽就该尽快失败并把预算让给后续跳，而不是「再多
+    给几秒」把上层的桥接超时一起烧掉（那正是本轮要根治的形态）。
+    """
+    if deadline is None:
+        return TOTAL_TURN_LLM_BUDGET
+    return max(0.0, float(deadline) - time.monotonic())
+
+
+def _memory_recall_available(components: dict[str, Any] | None) -> bool:
+    """registry 里是否真有 ``memory`` 工具（能力声明的唯一判定函数）。
+
+    2026-10-21 R3：能力声明必须按**真实可用性**渲染 —— ``memory`` 工具只在
+    ``config/system.yaml`` 的 ``builtin_tools`` 里声明且 ``structured_memory``
+    在位时才注册（``orchestrator/_init_mixin.py::_init_tools``）。把判定收在
+    这里，防止 prompt 侧、API 侧各写一套「能不能查」的猜测（复核条目 #4）。
+
+    任何异常一律按「不可用」处理（宁可不声明，也不声明一个不存在的通道）。
+    """
+    try:
+        tools = (components or {}).get("tools")
+        registry = getattr(tools, "registry", None)
+        if registry is None:
+            return False
+        getter = getattr(registry, "get", None)
+        if callable(getter):
+            return getter("memory") is not None
+        names = getattr(registry, "tool_names", None)
+        return bool(names) and "memory" in list(names)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def strip_internal_identifiers(text: str) -> str:
+    """剥掉回复正文里泄漏的内部标识（会话键 / user_key / call_id 形态）。
+
+    2026-10-21 R3：``MemoryTool`` 的返回体带 ``user_key``（``tools/builtin/
+    extra_tools.py:103``），L1 工具信封会把它送进 prompt；模型回显时就可能把
+    ``2:alice@im.wechat`` 这类内部会话键写进给用户看的话里。出站守卫此前不拦。
+
+    ⚠️ owner 说明：该规则的**自然 owner** 是
+    ``utils/prompt_sanitize.terminal_reply_guard``（所有出站收口的单一真源）；
+    本次任务的文件白名单不含该文件，故先落在编排层唯一出口 ``_finalize_reply``
+    （流式与非流式共用）。**下批应迁入 prompt_sanitize**；在此之前不得在别处
+    再造第二份实现。
+
+    只匹配「像内部标识」的形态，不碰正常中文/英文。
+    """
+    import re
+
+    s = str(text or "")
+    if not s:
+        return s
+    before = s
+    # 1) 会话键（微信侧 owner:peer@im.wechat / peer@im.wechat）
+    s = re.sub(r"(?<![\w.])[\w.:-]*@im\.wechat\b", "", s)
+    # 2) JSON 形态的键值对（含引号）
+    s = re.sub(
+        r'["\']?(?:user_key|call_id|turn_id|reply_id|session_key)["\']?\s*:\s*'
+        r'["\'][^"\']*["\']',
+        "",
+        s,
+    )
+    # 3) 裸赋值形态（值到空白/中文标点/括号为止）
+    s = re.sub(
+        r"\b(?:user_key|call_id|turn_id|reply_id|session_key)\s*[=:]\s*[^\s，。！？；、)）\]]*",
+        "",
+        s,
+    )
+    # 4) 残留清理：空括号、括号内只剩逗号/空白、多余空白
+    s = re.sub(r"[（(]\s*[，,]?\s*[)）]", "", s)
+    s = re.sub(r"[ \t]{2,}", " ", s)
+    s = s.strip()
+    if s != before:
+        logger.info(
+            "reply_internal_id_stripped before_len=%d after_len=%d",
+            len(before), len(s),
+        )
+    return s
+
 
 class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
     """
@@ -262,6 +388,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         user_id: int | None = None,
         turn_id: str = "",
         character_id: str = "",
+        llm_deadline: float | None = None,
     ) -> tuple[str, str]:
         """三级意图管线：L0 零成本晋级线 → L1 LLM 终审（function calling）
         → 工具执行。
@@ -271,6 +398,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 澄清状态机归属与提醒投递目标。
             user_id: 用户 id，随 ``_meta`` 注入需要归属的工具（服务端注入，
                 不由 LLM 决定归属）。
+            llm_deadline: 本轮 LLM 预算的 ``time.monotonic()`` 截止点（见
+                ``TOTAL_TURN_LLM_BUDGET``）。终审额度取
+                ``min(TOOL_GATE_LLM_TIMEOUT_SECONDS, 剩余预算)`` —— 本跳不得
+                把后面的主链预算吃掉。``None`` 时取整额（老调用方不变）。
 
         Returns:
             ``(tool_results, direct_reply)`` —— ``tool_results`` 非空时按旧惯例
@@ -322,6 +453,14 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             pending_ask_count=pending_ask_count,
         )
 
+        # 本跳额度：单跳上限与**轮次剩余预算**取小（deadline 递降传递，2026-10-21
+        # FIX-3）。旧实现只读自己的常量 —— 前面几跳把轮次预算吃掉后，工具闸仍照
+        # 40s 硬等，把主链预算一起吃光。
+        gate_timeout = min(
+            TOOL_GATE_LLM_TIMEOUT_SECONDS,
+            remaining_turn_llm_budget(llm_deadline),
+        )
+
         async def _review_call(extra_rule: str = "") -> tuple[bool, dict[str, Any] | None]:
             """L1 终审调用（独立低温度）。
 
@@ -348,7 +487,12 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     max_tokens=1024,
                 )
                 if inspect.isawaitable(resp):
-                    resp = await asyncio.wait_for(resp, timeout=15.0)
+                    # 预算与供应商读超时对齐（见模块顶 LLM 预算阶梯不变量）：
+                    # 旧实现写死 15.0，慢 agnes 在闸内白烧 15s 被杀后进主链
+                    # 再等一次 —— 单轮多出一段纯浪费的串行时间。
+                    resp = await asyncio.wait_for(
+                        resp, timeout=gate_timeout,
+                    )
             except Exception as e:  # noqa: BLE001
                 logger.warning("工具终审 provider 失败（保留现场，降级主链）: %s", e)
                 return False, None
@@ -784,6 +928,25 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             )
         return evicted
 
+    def _resolve_turn_reply_mode(self, session_id: str) -> str:
+        """本轮回复模式（**一轮一次解析**，R7 2026-10-21）。
+
+        读取优先级由 `utils.reply_mode.read_reply_mode` 单一 owner 决定：
+        该用户覆盖行 → 全局默认 → 内置默认（沉浸式）。``session_id`` 即完整会话键
+        （v1.28 形态 `N:wxid`），天然是多用户隔离维度；空会话（后台任务）回落全局。
+
+        异常一律回落默认：模式只是渲染口径，不得因为它炸掉整轮对话。
+        """
+        try:
+            from utils.reply_mode import read_reply_mode
+
+            return read_reply_mode(str(session_id or "") or None)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("解析本轮回复模式失败（回落默认）: %s", e)
+            from utils.reply_mode import DEFAULT_REPLY_MODE
+
+            return DEFAULT_REPLY_MODE
+
     async def _prepare_context(
         self,
         user_msg_clean: str,
@@ -792,12 +955,18 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         emotion_engine: Any | None = None,
         user_id: int | None = None,
         turn_id: str = "",
+        llm_deadline: float | None = None,
+        reply_mode: str | None = None,
     ) -> dict[str, Any]:
         """共享预处理逻辑。
 
         Args:
             turn_id: 调用方预生成的轮次 id（W2 流式生命周期：锁后即建立 turn
                 上下文，准备阶段取消/异常的收尾也要有稳定归属）。空串时内部生成。
+            llm_deadline: 本轮 LLM 预算截止点（``time.monotonic()`` 口径，见
+                ``TOTAL_TURN_LLM_BUDGET``）。向下传给工具闸，使其按**剩余**预算
+                取额度而不是吃掉主链那份（2026-10-21 FIX-3）。``None`` = 不设限
+                （老调用方/后台任务行为不变）。
 
         执行：PersonaExtractor 设置 → 并行任务（人格/情感/记忆/RAG）
         → 对话历史 → 世界信息 → system prompt 组装 → 角色卡注入
@@ -816,6 +985,16 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         from persona_extractor.fusion import profile_scope
 
         effective_user_id = profile_scope(character_id, session_id)
+
+        # ── 回复模式：一轮内**单次解析**（2026-10-21 R7）──
+        # 旧实现本函数内三处、终裁/兜底/流式各一处独立热读 `read_reply_mode()`，
+        # 同轮若控制端切换就会出现「注入剥了括号、出站按另一模式判」的半轮混排。
+        # 现在锁后解析一次并全程透传；user_key 取完整会话键（按用户覆盖优先）。
+        turn_reply_mode = (
+            reply_mode
+            if reply_mode in ("immersive", "novel")
+            else self._resolve_turn_reply_mode(session_id)
+        )
 
         # 并行执行独立任务（recent 传 session_id：会话隔离，防跨用户串扰）
         # P1-10（2026-09-21 审查修复）：get_recent_context 自 v1.17 起读 DB——
@@ -1004,35 +1183,20 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         # 又被当「我自己说过的话」few-shot 给模型 —— 这就是用户看到的「改了还犯」
         # 的自我强化回路。这里在注入前就地净化（只改内存副本，不动库），
         # 沉浸式下括号动作一并剥离（与出站同一真源 strip_stage_directions）。
+        #
+        # 2026-10-21 FIX-3：逐行净化规则抽到单一真源 prompt_sanitize.scrub_history_rows
+        # ——跨会话尾巴（下方 session_tail 块）此前**完全没有净化**，与主链两套规则
+        # 分叉；两处现共用同一函数（dict 行 = 历史，str 行 = 尾巴行）。
         try:
-            from utils.prompt_sanitize import (
-                _strip_attribution_flip,
-                _strip_meta_memory_talk,
-            )
-            from utils.reply_mode import REPLY_MODE_IMMERSIVE, read_reply_mode, strip_stage_directions
+            from utils.prompt_sanitize import scrub_history_rows
+            from utils.reply_mode import REPLY_MODE_IMMERSIVE
 
-            _immersive_hist = read_reply_mode() == REPLY_MODE_IMMERSIVE
+            # 2026-10-21 R7：用本轮已解析的模式（单次解析），不再热读
+            _immersive_hist = turn_reply_mode == REPLY_MODE_IMMERSIVE
             if isinstance(chat_history, list):
-                _scrubbed_hist: list[Any] = []
-                _dropped = 0
-                for _row in chat_history:
-                    if not isinstance(_row, dict):
-                        _scrubbed_hist.append(_row)
-                        continue
-                    _content = str(_row.get("content") or "")
-                    if not _content:
-                        _scrubbed_hist.append(_row)
-                        continue
-                    if _immersive_hist:
-                        _content = strip_stage_directions(_content)
-                    if str(_row.get("role") or "").lower() == "assistant":
-                        _content = _strip_meta_memory_talk(_content)
-                        _content = _strip_attribution_flip(_content)
-                    if not _content.strip():
-                        _dropped += 1
-                        continue
-                    _scrubbed_hist.append({**_row, "content": _content})
-                chat_history = _scrubbed_hist
+                _before_hist_len = len(chat_history)
+                chat_history = scrub_history_rows(chat_history, _immersive_hist)
+                _dropped = _before_hist_len - len(chat_history)
                 if _dropped:
                     logger.info(
                         "历史回灌净化：丢弃 %d 条退化 assistant 行（出站守卫同源规则）",
@@ -1168,6 +1332,20 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     format_session_tail,
                 )
 
+                # 2026-10-21 FIX-3：尾巴行必须与主链历史同源净化后才注入。
+                # 尾巴走的是 raw DB content（structured_memory 只滤「处理超时」），
+                # 已落库的坏回复（沉浸式括号动作 / 元记忆解释 / 归属翻转）会被
+                # 原样 few-shot 回去；而尾巴的命中条件恰是 hist_len<2（新会话/
+                # 近史浅）——冷启动最易出问题的场景。净化只改内存副本、不动库。
+                if tail_lines:
+                    from utils.prompt_sanitize import scrub_history_rows
+                    from utils.reply_mode import REPLY_MODE_IMMERSIVE
+
+                    # 2026-10-21 R7：同轮同一模式（不再二次热读）
+                    tail_lines = scrub_history_rows(
+                        tail_lines, turn_reply_mode == REPLY_MODE_IMMERSIVE,
+                    )
+
                 if hist_len < SESSION_TAIL_INJECT_MAX_RECENT_MESSAGES and tail_lines:
                     session_tail = format_session_tail(tail_lines)
                     if session_tail:
@@ -1211,6 +1389,14 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             character_id=character_id,
             # 批6b 项11：仅作 prompt_builder 知识槽的检索查询，不回显进 system
             user_message=user_msg_clean,
+            # 2026-10-21 R3：能力声明按**真实可用性**渲染 —— 只有 registry 里
+            # 真有 memory 工具时才声明「系统可能先替你检索一次长期记忆」。
+            capability_flags={
+                "memory_recall": _memory_recall_available(self.components),
+            },
+            # 2026-10-21 R7：本轮模式单次解析结果透传（mes_example/creator_notes/
+            # 知识槽剥离开关）——旧实现 persona_service 内部再热读一次。
+            reply_mode=turn_reply_mode,
         )
 
         # 身份唯一 owner = PersonaService 解析到的那张卡（内置卡 / 文件卡），
@@ -1234,6 +1420,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             user_id=user_id,
             turn_id=ax_turn_id,
             character_id=str(character_id or ""),
+            llm_deadline=llm_deadline,
         )
         if tool_results:
             # C 正式位次：工具结果插入「对话历史之后 / 扮演规则之前」
@@ -1276,17 +1463,20 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         try:
             from utils.reply_mode import reply_mode_instruction
 
+            # 2026-10-21 R7：单次解析结果透传（不再热读）
             system_prompt = (
                 f"{system_prompt}\n\n"
                 "# 输出格式（本节优先于角色卡中任何与之冲突的格式要求）\n"
-                f"{reply_mode_instruction()}"
+                f"{reply_mode_instruction(turn_reply_mode)}"
             )
             # D12-L：生理读数只喂**小说式**（函数内自判模式，沉浸式返回空串）。
             # 沉浸式明令「严禁描写自己的表情、声音、心跳」，此处注入会与它打架；
             # 小说式要写动作神态，没有这组数就只能凭空编一个心跳。
             from shisi.vital_signs.vital_prompt import novel_vital_prompt_section
 
-            vital_section = novel_vital_prompt_section(session_id, str(character_id or ""))
+            vital_section = novel_vital_prompt_section(
+                session_id, str(character_id or ""), mode=turn_reply_mode,
+            )
             if vital_section:
                 system_prompt = f"{system_prompt}\n\n{vital_section}"
         except Exception as e:  # noqa: BLE001
@@ -1343,6 +1533,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             "knowledge_snippets": knowledge_snippets,
             # 2026-10-19 时间感知 3.0：距上一回合秒数（出站时间词改写闸输入）
             "last_turn_age_seconds": last_turn_age_seconds,
+            # 2026-10-21 R7：本轮回复模式（单次解析）——下游终裁/兜底/流式透传，
+            # 禁止再次热读（同一轮内模式必须一致）。
+            "reply_mode": turn_reply_mode,
         }
 
     def _enqueue_profile_sync(self, session_id, user_msg, reply, llm, *, character_id="", turn_id=""):
@@ -1575,6 +1768,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         user_msg: str = "",
         session_id: str = "",
         last_turn_age_seconds: float | None = None,
+        reply_mode: str | None = None,
     ) -> str:
         """唯一输出定稿：清洗、空回复降级、安全检查均发生在发送和落库之前。
 
@@ -1586,9 +1780,16 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         剥称呼是独立动作）——非法称呼（角色名派生词/被用户否认的称呼）在
         `utils.address_terms` 单一真源里确定性剥除，不依赖模型配合。
         `session_id` 默认空串：缺省时仍按角色名派生词剥除（读不到画像昵称）。
+
+        ``reply_mode``（2026-10-21 R7）：本轮已解析的模式。缺省时回落到热读
+        真源 —— 后台线/单测直接调本函数的旧行为不变。
         """
         from utils.prompt_sanitize import sanitize_reply_text, terminal_reply_guard
         from utils.reply_mode import read_reply_mode
+
+        effective_mode = (
+            reply_mode if reply_mode in ("immersive", "novel") else read_reply_mode(session_id or None)
+        )
 
         if character_card is None:
             loader = getattr(self.components.get("persona"), "_load_character_card", None)
@@ -1600,7 +1801,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             user_msg=user_msg,
             character_name=char_name,
             last_turn_age_seconds=last_turn_age_seconds,
-            reply_mode=read_reply_mode(),
+            reply_mode=effective_mode,
         )
         try:
             from utils.address_terms import resolve_address, strip_forbidden_vocatives
@@ -1611,6 +1812,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         except Exception as _addr_exc:  # noqa: BLE001
             logger.debug("出站称呼剥除失败（忽略）: %s", _addr_exc)
         reply = sanitize_reply_text(reply, character_name=char_name)
+        # 2026-10-21 R3：内部标识出站剥离（memory 工具信封里的 user_key / 会话键
+        # 被模型回显给用户）。放在 sanitize 之后、硬违规检查之前——剥除只减字符。
+        reply = strip_internal_identifiers(reply)
         try:
             from my_character.consistency_checker import (
                 detect_hard_violation,
@@ -1623,9 +1827,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             logger.debug("硬违规检查跳过: %s", exc)
         if not reply:
             from utils.fallback_lines import get_fallback_line
-            from utils.reply_mode import read_reply_mode
 
-            reply = get_fallback_line(character_id, "empty_reply", read_reply_mode())
+            # 2026-10-21 R7：兜底句也跟随本轮模式（不再二次热读）
+            reply = get_fallback_line(character_id, "empty_reply", effective_mode)
         safety = self.components["safety"]
         checked = safety.check_output(reply)
         return reply if checked.is_safe else safety.safe_alternative(checked.category)
@@ -1694,6 +1898,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
         async with lock:
             start_time = time.perf_counter()
+            # 轮次 LLM 预算总账（2026-10-21 FIX-3）：deadline 在**拿到锁之后**建立
+            # —— 会话排队等的是并发（不是 LLM 时间），不计入 LLM 预算；之后工具闸
+            # 与主链都从剩余预算里取额度（见 TOTAL_TURN_LLM_BUDGET）。
+            llm_deadline = time.monotonic() + TOTAL_TURN_LLM_BUDGET
             user_msg_clean = ""
             ctx: dict[str, Any] = {}
             history_finished = False
@@ -1719,6 +1927,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     character_id,
                     emotion_engine=emotion_engine,
                     user_id=user_id,
+                    llm_deadline=llm_deadline,
                 )
                 emotion_state = ctx["emotion_state"]
                 system_prompt = ctx["system_prompt"]
@@ -1748,6 +1957,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     # 30s/45s 外层都可能在**降级链还没走完**时切断，把用户打到
                     # timeout 旁路句（等于白丢一轮对话）。60s 覆盖最坏健康路径；
                     # 用户体感由 typing 指示承担，宁可慢也不要错模型代写。
+                    # 2026-10-21 FIX-1：改具名常量 MAIN_CHAIN_LLM_TIMEOUT_SECONDS，
+                    # 与工具闸/供应商读预算构成可断言的阶梯（见模块顶不变量）。
+                    # 2026-10-21 FIX-3：再与**轮次剩余预算**取小 —— 前面几跳（工具闸/
+                    # 并行准备段）花掉的时间会从这里扣，整轮不再无上限。
                     try:
                         reply = await asyncio.wait_for(
                             request_llm.chat(
@@ -1758,14 +1971,18 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                                 max_tokens=2048,
                                 attachments=attachments,
                             ),
-                            timeout=60.0,
+                            timeout=min(
+                                MAIN_CHAIN_LLM_TIMEOUT_SECONDS,
+                                remaining_turn_llm_budget(llm_deadline),
+                            ),
                         )
                     except asyncio.TimeoutError:
                         logger.warning("LLM 调用超时 (60s), session=%s", session_id)
                         from utils.fallback_lines import get_fallback_line
-                        from utils.reply_mode import read_reply_mode
+                        # 2026-10-21 R7：超时旁路同样用本轮已解析的模式（透传，不热读）
                         _fb = get_fallback_line(
-                            character_id, "timeout", read_reply_mode()
+                            character_id, "timeout",
+                            ctx.get("reply_mode") or self._resolve_turn_reply_mode(session_id),
                         )
                         _fb = await publish(_fb)
                         # 超时旁路也必须落历史：否则用户这句话凭空消失，
@@ -1817,6 +2034,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     user_msg=user_msg_clean,
                     session_id=session_id,
                     last_turn_age_seconds=ctx.get("last_turn_age_seconds"),
+                    # 2026-10-21 R7：本轮模式透传（终裁内不再热读）
+                    reply_mode=ctx.get("reply_mode"),
                 )
                 reply = await publish(reply, emotion=emotion_state.to_dict() if emotion_state else None)
 
@@ -1897,9 +2116,12 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             except Exception:
                 logger.exception("消息处理异常")
                 from utils.fallback_lines import get_fallback_line
-                from utils.reply_mode import read_reply_mode
 
-                _err_fb = await publish(get_fallback_line(character_id, "exception", read_reply_mode()))
+                # 2026-10-21 R7：异常兜底也跟随本轮模式
+                _err_fb = await publish(get_fallback_line(
+                    character_id, "exception",
+                    ctx.get("reply_mode") or self._resolve_turn_reply_mode(session_id),
+                ))
                 try:
                     memory = self.components.get("memory")
                     if user_msg_clean and not history_finished and memory and hasattr(memory, "write_chat_history_sync"):

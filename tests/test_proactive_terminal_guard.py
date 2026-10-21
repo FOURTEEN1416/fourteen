@@ -63,3 +63,171 @@ def test_proactive_guard_shares_source_with_main_chain():
     # 不得有本地重实现（哨兵判据单一真源）
     assert "def terminal_reply_guard" not in sched_src
     assert hasattr(prompt_sanitize, "terminal_reply_guard")
+
+
+# --------------------------------------------------------------------------
+# 2026-10-21 FIX-1：主动/提醒链出站守卫未传 reply_mode → 沉浸式括号不剥
+#
+# 缺陷：三处 terminal_reply_guard 调用（scheduler 决策线、scheduler._deliver
+# 兜底线、reminder_delivery._compose_text）均未传 reply_mode，缺省空串使
+# `_strip_immersive_stage_directions` 直接返回原文 → 沉浸式模式下主动消息/
+# 提醒仍把「（想了想）」这类括号动作发给用户。主动线还把带括号的 mes_example
+# 喂进生成 prompt（「教它写括号又不拦」），构成正向教唆。
+#
+# 修法：三处调用各补 `reply_mode=read_reply_mode()`（utils.reply_mode 单一
+# 真源）。语义下界：immersive 下带括号必剥、novel 下原样、缺省（reply_mode
+# 不传）不改行为以防误伤其它未接线调用方。
+# --------------------------------------------------------------------------
+
+_BRACKETED = "（想了想）今天降温了，记得加衣服哦"
+_BRACKETED_STRIPPED = "今天降温了，记得加衣服哦"
+
+
+def test_guard_reply_mode_semantics_lower_bound():
+    """守卫 reply_mode 语义下界：immersive 剥、novel 原样、缺省原样。
+
+    这是三处接线共同依赖的下层契约——缺省不剥是**刻意保留**，避免误伤
+    未传 reply_mode 的历史调用方（主链/流式在别处已传）。
+    """
+    from utils.prompt_sanitize import terminal_reply_guard
+
+    # 沉浸式：括号动作是小说模式专属格式，出站必剥
+    assert (
+        terminal_reply_guard(
+            _BRACKETED, user_msg="", character_name="", reply_mode="immersive",
+        )
+        == _BRACKETED_STRIPPED
+    )
+    # 小说式：括号动作是设计的一部分，原样保留
+    assert (
+        terminal_reply_guard(
+            _BRACKETED, user_msg="", character_name="", reply_mode="novel",
+        )
+        == _BRACKETED
+    )
+    # 缺省（不传）：行为与旧版一致，不剥（防误伤未接线调用方）
+    assert terminal_reply_guard(_BRACKETED, user_msg="", character_name="") == _BRACKETED
+
+
+def test_proactive_scheduler_callsites_pass_reply_mode():
+    """源码级：scheduler 两处守卫调用都必须传 reply_mode=read_reply_mode()。
+
+    缺陷形态是「调用点漏传参数」，行为级单测难以覆盖决策线内部（需重度
+    装配）；此处以源码级钉住两处调用点的实参，配合 _deliver 行为级测试
+    双向锁定（缺一不可：源码级防漏传，行为级防传了不用）。
+    """
+    import inspect
+
+    from proactive import scheduler
+
+    for fn in (
+        scheduler.ProactiveScheduler._llm_proactive_one_user,
+        scheduler.ProactiveScheduler._deliver,
+    ):
+        src = inspect.getsource(fn)
+        assert "terminal_reply_guard(" in src, f"{fn.__name__} 未接终审守卫"
+        # 2026-10-21 R7 改写：模式由**全局单例**改为按会话解析（per-user 覆盖）。
+        # 原断言钉死字面量 `reply_mode=read_reply_mode()`，签名加 user_key 后
+        # 必然变红；改成语义级断言 —— 必须传 reply_mode，且取值来自
+        # `read_reply_mode(` 真源（允许带会话键实参）。
+        assert "reply_mode=" in src, (
+            f"{fn.__name__} 的守卫调用未传 reply_mode（沉浸式括号不剥）"
+        )
+        assert "read_reply_mode(" in src, (
+            f"{fn.__name__} 的 reply_mode 未取自 utils.reply_mode 真源"
+        )
+
+
+def test_reminder_delivery_compose_passes_reply_mode(monkeypatch):
+    """行为级：提醒文案在沉浸式下括号必剥（_compose_text 实调守卫）。"""
+    import asyncio
+
+    from proactive import reminder_delivery as rd_mod
+
+    class _LLM:
+        async def chat(self, **kwargs):  # noqa: ANN003
+            return _BRACKETED
+
+    monkeypatch.setattr(
+        rd_mod, "read_reply_mode", lambda: "immersive", raising=False,
+    )
+    task = rd_mod.ReminderDeliveryTask(
+        structured_memory=None, llm=_LLM(), character_id_resolver=lambda sk: "",
+    )
+    out = asyncio.run(task._compose_text({"content": "加衣服"}, character_id=""))
+    assert out == _BRACKETED_STRIPPED, "提醒线沉浸式未剥括号动作"
+
+
+def test_reminder_delivery_compose_keeps_brackets_in_novel(monkeypatch):
+    """行为级：小说式下提醒括号动作原样保留（不误伤设计格式）。"""
+    import asyncio
+
+    from proactive import reminder_delivery as rd_mod
+
+    class _LLM:
+        async def chat(self, **kwargs):  # noqa: ANN003
+            return _BRACKETED
+
+    monkeypatch.setattr(
+        rd_mod, "read_reply_mode", lambda: "novel", raising=False,
+    )
+    task = rd_mod.ReminderDeliveryTask(
+        structured_memory=None, llm=_LLM(), character_id_resolver=lambda sk: "",
+    )
+    out = asyncio.run(task._compose_text({"content": "加衣服"}, character_id=""))
+    assert out == _BRACKETED, "小说式提醒被误剥括号动作"
+
+
+def test_deliver_strips_stage_directions_in_immersive(monkeypatch):
+    """行为级：_deliver 兜底线在沉浸式下括号必剥（发送前已净化）。"""
+    from proactive import scheduler as sched_mod
+
+    captured: list[str] = []
+
+    monkeypatch.setattr(sched_mod, "read_reply_mode", lambda *a, **k: "immersive", raising=False)
+    sched = sched_mod.ProactiveScheduler.__new__(sched_mod.ProactiveScheduler)
+    sched._run_blocking = lambda fn: fn()  # type: ignore[method-assign]
+    sched._send_targeted = lambda msg, sk: (captured.append(msg), True)[1]  # type: ignore[method-assign]
+    sched._record_outbound = lambda *a, **k: None  # type: ignore[method-assign]
+
+    ok = sched._deliver(_BRACKETED, session_key=None)
+    assert ok is True
+    assert captured == [_BRACKETED_STRIPPED], "主动兜底线沉浸式未剥括号动作"
+
+
+def test_deliver_keeps_stage_directions_in_novel(monkeypatch):
+    """行为级：小说式下 _deliver 不剥括号（与今日行为一致）。"""
+    from proactive import scheduler as sched_mod
+
+    captured: list[str] = []
+
+    monkeypatch.setattr(sched_mod, "read_reply_mode", lambda *a, **k: "novel", raising=False)
+    sched = sched_mod.ProactiveScheduler.__new__(sched_mod.ProactiveScheduler)
+    sched._run_blocking = lambda fn: fn()  # type: ignore[method-assign]
+    sched._send_targeted = lambda msg, sk: (captured.append(msg), True)[1]  # type: ignore[method-assign]
+    sched._record_outbound = lambda *a, **k: None  # type: ignore[method-assign]
+
+    ok = sched._deliver(_BRACKETED, session_key=None)
+    assert ok is True
+    assert captured == [_BRACKETED], "小说式主动消息被误剥括号动作"
+
+
+def test_deliver_fail_closed_when_immersive_strips_to_empty(monkeypatch):
+    """沉浸式整条都是括号动作 → 剥空 → fail-closed 不投递。
+
+    这是既有裁决「宁可不发也不发括号」的语义下界（非新行为）：
+    `_deliver` 对空守卫结果返回 False，调用方走失败退避。
+    """
+    from proactive import scheduler as sched_mod
+
+    captured: list[str] = []
+
+    monkeypatch.setattr(sched_mod, "read_reply_mode", lambda *a, **k: "immersive", raising=False)
+    sched = sched_mod.ProactiveScheduler.__new__(sched_mod.ProactiveScheduler)
+    sched._run_blocking = lambda fn: fn()  # type: ignore[method-assign]
+    sched._send_targeted = lambda msg, sk: (captured.append(msg), True)[1]  # type: ignore[method-assign]
+    sched._record_outbound = lambda *a, **k: None  # type: ignore[method-assign]
+
+    ok = sched._deliver("（想了想）", session_key=None)
+    assert ok is False, "剥空后必须 fail-closed（返回 False 不投递）"
+    assert captured == [], "剥空后不得投递任何内容"

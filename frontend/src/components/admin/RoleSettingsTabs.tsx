@@ -19,6 +19,7 @@ import { Save, Trash2, Copy } from 'lucide-react'
 import { ENGINE_OPTIONS, MIMO_MODELS } from './RoleSettingsConstants'
 import { PERSONALITY_LABELS, SPEAKING_STYLE_LABELS, normalizePersonality, normalizeSpeakingStyle } from '../../constants/persona'
 import { enrichCharacter, proactiveGetConfig, proactiveHistory, proactivePause, updateProactiveConfig, knowledgeCollectConfig, updateKnowledgeCollectConfig } from '../../api/system'
+import { adminListUsers } from '../../api/admin'
 import { useAuthStore } from '../../store/authStore'
 import Section from './RoleSettingsSection'
 import HumanizeSection from './HumanizeSection'
@@ -598,6 +599,12 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
   const [threshold, setThreshold] = useState(2.0)
   const [dailyLimit, setDailyLimit] = useState(8)
   const [minInterval, setMinInterval] = useState(30)
+  // 2026-10-21 R7：回复模式的**作用域**（global=全站默认 / user=指定会话）
+  // 默认 global 保持旧开关语义不变；user 档用下拉选绑定用户，不让管理员手输
+  // `N:wxid@im.wechat` 这种内部键（复核 2026-10-21「最小性-1」条目）。
+  const [replyModeScope, setReplyModeScope] = useState<'global' | 'user'>('global')
+  const [replyModeTargetUser, setReplyModeTargetUser] = useState<number | ''>('')
+  const [adminUsers, setAdminUsers] = useState<Array<{ id: number; display_name?: string; username?: string; email?: string }>>([])
   const [cooldown, setCooldown] = useState(15)
   const [quietStart, setQuietStart] = useState(23)
   const [quietEnd, setQuietEnd] = useState(7)
@@ -625,10 +632,15 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
     setCfgStatus('loading')
     setCfgError('')
     try {
-      const [cfgRes, histRes] = await Promise.all([
+      const [cfgRes, histRes, usersRes] = await Promise.all([
         proactiveGetConfig(),
         proactiveHistory(10).catch(() => null),
+        // 2026-10-21 R7：user 档需要「选中用户」而不是手输内部会话键。
+        // 复用既有 GET /api/admin/users（下拉选择器）。
+        adminListUsers(1, 100).catch(() => null),
       ])
+      const users = (usersRes as { users?: Array<{ id: number; display_name?: string; username?: string; email?: string }> } | null)?.users
+      if (Array.isArray(users)) setAdminUsers(users)
       const cfg = cfgRes?.data as ProactiveConfigPayload | undefined
       if (!cfg || typeof cfg !== 'object') throw new Error('empty proactive config')
       setThreshold(cfg.threshold ?? 2.0)
@@ -673,6 +685,11 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
         min_interval_minutes: minInterval, cooldown_after_reply_minutes: cooldown,
         quiet_hours_start: quietStart, quiet_hours_end: quietEnd,
         reply_mode: replyMode,
+        // 2026-10-21 R7：作用域随保存一起发；user 档要求先选目标用户
+        reply_mode_scope: replyModeScope,
+        ...(replyModeScope === 'user' && replyModeTargetUser !== ''
+          ? { user_key: String(replyModeTargetUser) }
+          : {}),
         llm_proactive_enabled: llmEnabled,
         llm_proactive_style_hint: llmStyle,
         llm_proactive_intensity: llmIntensity,
@@ -879,6 +896,50 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
                   <div className="text-[10px] opacity-70">{m.hint}</div>
                 </button>
               ))}
+            </div>
+            {/* 2026-10-21 R7：作用域。global=全站默认（旧行为）；user=只改选中用户。
+                之前模式是全站单例，无法给不同用户不同模式。 */}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-gray-500">作用域</span>
+              <div className="flex gap-1 p-0.5 bg-gray-100/60 rounded-lg">
+                {([
+                  { key: 'global', label: '全站默认' },
+                  { key: 'user', label: '指定用户' },
+                ] as const).map(sc => (
+                  <button
+                    key={sc.key}
+                    type="button"
+                    onClick={() => setReplyModeScope(sc.key)}
+                    className={`rounded-md px-2.5 py-1 text-[11px] transition-all ${
+                      replyModeScope === sc.key
+                        ? 'bg-white text-gray-800 font-medium shadow-sm ring-1 ring-black/5'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    {sc.label}
+                  </button>
+                ))}
+              </div>
+              {replyModeScope === 'user' && (
+                <select
+                  aria-label="目标用户"
+                  value={replyModeTargetUser}
+                  onChange={e => setReplyModeTargetUser(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] text-gray-700"
+                >
+                  <option value="">选择用户…</option>
+                  {adminUsers.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.display_name || u.username || u.email || `#${u.id}`}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div className="mt-1 text-[11px] text-gray-400">
+              {replyModeScope === 'user'
+                ? '只改选中用户的模式；其他用户保持各自设置或全站默认。'
+                : '改全站默认：未被单独设置过的用户都会跟随。'}
             </div>
           </div>
           <div className="flex items-center gap-4">

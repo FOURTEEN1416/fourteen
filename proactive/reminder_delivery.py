@@ -25,6 +25,11 @@ from proactive.ase_engine import sanitize_message
 from utils import character_resolver
 from utils import session_key as session_key_mod
 
+# 回复模式单一真源（沉浸式/小说式）。出站守卫需要它来决定是否剥括号动作段
+# ——不传时 terminal_reply_guard 的 reply_mode 缺省空串，沉浸式括号会原样
+# 发给用户（2026-10-21 FIX-1：提醒线是守卫矩阵最后一条未接模式的通道）。
+from utils.reply_mode import read_reply_mode
+
 logger = logging.getLogger("reminder_delivery")
 
 # pending_intents 过期清理的节流间隔（秒）——随轮询每分钟触发但不必每分钟全表扫
@@ -324,6 +329,7 @@ class ReminderDeliveryTask:
             character_name=str(resolved_name or ""),
             session_key=str(reminder.get("session_key") or ""),
             character_id=str(character_id or ""),
+            reply_mode=read_reply_mode(),
         )
         return guarded or fallback
 

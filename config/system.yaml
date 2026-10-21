@@ -49,6 +49,19 @@ llm:
       db: ${REDIS_DB:-0}
       password: ${REDIS_PASSWORD}
 
+# ── 聊天流式行为（2026-10-21 R4 真流式）──
+# stream_mode:
+#   true     → 主链按句边真流式下发（首字节 = 首个句界耗时；默认）
+#   buffered → 旧行为：上游攒稿 → 完整定稿 → 8 字符切块（一键回滚开关）
+# ⚠️ 与 llm.stream_enabled 正交：后者是供应商层「是否用 SSE 拉取」，
+#    本项是编排层「是否边生成边下发」。两者不得复用同一键。
+#
+# ⚠️ SystemConfig（observability/config_models.py）没有 chat 字段，故本项
+#    只能经 `ConfigManager.get_config_dict()` 的原始/生效字典读取
+#    （见 utils/stream_guard.read_stream_mode）；不要改成 pydantic 字段假设。
+chat:
+  stream_mode: true
+
 emotion:
   use_llm_classifier: true
   llm_classifier_timeout_ms: 500
@@ -94,6 +107,12 @@ tools:
     - remember_facts
     - forget_facts
     - query_profile
+    # 2026-10-21 R3：长期记忆检索（只读）。L0 的「你还记得|记得我|我的偏好」
+    # 早已把回忆意图晋级到 L1，而 L1 规则也点名 memory —— 但工具没启用，等于
+    # 「叫上来又给不出手」。启用后：检索经服务端注入的 `_meta.session_key` 归属
+    # （LLM 自填键被无视），结果按 untrusted 信封注入，主链只读不写。
+    # ⚠️ 真实工具名是 `memory`（MemoryTool.name），不是 memory_query。
+    - memory
 
 api:
   host: "127.0.0.1"

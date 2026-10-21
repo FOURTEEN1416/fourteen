@@ -312,7 +312,8 @@ def _proactive_sched(monkeypatch, events: list, decide_ret: dict, persona_seen: 
 
     monkeypatch.setattr(lp, "read_web_proactive_config", lambda: {"enabled": True})
 
-    def _load_hint(cid: str = "") -> str:
+    def _load_hint(cid: str = "", user_key=None) -> str:
+        # 2026-10-21 R7：load_full_persona_hint 增加 user_key（per-user 模式）实参
         persona_seen["cid"] = cid
         return "P:" + str(cid)
 

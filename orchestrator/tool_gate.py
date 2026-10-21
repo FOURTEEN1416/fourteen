@@ -182,6 +182,12 @@ def build_review_messages(
         "  调用 **update_user_profile** 和/或 **remember_facts** 写入画像与记忆；",
         "  用户否认错误信息 → update_user_profile 的 clear_* 或 forget_facts。",
         "- 查询已有提醒 → query_reminders；看日程/日期 → calendar；查画像 → query_profile。",
+        # 2026-10-21 FIX-2：回忆意图此前**没有任何规则**指点 —— 而「你还记得|记得我|
+        # 我的偏好|关于我的记忆」本来就在 _QUERY_PATTERNS 里能晋级到 L1，等于把模型
+        # 叫上来又不说干什么（晋级后空窗）：MemoryTool 的 schema 在手上却没指引。
+        # （memory 工具是否在 config/system.yaml 启用属配置决策，不在本条改动范围。）
+        "- 用户问『你还记得…/我说过…吗』或明显需要回忆过去说过的事 → 调用 memory 工具"
+        "按关键词查询长期记忆；查不到就如实说记不清，**不要编造**记忆。",
         "- 用户要**取消/改期**已设的提醒（「那个提醒算了」「改到八点」）→ manage_reminder"
         "（action=cancel/reschedule + reminder_id，编号先由 query_reminders 拿到）；"
         "改期只改这一条，**不要再 set_reminder 新增一条**（同一天被叫两次）。",

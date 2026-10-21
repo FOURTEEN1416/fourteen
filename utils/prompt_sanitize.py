@@ -210,6 +210,30 @@ ROLE_CLARITY_RULE = (
     "「有时候我会忘记自己说过的话」）：你只是在聊天，不是在测试对方。\n"
 )
 
+# ── 记忆使用守则（2026-10-21 FIX-1）──
+#
+# 缺口：注入层（`shisi/application/persona_service.py` 的 injection_parts）与
+# 本模块此前**没有任何一句规范「怎么用记忆」** —— 唯一近似句只有
+# `USER_IDENTITY_RULE` 的「真实记得的事要自然地用（那是你的记忆）」以及
+# `ROLE_CLARITY_RULE` 的几条禁令。模型因此不知道「上下文里的记忆是系统自动
+# 给的」，于是会声明自己在回忆、逐条念记忆条目、说「我的记忆库/数据库里显示」，
+# 甚至试图在正文里写记忆指令。
+#
+# 对照爱语（`aiyu_prompts_full.json` #7「感觉回忆模糊 → 自动 <search:>」与
+# #0 的四档记忆规则）。仿 `EMOJI_USE_RULE` 的写法：纯文案，不改任何执行分支。
+# 段标题必须与 `persona_service` 实际生成的记忆段一致，模型才对得上号
+# （「我记得的」/「我对你的观察」/「相关回忆」/「早期对话摘要」/用户画像段）。
+MEMORY_USAGE_RULE = (
+    "\n\n# 记忆使用守则\n"
+    "- 上下文里「我记得的 / 我对你的观察 / 相关回忆 / 用户画像 / 早期摘要」"
+    "是系统**自动**给你的记忆，直接自然使用，不要声明你在回忆。\n"
+    "- 不要逐条念出记忆条目，也不要说「我的记忆库/数据库里显示」。\n"
+    "- 不要在正文里写任何记忆指令（如 <add:> 之类），也不要声称"
+    "「我记住了/我记下来了」——记忆由系统自动维护。\n"
+    "- 记忆与用户刚说的话冲突时，以用户刚说的为准。\n"
+    "- 想不起来的细节就说记不清，不要编造。\n"
+)
+
 # ── 当前话题续聊（2026-09-23：像人一样把一个话题聊下去）──
 # 事实里的 topics 滞后且主链根本没注入；真正缺的是「此刻在聊什么」+ 续聊指令。
 
@@ -457,6 +481,32 @@ def strip_time_prefixes(text: str) -> str:
     return s
 
 
+# 格式噪声正则（``sanitize_reply_text`` 与真流式增量守卫 ``utils.stream_guard``
+# 共用同一组真源；两处各抄一份字面量，规则一改就会出现「批式清了、流式漏了」）。
+_RE_MD_BOLD = re.compile(r"\*\*([^*\n]+)\*\*")
+_RE_SEMI_DUP = re.compile(r"[；;]{2,}")
+_RE_SEMI_AFTER_PUNCT = re.compile(r"([？?。！!…])[；;]+")
+_RE_SEMI_HEAD = re.compile(r"(?m)^\s*[；;]+")
+_RE_SEMI_TAIL = re.compile(r"[；;](?=[\s]|$)")
+
+
+def strip_format_noise(text: str) -> str:
+    """剥 markdown 粗体与分号残留（局部规则，不依赖整串位置）。
+
+    2026-10-14 生产实证：智谱降级轮把「1. **冰敷**：…」直接发进微信。
+    真流式下首句已下发的部分不走终裁，故该规则必须能逐句生效。
+    """
+    s = str(text or "")
+    if not s:
+        return s
+    s = _RE_MD_BOLD.sub(r"\1", s)
+    s = _RE_SEMI_DUP.sub("", s)
+    s = _RE_SEMI_AFTER_PUNCT.sub(r"\1", s)
+    s = _RE_SEMI_HEAD.sub("", s)
+    s = _RE_SEMI_TAIL.sub("", s)
+    return s
+
+
 def sanitize_reply_text(text: str, character_name: str = "") -> str:
     """只清显式发言标签和格式残留，不用人称/问答句式猜测语义归属。
 
@@ -477,12 +527,9 @@ def sanitize_reply_text(text: str, character_name: str = "") -> str:
         previous = s
         s = strip_time_prefixes(s)
         # markdown 粗体残留剥除（2026-10-14 生产实证：智谱降级轮把
-        # 「1. **冰敷**：…」markdown 列表直接发进微信——**是格式噪声不是人话）。
-        s = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", s)
-        s = re.sub(r"[；;]{2,}", "", s)
-        s = re.sub(r"([？?。！!…])[；;]+", r"\1", s)
-        s = re.sub(r"(?m)^\s*[；;]+", "", s)
-        s = re.sub(r"[；;](?=[\s]|$)", "", s)
+        # 「1. **冰敷**：…」markdown 列表直接发进微信——**是格式噪声不是人话**）。
+        # 2026-10-21 R4：正则抽到 ``strip_format_noise`` 与真流式增量守卫共用。
+        s = strip_format_noise(s)
         cleaned = []
         for line in s.splitlines():
             raw = line.strip()
@@ -725,7 +772,12 @@ def _strip_system_markers(text: str) -> str:
 # 用户没提问时反向虚构提问。prompt 侧软约束已收紧（reply_mode / 话题规则），
 # 但生成侧约束对降级模型仍会失效 —— 出站确定性兜底是最后一道门。
 
-_SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？!?…\n])")
+# 句界字符单一真源：批式切分（`_SENTENCE_SPLIT_RE`）与真流式的增量守卫
+# （`utils.stream_guard`，R4 2026-10-21）共用同一组终止符——两处若各写一份
+# 字面量，切句口径一改就会「批式删了、流式放了」。
+SENTENCE_TERMINATORS = "。！？!?…\n"
+
+_SENTENCE_SPLIT_RE = re.compile("(?<=[" + re.escape(SENTENCE_TERMINATORS) + "])")
 
 # 元记忆解释：解释自己的记忆/验证意图（生产原句「我想确认一下你是不是真的记得，
 # 有时候我会忘记自己说过的话」）。只匹配「解释记忆机制」形态，不碰正常关心
@@ -841,6 +893,92 @@ def _strip_attribution_flip(text: str) -> str:
     return "".join(kept).strip().lstrip("，,。.；;、 ")
 
 
+# 尾巴行行首角色前缀（structured_memory.get_cross_session_tail 的产出形态：
+# ``- 角色（cid）（MM-DD HH:MM）：content``）。判据只看**行首角色词**，不依赖
+# 时间戳是否存在（缺时间戳时该行同样要净化）。
+_TAIL_HEAD_STRIP_RE = re.compile(r"^[\s\-—•*]*")
+
+
+def _is_assistant_tail_head(head: str) -> bool:
+    """尾巴行首（``：`` 之前）是否 assistant 侧。"""
+    h = _TAIL_HEAD_STRIP_RE.sub("", str(head or "")).strip().lower()
+    return h.startswith(("角色", "助手", "assistant"))
+
+
+def scrub_history_rows(rows: Any, immersive: bool) -> Any:
+    """逐行净化**即将回灌给模型**的历史（chat_history 行 / 跨会话尾巴行）。
+
+    2026-10-21 FIX-3：单一真源。此前两处各写一套——
+
+    - 主链 ``_prepare_context`` 的内联循环（只作用于 ``get_chat_context`` 的
+      chat_history），
+    - 跨会话尾巴 ``structured_memory.get_cross_session_tail`` → ``format_session_tail``
+      注入，**完全没有净化**（尾巴只过滤「处理超时」占位）。
+
+    尾巴的命中条件恰是 ``hist_len < 2``（新会话 / 近史浅），正是冷启动最易出
+    问题的场景；已落库的坏回复（沉浸式括号动作 / 元记忆解释 / 归属翻转）会被
+    当「我自己说过的话」few-shot 回去，形成自我强化回路。
+
+    支持两种行长：
+
+    - ``dict``：chat_history 形态（``{"role", "content", ...}``）——role 为
+      ``assistant`` 时做语义净化；行内其它键（``timestamp``/``channel``）保留。
+    - ``str``：已格式化的尾巴行 ``- 角色（cid）（MM-DD HH:MM）：content``
+      ——**只净化 ``：`` 之后的 content**，行首角色/时间前缀原样保留（前缀是
+      10-11 时间感知批刻意加的，整体 strip 会把时间戳一起剥掉）。
+
+    规则（与出站守卫同源，模式无关项照旧）：
+
+    1. ``immersive`` 时剥离括号/星号动作段（``strip_stage_directions`` 单一真源）；
+    2. assistant 侧再过 ``_strip_meta_memory_talk``（元记忆解释/零信息问卷句）
+       与 ``_strip_attribution_flip``（把用户台词记到自己名下）——**与模式无关**；
+    3. 净化后为空的行**丢弃**（不留空壳行）；
+    4. 非 list 输入原样返回（调用方 fail-open，不炸）。
+
+    纯函数：不改入参、不动库，返回新列表——原文仍可排障。
+    """
+    if not isinstance(rows, list):
+        return rows
+    immersive = bool(immersive)
+    strip_sd = None
+    if immersive:
+        from utils.reply_mode import strip_stage_directions
+
+        strip_sd = strip_stage_directions
+
+    out: list[Any] = []
+    for row in rows:
+        if isinstance(row, dict):
+            content = str(row.get("content") or "")
+            if not content:
+                out.append(row)
+                continue
+            if strip_sd is not None:
+                content = strip_sd(content)
+            if str(row.get("role") or "").strip().lower() == "assistant":
+                content = _strip_meta_memory_talk(content)
+                content = _strip_attribution_flip(content)
+            if not content.strip():
+                continue
+            out.append({**row, "content": content})
+        elif isinstance(row, str):
+            head, sep, body = row.partition("：")
+            if not sep:
+                # 无角色前缀（非本函数产出形态）：整行当正文处理
+                head, body = "", row
+            if strip_sd is not None:
+                body = strip_sd(body)
+            if sep and _is_assistant_tail_head(head):
+                body = _strip_meta_memory_talk(body)
+                body = _strip_attribution_flip(body)
+            if not body.strip():
+                continue
+            out.append(f"{head}{sep}{body}" if sep else body)
+        else:
+            out.append(row)
+    return out
+
+
 def _strip_ungrounded_reciprocal(text: str, user_msg: Any) -> str:
     """用户本轮未提问时，截掉回复里「你呢，…？」这类反向虚构提问及其后文。
 
@@ -874,6 +1012,21 @@ def _strip_immersive_stage_directions(text: str, reply_mode: str) -> str:
     from utils.reply_mode import strip_stage_directions
 
     return strip_stage_directions(text)
+
+
+_EXTRA_ERROR_SENTINELS: tuple[str, ...] = (
+    # 空链形态（multi_provider_gateway.chat_stream 首行 ``yield``，不是 raise）：
+    # 它不是 ``_ERROR_SENTINELS`` 成员，批式与流式都会把它当正常回复发出去。
+    "没有可用的 LLM 提供商",
+)
+
+
+def _is_extra_error_sentinel(text: str) -> bool:
+    """``_ERROR_SENTINELS`` 之外的已知哨兵（保持单一网关真源不重复登记）。"""
+    stripped = str(text or "").strip()
+    if not (stripped.startswith("（") and stripped.endswith("）")):
+        return False
+    return any(sentinel in stripped for sentinel in _EXTRA_ERROR_SENTINELS)
 
 
 def _guard_log(rule: str, before: str, after: str) -> None:
@@ -927,7 +1080,7 @@ def terminal_reply_guard(
     from llm_provider.multi_provider_gateway import _is_error_reply
 
     s = str(reply or "").strip()
-    if not s or _is_error_reply(s):
+    if not s or _is_error_reply(s) or _is_extra_error_sentinel(s):
         return ""
     s = _strip_system_markers(s)
     if not s:

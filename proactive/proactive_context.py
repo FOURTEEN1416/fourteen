@@ -21,7 +21,40 @@ _MES_EXAMPLE_MAX_CHARS = 600
 _CREATOR_NOTES_MAX_CHARS = 400
 
 
-def load_full_persona_hint(character_id: str) -> str:
+def _strip_stage_directions_if_immersive(text: str, user_key: str | None = None) -> str:
+    """沉浸式下剥掉括号/星号动作段；小说式原样返回。
+
+    2026-10-21 FIX-2：角色卡里 mes_example/creator_notes/description 等字段
+    普遍带括号动作（生产 42 张卡：37 张 mes_example、23 张 creator_notes），
+    原样拼进主动消息 prompt 等于用第一手 few-shot 教模型违反同一 prompt 里的
+    ``_IMMERSIVE_CONSTRAINTS``（「严禁括号动作/神态/旁白」）——与首轮 R1 主链
+    缺陷同机理（``character_aggregate`` 已修，主动线被漏掉）。
+
+    每次调用动态读模式真源（无模块级缓存）：切角色/切模式即时生效 + 用户隔离
+    铁律。**读模式/导入异常时保守返回原文**——宁可多给一段 few-shot，也不可
+    因守卫故障把人设整段吞掉。
+    """
+    raw = str(text or "")
+    if not raw:
+        return ""
+    try:
+        from utils.reply_mode import (
+            REPLY_MODE_IMMERSIVE,
+            read_reply_mode,
+            strip_stage_directions,
+        )
+
+        # 2026-10-21 R7：主动线也按**该会话**的模式（有覆盖用覆盖，否则全局）。
+        # user_key 为空（无会话上下文的后台调用）→ 回落全局默认，旧行为不变。
+        if read_reply_mode(user_key) != REPLY_MODE_IMMERSIVE:
+            return raw
+        return strip_stage_directions(raw)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("_strip_stage_directions_if_immersive failed: %s", e)
+        return raw
+
+
+def load_full_persona_hint(character_id: str, user_key: str | None = None) -> str:
     """完整版人设（替代旧 ``llm_proactive.load_persona_hint`` 的 400+200 裁剪版）。
 
     - ``default``/``demo`` → ``config/persona.yaml``：``description`` 全量
@@ -42,14 +75,14 @@ def load_full_persona_hint(character_id: str) -> str:
         from utils.project_paths import project_path
 
         if cid in ("default", "demo"):
-            return _persona_from_yaml(project_path("config", "persona.yaml"))
-        return _persona_from_card(project_path("config", "characters"), cid)
+            return _persona_from_yaml(project_path("config", "persona.yaml"), user_key)
+        return _persona_from_card(project_path("config", "characters"), cid, user_key)
     except Exception as e:  # noqa: BLE001
         logger.debug("load_full_persona_hint failed cid=%s: %s", cid, e)
         return ""
 
 
-def _persona_from_yaml(path) -> str:
+def _persona_from_yaml(path, user_key: str | None = None) -> str:
     """内置十四（persona.yaml）：description 全量 + 通用禁令小节。"""
     from pathlib import Path
 
@@ -62,7 +95,10 @@ def _persona_from_yaml(path) -> str:
     if not isinstance(data, dict):
         return ""
     name = str(data.get("name") or "").strip() or "十四"
-    desc = str(data.get("description") or "").strip()
+    # 2026-10-21 FIX-2：沉浸式下先剥括号动作再拼段（剥空则不注入该段）。
+    desc = _strip_stage_directions_if_immersive(
+        str(data.get("description") or "").strip(), user_key
+    )
     notes = str(data.get("creator_notes") or "")
     segments = [f"角色：{name}"]
     if desc:
@@ -71,13 +107,14 @@ def _persona_from_yaml(path) -> str:
     # 只服务主链被直球拷问的场景，主动消息用不上（跳过它前面的全部内容）
     idx = notes.find("## 通用禁令")
     if idx >= 0:
-        bans = notes[idx:].strip()
-        segments.append(bans)
+        bans = _strip_stage_directions_if_immersive(notes[idx:].strip(), user_key)
+        if bans:
+            segments.append(bans)
     hint = "\n\n".join(s for s in segments if s).strip()
     return hint[:_PERSONA_HINT_MAX_CHARS]
 
 
-def _persona_from_card(root, cid: str) -> str:
+def _persona_from_card(root, cid: str, user_key: str | None = None) -> str:
     """角色卡分支：config/characters/{cid}.json（glob 按 id/name 兜底匹配）。"""
     import json
     from pathlib import Path
@@ -97,6 +134,16 @@ def _persona_from_card(root, cid: str) -> str:
     d = json.loads(p.read_text(encoding="utf-8"))
     name = str(d.get("name") or cid)
     segments: list[str] = [f"角色：{name}"]
+    # 2026-10-21 FIX-2：**示例/规则段**按模式先剥括号动作再拼；剥空的段不注入
+    # （不留空标题，与 character_aggregate 同款策略）。剥离先于截断——截断留在
+    # 后面的只可能是未闭合括号，不会漏出完整动作段。
+    #
+    # 🔴 作用面刻意收窄到 mes_example / creator_notes：这两段整体是 few-shot
+    # 示例与模型指令（生产实测卡文括号为 `（拉了拉衣领）`「（顿了顿）」式动作），
+    # 原样注入等于用 few-shot 教模型违反同一 prompt 的沉浸式禁令（`character_aggregate`
+    # 同机理已修，主动线被漏掉）。**description / personality_text / speaking_style
+    # 不动**——实测其括号绝大多数是规则限定语而非动作（如李信「（优先级从高到低，
+    # 不可越级违背）」、上杉绘梨衣「（凌驾于所有规则之上…）」），剥掉会扣掉角色规则。
     desc = str(d.get("description") or "").strip()
     if desc:
         segments.append(f"【角色设定】\n{desc}")
@@ -106,17 +153,21 @@ def _persona_from_card(root, cid: str) -> str:
     style = str(d.get("speaking_style") or "").strip()
     if style:
         segments.append(f"【说话风格】\n{style}")
-    mes = str(d.get("mes_example") or "").strip()
+    mes = _strip_stage_directions_if_immersive(
+        str(d.get("mes_example") or "").strip(), user_key
+    )
     if mes:
         segments.append(f"【回复示例】\n{mes[:_MES_EXAMPLE_MAX_CHARS]}")
-    notes = str(d.get("creator_notes") or "").strip()
+    notes = _strip_stage_directions_if_immersive(
+        str(d.get("creator_notes") or "").strip(), user_key
+    )
     if notes:
         segments.append(f"【扮演规则】\n{notes[:_CREATOR_NOTES_MAX_CHARS]}")
     hint = "\n\n".join(s for s in segments if s).strip()
     return hint[:_PERSONA_HINT_MAX_CHARS]
 
 
-def immersive_proactive_constraints() -> str:
+def immersive_proactive_constraints(user_key: str | None = None) -> str:
     """按当前回复模式渲染主动消息约束段（决策/生成两线共用）。
 
     主链 ``utils.reply_mode`` 已有沉浸式/小说式双模式指令，但主动两条线从未
@@ -127,7 +178,8 @@ def immersive_proactive_constraints() -> str:
     try:
         from utils.reply_mode import REPLY_MODE_NOVEL, read_reply_mode
 
-        if read_reply_mode() == REPLY_MODE_NOVEL:
+        # 2026-10-21 R7：跟随该会话的模式（主动链也有明确会话归属）
+        if read_reply_mode(user_key) == REPLY_MODE_NOVEL:
             return _NOVEL_CONSTRAINTS
         return _IMMERSIVE_CONSTRAINTS
     except Exception as e:  # noqa: BLE001

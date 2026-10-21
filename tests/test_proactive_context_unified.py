@@ -232,3 +232,265 @@ def test_build_context_whitelist_block_positive_directive(monkeypatch):
     assert "# 用户称呼" in ctx
     assert "只能" in ctx
     assert "你自己的名字" in ctx
+
+
+# ── 6. FIX-2（2026-10-21）：人设段按模式剥括号动作用 ─────────────
+#
+# 缺陷：load_full_persona_hint 把卡片的 mes_example[:600] / creator_notes[:400]
+# 原样拼进【回复示例】【扮演规则】（proactive_context.py:109-114），yaml 分支的
+# description 同样原样（:65-69）。无视 read_reply_mode() —— 生产 42 张卡里
+# 37 张 mes_example、23 张 creator_notes 含括号动作，沉浸式主动消息的
+# **第一手 few-shot 就是括号动作**，与同一 prompt 里的 _IMMERSIVE_CONSTRAINTS
+# 「严禁括号动作/神态/旁白」自相矛盾（「把带括号的示例喂进 prompt 又不拦」）。
+# 与首轮 R1 主链缺陷同机理（character_aggregate 已修），主动线被漏掉。
+#
+# 修法：按 read_reply_mode()==immersive 先 strip_stage_directions 再拼段，
+# 剥空则该段不注入（与 character_aggregate 同款策略：剥空不注入，不留空标题）。
+# 每次调用动态读真源，不缓存。
+
+import re as _re  # noqa: E402
+
+# 与 utils.reply_mode 单一真源同形的括号/星号动作段判据
+_STAGE_RE = _re.compile(r"[（(][^（）()]{0,200}?[）)]|\*[^*\n]{1,200}\*")
+
+
+def _force_mode(monkeypatch, mode: str) -> None:
+    """把回复模式真源钉到指定值（生产代码函数内局部 import → 打模块属性即生效）。"""
+    import utils.reply_mode as rm
+
+    # 2026-10-21 R7：签名加 `user_key` 后 mock 必须接受实参（语义不变：
+    # 仍把模式钉死，不读宿主真实配置）。
+    monkeypatch.setattr(rm, "read_reply_mode", lambda *a, **k: mode)
+
+
+def _write_card(root: Path, cid: str, **fields) -> None:
+    card = {
+        "id": cid,
+        "name": fields.pop("name", "测试角色"),
+        **fields,
+    }
+    (root / f"{cid}.json").write_text(
+        json.dumps(card, ensure_ascii=False), encoding="utf-8",
+    )
+
+
+def _section(hint: str, title: str) -> str:
+    """取人设块里 ``【标题】\\n正文`` 那一段（到下一个 ``\\n\\n【…】`` 标题为止）。
+
+    段内允许空行（示例对话常带空行），因此不能用 ``split("\\n\\n")``——那会在
+    段内空行处截断，令断言假通过。标题行以 ``^【…】$`` 形态出现，据此定界。
+    """
+    m = _re.search(
+        rf"(?m)^{_re.escape(title)}\n(.*?)(?=\n\n【[^】]+】\n|\Z)", hint, _re.S,
+    )
+    return m.group(1) if m else ""
+
+
+def test_persona_hint_strips_stage_directions_in_immersive(monkeypatch, tmp_path):
+    """沉浸式：示例/规则段（【回复示例】【扮演规则】）无括号动作。"""
+    from proactive import proactive_context as pctx
+
+    _write_card(
+        tmp_path, "cid-imm",
+        description="（她站在窗边）傲娇的测试角色。",
+        personality_text="（挑眉）嘴硬心软。",
+        speaking_style="简短、带刺。",
+        mes_example="用户：早\n测试角色：（想了想）早呀，今天降温了。",
+        creator_notes="（微笑）保持傲娇；不许客服腔。",
+    )
+    _force_mode(monkeypatch, "immersive")
+    hint = pctx._persona_from_card(tmp_path, "cid-imm")
+
+    assert hint, "人设不得为空"
+    assert not _STAGE_RE.search(_section(hint, "【回复示例】")), (
+        f"沉浸式【回复示例】仍含括号动作: {_section(hint, '【回复示例】')!r}"
+    )
+    assert not _STAGE_RE.search(_section(hint, "【扮演规则】")), (
+        f"沉浸式【扮演规则】仍含括号动作: {_section(hint, '【扮演规则】')!r}"
+    )
+    # 剥的是动作段，正文必须留存（剥空 ≠ 整段丢弃）
+    assert "早呀，今天降温了" in hint
+    assert "不许客服腔" in hint
+
+
+def test_persona_hint_keeps_role_definition_segments(monkeypatch, tmp_path):
+    """作用面收窄：description/personality_text 的括号限定语**不得**被剥。
+
+    实测卡文这两段的括号绝大多数是规则限定语而非动作（李信「（优先级从高到低，
+    不可越级违背）」、上杉绘梨衣「（凌驾于所有规则之上…）」），剥掉等于扣角色规则。
+    """
+    from proactive import proactive_context as pctx
+
+    _write_card(
+        tmp_path, "cid-def",
+        description="（优先级从高到低，不可越级违背）测试角色。",
+        personality_text="（强制不可修改）",
+        mes_example="（想了想）早呀。",
+    )
+    _force_mode(monkeypatch, "immersive")
+    hint = pctx._persona_from_card(tmp_path, "cid-def")
+
+    assert "（优先级从高到低，不可越级违背）" in hint, "角色设定段的规则限定语不得被剥"
+    assert "（强制不可修改）" in hint, "性格段的规则限定语不得被剥"
+
+
+def test_persona_hint_keeps_stage_directions_in_novel(monkeypatch, tmp_path):
+    """小说式：括号动作是设计的一部分，示例/规则段原样保留（不误伤）。"""
+    from proactive import proactive_context as pctx
+
+    _write_card(
+        tmp_path, "cid-novel",
+        description="（她站在窗边）傲娇的测试角色。",
+        mes_example="测试角色：（想了想）早呀。",
+        creator_notes="（微笑）保持傲娇。",
+    )
+    _force_mode(monkeypatch, "novel")
+    hint = pctx._persona_from_card(tmp_path, "cid-novel")
+
+    assert "（她站在窗边）" in hint
+    assert "（想了想）" in hint, "小说式不得剥 mes_example 括号"
+    assert "（微笑）" in hint, "小说式不得剥 creator_notes 括号"
+
+
+def test_persona_hint_empty_segment_removed_not_empty_title(monkeypatch, tmp_path):
+    """沉浸式剥空 → 该段**不注入**，而非留一个空标题行。"""
+    from proactive import proactive_context as pctx
+
+    _write_card(
+        tmp_path, "cid-empty",
+        description="正常角色描述。",
+        mes_example="（想了想）",           # 整段都是动作 → 剥空
+        creator_notes="（微笑）",            # 整段都是动作 → 剥空
+    )
+    _force_mode(monkeypatch, "immersive")
+    hint = pctx._persona_from_card(tmp_path, "cid-empty")
+
+    assert "【回复示例】" not in hint, "剥空段不得留空标题（【回复示例】）"
+    assert "【扮演规则】" not in hint, "剥空段不得留空标题（【扮演规则】）"
+    assert "【角色设定】" in hint, "非空段必须留存"
+
+
+def test_persona_hint_yaml_branch_mode_boundary(monkeypatch, tmp_path):
+    """yaml 分支（内置十四）同样按模式剥：description + 通用禁令段。"""
+    from proactive import proactive_context as pctx
+
+    yml = tmp_path / "persona.yaml"
+    yml.write_text(
+        "name: 十四\n"
+        "description: |\n"
+        "  （她抱着猫）傲娇的十四。\n"
+        "creator_notes: |\n"
+        "  ## 通用禁令\n"
+        "  - 不许客服腔（最高优先级）。\n",
+        encoding="utf-8",
+    )
+    _force_mode(monkeypatch, "immersive")
+    hint_imm = pctx._persona_from_yaml(yml)
+    assert not _STAGE_RE.search(hint_imm), f"沉浸式 yaml 人设仍含括号: {hint_imm!r}"
+    assert "傲娇的十四" in hint_imm and "通用禁令" in hint_imm
+    assert "不许客服腔" in hint_imm
+
+    _force_mode(monkeypatch, "novel")
+    hint_novel = pctx._persona_from_yaml(yml)
+    assert "（她抱着猫）" in hint_novel and "（最高优先级）" in hint_novel
+
+
+def test_load_full_persona_hint_wires_mode_through_public_api(monkeypatch, tmp_path):
+    """公共入口 load_full_persona_hint 必须真正接线（不只是两个内部函数改了）。"""
+    from utils import project_paths
+
+    card_root = tmp_path / "characters"
+    card_root.mkdir()
+    _write_card(
+        card_root, "cid-pub",
+        description="（她站在窗边）傲娇。",
+        mes_example="（想了想）早呀。",
+    )
+    yml = tmp_path / "persona.yaml"
+    yml.write_text("name: 十四\ndescription: |\n  （抱着猫）傲娇十四。\n", encoding="utf-8")
+
+    def _fake_project_path(*parts):
+        if parts == ("config", "characters"):
+            return card_root
+        if parts == ("config", "persona.yaml"):
+            return yml
+        return tmp_path.joinpath(*parts)
+
+    monkeypatch.setattr(project_paths, "project_path", _fake_project_path)
+
+    _force_mode(monkeypatch, "immersive")
+    assert not _STAGE_RE.search(_section(load_full_persona_hint("cid-pub"), "【回复示例】"))
+    assert not _STAGE_RE.search(load_full_persona_hint("default"))
+
+    _force_mode(monkeypatch, "novel")
+    assert _STAGE_RE.search(_section(load_full_persona_hint("cid-pub"), "【回复示例】"))
+    assert _STAGE_RE.search(load_full_persona_hint("default"))
+
+
+def test_load_full_persona_hint_mode_read_dynamically_no_cache(monkeypatch, tmp_path):
+    """模式每次动态读真源：同一 cid 连调两次，切模式即变（禁止模块级缓存）。"""
+    from utils import project_paths
+
+    card_root = tmp_path / "characters"
+    card_root.mkdir()
+    _write_card(card_root, "cid-dyn", mes_example="（想了想）早呀。")
+    monkeypatch.setattr(
+        project_paths, "project_path",
+        lambda *parts: card_root if parts == ("config", "characters") else tmp_path.joinpath(*parts),
+    )
+
+    _force_mode(monkeypatch, "immersive")
+    first = load_full_persona_hint("cid-dyn")
+    _force_mode(monkeypatch, "novel")
+    second = load_full_persona_hint("cid-dyn")
+    assert first != second, "切模式后人设必须立刻变化（禁止缓存）"
+    assert not _STAGE_RE.search(first) and _STAGE_RE.search(second)
+
+
+def test_persona_hint_real_cards_mode_boundary(monkeypatch):
+    """真实卡批量语义下界：沉浸式下示例/规则段无括号；小说式多数卡保留括号。"""
+    from proactive import proactive_context as pctx
+
+    cards: list[dict] = []
+    for f in sorted(_CHAR_ROOT.glob("*.json")):
+        try:
+            cards.append(json.loads(f.read_text(encoding="utf-8")))
+        except Exception:  # noqa: BLE001
+            continue
+    if not cards:
+        pytest.skip(f"config/characters 无可用卡（现 {len(cards)}）")
+
+    bracketed_raw = sum(
+        1
+        for d in cards
+        if _STAGE_RE.search(str(d.get("mes_example") or ""))
+        or _STAGE_RE.search(str(d.get("creator_notes") or ""))
+    )
+    assert bracketed_raw >= 30, (
+        f"前提不成立：mes_example/creator_notes 含括号动作的真实卡仅 {bracketed_raw} 张"
+    )
+
+    _force_mode(monkeypatch, "immersive")
+    for d in cards:
+        cid = str(d.get("id") or "")
+        hint = pctx.load_full_persona_hint(cid)
+        for title in ("【回复示例】", "【扮演规则】"):
+            seg = _section(hint, title)
+            assert not _STAGE_RE.search(seg), (
+                f"沉浸式下卡 {cid} 的 {title} 仍含括号动作: {seg!r}"
+            )
+
+    _force_mode(monkeypatch, "novel")
+    novel_bracketed = sum(
+        1
+        for d in cards
+        if _STAGE_RE.search(
+            _section(pctx.load_full_persona_hint(str(d.get("id") or "")), "【回复示例】")
+        )
+    )
+    # 下界取 20（而非原始 37）：人设总长上限 1200 字，【回复示例】排在
+    # 角色设定/性格/说话风格之后，长卡截断后示例段整个不可见（实测 42 卡里
+    # 只有 28 张能看到该段、其中 25 张含括号）。断言目的只是证明「剥离非空操作」。
+    assert novel_bracketed >= 20, (
+        f"小说式下【回复示例】含括号的卡仅 {novel_bracketed} 张——剥离非空操作验证失败"
+    )

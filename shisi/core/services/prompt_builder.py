@@ -32,6 +32,7 @@ def build(
     tool_context: str = "",
     knowledge_query: str = "",
     user_key: str = "",
+    reply_mode: str | None = None,
 ) -> str:
     """构建系统提示词。
 
@@ -61,6 +62,8 @@ def build(
         knowledge_context=knowledge_context,
         storyline_context=storyline_context,
         tool_context=tool_context,
+        # 2026-10-21 R7：本轮模式透传（缺省 None → 角色聚合内热读，旧行为不变）
+        reply_mode=reply_mode,
     )
 
     return prompt

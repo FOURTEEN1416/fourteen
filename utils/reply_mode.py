@@ -29,6 +29,9 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
+from contextlib import closing
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +45,14 @@ REPLY_MODES = (REPLY_MODE_IMMERSIVE, REPLY_MODE_NOVEL)
 DEFAULT_REPLY_MODE = REPLY_MODE_IMMERSIVE
 
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "data" / "scheduler_config.json"
+
+#: per-user 覆盖库（2026-10-21 R7）：与 `user_profile` / `user_facts` **同库同隔离域**
+#: （`data/sqlite.db`），不新开第二个真源。模块常量便于测试隔离（conftest 已把
+#: 真实 `data/sqlite.db` 当生产库，测试必须改道临时路径）。
+_OVERRIDE_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "sqlite.db"
+
+#: 覆盖表名（删号 purge/count/verify 三处清单都引用它，防三处字面量漂移）。
+OVERRIDE_TABLE = "user_reply_mode"
 
 _MODE_LABELS = {
     REPLY_MODE_IMMERSIVE: "沉浸式聊天（像真人发微信）",
@@ -111,8 +122,25 @@ _INSTRUCTION_NOVEL = """【回复模式：小说式】
   不要点破「隔了多久」、不要解释你怎么知道的——时间感是底色不是台词。"""
 
 
-def read_reply_mode() -> str:
-    """读取当前回复模式；缺失/非法一律回落默认（沉浸式）。"""
+def read_reply_mode(user_key: str | None = None) -> str:
+    """读取回复模式：**用户覆盖优先，无覆盖回落全局默认**。
+
+    Args:
+        user_key: 完整会话键（v1.28 形态 ``N:wxid``，由
+            ``StructuredMemory.user_key_from_session`` 产出）。
+            ``None``/空串 → 只读全局默认——**保持旧行为**，供后台线/提醒线等
+            没有会话上下文的调用点使用（2026-10-21 R7 兼容契约）。
+
+    语义（D15 显式声明、绝不猜测）：
+      - 覆盖表里没有该 user_key 的行 → 回落全局默认，不做任何模糊匹配；
+      - 覆盖行存在但值是非法串 → 回落全局默认（不信任脏数据）；
+      - 覆盖库不可用（缺失/损坏/权限）→ 回落全局默认，**绝不抛异常炸主链**。
+
+    每次调用热读（无进程缓存）：控制端写入即对所有 worker 生效。
+    """
+    override = _read_override(user_key)
+    if override in REPLY_MODES:
+        return override
     raw: Any = json_state.read_json(_CONFIG_PATH, default={}) or {}
     mode = raw.get("reply_mode")
     if mode in REPLY_MODES:
@@ -120,31 +148,121 @@ def read_reply_mode() -> str:
     return DEFAULT_REPLY_MODE
 
 
-def write_reply_mode(mode: str) -> str:
+def write_reply_mode(mode: str, user_key: str | None = None) -> str:
     """写入回复模式（保留文件内其他键）。返回实际生效值。
+
+    Args:
+        mode: ``immersive`` / ``novel``。
+        user_key: 非空 → 写**该用户**的覆盖行（不动全局默认）；空/``None`` →
+            写全局默认（旧行为，全站生效）。
 
     与其他 ``data/*.json`` 状态文件共用 `utils.json_state` 的原子写 + 跨进程锁
     —— 本文件是 4 个 uvicorn worker 共读的跨 worker 运行时配置，
     「控制端写入 / worker 读取」不允许出现半写。
+
+    Raises:
+        ValueError: mode 非法。
+        OSError / sqlite3.Error: 持久化失败**上抛**（2026-10-21 R7 修复）。
+            旧实现只 WARNING 后 ``return mode``，调用方据此记「回复模式已切换」
+            = **写盘失败却假成功**（独立复核指出的既有缺陷）。
     """
     if mode not in REPLY_MODES:
         raise ValueError(f"unknown reply_mode: {mode!r}; expected one of {REPLY_MODES}")
 
+    if user_key:
+        _write_override(str(user_key).strip(), mode)
+        return mode
+
     def _mutate(data: dict) -> None:
         data["reply_mode"] = mode
 
-    try:
-        json_state.update_json(_CONFIG_PATH, _mutate)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("写入 reply_mode 失败: %s", e)
+    json_state.update_json(_CONFIG_PATH, _mutate)
     return mode
 
 
-def reply_mode_instruction(mode: str | None = None) -> str:
-    """返回应追加到 system prompt 的模式指令。"""
-    m = mode if mode in REPLY_MODES else read_reply_mode()
+def clear_reply_mode_override(user_key: str) -> bool:
+    """删除该用户的覆盖行（回落全局默认）。返回是否有行被删。"""
+    uk = str(user_key or "").strip()
+    if not uk:
+        return False
+    try:
+        with closing(_override_conn()) as conn, conn:
+            cur = conn.execute("DELETE FROM user_reply_mode WHERE user_key = ?", (uk,))
+            return bool(cur.rowcount)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("清除回复模式覆盖失败 user=%s: %s", uk, e)
+        return False
+
+
+def reply_mode_instruction(mode: str | None = None, *, user_key: str | None = None) -> str:
+    """返回应追加到 system prompt 的模式指令。
+
+    ``mode`` 显式给出时优先（一轮内单次解析的透传入口）；否则按 ``user_key``
+    读真源（有覆盖用覆盖，否则全局）。
+    """
+    m = mode if mode in REPLY_MODES else read_reply_mode(user_key)
     return _INSTRUCTION_NOVEL if m == REPLY_MODE_NOVEL else _INSTRUCTION_IMMERSIVE
 
 
 def reply_mode_label(mode: str) -> str:
     return _MODE_LABELS.get(mode, mode)
+
+
+# ── per-user 覆盖存储（R7 2026-10-21）────────────────────────────
+#
+# 为什么放在 `shisi` 侧的同一个 sqlite.db：用户隔离域（user_key = 完整会话键
+# `N:wxid`）与 `user_profile` / `user_facts` 完全一致，删号 purge 也按同一键集
+# 清理。开第二个库只会制造「删了一个、漏了另一个」的第二个真源。
+#
+# 幂等建表：每次连接 `CREATE TABLE IF NOT EXISTS`（SQLite 的 DDL 是原子的）。
+# 不写迁移脚本 —— 旧库首次访问即建表，与 `UserProfileStore._ensure_schema` 同款。
+
+_OVERRIDE_SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS {OVERRIDE_TABLE} (
+    user_key TEXT PRIMARY KEY,
+    mode TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT ''
+)
+"""
+
+
+def _override_conn() -> sqlite3.Connection:
+    """打开覆盖库并幂等建表。
+
+    路径父目录不存在时先建（冷启动/测试 tmp 场景）；失败上抛，由调用方决定
+    是「回落全局」还是「写入失败上抛」。
+    """
+    path = Path(_OVERRIDE_DB_PATH)
+    if path.parent and not path.parent.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path), timeout=5.0)
+    conn.execute(_OVERRIDE_SCHEMA)
+    conn.commit()
+    return conn
+
+
+def _read_override(user_key: str | None) -> str:
+    """读该用户的覆盖值；无键/无行/库不可用 → 空串（调用方回落全局）。"""
+    uk = str(user_key or "").strip()
+    if not uk:
+        return ""
+    try:
+        with closing(_override_conn()) as conn:
+            row = conn.execute(
+                f"SELECT mode FROM {OVERRIDE_TABLE} WHERE user_key = ?", (uk,)
+            ).fetchone()
+        return str(row[0]) if row and row[0] else ""
+    except Exception as e:  # noqa: BLE001
+        logger.debug("读取回复模式覆盖失败 user=%s（回落全局）: %s", uk, e)
+        return ""
+
+
+def _write_override(user_key: str, mode: str) -> None:
+    """写/更新该用户的覆盖行。失败**上抛**（调用方必须知道没生效）。"""
+    with closing(_override_conn()) as conn, conn:
+        conn.execute(
+            f"INSERT INTO {OVERRIDE_TABLE} (user_key, mode, updated_at) VALUES (?, ?, ?) "
+            f"ON CONFLICT(user_key) DO UPDATE SET mode = excluded.mode, "
+            f"updated_at = excluded.updated_at",
+            (user_key, mode, datetime.now().isoformat(timespec="seconds")),
+        )

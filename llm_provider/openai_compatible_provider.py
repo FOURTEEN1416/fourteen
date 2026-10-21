@@ -35,6 +35,12 @@ logger = logging.getLogger("llm_provider.openai_compatible")
 # OAuth 刷新失败/缺 secret 时的重试冷却（秒）——避免每请求白打 token 端点
 _OAUTH_RETRY_COOLDOWN = 300.0
 
+# 单次 provider 调用的结构化耗时日志标记（2026-10-21 FIX-5）。
+# 排障时 `grep provider_call` 即可直接取延迟样本，不必再靠外挂探针反推。
+# 字段一律 key=value、全部为元数据 —— 不含 prompt / 回复原文（脱敏纪律同
+# `terminal_reply_guard` 的 `reply_guard_hit`：只记规则名与长度）。
+PROVIDER_CALL_LOG_MARK = "[provider_call]"
+
 
 class OpenAICompatibleProvider:
     """
@@ -59,7 +65,7 @@ class OpenAICompatibleProvider:
         models_config: list[dict] | None = None,
         max_tokens: int = 2048,
         temperature: float = 0.85,
-        stream_enabled: bool = True,
+        stream_enabled: bool = False,
         extra_payload: dict[str, Any] | None = None,
         request_timeout: float | None = None,
         **kwargs: Any,
@@ -71,7 +77,12 @@ class OpenAICompatibleProvider:
         self.auth_mode = auth_mode
         self.max_tokens = max_tokens
         self.temperature = temperature
-        self.stream_enabled = stream_enabled
+        # 2026-10-21 FIX-2：缺省 **False**（保持旧行为），由配置显式开启。
+        # 「流式聚合」是本批新引入的能力，新能力在未声明的配置下不得改变既有
+        # 行为 —— 生产 `config/llm_providers.json` 五个供应商都显式写了
+        # ``"stream_enabled": true``，故生产走流式聚合；程序化构造且未声明的
+        # 调用方维持原非流式路径（此前该字段是死配置，行为恒为非流式）。
+        self.stream_enabled = bool(stream_enabled)
         self.extra_payload = extra_payload or {}
 
         # 模型降级注册表
@@ -122,6 +133,47 @@ class OpenAICompatibleProvider:
             "OpenAICompatibleProvider [%s]: api_base=%s, model=%s, auth=%s",
             provider_name, self.api_base, self.model, auth_mode,
         )
+
+    def _log_call_outcome(
+        self,
+        *,
+        model_name: str,
+        stream: bool,
+        ok: bool,
+        elapsed_s: float,
+        empty: bool = False,
+        error: str = "",
+        ttft_s: float | None = None,
+        partial: bool = False,
+    ) -> None:
+        """单次 provider 调用的结构化耗时日志（2026-10-21 FIX-5）。
+
+        背景：此前 provider 自身**不记耗时** —— 日志里唯一相关的只有 wechat 侧
+        整轮 `llm_time`，而 `observability.metrics.record_chat_duration` 仅在
+        ``HAS_METRICS`` 时生效且不进日志。于是「agnes 单次延迟分布」只能靠外挂
+        探针或反推，**无法从生产日志直接取证**（质量悬崖批排查时最大的证据缺口）。
+
+        字段（key=value，便于 grep 与直接算分位数）：
+        ``provider`` / ``model`` / ``stream`` / ``ok`` / ``elapsed_ms`` /
+        ``ttft_ms``（仅流式）/ ``empty``（空内容响应）/ ``error``（失败时异常类型）
+        / ``partial``（流式已下发部分内容后中断）。全部为元数据，**不含原文**。
+        """
+        parts = [
+            PROVIDER_CALL_LOG_MARK,
+            f"provider={self.provider_name}",
+            f"model={model_name}",
+            f"stream={stream}",
+            f"ok={ok}",
+            f"elapsed_ms={int(max(0.0, float(elapsed_s)) * 1000)}",
+        ]
+        if ttft_s is not None:
+            parts.append(f"ttft_ms={int(max(0.0, float(ttft_s)) * 1000)}")
+        parts.append(f"empty={bool(empty)}")
+        if not ok:
+            parts.append(f"error={error or 'Unknown'}")
+        if partial:
+            parts.append("partial=True")
+        logger.info(" ".join(parts))
 
     @property
     def _async_client(self) -> httpx.AsyncClient:
@@ -188,18 +240,103 @@ class OpenAICompatibleProvider:
         timeout（2026-10-16 三连同义批 D）：按调用覆盖读超时（如主动决策线
         放宽到 25s）。⚠️ 只传 truthy 值——httpx 语义里 per-request
         ``timeout=None`` 是「禁用超时」而非「用客户端默认」，不能无条件传。
+
+        ``stream_enabled``（2026-10-21 FIX-2）：该字段此前是**死配置** ——
+        配置里写着 true、前端也能改，但全仓无读取点，实际是否流式恒由调用方
+        决定（本函数恒 ``stream=False``）。现在**消费**该开关：为真走流式聚合
+        并返回完整文本，为假保持原非流式路径。
         """
         from typing import cast as _cast
 
         from .multi_provider_gateway import _merge_attachments
 
         messages, query = _merge_attachments(query, system_prompt, history, messages, attachments)
+        if self.stream_enabled:
+            return await self._chat_aggregated(
+                query=query, system_prompt=system_prompt, history=history,
+                messages=messages, temperature=temperature, max_tokens=max_tokens,
+                tools=tools, model=model, timeout=timeout,
+            )
         result = await self._chat(
             query=query, system_prompt=system_prompt, history=history,
             messages=messages, temperature=temperature, max_tokens=max_tokens,
             tools=tools, model=model, stream=False, timeout=timeout,
         )
         return _cast(str, result)
+
+    async def _chat_aggregated(
+        self,
+        query: str = "",
+        system_prompt: str = "",
+        history: list | None = None,
+        messages: list | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        tools: list | None = None,
+        model: str | None = None,
+        timeout: float | None = None,
+    ) -> str:
+        """流式聚合：消费 ``stream_enabled`` 开关（2026-10-21 FIX-2）。
+
+        与非流式路径（``_chat(stream=False)``）**语义对齐**，这是本改动能安全
+        落地的前提 —— 失败必须走**同一条**错误处理链：
+
+        - ``timeout`` 继续生效（主动决策线放宽的 25s 不得静默变成 60s）；
+        - 记账（``mark_failed`` / 指标）+ 同 provider 内 ``_try_fallback`` 模型
+          兜底 + 统一 ``RuntimeError("模型请求失败，未生成角色回复")``；
+        - 聚合为空视同「空内容响应」→ 同样走上面这条链（与非流式同规则）；
+        - 失败不返回半截文本：聚合场景没有已下发的 token，部分文本一旦当成
+          最终回复落库，就等于丢掉了「换供应商重试」的兜底。
+        """
+        model_name = model or self.model
+        temp = temperature if temperature is not None else self.temperature
+        mt = max_tokens or self.max_tokens
+        start = time.perf_counter()
+        parts: list[str] = []
+        entry = self.registry.get_by_name(model_name)
+        err: Exception | None = None
+        try:
+            result = await self._chat(
+                query=query, system_prompt=system_prompt, history=history,
+                messages=messages, temperature=temperature, max_tokens=max_tokens,
+                tools=tools, model=model_name, stream=True, timeout=timeout,
+            )
+            if isinstance(result, str):
+                # 无 api_key / 无 api_base 的短路分支：与非流式同构
+                return result
+            async for token in result:
+                if token:
+                    parts.append(token)
+            if not "".join(parts).strip():
+                raise RuntimeError(
+                    f"[{self.provider_name}/{model_name}] 流式响应无内容（聚合为空）"
+                )
+        except Exception as e:  # noqa: BLE001
+            err = e
+
+        if err is None:
+            if HAS_METRICS:
+                record_chat_duration(
+                    f"{self.provider_name}/{model_name}", time.perf_counter() - start,
+                )
+            if entry:
+                entry.mark_success()
+            return "".join(parts).strip()
+
+        # 与非流式路径同一条错误链（见 _chat 的 except 分支）
+        if HAS_METRICS:
+            record_error("llm", type(err).__name__)
+        if entry:
+            entry.mark_failed()
+        logger.warning(
+            "[%s/%s] 流式聚合失败: %s: %s",
+            self.provider_name, model_name, type(err).__name__, err,
+        )
+        built = self._build_messages(query, system_prompt, history, messages)
+        fallback = await self._try_fallback(built, temp, mt, tools)
+        if fallback:
+            return fallback
+        raise RuntimeError("模型请求失败，未生成角色回复") from err
 
     async def chat_stream(
         self,
@@ -332,10 +469,11 @@ class OpenAICompatibleProvider:
         await self._refresh_oauth_if_needed()
 
         if stream:
-            return self._stream_chat(payload, model_name)
+            return self._stream_chat(payload, model_name, timeout=timeout)
 
         start = time.perf_counter()
         resp = None
+        empty_content = False
         try:
             # timeout 仅 truthy 时覆盖（None 在 httpx per-request 语义=禁用超时）。
             post_kwargs: dict[str, Any] = {}
@@ -351,6 +489,7 @@ class OpenAICompatibleProvider:
             # 再 content.strip() → AttributeError 被 except 吞掉走 fallback，健康
             # 统计被污染且日志无痕。现在在 mark_success **之前**判空并抛错。
             if not isinstance(content, str) or not content.strip():
+                empty_content = True
                 raise RuntimeError(
                     f"[{self.provider_name}/{model_name}] 空内容响应: "
                     f"choices={len(data.get('choices') or [])} "
@@ -368,6 +507,11 @@ class OpenAICompatibleProvider:
             entry = self.registry.get_by_name(model_name)
             if entry:
                 entry.mark_success()
+            # 2026-10-21 FIX-5：成功路径的结构化耗时（生产延迟分布的直接取证点）
+            self._log_call_outcome(
+                model_name=model_name, stream=False, ok=True,
+                elapsed_s=time.perf_counter() - start,
+            )
             return content.strip()
         except Exception as e:  # noqa: BLE001
             if HAS_METRICS:
@@ -381,6 +525,13 @@ class OpenAICompatibleProvider:
                     body_prefix = str(resp.text)[:300]
             except Exception:  # noqa: BLE001
                 pass
+            # 2026-10-21 FIX-5：失败路径同样留耗时 —— 慢失败（如 40s 读超时）
+            # 才是延迟分布里最要紧的那一撮，缺它等于只统计成功样本。
+            self._log_call_outcome(
+                model_name=model_name, stream=False, ok=False,
+                elapsed_s=time.perf_counter() - start,
+                empty=empty_content, error=type(e).__name__,
+            )
             logger.warning(
                 "[%s/%s] 请求失败: %s: %s | body=%s",
                 self.provider_name, model_name, type(e).__name__, e, body_prefix,
@@ -391,7 +542,7 @@ class OpenAICompatibleProvider:
             raise RuntimeError("模型请求失败，未生成角色回复") from e
 
     async def _stream_chat(
-        self, payload: dict, model_name: str,
+        self, payload: dict, model_name: str, timeout: float | None = None,
     ) -> AsyncIterator[str]:
         """流式产出 token。
 
@@ -402,12 +553,22 @@ class OpenAICompatibleProvider:
         - 首 token 前失败 → raise（网关 chat_stream 捕获后走下一 provider）；
         - 已产出内容后失败 → 记日志干净收尾（重放会造成半句+整句重复）；
         - SSE 200 + error 事件帧 → 同样 raise，不再 KeyError 静默吞。
+
+        ``timeout``（2026-10-21 FIX-2）：按调用覆盖读超时。此前流式分支**完全
+        忽略**该实参，而 ``chat()`` 现在会在 ``stream_enabled`` 为真时走流式
+        聚合 —— 不透传会让调用方的收紧预算（主动决策线 25s）静默失效。
+        仍只传 truthy 值（httpx 语义：per-request ``None`` = 禁用超时）。
         """
         first_token_time = None
         emitted = False
         start = time.perf_counter()
+        stream_kwargs: dict[str, Any] = {}
+        if timeout:
+            stream_kwargs["timeout"] = httpx.Timeout(float(timeout), connect=10.0)
         try:
-            async with self._async_client.stream("POST", self._chat_url, json=payload) as resp:
+            async with self._async_client.stream(
+                "POST", self._chat_url, json=payload, **stream_kwargs,
+            ) as resp:
                 resp.raise_for_status()
                 async with asyncio.timeout(60):  # type: ignore[attr-defined]
                     async for line in resp.aiter_lines():
@@ -437,14 +598,35 @@ class OpenAICompatibleProvider:
                         except (KeyError, IndexError):
                             # 无 choices 的心跳/角色帧继续，其余保持宽松跳过
                             continue
+            # 2026-10-21 FIX-5：流式正常读完（收到 [DONE] 或流自然结束）。
+            # ttft 是流式唯一可靠的延迟信号（总时长受回复长度影响）。
+            self._log_call_outcome(
+                model_name=model_name, stream=True, ok=True,
+                elapsed_s=time.perf_counter() - start,
+                ttft_s=(first_token_time - start) if first_token_time else None,
+            )
         except asyncio.TimeoutError as e:
             logger.warning("[%s] Stream timeout (60s)", self.provider_name)
+            # 已下发部分内容 → 干净收尾不再重放；但日志必须区分它与正常成功
+            # （partial=True），否则延迟样本会把「半截回复」算成好样本。
+            self._log_call_outcome(
+                model_name=model_name, stream=True, ok=False,
+                elapsed_s=time.perf_counter() - start,
+                ttft_s=(first_token_time - start) if first_token_time else None,
+                error="TimeoutError", partial=bool(emitted),
+            )
             if emitted:
                 return
             raise RuntimeError(f"[{self.provider_name}] 流式生成超时") from e
         except Exception as e:  # noqa: BLE001
             if HAS_METRICS:
                 record_error("llm_stream", type(e).__name__)
+            self._log_call_outcome(
+                model_name=model_name, stream=True, ok=False,
+                elapsed_s=time.perf_counter() - start,
+                ttft_s=(first_token_time - start) if first_token_time else None,
+                error=type(e).__name__, partial=bool(emitted),
+            )
             if emitted:
                 logger.warning("[%s] Stream 中断（已部分内容下发，不重放）: %s", self.provider_name, e)
                 return

@@ -130,7 +130,11 @@ def _build_backend(
             models_config=models_config,
             max_tokens=max_tokens,
             temperature=temperature,
-            stream_enabled=config.get("stream_enabled", True),
+            # 2026-10-21 FIX-2：缺省 False（显式 opt-in）。stream_enabled 此前
+            # 是死配置（无读取点），含义在本次批才确立为「允许 chat() 走流式
+            # 聚合」—— 未声明的配置不得改变既有非流式行为。生产 tracked 配置
+            # （config/llm_providers.json）五个供应商均显式 true。
+            stream_enabled=config.get("stream_enabled", False),
             extra_payload=extra_payload,
         )
 

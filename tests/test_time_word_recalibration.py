@@ -100,3 +100,81 @@ class TestMainChainWiring:
 
         src = inspect.getsource(OptimizedOrchestrator._finalize_reply)
         assert "last_turn_age_seconds" in src, "_finalize_reply 未接回合间隔"
+
+
+class TestStreamWiring:
+    """流式接线（2026-10-21 FIX-4）：流式 _finalize_reply 调用点曾漏传
+    ``session_id`` 与 ``last_turn_age_seconds``。
+
+    后果两条：① 会话级被否认称呼剥除失效（guard 与随后
+    ``strip_forbidden_vocatives`` 都拿不到 session 上下文，
+    ``resolve_address('')`` 读不到画像昵称）；② v1.53 的出站时间词确定性降级
+    （>45min 时「刚才/刚刚/刚X动词」→「之前」）在流式整条不生效——而非流式
+    主链（D5:1813-1820）传了这两个参数，属同一函数两条路径行为不一致。
+    """
+
+    @staticmethod
+    def _stream_finalize_call():
+        """取 process_message_stream 里对 _finalize_reply 的调用节点。"""
+        import ast
+        import inspect
+
+        from orchestrator._stream_mixin import _StreamPipelineMixin
+
+        src = inspect.getsource(_StreamPipelineMixin.process_message_stream)
+        tree = ast.parse(inspect.cleandoc(src))
+        calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "_finalize_reply"
+        ]
+        assert len(calls) == 1, f"流式 _finalize_reply 调用点应唯一，实得 {len(calls)}"
+        return calls[0]
+
+    def test_stream_finalize_passes_session_id(self):
+        """流式必须传 session_id（称呼剥除需要会话上下文读画像昵称）。"""
+        call = self._stream_finalize_call()
+        kw = {k.arg for k in call.keywords}
+        assert "session_id" in kw, "流式 _finalize_reply 漏传 session_id（称呼剥除失效）"
+
+    def test_stream_finalize_passes_turn_age(self):
+        """流式必须传 last_turn_age_seconds（时间词降级需要回合间隔）。"""
+        call = self._stream_finalize_call()
+        kw = {k.arg: k.value for k in call.keywords}
+        assert "last_turn_age_seconds" in kw, (
+            "流式 _finalize_reply 漏传 last_turn_age_seconds（时间词降级不生效）"
+        )
+        # 值必须取自 _prepare_context 的 ctx（不得写死 None 之类假接线）
+        import ast
+
+        src = ast.unparse(kw["last_turn_age_seconds"])
+        assert "ctx" in src and "last_turn_age_seconds" in src, (
+            f"回合间隔必须取自 prepare 产出的 ctx，实得 {src!r}"
+        )
+
+    def test_stream_and_blocking_paths_agree(self):
+        """两条路径（流式 / 非流式）必须传同一组守卫实参（防再次分叉）。"""
+        import ast
+        import inspect
+
+        from orchestrator._stream_mixin import _StreamPipelineMixin
+        from orchestrator.optimized_orchestrator import OptimizedOrchestrator
+
+        def _kw(func_src: str) -> set[str]:
+            tree = ast.parse(inspect.cleandoc(func_src))
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "_finalize_reply"
+                ):
+                    return {k.arg for k in node.keywords}
+            raise AssertionError("未找到 _finalize_reply 调用点")
+
+        stream_kw = _kw(inspect.getsource(_StreamPipelineMixin.process_message_stream))
+        blocking_kw = _kw(inspect.getsource(OptimizedOrchestrator.process_message))
+        for required in ("session_id", "last_turn_age_seconds", "user_msg"):
+            assert required in stream_kw, f"流式缺 {required}"
+            assert required in blocking_kw, f"非流式缺 {required}"

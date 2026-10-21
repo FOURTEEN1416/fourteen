@@ -133,6 +133,7 @@ class CharacterAggregate(BaseModel):
         knowledge_context: str = "",
         storyline_context: str = "",
         tool_context: str = "",
+        reply_mode: str | None = None,
     ) -> str:
         # 注入顺序对齐行业惯例（SillyTavern 默认序列 + chara-card-spec-v2）：
         #   角色定义（Name/Description/Personality/Scenario）→ 人设数值 → 状态
@@ -145,13 +146,17 @@ class CharacterAggregate(BaseModel):
         # 模式边界（2026-10-20）：mes_example/first_mes 里的括号动作是小说式的
         # 合法写法，但沉浸式明令禁止。之前无条件注入等于用 few-shot 教模型违反
         # 同一份 system prompt 的禁令；沉浸式下必须先剥离动作段再注入。
+        #
+        # 2026-10-21 R7：``reply_mode`` 显式入参（一轮内单次解析的透传入口）；
+        # 缺省时热读全局真源（旧调用方行为不变）。
         from utils.reply_mode import (
             REPLY_MODE_IMMERSIVE,
             read_reply_mode,
             strip_stage_directions,
         )
 
-        _immersive = read_reply_mode() == REPLY_MODE_IMMERSIVE
+        _mode = reply_mode if reply_mode in ("immersive", "novel") else read_reply_mode()
+        _immersive = _mode == REPLY_MODE_IMMERSIVE
         parts = [
             f"# 角色设定\n\n你是{self.name}。",
             self.description,

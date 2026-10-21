@@ -153,7 +153,8 @@ def test_llm_proactive_persona_falls_back_to_character_resolver(monkeypatch):
 
     hints: list[str] = []
 
-    def _capture_hint(cid: str = "") -> str:
+    def _capture_hint(cid: str = "", user_key=None) -> str:
+        # 2026-10-21 R7：load_full_persona_hint 增加 user_key（per-user 模式）实参
         hints.append(cid)
         return "persona文本"
 

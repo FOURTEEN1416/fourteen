@@ -45,8 +45,34 @@ export function proactiveSend(messageType?: string, sessionKey?: string) {
   return client.post('/proactive/send', body)
 }
 export function proactivePause(paused: boolean) { return client.post('/proactive/pause', { paused }) }
-export function updateProactiveConfig(cfg: { threshold?: number; max_daily?: number; min_interval_minutes?: number; cooldown_after_reply_minutes?: number; quiet_hours_start?: number; quiet_hours_end?: number; reply_mode?: 'immersive' | 'novel'; llm_proactive_enabled?: boolean; llm_proactive_style_hint?: string; llm_proactive_intensity?: 'low' | 'normal' | 'high'; llm_proactive_respect_quiet?: boolean; llm_proactive_character_hint?: string }) {
+export function updateProactiveConfig(cfg: {
+  threshold?: number
+  max_daily?: number
+  min_interval_minutes?: number
+  cooldown_after_reply_minutes?: number
+  quiet_hours_start?: number
+  quiet_hours_end?: number
+  reply_mode?: 'immersive' | 'novel'
+  /** 2026-10-21 R7：作用域。global=全站默认（旧行为）；user=仅目标 user_key */
+  reply_mode_scope?: 'global' | 'user'
+  /** scope=user 时的目标会话键（完整形态 `N:wxid`） */
+  user_key?: string
+  llm_proactive_enabled?: boolean
+  llm_proactive_style_hint?: string
+  llm_proactive_intensity?: 'low' | 'normal' | 'high'
+  llm_proactive_respect_quiet?: boolean
+  llm_proactive_character_hint?: string
+}) {
   return client.post('/proactive/config', cfg)
+}
+
+// ── 用户自助回复模式（2026-10-21 R7） ──
+// 为什么不复用 /proactive/config：那是 admin 门 + `orch._ase` 503 门；
+// 普通用户既无 admin 角色，也不该被「主动引擎是否初始化」耦合。
+// 后端从 JWT 派生 user_key（绝不接受客户端传 user_key）。
+export function getMyReplyMode() { return client.get('/user/reply-mode') }
+export function setMyReplyMode(replyMode: 'immersive' | 'novel') {
+  return client.post('/user/reply-mode', { reply_mode: replyMode })
 }
 
 // ── Humanize（拟人度：段间延时 / 主动拆条） ──

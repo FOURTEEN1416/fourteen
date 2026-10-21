@@ -153,6 +153,18 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # 回复模式的 per-user 覆盖库（2026-10-21 R7）：默认是宿主 data/sqlite.db。
+    # 任何测试（直接调 write_reply_mode(user_key=...)）都会在那里建表/写行；
+    # 真实库被测试键污染正是 2026-09-22 块E 事故同型。必须重定向到沙箱。
+    try:
+        from utils import reply_mode as _rm
+
+        monkeypatch.setattr(
+            _rm, "_OVERRIDE_DB_PATH", sandbox / "reply_mode_override.db", raising=False,
+        )
+    except Exception:
+        pass
+
     # W3 控制面（outbox/desired/presence/幂等账，2026-09-27）：任何测试
     # 触发连接器/scheduler/提醒装配都不许写真实 data/runtime_plane.db
     # （与上方 scheduler_config 自伤事故同型防线）。

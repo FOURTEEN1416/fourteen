@@ -30,6 +30,11 @@ from utils import character_resolver, json_state
 from utils import session_key as session_key_mod
 from utils.project_paths import project_path
 
+# 回复模式单一真源（沉浸式/小说式）。出站守卫需要它来决定是否剥括号动作段
+# ——不传时 terminal_reply_guard 的 reply_mode 缺省空串，沉浸式括号会原样
+# 发给用户（2026-10-21 FIX-1：主动链「把带括号的示例喂进 prompt 又不拦」）。
+from utils.reply_mode import read_reply_mode
+
 logger = logging.getLogger("scheduler")
 
 
@@ -1536,7 +1541,8 @@ class ProactiveScheduler:
         # 与生成线/祝福润色同走 proactive_context 单一 owner。
         char_id = self._resolve_character_id(str(user_key))
         from proactive.proactive_context import load_full_persona_hint
-        persona = load_full_persona_hint(char_id) if char_id else ""
+        # 2026-10-21 R7：人设注入侧的括号剥离开关也跟随该会话模式
+        persona = load_full_persona_hint(char_id, str(user_key or "") or None) if char_id else ""
         # 缺陷 H：真实可分享内容（角色知识库 + 热点池）经统一读接口进**决策链**。
         # 角色 id 用当轮解析值，不用引擎创建时缓存的 `_knowledge_character_id`
         # （切角色后那是旧角色 → 把别人的角色内容当谈资）。
@@ -1555,6 +1561,37 @@ class ProactiveScheduler:
             )
         elif str(getattr(eng, "_knowledge_character_id", "") or "") != char_id:
             last_user_message = ""
+        # 2026-10-21 FIX-5：决策 prompt 的【当前角色最近对话原文】此前直接吃**原始库行**
+        # ——既没过 sanitize_llm_history（连续同角色合并 / 系统占位过滤），也没过回灌
+        # 净化（沉浸式括号动作 / 元记忆解释 / 归属翻转）。于是上一轮写坏、已落库的
+        # assistant 行被当「我自己说过的话」few-shot 进决策，再由决策器写出主动消息
+        # ——与主链 R4 要切断的自我强化回路同构，只是发生在主动线。
+        # 与主链（orchestrator._prepare_context）共用同一真源函数，防规则分叉。
+        # ⚠️ 只净化**副本**：last_user_message 与 build_proactive_context 内的否决
+        # 检测/window 语义仍按原文 recent 计算（见上方取值处），不改 recent 本体。
+        scrubbed_recent: list[Any] = recent
+        if recent:
+            try:
+                # ⚠️ 用模块别名而非 `from ... import read_reply_mode`：本函数另有
+                # 模块级导入的 read_reply_mode（出站守卫 reply_mode 实参，见 :1722），
+                # 局部 `from X import read_reply_mode` 会让它在整个函数作用域变成
+                # 局部名 → recent 为空时 :1722 抛 UnboundLocalError（回归实证）。
+                import utils.reply_mode as _reply_mode
+                from utils.prompt_sanitize import (
+                    sanitize_llm_history,
+                    scrub_history_rows,
+                )
+
+                # 2026-10-21 R7：按**该会话**的模式净化（per-user 覆盖优先）。
+                # user_key 在此函数内已有（即会话键），空时回落全局默认。
+                scrubbed_recent = scrub_history_rows(
+                    sanitize_llm_history(recent),
+                    _reply_mode.read_reply_mode(str(user_key or "") or None)
+                    == _reply_mode.REPLY_MODE_IMMERSIVE,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("主动决策历史净化失败（回退原文）: %s", exc)
+                scrubbed_recent = recent
         # 活材料钩子（2026-10-16 三连同义批 B）：爱语逆向对照——话题感来自活
         # 材料注入（未答澄清/将到提醒/未闭环承诺/近日热点），非模型自觉。
         hooks = load_live_hooks(str(user_key), memory)
@@ -1580,7 +1617,7 @@ class ProactiveScheduler:
             urgency_signal=urgency,
             persona_hint=persona,
             knowledge_hint=knowledge,
-            recent_messages=recent,
+            recent_messages=scrubbed_recent,
             web_config=web_cfg,
             quiet_hours=quiet,
             # 🔴 2026-09-22 二次根治（块D 接地贯通）：补用户最后一句 + 注意力热度。
@@ -1686,9 +1723,14 @@ class ProactiveScheduler:
         # 会绕过终审直达用户。与主链共用同一真源 terminal_reply_guard。
         # 主动链无当轮用户消息（独白场景），user_msg 传空串——表情复读剥除
         # 在无用户消息时不触发（is_pure_emoji_message 空串=False），只拦哨兵/退化。
+        # 2026-10-21 FIX-1：补 reply_mode —— 缺省空串使沉浸式括号动作不剥。
         from utils.prompt_sanitize import terminal_reply_guard
 
-        message = terminal_reply_guard(message, user_msg="", character_name="")
+        # 2026-10-21 R7：守卫的 reply_mode 跟随该会话（per-user 覆盖）
+        message = terminal_reply_guard(
+            message, user_msg="", character_name="",
+            reply_mode=read_reply_mode(str(user_key or "") or None),
+        )
         if not message:
             append_proactive_event(
                 session_key=user_key,
@@ -1838,12 +1880,17 @@ class ProactiveScheduler:
         # 2026-10-15 称呼根治批：守卫扩面第三类（非法称呼呼语剥除）需会话上下文
         # ——decision/手动/祝福三条主动线全经本入口，此处统一传参即全覆盖
         # （session_key/character_id 均可能为 None，按守卫契约归一为空串）。
+        # 2026-10-21 FIX-1：补 reply_mode —— 本入口是手动/祝福线的唯一兜底，
+        # 不传则沉浸式括号动作（含上游已剥一次的决策线之外的路径）原样出站。
+        # 2026-10-21 R7：模式跟随该会话（per-user 覆盖）；session_key 为空
+        # （广播/手动线）→ 回落全局默认，与旧行为一致。
         guarded = terminal_reply_guard(
             message,
             user_msg="",
             character_name="",
             session_key=str(session_key or ""),
             character_id=str(character_id or ""),
+            reply_mode=read_reply_mode(str(session_key or "") or None),
         )
         if not guarded:
             logger.warning("[主动消息] 终审守卫拦截（哨兵/退化回复），不投递")

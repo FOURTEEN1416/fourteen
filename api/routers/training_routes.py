@@ -27,8 +27,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from pydantic import BaseModel, Field, model_validator
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import require_role
-from api.database import User
+from api.auth_jwt import get_current_user_id, require_role
+from api.database import User, WechatBinding, get_db
 from api.deps import deps
 from api.main_routes import ProactiveConfigRequest
 from utils.humanize_config import DELAY_MODE_PATTERN
@@ -36,6 +36,30 @@ from utils.humanize_config import DELAY_MODE_PATTERN
 logger = logging.getLogger("api.routers.training_routes")
 
 router = APIRouter(tags=["training"])
+
+
+class ProactiveConfigRequestScoped(ProactiveConfigRequest):
+    """`ProactiveConfigRequest` + 回复模式**作用域**（2026-10-21 R7）。
+
+    为什么不直接改 `api/main_routes.ProactiveConfigRequest`：该文件不在本批
+    允许清单内。用子类扩展既保持原模型（与 `api.__init__` 的再导出）不变，
+    又让本端点接受新字段；`tests/test_ax_p2_bundle.py` 的字段存在性断言仍成立。
+
+    语义：
+      - ``reply_mode_scope="global"``（默认）→ 写全局默认，全站生效（旧行为）；
+      - ``reply_mode_scope="user"`` + ``user_key`` → 只写该用户的覆盖行。
+    """
+
+    reply_mode_scope: str | None = Field(
+        default="global",
+        pattern="^(global|user)$",
+        description="回复模式作用域：global=全站默认（旧行为）；user=仅该 user_key",
+    )
+    user_key: str | None = Field(
+        default=None,
+        max_length=200,
+        description="作用域=user 时的目标会话键（完整形态 `N:wxid`）",
+    )
 
 
 # ═══════════════════════════════════════════════════════
@@ -298,11 +322,50 @@ async def get_proactive_config(
     return config
 
 
+async def _resolve_admin_target_key(raw: str, db) -> str:
+    """admin「指定用户」的目标 → 完整会话键（2026-10-22 P0 复核修复）。
+
+    为什么需要：per-user 覆盖表的键形态是 v1.28 隔离域 `N:wxid@im.wechat`
+    （`user_key_from_session` 明确「返回完整会话键，禁止剥掉 owner」），运行时
+    `_resolve_turn_reply_mode(session_id)` 也按它读。而 admin UI 的下拉给的是
+    `/api/admin/users` 的**数字 id**（`RoleSettingsTabs.tsx` 的
+    `String(replyModeTargetUser)`）；旧实现原样入库 → 写 `3`、读
+    `3:o9cq80@im.wechat` → **覆盖永远读不到，却回执 `status=ok`**（独立复核
+    2026-10-22 端到端实测：`runtime read '3:o9cq80@im.wechat' -> immersive`）。
+
+    解析口径（确定性、绝不猜测，D15）：
+      - 含 ``:``  → 视为完整会话键，**原样**返回（脚本/API 直呼契约不变）；
+      - 纯数字    → 视为注册用户 id，经 `wechat_bindings` 还原成 `N:wxid`；
+      - 其他形态 / 该用户无绑定 → 400（宁拒绝不写坏键）。
+
+    Raises:
+        HTTPException: 400 —— 空键、形态非法、或该 user_id 无微信绑定。
+    """
+    target = str(raw or "").strip()
+    if not target:
+        raise HTTPException(400, "reply_mode_scope=user 时必须提供 user_key")
+    if ":" in target:
+        return target
+    if target.isdigit():
+        resolved = await _user_session_key_for(int(target), db)
+        if not resolved:
+            raise HTTPException(
+                400,
+                f"user_id={target} 未绑定微信通道，无法确定会话键（不猜键）",
+            )
+        return resolved
+    raise HTTPException(
+        400,
+        f"user_key 形态非法: {target!r}（应为数字 user_id 或完整会话键 N:wxid）",
+    )
+
+
 @router.post("/api/proactive/config")
 async def update_proactive_config(
-    req: ProactiveConfigRequest,
+    req: ProactiveConfigRequestScoped,
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
+    db=Depends(get_db),
 ):
     """更新主动消息运行时参数——2026-08-28 修复：旧版只写展示字典不生效。"""
     orch = deps.orch
@@ -338,11 +401,38 @@ async def update_proactive_config(
 
     # 回复模式（沉浸式真人 / 小说式）：编排器每次组装提示词时读该文件，
     # 写入即对所有 worker 生效，无需重启。
+    #
+    # 2026-10-21 R7 作用域：
+    #   - `global`（默认）/ 未传 → 写全局默认（旧行为，全站生效）；
+    #   - `user` + `user_key` → 只写该用户的覆盖行（多用户隔离）；admin 门禁不变。
+    # 写失败**上抛 500**（`write_reply_mode` 已改为不吞异常）——旧实现吞掉后
+    # 仍记「已切换」，前端据此显示成功 = 假成功。
+    reply_mode_written: dict[str, object] = {}
     if req.reply_mode is not None:
         from utils.reply_mode import write_reply_mode
 
-        write_reply_mode(req.reply_mode)
-        logger.info("回复模式已切换: %s", req.reply_mode)
+        scope = str(req.reply_mode_scope or "global")
+        # admin 侧目标可能是数字 user_id（前端下拉）或完整会话键（脚本直呼）；
+        # 统一解析成覆盖表/运行时都认的 `N:wxid` 形态再写（2026-10-22 P0 修复）。
+        target_key = (
+            await _resolve_admin_target_key(str(req.user_key or ""), db)
+            if scope == "user"
+            else None
+        )
+        try:
+            write_reply_mode(req.reply_mode, user_key=target_key)
+        except (ValueError, OSError) as exc:
+            logger.warning("回复模式写入失败: %s", exc)
+            raise HTTPException(500, f"reply_mode 写入失败: {exc}") from exc
+        reply_mode_written = {
+            "reply_mode": req.reply_mode,
+            "reply_mode_scope": scope,
+            "user_key": target_key or "",
+        }
+        logger.info(
+            "回复模式已切换: %s scope=%s user=%s",
+            req.reply_mode, scope, target_key or "-",
+        )
 
     # LLM 主动决策参数（web 可调；注入 prompt，非硬编码日程表）
     if any(
@@ -375,7 +465,98 @@ async def update_proactive_config(
     )
     # 内部直调：_admin 已由本端点的 require_role 依赖解析（admin 必然在位），
     # 原样透传以绕开 DI 重复解析（直调时 Depends 缺省不会生效）
-    return {"status": "ok", "config": await get_proactive_config(_auth=True, _admin=_admin)}
+    payload = {"status": "ok", "config": await get_proactive_config(_auth=True, _admin=_admin)}
+    if reply_mode_written:
+        # 回执显式带上作用域：前端据此确认「写的是 global 还是某个用户」
+        payload.update(reply_mode_written)
+    return payload
+
+
+# ═══════════════════════════════════════════════════════
+# 用户自助：回复模式（2026-10-21 R7）
+# ═══════════════════════════════════════════════════════
+#
+# 为什么需要独立端点（独立复核 2026-10-21 的「非 admin 用户没有入口」条目）：
+#   - `/api/proactive/config` 是 `require_role("admin")` **且** 前置
+#     `orch._ase` 503 门；普通用户既没有 admin 角色，也不该被「主动引擎是否
+#     初始化」耦合（模式真源是文件，与调度器无关，对齐
+#     `/api/humanize/config` 的「刻意不同 503 语义」既定做法）。
+#   - 因此本端点：JWT 认证 + **服务端从 token 派生 user_key**
+#     （绝不接受客户端传 user_key —— 那等于允许改别人的模式）。
+
+
+class UserReplyModeRequest(BaseModel):
+    reply_mode: str = Field(
+        pattern="^(immersive|novel)$",
+        description="immersive=沉浸式真人聊天；novel=小说式",
+    )
+
+
+async def _user_session_key_for(user_id: int, db) -> str:
+    """把注册用户 id 还原成会话键（`N:wxid` 形态）。
+
+    隔离维度 = 完整会话键 `owner:peer`（v1.28，`StructuredMemory.user_key_from_session`
+    原样返回整串）。普通用户通常只有一个绑定 wxid（D16「一人一 bot」）；
+    无绑定时返回空串 —— 调用方回落全局默认，**不猜键、不拼假键**（D15 原则）。
+    """
+    from sqlalchemy import select
+
+    if db is None:
+        return ""
+    try:
+        result = await db.execute(
+            select(WechatBinding.wxid)
+            .where(WechatBinding.user_id == int(user_id))
+            .order_by(WechatBinding.bound_at.desc())
+        )
+        wxid = str(result.scalars().first() or "").strip()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("查询用户微信绑定失败 user=%s: %s", user_id, exc)
+        return ""
+    return f"{int(user_id)}:{wxid}" if wxid else ""
+
+
+@router.get("/api/user/reply-mode")
+async def get_my_reply_mode(
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db=Depends(get_db),
+):
+    """读取**本人**生效的回复模式 + 全局默认（供前端展示「继承/覆盖」）。"""
+    from utils.reply_mode import read_reply_mode, reply_mode_label
+
+    user_key = await _user_session_key_for(int(user_id), db)
+    effective = read_reply_mode(user_key or None)
+    global_default = read_reply_mode(None)
+    return {
+        "status": "ok",
+        "reply_mode": effective,
+        "reply_mode_label": reply_mode_label(effective),
+        "global_default": global_default,
+        "source": "user" if (user_key and effective != global_default) else "global",
+        "user_key_present": bool(user_key),
+    }
+
+
+@router.post("/api/user/reply-mode")
+async def set_my_reply_mode(
+    req: UserReplyModeRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db=Depends(get_db),
+):
+    """写入**本人**的回复模式覆盖；无绑定 wxid 时 400（不猜键）。"""
+    from utils.reply_mode import write_reply_mode
+
+    user_key = await _user_session_key_for(int(user_id), db)
+    if not user_key:
+        raise HTTPException(400, "当前账号尚未绑定微信通道，无法设置个人回复模式")
+    try:
+        write_reply_mode(req.reply_mode, user_key=user_key)
+    except (ValueError, OSError) as exc:
+        logger.warning("个人回复模式写入失败 user=%s: %s", user_id, exc)
+        raise HTTPException(500, f"reply_mode 写入失败: {exc}") from exc
+    return {"status": "ok", "reply_mode": req.reply_mode, "scope": "user"}
 
 
 # ═══════════════════════════════════════════════════════

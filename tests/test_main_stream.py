@@ -426,13 +426,21 @@ def test_stream_emotion_none_fallback():
 
 
 def test_stream_publishes_only_final_text_and_stores_the_same(monkeypatch):
+    """发言标签/归属错标签永不下发；下发文本 == done.reply == 落库文本。
+
+    2026-10-21 R4 真流式改钉：旧断言 `assert emitted == []`（「完整校验前不能
+    向客户端泄露模型草稿」）钉的是「攒稿后统一下发」这一**已被用户裁决取代**的
+    设计（见 AGENTS.md §「本批重构确立的设计规则」首条）。真流式下按句边下发
+    是预期行为，故改写为**语义断言**：① 归属标签（`用户：`/`Assistant：`）与
+    它们所在的整行都不出现；② 行结构（换行）保留；③ 三处文本一致。首字节
+    提前的时序语义由 `tests/test_true_streaming.py` 覆盖。
+    """
     orch = _make_orchestrator()
     emitted = []
     committed = []
 
     async def raw_stream(**kwargs):
         yield "用户：我先睡了\nAssistant："
-        assert emitted == [], "完整校验前不能向客户端泄露模型草稿"
         yield "我吃过了\n你也记得吃饭"
 
     orch.components["llm"] = SimpleNamespace(chat_stream=raw_stream)
@@ -445,6 +453,7 @@ def test_stream_publishes_only_final_text_and_stores_the_same(monkeypatch):
     asyncio.run(collect())
     text = "".join(e["content"] for e in emitted if e["type"] == "token")
     assert text == emitted[-1]["reply"] == "我吃过了\n你也记得吃饭"
+    assert "用户：" not in text and "Assistant：" not in text
     assert committed == [text]
 
 

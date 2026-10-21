@@ -29,6 +29,63 @@ from utils.project_paths import project_path
 
 logger = logging.getLogger("shisi.application.persona_service")
 
+# ── 能力声明（2026-10-21 R3 · 主链工具/记忆相结合）─────────────────
+#
+# 缺口（用户裁决「模型不知道能做什么」）：主链 system prompt 里**没有任何一句**
+# 说明哪些能力真实存在、哪些由别的系统在回复前代劳。于是模型面对「你能做什么」
+# 只能瞎猜：要么声称自己会设提醒/查天气（实际是 L1 在执行），要么否认自己记得
+# 用户说过的话（实际记忆段就在 system 里）。
+#
+# 设计纪律（v1.54 教训：继续加互相竞争的硬指令会继续恶化）：
+# 本段只**告知事实**，不下风格指令、不写「像真人/口语/不要太…」——
+# 那类硬指令已经够多，再加只会稀释角色指令的注意力（见 test_no_hard_style_commands）。
+#
+# 「只声明真实能力」逐条对得上代码（复核 2026-10-21 后修订）：
+#   - 长期记忆：`tools/builtin/extra_tools.py:31 MemoryTool`（name="memory"），
+#     经 L0→L1 服务端检索、`_meta.session_key` 注入归属（无键即拒）；
+#     系统在**生成前**把记忆段放进 system（persona_service 的「我记得的」等段）；
+#   - 提醒/天气/搜索/日历：真实存在（`_init_tools` 注册），但只有 L1 拿得到 schema
+#     （`_run_tools_if_needed` 的 tools 参数只喂给终审那一跳）→ 必须写成
+#     「由别的系统在你开口前处理」，不能写成「你没有这个能力」；
+#   - 画像/事实写入：`_enqueue_profile_sync` → `run_profile_sync_agent` 在回复后
+#     真实执行 → 属真能力，写成「自动」，否则模型会否认一件真实发生的事
+#     （复核条目 #9：通杀式「不要假装你做了」教模型说谎）。
+#   - 「不要旁白检索过程」：`terminal_reply_guard` 只拦四种元记忆形态
+#     （`utils/prompt_sanitize._META_MEMORY_RE`），「我查一下记忆」不违规也不被剥，
+#     所以只能靠措辞杜绝（复核条目 #6/#7）。
+CAPABILITY_DECLARATION = (
+    "# 你的能力（下面每一条都是真实接通的）\n"
+    "- 你**有**长期记忆：系统会在你开口前把「我记得的 / 我对你的观察 / 相关回忆 / "
+    "用户画像」放进上下文，直接自然使用即可。\n"
+    "- 提醒、天气、搜索网页、看日历这些事，由别的系统在你开口前处理完；"
+    "你不需要、也不能自己调用它们。用户托付了这些事，就按处理结果自然回应。\n"
+    "- 你的画像与偏好由系统自动维护：用户说过什么值得记住的事，系统会在回复后自动记下。"
+    "你可以自然地提到「记着你说的」，但不要说自己正在记录、也不要复述过程。\n"
+)
+
+#: 条件行：只有 `memory` 工具**真的注册**进 registry 时才追加（复核条目 #4：
+#: 能力声明必须按真实可用性条件渲染，不能声明一个不存在的检索通道）。
+CAPABILITY_RECALL_LINE = (
+    "- 用户问起旧事（「你还记得…」「我说过…吗」）时，系统可能会先替他检索一次长期记忆，"
+    "结果会作为参考材料放进上下文。**不要旁白检索过程**：不要说自己在查记忆、"
+    "不要说「让我检索一下」，看到材料就自然用；查不到就说记不清，不要编造。\n"
+)
+
+
+def capability_block(memory_recall: bool = True) -> str:
+    """按真实可用性拼能力声明段。
+
+    Args:
+        memory_recall: registry 里是否真有 ``memory`` 工具。缺省 True 便于直接
+            调用 ``build_system_prompt`` 的调用方（不传 flags 时按「有」处理，
+            与改造前无声明相比语义更保守——宁可说明有，也不让模型否认上下文里
+            明明存在的记忆段）。
+
+    Returns:
+        以 ``# 你的能力`` 开头的段落；段落**恒非空**（静态部分全是既成事实）。
+    """
+    return CAPABILITY_DECLARATION + (CAPABILITY_RECALL_LINE if memory_recall else "")
+
 
 class PersonaService:
     """复用 shisi 角色模型与 prompt_builder，并注入 PersonaEngine 人格对齐规则。"""
@@ -98,6 +155,8 @@ class PersonaService:
         character_id: str | None = None,
         user_message: str = "",
         tool_context: str = "",
+        capability_flags: dict[str, Any] | None = None,
+        reply_mode: str | None = None,
     ) -> str:
         """构建系统提示词。
 
@@ -106,6 +165,13 @@ class PersonaService:
         2. 用当前角色卡（如可用）或 PersonaEngine 的配置构造 CharacterAggregate；
         3. 通过 prompt_builder 生成基础 prompt（角色设定 + 人设 + RAG 知识 + 状态 + 对话历史 + 工具位）；
         4. 注入 PersonaEngine 的人格对齐规则：世界信息、RAG、情感层、风格层、约束层。
+
+        Args:
+            capability_flags: 真实能力可用性（2026-10-21 R3）。目前只消费
+                ``memory_recall``（registry 里是否真有 ``memory`` 工具）；
+                缺省按「有」处理（见 :func:`capability_block`）。
+            reply_mode: 本轮回复模式（2026-10-21 R7）。显式给出时全程复用该值
+                （一轮内单次解析）；缺省时各处热读真源（旧调用方行为不变）。
         """
         effective_emotion = (
             emotion_state if emotion_state is not None else self._engine.emotion.state
@@ -117,6 +183,7 @@ class PersonaService:
         #  分不清哪句是用户/哪句是自己）。记忆改为独立标注段，真对话只走 messages。
         from utils.prompt_sanitize import (
             EMOJI_USE_RULE,
+            MEMORY_USAGE_RULE,
             ROLE_CLARITY_RULE,
             TOPIC_CONTINUITY_RULE,
             USER_IDENTITY_RULE,
@@ -224,6 +291,8 @@ class PersonaService:
             # 剧情线状态键的用户维度（user_key::character_id，防同卡多用户串扰）；
             # use_storyline=False 时仅接线预留，profile_key 缺失走旧行为兜底。
             user_key=profile_key,
+            # 2026-10-21 R7：本轮模式全程透传（mes_example/creator_notes 剥离开关）
+            reply_mode=reply_mode,
         )
 
         # 身份唯一 Owner（2026-09-21 收口）：身份只来自 `_build_character` 解析到的
@@ -254,6 +323,18 @@ class PersonaService:
             logger.debug("称呼段注入失败: %s", _addr_exc)
         # 角色归属硬约束：真对话只在 messages；system 记忆不是用户发言
         injection_parts.append(ROLE_CLARITY_RULE.strip())
+        # 2026-10-21 FIX-1：记忆使用守则 —— 紧邻角色说明之后。此前整套注入层没有
+        # 一句规范「怎么用记忆」，模型不知道记忆是系统自动给的（会声明在回忆 /
+        # 逐条念条目 / 说「我的记忆库里显示」/ 在正文写记忆指令）。纯文案，无分支。
+        injection_parts.append(MEMORY_USAGE_RULE.strip())
+        # 2026-10-21 R3：能力声明 —— 紧邻记忆守则之后、话题续聊之前。
+        # 只告知事实（真实接通的通道），并按 registry 实况条件渲染检索行；
+        # 编排器经 `capability_flags` 传入可用性（见 `_memory_recall_available`）。
+        _flags = capability_flags if isinstance(capability_flags, dict) else {}
+        _memory_recall = _flags.get("memory_recall")
+        injection_parts.append(
+            capability_block(True if _memory_recall is None else bool(_memory_recall)).strip()
+        )
         # 话题续聊：像人一样接着聊，不跳题、不自问自答
         injection_parts.append(TOPIC_CONTINUITY_RULE.strip())
         # 微信表情守则（2026-10-14 表情镜像事故：能力保留，禁复读、要恰到好处）
@@ -275,10 +356,26 @@ class PersonaService:
             try:
                 from utils.reply_mode import REPLY_MODE_IMMERSIVE, read_reply_mode, strip_stage_directions
 
-                if read_reply_mode() == REPLY_MODE_IMMERSIVE:
+                # 2026-10-21 R7：优先用调用方传入的本轮模式（一轮单次解析）
+                _effective_mode = (
+                    reply_mode if reply_mode in ("immersive", "novel") else read_reply_mode()
+                )
+                if _effective_mode == REPLY_MODE_IMMERSIVE:
                     _rag_block = strip_stage_directions(_rag_block)
             except Exception as _rag_exc:  # noqa: BLE001
                 logger.debug("知识库模式剥离失败（保留原文）: %s", _rag_exc)
+            # 2026-10-21 FIX-4：知识槽渲染处去重 —— 与 `context_budget.rag_payload_to_text`
+            # 同真源（本段是 `# 角色知识库` 的唯一注入处）。生产实测
+            # `knowledge_snippets` 只有 1~2 个唯一串却被塞进 5 条（60%~80% 纯重复），
+            # 重复块挤占注入窗口、拉长 payload，对模型是纯噪声。此处兜住不经
+            # rag_payload_to_text 的调用方；只在渲染侧做，不动检索结果与知识库内容。
+            # 顺序：先剥离动作段再合并 —— 剥离后变空/变相同的块也一并收敛。
+            try:
+                from orchestrator.context_budget import dedup_rag_snippets
+
+                _rag_block = "\n".join(dedup_rag_snippets(_rag_block.splitlines()))
+            except Exception as _rag_dedup_exc:  # noqa: BLE001
+                logger.debug("知识库去重失败（保留原文）: %s", _rag_dedup_exc)
             if _rag_block.strip():
                 injection_parts.append(f"# 角色知识库\n{_rag_block}")
 

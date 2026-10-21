@@ -247,7 +247,7 @@ class TestPromptModeBoundary:
         from utils import reply_mode
 
         monkeypatch.setattr(
-            reply_mode, "read_reply_mode", lambda: reply_mode.REPLY_MODE_IMMERSIVE
+            reply_mode, "read_reply_mode", lambda *a, **k: reply_mode.REPLY_MODE_IMMERSIVE
         )
         prompt = self._aggregate().build_system_prompt(user_message="在吗")
         assert "（抬头看你）" not in prompt
@@ -259,7 +259,7 @@ class TestPromptModeBoundary:
         from utils import reply_mode
 
         monkeypatch.setattr(
-            reply_mode, "read_reply_mode", lambda: reply_mode.REPLY_MODE_NOVEL
+            reply_mode, "read_reply_mode", lambda *a, **k: reply_mode.REPLY_MODE_NOVEL
         )
         prompt = self._aggregate().build_system_prompt(user_message="在吗")
         assert "（抬头看你）" in prompt
@@ -278,7 +278,7 @@ class TestPromptModeBoundary:
         from utils import reply_mode
 
         monkeypatch.setattr(
-            reply_mode, "read_reply_mode", lambda: reply_mode.REPLY_MODE_IMMERSIVE
+            reply_mode, "read_reply_mode", lambda *a, **k: reply_mode.REPLY_MODE_IMMERSIVE
         )
         agg = CharacterAggregate(
             id="mode02",
@@ -295,7 +295,7 @@ class TestPromptModeBoundary:
         from utils import reply_mode
 
         monkeypatch.setattr(
-            reply_mode, "read_reply_mode", lambda: reply_mode.REPLY_MODE_NOVEL
+            reply_mode, "read_reply_mode", lambda *a, **k: reply_mode.REPLY_MODE_NOVEL
         )
         agg = CharacterAggregate(
             id="mode03",

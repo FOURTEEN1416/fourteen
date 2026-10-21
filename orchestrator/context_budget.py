@@ -8,11 +8,83 @@
 
 from __future__ import annotations
 
+import difflib
 import re
 from dataclasses import dataclass
 from typing import Any
 
 from shisi.core.conversation_turn import HISTORY_RECENT_LIMIT
+
+# ── RAG 知识槽渲染侧去重（2026-10-21 FIX-4）──
+#
+# 生产 `event_ledger.prompt_slots` 实测：`knowledge_snippets` 只有 1~2 个唯一
+# 字符串却被塞进 5 条（event 15696 n=5 uniq=2，400 字符里唯一内容 160 字符；
+# event 15687 n=5 uniq=1，400 字符里唯一内容 80 字符）—— 60%~80% 是纯重复，
+# 挤占注入窗口、拉长 payload，对模型是纯噪声（上游把同一来源的多个 chunk
+# 都返回了）。
+#
+# 只在**渲染侧**去重：不动知识库内容、不改检索结果本体，原始数据与可追溯性
+# 不受影响（同页用例 `test_payload_not_mutated` 钉死）。
+#
+# 🔴 安全边界：宁可漏合、不可误删。真正不同的块（尤其长卡文被切成的相邻片段）
+# 必须全部保留 —— 故只有三类才合并：归一化后**完全相同**、**互为包含**（短的
+# 全部信息已在长的里面）、**近似度 ≥ 阈值**；且合并时保留信息更全的那条。
+# 「邻近但不同」的片段既非包含关系、相似度也上不去，自然全部留下。
+RAG_SNIPPET_SIMILARITY_THRESHOLD = 0.9
+# 「互为包含（严格子串）」是强信号，短串也认（如「核心锚点：她喜欢猫。」整句被
+# 更长的一条完整包含）。下限定 6 是排除「核心锚点」这类 4 字通用词头假阳性。
+RAG_SNIPPET_MIN_CONTAIN_CHARS = 6
+# 「近似度」判定需要足够文本才可信：短串上 difflib 比值噪声大，阈值定 12。
+RAG_SNIPPET_MIN_SIMILAR_CHARS = 12
+
+
+def dedup_rag_snippets(lines: Any) -> list[str]:
+    """合并重复/高度重叠的知识块，返回保序去重后的行表（纯函数）。
+
+    - 保留下来的行是**原文逐字**（不重写、不截断），首现顺序不变；
+    - 遇到「新行包含旧行」时，用新行**替换**旧行（保留信息更全的那条，
+      位置仍是首现位）；
+    - 空行丢弃。
+    """
+    kept: list[str] = []
+    kept_norm: list[str] = []
+    for raw in lines or []:
+        line = str(raw or "").strip()
+        if not line:
+            continue
+        norm = _normalize_for_compare(line)
+        merged = False
+        for i, other in enumerate(kept_norm):
+            if not other:
+                continue
+            if norm == other:
+                merged = True
+                break
+            if (
+                len(norm) >= RAG_SNIPPET_MIN_CONTAIN_CHARS
+                and len(other) >= RAG_SNIPPET_MIN_CONTAIN_CHARS
+            ):
+                if norm in other:
+                    merged = True      # 新的是旧的一部分 → 丢新的
+                    break
+                if other in norm:
+                    kept[i] = line     # 旧的是新的一部分 → 用更全的替换
+                    kept_norm[i] = norm
+                    merged = True
+                    break
+            if (
+                len(norm) >= RAG_SNIPPET_MIN_SIMILAR_CHARS
+                and len(other) >= RAG_SNIPPET_MIN_SIMILAR_CHARS
+                and difflib.SequenceMatcher(None, norm, other).ratio()
+                >= RAG_SNIPPET_SIMILARITY_THRESHOLD
+            ):
+                merged = True
+                break
+        if merged:
+            continue
+        kept.append(line)
+        kept_norm.append(norm)
+    return kept
 
 
 @dataclass(frozen=True)
@@ -75,7 +147,9 @@ def rag_payload_to_text(payload: Any) -> str:
                     lines.append(content)
             elif isinstance(r, str) and r.strip():
                 lines.append(r.strip())
-    return "\n".join(lines)
+    # 2026-10-21 FIX-4：渲染侧去重（生产 60%~80% 纯重复）。字符串入参走上方
+    # 原样返回的透传契约（不改），只对**收集出来的行**去重。
+    return "\n".join(dedup_rag_snippets(lines))
 
 
 def _normalize_for_compare(text: str) -> str:

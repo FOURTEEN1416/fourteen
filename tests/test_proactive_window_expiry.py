@@ -73,7 +73,11 @@ def _make_harness(monkeypatch, tmp_path, *, next_ok: float | None):
     monkeypatch.setattr(ase_mod, "_local_now", lambda: now_local())
     # scheduler 在函数内从 proactive_context 局部导入 load_full_persona_hint，
     # 函数局部导入在**调用时**才绑定模块命名空间，monkeypatch 生效。
-    monkeypatch.setattr(pctx_mod, "load_full_persona_hint", lambda character_id="": "")
+    # 2026-10-21 R7：签名加 user_key（per-user 模式）——mock 需接受该实参
+    monkeypatch.setattr(
+        pctx_mod, "load_full_persona_hint",
+        lambda character_id="", user_key=None: "",
+    )
     monkeypatch.setattr(lp_mod, "read_web_proactive_config", lambda: dict(DEFAULT_WEB_CONFIG))
     monkeypatch.setattr(lp_mod, "load_proactive_knowledge", lambda character_id, **kw: "")
 

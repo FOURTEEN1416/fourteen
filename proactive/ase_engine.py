@@ -507,6 +507,7 @@ class MessageGenerator:
         last_user_message: str = "",
         response_rate: float | None = None,
         character_id: str = "",
+        user_key: str = "",
     ) -> str | None:
         if not self._llm:
             return None
@@ -577,8 +578,10 @@ class MessageGenerator:
                 load_full_persona_hint,
             )
 
-            persona = load_full_persona_hint(character_id)
-            mode_constraints = immersive_proactive_constraints()
+            # 2026-10-21 R7：主动线也按**该会话**的模式（per-user 覆盖优先），
+            # user_key 为空时回落全局默认（后台/无归属调用行为不变）。
+            persona = load_full_persona_hint(character_id, user_key or None)
+            mode_constraints = immersive_proactive_constraints(user_key or None)
         except Exception as e:  # noqa: BLE001
             logger.debug("proactive_context 装载失败（回退中性兜底分支）: %s", e)
             persona = ""
@@ -678,6 +681,7 @@ class MessageGenerator:
         last_user_message: str = "",
         response_rate: float | None = None,
         character_id: str = "",
+        user_key: str = "",
     ) -> tuple[str, str]:
         content = None
         generated_by = "template"
@@ -691,6 +695,7 @@ class MessageGenerator:
                 last_user_message=last_user_message,
                 response_rate=response_rate,
                 character_id=character_id,
+                user_key=user_key,
             )
             if content:
                 generated_by = "llm"
@@ -1412,6 +1417,9 @@ class ASEEngine:
                 # 2026-10-15 生成线角色化：按当前会话绑定角色动态解析（闭包绑定
                 # 本 user_key），生成走角色卡口吻而非写死的十四模板
                 character_id=self._current_character_id(),
+                # 2026-10-21 R7：模式同样按该会话（per-user 覆盖）——
+                # 旧实现读全局单例，主动消息与主链模式可能不一致
+                user_key=str(self._user_key or ""),
             )
         else:
             content = self._message_generator.generate_from_template(
