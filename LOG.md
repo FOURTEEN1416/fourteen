@@ -3941,3 +3941,15 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 **验证**：复验 12/12 通过、每任务 ≥1 突变验红（md5 恢复校验）；本批初跑四分块基线 2 块超时（已知随机挂起环境病），**最终由八项裁决批全量门确证合并树**：3900 收集/3898 通过+2 跳过/0 失败、ruff 全仓 0。
 
 **遗留**（并入八项裁决批 R8 统筹）：降级三选项待用户拍板；agnes 供应商侧抖动仍在；架构级差距（话题状态机/爱语式完全自主）未决。
+
+
+## 2026-10-22 八问+八项裁决两批部署上线（三端一致 @ 1c80cc5）
+
+- **部署链**（用户指令「部署！！！」）：服务器 git pull 8eb4abe6→1c80cc52 → pip install -e（.venv-cpu）→ npm ci + build → 冷停（MainPID=0 + cgroup.procs=0 实证）→ systemctl start → health/ready 200。
+- **🔴 remote_deploy.sh VENV 缺陷（本批发现即修）**：VENV 写死 ${APP_DIR}/.venv 而生产实为 .venv-cpu，脚本两连失败后手动按序执行；已改为 VENV 可覆盖 + 自动探测 .venv-cpu。
+- **生产冒烟**：stream_mode=true（真流式默认开，buffered 为回滚开关）；memory 工具在册（builtin_tools 13→14）；IncrementalReplyGuard 行为正确（「你好呀，今天有点累。」句界立即下发、尾巴「我们聊点开心的」held 到 finish）；/api/user/reply-mode 在 openapi；调度器 master 锁单例。
+- **网关实测 3 发**：probe1 agnes 空内容响应（content=""、completion_tokens=1）→ 空内容守卫正确抛错 → zhipu 降级接管 8.45s 回执 + quality_degraded 落账（v1.54 可观测修复生产实证）；probe2/3 0.74s/0.84s 健康。
+- **角色卡合并**（用户裁决「合并差距，选更优推送」）：全量对账发现漂移不止第 42 张——孙颖莎/简薇 is_active 在服务器侧翻转过（孙颖莎 True+updated_at、简薇 False，均生产控制台操作、比本地 09-20 恢复时刻新）→ 两张以服务器版为准回写本地；99c89c39.json（林挽夏 user_id=1 变体，内容与 62105bca 同源、is_active=False）推上服务器。终态两端 42/42 哈希零差异。
+- **黄金集生产基线**：45/45 确定性通过（1c80cc5 报告入库）。
+- **三端一致性**：git blob 级抽验 stream_guard.py / optimized_orchestrator.py / config/system.yaml 本地=服务器（⚠️ md5 直比被行尾骗，用 git show HEAD 口径）。
+- **用户裁决落账**：降级三方向暂不处理（用户后续自寻稳定主力模型）；agnes 保留链首；部署放行。

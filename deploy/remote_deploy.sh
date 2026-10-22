@@ -16,7 +16,12 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/ai-girlfriend}"
 FRONTEND_DIR="${APP_DIR}/frontend"
-VENV="${APP_DIR}/.venv"
+# 2026-10-22 修：VENV 此前写死 ${APP_DIR}/.venv，生产实为 .venv-cpu（脚本两连失败）。
+# 现支持 VENV 环境变量覆盖，缺省自动探测：.venv 存在用之，否则回落 .venv-cpu。
+VENV="${VENV:-${APP_DIR}/.venv}"
+if [ ! -d "${VENV}" ] && [ -d "${APP_DIR}/.venv-cpu" ]; then
+    VENV="${APP_DIR}/.venv-cpu"
+fi
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
