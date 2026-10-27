@@ -4000,3 +4000,12 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **未部署**（全部实施批完成后统一三端上线；上线即默认生效，回滚开关：`read_delay_enabled=false` / `typing_enabled=false` / `llm_proactive.judge_enabled=false` / `typo_rate=0`）。
 - **推送状态（如实登记）**：本地已完成 3 个提交（`e7da4dc` P0-A / `fd003b8` P0-B–Q6 / `c62e855` 文档 v1.57）；`git push` 因本机 SSH 出口（`198.18.1.64:22`）不可达连续失败，**GitHub 端尚未更新**。网络恢复后执行 `git push origin main` 即完成 B 档同步；A 档三端部署另行执行（`remote_deploy.sh` + health/ready 核验）。
 - **实施勘误·源码保真（2026-10-27 复核，用户质询「是否真实阅读 DSH 插件源码」触发）**：活跃响应曲线初版实现为「60–300s 线性升到 max」，与报告 §2.2.4（`send-delay.mjs:26-53,380-391`）的**四段**语义不符；已修正为 ≤60s→`min(fastReplyMs,minMs)` / 60–120s 线性升至 `minMs` / **120–300s 平台 `minMs`** / ≥300s 完整 `uniform(min,max)`（`FAST_WINDOW_MS=60s`/`MIN_WINDOW_MS=120s`/`FULL_WINDOW_MS=300s`/`FAST_REPLY_MS=1000`），测试改为四段边界 + 「fast 不高于 min」不变量；设计文档 R-5 行同步修正。**如实声明**：本机出网被阻断（GitHub HTTPS/SSH 均失败：ECONNRESET/SSL handshake），无法当场重拉源码逐行复核；本次修正依据报告内的源码行号引用（`send-delay.mjs` 等 9 处）；网络恢复后应补一次「报告引用 ↔ 远端源码」逐行对账。
+
+
+## 2026-10-27 源码核验批（代理恢复后全仓复核，闭合上一条的「无法当场复核」声明）· 纯文档勘误
+
+- **核验方法**：`git clone --depth 1 https://github.com/john-walks-slow/dsh-im-humanize` → 881 files，HEAD `1fe4b08`（v4.38.0-humanize.2，2026-10-26）；逐项 grep/read 与报告引用对照。
+- **全部一致（抽样全过）**：四段活跃曲线 `send-delay.mjs:29-45,378-392`；`SHORT_DELAY_CAP_MS=5000`（`:25`）；阅读延迟/段间隔默认值（`:48-66`：1000/6000/0/30000 与 500/2000/0/10000）；两类公式（`:344-370`、`:398-415`）；typing 三档 + burst ON 3000–6000/OFF 1500–4000 + residual-aware + start/stop/pause/resume（`typing-session.mjs:22-37`）；`MAX_MESSAGE_BREAKS_PER_TURN=20` + trailing delimiter + 空断点 no-op + `segmentsCover`（`message-break.mjs:27,61,95,155,189`）；schema 单一字段表 + `perBot` + 缺失=继承 + 宽松修复 vs 严格校验（`humanize-schema.mjs:60-215`）；仓库 ★4 / 0 fork / MIT 一致。
+- **发现并修正 2 处**：① 报告把 `DINGTALK_MIN_SEGMENT_GAP_MS=3000` 的来源误写为 `send-delay.mjs:393-415`——实际定义 `src/channels/dingtalk/dingtalk-bridge.mjs:539`、使用 `:1520`；已改正报告引用。② 行号漂移 +5~13（`computeReadDelayMs` 实际 344-370、`computeSegmentGapMs` 实际 398-415；内容未变，仓库在调研后更新）。
+- **补充口径（重要）**：`text-harness-bridge.mjs:1038-1040` 证明 5s 封顶**只对无 `sendTyping` 能力的渠道**生效（`channelCapMs: typeof this.#bot.sendTyping === 'function' ? undefined : SHORT_DELAY_CAP_MS`）；有 typing 的渠道（含微信票据）走完整延迟——与本仓 `typing_capable` 判定一致（`5337a4e` 修正后的实现逐分支对齐 `boostedBaseMs`）。插件自身 review 文档曾指出过微信被无条件封顶的旧矛盾，当前 HEAD 已按能力判定解决。
+- **仍未做**：未执行该插件、未真机验证；★4/developer preview 结论不变（借机制、重写实现）。
