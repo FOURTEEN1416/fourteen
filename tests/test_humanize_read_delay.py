@@ -15,8 +15,9 @@ from __future__ import annotations
 
 from utils.humanize_config import HumanizeConfig
 from utils.humanize_read_delay import (
-    ACTIVITY_FAST_IDLE_MS,
-    ACTIVITY_FULL_IDLE_MS,
+    FAST_WINDOW_MS,
+    FULL_WINDOW_MS,
+    MIN_WINDOW_MS,
     NO_TYPING_CAP_MS,
     activity_base_ms,
     compute_read_delay_ms,
@@ -41,14 +42,25 @@ def test_disabled_returns_zero():
     assert compute_read_delay_ms(0, "你好", _cfg(read_delay_enabled=False)) == 0
 
 
-def test_activity_curve_boundaries():
+def test_activity_curve_four_segments():
+    """对齐 DSH 源码四段：≤60s→fast；60–120s 线性；120–300s 平台；≥300s 完整区间。"""
+    # 默认 min=1000 时 fast=min(1000,1000)=1000
     assert activity_base_ms(0, 1000, 6000) == 1000
-    assert activity_base_ms(ACTIVITY_FAST_IDLE_MS, 1000, 6000) == 1000
-    mid = activity_base_ms(180_000, 1000, 6000)
-    assert 1000 < mid < 6000, "60–300s 应为线性过渡"
-    assert activity_base_ms(ACTIVITY_FULL_IDLE_MS, 1000, 6000, rng=lambda a, b: b) == 6000
-    assert activity_base_ms(ACTIVITY_FULL_IDLE_MS, 1000, 6000, rng=lambda a, b: a) == 1000
+    assert activity_base_ms(FAST_WINDOW_MS, 1000, 6000) == 1000
+    # 用 min=6000 才能观察 60–120s 的线性段（1000 → 6000）
+    mid = activity_base_ms((FAST_WINDOW_MS + MIN_WINDOW_MS) // 2, 6000, 10000)
+    assert 1000 < mid < 6000
+    # 120–300s 是平台期，保持 min_ms（不再是升向 max 的斜坡）
+    assert activity_base_ms(MIN_WINDOW_MS, 6000, 10000) == 6000
+    assert activity_base_ms(180_000, 6000, 10000) == 6000
+    assert activity_base_ms(FULL_WINDOW_MS, 6000, 10000, rng=lambda a, b: b) == 10000
+    assert activity_base_ms(FULL_WINDOW_MS, 6000, 10000, rng=lambda a, b: a) == 6000
     assert activity_base_ms(None, 1000, 6000) is None
+
+
+def test_fast_reply_never_exceeds_min():
+    """不变量：加成后的 base 永不高于 min_ms（fastReplyMs > min 时截到 min）。"""
+    assert activity_base_ms(0, 300, 6000) == 300
 
 
 def test_first_message_uses_full_range():
@@ -100,8 +112,10 @@ def test_no_typing_cap_respects_smaller_config_cap():
 
 
 def test_typing_available_has_no_5s_cap():
+    """有 typing 能力时只受 max_total 约束（不再有 5s 硬顶）；
+    用 ≥300s 的 idle 走完整区间，验证 2s 不被截断。"""
     cfg = _cfg(read_delay_min_ms=2000, read_delay_max_ms=2000)
-    assert compute_read_delay_ms(0, "hi", cfg, typing_available=True) == 2000
+    assert compute_read_delay_ms(600_000, "hi", cfg, typing_available=True) == 2000
 
 
 def test_inverted_bounds_are_healed():

@@ -4,8 +4,14 @@
 ``docs/reports/2026-10-27-DSH专项调研.md`` §2.2.3/§2.2.4 与本仓设计
 ``docs/reports/2026-10-27-仿真人化引入方案.md`` §3.2：
 
-- **base（活跃响应曲线）**：``idle ≤ 60s`` → 下界；``60s–300s`` 线性过渡；
-  ``≥ 300s`` → 完整区间随机（「隔久了才看到，回得慢一点」）；
+- **base（活跃响应曲线，按 DSH 源码四段实现）**：
+  ``idle ≤ 60s`` → ``fastReplyMs``；``60s–120s`` → 从 ``fastReplyMs`` 线性升到
+  ``min_ms``；``120s–300s`` → **保持 ``min_ms``（平台期）**；``≥300s`` →
+  完整 ``uniform(min_ms, max_ms)``。加成后的 base **永不高于 ``min_ms``**
+  （只缩短、不拉长；``fastReplyMs > min_ms`` 时截到 ``min_ms``）。
+  来源：``docs/reports/2026-10-27-DSH专项调研.md`` §2.2.4
+  （``send-delay.mjs:26-53,380-391``）；**2026-10-27 实施勘误**：初版误写成
+  「60–300s 线性升到 max」，与源码不符，已按四段曲线修正。
 - **reading（阅读耗时）**：``可见字数 / chars_per_second × 1000``（0 = 关闭）；
 - ``result = min(base + reading, max_total, channel_cap)``；
 - **无 typing 能力的渠道**：``channel_cap = min(配置值, 5000ms)`` —— 没有
@@ -21,9 +27,13 @@ import random
 from collections.abc import Callable
 from typing import Any
 
-#: 活跃响应曲线拐点：60s 内视为「刚聊完」，300s 外视为「隔久了」。
-ACTIVITY_FAST_IDLE_MS = 60_000
-ACTIVITY_FULL_IDLE_MS = 300_000
+#: 活跃响应曲线拐点（对齐 DSH 源码默认）：60s / 120s / 300s。
+FAST_WINDOW_MS = 60_000
+MIN_WINDOW_MS = 120_000
+FULL_WINDOW_MS = 300_000
+
+#: 刚聊完时的「秒回」基础值（仍受 min_ms 封顶——只缩短不拉长）。
+FAST_REPLY_MS = 1_000
 
 #: 无 typing 指示器时的硬封顶（没有沉默解释，延迟超过 5s 会被感知为变卡）。
 NO_TYPING_CAP_MS = 5_000
@@ -37,10 +47,16 @@ def activity_base_ms(
     max_ms: int,
     *,
     rng: Rng = random.uniform,
+    fast_reply_ms: int = FAST_REPLY_MS,
 ) -> int | None:
-    """活跃响应曲线的 base 延迟；``idle_ms is None``（首条消息）返回 ``None``。
+    """活跃响应曲线的 base 延迟（四段；``idle_ms is None`` → ``None``）。
 
-    ``None`` 表示「没有上一条可参照」→ 调用方回落到完整区间随机
+    - ``idle ≤ 60s`` → ``min(fast_reply_ms, min_ms)``
+    - ``60–120s`` → 线性从 ``fast`` 升到 ``min_ms``
+    - ``120–300s`` → 平台期 ``min_ms``
+    - ``≥300s`` → ``uniform(min_ms, max_ms)``（「隔久了，回得慢一点」）
+
+    ``None`` 表示「没有上一条可参照」→ 调用方回落完整区间随机
     （见 :func:`compute_read_delay_ms`）。
     """
     if idle_ms is None:
@@ -48,13 +64,16 @@ def activity_base_ms(
     lo, hi = (int(min_ms), int(max_ms))
     if lo > hi:
         lo, hi = hi, lo
+    fast = min(int(fast_reply_ms), lo)  # 不变量：加成后永不高于 min_ms
     idle = max(0, int(idle_ms))
-    if idle <= ACTIVITY_FAST_IDLE_MS:
-        return lo
-    if idle >= ACTIVITY_FULL_IDLE_MS:
+    if idle <= FAST_WINDOW_MS:
+        return fast
+    if idle >= FULL_WINDOW_MS:
         return int(round(rng(lo, hi)))
-    ratio = (idle - ACTIVITY_FAST_IDLE_MS) / float(ACTIVITY_FULL_IDLE_MS - ACTIVITY_FAST_IDLE_MS)
-    return int(round(lo + ratio * (hi - lo)))
+    if idle <= MIN_WINDOW_MS:
+        ratio = (idle - FAST_WINDOW_MS) / float(MIN_WINDOW_MS - FAST_WINDOW_MS)
+        return int(round(fast + ratio * (lo - fast)))
+    return lo
 
 
 def compute_read_delay_ms(
