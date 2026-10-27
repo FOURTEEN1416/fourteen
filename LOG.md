@@ -3953,3 +3953,16 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **黄金集生产基线**：45/45 确定性通过（1c80cc5 报告入库）。
 - **三端一致性**：git blob 级抽验 stream_guard.py / optimized_orchestrator.py / config/system.yaml 本地=服务器（⚠️ md5 直比被行尾骗，用 git show HEAD 口径）。
 - **用户裁决落账**：降级三方向暂不处理（用户后续自寻稳定主力模型）；agnes 保留链首；部署放行。
+
+
+## 2026-10-27 系统性升级调研批（DSH 仿真人化插件 + BreezeTTS2 语音引入）· workflow `dwfrun-c8488f5e` · 纯调研零代码 · 方案待裁决
+
+- **用户两项决议**：① 调研 DSH（用户明示「DSH 是 deepseekharness 的简写」）及同类「让 AI 仿真人化」的插件，研究如何参考引入；② 语音功能引入 BreezeTTS2（用户拍板方向）。执行形态：动态 workflow 四路并行调研（DSH 本体 / 插件生态 / BreezeTTS2 / 本仓测绘）→ 综合设计 → 独立复验 → 修订循环；产出 7 份文档至 `docs/reports/2026-10-27-*`。
+- **DSH 本体查证**（推翻任务预设、如实修正）：DSH = DeepSeek 官方开源 Agent Harness（智能体运行环境），**不是「让 AI 仿真人化的插件」本体**；Cordis「一切皆插件」架构，模型适配器/工具/会话日志/agent loop 均可替换；★26.3 万、30 天 3,423 commits、npm 单月 119 万下载、MIT，但仍是 developer preview 且有 breaking changes。**拟人价值在其第三方插件生态**：`dsh-im-humanize`（阅读延迟 + typing + 分步消息 + 状态表情，九渠道）、`dsh-humanizer` 家族（文本去 AI 味）、`dsh-proactive`（宿主级主动唤醒：jitter/免打扰/日预算/min_idle/静默墓碑）。结论：**借机制、不借运行时**，不把 DSH 嵌进主链。
+- **插件生态调研**（18 个可借鉴项目）：核心结论=拟人化的主要杠杆在工程层（节奏/时机/状态/记忆/抑制），不在继续堆 prompt；中文 IM 生态机制密度最高为 AstrBot 插件群（读空气/注意力疲劳/主动链/风格学习/记忆生命周期）与 MaiBot；SillyTavern 无专门拟人品类（TypingIndicator 只是 UI 动画）。**许可证硬约束**：MaiBot GPL、AstrBot 多数插件 AGPL、KouriChat 非商用且禁微信/QQ、lieflat CC BY-NC → 只借机制、重写实现。
+- **BreezeTTS2 查证**：正身=BreezeBlue（RESONIA, INC.）Breeze TTS 2，3B 英中双语 open-weight；**代码 Apache-2.0，但模型权重为 BreezeBlue Research and Non-Commercial License v1.1——自托管输出仅限研究/非商用，商用必须书面许可或付费托管 API**；能力=零样本克隆/音色设计/事件标签/24kHz/流式，官方 H100 TTFA<40ms，但需 12–24GB NVIDIA GPU 且官方只支持 Linux；AA 榜（2026-10-27）总榜 #11/Elo 1227、开源权重 #2，MiMo-V2.5-TTS #64/Elo 1054（中文克隆无独立数据，厂商「#1」引旧榜）。托管 $30/1M 计费字符（中文每字 2 units ≈ $60/1M 汉字），免费 400 credits/天≈2,000 汉字/天。**生产判定**：现生产 Linux 无 GPU（.venv-cpu，2–4 核/4–8GB）不能自托管；开发机 RTX 5060 Laptop 8GB 仅够实验（官方不支持 Windows、50 系未验证）→ **托管 API 是唯一不新增硬件的生产路径**，且须先过商业许可与跨境合规两硬门。
+- **本仓测绘**：语音链路 16 项坐标（MiMo-only 单引擎 + SAPI 兜底、仅非流式主链触发）；既有拟人机制 19 项（出站守卫/时间/主动/模式/称呼/拆条六层已覆盖）；真正缺口=生成前阅读延迟、typing、humanize 配置按用户覆盖。
+- **两项设计**（独立复验 1 轮修订后 **pass**；2 条 low 意见主控收口修正：T-4 grep 证据勘误、P0-B 流式路径覆盖范围声明+灰度指标按通道拆分）：①《仿真人化引入方案》=先补工程底座不补 prompt——P0 做 `humanize_config` 声明式 schema + 按用户覆盖 + opt-in 灰度上线「阅读延迟+typing+活跃响应曲线+supersede」，已覆盖机制一律勿重复引入；②《BreezeTTS2 引入设计》=首版生产走托管 API（MiMo 默认主力、Breeze 按角色 opt-in，Breeze 失败回落 MiMo、反向不自动回落付费），新增 `voice/breeze_tts_provider.py` + TTSManager 多引擎路由 + engine/model/voice_id 分域白名单；两个硬门（商业许可/跨境合规 + 生产到 api.breeze.blue 中国网络实测）未过前 `enabled=false` 代码合入不启用。
+- **待用户裁决 13 项**（Q0–Q13，见汇总）：**Q0 已由用户本轮拍板「引入 BreezeTTS2」**（设计文档按子智能体视角列为 Q0 待确认，现以本行落账为准；AGENTS L6「MiMo 唯一引擎」口径修订待实施批同步）；其余 Q1–Q6（仿真人化节奏/覆盖/错别字/情绪 schema/拆条）、Q7–Q13（Breeze 部署形态/角色定位/音色策略/商用范围/真流式/付费回退/跨境合规）待逐条拍板。
+- **未验证项（如实声明）**：Breeze 商用边界与跨境合规（需 BreezeBlue 书面确认+法务）；生产（中国大陆）到 `api.breeze.blue` 可达性与 TTFA 未实测；中文女声/角色克隆无独立评测（需听评基线）；iLink `sendtyping` 未实测（typing 上线前置条件）；RTX 5060 Laptop 8GB 兼容性未实测；MiMo「限时免费」生命周期与 `/audio/speech` 等价性待确认；生产是否真无 GPU 未远程 `nvidia-smi`（依据部署文档与 .venv-cpu 记录）。
+- **验证**：本轮纯调研与设计，零代码变更——pytest / vitest / ruff 未运行（不适用）；全量基线沿用 AGENTS §4.3 现行口径（3900 收集 / 3898 通过 + 2 跳过 / 250 文件 / 42 卡；vitest 217/217；ruff 0）。实施与全量验证在设计拍板后另开实施批。
