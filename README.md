@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-4194-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-4200-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
@@ -16,7 +16,7 @@
 
 > **当前状态（2026-10-21 八项裁决执行批：本轮未部署 —— 用户裁决 R2 暂不上生产）**：本轮八项裁决 R1–R8 落地/核实——**R1 降级三方向**（降级切同档位模型 / 降级轮走保守短回复 / 降低降级轮 prompt 复杂度）**仅讲解，待拍板**；**R2 暂不上生产**；**R3 主链工具与记忆相结合**（能力声明段按 registry 真实可用性渲染 + 启用 `memory` 工具打通 L0→L1 检索 + 内部标识出站剥离）；**R4 主链改真流式**（`chat.stream_mode: true`：按句边生成边下发，完整句即发、不完整尾巴永不下发，流末 `_finalize_reply` 唯一全文终裁，**已发前缀永不回滚**）；**R5 AOCI 与代码图谱补全**（`CODE_GRAPH.md` 重建 v3.8.33）；**R6 黄金集立项**（`tests/golden/` 45 条用例 + runner/judges/pytest 入口）；**R7 模式显式切换·按用户隔离**（全局降为默认 + per-user 覆盖表 + admin 作用域 + 用户自助端点）；**R8 部分闭环为何卡住**（架构/产品决定待裁决，非技术阻塞）。上一已部署版本 = `8eb4abe`（v1.55 聊天质量二轮）。批次详情见 `LOG.md`，当前状态见 `docs/HANDOFF_REPORT.md`。
 
-> **测试口径**（后端 = 2026-10-27 拟人化实施批实测）：后端 **3976 passed + 2 skipped / 4 failed**（收集 **3982**；轨迹 3900→3982 本轮 +82；现役角色卡 **42 张**；2 跳过=`test_cache.py:297 Redis not available`（环境相关非回归）+ `tests/golden/test_golden_set.py:48`（live_llm 用例默认不跑，设 `GOLDEN_LIVE=1` 才跑）；**4 失败为 HEAD 上既有问题**——`test_byok_hardening` api_base 校验 ×2 / `test_w1_identity_authorization` 无主卡 / `test_sweep_memory_forward_owner` 503，已用 `git stash` 复现、非本批引入，待专项清理）。⚠️ **口径勘误**：分块清单必须 **`find` 递归生成**——`ls tests/*.py tests/core/*.py` **漏子目录 `tests/api/`**（2 文件 32 例，2026-10-17 实证）；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> **测试口径**（后端 = 2026-10-27 拟人化实施批实测）：后端 **3982 passed + 2 skipped / 4 failed**（收集 **3988**；轨迹 3900→3988；现役角色卡 **42 张**；2 跳过=`test_cache.py:297 Redis not available`（环境相关非回归）+ `tests/golden/test_golden_set.py:48`（live_llm 用例默认不跑，设 `GOLDEN_LIVE=1` 才跑）；**4 失败为 HEAD 上既有问题**——`test_byok_hardening` api_base 校验 ×2 / `test_w1_identity_authorization` 无主卡 / `test_sweep_memory_forward_owner` 503，已用 `git stash` 复现、非本批引入，待专项清理）。⚠️ **口径勘误**：分块清单必须 **`find` 递归生成**——`ls tests/*.py tests/core/*.py` **漏子目录 `tests/api/`**（2 文件 32 例，2026-10-17 实证）；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
 > 前端 `217 passed`（vitest 5.0.3，33 文件；拟人化批前端测试入径取代旧 182/30 口径）+ `tsc --noEmit` 0 错误；ruff 0.16.8 全仓 0 错（`All checks passed!`）。
 > ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 13）。**引用基线必须同时声明卡数**。
 
@@ -193,7 +193,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │       ├── store/        Zustand 3 个（authStore / characterBuilderStore / errorStore）
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
-├── tests/                3976 后端测试通过 + 2 跳过 / 4 既有失败（2026-10-27 拟人化实施批实测，收集 3982）+ 217 前端测试
+├── tests/                3982 后端测试通过 + 2 跳过 / 4 既有失败（2026-10-27 拟人化实施批实测，收集 3988）+ 217 前端测试
 ├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 42 张 = 41 策展 + 1 张 user_id=1 林挽夏克隆变体，已定性 2026-10-12）
 └── main.py               入口
 ```

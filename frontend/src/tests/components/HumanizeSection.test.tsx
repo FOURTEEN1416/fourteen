@@ -8,7 +8,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 //   • 门禁同 MessageTab：非 admin 不渲染表单、不请求 admin-only 接口
 //   • 读失败 → 显式错误态 + 重试（绝不渲染默认假表单）
 //   • 档位四选一；dynamic 显示 每字/下钳/上钳，fixed 显示固定延时，random 显示区间
-//   • max_segments 只读呈现「2 条（固定，用户裁决）」
+//   • max_segments 只读呈现「3 条（可配 2/3/4）」
 //   • 保存为**显式按钮**：POST 增量 → 必须回执 status==='ok'；dirty 时标「未保存」
 // ════════════════════════════════════════════════════════════════
 
@@ -45,7 +45,7 @@ const SERVER_CONFIG = {
   delay_ceil_ms: 1600,
   bracket_delay_ms: 0,
   proactive_split: false,
-  max_segments: 2,
+  max_segments: 3,
   delay_mode_label: '逐字(按字数)',
 }
 
@@ -126,7 +126,7 @@ describe('控件呈现', () => {
     for (const label of ['逐字(按字数)', '固定延时', '随机区间', '不延时']) {
       expect(screen.getByRole('button', { name: label })).toBeDefined()
     }
-    expect(screen.getByTestId('humanize-max-segments').textContent).toBe('2 条（固定，用户裁决）')
+    expect(screen.getByTestId('humanize-max-segments').textContent).toBe('3 条（可配 2/3/4）')
     // Toggle 组件以 role=switch 暴露
     expect(screen.getByRole('switch')).toBeDefined()
     expect(screen.getByText('主动消息也拆句发送（默认：整段发）')).toBeDefined()

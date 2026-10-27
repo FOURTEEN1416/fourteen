@@ -199,27 +199,29 @@ def test_bracket_delay_inert_by_default_then_effective(hm_file):
 
 
 # ═══════════════════════════════════════════════════════════
-# 2. split_reply_for_wechat 参数化 + 默认值不变（2/45）
+# 2. split_reply_for_wechat 参数化 + 默认值（Q6 起默认 3 段 / 45 字）
 # ═══════════════════════════════════════════════════════════
 
 
 def test_split_defaults_unchanged():
+    from utils import humanize_config as hc
+
     params = inspect.signature(split_reply_for_wechat).parameters
-    assert params["max_segments"].default == 2
+    assert params["max_segments"].default == hc.MAX_SEGMENTS == 3
     assert params["max_chars"].default == 45
 
 
-def test_split_default_behavior_capped_at_two_preserving_content():
+def test_split_default_behavior_capped_at_three_preserving_content():
     reply = "\n".join(f"第{i}句" for i in range(12))
     segs = split_reply_for_wechat(reply)
-    assert len(segs) == 2
+    assert len(segs) == 3
     assert "\n".join(segs) == reply
 
 
 def test_split_accepts_explicit_max_chars_is_lossless():
     reply = "一。" * 30
     segs = split_reply_for_wechat(reply, max_chars=10)
-    assert len(segs) == 2
+    assert len(segs) == 3
     assert "".join(segs) == reply
 
 
@@ -256,7 +258,7 @@ def test_public_send_reply_segments_returns_only_accepted_prefix(tmp_path, monke
 
     monkeypatch.setattr(wc, "_send_text", send)
     accepted = c.send_reply_segments("peer", "第一段\n第二段\n第三段")
-    assert calls == ["第一段", "第二段\n第三段"]
+    assert calls == ["第一段", "第二段"], "第 2 段被拒后不再尝试第 3 段"
     assert accepted == "第一段", "只返回 API 已受理前缀，失败段及后续不入历史"
 
 
@@ -302,11 +304,11 @@ def test_connector_tier_vocabulary_covers_persistable_modes():
 
 
 def test_max_segments_single_source_across_connector_and_frontend():
-    """``MAX_SEGMENTS=2`` 的跨文件单一真源（复审 P3「常量镜像」）。
+    """``MAX_SEGMENTS`` 的跨文件单一真源（复审 P3「常量镜像」）。
 
-    真源 = ``utils/humanize_config.MAX_SEGMENTS``；连接器只许引用别名，
-    ``frontend/src/store/humanizeStore.ts`` 的 ``HUMANIZE_MAX_SEGMENTS`` 只许
-    等于同一值（无跨语言 import，故以文本约束钉死不漂移）。
+    真源 = ``utils/humanize_config.MAX_SEGMENTS``（2026-10-27 Q6 起默认 3）；
+    连接器只许引用别名，``frontend/src/store/humanizeStore.ts`` 的
+    ``HUMANIZE_MAX_SEGMENTS`` 只许等于同一值（无跨语言 import，故以文本约束钉死不漂移）。
     """
     from pathlib import Path
 
@@ -316,7 +318,7 @@ def test_max_segments_single_source_across_connector_and_frontend():
     assert wc._SPLIT_MAX_SEGMENTS is hc.MAX_SEGMENTS, (
         "连接器拆条上限未引用真源（应为同一对象别名，而非等值字面量）"
     )
-    assert hc.MAX_SEGMENTS == 2
+    assert hc.MAX_SEGMENTS == 3
 
     store = (
         Path(__file__).resolve().parents[1]

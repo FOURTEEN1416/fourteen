@@ -115,5 +115,5 @@ def test_returns_only_accepted_prefix(connector, monkeypatch):
 
     monkeypatch.setattr(wc, "_send_text", send)
     accepted = connector.send_reply_segments(PEER, "第一段\n第二段\n第三段")
-    assert calls == ["第一段", "第二段\n第三段"]
+    assert calls == ["第一段", "第二段"]  # Q6 默认 3 段：第 2 段被拒后不再尝试第 3 段
     assert accepted == "第一段"

@@ -52,16 +52,16 @@ def _split(reply, **kw):
     return split_reply_for_wechat(reply, **kw)
 
 
-def test_six_line_reply_caps_at_two_segments_and_rejoins_exactly():
-    """6 行回复 → ≤2 条，且按原始分隔拼回与原文完全一致（换行保留）。"""
+def test_six_line_reply_caps_at_three_segments_and_rejoins_exactly():
+    """6 行回复 → ≤3 条（Q6 默认 3），按原始分隔拼回与原文完全一致（换行保留）。"""
     reply = "\n".join(f"第{i}句" for i in range(1, 7))
     segs = _split(reply)
-    assert 1 <= len(segs) <= 2, f"拆条上限 2，实际 {len(segs)} 条"
+    assert 1 <= len(segs) <= 3, f"拆条上限 3，实际 {len(segs)} 条"
     assert "\n".join(segs) == reply, "并条必须保留换行，拼回与原文逐字一致"
 
 
 def test_two_line_reply_stays_two_segments():
-    """未超上限的行数维持旧行为：一行一条（≤2 条）。"""
+    """未超上限的行数维持旧行为：一行一条（≤3 条）。"""
     assert _split("第一句\n第二句") == ["第一句", "第二句"]
 
 
@@ -72,16 +72,16 @@ def test_single_line_reply_untouched():
 
 
 def test_overlong_single_line_merges_losslessly_without_added_newlines():
-    """超长单行：句切后并入第 2 条，不得凭空插入换行（内容逐字无损）。"""
+    """超长单行：句切后受 3 段上限约束合并，不得凭空插入换行（内容逐字无损）。"""
     reply = "一。" * 30
     segs = _split(reply, max_chars=10)
-    assert 1 <= len(segs) <= 2
+    assert 1 <= len(segs) <= 3
     assert "".join(segs) == reply
 
 
 def test_blank_lines_dropped_but_content_lossless():
     segs = _split("第一句\n\n第二句\n\n第三句\n\n第四句")
-    assert 1 <= len(segs) <= 2
+    assert 1 <= len(segs) <= 3
     assert "\n".join(segs) == "第一句\n第二句\n第三句\n第四句"
 
 

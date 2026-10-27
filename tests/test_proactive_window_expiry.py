@@ -203,6 +203,10 @@ class TestExpiredWindowAbandons:
         """过期出账后下一拍走全新 LLM 决策：过期不补 ≠ 永久静音；同一条
         pending 至多一次 window_expired（出账即噪声上限）。"""
         h = _make_harness(monkeypatch, tmp_path, next_ok=time.time() - 30 * 60)
+        # T-4：本用例断言精确等待窗 → 关闭抖动（抖动语义由 test_proactive_jitter 覆盖）
+        monkeypatch.setattr(
+            type(h.sched), "get_proactive_jitter_seconds", lambda self: 0.0,
+        )
         _write_window_config(h.cfg_path, enable=True)
 
         h.run()

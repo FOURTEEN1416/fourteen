@@ -20,7 +20,7 @@ import Section from './RoleSettingsSection'
 import Slider from '../shared/Slider'
 import Toggle from '../shared/Toggle'
 import { useAuthStore } from '../../store/authStore'
-import { HUMANIZE_MAX_SEGMENTS, humanizeIsDirty, useHumanizeStore } from '../../store/humanizeStore'
+import { humanizeIsDirty, useHumanizeStore } from '../../store/humanizeStore'
 import type { HumanizeConfig } from '../../store/humanizeStore'
 import { humanizeGetConfig, updateHumanizeConfig } from '../../api/system'
 import type { HumanizeDelayMode } from '../../api/system'
@@ -288,13 +288,13 @@ export default function HumanizeSection() {
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-sm text-gray-700">单次回复拆条上限</p>
-            <p className="text-[11px] text-gray-400 mt-0.5">用户裁决锁定为 2 条，不可修改</p>
+            <p className="text-[11px] text-gray-400 mt-0.5">可配 2/3/4（默认 3），经 API 调整</p>
           </div>
           <span
             className="rounded-lg bg-gray-100 px-3 py-1 text-xs font-mono text-gray-500"
             data-testid="humanize-max-segments"
           >
-            {HUMANIZE_MAX_SEGMENTS} 条（固定，用户裁决）
+            {config.max_segments} 条（可配 2/3/4）
           </span>
         </div>
 

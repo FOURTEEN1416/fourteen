@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 //   • load：GET 回执 status==='ok' 才算成功；否则 error 态（不渲染默认假表单）
 //   • save：POST **增量**（只带相对 snapshot 变化的可写键）→ partial merge；
 //     回执 status!=='ok' 一律判失败（不落 savedAt、不动 snapshot）
-//   • max_segments 只读：无论服务端回什么，编辑态恒为 2（用户裁决）
+//   • max_segments：只读展示（Q6 起默认 3、可配 2/3/4），编辑态不被 patch 改写
 //   • 跨字段互钳由 UI 侧保证；store 只做存取，不发明校验真源
 // ════════════════════════════════════════════════════════════════
 
@@ -41,7 +41,7 @@ const SERVER_CONFIG = {
   delay_ceil_ms: 1600,
   bracket_delay_ms: 0,
   proactive_split: false,
-  max_segments: 2,
+  max_segments: 3,
   delay_mode_label: '逐字(按字数)',
 }
 
@@ -240,12 +240,12 @@ describe('save（W11-D5 回执纪律）', () => {
 })
 
 describe('patch / reset', () => {
-  it('patch 只改传入键，且 max_segments 恒被钉为 2', () => {
+  it('patch 只改传入键，且 max_segments 不可被前端改写（保持当前有效值）', () => {
     useHumanizeStore.getState().patch({ per_char_ms: 88, max_segments: 99 })
 
     const s = useHumanizeStore.getState()
     expect(s.config.per_char_ms).toBe(88)
-    expect(s.config.max_segments).toBe(2)
+    expect(s.config.max_segments).toBe(3)
     expect(s.config.fixed_ms).toBe(DEFAULT_HUMANIZE_CONFIG.fixed_ms)
   })
 

@@ -67,8 +67,8 @@ def test_defaults_within_bounds_and_stable():
 
 
 def test_max_segments_choices(hm_tmp):
-    """Q6：拆条上限可配 2/3/4（默认 2），其余值拒绝；全局开关、不支持按用户覆盖。"""
-    assert hc.HumanizeConfig().max_segments == hc.MAX_SEGMENTS == 2
+    """Q6：拆条上限默认 3（可配 2/3/4），其余值拒绝；全局开关、不支持按用户覆盖。"""
+    assert hc.HumanizeConfig().max_segments == hc.MAX_SEGMENTS == 3
     for cap in (2, 3, 4):
         hc.write_humanize(max_segments=cap)
         assert hc.read_humanize().max_segments == cap
@@ -80,7 +80,7 @@ def test_max_segments_choices(hm_tmp):
         hc.write_humanize(user_key="2:alice@im.wechat", max_segments=3)
     # 磁盘坏值宽松回落默认
     hm_tmp.write_text(json.dumps({"humanize": {"max_segments": 9}}), encoding="utf-8")
-    assert hc.read_humanize().max_segments == 2
+    assert hc.read_humanize().max_segments == 3
 
 
 def test_user_override_switch_is_global_only(hm_tmp):

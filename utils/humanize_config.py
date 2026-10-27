@@ -72,9 +72,9 @@ DEFAULT_DELAY_MODE = DELAY_MODE_DYNAMIC
 #: 可达，**不可落盘**），故本正则 === 可落盘档位全集，不是连接器可解析档位全集。
 DELAY_MODE_PATTERN = "^(" + "|".join(DELAY_MODES) + ")$"
 
-#: 单次回复拆条上限 —— 2026-10-27 Q6 用户裁决：可在 2/3/4 之间配置（默认仍 2）。
-#: 超上限时剩余内容并入最后一条（内容逐字无损，见 split_reply_for_wechat）。
-MAX_SEGMENTS = 2
+#: 单次回复拆条上限 —— 2026-10-27 Q6 用户裁决：默认 **3**，可在 2/3/4 之间配置
+#: （「放宽到 3–4 段」；超上限时剩余内容并入最后一条，内容逐字无损）。
+MAX_SEGMENTS = 3
 SEGMENT_CAP_CHOICES = (2, 3, 4)
 
 DELAY_MODE_LABELS: dict[str, str] = {

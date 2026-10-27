@@ -33,12 +33,13 @@ def _mk_connector(tmp_path, monkeypatch) -> wc.WeChatConnector:
     return c
 
 
-def test_default_cap_still_two(tmp_path, monkeypatch, hm_cfg):
+def test_default_cap_is_three(tmp_path, monkeypatch, hm_cfg):
+    """Q6 默认放宽到 3 段：三行回复逐条发，第四行并入最后一条。"""
     c = _mk_connector(tmp_path, monkeypatch)
     sent: list[str] = []
     monkeypatch.setattr(wc, "_send_text", lambda **kw: sent.append(kw["text"]) or {"ret": 0})
     c.send_reply_segments("peer", "一\n二\n三\n四")
-    assert sent == ["一", "二\n三\n四"]
+    assert sent == ["一", "二", "三\n四"]
 
 
 def test_configured_cap_four_sends_four(tmp_path, monkeypatch, hm_cfg):

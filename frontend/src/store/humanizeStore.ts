@@ -7,8 +7,8 @@
  *  - 保存语义（W11-D5）：HTTP 200 不算成功，必须回执 `status === 'ok'`；
  *    成功后才落 `savedAt`，失败走 useErrorStore 提示且**不改动 snapshot**
  *    （否则本地乐观值会把「没生效」伪装成「已保存」）。
- *  - `max_segments` 是只读字段（用户裁决锁 2）：前端一律以常量呈现，
- *    即便后端回执异常也**不**把它当可编辑值。
+ *  - `max_segments`：2026-10-27 Q6 起默认 **3**、可配 2/3/4（只读展示，
+ *    管理员经 API 调整；前端不把它当可提交键，避免误写覆盖）。
  *  - `bracket_delay_ms` 默认 0 = 括号分支惰性（零行为变更）；>0 才生效。
  *
  * 局部编辑由 UI 侧完成「区间互钳」（min≤max / floor≤ceil），故正常操作下不会触发
@@ -29,8 +29,18 @@ export type HumanizeUpdateConfigFn = (
   cfg: HumanizeConfigPayload,
 ) => Promise<{ data?: { status?: string; config?: unknown } }>
 
-/** 单次回复拆条上限：只读，恒为 2（用户裁决） */
-export const HUMANIZE_MAX_SEGMENTS = 2
+/** 单次回复拆条上限默认值（Q6：可配 2/3/4；前端只读展示，管理员经 API 调整） */
+export const HUMANIZE_MAX_SEGMENTS = 3
+
+/** 合法档位（与后端 SEGMENT_CAP_CHOICES 同集） */
+export const HUMANIZE_SEGMENT_CAP_CHOICES = [2, 3, 4] as const
+
+/** 后端回执的 max_segments 归一：仅接受 2/3/4，其余回落默认 3 */
+function readSegmentCap(raw: unknown): number {
+  return typeof raw === 'number' && (HUMANIZE_SEGMENT_CAP_CHOICES as readonly number[]).includes(raw)
+    ? raw
+    : HUMANIZE_MAX_SEGMENTS
+}
 
 // ── 类型定义（本文件为唯一真源，api/system.ts 反向 import）──
 /** 段间延时档位（与后端 HumanizeConfigRequest 的 pattern 同集） */
@@ -160,7 +170,7 @@ export function normalizeHumanizeConfig(raw: unknown): HumanizeConfig {
     delay_ceil_ms: ceil,
     bracket_delay_ms: readInt('bracket_delay_ms', r.bracket_delay_ms),
     proactive_split: typeof r.proactive_split === 'boolean' ? r.proactive_split : d.proactive_split,
-    max_segments: HUMANIZE_MAX_SEGMENTS,
+    max_segments: readSegmentCap(r.max_segments),
   }
 }
 
@@ -239,7 +249,8 @@ export const useHumanizeStore = create<HumanizeState>()((set, get) => ({
 
   patch(partial) {
     set((state) => ({
-      config: { ...state.config, ...partial, max_segments: HUMANIZE_MAX_SEGMENTS },
+      // max_segments 不由前端编辑态改写（只读展示，管理员经 API 调）
+      config: { ...state.config, ...partial, max_segments: state.config.max_segments },
     }))
   },
 

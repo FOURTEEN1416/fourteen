@@ -3,8 +3,9 @@
 2026-09-19 用户原话：「一个正常人，怎么会一次性发那么回一大段？……不应该
 一句一句的吗？」—— 拆条因此而生。
 2026-10-12 用户裁决：「下一轮对话何时进行由 LLM 决策，不是数秒之内的多次
-回复」—— 拆条上限 4 收敛为 **最多 2 条**：超上限内容并入第 2 条，行间换行
-保留，内容无损（守卫另见 test_followup_retired.py）。
+回复」—— 拆条上限曾收敛为 **最多 2 条**。
+2026-10-27 Q6 用户裁决：放宽到 **3–4 段**（默认 3）；超上限内容仍并入最后一
+条，行间换行保留，内容无损（守卫另见 test_followup_retired.py）。
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ def test_user_reported_example_is_split():
         "我继续听雨了"
     )
     segs = _split(reply)
-    assert 1 < len(segs) <= 2, "多行整段不得作为一条发出，也不得拆出第 3 条"
+    assert 1 < len(segs) <= 3, "多行整段不得作为一条发出，也不得拆出第 4 条"
     assert all(s.strip() for s in segs)
     # 内容无损（拼接后应包含全部原文关键词）
     joined = "".join(segs)
@@ -49,7 +50,7 @@ def test_user_reported_example_is_split():
 def test_long_single_line_split_at_sentence_enders():
     reply = "早上好呀。今天天气不错，你要不要出去走走？我刚刚看了下窗外，太阳很大。"
     segs = _split(reply, max_chars=20)
-    assert len(segs) == 2
+    assert len(segs) == 3
     assert all(len(s) <= 20 for s in segs[:-1])   # 末段可能因合并兜底而略长
     assert "".join(segs) == reply                  # 单行原文逐字无损
 
@@ -57,21 +58,22 @@ def test_long_single_line_split_at_sentence_enders():
 def test_segments_capped():
     reply = "\n".join(f"第{i}句" for i in range(12))
     segs = _split(reply)
-    assert len(segs) == 2, "超出上限的应并入第 2 条，而不是继续刷屏"
+    assert len(segs) == 3, "超出上限的应并入最后一条，而不是继续刷屏"
     assert "\n".join(segs) == reply                # 拼回与原文逐字一致
 
 
 def test_no_content_loss_on_merge():
     reply = "一。" * 30
     segs = _split(reply, max_chars=10)
-    assert len(segs) == 2
+    assert len(segs) == 3
     assert "".join(segs) == reply
 
 
-def test_overflow_merges_into_second_segment_preserving_newlines():
-    """2026-10-12 收敛语义：超上限的行并入第 2 条，行间换行保留在消息内
-    （真人也发带换行的长消息），而不是拆出第 3 条。"""
-    assert _split("第一句\n第二句\n第三句") == ["第一句", "第二句\n第三句"]
+def test_overflow_merges_into_last_segment_preserving_newlines():
+    """Q6 语义：超上限的行并入最后一条，行间换行保留在消息内
+    （真人也发带换行的长消息）。"""
+    assert _split("第一句\n第二句\n第三句") == ["第一句", "第二句", "第三句"]
+    assert _split("第一句\n第二句\n第三句\n第四句") == ["第一句", "第二句", "第三句\n第四句"]
     # 未超上限时维持旧行为：一行一条
     assert _split("第一句\n第二句") == ["第一句", "第二句"]
 
@@ -110,7 +112,7 @@ def test_partial_reply_records_only_api_accepted_segments(tmp_path, monkeypatch)
         "message_type": 1, "message_id": "partial", "from_user_id": "peer",
         "item_list": [{"type": 1, "text_item": {"text": "你好"}}],
     })
-    assert transport_calls == ["第一段", "第二段\n第三段"]
+    assert transport_calls == ["第一段", "第二段"]
     assert accepted == ["第一段"]
 
 

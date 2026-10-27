@@ -4009,3 +4009,10 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **发现并修正 2 处**：① 报告把 `DINGTALK_MIN_SEGMENT_GAP_MS=3000` 的来源误写为 `send-delay.mjs:393-415`——实际定义 `src/channels/dingtalk/dingtalk-bridge.mjs:539`、使用 `:1520`；已改正报告引用。② 行号漂移 +5~13（`computeReadDelayMs` 实际 344-370、`computeSegmentGapMs` 实际 398-415；内容未变，仓库在调研后更新）。
 - **补充口径（重要）**：`text-harness-bridge.mjs:1038-1040` 证明 5s 封顶**只对无 `sendTyping` 能力的渠道**生效（`channelCapMs: typeof this.#bot.sendTyping === 'function' ? undefined : SHORT_DELAY_CAP_MS`）；有 typing 的渠道（含微信票据）走完整延迟——与本仓 `typing_capable` 判定一致（`5337a4e` 修正后的实现逐分支对齐 `boostedBaseMs`）。插件自身 review 文档曾指出过微信被无条件封顶的旧矛盾，当前 HEAD 已按能力判定解决。
 - **仍未做**：未执行该插件、未真机验证；★4/developer preview 结论不变（借机制、重写实现）。
+
+
+## 2026-10-27 仿真人机制补强批（用户「最最最最重要的是仿真人机制」）· T-4 抖动 + Q6 默认 3 段
+
+- **T-4 主动等待窗抖动**：`proactive/scheduler.py::apply_wait_jitter` + `get_proactive_jitter_seconds`（配置 `llm_proactive.jitter_seconds`，默认 **120s**、0=关闭、上限 900s）——模型 wait 窗后追加 `uniform(0,jitter)`，主动消息不再精确卡在「第 N 分钟」；契约拒收退避保持既有 5 分钟语义（不抖动）；随机源可注入，测试确定。
+- **Q6 真正放宽到 3 段**：`MAX_SEGMENTS` 默认 2→**3**（可配 2/3/4）；`split_reply_for_wechat` 默认随真源；前端 `HUMANIZE_MAX_SEGMENTS=3`、store 接受合法服务端值（坏值回落 3）、admin 面板只读展示「N 条（可配 2/3/4）」；超上限仍并入最后一条、内容逐字无损。连带更新 8 个测试文件的默认值断言（行为未变，仅默认值）。
+- **验证**：后端 **3988 收集 / 3982 通过 + 2 跳过 / 4 既有失败**（byok api_base×2 / w1 无主卡 / sweep 503，HEAD 复现、非本批；四分块 1045+1110+912+915 通过）；前端 **217/217** + `tsc --noEmit` 0；ruff 0。**未部署**。

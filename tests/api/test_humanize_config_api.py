@@ -87,7 +87,7 @@ _DEFAULTS = {
     "typing_enabled": True,
     "typo_rate": 0,
     "user_override_enabled": True,
-    "max_segments": 2,
+    "max_segments": 3,
 }
 
 
@@ -332,7 +332,7 @@ async def test_post_partial_merge_and_sibling_keys_preserved(api, hm_file):
                                    "typing_enabled": True,
                                    "typo_rate": 0,
                                    "user_override_enabled": True,
-                                   "max_segments": 2}
+                                   "max_segments": 3}
     assert on_disk["reply_mode"] == "novel"
     assert on_disk["quiet_hours"] == {"start": 22, "end": 7}
     assert on_disk["llm_proactive"] == {"enabled": True}
@@ -403,7 +403,7 @@ async def test_concurrent_partial_writes_do_not_lose_updates(api, hm_file):
     for key, value in fields:
         assert on_disk[key] == value, f"丢更新：{key} = {on_disk[key]!r}，期望 {value!r}"
     # 最后完成的那次调用返回的也是完整合并结果（不是它自己的局部视图）
-    assert all(cfg.max_segments == 2 for cfg in readback)
+    assert all(cfg.max_segments == 3 for cfg in readback)
 
 
 # ═══════════════════════════════════════════════════════════

@@ -16,6 +16,7 @@ import contextlib
 import json
 import logging
 import math
+import random
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -36,6 +37,25 @@ from utils.project_paths import project_path
 from utils.reply_mode import read_reply_mode
 
 logger = logging.getLogger("scheduler")
+
+
+def apply_wait_jitter(
+    now: float,
+    wait_minutes: int,
+    jitter_seconds: float,
+    *,
+    rng: Callable[[float, float], float] = random.uniform,
+) -> float:
+    """模型等待窗 + 随机抖动（T-4，2026-10-27「仿真人机制」）。
+
+    ``jitter_seconds <= 0`` → 行为与旧实现逐位一致（``now + wait*60``）；
+    否则在 ``[0, jitter_seconds]`` 均匀取一个正向偏移——主动消息不再精确
+    卡在「模型说的第 N 分钟」这种机器节奏上。随机源可注入，测试可确定。
+    """
+    base = float(now) + float(wait_minutes) * 60.0
+    if jitter_seconds <= 0:
+        return base
+    return base + float(rng(0.0, float(jitter_seconds)))
 
 
 def _accepts_key(fn: Callable | None) -> bool:
@@ -739,7 +759,23 @@ class ProactiveScheduler:
             logger.warning("调度器配置保存失败: %s", e)
             return cls._read_config_file()
 
-    def get_llm_proactive_config(self) -> dict[str, Any]:
+    def get_proactive_jitter_seconds(self) -> float:
+        """主动等待窗抖动上限（T-4，2026-10-27）：默认 120s，0 = 关闭。
+
+        真源：``data/scheduler_config.json`` → ``llm_proactive.jitter_seconds``
+        （热读；坏值/缺失回落默认；上限 900s 防手改放大成「永远不回」）。
+        """
+        try:
+            from utils import json_state
+
+            data = json_state.read_json(self._CONFIG_PATH, default={})
+            block = data.get("llm_proactive") if isinstance(data, dict) else None
+            value = block.get("jitter_seconds", 120) if isinstance(block, dict) else 120
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return 120.0
+            return max(0.0, min(900.0, float(value)))
+        except Exception:  # noqa: BLE001
+            return 120.0
         from proactive.llm_proactive import DEFAULT_WEB_CONFIG, read_web_proactive_config
 
         cfg = read_web_proactive_config()
@@ -1678,7 +1714,16 @@ class ProactiveScheduler:
         )
         wait_m = clamp_wait_minutes(decision.get("wait_minutes"))
         if isinstance(wait_m, int) and wait_m > 0:
-            self._llm_proactive_next_ok[str(user_key)] = _now + float(wait_m) * 60.0
+            # T-4（2026-10-27 仿真人机制）：模型给出的等待窗加随机抖动，
+            # 避免「精确到分钟」的机器节奏；jitter_seconds=0 时行为不变。
+            _jitter = self.get_proactive_jitter_seconds()
+            self._llm_proactive_next_ok[str(user_key)] = apply_wait_jitter(
+                _now, wait_m, _jitter,
+            )
+            if _jitter > 0:
+                logger.debug(
+                    "proactive wait jitter user=%s max=%.0fs", user_key, _jitter,
+                )
             # 块4（缺陷 J）：模型自判的等待窗必须落盘 —— 旧实现只有投递失败的
             # 退避侧落盘（块E），成功/skip 侧留内存，重启即归零 → 她会在模型
             # 明确说「X 分钟后再说」的窗口里提前开口。

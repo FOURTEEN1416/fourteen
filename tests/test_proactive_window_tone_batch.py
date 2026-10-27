@@ -529,7 +529,9 @@ class TestContractRejectBackoff:
         import time as _t
 
         remaining_min = (sched._llm_proactive_next_ok[self.KEY] - _t.time()) / 60.0
-        assert 44 <= remaining_min <= 45, f"应保留模型自判 45 分钟窗，实际 {remaining_min:.1f} 分"
+        # T-4 起等待窗带 0–120s 抖动（默认），故允许 45–47 分钟；
+        # 关键是「未被契约拒收的退避覆盖」——下限不得跌回 5 分钟档。
+        assert 44.5 <= remaining_min <= 47.5, f"应保留模型自判 45 分钟窗（+抖动），实际 {remaining_min:.1f} 分"
 
 
 class TestTokenWindowGate:

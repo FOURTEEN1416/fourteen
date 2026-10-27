@@ -385,7 +385,7 @@ describe('RoleSettings', () => {
     // 拟人度区块（2026-10-16 新增）：挂在消息 tab 内、回复模式段之后，走独立端点
     expect(await screen.findByText('拟人度')).toBeDefined()
     expect(mockHumanizeGetConfig).toHaveBeenCalledTimes(1)
-    expect(screen.getByTestId('humanize-max-segments').textContent).toBe('2 条（固定，用户裁决）')
+    expect(screen.getByTestId('humanize-max-segments').textContent).toBe('3 条（可配 2/3/4）')
   })
 
   // ────────────────────────────────────────────────
