@@ -3987,3 +3987,14 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **API**：`GET /api/humanize/config?user_key=` 返回合并生效视图 + `scope`；`POST/PUT` 增 `user_key` 作用域（admin 写该用户覆盖行）；新增 `DELETE /api/humanize/config?user_key=` 清除覆盖（幂等 noop）。端点 88→**89**，`tests/test_api_routes.py` 同步。
 - **测试**：`tests/test_humanize_config_schema.py`（12）+ `tests/test_humanize_user_override.py`（11）共 **+23 例**；humanize 相关 86 全绿。全量四分块 **3932 收集 / 3926 通过 + 2 跳过 / 4 失败**——4 失败（byok api_base 校验 ×2 / w1 无主卡 / sweep 503）用 `git stash` 在 HEAD 原样复现，**均为既有问题、与本批无关**；块 3 由计数修正后 1024/1024 全绿。ruff 0。
 - **未部署**（批次未完；全部 5 批完成后统一三端上线）。
+
+
+## 2026-10-27 拟人化实施批 2/5–5/5：阅读延迟/typing/supersede + 主动 judge + 沉浸式口误 + 拆条放宽 · 未部署
+
+- **P0-B 阅读延迟 + typing + supersede**（Q1 裁决：一次性全量上线、不做比例灰度）：新增 `utils/humanize_read_delay.py` 纯函数（活跃曲线 idle≤60s→下界 / 60–300s 线性 / ≥300s 区间随机；字数阅读耗时；max_total；无 typing 渠道 5s 硬封顶）；`optimized_orchestrator._apply_humanize_rhythm` 在生成前读用户级配置→延迟→检查进程内到达序号，**延迟期同一会话新消息 → superseded 静默取消**（不生成、不发送）；`typing_sender` 由连接器注入（`wechat_connector.send_typing` → iLink `ilink/bot/sendtyping` status 1/2，**未真机实测**，失败静默 no-op）；Web/HTTP 无 typing 能力 → 延迟封顶 5s。默认 **enabled=true**（用户裁决）。
+- **A-4 主动消息 post-draft judge**（Q3：加，fail-closed）：新增 `proactive/post_draft_judge.py`（只判发/不发、不允许改写；输入=候选正文+最近 5 句+时间/静默；judge 不可用/超时/坏 JSON → **drop**）；`scheduler._deliver` 投递前接线，决策线最近对话经 `_judge_recent` 暂存、投递时弹出（不累积）；`llm=None`（部署未配置）放行，调用失败一律 fail-closed。
+- **Q4 沉浸式可选口误**：新增 `utils/humanize_typo.py`（`typo_rate` 0–100%，**默认 0 关闭**；仅 immersive；单条回复最多一次相邻**汉字**换位，长度/字符多重集不变、不碰数字英文标点）；`_finalize_reply` 在全部守卫之后接线（有意为之的瑕疵不让守卫改写）。
+- **Q6 拆条放宽**：`max_segments` 由只读常量改为可写字段（仅 2/3/4，默认 2，per_user=False）；`send_reply_segments` 与 publish 完整度判定统一读 `_split_cap_for(peer)`；超上限仍并入最后一条（内容逐字无损）。
+- **P0-C 观测**：`[humanize][step=read_delay]` / `[humanize][step=superseded]` / `[proactive_judge]` 结构化日志（session/delay_ms/idle_ms/reason，不落原文）。
+- **测试**：新增 `test_humanize_read_delay`(10) / `test_humanize_rhythm`(12) / `test_humanize_typo`(7) / `test_humanize_split_cap`(3) / `test_proactive_judge`(15)；3 个测试替身随新 kwargs（typing_sender）适配；端点计数 89 维持。全量四分块 **3982 收集 / 3976 通过 + 2 跳过 / 4 失败**——4 失败（byok api_base ×2 / w1 无主卡 / sweep 503）已在 HEAD 用 git stash 复现，**均为既有、与本批无关**；ruff 0。
+- **未部署**（全部实施批完成后统一三端上线；上线即默认生效，回滚开关：`read_delay_enabled=false` / `typing_enabled=false` / `llm_proactive.judge_enabled=false` / `typo_rate=0`）。

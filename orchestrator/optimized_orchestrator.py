@@ -58,6 +58,50 @@ _SESSION_QUEUE_POLL = 0.2
 MEMORY_RETRIEVE_TIMEOUT_SECONDS = 10.0
 RAG_RETRIEVE_TIMEOUT_SECONDS = 10.0
 
+# ── 拟人节奏：supersede 序号（P0-B，2026-10-27）────────────────────────
+# 阅读延迟期间同一会话又来了新消息 → 旧回合静默取消（不再生成/发送），由
+# 新回合回答最新那条，避免「旧答案迟到 + 双回复」。序号是**进程内**的
+# （每 worker 独立）：微信会话通常固定落在同一 worker；跨 worker 的连发属
+# best-effort（新消息会正常排队生成，最多多一条回复，不会双回复同一条）。
+_SUPERSEDE_SEQ: dict[str, int] = {}
+_SUPERSEDE_SEQ_LOCK = threading.Lock()
+
+
+def _bump_supersede_seq(session_id: str) -> int:
+    """登记一次消息到达（进程内序号 +1），返回新序号。"""
+    with _SUPERSEDE_SEQ_LOCK:
+        _SUPERSEDE_SEQ[session_id] = _SUPERSEDE_SEQ.get(session_id, 0) + 1
+        return _SUPERSEDE_SEQ[session_id]
+
+
+def _supersede_seq(session_id: str) -> int:
+    """读取当前到达序号（无记录 = 0）。"""
+    with _SUPERSEDE_SEQ_LOCK:
+        return _SUPERSEDE_SEQ.get(session_id, 0)
+
+
+def _history_idle_ms(history: list | None) -> int | None:
+    """会话历史最后一条消息距现在的毫秒数；无可用时间戳 → ``None``。"""
+    rows = list(history or [])
+    for row in reversed(rows):
+        if not isinstance(row, dict) or not row.get("timestamp"):
+            continue
+        try:
+            from utils.local_time import beijing_wall, now_local
+
+            wall = beijing_wall(row.get("timestamp"))
+            if wall is None:
+                continue
+            now = now_local()
+            if getattr(now, "tzinfo", None) is not None:
+                now = now.replace(tzinfo=None)
+            if getattr(wall, "tzinfo", None) is not None:
+                wall = wall.replace(tzinfo=None)
+            return max(0, int((now - wall).total_seconds() * 1000))
+        except Exception:  # noqa: BLE001
+            return None
+    return None
+
 # ── LLM 预算阶梯（2026-10-21 FIX-1）──
 #
 # 🔴 不变量：``PROVIDER_READ_TIMEOUT_SECONDS ≤ TOOL_GATE_LLM_TIMEOUT_SECONDS
@@ -1832,7 +1876,18 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             reply = get_fallback_line(character_id, "empty_reply", effective_mode)
         safety = self.components["safety"]
         checked = safety.check_output(reply)
-        return reply if checked.is_safe else safety.safe_alternative(checked.category)
+        final = reply if checked.is_safe else safety.safe_alternative(checked.category)
+        # Q4（2026-10-27 用户裁决）：沉浸式可选口误，默认 typo_rate=0 关闭。
+        # 放在所有守卫之后——口误是有意为之，只做一次相邻汉字换位（信息不丢）。
+        if effective_mode == "immersive":
+            try:
+                from utils.humanize_config import read_humanize
+                from utils.humanize_typo import maybe_apply_typo
+
+                final = maybe_apply_typo(final, read_humanize(str(session_id or "")))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("口误应用跳过: %s", exc)
+        return final
 
     @request_scoped_llm
     async def process_message(
@@ -1846,6 +1901,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         user_id: int | None = None,
         attachments: list | None = None,
         reply_sender: Callable[[dict[str, Any]], Awaitable[str]] | None = None,
+        typing_sender: Callable[[bool], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         # 通道回执返回真正被 API 受理的正文；失败/部分发送都不能把全文写成已说。
         # 回调在会话锁内完成，下一轮生成前历史已与回执一致。
@@ -1876,6 +1932,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 logger.warning("回复发送未确认 session=%s: %s", session_id, exc)
             return published_reply
 
+        # P0-B：登记本轮消息到达（阅读延迟期的新消息据此触发 supersede）。
+        _bump_supersede_seq(session_id)
+
         if not self._initialized:
             return {"reply": await publish("系统初始化中, 请稍候..."), "error": "not_initialized"}
 
@@ -1905,6 +1964,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             user_msg_clean = ""
             ctx: dict[str, Any] = {}
             history_finished = False
+            typing_started = False
 
             try:
                 safety_result = self.components["safety"].check_input(user_msg)
@@ -1932,6 +1992,23 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 emotion_state = ctx["emotion_state"]
                 system_prompt = ctx["system_prompt"]
                 chat_history = ctx["chat_history"]
+
+                # ── P0-B 拟人节奏：阅读延迟 + supersede + typing（2026-10-27）──
+                # 延迟在生成前（用户感知的「秒回」主要来自生成前零延迟）；
+                # 延迟期收到同一会话新消息 → 本回合静默取消，由新回合回答。
+                rhythm = await self._apply_humanize_rhythm(
+                    session_id, user_msg_clean, ctx,
+                    typing_capable=typing_sender is not None,
+                )
+                if rhythm["superseded"]:
+                    logger.info("[humanize][step=superseded] session=%s", session_id)
+                    return {"reply": "", "superseded": True}
+                if typing_sender is not None and rhythm["typing"]:
+                    try:
+                        await typing_sender(True)
+                        typing_started = True
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("typing start 失败（忽略）: %s", exc)
 
                 # ── 澄清直复通道：终审产出澄清提问时跳过主链生成 ──
                 # （提问文本已带角色口吻，再过一次主链反而会稀释追问意图）
@@ -2135,6 +2212,57 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 except Exception:  # noqa: BLE001
                     pass
                 return {"reply": _err_fb, "error": "internal_error"}
+            finally:
+                if typing_started and typing_sender is not None:
+                    try:
+                        await typing_sender(False)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("typing stop 失败（忽略）: %s", exc)
+
+    async def _apply_humanize_rhythm(
+        self, session_id: str, user_msg: str, ctx: dict[str, Any],
+        *, typing_capable: bool = False,
+    ) -> dict[str, Any]:
+        """阅读延迟 + supersede 判定（P0-B，2026-10-27）。
+
+        返回 ``{"superseded": bool, "delay_ms": int, "typing": bool}``。
+        ``typing`` = 该通道**有** typing 能力（调用方传了 ``typing_sender``）
+        且用户配置开启；无 typing 能力的通道延迟按 5s 硬封顶（避免沉默被
+        感知为「掉线/变卡」）。
+
+        任何异常都放行：阅读延迟是体验增强，**不得**阻断主链生成。
+        """
+        out: dict[str, Any] = {"superseded": False, "delay_ms": 0, "typing": False}
+        try:
+            from utils.humanize_config import read_humanize
+            from utils.humanize_read_delay import compute_read_delay_ms
+
+            cfg = read_humanize(str(session_id or ""))
+            typing_on = bool(typing_capable and cfg.typing_enabled)
+            out["typing"] = typing_on
+            if not cfg.read_delay_enabled:
+                return out
+            idle_ms = _history_idle_ms(ctx.get("chat_history"))
+            delay_ms = compute_read_delay_ms(
+                idle_ms,
+                user_msg,
+                cfg,
+                typing_available=typing_on,
+            )
+            out["delay_ms"] = int(delay_ms)
+            if delay_ms <= 0:
+                return out
+            baseline = _supersede_seq(session_id)
+            await asyncio.sleep(delay_ms / 1000.0)
+            if _supersede_seq(session_id) > baseline:
+                out["superseded"] = True
+            logger.info(
+                "[humanize][step=read_delay] session=%s delay_ms=%d idle_ms=%s superseded=%s",
+                session_id, delay_ms, idle_ms, out["superseded"],
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("拟人节奏应用失败（放行）: %s", e)
+        return out
 
     def health_check(self) -> dict[str, Any]:
         results = {}

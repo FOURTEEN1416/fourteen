@@ -162,6 +162,8 @@ class ProactiveScheduler:
         # 现统一落盘到 `data/scheduler_config.json` 的 `throttle` 段（走
         # `utils.json_state` 原子写 + flock，与 `last_emotion_decay` 同源）。
         self._llm_proactive_next_ok: dict[str, float] = {}
+        #: 决策线最近对话摘要（供 post-draft judge 使用，投递时弹出，不累积）。
+        self._judge_recent: dict[str, list[str]] = {}
         # P1-22：投递连续失败计数（指数退避；旧实现失败零退避，
         # 不可达用户每 5 分钟「生成→失败→再生成」，一天 288 次 LLM 零投递）
         self._deliver_fail_counts: dict[str, int] = {}
@@ -1768,6 +1770,18 @@ class ProactiveScheduler:
             self._persist_throttle_ledger()
             logger.info("proactive LLM duplicate_suppressed user=%s msg=%s", user_key, message[:40])
             return
+        # 2026-10-27 Q3：把本轮决策用的最近对话摘要留给 post-draft judge
+        # （投递时弹出；无摘要时 judge 只凭正文 + 时间判定）。
+        try:
+            _recent_texts = [
+                str(row.get("content") or "") for row in (scrubbed_recent or [])
+                if isinstance(row, dict) and row.get("content")
+            ][-5:]
+            if not isinstance(getattr(self, "_judge_recent", None), dict):
+                self._judge_recent = {}
+            self._judge_recent[str(user_key)] = _recent_texts
+        except Exception:  # noqa: BLE001
+            pass
         if self._deliver(message, session_key=user_key, character_id=char_id):
             if eng is not None and hasattr(eng, "commit_sent"):
                 # 注意：模块顶部已导入 contextlib。此处**禁止**再写函数内局部导入
@@ -1896,6 +1910,40 @@ class ProactiveScheduler:
             logger.warning("[主动消息] 终审守卫拦截（哨兵/退化回复），不投递")
             return False
         message = guarded
+        # 2026-10-27 Q3：post-draft judge（只判发/不发，fail-closed）。
+        # 决策线在投递前已把最近 5 条对话摘要放入 `_judge_recent`；手动/祝福线
+        # 没有决策上下文 → 只凭正文 + 时间判定。judge 不可用一律不投递。
+        recent_for_judge = []
+        try:
+            _stash = getattr(self, "_judge_recent", None)
+            if isinstance(_stash, dict):
+                recent_for_judge = _stash.pop(str(session_key or ""), []) or []
+        except Exception:  # noqa: BLE001
+            recent_for_judge = []
+        try:
+            from proactive.post_draft_judge import judge_proactive_message
+
+            _quiet = None
+            try:
+                _quiet = self.get_quiet_hours() if hasattr(self, "get_quiet_hours") else None
+            except Exception:  # noqa: BLE001
+                _quiet = None
+            verdict = judge_proactive_message(
+                message,
+                llm=getattr(self, "_llm_provider", None),
+                recent=recent_for_judge,
+                quiet_hours=_quiet,
+                session_key=str(session_key or ""),
+            )
+            if not verdict.allow:
+                logger.info(
+                    "[主动消息] post-draft judge 拒绝投递 session=%s reason=%s",
+                    session_key, verdict.reason,
+                )
+                return False
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[主动消息] judge 异常（fail-closed 不投递）: %s", e)
+            return False
         if session_key:
             from api.consent import outbound_allowed_for_session_sync
 

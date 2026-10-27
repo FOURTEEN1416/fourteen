@@ -66,14 +66,21 @@ def test_defaults_within_bounds_and_stable():
     assert hc.DEFAULTS["user_override_enabled"] is True
 
 
-def test_max_segments_is_read_only(hm_tmp):
-    """max_segments 只读：写非 2 一律 ValueError；恰为 2 不落盘。"""
+def test_max_segments_choices(hm_tmp):
+    """Q6：拆条上限可配 2/3/4（默认 2），其余值拒绝；全局开关、不支持按用户覆盖。"""
     assert hc.HumanizeConfig().max_segments == hc.MAX_SEGMENTS == 2
+    for cap in (2, 3, 4):
+        hc.write_humanize(max_segments=cap)
+        assert hc.read_humanize().max_segments == cap
+        raw = json.loads(hm_tmp.read_text(encoding="utf-8"))
+        assert raw["humanize"]["max_segments"] == cap
     with pytest.raises(ValueError):
-        hc.write_humanize(max_segments=3)
-    hc.write_humanize(max_segments=2)
-    raw = json.loads(hm_tmp.read_text(encoding="utf-8"))
-    assert "max_segments" not in raw.get("humanize", {})
+        hc.write_humanize(max_segments=5)
+    with pytest.raises(ValueError):
+        hc.write_humanize(user_key="2:alice@im.wechat", max_segments=3)
+    # 磁盘坏值宽松回落默认
+    hm_tmp.write_text(json.dumps({"humanize": {"max_segments": 9}}), encoding="utf-8")
+    assert hc.read_humanize().max_segments == 2
 
 
 def test_user_override_switch_is_global_only(hm_tmp):

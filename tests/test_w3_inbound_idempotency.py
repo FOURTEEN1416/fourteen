@@ -121,7 +121,10 @@ async def _scheduler_sees(message_id: str) -> str:
 
     seen: dict = {}
 
-    async def _inner(self, user_id, text, message_type, attachments, reply_sender):
+    async def _inner(
+        self, user_id, text, message_type, attachments, reply_sender,
+        typing_sender=None,
+    ):
         seen["id"] = current_message_id()
         return {"reply": "ok"}
 

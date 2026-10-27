@@ -591,10 +591,15 @@ class HumanizeConfigRequest(BaseModel):
         default=None, ge=0, le=5000, description="括号段 (...) 覆盖延时；0=不启用（默认 0）",
     )
     max_segments: int | None = Field(
-        default=None, description="只读，恒为 2（用户裁决）；传其它值 400",
+        default=None, ge=2, le=4,
+        description="单次拆条上限（2/3/4，默认 2；2026-10-27 Q6 裁决可放宽）",
     )
     proactive_split: bool | None = Field(
         default=None, description="主动消息是否也拆条发送（默认 false=整段直发）",
+    )
+    typo_rate: int | None = Field(
+        default=None, ge=0, le=100,
+        description="沉浸式可选口误概率（百分比，0=关闭；仅 immersive 生效）",
     )
     user_key: str | None = Field(
         default=None,
@@ -682,15 +687,12 @@ async def update_humanize_config(
     覆盖行，不动全局默认（admin 作用域）。
 
     错误语义：字段非法/越界 → 422（Pydantic 先行）；
-    ``max_segments`` 存在且 ≠2 → 400；合并后跨字段冲突 → 400。
+    ``max_segments`` 非 2/3/4 或合并后跨字段冲突 → 400。
     """
-    from utils.humanize_config import MAX_SEGMENTS, write_humanize
+    from utils.humanize_config import write_humanize
 
     payload = req.model_dump(exclude_none=True)
     user_key = payload.pop("user_key", None)
-
-    if "max_segments" in payload and int(payload["max_segments"]) != MAX_SEGMENTS:
-        raise HTTPException(400, f"max_segments 固定为 {MAX_SEGMENTS}（用户裁决），不可修改")
 
     if payload or user_key:
         try:

@@ -834,7 +834,7 @@ def _api_ok(resp: Any) -> tuple[bool, str]:
     return False, f"ret={code} errmsg={resp.get('errmsg', '') or '-'}"
 
 
-def _post_api(endpoint, body, token="", base_url=DEFAULT_BASE_URL, timeout=15):
+def _post_api(endpoint, body, token="", base_url=DEFAULT_BASE_URL, timeout=15, quiet=False):
     """调用微信 API"""
     url = _ensure_trailing_slash(base_url) + endpoint
     headers = _build_headers(token)
@@ -844,13 +844,15 @@ def _post_api(endpoint, body, token="", base_url=DEFAULT_BASE_URL, timeout=15):
         resp.raise_for_status()
         return resp.json()
     except requests.exceptions.Timeout:
-        logger.debug(f"API超时: {endpoint}")
+        if not quiet:
+            logger.debug(f"API超时: {endpoint}")
         # ⚠️ 旧实现返回 {"ret": 0, "msgs": []} —— 对 getupdates 是「无新消息」，
         # 但对 sendmessage 等于把**超时**伪装成**成功**。加 timeout 标记，
         # 由 _api_ok() 判定为失败，同时不破坏轮询侧对 ret/msgs 的既有读取。
         return {"ret": 0, "msgs": [], "timeout": True}
     except Exception as e:
-        logger.error(f"API错误 {endpoint}: {e}")
+        if not quiet:
+            logger.error(f"API错误 {endpoint}: {e}")
         raise
 
 
@@ -874,6 +876,17 @@ def _send_text(to, text, context_token, token="", base_url=DEFAULT_BASE_URL):
             "context_token": context_token,
         }
     }, token=token, base_url=base_url)
+
+
+def _send_typing(to, status, token="", base_url=DEFAULT_BASE_URL):
+    """发送/结束「正在输入」状态（iLink 私聊 sendtyping：1=开始 / 2=结束）。
+
+    ⚠️ 该接口在本仓**尚未真机实测**（设计报告 A-1）：任何失败都必须静默
+    no-op（``quiet=True`` + 调用侧 try/except），绝不影响文本发送主链。
+    """
+    return _post_api("ilink/bot/sendtyping", {
+        "msg": {"to_user_id": to, "status": int(status)},
+    }, token=token, base_url=base_url, timeout=5, quiet=True)
 
 
 def _send_voice_message(to, audio_data_b64, duration_ms, context_token,
@@ -956,6 +969,7 @@ def _run_async_coro(coro):
 
 def _call_user_manager(
     mgr, user_id, text, attachments=None, reply_sender=None, message_id: str = "",
+    typing_sender=None,
 ):
     """
     调用女友管理器处理消息（多用户路由）。
@@ -976,6 +990,11 @@ def _call_user_manager(
     kwargs = {"attachments": attachments}
     if reply_sender is not None:
         kwargs["reply_sender"] = publish
+    if typing_sender is not None:
+        async def typing_async(on: bool) -> None:
+            await asyncio.to_thread(typing_sender, on)
+
+        kwargs["typing_sender"] = typing_async
     if message_id:
         kwargs["message_id"] = str(message_id)
     coro = mgr.process_message(user_id, text, **kwargs)
@@ -1151,6 +1170,27 @@ class WeChatConnector:
             return False
         with self._peer_lock(self._session_key(target)):
             return self._send_text_unlocked(text, target)
+
+    def send_typing(self, to_user: str, on: bool) -> bool:
+        """发送/结束「正在输入」状态（best-effort，失败静默）。
+
+        2026-10-27 P0-B：阅读延迟期间给用户一个「已读到、正在打字」的信号；
+        iLink 私聊支持 ``sendtyping`` status 1/2（本仓未真机实测）——任何
+        失败只记 debug，不影响本轮回复发送。
+        """
+        target = self._resolve_send_target(to_user, "typing")
+        if not target or not self.token:
+            return False
+        try:
+            resp = _send_typing(
+                to=target, status=1 if on else 2,
+                token=self.token, base_url=self.base_url,
+            )
+            ok, _ = _api_ok(resp)
+            return ok
+        except Exception as e:  # noqa: BLE001
+            logger.debug("typing 状态发送失败（忽略）: %s", e)
+            return False
 
     def _send_text_unlocked(self, text: str, to_user: str) -> bool:
         """主动发送文本消息（供外部调用）
@@ -1740,6 +1780,15 @@ class WeChatConnector:
     # 模块删除，角色选择唯一入口 = 网页控制台 /characters/{id}/activate，
     # 聊天侧由 activate 同步的扫码人绑定（wechat_bindings）决定角色。
 
+    def _split_cap_for(self, peer: str) -> int:
+        """该会话的拆条上限（Q6：2/3/4，默认 2；读配置失败回落默认）。"""
+        try:
+            from utils.humanize_config import read_humanize
+
+            return int(read_humanize(self._session_key(peer)).max_segments)
+        except Exception:  # noqa: BLE001
+            return _SPLIT_MAX_SEGMENTS
+
     def send_reply_segments(self, peer: str, reply: str, *, context_token: str = "") -> str:
         """拆条投递一条回复，**只返回 API 已明确受理的前缀**；失败段及后续不进入历史。
 
@@ -1751,7 +1800,7 @@ class WeChatConnector:
         生成与发送全程；主动线由 ``main.send_proactive_segmented`` 在外部补同一把
         可重入 RLock（RLock，重复获取不自死锁）。**不得在本方法内再持一半**。
         """
-        segments = split_reply_for_wechat(reply)
+        segments = split_reply_for_wechat(reply, max_segments=self._split_cap_for(peer))
         accepted = []
         for idx, segment in enumerate(segments):
             try:
@@ -2046,13 +2095,18 @@ class WeChatConnector:
             if sent_reply:
                 return str(sent_reply["accepted"])
             accepted = self.send_reply_segments(from_user, reply, context_token=context_token)
-            sent_reply.update(accepted=accepted, complete=bool(accepted) and accepted == "\n".join(split_reply_for_wechat(reply)))
+            sent_reply.update(accepted=accepted, complete=bool(accepted) and accepted == "\n".join(
+                split_reply_for_wechat(reply, max_segments=self._split_cap_for(from_user))
+            ))
             return accepted
+
+        def typing_hook(on: bool) -> None:
+            self.send_typing(from_user, on)
 
         try:
             result = _call_user_manager(
                 self.user_manager, session_key, text, attachments, reply_sender=publish,
-                message_id=msg_id,
+                message_id=msg_id, typing_sender=typing_hook,
             )
             t_elapsed = time.perf_counter() - t_start
         except Exception as e:  # noqa: BLE001

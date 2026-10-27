@@ -72,10 +72,10 @@ DEFAULT_DELAY_MODE = DELAY_MODE_DYNAMIC
 #: 可达，**不可落盘**），故本正则 === 可落盘档位全集，不是连接器可解析档位全集。
 DELAY_MODE_PATTERN = "^(" + "|".join(DELAY_MODES) + ")$"
 
-#: 单次回复拆条上限 —— 本批保持用户既有裁决锁死 2，写侧非 2 一律 ValueError；
-#: 前端只读。Q6「放宽到 3–4 段」（2026-10-27 裁决）的配置语义与连接器接线
-#: 在后续批次单独实施（配置层先行会造成半成品）。
+#: 单次回复拆条上限 —— 2026-10-27 Q6 用户裁决：可在 2/3/4 之间配置（默认仍 2）。
+#: 超上限时剩余内容并入最后一条（内容逐字无损，见 split_reply_for_wechat）。
 MAX_SEGMENTS = 2
+SEGMENT_CAP_CHOICES = (2, 3, 4)
 
 DELAY_MODE_LABELS: dict[str, str] = {
     DELAY_MODE_DYNAMIC: "逐字(按字数)",
@@ -110,8 +110,16 @@ HUMANIZE_FIELDS: tuple[HumanizeField, ...] = (
     HumanizeField("delay_ceil_ms", "int", 1600, (0, 60000), True, True, "延时上钳"),
     HumanizeField("bracket_delay_ms", "int", 0, (0, 5000), True, True, "括号段覆盖延时"),
     HumanizeField("proactive_split", "bool", False, None, True, True, "主动消息拆条"),
+    HumanizeField("read_delay_enabled", "bool", True, None, True, True, "生成前阅读延迟"),
+    HumanizeField("read_delay_min_ms", "int", 1000, (0, 30000), True, True, "阅读延迟下界"),
+    HumanizeField("read_delay_max_ms", "int", 6000, (0, 60000), True, True, "阅读延迟上界"),
+    HumanizeField("read_delay_chars_per_second", "int", 0, (0, 100), True, True, "阅读速度(字/秒,0=关)"),
+    HumanizeField("read_delay_max_total_ms", "int", 30000, (0, 120000), True, True, "阅读延迟总上限"),
+    HumanizeField("read_delay_channel_cap_ms", "int", 5000, (0, 60000), True, True, "无typing渠道封顶"),
+    HumanizeField("typing_enabled", "bool", True, None, True, True, "输入状态(typing)"),
+    HumanizeField("typo_rate", "int", 0, (0, 100), True, True, "沉浸式口误概率(%)"),
     HumanizeField("user_override_enabled", "bool", True, None, True, False, "按用户覆盖总开关"),
-    HumanizeField("max_segments", "int", MAX_SEGMENTS, None, False, False, "单次拆条上限（只读）"),
+    HumanizeField("max_segments", "int", MAX_SEGMENTS, None, True, False, "单次拆条上限(2/3/4)"),
 )
 
 _FIELD_BY_NAME: dict[str, HumanizeField] = {f.name: f for f in HUMANIZE_FIELDS}
@@ -153,6 +161,14 @@ class HumanizeConfig:
     delay_ceil_ms: int = 1600
     bracket_delay_ms: int = 0
     proactive_split: bool = False
+    read_delay_enabled: bool = True
+    read_delay_min_ms: int = 1000
+    read_delay_max_ms: int = 6000
+    read_delay_chars_per_second: int = 0
+    read_delay_max_total_ms: int = 30000
+    read_delay_channel_cap_ms: int = 5000
+    typing_enabled: bool = True
+    typo_rate: int = 0
     user_override_enabled: bool = True
     max_segments: int = MAX_SEGMENTS
 
@@ -168,6 +184,14 @@ class HumanizeConfig:
             "delay_ceil_ms": self.delay_ceil_ms,
             "bracket_delay_ms": self.bracket_delay_ms,
             "proactive_split": self.proactive_split,
+            "read_delay_enabled": self.read_delay_enabled,
+            "read_delay_min_ms": self.read_delay_min_ms,
+            "read_delay_max_ms": self.read_delay_max_ms,
+            "read_delay_chars_per_second": self.read_delay_chars_per_second,
+            "read_delay_max_total_ms": self.read_delay_max_total_ms,
+            "read_delay_channel_cap_ms": self.read_delay_channel_cap_ms,
+            "typing_enabled": self.typing_enabled,
+            "typo_rate": self.typo_rate,
             "user_override_enabled": self.user_override_enabled,
             "max_segments": self.max_segments,
         }
@@ -196,6 +220,17 @@ def _read_bool(block: dict[str, Any], key: str) -> bool:
     return bool(DEFAULTS[key])
 
 
+def _read_segment_cap(block: dict[str, Any]) -> int:
+    """拆条上限（Q6）：只接受 2/3/4；其余（含手改坏值）回落默认 2。"""
+    value = block.get("max_segments")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return MAX_SEGMENTS
+    if value not in SEGMENT_CAP_CHOICES:
+        logger.debug("humanize.max_segments 非法 %r，回落默认 %r", value, MAX_SEGMENTS)
+        return MAX_SEGMENTS
+    return value
+
+
 def _effective_global_values(block: dict[str, Any]) -> dict[str, Any]:
     """把全局 ``humanize`` 块按「容错读」折算成完整取值字典（含跨字段愈合）。"""
     mode = block.get("delay_mode")
@@ -211,6 +246,12 @@ def _effective_global_values(block: dict[str, Any]) -> dict[str, Any]:
         logger.warning("humanize 延时钳位倒置（%s > %s），两侧回落默认", floor, ceil)
         floor = int(DEFAULTS["delay_floor_ms"])
         ceil = int(DEFAULTS["delay_ceil_ms"])
+    read_min = _read_int(block, "read_delay_min_ms")
+    read_max = _read_int(block, "read_delay_max_ms")
+    if read_min > read_max:
+        logger.warning("humanize 阅读延迟区间倒置（%s > %s），两侧回落默认", read_min, read_max)
+        read_min = int(DEFAULTS["read_delay_min_ms"])
+        read_max = int(DEFAULTS["read_delay_max_ms"])
     return {
         "delay_mode": mode if mode in DELAY_MODES else DEFAULT_DELAY_MODE,
         "per_char_ms": _read_int(block, "per_char_ms"),
@@ -221,7 +262,16 @@ def _effective_global_values(block: dict[str, Any]) -> dict[str, Any]:
         "delay_ceil_ms": ceil,
         "bracket_delay_ms": _read_int(block, "bracket_delay_ms"),
         "proactive_split": _read_bool(block, "proactive_split"),
+        "read_delay_enabled": _read_bool(block, "read_delay_enabled"),
+        "read_delay_min_ms": read_min,
+        "read_delay_max_ms": read_max,
+        "read_delay_chars_per_second": _read_int(block, "read_delay_chars_per_second"),
+        "read_delay_max_total_ms": _read_int(block, "read_delay_max_total_ms"),
+        "read_delay_channel_cap_ms": _read_int(block, "read_delay_channel_cap_ms"),
+        "typing_enabled": _read_bool(block, "typing_enabled"),
+        "typo_rate": _read_int(block, "typo_rate"),
         "user_override_enabled": _read_bool(block, "user_override_enabled"),
+        "max_segments": _read_segment_cap(block),
     }
 
 
@@ -264,9 +314,15 @@ def read_humanize(user_key: str | None = None) -> HumanizeConfig:
                 )
                 merged["delay_floor_ms"] = values["delay_floor_ms"]
                 merged["delay_ceil_ms"] = values["delay_ceil_ms"]
+            if merged["read_delay_min_ms"] > merged["read_delay_max_ms"]:
+                logger.warning(
+                    "user_humanize 阅读延迟区间倒置（user=%s），该用户覆盖回落全局", user_key,
+                )
+                merged["read_delay_min_ms"] = values["read_delay_min_ms"]
+                merged["read_delay_max_ms"] = values["read_delay_max_ms"]
             values = merged
 
-    return HumanizeConfig(**values, max_segments=MAX_SEGMENTS)
+    return HumanizeConfig(**values)
 
 
 def _check_cross_field(values: dict[str, Any]) -> None:
@@ -278,6 +334,11 @@ def _check_cross_field(values: dict[str, Any]) -> None:
     if values.get("delay_floor_ms", 0) > values.get("delay_ceil_ms", 0):
         raise ValueError(
             f"delay_floor_ms 不得大于 delay_ceil_ms（{values['delay_floor_ms']} > {values['delay_ceil_ms']}）"
+        )
+    if values.get("read_delay_min_ms", 0) > values.get("read_delay_max_ms", 0):
+        raise ValueError(
+            f"read_delay_min_ms 不得大于 read_delay_max_ms"
+            f"（{values['read_delay_min_ms']} > {values['read_delay_max_ms']}）"
         )
 
 
@@ -305,13 +366,20 @@ def validate_payload(values: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{key} 越界: {value}（允许 {lo}..{hi}）")
         out[key] = int(value)
 
-    for key in ("proactive_split", "user_override_enabled"):
+    for key in ("proactive_split", "read_delay_enabled", "typing_enabled", "user_override_enabled"):
         value = values.get(key)
         if value is None:
             value = DEFAULTS[key]
         if not isinstance(value, bool):
             raise ValueError(f"{key} 必须是布尔值，收到 {type(value).__name__}")
         out[key] = value
+
+    cap = values.get("max_segments")
+    if cap is None:
+        cap = MAX_SEGMENTS
+    if isinstance(cap, bool) or not isinstance(cap, int) or cap not in SEGMENT_CAP_CHOICES:
+        raise ValueError(f"max_segments 仅支持 {list(SEGMENT_CAP_CHOICES)}，收到 {cap!r}")
+    out["max_segments"] = cap
 
     _check_cross_field(out)
     return out
@@ -330,6 +398,12 @@ def _validate_partial(payload: dict[str, Any]) -> None:
         if field.type == "int":
             if isinstance(value, bool) or not isinstance(value, int):
                 raise ValueError(f"{key} 必须是整数，收到 {type(value).__name__}")
+            if key == "max_segments":
+                if value not in SEGMENT_CAP_CHOICES:
+                    raise ValueError(
+                        f"max_segments 仅支持 {list(SEGMENT_CAP_CHOICES)}，收到 {value!r}"
+                    )
+                continue
             lo, hi = field.bounds or (0, 0)
             if value < lo or value > hi:
                 raise ValueError(f"{key} 越界: {value}（允许 {lo}..{hi}）")
@@ -356,15 +430,9 @@ def write_humanize(*, user_key: str | None = None, **partial: Any) -> HumanizeCo
     恰为默认档位时不落盘（读侧恒定由字段表产出）。
     """
     payload = {k: v for k, v in partial.items() if v is not None}
-    unknown = sorted(set(payload) - set(WRITABLE_FIELDS) - {"max_segments"})
+    unknown = sorted(set(payload) - set(WRITABLE_FIELDS))
     if unknown:
         raise ValueError(f"未知的拟人度字段: {unknown}；可写字段为 {list(WRITABLE_FIELDS)}")
-    if "max_segments" in payload:
-        requested = payload.pop("max_segments")
-        if int(requested) != MAX_SEGMENTS:
-            raise ValueError(
-                f"max_segments 固定为 {MAX_SEGMENTS}（用户裁决），不可修改；收到 {requested!r}"
-            )
 
     _validate_partial(payload)
 

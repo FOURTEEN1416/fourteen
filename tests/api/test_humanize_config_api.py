@@ -44,7 +44,7 @@ _ADMIN_ID = 1
 _VIEWER_ID = 2
 
 #: 契约钉死的响应字段全集（GET/POST/PUT 三个方向的 config 形状一致）。
-#: 2026-10-27 G-1 新增 ``user_override_enabled``（按用户覆盖总开关，默认 true）。
+#: 2026-10-27 G-1 新增 ``user_override_enabled``；P0-B 新增阅读延迟/typing 七字段。
 _EXPECTED_KEYS = {
     "delay_mode",
     "per_char_ms",
@@ -55,6 +55,14 @@ _EXPECTED_KEYS = {
     "delay_ceil_ms",
     "bracket_delay_ms",
     "proactive_split",
+    "read_delay_enabled",
+    "read_delay_min_ms",
+    "read_delay_max_ms",
+    "read_delay_chars_per_second",
+    "read_delay_max_total_ms",
+    "read_delay_channel_cap_ms",
+    "typing_enabled",
+    "typo_rate",
     "user_override_enabled",
     "max_segments",
     "delay_mode_label",
@@ -70,6 +78,14 @@ _DEFAULTS = {
     "delay_ceil_ms": 1600,
     "bracket_delay_ms": 0,
     "proactive_split": False,
+    "read_delay_enabled": True,
+    "read_delay_min_ms": 1000,
+    "read_delay_max_ms": 6000,
+    "read_delay_chars_per_second": 0,
+    "read_delay_max_total_ms": 30000,
+    "read_delay_channel_cap_ms": 5000,
+    "typing_enabled": True,
+    "typo_rate": 0,
     "user_override_enabled": True,
     "max_segments": 2,
 }
@@ -306,8 +322,17 @@ async def test_post_partial_merge_and_sibling_keys_preserved(api, hm_file):
                                    "random_max_ms": 1600, "delay_floor_ms": 400,
                                    "delay_ceil_ms": 1600, "bracket_delay_ms": 0,
                                    "proactive_split": False,
-                                   # 2026-10-27 G-1：新增全局开关随完整配置落盘
-                                   "user_override_enabled": True}
+                                   # 2026-10-27 G-1/P0-B：新增字段随完整配置落盘
+                                   "read_delay_enabled": True,
+                                   "read_delay_min_ms": 1000,
+                                   "read_delay_max_ms": 6000,
+                                   "read_delay_chars_per_second": 0,
+                                   "read_delay_max_total_ms": 30000,
+                                   "read_delay_channel_cap_ms": 5000,
+                                   "typing_enabled": True,
+                                   "typo_rate": 0,
+                                   "user_override_enabled": True,
+                                   "max_segments": 2}
     assert on_disk["reply_mode"] == "novel"
     assert on_disk["quiet_hours"] == {"start": 22, "end": 7}
     assert on_disk["llm_proactive"] == {"enabled": True}
@@ -395,6 +420,9 @@ async def test_concurrent_partial_writes_do_not_lose_updates(api, hm_file):
     {"per_char_ms": "abc"},
     {"random_min_ms": 2000, "random_max_ms": 100},
     {"delay_floor_ms": 3000, "delay_ceil_ms": 2000},
+    {"max_segments": 1},
+    {"max_segments": 5},
+    {"typo_rate": 101},
 ])
 async def test_invalid_payload_is_422(api, hm_file, payload):
     client, _engine, _app = api
@@ -413,22 +441,23 @@ async def test_numeric_string_is_coerced_by_pydantic(api, hm_file):
     assert _humanize_block(hm_file)["per_char_ms"] == 45
 
 
-async def test_max_segments_other_than_two_is_400(api, hm_file):
+async def test_max_segments_three_is_accepted_and_persisted(api, hm_file):
+    """2026-10-27 Q6：拆条上限可放宽到 3/4（默认仍 2），并写入真源。"""
     client, _engine, _app = api
     r = await client.post("/api/humanize/config", headers=_bearer(_ADMIN_ID),
                           json={"max_segments": 3})
-    assert r.status_code == 400, r.text
-    assert not hm_file.exists()
+    assert r.status_code == 200, r.text
+    assert r.json()["config"]["max_segments"] == 3
+    assert _humanize_block(hm_file)["max_segments"] == 3
 
 
-async def test_max_segments_two_is_accepted_and_not_persisted(api, hm_file):
-    """只读字段：==2 放行，但不写进真源文件（读侧恒定产出 2）。"""
+async def test_max_segments_two_is_accepted_and_persisted(api, hm_file):
     client, _engine, _app = api
     r = await client.post("/api/humanize/config", headers=_bearer(_ADMIN_ID),
                           json={"max_segments": 2, "per_char_ms": 50})
     assert r.status_code == 200, r.text
     assert r.json()["config"]["max_segments"] == 2
-    assert "max_segments" not in _humanize_block(hm_file)
+    assert _humanize_block(hm_file)["max_segments"] == 2
 
 
 async def test_cross_field_conflict_after_merge_is_400_and_file_untouched(api, hm_file):

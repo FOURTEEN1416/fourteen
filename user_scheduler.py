@@ -268,6 +268,7 @@ class UserManager:
         attachments: list | None = None,
         reply_sender=None,
         message_id: str = "",
+        typing_sender=None,
     ) -> dict[str, Any]:
         """处理某个用户的消息
 
@@ -282,7 +283,7 @@ class UserManager:
         """
         with bind_message_id(message_id):
             return await self._process_message_inner(
-                user_id, text, message_type, attachments, reply_sender
+                user_id, text, message_type, attachments, reply_sender, typing_sender
             )
 
     async def _get_user_llm_config(self, wxid: str) -> tuple[int | None, dict | None]:
@@ -332,6 +333,7 @@ class UserManager:
         self, user_id: str, text: str, message_type: str = "text",
         attachments: list | None = None,
         reply_sender=None,
+        typing_sender=None,
     ) -> dict[str, Any]:
         """实际消息处理：委托给 orchestrator，并追加语音合成逻辑"""
         instance = self._get_or_create(user_id)
@@ -366,6 +368,8 @@ class UserManager:
         # 使用关键字参数以兼容 Orchestrator（character_id 为第 5 参）和
         # OptimizedOrchestrator（character_id 为第 4 参）两种签名
         delivery_kwargs = {"reply_sender": reply_sender} if reply_sender is not None else {}
+        if typing_sender is not None:
+            delivery_kwargs["typing_sender"] = typing_sender
         result = await self._orch.process_message(
             text,
             session_id,
