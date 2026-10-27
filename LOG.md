@@ -3966,3 +3966,24 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **待用户裁决 13 项**（Q0–Q13，见汇总）：**Q0 已由用户本轮拍板「引入 BreezeTTS2」**（设计文档按子智能体视角列为 Q0 待确认，现以本行落账为准；AGENTS L6「MiMo 唯一引擎」口径修订待实施批同步）；其余 Q1–Q6（仿真人化节奏/覆盖/错别字/情绪 schema/拆条）、Q7–Q13（Breeze 部署形态/角色定位/音色策略/商用范围/真流式/付费回退/跨境合规）待逐条拍板。
 - **未验证项（如实声明）**：Breeze 商用边界与跨境合规（需 BreezeBlue 书面确认+法务）；生产（中国大陆）到 `api.breeze.blue` 可达性与 TTFA 未实测；中文女声/角色克隆无独立评测（需听评基线）；iLink `sendtyping` 未实测（typing 上线前置条件）；RTX 5060 Laptop 8GB 兼容性未实测；MiMo「限时免费」生命周期与 `/audio/speech` 等价性待确认；生产是否真无 GPU 未远程 `nvidia-smi`（依据部署文档与 .venv-cpu 记录）。
 - **验证**：本轮纯调研与设计，零代码变更——pytest / vitest / ruff 未运行（不适用）；全量基线沿用 AGENTS §4.3 现行口径（3900 收集 / 3898 通过 + 2 跳过 / 250 文件 / 42 卡；vitest 217/217；ruff 0）。实施与全量验证在设计拍板后另开实施批。
+
+
+## 2026-10-27 裁决补记：系统性升级决议逐条拍板（修正同日条目「Q0 已拍板引入」的记载，以本条为准）
+
+- **BreezeTTS2：暂不引入**（用户答「暂时不引入」）——推翻同日调研条目中「Q0 已由用户本轮拍板『引入 BreezeTTS2』」的记载；Breeze 相关 Q8/Q9/Q11/Q12 随之作废。**若将来引入，用户口径「肯定是需要采用本地部署才使用，不然连费用都扛不住」→ 只接受本地部署，托管 API 因成本出局**；本地部署仍受权重非商用许可（BreezeBlue Research and Non-Commercial License v1.1）+ 12–24GB GPU 约束。AGENTS L6「MiMo Cloud TTS 唯一引擎」保持有效，无需修订；两份 Breeze 文档冻结为技术预研（docs/reports/2026-10-27-BreezeTTS2*）。
+- **商用范围（Q10）**：暂缓决策（用户「先不着急决策这个」）。
+- **拟人节奏 Q1（阅读延迟 + typing）**：**一次性全量上线，不做比例灰度**（用户「一次性上不就行了不必要灰度」）——保留总开关回滚；typing 的 iLink `sendtyping` 能力实测仍为技术前置（未支持时静默 no-op，不影响发送）。
+- **Q2 按用户覆盖**：做（复用 v1.56 R7 同构做法，防键形态漂移）。
+- **Q3 主动 post-draft judge**：加，fail-closed。
+- **Q4 错别字/口语瑕疵**：仅沉浸模式可选（默认关闭，仅 opt-in 用户 + 沉浸模式生效；设计原判「不适合」，用户裁决优先并限定作用域）。
+- **Q6 拆条**：放宽到 3–4 段（推翻此前 2 段上限裁决；须落实单回合上限/空断点/尾部去重）。
+- **Q5 情绪/关系 schema**：未单独询问，按设计推荐默认「暂不做，先观测」，随时可改。
+- **实施范围落定**：仿真人化 P0 批（humanize 声明式 schema + 按用户覆盖 + 阅读延迟/typing/supersede 一次性上线 + 主动 judge + 沉浸式可选错别字 + 拆条放宽）；Breeze 零代码。全量测试与举证随实施批完成。
+
+
+## 2026-10-27 拟人化实施批 1/5：humanize 声明式 schema + 按用户覆盖（G-1/G-2）· 未部署
+
+- **实现**：`utils/humanize_config.py` 重构为**单一字段表** `HUMANIZE_FIELDS`（11 字段：名称/类型/默认/边界/可写/可按用户覆盖/标签），`DEFAULTS`/`INT_BOUNDS`/`WRITABLE_FIELDS` 全部派生；新增 `user_humanize` 表（`data/sqlite.db`，JSON 覆盖列，幂等建表），读取顺序=**用户覆盖 → 全局块 → 默认值**（键缺失=继承）；`read_humanize(user_key)` / `write_humanize(user_key=...)` partial merge + 严格校验（越界/跨字段/未知键 → ValueError 不落盘）；库内坏值宽松修复（逐字段回落全局）；`user_override_enabled` 为全局回滚开关（per_user=False，按用户写会被拒）。
+- **API**：`GET /api/humanize/config?user_key=` 返回合并生效视图 + `scope`；`POST/PUT` 增 `user_key` 作用域（admin 写该用户覆盖行）；新增 `DELETE /api/humanize/config?user_key=` 清除覆盖（幂等 noop）。端点 88→**89**，`tests/test_api_routes.py` 同步。
+- **测试**：`tests/test_humanize_config_schema.py`（12）+ `tests/test_humanize_user_override.py`（11）共 **+23 例**；humanize 相关 86 全绿。全量四分块 **3932 收集 / 3926 通过 + 2 跳过 / 4 失败**——4 失败（byok api_base 校验 ×2 / w1 无主卡 / sweep 503）用 `git stash` 在 HEAD 原样复现，**均为既有问题、与本批无关**；块 3 由计数修正后 1024/1024 全绿。ruff 0。
+- **未部署**（批次未完；全部 5 批完成后统一三端上线）。

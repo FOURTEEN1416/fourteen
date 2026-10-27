@@ -165,6 +165,17 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # 拟人度的 per-user 覆盖库（2026-10-27 G-2）：同型防线 ——
+    # `write_humanize(user_key=...)` 默认写宿主 data/sqlite.db 的 user_humanize 表。
+    try:
+        from utils import humanize_config as _hm
+
+        monkeypatch.setattr(
+            _hm, "_OVERRIDE_DB_PATH", sandbox / "humanize_override.db", raising=False,
+        )
+    except Exception:
+        pass
+
     # W3 控制面（outbox/desired/presence/幂等账，2026-09-27）：任何测试
     # 触发连接器/scheduler/提醒装配都不许写真实 data/runtime_plane.db
     # （与上方 scheduler_config 自伤事故同型防线）。

@@ -596,6 +596,11 @@ class HumanizeConfigRequest(BaseModel):
     proactive_split: bool | None = Field(
         default=None, description="主动消息是否也拆条发送（默认 false=整段直发）",
     )
+    user_key: str | None = Field(
+        default=None,
+        max_length=200,
+        description="按用户覆盖的作用域键（v1.28 完整会话键 N:wxid）；留空=写全局默认",
+    )
 
     @model_validator(mode="after")
     def _check_cross_field(self) -> HumanizeConfigRequest:
@@ -617,28 +622,46 @@ class HumanizeConfigRequest(BaseModel):
 class HumanizeConfigResponse(BaseModel):
     status: str
     config: dict
+    # 2026-10-27 G-2：``user_key`` 非空时 config 是「用户覆盖 → 全局 → 默认」
+    # 的**合并生效视图**；scope 标明本次读写的层级，便于前端提示。
+    scope: str = "global"
+    user_key: str = ""
 
 
-def _humanize_payload() -> dict:
-    """响应体 ``config`` —— 真源**热读** + 展示标签（标签不落真源文件）。"""
+def _humanize_payload(user_key: str | None = None) -> dict:
+    """响应体 ``config`` —— 真源**热读** + 展示标签（标签不落真源文件）。
+
+    ``user_key`` 非空 → 返回该用户合并后的生效视图（覆盖优先，无覆盖回落全局）。
+    """
     from utils.humanize_config import delay_mode_label, read_humanize
 
-    cfg = read_humanize()
+    cfg = read_humanize(user_key)
     return {**cfg.as_dict(), "delay_mode_label": delay_mode_label(cfg.delay_mode)}
 
 
 @router.get("/api/humanize/config", response_model=HumanizeConfigResponse)
 async def get_humanize_config(
+    user_key: str | None = Query(
+        default=None,
+        max_length=200,
+        description="可选：按用户读取合并生效视图（覆盖优先，无覆盖回落全局）",
+    ),
     _auth: bool = Security(verify_api_key_dep),
     # SEC-P0 同门：拟人度是控制面，与 /api/proactive/config 同级
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
-    """读取拟人度配置（**纯文件热读**，不依赖 ``orch._ase``，故无 503）。
+    """读取拟人度配置（**纯文件/覆盖库热读**，不依赖 ``orch._ase``，故无 503）。
 
     4 worker 中只有 master 持有主动引擎，其余 worker 仍必须能答「当前拟人度
     是什么」—— 与 ``/api/proactive/config`` 的 503 语义刻意不同。
     """
-    return {"status": "ok", "config": _humanize_payload()}
+    scope = "user" if user_key else "global"
+    return {
+        "status": "ok",
+        "config": _humanize_payload(user_key),
+        "scope": scope,
+        "user_key": user_key or "",
+    }
 
 
 @router.post("/api/humanize/config", response_model=HumanizeConfigResponse)
@@ -655,23 +678,53 @@ async def update_humanize_config(
     锁内读改写且只触碰 ``humanize`` 块，故与 ``/api/proactive/config``
     并发保存同一文件不会互相覆盖。
 
+    ``user_key`` 非空（2026-10-27 G-2）→ 只写该用户的 ``user_humanize``
+    覆盖行，不动全局默认（admin 作用域）。
+
     错误语义：字段非法/越界 → 422（Pydantic 先行）；
     ``max_segments`` 存在且 ≠2 → 400；合并后跨字段冲突 → 400。
     """
     from utils.humanize_config import MAX_SEGMENTS, write_humanize
 
-    if req.max_segments is not None and int(req.max_segments) != MAX_SEGMENTS:
+    payload = req.model_dump(exclude_none=True)
+    user_key = payload.pop("user_key", None)
+
+    if "max_segments" in payload and int(payload["max_segments"]) != MAX_SEGMENTS:
         raise HTTPException(400, f"max_segments 固定为 {MAX_SEGMENTS}（用户裁决），不可修改")
 
-    payload = req.model_dump(exclude_none=True)
-    payload.pop("max_segments", None)  # 只读字段不落盘
-    if payload:
+    if payload or user_key:
         try:
-            write_humanize(**payload)
+            write_humanize(user_key=user_key, **payload)
         except ValueError as e:
             raise HTTPException(400, str(e)) from None
-        logger.info("拟人度配置已更新: %s", payload)
-    return {"status": "ok", "config": _humanize_payload()}
+        logger.info("拟人度配置已更新（scope=%s user=%s）: %s", "user" if user_key else "global", user_key or "-", payload)
+    return {
+        "status": "ok",
+        "config": _humanize_payload(user_key),
+        "scope": "user" if user_key else "global",
+        "user_key": user_key or "",
+    }
+
+
+@router.delete("/api/humanize/config", response_model=HumanizeConfigResponse)
+async def clear_humanize_user_override(
+    user_key: str = Query(..., min_length=1, max_length=200, description="要清除覆盖的用户键"),
+    _auth: bool = Security(verify_api_key_dep),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """清除某用户的拟人度覆盖（回落全局默认）。
+
+    ``status="noop"`` 表示该用户本来就没有覆盖行（幂等）。
+    """
+    from utils.humanize_config import clear_humanize_override
+
+    cleared = clear_humanize_override(user_key)
+    return {
+        "status": "ok" if cleared else "noop",
+        "config": _humanize_payload(),
+        "scope": "global",
+        "user_key": "",
+    }
 
 
 class KnowledgeCollectConfigRequest(BaseModel):

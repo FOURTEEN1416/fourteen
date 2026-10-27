@@ -44,6 +44,7 @@ _ADMIN_ID = 1
 _VIEWER_ID = 2
 
 #: 契约钉死的响应字段全集（GET/POST/PUT 三个方向的 config 形状一致）。
+#: 2026-10-27 G-1 新增 ``user_override_enabled``（按用户覆盖总开关，默认 true）。
 _EXPECTED_KEYS = {
     "delay_mode",
     "per_char_ms",
@@ -54,6 +55,7 @@ _EXPECTED_KEYS = {
     "delay_ceil_ms",
     "bracket_delay_ms",
     "proactive_split",
+    "user_override_enabled",
     "max_segments",
     "delay_mode_label",
 }
@@ -68,6 +70,7 @@ _DEFAULTS = {
     "delay_ceil_ms": 1600,
     "bracket_delay_ms": 0,
     "proactive_split": False,
+    "user_override_enabled": True,
     "max_segments": 2,
 }
 
@@ -302,7 +305,9 @@ async def test_post_partial_merge_and_sibling_keys_preserved(api, hm_file):
                                    "fixed_ms": 600, "random_min_ms": 400,
                                    "random_max_ms": 1600, "delay_floor_ms": 400,
                                    "delay_ceil_ms": 1600, "bracket_delay_ms": 0,
-                                   "proactive_split": False}
+                                   "proactive_split": False,
+                                   # 2026-10-27 G-1：新增全局开关随完整配置落盘
+                                   "user_override_enabled": True}
     assert on_disk["reply_mode"] == "novel"
     assert on_disk["quiet_hours"] == {"start": 22, "end": 7}
     assert on_disk["llm_proactive"] == {"enabled": True}
