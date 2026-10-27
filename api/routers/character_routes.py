@@ -62,7 +62,30 @@ def card_owner_key(card: dict[str, Any]) -> str:
 
 
 def card_access_allowed(card: dict[str, Any], principal: AuthPrincipal | None) -> bool:
-    """主体是否有权读写该卡片。principal 为 None = 机器面（不限制）。"""
+    """主体是否有权访问该卡片（读 + 公共池）。principal 为 None = 机器面（不限制）。
+
+    2026-10-27 公共池改造：**无主卡（owner 为空）对所有已登录用户可见**。
+    旧实现要求 `bool(owner)`，导致 41 张无主成品卡只有机器面能看到，新注册用户
+    进控制台只有自己那 1 张 —— 与产品「四十多张人设卡随便换」的承诺不符。
+    写权限不放宽，见 `card_write_allowed`：公共卡普通用户不可改不可删。
+    """
+    if principal is None:
+        return True
+    if principal.role == "admin":
+        return True
+    owner = card_owner_key(card)
+    if not owner:
+        # 无主卡 = 公共池：任意登录用户可读、可激活（激活只写用户私有表）
+        return True
+    return owner == str(principal.user_id)
+
+
+def card_write_allowed(card: dict[str, Any], principal: AuthPrincipal | None) -> bool:
+    """主体是否有权**修改/删除**该卡片。
+
+    与 `card_access_allowed` 的唯一差别：无主公共卡对普通用户只读。
+    否则任何一个登录用户都能改写或删掉公共池里的成品卡。
+    """
     if principal is None:
         return True
     if principal.role == "admin":
@@ -84,6 +107,23 @@ async def require_character_access(
         return {}
     data = _load_character(character_id)
     if data is None or not card_access_allowed(data, principal):
+        raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
+    return data
+
+
+async def require_character_write(
+    character_id: str,
+    principal: AuthPrincipal | None = Security(get_optional_principal),
+) -> dict[str, Any]:
+    """FastAPI 依赖：角色**写**权限校验（PUT 改卡 / DELETE 删卡专用）。
+
+    公共池（无主卡）对普通用户只读，改动与删除仅限本人私有卡与管理员；
+    失败文案与 `require_character_access` 一致（404，防状态码枚举）。
+    """
+    if principal is None:
+        return {}
+    data = _load_character(character_id)
+    if data is None or not card_write_allowed(data, principal):
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
     return data
 
@@ -578,7 +618,7 @@ async def update_character(
     character_id: str,
     req: UnifiedCharacterUpdate,
     _auth: bool = Security(verify_api_key_dep),
-    _owned: dict[str, Any] = Depends(require_character_access),
+    _owned: dict[str, Any] = Depends(require_character_write),
 ):
     """更新角色（合并更新，只传要改的字段）"""
     data = _owned or _load_character(character_id)
@@ -627,7 +667,7 @@ async def update_character(
 async def delete_character(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
-    _owned: dict[str, Any] = Depends(require_character_access),
+    _owned: dict[str, Any] = Depends(require_character_write),
     db: AsyncSession = Depends(get_db),
 ):
     """删除角色 —— 承诺「删除即全清」，删除范围按 owner 粒度收口（W9 缺陷 B）。
