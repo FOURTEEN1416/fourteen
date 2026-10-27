@@ -3998,3 +3998,4 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **P0-C 观测**：`[humanize][step=read_delay]` / `[humanize][step=superseded]` / `[proactive_judge]` 结构化日志（session/delay_ms/idle_ms/reason，不落原文）。
 - **测试**：新增 `test_humanize_read_delay`(10) / `test_humanize_rhythm`(12) / `test_humanize_typo`(7) / `test_humanize_split_cap`(3) / `test_proactive_judge`(15)；3 个测试替身随新 kwargs（typing_sender）适配；端点计数 89 维持。全量四分块 **3982 收集 / 3976 通过 + 2 跳过 / 4 失败**——4 失败（byok api_base ×2 / w1 无主卡 / sweep 503）已在 HEAD 用 git stash 复现，**均为既有、与本批无关**；ruff 0。
 - **未部署**（全部实施批完成后统一三端上线；上线即默认生效，回滚开关：`read_delay_enabled=false` / `typing_enabled=false` / `llm_proactive.judge_enabled=false` / `typo_rate=0`）。
+- **推送状态（如实登记）**：本地已完成 3 个提交（`e7da4dc` P0-A / `fd003b8` P0-B–Q6 / `c62e855` 文档 v1.57）；`git push` 因本机 SSH 出口（`198.18.1.64:22`）不可达连续失败，**GitHub 端尚未更新**。网络恢复后执行 `git push origin main` 即完成 B 档同步；A 档三端部署另行执行（`remote_deploy.sh` + health/ready 核验）。
