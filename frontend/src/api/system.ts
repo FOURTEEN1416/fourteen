@@ -62,6 +62,8 @@ export function updateProactiveConfig(cfg: {
   llm_proactive_intensity?: 'low' | 'normal' | 'high'
   llm_proactive_respect_quiet?: boolean
   llm_proactive_character_hint?: string
+  /** T-4：主动等待窗随机抖动上限（秒）；0=关闭 */
+  llm_proactive_jitter_seconds?: number
 }) {
   return client.post('/proactive/config', cfg)
 }
@@ -88,9 +90,20 @@ export function setMyReplyMode(replyMode: 'immersive' | 'novel') {
 export type { HumanizeDelayMode, HumanizeConfigPayload } from '../store/humanizeStore'
 import type { HumanizeConfigPayload } from '../store/humanizeStore'
 
-export function humanizeGetConfig() { return client.get('/humanize/config') }
-/** partial merge：只传要改的键（后端在 json_state 锁内 merge，未传键保持原值） */
-export function updateHumanizeConfig(cfg: HumanizeConfigPayload) { return client.post('/humanize/config', cfg) }
+export function humanizeGetConfig(userKey?: string) {
+  return userKey
+    ? client.get('/humanize/config', { params: { user_key: userKey } })
+    : client.get('/humanize/config')
+}
+/** partial merge：只传要改的键（后端在 json_state 锁内 merge，未传键保持原值）；
+ *  userKey 非空 → 只写该用户的 user_humanize 覆盖行（admin 作用域） */
+export function updateHumanizeConfig(cfg: HumanizeConfigPayload, userKey?: string) {
+  return client.post('/humanize/config', userKey ? { ...cfg, user_key: userKey } : cfg)
+}
+/** 清除该用户的拟人度覆盖（回落全局默认） */
+export function clearHumanizeUserOverride(userKey: string) {
+  return client.delete('/humanize/config', { params: { user_key: userKey } })
+}
 
 export function agentPlaneReplay(sessionKey: string, turnId?: string, replyId?: string) {
   return client.get('/agent-plane/replay', { params: { session_key: sessionKey, turn_id: turnId || '', reply_id: replyId || '' } })

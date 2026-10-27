@@ -443,6 +443,7 @@ async def update_proactive_config(
             req.llm_proactive_intensity,
             req.llm_proactive_respect_quiet,
             req.llm_proactive_character_hint,
+            req.llm_proactive_jitter_seconds,
         )
     ):
         from proactive.scheduler import ProactiveScheduler
@@ -453,6 +454,7 @@ async def update_proactive_config(
             "intensity": req.llm_proactive_intensity,
             "respect_quiet_hours": req.llm_proactive_respect_quiet,
             "character_hint": req.llm_proactive_character_hint,
+            "jitter_seconds": req.llm_proactive_jitter_seconds,
         }
         ProactiveScheduler.write_config_file(
             llm_proactive={k: v for k, v in payload.items() if v is not None}

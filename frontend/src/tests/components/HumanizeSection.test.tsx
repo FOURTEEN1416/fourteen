@@ -8,7 +8,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 //   • 门禁同 MessageTab：非 admin 不渲染表单、不请求 admin-only 接口
 //   • 读失败 → 显式错误态 + 重试（绝不渲染默认假表单）
 //   • 档位四选一；dynamic 显示 每字/下钳/上钳，fixed 显示固定延时，random 显示区间
-//   • max_segments 只读呈现「3 条（可配 2/3/4）」
+//   • max_segments 用 2/3/4 选择器呈现（默认 3 选中）
 //   • 保存为**显式按钮**：POST 增量 → 必须回执 status==='ok'；dirty 时标「未保存」
 // ════════════════════════════════════════════════════════════════
 
@@ -126,9 +126,9 @@ describe('控件呈现', () => {
     for (const label of ['逐字(按字数)', '固定延时', '随机区间', '不延时']) {
       expect(screen.getByRole('button', { name: label })).toBeDefined()
     }
-    expect(screen.getByTestId('humanize-max-segments').textContent).toBe('3 条（可配 2/3/4）')
-    // Toggle 组件以 role=switch 暴露
-    expect(screen.getByRole('switch')).toBeDefined()
+    expect(screen.getByRole('button', { name: '3 条' }).getAttribute('aria-pressed')).toBe('true')
+    // Toggle 组件以 role=switch 暴露（主动拆条 / 阅读延迟 / typing / 按用户覆盖 共 ≥1）
+    expect(screen.getAllByRole('switch').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('主动消息也拆句发送（默认：整段发）')).toBeDefined()
   })
 
@@ -173,7 +173,7 @@ describe('控件呈现', () => {
 
     expect(screen.getByTestId('humanize-pure-instruction-note')).toBeDefined()
     // 面板里唯一的开关是「主动消息拆句」
-    expect(screen.getAllByRole('switch')).toHaveLength(1)
+    expect(screen.getAllByRole('switch').length).toBeGreaterThanOrEqual(4)
   })
 
   it('区间互钳：下界推过上界时上界跟随，不产生倒置载荷（避免必然的 400）', async () => {
@@ -227,7 +227,7 @@ describe('保存（partial merge + 回执纪律）', () => {
       data: { status: 'ok', config: { ...SERVER_CONFIG, proactive_split: true } },
     })
 
-    fireEvent.click(screen.getByRole('switch'))
+    fireEvent.click(screen.getAllByRole('switch')[0])
     expect(useHumanizeStore.getState().config.proactive_split).toBe(true)
 
     fireEvent.click(screen.getByRole('button', { name: '保存拟人度' }))

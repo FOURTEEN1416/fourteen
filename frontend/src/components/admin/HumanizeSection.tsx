@@ -10,19 +10,20 @@
  *  ② 读失败不渲染默认假表单 —— 显式错误态 + 重试（照 MessageTab 的 W11-D5 写法）；
  *  ③ 保存以回执 `status === 'ok'` 判成功，成功才落 `savedAt`；
  *     dirty 时按钮显式标注「未保存」；
- *  ④ `max_segments` 只读（用户裁决锁 2）—— 呈现为只读文本，绝不作为可提交键。
+ *  ④ `max_segments` / 阅读延迟 / typing / 口误 / 按用户覆盖等所有可写字段
+ *     都必须在前端有显式入口（Q6/Q2 裁决；「只做后端」= 半成品）。
  *
  * 关于「不延时」档位：`off` 即段间连发（无停顿），等价于把「段间停顿」这一拟人化
  * 特征关掉；`bracket_delay_ms = 0`（默认）让括号段覆盖分支保持惰性（零行为变更）。
  */
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Section from './RoleSettingsSection'
 import Slider from '../shared/Slider'
 import Toggle from '../shared/Toggle'
 import { useAuthStore } from '../../store/authStore'
 import { humanizeIsDirty, useHumanizeStore } from '../../store/humanizeStore'
 import type { HumanizeConfig } from '../../store/humanizeStore'
-import { humanizeGetConfig, updateHumanizeConfig } from '../../api/system'
+import { clearHumanizeUserOverride, humanizeGetConfig, updateHumanizeConfig } from '../../api/system'
 import type { HumanizeDelayMode } from '../../api/system'
 
 //: 四档延时模式：标签与后端 utils/humanize_config.py::DELAY_MODE_LABELS 逐字对齐
@@ -80,6 +81,9 @@ export default function HumanizeSection() {
   const patch = useHumanizeStore((s) => s.patch)
   const save = useHumanizeStore((s) => s.save)
   const reset = useHumanizeStore((s) => s.reset)
+  // 作用域：空 = 全局默认；非空 = 该用户的合并视图（保存→只写该用户覆盖行）
+  const [scopeKey, setScopeKey] = useState('')
+  const activeScope = scopeKey.trim()
 
   useEffect(() => {
     // 非 admin 不打 admin-only 接口（后端 /api/humanize/config 一律 require_role admin）
@@ -284,18 +288,187 @@ export default function HumanizeSection() {
           />
         </div>
 
-        {/* 拆条上限（只读） */}
+        {/* 拆条上限（Q6：2/3/4 可选，默认 3） */}
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-sm text-gray-700">单次回复拆条上限</p>
-            <p className="text-[11px] text-gray-400 mt-0.5">可配 2/3/4（默认 3），经 API 调整</p>
+            <p className="text-[11px] text-gray-400 mt-0.5">超上限内容并入最后一条，内容逐字无损</p>
           </div>
-          <span
-            className="rounded-lg bg-gray-100 px-3 py-1 text-xs font-mono text-gray-500"
-            data-testid="humanize-max-segments"
-          >
-            {config.max_segments} 条（可配 2/3/4）
-          </span>
+          <div className="flex gap-1 p-1 bg-gray-100/60 rounded-xl" data-testid="humanize-max-segments">
+            {[2, 3, 4].map((cap) => (
+              <button
+                key={cap}
+                type="button"
+                aria-label={`${cap} 条`}
+                aria-pressed={config.max_segments === cap}
+                onClick={() => patch({ max_segments: cap })}
+                className={`rounded-lg px-3 py-1.5 text-xs transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/50 ${
+                  config.max_segments === cap
+                    ? 'bg-white text-gray-800 font-medium shadow-sm ring-1 ring-black/5'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {cap} 条
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 生成前阅读延迟（P0-B，一次性全量上线） */}
+        <div className="pt-3 border-t border-gray-100 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm text-gray-700">生成前阅读延迟</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                先「读一下」再回；有输入状态时走完整延迟，无输入状态的渠道封顶
+              </p>
+            </div>
+            <Toggle
+              checked={config.read_delay_enabled}
+              onChange={(v) => patch({ read_delay_enabled: v })}
+            />
+          </div>
+          {config.read_delay_enabled && (
+            <div className="space-y-2" data-testid="humanize-read-delay-params">
+              <NumberRow
+                label="延迟下界"
+                tooltip="刚聊完（≤60s）时的基础等待；默认 1000ms"
+                value={config.read_delay_min_ms}
+                min={0}
+                max={30000}
+                step={100}
+                unit="ms"
+                onChange={(v) => patch({
+                  read_delay_min_ms: v,
+                  read_delay_max_ms: Math.max(config.read_delay_max_ms, v),
+                })}
+              />
+              <NumberRow
+                label="延迟上界"
+                tooltip="隔久了（≥300s）的随机上限；默认 6000ms"
+                value={config.read_delay_max_ms}
+                min={0}
+                max={60000}
+                step={100}
+                unit="ms"
+                onChange={(v) => patch({
+                  read_delay_max_ms: v,
+                  read_delay_min_ms: Math.min(config.read_delay_min_ms, v),
+                })}
+              />
+              <NumberRow
+                label="阅读速度"
+                tooltip="按字数计量阅读耗时；0=关闭（默认）"
+                value={config.read_delay_chars_per_second}
+                min={0}
+                max={100}
+                step={1}
+                unit="字/秒"
+                onChange={(v) => patch({ read_delay_chars_per_second: v })}
+              />
+              <NumberRow
+                label="总上限"
+                tooltip="单轮阅读延迟硬上限；默认 30000ms"
+                value={config.read_delay_max_total_ms}
+                min={0}
+                max={120000}
+                step={1000}
+                unit="ms"
+                onChange={(v) => patch({ read_delay_max_total_ms: v })}
+              />
+              <NumberRow
+                label="无输入状态封顶"
+                tooltip="渠道没有 typing 时最多等这么久（默认 5000ms）"
+                value={config.read_delay_channel_cap_ms}
+                min={0}
+                max={60000}
+                step={500}
+                unit="ms"
+                onChange={(v) => patch({ read_delay_channel_cap_ms: v })}
+              />
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm text-gray-700">输入状态（typing）</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                生成期间显示「正在输入」；iLink 接口失败时自动忽略，不影响发送
+              </p>
+            </div>
+            <Toggle
+              checked={config.typing_enabled}
+              onChange={(v) => patch({ typing_enabled: v })}
+            />
+          </div>
+
+          <NumberRow
+            label="口误概率（仅沉浸式）"
+            tooltip="0=关闭（默认）；>0 时按百分比对一条回复做一次相邻汉字换位"
+            value={config.typo_rate}
+            min={0}
+            max={100}
+            step={1}
+            unit="%"
+            onChange={(v) => patch({ typo_rate: v })}
+          />
+
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm text-gray-700">按用户覆盖总开关</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                关闭后忽略所有用户的独立覆盖，统一回落全局默认（回滚开关）
+              </p>
+            </div>
+            <Toggle
+              checked={config.user_override_enabled}
+              onChange={(v) => patch({ user_override_enabled: v })}
+            />
+          </div>
+        </div>
+
+        {/* 按用户覆盖：加载该用户合并视图 / 保存只写该用户 / 清除覆盖 */}
+        <div className="pt-3 border-t border-gray-100 space-y-2" data-testid="humanize-user-scope">
+          <p className="text-sm text-gray-700">按用户覆盖</p>
+          <p className="text-[11px] text-gray-400">
+            留空 = 全局默认；填入完整会话键（如 <code>2:wxid@im.wechat</code>）可单独调节该用户节奏
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={scopeKey}
+              onChange={(e) => setScopeKey(e.target.value)}
+              placeholder="2:wxid@im.wechat"
+              aria-label="用户会话键"
+              data-testid="humanize-user-key"
+              className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/50"
+            />
+            <button
+              type="button"
+              onClick={() => { void load(humanizeGetConfig, activeScope || undefined) }}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors"
+            >
+              加载该用户
+            </button>
+            <button
+              type="button"
+              disabled={!activeScope}
+              onClick={async () => {
+                if (!activeScope) return
+                try {
+                  await clearHumanizeUserOverride(activeScope)
+                } finally {
+                  await load(humanizeGetConfig, activeScope)
+                }
+              }}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-40"
+            >
+              清除覆盖
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-400">
+            当前作用域：{activeScope ? `用户 ${activeScope}` : '全局默认'}
+          </p>
         </div>
 
         {/* 只读说明（无开关）：ask 里点名的「纯指令隐身」目前在链路上只有**一半**
@@ -326,11 +499,11 @@ export default function HumanizeSection() {
           </button>
           <button
             type="button"
-            onClick={() => { void save(updateHumanizeConfig) }}
+            onClick={() => { void save(updateHumanizeConfig, activeScope || undefined) }}
             disabled={saving || !dirty}
             className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-primary-500 hover:bg-primary-400 rounded-lg transition-colors shadow-sm disabled:opacity-50"
           >
-            {saving ? '保存中…' : savedAt && !dirty ? `已保存（${savedAt}）` : '保存拟人度'}
+            {saving ? '保存中…' : savedAt && !dirty ? `已保存（${savedAt}）` : activeScope ? '保存为该用户覆盖' : '保存拟人度'}
           </button>
         </div>
       </div>

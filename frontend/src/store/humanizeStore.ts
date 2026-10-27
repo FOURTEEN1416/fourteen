@@ -22,11 +22,14 @@ import { useErrorStore } from './errorStore'
 // 由组件层（HumanizeSection）从 `../../api/system` 传入真实实现，
 // 测试传入 mock。store 因此保持零 API 依赖，只做状态存取。
 
-/** GET 配置的 API 函数签名（组件层注入真实实现，测试注入 mock） */
-export type HumanizeGetConfigFn = () => Promise<{ data?: { status?: string; config?: unknown } }>
-/** POST 配置的 API 函数签名 */
+/** GET 配置的 API 函数签名（组件层注入真实实现，测试注入 mock）；userKey 非空=读该用户合并视图 */
+export type HumanizeGetConfigFn = (
+  userKey?: string,
+) => Promise<{ data?: { status?: string; config?: unknown } }>
+/** POST 配置的 API 函数签名；userKey 非空=只写该用户覆盖（admin 作用域） */
 export type HumanizeUpdateConfigFn = (
   cfg: HumanizeConfigPayload,
+  userKey?: string,
 ) => Promise<{ data?: { status?: string; config?: unknown } }>
 
 /** 单次回复拆条上限默认值（Q6：可配 2/3/4；前端只读展示，管理员经 API 调整） */
@@ -58,7 +61,25 @@ export interface HumanizeConfigPayload {
   bracket_delay_ms?: number
   /** 主动消息是否也拆条发送；false（默认）=整段直发 */
   proactive_split?: boolean
-  /** **只读**：恒为 2（用户裁决）；写入非 2 → 400 */
+  /** 生成前阅读延迟总开关（默认 true；用户裁决一次性上线） */
+  read_delay_enabled?: boolean
+  /** 阅读延迟下界（默认 1000ms） */
+  read_delay_min_ms?: number
+  /** 阅读延迟上界（默认 6000ms） */
+  read_delay_max_ms?: number
+  /** 阅读速度（字/秒；0=关闭按字数计量） */
+  read_delay_chars_per_second?: number
+  /** 阅读延迟总上限（默认 30000ms） */
+  read_delay_max_total_ms?: number
+  /** 无 typing 能力渠道的封顶（默认 5000ms） */
+  read_delay_channel_cap_ms?: number
+  /** 输入状态（typing）开关（默认 true） */
+  typing_enabled?: boolean
+  /** 沉浸式可选口误概率（百分比，默认 0=关闭） */
+  typo_rate?: number
+  /** 按用户覆盖总开关（默认 true；关闭=忽略 user_humanize 覆盖表） */
+  user_override_enabled?: boolean
+  /** 单次回复拆条上限（Q6：2/3/4，默认 3） */
   max_segments?: number
   /** **只读**展示标签，GET 回执附带，不落真源文件 */
   delay_mode_label?: string
@@ -77,10 +98,19 @@ export const DEFAULT_HUMANIZE_CONFIG: HumanizeConfig = {
   delay_ceil_ms: 1600,
   bracket_delay_ms: 0,
   proactive_split: false,
+  read_delay_enabled: true,
+  read_delay_min_ms: 1000,
+  read_delay_max_ms: 6000,
+  read_delay_chars_per_second: 0,
+  read_delay_max_total_ms: 30000,
+  read_delay_channel_cap_ms: 5000,
+  typing_enabled: true,
+  typo_rate: 0,
+  user_override_enabled: true,
   max_segments: HUMANIZE_MAX_SEGMENTS,
 }
 
-/** 可写字段（顺序与后端 WRITABLE_FIELDS 一致）；只读的 max_segments 不在其中 */
+/** 可写字段（顺序与后端 WRITABLE_FIELDS 一致） */
 export const HUMANIZE_WRITABLE_KEYS = [
   'delay_mode',
   'per_char_ms',
@@ -91,6 +121,16 @@ export const HUMANIZE_WRITABLE_KEYS = [
   'delay_ceil_ms',
   'bracket_delay_ms',
   'proactive_split',
+  'read_delay_enabled',
+  'read_delay_min_ms',
+  'read_delay_max_ms',
+  'read_delay_chars_per_second',
+  'read_delay_max_total_ms',
+  'read_delay_channel_cap_ms',
+  'typing_enabled',
+  'typo_rate',
+  'user_override_enabled',
+  'max_segments',
 ] as const
 
 export type HumanizeWritableKey = (typeof HUMANIZE_WRITABLE_KEYS)[number]
@@ -114,6 +154,12 @@ const HUMANIZE_INT_BOUNDS = {
   delay_floor_ms: [0, 10000],
   delay_ceil_ms: [0, 60000],
   bracket_delay_ms: [0, 5000],
+  read_delay_min_ms: [0, 30000],
+  read_delay_max_ms: [0, 60000],
+  read_delay_chars_per_second: [0, 100],
+  read_delay_max_total_ms: [0, 120000],
+  read_delay_channel_cap_ms: [0, 60000],
+  typo_rate: [0, 100],
 } as const satisfies Partial<Record<keyof HumanizeConfig, readonly [number, number]>>
 
 type HumanizeIntKey = keyof typeof HUMANIZE_INT_BOUNDS
@@ -138,9 +184,9 @@ function readInt(key: HumanizeIntKey, raw: unknown): number {
  * 把后端回执归一为**完整**编辑态配置（缺键/类型不符/越界逐字段回落默认）。
  *
  * 与后端 read_humanize 的容错读同哲学：一个手改坏的真源文件不该让控制台白屏。
- * 跨字段倒置（min>max / floor>ceil）两侧一并回落默认 —— 同样照后端读侧愈合口径
- * （后端若已愈合则此处是恒真式，留此只为「回执直接来自别处」时不自相矛盾）。
- * `max_segments` 一律强制常量——只读真值由用户裁决给出，不信回执。
+ * 跨字段倒置（min>max / floor>ceil / readMin>readMax）两侧一并回落默认 —— 同样照
+ * 后端读侧愈合口径（后端若已愈合则此处是恒真式，留此只为「回执直接来自别处」时
+ * 不自相矛盾）。`max_segments` 仅接受 2/3/4，其余回落默认 3。
  */
 export function normalizeHumanizeConfig(raw: unknown): HumanizeConfig {
   const r = (raw && typeof raw === 'object' ? raw : {}) as HumanizeConfigPayload
@@ -158,6 +204,12 @@ export function normalizeHumanizeConfig(raw: unknown): HumanizeConfig {
     floor = d.delay_floor_ms
     ceil = d.delay_ceil_ms
   }
+  let readMin = readInt('read_delay_min_ms', r.read_delay_min_ms)
+  let readMax = readInt('read_delay_max_ms', r.read_delay_max_ms)
+  if (readMin > readMax) {
+    readMin = d.read_delay_min_ms
+    readMax = d.read_delay_max_ms
+  }
   return {
     delay_mode: typeof mode === 'string' && (DELAY_MODES as readonly string[]).includes(mode)
       ? (mode as HumanizeDelayMode)
@@ -170,6 +222,19 @@ export function normalizeHumanizeConfig(raw: unknown): HumanizeConfig {
     delay_ceil_ms: ceil,
     bracket_delay_ms: readInt('bracket_delay_ms', r.bracket_delay_ms),
     proactive_split: typeof r.proactive_split === 'boolean' ? r.proactive_split : d.proactive_split,
+    read_delay_enabled: typeof r.read_delay_enabled === 'boolean'
+      ? r.read_delay_enabled
+      : d.read_delay_enabled,
+    read_delay_min_ms: readMin,
+    read_delay_max_ms: readMax,
+    read_delay_chars_per_second: readInt('read_delay_chars_per_second', r.read_delay_chars_per_second),
+    read_delay_max_total_ms: readInt('read_delay_max_total_ms', r.read_delay_max_total_ms),
+    read_delay_channel_cap_ms: readInt('read_delay_channel_cap_ms', r.read_delay_channel_cap_ms),
+    typing_enabled: typeof r.typing_enabled === 'boolean' ? r.typing_enabled : d.typing_enabled,
+    typo_rate: readInt('typo_rate', r.typo_rate),
+    user_override_enabled: typeof r.user_override_enabled === 'boolean'
+      ? r.user_override_enabled
+      : d.user_override_enabled,
     max_segments: readSegmentCap(r.max_segments),
   }
 }
@@ -210,9 +275,9 @@ export interface HumanizeState {
   error: string
   saving: boolean
   savedAt: string
-  load: (getConfig: HumanizeGetConfigFn) => Promise<void>
+  load: (getConfig: HumanizeGetConfigFn, userKey?: string) => Promise<void>
   patch: (partial: Partial<HumanizeConfig>) => void
-  save: (updateConfig: HumanizeUpdateConfigFn) => Promise<boolean>
+  save: (updateConfig: HumanizeUpdateConfigFn, userKey?: string) => Promise<boolean>
   reset: () => void
 }
 
@@ -228,11 +293,11 @@ export const useHumanizeStore = create<HumanizeState>()((set, get) => ({
   saving: false,
   savedAt: '',
 
-  /** 热读真源；后端未回 `status:'ok'` 一律判失败（不渲染默认假表单） */
-  async load(getConfig) {
+  /** 热读真源（userKey 非空=读该用户合并视图）；后端未回 `status:'ok'` 一律判失败 */
+  async load(getConfig, userKey) {
     set({ status: 'loading', error: '' })
     try {
-      const res = await getConfig()
+      const res = userKey ? await getConfig(userKey) : await getConfig()
       const receipt = res?.data as { status?: string; config?: unknown } | undefined
       if (receipt?.status !== 'ok' || !receipt.config) {
         throw new Error('后端未确认拟人度配置（status≠ok）')
@@ -248,14 +313,17 @@ export const useHumanizeStore = create<HumanizeState>()((set, get) => ({
   },
 
   patch(partial) {
-    set((state) => ({
-      // max_segments 不由前端编辑态改写（只读展示，管理员经 API 调）
-      config: { ...state.config, ...partial, max_segments: state.config.max_segments },
-    }))
+    set((state) => {
+      const next = { ...state.config, ...partial }
+      if (partial.max_segments !== undefined) {
+        next.max_segments = readSegmentCap(partial.max_segments)
+      }
+      return { config: next }
+    })
   },
 
-  /** 保存增量；返回是否**确实**生效（回执 ok） */
-  async save(updateConfig) {
+  /** 保存增量（userKey 非空=写该用户覆盖）；返回是否**确实**生效（回执 ok） */
+  async save(updateConfig, userKey) {
     const { config, snapshot } = get()
     const diff = humanizeDiff(config, snapshot)
     if (Object.keys(diff).length === 0) {
@@ -265,7 +333,7 @@ export const useHumanizeStore = create<HumanizeState>()((set, get) => ({
     }
     set({ saving: true })
     try {
-      const res = await updateConfig(diff)
+      const res = userKey ? await updateConfig(diff, userKey) : await updateConfig(diff)
       const receipt = res?.data as { status?: string; config?: unknown } | undefined
       if (receipt?.status !== 'ok') {
         useErrorStore.getState().addToast({

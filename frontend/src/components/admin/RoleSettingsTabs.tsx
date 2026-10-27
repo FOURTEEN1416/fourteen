@@ -591,6 +591,8 @@ interface ProactiveConfigPayload {
     intensity?: 'low' | 'normal' | 'high'
     respect_quiet_hours?: boolean
     character_hint?: string
+    /** T-4：等待窗随机抖动上限（秒） */
+    jitter_seconds?: number
   }
 }
 
@@ -617,6 +619,8 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
   const [llmIntensity, setLlmIntensity] = useState<'low' | 'normal' | 'high'>('normal')
   const [llmRespectQuiet, setLlmRespectQuiet] = useState(true)
   const [llmCharHint, setLlmCharHint] = useState('')
+  // T-4：主动等待窗随机抖动上限（秒），0=关闭
+  const [llmJitter, setLlmJitter] = useState(120)
   // Agent Plane 回放
   const [replayKey, setReplayKey] = useState('')
   const [replayTurn, setReplayTurn] = useState('')
@@ -657,6 +661,7 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
       setLlmIntensity(lp.intensity || 'normal')
       setLlmRespectQuiet(lp.respect_quiet_hours !== false)
       setLlmCharHint(lp.character_hint || '')
+      setLlmJitter(lp.jitter_seconds ?? 120)
       const hist = histRes?.data as { history?: Array<{ type: string; message: string; at: string }> } | undefined
       if (hist?.history) setHistory(hist.history)
       setCfgStatus('ready')
@@ -695,6 +700,7 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
         llm_proactive_intensity: llmIntensity,
         llm_proactive_respect_quiet: llmRespectQuiet,
         llm_proactive_character_hint: llmCharHint,
+        llm_proactive_jitter_seconds: llmJitter,
       })
       // W11-D5：HTTP 200 不代表生效，必须回执 status==="ok"
       const receipt = res.data as { status?: string } | undefined
@@ -825,6 +831,18 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
           <div className="sm:col-span-2">
             <p className="text-xs text-gray-500 mb-1">角色补充提示</p>
             <input className="w-full border rounded-lg px-2 py-1.5 text-sm" value={llmCharHint} onChange={e => setLlmCharHint(e.target.value)} placeholder="可选，覆盖/补充角色人设口吻" maxLength={200} />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 mb-1">等待窗抖动（秒）</p>
+            <input
+              type="number"
+              min={0}
+              max={900}
+              className="w-full border rounded-lg px-2 py-1.5 text-sm"
+              value={llmJitter}
+              onChange={e => setLlmJitter(Math.max(0, Math.min(900, Number(e.target.value) || 0)))}
+            />
+            <p className="text-[11px] text-gray-400 mt-0.5">模型说「N 分钟后再看」时，随机延后 0–N 秒（0=关闭）</p>
           </div>
         </div>
       </Section>

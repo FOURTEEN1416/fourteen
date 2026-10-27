@@ -4016,3 +4016,11 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **T-4 主动等待窗抖动**：`proactive/scheduler.py::apply_wait_jitter` + `get_proactive_jitter_seconds`（配置 `llm_proactive.jitter_seconds`，默认 **120s**、0=关闭、上限 900s）——模型 wait 窗后追加 `uniform(0,jitter)`，主动消息不再精确卡在「第 N 分钟」；契约拒收退避保持既有 5 分钟语义（不抖动）；随机源可注入，测试确定。
 - **Q6 真正放宽到 3 段**：`MAX_SEGMENTS` 默认 2→**3**（可配 2/3/4）；`split_reply_for_wechat` 默认随真源；前端 `HUMANIZE_MAX_SEGMENTS=3`、store 接受合法服务端值（坏值回落 3）、admin 面板只读展示「N 条（可配 2/3/4）」；超上限仍并入最后一条、内容逐字无损。连带更新 8 个测试文件的默认值断言（行为未变，仅默认值）。
 - **验证**：后端 **3988 收集 / 3982 通过 + 2 跳过 / 4 既有失败**（byok api_base×2 / w1 无主卡 / sweep 503，HEAD 复现、非本批；四分块 1045+1110+912+915 通过）；前端 **217/217** + `tsc --noEmit` 0；ruff 0。**未部署**。
+
+
+## 2026-10-27 前端可编辑补全批（用户质询「为什么不可以被前端更改」）· humanize 全字段 + 按用户覆盖作用域 + 主动抖动入口
+
+- **原则修正（用户裁决）**：凡可写配置必须有**前端显式入口**——只做后端 API = 半成品；旧的「max_segments 只读锁 2」约束随 Q6 裁决一并解除。
+- **humanize 面板新增**：拆条上限 2/3/4 选择器；阅读延迟开关 + 下界/上界/阅读速度/总上限/无 typing 封顶；typing 开关；沉浸式口误概率（0=关）；按用户覆盖总开关；**按用户覆盖作用域**（输入完整会话键 → 加载该用户合并视图 / 保存只写该用户覆盖 / 清除覆盖，对应 GET `?user_key`、POST `user_key`、DELETE）。
+- **主动配置面板新增**：「等待窗抖动（秒）」（0=关闭）；后端 `ProactiveConfigRequest.llm_proactive_jitter_seconds`（0–900）→ `llm_proactive.jitter_seconds`，与 T-4 调度读取键**同名同源**（防 R7 类键漂移）。
+- **验证**：前端 **217/217** + `tsc --noEmit` 0；后端 **3988 收集 / 3982 通过 + 2 跳过 / 4 既有失败**（同前，未新增）；ruff 0。**未部署**。

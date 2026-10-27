@@ -379,13 +379,13 @@ describe('RoleSettings', () => {
     expect(screen.queryByText(/立即发送一条主动消息/)).toBeNull()
     expect(mockProactiveSend).not.toHaveBeenCalled()
 
-    // 作用域横幅：全局配置明示（非角色级）
-    expect(screen.getByText(/全局/)).toBeDefined()
+    // 作用域横幅：全局配置明示（非角色级）；拟人度区块也会出现「全局」字样 → 取全部
+    expect(screen.getAllByText(/全局/).length).toBeGreaterThan(0)
 
     // 拟人度区块（2026-10-16 新增）：挂在消息 tab 内、回复模式段之后，走独立端点
     expect(await screen.findByText('拟人度')).toBeDefined()
     expect(mockHumanizeGetConfig).toHaveBeenCalledTimes(1)
-    expect(screen.getByTestId('humanize-max-segments').textContent).toBe('3 条（可配 2/3/4）')
+    expect(screen.getByRole('button', { name: '3 条' }).getAttribute('aria-pressed')).toBe('true')
   })
 
   // ────────────────────────────────────────────────

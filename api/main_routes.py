@@ -75,6 +75,10 @@ class ProactiveConfigRequest(BaseModel):
     )
     llm_proactive_respect_quiet: bool | None = Field(default=None, description="是否将免打扰时段写入 prompt 供 LLM 遵守")
     llm_proactive_character_hint: str | None = Field(default=None, max_length=200, description="角色补充提示")
+    llm_proactive_jitter_seconds: int | None = Field(
+        default=None, ge=0, le=900,
+        description="主动等待窗随机抖动上限（秒）；0=关闭（T-4 仿真人机制）",
+    )
 
 class ToolToggleRequest(BaseModel):
     enabled: bool

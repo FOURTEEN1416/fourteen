@@ -133,7 +133,7 @@ describe('humanizeDiff / humanizeIsDirty', () => {
   it('快照损坏不炸：按无基线处理，增量含全部可写键', () => {
     const diff = humanizeDiff(DEFAULT_HUMANIZE_CONFIG, '{不是 JSON')
     expect(Object.keys(diff).sort()).toEqual(
-      ['bracket_delay_ms', 'delay_floor_ms', 'delay_ceil_ms', 'delay_mode', 'fixed_ms', 'per_char_ms', 'proactive_split', 'random_max_ms', 'random_min_ms'].sort(),
+      ['bracket_delay_ms', 'delay_floor_ms', 'delay_ceil_ms', 'delay_mode', 'fixed_ms', 'per_char_ms', 'proactive_split', 'random_max_ms', 'random_min_ms', 'read_delay_enabled', 'read_delay_min_ms', 'read_delay_max_ms', 'read_delay_chars_per_second', 'read_delay_max_total_ms', 'read_delay_channel_cap_ms', 'typing_enabled', 'typo_rate', 'user_override_enabled', 'max_segments'].sort(),
     )
   })
 })
