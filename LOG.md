@@ -4024,3 +4024,12 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **humanize 面板新增**：拆条上限 2/3/4 选择器；阅读延迟开关 + 下界/上界/阅读速度/总上限/无 typing 封顶；typing 开关；沉浸式口误概率（0=关）；按用户覆盖总开关；**按用户覆盖作用域**（输入完整会话键 → 加载该用户合并视图 / 保存只写该用户覆盖 / 清除覆盖，对应 GET `?user_key`、POST `user_key`、DELETE）。
 - **主动配置面板新增**：「等待窗抖动（秒）」（0=关闭）；后端 `ProactiveConfigRequest.llm_proactive_jitter_seconds`（0–900）→ `llm_proactive.jitter_seconds`，与 T-4 调度读取键**同名同源**（防 R7 类键漂移）。
 - **验证**：前端 **217/217** + `tsc --noEmit` 0；后端 **3988 收集 / 3982 通过 + 2 跳过 / 4 既有失败**（同前，未新增）；ruff 0。**未部署**。
+
+
+## 2026-10-27 话题状态机·设计与研判批（用户裁决「架构级的改变，先设计和研判」）· 纯文档零代码 · 待拍板
+
+- **现状取证**（代码实况）：锚点提取 `utils/prompt_sanitize.py:308`、`当前话题` 下传 `orchestrator/optimized_orchestrator.py:1311-1358`、注入 `shisi/application/persona_service.py:209-218`、硬指令 `TOPIC_CONTINUITY_RULE:545-553`；**无 topic_id/生命周期/parked/closed**，每轮从 24h 滑动窗重算；主动线 `llm_proactive.py:707` 只带最近消息。生产证据见 LOG 10-16/10-19/10-20/10-21 各批（旧话题「吃饭」误注入、`['的话','哈喽']` 噪声、硬指令互相竞争）。
+- **行业研判**：DSH Tavern（前台正文/后台结算变量、固定模板状态栏，`github.com/flizzywine/dsh-tavern`）、Letta memory blocks（常驻结构化状态块，`docs.letta.com`）、Graphiti（时序有效期/失效不删）、TextTiling（Hearst 1997 词汇相似度骤降=话题边界）、DST（`arXiv 2405.13037`/Awesome-DST）、EvolvConv（动态话题演化）、爱语逆向（注入槽有「最近话题」但**无状态机**）。结论：状态与正文分离结算 + 结构化状态注入，而非再加 prompt 规则。
+- **方案**：A 仅 prompt 强化 ❌（v1.54 教训）；**B 确定性状态（一期）**；**C B+稀疏 LLM 判定（二期目标，推荐）**；D 图 DB/第二记忆库 ❌（memory_ext 教训）。
+- **推荐架构**：`topic_state` 表（单 active + parked 栈 + closed 30 天 TTL，只存摘要/≤3 锚点不存全文）；`after_chat` 后台线程更新（**零新增首字延迟**，本轮注入用 pre-turn 状态）；状态块 ≤120 字替代「至少 2~3 轮」硬指令；主动线 parked 复提三重闸（≥6h + judge + 非静默）；`scheduler_config.json` 热读开关/预算/阈值；日志 `[topic_state][step=…]` 不落原文；4 批实施、每批可回滚；测试含状态机表驱动/隔离/容错/prompt A/B/黄金集/突变验红。
+- **交付**：`docs/reports/2026-10-27-话题状态机设计与研判.md`；P1_BACKLOG 登记 **TOPIC-1**（待拍板）。**纯文档零代码、未部署**；用户裁决 Q1–Q6 后才进入实施。
