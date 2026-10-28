@@ -509,6 +509,8 @@ def test_tick_dry_run_does_not_roll(dice_cfg_path, tmp_path, monkeypatch):
 
 
 def test_tick_quiet_hours_short_circuits_before_gate(dice_cfg_path, tmp_path, monkeypatch):
+    from utils.local_time import now_local
+
     _enable(dice_cfg_path, enabled=True, dry_run=False)
     eng = _engine(tmp_path, rng_value=0.99)
     calls: list[str] = []
@@ -517,7 +519,7 @@ def test_tick_quiet_hours_short_circuits_before_gate(dice_cfg_path, tmp_path, mo
         lambda **kw: calls.append(kw.get("requested_mode")) or (True, None),
         raising=False,
     )
-    h = datetime.now().hour
+    h = now_local().hour
     eng.set_quiet_hours(h, (h + 1) % 24)
 
     assert eng.tick(1.0, dry_run=False) is None
@@ -649,7 +651,9 @@ def _no_quiet(sched) -> None:
     取 ``((h+1) % 24, (h+2) % 24)``：覆盖**下一个小时**这一小时，
     当前小时必然不在其内。已对 24 个小时逐一穷举验证（均判非静默）。
     """
-    h = datetime.now().hour
+    from utils.local_time import now_local
+
+    h = now_local().hour
     sched._quiet_hours = ((h + 1) % 24, (h + 2) % 24)
 
 
