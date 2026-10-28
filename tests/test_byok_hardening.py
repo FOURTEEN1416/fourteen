@@ -31,12 +31,34 @@ from llm_provider.multi_provider_gateway import MultiProviderGateway
 
 UK = 998001  # 探针用用户 id（不落库，仅构造内存网关）
 
+# 合成 DNS 用的公网地址（example.com 的历史 A 记录；只要 is_private/is_reserved
+# 全为假即可，不参与任何网络请求）。
+_PUBLIC_IP = "93.184.216.34"
+
 
 def _cfg(**kw):
     base = {"provider": "custom", "api_key": "sk-u", "model": "m",
             "api_base": "https://api.example.com/v1"}
     base.update(kw)
     return base
+
+
+def _fake_dns(monkeypatch, host_ip: str = _PUBLIC_IP):
+    """合成 DNS：把任意主机名解析到给定地址，测试不依赖本机真实解析结果。
+
+    放行面用例必须在**确定性**的公网解析结果下跑：本机（及大量开发/CI 环境）
+    装了 fake-IP 模式的代理（Clash/Surge 等把域名解析到 198.18.0.0/15 或
+    fc00::/7），而 ``tools/url_guard._ip_is_blocked`` 会按 ``ip.is_private``
+    判为内网并拒绝——守卫本身工作正常，是测试误把「本机网络环境」当成了
+    「产品行为」。守卫在调用点取 ``socket.getaddrinfo``，patch 该模块命名
+    空间即全局生效（与 tests/test_character_crawler.py 同一手法）。
+    """
+    import socket as _socket
+
+    def fake(host, port, *a, **kw):
+        return [(2, 1, 6, "", (host_ip, port or 80))]
+
+    monkeypatch.setattr(_socket, "getaddrinfo", fake)
 
 
 # ── H1 SSRF：用户 api_base 必须指向公网 ──────────────────────────
@@ -55,8 +77,13 @@ def test_user_api_base_blocks_internal_and_bad_scheme(bad_base):
         get_user_llm(UK, _cfg(api_base=bad_base))
 
 
-def test_user_api_base_allows_public():
-    """放行面：真实可解析的公网端点（用生产在用的 agnes 端点，不依赖测试期 DNS 随机性）。"""
+def test_user_api_base_allows_public(monkeypatch):
+    """放行面：真实可解析的公网端点（agnes 生产端点 + 合成 DNS）。
+
+    合成 DNS 见 ``_fake_dns``：本机 fake-IP 代理会把域名解析到 198.18.0.0/15，
+    那不是被测行为，必须固定成公网地址才能测「守卫对公网放行」。
+    """
+    _fake_dns(monkeypatch)
     gw = get_user_llm(UK, _cfg(api_base="https://apihub.agnes-ai.com/v1"))
     assert gw is not None
 
@@ -139,8 +166,14 @@ def test_user_gateway_has_no_platform_env():
         os.environ.update(saved)
 
 
-def test_max_tokens_clamped_for_user_backend():
-    """红队 3b：用户提交 10^9 级 max_tokens 必须钳到 32768 上界。"""
+def test_max_tokens_clamped_for_user_backend(monkeypatch):
+    """红队 3b：用户提交 10^9 级 max_tokens 必须钳到 32768 上界。
+
+    同 ``test_user_api_base_allows_public``：SSRF 校验在钳制之前（
+    ``llm_provider/__init__.py:71-79``），DNS 不放行就永远到不了钳制逻辑，
+    故这里同样用合成 DNS 固定公网解析。
+    """
+    _fake_dns(monkeypatch)
     backend = _build_backend(
         "custom",
         {"api_key": "k", "api_base": "https://apihub.agnes-ai.com/v1",

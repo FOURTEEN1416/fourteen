@@ -467,7 +467,18 @@ async def test_owner_still_accesses_own_character(w1_app):
 
 
 async def test_unowned_legacy_card_not_auto_claimed(w1_app):
-    """存量无主卡（user_id=default）：普通用户不可见不可改，访问后归属不变。"""
+    """存量无主卡（user_id=default）= 公共池：可读可激活，不可改不可删，且不被认领。
+
+    语义依据（2026-10-27 公共池改造，产品侧既有裁决，非本用例新立）：
+    ``card_owner_key`` 把 ``""/default/system`` 视作平台公共卡 →
+    ``card_access_allowed`` 对任意登录用户放行**读**（列表/详情/激活），
+    ``card_write_allowed`` 仍只放行本人私有卡与管理员（PUT/DELETE → 404）。
+    产品意图：41 张成品卡不能让新注册用户进控制台只看到自己那 1 张。
+
+    本用例守的不变量是 **no-auto-claim**——访问不会把卡归属改写给首个访问者
+    （旧实现把全局 `is_active` 当个人选择，首个访问者即「继承」）。读可见性
+    断言按公共池口径更新；写侧 404 与归属不变是硬约束。
+    """
     client, engine, session_factory, chars_dir = w1_app
     legacy = {
         "id": "legacy01",
@@ -481,18 +492,26 @@ async def test_unowned_legacy_card_not_auto_claimed(w1_app):
 
     bob_auth = {"Authorization": f"Bearer {(await _login(client, 'bob'))['access_token']}"}
     r = await client.get("/api/characters", headers=bob_auth)
+    assert r.status_code == 200
     ids = [c["id"] for c in r.json()["characters"]]
-    assert "legacy01" not in ids, "无主存量卡不得进入普通用户列表"
+    assert "legacy01" in ids, "公共池无主卡必须进入登录用户列表（2026-10-27 公共池改造）"
 
     r = await client.get("/api/characters/legacy01", headers=bob_auth)
-    assert r.status_code == 404
+    assert r.status_code == 200, f"公共池卡必须可读，实得 {r.status_code}"
+
+    # 写侧仍收口：普通用户不得改/删公共卡（与「不存在」同文案 404，防状态码枚举）
     r = await client.put("/api/characters/legacy01", json={"name": "x"}, headers=bob_auth)
-    assert r.status_code == 404
+    assert r.status_code == 404, f"公共卡对普通用户只读：PUT 必须 404，实得 {r.status_code}"
+    r = await client.delete("/api/characters/legacy01", headers=bob_auth)
+    assert r.status_code == 404, f"公共卡对普通用户只读：DELETE 必须 404，实得 {r.status_code}"
+
+    # 激活是个人选择：只写 user_active_characters，不改卡文件（D2 per-user 语义）
     r = await client.post("/api/characters/legacy01/activate", headers=bob_auth)
-    assert r.status_code == 404
+    assert r.status_code == 200, f"公共池卡必须可激活，实得 {r.status_code}: {r.text[:200]}"
 
     after = json.loads((chars_dir / "legacy01.json").read_text(encoding="utf-8"))
     assert after["user_id"] == "default", "访问不得自动把存量卡归属给首个访问者"
+    assert after["is_active"] is False, "个人激活不得改写卡片全局 is_active"
 
     # admin 仍可管理存量卡
     admin_auth = {"Authorization": f"Bearer {(await _login(client, 'admin'))['access_token']}"}

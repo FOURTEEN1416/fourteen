@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from api.auth import verify_api_key_dep
 from api.auth_jwt import AuthPrincipal, get_optional_principal
 from api.deps import deps
-from api.routers.character_routes import require_character_access
+from api.routers.character_routes import require_character_access, require_character_write
 
 logger = logging.getLogger("api.memory_routes")
 
@@ -95,19 +95,25 @@ async def forward_favorite(
 ):
     """跨角色转发：生成可追溯目标侧派生记录（缺陷 F 恢复）。
 
-    目标卡归属与源卡同口径收口（PRIV-2）：有 Bearer 主体时，目标卡不存在 /
-    无权一律 404（复用 require_character_access 同文案防枚举）；公共目标卡
-    （owner 为空）按 card_access_allowed 同一判定，不特判；机器面（无 Bearer）
-    不收窄。context 已挂载 `forwarded_notes`（含 forward_id/from 可追溯字段）；
+    目标卡归属收口（PRIV-2）：有 Bearer 主体时，目标卡不存在 / 无权一律 404
+    （复用 character_routes 同文案防枚举）；机器面（无 Bearer）不收窄。
+    context 已挂载 `forwarded_notes`（含 forward_id/from 可追溯字段）；
     ⚠️ prompt 渲染层尚未消费——接线前不得按「已进 prompt」的假设消费该字段。
     返回真实回执。
+
+    2026-10-27 公共池后**目标侧改用写权限**（`require_character_write`）：
+    `memory_forwards` 无 owner 列、按 `to_character` 全局读取（并已挂进目标角色
+    context），因此「写入目标卡的便签表」是**写操作**而非读操作——公共卡对普通
+    用户只读（`card_write_allowed`），viewer 向其转发必须 404 且零落库；本人
+    私有卡与管理员照常放行。若改用读权限，任何登录用户都能把内容塞进全体用户
+    共享的角色上下文（PRIV-2 跨用户写入面回归）。
     """
     fwd_mgr = getattr(deps.shisi_reg, "forward_manager", None)
     if fwd_mgr is None:
         raise HTTPException(status_code=503, detail="转发管理器未初始化")
-    # PRIV-2：目标卡与源卡同一 owner、同一口径——机器面（principal None）不干预；
-    # 有主体时目标不存在/无权一律 404（同文案防枚举），杜绝向他人私人卡直写便签。
-    await require_character_access(req.to_character, principal)
+    # PRIV-2：目标卡写权限校验——机器面（principal None）不干预；
+    # 有主体时目标不存在/无权一律 404（同文案防枚举），杜绝向他人私人卡/公共卡直写便签。
+    await require_character_write(req.to_character, principal)
     receipt = fwd_mgr.forward_receipt(
         character_id, req.to_character, req.memory_id, req.content
     )

@@ -6,10 +6,14 @@
 任意 ≤300 字内容；该表已被 ``retrieve_context`` 挂进目标角色 context
 （``forwarded_notes``），prompt 渲染层一旦接线即成跨用户存储型注入。
 
-修复契约（与 ``character_routes.require_character_access`` /
-``card_access_allowed`` 同一 owner、同一口径）：
+修复契约（与 ``character_routes`` 同一 owner、同一口径）：
 1. 有 Bearer 主体时：目标卡不存在 / 无权一律 404（同文案防枚举）；
-2. 公共目标卡（owner 为空）与源卡同口径（card_access_allowed 判定，不特判）；
+2. 目标侧校验**写权限**（``require_character_write`` / ``card_write_allowed``）：
+   本人私有卡与管理员放行；他人私人卡与**公共卡（owner 为空）**对普通用户
+   一律 404 零落库。2026-10-27 公共池改造后公共卡「对登录用户可读」，但
+   ``memory_forwards`` 无 owner 列、按 ``to_character`` 全局读取并挂进目标角色
+   context，写入它是写操作，必须按写权限收口（读权限收口会让 viewer 向全体
+   用户共享的角色上下文写入 = PRIV-2 回归）；
 3. 机器面（无 Bearer）不收窄——与 W1 归属体系机器面契约一致；
 4. ``retrieve_context`` 的 forwarded_notes 挂载行为不回归（storage→context
    链不动）；ForwardManager 保持纯存储（仅 to_character 非空纵深，不引入认证）。
@@ -74,10 +78,15 @@ def _count_rows(db_path) -> int:
 
 
 def _make_client(monkeypatch, tmp_path, principal: AuthPrincipal | None):
-    """统一 API 面夹具：tmp 卡目录 + tmp 转发库 + 指定主体（None=机器面）。
+    """统一 API 面夹具：tmp 卡目录 + tmp 转发/收藏库 + 指定主体（None=机器面）。
 
-    ``require_character_access`` **不 override**——源卡与目标卡都走 W1 真实
-    归属链（get_optional_principal 被 override 后源/目标拿到同一主体）。
+    ``require_character_access`` / ``require_character_write`` **不 override**——
+    源卡与目标卡都走 W1 真实归属链（get_optional_principal 被 override 后源/目标
+    拿到同一主体）。
+
+    收藏管理器是读面替身：本文件只验证归属策略，收藏存储不是被测对象；早期夹具
+    没挂 ``favorite_manager``，GET favorites 直接 503，把「归属判定」的对照断言
+    变成了「管理器缺失」的假对照（2026-10-28 修）。
     """
     chars_dir = tmp_path / "config" / "characters"
     chars_dir.mkdir(parents=True)
@@ -85,8 +94,13 @@ def _make_client(monkeypatch, tmp_path, principal: AuthPrincipal | None):
 
     monkeypatch.setattr(char_routes, "CHARACTERS_DIR", chars_dir)
 
+    class _FavMgr:
+        def list_favorites(self, character_id: str):
+            return []
+
     class _Reg:
         forward_manager = ForwardManager(db_path=fwd_db)
+        favorite_manager = _FavMgr()
 
     monkeypatch.setattr(unified.deps, "shisi_reg", _Reg(), raising=True)
 
@@ -132,19 +146,28 @@ def test_forward_to_nonexistent_card_404(tmp_path, monkeypatch):
     assert _count_rows(fwd_db) == 0, "目标不存在不得落死行"
 
 
-def test_viewer_forward_to_public_card_same_policy_as_source(tmp_path, monkeypatch):
-    """公共目标卡（owner 空）与源卡同口径：viewer 无权（对照 GET favorites 404）。"""
+def test_viewer_forward_to_public_card_denied_by_write_guard(tmp_path, monkeypatch):
+    """公共目标卡（owner 空）：viewer 可读不可写 → 转发 404 且零落库。
+
+    2026-10-27 公共池后，公共卡对登录用户**读**放行（GET favorites 200），
+    但 ``memory_forwards`` 是按 to_character 全局读取的共享表（已挂进目标角色
+    context），写入必须按**写权限**收口，否则 viewer 能把内容塞进全体用户
+    共享的角色上下文（PRIV-2 跨用户写入面回归）。
+    """
     client, chars_dir, fwd_db = _make_client(monkeypatch, tmp_path, _principal(2, "viewer"))
     _write_card(chars_dir, "mine_a", "2")
     _write_card(chars_dir, "public_c", "default")
     ref = client.get("/api/characters/public_c/favorites")
-    assert ref.status_code == 404, "对照：源卡口径下 viewer 访问公共卡本就 404"
+    assert ref.status_code == 200, f"公共池卡读面必须放行，实得 {ref.status_code}: {ref.text[:200]}"
     resp = client.post(
         "/api/characters/mine_a/favorites/forward",
         json={"to_character": "public_c", "memory_id": "m1", "content": "x"},
     )
-    assert resp.status_code == ref.status_code, "目标卡必须与源卡同口径，不得特判放行"
-    assert _count_rows(fwd_db) == 0
+    assert resp.status_code == 404, (
+        f"公共卡写侧必须与读侧分离（viewer 转发应 404），实得 {resp.status_code}: {resp.text[:200]}"
+    )
+    assert resp.json()["detail"] == "角色不存在: public_c", "必须与 W1 同文案防状态码枚举"
+    assert _count_rows(fwd_db) == 0, "拦截必须发生在落库之前（零写入）"
 
 
 # ── 语义不变量（修复前后都必须绿，防误伤）────────────────
