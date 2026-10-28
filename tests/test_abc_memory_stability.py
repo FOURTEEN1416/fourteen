@@ -211,5 +211,7 @@ class TestSyncHistoryBa:
         from orchestrator.optimized_orchestrator import OptimizedOrchestrator
         src = inspect.getsource(OptimizedOrchestrator._after_process)
         assert "write_chat_history_sync" in src
-        assert src.index("write_chat_history_sync") < src.index("submit(copy_context().run, _safe_after_chat")
+        assert src.index("write_chat_history_sync") < src.index(
+            "copy_context().run, _safe_topic_then_after_chat"
+        )
         assert "history_already_written" in src

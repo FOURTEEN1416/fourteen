@@ -225,6 +225,7 @@ MEMORY_SLOT_PRIORITY: tuple[str, ...] = (
     "facts",
     "user_facts",
     "relationship_facts",
+    "topic_state_text",  # 2026-10-27 话题状态机：≤160 字，参与 memory_chars_max 扣减
     "reflections",
     "episodic",
     "session_tail",

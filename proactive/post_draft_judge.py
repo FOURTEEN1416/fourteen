@@ -35,6 +35,8 @@ JUDGE_SYSTEM = """你是主动消息发出前的**审稿人**。只判断这条�
 1. 空泛问候 / 零信息：「在吗」「吃了吗」「今天怎么样」且没有任何具体由头；
 2. 打卡式嘱咐：按点提醒吃饭/睡觉/喝水，与刚刚的对话无关；
 3. 与最近对话无关、突兀另起一个不相关的话题；
+   例外：候选明确承接【更早聊过的话题】且衔接自然 → 不算无关；
+   只是生硬翻旧账（「上次那个事」式空指）→ 仍 drop；
 4. 编造共同经历、承诺或对方没说过的事；
 5. 客服腔 / 模板腔 / 身份声明（「作为 AI」「我能为你做什么」）。
 
@@ -73,10 +75,15 @@ def build_judge_prompt(
     *,
     recent: list[str] | None = None,
     quiet_hours: Any | None = None,
+    topic_context: str = "",
 ) -> str:
     """构造 judge 输入：候选正文 + 最近对话摘要 + 当前时间/静默状态。
 
     不输入完整人设——避免 judge 变成第二作者（设计 §3.4 明确要求）。
+
+    ``topic_context``：parked 复提时「更早聊过的话题」摘要（2026-10-27 话题
+    状态机 Q3）。它不在最近对话里，规则 3 必须显式给它例外；为空时行为与
+    旧版逐字一致。
     """
     from utils.local_time import now_local
 
@@ -89,6 +96,11 @@ def build_judge_prompt(
             text = str(row or "").strip()
             if text:
                 lines.append(f"- {text}")
+    if topic_context:
+        lines.append(
+            "更早聊过的话题（不是刚刚说的；候选只有明确承接它时才算有关联）："
+            + topic_context
+        )
     lines.append("候选主动消息：")
     lines.append(str(message or ""))
     lines.append('只输出 JSON：{"allow": true/false, "reason": "..."}')
@@ -118,21 +130,29 @@ def judge_proactive_message(
     recent: list[str] | None = None,
     quiet_hours: Any | None = None,
     session_key: str = "",
+    topic_context: str = "",
 ) -> JudgeVerdict:
     """主动消息终审（同步，供 scheduler 的投递线程调用）。
 
     - 开关关闭 → 放行（回滚路径，零成本）；
-    - ``llm is None`` → 放行：这是**部署态未配置**，不是 judge 判定失败；
-      fail-closed 只覆盖「judge 被调用后失败/超时/不可解析」；
+    - ``llm is None`` → **普通主动消息**放行：这是部署态未配置，不是 judge
+      判定失败；fail-closed 只覆盖「judge 被调用后失败/超时/不可解析」。
+    - **parked 复提**（``topic_context`` 非空）且有候选时 LLM 为空 → **drop**：
+      Q3 的第三闸是「judge allow」，没有可调用的 judge 就不存在 allow；
+      不能沿用 ``judge_not_configured`` 的放行语义绕过裁决。
     - 其余任何异常 → **drop**（fail-closed，见模块 docstring）。
     """
     enabled, timeout = read_judge_config()
     if not enabled:
         return JudgeVerdict(True, "judge_disabled")
     if llm is None:
+        if topic_context:
+            return JudgeVerdict(False, "judge_not_configured_for_topic_recall")
         return JudgeVerdict(True, "judge_not_configured")
 
-    prompt = build_judge_prompt(message, recent=recent, quiet_hours=quiet_hours)
+    prompt = build_judge_prompt(
+        message, recent=recent, quiet_hours=quiet_hours, topic_context=topic_context,
+    )
     try:
         from proactive.llm_proactive import _llm_chat_sync
 

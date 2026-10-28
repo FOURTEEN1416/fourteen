@@ -1,15 +1,15 @@
 # P1 Backlog — 唯一的你
 
-**Updated**: 2026-10-11（SEC-15 根治销账：vitest ^3→^5.0.3 + FE-2 双锁收敛，commit `aea3cd0`、CI run 38109894676 全绿 9/9——见下方第 20 条销账标注；本文件只载真实未决项，历史处置记录见 git 历史与 `LOG.md`）
+**Updated**: 2026-10-28（TOPIC-1 话题状态机已实施待部署：Q1–Q6 全量落地，详见 `LOG.md` 2026-10-27 实施批；本文件只载真实未决项，历史处置记录见 git 历史与 `LOG.md`）
 
-## 产品决策（待默默拍板）
+## 产品决策（待默默拍板；TOPIC-1 已实施待部署）
 
 1. **[MM-V3] 表情识别（人脸）**：真空缺——`multimodal/` 仅通用视觉（VisionHandler 走 LLM `image_url`），非表情识别模型。需调研+选型；敏感生物特征，本地优先、不落盘原图。
 2. **[MM-V4] 语音声学情绪**：真空缺——`voice/` 全是 TTS，ASRHandler 只取文本，声学信息被丢。需调研+选型。
 3. **[Q4] 生物特征采集是否启用**：合规方向已调研（端侧只出特征、不上传原图），产品内启用与否归默默裁决。
 4. **[OBS-2] 明文 HTTP（已裁决接受）**：2026-10-04 D13 裁决（DECISION_LEDGER）：生产维持裸 IP HTTP，不上 TLS，明文传输风险已知悉接受（微信扫码产品形态）。 nginx 模板已保留 certbot 升级路径与 X-Forwarded-Proto 头，若未来绑定域名可按注释直接启用；HSTS 仍严禁在纯 HTTP 下开启。
 5. **[P1-11] GitHub 仓库名**：`FOURTEEN1416/fourteen.git` vs 项目名 `ai-girlfriend`，可选改名，需默默决策。
-6. **[TOPIC-1] 话题状态机（架构级，设计+研判完成待拍板）**：现状只有 24h 用户原话锚点注入 + 「2~3 轮守话题」硬指令，**无跨轮话题状态**（无 topic_id/生命周期/收尾/复提）。设计与研判（现状取证、DSH Tavern 前后台分离 / Letta 状态块 / TextTiling / DST / 爱语对照、B→C 两阶段方案、成本与测试计划、Q1–Q6 选择题）见 `docs/reports/2026-10-27-话题状态机设计与研判.md`。**未实施，待默默拍板。**
+6. **[TOPIC-1] 话题状态机（已实施待部署）**：Q1–Q6 已裁决并全量落地——Q1-B 确定性状态机 + 每 4 轮稀疏 LLM（8s 硬超时、失败保留原状态）/ Q2 B+C 状态块 + 软化接续 / Q3-A parked 复提三重闸（≥6h + 非静默 + judge allow，closed 永不主动复提）/ Q4-B 全部状态 7 天 TTL / Q5 免费 API 不设每日 LLM 上限 / Q6-B 多 active 并行上限 3。落地：`utils/topic_state.py`（三表六 API）+ `proactive/topic_recall.py`（复提候选）+ 主链状态块 + 主动 `topic_plan` + 管理端三端点/前端「话题状态」区。实施结果见 `docs/reports/2026-10-27-话题状态机实施计划.md` §18。**测试 4,180 收集 / 4,174 通过 + 2 跳过 / 4 失败（既有）；前端 251/251；ruff 0；未部署；**默认开启**，回滚走管理端显式 `topic_state.enabled=false` / `llm_judge_enabled=false`）。
 
 ## 安全升级遗留（2026-10-04 P0 批后登记，来源=两轮攻击面审计 81 条发现中未入 P0 批的 confirmed 项）
 

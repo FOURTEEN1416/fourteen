@@ -186,6 +186,7 @@ class PersonaService:
             MEMORY_USAGE_RULE,
             ROLE_CLARITY_RULE,
             TOPIC_CONTINUITY_RULE,
+            TOPIC_CONTINUITY_RULE_SOFT,
             USER_IDENTITY_RULE,
             sanitize_episodic,
             sanitize_fact_list,
@@ -335,8 +336,21 @@ class PersonaService:
         injection_parts.append(
             capability_block(True if _memory_recall is None else bool(_memory_recall)).strip()
         )
-        # 话题续聊：像人一样接着聊，不跳题、不自问自答
-        injection_parts.append(TOPIC_CONTINUITY_RULE.strip())
+        # 话题续聊（2026-10-27 话题状态机 Q2 B+C）：
+        # 有动态状态块 → untrusted 数据块 + 软化接续规则；
+        # 无状态/关闭 → 旧 `TOPIC_CONTINUITY_RULE` **逐字不变**（回滚口径）。
+        _topic_state_text = ""
+        if isinstance(mem_ctx, dict):
+            _topic_state_text = str(mem_ctx.get("topic_state_text") or "").strip()
+        if _topic_state_text:
+            injection_parts.append(
+                '<context trust="untrusted" source="topic_state">\n'
+                + _topic_state_text
+                + "\n</context>"
+            )
+            injection_parts.append(TOPIC_CONTINUITY_RULE_SOFT.strip())
+        else:
+            injection_parts.append(TOPIC_CONTINUITY_RULE.strip())
         # 微信表情守则（2026-10-14 表情镜像事故：能力保留，禁复读、要恰到好处）
         injection_parts.append(EMOJI_USE_RULE.strip())
 

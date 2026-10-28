@@ -4,7 +4,7 @@ import logging
 import os
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger("main_routes")
 
@@ -82,6 +82,32 @@ class ProactiveConfigRequest(BaseModel):
 
 class ToolToggleRequest(BaseModel):
     enabled: bool
+
+
+class TopicStateConfigRequest(BaseModel):
+    """话题状态机配置的 partial merge 入参（2026-10-27 实施计划 §9.1）。
+
+    11 个配置键全部显式建模，**不存在**“管理端改不到、代码里却生效”的隐藏
+    硬编码；其中 Q1/Q4/Q5/Q6 的裁决固化项用 ``ge=le`` 锁死（judge_every_turns=4、
+    retention_days=7、daily_llm_budget=0、park_idle_hours=6），越界一律 422。
+    ``switch_theta2 < switch_theta1`` 的跨字段校验在
+    ``utils.topic_state.write_topic_config`` 合并后执行，返回 400（允许只传一个
+    theta，按当前另一值比较）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = Field(default=None, description="话题状态机总开关")
+    llm_judge_enabled: bool | None = Field(default=None, description="稀疏 LLM 判定开关（每 4 轮一次）")
+    judge_every_turns: int | None = Field(default=None, ge=4, le=4, description="Q1 固化：每 4 轮判定一次")
+    daily_llm_budget: int | None = Field(default=None, ge=0, le=0, description="Q5 固化：0=不设每日 LLM 上限")
+    active_cap: int | None = Field(default=None, ge=1, le=3, description="Q6：并行 active 上限 1..3")
+    retention_days: int | None = Field(default=None, ge=7, le=7, description="Q4 固化：全部状态保留 7 天")
+    recall_after_hours: int | None = Field(default=None, ge=6, le=168, description="Q3：parked 复提间隔下限 6 小时")
+    recall_max: int | None = Field(default=None, ge=1, le=2, description="Q3：单次最多复提 2 条")
+    park_idle_hours: int | None = Field(default=None, ge=6, le=6, description="状态机固化：6 小时无活动转 parked")
+    switch_theta1: float | None = Field(default=None, ge=0.0, le=1.0, description="接续判定阈值 θ1")
+    switch_theta2: float | None = Field(default=None, ge=0.0, le=1.0, description="复提判定阈值 θ2（不得小于 θ1）")
 
 # \u2014\u2014 \u8f93\u52a9\u51fd\u6570 \u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014
 

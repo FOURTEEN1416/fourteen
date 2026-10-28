@@ -23,6 +23,7 @@ import { adminListUsers } from '../../api/admin'
 import { useAuthStore } from '../../store/authStore'
 import Section from './RoleSettingsSection'
 import HumanizeSection from './HumanizeSection'
+import TopicStateSection from './TopicStateSection'
 import KnowledgePreview from '../storyline/KnowledgePreview'
 
 // ═══ Tab: Basic ═══
@@ -997,6 +998,11 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
           （与 reply_mode 同一份跨 worker 配置），写入 POST /api/humanize/config。
           admin 门禁在 HumanizeSection 内自带（与 MessageTab 同口径）。 */}
       <HumanizeSection />
+
+      {/* 话题状态（2026-10-27 实施计划）：配置热读写 + 按会话只读快照。
+          真源是 data/scheduler_config.json 的 topic_state 块；admin 门禁在
+          TopicStateSection 内自带（与 MessageTab 同口径）。 */}
+      <TopicStateSection />
 
       {/* W11-D4：手动发送已从角色页**移除**。
           旧实现「立即发送一条主动消息」调用不带 session_key 的全局接口 ——

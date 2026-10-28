@@ -105,6 +105,26 @@ export function clearHumanizeUserOverride(userKey: string) {
   return client.delete('/humanize/config', { params: { user_key: userKey } })
 }
 
+// ── 话题状态机（管理端只读快照 + 配置热读写） ──
+// 真源 = data/scheduler_config.json 的 `topic_state` 块；后端
+// api/routers/topic_routes.py 的三个端点（admin 门，无 503）：
+//   GET  /api/topic-state/config
+//   POST /api/topic-state/config  （partial merge）
+//   GET  /api/topic-state/{session_key}?character_id=...
+import type { TopicStateConfigPayload } from '../store/topicStateStore'
+
+export function topicStateGetConfig() {
+  return client.get('/topic-state/config')
+}
+export function updateTopicStateConfig(cfg: TopicStateConfigPayload) {
+  return client.post('/topic-state/config', cfg)
+}
+export function topicStateSnapshot(sessionKey: string, characterId = 'default') {
+  return client.get(`/topic-state/${encodeURIComponent(sessionKey)}`, {
+    params: { character_id: characterId },
+  })
+}
+
 export function agentPlaneReplay(sessionKey: string, turnId?: string, replyId?: string) {
   return client.get('/agent-plane/replay', { params: { session_key: sessionKey, turn_id: turnId || '', reply_id: replyId || '' } })
 }

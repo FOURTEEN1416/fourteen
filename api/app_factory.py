@@ -31,6 +31,7 @@ from api.routers.misc_routes import router as misc_router
 from api.routers.personality_routes import router as personality_router
 from api.routers.safety_routes import router as safety_router
 from api.routers.tools_routes import router as tools_router
+from api.routers.topic_routes import router as topic_state_router
 from api.routers.training_routes import router as training_router
 from api.routers.users_routes import router as users_router
 from api.runtime_config import (
@@ -269,6 +270,7 @@ def create_api_app(
     app.include_router(tools_router)        #  6 端点: tools/* + plugins/*
     app.include_router(safety_router)       # 12 端点: safety/rag/voice/files/cache
     app.include_router(clone_router)        #  8 端点: clone/*
+    app.include_router(topic_state_router)  #  3 端点: topic-state/config + 快照
     try:
         from api.routers.agent_plane_routes import router as agent_plane_router
 
@@ -276,7 +278,7 @@ def create_api_app(
         logger.info("Agent Plane 路由已挂载 (/api/agent-plane/*)")
     except Exception as e:  # noqa: BLE001
         logger.warning("Agent Plane 路由挂载失败: %s", e)
-    logger.info("主路由已拆分为 8 个子路由 (83 端点)")
+    logger.info("主路由已挂载（8 个子路由 + topic-state）")
 
     # ── 用户认证 API ──
     # 2026-08-31：去 try 静默吞——认证路由消失=登录全挂，必须 fail-fast 而非降级

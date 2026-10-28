@@ -176,6 +176,30 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # 话题状态机（2026-10-27 Task 1）：默认库是宿主 data/sqlite.db、配置是
+    # scheduler_config.json；任何测试直接调用 topic_state 都必须走沙箱，
+    # 否则会写真实库（与上方 2026-09-22 块E 事故同型防线）。
+    try:
+        from utils import topic_state as _ts
+
+        monkeypatch.setattr(_ts, "_DB_PATH", sandbox / "topic_state.db", raising=False)
+        monkeypatch.setattr(
+            _ts, "_CONFIG_PATH", sandbox / "scheduler_config.json", raising=False,
+        )
+    except Exception:
+        pass
+
+    # 主动 parked 复提的 judge 读同一物理 scheduler_config.json；不重定向会让
+    # 测试随宿主 judge_enabled 漂移（2026-10-27 Task 1 Step 7 / 2026-10-28 复核）。
+    try:
+        from proactive import post_draft_judge as _pdj
+
+        monkeypatch.setattr(
+            _pdj, "_CONFIG_PATH", sandbox / "scheduler_config.json", raising=False,
+        )
+    except Exception:
+        pass
+
     # W3 控制面（outbox/desired/presence/幂等账，2026-09-27）：任何测试
     # 触发连接器/scheduler/提醒装配都不许写真实 data/runtime_plane.db
     # （与上方 scheduler_config 自伤事故同型防线）。

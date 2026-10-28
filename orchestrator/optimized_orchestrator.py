@@ -58,6 +58,29 @@ _SESSION_QUEUE_POLL = 0.2
 MEMORY_RETRIEVE_TIMEOUT_SECONDS = 10.0
 RAG_RETRIEVE_TIMEOUT_SECONDS = 10.0
 
+# ── 话题状态快照预算（2026-10-27 话题状态机）────────────────────────────
+# pre-turn 只读快照：内层 SQLite busy_timeout=50ms（utils.topic_state），
+# 外层 wait_for 200ms 硬上限。超时/缺表/库锁 → 空快照降级，绝不拖首字。
+TOPIC_SNAPSHOT_TIMEOUT_SECONDS = 0.2
+
+
+def _attach_topic_state(memory_context: Any, snapshot: Any) -> Any:
+    """把 topic snapshot 的 ``text`` 挂到 ``memory_context``（不改变其他键）。
+
+    纯函数，便于单测。非空字符串形态保持原样：``persona_service`` 只消费
+    dict 键 ``topic_state_text``，字符串本来就会被丢弃，不在本批扩大改动面。
+    """
+    text = str((snapshot or {}).get("text") or "").strip() if isinstance(snapshot, dict) else ""
+    if not text:
+        return memory_context
+    if isinstance(memory_context, dict):
+        out = dict(memory_context)
+        out["topic_state_text"] = text
+        return out
+    if not memory_context:
+        return {"topic_state_text": text}
+    return memory_context
+
 # ── 拟人节奏：supersede 序号（P0-B，2026-10-27）────────────────────────
 # 阅读延迟期间同一会话又来了新消息 → 旧回合静默取消（不再生成/发送），由
 # 新回合回答最新那条，避免「旧答案迟到 + 双回复」。序号是**进程内**的
@@ -265,6 +288,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         # 后台 task 引用集合（避免被 GC 回收，asyncio.create_task 文档要求）。
         # 必须为实例变量；若为类变量会导致多实例共享同一集合引发 race condition。
         self._background_tasks: set[Any] = set()
+        # 话题状态 judge 专用串行池（2026-10-27）：与 after_chat 池隔离，
+        # 8s 卡住时不堵塞后续会话的记忆后处理。
+        self._topic_judge_executor = None
         # 计数反诘模块：跟踪用户连续说"没事"等敷衍词的次数
         from my_character.counter_rebuttal import CounterRebuttal
         self._counter_rebuttal = CounterRebuttal()
@@ -297,12 +323,30 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             )
         return self._bg_executor
 
+    def _get_topic_judge_executor(self):
+        """话题 judge 专用单线程池（2026-10-27）。
+
+        与 `_bg_executor` 隔离：judge 8s 硬超时期间不占用 after_chat 串行队列，
+        后续会话的记忆后处理照常推进。
+        """
+        if self._topic_judge_executor is None:
+            import concurrent.futures
+            self._topic_judge_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="opt_topic_judge"
+            )
+        return self._topic_judge_executor
+
     def shutdown(self):
         """关闭 OptimizedOrchestrator 并释放资源。
 
         注意: 必须调用此方法以确保 ThreadPoolExecutor / 调度器正确关闭，
         避免程序退出时线程池或后台线程资源泄漏。
         """
+        # 话题 judge 池最先关（wait=False：不拖停机；进行中的 judge 由 8s 硬超时兜底）
+        if self._topic_judge_executor is not None:
+            self._topic_judge_executor.shutdown(wait=False)
+            self._topic_judge_executor = None
+
         scheduler = self.components.get("scheduler")
         if scheduler is not None and hasattr(scheduler, "stop"):
             try:
@@ -1101,12 +1145,30 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 timeout=RAG_RETRIEVE_TIMEOUT_SECONDS,
             )
 
+        # 话题状态快照（2026-10-27 话题状态机）：只读、与人格/情感/记忆/RAG
+        # 并行。内层 SQLite busy_timeout=50ms，外层 200ms 硬超时；关闭态零 DB
+        # （模块首行短路）。任何失败只降级为空，绝不给首字增加等待。
+        try:
+            from utils import topic_state as _topic_state
+
+            tasks["topic_state"] = asyncio.wait_for(
+                asyncio.to_thread(
+                    _topic_state.get_topic_snapshot,
+                    session_id,
+                    str(character_id or "default"),
+                ),
+                timeout=TOPIC_SNAPSHOT_TIMEOUT_SECONDS,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("topic_state snapshot task skipped: %s", e)
+
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
 
         persona_enhancement = ""
         emotion_state = None
         memory_context = ""
         rag_context = ""
+        topic_snapshot: dict[str, Any] = {}
         memory_fact_sources: list[dict[str, Any]] = []
         knowledge_snippets: list[str] = []
 
@@ -1170,6 +1232,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                                     knowledge_snippets.append(snippet)
                 except Exception:  # noqa: BLE001
                     pass
+            elif name == "topic_state":
+                # 快照只读；非 dict（含异常占位）一律当空，不让状态库故障影响主链
+                topic_snapshot = task_result if isinstance(task_result, dict) else {}
 
         # 对话历史 + 摘要
         # P1-10：get_chat_context 内含 DB 读 + 可能触发摘要 LLM 调用
@@ -1329,6 +1394,12 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             except Exception as e:  # noqa: BLE001
                 logger.debug("World info render failed: %s", e)
 
+        # 话题状态块（2026-10-27 话题状态机）：必须在 apply_budget **之前**并入
+        # memory_context —— 它是记忆槽位之一，参与 memory_chars_max 扣减与
+        # context_lengths["memory"] 埋点（计划 §6.4 / §17#8；槽位顺序见
+        # context_budget.MEMORY_SLOT_PRIORITY 的 topic_state_text）。
+        memory_context = _attach_topic_state(memory_context, topic_snapshot)
+
         # ── A4 上下文预算与去重（知识优先，memory 行级去重）──
         from orchestrator.context_budget import DEFAULT_BUDGET, apply_budget
 
@@ -1344,6 +1415,16 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         chat_summary = budgeted["chat_summary"]
         chat_history = budgeted["chat_history"]
         context_lengths = budgeted["lengths"]
+
+        # 状态块实际注入长度（预算可能裁剪/让位；以注入后的值为准）
+        _topic_injected = (
+            str(memory_context.get("topic_state_text") or "").strip()
+            if isinstance(memory_context, dict)
+            else ""
+        )
+        if _topic_injected:
+            context_lengths = dict(context_lengths or {})
+            context_lengths["topic_state"] = len(_topic_injected)
 
         # ── B-d 跨会话尾巴：实时窗口尚浅时注入持久化历史切片（untrusted）──
         # 话题键并入 memory_context（persona_service 渲染续聊钩子）
@@ -1676,20 +1757,84 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                         mem_kwargs["history_already_written"] = history_written is True
                 except Exception as e:  # noqa: BLE001
                     logger.warning("sync history write failed: %s", e)
+            # 话题状态（2026-10-27 话题状态机）：确定性更新 → after_chat →
+            # 稀疏 LLM judge，全部在后台完成，生成/首字路径零新增 await。
+            def _run_topic_judge():
+                try:
+                    from utils import topic_state as _ts
+
+                    _llm = None
+                    try:
+                        _pipeline = getattr(memory, "_pipeline", None)
+                        _resolver = getattr(_pipeline, "_session_llm_resolver", None)
+                    except Exception:  # noqa: BLE001
+                        _resolver = None
+                    if _resolver is not None:
+                        # 显式 per-user BYOK 配置错误（403/None）→ 本轮不判，
+                        # **绝不回落平台凭证**（api/byok.py 的隔离红线）。
+                        try:
+                            _llm = _resolver(session_id)
+                        except Exception as e:  # noqa: BLE001
+                            logger.debug(
+                                "topic_state judge per-user llm unavailable: %s", e
+                            )
+                            _llm = None
+                    else:
+                        # 仅当根本没有 per-user 解析器时才用平台 LLM
+                        _llm = self.components.get("llm")
+                    _ts.run_llm_judge(
+                        session_key=session_id,
+                        character_id=str(character_id or "default"),
+                        user_message=user_msg_clean,
+                        assistant_reply=reply if isinstance(reply, str) else "",
+                        llm=_llm,
+                        timeout=8.0,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("topic_state judge skipped: %s", e)
+
             # 后台线程执行 after_chat 重活（向量/事实/日记），
             # 避免其内部 async→sync 桥接在主事件循环线程自死锁。
-            def _safe_after_chat(**kw):
+            # 2026-10-27：确定性话题更新**先于** after_chat（下一轮快照尽快可见），
+            # judge 提交到独立串行池（不占 after_chat 队列）。
+            def _safe_topic_then_after_chat(**kw):
+                _should_judge = False
+                try:
+                    from utils import topic_state as _ts
+
+                    _result = _ts.update_after_turn(
+                        session_key=session_id,
+                        character_id=str(character_id or "default"),
+                        user_message=user_msg_clean,
+                        assistant_reply=reply if isinstance(reply, str) else "",
+                        turn_id=ax_turn_id,
+                    )
+                    _should_judge = bool(_result.get("should_judge"))
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("topic_state update skipped: %s", e)
                 try:
                     memory.after_chat(**kw)
                 except Exception as e:  # noqa: BLE001
                     logger.warning("after_chat failed, skipping: %s", e)
+                if _should_judge:
+                    try:
+                        from contextvars import copy_context
+
+                        self._get_topic_judge_executor().submit(
+                            copy_context().run, _run_topic_judge
+                        )
+                    except RuntimeError as e:
+                        logger.debug("topic judge 池已关闭: %s", e)
+
             try:
                 from contextvars import copy_context
 
-                self._get_background_executor().submit(copy_context().run, _safe_after_chat, **mem_kwargs)
+                self._get_background_executor().submit(
+                    copy_context().run, _safe_topic_then_after_chat, **mem_kwargs
+                )
             except RuntimeError as e:
                 logger.warning("后处理线程池已关闭，改为同步执行: %s", e)
-                _safe_after_chat(**mem_kwargs)
+                _safe_topic_then_after_chat(**mem_kwargs)
         # ASE：按会话键记账（2026-09-21 P1）。无 session_id 时不写入全局引擎，
         # 避免把某用户的聊天写进共享紧迫度/配额。
         ase = self.components.get("ase")

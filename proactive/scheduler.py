@@ -184,6 +184,9 @@ class ProactiveScheduler:
         self._llm_proactive_next_ok: dict[str, float] = {}
         #: 决策线最近对话摘要（供 post-draft judge 使用，投递时弹出，不累积）。
         self._judge_recent: dict[str, list[str]] = {}
+        #: parked 复提的「更早聊过的话题」摘要（2026-10-27 话题状态机 Q3）：
+        #: 决策线投递前写入，`_deliver` 内弹出传给 judge；手动/祝福线为空。
+        self._judge_topic: dict[str, str] = {}
         # P1-22：投递连续失败计数（指数退避；旧实现失败零退避，
         # 不可达用户每 5 分钟「生成→失败→再生成」，一天 288 次 LLM 零投递）
         self._deliver_fail_counts: dict[str, int] = {}
@@ -1384,11 +1387,13 @@ class ProactiveScheduler:
             should_skip_proactive_decision,
         )
         from proactive.proactive_hooks import load_live_hooks
+        from proactive.topic_recall import build_topic_recall
         from shisi.agent_plane.runtime import (
             append_proactive_event,
             get_profile_prompt_block,
             project_profile_for,
         )
+        from utils import topic_state as _topic_state
 
         web_cfg = read_web_proactive_config()
         # D12-L：同拍演算生理读数。放在所有决策闸**之前** —— 暂停/等待窗只是
@@ -1503,6 +1508,16 @@ class ProactiveScheduler:
                 # 出账使本条 pending 不再复活：下一拍走全新 LLM 决策（过期不补 ≠
                 # 永久静音）。账本变更即落盘（块E 纪律：重启不重置出账状态）。
                 self._llm_proactive_next_ok.pop(str(user_key), None)
+                # 2026-10-27 话题状态机 Q4：window_expired 消费旧计划（过期不补），
+                # 防止陈旧计划在下一拍被重新注入（next_at 早于 now 仍视为到期）。
+                try:
+                    _topic_state.take_next_plan(
+                        str(user_key),
+                        self._resolve_character_id(str(user_key)),
+                        consume=True,
+                    )
+                except Exception as _plan_err:  # noqa: BLE001
+                    logger.debug("消费过期计划失败（忽略）user=%s: %s", user_key, _plan_err)
                 append_proactive_event(
                     session_key=user_key,
                     sent=False,
@@ -1639,6 +1654,25 @@ class ProactiveScheduler:
             quiet = self.get_quiet_hours() if hasattr(self, "get_quiet_hours") else None
         except Exception:  # noqa: BLE001
             quiet = None
+        # 2026-10-27 话题状态机 Q3/Q4：parked 复提候选（三重闸的候选侧）与
+        # 上次决定的下一步（只取 next_at<=now 的到期计划）。两者都失败降级为空，
+        # 不阻塞决策；闸的 owner 在 topic_state / topic_recall，这里只组装。
+        _recall = build_topic_recall(
+            str(user_key),
+            char_id,
+            quiet_hours=quiet,
+            now=now,
+            judge_available=bool(
+                getattr(self, "_llm_provider", None)
+                or getattr(self, "_session_llm_resolver", None)
+            ),
+        )
+        _next_plan = None
+        try:
+            _next_plan = _topic_state.take_next_plan(str(user_key), char_id, now=now)
+        except Exception as _plan_err:  # noqa: BLE001
+            logger.debug("取下次计划失败（忽略）user=%s: %s", user_key, _plan_err)
+            _next_plan = None
         # 关怀下限（2026-10-11 批，arXiv 2510.23853 依据）：失联超 48h 且今日
         # 零主动 → 给决策器一句显式提示，破"低热度→永远别打扰"死循环
         # （2026-10-08 起账本实证：连续 4 天 15-25 次决策全部 should=False）。
@@ -1669,6 +1703,10 @@ class ProactiveScheduler:
             character_id=char_id,
             # 2026-10-16 三连同义批 B：活材料钩子节（有活材料才有话题意识）。
             hooks_text=hooks.section,
+            # 2026-10-27 话题状态机 Q3/Q4：parked 复提候选（已过 6h/静默/最多 2 条）
+            # 与到点的上次计划；渲染由 build_proactive_context 单 owner 负责。
+            parked_topics=list(_recall.items) if _recall.items else None,
+            next_plan=_next_plan,
         )
         llm = self._session_llm_resolver(user_key) if self._session_llm_resolver else self._resolve_proactive_llm(eng)
         if llm is None:
@@ -1730,6 +1768,29 @@ class ProactiveScheduler:
             self._persist_throttle_ledger()
         if not decision.get("should_contact"):
             _false_reason = str(decision.get("reason") or "")
+            # 2026-10-27 话题状态机 Q3/Q4：skip 也要落「下次准备聊什么」——
+            # 等待窗到点后的下一次决策靠它接续（跨进程重启仍在，见 topic_plan）。
+            # 2026-10-28 复核修复：两字段都空时，若本轮确实注入了旧计划
+            # （_next_plan 非 None），必须消费它——否则旧计划下一 tick 会再次
+            # 注入，形成「模型写空也无法放弃」的死循环。
+            _next_topic = str(decision.get("next_topic") or "")
+            _next_intent = str(decision.get("next_intent") or "")
+            try:
+                if _next_topic or _next_intent:
+                    _topic_state.save_next_plan(
+                        str(user_key),
+                        char_id,
+                        _next_topic,
+                        _next_intent,
+                        wait_minutes=wait_m if isinstance(wait_m, int) else 0,
+                        planned_at=now,
+                    )
+                elif _next_plan is not None:
+                    _topic_state.take_next_plan(
+                        str(user_key), char_id, now=now, consume=True,
+                    )
+            except Exception as _plan_err:  # noqa: BLE001
+                logger.debug("保存/放弃下次计划失败（忽略）user=%s: %s", user_key, _plan_err)
             # 契约拒收退避（2026-10-17 对抗验收发现→当场修复）：空 message /
             # 零信息问候被输出契约翻转后，若模型未自填有效 wait，此处不设窗
             # 会导致下一 tick 零约束重试、同上下文必然重犯 → 每 5 分钟白烧
@@ -1825,9 +1886,29 @@ class ProactiveScheduler:
             if not isinstance(getattr(self, "_judge_recent", None), dict):
                 self._judge_recent = {}
             self._judge_recent[str(user_key)] = _recent_texts
+            # parked 复提的「更早聊过的话题」也 stash：judge 规则 3 需要例外，
+            # 否则候选天然不在最近 5 条 → 第三闸永远过不了。
+            if not isinstance(getattr(self, "_judge_topic", None), dict):
+                self._judge_topic = {}
+            self._judge_topic[str(user_key)] = _recall.judge_context
         except Exception:  # noqa: BLE001
             pass
         if self._deliver(message, session_key=user_key, character_id=char_id):
+            # 2026-10-27 话题状态机 Q3/Q4：发送成功才消费旧计划，并保存本次
+            # 决定的下一步（wait=0 → 下一次决策即可见）。投递失败分支不消费、
+            # 不覆盖旧计划（保留到 TTL，见下方 else）。
+            try:
+                _topic_state.take_next_plan(str(user_key), char_id, now=now, consume=True)
+                _topic_state.save_next_plan(
+                    str(user_key),
+                    char_id,
+                    str(decision.get("next_topic") or ""),
+                    str(decision.get("next_intent") or ""),
+                    wait_minutes=0,
+                    planned_at=now,
+                )
+            except Exception as _plan_err:  # noqa: BLE001
+                logger.debug("消费/保存计划失败（忽略）user=%s: %s", user_key, _plan_err)
             if eng is not None and hasattr(eng, "commit_sent"):
                 # 注意：模块顶部已导入 contextlib。此处**禁止**再写函数内局部导入
                 # —— 局部导入会让该名在整个函数作用域被视为局部，任何在它
@@ -1965,6 +2046,15 @@ class ProactiveScheduler:
                 recent_for_judge = _stash.pop(str(session_key or ""), []) or []
         except Exception:  # noqa: BLE001
             recent_for_judge = []
+        # 2026-10-27 Q3：parked 复提的「更早聊过的话题」由决策线 stash；
+        # 手动/祝福线没有该键 → 空串，judge 行为与旧版完全一致。
+        topic_context = ""
+        try:
+            _topic_stash = getattr(self, "_judge_topic", None)
+            if isinstance(_topic_stash, dict):
+                topic_context = str(_topic_stash.pop(str(session_key or ""), "") or "")
+        except Exception:  # noqa: BLE001
+            topic_context = ""
         try:
             from proactive.post_draft_judge import judge_proactive_message
 
@@ -1973,12 +2063,28 @@ class ProactiveScheduler:
                 _quiet = self.get_quiet_hours() if hasattr(self, "get_quiet_hours") else None
             except Exception:  # noqa: BLE001
                 _quiet = None
+            # 2026-10-28 复核修复（Q3 第三闸绕过）：judge 的 LLM 必须与
+            # `build_topic_recall(judge_available=…)` 的判定同源——provider 为空
+            # 但存在按用户 resolver 时（BYOK / 替代装配），旧实现给 judge 传
+            # None → `judge_not_configured` 放行，parked 复提绕过第三闸。
+            # 这里按会话解析出真实 LLM；解析失败保持 None，由 post_draft_judge
+            # 对 topic_context 非空的复提候选 fail-closed（见其 llm is None 分支）。
+            judge_llm = getattr(self, "_llm_provider", None)
+            if judge_llm is None:
+                _resolver = getattr(self, "_session_llm_resolver", None)
+                if _resolver is not None:
+                    try:
+                        judge_llm = _resolver(str(session_key or ""))
+                    except Exception as _llm_err:  # noqa: BLE001
+                        logger.debug("judge 会话 LLM 解析失败（fail-closed）: %s", _llm_err)
+                        judge_llm = None
             verdict = judge_proactive_message(
                 message,
-                llm=getattr(self, "_llm_provider", None),
+                llm=judge_llm,
                 recent=recent_for_judge,
                 quiet_hours=_quiet,
                 session_key=str(session_key or ""),
+                topic_context=topic_context,
             )
             if not verdict.allow:
                 logger.info(
@@ -2149,6 +2255,17 @@ class ProactiveScheduler:
 
     def _run_daily_maintenance(self) -> None:
         """每日维护"""
+        # 2026-10-27 话题状态机 Q4：topic_state/topic_plan 7 天 TTL 清理。
+        # force=True：即使 enabled=false 也清过期行（避免「启用过再关闭」留残留）；
+        # 普通 purge_expired() 在关闭态仍是零 DB 契约。
+        try:
+            from utils.topic_state import purge_expired
+
+            _removed = purge_expired(force=True)
+            if _removed:
+                logger.info("话题状态 TTL 清理：删除 %d 条过期行", _removed)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("话题状态 TTL 清理失败: %s", e)
         if self._daily_maintenance:
             try:
                 self._daily_maintenance()

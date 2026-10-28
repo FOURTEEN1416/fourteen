@@ -131,7 +131,8 @@ DECISION_SYSTEM = """你是伴侣角色的**主动消息决策器**。
 1. 只输出一个 JSON 对象。
 2. 字段：should_contact（bool）、wait_minutes（int|null）、message（str）、
    reason（str）、candidates（可选：string 数组，最多 2 条备选开场，每条
-   用不同的由头角度——多候选竞争，最优者放 message）。
+   用不同的由头角度——多候选竞争，最优者放 message）、
+   next_topic（str，≤40 字，可空）、next_intent（str，≤120 字，可空）。
 3. **时机由你综合判断**：上次互动、时间、关系、画像、人设、控制台参数；不要机械套固定小时数。
 4. 控制台参数是**行为倾向**（风格/力度/请尊重免打扰），不是你必须遵守的死表；
    但 respect_quiet_hours=true 且当前落在免打扰时段时，**原则上不要 should_contact=true**
@@ -163,11 +164,14 @@ DECISION_SYSTEM = """你是伴侣角色的**主动消息决策器**。
 12. 决定暂不发消息（should_contact=false）时，wait_minutes 必须给出具体分钟数
    （建议至少 30）；只写「稍后再观察」却不填 wait 字段的决策无效——等待语义
    必须落到 wait_minutes 上，否则下次 tick 会立刻反悔重判。
-13.【必须有由头，2026-10-16 三连同义生产实证驱动】开口必须有「由头」：
-   若上下文有【现在真正值得你接话的事】，message 必须围绕其中**具体一条**
-   展开（TA 说过的事/没答的问题/将到的事/你掌握的相关知识），reason 必须
-   写明你用了哪条由头；若该节为空，才允许从画像或近况切入，reason 同样必须
-   写出具体依据（TA 的什么事）。**禁止**把「已经过去了一段时间/现在是 X 午/
+13.【必须有由头，2026-10-16 三连同义生产实证驱动】开口必须有「由头」，
+   按以下由头来源优先级取用：
+   ① 若上下文有【上次决定的下一步】，优先围绕它展开（可结合新语境调整，不硬套）；
+   ② 否则若【之前没聊完的事】非空，选其中**具体一条**自然接回；
+   ③ 否则若【现在真正值得你接话的事】非空，围绕其中**具体一条**展开
+   （TA 说过的事/没答的问题/将到的事/你掌握的相关知识）。
+   三者都为空时才允许从画像或近况切入。reason 必须写明你实际用了哪条由头/
+   哪个具体依据（TA 的什么事）。**禁止**把「已经过去了一段时间/现在是 X 午/
    距离上次约 X 小时/可以再次关心」这类纯时间描述当作 reason 或开场——时间
    只是背景，不是话题。写 candidates 时每条候选用不同由头角度。
 14.【零由头时「不发」优于空洞问候，2026-10-17 生产实证驱动】规则 11 堵住
@@ -179,6 +183,14 @@ DECISION_SYSTEM = """你是伴侣角色的**主动消息决策器**。
    寒暄堆叠、「有什么想和我分享的吗」式服务话术一律视为决策失败。这条不是
    软建议：输出层会把整条皆零信息分句的消息判为契约违反直接丢弃（见规则
    13 的由头定义——消息里有由头关键词的自然豁免）。
+15.【下一步计划，2026-10-27 话题状态机 Q3/Q4】即使 should_contact=false，
+   也必须给出 next_topic/next_intent：下次准备聊什么、从哪个角度开口
+   （具体到一件事；不要写「关心一下」「找个话题」这类空话）。下一次决策会
+   把它作为【上次决定的下一步】注入。字段必须存在；写空串表示放弃本轮
+   已注入的旧计划（如果存在）且不新建计划，不要用空值敷衍。
+16.【之前没聊完的事】只在距上次话题 ≥6 小时且自然衔接时复提；closed 话题
+   永不主动复提（上下文不会给 closed）。复提必须具体到当时说过的细节，不能
+   只说「上次那个事」；用户已经明确翻篇/解决的事不要重提。
 """
 
 
@@ -724,6 +736,8 @@ def build_proactive_context(
     response_rate: float | None = None,
     character_id: str = "",
     hooks_text: str = "",
+    parked_topics: list[dict[str, Any]] | None = None,
+    next_plan: dict[str, Any] | None = None,
 ) -> str:
     """组装主动决策提示词上下文。
 
@@ -857,6 +871,20 @@ def build_proactive_context(
                     "自然使用，不要逐条念出）\n"
                     + "\n".join(f"- {f}" for f in _mem_facts)
                 )
+    # 【上次决定的下一步】（2026-10-27 话题状态机 Q3/Q4）：取自上一条
+    # topic_plan（skip 时保存，到点后才由 scheduler take 出来）。它是「你
+    # 自己的计划」，不是新指令；语境已变时以自然衔接优先，不硬套。
+    if next_plan:
+        _plan_topic = str(next_plan.get("topic") or "").strip()
+        _plan_intent = str(next_plan.get("intent") or "").strip()
+        if _plan_topic or _plan_intent:
+            parts.append(
+                "【上次决定的下一步】原计划聊："
+                + (_plan_topic or "（未指定话题）")
+                + "；想说的方向："
+                + (_plan_intent or "（未指定角度）")
+                + "。如果语境已变，不要硬套；自然衔接优先。"
+            )
     if last_user_message.strip():
         parts.append("【用户最后一句】" + last_user_message.strip()[:200])
     if response_rate is not None:
@@ -904,6 +932,40 @@ def build_proactive_context(
             )
     elif proactive_history:
         parts.append("【当前角色最近主动发出的话】" + " ｜ ".join(str(t) for t in proactive_history[-3:]))
+    # 【之前没聊完的事】（2026-10-27 话题状态机 Q3）：候选已由
+    # `topic_state.select_proactive_recall` 过完「仅 parked / ≥6h / 非静默 /
+    # 最多 2 条」三闸；本函数只负责渲染，不自己判闸（闸 owner 在 topic_state
+    # 与 scheduler）。复提必须具体到当时说过的细节，不能只说「上次那个事」。
+    if parked_topics:
+        # 2026-10-28 复核修复：title/anchors 来自用户原话，可能含 #/<[INST]/
+        # system:/ignore previous 等指令标记；主动决策 prompt 不是状态块渲染
+        # 路径，必须复用 topic_state 的同一清洗真源，禁止直接拼原文。
+        try:
+            from utils.topic_state import _sanitize_topic_text as _clean_topic
+        except Exception:  # noqa: BLE001
+            def _clean_topic(value: Any, limit: int) -> str:
+                return str(value or "").strip()[:limit]
+
+        _recall_lines: list[str] = []
+        for _t in list(parked_topics)[:2]:
+            _title = _clean_topic(_t.get("title"), 40)
+            if not _title:
+                continue
+            _anchors: list[str] = []
+            for _a in _t.get("anchors") or []:
+                _cleaned_anchor = _clean_topic(_a, 40)
+                if _cleaned_anchor:
+                    _anchors.append(_cleaned_anchor)
+            _anchor = _anchors[0] if _anchors else ""
+            _age = float(_t.get("age_hours") or 0.0)
+            _line = f"- {_title}（约 {_age:.1f} 小时前聊过"
+            _line += f"，当时说到：{_anchor}）" if _anchor else "）"
+            _recall_lines.append(_line)
+        if _recall_lines:
+            parts.append(
+                "【之前没聊完的事】（自然接回，不要生硬翻旧账；最多选一条）\n"
+                + "\n".join(_recall_lines)
+            )
     if hooks_text:
         # 活材料钩子（2026-10-16 三连同义批 B）：爱语逆向对照——其主动消息=
         # 人设四段+【当前记忆库内容】+近 20 轮对话一次续写，话题感全部来自活
@@ -915,12 +977,24 @@ def build_proactive_context(
         # 模型在材料真空里被「主动开口」的任务压力逼着硬挤，产出「早上好，你
         # 今天感觉怎么样」式零信息问候。把「没有由头」显式写出来（而不是让模型
         # 从段落缺席里猜），规则 13/14 的触发条件对它才机器可见。
-        parts.append(
-            "【现在真正值得你接话的事】（空——本轮没有任何具体由头：无未答问题、"
-            "无将到提醒、无未闭环承诺、无热点谈资）\n"
-            "没有由头的主动开口只会是空洞问候。按规则 13/14：写不出有由头的话"
-            "就 should_contact=false，宁可不发，不写零信息问候。"
+        #
+        # 2026-10-27 话题状态机：有【上次决定的下一步】或【之前没聊完的事】时
+        # 必须跳过这个空仓提示——否则模型同时看到「有计划/没聊完」与「没有任何
+        # 具体由头」，规则 14 会把 should_contact 翻成 false（自我矛盾）。
+        _has_plan = bool(
+            next_plan
+            and (
+                str(next_plan.get("topic") or "").strip()
+                or str(next_plan.get("intent") or "").strip()
+            )
         )
+        if not parked_topics and not _has_plan:
+            parts.append(
+                "【现在真正值得你接话的事】（空——本轮没有任何具体由头：无未答问题、"
+                "无将到提醒、无未闭环承诺、无热点谈资）\n"
+                "没有由头的主动开口只会是空洞问候。按规则 13/14：写不出有由头的话"
+                "就 should_contact=false，宁可不发，不写零信息问候。"
+            )
     if urgency_signal is not None:
         parts.append(f"紧迫度信号（仅参考）：{urgency_signal:.2f}")
     if knowledge_hint:
@@ -950,16 +1024,28 @@ def build_proactive_context(
 def parse_decision(raw: str) -> dict[str, Any]:
     text = (raw or "").strip()
     if not text:
-        return {"should_contact": False, "message": "", "reason": "empty_llm", "wait_minutes": None}
+        return {
+            "should_contact": False, "message": "", "reason": "empty_llm",
+            "wait_minutes": None, "candidates": [], "next_topic": "", "next_intent": "",
+        }
     m = re.search(r"\{[\s\S]*\}", text)
     if not m:
-        return {"should_contact": False, "message": "", "reason": "no_json", "wait_minutes": None}
+        return {
+            "should_contact": False, "message": "", "reason": "no_json",
+            "wait_minutes": None, "candidates": [], "next_topic": "", "next_intent": "",
+        }
     try:
         data = json.loads(m.group(0))
     except Exception:  # noqa: BLE001
-        return {"should_contact": False, "message": "", "reason": "bad_json", "wait_minutes": None}
+        return {
+            "should_contact": False, "message": "", "reason": "bad_json",
+            "wait_minutes": None, "candidates": [], "next_topic": "", "next_intent": "",
+        }
     if not isinstance(data, dict):
-        return {"should_contact": False, "message": "", "reason": "not_object", "wait_minutes": None}
+        return {
+            "should_contact": False, "message": "", "reason": "not_object",
+            "wait_minutes": None, "candidates": [], "next_topic": "", "next_intent": "",
+        }
     should = bool(data.get("should_contact"))
     msg = str(data.get("message") or "").strip()
     wait = data.get("wait_minutes")
@@ -993,6 +1079,10 @@ def parse_decision(raw: str) -> dict[str, Any]:
         "reason": reason,
         "wait_minutes": wait_i,
         "candidates": candidates,
+        # 下一步计划（2026-10-27 话题状态机 Q3/Q4）：should_contact=false 时
+        # 也要有字段；空串表示模型确实没有下一步。长度上限与 topic_plan 表一致。
+        "next_topic": str(data.get("next_topic") or "").strip()[:40],
+        "next_intent": str(data.get("next_intent") or "").strip()[:120],
     }
 
 

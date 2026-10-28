@@ -363,7 +363,12 @@ def test_stream_chat_stream_raises_after_partial_tokens():
     done = events[-1]
     assert done["type"] == "done"
     assert done["reply"] == "前半"
-    # 验证 after_chat 被调用
+    # 验证 after_chat 被调用（后台线程池：等它落定，别用瞬时断言制造顺序依赖）
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline and not any(
+        k.get("reply") == "前半" for k in memory_calls
+    ):
+        time.sleep(0.02)
     assert any(k.get("reply") == "前半" for k in memory_calls)
 
 

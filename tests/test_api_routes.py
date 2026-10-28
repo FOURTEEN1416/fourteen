@@ -28,6 +28,7 @@ from api.routers import (
     personality_routes,
     safety_routes,
     tools_routes,
+    topic_routes,
     training_routes,
     users_routes,
 )
@@ -137,7 +138,7 @@ def test_control_plane_critical_routes_are_mounted(app):
     assert not required - actual, f"missing critical routes: {sorted(required - actual)}"
 
 
-# --- 8 sub-router mount checks (parametrized) ---
+# --- 9 sub-router mount checks (parametrized) ---
 
 @pytest.mark.parametrize(
     "module,expected_count,label",
@@ -150,6 +151,7 @@ def test_control_plane_critical_routes_are_mounted(app):
         (tools_routes, 6, "tools/* + plugins/* + health"),
         (safety_routes, 12, "safety/rag/voice/files/cache"),
         (clone_routes, 8, "clone/* (2026-08-27 剥离 /api/clone/preview 死路径)"),
+        (topic_routes, 3, "topic-state/config GET/POST + 会话快照"),
     ],
 )
 def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
@@ -166,8 +168,8 @@ def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
     )
 
 
-def test_total_contribution_is_81(app):
-    """The 8 new sub-routers together contribute exactly 89 endpoints.
+def test_total_contribution_is_92(app):
+    """The 9 new sub-routers together contribute exactly 92 endpoints.
 
     2026-08-27: 微信克隆 Option B 剥离 /api/clone/preview，clone_routes 由 9 端点变 8 端点
     2026-08-28: training/extract 移除（9→8）；proactive +config(GET)/send/pause 手动控制（8→11）；misc +diary/important-dates×2/meta（11→15）
@@ -175,20 +177,23 @@ def test_total_contribution_is_81(app):
     2026-10-16: +humanize/config GET/POST/PUT（拟人度配置读写，13→16；总 83→86）
     2026-10-21: +user/reply-mode GET/POST（用户自助回复模式 R7，16→18；总 86→88）
     2026-10-27: +humanize/config DELETE（按用户覆盖清除，18→19；总 88→89）
+    2026-10-27: +topic-state/config GET/POST + 会话快照（新增 topic_routes 3 端点；总 89→92）
     """
     modules = [
         misc_routes, chat_routes, personality_routes, users_routes,
         training_routes, tools_routes, safety_routes, clone_routes,
+        topic_routes,
     ]
     total = sum(len(_sub_router_routes(m)) for m in modules)
-    assert total == 89, f"8 sub-routers contribute {total} routes, expected 89"
+    assert total == 92, f"9 sub-routers contribute {total} routes, expected 92"
 
 
 def test_no_duplicate_endpoints_across_sub_routers():
-    """No (METHOD, path) appears in more than one of the 8 new sub-routers."""
+    """No (METHOD, path) appears in more than one of the 9 new sub-routers."""
     modules = [
         misc_routes, chat_routes, personality_routes, users_routes,
         training_routes, tools_routes, safety_routes, clone_routes,
+        topic_routes,
     ]
     seen: dict[tuple[str, str], str] = {}
     for mod in modules:
