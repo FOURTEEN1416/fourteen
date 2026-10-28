@@ -8,16 +8,16 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-4426-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-4508-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **当前状态（2026-10-28 话题状态机实施批 v1.58：本轮未部署）**：Q1–Q6 全量落地——**Q1-B** 确定性状态机 + 每 4 轮稀疏 LLM（8s 硬超时、失败保留原状态）；**Q2 B+C** 状态块 + 软化接续（旧硬规则仅关闭态逐字保留）；**Q3-A** parked 复提三重闸（≥6h + 非静默 + judge allow，closed 永不主动复提）；**Q4-B** 全部状态 7 天 TTL；**Q5** 免费 API 不设每日 LLM 上限；**Q6-B** 多 active 并行上限 3。主动线新增 `topic_plan`（skip 也存 → 重启读 → 到点注入 → 发送成功消费）；管理端 `/api/topic-state/*` 三端点 + 前端「话题状态」区。上一批 v1.57 拟人化实施批（humanize 全字段 + 阅读延迟/typing + 主动 judge + 口误 + 拆条）同样未部署。批次详情见 `LOG.md`，当前状态见 `docs/HANDOFF_REPORT.md`。
+> **当前状态（2026-10-28 话题状态机批已三端部署 @ `3fe2771`；四项跟进批已提交未部署）**：话题状态机 Q1–Q6 全量落地（**Q1-B** 确定性状态机 + 每 4 轮稀疏 LLM；**Q2** 状态块 + 软化接续；**Q3-A** parked 复提三重闸；**Q4-B** 全部状态 7 天 TTL；**Q5** 免费 API 不设每日 LLM 上限；**Q6-B** 多 active 上限 3；主动线 `topic_plan` 全周期；管理端 `/api/topic-state/*` 三端点 + 前端「话题状态」区），**默认开启**，回滚走管理端显式 `topic_state.enabled=false` / `llm_judge_enabled=false`。四项跟进批（4A 测试债清零 / 4B CSP 行为蒸馏 / 4C 零 token 骰子闸 / 4D BreezeTTS2 设计文档）已本地提交，推送由收口流程统一执行、部署待用户裁决。批次详情见 `LOG.md`，当前状态见 `docs/HANDOFF_REPORT.md`。
 
-> **测试口径**（后端 = 2026-10-27 话题状态机实施批实测）：后端 **4174 passed + 2 skipped / 4 failed**（收集 **4180**；轨迹 3988→4180；现役角色卡 **42 张**；2 跳过=`test_cache.py:297 Redis not available`（环境相关非回归）+ `tests/golden/test_golden_set.py:48`（live_llm 用例默认不跑，设 `GOLDEN_LIVE=1` 才跑）；**4 失败为 HEAD 上既有问题**——`test_byok_hardening` api_base 校验 ×2 / `test_w1_identity_authorization` 无主卡 / `test_sweep_memory_forward_owner` 503，已用 `git stash` 复现、非本批引入，待专项清理）。⚠️ **口径勘误**：分块清单必须 **`find` 递归生成**——`ls tests/*.py tests/core/*.py` **漏子目录 `tests/api/`**（2 文件 32 例，2026-10-17 实证）；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
-> 前端 `251 passed`（vitest 5.0.3，36 文件；话题状态机批新增 API 4 + store 19 + section 11）+ `tsc --noEmit` 0 错误；ruff 0.16.8 全仓 0 错（`All checks passed!`）。
+> **测试口径**（后端 = 2026-10-28 收口批实测）：后端 **4256 passed + 2 skipped / 4 failed**（收集 **4262**；四分块门 958+1180+1097+1021 通过；现役角色卡 **42 张**；2 跳过=`test_cache.py:297` Redis 环境 + `tests/golden/test_golden_set.py:48`（live_llm 用例默认不跑，设 `GOLDEN_LIVE=1` 才跑）；**既有四失败已由 4A `1d444d8` 清零**——`test_byok_hardening` api_base 校验 ×2 / `test_w1_identity_authorization` 无主卡 / `test_sweep_memory_forward_owner` 公共卡口径，定向复跑三文件 46 通过 0 失败实证；分块门残留 4 个失败与既有族同文件域、身份主控复核中）。⚠️ **口径勘误**：分块清单必须 **`find` 递归生成**——`ls tests/*.py tests/core/*.py` **漏子目录 `tests/api/`**（2 文件 32 例，2026-10-17 实证）；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> 前端 `251 passed`（vitest 5.0.3，36 文件）+ `tsc --noEmit` 0 错误；ruff 全仓 0 错（`All checks passed!`）。⚠️ 口径基于含 10 个未提交实现文件的工作树（4B/4C 实现待补交）。
 > ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 13）。**引用基线必须同时声明卡数**。
 
 ---
@@ -193,7 +193,7 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │       ├── store/        Zustand 3 个（authStore / characterBuilderStore / errorStore）
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
-├── tests/                4174 后端测试通过 + 2 跳过 / 4 既有失败（2026-10-27 话题状态机实施批实测，收集 4180）+ 251 前端测试
+├── tests/                4256 后端测试通过 + 2 跳过 / 4 分块门残留失败（2026-10-28 收口实测，收集 4262；既有四失败已清）+ 251 前端测试
 ├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 42 张 = 41 策展 + 1 张 user_id=1 林挽夏克隆变体，已定性 2026-10-12）
 └── main.py               入口
 ```

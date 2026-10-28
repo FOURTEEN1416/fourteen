@@ -4054,3 +4054,16 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **终验（收口后实跑，四分块递归清单）**：**4,180 收集 / 4,174 通过 + 2 跳过 / 4 失败**（4 失败仍为既有：byok api_base ×2 / sweep 503 / w1 无主卡；2 跳过=Redis 环境 + golden live_llm 默认不跑）；前端 **251/251（36 文件）** + `tsc --noEmit` 0；ruff 全仓 0；徽章 **4,426**（4,174 Py + 251 FE + 1 标记）。轨迹 3988→4,180（+192）。
 - **更正**：`_probe_tmp.py` 是主控本轮为生产只读取证创建的临时探针（非开工前既有文件），已删除；此前“既有未跟踪文件、未触碰”的记录作废。
 - **状态**：**未部署、未提交 git**（代码在工作树）；生产仍 `9a027a1`（2026-10-27 11:51，落后本地 3 个提交）。默认开启后，部署即生效；回滚 `topic_state.enabled=false`（零 DB、prompt 逐字旧规则）/ `llm_judge_enabled=false`（保留确定性状态）。
+
+
+## 2026-10-28 文档收口批：话题状态机批三端部署 + 四项跟进批本地提交 · 跟进批未部署待裁决
+
+- **话题状态机批（`3fe2771`）已提交+推送+三端部署**：上一条「未部署、未提交 git」状态就此闭合——Q1–Q6 全量落地（确定性状态机 + 每 4 轮稀疏 LLM + parked 复提三重闸 + 全状态 7 天 TTL + 免费 API 无每日上限 + 多 active 上限 3；主动 `topic_plan` 全周期；`/api/topic-state/*` 三端点 + 前端话题状态区）提交为 `3fe2771` 并推送（`git ls-remote` 实测 origin/main 即此提交），三端部署完成（**默认开启**；回滚走管理端显式 `topic_state.enabled=false` / `llm_judge_enabled=false`）。
+- **四项跟进批已本地提交（后补交实现文件一批），推送由收口流程统一执行；未部署，部署待用户裁决**：
+  - **4A 测试债清理（`1d444d8`）**：四个既有失败清零——byok api_base 校验 ×2 + w1 无主卡认领 + sweep 公共卡口径（503→404）；`api/routers/memory_routes.py` + 三个测试文件（109+/28-）。**定向复跑实证**：三测试文件 **46 passed / 0 失败**（2026-10-28 收口亲测）。
+  - **4B CSP 行为蒸馏移植（`5dff923`）**：AI 人设生成增 `behavior_patterns`/`honesty_boundary` + aggregate「# 行为规则」紧凑段（无字段整段省略）+ schema 往返；随批提交 `tests/test_character_behavior_distillation.py`（+551 行）。
+  - **4C dsh-speak-up 零 token 骰子闸（`aabc867`）**：掷骰先于 LLM（**默认关闭** + `dry_run` 默认开；峰谷命中线/时机因子/未中加成）+ 管理端与前端配置面；随批提交 `proactive/frequency.py`（+317 行）+ `tests/test_proactive_dice_gate.py`（+709 行）。
+  - **4D BreezeTTS2 本地部署设计（`c0a4d2c`）**：仅调研设计文档 `docs/reports/2026-10-28-BreezeTTS2本地部署设计.md`（+1145 行），遵守「暂不引入」裁决，零代码。
+- **🔴 提交完整性缺陷（如实登记）**：四个跟进批的提交漏掉部分实现文件（实施代理 filesChanged 清单不全，提交分组照单执行）——**10 个实现文件共 809 行仍留工作树未提交**：`shisi/application/persona_service.py` / `shisi/core/models/character_aggregate.py` / `utils/character_helpers.py`（4B 实现）、`frontend/src/api/system.ts` / `frontend/src/components/admin/RoleSettingsTabs.tsx`（4C 前端配置面）、`proactive/ase_engine.py` / `proactive/scheduler.py` / `api/main_routes.py` / `api/routers/character_routes.py` / `api/routers/training_routes.py`（4C 接线与管理端）。补交提交由主控在脚本收口后追加。
+- **测试口径（2026-10-28 收口实测）**：全量 **4262 收集**（`pytest --collect-only` 实测，17.82s，42 卡在位）/ **4256 通过 + 2 跳过 / 4 失败**（四分块门 958+1180+1097+1021 通过，第四块 4 失败；**既有四失败已由 4A 清零**——分块门残留 4 个，与既有四失败族同文件域；定向复跑该族 46 通过 0 失败，残留身份主控复核中，最终报告定论）；前端 **251/251（36 文件）**（vitest 实跑）+ `tsc --noEmit` 0 错；ruff 全仓 0（`All checks passed!`）；徽章 **4508**（4256 Py + 251 FE + 1 标记）。⚠️ 本口径基于含 10 个未提交实现文件的工作树，引用须注明。
+- **推送/部署状态**：本地 main 领先 origin/main（`git ls-remote` 实测远端停 `3fe2771`）；四项跟进批与本文档批**推送由收口流程统一执行**（push exit=0 才视为完成，失败则主控在最终报告与 LOG 如实更正）；**四项跟进批未部署，部署待用户裁决**。
