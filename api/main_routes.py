@@ -52,6 +52,30 @@ class CreateSessionRequest(BaseModel):
 class ConfigUpdateRequest(BaseModel):
     config: dict = Field(default_factory=dict, description="Partial config updates to merge")
 
+
+class DiceGateConfigRequest(BaseModel):
+    """零 token 骰子闸（dsh-speak-up）的 partial merge 入参（2026-10-28）。
+
+    10 个配置键**全部显式建模且可写**——不存在「管理端改不到、代码里却生效」
+    的隐藏硬编码（与 ``TopicStateConfigRequest`` 同纪律）。范围与
+    ``proactive/frequency.DICE_GATE_BOUNDS`` 逐键一致，越界 422；跨字段
+    ``idle_long_minutes > idle_short_minutes`` 在合并后校验，不满足返回 400。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = Field(default=None, description="骰子闸总开关（默认关闭）")
+    dry_run: bool | None = Field(default=None, description="干跑：只记账不拦截（默认开启）")
+    peak_line: int | None = Field(default=None, ge=0, le=100, description="峰时命中线（%）")
+    offpeak_line: int | None = Field(default=None, ge=0, le=100, description="谷时命中线（%）")
+    miss_bonus: float | None = Field(default=None, ge=0, le=40, description="连没中每次加成（%）")
+    miss_bonus_cap: float | None = Field(default=None, ge=0, le=40, description="连没中加成上限（%）")
+    idle_short_minutes: int | None = Field(default=None, ge=0, le=1440, description="短空闲阈值（分钟）")
+    idle_long_minutes: int | None = Field(default=None, ge=1, le=10080, description="长空闲阈值（分钟）")
+    idle_short_factor: float | None = Field(default=None, ge=0, le=1, description="短空闲命中线乘数")
+    idle_long_factor: float | None = Field(default=None, ge=1, le=10, description="长空闲命中线乘数")
+
+
 class ProactiveConfigRequest(BaseModel):
     threshold: float | None = None
     max_daily: int | None = None
@@ -78,6 +102,10 @@ class ProactiveConfigRequest(BaseModel):
     llm_proactive_jitter_seconds: int | None = Field(
         default=None, ge=0, le=900,
         description="主动等待窗随机抖动上限（秒）；0=关闭（T-4 仿真人机制）",
+    )
+    # ── 零 token 骰子闸（2026-10-28 dsh-speak-up）──
+    dice_gate: DiceGateConfigRequest | None = Field(
+        default=None, description="骰子闸 partial merge（10 键，缺省=不改）",
     )
 
 class ToolToggleRequest(BaseModel):

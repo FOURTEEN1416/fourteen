@@ -513,6 +513,10 @@ class PersonaService:
             "scenario": "",
             "first_mes": "",
             "catchphrases": [],
+            # 行为蒸馏（2026-10-28 CSP 移植）：内置十四没有卡文件内容，形状与
+            # 文件卡同构、值为空 —— 渲染时空段整体省略，内置人格 prompt 不变。
+            "behavior_patterns": [],
+            "honesty_boundary": "",
             "core_anchors": list(self._engine.get_core_anchors() or []),
             "personality": {
                 "warmth": profile.core_character.get("warmth", 0.7),
@@ -562,6 +566,11 @@ class PersonaService:
             creator_notes=card.get("creator_notes", "") or "",
             catchphrases=[str(c) for c in (card.get("catchphrases") or []) if str(c).strip()][:8],
             first_mes=str(card.get("first_mes", "") or ""),
+            # 行为蒸馏（2026-10-28 CSP 移植）：卡经 normalize_character_card 展平后
+            # 已带规范化值；这里原样搬运，清洗与上限不在此处做第二遍（聚合根的
+            # field_validator 会再委托同一真源，属幂等复核）。
+            behavior_patterns=list(card.get("behavior_patterns") or []),
+            honesty_boundary=card.get("honesty_boundary") or "",
         )
         character.emotional_state = emotional_state
         return character

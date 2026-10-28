@@ -29,7 +29,12 @@ from my_character.persona_card import PersonaCardV3
 from shisi.knowledge.character_knowledge_service import get_knowledge_service
 from shisi.knowledge.crawler_adapter import get_crawler_adapter
 from shisi.voice.character_voice import CharacterVoiceManager
-from utils.character_helpers import normalize_character_card, sanitize_character_name
+from utils.character_helpers import (
+    normalize_behavior_patterns,
+    normalize_character_card,
+    sanitize_character_name,
+    sanitize_honesty_boundary,
+)
 from utils.project_paths import project_path
 
 PRESETS_DIR = project_path("data", "presets")
@@ -382,13 +387,15 @@ def _build_character_data(
     catchphrases: list[str] | None = None,
     core_anchors: list[str] | None = None,
     user_id: str = "default",
+    behavior_patterns: Any = None,
+    honesty_boundary: Any = None,
 ) -> dict[str, Any]:
     now = datetime.now(tz=timezone.utc).isoformat()
     character_id = str(uuid.uuid4())[:8]
     style = dict(speaking_style or {})
     if catchphrases:
         style["catchphrases"] = catchphrases
-    return {
+    data: dict[str, Any] = {
         "id": character_id,
         "name": sanitize_character_name(name),
         "description": description,
@@ -402,6 +409,16 @@ def _build_character_data(
         "updated_at": now,
         "version": 1,
     }
+    # 行为蒸馏（2026-10-28 CSP 移植）：**归一化后为空就不写键**，与
+    # normalize_character_card 的清理循环同口径 —— 普通建卡（不传新参）落盘
+    # 形态零变化，不会凭空多出空键。
+    patterns = normalize_behavior_patterns(behavior_patterns)
+    if patterns:
+        data["behavior_patterns"] = patterns
+    boundary = sanitize_honesty_boundary(honesty_boundary)
+    if boundary:
+        data["honesty_boundary"] = boundary
+    return data
 
 
 # ── 角色卡安全校验（P0 修复批 2026-10-04，F1）────────────
@@ -1316,8 +1333,46 @@ def _character_generation_prompt(description: str, archetype: str) -> str:
         '"playfulness":0.0,"independence":0.0,"jealousy":0.0,"stubbornness":0.0,'
         '"creativity":0.0},"speaking_style":{"formality":0.0,"expressiveness":0.0,'
         '"humor":0.0,"directness":0.0,"emoji_freq":0.0,"catchphrases":["..."]},'
-        '"core_anchors":["..."],"catchphrases":["..."]}'
+        '"core_anchors":["..."],"catchphrases":["..."],'
+        '"behavior_patterns":[{"trigger":"触发情境","behavior":"这个角色的做法",'
+        '"why":"动机"}],"honesty_boundary":"不知道的事怎么处理"}\n\n'
+        "behavior_patterns / honesty_boundary 的硬要求（与渲染侧共用同一套上限，"
+        "超出会被截断）：\n"
+        "1. behavior_patterns 写 3–7 条，至少覆盖 3 个不同场景"
+        "（如被夸奖、被追问私事、被要求做不想做的事）；\n"
+        "2. 每条三字段都要有：trigger ≤12 字、behavior ≤16 字、why ≤6 字；\n"
+        "3. behavior 写「怎么做」（动作/态度），不写台词原文，"
+        "不写其他角色的名字或口头禅；\n"
+        "4. 禁止括号、星号与舞台指示（如「（沉默）」「*叹气*」）；\n"
+        "5. honesty_boundary ≤60 字，写遇到不知道、不记得、没做过的事时怎么办"
+        "（不编造、不假装记得，用自然的话带过）。"
     )
+
+
+def _normalize_distilled_persona_fields(persona_data: dict[str, Any]) -> dict[str, Any]:
+    """预览与落盘共用：规范化行为蒸馏两字段（空则删键，与落盘口径一致）。
+
+    预览若原样回显模型给的 9 条 / 字符串形态，用户确认的草案与随后落盘的卡
+    就不是同一份（「确认 9 条只存 7 条」）。此处先规范，再让两条路径共用结果。
+    """
+    raw_patterns = persona_data.get("behavior_patterns")
+    patterns = normalize_behavior_patterns(raw_patterns)
+    if patterns:
+        persona_data["behavior_patterns"] = patterns
+    else:
+        persona_data.pop("behavior_patterns", None)
+    boundary = sanitize_honesty_boundary(persona_data.get("honesty_boundary"))
+    if boundary:
+        persona_data["honesty_boundary"] = boundary
+    else:
+        persona_data.pop("honesty_boundary", None)
+    raw_count = (
+        len(raw_patterns) if isinstance(raw_patterns, (list, tuple))
+        else 1 if raw_patterns else 0
+    )
+    if raw_count != len(patterns):
+        logger.info("行为蒸馏条目已规范化: %d → %d 条", raw_count, len(patterns))
+    return persona_data
 
 
 async def _generate_persona_preview(req: CharacterGenerateRequest) -> dict[str, Any]:
@@ -1334,12 +1389,12 @@ async def _generate_persona_preview(req: CharacterGenerateRequest) -> dict[str, 
     prompt = _character_generation_prompt(req.description, req.archetype)
     try:
         if hasattr(llm, "chat"):
-            response = await llm.chat(query=prompt, max_tokens=1024, temperature=0.7)
+            response = await llm.chat(query=prompt, max_tokens=1536, temperature=0.7)
         elif hasattr(llm, "chat_sync"):
             response = await asyncio.to_thread(
                 llm.chat_sync,
                 query=prompt,
-                max_tokens=1024,
+                max_tokens=1536,
                 temperature=0.7,
             )
         else:
@@ -1369,6 +1424,8 @@ async def preview_character_from_description(
     persona_data = await _generate_persona_preview(req)
     name = sanitize_character_name(str(persona_data.get("name") or "新角色"))
     persona_data["name"] = name
+    # 预览＝落盘：两字段先规范再回显（上限/形态与 _build_character_data 同一真源）
+    _normalize_distilled_persona_fields(persona_data)
     return {
         "reply": f"我整理出了「{name}」的人设草案，你可以继续描述来覆盖这份预览。",
         "persona": persona_data,
@@ -1384,6 +1441,7 @@ async def generate_character_from_description(
     """从文本描述用 AI 生成角色人设卡并自动创建"""
     _enforce_byok_for_generation(principal)  # F2：BYOK 前置（失败 403，不烧平台 key）
     persona_data = await _generate_persona_preview(req)
+    _normalize_distilled_persona_fields(persona_data)
 
     catchphrases = persona_data.pop("catchphrases", [])
     data = _build_character_data(
@@ -1394,6 +1452,8 @@ async def generate_character_from_description(
         catchphrases=catchphrases,
         core_anchors=persona_data.get("core_anchors", []),
         user_id=_owner_for_write(principal, req.user_id),
+        behavior_patterns=persona_data.get("behavior_patterns"),
+        honesty_boundary=persona_data.get("honesty_boundary"),
     )
     if not _save_character(data["id"], data):
         raise HTTPException(status_code=500, detail="保存角色失败")

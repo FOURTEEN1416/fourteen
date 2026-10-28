@@ -64,8 +64,36 @@ export function updateProactiveConfig(cfg: {
   llm_proactive_character_hint?: string
   /** T-4：主动等待窗随机抖动上限（秒）；0=关闭 */
   llm_proactive_jitter_seconds?: number
+  /** 零 token 骰子闸（2026-10-28 dsh-speak-up）：10 键 partial merge */
+  dice_gate?: DiceGateConfigWrite
 }) {
   return client.post('/proactive/config', cfg)
+}
+
+/**
+ * 骰子闸可写字段（与后端 `DiceGateConfigRequest` / `frequency.DICE_GATE_DEFAULTS`
+ * 逐键一致）。缺省的键=不改；写侧服务端还会校验越界（422）与
+ * `idle_long_minutes > idle_short_minutes`（400）。
+ */
+export interface DiceGateConfigWrite {
+  enabled?: boolean
+  dry_run?: boolean
+  /** 峰时（工作日 09–12 / 14–18）命中线，% */
+  peak_line?: number
+  /** 谷时命中线，% */
+  offpeak_line?: number
+  /** 连没中每次加成，% */
+  miss_bonus?: number
+  /** 连没中加成上限，% */
+  miss_bonus_cap?: number
+  /** 短空闲阈值（分钟） */
+  idle_short_minutes?: number
+  /** 长空闲阈值（分钟），必须 > idle_short_minutes */
+  idle_long_minutes?: number
+  /** 短空闲命中线乘数 */
+  idle_short_factor?: number
+  /** 长空闲命中线乘数 */
+  idle_long_factor?: number
 }
 
 // ── 用户自助回复模式（2026-10-21 R7） ──

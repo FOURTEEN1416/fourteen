@@ -41,6 +41,16 @@ class CharacterAggregate(BaseModel):
     catchphrases: list[str] = Field(default_factory=list)
     first_mes: str = ""
 
+    # ── 行为蒸馏（CSP 移植 · 2026-10-28）──
+    # 上面三个字段回答「这个角色是谁、怎么说话」，却不回答「遇到 X 会怎么做」。
+    # 行为蒸馏把角色卡里的做法倾向（trigger → behavior（why））与诚实边界
+    # （不知道就不编）带进 prompt，段落在 build_system_prompt 的 # 性格 之后。
+    # ⚠️ 本批只覆盖主链（chat / 网页 / 微信）：主动线与 ASE 线不走
+    # build_system_prompt，尚未消费这两字段。
+    # 清洗唯一 owner 是 utils.character_helpers（此处只委托，不另写一套）。
+    behavior_patterns: list[dict[str, str]] = Field(default_factory=list)
+    honesty_boundary: str = ""
+
     persona: PersonaProfile = Field(default_factory=PersonaProfile)
     emotional_state: EmotionalState = Field(default_factory=EmotionalState)
 
@@ -62,6 +72,21 @@ class CharacterAggregate(BaseModel):
         if not v or not v.strip():
             raise ValueError("角色名称不能为空")
         return v.strip()
+
+    @field_validator("behavior_patterns", mode="before")
+    @classmethod
+    def _normalize_behavior_patterns(cls, v: Any) -> list[dict[str, str]]:
+        """任意形态 → 规范化条目（惰性 import：本模块不反向依赖 utils 包加载顺序）。"""
+        from utils.character_helpers import normalize_behavior_patterns
+
+        return normalize_behavior_patterns(v)
+
+    @field_validator("honesty_boundary", mode="before")
+    @classmethod
+    def _sanitize_honesty_boundary(cls, v: Any) -> str:
+        from utils.character_helpers import sanitize_honesty_boundary
+
+        return sanitize_honesty_boundary(v)
 
     def update_emotion(self, message: str) -> EmotionalState:
         msg = message.lower()
@@ -165,6 +190,16 @@ class CharacterAggregate(BaseModel):
         if self.personality_text:
             parts.extend(["", "# 性格", self.personality_text])
 
+        # 行为蒸馏（2026-10-28 CSP 移植）：紧跟在 # 性格 之后（任务钉死的位置），
+        # 在 # 开场情境 / 状态 / 历史之前。位置理由与取舍：本段位于对话历史之前，
+        # 约束力低于 post-history 位的 creator_notes，所以只做「短条目 + 硬上限
+        # ≤400 字符」，不与 creator_notes 抢同一份权威规则。
+        # 渲染 owner 是 utils.character_helpers.render_behavior_section（字段清洗与
+        # 段落布局同一个真源，写卡侧生成 prompt 与这里用同一套上限）。
+        behavior_block = self._behavior_rules_block()
+        if behavior_block:
+            parts.extend(["", behavior_block])
+
         if self.scenario:
             # ⚠️ scenario 是**开场情境**，不是「当前正在发生的事」（2026-09-19 生产实证：
             # 卡 62105bca 的开场把角色永久锚定在「用户在路上」）。本项目自 2026-09-20 起
@@ -259,6 +294,14 @@ class CharacterAggregate(BaseModel):
             parts.extend(["", f"用户: {user_message}", f"{self.name}:"])
 
         return "\n".join(parts)
+
+    def _behavior_rules_block(self) -> str:
+        """「# 行为规则」段；两字段皆空时返回空串（整段省略）。"""
+        if not self.behavior_patterns and not self.honesty_boundary:
+            return ""
+        from utils.character_helpers import render_behavior_section
+
+        return render_behavior_section(self.behavior_patterns, self.honesty_boundary)
 
     def _format_dialogue_examples(self) -> str:
         """格式化 mes_example 为对话示例段；无内容返回空串。"""

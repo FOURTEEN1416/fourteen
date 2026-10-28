@@ -56,6 +56,33 @@ def _proactive_now_str() -> str:
     return f"{now:%Y-%m-%d} {_WEEKDAY_CN[now.weekday()]} {now:%H:%M}"
 
 
+def _read_dice_gate_config_safe() -> dict:
+    """骰子闸配置的热读（失败回落默认）——仅供展示面，判定走真源读取。
+
+    为什么不缓存：配置由管理端写文件热生效（跨 worker），缓存就要失效策略；
+    这份读取只在 config/health 端点与日志里发生，不在每个 tick 上。
+    """
+    try:
+        from proactive.frequency import read_dice_gate_config
+
+        return read_dice_gate_config()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("骰子闸配置读取失败（展示面回落默认）: %s", e)
+        from proactive.frequency import DICE_GATE_DEFAULTS
+
+        return dict(DICE_GATE_DEFAULTS)
+
+
+def _dice_gate_wired() -> bool:
+    """真闸是否接在生产决策链（回退只读分支时置 False，管理端据此标「不生效」）。"""
+    try:
+        from proactive.frequency import DICE_GATE_PRODUCTION_WIRED
+
+        return bool(DICE_GATE_PRODUCTION_WIRED)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # ═══════════════════════════════════════════════════════════════
 #  消息清洗与去重（2026-09-19）
 #
@@ -823,6 +850,7 @@ class ASEEngine:
         reflection_mode: str = "rule",
         state_path: str = "",
         character_id_resolver: Callable[[], str] | None = None,
+        dice_rng: Callable[[], float] | None = None,
     ):
         self._get_affinity = affinity_level_func or (lambda: 0)
         self._llm = llm_gateway
@@ -920,6 +948,26 @@ class ASEEngine:
         # generate_failed / ok）。旧实现只有 result=True/False，
         # 「为什么不发」在生产日志里完全不可见（2026-09-19 排查困难根源）。
         self._last_skip_reason: str = ""
+
+        # ── 零 token 骰子闸（2026-10-28 dsh-speak-up 批）──────────────
+        # 判定纯函数与配置 owner 在 `proactive/frequency.py`；引擎只保持状态。
+        # 随机源可注入（与 `proactive/scheduler.apply_wait_jitter(rng=...)` 同先例），
+        # 测试据此完全确定；生产用 random.random。
+        self._dice_rng: Callable[[], float] = dice_rng or random.random
+        # dry / live **两个独立桶**：干跑推进不污染真拦截的连没中加成
+        # （否则切到 live 时带着一串「从未真正发生过的连没中」，首掷概率失真）。
+        self._dice_dry_miss_streak = 0
+        self._dice_live_miss_streak = 0
+        self._dice_dry_rolls = 0
+        self._dice_dry_would_send = 0
+        self._dice_dry_would_skip = 0
+        self._dice_live_rolls = 0
+        self._dice_live_hits = 0
+        self._dice_live_skips = 0
+        self._dice_dry_last_result: dict[str, Any] | None = None
+        self._dice_live_last_result: dict[str, Any] | None = None
+        # 账本降噪：键 "user_key|reason" → 本地日期（每 user|reason 每日一条）
+        self._dice_event_day: dict[str, str] = {}
 
         # 手动控制面（2026-08-28 消息 tab 手动控制需求）
         self._paused: bool = False
@@ -1151,6 +1199,17 @@ class ASEEngine:
             self._last_skip_reason = reason
             return None
 
+        # ④-2 零 token 骰子闸（2026-10-28，**仅生成路径**）。
+        #     为什么只在 dry_run=False 这条路径掷：生产决策链走的是
+        #     `scheduler._llm_proactive_one_user` → `tick(dry_run=True)`，
+        #     骰子由调度器 hook 在**决策 LLM 之前**掷一次；这里若在 dry_run
+        #     分支也掷，同一轮就掷两次（双掷会双倍推进连没中、统计失真）。
+        #     两条调用点各自最多掷一次，互不共享缓存。
+        allow, _dice = self.evaluate_dice_gate(requested_mode="live")
+        if not allow:
+            self._last_skip_reason = "dice_gate"
+            return None
+
         # ⑤ 场景触发（早安/晚安/三餐）优先于紧迫度阈值
         #    commit=False：场景日期标记由 commit_sent() 在投递成功后才置位，
         #    否则未送达的早安会「标记为已发」，当天再也不补发。
@@ -1222,6 +1281,135 @@ class ASEEngine:
         if self._daily_message_count < 8:
             return True, "ok"
         return False, "daily_limit"
+
+    # ── 零 token 骰子闸（2026-10-28 dsh-speak-up 批）──────────
+
+    def evaluate_dice_gate(
+        self, *, requested_mode: str = "live",
+    ) -> tuple[bool, Any]:
+        """掷一次骰子决定「这次要不要开口」。返回 ``(是否放行, 掷骰结果)``。
+
+        语义（配置 owner = ``proactive/frequency.py``）：
+
+        - ``enabled=false``（默认）→ 恒放行，两桶 streak 归零（关掉之后不
+          留着「欠着的加成」，重新打开从干净状态开始）；
+        - ``dry_run=true``（默认）→ 无论 ``requested_mode`` 是什么都只进
+          **dry 桶**（would_send / would_skip），**不拦截**；
+        - ``requested_mode="live"`` 且 ``dry_run=false`` → 进 **live 桶**，
+          未中即返回 ``False``（调用方负责等待冷却）。
+
+        失败开闸：任何异常 → ``(True, None)``。骰子坏了宁可放过，不能把
+        主动链永久堵死（与投递层「宁缺毋滥但不静默」的取舍不同：这里是
+        观测组件，不该成为单点故障）。
+        """
+        try:
+            from proactive.frequency import evaluate_dice_roll, read_dice_gate_config
+
+            cfg = read_dice_gate_config()
+            if not cfg.get("enabled", False):
+                self._dice_dry_miss_streak = 0
+                self._dice_live_miss_streak = 0
+                return True, None
+            effective_live = str(requested_mode) == "live" and not cfg["dry_run"]
+            mode = "live" if effective_live else "dry_run"
+            # 空窗按**用户最后一次开口**算（不是「上次主动投递」）：用户刚说
+            # 完话就该克制，久未互动才更愿意开口。显式 ×60，不用
+            # `hours or self._hours...`——0.0 会被 `or` 换成 99h（旧缺陷同型）。
+            idle_minutes = max(0.0, float(self._hours_since_last_chat()) * 60.0)
+            streak = self._dice_live_miss_streak if effective_live else self._dice_dry_miss_streak
+            result = evaluate_dice_roll(
+                now=_local_now(),
+                idle_minutes=idle_minutes,
+                miss_streak=streak,
+                config=cfg,
+                rng=self._dice_rng,
+            )
+            payload = result.to_payload()
+            if effective_live:
+                self._dice_live_rolls += 1
+                self._dice_live_miss_streak = result.next_streak
+                if result.hit:
+                    self._dice_live_hits += 1
+                else:
+                    self._dice_live_skips += 1
+                self._dice_live_last_result = payload
+            else:
+                self._dice_dry_rolls += 1
+                self._dice_dry_miss_streak = result.next_streak
+                if result.hit:
+                    self._dice_dry_would_send += 1
+                else:
+                    self._dice_dry_would_skip += 1
+                self._dice_dry_last_result = payload
+            if not result.hit:
+                # 只记「未中」：账本回答的是「本该开口却没开口」的审计问题
+                # （命中放行由下游正常的决策/投递事件覆盖，再记一遍是噪声）。
+                self._record_dice_event(result, mode, dry_run_config=bool(cfg["dry_run"]))
+            if effective_live and not result.hit:
+                self._last_skip_reason = "dice_gate"
+                return False, result
+            return True, result
+        except Exception as e:  # noqa: BLE001
+            logger.debug("骰子闸异常，失败开闸: %s", e)
+            return True, None
+
+    def _record_dice_event(self, result: Any, mode: str, *, dry_run_config: bool) -> None:
+        """落一条 ``proactive_skip`` 账本事件（actor=proactive_dice）。
+
+        不复用 ``append_proactive_event``：那个函数硬编码 actor="proactive_llm"
+        且 payload 只有 message/reason/wait_minutes，会把掷骰指标（roll/line/
+        streak/peak）静默丢掉，还会让账本误以为是 LLM 决策的结论。
+        降噪口径对齐 scheduler ``_emit_skip_event_daily``：每 user|reason
+        每日首条落账（288 tick/日 × 全用户会淹掉真信号）。
+        """
+        reason = "dice_gate" if mode == "live" else "dice_gate_dry_run"
+        user_key = str(self._user_key or "").strip()
+        if not user_key:
+            # 无会话归属（全局引擎/控制台）→ 不写账本：那没有"谁"的维度，
+            # 写进去就是把指标挂到匿名键上（与 `_emit_vital_event` 同纪律）。
+            return
+        today = _local_now().date().isoformat()
+        dedup_key = f"{user_key}|{reason}"
+        if self._dice_event_day.get(dedup_key) == today:
+            return
+        self._dice_event_day[dedup_key] = today
+        try:
+            from shisi.agent_plane.event_ledger import EVENT_PROACTIVE_SKIP
+            from shisi.agent_plane.runtime import get_ledger
+
+            get_ledger().append(
+                session_key=user_key,
+                event_type=EVENT_PROACTIVE_SKIP,
+                character_id=self._current_character_id(),
+                actor="proactive_dice",
+                payload={
+                    "reason": reason,
+                    "mode": mode,
+                    "dry_run_config": bool(dry_run_config),
+                    **result.to_payload(),
+                },
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("骰子闸账本写入失败（忽略）user=%s: %s", user_key, e)
+
+    def get_dice_gate_state(self) -> dict[str, Any]:
+        """dry / live 两桶统计（管理端只读展示；统计归属**当前 worker**）。"""
+        return {
+            "dry": {
+                "rolls": self._dice_dry_rolls,
+                "would_send": self._dice_dry_would_send,
+                "would_skip": self._dice_dry_would_skip,
+                "miss_streak": self._dice_dry_miss_streak,
+                "last": self._dice_dry_last_result,
+            },
+            "live": {
+                "rolls": self._dice_live_rolls,
+                "hits": self._dice_live_hits,
+                "skips": self._dice_live_skips,
+                "miss_streak": self._dice_live_miss_streak,
+                "last": self._dice_live_last_result,
+            },
+        }
 
     # ── 免打扰时段 ───────────────────────────────────────
 
@@ -1540,6 +1728,10 @@ class ASEEngine:
             "paused": self._paused,
             "frequency_mode": self._frequency_mode,
             "daily_count": self._daily_message_count,
+            # 零 token 骰子闸（2026-10-28）：配置热读 + 是否真接生产 + 双桶统计
+            "dice_gate": _read_dice_gate_config_safe(),
+            "dice_gate_effective": _dice_gate_wired(),
+            "dice_gate_state": self.get_dice_gate_state(),
         }
 
     def apply_runtime_config(
@@ -1861,6 +2053,9 @@ class ASEEngine:
             ),
             "quiet_hours": list(self._quiet_hours),
             "last_skip_reason": self._last_skip_reason,
+            "dice_gate": _read_dice_gate_config_safe(),
+            "dice_gate_effective": _dice_gate_wired(),
+            "dice_gate_state": self.get_dice_gate_state(),
             "frequency": freq_info,
             "modes": {
                 "frequency": self._frequency_mode,

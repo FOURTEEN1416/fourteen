@@ -1561,6 +1561,36 @@ class ProactiveScheduler:
                     character_id=self._resolve_character_id(str(user_key)),
                 )
                 return
+        # 零 token 骰子闸（2026-10-28 dsh-speak-up 批）。
+        # ⚠️ **一次性例外**：`proactive/scheduler.py` 在用户禁改清单内，本批按
+        # 复核第一分支特批这 7 行真闸（例外不成立则回退只读分支：删本块 +
+        # `frequency.DICE_GATE_PRODUCTION_WIRED=False`，引擎侧实现原样保留）。
+        # 位置理由：在所有确定性闸（暂停/静默/模型/token 窗口/等待窗/节奏）之后、
+        # 生产 LLM 决策之前——骰子只在「本来真要调 LLM」的那一次才掷，不浪费
+        # 判定机会，也绝不因为骰子而未中就去监听后续闸。
+        # 未中 → 按最小间隔进入等待窗（不新增第 11 个可写键；与既有语义一致），
+        # 下一拍在 :1497 的 `_next_ok` 前置检查处被抑制，**不烧决策调用**。
+        # 同一轮随后是 `eng.tick(hours, dry_run=True)`——那条路径不掷骰，
+        # 故生产每轮最多掷一次（无双掷、无跨 tick 共享缓存）。
+        # 账本由引擎写（actor=proactive_dice，含 roll/line/streak），此处不写：
+        # 复用它会冒充 `proactive_llm` 且丢掉指标（见引擎 `_record_dice_event`）。
+        if eng is not None:
+            try:
+                _allow, _dice = eng.evaluate_dice_gate(requested_mode="live")
+            except Exception:  # noqa: BLE001
+                _allow, _dice = True, None
+            if not _allow:
+                _wait = max(1, int(getattr(eng, "_min_interval_minutes", 30) or 30))
+                self._llm_proactive_next_ok[str(user_key)] = _time.time() + _wait * 60.0
+                self._persist_throttle_ledger()
+                logger.info(
+                    "proactive dice gate skip user=%s wait=%dmin line=%.1f roll=%.1f streak=%d",
+                    user_key, _wait,
+                    float(getattr(_dice, "line", 0.0) or 0.0),
+                    float(getattr(_dice, "roll", 0.0) or 0.0),
+                    int(getattr(_dice, "next_streak", 0) or 0),
+                )
+                return
         urgency = None
         if eng is not None:
             try:

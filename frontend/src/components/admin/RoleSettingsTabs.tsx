@@ -577,6 +577,72 @@ function VoiceTab({ character }: { character: RoleSettingsCharacter }) {
 // W11-D5：保存/暂停一律以回执 status==="ok" 判成功，业务失败不得给绿色回执。
 
 /** GET /api/proactive/config 真实回执形状（api/routers/training_routes.py） */
+interface DiceGateConfig {
+  enabled: boolean
+  dry_run: boolean
+  peak_line: number
+  offpeak_line: number
+  miss_bonus: number
+  miss_bonus_cap: number
+  idle_short_minutes: number
+  idle_long_minutes: number
+  idle_short_factor: number
+  idle_long_factor: number
+}
+
+interface DiceGateLastRoll {
+  hit?: boolean
+  roll?: number
+  line?: number
+  peak?: boolean
+  base_line?: number
+  timing_factor?: number
+  idle_minutes?: number
+  streak_before?: number
+  next_streak?: number
+}
+
+interface DiceGateState {
+  dry?: { rolls?: number; would_send?: number; would_skip?: number; miss_streak?: number; last?: DiceGateLastRoll | null }
+  live?: { rolls?: number; hits?: number; skips?: number; miss_streak?: number; last?: DiceGateLastRoll | null }
+}
+
+/** 默认值与后端 `frequency.DICE_GATE_DEFAULTS` 逐键一致（默认关闭 + 干跑开启） */
+const DEFAULT_DICE_GATE: DiceGateConfig = {
+  enabled: false,
+  dry_run: true,
+  peak_line: 20,
+  offpeak_line: 60,
+  miss_bonus: 10,
+  miss_bonus_cap: 40,
+  idle_short_minutes: 20,
+  idle_long_minutes: 360,
+  idle_short_factor: 0.15,
+  idle_long_factor: 1.5,
+}
+
+/** 8 个数值键（2 个布尔键单独渲染）——顺序即界面顺序，范围与后端 bounds 一致 */
+const DICE_NUM_FIELDS: Array<{
+  key:
+    | 'peak_line' | 'offpeak_line' | 'miss_bonus' | 'miss_bonus_cap'
+    | 'idle_short_minutes' | 'idle_long_minutes' | 'idle_short_factor' | 'idle_long_factor'
+  label: string
+  min: number
+  max: number
+  step: number
+  unit: string
+  hint: string
+}> = [
+  { key: 'peak_line', label: '峰时命中线', min: 0, max: 100, step: 1, unit: '%', hint: '工作日 09–12 / 14–18 的命中线，越低越克制' },
+  { key: 'offpeak_line', label: '谷时命中线', min: 0, max: 100, step: 1, unit: '%', hint: '其余时间的命中线，越高越主动' },
+  { key: 'miss_bonus', label: '连没中加成', min: 0, max: 40, step: 1, unit: '%', hint: '每连没中一次，下一轮命中线加的百分点' },
+  { key: 'miss_bonus_cap', label: '连没中加成上限', min: 0, max: 40, step: 1, unit: '%', hint: '加成累积的天花板（与 100% 命中线总上限不同）' },
+  { key: 'idle_short_minutes', label: '短空闲阈值', min: 0, max: 1440, step: 1, unit: '分钟', hint: '不足该时长＝刚聊完，命中线乘短空闲因子' },
+  { key: 'idle_long_minutes', label: '长空闲阈值', min: 1, max: 10080, step: 1, unit: '分钟', hint: '超过该时长＝久未互动；必须大于短空闲阈值' },
+  { key: 'idle_short_factor', label: '短空闲因子', min: 0, max: 1, step: 0.05, unit: '×', hint: '刚聊完时的命中线乘数（默认 0.15）' },
+  { key: 'idle_long_factor', label: '长空闲因子', min: 1, max: 10, step: 0.1, unit: '×', hint: '久未互动时的命中线乘数（默认 1.5）' },
+]
+
 interface ProactiveConfigPayload {
   threshold?: number
   max_daily_messages?: number
@@ -595,6 +661,12 @@ interface ProactiveConfigPayload {
     /** T-4：等待窗随机抖动上限（秒） */
     jitter_seconds?: number
   }
+  /** 零 token 骰子闸（2026-10-28）：10 键全量热读 */
+  dice_gate?: Partial<DiceGateConfig>
+  /** 真闸是否接在生产决策链（false=只读分支，界面标「当前不生效」） */
+  dice_gate_effective?: boolean
+  /** dry/live 双桶运行态（统计归属当前 worker） */
+  dice_gate_state?: DiceGateState
 }
 
 function MessageTab({ character }: { character: RoleSettingsCharacter }) {
@@ -622,6 +694,10 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
   const [llmCharHint, setLlmCharHint] = useState('')
   // T-4：主动等待窗随机抖动上限（秒），0=关闭
   const [llmJitter, setLlmJitter] = useState(120)
+  // 零 token 骰子闸（2026-10-28）：10 键全部可写；默认关闭 + 干跑开启
+  const [diceGate, setDiceGate] = useState<DiceGateConfig>(DEFAULT_DICE_GATE)
+  const [diceGateState, setDiceGateState] = useState<DiceGateState>({})
+  const [diceGateEffective, setDiceGateEffective] = useState(true)
   // Agent Plane 回放
   const [replayKey, setReplayKey] = useState('')
   const [replayTurn, setReplayTurn] = useState('')
@@ -663,6 +739,10 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
       setLlmRespectQuiet(lp.respect_quiet_hours !== false)
       setLlmCharHint(lp.character_hint || '')
       setLlmJitter(lp.jitter_seconds ?? 120)
+      // 骰子闸：逐键缺省=继承默认（后端已做逐字段容错，这里只补前端展示形状）
+      setDiceGate({ ...DEFAULT_DICE_GATE, ...(cfg.dice_gate ?? {}) })
+      setDiceGateState(cfg.dice_gate_state ?? {})
+      setDiceGateEffective(cfg.dice_gate_effective !== false)
       const hist = histRes?.data as { history?: Array<{ type: string; message: string; at: string }> } | undefined
       if (hist?.history) setHistory(hist.history)
       setCfgStatus('ready')
@@ -683,6 +763,11 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
     void loadConfig()
   }, [isAdmin, loadConfig])
 
+  /** 骰子闸单键改写（布尔/数值共用；数值按字段上下界钳制，避免界面先出现非法值） */
+  function patchDiceGate<K extends keyof DiceGateConfig>(key: K, value: DiceGateConfig[K]) {
+    setDiceGate((prev) => ({ ...prev, [key]: value }))
+  }
+
   async function handleSave() {
     setSaving(true)
     try {
@@ -702,6 +787,8 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
         llm_proactive_respect_quiet: llmRespectQuiet,
         llm_proactive_character_hint: llmCharHint,
         llm_proactive_jitter_seconds: llmJitter,
+        // 零 token 骰子闸：10 键全量随保存发送（缺键后端不写；这里发全量=所见即所存）
+        dice_gate: { ...diceGate },
       })
       // W11-D5：HTTP 200 不代表生效，必须回执 status==="ok"
       const receipt = res.data as { status?: string } | undefined
@@ -717,8 +804,7 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
     }
   }
 
-  async function handlePause(next: boolean) {
-    try {
+  async function handlePause(next: boolean) {    try {
       const res = await proactivePause(next)
       const receipt = res.data as { status?: string; paused?: boolean } | undefined
       if (receipt?.status !== 'ok') {
@@ -846,6 +932,80 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
             <p className="text-[11px] text-gray-400 mt-0.5">模型说「N 分钟后再看」时，随机延后 0–N 秒（0=关闭）</p>
           </div>
         </div>
+      </Section>
+
+      {/* 零 token 骰子闸（2026-10-28 dsh-speak-up）：10 键全部可写。
+          与 LLM 决策段同属全局配置；保存走同一个「保存频率配置」按钮
+          （一次 POST 全量随行，避免两个 owner 各自覆盖同一份配置文件）。 */}
+      <Section title="零 token 骰子闸（dsh-speak-up）">
+        <p className="text-xs text-gray-500 mb-2">
+          不花一个 token 决定「这次要不要开口」：命中线越高越容易开口。峰时默认 20%、谷时默认 60%，命中线总上限 100%。
+        </p>
+        {!diceGateEffective && (
+          <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50/60 px-2 py-1 text-[11px] text-amber-700">
+            当前不生效：后端真闸未接入生产决策链，参数可保存但不会拦截（只读展示）。
+          </p>
+        )}
+        <fieldset disabled={!diceGateEffective} className="space-y-3 disabled:opacity-60">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                aria-label="启用骰子闸"
+                checked={diceGate.enabled}
+                onChange={e => patchDiceGate('enabled', e.target.checked)}
+              />
+              启用骰子闸
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                aria-label="干跑（只记账不拦截）"
+                checked={diceGate.dry_run}
+                onChange={e => patchDiceGate('dry_run', e.target.checked)}
+              />
+              干跑（只记账不拦截）
+            </label>
+            {DICE_NUM_FIELDS.map(f => (
+              <div key={f.key}>
+                <p className="text-xs text-gray-500 mb-1">{f.label}（{f.unit}）</p>
+                <input
+                  type="number"
+                  aria-label={f.label}
+                  min={f.min}
+                  max={f.max}
+                  step={f.step}
+                  className="w-full border rounded-lg px-2 py-1.5 text-sm"
+                  value={diceGate[f.key]}
+                  onChange={e => {
+                    const raw = Number(e.target.value)
+                    const v = Number.isFinite(raw) ? Math.max(f.min, Math.min(f.max, raw)) : f.min
+                    patchDiceGate(f.key, v)
+                  }}
+                />
+                <p className="text-[11px] text-gray-400 mt-0.5">{f.hint}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-gray-400">
+            峰时窗口：周一至周五 09:00–12:00 / 14:00–18:00（其余时间为谷时）。
+            命中线 = min(100%, 基础线 × 空闲因子 + min(加成上限, 连没中 × 每次加成))。
+          </p>
+          <p className={`text-[11px] ${diceGate.dry_run ? 'text-sky-600' : 'text-rose-600'}`}>
+            {diceGate.dry_run
+              ? '干跑开启：只记账不拦截（下方 dry 统计记录「本会发 / 本会拦」）。'
+              : '干跑关闭：真拦截——未中即按最小间隔等待，本轮不烧决策调用。'}
+          </p>
+          <div className="rounded-lg bg-gray-50 p-2 text-[11px] text-gray-500 leading-relaxed">
+            <div>
+              干跑：掷骰 {diceGateState.dry?.rolls ?? 0} 次 / 本会发 {diceGateState.dry?.would_send ?? 0} / 本会拦 {diceGateState.dry?.would_skip ?? 0} / 连没中 {diceGateState.dry?.miss_streak ?? 0}
+            </div>
+            <div>
+              真拦截：掷骰 {diceGateState.live?.rolls ?? 0} 次 / 放过 {diceGateState.live?.hits ?? 0} / 拦截 {diceGateState.live?.skips ?? 0} / 连没中 {diceGateState.live?.miss_streak ?? 0}
+            </div>
+            <div className="text-gray-400 mt-0.5">统计来自当前 worker，完整账本见 Agent Plane（actor=proactive_dice）。</div>
+          </div>
+        </fieldset>
       </Section>
 
       {/* 因果回放 + curator */}

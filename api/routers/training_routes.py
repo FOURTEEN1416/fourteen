@@ -319,6 +319,19 @@ async def get_proactive_config(
         from proactive.llm_proactive import read_web_proactive_config
 
         config["llm_proactive"] = read_web_proactive_config()
+    # 零 token 骰子闸（2026-10-28）：配置**唯一真源是文件**——无论本 worker
+    # 有没有已加载引擎都按文件回实（4 worker 里只有 master 持有调度器，
+    # 非 master 读到的必须是同一份）；`dice_gate_state` 是**运行态**，只有
+    # 已加载引擎的 worker 才有，故只在缺席时补空态，绝不覆盖引擎真值。
+    from proactive.frequency import (
+        DICE_GATE_PRODUCTION_WIRED,
+        empty_dice_gate_state,
+        read_dice_gate_config,
+    )
+
+    config["dice_gate"] = read_dice_gate_config()
+    config["dice_gate_effective"] = DICE_GATE_PRODUCTION_WIRED
+    config.setdefault("dice_gate_state", empty_dice_gate_state())
     return config
 
 
@@ -460,6 +473,21 @@ async def update_proactive_config(
             llm_proactive={k: v for k, v in payload.items() if v is not None}
         )
         logger.info("LLM 主动决策配置已更新: %s", {k: v for k, v in payload.items() if v is not None})
+
+    # 零 token 骰子闸（2026-10-28）：10 键全部可写、partial merge。写入只触碰
+    # `dice_gate` 块（`utils.json_state.update_json` 锁内读改写），其余配置块
+    # （llm_proactive / quiet_hours / reply_mode / humanize / topic_state）逐字保留。
+    # 跨字段非法（idle_long <= idle_short）→ 400，不当成"保存成功"。
+    if req.dice_gate is not None:
+        from proactive.frequency import write_dice_gate_config
+
+        dice_payload = req.dice_gate.model_dump(exclude_none=True)
+        if dice_payload:
+            try:
+                write_dice_gate_config(**dice_payload)
+            except ValueError as exc:
+                raise HTTPException(400, f"dice_gate 配置非法: {exc}") from exc
+            logger.info("零 token 骰子闸配置已更新: %s", dice_payload)
 
     logger.info(
         "Proactive config updated: threshold=%s max_daily=%s",

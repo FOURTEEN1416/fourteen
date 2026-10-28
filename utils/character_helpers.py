@@ -84,6 +84,212 @@ def sanitize_character_text(text: str) -> str:
     return text
 
 
+# ── 行为蒸馏（CSP 移植 · 2026-10-28）──────────────────────────
+#
+# 行为蒸馏 = 从角色卡里提炼「这个角色遇到 X 会怎么做」（trigger → behavior（why））
+# 与「不知道就不编」的诚实边界。三件事必须同时成立，否则本段就是净负担：
+#   1. **卡上看到的 = 模型看到的**：字段上限与渲染上限是同一套常量，写卡侧的
+#      生成 prompt 也声明同一套数字。不做「渲染时按预算淘汰条目」——那会让
+#      「卡上有 7 条、模型只看到 2 条」，属于静默丢内容。
+#   2. **整段硬上限 ≤ 400 字符**：本段位于对话历史之前（# 性格 之后），约束力
+#      低于 post-history 位的 creator_notes，堆规则只会加剧指令稀释；宁可
+#      每条短，也不要把 prompt 撑长。
+#   3. **边界行前置且豁免**：honesty_boundary 排在条目之前、永不被条目挤掉。
+#
+# 单条最坏形态 "- {t} → {b}（{w}）" = 2 + 12 + 3 + 16 + 1 + 6 + 1 = 41 字符；
+# 7 条 + 段头(21) + 护栏(12) + 边界行(3+60) + 9 个换行 = 392 ≤ 400。
+# 改动任一常量都必须重算这个式子（tests/test_character_behavior_distillation.py
+# 的满长用例会先把超预算变成红灯）。
+MAX_BEHAVIOR_PATTERNS = 7
+MAX_BEHAVIOR_TRIGGER_CHARS = 12
+MAX_BEHAVIOR_TEXT_CHARS = 16
+MAX_BEHAVIOR_WHY_CHARS = 6
+HONESTY_BOUNDARY_MAX_CHARS = 60
+BEHAVIOR_SECTION_MAX_CHARS = 400
+
+# 段头**中性**：本仓角色卡不只有女性角色（42 卡中有男性卡），写死「她」会把
+# 男性角色说成女性；同时不引入第二人称称谓，避免与 utils/address_terms.py 的
+# 称呼白名单（2026-10-15 称呼根治批）打架。
+BEHAVIOR_SECTION_HEADER = "# 行为规则（一贯反应倾向，不是台词模板）"
+BEHAVIOR_SECTION_GUARDRAIL = "只判断怎么做，不要念出来"
+BEHAVIOR_BOUNDARY_PREFIX = "边界："
+
+# 行内文本的极简清洗（本批只做「不把标签/脚本带进 prompt」这一层；
+# 完整的 XSS/注入闸归 shisi/character/validator.py，那是另一个 owner）。
+_INLINE_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
+_INLINE_UNSAFE_RE = re.compile(
+    r"<\s*/?\s*script[^>]*>|<\s*/?\s*iframe[^>]*>|javascript\s*:|on\w+\s*=",
+    re.IGNORECASE,
+)
+_INLINE_TRAILING_RE = re.compile(r"[\s，,、；;：:。\.\-—]+$")
+
+
+def _coerce_inline_text(value: Any) -> str:
+    """把任意标量/容器摊成一行可读文本（**禁止** repr 进 prompt）。
+
+    list/tuple → 非空项用「；」连接；dict → 取 values 用「；」连接；
+    None → 空串；其余标量 → str()。
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple, set)):
+        return "；".join(str(item).strip() for item in value if str(item).strip())
+    if isinstance(value, dict):
+        return "；".join(str(item).strip() for item in value.values() if str(item).strip())
+    return str(value)
+
+
+def _clean_inline(value: Any, limit: int) -> str:
+    """单行文本清洗：控符折空格 → 去标签/脚本残片 → 折叠空白 → 截断到 limit。"""
+    text = _coerce_inline_text(value)
+    text = _INLINE_CONTROL_RE.sub(" ", text)
+    text = _INLINE_UNSAFE_RE.sub("", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if limit > 0 and len(text) > limit:
+        text = _INLINE_TRAILING_RE.sub("", text[:limit].rstrip())
+    return text
+
+
+def sanitize_honesty_boundary(raw: Any) -> str:
+    """诚实边界 → 单行短文本（≤ HONESTY_BOUNDARY_MAX_CHARS）。
+
+    非字符串输入**不得**变成 repr：`["不知道天气","不编造行程"]` 必须是
+    「不知道天气；不编造行程」，不能是 `['不知道天气', '不编造行程']`。
+    """
+    if raw is None or raw == "" or raw == [] or raw == {}:
+        return ""
+    return _clean_inline(raw, HONESTY_BOUNDARY_MAX_CHARS)
+
+
+def _behavior_pattern_from_string(value: Any) -> dict[str, str] | None:
+    """字符串条目 → {trigger, behavior, why}。
+
+    切分规格（写死，避免各路径各切一套）：
+    - 分隔符「→」，`->` 等价；
+    - 无分隔符 → 整串当 behavior；
+    - 恰 2 段 → trigger、behavior；
+    - ≥3 段 → trigger=第 1 段、behavior=第 2 段、why=其余段用「；」连接
+      （丢掉多余箭头但**保留全部文字**）；
+    - behavior 为必需项，清洗后为空则整条丢弃。
+    """
+    text = _coerce_inline_text(value)
+    if not text.strip():
+        return None
+    parts = [part.strip() for part in text.replace("->", "→").split("→")]
+    if len(parts) == 1:
+        trigger, behavior, rest = "", parts[0], []
+    elif len(parts) == 2:
+        trigger, behavior, rest = parts[0], parts[1], []
+    else:
+        trigger, behavior, rest = parts[0], parts[1], parts[2:]
+    why = "；".join(part for part in rest if part)
+    trigger_clean = _clean_inline(trigger, MAX_BEHAVIOR_TRIGGER_CHARS)
+    behavior_clean = _clean_inline(behavior, MAX_BEHAVIOR_TEXT_CHARS)
+    why_clean = _clean_inline(why, MAX_BEHAVIOR_WHY_CHARS)
+    if not behavior_clean:
+        return None
+    return {"trigger": trigger_clean, "behavior": behavior_clean, "why": why_clean}
+
+
+def _behavior_pattern_from_dict(value: dict[str, Any]) -> dict[str, str] | None:
+    """dict 条目只认 trigger/behavior/why 三个键，**绝不**再按「→」切分。"""
+    behavior_clean = _clean_inline(value.get("behavior"), MAX_BEHAVIOR_TEXT_CHARS)
+    if not behavior_clean:
+        return None
+    return {
+        "trigger": _clean_inline(value.get("trigger"), MAX_BEHAVIOR_TRIGGER_CHARS),
+        "behavior": behavior_clean,
+        "why": _clean_inline(value.get("why"), MAX_BEHAVIOR_WHY_CHARS),
+    }
+
+
+def normalize_behavior_patterns(raw: Any) -> list[dict[str, str]]:
+    """任意形态的行为蒸馏条目 → 规范化列表（≤ MAX_BEHAVIOR_PATTERNS 条）。
+
+    接受：单条 dict、dict 列表、字符串（多行 = 多条）、`{"patterns": [...]}`。
+    归一化幂等：`normalize(normalize(x)) == normalize(x)`。
+    空/非法 → `[]`（调用方据此「不落盘空键、不渲染空段」）。
+    """
+    if raw is None or raw == "" or raw == [] or raw == {}:
+        return []
+
+    items: list[Any]
+    if isinstance(raw, dict):
+        nested = next(
+            (raw[key] for key in ("patterns", "rules", "items")
+             if isinstance(raw.get(key), (list, tuple))),
+            None,
+        )
+        items = list(nested) if nested is not None else [raw]
+    elif isinstance(raw, str):
+        items = [line for line in raw.splitlines() if line.strip()]
+    elif isinstance(raw, (list, tuple, set)):
+        items = list(raw)
+    else:
+        items = [raw]
+
+    out: list[dict[str, str]] = []
+    for item in items:
+        pattern = (
+            _behavior_pattern_from_dict(item)
+            if isinstance(item, dict)
+            else _behavior_pattern_from_string(item)
+        )
+        if pattern:
+            out.append(pattern)
+        if len(out) >= MAX_BEHAVIOR_PATTERNS:
+            break
+    return out
+
+
+def _format_behavior_line(pattern: dict[str, str]) -> str:
+    trigger = pattern.get("trigger", "")
+    behavior = pattern.get("behavior", "")
+    why = pattern.get("why", "")
+    if trigger and why:
+        return f"- {trigger} → {behavior}（{why}）"
+    if trigger:
+        return f"- {trigger} → {behavior}"
+    if why:
+        return f"- {behavior}（{why}）"
+    return f"- {behavior}"
+
+
+def render_behavior_section(
+    patterns: Any = None, honesty_boundary: Any = "",
+) -> str:
+    """渲染「# 行为规则」段（整段 ≤ BEHAVIOR_SECTION_MAX_CHARS，无内容返回空串）。
+
+    返回的字符串**不含**段前空行（由调用方按 parts 习惯补），不含段后空行。
+    段内顺序：段头 → 护栏 → 边界（前置且豁免）→ 条目。
+    """
+    items = normalize_behavior_patterns(patterns)
+    boundary = sanitize_honesty_boundary(honesty_boundary)
+    if not items and not boundary:
+        return ""
+
+    lines = [BEHAVIOR_SECTION_HEADER, BEHAVIOR_SECTION_GUARDRAIL]
+    if boundary:
+        lines.append(f"{BEHAVIOR_BOUNDARY_PREFIX}{boundary}")
+    lines.extend(_format_behavior_line(item) for item in items)
+
+    section = "\n".join(lines)
+    if len(section) <= BEHAVIOR_SECTION_MAX_CHARS:
+        return section
+
+    # 防御路径：常量为误改时按行收口（段头/护栏/边界先占位，永不被条目挤掉）。
+    # 正常路径由上面的字段上限保证不可达 —— 满长 7 条用例锁死这一点。
+    head_len = 2 + (1 if boundary else 0)
+    kept = lines[:head_len]
+    for extra in lines[head_len:]:
+        if len("\n".join([*kept, extra])) > BEHAVIOR_SECTION_MAX_CHARS:
+            break
+        kept.append(extra)
+    return "\n".join(kept)
+
+
 def _as_float(value: Any) -> float | None:
     """可转 float 则返回值，否则 None（None 表示「这不是数值维度」）。"""
     try:
@@ -226,6 +432,11 @@ def normalize_character_card(data: dict[str, Any]) -> dict[str, Any]:
     2. **幂等**：`normalize(normalize(x)) == normalize(x)`。
     3. **优先级**：顶层扁平字段 > 嵌套块；嵌套块在输出里被同步为同一份规范值，
        未知扩展键原样保留。
+    4. **行为蒸馏两字段（2026-10-28）**：`behavior_patterns` 走
+       `normalize_behavior_patterns`（字符串按「→」切分、dict 只取三键、上限 7 条、
+       单字段截断），`honesty_boundary` 走 `sanitize_honesty_boundary`（非字符串
+       摊成「；」连接，**不得** repr 进 prompt）。规范化后为空则在下方清理循环里
+       整个键 pop —— 「缺省/空数组不落盘空段」的落点就在这里。
     """
     if not isinstance(data, dict):
         data = {}
@@ -304,6 +515,14 @@ def normalize_character_card(data: dict[str, Any]) -> dict[str, Any]:
         "scenario": scenario,
         "first_mes": first_mes,
         "mes_example": mes_example,
+        # 行为蒸馏（2026-10-28 CSP 移植）：与 scenario/personality_text 同一条
+        # 「顶层优先、嵌套回退、无损幂等」路径。清洗规格在各自 docstring 里。
+        "behavior_patterns": normalize_behavior_patterns(
+            _pick(src, top, "behavior_patterns")
+        ),
+        "honesty_boundary": sanitize_honesty_boundary(
+            _pick(src, top, "honesty_boundary")
+        ),
     }
 
     # 嵌套块同步为同一份规范值：否则下一次读取仍取到旧值 = 编辑静默丢失。
@@ -314,7 +533,8 @@ def normalize_character_card(data: dict[str, Any]) -> dict[str, Any]:
     # 清理临时空字段，保持响应干净（只清**规范化后确实为空**的可选字段，
     # 且逐字段以规范值为准，不再影响任何有内容的字段）
     for key in ("creator_notes", "personality_text", "speaking_style_text",
-                "catchphrases", "scenario", "first_mes", "mes_example"):
+                "catchphrases", "scenario", "first_mes", "mes_example",
+                "behavior_patterns", "honesty_boundary"):
         if not normalized.get(key):
             normalized.pop(key, None)
 
