@@ -1,6 +1,6 @@
 # 数据库地图
 
-**最近更新:** 2026-10-12（`data/sqlite.db` 全量表清单刷新：schema 合计 28 张 = 本地只读实测 27 张 + v1.45 惰性建表 `user_identity_map` 本地未实例化，见下方清单注记；`api/database.py` 9 模型同日复核一致）
+**最近更新:** 2026-10-28（v1.58 话题状态机三表 + R7 `user_reply_mode` 增补；`data/sqlite.db` 本地只读亲测 **35 张**（含 `sqlite_sequence` 内部表与 5 张 `user_facts_fts*` 影子表）= **29 张业务表**；schema 真源合计 **32 张** = 29 已定义业务表 + 3 张 topic 表（惰性建表，本地未触发首次写入故不在实测数内；**生产已实测在位**且 `topic_plan` 有真实计划行），见下方清单注记；`api/database.py` 9 模型同日复核一致）
 **数据库:** SQLite (主, aiosqlite) + ChromaDB (向量) + 文件系统 (角色卡/知识库)
 
 > **✅ 2026-09-29 全仓历遍复核（三库实测）**：`data/users.db` **9 表**（api/database.py 模型；+`user_active_characters` W1 `94ed63d` 激活归属唯一 owner；`users.id` AUTOINCREMENT 表重建 + 引擎级 `PRAGMA foreign_keys=ON`，W9）；`data/sqlite.db` **27 张**（不含 FTS 影子表；较 09-20 口径 +`memory_extraction_progress`/`fact_deletion_watermarks`/`memory_forwards`/`user_persona`/`user_persona_snapshots`/`user_profile`，旧清单中 `sessions`/`working_memory`/`emotion_trajectory`/`pending_events`/`affinity_log` 五死表已不存在）；`data/runtime_plane.db` **8 表**（W3 运行平面跨进程 CAS 账，WAL）。文件账：`data/lifecycle_jobs/`（W9 五阶段作业账+坟场）、`data/runtime_switches.json`（W6 工具开关）、`data/voice_catalog.json`（W7 音色）、`config/character_templates.yaml`（W12 策展清单）。
@@ -91,15 +91,64 @@
 > `api/database.py` 中的 **9 表**是用户认证与控制面模型（`users` / `user_sessions` / `invite_codes` /
 > `consent_records` / `wechat_bindings` / `wechat_channel_sessions` / `wechat_peer_preferences` / `character_achievements` / `user_active_characters`）。
 
-### `data/sqlite.db` 全量表清单（schema 合计 28 张；本地库只读实测 27 张，2026-10-12，不含 FTS 影子表）
+### `data/sqlite.db` 全量表清单（schema 真源合计 32 张；本地库只读实测 29 张业务表，2026-10-28，不含 FTS 影子表与 `sqlite_sequence`）
 
 `shisi/migrations.py` 建 12 张（上表）。同库另由 `structured_memory.py` /
-`_legacy_diary_summarizer.py` 等建表，**schema 合计 28 张**（不含 `sqlite_sequence` 与 `user_facts_fts*` FTS 影子表）。本地 `data/sqlite.db` 2026-10-12 只读实测 **27 张**——`user_identity_map` 系 v1.45 惰性 `CREATE TABLE IF NOT EXISTS`（`structured_memory.py:201`），本地 dev 库尚未触发实例化故不在实测数内；生产库已实例化（2026-10-12 unlink 后 0 行，机制保留）：
+`utils/topic_state.py` / `utils/reply_mode.py` 等建表，**schema 真源合计 32 张**（不含 `sqlite_sequence` 与 `user_facts_fts*` FTS 影子表）。本地 `data/sqlite.db` 2026-10-28 只读实测 **29 张业务表**（含 FTS 影子与 `sqlite_sequence` 后文件账 **35 张**）；两处惰性建表注记：**topic 三表**（v1.58，`utils/topic_state.py:85-128` `_SCHEMA`）本地未触发首次写入故不在实测数内，**生产已实例化**且 `topic_plan` 已有真实计划行：
 
 | 来源 | 表 |
 |------|-----|
 | `shisi/migrations.py`（12） | `characters` / `characters_v2` / `affinity_records` / `affinity_unlocks` / `affinity_audit` / `emotion_stage_state` / `stickers` / `character_stickers` / `vital_signs_state` / `memory_favorites` / `memory_recycle_bin` / `shisi_schema_version` |
-| `structured_memory.py` 等（16） | `chat_history`（**对话上下文真源，按 session 隔离读取**） / `user_facts`（+`user_facts_fts` 全文索引） / `daily_summaries` / `reflections` / `tool_call_log` / `trace_log` / `persona_evolution_log` / `pending_intents`（澄清状态机：槽位合并 / 两轮上限 / 15min TTL） / `reminders`（+session_key/user_id/status/delivered_at/fail_count） / `memory_extraction_progress`（抽取租约 + 来源 id 水位） / `fact_deletion_watermarks`（删除水位，派生召回失效） / `memory_forwards`（转发） / `user_persona` / `user_persona_snapshots`（画像保序快照） / `user_profile`（用户画像） / `user_identity_map`（D15 显式身份组，v1.45 @c0244b2；2026-10-12 生产 unlink 后 0 行、机制保留） |
+| `structured_memory.py` 等（17） | `chat_history`（**对话上下文真源，按 session 隔离读取**） / `user_facts`（+`user_facts_fts` 全文索引） / `daily_summaries` / `reflections` / `tool_call_log` / `trace_log` / `persona_evolution_log` / `pending_intents`（澄清状态机：槽位合并 / 两轮上限 / 15min TTL） / `reminders`（+session_key/user_id/status/delivered_at/fail_count） / `memory_extraction_progress`（抽取租约 + 来源 id 水位） / `fact_deletion_watermarks`（删除水位，派生召回失效） / `memory_forwards`（转发） / `user_persona` / `user_persona_snapshots`（画像保序快照） / `user_profile`（用户画像） / `user_identity_map`（D15 显式身份组，v1.45；本地已实例化） / **`user_reply_mode`**（R7 按用户回复模式覆盖，v1.56；真源 `utils/reply_mode.py:224` 幂等 `CREATE TABLE IF NOT EXISTS`；`user_key` TEXT PK / `mode` TEXT NOT NULL / `updated_at` TEXT NOT NULL DEFAULT ''——本地库 DDL 亲测） |
+| `utils/topic_state.py`（3，v1.58，惰性建表·生产已实例化） | `topic_state` / `topic_plan` / `topic_meta`（schema 逐列见下节；**唯一 owner=`utils/topic_state.py`**，其他模块不得直接 `sqlite3.connect`） |
+
+### 话题状态机三表 schema（v1.58，真源 `utils/topic_state.py:85-128` `_SCHEMA`，逐列抄实 2026-10-28）
+
+**`topic_state`** — 话题状态行（PK `(session_key, character_id, topic_id)`；索引 `idx_topic_state_session_status(session_key, character_id, status, last_active_at DESC)`）：
+
+| 字段 | 类型 | 约束/默认 | 说明 |
+|------|------|-----------|------|
+| session_key | TEXT | NOT NULL, PK | 完整会话键（`N:wxid` / `N:web:8hex`） |
+| character_id | TEXT | NOT NULL, PK | 角色 ID |
+| topic_id | TEXT | NOT NULL, PK | `sha1(session_key\|character_id\|norm(title))[:12]` |
+| title | TEXT | NOT NULL | 话题标题（≤20 字，首句截取） |
+| summary | TEXT | NOT NULL DEFAULT '' | 最近摘要（≤60 字，**不存对话原文**） |
+| status | TEXT | NOT NULL | CHECK `IN ('active','parked','closed')` |
+| salience | REAL | NOT NULL DEFAULT 0.5 | 显著度 0..1（每轮衰减 ×0.9，命中 +0.2 封顶 1.0） |
+| mention_count | INTEGER | NOT NULL DEFAULT 0 | 提及次数 |
+| turn_count | INTEGER | NOT NULL DEFAULT 0 | 轮数（每轮对本会话 active 行 +1） |
+| anchors | TEXT | NOT NULL DEFAULT '[]' | JSON 数组，≤3 条短锚点（各 ≤40 字） |
+| idle_turns | INTEGER | NOT NULL DEFAULT 0 | 连续未命中轮数（≥3 → parked） |
+| last_active_at | TEXT | NOT NULL | 北京墙钟 `%Y-%m-%d %H:%M:%S`（naive） |
+| created_at | TEXT | NOT NULL | 同上 |
+| updated_at | TEXT | NOT NULL | 同上 |
+| expires_at | TEXT | NOT NULL | TTL 7 天（Q4-B 固化 `retention_days=7`） |
+
+**`topic_plan`** — 主动线下一步对话计划（PK `(session_key, character_id)`，单条 upsert）：
+
+| 字段 | 类型 | 约束/默认 | 说明 |
+|------|------|-----------|------|
+| session_key | TEXT | NOT NULL, PK | 会话键 |
+| character_id | TEXT | NOT NULL, PK | 角色 ID |
+| topic | TEXT | NOT NULL DEFAULT '' | 计划话题（≤40 字） |
+| intent | TEXT | NOT NULL DEFAULT '' | 意图（≤120 字） |
+| planned_at | TEXT | NOT NULL | 决策时刻 |
+| next_at | TEXT | NOT NULL | `planned_at + wait_minutes`（到点才可 take） |
+| expires_at | TEXT | NOT NULL | `min(next_at+24h, planned_at+7天)` |
+| consumed_at | TEXT | NULL | 发送成功才写（upsert 复位 NULL；skip 也存 → 重启读 → 到点注入 → 发送成功消费） |
+
+**`topic_meta`** — 每 (会话, 角色) 一行的 judge 计数（PK `(session_key, character_id)`）：
+
+| 字段 | 类型 | 约束/默认 | 说明 |
+|------|------|-----------|------|
+| session_key | TEXT | NOT NULL, PK | 会话键 |
+| character_id | TEXT | NOT NULL, PK | 角色 ID |
+| turns_since_llm | INTEGER | NOT NULL DEFAULT 0 | 距上次 LLM judge 轮数（≥`judge_every_turns=4` 触发） |
+| llm_calls | INTEGER | NOT NULL DEFAULT 0 | 当日 LLM judge 调用数（跨日归零；`daily_llm_budget=0` 不限，Q5） |
+| last_llm_at | TEXT | NOT NULL DEFAULT '' | 上次 judge 时刻 |
+| last_turn_id | TEXT | NOT NULL DEFAULT '' | 去重回放（同 turn_id → `action=replay` 零写） |
+
+> 关闭态零 DB：`topic_state.enabled=false` 时六 API 首行短路，不连库、不建表、不读表（唯一例外 `purge_expired(force=True)` 每日维护）。配置热读/写走 `data/scheduler_config.json` 的 `topic_state` 块；裁决固化边界（`judge_every_turns=(4,4)` / `daily_llm_budget=(0,0)` / `active_cap=(1,3)` / `retention_days=(7,7)` / `recall_after_hours≥6` / `recall_max≤2`）写入越界一律 400/422。
 
 ---
 

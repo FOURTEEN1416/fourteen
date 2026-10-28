@@ -14,10 +14,10 @@
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **当前状态（2026-10-28 话题状态机批已三端部署 @ `3fe2771`；四项跟进批已提交未部署）**：话题状态机 Q1–Q6 全量落地（**Q1-B** 确定性状态机 + 每 4 轮稀疏 LLM；**Q2** 状态块 + 软化接续；**Q3-A** parked 复提三重闸；**Q4-B** 全部状态 7 天 TTL；**Q5** 免费 API 不设每日 LLM 上限；**Q6-B** 多 active 上限 3；主动线 `topic_plan` 全周期；管理端 `/api/topic-state/*` 三端点 + 前端「话题状态」区），**默认开启**，回滚走管理端显式 `topic_state.enabled=false` / `llm_judge_enabled=false`。四项跟进批（4A 测试债清零 / 4B CSP 行为蒸馏 / 4C 零 token 骰子闸 / 4D BreezeTTS2 设计文档）已本地提交，推送由收口流程统一执行、部署待用户裁决。批次详情见 `LOG.md`，当前状态见 `docs/HANDOFF_REPORT.md`。
+> **当前状态（2026-10-28 全批三端部署，生产 @ `c3ede77`）**：话题状态机批 `3fe2771`（Q1–Q6 全量落地：**Q1-B** 确定性状态机 + 每 4 轮稀疏 LLM；**Q2** 状态块 + 软化接续；**Q3-A** parked 复提三重闸；**Q4-B** 全部状态 7 天 TTL；**Q5** 免费 API 不设每日 LLM 上限；**Q6-B** 多 active 上限 3；主动线 `topic_plan` 全周期；管理端 `/api/topic-state/*` 三端点 + 前端「话题状态」区；**默认开启**，回滚走管理端显式 `topic_state.enabled=false` / `llm_judge_enabled=false`）+ 四项跟进批（4A 测试债清零 `1d444d8` / 4B CSP 行为蒸馏 `5dff923` / 4C 零 token 骰子闸 `aabc867` / 4D BreezeTTS2 设计文档 `c0a4d2c`）+ CI 修复 `165504f`（骰子测试时区对齐 + npm audit fix）+ 沉浸式方括号动作段剥离 hotfix `c3ede77` **均已部署**（health/ready 200、blob 抽验一致）。批次详情见 `LOG.md`，当前状态见 `docs/HANDOFF_REPORT.md`。
 
-> **测试口径**（后端 = 2026-10-28 收口批实测）：后端 **4256 passed + 2 skipped / 4 failed**（收集 **4262**；四分块门 958+1180+1097+1021 通过；现役角色卡 **42 张**；2 跳过=`test_cache.py:297` Redis 环境 + `tests/golden/test_golden_set.py:48`（live_llm 用例默认不跑，设 `GOLDEN_LIVE=1` 才跑）；**既有四失败已由 4A `1d444d8` 清零**——`test_byok_hardening` api_base 校验 ×2 / `test_w1_identity_authorization` 无主卡 / `test_sweep_memory_forward_owner` 公共卡口径，定向复跑三文件 46 通过 0 失败实证；分块门残留 4 个失败与既有族同文件域、身份主控复核中）。⚠️ **口径勘误**：分块清单必须 **`find` 递归生成**——`ls tests/*.py tests/core/*.py` **漏子目录 `tests/api/`**（2 文件 32 例，2026-10-17 实证）；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
-> 前端 `251 passed`（vitest 5.0.3，36 文件）+ `tsc --noEmit` 0 错误；ruff 全仓 0 错（`All checks passed!`）。⚠️ 口径基于含 10 个未提交实现文件的工作树（4B/4C 实现待补交）。
+> **测试口径**（后端 = 2026-10-28 全量四分块门实测，生产 @ `c3ede77`）：后端 **4256 passed + 2 skipped / 4 failed**（收集 **4263** / **266 个测试文件**；现役角色卡 **42 张**；2 跳过=`test_cache.py:297` Redis 环境 + `tests/golden/test_golden_set.py:48`（live_llm 用例默认不跑，设 `GOLDEN_LIVE=1` 才跑）；4 失败=**骰子闸时区族**——测试钉 UTC 主机时钟与引擎 `now_local` 差 8h，根因已由 `165504f` 时区对齐根治，五文件新鲜复跑 **128/128** 全绿、CI 绿）。⚠️ **口径勘误**：分块清单必须 **`find` 递归生成**——`ls tests/*.py tests/core/*.py` **漏子目录 `tests/api/`**（2 文件 32 例，2026-10-17 实证）；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> 前端 `251 passed`（vitest 5.0.3，36 文件）+ `tsc --noEmit` 0 错误；ruff 全仓 0 错（`All checks passed!`）。徽章口径 **4508**（4256 Py + 251 FE + 1 标记）。
 > ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 13）。**引用基线必须同时声明卡数**。
 
 ---
@@ -73,6 +73,8 @@ python main.py
 | **角色系统** | 每个微信用户绑一个角色卡，性格、说话风格、口头禅都能调 |
 | **情感引擎** | 聊得越久越了解你，有亲密度和情感阶段变化 |
 | **主动搭话** | 不全是等你发消息，系统也会主动找话题 |
+| **话题状态机** | 多话题并行跟踪（active 上限 3）、收尾话题转 parked 并按三重闸（≥6h + 非静默 + LLM judge 允许）复提、每 4 轮稀疏 LLM 仲裁（8s 硬超时失败保留原状态）、全部状态 7 天 TTL、主动线按下一步计划（topic_plan）全周期衔接；管理端「话题状态」区可视（默认开启，回滚走管理端显式开关） |
+| **主动骰子闸** | 零 token 掷骰闸（dsh-speak-up）：主动发言先掷骰、命中才进 LLM 生成，未命中零成本跳过；默认关闭、dry_run 默认开，管理端与前端配置面可调 |
 | **语音合成** | 文字回复能自动转语音发到微信。MiMo Cloud TTS（基础合成 / 语音克隆 / 音色设计），云端失败可降级 Windows SAPI 本地兜底 |
 | **记忆系统** | 会记住你说过的事（三层记忆：短期+情景+长期） |
 | **工具** | 天气、搜索、日历、计算器、提醒、时间感知等 17 个内置工具（默认注册 13 个） |
@@ -159,29 +161,31 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 ## 项目结构
 
 ```
-├── api/                  FastAPI 后端（226 端点 / 193 条路径，2026-10-12 内省复测；len(app.routes)=230 含 4 条框架路由）
+├── api/                  FastAPI 后端（235 端点 / 197 唯一路径，2026-10-28 内省实测；len(app.routes)=239 含 4 条框架路由）
 │   ├── app_factory.py    create_api_app() —— 唯一 app 工厂
-│   ├── routers/          24 个域路由模块（character/chat/misc/personality/users/
+│   ├── routers/          25 个域路由模块（character/chat/misc/personality/users/
 │   │                     training/tools/safety/clone/auth/admin/invite/voice/
 │   │                     mimo_voice/storyline/wechat/wechat_channel/emotion/memory/
 │   │                     knowledge/persona_card/llm_providers/agent_plane/
-│   │                     character_template）
+│   │                     character_template/topic）
 │   └── achievement_engine.py / database.py / auth_jwt.py / deps.py ...
 ├── orchestrator/         编排器（9 文件）：主类 + _InitPhasesMixin + _StreamPipelineMixin
 │                         + session_locks + voice_detector + console_chat
 │                         + tool_gate（工具意图分级）+ context_budget（上下文预算/信封）
 ├── shisi/                DDD 领域层（116 文件）：application / core / infrastructure /
 │                         character / knowledge / memory / affinity / voice / vault ...
-├── utils/                公共工具（19 文件）：local_time（墙钟真源）/ llm_bridge /
+├── utils/                公共工具（26 文件）：local_time（墙钟真源）/ llm_bridge /
 │                         session_key / json_state / fallback_lines / affinity_state /
-│                         reply_mode / async_utils / important_dates ...
+│                         reply_mode / async_utils / important_dates /
+│                         topic_state（话题状态机三表唯一 owner）/ stream_guard（主链增量出站守卫）...
 ├── voice/                MiMo Cloud TTS + 音频转码（silk）
 ├── wechat_direct/        微信直连（每人独立通道·D16 谁扫码谁聊：connector_registry
 │                         + channel_paths + wechat_connector）
 ├── user_scheduler.py     多用户调度（每个微信用户独立情感状态）
 ├── my_character/         情感引擎 + 角色卡
 ├── llm_provider/         LLM 接入层（多供应商 fallback）
-├── proactive/            主动搭话调度（APScheduler）
+├── proactive/            主动搭话调度（APScheduler；14 文件：ASE 引擎 / 调度 /
+│                         topic_recall（parked 话题复提候选）/ frequency（零 token 骰子闸））
 ├── persona_extractor/    人格提取 / PAD 检测 / 网络画像增强
 ├── security/             4 安全模块（content_safety / encryption /
 │                         pii_anonymizer / prompt_injection）
@@ -190,10 +194,10 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 │   └── src/
 │       ├── api/          15 个 API 模块（按域拆分）
 │       ├── pages/        19 个页面（含 TemplatesPage / SettingsAccount）
-│       ├── store/        Zustand 3 个（authStore / characterBuilderStore / errorStore）
+│       ├── store/        Zustand 5 个（authStore / characterBuilderStore / errorStore / humanizeStore / topicStateStore）
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
-├── tests/                4256 后端测试通过 + 2 跳过 / 4 分块门残留失败（2026-10-28 收口实测，收集 4262；既有四失败已清）+ 251 前端测试
+├── tests/                4256 后端测试通过 + 2 跳过 / 4 失败（骰子闸时区族，根因已由 165504f 根治；2026-10-28 实测，收集 4263 / 266 文件）+ 251 前端测试（36 文件）
 ├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 42 张 = 41 策展 + 1 张 user_id=1 林挽夏克隆变体，已定性 2026-10-12）
 └── main.py               入口
 ```

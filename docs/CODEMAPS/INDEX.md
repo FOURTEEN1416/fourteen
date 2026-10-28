@@ -1,10 +1,10 @@
 # 代码地图索引
 
-> **✅ 2026-10-12 图册口径对齐刷新**：三端一致 **`7ac7418`**（2026-10-12 D16 补裁批，含同日 v1.46 通道语义对齐 `173b2b3`）；测试口径 **3027 收集（196 测试文件）/ 3026 通过 / 1 跳过 / 0 失败**（2026-10-12 通道语义对齐批串行四分块实跑，`LOG.md` 10-12 条；全量口径必含 `tests/core/`；当前工作树含未提交新测试文件，实际收集更多）+ 前端 **182**（30 文件，vitest ^5.0.3，徽章 **3208**）；端点 **226 APIRoute / 193 唯一路径 / 19 include_router**（`len(app.routes)`=230；2026-10-12 内省，v1.46 拆除 peers 三端点后）；活跃 ADR **12** 不变；.py 总量 **515**（含未提交新测试，见下行规模行）。权威数字以 `CODE_GRAPH.md` **v3.8.29** 为准。更早刷新（10-11/09-27/09-28/09-29）见 git 历史与 `docs/history/INDEX.md`。
+> **✅ 2026-10-28 批次刷新**：三端一致 **`c3ede77`**（2026-10-28 收口批：话题状态机 `3fe2771` + 四项跟进 `1d444d8`/`5dff923`/`aabc867`/`c0a4d2c` + CI 修复 `165504f` + 沉浸式方括号剥离 hotfix `c3ede77`，全批三端部署）；测试口径 **4263 收集（266 测试文件）/ 4256 通过 + 2 跳过 / 4 失败**（今日全量四分块门实跑；4 失败=骰子闸时区族，根因已由 `165504f` 根治、五文件新鲜复跑 128/128、CI 绿；全量口径必含 `tests/core/` 与 `tests/api/`，分块清单 `find` 递归生成）+ 前端 **251**（36 文件，vitest ^5.0.3，徽章 **4508**）；端点 **235 APIRoute / 197 唯一路径 / 20 include_router**（`len(app.routes)`=239 含 4 条框架路由；2026-10-28 `create_api_app` 内省实测，AI_GF_ENV=dev）；活跃 ADR **12** 不变；.py 总量 **590**（2026-10-28 find 实测，见下行规模行）。权威数字以 `CODE_GRAPH.md` **v3.8.34** 为准。更早刷新（10-12/10-11/09-27~09-29）见 git 历史与 `docs/history/INDEX.md`。
 
-**最近更新:** 2026-10-12
+**最近更新:** 2026-10-28
 **项目版本:** 3.1.0
-**项目规模:** **515** 个 Python 文件（模块 283 + 根级 2 + `scripts/` **18** + `tests/` **209**（tracked test_*.py 196 与 AGENTS 口径一致；工作树含 11 个未提交新测试 .py，净树口径更小）+ `deploy/` 3；**2026-10-12 find 实测**；**不含** `frontend/` 与内嵌 `大创赛报名以及后期发展/`） + **128** TS/TSX 文件（frontend/src） | 当前分支: `main`
+**项目规模:** **590** 个 Python 文件（模块包 **295** + `data/archive/` 归档遗物 1 + 根级 2 + `scripts/` **19** + `tests/` **270**（test_*.py 266 与 AGENTS 口径一致）+ `deploy/` 3；**2026-10-28 find 实测，顶层分布两窗口互核闭合**；**不含** `frontend/` 与内嵌 `大创赛报名以及后期发展/`） + **138** TS/TSX 文件（frontend/src） | 当前分支: `main`
 **架构框架:** FastAPI (后端) + React/Vite (前端) + SQLite/ChromaDB (数据)
 
 ---
@@ -31,22 +31,24 @@
 | **后端** | Python ≥3.10 + FastAPI + Uvicorn | `:8000` |
 | **数据库** | SQLite (主, aiosqlite) + ChromaDB (向量) | `data/users.db` |
 
-### 项目目录结构（2026-09-19 实测）
+### 项目目录结构（2026-10-28 实测）
 
 ```
 unique-you/
-├── api/                    # FastAPI 路由层 (48 py 文件：app_factory/run_api/24 routers/
+├── api/                    # FastAPI 路由层 (49 py 文件：app_factory/run_api/25 routers/
 │                           #   achievement_engine/database/auth/auth_jwt/deps/
 #                           #   health_routes/main_routes/qrcode_store/websocket_server/state/...)
 ├── shisi/                  # DDD 核心域 (116 py 文件，v2 死模块删除后口径)
 ├── my_character/           # 情感引擎 (12 py 文件)
-├── frontend/               # React 前端 SPA (19 pages / 15 api 模块 / 3 store)
+├── frontend/               # React 前端 SPA (19 pages / 15 api 模块 / 5 store)
 ├── orchestrator/           # 编排包 (9 文件：主类+init/stream mixin+session_locks+voice_detector
 │                           #   +console_chat+tool_gate+context_budget)
 ├── persona_extractor/      # 人格提取 (13 文件)
-├── tools/                  # 工具系统 (13 py 文件, 12 内置工具)
-├── utils/                  # 公共工具 (19 文件：local_time/fallback_lines/affinity_state/
-│                           #   reply_mode/async_utils/important_dates/...)
+├── tools/                  # 工具系统 (13 py 文件, 17 内置工具·默认注册 14
+│                           #   = config/system.yaml builtin_tools，2026-10-21 R3 批 +memory)
+├── utils/                  # 公共工具 (26 文件：local_time/fallback_lines/affinity_state/
+│                           #   reply_mode/async_utils/important_dates/topic_state(话题状态机三表
+│                           #   唯一 owner)/stream_guard(主链增量出站守卫)/...)
 ├── observability/          # 可观测性 (8 py 文件)
 ├── security/               # 安全模块 (4 模块 + __init__)
 ├── llm_provider/           # LLM 供应商接入 (4 py 文件)
@@ -56,15 +58,16 @@ unique-you/
 ├── clone_training/         # 克隆训练 (4 文件：清洗/提取/风格分析)
 ├── context/                # 上下文 (世界书)
 ├── memory_ext/             # 已删除（2026-09-28 历遍批 W18 整包出库，第二套 RAG 记忆真源，见 docs/DELETION_LOG.md）
-├── proactive/              # 主动消息 (10 文件：ase_engine/ase_hub/scheduler/frequency/reflection/
-│                           #   reminder_delivery/llm_proactive/runtime_plane/runtime_assembly)
+├── proactive/              # 主动消息 (14 文件：ase_engine/ase_hub/scheduler/frequency(零 token 骰子闸)/
+│                           #   reflection/reminder_delivery/llm_proactive/runtime_plane/runtime_assembly
+│                           #   /topic_recall(parked 复提候选))
 ├── multimodal/             # 多模态 (image_attachment + multimodal_processor)
 ├── wechat_direct/          # 微信直连 (4 文件：每人独立通道·D16 谁扫码谁聊 registry/paths + connector)
 ├── plugins/                # 插件系统 (2 文件)
 ├── config/                 # YAML/JSON 配置 + config/characters/ 角色卡库（gitignore；本地实测 42 张
 │                           #   = 41 default 策展卡 + 1 张 user_id=1 林挽夏运行时克隆副本 99c89c39，
 │                           #   2026-10-09 落盘；与 LOG「41 卡」差异注记见 CODEMAPS/DATABASE.md）
-├── tests/                  # 测试 (3026 Python 通过 + 1 跳过 / 182 前端；196 个测试文件，工作树含未提交新测试时收集更多)
+├── tests/                  # 测试 (4256 Python 通过 + 2 跳过 / 4 失败（骰子闸时区族，根因已根治）；收集 4263 / 266 测试文件 + 251 前端)
 └── docs/                   # 文档
     ├── CODEMAPS/           # ← 本目录
     ├── adr/                # 架构决策记录 (12 篇)
@@ -75,13 +78,13 @@ unique-you/
 
 > `weclone_adapter/` 已于 08-28 删除（克隆收敛为本地提取+JSON 上传，DECISION_LEDGER 08-28 行）。
 
-### 关键指标（2026-10-12 复测）
+### 关键指标（2026-10-28 复测）
 
 | 指标 | 值 |
 |------|-----|
-| API 端点 | **226 业务端点 / 193 唯一路径**（109 GET / 82 POST / 15 PUT / 20 DELETE；19 include_router + setup_shisi，`create_api_app` 内省 2026-10-12 复测（v1.46 拆除 peers 三端点后）；⚠️ `len(app.routes)`=230 含 4 条框架路由） |
+| API 端点 | **235 业务端点 / 197 唯一路径**（113 GET / 85 POST / 16 PUT / 21 DELETE；20 include_router + setup_shisi，`create_api_app` 内省 2026-10-28 实测（AI_GF_ENV=dev，话题状态机批 `3fe2771` 增 `/api/topic-state/*` 三端点后）；⚠️ `len(app.routes)`=239 含 4 条框架路由） |
 | 前端页面 | 19 页面文件（全部挂载；2026-09-28 新增 TemplatesPage / SettingsAccount） |
-| 测试用例 | **3208 = 3026 Python 通过（1 跳过；收集 3027 / 196 文件）+ 182 前端通过**（口径引 `LOG.md` 2026-10-12 通道语义对齐批串行四分块实跑全绿；前端 182/182 为 2026-10-11 SEC-15 根治批复验；⚠️ 随 `config/characters/` 卡数浮动 = 2 × 卡数 + 13，本地实测 42 张 = 41 策展 + 1 运行时克隆副本，差异注记见 `DATABASE.md`；工作树含未提交新测试时收集更多） |
+| 测试用例 | **4508 = 4256 Python 通过（2 跳过；收集 4263 / 266 测试文件；4 失败=骰子闸时区族，根因已由 `165504f` 根治、五文件新鲜复跑 128/128、CI 绿）+ 251 前端通过（36 文件）**（口径引 2026-10-28 全量四分块门实跑；⚠️ 随 `config/characters/` 卡数浮动 = 2 × 卡数 + 13，现役 42 张 = 41 策展 + 1 运行时克隆副本，差异注记见 `DATABASE.md`） |
 | 活跃 ADR | **12**（0001–0007 + 0011–**0015**；0008–0010 空缺未使用） |
 | Fitness Functions | 17 (12 CI + 5 手动) |
 | 总线因子 | 1 (唯一开发者: 默默) |

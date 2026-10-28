@@ -1,9 +1,9 @@
 # 前端地图
 
-> **✅ 2026-10-11 口径对齐刷新**：vitest **182 用例 / 30 文件**（2026-10-11 SEC-15 根治批复验全绿，vitest ^5.0.3，`LOG.md` 10-11 条）；页面 19 / API 模块 15 本批 find 实测不变。权威数字以 `CODE_GRAPH.md` **v3.8.29** 为准。上轮刷新（09-29：页面 17→19 +TemplatesPage/SettingsAccount、API 模块 13→15 +selfservice/templates、vitest 98/16→177/30）见 git 历史。
+> **✅ 2026-10-28 口径刷新**：vitest **251 用例 / 36 文件**（2026-10-28 收口实测全绿，vitest 5 + tsc 0，徽章 4508 口径）；页面 19 / API 模块 15 本批 find 亲测不变；**新增 `store/topicStateStore.ts`（stores 4→5：v1.57 已有 humanizeStore，本批再增话题状态）**、`components/admin/TopicStateSection.tsx`（v1.58 话题状态面板，405 行）与 RoleSettingsTabs 消息 tab 内 **骰子闸配置面**（4C `dice_gate`）；测试文件 30→36。生产 @ `c3ede77`。权威数字以 `CODE_GRAPH.md` 为准。上轮刷新（10-11：vitest 182/30）见 git 历史。
 > 功能级清单（页-功能点编号）见 `docs/FUNCTION_INVENTORY.md`。
 
-**最近更新:** 2026-10-11
+**最近更新:** 2026-10-28
 **技术栈:** React ^19.0.0 + Vite ^8.0.12 + TypeScript ~6.0.2 + Tailwind CSS ^4.1.0 + Zustand ^5.0.0
 **入口:** `frontend/index.html` → `frontend/src/main.tsx`
 
@@ -28,10 +28,10 @@ frontend/src/
 │   ├── clone.ts          ← 克隆 API
 │   ├── llmProviders.ts   ← LLM 供应商管理 API
 │   ├── mimo.ts           ← MiMo 语音 API
-│   ├── system.ts         ← 系统 API（含 /api/user/llm-config）
+│   ├── system.ts         ← 系统 API（含 /api/user/llm-config、topic-state config/快照三函数，v1.58）
 │   ├── selfservice.ts    ← 自服务 API（同意状态/数据导出/注销，W17）
 │   ├── templates.ts      ← 角色模板 API（W12）
-│   ├── training.ts       ← 训练 API（training/* + proactive/*）
+│   ├── training.ts       ← 训练 API（training/* + proactive/* + humanize/config + user/reply-mode）
 │   └── wechat.ts         ← 微信 API
 │
 ├── constants/            ← 常量单一真源
@@ -101,8 +101,16 @@ frontend/src/
 │   │   ├── StorylineIndicator.tsx  ← 故事线指示器
 │   │   └── KnowledgePreview.tsx    ← 知识预览（DATA tab 真实管理区）
 │   │
-│   └── admin/RoleSettingsTabs.tsx ← 角色设置**五 tab** 实现（basic/voice/message/data/timeline；
-│                                    StickersTab 已于 09-19 撤除——无后端支撑的装饰 tab）
+│   └── admin/
+│       ├── RoleSettingsTabs.tsx   ← 角色设置**五 tab** 实现（basic/voice/message/data/timeline；
+│       │                             StickersTab 已于 09-19 撤除）；消息 tab 内含 **骰子闸（dice_gate）
+│       │                             配置面**（4C：enabled/dry_run/触发阈值等 + dry/live 运行态回显，
+│       │                             走 /api/proactive/config 的 dice_gate 块，默认关闭+dry_run 默认开）
+│       └── TopicStateSection.tsx  ← 控制台「话题状态」面板（v1.58，405 行）：11 个配置键
+│                                    （可调项滑条 + Q1/Q4/Q5/Q6 裁决固化项只读展示）+ 会话键查
+│                                    只读快照（正在聊/没聊完/已结束/下一次对话计划）；门禁沿用
+│                                    MessageTab（非 admin 不渲染不请求）；配套
+│                                    TopicStateSection.test.tsx
 │
 ├── hooks/                ← 自定义 Hooks (5 文件)
 │   ├── index.ts                ← 统一导出
@@ -111,16 +119,19 @@ frontend/src/
 │   ├── useMousePosition.ts     ← 鼠标位置
 │   └── useQueries.ts           ← React Query 封装
 │
-├── store/                ← Zustand 状态管理 (3 stores)
+├── store/                ← Zustand 状态管理 (5 stores)
 │   ├── authStore.ts            ← 认证状态
 │   ├── characterBuilderStore.ts← 角色构建器
-│   └── errorStore.ts           ← 错误状态
+│   ├── errorStore.ts           ← 错误状态
+│   ├── humanizeStore.ts        ← 拟人化配置（v1.57：阅读延迟/typing/口误等字段表）
+│   └── topicStateStore.ts      ← 话题状态配置+快照（v1.58，417 行；dirty 判定
+│                                  `topicStateIsDirty`、类型 TopicStateConfig/Item/Plan）
 │
 ├── types/                ← TypeScript 类型定义
 │   ├── api.ts                  ← API 类型
 │   └── framework.ts            ← 框架类型
 │
-└── tests/                ← 前端测试（vitest 182 用例 / 30 文件，2026-10-11 复验全绿，vitest ^5.0.3）
+└── tests/                ← 前端测试（vitest 251 用例 / 36 文件，2026-10-28 收口实测全绿）
     ├── components/
     └── hooks/
 ```
