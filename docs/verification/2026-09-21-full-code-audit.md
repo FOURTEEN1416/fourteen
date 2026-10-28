@@ -1,5 +1,7 @@
 # 全量代码审查报告（2026-09-21）
 
+> ⚠️ **2026-10-28 时效注记**：本文件为 2026-09-21 批审查工作单快照，其中测试/端点等读数已被 2026-10-28 批取代，最新以 `CODE_GRAPH.md` v3.8.34 为准，finding 与排除清单仅作历史追溯。
+
 > 方法：六路分域审计（wechat / proactive / memory / llm+knowledge / persona / api+tools+utils+security+observability）+ 主审独立通读每轮热路径（orchestrator→persona→memory→llm→tools）+ 全仓 AST 阻塞调用扫描。
 > **每一条 finding 均由主审逐条对代码复核**（行号+实况），不采信注释与函数名；附「排除清单」= 审过但核实**不是**缺陷的候选。
 > 边界声明：① persona 分域子审计已回收并**全量逐条对码核验**（其 P1×6 全证实、P2 修正两条、死代码清单逐项查调用面，见下 persona 域小节与排除清单）；② 服务器侧只读取证（如 `shisi/data/` 是否已生成脏库）未做，属生产核验另批。
