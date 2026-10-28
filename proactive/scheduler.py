@@ -1562,9 +1562,10 @@ class ProactiveScheduler:
                 )
                 return
         # 零 token 骰子闸（2026-10-28 dsh-speak-up 批）。
-        # ⚠️ **一次性例外**：`proactive/scheduler.py` 在用户禁改清单内，本批按
-        # 复核第一分支特批这 7 行真闸（例外不成立则回退只读分支：删本块 +
-        # `frequency.DICE_GATE_PRODUCTION_WIRED=False`，引擎侧实现原样保留）。
+        # ⚠️ **一次性例外（已成立）**：`proactive/scheduler.py` 原在本批用户禁改
+        # 清单内，实施时按复核第一分支特批插入；**2026-10-28 用户裁决「接受例外」**
+        # （实证为 +30 行闸块而非自述「7 行」，内容经专项复核成立）。回退开关保留：
+        # 删本块 + `frequency.DICE_GATE_PRODUCTION_WIRED=False`（引擎侧实现原样保留）。
         # 位置理由：在所有确定性闸（暂停/静默/模型/token 窗口/等待窗/节奏）之后、
         # 生产 LLM 决策之前——骰子只在「本来真要调 LLM」的那一次才掷，不浪费
         # 判定机会，也绝不因为骰子而未中就去监听后续闸。
