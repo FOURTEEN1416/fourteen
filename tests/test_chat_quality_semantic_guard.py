@@ -272,6 +272,24 @@ class TestPromptModeBoundary:
         assert strip_stage_directions("（想了想）") == ""
         assert strip_stage_directions("今天好热（擦了擦汗）。") == "今天好热。"
 
+    def test_strip_stage_directions_square_brackets(self):
+        """2026-10-28 生产实证：沉浸式回复漏出「[拍照动作] 拍好了」——半角/全角
+        方括号动作段与圆括号同构剥离，堵同族漏网。"""
+        from utils.reply_mode import strip_stage_directions
+
+        # 生产原句形态（o9cq80wmKU 会话 18:14:55 实发）
+        assert (
+            strip_stage_directions("我这就给你拍张照片。 [拍照动作] 拍好了，你看喜欢吗？")
+            == "我这就给你拍张照片。 拍好了，你看喜欢吗？"
+        )
+        assert strip_stage_directions("[拍照动作]") == ""
+        assert strip_stage_directions("【回头看了一眼】今天好累呀") == "今天好累呀"
+        # 多段混合
+        assert (
+            strip_stage_directions("（想了想）[翻出手机] 你看这张")
+            == " 你看这张".strip()
+        )
+
     def test_immersive_creator_notes_format_conflict_overridden(self, monkeypatch):
         """12/42 张卡 creator_notes 强制括号格式：沉浸式下必须声明格式优先级。"""
         from shisi.core.models.character_aggregate import CharacterAggregate
