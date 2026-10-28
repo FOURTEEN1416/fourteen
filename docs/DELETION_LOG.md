@@ -1091,3 +1091,11 @@ equire() in MessageList.tsx even though MessageList is unused
 - **背景**：BYOK 红队加固批收尾时工作树出现非本批改动（`memory_pipeline.py` +15、`test_time_prefix_leak_guard.py` +47、`_accept_tmp/` 临时目录）——归属另一窗口的「对抗验收·存储层纵深」在制品（LOG 2026-10-13 对抗验收轮同族），实现写了一半且测试用了 pytest 9 已移除的 `pytest.ensuretemp`（红）。
 - **处置**（按 Owner 唯一制不代收编、不代改）：完整备份到 `data/archive/abandoned-wip-20261013/`（memory_pipeline.py.wip + test 文件 + _accept_tmp/test_boundary.py）→ `git checkout` 还原两文件 → 删 `_accept_tmp/` → 复跑 `test_time_prefix_leak_guard` 11/11 绿。
 - **留痕**：该窗口如需继续「存储层剥前缀兜底」，从备份恢复即可；设计意图（assistant 正文落库前 strip_time_prefixes 兜底）已在备份中完整保留。
+
+## 2026-10-28 — docs/verification/ 62 张验证截图删除（用户裁决瘦身）
+
+- **裁决**：用户 2026-10-28 裁决「PNG 可以删除，浏览器自动化先保留」（本 LOG 只删 PNG；`.browser_profile/` 44M 保留）。
+- **对象**：`git ls-files "docs/verification/*.png"` 全量 62 张（18MB），全部产自 2026-09-19 前端三批（frontend-fix / 前端审美与移动端优化 before+after / 前端视觉与性能诊断），引入提交 0fff013/3728a87/2559baa 族。
+- **删除前核验**：① 清单全量盘点（62 png + 16 md，md 一律保留）；② `grep -rln "\.png" docs/verification/*.md` 零引用——16 份报告正文自包含，删图不破坏任何链接；③ 抽读 `verify_login_card.png` 确证为页面截图；④ 09-15 事故立案的「受保护审计资产」指该**目录与报告**，截图瘦身经用户显式裁决授权。
+- **可恢复性**：图片永久存在于 git 历史（`git show 0fff013:docs/verification/...` 随时取回），无需另行备份。
+- **效果**：公开仓唯一大批二进制体积负担清除（18MB→0），16 份文字验证报告原样保留。
