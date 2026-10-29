@@ -33,16 +33,13 @@ const CARDS: UnifiedCharacter[] = [
   } as unknown as UnifiedCharacter,
 ]
 
+const { mockUseUnifiedCharacters } = vi.hoisted(() => ({ mockUseUnifiedCharacters: vi.fn() }))
+
 vi.mock('../../hooks/useQueries', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../hooks/useQueries')>()
   return {
     ...actual,
-    useUnifiedCharacters: () => ({
-      data: { characters: CARDS },
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    }),
+    useUnifiedCharacters: (...args: unknown[]) => mockUseUnifiedCharacters(...args),
   }
 })
 
@@ -53,6 +50,12 @@ function Shell({ qc, children }: { qc: QueryClient; children: ReactNode }) {
 describe('RolesPage 激活后缓存失效（W17 遗留①收口）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockUseUnifiedCharacters.mockReturnValue({
+      data: { characters: CARDS },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
   })
 
   it('切换角色成功后 invalidate 账号维度键，而非裸 characters 键', async () => {
@@ -73,5 +76,29 @@ describe('RolesPage 激活后缓存失效（W17 遗留①收口）', () => {
       .filter(Boolean)
     expect(calledKeys).toContainEqual(queryKeys.characters.all)
     expect(calledKeys).not.toContainEqual(['characters'])
+  })
+})
+
+// ── NEW-9（2026-10-29）：查询错误不得伪装成「暂无角色」空态 ──
+describe('RolesPage 查询错误态', () => {
+  it('isError 时渲染错误态与重试按钮，且不出现「暂无角色」', async () => {
+    const refetch = vi.fn()
+    mockUseUnifiedCharacters.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch,
+    })
+    render(
+      <Shell qc={new QueryClient()}>
+        <MemoryRouter>
+          <RolesPage />
+        </MemoryRouter>
+      </Shell>,
+    )
+    expect(await screen.findByText('角色列表加载失败，请检查网络后重试')).toBeDefined()
+    expect(screen.queryByText('暂无角色')).toBeNull()
+    fireEvent.click(screen.getByText('重试'))
+    expect(refetch).toHaveBeenCalledTimes(1)
   })
 })

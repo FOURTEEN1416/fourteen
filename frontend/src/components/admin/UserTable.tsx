@@ -38,14 +38,16 @@ function SortIcon({ field, sortField, sortDir }: { field: SortField; sortField: 
 function formatDateTime(iso: string | null): string {
   if (!iso) return '-'
   const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '-' // 非法时间串不渲染 NaN-NaN-NaN
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 function formatRelative(iso: string | null): string {
   if (!iso) return '-'
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60_000)
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return '-'
+  const mins = Math.floor((Date.now() - t) / 60_000)
   if (mins < 1) return '刚刚'
   if (mins < 60) return `${mins} 分钟前`
   const hours = Math.floor(mins / 60)

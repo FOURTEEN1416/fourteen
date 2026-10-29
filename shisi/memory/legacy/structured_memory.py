@@ -1622,6 +1622,25 @@ class StructuredMemory:
             ).fetchone()
             return row["cnt"] if row else 0
 
+    def count_facts(self, owner_prefix: str | None = None) -> int:
+        """活跃事实计数（仪表盘「记忆条目」真源）。
+
+        owner_prefix: 归属前缀（如 ``"4:"``，普通用户数据面收缩口径）；``None``
+        = 全库计数（admin / 机器 key）。WHERE 口径与 :meth:`get_facts` 一致
+        （``status = 'active'`` + 前缀下推），只计数不拉行。
+        """
+        with self._conn() as conn:
+            clauses = ["status = 'active'"]
+            params: list[Any] = []
+            if owner_prefix is not None:
+                clauses.append("substr(user_key, 1, ?) = ?")
+                params.extend((len(owner_prefix), owner_prefix))
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM user_facts WHERE " + " AND ".join(clauses),
+                params,
+            ).fetchone()
+            return int(row["cnt"]) if row else 0
+
     # ── 提醒 ──────────────────────────────────────────────
 
     @staticmethod

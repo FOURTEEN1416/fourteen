@@ -98,6 +98,8 @@ export interface DashboardStats {
   today_chats: number
   recent_memories: number
   affinity: number
+  /** 引擎真源档名（「陌生人/朋友/恋人/…」，0-8 档）；空 = 后端未提供，回退本地刻度表 */
+  affinity_name?: string
   energy: number
   current_emotion: string
   system_status: string

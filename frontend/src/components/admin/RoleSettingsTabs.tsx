@@ -669,6 +669,48 @@ interface ProactiveConfigPayload {
   dice_gate_state?: DiceGateState
 }
 
+// ── 主动消息历史契约归一化（NEW-7）──
+// 后端主径（agent_plane 出站账本）返回 {kind, message, created_at(epoch 秒)}，
+// 降级径（ASE 引擎内存 sent_history）返回 {type, message, at(ISO)} —— 旧前端
+// 直接读 type/at，主径字段全落空（「今日主动」恒 0 + Invalid Date）。在边界
+// 归一化为 {type, at(ISO)}，下游统计与渲染只看归一化形状。
+export interface ProactiveHistoryItem {
+  type: string
+  message: string
+  at: string // ISO 字符串；解析不出为 ''
+}
+
+export function normalizeProactiveHistory(raw: unknown): ProactiveHistoryItem[] {
+  if (!Array.isArray(raw)) return []
+  const items: ProactiveHistoryItem[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const r = item as Record<string, unknown>
+    let at = ''
+    if (typeof r.at === 'string' && r.at) {
+      at = r.at
+    } else {
+      const created = typeof r.created_at === 'number' ? r.created_at : Number(r.created_at)
+      if (Number.isFinite(created) && created > 0) at = new Date(created * 1000).toISOString()
+    }
+    items.push({ type: String(r.kind ?? r.type ?? ''), message: String(r.message ?? ''), at })
+  }
+  return items
+}
+
+/** 本地墙钟日键 YYYY-MM-DD（「今日」按本地日界非 UTC，对齐后端 local_day_utc_bounds 纪律） */
+export function localDayKey(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+export function formatHistoryTime(iso: string, mode: 'datetime' | 'time'): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return mode === 'time' ? d.toLocaleTimeString('zh-CN') : d.toLocaleString('zh-CN')
+}
+
 function MessageTab(_props: { character: RoleSettingsCharacter }) {
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const [threshold, setThreshold] = useState(2.0)
@@ -707,7 +749,7 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
   const [paused, setPaused] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState('')
-  const [history, setHistory] = useState<Array<{ type: string; message: string; at: string }>>([])
+  const [history, setHistory] = useState<ProactiveHistoryItem[]>([])
   const [cfgStatus, setCfgStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [cfgError, setCfgError] = useState('')
 
@@ -745,8 +787,8 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
       setDiceGate({ ...DEFAULT_DICE_GATE, ...(cfg.dice_gate ?? {}) })
       setDiceGateState(cfg.dice_gate_state ?? {})
       setDiceGateEffective(cfg.dice_gate_effective !== false)
-      const hist = histRes?.data as { history?: Array<{ type: string; message: string; at: string }> } | undefined
-      if (hist?.history) setHistory(hist.history)
+      const hist = histRes?.data as { history?: unknown } | undefined
+      if (hist) setHistory(normalizeProactiveHistory(hist.history))
       setCfgStatus('ready')
     } catch (e) {
       const status = (e as { response?: { status?: number } })?.response?.status
@@ -819,8 +861,11 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
     }
   }
 
-  const todayCount = history.filter(h => (h.at || '').startsWith(new Date().toISOString().slice(0, 10))).length
-  const lastAt = history[0]?.at ? new Date(history[0].at).toLocaleString('zh-CN') : '—'
+  // NEW-7：「今日」按本地墙钟日界（旧实现 toISOString=UTC 日 + 未归一化 at，恒 0）
+  const today = localDayKey(new Date())
+  const todayCount = history.filter(h => h.at && localDayKey(new Date(h.at)) === today).length
+  const lastValid = history.find(h => h.at)
+  const lastAt = lastValid ? (formatHistoryTime(lastValid.at, 'datetime') || '—') : '—'
 
   async function handleReplay() {
     try {
@@ -1183,9 +1228,9 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
           <div className="space-y-1.5 max-h-40 overflow-y-auto">
             {history.slice(0, 5).map((h, i) => (
               <div key={i} className="rounded-lg bg-gray-50 px-3 py-1.5 flex items-start justify-between gap-2">
-                <span className="text-[10px] text-gray-400 shrink-0">{h.type}</span>
+                <span className="text-[10px] text-gray-400 shrink-0">{h.type || '—'}</span>
                 <span className="text-[11px] text-gray-600 text-right flex-1 line-clamp-1">{h.message}</span>
-                <span className="text-[10px] text-gray-400 shrink-0">{new Date(h.at).toLocaleTimeString('zh-CN')}</span>
+                <span className="text-[10px] text-gray-400 shrink-0">{formatHistoryTime(h.at, 'time')}</span>
               </div>
             ))}
           </div>

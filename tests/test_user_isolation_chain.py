@@ -70,6 +70,30 @@ def test_same_peer_different_owners_facts_isolated():
         sm.close()
 
 
+def test_count_facts_scoped_by_owner_prefix():
+    """NEW-5②（2026-10-29）：count_facts 按归属前缀计数 —— 仪表盘「记忆条目」的隔离口径。
+
+    旧实现 count_facts 只存在于 hasattr 探针里（从未定义）→ 记忆条目恒 0；
+    新实现 owner_prefix=None = 全库（admin），带前缀 = 该 user_id 全通道（隔离他人）。
+    """
+    tmp = Path(tempfile.mkdtemp())
+    sm = _sm(tmp)
+    try:
+        sm.add_fact("A 的偏好：喝咖啡", category="preference", user_key="1:peer@im.wechat")
+        sm.add_fact("A2 的偏好：喝茶", category="preference", user_key="1:wx_other")
+        sm.add_fact("B 的偏好：晨跑", category="preference", user_key="4:peer@im.wechat")
+        # admin / 机器 key：全库
+        assert sm.count_facts() == 3
+        # owner 前缀 = user_id 维度（同用户跨通道合并），他人不可见
+        assert sm.count_facts(owner_prefix="1:") == 2
+        assert sm.count_facts(owner_prefix="4:") == 1
+        assert sm.count_facts(owner_prefix="9:") == 0
+        # 与 get_facts 同口径：前缀读出的行数 == 计数
+        assert len(sm.get_facts(owner_prefix="1:")) == sm.count_facts(owner_prefix="1:")
+    finally:
+        sm.close()
+
+
 def test_load_session_history_does_not_merge_bare_form():
     tmp = Path(tempfile.mkdtemp())
     sm = _sm(tmp)

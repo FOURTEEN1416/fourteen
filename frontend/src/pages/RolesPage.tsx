@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useMemo, useState } from 'react'
-import { Plus, Search, Sparkles } from 'lucide-react'
+import { Plus, Search, Sparkles, AlertTriangle } from 'lucide-react'
 import AnimatedPage from '../components/shared/AnimatedPage'
 import { useUnifiedCharacters, queryKeys } from '../hooks/useQueries'
 import { activateCharacter } from '../api/characters'
@@ -69,7 +69,8 @@ function RoleCard({
 export default function RolesPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { data, isLoading } = useUnifiedCharacters()
+  // NEW-9：isError 不得伪装成「暂无角色」空态（用户会误以为角色全没了）
+  const { data, isLoading, isError, refetch } = useUnifiedCharacters()
   const characters = data?.characters ?? []
   const [activatingId, setActivatingId] = useState<string | null>(null)
   const [keyword, setKeyword] = useState('')
@@ -121,6 +122,17 @@ export default function RolesPage() {
               {Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="glass-card rounded-2xl p-4 h-40 animate-pulse bg-white/30" />
               ))}
+            </div>
+          ) : isError ? (
+            <div className="glass-card rounded-2xl p-8 text-center">
+              <AlertTriangle className="w-10 h-10 mx-auto mb-3 text-red-300" />
+              <p className="text-sm text-gray-500">角色列表加载失败，请检查网络后重试</p>
+              <button
+                onClick={() => void refetch()}
+                className="mt-4 btn-macaron rounded-xl px-5 py-2 text-xs font-medium"
+              >
+                重试
+              </button>
             </div>
           ) : characters.length === 0 ? (
             <div className="glass-card rounded-2xl p-8 text-center text-gray-400">

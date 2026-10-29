@@ -231,7 +231,16 @@ export function useTrainingProgress() {
 export function useMemoryFacts(category?: string) {
   return useQuery({
     queryKey: queryKeys.memory.facts(category),
-    queryFn: () => api.memoryFacts(category ?? '').then(r => (r.data as { facts: MemoryFact[] }).facts),
+    queryFn: () =>
+      api.memoryFacts(category ?? '').then(r => {
+        // NEW-5④：user_facts 表正文的列名是 fact（旧实现读 content →「最近沉淀」恒空），
+        // 在边界归一化为 MemoryFact.content，消费面不变。
+        const rows = ((r.data as { facts?: Array<Record<string, unknown>> }).facts ?? [])
+        return rows.map(row => ({
+          ...row,
+          content: String(row.fact ?? row.content ?? ''),
+        })) as MemoryFact[]
+      }),
   })
 }
 

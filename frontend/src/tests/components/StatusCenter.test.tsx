@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import StatusCenter from '../../pages/StatusCenter'
@@ -68,15 +68,33 @@ function renderWithQuery(ui: React.ReactNode) {
 describe('StatusCenter', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockClientGet.mockResolvedValue({
-      data: {
-        data: [
-          { name: '陌生', min: 0, max: 25 },
-          { name: '熟悉', min: 25, max: 50 },
-          { name: '亲密', min: 50, max: 75 },
-          { name: '羁绊', min: 75, max: 100 },
-        ],
-      },
+    // URL 分路 mock：MemorySystemCard 直连 /stats、/memory/diary、/characters/{id}/*
+    mockClientGet.mockImplementation((url: string) => {
+      if (url === '/shisi/emotion-stage/stages') {
+        return Promise.resolve({
+          data: {
+            data: [
+              { name: '陌生', min: 0, max: 25 },
+              { name: '熟悉', min: 25, max: 50 },
+              { name: '亲密', min: 50, max: 75 },
+              { name: '羁绊', min: 75, max: 100 },
+            ],
+          },
+        })
+      }
+      // V2-6③：后端已回纯日期（rsplit 剥键），前端按原样渲染
+      if (url === '/memory/diary') {
+        return Promise.resolve({
+          data: { entries: [{ date: '2026-10-28', summary: '今天聊了咖啡' }] },
+        })
+      }
+      if (url === '/stats') {
+        return Promise.resolve({ data: { working_count: 5 } })
+      }
+      if (url.startsWith('/characters/char-001')) {
+        return Promise.resolve({ data: { total: 3 } })
+      }
+      return Promise.resolve({ data: {} })
     })
     mockUseActiveCharacter.mockReturnValue({ activeCharacter: null })
     mockUseDashboard.mockReturnValue({ data: undefined, isLoading: false })
@@ -156,5 +174,36 @@ describe('StatusCenter', () => {
     renderWithQuery(<StatusCenter />)
 
     expect(screen.getByText('还没有沉淀下来的记忆')).toBeDefined()
+  })
+
+  // ── NEW-5①（2026-10-29）：affinity 是 0-8 档位序数，旧实现按 0-100 刻度表换算恒「陌生」 ──
+  it('affinity_name 在契约内时直读档名，不再按 0-100 刻度表换算', async () => {
+    mockUseActiveCharacter.mockReturnValue({ activeCharacter: FAKE_CHARACTER })
+    mockUseDashboard.mockReturnValue({
+      data: { ...FAKE_STATS, affinity: 6, affinity_name: '恋人' },
+      isLoading: false,
+    })
+    mockUseEmotionState.mockReturnValue({ data: undefined })
+    mockUseMemoryFacts.mockReturnValue({ data: [] })
+
+    renderWithQuery(<StatusCenter />)
+
+    expect(await screen.findByText('恋人')).toBeDefined()
+    // 6 若被 0-100 刻度表解读会落「陌生」——旧缺陷回归哨
+    expect(screen.queryByText('陌生')).toBeNull()
+  })
+
+  // ── V2-6③：情景归档时间线渲染纯日期 ──
+  it('情景归档时间线渲染纯日期，不泄漏 user_key|character_id 键', async () => {
+    mockUseActiveCharacter.mockReturnValue({ activeCharacter: FAKE_CHARACTER })
+    mockUseDashboard.mockReturnValue({ data: FAKE_STATS, isLoading: false })
+    mockUseEmotionState.mockReturnValue({ data: undefined })
+    mockUseMemoryFacts.mockReturnValue({ data: [] })
+
+    renderWithQuery(<StatusCenter />)
+
+    fireEvent.click(await screen.findByText('时间线'))
+    expect(await screen.findByText('2026-10-28')).toBeDefined()
+    expect(screen.queryByText(/4:wxid/)).toBeNull()
   })
 })

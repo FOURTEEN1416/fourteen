@@ -115,6 +115,7 @@ async def get_dashboard_stats(
     orch = deps.orch
     emotion_current = "-"
     affinity = 0
+    affinity_name = ""
     energy = 0
     chats_today = 0
     facts_count = 0
@@ -170,6 +171,14 @@ async def get_dashboard_stats(
                 emotion_current = es.primary_emotion.value if hasattr(es.primary_emotion, "value") else str(es.primary_emotion)
                 affinity = getattr(es, "affinity", 0)
                 energy = getattr(es, "energy", 0)
+                # NEW-5①：好感度真源是 0-8 档位序数，前端按 0-100 刻度解读恒「陌生」。
+                # 回引擎档名（「朋友/恋人/…」）让前端直读，不再自行换算刻度。
+                get_level_name = getattr(emotion, "get_affinity_level_name", None)
+                if callable(get_level_name):
+                    try:
+                        affinity_name = str(get_level_name() or "")
+                    except Exception:
+                        affinity_name = ""
             if memory:
                 try:
                     structured = getattr(memory, "structured_memory", None)
@@ -179,7 +188,10 @@ async def get_dashboard_stats(
                         # 的 DB 写争锁时会阻塞整条循环。挪到线程池。
                         chats_today = await asyncio.to_thread(structured.count_chats_today)
                         if hasattr(structured, "count_facts"):
-                            facts_count = await asyncio.to_thread(structured.count_facts)
+                            # NEW-5②：普通用户按数据面前缀计数（隔离口径），admin 全库。
+                            facts_count = await asyncio.to_thread(
+                                structured.count_facts, owner_prefix=scope
+                            )
                 except Exception as e:
                     logger.debug("Failed to get memory stats for dashboard: %s", e)
     except Exception as e:
@@ -202,6 +214,7 @@ async def get_dashboard_stats(
             "today_chats": chats_today,
             "recent_memories": facts_count,
             "affinity": affinity,
+            "affinity_name": affinity_name,
             "energy": energy,
             "current_emotion": emotion_current,
         }
@@ -209,6 +222,7 @@ async def get_dashboard_stats(
         "today_chats": chats_today,
         "recent_memories": facts_count,
         "affinity": affinity,
+        "affinity_name": affinity_name,
         "energy": energy,
         "current_emotion": emotion_current,
         "system_status": sys_status,
@@ -316,7 +330,13 @@ async def memory_diary(
         if prefix is not None:
             # 日记键形如 user_key|date，user_key 形如 "4:peer" —— 按归属前缀过滤
             items = [kv for kv in items if str(kv[0]).startswith(prefix)]
-        entries = [{"date": d, "summary": s} for d, s in items[:limit]]
+        entries = [
+            # V2-6③：键形 user_key|character_id|YYYY-MM-DD —— 旧实现把整个键当
+            # date 返回，前端直接渲染出「4:wxid|林挽夏|2026-10-28」。只回纯日期，
+            # 排序键（同 rsplit）不受影响。
+            {"date": str(d).rsplit("|", 1)[-1], "summary": s}
+            for d, s in items[:limit]
+        ]
         return {"entries": entries}
     except Exception:
         logger.warning("读取日记失败", exc_info=True)

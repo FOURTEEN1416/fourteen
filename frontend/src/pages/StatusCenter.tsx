@@ -66,10 +66,14 @@ export default function StatusCenter() {
   }
 
   const emotionLabel = emotionData?.primary?.type || stats?.current_emotion || '—'
-  const affinityLabel = getAffinityLabel(
-    (stats as DashboardStats | undefined)?.affinity ?? 0,
-    affinityStages ?? AFFINITY_STAGES,
-  )
+  // NEW-5①：affinity 真源是 0-8 档位序数，旧实现拿它对 0-100 刻度表换算恒「陌生」；
+  // 优先直读后端档名 affinity_name，仅在后端未提供时回退刻度表。
+  const affinityLabel =
+    (stats as DashboardStats | undefined)?.affinity_name ||
+    getAffinityLabel(
+      (stats as DashboardStats | undefined)?.affinity ?? 0,
+      affinityStages ?? AFFINITY_STAGES,
+    )
   const memoryCount = (stats as DashboardStats | undefined)?.recent_memories ?? 0
   const recentFacts = facts ?? []
 
@@ -314,7 +318,10 @@ function MemorySystemCard({
     {
       no: '①',
       name: '工作记忆',
-      desc: '当前会话上下文，保留最近 20 条',
+      // NEW-5⑤：/stats 的 working_count 是本 worker 当前活跃会话桶的条数
+      // （RAM，重启清空），旧文案「保留最近 20 条」把可配置容量写死且
+      // 伪装成「你的会话」——改为如实口径。
+      desc: '当前会话的短期上下文（重启后清空）',
       value: workingCount ?? 0,
       unit: '条',
       tone: 'blue',
@@ -376,9 +383,10 @@ function MemorySystemCard({
 
               {expandable && openDiary && (
                 <div className="mt-2 ml-7 space-y-2">
-                  {diaryEntries.map(e => (
+                  {diaryEntries.map((e, idx) => (
                     <div
-                      key={e.date}
+                      // 纯日期键在多角色同日时可能重复，key 加 idx 防碰撞
+                      key={`${e.date}-${idx}`}
                       className="rounded-lg bg-white/50 border border-white/60 px-2.5 py-2"
                     >
                       <p className="text-[10px] text-gray-400 mb-0.5">{e.date}</p>

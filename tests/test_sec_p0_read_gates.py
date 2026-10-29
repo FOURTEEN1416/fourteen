@@ -151,7 +151,16 @@ class _FakeEngines:
         self.memory = SimpleNamespace(
             working=SimpleNamespace(count=lambda: 7),
             structured_memory=SimpleNamespace(
-                count_chats_today=lambda: 3, count_facts=lambda: 9,
+                count_chats_today=lambda: 3,
+                # NEW-5②：dashboard 现按数据面前缀传 owner_prefix（viewer 隔离口径）
+                count_facts=lambda owner_prefix=None: 9 if owner_prefix is None else 4,
+            ),
+            # V2-6③：日记源（真源 daily_summaries 键形 user_key|character_id|date）
+            ds=SimpleNamespace(
+                get_all_summaries=lambda: {
+                    f"{_ALICE_ID}:peer@im.wechat|小雅|2026-10-28": "聊了咖啡和天气",
+                    "999:other|别人|2026-10-27": "他人日记不应出现在 alice 视野",
+                },
             ),
         )
         self.orch = SimpleNamespace(
@@ -314,6 +323,10 @@ async def test_f3_dashboard_viewer_shrunk(sec_app, fake_engines):
     # 陪伴态字段对 viewer 保留（StatusCenter 消费 current_emotion/affinity/recent_memories）
     assert body.get("affinity") == 42
     assert body.get("current_emotion") == "平和"
+    # NEW-5②：viewer 的记忆条目按数据面前缀计数（假件对带前缀返回 4，全库 9）
+    assert body.get("recent_memories") == 4
+    # NEW-5①：affinity_name 字段在契约内（假件无档名方法 → 空串，前端回退刻度表）
+    assert body.get("affinity_name") == ""
 
 
 async def test_f3_dashboard_admin_full(sec_app, fake_engines):
@@ -324,6 +337,27 @@ async def test_f3_dashboard_admin_full(sec_app, fake_engines):
     assert r.status_code == 200, r.text
     body = r.json()
     assert "wechat" in body and "training" in body and "system_status" in body
+    # NEW-5②：admin 无前缀 → 全库计数（假件无前缀返回 9）
+    assert body.get("recent_memories") == 9
+    assert body.get("affinity_name") == ""
+
+
+async def test_diary_entries_pure_date(sec_app, fake_engines):
+    """V2-6③：/api/memory/diary 回纯日期，不再把 user_key|character_id|date 整键当 date 返回
+    （旧实现前端直接渲染出「4:wxid|林挽夏|2026-10-28」）；且只回本人前缀内的日记。"""
+    client, _engine, _sf = sec_app
+    r = await client.get("/api/memory/diary?limit=10", headers=_bearer(_ALICE_ID))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    entries = body.get("entries", [])
+    assert entries, "沙箱日记源应返回至少一条"
+    dates = [e["date"] for e in entries]
+    assert all("|" not in d for d in dates), f"date 字段泄漏完整键: {dates}"
+    assert "2026-10-28" in dates
+    # 他人（999:）日记不得出现在 alice 的数据面
+    summaries = [e["summary"] for e in entries]
+    assert "聊了咖啡和天气" in summaries
+    assert "他人日记不应出现在 alice 视野" not in summaries
 
 
 async def test_f3_config_viewer_shrunk(sec_app, fake_engines):
