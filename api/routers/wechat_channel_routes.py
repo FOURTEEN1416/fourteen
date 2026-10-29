@@ -111,13 +111,24 @@ async def get_my_channel(
             bot_id=str(st.get("bot_id") or ""),
         )
     channels = [_safe_channel_payload(s) for s in statuses]
-    return {
+    payload = {
         **_safe_channel_payload(primary),
         "channels": channels,
         "max_per_user": channel_paths.MAX_CHANNELS_PER_USER,
         "max_global": channel_paths.max_channels(),
         "message": "仅显示你自己的微信通道",
     }
+    # NEW-4（2026-10-29）：扫码等待期把二维码时效带给前端——旧实现 is_expired
+    # 只在 /qrcode 端点返回，前端拿到二维码后切入的连接轮询完全不检查过期，
+    # 延误扫码后旧码永远显示「等待扫描」。等待/已扫态下补算时效（一次磁盘读）。
+    if payload.get("status") in ("waiting_qr", "scanned"):
+        from wechat_direct.wechat_connector import load_session_qrcode
+
+        qr_ts = float(
+            load_session_qrcode(user_id, int(payload.get("slot", 0)) or 0).get("timestamp") or 0
+        )
+        payload["is_expired"] = (time.time() - qr_ts) >= QRCODE_EXPIRY_SECONDS if qr_ts else True
+    return payload
 
 
 @router.get("/list")

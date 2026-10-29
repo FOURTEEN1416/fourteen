@@ -290,3 +290,84 @@ def test_6_3_commit_persists_before_response():
     resp = client.post("/api/user/llm-config", json={"config": {"llm": _LLM_A}})
     assert resp.status_code == 200
     assert session_holder["sess"].commit_count >= 1
+
+
+# ─────────────────────────────────────────────────────
+# NEW-13①（2026-10-29）— POST /api/user/llm-config/test 连通性测试
+# 错误一律 200 + ok=false 就地回显；走真实 _build_backend 构造路径
+# （BYOK fail-closed 校验原样生效）；不触碰用户 gateway 缓存。
+# ─────────────────────────────────────────────────────
+
+
+def test_llm_test_auto_provider_rejected_with_guidance():
+    """auto 链不支持一键测试 → ok=false + 指引文案（不抛 500）。"""
+    client, _state = _build_app({1: FakeUser(1)})
+    resp = client.post("/api/user/llm-config/test", json={"config": {"llm": {"provider": "auto"}}})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert "明确指定供应商" in body["error"]
+
+
+def test_llm_test_missing_llm_block_is_400():
+    client, _state = _build_app({1: FakeUser(1)})
+    resp = client.post("/api/user/llm-config/test", json={"config": {}})
+    assert resp.status_code == 400
+
+
+def test_llm_test_build_failure_returns_ok_false():
+    """构造期校验失败（SSRF/缺 Key）→ 200 + ok=false + 错误回显。"""
+    users = {1: FakeUser(1)}
+    client, _state = _build_app(users)
+
+    def _boom(*_a, **_k):
+        raise ValueError("用户供应商缺少API Key，不允许借用平台凭证")
+
+    with patch("llm_provider._build_backend", side_effect=_boom):
+        resp = client.post(
+            "/api/user/llm-config/test",
+            json={"config": {"llm": {"provider": "zhipu", "model": "glm-4-flash"}}},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert "API Key" in body["error"]
+
+
+def test_llm_test_success_roundtrip():
+    """构造成功 + chat 回包 → ok=true + latency + preview。"""
+    users = {1: FakeUser(1)}
+    client, _state = _build_app(users)
+
+    fake_backend = SimpleNamespace(chat=AsyncMock(return_value="pong"))
+    with patch("llm_provider._build_backend", return_value=fake_backend):
+        resp = client.post(
+            "/api/user/llm-config/test",
+            json={"config": {"llm": {"provider": "zhipu", "model": "glm-4-flash", "api_key": "sk-ok"}}},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["preview"] == "pong"
+    assert "latency_ms" in body
+
+
+def test_llm_test_empty_key_falls_back_to_saved():
+    """未填新 Key 时用已保存 Key 测试（与保存合并语义一致）。"""
+    users = {1: FakeUser(1, llm_config={"provider": "zhipu", "api_key": "sk-saved"})}
+    client, _state = _build_app(users)
+
+    captured: dict = {}
+
+    def _capture(_provider, cfg, *_a, **_k):
+        captured["api_key"] = cfg.get("api_key")
+        return SimpleNamespace(chat=AsyncMock(return_value="pong"))
+
+    with patch("llm_provider._build_backend", side_effect=_capture):
+        resp = client.post(
+            "/api/user/llm-config/test",
+            json={"config": {"llm": {"provider": "zhipu", "model": "glm-4-flash"}}},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert captured["api_key"] == "sk-saved"

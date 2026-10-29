@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import SettingsLLM from '../../pages/SettingsLLM'
 
 // ── hoisted mock fns ──
-const { mockFetchConfig, mockSaveConfig } = vi.hoisted(() => ({
+const { mockFetchConfig, mockSaveConfig, mockTestLlmConfig } = vi.hoisted(() => ({
   mockFetchConfig: vi.fn(),
   mockSaveConfig: vi.fn(),
+  mockTestLlmConfig: vi.fn(),
 }))
 
 const { mockListProviders } = vi.hoisted(() => ({
@@ -24,6 +25,9 @@ vi.mock('../../api/system', async (importOriginal) => {
     ...actual,
     config: (...args: unknown[]) => mockFetchConfig(...args),
     saveConfig: (...args: unknown[]) => mockSaveConfig(...args),
+    userLlmConfig: vi.fn(() => Promise.resolve({ data: { llm: {} } })),
+    saveUserLlmConfig: vi.fn(() => Promise.resolve({ data: { llm: {} } })),
+    testUserLlmConfig: (...args: unknown[]) => mockTestLlmConfig(...args),
   }
 })
 
@@ -79,6 +83,15 @@ const PROVIDERS_FIXTURE = {
       api_base: 'https://api.deepseek.com/v1',
       guide: { apply_url: 'https://platform.deepseek.com', free_quota: '送 5000 万 token', steps: [], tips: [], warnings: [] },
     },
+    {
+      key: 'deadprov',
+      name: '已停用供应商',
+      description: '用于禁用态测试',
+      sort_order: 2,
+      is_special: false,
+      enabled: false,
+      guide: { apply_url: '', free_quota: '', steps: [], tips: [], warnings: [] },
+    },
   ],
   default_provider: 'auto',
 }
@@ -125,9 +138,10 @@ describe('SettingsLLM', () => {
     const apiBaseInput = screen.getByPlaceholderText('https://api.deepseek.com/v1') as HTMLInputElement
     expect(apiBaseInput.value).toBe('https://api.deepseek.com/v1')
 
-    // API Key input (type=password, but value still rendered)
-    const apiKeyInput = screen.getByPlaceholderText('sk-...') as HTMLInputElement
+    // API Key input（NEW-13④：'****' 回显 → 「已保存密钥」徽标 + 更换式 placeholder，明文不回显）
+    const apiKeyInput = screen.getByPlaceholderText('已保存（输入新值可更换）') as HTMLInputElement
     expect(apiKeyInput.value).toBe('')
+    expect(screen.getByTestId('key-saved-badge')).toBeDefined()
 
     // Model input
     const modelInput = screen.getByPlaceholderText('deepseek-chat') as HTMLInputElement
@@ -287,5 +301,78 @@ describe('SettingsLLM', () => {
     await waitFor(() => {
       expect(screen.getByText('Save failed')).toBeDefined()
     })
+  })
+})
+
+
+// ── NEW-13（2026-10-29）：配置反馈环——测试连接 / byok 跳转提示 / 禁用供应商拦截 ──
+describe('SettingsLLM NEW-13 反馈环', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockFetchConfig.mockResolvedValue(DEFAULT_CONFIG)
+    mockListProviders.mockResolvedValue(PROVIDERS_FIXTURE)
+    mockUseAuthStore.mockImplementation((selector: (s: { user: { role: string } | null }) => unknown) =>
+      selector({ user: { role: 'admin' } }))
+  })
+
+  it('测试连接成功：渲染延迟与回包预览', async () => {
+    mockTestLlmConfig.mockResolvedValue({ ok: true, latency_ms: 812, preview: 'pong' })
+    render(
+      <MemoryRouter initialEntries={['/settings/llm']}>
+        <Routes>
+          <Route path="/settings/llm" element={<SettingsLLM />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('保存设置')).toBeDefined())
+    fireEvent.click(screen.getByText('测试连接'))
+    expect(await screen.findByTestId('llm-test-result')).toBeDefined()
+    expect(screen.getByTestId('llm-test-result').textContent).toContain('连接成功')
+    expect(screen.getByTestId('llm-test-result').textContent).toContain('812')
+  })
+
+  it('测试连接失败：就地回显错误（不再延迟到聊天才爆）', async () => {
+    mockTestLlmConfig.mockResolvedValue({ ok: false, error: '配置校验失败：API Key 缺失' })
+    render(
+      <MemoryRouter initialEntries={['/settings/llm']}>
+        <Routes>
+          <Route path="/settings/llm" element={<SettingsLLM />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('保存设置')).toBeDefined())
+    fireEvent.click(screen.getByText('测试连接'))
+    expect(await screen.findByTestId('llm-test-result')).toBeDefined()
+    expect(screen.getByTestId('llm-test-result').textContent).toContain('API Key 缺失')
+  })
+
+  it('?byok=1 跳转参数渲染配置引导（②）', async () => {
+    render(
+      <MemoryRouter initialEntries={['/settings/llm?byok=1']}>
+        <Routes>
+          <Route path="/settings/llm" element={<SettingsLLM />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect(await screen.findByTestId('byok-redirect-hint')).toBeDefined()
+  })
+
+  it('已禁用供应商保存被拦截（⑤）', async () => {
+    mockFetchConfig.mockResolvedValue({
+      data: { llm: { ...DEFAULT_CONFIG.data.llm, provider: 'deadprov' } },
+    })
+    render(
+      <MemoryRouter initialEntries={['/settings/llm']}>
+        <Routes>
+          <Route path="/settings/llm" element={<SettingsLLM />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('保存设置')).toBeDefined())
+    fireEvent.click(screen.getByText('保存设置'))
+    await waitFor(() => {
+      expect(screen.getByText(/已被禁用/)).toBeDefined()
+    })
+    expect(mockSaveConfig).not.toHaveBeenCalled()
   })
 })

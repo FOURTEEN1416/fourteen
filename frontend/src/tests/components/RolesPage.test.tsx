@@ -68,7 +68,8 @@ describe('RolesPage 激活后缓存失效（W17 遗留①收口）', () => {
         </MemoryRouter>
       </Shell>,
     )
-    const btn = await screen.findByText(/设为活跃|激活|使用/)
+    // NEW-16 初始角色告知条文案也含「设为活跃」，这里必须锁定按钮本体
+    const btn = await screen.findByRole('button', { name: /设为活跃/ })
     fireEvent.click(btn)
     await waitFor(() => expect(activateCharacter).toHaveBeenCalledWith('other1'))
     const calledKeys = invalidateSpy.mock.calls

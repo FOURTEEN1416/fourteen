@@ -23,6 +23,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -400,6 +401,63 @@ class CharacterAchievement(Base):
             f"<CharacterAchievement(char='{self.character_id}', "
             f"ach='{self.achievement_id}', {self.progress}/{self.target})>"
         )
+
+
+class Announcement(Base):
+    """网站公告（V2-5，D20 2026-10-29）：admin 可编辑，含使用说明/用户导引/QQ 反馈渠道。
+
+    时间窗（starts_at/ends_at）自动上下线，免手动删；content_md 存
+    Markdown 纯文本（前端按纯文本段落渲染，不引 MD 运行时）。
+    """
+
+    __tablename__ = "announcements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    type: Mapped[str] = mapped_column(String(16), default="banner", nullable=False)  # banner | modal
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_md: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    link: Mapped[str] = mapped_column(String(512), default="", nullable=False)
+    link_label: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    dismissible: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "type": self.type,
+            "title": self.title,
+            "content_md": self.content_md,
+            "link": self.link,
+            "link_label": self.link_label,
+            "dismissible": self.dismissible,
+            "starts_at": self.starts_at.isoformat() if self.starts_at else None,
+            "ends_at": self.ends_at.isoformat() if self.ends_at else None,
+            "enabled": self.enabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class AnnouncementRead(Base):
+    """公告已读水位（V2-5）：生产有真实多用户且要求隔离，落库而非 localStorage。"""
+
+    __tablename__ = "announcement_reads"
+    __table_args__ = (UniqueConstraint("user_id", "announcement_id", name="uq_announcement_read"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    announcement_id: Mapped[int] = mapped_column(
+        ForeignKey("announcements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    read_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
 # ═══════════════════════════════════════════════════════

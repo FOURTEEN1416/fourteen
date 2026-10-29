@@ -9,7 +9,11 @@ import {
 import { useAuthStore } from '../store/authStore'
 import { useErrorStore } from '../store/errorStore'
 import { useGlobalViewStore } from '../store/globalViewStore'
-import { Shield, UserPlus, Search, X, Globe, ChevronDown, ChevronRight } from 'lucide-react'
+import { Shield, UserPlus, Search, X, Globe, ChevronDown, ChevronRight, Megaphone, Pencil, Trash2, Plus } from 'lucide-react'
+import {
+  adminListAnnouncements, adminCreateAnnouncement, adminUpdateAnnouncement, adminDeleteAnnouncement,
+  type AnnouncementItem, type AnnouncementUpsertRequest,
+} from '../api/announcements'
 import { ROLES, ROLE_LABELS } from '../components/admin/UserBadges'
 import UserTable, { type SortField, type SortDir } from '../components/admin/UserTable'
 import UserModal from '../components/admin/UserModal'
@@ -73,6 +77,19 @@ export default function AdminUsersPage() {
   const [auditEntries, setAuditEntries] = useState<OperatorAuditEntry[] | null>(null)
   const [auditOpen, setAuditOpen] = useState(false)
   const [auditLoading, setAuditLoading] = useState(false)
+
+  // ── V2-5 网站公告管理 ──
+  const EMPTY_ANN: AnnouncementUpsertRequest = {
+    type: 'banner', title: '', content_md: '', link: '', link_label: '',
+    dismissible: true, starts_at: null, ends_at: null, enabled: true,
+  }
+  const [annOpen, setAnnOpen] = useState(false)
+  const [annList, setAnnList] = useState<AnnouncementItem[]>([])
+  const [annLoading, setAnnLoading] = useState(false)
+  const [annForm, setAnnForm] = useState<AnnouncementUpsertRequest | null>(null)
+  const [annEditingId, setAnnEditingId] = useState<number | null>(null)
+  const [annSaving, setAnnSaving] = useState(false)
+  const [annDeleting, setAnnDeleting] = useState<AnnouncementItem | null>(null)
 
   // ── 表单状态（创建） ──
   const [createForm, setCreateForm] = useState<AdminCreateUserRequest>({
@@ -292,6 +309,70 @@ export default function AdminUsersPage() {
     }
   }
 
+  // ── V2-5：网站公告管理 ──
+  const loadAnnouncements = async () => {
+    setAnnLoading(true)
+    try {
+      const res = await adminListAnnouncements(50)
+      setAnnList(res.announcements ?? [])
+    } catch {
+      setAnnList([])
+    } finally {
+      setAnnLoading(false)
+    }
+  }
+
+  const toggleAnnPanel = () => {
+    if (annOpen) { setAnnOpen(false); return }
+    setAnnOpen(true)
+    void loadAnnouncements()
+  }
+
+  const submitAnnouncement = async () => {
+    if (!annForm || !annForm.title.trim()) {
+      addToast({ type: 'warning', message: '公告标题不能为空' })
+      return
+    }
+    setAnnSaving(true)
+    try {
+      // datetime-local 值（YYYY-MM-DDTHH:mm）→ ISO（后端可解析）；空串归 null
+      const payload: AnnouncementUpsertRequest = {
+        ...annForm,
+        starts_at: annForm.starts_at ? new Date(annForm.starts_at).toISOString() : null,
+        ends_at: annForm.ends_at ? new Date(annForm.ends_at).toISOString() : null,
+      }
+      if (annEditingId != null) {
+        await adminUpdateAnnouncement(annEditingId, payload)
+        addToast({ type: 'success', message: '公告已更新' })
+      } else {
+        await adminCreateAnnouncement(payload)
+        addToast({ type: 'success', message: '公告已创建' })
+      }
+      setAnnForm(null)
+      setAnnEditingId(null)
+      await loadAnnouncements()
+    } catch (err) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        || (err instanceof Error ? err.message : '保存失败')
+      addToast({ type: 'error', message: msg })
+    } finally {
+      setAnnSaving(false)
+    }
+  }
+
+  const handleDeleteAnnouncement = async () => {
+    if (!annDeleting) return
+    try {
+      await adminDeleteAnnouncement(annDeleting.id)
+      addToast({ type: 'success', message: '公告已删除' })
+      await loadAnnouncements()
+    } catch {
+      addToast({ type: 'error', message: '删除失败' })
+    } finally {
+      setAnnDeleting(null)
+    }
+  }
+
   // ═════════════════════════════════════════════════
   //  渲染
   // ═════════════════════════════════════════════════
@@ -392,6 +473,156 @@ export default function AdminUsersPage() {
                         {e.target ? <span className="font-mono text-gray-400 truncate">{e.target}</span> : null}
                         <span className="ml-auto shrink-0 text-gray-300 tabular-nums">
                           {e.created_at ? e.created_at.slice(0, 19).replace('T', ' ') : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+
+          {/* ═══ V2-5 网站公告管理 ═══ */}
+          <section className="glass-card rounded-xl px-4 py-3 mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Megaphone className="w-4 h-4 shrink-0 text-gray-400" />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-700">网站公告</p>
+                  <p className="text-[10px] text-gray-400">
+                    全站顶栏横幅（使用说明 / 用户导引 / 反馈渠道）；时间窗自动上下线，用户已读落库
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={toggleAnnPanel}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 rounded-lg hover:bg-white/60 transition-colors"
+              >
+                {annOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                管理公告
+              </button>
+            </div>
+
+            {annOpen && (
+              <div className="mt-3 border-t border-white/40 pt-3 space-y-2">
+                <button
+                  onClick={() => { setAnnForm({ ...EMPTY_ANN }); setAnnEditingId(null) }}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-primary-500 hover:bg-primary-400 rounded-lg transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  新建公告
+                </button>
+
+                {annForm && (
+                  <div className="rounded-xl bg-white/50 border border-white/40 p-3 space-y-2" data-testid="announcement-form">
+                    <div className="flex flex-wrap gap-2">
+                      <select
+                        value={annForm.type}
+                        onChange={e => setAnnForm({ ...annForm, type: e.target.value as 'banner' | 'modal' })}
+                        aria-label="公告类型"
+                        className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700"
+                      >
+                        <option value="banner">横幅</option>
+                        <option value="modal">弹窗（预留）</option>
+                      </select>
+                      <input
+                        value={annForm.title}
+                        onChange={e => setAnnForm({ ...annForm, title: e.target.value })}
+                        placeholder="标题（必填）"
+                        aria-label="公告标题"
+                        className="flex-1 min-w-[12rem] rounded-lg border border-gray-200 px-3 py-1.5 text-xs"
+                      />
+                    </div>
+                    <textarea
+                      value={annForm.content_md}
+                      onChange={e => setAnnForm({ ...annForm, content_md: e.target.value })}
+                      placeholder="正文（纯文本；使用说明可指向 /intro，反馈渠道如 QQ 2053769154）"
+                      aria-label="公告正文"
+                      rows={3}
+                      className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-xs"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <input
+                        value={annForm.link}
+                        onChange={e => setAnnForm({ ...annForm, link: e.target.value })}
+                        placeholder="跳转链接（可选，如 /intro）"
+                        aria-label="公告链接"
+                        className="flex-1 min-w-[10rem] rounded-lg border border-gray-200 px-3 py-1.5 text-xs"
+                      />
+                      <input
+                        value={annForm.link_label}
+                        onChange={e => setAnnForm({ ...annForm, link_label: e.target.value })}
+                        placeholder="链接文案（如 查看使用说明）"
+                        aria-label="链接文案"
+                        className="w-40 rounded-lg border border-gray-200 px-3 py-1.5 text-xs"
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600">
+                      <label className="inline-flex items-center gap-1">
+                        <input type="checkbox" checked={annForm.dismissible} onChange={e => setAnnForm({ ...annForm, dismissible: e.target.checked })} />
+                        可关闭
+                      </label>
+                      <label className="inline-flex items-center gap-1">
+                        <input type="checkbox" checked={annForm.enabled} onChange={e => setAnnForm({ ...annForm, enabled: e.target.checked })} />
+                        启用
+                      </label>
+                      <label className="inline-flex items-center gap-1">
+                        上线
+                        <input type="datetime-local" value={annForm.starts_at ?? ''} onChange={e => setAnnForm({ ...annForm, starts_at: e.target.value || null })} className="rounded-lg border border-gray-200 px-2 py-1 text-xs" />
+                      </label>
+                      <label className="inline-flex items-center gap-1">
+                        下线
+                        <input type="datetime-local" value={annForm.ends_at ?? ''} onChange={e => setAnnForm({ ...annForm, ends_at: e.target.value || null })} className="rounded-lg border border-gray-200 px-2 py-1 text-xs" />
+                      </label>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => { setAnnForm(null); setAnnEditingId(null) }} className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50">取消</button>
+                      <button onClick={() => void submitAnnouncement()} disabled={annSaving} className="rounded-lg bg-primary-500 px-4 py-1.5 text-xs font-medium text-white hover:bg-primary-400 disabled:opacity-50">
+                        {annSaving ? '保存中…' : annEditingId != null ? '保存修改' : '创建公告'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {annLoading ? (
+                  <p className="text-xs text-gray-400 py-2">加载中…</p>
+                ) : annList.length === 0 ? (
+                  <p className="text-xs text-gray-400 py-2">暂无公告</p>
+                ) : (
+                  <div className="space-y-1 max-h-64 overflow-y-auto">
+                    {annList.map(a => (
+                      <div key={a.id} className="flex items-center gap-2 text-xs text-gray-600 rounded-lg bg-white/40 px-2.5 py-1.5">
+                        <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] ${a.enabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                          {a.enabled ? '启用' : '停用'}
+                        </span>
+                        <span className="font-medium text-gray-700 truncate">{a.title}</span>
+                        <span className="text-[10px] text-gray-300 shrink-0">
+                          {a.starts_at ? `自 ${a.starts_at.slice(0, 10)}` : ''}{a.ends_at ? ` 至 ${a.ends_at.slice(0, 10)}` : '（长期）'}
+                        </span>
+                        <span className="ml-auto flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => {
+                              setAnnEditingId(a.id)
+                              setAnnForm({
+                                type: a.type, title: a.title, content_md: a.content_md,
+                                link: a.link, link_label: a.link_label, dismissible: a.dismissible,
+                                starts_at: a.starts_at ? a.starts_at.slice(0, 16) : null,
+                                ends_at: a.ends_at ? a.ends_at.slice(0, 16) : null,
+                                enabled: a.enabled,
+                              })
+                            }}
+                            className="p-1 rounded text-gray-400 hover:text-primary-600 hover:bg-primary-50"
+                            title="编辑"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setAnnDeleting(a)}
+                            className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50"
+                            title="删除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </span>
                       </div>
                     ))}
@@ -525,6 +756,17 @@ export default function AdminUsersPage() {
           )}
 
           {/* ═══ V2-1 开启全局视图确认（范围说明+审计提示） ═══ */}
+          <ConfirmDialog
+            open={!!annDeleting}
+            title="确认删除公告"
+            message={annDeleting ? `确定删除公告「${annDeleting.title}」吗？已读记录一并清除。` : ''}
+            confirmText="删除"
+            cancelText="取消"
+            variant="danger"
+            onConfirm={() => void handleDeleteAnnouncement()}
+            onCancel={() => setAnnDeleting(null)}
+          />
+
           <ConfirmDialog
             open={gvConfirm}
             title="开启全局运维视图"

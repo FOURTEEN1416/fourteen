@@ -650,6 +650,61 @@ async def save_user_llm_config(
     return {"source": "user", "llm": _sanitize_llm_config(user.llm_config)}
 
 
+class LlmConfigTestRequest(BaseModel):
+    config: dict[str, Any]
+
+
+@router.post("/api/user/llm-config/test")
+async def test_user_llm_config(
+    req: LlmConfigTestRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """BYOK 连通性测试（NEW-13①，2026-10-29）：错 Key 当场报错，不再延迟到聊天才爆。
+
+    走与真实对话完全相同的构造路径（``llm_provider._build_backend``，BYOK 全部
+    fail-closed 校验——SSRF/幽灵链/凭证借用拦截原样生效），再发一次最小
+    completion。**不触碰用户 gateway 缓存**（测试配置 ≠ 已保存配置）。
+    错误一律 200 + ok=false（前端就地展示），不抛 4xx/5xx。
+    """
+    user = await db.get(User, user_id)
+    llm_cfg = req.config.get("llm") if isinstance(req.config, dict) else None
+    if not llm_cfg or not isinstance(llm_cfg, dict):
+        raise HTTPException(400, "Missing 'llm' in config")
+    # 未填新 Key 时用已保存的 Key 测试（与保存合并语义一致：空 = 保留原值）
+    existing = (user.llm_config or {}) if user else {}
+    if not str(llm_cfg.get("api_key") or "").strip() and existing.get("api_key"):
+        llm_cfg = {**llm_cfg, "api_key": existing["api_key"]}
+
+    provider = str(llm_cfg.get("provider") or "").strip()
+    if not provider or provider == "auto":
+        return {
+            "ok": False,
+            "error": "测试连接需要明确指定供应商；「自动回退」链请改用逐供应商配置后分别测试",
+        }
+
+    from llm_provider import _build_backend
+
+    started = time.perf_counter()
+    try:
+        backend = _build_backend(provider, llm_cfg, None, inherit_platform=False)
+    except Exception as exc:  # noqa: BLE001 — 构造期校验失败就地回显（SSRF/缺 Key/幽灵链）
+        return {"ok": False, "latency_ms": 0, "error": f"配置校验失败：{exc}"[:300]}
+
+    try:
+        reply = await asyncio.wait_for(
+            backend.chat("ping", system_prompt="连接测试，请直接回复 pong", timeout=15.0),
+            timeout=25.0,
+        )
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        text = str(reply or "").strip()
+        return {"ok": bool(text), "latency_ms": latency_ms, "preview": text[:60]}
+    except Exception as exc:  # noqa: BLE001 — 供应商侧失败（超时/401/429…）就地回显
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        return {"ok": False, "latency_ms": latency_ms, "error": str(exc)[:300]}
+
+
 # ═══════════════════════════════════════════════════════
 # Channels list (mixed web/api/wechat + active sessions)
 # ═══════════════════════════════════════════════════════

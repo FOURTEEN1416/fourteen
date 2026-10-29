@@ -2120,6 +2120,11 @@ class WeChatConnector:
                 _exc_text = get_fallback_line(None, "exception", read_reply_mode())
             except Exception:  # noqa: BLE001
                 _exc_text = "刚才好像出问题了，再说一次好吗"
+            # NEW-13③（2026-10-29）：BYOK 配置类失败给控制台指引——错 Key/缺 Key
+            # 此前只回角色化兜底句，用户无从得知要去网页配 Key。
+            _exc_repr = f"{type(e).__name__}: {e}"
+            if any(kw in _exc_repr for kw in ("API Key", "api_key", "供应商", "provider")):
+                _exc_text += "（请到网页控制台 → 系统设置 → LLM 配置，检查你的 API Key）"
             try:
                 _send_text(
                     to=from_user, text=_exc_text,

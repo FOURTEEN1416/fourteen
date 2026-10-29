@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Toggle } from '../components/shared'
-import { config as fetchConfig, saveConfig, userLlmConfig, saveUserLlmConfig } from '../api/system'
+import { config as fetchConfig, saveConfig, userLlmConfig, saveUserLlmConfig, testUserLlmConfig } from '../api/system'
 import { listProviders, type ProviderOption } from '../api/llmProviders'
 import ProviderGuideModal from '../components/llm/ProviderGuideModal'
 import { useAuthStore } from '../store/authStore'
-import { BookOpen, Loader2 } from 'lucide-react'
+import { BookOpen, Loader2, PlugZap } from 'lucide-react'
 
 /** POST /api/config 的 save_receipt 契约（observability/config_manager.py） */
 interface SaveReceipt {
@@ -55,6 +56,14 @@ function SettingsLLM() {
   const [modelName, setModelName] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [apiBase, setApiBase] = useState('')
+  // NEW-13④：已保存密钥状态可见（'****' 回显被转空串后，「从未配置」与「已配置」界面完全一样）
+  const [hasSavedKey, setHasSavedKey] = useState(false)
+  // NEW-13①：连通性测试状态
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean; latency_ms?: number; preview?: string; error?: string } | null>(null)
+  // NEW-13②：403 自动跳转带来的 ?byok=1 → 就地提示（旧实现全前端无人读取该参数）
+  const location = useLocation()
+  const byokRedirect = new URLSearchParams(location.search).get('byok') === '1'
 
   // 生成参数
   const [temperature, setTemperature] = useState(0.85)
@@ -110,6 +119,7 @@ function SettingsLLM() {
         setConfigSource(source)
         setProvider(llm.provider ?? 'auto')
         setModelName(llm.model || llm.primary_model || '')
+        setHasSavedKey(llm.api_key === '****')
         setApiKey(llm.api_key && llm.api_key !== '****' ? llm.api_key : '')
         setApiBase(llm.api_base ?? '')
         setTemperature(Number(llm.temperature) || 0.85)
@@ -135,6 +145,13 @@ function SettingsLLM() {
     setError(null)
     setSuccess(false)
     setSaveNotice(null)
+
+    // NEW-13⑤：已禁用供应商保存也不生效，当场拦下（不再静默成功）
+    if (provider !== 'auto' && selectedProvider?.enabled === false) {
+      setError('所选供应商已被禁用，保存后也不会生效——请选择其他供应商')
+      setSaving(false)
+      return
+    }
 
     try {
       const llmConfig: Record<string, unknown> = {
@@ -172,6 +189,26 @@ function SettingsLLM() {
   // 是否需要显示连接参数（auto 不需要，custom 和真实供应商需要）
   const showConnectionParams = provider !== 'auto'
 
+  // NEW-13①：连通性测试——与保存同形状发后端，走真实构造路径（SSRF/缺 Key 拦截原样生效）
+  const handleTest = async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const llmConfig: Record<string, unknown> = {
+        provider,
+        model: modelName,
+        api_base: apiBase,
+      }
+      if (apiKey && apiKey !== '****') llmConfig.api_key = apiKey
+      const res = await testUserLlmConfig({ llm: llmConfig })
+      setTestResult(res)
+    } catch (err: unknown) {
+      setTestResult({ ok: false, error: err instanceof Error ? err.message : '测试请求失败' })
+    } finally {
+      setTesting(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="space-y-6" role="status" aria-label="加载配置中">
@@ -191,6 +228,12 @@ function SettingsLLM() {
 
   return (
     <div className="space-y-6">
+      {/* NEW-13②：聊天失败 403 自动跳转 ?byok=1 —— 旧实现全前端无人读取该参数 */}
+      {byokRedirect && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-4 py-3 text-sm" data-testid="byok-redirect-hint">
+          对话失败是因为还没有配置你自己的模型凭证。请在下方选择供应商并保存 <strong>API Key</strong>，保存成功后回到微信继续对话即可。
+        </div>
+      )}
       {/* 配置来源指示 */}
       <div className="text-xs text-gray-400">
         {isAdmin
@@ -303,14 +346,21 @@ function SettingsLLM() {
             </div>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
               <div>
-                <p className="text-sm text-gray-700">API Key</p>
+                <p className="text-sm text-gray-700">
+                  API Key
+                  {hasSavedKey && !apiKey && (
+                    <span className="ml-2 rounded-full bg-green-100 px-1.5 py-0.5 text-[9px] text-green-600 align-middle" data-testid="key-saved-badge">
+                      已保存密钥
+                    </span>
+                  )}
+                </p>
                 <p className="text-xs text-gray-400">从供应商后台获取</p>
               </div>
               <input
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
+                placeholder={hasSavedKey ? '已保存（输入新值可更换）' : 'sk-...'}
                 className="w-full sm:w-56 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
               />
             </div>
@@ -326,6 +376,33 @@ function SettingsLLM() {
                 placeholder={selectedProvider?.model || 'model-name'}
                 className="w-full sm:w-56 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50"
               />
+            </div>
+            {/* NEW-13①：保存前先测连通性——错 Key 当场报错，不再延迟到聊天才爆 */}
+            <div className="pt-1 border-t border-gray-100 space-y-2">
+              <button
+                type="button"
+                onClick={() => void handleTest()}
+                disabled={testing || provider === 'auto'}
+                title={provider === 'auto' ? '「自动回退」不支持一键测试，请选择具体供应商' : '用当前参数向供应商发一次真实请求'}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-primary-200 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-600 hover:bg-primary-100 transition-colors disabled:opacity-40"
+              >
+                {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PlugZap className="w-3.5 h-3.5" />}
+                {testing ? '测试中…' : '测试连接'}
+              </button>
+              {testResult && (
+                <p
+                  data-testid="llm-test-result"
+                  className={`text-xs rounded-lg px-3 py-2 ${
+                    testResult.ok
+                      ? 'bg-green-50 text-green-700'
+                      : 'bg-red-50 text-red-600'
+                  }`}
+                >
+                  {testResult.ok
+                    ? `连接成功（${testResult.latency_ms ?? '?'}ms）${testResult.preview ? `：${testResult.preview}` : ''}`
+                    : `连接失败：${testResult.error || '未知错误'}`}
+                </p>
+              )}
             </div>
           </div>
           {selectedProvider?.guide?.apply_url && (
@@ -391,37 +468,39 @@ function SettingsLLM() {
       <section>
         <h3 className="text-sm font-semibold text-gray-700 mb-3">LLM 缓存</h3>
         <div className="glass-card rounded-xl p-4 space-y-4">
-          {/* W10 诚实化：LLM 缓存尚未接入对话链路（/api/cache/stats 返回
-              not_integrated），此开关与统计当前不生效，不得宣称省 token */}
+          {/* W10 诚实化 + NEW-13⑥：缓存未接线——横幅诚实 + 控件置灰（旧实现
+              横幅说「不生效」但下方控件仍可交互保存，自相矛盾） */}
           <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
             <p className="text-xs text-amber-700" data-testid="cache-not-integrated">
               未接线（not_integrated）：LLM 缓存尚未接入对话链路，此配置当前不生效，也不会节省 token。
             </p>
           </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-700">启用缓存</p>
-              <p className="text-xs text-gray-400">缓存 LLM 响应以减少重复请求（当前未接线，不生效）</p>
+          <fieldset disabled className="space-y-4 opacity-50" aria-disabled="true" data-testid="cache-controls-disabled">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-700">启用缓存</p>
+                <p className="text-xs text-gray-400">缓存 LLM 响应以减少重复请求（当前未接线，不生效）</p>
+              </div>
+              <Toggle
+                checked={llmCache}
+                onChange={(v: boolean) => setLlmCache(v)}
+              />
             </div>
-            <Toggle
-              checked={llmCache}
-              onChange={(v: boolean) => setLlmCache(v)}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-700">缓存时长</p>
-              <p className="text-xs text-gray-400">缓存保留时间（分钟）</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-700">缓存时长</p>
+                <p className="text-xs text-gray-400">缓存保留时间（分钟）</p>
+              </div>
+              <input
+                type="number"
+                value={cacheDuration}
+                onChange={(e) => setCacheDuration(parseInt(e.target.value) || 0)}
+                min={1}
+                max={525600}
+                className="w-24 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50 text-center"
+              />
             </div>
-            <input
-              type="number"
-              value={cacheDuration}
-              onChange={(e) => setCacheDuration(parseInt(e.target.value) || 0)}
-              min={1}
-              max={525600}
-              className="w-24 px-3 py-1.5 text-xs input-macaron rounded-lg outline-none focus:ring-2 focus:ring-primary-400/50 text-center"
-            />
-          </div>
+          </fieldset>
         </div>
       </section>
       </div>

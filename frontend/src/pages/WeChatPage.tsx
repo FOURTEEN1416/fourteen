@@ -167,7 +167,21 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollingStartRef = useRef<number>(0)
+  // NEW-4（2026-10-29）：连续失败计数——旧实现轮询 catch 静默吞错，error 分支
+  // 永不可达，后端/平台故障时用户只见无限「获取二维码中…」。
+  const qrFailRef = useRef(0)
+  const connFailRef = useRef(0)
+  // 看门狗用 ref 读码图（不进 useCallback 依赖，避免轮询被 effect 重启打断）
+  const qrImageRef = useRef('')
   const qc = useQueryClient()
+
+  /** 连续失败达阈值：停轮询并置错误态（重试按钮走 handleRefresh 重开全流程） */
+  const bailToError = useCallback((what: 'qr' | 'conn') => {
+    if (pollingRef.current) clearInterval(pollingRef.current)
+    pollingRef.current = null
+    setStatus('error')
+    setErrorMsg(what === 'qr' ? '二维码获取失败，请检查网络后重试' : '连接状态查询失败，请检查网络后重试')
+  }, [])
 
   const triggerConnection = useCallback(async () => {
     try {
@@ -178,35 +192,51 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
   }, [])
 
   const startConnectionPolling = useCallback(() => {
+    connFailRef.current = 0
     pollingRef.current = setInterval(async () => {
       try {
         const res = await wechatConnectionStatus()
-        const connData = res.data as { connected?: boolean; wxid?: string; status?: string }
+        connFailRef.current = 0
+        const connData = res.data as { connected?: boolean; wxid?: string; status?: string; is_expired?: boolean }
         if (connData.connected || connData.status === 'connected') {
           setStatus('connected')
           if (pollingRef.current) clearInterval(pollingRef.current)
           // 本人通道已在后端落库，不再调用 admin 的 wechatCreateConnection
           qc.invalidateQueries({ queryKey: queryKeys.wechat.status })
           qc.invalidateQueries({ queryKey: ['wechat', 'bindings'] })
+        } else if (connData.is_expired === true) {
+          // NEW-4：等待扫码期间二维码过期（后端 waiting_qr/scanned 态返回时效）——
+          // 旧实现此分支不存在，延误扫码后旧码永远显示「等待扫描」。
+          setStatus('expired')
+          if (pollingRef.current) clearInterval(pollingRef.current)
         } else if (connData.status === 'scanned') {
           setStatus('scanned')
         }
       } catch {
-        // 忽略轮询错误
+        connFailRef.current += 1
+        if (connFailRef.current >= 3) bailToError('conn')
       }
     }, 2000)
-  }, [onConnected, qc])
+  }, [onConnected, qc, bailToError])
 
   const startQrPolling = useCallback(() => {
     if (pollingRef.current) clearInterval(pollingRef.current)
     pollingStartRef.current = Date.now()
+    qrFailRef.current = 0
 
     pollingRef.current = setInterval(async () => {
+      // 看门狗：15s（启动延迟 + 数次轮询）仍无码 → 错误态，避免请求悬挂时无限 loading
+      if (!qrImageRef.current && Date.now() - pollingStartRef.current > 15000) {
+        bailToError('qr')
+        return
+      }
       try {
         const res = await wechatQrCode()
+        qrFailRef.current = 0
         const data = res.data as { qr_image?: string; status?: string; is_expired?: boolean; message?: string }
 
         if (data.qr_image) {
+          qrImageRef.current = data.qr_image
           setQrImage(data.qr_image)
           setStatus('waiting')
           if (pollingRef.current) clearInterval(pollingRef.current)
@@ -216,10 +246,11 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
           if (pollingRef.current) clearInterval(pollingRef.current)
         }
       } catch {
-        // 忽略轮询错误
+        qrFailRef.current += 1
+        if (qrFailRef.current >= 3) bailToError('qr')
       }
     }, 2000)
-  }, [startConnectionPolling])
+  }, [startConnectionPolling, bailToError])
 
   const startFlow = useCallback(() => {
     if (startupTimerRef.current) clearTimeout(startupTimerRef.current)
@@ -240,6 +271,10 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
   const handleRefresh = () => {
     setStatus('loading')
     setErrorMsg('')
+    qrFailRef.current = 0
+    connFailRef.current = 0
+    qrImageRef.current = ''
+    setQrImage('')
     startFlow()
   }
 
@@ -315,6 +350,10 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
             </div>
             <p className="text-sm font-medium text-green-600">连接成功</p>
             <p className="text-xs text-gray-400">微信账号已接入</p>
+            {/* V2-4③（2026-10-29）：首日接力——成功后告诉用户下一步做什么 */}
+            <p className="text-xs text-gray-500 bg-macaron-mint-light/40 rounded-lg px-3 py-2">
+              现在打开微信，给你的角色发第一条消息试试吧
+            </p>
             <button
               onClick={handleClose}
               className="mt-2 rounded-lg bg-primary-500 px-6 py-2 text-xs font-medium text-white hover:bg-primary-600"

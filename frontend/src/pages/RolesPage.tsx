@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useMemo, useState } from 'react'
-import { Plus, Search, Sparkles, AlertTriangle } from 'lucide-react'
+import { Plus, Search, Sparkles, AlertTriangle, Gift, X } from 'lucide-react'
 import AnimatedPage from '../components/shared/AnimatedPage'
 import { useUnifiedCharacters, queryKeys } from '../hooks/useQueries'
 import { activateCharacter } from '../api/characters'
@@ -8,6 +8,28 @@ import { useQueryClient } from '@tanstack/react-query'
 import { anchorTone, deriveCardSummary, sanitizeCharacterName } from '../utils/character'
 import { useErrorStore } from '../store/errorStore'
 import type { UnifiedCharacter } from '../types/api'
+
+const INITIAL_NOTICE_KEY = 'initial-character-notice-done'
+
+/** NEW-16（2026-10-29）：注册自动分发初始角色的一次性告知（可关闭并记住） */
+function useInitialCharacterNotice(hasActive: boolean) {
+  const [visible, setVisible] = useState(() => {
+    try {
+      return localStorage.getItem(INITIAL_NOTICE_KEY) !== 'done'
+    } catch {
+      return true
+    }
+  })
+  const dismiss = () => {
+    setVisible(false)
+    try {
+      localStorage.setItem(INITIAL_NOTICE_KEY, 'done')
+    } catch {
+      /* 隐私模式等场景下仅本次会话内消失 */
+    }
+  }
+  return { show: visible && hasActive, dismiss }
+}
 
 function RoleCard({
   character,
@@ -72,6 +94,8 @@ export default function RolesPage() {
   // NEW-9：isError 不得伪装成「暂无角色」空态（用户会误以为角色全没了）
   const { data, isLoading, isError, refetch } = useUnifiedCharacters()
   const characters = data?.characters ?? []
+  const hasActive = characters.some(c => c.is_active)
+  const initialNotice = useInitialCharacterNotice(hasActive)
   const [activatingId, setActivatingId] = useState<string | null>(null)
   const [keyword, setKeyword] = useState('')
 
@@ -117,6 +141,26 @@ export default function RolesPage() {
             <p className="mt-0.5 text-sm text-gray-400">选择当前活跃角色，或创建新的自定义角色。</p>
           </div>
 
+          {/* NEW-16：注册自动分发并激活的初始角色——旧实现只有 4 秒 toast，此后无任何持久告知 */}
+          {initialNotice.show && (
+            <div
+              className="mb-4 flex items-center gap-2 rounded-xl border border-macaron-yellow/40 bg-macaron-yellow-light/50 px-4 py-3 text-sm"
+              data-testid="initial-character-notice"
+            >
+              <Gift className="h-4 w-4 shrink-0 text-macaron-yellow-deep" />
+              <span className="text-gray-600">
+                已经为你准备好了初始角色并设为活跃——可以直接去微信开始对话，也可以在这里切换其他角色。
+              </span>
+              <button
+                onClick={initialNotice.dismiss}
+                aria-label="知道了"
+                className="ml-auto shrink-0 rounded-lg p-1 text-gray-400 hover:text-gray-600 hover:bg-white/60 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
           {isLoading ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {Array.from({ length: 4 }).map((_, i) => (
@@ -138,6 +182,10 @@ export default function RolesPage() {
             <div className="glass-card rounded-2xl p-8 text-center text-gray-400">
               <Sparkles className="w-10 h-10 mx-auto mb-3 text-gray-400" />
               <p className="text-sm">暂无角色</p>
+              {/* NEW-16：初始角色分发失败的静默分支——给一句显式引导（不阻断注册） */}
+              <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-gray-400">
+                注册时如未自动分配初始角色，可在这里创建一个开始使用
+              </p>
               <button
                 onClick={() => navigate('/roles/create')}
                 className="mt-4 btn-macaron rounded-xl px-5 py-2 text-xs font-medium"

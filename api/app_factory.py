@@ -25,6 +25,8 @@ from api.auth import configure_auth, verify_api_key_dep
 from api.auth_jwt import verify_token
 from api.deps import deps
 from api.health_routes import health_router
+from api.routers.announcement_routes import admin_router as announcement_admin_router
+from api.routers.announcement_routes import router as announcement_router
 from api.routers.chat_routes import router as chat_router
 from api.routers.clone_routes import router as clone_router
 from api.routers.misc_routes import router as misc_router
@@ -271,6 +273,8 @@ def create_api_app(
     app.include_router(safety_router)       # 12 端点: safety/rag/voice/files/cache
     app.include_router(clone_router)        #  8 端点: clone/*
     app.include_router(topic_state_router)  #  3 端点: topic-state/config + 快照
+    app.include_router(announcement_router)  # V2-5 公告: active 读面 + 已读标记（2 端点）
+    app.include_router(announcement_admin_router)  # V2-5 公告 admin CRUD（4 端点）
     try:
         from api.routers.agent_plane_routes import router as agent_plane_router
 

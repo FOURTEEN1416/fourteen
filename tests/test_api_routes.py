@@ -143,7 +143,7 @@ def test_control_plane_critical_routes_are_mounted(app):
 @pytest.mark.parametrize(
     "module,expected_count,label",
     [
-        (misc_routes, 16, "stats/memory/diary/dates/meta/logs/config/channels/routes/user-llm-config"),
+        (misc_routes, 17, "stats/memory/diary/dates/meta/logs/config/channels/routes/user-llm-config（10-29 +user/llm-config/test BYOK 连通性测试）"),
         (chat_routes, 11, "chat/session + wechat channels"),
         (personality_routes, 10, "emotion/persona/psych（08-31? +emotion/distribution SP-1）"),
         (users_routes, 7, "users/*"),
@@ -178,6 +178,7 @@ def test_total_contribution_is_92(app):
     2026-10-21: +user/reply-mode GET/POST（用户自助回复模式 R7，16→18；总 86→88）
     2026-10-27: +humanize/config DELETE（按用户覆盖清除，18→19；总 88→89）
     2026-10-27: +topic-state/config GET/POST + 会话快照（新增 topic_routes 3 端点；总 89→92）
+    2026-10-29: +user/llm-config/test（BYOK 连通性测试，misc 16→17；总 92→93）
     """
     modules = [
         misc_routes, chat_routes, personality_routes, users_routes,
@@ -185,7 +186,7 @@ def test_total_contribution_is_92(app):
         topic_routes,
     ]
     total = sum(len(_sub_router_routes(m)) for m in modules)
-    assert total == 92, f"9 sub-routers contribute {total} routes, expected 92"
+    assert total == 93, f"9 sub-routers contribute {total} routes, expected 93"
 
 
 def test_no_duplicate_endpoints_across_sub_routers():

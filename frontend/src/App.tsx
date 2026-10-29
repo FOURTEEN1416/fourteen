@@ -22,6 +22,7 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const WeChatPage = lazy(() => import('./pages/WeChatPage'))
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
 const AdminProvidersPage = lazy(() => import('./pages/AdminProvidersPage'))
+const HelpGuidePage = lazy(() => import('./pages/HelpGuidePage'))
 
 const SettingsLLM = lazy(() => import('./pages/SettingsLLM'))
 const SettingsVoice = lazy(() => import('./pages/SettingsVoice'))
@@ -151,6 +152,7 @@ export default function App() {
           {/* 心理画像需登录：2026-09-19 审美批次并入控制台外壳（此前独立路由无侧栏/面包屑，
               未登录时由 AuthGuard 拦截，请求不会发出） */}
           <Route path="/psych" element={<AnimatedSuspense><PsychProfilePage /></AnimatedSuspense>} />
+          <Route path="/help" element={<AnimatedSuspense><HelpGuidePage /></AnimatedSuspense>} />
 
           {/* 系统设置 */}
           <Route path="/settings" element={<SystemSettingsLayout />}>

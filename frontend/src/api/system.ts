@@ -15,6 +15,10 @@ export function saveConfig(cfg: Record<string, unknown>) { return client.post('/
 
 export function userLlmConfig() { return client.get('/user/llm-config') }
 export function saveUserLlmConfig(cfg: Record<string, unknown>) { return client.post('/user/llm-config', { config: cfg }) }
+// NEW-13①（2026-10-29）：BYOK 连通性测试——错 Key 当场报错，不延迟到聊天才爆
+export function testUserLlmConfig(cfg: Record<string, unknown>) {
+  return client.post('/user/llm-config/test', { config: cfg }).then(r => r.data as { ok: boolean; latency_ms?: number; preview?: string; error?: string })
+}
 
 // ── Persona ──
 

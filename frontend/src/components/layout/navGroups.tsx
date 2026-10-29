@@ -1,7 +1,7 @@
 import {
   MessageCircle, Sparkles, Mic, Shield, FileText,
   Settings, Activity, Library, Brain, Wand2,
-  User, Wrench, BarChart3, Server, Database,
+  User, Wrench, BarChart3, Server, Database, Compass,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -48,6 +48,7 @@ export function buildGlobalNavGroups(isAdmin: boolean, activeRoleId?: string): N
         { to: '/settings/tools', icon: Wrench, label: '工具仪表盘' },
         { to: '/settings/security', icon: Shield, label: '安全' },
         { to: '/settings/logs', icon: FileText, label: '日志' },
+        { to: '/help', icon: Compass, label: '使用帮助' },
       ],
     },
     {
