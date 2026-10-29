@@ -28,10 +28,13 @@ describe('IntroPage', () => {
     expect(screen.getByText('语音克隆')).toBeDefined()
   })
 
-  it('links invite registration to /login', () => {
+  it('links registration to /login with open-registration copy (D20-①)', () => {
     renderComponent()
-    const link = screen.getByRole('link', { name: /使用邀请码注册/ })
+    const link = screen.getByRole('link', { name: /立即注册/ })
     expect(link.getAttribute('href')).toBe('/login')
+    // D13 开放注册主链路：不得再把「邀请码制」说成注册前提
+    expect(screen.queryByText(/注册采用邀请码制/)).toBeNull()
+    expect(screen.getByText(/无需邀请码/)).toBeDefined()
   })
 
   it('shows the MIT open-source badge with GitHub link', () => {

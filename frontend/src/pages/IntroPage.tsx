@@ -133,27 +133,32 @@ export default function IntroPage() {
           </div>
         </section>
 
-        {/* ─── 邀请码注册入口 ─── */}
+        {/* ─── 注册入口 ─── */}
+        {/* 2026-10-29 NEW-3 / D20-①：旧文案「注册采用邀请码制」与代码实况不符——
+            注册主链路开放（/api/auth/register 无邀请码门，注册页邀请码为可选勾选），
+            邀请码是可选协助渠道（invite 端点并存，符合 D13 裁决）。文案对齐实况，
+            消除「必须先取码」的首日漏斗误导。 */}
         <section className="glass-card rounded-2xl p-6 sm:p-8 mt-10 text-center stagger-item" style={{ animationDelay: '360ms' }} aria-label="注册入口">
           <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-macaron-yellow-light mb-3">
             <KeyRound className="w-5 h-5 text-macaron-yellow-deep" />
           </div>
-          <h2 className="text-lg font-semibold text-gray-700 mb-2">注册采用邀请码制</h2>
+          <h2 className="text-lg font-semibold text-gray-700 mb-2">注册即可开始</h2>
           <p className="text-sm text-gray-500 mb-4 max-w-md mx-auto leading-relaxed">
-            获取邀请码后，在注册页勾选「我有邀请码」即可创建账户，绑定你的专属角色开始陪伴。
+            无需邀请码，直接注册创建账户，绑定你的专属角色开始陪伴；
+            如需邀请码协助开通或在注册中遇到问题，也可以联系我们。
           </p>
           <div className="inline-flex items-center gap-2 rounded-xl bg-macaron-yellow-light/70 border border-macaron-yellow/40 px-4 py-2.5 mb-6">
             <Headset className="w-4 h-4 text-macaron-yellow-deep" />
             <span className="text-xs text-gray-600">
-              邀请码获取：联系 QQ <span className="font-mono font-semibold text-gray-800">2053769154</span>
-              ，备注「AI伴侣」
+              邀请码协助 / 使用问题 / 反馈 bug：联系 QQ{' '}
+              <span className="font-mono font-semibold text-gray-800">2053769154</span>，备注「AI伴侣」
             </span>
           </div>
           <Link
             to="/login"
             className="btn-macaron inline-flex items-center gap-2 rounded-xl px-8 py-3 text-sm font-medium"
           >
-            使用邀请码注册
+            立即注册
             <ArrowRight className="w-4 h-4" />
           </Link>
           <p className="text-xs text-gray-400 mt-4">

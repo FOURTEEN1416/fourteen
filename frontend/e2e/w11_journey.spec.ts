@@ -292,11 +292,10 @@ test.describe.serial('W11 · 账号维度', () => {
     await page.goto('/settings/security')
     await expect(page.getByText('内容安全过滤器')).toBeVisible()
 
-    // 产品现状：控制台**没有登出入口**（唯一登出路径是协议门的「不同意并退出登录」），
-    // 故此处以「会话失效」路径回登录页：清 cookie + 清持久化并重载，让内存态一并丢弃。
-    await page.context().clearCookies()
-    await page.evaluate(() => window.localStorage.clear())
-    await page.reload()
+    // 2026-10-29 NEW-2：控制台顶栏新增「退出登录」入口（此前唯一登出路径是协议门），
+    // 此处改为走真实登出入口，兼作该入口的 e2e 回归。
+    await page.getByRole('button', { name: '退出登录' }).click()
+    await expect(page).toHaveURL(/\/login/)
     await uiLogin(page, VIEWER)
     await page.goto('/settings/security')
 

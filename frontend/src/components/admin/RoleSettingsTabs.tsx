@@ -669,7 +669,7 @@ interface ProactiveConfigPayload {
   dice_gate_state?: DiceGateState
 }
 
-function MessageTab({ character }: { character: RoleSettingsCharacter }) {
+function MessageTab(_props: { character: RoleSettingsCharacter }) {
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const [threshold, setThreshold] = useState(2.0)
   const [dailyLimit, setDailyLimit] = useState(8)
@@ -702,6 +702,8 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
   const [replayKey, setReplayKey] = useState('')
   const [replayTurn, setReplayTurn] = useState('')
   const [replayOut, setReplayOut] = useState<string>('')
+  // 记忆整理确认（2026-10-29 NEW-6：空键=对全部会话改写事实库，必须二次确认+作用域明示）
+  const [showCurateConfirm, setShowCurateConfirm] = useState(false)
   const [paused, setPaused] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState('')
@@ -1015,16 +1017,22 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
           <input className="border rounded-lg px-2 py-1.5 text-sm" placeholder="turn_id（回放用）" value={replayTurn} onChange={e => setReplayTurn(e.target.value)} />
           <div className="flex gap-2">
             <button className="flex-1 rounded-lg bg-sky-500 text-white text-sm py-1.5" onClick={handleReplay}>回放</button>
-            <button className="flex-1 rounded-lg bg-emerald-500 text-white text-sm py-1.5" onClick={handleCurate}>整理记忆</button>
+            <button className="flex-1 rounded-lg bg-emerald-500 text-white text-sm py-1.5" onClick={() => setShowCurateConfirm(true)}>整理记忆</button>
           </div>
         </div>
+        <p className="mt-1.5 text-[11px] text-gray-400">
+          回放按会话键定位事件；<strong>整理记忆会改写事实库（删除/调低置信度）</strong>——
+          会话键<strong>留空时作用于全部已知会话</strong>，属全局改写，请务必先填目标会话键再执行。
+        </p>
         {replayOut ? <pre className="mt-2 text-xs bg-gray-50 rounded-lg p-2 overflow-auto max-h-64 whitespace-pre-wrap">{replayOut}</pre> : null}
       </Section>
-      {/* Stats（真数据：/api/proactive/history + config） */}
+      {/* Stats（真数据：/api/proactive/history + config）
+          2026-10-29 NEW-19：「消息总数」原读 character.stats?.messages，但后端角色详情
+          从不返回 stats（42 卡 0 张含此字段），上线以来恒 0——按裁决删卡止血，
+          真实统计（会话×角色口径计数）另立功能批。 */}
       <Section title="消息统计">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-4">
           {[
-            { label: '消息总数', value: (character.stats?.messages ?? 0).toLocaleString(), color: 'text-blue-600' },
             { label: '今日主动', value: String(todayCount), color: 'text-green-600' },
             { label: '最后发送', value: lastAt, color: 'text-gray-600', small: true },
           ].map(s => (
@@ -1183,6 +1191,24 @@ function MessageTab({ character }: { character: RoleSettingsCharacter }) {
           </div>
         </Section>
       )}
+
+      <ConfirmDialog
+        open={showCurateConfirm}
+        title="确认整理记忆"
+        message={
+          replayKey.trim()
+            ? `将对会话「${replayKey.trim()}」执行记忆整理：改写事实库（删除/调低置信度），删除项进入回收站。确定继续？`
+            : '未填写会话键——将对【全部已知会话】执行记忆整理：改写所有用户的事实库与派生召回。这是全局写操作，确定继续？'
+        }
+        confirmText="确认整理"
+        cancelText="取消"
+        variant="danger"
+        onConfirm={() => {
+          setShowCurateConfirm(false)
+          void handleCurate()
+        }}
+        onCancel={() => setShowCurateConfirm(false)}
+      />
     </div>
   )
 }
@@ -1285,21 +1311,9 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
 
   return (
     <div className="space-y-4">
-      {/* Stats */}
-      <Section title="数据概览">
-        <div className="grid grid-cols-3 gap-4">
-          {[
-            { label: '消息总数', value: (character.stats?.messages ?? 0).toLocaleString(), icon: '💬' },
-            { label: '记忆条数', value: (character.stats?.memories ?? 0).toLocaleString(), icon: '🧠' },
-            { label: '平均响应', value: character.stats?.avgResponse ?? '—', icon: '⚡' },
-          ].map(s => (
-            <div key={s.label} className="text-center p-3 rounded-xl bg-gray-50">
-              <p className="text-lg mb-0.5">{s.icon}</p>
-              <p className="text-lg font-bold text-gray-800">{s.value}</p>
-              <p className="text-[11px] text-gray-400 mt-0.5">{s.label}</p>
-            </div>
-          ))}
-        </div>
+      {/* 数据导出（2026-10-29 NEW-19：原「数据概览」三卡读 character.stats，
+          后端从不返回 → 恒显 0/0/—，按裁决删卡止血；真实统计另立功能批） */}
+      <Section title="数据导出">
         <ExportRow characterId={character.id} characterName={character.name} />
       </Section>
 

@@ -3,12 +3,14 @@ import { render, screen } from '../utils/test-utils'
 import WeChatPage from '../../pages/WeChatPage'
 
 // ── Shared mock fns (hoisted so vi.mock factories can reference them) ──
-const { mockUseWechatStatus } = vi.hoisted(() => ({
+const { mockUseWechatStatus, mockUseUnifiedCharacters } = vi.hoisted(() => ({
   mockUseWechatStatus: vi.fn(),
+  mockUseUnifiedCharacters: vi.fn(),
 }))
 
 vi.mock('../../hooks/useQueries', () => ({
   useWechatStatus: mockUseWechatStatus,
+  useUnifiedCharacters: mockUseUnifiedCharacters,
   queryKeys: {
     wechat: { status: ['wechat', 'status'] },
     characters: { all: ['characters'], detail: (id: string) => ['characters', id] },
@@ -53,6 +55,10 @@ describe('WeChatPage', () => {
       isLoading: false,
       isError: false,
     })
+    mockUseUnifiedCharacters.mockReturnValue({
+      data: { characters: [] },
+      isLoading: false,
+    })
   })
 
   // ── 1. Header render ──
@@ -96,5 +102,40 @@ describe('WeChatPage', () => {
     renderPage()
     expect(screen.getByText('我的微信 已连接')).toBeDefined()
     expect(screen.getByText('我的微信 已连接').closest('.glass-card')).toBeDefined()
+  })
+
+  // ── 5. V2-2（2026-10-29）：绑定账号 + 当前聊天角色可见 ──
+  it('shows the bound bot account id', () => {
+    mockUseWechatStatus.mockReturnValue({
+      data: { ...defaultStatus, connected: true, bot_id: 'bot-abc123' },
+      isLoading: false,
+      isError: false,
+    })
+    renderPage()
+    expect(screen.getByText(/绑定账号：bot-abc123/)).toBeDefined()
+  })
+
+  it('shows 未绑定 when the channel reports no bot id', () => {
+    renderPage()
+    expect(screen.getByText(/绑定账号：未绑定/)).toBeDefined()
+  })
+
+  it('shows the active character as the current chat companion', () => {
+    mockUseUnifiedCharacters.mockReturnValue({
+      data: { characters: [{ id: 'c1', name: '林挽夏', is_active: true }] },
+      isLoading: false,
+    })
+    renderPage()
+    expect(screen.getByText('当前聊天角色：')).toBeDefined()
+    expect(screen.getByText('林挽夏')).toBeDefined()
+  })
+
+  it('prompts to pick a role when none is active', () => {
+    mockUseUnifiedCharacters.mockReturnValue({
+      data: { characters: [{ id: 'c2', name: '凌白', is_active: false }] },
+      isLoading: false,
+    })
+    renderPage()
+    expect(screen.getByText(/尚未选择，去选择角色/)).toBeDefined()
   })
 })

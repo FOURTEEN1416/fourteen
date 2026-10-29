@@ -280,8 +280,9 @@ describe('RoleSettings', () => {
 
     // 点击「数据」tab
     fireEvent.click(screen.getByText('数据'))
-    // 数据 tab 显示数据概览
-    expect(screen.getByText('数据概览')).toBeDefined()
+    // 2026-10-29 NEW-19：死数据三卡已删（后端从不返回 stats），改为「数据导出」区
+    expect(screen.getByText('数据导出')).toBeDefined()
+    expect(screen.queryByText('数据概览')).toBeNull()
   })
 
   // ────────────────────────────────────────────────

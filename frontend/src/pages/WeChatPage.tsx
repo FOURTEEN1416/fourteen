@@ -1,9 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { AnimatedPage } from '../components/shared'
 import { useQueryClient } from '@tanstack/react-query'
-import { useWechatStatus, queryKeys } from '../hooks/useQueries'
-import { RefreshCw, X, QrCode, Clock, MessageSquare, AlertTriangle, CheckCircle2, Smartphone } from 'lucide-react'
+import { useWechatStatus, useUnifiedCharacters, queryKeys } from '../hooks/useQueries'
+import { RefreshCw, X, QrCode, Clock, MessageSquare, AlertTriangle, CheckCircle2, Smartphone, UserRound } from 'lucide-react'
 import { wechatQrCode, wechatConnectionStatus, wechatConnect } from '../api/system'
+import { sanitizeCharacterName } from '../utils/character'
 
 // ── Types ──
 
@@ -13,6 +15,10 @@ type QrStatus = 'loading' | 'waiting' | 'scanned' | 'connected' | 'expired' | 'e
 
 function LiveStatusBanner() {
   const { data: status, isLoading, isError } = useWechatStatus()
+  // 2026-10-29 V2-2：微信页显示「当前聊天角色」——此前全站无任何地方告诉用户
+  // 「你微信里在跟谁聊」（用户报障：角色未激活却挂着数据/不知在聊哪个角色）。
+  const { data: charData } = useUnifiedCharacters()
+  const activeCharacter = charData?.characters?.find((c) => c.is_active)
   const [showQrModal, setShowQrModal] = useState(false)
 
   if (isLoading) {
@@ -64,6 +70,22 @@ function LiveStatusBanner() {
               {status.connected ? `今日 ${status.messages_today ?? 0} 条消息` : '今日暂无消息'}
             </span>
           </div>
+        </div>
+        {/* V2-2：绑定账号 + 当前聊天角色（此前二者均不可见，扫错号/不知在聊谁无从察觉） */}
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
+          <span className="flex items-center gap-1" title="当前绑定到本账号的微信机器人账号">
+            <Smartphone className="h-3 w-3 text-gray-400" />
+            绑定账号：{status.bot_id ? status.bot_id : '未绑定'}
+          </span>
+          <span className="flex items-center gap-1" title="你微信里正在对话的角色">
+            <UserRound className="h-3 w-3 text-gray-400" />
+            当前聊天角色：
+            {activeCharacter ? (
+              <span className="font-medium text-gray-700">{sanitizeCharacterName(activeCharacter.name)}</span>
+            ) : (
+              <Link to="/roles" className="text-macaron-blue-deep hover:underline">尚未选择，去选择角色 →</Link>
+            )}
+          </span>
         </div>
 
         {/* Right: QR code / reconnect */}

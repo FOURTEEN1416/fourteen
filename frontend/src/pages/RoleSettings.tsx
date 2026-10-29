@@ -66,7 +66,14 @@ export default function RoleSettings() {
               <p className="text-sm text-text-muted truncate">{character.description}</p>
               <div className="flex items-center gap-3 mt-1.5">
                 <span className="text-[11px] text-gray-400">ID: {characterId}</span>
-                <span className="text-[11px] text-gray-400">用户: {character.user_id || '未绑定'}</span>
+                {/* 2026-10-29 V2-2：不再裸渲 user_id（含遗留字符串「default」——用户视觉一致性-10 报障
+                    的困惑源）。公共卡给可读标签；其余归属在管理员全局视图由 V2-1 的
+                    user_key→用户名映射统一展示（批 3）。 */}
+                {!character.user_id || character.user_id === 'default' ? (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-macaron-blue-light/40 text-macaron-blue-deep">
+                    公共卡
+                  </span>
+                ) : null}
                 <span className={`flex items-center gap-1 text-[11px] ${character.is_active ? 'text-green-600' : 'text-gray-400'}`}>
                   <span className={`w-1.5 h-1.5 rounded-full ${character.is_active ? 'bg-green-400' : 'bg-gray-300'}`} />
                   {character.is_active ? '活跃' : '未激活'}

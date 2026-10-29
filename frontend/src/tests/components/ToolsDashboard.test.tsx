@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import ToolsDashboard from '../../pages/ToolsDashboard'
+import { useAuthStore } from '../../store/authStore'
+import { useErrorStore } from '../../store/errorStore'
 
 const { mockTools, mockToolsHealth, mockToggleTool } = vi.hoisted(() => ({
   mockTools: vi.fn(),
@@ -14,6 +16,28 @@ vi.mock('../../api/system', () => ({
   toggleTool: mockToggleTool,
 }))
 
+function setRole(role: 'admin' | 'viewer' | null) {
+  if (role === null) {
+    useAuthStore.setState({ user: null, isAuthenticated: false })
+    return
+  }
+  useAuthStore.setState({
+    user: {
+      id: role === 'admin' ? 1 : 2,
+      email: `${role}@test.local`,
+      username: role,
+      display_name: role,
+      avatar_url: '',
+      role,
+      is_active: true,
+      is_verified: true,
+      created_at: '2026-01-01T00:00:00Z',
+      last_login_at: null,
+    },
+    isAuthenticated: true,
+  })
+}
+
 function renderDashboard() {
   return render(<ToolsDashboard />)
 }
@@ -21,6 +45,10 @@ function renderDashboard() {
 describe('ToolsDashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useErrorStore.setState({ toasts: [] })
+    // 2026-10-29 NEW-1：启停开关为 admin-only（后端 require_role("admin")），
+    // 既有用例以管理员身份验证开关行为。
+    setRole('admin')
     mockTools.mockResolvedValue({
       data: {
         tools: ['weather', 'search'],
@@ -105,6 +133,43 @@ describe('ToolsDashboard', () => {
     fireEvent.click(schedulerToggle)
     await waitFor(() => {
       expect(mockToggleTool).toHaveBeenCalledWith('scheduler', true)
+    })
+  })
+
+  // ── NEW-1（2026-10-29）：全局作用域横幅 + 非 admin 只读 + 失败 toast ──
+
+  it('shows global-scope banner for admins', async () => {
+    renderDashboard()
+    await waitFor(() => {
+      expect(screen.getByText('全局作用域')).toBeDefined()
+    })
+    expect(screen.getByText(/当前具备管理员权限/)).toBeDefined()
+  })
+
+  it('renders read-only view for non-admin users (no toggle hits 403)', async () => {
+    setRole('viewer')
+    renderDashboard()
+    await waitFor(() => {
+      expect(screen.getByText('weather')).toBeDefined()
+    })
+    // 开关不渲染（后端 require_role("admin") 必 403），改为只读标记
+    expect(screen.queryByLabelText('禁用 weather')).toBeNull()
+    expect(screen.getAllByText('只读').length).toBeGreaterThan(0)
+    expect(screen.getByText(/当前账号为只读视图/)).toBeDefined()
+    // 工具可用性信息仍然可见（不收信息）
+    expect(screen.getByText('search')).toBeDefined()
+  })
+
+  it('shows error toast when toggle fails (NEW-1: 不再静默弹回)', async () => {
+    mockToggleTool.mockRejectedValueOnce(new Error('403'))
+    renderDashboard()
+    await waitFor(() => {
+      expect(screen.getByText('weather')).toBeDefined()
+    })
+    fireEvent.click(screen.getByLabelText('禁用 weather'))
+    await waitFor(() => {
+      const toasts = useErrorStore.getState().toasts
+      expect(toasts.some((t) => t.type === 'error' && t.message.includes('未保存'))).toBe(true)
     })
   })
 })

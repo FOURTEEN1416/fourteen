@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Wifi, AlertCircle, Wrench, PauseCircle } from 'lucide-react'
 import { tools as fetchTools, toolsHealth, toggleTool } from '../api/system'
+import { useAuthStore } from '../store/authStore'
+import { useErrorStore } from '../store/errorStore'
 
 interface ToolHealth {
   available: boolean
@@ -101,7 +103,12 @@ export default function ToolsDashboard() {
         prev.map((t) => (t.name === name ? { ...t, status: enabled ? 'enabled' : 'disabled' } : t)),
       )
     } catch {
-      // revert on error is implicit since we only update on success
+      // revert on error is implicit since we only update on success；
+      // 但必须显式告知失败，否则开关静默弹回（2026-10-29 NEW-1）
+      useErrorStore.getState().addToast({
+        type: 'error',
+        message: `${TOOL_DESCRIPTIONS[name] || name} 的开关未保存，请稍后重试`,
+      })
     } finally {
       setToggling(null)
     }
@@ -110,12 +117,20 @@ export default function ToolsDashboard() {
   const onlineCount = summary.online
   const totalCount = summary.total
   const allHealthy = totalCount > 0 && onlineCount === totalCount
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
 
   return (
     <div className="space-y-6">
       <p className="text-xs text-gray-400">
         查看内置工具的运行状态、可用性与启停开关（开关跨重启持久生效）
       </p>
+      <div className="flex items-start gap-2 rounded-lg border border-amber-200/70 bg-amber-50/60 px-3 py-2 text-xs text-amber-700">
+        <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+        <span>
+          启停开关为<strong>全局作用域</strong>，会影响所有用户的工具可用性；
+          {isAdmin ? '当前具备管理员权限，可直接操作。' : '当前账号为只读视图，如需调整请联系管理员。'}
+        </span>
+      </div>
 
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="status" aria-label="加载中">
@@ -168,7 +183,7 @@ export default function ToolsDashboard() {
                         {TOOL_DESCRIPTIONS[entry.name] || entry.name}
                       </p>
                     </div>
-                    {toggleable ? (
+                    {toggleable && isAdmin ? (
                       <button
                         onClick={() => handleToggle(entry.name, entry.status !== 'enabled')}
                         disabled={isToggling}
@@ -183,6 +198,13 @@ export default function ToolsDashboard() {
                           }`}
                         />
                       </button>
+                    ) : toggleable ? (
+                      <span
+                        className="text-[10px] text-gray-400"
+                        title="启停开关仅管理员可操作"
+                      >
+                        只读
+                      </span>
                     ) : (
                       <PauseCircle className="h-4 w-4 text-gray-300" aria-hidden />
                     )}
