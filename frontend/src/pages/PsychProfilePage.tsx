@@ -88,8 +88,9 @@ function SignalCard({ title, signal }: { title: string; signal: Signal }) {
         {(signal?.total_score ?? 0).toFixed(2)}
         <span className="text-xs text-gray-400 font-normal"> / 1.0</span>
       </p>
+      {/* NEW-15①：档位走中文映射（后端英文 level 直出已收敛） */}
       <p className="text-[11px] text-gray-400">
-        档位 {signal?.level ?? '—'} · 命中维度 {signal?.items_hit ?? 0}/{signal?.items_total ?? 0} · 证据强度 {signal?.evidence ?? 0}
+        档位 <RiskBadge level={signal?.level ?? ''} /> · 命中维度 {signal?.items_hit ?? 0}/{signal?.items_total ?? 0} · 证据强度 {signal?.evidence ?? 0} 条
       </p>
       {(signal?.matched?.length ?? 0) > 0 && (
         <p className="text-[11px] text-gray-400 mt-1">命中词：{signal!.matched!.join('、')}</p>
@@ -199,7 +200,13 @@ export default function PsychProfilePage() {
               {/* 元信息条 */}
               <div className="glass-card rounded-xl px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-gray-500">
                 <span>状态：<span className="font-medium text-gray-700">{status === 'stable' ? '稳定' : '学习中'}</span></span>
-                <span>稳定度：<span className="font-mono">{Math.round((profile?.stability ?? 0) * 100)}%</span></span>
+                {/* NEW-15③：稳定度是 0/1 两态统计量——口语化标注避免「0%」被读成坏掉 */}
+                <span>
+                  稳定度：<span className="font-mono">{Math.round((profile?.stability ?? 0) * 100)}%</span>
+                  <span className="ml-1 text-gray-400">
+                    {(profile?.stability ?? 0) >= 0.99 ? '（结论已稳定）' : '（随对话继续收敛）'}
+                  </span>
+                </span>
                 <span>快照数：<span className="font-mono">{profile?.snapshots ?? 0}</span></span>
                 <span>样本窗口：{profile?.snapshots ?? 0} 次检测</span>
               </div>
@@ -207,7 +214,7 @@ export default function PsychProfilePage() {
               {/* 画像按「角色 × 会话」各存一份：这里显示的是哪一份、共几份 */}
               <div className="rounded-xl bg-white/40 border border-gray-100 px-4 py-2.5 text-[11px] text-gray-400 leading-relaxed space-y-1">
                 <p>
-                  当前显示：{profile?.scope ?? '—'}
+                  当前显示：会话 {profile?.scope ? String(profile.scope).split(':').pop() : '—'}
                   {scopeCount > 1 ? `（该角色共 ${scopeCount} 份会话画像，取最近更新的一份）` : scopeCount === 1 ? '（该角色仅此 1 份会话画像）' : ''}
                 </p>
                 <p>画像按「角色 × 会话」分别学习，换角色或换会话不会共用同一份数据。</p>

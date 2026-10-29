@@ -1001,6 +1001,10 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
         <p className="text-xs text-gray-500 mb-2">
           不花一个 token 决定「这次要不要开口」：命中线越高越容易开口。峰时默认 20%、谷时默认 60%，命中线总上限 100%。
         </p>
+        {/* NEW-24：保存入口指引——唯一保存按钮在「频率控制」区，改完骰子闸极易丢失 */}
+        <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50/60 px-2 py-1 text-[11px] text-amber-700">
+          改动需点击下方「保存频率配置」按钮才会生效（骰子闸与频率/主动决策共用一次保存）。
+        </p>
         {!diceGateEffective && (
           <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50/60 px-2 py-1 text-[11px] text-amber-700">
             当前不生效：后端真闸未接入生产决策链，参数可保存但不会拦截（只读展示）。

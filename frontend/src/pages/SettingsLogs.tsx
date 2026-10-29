@@ -115,6 +115,10 @@ function SettingsLogs() {
           普通用户：仅本人请求级日志 · 管理员：全站日志
         </span>
       </p>
+      {/* NEW-23②：日志源 = 每进程内存环形缓冲（logging_setup deque 200 条），多 worker 部署下各说各话 */}
+      <p className="text-[10px] text-gray-300">
+        日志取自各服务进程的内存缓冲（每进程最近 200 条，重启清空）；多进程部署时不同进程的日志各自独立。
+      </p>
 
       <div className="glass-card rounded-xl p-4 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -135,7 +139,8 @@ function SettingsLogs() {
               刷新
             </button>
             <button
-              onClick={handleClear}
+              onClick={() => { handleClear(); setPaused(true) }}
+              title="清空当前视图并暂停自动刷新（否则下一次轮询会全量复原）"
               className="min-h-[44px] px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-all"
             >
               清屏

@@ -79,7 +79,8 @@ afterEach(() => {
 async function renderWithMh(mh: unknown) {
   spy('psychProfile', { data: { ...PROFILE, mental_health: mh } })
   render(<PsychProfilePage />)
-  return screen.findByText(/char-001:user4:peerA/)
+  // NEW-15②：页面只渲染会话尾段（peerA），完整内部键不再直出
+  return screen.findByText(/当前显示：会话 peerA/)
 }
 
 describe('PsychProfilePage 情绪信号口径', () => {

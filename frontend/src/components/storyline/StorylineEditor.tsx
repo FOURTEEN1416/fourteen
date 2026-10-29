@@ -16,6 +16,8 @@ import type {
 
 // ── 默认阶段模板 ──
 
+// NEW-30②：默认模板是产品预置的「初识→暧昧→热恋→平淡→告别」叙事弧（非用户数据），
+// 新启用剧情线的用户会直接得到这一套阶段骨架，可自由编辑或删除。
 const DEFAULT_STAGES: StorylineStage[] = [
   {
     name: '初识期', display_name: '初识期',
@@ -323,7 +325,9 @@ export default function StorylineEditor({ characterId, standalone = false }: Sto
               {/* 时间参数 */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="block text-[10px] text-gray-500 mb-1">每句话增加（分钟）</label>
+                  <label className="block text-[10px] text-gray-500 mb-1" title="每收到一条对话消息，剧情进度时间前进的分钟数（推进阶段用）">
+                    每条对话推进（分钟）
+                  </label>
                   <input
                     type="number" min={1} max={1440}
                     value={timePerTurn} onChange={e => setTimePerTurn(Number(e.target.value))}

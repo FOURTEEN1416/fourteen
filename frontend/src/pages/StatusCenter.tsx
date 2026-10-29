@@ -106,7 +106,8 @@ export default function StatusCenter() {
     )
   }
 
-  const emotionLabel = emotionData?.primary?.type || stats?.current_emotion || '—'
+  // NEW-29：对齐 /api/emotion/state 实况形状（health_check）——旧 primary.type 恒 undefined
+  const emotionLabel = emotionData?.current_emotion || stats?.current_emotion || '—'
   // NEW-5①：affinity 真源是 0-8 档位序数，旧实现拿它对 0-100 刻度表换算恒「陌生」；
   // 优先直读后端档名 affinity_name，仅在后端未提供时回退刻度表。
   const affinityLabel =

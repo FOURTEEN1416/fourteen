@@ -4,7 +4,9 @@ import { AnimatedPage } from '../components/shared'
 import { useQueryClient } from '@tanstack/react-query'
 import { useWechatStatus, useUnifiedCharacters, queryKeys } from '../hooks/useQueries'
 import { RefreshCw, X, QrCode, Clock, MessageSquare, AlertTriangle, CheckCircle2, Smartphone, UserRound } from 'lucide-react'
-import { wechatQrCode, wechatConnectionStatus, wechatConnect } from '../api/system'
+import { wechatQrCode, wechatConnectionStatus, wechatConnect, wechatDisconnect } from '../api/system'
+import ConfirmDialog from '../components/shared/ConfirmDialog'
+import { useErrorStore } from '../store/errorStore'
 import { sanitizeCharacterName } from '../utils/character'
 
 // ── Types ──
@@ -18,6 +20,24 @@ function LiveStatusBanner() {
   // 2026-10-29 V2-2：微信页显示「当前聊天角色」——此前全站无任何地方告诉用户
   // 「你微信里在跟谁聊」（用户报障：角色未激活却挂着数据/不知在聊哪个角色）。
   const { data: charData } = useUnifiedCharacters()
+  // NEW-27（2026-10-29，D20-③ 裁决「开放换绑，带确认+后果说明」）：
+  // 已连接用户此前无任何自助断开/换绑路径（API 已封装、零页面消费）。
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false)
+  const addToast = useErrorStore(s => s.addToast)
+
+  const handleDisconnect = async () => {
+    try {
+      const res = await wechatDisconnect()
+      if ((res.data as { status?: string }).status === 'disconnected') {
+        addToast({ type: 'success', message: '已断开连接。重新扫码即可换绑；角色与记忆数据保留。' })
+      } else {
+        addToast({ type: 'warning', message: '断开指令已受理，请刷新核实状态' })
+      }
+      setShowDisconnectConfirm(false)
+    } catch {
+      addToast({ type: 'error', message: '断开失败，请稍后重试' })
+    }
+  }
   const activeCharacter = charData?.characters?.find((c) => c.is_active)
   const [showQrModal, setShowQrModal] = useState(false)
 
@@ -41,9 +61,14 @@ function LiveStatusBanner() {
   }
 
   const seconds = status.uptime_seconds ?? 0
-  const uptime = seconds > 0
-    ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
-    : '--'
+  // NEW-28①：按小时/天进位（旧实现超 1 小时显示「75 分 0 秒」不进位）
+  const uptime = seconds >= 86400
+    ? `${Math.floor(seconds / 86400)} 天 ${Math.floor((seconds % 86400) / 3600)} 小时`
+    : seconds >= 3600
+      ? `${Math.floor(seconds / 3600)} 小时 ${Math.floor((seconds % 3600) / 60)} 分`
+      : seconds > 0
+        ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
+        : '--'
 
   return (
     <div className="glass-card mb-5 rounded-xl p-4 stagger-item">
@@ -90,6 +115,15 @@ function LiveStatusBanner() {
 
         {/* Right: QR code / reconnect */}
         <div className="flex items-center gap-2">
+          {status.connected && (
+            <button
+              onClick={() => setShowDisconnectConfirm(true)}
+              className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 transition-colors"
+              data-testid="disconnect-btn"
+            >
+              断开连接
+            </button>
+          )}
           {status.qr_code && (
             <button
               onClick={() => {
@@ -154,6 +188,17 @@ function LiveStatusBanner() {
       {showQrModal && (
         <QrCodeConnectionModal onClose={() => setShowQrModal(false)} />
       )}
+
+      <ConfirmDialog
+        open={showDisconnectConfirm}
+        title="确认断开微信连接"
+        message="断开后，你的微信将不再收到角色消息，直到重新扫码绑定。换绑新微信号同理。你的角色配置、记忆与数据都会保留。确定继续？"
+        confirmText="断开连接"
+        cancelText="取消"
+        variant="danger"
+        onConfirm={() => void handleDisconnect()}
+        onCancel={() => setShowDisconnectConfirm(false)}
+      />
     </div>
   )
 }
@@ -404,7 +449,7 @@ function useWechatStatusStream() {
 
 export default function WeChatPage() {
   const qc = useQueryClient()
-  // SSE 实时更新缓存，轮询作为兜底（30s 一次）
+  // NEW-28②：注释与实现一致——隔离后 SSE 已 no-op，本页数据由 useWechatStatus 轮询驱动
   useWechatStatusStream()
 
   const [showQrModal, setShowQrModal] = useState(false)
@@ -476,7 +521,7 @@ export default function WeChatPage() {
                 {[
                   ['断线自动重连', '登录态失效或网络波动时系统自动尝试恢复，无需手动操作'],
                   ['账号隔离', '每位注册用户的数据严格隔离；你的记忆与亲密度只属于你自己'],
-                  ['状态实时同步', '本页通过实时推送展示桥接状态；「最后活动」为最近一次收发消息的时间'],
+                  ['状态刷新', '本页状态由定时轮询刷新；「最后活动」为最近一次收发消息的时间'],
                 ].map(([title, desc]) => (
                   <li key={title} className="flex items-start gap-3">
                     <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-macaron-mint-deep/60 mt-1.5" />

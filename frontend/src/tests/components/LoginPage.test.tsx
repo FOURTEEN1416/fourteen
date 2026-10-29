@@ -128,7 +128,7 @@ describe('LoginPage', () => {
   // ──────────────────────────────────────────────
   it('shows login error on failure', async () => {
     mockLogin.mockRejectedValueOnce({
-      response: { data: { detail: '邮箱或密码错误' } },
+      response: { status: 401, data: { detail: 'Invalid email or password' } },
     })
 
     renderComponent()
@@ -141,7 +141,8 @@ describe('LoginPage', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '登 录' }))
 
-    expect(await screen.findByText('邮箱或密码错误')).toBeDefined()
+    // NEW-18：英文 detail 不直出，401 → 中文安全模糊表述
+    expect(await screen.findByText('账号或密码不正确')).toBeDefined()
   })
 
   // ──────────────────────────────────────────────

@@ -259,11 +259,37 @@ async def update_user(
     if req.display_name is not None:
         user.display_name = req.display_name
     if req.role is not None:
+        # NEW-17（2026-10-29）：最后一个 active admin 守卫——单管理员站一次误操作
+        # 即锁死全部管理入口（只能改库恢复）。降权/停用前确认至少保留一个。
+        if user.role == "admin" and req.role != "admin":
+            active_admins = (
+                await db.execute(
+                    select(func.count(User.id)).where(
+                        User.role == "admin", User.is_active.is_(True)
+                    )
+                )
+            ).scalar() or 0
+            if active_admins <= 1:
+                raise HTTPException(
+                    400, "至少保留一个启用中的管理员：请先把其他账号提升为管理员再降级该账号"
+                )
         # 降权 / 升权：**不**撤销版本——角色每请求取库内现值，权限当场收窄/放开，
         # 用户无需重新登录（撤销版本只留给改密 / 重置 / 停用 / 删除）。
         user.role = req.role
     if req.is_active is not None:
         was_active = bool(user.is_active)
+        if was_active and not req.is_active and user.role == "admin":
+            active_admins = (
+                await db.execute(
+                    select(func.count(User.id)).where(
+                        User.role == "admin", User.is_active.is_(True)
+                    )
+                )
+            ).scalar() or 0
+            if active_admins <= 1:
+                raise HTTPException(
+                    400, "至少保留一个启用中的管理员：不能停用唯一的 active 管理员"
+                )
         user.is_active = req.is_active
         if was_active and not req.is_active:
             # 停用即撤销：撤销版本自增 → 旧 access/refresh 立即失效，

@@ -68,7 +68,8 @@ describe('PsychProfilePage 画像 scope 同源', () => {
     spy('psychProfile', { data: PROFILE })
     render(<PsychProfilePage />)
 
-    expect(await screen.findByText(/char-001:user4:peerA/)).toBeTruthy()
+    // NEW-15②：内部键只露会话尾段
+    expect(await screen.findByText(/会话 peerA/)).toBeTruthy()
     expect(screen.getByText(/共\s*2\s*份会话画像/)).toBeTruthy()
   })
 

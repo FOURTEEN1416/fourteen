@@ -1,16 +1,15 @@
+/**
+ * GET /api/emotion/state 实况形状（= EmotionEngine.health_check，personality_routes:34）。
+ * NEW-29（2026-10-29）：旧类型按 to_dict 形状声明，`primary.type` 恒 undefined →
+ * 10s 轮询数据从未被消费（情绪显示全靠 dashboard 兜底）。类型对齐真源。
+ */
 export interface EmotionState {
-  primary: {
-    type: string
-    intensity: number
-  }
-  secondary: Array<{ type: string; intensity: number }>
+  current_emotion: string
+  intensity: number
   energy: number
-  affinity: {
-    level: number
-    name: string
-    points: number
-  }
-  last_update?: number
+  available?: boolean
+  engine?: string
+  [k: string]: unknown
 }
 
 export interface EmotionTrend {

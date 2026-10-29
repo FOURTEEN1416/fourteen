@@ -70,6 +70,8 @@ def _build_app(tmp_path, *, machine_auth: bool = False):
                 (_ADMIN_ID, "admin@w1.test", "admin", "admin"),
                 (_ALICE_ID, "alice@w1.test", "alice", "viewer"),
                 (_BOB_ID, "bob@w1.test", "bob", "viewer"),
+                # NEW-17：守卫要求至少一个 active admin——降权/停用 admin 的测试场景需第二 admin 兜底
+                (999, "admin2@w1.test", "admin2", "admin"),
             ):
                 session.add(
                     User(

@@ -62,10 +62,28 @@ export default function LoginPage() {
       const from = (location.state as { from?: string })?.from || '/wechat'
       navigate(from, { replace: true })
     } catch (err: unknown) {
-      const msg =
-        err && typeof err === 'object' && 'response' in err
-          ? (err as { response: { data?: { detail?: string } } }).response?.data?.detail || '请求失败'
-          : '网络错误，请重试'
+      // NEW-18（2026-10-29）：登录/注册是产品第一屏——后端英文 detail 不再直出，
+      // 按状态码映射中文；保留安全模糊表述（不区分「用户不存在 vs 密码错」）。
+      const status = (err as { response?: { status?: number } })?.response?.status
+      const rawDetail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      const DETAIL_MAP: Array<[RegExp, string]> = [
+        [/invalid email or password/i, '账号或密码不正确'],
+        [/account is disabled/i, '账号已被停用，请联系管理员'],
+        [/already registered|already taken/i, '该邮箱或用户名已被使用'],
+        [/password/i, '密码强度不足：至少 8 位，包含字母与数字'],
+      ]
+      let msg = '网络错误，请重试'
+      if (err && typeof err === 'object' && 'response' in err) {
+        if (status === 401) msg = '账号或密码不正确'
+        else if (status === 403) msg = '账号已被停用，请联系管理员'
+        else if (status === 429) msg = '尝试过于频繁，请稍后再试'
+        else if (rawDetail) {
+          const hit = DETAIL_MAP.find(([re]) => re.test(rawDetail))
+          msg = hit ? hit[1] : '请求失败，请稍后重试'
+        } else {
+          msg = '请求失败，请稍后重试'
+        }
+      }
       setError(msg)
     } finally {
       setLoading(false)
