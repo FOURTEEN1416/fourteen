@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import {
   Edit, Trash2, ChevronLeft, ChevronRight,
-  ArrowUpDown, ArrowUp, ArrowDown, User,
+  ArrowUpDown, ArrowUp, ArrowDown, User, Info,
 } from 'lucide-react'
 import { Skeleton, EmptyState } from '../shared'
 import { RoleBadge, ActiveBadge } from './UserBadges'
@@ -106,6 +106,8 @@ export interface UserTableProps {
   onPageSize: (size: number) => void
   onEdit: (user: AdminUser) => void
   onDelete: (user: AdminUser) => void
+  /** NEW-11：打开用户详情下钻（账号 + 通道状态 + 强制断开） */
+  onDetail?: (user: AdminUser) => void
   currentUserId?: number
 }
 
@@ -115,7 +117,7 @@ export interface UserTableProps {
 
 export default function UserTable({
   users, total, loading, sortField, sortDir, page, pageSize, hasFilter,
-  onSort, onPage, onPageSize, onEdit, onDelete, currentUserId,
+  onSort, onPage, onPageSize, onEdit, onDelete, onDetail, currentUserId,
 }: UserTableProps) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
@@ -203,6 +205,15 @@ export default function UserTable({
                   <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{formatRelative(u.last_login_at)}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {onDetail && (
+                        <button
+                          onClick={() => onDetail(u)}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100/70 transition-all"
+                          title="详情与通道"
+                        >
+                          <Info className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => onEdit(u)}
                         className="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-all"
@@ -240,6 +251,15 @@ export default function UserTable({
                 <p className="text-xs text-gray-400 truncate mt-0.5">{u.email}</p>
               </div>
               <div className="flex gap-1 shrink-0">
+                {onDetail && (
+                  <button
+                    onClick={() => onDetail(u)}
+                    className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100/70 transition-all"
+                    aria-label="详情与通道"
+                  >
+                    <Info className="w-4 h-4" />
+                  </button>
+                )}
                 <button
                   onClick={() => onEdit(u)}
                   className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-all"

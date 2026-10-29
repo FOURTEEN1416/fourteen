@@ -4,6 +4,7 @@ import { Menu, LogOut, UserRound } from 'lucide-react'
 import MobileDrawer from './MobileDrawer'
 import { useUnifiedCharacters } from '../../hooks/useQueries'
 import { useAuth } from '../../hooks/useAuth'
+import GlobalViewBanner from '../admin/GlobalViewBanner'
 import type { UnifiedCharacter } from '../../types/api'
 
 interface Crumb {
@@ -109,6 +110,8 @@ export default function Breadcrumb() {
 
   return (
     <>
+      {/* V2-1：admin 全局运维视图开启时常驻横幅（越权视角必须有可见标识） */}
+      <GlobalViewBanner />
       <nav className="mat-floating border-x-0 border-t-0 rounded-none px-4 sm:px-6 py-3 flex items-center gap-2 text-sm" aria-label="面包屑导航">
         {/* 移动端汉堡按钮：唤起全量导航抽屉（入口与桌面 Sidebar 一致） */}
         <button

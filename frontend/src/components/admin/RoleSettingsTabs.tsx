@@ -1057,6 +1057,28 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
 
       {/* 因果回放 + curator */}
       <Section title="状态账本 · 因果回放 / 记忆整理">
+        {/* NEW-12：选用户预填会话键（后端按绑定还原），手输保留为高级入口 */}
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <select
+            aria-label="回放目标用户"
+            value={(/^(\d+):$/.exec(replayKey.trim())?.[1]) ?? ''}
+            onChange={(e) => {
+              const id = e.target.value
+              setReplayKey(id === '' ? '' : `${id}:`)
+            }}
+            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700"
+          >
+            <option value="">选用户预填会话键前缀…</option>
+            {adminUsers.map(u => (
+              <option key={u.id} value={u.id}>
+                {u.display_name || u.username || u.email || `#${u.id}`}
+              </option>
+            ))}
+          </select>
+          <span className="text-[11px] text-gray-400">
+            选中后自动填「数字id:」前缀，补上 wxid 即完整键（数字 id 亦可被后端按绑定还原）
+          </span>
+        </div>
         <div className="grid gap-2 sm:grid-cols-3">
           <input className="border rounded-lg px-2 py-1.5 text-sm" placeholder="session_key 如 N:wxid" value={replayKey} onChange={e => setReplayKey(e.target.value)} />
           <input className="border rounded-lg px-2 py-1.5 text-sm" placeholder="turn_id（回放用）" value={replayTurn} onChange={e => setReplayTurn(e.target.value)} />

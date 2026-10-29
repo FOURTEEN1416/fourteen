@@ -24,9 +24,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.audit import record_operator_audit
 from api.auth_jwt import require_role
-from api.database import User
+from api.database import User, get_db
 from utils.project_paths import project_path
 
 logger = logging.getLogger("api.routers.llm_providers")
@@ -270,6 +272,7 @@ async def list_all_providers(
 async def create_provider(
     req: ProviderCreateRequest,
     _admin: tuple[int, User] = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
 ):
     """admin：添加新供应商
 
@@ -316,6 +319,10 @@ async def create_provider(
 
     logger.info("Admin created provider: %s (%s) secret_persisted=%s",
                 key, req.name, bool(secret_key))
+    await record_operator_audit(
+        db, admin_id=_admin[0], action="provider_create", target=f"provider={key}",
+        detail={"name": req.name, "secret_persisted": bool(secret_key)},
+    )
     resp_cfg = dict(new_cfg)
     if secret_key:
         resp_cfg["api_key"] = "****"
@@ -327,6 +334,7 @@ async def update_provider(
     key: str,
     req: ProviderConfig,
     _admin: tuple[int, User] = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
 ):
     """admin：更新供应商配置 + 教程
 
@@ -392,6 +400,10 @@ async def update_provider(
         had_secret = False
 
     logger.info("Admin updated provider: %s secret_persisted=%s", key, had_secret)
+    await record_operator_audit(
+        db, admin_id=_admin[0], action="provider_update", target=f"provider={key}",
+        detail={"secret_persisted": had_secret},
+    )
     resp_cfg = dict(cfg)
     if had_secret:
         resp_cfg["api_key"] = "****"
@@ -403,6 +415,7 @@ async def toggle_provider(
     key: str,
     req: ProviderToggleRequest,
     _admin: tuple[int, User] = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
 ):
     """admin：启用/禁用供应商（预设供应商不可删除，只能 toggle）"""
     data = _load_config()
@@ -413,6 +426,10 @@ async def toggle_provider(
     providers[key]["enabled"] = req.enabled
     _save_config(data)
     logger.info("Admin toggled provider %s -> enabled=%s", key, req.enabled)
+    await record_operator_audit(
+        db, admin_id=_admin[0], action="provider_toggle", target=f"provider={key}",
+        detail={"enabled": req.enabled},
+    )
     return {"detail": f"Provider '{key}' {'enabled' if req.enabled else 'disabled'}", "enabled": req.enabled}
 
 
@@ -420,6 +437,7 @@ async def toggle_provider(
 async def delete_provider(
     key: str,
     _admin: tuple[int, User] = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
 ):
     """admin：删除任意供应商
 
@@ -444,4 +462,7 @@ async def delete_provider(
     _save_config(data)
     _set_provider_secret(key, "")  # 清除 local 密钥
     logger.info("Admin deleted provider: %s", key)
+    await record_operator_audit(
+        db, admin_id=_admin[0], action="provider_delete", target=f"provider={key}",
+    )
     return {"detail": f"Provider '{key}' deleted"}

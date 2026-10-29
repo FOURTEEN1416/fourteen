@@ -1,17 +1,37 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { AnimatedPage, EmptyState, ConfirmDialog } from '../components/shared'
 import {
-  adminListUsers, adminCreateUser, adminUpdateUser, adminDeleteUser,
-  type AdminUser,
+  adminListUsers, adminCreateUser, adminUpdateUser, adminDeleteUser, listOperatorAudit,
+  getGlobalView, setGlobalView,
+  type AdminUser, type OperatorAuditEntry,
   type AdminCreateUserRequest, type AdminUpdateUserRequest,
 } from '../api/admin'
 import { useAuthStore } from '../store/authStore'
 import { useErrorStore } from '../store/errorStore'
-import { Shield, UserPlus, Search, X } from 'lucide-react'
+import { useGlobalViewStore } from '../store/globalViewStore'
+import { Shield, UserPlus, Search, X, Globe, ChevronDown, ChevronRight } from 'lucide-react'
 import { ROLES, ROLE_LABELS } from '../components/admin/UserBadges'
 import UserTable, { type SortField, type SortDir } from '../components/admin/UserTable'
 import UserModal from '../components/admin/UserModal'
+import UserDetailDrawer from '../components/admin/UserDetailDrawer'
 import { validateEmail, validateUsername, validatePassword } from '../components/admin/UserForm'
+
+/** NEW-21：审计动作中文名（未收录动作回退原始键，保证新动作不显示为空） */
+const AUDIT_LABELS: Record<string, string> = {
+  global_view_on: '开启全局运维视图',
+  global_view_off: '关闭全局运维视图',
+  read_global_facts: '读取全部用户记忆',
+  read_global_diary: '读取全部用户日记',
+  read_proactive_history_all: '读取主动消息历史（全用户）',
+  user_create: '创建用户',
+  user_update: '更新用户',
+  user_delete: '删除用户',
+  provider_create: '新增供应商',
+  provider_update: '修改供应商',
+  provider_toggle: '启停供应商',
+  provider_delete: '删除供应商',
+  channel_force_disconnect: '强制断开微信通道',
+}
 
 // ════════════════════════════════════════════════════
 //  主组件
@@ -42,7 +62,17 @@ export default function AdminUsersPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
   const [deletingUser, setDeletingUser] = useState<AdminUser | null>(null)
+  const [detailUser, setDetailUser] = useState<AdminUser | null>(null)
   const [saving, setSaving] = useState(false)
+
+  // ── V2-1 全局运维视图 + NEW-21 审计 ──
+  const gvEnabled = useGlobalViewStore(s => s.enabled)
+  const gvLoaded = useGlobalViewStore(s => s.loaded)
+  const gvSetEnabled = useGlobalViewStore(s => s.setEnabled)
+  const [gvConfirm, setGvConfirm] = useState(false)
+  const [auditEntries, setAuditEntries] = useState<OperatorAuditEntry[] | null>(null)
+  const [auditOpen, setAuditOpen] = useState(false)
+  const [auditLoading, setAuditLoading] = useState(false)
 
   // ── 表单状态（创建） ──
   const [createForm, setCreateForm] = useState<AdminCreateUserRequest>({
@@ -57,6 +87,16 @@ export default function AdminUsersPage() {
   // ── 当前用户角色检查 ──
   const isAdmin = user?.role === 'admin'
   const hasFilter = !!search || !!roleFilter
+
+  // V2-1：进页确保全局视图开关状态已加载（横幅未挂载时由本页兜底拉取；
+  // FF-0007：API 调用在组件内，结果经 gvSetEnabled 写回 store）
+  useEffect(() => {
+    if (isAdmin && !gvLoaded) {
+      void getGlobalView()
+        .then(res => gvSetEnabled(!!res.enabled))
+        .catch(() => gvSetEnabled(false))
+    }
+  }, [isAdmin, gvLoaded, gvSetEnabled])
 
   // ═════════════════════════════════════════════════
   //  数据加载
@@ -223,6 +263,35 @@ export default function AdminUsersPage() {
     setEditErrors({})
   }
 
+  // ── NEW-21：审计流水加载 ──
+  const loadAudit = async () => {
+    if (auditOpen) { setAuditOpen(false); return }
+    setAuditOpen(true)
+    setAuditLoading(true)
+    try {
+      const res = await listOperatorAudit(50)
+      setAuditEntries(res.entries)
+    } catch {
+      setAuditEntries([])
+    } finally {
+      setAuditLoading(false)
+    }
+  }
+
+  // ── V2-1：全局运维视图开关（FF-0007：API 调用在组件内，写回 store 同步横幅） ──
+  const handleToggleGlobalView = async (enabled: boolean) => {
+    try {
+      const res = await setGlobalView(enabled)
+      gvSetEnabled(!!res.enabled)
+      addToast({
+        type: 'success',
+        message: enabled ? '全局运维视图已开启（已留痕审计）' : '已关闭全局运维视图，数据面恢复本人范围',
+      })
+    } catch {
+      addToast({ type: 'error', message: '开关未生效，请重试' })
+    }
+  }
+
   // ═════════════════════════════════════════════════
   //  渲染
   // ═════════════════════════════════════════════════
@@ -269,6 +338,68 @@ export default function AdminUsersPage() {
               创建用户
             </button>
           </div>
+
+          {/* ═══ V2-1 全局运维视图 + NEW-21 操作员审计 ═══ */}
+          <section className="glass-card rounded-xl px-4 py-3 mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Globe className={`w-4 h-4 shrink-0 ${gvEnabled ? 'text-amber-500' : 'text-gray-400'}`} />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-700">
+                    全局运维视图
+                    {gvEnabled && (
+                      <span className="ml-2 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-600">开启中</span>
+                    )}
+                  </p>
+                  <p className="text-[10px] text-gray-400">
+                    默认关闭：记忆/日记等数据面只显示你本人的范围；开启后显示所有用户数据（顶栏常驻横幅 + 操作留痕审计）
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => void loadAudit()}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 rounded-lg hover:bg-white/60 transition-colors"
+                >
+                  {auditOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                  操作审计
+                </button>
+                <button
+                  onClick={() => (gvEnabled ? void handleToggleGlobalView(false) : setGvConfirm(true))}
+                  disabled={!gvLoaded}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors disabled:opacity-50 ${
+                    gvEnabled
+                      ? 'text-amber-700 bg-amber-100 hover:bg-amber-200'
+                      : 'text-white bg-primary-500 hover:bg-primary-400'
+                  }`}
+                >
+                  {gvEnabled ? '关闭全局视图' : '开启全局视图'}
+                </button>
+              </div>
+            </div>
+
+            {auditOpen && (
+              <div className="mt-3 border-t border-white/40 pt-3">
+                {auditLoading ? (
+                  <p className="text-xs text-gray-400 py-2">加载中…</p>
+                ) : !auditEntries || auditEntries.length === 0 ? (
+                  <p className="text-xs text-gray-400 py-2">暂无操作审计记录</p>
+                ) : (
+                  <div className="space-y-1 max-h-56 overflow-y-auto">
+                    {auditEntries.map(e => (
+                      <div key={e.id} className="flex items-center gap-2 text-[11px] text-gray-500 rounded-lg bg-white/40 px-2.5 py-1.5">
+                        <span className="font-medium text-gray-600 shrink-0">{AUDIT_LABELS[e.action] ?? e.action}</span>
+                        {e.target ? <span className="font-mono text-gray-400 truncate">{e.target}</span> : null}
+                        <span className="ml-auto shrink-0 text-gray-300 tabular-nums">
+                          {e.created_at ? e.created_at.slice(0, 19).replace('T', ' ') : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
 
           {/* ═══ 搜索 + 过滤 ═══ */}
           <div className="glass-card rounded-xl px-4 py-3 mb-4">
@@ -342,6 +473,7 @@ export default function AdminUsersPage() {
               onPageSize={setPageSize}
               onEdit={openEdit}
               onDelete={setDeletingUser}
+              onDetail={setDetailUser}
               currentUserId={user?.id}
             />
           )}
@@ -385,6 +517,26 @@ export default function AdminUsersPage() {
             variant="danger"
             onConfirm={handleDelete}
             onCancel={() => setDeletingUser(null)}
+          />
+
+          {/* ═══ NEW-11 用户详情下钻抽屉 ═══ */}
+          {detailUser && (
+            <UserDetailDrawer user={detailUser} onClose={() => setDetailUser(null)} />
+          )}
+
+          {/* ═══ V2-1 开启全局视图确认（范围说明+审计提示） ═══ */}
+          <ConfirmDialog
+            open={gvConfirm}
+            title="开启全局运维视图"
+            message="开启后，记忆 / 日记等数据面将显示【所有用户】的数据（排查问题用）。顶栏会常驻提示横幅，且每次全局读取都会记入操作审计。确认开启？"
+            confirmText="开启"
+            cancelText="取消"
+            variant="danger"
+            onConfirm={() => {
+              setGvConfirm(false)
+              void handleToggleGlobalView(true)
+            }}
+            onCancel={() => setGvConfirm(false)}
           />
         </div>
       </div>

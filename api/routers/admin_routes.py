@@ -16,6 +16,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.audit import (
+    is_global_view_enabled,
+    recent_operator_audit,
+    record_operator_audit,
+    set_global_view_enabled,
+)
 from api.auth_jwt import bump_token_version, hash_password, require_role
 from api.database import (
     User,
@@ -55,6 +61,54 @@ class UserListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class GlobalViewRequest(BaseModel):
+    enabled: bool
+
+
+# ═══════════════════════════════════════════════════════
+# 全局运维视图（V2-1，D20-⑥：默认收窄 + 显式开关 + 审计）
+# ═══════════════════════════════════════════════════════
+
+
+@router.get("/global-view")
+async def get_global_view(
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """读当前操作员的「全局运维视图」开关（默认关闭=收窄到本人前缀）。"""
+    admin_id, _ = _admin
+    return {"enabled": await is_global_view_enabled(db, admin_id)}
+
+
+@router.post("/global-view")
+async def update_global_view(
+    req: GlobalViewRequest,
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """显式开关「全局运维视图」——开启后 admin 的 memory 数据面读全库（带横幅+审计）。"""
+    admin_id, _ = _admin
+    await set_global_view_enabled(db, admin_id, req.enabled)
+    await record_operator_audit(
+        db,
+        admin_id=admin_id,
+        action="global_view_on" if req.enabled else "global_view_off",
+        target=f"user_id={admin_id}",
+    )
+    logger.info("全局运维视图开关: admin=%s enabled=%s", admin_id, req.enabled)
+    return {"status": "ok", "enabled": req.enabled}
+
+
+@router.get("/audit")
+async def list_operator_audit(
+    limit: int = Query(50, ge=1, le=200),
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """操作员审计流水（NEW-21）：admin 特权读写留痕，不含用户内容。"""
+    return {"entries": await recent_operator_audit(db, limit)}
 
 
 # ═══════════════════════════════════════════════════════
@@ -162,6 +216,11 @@ async def create_user(
     await db.commit()
     await db.refresh(user)
 
+    admin_id, _ = _admin
+    await record_operator_audit(
+        db, admin_id=admin_id, action="user_create",
+        target=f"user_id={user.id}", detail={"email": user.email, "role": user.role},
+    )
     logger.info("管理员创建用户: %s (%s, role=%s)", user.email, user.username, user.role)
     return user.to_dict()
 
@@ -214,6 +273,17 @@ async def update_user(
     await db.commit()
     await db.refresh(user)
 
+    admin_id, _ = _admin
+    await record_operator_audit(
+        db, admin_id=admin_id, action="user_update",
+        target=f"user_id={user.id}",
+        detail={
+            "email": user.email,
+            "role": user.role,
+            "is_active": bool(user.is_active),
+            "changed": [k for k in ("email", "username", "password", "display_name", "role", "is_active") if getattr(req, k) is not None],
+        },
+    )
     logger.info("管理员更新用户: %s (id=%d, role=%s, active=%s)",
                 user.email, user.id, user.role, user.is_active)
     return user.to_dict()
@@ -245,6 +315,10 @@ async def delete_user(
     from api import lifecycle
 
     job = await lifecycle.delete_account_everywhere(user_id)
+    await record_operator_audit(
+        db, admin_id=admin_user_id, action="user_delete",
+        target=f"user_id={user_id}", detail={"email": email, "completed": bool(job.get("completed"))},
+    )
     if job.get("completed"):
         logger.info("管理员删除用户（跨存储清除完成）: %s (id=%d)", email, user_id)
         return {"detail": f"User {email} deleted", "job": job}

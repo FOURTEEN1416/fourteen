@@ -298,10 +298,39 @@ async def test_f3_stats_viewer_shrunk_to_harmless(sec_app, fake_engines):
     assert "emotion" not in body, "引擎健康详情不得暴露给 viewer"
 
 
-async def test_f3_stats_admin_full(sec_app, fake_engines):
-    """admin /api/stats 保持全量（既有契约，不因收缩而收窄 admin 视角）。"""
+async def _enable_global_view(client, admin_headers) -> None:
+    """V2-1：显式开启操作员全局运维视图（走真实端点，顺带钉契约）。"""
+    r = await client.post("/api/admin/global-view", json={"enabled": True}, headers=admin_headers)
+    assert r.status_code == 200, r.text
+    assert r.json().get("enabled") is True
+
+
+async def test_f3_admin_default_narrowed(sec_app, fake_engines):
+    """V2-1（D20-⑥）：admin 默认收窄到本人前缀——dashboard 管理面字段不外泄，
+    记忆条目按前缀计数；显式开全局视图后才恢复全量。"""
     client, _engine, _sf = sec_app
     admin = _bearer(_ADMIN_ID)
+    r = await client.get("/api/stats/dashboard", headers=admin)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    forbidden = {"wechat", "wechat_connected", "training", "system_status", "uptime_seconds"}
+    leaked = forbidden & set(body.keys())
+    assert not leaked, f"默认收窄的 admin 不得携带管理面字段，泄漏 {sorted(leaked)}"
+    assert body.get("recent_memories") == 4  # 假件：带前缀返回 4
+
+    # 显式开启 → 全量回归（与旧 admin 契约一致）
+    await _enable_global_view(client, admin)
+    r2 = await client.get("/api/stats/dashboard", headers=admin)
+    body2 = r2.json()
+    assert "wechat" in body2 and "training" in body2
+    assert body2.get("recent_memories") == 9  # 全库计数
+
+
+async def test_f3_stats_admin_full(sec_app, fake_engines):
+    """admin（开全局视图后）/api/stats 保持全量（既有契约不因收窄而丢失）。"""
+    client, _engine, _sf = sec_app
+    admin = _bearer(_ADMIN_ID)
+    await _enable_global_view(client, admin)
     r = await client.get("/api/stats", headers=admin)
     assert r.status_code == 200, r.text
     body = r.json()
@@ -330,14 +359,15 @@ async def test_f3_dashboard_viewer_shrunk(sec_app, fake_engines):
 
 
 async def test_f3_dashboard_admin_full(sec_app, fake_engines):
-    """admin /api/stats/dashboard 保持全量（wechat/training 管理面字段在位）。"""
+    """admin（开全局视图后）/api/stats/dashboard 保持全量（wechat/training 管理面字段在位）。"""
     client, _engine, _sf = sec_app
     admin = _bearer(_ADMIN_ID)
+    await _enable_global_view(client, admin)
     r = await client.get("/api/stats/dashboard", headers=admin)
     assert r.status_code == 200, r.text
     body = r.json()
     assert "wechat" in body and "training" in body and "system_status" in body
-    # NEW-5②：admin 无前缀 → 全库计数（假件无前缀返回 9）
+    # NEW-5②：admin 全局视图 → 全库计数（假件无前缀返回 9）
     assert body.get("recent_memories") == 9
     assert body.get("affinity_name") == ""
 
@@ -360,6 +390,30 @@ async def test_diary_entries_pure_date(sec_app, fake_engines):
     assert "他人日记不应出现在 alice 视野" not in summaries
 
 
+async def test_new21_operator_audit_rows(sec_app, fake_engines):
+    """NEW-21：admin 特权读写留痕——开全局视图 / 读全局日记都进审计流水；
+    审计不落用户内容；viewer 不得访问审计面。"""
+    client, _engine, _sf = sec_app
+    admin = _bearer(_ADMIN_ID)
+    await _enable_global_view(client, admin)
+    await client.get("/api/memory/diary?limit=5", headers=admin)
+
+    r = await client.get("/api/admin/audit?limit=20", headers=admin)
+    assert r.status_code == 200, r.text
+    entries = r.json().get("entries", [])
+    actions = [e["action"] for e in entries]
+    assert "global_view_on" in actions
+    assert "read_global_diary" in actions
+    # 隐私红线：审计条目不得携带用户内容（沙箱日记正文）
+    import json as _json
+
+    assert "聊了咖啡和天气" not in _json.dumps(r.json(), ensure_ascii=False)
+
+    # viewer 不得访问审计面
+    r2 = await client.get("/api/admin/audit", headers=_bearer(_ALICE_ID))
+    assert r2.status_code == 403
+
+
 async def test_f3_config_viewer_shrunk(sec_app, fake_engines):
     """viewer GET /api/config 收缩：全局配置结构（llm 块等）不得外泄。
 
@@ -375,9 +429,10 @@ async def test_f3_config_viewer_shrunk(sec_app, fake_engines):
 
 
 async def test_f3_config_admin_full(sec_app, fake_engines):
-    """admin GET /api/config 保持全量（llm 块在位、api_key 已被既有掩码盖住）。"""
+    """admin（开全局视图后）GET /api/config 保持全量（llm 块在位、api_key 已被既有掩码盖住）。"""
     client, _engine, _sf = sec_app
     admin = _bearer(_ADMIN_ID)
+    await _enable_global_view(client, admin)
     r = await client.get("/api/config", headers=admin)
     assert r.status_code == 200, r.text
     body = r.json()

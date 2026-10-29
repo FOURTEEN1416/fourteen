@@ -24,6 +24,7 @@ import { useAuthStore } from '../../store/authStore'
 import { humanizeIsDirty, useHumanizeStore } from '../../store/humanizeStore'
 import type { HumanizeConfig } from '../../store/humanizeStore'
 import { clearHumanizeUserOverride, humanizeGetConfig, updateHumanizeConfig } from '../../api/system'
+import { adminListUsers } from '../../api/admin'
 import type { HumanizeDelayMode } from '../../api/system'
 
 //: 四档延时模式：标签与后端 utils/humanize_config.py::DELAY_MODE_LABELS 逐字对齐
@@ -84,11 +85,17 @@ export default function HumanizeSection() {
   // 作用域：空 = 全局默认；非空 = 该用户的合并视图（保存→只写该用户覆盖行）
   const [scopeKey, setScopeKey] = useState('')
   const activeScope = scopeKey.trim()
+  // NEW-12（2026-10-29）：选用户代替手输内部会话键（后端支持数字 user_id 还原）
+  const [adminUsers, setAdminUsers] = useState<Array<{ id: number; display_name?: string; username?: string; email?: string }>>([])
 
   useEffect(() => {
     // 非 admin 不打 admin-only 接口（后端 /api/humanize/config 一律 require_role admin）
     if (!isAdmin) return
     void load(humanizeGetConfig)
+    // NEW-12：用户下拉数据源（与 reply-mode 同一来源）
+    void adminListUsers(1, 100)
+      .then(res => setAdminUsers(res.users ?? []))
+      .catch(() => setAdminUsers([]))
   }, [isAdmin, load])
 
   // ── 门禁（照 MessageTab）────────────────────────────────
@@ -431,18 +438,22 @@ export default function HumanizeSection() {
         <div className="pt-3 border-t border-gray-100 space-y-2" data-testid="humanize-user-scope">
           <p className="text-sm text-gray-700">按用户覆盖</p>
           <p className="text-[11px] text-gray-400">
-            留空 = 全局默认；填入完整会话键（如 <code>2:wxid@im.wechat</code>）可单独调节该用户节奏
+            留空 = 全局默认；选择用户可单独调节该用户节奏（会话键由后端按绑定自动还原，无需手输）
           </p>
           <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={scopeKey}
-              onChange={(e) => setScopeKey(e.target.value)}
-              placeholder="2:wxid@im.wechat"
-              aria-label="用户会话键"
-              data-testid="humanize-user-key"
-              className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/50"
-            />
+            <select
+              aria-label="选择用户"
+              value={/^\d+$/.test(activeScope) ? activeScope : ''}
+              onChange={(e) => setScopeKey(e.target.value === '' ? '' : e.target.value)}
+              className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/50"
+            >
+              <option value="">选择用户…</option>
+              {adminUsers.map(u => (
+                <option key={u.id} value={u.id}>
+                  {u.display_name || u.username || u.email || `#${u.id}`}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               onClick={() => { void load(humanizeGetConfig, activeScope || undefined) }}
@@ -466,6 +477,19 @@ export default function HumanizeSection() {
               清除覆盖
             </button>
           </div>
+          {/* 高级入口：手输完整会话键（脚本/无绑定用户场景；后端同一还原器兜底） */}
+          <details className="text-[11px] text-gray-400">
+            <summary className="cursor-pointer select-none hover:text-gray-500">高级：手输完整会话键</summary>
+            <input
+              type="text"
+              value={/^\d+$/.test(activeScope) ? '' : scopeKey}
+              onChange={(e) => setScopeKey(e.target.value)}
+              placeholder="2:wxid@im.wechat"
+              aria-label="用户会话键"
+              data-testid="humanize-user-key"
+              className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-1.5 font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/50"
+            />
+          </details>
           <p className="text-[11px] text-gray-400">
             当前作用域：{activeScope ? `用户 ${activeScope}` : '全局默认'}
           </p>

@@ -483,3 +483,37 @@ async def test_off_mode_round_trip(api, hm_file):
     assert config["delay_mode_label"] == "不延时"
     assert config["proactive_split"] is True
     assert _humanize_block(hm_file)["proactive_split"] is True
+
+
+# ═══════════════════════════════════════════════════════════
+# NEW-12（2026-10-29）：user_key 数字 user_id 还原（与 reply-mode 同一还原器）
+# ═══════════════════════════════════════════════════════════
+
+
+async def test_user_key_full_session_key_passthrough(api, hm_file):
+    """含 ':' 的 user_key 视为完整会话键原样使用（脚本/API 直呼契约不变）。"""
+    client, _engine, _app = api
+    r = await client.get("/api/humanize/config", headers=_bearer(_ADMIN_ID),
+                         params={"user_key": "2:peer@im.wechat"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["scope"] == "user"
+    assert body["user_key"] == "2:peer@im.wechat"
+
+
+async def test_user_key_numeric_unbound_is_400(api, hm_file):
+    """纯数字 user_key 无微信绑定时 400（宁拒绝不猜键，与 reply-mode 同口径）。"""
+    client, _engine, _app = api
+    r = await client.get("/api/humanize/config", headers=_bearer(_ADMIN_ID),
+                         params={"user_key": str(_VIEWER_ID)})
+    assert r.status_code == 400, r.text
+    assert "未绑定" in r.json()["detail"]
+
+
+async def test_post_user_key_numeric_unbound_is_400(api, hm_file):
+    """POST 写入方向同门：无绑定数字 id 拒绝写覆盖行（不写坏键）。"""
+    client, _engine, _app = api
+    r = await client.post("/api/humanize/config", headers=_bearer(_ADMIN_ID),
+                          json={"user_key": str(_VIEWER_ID), "typo_rate": 1})
+    assert r.status_code == 400, r.text
+    assert hm_file.exists() is False or "user_humanize" not in _humanize_block(hm_file)

@@ -36,6 +36,11 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   time_awareness: '时间感知与日程认知',
 }
 
+/** V2-1②：未收录工具的标题/描述可读化（snake_case → 空格分词），不再直出英文原始键 */
+function toolDisplayName(name: string): string {
+  return name.replace(/_/g, ' ')
+}
+
 const STATUS_LABEL: Record<ToolStatus, string> = {
   enabled: '启用',
   disabled: '已禁用',
@@ -180,7 +185,7 @@ export default function ToolsDashboard() {
                         </span>
                       </p>
                       <p className="text-xs text-gray-400">
-                        {TOOL_DESCRIPTIONS[entry.name] || entry.name}
+                        {TOOL_DESCRIPTIONS[entry.name] || toolDisplayName(entry.name)}
                       </p>
                     </div>
                     {toggleable && isAdmin ? (

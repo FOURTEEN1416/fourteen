@@ -58,7 +58,12 @@ def _memory_scope_prefix(request: Request) -> str | None:
     if principal is None:
         raise HTTPException(status_code=401, detail="无效的登录凭证")
     if principal.role == "admin":
-        return None
+        # V2-1（D20-⑥ 2026-10-29）：admin 默认**收窄**到本人前缀；仅显式开启
+        # 「全局运维视图」（operator_prefs 开关，由 resolve_principal_from_request
+        # 落 request.state.admin_global_view）才放行全库。开关读失败按收窄处理。
+        if getattr(request.state, "admin_global_view", False):
+            return None
+        return f"{principal.user_id}:"
     return f"{principal.user_id}:"
 
 
@@ -312,13 +317,27 @@ async def update_important_dates(
     return {"status": "saved", "count": len(req.dates)}
 
 
+async def _audit_global_read(request: Request, db: AsyncSession, action: str) -> None:
+    """admin 操作员的全局读留痕（NEW-21：审计先行；机器 key 无主体不留）。"""
+    principal = getattr(request.state, "auth_principal", None)
+    if principal is None or principal.role != "admin":
+        return
+    from api.audit import record_operator_audit
+
+    await record_operator_audit(db, admin_id=principal.user_id, action=action)
+
+
 @router.get("/api/memory/diary")
 async def memory_diary(
+    request: Request,
     limit: int = Query(default=10, le=60),
     _auth: bool = Security(verify_api_key_dep),
     prefix: str | None = Depends(memory_scope),
+    db: AsyncSession = Depends(get_db),
 ):
     """角色日记（每日摘要，daily_summaries 表；候选 B）。"""
+    if prefix is None:
+        await _audit_global_read(request, db, "read_global_diary")
     orch = deps.orch
     mem = orch.components.get("memory") if orch and orch.components else None
     ds = getattr(mem, "ds", None)
@@ -330,13 +349,17 @@ async def memory_diary(
         if prefix is not None:
             # 日记键形如 user_key|date，user_key 形如 "4:peer" —— 按归属前缀过滤
             items = [kv for kv in items if str(kv[0]).startswith(prefix)]
-        entries = [
-            # V2-6③：键形 user_key|character_id|YYYY-MM-DD —— 旧实现把整个键当
-            # date 返回，前端直接渲染出「4:wxid|林挽夏|2026-10-28」。只回纯日期，
-            # 排序键（同 rsplit）不受影响。
-            {"date": str(d).rsplit("|", 1)[-1], "summary": s}
-            for d, s in items[:limit]
-        ]
+        entries = []
+        for d, s in items[:limit]:
+            key = str(d)
+            # V2-6③：只回纯日期，内部键不外泄。
+            entry: dict[str, Any] = {"date": key.rsplit("|", 1)[-1], "summary": s}
+            if prefix is None:
+                # V2-1①：admin 全局视图需要归属标注——只给数字 owner id（不回原始键），
+                # 前端用 adminListUsers 映射用户名；普通用户路径不附该字段。
+                owner_seg = key.split("|", 1)[0].split(":", 1)[0]
+                entry["owner_user_id"] = int(owner_seg) if owner_seg.isdigit() else None
+            entries.append(entry)
         return {"entries": entries}
     except Exception:
         logger.warning("读取日记失败", exc_info=True)
@@ -345,11 +368,15 @@ async def memory_diary(
 
 @router.get("/api/memory/facts")
 async def memory_facts(
+    request: Request,
     category: str | None = None,
     limit: int = Query(default=50, le=500),
     _auth: bool = Security(verify_api_key_dep),
     prefix: str | None = Depends(memory_scope),
+    db: AsyncSession = Depends(get_db),
 ):
+    if prefix is None:
+        await _audit_global_read(request, db, "read_global_facts")
     orch = deps.orch
     if orch and orch._memory:
         if prefix is None:

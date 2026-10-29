@@ -25,6 +25,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
 from api.auth_jwt import get_current_user_id, require_role
@@ -679,23 +680,30 @@ async def get_humanize_config(
     user_key: str | None = Query(
         default=None,
         max_length=200,
-        description="可选：按用户读取合并生效视图（覆盖优先，无覆盖回落全局）",
+        description="可选：按用户读取合并生效视图（数字 user_id 或完整会话键；覆盖优先，无覆盖回落全局）",
     ),
     _auth: bool = Security(verify_api_key_dep),
     # SEC-P0 同门：拟人度是控制面，与 /api/proactive/config 同级
     _admin: tuple[int, User] = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
 ):
     """读取拟人度配置（**纯文件/覆盖库热读**，不依赖 ``orch._ase``，故无 503）。
 
     4 worker 中只有 master 持有主动引擎，其余 worker 仍必须能答「当前拟人度
     是什么」—— 与 ``/api/proactive/config`` 的 503 语义刻意不同。
+
+    NEW-12（2026-10-29）：``user_key`` 支持数字 user_id（经 wechat_bindings
+    还原成会话键），与 reply-mode 同一还原器——admin 前端不再需要手输内部键。
     """
-    scope = "user" if user_key else "global"
+    target_key = (
+        await _resolve_admin_target_key(str(user_key), db) if user_key else None
+    )
+    scope = "user" if target_key else "global"
     return {
         "status": "ok",
-        "config": _humanize_payload(user_key),
+        "config": _humanize_payload(target_key),
         "scope": scope,
-        "user_key": user_key or "",
+        "user_key": target_key or "",
     }
 
 
@@ -705,6 +713,7 @@ async def update_humanize_config(
     req: HumanizeConfigRequest,
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
 ):
     """写入拟人度配置（partial merge；POST / PUT 同一实现，前端按 POST 消费）。
 
@@ -714,7 +723,8 @@ async def update_humanize_config(
     并发保存同一文件不会互相覆盖。
 
     ``user_key`` 非空（2026-10-27 G-2）→ 只写该用户的 ``user_humanize``
-    覆盖行，不动全局默认（admin 作用域）。
+    覆盖行，不动全局默认（admin 作用域）。NEW-12：支持数字 user_id，
+    经 `_resolve_admin_target_key` 还原（与 reply-mode 同一真源，不猜键）。
 
     错误语义：字段非法/越界 → 422（Pydantic 先行）；
     ``max_segments`` 非 2/3/4 或合并后跨字段冲突 → 400。
@@ -723,34 +733,40 @@ async def update_humanize_config(
 
     payload = req.model_dump(exclude_none=True)
     user_key = payload.pop("user_key", None)
+    target_key = (
+        await _resolve_admin_target_key(str(user_key), db) if user_key else None
+    )
 
-    if payload or user_key:
+    if payload or target_key:
         try:
-            write_humanize(user_key=user_key, **payload)
+            write_humanize(user_key=target_key, **payload)
         except ValueError as e:
             raise HTTPException(400, str(e)) from None
-        logger.info("拟人度配置已更新（scope=%s user=%s）: %s", "user" if user_key else "global", user_key or "-", payload)
+        logger.info("拟人度配置已更新（scope=%s user=%s）: %s", "user" if target_key else "global", target_key or "-", payload)
     return {
         "status": "ok",
-        "config": _humanize_payload(user_key),
-        "scope": "user" if user_key else "global",
-        "user_key": user_key or "",
+        "config": _humanize_payload(target_key),
+        "scope": "user" if target_key else "global",
+        "user_key": target_key or "",
     }
 
 
 @router.delete("/api/humanize/config", response_model=HumanizeConfigResponse)
 async def clear_humanize_user_override(
-    user_key: str = Query(..., min_length=1, max_length=200, description="要清除覆盖的用户键"),
+    user_key: str = Query(..., min_length=1, max_length=200, description="要清除覆盖的用户键（数字 user_id 或完整会话键）"),
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
 ):
     """清除某用户的拟人度覆盖（回落全局默认）。
 
     ``status="noop"`` 表示该用户本来就没有覆盖行（幂等）。
+    NEW-12：``user_key`` 支持数字 user_id（经绑定还原，不猜键）。
     """
     from utils.humanize_config import clear_humanize_override
 
-    cleared = clear_humanize_override(user_key)
+    target_key = await _resolve_admin_target_key(str(user_key), db)
+    cleared = clear_humanize_override(target_key)
     return {
         "status": "ok" if cleared else "noop",
         "config": _humanize_payload(),
@@ -948,6 +964,7 @@ async def proactive_history(
     # SEC-P0 读面加门（本域最高危）：全表读**所有用户**的消息正文 + wxid，
     # 普通注册用户的 JWT 此前仅验签即放行 —— 必须 admin。
     _admin: tuple[int, User] = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
 ):
     """发送历史真源 = 控制面出站事实（跨 worker / 跨重启）。
 
@@ -955,6 +972,13 @@ async def proactive_history(
     引擎的代理列表 —— 4 worker 下各说各话、重启归零，且自动消息与手动消息
     不同源，统计与真实触达脱钩（W3 缺陷 E「统计走旁路」）。
     """
+    # NEW-21：全用户消息正文属最高敏感读，操作员留痕（不含正文，只留行为）。
+    from api.audit import record_operator_audit
+
+    await record_operator_audit(
+        db, admin_id=_admin[0], action="read_proactive_history_all",
+        detail={"limit": int(limit)},
+    )
     rp = _plane()
     if rp is not None:
         rows = rp.recent_sends("", int(limit))

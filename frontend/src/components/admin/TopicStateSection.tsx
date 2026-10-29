@@ -26,6 +26,7 @@ import {
   topicStateSnapshot,
   updateTopicStateConfig,
 } from '../../api/system'
+import { adminListUsers } from '../../api/admin'
 
 interface NumberRowProps {
   label: string
@@ -146,10 +147,15 @@ export default function TopicStateSection() {
 
   const [sessionKey, setSessionKey] = useState('')
   const [characterId, setCharacterId] = useState('default')
+  // NEW-12（2026-10-29）：用户下拉代替手输会话键（后端按绑定数字 id 还原）
+  const [adminUsers, setAdminUsers] = useState<Array<{ id: number; display_name?: string; username?: string; email?: string }>>([])
 
   useEffect(() => {
     if (!isAdmin) return
     void load(topicStateGetConfig)
+    void adminListUsers(1, 100)
+      .then(res => setAdminUsers(res.users ?? []))
+      .catch(() => setAdminUsers([]))
   }, [isAdmin, load])
 
   if (!isAdmin) {
@@ -295,14 +301,27 @@ export default function TopicStateSection() {
         <div className="pt-3 border-t border-gray-100 space-y-2" data-testid="topic-state-scope">
           <p className="text-sm text-gray-700">查看会话话题</p>
           <p className="text-[11px] text-gray-400">
-            完整键示例 <code>2:wxid@im.wechat</code> / <code>2:web:8hex</code>；纯数字仅支持已绑定微信的用户。
+            选择用户（后端按绑定自动还原会话键，宁拒绝不猜键）；完整键可走下方高级输入。
           </p>
           <div className="flex flex-col sm:flex-row gap-2">
+            <select
+              aria-label="选择用户"
+              value={/^\d+$/.test(sessionKey) ? sessionKey : ''}
+              onChange={(e) => setSessionKey(e.target.value === '' ? '' : e.target.value)}
+              className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/50"
+            >
+              <option value="">选择用户或手输…</option>
+              {adminUsers.map(u => (
+                <option key={u.id} value={u.id}>
+                  {u.display_name || u.username || u.email || `#${u.id}`}
+                </option>
+              ))}
+            </select>
             <input
               type="text"
-              value={sessionKey}
+              value={/^\d+$/.test(sessionKey) ? '' : sessionKey}
               onChange={(e) => setSessionKey(e.target.value)}
-              placeholder="2:wxid@im.wechat"
+              placeholder="高级：2:wxid@im.wechat"
               aria-label="会话键"
               data-testid="topic-state-session-key"
               className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/50"

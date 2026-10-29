@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import client from '../api/client'
 import {
@@ -10,6 +10,9 @@ import {
   useEmotionTrend,
   useMemoryFacts,
 } from '../hooks/useQueries'
+import { adminListUsers } from '../api/admin'
+import { useAuthStore } from '../store/authStore'
+import { useGlobalViewStore } from '../store/globalViewStore'
 import type { AchievementsResponse, DashboardStats } from '../types/api'
 import { AFFINITY_STAGES, EMOTION_COLORS, type AffinityStage } from '../constants/persona'
 
@@ -56,6 +59,24 @@ export default function StatusCenter() {
   const { data: trendData } = useEmotionTrend(7)
   const { data: distData } = useEmotionDistribution(7)
   const { data: affinityStages } = useAffinityStages()
+
+  // V2-1①：admin 全局视图下「最近沉淀」带归属标注（user_key → 用户名映射底座）
+  const isAdmin = useAuthStore(s => s.user?.role === 'admin')
+  const gvEnabled = useGlobalViewStore(s => s.enabled)
+  const [ownerNames, setOwnerNames] = useState<Record<number, string>>({})
+  useEffect(() => {
+    if (!isAdmin || !gvEnabled) {
+      setOwnerNames({})
+      return
+    }
+    void adminListUsers(1, 100)
+      .then(res => {
+        const map: Record<number, string> = {}
+        for (const u of res.users ?? []) map[u.id] = u.display_name || u.username || u.email || `#${u.id}`
+        setOwnerNames(map)
+      })
+      .catch(() => setOwnerNames({}))
+  }, [isAdmin, gvEnabled])
 
   if (!activeCharacter) {
     return (
@@ -105,7 +126,7 @@ export default function StatusCenter() {
           <AchievementsCard data={achievements} />
         </div>
 
-        <MemorySystemCard characterId={activeCharacter.id} recentFacts={recentFacts} />
+        <MemorySystemCard characterId={activeCharacter.id} recentFacts={recentFacts} ownerNames={ownerNames} />
       </div>
     </div>
   )
@@ -256,9 +277,12 @@ function AchievementsCard({ data }: { data?: AchievementsResponse }) {
 function MemorySystemCard({
   characterId,
   recentFacts,
+  ownerNames,
 }: {
   characterId: string
-  recentFacts: Array<{ content: string }>
+  recentFacts: Array<{ content: string; user_key?: string }>
+  /** V2-1①：admin 全局视图下的 user_id → 用户名映射（空 = 非全局视图，不标归属） */
+  ownerNames: Record<number, string>
 }) {
   const { data: charFacts } = useQuery({
     queryKey: ['memory', 'char-facts', characterId],
@@ -296,10 +320,10 @@ function MemorySystemCard({
         .get('/memory/diary', { params: { limit: 10 } })
         .then(
           r =>
-            (r.data as { entries?: Array<{ date: string; summary: string }> }).entries ??
-            ([] as Array<{ date: string; summary: string }>),
+            (r.data as { entries?: Array<{ date: string; summary: string; owner_user_id?: number }> }).entries ??
+            ([] as Array<{ date: string; summary: string; owner_user_id?: number }>),
         )
-        .catch(() => [] as Array<{ date: string; summary: string }>),
+        .catch(() => [] as Array<{ date: string; summary: string; owner_user_id?: number }>),
     enabled: !!characterId,
     staleTime: 30 * 1000,
   })
@@ -389,7 +413,14 @@ function MemorySystemCard({
                       key={`${e.date}-${idx}`}
                       className="rounded-lg bg-white/50 border border-white/60 px-2.5 py-2"
                     >
-                      <p className="text-[10px] text-gray-400 mb-0.5">{e.date}</p>
+                      <p className="text-[10px] text-gray-400 mb-0.5">
+                        {e.date}
+                        {e.owner_user_id != null && ownerNames[e.owner_user_id] && (
+                          <span className="ml-1.5 inline-block rounded-full bg-macaron-blue-light px-1.5 text-[10px] text-macaron-blue-deep align-middle">
+                            {ownerNames[e.owner_user_id]}
+                          </span>
+                        )}
+                      </p>
                       <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">
                         {e.summary}
                       </p>
@@ -413,14 +444,24 @@ function MemorySystemCard({
           // 空 content 的 fact 会渲染成一条空白盒（09-19 诊断 P2「空条」），先过滤。
           const visible = recentFacts.filter(f => f.content && f.content.trim()).slice(0, 5);
           return visible.length > 0 ? (
-            visible.map((fact, idx) => (
-              <div
-                key={idx}
-                className="bg-white/40 rounded-lg px-3 py-2 text-xs text-gray-600"
-              >
-                {fact.content}
-              </div>
-            ))
+            visible.map((fact, idx) => {
+              // V2-1①：admin 全局视图按 user_key 前缀标归属（只显示用户名，不回显内部键）
+              const owner = /^(\d+):/.exec(fact.user_key ?? '')?.[1]
+              const ownerName = owner ? ownerNames[Number(owner)] : undefined
+              return (
+                <div
+                  key={idx}
+                  className="bg-white/40 rounded-lg px-3 py-2 text-xs text-gray-600"
+                >
+                  {ownerName && (
+                    <span className="mr-1.5 inline-block rounded-full bg-macaron-blue-light px-1.5 py-0.5 text-[10px] text-macaron-blue-deep align-middle">
+                      {ownerName}
+                    </span>
+                  )}
+                  {fact.content}
+                </div>
+              )
+            })
           ) : (
             <p className="py-4 text-center text-xs text-gray-400">
               还没有沉淀下来的记忆

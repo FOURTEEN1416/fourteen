@@ -324,6 +324,12 @@ async def admin_force_disconnect(
         raise HTTPException(status_code=400, detail="slot 仅支持 0/1")
     ok = get_registry().disconnect(user_id, slot)
     await _upsert_session_row(db, user_id, slot, status="idle", bot_id="")
+    from api.audit import record_operator_audit
+
+    await record_operator_audit(
+        db, admin_id=admin[0], action="channel_force_disconnect",
+        target=f"user_id={user_id} slot={slot}", detail={"ok": bool(ok)},
+    )
     logger.warning(
         "管理员强制断开微信通道 target_user=%s slot=%s admin=%s ok=%s",
         user_id, slot, admin[0], ok,

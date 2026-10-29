@@ -407,6 +407,43 @@ class CharacterAchievement(Base):
 # ═══════════════════════════════════════════════════════
 
 
+class OperatorPref(Base):
+    """操作员（admin）面板偏好 — 全局运维视图开关（V2-1，D20-⑥ 2026-10-29）。
+
+    admin 默认**收窄**到本人数据前缀（`{user_id}:`），仅显式开启「全局运维视图」
+    后才能读全库（GitLab Admin Mode 范式：显式开关 + 常驻横幅 + 审计先行）。
+    开关状态落库（非进程内存）：重启不静默回到旧口径，行为可预期。
+    """
+
+    __tablename__ = "operator_prefs"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    global_view_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
+class OperatorAudit(Base):
+    """操作员审计（NEW-21，2026-10-29）：admin 特权读写留痕。
+
+    红线：**不存用户消息内容**——target 只落归属标识（user_id / email / 键指纹级），
+    detail 只落结构化摘要（作用域、计数、开关态）。不挂 users 外键：账号删除后
+    审计行必须留存（审计的生命期长于账号）。
+    """
+
+    __tablename__ = "operator_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    admin_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    action: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    target: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 async def _migrate_schema() -> None:
     """幂等列级迁移。
 

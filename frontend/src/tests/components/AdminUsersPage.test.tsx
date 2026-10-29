@@ -12,6 +12,12 @@ const {
   mockAdminCreateUser,
   mockAdminUpdateUser,
   mockAdminDeleteUser,
+  mockGetGlobalView,
+  mockSetGlobalView,
+  mockListOperatorAudit,
+  mockAdminGetUser,
+  mockAdminListChannels,
+  mockAdminForceDisconnect,
   mockAddToast,
   mockAdminUser,
   authStoreState,
@@ -77,6 +83,12 @@ const {
     mockAdminCreateUser: vi.fn(),
     mockAdminUpdateUser: vi.fn(),
     mockAdminDeleteUser: vi.fn(),
+    mockGetGlobalView: vi.fn(),
+    mockSetGlobalView: vi.fn(),
+    mockListOperatorAudit: vi.fn(),
+    mockAdminGetUser: vi.fn(),
+    mockAdminListChannels: vi.fn(),
+    mockAdminForceDisconnect: vi.fn(),
     mockAddToast: vi.fn(),
     mockAdminUser,
     authStoreState: { user: mockAdminUser },
@@ -88,11 +100,19 @@ const {
 //  Module mocks（工厂函数访问 hoisted 变量）
 // ════════════════════════════════════════════════════════════════
 
-vi.mock('../../api/admin', () => ({
+vi.mock('../../api/admin', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api/admin')>()),
   adminListUsers: (...args: unknown[]) => mockAdminListUsers(...args),
   adminCreateUser: (...args: unknown[]) => mockAdminCreateUser(...args),
   adminUpdateUser: (...args: unknown[]) => mockAdminUpdateUser(...args),
   adminDeleteUser: (...args: unknown[]) => mockAdminDeleteUser(...args),
+  // V2-1 全局运维视图 + NEW-21 审计 + NEW-11 下钻
+  getGlobalView: (...args: unknown[]) => mockGetGlobalView(...args),
+  setGlobalView: (...args: unknown[]) => mockSetGlobalView(...args),
+  listOperatorAudit: (...args: unknown[]) => mockListOperatorAudit(...args),
+  adminGetUser: (...args: unknown[]) => mockAdminGetUser(...args),
+  adminListChannels: (...args: unknown[]) => mockAdminListChannels(...args),
+  adminForceDisconnect: (...args: unknown[]) => mockAdminForceDisconnect(...args),
 }))
 
 vi.mock('../../store/authStore', () => ({
@@ -161,6 +181,24 @@ describe('AdminUsersPage', () => {
     authStoreState.user = mockAdminUser
     // 默认 mock 返回 3 个用户
     mockAdminListUsers.mockResolvedValue(FAKE_USERS)
+    // V2-1/NEW-21/NEW-11 默认桩：全局视图关、审计空、详情/通道空
+    mockGetGlobalView.mockResolvedValue({ enabled: false })
+    mockSetGlobalView.mockResolvedValue({ status: 'ok', enabled: true })
+    mockListOperatorAudit.mockResolvedValue({
+      entries: [
+        { id: 1, admin_id: 1, action: 'global_view_on', target: 'user_id=1', detail: {}, created_at: '2026-10-29T10:00:00' },
+        { id: 2, admin_id: 1, action: 'read_global_diary', target: '', detail: {}, created_at: '2026-10-29T10:01:00' },
+      ],
+    })
+    mockAdminGetUser.mockResolvedValue({ ...FAKE_USERS.users[1], updated_at: '2026-06-02T00:00:00Z' })
+    mockAdminListChannels.mockResolvedValue({
+      channels: [
+        { user_id: 2, slot: 0, status: 'connected', bot_id: 'bot-x', connected: true },
+      ],
+      online: 1,
+      max_global: 1,
+    })
+    mockAdminForceDisconnect.mockResolvedValue({ status: 'disconnected', ok: true, user_id: 2, slot: 0 })
   })
 
   // ────────────────────────────────────────────────
@@ -562,5 +600,73 @@ describe('AdminUsersPage', () => {
     await waitFor(() => {
       expect(emailOrder()[0]).toBe('admin@test.com')
     })
+  })
+})
+
+// ────────────────────────────────────────────────
+//  V2-1 全局运维视图 / NEW-21 操作审计 / NEW-11 用户下钻（2026-10-29 批 3）
+// ────────────────────────────────────────────────
+describe('AdminUsersPage 批 3 增量', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    authStoreState.user = mockAdminUser
+    mockAdminListUsers.mockResolvedValue(FAKE_USERS)
+    mockGetGlobalView.mockResolvedValue({ enabled: false })
+    mockSetGlobalView.mockResolvedValue({ status: 'ok', enabled: true })
+    mockListOperatorAudit.mockResolvedValue({
+      entries: [
+        { id: 1, admin_id: 1, action: 'global_view_on', target: 'user_id=1', detail: {}, created_at: '2026-10-29T10:00:00' },
+      ],
+    })
+    mockAdminGetUser.mockResolvedValue({ ...FAKE_USERS.users[1] })
+    mockAdminListChannels.mockResolvedValue({
+      channels: [{ user_id: 2, slot: 0, status: 'connected', bot_id: 'bot-x', connected: true }],
+      online: 1,
+      max_global: 1,
+    })
+    mockAdminForceDisconnect.mockResolvedValue({ status: 'disconnected', ok: true, user_id: 2, slot: 0 })
+  })
+
+  it('开启全局视图走确认弹窗，确认后调用 setGlobalView(true)', async () => {
+    renderComponent()
+    await waitForUserData('admin@test.com')
+    fireEvent.click(screen.getByText('开启全局视图'))
+    // 确认弹窗出现（范围说明文案，与开关卡副文案用「确认开启？」区分）
+    expect(await screen.findByText(/确认开启？/)).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: '开启' }))
+    await waitFor(() => expect(mockSetGlobalView).toHaveBeenCalledWith(true))
+  })
+
+  it('操作审计面板展开后渲染审计条目（动作中文化）', async () => {
+    renderComponent()
+    await waitForUserData('admin@test.com')
+    fireEvent.click(screen.getByText('操作审计'))
+    expect(await screen.findByText('开启全局运维视图')).toBeDefined()
+    expect(mockListOperatorAudit).toHaveBeenCalled()
+  })
+
+  it('行操作「详情」打开下钻抽屉，展示账号与通道状态', async () => {
+    renderComponent()
+    await waitForUserData('editor@test.com')
+    // 定位 desktop 表格里 editor 行的详情按钮（移动卡片与桌面表格会重复渲染）
+    const editorRow = screen.getAllByText('editor@test.com')[0].closest('tr') as HTMLElement
+    fireEvent.click(within(editorRow).getByTitle('详情与通道'))
+    expect(await screen.findByText(/用户详情/)).toBeDefined()
+    await waitFor(() => expect(mockAdminGetUser).toHaveBeenCalledWith(2))
+    // 通道行渲染（slot 0 在线 + bot_id）
+    expect(await screen.findByText(/slot 0/)).toBeDefined()
+    expect(screen.getByText('bot-x')).toBeDefined()
+  })
+
+  it('抽屉内强制断开需确认，确认后调用 force-disconnect', async () => {
+    renderComponent()
+    await waitForUserData('editor@test.com')
+    const editorRow = screen.getAllByText('editor@test.com')[0].closest('tr') as HTMLElement
+    fireEvent.click(within(editorRow).getByTitle('详情与通道'))
+    const disconnectBtn = await screen.findByTitle('强制断开该通道')
+    fireEvent.click(disconnectBtn)
+    expect(await screen.findByText('确认强制断开通道')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: '强制断开' }))
+    await waitFor(() => expect(mockAdminForceDisconnect).toHaveBeenCalledWith(2, 0))
   })
 })

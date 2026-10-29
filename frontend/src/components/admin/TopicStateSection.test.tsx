@@ -19,7 +19,14 @@ const { mockGet, mockPost, mockSnapshot, authState } = vi.hoisted(() => ({
   authState: { user: null as unknown },
 }))
 
-vi.mock('../../api/system', () => ({
+
+vi.mock('../../api/admin', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api/admin')>()),
+  adminListUsers: vi.fn(async () => ({ users: [], total: 0, page: 1, page_size: 100 })),
+}))
+
+vi.mock('../../api/system', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api/system')>()),
   topicStateGetConfig: (...args: unknown[]) => mockGet(...args),
   updateTopicStateConfig: (...args: unknown[]) => mockPost(...args),
   topicStateSnapshot: (...args: unknown[]) => mockSnapshot(...args),

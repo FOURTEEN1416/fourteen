@@ -278,6 +278,8 @@ async def resolve_principal_from_request(
     """从原始请求解析唯一主体（供共享依赖在非 DI 上下文复用，单一提取路径）。
 
     无 Bearer → None（机器 / 匿名面）；有 Bearer 则必须合法（否则 401）。
+    admin 主体解析时顺带读「全局运维视图」开关落 `request.state.admin_global_view`
+    （V2-1 默认收窄的消费依据；一次小查询仅对 admin 发生）。
     """
     auth = str(request.headers.get("Authorization") or "")
     credentials: HTTPAuthorizationCredentials | None = None
@@ -285,7 +287,15 @@ async def resolve_principal_from_request(
         token = auth[len("Bearer "):].strip()
         if token:
             credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-    return await _resolve_principal(credentials, db)
+    principal = await _resolve_principal(credentials, db)
+    if principal is not None and principal.role == "admin":
+        from api.audit import is_global_view_enabled
+
+        try:
+            request.state.admin_global_view = await is_global_view_enabled(db, principal.user_id)
+        except Exception:  # noqa: BLE001 — 开关读失败按收窄处理（fail-closed）
+            request.state.admin_global_view = False
+    return principal
 
 
 async def get_auth_principal(

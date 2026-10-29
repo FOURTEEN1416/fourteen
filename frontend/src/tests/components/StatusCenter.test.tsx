@@ -3,6 +3,8 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import StatusCenter from '../../pages/StatusCenter'
+import { useAuthStore } from '../../store/authStore'
+import { useGlobalViewStore } from '../../store/globalViewStore'
 
 // ── hoisted mock fns ──
 const { mockUseActiveCharacter, mockUseDashboard, mockUseEmotionState, mockUseMemoryFacts, mockUseAchievements, mockUseEmotionTrend, mockUseEmotionDistribution, mockClientGet } = vi.hoisted(
@@ -205,5 +207,50 @@ describe('StatusCenter', () => {
     fireEvent.click(await screen.findByText('时间线'))
     expect(await screen.findByText('2026-10-28')).toBeDefined()
     expect(screen.queryByText(/4:wxid/)).toBeNull()
+  })
+})
+
+// ── V2-1①（2026-10-29）：admin 全局视图下「最近沉淀」按 user_key 标注归属 ──
+describe('StatusCenter admin 全局视图归属标注', () => {
+  it('最近沉淀按 user_key 前缀映射用户名徽章（仅全局视图）', async () => {
+    useAuthStore.setState({
+      user: {
+        id: 1, email: 'a@t', username: 'admin', display_name: 'Admin',
+        role: 'admin', is_active: true, is_verified: true,
+      },
+    } as never)
+    useGlobalViewStore.setState({ enabled: true, loaded: true })
+
+    // /admin/users 返回用户名映射（ownerNames 底座）
+    mockClientGet.mockImplementation((url: string) => {
+      if (url === '/admin/users') {
+        return Promise.resolve({
+          data: { users: [{ id: 2, display_name: '小小鱼', username: 'fish', email: 'f@t' }], total: 1, page: 1, page_size: 100 },
+        })
+      }
+      if (url === '/shisi/emotion-stage/stages') {
+        return Promise.resolve({ data: { data: [{ name: '陌生', min: 0, max: 25 }] } })
+      }
+      return Promise.resolve({ data: {} })
+    })
+
+    mockUseActiveCharacter.mockReturnValue({ activeCharacter: FAKE_CHARACTER })
+    mockUseDashboard.mockReturnValue({ data: FAKE_STATS, isLoading: false })
+    mockUseEmotionState.mockReturnValue({ data: undefined })
+    mockUseAchievements.mockReturnValue({ data: undefined })
+    mockUseEmotionTrend.mockReturnValue({ data: undefined })
+    mockUseEmotionDistribution.mockReturnValue({ data: undefined })
+    mockUseMemoryFacts.mockReturnValue({
+      data: [{ content: '记得喜欢喝咖啡', user_key: '2:peer@im.wechat' }],
+    })
+
+    renderWithQuery(<StatusCenter />)
+
+    expect(await screen.findByText('小小鱼')).toBeDefined()
+    expect(screen.getByText('记得喜欢喝咖啡')).toBeDefined()
+
+    // 收尾：恢复非 admin，避免污染其他用例的全局 store
+    useAuthStore.setState({ user: null } as never)
+    useGlobalViewStore.setState({ enabled: false, loaded: true })
   })
 })
