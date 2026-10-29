@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import PsychProfilePage from '../../pages/PsychProfilePage'
 import { useErrorStore } from '../../store/errorStore'
 import { queryClient } from '../../api/queryClient'
@@ -58,7 +59,9 @@ async function openResetAndConfirm() {
   // usePsychReset 保留真实实现（业务判定在被测对象里），它内部需要 QueryClient
   render(
     <QueryClientProvider client={queryClient}>
-      <PsychProfilePage />
+      <MemoryRouter>
+        <PsychProfilePage />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
   // 触发重置对话框

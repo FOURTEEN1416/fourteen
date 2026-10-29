@@ -6,6 +6,7 @@
  * 样式：现有设计系统（三色语义 + glass + LightOnly），零新依赖。
  */
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Brain, Activity, ShieldAlert, RefreshCw, Info } from 'lucide-react'
 import AnimatedPage from '../components/shared/AnimatedPage'
 import ConfirmDialog from '../components/shared/ConfirmDialog'
@@ -165,6 +166,15 @@ export default function PsychProfilePage() {
               如有心理困扰请联系专业机构；全国心理援助热线 400-161-9995（24 小时）。
             </p>
           </div>
+
+          {/* NEW-8（2026-10-29）：无活跃角色显式提示（旧 useActiveCharacter 静默回退首卡已根治） */}
+          {!activeCharacter && (
+            <div className="mb-5 rounded-xl bg-gray-50 border border-gray-200 px-4 py-3 text-xs text-gray-500">
+              暂无活跃角色——请先到{' '}
+              <Link to="/roles" className="font-medium text-macaron-blue-deep hover:underline">角色配置</Link>{' '}
+              激活一个角色，画像将基于你与活跃角色的对话生成。
+            </div>
+          )}
 
           {isLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

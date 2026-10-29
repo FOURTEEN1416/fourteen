@@ -147,7 +147,7 @@ def test_control_plane_critical_routes_are_mounted(app):
         (chat_routes, 11, "chat/session + wechat channels"),
         (personality_routes, 10, "emotion/persona/psych（08-31? +emotion/distribution SP-1）"),
         (users_routes, 7, "users/*"),
-        (training_routes, 19, "training/* + proactive/*（08-28 +config/send/pause；09-17 +knowledge/collect-config×2；10-16 +humanize/config GET/POST/PUT；10-21 +user/reply-mode GET/POST；10-27 +humanize/config DELETE 按用户覆盖清除）"),
+        (training_routes, 23, "training/* + proactive/*（…10-27 +humanize/config DELETE；10-29 +user/humanize GET/POST/PUT/DELETE 用户自助拟人节奏 NEW-34）"),
         (tools_routes, 6, "tools/* + plugins/* + health"),
         (safety_routes, 12, "safety/rag/voice/files/cache"),
         (clone_routes, 8, "clone/* (2026-08-27 剥离 /api/clone/preview 死路径)"),
@@ -178,7 +178,7 @@ def test_total_contribution_is_92(app):
     2026-10-21: +user/reply-mode GET/POST（用户自助回复模式 R7，16→18；总 86→88）
     2026-10-27: +humanize/config DELETE（按用户覆盖清除，18→19；总 88→89）
     2026-10-27: +topic-state/config GET/POST + 会话快照（新增 topic_routes 3 端点；总 89→92）
-    2026-10-29: +user/llm-config/test（BYOK 连通性测试，misc 16→17；总 92→93）
+    2026-10-29: +user/llm-config/test（BYOK 连通性测试，misc 16→17；总 92→93）+user/humanize GET/POST/DELETE（用户自助拟人节奏，training 19→22；总 93→97）
     """
     modules = [
         misc_routes, chat_routes, personality_routes, users_routes,
@@ -186,7 +186,7 @@ def test_total_contribution_is_92(app):
         topic_routes,
     ]
     total = sum(len(_sub_router_routes(m)) for m in modules)
-    assert total == 93, f"9 sub-routers contribute {total} routes, expected 93"
+    assert total == 97, f"9 sub-routers contribute {total} routes, expected 97"
 
 
 def test_no_duplicate_endpoints_across_sub_routers():

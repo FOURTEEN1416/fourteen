@@ -10,6 +10,8 @@ export interface NavItem {
   label: string
   end?: boolean
   badge?: string
+  /** V2-3②（2026-10-29）：一句话说明——侧栏/抽屉副行渲染，消除「点了才知道是什么」 */
+  desc?: string
 }
 
 export interface NavGroup {
@@ -40,15 +42,17 @@ export function buildGlobalNavGroups(isAdmin: boolean, activeRoleId?: string): N
       ],
     },
     {
-      label: '系统设置',
+      // V2-3①：旧名「系统设置」过重——6 项中 5 项实为个人数据/个性化
+      // （BYOK/语音/偏好），与「这是系统管理面」的观感相悖。改「偏好与设置」。
+      label: '偏好与设置',
       items: [
-        { to: '/settings/account', icon: Database, label: '账号与数据' },
-        { to: '/settings/llm', icon: Sparkles, label: 'LLM 配置' },
-        { to: '/settings/voice', icon: Mic, label: '语音引擎' },
-        { to: '/settings/tools', icon: Wrench, label: '工具仪表盘' },
-        { to: '/settings/security', icon: Shield, label: '安全' },
-        { to: '/settings/logs', icon: FileText, label: '日志' },
-        { to: '/help', icon: Compass, label: '使用帮助' },
+        { to: '/settings/account', icon: Database, label: '账号与数据', desc: '回复模式等个人偏好、数据导出' },
+        { to: '/settings/llm', icon: Sparkles, label: 'LLM 配置', desc: '自带 API Key（BYOK）、测试连接' },
+        { to: '/settings/voice', icon: Mic, label: '语音引擎', desc: '给角色选音色、克隆声音' },
+        { to: '/settings/tools', icon: Wrench, label: '工具仪表盘', desc: '天气/提醒/搜索等能力状态' },
+        { to: '/settings/security', icon: Shield, label: '安全', desc: '登录会话管理' },
+        { to: '/settings/logs', icon: FileText, label: '日志', desc: '运行日志（普通用户仅见本人请求）' },
+        { to: '/help', icon: Compass, label: '使用帮助', desc: '全部功能教学与导览重放' },
       ],
     },
     {

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { Mic, Upload, Play, Check, Loader2 } from 'lucide-react'
-import { Select } from '../components/shared'
+import { Select, ConfirmDialog } from '../components/shared'
 import type { MiMoVoice, VoiceDesignRequest } from '../api/mimo'
 import {
   mimoClone,
@@ -218,6 +218,10 @@ function VoiceCloneSection({ onCreated }: { onCreated: (voiceId: string) => void
               </span>
             )}
           </div>
+          {/* NEW-14④：参考音频口径提示（后端硬上限 50MB，ABUSE-2；超限 413 拒收） */}
+          <p className="text-[11px] text-gray-400">
+            建议 10–30 秒清晰人声（环境噪声越小克隆越像）；格式 mp3/wav，上限 50MB——超限会被服务端拒绝。
+          </p>
 
           <button
             onClick={handleClone}
@@ -261,6 +265,8 @@ function VoiceDesignSection({ onCreated }: { onCreated: (voiceId: string) => voi
     pitch: 0,
     speed: 1.0,
   })
+  // NEW-14③（2026-10-29）：设计音色可命名——旧实现硬编码 design_${Date.now()}，无法辨识
+  const [designName, setDesignName] = useState('')
   const [designing, setDesigning] = useState(false)
   const [error, setError] = useState('')
   const [createdId, setCreatedId] = useState('')
@@ -281,7 +287,7 @@ function VoiceDesignSection({ onCreated }: { onCreated: (voiceId: string) => voi
         setEngineNotice('音色模型切换为管理员能力；将以平台当前模型尝试设计，若失败请联系管理员切换模型')
       }
       const res = await mimoDesign({
-        voice_name: `design_${Date.now()}`,
+        voice_name: designName.trim() || `design_${Date.now()}`,
         description: `${design.gender} voice, ${design.style} style`,
         gender: design.gender,
         age_group: design.age < 30 ? 'young' : design.age < 55 ? 'middle' : 'elder',
@@ -295,13 +301,26 @@ function VoiceDesignSection({ onCreated }: { onCreated: (voiceId: string) => voi
     } finally {
       setDesigning(false)
     }
-  }, [design, onCreated])
+  }, [design, designName, onCreated])
 
   return (
     <section>
       <h3 className="mb-3 text-sm font-semibold text-gray-700">语音设计</h3>
       <div className="rounded-xl border border-gray-200 bg-white/60 p-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {/* NEW-14③：音色名称（空则自动生成，建议命名便于「可用语音」列表辨识） */}
+          <div className="sm:col-span-2">
+            <label className="mb-1 block text-xs text-gray-500">音色名称</label>
+            <input
+              type="text"
+              value={designName}
+              onChange={(e) => setDesignName(e.target.value)}
+              placeholder="如：温柔御姐（留空自动生成编号）"
+              maxLength={64}
+              className="w-full rounded-lg border border-gray-200 bg-white/60 px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-400/20"
+            />
+          </div>
+
           {/* Gender */}
           <div>
             <label className="mb-1 block text-xs text-gray-500">性别</label>
@@ -343,27 +362,31 @@ function VoiceDesignSection({ onCreated }: { onCreated: (voiceId: string) => voi
             />
           </div>
 
-          {/* Pitch */}
+          {/* NEW-14①（2026-10-29）：音调/语速为预留参数——后端 /design 只收
+              gender/age_group/description 四字段，这两个滑条的值从未被发送。
+              不保留静默假控件：禁用 + 如实标注，等后端支持再解禁。 */}
           <div>
-            <label className="mb-1 block text-xs text-gray-500">
+            <label className="mb-1 block text-xs text-gray-400">
               音调: {design.pitch > 0 ? `+${design.pitch}` : design.pitch}
+              <span className="ml-1.5 rounded bg-gray-100 px-1.5 py-0.5 text-[10px]">预留 · 当前版本不生效</span>
             </label>
             <input
               type="range"
               min={-12}
               max={12}
               value={design.pitch}
+              disabled
               onChange={(e) =>
                 setDesign((p) => ({ ...p, pitch: Number(e.target.value) }))
               }
-              className="w-full accent-primary-500"
+              className="w-full accent-gray-300 opacity-50"
             />
           </div>
 
-          {/* Speed */}
-          <div className="sm:col-span-2">
-            <label className="mb-1 block text-xs text-gray-500">
+          <div>
+            <label className="mb-1 block text-xs text-gray-400">
               语速: {Number(design.speed || 0).toFixed(1)}x
+              <span className="ml-1.5 rounded bg-gray-100 px-1.5 py-0.5 text-[10px]">预留 · 当前版本不生效</span>
             </label>
             <input
               type="range"
@@ -371,10 +394,11 @@ function VoiceDesignSection({ onCreated }: { onCreated: (voiceId: string) => voi
               max={2.0}
               step={0.1}
               value={design.speed}
+              disabled
               onChange={(e) =>
                 setDesign((p) => ({ ...p, speed: Number(e.target.value) }))
               }
-              className="w-full accent-primary-500"
+              className="w-full accent-gray-300 opacity-50"
             />
           </div>
         </div>
@@ -515,7 +539,19 @@ export default function SettingsVoice() {
       }
 
       setVoices(list)
-      if (!activeVoice && list.length > 0) setActiveVoice(list[0].name)
+      // NEW-14②（2026-10-29）：高亮 = 平台当前真值（/mimo/status health.voice_id），
+      // 旧实现高亮列表第一项冒充「当前默认」。
+      let current = ''
+      if (statusRes.status === 'fulfilled') {
+        const health = (statusRes.value.data as { health?: { voice_id?: string } }).health
+        current = health?.voice_id || ''
+      }
+      const known = current && list.some(v => v.name === current)
+      if (known) {
+        setActiveVoice(current)
+      } else if (!activeVoice && list.length > 0) {
+        setActiveVoice(list[0].name)
+      }
     } catch {
       setVoices([])
     } finally {
@@ -536,21 +572,30 @@ export default function SettingsVoice() {
     setReloadTick((t) => t + 1)
   }, [])
 
+  // NEW-14②：admin 点击音色 = 改全局 TTS 单例（影响所有用户）——先确认再切，
+  // 旧实现静默切换、无作用域提示。普通用户选择仅用于试听（个人绑定走角色设置）。
+  const [pendingGlobalVoice, setPendingGlobalVoice] = useState<string | null>(null)
+
   const handleActivate = useCallback(
-    async (name: string) => {
+    (name: string) => {
       // 本地选中始终生效——它驱动下方「语音合成测试」的试听音色
       setActiveVoice(name)
-      // P0 收尾：全局切换改全局 TTS 单例（admin 门端点），普通用户不发必 403 的请求；
-      // 此处选择仅用于试听，个人音色绑定走角色设置
       if (!isAdmin) return
-      try {
-        await mimoSwitchVoice(name)
-      } catch {
-        // error handled by global interceptor
-      }
+      setPendingGlobalVoice(name)
     },
     [isAdmin]
   )
+
+  const confirmGlobalSwitch = useCallback(async () => {
+    if (!pendingGlobalVoice) return
+    try {
+      await mimoSwitchVoice(pendingGlobalVoice)
+    } catch {
+      // error handled by global interceptor
+    } finally {
+      setPendingGlobalVoice(null)
+    }
+  }, [pendingGlobalVoice])
 
   return (
     <div className="space-y-6">
@@ -577,6 +622,17 @@ export default function SettingsVoice() {
       <VoiceCloneSection onCreated={handleVoiceCreated} />
       <VoiceDesignSection onCreated={handleVoiceCreated} />
       <SynthesizeTest voiceId={activeVoice} />
+
+      <ConfirmDialog
+        open={!!pendingGlobalVoice}
+        title="设为全局默认音色"
+        message={`将把音色「${pendingGlobalVoice}」设为平台全局默认——所有用户、所有角色的语音合成都会改用它（个人角色绑定不受影响）。确定继续？`}
+        confirmText="设为全局默认"
+        cancelText="仅试听，不切换"
+        variant="default"
+        onConfirm={() => void confirmGlobalSwitch()}
+        onCancel={() => setPendingGlobalVoice(null)}
+      />
     </div>
   )
 }

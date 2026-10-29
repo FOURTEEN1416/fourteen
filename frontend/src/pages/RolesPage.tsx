@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useMemo, useState } from 'react'
 import { Plus, Search, Sparkles, AlertTriangle, Gift, X } from 'lucide-react'
 import AnimatedPage from '../components/shared/AnimatedPage'
@@ -71,8 +71,18 @@ function RoleCard({
           <div className="absolute top-3 right-3 text-[10px] px-2 py-0.5 rounded-full bg-macaron-blue text-text-primary">
             当前活跃
           </div>
-          <div className="mt-auto w-full py-1.5 rounded-lg text-xs border border-macaron-blue/20 bg-macaron-blue-light/30 text-macaron-blue-deep text-center">
-            正在陪伴你
+          <div className="mt-auto flex items-center gap-2">
+            <div className="flex-1 w-full py-1.5 rounded-lg text-xs border border-macaron-blue/20 bg-macaron-blue-light/30 text-macaron-blue-deep text-center">
+              正在陪伴你
+            </div>
+            {/* NEW-10：活跃角色也给设置入口（统一卡片操作区） */}
+            <Link
+              to={`/roles/${character.id}/settings`}
+              className="shrink-0 py-1.5 px-2.5 rounded-lg text-xs border border-gray-200 text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
+              title="角色设置"
+            >
+              设置
+            </Link>
           </div>
         </>
       ) : (
@@ -83,6 +93,16 @@ function RoleCard({
         >
           {activating === character.id ? '激活中…' : '设为活跃'}
         </button>
+      )}
+      {/* NEW-10：非活跃角色也有「设置」入口——编辑人格/语音不该要求先激活
+          （激活是切换聊天对象的全局副作用；RoleSettings 页头本就支持未激活态） */}
+      {!character.is_active && (
+        <Link
+          to={`/roles/${character.id}/settings`}
+          className="mt-2 w-full py-1 rounded-lg text-[11px] text-gray-400 hover:text-gray-600 text-center transition-colors"
+        >
+          设置与详情 →
+        </Link>
       )}
     </div>
   )
@@ -186,12 +206,21 @@ export default function RolesPage() {
               <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-gray-400">
                 注册时如未自动分配初始角色，可在这里创建一个开始使用
               </p>
-              <button
-                onClick={() => navigate('/roles/create')}
-                className="mt-4 btn-macaron rounded-xl px-5 py-2 text-xs font-medium"
-              >
-                创建角色
-              </button>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <button
+                  onClick={() => navigate('/roles/create')}
+                  className="btn-macaron rounded-xl px-5 py-2 text-xs font-medium"
+                >
+                  创建角色
+                </button>
+                {/* NEW-10：空态并列模板入口 */}
+                <Link
+                  to="/templates"
+                  className="rounded-xl border border-macaron-blue/40 px-5 py-2 text-xs font-medium text-macaron-blue-deep hover:bg-macaron-blue-light/30 transition-colors"
+                >
+                  从模板挑一个
+                </Link>
+              </div>
             </div>
           ) : (
             <>

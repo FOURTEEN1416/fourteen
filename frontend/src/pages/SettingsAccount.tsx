@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Download, ShieldAlert, ShieldOff, UserX } from 'lucide-react'
+import { Download, ShieldAlert, ShieldOff, UserX, SlidersHorizontal, Loader2 } from 'lucide-react'
+import { getMyReplyMode, setMyReplyMode, getMyHumanize, saveMyHumanize, clearMyHumanize } from '../api/system'
 import { consent } from '../api/auth'
 import {
   deleteAccount,
@@ -222,6 +223,7 @@ export default function SettingsAccount() {
 
   return (
     <div className="space-y-6">
+      <MyPreferencesSection />
       {/* ── 协议与同意 ── */}
       <section>
         <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700">
@@ -366,5 +368,232 @@ export default function SettingsAccount() {
         </div>
       </section>
     </div>
+  )
+}
+
+
+// ════════════════════════════════════════════════════
+//  个人偏好（NEW-34，D20-⑤ 用户主权裁决：用户需要能自己设置）
+//  回复模式（R7 自助端点首次接前端）+ 拟人节奏（/api/user/humanize，
+//  复用 user_humanize 作用域机制；未绑定微信 → 诚实降级为只读全局视图）
+// ════════════════════════════════════════════════════
+
+type ReplyMode = 'immersive' | 'novel'
+
+function MyPreferencesSection() {
+  const addToast = useErrorStore((s) => s.addToast)
+
+  // 回复模式
+  const [replyMode, setReplyMode] = useState<ReplyMode>('immersive')
+  const [replySource, setReplySource] = useState<'user' | 'global'>('global')
+  const [replyBound, setReplyBound] = useState(true)
+  const [replySaving, setReplySaving] = useState(false)
+
+  // 拟人节奏
+  const [hLoading, setHLoading] = useState(true)
+  const [hScope, setHScope] = useState<'user' | 'global'>('global')
+  const [delayMode, setDelayMode] = useState('dynamic')
+  const [perCharMs, setPerCharMs] = useState(45)
+  const [fixedMs, setFixedMs] = useState(600)
+  const [proactiveSplit, setProactiveSplit] = useState(false)
+  const [hSaving, setHSaving] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void getMyReplyMode()
+      .then((res) => {
+        if (cancelled) return
+        const d = res.data as { reply_mode?: ReplyMode; source?: 'user' | 'global'; user_key_present?: boolean }
+        if (d.reply_mode === 'immersive' || d.reply_mode === 'novel') setReplyMode(d.reply_mode)
+        setReplySource(d.source ?? 'global')
+        setReplyBound(!!d.user_key_present)
+      })
+      .catch(() => undefined)
+    void getMyHumanize()
+      .then((res) => {
+        if (cancelled) return
+        const d = res.data as { config?: Record<string, unknown>; scope?: 'user' | 'global' }
+        const cfg = d.config ?? {}
+        setDelayMode(String(cfg.delay_mode ?? 'dynamic'))
+        setPerCharMs(Number(cfg.per_char_ms ?? 45))
+        setFixedMs(Number(cfg.fixed_ms ?? 600))
+        setProactiveSplit(!!cfg.proactive_split)
+        setHScope(d.scope === 'user' ? 'user' : 'global')
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setHLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  const handleReplyMode = async (mode: ReplyMode) => {
+    setReplyMode(mode)
+    setReplySaving(true)
+    try {
+      const res = await setMyReplyMode(mode)
+      if ((res.data as { status?: string }).status !== 'ok') {
+        addToast({ type: 'warning', message: '回复模式未生效（后端未确认），请重试' })
+        return
+      }
+      setReplySource('user')
+      addToast({ type: 'success', message: '回复模式已更新（仅作用于你自己的对话）' })
+    } catch (err) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        || '设置失败（未绑定微信通道时不可用）'
+      addToast({ type: 'error', message: msg })
+    } finally {
+      setReplySaving(false)
+    }
+  }
+
+  const handleSaveHumanize = async () => {
+    setHSaving(true)
+    try {
+      const res = await saveMyHumanize({
+        delay_mode: delayMode,
+        per_char_ms: perCharMs,
+        fixed_ms: fixedMs,
+        proactive_split: proactiveSplit,
+      })
+      if ((res.data as { status?: string }).status !== 'ok') {
+        addToast({ type: 'warning', message: '未生效（后端未确认），请重试' })
+        return
+      }
+      setHScope('user')
+      addToast({ type: 'success', message: '个人节奏已保存（仅作用于你自己的会话）' })
+    } catch (err) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        || '保存失败（未绑定微信通道时不可用）'
+      addToast({ type: 'error', message: msg })
+    } finally {
+      setHSaving(false)
+    }
+  }
+
+  const handleClearHumanize = async () => {
+    setHSaving(true)
+    try {
+      await clearMyHumanize()
+      addToast({ type: 'success', message: '已恢复跟随全局默认' })
+      setHScope('global')
+    } catch {
+      addToast({ type: 'error', message: '清除失败，请重试' })
+    } finally {
+      setHSaving(false)
+    }
+  }
+
+  return (
+    <section>
+      <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700">
+        <SlidersHorizontal className="h-4 w-4 text-macaron-mint-deep" />
+        个人偏好
+        <span className="ml-1 text-[10px] font-normal text-gray-400">仅作用于你自己的对话</span>
+      </h3>
+      <div className="rounded-xl border border-macaron-mint/30 bg-white/60 p-4 space-y-4">
+        {/* 回复模式 */}
+        <div>
+          <p className="text-sm text-gray-700 mb-1.5">
+            回复模式
+            <span className={`ml-2 rounded-full px-1.5 py-0.5 text-[9px] ${replySource === 'user' ? 'bg-macaron-mint-light text-macaron-mint-deep' : 'bg-gray-100 text-gray-400'}`}>
+              {replySource === 'user' ? '个人覆盖' : '跟随全局默认'}
+            </span>
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {([
+              { v: 'immersive', label: '沉浸式（真人聊天）', desc: '纯对白，像微信真人' },
+              { v: 'novel', label: '小说式（带动作神态）', desc: '带括号动作与神态描写' },
+            ] as const).map((opt) => (
+              <button
+                key={opt.v}
+                onClick={() => void handleReplyMode(opt.v)}
+                disabled={replySaving || !replyBound}
+                title={replyBound ? undefined : '绑定微信后可用（服务端按绑定还原个人键，不猜键）'}
+                className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors disabled:opacity-50 ${
+                  replyMode === opt.v
+                    ? 'border-macaron-blue/50 bg-macaron-blue-light/40 text-macaron-blue-deep'
+                    : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                }`}
+              >
+                <span className="block font-medium">{opt.label}</span>
+                <span className="block text-[10px] text-gray-400">{opt.desc}</span>
+              </button>
+            ))}
+            {replySaving && <Loader2 className="h-4 w-4 animate-spin self-center text-gray-400" />}
+          </div>
+        </div>
+
+        {/* 拟人节奏 */}
+        <div className="pt-3 border-t border-gray-100">
+          <p className="text-sm text-gray-700 mb-1.5">
+            拟人节奏（打字延时 / 拆条）
+            <span className={`ml-2 rounded-full px-1.5 py-0.5 text-[9px] ${hScope === 'user' ? 'bg-macaron-mint-light text-macaron-mint-deep' : 'bg-gray-100 text-gray-400'}`}>
+              {hScope === 'user' ? '个人覆盖' : '跟随全局默认'}
+            </span>
+          </p>
+          {hLoading ? (
+            <p className="text-xs text-gray-400 py-2">加载中…</p>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <label className="inline-flex items-center gap-1">
+                  延时模式
+                  <select
+                    value={delayMode}
+                    onChange={(e) => setDelayMode(e.target.value)}
+                    className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700"
+                  >
+                    <option value="dynamic">逐字（按字数）</option>
+                    <option value="fixed">固定延时</option>
+                    <option value="off">不延时</option>
+                  </select>
+                </label>
+                {delayMode === 'dynamic' && (
+                  <label className="inline-flex items-center gap-1">
+                    每字
+                    <input type="number" min={0} max={2000} value={perCharMs} onChange={(e) => setPerCharMs(Number(e.target.value) || 0)} className="w-20 rounded-lg border border-gray-200 px-2 py-1 text-xs text-center" />
+                    ms
+                  </label>
+                )}
+                {delayMode === 'fixed' && (
+                  <label className="inline-flex items-center gap-1">
+                    固定
+                    <input type="number" min={0} max={60000} value={fixedMs} onChange={(e) => setFixedMs(Number(e.target.value) || 0)} className="w-24 rounded-lg border border-gray-200 px-2 py-1 text-xs text-center" />
+                    ms
+                  </label>
+                )}
+                <label className="inline-flex items-center gap-1">
+                  <input type="checkbox" checked={proactiveSplit} onChange={(e) => setProactiveSplit(e.target.checked)} />
+                  主动消息也拆条
+                </label>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => void handleSaveHumanize()}
+                  disabled={hSaving || hScope === 'global' && !replyBound}
+                  title={hScope === 'global' && !replyBound ? '绑定微信后可用（服务端按绑定还原个人键，不猜键）' : undefined}
+                  className="rounded-lg bg-primary-500 px-4 py-1.5 text-xs font-medium text-white hover:bg-primary-400 disabled:opacity-50"
+                >
+                  {hSaving ? '保存中…' : '保存个人节奏'}
+                </button>
+                {hScope === 'user' && (
+                  <button
+                    onClick={() => void handleClearHumanize()}
+                    disabled={hSaving}
+                    className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    恢复跟随全局
+                  </button>
+                )}
+              </div>
+              <p className="text-[10px] text-gray-400">
+                节奏只在你的微信会话生效；主动消息的整体频率与免打扰时段属全局调度，个人档调节见后续版本。
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
   )
 }

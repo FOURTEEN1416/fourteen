@@ -89,7 +89,7 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
                 {group.label}
               </div>
               <div className="space-y-0.5 px-2">
-                {group.items.map(({ to, icon: Icon, label, end, badge }) => (
+                {group.items.map(({ to, icon: Icon, label, end, badge, desc }) => (
                   <NavLink
                     key={label + to}
                     to={to}
@@ -105,7 +105,7 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
                     }
                   >
                     <Icon className="w-4 h-4 shrink-0" />
-                    <span>{label}</span>
+                    <span>{label}</span>{desc && <span className="block text-[10px] text-gray-400 leading-tight">{desc}</span>}
                     {badge && (
                       <span className="ml-auto text-[9px] rounded px-1 tag-yellow">{badge}</span>
                     )}

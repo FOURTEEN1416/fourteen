@@ -145,7 +145,7 @@ describe('门禁与加载态', () => {
 
     expect(mockGet).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('heading', { name: '话题状态' })).toBeDefined()
-    for (const label of ['并行上限', '复提间隔', '复提条数', 'θ1', 'θ2']) {
+    for (const label of ['并行上限', '复提间隔', '复提条数', '算「接着聊」的灵敏度（θ1）', '翻旧话题的门槛（θ2）']) {
       expect(screen.getByLabelText(label)).toBeDefined()
     }
     for (const text of ['启用话题状态机', '稀疏 LLM 判定', 'LLM 判定频率', '每日 LLM 预算', '状态保留期', '空闲转「没聊完」']) {

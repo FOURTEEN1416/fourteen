@@ -108,7 +108,13 @@ function SettingsLogs() {
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-gray-400">查看系统运行日志、调试信息与错误记录</p>
+      <p className="text-xs text-gray-400">
+        查看系统运行日志、调试信息与错误记录
+        {/* V2-3③：双视角作用域标识——普通用户只读本人请求级日志（misc_routes logs 按主体过滤） */}
+        <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500 align-middle" data-testid="logs-scope">
+          普通用户：仅本人请求级日志 · 管理员：全站日志
+        </span>
+      </p>
 
       <div className="glass-card rounded-xl p-4 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">

@@ -898,6 +898,12 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
         <p className="mt-2 text-[11px] text-gray-400">
           需要调整主动消息频率、免打扰时段或暂停调度，请用管理员账号进入本页「消息」标签操作。
         </p>
+        {/* NEW-34（2026-10-29）：个人偏好自助入口——回复模式/个人拟人节奏 */}
+        <p className="mt-1 text-[11px] text-gray-400">
+          回复模式与个人拟人节奏可在{' '}
+          <a href="/settings/account" className="font-medium text-macaron-blue-deep hover:underline">账号与数据 → 个人偏好</a>
+          {' '}自助调整。
+        </p>
       </Section>
     )
   }
@@ -938,6 +944,13 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
         </p>
       </div>
 
+      {/* V2-3④（2026-10-29）：消息 tab 分层——日常调频区（回复模式/阈值/拟人化）在前，
+          开发级运维区（LLM 决策参数/骰子闸/账本回放）默认折叠，渐进式披露不收能力。 */}
+      <details className="group rounded-xl border border-gray-200/70 bg-white/30">
+        <summary className="cursor-pointer select-none px-3 py-2.5 text-xs font-semibold text-gray-500 hover:text-gray-700">
+          高级运维：LLM 决策参数 / 骰子闸 / 状态账本回放（管理员，日常无需展开）
+        </summary>
+        <div className="space-y-4 pt-2">
       {/* LLM 主动决策 web 可调 */}
       <Section title="LLM 主动决策（人设·画像·控制台）">
         <p className="text-xs text-gray-500 mb-2">时机与文案由 LLM 综合判断；此处参数注入决策提示词，可动态调整。</p>
@@ -1093,6 +1106,8 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
         </p>
         {replayOut ? <pre className="mt-2 text-xs bg-gray-50 rounded-lg p-2 overflow-auto max-h-64 whitespace-pre-wrap">{replayOut}</pre> : null}
       </Section>
+        </div>
+      </details>
       {/* Stats（真数据：/api/proactive/history + config）
           2026-10-29 NEW-19：「消息总数」原读 character.stats?.messages，但后端角色详情
           从不返回 stats（42 卡 0 张含此字段），上线以来恒 0——按裁决删卡止血，

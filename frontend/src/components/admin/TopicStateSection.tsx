@@ -269,9 +269,10 @@ export default function TopicStateSection() {
             unit="条"
             onChange={(value) => patch({ recall_max: value })}
           />
+          {/* V2-3④：白话做主文案、术语降为副标注（θ 缺白话因果 finding） */}
           <NumberRow
-            label="θ1"
-            tooltip="接续判定阈值：当前消息与 active 标题/锚点的 bigram 短边包含度 ≥ θ1 视为继续"
+            label="算「接着聊」的灵敏度（θ1）"
+            tooltip="术语：接续判定阈值——当前消息与 active 标题/锚点的 bigram 短边包含度 ≥ θ1 视为继续。调高=更难算继续话题，调低=更容易顺势聊下去"
             value={config.switch_theta1}
             min={0}
             max={1}
@@ -279,8 +280,8 @@ export default function TopicStateSection() {
             onChange={setTheta1}
           />
           <NumberRow
-            label="θ2"
-            tooltip="复提判定阈值：与 parked 的重叠达到 θ2 才恢复为 active；不得小于 θ1"
+            label="翻旧话题的门槛（θ2）"
+            tooltip="术语：复提判定阈值——与 parked 的重叠达到 θ2 才恢复为 active；不得小于 θ1。调高=更难主动翻旧话题"
             value={config.switch_theta2}
             min={0}
             max={1}

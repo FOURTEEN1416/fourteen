@@ -21,7 +21,11 @@ const {
   mockGetConsentStatus, mockWithdrawConsent, mockConsent,
   mockDeleteAccount, mockExportManifest, mockExportAllChats,
   mockDownloadJson, mockDatedFilename, mockLogout, mockNavigate,
-} = vi.hoisted(() => ({
+  mockGetMyReplyMode,
+  mockSetMyReplyMode,
+  mockGetMyHumanize,
+  mockSaveMyHumanize,
+  mockClearMyHumanize} = vi.hoisted(() => ({
   mockGetConsentStatus: vi.fn(),
   mockWithdrawConsent: vi.fn(),
   mockConsent: vi.fn(),
@@ -32,6 +36,11 @@ const {
   mockDatedFilename: vi.fn((prefix: string, ext: string) => `${prefix}-2026-09-28.${ext}`),
   mockLogout: vi.fn(async () => undefined),
   mockNavigate: vi.fn(),
+  mockGetMyReplyMode: vi.fn(),
+  mockSetMyReplyMode: vi.fn(),
+  mockGetMyHumanize: vi.fn(),
+  mockSaveMyHumanize: vi.fn(),
+  mockClearMyHumanize: vi.fn(),
 }))
 
 vi.mock('../../api/selfservice', () => ({
@@ -47,6 +56,15 @@ vi.mock('../../api/selfservice', () => ({
 
 vi.mock('../../api/auth', () => ({
   consent: (...a: unknown[]) => mockConsent(...a),
+}))
+
+vi.mock('../../api/system', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api/system')>()),
+  getMyReplyMode: (...a: unknown[]) => mockGetMyReplyMode(...a),
+  setMyReplyMode: (...a: unknown[]) => mockSetMyReplyMode(...a),
+  getMyHumanize: (...a: unknown[]) => mockGetMyHumanize(...a),
+  saveMyHumanize: (...a: unknown[]) => mockSaveMyHumanize(...a),
+  clearMyHumanize: (...a: unknown[]) => mockClearMyHumanize(...a),
 }))
 
 vi.mock('../../utils/download', () => ({
@@ -89,6 +107,13 @@ beforeEach(() => {
   useErrorStore.setState({ toasts: [], lastError: null })
   mockGetConsentStatus.mockResolvedValue({ status: 'granted', agreement_version: AGREEMENT_VERSION })
   mockExportManifest.mockResolvedValue(MANIFEST)
+  // NEW-34：个人偏好区挂载即拉自助端点——全文件默认桩（各用例可覆盖）
+  mockGetMyReplyMode.mockResolvedValue({
+    data: { status: 'ok', reply_mode: 'immersive', source: 'global', user_key_present: true },
+  })
+  mockGetMyHumanize.mockResolvedValue({
+    data: { status: 'ok', config: { delay_mode: 'dynamic', per_char_ms: 45, fixed_ms: 600, proactive_split: false }, scope: 'global', user_key: '' },
+  })
 })
 
 describe('同意状态展示与撤回', () => {
@@ -234,5 +259,49 @@ describe('注销账号', () => {
     await waitFor(() => expect(toasts().length).toBeGreaterThan(0))
     expect(mockLogout).not.toHaveBeenCalled()
     expect(mockNavigate).not.toHaveBeenCalledWith('/login')
+  })
+})
+
+
+// ── NEW-34（2026-10-29）：个人偏好自助区——回复模式 + 拟人节奏 ──
+describe('SettingsAccount 个人偏好（NEW-34）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockGetConsentStatus.mockResolvedValue({ status: 'granted', agreement_version: AGREEMENT_VERSION })
+    mockGetMyReplyMode.mockResolvedValue({
+      data: { status: 'ok', reply_mode: 'immersive', source: 'global', user_key_present: true },
+    })
+    mockGetMyHumanize.mockResolvedValue({
+      data: { status: 'ok', config: { delay_mode: 'dynamic', per_char_ms: 45, fixed_ms: 600, proactive_split: false }, scope: 'global', user_key: '2:wx' },
+    })
+  })
+
+  it('渲染回复模式与拟人节奏（含作用域徽标「跟随全局默认」）', async () => {
+    render(<SettingsAccount />)
+    expect(await screen.findByText('个人偏好')).toBeDefined()
+    expect(await screen.findByText('沉浸式（真人聊天）')).toBeDefined()
+    expect(screen.getAllByText('跟随全局默认').length).toBeGreaterThan(0)
+  })
+
+  it('切换回复模式调用自助端点并给成功提示', async () => {
+    mockSetMyReplyMode.mockResolvedValue({ data: { status: 'ok', reply_mode: 'novel', scope: 'user' } })
+    render(<SettingsAccount />)
+    fireEvent.click(await screen.findByText('小说式（带动作神态）'))
+    await waitFor(() => expect(mockSetMyReplyMode).toHaveBeenCalledWith('novel'))
+    // 作用域徽标翻为「个人覆盖」（toast 容器不在测试 DOM，不.assert 文案）
+    await waitFor(() => {
+      expect(screen.getAllByText('个人覆盖').length).toBeGreaterThan(0)
+    })
+  })
+
+  it('保存个人节奏调用 /user/humanize 并翻「个人覆盖」徽标', async () => {
+    mockSaveMyHumanize.mockResolvedValue({ data: { status: 'ok', scope: 'user' } })
+    render(<SettingsAccount />)
+    fireEvent.click(await screen.findByText('保存个人节奏'))
+    await waitFor(() => expect(mockSaveMyHumanize).toHaveBeenCalled())
+    await waitFor(() => {
+      // 拟人节奏徽标翻「个人覆盖」
+      expect(screen.getAllByText('个人覆盖').length).toBeGreaterThan(0)
+    })
   })
 })

@@ -105,6 +105,12 @@ export interface DiceGateConfigWrite {
 // 普通用户既无 admin 角色，也不该被「主动引擎是否初始化」耦合。
 // 后端从 JWT 派生 user_key（绝不接受客户端传 user_key）。
 export function getMyReplyMode() { return client.get('/user/reply-mode') }
+
+// NEW-34（2026-10-29）：用户自助拟人节奏（复用 user_humanize 按用户作用域机制；
+// 作用域键服务端从 token 派生，未绑定微信 400）
+export function getMyHumanize() { return client.get('/user/humanize') }
+export function saveMyHumanize(cfg: Record<string, unknown>) { return client.post('/user/humanize', cfg) }
+export function clearMyHumanize() { return client.delete('/user/humanize') }
 export function setMyReplyMode(replyMode: 'immersive' | 'novel') {
   return client.post('/user/reply-mode', { reply_mode: replyMode })
 }

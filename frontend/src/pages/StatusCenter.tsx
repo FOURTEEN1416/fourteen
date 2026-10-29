@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
+import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import client from '../api/client'
 import {
-  useActiveCharacter,
   useAchievements,
   useDashboard,
   useEmotionDistribution,
   useEmotionState,
   useEmotionTrend,
   useMemoryFacts,
+  useUnifiedCharacter,
 } from '../hooks/useQueries'
 import { adminListUsers } from '../api/admin'
 import { useAuthStore } from '../store/authStore'
@@ -51,7 +52,12 @@ const CATEGORY_META: Record<string, { label: string; chip: string }> = {
 }
 
 export default function StatusCenter() {
-  const { activeCharacter } = useActiveCharacter()
+  // NEW-8（2026-10-29）：按 URL roleId 取角色（与剧情线页同一语义）——
+  // 旧实现忽略 URL 参数、一律取 useActiveCharacter 且无活跃时静默回退
+  // characters[0]，面包屑写 A、页面渲染 B 的情绪/亲密度。
+  const { roleId } = useParams<{ roleId: string }>()
+  const { data: characterData, isLoading: charLoading } = useUnifiedCharacter(roleId)
+  const activeCharacter = characterData ?? null
   const { data: stats, isLoading: statsLoading } = useDashboard()
   const { data: emotionData } = useEmotionState()
   const { data: facts } = useMemoryFacts()
@@ -78,10 +84,24 @@ export default function StatusCenter() {
       .catch(() => setOwnerNames({}))
   }, [isAdmin, gvEnabled])
 
+  if (!roleId) {
+    return (
+      <div className="px-4 sm:px-6 lg:px-8 py-16 mx-auto w-full max-w-6xl text-center text-gray-400 text-sm">
+        暂无活跃角色，请先在角色配置中激活一个角色
+      </div>
+    )
+  }
+  if (charLoading) {
+    return (
+      <div className="px-4 py-6 sm:px-6 lg:px-8 mx-auto w-full max-w-6xl">
+        <div className="h-40 rounded-xl bg-white/30 animate-pulse" />
+      </div>
+    )
+  }
   if (!activeCharacter) {
     return (
       <div className="px-4 sm:px-6 lg:px-8 py-16 mx-auto w-full max-w-6xl text-center text-gray-400 text-sm">
-        暂无活跃角色，请先创建或激活角色
+        未找到角色（{roleId}）——可能已被删除
       </div>
     )
   }

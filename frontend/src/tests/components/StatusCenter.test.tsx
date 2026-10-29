@@ -1,15 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import StatusCenter from '../../pages/StatusCenter'
 import { useAuthStore } from '../../store/authStore'
 import { useGlobalViewStore } from '../../store/globalViewStore'
 
 // ── hoisted mock fns ──
-const { mockUseActiveCharacter, mockUseDashboard, mockUseEmotionState, mockUseMemoryFacts, mockUseAchievements, mockUseEmotionTrend, mockUseEmotionDistribution, mockClientGet } = vi.hoisted(
+const { mockUseActiveCharacter, mockUseUnifiedCharacter, mockUseDashboard, mockUseEmotionState, mockUseMemoryFacts, mockUseAchievements, mockUseEmotionTrend, mockUseEmotionDistribution, mockClientGet } = vi.hoisted(
   () => ({
     mockUseActiveCharacter: vi.fn(),
+    mockUseUnifiedCharacter: vi.fn(),
     mockUseDashboard: vi.fn(),
     mockUseEmotionState: vi.fn(),
     mockUseMemoryFacts: vi.fn(),
@@ -22,6 +23,7 @@ const { mockUseActiveCharacter, mockUseDashboard, mockUseEmotionState, mockUseMe
 
 vi.mock('../../hooks/useQueries', () => ({
   useActiveCharacter: () => mockUseActiveCharacter(),
+  useUnifiedCharacter: (id?: string) => mockUseUnifiedCharacter(id),
   useDashboard: () => mockUseDashboard(),
   useEmotionState: () => mockUseEmotionState(),
   useMemoryFacts: () => mockUseMemoryFacts(),
@@ -56,13 +58,17 @@ const FAKE_STATS = {
   training: { status: 'idle', progress: 0, loss: 0 },
 }
 
-function renderWithQuery(ui: React.ReactNode) {
+function renderWithQuery(ui: React.ReactNode, path = '/roles/char-001/status') {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>{ui}</MemoryRouter>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/roles/:roleId/status" element={ui} />
+        </Routes>
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -99,6 +105,7 @@ describe('StatusCenter', () => {
       return Promise.resolve({ data: {} })
     })
     mockUseActiveCharacter.mockReturnValue({ activeCharacter: null })
+    mockUseUnifiedCharacter.mockReturnValue({ data: undefined, isLoading: false })
     mockUseDashboard.mockReturnValue({ data: undefined, isLoading: false })
     mockUseEmotionState.mockReturnValue({ data: undefined })
     mockUseMemoryFacts.mockReturnValue({ data: undefined })
@@ -107,13 +114,14 @@ describe('StatusCenter', () => {
     mockUseEmotionDistribution.mockReturnValue({ data: undefined })
   })
 
-  it('shows empty state when no active character', () => {
+  it('URL 角色不存在 → 显式「未找到角色」（NEW-8：不再静默回退别的角色）', () => {
     renderWithQuery(<StatusCenter />)
-    expect(screen.getByText('暂无活跃角色，请先创建或激活角色')).toBeDefined()
+    expect(screen.getByText(/未找到角色/)).toBeDefined()
+    expect(screen.getByText(/char-001/)).toBeDefined()
   })
 
   it('renders emotion, affinity level and memory count', async () => {
-    mockUseActiveCharacter.mockReturnValue({ activeCharacter: FAKE_CHARACTER })
+    mockUseUnifiedCharacter.mockReturnValue({ data: FAKE_CHARACTER, isLoading: false })
     mockUseDashboard.mockReturnValue({ data: FAKE_STATS, isLoading: false })
     mockUseEmotionState.mockReturnValue({ data: undefined })
     mockUseMemoryFacts.mockReturnValue({ data: undefined })
@@ -127,7 +135,7 @@ describe('StatusCenter', () => {
   })
 
   it('renders recent memories from facts', () => {
-    mockUseActiveCharacter.mockReturnValue({ activeCharacter: FAKE_CHARACTER })
+    mockUseUnifiedCharacter.mockReturnValue({ data: FAKE_CHARACTER, isLoading: false })
     mockUseDashboard.mockReturnValue({ data: FAKE_STATS, isLoading: false })
     mockUseEmotionState.mockReturnValue({ data: undefined })
     mockUseMemoryFacts.mockReturnValue({
@@ -144,7 +152,7 @@ describe('StatusCenter', () => {
   })
 
   it('renders achievements card with unlocked count', () => {
-    mockUseActiveCharacter.mockReturnValue({ activeCharacter: FAKE_CHARACTER })
+    mockUseUnifiedCharacter.mockReturnValue({ data: FAKE_CHARACTER, isLoading: false })
     mockUseDashboard.mockReturnValue({ data: FAKE_STATS, isLoading: false })
     mockUseEmotionState.mockReturnValue({ data: undefined })
     mockUseMemoryFacts.mockReturnValue({ data: [] })
@@ -168,7 +176,7 @@ describe('StatusCenter', () => {
   })
 
   it('shows empty state when no facts', () => {
-    mockUseActiveCharacter.mockReturnValue({ activeCharacter: FAKE_CHARACTER })
+    mockUseUnifiedCharacter.mockReturnValue({ data: FAKE_CHARACTER, isLoading: false })
     mockUseDashboard.mockReturnValue({ data: FAKE_STATS, isLoading: false })
     mockUseEmotionState.mockReturnValue({ data: undefined })
     mockUseMemoryFacts.mockReturnValue({ data: [] })
@@ -180,7 +188,7 @@ describe('StatusCenter', () => {
 
   // ── NEW-5①（2026-10-29）：affinity 是 0-8 档位序数，旧实现按 0-100 刻度表换算恒「陌生」 ──
   it('affinity_name 在契约内时直读档名，不再按 0-100 刻度表换算', async () => {
-    mockUseActiveCharacter.mockReturnValue({ activeCharacter: FAKE_CHARACTER })
+    mockUseUnifiedCharacter.mockReturnValue({ data: FAKE_CHARACTER, isLoading: false })
     mockUseDashboard.mockReturnValue({
       data: { ...FAKE_STATS, affinity: 6, affinity_name: '恋人' },
       isLoading: false,
@@ -197,7 +205,7 @@ describe('StatusCenter', () => {
 
   // ── V2-6③：情景归档时间线渲染纯日期 ──
   it('情景归档时间线渲染纯日期，不泄漏 user_key|character_id 键', async () => {
-    mockUseActiveCharacter.mockReturnValue({ activeCharacter: FAKE_CHARACTER })
+    mockUseUnifiedCharacter.mockReturnValue({ data: FAKE_CHARACTER, isLoading: false })
     mockUseDashboard.mockReturnValue({ data: FAKE_STATS, isLoading: false })
     mockUseEmotionState.mockReturnValue({ data: undefined })
     mockUseMemoryFacts.mockReturnValue({ data: [] })
@@ -234,7 +242,7 @@ describe('StatusCenter admin 全局视图归属标注', () => {
       return Promise.resolve({ data: {} })
     })
 
-    mockUseActiveCharacter.mockReturnValue({ activeCharacter: FAKE_CHARACTER })
+    mockUseUnifiedCharacter.mockReturnValue({ data: FAKE_CHARACTER, isLoading: false })
     mockUseDashboard.mockReturnValue({ data: FAKE_STATS, isLoading: false })
     mockUseEmotionState.mockReturnValue({ data: undefined })
     mockUseAchievements.mockReturnValue({ data: undefined })

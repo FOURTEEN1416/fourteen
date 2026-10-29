@@ -262,7 +262,7 @@ describe('SettingsVoice', () => {
     expect(screen.getByText(/角色设置中绑定个人音色/)).toBeDefined()
   })
 
-  it('admin 点击音色仍调用全局切换 switch-voice（既有链路钉住）', async () => {
+  it('admin 点击音色 → 全局切换确认弹窗 → 确认后调 switch-voice（NEW-14②：作用域明示）', async () => {
     setAuthUser('admin')
     render(<SettingsVoice />)
 
@@ -271,6 +271,10 @@ describe('SettingsVoice', () => {
     })
 
     fireEvent.click(screen.getByText('我的克隆音色'))
+    // 先出确认弹窗（全局作用域提示），确认后才真正切换
+    expect(await screen.findByText('设为全局默认音色')).toBeDefined()
+    expect(mockMimoSwitchVoice).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '设为全局默认' }))
     await waitFor(() => {
       expect(mockMimoSwitchVoice).toHaveBeenCalledWith('vc_cloned_1')
     })

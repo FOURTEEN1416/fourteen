@@ -517,3 +517,106 @@ async def test_post_user_key_numeric_unbound_is_400(api, hm_file):
                           json={"user_key": str(_VIEWER_ID), "typo_rate": 1})
     assert r.status_code == 400, r.text
     assert hm_file.exists() is False or "user_humanize" not in _humanize_block(hm_file)
+
+
+# ═══════════════════════════════════════════════════════════
+# NEW-34（2026-10-29）：用户自助拟人节奏 /api/user/humanize
+# 作用域键服务端从 token 派生（绑定还原，不猜键）；未绑定 → GET 全局视图 / 写 400
+# ═══════════════════════════════════════════════════════════
+
+
+async def test_user_self_unbound_get_global_post_400(api, hm_file):
+    """未绑定微信：GET 回全局视图（scope=global）；写/清 400 宁拒绝不猜键。"""
+    client, _engine, _app = api
+    r = await client.get("/api/user/humanize", headers=_bearer(_VIEWER_ID))
+    assert r.status_code == 200, r.text
+    assert r.json()["scope"] == "global"
+
+    r2 = await client.post("/api/user/humanize", headers=_bearer(_VIEWER_ID),
+                           json={"typo_rate": 5})
+    assert r2.status_code == 400
+    assert "未绑定" in r2.json()["detail"]
+
+    r3 = await client.delete("/api/user/humanize", headers=_bearer(_VIEWER_ID))
+    assert r3.status_code == 400
+
+
+async def test_user_self_bound_write_read_clear(api, hm_file):
+    """已绑定用户全链路：写覆盖 → 合并视图生效 → 清除回落。"""
+    from api.database import WechatBinding
+
+    client, engine, app = api
+    # 给 viewer 补一条微信绑定（_user_session_key_for 按此还原 N:wxid）
+    engine2 = engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker as _sm
+
+    session_factory = _sm(engine2, expire_on_commit=False)
+    async with session_factory() as session:
+        session.add(WechatBinding(user_id=_VIEWER_ID, wxid="wx_selftest", nickname="selftest"))
+        await session.commit()
+
+    r1 = await client.get("/api/user/humanize", headers=_bearer(_VIEWER_ID))
+    assert r1.status_code == 200
+    body = r1.json()
+    assert body["scope"] == "global"  # 无覆盖行 → 合并视图=全局，但键已在
+    assert body["user_key"].startswith(f"{_VIEWER_ID}:")
+
+    r2 = await client.post("/api/user/humanize", headers=_bearer(_VIEWER_ID),
+                           json={"typo_rate": 7})
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["scope"] == "user"
+
+    r3 = await client.get("/api/user/humanize", headers=_bearer(_VIEWER_ID))
+    assert r3.json()["scope"] == "user"
+    assert r3.json()["config"]["typo_rate"] == 7
+    # 真源落在 user_humanize 覆盖库（conftest 沙箱重定向；scheduler_config.json 只放全局块）
+    import sqlite3 as _sq
+
+    from utils import humanize_config as _hc
+
+    conn = _sq.connect(str(_hc._OVERRIDE_DB_PATH))
+    try:
+        row = conn.execute(
+            "SELECT config FROM user_humanize WHERE user_key = ?",
+            (r1.json()["user_key"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None and 'typo_rate' in row[0]
+
+    r4 = await client.delete("/api/user/humanize", headers=_bearer(_VIEWER_ID))
+    assert r4.status_code == 200
+    assert r4.json()["status"] == "ok"
+
+
+async def test_user_self_ignores_client_user_key(api, hm_file):
+    """🔴 安全语义：客户端自报 user_key 一律忽略（不能借自助端点改别人节奏）。"""
+    from sqlalchemy.ext.asyncio import async_sessionmaker as _sm
+
+    from api.database import WechatBinding
+
+    client, engine, _app = api
+    session_factory = _sm(engine, expire_on_commit=False)
+    async with session_factory() as session:
+        session.add(WechatBinding(user_id=_VIEWER_ID, wxid="wx_selftest2", nickname="selftest2"))
+        await session.commit()
+
+    r = await client.post(
+        "/api/user/humanize",
+        headers=_bearer(_VIEWER_ID),
+        json={"typo_rate": 9, "user_key": "1:evil@im.wechat"},
+    )
+    assert r.status_code == 200, r.text
+    # 写入的是自己派生的键，不是客户端报的键（真源 = user_humanize 覆盖库）
+    import sqlite3 as _sq
+
+    from utils import humanize_config as _hc
+
+    conn = _sq.connect(str(_hc._OVERRIDE_DB_PATH))
+    try:
+        rows = dict(conn.execute("SELECT user_key, config FROM user_humanize").fetchall())
+    finally:
+        conn.close()
+    assert "1:evil@im.wechat" not in rows
+    own_key = f"{_VIEWER_ID}:wx_selftest2"
+    assert own_key in rows and "typo_rate" in rows[own_key]

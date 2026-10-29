@@ -775,6 +775,92 @@ async def clear_humanize_user_override(
     }
 
 
+# ═══════════════════════════════════════════════════════
+# 用户自助拟人节奏（NEW-34，2026-10-29 用户主权裁决 D20-⑤）
+# 「用户需要能够自己进行设置，而不是全站统一」——复用 user_humanize
+# 按用户作用域机制（与 admin 覆盖同一张表、同一套字段校验），键从
+# **token 派生**（服务端还原绑定，绝不接受客户端自报归属）。
+# ═══════════════════════════════════════════════════════
+
+
+@router.get("/api/user/humanize", response_model=HumanizeConfigResponse)
+async def get_my_humanize(
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """读当前用户的合并生效视图（覆盖 → 全局 → 默认）。未绑定微信 → 全局视图。"""
+    user_key = await _user_session_key_for(int(user_id), db)
+    # scope 语义 = 是否存在本人覆盖行（「个人覆盖/跟随全局」徽标真源）；
+    # 已绑定但无覆盖 → 仍是全局视图（user_key 字段供前端判绑定态）。
+    from utils.humanize_config import has_user_override
+
+    return {
+        "status": "ok",
+        "config": _humanize_payload(user_key),
+        "scope": "user" if (user_key and has_user_override(user_key)) else "global",
+        "user_key": user_key or "",
+    }
+
+
+@router.post("/api/user/humanize", response_model=HumanizeConfigResponse)
+@router.put("/api/user/humanize", response_model=HumanizeConfigResponse)
+async def save_my_humanize(
+    req: HumanizeConfigRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """写当前用户自己的拟人度覆盖行（partial merge；字段校验同 admin 面）。
+
+    🔴 安全语义：``req.user_key`` 一律**忽略**——作用域键只从 token 派生，
+    用户不能借该端点改别人的节奏。未绑定微信 → 400（宁拒绝不猜键）。
+    """
+    from utils.humanize_config import write_humanize
+
+    target_key = await _user_session_key_for(int(user_id), db)
+    if not target_key:
+        raise HTTPException(
+            400,
+            "当前账号未绑定微信通道，个人拟人节奏暂不可用（宁拒绝不猜键）",
+        )
+    payload = req.model_dump(exclude_none=True)
+    payload.pop("user_key", None)  # 自助端点忽略客户端归属
+    if payload:
+        try:
+            write_humanize(user_key=target_key, **payload)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        logger.info("用户拟人节奏自助更新: user=%s key=%s: %s", user_id, target_key, payload)
+    return {
+        "status": "ok",
+        "config": _humanize_payload(target_key),
+        "scope": "user",
+        "user_key": target_key,
+    }
+
+
+@router.delete("/api/user/humanize", response_model=HumanizeConfigResponse)
+async def clear_my_humanize(
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """清除自己的拟人度覆盖（回落全局默认；幂等 noop）。"""
+    from utils.humanize_config import clear_humanize_override
+
+    target_key = await _user_session_key_for(int(user_id), db)
+    if not target_key:
+        raise HTTPException(400, "当前账号未绑定微信通道，无个人覆盖可清除")
+    cleared = clear_humanize_override(target_key)
+    return {
+        "status": "ok" if cleared else "noop",
+        "config": _humanize_payload(),
+        "scope": "global",
+        "user_key": "",
+    }
+
+
 class KnowledgeCollectConfigRequest(BaseModel):
     enabled: bool | None = None
     interval_minutes: int | None = Field(default=None, ge=10, le=1440)

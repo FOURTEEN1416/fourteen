@@ -130,8 +130,11 @@ export function useCharacters() {
 
 export function useActiveCharacter() {
   const { data: characters } = useCharacters()
+  // NEW-8（2026-10-29）：不再静默回退 characters[0] —— 旧回退会把公共池卡当
+  // 「当前角色」渲染（情绪/亲密度标注与数据错位）。无活跃角色返回 null，
+  // 消费方显式处理（WeChatPage「尚未选择」/ 心理画像空态）。
   const active = characters?.find(c => c.is_active)
-  return { activeCharacter: active ?? characters?.[0] ?? null, characters: characters ?? [] }
+  return { activeCharacter: active ?? null, characters: characters ?? [] }
 }
 
 export function useDashboard() {

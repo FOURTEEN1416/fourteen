@@ -47,7 +47,7 @@ export default function Sidebar() {
               </div>
             )}
             <div className="space-y-0.5 px-1.5">
-              {group.items.map(({ to, icon: Icon, label, end, badge }) => (
+              {group.items.map(({ to, icon: Icon, label, end, badge, desc }) => (
                 <NavLink
                   key={label + to}
                   to={to}
@@ -66,7 +66,12 @@ export default function Sidebar() {
                   <Icon className="w-4 h-4 shrink-0" />
                   {!collapsed && (
                     <>
-                      <span>{label}</span>
+                      <span className="min-w-0">
+                        <span className="block">{label}</span>
+                        {desc && (
+                          <span className="block text-[10px] font-normal text-gray-400 leading-tight">{desc}</span>
+                        )}
+                      </span>
                       {badge && (
                         <span className="ml-auto text-[9px] rounded px-1 tag-yellow">
                           {badge}

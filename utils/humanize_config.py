@@ -466,6 +466,22 @@ def write_humanize(*, user_key: str | None = None, **partial: Any) -> HumanizeCo
     return read_humanize()
 
 
+def has_user_override(user_key: str) -> bool:
+    """该用户是否有 user_humanize 覆盖行（前端「个人覆盖/跟随全局」徽标真源）。"""
+    uk = str(user_key or "").strip()
+    if not uk:
+        return False
+    try:
+        with closing(_override_conn()) as conn:
+            cur = conn.execute(
+                f"SELECT 1 FROM {OVERRIDE_TABLE} WHERE user_key = ? LIMIT 1", (uk,)
+            )
+            return cur.fetchone() is not None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("查询拟人度覆盖存在性失败 user=%s: %s", uk, e)
+        return False
+
+
 def clear_humanize_override(user_key: str) -> bool:
     """删除该用户的覆盖行（回落全局默认）。返回是否有行被删。"""
     uk = str(user_key or "").strip()
