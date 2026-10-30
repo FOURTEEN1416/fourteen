@@ -1,6 +1,6 @@
 # 代码图谱 — unique-you (唯一的你) **v3.8.36**（2026-10-30 批7 收尾口径）
 
-> **v3.8.36（2026-10-30 批7 收尾 · 本地 16 提交领先 origin、未部署）**：D20 前端全站体验六批（批 1–6：`908db1c` P0 止血 → `38e517c` 契约修复 → `6d57e30` admin 数据面 → `cbdaf96` 首日旅程与教学 → `a91ed34` 个性化与 IA → `69c1d71` 收尾）+ 批 6 对抗验收收编（`69aecd2`：F1 教学页死路由 / F4 公告 XSS scheme 白名单 / F5 毫秒时间戳守卫 + F9 端点口径更正 101→106；`f9ccfd4`：F2 last-admin 删除不变式测试）+ **批 7 四收编**（`d182b6c` NEW-20 高危操作二次确认 / `c6ed735` NEW-31 组件库收编（SubTabBar 删除）/ `65e0fee` NEW-32 设计 token（+`DesignTokens` 守卫测试）/ `9815c27` NEW-22 用户列表排序全页化（sort/sort_dir 白名单 7 键 + `tests/test_admin_users_sort.py` 28 例））。端点 235/197 → **249/205**（+14 全部来自批 1–6 体验面四组；**批 7 零新端点**，NEW-22 仅给既有端点增查询参数）；新增 §4.16。测试口径（主控 2026-10-30 实测）：后端四分块 **4297 通过 / 2 跳过 / 3 个存量失败族**（均 HEAD 对照实证与批 7 无关）+ ruff 0；前端 vitest **342/342（47 文件）** + tsc 0；**突变验红 4/4**。⚠️ 角色卡 42→**41**（`99c89c39.json` 变体已不在盘，gitignore 无轨迹，待主控定性——见 §1.1）。读数见 §1.1。
+> **v3.8.36（2026-10-30 批7 收尾 · 本地全链领先 origin、未部署）**：D20 前端全站体验六批（批 1–6：`908db1c` P0 止血 → `38e517c` 契约修复 → `6d57e30` admin 数据面 → `cbdaf96` 首日旅程与教学 → `a91ed34` 个性化与 IA → `69c1d71` 收尾）+ 批 6 对抗验收收编（`69aecd2`：F1 教学页死路由 / F4 公告 XSS scheme 白名单 / F5 毫秒时间戳守卫 + F9 端点口径更正 101→106；`f9ccfd4`：F2 last-admin 删除不变式测试）+ **批 7 四收编**（`d182b6c` NEW-20 高危操作二次确认 / `c6ed735` NEW-31 组件库收编（SubTabBar 删除）/ `65e0fee` NEW-32 设计 token（+`DesignTokens` 守卫测试）/ `9815c27` NEW-22 用户列表排序全页化（sort/sort_dir 白名单 7 键 + `tests/test_admin_users_sort.py` 28 例））。端点 235/197 → **249/205**（+14 全部来自批 1–6 体验面四组；**批 7 零新端点**，NEW-22 仅给既有端点增查询参数）；新增 §4.16。测试口径（主控 2026-10-30 实测）：后端四分块 **4297 通过 / 2 跳过 / 3 个存量失败族**（均 HEAD 对照实证与批 7 无关）+ ruff 0；前端 vitest **342/342（47 文件）** + tsc 0；**突变验红 4/4**。⚠️ 角色卡 42→**41**（`99c89c39.json` 变体已不在盘，gitignore 无轨迹，待主控定性——见 §1.1）。读数见 §1.1。
 > **结构真源 = AOCI**（`aoci.txt` 卷头 → `aoci.code.txt` 实体条目 **1116 行** → `aoci.meta.txt` 词表）；本文件只保留人读的规模读数、分层骨架与维护指针。**历史版本（v3.8.35 话题状态机/拟人化部署批 / v3.8.34 八项裁决批 / v3.8.33 重建批 / v1.55·v1.54 质量批）要点压缩归档至 `LOG.md` 对应条目，本文件不再逐条保留**。
 > 批次详情、生产取证与历史版本见 `LOG.md`（唯一只追加不覆盖文件）。
 
@@ -15,7 +15,7 @@
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| 仓库 HEAD | **`0520801`**（批 7 文档收口：CODE_GRAPH v3.8.36 + CODEMAPS/HANDOFF/AGENTS/LOG/DELETION_LOG）；**未部署**——本地 **16 提交**领先 `origin/main`（`cdbe546`）= 12 实现（批 1–6 ×6 + 批 6 对抗收编 ×2 + 批 7 ×4）+ 4 文档（LOG×2 / AGENTS×1 / 批 7 文档收口×1）；**工作树干净（0 项）** | `git log --oneline origin/main..HEAD`（验收二轮实跑 = 16）+ `git status --porcelain`（= 0 项） |
+| 仓库 HEAD | **批 7 收口链**（以 `git log -1` 为准；链尾提交 `181e642`）；**未部署**——本地全链领先 `origin/main`（`cdbe546`）（实现 12 + 文档 5 + 测试 1，精确快照见 `LOG.md` 2026-10-30 补记「提交快照」）；**工作树干净（0 项）** | `git log --oneline origin/main..HEAD` + `git status --porcelain`（验收二轮实跑，工作树 = 0 项） |
 | API 业务端点 | **249 `APIRoute` / 205 条唯一路径**；`len(app.routes)` = **253**（含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`） | `create_api_app()` 内省（本批实跑，`AI_GF_ENV=dev`）：`len([r for r in app.routes if isinstance(r, APIRoute)])` = **249**；唯一路径 **205**。较 v3.8.35 的 235/197 增 **14**——全部来自批 1–6 体验面：`POST /api/user/llm-config/test` ×1 + `/api/user/humanize` ×4（NEW-34）+ `/api/announcements` ×2 + `/api/admin/announcements` ×4（V2-5）+ `/api/admin/audit` + `/api/admin/global-view` ×2（NEW-21/V2-1）；**批 7 零新端点**（NEW-22 仅增查询参数） |
 | 方法分布 | **118 GET / 90 POST / 18 PUT / 23 DELETE** | 同上，按 `route.methods` 计数（本批实跑） |
 | 路由挂载 | 字面 **22 处 `app.include_router(`**（其中 1 处在 `_mount_required_router` 辅助函数内 `:361`）+ **9 处 `_mount_required_router(...)` 调用** → 运行期路由挂载点 **30 处**；另加 `setup_shisi` 一处（`api/app_factory.py:297-302`） | `grep -c "app\.include_router(" api/app_factory.py` = 22；`grep -c "_mount_required_router("` = 10（含 def，本批实跑）。公告双挂载 `announcement_router`/`announcement_admin_router` @ `:276-277`；`topic_state_router` @ `:273` |
@@ -427,7 +427,7 @@ tools/
 - **拆条**：`utils/humanize_delivery.py`（114 行）2–4 段 + 段间节奏，两投递点共用。
 - **API**：`GET/POST/PUT /api/humanize/config`（`training_routes.py:677-735`）+ **`DELETE` 清除用户覆盖**（`:741-756`，G-2，`clear_humanize_override`）——即 §4.2 端点 +1 的来源；观测日志 `[humanize][step=…]`。
 
-### 4.16 D20 前端全站体验批（批 1–7；本地 16 提交领先 origin、未部署）
+### 4.16 D20 前端全站体验批（批 1–7；本地全链领先 origin、未部署）
 
 **背景**：2026-10-29 用户实测控制台报障四件（管理员视角全量裸渲 / 角色归属错认 / 前端太复杂 / 无导引公告）→ 审计工作流 `dwfrun-a50aa227`（80 发现 + 40 项 backlog，报告真源 `docs/reports/2026-10-28-frontend-ux-audit.md`）→ `DECISION_LEDGER` **D20 八裁决** → 六批计划全开工 → 批 6 对抗验收收编 → 批 7 四收编。逐批详情见 `LOG.md` 2026-10-29/30 条目。
 
@@ -458,7 +458,7 @@ tools/
 
 **测试口径（主控 2026-10-30 实测）**：后端四分块 **4297 通过 / 2 跳过 / 3 个存量失败族**（§1.1 注，均 HEAD 对照实证与批 7 无关）+ ruff 0；前端 vitest **342/342（47 文件）** + tsc 0；**突变验红 4/4**（M1 排序闸 / M2 停用确认 / M3 token 回潮 / M4 Button 收编）。新依赖 **driver.js `^1.10.2`**（MIT，教学导览；shepherd.js / intro.js 因 AGPL 商业双许可排除）。
 
-**遗留登记**：① **部署未做**——本地 16 提交领先 origin（12 实现 + 4 文档），三端统一铁律下随用户裁决；② `README.md:11` 徽章 4508 → **4640** 待收口批同步（CODEMAPS 六件 / HANDOFF / AGENTS v1.61 / LOG / DELETION_LOG 已随 `0520801` 落账）；③ 扫码弹窗 playwright e2e spec 未做（以 fake-timers 组件测试替代钉住）；④ 批 6 遗留 NEW-22/20/31/32 已于批 7 清零；⑤ 3 个存量失败族待专项批。
+**遗留登记**：① **部署未做**——本地全链领先 origin（12 实现 + 4 文档），三端统一铁律下随用户裁决；② `README.md:11` 徽章 4508 → **4640** 待收口批同步（CODEMAPS 六件 / HANDOFF / AGENTS v1.61 / LOG / DELETION_LOG 已随 `0520801` 落账）；③ 扫码弹窗 playwright e2e spec 未做（以 fake-timers 组件测试替代钉住）；④ 批 6 遗留 NEW-22/20/31/32 已于批 7 清零；⑤ 3 个存量失败族待专项批。
 
 ---
 
@@ -492,7 +492,7 @@ tools/
 
 | 风险 | 严重度 | 位置 | 建议 / 现状 |
 |------|--------|------|-------------|
-| **D20 批 1–7 未部署（16 提交本地领先）** | **中** | 本地 HEAD `0520801` vs `origin/main` `cdbe546` | 批 1–7 全量（体验面 + 14 端点 + 4 表 + last-admin 删除守卫）只在本地；三端统一铁律下部署随用户裁决；收口同步面 = README 徽章 4640（其余 CODEMAPS/HANDOFF/AGENTS/LOG 已随 `0520801` 落账） |
+| **D20 批 1–7 未部署（全链本地领先）** | **中** | 批 7 收口链（链尾 `181e642`）vs `origin/main` `cdbe546` | 批 1–7 全量（体验面 + 14 端点 + 4 表 + last-admin 删除守卫）只在本地；三端统一铁律下部署随用户裁决；收口同步面 = README 徽章 4640（其余 CODEMAPS/HANDOFF/AGENTS/LOG 已随 `0520801` 落账） |
 | **降级质量悬崖** | **高（产品级）** | `llm_provider/multi_provider_gateway.py` + `config/llm_providers.json` | agnes 超时 40s、熔断阈值 2 / 冷却 120s 在位。**未解决**：供应商侧抖动仍在；`c3ede77` 批观察记录：同窗口 agnes 40s 超时×2（18:13:05/18:13:33）→ 单轮 78.28s 延迟，zhipu 降级均接住、消息未丢（证据在 `LOG.md`）。三个候选方向（降级切同档位模型 / 降级轮走保守短回复 / 降低降级轮 prompt 复杂度）**用户裁决 2026-10-28 继续挂起（先不急）** |
 | ~~话题仍是原话锚点~~ → **已根治** | — | `utils/topic_state.py` + `proactive/topic_recall.py` | **`3fe2771` 话题状态机已上线（§4.12）**：确定性状态机 + 每 4 轮稀疏 judge + parked 三重闸 + 7 天 TTL；原 `_extract_user_anchor_sentences`（`prompt_sanitize.py:308`）仍保留作锚点补充。**新观察项**：生产 judge 触发率与 parked 复提质量待运行观察（生产 `topic_plan` 已有真实计划行） |
 | **骰子闸默认关闭（无生产行为影响）** | 低 | `proactive/frequency.py:180-193` + `scheduler.py:1576-1592` | `enabled=False` + `dry_run=True` 为出厂契约；开启后先干跑记账。回退开关 `DICE_GATE_PRODUCTION_WIRED=False`；scheduler.py 例外已由用户裁决接受（`dd3b470`）。生产启用时机待用户裁决 |
@@ -539,7 +539,7 @@ tools/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
-| **v3.8.36** | **2026-10-30** | **批 7 收尾口径（D20 前端全站体验批 1–6 + 批 6 对抗收编 + 批 7 四收编；本地 16 提交领先 origin、未部署）**：新增 §4.16；端点 **235/197 → 249/205**（+14：misc +1 / training +4 / announcements +6 / admin +3；批 7 零新端点）；方法分布 113/85/16/21 → **118/90/18/23**；路由挂载 28 → **30**（公告双挂载 `:276-277`）；域路由 25 → **26**（+`announcement_routes`）；Python tracked 589/159,543 → **594/161,346**；api 49 → **51**（+`audit.py` / `announcement_routes.py`）；frontend/src 138 → **154**；页面 19 → **20**（+HelpGuidePage `/help`）；API 模块 15 → **16**（+announcements）；store 5 → **6**（+globalViewStore）；测试文件 266 → **269**（+3）；主控实测后端 **4297 通过 / 2 跳过 / 3 存量失败族**（均 HEAD 对照实证）+ 前端 **342/47** + ruff 0 + tsc 0 + 突变验红 4/4；徽章口径 **4508 → 4640**（README 同步归收口批）；users.db 口径新增 **14 表**（+4）；⚠️ 角色卡 42 → **41** 漂移登记。 |
+| **v3.8.36** | **2026-10-30** | **批 7 收尾口径（D20 前端全站体验批 1–6 + 批 6 对抗收编 + 批 7 四收编；本地全链领先 origin、未部署）**：新增 §4.16；端点 **235/197 → 249/205**（+14：misc +1 / training +4 / announcements +6 / admin +3；批 7 零新端点）；方法分布 113/85/16/21 → **118/90/18/23**；路由挂载 28 → **30**（公告双挂载 `:276-277`）；域路由 25 → **26**（+`announcement_routes`）；Python tracked 589/159,543 → **594/161,346**；api 49 → **51**（+`audit.py` / `announcement_routes.py`）；frontend/src 138 → **154**；页面 19 → **20**（+HelpGuidePage `/help`）；API 模块 15 → **16**（+announcements）；store 5 → **6**（+globalViewStore）；测试文件 266 → **269**（+3）；主控实测后端 **4297 通过 / 2 跳过 / 3 存量失败族**（均 HEAD 对照实证）+ 前端 **342/47** + ruff 0 + tsc 0 + 突变验红 4/4；徽章口径 **4508 → 4640**（README 同步归收口批）；users.db 口径新增 **14 表**（+4）；⚠️ 角色卡 42 → **41** 漂移登记。 |
 | v3.8.35 | 2026-10-28 | 工作区整理批：话题状态机 `3fe2771`（§4.12）/ 拟人化 v1.57（§4.15）/ 四项跟进 + CI 修复 + hotfix 整本回扫；新增 §4.13 骰子闸 / §4.14 行为蒸馏；端点 231/195→235/197；收集 4263（266 文件）/ 4256+2+4；徽章 4508；store 4→5（+topicState）。要点归档 `LOG.md` 2026-10-28 条。 |
 | v3.8.34 | 2026-10-21 | 八项裁决批：R4 真流式（`utils/stream_guard.py`）/ R3 工具记忆结合 / R6 黄金集立项（45 条用例）/ R7 模式显式切换按用户隔离 / 轮次 LLM 预算总账 / provider `stream_enabled` / RAG 去重 / AOCI 补全 1116 行；端点 231/195；收集 3900（工作树在制品口径）。 |
 | v3.8.33 及更早 | 2026-07 ~ 10-20 | 重建批、窗口死寂批（v1.52）、时间感知 3.0（v1.53）、聊天质量两批（v1.54/v1.55）等——一律见 `LOG.md` 对应日期条目。 |
