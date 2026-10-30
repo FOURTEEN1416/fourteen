@@ -93,7 +93,21 @@ function VoiceList({
       </h3>
       <div className="rounded-xl border border-gray-200 bg-white/60 p-4">
         {loading ? (
-          <p className="py-6 text-center text-sm text-gray-400">加载中...</p>
+          // NEW-31：加载态统一为结构化骨架（范式 = SettingsLLM 的 loading 分支）。
+          // 骨架**就地替换卡片内容**：外层已有一张 rounded-xl border 卡片，
+          // 再套 glass-card（或给占位行加描边盒子）都会形成「第二层卡片容器」。
+          // 所以这里只有灰条 + 间距，没有任何边框/背板盒子。
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="status" aria-label="加载可用语音">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+                <span className="h-4 w-4 shrink-0 animate-pulse rounded bg-gray-200/60" />
+                <span className="flex-1 space-y-1.5">
+                  <span className="block h-3 w-1/2 animate-pulse rounded bg-gray-200/60" />
+                  <span className="block h-2 w-3/4 animate-pulse rounded bg-gray-200/40" />
+                </span>
+              </div>
+            ))}
+          </div>
         ) : voices.length === 0 ? (
           <p className="py-6 text-center text-sm text-gray-400">暂无可用语音</p>
         ) : (

@@ -1,7 +1,7 @@
 import { useNavigate, Link } from 'react-router-dom'
 import { useMemo, useState } from 'react'
 import { Plus, Search, Sparkles, AlertTriangle, Gift, X } from 'lucide-react'
-import AnimatedPage from '../components/shared/AnimatedPage'
+import { AnimatedPage, Skeleton, EmptyState } from '../components/shared'
 import { useUnifiedCharacters, queryKeys } from '../hooks/useQueries'
 import { activateCharacter } from '../api/characters'
 import { useQueryClient } from '@tanstack/react-query'
@@ -182,9 +182,18 @@ export default function RolesPage() {
           )}
 
           {isLoading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            // NEW-31：加载态收敛到 shared/Skeleton 拼装（不再手写 animate-pulse 灰块），
+            // 骨架形状贴近真实卡片：标题一行 + 描述两行 + 底部标签/操作区。
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" role="status" aria-label="加载角色列表">
               {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="glass-card rounded-2xl p-4 h-40 animate-pulse bg-white/30" />
+                <div key={i} className="glass-card rounded-2xl p-4 h-40 flex flex-col gap-3">
+                  <Skeleton className="h-4 w-2/3" />
+                  <Skeleton className="h-3 w-full" count={2} />
+                  <div className="mt-auto flex gap-1">
+                    <Skeleton className="h-4 w-12" />
+                    <Skeleton className="h-4 w-10" />
+                  </div>
+                </div>
               ))}
             </div>
           ) : isError ? (
@@ -199,28 +208,31 @@ export default function RolesPage() {
               </button>
             </div>
           ) : characters.length === 0 ? (
-            <div className="glass-card rounded-2xl p-8 text-center text-gray-400">
-              <Sparkles className="w-10 h-10 mx-auto mb-3 text-gray-400" />
-              <p className="text-sm">暂无角色</p>
-              {/* NEW-16：初始角色分发失败的静默分支——给一句显式引导（不阻断注册） */}
-              <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-gray-400">
-                注册时如未自动分配初始角色，可在这里创建一个开始使用
-              </p>
-              <div className="mt-4 flex items-center justify-center gap-2">
-                <button
-                  onClick={() => navigate('/roles/create')}
-                  className="btn-macaron rounded-xl px-5 py-2 text-xs font-medium"
-                >
-                  创建角色
-                </button>
-                {/* NEW-10：空态并列模板入口 */}
-                <Link
-                  to="/templates"
-                  className="rounded-xl border border-macaron-blue/40 px-5 py-2 text-xs font-medium text-macaron-blue-deep hover:bg-macaron-blue-light/30 transition-colors"
-                >
-                  从模板挑一个
-                </Link>
-              </div>
+            // NEW-31：空态收敛到 shared/EmptyState（icon/title/description/action 四槽位），
+            // 外层的 glass-card 材质保留——EmptyState 只负责排版，不携带背板。
+            <div className="glass-card rounded-2xl">
+              <EmptyState
+                icon={<Sparkles className="w-10 h-10" />}
+                title="暂无角色"
+                description="注册时如未自动分配初始角色，可在这里创建一个开始使用"
+                action={
+                  <div className="flex items-center justify-center gap-2">
+                    <button
+                      onClick={() => navigate('/roles/create')}
+                      className="btn-macaron rounded-xl px-5 py-2 text-xs font-medium"
+                    >
+                      创建角色
+                    </button>
+                    {/* NEW-10：空态并列模板入口 */}
+                    <Link
+                      to="/templates"
+                      className="rounded-xl border border-macaron-blue/40 px-5 py-2 text-xs font-medium text-macaron-blue-deep hover:bg-macaron-blue-light/30 transition-colors"
+                    >
+                      从模板挑一个
+                    </Link>
+                  </div>
+                }
+              />
             </div>
           ) : (
             <>

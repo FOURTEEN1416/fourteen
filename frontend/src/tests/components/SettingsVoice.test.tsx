@@ -221,8 +221,43 @@ describe('SettingsVoice', () => {
 
     render(<SettingsVoice />)
 
-    // Voice list should show loading indicator
-    expect(screen.getByText('加载中...')).toBeDefined()
+    // NEW-31：加载态由纯文字改为结构化骨架（role=status + aria-label 供读屏与测试定位）
+    const skeleton = screen.getByRole('status', { name: '加载可用语音' })
+    expect(skeleton).toBeDefined()
+    // 旧文案不再出现（无「加载中...」纯文字态）
+    expect(screen.queryByText('加载中...')).toBeNull()
+    // 骨架 = 多条占位块，不是一行字
+    expect(skeleton.querySelectorAll('.animate-pulse').length).toBeGreaterThanOrEqual(4)
+  })
+
+  it('加载骨架就地替换卡片内容，不新增第二层卡片容器', async () => {
+    mockGetSpeakers.mockReturnValue(new Promise(() => {}))
+    mockMimoStatus.mockReturnValue(new Promise(() => {}))
+
+    render(<SettingsVoice />)
+
+    const skeleton = screen.getByRole('status', { name: '加载可用语音' })
+    // 骨架的直接父节点就是那张既有 rounded-xl border 卡片（双层描边会在这里暴露）
+    const card = skeleton.parentElement as HTMLElement
+    expect(card.className).toContain('rounded-xl')
+    expect(card.className).toContain('border')
+    // 骨架自身不是一张卡片（没有圆角描边包装）
+    expect(skeleton.className).not.toContain('rounded-xl')
+    expect(skeleton.className).not.toContain('border')
+    // 卡片之外不得再有第二层「圆角描边」容器，也不得出现 glass-card 背板链
+    const outerCards: string[] = []
+    let node: HTMLElement | null = card.parentElement
+    while (node) {
+      if (/\brounded-xl\b/.test(node.className) || node.classList.contains('glass-card')) {
+        outerCards.push(node.className)
+      }
+      node = node.parentElement
+    }
+    expect(outerCards).toEqual([])
+    expect(skeleton.closest('.glass-card')).toBeNull()
+    // 骨架内部同样不得出现描边盒子（占位行曾是 rounded-lg border border-gray-100，
+    // 那是列表项造型、不构成卡片；但为避免「第二层卡片容器」的口径歧义，现在只留灰条）
+    expect(skeleton.querySelectorAll('[class*="border"]').length).toBe(0)
   })
 
   // ── Test 8: W7 — engine 卡片点击不再发送 engine 名给 set-engine ──

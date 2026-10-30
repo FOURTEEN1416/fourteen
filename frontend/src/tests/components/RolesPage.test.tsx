@@ -103,3 +103,63 @@ describe('RolesPage 查询错误态', () => {
     expect(refetch).toHaveBeenCalledTimes(1)
   })
 })
+
+// ── NEW-31（2026-10-30）：加载态收敛 shared/Skeleton + 空态收敛 shared/EmptyState ──
+describe('RolesPage 加载态与空态收编', () => {
+  const renderPage = () =>
+    render(
+      <Shell qc={new QueryClient()}>
+        <MemoryRouter>
+          <RolesPage />
+        </MemoryRouter>
+      </Shell>,
+    )
+
+  it('加载态用 shared/Skeleton 拼装（不再手写 animate-pulse 灰块），带 role=status', () => {
+    mockUseUnifiedCharacters.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isError: false,
+      refetch: vi.fn(),
+    })
+    const { container } = renderPage()
+
+    const grid = screen.getByRole('status', { name: '加载角色列表' })
+    // 4 张卡 × (标题 1 + 描述 2 + 底部 2) 条骨架
+    expect(container.querySelectorAll('.animate-skeleton').length).toBeGreaterThanOrEqual(16)
+    // 旧实现是整卡 animate-pulse 灰块——Skeleton 走的是 animate-skeleton 关键帧
+    expect(grid.querySelectorAll('.animate-pulse').length).toBe(0)
+  })
+
+  it('空态用 shared/EmptyState，且两个动作与 NEW-16 引导文案都在', async () => {
+    mockUseUnifiedCharacters.mockReturnValue({
+      data: { characters: [] },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+    const { container } = renderPage()
+
+    expect(await screen.findByText('暂无角色')).toBeDefined()
+    // EmptyState 的 action 槽位承载两个入口（能力入口不因收编而消失）
+    expect(screen.getByRole('button', { name: '创建角色' })).toBeDefined()
+    expect(screen.getByRole('link', { name: '从模板挑一个' })).toBeDefined()
+
+    const description = screen.getByText('注册时如未自动分配初始角色，可在这里创建一个开始使用')
+    // ── 以下四条钉住「确实换成了 shared/EmptyState」，旧手写块会全红 ──
+    // ① 描述走 EmptyState 的 description 槽位样式（旧手写是 mx-auto/max-w-sm/leading-relaxed）
+    expect(description.className).toContain('max-w-[200px]')
+    expect(description.className).not.toContain('max-w-sm')
+    // ② 空态根节点是 EmptyState 的居中骨架（py-12 + items-center），不再是手写 p-8 块
+    const root = description.parentElement as HTMLElement
+    expect(root.className).toContain('py-12')
+    expect(root.className).toContain('items-center')
+    expect(root.className).toContain('text-center')
+    // ③ 旧手写空态的标记消失：p-8 容器与 mx-auto 图标
+    expect(container.querySelector('.p-8')).toBeNull()
+    expect(container.querySelector('.mx-auto.mb-3')).toBeNull()
+    // ④ 标题走 EmptyState 的 title 槽位样式（旧是裸 <p className="text-sm">）
+    expect(screen.getByText('暂无角色').className).toContain('font-medium')
+    expect(screen.getByText('暂无角色').className).not.toContain('text-sm text-gray-500')
+  })
+})
