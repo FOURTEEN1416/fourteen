@@ -151,6 +151,8 @@ body::before {
       明度阶梯，不靠加大模糊半径，故不是烂大街毛玻璃；
    ③ mat-floating 浮动层（侧栏/弹窗/下拉）：全站的玻璃特权只给真正悬浮之物
       （Apple 的克制：设置页内容面几乎实色，玻璃只当导航层）。
+   ④ 材质归属登记（NEW-32）：面包屑=mat-raised（常驻文档流，不悬浮、不折光）；
+      只有真正脱离文档流的浮层才可用 mat-floating。
    旧类名 glass-card/paper-card 全部保留并升级——48 个调用文件零改动即受益。 */
 .glass-card,
 .paper-card {

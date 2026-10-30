@@ -13,10 +13,13 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   viewer: '观察者',
 }
 
+// 角色徽章配色收编到 index.css 的 tag 三族（NEW-32）：
+// rose/pink/indigo 是 EMOTION_COLORS 情绪数据色的保留色相，不得复用为身份色；
+// 身份/设定=海盐蓝、关系/情感=暖黄、风格/行为=薄荷青，与 Tag 语义一致。
 const ROLE_BADGE: Record<UserRole, string> = {
-  admin: 'bg-rose-50 text-rose-600 ring-1 ring-rose-200/50',
-  editor: 'bg-amber-50 text-amber-600 ring-1 ring-amber-200/50',
-  viewer: 'bg-sky-50 text-sky-600 ring-1 ring-sky-200/50',
+  admin: 'tag-yellow',
+  editor: 'tag-blue',
+  viewer: 'tag-mint',
 }
 
 // ════════════════════════════════════════════════════

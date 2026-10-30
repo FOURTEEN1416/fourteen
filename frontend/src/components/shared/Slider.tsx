@@ -38,15 +38,15 @@ export default function Slider({ label, value, min = 0, max = 1, step = 0.01, to
           disabled={disabled}
           onChange={(e) => onChange(parseFloat(e.target.value))}
           className="w-full h-1.5 appearance-none bg-gray-200/70 rounded-full cursor-pointer
-            accent-primary-400
+            accent-accent-400
             [&::-webkit-slider-thumb]:appearance-none
             [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4
             [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full
             [&::-webkit-slider-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.15)]
-            [&::-webkit-slider-thumb]:hover:shadow-[0_0_0_4px_rgba(34,208,223,0.15)]
+            [&::-webkit-slider-thumb]:hover:shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-accent-400)_15%,transparent)]
             [&::-webkit-slider-thumb]:transition-shadow"
           style={{
-            background: `linear-gradient(to right, #22d0df ${pct}%, rgba(0,0,0,0.08) ${pct}%)`,
+            background: `linear-gradient(to right, var(--color-accent-400) ${pct}%, rgba(0,0,0,0.08) ${pct}%)`,
           }}
         />
       </div>

@@ -115,7 +115,10 @@ export default function Breadcrumb() {
       <AnnouncementBanner />
       {/* V2-1：admin 全局运维视图开启时常驻横幅（越权视角必须有可见标识） */}
       <GlobalViewBanner />
-      <nav className="mat-floating border-x-0 border-t-0 rounded-none px-4 sm:px-6 py-3 flex items-center gap-2 text-sm" aria-label="面包屑导航">
+      {/* NEW-32：面包屑是常驻文档流的顶部导航条，不属「悬浮之物」——
+          材质改 mat-raised（材质语义清单 index.css 已登记），黏合边缘仍走
+          rounded-none / border-x-0 / border-t-0 覆写。 */}
+      <nav className="mat-raised border-x-0 border-t-0 rounded-none px-4 sm:px-6 py-3 flex items-center gap-2 text-sm" aria-label="面包屑导航">
         {/* 移动端汉堡按钮：唤起全量导航抽屉（入口与桌面 Sidebar 一致） */}
         <button
           onClick={() => setDrawerOpen(true)}

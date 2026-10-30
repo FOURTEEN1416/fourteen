@@ -15,7 +15,8 @@ import ConfirmDialog from '../shared/ConfirmDialog'
 import StorylineEditor from '../storyline/StorylineEditor'
 import type { RoleSettingsTab, RoleSettingsCharacter } from '../../types/framework'
 import type { UnifiedCharacterUpdate } from '../../types/api'
-import { Save, Trash2, Copy } from 'lucide-react'
+import { Save, Trash2, Copy, Flame, CircleCheck, CircleAlert, Sun, Theater, Bird, HeartCrack, BrickWall } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { ENGINE_OPTIONS, MIMO_MODELS } from './RoleSettingsConstants'
 import { PERSONALITY_LABELS, SPEAKING_STYLE_LABELS, normalizePersonality, normalizeSpeakingStyle } from '../../constants/persona'
 import { enrichCharacter, proactiveGetConfig, proactiveHistory, proactivePause, updateProactiveConfig, knowledgeCollectConfig, updateKnowledgeCollectConfig } from '../../api/system'
@@ -25,6 +26,27 @@ import Section from './RoleSettingsSection'
 import HumanizeSection from './HumanizeSection'
 import TopicStateSection from './TopicStateSection'
 import KnowledgePreview from '../storyline/KnowledgePreview'
+
+// ═══ 性格特质图标（NEW-32：全站图标统一 lucide，不再混用 emoji） ═══
+
+const PERSONALITY_ICONS: Record<string, LucideIcon> = {
+  warmth: Sun,
+  playfulness: Theater,
+  independence: Bird,
+  jealousy: HeartCrack,
+  stubbornness: BrickWall,
+}
+
+// ═══ 统计小卡（NEW-32：同文件两份统计样式收敛为唯一组件） ═══
+
+function StatCard({ label, value, tone, small }: { label: string; value: string; tone: string; small?: boolean }) {
+  return (
+    <div className="text-center p-3 rounded-xl bg-gray-50 border border-gray-100">
+      <p className={`font-bold ${small ? 'text-xs mt-1' : 'text-lg'} ${tone}`}>{value}</p>
+      <p className="text-[11px] text-gray-400 mt-0.5">{label}</p>
+    </div>
+  )
+}
 
 // ═══ Tab: Basic ═══
 
@@ -113,21 +135,17 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
       <Section title="性格特质">
         <div className="space-y-4">
           {(Object.entries(personality) as [string, number][]).map(([key, val]) => {
-            const emoji: Record<string, string> = {
-              warmth: '☀️',
-              playfulness: '🎭',
-              independence: '🦅',
-              jealousy: '💢',
-              stubbornness: '🧱',
-            }
-            const info = { zh: PERSONALITY_LABELS[key] || key, emoji: emoji[key] || '' }
+            const Icon = PERSONALITY_ICONS[key]
             return (
               <div key={key} className="flex items-center gap-4">
                 <div className="w-20 shrink-0">
-                  <span className="text-xs text-gray-600">{info.emoji} {info.zh}</span>
+                  <span className="text-xs text-gray-600 inline-flex items-center gap-1">
+                    {Icon ? <Icon className="w-3 h-3 shrink-0" aria-hidden /> : null}
+                    {PERSONALITY_LABELS[key] || key}
+                  </span>
                 </div>
                 <div className="flex-1">
-                  <Slider value={val} min={0} max={1} step={0.01} label={info.zh} onChange={v => setPersonality((prev: Record<string, number>) => ({ ...prev, [key]: v }))} />
+                  <Slider value={val} min={0} max={1} step={0.01} label={PERSONALITY_LABELS[key] || key} onChange={v => setPersonality((prev: Record<string, number>) => ({ ...prev, [key]: v }))} />
                 </div>
                 <span className="w-10 text-right text-xs font-mono text-gray-400">{(val * 100).toFixed(0)}</span>
               </div>
@@ -1122,15 +1140,8 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
           真实统计（会话×角色口径计数）另立功能批。 */}
       <Section title="消息统计">
         <div className="grid grid-cols-2 gap-4">
-          {[
-            { label: '今日主动', value: String(todayCount), color: 'text-green-600' },
-            { label: '最后发送', value: lastAt, color: 'text-gray-600', small: true },
-          ].map(s => (
-            <div key={s.label} className="text-center p-3 rounded-xl bg-gray-50">
-              <p className={`font-bold ${s.small ? 'text-xs mt-1' : 'text-lg'} ${s.color}`}>{s.value}</p>
-              <p className="text-[11px] text-gray-400 mt-0.5">{s.label}</p>
-            </div>
-          ))}
+          <StatCard label="今日主动" value={String(todayCount)} tone="text-green-600" />
+          <StatCard label="最后发送" value={lastAt} tone="text-gray-600" small />
         </div>
       </Section>
 
@@ -1429,7 +1440,10 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
                   增强中...
                 </>
               ) : (
-                <>🔥 开始网络增强</>
+                <>
+                  <Flame className="w-3.5 h-3.5" aria-hidden />
+                  开始网络增强
+                </>
               )}
             </button>
             <span className="text-xs text-gray-400">
@@ -1443,8 +1457,18 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
           )}
           {enrichResult && (
             <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-3 py-2 text-xs space-y-1">
-              <div className="font-medium">
-                {enrichResult.status === 'enriched' ? '✅ 增强成功' : '⚠️ 未写入新知识块'}
+              <div className="font-medium inline-flex items-center gap-1">
+                {enrichResult.status === 'enriched' ? (
+                  <>
+                    <CircleCheck className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                    增强成功
+                  </>
+                ) : (
+                  <>
+                    <CircleAlert className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                    未写入新知识块
+                  </>
+                )}
               </div>
               <div>找到文档：{enrichResult.documents_found} 篇</div>
               <div>生成知识块：{enrichResult.chunks_added} 块</div>
