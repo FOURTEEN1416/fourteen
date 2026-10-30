@@ -1,6 +1,6 @@
 # 数据库地图
 
-**最近更新:** 2026-10-28（v1.58 话题状态机三表 + R7 `user_reply_mode` 增补；`data/sqlite.db` 本地只读亲测 **35 张**（含 `sqlite_sequence` 内部表与 5 张 `user_facts_fts*` 影子表）= **29 张业务表**；schema 真源合计 **32 张** = 29 已定义业务表 + 3 张 topic 表（惰性建表，本地未触发首次写入故不在实测数内；**生产已实测在位**且 `topic_plan` 有真实计划行），见下方清单注记；`api/database.py` 9 模型同日复核一致）
+**最近更新:** 2026-10-30（批1–7 全链复核：`api/database.py` 模型 9→**13**（批3 +`operator_audit`/`operator_prefs`、批4 +`announcements`/`announcement_reads`），批5–7 零 schema 变更；`utils/topic_state.py` 三表 `_SCHEMA` 逐列抄实仍有效；下述 2026-10-28 库实测口径延续有效）
 **数据库:** SQLite (主, aiosqlite) + ChromaDB (向量) + 文件系统 (角色卡/知识库)
 
 > **✅ 2026-09-29 全仓历遍复核（三库实测）**：`data/users.db` **9 表**（api/database.py 模型；+`user_active_characters` W1 `94ed63d` 激活归属唯一 owner；`users.id` AUTOINCREMENT 表重建 + 引擎级 `PRAGMA foreign_keys=ON`，W9）；`data/sqlite.db` **27 张**（不含 FTS 影子表；较 09-20 口径 +`memory_extraction_progress`/`fact_deletion_watermarks`/`memory_forwards`/`user_persona`/`user_persona_snapshots`/`user_profile`，旧清单中 `sessions`/`working_memory`/`emotion_trajectory`/`pending_events`/`affinity_log` 五死表已不存在）；`data/runtime_plane.db` **8 表**（W3 运行平面跨进程 CAS 账，WAL）。文件账：`data/lifecycle_jobs/`（W9 五阶段作业账+坟场）、`data/runtime_switches.json`（W6 工具开关）、`data/voice_catalog.json`（W7 音色）、`config/character_templates.yaml`（W12 策展清单）。
@@ -17,7 +17,7 @@
 │  ┌────────────────────┐   ┌──────────────────────┐      │
 │  │ 用户 & 会话 (主库)  │   │ RAG 嵌入向量存储      │      │
 │  │ data/users.db      │   │ data/chroma_db/      │      │
-│  │ 9 表 (见下)         │   │ - 文档嵌入            │      │
+│  │ 13 表 (见下)        │   │ - 文档嵌入            │      │
 │  │                    │   │ - 情景记忆 (单 collection， │
 │  │                    │   │   隔离缺口见 FUNCTION_      │
 │  │                    │   │   INVENTORY 差距表)        │
@@ -42,7 +42,7 @@
 
 ---
 
-## SQLite 模型 (api/database.py，9 表)
+## SQLite 模型 (api/database.py，13 表)
 
 > 数据库连接由 `api/runtime_config.py:get_database_url()` 解析，默认 `sqlite+aiosqlite:///data/users.db`。
 > 若设置 `DATABASE_URL` / `APP_DATABASE_URL` 环境变量，可切换为 PostgreSQL/MySQL（同步驱动自动转异步）。
@@ -71,7 +71,7 @@
 | is_active | Boolean, default=True | 是否有效 |
 | expires_at / created_at / last_used_at | DateTime | 时间戳 |
 
-### 其余 7 表
+### 其余 11 表
 
 | 模型 | 表名 | 说明 |
 |------|------|------|
@@ -82,14 +82,18 @@
 | **WechatPeerPreference** | wechat_peer_preferences | **已退役（D16，2026-10-12）**：原 09-19「通道内好友自选角色」(owner_user_id, peer_wxid) → character_card_id；读写消费者已清零，表保留历史数据（lifecycle/删卡级联仍引用防孤儿），物理处置归 schema 批 |
 | CharacterAchievement | character_achievements | 角色成就（ADR-0014，10 成就×4 类，幂等重算） |
 | **UserActiveCharacter** | user_active_characters | **激活角色归属唯一 owner**（W1 `94ed63d`）：每用户当前激活卡，替代散落的激活状态字段 |
+| **OperatorAudit** | operator_audit | **操作员审计**（批3 NEW-21）：管理端敏感操作留痕（操作者/动作/对象/时间），审计面板数据源 |
+| **OperatorPref** | operator_prefs | **运维视图偏好**（批3 V2-1）：admin 数据面默认收窄 + 全局运维视图开关的按操作员持久化 |
+| **Announcement** | announcements | **公告**（批4 V2-5）：公告 CRUD（admin），active 读面供顶栏横幅 |
+| **AnnouncementRead** | announcement_reads | **公告已读**（批4 V2-5）：(user_id, announcement_id) 已读标记 |
 
 ### shisi 业务表 (shisi/migrations.py，12 张)
 
 `characters` / `characters_v2` / `affinity_records` / `affinity_unlocks` / `affinity_audit` / `emotion_stage_state` / `stickers` / `character_stickers` / `vital_signs_state` / `memory_favorites` / `memory_recycle_bin` / `shisi_schema_version`
 
 > **注意:** `shisi/` 子系统使用独立 SQLite 异步访问（DDD 分层: affinity/emotion_stage/persona/stats/vital_signs）。
-> `api/database.py` 中的 **9 表**是用户认证与控制面模型（`users` / `user_sessions` / `invite_codes` /
-> `consent_records` / `wechat_bindings` / `wechat_channel_sessions` / `wechat_peer_preferences` / `character_achievements` / `user_active_characters`）。
+> `api/database.py` 中的 **13 表**是用户认证与控制面模型（`users` / `user_sessions` / `invite_codes` /
+> `consent_records` / `wechat_bindings` / `wechat_channel_sessions` / `wechat_peer_preferences` / `character_achievements` / `user_active_characters` / `operator_audit` / `operator_prefs` / `announcements` / `announcement_reads`，2026-10-30 逐类 grep 亲测）。
 
 ### `data/sqlite.db` 全量表清单（schema 真源合计 32 张；本地库只读实测 29 张业务表，2026-10-28，不含 FTS 影子表与 `sqlite_sequence`）
 

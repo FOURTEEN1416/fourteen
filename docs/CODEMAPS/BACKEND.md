@@ -1,8 +1,8 @@
 # 后端地图
 
-> **✅ 2026-10-28 口径刷新**：`create_api_app()` 内省亲测（AI_GF_ENV=dev）——**235 APIRoute / `len(app.routes)`=239**（113 GET / 85 POST / 16 PUT / 21 DELETE）。较 10-12 口径 226 净增 **9** = v1.58 话题状态机 `topic_routes` +3（GET/POST `/api/topic-state/config`、GET `/api/topic-state/{session_key}`）+ v1.57 拟人化 `/api/humanize/config` +4（GET/PUT/POST/DELETE，DELETE 清除按用户覆盖）+ v1.56 R7 `/api/user/reply-mode` +2（GET/POST）；`training_routes` 13→**19**。骰子闸（4C）**无新端点**——挂在 `/api/proactive/config` GET/POST 的 `dice_gate` 块（`api/routers/training_routes.py:332` 读 / `:481` 写，owner=`proactive/frequency.py`）。生产 @ **`c3ede77`**。权威口径以 `CODE_GRAPH.md` 为准。更早增量（10-12/09-29）见 git 历史。
+> **✅ 2026-10-30 口径刷新**：`create_api_app()` 内省亲测（AI_GF_ENV=dev）——**249 APIRoute / 205 唯一路径 / `len(app.routes)`=253**（**118 GET / 90 POST / 18 PUT / 23 DELETE**；4 条框架路由=`/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`）。较 10-28 口径 235 净增 **14** = 批4 announcements 6 + 批3 global-view 2 + audit 1 + 批5 llm-config/test 1 + humanize 4；**批7 零新端点**（NEW-22 为 `GET /api/admin/users` 的 `sort`/`sort_dir` 查询参数扩展，400 行·内白名单 Literal 校验 + `_USER_SORT_COLUMNS` asc/desc 双列排序，非法值 422）。admin_routes 5→**8**（批3 并入 global-view×2+audit）。生产 @ **`c3ede77`**（批1–7 本地链 `9815c27` 未部署）。权威口径以 `CODE_GRAPH.md` 为准。更早增量（10-28/10-12/09-29）见 git 历史。
 
-**最近更新:** 2026-10-28
+**最近更新:** 2026-10-30
 **版本:** 3.1.0
 **入口文件:** `api/run_api.py`, `api/app_factory.py`, `main.py`, `orchestrator/`
 
@@ -11,16 +11,18 @@
 ## 架构分层
 
 ```
-api/ (49 py 文件)            ← FastAPI 路由层
+api/ (51 py 文件)            ← FastAPI 路由层
 ├── run_api.py              ← 启动入口 (uvicorn + flock 调度器单例/微信连接自动恢复)
 ├── app_factory.py          ← APP 工厂 (create_api_app) — 唯一构造入口
 ├── auth.py                 ← X-API-Key 认证依赖
 ├── auth_jwt.py             ← JWT 认证 (bcrypt + python-jose)
-├── database.py             ← SQLAlchemy 模型 9 个 (User/InviteCode/UserSession/
+├── database.py             ← SQLAlchemy 模型 13 个 (User/InviteCode/UserSession/
 │                             UserActiveCharacter/ConsentRecord/WechatBinding/
 │                             WechatChannelSession/WechatPeerPreference/
-│                             CharacterAchievement，详见 CODEMAPS/DATABASE.md)
+│                             CharacterAchievement/OperatorAudit/OperatorPref/
+│                             Announcement/AnnouncementRead，详见 CODEMAPS/DATABASE.md)
 ├── achievement_engine.py   ← 成就引擎 (ADR-0014，10 成就×4 类幂等重算)
+├── audit.py                ← 操作员审计 (批3 NEW-21)
 ├── lifecycle.py            ← W9 五阶段作业账
 ├── deps.py                 ← 依赖注入
 ├── health_routes.py        ← 健康检查路由 (/api/health, /api/ready) + /api/metrics（W10 多 worker 聚合）— 前两者无需认证
@@ -31,10 +33,10 @@ api/ (49 py 文件)            ← FastAPI 路由层
 ├── session_manager.py      ← 会话管理
 ├── state/                  ← safety_log / tool_history / training_state
 │
-└── routers/                ← 路由模块 (25 个，不含 __init__.py)
+└── routers/                ← 路由模块 (26 个，不含 __init__.py)
     ├── character_routes.py   (21 endpoints，tag=character)
-    ├── misc_routes.py        (16，含 /api/user/llm-config GET/POST、日记种子、reply_mode 配置)
-    ├── training_routes.py    (19，training/* + proactive/* + /api/user/reply-mode GET/POST（R7）+ /api/humanize/config GET/PUT/POST/DELETE（v1.57）；proactive/config GET/POST 含 dice_gate 块（4C 骰子闸，无独立端点）)
+    ├── training_routes.py    (23，training/* 5 + proactive/* 6（state/config×2/pause/send/history，config 含 reply_mode 与 dice_gate 块 4C）+ knowledge/collect-config×2 + /api/user/reply-mode GET/POST R7 + /api/humanize/config 4 v1.57 + **/api/user/humanize GET/POST/PUT/DELETE 批5**)
+    ├── misc_routes.py        (17，stats/dashboard/meta + diary seed/diary/facts + important-dates×2 + logs×2 + config×2 + user/llm-config×2 + **llm-config/test 批5** + channels + routes)
     ├── auth_routes.py        (13，register/login/refresh/logout/me/change-password/admin reset + consent 状态机 + W9 自服务 consent/status|withdraw、account/delete|export(+chats))
     ├── safety_routes.py      (12，safety/rag/voice/files/cache)
     ├── chat_routes.py        (11，chat/session + wechat channels；旧全局微信端点已收敛 admin 兼容面)
@@ -43,6 +45,8 @@ api/ (49 py 文件)            ← FastAPI 路由层
     ├── wechat_routes.py      (8，wechat/*；另有 qrcode_store 1 端点独立挂载)
     ├── clone_routes.py       (8)
     ├── knowledge_routes.py   (8，knowledge/* + enrich)
+    ├── admin_routes.py       (8，**批7 NEW-22 用户列表 sort/sort_dir 白名单排序全页化**；users CRUD + global-view×2 + audit，delete 接 lifecycle)
+    ├── announcement_routes.py (6，批4 V2-5 公告：active 读面 2 + admin CRUD 4，落 operator_audit)
     ├── users_routes.py       (7)
     ├── topic_routes.py       (3，v1.58 话题状态机管理端：GET/POST /api/topic-state/config（热读/partial merge 热写，越界 400/422）+ GET /api/topic-state/{session_key}（只读快照）；admin 门槛，/config 注册序先于 /{session_key} 为硬约束)
     ├── tools_routes.py       (6，system/tools + plugins/*)
@@ -52,7 +56,6 @@ api/ (49 py 文件)            ← FastAPI 路由层
     ├── llm_providers_routes.py (6，admin)
     ├── agent_plane_routes.py (5，agent-plane/*，admin 门槛)
     ├── memory_routes.py      (5，/api/characters/{id}/favorites* 收藏/转发回执，桥接 shisi Favorite/ForwardManager)
-    ├── admin_routes.py       (5，admin/users* CRUD，delete 接 lifecycle)
     ├── invite_routes.py      (4，register-invite 独立路由+独立 TokenResponse + admin/invites*)
     ├── persona_card_routes.py (3)
     ├── emotion_routes.py     (2，emotion/params/*)
@@ -70,13 +73,13 @@ api/ (49 py 文件)            ← FastAPI 路由层
 
 ---
 
-## API 端点清单（模块级，2026-10-28 内省亲测 235——按 handler 所属文件）
+## API 端点清单（模块级，2026-10-30 内省亲测 249——按 handler 所属文件）
 
 | 模块文件 | 端点数 | 路径 |
 |------|------|------|
 | character_routes | 21 | /api/characters/*, /api/presets/*（含 .png 导入/导出） |
-| misc_routes | 16 | /api/stats, /api/dashboard, /api/memory/facts, /api/logs*, /api/config, /api/user/llm-config, /api/channels, /api/routes, /api/memory/diary* |
-| training_routes | 19 | /api/training/*, /api/proactive/*（config 含 reply_mode 与 **dice_gate 块（4C 骰子闸）**、send/pause/history）+ /api/user/reply-mode GET/POST（R7 按用户覆盖）+ /api/humanize/config GET/PUT/POST/DELETE（v1.57，DELETE 清除按用户覆盖） |
+| training_routes | 23 | /api/training/* 5, /api/proactive/* 6（config 含 reply_mode 与 **dice_gate 块（4C 骰子闸）**、send/pause/history）+ /api/knowledge/collect-config×2 + /api/user/reply-mode GET/POST（R7）+ /api/humanize/config 4（v1.57）+ **/api/user/humanize GET/POST/PUT/DELETE（批5 自助端点）** |
+| misc_routes | 17 | /api/stats, /api/stats/dashboard, /api/meta, /api/memory/diary*（seed/diary）, /api/characters/{id}/important-dates×2, /api/memory/facts, /api/logs*, /api/config×2, /api/user/llm-config×2, **/api/user/llm-config/test（批5 BYOK 反馈环）**, /api/channels, /api/routes |
 | auth_routes | 13 | /api/auth/*：register/login/refresh/logout/me/change-password/admin reset + consent(AGREEMENT_VERSION) + W9 自服务 consent/status、consent/withdraw、account/delete、account/export、account/export/chats |
 | safety_routes | 12 | /api/safety/*, /api/rag/*, /api/voice/*, /api/files/*, /api/cache/* |
 | chat_routes | 11 | /api/chat/*, /api/session/*, /api/wechat/status |
@@ -85,6 +88,8 @@ api/ (49 py 文件)            ← FastAPI 路由层
 | clone_routes | 8 | /api/clone/*（含 /api/clone/upload） |
 | knowledge_routes | 8 | /api/characters/{id}/knowledge/*, /api/characters/{id}/enrich |
 | wechat_routes | 8 | /api/wechat/*（另有 qrcode_store 1 端点独立挂载，admin 兼容） |
+| **admin_routes** | **8** | /api/admin/users* CRUD（**批7 NEW-22：`GET /api/admin/users` 增 `sort`/`sort_dir` 白名单 Literal 校验 + `_USER_SORT_COLUMNS` 双列 asc/desc 排序，默认 created_at/desc 与旧行序一致**；`GET /api/admin/users/{id}`）+ **/api/admin/global-view GET/POST（批3 V2-1 全局运维视图）** + **/api/admin/audit GET（批3 NEW-21 操作员审计）**；delete 接 lifecycle |
+| announcement_routes | 6 | **批4 V2-5 公告**：active 读面 2（active/已读标记）+ admin CRUD 4（list/create/update/delete，落 operator_audit） |
 | users_routes | 7 | /api/users/*（admin only） |
 | shisi/api/character_routes | 7 | /api/shisi/characters |
 | **topic_routes (v1.58)** | **3** | **GET/POST /api/topic-state/config**（热读 / partial merge 热写 `scheduler_config.json` 的 `topic_state` 块，越界 400/Pydantic 422；admin 门槛）+ **GET /api/topic-state/{session_key}**（只读快照 active/parked/closed/next_plan；`/config` 注册序先于 `/{session_key}` 为硬约束） |
@@ -93,11 +98,10 @@ api/ (49 py 文件)            ← FastAPI 路由层
 | voice_routes | 6 | /api/character/voice/* |
 | mimo_voice_routes | 6 | /api/mimo/* |
 | storyline_routes | 6 | /api/storyline/* |
-| llm_providers_routes | 6 | /api/llm-providers/*（admin） |
+| llm_providers_routes | 6 | /api/llm-providers/*（admin；批7 NEW-20 高危启停前端二次确认，端点不变） |
 | agent_plane_routes | 5 | /api/agent-plane/*（replay/profile/events/curate/probes，admin 门槛） |
 | shisi/api/sticker_routes | 5 | /api/shisi/stickers |
 | memory_routes (api) | 5 | /api/characters/{id}/favorites*（收藏增删查 + 转发回执） |
-| admin_routes | 5 | /api/admin/users*（用户 CRUD；delete 接 lifecycle） |
 | shisi/api/affinity_routes | 4 | /api/shisi/affinity |
 | invite_routes | 4 | /api/auth/register-invite（独立路由+独立 TokenResponse）+ /api/admin/invites* |
 | health_routes | 3 | /api/health, /api/ready（无认证探活）+ /api/metrics（W10 多 worker 聚合） |
@@ -110,7 +114,7 @@ api/ (49 py 文件)            ← FastAPI 路由层
 | shisi/api/stats_routes | 1 | /api/shisi/stats |
 | app_factory（直挂） | 1 | /api/shisi/status（shisi 域合计 31 = 30 路由 + 本端点） |
 | qrcode_store | 1 | /api/wechat/qrcode |
-| **合计** | **235** | **113 GET / 85 POST / 16 PUT / 21 DELETE**（`len(app.routes)`=239 含 4 条框架路由，2026-10-28 内省亲测） |
+| **合计** | **249** | **118 GET / 90 POST / 18 PUT / 23 DELETE**（205 唯一路径；`len(app.routes)`=253 含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`，2026-10-30 内省亲测） |
 
 ---
 

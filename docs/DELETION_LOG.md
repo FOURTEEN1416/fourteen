@@ -1099,3 +1099,10 @@ equire() in MessageList.tsx even though MessageList is unused
 - **删除前核验**：① 清单全量盘点（62 png + 16 md，md 一律保留）；② `grep -rln "\.png" docs/verification/*.md` 零引用——16 份报告正文自包含，删图不破坏任何链接；③ 抽读 `verify_login_card.png` 确证为页面截图；④ 09-15 事故立案的「受保护审计资产」指该**目录与报告**，截图瘦身经用户显式裁决授权。
 - **可恢复性**：图片永久存在于 git 历史（`git show 0fff013:docs/verification/...` 随时取回），无需另行备份。
 - **效果**：公开仓唯一大批二进制体积负担清除（18MB→0），16 份文字验证报告原样保留。
+
+## 2026-10-30 — shared/SubTabBar 死组件删除（批7 NEW-31 组件库收编）
+
+- **对象**：`frontend/src/components/shared/SubTabBar.tsx`（31 行）+ `shared/index.ts` 导出行，删除提交 `c6ed735`（批7 NEW-31）。
+- **删除前核验**：全仓 grep（frontend/src / frontend/e2e / tests，含 ts/tsx/py）零引用——审计 NEW-31 ① 认定其全站零使用；RoleSettingsTabs 的 URL 真源能力走路由态，不依赖该组件（grep 实证无 import）。
+- **可恢复性**：git 历史随时取回（`git show c6ed735^:frontend/src/components/shared/SubTabBar.tsx`），无需另行备份。
+- **效果**：shared/ 死组件清零；组件库收编为唯一真源（Button/EmptyState/Skeleton/ConfirmDialog/Modal 五件 + SubTabBar 移除）。

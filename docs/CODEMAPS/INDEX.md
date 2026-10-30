@@ -1,10 +1,10 @@
 # 代码地图索引
 
-> **✅ 2026-10-28 批次刷新**：三端一致 **`c3ede77`**（2026-10-28 收口批：话题状态机 `3fe2771` + 四项跟进 `1d444d8`/`5dff923`/`aabc867`/`c0a4d2c` + CI 修复 `165504f` + 沉浸式方括号剥离 hotfix `c3ede77`，全批三端部署）；测试口径 **4263 收集（266 测试文件）/ 4256 通过 + 2 跳过 / 4 失败**（今日全量四分块门实跑；4 失败=骰子闸时区族，根因已由 `165504f` 根治、五文件新鲜复跑 128/128、CI 绿；全量口径必含 `tests/core/` 与 `tests/api/`，分块清单 `find` 递归生成）+ 前端 **251**（36 文件，vitest ^5.0.3，徽章 **4508**）；端点 **235 APIRoute / 197 唯一路径 / 20 include_router**（`len(app.routes)`=239 含 4 条框架路由；2026-10-28 `create_api_app` 内省实测，AI_GF_ENV=dev）；活跃 ADR **12** 不变；.py 总量 **590**（2026-10-28 find 实测，见下行规模行）。权威数字以 `CODE_GRAPH.md` **v3.8.34** 为准。更早刷新（10-12/10-11/09-27~09-29）见 git 历史与 `docs/history/INDEX.md`。
+> **✅ 2026-10-30 批次刷新**：本地 HEAD **`9815c27`**（前端体验批 1–7 链：批1 `908db1c` → 批2 `38e517c` → 批3 `6d57e30` → 批4 `cbdaf96` → 批5 `a91ed34` → 批6 `69c1d71` → 批6 对抗验收收编 `69aecd2`/`f9ccfd4` → **批7 `d182b6c`(NEW-20 高危操作二次确认) → `c6ed735`(NEW-31 组件库收编·SubTabBar 移除) → `65e0fee`(NEW-32 设计 token 统一) → `9815c27`(NEW-22 用户列表排序全页化)**，批1–7 均本地提交未部署）；端点 **249 业务 APIRoute / 205 唯一路径 / `len(app.routes)`=253**（含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`；**118 GET / 90 POST / 18 PUT / 23 DELETE**；2026-10-30 `create_api_app` 内省实测，AI_GF_ENV=dev；批6 净增 14=announcements 6+global-view 2+audit 1+llm-config/test 1+humanize 4，批7 零新端点）；.py 总量 **595**（模块包 **297** + `data/archive/` 1 + 根级 2 + `scripts/` **19** + `tests/` **273**（test_*.py **269**，find/git ls-files 双证）+ `deploy/` 3）；TS/TSX **154**；前端 **20 页面 / 16 API 模块 / 6 stores**；前端测试 **342 用例 / 47 文件**（vitest，342 为主控收口实测、47=src/tests 46 + `components/admin/TopicStateSection.test.tsx` 旁挂 1）；活跃 ADR **12** 不变。权威数字以 `CODE_GRAPH.md` 为准。更早刷新（10-28/10-12/10-11/09-27~09-29）见 git 历史与 `docs/history/INDEX.md`。
 
-**最近更新:** 2026-10-28
+**最近更新:** 2026-10-30
 **项目版本:** 3.1.0
-**项目规模:** **590** 个 Python 文件（模块包 **295** + `data/archive/` 归档遗物 1 + 根级 2 + `scripts/` **19** + `tests/` **270**（test_*.py 266 与 AGENTS 口径一致）+ `deploy/` 3；**2026-10-28 find 实测，顶层分布两窗口互核闭合**；**不含** `frontend/` 与内嵌 `大创赛报名以及后期发展/`） + **138** TS/TSX 文件（frontend/src） | 当前分支: `main`
+**项目规模:** **595** 个 Python 文件（模块包 **297** + `data/archive/` 归档遗物 1 + 根级 2 + `scripts/` **19** + `tests/` **273**（test_*.py **269**，find/git ls-files 双证）+ `deploy/` 3；**2026-10-30 find 实测**；**不含** `frontend/` 与内嵌 `大创赛报名以及后期发展/`） + **154** TS/TSX 文件（frontend/src，2026-10-30 find 实测） | 当前分支: `main`
 **架构框架:** FastAPI (后端) + React/Vite (前端) + SQLite/ChromaDB (数据)
 
 ---
@@ -31,16 +31,16 @@
 | **后端** | Python ≥3.10 + FastAPI + Uvicorn | `:8000` |
 | **数据库** | SQLite (主, aiosqlite) + ChromaDB (向量) | `data/users.db` |
 
-### 项目目录结构（2026-10-28 实测）
+### 项目目录结构（2026-10-30 实测）
 
 ```
 unique-you/
-├── api/                    # FastAPI 路由层 (49 py 文件：app_factory/run_api/25 routers/
+├── api/                    # FastAPI 路由层 (51 py 文件：app_factory/run_api/audit/26 routers/
 │                           #   achievement_engine/database/auth/auth_jwt/deps/
 #                           #   health_routes/main_routes/qrcode_store/websocket_server/state/...)
 ├── shisi/                  # DDD 核心域 (116 py 文件，v2 死模块删除后口径)
 ├── my_character/           # 情感引擎 (12 py 文件)
-├── frontend/               # React 前端 SPA (19 pages / 15 api 模块 / 5 store)
+├── frontend/               # React 前端 SPA (20 pages / 16 api 模块 / 6 stores)
 ├── orchestrator/           # 编排包 (9 文件：主类+init/stream mixin+session_locks+voice_detector
 │                           #   +console_chat+tool_gate+context_budget)
 ├── persona_extractor/      # 人格提取 (13 文件)
@@ -67,7 +67,7 @@ unique-you/
 ├── config/                 # YAML/JSON 配置 + config/characters/ 角色卡库（gitignore；本地实测 42 张
 │                           #   = 41 default 策展卡 + 1 张 user_id=1 林挽夏运行时克隆副本 99c89c39，
 │                           #   2026-10-09 落盘；与 LOG「41 卡」差异注记见 CODEMAPS/DATABASE.md）
-├── tests/                  # 测试 (4256 Python 通过 + 2 跳过 / 4 失败（骰子闸时区族，根因已根治）；收集 4263 / 266 测试文件 + 251 前端)
+├── tests/                  # 测试 (test_*.py **269** 文件=find/git ls-files 双证；前端 342 用例/47 文件；批7 新增 test_admin_users_sort.py 28 例)
 └── docs/                   # 文档
     ├── CODEMAPS/           # ← 本目录
     ├── adr/                # 架构决策记录 (12 篇)
@@ -78,13 +78,13 @@ unique-you/
 
 > `weclone_adapter/` 已于 08-28 删除（克隆收敛为本地提取+JSON 上传，DECISION_LEDGER 08-28 行）。
 
-### 关键指标（2026-10-28 复测）
+### 关键指标（2026-10-30 复测）
 
 | 指标 | 值 |
 |------|-----|
-| API 端点 | **235 业务端点 / 197 唯一路径**（113 GET / 85 POST / 16 PUT / 21 DELETE；20 include_router + setup_shisi，`create_api_app` 内省 2026-10-28 实测（AI_GF_ENV=dev，话题状态机批 `3fe2771` 增 `/api/topic-state/*` 三端点后）；⚠️ `len(app.routes)`=239 含 4 条框架路由） |
-| 前端页面 | 19 页面文件（全部挂载；2026-09-28 新增 TemplatesPage / SettingsAccount） |
-| 测试用例 | **4508 = 4256 Python 通过（2 跳过；收集 4263 / 266 测试文件；4 失败=骰子闸时区族，根因已由 `165504f` 根治、五文件新鲜复跑 128/128、CI 绿）+ 251 前端通过（36 文件）**（口径引 2026-10-28 全量四分块门实跑；⚠️ 随 `config/characters/` 卡数浮动 = 2 × 卡数 + 13，现役 42 张 = 41 策展 + 1 运行时克隆副本，差异注记见 `DATABASE.md`） |
+| API 端点 | **249 业务端点 / 205 唯一路径**（118 GET / 90 POST / 18 PUT / 23 DELETE；20 include_router 口径=19 直接 + `_mount_required_router` 9 条件 + `setup_shisi`，`create_api_app` 内省 2026-10-30 实测（AI_GF_ENV=dev）；较 10-28 口径 235 净增 **14**=批6 announcements 6+global-view 2+audit 1+llm-config/test 1+humanize 4，**批7 零新端点**）；⚠️ `len(app.routes)`=253 含 4 条框架路由（`/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`） |
+| 前端页面 | 20 页面文件（全部挂载；批4 +HelpGuidePage `/help`；2026-10-30 App.tsx 实测） |
+| 测试用例 | 前端 **342 用例 / 47 测试文件**（342=主控收口实测；47=`src/tests` 46 + `components/admin/TopicStateSection.test.tsx` 旁挂 1）+ 后端 test_*.py **269 测试文件**（find/git ls-files 双证；批6 新增 `test_character_behavior_distillation`/`test_proactive_dice_gate`/`test_announcements_api`，批7 新增 `test_admin_users_sort.py` 28 例+`test_admin_routes_last_admin` 扩充）；后端收集/通过口径随收口批主控实跑 |
 | 活跃 ADR | **12**（0001–0007 + 0011–**0015**；0008–0010 空缺未使用） |
 | Fitness Functions | 17 (12 CI + 5 手动) |
 | 总线因子 | 1 (唯一开发者: 默默) |

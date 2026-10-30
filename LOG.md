@@ -4118,3 +4118,16 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **口径**：vitest **303/303（42 文件）**、tsc 0、ruff 0；后端定向 last_admin 4/read_gates 26/w1 23/api_routes 16/humanize 37/announcements 5/llm-config 15/channel_slot 15 全绿。**端点基线**：9 子路由 92→**97**（misc 17/training 23）+ announcements 新路由 6 + admin 3 = 全口径 **106**（对抗验收 F9 更正，原记 101 系算术错误）；**新表 4 张**（operator_audit/operator_prefs/announcements/announcement_reads，纯新增 create_all 幂等）；新依赖 **driver.js（MIT）**。
 - **🔴 实施中发现并纠正**：① NEW-34 测试曾把 user_humanize 覆盖行写进真实 data/sqlite.db 的风险——核实 conftest 已沙箱 `_OVERRIDE_DB_PATH`（无污染，data/sqlite.db 无该表）；② FF-0007 门禁拦截 store 直 import API（批 3）→ store 改纯状态；③ 测试假绿三处连修（幂等行数/断言目标错误/HTTP stub 形状）。
 - **遗留（批 6 收尾未竟，登记）**：① M 级四项未实施——NEW-20（高危操作二次确认三处）/NEW-22（用户列表排序全页化）/NEW-31（组件库收编）/NEW-32（设计 token 统一）；② 扫码弹窗 playwright e2e spec（以 fake-timers 组件测试替代钉住）；③ CODE_GRAPH 整本回扫（v3.8.36）与 CODEMAPS/HANDOFF 真源对齐未做；④ **部署未做**——本地领先 origin 七个实现提交+2 文档提交，三端统一铁律下随用户裁决执行。
+
+## 2026-10-30 — 前端体验批 7·遗留收尾（D20 六批计划 M 级四项清零；本地六提交未部署）· `69aecd2` `f9ccfd4` `d182b6c` `c6ed735` `65e0fee` `9815c27`
+
+- **NEW-20 高危管理操作二次确认**：只对**危险方向**加确认（三处），每处配**后果文案**（写清会影响谁、能不能撤销）；弹窗走 **Modal 顶层 ESC 栈**——嵌套弹窗按 ESC 只关最上层，不误关父层；供应商页加**回退链徽章**（标明降级回退顺序）；**启用/开启路径零摩擦**——恢复能力的操作不设确认，避免「处处弹窗」疲劳。
+- **NEW-22 用户列表排序全页化**：后端 `sort` / `sort_dir` 用 **Literal 白名单 7 键** + `id desc` 作确定性次键（旧实现前端只排当前页 = 伪排序，翻页即失效）；前端改为**透传**参数并删掉本地伪排序；非法键回落默认，不 500。
+- **NEW-31 组件库收编**：`SubTabBar` 组件删除（零消费者；SubTabBar 删除已补 DELETION_LOG）；`ConfirmDialog` 改复用 `Button`；`RolesPage` / `SettingsVoice` 收敛到 `EmptyState` + `Skeleton`（消除各页手写空态/骨架的视觉漂移）。
+- **NEW-32 设计 token 统一**：修四病灶——`Slider` / `UserBadges` / `Breadcrumb` / `RoleSettingsTabs` 的硬编码色值/间距改走 token；新增 **DesignTokens 守卫测试**（扫源码违禁硬编码，防回流）。
+- **提交链**：`69aecd2`（批 6 对抗验收收编 F1/F4/F5 + **F9 口径更正**）→ `f9ccfd4`（F2 测试半件）→ `d182b6c` → `c6ed735` → `65e0fee` → `9815c27`（NEW-22，含 F2 守卫 hunk 随件入账）。
+- **过程要点**：工作流 `dwfrun-d95bc40b` 实施，任务卡复核 **11 条冲突回炉一轮**；主控收编前把窗前停放工件归位，并拆除 F1 测试雷（`HelpGuidePage` 3 用例 mock 修复）；删除过期突变脚本 `_mutation_check.py`（ruff 恢复 0）；**对抗验收发现 2 项已修**——① DELETION_LOG 漏登；② 排序测试断言缺陷（14 红→28 绿）；**突变验红 4/4**。
+- **验证口径**（声明：后端 269 测试文件四分块；工作树干净）：**4296 通过 + 2 跳过 / 3 个存量失败族**——`test_api_routes`（sqlalchemy）/ `test_w10_metrics_multiproc`（503→404）/ `test_w3_scheduler_state`（Depends），三族均以 **HEAD 对照实证非本批引入**，登记待专项批次；ruff 0；前端 **47 文件 342 例全绿**；`tsc` 0；**端点无新增**（NEW-22 仅加查询参数、不增路径；全口径读数以 CODE_GRAPH 回扫为准）。
+- **基线漂移注记（重要）**：AGENTS v1.59.1 版本头的「4 失败=骰子闸时区族」口径**已过期**（那 4 个已由 `165504f` 根治）；当前真实口径是上述 **3 个存量失败族**（与本批无关）。AGENTS v1.61 行已按真实口径重写，后续引用以本条目为准。
+- **遗留（如实登记）**：① **推送与部署未做**——本地六个提交领先 origin，三端统一铁律下随用户裁决；② 登记②扫码 e2e spec 仍开放；③ 3 个存量失败族待专项批次；④ CODE_GRAPH 已回扫至 **v3.8.36**（内省实跑端点 249/205、新增 §4.16 批 7 全景，随收口提交）；**角色卡漂移登记**：现役 **41 张**（`99c89c39.json` 林挽夏变体已不在盘、gitignore 无 git 轨迹、消失时点不明——非本批删除；persona 参数化公式随之为 2×41+13=95），待主控定性。
+- **状态**：批 7 为 M 级四项收尾，D20 六批计划的 M 级遗留至此清零；**未推送、未部署**。

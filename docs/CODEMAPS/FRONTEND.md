@@ -1,9 +1,9 @@
 # 前端地图
 
-> **✅ 2026-10-28 口径刷新**：vitest **251 用例 / 36 文件**（2026-10-28 收口实测全绿，vitest 5 + tsc 0，徽章 4508 口径）；页面 19 / API 模块 15 本批 find 亲测不变；**新增 `store/topicStateStore.ts`（stores 4→5：v1.57 已有 humanizeStore，本批再增话题状态）**、`components/admin/TopicStateSection.tsx`（v1.58 话题状态面板，405 行）与 RoleSettingsTabs 消息 tab 内 **骰子闸配置面**（4C `dice_gate`）；测试文件 30→36。生产 @ `c3ede77`。权威数字以 `CODE_GRAPH.md` 为准。上轮刷新（10-11：vitest 182/30）见 git 历史。
+> **✅ 2026-10-30 口径刷新**：前端测试 **342 用例 / 47 测试文件**（342=主控收口实测；47=`src/tests` 46 + `components/admin/TopicStateSection.test.tsx` 旁挂 1；另有 e2e 5 个 spec）；页面 **20** / API 模块 **16** / stores **6** / TS·TSX **154**（2026-10-30 find 实测）。**批7 三项收编**：NEW-31 组件库收编（**`shared/SubTabBar.tsx` 删除 31 行**，ConfirmDialog/Button/RolesPage/SettingsVoice 统一到 Button+EmptyState+Skeleton）、NEW-32 设计 token 统一（Slider/UserBadges/Breadcrumb/RoleSettingsTabs/index.css + **新增 `DesignTokens.test.tsx`**）、NEW-22 用户列表排序全页化（`api/admin.ts` 增 `sort`/`sort_dir` 参数 + AdminUsersPage 全页排序，服务端白名单）；NEW-20 高危操作二次确认（Modal/UserForm/AdminProvidersPage/SettingsSecurity）。生产 @ `c3ede77`（批1–7 本地链未部署）。权威数字以 `CODE_GRAPH.md` 为准。上轮刷新（10-28：vitest 251/36）见 git 历史。
 > 功能级清单（页-功能点编号）见 `docs/FUNCTION_INVENTORY.md`。
 
-**最近更新:** 2026-10-28
+**最近更新:** 2026-10-30
 **技术栈:** React ^19.0.0 + Vite ^8.0.12 + TypeScript ~6.0.2 + Tailwind CSS ^4.1.0 + Zustand ^5.0.0
 **入口:** `frontend/index.html` → `frontend/src/main.tsx`
 
