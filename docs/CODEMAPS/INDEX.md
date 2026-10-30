@@ -1,6 +1,6 @@
 # 代码地图索引
 
-> **✅ 2026-10-30 批次刷新**：本地 HEAD **`9815c27`**（前端体验批 1–7 链：批1 `908db1c` → 批2 `38e517c` → 批3 `6d57e30` → 批4 `cbdaf96` → 批5 `a91ed34` → 批6 `69c1d71` → 批6 对抗验收收编 `69aecd2`/`f9ccfd4` → **批7 `d182b6c`(NEW-20 高危操作二次确认) → `c6ed735`(NEW-31 组件库收编·SubTabBar 移除) → `65e0fee`(NEW-32 设计 token 统一) → `9815c27`(NEW-22 用户列表排序全页化)**，批1–7 均本地提交未部署）；端点 **249 业务 APIRoute / 205 唯一路径 / `len(app.routes)`=253**（含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`；**118 GET / 90 POST / 18 PUT / 23 DELETE**；2026-10-30 `create_api_app` 内省实测，AI_GF_ENV=dev；批6 净增 14=announcements 6+global-view 2+audit 1+llm-config/test 1+humanize 4，批7 零新端点）；.py 总量 **595**（模块包 **297** + `data/archive/` 1 + 根级 2 + `scripts/` **19** + `tests/` **273**（test_*.py **269**，find/git ls-files 双证）+ `deploy/` 3）；TS/TSX **154**；前端 **20 页面 / 16 API 模块 / 6 stores**；前端测试 **342 用例 / 47 文件**（vitest，342 为主控收口实测、47=src/tests 46 + `components/admin/TopicStateSection.test.tsx` 旁挂 1）；活跃 ADR **12** 不变。权威数字以 `CODE_GRAPH.md` 为准。更早刷新（10-28/10-12/10-11/09-27~09-29）见 git 历史与 `docs/history/INDEX.md`。
+> **✅ 2026-10-30 批次刷新**：本地 HEAD = 批 7 收口链（代码尾 **`9815c27`**，其后为文档收口/验收修正/e2e 基础设施提交；精确链尾以 `git log -1` 为准；前端体验批 1–7 链：批1 `908db1c` → 批2 `38e517c` → 批3 `6d57e30` → 批4 `cbdaf96` → 批5 `a91ed34` → 批6 `69c1d71` → 批6 对抗验收收编 `69aecd2`/`f9ccfd4` → **批7 `d182b6c`(NEW-20 高危操作二次确认) → `c6ed735`(NEW-31 组件库收编·SubTabBar 移除) → `65e0fee`(NEW-32 设计 token 统一) → `9815c27`(NEW-22 用户列表排序全页化)**，批1–7 均本地提交未部署）；端点 **249 业务 APIRoute / 205 唯一路径 / `len(app.routes)`=253**（含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`；**118 GET / 90 POST / 18 PUT / 23 DELETE**；2026-10-30 `create_api_app` 内省实测，AI_GF_ENV=dev；批6 净增 14=announcements 6+global-view 2+audit 1+llm-config/test 1+humanize 4，批7 零新端点）；.py 总量 **595**（模块包 **297** + `data/archive/` 1 + 根级 2 + `scripts/` **19** + `tests/` **273**（test_*.py **269**，find/git ls-files 双证）+ `deploy/` 3）；TS/TSX **154**；前端 **20 页面 / 16 API 模块 / 6 stores**；前端测试 **342 用例 / 47 文件**（vitest，342 为主控收口实测、47=src/tests 46 + `components/admin/TopicStateSection.test.tsx` 旁挂 1）；活跃 ADR **12** 不变。权威数字以 `CODE_GRAPH.md` 为准。更早刷新（10-28/10-12/10-11/09-27~09-29）见 git 历史与 `docs/history/INDEX.md`。
 
 **最近更新:** 2026-10-30
 **项目版本:** 3.1.0
@@ -67,7 +67,7 @@ unique-you/
 ├── config/                 # YAML/JSON 配置 + config/characters/ 角色卡库（gitignore；本地实测 42 张
 │                           #   = 41 default 策展卡 + 1 张 user_id=1 林挽夏运行时克隆副本 99c89c39，
 │                           #   2026-10-09 落盘；与 LOG「41 卡」差异注记见 CODEMAPS/DATABASE.md）
-├── tests/                  # 测试 (test_*.py **269** 文件=find/git ls-files 双证；前端 342 用例/47 文件；批7 新增 test_admin_users_sort.py 28 例)
+├── tests/                  # 测试 (test_*.py **269** 文件=find/git ls-files 双证；前端 342 用例/47 文件；批7 新增 test_admin_users_sort.py 29 例)
 └── docs/                   # 文档
     ├── CODEMAPS/           # ← 本目录
     ├── adr/                # 架构决策记录 (12 篇)
@@ -82,9 +82,9 @@ unique-you/
 
 | 指标 | 值 |
 |------|-----|
-| API 端点 | **249 业务端点 / 205 唯一路径**（118 GET / 90 POST / 18 PUT / 23 DELETE；20 include_router 口径=19 直接 + `_mount_required_router` 9 条件 + `setup_shisi`，`create_api_app` 内省 2026-10-30 实测（AI_GF_ENV=dev）；较 10-28 口径 235 净增 **14**=批6 announcements 6+global-view 2+audit 1+llm-config/test 1+humanize 4，**批7 零新端点**）；⚠️ `len(app.routes)`=253 含 4 条框架路由（`/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`） |
+| API 端点 | **249 业务端点 / 205 唯一路径**（118 GET / 90 POST / 18 PUT / 23 DELETE；挂载口径 **30 挂载点 = 22 处字面 `include_router`（21 直接 + 1 在 `_mount_required_router` 内）+ 9 条件挂载**，另 `setup_shisi` 域路由组；`create_api_app` 内省 2026-10-30 实测（AI_GF_ENV=dev）；较 10-28 口径 235 净增 **14**=批6 announcements 6+global-view 2+audit 1+llm-config/test 1+humanize 4，**批7 零新端点**）；⚠️ `len(app.routes)`=253 含 4 条框架路由（`/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`） |
 | 前端页面 | 20 页面文件（全部挂载；批4 +HelpGuidePage `/help`；2026-10-30 App.tsx 实测） |
-| 测试用例 | 前端 **342 用例 / 47 测试文件**（342=主控收口实测；47=`src/tests` 46 + `components/admin/TopicStateSection.test.tsx` 旁挂 1）+ 后端 test_*.py **269 测试文件**（find/git ls-files 双证；批6 新增 `test_character_behavior_distillation`/`test_proactive_dice_gate`/`test_announcements_api`，批7 新增 `test_admin_users_sort.py` 28 例+`test_admin_routes_last_admin` 扩充）；后端收集/通过口径随收口批主控实跑 |
+| 测试用例 | 前端 **342 用例 / 47 测试文件**（342=主控收口实测；47=`src/tests` 46 + `components/admin/TopicStateSection.test.tsx` 旁挂 1）+ 后端 test_*.py **269 测试文件**（find/git ls-files 双证；批6 新增 `test_character_behavior_distillation`/`test_proactive_dice_gate`/`test_announcements_api`，批7 新增 `test_admin_users_sort.py` 29 例+`test_admin_routes_last_admin` 扩充）；后端收集/通过口径随收口批主控实跑 |
 | 活跃 ADR | **12**（0001–0007 + 0011–**0015**；0008–0010 空缺未使用） |
 | Fitness Functions | 17 (12 CI + 5 手动) |
 | 总线因子 | 1 (唯一开发者: 默默) |

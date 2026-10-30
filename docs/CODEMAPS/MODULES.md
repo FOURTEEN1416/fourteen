@@ -76,11 +76,11 @@
 **入口:** `api/run_api.py` → `api/app_factory.py:create_api_app()`
 
 **结构:**
-- 根目录 22 个: `app_factory.py`（应用工厂）, `run_api.py`（启动入口）, `main_routes.py`（模型/常量/Helper，含 TopicStateConfigRequest）, `health_routes.py`（健康检查）, `auth.py`/`auth_jwt.py`（认证，09-19 起 **JWT 优先**）, `database.py`（SQLAlchemy **13 表**，2026-10-30 逐类 grep 亲测）, `achievement_engine.py`（成就引擎，ADR-0014）, **`audit.py`**（操作员审计，批3 NEW-21）, `lifecycle.py`（W9 五阶段作业账）, `byok.py`（W1 用户自带 Key 强制策略）, `consent.py`（W2 使用即同意协议）, `password_policy.py`（密码策略唯一真源 ≥8 含字母数字）, `deps.py`（依赖注入）, `session_manager.py`, `websocket_server.py`, `qrcode_store.py`, `path_security.py`, `runtime_config.py`, `__init__.py`
+- 根目录 20 个: `app_factory.py`（应用工厂）, `run_api.py`（启动入口）, `main_routes.py`（模型/常量/Helper，含 TopicStateConfigRequest）, `health_routes.py`（健康检查）, `auth.py`/`auth_jwt.py`（认证，09-19 起 **JWT 优先**）, `database.py`（SQLAlchemy **13 表**，2026-10-30 逐类 grep 亲测）, `achievement_engine.py`（成就引擎，ADR-0014）, **`audit.py`**（操作员审计，批3 NEW-21）, `lifecycle.py`（W9 五阶段作业账）, `byok.py`（W1 用户自带 Key 强制策略）, `consent.py`（W2 使用即同意协议）, `password_policy.py`（密码策略唯一真源 ≥8 含字母数字）, `deps.py`（依赖注入）, `session_manager.py`, `websocket_server.py`, `qrcode_store.py`, `path_security.py`, `runtime_config.py`, `__init__.py`
 - `routers/` **26** 个路由模块: `admin_routes`, `agent_plane_routes`, **`announcement_routes`**（批4 V2-5 公告：active 读面 2 + admin CRUD 4）, `auth_routes`, `character_routes`, `character_template_routes`, `chat_routes`, `clone_routes`, `emotion_routes`, `invite_routes`, `knowledge_routes`, `llm_providers_routes`, `memory_routes`, `mimo_voice_routes`, `misc_routes`, `persona_card_routes`, `personality_routes`, `safety_routes`, `storyline_routes`, `topic_routes`（v1.58 话题状态机管理端 3 端点）, `tools_routes`, `training_routes`, `users_routes`, `voice_routes`, `wechat_channel_routes`（每人独立通道，09-19）, `wechat_routes`
 - `state/` 3 个状态模块: `safety_log`, `tool_history`, `training_state`
 
-**实际挂载:** 19 处 `include_router` 直接调用 + `_mount_required_router` 辅助函数挂载 9 个条件 router + `setup_shisi(app)` 装配，共 **249 业务端点 / 205 唯一路径 / `len(app.routes)`=253**（2026-10-30 `create_api_app` 内省亲测，AI_GF_ENV=dev；**118 GET / 90 POST / 18 PUT / 23 DELETE**）
+**实际挂载:** 22 处字面 `include_router`（21 处直接 + 1 处在 `_mount_required_router` 内） + `_mount_required_router` 辅助函数挂载 9 个条件 router + `setup_shisi(app)` 装配，共 **249 业务端点 / 205 唯一路径 / `len(app.routes)`=253**（2026-10-30 `create_api_app` 内省亲测，AI_GF_ENV=dev；**118 GET / 90 POST / 18 PUT / 23 DELETE**）
 **依赖:** shisi, security, llm_provider, database
 
 ---

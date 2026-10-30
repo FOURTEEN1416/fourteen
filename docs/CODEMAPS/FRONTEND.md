@@ -17,7 +17,7 @@ frontend/src/
 ├── App.tsx               ← 路由定义 + 布局
 ├── vite-env.d.ts
 │
-├── api/                  ← API 客户端模块 (15 文件)
+├── api/                  ← API 客户端模块 (16 文件)
 │   ├── client.ts         ← axios 实例 + 拦截器（normalize.ts/emotion.ts 抽离后为纯 re-export 门面）
 │   ├── normalize.ts      ← 响应归一化（09-18 自 client.ts 抽离，FF-0006）
 │   ├── emotion.ts        ← 情绪趋势/分布工具（09-18 自 client.ts 抽离，FF-0006）
@@ -40,7 +40,7 @@ frontend/src/
 │                                SPEAKING_STYLE_LABELS/EMOTION_COLORS/AFFINITY_STAGES，
 │                                09-19「前端写死数据审计」批次新建）
 │
-├── pages/                ← 页面组件 (19 个 .tsx)
+├── pages/                ← 页面组件 (20 个 .tsx)
 │   ├── IntroPage.tsx          ← 产品介绍页 /intro（SP-11，公开静态门面）
 │   ├── LoginPage.tsx          ← 登录页
 │   ├── PsychProfilePage.tsx   ← 心理画像 /psych（09-18 起包 AuthGuard 需登录）
@@ -91,7 +91,6 @@ frontend/src/
 │   │   ├── Select.tsx
 │   │   ├── Skeleton.tsx
 │   │   ├── Slider.tsx
-│   │   ├── SubTabBar.tsx
 │   │   ├── TagInput.tsx
 │   │   ├── Toggle.tsx
 │   │   └── index.ts
@@ -119,7 +118,7 @@ frontend/src/
 │   ├── useMousePosition.ts     ← 鼠标位置
 │   └── useQueries.ts           ← React Query 封装
 │
-├── store/                ← Zustand 状态管理 (5 stores)
+├── store/                ← Zustand 状态管理 (6 stores)
 │   ├── authStore.ts            ← 认证状态
 │   ├── characterBuilderStore.ts← 角色构建器
 │   ├── errorStore.ts           ← 错误状态
