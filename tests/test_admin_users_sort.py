@@ -303,3 +303,44 @@ async def test_tied_created_at_pages_use_id_desc_and_never_duplicate(sort_app):
     assert len(collected) == len(set(collected)) == len(db_rows), "翻页无重复、无缺行"
     tie_in_response = [uid for uid in collected if uid in tie_ids]
     assert tie_in_response == [5, 3, 2], "同 created_at 的行以 id desc 作确定性次键"
+
+
+# ═══════════════════════════════════════════════════════════
+# ⑤ 组合场景：sort × search × role 同用（对抗验收二轮补测）
+# ═══════════════════════════════════════════════════════════
+
+
+async def test_sort_composes_with_search_and_role_filters(sort_app):
+    client, _ = sort_app
+    # role=editor 命中 id=3(charlie/xray) 与 id=5(echo/victor)；search=example 命中全部
+    both = await client.get(
+        "/api/admin/users",
+        params={"role": "editor", "search": "example", "sort": "username", "sort_dir": "asc", "page_size": 100},
+    )
+    assert both.status_code == 200, both.text
+    users = both.json()["users"]
+    assert {u["id"] for u in users} == {3, 5}, "过滤条件必须同时生效"
+    assert [u["username"] for u in users] == ["victor", "xray"], "排序必须在过滤后的结果集上生效"
+
+    # search 命中单行：排序不得破坏过滤结果
+    searched = await client.get(
+        "/api/admin/users",
+        params={"search": "aaron", "sort": "email", "sort_dir": "desc", "page_size": 100},
+    )
+    assert searched.status_code == 200, searched.text
+    assert [u["id"] for u in searched.json()["users"]] == [1]
+
+    # role 过滤 + 跨页 + 排序：逐页拼接 == 一次全量（三者组合口径一致）
+    paged: list[int] = []
+    for page in (1, 2):
+        resp = await client.get(
+            "/api/admin/users",
+            params={"role": "editor", "sort": "created_at", "sort_dir": "asc", "page_size": 1, "page": page},
+        )
+        assert resp.status_code == 200, resp.text
+        paged.extend(u["id"] for u in resp.json()["users"])
+    full = await client.get(
+        "/api/admin/users",
+        params={"role": "editor", "sort": "created_at", "sort_dir": "asc", "page_size": 100},
+    )
+    assert paged == [u["id"] for u in full.json()["users"]], "过滤+排序+分页组合必须与全量排序一致"
