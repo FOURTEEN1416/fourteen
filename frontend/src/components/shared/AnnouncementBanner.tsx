@@ -43,7 +43,9 @@ export default function AnnouncementBanner() {
             {a.content_md && (
               <p className="mt-0.5 whitespace-pre-wrap text-xs leading-relaxed text-gray-500">{a.content_md}</p>
             )}
-            {a.link && (
+            {/* 对抗验收 F4（2026-10-30）：link 只放行站内 / 与 http(s)——
+                javascript:/data: 等 scheme 是存储型 XSS 向量（横幅渲染给全站用户） */}
+            {a.link && /^(https?:\/\/|\/)/.test(a.link) ? (
               a.link.startsWith('/') ? (
                 <Link to={a.link} className="mt-1 inline-block text-xs font-medium text-macaron-blue-deep hover:underline">
                   {a.link_label || '查看详情'} →
@@ -53,7 +55,7 @@ export default function AnnouncementBanner() {
                   {a.link_label || '查看详情'} →
                 </a>
               )
-            )}
+            ) : null}
           </div>
           {a.dismissible && (
             <button

@@ -691,7 +691,11 @@ export function normalizeProactiveHistory(raw: unknown): ProactiveHistoryItem[] 
       at = r.at
     } else {
       const created = typeof r.created_at === 'number' ? r.created_at : Number(r.created_at)
-      if (Number.isFinite(created) && created > 0) at = new Date(created * 1000).toISOString()
+      if (Number.isFinite(created) && created > 0) {
+        // 对抗验收 F5：>1e12 视为毫秒（对齐 WeChatPage last_activity 启发式）——
+        // 秒值恒 <1e12，防上游口径漂移把日期算到公元五万年。
+        at = new Date(created < 1e12 ? created * 1000 : created).toISOString()
+      }
     }
     items.push({ type: String(r.kind ?? r.type ?? ''), message: String(r.message ?? ''), at })
   }

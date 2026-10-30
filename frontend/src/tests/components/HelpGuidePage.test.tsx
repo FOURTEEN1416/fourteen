@@ -4,6 +4,18 @@ import { MemoryRouter } from 'react-router-dom'
 import HelpGuidePage from '../../pages/HelpGuidePage'
 import { useAuthStore } from '../../store/authStore'
 
+// F1（2026-10-30）：HelpGuidePage 经 useActiveCharacter 造 needsRole 条目链接，
+// 本文件无 QueryClientProvider——模块级 mock 该 hook，按用例注入活跃角色。
+const mocks = vi.hoisted(() => ({
+  activeCharacter: null as null | { id: number; is_active: boolean },
+}))
+vi.mock('../../hooks/useQueries', () => ({
+  useActiveCharacter: () => ({
+    activeCharacter: mocks.activeCharacter,
+    characters: mocks.activeCharacter ? [mocks.activeCharacter] : [],
+  }),
+}))
+
 // V2-4（2026-10-29）：功能教学 checklist——全部模块 + 进度按 user 持久化 + 导览重放位。
 // driver.js 的真 DOM 高亮在 jsdom 下不可驱动，只测页面契约（清单/进度/按钮），不测动画。
 
@@ -16,6 +28,7 @@ describe('HelpGuidePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
+    mocks.activeCharacter = null
     useAuthStore.setState({ user: ADMIN_USER } as never)
   })
 
@@ -54,5 +67,32 @@ describe('HelpGuidePage', () => {
     )
     expect(screen.getByTestId('guide-replay-tour')).toBeDefined()
     expect(screen.getByText('新手五步教程 / 免费 Key 申请')).toBeDefined()
+  })
+
+  it('F1：needsRole 条目按活跃角色真 id 造链；无活跃角色回落 /roles 并带提示', () => {
+    // 无活跃角色：死路由不再产生，回落 /roles 且带「先激活一个角色后可直达」
+    const { unmount } = render(
+      <MemoryRouter>
+        <HelpGuidePage />
+      </MemoryRouter>,
+    )
+    const fallback = screen
+      .getAllByRole('link')
+      .find((a) => a.getAttribute('href') === '/roles' && a.getAttribute('title') === '先激活一个角色后可直达')
+    expect(fallback).toBeDefined()
+    unmount()
+
+    // 有活跃角色：/roles/current/* 替换为真 id，不再产出死链
+    mocks.activeCharacter = { id: 5, is_active: true }
+    render(
+      <MemoryRouter>
+        <HelpGuidePage />
+      </MemoryRouter>,
+    )
+    const hrefs = screen.getAllByRole('link').map((a) => a.getAttribute('href'))
+    expect(hrefs).toContain('/roles/5/settings')
+    expect(hrefs).toContain('/roles/5/status')
+    expect(hrefs).toContain('/roles/5/storyline')
+    expect(hrefs.some((h) => h?.startsWith('/roles/current/'))).toBe(false)
   })
 })

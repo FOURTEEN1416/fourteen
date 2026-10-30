@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { driver } from 'driver.js'
 import 'driver.js/dist/driver.css'
 import AnimatedPage from '../components/shared/AnimatedPage'
+import { useActiveCharacter } from '../hooks/useQueries'
 import { useAuthStore } from '../store/authStore'
 import { CircleCheck, Circle, Compass, BookOpen } from 'lucide-react'
 
@@ -113,6 +114,9 @@ function loadProgress(userId: number | undefined): Record<string, boolean> {
 
 export default function HelpGuidePage() {
   const user = useAuthStore(s => s.user)
+  // 对抗验收 F1（2026-10-30）：needsRole 条目的「前往」此前产出 /roles/settings 等
+  // 不存在路由（必落 NotFound）——改用活跃角色真 id 造链，无活跃角色回落 /roles。
+  const { activeCharacter } = useActiveCharacter()
   const [done, setDone] = useState<Record<string, boolean>>(() => loadProgress(user?.id))
   const [tourActive, setTourActive] = useState(false)
 
@@ -216,7 +220,14 @@ export default function HelpGuidePage() {
                 <p className="mt-0.5 text-xs leading-relaxed text-gray-500">{item.desc}</p>
               </div>
               <Link
-                to={item.to.startsWith('/roles/current/') ? item.to.replace('/current', '') : item.to}
+                to={
+                  item.to.startsWith('/roles/current/')
+                    ? activeCharacter
+                      ? item.to.replace('/current', `/${activeCharacter.id}`)
+                      : '/roles'
+                    : item.to
+                }
+                title={item.to.startsWith('/roles/current/') && !activeCharacter ? '先激活一个角色后可直达' : undefined}
                 className="shrink-0 self-center rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 transition-colors"
               >
                 前往
