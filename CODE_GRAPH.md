@@ -1,6 +1,6 @@
 # 代码图谱 — unique-you (唯一的你) **v3.8.36**（2026-10-30 批7 收尾口径）
 
-> **v3.8.36（2026-10-30 批7 收尾 · 本地 15 提交领先 origin、未部署）**：D20 前端全站体验六批（批 1–6：`908db1c` P0 止血 → `38e517c` 契约修复 → `6d57e30` admin 数据面 → `cbdaf96` 首日旅程与教学 → `a91ed34` 个性化与 IA → `69c1d71` 收尾）+ 批 6 对抗验收收编（`69aecd2`：F1 教学页死路由 / F4 公告 XSS scheme 白名单 / F5 毫秒时间戳守卫 + F9 端点口径更正 101→106；`f9ccfd4`：F2 last-admin 删除不变式测试）+ **批 7 四收编**（`d182b6c` NEW-20 高危操作二次确认 / `c6ed735` NEW-31 组件库收编（SubTabBar 删除）/ `65e0fee` NEW-32 设计 token（+`DesignTokens` 守卫测试）/ `9815c27` NEW-22 用户列表排序全页化（sort/sort_dir 白名单 7 键 + `tests/test_admin_users_sort.py` 28 例））。端点 235/197 → **249/205**（+14 全部来自批 1–6 体验面四组；**批 7 零新端点**，NEW-22 仅给既有端点增查询参数）；新增 §4.16。测试口径（主控 2026-10-30 实测）：后端四分块 **4296 通过 / 2 跳过 / 3 个存量失败族**（均 HEAD 对照实证与批 7 无关）+ ruff 0；前端 vitest **342/342（47 文件）** + tsc 0；**突变验红 4/4**。⚠️ 角色卡 42→**41**（`99c89c39.json` 变体已不在盘，gitignore 无轨迹，待主控定性——见 §1.1）。读数见 §1.1。
+> **v3.8.36（2026-10-30 批7 收尾 · 本地 16 提交领先 origin、未部署）**：D20 前端全站体验六批（批 1–6：`908db1c` P0 止血 → `38e517c` 契约修复 → `6d57e30` admin 数据面 → `cbdaf96` 首日旅程与教学 → `a91ed34` 个性化与 IA → `69c1d71` 收尾）+ 批 6 对抗验收收编（`69aecd2`：F1 教学页死路由 / F4 公告 XSS scheme 白名单 / F5 毫秒时间戳守卫 + F9 端点口径更正 101→106；`f9ccfd4`：F2 last-admin 删除不变式测试）+ **批 7 四收编**（`d182b6c` NEW-20 高危操作二次确认 / `c6ed735` NEW-31 组件库收编（SubTabBar 删除）/ `65e0fee` NEW-32 设计 token（+`DesignTokens` 守卫测试）/ `9815c27` NEW-22 用户列表排序全页化（sort/sort_dir 白名单 7 键 + `tests/test_admin_users_sort.py` 28 例））。端点 235/197 → **249/205**（+14 全部来自批 1–6 体验面四组；**批 7 零新端点**，NEW-22 仅给既有端点增查询参数）；新增 §4.16。测试口径（主控 2026-10-30 实测）：后端四分块 **4297 通过 / 2 跳过 / 3 个存量失败族**（均 HEAD 对照实证与批 7 无关）+ ruff 0；前端 vitest **342/342（47 文件）** + tsc 0；**突变验红 4/4**。⚠️ 角色卡 42→**41**（`99c89c39.json` 变体已不在盘，gitignore 无轨迹，待主控定性——见 §1.1）。读数见 §1.1。
 > **结构真源 = AOCI**（`aoci.txt` 卷头 → `aoci.code.txt` 实体条目 **1116 行** → `aoci.meta.txt` 词表）；本文件只保留人读的规模读数、分层骨架与维护指针。**历史版本（v3.8.35 话题状态机/拟人化部署批 / v3.8.34 八项裁决批 / v3.8.33 重建批 / v1.55·v1.54 质量批）要点压缩归档至 `LOG.md` 对应条目，本文件不再逐条保留**。
 > 批次详情、生产取证与历史版本见 `LOG.md`（唯一只追加不覆盖文件）。
 
@@ -15,7 +15,7 @@
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| 仓库 HEAD | **`9815c27`**（批 7 尾：NEW-22 用户列表排序全页化）；**未部署**——本地 **15 提交**领先 `origin/main`（`cdbe546`）= 12 实现（批 1–6 ×6 + 批 6 对抗收编 ×2 + 批 7 ×4）+ 3 文档（LOG×2 / AGENTS×1）；**工作树 5 项在制品**（本图谱自身 + 主控并行收口写入的 AGENTS.md（v1.61）/ LOG.md（批 7 条目）/ docs/HANDOFF_REPORT.md（v1.61）/ docs/DELETION_LOG.md（NEW-31 补登）——**全部 `.md` = B 档文档，业务代码零在制品**） | `git log --oneline origin/main..HEAD`（本批实跑 = 15）+ `git status --porcelain`（本批实跑 = 5 项 `M`，后缀全 `.md`） |
+| 仓库 HEAD | **`0520801`**（批 7 文档收口：CODE_GRAPH v3.8.36 + CODEMAPS/HANDOFF/AGENTS/LOG/DELETION_LOG）；**未部署**——本地 **16 提交**领先 `origin/main`（`cdbe546`）= 12 实现（批 1–6 ×6 + 批 6 对抗收编 ×2 + 批 7 ×4）+ 4 文档（LOG×2 / AGENTS×1 / 批 7 文档收口×1）；**工作树干净（0 项）** | `git log --oneline origin/main..HEAD`（验收二轮实跑 = 16）+ `git status --porcelain`（= 0 项） |
 | API 业务端点 | **249 `APIRoute` / 205 条唯一路径**；`len(app.routes)` = **253**（含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`） | `create_api_app()` 内省（本批实跑，`AI_GF_ENV=dev`）：`len([r for r in app.routes if isinstance(r, APIRoute)])` = **249**；唯一路径 **205**。较 v3.8.35 的 235/197 增 **14**——全部来自批 1–6 体验面：`POST /api/user/llm-config/test` ×1 + `/api/user/humanize` ×4（NEW-34）+ `/api/announcements` ×2 + `/api/admin/announcements` ×4（V2-5）+ `/api/admin/audit` + `/api/admin/global-view` ×2（NEW-21/V2-1）；**批 7 零新端点**（NEW-22 仅增查询参数） |
 | 方法分布 | **118 GET / 90 POST / 18 PUT / 23 DELETE** | 同上，按 `route.methods` 计数（本批实跑） |
 | 路由挂载 | 字面 **22 处 `app.include_router(`**（其中 1 处在 `_mount_required_router` 辅助函数内 `:361`）+ **9 处 `_mount_required_router(...)` 调用** → 运行期路由挂载点 **30 处**；另加 `setup_shisi` 一处（`api/app_factory.py:297-302`） | `grep -c "app\.include_router(" api/app_factory.py` = 22；`grep -c "_mount_required_router("` = 10（含 def，本批实跑）。公告双挂载 `announcement_router`/`announcement_admin_router` @ `:276-277`；`topic_state_router` @ `:273` |
@@ -24,9 +24,9 @@
 | Python 规模（磁盘全量） | **755 文件 / 199,840 行**（剔除 `.git` / `node_modules` / `__pycache__`）；其中含 `大创赛报名以及后期发展/` 软著代码副本（gitignored，不入库） | `find . -name '*.py' -not -path './.git/*' -not -path '*/node_modules/*' -not -path '*__pycache__*'` + `xargs cat \| wc -l`（本批实跑） |
 | main.py | **573 行** | `wc -l main.py`（本批实跑，未变） |
 | orchestrator/ | **9 文件 / 5,154 行**：`optimized_orchestrator.py` **2464**、`_stream_mixin.py` **607**、`context_budget.py` **666**、`_init_mixin.py` **589**（11 个 `_init_*` 阶段）、`tool_gate.py` **387**、`session_locks.py` 175、`console_chat.py` 134、`voice_detector.py` 108、`__init__.py` 24 | `wc -l orchestrator/*.py`（本批实跑；批 1–7 后端改动未触及 orchestrator/，`git diff bdab4f7..HEAD -- orchestrator/` 为空） |
-| Python 测试 | **269 测试文件 / 主控实测 4296 通过 + 2 跳过 / 3 个存量失败族**（① `tests/test_api_routes.py` sqlalchemy **14 errors**② `test_w10_metrics_multiproc` 503→404 口径债③ `test_w3_scheduler_state` Depends 形态——**三族均 HEAD 对照实证、与批 7 无关**）；ruff **0**；收集总数本版未复测（本任务禁跑 pytest，以主控口径为准） | 文件数本批 `find tests -name 'test_*.py' \| wc -l` 与 `git ls-files` **双重实测 269**（+3 新文件 = `tests/api/test_announcements_api.py` / `tests/test_admin_routes_last_admin.py` / `tests/test_admin_users_sort.py`，且批 1–7 无测试文件删除）；⚠️ 主控 LOG/HANDOFF/v1.61 口径作 **268**，与实读差 1——以实读为准，留主控对账；通过/跳过/失败族引主控 2026-10-30 四分块实测 |
+| Python 测试 | **269 测试文件 / 主控实测 4297 通过 + 2 跳过 / 3 个存量失败族**（① `tests/test_api_routes.py` sqlalchemy **14 errors**② `test_w10_metrics_multiproc` 503→404 口径债③ `test_w3_scheduler_state` Depends 形态——**三族均 HEAD 对照实证、与批 7 无关**）；ruff **0**；收集总数本版未复测（本任务禁跑 pytest，以主控口径为准） | 文件数本批 `find tests -name 'test_*.py' \| wc -l` 与 `git ls-files` **双重实测 269**（+3 新文件 = `tests/api/test_announcements_api.py` / `tests/test_admin_routes_last_admin.py` / `tests/test_admin_users_sort.py`，且批 1–7 无测试文件删除）；⚠️ 主控 LOG/HANDOFF/v1.61 口径作 **268**，与实读差 1——以实读为准，留主控对账；通过/跳过/失败族引主控 2026-10-30 四分块实测 |
 | 前端测试 | **342 通过 / 47 文件**（vitest ^5） | 文件数本批实测 `find frontend/src \( -name '*.test.*' -o -name '*.spec.*' \) \| wc -l` = **47**（36→47，+11 新文件清单见 §4.9）；用例数 342 + tsc 0 引主控 2026-10-30 实测口径 |
-| 测试合计（徽章） | **4639**（4296 Py 通过 + 342 FE + 1 跳过标记） | ⚠️ `README.md:11` 徽章仍为 `Tests-4508`（v3.8.35 口径）——**徽章同步归收口批，本版不动 README**（本批 grep 复核） |
+| 测试合计（徽章） | **4640**（4297 Py 通过 + 342 FE + 1 跳过标记） | ⚠️ `README.md:11` 徽章仍为 `Tests-4508`（v3.8.35 口径）——**徽章同步归收口批，本版不动 README**（本批 grep 复核） |
 | 现役角色卡 | **41 张**（`config/characters/*.json`）——⚠️ **漂移登记**：v3.8.35 口径 42，`99c89c39.json`（user_id=1 林挽夏克隆变体）已不在盘，`find .` 全仓无踪；目录被 `.gitignore` 忽略故无 git 轨迹可追，**原因待主控定性** | `ls config/characters/*.json \| wc -l`（本批实跑 41）+ `find . -name '99c89c39*' -not -path './.git/*'`（无踪）。**卡数不随 git 复现** |
 | 模块 .py/.ts/.tsx 计数 | **api 51 / orchestrator 9 / proactive 14 / shisi 116 / utils 26 / tools 13 / voice 8 / wechat_direct 4 / frontend/src 154** | `find <pkg> -name '*.py' \| wc -l` ×8 + `find frontend/src \( -name '*.ts' -o -name '*.tsx' \) \| wc -l`（本批逐项实跑；api +2 = `audit.py` + `announcement_routes.py`；frontend/src 138→154） |
 | 前端页面 / API 模块 / store | **20 页 / 16 API 模块 / 6 store**（auth / characterBuilder / error / **globalView** / humanize / topicState） | `ls frontend/src/pages/*.tsx`、`ls frontend/src/api/*.ts`、`ls frontend/src/store/`（本批实跑；+`HelpGuidePage` / +`announcements.ts` / +`globalViewStore.ts`） |
@@ -36,9 +36,9 @@
 > ⚠️ **工作树口径（v3.8.36）**：本版数值读数采集于 HEAD=`9815c27`、工作树 **5 项 `.md` 在制品**（本图谱 + 主控并行收口的 AGENTS/LOG/HANDOFF/DELETION_LOG 四件）时点——**业务代码（A 档 .py/.ts）零在制品**，§1.1 全部数值读数即 HEAD 实况；按读出纪律①，引用 v3.8.36 须注明「工作树含 5 项 B 档文档在制品（含主控并行收口写入）」。
 > ⚠️ **聚合态跑法**：单进程整跑 `pytest -q` 会在随机位置停住（环境问题，非用例失败），须**串行**四分块；分块清单必须 `find` 递归生成——本批实测 **269** 个 `test_*.py`（含 `tests/core/` 与 `tests/api/`；漏子目录会少跑一批用例，10-17 批已实证漏 `tests/api/` 少 32 例）。
 > ✅ **基线公式复核**：`tests/test_persona_injection.py` 单独收集 = **2 × 卡数 + 13**；卡数已由 42 漂移为 **41**（见上表「现役角色卡」行），即现行公式 2×41+13 = **95**，卡数变则全量收集数随之浮动。
-> ✅ **3 个存量失败族定性（2026-10-30 主控实测）**：① `tests/test_api_routes.py` **14 errors**（sqlalchemy 形态债）② `test_w10_metrics_multiproc`（503→404 口径债）③ `test_w3_scheduler_state`（Depends 形态）——三族均已 **HEAD 对照实证与批 7 无关**，归专项口径债清理；批 7 自身四分块 4296 通过 + 2 跳过、ruff 0、**突变验红 4/4**（M1 排序闸 / M2 停用确认 / M3 token 回潮 / M4 Button 收编）。
+> ✅ **3 个存量失败族定性（2026-10-30 主控实测）**：① `tests/test_api_routes.py` **14 errors**（sqlalchemy 形态债）② `test_w10_metrics_multiproc`（503→404 口径债）③ `test_w3_scheduler_state`（Depends 形态）——三族均已 **HEAD 对照实证与批 7 无关**，归专项口径债清理；批 7 自身四分块 4297 通过 + 2 跳过、ruff 0、**突变验红 4/4**（M1 排序闸 / M2 停用确认 / M3 token 回潮 / M4 Button 收编）。
 > ✅ **2 例跳过为非回归**：`tests/test_cache.py:297`（Redis not available）+ `tests/golden/test_golden_set.py:48`（`live_llm` 用例默认不跑，设 `GOLDEN_LIVE=1` 才启用真实供应商）。
-> ✅ **跨文档口径**：`AGENTS.md` **v1.61** 版本头 + `LOG.md` 批 7 条目 + `docs/HANDOFF_REPORT.md` v1.61 顶栏 + `docs/DELETION_LOG.md` NEW-31 补登——主控并行收口与本图谱回扫**同帧进行**（F9 端点口径更正 101→106、批 7 突变验红 4/4、3 存量失败族定性均互洽）；**待同步**：`README.md:11` 徽章 4508→**4639**（收口批）、CODEMAPS 六件（CODEMAPS 对齐随本收口批提交后本行应删）。测试文件口径已对账为 **269**（本图谱双重实读；主控文档中原 268 系笔误、已随本收口批更正）。
+> ✅ **跨文档口径**：`AGENTS.md` **v1.61** 版本头 + `LOG.md` 批 7 条目 + `docs/HANDOFF_REPORT.md` v1.61 顶栏 + `docs/DELETION_LOG.md` NEW-31 补登——主控并行收口与本图谱回扫**同帧进行**（F9 端点口径更正 101→106、批 7 突变验红 4/4、3 存量失败族定性均互洽）；**已收口**：CODEMAPS 六件随 `0520801` 对齐（本行保留作跨文档互洽的记录）；**待同步**：`README.md:11` 徽章 4508→**4640**（收口批）。测试文件口径已对账为 **269**（本图谱双重实读；主控文档中原 268 系笔误、已随本收口批更正）。
 
 ### 1.2 图谱工具快照（历史归档）
 
@@ -427,7 +427,7 @@ tools/
 - **拆条**：`utils/humanize_delivery.py`（114 行）2–4 段 + 段间节奏，两投递点共用。
 - **API**：`GET/POST/PUT /api/humanize/config`（`training_routes.py:677-735`）+ **`DELETE` 清除用户覆盖**（`:741-756`，G-2，`clear_humanize_override`）——即 §4.2 端点 +1 的来源；观测日志 `[humanize][step=…]`。
 
-### 4.16 D20 前端全站体验批（批 1–7；本地 15 提交领先 origin、未部署）
+### 4.16 D20 前端全站体验批（批 1–7；本地 16 提交领先 origin、未部署）
 
 **背景**：2026-10-29 用户实测控制台报障四件（管理员视角全量裸渲 / 角色归属错认 / 前端太复杂 / 无导引公告）→ 审计工作流 `dwfrun-a50aa227`（80 发现 + 40 项 backlog，报告真源 `docs/reports/2026-10-28-frontend-ux-audit.md`）→ `DECISION_LEDGER` **D20 八裁决** → 六批计划全开工 → 批 6 对抗验收收编 → 批 7 四收编。逐批详情见 `LOG.md` 2026-10-29/30 条目。
 
@@ -456,9 +456,9 @@ tools/
 
 **对抗验收收编（批 6 `69aecd2`，5 项）**：F1 教学页死路由（`/help` 路由挂载 `App.tsx:155`）/ F4 公告 XSS scheme 白名单 / F5 毫秒时间戳守卫 / F9 端点口径更正 101→106（子集口径注记见 §4.2）/ F2 见上。
 
-**测试口径（主控 2026-10-30 实测）**：后端四分块 **4296 通过 / 2 跳过 / 3 个存量失败族**（§1.1 注，均 HEAD 对照实证与批 7 无关）+ ruff 0；前端 vitest **342/342（47 文件）** + tsc 0；**突变验红 4/4**（M1 排序闸 / M2 停用确认 / M3 token 回潮 / M4 Button 收编）。新依赖 **driver.js `^1.10.2`**（MIT，教学导览；shepherd.js / intro.js 因 AGPL 商业双许可排除）。
+**测试口径（主控 2026-10-30 实测）**：后端四分块 **4297 通过 / 2 跳过 / 3 个存量失败族**（§1.1 注，均 HEAD 对照实证与批 7 无关）+ ruff 0；前端 vitest **342/342（47 文件）** + tsc 0；**突变验红 4/4**（M1 排序闸 / M2 停用确认 / M3 token 回潮 / M4 Button 收编）。新依赖 **driver.js `^1.10.2`**（MIT，教学导览；shepherd.js / intro.js 因 AGPL 商业双许可排除）。
 
-**遗留登记**：① **部署未做**——本地 15 提交领先 origin（12 实现 + 3 文档），三端统一铁律下随用户裁决；② `README.md:11` 徽章 4508 → **4639** 与 CODEMAPS 六件归收口批；AGENTS v1.61 / LOG / HANDOFF v1.61 / DELETION_LOG（NEW-31 补登）已由主控并行收口；③ 扫码弹窗 playwright e2e spec 未做（以 fake-timers 组件测试替代钉住）；④ 批 6 遗留 NEW-22/20/31/32 已于批 7 清零；⑤ 3 个存量失败族待专项批。
+**遗留登记**：① **部署未做**——本地 16 提交领先 origin（12 实现 + 4 文档），三端统一铁律下随用户裁决；② `README.md:11` 徽章 4508 → **4640** 待收口批同步（CODEMAPS 六件 / HANDOFF / AGENTS v1.61 / LOG / DELETION_LOG 已随 `0520801` 落账）；③ 扫码弹窗 playwright e2e spec 未做（以 fake-timers 组件测试替代钉住）；④ 批 6 遗留 NEW-22/20/31/32 已于批 7 清零；⑤ 3 个存量失败族待专项批。
 
 ---
 
@@ -492,7 +492,7 @@ tools/
 
 | 风险 | 严重度 | 位置 | 建议 / 现状 |
 |------|--------|------|-------------|
-| **D20 批 1–7 未部署（15 提交本地领先）** | **中** | 本地 HEAD `9815c27` vs `origin/main` `cdbe546` | 批 1–7 全量（体验面 + 14 端点 + 4 表 + last-admin 删除守卫）只在本地；三端统一铁律下部署随用户裁决；收口同步面 = README 徽章 4639 / CODEMAPS / HANDOFF（§4.16 遗留登记） |
+| **D20 批 1–7 未部署（16 提交本地领先）** | **中** | 本地 HEAD `0520801` vs `origin/main` `cdbe546` | 批 1–7 全量（体验面 + 14 端点 + 4 表 + last-admin 删除守卫）只在本地；三端统一铁律下部署随用户裁决；收口同步面 = README 徽章 4640（其余 CODEMAPS/HANDOFF/AGENTS/LOG 已随 `0520801` 落账） |
 | **降级质量悬崖** | **高（产品级）** | `llm_provider/multi_provider_gateway.py` + `config/llm_providers.json` | agnes 超时 40s、熔断阈值 2 / 冷却 120s 在位。**未解决**：供应商侧抖动仍在；`c3ede77` 批观察记录：同窗口 agnes 40s 超时×2（18:13:05/18:13:33）→ 单轮 78.28s 延迟，zhipu 降级均接住、消息未丢（证据在 `LOG.md`）。三个候选方向（降级切同档位模型 / 降级轮走保守短回复 / 降低降级轮 prompt 复杂度）**用户裁决 2026-10-28 继续挂起（先不急）** |
 | ~~话题仍是原话锚点~~ → **已根治** | — | `utils/topic_state.py` + `proactive/topic_recall.py` | **`3fe2771` 话题状态机已上线（§4.12）**：确定性状态机 + 每 4 轮稀疏 judge + parked 三重闸 + 7 天 TTL；原 `_extract_user_anchor_sentences`（`prompt_sanitize.py:308`）仍保留作锚点补充。**新观察项**：生产 judge 触发率与 parked 复提质量待运行观察（生产 `topic_plan` 已有真实计划行） |
 | **骰子闸默认关闭（无生产行为影响）** | 低 | `proactive/frequency.py:180-193` + `scheduler.py:1576-1592` | `enabled=False` + `dry_run=True` 为出厂契约；开启后先干跑记账。回退开关 `DICE_GATE_PRODUCTION_WIRED=False`；scheduler.py 例外已由用户裁决接受（`dd3b470`）。生产启用时机待用户裁决 |
@@ -539,7 +539,7 @@ tools/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
-| **v3.8.36** | **2026-10-30** | **批 7 收尾口径（D20 前端全站体验批 1–6 + 批 6 对抗收编 + 批 7 四收编；本地 15 提交领先 origin、未部署）**：新增 §4.16；端点 **235/197 → 249/205**（+14：misc +1 / training +4 / announcements +6 / admin +3；批 7 零新端点）；方法分布 113/85/16/21 → **118/90/18/23**；路由挂载 28 → **30**（公告双挂载 `:276-277`）；域路由 25 → **26**（+`announcement_routes`）；Python tracked 589/159,543 → **594/161,346**；api 49 → **51**（+`audit.py` / `announcement_routes.py`）；frontend/src 138 → **154**；页面 19 → **20**（+HelpGuidePage `/help`）；API 模块 15 → **16**（+announcements）；store 5 → **6**（+globalViewStore）；测试文件 266 → **269**（+3）；主控实测后端 **4296 通过 / 2 跳过 / 3 存量失败族**（均 HEAD 对照实证）+ 前端 **342/47** + ruff 0 + tsc 0 + 突变验红 4/4；徽章口径 **4508 → 4639**（README 同步归收口批）；users.db 口径新增 **14 表**（+4）；⚠️ 角色卡 42 → **41** 漂移登记。 |
+| **v3.8.36** | **2026-10-30** | **批 7 收尾口径（D20 前端全站体验批 1–6 + 批 6 对抗收编 + 批 7 四收编；本地 16 提交领先 origin、未部署）**：新增 §4.16；端点 **235/197 → 249/205**（+14：misc +1 / training +4 / announcements +6 / admin +3；批 7 零新端点）；方法分布 113/85/16/21 → **118/90/18/23**；路由挂载 28 → **30**（公告双挂载 `:276-277`）；域路由 25 → **26**（+`announcement_routes`）；Python tracked 589/159,543 → **594/161,346**；api 49 → **51**（+`audit.py` / `announcement_routes.py`）；frontend/src 138 → **154**；页面 19 → **20**（+HelpGuidePage `/help`）；API 模块 15 → **16**（+announcements）；store 5 → **6**（+globalViewStore）；测试文件 266 → **269**（+3）；主控实测后端 **4297 通过 / 2 跳过 / 3 存量失败族**（均 HEAD 对照实证）+ 前端 **342/47** + ruff 0 + tsc 0 + 突变验红 4/4；徽章口径 **4508 → 4640**（README 同步归收口批）；users.db 口径新增 **14 表**（+4）；⚠️ 角色卡 42 → **41** 漂移登记。 |
 | v3.8.35 | 2026-10-28 | 工作区整理批：话题状态机 `3fe2771`（§4.12）/ 拟人化 v1.57（§4.15）/ 四项跟进 + CI 修复 + hotfix 整本回扫；新增 §4.13 骰子闸 / §4.14 行为蒸馏；端点 231/195→235/197；收集 4263（266 文件）/ 4256+2+4；徽章 4508；store 4→5（+topicState）。要点归档 `LOG.md` 2026-10-28 条。 |
 | v3.8.34 | 2026-10-21 | 八项裁决批：R4 真流式（`utils/stream_guard.py`）/ R3 工具记忆结合 / R6 黄金集立项（45 条用例）/ R7 模式显式切换按用户隔离 / 轮次 LLM 预算总账 / provider `stream_enabled` / RAG 去重 / AOCI 补全 1116 行；端点 231/195；收集 3900（工作树在制品口径）。 |
 | v3.8.33 及更早 | 2026-07 ~ 10-20 | 重建批、窗口死寂批（v1.52）、时间感知 3.0（v1.53）、聊天质量两批（v1.54/v1.55）等——一律见 `LOG.md` 对应日期条目。 |
