@@ -230,12 +230,20 @@ test.describe.serial('W11 · 主动面板作用域（D4）', () => {
     const role = await anyRoleId(request)
     const roleId = role.id
     try {
-      await page.goto(`/roles/${encodeURIComponent(roleId)}/settings/message`)
+    await page.goto(`/roles/${encodeURIComponent(roleId)}/settings/message`)
 
-      await expect(page.getByText('LLM 主动决策（人设·画像·控制台）')).toBeVisible()
-      await expect(page.getByText('保存频率配置')).toBeVisible()
-      // 作用域声明：参数是全局的，不是本角色专属
-      await expect(page.getByText(/全局配置：以下参数作用于全部角色的主动消息调度/)).toBeVisible()
+    // 批5 V2-3 渐进式披露：高级运维区（含 LLM 决策/频率保存）收紧为
+    // <details> 折叠，管理员需先展开——本用例的断言面在该折叠区内。
+    await page
+      .getByText('高级运维：LLM 决策参数 / 骰子闸 / 状态账本回放（管理员，日常无需展开）')
+      .click()
+
+    await expect(page.getByText('LLM 主动决策（人设·画像·控制台）')).toBeVisible()
+    // 批6 NEW-24 加了「改动需点击下方『保存频率配置』生效」指引 → 纯文本定位会命中
+    // 按钮+指引两处（strict mode 冲突）；按按钮角色定位。
+    await expect(page.getByRole('button', { name: '保存频率配置' })).toBeVisible()
+    // 作用域声明：参数是全局的，不是本角色专属
+    await expect(page.getByText(/全局配置：以下参数作用于全部角色的主动消息调度/)).toBeVisible()
       // 角色页禁止全局广播
       await expect(page.getByText('立即发送一条主动消息')).toHaveCount(0)
     } finally {
@@ -290,6 +298,26 @@ test.describe.serial('W11 · 账号维度', () => {
     await page.goto('/settings/security')
     await expect(page.getByText('累计拦截')).toBeVisible()
     await expect(page.getByText('内容安全过滤器')).toHaveCount(0)
+
+    // 3) 清理：新账号登录过程会落一张默认角色卡（应用侧行为），e2e 收尾删净，
+    //    防 config/characters（gitignored）随跑次累积污染——2026-10-30 对抗验收实锤。
+    try {
+      const freshToken = await apiToken(request, { login: email, password: 'W11Test#2026' })
+      const mine = await request.get(`${API}/api/characters`, {
+        headers: { Authorization: `Bearer ${freshToken}` },
+      })
+      if (mine.ok()) {
+        const body = await mine.json()
+        const list = Array.isArray(body) ? body : (body.characters ?? [])
+        for (const c of list) {
+          await request.delete(`${API}/api/characters/${c.id}`, {
+            headers: { Authorization: `Bearer ${freshToken}` },
+          })
+        }
+      }
+    } catch {
+      // 清理失败不改变用例结论（泄漏由外部观察兜底）
+    }
   })
 
   test('admin 视图与 viewer 视图互不串（同一浏览器上下文）', async ({ page }) => {

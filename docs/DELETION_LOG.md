@@ -1106,3 +1106,10 @@ equire() in MessageList.tsx even though MessageList is unused
 - **删除前核验**：全仓 grep（frontend/src / frontend/e2e / tests，含 ts/tsx/py）零引用——审计 NEW-31 ① 认定其全站零使用；RoleSettingsTabs 的 URL 真源能力走路由态，不依赖该组件（grep 实证无 import）。
 - **可恢复性**：git 历史随时取回（`git show c6ed735^:frontend/src/components/shared/SubTabBar.tsx`），无需另行备份。
 - **效果**：shared/ 死组件清零；组件库收编为唯一真源（Button/EmptyState/Skeleton/ConfirmDialog/Modal 五件 + SubTabBar 移除）。
+
+## 2026-10-30 — e2e 测试泄漏角色卡清理（4 张）
+
+- **对象**：`config/characters/a3d72673.json`（林挽夏 / user_id=5）及 `c01cf26e`（1005）/ `24c37859`（1004）/ `9f6a282a`（1003）（均为 w11 e2e 跑动产生的账号克隆卡）。`config/characters` 被 `.gitignore:120` 忽略、无 git 轨迹；删前逐一核过 name / user_id 归属。
+- **根因**：`frontend/e2e/w11_journey.spec.ts`「账号维度」用例每次注册 fresh 账号并触发默认角色克隆，用例无收尾清理 → 每跑一次泄漏一张；第 4 张为初跑接错库（真实 `data/users.db`）的残留。
+- **处置**：四张卡连同 `data/knowledge/<id>.json` 派生索引一并删除（索引可由源重建）；该用例已补收尾清理（用 fresh 账号 token 删净名下角色卡），复跑实证角色卡稳定 41 张。
+- **登记**：对抗验收三轮发现（e2e 首次真机执行 + 长期泄漏），非批 7 代码缺陷。

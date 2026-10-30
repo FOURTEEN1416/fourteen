@@ -18,6 +18,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent.absolute()))
 
 E2E_DB = Path("data/e2e_users.db")
 E2E_URL = f"sqlite+aiosqlite:///data/e2e_users.db"
+# 2026-10-30 对抗验收实锤：启动期 reconcile_graveyard() 会把「坟场」墓碑 uid 在
+# 当前库中再次清除（「已删账号不得复活」的合法机制）。本地坟场长期含 uid=1
+# （历史删除留痕，deleted_at 每次重删都会刷新），任何以 id=1 播种的新库一起后端
+# 就被删——w11_journey 的 4 个 admin 用例曾因此必红。种子 id 因此避开坟场。
+E2E_ID_BASE = 1001  # 远高于坟场/正常用户 id 段，且 AUTOINCREMENT 不冲突
 ADMIN_EMAIL = "e2e-admin@test.local"
 ADMIN_USER = "e2e-admin"
 ADMIN_PASSWORD = "E2eTest#2026"
@@ -43,6 +48,7 @@ def main() -> None:
         async with async_session() as session:
             session.add(
                 User(
+                    id=E2E_ID_BASE,
                     email=ADMIN_EMAIL,
                     username=ADMIN_USER,
                     hashed_password=hash_password(ADMIN_PASSWORD),
@@ -54,6 +60,7 @@ def main() -> None:
             # role 缺省即 "viewer"（User 模型默认值）；同意门禁留给首次登录的协议门流程
             session.add(
                 User(
+                    id=E2E_ID_BASE + 1,
                     email=VIEWER_EMAIL,
                     username=VIEWER_USER,
                     hashed_password=hash_password(VIEWER_PASSWORD),
