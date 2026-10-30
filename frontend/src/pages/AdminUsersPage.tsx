@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { AnimatedPage, EmptyState, ConfirmDialog } from '../components/shared'
 import {
   adminListUsers, adminCreateUser, adminUpdateUser, adminDeleteUser, listOperatorAudit,
@@ -119,11 +119,19 @@ export default function AdminUsersPage() {
   //  数据加载
   // ═════════════════════════════════════════════════
 
+  // NEW-22：排序随请求下发——翻页/改每页大小都携带同一个全局排序键
   const fetchUsers = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const res = await adminListUsers(page, pageSize, search || undefined, roleFilter || undefined)
+      const res = await adminListUsers(
+        page,
+        pageSize,
+        search || undefined,
+        roleFilter || undefined,
+        sortField ?? undefined,
+        sortDir,
+      )
       setUsers(res.users)
       setTotal(res.total)
     } catch (err: unknown) {
@@ -134,7 +142,7 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, search, roleFilter])
+  }, [page, pageSize, search, roleFilter, sortField, sortDir])
 
   // 挂载时拉数据（搜索/分页/筛选变化时重拉）
   // 非 admin 用户不调用 API，避免不必要的 403/404
@@ -155,30 +163,16 @@ export default function AdminUsersPage() {
   //  排序逻辑
   // ═════════════════════════════════════════════════
 
+  // 排序真的落到数据上（NEW-22：排序由后端按全量结果集执行，前端不再重排当前页）。
+  // 表头箭头 = 全局排序态；改排序会带新 sort/sort_dir 重拉，渲染顺序完全来自响应。
   const handleSort = useCallback((field: SortField) => {
-    setSortField(prevField => {
-      if (prevField === field) {
-        setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-        return prevField
-      }
-      setSortDir('asc')
-      return field
-    })
-  }, [])
-
-  // 排序真正落到数据上（此前 handleSort 只翻转表头箭头，行序纹丝不动）。
-  // 后端 /admin/users 无 sort 参数，排序作用于当前页已加载行。
-  const sortedUsers = useMemo(() => {
-    if (!sortField) return users
-    const dir = sortDir === 'asc' ? 1 : -1
-    return [...users].sort((a, b) => {
-      const av = a[sortField]
-      const bv = b[sortField]
-      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
-      if (typeof av === 'boolean' && typeof bv === 'boolean') return (Number(av) - Number(bv)) * dir
-      return String(av ?? '').localeCompare(String(bv ?? '')) * dir
-    })
-  }, [users, sortField, sortDir])
+    if (sortField === field) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortField(field)
+    setSortDir('asc')
+  }, [sortField])
 
   // ═════════════════════════════════════════════════
   //  CRUD 操作
@@ -691,7 +685,7 @@ export default function AdminUsersPage() {
           {/* ═══ 表格（加载 / 空 / 数据） ═══ */}
           {!error && (
             <UserTable
-              users={sortedUsers}
+              users={users}
               total={total}
               loading={loading}
               sortField={sortField}

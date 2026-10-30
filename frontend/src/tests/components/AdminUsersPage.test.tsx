@@ -578,9 +578,17 @@ describe('AdminUsersPage', () => {
   })
 
   // ────────────────────────────────────────────────
-  //  15. 列排序真实生效（回归：2026-09-19 审计发现排序只翻转表头箭头，行序不动）
+  //  15. 列排序 = 后端全局排序（NEW-22：前端不再重排当前页）
   // ────────────────────────────────────────────────
-  it('column sorting reorders the rendered rows', async () => {
+  it('column sorting drives backend sort params and renders response order', async () => {
+    // 响应顺序刻意 ≠ 本地 id 排序结果：[editor(2), admin(1), viewer(3)]
+    // 旧实现会把当前页重排成 id desc（viewer 首行）→ 本断言即红。
+    const backendOrder = {
+      users: [FAKE_USERS.users[1], FAKE_USERS.users[0], FAKE_USERS.users[2]],
+      total: 3,
+    }
+    mockAdminListUsers.mockResolvedValue(backendOrder)
+
     const { container } = renderComponent()
     await waitForUserData('admin@test.com')
 
@@ -589,17 +597,64 @@ describe('AdminUsersPage', () => {
         .map(td => td.textContent?.trim() ?? '')
         .filter(t => t.endsWith('@test.com'))
 
-    // 初始 sortField=id / sortDir=desc → id 最大的 viewer 在前
-    expect(emailOrder()[0]).toBe('viewer@test.com')
+    // 首屏即带排序：6 个位置参数，第 5/6 位 = 当前 sortField / sortDir
+    const initialCall = mockAdminListUsers.mock.lastCall
+    expect(initialCall).toHaveLength(6)
+    expect(initialCall?.[4]).toBe('id')
+    expect(initialCall?.[5]).toBe('desc')
+    // 渲染顺序完全来自响应
+    expect(emailOrder()).toEqual(['editor@test.com', 'admin@test.com', 'viewer@test.com'])
 
-    // 点击 ID 表头 → 同列翻转方向 → asc，admin(id=1) 提到首位
+    mockAdminListUsers.mockClear()
+
+    // 点击 ID 表头 → 同列翻转方向 → asc，并带新参数重拉
     const idHeader = Array.from(container.querySelectorAll('th')).find(th => th.textContent?.trim() === 'ID')
     expect(idHeader).toBeDefined()
     fireEvent.click(idHeader!)
 
     await waitFor(() => {
-      expect(emailOrder()[0]).toBe('admin@test.com')
+      expect(mockAdminListUsers).toHaveBeenCalled()
     })
+    const sortedCall = mockAdminListUsers.mock.lastCall
+    expect(sortedCall).toHaveLength(6)
+    expect(sortedCall?.[4]).toBe('id')
+    expect(sortedCall?.[5]).toBe('asc')
+    // 仍是响应顺序（旧实现按 id asc 重排会把 admin 提到首行）
+    await waitFor(() => {
+      expect(emailOrder()).toEqual(['editor@test.com', 'admin@test.com', 'viewer@test.com'])
+    })
+  })
+
+  // ────────────────────────────────────────────────
+  //  15b. 改排序后再翻页，请求仍带同一排序（NEW-22：跨页不丢排序）
+  // ────────────────────────────────────────────────
+  it('pagination keeps sending the current sort params', async () => {
+    mockAdminListUsers.mockResolvedValue(generateUsersPage(1, 25))
+    const { container } = renderComponent()
+    await waitForUserData('User 1')
+
+    // 先改排序：点「邮箱」表头（新列 → asc）
+    const emailHeader = Array.from(container.querySelectorAll('th')).find(th => th.textContent?.trim() === '邮箱')
+    expect(emailHeader).toBeDefined()
+    fireEvent.click(emailHeader!)
+    await waitFor(() => {
+      expect(mockAdminListUsers.mock.lastCall?.[4]).toBe('email')
+    })
+    // 等表格回到数据态（加载骨架期间分页按钮不在 DOM）
+    await waitForUserData('User 1')
+
+    mockAdminListUsers.mockClear()
+    const nextPageBtn = screen.getAllByRole('button').find(b => b.textContent?.trim() === '2')
+    expect(nextPageBtn).toBeDefined()
+    fireEvent.click(nextPageBtn!)
+
+    await waitFor(() => {
+      expect(mockAdminListUsers).toHaveBeenCalled()
+    })
+    const pageCall = mockAdminListUsers.mock.lastCall
+    expect(pageCall?.[0]).toBe(2)
+    expect(pageCall?.[4]).toBe('email')
+    expect(pageCall?.[5]).toBe('asc')
   })
 })
 

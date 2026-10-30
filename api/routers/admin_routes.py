@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 
 from api.audit import (
     is_global_view_enabled,
@@ -115,6 +117,19 @@ async def list_operator_audit(
 # 端点
 # ═══════════════════════════════════════════════════════
 
+# NEW-22：用户列表排序键白名单。
+# 查询参数只能查这张表取到列对象——严禁按用户输入的列名动态取属性或拼列名字符串
+# （用户输入直入 SQL 列名 = 注入面）；非法键由 Literal 校验在进函数前 422。
+_USER_SORT_COLUMNS: dict[str, InstrumentedAttribute[Any]] = {
+    "id": User.id,
+    "email": User.email,
+    "username": User.username,
+    "display_name": User.display_name,
+    "role": User.role,
+    "is_active": User.is_active,
+    "created_at": User.created_at,
+}
+
 
 @router.get("/users", response_model=UserListResponse)
 async def list_users(
@@ -122,10 +137,18 @@ async def list_users(
     page_size: int = Query(20, ge=1, le=100),
     search: str | None = Query(None, max_length=100),
     role: str | None = Query(None, pattern=r"^(admin|editor|viewer)$"),
+    sort: Literal[
+        "id", "email", "username", "display_name", "role", "is_active", "created_at"
+    ] = Query("created_at"),
+    sort_dir: Literal["asc", "desc"] = Query("desc"),
     _admin: tuple[int, User] = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """获取用户列表（分页、搜索、筛选）"""
+    """获取用户列表（分页、搜索、筛选、全局排序）
+
+    NEW-22：排序作用于**全量结果集**（在分页 offset 之前 order_by），不再是「只排当前页」。
+    默认 sort=created_at / sort_dir=desc，与改动前不带参请求的行序一致。
+    """
     query = select(User)
     # 计数查询用独立变量，避免与 select(User) 的 query 联合类型互染（mypy）
     count_query = select(func.count(User.id))
@@ -155,7 +178,10 @@ async def list_users(
 
     # 分页
     offset = (page - 1) * page_size
-    query = query.order_by(User.created_at.desc()).offset(offset).limit(page_size)
+    # NEW-22：白名单列排序 + id 作确定性次键（同值行跨页不重复、不丢行）
+    sort_column = _USER_SORT_COLUMNS[sort]
+    primary_order = sort_column.asc() if sort_dir == "asc" else sort_column.desc()
+    query = query.order_by(primary_order, User.id.desc()).offset(offset).limit(page_size)
     result = await db.execute(query)
     users = result.scalars().all()
     # query 经 count 联合后 mypy 推断退化；显式收窄回 User 行
@@ -331,6 +357,22 @@ async def delete_user(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # 对抗验收 F2（2026-10-30）：NEW-17 守卫缝隙——update_user 拦了降权/停用
+    # 唯一 active admin，但 delete_user 没拦：admin2 删掉 admin1 → 场上 0 个
+    # active admin，管理入口照样锁死。删除 admin 前同样确认至少保留一个。
+    if user.role == "admin" and bool(user.is_active):
+        active_admins = (
+            await db.execute(
+                select(func.count(User.id)).where(
+                    User.role == "admin", User.is_active.is_(True)
+                )
+            )
+        ).scalar() or 0
+        if active_admins <= 1:
+            raise HTTPException(
+                400, "至少保留一个启用中的管理员：不能删除唯一的 active 管理员"
+            )
 
     # W9：管理员删除 = 统一生命周期作业（协议 §2.5「删除即真正删除」）。
     # 冻结（停用+撤销版本+吊销会话+坟场+迟到写入封禁）→ 逐 owner 跨存储清除

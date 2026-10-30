@@ -67,6 +67,17 @@ export interface AdminCreateUserResponse {
 //  API 函数
 // ════════════════════════════════════════════════════
 
+/** GET /api/admin/users 的排序键——与后端 `_USER_SORT_COLUMNS` 白名单一一对应。
+ *  与 UserTable 的 SortField 同形，但这里另立一份以免 api 层反向依赖组件层。 */
+export type AdminUserSortField =
+  | 'id'
+  | 'email'
+  | 'username'
+  | 'display_name'
+  | 'role'
+  | 'is_active'
+  | 'created_at'
+
 /**
  * GET /api/admin/users — 获取系统用户列表
  *
@@ -74,16 +85,22 @@ export interface AdminCreateUserResponse {
  * @param pageSize  每页数量
  * @param search    搜索关键词（匹配 email / username / display_name）
  * @param role      按角色过滤
+ * @param sort      排序键（编译期收窄到 7 键白名单；非法值后端另有 422 兜底）
+ * @param sortDir   排序方向（asc/desc）；两参缺省时后端按 created_at desc
  */
 export function adminListUsers(
   page = 1,
   pageSize = 20,
   search?: string,
   role?: string,
+  sort?: AdminUserSortField,
+  sortDir?: 'asc' | 'desc',
 ): Promise<AdminListUsersResponse> {
   const params: Record<string, string | number> = { page, page_size: pageSize }
   if (search) params.search = search
   if (role) params.role = role
+  if (sort) params.sort = sort
+  if (sortDir) params.sort_dir = sortDir
   return client.get('/admin/users', { params }).then(r => r.data as AdminListUsersResponse)
 }
 
