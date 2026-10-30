@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Shield, ShieldAlert } from 'lucide-react'
+import { ConfirmDialog } from '../components/shared'
 import { safetyStats, safetyLog, safetyConfig } from '../api/system'
 import { useAuthStore } from '../store/authStore'
 import { useErrorStore } from '../store/errorStore'
@@ -63,6 +64,8 @@ function SafetyPanelSection() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [toggling, setToggling] = useState(false)
+  // 关闭（enabled=true → false）是危险方向：先弹确认；开启方向一键直生效
+  const [confirmDisable, setConfirmDisable] = useState(false)
 
   const doFetch = useCallback(async () => {
     setLoading(true)
@@ -100,7 +103,15 @@ function SafetyPanelSection() {
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleToggle = async () => {
-    const next = !enabled
+    // 关闭全局过滤器 = 降低所有用户防护，先确认；开启不设摩擦
+    if (enabled) {
+      setConfirmDisable(true)
+      return
+    }
+    await applyToggle(true)
+  }
+
+  const applyToggle = async (next: boolean) => {
     setToggling(true)
     try {
       const res = await safetyConfig(next)
@@ -252,6 +263,18 @@ function SafetyPanelSection() {
           )}
         </div>
       </div>
+
+      {/* 关闭确认（危险方向）：确认后才真正发请求；取消则设置完全不变 */}
+      <ConfirmDialog
+        open={confirmDisable}
+        title="确认关闭内容安全过滤器"
+        message="关闭后所有用户失去内容安全过滤，输入与输出不再做风险拦截。可随时重新开启。"
+        confirmText="关闭过滤器"
+        cancelText="取消"
+        variant="danger"
+        onConfirm={() => { setConfirmDisable(false); applyToggle(false) }}
+        onCancel={() => setConfirmDisable(false)}
+      />
     </section>
   )
 }

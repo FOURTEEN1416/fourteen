@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { Mail, User, KeyRound } from 'lucide-react'
+import { ConfirmDialog } from '../shared'
 import { ROLES, ROLE_LABELS } from './UserBadges'
 import { PASSWORD_HINT, validatePasswordStrength } from '../../utils/passwordPolicy'
 import type { AdminCreateUserRequest, AdminUpdateUserRequest, UserRole } from '../../api/admin'
@@ -76,6 +78,9 @@ export default function UserForm({
 
   const isCreate = mode === 'create'
 
+  // 停用是危险方向（后端会立即 bump_token_version）：先确认，取消则 formData 不被改写
+  const [pendingDeactivate, setPendingDeactivate] = useState(false)
+
   // 当 mode=create 时强制 role 回退
   const currentRole = (data.role as UserRole) || ROLES[2]
   const currentActive = data.is_active !== undefined ? Boolean(data.is_active) : true
@@ -137,7 +142,11 @@ export default function UserForm({
               <input
                 type="checkbox"
                 checked={currentActive}
-                onChange={e => set('is_active', e.target.checked)}
+                onChange={e => {
+                  // 仅 true→false（停用）加一次确认；恢复活跃直接生效
+                  if (e.target.checked) set('is_active', true)
+                  else setPendingDeactivate(true)
+                }}
                 className="w-4 h-4 rounded border-gray-300 text-primary-500 focus:ring-primary-300"
               />
               <span className="text-gray-600">{currentActive ? '活跃' : '停用'}</span>
@@ -175,6 +184,20 @@ export default function UserForm({
           {isCreate ? '创建' : '保存'}
         </button>
       </div>
+
+      {/* 停用确认（嵌套在编辑弹窗内；Modal 栈保证 ESC 只关这一层）。
+          后端 API 可能因「最后一个 active admin」守卫返回 400，故文案不承诺一定成功，
+          失败仍走页面原有错误 toast 路径。 */}
+      <ConfirmDialog
+        open={pendingDeactivate}
+        title="确认停用用户"
+        message="停用后该用户立即失去全部登录会话，旧 token 不会恢复：已签发的旧 token 即刻失效，重新启用也不会让它复活。若该用户是唯一可用的管理员，后端会拒绝本次停用。"
+        confirmText="确认停用"
+        cancelText="保持活跃"
+        variant="danger"
+        onConfirm={() => { set('is_active', false); setPendingDeactivate(false) }}
+        onCancel={() => setPendingDeactivate(false)}
+      />
     </div>
   )
 }

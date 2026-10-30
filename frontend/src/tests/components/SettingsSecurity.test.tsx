@@ -102,7 +102,7 @@ describe('SettingsSecurity（安全面板真契约）', () => {
     expect(screen.getByText('输出')).toBeDefined()
   })
 
-  it('admin：可见开关；业务成功（status=ok）才翻转状态', async () => {
+  it('admin：关闭过滤器先弹确认，确认后才发请求且业务成功才翻转', async () => {
     makeUser('admin')
     render(<SettingsSecurity />)
 
@@ -110,6 +110,13 @@ describe('SettingsSecurity（安全面板真契约）', () => {
     expect(toggle).toBeDefined()
 
     fireEvent.click(toggle.parentElement!.querySelector('button')!)
+
+    // NEW-20③：关闭方向是危险操作，先出现确认框且此时尚未发请求
+    expect(await screen.findByText('确认关闭内容安全过滤器')).toBeDefined()
+    expect(screen.getByText(/所有用户失去内容安全过滤/)).toBeDefined()
+    expect(mockSafetyConfig).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭过滤器' }))
 
     await waitFor(() => {
       expect(mockSafetyConfig).toHaveBeenCalledWith(false)
@@ -126,6 +133,12 @@ describe('SettingsSecurity（安全面板真契约）', () => {
     const toggle = await screen.findByText('内容安全过滤器')
     fireEvent.click(toggle.parentElement!.querySelector('button')!)
 
+    // NEW-20③：先出确认框、此帧不得发请求（「点击即发」与「确认后发」必须可区分）
+    expect(await screen.findByText('确认关闭内容安全过滤器')).toBeDefined()
+    expect(mockSafetyConfig).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭过滤器' }))
+
     await waitFor(() => {
       expect(mockSafetyConfig).toHaveBeenCalled()
     })
@@ -138,6 +151,38 @@ describe('SettingsSecurity（安全面板真契约）', () => {
     await waitFor(() => {
       expect(toasts().some((t) => t.type === 'warning')).toBe(true)
     })
+  })
+
+  it('admin：确认框点取消 → 不发请求、状态保持运行中', async () => {
+    makeUser('admin')
+    render(<SettingsSecurity />)
+
+    const toggle = await screen.findByText('内容安全过滤器')
+    fireEvent.click(toggle.parentElement!.querySelector('button')!)
+    fireEvent.click(await screen.findByRole('button', { name: '取消' }))
+
+    expect(screen.queryByText('确认关闭内容安全过滤器')).toBeNull()
+    expect(mockSafetyConfig).not.toHaveBeenCalled()
+    expect(screen.getByText('运行中')).toBeDefined()
+    expect(screen.queryByText('已暂停')).toBeNull()
+  })
+
+  it('admin：过滤器已关闭时点开关（开启方向）不弹确认，直接发请求', async () => {
+    makeUser('admin')
+    mockSafetyStats.mockResolvedValue({ data: { ...REAL_STATS, enabled: false } })
+    mockSafetyConfig.mockResolvedValue({ data: { status: 'ok', enabled: true } })
+    render(<SettingsSecurity />)
+
+    expect(await screen.findByText('已暂停')).toBeDefined()
+    const toggle = screen.getByText('内容安全过滤器')
+    fireEvent.click(toggle.parentElement!.querySelector('button')!)
+
+    // 开启方向不加摩擦：无确认框，请求立刻发出
+    expect(screen.queryByText('确认关闭内容安全过滤器')).toBeNull()
+    await waitFor(() => {
+      expect(mockSafetyConfig).toHaveBeenCalledWith(true)
+    })
+    expect(await screen.findByText('运行中')).toBeDefined()
   })
 
   it('加载失败显示错误与重试入口，不显示 0 冒充数据', async () => {

@@ -144,6 +144,11 @@ test.describe.serial('W11 · 安全面板（D1）', () => {
     )
     await page.getByRole('button', { name: '内容安全过滤器开关' }).click()
 
+    // NEW-20③：关闭过滤器是危险方向 —— 先出确认框，确认后才真正发请求
+    await expect(page.getByText('确认关闭内容安全过滤器')).toBeVisible()
+    await expect(page.getByText(/所有用户失去内容安全过滤/)).toBeVisible()
+    await page.getByRole('button', { name: '关闭过滤器' }).click()
+
     // 绝不假成功：状态保持「运行中」，且给出 warning
     await expect(page.getByText('运行中')).toBeVisible()
     await expect(page.getByText('已暂停')).toHaveCount(0)

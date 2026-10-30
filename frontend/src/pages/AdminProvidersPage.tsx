@@ -27,6 +27,9 @@ export default function AdminProvidersPage() {
 
   // ── 数据状态 ──
   const [providers, setProviders] = useState<ProviderOption[]>([])
+  // 默认供应商 / 回退链：/all 一直返回但此前被丢弃，页头据此渲染模型路径徽章序列
+  const [defaultProvider, setDefaultProvider] = useState('')
+  const [fallbackChain, setFallbackChain] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -35,6 +38,8 @@ export default function AdminProvidersPage() {
   const [editingProvider, setEditingProvider] = useState<ProviderOption | null>(null)
   const [guideProvider, setGuideProvider] = useState<ProviderOption | null>(null)
   const [deletingProvider, setDeletingProvider] = useState<ProviderOption | null>(null)
+  // 禁用是危险方向（改变全体用户可用模型与回退路径）：先确认
+  const [disablingProvider, setDisablingProvider] = useState<ProviderOption | null>(null)
   const [togglingKey, setTogglingKey] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -48,6 +53,8 @@ export default function AdminProvidersPage() {
     try {
       const res = await listAllProviders()
       setProviders(res.providers ?? [])
+      setDefaultProvider(res.default_provider ?? '')
+      setFallbackChain(res.fallback_chain ?? [])
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
         || (err as Error)?.message
@@ -66,11 +73,20 @@ export default function AdminProvidersPage() {
   //  操作
   // ═════════════════════════════════════════════════
 
-  const handleToggle = async (p: ProviderOption) => {
+  const handleToggle = (p: ProviderOption) => {
     if (p.is_special) {
       addToast({ type: 'warning', message: '特殊选项不支持启用/禁用' })
       return
     }
+    // 仅「禁用」方向加一次确认；「启用」方向保持一键直生效（不收回能力、不加阻碍）
+    if (p.enabled === true) {
+      setDisablingProvider(p)
+      return
+    }
+    void applyToggle(p)
+  }
+
+  const applyToggle = async (p: ProviderOption) => {
     setTogglingKey(p.key)
     try {
       await toggleProvider(p.key, !p.enabled)
@@ -134,6 +150,25 @@ export default function AdminProvidersPage() {
   //  渲染
   // ═════════════════════════════════════════════════
 
+  /** key → 展示名；链里出现已不在清单的旧 key 时原样显示，不编造名称 */
+  const nameOfKey = (key: string) => providers.find((x) => x.key === key)?.name || key
+  const defaultInList = providers.some((x) => x.key === defaultProvider)
+  // 空串键不渲染成空徽章（防御脏配置）
+  const visibleChain = fallbackChain.filter((key) => key.trim() !== '')
+  const disableChainIndex = disablingProvider ? visibleChain.indexOf(disablingProvider.key) : -1
+
+  const disableMessage = (() => {
+    if (!disablingProvider) return ''
+    const notes: string[] = []
+    if (disablingProvider.key === defaultProvider) {
+      notes.push('该供应商是当前默认供应商，禁用后默认模型将切换')
+    }
+    if (disableChainIndex >= 0) {
+      notes.push(`该供应商处于回退链第 ${disableChainIndex + 1} 位，禁用后该档位会被跳过`)
+    }
+    return `禁用会改变所有用户可用模型与回退路径。${notes.map((n) => `${n}。`).join('')}确认禁用「${disablingProvider.name}」？`
+  })()
+
   if (!isAdmin) {
     return (
       <AnimatedPage>
@@ -185,6 +220,35 @@ export default function AdminProvidersPage() {
               </button>
             </div>
           </div>
+
+          {/* ═══ 模型路径：默认 → 回退链 ═══
+              /all 一直返回 default_provider / fallback_chain，此前前端从未展示。 */}
+          {!loading && !error && (
+            <div className="mb-5 flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span className="text-gray-400">模型路径</span>
+              {defaultProvider ? (
+                <span className="inline-flex items-center gap-1 rounded bg-primary-50 px-2 py-0.5 font-medium text-primary-600">
+                  默认：{defaultInList ? nameOfKey(defaultProvider) : `${defaultProvider}（内置自动选择）`}
+                </span>
+              ) : (
+                <span className="rounded bg-gray-100 px-2 py-0.5 text-gray-500">默认：未配置</span>
+              )}
+              <span className="text-gray-300">→</span>
+              {visibleChain.length === 0 ? (
+                <span className="rounded bg-gray-100 px-2 py-0.5 text-gray-500">未配置回退链</span>
+              ) : (
+                visibleChain.map((key, i) => (
+                  <span
+                    key={`${i}-${key}`}
+                    className="inline-flex items-center gap-1 rounded bg-white/70 px-2 py-0.5 text-gray-600 border border-white/40"
+                  >
+                    <span className="text-gray-400">第 {i + 1} 位</span>
+                    {nameOfKey(key)}
+                  </span>
+                ))
+              )}
+            </div>
+          )}
 
           {/* ═══ 错误状态 ═══ */}
           {error && !loading && (
@@ -340,6 +404,22 @@ export default function AdminProvidersPage() {
             provider={guideProvider}
             open={!!guideProvider}
             onClose={() => setGuideProvider(null)}
+          />
+
+          {/* ═══ 禁用确认弹窗（危险方向；启用不弹） ═══ */}
+          <ConfirmDialog
+            open={!!disablingProvider}
+            title="确认禁用供应商"
+            message={disableMessage}
+            confirmText="确认禁用"
+            cancelText="取消"
+            variant="danger"
+            onConfirm={() => {
+              const target = disablingProvider
+              setDisablingProvider(null)
+              if (target) void applyToggle(target)
+            }}
+            onCancel={() => setDisablingProvider(null)}
           />
 
           {/* ═══ 删除确认弹窗 ═══ */}
