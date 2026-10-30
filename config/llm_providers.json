@@ -11,7 +11,7 @@
       "temperature": 0.85,
       "stream_enabled": true,
       "request_timeout": 40,
-      "description": "Agnes agnes-3.0-flash（OpenAI 兼容端点），首选供应商；2026-10-20 质量悬崖批：超时 15→40s。实测生产形态 prompt（system ~5.9k 字 + 19 条历史 + max_tokens 512~2048）下 agnes 延迟分布 1.1/2.4/3.4/10.5/10.9/24.6/37.4/51.7s（8 次采样）——15s 会误杀 24.6/37.4/51.7 三次**健康响应**，当日 24 次调用 15 次失败/10 次熔断，报障对话 2873/2875 全部由降级模型 glm-4.5-flash 生成（客服腔）。40s 覆盖 P90 长尾；主链外层预算 45s（agnes 40s + 降级位窗口）；熔断阈值 1→2、冷却 300→120s",
+      "description": "agnes-3.0-flash（OpenAI 兼容），首选供应商，负责角色扮演主链，优先保证长回复稳定。",
       "enabled": true,
       "sort_order": 1,
       "guide": {
@@ -23,8 +23,8 @@
           "保存设置，系统将优先使用 agnes-3.0-flash"
         ],
         "tips": [
-          "本供应商为 OpenAI 兼容协议，base_url 须含 /v1",
-          "该 key 亦被图片生成模块复用（IMAGE_GEN_PROVIDER=agnes）"
+          "本供应商使用 OpenAI 兼容协议，Base URL 须包含 /v1",
+          "同一个 Key 也可用于图片生成，无需重复配置"
         ]
       }
     },
@@ -42,12 +42,12 @@
           "type": "disabled"
         }
       },
-      "description": "GLM-4.5-Flash（免费，链上第 2 位）。必须带 thinking=disabled：实测该模型默认开思考，max_tokens=60 时预算被推理吃光 → content 为空/截断，100 时恒空。不用 GLM-4.7 的真因（09-21 逐模型实调）：glm-4.7 与 glm-4.5-air 返回 1113「余额不足或无可用资源包」= 付费档、该 key 无余额；glm-4.7-flash 返回 1305「该模型当前访问量过大」= 免费池拥挤不可依赖",
+      "description": "glm-4.5-flash（免费），链上第 2 位，Agnes 不可用时自动接管。",
       "enabled": true,
       "sort_order": 2,
       "guide": {
         "apply_url": "https://open.bigmodel.cn",
-        "free_quota": "GLM-4.5-Flash 免费档（本系统已关闭其思考模式以适配短句对话）",
+        "free_quota": "GLM-4.5-Flash 免费档（已关闭思考模式，适配短句对话）",
         "steps": [
           "打开 https://open.bigmodel.cn 用手机号注册账号",
           "完成实名认证（个人账号即可）",
@@ -58,9 +58,9 @@
           "点击「保存设置」，系统会自动使用 GLM-4.5-Flash 模型"
         ],
         "tips": [
-          "本位是 agnes 挂死/超时后的降级位，角色扮演对齐弱于 agnes（实测同会话 agnes 出角色腔、智谱出客服腔）",
-          "GLM-4.7 / GLM-4.5-Air 需付费余额（实测错误码 1113），GLM-4.7-Flash 免费池拥挤（实测 1305），均不作为默认档位",
-          "可用 ZHIPU_MODEL 环境变量覆盖档位（覆盖后仍需保留 thinking=disabled，否则短回复会变空）"
+          "Agnes 不可用时自动接管；角色扮演效果略弱于 Agnes",
+          "默认使用免费档 GLM-4.5-Flash；其他档位可能需要付费或额度受限",
+          "切换其他档位时需保留 thinking=disabled，否则短回复可能为空"
         ],
         "warnings": []
       }
@@ -74,7 +74,7 @@
       "max_tokens": 2048,
       "temperature": 0.85,
       "stream_enabled": true,
-      "description": "Spark Lite 永久免费，Token无限，并发5，有效期至2036年",
+      "description": "spark-lite 永久免费，Token 无限，并发 5，有效期至 2036 年。",
       "enabled": true,
       "sort_order": 3,
       "guide": {
@@ -111,7 +111,7 @@
       "max_tokens": 2048,
       "temperature": 0.85,
       "stream_enabled": true,
-      "description": "ERNIE-Speed-128k 每月 50 万 Token 免费，128K 上下文",
+      "description": "ernie-speed-128k 每月 50 万 Token 免费，支持 128K 上下文。",
       "enabled": true,
       "sort_order": 4,
       "guide": {
@@ -149,7 +149,7 @@
       "max_tokens": 4096,
       "temperature": 0.85,
       "stream_enabled": true,
-      "description": "DeepSeek-V3（deepseek-chat）高质量模型，需自行申请API Key（付费）",
+      "description": "deepseek-chat（DeepSeek-V3）质量更高，需自行申请 API Key（付费）。",
       "enabled": false,
       "sort_order": 5,
       "guide": {
@@ -186,14 +186,14 @@
         "free_quota": "免费（使用已配置的供应商）",
         "steps": [
           "选择「自动回退」后无需任何操作",
-          "系统会按以下优先级尝试：Agnes → 智谱 → 讯飞 → 百度（与 fallback_chain 同一真源）",
+          "系统会按以下优先级尝试：Agnes → 智谱 → 讯飞 → 百度",
           "如果某个供应商不可用（如 API Key 过期），会自动切换到下一个",
           "建议新用户选择此选项"
         ],
         "tips": [
           "推荐新用户使用，无需关心技术细节",
           "需要至少配置一个供应商的 API Key 才能正常工作",
-          "链首 Agnes 承担角色扮演主链（实测角色扮演对齐明显优于智谱免费档），建议优先配置"
+          "链首 Agnes 承担角色扮演主链，建议优先配置"
         ],
         "warnings": []
       }

@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-10-30 — 供应商管理文案清理（用户报障「描述太复杂太杂乱，疑似调试过程泄露」）· 纯文案零逻辑
+
+- **定位**：`config/llm_providers.json` 的 `providers.*.description`——管理页 `AdminProvidersPage.tsx:307` 全文展示、用户端 `SettingsLLM.tsx:313` 单行截断；教程 tips 同源展示于 `ProviderGuideModal`。
+- **问题**：agnes description 为 2026-10-20 质量悬崖批事故复盘（8 次采样延迟、熔断阈值、报障会话 2873/2875）；智谱为逐模型实调错误码 1113/1305 与「客服腔」对照；均属工程笔记直接进入用户界面，非产品文案。
+- **改动**（仅 `config/llm_providers.json`）：5 个供应商 description 统一为一句式（Agnes 52 字 / 智谱 41 / 讯飞 42 / 百度 46 / DeepSeek 49），保留各自实配模型名以满足 `test_provider_description_consistency` 透明性门禁；教程清理 Agnes tips 2 条、智谱 tips 3 条 + free_quota、自动回退 tips 1 条与 steps 1 条（去掉「实测 / 错误码 / 熔断 / 客服腔 / IMAGE_GEN_PROVIDER / fallback_chain」等内部痕迹）。未改代码、端点、行为。
+- **验证**：`tests/test_provider_description_consistency.py` **15 passed**；`tests/test_llm_providers_routes.py` + `tests/test_llm_provider.py` **42 passed**；JSON 解析通过，5 条 description 41–52 字。按用户裁决未新增防复发门禁（只改文案）。
+- **工作树说明**：主检出同时存在并行窗口在制品（`voice/` + `tests/` 5 文件 + `.env.example`，mtime 13:44–13:56），本批精确 `git add` 仅本文件与 LOG，未触碰未提交他窗成果。
+- **未部署**：纯 A 档配置文案，本地提交；推送/部署随用户裁决。
+
 ## 2026-10-16 — 主动消息同义三连诊断（用户报障「今天的三次主动消息都是一样的意思，这个也太AI了吧」）· 纯诊断零代码 · 待裁决
 
 - **生产取证**（会话4/林挽夏；chat_history + event_ledger + app.log 时序链）：今日三发三条同义——① 10:36:53「早上好，你今天感觉怎么样？」；② 11:41:54「早上好，你今天感觉怎么样？今天有没有什么特别的事情想要和我分享的呢？」（①作前缀续写）；③ 16:14:56「今天感觉怎么样？有没有什么特别的事情想要和我分享的呢？」（②去「早上好」重排）。其间 16:04:52 出现与②逐字相同的生成，被去重硬闸拦下（账本 `duplicate_suppressed`）→ 退避 5 分钟 → 16:14 换说法（③）再发——**闸在工作，但只拦住精确重复**。
