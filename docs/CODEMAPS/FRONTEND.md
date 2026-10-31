@@ -31,7 +31,7 @@ frontend/src/
 │   ├── system.ts         ← 系统 API（含 /api/user/llm-config、topic-state config/快照三函数，v1.58）
 │   ├── selfservice.ts    ← 自服务 API（同意状态/数据导出/注销，W17）
 │   ├── templates.ts      ← 角色模板 API（W12）
-│   ├── training.ts       ← 训练 API（training/* + proactive/* + humanize/config + user/reply-mode）
+│   ├── training.ts       ← 风格提取 API（training/* + proactive/* + humanize/config + user/reply-mode）
 │   └── wechat.ts         ← 微信 API
 │
 ├── constants/            ← 常量单一真源

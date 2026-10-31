@@ -17,11 +17,18 @@ logger = logging.getLogger("voice.voice_catalog")
 
 _DEFAULT_PATH = project_path("data", "voice_catalog.json")
 
-# MiMo 预设音色（静态，与 api/routers/voice_routes._MIMO_VOICES 同源语义）
+# MiMo 预置音色（2026-10-30 对齐官方 v2.5 音色表；
+# 旧三档 female-tianmei/female-qingxin/male-chenwen 在 provider 侧保留别名映射）
 _PRESET_VOICES: list[dict[str, str]] = [
-    {"name": "female-tianmei", "description": "甜美女声"},
-    {"name": "female-qingxin", "description": "清新女声"},
-    {"name": "male-chenwen", "description": "沉稳男声"},
+    {"name": "mimo_default", "description": "MiMo 默认音色"},
+    {"name": "冰糖", "description": "清甜女声"},
+    {"name": "茉莉", "description": "清新女声"},
+    {"name": "苏打", "description": "元气女声"},
+    {"name": "白桦", "description": "沉稳男声"},
+    {"name": "Mia", "description": "英文女声 Mia"},
+    {"name": "Chloe", "description": "英文女声 Chloe"},
+    {"name": "Milo", "description": "英文男声 Milo"},
+    {"name": "Dean", "description": "英文男声 Dean"},
 ]
 
 _singleton: VoiceCatalog | None  # noqa: E305 — 前向声明（定义见下）
@@ -83,6 +90,7 @@ class VoiceCatalog:
         gender: str = "",
         age_group: str = "",
         owner: str = "",
+        sample_path: str = "",
     ) -> dict[str, Any]:
         """登记音色。
 
@@ -104,6 +112,9 @@ class VoiceCatalog:
             entry["age_group"] = age_group
         if owner:
             entry["owner"] = owner
+        if sample_path:
+            # voiceclone 参考音频（相对项目根）；合成时 provider 还原为 data URL
+            entry["sample_path"] = sample_path
         with self._lock:
             self._entries[voice_id] = entry
             self._save()
@@ -142,3 +153,45 @@ def get_voice_catalog() -> VoiceCatalog:
             if _singleton is None:
                 _singleton = VoiceCatalog()
     return _singleton
+
+
+# ── 音色归属判定（唯一 owner）────────────────────────────────────────────
+#
+# 归属位就是这个 catalog 条目的 ``owner`` 字段（克隆/设计登记时写入，见
+# ``api/routers/mimo_voice_routes.py`` 的 ``_register_catalog`` 调用）。
+# 规则**只在这里定义一次**：合成入口（``/api/mimo/synthesize``）与角色绑定入口
+# （``/api/characters/{id}/voice`` POST/PUT）必须调用本函数，不得各写一份内联判断
+# —— 两处口径一旦漂移，就会重新出现「绑得进去、合成不了」或反向的漏洞。
+#
+# 语义：``owner`` 为空串 = 平台共享（存量条目无该键，向后兼容），不受限；
+# 静态预设不是 catalog 条目，天然不受限；admin 例外；无主体（机器面）不干预。
+
+#: 归属拒绝的统一文案（两处强制点同文案，测试按常量断言防漂移）
+VOICE_OWNER_DENIED = "无权使用他人克隆音色"
+
+
+def denied_voice_owner(
+    voice_id: str,
+    *,
+    user_id: str,
+    is_admin: bool = False,
+    catalog: VoiceCatalog | None = None,
+) -> bool:
+    """该 ``voice_id`` 是否属于**他人**的克隆音色（是 → 调用方应拒绝）。
+
+    Args:
+        voice_id: 待判音色；空串直接放行（未指定音色 = 用引擎默认）。
+        user_id: 服务端从认证主体派生的用户键（客户端自报值不得传入）。
+        is_admin: admin 例外（可管理全量音色资产）。
+        catalog: 注入点（测试用）；缺省走 ``get_voice_catalog()`` 单例。
+
+    Returns:
+        True 表示 owner 非空且不等于 ``user_id``（他人资产）。
+    """
+    if not voice_id or is_admin:
+        return False
+    cat = catalog if catalog is not None else get_voice_catalog()
+    entry = cat.get(voice_id)
+    owner = str((entry or {}).get("owner") or "")
+    return bool(owner) and owner != str(user_id)
+

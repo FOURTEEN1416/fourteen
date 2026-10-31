@@ -1,13 +1,13 @@
 # AGENTS.md — 唯一的你（ai-girlfriend）项目 Agent 宪法
 
 > **项目**：unique-you — 唯一的你·十四 — 基于 LLM 的智能情感陪伴系统
-> **版本**：v1.61（2026-10-30 前端体验批7·遗留收尾（D20 M 级四项清零，本地全链提交未部署）：**NEW-20 高危管理操作二次确认**（三处危险方向确认+后果文案+Modal 顶层 ESC 栈+供应商页回退链徽章；启用/开启路径零摩擦）/ **NEW-22 用户列表排序全页化**（后端 sort/sort_dir Literal 白名单 7 键+id desc 次键，前端透传删伪排序）/ **NEW-31 组件库收编**（SubTabBar 删除+DELETION_LOG 补登、ConfirmDialog Button 化、RolesPage/SettingsVoice EmptyState+Skeleton 收编）/ **NEW-32 设计 token 统一**（Slider/UserBadges/Breadcrumb/RoleSettingsTabs 四病灶+DesignTokens 守卫测试）。对抗验收 2 缺陷修复（DELETION_LOG 漏登/排序断言缺陷）+突变验红 4/4；后端 269 测试文件四分块 **4297 通过 + 2 跳过 / 3 个存量失败族**（test_api_routes sqlalchemy / test_w10_metrics_multiproc 503→404 / test_w3_scheduler_state Depends，均 HEAD 对照实证非本批）——v1.59.1「4 失败=骰子闸时区族」口径已过期；ruff 0；前端 **47 文件 342 例全绿** + tsc 0；端点无新增。**部署未做（随用户裁决）**；扫码 e2e spec 仍开放。详见 §10 表）。
-> **上一版本**：v1.60（2026-10-29 前端全站体验批 1–6（D20 六批全开工，本地七提交未部署）：批1 P0止血 `908db1c`→批2 契约修复 `38e517c`→批3 admin 数据面 `6d57e30`→批4 首日旅程 `cbdaf96`→批5 个性化与 IA `a91ed34`→批6 收尾 `69c1d71`；新端点 14 个/新表 4 张（operator_audit/operator_prefs/announcements/announcement_reads）/driver.js（MIT）；vitest 303/303（42 文件）、tsc 0、ruff 0；M 级四项（NEW-20/22/31/32）登记为收尾批遗留、已由 v1.61 批7清零）。
-> **更早版本**：v1.59.1（2026-10-28 部署收口：话题状态机批 `3fe2771` + 四项跟进批均已三端部署，生产 @ `dd3b470`；4A 测试债清零 / 4B CSP 行为蒸馏 / 4C 骰子闸 / 4D BreezeTTS2 设计；测试 4262 收集 / 4256 通过 + 2 跳过 / 4 失败；前端 251/251；徽章 4508）。**更早**：v1.57 拟人化实施批（2026-10-27，详见 §10 修订历史表）。批次详情与全部历史版本记录见 `LOG.md`（唯一只追加不覆盖文件）；当前状态见 `docs/HANDOFF_REPORT.md`。（2026-09-29 默默裁决：版本头历史堆叠移除，只留当前版本行。）
+> **版本**：v1.62（2026-10-31 表述分离 + 用户主权 per-user 化批（8 域 · **7/8 独立对抗验收通过**；修复批 **6/6 通过** · 全量回归通过 · **本地工作树未提交未部署**）：**psych** 五端点 admin 全量 / 普通用户仅本人会话；**proactive-backend** 新增 `utils/proactive_config.py` 三级合并 + `user_proactive_config` 覆盖表 + 4 个 `/api/user/proactive*` 端点；**proactive-frontend** 消息 tab 对全体用户开放（个人覆盖/继承全局徽章）；**wechat** 遗留全局端点保持 admin、新增 iLink 出站 CDN 媒体上传；**clone** 数据集 `data/clone/<user_id>/` per-user 分区；**voice** 音色归属单一规则 + 角色音色写门改 `require_character_write`（全局 switch-voice/set-engine 保持 admin）；**topic** 快照读面按本人会话白名单；**docs-naming** 「训练→风格提取」表述分离（目录/类名/路径/字面量零改）。端点 **249/205 → 253/207**（+4 全部为 user/proactive）；测试 **276 文件 / 4498 通过 + 2 跳过 / 收集 4500**（3 个存量失败族由 conftest users 主库隔离根治，非删测试）+ 前端 **47 文件 354 例** + tsc 0 + ruff 0；徽章 **4853**；角色卡 **41 张**。**部署未做（随用户裁决）**；voice 公共卡音色写侧产品级回退、风格提取 LLM per-user 化等登记 deferred。
+> **上一版本**：v1.61（2026-10-30 前端体验批7·遗留收尾（D20 M 级四项清零，本地全链提交未部署）：NEW-20 高危管理操作二次确认 / NEW-22 用户列表排序全页化 / NEW-31 组件库收编 / NEW-32 设计 token 统一；对抗验收 2 缺陷修复 + 突变验红 4/4；后端 269 测试文件 4297 通过 + 2 跳过 / 3 个存量失败族；ruff 0；前端 47 文件 342 例 + tsc 0；端点无新增）。
+> **更早版本**：v1.60（2026-10-29 前端全站体验批 1–6，本地七提交未部署；新端点 14 / 新表 4 / driver.js；vitest 303/303）→ v1.59.1（2026-10-28 部署收口，生产 @ `dd3b470`；测试 4262 收集 / 4256 通过 + 2 跳过 / 4 失败；前端 251/251；徽章 4508）。**更早**：v1.57 拟人化实施批（2026-10-27，详见 §10 修订历史表）。批次详情与全部历史版本记录见 `LOG.md`（唯一只追加不覆盖文件）；当前状态见 `docs/HANDOFF_REPORT.md`。（2026-09-29 默默裁决：版本头历史堆叠移除，只留当前版本行。）
 
 ---
 
-## 实现补充快照（2026-10-11，三端一致 `aea3cd0`；当前状态以版本头 v1.59 为准）
+## 实现补充快照（2026-10-11，三端一致 `aea3cd0`；当前状态以版本头 v1.62 为准）
 
 - **三端一致 @ `aea3cd0`**（2026-10-11 SEC-15 根治批；10 月三批均已部署）：10-05 安全升级批 `2c3b888`（两轮对抗审计 34+47 发现 + 生产 SSH 取证 + P0 修复八域，nginx 线上精确 patch：备份后插安全头/X-Forwarded-Proto/ws 日志关闭）→ 10-09 攻击面扫描批 `e949107`（六路对抗扫描 30 发现/16 确认/9 修复，nginx XFF 行替换 `$proxy_add_x_forwarded_for`→`$remote_addr`，行为级实证 21 打 15×429+6×401）→ 10-11 SEC-15 根治 `aea3cd0`（vitest 3→5 根治 tinypool 双 critical、`npm audit` 0 vulnerabilities、bun.lock/package-lock 双锁收敛销账 FE-2）。复验：health/ready 200、重启窗口 0 ERROR、blob 三端 `git hash-object` 一致、CI 全绿 run `38109894676`（9/9 job 含前端审计门）。下方 bundle/停机判据/依赖声明纪律继续有效。
 - 部署通道：本地 `git push` + 服务器 bundle 快进（含大二进制提交的 `git pull` 必现 `fetch-pack: unexpected disconnect`）。**停机判据用 `MainPID=0` + `cgroup.procs` 为空**，不要用 `is-active`（`TimeoutStopSec=5s` 会让超时停机显示 `failed` 而进程已清空）。
@@ -28,7 +28,7 @@
 ## 0. 项目身份
 
 - **产品形态**：微信扫码即用的 LLM 智能情感陪伴系统，扫码绑定 bot 后在控制台调角色与语音（D16：谁扫码谁聊，一对一）
-- **技术栈**：Python 3.10+ / React 19 / Vite 8 / TypeScript 6 / Tailwind 4 / Zustand 5 / 测试 **4640**（**4297** Py 通过 + 2 跳过 / **3 个存量失败族**（api_routes sqlalchemy / w10 503→404 / w3 Depends，均 HEAD 对照实证与批 7 无关，待专项批次），**342** FE 通过（vitest 5，47 文件）；2026-10-30 批 7 实测收集 **4315**，角色卡 **41 张**）/ MIT
+- **技术栈**：Python 3.10+ / React 19 / Vite 8 / TypeScript 6 / Tailwind 4 / Zustand 5 / 测试 **4853**（**4498** Py 通过 + 2 跳过 / **0 失败**（3 个存量失败族已由 2026-10-31 conftest users 主库隔离根治），**354** FE 通过（vitest 5，47 文件）；2026-10-31 本批实测收集 **4500**、**276 测试文件**，角色卡 **41 张**）/ MIT
 - **核心能力**（见 `README.md`）：
   - 微信聊天（**微信官方 iLink 机器人平台**；**D16 裁决（2026-10-12）「谁扫码谁聊」**：注册用户扫码绑定 bot，bot 即「角色化身」出现在其本人微信里一对一聊天，角色在网页控制台自由切换（activate 链同步扫码人绑定）——**一人一 bot 一条通道**（2026-10-12 D16 补裁「每一个用户只有一个BOT」，取代 09-19「一人两条」）；旧「好友回复『角色』自选」机制已随 D16 整体退役，非扫码人消息按异常拒绝）
   - 角色系统（每用户绑角色卡，性格/风格/口头禅可调）
@@ -114,12 +114,12 @@
 | 语音 | 语音开发 | `voice/` |
 | 剧情线 | 剧情开发 | `plugins/` / `shisi/storyline/` |
 | 微信集成 | 集成开发 | `wechat_direct/` / `shisi/`（DDD 核心 plane: affinity/emotion_stage/persona/stats/vital_signs） |
-| 克隆训练 | 训练开发 | `clone_training/`（weclone_adapter 已于 08-28 删除，克隆收敛为本地提取+JSON 上传） |
+| 风格提取（训练管线） | 训练开发 | `clone_training/`（提取说话风格并注入提示词，**不是模型微调**；weclone_adapter 已于 08-28 删除，克隆收敛为本地提取+JSON 上传） |
 | 前端 | 前端开发 | `frontend/`（React 19 + Vite 8） |
 | 部署 | 部署开发 | `deploy/`（bat/ps1 双版本部署脚本已于 08-28 删除） |
 | 可观测性 | 运维开发 | `observability/` |
 | 安全 | 安全开发 | `security/` |
-| 测试 | QA | `tests/`（**4297** Python 通过 + 2 跳过 / **3 个存量失败族**（HEAD 实证非批 7，待专项）；前端 **342**（47 文件）；2026-10-30 批 7 实测收集 **4315**、**41 卡**；批 1–7 全链本地领先未部署（推送随收口流程），工作树干净，见 `LOG.md` 本批条目） |
+| 测试 | QA | `tests/`（**4498** Python 通过 + 2 跳过 / **0 失败**；前端 **354**（47 文件）；2026-10-31 本批实测收集 **4500**、**276 测试文件**、**41 卡**；8 域实现+文档仍在工作树未提交、未部署（部署随用户裁决），见 `LOG.md` 本批条目） |
 | 工具与脚本 | 工具开发 | `tools/` / `scripts/` / `utils/`（含 **`utils/topic_state.py`**：话题状态机三表 `topic_state/topic_plan/topic_meta` 的唯一 owner，2026-10-27 话题状态机批） |
 
 ---
@@ -136,7 +136,7 @@
 - **微信合规**：不得使用违反微信 ToS 的自动化手段，不得造成账号封禁
 - **数据隐私**：用户聊天记录、角色卡、记忆数据属敏感信息，不得外泄，`.env` 必须在 `.gitignore`；参赛报名/个人资料类目录不得进入公开仓库
 - **多用户隔离**：不同微信用户的数据（角色、记忆、剧情）必须严格隔离，不得串扰
-- **质量门槛**：全量测试基线必须保持通过（当前口径 **4297 通过 + 2 跳过 / 3 个存量失败族 / 收集 4315**，见 §4.3），新功能必须附测试
+- **质量门槛**：全量测试基线必须保持通过（当前口径 **4498 通过 + 2 跳过 / 0 失败 / 收集 4500**，见 §4.3），新功能必须附测试
 - **Windows 优先**：目标用户环境
 - **真实情感优先**：角色互动必须自然真实，不得使用生硬模板回复
 - **LLM 透明**：不得伪装模型身份（反对模型别名映射伪装实际模型）
@@ -160,12 +160,12 @@
 
 ### 4.3 测试约定
 
-- 全量测试基线（2026-10-30 批 7 实测）：**4297** Python 通过 + **2 跳过** / **3 个存量失败族**（`test_api_routes` sqlalchemy / `test_w10_metrics_multiproc` 503→404 / `test_w3_scheduler_state` Depends——均 HEAD 对照实证与批 7 无关，待专项批次）/ 收集 **4315** + **342** 前端（47 文件）；新功能必须附测试；现役角色卡 **41 张**（persona 公式 2×41+13=95）；⚠️ 全量口径必须含 `tests/core/` **与 `tests/api/`**，且分块清单须 `find` 递归生成（`git ls-files` 清单不含未提交新文件；**分块总数必须对四块并集，不得对单块外推**）
+- 全量测试基线（2026-10-31 本批实测）：**4498** Python 通过 + **2 跳过 / 0 失败** / **276 测试文件** / 收集 **4500** + **354** 前端（47 文件）；3 个存量失败族（`test_api_routes` sqlalchemy / `test_w10_metrics_multiproc` 503→404 / `test_w3_scheduler_state` Depends）已由 `tests/conftest.py` 的 users 主库会话级临时库隔离根治（非删测试）；新功能必须附测试；现役角色卡 **41 张**（persona 公式 2×41+13=95）；⚠️ 全量口径必须含 `tests/core/` **与 `tests/api/`**，且分块清单须 `find` 递归生成（`git ls-files` 清单不含未提交新文件；**分块总数必须对四块并集，不得对单块外推**）
 - 用户明确反对采样验证，要求完整验证
 - **测试口径注记（2026-10-21 四十六次刷新，历史口径）**：10-21 八项裁决执行批（`LOG.md` 本批条目）——**3900 收集（250 测试文件）/ 3898 通过 + 2 跳过 / 0 失败**（轨迹 3627→3900 本轮 +273）。前端 vitest **217/217**（33 文件）+ ruff 0 错。**徽章 4116**（3898 Py + 217 FE + 1 标记）；**本轮未部署**（R2 用户裁决）。🔑 **分块清单必须 `find` 递归生成**（漏 `tests/api/` 少 32 例的实证教训在案）。2 跳过 = `test_cache.py:297 Redis not available`（环境相关，非回归）+ `tests/golden/test_golden_set.py:48`（live_llm 用例默认不跑，设 `GOLDEN_LIVE=1` 才跑）。（工作树含未提交新文件，引用 3900 须注明。）
   🔴 **2026-10-27 拟人化实施批刷新**：实测 **3988 收集 / 3982 通过 + 2 跳过 / 4 失败**（四分块 1045+1110+912+915 通过，与 collect-only 精确吻合）；**4 失败为既有问题**——byok api_base 校验 ×2 / w1 无主卡 / sweep 503，均已用 `git stash` 在 HEAD 原样复现、**非本批引入**，待专项批次清理；徽章口径 = 通过数 **4200**（3982 Py + 217 FE + 1 标记）。
   🔴 **2026-10-27/28 话题状态机实施批刷新**：实测 **4180 收集 / 4174 通过 + 2 跳过 / 4 失败**（4 失败同上：byok api_base ×2 / sweep 503 / w1 无主卡，HEAD 复现、非本批）；前端 **251/251（36 文件）**；ruff 0；徽章口径 = **4426**（4174 Py + 251 FE + 1 标记）；**未部署**（回滚 `topic_state.enabled=false` / `llm_judge_enabled=false`）。
-  🔴 **2026-10-28 收口批刷新（历史口径，已被 v1.61 取代——见上方 §4.3 首条）**：实测 **4262 收集 / 4256 通过 + 2 跳过 / 4 失败**（四分块门 958+1180+1097+1021 通过，第四块 4 失败；**既有四失败已由 4A `1d444d8` 清零**——定向复跑三文件 46 通过 0 失败，残留 4 个与既有族同文件域、身份主控复核中）；前端 **251/251（36 文件）** + tsc 0；ruff 0；徽章口径 = **4508**（4256 Py + 251 FE + 1 标记）；⚠️ 工作树含 10 个未提交实现文件（4B/4C 实现部分），引用本口径须注明。
+  🔴 **2026-10-28 收口批刷新（历史口径，已被 v1.62 取代——见上方 §4.3 首条）**：实测 **4262 收集 / 4256 通过 + 2 跳过 / 4 失败**（四分块门 958+1180+1097+1021 通过，第四块 4 失败；**既有四失败已由 4A `1d444d8` 清零**——定向复跑三文件 46 通过 0 失败，残留 4 个与既有族同文件域、身份主控复核中）；前端 **251/251（36 文件）** + tsc 0；ruff 0；徽章口径 = **4508**（4256 Py + 251 FE + 1 标记）；⚠️ 工作树含 10 个未提交实现文件（4B/4C 实现部分），引用本口径须注明。
   ⚠️ **基线口径纪律（2026-10-11 实测，10-12 定性收口）**：**角色卡数也是基线的隐藏变量**。`config/characters/` 被 `.gitignore:120` 忽略、**内容不随 git 复现**；`tests/test_persona_injection.py` 按 `Path("config/characters").glob("*.json")` 参数化 → **用例数 = 2 × 卡数 + 13**（2026-10-11 实测 42 张 → 收集 97）。当时 **42 张 = 41 策展卡 + 1 张 `99c89c39.json`（user_id=1 的林挽夏克隆变体，与前两张林挽夏 md5 互异，10-09 19:36 落盘）**——第 42 张已定性，差异复核**关闭**（2026-10-12 主控裁决，此前「待复核」作废）；**现行 41 张**（2026-10-30 批 7 复核：`99c89c39.json` 已不在盘、gitignore 无轨迹、消失时点不明，非批 7 删除，见 v1.61/LOG 登记待定性）；引用基线按 **41 张**声明（历史：09-20 该目录曾为空致收集塌缩 1356，后按用户指令从服务器逐字节恢复 41 张）。
   🔑 **引用任何基线都必须同时声明两件事**：① **角色卡是否在位 / 卡数**；② **工作树是否含并行窗口在制品**（与"passed ≠ collected"同类）。缺一则数字不可比。
   ⚠️ **已知环境问题：单进程整跑 `pytest -q` 会在 30%~97% 之间的**随机位置**停住**（三次实测分别停在 `test_integration.py` / `test_web_enricher.py` / `test_llm_providers_routes.py`），且这三个文件**单独跑全部通过** —— 属聚合态资源问题（疑似前序用例泄漏线程/事件循环），**不是某个用例失败**。分块跑可稳定复现完整基线，推荐工作流：
@@ -174,7 +174,7 @@
   for i in 0 1 2 3; do echo "$files" | awk -v i=$i 'NR%4==i' | tr '\n' ' ' > /tmp/c$i.txt; done
   for i in 0 1 2 3; do timeout 200 env PYTHONPATH= python -m pytest $(cat /tmp/c$i.txt) -q -p no:cacheprovider; done
   ```
-  四块结果相加应等于 `--collect-only` 的收集数（当前检出 **4315** = 2026-10-30 批 7 实跑；收集数随 `config/characters/` 卡数浮动 = 2 × 卡数 + 13，**现役 41 张**；⚠️ 分块清单须 `find` 递归生成，`tests/test_*.py` 四段 glob 会漏 `tests/core/`；🔴 分块运行期间禁跑任何其他测试——并行 pytest 会互相污染共享 data/ 与锁，失败数随并发漂移）。
+  四块结果相加应等于 `--collect-only` 的收集数（当前检出 **4500** = 2026-10-31 本批实跑；收集数随 `config/characters/` 卡数浮动 = 2 × 卡数 + 13，**现役 41 张**；⚠️ 分块清单须 `find` 递归生成，`tests/test_*.py` 四段 glob 会漏 `tests/core/`；🔴 分块运行期间禁跑任何其他测试——并行 pytest 会互相污染共享 data/ 与锁，失败数随并发漂移）。
 - 验证报告：归档到 `docs/`；测试基线历史口径以 `LOG.md` 各批条目为准（原根目录 `pytest_*_baseline.log` 三件已不存在，死引用于 2026-10-11 对齐批删除）
 
 ### 4.4 Git 约定
@@ -295,6 +295,7 @@
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v1.62**（表述分离 + 用户主权 per-user 化批） | **2026-10-31** | **8 域 · 7/8 独立对抗验收通过；修复批 6/6 通过 · 全量回归通过 · 本地工作树未提交未部署**：**psych** 五端点 admin 全量 / 普通用户仅本人会话 scope；**proactive-backend** 新增 `utils/proactive_config.py`（879 行，三级合并 + `user_proactive_config` 表）+ 4 个 `/api/user/proactive*` 端点（training 23→27）；**proactive-frontend** 消息 tab 对全体用户开放（个人覆盖/继承全局徽章，+11 vitest）；**wechat** 遗留全局端点保持 admin + 新增 `wechat_direct/media_upload.py` 出站 CDN 上传（14 例）；**clone** 数据集 `data/clone/<user_id>/` per-user 分区（8 例）；**voice** 音色 owner 单一规则 + 角色音色写门 `require_character_write` + 只读审计脚本（23 例；全局 `switch-voice`/`set-engine` 保持 admin；公共卡写侧 404 产品级回退 deferred）；**topic** 快照读面本人会话白名单（+6 例）；**docs-naming** 「训练→风格提取」表述分离（`training.ts` / `client.ts` / CODEMAPS / §2 Owner Map；目录名/类名/路径/字面量零改）。**端点 249/205 → 253/207**（+4 全部为 user/proactive）；测试 **276 文件 / 4498 通过 + 2 跳过 / 收集 4500 / 0 失败**（3 个存量失败族由 `tests/conftest.py` users 主库隔离根治，非删测试）+ 前端 **47 文件 354 例** + tsc 0 + ruff 0；徽章 **4853**；角色卡 **41 张**。**未提交/未部署**（部署归用户裁决）；deferred：voice 公共卡前端控件/`(character_id,user_id)` 二级键、风格提取 LLM per-user 化、消息 tab 新用户 UX、存量越权音色绑定审计不迁移。 |
 | **v1.61** | **2026-10-30** | **前端体验批7·遗留收尾（D20 M 级四项清零，本地全链提交未部署）**：**NEW-20 高危管理操作二次确认**（三处危险方向确认+后果文案+Modal 顶层 ESC 栈+供应商页回退链徽章；启用/开启路径零摩擦）/ **NEW-22 用户列表排序全页化**（后端 sort/sort_dir Literal 白名单 7 键+id desc 次键，前端透传删伪排序）/ **NEW-31 组件库收编**（SubTabBar 删除+DELETION_LOG 补登、ConfirmDialog Button 化、RolesPage/SettingsVoice EmptyState+Skeleton 收编）/ **NEW-32 设计 token 统一**（Slider/UserBadges/Breadcrumb/RoleSettingsTabs 四病灶+DesignTokens 守卫测试）。工作流 dwfrun-d95bc40b 实施（任务卡复核 11 条冲突回炉一轮）；主控收编前窗停放工件并拆除 F1 测试雷（HelpGuidePage 3 用例 mock 修复）；收编链 `69aecd2`（F1/F4/F5 收编+F9 口径更正）→`f9ccfd4`（F2 测试半件）→`d182b6c`→`c6ed735`→`65e0fee`→`9815c27`（NEW-22，含 F2 守卫 hunk 随件入账）；`_mutation_check.py` 过期突变脚本删除（ruff 恢复 0）；对抗验收 2 缺陷修复（DELETION_LOG 漏登 SubTabBar / 排序测试断言缺陷 14 红→28 绿）+突变验红 4/4。**真实测试基线**：后端 269 测试文件四分块 **4297 通过 + 2 跳过 / 3 个存量失败族**（test_api_routes sqlalchemy / test_w10_metrics_multiproc 503→404 / test_w3_scheduler_state Depends，均 HEAD 对照实证非本批，登记待专项批次）——v1.59.1「4 失败=骰子闸时区族」口径已过期；ruff 0；前端 **47 文件 342 例全绿**；tsc 0；端点无新增（NEW-22 仅加查询参数，全口径读数以 CODE_GRAPH 回扫为准）。**部署未做**（随用户裁决）；登记②扫码 e2e spec 仍开放。 |
 | **v1.60** | **2026-10-29** | **前端全站体验批 1–6（D20 六批全开工，本地七提交未部署）**：批1 P0止血 `908db1c`（顶栏身份+退出登录/工具开关 admin 门+只读徽章/记忆整理全局写确认//intro 文案对齐 D13/微信页绑定账号+当前聊天角色/三死卡删除/三死映射删除）→ 批2 契约修复 `38e517c`（NEW-7 主动历史 kind/created_at 归一化+本地日界；NEW-5 状态中心五处：count_facts 真源+owner_prefix 隔离计数/affinity_name 档名/fact→content/日记纯日期；V2-6 Invalid Date 收敛；NEW-9 错误态不伪装空态）→ 批3 admin 数据面 `6d57e30`（NEW-21 operator_audit 审计先行+8 留痕面+审计面板；V2-1 admin 数据面**默认收窄**+operator_prefs 全局运维视图开关+顶栏横幅+user_key→用户名归属标注底座；NEW-11 用户下钻抽屉（账号+通道+强制断开）；NEW-12 humanize 接线数字 id 还原器+用户下拉）→ 批4 首日旅程 `cbdaf96`（NEW-4 扫码状态机：连续失败 error 支路+is_expired 连接轮询检查+15s 看门狗；NEW-16 初始角色告知；NEW-13 BYOK 反馈环：新端点 /api/user/llm-config/test+测试连接+byok=1 引导+已保存密钥徽标+禁用供应商拦截+缓存控件置灰+微信端配置类失败指引；V2-4 /help 教学页 13 模块卡+进度持久化+driver.js 导览；V2-5 公告系统：announcements+announcement_reads 两新表+active 读面+admin CRUD 落审计+顶栏横幅+管理段）→ 批5 个性化与 IA `a91ed34`（V2-3 侧栏「偏好与设置」+逐项 desc+消息 tab 高级运维折叠+θ 白话；NEW-8 useActiveCharacter 根治静默回退+StatusCenter 按 URL 取数；NEW-10 非活跃角色设置入口+模板入口；NEW-14 语音四透明化（死滑条标注/真值选中/全局切换确认/命名+音频口径）；NEW-34 个人偏好自助：/api/user/humanize GET/POST/PUT/DELETE（token 派生键、客户端自报归属忽略）+SettingsAccount 区+回复模式自助端点首次接前端）→ 批6 收尾 `69c1d71`（NEW-17 最后管理员守卫；NEW-15 画像可读化；NEW-18 登录错误本地化；NEW-27 换绑自助断开入口；NEW-23/24/28/29/30 S 批修；NEW-25 按裁决保留训练端点=登记）。**新端点 14 个**（llm-config/test×1 + user/humanize×4（POST/PUT 双装饰器=2 路由）+ announcements×6 + admin global-view×2/audit×1；9 子路由 92→**97**（misc 17/training 23，test_api_routes 钉死），加新路由 6+admin 3 = 全口径 **106**——对抗验收 F9 更正，原记 10 个/101 系算术错误）；新表 4 张（operator_audit/operator_prefs/announcements/announcement_reads，纯新增 create_all 幂等）；新依赖 driver.js（MIT）。口径：vitest **303/303（42 文件）**、tsc 0、ruff 0；后端定向 read_gates 26/humanize 37/w1 23/api_routes 16/last_admin 4/announcements 5/llm-config 15/channel_slot 全绿；**部署未做**（七提交本地领先，随用户裁决）；CODE_GRAPH/HANDOFF 回扫与 M 级残留（NEW-20/22/31/32+扫码 e2e spec）登记为收尾批遗留。 |
 | **v1.59.2** | **2026-10-28** | **工作区整理与真源对齐批（零代码变更）**：CODE_GRAPH 整本回扫升级 **v3.8.35**（§1.1 全表重测 + 历史版本要点压缩归档至 LOG）+ **CODEMAPS 六件**（DATABASE 话题三表 schema 逐列抄实 + `user_reply_mode` 表增补、INDEX 规模 590 py/138 TS、MODULES proactive 14/utils 26、ARCHITECTURE/BACKEND/FRONTEND 热路径与读数同步）+ **README / docs README**（结构树刷新 + 图册行指向 v3.8.35 + reports 登记补漏）+ **FUNCTION_INVENTORY / DECISION_LEDGER**（账本新增五行：D18 话题状态机 / BreezeTTS2 暂不引入维持 / D19 四项跟进批三裁决 / R1 继续挂起 / 沉浸式方括号热修；清单 §I 新增三组 **15 条功能点** N-TOPIC-1~6 / N-DICE-1~5 / N-BEHAV-1~3）+ **READING_REPORT 时效注记**（24 件历史快照头部注记，已随 `958da31` 提交）+ **清理 6 项**（未跟踪 gitignore 缓存/构建产物：`.pytest_cache/` / `.mypy_cache/` / `.ruff_cache/` / `frontend/dist` + `data/` 与 `.aoci/` 下临时物各一；data/ 运行时 34 项与 .aoci 正式内容完整无损，零 tracked 删除）+ **登记候选 1 项**（`docs/verification/` 62 张 PNG 共 18MB 验证截图存证，勘察结论=保留，是否瘦身归用户裁决）。口径：收集 **4263**（266 测试文件）/ 端点 **235 APIRoute**（`len(app.routes)`=**239**）/ 徽章 **4508**；对齐复核残留 **0 条**。 |

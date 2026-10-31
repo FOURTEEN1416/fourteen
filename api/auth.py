@@ -44,6 +44,28 @@ def update_auth_key(api_key: str) -> None:
         _auth_config["api_key"] = api_key
 
 
+def verify_machine_api_key(candidate: str | None) -> bool:
+    """机器面 API Key **复核**：只比对已配置的 key，不看 ``API_KEY_ENABLED`` 开关。
+
+    背景（clone-hardening R3-1）：``verify_api_key_dep`` 在
+    ``API_KEY_ENABLED=false`` 时对无凭证请求直接放行（``if not enabled:
+    return True`` 分支），机器面与匿名面因此无法区分。克隆数据集等私密读面需要
+    「要么有登录主体、要么显式持有效 API Key」的独立判定，故把 key 比对抽成
+    公开函数供该类路由二次复核。
+
+    - key 未配置（空串）→ False（无主体即拒绝，绝不把「没配 key」当放行）
+    - candidate 缺失 / 不匹配 → False
+    """
+    with _auth_lock:
+        key = str(_auth_config["api_key"] or "")
+    if not key or not candidate:
+        return False
+    try:
+        return hmac.compare_digest(str(candidate), key)
+    except TypeError:  # 非 ASCII 输入 compare_digest 不支持 → 非法即不匹配
+        return False
+
+
 async def verify_api_key_dep(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -309,4 +331,5 @@ __all__ = [
     "configure_auth",
     "update_auth_key",
     "verify_api_key_dep",
+    "verify_machine_api_key",
 ]

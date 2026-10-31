@@ -70,7 +70,9 @@ _VOICE_SYNTH_LIMITER = _RateLimiter(6)  # 6 次/分钟/用户
 
 
 def _as_principal(candidate: Any) -> AuthPrincipal | None:
-    """归一主体：直呼 handler（既有测试/脚本）会拿到 Depends 哨兵——按「无主体」解释。"""
+    """归一主体：直呼 handler（既有测试/脚本只传位置参数）会拿到 ``Depends`` 哨兵
+    而非真实主体——统一按「无主体（机器面）」解释；HTTP 层由 FastAPI 注入真值。
+    """
     return candidate if isinstance(candidate, AuthPrincipal) else None
 
 
@@ -253,7 +255,15 @@ async def voice_synthesize(
     if not tts or not tts.enabled:
         raise HTTPException(503, "TTS未启用")
     if engine and engine in tts.available_engines:
-        await tts.switch_engine(engine)
+        # 全局单例变更面收口（语音域边界批）：`switch_engine` 直接改 `_current_engine`，
+        # 效果是全站所有会话的引擎，不是 per-user 参数；合成端点不得成为普通用户的
+        # 全局开关。已是当前引擎 → 无副作用，直接放行（兼容前端默认传值）；
+        # 真要换引擎 → 仅 admin / 机器面（无 Bearer，W1 既有契约）。
+        switching_globally = engine != tts.current_engine
+        if switching_globally and principal is not None and principal.role != "admin":
+            raise HTTPException(403, "切换全局 TTS 引擎为管理员能力")
+        if switching_globally:
+            await tts.switch_engine(engine)
     audio = await tts.synthesize(text)
     if audio is None or len(audio) == 0:
         raise HTTPException(500, "语音合成失败")

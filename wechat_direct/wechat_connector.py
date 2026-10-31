@@ -28,6 +28,7 @@ import requests
 from utils.humanize_config import DELAY_MODES
 from utils.humanize_config import MAX_SEGMENTS as _SPLIT_MAX_SEGMENTS
 from utils.local_time import now_local
+from wechat_direct.media_upload import DEFAULT_CDN_BASE_URL
 
 logger = logging.getLogger("wechat_direct")
 
@@ -36,7 +37,7 @@ DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
 
 # ── iLink CDN 媒体（2026-10-12 多模态协议适配批）──
 # photon-hq/wechat-ilink-client 逆向默认基址；服务端 media 里下发 full_url 时优先用之
-DEFAULT_CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c"
+# 单一真源在 media_upload（出站上传与入站下载共用同一基址，避免两处字面量漂移）
 MEDIA_DOWNLOAD_TIMEOUT_S = 15.0   # 媒体下载超时（规格钉死 15s，失败降级不炸主流程）
 
 # ── 登录相关 ──
@@ -891,7 +892,71 @@ def _send_typing(to, status, token="", base_url=DEFAULT_BASE_URL):
 
 def _send_voice_message(to, audio_data_b64, duration_ms, context_token,
                         token="", base_url=DEFAULT_BASE_URL, fmt="silk"):
-    """发语音消息 (message_type=34)"""
+    """发语音消息：优先走 CDN 媒体上传（新协议），失败回落旧内联协议。
+
+    2026-10-30 出站媒体批：旧实现把 SILK 字节内联进 ``voice_data`` +
+    ``message_type=34``，iLink 服务端对 bot 方向的内联语音静默丢弃
+    （``LOG.md`` 2026-10-12 遗留登记）。新协议要求
+    ``getuploadurl`` → AES-128-ECB 加密 → CDN 上传 → item 引用 ``media``。
+
+    回落逻辑保留旧协议：CDN 不可用时行为与改造前完全一致，可灰度回滚。
+
+    边界（对抗验收 2026-10-30 修正两处）：
+    - **只有上传失败才回落**。sendmessage 本身失败必须向上抛（send_voice 记失败），
+      否则「上传成功 + 发送抛错 → 再发一遍内联」会造成同一条语音重复投递。
+    - 上传预算收紧到 20s × 2 次：本方法跑在 ``_msg_executor``（owner 通道仅 2 worker），
+      原默认 60s × 3 次最坏阻塞 180s，会饿死同通道的另一条消息。
+    """
+    audio_bytes: bytes = b""
+    try:
+        audio_bytes = base64.b64decode(audio_data_b64)
+    except Exception:  # noqa: BLE001 - 非法 base64 交给旧协议原样透传
+        audio_bytes = b""
+
+    if audio_bytes:
+        uploaded = None
+        try:
+            # 延迟导入：避免 wechat_direct/__init__ → connector → media_upload 的循环
+            from . import media_upload
+
+            uploaded = media_upload.upload_bytes(
+                audio_bytes,
+                media_type=media_upload.MEDIA_TYPE_VOICE,
+                to_user_id=to,
+                post_api=_post_api,
+                token=token,
+                base_url=base_url,
+                timeout=20.0,
+            )
+        except Exception as error:  # noqa: BLE001 - 上传失败才回落，不炸主链
+            logger.warning(
+                "[wx][step=voice_cdn_failed] target=%s error=%s；回落旧内联协议",
+                to, error,
+            )
+            uploaded = None
+
+        if uploaded is not None:
+            msg = media_upload.build_message(
+                to_user_id=to,
+                item=media_upload.voice_item(
+                    uploaded,
+                    voice_format=fmt,
+                    playtime_ms=duration_ms,
+                ),
+                context_token=context_token,
+                client_id=uuid.uuid4().hex[:16],
+            )
+            logger.info(
+                "[wx][step=voice_cdn_upload] target=%s bytes=%d padded=%d fmt=%s",
+                to, uploaded.file_size, uploaded.file_size_ciphertext, fmt,
+            )
+            # 发送失败向上抛：绝不二次回落（重复投递风险）
+            return _post_api(
+                "ilink/bot/sendmessage", {"msg": msg},
+                token=token, base_url=base_url,
+            )
+
+    # 旧内联协议（CDN 不可用时的兜底，行为与 2026-10-12 前一致）
     item = {
         "type": 34,
         "voice_item": {

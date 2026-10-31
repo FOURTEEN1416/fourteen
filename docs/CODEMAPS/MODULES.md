@@ -23,7 +23,7 @@
 | **llm_provider** | 4 | `llm_provider/` | LLM 多供应商网关 | ✅ 活跃 |
 | **security** | 5 | `security/` | 安全过滤与加密 | ✅ 活跃 |
 | **proactive** | 14 | `proactive/` | 主动消息推送（ase_engine/ase_hub/scheduler/frequency/**+`frequency.py` 内零 token 骰子闸 owner（4C，默认关闭+dry_run 默认开）**/reflection/reminder_delivery/runtime_plane/runtime_assembly/proactive_context（v1.49 统一上下文真源）/**proactive_hooks**（活材料钩子·近日热点）/llm_proactive（决策线，topic_plan 保存）/post_draft_judge（v1.57 主动 judge fail-closed）/**topic_recall**（v1.58 Q3 parked 复提三重闸候选侧） | ✅ 活跃 |
-| **clone_training** | 4 | `clone_training/` | 克隆训练（数据清洗/数据提取/风格分析） | ✅ 活跃 |
+| **clone_training** | 4 | `clone_training/` | 风格提取（训练管线：数据清洗/数据提取/风格分析；目录名保留） | ✅ 活跃 |
 | **multimodal** | 3 | `multimodal/` | 多模态处理（image_attachment/multimodal_processor） | ✅ 活跃 |
 | **wechat_direct** | 4 | `wechat_direct/` | 微信直连（**每人独立通道·D16 谁扫码谁聊**：connector_registry/channel_paths/wechat_connector **2413 行**） | ✅ 活跃 |
 | **plugins** | 2 | `plugins/` | 插件系统 | ✅ 活跃 |
@@ -247,9 +247,9 @@
 
 ---
 
-## clone_training/ — 克隆训练 (4 文件)
+## clone_training/ — 风格提取（训练管线）(4 文件)
 
-**职责:** 微信聊天数据清洗、数据提取、风格分析
+**职责:** 微信聊天数据清洗、数据提取、风格分析（**提取说话风格并注入提示词，不是模型微调**——`lora_trainer.py` 已删）
 
 **关键文件:**
 - `data_cleaner.py` — 数据清洗

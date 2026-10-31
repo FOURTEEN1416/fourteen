@@ -25,7 +25,13 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import AuthPrincipal, get_current_user_id, get_optional_principal, require_role
+from api.auth_jwt import (
+    AuthPrincipal,
+    get_current_user,
+    get_current_user_id,
+    get_optional_principal,
+    require_role,
+)
 from api.consent import require_current_consent
 from api.database import User, get_db
 from api.deps import deps
@@ -396,6 +402,19 @@ async def list_sessions(
     return {"sessions": owned, "active_count": len(owned)}
 
 
+def _session_owned_by(session_id: str, user_id: int) -> bool:
+    """会话归属判定：会话键的 owner 段必须等于认证用户 id（token 派生，唯一真源
+    ``utils.session_key``）。
+
+    客户端传入的 ``session_id`` 只作**待比对候选**，永不作为归属依据；一段式遗留
+    裸键（无 owner 段）对普通用户一律不可见（fail-closed，与 psych
+    ``_owned_targets`` 的遗留键边界同口径）。admin 不受此函数约束。
+    """
+    from utils.session_key import owner_of
+
+    return owner_of(session_id) == int(user_id)
+
+
 @router.get("/api/chat/history")
 async def chat_history(
     session_id: str = "",
@@ -403,24 +422,33 @@ async def chat_history(
     before: int = Query(default=0, ge=0, description="旧UTC秒时间过滤；精确分页请用before_id"),
     before_id: int = Query(default=0, ge=0, description="上一页最小消息ID，严格小于该ID"),
     _auth: bool = Security(verify_api_key_dep),
-    _admin: tuple[int, User] = Depends(require_role("admin")),
+    user: User = Security(get_current_user),
 ):
+    """聊天历史：admin 可查任意会话；普通用户只能查**本人**会话。
+
+    归属只从认证主体派生（``user.id`` ↔ 会话键 owner 段）；请求他人会话一律
+    404（不区分「不存在」与「无权限」，防状态码枚举）。无 ``session_id`` 时
+    保持既有语义返回空列表（200）。
+    """
+    sid = str(session_id or "").strip()
+    if sid and user.role != "admin" and not _session_owned_by(sid, int(user.id)):
+        raise HTTPException(status_code=404, detail="会话不存在")
     orch = deps.orch
     if not orch or not orch._memory:
         return {"messages": []}
-    if session_id:
+    if sid:
         sm = getattr(orch._memory, "structured_memory", None) or getattr(orch._memory, "_sm", None)
         if sm and hasattr(sm, "get_connection"):
             try:
                 messages = await asyncio.to_thread(
-                    _query_history_sync, sm, session_id, limit, before, before_id
+                    _query_history_sync, sm, sid, limit, before, before_id
                 )
-                return {"messages": messages, "session_id": session_id,
+                return {"messages": messages, "session_id": sid,
                         "next_before_id": messages[0]["id"] if messages else None}
             except Exception as e:
                 logger.warning("Failed to query chat history by session_id: %s", e)
     # 定向查询失败不得回落全局工作记忆（会把其他会话内容冒充本会话）。
-    return {"messages": [], "session_id": session_id, "next_before_id": None}
+    return {"messages": [], "session_id": sid, "next_before_id": None}
 
 
 def _query_history_sync(sm, session_id: str, limit: int, before: int, before_id: int = 0) -> list[dict]:
@@ -465,7 +493,13 @@ async def manual_connect_wechat(
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
-    """Admin 兼容：启动遗留全局/管理员通道。普通用户请用 /api/wechat/channel/connect。"""
+    """Admin 兼容：启动遗留全局/管理员通道。普通用户请用 /api/wechat/channel/connect。
+
+    🔴 禁止开放给普通用户；per-user 通道 owner = api/routers/wechat_channel_routes.py。
+    本端点实操的是 ``slot=0`` 的**管理员自有**通道（``start_login(admin_id, slot=0)``），
+    去掉 admin 门等于让任意用户操作管理员通道——既不解决任何用户诉求，
+    又与 ``/api/wechat/channel/*`` 构成第二套 owner。
+    """
     from wechat_direct.connector_registry import get_registry
 
     admin_id = _admin[0]
@@ -482,6 +516,11 @@ async def manual_disconnect_wechat(
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
+    """Admin 兼容：断开**管理员自有**的 ``slot=0`` 通道。
+
+    🔴 禁止开放给普通用户；per-user 通道 owner = api/routers/wechat_channel_routes.py
+    （用户断开自己通道走 ``POST /api/wechat/channel/disconnect``，身份由 token 派生）。
+    """
     from wechat_direct.connector_registry import get_registry
 
     admin_id = _admin[0]
@@ -610,6 +649,12 @@ async def reconnect_wechat(
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
+    """Admin 兼容：清除**管理员自有** ``slot=0`` 凭证并断开（**不自动重连**）。
+
+    🔴 禁止开放给普通用户；per-user 通道 owner = api/routers/wechat_channel_routes.py
+    （用户自助重连走 ``POST /api/wechat/channel/reconnect``，目标 (user_id, slot) 全部
+    由 token 派生，见 ``wechat_channel_routes.py:231-263``）。
+    """
     from wechat_direct import channel_paths
     from wechat_direct.connector_registry import get_registry
 
@@ -618,4 +663,4 @@ async def reconnect_wechat(
     if path.exists():
         path.unlink()
     get_registry().disconnect(admin_id, 0)
-    return {"status": "reconnecting", "message": "已清除管理员通道凭证并触发重连"}
+    return {"status": "disconnected", "message": "已清除管理员通道凭证并断开（不自动重连）"}

@@ -333,3 +333,242 @@ async def test_web_full_key_requires_full_key(api):
     )
     assert r.status_code == 200, r.text
     assert r.json()["session_key"] == "2:web:8hexdemo"
+
+
+# ═══════════════════════════════════════════════════════════
+# 读面归属：admin 任意键 / 普通用户仅本人会话
+# （服务端从 token 派生身份键，客户端自报归属不得成为依据）
+# ═══════════════════════════════════════════════════════════
+
+
+async def test_snapshot_401_without_token(api):
+    client, _engine, _app, _path = api
+    r = await client.get("/api/topic-state/2:wxid@im.wechat")
+    assert r.status_code == 401, r.text
+
+
+async def test_viewer_reads_own_bound_key_without_text(api):
+    """isolation ①：viewer 传本人绑定键 → 200，且载荷不含 prompt 文本。"""
+    from utils import topic_state
+
+    client, _engine, _app, _path = api
+    topic_state.write_topic_config(enabled=True)
+    topic_state.update_after_turn(
+        "2:wxid@im.wechat", "default", "我明天去面试", now=_NOW, turn_id="own-1",
+    )
+
+    r = await client.get(
+        "/api/topic-state/2:wxid@im.wechat", headers=_bearer(_VIEWER_ID),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["session_key"] == "2:wxid@im.wechat"
+    assert [t["title"] for t in body["active"]] == ["我明天去面试"]
+    assert "text" not in body
+
+
+async def test_viewer_other_user_key_404(api):
+    """isolation ②：viewer 传他人完整键 → 404（不区分无权限/不存在）。"""
+    client, _engine, _app, _path = api
+    r = await client.get(
+        "/api/topic-state/9:wxid@im.wechat", headers=_bearer(_VIEWER_ID),
+    )
+    assert r.status_code == 404, r.text
+
+
+async def test_viewer_numeric_id_404_admin_numeric_id_200(api):
+    """isolation ③：普通用户分支不解析数字 id；admin 保留 R7 还原语义。"""
+    client, _engine, _app, _path = api
+
+    denied = await client.get("/api/topic-state/2", headers=_bearer(_VIEWER_ID))
+    assert denied.status_code == 404, denied.text
+
+    allowed = await client.get("/api/topic-state/2", headers=_bearer(_ADMIN_ID))
+    assert allowed.status_code == 200, allowed.text
+    assert allowed.json()["session_key"] == "2:wxid@im.wechat"
+
+
+async def test_viewer_active_web_session_whitelisted_others_404(api):
+    """白名单第二支：本人活跃 web 会话可读，他人活跃会话 404、admin 可读。"""
+    from api.deps import deps
+    from api.session_manager import SessionManager
+
+    client, _engine, _app, _path = api
+    sessions = SessionManager()
+    own = sessions.create_session(str(_VIEWER_ID), "web")
+    other = sessions.create_session(str(_ADMIN_ID), "web")
+    saved = deps.sessions
+    deps.sessions = sessions
+    try:
+        allowed = await client.get(
+            f"/api/topic-state/{own}", headers=_bearer(_VIEWER_ID),
+        )
+        assert allowed.status_code == 200, allowed.text
+        assert allowed.json()["session_key"] == own
+
+        denied = await client.get(
+            f"/api/topic-state/{other}", headers=_bearer(_VIEWER_ID),
+        )
+        assert denied.status_code == 404, denied.text
+
+        admin_read = await client.get(
+            f"/api/topic-state/{other}", headers=_bearer(_ADMIN_ID),
+        )
+        assert admin_read.status_code == 200, admin_read.text
+    finally:
+        deps.sessions = saved
+
+
+async def test_viewer_reads_real_web_session_key_without_session_manager(api):
+    """R4-1：真实 web 键 ``N:web:hex`` 由 ``resolve_owned_session`` 现场铸造，
+    从不登记 SessionManager / 绑定表 → 必须按 token 派生的 owner 前缀可读。
+
+    旧实现只认 SessionManager 登记键，本用例（sessions=None）恒 404。
+    """
+    from api.deps import deps
+    from utils import topic_state
+
+    client, _engine, _app, _path = api
+    topic_state.write_topic_config(enabled=True)
+    own_key = "2:web:1a2b3c4d"
+    other_key = "1:web:deadbeef"
+    topic_state.update_after_turn(
+        own_key, "default", "我明天去面试", now=_NOW, turn_id="web-own-1",
+    )
+    topic_state.update_after_turn(
+        other_key, "default", "换个话题吧", now=_NOW, turn_id="web-other-1",
+    )
+
+    saved = deps.sessions
+    deps.sessions = None  # 证明确实不依赖 SessionManager 登记
+    try:
+        allowed = await client.get(
+            f"/api/topic-state/{own_key}", headers=_bearer(_VIEWER_ID),
+        )
+        assert allowed.status_code == 200, allowed.text
+        assert allowed.json()["session_key"] == own_key
+        assert [t["title"] for t in allowed.json()["active"]] == ["我明天去面试"]
+
+        denied = await client.get(
+            f"/api/topic-state/{other_key}", headers=_bearer(_VIEWER_ID),
+        )
+        assert denied.status_code == 404, denied.text
+
+        admin_read = await client.get(
+            f"/api/topic-state/{other_key}", headers=_bearer(_ADMIN_ID),
+        )
+        assert admin_read.status_code == 200, admin_read.text
+    finally:
+        deps.sessions = saved
+
+
+async def test_viewer_reads_all_wechat_bindings_not_only_latest(api):
+    """R4-2：多条微信绑定的会话键全部可读（旧实现只取 bound_at 最新一条）。"""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from api.database import WechatBinding
+    from utils import topic_state
+
+    client, engine, _app, _path = api
+    topic_state.write_topic_config(enabled=True)
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as session:
+        session.add(
+            WechatBinding(
+                user_id=_VIEWER_ID,
+                wxid="wxid-second@im.wechat",
+                nickname="第二绑定",
+                bound_at=datetime(2026, 10, 1, 9, 0, 0),
+            )
+        )
+        await session.commit()
+
+    primary = "2:wxid@im.wechat"
+    secondary = "2:wxid-second@im.wechat"
+    topic_state.update_after_turn(
+        primary, "default", "主绑定会话", now=_NOW, turn_id="bind-1",
+    )
+    topic_state.update_after_turn(
+        secondary, "default", "副绑定会话", now=_NOW, turn_id="bind-2",
+    )
+
+    for key, title in ((primary, "主绑定会话"), (secondary, "副绑定会话")):
+        response = await client.get(
+            f"/api/topic-state/{key}", headers=_bearer(_VIEWER_ID),
+        )
+        assert response.status_code == 200, f"{key} -> {response.status_code}: {response.text}"
+        assert [t["title"] for t in response.json()["active"]] == [title]
+
+
+class _ExplodingSessionManager:
+    """``get_active_sessions`` 必抛错：模拟会话管理器故障。"""
+
+    def get_active_sessions(self, user_id: str = "") -> list[str]:
+        raise RuntimeError("session manager unavailable")
+
+
+async def test_owned_session_keys_fail_closed_on_sessions_error(api):
+    """R4-3：读活跃会话抛错 → 异常被吞、绑定键仍可读、他人键仍 404。
+
+    fail-closed = 只丢 SessionManager 支（收窄），不向客户端回 500。
+    """
+    from api.deps import deps
+    from utils import topic_state
+
+    client, _engine, _app, _path = api
+    topic_state.write_topic_config(enabled=True)
+    topic_state.update_after_turn(
+        "2:wxid@im.wechat", "default", "绑定会话", now=_NOW, turn_id="fc-1",
+    )
+    topic_state.update_after_turn(
+        "2:web:feedface", "default", "网页会话", now=_NOW, turn_id="fc-2",
+    )
+
+    saved = deps.sessions
+    deps.sessions = _ExplodingSessionManager()
+    try:
+        bound = await client.get(
+            "/api/topic-state/2:wxid@im.wechat", headers=_bearer(_VIEWER_ID),
+        )
+        assert bound.status_code == 200, bound.text
+        assert [t["title"] for t in bound.json()["active"]] == ["绑定会话"]
+
+        web = await client.get(
+            "/api/topic-state/2:web:feedface", headers=_bearer(_VIEWER_ID),
+        )
+        assert web.status_code == 200, web.text
+
+        other = await client.get(
+            "/api/topic-state/1:web:feedface", headers=_bearer(_VIEWER_ID),
+        )
+        assert other.status_code == 404, other.text
+    finally:
+        deps.sessions = saved
+
+
+async def test_unbound_viewer_whitelist_empty_404(api):
+    """无微信绑定且无活跃会话 → 白名单为空，任意键 404（不猜键）。"""
+    client, _engine, _app, _path = api
+    r = await client.get(
+        "/api/topic-state/3:wxid@im.wechat", headers=_bearer(_UNBOUND_ID),
+    )
+    assert r.status_code == 404, r.text
+
+
+async def test_admin_reads_any_key_without_text(api):
+    """admin 保留：任意（含他人）完整键可读，载荷同样不含 text。"""
+    from utils import topic_state
+
+    client, _engine, _app, _path = api
+    topic_state.write_topic_config(enabled=True)
+    topic_state.update_after_turn(
+        "1:other@im.wechat", "default", "换个话题吧", now=_NOW, turn_id="adm-1",
+    )
+    r = await client.get(
+        "/api/topic-state/1:other@im.wechat", headers=_bearer(_ADMIN_ID),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [t["title"] for t in body["active"]] == ["换个话题吧"]
+    assert "text" not in body

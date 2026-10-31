@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -20,7 +21,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from api.auth import verify_api_key_dep
-from api.auth_jwt import get_current_user_id
+from api.auth_jwt import AuthPrincipal, get_optional_principal
 from api.database import Base, User, get_db
 from api.deps import deps
 from api.routers import personality_routes
@@ -57,7 +58,12 @@ def extractor(tmp_path):
 
 @pytest.fixture
 def psych_client(extractor, tmp_path):
-    """最小 app：只挂 personality_routes，真实 require_role 链走临时 users 库。"""
+    """最小 app：只挂 personality_routes；身份入口覆写为 ``get_optional_principal``。
+
+    R5-1 后心理端点唯一身份入口是 ``_actor → get_optional_principal``（旧链的
+    ``get_current_user`` 已从路由依赖树移除）；本夹具用临时 users 库构造主体，
+    覆盖该入口而非 ``require_role``。
+    """
     engine = create_async_engine(
         f"sqlite+aiosqlite:///{tmp_path / 'users.db'}", echo=False
     )
@@ -94,7 +100,14 @@ def psych_client(extractor, tmp_path):
     app.include_router(personality_routes.router)
     app.dependency_overrides[verify_api_key_dep] = lambda: True
     app.dependency_overrides[get_db] = _get_db_override
-    app.dependency_overrides[get_current_user_id] = lambda: ADMIN_ID
+    # R5-1 后心理端点唯一身份入口是 get_optional_principal（不再有
+    # get_current_user_id 回落链）；本文件只测读/写 scope 语义，直接注入 admin 主体。
+    app.dependency_overrides[get_optional_principal] = lambda: AuthPrincipal(
+        user_id=ADMIN_ID,
+        role="admin",
+        token_version=0,
+        user=SimpleNamespace(id=ADMIN_ID, role="admin"),
+    )
 
     class _Orch:
         components = {"persona_extractor": extractor}

@@ -67,7 +67,9 @@ def test_success_logs_elapsed_ms(monkeypatch, caplog):
     p = _make_provider()
 
     async def _slow(request: httpx.Request) -> httpx.Response:
-        await asyncio.sleep(0.05)
+        # 0.3s 而非 0.05s：Windows 时钟粒度下 50ms sleep 实测可低至 39ms，
+        # 旧断言 ``>= 40`` 边界过贴导致 flaky（2026-10-31 清扫批）。
+        await asyncio.sleep(0.3)
         return _ok_response(request)
 
     _install(monkeypatch, p, _slow)
@@ -82,8 +84,8 @@ def test_success_logs_elapsed_ms(monkeypatch, caplog):
     assert f.get("model") == "agnes-3.0-flash"
     assert f.get("ok") == "True"
     assert f.get("stream") == "False"
-    # 真实测量（不是常量 0）：50ms 的响应必须量出来
-    assert int(f["elapsed_ms"]) >= 40, f"耗时未被真实测量：{f}"
+    # 真实测量（不是常量 0）：300ms 的响应至少量到 150ms（50% 余量）
+    assert int(f["elapsed_ms"]) >= 150, f"耗时未被真实测量：{f}"
 
 
 def test_failure_logs_elapsed_ms_and_error_type(monkeypatch, caplog):
@@ -91,7 +93,7 @@ def test_failure_logs_elapsed_ms_and_error_type(monkeypatch, caplog):
     p = _make_provider()
 
     async def _boom(request: httpx.Request) -> httpx.Response:
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.3)
         raise httpx.ConnectError("offline")
 
     _install(monkeypatch, p, _boom)
@@ -107,7 +109,7 @@ def test_failure_logs_elapsed_ms_and_error_type(monkeypatch, caplog):
     f = _fields(lines[0])
     assert f.get("ok") == "False"
     assert f.get("error") == "ConnectError"
-    assert int(f["elapsed_ms"]) >= 40, f"失败耗时未被真实测量：{f}"
+    assert int(f["elapsed_ms"]) >= 150, f"失败耗时未被真实测量：{f}"
 
 
 async def _async_none(*args, **kwargs):  # noqa: ANN002, ANN003, ANN201
@@ -137,7 +139,8 @@ def test_stream_logs_ttft_and_elapsed(monkeypatch, caplog):
     """流式调用必须带 stream=True 与 ttft_ms（首 token 延迟是流式唯一可用信号）。"""
 
     async def _sse(request: httpx.Request) -> httpx.Response:
-        await asyncio.sleep(0.03)
+        # 0.2s 而非 0.03s：同上，避免 Windows 时钟粒度把 30ms 测成 <20ms。
+        await asyncio.sleep(0.2)
         frames = [
             'data: {"choices":[{"delta":{"content":"你"}}]}\n\n',
             "data: [DONE]\n\n",
@@ -162,7 +165,7 @@ def test_stream_logs_ttft_and_elapsed(monkeypatch, caplog):
     f = _fields(lines[0])
     assert f.get("stream") == "True"
     assert "ttft_ms" in f, f"流式日志缺 ttft_ms：{f}"
-    assert int(f["ttft_ms"]) >= 20
+    assert int(f["ttft_ms"]) >= 100
     assert int(f["elapsed_ms"]) >= int(f["ttft_ms"])
 
 

@@ -32,10 +32,19 @@ class FrequencyAdapter:
         normal_daily: int = 8,
         low_daily: int = 3,
         min_weekly: int = 1,
+        override_max_daily: int | None = None,
     ):
         self.normal_daily = normal_daily
         self.low_daily = low_daily
         self.min_weekly = min_weekly
+        # 硬上限（2026-10-31 R1-2）：用户的 ``max_daily_messages`` 必须压过
+        # **所有档位**。旧实现只改 ``normal_daily`` —— 用户设 1/2 后进入
+        # low 档仍按 ``low_daily=3`` 发送，个人上限不执行。
+        # 缺省即 normal_daily：normal=8 时 low=3/minimal=1 不受影响（min 语义），
+        # 而 normal=1/2 时所有档位都会被压到 1/2 —— 这正是「上限」的定义。
+        self.override_max_daily = (
+            normal_daily if override_max_daily is None else override_max_daily
+        )
         self._unanswered_count = 0
         self._current_level = "normal"
 
@@ -56,12 +65,38 @@ class FrequencyAdapter:
         elif self._unanswered_count >= 3 and self._current_level == "normal":
             self._current_level = "low"
 
+    @property
+    def configured_max_daily(self) -> int:
+        """配置面的每日上限（不随当前档位变化）——scheduler 幂等比较的真值。
+
+        ``get_max_daily`` 是「今天实际生效值」（会随档位下降）；拿它和
+        normal 上限比较会让 adaptive 在 low/minimal 档**每拍都判定不一致**，
+        进而每拍重建适配器。配置面读数必须是稳定的 normal/override 上限。
+        """
+        value = self.override_max_daily if self.override_max_daily is not None else self.normal_daily
+        return max(0, int(value))
+
+    def set_max_daily(self, max_daily: int) -> None:
+        """更新每日上限（normal + 全档位硬上限），**保留**降档状态。
+
+        旧 ``apply_runtime_config`` 用「新建 FrequencyAdapter + from_dict」更新
+        normal_daily；本方法只改字段，对象身份与 ``_current_level`` /
+        ``_unanswered_count`` 全保留，从根上消除每拍重建。
+        """
+        value = max(0, int(max_daily))
+        self.normal_daily = value
+        self.override_max_daily = value
+
     def get_max_daily(self) -> int:
         if self._current_level == "minimal":
-            return self.min_weekly
-        if self._current_level == "low":
-            return self.low_daily
-        return self.normal_daily
+            base = self.min_weekly
+        elif self._current_level == "low":
+            base = self.low_daily
+        else:
+            base = self.normal_daily
+        if self.override_max_daily is not None:
+            return max(0, min(int(base), int(self.override_max_daily)))
+        return max(0, int(base))
 
     @property
     def level(self) -> str:
@@ -74,6 +109,7 @@ class FrequencyAdapter:
             "normal_daily": self.normal_daily,
             "low_daily": self.low_daily,
             "min_weekly": self.min_weekly,
+            "override_max_daily": self.override_max_daily,
         }
 
     def from_dict(self, data: dict[str, Any]) -> None:
@@ -82,6 +118,11 @@ class FrequencyAdapter:
         self.normal_daily = data.get("normal_daily", self.normal_daily)
         self.low_daily = data.get("low_daily", self.low_daily)
         self.min_weekly = data.get("min_weekly", self.min_weekly)
+        if "override_max_daily" in data:
+            self.override_max_daily = data.get("override_max_daily")
+        else:
+            # 旧状态文件无此键：上限跟 normal 走（旧实现只有 normal 是配置值）
+            self.override_max_daily = self.normal_daily
 
 
 class FrequencyController:

@@ -1,17 +1,21 @@
 """
-训练管线 + 主动搭话路由 — /api/training/* + /api/proactive/*
+风格提取（训练管线）+ 主动搭话路由 — /api/training/* + /api/proactive/*
+
+> 口径（2026-10-30 统一）：本文件里的「训练」一律指**风格提取管线**
+> （数据清洗 → 测试 → 应用到 ToneMimic 提示词注入），不是 LoRA/微调训练。
+> 只改表述，函数名 / 路由 / 类名 / 路径全部保持原样（前端与测试按旧名消费）。
 
 来源：原 api.main_routes.py L365/379/459/512/544/549/590/638/647/664/1252 共 11 端点
 （2026-08-28：/api/training/extract 已移除——微信克隆收敛为"本地工具提取 + 上传 JSON"，
 服务端不做任何微信数据提取，见 /api/clone/upload）
 
-注意：LoRA 微调训练端点已移除（项目使用外接 API + RAG + 提示词注入）。
+注意：LoRA 微调端点已移除（项目使用外接 API + RAG + 提示词注入）。
 保留：数据清洗 / 测试 / 应用（克隆到 ToneMimic）+ 主动搭话配置。
 
 依赖：
 - deps.orch（_ase 主动搭话引擎）
-- deps.training_mgr（训练状态管理器）
-- 训练管线: clone_training.data_cleaner / my_character.tone_mimic
+- deps.training_mgr（风格提取状态管理器）
+- 风格提取管线: clone_training.data_cleaner / my_character.tone_mimic
 - ProactiveConfigRequest 模型来自 api.main_routes
 """
 
@@ -73,10 +77,10 @@ async def training_status(_auth: bool = Security(verify_api_key_dep)):
     try:
         import clone_training  # noqa: F401
         available = True
-        desc = "风格克隆管线已就绪（提示词注入模式，无 LoRA 训练）"
+        desc = "风格提取管线已就绪（训练管线：提示词注入模式，无 LoRA 微调）"
     except ImportError:
         available = False
-        desc = "训练模块未安装"
+        desc = "风格提取模块未安装"
     return {"available": available, "description": desc, "steps": [
         "style_analyze", "tone_mimic_inject",
     ]}
@@ -85,7 +89,7 @@ async def training_status(_auth: bool = Security(verify_api_key_dep)):
 @router.get("/api/training/progress")
 async def get_training_progress(
     _auth: bool = Security(verify_api_key_dep),
-    # SEC-P0 读面加门：训练管线状态是控制面，viewer 的 JWT 不得读
+    # SEC-P0 读面加门：风格提取管线状态是控制面，viewer 的 JWT 不得读
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
     return deps.training_mgr.get_state()
@@ -294,11 +298,27 @@ async def get_proactive_config(
     # SEC-P0 读面加门：主动消息运行时全量参数是控制面
     _admin: tuple[int, User] = Depends(require_role("admin")),
 ):
-    """运行时参数真值（阈值/频率控制器对象，非展示字典）。"""
+    """运行时参数**全局**真值（阈值/频率控制器对象，非展示字典）。
+
+    🔴 2026-10-30 复核修正：``ASEHub.get_runtime_config()`` 返回「第一个已加载
+    引擎」的真值（``ase_hub.py:243-250``）。per-user 覆盖落地后，若 A 有个人
+    threshold，admin 会读到 A 的个人值 → 再保存一次就把它广播成全局（跨用户
+    污染）。故四个引擎键改按**全局面**取：hub 级 admin 记账
+    ``_replay["runtime_config"]`` > ``utils.proactive_config.global_config()``
+    （config/system.yaml 的 proactive 块，与构造引擎同源）。其余字段仍取引擎
+    读数（每日计数/骰子运行态等只有引擎有）。
+    """
     orch = deps.orch
     if not orch or not orch._ase:
         raise HTTPException(503, "Proactive engine not initialized")
     config = orch._ase.get_runtime_config()
+    # —— 全局面纠偏（见 docstring）——
+    global_engine = _hub_global_engine_values()
+    for _key in (
+        "threshold", "max_daily_messages",
+        "min_interval_minutes", "cooldown_after_reply_minutes",
+    ):
+        config[_key] = global_engine[_key]
     scheduler = _scheduler_or_none()
     if scheduler is not None and hasattr(scheduler, "get_quiet_hours"):
         start, end = scheduler.get_quiet_hours()
@@ -386,6 +406,28 @@ async def update_proactive_config(
     if not orch or not orch._ase:
         raise HTTPException(503, "Proactive engine not initialized")
     ase = orch._ase
+    # 2026-10-30 复核：四个引擎级全局值必须**跨 worker 持久**。
+    # `ASEHub.apply_runtime_config` 只写本进程 `_replay`（ase_hub.py:235-241），
+    # 4 worker 中另外三个读不到 → 它们给用户的 `global_default` 与墓碑回滚值
+    # 会回落部署默认，同一次 admin 保存出现两种读数。先写
+    # `scheduler_config.json` 的 `proactive_runtime` 块（4 worker 共读真源），
+    # 再对本 worker 引擎生效；校验失败 → 400 且**不落盘**。
+    _engine_partial = {
+        "threshold": req.threshold,
+        "max_daily_messages": req.max_daily,
+        "min_interval_minutes": req.min_interval_minutes,
+        "cooldown_after_reply_minutes": req.cooldown_after_reply_minutes,
+    }
+    if any(v is not None for v in _engine_partial.values()):
+        from utils.proactive_config import write_engine_globals
+
+        try:
+            write_engine_globals(**_engine_partial)
+        except ValueError as exc:
+            raise HTTPException(400, f"proactive 引擎参数非法: {exc}") from exc
+        logger.info("主动消息引擎全局参数已持久化: %s", {
+            k: v for k, v in _engine_partial.items() if v is not None
+        })
     ase.apply_runtime_config(
         threshold=req.threshold,
         max_daily_messages=req.max_daily,
@@ -490,9 +532,13 @@ async def update_proactive_config(
                 raise HTTPException(400, f"dice_gate 配置非法: {exc}") from exc
             logger.info("零 token 骰子闸配置已更新: %s", dice_payload)
 
+    # 用 get_runtime_config() 取值：`ase` 可能是 ASEHub（没有 `_urgency_threshold`
+    # 实例属性，__getattr__ 会抛 AttributeError）——旧写法在真实 hub 装配下
+    # 会把一次成功的保存变成 500。
+    _rt_now = ase.get_runtime_config()
     logger.info(
         "Proactive config updated: threshold=%s max_daily=%s",
-        ase._urgency_threshold, ase.get_runtime_config()["max_daily_messages"],
+        _rt_now.get("threshold"), _rt_now.get("max_daily_messages"),
     )
     # 内部直调：_admin 已由本端点的 require_role 依赖解析（admin 必然在位），
     # 原样透传以绕开 DI 重复解析（直调时 Depends 缺省不会生效）
@@ -858,6 +904,243 @@ async def clear_my_humanize(
         "config": _humanize_payload(),
         "scope": "global",
         "user_key": "",
+    }
+
+
+# ═══════════════════════════════════════════════════════
+# 用户自助主动调度（D20，2026-10-30 用户主权裁决）
+# 「用户需要能够自己进行设置，而不是全站统一」——复用
+# `utils.proactive_config` 的 per-user 覆盖机制（与 admin 的全局真源
+# `data/scheduler_config.json` 同一套键位/同一份默认值），键从 **token 派生**
+# （服务端还原绑定，绝不接受客户端自报归属）。
+#
+# 与 admin 面的分工（**双分支，不在门内加判断**）：
+#   · `/api/proactive/{config,state,pause,send,history}` —— `require_role("admin")`
+#     原样保留（SEC-P0 已把那三条 GET 钉为读面闸），语义仍是**全局默认值**；
+#   · `/api/user/proactive*` —— 本段四条，只影响调用者自己的那个会话键。
+# 所以「用户自助」不会削弱任何既有 admin 闸，也不会给 admin 面加 if。
+# ═══════════════════════════════════════════════════════
+
+
+def _hub_global_engine_values() -> dict:
+    """四个引擎级键的**全局**真值：持久文件 > hub 记账 > 部署默认。
+
+    ⚠️ 不用 ``ASEHub.get_runtime_config()``：那是首引擎视图，会被 A 的
+    per-user 值污染（见 ``get_proactive_config`` 的注释）。
+
+    ⚠️ 也不用「replay 优先」：4 worker 下只有接到 admin POST 的那个 worker
+    有最新 ``_replay``，其余 worker 的 replay 是**旧值**；持久文件
+    （``scheduler_config.json`` 的 ``proactive_runtime``）才是跨 worker 真源，
+    由 ``utils.proactive_config.global_engine_values`` 逐键压过 replay
+    （2026-10-30 二轮复核：文件 6.25 + 旧 replay 5.5 必须读 6.25）。
+    """
+    from utils.proactive_config import global_engine_values
+
+    replay = None
+    try:
+        ase = getattr(deps.orch, "_ase", None) if deps.orch else None
+        replay = (getattr(ase, "_replay", None) or {}).get("runtime_config")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("读取 hub 全局运行时记账失败（用部署默认）: %s", exc)
+        replay = None
+    return global_engine_values(replay)
+
+
+def _proactive_config_payload(user_key: str | None) -> dict:
+    """响应体 —— 生效值 / 全局默认 / 覆盖键（真源热读，不做进程缓存）。
+
+    ``global_default`` 的四个引擎键取**全局面**（hub ``_replay`` > 部署默认）：
+    否则用户看到的是 ``config/system.yaml`` 的静态值，而 admin 明明已经保存过
+    别的全局值（2026-10-30 复核 medium）。用户覆盖了某键时 ``effective`` 仍
+    显示该用户值，只有未覆盖的引擎键才会被全局值顶上来。
+    """
+    from utils.proactive_config import ENGINE_KEYS, FIELDS_ALL, effective
+
+    cfg = effective(user_key)
+    engine_global = _hub_global_engine_values()
+    global_default = {key: cfg.global_values[key] for key in FIELDS_ALL}
+    effective_values = cfg.as_dict()
+    for key in ENGINE_KEYS:
+        global_default[key] = engine_global[key]
+        if key not in cfg.overridden_keys:
+            effective_values[key] = engine_global[key]
+    return {
+        "effective": effective_values,
+        "global_default": global_default,
+        "overridden_keys": sorted(cfg.overridden_keys),
+        "scope": "user" if cfg.overridden_keys else "global",
+        "user_key_present": bool(user_key),
+    }
+
+
+class UserProactiveConfigRequest(BaseModel):
+    """本人主动调度节奏的 partial merge 入参（只改传入键）。
+
+    ``user_key`` 字段**只用于显式忽略**：客户端自报归属一律丢弃，作用域键
+    服务端从 token 派生（与 ``/api/user/humanize`` 同一条纪律）。留成字段而不是
+    静默丢弃，是为了让「传了也不生效」可被测试断言。
+    """
+
+    enabled: bool | None = Field(default=None, description="是否接收主动消息（本人）")
+    paused: bool | None = Field(default=None, description="暂停本人的主动消息")
+    quiet_hours_start: int | None = Field(
+        default=None, ge=0, le=23, description="本人免打扰开始小时（0-23）",
+    )
+    quiet_hours_end: int | None = Field(
+        default=None, ge=0, le=23, description="本人免打扰结束小时（0-23）",
+    )
+    threshold: float | None = Field(
+        default=None, ge=0.0, le=20.0, description="紧迫度阈值（引擎级）",
+    )
+    max_daily_messages: int | None = Field(
+        default=None, ge=1, le=200, description="本人每日主动上限",
+    )
+    min_interval_minutes: int | None = Field(
+        default=None, ge=0, le=1440, description="两次主动最小间隔（分钟）",
+    )
+    cooldown_after_reply_minutes: int | None = Field(
+        default=None, ge=0, le=1440, description="自己发言后的冷却（分钟）",
+    )
+    user_key: str | None = Field(
+        default=None,
+        max_length=200,
+        description="⚠️ 忽略：归属键只从 token 派生（自助端点不接受客户端自报归属）",
+    )
+
+
+class UserProactivePauseRequest(BaseModel):
+    paused: bool
+
+
+@router.get("/api/user/proactive-config")
+async def get_my_proactive_config(
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """读取**本人**生效的主动调度配置 + 全局默认值（供前端展示「继承/覆盖」）。
+
+    未绑定微信 → **400**（与写面同一口径：宁拒绝不猜键）。域规格明令四条自助
+    端点「未绑定微信 → 400」，读面无副作用不构成放宽理由 —— 猜一个键去读别人
+    的覆盖比拒绝更危险，而 `user_key_present` 只是回执字段，不承担「无键可读」
+    的语义。
+    """
+    user_key = await _user_session_key_for(int(user_id), db)
+    if not user_key:
+        raise HTTPException(
+            400,
+            "当前账号未绑定微信通道，个人主动消息设置暂不可用（宁拒绝不猜键）",
+        )
+    return {"status": "ok", **_proactive_config_payload(user_key)}
+
+
+@router.post("/api/user/proactive-config")
+async def save_my_proactive_config(
+    req: UserProactiveConfigRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """写**本人**的主动调度覆盖（partial merge；字段校验同字段表）。
+
+    🔴 安全语义：``req.user_key`` 一律**忽略**——作用域键只从 token 派生，
+    用户不能借该端点改别人的节奏；未绑定微信 → 400（宁拒绝不猜键）。
+    admin 的全局默认值（``/api/proactive/config``）**不受影响**：本端点只写
+    ``user_proactive_config`` 覆盖行，从不触碰全局文件/引擎广播。
+    """
+    from utils.proactive_config import write_proactive_config
+
+    target_key = await _user_session_key_for(int(user_id), db)
+    if not target_key:
+        raise HTTPException(
+            400,
+            "当前账号未绑定微信通道，个人主动消息设置暂不可用（宁拒绝不猜键）",
+        )
+    payload = req.model_dump(exclude_none=True)
+    payload.pop("user_key", None)  # 自助端点忽略客户端归属
+    if payload:
+        try:
+            write_proactive_config(user_key=target_key, **payload)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        logger.info("用户主动调度自助更新: user=%s key=%s: %s", user_id, target_key, payload)
+    return {
+        "status": "ok",
+        **_proactive_config_payload(target_key),
+        "user_key": target_key,
+    }
+
+
+@router.post("/api/user/proactive/pause")
+async def pause_my_proactive(
+    req: UserProactivePauseRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """暂停/恢复**本人**的主动消息（只切 ``paused``，不动其他键与全局开关）。
+
+    调度器在该会话的决策点读到 ``paused=true`` 即「生成前」短路并落账本
+    reason=``paused`` —— 其他用户的会话完全不受影响（per-user 生效）。
+    """
+    from utils.proactive_config import write_proactive_config
+
+    target_key = await _user_session_key_for(int(user_id), db)
+    if not target_key:
+        raise HTTPException(400, "当前账号未绑定微信通道，无法暂停个人主动消息")
+    try:
+        write_proactive_config(user_key=target_key, paused=bool(req.paused))
+    except ValueError as e:  # pragma: no cover - bool 入参不会触发，保守兜底
+        raise HTTPException(400, str(e)) from None
+    logger.info("用户主动消息暂停自助切换: user=%s paused=%s", user_id, req.paused)
+    return {
+        "status": "ok",
+        "paused": bool(req.paused),
+        **_proactive_config_payload(target_key),
+        "user_key": target_key,
+    }
+
+
+@router.delete("/api/user/proactive-config")
+async def clear_my_proactive_config(
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """清除本人的主动调度覆盖（回落全局默认；幂等 noop）。
+
+    🔴 引擎级键**不能只删行**：`utils.proactive_config.clear_override` 会留
+    墓碑行，本端点再调 `scheduler.reconcile_user_engine` 做一次即时回滚
+    （跨 worker 的最终一致性由 master 下一拍读墓碑保证）。写/清失败一律
+    **500**，绝不回 ``noop`` 冒充成功。
+    """
+    import sqlite3
+
+    from utils.proactive_config import clear_override
+
+    target_key = await _user_session_key_for(int(user_id), db)
+    if not target_key:
+        raise HTTPException(400, "当前账号未绑定微信通道，无个人覆盖可清除")
+    try:
+        cleared = clear_override(target_key)
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        logger.warning("清除个人主动调度覆盖失败 user=%s: %s", user_id, exc)
+        raise HTTPException(500, f"proactive_config 清除失败: {exc}") from exc
+    # 即时回滚（本 worker 若持有该用户的引擎）：无引擎/无 hub 时静默跳过，
+    # 由 master 的下一拍按墓碑行完成回滚。
+    scheduler = _scheduler_or_none()
+    if scheduler is not None and hasattr(scheduler, "reconcile_user_engine"):
+        try:
+            scheduler.reconcile_user_engine(target_key)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("个人主动调度引擎回滚失败（留待下一拍） user=%s: %s", user_id, exc)
+    return {
+        "status": "ok" if cleared else "noop",
+        # 🔴 2026-10-31 R1-5：必须用**实际** target_key 计算 payload。旧实现传
+        # None → user_key_present=False；已绑定用户点「恢复继承全局」后前端
+        # 会误判「账号未绑定微信」并弹假横幅（一次往返后才自愈）。
+        **_proactive_config_payload(target_key),
+        "user_key": target_key,
     }
 
 

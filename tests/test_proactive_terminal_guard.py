@@ -10,17 +10,58 @@ from __future__ import annotations
 
 
 def test_proactive_delivery_runs_terminal_guard():
-    """主动链投递路径必须调用终审守卫（源码级钉存在性）。"""
+    """主动链**决策线**：守卫必须在 ``_deliver`` 之前执行且结果就是投递正文。
+
+    2026-10-31 R1-3：旧实现拿**整个 scheduler 模块源码**做首个 ``index`` ——
+    首个命中是第 36 行注释里的 ``terminal_reply_guard``；``_deliver`` 首个
+    命中是 ``_send_date_wish`` 的手动发送（scheduler.py:2802），根本没
+    钉住决策线（当时 docstring 误记为 ``_send_important_dates``/``:954``，
+    后者实为 ``manual_send_now`` 且参数是 ``session_key=key``，旧 needle
+    不会命中）。改为 AST 只解析 ``_llm_proactive_one_user`` 函数体：
+    删掉该函数里的守卫或投递调用，AST 找不到对应 Call → 测试必红。
+    """
+    import ast
     import inspect
+    import textwrap
 
     from proactive import scheduler
 
-    src = inspect.getsource(scheduler)
-    assert "terminal_reply_guard" in src, "主动链投递前未接终审守卫"
-    # 必须在 _deliver 之前
-    guard_pos = src.index("terminal_reply_guard")
-    deliver_pos = src.index("self._deliver(message, session_key=user_key")
-    assert guard_pos < deliver_pos, "终审守卫必须在投递之前执行"
+    src = inspect.getsource(scheduler.ProactiveScheduler._llm_proactive_one_user)
+    tree = ast.parse(textwrap.dedent(src))
+
+    guard_line: int | None = None
+    guard_assigns_message = False
+    deliver_line: int | None = None
+    delivers_message = False
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id == "terminal_reply_guard"
+        ):
+            guard_line = node.lineno
+            guard_assigns_message = any(
+                isinstance(target, ast.Name) and target.id == "message"
+                for target in node.targets
+            )
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "_deliver"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "self"
+        ):
+            deliver_line = node.lineno
+            if node.args and isinstance(node.args[0], ast.Name):
+                delivers_message = node.args[0].id == "message"
+
+    assert guard_line is not None, "决策线未接终审守卫 terminal_reply_guard"
+    assert guard_assigns_message, "守卫结果没有赋回 message（投递仍是未净化正文）"
+    assert deliver_line is not None, "决策线没有投递调用 self._deliver"
+    assert guard_line < deliver_line, "终审守卫必须在决策线投递之前执行"
+    assert delivers_message, "决策线投递的不是守卫生成的 message"
+
 
 
 def test_proactive_terminal_guard_blocks_sentinel():

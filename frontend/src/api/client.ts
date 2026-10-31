@@ -2,7 +2,7 @@
  * API 客户端 & 领域函数总线
  *
  * ═══ Decision 5: 数据架构约定 ═══
- * • 服务端数据（角色列表、训练状态、日志等）→ React Query (useQueries.ts)
+ * • 服务端数据（角色列表、风格提取状态、日志等）→ React Query (useQueries.ts)
  *     从本文件 import { api } 调用，queryKey 见 useQueries.ts
  * • UI 交互状态（弹窗、表单输入、选中项、切片 UI 状态）→ Zustand store
  *     见 ../store/ 目录
@@ -30,6 +30,7 @@ import {
   health, stats, dashboardStats, config, saveConfig,
   personaProfile, personaEvolutionLog, memoryFacts,
   tools, toolsHealth, toggleTool, toolHistory, proactiveHistory, updateProactiveConfig,
+  userProactiveGetConfig, updateUserProactiveConfig, clearUserProactiveConfig, userProactivePause,
   logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
   wechatConnectionStatus, wechatQrCode,
   safetyStats, safetyLog, safetyConfig,
@@ -253,6 +254,7 @@ export {
   health, stats, dashboardStats, config, saveConfig,
   personaProfile, personaEvolutionLog, memoryFacts,
   tools, toolsHealth, toggleTool, toolHistory, proactiveHistory, updateProactiveConfig,
+  userProactiveGetConfig, updateUserProactiveConfig, clearUserProactiveConfig, userProactivePause,
   logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
   wechatConnectionStatus, wechatQrCode,
   psychProfile, psychSnapshots, psychReset, psychMentalHealth, psychLiwc,
@@ -269,6 +271,7 @@ export const api = {
   health, stats, dashboardStats, config, saveConfig,
   personaProfile, personaEvolutionLog, memoryFacts,
   tools, toolsHealth, toggleTool, toolHistory, proactiveHistory, updateProactiveConfig,
+  userProactiveGetConfig, updateUserProactiveConfig, clearUserProactiveConfig, userProactivePause,
   logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
   wechatConnectionStatus, wechatQrCode,
   trainingStatus, trainingProgress, trainingClean,

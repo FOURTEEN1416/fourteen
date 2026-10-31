@@ -121,6 +121,12 @@ export const queryKeys = {
   },
   get toolHistory() { return ['acct', accountScope(), 'tools', 'history'] as const },
   get proactiveHistory() { return ['acct', accountScope(), 'proactive', 'history'] as const },
+  /** 本人的主动消息生效视图（三级合并 + scope/overridden_keys 元数据）。
+   *  与 proactiveHistory 同属 account-scoped 家族：账号切换自动失效。 */
+  get userProactive() {
+    const scope = ['acct', accountScope(), 'userProactive'] as const
+    return { config: [...scope, 'config'] as const }
+  },
 }
 
 export function useCharacters() {
@@ -377,6 +383,29 @@ export function useProactiveHistory(limit = 50) {
   return useQuery({
     queryKey: queryKeys.proactiveHistory,
     queryFn: () => api.proactiveHistory(limit).then(r => (r.data as { history: ProactiveHistoryEntry[] }).history),
+  })
+}
+
+/**
+ * 本人的主动消息生效视图（D21：消息 tab 对全体用户开放）。
+ *
+ * 回执是**平铺**形状 `{status, effective, global_default, overridden_keys,
+ * scope, user_key_present}`（真源：`api/routers/training_routes.py::
+ * _proactive_config_payload`，类型见 `api/system.ts:UserProactiveConfigResponse`：
+ * `effective`/`global_default` 各含 enabled/paused/6 个节奏键）。
+ * `effective` 已由服务端做「用户覆盖 > 全局 > 默认」三级合并，前端不再合并、
+ * 也不自算「值等于全局值即未覆盖」（徽章真源是 `overridden_keys`）。
+ *
+ * `enabled`：admin 走全局控制面端点（`/api/proactive/config`），传 false 避免
+ * 一次多余请求（本 hook 只为普通用户的个人视图服务）。
+ */
+export function useUserProactiveConfig(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.userProactive.config,
+    queryFn: () =>
+      api.userProactiveGetConfig().then(r => r.data as import('../api/system').UserProactiveConfigResponse),
+    enabled,
+    staleTime: 30 * 1000,
   })
 }
 

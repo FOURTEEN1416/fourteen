@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import dataclasses
 import json
 import sys
@@ -57,6 +58,15 @@ class _FakeResponse:
 
     async def __aexit__(self, *exc):
         return False
+
+
+def _audio_json(audio_bytes: bytes = b"mp3-bytes") -> str:
+    """构造现行 chat.completions 语音响应（audio.data 为 base64）。"""
+    return json.dumps({
+        "choices": [{"message": {"audio": {
+            "data": base64.b64encode(audio_bytes).decode("ascii"),
+        }}}],
+    })
 
 
 class _FakeSession:
@@ -190,11 +200,13 @@ def test_spec_synth_kwargs_preset_falls_back_to_speaker(tmp_path):
 def test_provider_concurrent_specs_no_crosstalk(fake_http):
     """两角色不同 model/voice 并发合成：每个请求 payload 严格用各自快照，
     provider 实例全局态不被改写。"""
+    _FakeSession.next_response = _FakeResponse(status=200, text=_audio_json())
     provider = MiMoTTSProvider(api_key="k", model="mimo-v2.5-tts", voice_id="")
     spec_a = CharacterVoiceSpec(
-        mimo_model="mimo-v2.5-tts-voiceclone", voice_id="vc_char_a", speed=1.3,
+        mimo_model="mimo-v2.5-tts-voiceclone",
+        voice_id="data:audio/wav;base64,cmVm", speed=1.3,
     )
-    spec_b = CharacterVoiceSpec(mimo_model="mimo-v2.5-tts", voice_id="female-tianmei")
+    spec_b = CharacterVoiceSpec(mimo_model="mimo-v2.5-tts", voice_id="mimo_default")
 
     async def _run():
         return await asyncio.gather(
@@ -206,16 +218,14 @@ def test_provider_concurrent_specs_no_crosstalk(fake_http):
     assert all(r is not None and r.data == b"mp3-bytes" for r in results)
 
     payloads = [p["json"] for p in _FakeSession.payloads]
-    by_text = {p["input"]: p for p in payloads}
+    by_text = {p["messages"][1]["content"]: p for p in payloads}
     pa = by_text["角色甲的话"]
     pb = by_text["角色乙的话"]
     assert pa["model"] == "mimo-v2.5-tts-voiceclone"
-    assert pa["voice"] == "vc_char_a"
-    assert pa["voice_id"] == "vc_char_a"
-    assert pa["speed"] == 1.3
+    assert pa["audio"]["voice"].startswith("data:audio/wav;base64,")
+    assert "语速约为常速的 1.30 倍" in pa["messages"][0]["content"]
     assert pb["model"] == "mimo-v2.5-tts"
-    assert pb["voice"] == "female-tianmei"
-    assert "voice_id" not in pb  # 非 voiceclone 模型不带 voice_id 字段
+    assert pb["audio"]["voice"] == "mimo_default"
 
     # provider 全局态未被并发请求改写
     assert provider.health_check()["model"] == "mimo-v2.5-tts"
@@ -223,13 +233,16 @@ def test_provider_concurrent_specs_no_crosstalk(fake_http):
 
 
 def test_provider_emotion_reaches_payload(fake_http):
-    """E：emotion 经 provider 的 EMOTION_MAPPING 落进真实 payload（速度/音高）。"""
+    """E：emotion + speed/pitch 经自然语言风格指令落进真实 payload。"""
+    _FakeSession.next_response = _FakeResponse(status=200, text=_audio_json())
     provider = MiMoTTSProvider(api_key="k", model="mimo-v2.5-tts")
     result = asyncio.run(provider.synthesize("开心的话", emotion="开心"))
     assert result is not None
     payload = _FakeSession.payloads[-1]["json"]
-    assert payload["speed"] == 1.1  # 「开心」映射 speed=1.1
-    assert payload["pitch"] == 1.05  # 「开心」映射 pitch=1.05
+    style = payload["messages"][0]["content"]
+    assert "开心" in style
+    assert "语速约为常速的 1.10 倍" in style
+    assert "音调略高" in style
 
 
 def test_provider_sapi_fallback_is_wav_format(fake_http, monkeypatch):
@@ -248,26 +261,26 @@ def test_provider_sapi_fallback_is_wav_format(fake_http, monkeypatch):
     assert result.mime == "audio/wav"
 
 
-def test_provider_clone_does_not_hijack_global_voice_id(fake_http):
-    """B：克隆成功返回 voice_id，但不得改写 provider 全局默认音色
-    （多用户权威在 catalog，不在 provider 实例字段）。"""
+def test_provider_clone_does_not_hijack_global_voice_id(tmp_path, monkeypatch):
+    """B：克隆登记返回本地 voice_id + 样本路径，但不得改写 provider 全局默认音色。"""
+    import voice.mimo_tts_provider as mimo_mod
+
+    monkeypatch.setattr(mimo_mod.MiMoTTSProvider, "SAMPLES_DIR", tmp_path / "samples")
     provider = MiMoTTSProvider(api_key="k", model="mimo-v2.5-tts-voiceclone", voice_id="")
-    _FakeSession.next_response = _FakeResponse(
-        status=200, text=json.dumps({"voice_id": "vc_new"}),
-    )
-    result = asyncio.run(provider.clone_voice(audio_data=b"ref", voice_name="我的音色"))
+    result = asyncio.run(provider.clone_voice(audio_data=b"RIFFref", voice_name="我的音色"))
     assert result["status"] == "success"
-    assert result["voice_id"] == "vc_new"
+    assert result["voice_id"].startswith("clone_")
+    sample = tmp_path / "samples" / f"{result['voice_id']}.wav"
+    assert sample.exists() and sample.read_bytes() == b"RIFFref"
+    assert result["sample_path"].endswith(".wav")
     assert provider.health_check()["voice_id"] == ""
 
 
-def test_provider_design_does_not_hijack_global_voice_id(fake_http):
+def test_provider_design_does_not_hijack_global_voice_id():
     provider = MiMoTTSProvider(api_key="k", model="mimo-v2.5-tts-voicedesign", voice_id="")
-    _FakeSession.next_response = _FakeResponse(
-        status=200, text=json.dumps({"voice_id": "vd_new"}),
-    )
     result = asyncio.run(provider.design_voice(description="温柔女声", voice_name="设计音色"))
     assert result["status"] == "success"
+    assert result["voice_id"].startswith("design_")
     assert provider.health_check()["voice_id"] == ""
 
 
@@ -349,7 +362,9 @@ def test_catalog_list_preset_names():
     from voice.voice_catalog import preset_names
 
     names = set(preset_names())
-    assert "female-tianmei" in names
+    assert {"mimo_default", "冰糖", "白桦", "Mia"} <= names
+    # 旧三档已不在预置表（provider 侧仍保留兼容别名）
+    assert "female-tianmei" not in names
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -426,7 +441,7 @@ def test_voice_test_endpoint_uses_character_spec_and_mime(voice_env, monkeypatch
     monkeypatch.setattr(deps_mod.deps, "_character_voice_mgr", voice_env.mgr, raising=False)
     asyncio.run(bind_character_voice(
         "c1",
-        VoiceBindRequest(mimo_model="mimo-v2.5-tts-voiceclone", voice_id="female-tianmei", speed=1.2),
+        VoiceBindRequest(mimo_model="mimo-v2.5-tts", voice_id="mimo_default", speed=1.2),
     ))
 
     fake_tts = _fake_tts(SynthesizedAudio(data=b"mp3", fmt="mp3"))
@@ -435,8 +450,8 @@ def test_voice_test_endpoint_uses_character_spec_and_mime(voice_env, monkeypatch
     response = asyncio.run(test_character_voice("c1", VoiceTestRequest(text="试听")))
     assert response.media_type == "audio/mpeg"
     _, kwargs = fake_tts.synthesize.call_args
-    assert kwargs["model"] == "mimo-v2.5-tts-voiceclone"
-    assert kwargs["voice_id"] == "female-tianmei"
+    assert kwargs["model"] == "mimo-v2.5-tts"
+    assert kwargs["voice_id"] == "mimo_default"
     assert kwargs["speed"] == 1.2
 
 
@@ -476,7 +491,7 @@ def test_speakers_merge_catalog(voice_env, monkeypatch):
     cat.register(voice_id="vc_merged", name="合并音色", kind="clone", model="mimo-v2.5-tts-voiceclone")
     data = asyncio.run(list_speakers())
     names = {s["name"] for s in data["speakers"]}
-    assert "female-tianmei" in names
+    assert "mimo_default" in names
     assert "vc_merged" in names
     merged = next(s for s in data["speakers"] if s["name"] == "vc_merged")
     assert merged["kind"] == "clone"
@@ -508,20 +523,25 @@ def _fake_mgr(provider) -> MagicMock:
 
 
 def test_mimo_clone_registers_catalog(fake_http, monkeypatch, tmp_path):
+    import voice.mimo_tts_provider as mimo_mod
     from api.routers import mimo_voice_routes
 
     monkeypatch.setattr(vc_mod, "_DEFAULT_PATH", tmp_path / "voice_catalog.json", raising=False)
     monkeypatch.setattr(vc_mod, "_singleton", None, raising=False)
+    monkeypatch.setattr(mimo_mod.MiMoTTSProvider, "SAMPLES_DIR", tmp_path / "samples")
 
-    provider = _clone_provider(fake_http)
+    provider = MiMoTTSProvider(api_key="k", model="mimo-v2.5-tts-voiceclone", voice_id="")
     result = asyncio.run(mimo_voice_routes.clone_voice(
         voice_name="路由克隆", description="", audio=_FakeUpload(),
         tts_manager=_fake_mgr(provider), _auth=True,
     ))
-    assert result["voice_id"] == "vc_route_new"
+    voice_id = result["voice_id"]
+    assert voice_id.startswith("clone_")
     assert result["catalog_saved"] is True
     cat = vc_mod.get_voice_catalog()
-    assert cat.get("vc_route_new")["name"] == "路由克隆"
+    entry = cat.get(voice_id)
+    assert entry["name"] == "路由克隆"
+    assert entry["sample_path"].endswith(".mp3")
 
 
 def test_mimo_set_engine_rejects_engine_name(fake_http):
@@ -551,6 +571,7 @@ def test_mimo_synthesize_returns_actual_mime(fake_http, monkeypatch, tmp_path):
 
     monkeypatch.setattr(vc_mod, "_DEFAULT_PATH", tmp_path / "voice_catalog.json", raising=False)
     monkeypatch.setattr(vc_mod, "_singleton", None, raising=False)
+    _FakeSession.next_response = _FakeResponse(status=200, text=_audio_json(b"mp3"))
 
     provider = MiMoTTSProvider(api_key="k", model="mimo-v2.5-tts")
     response = asyncio.run(mimo_voice_routes.synthesize(
@@ -589,7 +610,7 @@ def test_mimo_switch_voice_validates(fake_http, monkeypatch, tmp_path):
     assert ei.value.status_code == 404
 
     ok = asyncio.run(mimo_voice_routes.switch_voice(
-        voice_id="female-tianmei", tts_manager=_fake_mgr(provider), _auth=True,
+        voice_id="mimo_default", tts_manager=_fake_mgr(provider), _auth=True,
     ))
     assert ok["status"] == "success"
 
@@ -653,8 +674,10 @@ def test_route_rejects_self_only_data():
             return payload
 
     with pytest.raises(HTTPException) as ei:
+        # 归 per-user 化后 handler 不再有 _admin 形参（改由 principal 派生 owner）；
+        # 直呼时省略 principal → Depends 哨兵 → 机器面（_as_principal 归一为 None）。
         asyncio.run(upload_clone_data(
-            target="某人", file=_Upload(), _auth=True, _admin=(1, None),
+            target="某人", file=_Upload(), _auth=True,
         ))
     assert ei.value.status_code == 422
     assert "is_self" in str(ei.value.detail)

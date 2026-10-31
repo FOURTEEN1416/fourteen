@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import client from '../../api/client'
-import { queryKeys, useVoiceStatus, useDeleteCharacter } from '../../hooks/useQueries'
+import { queryKeys, useVoiceStatus, useDeleteCharacter, useUserProactiveConfig } from '../../hooks/useQueries'
 import { updateCharacter } from '../../api/characters'
 import { playAudioBlob } from '../../api/mimo'
 import { useErrorStore } from '../../store/errorStore'
@@ -12,6 +12,7 @@ import { Select } from '../shared'
 import TagInput from '../shared/TagInput'
 import Toggle from '../shared/Toggle'
 import ConfirmDialog from '../shared/ConfirmDialog'
+import Badge from '../common/Badge'
 import StorylineEditor from '../storyline/StorylineEditor'
 import type { RoleSettingsTab, RoleSettingsCharacter } from '../../types/framework'
 import type { UnifiedCharacterUpdate } from '../../types/api'
@@ -20,6 +21,8 @@ import type { LucideIcon } from 'lucide-react'
 import { ENGINE_OPTIONS, MIMO_MODELS } from './RoleSettingsConstants'
 import { PERSONALITY_LABELS, SPEAKING_STYLE_LABELS, normalizePersonality, normalizeSpeakingStyle } from '../../constants/persona'
 import { enrichCharacter, proactiveGetConfig, proactiveHistory, proactivePause, updateProactiveConfig, knowledgeCollectConfig, updateKnowledgeCollectConfig } from '../../api/system'
+import { userProactivePause, updateUserProactiveConfig, clearUserProactiveConfig } from '../../api/system'
+import type { UserProactiveConfigResponse, UserProactiveConfigWrite, UserProactiveEffective } from '../../api/system'
 import { adminListUsers } from '../../api/admin'
 import { useAuthStore } from '../../store/authStore'
 import Section from './RoleSettingsSection'
@@ -45,6 +48,31 @@ function StatCard({ label, value, tone, small }: { label: string; value: string;
       <p className={`font-bold ${small ? 'text-xs mt-1' : 'text-lg'} ${tone}`}>{value}</p>
       <p className="text-[11px] text-gray-400 mt-0.5">{label}</p>
     </div>
+  )
+}
+
+// ═══ 作用域徽章（D21）：真源 = 服务端 scope ═══
+//
+// 语义对齐 `utils/humanize_config.py::has_user_override`：**覆盖行是否存在**才算
+// 个人覆盖，前端禁止用「值等于全局值」自算（那种伪判定会把「恰好改成同值」误标）。
+// 逐字段明细由页面上的 overridden_keys 标记承担，徽章只讲作用域。
+
+/** 个人节奏表单的 6 个数值键（后端 UserProactiveConfigRequest 的可写数值子集） */
+type UserFreqKey =
+  | 'threshold'
+  | 'max_daily_messages'
+  | 'min_interval_minutes'
+  | 'cooldown_after_reply_minutes'
+  | 'quiet_hours_start'
+  | 'quiet_hours_end'
+
+function ProactiveScopeBadge({ scope }: { scope: 'user' | 'global' }) {
+  return (
+    <span data-testid="user-proactive-scope" className="shrink-0">
+      <Badge variant={scope === 'user' ? 'success' : 'default'}>
+        {scope === 'user' ? '个人覆盖' : '继承全局'}
+      </Badge>
+    </span>
   )
 }
 
@@ -734,6 +762,7 @@ export function formatHistoryTime(iso: string, mode: 'datetime' | 'time'): strin
 }
 
 function MessageTab(_props: { character: RoleSettingsCharacter }) {
+  const qc = useQueryClient()
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const [threshold, setThreshold] = useState(2.0)
   const [dailyLimit, setDailyLimit] = useState(8)
@@ -774,6 +803,79 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
   const [history, setHistory] = useState<ProactiveHistoryItem[]>([])
   const [cfgStatus, setCfgStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [cfgError, setCfgError] = useState('')
+
+  // ── 普通用户个人视图（D21：消息 tab 对全体用户开放）──────────────────
+  // 数据源 `/api/user/proactive-config`（交付树真实回执，见
+  // api/routers/training_routes.py::_proactive_config_payload）：
+  //   `effective` = 服务端「用户覆盖 > 全局 > 默认」三级合并后的**平铺**生效值；
+  //   `global_default` = 继承基线；`scope` / `overridden_keys` = 作用域真源。
+  // 前端**不合并、不自算**「值等于全局值即未覆盖」（对齐
+  // utils/humanize_config.py::has_user_override 的「覆盖行存在与否」语义）。
+  // admin 传 enabled=false：其视图仍是全局控制面（proactiveGetConfig），不重复请求。
+  const userConfigQuery = useUserProactiveConfig(!isAdmin)
+  const [userScope, setUserScope] = useState<'user' | 'global'>('global')
+  const [userOverriddenKeys, setUserOverriddenKeys] = useState<string[]>([])
+  /** 载入时的服务端生效值：保存时只提交改动键（未改动=不覆盖，继续继承） */
+  const [userBaseline, setUserBaseline] = useState<Record<string, number>>({})
+  /** 全局默认值（继承基线）：逐字段「继承」旁注的数值来源 */
+  const [userGlobalDefault, setUserGlobalDefault] = useState<Partial<UserProactiveEffective>>({})
+  /** effective.enabled：总开关关闭时不得显示「运行中」 */
+  const [userEnabled, setUserEnabled] = useState(true)
+  /** user_key_present：false = 未绑定微信，写面必 400 → 控件禁用并提示 */
+  const [userKeyPresent, setUserKeyPresent] = useState(true)
+  const [userSaving, setUserSaving] = useState(false)
+
+  /**
+   * 回执 → 表单 state。读 `effective`（含 paused/enabled），缺键用 `global_default`。
+   *
+   * 🔴 前端**不持有任何默认值副本**：生效值缺失时按「继承基线」`global_default` 补齐
+   * （两份都由服务端下发）；两者都缺则该字段保持当前 state，绝不落前端硬编码值
+   * （旧实现这里写死 2.0/8/30/15，与后端 `observability.config_models.ProactiveConfig`
+   * 不同源 → 回执一旦缺键用户就看到错值，2026-10-30 复核 high）。
+   */
+  function applyUserConfig(
+    body: UserProactiveConfigResponse | undefined,
+    opts?: { trustUserKeyPresent?: boolean },
+  ) {
+    if (!body) return
+    const eff = body.effective ?? {}
+    const fallback = body.global_default ?? {}
+    const pick = (key: UserFreqKey): number | undefined => {
+      const raw = eff[key] ?? fallback[key]
+      return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined
+    }
+    const seeded: Partial<Record<UserFreqKey, number>> = {}
+    const seed = (key: UserFreqKey, apply: (v: number) => void) => {
+      const v = pick(key)
+      if (v === undefined) return
+      seeded[key] = v
+      apply(v)
+    }
+    seed('threshold', setThreshold)
+    seed('max_daily_messages', setDailyLimit)
+    seed('min_interval_minutes', setMinInterval)
+    seed('cooldown_after_reply_minutes', setCooldown)
+    seed('quiet_hours_start', setQuietStart)
+    seed('quiet_hours_end', setQuietEnd)
+    if (Object.keys(seeded).length > 0) setUserBaseline((prev) => ({ ...prev, ...seeded }))
+    setUserGlobalDefault(fallback)
+    setUserScope(body.scope === 'user' ? 'user' : 'global')
+    setUserOverriddenKeys(
+      Array.isArray(body.overridden_keys)
+        ? body.overridden_keys.filter((k): k is string => typeof k === 'string')
+        : [],
+    )
+    if (typeof eff.paused === 'boolean') setPaused(eff.paused)
+    if (typeof eff.enabled === 'boolean') setUserEnabled(eff.enabled)
+    // 🔴 R2-1：DELETE 回执的 `user_key_present` 不可靠——历史实现曾用 `user_key=None`
+    // 计算（恒 false）；R1-5 已修为用实际 target_key，但前端仍按防御处理：DELETE 路径
+    // 一律传 `trustUserKeyPresent: false`，只信 invalidate 之后 GET 回执里的该字段。
+    // （否则若后端回退或异常，已绑定用户点「恢复继承全局」会先闪出假「未绑定微信」横幅、
+    // 三个控件被误禁用。）
+    if (opts?.trustUserKeyPresent !== false && typeof body.user_key_present === 'boolean') {
+      setUserKeyPresent(body.user_key_present)
+    }
+  }
 
   const loadConfig = useCallback(async () => {
     setCfgStatus('loading')
@@ -824,10 +926,18 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
   }, [])
 
   useEffect(() => {
-    // W11-D4：非 admin 一律不请求全局主动接口
+    // W11-D4 / D21：admin 走全局控制面；普通用户走个人端点（下方 effect）。
     if (!isAdmin) return
     void loadConfig()
   }, [isAdmin, loadConfig])
+
+  // 普通用户：服务端生效视图 → 表单 state 同步（保存/DELETE 回执同一入口）
+  /* eslint-disable react-hooks/set-state-in-effect -- 服务端生效视图 → 表单 state 同步（标准模式）*/
+  useEffect(() => {
+    if (isAdmin) return
+    applyUserConfig(userConfigQuery.data)
+  }, [isAdmin, userConfigQuery.data])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   /** 骰子闸单键改写（布尔/数值共用；数值按字段上下界钳制，避免界面先出现非法值） */
   function patchDiceGate<K extends keyof DiceGateConfig>(key: K, value: DiceGateConfig[K]) {
@@ -883,6 +993,97 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
     }
   }
 
+  // ── 普通用户：保存自己的主动节奏（只打 /api/user/proactive-config）──
+  /**
+   * 只提交**与生效值不同**的键：未改动的键不写覆盖行 → 继续继承全局
+   * （「键缺失 ≠ 键等于默认值」，见 docs/reports/2026-10-27-DSH专项调研.md）。
+   */
+  async function handleSaveMine() {
+    setUserSaving(true)
+    try {
+      // 本表单只管 6 个「节奏」数值键；enabled/paused 各有独立控件与端点
+      const current: Record<UserFreqKey, number> = {
+        threshold,
+        max_daily_messages: dailyLimit,
+        min_interval_minutes: minInterval,
+        cooldown_after_reply_minutes: cooldown,
+        quiet_hours_start: quietStart,
+        quiet_hours_end: quietEnd,
+      }
+      const patch: UserProactiveConfigWrite = {}
+      for (const key of Object.keys(current) as UserFreqKey[]) {
+        const base = userBaseline[key]
+        // 基线缺失（服务端未下发该键）= 无从判断是否改动 → 不提交，避免误写覆盖行
+        if (base === undefined) continue
+        if (current[key] !== base) patch[key] = current[key]
+      }
+      if (Object.keys(patch).length === 0) {
+        useErrorStore.getState().addToast({ type: 'info', message: '没有改动，无需保存' })
+        return
+      }
+      const res = await updateUserProactiveConfig(patch)
+      const body = res.data as UserProactiveConfigResponse | undefined
+      // W11-D5：HTTP 200 不算生效，必须回执 status==="ok"
+      if (body?.status !== 'ok') {
+        useErrorStore.getState().addToast({ type: 'warning', message: '个人节奏未生效（后端未确认），请重试' })
+        return
+      }
+      // 回执必带 effective（服务端 _proactive_config_payload）；缺失时不拿兜底值覆盖表单
+      if (body.effective) applyUserConfig(body)
+      await qc.invalidateQueries({ queryKey: queryKeys.userProactive.config })
+      useErrorStore.getState().addToast({ type: 'success', message: '已保存（仅作用于你自己的主动消息）' })
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      useErrorStore.getState().addToast({ type: 'error', message: detail || '保存失败（未绑定微信通道时不可用）' })
+    } finally {
+      setUserSaving(false)
+    }
+  }
+
+  /** 恢复继承全局：DELETE 覆盖行；`noop`（本就没有覆盖）同样回「继承全局」 */
+  async function handleClearMine() {
+    setUserSaving(true)
+    try {
+      const res = await clearUserProactiveConfig()
+      const body = res.data as UserProactiveConfigResponse | undefined
+      // W11-D5：空回执/HTTP 200 都不算生效，必须有 ok|noop 的业务回执
+      if (!body || (body.status !== 'ok' && body.status !== 'noop')) {
+        useErrorStore.getState().addToast({ type: 'warning', message: '恢复未生效（后端未确认），请重试' })
+        return
+      }
+      if (body.effective) applyUserConfig(body, { trustUserKeyPresent: false })
+      await qc.invalidateQueries({ queryKey: queryKeys.userProactive.config })
+      useErrorStore.getState().addToast({ type: 'success', message: '已恢复继承全局' })
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      useErrorStore.getState().addToast({ type: 'error', message: detail || '恢复失败（未绑定微信通道时不可用）' })
+    } finally {
+      setUserSaving(false)
+    }
+  }
+
+  /** 个人暂停：只打 /api/user/proactive/pause，绝不落到全局暂停端点 */
+  async function handlePauseMine(next: boolean) {
+    try {
+      const res = await userProactivePause(next)
+      const body = res.data as UserProactiveConfigResponse | undefined
+      if (body?.status !== 'ok') {
+        useErrorStore.getState().addToast({ type: 'warning', message: '暂停操作未生效（后端未确认）' })
+        return
+      }
+      // 暂停会写本人覆盖行 → scope/overridden_keys 随之变化，回执带全量生效视图
+      if (body.effective) applyUserConfig(body)
+      setPaused(body.paused !== undefined ? Boolean(body.paused) : next)
+      // 🔴 R2-4：缓存默认 staleTime=30s；切 tab 会卸载 MessageTab，不 invalidate 的话
+      // 30s 内切回会用旧缓存重新 applyUserConfig → 刚暂停的状态/徽章回滚。
+      // 与 handleSaveMine 一致，以 GET 结果为准。
+      await qc.invalidateQueries({ queryKey: queryKeys.userProactive.config })
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      useErrorStore.getState().addToast({ type: 'error', message: detail || '操作失败（未绑定微信通道时不可用）' })
+    }
+  }
+
   // NEW-7：「今日」按本地墙钟日界（旧实现 toISOString=UTC 日 + 未归一化 at，恒 0）
   const today = localDayKey(new Date())
   const todayCount = history.filter(h => h.at && localDayKey(new Date(h.at)) === today).length
@@ -909,28 +1110,11 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
     }
   }
 
-  // ── 作用域闸门（W11-D4）────────────────────────────────
-  // 非 admin：不渲染 admin-only 表单，也不请求全局接口；明确告知调度是全局的。
-  if (!isAdmin) {
-    return (
-      <Section title="主动消息">
-        <p className="text-xs text-gray-500 leading-relaxed">
-          主动消息由全局引擎统一调度（按会话与绑定角色投递），角色页不提供全局广播操作。
-        </p>
-        <p className="mt-2 text-[11px] text-gray-400">
-          需要调整主动消息频率、免打扰时段或暂停调度，请用管理员账号进入本页「消息」标签操作。
-        </p>
-        {/* NEW-34（2026-10-29）：个人偏好自助入口——回复模式/个人拟人节奏 */}
-        <p className="mt-1 text-[11px] text-gray-400">
-          回复模式与个人拟人节奏可在{' '}
-          <a href="/settings/account" className="font-medium text-macaron-blue-deep hover:underline">账号与数据 → 个人偏好</a>
-          {' '}自助调整。
-        </p>
-      </Section>
-    )
-  }
-
-  if (cfgStatus === 'loading') {
+  // ── 作用域分段（D21：消息 tab 对全体用户开放）──────────────
+  // admin：全局控制面（全局横幅/高级运维/消息统计/全局暂停），端点与 SEC-P0 闸不动；
+  // 普通用户：个人生效视图（自己的节奏 + 自己暂停），只打 /api/user/proactive*。
+  // 下面两个早退分支因此都是 **admin 专属**（普通用户的状态由 userConfigQuery 承载）。
+  if (isAdmin && cfgStatus === 'loading') {
     return (
       <Section title="主动消息">
         <div className="flex items-center justify-center py-8">
@@ -941,7 +1125,7 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
   }
 
   // admin 且配置读取失败：显式错误态 + 重试，绝不渲染默认假表单
-  if (cfgStatus === 'error') {
+  if (isAdmin && cfgStatus === 'error') {
     return (
       <Section title="主动消息">
         <div className="rounded-xl border border-red-200/40 bg-red-50/40 p-5 text-center space-y-3">
@@ -959,6 +1143,137 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
 
   return (
     <div className="space-y-4">
+      {/* ── 普通用户：个人主动消息（D21）──────────────────────────
+          作用域真源=服务端：scope / overridden_keys 一律照抄回执，
+          不用「值等于全局值」推断（对齐 utils/humanize_config.py::has_user_override）。 */}
+      {!isAdmin && (
+        <Section title="我的主动消息">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <p className="text-xs text-gray-500 leading-relaxed">
+              这些设置只影响你自己的主动消息：改哪项就覆盖哪项，没动的继续跟随全局默认。
+            </p>
+            <ProactiveScopeBadge scope={userScope} />
+          </div>
+
+          {!userKeyPresent && (
+            <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50/60 px-2 py-1 text-[11px] text-amber-700">
+              当前账号未绑定微信通道，个人主动消息设置暂不可用（写入会被服务端拒绝，宁拒绝不猜键）。
+            </p>
+          )}
+
+          {userConfigQuery.isLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+            </div>
+          ) : userConfigQuery.isError ? (
+            <div className="rounded-xl border border-red-200/40 bg-red-50/40 p-5 text-center space-y-3">
+              <p className="text-sm text-red-600">个人主动消息设置读取失败，请重试</p>
+              <button
+                onClick={() => { void userConfigQuery.refetch() }}
+                className="rounded-lg border border-red-200 bg-white/80 px-4 py-1.5 text-xs text-red-600 hover:bg-white transition-colors"
+              >
+                重试
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* 区间与后端 UserProactiveConfigRequest 的 ge/le 逐键一致
+                  （threshold 0–20 / max_daily 1–200 / min_interval 0–1440 /
+                  cooldown 0–1440 / quiet 0–23）——窄于后端会让「显示值 ≠ 生效值」，
+                  一按保存就把超区间值静默钳回。 */}
+              {([
+                { key: 'threshold', label: '紧迫阈值', value: threshold, min: 0, max: 20, step: 0.5, unit: '', onChange: setThreshold },
+                { key: 'max_daily_messages', label: '每日上限', value: dailyLimit, min: 1, max: 200, step: 1, unit: '条/天', onChange: setDailyLimit },
+                { key: 'min_interval_minutes', label: '最小间隔', value: minInterval, min: 0, max: 1440, step: 1, unit: '分钟', onChange: setMinInterval },
+                { key: 'cooldown_after_reply_minutes', label: '冷却时间', value: cooldown, min: 0, max: 1440, step: 1, unit: '分钟', onChange: setCooldown },
+                { key: 'quiet_hours_start', label: '免打扰开始', value: quietStart, min: 0, max: 23, step: 1, unit: '点', onChange: setQuietStart },
+                { key: 'quiet_hours_end', label: '免打扰结束', value: quietEnd, min: 0, max: 23, step: 1, unit: '点', onChange: setQuietEnd },
+              ] as const).map(f => (
+                <div key={f.key} data-testid={`user-freq-${f.key}`} className="flex items-center gap-3">
+                  <div className="w-28 shrink-0">
+                    <span className="text-xs text-gray-600">{f.label}</span>
+                    <span
+                      title={
+                        userOverriddenKeys.includes(f.key)
+                          ? '已按个人设置覆盖'
+                          : `未覆盖：继承全局默认 ${String(userGlobalDefault[f.key as keyof UserProactiveEffective] ?? '—')}`
+                      }
+                      className={`ml-1 rounded px-1 py-0.5 text-[9px] ${
+                        userOverriddenKeys.includes(f.key)
+                          ? 'bg-macaron-mint-light text-macaron-mint-deep'
+                          : 'bg-gray-100 text-gray-400'
+                      }`}
+                    >
+                      {userOverriddenKeys.includes(f.key) ? '个人' : '继承'}
+                    </span>
+                  </div>
+                  <div className="flex-1">
+                    <Slider value={f.value} min={f.min} max={f.max} step={f.step} label={f.label} showLabel={false} showValue={false} onChange={f.onChange} />
+                  </div>
+                  <span className="w-16 text-right text-xs font-mono text-gray-400">{f.value}{f.unit ? ` ${f.unit}` : ''}</span>
+                </div>
+              ))}
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {userScope === 'user' && (
+                  <button
+                    onClick={() => { void handleClearMine() }}
+                    disabled={userSaving || !userKeyPresent}
+                    className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  >
+                    恢复继承全局
+                  </button>
+                )}
+                <button
+                  onClick={() => { void handleSaveMine() }}
+                  disabled={userSaving || !userKeyPresent}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-primary-500 px-4 py-2 text-xs font-medium text-white hover:bg-primary-400 transition-colors shadow-sm disabled:opacity-50"
+                >
+                  {userSaving ? '保存中…' : '保存我的节奏'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 个人暂停：只打 /api/user/proactive/pause，不落全局暂停端点。
+              只在服务端数据到位后渲染——数据未到/失败时显示「运行中」会给用户错误基线
+              （真实 paused=true 的用户会以为在运行并重复点击）。 */}
+          {!userConfigQuery.isLoading && !userConfigQuery.isError && (
+            <div className="mt-4 border-t border-gray-100 pt-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-700">
+                    {!userEnabled ? '我的主动消息已关闭' : paused ? '我的主动消息已暂停' : '我的主动消息运行中'}
+                  </p>
+                  <p className="mt-0.5 text-xs text-gray-400">
+                    {!userEnabled
+                      ? '主动消息总开关已关闭，不接收任何主动消息（此开关只控制个人暂停，不能开启总开关）'
+                      : paused
+                        ? '暂停期间不会自动给你发主动消息；不影响其他用户'
+                        : '暂停后不再自动给你发主动消息，不影响其他用户'}
+                  </p>
+                </div>
+                {/* R2-3：enabled=false 时总开关关闭 → Toggle 必须显示「关」且禁用，
+                    否则文案「已关闭」+ 开关显示「开」互相矛盾，点它还会发 pause。 */}
+                <Toggle
+                  checked={userEnabled && !paused}
+                  disabled={!userKeyPresent || !userEnabled}
+                  onChange={v => { void handlePauseMine(!v) }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* NEW-34（2026-10-29）既有自助入口：回复模式/个人拟人节奏仍走账号页 */}
+          <p className="mt-3 text-[11px] text-gray-400">
+            回复模式与个人拟人节奏可在{' '}
+            <a href="/settings/account" className="font-medium text-macaron-blue-deep hover:underline">账号与数据 → 个人偏好</a>
+            {' '}自助调整。
+          </p>
+        </Section>
+      )}
+
+      {isAdmin && (
+        <>
       {/* 作用域横幅（W11-D4）：本 tab 的参数是全局的，不是本角色专属 */}
       <div className="rounded-xl border border-amber-100 bg-amber-50/50 px-3 py-2">
         <p className="text-[11px] text-amber-700 leading-relaxed">
@@ -1310,6 +1625,8 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
         }}
         onCancel={() => setShowCurateConfirm(false)}
       />
+        </>
+      )}
     </div>
   )
 }

@@ -807,11 +807,21 @@ def test_manual_send_rejects_unknown_message_type_without_generating(
 def _call_history(monkeypatch, hub):
     import asyncio
 
+    import api.audit as audit_mod
     import api.routers.training_routes as tr
     from api.deps import deps
 
+    async def _noop_audit(*args, **kwargs):
+        return None
+
+    # NEW-21 后端点会先写操作员审计；直调（非 FastAPI DI）必须显式给
+    # `_admin`/`db`，否则 `_admin` 仍是 `Depends` 缺省对象，`_admin[0]`
+    # 直接 TypeError。审计本身不是本用例被测对象，stub 掉。
+    monkeypatch.setattr(audit_mod, "record_operator_audit", _noop_audit)
     monkeypatch.setattr(deps, "orch", _Orch(None, hub), raising=False)
-    return asyncio.run(tr.proactive_history(limit=10, _auth=True))
+    return asyncio.run(
+        tr.proactive_history(limit=10, _auth=True, _admin=(1, None), db=None)
+    )
 
 
 def test_proactive_history_reads_outbound_plane(monkeypatch):

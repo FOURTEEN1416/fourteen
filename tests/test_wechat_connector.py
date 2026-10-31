@@ -53,7 +53,8 @@ class TestWeChatConnectorSendMethods:
 
 class TestMessageBodyFormat:
     @patch("wechat_direct.wechat_connector._post_api")
-    def test_voice_message_type_34(self, mock_post):
+    def test_voice_message_type_34_legacy_fallback(self, mock_post):
+        """CDN 上传拿不到上传地址时必须回落旧内联协议（2026-10-30 出站媒体批）。"""
         mock_post.return_value = {"ret": 0}
         from wechat_direct.wechat_connector import _send_voice_message
         _send_voice_message("user1", "b64audio", 3000, "ctx")

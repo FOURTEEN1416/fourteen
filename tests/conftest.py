@@ -1,7 +1,9 @@
+import atexit
 import contextlib
 import os
 import shutil
 import sys
+import tempfile
 from uuid import uuid4
 
 import pytest
@@ -17,7 +19,44 @@ os.environ.setdefault(
     "unit-test-only-jwt-secret-minimum-32-characters-ok",
 )
 
+# users 主库测试隔离（2026-10-31 回归门禁根治）：test_api_routes /
+# test_w10_ready_probes / test_w10_metrics_multiproc 的夹具假定 users 表只有
+# 自己种下的 id=1 admin；此前直连宿主 `data/users.db`，跨轮次残留的
+# ci-admin / w10-admin 等测试账号会令 `UNIQUE constraint failed: users.username`
+# 直接炸 14+12 个用例，id=1 缺失时 require_role 又退化成 404（cache 用例
+# 503→404 同源）。必须在 import `api.database` 之前把连接串钉到会话级临时库；
+# 与下方 `isolate_runtime_state_files` 的 per-test 文件沙箱同一防线，只是
+# users 引擎在模块导入期创建，fixture 阶段再改已来不及。
+# 显式提供 APP_DATABASE_URL/DATABASE_URL 的环境（CI/专用探针）保持原样。
+if not (os.environ.get("APP_DATABASE_URL") or os.environ.get("DATABASE_URL")):
+    _TEST_USERS_DB_DIR = tempfile.mkdtemp(prefix="ai_gf_test_users_")
+    os.environ["APP_DATABASE_URL"] = (
+        f"sqlite+aiosqlite:///{os.path.join(_TEST_USERS_DB_DIR, 'users.db').replace(os.sep, '/')}"
+    )
+    atexit.register(shutil.rmtree, _TEST_USERS_DB_DIR, ignore_errors=True)
+
 collect_ignore = ["real_e2e_test.py", "real_test.py"]
+
+
+@pytest.fixture(scope="session", autouse=True)
+def init_test_users_db_schema():
+    """在会话级临时 users 库上建全表（空库，不种任何账号）。
+
+    部分用例只覆盖 FastAPI `get_db`，但间接路径（如 `api/lifecycle._resolve_scope`
+    的 db_factory 缺省 = `api.database._async_session`）仍走默认引擎；空文件
+    （无表）会抛 `no such table: users`。与 CI 上「空库 + 已初始化 schema」对齐。
+    建表后立即 dispose，避免把连接池绑定到本 bootstrap 的临时事件循环。
+    """
+    import asyncio
+
+    async def _bootstrap() -> None:
+        from api.database import _engine, init_db
+
+        await init_db()
+        await _engine.dispose()
+
+    asyncio.run(_bootstrap())
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -173,6 +212,22 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
         monkeypatch.setattr(
             _hm, "_OVERRIDE_DB_PATH", sandbox / "humanize_override.db", raising=False,
         )
+    except Exception:
+        pass
+
+    # 主动调度 per-user 覆盖库（2026-10-30 D20）：同型防线 ——
+    # `write_proactive_config(user_key=...)` 默认写宿主 data/sqlite.db 的
+    # user_proactive_config 表；不重定向 → 测试键会污染开发机真实库
+    # （与 2026-09-22 块E 事故同型，git 看不见）。全局真源同样重定向到沙箱的
+    # 同一个 `scheduler_config.json` 文件名，复现「与 ProactiveScheduler 同一
+    # 物理文件」语义。
+    try:
+        from utils import proactive_config as _pc
+
+        monkeypatch.setattr(
+            _pc, "_OVERRIDE_DB_PATH", sandbox / "proactive_override.db", raising=False,
+        )
+        _redirect(_pc, "_CONFIG_PATH", "scheduler_config.json")
     except Exception:
         pass
 

@@ -55,7 +55,7 @@ unique-you/
 ├── voice/                  # MiMo TTS 语音合成 (7 模块 + __init__)
 ├── cache/                  # 缓存层 (LLM 缓存 + Redis)
 ├── character_card/         # 已删除（批6b 项10，零读者死码包，见 docs/DELETION_LOG.md）
-├── clone_training/         # 克隆训练 (4 文件：清洗/提取/风格分析)
+├── clone_training/         # 风格提取（训练管线：数据清洗/风格提取/风格分析；目录名保留 clone_training）
 ├── context/                # 上下文 (世界书)
 ├── memory_ext/             # 已删除（2026-09-28 历遍批 W18 整包出库，第二套 RAG 记忆真源，见 docs/DELETION_LOG.md）
 ├── proactive/              # 主动消息 (14 文件：ase_engine/ase_hub/scheduler/frequency(零 token 骰子闸)/

@@ -200,7 +200,7 @@ async def test_switch_voice_rejects_viewer(sec_app):
     client, *_ = sec_app
     r = await client.post(
         "/api/mimo/switch-voice",
-        data={"voice_id": "female-tianmei"},
+        data={"voice_id": "mimo_default"},
         headers=_auth_of(await _login(client, "alice")),
     )
     assert r.status_code == 403, f"viewer 切全局音色应 403，实得 {r.status_code}: {r.text}"
@@ -220,7 +220,7 @@ async def test_control_plane_rejects_machine_key(machine_app):
     """机器 API Key 不是 admin 主体：改全局 TTS 单例的控制面一律 401。"""
     client, *_ = machine_app
     r = await client.post(
-        "/api/mimo/switch-voice", data={"voice_id": "female-tianmei"},
+        "/api/mimo/switch-voice", data={"voice_id": "mimo_default"},
         headers={"X-API-Key": _MACHINE_KEY},
     )
     assert r.status_code == 401, f"机器 key 切音色应 401，实得 {r.status_code}"
@@ -235,7 +235,7 @@ async def test_admin_passes_control_plane_gate(sec_app):
     """admin 过门后进 handler（测试环境 TTS 未初始化 → 400，而非 401/403）。"""
     client, *_ = sec_app
     auth = _auth_of(await _login(client, "admin"))
-    r = await client.post("/api/mimo/switch-voice", data={"voice_id": "female-tianmei"}, headers=auth)
+    r = await client.post("/api/mimo/switch-voice", data={"voice_id": "mimo_default"}, headers=auth)
     assert r.status_code == 400, r.text
     assert "TTS" in r.json()["detail"]
     r = await client.post("/api/mimo/set-engine", data={"model": "mimo-v2.5-tts"}, headers=auth)
@@ -366,7 +366,7 @@ async def test_speakers_filtered_for_normal_user(sec_app):
     names = {s["name"] for s in r.json()["speakers"]}
     assert "vc_alice" in names, "自己的克隆音色必须可见"
     assert "vc_platform" in names, "平台共享音色必须可见"
-    assert "female-tianmei" in names, "静态预设必须可见"
+    assert "mimo_default" in names, "静态预设必须可见"
     assert "vc_bob" not in names, f"不得看到他人克隆音色，实得 {names}"
 
 

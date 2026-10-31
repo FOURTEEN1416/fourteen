@@ -1971,6 +1971,12 @@ class StructuredMemory:
                         _run("user_identity_map", f"user_key IN ({ph})", tuple(keys))
                     if self._has_table(conn, "user_profile"):
                         _run("user_profile", f"user_key IN ({ph})", tuple(keys))
+                    # 主动调度 per-user 覆盖（2026-10-30 D20）：与 user_profile
+                    # 同库同隔离域（user_key = 完整会话键）。不登记 → 删号后残留
+                    # 个人调度行（隐私红线）。`_has_table` 守卫：旧库无此表时跳过。
+                    if self._has_table(conn, "user_proactive_config"):
+                        _run("user_proactive_config",
+                             f"user_key IN ({ph})", tuple(keys))
                     if self._has_table(conn, "daily_summaries"):
                         like_ph = " OR ".join("date LIKE ?" for _ in keys)
                         _run("daily_summaries",
@@ -2095,6 +2101,10 @@ class StructuredMemory:
             )
             if self._has_table(conn, "user_profile"):
                 out["user_profile"] = _cnt("user_profile", "user_key")
+            if self._has_table(conn, "user_proactive_config"):
+                out["user_proactive_config"] = _cnt(
+                    "user_proactive_config", "user_key"
+                )
             out["fact_deletion_watermarks"] = _cnt("fact_deletion_watermarks", "user_key")
             if has_daily and keys:
                 like_ph = " OR ".join("date LIKE ?" for _ in keys)

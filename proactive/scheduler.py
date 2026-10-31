@@ -28,6 +28,7 @@ from typing import Any
 # datetime.now().hour，两边小时数差 8，静默短路会静默失效（2026-09-19 CI 实证）。
 from proactive.ase_engine import _local_now, sanitize_message
 from utils import character_resolver, json_state
+from utils import proactive_config as proactive_config_mod
 from utils import session_key as session_key_mod
 from utils.project_paths import project_path
 
@@ -1126,11 +1127,50 @@ class ProactiveScheduler:
         相差 8 小时，导致调度器静默短路失效、引擎却在算静默——配额记账
         与投递判定分裂（v1.13 生产事故的 CI 侧再现）。
         """
+        return self._quiet_hours_contains(self._quiet_hours)
+
+    def _quiet_hours_for(self, user_cfg: Any) -> tuple[int, int]:
+        """该会话生效的静默时段：per-user 覆盖了哪一端就用哪一端，其余用全局。
+
+        2026-10-30 D20：全局时段仍在 ``self._quiet_hours``（由
+        ``scheduler_config.json`` 的 ``quiet_hours`` 块热载，admin 端点写它）——
+        这里只叠该用户真正覆盖的那一端，**不做整对覆盖**：用户只改「开始」
+        或只改「结束」时，另一端的既有全局值按直觉保留，而不是回落到 23/7。
+        未覆盖任何一端 → 原样返回全局（零行为变更）。
+        """
+        # getattr 兜底：既有测试有以 `__new__` 构造的 scheduler 替身（不跑
+        # `__init__`），没有 `_quiet_hours`；未覆盖时本函数不参与判据，
+        # 兜底值只为不炸调用方。
+        start, end = getattr(self, "_quiet_hours", None) or (23, 7)
+        if not getattr(user_cfg, "overridden_keys", frozenset()):
+            return start, end
+        overridden = user_cfg.overridden_keys
+        if "quiet_hours_start" in overridden:
+            start = int(user_cfg.get("quiet_hours_start", start))
+        if "quiet_hours_end" in overridden:
+            end = int(user_cfg.get("quiet_hours_end", end))
+        return start, end
+
+    @staticmethod
+    def _quiet_hours_contains(window: tuple[int, int]) -> bool:
+        """``window`` 是否覆盖当前本地小时（跨零点用 start>end 区分）。"""
         local_hour = _local_now().hour
-        start, end = self._quiet_hours
+        start, end = window
         if start < end:
             return start <= local_hour < end
         return local_hour >= start or local_hour < end
+
+    def _is_quiet_hours_for(self, user_cfg: Any) -> bool:
+        """静默判据（per-user 覆盖优先，未覆盖的一端用全局时段）。
+
+        未覆盖任何静默键时**原样调用** ``self._is_quiet_hours()``：既有调用点/
+        测试替身对它的 stub 必须继续生效（零行为变更）；只有真的覆盖了静默
+        时段才走 per-user 计算。
+        """
+        if not (getattr(user_cfg, "overridden_keys", frozenset())
+                & set(proactive_config_mod.QUIET_KEYS)):
+            return self._is_quiet_hours()
+        return self._quiet_hours_contains(self._quiet_hours_for(user_cfg))
 
     # 仅写日志、不构成真实送达的通道（开发期观察用）。
     # 它们【不得】计入送达：否则真实通道（微信）失败时会被兜底掩盖成「成功」，
@@ -1142,10 +1182,15 @@ class ProactiveScheduler:
     # 真实投递通道（按优先级）
     _REAL_CHANNELS = ("wechat", "websocket")
 
-    async def _send_to_all(self, message: str) -> bool:
+    async def _send_to_all(
+        self, message: str, quiet_hours: tuple[int, int] | None = None,
+    ) -> bool:
         """
         向所有已注册通道发送消息
         优先级: wechat > websocket（console 仅留痕）
+
+        ``quiet_hours`` 非空 → 用该窗口判免打扰（per-user 会话），否则用全局
+        ``self._quiet_hours``（广播/手动线，零行为变更）。
 
         Returns:
             **是否真实送达** —— 任一真实通道成功即为 True。
@@ -1156,10 +1201,19 @@ class ProactiveScheduler:
         但代码里并不存在紧急消息旁路，措辞掩盖了「消息被丢弃」的事实 ——
         配合「生成时即扣配额」，静默时段静默烧光全天配额而无人察觉。
         """
-        if self._is_quiet_hours():
+        if quiet_hours is None:
+            # 无 per-user 窗口 → 完全走既有全局闸：既有替身只实现
+            # `_is_quiet_hours`（没有 `_quiet_hours` 字段），且 monkeypatch
+            # `_is_quiet_hours=False` 的用例必须继续生效（零行为变更）。
+            blocked = self._is_quiet_hours()
+            window = getattr(self, "_quiet_hours", None) or (23, 7)
+        else:
+            blocked = self._quiet_hours_contains(quiet_hours)
+            window = quiet_hours
+        if blocked:
             logger.warning(
                 "免打扰时段(%s-%s)：消息未投递（无紧急旁路），内容不计数不扣配额",
-                self._quiet_hours[0], self._quiet_hours[1],
+                window[0], window[1],
             )
             return False
 
@@ -1323,9 +1377,13 @@ class ProactiveScheduler:
             logger.info("ASE tick: 无用户目标，跳过（hub_known=%s）", hub.known_user_keys())
             return
         logger.info("proactive LLM tick per-user: targets=%d %s", len(user_keys), user_keys[:8])
+        # 引擎级全局值每拍只算一次（读 yaml + scheduler_config.json）：4 worker 下
+        # admin 保存只落到一个 worker 的引擎/`_replay`，其余 worker 靠本函数把
+        # **持久化全局值**对齐到自己的引擎（2026-10-30 二轮复核 medium）。
+        engine_globals = self._global_engine_values(hub)
         for user_key in user_keys:
             try:
-                self._llm_proactive_one_user(hub, user_key)
+                self._llm_proactive_one_user(hub, user_key, engine_globals=engine_globals)
             except Exception as e:  # noqa: BLE001
                 logger.warning("proactive LLM tick failed user=%s: %s", user_key, e)
 
@@ -1370,7 +1428,164 @@ class ProactiveScheduler:
         except Exception:  # noqa: BLE001
             return False
 
-    def _llm_proactive_one_user(self, hub: Any, user_key: str) -> None:
+    def _global_engine_values(self, hub: Any) -> dict[str, Any]:
+        """四个引擎级键的全局真值：持久文件 > 本进程 hub 记账 > 部署默认。
+
+        ⚠️ 不用 ``hub.get_runtime_config()``：它取「第一个已加载引擎」的真值
+        （``ase_hub.py:243-250``），一旦某用户有 per-user 覆盖，全局读数就被
+        该用户污染。``_replay["runtime_config"]`` 是**本进程**的 admin 记账，
+        但 4 worker 下只有接到那次 POST 的 worker 有它，且可能是**旧值** ——
+        故 ``proactive_config.global_engine_values`` 让持久文件
+        （``scheduler_config.json`` 的 ``proactive_runtime``）逐键压过 replay
+        （2026-10-30 二轮复核：文件 6.25 + 旧 replay 5.5 必须读 6.25）。
+        """
+        replay = None
+        try:
+            replay = (getattr(hub, "_replay", None) or {}).get("runtime_config")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("读取 hub 全局运行时记账失败（用部署默认）: %s", e)
+        return proactive_config_mod.global_engine_values(replay)
+
+    def _apply_user_engine_config(
+        self, hub: Any, eng: Any, user_key: str, user_cfg: Any,
+        engine_globals: dict[str, Any] | None = None,
+    ) -> None:
+        """把该用户**当前应有的**引擎级参数对齐到该用户自己的引擎上（2026-10-30 D20）。
+
+        「应有的值」= 每个引擎键：用户覆盖了就用用户值，否则用**全局值**
+        （持久文件 > hub 记账 > 部署默认，见 :meth:`_global_engine_values`）。
+        因此本方法同时承担三件事（2026-10-30 二轮复核补齐后两件）：
+
+        1. **per-user 下发**：覆盖值直调 ``eng.apply_runtime_config(...)``；
+        2. **跨 worker 全局对齐**：admin 保存只落到接到 POST 的那个 worker
+           （``hub._replay`` + 本机引擎），其余 worker 的引擎仍是构造时的部署
+           默认 —— 每拍按持久化全局值补齐，否则「API 报 6.25、实际按 2.0 调度」；
+        3. **脏覆盖行自愈**：覆盖行被手改成非法值（或外部删掉）时读侧回落全局，
+           但引擎里旧个人值还在 —— 这里的目标值同样变成全局 → 自动还原，
+           不必等墓碑（墓碑只在用户主动 DELETE 时生成）。
+
+        🔴 绝不经 ``ASEHub.apply_runtime_config``：那条路径会写
+        ``_replay["runtime_config"]`` 并扇出到**全部**已加载引擎
+        （``proactive/ase_hub.py:235-241``），既把 A 的个人设置泄漏给 B，
+        又会被 ``_apply_replay`` 传染给随后新建的引擎 —— 与「用户主权」
+        正好相反。此处只用 ``hub.get(user_key)`` 拿到的那一个引擎直调
+        ``eng.apply_runtime_config(...)``（``ase_engine.py:1737``）。
+
+        **回滚也要走这里**：``DELETE`` 端点清覆盖时若删掉了引擎级键，会在覆盖表
+        留一条墓碑行 ``{"__revert__": [...]}``；本方法读到墓碑就把这些键还原成
+        **全局值**，成功后再删墓碑。否则「清掉了覆盖」只是删了表行，引擎（及其
+        ``save_state`` 持久化的频率字段，``ase_engine.py:1827-1830/1936-1939``）
+        仍按旧个人值调度。
+
+        幂等纪律：只在「目标值与引擎现值不一致」时下发。``apply_runtime_config``
+        一旦收到频率三参之一就会**重建** ``FrequencyController``（``_daily_count``
+        归零）——每 tick 无条件下发等于把该用户的日配额永远清零、主动消息
+        无上限。值一致即跳过，因此稳态每用户零写入（等价于原「无覆盖零写入」）。
+
+        频率三参必须**同批**下发：``apply_runtime_config`` 在只收到
+        ``min_interval_minutes`` 时会把 ``max_daily`` 回落到默认 8（既有实现
+        缺陷）。故此处用目标值/引擎现值补齐未覆盖的两个。
+
+        Args:
+            engine_globals: 本拍已算好的全局引擎值（``_check_ase_per_user``
+                每拍算一次传下来）；``None`` → 自行读取（单用户路径/回滚快路径）。
+
+        失败一律降级（WARNING 后返回；墓碑保留，下一拍重试）。
+        """
+        if eng is None or not hasattr(eng, "apply_runtime_config"):
+            return
+        uk = str(user_key or "").strip()
+        # 🔴 先读墓碑、再用它**遮蔽** user_cfg 里的同名键（2026-10-30 复核）：
+        # 决策链的 user_cfg 在函数开头读、这里晚得多；若 DELETE 恰好落在两步
+        # 之间，user_cfg 仍含旧引擎键 → desired 会用旧个人值 → payload 为空
+        # → 再摘墓碑 = 「墓碑被摘、引擎停在旧值」。墓碑是更新的意图（用户刚
+        # 清过），必须以它为准把该键的目标改回全局。
+        pending = set(proactive_config_mod.pending_revert_keys(uk))
+        overridden = set(getattr(user_cfg, "overridden_keys", frozenset())) - pending
+        globals_ = engine_globals if engine_globals is not None else self._global_engine_values(hub)
+        desired: dict[str, Any] = {
+            key: (user_cfg.get(key) if key in overridden else globals_[key])
+            for key in proactive_config_mod.ENGINE_KEYS
+        }
+        try:
+            current = dict(eng.get_runtime_config() or {})
+        except Exception as e:  # noqa: BLE001
+            logger.debug("读取引擎运行时配置失败 user=%s: %s", uk, e)
+            current = {}
+
+        payload: dict[str, Any] = {}
+        for key, want in desired.items():
+            have = current.get(key)
+            if key == "max_daily_messages" and current.get("frequency_mode") == "adaptive":
+                # 2026-10-31 R1-2：adaptive 的 ``get_max_daily`` 是**今天实际值**，
+                # 会随档位降到 low=3/minimal=1；拿它和 normal 上限比较永远不等
+                # → 每拍重建适配器并刷 INFO。配置面比较必须用稳定的
+                # ``max_daily_messages_configured``（normal/override 上限）。
+                configured = current.get("max_daily_messages_configured")
+                if isinstance(configured, (int, float)) and not isinstance(configured, bool):
+                    have = configured
+            if isinstance(have, (int, float)) and not isinstance(have, bool):
+                if key == "threshold":
+                    if abs(float(have) - float(want)) < 1e-9:
+                        continue
+                elif int(have) == int(want):
+                    continue
+            payload[key] = want
+        if payload and set(payload) & proactive_config_mod.FREQUENCY_KEYS:
+            for key in ("max_daily_messages", "min_interval_minutes", "cooldown_after_reply_minutes"):
+                if key in payload:
+                    continue
+                want = desired.get(key, current.get(key))
+                if isinstance(want, (int, float)) and not isinstance(want, bool):
+                    payload[key] = int(want)
+            missing = proactive_config_mod.FREQUENCY_KEYS - set(payload)
+            if missing:
+                logger.warning(
+                    "proactive per-user 频率覆盖缺目标值，按引擎默认下发 user=%s missing=%s",
+                    uk, sorted(missing),
+                )
+        try:
+            if payload:
+                eng.apply_runtime_config(**payload)
+                logger.info("proactive per-user engine config applied user=%s %s", uk, payload)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("proactive per-user engine config 下发失败 user=%s: %s", uk, e)
+            return
+        if pending:
+            # 引擎已对齐全局 → 墓碑使命完成。**只摘本次真的回滚掉的键**，保留
+            # 期间新写入的覆盖与并发新加的墓碑（直接删整行会把「DELETE 后马上
+            # 重设 paused」的设置一起抹掉；整段摘会把并发 DELETE 的新墓碑吞掉）。
+            try:
+                proactive_config_mod.clear_revert_marker(uk, pending)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("清除主动调度墓碑标记失败 user=%s: %s", uk, e)
+
+    def reconcile_user_engine(self, user_key: str) -> bool:
+        """把该用户的引擎对齐到当前生效配置（DELETE 清覆盖后的即时回滚入口）。
+
+        返回是否真的碰到引擎（无 hub/引擎 → False）。跨 worker 的最终一致性
+        由调度器下一拍读墓碑行保证；本方法是「清完立刻生效」的快路径。
+        """
+        key = str(user_key or "").strip()
+        if not key:
+            return False
+        hub = self.ase
+        if hub is None or not hasattr(hub, "get"):
+            return False
+        try:
+            eng = hub.get(key)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("reconcile_user_engine 取引擎失败 user=%s: %s", key, e)
+            return False
+        if eng is None:
+            return False
+        self._apply_user_engine_config(hub, eng, key, proactive_config_mod.effective(key))
+        return True
+
+    def _llm_proactive_one_user(
+        self, hub: Any, user_key: str,
+        engine_globals: dict[str, Any] | None = None,
+    ) -> None:
         from proactive.ase_engine import _local_now, sanitize_message
         from proactive.llm_proactive import (
             PROACTIVE_DEDUP_WINDOW,
@@ -1396,20 +1611,62 @@ class ProactiveScheduler:
         from utils import topic_state as _topic_state
 
         web_cfg = read_web_proactive_config()
+        # 2026-10-30 D20：per-user 主动调度覆盖（用户覆盖 > 全局 > 默认）。
+        # 一次热读拿到该会话的生效值与「真正被覆盖的键」——本函数后续三道前置
+        # 闸（暂停 / 总开关 / 静默）都按它判据，全局值仍是 ``scheduler_config.json``
+        # （与 admin 端点同一真源，admin 面原样不动）。读库失败/脏值已在
+        # ``utils.proactive_config`` 内逐字段回落全局，**绝不抛异常炸主链**。
+        user_cfg = proactive_config_mod.effective(str(user_key))
+        # 该会话生效的静默时段（覆盖哪一端用哪一端）——决策闸、上下文、judge
+        # 与投递必须**同一份**窗口，否则「用户把静默窗改窄」会在决策层放行、
+        # 又被投递层的全局静默拦回（设置看起来保存成功却永不生效）。
+        # 未覆盖 → None，后续一律走既有全局路径（零行为变更，替身兼容）。
+        _quiet_overridden = bool(
+            user_cfg.overridden_keys & set(proactive_config_mod.QUIET_KEYS)
+        )
+        _quiet_window = self._quiet_hours_for(user_cfg) if _quiet_overridden else None
+
+        def _gate(key: str, global_value: Any) -> Any:
+            """闸位取值：用户覆盖了该键就用用户值，否则用**运行时全局**。
+
+            全局来源保持原样（``self._paused`` / ``read_web_proactive_config()``）
+            ——不是 ``global_config()`` 的文件快照：调度器内存中的全局值是
+            ``_load_config_file`` 每 tick 热载的同一真源，且既有调用方/测试对
+            `read_web_proactive_config` 的替身必须继续生效（零行为变更）。
+            """
+            if key in user_cfg.overridden_keys:
+                return user_cfg.get(key, global_value)
+            return global_value
+        # 🔴 墓碑回滚必须排在所有「此刻不开口」闸**之前**（2026-10-30 复核 high）：
+        # paused / enabled=false 的用户根本走不到下面的引擎下发点，墓碑会永远
+        # 悬着 —— 引擎停在旧个人值，而用户以为已回到全局。回滚只是改配置，
+        # 不是发消息，不该被「暂停」拦住。
+        if proactive_config_mod.pending_revert_keys(str(user_key)):
+            try:
+                _eng_for_revert = hub.get(user_key) if hasattr(hub, "get") else None
+            except Exception as _eng_err:  # noqa: BLE001
+                logger.debug("墓碑回滚取引擎失败（下一拍重试）user=%s: %s", user_key, _eng_err)
+                _eng_for_revert = None
+            self._apply_user_engine_config(
+                hub, _eng_for_revert, str(user_key), user_cfg,
+                engine_globals=engine_globals,
+            )
         # D12-L：同拍演算生理读数。放在所有决策闸**之前** —— 暂停/等待窗只是
         # 「此刻不开口」，不是心跳停了；放在闸后会让她在 LLM 自判的长等待窗里
         # 读数整段冻结（tick 是唯一的回稳与噪声来源）。
         self._vital_tick_for_user(str(user_key))
-        if self._paused:
+        if bool(_gate("paused", self._paused)):
             # 块4（缺陷 D）：暂停必须在**生成之前**短路。旧实现只把 paused 存在
             # ASE 引擎里（tick 级），而生产主动消息走的是这条 LLM 决策链 ——
             # 引擎里的闸从未被本链读到，表现为「控制台按了暂停，她照发」。
+            # 2026-10-30 D20：判据改读该会话的生效值（用户覆盖 > 全局），
+            # 于是「我只暂停我自己」不再需要 admin 把全站一起停掉。
             append_proactive_event(
                 session_key=user_key, sent=False, reason="paused",
                 character_id=self._resolve_character_id(str(user_key)),
             )
             return
-        if not web_cfg.get("enabled", True):
+        if not bool(_gate("enabled", web_cfg.get("enabled", True))):
             # P1-51：关闭态账本事件每用户每日至多一条（旧实现每 tick 写一行，
             # enabled=false 反而让 agent_plane.db 涨得最快）
             today = _local_now().date().isoformat()
@@ -1421,7 +1678,9 @@ class ProactiveScheduler:
             return
         # P1-49：静默时段在 LLM 决策**之前**前置闸。旧实现静默只挡投递层，
         # 23:00-07:00 每 5 分钟照调一次远端 LLM（消息不发、token 恒流失）。
-        if self._is_quiet_hours():
+        # 2026-10-30 D20：per-user 静默 = 「被覆盖的那一端用用户值、另一端仍用
+        # 调度器内存里的全局时段」（半对时段按直觉合并，不做整对覆盖）。
+        if self._is_quiet_hours_for(user_cfg):
             # skip 账本治理（2026-10-12）：静默闸此前只 debug 不落账，决策
             # 链整夜不可观测；补每用户每日一条（与 llm_wait_window 同口径）。
             today_q = _local_now().date().isoformat()
@@ -1535,6 +1794,13 @@ class ProactiveScheduler:
                 return
 
         eng = hub.get(user_key) if hasattr(hub, "get") else None
+        # 2026-10-30 D20：引擎级 per-user 覆盖（阈值 / 日上限 / 最小间隔 / 冷却）
+        # 必须在掷骰与 `eng.tick` **之前**落到该用户的引擎上——否则 tick 读的是
+        # 全局频率参数，用户的个人设置要等下一次全局 admin 保存才生效。
+        # 纯 `paused`/`enabled` 覆盖的用户不触发任何引擎写（targets 为空即返回）。
+        self._apply_user_engine_config(
+            hub, eng, str(user_key), user_cfg, engine_globals=engine_globals,
+        )
         # D16（2026-10-12「谁扫码谁聊」）：节奏按**账号**聚合（`account_pacing_state`
         # 单一真源）——同 owner 前缀的多条通道取「最近一次投递」与「最近一次
         # 聊天」，消除同账号双通道各记各账、几分钟内连发（生产实证残留根因）。
@@ -1680,11 +1946,16 @@ class ProactiveScheduler:
         # 材料注入（未答澄清/将到提醒/未闭环承诺/近日热点），非模型自觉。
         hooks = load_live_hooks(str(user_key), memory)
         now = _local_now()
-        quiet = None
-        try:
-            quiet = self.get_quiet_hours() if hasattr(self, "get_quiet_hours") else None
-        except Exception:  # noqa: BLE001
+        # 2026-10-30 D20：上下文里的免打扰说明也用该会话的窗口（与决策闸同源）。
+        # 未覆盖静默键 → 保持旧取值（调度器内存里的全局时段）。
+        if _quiet_window is not None:
+            quiet = _quiet_window
+        else:
             quiet = None
+            try:
+                quiet = self.get_quiet_hours() if hasattr(self, "get_quiet_hours") else None
+            except Exception:  # noqa: BLE001
+                quiet = None
         # 2026-10-27 话题状态机 Q3/Q4：parked 复提候选（三重闸的候选侧）与
         # 上次决定的下一步（只取 next_at<=now 的到期计划）。两者都失败降级为空，
         # 不阻塞决策；闸的 owner 在 topic_state / topic_recall，这里只组装。
@@ -1924,7 +2195,17 @@ class ProactiveScheduler:
             self._judge_topic[str(user_key)] = _recall.judge_context
         except Exception:  # noqa: BLE001
             pass
-        if self._deliver(message, session_key=user_key, character_id=char_id):
+        # 2026-10-30 D20：投递层也按该会话的静默窗口判（否则用户把窗口改窄后
+        # 决策放行、投递仍被全局静默拦回 = 设置永远不生效）。只在**真的覆盖了**
+        # 静默时段时才传该 kwarg：未覆盖时投递本就用全局窗口（`_quiet_window`
+        # 即全局），少传一次也保持 `_deliver(message, session_key, character_id)`
+        # 的既有调用形态（大量测试替身按三参定义）。
+        _deliver_kwargs: dict[str, Any] = {}
+        if _quiet_window is not None:
+            _deliver_kwargs["quiet_hours"] = _quiet_window
+        if self._deliver(
+            message, session_key=user_key, character_id=char_id, **_deliver_kwargs,
+        ):
             # 2026-10-27 话题状态机 Q3/Q4：发送成功才消费旧计划，并保存本次
             # 决定的下一步（wait=0 → 下一次决策即可见）。投递失败分支不消费、
             # 不覆盖旧计划（保留到 TTL，见下方 else）。
@@ -2027,6 +2308,7 @@ class ProactiveScheduler:
 
     def _deliver(
         self, message: str, session_key: str | None = None, character_id: str | None = None,
+        quiet_hours: tuple[int, int] | None = None,
     ) -> bool:
         """投递主动消息。session_key 非空时**定向**到该会话，否则广播（旧路径）。
 
@@ -2089,11 +2371,14 @@ class ProactiveScheduler:
         try:
             from proactive.post_draft_judge import judge_proactive_message
 
-            _quiet = None
-            try:
-                _quiet = self.get_quiet_hours() if hasattr(self, "get_quiet_hours") else None
-            except Exception:  # noqa: BLE001
-                _quiet = None
+            # 2026-10-30 D20：per-user 会话用该会话的静默窗口（与决策闸同源）；
+            # 广播/手动线（quiet_hours=None）仍取全局，零行为变更。
+            _quiet = quiet_hours
+            if _quiet is None:
+                try:
+                    _quiet = self.get_quiet_hours() if hasattr(self, "get_quiet_hours") else None
+                except Exception:  # noqa: BLE001
+                    _quiet = None
             # 2026-10-28 复核修复（Q3 第三闸绕过）：judge 的 LLM 必须与
             # `build_topic_recall(judge_available=…)` 的判定同源——provider 为空
             # 但存在按用户 resolver 时（BYOK / 替代装配），旧实现给 judge 传
@@ -2139,9 +2424,18 @@ class ProactiveScheduler:
                 return False
             character_id = current_character
         try:
-            delivered = bool(
-                self._run_blocking(lambda: self._send_targeted(message, session_key))
-            )
+            if quiet_hours is None:
+                delivered = bool(
+                    self._run_blocking(lambda: self._send_targeted(message, session_key))
+                )
+            else:
+                delivered = bool(
+                    self._run_blocking(
+                        lambda: self._send_targeted(
+                            message, session_key, quiet_hours=quiet_hours,
+                        )
+                    )
+                )
         except Exception as e:  # noqa: BLE001
             logger.error("主动消息投递失败（不记账、不扣配额）: %s", e)
             return False
@@ -2161,16 +2455,27 @@ class ProactiveScheduler:
         """
         return session_key_mod.is_wechat_key(session_key)
 
-    async def _send_targeted(self, message: str, session_key: str | None = None) -> bool:
+    async def _send_targeted(
+        self, message: str, session_key: str | None = None,
+        quiet_hours: tuple[int, int] | None = None,
+    ) -> bool:
         # 投递失败分类（2026-10-17 批）：每次尝试先清零，失败分支各自落短因，
         # 供调用方账本分类（deliver_failed_backoff_XXm|<class>）——旧实现失败
         # 只有 warning 日志，账本看不出「窗口拒收」与「通道掉线」是两种病。
         self._last_deliver_error = ""
-        if self._is_quiet_hours():
+        if quiet_hours is None:
+            # 同 `_send_to_all`：无 per-user 窗口时保持旧判据（`_is_quiet_hours`），
+            # 不新增对 `self._quiet_hours` 字段的硬依赖。
+            blocked = self._is_quiet_hours()
+            window = getattr(self, "_quiet_hours", None) or (23, 7)
+        else:
+            blocked = self._quiet_hours_contains(quiet_hours)
+            window = quiet_hours
+        if blocked:
             self._last_deliver_error = "quiet_hours"
             logger.warning(
                 "免打扰时段(%s-%s)：消息未投递（无紧急旁路），内容不计数不扣配额",
-                self._quiet_hours[0], self._quiet_hours[1],
+                window[0], window[1],
             )
             return False
 
@@ -2235,7 +2540,11 @@ class ProactiveScheduler:
             logger.warning("微信定向投递未成功（通道不可用），不回退广播: session=%s", session_key)
             return False
 
-        return await self._send_to_all(message)
+        # quiet_hours=None 时保持旧调用形态（两个位置参数）——`_send_to_all` 的
+        # 既有测试替身按 `(message)` 定义，多传一个 kwarg 会整片打断。
+        if quiet_hours is None:
+            return await self._send_to_all(message)
+        return await self._send_to_all(message, quiet_hours=quiet_hours)
 
     def _run_memory_curator(self) -> None:
         """AX P2：夜间记忆整理（垃圾归档 / near-dup 合并 / 账本事件）。"""

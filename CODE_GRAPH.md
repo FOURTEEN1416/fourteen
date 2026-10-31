@@ -1,44 +1,44 @@
-# 代码图谱 — unique-you (唯一的你) **v3.8.36**（2026-10-30 批7 收尾口径）
+# 代码图谱 — unique-you (唯一的你) **v3.8.37**（2026-10-31 表述分离 + 用户主权 per-user 化批口径）
 
-> **v3.8.36（2026-10-30 批7 收尾 · 本地全链领先 origin、未部署）**：D20 前端全站体验六批（批 1–6：`908db1c` P0 止血 → `38e517c` 契约修复 → `6d57e30` admin 数据面 → `cbdaf96` 首日旅程与教学 → `a91ed34` 个性化与 IA → `69c1d71` 收尾）+ 批 6 对抗验收收编（`69aecd2`：F1 教学页死路由 / F4 公告 XSS scheme 白名单 / F5 毫秒时间戳守卫 + F9 端点口径更正 101→106；`f9ccfd4`：F2 last-admin 删除不变式测试）+ **批 7 四收编**（`d182b6c` NEW-20 高危操作二次确认 / `c6ed735` NEW-31 组件库收编（SubTabBar 删除）/ `65e0fee` NEW-32 设计 token（+`DesignTokens` 守卫测试）/ `9815c27` NEW-22 用户列表排序全页化（sort/sort_dir 白名单 7 键 + `tests/test_admin_users_sort.py` 29 例））。端点 235/197 → **249/205**（+14 全部来自批 1–6 体验面四组；**批 7 零新端点**，NEW-22 仅给既有端点增查询参数）；新增 §4.16。测试口径（主控 2026-10-30 实测）：后端四分块 **4297 通过 / 2 跳过 / 3 个存量失败族**（均 HEAD 对照实证与批 7 无关）+ ruff 0；前端 vitest **342/342（47 文件）** + tsc 0；**突变验红 4/4**。⚠️ 角色卡 42→**41**（`99c89c39.json` 变体已不在盘，gitignore 无轨迹，待主控定性——见 §1.1）。读数见 §1.1。
-> **结构真源 = AOCI**（`aoci.txt` 卷头 → `aoci.code.txt` 实体条目 **1116 行** → `aoci.meta.txt` 词表）；本文件只保留人读的规模读数、分层骨架与维护指针。**历史版本（v3.8.35 话题状态机/拟人化部署批 / v3.8.34 八项裁决批 / v3.8.33 重建批 / v1.55·v1.54 质量批）要点压缩归档至 `LOG.md` 对应条目，本文件不再逐条保留**。
+> **v3.8.37（2026-10-31 表述分离 + 用户主权 per-user 化批 · 8 域 · 7/8 独立对抗验收通过 · 全量回归通过 · 本地工作树未提交未部署）**：`psych`（五端点 admin 全量 / 普通用户仅本人会话 scope）/ `proactive-backend`（新增 `utils/proactive_config.py` 879 行三级合并 + `user_proactive_config` 覆盖表 + 4 个 `/api/user/proactive*` 端点）/ `proactive-frontend`（消息 tab 对全体用户开放，个人覆盖/继承全局徽章）/ `wechat`（遗留全局端点保持 admin + 新增 `wechat_direct/media_upload.py` 出站 CDN 上传）/ `clone`（数据集 `data/clone/<user_id>/` per-user 分区）/ `voice`（音色 owner 单一规则 + 角色音色写门 `require_character_write`；全局 switch-voice/set-engine 保持 admin）/ `topic`（快照读面本人会话白名单）/ `docs-naming`（训练→风格提取）。端点 249/205 → **253/207**（+4 全部为 user/proactive）；新增 §4.17。测试口径（本批 `python scripts/regression_gate.py` 实跑）：后端四分块 **4498 通过 + 2 跳过 / 收集 4500 / 0 失败**（3 个存量失败族由 conftest users 主库隔离根治）+ ruff 0；前端 vitest **354/354（47 文件）** + tsc 0。角色卡 **41 张**（不变）。读数见 §1.1。
+> **结构真源 = AOCI**（`aoci.txt` 卷头 → `aoci.code.txt` 实体条目 **1116 行** → `aoci.meta.txt` 词表）；本文件只保留人读的规模读数、分层骨架与维护指针。**历史版本（v3.8.36 批 7 收尾 / v3.8.35 话题状态机/拟人化部署批 / v3.8.34 八项裁决批 / v3.8.33 重建批 / v1.55·v1.54 质量批）要点压缩归档至 `LOG.md` 对应条目，本文件不再逐条保留**。
 > 批次详情、生产取证与历史版本见 `LOG.md`（唯一只追加不覆盖文件）。
 
-> 由维护者手动维护 | **最后核实: 2026-10-30（v3.8.36 批7 收尾口径）**，读数命令见各节「核实方法」列；更早的核实记录一律见 `LOG.md` 对应批次条目。
+> 由维护者手动维护 | **最后核实: 2026-10-31（v3.8.37 本批口径）**，读数命令见各节「核实方法」列；更早的核实记录一律见 `LOG.md` 对应批次条目。
 > **读出纪律**：① 引用测试基线必须同时声明**角色卡数**与**工作树是否含在制品**（见 §1.1 表下注）；② 端点口径只认 `APIRoute` 实例数，不认 `len(app.routes)`（后者恒定多 4 条框架路由）。
 
 ---
 
 ## 1. 全局指标
 
-### 1.1 实时核实指标（2026-10-30 本批亲跑）
+### 1.1 实时核实指标（2026-10-31 本批亲跑）
 
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
-| 仓库 HEAD | **批 7 收口链**（以 `git log -1` 为准；链尾含 e2e 基础设施修复 `38bf6ee`，其后仅口径修正）；**未部署**——本地全链领先 `origin/main`（`cdbe546`）（实现 12 + 文档若干 + 测试/基础设施若干，精确快照见 `LOG.md` 2026-10-30 补记「提交快照」）；**工作树干净（0 项）** | `git log --oneline origin/main..HEAD` + `git status --porcelain`（验收三轮实跑，工作树 = 0 项） |
-| API 业务端点 | **249 `APIRoute` / 205 条唯一路径**；`len(app.routes)` = **253**（含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`） | `create_api_app()` 内省（本批实跑，`AI_GF_ENV=dev`）：`len([r for r in app.routes if isinstance(r, APIRoute)])` = **249**；唯一路径 **205**。较 v3.8.35 的 235/197 增 **14**——全部来自批 1–6 体验面：`POST /api/user/llm-config/test` ×1 + `/api/user/humanize` ×4（NEW-34）+ `/api/announcements` ×2 + `/api/admin/announcements` ×4（V2-5）+ `/api/admin/audit` + `/api/admin/global-view` ×2（NEW-21/V2-1）；**批 7 零新端点**（NEW-22 仅增查询参数） |
-| 方法分布 | **118 GET / 90 POST / 18 PUT / 23 DELETE** | 同上，按 `route.methods` 计数（本批实跑） |
+| 仓库 HEAD | **本批工作树基于 HEAD `ccfa197`**；`origin/main` = `cdbe546`，本地领先 **22 提交**；本批 8 域实现 + 文档**全部未提交**（`git status --porcelain` = **47 项：37 修改 + 10 新文件**）；**未部署** | `git log -1 --oneline` + `git rev-list --count origin/main..HEAD` + `git status --porcelain \| wc -l`（本批实跑） |
+| API 业务端点 | **253 `APIRoute` / 207 条唯一路径**；`len(app.routes)` = **257**（含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`） | `create_api_app()` 内省（本批实跑，`AI_GF_ENV=dev`）：`len([r for r in app.routes if isinstance(r, APIRoute)])` = **253**；唯一路径 **207**。较 v3.8.36 的 249/205 **+4**——全部为 `/api/user/proactive-config` GET/POST/DELETE + `/api/user/proactive/pause` POST（D20 用户自助主动调度） |
+| 方法分布 | **119 GET / 92 POST / 18 PUT / 24 DELETE** | 同上，按 `route.methods` 计数（本批实跑） |
 | 路由挂载 | 字面 **22 处 `app.include_router(`**（其中 1 处在 `_mount_required_router` 辅助函数内 `:361`）+ **9 处 `_mount_required_router(...)` 调用** → 运行期路由挂载点 **30 处**；另加 `setup_shisi` 一处（`api/app_factory.py:297-302`） | `grep -c "app\.include_router(" api/app_factory.py` = 22；`grep -c "_mount_required_router("` = 10（含 def，本批实跑）。公告双挂载 `announcement_router`/`announcement_admin_router` @ `:276-277`；`topic_state_router` @ `:273` |
 | 域路由模块 | **26 个**（`api/routers/*.py` 不含 `__init__.py`；26 个全部带路由；+`announcement_routes.py` 一双 router 文件） | `ls api/routers/*.py \| grep -v __init__ \| wc -l`（本批实跑） |
-| Python 规模（tracked = HEAD） | **594 文件 / 161,394 行** | `git ls-files '*.py' \| wc -l` + `xargs cat \| wc -l`（本批实跑 @ `9815c27`） |
-| Python 规模（磁盘全量） | **755 文件 / 199,888 行**（剔除 `.git` / `node_modules` / `__pycache__`）；其中含 `大创赛报名以及后期发展/` 软著代码副本（gitignored，不入库） | `find . -name '*.py' -not -path './.git/*' -not -path '*/node_modules/*' -not -path '*__pycache__*'` + `xargs cat \| wc -l`（本批实跑） |
+| Python 规模（tracked = HEAD） | **594 文件 / 161,394 行**（HEAD 未含本批 10 个新文件；本批新增文件见下行） | `git ls-files '*.py' \| wc -l` + `xargs cat \| wc -l`（本批实跑 @ `ccfa197`） |
+| Python 规模（磁盘全量） | **765 文件 / 206,919 行**（剔除 `.git` / `node_modules` / `__pycache__`）；含 `大创赛报名以及后期发展/` 软著代码副本（gitignored，不入库）；较 v3.8.36 的 755/199,888 增 **10 文件 / 7,031 行**（6 个新测试 + `utils/proactive_config.py` + `wechat_direct/media_upload.py` + 2 个脚本） | `find . -name '*.py' -not -path './.git/*' -not -path '*/node_modules/*' -not -path '*__pycache__*'` + `xargs cat \| wc -l`（本批实跑） |
 | main.py | **573 行** | `wc -l main.py`（本批实跑，未变） |
 | orchestrator/ | **9 文件 / 5,154 行**：`optimized_orchestrator.py` **2464**、`_stream_mixin.py` **607**、`context_budget.py` **666**、`_init_mixin.py` **589**（11 个 `_init_*` 阶段）、`tool_gate.py` **387**、`session_locks.py` 175、`console_chat.py` 134、`voice_detector.py` 108、`__init__.py` 24 | `wc -l orchestrator/*.py`（本批实跑；批 1–7 后端改动未触及 orchestrator/，`git diff bdab4f7..HEAD -- orchestrator/` 为空） |
-| Python 测试 | **269 测试文件 / 主控实测 4297 通过 + 2 跳过 / 3 个存量失败族 / 收集 4315**（① `tests/test_api_routes.py` sqlalchemy **14 errors**② `test_w10_metrics_multiproc` 503→404 口径债③ `test_w3_scheduler_state` Depends 形态——**三族均 HEAD 对照实证、与批 7 无关**；各族的 failed/errors 计数随聚合态浮动，以族为单位引用）；ruff **0** | 文件数 `find tests -name 'test_*.py' \| wc -l` 与 `git ls-files` **双重实测 269**（+3 新文件 = `tests/api/test_announcements_api.py` / `tests/test_admin_routes_last_admin.py` / `tests/test_admin_users_sort.py`，且批 1–7 无测试文件删除）；收集 4315 与四分块并集精确吻合（主控 2026-10-30 复测；**教训：分块总数对并集，不得对单块外推**） |
-| 前端测试 | **342 通过 / 47 文件**（vitest ^5） | 文件数本批实测 `find frontend/src \( -name '*.test.*' -o -name '*.spec.*' \) \| wc -l` = **47**（36→47，+11 新文件清单见 §4.9）；用例数 342 + tsc 0 引主控 2026-10-30 实测口径 |
-| 测试合计（徽章） | **4640**（4297 Py 通过 + 342 FE + 1 跳过标记） | ⚠️ `README.md:11` 徽章仍为 `Tests-4508`（v3.8.35 口径）——**徽章同步归收口批，本版不动 README**（本批 grep 复核） |
+| Python 测试 | **276 测试文件 / 4498 通过 + 2 跳过 / 收集 4500 / 0 失败**（本批 `python scripts/regression_gate.py` 实跑；四分块 1026+1332+1104+1036 = 4498）；ruff **0** | 文件数 `find tests -name 'test_*.py' \| wc -l` 实测 **275**（269→276，+6：`test_psych_user_scope` / `test_proactive_user_scope` / `test_wechat_channel_user_scope` / `test_clone_user_scope` / `test_voice_user_scope` / `test_media_upload_cdn`）；`pytest --collect-only` = **4500**，与四分块并集精确吻合；**3 个存量失败族**（api_routes sqlalchemy / w10 503→404 / w3 Depends）由 `tests/conftest.py` users 主库会话级临时库隔离根治，本批 0 失败（非删测试） |
+| 前端测试 | **353 通过 / 47 文件**（vitest ^5） | `npm test -- --run` 本批实测：`Test Files 47 passed (47)` / `Tests 353 passed (353)`；文件数 47 不变、用例 342→353（+11，`RoleSettings.test.tsx`） |
+| 测试合计（徽章） | **4853**（4498 Py 通过 + 354 FE + 1 跳过标记） | ⚠️ `README.md:11` 徽章仍为 `Tests-4508`（v3.8.35 历史口径）——**README 不在本批范围；CODE_GRAPH 权威口径为 4853** |
 | 现役角色卡 | **41 张**（`config/characters/*.json`）——⚠️ **漂移登记**：v3.8.35 口径 42，`99c89c39.json`（user_id=1 林挽夏克隆变体）已不在盘，`find .` 全仓无踪；目录被 `.gitignore` 忽略故无 git 轨迹可追，**原因待主控定性** | `ls config/characters/*.json \| wc -l`（本批实跑 41）+ `find . -name '99c89c39*' -not -path './.git/*'`（无踪）。**卡数不随 git 复现** |
-| 模块 .py/.ts/.tsx 计数 | **api 51 / orchestrator 9 / proactive 14 / shisi 116 / utils 26 / tools 13 / voice 8 / wechat_direct 4 / frontend/src 154** | `find <pkg> -name '*.py' \| wc -l` ×8 + `find frontend/src \( -name '*.ts' -o -name '*.tsx' \) \| wc -l`（本批逐项实跑；api +2 = `audit.py` + `announcement_routes.py`；frontend/src 138→154） |
+| 模块 .py/.ts/.tsx 计数 | **api 51 / orchestrator 9 / proactive 14 / shisi 116 / utils 27 / tools 13 / voice 8 / wechat_direct 5 / frontend/src 154** | `find <pkg> -name '*.py' \| wc -l` ×8 + `find frontend/src \( -name '*.ts' -o -name '*.tsx' \) \| wc -l`（本批逐项实跑；utils 26→27 = `proactive_config.py`；wechat_direct 4→5 = `media_upload.py`） |
 | 前端页面 / API 模块 / store | **20 页 / 16 API 模块 / 6 store**（auth / characterBuilder / error / **globalView** / humanize / topicState） | `ls frontend/src/pages/*.tsx`、`ls frontend/src/api/*.ts`、`ls frontend/src/store/`（本批实跑；+`HelpGuidePage` / +`announcements.ts` / +`globalViewStore.ts`） |
 | tools/builtin | **9 文件 / 17 个工具类**；默认注册 **14**（`config/system.yaml` `tools.builtin_tools`） | `find tools/builtin -name '*.py' \| wc -l` = 9；`grep -h "^class .*Tool" tools/builtin/*.py \| wc -l` = 17（本批复测，数值未变） |
-| 数据库 | **本地 `data/sqlite.db` 35 表**（不变；无 topic 三表 = **惰性建表未触发**）；**新增口径 `data/users.db` 14 表**（10 → 14：+`announcements` / `announcement_reads` / `operator_prefs` / `operator_audit` 四张批 3–4 新表，纯新增 create_all 幂等；model 真源 `api/database.py:406/:447/:468/:487`） | python sqlite3 `sqlite_master` 枚举（本批实跑：sqlite.db 35 表 / users.db 14 表含 `sqlite_sequence`）；topic 三表 schema 真源 = `utils/topic_state.py:86/:107/:119`（生产三表已在位） |
+| 数据库 | **本地 `data/sqlite.db` 35 表**（本批新增 `user_proactive_config` 覆盖表为**惰性建表、未触发**；topic 三表同）；**`data/users.db` 14 表**（批 3–4 四张新表，纯新增 create_all 幂等；model 真源 `api/database.py:406/:447/:468/:487`） | python sqlite3 `sqlite_master` 枚举（本批实跑：sqlite.db 35 表 / users.db 14 表含 `sqlite_sequence`）；`user_proactive_config` schema 真源 = `utils/proactive_config.py:106`（`OVERRIDE_TABLE`） |
 
-> ⚠️ **工作树口径（v3.8.36）**：本版数值读数采集于 HEAD=`9815c27`、工作树 **5 项 `.md` 在制品**（本图谱 + 主控并行收口的 AGENTS/LOG/HANDOFF/DELETION_LOG 四件）时点——**业务代码（A 档 .py/.ts）零在制品**，§1.1 全部数值读数即 HEAD 实况；按读出纪律①，引用 v3.8.36 须注明「工作树含 5 项 B 档文档在制品（含主控并行收口写入）」。
-> ⚠️ **聚合态跑法**：单进程整跑 `pytest -q` 会在随机位置停住（环境问题，非用例失败），须**串行**四分块；分块清单必须 `find` 递归生成——本批实测 **269** 个 `test_*.py`（含 `tests/core/` 与 `tests/api/`；漏子目录会少跑一批用例，10-17 批已实证漏 `tests/api/` 少 32 例）。
-> ✅ **基线公式复核**：`tests/test_persona_injection.py` 单独收集 = **2 × 卡数 + 13**；卡数已由 42 漂移为 **41**（见上表「现役角色卡」行），即现行公式 2×41+13 = **95**，卡数变则全量收集数随之浮动。
-> ✅ **3 个存量失败族定性（2026-10-30 主控实测）**：① `tests/test_api_routes.py` **14 errors**（sqlalchemy 形态债）② `test_w10_metrics_multiproc`（503→404 口径债）③ `test_w3_scheduler_state`（Depends 形态）——三族均已 **HEAD 对照实证与批 7 无关**，归专项口径债清理；批 7 自身四分块 4297 通过 + 2 跳过、ruff 0、**突变验红 4/4**（M1 排序闸 / M2 停用确认 / M3 token 回潮 / M4 Button 收编）。
+> ⚠️ **工作树口径（v3.8.37）**：本版数值读数采集于 HEAD=`ccfa197` + **本批 47 项工作树在制品**（37 修改 + 10 新文件；含 8 域实现/测试/脚本与 AGENTS/LOG/HANDOFF/CODE_GRAPH 文档）时点；业务代码非 HEAD 实况，引用 §1.1 须注明「本批未提交工作树」。
+> ⚠️ **聚合态跑法**：单进程整跑 `pytest -q` 会在随机位置停住（环境问题，非用例失败），须**串行**四分块；分块清单必须 `find` 递归生成——本批实测 **275** 个 `test_*.py`（含 `tests/core/` 与 `tests/api/`；漏子目录会少跑一批用例，10-17 批已实证漏 `tests/api/` 少 32 例）。
+> ✅ **基线公式复核**：`tests/test_persona_injection.py` 单独收集 = **2 × 卡数 + 13**；卡数 **41**（见上表「现役角色卡」行），现行公式 2×41+13 = **95**，卡数变则全量收集数随之浮动。
+> ✅ **3 个存量失败族清零（2026-10-31 本批实跑）**：`tests/test_api_routes.py` sqlalchemy / `test_w10_metrics_multiproc` 503→404 / `test_w3_scheduler_state` Depends——根因由 `tests/conftest.py` 在 import `api.database` 前把 users 主库钉到会话级临时库（空库 + `init_db`）根治；四分块 **4498 通过 + 2 跳过 / 0 失败**，非删测试或放行。
 > ✅ **2 例跳过为非回归**：`tests/test_cache.py:297`（Redis not available）+ `tests/golden/test_golden_set.py:48`（`live_llm` 用例默认不跑，设 `GOLDEN_LIVE=1` 才启用真实供应商）。
-> ✅ **跨文档口径**：`AGENTS.md` **v1.61** 版本头 + `LOG.md` 批 7 条目 + `docs/HANDOFF_REPORT.md` v1.61 顶栏 + `docs/DELETION_LOG.md` NEW-31 补登——主控并行收口与本图谱回扫**同帧进行**（F9 端点口径更正 101→106、批 7 突变验红 4/4、3 存量失败族定性均互洽）；**已收口**：CODEMAPS 六件随 `0520801` 对齐（本行保留作跨文档互洽的记录）；**待同步**：`README.md:11` 徽章 4508→**4640**（收口批）。测试文件口径已对账为 **269**（本图谱双重实读；主控文档中原 268 系笔误、已随本收口批更正）。
+> ✅ **跨文档口径**：`AGENTS.md` **v1.62** 版本头 + `LOG.md` 2026-10-31 批条目 + `docs/HANDOFF_REPORT.md` v1.62 顶栏 + `CODE_GRAPH.md` v3.8.37——四件同帧更新；`README.md:11` 徽章仍为 4508（历史口径，**README 不在本批范围**），CODE_GRAPH 权威口径 = **4853**。
 
 ### 1.2 图谱工具快照（历史归档）
 
@@ -51,7 +51,7 @@
 请求自外向内四层，**调用方向单向**（越界即循环依赖风险）：
 
 1. **入口层**：`main.py`（`_run_orchestrator`，573 行）/ `api/run_api.py`（uvicorn，`create_api_app()` @ `:626`）。
-2. **接口层**：`api/`（`app_factory.py:94 create_api_app()` + 25 域路由 + `setup_shisi`）与 `shisi/api/`（DDD 核心域 30 端点）。
+2. **接口层**：`api/`（`app_factory.py:94 create_api_app()` + 26 域路由 + `setup_shisi`）与 `shisi/api/`（DDD 核心域 30 端点）。
 3. **编排层**：`orchestrator/`（`OptimizedOrchestrator` 三件套 + `tool_gate` / `context_budget` / `session_locks`）。
 4. **领域与服务层**：`shisi/`（DDD 核心）、`my_character/`、`persona_extractor/`、`security/`、`llm_provider/`、`proactive/`、`voice/`、`wechat_direct/`、`tools/`、`utils/`。
 
@@ -120,43 +120,43 @@
 
 > **架构演进（历史归档）**：`_run_fast_mode` + `_run_full_mode` 于 2026-07-28 合并为 `_run_orchestrator`，`console_chat` 已自 main.py 迁出——详见 `LOG.md` 2026-07-28 / 2026-08-28 条。
 
-### 4.2 API 层（**249 业务端点 / 205 唯一路径** — 2026-10-30 批7 收尾口径内省实扫）
+### 4.2 API 层（**253 业务端点 / 207 唯一路径** — 2026-10-31 本批内省实扫）
 
 | 来源 | 路径 | 端点数 | 文件数 | 说明 |
 |------|------|--------|------|------|
-| `api/routers/` | **26 个域路由模块**（不含 `__init__.py`；26 个全部带路由） | **214** | 27（含 `__init__.py`） | character / auth / admin / invite / voice / mimo_voice / storyline / wechat / wechat_channel / emotion / memory / knowledge / persona_card / chat / clone / misc / personality / safety / tools / training / users / llm_providers / agent_plane / character_template / topic / **announcement（批 4 新增，一双 router 文件）** |
+| `api/routers/` | **26 个域路由模块**（不含 `__init__.py`；26 个全部带路由） | **218** | 27（含 `__init__.py`） | character / auth / admin / invite / voice / mimo_voice / storyline / wechat / wechat_channel / emotion / memory / knowledge / persona_card / chat / clone / misc / personality / safety / tools / training / users / llm_providers / agent_plane / character_template / topic / **announcement（批 4 新增，一双 router 文件）**；本批 training +4（`/api/user/proactive*`） |
 | `api/`（非 routers） | `health_routes.py` / `qrcode_store.py` / `app_factory.py` 内联 | **5** | 3 | health 3（含 `/api/metrics`）+ qrcode 1（admin 兼容面）+ app_factory 内联 `/api/shisi/status` 1（untagged） |
 | `shisi/api/` | v1（`v2/` 死模块 2026-09-18 删除） | **30** | 11（其中 **8** 个文件带路由） | character 7 / memory 6 / sticker 5 / affinity 4 / emotion_stage 3 / persona 3 / stats 1 / vital_signs 1（+ 上面内联 status = 31 域面）；`__init__` / `common` / `registry` 无路由 |
-| **合计** | | **249** | | 118 GET / 90 POST / 18 PUT / 23 DELETE；`len(app.routes)`=253 |
+| **合计** | | **253** | | 119 GET / 92 POST / 18 PUT / 24 DELETE；`len(app.routes)`=257 |
 
-> 🔢 **两个数字不是同一件事**（易误读，特此点明；本批用 `inspect.getmodule` 分组实测）：表中 `api/routers/` 行的 **214 = 该层端点数**（26 文件）；§1.1 的 **205 = 全站唯一路径数**。校验：214（routers）+ 30（shisi/api，8 个文件带路由）+ **5**（api 非 routers：health 3 + qrcode 1 + app_factory 内联 1）= **249** = `APIRoute` 总数 ✓。
+> 🔢 **两个数字不是同一件事**（易误读，特此点明；本批用 `inspect.getmodule` 分组实测）：表中 `api/routers/` 行的 **218 = 该层端点数**（26 文件）；§1.1 的 **207 = 全站唯一路径数**。校验：218（routers）+ 30（shisi/api，8 个文件带路由）+ **5**（api 非 routers：health 3 + qrcode 1 + app_factory 内联 1）= **253** = `APIRoute` 总数 ✓。
 
-> ⚠️ **口径纠错**：旧口径「206 / 208 端点」取自 `len(app.routes)`，其中固定含 4 条 FastAPI 框架路由，系统性偏高 4。**业务端点 = `APIRoute` 实例数**。演进链：2026-09-21 `220/186` → +W4 forwards 1 +W10 metrics 1 +W12 templates 2 +W9 自服务 5 = 229 → D16 退役 peers 3 = **226/193** → v3.8.33 重建批 **229/194** → v3.8.34 **231/195**（R7 reply-mode 2）→ v3.8.35 **235/197**（+4 = `/api/topic-state` ×3 + `DELETE /api/humanize/config`）→ **v3.8.36** 实测 **249/205**（+14 = 批 1–6 体验面四组：misc +1 / training +4 / announcements +6 / admin +3；**批 7 零新端点**）。
+> ⚠️ **口径纠错**：旧口径「206 / 208 端点」取自 `len(app.routes)`，其中固定含 4 条 FastAPI 框架路由，系统性偏高 4。**业务端点 = `APIRoute` 实例数**。演进链：2026-09-21 `220/186` → +W4 forwards 1 +W10 metrics 1 +W12 templates 2 +W9 自服务 5 = 229 → D16 退役 peers 3 = **226/193** → v3.8.33 重建批 **229/194** → v3.8.34 **231/195**（R7 reply-mode 2）→ v3.8.35 **235/197**（+4 = `/api/topic-state` ×3 + `DELETE /api/humanize/config`）→ v3.8.36 **249/205**（+14 = 批 1–6 体验面四组）→ **v3.8.37** 实测 **253/207**（+4 = `/api/user/proactive*` 四端点）。
 
-**按 tag 的端点分布**（内省实测，权威口径；较 v3.8.35 变化：**training 19→23** / **misc 16→17** / **admin 5→8** / 新增 **announcements 2 + admin-announcements 4**，其余一致）：
+**按 tag 的端点分布**（内省实测，权威口径；较 v3.8.36 变化：**training 23→27**，其余一致）：
 
 ```
-training 23 │ character 21 │ misc 17 │ auth 13 │ safety-infra 12 │ chat 11
+training 27 │ character 21 │ misc 17 │ auth 13 │ safety-infra 12 │ chat 11
 memory 11 │ personality 10 │ wechat 9 │ clone 8 │ knowledge 8 │ admin 8
 users 7 │ characters 7 │ tools 6 │ wechat-channel 6 │ voice 6 │ mimo-tts 6
 storyline 6 │ llm-providers 6 │ agent-plane 5 │ stickers 5 │ affinity 4 │ invite 4
 admin-announcements 4 │ health 3 │ topic-state 3 │ emotion-stage 3 │ persona 3 │ persona-card 3
 announcements 2 │ admin-wechat 2 │ character-templates 2 │ emotion 2 │ vital-signs 1 │ stats 1
 (untagged) 1
-                                          ────────── 合计 249
+                                          ────────── 合计 253
 ```
 
-> 注：`character`(21) = `api/routers/character_routes.py`；`characters`(7) = `shisi/api/character_routes.py`。`memory`(11) = api `memory_routes`(5) + shisi `memory_routes`(6)。`auth`(13) = 原 8 + W9 自服务 5。`training`(23) = training 5 + proactive 6 + humanize/config 4 + knowledge/collect-config 2 + reply-mode 2 + **user/humanize 自助 4**（NEW-34，`/api/user/humanize` GET/POST/PUT/DELETE）——`api/routers/training_routes.py` 单文件承载六组。`misc`(17) = 原 16 + **`POST /api/user/llm-config/test`**（NEW-13 BYOK 连通性）。`admin`(8) = 原 5 + **audit 1 + global-view 2**（NEW-21 / V2-1）。`announcements`(2) + `admin-announcements`(4) = `api/routers/announcement_routes.py` 一双 router 文件（V2-5）。`wechat-channel`(6) + `admin-wechat`(2) 同属 `wechat_channel_routes.py`。`(untagged)`(1) = app_factory 内联 `/api/shisi/status`。
+> 注：`character`(21) = `api/routers/character_routes.py`；`characters`(7) = `shisi/api/character_routes.py`。`memory`(11) = api `memory_routes`(5) + shisi `memory_routes`(6)。`auth`(13) = 原 8 + W9 自服务 5。`training`(27) = training 5 + proactive 6 + humanize/config 4 + knowledge/collect-config 2 + reply-mode 2 + **user/humanize 自助 4**（NEW-34）+ **user/proactive 自助 4**（本批 D20，`/api/user/proactive-config` GET/POST/DELETE + `/api/user/proactive/pause` POST）——`api/routers/training_routes.py` 单文件承载七组。`misc`(17) = 原 16 + `POST /api/user/llm-config/test`（NEW-13）。`admin`(8) = 原 5 + audit 1 + global-view 2（NEW-21 / V2-1）。`announcements`(2) + `admin-announcements`(4) = `api/routers/announcement_routes.py` 一双 router 文件（V2-5）。`wechat-channel`(6) + `admin-wechat`(2) 同属 `wechat_channel_routes.py`。`(untagged)`(1) = app_factory 内联 `/api/shisi/status`。
 
-> 📐 **批 6 收编 F9 更正（子集口径注记）**：`tests/test_api_routes.py:171-189` 契约断言「9 子路由合计 = **97**」（misc 17 / chat 11 / personality 10 / users 7 / training 23 / tools 6 / safety 12 / clone 8 / topic 3）；批 6 收编登记的全口径 **106** = 97 + announcements 6 + admin 新增 3（原记 101 系算术错误，`69aecd2` 更正）。⚠️ 该 106 为**管理/自助面子集记账**，图谱权威口径始终以本表 `APIRoute` 全量 **249/205** 为准。
+> 📐 **子集口径注记（批 6 F9 更正 + 本批更新）**：`tests/test_api_routes.py:171-189` 契约断言「9 子路由合计 = **101**」（misc 17 / chat 11 / personality 10 / users 7 / training **27** / tools 6 / safety 12 / clone 8 / topic 3）；批 6 收编登记的管理/自助子集 **106** = 97 + announcements 6 + admin 新增 3，本批 training +4 后为 **110**。⚠️ 该子集记账≠全站口径，图谱权威口径始终以本表 `APIRoute` 全量 **253/207** 为准。
 
 **`api/app_factory.py:94 create_api_app()`** 是 FastAPI 应用唯一构造入口（`FastAPI(..., version="3.1.0")`），被 `api/run_api.py:626` 与 `main.py` 调用。挂载清单（源码逐行核对；22 处字面 `app.include_router`（含辅助函数内 1 处）+ 9 处 `_mount_required_router` 辅助调用 + `setup_shisi` @`:297-302`；`topic_state_router` @`:273`，公告双挂载 @`:276-277`）：
 
-**按定义模块的端点归属**（`inspect.getmodule(route.endpoint)` 实测，合计 214 + 30 + 5 = **249**）：
+**按定义模块的端点归属**（`inspect.getmodule(route.endpoint)` 实测，合计 218 + 30 + 5 = **253**）：
 
 ```
-api/routers/（26 文件，214 端点）
-  training_routes 23 │ character_routes 21 │ misc_routes 17 │ auth_routes 13
+api/routers/（26 文件，218 端点）
+  training_routes 27 │ character_routes 21 │ misc_routes 17 │ auth_routes 13
   safety_routes 12 │ chat_routes 11 │ personality_routes 10 │ clone_routes 8
   knowledge_routes 8 │ wechat_channel_routes 8 │ wechat_routes 8 │ admin_routes 8
   users_routes 7 │ tools_routes 6 │ announcement_routes 6 │ mimo_voice_routes 6
@@ -270,7 +270,7 @@ api 非 routers（5 端点）
 
 **多用户 API Key 隔离**：`User.llm_config` JSON 字段（`api/database.py:85`）→ `/api/user/llm-config` GET（脱敏 `****`）/ POST（自动 `invalidate_user_llm()`），在 `api/routers/misc_routes.py`。调用链：`SettingsLLM.tsx` → `frontend/src/api/system.ts` → `POST /api/user/llm-config` → `users.llm_config` → 下次 `process_message` 按 `user_id` 取专属 LLM。
 
-### 4.7.1 wechat_direct/ — 每人独立微信通道（4 文件；D16 后 `peer_character.py` 已退役）
+### 4.7.1 wechat_direct/ — 每人独立微信通道（5 文件；D16 后 `peer_character.py` 已退役）
 
 > 2026-09-19 裁决：通道层由全局单例改为 **per-user × slot 多租户**；2026-10-12 D16 补裁 **一人一 bot**（`MAX_CHANNELS_PER_USER = 1`，`channel_paths.py:13`），全局并发上限 `WECHAT_MAX_CHANNELS`（默认 100）。方案文档：`docs/plans/2026-09-19-每人独立微信通道方案.md`。
 
@@ -278,12 +278,14 @@ api 非 routers（5 端点）
 |------|------|
 | `channel_paths.py` | 磁盘路径唯一真源 `data/wechat_sessions/<user_id>/slotN/`；`max_channels()`；`list_user_slots_with_credentials()`；**`scanner_ids_for_user()`** 枚举各通道扫码人 |
 | `connector_registry.py` | `ConnectorRegistry`（`get_registry()` 单例）：`(owner_user_id, slot)` 键控；`ensure/disconnect/status_for_user/primary_status/start_login/restore_on_boot`；`ChannelQuotaError`/`ChannelSlotError`；每会话目录 `poll.lock` 去重多 worker 轮询 |
-| `wechat_connector.py` | 连接器本体按 owner/slot 隔离：`load_session_state/qrcode`、`get_wechat_state`、`split_reply_for_wechat()`、**D16 扫码人守卫**（`ilink_user_id` 三路径装载 + 非扫码人拒绝 + 告警）、入站 `parse_ilink_items`（图片 item 2 / 语音 item 3）、图片/语音/emoji 发送、`token_window_state(owner)` 六态探针、`_drain_outbox` 出站宿主；**v1.57 新增 `_send_typing`（`:881-887`，iLink `ilink/bot/sendtyping`，1=开始 / 2=结束）与 `send_typing(to_user, on)`（`:1174`），失败静默 no-op**；对话内追问引擎已随 D14 退役 |
+| `wechat_connector.py` | **2478 行**；连接器本体按 owner/slot 隔离：`load_session_state/qrcode`、`get_wechat_state`、`split_reply_for_wechat()`、**D16 扫码人守卫**（`ilink_user_id` 三路径装载 + 非扫码人拒绝 + 告警）、入站 `parse_ilink_items`（图片 item 2 / 语音 item 3）、图片/语音/emoji 发送、`token_window_state(owner)` 六态探针、`_drain_outbox` 出站宿主；**v1.57 `_send_typing`/`send_typing` 失败静默 no-op**；**本批 `_send_voice_message` `:893` 优先 CDN 出站（`media_upload.upload_bytes`），仅上传失败回落旧内联 `message_type=34`；sendmessage 失败不回落（防重复投递），上传预算 20s×2**；对话内追问引擎已随 D14 退役 |
+| **`media_upload.py`**（本批新增，287 行） | iLink 出站媒体 CDN 上传唯一 owner：`upload_bytes` `:168`（`getuploadurl` → AES-128-ECB/PKCS7 → POST 密文 → `x-encrypted-param`）、`voice_item` `:228`（type=3 + `media` 引用）/ `image_item`（type=2）/ `build_message`；`DEFAULT_CDN_BASE_URL` 与入站下载共用基址，不拥有 HTTP 客户端（`post_api` 注入） |
 | `__init__.py` | 导出 |
 
 **D16 跨域机制**：① activate 直连扫码人绑定（`character_routes` 激活时经 `scanner_ids_for_user()` 落 `wechat_bindings` + `upsert_binding` 缓存 + 活实例热切）；② 主动节奏按账号聚合（`proactive/llm_proactive.py:289 account_pacing_state()` 单一真源，同 owner 前缀取 hours=min / last_proactive=max）。
 **双入口契约**：`sync_disk_sessions_to_db()`（async，lifespan 调用）与 `_sync_disk_sessions_to_db_sync()`（CLI）共同委托 `_sync_disk_sessions_async()` 内核，禁在运行中事件循环内 `asyncio.run()`。
 **遗留迁移**：`scripts/migrate_legacy_wechat_channel.py` 一次性把旧全局凭证迁入 admin（user_id=1）`slot0`。旧全局端点 `/api/channels/wechat/*` 与 `/api/wechat/qrcode` 收敛为 admin 兼容面，普通用户一律走 `/api/wechat/channel*`（仅 JWT）。
+**本批通道边界（2026-10-31）**：`api/routers/chat_routes.py` 的遗留全局 connect/disconnect/reconnect 三端点**保持 admin-only**（操作 admin 自有 `slot=0`，不是 per-user 能力）；per-user owner 仍是 `wechat_channel_routes.py`（token 派生 `(user_id, slot)`），防第二套 owner。
 
 ### 4.8 voice/ — 语音合成（MiMo 唯一引擎）
 
@@ -291,13 +293,15 @@ api 非 routers（5 端点）
 
 | 文件 | 说明 |
 |------|------|
-| `mimo_tts_provider.py` | 唯一引擎：MiMo Cloud API（8 情感映射内置）+ SAPI 本地兜底 |
+| `mimo_tts_provider.py` | **577 行**；唯一引擎：MiMo 官方 `POST /v1/chat/completions`（`messages=[user=风格指令, assistant=待合成文本]` + `audio={format,voice}`，音频 `choices[0].message.audio.data` base64）+ SAPI 本地兜底；情感/speed/pitch 转自然语言风格指令；9 款官方预置音色 + 旧三档兼容别名；voiceclone/voicedesign 本地登记参考音频/描述（`data/voice_samples/`），不再依赖持久 voice_id |
 | `tts_manager.py` | 单引擎管理（多引擎降级链已删） |
 | `tts_provider_base.py` | Provider 抽象基类 |
 | `audio_converter.py` | 音频格式转换（silk） |
-| `clone_data_manager.py` | 聊天克隆数据管理（克隆域，与 TTS 无关） |
-| `voice_catalog.py` | 音色 catalog（`data/voice_catalog.json`） |
+| `clone_data_manager.py` | **434 行**；聊天克隆数据管理（克隆域，与 TTS 无关）；本批全部读写入口接 `owner`——空串=根目录（admin/机器面存量无主），非空=`data/clone/<user_id>/`；`safe_person_id` 路径段唯一校验、`has_dataset/count_datasets/save_dataset` |
+| `voice_catalog.py` | **197 行**；音色 catalog（`data/voice_catalog.json`）；9 款官方预置；`register(sample_path=...)`；**`denied_voice_owner` `:173` 音色归属判定唯一 owner** + `VOICE_OWNER_DENIED` 文案常量 |
 | `audio_result.py` | 合成结果封装 |
+
+> **音色归属（本批，§4.17）**：`api/routers/voice_routes.py::_assert_voice_owner` `:147`（POST/PUT）与 `/api/mimo/synthesize` 共用 `voice.voice_catalog.denied_voice_owner`；`shisi/voice/character_voice.py::effective_voice_ids` `:41` 收 `voice_id`/`speaker_name`/`extra_params` 一层嵌套（保守上界），`audit_voice_owner_mismatches` `:79` 只读审计；`/api/mimo/switch-voice`、`/api/mimo/set-engine` 保持 admin（全局 TTS 单例）。
 
 ### 4.9 前端（React 19 管理控制台）
 
@@ -306,9 +310,10 @@ api 非 routers（5 端点）
 - **16 个 API 模块**：admin, **announcements（V2-5）**, auth, characters, client, clone, emotion, llmProviders, mimo, normalize, queryClient, selfservice, system, templates, training, wechat（demo/chat/users 已删）。
 - **R7 模式隔离 UI（2026-10-21）**：`components/admin/RoleSettingsTabs.tsx` 新增 `reply_mode` 作用域切换（global/user）+ 目标 user 选择；`api/system.ts` 增 `getMyReplyMode()` / `setMyReplyMode()`（走 `/api/user/reply-mode` 自助端点）。
 - **话题状态机 UI（2026-10-27/28）**：`components/admin/TopicStateSection.tsx` + `store/topicStateStore.ts` + `api/system.ts`（消费 `/api/topic-state/*` 三端点）；**骰子闸配置面**同在 `RoleSettingsTabs.tsx` + `api/system.ts`（`/api/proactive/config` 的 `dice_gate` 块）。
+- **用户自助主动消息 UI（本批，§4.17）**：`components/admin/RoleSettingsTabs.tsx` 普通用户「我的主动消息」区（6 个节奏滑条 + `scope` 徽章「个人覆盖/继承全局」+ 保存只提交改动键 + 恢复继承 + 个人暂停）；`api/system.ts` 四端点封装与类型；`hooks/useQueries.ts` `queryKeys.userProactive` + `useUserProactiveConfig`；admin 仍走全局 `proactiveGetConfig` 控制面。`RoleSettings.test.tsx` +11 例。
 - **6 个 Zustand store**：authStore, errorStore, characterBuilderStore, humanizeStore, topicStateStore, **globalViewStore**（V2-1 全局运维视图开关，批 3 新增）。
 - **React Query hooks 5 文件**（`useAuth` / `useQueries` / `useInView` / `useMousePosition` / `index`）；Playwright E2E 配置在册；`frontend/src/constants/` 含 `cloneAgentGuide.ts`（CreateRole 任务书）、`agreement.ts`、`persona.ts`。新依赖 **driver.js `^1.10.2`（MIT，教学导览）** 与 `lucide-react ^0.510.0`（NEW-32 图标统一）。
-- **vitest 342 用例 / 47 文件**（vitest ^5；文件数 2026-10-30 实测 47 = 36 + **11 新文件**：`AdminProvidersPage` / `AnnouncementBanner` / `Breadcrumb` / `DesignTokens` / `GlobalViewBanner` / `HelpGuidePage` / `Modal` / `RoleSettingsTabsHistory` / `SharedComponents` / `UserForm` + `hooks/useMemoryFacts`；用例数 342 + tsc 0 引主控 2026-10-30 实测口径）。
+- **vitest 353 用例 / 47 文件**（vitest ^5；文件数 47 与 v3.8.36 相同；本批 `RoleSettings.test.tsx` +11 例，342→353；`npm test -- --run` 本批实测 `Tests 353 passed (353)` + `tsc --noEmit` 0 错）。
 
 **页面说明（沿用，逐条仍在位）**：ToolsDashboard = 工具健康/启停；StatusCenter = 系统状态（记忆三层管线）；SettingsVoice = 语音设置（ENGINE_OPTIONS 仅 mimo-tts）；WeChatPage 仅 LiveStatusBanner + QrCodeConnectionModal（移除 0 数据 StatsBar）；SettingsLLM 走 `/api/user/llm-config`（普通用户不再 403，批 4 增「测试连接」走 `/api/user/llm-config/test`）；PsychProfilePage 消费 `/api/psych/*` 五端点；IntroPage 接替已删 Demo 的访客转化；CreateRole 克隆三步流（智能体代跑，任务书 `constants/cloneAgentGuide.ts`）；RoleSettings DataTab 含「网络增强」→ `/api/characters/{id}/enrich`；**HelpGuidePage** = 13 模块教学卡 + 学习进度按 user_id 持久化 + driver.js 导览（「需活跃角色」显式标注）。
 
@@ -350,21 +355,21 @@ tools/
 **核心类**：`BaseTool`（name/description/permission_level/parameters_schema → `execute()` → ToolResult；`to_openai_fc_schema()`）、`ToolResult`（success + data/error；`to_dict()`/`to_fc_result()`）、`ToolRegistry`（`register/get/get_tools_by_permission(affinity)/health_check_all`）、`ToolDispatcher`（权限 → 限速 3 次/分/工具 → 执行 → 重试 → 埋点）。
 **安全特性**：SSRF 防护（`url_guard`）、AST 计算替代 eval、public/friend/intimate/admin 四级门控、逐工具优雅降级。
 
-### 4.11 其余模块包（2026-10-30 批7 收尾口径刷新）
+### 4.11 其余模块包（2026-10-31 本批口径刷新）
 
 | 包 | 文件数 | 内容与关键 owner |
 |----|--------|------------------|
-| `proactive/` | **14** | `scheduler.py`（**2821 行**：决策线主循环；**骰子闸例外 hook `:1576-1592`**（`evaluate_dice_gate(requested_mode="live")` @`:1580`，账本由引擎写 `actor=proactive_dice` 不冒充 `proactive_llm`；用户裁决接受该例外，回退 `DICE_GATE_PRODUCTION_WIRED=False`）；**话题状态机接线**：`build_topic_recall` `:1691`（import `:1390`）、`topic_plan` 全周期 `take_next_plan` `:1514/:1703/:1820/:1932(consume=True)` / `save_next_plan` `:1811/:1933`、7 天 TTL `purge_expired` `:2289-2293`）、`ase_engine.py`（**2065 行**：`evaluate_dice_gate` `:1287` / `_record_dice_event` `:1356` / dice 双桶状态 `:956-963` / `_read_dice_gate_config_safe` `:59` + `_dice_gate_wired` `:76`）、`frequency.py`（**470 行**：节奏控制器 + 骰子闸纯函数面 §4.13）、`llm_proactive.py`（**1445 行**，决策线 + `account_pacing_state` @`:289`）、`proactive_context.py`（**216 行**，人设/约束统一构造器）、`reminder_delivery.py`（**360 行**，投递守卫）、`ase_hub.py`（332）、`proactive_hooks.py`（201）、`post_draft_judge.py`（**171 行**，v1.57 A-4 主动 post-draft judge fail-closed，只判发/不发）、`reflection.py`（143）、`runtime_plane.py`（**804 行**，跨进程运行时平面 `data/runtime_plane.db`）、`runtime_assembly.py`（140 行，提醒/主动两入口唯一装配 owner）、**`topic_recall.py`（100 行：parked 复提候选 + `judge_context`，三重闸候选侧——judge 关闭/不可调用 → 空候选，fail-closed）** |
-| `utils/` | **26** | 共享真源包：**`topic_state.py`（1769 行，话题状态机唯一 owner，§4.12）**、`stream_guard.py`（597 行：`IncrementalReplyGuard` `:207` + `read_stream_mode()` `:157` / `true_streaming_enabled()` `:165`）、`prompt_sanitize.py`（**1152 行**：`terminal_reply_guard` `:1058`、`_extract_user_anchor_sentences` `:308`、`scrub_history_rows` `:922`）、`reply_mode.py`（**275 行**：`DEFAULT_REPLY_MODE` `:45`、per-user 覆盖 `read_reply_mode(user_key)` + 表 `user_reply_mode`、**`_STAGE_DIRECTION_RE` `:66` 四形态单一真源（圆括号/星号/`[]`/`【】`，c3ede77）**）、`character_helpers.py`（CSP 行为蒸馏清洗与渲染 §4.14）、`humanize_config.py`（`HUMANIZE_FIELDS` 声明式字段表 `:103`，`DEFAULTS` `:128` / `INT_BOUNDS` `:131` / `WRITABLE_FIELDS` `:137` 全派生；`user_humanize` 按用户覆盖）、`humanize_read_delay.py`（**119 行**，`compute_read_delay_ms` `:79`）、`humanize_typo.py`（**54 行**，可选口误，`typo_rate` 默认 0）、`humanize_delivery.py`（114 行，主动拆条 2–4 段 + 段间节奏，两投递点共用）、`session_key.py`（165 行）、`address_terms.py`（237 行）、`local_time.py`、`project_paths.py`、`llm_bridge.py`、`json_state.py`、`async_utils.py`、`deletion_guard.py`、`inbound_context.py`、`fallback_lines.py`、`affinity_state.py`、`character_resolver.py`、`bootstrap.py`、`emotion_state.py`、`health_check.py`、`important_dates.py` |
+| `proactive/` | **14** | `scheduler.py`（**3122 行**：决策线主循环；本批 per-user 段 `_quiet_hours_for` `:1132` / `_is_quiet_hours_for` `:1163` / `_global_engine_values` `:1431` / `_apply_user_engine_config` `:1449` / `reconcile_user_engine` `:1555`；**骰子闸例外 hook `:1838`（本批 +301 行后由旧 `:1576-1592` 下移）**；**话题状态机接线** `build_topic_recall` / `topic_plan` 全周期 `take_next_plan` / `save_next_plan` / 7 天 TTL `purge_expired`，旧行号整体下移）、`ase_engine.py`（**2065 行**：`evaluate_dice_gate` `:1287` / `_record_dice_event` `:1356` / dice 双桶状态）、`frequency.py`（**470 行**：节奏控制器 + 骰子闸纯函数面 §4.13）、`llm_proactive.py`（**1445 行**，决策线 + `account_pacing_state` @`:289`）、`proactive_context.py`（**216 行**，人设/约束统一构造器）、`reminder_delivery.py`（**360 行**，投递守卫）、`ase_hub.py`（332）、`proactive_hooks.py`（201）、`post_draft_judge.py`（**171 行**，v1.57 A-4 主动 post-draft judge fail-closed，只判发/不发）、`reflection.py`（143）、`runtime_plane.py`（**804 行**，跨进程运行时平面 `data/runtime_plane.db`）、`runtime_assembly.py`（140 行，提醒/主动两入口唯一装配 owner）、**`topic_recall.py`（100 行：parked 复提候选 + `judge_context`，三重闸候选侧——judge 关闭/不可调用 → 空候选，fail-closed）** |
+| `utils/` | **27** | 共享真源包：**`proactive_config.py`（879 行，本批新增——主动调度 per-user 覆盖唯一 owner，8 键声明式 `FIELDS` / `ENGINE_KEYS` / `user_proactive_config` 表 / 三级合并 / 墓碑回滚，§4.17）**、**`topic_state.py`（1769 行，话题状态机唯一 owner，§4.12）**、`stream_guard.py`（597 行：`IncrementalReplyGuard` `:207` + `read_stream_mode()` `:157` / `true_streaming_enabled()` `:165`）、`prompt_sanitize.py`（**1152 行**：`terminal_reply_guard` `:1058`、`_extract_user_anchor_sentences` `:308`、`scrub_history_rows` `:922`）、`reply_mode.py`（**275 行**：`DEFAULT_REPLY_MODE` `:45`、per-user 覆盖 `read_reply_mode(user_key)` + 表 `user_reply_mode`、**`_STAGE_DIRECTION_RE` `:66` 四形态单一真源（圆括号/星号/`[]`/`【】`，c3ede77）**）、`character_helpers.py`（CSP 行为蒸馏清洗与渲染 §4.14）、`humanize_config.py`（`HUMANIZE_FIELDS` 声明式字段表 `:103`，`DEFAULTS` `:128` / `INT_BOUNDS` `:131` / `WRITABLE_FIELDS` `:137` 全派生；`user_humanize` 按用户覆盖）、`humanize_read_delay.py`（**119 行**，`compute_read_delay_ms` `:79`）、`humanize_typo.py`（**54 行**，可选口误，`typo_rate` 默认 0）、`humanize_delivery.py`（114 行，主动拆条 2–4 段 + 段间节奏，两投递点共用）、`session_key.py`（165 行）、`address_terms.py`（237 行）、`local_time.py`、`project_paths.py`、`llm_bridge.py`、`json_state.py`、`async_utils.py`、`deletion_guard.py`、`inbound_context.py`、`fallback_lines.py`、`affinity_state.py`、`character_resolver.py`、`bootstrap.py`、`emotion_state.py`、`health_check.py`、`important_dates.py` |
 | `context/` | 2 | `world_info_provider.py`（世界书/lorebook） |
 | `multimodal/` | 3 | `image_attachment.py`（入站图片归一化，magic bytes，不落盘）、`multimodal_processor.py` |
 | `clone_training/` | 4 | `data_cleaner` / `data_extractor` / `style_analyzer`（weclone_adapter 已删） |
 | `observability/` | 8 | metrics / health / logging_setup / sentry / graceful_shutdown / config_manager / config_models |
 | `plugins/` | 2 | `weather.py`（外部数据源插件位） |
-| `scripts/` | 19 | 运维/迁移脚本（`rebuild_knowledge_index.py`、`migrate_legacy_wechat_channel.py`、`link_identities.py` 等，见 `ls scripts/*.py`） |
+| `scripts/` | **21** | 运维/迁移脚本（`rebuild_knowledge_index.py`、`migrate_legacy_wechat_channel.py`、`link_identities.py` 等；本批新增 `regression_gate.py`（263 行，四分块 pytest + vitest + tsc + ruff 串行门禁）与 `audit_voice_bindings.py`（60 行，音色归属只读审计）） |
 | `deploy/` | — | systemd unit + nginx 模板 + `remote_deploy.sh` + `backup_manager.py`（577 行）+ `restore_manager.py`（329 行） |
 | `api/` 非路由 | **20 文件** + `api/state/`（3 模块 + `__init__`） | 请求链：`run_api.py`（642 行）/ `app_factory.py`（**523 行**，+4 = 公告双挂载）/ `auth.py` / `auth_jwt.py` / `deps.py` / `runtime_config.py` / `session_manager.py` / `path_security.py` / `password_policy.py` / `byok.py` / `achievement_engine.py` / `main_routes.py` / **`audit.py`（91 行，批 3 新增——NEW-21 operator_audit + V2-1 全局视图开关唯一 owner，见 §4.16）**；数据与生命周期：`database.py`（**666 行**，+4 表 model）、`lifecycle.py`（账号/角色删除五阶段作业）、`consent.py`（同意状态机）、`qrcode_store.py`、`health_routes.py`、`websocket_server.py`；`api/state/`：`safety_log.py`、`tool_history.py`、`training_state.py` |
-| `api/routers/topic_routes.py` | **85 行** | 话题状态机管理端（2026-10-27 新增）：`GET/POST /api/topic-state/config`（热读/partial merge 热写 `data/scheduler_config.json` 的 `topic_state` 块，admin）+ `GET /api/topic-state/{session_key}`（只读快照，不回传 prompt 文本）；**注册顺序硬约束 `/config` 在 `/{session_key}` 之前**；会话键沿用 `_resolve_admin_target_key`（纯数字仅当存在微信绑定才还原 `N:wxid`，否则 400 不猜键） |
+| `api/routers/topic_routes.py` | **139 行** | 话题状态机管理端（2026-10-27 新增；本批读面 per-user 化）：`GET/POST /api/topic-state/config`（热读/partial merge 热写 `data/scheduler_config.json` 的 `topic_state` 块，admin）+ `GET /api/topic-state/{session_key}`（只读快照，不回传 prompt 文本）——admin 任意键；普通用户仅本人绑定键 ∪ 活跃 web 会话白名单（`_owned_session_keys` `:67`），不解析客户端自报数字 id，他人/不存在 404；**注册顺序硬约束 `/config` 在 `/{session_key}` 之前** |
 | `api/routers/character_template_routes.py` | 278 行 | 角色模板面阶段 1：`GET /api/character-templates` + `POST /{id}/clone`（模板文件零改动） |
 | `tests/golden/` | 12 文件 | **R6 黄金集（2026-10-21 立项）**：`cases/*.jsonl` **45 条用例**（8 分类：aiyu_contrast 6 / degradation_quality 4 / echo_attribution 6 / guard_regression 8 / meta_memory 4 / mode_boundary 7 / topic_awareness 5 / ungrounded_reciprocal 5）+ `runner.py`（792 行）+ `judges.py`（154 行）+ `test_golden_set.py`（402 行，pytest 入口，单文件收集 69 例 = 68 passed + 1 skipped live_llm）+ `README.md`。**确定性优先、判定全部委托被测真源、LLM 判定不计基线** |
 
@@ -381,19 +386,19 @@ tools/
 | `get_topic_snapshot` | `:889` | 主链快照任务（见下） |
 | `update_after_turn` | `:922` | `_after_process._safe_topic_then_after_chat`（`optimized_orchestrator:1800`） |
 | `select_proactive_recall` | `:1183` | `proactive/topic_recall.py`（parked 复提候选侧） |
-| `save_next_plan` / `take_next_plan` | `:1261` / `:1323` | `scheduler.py:1811/:1933` / `:1514/:1703/:1820/:1932(consume=True)` |
-| `purge_expired` | `:1380` | `scheduler.py:2293`（每日维护，全状态 7 天 TTL） |
+| `save_next_plan` / `take_next_plan` | `:1261` / `:1323` | `scheduler.py:2074/:2206` / `:1765/:1966/:2083/:2205(consume=True)`（本批 +301 行后行号已下移，grep 复核） |
+| `purge_expired` | `:1380` | `scheduler.py:2596`（每日维护，全状态 7 天 TTL；本批 +301 行后下移） |
 | `read_topic_config` / `write_topic_config` | `:152` / `:182` | 管理端 `/api/topic-state/config` |
 | `should_run_llm_judge` / `run_llm_judge` | `:1476` / `:1641`（`timeout=8.0` @`:1648`） | `_after_process._run_topic_judge`（`optimized_orchestrator:1762`）——每 4 轮稀疏 judge，超时/失败**保留原状态** |
 | `render_topic_state_block` | `:509` | prompt 状态块渲染（≤160 字） |
 
 **主链接线**（`orchestrator/optimized_orchestrator.py`）：并发快照任务 `:1152-1161`（`asyncio.wait_for` + `TOPIC_SNAPSHOT_TIMEOUT_SECONDS=0.2` @`:64`，失败只降级为空、不给首字加等待）→ `_attach_topic_state` `:67/:1401`（dict 键 `topic_state_text`）→ `:1421-1427` 随记忆上下文注入。
 
-**主动线 `topic_plan` 全周期**：决策时 `skip` 也存计划（`save_next_plan`）→ 重启后读回（跨进程仍在）→ 到点注入决策上下文 → 消息发送成功才 `consume=True` 消费（`scheduler.py:1932`）。
+**主动线 `topic_plan` 全周期**：决策时 `skip` 也存计划（`save_next_plan`）→ 重启后读回（跨进程仍在）→ 到点注入决策上下文 → 消息发送成功才 `consume=True` 消费（`scheduler.py:2205`）。
 
-**parked 复提三重闸**（Q3-A）：`proactive/topic_recall.py`（100 行，`build_topic_recall` @ `scheduler.py:1691`）——候选侧要求 **≥6h 闲置 + 非静默时段 + judge allow** 三条同时成立；judge 关闭/不可调用 → 空候选（fail-closed）。
+**parked 复提三重闸**（Q3-A）：`proactive/topic_recall.py`（100 行，`build_topic_recall` @ `scheduler.py:1954`）——候选侧要求 **≥6h 闲置 + 非静默时段 + judge allow** 三条同时成立；judge 关闭/不可调用 → 空候选（fail-closed）。
 
-**管理端与前端**：`/api/topic-state/*` 三端点（`api/routers/topic_routes.py:85` 行，admin，见 §4.11）+ 前端 `components/admin/TopicStateSection.tsx` + `store/topicStateStore.ts`。**回滚开关**：管理端热写 `topic_state.enabled=false` / `llm_judge_enabled=false`（partial merge，其余配置块逐字保留）。多 active 并行上限 3（Q6-B `_enforce_active_cap` @`:840`）。
+**管理端与前端**：`/api/topic-state/*` 三端点（`api/routers/topic_routes.py` **139 行**；config 两面 admin，快照读面 admin 任意键 / 普通用户本人会话白名单，见 §4.11/§4.17）+ 前端 `components/admin/TopicStateSection.tsx` + `store/topicStateStore.ts`。**回滚开关**：管理端热写 `topic_state.enabled=false` / `llm_judge_enabled=false`（partial merge，其余配置块逐字保留）。多 active 并行上限 3（Q6-B `_enforce_active_cap` @`:840`）。
 
 ### 4.13 dsh-speak-up 零 token 骰子闸（`aabc867`，默认关闭 + dry_run 默认开）
 
@@ -405,7 +410,7 @@ tools/
 - 配置读写：`normalize_dice_gate_config` `:389` / `read_dice_gate_config` `:425` / `write_dice_gate_config` `:432`；配置真源 `data/scheduler_config.json` `dice_gate` 块。
 - **回退开关**：`DICE_GATE_PRODUCTION_WIRED` `:209`（现 `True`）——若 scheduler 例外不成立而回退只读分支则置 `False`，管理端据此显示「当前不生效」。**scheduler.py 例外已由用户裁决接受（`dd3b470`，2026-10-28）**。
 
-**接线**：① 引擎侧 `proactive/ase_engine.py`：`evaluate_dice_gate` `:1287` / `_record_dice_event` `:1356`（账本 `actor=proactive_dice`，含 roll/line/streak）；dry/live **双桶 streak** `:956-963`（干跑期不污染 live 的连没中加成）；`_read_dice_gate_config_safe` `:59` + `_dice_gate_wired` `:76`。② 决策侧 `proactive/scheduler.py:1576-1592`：**一次性例外 hook**——掷骰不通过 → skip 该 tick（`wait` + line/roll/streak 落日志），不烧决策 LLM。③ 配置面：管理端 `/api/proactive/config` 的 `dice_gate` 块（`training_routes.py:324-332`，读侧附 `empty_dice_gate_state` 运行态）+ 前端 `RoleSettingsTabs.tsx` / `api/system.ts`。
+**接线**：① 引擎侧 `proactive/ase_engine.py`：`evaluate_dice_gate` `:1287` / `_record_dice_event` `:1356`（账本 `actor=proactive_dice`，含 roll/line/streak）；dry/live **双桶 streak** `:956-963`（干跑期不污染 live 的连没中加成）；`_read_dice_gate_config_safe` `:59` + `_dice_gate_wired` `:76`。② 决策侧 `proactive/scheduler.py:1838`：**一次性例外 hook**——掷骰不通过 → skip 该 tick（`wait` + line/roll/streak 落日志），不烧决策 LLM。③ 配置面：管理端 `/api/proactive/config` 的 `dice_gate` 块（`training_routes.py:324-332`，读侧附 `empty_dice_gate_state` 运行态）+ 前端 `RoleSettingsTabs.tsx` / `api/system.ts`。
 
 **测试时区缺陷**：骰子测试曾误用墙钟（UTC CI 主机差 8h → 4 分块门 4 失败），`165504f` 改 `now_local` 对齐引擎时钟根治（五文件复跑 128/128，见 §1.1 注）。
 
@@ -460,6 +465,25 @@ tools/
 
 **遗留登记**：① **部署未做**——本地全链领先 origin（快照见 LOG 2026-10-30 补记），三端统一铁律下随用户裁决；② `README.md:11` 徽章 4508 → **4640** 待收口批同步（CODEMAPS 六件 / HANDOFF / AGENTS v1.61 / LOG / DELETION_LOG 已随 `0520801` 落账）；③ **w11_journey e2e 已真机跑通 11/11**（2026-10-30 验收三轮；其余四个 spec 仍待前置重建——`capabilities` 需探针卡）；④ 批 6 遗留 NEW-22/20/31/32 已于批 7 清零；⑤ 3 个存量失败族待专项批。
 
+### 4.17 表述分离 + 用户主权 per-user 化批（2026-10-31，8 域 · 7/8 独立对抗验收通过 · 本地工作树未提交未部署）
+
+**范围**：D20-⑤「用户需要能够自己进行设置，而不是全站统一」+「训练→风格提取」表述分离。工作流 `dwfrun-cacb31a3` 按 8 域 fan-out，每域 implementor + 独立 verifier（verifier 不跑 pytest，避免共享 `data/` 污染）；全量回归由 `scripts/regression_gate.py` 统一执行。
+
+| 域 | 落点 | 关键证据 |
+|----|------|----------|
+| **psych** | `api/routers/personality_routes.py` 五端点双分支：admin 全量 / 普通用户仅本人会话 scope | `_owned_targets` `:204` 用 `persona_bank.list_persona_scopes()` + `scope_owner_uid` 过滤；`session_id` 必须命中服务端派生白名单；客户端自报他人键/完整 scope 塞 `character_id` → 404；无本人桶不读 bank；`DELETE` 不全表清。`tests/test_psych_user_scope.py` 21 例 |
+| **proactive-backend** | `utils/proactive_config.py`（新增 879 行）+ `proactive/scheduler.py`（3122 行）+ `api/routers/training_routes.py` 四端点 | 三级合并「用户覆盖 > 全局 > 默认」；`user_proactive_config` 表（`:106`，惰性建表）；`FIELDS` `:146` / `ENGINE_KEYS` `:178` / `effective` `:547` / `write_proactive_config` `:611` / `clear_override` `:653`；scheduler `_quiet_hours_for` `:1132` / `_is_quiet_hours_for` `:1163` / `_apply_user_engine_config` `:1449` / `reconcile_user_engine` `:1555`；端点 `GET/POST/DELETE /api/user/proactive-config` + `POST /api/user/proactive/pause`（training 23→27）。`tests/test_proactive_user_scope.py` 57 例 |
+| **proactive-frontend** | `RoleSettingsTabs.tsx` 普通用户「我的主动消息」区 + `api/system.ts` 四端点 + `hooks/useQueries.ts` | 服务端 `effective` 平铺真源、`scope`/`overridden_keys` 徽章；保存只提交改动键；未绑定微信禁用；admin 全局控制面不动。`RoleSettings.test.tsx` +11 例（342→353） |
+| **wechat** | `wechat_direct/media_upload.py`（新增 287 行）+ `wechat_connector._send_voice_message` `:893` | iLink 出站 CDN：`getuploadurl` → AES-128-ECB/PKCS7 → POST 密文 → `x-encrypted-param` → item type=3/2；仅上传失败回落旧内联（sendmessage 失败不回落，防重复投递）。`chat_routes.py` 遗留全局 connect/disconnect/reconnect 保持 admin（真 owner=`wechat_channel_routes.py`）。`test_media_upload_cdn.py` 14 例 + `test_wechat_channel_user_scope.py` 5 例 |
+| **clone** | `voice/clone_data_manager.py`（434 行）+ `api/routers/clone_routes.py`（447 行） | `_owner_dir` 唯一根入口：空串=根目录（admin/机器面存量无主），非空=`data/clone/<user_id>/`；上传 `persist` + 配额 429 + `safe_person_id`；LIST/DETAIL/DELETE/批量删按 owner 分区，他人/不存在 404。`test_clone_user_scope.py` 8 例 |
+| **voice** | `api/routers/voice_routes.py` / `voice/voice_catalog.py` / `shisi/voice/character_voice.py` | `_assert_voice_owner` `:147`（POST/PUT）与合成入口共用 `denied_voice_owner` `:173`；角色音色写门 `require_character_access`→`require_character_write`；PUT `deepcopy`；`effective_voice_ids` `:41` / `audit_voice_owner_mismatches` `:79`；`scripts/audit_voice_bindings.py`。全局 `switch-voice`/`set-engine` 保持 admin（改全局单例）。`test_voice_user_scope.py` 23 例；公共卡写侧 404 产品级回退 deferred |
+| **topic** | `api/routers/topic_routes.py`（139 行） | 快照读面 admin 任意键 / 普通用户本人绑定键 ∪ 活跃 web 会话白名单（`_owned_session_keys` `:67`）；不解析客户端自报数字 id；`POST /config` 仍 admin。`tests/api/test_topic_state_api.py` +6 例 |
+| **docs-naming** | `frontend/src/api/training.ts` / `client.ts` / `docs/CODEMAPS/*` / `AGENTS.md` §2 Owner Map | 「训练」→「风格提取（训练管线）」；目录名 `clone_training/`、`TrainingStateManager`、`deps.training_mgr`、`/api/training/*`、`queryKeys.training`、`'training'` 字面量零改。Owner Map 复查一致 |
+
+**端点/测试口径（本批实跑）**：`create_api_app()` = **253 APIRoute / 207 唯一路径 / len(app.routes)=257**（119 GET / 92 POST / 18 PUT / 24 DELETE；+4 = user/proactive）；`python scripts/regression_gate.py` = **PASS**：pytest 四分块 **987 + 1332 + 1092 + 1036 = 4498 通过 + 2 跳过**（`--collect-only` 4500、0 失败；3 个存量失败族由 `tests/conftest.py` users 主库隔离根治）；vitest **354/354（47 文件）**；tsc 0；ruff 0。测试文件 269→**275**；角色卡 **41**。
+
+**遗留（deferred）**：① voice 公共卡前端控件与 `CharacterVoiceManager (character_id,user_id)` 二级键；② `clone_training` 的 LLM 调用 per-user 化（拆到 user BYOK）；③ 「消息」tab 纯新用户 UX 细化 P2；④ 存量越权音色绑定只读审计、不自动迁移；⑤ 本批未提交/未部署（部署归用户裁决）。
+
 ---
 
 ## 5–9. 图谱派生视图（历史归档）
@@ -488,14 +512,15 @@ tools/
 
 ---
 
-## 11. 风险与建议（按 2026-10-30 现状重写）
+## 11. 风险与建议（按 2026-10-31 现状重写）
 
 | 风险 | 严重度 | 位置 | 建议 / 现状 |
 |------|--------|------|-------------|
-| **D20 批 1–7 未部署（全链本地领先）** | **中** | 批 7 收口链（链尾 `181e642`）vs `origin/main` `cdbe546` | 批 1–7 全量（体验面 + 14 端点 + 4 表 + last-admin 删除守卫）只在本地；三端统一铁律下部署随用户裁决；收口同步面 = README 徽章 4640（其余 CODEMAPS/HANDOFF/AGENTS/LOG 已随 `0520801` 落账） |
+| **v1.62 本批未提交/未部署（工作树）** | **中** | HEAD `ccfa197` + 本批 47 项工作树；`origin/main` `cdbe546`（本地领先 22 提交 + 未提交批次） | 8 域 per-user 化 + 表述分离全在本地工作树；三端统一铁律下部署随用户裁决；README 徽章仍 4508（历史口径），CODE_GRAPH/AGENTS/HANDOFF/LOG 已对齐到 **4853 / 4498+2 / 354** |
+| **voice 公共卡音色写侧产品级回退** | **中（产品级）** | `api/routers/voice_routes.py` + `frontend/src/components/admin/RoleSettingsTabs.tsx` | 公共卡写侧收归 admin 后，普通用户在 `/roles/:id/settings` 保存音色返回 404「角色不存在」；需前端隐藏/禁用公共卡保存控件或改只读提示；真正恢复需 `CharacterVoiceManager (character_id,user_id)` 二级键（deferred） |
 | **降级质量悬崖** | **高（产品级）** | `llm_provider/multi_provider_gateway.py` + `config/llm_providers.json` | agnes 超时 40s、熔断阈值 2 / 冷却 120s 在位。**未解决**：供应商侧抖动仍在；`c3ede77` 批观察记录：同窗口 agnes 40s 超时×2（18:13:05/18:13:33）→ 单轮 78.28s 延迟，zhipu 降级均接住、消息未丢（证据在 `LOG.md`）。三个候选方向（降级切同档位模型 / 降级轮走保守短回复 / 降低降级轮 prompt 复杂度）**用户裁决 2026-10-28 继续挂起（先不急）** |
 | ~~话题仍是原话锚点~~ → **已根治** | — | `utils/topic_state.py` + `proactive/topic_recall.py` | **`3fe2771` 话题状态机已上线（§4.12）**：确定性状态机 + 每 4 轮稀疏 judge + parked 三重闸 + 7 天 TTL；原 `_extract_user_anchor_sentences`（`prompt_sanitize.py:308`）仍保留作锚点补充。**新观察项**：生产 judge 触发率与 parked 复提质量待运行观察（生产 `topic_plan` 已有真实计划行） |
-| **骰子闸默认关闭（无生产行为影响）** | 低 | `proactive/frequency.py:180-193` + `scheduler.py:1576-1592` | `enabled=False` + `dry_run=True` 为出厂契约；开启后先干跑记账。回退开关 `DICE_GATE_PRODUCTION_WIRED=False`；scheduler.py 例外已由用户裁决接受（`dd3b470`）。生产启用时机待用户裁决 |
+| **骰子闸默认关闭（无生产行为影响）** | 低 | `proactive/frequency.py:180-193` + `scheduler.py:1838` | `enabled=False` + `dry_run=True` 为出厂契约；开启后先干跑记账。回退开关 `DICE_GATE_PRODUCTION_WIRED=False`；scheduler.py 例外已由用户裁决接受（`dd3b470`）。生产启用时机待用户裁决 |
 | **bun.lock 旧 undici 残留** | 低 | `frontend/bun.lock` | `package-lock.json` 已升 undici 7.30.1 / vite 8.3.5（`165504f`）；bun.lock 未跟上，`npm audit` 门只读 package-lock 故 CI 绿；收敛留待下批 |
 | **回复模式开关残留全局默认** | 低（R7 已大幅缓解） | `utils/reply_mode.py` + `data/sqlite.db` `user_reply_mode` 表 | per-user 覆盖表 + `GET/POST /api/user/reply-mode` 在位；剩余风险：未覆盖用户仍共享 `data/scheduler_config.json` 全局 `reply_mode` 默认值 |
 | **prompt 与超时的反馈回路** | 中 | 编排器 prompt 组装 | 每批 prompt 修复都让 system 变长 → 主模型更慢 → 更易被判超时 → 更多流量落弱模型（v1.55 定性的真根因）。**新增指令前先评估 token 成本**；R6 黄金集为量化该回路提供基线（待接入真实模型 A/B） |
@@ -504,7 +529,7 @@ tools/
 | `run_console_chat` 复杂度 | 低 | `orchestrator/console_chat.py`（134 行） | 已在 `orchestrator/` 包内，主路径不受阻；可继续函数化拆分 |
 | 调度器单例 flock 仅 POSIX 生效 | 低 | `api/run_api.py:245-250`（`_ensure_scheduler_singleton` @ `:222`） | Windows 开发环境无锁（单 worker）；锁文件 `/tmp/ai-girlfriend-scheduler.lock` **禁止手删**（`PrivateTmp=no`，删后新 worker 会抢到新 inode → 调度器翻倍） |
 | 多用户 LLM 缓存失效边界 | 低 | `llm_provider/__init__.py` `invalidate_user_llm` | 跨 worker 缓存一致性待验证 |
-| 基线口径随卡数漂移 | 低 | `AGENTS.md §4.3` / 本文件 §1.1 | 引用基线必须声明**卡数（41——v3.8.36 实测由 42 漂移，`99c89c39.json` 下落待主控定性）**与**工作树在制品**（当前 = 5 项 `.md`，含主控并行收口写入，业务代码零在制品）；`config/characters/` 变动仍会浮动收集数（2×卡数+13） |
+| 基线口径随卡数漂移 | 低 | `AGENTS.md §4.3` / 本文件 §1.1 | 引用基线必须声明**卡数（41——v3.8.36 实测由 42 漂移，`99c89c39.json` 下落待主控定性）**与**工作树在制品**（当前 = 47 项：37 修改 + 10 新文件，含 8 域实现/测试/脚本与文档）；`config/characters/` 变动仍会浮动收集数（2×卡数+13） |
 | 后处理并发写同一 SQLite | 低 | `orchestrator/optimized_orchestrator.py:1704 _after_process` | `after_chat` 重活（向量/事实/日记 + 话题 judge/update）经后台线程池执行，与记忆 SQLite 写竞争；已有单线程池约束，长会话下仍需观察写锁等待 |
 
 ---
@@ -535,10 +560,11 @@ tools/
 
 ## 13. 更新记录（历史归档）
 
-> **历史归档**：版本表（v3.8.0 → v3.8.32 共 40+ 行，含 2026-07 至 2026-10 各批端点/测试/部署读数）已由 `LOG.md` 权威承载，本文件只保留近两版指针。批次详情、生产取证见 `LOG.md` 对应日期条目。
+> **历史归档**：版本表（v3.8.0 → v3.8.32 共 40+ 行，含 2026-07 至 2026-10 各批端点/测试/部署读数）已由 `LOG.md` 权威承载，本文件只保留近几版指针。批次详情、生产取证见 `LOG.md` 对应日期条目。
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.8.37** | **2026-10-31** | **表述分离 + 用户主权 per-user 化批（8 域 · 7/8 独立对抗验收通过 · 全量回归通过 · 工作树未提交未部署）**：新增 §4.17；端点 **249/205 → 253/207**（+4 全部为 `/api/user/proactive*`；`len(app.routes)` 253→**257**）；方法分布 **119/92/18/24**；`training` tag 23→**27**；新增 `utils/proactive_config.py`（879 行）+ `wechat_direct/media_upload.py`（287 行）+ `scripts/regression_gate.py` / `audit_voice_bindings.py`；utils 26→**27** / wechat_direct 4→**5** / scripts 19→**21**；测试文件 269→**275**；主控实跑后端 **4498 通过 + 2 跳过 / 收集 4500 / 0 失败**（3 存量失败族由 conftest users 主库隔离根治）+ 前端 **354/47** + ruff 0 + tsc 0；徽章 **4853**；角色卡 41 不变；voice 公共卡写侧 404 产品回退 deferred。 |
 | **v3.8.36** | **2026-10-30** | **批 7 收尾口径（D20 前端全站体验批 1–6 + 批 6 对抗收编 + 批 7 四收编；本地全链领先 origin、未部署）**：新增 §4.16；端点 **235/197 → 249/205**（+14：misc +1 / training +4 / announcements +6 / admin +3；批 7 零新端点）；方法分布 113/85/16/21 → **118/90/18/23**；路由挂载 28 → **30**（公告双挂载 `:276-277`）；域路由 25 → **26**（+`announcement_routes`）；Python tracked 589/159,543 → **594/161,394**；api 49 → **51**（+`audit.py` / `announcement_routes.py`）；frontend/src 138 → **154**；页面 19 → **20**（+HelpGuidePage `/help`）；API 模块 15 → **16**（+announcements）；store 5 → **6**（+globalViewStore）；测试文件 266 → **269**（+3）；主控实测后端 **4297 通过 / 2 跳过 / 3 存量失败族**（均 HEAD 对照实证）+ 前端 **342/47** + ruff 0 + tsc 0 + 突变验红 4/4；徽章口径 **4508 → 4640**（README 同步归收口批）；users.db 口径新增 **14 表**（+4）；⚠️ 角色卡 42 → **41** 漂移登记。 |
 | v3.8.35 | 2026-10-28 | 工作区整理批：话题状态机 `3fe2771`（§4.12）/ 拟人化 v1.57（§4.15）/ 四项跟进 + CI 修复 + hotfix 整本回扫；新增 §4.13 骰子闸 / §4.14 行为蒸馏；端点 231/195→235/197；收集 4263（266 文件）/ 4256+2+4；徽章 4508；store 4→5（+topicState）。要点归档 `LOG.md` 2026-10-28 条。 |
 | v3.8.34 | 2026-10-21 | 八项裁决批：R4 真流式（`utils/stream_guard.py`）/ R3 工具记忆结合 / R6 黄金集立项（45 条用例）/ R7 模式显式切换按用户隔离 / 轮次 LLM 预算总账 / provider `stream_enabled` / RAG 去重 / AOCI 补全 1116 行；端点 231/195；收集 3900（工作树在制品口径）。 |

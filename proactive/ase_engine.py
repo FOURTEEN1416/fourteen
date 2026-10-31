@@ -1708,14 +1708,23 @@ class ASEEngine:
         self.sent_history.append({**entry, "at": datetime.now(tz=timezone.utc).isoformat()})
 
     def get_runtime_config(self) -> dict[str, Any]:
-        """运行时参数真值（修复：旧 config 端点只写 _config 字典不生效）。"""
+        """运行时参数真值（修复：旧 config 端点只写 _config 字典不生效）。
+
+        ``max_daily_messages`` 报**今天实际生效值**（adaptive 下随档位下降：
+        low=3 / minimal=1）；``max_daily_messages_configured`` 报**配置面上限**
+        （不随档位变化）。scheduler 的幂等比较必须用后者（2026-10-31 R1-2）：
+        拿实际档位值与 normal 上限比较，在 low/minimal 下永不相等 → 每拍
+        重建适配器并刷 INFO。
+        """
         if self._frequency_mode == "adaptive" and self._freq_adapter:
             max_daily = self._freq_adapter.get_max_daily()
+            max_daily_configured = self._freq_adapter.configured_max_daily
             # P1-25：报引擎真实生效值（旧实现写死 30/10 与展示口径都不符）
             min_interval = self._min_interval_minutes
             cooldown = self._cooldown_after_reply_minutes
         else:
             max_daily = self._freq_controller.max_daily if self._freq_controller else 8
+            max_daily_configured = max_daily
             # FrequencyController 只暴露 timedelta（旧 getattr 恒取不到
             # min_interval_minutes → 永远报默认 30/10，与真实配置脱钩）
             min_interval = self._min_interval_minutes
@@ -1723,6 +1732,7 @@ class ASEEngine:
         return {
             "threshold": self._urgency_threshold,
             "max_daily_messages": max_daily,
+            "max_daily_messages_configured": max_daily_configured,
             "min_interval_minutes": min_interval,
             "cooldown_after_reply_minutes": cooldown,
             "paused": self._paused,
@@ -1746,18 +1756,23 @@ class ASEEngine:
         if threshold is not None:
             self._urgency_threshold = max(0.0, float(threshold))
         if max_daily_messages is not None or min_interval_minutes is not None or cooldown_after_reply_minutes is not None:
-            max_daily = max_daily_messages if max_daily_messages is not None else (
-                self._freq_adapter.get_max_daily() if self._freq_adapter else 8)
+            if max_daily_messages is not None:
+                max_daily = max_daily_messages
+            elif self._freq_adapter:
+                # 只改间隔/冷却时保留**配置面上限**，不得用当前档位值（low=3）
+                # 把 normal_daily 误降成 3（2026-10-31 R1-2）。
+                max_daily = self._freq_adapter.configured_max_daily
+            else:
+                max_daily = 8
             min_i = min_interval_minutes if min_interval_minutes is not None else self._min_interval_minutes
             cooldown_c = cooldown_after_reply_minutes if cooldown_after_reply_minutes is not None else self._cooldown_after_reply_minutes
             # P1-25：配置真值落引擎字段（adaptive 分支直接读它们）
             self._min_interval_minutes = max(0, int(min_i))
             self._cooldown_after_reply_minutes = max(0, int(cooldown_c))
             if self._frequency_mode == "adaptive" and self._freq_adapter:
-                # P1-20/25：重建时保留已积累的降档状态（旧实现整表清零）
-                old = self._freq_adapter.to_dict()
-                self._freq_adapter = FrequencyAdapter(normal_daily=max_daily)
-                self._freq_adapter.from_dict({**old, "normal_daily": max_daily})
+                # 2026-10-31 R1-2：原地更新（normal + 全档位硬上限），保留
+                # _current_level/_unanswered_count，且不再每拍新建适配器。
+                self._freq_adapter.set_max_daily(max_daily)
             elif self._freq_controller:
                 self._freq_controller = FrequencyController(
                     max_daily=max_daily,

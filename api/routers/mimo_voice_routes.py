@@ -21,7 +21,7 @@ from api.database import User
 from api.deps import get_tts_manager
 from voice.mimo_tts_provider import MiMoTTSProvider
 from voice.tts_manager import TTSManager
-from voice.voice_catalog import get_voice_catalog
+from voice.voice_catalog import VOICE_OWNER_DENIED, denied_voice_owner, get_voice_catalog
 
 logger = logging.getLogger("api.mimo")
 
@@ -78,8 +78,8 @@ _DESIGN_LIMITER = _RateLimiter(2)
 
 
 def _as_principal(candidate: Any) -> AuthPrincipal | None:
-    """归一主体：直呼 handler（既有测试/脚本只传 _auth=True）会拿到 Depends 哨兵而非
-    真实主体——统一按「无主体（机器面）」解释；HTTP 层由 FastAPI 注入真实 AuthPrincipal。
+    """归一主体：直呼 handler（既有测试/脚本只传位置参数）会拿到 ``Depends`` 哨兵
+    而非真实主体——统一按「无主体（机器面）」解释；HTTP 层由 FastAPI 注入真值。
     """
     return candidate if isinstance(candidate, AuthPrincipal) else None
 
@@ -141,6 +141,9 @@ def _register_catalog(result: dict[str, Any], *, name: str, kind: str, model: st
     voice_id = result.get("voice_id", "")
     if not voice_id:
         return False
+    # voiceclone：provider 返回本地参考音频路径，随条目持久化（相对项目根）
+    if result.get("sample_path"):
+        extra.setdefault("sample_path", str(result["sample_path"]))
     try:
         get_voice_catalog().register(
             voice_id=voice_id, name=name, kind=kind, model=model,
@@ -464,11 +467,17 @@ async def synthesize(
 
     # P0 F2 归属校验先于一切服务状态暴露：catalog 内他人克隆音色 403
     # （admin 例外；无主平台音色/预设不受限；未知 voice_id 交给下方 is_known 400）
-    if voice_id and principal is not None and principal.role != "admin":
-        entry = get_voice_catalog().get(voice_id)
-        owner = str(entry.get("owner") or "") if entry else ""
-        if owner and owner != str(principal.user_id):
-            raise HTTPException(status_code=403, detail="无权使用他人克隆音色")
+    # 判定规则唯一 owner 在 `voice.voice_catalog.denied_voice_owner`——角色音色绑定
+    # 入口（api/routers/voice_routes.py::_assert_voice_owner）调同一函数、同一文案，
+    # 两处口径不得各写一份内联判断（AGENTS §1.2 重复 owner 零容忍）。
+    # 机器面（无 Bearer，principal is None）**不拦截**——W1 既有契约，不得因收敛
+    # 判定函数而改变（user_id 传空串会让「他人音色」恒判为 True，需显式跳过）。
+    if principal is not None and denied_voice_owner(
+        voice_id,
+        user_id=str(principal.user_id),
+        is_admin=principal.role == "admin",
+    ):
+        raise HTTPException(status_code=403, detail=VOICE_OWNER_DENIED)
 
     if tts_manager is None:
         raise HTTPException(status_code=400, detail="TTS管理器未初始化")

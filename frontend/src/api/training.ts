@@ -1,11 +1,11 @@
 import client from './client'
 
-/** GET /api/training/status — 训练状态 */
+/** GET /api/training/status — 风格提取状态 */
 export function trainingStatus() {
   return client.get('/training/status')
 }
 
-/** GET /api/training/progress — 训练进度 */
+/** GET /api/training/progress — 风格提取进度 */
 export function trainingProgress() {
   return client.get('/training/progress')
 }

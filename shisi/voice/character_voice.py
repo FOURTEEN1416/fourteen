@@ -38,6 +38,92 @@ def _ratio(value: Any) -> float | None:
     return None
 
 
+def effective_voice_ids(binding: dict[str, Any]) -> list[str]:
+    """绑定体里**可能被读作音色**的值（唯一 owner；写入校验与审计共用）。
+
+    读取真源是 ``CharacterVoiceSpec`` 的构造（见本文件 ``resolve_voice_spec``）：
+    - ``voice_id = str(_pick("voice_id") or "")`` → ``cfg["voice_id"]``，为 ``None`` 时
+      回落 ``cfg["extra_params"]["voice_id"]``；
+    - ``speaker_name = str(cfg.get("speaker_name") or "")`` → **只读顶层**，不回落
+      ``extra_params``（与 voice_id 不同，别照抄 ``_pick``）；
+    - ``synth_kwargs`` 下发 ``voice_id or speaker_name``（voice_id 为空时 speaker_name 即音色）。
+
+    本函数是**保守上界**，不是读取面的逐位镜像：
+    - ``voice_id`` 两级都收——顶层非空时读取面只用顶层，扫 extra 是为防「隐藏副本」
+      在读取面变更后被激活；
+    - ``extra_params["speaker_name"]`` 当前读取面**不会**用到，仍收进来是宁可偏严；
+      代价是历史行若在 extra 里存过形如他人 voice_id 的 speaker 值，PUT 会 403
+      而不是被静默放行（失败安全，review 允许）。
+
+    **必须看嵌套一层 ``extra_params``**：绑定端点用 ``{**req.extra_params}`` 展平请求，
+    客户端若把 ``extra_params`` 本身塞进 ``extra_params``，展平后 ``cfg["extra_params"]``
+    就是那个内层 dict，``_pick`` 会把它当音色。只查一层会读到空串而放行（本批 HIGH 缺陷）。
+
+    不做任意深度递归：``_pick`` 只下钻一层，更深层同名键不会被读作音色，
+    盲目递归只会制造假阳性。层级若变（``_pick`` 改成递归），本函数必须同步改。
+    """
+    found: list[str] = []
+    for key in ("voice_id", "speaker_name"):
+        value = binding.get(key)
+        if isinstance(value, str) and value:
+            found.append(value)
+    extra = binding.get("extra_params")
+    if isinstance(extra, dict):
+        for key in ("voice_id", "speaker_name"):
+            value = extra.get(key)
+            if isinstance(value, str) and value:
+                found.append(value)
+    return found
+
+
+def audit_voice_owner_mismatches(
+    bindings: dict[str, dict[str, Any]],
+    card_owner_of: Callable[[str], str],
+    catalog: Any = None,
+) -> list[dict[str, Any]]:
+    """只读审计：找出「绑定音色的 owner ≠ 卡片 owner」的存量行。
+
+    写入入口的归属校验无法回溯历史数据；若生产在修复前已存在「私有卡绑了他人
+    克隆音色」，``/voice/test`` 与 chat 链（``resolve_voice_spec`` 只看 W14 亲和）
+    仍会真的用上该音色。本函数给出可执行的审计清单，**不自动改数据**——
+    清理需人工确认后走管理端重绑或解绑。
+
+    Args:
+        bindings: ``CharacterVoiceManager.list_bindings()`` 的快照。
+        card_owner_of: ``character_id -> 卡片 user_id``（公共卡返回 "" 或 default/system）。
+        catalog: 音色 catalog（缺省用 ``voice.voice_catalog.get_voice_catalog()``）。
+
+    Returns:
+        每行 ``{character_id, voice_id, voice_owner, card_owner}``；无 owner 的音色
+        （平台共享/预设）与卡片无主（平台卡，由 admin 统一管理）不计入。
+    """
+    if catalog is None:
+        from voice.voice_catalog import get_voice_catalog
+
+        catalog = get_voice_catalog()
+
+    rows: list[dict[str, Any]] = []
+    for character_id, binding in (bindings or {}).items():
+        if not isinstance(binding, dict):
+            continue
+        card_owner = str(card_owner_of(character_id) or "").strip()
+        if not card_owner or card_owner in ("default", "system"):
+            continue
+        for voice_id in effective_voice_ids(binding):
+            entry = catalog.get(voice_id)
+            voice_owner = str((entry or {}).get("owner") or "").strip()
+            if voice_owner and voice_owner != card_owner:
+                rows.append(
+                    {
+                        "character_id": character_id,
+                        "voice_id": voice_id,
+                        "voice_owner": voice_owner,
+                        "card_owner": card_owner,
+                    }
+                )
+    return rows
+
+
 @dataclass(frozen=True)
 class CharacterVoiceSpec:
     """角色语音契约快照（一次合成所用的全部音色参数，不可变）。"""
