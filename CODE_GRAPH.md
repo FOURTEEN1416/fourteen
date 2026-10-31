@@ -1,6 +1,6 @@
 # 代码图谱 — unique-you (唯一的你) **v3.8.37**（2026-10-31 表述分离 + 用户主权 per-user 化批口径）
 
-> **v3.8.37（2026-10-31 表述分离 + 用户主权 per-user 化批 · 8 域 · 7/8 独立对抗验收通过 · 全量回归通过 · 本地工作树未提交未部署）**：`psych`（五端点 admin 全量 / 普通用户仅本人会话 scope）/ `proactive-backend`（新增 `utils/proactive_config.py` 879 行三级合并 + `user_proactive_config` 覆盖表 + 4 个 `/api/user/proactive*` 端点）/ `proactive-frontend`（消息 tab 对全体用户开放，个人覆盖/继承全局徽章）/ `wechat`（遗留全局端点保持 admin + 新增 `wechat_direct/media_upload.py` 出站 CDN 上传）/ `clone`（数据集 `data/clone/<user_id>/` per-user 分区）/ `voice`（音色 owner 单一规则 + 角色音色写门 `require_character_write`；全局 switch-voice/set-engine 保持 admin）/ `topic`（快照读面本人会话白名单）/ `docs-naming`（训练→风格提取）。端点 249/205 → **253/207**（+4 全部为 user/proactive）；新增 §4.17。测试口径（本批 `python scripts/regression_gate.py` 实跑）：后端四分块 **4498 通过 + 2 跳过 / 收集 4500 / 0 失败**（3 个存量失败族由 conftest users 主库隔离根治）+ ruff 0；前端 vitest **354/354（47 文件）** + tsc 0。角色卡 **41 张**（不变）。读数见 §1.1。
+> **v3.8.37（2026-10-31 表述分离 + 用户主权 per-user 化批 · 8 域 · 7/8 独立对抗验收通过 · 全量回归通过 · 已三端部署 @ 43aeaae）**：`psych`（五端点 admin 全量 / 普通用户仅本人会话 scope）/ `proactive-backend`（新增 `utils/proactive_config.py` 879 行三级合并 + `user_proactive_config` 覆盖表 + 4 个 `/api/user/proactive*` 端点）/ `proactive-frontend`（消息 tab 对全体用户开放，个人覆盖/继承全局徽章）/ `wechat`（遗留全局端点保持 admin + 新增 `wechat_direct/media_upload.py` 出站 CDN 上传）/ `clone`（数据集 `data/clone/<user_id>/` per-user 分区）/ `voice`（音色 owner 单一规则 + 角色音色写门 `require_character_write`；全局 switch-voice/set-engine 保持 admin）/ `topic`（快照读面本人会话白名单）/ `docs-naming`（训练→风格提取）。端点 249/205 → **253/207**（+4 全部为 user/proactive）；新增 §4.17。测试口径（本批 `python scripts/regression_gate.py` 实跑）：后端四分块 **4498 通过 + 2 跳过 / 收集 4500 / 0 失败**（3 个存量失败族由 conftest users 主库隔离根治）+ ruff 0；前端 vitest **354/354（47 文件）** + tsc 0。角色卡 **41 张**（不变）。读数见 §1.1。
 > **结构真源 = AOCI**（`aoci.txt` 卷头 → `aoci.code.txt` 实体条目 **1116 行** → `aoci.meta.txt` 词表）；本文件只保留人读的规模读数、分层骨架与维护指针。**历史版本（v3.8.36 批 7 收尾 / v3.8.35 话题状态机/拟人化部署批 / v3.8.34 八项裁决批 / v3.8.33 重建批 / v1.55·v1.54 质量批）要点压缩归档至 `LOG.md` 对应条目，本文件不再逐条保留**。
 > 批次详情、生产取证与历史版本见 `LOG.md`（唯一只追加不覆盖文件）。
 
@@ -465,7 +465,7 @@ tools/
 
 **遗留登记**：① **部署未做**——本地全链领先 origin（快照见 LOG 2026-10-30 补记），三端统一铁律下随用户裁决；② `README.md:11` 徽章 4508 → **4640** 待收口批同步（CODEMAPS 六件 / HANDOFF / AGENTS v1.61 / LOG / DELETION_LOG 已随 `0520801` 落账）；③ **w11_journey e2e 已真机跑通 11/11**（2026-10-30 验收三轮；其余四个 spec 仍待前置重建——`capabilities` 需探针卡）；④ 批 6 遗留 NEW-22/20/31/32 已于批 7 清零；⑤ 3 个存量失败族待专项批。
 
-### 4.17 表述分离 + 用户主权 per-user 化批（2026-10-31，8 域 · 7/8 独立对抗验收通过 · 本地工作树未提交未部署）
+### 4.17 表述分离 + 用户主权 per-user 化批（2026-10-31，8 域 · 7/8 独立对抗验收通过 · 已三端部署 @ 43aeaae）
 
 **范围**：D20-⑤「用户需要能够自己进行设置，而不是全站统一」+「训练→风格提取」表述分离。工作流 `dwfrun-cacb31a3` 按 8 域 fan-out，每域 implementor + 独立 verifier（verifier 不跑 pytest，避免共享 `data/` 污染）；全量回归由 `scripts/regression_gate.py` 统一执行。
 
@@ -482,7 +482,7 @@ tools/
 
 **端点/测试口径（本批实跑）**：`create_api_app()` = **253 APIRoute / 207 唯一路径 / len(app.routes)=257**（119 GET / 92 POST / 18 PUT / 24 DELETE；+4 = user/proactive）；`python scripts/regression_gate.py` = **PASS**：pytest 四分块 **987 + 1332 + 1092 + 1036 = 4498 通过 + 2 跳过**（`--collect-only` 4500、0 失败；3 个存量失败族由 `tests/conftest.py` users 主库隔离根治）；vitest **354/354（47 文件）**；tsc 0；ruff 0。测试文件 269→**275**；角色卡 **41**。
 
-**遗留（deferred）**：① voice 公共卡前端控件与 `CharacterVoiceManager (character_id,user_id)` 二级键；② `clone_training` 的 LLM 调用 per-user 化（拆到 user BYOK）；③ 「消息」tab 纯新用户 UX 细化 P2；④ 存量越权音色绑定只读审计、不自动迁移；⑤ 本批未提交/未部署（部署归用户裁决）。
+**遗留（deferred）**：① voice 公共卡前端控件与 `CharacterVoiceManager (character_id,user_id)` 二级键；② `clone_training` 的 LLM 调用 per-user 化（拆到 user BYOK）；③ 「消息」tab 纯新用户 UX 细化 P2；④ 存量越权音色绑定只读审计、不自动迁移；⑤ 已三端部署 @ 43aeaae（2026-10-31）。
 
 ---
 
@@ -516,7 +516,7 @@ tools/
 
 | 风险 | 严重度 | 位置 | 建议 / 现状 |
 |------|--------|------|-------------|
-| **v1.62 本批未提交/未部署（工作树）** | **中** | HEAD `ccfa197` + 本批 47 项工作树；`origin/main` `cdbe546`（本地领先 22 提交 + 未提交批次） | 8 域 per-user 化 + 表述分离全在本地工作树；三端统一铁律下部署随用户裁决；README 徽章仍 4508（历史口径），CODE_GRAPH/AGENTS/HANDOFF/LOG 已对齐到 **4853 / 4498+2 / 354** |
+| **v1.62 三端部署 @ `43aeaae`（2026-10-31）** | **低** | 生产 HEAD `43aeaae`；health/ready 200；OpenAPI **207 唯一路径**；三端 blob sha256 3/3 一致；0 ERROR | 8 域 per-user 化 + 表述分离 + 修复批 + 清扫批全部上线；README 徽章仍 4508（历史口径），CODE_GRAPH/AGENTS/HANDOFF/LOG 已对齐到 **4853 / 4498+2 / 354** |
 | **voice 公共卡音色写侧产品级回退** | **中（产品级）** | `api/routers/voice_routes.py` + `frontend/src/components/admin/RoleSettingsTabs.tsx` | 公共卡写侧收归 admin 后，普通用户在 `/roles/:id/settings` 保存音色返回 404「角色不存在」；需前端隐藏/禁用公共卡保存控件或改只读提示；真正恢复需 `CharacterVoiceManager (character_id,user_id)` 二级键（deferred） |
 | **降级质量悬崖** | **高（产品级）** | `llm_provider/multi_provider_gateway.py` + `config/llm_providers.json` | agnes 超时 40s、熔断阈值 2 / 冷却 120s 在位。**未解决**：供应商侧抖动仍在；`c3ede77` 批观察记录：同窗口 agnes 40s 超时×2（18:13:05/18:13:33）→ 单轮 78.28s 延迟，zhipu 降级均接住、消息未丢（证据在 `LOG.md`）。三个候选方向（降级切同档位模型 / 降级轮走保守短回复 / 降低降级轮 prompt 复杂度）**用户裁决 2026-10-28 继续挂起（先不急）** |
 | ~~话题仍是原话锚点~~ → **已根治** | — | `utils/topic_state.py` + `proactive/topic_recall.py` | **`3fe2771` 话题状态机已上线（§4.12）**：确定性状态机 + 每 4 轮稀疏 judge + parked 三重闸 + 7 天 TTL；原 `_extract_user_anchor_sentences`（`prompt_sanitize.py:308`）仍保留作锚点补充。**新观察项**：生产 judge 触发率与 parked 复提质量待运行观察（生产 `topic_plan` 已有真实计划行） |
@@ -564,7 +564,7 @@ tools/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
-| **v3.8.37** | **2026-10-31** | **表述分离 + 用户主权 per-user 化批（8 域 · 7/8 独立对抗验收通过 · 全量回归通过 · 工作树未提交未部署）**：新增 §4.17；端点 **249/205 → 253/207**（+4 全部为 `/api/user/proactive*`；`len(app.routes)` 253→**257**）；方法分布 **119/92/18/24**；`training` tag 23→**27**；新增 `utils/proactive_config.py`（879 行）+ `wechat_direct/media_upload.py`（287 行）+ `scripts/regression_gate.py` / `audit_voice_bindings.py`；utils 26→**27** / wechat_direct 4→**5** / scripts 19→**21**；测试文件 269→**275**；主控实跑后端 **4498 通过 + 2 跳过 / 收集 4500 / 0 失败**（3 存量失败族由 conftest users 主库隔离根治）+ 前端 **354/47** + ruff 0 + tsc 0；徽章 **4853**；角色卡 41 不变；voice 公共卡写侧 404 产品回退 deferred。 |
+| **v3.8.37** | **2026-10-31** | **表述分离 + 用户主权 per-user 化批（8 域 · 7/8 独立对抗验收通过 · 全量回归通过 · 已三端部署 @ 43aeaae）**：新增 §4.17；端点 **249/205 → 253/207**（+4 全部为 `/api/user/proactive*`；`len(app.routes)` 253→**257**）；方法分布 **119/92/18/24**；`training` tag 23→**27**；新增 `utils/proactive_config.py`（879 行）+ `wechat_direct/media_upload.py`（287 行）+ `scripts/regression_gate.py` / `audit_voice_bindings.py`；utils 26→**27** / wechat_direct 4→**5** / scripts 19→**21**；测试文件 269→**275**；主控实跑后端 **4498 通过 + 2 跳过 / 收集 4500 / 0 失败**（3 存量失败族由 conftest users 主库隔离根治）+ 前端 **354/47** + ruff 0 + tsc 0；徽章 **4853**；角色卡 41 不变；voice 公共卡写侧 404 产品回退 deferred。 |
 | **v3.8.36** | **2026-10-30** | **批 7 收尾口径（D20 前端全站体验批 1–6 + 批 6 对抗收编 + 批 7 四收编；本地全链领先 origin、未部署）**：新增 §4.16；端点 **235/197 → 249/205**（+14：misc +1 / training +4 / announcements +6 / admin +3；批 7 零新端点）；方法分布 113/85/16/21 → **118/90/18/23**；路由挂载 28 → **30**（公告双挂载 `:276-277`）；域路由 25 → **26**（+`announcement_routes`）；Python tracked 589/159,543 → **594/161,394**；api 49 → **51**（+`audit.py` / `announcement_routes.py`）；frontend/src 138 → **154**；页面 19 → **20**（+HelpGuidePage `/help`）；API 模块 15 → **16**（+announcements）；store 5 → **6**（+globalViewStore）；测试文件 266 → **269**（+3）；主控实测后端 **4297 通过 / 2 跳过 / 3 存量失败族**（均 HEAD 对照实证）+ 前端 **342/47** + ruff 0 + tsc 0 + 突变验红 4/4；徽章口径 **4508 → 4640**（README 同步归收口批）；users.db 口径新增 **14 表**（+4）；⚠️ 角色卡 42 → **41** 漂移登记。 |
 | v3.8.35 | 2026-10-28 | 工作区整理批：话题状态机 `3fe2771`（§4.12）/ 拟人化 v1.57（§4.15）/ 四项跟进 + CI 修复 + hotfix 整本回扫；新增 §4.13 骰子闸 / §4.14 行为蒸馏；端点 231/195→235/197；收集 4263（266 文件）/ 4256+2+4；徽章 4508；store 4→5（+topicState）。要点归档 `LOG.md` 2026-10-28 条。 |
 | v3.8.34 | 2026-10-21 | 八项裁决批：R4 真流式（`utils/stream_guard.py`）/ R3 工具记忆结合 / R6 黄金集立项（45 条用例）/ R7 模式显式切换按用户隔离 / 轮次 LLM 预算总账 / provider `stream_enabled` / RAG 去重 / AOCI 补全 1116 行；端点 231/195；收集 3900（工作树在制品口径）。 |

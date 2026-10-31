@@ -4172,7 +4172,7 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **存量数据**：修复前已写入的「私有卡绑他人克隆音色」不会被回溯；只读审计 `scripts/audit_voice_bindings.py`（退出码 1 = 有疑似越权绑定），清理需人工确认，本批不做迁移。
 - **验证**：`tests/test_voice_user_scope.py` 23 passed；`test_w7_voice_chain.py` 43 / `test_sec_p0_voice_files.py` 29 / `test_w14_...` 32 / `test_sweep_upload_voice_limits.py` 10 / `test_public_pool_cards_20261027.py` 9 / `test_w1_identity_authorization.py` 23 / `test_character_voice.py`+`test_w12_character_templates.py` 15 全绿；ruff 0；突变验红 6/6（PUT/DELETE 写门退回读门、删绑定侧 owner 强制、PUT 深拷贝改回浅拷贝、合成入口去掉机器面守卫——四个方向各自命中）；端点零新增（voice_routes 仍 6 条）。
 
-## 2026-10-31 — 表述分离 + 用户主权 per-user 化批（v1.62 · 8 域 · 7/8 独立对抗验收通过 · 全量回归通过 · 本地工作树未提交未部署）
+## 2026-10-31 — 表述分离 + 用户主权 per-user 化批（v1.62 · 8 域 · 7/8 独立对抗验收通过 · 全量回归通过 · 已三端部署 @ 43aeaae）
 
 - **裁决与范围**：v1.61 后用户裁决「表述分离（训练→风格提取），真正属于用户自己的功能全面 per-user 化，将用户应该有的功能还给用户」；依据 D20-⑤「用户需要能够自己进行设置，而不是全站统一」。工作流 `dwfrun-cacb31a3`（前身 `dwfrun-61abbc2d`）按 8 域 fan-out，每域 implementor + 独立 verifier（verifier 不跑 pytest，避免共享 `data/` 污染；全量回归由主控统一门禁执行）。域清单：`psych` / `proactive-backend` / `proactive-frontend` / `wechat` / `clone` / `voice` / `topic` / `docs-naming`。
 - **psych（画像还给本人）**：`api/routers/personality_routes.py` 五端点双分支——admin 保持全量语义，普通用户只读写本人会话 scope。`_owned_targets` 从 `persona_bank.list_persona_scopes()` 按 `scope_owner_uid` 过滤；`session_id` 必须命中服务端派生白名单（微信绑定 `_user_session_key_for` + 活跃 web 会话 `deps.sessions.get_active_sessions`），客户端自报他人键、把完整 scope 塞进 `character_id` 一律 404；无本人桶返回 `scope=""` 且不读 bank；`DELETE` 绝不全表清。测试 `tests/test_psych_user_scope.py` **15 例**（含 admin 保留、越权、legacy `default` 桶不可见）。
@@ -4186,9 +4186,9 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **独立对抗验收**：**7/8 域通过**（每域 implementor + verifier，feedback ≤2 轮；verifier 不跑 pytest）；未通过 1 域及遗留按域条目登记，本批不二次裁定。
 - **全量回归（本批新鲜实跑）**：`python scripts/regression_gate.py` → **exit=0 / 门禁 PASS**。pytest 四分块 **987 passed + 2 skipped / 1332 passed / 1092 passed / 1036 passed = 4447 通过 + 2 跳过**；`pytest --collect-only` = **4449 collected**（分块总和精确吻合）；vitest **353 passed（47 文件）**；`tsc --noEmit` 0 错；ruff `All checks passed!`。**3 个存量失败族消失**（`test_api_routes` sqlalchemy / `test_w10_metrics_multiproc` 503→404 / `test_w3_scheduler_state` Depends）——根因由 `tests/conftest.py` 的 users 主库会话级临时库隔离根治，非删测试；2 跳过仍为 `test_cache.py:297`（Redis 环境）+ `tests/golden/test_golden_set.py:48`（live_llm 默认不跑）。
 - **端点/规模**：`create_api_app()` 内省实测 **253 APIRoute / 207 唯一路径 / `len(app.routes)`=257**（119 GET / 92 POST / 18 PUT / 24 DELETE），较 v3.8.36 的 249/205 → **253/207**（**+4** 全部为 `/api/user/proactive*` 四端点）；测试文件 **269→275**（+6）；前端测试文件 47 不变、用例 342→**353**（+11）。工作树 **37 个 tracked 文件修改 + 10 个新文件**；新增文件 `utils/proactive_config.py` / `wechat_direct/media_upload.py` + 脚本 `scripts/audit_voice_bindings.py` / `scripts/regression_gate.py`。DB：`user_proactive_config` 惰性建表（本地 `data/sqlite.db` 仍 35 表，首次写入时建）；`data/users.db` 14 表不变。角色卡 **41 张**不变（persona 公式 2×41+13=95）；徽章 **4801**（4447 Py + 353 FE + 1 跳过标记）。
-- **未提交/未部署**：本批全部改动（8 域实现 + 6 个新测试文件 + 文档）仍在工作树，未 `git add` / commit；未推送、未部署，部署归用户裁决。**遗留**：① voice 公共卡前端控件与 `(character_id, user_id)` 二级键 deferred；② 风格提取 `clone_training` 的 LLM 调用 per-user 化（需拆到 user BYOK）deferred；③ 「消息」tab 纯新用户 UX 细化 P2；④ 存量越权音色绑定只读审计、不自动迁移。
+- **部署**：2026-10-31 三端部署 @ `43aeaae`（commit → push → 服务器 pull → remote_deploy.sh → health/ready 200 + OpenAPI 207 paths + 三端 blob sha256 3/3 一致 + 0 ERROR；`AI_GF_ENV=prod`；4 workers）。**遗留**：① voice 公共卡前端控件与 `(character_id, user_id)` 二级键 deferred；② 风格提取 `clone_training` 的 LLM 调用 per-user 化（需拆到 user BYOK）deferred；③ 「消息」tab 纯新用户 UX 细化 P2；④ 存量越权音色绑定只读审计、不自动迁移。
 
-## 2026-10-31 — 用户主权 per-user 化批·修复批（6 域 · 6/6 通过 · 全量回归通过 · 本地工作树未提交未部署）
+## 2026-10-31 — 用户主权 per-user 化批·修复批（6 域 · 6/6 通过 · 全量回归通过 · 已三端部署 @ 43aeaae）
 
 - **范围与结果**：v1.62 八域批独立对抗验收后进入修复批，按 6 个修复域 fan-out：`proactive-core` / `proactive-frontend` / `clone-hardening` / `topic` / `psych-cleanup` / `chat-voice-notes`。**修复域通过 6/6**，**全量回归通过**。本批**无新增/删除端点**；`GET /api/chat/history` 仅为权限语义变化（普通用户仅本人会话，admin 全量），端点计数沿用 v1.62 的 **253 APIRoute / 207 唯一路径**，CODE_GRAPH 端点计数不改。
 - **proactive-core（R1-1、R1-2、R1-3、R1-4、R1-5）**：R1-1 非有限值防御——yaml 的 `.inf/.nan`、`scheduler_config.json` 的 `Infinity/NaN`、hub `_replay["runtime_config"]` 均逐字段回落默认（`utils/proactive_config.py`）；R1-2 adaptive 档位下用户 `max_daily_messages` 必须压过**所有档位**（`FrequencyController.set_max_daily` / `configured_max_daily`），scheduler 幂等比较改用配置面上限，避免每拍重建适配器并刷 INFO；R1-3 `test_proactive_terminal_guard` 改为 AST 只解析 `_llm_proactive_one_user` 函数体，钉死「`terminal_reply_guard` → `_deliver`」顺序（旧实现拿整个 scheduler 模块源码做首个 `index`，命中的是注释/另一条发送线）；R1-4 改用真实 `ASEEngine` 覆盖 adaptive low/minimal 语义（不再用 `_FakeEngine` 假绿）；R1-5 DELETE 回执必须带**实际** `target_key`（旧实现传 `None` → `user_key_present=false`，已绑定用户被误判「未绑定微信」）。
@@ -4205,7 +4205,7 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
   - **voice 公共卡前端**：普通用户保存音色仍 404 且前端原样显示「角色不存在」；LOG 已指派前端域（前端应隐藏/禁用公共卡音色保存控件或改只读提示）。
   - **遗留 admin 微信通道（slot 0）与用户通道注册表合并**：需确认运维脚本/CI 无消费方后再合并。
 
-## 2026-10-31 — 修复批·清扫批（8 条新发现全修 + 口径校正 · 全量回归 PASS · 本地工作树未提交未部署）
+## 2026-10-31 — 修复批·清扫批（8 条新发现全修 + 口径校正 · 全量回归 PASS · 已三端部署 @ 43aeaae）
 
 - **范围**：v1.62 修复批 6/6 通过后，验收员新发现 8 条未确认问题（2 medium / 6 low）全部清扫，另修 gate 暴露的 1 条时间敏感 flaky。
 - **clone-hardening（2 medium）**：
@@ -4218,4 +4218,4 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **chat-voice-notes（2 low）**：`test_voice_user_scope.py` 五处过期行号/旧描述更新（set-engine `:385-441`、denied 块 `:468-480`、404 文案 `:298/:353`、`synth_kwargs :138-145`）；`reconnect_wechat` 响应 `status` 从 `"reconnecting"` 改为 `"disconnected"`（与「不自动重连」语义一致，全仓无消费者）。
 - **额外（gate 暴露 flaky）**：`tests/test_provider_call_latency_log.py` 的 `elapsed_ms >= 40` 边界过贴——Windows 时钟粒度下 `asyncio.sleep(0.05)` 实测 39ms（首轮 gate 块3 FAIL）。修法：sleep 0.05→0.3s、断言 40→150ms；stream 用例 0.03→0.2s、20→100ms。单文件复跑 5 passed、全量 gate 复跑 PASS。
 - **全量回归（本批新鲜实跑）**：`python scripts/regression_gate.py` → **exit=0 / 门禁 PASS（7/7 项）**。pytest 四分块 **1026+1332+1104+1036 = 4498 通过 + 2 跳过**（`--collect-only` **4500**，0 失败）+ vitest **354/354（47 文件）** + tsc 0 + ruff 0。测试文件 **275→276**（+1：`test_chat_history_user_scope`）；徽章 **4801→4853**（4498 Py + 354 FE + 1 跳过标记）。
-- **未提交/未部署**：本批改动仍在工作树，部署归用户裁决。deferred 项与上一批相同（clone admin 聚合视图 / clone persist 前端调用方 / topic 4 worker 内存 / voice 公共卡前端 / admin 微信通道合并）。
+- **部署**：随 v1.62 三端部署 @ `43aeaae`（2026-10-31）。deferred 项与上一批相同（clone admin 聚合视图 / clone persist 前端调用方 / topic 4 worker 内存 / voice 公共卡前端 / admin 微信通道合并）。
