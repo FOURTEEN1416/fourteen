@@ -209,14 +209,19 @@ test.describe.serial('W11 · 角色设置深链（D2）', () => {
 // ── D4：主动面板作用域（角色页禁全局广播） ───────────────
 
 test.describe.serial('W11 · 主动面板作用域（D4）', () => {
-  test('viewer：消息 tab 仅全局调度说明，无 admin 表单与全局广播按钮', async ({ page, request }) => {
+  test('viewer：消息 tab 显示个人主动配置（用户主权），无 admin 全局控制面与全局广播按钮', async ({ page, request }) => {
     await uiLogin(page, VIEWER)
     // 真实创建并归属到 viewer（角色资源按归属校验，别人的卡对 viewer 不可见）
     const { id: roleId, token } = await createRoleAs(request, VIEWER, `W11-E2E-viewer-${Date.now()}`)
     try {
       await page.goto(`/roles/${encodeURIComponent(roleId)}/settings/message`)
 
-      await expect(page.getByText(/全局引擎统一调度/)).toBeVisible()
+      // v1.62 用户主权批：消息 tab 对全体用户开放——viewer 看到自己的
+      // 「我的主动消息」区（个人覆盖/继承全局徽章 + 节奏滑条 + 暂停），
+      // 不再是旧的「仅全局调度说明」只读挡板。
+      await expect(page.getByText('我的主动消息')).toBeVisible()
+      await expect(page.getByTestId('user-proactive-scope')).toBeVisible()
+      // 仍未暴露 admin 全局控制面与广播按钮
       await expect(page.getByText('LLM 主动决策（人设·画像·控制台）')).toHaveCount(0)
       await expect(page.getByText('保存频率配置')).toHaveCount(0)
       await expect(page.getByText('立即发送一条主动消息')).toHaveCount(0)
