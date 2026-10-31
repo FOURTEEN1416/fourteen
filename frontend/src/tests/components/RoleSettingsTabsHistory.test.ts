@@ -61,13 +61,25 @@ describe('normalizeProactiveHistory', () => {
 
 describe('localDayKey（「今日」本地日界）', () => {
   it('按本地墙钟取日，不是 UTC 日', () => {
-    // 本地 2026-10-29 00:30（东八区）= UTC 2026-10-28 16:30
+    // 真实本地构造：任何时区都成立（本地构造 → 本地读取）
     const d = new Date(2026, 9, 29, 0, 30, 0)
     expect(localDayKey(d)).toBe('2026-10-29')
-    // 同一时刻的 toISOString 是 UTC 日（旧实现的错误口径）
-    expect(d.toISOString().slice(0, 10)).toBe(
-      new Date(Date.UTC(2026, 9, 28, 16, 30)).toISOString().slice(0, 10),
-    )
+
+    // 时区无关的跨日对照：用一个「本地字段与 UTC 字段不同」的替身 Date，
+    // 钉死实现读的是 getFullYear/getMonth/getDate（本地），不是 toISOString（UTC）。
+    // 旧断言用真实 Date + 硬编码东八区换算，在 CI runner（UTC）下必然失败
+    // （`new Date(2026,9,29,0,30).toISOString()` 在 UTC 下就是 29 日）——
+    // 2026-10-31 CI 首次暴露（v1.60 批 2 新增后本地 22 commit 未推送，从未上过 CI）。
+    const crossDay = {
+      getFullYear: () => 2026,
+      getMonth: () => 9, // 10 月（0-based）
+      getDate: () => 29, // 本地 29 日
+      toISOString: () => '2026-10-28T16:30:00.000Z', // 同一时刻的 UTC 是 28 日
+    } as unknown as Date
+    expect(localDayKey(crossDay)).toBe('2026-10-29')
+    expect(crossDay.toISOString().slice(0, 10)).toBe('2026-10-28')
+    // 若实现退回 toISOString 口径，上面第一条会得 '2026-10-28' 而失败
+    expect(localDayKey(crossDay)).not.toBe(crossDay.toISOString().slice(0, 10))
   })
 
   it('月/日两位补零', () => {
