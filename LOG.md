@@ -4219,3 +4219,10 @@ P0 是否**前置** B1/D5（时间真源）+ B3（死配置接线）· 遗忘是
 - **额外（gate 暴露 flaky）**：`tests/test_provider_call_latency_log.py` 的 `elapsed_ms >= 40` 边界过贴——Windows 时钟粒度下 `asyncio.sleep(0.05)` 实测 39ms（首轮 gate 块3 FAIL）。修法：sleep 0.05→0.3s、断言 40→150ms；stream 用例 0.03→0.2s、20→100ms。单文件复跑 5 passed、全量 gate 复跑 PASS。
 - **全量回归（本批新鲜实跑）**：`python scripts/regression_gate.py` → **exit=0 / 门禁 PASS（7/7 项）**。pytest 四分块 **1026+1332+1104+1036 = 4498 通过 + 2 跳过**（`--collect-only` **4500**，0 失败）+ vitest **354/354（47 文件）** + tsc 0 + ruff 0。测试文件 **275→276**（+1：`test_chat_history_user_scope`）；徽章 **4801→4853**（4498 Py + 354 FE + 1 跳过标记）。
 - **部署**：随 v1.62 三端部署 @ `43aeaae`（2026-10-31）。deferred 项与上一批相同（clone admin 聚合视图 / clone persist 前端调用方 / topic 4 worker 内存 / voice 公共卡前端 / admin 微信通道合并）。
+
+## 2026-10-31 — CI 修复批（GitHub Actions 双失败根治 · 全绿 @ 9d3822e）
+
+- **失败一（frontend vitest）**：`RoleSettingsTabsHistory.test.ts` 的 `localDayKey` 用例假设东八区——`new Date(2026,9,29,0,30).toISOString()` 在 GitHub Actions runner（UTC）下就是 29 日，旧断言期望 28 日必然失败。该用例是 v1.60 批 2 新增、本地 22 commit 从未推送，**首次上 CI 暴露**。修法：跨日对照改用「本地字段与 UTC 字段不同」的最小替身 Date，时区无关；双时区实跑（本地 UTC+8 8 passed / TZ=UTC 8 passed）。提交 `c93d293`。
+- **失败二（Playwright E2E）**：`w11_journey.spec.ts:212` 断言「viewer 消息 tab 仅全局调度说明」= v1.60 前旧契约；v1.62 用户主权批已把消息 tab 对全体用户开放（个人覆盖/继承全局徽章 + 节奏滑条 + 个人暂停）。此前被 vitest 失败挡住从未执行，**首次执行暴露**。修法：新契约断言 viewer 看到「我的主动消息」+ `user-proactive-scope` 徽章，仍无 admin 全局控制面（LLM 主动决策/保存频率配置/立即发送）；本地实跑 w11_journey **11/11 passed**（baseURL 5199 preview + 8000 E2E 后端）。提交 `9d3822e`。
+- **CI 全绿**：run `41185860301` — frontend 6m23s（vitest 354 + Playwright E2E 全过）+ backend 10m16s + 8 个 ff 守卫 + adr-integrity 全 ✓。
+- **验收**：工作区干净；HEAD `9d3822e`；本地/远程一致（生产同步见下）。
