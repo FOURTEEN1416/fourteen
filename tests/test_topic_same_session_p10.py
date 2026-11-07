@@ -27,7 +27,10 @@ def _utc_ago(hours: float) -> str:
 
 
 def _beijing_ago(hours: float) -> str:
-    return (datetime.now() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    # naive 北京墙钟串（topic_state._parse_ts 按 Beijing naive 解析）——
+    # datetime.now() 在 UTC 宿主是 UTC 墙钟，strftime 出来的「伪北京串」
+    # 会与 now_local 基准差 8h（run 42401562467 test_fresh_active 红）。
+    return (now_local() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 # ── 1. 续聊锚点的时间窗 ───────────────────────────────────
